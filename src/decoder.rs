@@ -74,6 +74,14 @@ impl Rav1dDecoder {
 
     /// Decode AV1 data and return the picture
     fn decode(&mut self, data: &[u8]) -> Result<DecodedPicture> {
+        // EAGAIN is 11 on Linux, 35 on macOS - rav1d uses -EAGAIN for "try again"
+        #[cfg(target_os = "linux")]
+        const EAGAIN: c_int = -11;
+        #[cfg(target_os = "macos")]
+        const EAGAIN: c_int = -35;
+        #[cfg(target_os = "windows")]
+        const EAGAIN: c_int = -11; // Windows doesn't use EAGAIN but use same value
+
         let ctx = self.ctx.ok_or_else(|| {
             at(Error::Decode {
                 code: -1,
@@ -107,31 +115,58 @@ impl Rav1dDecoder {
             }));
         }
 
-        // Send data to decoder
+        // Send data to decoder in a loop until all data is consumed
         // SAFETY: ctx is valid and dav1d_data has been initialized
-        let result = unsafe { dav1d_send_data(Some(ctx), NonNull::new(&mut dav1d_data)) };
+        loop {
+            let result = unsafe { dav1d_send_data(Some(ctx), NonNull::new(&mut dav1d_data)) };
 
-        if result.0 < 0 {
-            return Err(at(Error::Decode {
-                code: result.0,
-                msg: "failed to send data to decoder",
-            }));
+            if result.0 == 0 {
+                // All data consumed
+                break;
+            } else if result.0 == EAGAIN {
+                // Output queue is full, need to drain pictures first
+                // For single-frame AVIF this shouldn't happen, but handle it
+                let mut picture = Dav1dPicture::default();
+                let pic_result =
+                    unsafe { dav1d_get_picture(Some(ctx), NonNull::new(&mut picture)) };
+                if pic_result.0 == 0 {
+                    // Got a picture while draining
+                    return Ok(DecodedPicture { picture });
+                }
+                // Otherwise continue trying to send
+            } else if result.0 < 0 {
+                return Err(at(Error::Decode {
+                    code: result.0,
+                    msg: "failed to send data to decoder",
+                }));
+            }
+
+            // If data.sz == 0, we're done
+            if dav1d_data.sz == 0 {
+                break;
+            }
         }
 
-        // Get the decoded picture
+        // Get the decoded picture - keep trying if EAGAIN
         let mut picture = Dav1dPicture::default();
+        loop {
+            // SAFETY: ctx is valid and picture is initialized
+            let result = unsafe { dav1d_get_picture(Some(ctx), NonNull::new(&mut picture)) };
 
-        // SAFETY: ctx is valid and picture is initialized
-        let result = unsafe { dav1d_get_picture(Some(ctx), NonNull::new(&mut picture)) };
-
-        if result.0 < 0 {
-            return Err(at(Error::Decode {
-                code: result.0,
-                msg: "failed to get picture",
-            }));
+            if result.0 == 0 {
+                return Ok(DecodedPicture { picture });
+            } else if result.0 == EAGAIN {
+                // No picture ready yet, this can happen if decoding is async
+                // For single-frame this shouldn't loop forever
+                std::thread::yield_now();
+                continue;
+            } else {
+                return Err(at(Error::Decode {
+                    code: result.0,
+                    msg: "failed to get picture",
+                }));
+            }
         }
-
-        Ok(DecodedPicture { picture })
     }
 }
 

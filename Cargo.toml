@@ -22,6 +22,7 @@ log = "0.4"
 
 [dev-dependencies]
 env_logger = { version = "0.11", default-features = false }
+png = "0.18.0"
 
 [features]
 default = ["asm"]
