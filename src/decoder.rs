@@ -10,18 +10,45 @@ use crate::image::{
 };
 use enough::Stop;
 use imgref::ImgVec;
+
+// Conditionally import from rav1d or rav1d-safe based on feature
+#[cfg(feature = "asm")]
 use rav1d::include::dav1d::data::Dav1dData;
+#[cfg(feature = "asm")]
 use rav1d::include::dav1d::dav1d::{Dav1dContext, Dav1dSettings};
+#[cfg(feature = "asm")]
 use rav1d::include::dav1d::headers::{
     DAV1D_PIXEL_LAYOUT_I400, DAV1D_PIXEL_LAYOUT_I420, DAV1D_PIXEL_LAYOUT_I422,
     DAV1D_PIXEL_LAYOUT_I444, Dav1dPixelLayout, Rav1dMatrixCoefficients, Rav1dSequenceHeader,
 };
+#[cfg(feature = "asm")]
 use rav1d::include::dav1d::picture::Dav1dPicture;
+#[cfg(feature = "asm")]
 use rav1d::src::lib::{
     dav1d_close, dav1d_data_wrap, dav1d_default_settings, dav1d_get_picture, dav1d_open,
     dav1d_picture_unref, dav1d_send_data,
 };
+#[cfg(feature = "asm")]
 use rav1d::src::send_sync_non_null::SendSyncNonNull;
+
+#[cfg(feature = "safe-simd")]
+use rav1d_safe::include::dav1d::data::Dav1dData;
+#[cfg(feature = "safe-simd")]
+use rav1d_safe::include::dav1d::dav1d::{Dav1dContext, Dav1dSettings};
+#[cfg(feature = "safe-simd")]
+use rav1d_safe::include::dav1d::headers::{
+    DAV1D_PIXEL_LAYOUT_I400, DAV1D_PIXEL_LAYOUT_I420, DAV1D_PIXEL_LAYOUT_I422,
+    DAV1D_PIXEL_LAYOUT_I444, Dav1dPixelLayout, Rav1dMatrixCoefficients, Rav1dSequenceHeader,
+};
+#[cfg(feature = "safe-simd")]
+use rav1d_safe::include::dav1d::picture::Dav1dPicture;
+#[cfg(feature = "safe-simd")]
+use rav1d_safe::src::lib::{
+    dav1d_close, dav1d_data_wrap, dav1d_default_settings, dav1d_get_picture, dav1d_open,
+    dav1d_picture_unref, dav1d_send_data,
+};
+#[cfg(feature = "safe-simd")]
+use rav1d_safe::src::send_sync_non_null::SendSyncNonNull;
 use rgb::Rgba;
 use rgb::prelude::*;
 use std::ffi::c_int;

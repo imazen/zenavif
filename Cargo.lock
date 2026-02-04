@@ -367,6 +367,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "rav1d-safe"
+version = "0.1.0"
+dependencies = [
+ "archmage",
+ "assert_matches",
+ "atomig",
+ "bitflags",
+ "cc",
+ "cfg-if",
+ "libc",
+ "nasm-rs",
+ "parking_lot",
+ "paste",
+ "raw-cpuid",
+ "safe_unaligned_simd",
+ "strum",
+ "to_method",
+ "zerocopy",
+]
+
+[[package]]
 name = "raw-cpuid"
 version = "11.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -538,6 +559,7 @@ dependencies = [
  "log",
  "png",
  "rav1d",
+ "rav1d-safe",
  "rgb",
  "safe_unaligned_simd",
  "thiserror",

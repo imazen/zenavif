@@ -10,7 +10,9 @@ keywords = ["avif", "decoder", "av1", "image", "rav1d"]
 repository = "https://github.com/imazen/zenavif"
 
 [dependencies]
-rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
+# Use rav1d-safe for safe-simd, or rav1d for asm
+rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"], optional = true }
+rav1d-safe = { path = "../rav1d-safe", default-features = false, features = ["bitdepth_8", "bitdepth_16", "safe-simd"], optional = true }
 archmage = { version = "0.4.0", features = ["macros"] }
 safe_unaligned_simd = "0.2.4"
 avif-parse = "1.4.0"
@@ -28,7 +30,10 @@ png = "0.18.0"
 
 [features]
 default = ["asm"]
-asm = ["rav1d/asm"]
+# Use hand-written assembly (fastest, original rav1d)
+asm = ["dep:rav1d", "rav1d/asm"]
+# Use safe Rust intrinsics (no asm, uses rav1d-safe fork)
+safe-simd = ["dep:rav1d-safe"]
 
 [patch.crates-io]
 yuv = { git = "https://github.com/lilith/yuv", branch = "rgb-0.8.91-compat" }
