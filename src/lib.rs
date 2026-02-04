@@ -55,6 +55,7 @@ mod convert;
 mod decoder;
 mod error;
 mod image;
+pub mod simd;
 
 pub use config::DecoderConfig;
 pub use decoder::AvifDecoder;
