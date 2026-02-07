@@ -15,7 +15,7 @@ use crate::image::{
 };
 use enough::Stop;
 use imgref::ImgVec;
-use rgb::prelude::*;
+use rgb::{RGB, prelude::*};
 use whereat::at;
 use yuv::YUV;
 use yuv::color::{Depth, Range};
@@ -36,7 +36,7 @@ fn convert_color_primaries(pri: Rav1dColorPrimaries) -> ColorPrimaries {
         Rav1dColorPrimaries::BT2020 => ColorPrimaries::BT2020,
         Rav1dColorPrimaries::BT601 => ColorPrimaries::BT601,
         Rav1dColorPrimaries::SMPTE240 => ColorPrimaries::SMPTE240,
-        _ => ColorPrimaries::Unspecified,
+        _ => ColorPrimaries::UNKNOWN,
     }
 }
 
@@ -47,18 +47,18 @@ fn convert_transfer(trc: Rav1dTransferCharacteristics) -> TransferCharacteristic
         Rav1dTransferCharacteristics::SMPTE2084 => TransferCharacteristics::SMPTE2084,
         Rav1dTransferCharacteristics::HLG => TransferCharacteristics::HLG,
         Rav1dTransferCharacteristics::SRGB => TransferCharacteristics::SRGB,
-        _ => TransferCharacteristics::Unspecified,
+        _ => TransferCharacteristics::UNKNOWN,
     }
 }
 
 /// Convert rav1d-safe MatrixCoefficients to zenavif
 fn convert_matrix(mtrx: Rav1dMatrixCoefficients) -> MatrixCoefficients {
     match mtrx {
-        Rav1dMatrixCoefficients::Identity => MatrixCoefficients::Identity,
+        Rav1dMatrixCoefficients::IDENTITY => MatrixCoefficients::IDENTITY,
         Rav1dMatrixCoefficients::BT709 => MatrixCoefficients::BT709,
-        Rav1dMatrixCoefficients::BT2020NCL => MatrixCoefficients::BT2020NCL,
+        Rav1dMatrixCoefficients::BT2020_NCL => MatrixCoefficients::BT2020_NCL,
         Rav1dMatrixCoefficients::BT601 => MatrixCoefficients::BT601,
-        _ => MatrixCoefficients::Unspecified,
+        _ => MatrixCoefficients::UNKNOWN,
     }
 }
 
@@ -73,7 +73,7 @@ fn convert_color_range(range: Rav1dColorRange) -> ColorRange {
 /// Convert rav1d-safe PixelLayout to zenavif ChromaSampling
 fn convert_chroma_sampling(layout: PixelLayout) -> ChromaSampling {
     match layout {
-        PixelLayout::I400 => ChromaSampling::Mono,
+        PixelLayout::I400 => ChromaSampling::Monochrome,
         PixelLayout::I420 => ChromaSampling::Cs420,
         PixelLayout::I422 => ChromaSampling::Cs422,
         PixelLayout::I444 => ChromaSampling::Cs444,
@@ -92,7 +92,7 @@ impl ManagedAvifDecoder {
         // Parse AVIF container
         let mut cursor = std::io::Cursor::new(data);
         let avif_data = avif_parse::read_avif(&mut cursor)
-            .map_err(|e| at(Error::Parse(format!("Failed to parse AVIF: {}", e))))?;
+            .map_err(|e| at(Error::from(e)))?;
 
         // Create managed decoder with settings
         let settings = Settings {
@@ -113,7 +113,7 @@ impl ManagedAvifDecoder {
 
     /// Decode the primary image and optionally alpha channel
     pub fn decode(&mut self, stop: &impl Stop) -> Result<DecodedImage> {
-        stop.check()?;
+        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
         // Decode primary item
         let primary_frame = self.decoder
@@ -127,7 +127,7 @@ impl ManagedAvifDecoder {
                 msg: "No frame returned from decoder",
             }))?;
 
-        stop.check()?;
+        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
         // Decode alpha if present
         let alpha_frame = if let Some(ref alpha_data) = self.avif_data.alpha_item {
@@ -145,7 +145,7 @@ impl ManagedAvifDecoder {
             None
         };
 
-        stop.check()?;
+        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
         // Convert to DecodedImage
         self.convert_to_image(primary_frame, alpha_frame, stop)
@@ -176,7 +176,7 @@ impl ManagedAvifDecoder {
             full_range: matches!(color.color_range, Rav1dColorRange::Full),
         };
 
-        stop.check()?;
+        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
         // Convert based on bit depth
         match bit_depth {
@@ -289,7 +289,7 @@ impl ManagedAvifDecoder {
                     stop,
                 )?
             }
-            ChromaSampling::Mono => {
+            ChromaSampling::Monochrome => {
                 // Grayscale - create RGB from Y only
                 let mut rgb_data = Vec::with_capacity(width * height * 3);
                 for row in y_plane.rows() {
@@ -303,7 +303,7 @@ impl ManagedAvifDecoder {
             }
         };
 
-        stop.check()?;
+        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
         // Handle alpha channel if present
         if let Some(alpha_frame) = alpha {
@@ -361,7 +361,7 @@ impl ManagedAvifDecoder {
         // Similar logic to 8-bit but with u16 data
         // This is simplified - full implementation would use yuv crate properly
 
-        stop.check()?;
+        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
         // For now, return error - full 16-bit support needs more work
         Err(at(Error::Decode {
