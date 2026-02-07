@@ -35,7 +35,30 @@ just fmt     # cargo fmt
 
 ## Known Bugs
 
-(none yet)
+### rav1d-safe Issues (Blocking Integration Tests)
+
+1. **Threading Race Condition** - DisjointMut overlap panic with multi-threaded decoding
+   - Panic in `cdef.rs:339` / `cdef_apply.rs:76` with overlapping mutable borrows
+   - Workaround: Use `threads: 1` for single-threaded decoding
+   - Upstream issue to report to rav1d-safe
+
+2. **Bounds Check Panic** - Range out of bounds in managed API
+   - Panic: "range end index 32896 out of range for slice of length 32768"
+   - Location: `rav1d-safe/src/managed.rs:741`
+   - Triggered by: `color_nogrid_alpha_nogrid_gainmap_grid.avif`
+   - Upstream issue to report to rav1d-safe
+
+3. **Decoder Returns No Frame** - Many files fail with "No frame returned from decoder"
+   - May be related to unsupported AV1 features or decoder state management
+   - Need to investigate which files fail and why
+
+### Integration Test Results
+
+- **7/55 files decode successfully** (12.7% success rate)
+- Most failures are from:
+  - avif-parse limitations (animated AVIF, grids, unsupported features)
+  - rav1d-safe bugs (panics, no frame returned)
+- Once rav1d-safe bugs are fixed, expect 70%+ success rate
 
 ## Investigation Notes
 
