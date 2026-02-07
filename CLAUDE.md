@@ -62,7 +62,38 @@ just fmt     # cargo fmt
 
 ## Investigation Notes
 
-(none yet)
+### rav1d-safe PlaneView Height Mismatch Bug (2026-02-07)
+
+**File:** `color_nogrid_alpha_nogrid_gainmap_grid.avif`
+
+**Root Cause:** rav1d-safe's `PlaneView16` reports incorrect height that doesn't match actual buffer size.
+
+**Evidence:**
+```
+DEBUG planar setup: width=128 height=200 sampling=Cs444
+  Y: 128x200 stride=256 buffer_len=32768
+  U: 128x200 stride=256 buffer_len=32768
+  V: 128x200 stride=256 buffer_len=32768
+```
+
+**Analysis:**
+- PlaneView reports: height=200, stride=256, buffer_len=32768
+- Expected buffer size: stride × height = 256 × 200 = 51,200
+- Actual buffer size: 32,768 = 256 × 128 rows
+- **Bug**: PlaneView.height = 200 but buffer only contains 128 rows
+
+**Impact:**
+- yuv crate validation detects the mismatch: `LumaPlaneSizeMismatch(expected: 51072, received: 32768)`
+- This happens BEFORE the bounds check panic at managed.rs:741
+- The bounds panic occurs because `.row(y)` tries to access row 128+, which doesn't exist
+
+**Upstream Issue:**
+This needs to be reported to rav1d-safe. The PlaneView construction in `src/managed.rs` is getting inconsistent height/buffer_len values from the underlying `Rav1dPictureDataComponent`.
+
+**Location in rav1d-safe:**
+- `src/managed.rs`: PlaneView8/PlaneView16 construction
+- Likely issue in how `DisjointImmutGuard` slice is created from the picture data
+- Need to verify that `height * stride <= buffer.len()` invariant is maintained
 
 ## Recent Changes (2026-02-06)
 

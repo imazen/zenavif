@@ -21,7 +21,7 @@ pub enum Error {
 
     /// YUV to RGB color conversion error
     #[error("Color conversion error: {0}")]
-    ColorConversion(#[from] yuv::Error),
+    ColorConversion(#[from] yuv::YuvError),
 
     /// Unsupported feature
     #[error("Unsupported: {0}")]

@@ -49,7 +49,6 @@
 //! let image = decode_with(&avif_data, &config, &Unstoppable).unwrap();
 //! ```
 
-mod chroma;
 mod config;
 mod convert;
 #[cfg(feature = "asm")]

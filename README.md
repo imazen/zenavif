@@ -3,7 +3,7 @@
 [![CI](https://github.com/imazen/zenavif/workflows/CI/badge.svg)](https://github.com/imazen/zenavif/actions)
 [![Crates.io](https://img.shields.io/crates/v/zenavif.svg)](https://crates.io/crates/zenavif)
 [![Documentation](https://docs.rs/zenavif/badge.svg)](https://docs.rs/zenavif)
-[![License](https://img.shields.io/crates/l/zenavif.svg)](https://github.com/imazen/zenavif#license)
+[![License: AGPL/Commercial](https://img.shields.io/badge/License-AGPL%2FCommercial-blue.svg)](https://github.com/imazen/zenavif#license)
 
 Pure Rust AVIF image decoder powered by [rav1d](https://github.com/memorysafety/rav1d).
 
@@ -88,13 +88,10 @@ just test-integration
 
 ## License
 
-Licensed under either of:
+Sustainable, large-scale open source work requires a funding model, and I have been
+doing this full-time for 15 years. If you are using this for closed-source development
+AND make over $1 million per year, you'll need to buy a commercial license at
+https://www.imazen.io/pricing
 
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
-
-at your option.
-
-## Contribution
-
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+Commercial licenses are similar to the Apache 2 license but company-specific, and on
+a sliding scale. You can also use this under the AGPL v3.
