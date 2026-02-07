@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        submodules: recursive
+        
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Verify version matches tag
+      run: |
+        TAG=${GITHUB_REF#refs/tags/v}
+        VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/.*= "\(.*\)"/\1/')
+        if [ "$TAG" != "$VERSION" ]; then
+          echo "Tag $TAG does not match Cargo.toml version $VERSION"
+          exit 1
+        fi
+        
+    - name: Run tests
+      run: cargo test --all-features
+      
+    - name: Publish
+      run: cargo publish --token ${CRATES_TOKEN}
+      env:
+        CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
+        
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        generate_release_notes: true
+        draft: false
+        prerelease: false
