@@ -1371,7 +1371,8 @@ fn read_ftyp<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<FileTypeBox> {
 #[cfg_attr(debug_assertions, track_caller)]
 fn check_parser_state<T>(left: &Take<T>) -> Result<(), Error> {
     let limit = left.limit();
-    if limit == 0 {
+    // Allow size=0 boxes (which have limit near u64::MAX after reading to EOF)
+    if limit == 0 || limit >= u64::MAX - BoxHeader::MIN_LARGE_SIZE {
         Ok(())
     } else {
         debug_assert_eq!(0, limit, "bad parser state bytes left");
