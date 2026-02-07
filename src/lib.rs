@@ -26,11 +26,9 @@
 //!
 //! ## Features
 //!
-//! - Pure Rust implementation (via rav1d)
-//! - 8-bit and 10/12-bit depth support
-//! - Alpha channel support with premultiplied alpha handling
-//! - Film grain synthesis
-//! - Cooperative cancellation via `enough::Stop`
+//! - **`asm`** (default): Hand-written assembly (fastest, uses C FFI)
+//! - **`safe-simd`**: Safe Rust intrinsics (uses C FFI)
+//! - **`managed`**: 100% safe managed API (no unsafe code!)
 //!
 //! ## Configuration
 //!
@@ -52,13 +50,19 @@
 mod chroma;
 mod config;
 mod convert;
+#[cfg(any(feature = "asm", feature = "safe-simd"))]
 mod decoder;
+#[cfg(feature = "managed")]
+mod decoder_managed;
 mod error;
 mod image;
 pub mod simd;
 
 pub use config::DecoderConfig;
+#[cfg(any(feature = "asm", feature = "safe-simd"))]
 pub use decoder::AvifDecoder;
+#[cfg(feature = "managed")]
+pub use decoder_managed::ManagedAvifDecoder;
 pub use enough::{Stop, StopReason, Unstoppable};
 pub use error::{Error, Result};
 pub use image::{
@@ -100,6 +104,20 @@ pub fn decode(data: &[u8]) -> Result<DecodedImage> {
 /// let image = decode_with(&avif_data, &config, &Unstoppable).unwrap();
 /// ```
 pub fn decode_with(data: &[u8], config: &DecoderConfig, stop: &impl Stop) -> Result<DecodedImage> {
-    let mut decoder = AvifDecoder::new(data, config)?;
-    decoder.decode(stop)
+    #[cfg(feature = "managed")]
+    {
+        let mut decoder = ManagedAvifDecoder::new(data, config)?;
+        decoder.decode(stop)
+    }
+    
+    #[cfg(all(not(feature = "managed"), any(feature = "asm", feature = "safe-simd")))]
+    {
+        let mut decoder = AvifDecoder::new(data, config)?;
+        decoder.decode(stop)
+    }
+    
+    #[cfg(not(any(feature = "managed", feature = "asm", feature = "safe-simd")))]
+    {
+        compile_error!("At least one feature must be enabled: asm, safe-simd, or managed");
+    }
 }
