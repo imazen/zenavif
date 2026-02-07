@@ -104,6 +104,30 @@ jobs:
         run: cross test --no-default-features --features managed --target ${{ matrix.target }}
 
   # ==========================================================================
+  # WASM build check (wasm32-wasip1 with simd128)
+  # ==========================================================================
+  test-wasm:
+    name: WASM Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build for WASM
+        env:
+          RUSTFLAGS: "-C target-feature=+simd128"
+        run: cargo build --no-default-features --features managed --target wasm32-wasip1
+
+  # ==========================================================================
   # Clippy
   # ==========================================================================
   clippy:
@@ -174,3 +198,28 @@ jobs:
           files: lcov.info
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  # ==========================================================================
+  # AVIF Conformance (main branch only, downloads test vectors)
+  # ==========================================================================
+  conformance:
+    name: AVIF Conformance
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Download test vectors
+        run: bash scripts/download-avif-test-vectors.sh
+
+      - name: Run integration tests
+        run: cargo test --no-default-features --features managed --test integration_corpus -- --ignored --nocapture
