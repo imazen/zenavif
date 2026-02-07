@@ -17,7 +17,7 @@ rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8",
 rav1d-safe = { path = "../rav1d-safe", default-features = false, features = ["bitdepth_8", "bitdepth_16"], optional = true }
 archmage = { version = "0.4.0", features = ["macros"] }
 safe_unaligned_simd = "0.2.4"
-avif-parse = "1.4.0"
+avif-parse = { path = "../avif-parse" }
 yuv = "0.8.10"
 imgref = "1.12.0"
 rgb = { version = "0.8.52", default-features = false, features = ["as-bytes"] }

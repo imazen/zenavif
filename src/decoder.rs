@@ -529,7 +529,9 @@ impl AvifDecoder {
     ///
     /// This parses the AVIF container but does not decode the AV1 data yet.
     pub fn new(data: &[u8], config: &DecoderConfig) -> Result<Self> {
-        let avif_data = avif_parse::read_avif(&mut &data[..]).map_err(|e| at(Error::Parse(e)))?;
+        // Use lenient parsing to handle files with non-critical validation issues
+        let options = avif_parse::ParseOptions { lenient: true };
+        let avif_data = avif_parse::read_avif_with_options(&mut &data[..], &options).map_err(|e| at(Error::Parse(e)))?;
 
         // Extract metadata from the parsed AVIF
         let metadata = avif_data

@@ -109,8 +109,10 @@ impl ManagedAvifDecoder {
     /// Create new decoder with AVIF data and configuration
     pub fn new(data: &[u8], config: &DecoderConfig) -> Result<Self> {
         let mut cursor = std::io::Cursor::new(data);
+        // Use lenient parsing to handle files with non-critical validation issues
+        let options = avif_parse::ParseOptions { lenient: true };
         let avif_data =
-            avif_parse::read_avif(&mut cursor).map_err(|e| at(Error::from(e)))?;
+            avif_parse::read_avif_with_options(&mut cursor, &options).map_err(|e| at(Error::from(e)))?;
 
         let settings = Settings {
             threads: config.threads,
