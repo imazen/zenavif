@@ -70,6 +70,22 @@ fn convert_color_range(range: Rav1dColorRange) -> ColorRange {
     }
 }
 
+/// Convert zenavif MatrixCoefficients to yuv crate's MatrixCoefficients
+fn to_yuv_matrix(mc: MatrixCoefficients) -> yuv::color::MatrixCoefficients {
+    match mc {
+        MatrixCoefficients::IDENTITY => yuv::color::MatrixCoefficients::Identity,
+        MatrixCoefficients::BT709 => yuv::color::MatrixCoefficients::BT709,
+        MatrixCoefficients::FCC => yuv::color::MatrixCoefficients::FCC,
+        MatrixCoefficients::BT470BG => yuv::color::MatrixCoefficients::BT470BG,
+        MatrixCoefficients::BT601 => yuv::color::MatrixCoefficients::BT601,
+        MatrixCoefficients::SMPTE240 => yuv::color::MatrixCoefficients::SMPTE240,
+        MatrixCoefficients::YCGCO => yuv::color::MatrixCoefficients::YCgCo,
+        MatrixCoefficients::BT2020_NCL => yuv::color::MatrixCoefficients::BT2020NCL,
+        MatrixCoefficients::BT2020_CL => yuv::color::MatrixCoefficients::BT2020CL,
+        _ => yuv::color::MatrixCoefficients::BT601, // Default fallback
+    }
+}
+
 /// Convert rav1d-safe PixelLayout to zenavif ChromaSampling
 fn convert_chroma_sampling(layout: PixelLayout) -> ChromaSampling {
     match layout {
@@ -165,15 +181,19 @@ impl ManagedAvifDecoder {
 
         // Get color info
         let color = primary.color_info();
+        let has_alpha = alpha.is_some();
         let info = ImageInfo {
-            width,
-            height,
+            width: width as u32,
+            height: height as u32,
             bit_depth,
+            has_alpha,
+            premultiplied_alpha: self.avif_data.premultiplied_alpha,
+            monochrome: matches!(layout, PixelLayout::I400),
+            color_primaries: convert_color_primaries(color.primaries),
+            transfer_characteristics: convert_transfer(color.transfer_characteristics),
+            matrix_coefficients: convert_matrix(color.matrix_coefficients),
+            color_range: convert_color_range(color.color_range),
             chroma_sampling: convert_chroma_sampling(layout),
-            primaries: convert_color_primaries(color.primaries),
-            transfer: convert_transfer(color.transfer_characteristics),
-            matrix: convert_matrix(color.matrix_coefficients),
-            full_range: matches!(color.color_range, Rav1dColorRange::Full),
         };
 
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
