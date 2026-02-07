@@ -15,15 +15,14 @@ use crate::image::{
 };
 use enough::Stop;
 use imgref::ImgVec;
-use rgb::{RGB, prelude::*};
+use rgb::{Rgb, prelude::*};
 use whereat::at;
-use yuv::YUV;
 use yuv::color::{Depth, Range};
 use yuv::convert::RGBConvert;
 
 // Import managed API from rav1d-safe
 use rav1d_safe::src::managed::{
-    self as rav1d_managed, ColorInfo as Rav1dColorInfo, ColorPrimaries as Rav1dColorPrimaries,
+    ColorPrimaries as Rav1dColorPrimaries,
     ColorRange as Rav1dColorRange, Decoder as Rav1dDecoder, Frame, 
     MatrixCoefficients as Rav1dMatrixCoefficients, PixelLayout, Planes, Settings,
     TransferCharacteristics as Rav1dTransferCharacteristics,
@@ -119,7 +118,7 @@ impl ManagedAvifDecoder {
         };
 
         let decoder = Rav1dDecoder::with_settings(settings)
-            .map_err(|e| at(Error::Decode {
+            .map_err(|_e| at(Error::Decode {
                 code: -1,
                 msg: "Failed to create decoder",
             }))?;
@@ -134,7 +133,7 @@ impl ManagedAvifDecoder {
         // Decode primary item
         let primary_frame = self.decoder
             .decode(&self.avif_data.primary_item)
-            .map_err(|e| at(Error::Decode {
+            .map_err(|_e| at(Error::Decode {
                 code: -1,
                 msg: "Failed to decode primary frame",
             }))?
@@ -149,7 +148,7 @@ impl ManagedAvifDecoder {
         let alpha_frame = if let Some(ref alpha_data) = self.avif_data.alpha_item {
             Some(self.decoder
                 .decode(alpha_data)
-                .map_err(|e| at(Error::Decode {
+                .map_err(|_e| at(Error::Decode {
                     code: -1,
                     msg: "Failed to decode alpha frame",
                 }))?
@@ -317,7 +316,7 @@ impl ManagedAvifDecoder {
                     for row in y_plane.rows() {
                         for &y in row.iter().take(width) {
                             let gray = conv.to_luma(y);
-                            rgb_data.push(RGB::new(gray, gray, gray).with_alpha(255));
+                            rgb_data.push(Rgb::new(gray, gray, gray).with_alpha(255));
                         }
                     }
                     DecodedImage::Rgba8(ImgVec::new(rgb_data, width, height))
@@ -326,7 +325,7 @@ impl ManagedAvifDecoder {
                     for row in y_plane.rows() {
                         for &y in row.iter().take(width) {
                             let gray = conv.to_luma(y);
-                            rgb_data.push(RGB::new(gray, gray, gray));
+                            rgb_data.push(Rgb::new(gray, gray, gray));
                         }
                     }
                     DecodedImage::Rgb8(ImgVec::new(rgb_data, width, height))
@@ -481,7 +480,7 @@ impl ManagedAvifDecoder {
                     for row in y_plane.rows() {
                         for &y in row.iter().take(width) {
                             let gray = conv.to_luma(y);
-                            rgb_data.push(RGB::new(gray, gray, gray).with_alpha(0xFFFF));
+                            rgb_data.push(Rgb::new(gray, gray, gray).with_alpha(0xFFFF));
                         }
                     }
                     DecodedImage::Rgba16(ImgVec::new(rgb_data, width, height))
@@ -490,7 +489,7 @@ impl ManagedAvifDecoder {
                     for row in y_plane.rows() {
                         for &y in row.iter().take(width) {
                             let gray = conv.to_luma(y);
-                            rgb_data.push(RGB::new(gray, gray, gray));
+                            rgb_data.push(Rgb::new(gray, gray, gray));
                         }
                     }
                     DecodedImage::Rgb16(ImgVec::new(rgb_data, width, height))
