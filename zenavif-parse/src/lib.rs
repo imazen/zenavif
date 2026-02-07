@@ -801,7 +801,7 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
             _ => skip_box_content(&mut b)?,
         }
 
-        check_parser_state(&b.content)?;
+        check_parser_state(&b.head, &b.content)?;
     }
 
     let meta = meta.ok_or(Error::InvalidData("missing meta"))?;
@@ -933,7 +933,7 @@ fn read_avif_meta<T: Read + Offset>(src: &mut BMFFBox<'_, T>, options: &ParseOpt
             _ => skip_box_content(&mut b)?,
         }
 
-        check_parser_state(&b.content)?;
+        check_parser_state(&b.head, &b.content)?;
     }
 
     let primary_item_id = primary_item_id.ok_or(Error::InvalidData("Required pitm box not present in meta box"))?;
@@ -999,7 +999,7 @@ fn read_iinf<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
 
         item_infos.push(read_infe(&mut b)?)?;
 
-        check_parser_state(&b.content)?;
+        check_parser_state(&b.head, &b.content)?;
     }
 
     Ok(item_infos)
@@ -1064,7 +1064,7 @@ fn read_iref<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
                 to_item_id,
             })?;
         }
-        check_parser_state(&b.content)?;
+        check_parser_state(&b.head, &b.content)?;
     }
     Ok(item_references)
 }
@@ -1193,7 +1193,7 @@ fn read_pixi<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
     debug_assert_eq!(num_channels, channels.len());
     src.read_exact(&mut channels).map_err(|_| Error::InvalidData("invalid num_channels"))?;
 
-    check_parser_state(&src.content)?;
+    check_parser_state(&src.head, &src.content)?;
     Ok(channels)
 }
 
@@ -1369,10 +1369,10 @@ fn read_ftyp<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<FileTypeBox> {
 }
 
 #[cfg_attr(debug_assertions, track_caller)]
-fn check_parser_state<T>(left: &Take<T>) -> Result<(), Error> {
+fn check_parser_state<T>(header: &BoxHeader, left: &Take<T>) -> Result<(), Error> {
     let limit = left.limit();
-    // Allow size=0 boxes (which have limit near u64::MAX after reading to EOF)
-    if limit == 0 || limit >= u64::MAX - BoxHeader::MIN_LARGE_SIZE {
+    // Allow fully consumed boxes, or size=0 boxes (where original size was u64::MAX)
+    if limit == 0 || header.size == u64::MAX {
         Ok(())
     } else {
         debug_assert_eq!(0, limit, "bad parser state bytes left");
