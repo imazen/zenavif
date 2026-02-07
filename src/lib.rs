@@ -26,9 +26,11 @@
 //!
 //! ## Features
 //!
-//! - **`asm`** (default): Hand-written assembly (fastest, uses C FFI)
-//! - **`safe-simd`**: Safe Rust intrinsics (uses C FFI)
-//! - **`managed`**: 100% safe managed API (no unsafe code!)
+//! - **`managed`** (default): 100% safe managed API - no unsafe code!
+//! - **`asm`**: Hand-written assembly (fastest, uses C FFI)
+//!
+//! The default `managed` feature uses rav1d-safe's managed API which is
+//! completely safe Rust with zero unsafe code in the entire decode path.
 //!
 //! ## Configuration
 //!
@@ -50,7 +52,7 @@
 mod chroma;
 mod config;
 mod convert;
-#[cfg(any(feature = "asm", feature = "safe-simd"))]
+#[cfg(feature = "asm")]
 mod decoder;
 #[cfg(feature = "managed")]
 mod decoder_managed;
@@ -59,7 +61,7 @@ mod image;
 pub mod simd;
 
 pub use config::DecoderConfig;
-#[cfg(any(feature = "asm", feature = "safe-simd"))]
+#[cfg(feature = "asm")]
 pub use decoder::AvifDecoder;
 #[cfg(feature = "managed")]
 pub use decoder_managed::ManagedAvifDecoder;
@@ -110,14 +112,14 @@ pub fn decode_with(data: &[u8], config: &DecoderConfig, stop: &impl Stop) -> Res
         decoder.decode(stop)
     }
     
-    #[cfg(all(not(feature = "managed"), any(feature = "asm", feature = "safe-simd")))]
+    #[cfg(all(not(feature = "managed"), feature = "asm"))]
     {
         let mut decoder = AvifDecoder::new(data, config)?;
         decoder.decode(stop)
     }
     
-    #[cfg(not(any(feature = "managed", feature = "asm", feature = "safe-simd")))]
+    #[cfg(not(any(feature = "managed", feature = "asm")))]
     {
-        compile_error!("At least one feature must be enabled: asm, safe-simd, or managed");
+        compile_error!("At least one feature must be enabled: managed or asm");
     }
 }
