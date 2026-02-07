@@ -528,9 +528,16 @@ struct BMFFBox<'a, T> {
 
 impl<T: Read> BMFFBox<'_, T> {
     fn read_into_try_vec(&mut self) -> std::io::Result<TryVec<u8>> {
-        let mut vec = std::vec::Vec::new();
-        vec.try_reserve_exact(self.content.limit() as usize)
-            .map_err(|_| std::io::ErrorKind::OutOfMemory)?;
+        let limit = self.content.limit();
+        let mut vec = if limit == u64::MAX {
+            // Unknown size (size=0 box), read without pre-allocation
+            std::vec::Vec::new()
+        } else {
+            let mut v = std::vec::Vec::new();
+            v.try_reserve_exact(limit as usize)
+                .map_err(|_| std::io::ErrorKind::OutOfMemory)?;
+            v
+        };
         self.content.read_to_end(&mut vec)?; // The default impl
         Ok(vec.into())
     }
@@ -553,7 +560,8 @@ fn box_read_to_end_oom() {
     let tmp = &mut b"1234567890".as_slice();
     let mut src = BMFFBox {
         head: BoxHeader { name: BoxType::FileTypeBox, size: 5, offset: 0, uuid: None },
-        content: <_ as Read>::take(tmp, usize::MAX.try_into().expect("usize < u64")),
+        // Use u64::MAX - 1 instead of usize::MAX to avoid conflicting with size=0 box sentinel
+        content: <_ as Read>::take(tmp, u64::MAX - 1),
     };
     assert!(src.read_into_try_vec().is_err());
 }
@@ -628,7 +636,10 @@ fn read_box_header<T: ReadBytesExt>(src: &mut T) -> Result<BoxHeader> {
     let name = BoxType::from(be_u32(src)?);
     let size = match size32 {
         // valid only for top-level box and indicates it's the last box in the file.  usually mdat.
-        0 => return Err(Error::Unsupported("unknown sized box")),
+        0 => {
+            // Size=0 means box extends to EOF (ISOBMFF spec allows this for last box)
+            u64::MAX
+        },
         1 => {
             let size64 = be_u64(src)?;
             if size64 < BoxHeader::MIN_LARGE_SIZE {
