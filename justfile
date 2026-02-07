@@ -35,6 +35,17 @@ decode-test:
     mkdir -p /mnt/v/output/zenavif/test
     cargo run --release --example decode_avif -- {{justfile_directory()}}/../../aom-decode/tests/test.avif /mnt/v/output/zenavif/test/test.png
 
+# Cross-test i686 (32-bit x86)
+test-i686:
+    cross test --no-default-features --features managed --target i686-unknown-linux-gnu
+
+# Cross-test armv7 (32-bit ARM)
+test-armv7:
+    cross test --no-default-features --features managed --target armv7-unknown-linux-gnueabihf
+
+# Run all cross tests
+test-cross: test-i686 test-armv7
+
 # Clean build artifacts
 clean:
     cargo clean
