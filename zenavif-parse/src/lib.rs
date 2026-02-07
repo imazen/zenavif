@@ -548,7 +548,10 @@ struct BMFFBox<'a, T> {
 impl<T: Read> BMFFBox<'_, T> {
     fn read_into_try_vec(&mut self) -> std::io::Result<TryVec<u8>> {
         let limit = self.content.limit();
-        let mut vec = if limit == u64::MAX {
+        // For size=0 boxes, size is set to u64::MAX, but after subtracting offset
+        // (8 or 16 bytes), the limit will be slightly less. Check for values very
+        // close to u64::MAX to detect these cases.
+        let mut vec = if limit >= u64::MAX - BoxHeader::MIN_LARGE_SIZE {
             // Unknown size (size=0 box), read without pre-allocation
             std::vec::Vec::new()
         } else {
@@ -579,8 +582,8 @@ fn box_read_to_end_oom() {
     let tmp = &mut b"1234567890".as_slice();
     let mut src = BMFFBox {
         head: BoxHeader { name: BoxType::FileTypeBox, size: 5, offset: 0, uuid: None },
-        // Use u64::MAX - 1 instead of usize::MAX to avoid conflicting with size=0 box sentinel
-        content: <_ as Read>::take(tmp, u64::MAX - 1),
+        // Use a very large value to trigger OOM, but not near u64::MAX (which indicates size=0 boxes)
+        content: <_ as Read>::take(tmp, u64::MAX / 2),
     };
     assert!(src.read_into_try_vec().is_err());
 }
