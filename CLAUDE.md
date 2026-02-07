@@ -42,31 +42,30 @@ just fmt     # cargo fmt
    - Workaround: Use `threads: 1` for single-threaded decoding
    - Upstream issue to report to rav1d-safe
 
-2. **Bounds Check Panic** - Range out of bounds in managed API
-   - Panic: "range end index 32896 out of range for slice of length 32768"
-   - Location: `rav1d-safe/src/managed.rs:741`
-   - Triggered by: `color_nogrid_alpha_nogrid_gainmap_grid.avif`
+2. **PlaneView Height Mismatch** - ✅ ROOT CAUSE IDENTIFIED
+   - PlaneView reports height that doesn't match actual buffer size
+   - Example: height=200 but buffer only contains 128 rows
+   - Affects 10 test files (18.2% of test suite)
+   - Causes both "Luma plane size mismatch" and "bounds check panic" errors
+   - See Investigation Notes below for full analysis
    - Upstream issue to report to rav1d-safe
-
-3. **Decoder Returns No Frame** - Many files fail with "No frame returned from decoder"
-   - May be related to unsupported AV1 features or decoder state management
-   - Need to investigate which files fail and why
 
 ### Integration Test Results (Updated 2026-02-07)
 
 - **18/55 files decode successfully** (32.7% success rate)
 - Failure breakdown:
-  - **12 files (21.8%)**: rav1d-safe PlaneView height mismatch bug
+  - **10 files (18.2%)**: rav1d-safe PlaneView height mismatch bug
     - All show "Luma plane have invalid size" error
     - Same root cause as investigation above
-  - **19 files (34.5%)**: avif-parse limitations (expected, not fixable)
+  - **27 files (49.1%)**: avif-parse limitations (expected, not fixable)
     - 5 animated AVIF
     - 4 grid-based collages
-    - 10 unknown sized box / unsupported construction methods
-  - **6 files (10.9%)**: Other issues
+    - 8 unknown sized box
+    - 2 unsupported construction_method
+    - 8 other parse errors
 
-**Projected success rate if rav1d-safe bug fixed:** 30/55 = 54.5%
-**Projected success rate excluding avif-parse limitations:** 30/36 = 83.3%
+**Projected success rate if rav1d-safe bug fixed:** 28/55 = 50.9%
+**Projected success rate excluding avif-parse limitations:** 28/28 = 100%
 
 ## Investigation Notes
 
@@ -103,7 +102,7 @@ This needs to be reported to rav1d-safe. The PlaneView construction in `src/mana
 - Likely issue in how `DisjointImmutGuard` slice is created from the picture data
 - Need to verify that `height * stride <= buffer.len()` invariant is maintained
 
-**Affected Files (12 total):**
+**Affected Files (10 total):**
 1. `color_nogrid_alpha_nogrid_gainmap_grid.avif` - expected 51072, got 32768
 2. `cosmos1650_yuv444_10bpc_p3pq.avif` - expected 902848, got 540672
 3. `seine_hdr_gainmap_small_srgb.avif` - expected 325712, got 208896
