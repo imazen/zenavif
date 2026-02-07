@@ -232,8 +232,10 @@ impl ManagedAvifDecoder {
             }));
         };
 
-        let width = info.width as usize;
-        let height = info.height as usize;
+        // Use PlaneView dimensions instead of info metadata
+        // The PlaneView height has been corrected to match actual buffer size
+        let width = planes.y().width();
+        let height = planes.y().height();
         let has_alpha = alpha.is_some();
         let yuv_range = to_yuv_range(info.color_range);
         let matrix = to_yuv_matrix(info.matrix_coefficients);
@@ -356,8 +358,10 @@ impl ManagedAvifDecoder {
             }));
         };
 
-        let width = info.width as usize;
-        let height = info.height as usize;
+        // Use PlaneView dimensions instead of info metadata
+        // The PlaneView height has been corrected to match actual buffer size
+        let width = planes.y().width();
+        let height = planes.y().height();
         let has_alpha = alpha.is_some();
         let yuv_range = to_yuv_range(info.color_range);
         let matrix = to_yuv_matrix(info.matrix_coefficients);
