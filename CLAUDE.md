@@ -95,7 +95,15 @@ DEBUG planar setup: width=128 height=200 sampling=Cs444
 - The bounds panic occurs because `.row(y)` tries to access row 128+, which doesn't exist
 
 **Upstream Issue:**
-This needs to be reported to rav1d-safe. The PlaneView construction in `src/managed.rs` is getting inconsistent height/buffer_len values from the underlying `Rav1dPictureDataComponent`.
+Comprehensive bug report created at: `/home/lilith/work/rav1d-safe/BUG_PLANEVIEW_HEIGHT_MISMATCH.md`
+
+The bug report includes:
+- Exact reproduction steps with file paths
+- All 10 affected test files
+- Expected vs actual behavior measurements
+- Root cause analysis with suspected fix locations
+- Workarounds for downstream users
+- Ready for filing as GitHub issue
 
 **Location in rav1d-safe:**
 - `src/managed.rs`: PlaneView8/PlaneView16 construction
