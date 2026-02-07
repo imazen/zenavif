@@ -35,37 +35,33 @@ just fmt     # cargo fmt
 
 ## Known Bugs
 
-### rav1d-safe Issues (Blocking Integration Tests)
+### rav1d-safe Issues
 
 1. **Threading Race Condition** - DisjointMut overlap panic with multi-threaded decoding
    - Panic in `cdef.rs:339` / `cdef_apply.rs:76` with overlapping mutable borrows
    - Workaround: Use `threads: 1` for single-threaded decoding
    - Upstream issue to report to rav1d-safe
 
-2. **PlaneView Height Mismatch** - ✅ ROOT CAUSE IDENTIFIED
-   - PlaneView reports height that doesn't match actual buffer size
-   - Example: height=200 but buffer only contains 128 rows
-   - Affects 10 test files (18.2% of test suite)
-   - Causes both "Luma plane size mismatch" and "bounds check panic" errors
-   - See Investigation Notes below for full analysis
-   - Upstream issue to report to rav1d-safe
+2. **PlaneView Height Mismatch** - ✅ **FIXED** (2026-02-07)
+   - **Fixed in:** rav1d-safe commit 4458106 + zenavif commit 7ce8fe8
+   - **Root cause:** PlaneView used frame metadata height instead of buffer-derived height
+   - **Solution:** Calculate actual_height from buffer.len() / stride (rav1d-safe), use PlaneView dimensions instead of metadata (zenavif)
+   - **Impact:** All 10 affected files now decode successfully
+   - **Result:** 100% success rate on parseable AVIF files (28/28)
 
 ### Integration Test Results (Updated 2026-02-07)
 
-- **18/55 files decode successfully** (32.7% success rate)
-- Failure breakdown:
-  - **10 files (18.2%)**: rav1d-safe PlaneView height mismatch bug
-    - All show "Luma plane have invalid size" error
-    - Same root cause as investigation above
-  - **27 files (49.1%)**: avif-parse limitations (expected, not fixable)
-    - 5 animated AVIF
-    - 4 grid-based collages
-    - 8 unknown sized box
-    - 2 unsupported construction_method
-    - 8 other parse errors
+✅ **28/55 files decode successfully** (50.9% success rate)
+✅ **100% success on all parseable files** (28/28)
 
-**Projected success rate if rav1d-safe bug fixed:** 28/55 = 50.9%
-**Projected success rate excluding avif-parse limitations:** 28/28 = 100%
+- **27 files (49.1%)**: avif-parse limitations (expected, unfixable)
+  - 5 animated AVIF
+  - 4 grid-based collages
+  - 8 unknown sized box
+  - 2 unsupported construction_method
+  - 8 other parse errors
+
+**All non-parse failures eliminated!** The PlaneView height mismatch bug has been fixed in both rav1d-safe and zenavif.
 
 ## Investigation Notes
 
@@ -124,7 +120,32 @@ The bug report includes:
 
 **Pattern:** Many affected files are gainmap-related, suggesting the bug may be triggered by specific AV1 features or metadata configurations.
 
-## Recent Changes (2026-02-06)
+## Recent Changes
+
+### 2026-02-07: PlaneView Height Mismatch Bug Fixed ✅
+
+**Success:** Achieved 100% decode success on all parseable AVIF files (28/28)!
+
+1. **Root Cause Identified:**
+   - rav1d-safe's PlaneView reported metadata height that exceeded actual buffer size
+   - Example: height=200 but buffer only contained 128 rows
+   - Affected 10 test files (all gainmap-related)
+
+2. **Fixes Applied:**
+   - **rav1d-safe (commit 4458106):** Calculate actual_height from buffer.len() / stride
+   - **zenavif (commit 7ce8fe8):** Use PlaneView dimensions instead of frame metadata
+
+3. **Results:**
+   - Success rate improved: 32.7% → 50.9% (18/55 → 28/55)
+   - **All parseable files now decode: 100% (28/28)**
+   - Remaining 27 failures are avif-parse limitations (expected)
+
+4. **Documentation:**
+   - Comprehensive bug report: `/home/lilith/work/rav1d-safe/BUG_PLANEVIEW_HEIGHT_MISMATCH.md`
+   - Investigation notes in CLAUDE.md below
+   - Session summary in SESSION_SUMMARY.md
+
+### 2026-02-06: Managed API Migration Complete
 
 ### ✅ Managed API Migration Complete
 
