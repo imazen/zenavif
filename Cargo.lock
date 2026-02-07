@@ -14,8 +14,18 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c9fb5c235b8c9ee09d8f332472c32a1dae6cc4ed0bfb819651b438f9cec923c"
 dependencies = [
- "archmage-macros",
+ "archmage-macros 0.4.0",
  "bytemuck",
+]
+
+[[package]]
+name = "archmage"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d89e1ed9f58e616382257c15c001ea415a4d1f418dac6eb5b03dde1767b4d52"
+dependencies = [
+ "archmage-macros 0.5.0",
+ "safe_unaligned_simd",
 ]
 
 [[package]]
@@ -23,6 +33,17 @@ name = "archmage-macros"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f6d4d20f79dde36c8d0d7ddd4bd6ea2ebd4aafa3119fd3bd831e6b30af3f251"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "archmage-macros"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7a39a707a76a33e2bd6663f987c2650af2ff0ad67a1c8c34da3f4b5d01a9f5a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -370,7 +391,7 @@ dependencies = [
 name = "rav1d-safe"
 version = "0.1.0"
 dependencies = [
- "archmage",
+ "archmage 0.5.0",
  "assert_matches",
  "atomig",
  "bitflags",
@@ -551,7 +572,7 @@ dependencies = [
 name = "zenavif"
 version = "0.1.0"
 dependencies = [
- "archmage",
+ "archmage 0.4.0",
  "avif-parse",
  "enough",
  "env_logger",

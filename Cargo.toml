@@ -12,7 +12,7 @@ repository = "https://github.com/imazen/zenavif"
 [dependencies]
 # Use rav1d-safe for safe-simd, or rav1d for asm
 rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"], optional = true }
-rav1d-safe = { path = "../rav1d-safe", default-features = false, features = ["bitdepth_8", "bitdepth_16"], optional = true }
+rav1d-safe = { path = "../rav1d-safe", default-features = false, features = ["bitdepth_8", "bitdepth_16", "c-ffi"], optional = true }
 archmage = { version = "0.4.0", features = ["macros"] }
 safe_unaligned_simd = "0.2.4"
 avif-parse = "1.4.0"
