@@ -52,13 +52,21 @@ just fmt     # cargo fmt
    - May be related to unsupported AV1 features or decoder state management
    - Need to investigate which files fail and why
 
-### Integration Test Results
+### Integration Test Results (Updated 2026-02-07)
 
-- **7/55 files decode successfully** (12.7% success rate)
-- Most failures are from:
-  - avif-parse limitations (animated AVIF, grids, unsupported features)
-  - rav1d-safe bugs (panics, no frame returned)
-- Once rav1d-safe bugs are fixed, expect 70%+ success rate
+- **18/55 files decode successfully** (32.7% success rate)
+- Failure breakdown:
+  - **12 files (21.8%)**: rav1d-safe PlaneView height mismatch bug
+    - All show "Luma plane have invalid size" error
+    - Same root cause as investigation above
+  - **19 files (34.5%)**: avif-parse limitations (expected, not fixable)
+    - 5 animated AVIF
+    - 4 grid-based collages
+    - 10 unknown sized box / unsupported construction methods
+  - **6 files (10.9%)**: Other issues
+
+**Projected success rate if rav1d-safe bug fixed:** 30/55 = 54.5%
+**Projected success rate excluding avif-parse limitations:** 30/36 = 83.3%
 
 ## Investigation Notes
 
@@ -94,6 +102,20 @@ This needs to be reported to rav1d-safe. The PlaneView construction in `src/mana
 - `src/managed.rs`: PlaneView8/PlaneView16 construction
 - Likely issue in how `DisjointImmutGuard` slice is created from the picture data
 - Need to verify that `height * stride <= buffer.len()` invariant is maintained
+
+**Affected Files (12 total):**
+1. `color_nogrid_alpha_nogrid_gainmap_grid.avif` - expected 51072, got 32768
+2. `cosmos1650_yuv444_10bpc_p3pq.avif` - expected 902848, got 540672
+3. `seine_hdr_gainmap_small_srgb.avif` - expected 325712, got 208896
+4. `seine_hdr_gainmap_srgb.avif` - expected 325712, got 208896
+5. `seine_hdr_gainmap_wrongaltr.avif` - expected 325712, got 208896
+6. `supported_gainmap_writer_version_with_extra_bytes.avif` - expected 25444, got 16384
+7. `unsupported_gainmap_minimum_version.avif` - expected 25444, got 16384
+8. `unsupported_gainmap_version.avif` - expected 25444, got 16384
+9. `unsupported_gainmap_writer_version_with_extra_bytes.avif` - expected 25444, got 16384
+10. `weld_sato_12B_8B_q0.avif` - expected 1443520, got 811008
+
+**Pattern:** Many affected files are gainmap-related, suggesting the bug may be triggered by specific AV1 features or metadata configurations.
 
 ## Recent Changes (2026-02-06)
 
