@@ -1,1 +1,9 @@
 /target
+
+# Test vectors (large binary files - download with scripts/download-avif-test-vectors.sh)
+tests/vectors/
+*.avif
+*.ivf
+*.obu
+# But keep the download script
+!scripts/download-avif-test-vectors.sh

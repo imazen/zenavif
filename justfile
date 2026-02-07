@@ -46,3 +46,14 @@ update:
 # Check outdated dependencies
 outdated:
     cargo outdated
+
+# Download AVIF test vectors
+download-vectors:
+    bash scripts/download-avif-test-vectors.sh
+
+# Run integration tests with test vectors
+test-integration:
+    cargo test --features managed --test integration_corpus -- --ignored --nocapture
+
+# Download vectors and run integration tests
+test-all: download-vectors test-integration
