@@ -54,9 +54,9 @@ fn convert_transfer(trc: Rav1dTransferCharacteristics) -> TransferCharacteristic
 /// Convert rav1d-safe MatrixCoefficients to zenavif
 fn convert_matrix(mtrx: Rav1dMatrixCoefficients) -> MatrixCoefficients {
     match mtrx {
-        Rav1dMatrixCoefficients::IDENTITY => MatrixCoefficients::IDENTITY,
+        Rav1dMatrixCoefficients::Identity => MatrixCoefficients::IDENTITY,
         Rav1dMatrixCoefficients::BT709 => MatrixCoefficients::BT709,
-        Rav1dMatrixCoefficients::BT2020_NCL => MatrixCoefficients::BT2020_NCL,
+        Rav1dMatrixCoefficients::BT2020NCL => MatrixCoefficients::BT2020_NCL,
         Rav1dMatrixCoefficients::BT601 => MatrixCoefficients::BT601,
         _ => MatrixCoefficients::UNKNOWN,
     }
@@ -210,6 +210,7 @@ impl ManagedAvifDecoder {
     }
 
     /// Convert 8-bit frame to RGB
+    /// Convert 8-bit frame to RGB
     fn convert_8bit(
         &self,
         primary: Frame,
@@ -224,8 +225,8 @@ impl ManagedAvifDecoder {
             }));
         };
 
-        let width = info.width;
-        let height = info.height;
+        let width = info.width as usize;
+        let height = info.height as usize;
 
         // Get Y, U, V planes
         let y_plane = planes.y();
@@ -233,10 +234,16 @@ impl ManagedAvifDecoder {
         let v_plane = planes.v();
 
         // Convert YUV to RGB based on chroma sampling
-        let yuv_depth = Depth::Depth8;
-        let yuv_range = if info.full_range { Range::Full } else { Range::Limited };
+        let yuv_range = match info.color_range {
+            ColorRange::Full => Range::Full,
+            ColorRange::Limited => Range::Limited,
+        };
+        let conv = RGBConvert::<u8>::new(yuv_range, to_yuv_matrix(info.matrix_coefficients))
+            .map_err(|e| at(Error::ColorConversion(e)))?;
 
-        let rgb_img = match info.chroma_sampling {
+        let has_alpha = alpha.is_some();
+
+        let mut image = match info.chroma_sampling {
             ChromaSampling::Cs420 => {
                 let u = u_plane.ok_or_else(|| at(Error::Decode {
                     code: -1,
@@ -247,19 +254,17 @@ impl ManagedAvifDecoder {
                     msg: "Missing V plane for 420",
                 }))?;
 
-                yuv_420(
-                    y_plane.as_slice(),
-                    y_plane.stride(),
-                    u.as_slice(),
-                    u.stride(),
-                    v.as_slice(),
-                    v.stride(),
-                    width,
-                    height,
-                    yuv_depth,
-                    yuv_range,
-                    stop,
-                )?
+                let px_iter = yuv_420(y_plane.rows(), u.rows(), v.rows());
+
+                if has_alpha {
+                    let mut out = Vec::with_capacity(width * height);
+                    out.extend(px_iter.map(|px| conv.to_rgb(px).with_alpha(255)));
+                    DecodedImage::Rgba8(ImgVec::new(out, width, height))
+                } else {
+                    let mut out = Vec::with_capacity(width * height);
+                    out.extend(px_iter.map(|px| conv.to_rgb(px)));
+                    DecodedImage::Rgb8(ImgVec::new(out, width, height))
+                }
             }
             ChromaSampling::Cs422 => {
                 let u = u_plane.ok_or_else(|| at(Error::Decode {
@@ -271,19 +276,17 @@ impl ManagedAvifDecoder {
                     msg: "Missing V plane for 422",
                 }))?;
 
-                yuv_422(
-                    y_plane.as_slice(),
-                    y_plane.stride(),
-                    u.as_slice(),
-                    u.stride(),
-                    v.as_slice(),
-                    v.stride(),
-                    width,
-                    height,
-                    yuv_depth,
-                    yuv_range,
-                    stop,
-                )?
+                let px_iter = yuv_422(y_plane.rows(), u.rows(), v.rows());
+
+                if has_alpha {
+                    let mut out = Vec::with_capacity(width * height);
+                    out.extend(px_iter.map(|px| conv.to_rgb(px).with_alpha(255)));
+                    DecodedImage::Rgba8(ImgVec::new(out, width, height))
+                } else {
+                    let mut out = Vec::with_capacity(width * height);
+                    out.extend(px_iter.map(|px| conv.to_rgb(px)));
+                    DecodedImage::Rgb8(ImgVec::new(out, width, height))
+                }
             }
             ChromaSampling::Cs444 => {
                 let u = u_plane.ok_or_else(|| at(Error::Decode {
@@ -295,31 +298,39 @@ impl ManagedAvifDecoder {
                     msg: "Missing V plane for 444",
                 }))?;
 
-                yuv_444(
-                    y_plane.as_slice(),
-                    y_plane.stride(),
-                    u.as_slice(),
-                    u.stride(),
-                    v.as_slice(),
-                    v.stride(),
-                    width,
-                    height,
-                    yuv_depth,
-                    yuv_range,
-                    stop,
-                )?
+                let px_iter = yuv_444(y_plane.rows(), u.rows(), v.rows());
+
+                if has_alpha {
+                    let mut out = Vec::with_capacity(width * height);
+                    out.extend(px_iter.map(|px| conv.to_rgb(px).with_alpha(255)));
+                    DecodedImage::Rgba8(ImgVec::new(out, width, height))
+                } else {
+                    let mut out = Vec::with_capacity(width * height);
+                    out.extend(px_iter.map(|px| conv.to_rgb(px)));
+                    DecodedImage::Rgb8(ImgVec::new(out, width, height))
+                }
             }
             ChromaSampling::Monochrome => {
                 // Grayscale - create RGB from Y only
-                let mut rgb_data = Vec::with_capacity(width * height * 3);
-                for row in y_plane.rows() {
-                    for &y in &row[..width] {
-                        rgb_data.push(y);
-                        rgb_data.push(y);
-                        rgb_data.push(y);
+                if has_alpha {
+                    let mut rgb_data = Vec::with_capacity(width * height);
+                    for row in y_plane.rows() {
+                        for &y in row.iter().take(width) {
+                            let gray = conv.to_luma(y);
+                            rgb_data.push(RGB::new(gray, gray, gray).with_alpha(255));
+                        }
                     }
+                    DecodedImage::Rgba8(ImgVec::new(rgb_data, width, height))
+                } else {
+                    let mut rgb_data = Vec::with_capacity(width * height);
+                    for row in y_plane.rows() {
+                        for &y in row.iter().take(width) {
+                            let gray = conv.to_luma(y);
+                            rgb_data.push(RGB::new(gray, gray, gray));
+                        }
+                    }
+                    DecodedImage::Rgb8(ImgVec::new(rgb_data, width, height))
                 }
-                ImgVec::new(rgb_data, width, height)
             }
         };
 
@@ -327,31 +338,35 @@ impl ManagedAvifDecoder {
 
         // Handle alpha channel if present
         if let Some(alpha_frame) = alpha {
-            let alpha_img = self.extract_alpha_8bit(alpha_frame, width, height)?;
-            let rgba_img = add_alpha8(rgb_img, alpha_img, self.avif_data.premultiplied_alpha)?;
-            Ok(DecodedImage::Rgba8(rgba_img).with_info(info))
-        } else {
-            Ok(DecodedImage::Rgb8(rgb_img).with_info(info))
+            // Extract alpha plane and add to image
+            let Planes::Depth8(alpha_planes) = alpha_frame.planes() else {
+                return Err(at(Error::Decode {
+                    code: -1,
+                    msg: "Expected 8-bit alpha plane",
+                }));
+            };
+
+            let alpha_y = alpha_planes.y();
+            let alpha_range = if matches!(alpha_frame.color_info().color_range, Rav1dColorRange::Full) {
+                Range::Full
+            } else {
+                Range::Limited
+            };
+
+            let alpha_conv = RGBConvert::<u8>::new(alpha_range, yuv::color::MatrixCoefficients::Identity)
+                .map_err(|e| at(Error::ColorConversion(e)))?;
+
+            add_alpha8(
+                &mut image,
+                alpha_y.rows(),
+                width,
+                height,
+                alpha_conv,
+                self.avif_data.premultiplied_alpha,
+            )?;
         }
-    }
 
-    /// Extract alpha plane from 8-bit frame
-    fn extract_alpha_8bit(&self, alpha_frame: Frame, width: usize, height: usize) -> Result<ImgVec<u8>> {
-        let Planes::Depth8(planes) = alpha_frame.planes() else {
-            return Err(at(Error::Decode {
-                code: -1,
-                msg: "Expected 8-bit alpha planes",
-            }));
-        };
-
-        let y_plane = planes.y();
-        let mut alpha_data = Vec::with_capacity(width * height);
-
-        for row in y_plane.rows() {
-            alpha_data.extend_from_slice(&row[..width]);
-        }
-
-        Ok(ImgVec::new(alpha_data, width, height))
+        Ok(image)
     }
 
     /// Convert 10/12-bit frame to RGB
@@ -369,24 +384,152 @@ impl ManagedAvifDecoder {
             }));
         };
 
-        let width = info.width;
-        let height = info.height;
+        let width = info.width as usize;
+        let height = info.height as usize;
 
         // Get Y, U, V planes
         let y_plane = planes.y();
         let u_plane = planes.u();
         let v_plane = planes.v();
 
-        // For 16-bit, we need to handle the conversion differently
-        // Similar logic to 8-bit but with u16 data
-        // This is simplified - full implementation would use yuv crate properly
+        // Convert YUV to RGB based on chroma sampling
+        let yuv_range = match info.color_range {
+            ColorRange::Full => Range::Full,
+            ColorRange::Limited => Range::Limited,
+        };
+        let yuv_depth = match info.bit_depth {
+            10 => Depth::Depth10,
+            12 => Depth::Depth12,
+            _ => Depth::Depth16,
+        };
+        let conv = RGBConvert::<u16>::new(yuv_range, to_yuv_matrix(info.matrix_coefficients), yuv_depth)
+            .map_err(|e| at(Error::ColorConversion(e)))?;
+
+        let has_alpha = alpha.is_some();
+
+        let mut image = match info.chroma_sampling {
+            ChromaSampling::Cs420 => {
+                let u = u_plane.ok_or_else(|| at(Error::Decode {
+                    code: -1,
+                    msg: "Missing U plane for 420",
+                }))?;
+                let v = v_plane.ok_or_else(|| at(Error::Decode {
+                    code: -1,
+                    msg: "Missing V plane for 420",
+                }))?;
+
+                let px_iter = yuv_420(y_plane.rows(), u.rows(), v.rows());
+
+                if has_alpha {
+                    let mut out = Vec::with_capacity(width * height);
+                    out.extend(px_iter.map(|px| conv.to_rgb(px).with_alpha(0xFFFF)));
+                    DecodedImage::Rgba16(ImgVec::new(out, width, height))
+                } else {
+                    let mut out = Vec::with_capacity(width * height);
+                    out.extend(px_iter.map(|px| conv.to_rgb(px)));
+                    DecodedImage::Rgb16(ImgVec::new(out, width, height))
+                }
+            }
+            ChromaSampling::Cs422 => {
+                let u = u_plane.ok_or_else(|| at(Error::Decode {
+                    code: -1,
+                    msg: "Missing U plane for 422",
+                }))?;
+                let v = v_plane.ok_or_else(|| at(Error::Decode {
+                    code: -1,
+                    msg: "Missing V plane for 422",
+                }))?;
+
+                let px_iter = yuv_422(y_plane.rows(), u.rows(), v.rows());
+
+                if has_alpha {
+                    let mut out = Vec::with_capacity(width * height);
+                    out.extend(px_iter.map(|px| conv.to_rgb(px).with_alpha(0xFFFF)));
+                    DecodedImage::Rgba16(ImgVec::new(out, width, height))
+                } else {
+                    let mut out = Vec::with_capacity(width * height);
+                    out.extend(px_iter.map(|px| conv.to_rgb(px)));
+                    DecodedImage::Rgb16(ImgVec::new(out, width, height))
+                }
+            }
+            ChromaSampling::Cs444 => {
+                let u = u_plane.ok_or_else(|| at(Error::Decode {
+                    code: -1,
+                    msg: "Missing U plane for 444",
+                }))?;
+                let v = v_plane.ok_or_else(|| at(Error::Decode {
+                    code: -1,
+                    msg: "Missing V plane for 444",
+                }))?;
+
+                let px_iter = yuv_444(y_plane.rows(), u.rows(), v.rows());
+
+                if has_alpha {
+                    let mut out = Vec::with_capacity(width * height);
+                    out.extend(px_iter.map(|px| conv.to_rgb(px).with_alpha(0xFFFF)));
+                    DecodedImage::Rgba16(ImgVec::new(out, width, height))
+                } else {
+                    let mut out = Vec::with_capacity(width * height);
+                    out.extend(px_iter.map(|px| conv.to_rgb(px)));
+                    DecodedImage::Rgb16(ImgVec::new(out, width, height))
+                }
+            }
+            ChromaSampling::Monochrome => {
+                // Grayscale - create RGB from Y only
+                if has_alpha {
+                    let mut rgb_data = Vec::with_capacity(width * height);
+                    for row in y_plane.rows() {
+                        for &y in row.iter().take(width) {
+                            let gray = conv.to_luma(y);
+                            rgb_data.push(RGB::new(gray, gray, gray).with_alpha(0xFFFF));
+                        }
+                    }
+                    DecodedImage::Rgba16(ImgVec::new(rgb_data, width, height))
+                } else {
+                    let mut rgb_data = Vec::with_capacity(width * height);
+                    for row in y_plane.rows() {
+                        for &y in row.iter().take(width) {
+                            let gray = conv.to_luma(y);
+                            rgb_data.push(RGB::new(gray, gray, gray));
+                        }
+                    }
+                    DecodedImage::Rgb16(ImgVec::new(rgb_data, width, height))
+                }
+            }
+        };
 
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
-        // For now, return error - full 16-bit support needs more work
-        Err(at(Error::Decode {
-            code: -1,
-            msg: "16-bit RGB conversion not yet implemented in managed decoder",
-        }))
+        // Handle alpha channel if present
+        if let Some(alpha_frame) = alpha {
+            // Extract alpha plane and add to image
+            let Planes::Depth16(alpha_planes) = alpha_frame.planes() else {
+                return Err(at(Error::Decode {
+                    code: -1,
+                    msg: "Expected 16-bit alpha plane",
+                }));
+            };
+
+            let alpha_y = alpha_planes.y();
+            let alpha_range = if matches!(alpha_frame.color_info().color_range, Rav1dColorRange::Full) {
+                Range::Full
+            } else {
+                Range::Limited
+            };
+
+            let alpha_conv = RGBConvert::<u16>::new(alpha_range, yuv::color::MatrixCoefficients::Identity, yuv_depth)
+                .map_err(|e| at(Error::ColorConversion(e)))?;
+
+            add_alpha16(
+                &mut image,
+                alpha_y.rows(),
+                width,
+                height,
+                alpha_conv,
+                self.avif_data.premultiplied_alpha,
+            )?;
+        }
+
+        Ok(image)
     }
 }
