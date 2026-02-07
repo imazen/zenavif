@@ -268,6 +268,25 @@ pub(crate) struct AV1ConfigBox {
     pub(crate) config_obus: TryVec<u8>,
 }
 
+/// Options for parsing AVIF files
+#[derive(Debug, Clone, Copy)]
+pub struct ParseOptions {
+    /// Enable lenient parsing mode
+    ///
+    /// When true, non-critical validation errors (like non-zero flags in boxes
+    /// that expect zero flags) will be ignored instead of returning errors.
+    /// This allows parsing of slightly malformed but otherwise valid AVIF files.
+    ///
+    /// Default: false (strict validation)
+    pub lenient: bool,
+}
+
+impl Default for ParseOptions {
+    fn default() -> Self {
+        Self { lenient: false }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct AvifData {
     /// AV1 data for the color channels.
@@ -693,10 +712,10 @@ fn read_fullbox_extra<T: ReadBytesExt>(src: &mut T) -> Result<(u8, u32)> {
 }
 
 // Parse the extra fields for a full box whose flag fields must be zero.
-fn read_fullbox_version_no_flags<T: ReadBytesExt>(src: &mut T) -> Result<u8> {
+fn read_fullbox_version_no_flags<T: ReadBytesExt>(src: &mut T, options: &ParseOptions) -> Result<u8> {
     let (version, flags) = read_fullbox_extra(src)?;
 
-    if flags != 0 {
+    if flags != 0 && !options.lenient {
         return Err(Error::Unsupported("expected flags to be 0"));
     }
 
@@ -729,10 +748,15 @@ fn skip_box_remain<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<()> {
     skip(src, remain)
 }
 
-/// Read the contents of an AVIF file
+/// Read the contents of an AVIF file with custom parsing options
 ///
-/// Metadata is accumulated and returned in [`AvifData`] struct,
-pub fn read_avif<T: Read>(f: &mut T) -> Result<AvifData> {
+/// Metadata is accumulated and returned in [`AvifData`] struct.
+///
+/// # Arguments
+///
+/// * `f` - Reader for the AVIF file
+/// * `options` - Parsing options (e.g., lenient mode)
+pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Result<AvifData> {
     let mut f = OffsetReader::new(f);
 
     let mut iter = BoxIter::new(&mut f);
@@ -762,7 +786,7 @@ pub fn read_avif<T: Read>(f: &mut T) -> Result<AvifData> {
                 if meta.is_some() {
                     return Err(Error::InvalidData("There should be zero or one meta boxes per ISO 14496-12:2015 § 8.11.1.1"));
                 }
-                meta = Some(read_avif_meta(&mut b)?);
+                meta = Some(read_avif_meta(&mut b, options)?);
             },
             BoxType::MediaDataBox => {
                 if b.bytes_left() > 0 {
@@ -849,12 +873,22 @@ pub fn read_avif<T: Read>(f: &mut T) -> Result<AvifData> {
     Ok(context)
 }
 
+/// Read the contents of an AVIF file
+///
+/// Metadata is accumulated and returned in [`AvifData`] struct.
+/// Uses strict validation by default.
+///
+/// For custom parsing options (e.g., lenient mode), use [`read_avif_with_options`].
+pub fn read_avif<T: Read>(f: &mut T) -> Result<AvifData> {
+    read_avif_with_options(f, &ParseOptions::default())
+}
+
 /// Parse a metadata box in the context of an AVIF
 /// Currently requires the primary item to be an av01 item type and generates
 /// an error otherwise.
 /// See ISO 14496-12:2015 § 8.11.1
-fn read_avif_meta<T: Read + Offset>(src: &mut BMFFBox<'_, T>) -> Result<AvifInternalMeta> {
-    let version = read_fullbox_version_no_flags(src)?;
+fn read_avif_meta<T: Read + Offset>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<AvifInternalMeta> {
+    let version = read_fullbox_version_no_flags(src, options)?;
 
     if version != 0 {
         return Err(Error::Unsupported("unsupported meta version"));
@@ -873,25 +907,25 @@ fn read_avif_meta<T: Read + Offset>(src: &mut BMFFBox<'_, T>) -> Result<AvifInte
                 if item_infos.is_some() {
                     return Err(Error::InvalidData("There should be zero or one iinf boxes per ISO 14496-12:2015 § 8.11.6.1"));
                 }
-                item_infos = Some(read_iinf(&mut b)?);
+                item_infos = Some(read_iinf(&mut b, options)?);
             },
             BoxType::ItemLocationBox => {
                 if iloc_items.is_some() {
                     return Err(Error::InvalidData("There should be zero or one iloc boxes per ISO 14496-12:2015 § 8.11.3.1"));
                 }
-                iloc_items = Some(read_iloc(&mut b)?);
+                iloc_items = Some(read_iloc(&mut b, options)?);
             },
             BoxType::PrimaryItemBox => {
                 if primary_item_id.is_some() {
                     return Err(Error::InvalidData("There should be zero or one iloc boxes per ISO 14496-12:2015 § 8.11.4.1"));
                 }
-                primary_item_id = Some(read_pitm(&mut b)?);
+                primary_item_id = Some(read_pitm(&mut b, options)?);
             },
             BoxType::ImageReferenceBox => {
-                item_references.append(&mut read_iref(&mut b)?)?;
+                item_references.append(&mut read_iref(&mut b, options)?)?;
             },
             BoxType::ImagePropertiesBox => {
-                properties = read_iprp(&mut b)?;
+                properties = read_iprp(&mut b, options)?;
             },
             _ => skip_box_content(&mut b)?,
         }
@@ -925,8 +959,8 @@ fn read_avif_meta<T: Read + Offset>(src: &mut BMFFBox<'_, T>) -> Result<AvifInte
 
 /// Parse a Primary Item Box
 /// See ISO 14496-12:2015 § 8.11.4
-fn read_pitm<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<u32> {
-    let version = read_fullbox_version_no_flags(src)?;
+fn read_pitm<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<u32> {
+    let version = read_fullbox_version_no_flags(src, options)?;
 
     let item_id = match version {
         0 => be_u16(src)?.into(),
@@ -939,8 +973,8 @@ fn read_pitm<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<u32> {
 
 /// Parse an Item Information Box
 /// See ISO 14496-12:2015 § 8.11.6
-fn read_iinf<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<ItemInfoEntry>> {
-    let version = read_fullbox_version_no_flags(src)?;
+fn read_iinf<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<TryVec<ItemInfoEntry>> {
+    let version = read_fullbox_version_no_flags(src, options)?;
 
     match version {
         0 | 1 => (),
@@ -997,9 +1031,9 @@ fn read_infe<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<ItemInfoEntry> {
     Ok(ItemInfoEntry { item_id, item_type })
 }
 
-fn read_iref<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<SingleItemTypeReferenceBox>> {
+fn read_iref<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<TryVec<SingleItemTypeReferenceBox>> {
     let mut item_references = TryVec::new();
-    let version = read_fullbox_version_no_flags(src)?;
+    let version = read_fullbox_version_no_flags(src, options)?;
     if version > 1 {
         return Err(Error::Unsupported("iref version"));
     }
@@ -1032,7 +1066,7 @@ fn read_iref<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<SingleItemTypeR
     Ok(item_references)
 }
 
-fn read_iprp<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<AssociatedProperty>> {
+fn read_iprp<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<TryVec<AssociatedProperty>> {
     let mut iter = src.box_iter();
     let mut properties = TryVec::new();
     let mut associations = TryVec::new();
@@ -1040,7 +1074,7 @@ fn read_iprp<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<AssociatedPrope
     while let Some(mut b) = iter.next_box()? {
         match b.head.name {
             BoxType::ItemPropertyContainerBox => {
-                properties = read_ipco(&mut b)?;
+                properties = read_ipco(&mut b, options)?;
             },
             BoxType::ItemPropertyAssociationBox => {
                 associations = read_ipma(&mut b)?;
@@ -1126,15 +1160,15 @@ fn read_ipma<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<Association>> {
     Ok(associations)
 }
 
-fn read_ipco<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<ItemProperty>> {
+fn read_ipco<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<TryVec<ItemProperty>> {
     let mut properties = TryVec::new();
 
     let mut iter = src.box_iter();
     while let Some(mut b) = iter.next_box()? {
         // Must push for every property to have correct index for them
         properties.push(match b.head.name {
-            BoxType::PixelInformationBox => ItemProperty::Channels(read_pixi(&mut b)?),
-            BoxType::AuxiliaryTypeProperty => ItemProperty::AuxiliaryType(read_auxc(&mut b)?),
+            BoxType::PixelInformationBox => ItemProperty::Channels(read_pixi(&mut b, options)?),
+            BoxType::AuxiliaryTypeProperty => ItemProperty::AuxiliaryType(read_auxc(&mut b, options)?),
             _ => {
                 skip_box_remain(&mut b)?;
                 ItemProperty::Unsupported
@@ -1144,8 +1178,8 @@ fn read_ipco<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<ItemProperty>> 
     Ok(properties)
 }
 
-fn read_pixi<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<ArrayVec<u8, 16>> {
-    let version = read_fullbox_version_no_flags(src)?;
+fn read_pixi<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<ArrayVec<u8, 16>> {
+    let version = read_fullbox_version_no_flags(src, options)?;
     if version != 0 {
         return Err(Error::Unsupported("pixi version"));
     }
@@ -1188,8 +1222,8 @@ impl TryClone for AuxiliaryTypeProperty {
     }
 }
 
-fn read_auxc<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<AuxiliaryTypeProperty> {
-    let version = read_fullbox_version_no_flags(src)?;
+fn read_auxc<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<AuxiliaryTypeProperty> {
+    let version = read_fullbox_version_no_flags(src, options)?;
     if version != 0 {
         return Err(Error::Unsupported("auxC version"));
     }
@@ -1201,8 +1235,8 @@ fn read_auxc<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<AuxiliaryTypeProperty>
 
 /// Parse an item location box inside a meta box
 /// See ISO 14496-12:2015 § 8.11.3
-fn read_iloc<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<ItemLocationBoxItem>> {
-    let version: IlocVersion = read_fullbox_version_no_flags(src)?.try_into()?;
+fn read_iloc<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<TryVec<ItemLocationBoxItem>> {
+    let version: IlocVersion = read_fullbox_version_no_flags(src, options)?.try_into()?;
 
     let iloc = src.read_into_try_vec()?;
     let mut iloc = BitReader::new(&iloc);
