@@ -8,7 +8,7 @@ All upstream tests pass. All files in the AOM test suite and link-u animated sam
 
 ### Eager: `read_avif`
 
-Reads the entire file and copies all mdat data into memory. This is the original upstream API.
+Reads the entire file and copies all mdat data into memory. The `read_avif()` function signature is from upstream; the returned `AvifData` struct has been extended with grid config, animation config, and animation frames.
 
 ```rust
 use avif_parse::read_avif;
