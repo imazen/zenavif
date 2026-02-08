@@ -12,18 +12,18 @@ use crate::image::{
     ChromaSampling, ColorPrimaries, ColorRange, DecodedImage, ImageInfo, MatrixCoefficients,
     TransferCharacteristics,
 };
+use crate::yuv_convert::{self, YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRange};
 use enough::Stop;
 use imgref::ImgVec;
 use rgb::{ComponentBytes, ComponentSlice, Rgb, Rgba};
 use whereat::at;
 use yuv::{YuvGrayImage, YuvPlanarImage, YuvRange, YuvStandardMatrix};
-use crate::yuv_convert::{self, YuvRange as OurYuvRange, YuvMatrix as OurYuvMatrix};
 
 // Import managed API from rav1d-safe
 use rav1d_safe::src::managed::{
-    ColorPrimaries as Rav1dColorPrimaries, ColorRange as Rav1dColorRange,
-    Decoder as Rav1dDecoder, Frame, MatrixCoefficients as Rav1dMatrixCoefficients, PixelLayout,
-    Planes, Settings, TransferCharacteristics as Rav1dTransferCharacteristics,
+    ColorPrimaries as Rav1dColorPrimaries, ColorRange as Rav1dColorRange, Decoder as Rav1dDecoder,
+    Frame, MatrixCoefficients as Rav1dMatrixCoefficients, PixelLayout, Planes, Settings,
+    TransferCharacteristics as Rav1dTransferCharacteristics,
 };
 
 /// Convert rav1d-safe ColorPrimaries to zenavif ColorPrimaries
@@ -74,9 +74,7 @@ fn to_yuv_matrix(mc: MatrixCoefficients) -> YuvStandardMatrix {
         MatrixCoefficients::BT601 | MatrixCoefficients::BT470BG | MatrixCoefficients::FCC => {
             YuvStandardMatrix::Bt601
         }
-        MatrixCoefficients::BT2020_NCL | MatrixCoefficients::BT2020_CL => {
-            YuvStandardMatrix::Bt2020
-        }
+        MatrixCoefficients::BT2020_NCL | MatrixCoefficients::BT2020_CL => YuvStandardMatrix::Bt2020,
         MatrixCoefficients::SMPTE240 => YuvStandardMatrix::Smpte240,
         _ => YuvStandardMatrix::Bt601,
     }
@@ -89,9 +87,7 @@ fn to_our_yuv_matrix(mc: MatrixCoefficients) -> OurYuvMatrix {
         MatrixCoefficients::BT601 | MatrixCoefficients::BT470BG | MatrixCoefficients::FCC => {
             OurYuvMatrix::Bt601
         }
-        MatrixCoefficients::BT2020_NCL | MatrixCoefficients::BT2020_CL => {
-            OurYuvMatrix::Bt2020
-        }
+        MatrixCoefficients::BT2020_NCL | MatrixCoefficients::BT2020_CL => OurYuvMatrix::Bt2020,
         _ => OurYuvMatrix::Bt601, // Default to BT.601 for unknown
     }
 }
@@ -134,8 +130,8 @@ impl ManagedAvifDecoder {
         let mut cursor = std::io::Cursor::new(data);
         // Use lenient parsing to handle files with non-critical validation issues
         let options = avif_parse::ParseOptions { lenient: true };
-        let avif_data =
-            avif_parse::read_avif_with_options(&mut cursor, &options).map_err(|e| at(Error::from(e)))?;
+        let avif_data = avif_parse::read_avif_with_options(&mut cursor, &options)
+            .map_err(|e| at(Error::from(e)))?;
 
         let settings = Settings {
             threads: config.threads,
@@ -298,12 +294,24 @@ impl ManagedAvifDecoder {
 
         // Stitch tiles based on bit depth and alpha
         match &tile_images[0] {
-            DecodedImage::Rgb8(_) => self.stitch_rgb8(tile_images, rows, cols, output_width, output_height),
-            DecodedImage::Rgba8(_) => self.stitch_rgba8(tile_images, rows, cols, output_width, output_height),
-            DecodedImage::Rgb16(_) => self.stitch_rgb16(tile_images, rows, cols, output_width, output_height),
-            DecodedImage::Rgba16(_) => self.stitch_rgba16(tile_images, rows, cols, output_width, output_height),
-            DecodedImage::Gray8(_) => self.stitch_gray8(tile_images, rows, cols, output_width, output_height),
-            DecodedImage::Gray16(_) => self.stitch_gray16(tile_images, rows, cols, output_width, output_height),
+            DecodedImage::Rgb8(_) => {
+                self.stitch_rgb8(tile_images, rows, cols, output_width, output_height)
+            }
+            DecodedImage::Rgba8(_) => {
+                self.stitch_rgba8(tile_images, rows, cols, output_width, output_height)
+            }
+            DecodedImage::Rgb16(_) => {
+                self.stitch_rgb16(tile_images, rows, cols, output_width, output_height)
+            }
+            DecodedImage::Rgba16(_) => {
+                self.stitch_rgba16(tile_images, rows, cols, output_width, output_height)
+            }
+            DecodedImage::Gray8(_) => {
+                self.stitch_gray8(tile_images, rows, cols, output_width, output_height)
+            }
+            DecodedImage::Gray16(_) => {
+                self.stitch_gray16(tile_images, rows, cols, output_width, output_height)
+            }
         }
     }
 
@@ -414,7 +422,8 @@ impl ManagedAvifDecoder {
         height: usize,
     ) -> Result<DecodedImage> {
         use rgb::RGBA16;
-        let mut output = imgref::ImgVec::new(vec![RGBA16::default(); width * height], width, height);
+        let mut output =
+            imgref::ImgVec::new(vec![RGBA16::default(); width * height], width, height);
 
         for (tile_idx, tile) in tiles.iter().enumerate() {
             if let DecodedImage::Rgba16(tile_img) = tile {
@@ -636,16 +645,36 @@ impl ManagedAvifDecoder {
                 };
 
                 if has_alpha {
-                    let mut out = vec![Rgba { r: 0u8, g: 0, b: 0, a: 255 }; buffer_pixel_count];
+                    let mut out = vec![
+                        Rgba {
+                            r: 0u8,
+                            g: 0,
+                            b: 0,
+                            a: 255
+                        };
+                        buffer_pixel_count
+                    ];
                     let rgb_stride = buffer_width as u32 * 4;
-                    yuv::yuv400_to_rgba(&gray, out.as_mut_slice().as_bytes_mut(), rgb_stride, yuv_range, matrix)
-                        .map_err(|e| at(Error::ColorConversion(e)))?;
+                    yuv::yuv400_to_rgba(
+                        &gray,
+                        out.as_mut_slice().as_bytes_mut(),
+                        rgb_stride,
+                        yuv_range,
+                        matrix,
+                    )
+                    .map_err(|e| at(Error::ColorConversion(e)))?;
                     DecodedImage::Rgba8(ImgVec::new(out, buffer_width, buffer_height))
                 } else {
                     let mut out = vec![Rgb { r: 0u8, g: 0, b: 0 }; buffer_pixel_count];
                     let rgb_stride = buffer_width as u32 * 3;
-                    yuv::yuv400_to_rgb(&gray, out.as_mut_slice().as_bytes_mut(), rgb_stride, yuv_range, matrix)
-                        .map_err(|e| at(Error::ColorConversion(e)))?;
+                    yuv::yuv400_to_rgb(
+                        &gray,
+                        out.as_mut_slice().as_bytes_mut(),
+                        rgb_stride,
+                        yuv_range,
+                        matrix,
+                    )
+                    .map_err(|e| at(Error::ColorConversion(e)))?;
                     DecodedImage::Rgb8(ImgVec::new(out, buffer_width, buffer_height))
                 }
             }
@@ -676,12 +705,38 @@ impl ManagedAvifDecoder {
                 };
 
                 if has_alpha {
-                    let mut out = vec![Rgba { r: 0u8, g: 0, b: 0, a: 255 }; buffer_pixel_count];
+                    let mut out = vec![
+                        Rgba {
+                            r: 0u8,
+                            g: 0,
+                            b: 0,
+                            a: 255
+                        };
+                        buffer_pixel_count
+                    ];
                     let rgb_stride = buffer_width as u32 * 4;
                     match sampling {
-                        ChromaSampling::Cs420 => yuv::yuv420_to_rgba(&planar, out.as_mut_slice().as_bytes_mut(), rgb_stride, yuv_range, matrix),
-                        ChromaSampling::Cs422 => yuv::yuv422_to_rgba(&planar, out.as_mut_slice().as_bytes_mut(), rgb_stride, yuv_range, matrix),
-                        ChromaSampling::Cs444 => yuv::yuv444_to_rgba(&planar, out.as_mut_slice().as_bytes_mut(), rgb_stride, yuv_range, matrix),
+                        ChromaSampling::Cs420 => yuv::yuv420_to_rgba(
+                            &planar,
+                            out.as_mut_slice().as_bytes_mut(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        ChromaSampling::Cs422 => yuv::yuv422_to_rgba(
+                            &planar,
+                            out.as_mut_slice().as_bytes_mut(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        ChromaSampling::Cs444 => yuv::yuv444_to_rgba(
+                            &planar,
+                            out.as_mut_slice().as_bytes_mut(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
                         ChromaSampling::Monochrome => unreachable!(),
                     }
                     .map_err(|e| at(Error::ColorConversion(e)))?;
@@ -693,25 +748,40 @@ impl ManagedAvifDecoder {
 
                     let result = match sampling {
                         ChromaSampling::Cs420 => yuv_convert::yuv420_to_rgb8(
-                            y_view.as_slice(), y_view.stride(),
-                            u_view.as_slice(), u_view.stride(),
-                            v_view.as_slice(), v_view.stride(),
-                            buffer_width, buffer_height,
-                            our_range, our_matrix
+                            y_view.as_slice(),
+                            y_view.stride(),
+                            u_view.as_slice(),
+                            u_view.stride(),
+                            v_view.as_slice(),
+                            v_view.stride(),
+                            buffer_width,
+                            buffer_height,
+                            our_range,
+                            our_matrix,
                         ),
                         ChromaSampling::Cs422 => yuv_convert::yuv422_to_rgb8(
-                            y_view.as_slice(), y_view.stride(),
-                            u_view.as_slice(), u_view.stride(),
-                            v_view.as_slice(), v_view.stride(),
-                            buffer_width, buffer_height,
-                            our_range, our_matrix
+                            y_view.as_slice(),
+                            y_view.stride(),
+                            u_view.as_slice(),
+                            u_view.stride(),
+                            v_view.as_slice(),
+                            v_view.stride(),
+                            buffer_width,
+                            buffer_height,
+                            our_range,
+                            our_matrix,
                         ),
                         ChromaSampling::Cs444 => yuv_convert::yuv444_to_rgb8(
-                            y_view.as_slice(), y_view.stride(),
-                            u_view.as_slice(), u_view.stride(),
-                            v_view.as_slice(), v_view.stride(),
-                            buffer_width, buffer_height,
-                            our_range, our_matrix
+                            y_view.as_slice(),
+                            y_view.stride(),
+                            u_view.as_slice(),
+                            u_view.stride(),
+                            v_view.as_slice(),
+                            v_view.stride(),
+                            buffer_width,
+                            buffer_height,
+                            our_range,
+                            our_matrix,
                         ),
                         ChromaSampling::Monochrome => unreachable!(),
                     };
@@ -790,22 +860,73 @@ impl ManagedAvifDecoder {
                 };
 
                 if has_alpha {
-                    let mut out = vec![Rgba { r: 0u16, g: 0, b: 0, a: 0xFFFF }; buffer_pixel_count];
+                    let mut out = vec![
+                        Rgba {
+                            r: 0u16,
+                            g: 0,
+                            b: 0,
+                            a: 0xFFFF
+                        };
+                        buffer_pixel_count
+                    ];
                     let rgb_stride = buffer_width as u32 * 4;
                     match info.bit_depth {
-                        10 => yuv::y010_to_rgba10(&gray, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
-                        12 => yuv::y012_to_rgba12(&gray, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
-                        _ => yuv::y016_to_rgba16(&gray, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
+                        10 => yuv::y010_to_rgba10(
+                            &gray,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        12 => yuv::y012_to_rgba12(
+                            &gray,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        _ => yuv::y016_to_rgba16(
+                            &gray,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
                     }
                     .map_err(|e| at(Error::ColorConversion(e)))?;
                     DecodedImage::Rgba16(ImgVec::new(out, buffer_width, buffer_height))
                 } else {
-                    let mut out = vec![Rgb { r: 0u16, g: 0, b: 0 }; buffer_pixel_count];
+                    let mut out = vec![
+                        Rgb {
+                            r: 0u16,
+                            g: 0,
+                            b: 0
+                        };
+                        buffer_pixel_count
+                    ];
                     let rgb_stride = buffer_width as u32 * 3;
                     match info.bit_depth {
-                        10 => yuv::y010_to_rgb10(&gray, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
-                        12 => yuv::y012_to_rgb12(&gray, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
-                        _ => yuv::y016_to_rgb16(&gray, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
+                        10 => yuv::y010_to_rgb10(
+                            &gray,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        12 => yuv::y012_to_rgb12(
+                            &gray,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        _ => yuv::y016_to_rgb16(
+                            &gray,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
                     }
                     .map_err(|e| at(Error::ColorConversion(e)))?;
                     DecodedImage::Rgb16(ImgVec::new(out, buffer_width, buffer_height))
@@ -838,35 +959,158 @@ impl ManagedAvifDecoder {
                 };
 
                 if has_alpha {
-                    let mut out = vec![Rgba { r: 0u16, g: 0, b: 0, a: 0xFFFF }; buffer_pixel_count];
+                    let mut out = vec![
+                        Rgba {
+                            r: 0u16,
+                            g: 0,
+                            b: 0,
+                            a: 0xFFFF
+                        };
+                        buffer_pixel_count
+                    ];
                     let rgb_stride = buffer_width as u32 * 4;
                     match (info.bit_depth, sampling) {
-                        (10, ChromaSampling::Cs420) => yuv::i010_to_rgba10(&planar, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
-                        (10, ChromaSampling::Cs422) => yuv::i210_to_rgba10(&planar, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
-                        (10, ChromaSampling::Cs444) => yuv::i410_to_rgba10(&planar, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
-                        (12, ChromaSampling::Cs420) => yuv::i012_to_rgba12(&planar, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
-                        (12, ChromaSampling::Cs422) => yuv::i212_to_rgba12(&planar, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
-                        (12, ChromaSampling::Cs444) => yuv::i412_to_rgba12(&planar, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
-                        (_, ChromaSampling::Cs420) => yuv::i016_to_rgba16(&planar, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
-                        (_, ChromaSampling::Cs422) => yuv::i216_to_rgba16(&planar, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
-                        (_, ChromaSampling::Cs444) => yuv::i416_to_rgba16(&planar, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
+                        (10, ChromaSampling::Cs420) => yuv::i010_to_rgba10(
+                            &planar,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        (10, ChromaSampling::Cs422) => yuv::i210_to_rgba10(
+                            &planar,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        (10, ChromaSampling::Cs444) => yuv::i410_to_rgba10(
+                            &planar,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        (12, ChromaSampling::Cs420) => yuv::i012_to_rgba12(
+                            &planar,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        (12, ChromaSampling::Cs422) => yuv::i212_to_rgba12(
+                            &planar,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        (12, ChromaSampling::Cs444) => yuv::i412_to_rgba12(
+                            &planar,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        (_, ChromaSampling::Cs420) => yuv::i016_to_rgba16(
+                            &planar,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        (_, ChromaSampling::Cs422) => yuv::i216_to_rgba16(
+                            &planar,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        (_, ChromaSampling::Cs444) => yuv::i416_to_rgba16(
+                            &planar,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
                         (_, ChromaSampling::Monochrome) => unreachable!(),
                     }
                     .map_err(|e| at(Error::ColorConversion(e)))?;
                     DecodedImage::Rgba16(ImgVec::new(out, buffer_width, buffer_height))
                 } else {
-                    let mut out = vec![Rgb { r: 0u16, g: 0, b: 0 }; buffer_pixel_count];
+                    let mut out = vec![
+                        Rgb {
+                            r: 0u16,
+                            g: 0,
+                            b: 0
+                        };
+                        buffer_pixel_count
+                    ];
                     let rgb_stride = buffer_width as u32 * 3;
                     match (info.bit_depth, sampling) {
-                        (10, ChromaSampling::Cs420) => yuv::i010_to_rgb10(&planar, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
-                        (10, ChromaSampling::Cs422) => yuv::i210_to_rgb10(&planar, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
-                        (10, ChromaSampling::Cs444) => yuv::i410_to_rgb10(&planar, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
-                        (12, ChromaSampling::Cs420) => yuv::i012_to_rgb12(&planar, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
-                        (12, ChromaSampling::Cs422) => yuv::i212_to_rgb12(&planar, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
-                        (12, ChromaSampling::Cs444) => yuv::i412_to_rgb12(&planar, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
-                        (_, ChromaSampling::Cs420) => yuv::i016_to_rgb16(&planar, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
-                        (_, ChromaSampling::Cs422) => yuv::i216_to_rgb16(&planar, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
-                        (_, ChromaSampling::Cs444) => yuv::i416_to_rgb16(&planar, out.as_mut_slice().as_mut_slice(), rgb_stride, yuv_range, matrix),
+                        (10, ChromaSampling::Cs420) => yuv::i010_to_rgb10(
+                            &planar,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        (10, ChromaSampling::Cs422) => yuv::i210_to_rgb10(
+                            &planar,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        (10, ChromaSampling::Cs444) => yuv::i410_to_rgb10(
+                            &planar,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        (12, ChromaSampling::Cs420) => yuv::i012_to_rgb12(
+                            &planar,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        (12, ChromaSampling::Cs422) => yuv::i212_to_rgb12(
+                            &planar,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        (12, ChromaSampling::Cs444) => yuv::i412_to_rgb12(
+                            &planar,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        (_, ChromaSampling::Cs420) => yuv::i016_to_rgb16(
+                            &planar,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        (_, ChromaSampling::Cs422) => yuv::i216_to_rgb16(
+                            &planar,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
+                        (_, ChromaSampling::Cs444) => yuv::i416_to_rgb16(
+                            &planar,
+                            out.as_mut_slice().as_mut_slice(),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
+                        ),
                         (_, ChromaSampling::Monochrome) => unreachable!(),
                     }
                     .map_err(|e| at(Error::ColorConversion(e)))?;

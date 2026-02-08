@@ -111,13 +111,13 @@ pub fn decode_with(data: &[u8], config: &DecoderConfig, stop: &impl Stop) -> Res
         let mut decoder = ManagedAvifDecoder::new(data, config)?;
         decoder.decode(stop)
     }
-    
+
     #[cfg(all(not(feature = "managed"), feature = "asm"))]
     {
         let mut decoder = AvifDecoder::new(data, config)?;
         decoder.decode(stop)
     }
-    
+
     #[cfg(not(any(feature = "managed", feature = "asm")))]
     {
         compile_error!("At least one feature must be enabled: managed or asm");

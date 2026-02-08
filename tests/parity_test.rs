@@ -21,7 +21,7 @@ fn test_decode_works() {
 
         // Decode with default config
         let result = zenavif::decode(&data);
-        
+
         match result {
             Ok(image) => {
                 println!("  Decoded: {}x{}", image.width(), image.height());

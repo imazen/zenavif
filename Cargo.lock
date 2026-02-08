@@ -61,33 +61,12 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
 name = "archmage"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c9fb5c235b8c9ee09d8f332472c32a1dae6cc4ed0bfb819651b438f9cec923c"
-dependencies = [
- "archmage-macros 0.4.0",
- "bytemuck",
-]
-
-[[package]]
-name = "archmage"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4d89e1ed9f58e616382257c15c001ea415a4d1f418dac6eb5b03dde1767b4d52"
 dependencies = [
- "archmage-macros 0.5.0",
+ "archmage-macros",
  "safe_unaligned_simd",
-]
-
-[[package]]
-name = "archmage-macros"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f6d4d20f79dde36c8d0d7ddd4bd6ea2ebd4aafa3119fd3bd831e6b30af3f251"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -762,6 +741,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "magetypes"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9c9af7b6ffcb5a5a4f2361a9018acdadd892f30fb177d5b68dd6487eb029153"
+dependencies = [
+ "archmage",
+]
+
+[[package]]
 name = "maybe-rayon"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1096,7 +1084,7 @@ dependencies = [
 name = "rav1d-safe"
 version = "0.1.0"
 dependencies = [
- "archmage 0.5.0",
+ "archmage",
  "assert_matches",
  "atomig",
  "bitflags",
@@ -1577,7 +1565,7 @@ dependencies = [
 name = "zenavif"
 version = "0.1.0"
 dependencies = [
- "archmage 0.4.0",
+ "archmage",
  "avif-parse",
  "criterion",
  "enough",
@@ -1585,6 +1573,7 @@ dependencies = [
  "image",
  "imgref",
  "log",
+ "magetypes",
  "png",
  "rav1d",
  "rav1d-safe",

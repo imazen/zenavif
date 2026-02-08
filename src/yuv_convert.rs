@@ -7,8 +7,8 @@
 //! - ITU-R BT.709 (HD video)
 //! - ITU-R BT.2020 (UHD video)
 
-use rgb::{RGB8, RGBA8, RGB16, RGBA16};
 use imgref::ImgVec;
+use rgb::{RGB8, RGB16, RGBA8, RGBA16};
 
 /// YUV color range
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -222,15 +222,7 @@ fn matrix_coefficients(matrix: YuvMatrix) -> (f32, f32) {
 /// Vg = -2 * Kr * (1 - Kr) / Kg
 /// Ub = 2 * (1 - Kb)
 /// ```
-fn yuv_to_rgb(
-    y: f32,
-    u: f32,
-    v: f32,
-    kr: f32,
-    kg: f32,
-    kb: f32,
-    range: YuvRange,
-) -> (u8, u8, u8) {
+fn yuv_to_rgb(y: f32, u: f32, v: f32, kr: f32, kg: f32, kb: f32, range: YuvRange) -> (u8, u8, u8) {
     // Normalize to [0..1] range based on color range
     let (y_norm, u_norm, v_norm) = match range {
         YuvRange::Full => {

@@ -1,12 +1,13 @@
 //! Benchmarks for zenavif decoder
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use zenavif::{decode_with, DecoderConfig};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use enough::Unstoppable;
+use zenavif::{DecoderConfig, decode_with};
 
 // Include test images as bytes
 const SMALL_IMAGE: &[u8] = include_bytes!("../tests/vectors/libavif/white_1x1.avif");
-const MEDIUM_IMAGE: &[u8] = include_bytes!("../tests/vectors/libavif/abc_color_irot_alpha_irot.avif");
+const MEDIUM_IMAGE: &[u8] =
+    include_bytes!("../tests/vectors/libavif/abc_color_irot_alpha_irot.avif");
 
 fn benchmark_decode(c: &mut Criterion) {
     let mut group = c.benchmark_group("decode");
