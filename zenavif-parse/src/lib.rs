@@ -812,13 +812,12 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
     if let Some(mut b) = iter.next_box()? {
         if b.head.name == BoxType::FileTypeBox {
             let ftyp = read_ftyp(&mut b)?;
-            if ftyp.major_brand != b"avif" {
-                if ftyp.major_brand == b"avis" {
-                    return Err(Error::Unsupported("Animated AVIF is not supported. Please use real AV1 videos instead."));
-                }
+            // Accept both 'avif' (single-frame) and 'avis' (animated) brands
+            if ftyp.major_brand != b"avif" && ftyp.major_brand != b"avis" {
                 warn!("major_brand: {}", ftyp.major_brand);
-                return Err(Error::InvalidData("ftyp must be 'avif'"));
+                return Err(Error::InvalidData("ftyp must be 'avif' or 'avis'"));
             }
+            let is_animated = ftyp.major_brand == b"avis";
         } else {
             return Err(Error::InvalidData("'ftyp' box must occur first"));
         }
