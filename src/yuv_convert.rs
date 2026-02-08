@@ -145,16 +145,23 @@ fn yuv420_to_rgb8_simd(
             let (r_vec, g_vec, b_vec) =
                 yuv_to_rgb_simd(token, y_vec, u_vec, v_vec, kr, kg, kb, range);
 
-            // Convert f32 vectors to u8 and store
-            let r_vals = r_vec.to_array();
-            let g_vals = g_vec.to_array();
-            let b_vals = b_vec.to_array();
+            // Clamp and round using SIMD
+            let zero = f32x8::splat(token, 0.0);
+            let max_val = f32x8::splat(token, 255.0);
+            let r_clamped = r_vec.clamp(zero, max_val).round();
+            let g_clamped = g_vec.clamp(zero, max_val).round();
+            let b_clamped = b_vec.clamp(zero, max_val).round();
+
+            // Convert to u8 and store
+            let r_vals = r_clamped.to_array();
+            let g_vals = g_clamped.to_array();
+            let b_vals = b_clamped.to_array();
 
             for i in 0..8 {
                 out[row_start + x_pos + i] = RGB8 {
-                    r: (r_vals[i].round().clamp(0.0, 255.0)) as u8,
-                    g: (g_vals[i].round().clamp(0.0, 255.0)) as u8,
-                    b: (b_vals[i].round().clamp(0.0, 255.0)) as u8,
+                    r: r_vals[i] as u8,
+                    g: g_vals[i] as u8,
+                    b: b_vals[i] as u8,
                 };
             }
 
