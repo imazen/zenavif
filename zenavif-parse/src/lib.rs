@@ -922,19 +922,28 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
             });
 
             if let (Some(grid), Some(tile)) = (grid_dims, tile_dims) {
-                // Calculate grid layout: grid_dims ÷ tile_dims
-                if grid.width % tile.width == 0 && grid.height % tile.height == 0 {
-                    let columns = (grid.width / tile.width) as u8;
-                    let rows = (grid.height / tile.height) as u8;
-                    log::debug!("Grid: calculated {}×{} layout from ispe dimensions", rows, columns);
-                    grid_config = Some(GridConfig {
-                        rows,
-                        columns,
-                        output_width: grid.width,
-                        output_height: grid.height,
-                    });
+                // Validate tile dimensions are non-zero (already validated in read_ispe, but defensive)
+                if tile.width == 0 || tile.height == 0 {
+                    log::warn!("Grid: tile has zero dimensions, using fallback");
+                } else if grid.width % tile.width == 0 && grid.height % tile.height == 0 {
+                    // Calculate grid layout: grid_dims ÷ tile_dims
+                    let columns = grid.width / tile.width;
+                    let rows = grid.height / tile.height;
+
+                    // Validate grid dimensions fit in u8 (max 255×255 grid)
+                    if columns > 255 || rows > 255 {
+                        log::warn!("Grid: calculated dimensions {}×{} exceed 255, using fallback", rows, columns);
+                    } else {
+                        log::debug!("Grid: calculated {}×{} layout from ispe dimensions", rows, columns);
+                        grid_config = Some(GridConfig {
+                            rows: rows as u8,
+                            columns: columns as u8,
+                            output_width: grid.width,
+                            output_height: grid.height,
+                        });
+                    }
                 } else {
-                    log::warn!("Grid: dimension mismatch - grid {}x{} not evenly divisible by tile {}x{}, using fallback",
+                    log::warn!("Grid: dimension mismatch - grid {}×{} not evenly divisible by tile {}×{}, using fallback",
                               grid.width, grid.height, tile.width, tile.height);
                 }
             }
@@ -1473,6 +1482,11 @@ fn read_ispe<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
 
     let width = be_u32(src)?;
     let height = be_u32(src)?;
+
+    // Validate dimensions are non-zero (0×0 images are invalid)
+    if width == 0 || height == 0 {
+        return Err(Error::InvalidData("ispe dimensions cannot be zero"));
+    }
 
     Ok(ImageSpatialExtents { width, height })
 }
