@@ -32,29 +32,29 @@ These are transform/display properties. The parser should expose them; the decod
 
 - [x] clli — Content Light Level Info (max_content_light_level, max_pic_average_light_level)
 - [x] mdcv — Mastering Display Colour Volume (primaries, white point, luminance range)
-- [ ] cclv — Content Colour Volume
-- [ ] amve — Ambient Viewing Environment
-- [ ] reve — Reference Viewing Environment (v0)
-- [ ] ndwt — Nominal Diffuse White Luminance (v0)
+- [x] cclv — Content Colour Volume
+- [x] amve — Ambient Viewing Environment
+- [ ] reve — Reference Viewing Environment (v0). No spec available (ISO 23008-12:2025 Amd 1), no implementations exist.
+- [ ] ndwt — Nominal Diffuse White Luminance (v0). No spec available, no implementations exist.
 
 ## Priority 4 — Container-level validation
 
-- [ ] hdlr — Parse and validate handler_type is 'pict'
+- [x] hdlr — Parse and validate handler_type is 'pict'
+- [x] Expose compatible_brands and profile brands (MA1B, MA1A, avio)
 - [ ] Brand validation — Check miaf in compatible_brands per spec requirement
-- [ ] Expose compatible_brands and profile brands (MA1B, MA1A, avio)
 - [ ] Validate no transformative properties on grid tile derivation chains (spec 1.2 constraint)
 
 ## Priority 5 — Advanced features (rare in practice)
 
-- [ ] a1op — OperatingPointSelectorProperty (multi-operating-point images)
-- [ ] lsel — Layer selector (progressive/layered decoding)
-- [ ] a1lx — Layered image indexing (byte ranges for layers)
-- [ ] sato — Sample Transform Derived Image Item (new in 1.2, enables >12bpc)
-- [ ] tmap — Tone Map Derived Image Item (gain maps for HDR)
-- [ ] grpl/altr — Entity groups (alternatives, for sato/tmap fallback)
-- [ ] ster — Stereo pair groups
-- [ ] thmb — Thumbnail references
-- [ ] cdsc — Content description / metadata links
+- [x] a1op — OperatingPointSelectorProperty (multi-operating-point images)
+- [x] lsel — Layer selector (progressive/layered decoding)
+- [x] a1lx — Layered image indexing (byte ranges for layers)
+- [ ] sato — Sample Transform Derived Image Item (new in 1.2, enables >12bpc). No test files.
+- [ ] tmap — Tone Map Derived Image Item (gain maps for HDR). No test files.
+- [ ] grpl/altr — Entity groups (alternatives, for sato/tmap fallback). No test files.
+- [ ] ster — Stereo pair groups. No test files.
+- [ ] thmb — Thumbnail references (iref type, already parsed but not exposed as named accessor)
+- [ ] cdsc — Content description / metadata links (iref type, already parsed but not exposed)
 
 ## Test Corpus Coverage
 
