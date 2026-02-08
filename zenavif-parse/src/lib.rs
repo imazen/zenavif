@@ -14,6 +14,7 @@ use log::{debug, warn};
 use bitreader::BitReader;
 use byteorder::ReadBytesExt;
 use fallible_collections::{TryClone, TryReserveError};
+use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto as _};
 
 use std::io::{Read, Take};
@@ -1124,6 +1125,89 @@ impl AvifParser {
         }
 
         Err(Error::InvalidData("item not found"))
+    }
+
+    // ========================================
+    // Unified Cow-based API (idiomatic Rust)
+    // ========================================
+
+    /// Get animation frame data (automatically chooses zero-copy or owned)
+    ///
+    /// This method tries zero-copy first (single-extent frames), falling back
+    /// to owned data (multi-extent frames). Returns borrowed data when possible.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use avif_parse::AvifParser;
+    /// # use std::fs::File;
+    /// let parser = AvifParser::from_reader(&mut File::open("animation.avifs")?)?;
+    /// let frame_data = parser.frame_data(0)?;
+    /// // frame_data is Cow::Borrowed for single-extent, Cow::Owned for multi-extent
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn frame_data(&self, index: usize) -> Result<Cow<'_, [u8]>> {
+        // Try zero-copy first
+        match self.animation_frame_slice(index) {
+            Ok((slice, _)) => Ok(Cow::Borrowed(slice)),
+            Err(_) => {
+                // Fall back to owned (multi-extent or error)
+                let frame = self.animation_frame(index)?;
+                Ok(Cow::Owned(frame.data.to_vec()))
+            }
+        }
+    }
+
+    /// Get primary item data (automatically chooses zero-copy or owned)
+    pub fn primary_data(&self) -> Result<Cow<'_, [u8]>> {
+        match self.primary_item_slice() {
+            Ok(slice) => Ok(Cow::Borrowed(slice)),
+            Err(_) => {
+                let item = self.primary_item()?;
+                Ok(Cow::Owned(item.to_vec()))
+            }
+        }
+    }
+
+    /// Get alpha item data (automatically chooses zero-copy or owned)
+    pub fn alpha_data(&self) -> Option<Result<Cow<'_, [u8]>>> {
+        self.alpha_item_extents.as_ref().map(|_| {
+            match self.alpha_item_slice() {
+                Some(Ok(slice)) => Ok(Cow::Borrowed(slice)),
+                _ => {
+                    // alpha_item() returns Option<Result<TryVec<u8>>>
+                    match self.alpha_item() {
+                        Some(Ok(item)) => Ok(Cow::Owned(item.to_vec())),
+                        Some(Err(e)) => Err(e),
+                        None => Err(Error::InvalidData("alpha item missing")),
+                    }
+                }
+            }
+        })
+    }
+
+    /// Get grid tile data (automatically chooses zero-copy or owned)
+    pub fn tile_data(&self, index: usize) -> Result<Cow<'_, [u8]>> {
+        match self.grid_tile_slice(index) {
+            Ok(slice) => Ok(Cow::Borrowed(slice)),
+            Err(_) => {
+                let tile = self.grid_tile(index)?;
+                Ok(Cow::Owned(tile.to_vec()))
+            }
+        }
+    }
+
+    /// Check if zero-copy is possible for this frame
+    ///
+    /// Returns `true` if the frame is stored in a single extent and can be
+    /// accessed via zero-copy slice methods.
+    pub fn can_zero_copy_frame(&self, index: usize) -> bool {
+        self.animation_frame_slice(index).is_ok()
+    }
+
+    /// Check if zero-copy is possible for primary item
+    pub fn can_zero_copy_primary(&self) -> bool {
+        self.primary_item_slice().is_ok()
     }
 }
 
