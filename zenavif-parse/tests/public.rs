@@ -149,6 +149,107 @@ fn test_dir(dir: &str) {
     assert_eq!(0, errors);
 }
 
+/// Test a directory with all three parsing paths:
+/// 1. read_avif_with_config (eager + default limits)
+/// 2. AvifParser::from_reader_with_config (streaming + default limits)
+/// 3. Verify both produce consistent primary_item data
+fn test_dir_all_paths(dir: &str) {
+    let _ = env_logger::builder().is_test(true).filter_level(log::LevelFilter::max()).try_init();
+    let config = avif_parse::DecodeConfig::default();
+    let mut errors = 0;
+
+    for entry in walkdir::WalkDir::new(dir) {
+        let entry = entry.expect("AVIF entry");
+        let path = entry.path();
+        let ext = path.extension().unwrap_or_default();
+        if !path.is_file() || (ext != "avif" && ext != "avifs") {
+            continue;
+        }
+
+        // Path 1: eager with default limits
+        let eager_result = avif_parse::read_avif_with_config(
+            &mut File::open(path).expect("bad file"),
+            &config,
+            &avif_parse::Unstoppable,
+        );
+
+        // Path 2: streaming with default limits
+        let streaming_result = avif_parse::AvifParser::from_reader_with_config(
+            &mut File::open(path).expect("bad file"),
+            &config,
+            &avif_parse::Unstoppable,
+        );
+
+        match (&eager_result, &streaming_result) {
+            (Ok(avif), Ok(parser)) => {
+                // Both succeeded — verify consistency
+                if avif.grid_config.is_none() {
+                    let streaming_primary = parser.primary_item()
+                        .expect("streaming primary_item failed");
+                    assert_eq!(
+                        avif.primary_item.len(),
+                        streaming_primary.len(),
+                        "{}: primary_item length mismatch (eager={}, streaming={})",
+                        path.display(),
+                        avif.primary_item.len(),
+                        streaming_primary.len(),
+                    );
+                } else {
+                    assert!(!avif.grid_tiles.is_empty(), "{}: grid has no tiles", path.display());
+                    assert_eq!(
+                        avif.grid_tiles.len(),
+                        parser.grid_tile_count(),
+                        "{}: tile count mismatch",
+                        path.display(),
+                    );
+                }
+            }
+            (Err(Error::Unsupported(why)), _) | (_, Err(Error::Unsupported(why))) => {
+                log::warn!("{}: {why}", path.display());
+            }
+            // Both failed — consistent behavior, expected for corrupt files
+            (Err(_), Err(_)) => {
+                log::debug!("{}: both paths rejected (expected for corrupt files)", path.display());
+            }
+            // Eager failed but streaming succeeded — expected: streaming defers
+            // data extraction, so corrupt extents aren't caught until access time.
+            // Verify the streaming parser fails when we actually try to extract data.
+            (Err(e), Ok(parser)) => {
+                log::debug!("{}: eager rejected ({e}), verifying streaming fails on extraction", path.display());
+                let extraction_ok = parser.primary_item().is_ok()
+                    || parser.grid_tile_count() > 0;
+                if extraction_ok {
+                    // Streaming extraction succeeded where eager failed — real inconsistency
+                    log::error!("{}: eager failed ({e}) but streaming extraction succeeded", path.display());
+                    errors += 1;
+                }
+            }
+            (Ok(_), Err(e)) => {
+                log::error!("{}: streaming failed but eager succeeded: {e}", path.display());
+                errors += 1;
+            }
+        }
+    }
+    assert_eq!(0, errors);
+}
+
+// Corpus-wide tests: all 3 parsing paths (eager+limits, streaming+limits, consistency)
+
+#[test]
+fn corpus_aomedia_all_paths() {
+    test_dir_all_paths(AOMEDIA_TEST_FILES);
+}
+
+#[test]
+fn corpus_linku_all_paths() {
+    test_dir_all_paths(LINK_U_SAMPLES);
+}
+
+#[test]
+fn corpus_local_all_paths() {
+    test_dir_all_paths("tests");
+}
+
 // Streaming parser tests
 
 #[test]
