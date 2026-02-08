@@ -287,6 +287,37 @@ impl Default for ParseOptions {
     }
 }
 
+/// Grid configuration for tiled/grid-based AVIF images
+#[derive(Debug, Clone, PartialEq)]
+pub struct GridConfig {
+    /// Number of rows in the grid
+    pub rows: u8,
+    /// Number of columns in the grid
+    pub columns: u8,
+    /// Output width of the reconstructed image
+    pub output_width: u32,
+    /// Output height of the reconstructed image
+    pub output_height: u32,
+}
+
+/// Frame information for animated AVIF
+#[derive(Debug)]
+pub struct AnimationFrame {
+    /// AV1 bitstream data for this frame
+    pub data: TryVec<u8>,
+    /// Duration in milliseconds (0 if unknown)
+    pub duration_ms: u32,
+}
+
+/// Animation configuration for animated AVIF (avis brand)
+#[derive(Debug)]
+pub struct AnimationConfig {
+    /// Number of times to loop (0 = infinite)
+    pub loop_count: u32,
+    /// All frames in the animation
+    pub frames: TryVec<AnimationFrame>,
+}
+
 #[derive(Debug, Default)]
 pub struct AvifData {
     /// AV1 data for the color channels.
@@ -301,6 +332,18 @@ pub struct AvifData {
     ///
     /// See `prem` in MIAF § 7.3.5.2
     pub premultiplied_alpha: bool,
+
+    /// Grid configuration and tiles (for grid-based AVIF)
+    ///
+    /// When present, primary_item should be empty and tiles contain the actual data
+    pub grid_config: Option<GridConfig>,
+    /// Tiles for grid-based AVIF (in row-major order)
+    pub grid_tiles: TryVec<TryVec<u8>>,
+
+    /// Animation configuration (for animated AVIF with avis brand)
+    ///
+    /// When present, primary_item contains the first frame
+    pub animation: Option<AnimationConfig>,
 }
 
 impl AvifData {
@@ -361,6 +404,7 @@ struct AvifInternalMeta {
     properties: TryVec<AssociatedProperty>,
     primary_item_id: u32,
     iloc_items: TryVec<ItemLocationBoxItem>,
+    item_infos: TryVec<ItemInfoEntry>,
 }
 
 /// A Media Data Box
@@ -806,6 +850,51 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
 
     let meta = meta.ok_or(Error::InvalidData("missing meta"))?;
 
+    // Check if primary item is a grid (tiled image)
+    let is_grid = meta
+        .item_infos
+        .iter()
+        .find(|x| x.item_id == meta.primary_item_id)
+        .map_or(false, |info| {
+            let is_g = info.item_type == b"grid";
+            if is_g {
+                log::debug!("Grid image detected: primary_item_id={}", meta.primary_item_id);
+            }
+            is_g
+        });
+
+    // Extract grid configuration if this is a grid image
+    let grid_config = if is_grid {
+        meta.properties
+            .iter()
+            .find(|prop| {
+                prop.item_id == meta.primary_item_id
+                    && matches!(prop.property, ItemProperty::ImageGrid(_))
+            })
+            .and_then(|prop| match &prop.property {
+                ItemProperty::ImageGrid(config) => Some(config.clone()),
+                _ => None,
+            })
+    } else {
+        None
+    };
+
+    // Find tile item IDs if this is a grid
+    let tile_item_ids: TryVec<u32> = if is_grid {
+        let mut ids = TryVec::new();
+        for iref in meta.item_references.iter() {
+            // Grid items reference tiles via "dimg" (derived image) type
+            if iref.from_item_id == meta.primary_item_id && iref.item_type == b"dimg" {
+                ids.push(iref.to_item_id)?;
+            }
+        }
+        log::debug!("Grid: found {} tile references, grid_config present: {}",
+                   ids.len(), grid_config.is_some());
+        ids
+    } else {
+        TryVec::new()
+    };
+
     let alpha_item_id = meta
         .item_references
         .iter()
@@ -841,34 +930,74 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
     };
 
     // load data of relevant items
-    for loc in meta.iloc_items.iter() {
-        let item_data = if loc.item_id == meta.primary_item_id {
-            &mut context.primary_item
-        } else if Some(loc.item_id) == alpha_item_id {
-            context.alpha_item.get_or_insert_with(TryVec::new)
-        } else {
-            continue;
-        };
+    // For grid images, we need to load tiles in the order specified by iref
+    if is_grid {
+        // Extract each tile in order
+        for &tile_id in tile_item_ids.iter() {
+            let mut tile_data = TryVec::new();
 
-        if loc.construction_method != ConstructionMethod::File {
-            return Err(Error::Unsupported("unsupported construction_method"));
-        }
-        for extent in loc.extents.iter() {
-            let mut found = false;
-            // try to find an overlapping mdat
-            for mdat in mdats.iter_mut() {
-                if mdat.matches_extent(&extent.extent_range) {
-                    item_data.append(&mut mdat.data)?;
-                    found = true;
-                    break;
-                } else if mdat.contains_extent(&extent.extent_range) {
-                    mdat.read_extent(&extent.extent_range, item_data)?;
-                    found = true;
-                    break;
+            if let Some(loc) = meta.iloc_items.iter().find(|loc| loc.item_id == tile_id) {
+                if loc.construction_method != ConstructionMethod::File {
+                    return Err(Error::Unsupported("unsupported construction_method"));
                 }
+                for extent in loc.extents.iter() {
+                    let mut found = false;
+                    // try to find an overlapping mdat
+                    for mdat in mdats.iter_mut() {
+                        if mdat.matches_extent(&extent.extent_range) {
+                            tile_data.append(&mut mdat.data)?;
+                            found = true;
+                            break;
+                        } else if mdat.contains_extent(&extent.extent_range) {
+                            mdat.read_extent(&extent.extent_range, &mut tile_data)?;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if !found {
+                        return Err(Error::InvalidData("iloc contains an extent that is not in mdat"));
+                    }
+                }
+            } else {
+                return Err(Error::InvalidData("grid tile not found in iloc"));
             }
-            if !found {
-                return Err(Error::InvalidData("iloc contains an extent that is not in mdat"));
+
+            context.grid_tiles.push(tile_data)?;
+        }
+
+        // Set grid_config in context
+        context.grid_config = grid_config;
+    } else {
+        // Standard single-frame AVIF: load primary_item and optional alpha_item
+        for loc in meta.iloc_items.iter() {
+            let item_data = if loc.item_id == meta.primary_item_id {
+                &mut context.primary_item
+            } else if Some(loc.item_id) == alpha_item_id {
+                context.alpha_item.get_or_insert_with(TryVec::new)
+            } else {
+                continue;
+            };
+
+            if loc.construction_method != ConstructionMethod::File {
+                return Err(Error::Unsupported("unsupported construction_method"));
+            }
+            for extent in loc.extents.iter() {
+                let mut found = false;
+                // try to find an overlapping mdat
+                for mdat in mdats.iter_mut() {
+                    if mdat.matches_extent(&extent.extent_range) {
+                        item_data.append(&mut mdat.data)?;
+                        found = true;
+                        break;
+                    } else if mdat.contains_extent(&extent.extent_range) {
+                        mdat.read_extent(&extent.extent_range, item_data)?;
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    return Err(Error::InvalidData("iloc contains an extent that is not in mdat"));
+                }
             }
         }
     }
@@ -941,12 +1070,10 @@ fn read_avif_meta<T: Read + Offset>(src: &mut BMFFBox<'_, T>, options: &ParseOpt
     let item_infos = item_infos.ok_or(Error::InvalidData("iinf missing"))?;
 
     if let Some(item_info) = item_infos.iter().find(|x| x.item_id == primary_item_id) {
-        if item_info.item_type != b"av01" {
-            if item_info.item_type == b"grid" {
-                return Err(Error::Unsupported("Grid-based AVIF collage is not supported"));
-            }
+        // Allow both "av01" (standard single-frame) and "grid" (tiled) types
+        if item_info.item_type != b"av01" && item_info.item_type != b"grid" {
             warn!("primary_item_id type: {}", item_info.item_type);
-            return Err(Error::InvalidData("primary_item_id type is not av01"));
+            return Err(Error::InvalidData("primary_item_id type is not av01 or grid"));
         }
     } else {
         return Err(Error::InvalidData("primary_item_id not present in iinf box"));
@@ -957,6 +1084,7 @@ fn read_avif_meta<T: Read + Offset>(src: &mut BMFFBox<'_, T>, options: &ParseOpt
         item_references,
         primary_item_id,
         iloc_items: iloc_items.ok_or(Error::InvalidData("iloc missing"))?,
+        item_infos,
     })
 }
 
@@ -1108,6 +1236,7 @@ fn read_iprp<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
 pub(crate) enum ItemProperty {
     Channels(ArrayVec<u8, 16>),
     AuxiliaryType(AuxiliaryTypeProperty),
+    ImageGrid(GridConfig),
     Unsupported,
 }
 
@@ -1116,6 +1245,7 @@ impl TryClone for ItemProperty {
         Ok(match self {
             Self::Channels(val) => Self::Channels(val.clone()),
             Self::AuxiliaryType(val) => Self::AuxiliaryType(val.try_clone()?),
+            Self::ImageGrid(val) => Self::ImageGrid(val.clone()),
             Self::Unsupported => Self::Unsupported,
         })
     }
@@ -1172,6 +1302,7 @@ fn read_ipco<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
         properties.push(match b.head.name {
             BoxType::PixelInformationBox => ItemProperty::Channels(read_pixi(&mut b, options)?),
             BoxType::AuxiliaryTypeProperty => ItemProperty::AuxiliaryType(read_auxc(&mut b, options)?),
+            BoxType::ImageGridBox => ItemProperty::ImageGrid(read_grid(&mut b, options)?),
             _ => {
                 skip_box_remain(&mut b)?;
                 ItemProperty::Unsupported
@@ -1239,6 +1370,35 @@ fn read_auxc<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
     let aux_data = src.read_into_try_vec()?;
 
     Ok(AuxiliaryTypeProperty { aux_data })
+}
+
+/// Parse an ImageGrid property box
+/// See ISO/IEC 23008-12:2017 § 6.6.2.3
+fn read_grid<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<GridConfig> {
+    let version = read_fullbox_version_no_flags(src, options)?;
+    if version > 0 {
+        return Err(Error::Unsupported("grid version > 0"));
+    }
+
+    let flags_byte = src.read_u8()?;
+    let rows = src.read_u8()?;
+    let columns = src.read_u8()?;
+
+    // flags & 1 determines field size: 0 = 16-bit, 1 = 32-bit
+    let (output_width, output_height) = if flags_byte & 1 == 0 {
+        // 16-bit fields
+        (u32::from(be_u16(src)?), u32::from(be_u16(src)?))
+    } else {
+        // 32-bit fields
+        (be_u32(src)?, be_u32(src)?)
+    };
+
+    Ok(GridConfig {
+        rows,
+        columns,
+        output_width,
+        output_height,
+    })
 }
 
 /// Parse an item location box inside a meta box

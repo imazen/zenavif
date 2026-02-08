@@ -62,8 +62,14 @@ fn test_dir(dir: &str) {
         let input = &mut File::open(path).expect("bad file");
         match avif_parse::read_avif(input) {
             Ok(avif) => {
-                avif.primary_item_metadata().unwrap();
-                avif.alpha_item_metadata().unwrap();
+                // Grid images have tiles instead of primary_item
+                if avif.grid_config.is_none() {
+                    avif.primary_item_metadata().unwrap();
+                    avif.alpha_item_metadata().unwrap();
+                } else {
+                    // For grid images, validate that we have tiles
+                    assert!(!avif.grid_tiles.is_empty(), "Grid image has no tiles");
+                }
             },
             Err(Error::Unsupported(why)) => log::warn!("{why}"),
             Err(err) => {

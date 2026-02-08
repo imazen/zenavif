@@ -121,6 +121,7 @@ box_database!(
     ColorInformationBox               0x636f_6c72, // "colr"
     PixelInformationBox               0x7069_7869, // "pixi"
     AuxiliaryTypeProperty             0x6175_7843, // "auxC"
+    ImageGridBox                      0x6772_6964, // "grid" - for grid/tiled images
     SampleTableBox                    0x7374_626c, // "stbl"
     SampleDescriptionBox              0x7374_7364, // "stsd"
     TimeToSampleBox                   0x7374_7473, // "stts"
