@@ -1,10 +1,11 @@
 //! Exact libyuv YUV to RGB conversion
 //!
 //! This module replicates libyuv's exact integer math for pixel-perfect matching.
-//! Constants and formulas from libyuv row_common.cc (BT.709)
+//! Currently only supports BT.709 Full Range (the most common for AVIF).
 
 use imgref::ImgVec;
 use rgb::RGB8;
+use crate::yuv_convert::{YuvRange, YuvMatrix};
 
 /// BT.709 constants from libyuv
 const YG: i32 = 18997;   // 1.164 * 64 * 256 * 256 / 257
@@ -42,8 +43,11 @@ fn yuv_pixel(y: u8, u: u8, v: u8) -> RGB8 {
     }
 }
 
-/// Convert YUV420 to RGB8 using exact libyuv math (scalar version)
-pub fn yuv420_to_rgb8_libyuv_scalar(
+/// Convert YUV420 to RGB8 using exact libyuv math
+///
+/// Currently only supports BT.709 Full Range. Falls back to float implementation
+/// for other color spaces.
+pub fn yuv420_to_rgb8(
     y_plane: &[u8],
     y_stride: usize,
     u_plane: &[u8],
@@ -52,7 +56,14 @@ pub fn yuv420_to_rgb8_libyuv_scalar(
     v_stride: usize,
     width: usize,
     height: usize,
-) -> ImgVec<RGB8> {
+    range: YuvRange,
+    matrix: YuvMatrix,
+) -> Option<ImgVec<RGB8>> {
+    // Only support BT.709 Full Range for now
+    if !matches!(range, YuvRange::Full) || !matches!(matrix, YuvMatrix::Bt709) {
+        return None;
+    }
+    
     let mut out = vec![RGB8::default(); width * height];
     
     for y in 0..height {
@@ -68,7 +79,73 @@ pub fn yuv420_to_rgb8_libyuv_scalar(
         }
     }
     
-    ImgVec::new(out, width, height)
+    Some(ImgVec::new(out, width, height))
+}
+
+/// Convert YUV422 to RGB8 using exact libyuv math
+pub fn yuv422_to_rgb8(
+    y_plane: &[u8],
+    y_stride: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+    width: usize,
+    height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+) -> Option<ImgVec<RGB8>> {
+    if !matches!(range, YuvRange::Full) || !matches!(matrix, YuvMatrix::Bt709) {
+        return None;
+    }
+    
+    let mut out = vec![RGB8::default(); width * height];
+    
+    for y in 0..height {
+        for x in 0..width {
+            let chroma_x = x / 2;
+            
+            let y_val = y_plane[y * y_stride + x];
+            let u_val = u_plane[y * u_stride + chroma_x];
+            let v_val = v_plane[y * v_stride + chroma_x];
+            
+            out[y * width + x] = yuv_pixel(y_val, u_val, v_val);
+        }
+    }
+    
+    Some(ImgVec::new(out, width, height))
+}
+
+/// Convert YUV444 to RGB8 using exact libyuv math
+pub fn yuv444_to_rgb8(
+    y_plane: &[u8],
+    y_stride: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+    width: usize,
+    height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+) -> Option<ImgVec<RGB8>> {
+    if !matches!(range, YuvRange::Full) || !matches!(matrix, YuvMatrix::Bt709) {
+        return None;
+    }
+    
+    let mut out = vec![RGB8::default(); width * height];
+    
+    for y in 0..height {
+        for x in 0..width {
+            let y_val = y_plane[y * y_stride + x];
+            let u_val = u_plane[y * u_stride + x];
+            let v_val = v_plane[y * v_stride + x];
+            
+            out[y * width + x] = yuv_pixel(y_val, u_val, v_val);
+        }
+    }
+    
+    Some(ImgVec::new(out, width, height))
 }
 
 #[cfg(test)]
@@ -95,12 +172,14 @@ mod tests {
         let u_plane = vec![100u8; (width/2) * (height/2)];
         let v_plane = vec![150u8; (width/2) * (height/2)];
         
-        let result = yuv420_to_rgb8_libyuv_scalar(
+        let result = yuv420_to_rgb8(
             &y_plane, width,
             &u_plane, width / 2,
             &v_plane, width / 2,
             width, height,
-        );
+            YuvRange::Full,
+            YuvMatrix::Bt709,
+        ).unwrap();
         
         // All pixels should be R=230, G=185, B=135
         for pixel in result.buf() {
