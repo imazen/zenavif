@@ -595,6 +595,7 @@ impl ManagedAvifDecoder {
             matrix_coefficients: convert_matrix(color.matrix_coefficients),
             color_range: convert_color_range(color.color_range),
             chroma_sampling: convert_chroma_sampling(layout),
+            icc_profile: None,
         };
 
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;

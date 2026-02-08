@@ -177,6 +177,8 @@ pub struct ImageInfo {
     pub color_range: ColorRange,
     /// Chroma subsampling
     pub chroma_sampling: ChromaSampling,
+    /// ICC color profile from the container's `colr` box, if present
+    pub icc_profile: Option<Vec<u8>>,
 }
 
 impl Default for ImageInfo {
@@ -193,6 +195,7 @@ impl Default for ImageInfo {
             matrix_coefficients: MatrixCoefficients::default(),
             color_range: ColorRange::default(),
             chroma_sampling: ChromaSampling::Cs420,
+            icc_profile: None,
         }
     }
 }
