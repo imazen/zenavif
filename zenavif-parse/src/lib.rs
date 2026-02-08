@@ -110,12 +110,7 @@ impl<T: Read> Read for OffsetReader<'_, T> {
 
 #[doc(hidden)]
 pub type TryVec<T> = fallible_collections::TryVec<T>;
-#[doc(hidden)]
-pub type TryString = fallible_collections::TryVec<u8>;
-#[doc(hidden)]
-pub type TryHashMap<K, V> = std::collections::HashMap<K, V>;
-#[doc(hidden)]
-pub type TryBox<T> = fallible_collections::TryBox<T>;
+type TryString = fallible_collections::TryVec<u8>;
 
 // To ensure we don't use stdlib allocating types by accident
 #[allow(dead_code)]
@@ -1820,22 +1815,6 @@ impl<'a> ResourceTracker<'a> {
         Ok(())
     }
 
-    #[allow(dead_code)] // Used by v2 AvifParser constructors
-    fn validate_frame_megapixels(&self, width: u32, height: u32) -> Result<()> {
-        if let Some(limit) = self.config.frame_megapixels_limit {
-            let megapixels = (width as u64)
-                .checked_mul(height as u64)
-                .ok_or(Error::InvalidData("dimension overflow"))?
-                / 1_000_000;
-
-            if megapixels > limit as u64 {
-                return Err(Error::ResourceLimitExceeded("frame megapixels limit exceeded"));
-            }
-        }
-
-        Ok(())
-    }
-
     fn validate_animation_frames(&self, count: u32) -> Result<()> {
         if let Some(limit) = self.config.max_animation_frames {
             if count > limit {
@@ -2563,15 +2542,13 @@ fn read_pixi<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
 }
 
 #[derive(Debug, PartialEq)]
-#[doc(hidden)]
-// this wasn't supposed to be public
-pub struct AuxiliaryTypeProperty {
+struct AuxiliaryTypeProperty {
     aux_data: TryString,
 }
 
 impl AuxiliaryTypeProperty {
     #[must_use]
-    pub fn type_subtype(&self) -> (&[u8], &[u8]) {
+    fn type_subtype(&self) -> (&[u8], &[u8]) {
         let split = self.aux_data.iter().position(|&b| b == b'\0')
             .map(|pos| self.aux_data.split_at(pos));
         if let Some((aux_type, rest)) = split {
