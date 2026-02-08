@@ -397,6 +397,70 @@ pub struct MasteringDisplayColourVolume {
     pub min_luminance: u32,
 }
 
+/// Content colour volume from the `cclv` property box.
+///
+/// Describes the colour volume of the content. Derived from H.265 D.2.40 /
+/// ITU-T H.274. All fields are optional, controlled by presence flags.
+/// See ISOBMFF § 12.1.5.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContentColourVolume {
+    /// Content colour primaries (x, y) for 3 primaries, as signed i32.
+    /// Present only if `ccv_primaries_present_flag` was set.
+    pub primaries: Option<[(i32, i32); 3]>,
+    /// Minimum luminance value. Present only if flag was set.
+    pub min_luminance: Option<u32>,
+    /// Maximum luminance value. Present only if flag was set.
+    pub max_luminance: Option<u32>,
+    /// Average luminance value. Present only if flag was set.
+    pub avg_luminance: Option<u32>,
+}
+
+/// Ambient viewing environment from the `amve` property box.
+///
+/// Describes the ambient viewing conditions under which the content
+/// was authored. See ISOBMFF § 12.1.5 / H.265 D.2.39.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AmbientViewingEnvironment {
+    /// Ambient illuminance in units of 1/10000 cd/m²
+    pub ambient_illuminance: u32,
+    /// Ambient light x chromaticity (CIE 1931), units of 1/50000
+    pub ambient_light_x: u16,
+    /// Ambient light y chromaticity (CIE 1931), units of 1/50000
+    pub ambient_light_y: u16,
+}
+
+/// Operating point selector from the `a1op` property box.
+///
+/// Selects which AV1 operating point to decode for multi-operating-point images.
+/// See AVIF § 4.3.4.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OperatingPointSelector {
+    /// Operating point index (0..31)
+    pub op_index: u8,
+}
+
+/// Layer selector from the `lsel` property box.
+///
+/// Selects which spatial layer to render for layered/progressive images.
+/// See HEIF (ISO 23008-12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LayerSelector {
+    /// Layer ID to render (0-3), or 0xFFFF for all layers (progressive)
+    pub layer_id: u16,
+}
+
+/// AV1 layered image indexing from the `a1lx` property box.
+///
+/// Provides byte sizes for the first 3 layers so decoders can seek
+/// to a specific layer without parsing the full bitstream.
+/// See AVIF § 4.3.6.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AV1LayeredImageIndexing {
+    /// Byte sizes of layers 0, 1, 2. The last layer's size is implicit
+    /// (total item size minus the sum of these three).
+    pub layer_sizes: [u32; 3],
+}
+
 /// Options for parsing AVIF files
 ///
 /// Prefer using [`DecodeConfig::lenient()`] with [`AvifParser`] instead.
@@ -686,6 +750,27 @@ pub struct AvifData {
 
     /// Mastering display colour volume from the container's `mdcv` property.
     pub mastering_display: Option<MasteringDisplayColourVolume>,
+
+    /// Content colour volume from the container's `cclv` property.
+    pub content_colour_volume: Option<ContentColourVolume>,
+
+    /// Ambient viewing environment from the container's `amve` property.
+    pub ambient_viewing: Option<AmbientViewingEnvironment>,
+
+    /// Operating point selector from the container's `a1op` property.
+    pub operating_point: Option<OperatingPointSelector>,
+
+    /// Layer selector from the container's `lsel` property.
+    pub layer_selector: Option<LayerSelector>,
+
+    /// AV1 layered image indexing from the container's `a1lx` property.
+    pub layered_image_indexing: Option<AV1LayeredImageIndexing>,
+
+    /// Major brand from the `ftyp` box (e.g., `*b"avif"` or `*b"avis"`).
+    pub major_brand: [u8; 4],
+
+    /// Compatible brands from the `ftyp` box.
+    pub compatible_brands: std::vec::Vec<[u8; 4]>,
 }
 
 // # Memory Usage
@@ -830,6 +915,13 @@ pub struct AvifParser<'data> {
     pixel_aspect_ratio: Option<PixelAspectRatio>,
     content_light_level: Option<ContentLightLevel>,
     mastering_display: Option<MasteringDisplayColourVolume>,
+    content_colour_volume: Option<ContentColourVolume>,
+    ambient_viewing: Option<AmbientViewingEnvironment>,
+    operating_point: Option<OperatingPointSelector>,
+    layer_selector: Option<LayerSelector>,
+    layered_image_indexing: Option<AV1LayeredImageIndexing>,
+    major_brand: [u8; 4],
+    compatible_brands: std::vec::Vec<[u8; 4]>,
 }
 
 struct AnimationParserData {
@@ -850,6 +942,8 @@ struct ParsedStructure {
     meta: AvifInternalMeta,
     mdat_bounds: TryVec<MdatBounds>,
     animation_data: Option<(u32, SampleTable, u32)>,
+    major_brand: [u8; 4],
+    compatible_brands: std::vec::Vec<[u8; 4]>,
 }
 
 impl<'data> AvifParser<'data> {
@@ -922,16 +1016,21 @@ impl<'data> AvifParser<'data> {
         let mut iter = BoxIter::new(&mut f);
 
         // 'ftyp' box must occur first; see ISO 14496-12:2015 § 4.3.1
-        if let Some(mut b) = iter.next_box()? {
+        let (major_brand, compatible_brands) = if let Some(mut b) = iter.next_box()? {
             if b.head.name == BoxType::FileTypeBox {
                 let ftyp = read_ftyp(&mut b)?;
                 if ftyp.major_brand != b"avif" && ftyp.major_brand != b"avis" {
                     return Err(Error::InvalidData("ftyp must be 'avif' or 'avis'"));
                 }
+                let major = ftyp.major_brand.value;
+                let compat = ftyp.compatible_brands.iter().map(|b| b.value).collect();
+                (major, compat)
             } else {
                 return Err(Error::InvalidData("'ftyp' box must occur first"));
             }
-        }
+        } else {
+            return Err(Error::InvalidData("'ftyp' box must occur first"));
+        };
 
         let mut meta = None;
         let mut mdat_bounds = TryVec::new();
@@ -971,7 +1070,7 @@ impl<'data> AvifParser<'data> {
 
         let meta = meta.ok_or(Error::InvalidData("missing meta"))?;
 
-        Ok(ParsedStructure { meta, mdat_bounds, animation_data })
+        Ok(ParsedStructure { meta, mdat_bounds, animation_data, major_brand, compatible_brands })
     }
 
     /// Build an AvifParser from raw bytes + parsed structure.
@@ -1076,6 +1175,11 @@ impl<'data> AvifParser<'data> {
         let pixel_aspect_ratio = find_prop!(PixelAspectRatio);
         let content_light_level = find_prop!(ContentLightLevel);
         let mastering_display = find_prop!(MasteringDisplayColourVolume);
+        let content_colour_volume = find_prop!(ContentColourVolume);
+        let ambient_viewing = find_prop!(AmbientViewingEnvironment);
+        let operating_point = find_prop!(OperatingPointSelector);
+        let layer_selector = find_prop!(LayerSelector);
+        let layered_image_indexing = find_prop!(AV1LayeredImageIndexing);
 
         // Store animation metadata if present
         let animation_data = if let Some((media_timescale, sample_table, loop_count)) = parsed.animation_data {
@@ -1112,6 +1216,13 @@ impl<'data> AvifParser<'data> {
             pixel_aspect_ratio,
             content_light_level,
             mastering_display,
+            content_colour_volume,
+            ambient_viewing,
+            operating_point,
+            layer_selector,
+            layered_image_indexing,
+            major_brand: parsed.major_brand,
+            compatible_brands: parsed.compatible_brands,
         })
     }
 
@@ -1498,6 +1609,41 @@ impl<'data> AvifParser<'data> {
         self.mastering_display.as_ref()
     }
 
+    /// Get content colour volume for the primary item, if present.
+    pub fn content_colour_volume(&self) -> Option<&ContentColourVolume> {
+        self.content_colour_volume.as_ref()
+    }
+
+    /// Get ambient viewing environment for the primary item, if present.
+    pub fn ambient_viewing(&self) -> Option<&AmbientViewingEnvironment> {
+        self.ambient_viewing.as_ref()
+    }
+
+    /// Get operating point selector for the primary item, if present.
+    pub fn operating_point(&self) -> Option<&OperatingPointSelector> {
+        self.operating_point.as_ref()
+    }
+
+    /// Get layer selector for the primary item, if present.
+    pub fn layer_selector(&self) -> Option<&LayerSelector> {
+        self.layer_selector.as_ref()
+    }
+
+    /// Get AV1 layered image indexing for the primary item, if present.
+    pub fn layered_image_indexing(&self) -> Option<&AV1LayeredImageIndexing> {
+        self.layered_image_indexing.as_ref()
+    }
+
+    /// Get the major brand from the `ftyp` box (e.g., `*b"avif"` or `*b"avis"`).
+    pub fn major_brand(&self) -> &[u8; 4] {
+        &self.major_brand
+    }
+
+    /// Get the compatible brands from the `ftyp` box.
+    pub fn compatible_brands(&self) -> &[[u8; 4]] {
+        &self.compatible_brands
+    }
+
     /// Parse AV1 metadata from the primary item.
     pub fn primary_metadata(&self) -> Result<AV1Metadata> {
         let data = self.primary_data()?;
@@ -1577,6 +1723,13 @@ impl<'data> AvifParser<'data> {
             pixel_aspect_ratio: self.pixel_aspect_ratio,
             content_light_level: self.content_light_level,
             mastering_display: self.mastering_display,
+            content_colour_volume: self.content_colour_volume,
+            ambient_viewing: self.ambient_viewing,
+            operating_point: self.operating_point,
+            layer_selector: self.layer_selector,
+            layered_image_indexing: self.layered_image_indexing,
+            major_brand: self.major_brand,
+            compatible_brands: self.compatible_brands.clone(),
         })
     }
 }
@@ -2116,7 +2269,7 @@ pub fn read_avif_with_config<T: Read>(
     let mut iter = BoxIter::new(&mut f);
 
     // 'ftyp' box must occur first; see ISO 14496-12:2015 § 4.3.1
-    if let Some(mut b) = iter.next_box()? {
+    let (major_brand, compatible_brands) = if let Some(mut b) = iter.next_box()? {
         if b.head.name == BoxType::FileTypeBox {
             let ftyp = read_ftyp(&mut b)?;
             // Accept both 'avif' (single-frame) and 'avis' (animated) brands
@@ -2124,11 +2277,15 @@ pub fn read_avif_with_config<T: Read>(
                 warn!("major_brand: {}", ftyp.major_brand);
                 return Err(Error::InvalidData("ftyp must be 'avif' or 'avis'"));
             }
-            let _is_animated = ftyp.major_brand == b"avis";
+            let major = ftyp.major_brand.value;
+            let compat = ftyp.compatible_brands.iter().map(|b| b.value).collect();
+            (major, compat)
         } else {
             return Err(Error::InvalidData("'ftyp' box must occur first"));
         }
-    }
+    } else {
+        return Err(Error::InvalidData("'ftyp' box must occur first"));
+    };
 
     let mut meta = None;
     let mut mdats = TryVec::new();
@@ -2337,6 +2494,11 @@ pub fn read_avif_with_config<T: Read>(
     let pixel_aspect_ratio = find_prop!(PixelAspectRatio);
     let content_light_level = find_prop!(ContentLightLevel);
     let mastering_display = find_prop!(MasteringDisplayColourVolume);
+    let content_colour_volume = find_prop!(ContentColourVolume);
+    let ambient_viewing = find_prop!(AmbientViewingEnvironment);
+    let operating_point = find_prop!(OperatingPointSelector);
+    let layer_selector = find_prop!(LayerSelector);
+    let layered_image_indexing = find_prop!(AV1LayeredImageIndexing);
 
     let mut context = AvifData {
         premultiplied_alpha: alpha_item_id.is_some_and(|alpha_item_id| {
@@ -2354,6 +2516,13 @@ pub fn read_avif_with_config<T: Read>(
         pixel_aspect_ratio,
         content_light_level,
         mastering_display,
+        content_colour_volume,
+        ambient_viewing,
+        operating_point,
+        layer_selector,
+        layered_image_indexing,
+        major_brand,
+        compatible_brands,
         ..Default::default()
     };
 
@@ -2552,6 +2721,13 @@ fn read_avif_meta<T: Read + Offset>(src: &mut BMFFBox<'_, T>, options: &ParseOpt
                 }
                 idat = Some(b.read_into_try_vec()?);
             },
+            BoxType::HandlerBox => {
+                let hdlr = read_hdlr(&mut b)?;
+                if hdlr.handler_type != b"pict" {
+                    warn!("hdlr handler_type: {}", hdlr.handler_type);
+                    return Err(Error::InvalidData("meta handler_type must be 'pict' for AVIF"));
+                }
+            },
             _ => skip_box_content(&mut b)?,
         }
 
@@ -2579,6 +2755,21 @@ fn read_avif_meta<T: Read + Offset>(src: &mut BMFFBox<'_, T>, options: &ParseOpt
         iloc_items: iloc_items.ok_or(Error::InvalidData("iloc missing"))?,
         item_infos,
         idat,
+    })
+}
+
+/// Parse a Handler Reference Box
+/// See ISO 14496-12:2015 § 8.4.3
+fn read_hdlr<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<HandlerBox> {
+    let (_version, _flags) = read_fullbox_extra(src)?;
+    // pre_defined (4 bytes)
+    skip(src, 4)?;
+    // handler_type (4 bytes)
+    let handler_type = be_u32(src)?;
+    // reserved (3 × 4 bytes) + name (variable) — skip the rest
+    skip_box_remain(src)?;
+    Ok(HandlerBox {
+        handler_type: FourCC::from(handler_type),
     })
 }
 
@@ -2748,6 +2939,11 @@ pub(crate) enum ItemProperty {
     PixelAspectRatio(PixelAspectRatio),
     ContentLightLevel(ContentLightLevel),
     MasteringDisplayColourVolume(MasteringDisplayColourVolume),
+    ContentColourVolume(ContentColourVolume),
+    AmbientViewingEnvironment(AmbientViewingEnvironment),
+    OperatingPointSelector(OperatingPointSelector),
+    LayerSelector(LayerSelector),
+    AV1LayeredImageIndexing(AV1LayeredImageIndexing),
     Unsupported,
 }
 
@@ -2766,6 +2962,11 @@ impl TryClone for ItemProperty {
             Self::PixelAspectRatio(val) => Self::PixelAspectRatio(*val),
             Self::ContentLightLevel(val) => Self::ContentLightLevel(*val),
             Self::MasteringDisplayColourVolume(val) => Self::MasteringDisplayColourVolume(*val),
+            Self::ContentColourVolume(val) => Self::ContentColourVolume(*val),
+            Self::AmbientViewingEnvironment(val) => Self::AmbientViewingEnvironment(*val),
+            Self::OperatingPointSelector(val) => Self::OperatingPointSelector(*val),
+            Self::LayerSelector(val) => Self::LayerSelector(*val),
+            Self::AV1LayeredImageIndexing(val) => Self::AV1LayeredImageIndexing(*val),
             Self::Unsupported => Self::Unsupported,
         })
     }
@@ -2837,6 +3038,11 @@ fn read_ipco<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
             BoxType::PixelAspectRatioBox => ItemProperty::PixelAspectRatio(read_pasp(&mut b)?),
             BoxType::ContentLightLevelBox => ItemProperty::ContentLightLevel(read_clli(&mut b)?),
             BoxType::MasteringDisplayColourVolumeBox => ItemProperty::MasteringDisplayColourVolume(read_mdcv(&mut b)?),
+            BoxType::ContentColourVolumeBox => ItemProperty::ContentColourVolume(read_cclv(&mut b)?),
+            BoxType::AmbientViewingEnvironmentBox => ItemProperty::AmbientViewingEnvironment(read_amve(&mut b)?),
+            BoxType::OperatingPointSelectorBox => ItemProperty::OperatingPointSelector(read_a1op(&mut b)?),
+            BoxType::LayerSelectorBox => ItemProperty::LayerSelector(read_lsel(&mut b)?),
+            BoxType::AV1LayeredImageIndexingBox => ItemProperty::AV1LayeredImageIndexing(read_a1lx(&mut b)?),
             _ => {
                 skip_box_remain(&mut b)?;
                 ItemProperty::Unsupported
@@ -3081,6 +3287,85 @@ fn read_mdcv<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<MasteringDisplayColour
         max_luminance,
         min_luminance,
     })
+}
+
+/// Parse a Content Colour Volume property box.
+/// See ISOBMFF § 12.1.5 / H.265 D.2.40. NOT a FullBox.
+fn read_cclv<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<ContentColourVolume> {
+    let flags = src.read_u8()?;
+    let primaries_present = flags & 0x20 != 0;
+    let min_lum_present = flags & 0x10 != 0;
+    let max_lum_present = flags & 0x08 != 0;
+    let avg_lum_present = flags & 0x04 != 0;
+
+    let primaries = if primaries_present {
+        Some([
+            (be_i32(src)?, be_i32(src)?),
+            (be_i32(src)?, be_i32(src)?),
+            (be_i32(src)?, be_i32(src)?),
+        ])
+    } else {
+        None
+    };
+
+    let min_luminance = if min_lum_present { Some(be_u32(src)?) } else { None };
+    let max_luminance = if max_lum_present { Some(be_u32(src)?) } else { None };
+    let avg_luminance = if avg_lum_present { Some(be_u32(src)?) } else { None };
+
+    skip_box_remain(src)?;
+    Ok(ContentColourVolume {
+        primaries,
+        min_luminance,
+        max_luminance,
+        avg_luminance,
+    })
+}
+
+/// Parse an Ambient Viewing Environment property box.
+/// See ISOBMFF § 12.1.5 / H.265 D.2.39. NOT a FullBox.
+fn read_amve<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<AmbientViewingEnvironment> {
+    let ambient_illuminance = be_u32(src)?;
+    let ambient_light_x = be_u16(src)?;
+    let ambient_light_y = be_u16(src)?;
+    skip_box_remain(src)?;
+    Ok(AmbientViewingEnvironment {
+        ambient_illuminance,
+        ambient_light_x,
+        ambient_light_y,
+    })
+}
+
+/// Parse an Operating Point Selector property box.
+/// See AVIF § 4.3.4. NOT a FullBox.
+fn read_a1op<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<OperatingPointSelector> {
+    let op_index = src.read_u8()?;
+    if op_index > 31 {
+        return Err(Error::InvalidData("a1op op_index must be 0..31"));
+    }
+    skip_box_remain(src)?;
+    Ok(OperatingPointSelector { op_index })
+}
+
+/// Parse a Layer Selector property box.
+/// See HEIF (ISO 23008-12). NOT a FullBox.
+fn read_lsel<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<LayerSelector> {
+    let layer_id = be_u16(src)?;
+    skip_box_remain(src)?;
+    Ok(LayerSelector { layer_id })
+}
+
+/// Parse an AV1 Layered Image Indexing property box.
+/// See AVIF § 4.3.6. NOT a FullBox.
+fn read_a1lx<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<AV1LayeredImageIndexing> {
+    let flags = src.read_u8()?;
+    let large_size = flags & 0x01 != 0;
+    let layer_sizes = if large_size {
+        [be_u32(src)?, be_u32(src)?, be_u32(src)?]
+    } else {
+        [u32::from(be_u16(src)?), u32::from(be_u16(src)?), u32::from(be_u16(src)?)]
+    };
+    skip_box_remain(src)?;
+    Ok(AV1LayeredImageIndexing { layer_sizes })
 }
 
 /// Parse an Image Spatial Extents property box

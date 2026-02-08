@@ -568,6 +568,102 @@ fn eager_hdr_metadata() {
     assert_eq!(mdcv.min_luminance, 200_000);
 }
 
+// ============================================================================
+// Layered image property tests
+// ============================================================================
+
+#[test]
+fn parser_operating_point_selector() {
+    let bytes = std::fs::read("av1-avif/testFiles/Xiph/quebec_3layer_op2.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let a1op = parser.operating_point().expect("a1op should be present");
+    assert_eq!(a1op.op_index, 2);
+}
+
+#[test]
+fn parser_layer_selector() {
+    // quebec_3layer_op2 has lsel on the primary item
+    let bytes = std::fs::read("av1-avif/testFiles/Xiph/quebec_3layer_op2.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let lsel = parser.layer_selector().expect("lsel should be present");
+    assert_eq!(lsel.layer_id, 0xFFFF); // progressive (all layers)
+}
+
+#[test]
+fn parser_a1op_and_lsel_on_primary() {
+    // Apple a1op_lsel file has both on the primary item
+    let bytes = std::fs::read("av1-avif/testFiles/Apple/multilayer_examples/animals_00_multilayer_a1op_lsel.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let a1op = parser.operating_point().expect("a1op should be present");
+    assert_eq!(a1op.op_index, 0);
+
+    let lsel = parser.layer_selector().expect("lsel should be present");
+    assert_eq!(lsel.layer_id, 1);
+}
+
+#[test]
+fn parser_a1lx_on_grid_tiles() {
+    // In grid_a1lx file, a1lx and lsel are on tile items (not primary).
+    // Primary item (grid) should NOT have a1lx, but the file should parse without errors.
+    let bytes = std::fs::read("av1-avif/testFiles/Apple/multilayer_examples/animals_00_multilayer_grid_a1lx.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    // a1lx is on tiles, not primary
+    assert!(parser.layered_image_indexing().is_none());
+    // lsel is also on tiles in this file
+    assert!(parser.layer_selector().is_none());
+}
+
+// ============================================================================
+// Brand / ftyp tests
+// ============================================================================
+
+#[test]
+fn parser_brands_avif() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    assert_eq!(parser.major_brand(), b"avif");
+    let compat = parser.compatible_brands();
+    assert!(compat.iter().any(|b| b == b"miaf"), "should have miaf brand");
+    assert!(compat.iter().any(|b| b == b"avif"), "should have avif brand");
+}
+
+#[test]
+fn parser_brands_avis() {
+    let bytes = std::fs::read(ANIMATED_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    assert_eq!(parser.major_brand(), b"avis");
+    let compat = parser.compatible_brands();
+    assert!(compat.iter().any(|b| b == b"avis"), "should have avis brand");
+    assert!(compat.iter().any(|b| b == b"miaf"), "should have miaf brand");
+    assert!(compat.iter().any(|b| b == b"MA1B"), "should have MA1B brand");
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn eager_brands() {
+    let input = &mut std::fs::File::open(IMAGE_AVIF).expect("Unknown file");
+    let context = zenavif_parse::read_avif(input).expect("read_avif failed");
+
+    assert_eq!(context.major_brand, *b"avif");
+    assert!(context.compatible_brands.iter().any(|b| b == b"miaf"));
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn eager_layered_properties() {
+    let input = &mut std::fs::File::open("av1-avif/testFiles/Xiph/quebec_3layer_op2.avif").expect("Unknown file");
+    let context = zenavif_parse::read_avif(input).expect("read_avif failed");
+
+    let a1op = context.operating_point.expect("a1op should be present");
+    assert_eq!(a1op.op_index, 2);
+}
+
 #[test]
 fn parser_alpha_data() {
     let bytes = std::fs::read(IMAGE_AVIF_ALPHA).expect("read file");
