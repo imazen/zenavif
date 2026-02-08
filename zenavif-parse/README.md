@@ -105,9 +105,14 @@ let parser = AvifParser::from_bytes_with_config(
 
 Defaults: 1GB peak memory, 512MP total, 10k frames, 1k tiles. Use `DecodeConfig::unlimited()` to disable all limits.
 
-### Legacy API
+### Legacy API (feature = "eager")
 
-The original `read_avif()` function and `AvifData` struct still work. `parser.to_avif_data()` converts if you need to bridge old code.
+The original `read_avif()` / `AvifData` API and C FFI are behind the `eager` feature flag, off by default.
+
+```toml
+[dependencies]
+zenavif-parse = { version = "0.1", features = ["eager"] }
+```
 
 ```rust
 use zenavif_parse::read_avif;

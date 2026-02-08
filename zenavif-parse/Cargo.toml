@@ -42,6 +42,7 @@ eager = []
 maintenance = { status = "passively-maintained" }
 
 [package.metadata.docs.rs]
+all-features = true
 targets = ["x86_64-unknown-linux-gnu"]
 
 [[example]]

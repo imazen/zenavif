@@ -587,7 +587,9 @@ impl AvifData {
     }
 }
 
-/// See [`AvifData::primary_item_metadata()`]
+/// AV1 sequence header metadata parsed from an OBU bitstream.
+///
+/// See [`AvifParser::primary_metadata()`] and [`AV1Metadata::parse_av1_bitstream()`].
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct AV1Metadata {
