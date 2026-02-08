@@ -1209,6 +1209,137 @@ impl AvifParser {
     pub fn can_zero_copy_primary(&self) -> bool {
         self.primary_item_slice().is_ok()
     }
+
+    // ========================================
+    // Iterator API (idiomatic Rust)
+    // ========================================
+
+    /// Iterate over animation frames (copying)
+    ///
+    /// Returns an iterator that extracts frames on-demand. Each frame is
+    /// copied into owned memory.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use avif_parse::AvifParser;
+    /// # use std::fs::File;
+    /// let parser = AvifParser::from_reader(&mut File::open("animation.avifs")?)?;
+    /// for frame in parser.frames() {
+    ///     let frame = frame?;
+    ///     println!("Frame: {} bytes, {}ms", frame.data.len(), frame.duration_ms);
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn frames(&self) -> FrameIterator<'_> {
+        let count = self
+            .animation_info()
+            .map(|info| info.frame_count)
+            .unwrap_or(0);
+        FrameIterator {
+            parser: self,
+            index: 0,
+            count,
+        }
+    }
+
+    /// Iterate over animation frames (returns Cow for zero-copy when possible)
+    ///
+    /// Returns an iterator that provides `Cow<[u8]>` for each frame, automatically
+    /// choosing zero-copy (borrowed) or owned based on extent structure.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use avif_parse::AvifParser;
+    /// # use std::fs::File;
+    /// let parser = AvifParser::from_reader(&mut File::open("animation.avifs")?)?;
+    /// for (i, data) in parser.frame_data_iter().enumerate() {
+    ///     let data = data?;
+    ///     println!("Frame {}: {} bytes ({})",
+    ///         i, data.len(),
+    ///         if matches!(data, std::borrow::Cow::Borrowed(_)) { "zero-copy" } else { "copied" }
+    ///     );
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn frame_data_iter(&self) -> FrameDataIterator<'_> {
+        let count = self
+            .animation_info()
+            .map(|info| info.frame_count)
+            .unwrap_or(0);
+        FrameDataIterator {
+            parser: self,
+            index: 0,
+            count,
+        }
+    }
+}
+
+/// Iterator over animation frames (copying)
+///
+/// Created by [`AvifParser::frames()`]. Extracts frames on-demand.
+pub struct FrameIterator<'a> {
+    parser: &'a AvifParser,
+    index: usize,
+    count: usize,
+}
+
+impl<'a> Iterator for FrameIterator<'a> {
+    type Item = Result<AnimationFrame>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.count {
+            return None;
+        }
+        let result = self.parser.animation_frame(self.index);
+        self.index += 1;
+        Some(result)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.count.saturating_sub(self.index);
+        (remaining, Some(remaining))
+    }
+}
+
+impl<'a> ExactSizeIterator for FrameIterator<'a> {
+    fn len(&self) -> usize {
+        self.count.saturating_sub(self.index)
+    }
+}
+
+/// Iterator over animation frame data (Cow for zero-copy when possible)
+///
+/// Created by [`AvifParser::frame_data_iter()`]. Returns `Cow<[u8]>` for each frame.
+pub struct FrameDataIterator<'a> {
+    parser: &'a AvifParser,
+    index: usize,
+    count: usize,
+}
+
+impl<'a> Iterator for FrameDataIterator<'a> {
+    type Item = Result<Cow<'a, [u8]>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.count {
+            return None;
+        }
+        let result = self.parser.frame_data(self.index);
+        self.index += 1;
+        Some(result)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.count.saturating_sub(self.index);
+        (remaining, Some(remaining))
+    }
+}
+
+impl<'a> ExactSizeIterator for FrameDataIterator<'a> {
+    fn len(&self) -> usize {
+        self.count.saturating_sub(self.index)
+    }
 }
 
 struct AvifInternalMeta {
