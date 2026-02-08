@@ -264,9 +264,215 @@ impl ManagedAvifDecoder {
             tile_height * rows
         };
 
-        // For now, just decode the first tile as a placeholder
-        // TODO: Actually stitch all tiles together
-        self.convert_to_image(tiles.into_iter().next().unwrap(), None, stop)
+        // Convert each tile to RGB/RGBA
+        let mut tile_images = Vec::new();
+        for tile in tiles {
+            let img = self.convert_to_image(tile, None, stop)?;
+            tile_images.push(img);
+        }
+
+        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+
+        // Stitch tiles based on bit depth and alpha
+        match &tile_images[0] {
+            DecodedImage::Rgb8(_) => self.stitch_rgb8(tile_images, rows, cols, output_width, output_height),
+            DecodedImage::Rgba8(_) => self.stitch_rgba8(tile_images, rows, cols, output_width, output_height),
+            DecodedImage::Rgb16(_) => self.stitch_rgb16(tile_images, rows, cols, output_width, output_height),
+            DecodedImage::Rgba16(_) => self.stitch_rgba16(tile_images, rows, cols, output_width, output_height),
+            DecodedImage::Gray8(_) => self.stitch_gray8(tile_images, rows, cols, output_width, output_height),
+            DecodedImage::Gray16(_) => self.stitch_gray16(tile_images, rows, cols, output_width, output_height),
+        }
+    }
+
+    /// Stitch RGB8 tiles into final image
+    fn stitch_rgb8(
+        &self,
+        tiles: Vec<DecodedImage>,
+        rows: usize,
+        cols: usize,
+        width: usize,
+        height: usize,
+    ) -> Result<DecodedImage> {
+        use rgb::RGB8;
+        let mut output = imgref::ImgVec::new(vec![RGB8::default(); width * height], width, height);
+
+        for (tile_idx, tile) in tiles.iter().enumerate() {
+            if let DecodedImage::Rgb8(tile_img) = tile {
+                let row = tile_idx / cols;
+                let col = tile_idx % cols;
+                let tile_w = tile_img.width();
+                let tile_h = tile_img.height();
+                let dst_x = col * tile_w;
+                let dst_y = row * tile_h;
+
+                // Copy tile data to output
+                for y in 0..tile_h.min(height - dst_y) {
+                    for x in 0..tile_w.min(width - dst_x) {
+                        output[(dst_x + x, dst_y + y)] = tile_img[(x, y)];
+                    }
+                }
+            }
+        }
+
+        Ok(DecodedImage::Rgb8(output))
+    }
+
+    /// Stitch RGBA8 tiles into final image
+    fn stitch_rgba8(
+        &self,
+        tiles: Vec<DecodedImage>,
+        rows: usize,
+        cols: usize,
+        width: usize,
+        height: usize,
+    ) -> Result<DecodedImage> {
+        use rgb::RGBA8;
+        let mut output = imgref::ImgVec::new(vec![RGBA8::default(); width * height], width, height);
+
+        for (tile_idx, tile) in tiles.iter().enumerate() {
+            if let DecodedImage::Rgba8(tile_img) = tile {
+                let row = tile_idx / cols;
+                let col = tile_idx % cols;
+                let tile_w = tile_img.width();
+                let tile_h = tile_img.height();
+                let dst_x = col * tile_w;
+                let dst_y = row * tile_h;
+
+                for y in 0..tile_h.min(height - dst_y) {
+                    for x in 0..tile_w.min(width - dst_x) {
+                        output[(dst_x + x, dst_y + y)] = tile_img[(x, y)];
+                    }
+                }
+            }
+        }
+
+        Ok(DecodedImage::Rgba8(output))
+    }
+
+    /// Stitch RGB16 tiles into final image
+    fn stitch_rgb16(
+        &self,
+        tiles: Vec<DecodedImage>,
+        rows: usize,
+        cols: usize,
+        width: usize,
+        height: usize,
+    ) -> Result<DecodedImage> {
+        use rgb::RGB16;
+        let mut output = imgref::ImgVec::new(vec![RGB16::default(); width * height], width, height);
+
+        for (tile_idx, tile) in tiles.iter().enumerate() {
+            if let DecodedImage::Rgb16(tile_img) = tile {
+                let row = tile_idx / cols;
+                let col = tile_idx % cols;
+                let tile_w = tile_img.width();
+                let tile_h = tile_img.height();
+                let dst_x = col * tile_w;
+                let dst_y = row * tile_h;
+
+                for y in 0..tile_h.min(height - dst_y) {
+                    for x in 0..tile_w.min(width - dst_x) {
+                        output[(dst_x + x, dst_y + y)] = tile_img[(x, y)];
+                    }
+                }
+            }
+        }
+
+        Ok(DecodedImage::Rgb16(output))
+    }
+
+    /// Stitch RGBA16 tiles into final image
+    fn stitch_rgba16(
+        &self,
+        tiles: Vec<DecodedImage>,
+        rows: usize,
+        cols: usize,
+        width: usize,
+        height: usize,
+    ) -> Result<DecodedImage> {
+        use rgb::RGBA16;
+        let mut output = imgref::ImgVec::new(vec![RGBA16::default(); width * height], width, height);
+
+        for (tile_idx, tile) in tiles.iter().enumerate() {
+            if let DecodedImage::Rgba16(tile_img) = tile {
+                let row = tile_idx / cols;
+                let col = tile_idx % cols;
+                let tile_w = tile_img.width();
+                let tile_h = tile_img.height();
+                let dst_x = col * tile_w;
+                let dst_y = row * tile_h;
+
+                for y in 0..tile_h.min(height - dst_y) {
+                    for x in 0..tile_w.min(width - dst_x) {
+                        output[(dst_x + x, dst_y + y)] = tile_img[(x, y)];
+                    }
+                }
+            }
+        }
+
+        Ok(DecodedImage::Rgba16(output))
+    }
+
+    /// Stitch Gray8 tiles into final image
+    fn stitch_gray8(
+        &self,
+        tiles: Vec<DecodedImage>,
+        rows: usize,
+        cols: usize,
+        width: usize,
+        height: usize,
+    ) -> Result<DecodedImage> {
+        let mut output = imgref::ImgVec::new(vec![0u8; width * height], width, height);
+
+        for (tile_idx, tile) in tiles.iter().enumerate() {
+            if let DecodedImage::Gray8(tile_img) = tile {
+                let row = tile_idx / cols;
+                let col = tile_idx % cols;
+                let tile_w = tile_img.width();
+                let tile_h = tile_img.height();
+                let dst_x = col * tile_w;
+                let dst_y = row * tile_h;
+
+                for y in 0..tile_h.min(height - dst_y) {
+                    for x in 0..tile_w.min(width - dst_x) {
+                        output[(dst_x + x, dst_y + y)] = tile_img[(x, y)];
+                    }
+                }
+            }
+        }
+
+        Ok(DecodedImage::Gray8(output))
+    }
+
+    /// Stitch Gray16 tiles into final image
+    fn stitch_gray16(
+        &self,
+        tiles: Vec<DecodedImage>,
+        rows: usize,
+        cols: usize,
+        width: usize,
+        height: usize,
+    ) -> Result<DecodedImage> {
+        let mut output = imgref::ImgVec::new(vec![0u16; width * height], width, height);
+
+        for (tile_idx, tile) in tiles.iter().enumerate() {
+            if let DecodedImage::Gray16(tile_img) = tile {
+                let row = tile_idx / cols;
+                let col = tile_idx % cols;
+                let tile_w = tile_img.width();
+                let tile_h = tile_img.height();
+                let dst_x = col * tile_w;
+                let dst_y = row * tile_h;
+
+                for y in 0..tile_h.min(height - dst_y) {
+                    for x in 0..tile_w.min(width - dst_x) {
+                        output[(dst_x + x, dst_y + y)] = tile_img[(x, y)];
+                    }
+                }
+            }
+        }
+
+        Ok(DecodedImage::Gray16(output))
     }
 
     /// Convert rav1d Frame to zenavif DecodedImage
