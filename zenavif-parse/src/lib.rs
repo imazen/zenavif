@@ -743,7 +743,7 @@ impl AvifParser {
                 BoxType::MediaDataBox => {
                     if b.bytes_left() > 0 {
                         let offset = b.offset();
-                        let size = b.bytes_left() as u64;
+                        let size = b.bytes_left();
                         tracker.reserve(size)?;
                         let data = b.read_into_try_vec()?;
                         tracker.release(size);
@@ -2063,7 +2063,7 @@ pub fn read_avif_with_config<T: Read>(
             BoxType::MediaDataBox => {
                 if b.bytes_left() > 0 {
                     let offset = b.offset();
-                    let size = b.bytes_left() as u64;
+                    let size = b.bytes_left();
                     tracker.reserve(size)?;
                     let data = b.read_into_try_vec()?;
                     tracker.release(size);
