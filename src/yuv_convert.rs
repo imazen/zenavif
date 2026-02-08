@@ -41,7 +41,7 @@ pub enum ChromaSubsampling {
     Cs420,
 }
 
-/// Convert YUV420 to RGB8
+/// Convert YUV420 to RGB8 with bilinear chroma upsampling
 ///
 /// # Arguments
 /// * `y_plane` - Luma plane (full resolution)
@@ -72,17 +72,46 @@ pub fn yuv420_to_rgb8(
     let (kr, kb) = matrix_coefficients(matrix);
     let kg = 1.0 - kr - kb;
 
+    // Chroma dimensions (half of luma for 4:2:0)
+    let chroma_width = (width + 1) / 2;
+    let chroma_height = (height + 1) / 2;
+
     for y in 0..height {
         for x in 0..width {
             // Get Y value
             let y_val = y_plane[y * y_stride + x] as f32;
 
-            // Get UV values (with chroma upsampling)
-            // For 4:2:0, chroma is at half resolution
-            let u_x = x / 2;
-            let u_y = y / 2;
-            let u_val = u_plane[u_y * u_stride + u_x] as f32;
-            let v_val = v_plane[u_y * v_stride + u_x] as f32;
+            // Bilinear chroma upsampling
+            // Map luma position to chroma position (with 0.5 offset for centering)
+            let chroma_x = (x as f32 + 0.5) * 0.5 - 0.5;
+            let chroma_y = (y as f32 + 0.5) * 0.5 - 0.5;
+
+            // Get the 4 surrounding chroma samples
+            let cx0 = chroma_x.floor().max(0.0) as usize;
+            let cy0 = chroma_y.floor().max(0.0) as usize;
+            let cx1 = (cx0 + 1).min(chroma_width - 1);
+            let cy1 = (cy0 + 1).min(chroma_height - 1);
+
+            // Interpolation weights
+            let fx = chroma_x - cx0 as f32;
+            let fy = chroma_y - cy0 as f32;
+            let fx1 = 1.0 - fx;
+            let fy1 = 1.0 - fy;
+
+            // Sample the 4 surrounding chroma values
+            let u00 = u_plane[cy0 * u_stride + cx0] as f32;
+            let u01 = u_plane[cy0 * u_stride + cx1] as f32;
+            let u10 = u_plane[cy1 * u_stride + cx0] as f32;
+            let u11 = u_plane[cy1 * u_stride + cx1] as f32;
+
+            let v00 = v_plane[cy0 * v_stride + cx0] as f32;
+            let v01 = v_plane[cy0 * v_stride + cx1] as f32;
+            let v10 = v_plane[cy1 * v_stride + cx0] as f32;
+            let v11 = v_plane[cy1 * v_stride + cx1] as f32;
+
+            // Bilinear interpolation
+            let u_val = u00 * fx1 * fy1 + u01 * fx * fy1 + u10 * fx1 * fy + u11 * fx * fy;
+            let v_val = v00 * fx1 * fy1 + v01 * fx * fy1 + v10 * fx1 * fy + v11 * fx * fy;
 
             // Convert to RGB
             let (r, g, b) = yuv_to_rgb(y_val, u_val, v_val, kr, kg, kb, range);

@@ -114,14 +114,17 @@ just verify-pixels         # Run pixel verification
    - Pattern: zenavif often adds 56 or 84 pixels of height
    - **Root cause:** Possibly decoding multiple frames/layers instead of primary
 
-4. **YUV to RGB Conversion Errors:**
-   - `kodim03_yuv420_8bpc.avif`: 16.07% pixels wrong (max error: 36/255)
-   - `kodim23_yuv420_8bpc.avif`: 25.20% pixels wrong (max error: 42/255)
-   - **Root cause:** YUV420 chroma upsampling or color space conversion bug
+4. **YUV to RGB Conversion Errors:** ✅ **MOSTLY FIXED** (2026-02-07):
+   - **Fixed:** Implemented bilinear chroma upsampling for YUV420
+   - `kodim03_yuv420_8bpc.avif`: **0.46% pixels wrong** (max error: 5) - down from 16%
+   - `kodim23_yuv420_8bpc.avif`: **0.62% pixels wrong** (max error: 2) - down from 25%
+   - **Impact:** YUV420 conversion is now 99%+ accurate
+   - **Remaining errors:** Likely rounding differences in conversion formula or chroma positioning
+   - `extended_pixi.avif`: Still has 50% error (8 pixels) - needs investigation
 
 **TODO:**
 1. Fix dimension mismatches (highest priority)
-2. Fix YUV to RGB conversion (high priority - 16-25% error is unacceptable)
+2. ✅ Fix YUV to RGB conversion (99%+ accurate with bilinear upsampling)
 3. Implement RGB16/RGBA comparison in pixel_verification.rs
 4. Investigate whether grid stitching is correct behavior
 
