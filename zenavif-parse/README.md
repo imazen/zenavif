@@ -25,53 +25,28 @@ if data.premultiplied_alpha {
 }
 ```
 
-### Streaming API (Low Memory)
+### Zero-Copy Parser
 
-For animated AVIFs or applications where memory is constrained, use `AvifParser` to extract frames on-demand:
+`AvifParser` parses metadata without copying pixel data. Data access returns `Cow<[u8]>` — borrowed (zero-copy) for single-extent items, owned for multi-extent.
 
 ```rust
-let parser = AvifParser::from_reader(&mut file)?;
+let bytes = std::fs::read("image.avif")?;
+let parser = AvifParser::from_bytes(&bytes)?;
 
-// Check if animated
+// Primary item (zero-copy when possible)
+let primary = parser.primary_data()?;
+av1_decode(&primary)?;
+
+// Animation support
 if let Some(info) = parser.animation_info() {
-    println!("Animation: {} frames, {} loops", info.frame_count, info.loop_count);
-
-    // Extract frames one at a time (streaming)
     for i in 0..info.frame_count {
-        let frame = parser.animation_frame(i)?;
+        let frame = parser.frame(i)?;
         av1_decode(&frame.data)?;
-        // Display for frame.duration_ms milliseconds
     }
 }
-
-// Or extract primary item on-demand
-let primary = parser.primary_item()?;
-av1_decode(&primary)?;
 ```
 
-**Memory benefits:**
-- Animated images: ~50% less memory (stores metadata only, extracts frames on-demand)
-- Grid images: tiles extracted only when needed
-
-### Zero-Copy API (Maximum Performance)
-
-For maximum performance, use zero-copy slice methods that return borrowed data:
-
-```rust
-let parser = AvifParser::from_reader(&mut file)?;
-
-// Zero-copy frame access (no allocation)
-let (frame_data, duration_ms) = parser.animation_frame_slice(0)?;
-av1_decode(frame_data)?;
-
-// Zero-copy primary item access
-let primary_data = parser.primary_item_slice()?;
-av1_decode(primary_data)?;
-```
-
-**Limitations:**
-- Only works for single-extent items/frames
-- Returns `Error::Unsupported` for multi-extent data
+Also available: `from_owned(Vec<u8>)` and `from_reader(&mut impl Read)`. See `README_FORK.md` for the full API.
 
 ## Usage from C
 
