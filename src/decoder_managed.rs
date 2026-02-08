@@ -135,6 +135,11 @@ impl ManagedAvifDecoder {
     pub fn decode(&mut self, stop: &impl Stop) -> Result<DecodedImage> {
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
+        // Check if this is a grid image (tiled/multi-frame)
+        if self.avif_data.grid_config.is_some() {
+            return self.decode_grid(stop);
+        }
+
         let primary_frame = self
             .decoder
             .decode(&self.avif_data.primary_item)
@@ -177,6 +182,91 @@ impl ManagedAvifDecoder {
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
         self.convert_to_image(primary_frame, alpha_frame, stop)
+    }
+
+    /// Decode a grid-based AVIF (tiled image)
+    fn decode_grid(&mut self, stop: &impl Stop) -> Result<DecodedImage> {
+        let grid_config = self
+            .avif_data
+            .grid_config
+            .as_ref()
+            .expect("grid_config should be Some");
+
+        // Decode all tiles
+        let mut tile_frames = Vec::new();
+        for (i, tile_data) in self.avif_data.grid_tiles.iter().enumerate() {
+            stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+
+            let frame = self
+                .decoder
+                .decode(tile_data)
+                .map_err(|_e| {
+                    at(Error::Decode {
+                        code: -1,
+                        msg: "Failed to decode grid tile",
+                    })
+                })?
+                .ok_or_else(|| {
+                    at(Error::Decode {
+                        code: -1,
+                        msg: "No frame returned for grid tile",
+                    })
+                })?;
+
+            tile_frames.push(frame);
+        }
+
+        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+
+        // Stitch tiles together
+        self.stitch_tiles(tile_frames, grid_config, stop)
+    }
+
+    /// Stitch decoded tile frames into a single image
+    fn stitch_tiles(
+        &self,
+        tiles: Vec<Frame>,
+        grid_config: &avif_parse::GridConfig,
+        stop: &impl Stop,
+    ) -> Result<DecodedImage> {
+        if tiles.is_empty() {
+            return Err(at(Error::Decode {
+                code: -1,
+                msg: "No tiles to stitch",
+            }));
+        }
+
+        let rows = grid_config.rows as usize;
+        let cols = grid_config.columns as usize;
+
+        if tiles.len() != rows * cols {
+            return Err(at(Error::Decode {
+                code: -1,
+                msg: "Tile count doesn't match grid dimensions",
+            }));
+        }
+
+        // Get dimensions from first tile (all tiles should be same size)
+        let tile_width = tiles[0].width() as usize;
+        let tile_height = tiles[0].height() as usize;
+        let bit_depth = tiles[0].bit_depth();
+        let layout = tiles[0].pixel_layout();
+
+        // Calculate output dimensions
+        let output_width = if grid_config.output_width > 0 {
+            grid_config.output_width as usize
+        } else {
+            tile_width * cols
+        };
+        let output_height = if grid_config.output_height > 0 {
+            grid_config.output_height as usize
+        } else {
+            tile_height * rows
+        };
+
+        // For now, just decode the first tile as a placeholder
+        // TODO: Actually stitch all tiles together
+        self.convert_to_image(tiles.into_iter().next().unwrap(), None, stop)
     }
 
     /// Convert rav1d Frame to zenavif DecodedImage
