@@ -916,16 +916,54 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
         log::debug!("Grid: found {} tile references (sorted by dimgIdx), grid_config present: {}",
                    ids.len(), grid_config.is_some());
 
-        // If no ImageGrid property found, infer grid layout
-        // Default to single column (N × 1) layout to match libavif behavior
+        // If no ImageGrid property found, calculate grid layout from ispe dimensions
         if grid_config.is_none() && !ids.is_empty() {
-            log::debug!("Grid: inferring {}x1 layout (no ImageGrid property)", ids.len());
-            grid_config = Some(GridConfig {
-                rows: ids.len() as u8,  // Changed: vertical stack
-                columns: 1,              // Changed: single column
-                output_width: 0,  // Will be calculated from tiles
-                output_height: 0, // Will be calculated from tiles
+            // Try to calculate grid dimensions from ispe properties
+            let grid_dims = meta.properties.iter()
+                .find(|p| p.item_id == meta.primary_item_id)
+                .and_then(|p| match &p.property {
+                    ItemProperty::ImageSpatialExtents(e) => Some(e),
+                    _ => None,
+                });
+
+            let tile_dims = ids.first().and_then(|&tile_id| {
+                meta.properties.iter()
+                    .find(|p| p.item_id == tile_id)
+                    .and_then(|p| match &p.property {
+                        ItemProperty::ImageSpatialExtents(e) => Some(e),
+                        _ => None,
+                    })
             });
+
+            if let (Some(grid), Some(tile)) = (grid_dims, tile_dims) {
+                // Calculate grid layout: grid_dims ÷ tile_dims
+                if grid.width % tile.width == 0 && grid.height % tile.height == 0 {
+                    let columns = (grid.width / tile.width) as u8;
+                    let rows = (grid.height / tile.height) as u8;
+                    log::debug!("Grid: calculated {}x{} layout from ispe (grid {}x{} ÷ tile {}x{})",
+                               rows, columns, grid.width, grid.height, tile.width, tile.height);
+                    grid_config = Some(GridConfig {
+                        rows,
+                        columns,
+                        output_width: grid.width,
+                        output_height: grid.height,
+                    });
+                } else {
+                    log::warn!("Grid: dimension mismatch - grid {}x{} not evenly divisible by tile {}x{}, using fallback",
+                              grid.width, grid.height, tile.width, tile.height);
+                }
+            }
+
+            // Fallback: if calculation failed or ispe not available, use N×1 inference
+            if grid_config.is_none() {
+                log::debug!("Grid: inferring {}x1 layout (fallback, no ispe or calculation failed)", ids.len());
+                grid_config = Some(GridConfig {
+                    rows: ids.len() as u8,  // Changed: vertical stack
+                    columns: 1,              // Changed: single column
+                    output_width: 0,  // Will be calculated from tiles
+                    output_height: 0, // Will be calculated from tiles
+                });
+            }
         }
 
         ids
