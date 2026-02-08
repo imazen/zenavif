@@ -892,12 +892,12 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
                    ids.len(), grid_config.is_some());
 
         // If no ImageGrid property found, infer grid layout
-        // Default to single row (1 × N) layout
+        // Default to single column (N × 1) layout to match libavif behavior
         if grid_config.is_none() && !ids.is_empty() {
-            log::debug!("Grid: inferring 1x{} layout (no ImageGrid property)", ids.len());
+            log::debug!("Grid: inferring {}x1 layout (no ImageGrid property)", ids.len());
             grid_config = Some(GridConfig {
-                rows: 1,
-                columns: ids.len() as u8,
+                rows: ids.len() as u8,  // Changed: vertical stack
+                columns: 1,              // Changed: single column
                 output_width: 0,  // Will be calculated from tiles
                 output_height: 0, // Will be calculated from tiles
             });
