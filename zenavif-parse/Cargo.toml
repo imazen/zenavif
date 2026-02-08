@@ -1,7 +1,8 @@
 [package]
-name = "avif-parse"
-version = "1.4.0"
+name = "zenavif-parse"
+version = "2.0.0"
 authors = [
+  "Lilith River <lilith@imazen.io>",
   "Kornel Lesiński <kornel@geekhood.net>",
   "Ralph Giles <giles@mozilla.com>",
   "Matthew Gregan <kinetik@flim.org>",
@@ -9,14 +10,13 @@ authors = [
   "Jon Bauman <jbauman@mozilla.com>",
 ]
 edition = "2021"
-description = "Parser for AVIF image files"
-documentation = "https://docs.rs/avif-parse/"
+description = "AVIF container parser with zero-copy AvifParser API, grid images, animation, and resource limits. Fork of avif-parse."
 license = "MPL-2.0"
 categories = ["multimedia::images"]
-repository = "https://github.com/kornelski/avif-parse"
+repository = "https://github.com/imazen/zenavif-parse"
 readme = "README.md"
 include = ["/README.md", "/Cargo.toml", "/LICENSE", "/src/*.rs", "/avif_parse.h"]
-keywords = ["demuxer", "image", "parser", "heif"]
+keywords = ["avif", "image", "parser", "demuxer", "heif"]
 rust-version = "1.69"
 
 [lib]

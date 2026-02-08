@@ -307,7 +307,7 @@ pub struct ParseOptions {
 /// # Examples
 ///
 /// ```rust
-/// use avif_parse::DecodeConfig;
+/// use zenavif_parse::DecodeConfig;
 ///
 /// // Default limits (suitable for most apps)
 /// let config = DecodeConfig::default();
@@ -517,7 +517,7 @@ pub struct AvifData {
     /// use std::fs::File;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// #[allow(deprecated)]
-    /// let data = avif_parse::read_avif(&mut File::open("image.avif")?)?;
+    /// let data = zenavif_parse::read_avif(&mut File::open("image.avif")?)?;
     ///
     /// if let Some(grid) = data.grid_config {
     ///     println!("Grid: {}×{} tiles", grid.rows, grid.columns);
@@ -658,7 +658,7 @@ struct ItemExtents {
 /// # Example
 ///
 /// ```no_run
-/// use avif_parse::AvifParser;
+/// use zenavif_parse::AvifParser;
 ///
 /// let bytes = std::fs::read("image.avif")?;
 /// let parser = AvifParser::from_bytes(&bytes)?;

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #![allow(deprecated)]
-use avif_parse::Error;
+use zenavif_parse::Error;
 use std::borrow::Cow;
 use std::fs::File;
 
@@ -22,7 +22,7 @@ static LINK_U_SAMPLES: &str = "link-u-samples";
 #[test]
 fn public_avif_primary_item() {
     let input = &mut File::open(IMAGE_AVIF).expect("Unknown file");
-    let context = avif_parse::read_avif(input).expect("read_avif failed");
+    let context = zenavif_parse::read_avif(input).expect("read_avif failed");
     assert_eq!(context.primary_item.len(), 6979);
     assert_eq!(context.primary_item[0..4], [0x12, 0x00, 0x0a, 0x0a]);
 }
@@ -30,20 +30,20 @@ fn public_avif_primary_item() {
 #[test]
 fn public_avif_primary_item_split_extents() {
     let input = &mut File::open(IMAGE_AVIF_EXTENTS).expect("Unknown file");
-    let context = avif_parse::read_avif(input).expect("read_avif failed");
+    let context = zenavif_parse::read_avif(input).expect("read_avif failed");
     assert_eq!(context.primary_item.len(), 4387);
 }
 
 #[test]
 fn public_avif_bug_1655846() {
     let input = &mut File::open(IMAGE_AVIF_CORRUPT).expect("Unknown file");
-    assert!(avif_parse::read_avif(input).is_err());
+    assert!(zenavif_parse::read_avif(input).is_err());
 }
 
 #[test]
 fn public_avif_bug_1661347() {
     let input = &mut File::open(IMAGE_AVIF_CORRUPT_2).expect("Unknown file");
-    assert!(avif_parse::read_avif(input).is_err());
+    assert!(zenavif_parse::read_avif(input).is_err());
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn linku_sample_images() {
 #[test]
 fn grid_5x4_ispe_calculation() {
     let input = &mut File::open(IMAGE_GRID_5X4).expect("Unknown file");
-    let avif = avif_parse::read_avif(input).expect("read_avif failed");
+    let avif = zenavif_parse::read_avif(input).expect("read_avif failed");
 
     let grid = avif.grid_config.expect("Expected grid config");
     assert_eq!(grid.rows, 4, "Expected 4 rows");
@@ -73,7 +73,7 @@ fn grid_5x4_ispe_calculation() {
 #[test]
 fn grid_tile_ordering() {
     let input = &mut File::open(IMAGE_GRID_5X4).expect("Unknown file");
-    let avif = avif_parse::read_avif(input).expect("read_avif failed");
+    let avif = zenavif_parse::read_avif(input).expect("read_avif failed");
 
     for (i, tile) in avif.grid_tiles.iter().enumerate() {
         assert!(!tile.is_empty(), "Tile {} should not be empty", i);
@@ -84,7 +84,7 @@ fn grid_tile_ordering() {
 #[test]
 fn animated_avif_frame_extraction() {
     let input = &mut File::open(ANIMATED_AVIF).expect("Unknown file");
-    let avif = avif_parse::read_avif(input).expect("read_avif failed");
+    let avif = zenavif_parse::read_avif(input).expect("read_avif failed");
 
     let animation = avif.animation.expect("Expected animation data");
     assert_eq!(animation.frames.len(), 5, "Expected 5 frames");
@@ -115,7 +115,7 @@ fn test_dir(dir: &str) {
         }
         log::debug!("parsing {:?}", path.display());
         let input = &mut File::open(path).expect("bad file");
-        match avif_parse::read_avif(input) {
+        match zenavif_parse::read_avif(input) {
             Ok(avif) => {
                 if avif.grid_config.is_none() {
                     avif.primary_item_metadata().unwrap();
@@ -141,7 +141,7 @@ fn test_dir(dir: &str) {
 #[test]
 fn parser_from_bytes_primary() {
     let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
-    let parser = avif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
 
     let primary = parser.primary_data().expect("primary_data failed");
     assert_eq!(primary.len(), 6979);
@@ -155,7 +155,7 @@ fn parser_from_bytes_primary() {
 #[test]
 fn parser_from_bytes_multi_extent() {
     let bytes = std::fs::read(IMAGE_AVIF_EXTENTS).expect("read file");
-    let parser = avif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
 
     let primary = parser.primary_data().expect("primary_data failed");
     assert_eq!(primary.len(), 4387);
@@ -167,7 +167,7 @@ fn parser_from_bytes_multi_extent() {
 #[test]
 fn parser_from_owned_primary() {
     let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
-    let parser = avif_parse::AvifParser::from_owned(bytes).expect("from_owned failed");
+    let parser = zenavif_parse::AvifParser::from_owned(bytes).expect("from_owned failed");
 
     let primary = parser.primary_data().expect("primary_data failed");
     assert_eq!(primary.len(), 6979);
@@ -176,7 +176,7 @@ fn parser_from_owned_primary() {
 
 #[test]
 fn parser_from_reader_primary() {
-    let parser = avif_parse::AvifParser::from_reader(
+    let parser = zenavif_parse::AvifParser::from_reader(
         &mut File::open(IMAGE_AVIF).expect("Unknown file"),
     ).expect("from_reader failed");
 
@@ -188,7 +188,7 @@ fn parser_from_reader_primary() {
 #[test]
 fn parser_grid() {
     let bytes = std::fs::read(IMAGE_GRID_5X4).expect("read file");
-    let parser = avif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
 
     let grid = parser.grid_config().expect("Expected grid config");
     assert_eq!(grid.rows, 4);
@@ -209,7 +209,7 @@ fn parser_grid() {
 #[test]
 fn parser_animation_frames() {
     let bytes = std::fs::read(ANIMATED_AVIF).expect("read file");
-    let parser = avif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
 
     let info = parser.animation_info().expect("Expected animation");
     assert_eq!(info.frame_count, 5);
@@ -229,7 +229,7 @@ fn parser_animation_frames() {
 #[test]
 fn parser_frames_iterator() {
     let bytes = std::fs::read(ANIMATED_AVIF).expect("read file");
-    let parser = avif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
 
     let frames: Vec<_> = parser.frames().collect();
     assert_eq!(frames.len(), 5);
@@ -244,7 +244,7 @@ fn parser_frames_iterator() {
 #[test]
 fn parser_metadata() {
     let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
-    let parser = avif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
 
     let meta = parser.primary_metadata().expect("primary_metadata failed");
     assert!(meta.monochrome); // Monochrome.avif
@@ -256,10 +256,10 @@ fn parser_metadata() {
 #[test]
 fn parser_to_avif_data_matches_eager() {
     let bytes = std::fs::read(ANIMATED_AVIF).expect("read file");
-    let parser = avif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
     let converted = parser.to_avif_data().expect("to_avif_data failed");
 
-    let direct = avif_parse::read_avif(&mut File::open(ANIMATED_AVIF).expect("file"))
+    let direct = zenavif_parse::read_avif(&mut File::open(ANIMATED_AVIF).expect("file"))
         .expect("read_avif failed");
 
     assert_eq!(converted.primary_item.len(), direct.primary_item.len());
@@ -278,10 +278,10 @@ fn parser_to_avif_data_matches_eager() {
 #[test]
 fn parser_to_avif_data_grid() {
     let bytes = std::fs::read(IMAGE_GRID_5X4).expect("read file");
-    let parser = avif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
     let converted = parser.to_avif_data().expect("to_avif_data failed");
 
-    let direct = avif_parse::read_avif(&mut File::open(IMAGE_GRID_5X4).expect("file"))
+    let direct = zenavif_parse::read_avif(&mut File::open(IMAGE_GRID_5X4).expect("file"))
         .expect("read_avif failed");
 
     assert_eq!(converted.grid_tiles.len(), direct.grid_tiles.len());
@@ -296,7 +296,7 @@ fn parser_to_avif_data_grid() {
 
 fn test_dir_all_paths(dir: &str) {
     let _ = env_logger::builder().is_test(true).filter_level(log::LevelFilter::max()).try_init();
-    let config = avif_parse::DecodeConfig::default();
+    let config = zenavif_parse::DecodeConfig::default();
     let mut errors = 0;
 
     for entry in walkdir::WalkDir::new(dir) {
@@ -308,18 +308,18 @@ fn test_dir_all_paths(dir: &str) {
         }
 
         // Path 1: eager
-        let eager_result = avif_parse::read_avif_with_config(
+        let eager_result = zenavif_parse::read_avif_with_config(
             &mut File::open(path).expect("bad file"),
             &config,
-            &avif_parse::Unstoppable,
+            &zenavif_parse::Unstoppable,
         );
 
         // Path 2: zero-copy from_bytes
         let file_bytes = std::fs::read(path).expect("read file");
-        let parser_result = avif_parse::AvifParser::from_bytes_with_config(
+        let parser_result = zenavif_parse::AvifParser::from_bytes_with_config(
             &file_bytes,
             &config,
-            &avif_parse::Unstoppable,
+            &zenavif_parse::Unstoppable,
         );
 
         match (&eager_result, &parser_result) {
@@ -389,11 +389,11 @@ fn corpus_local_all_paths() {
 #[test]
 fn resource_limit_peak_memory() {
     let input = &mut File::open(IMAGE_AVIF).expect("Unknown file");
-    let config = avif_parse::DecodeConfig::default().with_peak_memory_limit(1_000);
-    let result = avif_parse::read_avif_with_config(input, &config, &avif_parse::Unstoppable);
+    let config = zenavif_parse::DecodeConfig::default().with_peak_memory_limit(1_000);
+    let result = zenavif_parse::read_avif_with_config(input, &config, &zenavif_parse::Unstoppable);
 
     match result {
-        Err(avif_parse::Error::ResourceLimitExceeded(msg)) => {
+        Err(zenavif_parse::Error::ResourceLimitExceeded(msg)) => {
             assert_eq!(msg, "peak memory limit exceeded");
         }
         Ok(_) => panic!("Expected peak memory limit error"),
@@ -404,11 +404,11 @@ fn resource_limit_peak_memory() {
 #[test]
 fn resource_limit_total_megapixels() {
     let input = &mut File::open(IMAGE_GRID_5X4).expect("Unknown file");
-    let config = avif_parse::DecodeConfig::default().with_total_megapixels_limit(10);
-    let result = avif_parse::read_avif_with_config(input, &config, &avif_parse::Unstoppable);
+    let config = zenavif_parse::DecodeConfig::default().with_total_megapixels_limit(10);
+    let result = zenavif_parse::read_avif_with_config(input, &config, &zenavif_parse::Unstoppable);
 
     match result {
-        Err(avif_parse::Error::ResourceLimitExceeded(msg)) => {
+        Err(zenavif_parse::Error::ResourceLimitExceeded(msg)) => {
             assert_eq!(msg, "total megapixels limit exceeded");
         }
         Ok(_) => panic!("Expected total megapixels limit error"),
@@ -419,11 +419,11 @@ fn resource_limit_total_megapixels() {
 #[test]
 fn resource_limit_grid_tiles() {
     let input = &mut File::open(IMAGE_GRID_5X4).expect("Unknown file");
-    let config = avif_parse::DecodeConfig::default().with_max_grid_tiles(10);
-    let result = avif_parse::read_avif_with_config(input, &config, &avif_parse::Unstoppable);
+    let config = zenavif_parse::DecodeConfig::default().with_max_grid_tiles(10);
+    let result = zenavif_parse::read_avif_with_config(input, &config, &zenavif_parse::Unstoppable);
 
     match result {
-        Err(avif_parse::Error::ResourceLimitExceeded(msg)) => {
+        Err(zenavif_parse::Error::ResourceLimitExceeded(msg)) => {
             assert_eq!(msg, "grid tile count limit exceeded");
         }
         Ok(_) => panic!("Expected grid tile count limit error"),
@@ -434,11 +434,11 @@ fn resource_limit_grid_tiles() {
 #[test]
 fn resource_limit_animation_frames() {
     let input = &mut File::open(ANIMATED_AVIF).expect("Unknown file");
-    let config = avif_parse::DecodeConfig::default().with_max_animation_frames(3);
-    let result = avif_parse::read_avif_with_config(input, &config, &avif_parse::Unstoppable);
+    let config = zenavif_parse::DecodeConfig::default().with_max_animation_frames(3);
+    let result = zenavif_parse::read_avif_with_config(input, &config, &zenavif_parse::Unstoppable);
 
     match result {
-        Err(avif_parse::Error::ResourceLimitExceeded(msg)) => {
+        Err(zenavif_parse::Error::ResourceLimitExceeded(msg)) => {
             assert_eq!(msg, "animation frame count limit exceeded");
         }
         Ok(_) => panic!("Expected animation frame count limit error"),
@@ -449,19 +449,19 @@ fn resource_limit_animation_frames() {
 #[test]
 fn cancellation_during_parse() {
     struct ImmediatelyCancelled;
-    impl avif_parse::Stop for ImmediatelyCancelled {
-        fn check(&self) -> std::result::Result<(), avif_parse::StopReason> {
-            Err(avif_parse::StopReason::Cancelled)
+    impl zenavif_parse::Stop for ImmediatelyCancelled {
+        fn check(&self) -> std::result::Result<(), zenavif_parse::StopReason> {
+            Err(zenavif_parse::StopReason::Cancelled)
         }
     }
 
     let input = &mut File::open(IMAGE_AVIF).expect("Unknown file");
-    let config = avif_parse::DecodeConfig::default();
-    let result = avif_parse::read_avif_with_config(input, &config, &ImmediatelyCancelled);
+    let config = zenavif_parse::DecodeConfig::default();
+    let result = zenavif_parse::read_avif_with_config(input, &config, &ImmediatelyCancelled);
 
     match result {
-        Err(avif_parse::Error::Stopped(reason)) => {
-            assert_eq!(reason, avif_parse::StopReason::Cancelled);
+        Err(zenavif_parse::Error::Stopped(reason)) => {
+            assert_eq!(reason, zenavif_parse::StopReason::Cancelled);
         }
         Ok(_) => panic!("Expected cancellation"),
         Err(e) => panic!("Unexpected error: {:?}", e),
@@ -471,20 +471,20 @@ fn cancellation_during_parse() {
 #[test]
 fn unstoppable_completes() {
     let input = &mut File::open(IMAGE_AVIF).expect("Unknown file");
-    let config = avif_parse::DecodeConfig::default();
-    let result = avif_parse::read_avif_with_config(input, &config, &avif_parse::Unstoppable);
+    let config = zenavif_parse::DecodeConfig::default();
+    let result = zenavif_parse::read_avif_with_config(input, &config, &zenavif_parse::Unstoppable);
     assert!(result.is_ok(), "Unstoppable should never cancel");
 }
 
 #[test]
 fn decode_config_unlimited_backwards_compat() {
-    let result_old = avif_parse::read_avif(&mut File::open(IMAGE_AVIF).expect("Unknown file"))
+    let result_old = zenavif_parse::read_avif(&mut File::open(IMAGE_AVIF).expect("Unknown file"))
         .expect("read_avif failed");
-    let config = avif_parse::DecodeConfig::unlimited();
-    let result_new = avif_parse::read_avif_with_config(
+    let config = zenavif_parse::DecodeConfig::unlimited();
+    let result_new = zenavif_parse::read_avif_with_config(
         &mut File::open(IMAGE_AVIF).expect("Unknown file"),
         &config,
-        &avif_parse::Unstoppable,
+        &zenavif_parse::Unstoppable,
     )
     .expect("read_avif_with_config failed");
 
@@ -494,7 +494,7 @@ fn decode_config_unlimited_backwards_compat() {
 
 #[test]
 fn decode_config_default_has_sane_limits() {
-    let config = avif_parse::DecodeConfig::default();
+    let config = zenavif_parse::DecodeConfig::default();
     assert_eq!(config.peak_memory_limit, Some(1_000_000_000));
     assert_eq!(config.total_megapixels_limit, Some(512));
     assert_eq!(config.max_animation_frames, Some(10_000));
@@ -507,16 +507,16 @@ fn decode_config_default_has_sane_limits() {
 #[test]
 fn parser_resource_limit_grid_tiles() {
     let bytes = std::fs::read(IMAGE_GRID_5X4).expect("read file");
-    let config = avif_parse::DecodeConfig::default().with_max_grid_tiles(10);
+    let config = zenavif_parse::DecodeConfig::default().with_max_grid_tiles(10);
 
-    let result = avif_parse::AvifParser::from_bytes_with_config(
+    let result = zenavif_parse::AvifParser::from_bytes_with_config(
         &bytes,
         &config,
-        &avif_parse::Unstoppable,
+        &zenavif_parse::Unstoppable,
     );
 
     match result {
-        Err(avif_parse::Error::ResourceLimitExceeded(msg)) => {
+        Err(zenavif_parse::Error::ResourceLimitExceeded(msg)) => {
             assert_eq!(msg, "grid tile count limit exceeded");
         }
         Ok(_) => panic!("Expected grid tile count limit error"),
@@ -527,23 +527,23 @@ fn parser_resource_limit_grid_tiles() {
 #[test]
 fn parser_cancellation_during_parse() {
     struct ImmediatelyCancelled;
-    impl avif_parse::Stop for ImmediatelyCancelled {
-        fn check(&self) -> std::result::Result<(), avif_parse::StopReason> {
-            Err(avif_parse::StopReason::Cancelled)
+    impl zenavif_parse::Stop for ImmediatelyCancelled {
+        fn check(&self) -> std::result::Result<(), zenavif_parse::StopReason> {
+            Err(zenavif_parse::StopReason::Cancelled)
         }
     }
 
     let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
-    let config = avif_parse::DecodeConfig::default();
-    let result = avif_parse::AvifParser::from_bytes_with_config(
+    let config = zenavif_parse::DecodeConfig::default();
+    let result = zenavif_parse::AvifParser::from_bytes_with_config(
         &bytes,
         &config,
         &ImmediatelyCancelled,
     );
 
     match result {
-        Err(avif_parse::Error::Stopped(reason)) => {
-            assert_eq!(reason, avif_parse::StopReason::Cancelled);
+        Err(zenavif_parse::Error::Stopped(reason)) => {
+            assert_eq!(reason, zenavif_parse::StopReason::Cancelled);
         }
         Ok(_) => panic!("Expected cancellation"),
         Err(e) => panic!("Unexpected error: {:?}", e),
