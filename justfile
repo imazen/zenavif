@@ -75,10 +75,14 @@ docker-build:
 
 # Generate libavif reference images using Docker
 generate-references: download-vectors
-    mkdir -p tests/references/libavif
+    @if [ ! -d tests/zenavif-references/.git ]; then \
+        echo "Error: tests/zenavif-references repo not found"; \
+        echo "Clone it with: git clone <url> tests/zenavif-references"; \
+        exit 1; \
+    fi
     docker run --rm \
         -v {{justfile_directory()}}/tests/vectors:/vectors:ro \
-        -v {{justfile_directory()}}/tests/references/libavif:/references \
+        -v {{justfile_directory()}}/tests/zenavif-references:/references \
         zenavif-references
 
 # Run pixel verification tests (requires references)

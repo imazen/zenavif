@@ -7,3 +7,4 @@ tests/vectors/
 *.obu
 # But keep the download script
 !scripts/download-avif-test-vectors.sh
+tests/zenavif-references/

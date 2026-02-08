@@ -272,7 +272,7 @@ fn find_test_vectors() -> Vec<PathBuf> {
 #[test]
 #[ignore]
 fn verify_against_libavif() {
-    let reference_dir = Path::new("tests/references/libavif");
+    let reference_dir = Path::new("tests/zenavif-references");
 
     if !reference_dir.exists() {
         eprintln!("\n⚠️  No libavif references found!");
