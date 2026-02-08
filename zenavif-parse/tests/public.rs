@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use avif_parse::Error;
+use std::borrow::Cow;
 use std::fs::File;
 
 static IMAGE_AVIF: &str = "av1-avif/testFiles/Microsoft/Monochrome.avif";
@@ -12,6 +13,10 @@ static IMAGE_GRID_5X4: &str = "av1-avif/testFiles/Microsoft/Summer_in_Tomsk_720p
 static ANIMATED_AVIF: &str = "link-u-samples/star-8bpc.avifs";
 static AOMEDIA_TEST_FILES: &str = "av1-avif/testFiles";
 static LINK_U_SAMPLES: &str = "link-u-samples";
+
+// ============================================================================
+// Eager path (read_avif) tests
+// ============================================================================
 
 #[test]
 fn public_avif_primary_item() {
@@ -52,65 +57,46 @@ fn linku_sample_images() {
 
 #[test]
 fn grid_5x4_ispe_calculation() {
-    // Test grid layout calculation from ispe (Image Spatial Extents) properties
-    // This file has NO explicit ImageGrid box, only ispe properties
     let input = &mut File::open(IMAGE_GRID_5X4).expect("Unknown file");
     let avif = avif_parse::read_avif(input).expect("read_avif failed");
 
-    // Verify grid config was calculated correctly from ispe
     let grid = avif.grid_config.expect("Expected grid config");
     assert_eq!(grid.rows, 4, "Expected 4 rows");
     assert_eq!(grid.columns, 5, "Expected 5 columns");
     assert_eq!(grid.output_width, 6400, "Expected width 6400");
     assert_eq!(grid.output_height, 2880, "Expected height 2880");
-
-    // Verify tile count matches grid dimensions
     assert_eq!(avif.grid_tiles.len(), 20, "Expected 20 tiles (4×5)");
-
-    // Verify primary item is empty for grid images
     assert_eq!(avif.primary_item.len(), 0, "Grid images should have empty primary_item");
 }
 
 #[test]
 fn grid_tile_ordering() {
-    // Verify tiles are ordered by dimgIdx (reference_index) not item_id
     let input = &mut File::open(IMAGE_GRID_5X4).expect("Unknown file");
     let avif = avif_parse::read_avif(input).expect("read_avif failed");
 
-    // All tiles should have valid data
     for (i, tile) in avif.grid_tiles.iter().enumerate() {
         assert!(!tile.is_empty(), "Tile {} should not be empty", i);
         assert!(tile.len() > 1000, "Tile {} seems too small ({} bytes)", i, tile.len());
     }
-
-    // Tiles should be in dimgIdx order (verified by the sizes being reasonable)
-    // The Microsoft 5×4 grid has tiles with varying sizes, confirming order matters
 }
 
 #[test]
 fn animated_avif_frame_extraction() {
-    // Test animation parsing from .avifs file
     let input = &mut File::open(ANIMATED_AVIF).expect("Unknown file");
     let avif = avif_parse::read_avif(input).expect("read_avif failed");
 
-    // Verify animation was detected and parsed
     let animation = avif.animation.expect("Expected animation data");
-
-    // Verify frame count
     assert_eq!(animation.frames.len(), 5, "Expected 5 frames");
 
-    // Verify all frames have valid data
     for (i, frame) in animation.frames.iter().enumerate() {
         assert!(!frame.data.is_empty(), "Frame {} should not be empty", i);
         assert!(frame.duration_ms > 0, "Frame {} should have positive duration", i);
     }
 
-    // Verify expected durations (star-8bpc.avifs has 100ms per frame)
     for frame in &animation.frames {
         assert_eq!(frame.duration_ms, 100, "Expected 100ms frame duration");
     }
 
-    // Verify primary item contains first frame
     assert_eq!(avif.primary_item.len(), animation.frames[0].data.len(),
         "Primary item should match first frame");
 }
@@ -124,18 +110,16 @@ fn test_dir(dir: &str) {
         let path = entry.path();
         let ext = path.extension().unwrap_or_default();
         if !path.is_file() || (ext != "avif" && ext != "avifs") {
-            continue; // Skip directories, ReadMe.txt, etc.
+            continue;
         }
         log::debug!("parsing {:?}", path.display());
         let input = &mut File::open(path).expect("bad file");
         match avif_parse::read_avif(input) {
             Ok(avif) => {
-                // Grid images have tiles instead of primary_item
                 if avif.grid_config.is_none() {
                     avif.primary_item_metadata().unwrap();
                     avif.alpha_item_metadata().unwrap();
                 } else {
-                    // For grid images, validate that we have tiles
                     assert!(!avif.grid_tiles.is_empty(), "Grid image has no tiles");
                 }
             },
@@ -149,10 +133,166 @@ fn test_dir(dir: &str) {
     assert_eq!(0, errors);
 }
 
-/// Test a directory with all three parsing paths:
-/// 1. read_avif_with_config (eager + default limits)
-/// 2. AvifParser::from_reader_with_config (streaming + default limits)
-/// 3. Verify both produce consistent primary_item data
+// ============================================================================
+// AvifParser (zero-copy) tests
+// ============================================================================
+
+#[test]
+fn parser_from_bytes_primary() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = avif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let primary = parser.primary_data().expect("primary_data failed");
+    assert_eq!(primary.len(), 6979);
+    assert_eq!(&primary[0..4], &[0x12, 0x00, 0x0a, 0x0a]);
+
+    // Single-extent → must be Cow::Borrowed (true zero-copy)
+    assert!(matches!(primary, Cow::Borrowed(_)), "Expected Cow::Borrowed for single-extent");
+    assert!(parser.animation_info().is_none());
+}
+
+#[test]
+fn parser_from_bytes_multi_extent() {
+    let bytes = std::fs::read(IMAGE_AVIF_EXTENTS).expect("read file");
+    let parser = avif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let primary = parser.primary_data().expect("primary_data failed");
+    assert_eq!(primary.len(), 4387);
+
+    // Multi-extent → Cow::Owned
+    assert!(matches!(primary, Cow::Owned(_)), "Expected Cow::Owned for multi-extent");
+}
+
+#[test]
+fn parser_from_owned_primary() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = avif_parse::AvifParser::from_owned(bytes).expect("from_owned failed");
+
+    let primary = parser.primary_data().expect("primary_data failed");
+    assert_eq!(primary.len(), 6979);
+    assert_eq!(&primary[0..4], &[0x12, 0x00, 0x0a, 0x0a]);
+}
+
+#[test]
+fn parser_from_reader_primary() {
+    let parser = avif_parse::AvifParser::from_reader(
+        &mut File::open(IMAGE_AVIF).expect("Unknown file"),
+    ).expect("from_reader failed");
+
+    let primary = parser.primary_data().expect("primary_data failed");
+    assert_eq!(primary.len(), 6979);
+    assert_eq!(&primary[0..4], &[0x12, 0x00, 0x0a, 0x0a]);
+}
+
+#[test]
+fn parser_grid() {
+    let bytes = std::fs::read(IMAGE_GRID_5X4).expect("read file");
+    let parser = avif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let grid = parser.grid_config().expect("Expected grid config");
+    assert_eq!(grid.rows, 4);
+    assert_eq!(grid.columns, 5);
+    assert_eq!(parser.grid_tile_count(), 20);
+
+    let tile = parser.tile_data(0).expect("tile_data failed");
+    assert!(!tile.is_empty());
+
+    for i in 0..20 {
+        let t = parser.tile_data(i).expect("tile_data failed");
+        assert!(!t.is_empty(), "Tile {} empty", i);
+    }
+
+    assert!(parser.tile_data(20).is_err());
+}
+
+#[test]
+fn parser_animation_frames() {
+    let bytes = std::fs::read(ANIMATED_AVIF).expect("read file");
+    let parser = avif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+    assert_eq!(info.frame_count, 5);
+
+    for i in 0..5 {
+        let frame = parser.frame(i).expect("frame failed");
+        assert!(!frame.data.is_empty(), "Frame {} empty", i);
+        assert_eq!(frame.duration_ms, 100);
+
+        // from_bytes → single-extent frames should be Cow::Borrowed
+        assert!(matches!(frame.data, Cow::Borrowed(_)), "Frame {} should be Cow::Borrowed", i);
+    }
+
+    assert!(parser.frame(5).is_err());
+}
+
+#[test]
+fn parser_frames_iterator() {
+    let bytes = std::fs::read(ANIMATED_AVIF).expect("read file");
+    let parser = avif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let frames: Vec<_> = parser.frames().collect();
+    assert_eq!(frames.len(), 5);
+
+    for (i, result) in frames.iter().enumerate() {
+        let frame = result.as_ref().expect("frame failed");
+        assert!(!frame.data.is_empty(), "Frame {} empty", i);
+        assert_eq!(frame.duration_ms, 100);
+    }
+}
+
+#[test]
+fn parser_metadata() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = avif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let meta = parser.primary_metadata().expect("primary_metadata failed");
+    assert!(meta.monochrome); // Monochrome.avif
+    assert!(meta.still_picture);
+
+    assert!(parser.alpha_metadata().is_none());
+}
+
+#[test]
+fn parser_to_avif_data_matches_eager() {
+    let bytes = std::fs::read(ANIMATED_AVIF).expect("read file");
+    let parser = avif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+    let converted = parser.to_avif_data().expect("to_avif_data failed");
+
+    let direct = avif_parse::read_avif(&mut File::open(ANIMATED_AVIF).expect("file"))
+        .expect("read_avif failed");
+
+    assert_eq!(converted.primary_item.len(), direct.primary_item.len());
+    assert_eq!(converted.primary_item.as_slice(), direct.primary_item.as_slice());
+
+    let conv_anim = converted.animation.as_ref().expect("animation");
+    let dir_anim = direct.animation.as_ref().expect("animation");
+    assert_eq!(conv_anim.frames.len(), dir_anim.frames.len());
+
+    for (i, (c, d)) in conv_anim.frames.iter().zip(dir_anim.frames.iter()).enumerate() {
+        assert_eq!(c.data.as_slice(), d.data.as_slice(), "Frame {} data mismatch", i);
+        assert_eq!(c.duration_ms, d.duration_ms, "Frame {} duration mismatch", i);
+    }
+}
+
+#[test]
+fn parser_to_avif_data_grid() {
+    let bytes = std::fs::read(IMAGE_GRID_5X4).expect("read file");
+    let parser = avif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+    let converted = parser.to_avif_data().expect("to_avif_data failed");
+
+    let direct = avif_parse::read_avif(&mut File::open(IMAGE_GRID_5X4).expect("file"))
+        .expect("read_avif failed");
+
+    assert_eq!(converted.grid_tiles.len(), direct.grid_tiles.len());
+    for (i, (c, d)) in converted.grid_tiles.iter().zip(direct.grid_tiles.iter()).enumerate() {
+        assert_eq!(c.as_slice(), d.as_slice(), "Tile {} data mismatch", i);
+    }
+}
+
+// ============================================================================
+// Corpus-wide tests: all parsing paths
+// ============================================================================
+
 fn test_dir_all_paths(dir: &str) {
     let _ = env_logger::builder().is_test(true).filter_level(log::LevelFilter::max()).try_init();
     let config = avif_parse::DecodeConfig::default();
@@ -166,33 +306,31 @@ fn test_dir_all_paths(dir: &str) {
             continue;
         }
 
-        // Path 1: eager with default limits
+        // Path 1: eager
         let eager_result = avif_parse::read_avif_with_config(
             &mut File::open(path).expect("bad file"),
             &config,
             &avif_parse::Unstoppable,
         );
 
-        // Path 2: streaming with default limits
-        let streaming_result = avif_parse::AvifParser::from_reader_with_config(
-            &mut File::open(path).expect("bad file"),
+        // Path 2: zero-copy from_bytes
+        let file_bytes = std::fs::read(path).expect("read file");
+        let parser_result = avif_parse::AvifParser::from_bytes_with_config(
+            &file_bytes,
             &config,
             &avif_parse::Unstoppable,
         );
 
-        match (&eager_result, &streaming_result) {
+        match (&eager_result, &parser_result) {
             (Ok(avif), Ok(parser)) => {
-                // Both succeeded — verify consistency
                 if avif.grid_config.is_none() {
-                    let streaming_primary = parser.primary_item()
-                        .expect("streaming primary_item failed");
+                    let parser_primary = parser.primary_data()
+                        .expect("primary_data failed");
                     assert_eq!(
                         avif.primary_item.len(),
-                        streaming_primary.len(),
-                        "{}: primary_item length mismatch (eager={}, streaming={})",
+                        parser_primary.len(),
+                        "{}: primary_item length mismatch",
                         path.display(),
-                        avif.primary_item.len(),
-                        streaming_primary.len(),
                     );
                 } else {
                     assert!(!avif.grid_tiles.is_empty(), "{}: grid has no tiles", path.display());
@@ -207,33 +345,26 @@ fn test_dir_all_paths(dir: &str) {
             (Err(Error::Unsupported(why)), _) | (_, Err(Error::Unsupported(why))) => {
                 log::warn!("{}: {why}", path.display());
             }
-            // Both failed — consistent behavior, expected for corrupt files
             (Err(_), Err(_)) => {
-                log::debug!("{}: both paths rejected (expected for corrupt files)", path.display());
+                log::debug!("{}: both paths rejected", path.display());
             }
-            // Eager failed but streaming succeeded — expected: streaming defers
-            // data extraction, so corrupt extents aren't caught until access time.
-            // Verify the streaming parser fails when we actually try to extract data.
             (Err(e), Ok(parser)) => {
-                log::debug!("{}: eager rejected ({e}), verifying streaming fails on extraction", path.display());
-                let extraction_ok = parser.primary_item().is_ok()
+                log::debug!("{}: eager rejected ({e}), verifying parser fails on extraction", path.display());
+                let extraction_ok = parser.primary_data().is_ok()
                     || parser.grid_tile_count() > 0;
                 if extraction_ok {
-                    // Streaming extraction succeeded where eager failed — real inconsistency
-                    log::error!("{}: eager failed ({e}) but streaming extraction succeeded", path.display());
+                    log::error!("{}: eager failed ({e}) but parser extraction succeeded", path.display());
                     errors += 1;
                 }
             }
             (Ok(_), Err(e)) => {
-                log::error!("{}: streaming failed but eager succeeded: {e}", path.display());
+                log::error!("{}: parser failed but eager succeeded: {e}", path.display());
                 errors += 1;
             }
         }
     }
     assert_eq!(0, errors);
 }
-
-// Corpus-wide tests: all 3 parsing paths (eager+limits, streaming+limits, consistency)
 
 #[test]
 fn corpus_aomedia_all_paths() {
@@ -250,225 +381,6 @@ fn corpus_local_all_paths() {
     test_dir_all_paths("tests");
 }
 
-// Streaming parser tests
-
-#[test]
-fn streaming_parser_basic() {
-    // Test basic streaming parser functionality
-    let input = &mut File::open(ANIMATED_AVIF).expect("Unknown file");
-    let parser = avif_parse::AvifParser::from_reader(input).expect("from_reader failed");
-
-    // Should parse without loading frames
-    assert!(parser.animation_info().is_some(), "Expected animation info");
-
-    let info = parser.animation_info().unwrap();
-    assert_eq!(info.frame_count, 5, "Expected 5 frames");
-
-    // Extract single frame
-    let frame = parser.animation_frame(0).expect("Failed to extract frame 0");
-    assert!(!frame.data.is_empty(), "Frame 0 should not be empty");
-    assert_eq!(frame.duration_ms, 100, "Expected 100ms duration");
-}
-
-#[test]
-fn streaming_matches_eager() {
-    // Verify streaming parser produces identical results to eager parser
-    let avif_data = avif_parse::read_avif(&mut File::open(ANIMATED_AVIF).expect("Unknown file"))
-        .expect("read_avif failed");
-    let parser = avif_parse::AvifParser::from_reader(&mut File::open(ANIMATED_AVIF).expect("Unknown file"))
-        .expect("from_reader failed");
-
-    let info = parser.animation_info().expect("Expected animation");
-    assert_eq!(
-        info.frame_count,
-        avif_data.animation.as_ref().unwrap().frames.len(),
-        "Frame counts should match"
-    );
-
-    // Compare first 5 frames
-    for i in 0..5 {
-        let eager_frame = &avif_data.animation.as_ref().unwrap().frames[i];
-        let streaming_frame = parser.animation_frame(i).expect("Failed to extract frame");
-
-        assert_eq!(
-            eager_frame.data.len(),
-            streaming_frame.data.len(),
-            "Frame {} data length should match",
-            i
-        );
-        assert_eq!(
-            eager_frame.data.as_slice(),
-            streaming_frame.data.as_slice(),
-            "Frame {} data should match",
-            i
-        );
-        assert_eq!(
-            eager_frame.duration_ms, streaming_frame.duration_ms,
-            "Frame {} duration should match",
-            i
-        );
-    }
-}
-
-#[test]
-fn streaming_parser_grid() {
-    // Test streaming parser with grid images
-    let parser = avif_parse::AvifParser::from_reader(
-        &mut File::open(IMAGE_GRID_5X4).expect("Unknown file"),
-    )
-    .expect("from_reader failed");
-
-    let grid = parser.grid_config().expect("Expected grid config");
-    assert_eq!(grid.rows, 4, "Expected 4 rows");
-    assert_eq!(grid.columns, 5, "Expected 5 columns");
-
-    assert_eq!(parser.grid_tile_count(), 20, "Expected 20 tiles");
-
-    // Extract first tile
-    let tile = parser.grid_tile(0).expect("Failed to extract tile 0");
-    assert!(!tile.is_empty(), "Tile 0 should not be empty");
-}
-
-#[test]
-fn streaming_parser_primary_item() {
-    // Test streaming parser with single-frame image
-    let parser = avif_parse::AvifParser::from_reader(&mut File::open(IMAGE_AVIF).expect("Unknown file"))
-        .expect("from_reader failed");
-
-    let primary = parser.primary_item().expect("Failed to extract primary item");
-    assert_eq!(primary.len(), 6979, "Primary item length mismatch");
-    assert_eq!(primary[0..4], [0x12, 0x00, 0x0a, 0x0a], "Primary item header mismatch");
-
-    // Should not have animation
-    assert!(parser.animation_info().is_none(), "Should not have animation");
-}
-
-#[test]
-fn parser_to_avif_data_conversion() {
-    // Test that streaming parser can convert to AvifData
-    let parser = avif_parse::AvifParser::from_reader(&mut File::open(ANIMATED_AVIF).expect("Unknown file"))
-        .expect("from_reader failed");
-    let avif_data = parser.to_avif_data().expect("Failed to convert to AvifData");
-
-    // Should produce identical result to direct read_avif
-    let direct = avif_parse::read_avif(&mut File::open(ANIMATED_AVIF).expect("Unknown file"))
-        .expect("read_avif failed");
-
-    assert_eq!(
-        avif_data.primary_item.len(),
-        direct.primary_item.len(),
-        "Primary item length should match"
-    );
-    assert_eq!(
-        avif_data.primary_item.as_slice(),
-        direct.primary_item.as_slice(),
-        "Primary item data should match"
-    );
-
-    // Compare animation data
-    let converted_anim = avif_data.animation.as_ref().expect("Expected animation");
-    let direct_anim = direct.animation.as_ref().expect("Expected animation");
-
-    assert_eq!(
-        converted_anim.frames.len(),
-        direct_anim.frames.len(),
-        "Frame counts should match"
-    );
-
-    for (i, (conv_frame, direct_frame)) in converted_anim
-        .frames
-        .iter()
-        .zip(direct_anim.frames.iter())
-        .enumerate()
-    {
-        assert_eq!(
-            conv_frame.data.as_slice(),
-            direct_frame.data.as_slice(),
-            "Frame {} data should match",
-            i
-        );
-    }
-}
-
-// Zero-copy slice tests
-
-#[test]
-fn zero_copy_animation_frame_slice() {
-    // Test zero-copy frame access
-    let parser = avif_parse::AvifParser::from_reader(&mut File::open(ANIMATED_AVIF).expect("Unknown file"))
-        .expect("from_reader failed");
-
-    // Get frame data via zero-copy
-    let (slice, duration_ms) = parser.animation_frame_slice(0).expect("Failed to get frame slice");
-    assert!(!slice.is_empty(), "Frame slice should not be empty");
-    assert_eq!(duration_ms, 100, "Expected 100ms duration");
-
-    // Compare with copying version
-    let frame = parser.animation_frame(0).expect("Failed to extract frame");
-    assert_eq!(slice, frame.data.as_slice(), "Zero-copy slice should match copied data");
-    assert_eq!(duration_ms, frame.duration_ms, "Durations should match");
-}
-
-#[test]
-fn zero_copy_primary_item_slice() {
-    // Test zero-copy primary item access
-    let parser = avif_parse::AvifParser::from_reader(&mut File::open(IMAGE_AVIF).expect("Unknown file"))
-        .expect("from_reader failed");
-
-    // Get primary item via zero-copy
-    let slice = parser.primary_item_slice().expect("Failed to get primary item slice");
-    assert_eq!(slice.len(), 6979, "Primary item slice length mismatch");
-    assert_eq!(slice[0..4], [0x12, 0x00, 0x0a, 0x0a], "Primary item slice header mismatch");
-
-    // Compare with copying version
-    let primary = parser.primary_item().expect("Failed to extract primary item");
-    assert_eq!(slice, primary.as_slice(), "Zero-copy slice should match copied data");
-}
-
-#[test]
-fn zero_copy_grid_tile_slice() {
-    // Test zero-copy grid tile access
-    let parser = avif_parse::AvifParser::from_reader(
-        &mut File::open(IMAGE_GRID_5X4).expect("Unknown file"),
-    )
-    .expect("from_reader failed");
-
-    // Get first tile via zero-copy
-    let slice = parser.grid_tile_slice(0).expect("Failed to get tile slice");
-    assert!(!slice.is_empty(), "Tile slice should not be empty");
-
-    // Compare with copying version
-    let tile = parser.grid_tile(0).expect("Failed to extract tile");
-    assert_eq!(slice, tile.as_slice(), "Zero-copy slice should match copied data");
-}
-
-#[test]
-fn zero_copy_vs_copying_performance() {
-    // Verify zero-copy returns same data as copying methods
-    let parser = avif_parse::AvifParser::from_reader(&mut File::open(ANIMATED_AVIF).expect("Unknown file"))
-        .expect("from_reader failed");
-
-    let info = parser.animation_info().expect("Expected animation");
-
-    // Compare all frames
-    for i in 0..info.frame_count {
-        let (slice, duration_zero) = parser.animation_frame_slice(i).expect("Failed to get frame slice");
-        let frame = parser.animation_frame(i).expect("Failed to extract frame");
-
-        assert_eq!(
-            slice,
-            frame.data.as_slice(),
-            "Frame {} zero-copy slice should match copied data",
-            i
-        );
-        assert_eq!(
-            duration_zero, frame.duration_ms,
-            "Frame {} durations should match",
-            i
-        );
-    }
-}
-
 // ============================================================================
 // Resource Limit Tests
 // ============================================================================
@@ -476,11 +388,7 @@ fn zero_copy_vs_copying_performance() {
 #[test]
 fn resource_limit_peak_memory() {
     let input = &mut File::open(IMAGE_AVIF).expect("Unknown file");
-
-    // Set very low peak memory limit (1KB) — mdat read will exceed this
-    let config = avif_parse::DecodeConfig::default()
-        .with_peak_memory_limit(1_000);
-
+    let config = avif_parse::DecodeConfig::default().with_peak_memory_limit(1_000);
     let result = avif_parse::read_avif_with_config(input, &config, &avif_parse::Unstoppable);
 
     match result {
@@ -494,12 +402,8 @@ fn resource_limit_peak_memory() {
 
 #[test]
 fn resource_limit_total_megapixels() {
-    // Grid is 6400×2880 = 18.432 MP, set limit below that
     let input = &mut File::open(IMAGE_GRID_5X4).expect("Unknown file");
-
-    let config = avif_parse::DecodeConfig::default()
-        .with_total_megapixels_limit(10);
-
+    let config = avif_parse::DecodeConfig::default().with_total_megapixels_limit(10);
     let result = avif_parse::read_avif_with_config(input, &config, &avif_parse::Unstoppable);
 
     match result {
@@ -513,12 +417,8 @@ fn resource_limit_total_megapixels() {
 
 #[test]
 fn resource_limit_grid_tiles() {
-    // Grid has 20 tiles (5×4), set limit below that
     let input = &mut File::open(IMAGE_GRID_5X4).expect("Unknown file");
-
-    let config = avif_parse::DecodeConfig::default()
-        .with_max_grid_tiles(10);
-
+    let config = avif_parse::DecodeConfig::default().with_max_grid_tiles(10);
     let result = avif_parse::read_avif_with_config(input, &config, &avif_parse::Unstoppable);
 
     match result {
@@ -532,12 +432,8 @@ fn resource_limit_grid_tiles() {
 
 #[test]
 fn resource_limit_animation_frames() {
-    // File has 5 frames, set limit below that
     let input = &mut File::open(ANIMATED_AVIF).expect("Unknown file");
-
-    let config = avif_parse::DecodeConfig::default()
-        .with_max_animation_frames(3);
-
+    let config = avif_parse::DecodeConfig::default().with_max_animation_frames(3);
     let result = avif_parse::read_avif_with_config(input, &config, &avif_parse::Unstoppable);
 
     match result {
@@ -581,7 +477,6 @@ fn unstoppable_completes() {
 
 #[test]
 fn decode_config_unlimited_backwards_compat() {
-    // Verify unlimited config produces identical results to read_avif
     let result_old = avif_parse::read_avif(&mut File::open(IMAGE_AVIF).expect("Unknown file"))
         .expect("read_avif failed");
     let config = avif_parse::DecodeConfig::unlimited();
@@ -607,15 +502,15 @@ fn decode_config_default_has_sane_limits() {
     assert!(!config.lenient);
 }
 
-// Streaming parser resource limit tests
+// Parser-specific resource limit tests
 
 #[test]
-fn streaming_resource_limit_grid_tiles() {
-    let input = &mut File::open(IMAGE_GRID_5X4).expect("Unknown file");
+fn parser_resource_limit_grid_tiles() {
+    let bytes = std::fs::read(IMAGE_GRID_5X4).expect("read file");
     let config = avif_parse::DecodeConfig::default().with_max_grid_tiles(10);
 
-    let result = avif_parse::AvifParser::from_reader_with_config(
-        input,
+    let result = avif_parse::AvifParser::from_bytes_with_config(
+        &bytes,
         &config,
         &avif_parse::Unstoppable,
     );
@@ -630,7 +525,7 @@ fn streaming_resource_limit_grid_tiles() {
 }
 
 #[test]
-fn streaming_cancellation_during_parse() {
+fn parser_cancellation_during_parse() {
     struct ImmediatelyCancelled;
     impl avif_parse::Stop for ImmediatelyCancelled {
         fn check(&self) -> std::result::Result<(), avif_parse::StopReason> {
@@ -638,10 +533,10 @@ fn streaming_cancellation_during_parse() {
         }
     }
 
-    let input = &mut File::open(IMAGE_AVIF).expect("Unknown file");
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
     let config = avif_parse::DecodeConfig::default();
-    let result = avif_parse::AvifParser::from_reader_with_config(
-        input,
+    let result = avif_parse::AvifParser::from_bytes_with_config(
+        &bytes,
         &config,
         &ImmediatelyCancelled,
     );

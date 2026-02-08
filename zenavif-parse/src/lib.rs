@@ -625,38 +625,60 @@ impl AV1Metadata {
     }
 }
 
-/// Streaming AVIF parser for on-demand frame extraction (low memory usage)
+/// A single frame from an animated AVIF, with zero-copy when possible.
 ///
-/// Unlike [`AvifData`] which eagerly loads all animation frames,
-/// `AvifParser` extracts frames on-demand, using ~50% less memory.
+/// The `data` field is `Cow::Borrowed` when the frame lives in a single
+/// contiguous mdat extent, and `Cow::Owned` when extents must be concatenated.
+pub struct FrameRef<'a> {
+    pub data: Cow<'a, [u8]>,
+    pub duration_ms: u32,
+}
+
+/// Byte range of a media data box within the file.
+struct MdatBounds {
+    offset: u64,
+    length: u64,
+}
+
+/// Where an item's data lives: construction method + extent ranges.
+struct ItemExtents {
+    construction_method: ConstructionMethod,
+    extents: TryVec<ExtentRange>,
+}
+
+/// Zero-copy AVIF parser backed by a borrowed or owned byte buffer.
 ///
-/// # Memory Usage
+/// `AvifParser` records byte offsets during parsing but does **not** copy
+/// mdat payload data. Data access methods return `Cow<[u8]>` — borrowed
+/// when the item is a single contiguous extent, owned when extents must
+/// be concatenated.
 ///
-/// - **Animated images**: ~50% less memory (mdat only, no pre-extracted frames)
+/// # Constructors
+///
+/// | Method | Lifetime | Zero-copy? |
+/// |--------|----------|------------|
+/// | [`from_bytes`](Self::from_bytes) | `'data` | Yes — borrows the slice |
+/// | [`from_owned`](Self::from_owned) | `'static` | Within the owned buffer |
+/// | [`from_reader`](Self::from_reader) | `'static` | Reads all, then owned |
 ///
 /// # Example
 ///
 /// ```no_run
 /// use avif_parse::AvifParser;
-/// use std::fs::File;
 ///
-/// let mut file = File::open("animation.avifs")?;
-/// let parser = AvifParser::from_reader(&mut file)?;
-///
-/// if let Some(info) = parser.animation_info() {
-///     for i in 0..info.frame_count {
-///         let frame = parser.animation_frame(i)?; // On-demand!
-///     }
-/// }
+/// let bytes = std::fs::read("image.avif")?;
+/// let parser = AvifParser::from_bytes(&bytes)?;
+/// let primary = parser.primary_data()?; // Cow::Borrowed for single-extent
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-pub struct AvifParser {
-    mdats: TryVec<MediaDataBox>,
+pub struct AvifParser<'data> {
+    raw: Cow<'data, [u8]>,
+    mdat_bounds: TryVec<MdatBounds>,
     idat: Option<TryVec<u8>>,
-    primary_item_extents: TryVec<ExtentRange>,
-    alpha_item_extents: Option<TryVec<ExtentRange>>,
+    primary: ItemExtents,
+    alpha: Option<ItemExtents>,
     grid_config: Option<GridConfig>,
-    grid_tile_extents: TryVec<TryVec<ExtentRange>>,
+    tiles: TryVec<ItemExtents>,
     animation_data: Option<AnimationParserData>,
     premultiplied_alpha: bool,
 }
@@ -674,42 +696,86 @@ pub struct AnimationInfo {
     pub loop_count: u32,
 }
 
-impl AvifParser {
-    /// Parse AVIF file for streaming access (low memory)
+/// Parsed structure from the box-level parse pass (no mdat data).
+struct ParsedStructure {
+    meta: AvifInternalMeta,
+    mdat_bounds: TryVec<MdatBounds>,
+    animation_data: Option<(u32, SampleTable, u32)>,
+}
+
+impl<'data> AvifParser<'data> {
+    // ========================================
+    // Constructors
+    // ========================================
+
+    /// Parse AVIF from a borrowed byte slice (true zero-copy).
     ///
-    /// Unlike [`read_avif()`] which eagerly loads all animation frames,
-    /// this method only stores metadata and frame locations. Extract frames
-    /// on-demand using [`animation_frame()`].
-    ///
-    /// Uses unlimited resource limits. For limits, use [`from_reader_with_config`].
-    ///
-    /// [`animation_frame()`]: AvifParser::animation_frame
-    /// [`from_reader_with_config`]: AvifParser::from_reader_with_config
-    pub fn from_reader<R: Read>(f: &mut R) -> Result<Self> {
-        Self::from_reader_with_config(f, &DecodeConfig::unlimited(), &Unstoppable)
+    /// The returned parser borrows `data` — single-extent items will be
+    /// returned as `Cow::Borrowed` slices into this buffer.
+    pub fn from_bytes(data: &'data [u8]) -> Result<Self> {
+        Self::from_bytes_with_config(data, &DecodeConfig::unlimited(), &Unstoppable)
     }
 
-    /// Parse AVIF file with resource limits and cancellation support
-    ///
-    /// Like [`from_reader`], but with configurable resource limits and
-    /// cooperative cancellation via the [`Stop`] trait.
-    ///
-    /// [`from_reader`]: AvifParser::from_reader
-    pub fn from_reader_with_config<R: Read>(
-        f: &mut R,
+    /// Parse AVIF from a borrowed byte slice with resource limits.
+    pub fn from_bytes_with_config(
+        data: &'data [u8],
         config: &DecodeConfig,
         stop: &dyn Stop,
     ) -> Result<Self> {
-        let mut tracker = ResourceTracker::new(config);
+        let parsed = Self::parse_raw(data, config, stop)?;
+        Self::build(Cow::Borrowed(data), parsed, config)
+    }
+
+    /// Parse AVIF from an owned buffer.
+    ///
+    /// The returned parser owns the data — single-extent items will still
+    /// be returned as `Cow::Borrowed` slices (borrowing from the internal buffer).
+    pub fn from_owned(data: std::vec::Vec<u8>) -> Result<AvifParser<'static>> {
+        AvifParser::from_owned_with_config(data, &DecodeConfig::unlimited(), &Unstoppable)
+    }
+
+    /// Parse AVIF from an owned buffer with resource limits.
+    pub fn from_owned_with_config(
+        data: std::vec::Vec<u8>,
+        config: &DecodeConfig,
+        stop: &dyn Stop,
+    ) -> Result<AvifParser<'static>> {
+        let parsed = AvifParser::parse_raw(&data, config, stop)?;
+        AvifParser::build(Cow::Owned(data), parsed, config)
+    }
+
+    /// Parse AVIF from a reader (reads all bytes, then parses).
+    pub fn from_reader<R: Read>(reader: &mut R) -> Result<AvifParser<'static>> {
+        AvifParser::from_reader_with_config(reader, &DecodeConfig::unlimited(), &Unstoppable)
+    }
+
+    /// Parse AVIF from a reader with resource limits.
+    pub fn from_reader_with_config<R: Read>(
+        reader: &mut R,
+        config: &DecodeConfig,
+        stop: &dyn Stop,
+    ) -> Result<AvifParser<'static>> {
+        let mut buf = std::vec::Vec::new();
+        reader.read_to_end(&mut buf)?;
+        AvifParser::from_owned_with_config(buf, config, stop)
+    }
+
+    // ========================================
+    // Internal: parse pass (records offsets, no mdat copy)
+    // ========================================
+
+    /// Parse the AVIF box structure from raw bytes, recording mdat offsets
+    /// without copying mdat content.
+    fn parse_raw(data: &[u8], config: &DecodeConfig, stop: &dyn Stop) -> Result<ParsedStructure> {
         let parse_opts = ParseOptions { lenient: config.lenient };
-        let mut f = OffsetReader::new(f);
+        let mut cursor = std::io::Cursor::new(data);
+        let mut f = OffsetReader::new(&mut cursor);
         let mut iter = BoxIter::new(&mut f);
 
         // 'ftyp' box must occur first; see ISO 14496-12:2015 § 4.3.1
         if let Some(mut b) = iter.next_box()? {
             if b.head.name == BoxType::FileTypeBox {
                 let ftyp = read_ftyp(&mut b)?;
-                // Accept both 'avif' (single-frame) and 'avis' (animated) brands
                 if ftyp.major_brand != b"avif" && ftyp.major_brand != b"avis" {
                     return Err(Error::InvalidData("ftyp must be 'avif' or 'avis'"));
                 }
@@ -719,7 +785,7 @@ impl AvifParser {
         }
 
         let mut meta = None;
-        let mut mdats = TryVec::new();
+        let mut mdat_bounds = TryVec::new();
         let mut animation_data: Option<(u32, SampleTable, u32)> = None;
 
         while let Some(mut b) = iter.next_box()? {
@@ -736,19 +802,17 @@ impl AvifParser {
                 }
                 BoxType::MovieBox => {
                     if let Some((media_timescale, sample_table)) = read_moov(&mut b)? {
-                        // TODO: parse loop_count from edit list or meta
                         animation_data = Some((media_timescale, sample_table, 0));
                     }
                 }
                 BoxType::MediaDataBox => {
                     if b.bytes_left() > 0 {
                         let offset = b.offset();
-                        let size = b.bytes_left();
-                        tracker.reserve(size)?;
-                        let data = b.read_into_try_vec()?;
-                        tracker.release(size);
-                        mdats.push(MediaDataBox { offset, data })?;
+                        let length = b.bytes_left();
+                        mdat_bounds.push(MdatBounds { offset, length })?;
                     }
+                    // Skip the content — we'll slice into raw later
+                    skip_box_content(&mut b)?;
                 }
                 _ => skip_box_content(&mut b)?,
             }
@@ -758,8 +822,16 @@ impl AvifParser {
 
         let meta = meta.ok_or(Error::InvalidData("missing meta"))?;
 
+        Ok(ParsedStructure { meta, mdat_bounds, animation_data })
+    }
+
+    /// Build an AvifParser from raw bytes + parsed structure.
+    fn build(raw: Cow<'data, [u8]>, parsed: ParsedStructure, config: &DecodeConfig) -> Result<Self> {
+        let tracker = ResourceTracker::new(config);
+        let meta = parsed.meta;
+
         // Get primary item extents
-        let primary_item_extents = Self::get_item_extents(&meta, meta.primary_item_id)?;
+        let primary = Self::get_item_extents(&meta, meta.primary_item_id)?;
 
         // Find alpha item and get its extents
         let alpha_item_id = meta
@@ -783,15 +855,15 @@ impl AvifParser {
                 })
             });
 
-        let alpha_item_extents = alpha_item_id
+        let alpha = alpha_item_id
             .map(|id| Self::get_item_extents(&meta, id))
             .transpose()?;
 
         // Check for premultiplied alpha
-        let premultiplied_alpha = alpha_item_id.map_or(false, |alpha_item_id| {
+        let premultiplied_alpha = alpha_item_id.map_or(false, |alpha_id| {
             meta.item_references.iter().any(|iref| {
                 iref.from_item_id == meta.primary_item_id
-                    && iref.to_item_id == alpha_item_id
+                    && iref.to_item_id == alpha_id
                     && iref.item_type == b"prem"
             })
         });
@@ -804,8 +876,7 @@ impl AvifParser {
             .map_or(false, |info| info.item_type == b"grid");
 
         // Extract grid configuration and tile extents if this is a grid
-        let (grid_config, grid_tile_extents) = if is_grid {
-            // Collect tiles with their reference index
+        let (grid_config, tiles) = if is_grid {
             let mut tiles_with_index: TryVec<(u32, u16)> = TryVec::new();
             for iref in meta.item_references.iter() {
                 if iref.from_item_id == meta.primary_item_id && iref.item_type == b"dimg" {
@@ -813,46 +884,34 @@ impl AvifParser {
                 }
             }
 
-            // Validate tile count
             tracker.validate_grid_tiles(tiles_with_index.len() as u32)?;
-
-            // Sort tiles by reference_index to get correct grid order
             tiles_with_index.sort_by_key(|&(_, idx)| idx);
 
-            // Extract tile extents in sorted order
             let mut tile_extents = TryVec::new();
             for (tile_id, _) in tiles_with_index.iter() {
-                let extents = Self::get_item_extents(&meta, *tile_id)?;
-                tile_extents.push(extents)?;
+                tile_extents.push(Self::get_item_extents(&meta, *tile_id)?)?;
             }
 
-            // Extract tile IDs in sorted order
             let mut tile_ids = TryVec::new();
             for (tile_id, _) in tiles_with_index.iter() {
                 tile_ids.push(*tile_id)?;
             }
 
-            // Calculate grid config
             let grid_config = Self::calculate_grid_config(&meta, &tile_ids)?;
-
             (Some(grid_config), tile_extents)
         } else {
             (None, TryVec::new())
         };
 
         // Store animation metadata if present
-        let animation_parser_data = if let Some((media_timescale, sample_table, loop_count)) = animation_data {
+        let animation_data = if let Some((media_timescale, sample_table, loop_count)) = parsed.animation_data {
             tracker.validate_animation_frames(sample_table.sample_sizes.len() as u32)?;
-            Some(AnimationParserData {
-                media_timescale,
-                sample_table,
-                loop_count,
-            })
+            Some(AnimationParserData { media_timescale, sample_table, loop_count })
         } else {
             None
         };
 
-        // Manual clone of idat since TryVec doesn't impl Clone
+        // Clone idat
         let idat = if let Some(ref idat_data) = meta.idat {
             let mut cloned = TryVec::new();
             cloned.extend_from_slice(idat_data)?;
@@ -862,34 +921,168 @@ impl AvifParser {
         };
 
         Ok(Self {
-            mdats,
+            raw,
+            mdat_bounds: parsed.mdat_bounds,
             idat,
-            primary_item_extents,
-            alpha_item_extents,
+            primary,
+            alpha,
             grid_config,
-            grid_tile_extents,
-            animation_data: animation_parser_data,
+            tiles,
+            animation_data,
             premultiplied_alpha,
         })
     }
 
-    /// Get item extents from metadata
-    fn get_item_extents(meta: &AvifInternalMeta, item_id: u32) -> Result<TryVec<ExtentRange>> {
+    // ========================================
+    // Internal helpers
+    // ========================================
+
+    /// Get item extents (construction method + ranges) from metadata.
+    fn get_item_extents(meta: &AvifInternalMeta, item_id: u32) -> Result<ItemExtents> {
         let item = meta
             .iloc_items
             .iter()
             .find(|item| item.item_id == item_id)
             .ok_or(Error::InvalidData("item not found in iloc"))?;
 
-        // Manual clone since TryVec doesn't impl Clone
         let mut extents = TryVec::new();
         for extent in &item.extents {
             extents.push(extent.extent_range.clone())?;
         }
-        Ok(extents)
+        Ok(ItemExtents {
+            construction_method: item.construction_method,
+            extents,
+        })
     }
 
-    /// Calculate grid configuration from metadata
+    /// Resolve an item's data from the raw buffer, returning `Cow::Borrowed`
+    /// for single-extent file items and `Cow::Owned` for multi-extent or idat.
+    fn resolve_item(&self, item: &ItemExtents) -> Result<Cow<'_, [u8]>> {
+        match item.construction_method {
+            ConstructionMethod::Idat => self.resolve_idat_extents(&item.extents),
+            ConstructionMethod::File => self.resolve_file_extents(&item.extents),
+            ConstructionMethod::Item => Err(Error::Unsupported("construction_method 'item' not supported")),
+        }
+    }
+
+    /// Resolve file-based extents from the raw buffer.
+    fn resolve_file_extents(&self, extents: &[ExtentRange]) -> Result<Cow<'_, [u8]>> {
+        let raw = self.raw.as_ref();
+
+        // Fast path: single extent → borrow directly from raw
+        if extents.len() == 1 {
+            let extent = &extents[0];
+            let (start, end) = self.extent_byte_range(extent)?;
+            let slice = raw.get(start..end).ok_or(Error::InvalidData("extent out of bounds in raw buffer"))?;
+            return Ok(Cow::Borrowed(slice));
+        }
+
+        // Multi-extent: concatenate into owned buffer
+        let mut data = TryVec::new();
+        for extent in extents {
+            let (start, end) = self.extent_byte_range(extent)?;
+            let slice = raw.get(start..end).ok_or(Error::InvalidData("extent out of bounds in raw buffer"))?;
+            data.extend_from_slice(slice)?;
+        }
+        Ok(Cow::Owned(data.to_vec()))
+    }
+
+    /// Convert an ExtentRange to a (start, end) byte range within the raw buffer.
+    fn extent_byte_range(&self, extent: &ExtentRange) -> Result<(usize, usize)> {
+        let file_offset = extent.start();
+        let start = usize::try_from(file_offset)?;
+
+        match extent {
+            ExtentRange::WithLength(range) => {
+                let len = range.end.checked_sub(range.start)
+                    .ok_or(Error::InvalidData("extent range start > end"))?;
+                let end = start.checked_add(usize::try_from(len)?)
+                    .ok_or(Error::InvalidData("extent end overflow"))?;
+                Ok((start, end))
+            }
+            ExtentRange::ToEnd(_) => {
+                // Find the mdat that contains this offset and use its bounds
+                for mdat in &self.mdat_bounds {
+                    if file_offset >= mdat.offset && file_offset < mdat.offset + mdat.length {
+                        let end = usize::try_from(mdat.offset + mdat.length)?;
+                        return Ok((start, end));
+                    }
+                }
+                // Fall back to end of raw buffer
+                Ok((start, self.raw.len()))
+            }
+        }
+    }
+
+    /// Resolve idat-based extents.
+    fn resolve_idat_extents(&self, extents: &[ExtentRange]) -> Result<Cow<'_, [u8]>> {
+        let idat_data = self.idat.as_ref()
+            .ok_or(Error::InvalidData("idat box missing but construction_method is Idat"))?;
+
+        if extents.len() == 1 {
+            let extent = &extents[0];
+            let start = usize::try_from(extent.start())?;
+            let slice = match extent {
+                ExtentRange::WithLength(range) => {
+                    let len = usize::try_from(range.end - range.start)?;
+                    idat_data.get(start..start + len)
+                        .ok_or(Error::InvalidData("idat extent out of bounds"))?
+                }
+                ExtentRange::ToEnd(_) => {
+                    idat_data.get(start..)
+                        .ok_or(Error::InvalidData("idat extent out of bounds"))?
+                }
+            };
+            return Ok(Cow::Borrowed(slice));
+        }
+
+        // Multi-extent idat: concatenate
+        let mut data = TryVec::new();
+        for extent in extents {
+            let start = usize::try_from(extent.start())?;
+            let slice = match extent {
+                ExtentRange::WithLength(range) => {
+                    let len = usize::try_from(range.end - range.start)?;
+                    idat_data.get(start..start + len)
+                        .ok_or(Error::InvalidData("idat extent out of bounds"))?
+                }
+                ExtentRange::ToEnd(_) => {
+                    idat_data.get(start..)
+                        .ok_or(Error::InvalidData("idat extent out of bounds"))?
+                }
+            };
+            data.extend_from_slice(slice)?;
+        }
+        Ok(Cow::Owned(data.to_vec()))
+    }
+
+    /// Resolve a single animation frame from the raw buffer.
+    fn resolve_frame(&self, index: usize) -> Result<FrameRef<'_>> {
+        let anim = self.animation_data.as_ref()
+            .ok_or(Error::InvalidData("not an animated AVIF"))?;
+
+        if index >= anim.sample_table.sample_sizes.len() {
+            return Err(Error::InvalidData("frame index out of bounds"));
+        }
+
+        let duration_ms = self.calculate_frame_duration(&anim.sample_table, anim.media_timescale, index)?;
+        let (offset, size) = self.calculate_sample_location(&anim.sample_table, index)?;
+
+        let start = usize::try_from(offset)?;
+        let end = start.checked_add(size as usize)
+            .ok_or(Error::InvalidData("frame end overflow"))?;
+
+        let raw = self.raw.as_ref();
+        let slice = raw.get(start..end)
+            .ok_or(Error::InvalidData("frame not found in raw buffer"))?;
+
+        Ok(FrameRef {
+            data: Cow::Borrowed(slice),
+            duration_ms,
+        })
+    }
+
+    /// Calculate grid configuration from metadata.
     fn calculate_grid_config(meta: &AvifInternalMeta, tile_ids: &[u32]) -> Result<GridConfig> {
         // Try explicit grid property first
         for prop in &meta.properties {
@@ -921,15 +1114,14 @@ impl AvifParser {
         });
 
         if let (Some(grid), Some(tile)) = (grid_dims, tile_dims) {
-            // Validate tile dimensions are non-zero
-            if tile.width == 0 || tile.height == 0 {
-                // Fall through to fallback
-            } else if grid.width % tile.width == 0 && grid.height % tile.height == 0 {
-                // Calculate grid layout: grid_dims ÷ tile_dims
+            if tile.width != 0
+                && tile.height != 0
+                && grid.width % tile.width == 0
+                && grid.height % tile.height == 0
+            {
                 let columns = grid.width / tile.width;
                 let rows = grid.height / tile.height;
 
-                // Validate grid dimensions fit in u8 (max 255×255 grid)
                 if columns <= 255 && rows <= 255 {
                     return Ok(GridConfig {
                         rows: rows as u8,
@@ -941,7 +1133,6 @@ impl AvifParser {
             }
         }
 
-        // Fallback: if calculation failed or ispe not available, use N×1 inference
         let tile_count = tile_ids.len();
         Ok(GridConfig {
             rows: tile_count.min(255) as u8,
@@ -951,111 +1142,7 @@ impl AvifParser {
         })
     }
 
-    /// Extract primary item data (on-demand)
-    pub fn primary_item(&self) -> Result<TryVec<u8>> {
-        self.extract_item(&self.primary_item_extents)
-    }
-
-    /// Extract alpha item data (on-demand)
-    pub fn alpha_item(&self) -> Option<Result<TryVec<u8>>> {
-        self.alpha_item_extents
-            .as_ref()
-            .map(|extents| self.extract_item(extents))
-    }
-
-    /// Extract grid tile data by index (on-demand)
-    pub fn grid_tile(&self, index: usize) -> Result<TryVec<u8>> {
-        let extents = self
-            .grid_tile_extents
-            .get(index)
-            .ok_or(Error::InvalidData("tile index out of bounds"))?;
-        self.extract_item(extents)
-    }
-
-    /// Extract item data from extents (internal helper)
-    fn extract_item(&self, extents: &[ExtentRange]) -> Result<TryVec<u8>> {
-        let mut data = TryVec::new();
-        for extent in extents {
-            // Try idat first
-            if let Some(idat_data) = &self.idat {
-                if extent.start() == 0 {
-                    match extent {
-                        ExtentRange::WithLength(range) => {
-                            let len = (range.end - range.start) as usize;
-                            data.extend_from_slice(&idat_data[..len])?;
-                            continue;
-                        }
-                        ExtentRange::ToEnd(_) => {
-                            data.extend_from_slice(idat_data)?;
-                            continue;
-                        }
-                    }
-                }
-            }
-
-            // Try mdat boxes
-            let mut found = false;
-            for mdat in &self.mdats {
-                if mdat.contains_extent(extent) {
-                    mdat.read_extent(extent, &mut data)?;
-                    found = true;
-                    break;
-                }
-            }
-
-            if !found {
-                return Err(Error::InvalidData("extent not found in mdat"));
-            }
-        }
-        Ok(data)
-    }
-
-    /// Get animation metadata (if animated)
-    pub fn animation_info(&self) -> Option<AnimationInfo> {
-        self.animation_data.as_ref().map(|data| AnimationInfo {
-            frame_count: data.sample_table.sample_sizes.len(),
-            loop_count: data.loop_count,
-        })
-    }
-
-    /// Extract single animation frame by index (on-demand)
-    pub fn animation_frame(&self, index: usize) -> Result<AnimationFrame> {
-        let data = self
-            .animation_data
-            .as_ref()
-            .ok_or(Error::InvalidData("not an animated AVIF"))?;
-
-        if index >= data.sample_table.sample_sizes.len() {
-            return Err(Error::InvalidData("frame index out of bounds"));
-        }
-
-        // Calculate duration from time-to-sample
-        let duration_ms = self.calculate_frame_duration(&data.sample_table, data.media_timescale, index)?;
-
-        // Calculate frame location from sample table
-        let (offset, size) = self.calculate_sample_location(&data.sample_table, index)?;
-
-        // Extract from mdat
-        let range = ExtentRange::WithLength(Range {
-            start: offset,
-            end: offset + size as u64,
-        });
-
-        let mut frame_data = TryVec::new();
-        for mdat in &self.mdats {
-            if mdat.contains_extent(&range) {
-                mdat.read_extent(&range, &mut frame_data)?;
-                return Ok(AnimationFrame {
-                    data: frame_data,
-                    duration_ms,
-                });
-            }
-        }
-
-        Err(Error::InvalidData("frame not found in mdat"))
-    }
-
-    /// Calculate frame duration from sample table
+    /// Calculate frame duration from sample table.
     fn calculate_frame_duration(
         &self,
         st: &SampleTable,
@@ -1077,14 +1164,13 @@ impl AvifParser {
         Ok(0)
     }
 
-    /// Calculate sample location (offset and size) from sample table
+    /// Calculate sample location (offset and size) from sample table.
     fn calculate_sample_location(&self, st: &SampleTable, index: usize) -> Result<(u64, u32)> {
         let sample_size = *st
             .sample_sizes
             .get(index)
             .ok_or(Error::InvalidData("sample index out of bounds"))?;
 
-        // Build sample-to-chunk mapping and find our sample
         let mut current_sample = 0;
         for (chunk_map_idx, entry) in st.sample_to_chunk.iter().enumerate() {
             let next_first_chunk = st
@@ -1102,7 +1188,6 @@ impl AvifParser {
 
                 for sample_in_chunk in 0..entry.samples_per_chunk {
                     if current_sample == index {
-                        // Calculate offset within chunk
                         let mut offset_in_chunk = 0u64;
                         for s in 0..sample_in_chunk {
                             let prev_idx = current_sample.saturating_sub((sample_in_chunk - s) as usize);
@@ -1121,44 +1206,119 @@ impl AvifParser {
         Err(Error::InvalidData("sample not found in chunk table"))
     }
 
-    /// Get grid configuration (if grid image)
+    // ========================================
+    // Public data access API (one way each)
+    // ========================================
+
+    /// Get primary item data.
+    ///
+    /// Returns `Cow::Borrowed` for single-extent items, `Cow::Owned` for multi-extent.
+    pub fn primary_data(&self) -> Result<Cow<'_, [u8]>> {
+        self.resolve_item(&self.primary)
+    }
+
+    /// Get alpha item data, if present.
+    pub fn alpha_data(&self) -> Option<Result<Cow<'_, [u8]>>> {
+        self.alpha.as_ref().map(|item| self.resolve_item(item))
+    }
+
+    /// Get grid tile data by index.
+    pub fn tile_data(&self, index: usize) -> Result<Cow<'_, [u8]>> {
+        let item = self.tiles.get(index)
+            .ok_or(Error::InvalidData("tile index out of bounds"))?;
+        self.resolve_item(item)
+    }
+
+    /// Get a single animation frame by index.
+    pub fn frame(&self, index: usize) -> Result<FrameRef<'_>> {
+        self.resolve_frame(index)
+    }
+
+    /// Iterate over all animation frames.
+    pub fn frames(&self) -> FrameIterator<'_> {
+        let count = self
+            .animation_info()
+            .map(|info| info.frame_count)
+            .unwrap_or(0);
+        FrameIterator { parser: self, index: 0, count }
+    }
+
+    // ========================================
+    // Metadata (no data access)
+    // ========================================
+
+    /// Get animation metadata (if animated).
+    pub fn animation_info(&self) -> Option<AnimationInfo> {
+        self.animation_data.as_ref().map(|data| AnimationInfo {
+            frame_count: data.sample_table.sample_sizes.len(),
+            loop_count: data.loop_count,
+        })
+    }
+
+    /// Get grid configuration (if grid image).
     pub fn grid_config(&self) -> Option<&GridConfig> {
         self.grid_config.as_ref()
     }
 
-    /// Get number of grid tiles
+    /// Get number of grid tiles.
     pub fn grid_tile_count(&self) -> usize {
-        self.grid_tile_extents.len()
+        self.tiles.len()
     }
 
-    /// Extract all grid tiles (on-demand)
-    pub fn grid_tiles(&self) -> Result<TryVec<TryVec<u8>>> {
-        let mut tiles = TryVec::new();
-        for i in 0..self.grid_tile_count() {
-            tiles.push(self.grid_tile(i)?)?;
-        }
-        Ok(tiles)
-    }
-
-    /// Check if alpha channel uses premultiplied alpha
+    /// Check if alpha channel uses premultiplied alpha.
     pub fn premultiplied_alpha(&self) -> bool {
         self.premultiplied_alpha
     }
 
-    /// Convert to AvifData (loads all frames - high memory!)
-    ///
-    /// This method eagerly loads all animation frames and grid tiles,
-    /// which can use ~2× memory compared to on-demand extraction.
-    /// Only use this if you need the AvifData API.
+    /// Parse AV1 metadata from the primary item.
+    pub fn primary_metadata(&self) -> Result<AV1Metadata> {
+        let data = self.primary_data()?;
+        AV1Metadata::parse_av1_bitstream(&data)
+    }
+
+    /// Parse AV1 metadata from the alpha item, if present.
+    pub fn alpha_metadata(&self) -> Option<Result<AV1Metadata>> {
+        self.alpha.as_ref().map(|item| {
+            let data = self.resolve_item(item)?;
+            AV1Metadata::parse_av1_bitstream(&data)
+        })
+    }
+
+    // ========================================
+    // Conversion
+    // ========================================
+
+    /// Convert to [`AvifData`] (eagerly loads all frames and tiles).
     pub fn to_avif_data(&self) -> Result<AvifData> {
-        let primary_item = self.primary_item()?;
-        let alpha_item = self.alpha_item().transpose()?;
-        let grid_tiles = self.grid_tiles()?;
+        let primary_data = self.primary_data()?;
+        let mut primary_item = TryVec::new();
+        primary_item.extend_from_slice(&primary_data)?;
+
+        let alpha_item = match self.alpha_data() {
+            Some(Ok(data)) => {
+                let mut v = TryVec::new();
+                v.extend_from_slice(&data)?;
+                Some(v)
+            }
+            Some(Err(e)) => return Err(e),
+            None => None,
+        };
+
+        let mut grid_tiles = TryVec::new();
+        for i in 0..self.grid_tile_count() {
+            let data = self.tile_data(i)?;
+            let mut v = TryVec::new();
+            v.extend_from_slice(&data)?;
+            grid_tiles.push(v)?;
+        }
 
         let animation = if let Some(info) = self.animation_info() {
             let mut frames = TryVec::new();
             for i in 0..info.frame_count {
-                frames.push(self.animation_frame(i)?)?;
+                let frame_ref = self.frame(i)?;
+                let mut data = TryVec::new();
+                data.extend_from_slice(&frame_ref.data)?;
+                frames.push(AnimationFrame { data, duration_ms: frame_ref.duration_ms })?;
             }
             Some(AnimationConfig {
                 loop_count: info.loop_count,
@@ -1177,278 +1337,25 @@ impl AvifParser {
             animation,
         })
     }
-
-    /// Zero-copy access to animation frame (returns slice into mdat)
-    ///
-    /// Returns frame data slice and duration in milliseconds.
-    /// This avoids memory allocation compared to [`animation_frame()`].
-    ///
-    /// # Limitations
-    ///
-    /// Only works for single-extent frames. Returns error if frame spans multiple extents.
-    ///
-    /// [`animation_frame()`]: AvifParser::animation_frame
-    pub fn animation_frame_slice(&self, index: usize) -> Result<(&[u8], u32)> {
-        let data = self
-            .animation_data
-            .as_ref()
-            .ok_or(Error::InvalidData("not an animated AVIF"))?;
-
-        let duration_ms =
-            self.calculate_frame_duration(&data.sample_table, data.media_timescale, index)?;
-
-        let (offset, size) = self.calculate_sample_location(&data.sample_table, index)?;
-
-        let range = ExtentRange::WithLength(Range {
-            start: offset,
-            end: offset + size as u64,
-        });
-
-        for mdat in &self.mdats {
-            if mdat.contains_extent(&range) {
-                let slice = mdat.extent_slice(&range)?;
-                return Ok((slice, duration_ms));
-            }
-        }
-
-        Err(Error::InvalidData("frame not found"))
-    }
-
-    /// Zero-copy access to primary item (returns slice into mdat/idat)
-    ///
-    /// # Limitations
-    ///
-    /// Only works for single-extent items. Returns error if item spans multiple extents.
-    pub fn primary_item_slice(&self) -> Result<&[u8]> {
-        self.extract_item_slice(&self.primary_item_extents)
-    }
-
-    /// Zero-copy access to alpha item (returns slice into mdat/idat)
-    ///
-    /// # Limitations
-    ///
-    /// Only works for single-extent items. Returns error if item spans multiple extents.
-    pub fn alpha_item_slice(&self) -> Option<Result<&[u8]>> {
-        self.alpha_item_extents
-            .as_ref()
-            .map(|extents| self.extract_item_slice(extents))
-    }
-
-    /// Zero-copy access to grid tile (returns slice into mdat/idat)
-    ///
-    /// # Limitations
-    ///
-    /// Only works for single-extent tiles. Returns error if tile spans multiple extents.
-    pub fn grid_tile_slice(&self, index: usize) -> Result<&[u8]> {
-        let extents = self
-            .grid_tile_extents
-            .get(index)
-            .ok_or(Error::InvalidData("tile index out of bounds"))?;
-        self.extract_item_slice(extents)
-    }
-
-    /// Extract item slice from extents (zero-copy, internal helper)
-    fn extract_item_slice(&self, extents: &[ExtentRange]) -> Result<&[u8]> {
-        // Only works for single-extent items
-        if extents.len() != 1 {
-            return Err(Error::Unsupported(
-                "multi-extent zero-copy not supported",
-            ));
-        }
-
-        let extent = &extents[0];
-
-        // Try idat
-        if let Some(idat_data) = &self.idat {
-            if extent.start() == 0 {
-                match extent {
-                    ExtentRange::WithLength(range) => {
-                        let len = (range.end - range.start) as usize;
-                        return Ok(&idat_data[..len]);
-                    }
-                    ExtentRange::ToEnd(_) => {
-                        return Ok(idat_data.as_slice());
-                    }
-                }
-            }
-        }
-
-        // Try mdat
-        for mdat in &self.mdats {
-            if mdat.contains_extent(extent) {
-                return mdat.extent_slice(extent);
-            }
-        }
-
-        Err(Error::InvalidData("item not found"))
-    }
-
-    // ========================================
-    // Unified Cow-based API (idiomatic Rust)
-    // ========================================
-
-    /// Get animation frame data (automatically chooses zero-copy or owned)
-    ///
-    /// This method tries zero-copy first (single-extent frames), falling back
-    /// to owned data (multi-extent frames). Returns borrowed data when possible.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use avif_parse::AvifParser;
-    /// # use std::fs::File;
-    /// let parser = AvifParser::from_reader(&mut File::open("animation.avifs")?)?;
-    /// let frame_data = parser.frame_data(0)?;
-    /// // frame_data is Cow::Borrowed for single-extent, Cow::Owned for multi-extent
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
-    pub fn frame_data(&self, index: usize) -> Result<Cow<'_, [u8]>> {
-        // Try zero-copy first
-        match self.animation_frame_slice(index) {
-            Ok((slice, _)) => Ok(Cow::Borrowed(slice)),
-            Err(_) => {
-                // Fall back to owned (multi-extent or error)
-                let frame = self.animation_frame(index)?;
-                Ok(Cow::Owned(frame.data.to_vec()))
-            }
-        }
-    }
-
-    /// Get primary item data (automatically chooses zero-copy or owned)
-    pub fn primary_data(&self) -> Result<Cow<'_, [u8]>> {
-        match self.primary_item_slice() {
-            Ok(slice) => Ok(Cow::Borrowed(slice)),
-            Err(_) => {
-                let item = self.primary_item()?;
-                Ok(Cow::Owned(item.to_vec()))
-            }
-        }
-    }
-
-    /// Get alpha item data (automatically chooses zero-copy or owned)
-    pub fn alpha_data(&self) -> Option<Result<Cow<'_, [u8]>>> {
-        self.alpha_item_extents.as_ref().map(|_| {
-            match self.alpha_item_slice() {
-                Some(Ok(slice)) => Ok(Cow::Borrowed(slice)),
-                _ => {
-                    // alpha_item() returns Option<Result<TryVec<u8>>>
-                    match self.alpha_item() {
-                        Some(Ok(item)) => Ok(Cow::Owned(item.to_vec())),
-                        Some(Err(e)) => Err(e),
-                        None => Err(Error::InvalidData("alpha item missing")),
-                    }
-                }
-            }
-        })
-    }
-
-    /// Get grid tile data (automatically chooses zero-copy or owned)
-    pub fn tile_data(&self, index: usize) -> Result<Cow<'_, [u8]>> {
-        match self.grid_tile_slice(index) {
-            Ok(slice) => Ok(Cow::Borrowed(slice)),
-            Err(_) => {
-                let tile = self.grid_tile(index)?;
-                Ok(Cow::Owned(tile.to_vec()))
-            }
-        }
-    }
-
-    /// Check if zero-copy is possible for this frame
-    ///
-    /// Returns `true` if the frame is stored in a single extent and can be
-    /// accessed via zero-copy slice methods.
-    pub fn can_zero_copy_frame(&self, index: usize) -> bool {
-        self.animation_frame_slice(index).is_ok()
-    }
-
-    /// Check if zero-copy is possible for primary item
-    pub fn can_zero_copy_primary(&self) -> bool {
-        self.primary_item_slice().is_ok()
-    }
-
-    // ========================================
-    // Iterator API (idiomatic Rust)
-    // ========================================
-
-    /// Iterate over animation frames (copying)
-    ///
-    /// Returns an iterator that extracts frames on-demand. Each frame is
-    /// copied into owned memory.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use avif_parse::AvifParser;
-    /// # use std::fs::File;
-    /// let parser = AvifParser::from_reader(&mut File::open("animation.avifs")?)?;
-    /// for frame in parser.frames() {
-    ///     let frame = frame?;
-    ///     println!("Frame: {} bytes, {}ms", frame.data.len(), frame.duration_ms);
-    /// }
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
-    pub fn frames(&self) -> FrameIterator<'_> {
-        let count = self
-            .animation_info()
-            .map(|info| info.frame_count)
-            .unwrap_or(0);
-        FrameIterator {
-            parser: self,
-            index: 0,
-            count,
-        }
-    }
-
-    /// Iterate over animation frames (returns Cow for zero-copy when possible)
-    ///
-    /// Returns an iterator that provides `Cow<[u8]>` for each frame, automatically
-    /// choosing zero-copy (borrowed) or owned based on extent structure.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use avif_parse::AvifParser;
-    /// # use std::fs::File;
-    /// let parser = AvifParser::from_reader(&mut File::open("animation.avifs")?)?;
-    /// for (i, data) in parser.frame_data_iter().enumerate() {
-    ///     let data = data?;
-    ///     println!("Frame {}: {} bytes ({})",
-    ///         i, data.len(),
-    ///         if matches!(data, std::borrow::Cow::Borrowed(_)) { "zero-copy" } else { "copied" }
-    ///     );
-    /// }
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
-    pub fn frame_data_iter(&self) -> FrameDataIterator<'_> {
-        let count = self
-            .animation_info()
-            .map(|info| info.frame_count)
-            .unwrap_or(0);
-        FrameDataIterator {
-            parser: self,
-            index: 0,
-            count,
-        }
-    }
 }
 
-/// Iterator over animation frames (copying)
+/// Iterator over animation frames.
 ///
-/// Created by [`AvifParser::frames()`]. Extracts frames on-demand.
+/// Created by [`AvifParser::frames()`]. Yields [`FrameRef`] on demand.
 pub struct FrameIterator<'a> {
-    parser: &'a AvifParser,
+    parser: &'a AvifParser<'a>,
     index: usize,
     count: usize,
 }
 
 impl<'a> Iterator for FrameIterator<'a> {
-    type Item = Result<AnimationFrame>;
+    type Item = Result<FrameRef<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index >= self.count {
             return None;
         }
-        let result = self.parser.animation_frame(self.index);
+        let result = self.parser.frame(self.index);
         self.index += 1;
         Some(result)
     }
@@ -1459,40 +1366,7 @@ impl<'a> Iterator for FrameIterator<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for FrameIterator<'a> {
-    fn len(&self) -> usize {
-        self.count.saturating_sub(self.index)
-    }
-}
-
-/// Iterator over animation frame data (Cow for zero-copy when possible)
-///
-/// Created by [`AvifParser::frame_data_iter()`]. Returns `Cow<[u8]>` for each frame.
-pub struct FrameDataIterator<'a> {
-    parser: &'a AvifParser,
-    index: usize,
-    count: usize,
-}
-
-impl<'a> Iterator for FrameDataIterator<'a> {
-    type Item = Result<Cow<'a, [u8]>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.count {
-            return None;
-        }
-        let result = self.parser.frame_data(self.index);
-        self.index += 1;
-        Some(result)
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.count.saturating_sub(self.index);
-        (remaining, Some(remaining))
-    }
-}
-
-impl<'a> ExactSizeIterator for FrameDataIterator<'a> {
+impl ExactSizeIterator for FrameIterator<'_> {
     fn len(&self) -> usize {
         self.count.saturating_sub(self.index)
     }
@@ -1571,29 +1445,6 @@ impl MediaDataBox {
         Ok(())
     }
 
-    /// Zero-copy access to extent data (returns slice into mdat buffer)
-    fn extent_slice(&self, extent: &ExtentRange) -> Result<&[u8]> {
-        let start_offset = extent
-            .start()
-            .checked_sub(self.offset)
-            .ok_or(Error::InvalidData("mdat doesn't contain extent"))?;
-
-        let slice = match extent {
-            ExtentRange::WithLength(range) => {
-                let range_len = range
-                    .end
-                    .checked_sub(range.start)
-                    .ok_or(Error::InvalidData("invalid range"))?;
-                let end = start_offset
-                    .checked_add(range_len)
-                    .ok_or(Error::InvalidData("extent overflow"))?;
-                self.data.get(start_offset.try_into()?..end.try_into()?)
-            }
-            ExtentRange::ToEnd(_) => self.data.get(start_offset.try_into()?..),
-        };
-
-        slice.ok_or(Error::InvalidData("extent out of bounds"))
-    }
 }
 
 /// Used for 'infe' boxes within 'iinf' boxes
