@@ -56,6 +56,42 @@ These are transform/display properties. The parser should expose them; the decod
 - [ ] thmb — Thumbnail references
 - [ ] cdsc — Content description / metadata links
 
+## Test Corpus Coverage
+
+Which boxes have test files in av1-avif/ and link-u-samples/:
+
+| FourCC | Found | Files | Notes |
+|--------|-------|-------|-------|
+| cclv | No | 0 | |
+| amve | No | 0 | |
+| reve | No | 0 | |
+| ndwt | No | 0 | |
+| a1op | Yes | 3 | Apple multilayer, Xiph quebec_3layer_op2 |
+| lsel | Yes | 12 | Apple multilayer (7), Xiph (5) |
+| a1lx | Yes | 6 | Apple multilayer (2), Xiph (4) |
+| grpl | No | 0 | |
+| altr | No | 0 | |
+| thmb | Yes | 1 | Microsoft/Tomsk_with_thumbnails.avif |
+| cdsc | Yes | 16 | All Microsoft test files (in iref) |
+| sato | No | 0 | |
+| tmap | No | 0 | |
+| ster | No | 0 | |
+| hdlr | Yes | all | handler_type = pict in all tested files |
+
+## ftyp Brand Analysis
+
+| Source | major_brand | compatible_brands |
+|--------|-------------|-------------------|
+| Microsoft stills | avif | mif1, avif, miaf, MA1B |
+| Apple/Xiph multilayer | avif | mif1, avif, miaf |
+| Link-U stills | avif | avif, mif1, miaf, MA1B |
+| Netflix AVIS sequences | avis | avis, msf1, miaf, MA1B, iso8 |
+| link-u-samples .avifs | avis | avis, msf1, miaf, MA1B |
+
+- All files have minor_version=0
+- mif1/msf1 = HEIF base brands; miaf = MIAF brand; MA1B = AV1 MIAF profile
+- Multilayer files omit MA1B
+
 ## Notes
 
 ### What decoders handle vs what the parser exposes
