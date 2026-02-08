@@ -83,16 +83,20 @@ pub fn yuv420_to_rgb8(
 
             // Bilinear chroma upsampling
             // Map luma position to chroma position (with 0.5 offset for centering)
-            let chroma_x = (x as f32 + 0.5) * 0.5 - 0.5;
-            let chroma_y = (y as f32 + 0.5) * 0.5 - 0.5;
+            let chroma_x_raw = (x as f32 + 0.5) * 0.5 - 0.5;
+            let chroma_y_raw = (y as f32 + 0.5) * 0.5 - 0.5;
+
+            // Clamp to valid range BEFORE calculating floor
+            let chroma_x = chroma_x_raw.max(0.0).min(chroma_width as f32 - 1.0);
+            let chroma_y = chroma_y_raw.max(0.0).min(chroma_height as f32 - 1.0);
 
             // Get the 4 surrounding chroma samples
-            let cx0 = chroma_x.floor().max(0.0) as usize;
-            let cy0 = chroma_y.floor().max(0.0) as usize;
+            let cx0 = chroma_x.floor() as usize;
+            let cy0 = chroma_y.floor() as usize;
             let cx1 = (cx0 + 1).min(chroma_width - 1);
             let cy1 = (cy0 + 1).min(chroma_height - 1);
 
-            // Interpolation weights
+            // Interpolation weights (now guaranteed to be in [0, 1])
             let fx = chroma_x - cx0 as f32;
             let fy = chroma_y - cy0 as f32;
             let fx1 = 1.0 - fx;
