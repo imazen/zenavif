@@ -17,7 +17,7 @@ repository = "https://github.com/imazen/zenavif-parse"
 readme = "README.md"
 include = ["/README.md", "/Cargo.toml", "/LICENSE", "/src/*.rs", "/avif_parse.h"]
 keywords = ["avif", "image", "parser", "demuxer", "heif"]
-rust-version = "1.69"
+rust-version = "1.92"
 
 [lib]
 crate-type = ["rlib", "staticlib"]
