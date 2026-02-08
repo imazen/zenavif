@@ -85,11 +85,18 @@ just verify-pixels         # Run pixel verification
 ```
 
 **Results (51 references):**
-- ✅ 31 files match (though many formats not fully verified - returns OK for non-RGB8)
-- ❌ 20 files have mismatches
+- ✅ 34 files match (up from 31 after dimension fix)
+- ❌ 17 files have mismatches (down from 20)
 - ⊘ 4 files skipped (libavif also failed to decode)
 
 **CRITICAL BUGS FOUND:**
+
+0. **Dimension Cropping Bug** - ✅ FIXED (2026-02-07):
+   - **Root cause:** Decoder used AV1 buffer dimensions (with padding/alignment) instead of AVIF display dimensions
+   - **Example:** white_1x1.avif produced 1x128 instead of 1x1
+   - **Fix:** Convert YUV using buffer dimensions (for validation), then crop to display dimensions
+   - **Impact:** Fixed white_1x1, extended_pixi, all HDR dimension mismatches
+   - **Result:** Pixel verification improved from 31/51 to 34/51 matches
 
 1. **Dimension Mismatches - Grid Files:**
    - `sofa_grid1x5_420.avif`: zenavif produces 5120x154 (stitched) vs libavif 1024x770 (single tile)
