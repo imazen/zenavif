@@ -218,11 +218,17 @@ fn bilinear_chroma_sample_x8(
     let cy0 = chroma_y.floor() as usize;
     let cy1 = (cy0 + 1).min(chroma_height - 1);
     let fy = chroma_y - cy0 as f32;
-    let fy1 = 1.0 - fy;
 
-    // Process 8 pixels
-    let mut u_vals = [0f32; 8];
-    let mut v_vals = [0f32; 8];
+    // Gather data for 8 pixels
+    let mut fx_vals = [0f32; 8];
+    let mut u00_vals = [0f32; 8];
+    let mut u01_vals = [0f32; 8];
+    let mut u10_vals = [0f32; 8];
+    let mut u11_vals = [0f32; 8];
+    let mut v00_vals = [0f32; 8];
+    let mut v01_vals = [0f32; 8];
+    let mut v10_vals = [0f32; 8];
+    let mut v11_vals = [0f32; 8];
 
     for i in 0..8 {
         let x = x_start + i;
@@ -232,26 +238,48 @@ fn bilinear_chroma_sample_x8(
         let chroma_x = chroma_x_raw.max(0.0).min(chroma_width as f32 - 1.0);
         let cx0 = chroma_x.floor() as usize;
         let cx1 = (cx0 + 1).min(chroma_width - 1);
-        let fx = chroma_x - cx0 as f32;
-        let fx1 = 1.0 - fx;
+        fx_vals[i] = chroma_x - cx0 as f32;
 
         // Load 4 surrounding chroma samples
-        let u00 = u_plane[cy0 * u_stride + cx0] as f32;
-        let u01 = u_plane[cy0 * u_stride + cx1] as f32;
-        let u10 = u_plane[cy1 * u_stride + cx0] as f32;
-        let u11 = u_plane[cy1 * u_stride + cx1] as f32;
+        u00_vals[i] = u_plane[cy0 * u_stride + cx0] as f32;
+        u01_vals[i] = u_plane[cy0 * u_stride + cx1] as f32;
+        u10_vals[i] = u_plane[cy1 * u_stride + cx0] as f32;
+        u11_vals[i] = u_plane[cy1 * u_stride + cx1] as f32;
 
-        let v00 = v_plane[cy0 * v_stride + cx0] as f32;
-        let v01 = v_plane[cy0 * v_stride + cx1] as f32;
-        let v10 = v_plane[cy1 * v_stride + cx0] as f32;
-        let v11 = v_plane[cy1 * v_stride + cx1] as f32;
-
-        // Bilinear interpolation
-        u_vals[i] = u00 * fx1 * fy1 + u01 * fx * fy1 + u10 * fx1 * fy + u11 * fx * fy;
-        v_vals[i] = v00 * fx1 * fy1 + v01 * fx * fy1 + v10 * fx1 * fy + v11 * fx * fy;
+        v00_vals[i] = v_plane[cy0 * v_stride + cx0] as f32;
+        v01_vals[i] = v_plane[cy0 * v_stride + cx1] as f32;
+        v10_vals[i] = v_plane[cy1 * v_stride + cx0] as f32;
+        v11_vals[i] = v_plane[cy1 * v_stride + cx1] as f32;
     }
 
-    (f32x8::from_array(token, u_vals), f32x8::from_array(token, v_vals))
+    // Load into SIMD vectors
+    let fx = f32x8::from_array(token, fx_vals);
+    let u00 = f32x8::from_array(token, u00_vals);
+    let u01 = f32x8::from_array(token, u01_vals);
+    let u10 = f32x8::from_array(token, u10_vals);
+    let u11 = f32x8::from_array(token, u11_vals);
+    let v00 = f32x8::from_array(token, v00_vals);
+    let v01 = f32x8::from_array(token, v01_vals);
+    let v10 = f32x8::from_array(token, v10_vals);
+    let v11 = f32x8::from_array(token, v11_vals);
+
+    // Precompute weights
+    let one = f32x8::splat(token, 1.0);
+    let fx1 = one - fx;
+    let fy_vec = f32x8::splat(token, fy);
+    let fy1_vec = f32x8::splat(token, 1.0 - fy);
+
+    // Bilinear interpolation using FMA: u00*(1-fx)*(1-fy) + u01*fx*(1-fy) + u10*(1-fx)*fy + u11*fx*fy
+    // Rearrange: ((u00*(1-fx) + u01*fx)*(1-fy)) + ((u10*(1-fx) + u11*fx)*fy)
+    let u_top = u01.mul_add(fx, u00 * fx1);     // u00*(1-fx) + u01*fx
+    let u_bot = u11.mul_add(fx, u10 * fx1);     // u10*(1-fx) + u11*fx
+    let u_result = u_bot.mul_add(fy_vec, u_top * fy1_vec); // u_top*(1-fy) + u_bot*fy
+
+    let v_top = v01.mul_add(fx, v00 * fx1);
+    let v_bot = v11.mul_add(fx, v10 * fx1);
+    let v_result = v_bot.mul_add(fy_vec, v_top * fy1_vec);
+
+    (u_result, v_result)
 }
 
 /// SIMD helper: Bilinear chroma sample for a single pixel
