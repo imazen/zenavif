@@ -408,6 +408,166 @@ fn eager_av1_config() {
     assert!(av1c.monochrome);
 }
 
+// ============================================================================
+// Transform / display property tests
+// ============================================================================
+
+#[test]
+fn parser_rotation_90() {
+    let bytes = std::fs::read("av1-avif/testFiles/Link-U/kimono.rotate90.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let irot = parser.rotation().expect("irot should be present");
+    // File has angle_code=3, which is 270° CCW
+    assert_eq!(irot.angle, 270);
+}
+
+#[test]
+fn parser_rotation_270() {
+    let bytes = std::fs::read("av1-avif/testFiles/Link-U/kimono.rotate270.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let irot = parser.rotation().expect("irot should be present");
+    // File has angle_code=1, which is 90° CCW
+    assert_eq!(irot.angle, 90);
+}
+
+#[test]
+fn parser_mirror_horizontal() {
+    let bytes = std::fs::read("av1-avif/testFiles/Link-U/kimono.mirror-horizontal.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let imir = parser.mirror().expect("imir should be present");
+    assert_eq!(imir.axis, 1);
+    assert!(parser.rotation().is_none());
+}
+
+#[test]
+fn parser_mirror_vertical() {
+    let bytes = std::fs::read("av1-avif/testFiles/Link-U/kimono.mirror-vertical.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let imir = parser.mirror().expect("imir should be present");
+    assert_eq!(imir.axis, 0);
+    assert!(parser.rotation().is_none());
+}
+
+#[test]
+fn parser_clean_aperture() {
+    let bytes = std::fs::read("av1-avif/testFiles/Link-U/kimono.crop.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let clap = parser.clean_aperture().expect("clap should be present");
+    assert_eq!(clap.width_n, 385);
+    assert_eq!(clap.width_d, 1);
+    assert_eq!(clap.height_n, 330);
+    assert_eq!(clap.height_d, 1);
+    assert_eq!(clap.horiz_off_n, 207);
+    assert_eq!(clap.horiz_off_d, 2);
+    assert_eq!(clap.vert_off_n, -616);
+    assert_eq!(clap.vert_off_d, 2);
+}
+
+#[test]
+fn parser_pixel_aspect_ratio() {
+    let bytes = std::fs::read("av1-avif/testFiles/Link-U/kimono.crop.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let pasp = parser.pixel_aspect_ratio().expect("pasp should be present");
+    assert_eq!(pasp.h_spacing, 1);
+    assert_eq!(pasp.v_spacing, 1);
+}
+
+#[test]
+fn parser_combined_transforms() {
+    // This file has irot + imir + clap + pasp all together
+    let bytes = std::fs::read("av1-avif/testFiles/Link-U/kimono.mirror-vertical.rotate270.crop.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let irot = parser.rotation().expect("irot should be present");
+    assert_eq!(irot.angle, 90); // angle_code=1
+
+    let imir = parser.mirror().expect("imir should be present");
+    assert_eq!(imir.axis, 0);
+
+    let clap = parser.clean_aperture().expect("clap should be present");
+    assert_eq!(clap.width_n, 330);
+    assert_eq!(clap.width_d, 1);
+    assert_eq!(clap.height_n, 385);
+    assert_eq!(clap.height_d, 1);
+
+    assert!(parser.pixel_aspect_ratio().is_some());
+}
+
+#[test]
+fn parser_hdr_metadata() {
+    let bytes = std::fs::read("av1-avif/testFiles/Microsoft/Chimera_10bit_cropped_to_1920x1008_with_HDR_metadata.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let clli = parser.content_light_level().expect("clli should be present");
+    assert_eq!(clli.max_content_light_level, 2000);
+    assert_eq!(clli.max_pic_average_light_level, 1500);
+
+    let mdcv = parser.mastering_display().expect("mdcv should be present");
+    // Green, Blue, Red primaries (SMPTE ST 2086 order)
+    assert_eq!(mdcv.primaries[0], (15000, 20000));
+    assert_eq!(mdcv.primaries[1], (25000, 30000));
+    assert_eq!(mdcv.primaries[2], (5000, 10000));
+    assert_eq!(mdcv.white_point, (35000, 40000));
+    assert_eq!(mdcv.max_luminance, 100_000_000);
+    assert_eq!(mdcv.min_luminance, 200_000);
+
+    // This file also has clap
+    let clap = parser.clean_aperture().expect("clap should be present");
+    assert_eq!(clap.width_n, 1920);
+    assert_eq!(clap.height_n, 1008);
+}
+
+#[test]
+fn parser_no_transforms_on_simple_image() {
+    // Monochrome.avif has no transform properties
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    assert!(parser.rotation().is_none());
+    assert!(parser.mirror().is_none());
+    assert!(parser.clean_aperture().is_none());
+    assert!(parser.pixel_aspect_ratio().is_none());
+    assert!(parser.content_light_level().is_none());
+    assert!(parser.mastering_display().is_none());
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn eager_transforms() {
+    let input = &mut std::fs::File::open("av1-avif/testFiles/Link-U/kimono.mirror-vertical.rotate270.crop.avif").expect("Unknown file");
+    let context = zenavif_parse::read_avif(input).expect("read_avif failed");
+
+    let irot = context.rotation.expect("irot should be present");
+    assert_eq!(irot.angle, 90);
+
+    let imir = context.mirror.expect("imir should be present");
+    assert_eq!(imir.axis, 0);
+
+    assert!(context.clean_aperture.is_some());
+    assert!(context.pixel_aspect_ratio.is_some());
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn eager_hdr_metadata() {
+    let input = &mut std::fs::File::open("av1-avif/testFiles/Microsoft/Chimera_10bit_cropped_to_1920x1008_with_HDR_metadata.avif").expect("Unknown file");
+    let context = zenavif_parse::read_avif(input).expect("read_avif failed");
+
+    let clli = context.content_light_level.expect("clli should be present");
+    assert_eq!(clli.max_content_light_level, 2000);
+    assert_eq!(clli.max_pic_average_light_level, 1500);
+
+    let mdcv = context.mastering_display.expect("mdcv should be present");
+    assert_eq!(mdcv.max_luminance, 100_000_000);
+    assert_eq!(mdcv.min_luminance, 200_000);
+}
+
 #[test]
 fn parser_alpha_data() {
     let bytes = std::fs::read(IMAGE_AVIF_ALPHA).expect("read file");
