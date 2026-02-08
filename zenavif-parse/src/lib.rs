@@ -863,19 +863,6 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
 
     // Extract grid configuration if this is a grid image
     let mut grid_config = if is_grid {
-        log::debug!("Grid: Looking for ImageGrid property for item_id={}", meta.primary_item_id);
-        log::debug!("Grid: Total properties available: {}", meta.properties.len());
-        for prop in &meta.properties {
-            log::debug!("Grid:   Property for item_id={}: {:?}", prop.item_id,
-                       match &prop.property {
-                           ItemProperty::ImageGrid(g) => format!("ImageGrid({:?})", g),
-                           ItemProperty::ImageSpatialExtents(e) => format!("ImageSpatialExtents({}x{})", e.width, e.height),
-                           ItemProperty::Channels(_) => "Channels".to_string(),
-                           ItemProperty::AuxiliaryType(_) => "AuxiliaryType".to_string(),
-                           ItemProperty::Unsupported => "Unsupported".to_string(),
-                       });
-        }
-
         meta.properties
             .iter()
             .find(|prop| {
@@ -884,7 +871,7 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
             })
             .and_then(|prop| match &prop.property {
                 ItemProperty::ImageGrid(config) => {
-                    log::debug!("Grid: Found explicit ImageGrid config: {:?}", config);
+                    log::debug!("Grid: found explicit ImageGrid property: {:?}", config);
                     Some(config.clone())
                 },
                 _ => None,
@@ -913,8 +900,7 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
             ids.push(*tile_id)?;
         }
 
-        log::debug!("Grid: found {} tile references (sorted by dimgIdx), grid_config present: {}",
-                   ids.len(), grid_config.is_some());
+        // No logging here - too verbose for production
 
         // If no ImageGrid property found, calculate grid layout from ispe dimensions
         if grid_config.is_none() && !ids.is_empty() {
@@ -940,8 +926,7 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
                 if grid.width % tile.width == 0 && grid.height % tile.height == 0 {
                     let columns = (grid.width / tile.width) as u8;
                     let rows = (grid.height / tile.height) as u8;
-                    log::debug!("Grid: calculated {}x{} layout from ispe (grid {}x{} ÷ tile {}x{})",
-                               rows, columns, grid.width, grid.height, tile.width, tile.height);
+                    log::debug!("Grid: calculated {}×{} layout from ispe dimensions", rows, columns);
                     grid_config = Some(GridConfig {
                         rows,
                         columns,
@@ -956,7 +941,7 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
 
             // Fallback: if calculation failed or ispe not available, use N×1 inference
             if grid_config.is_none() {
-                log::debug!("Grid: inferring {}x1 layout (fallback, no ispe or calculation failed)", ids.len());
+                log::debug!("Grid: using fallback {}×1 layout inference", ids.len());
                 grid_config = Some(GridConfig {
                     rows: ids.len() as u8,  // Changed: vertical stack
                     columns: 1,              // Changed: single column
@@ -1409,21 +1394,14 @@ fn read_ipco<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
             BoxType::PixelInformationBox => ItemProperty::Channels(read_pixi(&mut b, options)?),
             BoxType::AuxiliaryTypeProperty => ItemProperty::AuxiliaryType(read_auxc(&mut b, options)?),
             BoxType::ImageSpatialExtentsBox => ItemProperty::ImageSpatialExtents(read_ispe(&mut b, options)?),
-            BoxType::ImageGridBox => {
-                log::debug!("Grid: Parsing ImageGrid property box");
-                let grid = read_grid(&mut b, options)?;
-                log::debug!("Grid: Parsed ImageGrid: {:?}", grid);
-                ItemProperty::ImageGrid(grid)
-            },
+            BoxType::ImageGridBox => ItemProperty::ImageGrid(read_grid(&mut b, options)?),
             _ => {
-                log::debug!("Grid: Skipping property box type: {:?}", b.head.name);
                 skip_box_remain(&mut b)?;
                 ItemProperty::Unsupported
             },
         };
         properties.push(prop)?;
     }
-    log::debug!("Grid: Parsed {} properties from ipco", properties.len());
     Ok(properties)
 }
 
