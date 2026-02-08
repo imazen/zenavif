@@ -23,15 +23,15 @@ Compared against https://github.com/AOMediaCodec/av1-avif/blob/main/index.bs (v1
 
 These are transform/display properties. The parser should expose them; the decoder (zenavif) applies them.
 
-- [ ] irot — Rotation (0/90/180/270 degrees). Single byte: angle field.
-- [ ] imir — Mirror/flip. Single byte: axis field.
-- [ ] clap — Clean aperture (crop). 8 fields (4 rationals). Spec 1.2 adds: origin SHALL be anchored to 0,0 unless un-cropped image is a secondary item.
-- [ ] pasp — Pixel aspect ratio. If present, spec says SHALL be 1:1 for AVIF.
+- [x] irot — Rotation (0/90/180/270 degrees). Single byte: angle field.
+- [x] imir — Mirror/flip. Single byte: axis field.
+- [x] clap — Clean aperture (crop). 8 fields (4 rationals). Spec 1.2 adds: origin SHALL be anchored to 0,0 unless un-cropped image is a secondary item.
+- [x] pasp — Pixel aspect ratio. If present, spec says SHALL be 1:1 for AVIF.
 
 ## Priority 3 — Parse and Expose (HDR metadata)
 
-- [ ] clli — Content Light Level Info (max_content_light_level, max_pic_average_light_level)
-- [ ] mdcv — Mastering Display Colour Volume (primaries, white point, luminance range)
+- [x] clli — Content Light Level Info (max_content_light_level, max_pic_average_light_level)
+- [x] mdcv — Mastering Display Colour Volume (primaries, white point, luminance range)
 - [ ] cclv — Content Colour Volume
 - [ ] amve — Ambient Viewing Environment
 - [ ] reve — Reference Viewing Environment (v0)
