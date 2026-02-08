@@ -581,8 +581,44 @@ impl ManagedAvifDecoder {
         let bit_depth = primary.bit_depth();
         let layout = primary.pixel_layout();
 
-        let color = primary.color_info();
+        let av1_color = primary.color_info();
         let has_alpha = alpha.is_some();
+
+        // CICP precedence (per MIAF ISO 23000-22 Amd 2):
+        //   container colr box > AV1 bitstream > AVIF defaults (1/13/6/full)
+        //
+        // Matrix coefficients and color range always come from AV1 bitstream
+        // because they govern YUV→RGB conversion before any ICC profile applies.
+        let matrix_coefficients = convert_matrix(av1_color.matrix_coefficients);
+        let color_range = convert_color_range(av1_color.color_range);
+
+        let (color_primaries, transfer_characteristics, icc_profile) =
+            match self.parser.color_info() {
+                Some(zenavif_parse::ColorInformation::Nclx {
+                    color_primaries: cp,
+                    transfer_characteristics: tc,
+                    ..
+                }) => (
+                    ColorPrimaries(*cp as u8),
+                    TransferCharacteristics(*tc as u8),
+                    None,
+                ),
+                Some(zenavif_parse::ColorInformation::IccProfile(icc)) => {
+                    // ICC overrides CP and TC for color management, but we
+                    // still populate those fields from AV1 as a fallback
+                    (
+                        convert_color_primaries(av1_color.primaries),
+                        convert_transfer(av1_color.transfer_characteristics),
+                        Some(icc.clone()),
+                    )
+                }
+                None => (
+                    convert_color_primaries(av1_color.primaries),
+                    convert_transfer(av1_color.transfer_characteristics),
+                    None,
+                ),
+            };
+
         let info = ImageInfo {
             width: width as u32,
             height: height as u32,
@@ -590,12 +626,12 @@ impl ManagedAvifDecoder {
             has_alpha,
             premultiplied_alpha: self.parser.premultiplied_alpha(),
             monochrome: matches!(layout, PixelLayout::I400),
-            color_primaries: convert_color_primaries(color.primaries),
-            transfer_characteristics: convert_transfer(color.transfer_characteristics),
-            matrix_coefficients: convert_matrix(color.matrix_coefficients),
-            color_range: convert_color_range(color.color_range),
+            color_primaries,
+            transfer_characteristics,
+            matrix_coefficients,
+            color_range,
             chroma_sampling: convert_chroma_sampling(layout),
-            icc_profile: None,
+            icc_profile,
         };
 
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
