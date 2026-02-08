@@ -488,6 +488,9 @@ struct SingleItemTypeReferenceBox {
     item_type: FourCC,
     from_item_id: u32,
     to_item_id: u32,
+    /// Index of this reference within the list of references of the same type from the same item
+    /// (0-based). This is the dimgIdx for grid tiles.
+    reference_index: u16,
 }
 
 /// Potential sizes (in bytes) of variable-sized fields of the 'iloc' box
@@ -881,14 +884,25 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
 
     // Find tile item IDs if this is a grid
     let tile_item_ids: TryVec<u32> = if is_grid {
-        let mut ids = TryVec::new();
+        // Collect tiles with their reference index
+        let mut tiles_with_index: TryVec<(u32, u16)> = TryVec::new();
         for iref in meta.item_references.iter() {
             // Grid items reference tiles via "dimg" (derived image) type
             if iref.from_item_id == meta.primary_item_id && iref.item_type == b"dimg" {
-                ids.push(iref.to_item_id)?;
+                tiles_with_index.push((iref.to_item_id, iref.reference_index))?;
             }
         }
-        log::debug!("Grid: found {} tile references, grid_config present: {}",
+
+        // Sort tiles by reference_index to get correct grid order
+        tiles_with_index.sort_by_key(|&(_, idx)| idx);
+
+        // Extract just the IDs in sorted order
+        let mut ids = TryVec::new();
+        for (tile_id, _) in tiles_with_index.iter() {
+            ids.push(*tile_id)?;
+        }
+
+        log::debug!("Grid: found {} tile references (sorted by dimgIdx), grid_config present: {}",
                    ids.len(), grid_config.is_some());
 
         // If no ImageGrid property found, infer grid layout
@@ -1210,7 +1224,7 @@ fn read_iref<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
             be_u32(&mut b)?
         };
         let reference_count = be_u16(&mut b)?;
-        for _ in 0..reference_count {
+        for reference_index in 0..reference_count {
             let to_item_id = if version == 0 {
                 be_u16(&mut b)?.into()
             } else {
@@ -1223,6 +1237,7 @@ fn read_iref<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
                 item_type: b.head.name.into(),
                 from_item_id,
                 to_item_id,
+                reference_index,
             })?;
         }
         check_parser_state(&b.head, &b.content)?;
