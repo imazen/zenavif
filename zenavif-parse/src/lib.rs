@@ -1193,6 +1193,11 @@ fn read_pixi<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
     debug_assert_eq!(num_channels, channels.len());
     src.read_exact(&mut channels).map_err(|_| Error::InvalidData("invalid num_channels"))?;
 
+    // In lenient mode, skip any extra bytes (e.g., extended_pixi.avif has 6 extra bytes)
+    if options.lenient && src.bytes_left() > 0 {
+        skip(src, src.bytes_left())?;
+    }
+
     check_parser_state(&src.head, &src.content)?;
     Ok(channels)
 }
