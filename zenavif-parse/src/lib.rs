@@ -29,6 +29,8 @@ use crate::boxes::{BoxType, FourCC};
 /// This crate can be used from C.
 pub mod c_api;
 
+pub use enough::{Stop, StopReason, Unstoppable};
+
 // Arbitrary buffer size limit used for raw read_bufs on a box.
 // const BUF_SIZE_LIMIT: u64 = 10 * 1024 * 1024;
 
@@ -143,16 +145,21 @@ pub enum Error {
     NoMoov,
     /// Out of memory
     OutOfMemory,
+    /// Resource limit exceeded during parsing
+    ResourceLimitExceeded(&'static str),
+    /// Operation was stopped/cancelled
+    Stopped(enough::StopReason),
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let msg = match self {
-            Self::InvalidData(s) | Self::Unsupported(s) => s,
+            Self::InvalidData(s) | Self::Unsupported(s) | Self::ResourceLimitExceeded(s) => s,
             Self::UnexpectedEOF => "EOF",
             Self::Io(err) => return err.fmt(f),
             Self::NoMoov => "Missing Moov box",
             Self::OutOfMemory => "OOM",
+            Self::Stopped(reason) => return write!(f, "Stopped: {}", reason),
         };
         f.write_str(msg)
     }
@@ -206,6 +213,12 @@ impl From<Error> for std::io::Error {
 impl From<TryReserveError> for Error {
     fn from(_: TryReserveError) -> Self {
         Self::OutOfMemory
+    }
+}
+
+impl From<enough::StopReason> for Error {
+    fn from(reason: enough::StopReason) -> Self {
+        Self::Stopped(reason)
     }
 }
 
@@ -284,6 +297,123 @@ pub struct ParseOptions {
     ///
     /// Default: false (strict validation)
     pub lenient: bool,
+}
+
+/// Configuration for parsing AVIF files with resource limits and validation options
+///
+/// Provides fine-grained control over resource consumption during AVIF parsing,
+/// allowing defensive parsing against malicious or malformed files.
+///
+/// Resource limits are checked **before** allocations occur, preventing out-of-memory
+/// conditions from malicious files that claim unrealistic dimensions or counts.
+///
+/// # Examples
+///
+/// ```rust
+/// use avif_parse::DecodeConfig;
+///
+/// // Default limits (suitable for most apps)
+/// let config = DecodeConfig::default();
+///
+/// // Strict limits for untrusted input
+/// let config = DecodeConfig::default()
+///     .with_peak_memory_limit(100_000_000)  // 100MB
+///     .with_total_megapixels_limit(64)       // 64MP max
+///     .with_max_animation_frames(100);       // 100 frames
+///
+/// // No limits (backwards compatible with read_avif)
+/// let config = DecodeConfig::unlimited();
+/// ```
+#[derive(Debug, Clone)]
+pub struct DecodeConfig {
+    /// Maximum peak heap memory usage in bytes.
+    /// Default: 1GB (1,000,000,000 bytes)
+    pub peak_memory_limit: Option<u64>,
+
+    /// Maximum total megapixels for grid images.
+    /// Default: 512 megapixels
+    pub total_megapixels_limit: Option<u32>,
+
+    /// Maximum megapixels per frame/tile.
+    /// Default: 256 megapixels
+    pub frame_megapixels_limit: Option<u32>,
+
+    /// Maximum number of animation frames.
+    /// Default: 10,000 frames
+    pub max_animation_frames: Option<u32>,
+
+    /// Maximum number of grid tiles.
+    /// Default: 1,000 tiles
+    pub max_grid_tiles: Option<u32>,
+
+    /// Enable lenient parsing mode.
+    /// Default: false (strict validation)
+    pub lenient: bool,
+}
+
+impl Default for DecodeConfig {
+    fn default() -> Self {
+        Self {
+            peak_memory_limit: Some(1_000_000_000),
+            total_megapixels_limit: Some(512),
+            frame_megapixels_limit: Some(256),
+            max_animation_frames: Some(10_000),
+            max_grid_tiles: Some(1_000),
+            lenient: false,
+        }
+    }
+}
+
+impl DecodeConfig {
+    /// Create a configuration with no resource limits.
+    ///
+    /// Equivalent to the behavior of `read_avif()` before resource limits were added.
+    pub fn unlimited() -> Self {
+        Self {
+            peak_memory_limit: None,
+            total_megapixels_limit: None,
+            frame_megapixels_limit: None,
+            max_animation_frames: None,
+            max_grid_tiles: None,
+            lenient: false,
+        }
+    }
+
+    /// Set the peak memory limit in bytes
+    pub fn with_peak_memory_limit(mut self, bytes: u64) -> Self {
+        self.peak_memory_limit = Some(bytes);
+        self
+    }
+
+    /// Set the total megapixels limit for grid images
+    pub fn with_total_megapixels_limit(mut self, megapixels: u32) -> Self {
+        self.total_megapixels_limit = Some(megapixels);
+        self
+    }
+
+    /// Set the per-frame/per-tile megapixels limit
+    pub fn with_frame_megapixels_limit(mut self, megapixels: u32) -> Self {
+        self.frame_megapixels_limit = Some(megapixels);
+        self
+    }
+
+    /// Set the maximum animation frame count
+    pub fn with_max_animation_frames(mut self, frames: u32) -> Self {
+        self.max_animation_frames = Some(frames);
+        self
+    }
+
+    /// Set the maximum grid tile count
+    pub fn with_max_grid_tiles(mut self, tiles: u32) -> Self {
+        self.max_grid_tiles = Some(tiles);
+        self
+    }
+
+    /// Enable lenient parsing mode
+    pub fn lenient(mut self, lenient: bool) -> Self {
+        self.lenient = lenient;
+        self
+    }
 }
 
 /// Grid configuration for tiled/grid-based AVIF images
@@ -1766,15 +1896,106 @@ fn skip_box_remain<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<()> {
     skip(src, remain)
 }
 
-/// Read the contents of an AVIF file with custom parsing options
+struct ResourceTracker<'a> {
+    config: &'a DecodeConfig,
+    current_memory: u64,
+    peak_memory: u64,
+}
+
+impl<'a> ResourceTracker<'a> {
+    fn new(config: &'a DecodeConfig) -> Self {
+        Self {
+            config,
+            current_memory: 0,
+            peak_memory: 0,
+        }
+    }
+
+    fn reserve(&mut self, bytes: u64) -> Result<()> {
+        self.current_memory = self.current_memory.saturating_add(bytes);
+        self.peak_memory = self.peak_memory.max(self.current_memory);
+
+        if let Some(limit) = self.config.peak_memory_limit {
+            if self.peak_memory > limit {
+                return Err(Error::ResourceLimitExceeded("peak memory limit exceeded"));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn release(&mut self, bytes: u64) {
+        self.current_memory = self.current_memory.saturating_sub(bytes);
+    }
+
+    fn validate_total_megapixels(&self, width: u32, height: u32) -> Result<()> {
+        if let Some(limit) = self.config.total_megapixels_limit {
+            let megapixels = (width as u64)
+                .checked_mul(height as u64)
+                .ok_or(Error::InvalidData("dimension overflow"))?
+                / 1_000_000;
+
+            if megapixels > limit as u64 {
+                return Err(Error::ResourceLimitExceeded("total megapixels limit exceeded"));
+            }
+        }
+
+        Ok(())
+    }
+
+    #[allow(dead_code)] // Used by v2 AvifParser constructors
+    fn validate_frame_megapixels(&self, width: u32, height: u32) -> Result<()> {
+        if let Some(limit) = self.config.frame_megapixels_limit {
+            let megapixels = (width as u64)
+                .checked_mul(height as u64)
+                .ok_or(Error::InvalidData("dimension overflow"))?
+                / 1_000_000;
+
+            if megapixels > limit as u64 {
+                return Err(Error::ResourceLimitExceeded("frame megapixels limit exceeded"));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_animation_frames(&self, count: u32) -> Result<()> {
+        if let Some(limit) = self.config.max_animation_frames {
+            if count > limit {
+                return Err(Error::ResourceLimitExceeded("animation frame count limit exceeded"));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_grid_tiles(&self, count: u32) -> Result<()> {
+        if let Some(limit) = self.config.max_grid_tiles {
+            if count > limit {
+                return Err(Error::ResourceLimitExceeded("grid tile count limit exceeded"));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Read the contents of an AVIF file with resource limits and cancellation support
 ///
-/// Metadata is accumulated and returned in [`AvifData`] struct.
+/// This is the primary parsing function with full control over resource limits
+/// and cooperative cancellation via the [`Stop`] trait.
 ///
 /// # Arguments
 ///
 /// * `f` - Reader for the AVIF file
-/// * `options` - Parsing options (e.g., lenient mode)
-pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Result<AvifData> {
+/// * `config` - Resource limits and parsing options
+/// * `stop` - Cancellation token (use [`Unstoppable`] if not needed)
+pub fn read_avif_with_config<T: Read>(
+    f: &mut T,
+    config: &DecodeConfig,
+    stop: &dyn Stop,
+) -> Result<AvifData> {
+    let mut tracker = ResourceTracker::new(config);
     let mut f = OffsetReader::new(f);
 
     let mut iter = BoxIter::new(&mut f);
@@ -1798,13 +2019,17 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
     let mut mdats = TryVec::new();
     let mut animation_data: Option<(u32, SampleTable)> = None;
 
+    let parse_opts = ParseOptions { lenient: config.lenient };
+
     while let Some(mut b) = iter.next_box()? {
+        stop.check()?;
+
         match b.head.name {
             BoxType::MetadataBox => {
                 if meta.is_some() {
                     return Err(Error::InvalidData("There should be zero or one meta boxes per ISO 14496-12:2015 § 8.11.1.1"));
                 }
-                meta = Some(read_avif_meta(&mut b, options)?);
+                meta = Some(read_avif_meta(&mut b, &parse_opts)?);
             },
             BoxType::MovieBox => {
                 animation_data = read_moov(&mut b)?;
@@ -1812,7 +2037,10 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
             BoxType::MediaDataBox => {
                 if b.bytes_left() > 0 {
                     let offset = b.offset();
+                    let size = b.bytes_left() as u64;
+                    tracker.reserve(size)?;
                     let data = b.read_into_try_vec()?;
+                    tracker.release(size);
                     mdats.push(MediaDataBox { offset, data })?;
                 }
             },
@@ -1867,6 +2095,9 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
             }
         }
 
+        // Validate tile count
+        tracker.validate_grid_tiles(tiles_with_index.len() as u32)?;
+
         // Sort tiles by reference_index to get correct grid order
         tiles_with_index.sort_by_key(|&(_, idx)| idx);
 
@@ -1898,6 +2129,9 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
             });
 
             if let (Some(grid), Some(tile)) = (grid_dims, tile_dims) {
+                // Validate grid output dimensions
+                tracker.validate_total_megapixels(grid.width, grid.height)?;
+
                 // Validate tile dimensions are non-zero (already validated in read_ispe, but defensive)
                 if tile.width == 0 || tile.height == 0 {
                     log::warn!("Grid: tile has zero dimensions, using fallback");
@@ -2031,7 +2265,11 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
     // For grid images, we need to load tiles in the order specified by iref
     if is_grid {
         // Extract each tile in order
-        for &tile_id in tile_item_ids.iter() {
+        for (idx, &tile_id) in tile_item_ids.iter().enumerate() {
+            if idx % 16 == 0 {
+                stop.check()?;
+            }
+
             let mut tile_data = TryVec::new();
 
             if let Some(loc) = meta.iloc_items.iter().find(|loc| loc.item_id == tile_id) {
@@ -2062,6 +2300,9 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
 
     // Extract animation frames if this is an animated AVIF
     if let Some((media_timescale, sample_table)) = animation_data {
+        let frame_count = sample_table.sample_sizes.len() as u32;
+        tracker.validate_animation_frames(frame_count)?;
+
         log::debug!("Animation: extracting frames (media_timescale={})", media_timescale);
         match extract_animation_frames(&sample_table, media_timescale, &mut mdats) {
             Ok(frames) => {
@@ -2082,12 +2323,26 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
     Ok(context)
 }
 
+/// Read the contents of an AVIF file with custom parsing options
+///
+/// Uses unlimited resource limits for backwards compatibility.
+///
+/// # Arguments
+///
+/// * `f` - Reader for the AVIF file
+/// * `options` - Parsing options (e.g., lenient mode)
+pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Result<AvifData> {
+    let config = DecodeConfig::unlimited().lenient(options.lenient);
+    read_avif_with_config(f, &config, &Unstoppable)
+}
+
 /// Read the contents of an AVIF file
 ///
 /// Metadata is accumulated and returned in [`AvifData`] struct.
-/// Uses strict validation by default.
+/// Uses strict validation and unlimited resource limits by default.
 ///
-/// For custom parsing options (e.g., lenient mode), use [`read_avif_with_options`].
+/// For resource limits, use [`read_avif_with_config`].
+/// For lenient parsing, use [`read_avif_with_options`].
 pub fn read_avif<T: Read>(f: &mut T) -> Result<AvifData> {
     read_avif_with_options(f, &ParseOptions::default())
 }

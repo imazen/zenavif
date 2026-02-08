@@ -29,6 +29,7 @@ leb128 = "0.2.5"
 log = "0.4.20"
 fallible_collections = { version = "0.5.1", default-features = false, features = ["std"] }
 arrayvec = "0.7.6"
+enough = { version = "0.3.1", features = ["std"] }
 
 [dev-dependencies]
 env_logger = "0.11"
