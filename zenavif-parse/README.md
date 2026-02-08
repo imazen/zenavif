@@ -111,7 +111,7 @@ The original `read_avif()` / `AvifData` API and C FFI are behind the `eager` fea
 
 ```toml
 [dependencies]
-zenavif-parse = { version = "0.1", features = ["eager"] }
+zenavif-parse = { version = "0.2", features = ["eager"] }
 ```
 
 ```rust

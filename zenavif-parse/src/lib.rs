@@ -1396,11 +1396,10 @@ impl<'data> AvifParser<'data> {
     fn calculate_grid_config(meta: &AvifInternalMeta, tile_ids: &[u32]) -> Result<GridConfig> {
         // Try explicit grid property first
         for prop in &meta.properties {
-            if prop.item_id == meta.primary_item_id {
-                if let ItemProperty::ImageGrid(grid) = &prop.property {
+            if prop.item_id == meta.primary_item_id
+                && let ItemProperty::ImageGrid(grid) = &prop.property {
                     return Ok(grid.clone());
                 }
-            }
         }
 
         // Fall back to ispe calculation
@@ -1423,8 +1422,8 @@ impl<'data> AvifParser<'data> {
                 })
         });
 
-        if let (Some(grid), Some(tile)) = (grid_dims, tile_dims) {
-            if tile.width != 0
+        if let (Some(grid), Some(tile)) = (grid_dims, tile_dims)
+            && tile.width != 0
                 && tile.height != 0
                 && grid.width % tile.width == 0
                 && grid.height % tile.height == 0
@@ -1441,7 +1440,6 @@ impl<'data> AvifParser<'data> {
                     });
                 }
             }
-        }
 
         let tile_count = tile_ids.len();
         Ok(GridConfig {
@@ -2211,11 +2209,10 @@ impl<'a> ResourceTracker<'a> {
         self.current_memory = self.current_memory.saturating_add(bytes);
         self.peak_memory = self.peak_memory.max(self.current_memory);
 
-        if let Some(limit) = self.config.peak_memory_limit {
-            if self.peak_memory > limit {
+        if let Some(limit) = self.config.peak_memory_limit
+            && self.peak_memory > limit {
                 return Err(Error::ResourceLimitExceeded("peak memory limit exceeded"));
             }
-        }
 
         Ok(())
     }
@@ -2242,21 +2239,19 @@ impl<'a> ResourceTracker<'a> {
     }
 
     fn validate_animation_frames(&self, count: u32) -> Result<()> {
-        if let Some(limit) = self.config.max_animation_frames {
-            if count > limit {
+        if let Some(limit) = self.config.max_animation_frames
+            && count > limit {
                 return Err(Error::ResourceLimitExceeded("animation frame count limit exceeded"));
             }
-        }
 
         Ok(())
     }
 
     fn validate_grid_tiles(&self, count: u32) -> Result<()> {
-        if let Some(limit) = self.config.max_grid_tiles {
-            if count > limit {
+        if let Some(limit) = self.config.max_grid_tiles
+            && count > limit {
                 return Err(Error::ResourceLimitExceeded("grid tile count limit exceeded"));
             }
-        }
 
         Ok(())
     }
@@ -2923,14 +2918,13 @@ fn read_iprp<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
             0 => continue,
             x => x as usize - 1,
         };
-        if let Some(prop) = properties.get(index) {
-            if *prop != ItemProperty::Unsupported {
+        if let Some(prop) = properties.get(index)
+            && *prop != ItemProperty::Unsupported {
                 associated.push(AssociatedProperty {
                     item_id: a.item_id,
                     property: prop.try_clone()?,
                 })?;
             }
-        }
     }
     Ok(associated)
 }
