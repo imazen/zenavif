@@ -104,10 +104,10 @@ jobs:
         run: cross test --no-default-features --features managed --target ${{ matrix.target }}
 
   # ==========================================================================
-  # WASM build check (wasm32-wasip1 with simd128)
+  # WASM testing (wasm32-wasip1 with simd128, run via wasmtime)
   # ==========================================================================
   test-wasm:
-    name: WASM Build Check
+    name: WASM Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -119,13 +119,17 @@ jobs:
         with:
           targets: wasm32-wasip1
 
+      - name: Install wasmtime
+        uses: bytecodealliance/actions/wasmtime/setup@v1
+
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Build for WASM
+      - name: Test (managed, wasmtime)
         env:
+          CARGO_TARGET_WASM32_WASIP1_RUNNER: wasmtime
           RUSTFLAGS: "-C target-feature=+simd128"
-        run: cargo build --no-default-features --features managed --target wasm32-wasip1
+        run: cargo test --no-default-features --features managed --target wasm32-wasip1
 
   # ==========================================================================
   # Clippy
