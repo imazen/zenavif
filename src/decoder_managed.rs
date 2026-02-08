@@ -122,17 +122,20 @@ fn convert_chroma_sampling(layout: PixelLayout) -> ChromaSampling {
 /// Managed decoder wrapper - 100% safe!
 pub struct ManagedAvifDecoder {
     decoder: Rav1dDecoder,
-    avif_data: avif_parse::AvifData,
+    parser: zenavif_parse::AvifParser<'static>,
 }
 
 impl ManagedAvifDecoder {
     /// Create new decoder with AVIF data and configuration
     pub fn new(data: &[u8], config: &DecoderConfig) -> Result<Self> {
-        let mut cursor = std::io::Cursor::new(data);
-        // Use lenient parsing to handle files with non-critical validation issues
-        let options = avif_parse::ParseOptions { lenient: true };
-        let avif_data = avif_parse::read_avif_with_options(&mut cursor, &options)
-            .map_err(|e| at(Error::from(e)))?;
+        // Use zero-copy AvifParser — primary/alpha data returned as Cow::Borrowed
+        let parse_config = zenavif_parse::DecodeConfig::default().lenient(true);
+        let parser = zenavif_parse::AvifParser::from_owned_with_config(
+            data.to_vec(),
+            &parse_config,
+            &enough::Unstoppable,
+        )
+        .map_err(|e| at(Error::from(e)))?;
 
         let settings = Settings {
             threads: config.threads,
@@ -148,7 +151,7 @@ impl ManagedAvifDecoder {
             })
         })?;
 
-        Ok(Self { decoder, avif_data })
+        Ok(Self { decoder, parser })
     }
 
     /// Decode the primary image and optionally alpha channel
@@ -156,13 +159,15 @@ impl ManagedAvifDecoder {
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
         // Check if this is a grid image (tiled/multi-frame)
-        if self.avif_data.grid_config.is_some() {
+        if self.parser.grid_config().is_some() {
             return self.decode_grid(stop);
         }
 
+        let primary_data = self.parser.primary_data()
+            .map_err(|e| at(Error::from(e)))?;
         let primary_frame = self
             .decoder
-            .decode(&self.avif_data.primary_item)
+            .decode(&primary_data)
             .map_err(|_e| {
                 at(Error::Decode {
                     code: -1,
@@ -178,10 +183,11 @@ impl ManagedAvifDecoder {
 
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
-        let alpha_frame = if let Some(ref alpha_data) = self.avif_data.alpha_item {
+        let alpha_frame = if let Some(alpha_result) = self.parser.alpha_data() {
+            let alpha_data = alpha_result.map_err(|e| at(Error::from(e)))?;
             Some(
                 self.decoder
-                    .decode(alpha_data)
+                    .decode(&alpha_data)
                     .map_err(|_e| {
                         at(Error::Decode {
                             code: -1,
@@ -207,19 +213,21 @@ impl ManagedAvifDecoder {
     /// Decode a grid-based AVIF (tiled image)
     fn decode_grid(&mut self, stop: &impl Stop) -> Result<DecodedImage> {
         let grid_config = self
-            .avif_data
-            .grid_config
-            .as_ref()
-            .expect("grid_config should be Some");
+            .parser
+            .grid_config()
+            .expect("grid_config should be Some")
+            .clone();
 
         // Decode all tiles
         let mut tile_frames = Vec::new();
-        for (i, tile_data) in self.avif_data.grid_tiles.iter().enumerate() {
+        for i in 0..self.parser.grid_tile_count() {
             stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
+            let tile_data = self.parser.tile_data(i)
+                .map_err(|e| at(Error::from(e)))?;
             let frame = self
                 .decoder
-                .decode(tile_data)
+                .decode(&tile_data)
                 .map_err(|_e| {
                     at(Error::Decode {
                         code: -1,
@@ -239,14 +247,14 @@ impl ManagedAvifDecoder {
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
         // Stitch tiles together
-        self.stitch_tiles(tile_frames, grid_config, stop)
+        self.stitch_tiles(tile_frames, &grid_config, stop)
     }
 
     /// Stitch decoded tile frames into a single image
     fn stitch_tiles(
         &self,
         tiles: Vec<Frame>,
-        grid_config: &avif_parse::GridConfig,
+        grid_config: &zenavif_parse::GridConfig,
         stop: &impl Stop,
     ) -> Result<DecodedImage> {
         if tiles.is_empty() {
@@ -587,7 +595,7 @@ impl ManagedAvifDecoder {
             height: height as u32,
             bit_depth,
             has_alpha,
-            premultiplied_alpha: self.avif_data.premultiplied_alpha,
+            premultiplied_alpha: self.parser.premultiplied_alpha(),
             monochrome: matches!(layout, PixelLayout::I400),
             color_primaries: convert_color_primaries(color.primaries),
             transfer_characteristics: convert_transfer(color.transfer_characteristics),
@@ -851,7 +859,7 @@ impl ManagedAvifDecoder {
                 display_width,
                 display_height,
                 alpha_range,
-                self.avif_data.premultiplied_alpha,
+                self.parser.premultiplied_alpha(),
             )?;
         }
 
@@ -1180,7 +1188,7 @@ impl ManagedAvifDecoder {
                 display_height,
                 alpha_range,
                 info.bit_depth as u8,
-                self.avif_data.premultiplied_alpha,
+                self.parser.premultiplied_alpha(),
             )?;
         }
 

@@ -8,7 +8,7 @@ use enough::StopReason;
 pub enum Error {
     /// AVIF container parsing error
     #[error("AVIF parse error: {0}")]
-    Parse(#[from] avif_parse::Error),
+    Parse(#[from] zenavif_parse::Error),
 
     /// AV1 decode error from rav1d
     #[error("AV1 decode error {code}: {msg}")]

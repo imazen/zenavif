@@ -519,7 +519,7 @@ fn to_yuv_matrix(mc: Rav1dMatrixCoefficients) -> yuv::color::MatrixCoefficients 
 
 /// AVIF decoder
 pub struct AvifDecoder {
-    avif_data: avif_parse::AvifData,
+    parser: zenavif_parse::AvifParser<'static>,
     config: DecoderConfig,
     info: ImageInfo,
 }
@@ -529,14 +529,18 @@ impl AvifDecoder {
     ///
     /// This parses the AVIF container but does not decode the AV1 data yet.
     pub fn new(data: &[u8], config: &DecoderConfig) -> Result<Self> {
-        // Use lenient parsing to handle files with non-critical validation issues
-        let options = avif_parse::ParseOptions { lenient: true };
-        let avif_data = avif_parse::read_avif_with_options(&mut &data[..], &options)
-            .map_err(|e| at(Error::Parse(e)))?;
+        // Use zero-copy AvifParser — primary/alpha data returned as Cow::Borrowed
+        let parse_config = zenavif_parse::DecodeConfig::default().lenient(true);
+        let parser = zenavif_parse::AvifParser::from_owned_with_config(
+            data.to_vec(),
+            &parse_config,
+            &enough::Unstoppable,
+        )
+        .map_err(|e| at(Error::Parse(e)))?;
 
         // Extract metadata from the parsed AVIF
-        let metadata = avif_data
-            .primary_item_metadata()
+        let metadata = parser
+            .primary_metadata()
             .map_err(|e| at(Error::Parse(e)))?;
 
         let chroma_sampling = match metadata.chroma_subsampling {
@@ -546,12 +550,13 @@ impl AvifDecoder {
             _ => ChromaSampling::Cs420,
         };
 
+        let has_alpha = parser.alpha_data().is_some();
         let info = ImageInfo {
             width: metadata.max_frame_width.get(),
             height: metadata.max_frame_height.get(),
             bit_depth: metadata.bit_depth,
-            has_alpha: avif_data.alpha_item.is_some(),
-            premultiplied_alpha: avif_data.premultiplied_alpha,
+            has_alpha,
+            premultiplied_alpha: parser.premultiplied_alpha(),
             monochrome: metadata.monochrome,
             // Color info will be determined from decoded sequence header
             color_primaries: ColorPrimaries::default(),
@@ -573,7 +578,7 @@ impl AvifDecoder {
         }
 
         Ok(Self {
-            avif_data,
+            parser,
             config: config.clone(),
             info,
         })
@@ -593,7 +598,9 @@ impl AvifDecoder {
         let mut decoder = Rav1dDecoder::new(&self.config)?;
 
         // Decode color image
-        let color_picture = decoder.decode(&self.avif_data.primary_item)?;
+        let primary_data = self.parser.primary_data()
+            .map_err(|e| at(Error::Parse(e)))?;
+        let color_picture = decoder.decode(&primary_data)?;
 
         // Check for cancellation after color decode
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
@@ -615,7 +622,7 @@ impl AvifDecoder {
             .unwrap_or(yuv::color::MatrixCoefficients::BT601);
 
         let bit_depth = color_picture.bit_depth();
-        let has_alpha = self.avif_data.alpha_item.is_some();
+        let has_alpha = self.parser.alpha_data().is_some();
 
         // Convert to RGB
         let mut image = if bit_depth == 8 {
@@ -655,8 +662,9 @@ impl AvifDecoder {
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
         // Decode alpha channel if present
-        if let Some(alpha_data) = &self.avif_data.alpha_item {
-            let alpha_picture = decoder.decode(alpha_data)?;
+        if let Some(alpha_result) = self.parser.alpha_data() {
+            let alpha_data = alpha_result.map_err(|e| at(Error::Parse(e)))?;
+            let alpha_picture = decoder.decode(&alpha_data)?;
 
             let alpha_range = alpha_picture
                 .seq_hdr()
@@ -670,6 +678,7 @@ impl AvifDecoder {
                 .unwrap_or(Range::Limited);
 
             let alpha_bit_depth = alpha_picture.bit_depth();
+            let premultiplied = self.parser.premultiplied_alpha();
 
             // Alpha uses Identity matrix
             if alpha_bit_depth == 8 {
@@ -687,7 +696,7 @@ impl AvifDecoder {
                     width,
                     height,
                     conv,
-                    self.avif_data.premultiplied_alpha,
+                    premultiplied,
                 )?;
             } else {
                 let depth = match alpha_bit_depth {
@@ -713,7 +722,7 @@ impl AvifDecoder {
                     width,
                     height,
                     conv,
-                    self.avif_data.premultiplied_alpha,
+                    premultiplied,
                 )?;
             }
         }

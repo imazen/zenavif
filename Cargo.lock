@@ -173,18 +173,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "avif-parse"
-version = "1.4.0"
-dependencies = [
- "arrayvec",
- "bitreader",
- "byteorder",
- "fallible_collections",
- "leb128",
- "log",
-]
-
-[[package]]
 name = "avif-serialize"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1566,7 +1554,6 @@ name = "zenavif"
 version = "0.1.0"
 dependencies = [
  "archmage",
- "avif-parse",
  "criterion",
  "enough",
  "env_logger",
@@ -1582,6 +1569,20 @@ dependencies = [
  "thiserror",
  "whereat",
  "yuv",
+ "zenavif-parse",
+]
+
+[[package]]
+name = "zenavif-parse"
+version = "2.0.0"
+dependencies = [
+ "arrayvec",
+ "bitreader",
+ "byteorder",
+ "enough",
+ "fallible_collections",
+ "leb128",
+ "log",
 ]
 
 [[package]]
