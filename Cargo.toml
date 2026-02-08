@@ -41,6 +41,10 @@ harness = false
 name = "yuv_conversion_benchmark"
 harness = false
 
+[[bench]]
+name = "yuv_crate_comparison"
+harness = false
+
 [features]
 default = ["managed"]
 # Use hand-written assembly (fastest, uses C FFI)

@@ -705,42 +705,57 @@ impl ManagedAvifDecoder {
                 };
 
                 if has_alpha {
-                    let mut out = vec![
-                        Rgba {
-                            r: 0u8,
-                            g: 0,
-                            b: 0,
-                            a: 255
-                        };
-                        buffer_pixel_count
-                    ];
-                    let rgb_stride = buffer_width as u32 * 4;
-                    match sampling {
-                        ChromaSampling::Cs420 => yuv::yuv420_to_rgba(
-                            &planar,
-                            out.as_mut_slice().as_bytes_mut(),
-                            rgb_stride,
-                            yuv_range,
-                            matrix,
+                    // Use our accurate custom YUV to RGB conversion, then add alpha
+                    let our_range = to_our_yuv_range(info.color_range);
+                    let our_matrix = to_our_yuv_matrix(info.matrix_coefficients);
+
+                    let rgb_result = match sampling {
+                        ChromaSampling::Cs420 => yuv_convert::yuv420_to_rgb8(
+                            y_view.as_slice(),
+                            y_view.stride(),
+                            u_view.as_slice(),
+                            u_view.stride(),
+                            v_view.as_slice(),
+                            v_view.stride(),
+                            buffer_width,
+                            buffer_height,
+                            our_range,
+                            our_matrix,
                         ),
-                        ChromaSampling::Cs422 => yuv::yuv422_to_rgba(
-                            &planar,
-                            out.as_mut_slice().as_bytes_mut(),
-                            rgb_stride,
-                            yuv_range,
-                            matrix,
+                        ChromaSampling::Cs422 => yuv_convert::yuv422_to_rgb8(
+                            y_view.as_slice(),
+                            y_view.stride(),
+                            u_view.as_slice(),
+                            u_view.stride(),
+                            v_view.as_slice(),
+                            v_view.stride(),
+                            buffer_width,
+                            buffer_height,
+                            our_range,
+                            our_matrix,
                         ),
-                        ChromaSampling::Cs444 => yuv::yuv444_to_rgba(
-                            &planar,
-                            out.as_mut_slice().as_bytes_mut(),
-                            rgb_stride,
-                            yuv_range,
-                            matrix,
+                        ChromaSampling::Cs444 => yuv_convert::yuv444_to_rgb8(
+                            y_view.as_slice(),
+                            y_view.stride(),
+                            u_view.as_slice(),
+                            u_view.stride(),
+                            v_view.as_slice(),
+                            v_view.stride(),
+                            buffer_width,
+                            buffer_height,
+                            our_range,
+                            our_matrix,
                         ),
                         ChromaSampling::Monochrome => unreachable!(),
-                    }
-                    .map_err(|e| at(Error::ColorConversion(e)))?;
-                    DecodedImage::Rgba8(ImgVec::new(out, buffer_width, buffer_height))
+                    };
+
+                    // Convert RGB to RGBA (with alpha=255 default)
+                    let rgba_buf: Vec<Rgba<u8>> = rgb_result.buf()
+                        .iter()
+                        .map(|rgb| Rgba { r: rgb.r, g: rgb.g, b: rgb.b, a: 255 })
+                        .collect();
+
+                    DecodedImage::Rgba8(ImgVec::new(rgba_buf, buffer_width, buffer_height))
                 } else {
                     // Use our own YUV to RGB conversion
                     let our_range = to_our_yuv_range(info.color_range);

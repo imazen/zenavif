@@ -60,6 +60,9 @@ mod image;
 pub mod simd;
 #[doc(hidden)]
 pub mod yuv_convert;
+#[doc(hidden)]
+pub mod yuv_convert_fast;
+pub mod yuv_convert_libyuv;
 
 pub use config::DecoderConfig;
 #[cfg(feature = "asm")]
