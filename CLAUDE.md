@@ -65,6 +65,65 @@ just fmt     # cargo fmt
 
 ## Investigation Notes
 
+### Pixel Verification Against libavif (2026-02-07)
+
+**Status:** 🔴 CRITICAL ISSUES FOUND
+
+Implemented Docker-based pixel verification system comparing zenavif output against libavif v1.1.1 references.
+
+**Verification Infrastructure:**
+- `Dockerfile.references` - libavif v1.1.1 with dav1d 1.4.1 and aom 3.8.2
+- `scripts/generate-references.sh` - Decode all test vectors with avifdec
+- `tests/zenavif-references/` - Separate git repo with 51 reference PNGs (9.2MB)
+- `tests/pixel_verification.rs::verify_against_libavif` - Pixel comparison test
+
+**Commands:**
+```bash
+just docker-build          # Build libavif Docker image
+just generate-references   # Generate reference PNGs (requires zenavif-references repo)
+just verify-pixels         # Run pixel verification
+```
+
+**Results (51 references):**
+- ✅ 31 files match (though many formats not fully verified - returns OK for non-RGB8)
+- ❌ 20 files have mismatches
+- ⊘ 4 files skipped (libavif also failed to decode)
+
+**CRITICAL BUGS FOUND:**
+
+1. **Dimension Mismatches - Grid Files:**
+   - `sofa_grid1x5_420.avif`: zenavif produces 5120x154 (stitched) vs libavif 1024x770 (single tile)
+   - `sofa_grid1x5_420_reversed_dimg_order.avif`: Same issue
+   - **Root cause:** libavif decodes only primary image, zenavif stitches grid tiles
+   - **Expected behavior:** Unclear - need to check AVIF spec on grid decoding
+
+2. **Dimension Mismatches - Simple Files:**
+   - `white_1x1.avif`: zenavif produces 1x128 vs libavif 1x1
+   - `extended_pixi.avif`: zenavif produces 4x128 vs libavif 4x4
+   - **Root cause:** Unknown - possibly metadata vs actual data mismatch
+
+3. **Dimension Mismatches - Animated/Gainmap Files:**
+   - Multiple files show extra height: 150x256 vs 150x150, 200x256 vs 200x200, 400x384 vs 400x300
+   - Pattern: zenavif often adds 56 or 84 pixels of height
+   - **Root cause:** Possibly decoding multiple frames/layers instead of primary
+
+4. **YUV to RGB Conversion Errors:**
+   - `kodim03_yuv420_8bpc.avif`: 16.07% pixels wrong (max error: 36/255)
+   - `kodim23_yuv420_8bpc.avif`: 25.20% pixels wrong (max error: 42/255)
+   - **Root cause:** YUV420 chroma upsampling or color space conversion bug
+
+**TODO:**
+1. Fix dimension mismatches (highest priority)
+2. Fix YUV to RGB conversion (high priority - 16-25% error is unacceptable)
+3. Implement RGB16/RGBA comparison in pixel_verification.rs
+4. Investigate whether grid stitching is correct behavior
+
+**Files:**
+- `/home/lilith/work/zenavif/Dockerfile.references`
+- `/home/lilith/work/zenavif/scripts/generate-references.sh`
+- `/home/lilith/work/zenavif/tests/zenavif-references/` (separate repo)
+- `/home/lilith/work/zenavif/tests/pixel_verification.rs`
+
 ### rav1d-safe PlaneView Height Mismatch Bug (2026-02-07)
 
 **File:** `color_nogrid_alpha_nogrid_gainmap_grid.avif`
