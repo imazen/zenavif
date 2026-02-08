@@ -869,6 +869,7 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
             log::debug!("Grid:   Property for item_id={}: {:?}", prop.item_id,
                        match &prop.property {
                            ItemProperty::ImageGrid(g) => format!("ImageGrid({:?})", g),
+                           ItemProperty::ImageSpatialExtents(e) => format!("ImageSpatialExtents({}x{})", e.width, e.height),
                            ItemProperty::Channels(_) => "Channels".to_string(),
                            ItemProperty::AuxiliaryType(_) => "AuxiliaryType".to_string(),
                            ItemProperty::Unsupported => "Unsupported".to_string(),
@@ -1290,10 +1291,18 @@ fn read_iprp<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
     Ok(associated)
 }
 
+/// Image spatial extents (dimensions)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImageSpatialExtents {
+    pub width: u32,
+    pub height: u32,
+}
+
 #[derive(Debug, PartialEq)]
 pub(crate) enum ItemProperty {
     Channels(ArrayVec<u8, 16>),
     AuxiliaryType(AuxiliaryTypeProperty),
+    ImageSpatialExtents(ImageSpatialExtents),
     ImageGrid(GridConfig),
     Unsupported,
 }
@@ -1303,6 +1312,7 @@ impl TryClone for ItemProperty {
         Ok(match self {
             Self::Channels(val) => Self::Channels(val.clone()),
             Self::AuxiliaryType(val) => Self::AuxiliaryType(val.try_clone()?),
+            Self::ImageSpatialExtents(val) => Self::ImageSpatialExtents(*val),
             Self::ImageGrid(val) => Self::ImageGrid(val.clone()),
             Self::Unsupported => Self::Unsupported,
         })
@@ -1360,6 +1370,7 @@ fn read_ipco<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
         let prop = match b.head.name {
             BoxType::PixelInformationBox => ItemProperty::Channels(read_pixi(&mut b, options)?),
             BoxType::AuxiliaryTypeProperty => ItemProperty::AuxiliaryType(read_auxc(&mut b, options)?),
+            BoxType::ImageSpatialExtentsBox => ItemProperty::ImageSpatialExtents(read_ispe(&mut b, options)?),
             BoxType::ImageGridBox => {
                 log::debug!("Grid: Parsing ImageGrid property box");
                 let grid = read_grid(&mut b, options)?;
@@ -1436,6 +1447,18 @@ fn read_auxc<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
     let aux_data = src.read_into_try_vec()?;
 
     Ok(AuxiliaryTypeProperty { aux_data })
+}
+
+/// Parse an Image Spatial Extents property box
+/// See ISO/IEC 23008-12:2017 § 6.5.3
+fn read_ispe<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<ImageSpatialExtents> {
+    let _version = read_fullbox_version_no_flags(src, options)?;
+    // Version is always 0 for ispe
+
+    let width = be_u32(src)?;
+    let height = be_u32(src)?;
+
+    Ok(ImageSpatialExtents { width, height })
 }
 
 /// Parse an ImageGrid property box
