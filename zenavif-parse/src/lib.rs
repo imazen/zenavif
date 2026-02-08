@@ -833,6 +833,117 @@ impl AvifParser {
         }
         Ok(data)
     }
+
+    /// Get animation metadata (if animated)
+    pub fn animation_info(&self) -> Option<AnimationInfo> {
+        self.animation_data.as_ref().map(|data| AnimationInfo {
+            frame_count: data.sample_table.sample_sizes.len(),
+            loop_count: data.loop_count,
+        })
+    }
+
+    /// Extract single animation frame by index (on-demand)
+    pub fn animation_frame(&self, index: usize) -> Result<AnimationFrame> {
+        let data = self
+            .animation_data
+            .as_ref()
+            .ok_or(Error::InvalidData("not an animated AVIF"))?;
+
+        if index >= data.sample_table.sample_sizes.len() {
+            return Err(Error::InvalidData("frame index out of bounds"));
+        }
+
+        // Calculate duration from time-to-sample
+        let duration_ms = self.calculate_frame_duration(&data.sample_table, data.media_timescale, index)?;
+
+        // Calculate frame location from sample table
+        let (offset, size) = self.calculate_sample_location(&data.sample_table, index)?;
+
+        // Extract from mdat
+        let range = ExtentRange::WithLength(Range {
+            start: offset,
+            end: offset + size as u64,
+        });
+
+        let mut frame_data = TryVec::new();
+        for mdat in &self.mdats {
+            if mdat.contains_extent(&range) {
+                mdat.read_extent(&range, &mut frame_data)?;
+                return Ok(AnimationFrame {
+                    data: frame_data,
+                    duration_ms,
+                });
+            }
+        }
+
+        Err(Error::InvalidData("frame not found in mdat"))
+    }
+
+    /// Calculate frame duration from sample table
+    fn calculate_frame_duration(
+        &self,
+        st: &SampleTable,
+        timescale: u32,
+        index: usize,
+    ) -> Result<u32> {
+        let mut current_sample = 0;
+        for entry in &st.time_to_sample {
+            if current_sample + entry.sample_count as usize > index {
+                let duration_ms = if timescale > 0 {
+                    ((entry.sample_delta as u64) * 1000) / (timescale as u64)
+                } else {
+                    0
+                };
+                return Ok(duration_ms as u32);
+            }
+            current_sample += entry.sample_count as usize;
+        }
+        Ok(0)
+    }
+
+    /// Calculate sample location (offset and size) from sample table
+    fn calculate_sample_location(&self, st: &SampleTable, index: usize) -> Result<(u64, u32)> {
+        let sample_size = *st
+            .sample_sizes
+            .get(index)
+            .ok_or(Error::InvalidData("sample index out of bounds"))?;
+
+        // Build sample-to-chunk mapping and find our sample
+        let mut current_sample = 0;
+        for (chunk_map_idx, entry) in st.sample_to_chunk.iter().enumerate() {
+            let next_first_chunk = st
+                .sample_to_chunk
+                .get(chunk_map_idx + 1)
+                .map(|e| e.first_chunk)
+                .unwrap_or(u32::MAX);
+
+            for chunk_idx in entry.first_chunk..next_first_chunk {
+                if chunk_idx == 0 || (chunk_idx as usize) > st.chunk_offsets.len() {
+                    break;
+                }
+
+                let chunk_offset = st.chunk_offsets[(chunk_idx - 1) as usize];
+
+                for sample_in_chunk in 0..entry.samples_per_chunk {
+                    if current_sample == index {
+                        // Calculate offset within chunk
+                        let mut offset_in_chunk = 0u64;
+                        for s in 0..sample_in_chunk {
+                            let prev_idx = current_sample.saturating_sub((sample_in_chunk - s) as usize);
+                            if let Some(&prev_size) = st.sample_sizes.get(prev_idx) {
+                                offset_in_chunk += prev_size as u64;
+                            }
+                        }
+
+                        return Ok((chunk_offset + offset_in_chunk, sample_size));
+                    }
+                    current_sample += 1;
+                }
+            }
+        }
+
+        Err(Error::InvalidData("sample not found in chunk table"))
+    }
 }
 
 struct AvifInternalMeta {
