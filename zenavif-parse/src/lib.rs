@@ -681,12 +681,27 @@ impl AvifParser {
     /// this method only stores metadata and frame locations. Extract frames
     /// on-demand using [`animation_frame()`].
     ///
-    /// # Memory Usage
-    ///
-    /// - **Animated images**: ~50% less memory than [`read_avif()`]
+    /// Uses unlimited resource limits. For limits, use [`from_reader_with_config`].
     ///
     /// [`animation_frame()`]: AvifParser::animation_frame
+    /// [`from_reader_with_config`]: AvifParser::from_reader_with_config
     pub fn from_reader<R: Read>(f: &mut R) -> Result<Self> {
+        Self::from_reader_with_config(f, &DecodeConfig::unlimited(), &Unstoppable)
+    }
+
+    /// Parse AVIF file with resource limits and cancellation support
+    ///
+    /// Like [`from_reader`], but with configurable resource limits and
+    /// cooperative cancellation via the [`Stop`] trait.
+    ///
+    /// [`from_reader`]: AvifParser::from_reader
+    pub fn from_reader_with_config<R: Read>(
+        f: &mut R,
+        config: &DecodeConfig,
+        stop: &dyn Stop,
+    ) -> Result<Self> {
+        let mut tracker = ResourceTracker::new(config);
+        let parse_opts = ParseOptions { lenient: config.lenient };
         let mut f = OffsetReader::new(f);
         let mut iter = BoxIter::new(&mut f);
 
@@ -708,6 +723,8 @@ impl AvifParser {
         let mut animation_data: Option<(u32, SampleTable, u32)> = None;
 
         while let Some(mut b) = iter.next_box()? {
+            stop.check()?;
+
             match b.head.name {
                 BoxType::MetadataBox => {
                     if meta.is_some() {
@@ -715,7 +732,7 @@ impl AvifParser {
                             "There should be zero or one meta boxes per ISO 14496-12:2015 § 8.11.1.1",
                         ));
                     }
-                    meta = Some(read_avif_meta(&mut b, &ParseOptions::default())?);
+                    meta = Some(read_avif_meta(&mut b, &parse_opts)?);
                 }
                 BoxType::MovieBox => {
                     if let Some((media_timescale, sample_table)) = read_moov(&mut b)? {
@@ -726,7 +743,10 @@ impl AvifParser {
                 BoxType::MediaDataBox => {
                     if b.bytes_left() > 0 {
                         let offset = b.offset();
+                        let size = b.bytes_left() as u64;
+                        tracker.reserve(size)?;
                         let data = b.read_into_try_vec()?;
+                        tracker.release(size);
                         mdats.push(MediaDataBox { offset, data })?;
                     }
                 }
@@ -793,6 +813,9 @@ impl AvifParser {
                 }
             }
 
+            // Validate tile count
+            tracker.validate_grid_tiles(tiles_with_index.len() as u32)?;
+
             // Sort tiles by reference_index to get correct grid order
             tiles_with_index.sort_by_key(|&(_, idx)| idx);
 
@@ -818,13 +841,16 @@ impl AvifParser {
         };
 
         // Store animation metadata if present
-        let animation_parser_data = animation_data.map(|(media_timescale, sample_table, loop_count)| {
-            AnimationParserData {
+        let animation_parser_data = if let Some((media_timescale, sample_table, loop_count)) = animation_data {
+            tracker.validate_animation_frames(sample_table.sample_sizes.len() as u32)?;
+            Some(AnimationParserData {
                 media_timescale,
                 sample_table,
                 loop_count,
-            }
-        });
+            })
+        } else {
+            None
+        };
 
         // Manual clone of idat since TryVec doesn't impl Clone
         let idat = if let Some(ref idat_data) = meta.idat {
