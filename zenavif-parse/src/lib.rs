@@ -284,14 +284,31 @@ pub struct ParseOptions {
 
 /// Grid configuration for tiled/grid-based AVIF images
 #[derive(Debug, Clone, PartialEq)]
+/// Grid image configuration
+///
+/// For tiled/grid AVIF images, this describes the grid layout.
+/// Grid images are composed of multiple AV1 image items (tiles) arranged in a rectangular grid.
+///
+/// ## Grid Layout Determination
+///
+/// Grid layout can be specified in two ways:
+/// 1. **Explicit ImageGrid property box** - contains rows, columns, and output dimensions
+/// 2. **Calculated from ispe properties** - when no ImageGrid box exists, dimensions are
+///    calculated by dividing the grid item's dimensions by a tile's dimensions
+///
+/// ## Output Dimensions
+///
+/// - `output_width` and `output_height` may be 0, indicating the decoder should calculate
+///   them from the tile dimensions
+/// - When non-zero, they specify the exact output dimensions of the composed image
 pub struct GridConfig {
-    /// Number of rows in the grid
+    /// Number of tile rows (1-256)
     pub rows: u8,
-    /// Number of columns in the grid
+    /// Number of tile columns (1-256)
     pub columns: u8,
-    /// Output width of the reconstructed image
+    /// Output width in pixels (0 = calculate from tiles)
     pub output_width: u32,
-    /// Output height of the reconstructed image
+    /// Output height in pixels (0 = calculate from tiles)
     pub output_height: u32,
 }
 
@@ -328,11 +345,36 @@ pub struct AvifData {
     /// See `prem` in MIAF § 7.3.5.2
     pub premultiplied_alpha: bool,
 
-    /// Grid configuration and tiles (for grid-based AVIF)
+    /// Grid configuration for tiled images.
     ///
-    /// When present, primary_item should be empty and tiles contain the actual data
+    /// If present, the image is a grid and `grid_tiles` contains the tile data.
+    /// Grid layout is determined either from an explicit ImageGrid property box or
+    /// calculated from ispe (Image Spatial Extents) properties.
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// use std::fs::File;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let data = avif_parse::read_avif(&mut File::open("image.avif")?)?;
+    ///
+    /// if let Some(grid) = data.grid_config {
+    ///     println!("Grid: {}×{} tiles", grid.rows, grid.columns);
+    ///     println!("Output: {}×{}", grid.output_width, grid.output_height);
+    ///     println!("Tile count: {}", data.grid_tiles.len());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub grid_config: Option<GridConfig>,
-    /// Tiles for grid-based AVIF (in row-major order)
+
+    /// AV1 payloads for grid image tiles.
+    ///
+    /// Empty for non-grid images. For grid images, contains one entry per tile.
+    ///
+    /// **Tile ordering:** Tiles are guaranteed to be in the correct order for grid assembly,
+    /// sorted by their dimgIdx (reference index). This is row-major order: tiles in the first
+    /// row from left to right, then the second row, etc.
     pub grid_tiles: TryVec<TryVec<u8>>,
 
     /// Animation configuration (for animated AVIF with avis brand)
