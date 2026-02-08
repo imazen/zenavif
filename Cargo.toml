@@ -37,6 +37,10 @@ criterion = { version = "0.5", features = ["html_reports"] }
 name = "decode_benchmark"
 harness = false
 
+[[bench]]
+name = "yuv_conversion_benchmark"
+harness = false
+
 [features]
 default = ["managed"]
 # Use hand-written assembly (fastest, uses C FFI)
