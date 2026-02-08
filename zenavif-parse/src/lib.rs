@@ -281,6 +281,8 @@ pub(crate) struct AV1ConfigBox {
 }
 
 /// Options for parsing AVIF files
+///
+/// Prefer using [`DecodeConfig::lenient()`] with [`AvifParser`] instead.
 #[derive(Debug, Clone, Copy)]
 #[derive(Default)]
 pub struct ParseOptions {
@@ -430,6 +432,7 @@ pub struct GridConfig {
 }
 
 /// Frame information for animated AVIF
+#[deprecated(since = "1.5.0", note = "Use `AvifParser::frame()` which returns `FrameRef` instead")]
 #[derive(Debug)]
 pub struct AnimationFrame {
     /// AV1 bitstream data for this frame
@@ -439,7 +442,9 @@ pub struct AnimationFrame {
 }
 
 /// Animation configuration for animated AVIF (avis brand)
+#[deprecated(since = "1.5.0", note = "Use `AvifParser::animation_info()` and `AvifParser::frames()` instead")]
 #[derive(Debug)]
+#[allow(deprecated)]
 pub struct AnimationConfig {
     /// Number of times to loop (0 = infinite)
     pub loop_count: u32,
@@ -482,7 +487,9 @@ struct SampleTable {
     chunk_offsets: TryVec<u64>,
 }
 
+#[deprecated(since = "1.5.0", note = "Use `AvifParser` for zero-copy parsing instead")]
 #[derive(Debug, Default)]
+#[allow(deprecated)]
 pub struct AvifData {
     /// AV1 data for the color channels.
     ///
@@ -506,8 +513,10 @@ pub struct AvifData {
     /// ## Example
     ///
     /// ```no_run
+    /// #[allow(deprecated)]
     /// use std::fs::File;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// #[allow(deprecated)]
     /// let data = avif_parse::read_avif(&mut File::open("image.avif")?)?;
     ///
     /// if let Some(grid) = data.grid_config {
@@ -555,7 +564,9 @@ pub struct AvifData {
 // For large animated files, consider using a streaming approach or processing frames
 // individually rather than loading the entire `AvifData` structure.
 
+#[allow(deprecated)]
 impl AvifData {
+    #[deprecated(since = "1.5.0", note = "Use `AvifParser::from_reader()` instead")]
     pub fn from_reader<R: Read>(reader: &mut R) -> Result<Self> {
         read_avif(reader)
     }
@@ -1272,6 +1283,11 @@ impl<'data> AvifParser<'data> {
     // ========================================
 
     /// Convert to [`AvifData`] (eagerly loads all frames and tiles).
+    ///
+    /// Provided for migration from the eager API. Prefer using `AvifParser`
+    /// methods directly.
+    #[deprecated(since = "1.5.0", note = "Use AvifParser methods directly instead of converting to AvifData")]
+    #[allow(deprecated)]
     pub fn to_avif_data(&self) -> Result<AvifData> {
         let primary_data = self.primary_data()?;
         let mut primary_item = TryVec::new();
@@ -1834,6 +1850,8 @@ impl<'a> ResourceTracker<'a> {
 /// * `f` - Reader for the AVIF file
 /// * `config` - Resource limits and parsing options
 /// * `stop` - Cancellation token (use [`Unstoppable`] if not needed)
+#[deprecated(since = "1.5.0", note = "Use `AvifParser::from_reader_with_config()` instead")]
+#[allow(deprecated)]
 pub fn read_avif_with_config<T: Read>(
     f: &mut T,
     config: &DecodeConfig,
@@ -2175,6 +2193,8 @@ pub fn read_avif_with_config<T: Read>(
 ///
 /// * `f` - Reader for the AVIF file
 /// * `options` - Parsing options (e.g., lenient mode)
+#[deprecated(since = "1.5.0", note = "Use `AvifParser::from_reader_with_config()` with `DecodeConfig::lenient()` instead")]
+#[allow(deprecated)]
 pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Result<AvifData> {
     let config = DecodeConfig::unlimited().lenient(options.lenient);
     read_avif_with_config(f, &config, &Unstoppable)
@@ -2187,6 +2207,8 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
 ///
 /// For resource limits, use [`read_avif_with_config`].
 /// For lenient parsing, use [`read_avif_with_options`].
+#[deprecated(since = "1.5.0", note = "Use `AvifParser::from_reader()` instead")]
+#[allow(deprecated)]
 pub fn read_avif<T: Read>(f: &mut T) -> Result<AvifData> {
     read_avif_with_options(f, &ParseOptions::default())
 }
@@ -2849,6 +2871,7 @@ fn read_minf<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<SampleTable>> {
 }
 
 /// Extract animation frames using sample table
+#[allow(deprecated)]
 fn extract_animation_frames(
     sample_table: &SampleTable,
     media_timescale: u32,

@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 use avif_parse::AvifData;
 use std::path::PathBuf;
 use std::{env, fs};

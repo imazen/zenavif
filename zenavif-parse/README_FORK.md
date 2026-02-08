@@ -6,7 +6,9 @@ All upstream tests pass. All files in the AOM test suite and link-u animated sam
 
 ## Two Parsing APIs
 
-### Eager: `read_avif`
+### Eager: `read_avif` (deprecated)
+
+**Deprecated.** `AvifParser` is a strict superset — use it instead.
 
 Reads the entire file and copies all mdat data into memory. The `read_avif()` function signature is from upstream; the returned `AvifData` struct has been extended with grid config, animation config, and animation frames.
 
@@ -117,9 +119,9 @@ let parser = AvifParser::from_bytes_with_config(&bytes, config)?;
 
 Use `DecodeConfig::unlimited()` to disable all limits.
 
-### Conversion
+### Conversion (deprecated)
 
-`parser.to_avif_data()` converts to the eager `AvifData` type for interop with code that uses `read_avif`.
+`parser.to_avif_data()` converts to the deprecated `AvifData` type for migration from the eager API.
 
 ## Changes vs Upstream
 

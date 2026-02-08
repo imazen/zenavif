@@ -1,4 +1,5 @@
 //! Inspect grid AVIF structure
+#![allow(deprecated)]
 use avif_parse::read_avif;
 use std::env;
 use std::fs::File;

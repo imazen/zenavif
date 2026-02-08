@@ -1,4 +1,5 @@
 #![allow(unsafe_code)]
+#![allow(deprecated)]
 
 use crate::AvifData as AvifDataRust;
 
