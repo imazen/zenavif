@@ -672,8 +672,14 @@ impl AvifParser {
                 tile_extents.push(extents)?;
             }
 
+            // Extract tile IDs in sorted order
+            let mut tile_ids = TryVec::new();
+            for (tile_id, _) in tiles_with_index.iter() {
+                tile_ids.push(*tile_id)?;
+            }
+
             // Calculate grid config
-            let grid_config = Self::calculate_grid_config(&meta, tile_extents.len())?;
+            let grid_config = Self::calculate_grid_config(&meta, &tile_ids)?;
 
             (Some(grid_config), tile_extents)
         } else {
@@ -727,7 +733,7 @@ impl AvifParser {
     }
 
     /// Calculate grid configuration from metadata
-    fn calculate_grid_config(meta: &AvifInternalMeta, tile_count: usize) -> Result<GridConfig> {
+    fn calculate_grid_config(meta: &AvifInternalMeta, tile_ids: &[u32]) -> Result<GridConfig> {
         // Try explicit grid property first
         for prop in &meta.properties {
             if prop.item_id == meta.primary_item_id {
@@ -738,41 +744,54 @@ impl AvifParser {
         }
 
         // Fall back to ispe calculation
-        let grid_ispe = meta
+        let grid_dims = meta
             .properties
             .iter()
-            .find(|p| {
-                p.item_id == meta.primary_item_id
-                    && matches!(&p.property, ItemProperty::ImageSpatialExtents(_))
-            })
-            .and_then(|p| {
-                if let ItemProperty::ImageSpatialExtents(ispe) = &p.property {
-                    Some(ispe)
-                } else {
-                    None
-                }
+            .find(|p| p.item_id == meta.primary_item_id)
+            .and_then(|p| match &p.property {
+                ItemProperty::ImageSpatialExtents(e) => Some(e),
+                _ => None,
             });
 
-        if let Some(grid_ispe) = grid_ispe {
-            // Infer N×1 vertical grid
-            let columns = 1u8;
-            let rows = tile_count.min(255) as u8;
+        let tile_dims = tile_ids.first().and_then(|&tile_id| {
+            meta.properties
+                .iter()
+                .find(|p| p.item_id == tile_id)
+                .and_then(|p| match &p.property {
+                    ItemProperty::ImageSpatialExtents(e) => Some(e),
+                    _ => None,
+                })
+        });
 
-            Ok(GridConfig {
-                rows,
-                columns,
-                output_width: grid_ispe.width,
-                output_height: grid_ispe.height,
-            })
-        } else {
-            // Fallback: if ispe not available, use N×1 inference
-            Ok(GridConfig {
-                rows: tile_count.min(255) as u8,
-                columns: 1,
-                output_width: 0,
-                output_height: 0,
-            })
+        if let (Some(grid), Some(tile)) = (grid_dims, tile_dims) {
+            // Validate tile dimensions are non-zero
+            if tile.width == 0 || tile.height == 0 {
+                // Fall through to fallback
+            } else if grid.width % tile.width == 0 && grid.height % tile.height == 0 {
+                // Calculate grid layout: grid_dims ÷ tile_dims
+                let columns = grid.width / tile.width;
+                let rows = grid.height / tile.height;
+
+                // Validate grid dimensions fit in u8 (max 255×255 grid)
+                if columns <= 255 && rows <= 255 {
+                    return Ok(GridConfig {
+                        rows: rows as u8,
+                        columns: columns as u8,
+                        output_width: grid.width,
+                        output_height: grid.height,
+                    });
+                }
+            }
         }
+
+        // Fallback: if calculation failed or ispe not available, use N×1 inference
+        let tile_count = tile_ids.len();
+        Ok(GridConfig {
+            rows: tile_count.min(255) as u8,
+            columns: 1,
+            output_width: 0,
+            output_height: 0,
+        })
     }
 
     /// Extract primary item data (on-demand)

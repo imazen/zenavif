@@ -148,3 +148,143 @@ fn test_dir(dir: &str) {
     }
     assert_eq!(0, errors);
 }
+
+// Streaming parser tests
+
+#[test]
+fn streaming_parser_basic() {
+    // Test basic streaming parser functionality
+    let input = &mut File::open(ANIMATED_AVIF).expect("Unknown file");
+    let parser = avif_parse::AvifParser::from_reader(input).expect("from_reader failed");
+
+    // Should parse without loading frames
+    assert!(parser.animation_info().is_some(), "Expected animation info");
+
+    let info = parser.animation_info().unwrap();
+    assert_eq!(info.frame_count, 5, "Expected 5 frames");
+
+    // Extract single frame
+    let frame = parser.animation_frame(0).expect("Failed to extract frame 0");
+    assert!(!frame.data.is_empty(), "Frame 0 should not be empty");
+    assert_eq!(frame.duration_ms, 100, "Expected 100ms duration");
+}
+
+#[test]
+fn streaming_matches_eager() {
+    // Verify streaming parser produces identical results to eager parser
+    let avif_data = avif_parse::read_avif(&mut File::open(ANIMATED_AVIF).expect("Unknown file"))
+        .expect("read_avif failed");
+    let parser = avif_parse::AvifParser::from_reader(&mut File::open(ANIMATED_AVIF).expect("Unknown file"))
+        .expect("from_reader failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+    assert_eq!(
+        info.frame_count,
+        avif_data.animation.as_ref().unwrap().frames.len(),
+        "Frame counts should match"
+    );
+
+    // Compare first 5 frames
+    for i in 0..5 {
+        let eager_frame = &avif_data.animation.as_ref().unwrap().frames[i];
+        let streaming_frame = parser.animation_frame(i).expect("Failed to extract frame");
+
+        assert_eq!(
+            eager_frame.data.len(),
+            streaming_frame.data.len(),
+            "Frame {} data length should match",
+            i
+        );
+        assert_eq!(
+            eager_frame.data.as_slice(),
+            streaming_frame.data.as_slice(),
+            "Frame {} data should match",
+            i
+        );
+        assert_eq!(
+            eager_frame.duration_ms, streaming_frame.duration_ms,
+            "Frame {} duration should match",
+            i
+        );
+    }
+}
+
+#[test]
+fn streaming_parser_grid() {
+    // Test streaming parser with grid images
+    let parser = avif_parse::AvifParser::from_reader(
+        &mut File::open(IMAGE_GRID_5X4).expect("Unknown file"),
+    )
+    .expect("from_reader failed");
+
+    let grid = parser.grid_config().expect("Expected grid config");
+    assert_eq!(grid.rows, 4, "Expected 4 rows");
+    assert_eq!(grid.columns, 5, "Expected 5 columns");
+
+    assert_eq!(parser.grid_tile_count(), 20, "Expected 20 tiles");
+
+    // Extract first tile
+    let tile = parser.grid_tile(0).expect("Failed to extract tile 0");
+    assert!(!tile.is_empty(), "Tile 0 should not be empty");
+}
+
+#[test]
+fn streaming_parser_primary_item() {
+    // Test streaming parser with single-frame image
+    let parser = avif_parse::AvifParser::from_reader(&mut File::open(IMAGE_AVIF).expect("Unknown file"))
+        .expect("from_reader failed");
+
+    let primary = parser.primary_item().expect("Failed to extract primary item");
+    assert_eq!(primary.len(), 6979, "Primary item length mismatch");
+    assert_eq!(primary[0..4], [0x12, 0x00, 0x0a, 0x0a], "Primary item header mismatch");
+
+    // Should not have animation
+    assert!(parser.animation_info().is_none(), "Should not have animation");
+}
+
+#[test]
+fn parser_to_avif_data_conversion() {
+    // Test that streaming parser can convert to AvifData
+    let parser = avif_parse::AvifParser::from_reader(&mut File::open(ANIMATED_AVIF).expect("Unknown file"))
+        .expect("from_reader failed");
+    let avif_data = parser.to_avif_data().expect("Failed to convert to AvifData");
+
+    // Should produce identical result to direct read_avif
+    let direct = avif_parse::read_avif(&mut File::open(ANIMATED_AVIF).expect("Unknown file"))
+        .expect("read_avif failed");
+
+    assert_eq!(
+        avif_data.primary_item.len(),
+        direct.primary_item.len(),
+        "Primary item length should match"
+    );
+    assert_eq!(
+        avif_data.primary_item.as_slice(),
+        direct.primary_item.as_slice(),
+        "Primary item data should match"
+    );
+
+    // Compare animation data
+    let converted_anim = avif_data.animation.as_ref().expect("Expected animation");
+    let direct_anim = direct.animation.as_ref().expect("Expected animation");
+
+    assert_eq!(
+        converted_anim.frames.len(),
+        direct_anim.frames.len(),
+        "Frame counts should match"
+    );
+
+    for (i, (conv_frame, direct_frame)) in converted_anim
+        .frames
+        .iter()
+        .zip(direct_anim.frames.iter())
+        .enumerate()
+    {
+        assert_eq!(
+            conv_frame.data.as_slice(),
+            direct_frame.data.as_slice(),
+            "Frame {} data should match",
+            i
+        );
+    }
+}
