@@ -288,3 +288,82 @@ fn parser_to_avif_data_conversion() {
         );
     }
 }
+
+// Zero-copy slice tests
+
+#[test]
+fn zero_copy_animation_frame_slice() {
+    // Test zero-copy frame access
+    let parser = avif_parse::AvifParser::from_reader(&mut File::open(ANIMATED_AVIF).expect("Unknown file"))
+        .expect("from_reader failed");
+
+    // Get frame data via zero-copy
+    let (slice, duration_ms) = parser.animation_frame_slice(0).expect("Failed to get frame slice");
+    assert!(!slice.is_empty(), "Frame slice should not be empty");
+    assert_eq!(duration_ms, 100, "Expected 100ms duration");
+
+    // Compare with copying version
+    let frame = parser.animation_frame(0).expect("Failed to extract frame");
+    assert_eq!(slice, frame.data.as_slice(), "Zero-copy slice should match copied data");
+    assert_eq!(duration_ms, frame.duration_ms, "Durations should match");
+}
+
+#[test]
+fn zero_copy_primary_item_slice() {
+    // Test zero-copy primary item access
+    let parser = avif_parse::AvifParser::from_reader(&mut File::open(IMAGE_AVIF).expect("Unknown file"))
+        .expect("from_reader failed");
+
+    // Get primary item via zero-copy
+    let slice = parser.primary_item_slice().expect("Failed to get primary item slice");
+    assert_eq!(slice.len(), 6979, "Primary item slice length mismatch");
+    assert_eq!(slice[0..4], [0x12, 0x00, 0x0a, 0x0a], "Primary item slice header mismatch");
+
+    // Compare with copying version
+    let primary = parser.primary_item().expect("Failed to extract primary item");
+    assert_eq!(slice, primary.as_slice(), "Zero-copy slice should match copied data");
+}
+
+#[test]
+fn zero_copy_grid_tile_slice() {
+    // Test zero-copy grid tile access
+    let parser = avif_parse::AvifParser::from_reader(
+        &mut File::open(IMAGE_GRID_5X4).expect("Unknown file"),
+    )
+    .expect("from_reader failed");
+
+    // Get first tile via zero-copy
+    let slice = parser.grid_tile_slice(0).expect("Failed to get tile slice");
+    assert!(!slice.is_empty(), "Tile slice should not be empty");
+
+    // Compare with copying version
+    let tile = parser.grid_tile(0).expect("Failed to extract tile");
+    assert_eq!(slice, tile.as_slice(), "Zero-copy slice should match copied data");
+}
+
+#[test]
+fn zero_copy_vs_copying_performance() {
+    // Verify zero-copy returns same data as copying methods
+    let parser = avif_parse::AvifParser::from_reader(&mut File::open(ANIMATED_AVIF).expect("Unknown file"))
+        .expect("from_reader failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+
+    // Compare all frames
+    for i in 0..info.frame_count {
+        let (slice, duration_zero) = parser.animation_frame_slice(i).expect("Failed to get frame slice");
+        let frame = parser.animation_frame(i).expect("Failed to extract frame");
+
+        assert_eq!(
+            slice,
+            frame.data.as_slice(),
+            "Frame {} zero-copy slice should match copied data",
+            i
+        );
+        assert_eq!(
+            duration_zero, frame.duration_ms,
+            "Frame {} durations should match",
+            i
+        );
+    }
+}

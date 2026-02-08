@@ -1020,6 +1020,111 @@ impl AvifParser {
             animation,
         })
     }
+
+    /// Zero-copy access to animation frame (returns slice into mdat)
+    ///
+    /// Returns frame data slice and duration in milliseconds.
+    /// This avoids memory allocation compared to [`animation_frame()`].
+    ///
+    /// # Limitations
+    ///
+    /// Only works for single-extent frames. Returns error if frame spans multiple extents.
+    ///
+    /// [`animation_frame()`]: AvifParser::animation_frame
+    pub fn animation_frame_slice(&self, index: usize) -> Result<(&[u8], u32)> {
+        let data = self
+            .animation_data
+            .as_ref()
+            .ok_or(Error::InvalidData("not an animated AVIF"))?;
+
+        let duration_ms =
+            self.calculate_frame_duration(&data.sample_table, data.media_timescale, index)?;
+
+        let (offset, size) = self.calculate_sample_location(&data.sample_table, index)?;
+
+        let range = ExtentRange::WithLength(Range {
+            start: offset,
+            end: offset + size as u64,
+        });
+
+        for mdat in &self.mdats {
+            if mdat.contains_extent(&range) {
+                let slice = mdat.extent_slice(&range)?;
+                return Ok((slice, duration_ms));
+            }
+        }
+
+        Err(Error::InvalidData("frame not found"))
+    }
+
+    /// Zero-copy access to primary item (returns slice into mdat/idat)
+    ///
+    /// # Limitations
+    ///
+    /// Only works for single-extent items. Returns error if item spans multiple extents.
+    pub fn primary_item_slice(&self) -> Result<&[u8]> {
+        self.extract_item_slice(&self.primary_item_extents)
+    }
+
+    /// Zero-copy access to alpha item (returns slice into mdat/idat)
+    ///
+    /// # Limitations
+    ///
+    /// Only works for single-extent items. Returns error if item spans multiple extents.
+    pub fn alpha_item_slice(&self) -> Option<Result<&[u8]>> {
+        self.alpha_item_extents
+            .as_ref()
+            .map(|extents| self.extract_item_slice(extents))
+    }
+
+    /// Zero-copy access to grid tile (returns slice into mdat/idat)
+    ///
+    /// # Limitations
+    ///
+    /// Only works for single-extent tiles. Returns error if tile spans multiple extents.
+    pub fn grid_tile_slice(&self, index: usize) -> Result<&[u8]> {
+        let extents = self
+            .grid_tile_extents
+            .get(index)
+            .ok_or(Error::InvalidData("tile index out of bounds"))?;
+        self.extract_item_slice(extents)
+    }
+
+    /// Extract item slice from extents (zero-copy, internal helper)
+    fn extract_item_slice(&self, extents: &[ExtentRange]) -> Result<&[u8]> {
+        // Only works for single-extent items
+        if extents.len() != 1 {
+            return Err(Error::Unsupported(
+                "multi-extent zero-copy not supported",
+            ));
+        }
+
+        let extent = &extents[0];
+
+        // Try idat
+        if let Some(idat_data) = &self.idat {
+            if extent.start() == 0 {
+                match extent {
+                    ExtentRange::WithLength(range) => {
+                        let len = (range.end - range.start) as usize;
+                        return Ok(&idat_data[..len]);
+                    }
+                    ExtentRange::ToEnd(_) => {
+                        return Ok(idat_data.as_slice());
+                    }
+                }
+            }
+        }
+
+        // Try mdat
+        for mdat in &self.mdats {
+            if mdat.contains_extent(extent) {
+                return mdat.extent_slice(extent);
+            }
+        }
+
+        Err(Error::InvalidData("item not found"))
+    }
 }
 
 struct AvifInternalMeta {
@@ -1093,6 +1198,30 @@ impl MediaDataBox {
         let slice = slice.ok_or(Error::InvalidData("extent crosses box boundary"))?;
         buf.extend_from_slice(slice)?;
         Ok(())
+    }
+
+    /// Zero-copy access to extent data (returns slice into mdat buffer)
+    fn extent_slice(&self, extent: &ExtentRange) -> Result<&[u8]> {
+        let start_offset = extent
+            .start()
+            .checked_sub(self.offset)
+            .ok_or(Error::InvalidData("mdat doesn't contain extent"))?;
+
+        let slice = match extent {
+            ExtentRange::WithLength(range) => {
+                let range_len = range
+                    .end
+                    .checked_sub(range.start)
+                    .ok_or(Error::InvalidData("invalid range"))?;
+                let end = start_offset
+                    .checked_add(range_len)
+                    .ok_or(Error::InvalidData("extent overflow"))?;
+                self.data.get(start_offset.try_into()?..end.try_into()?)
+            }
+            ExtentRange::ToEnd(_) => self.data.get(start_offset.try_into()?..),
+        };
+
+        slice.ok_or(Error::InvalidData("extent out of bounds"))
     }
 }
 
