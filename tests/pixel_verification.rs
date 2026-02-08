@@ -357,3 +357,4 @@ fn verify_against_libavif() {
 
     assert_eq!(failed, 0, "Pixel verification failed for {} files", failed);
 }
+

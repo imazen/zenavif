@@ -215,6 +215,11 @@ impl ManagedAvifDecoder {
             .as_ref()
             .expect("grid_config should be Some");
 
+        eprintln!("GRID DEBUG: rows={}, cols={}, out_w={}, out_h={}, tiles={}",
+                 grid_config.rows, grid_config.columns,
+                 grid_config.output_width, grid_config.output_height,
+                 self.avif_data.grid_tiles.len());
+
         // Decode all tiles
         let mut tile_frames = Vec::new();
         for (i, tile_data) in self.avif_data.grid_tiles.iter().enumerate() {
