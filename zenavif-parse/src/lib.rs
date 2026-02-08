@@ -329,10 +329,6 @@ pub struct DecodeConfig {
     /// Default: 512 megapixels
     pub total_megapixels_limit: Option<u32>,
 
-    /// Maximum megapixels per frame/tile.
-    /// Default: 256 megapixels
-    pub frame_megapixels_limit: Option<u32>,
-
     /// Maximum number of animation frames.
     /// Default: 10,000 frames
     pub max_animation_frames: Option<u32>,
@@ -351,7 +347,6 @@ impl Default for DecodeConfig {
         Self {
             peak_memory_limit: Some(1_000_000_000),
             total_megapixels_limit: Some(512),
-            frame_megapixels_limit: Some(256),
             max_animation_frames: Some(10_000),
             max_grid_tiles: Some(1_000),
             lenient: false,
@@ -367,7 +362,6 @@ impl DecodeConfig {
         Self {
             peak_memory_limit: None,
             total_megapixels_limit: None,
-            frame_megapixels_limit: None,
             max_animation_frames: None,
             max_grid_tiles: None,
             lenient: false,
@@ -383,12 +377,6 @@ impl DecodeConfig {
     /// Set the total megapixels limit for grid images
     pub fn with_total_megapixels_limit(mut self, megapixels: u32) -> Self {
         self.total_megapixels_limit = Some(megapixels);
-        self
-    }
-
-    /// Set the per-frame/per-tile megapixels limit
-    pub fn with_frame_megapixels_limit(mut self, megapixels: u32) -> Self {
-        self.frame_megapixels_limit = Some(megapixels);
         self
     }
 
@@ -2431,9 +2419,9 @@ fn read_iprp<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
 
 /// Image spatial extents (dimensions)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ImageSpatialExtents {
-    pub width: u32,
-    pub height: u32,
+pub(crate) struct ImageSpatialExtents {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
 }
 
 #[derive(Debug, PartialEq)]

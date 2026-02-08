@@ -496,7 +496,6 @@ fn decode_config_default_has_sane_limits() {
     let config = avif_parse::DecodeConfig::default();
     assert_eq!(config.peak_memory_limit, Some(1_000_000_000));
     assert_eq!(config.total_megapixels_limit, Some(512));
-    assert_eq!(config.frame_megapixels_limit, Some(256));
     assert_eq!(config.max_animation_frames, Some(10_000));
     assert_eq!(config.max_grid_tiles, Some(1_000));
     assert!(!config.lenient);
