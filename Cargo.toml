@@ -14,7 +14,7 @@ repository = "https://github.com/imazen/zenavif"
 rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"], optional = true }
 # rav1d-safe: 100% safe managed API decoder (default, no c-ffi feature!)
 # NOTE: Using default-features = false ensures c-ffi is NOT enabled
-rav1d-safe = { path = "../rav1d-safe", default-features = false, features = ["bitdepth_8", "bitdepth_16"], optional = true }
+rav1d-safe = { path = "../rav1d-safe-forbid", default-features = false, features = ["bitdepth_8", "bitdepth_16"], optional = true }
 archmage = { version = "0.5.0", features = ["macros", "safe_unaligned_simd"] }
 magetypes = "0.5.0"
 safe_unaligned_simd = "0.2.4"
