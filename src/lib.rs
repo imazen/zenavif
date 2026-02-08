@@ -58,6 +58,7 @@ mod decoder_managed;
 mod error;
 mod image;
 pub mod simd;
+mod yuv_convert;
 
 pub use config::DecoderConfig;
 #[cfg(feature = "asm")]

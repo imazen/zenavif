@@ -17,6 +17,7 @@ use imgref::ImgVec;
 use rgb::{ComponentBytes, ComponentSlice, Rgb, Rgba};
 use whereat::at;
 use yuv::{YuvGrayImage, YuvPlanarImage, YuvRange, YuvStandardMatrix};
+use crate::yuv_convert::{self, YuvRange as OurYuvRange, YuvMatrix as OurYuvMatrix};
 
 // Import managed API from rav1d-safe
 use rav1d_safe::src::managed::{
@@ -78,6 +79,28 @@ fn to_yuv_matrix(mc: MatrixCoefficients) -> YuvStandardMatrix {
         }
         MatrixCoefficients::SMPTE240 => YuvStandardMatrix::Smpte240,
         _ => YuvStandardMatrix::Bt601,
+    }
+}
+
+/// Convert zenavif MatrixCoefficients to our YuvMatrix
+fn to_our_yuv_matrix(mc: MatrixCoefficients) -> OurYuvMatrix {
+    match mc {
+        MatrixCoefficients::BT709 => OurYuvMatrix::Bt709,
+        MatrixCoefficients::BT601 | MatrixCoefficients::BT470BG | MatrixCoefficients::FCC => {
+            OurYuvMatrix::Bt601
+        }
+        MatrixCoefficients::BT2020_NCL | MatrixCoefficients::BT2020_CL => {
+            OurYuvMatrix::Bt2020
+        }
+        _ => OurYuvMatrix::Bt601, // Default to BT.601 for unknown
+    }
+}
+
+/// Convert zenavif ColorRange to our YuvRange
+fn to_our_yuv_range(cr: ColorRange) -> OurYuvRange {
+    match cr {
+        ColorRange::Limited => OurYuvRange::Limited,
+        ColorRange::Full => OurYuvRange::Full,
     }
 }
 
@@ -658,7 +681,7 @@ impl ManagedAvifDecoder {
                     eprintln!("  Buffer: {}x{}, Display: {}x{}", buffer_width, buffer_height, display_width, display_height);
                     eprintln!("  Y: w={} h={} stride={} len={}", y_view.width(), y_view.height(), y_view.stride(), y_view.as_slice().len());
                     eprintln!("  U: w={} h={} stride={} len={}", u_view.width(), u_view.height(), u_view.stride(), u_view.as_slice().len());
-                    eprintln!("  V: w={} h={} stride={} len={}", v_view.width(), v_view.height(), v_view.as_slice().len());
+                    eprintln!("  V: w={} h={} stride={} len={}", v_view.width(), v_view.height(), v_view.stride(), v_view.as_slice().len());
                     eprintln!("  Sampling: {:?}, Range: {:?}, Matrix: {:?}", sampling, yuv_range, matrix);
 
                     // Print first few YUV values
@@ -679,25 +702,44 @@ impl ManagedAvifDecoder {
                     .map_err(|e| at(Error::ColorConversion(e)))?;
                     DecodedImage::Rgba8(ImgVec::new(out, buffer_width, buffer_height))
                 } else {
-                    let mut out = vec![Rgb { r: 0u8, g: 0, b: 0 }; buffer_pixel_count];
-                    let rgb_stride = buffer_width as u32 * 3;
-                    match sampling {
-                        ChromaSampling::Cs420 => yuv::yuv420_to_rgb(&planar, out.as_mut_slice().as_bytes_mut(), rgb_stride, yuv_range, matrix),
-                        ChromaSampling::Cs422 => yuv::yuv422_to_rgb(&planar, out.as_mut_slice().as_bytes_mut(), rgb_stride, yuv_range, matrix),
-                        ChromaSampling::Cs444 => yuv::yuv444_to_rgb(&planar, out.as_mut_slice().as_bytes_mut(), rgb_stride, yuv_range, matrix),
+                    // Use our own YUV to RGB conversion
+                    let our_range = to_our_yuv_range(info.color_range);
+                    let our_matrix = to_our_yuv_matrix(info.matrix_coefficients);
+
+                    let result = match sampling {
+                        ChromaSampling::Cs420 => yuv_convert::yuv420_to_rgb8(
+                            y_view.as_slice(), y_view.stride(),
+                            u_view.as_slice(), u_view.stride(),
+                            v_view.as_slice(), v_view.stride(),
+                            buffer_width, buffer_height,
+                            our_range, our_matrix
+                        ),
+                        ChromaSampling::Cs422 => yuv_convert::yuv422_to_rgb8(
+                            y_view.as_slice(), y_view.stride(),
+                            u_view.as_slice(), u_view.stride(),
+                            v_view.as_slice(), v_view.stride(),
+                            buffer_width, buffer_height,
+                            our_range, our_matrix
+                        ),
+                        ChromaSampling::Cs444 => yuv_convert::yuv444_to_rgb8(
+                            y_view.as_slice(), y_view.stride(),
+                            u_view.as_slice(), u_view.stride(),
+                            v_view.as_slice(), v_view.stride(),
+                            buffer_width, buffer_height,
+                            our_range, our_matrix
+                        ),
                         ChromaSampling::Monochrome => unreachable!(),
-                    }
-                    .map_err(|e| at(Error::ColorConversion(e)))?;
+                    };
 
                     // Debug: print first few RGB values
                     if buffer_width == 768 || buffer_width == 1024 || buffer_width == 4 {
-                        eprintln!("  First 4 RGB pixels after conversion:");
-                        for i in 0..4.min(out.len()) {
-                            eprintln!("    [{}] = RGB({}, {}, {})", i, out[i].r, out[i].g, out[i].b);
+                        eprintln!("  First 4 RGB pixels after conversion (OUR IMPL):");
+                        for i in 0..4.min(result.buf().len()) {
+                            eprintln!("    [{}] = RGB({}, {}, {})", i, result.buf()[i].r, result.buf()[i].g, result.buf()[i].b);
                         }
                     }
 
-                    DecodedImage::Rgb8(ImgVec::new(out, buffer_width, buffer_height))
+                    DecodedImage::Rgb8(result)
                 }
             }
         };
