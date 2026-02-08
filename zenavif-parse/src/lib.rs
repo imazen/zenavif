@@ -405,6 +405,7 @@ struct AvifInternalMeta {
     primary_item_id: u32,
     iloc_items: TryVec<ItemLocationBoxItem>,
     item_infos: TryVec<ItemInfoEntry>,
+    idat: Option<TryVec<u8>>,
 }
 
 /// A Media Data Box
@@ -941,27 +942,19 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
         ..Default::default()
     };
 
-    // load data of relevant items
-    // For grid images, we need to load tiles in the order specified by iref
-    if is_grid {
-        // Extract each tile in order
-        for &tile_id in tile_item_ids.iter() {
-            let mut tile_data = TryVec::new();
-
-            if let Some(loc) = meta.iloc_items.iter().find(|loc| loc.item_id == tile_id) {
-                if loc.construction_method != ConstructionMethod::File {
-                    return Err(Error::Unsupported("unsupported construction_method"));
-                }
+    // Helper to extract item data from either mdat or idat
+    let mut extract_item_data = |loc: &ItemLocationBoxItem, buf: &mut TryVec<u8>| -> Result<()> {
+        match loc.construction_method {
+            ConstructionMethod::File => {
                 for extent in loc.extents.iter() {
                     let mut found = false;
-                    // try to find an overlapping mdat
                     for mdat in mdats.iter_mut() {
                         if mdat.matches_extent(&extent.extent_range) {
-                            tile_data.append(&mut mdat.data)?;
+                            buf.append(&mut mdat.data)?;
                             found = true;
                             break;
                         } else if mdat.contains_extent(&extent.extent_range) {
-                            mdat.read_extent(&extent.extent_range, &mut tile_data)?;
+                            mdat.read_extent(&extent.extent_range, buf)?;
                             found = true;
                             break;
                         }
@@ -970,6 +963,46 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
                         return Err(Error::InvalidData("iloc contains an extent that is not in mdat"));
                     }
                 }
+                Ok(())
+            },
+            ConstructionMethod::Idat => {
+                let idat_data = meta.idat.as_ref().ok_or(Error::InvalidData("idat box missing but construction_method is Idat"))?;
+                for extent in loc.extents.iter() {
+                    match &extent.extent_range {
+                        ExtentRange::WithLength(range) => {
+                            let start = usize::try_from(range.start).map_err(|_| Error::InvalidData("extent start too large"))?;
+                            let end = usize::try_from(range.end).map_err(|_| Error::InvalidData("extent end too large"))?;
+                            if end > idat_data.len() {
+                                return Err(Error::InvalidData("extent exceeds idat size"));
+                            }
+                            buf.extend_from_slice(&idat_data[start..end]).map_err(|_| Error::OutOfMemory)?;
+                        },
+                        ExtentRange::ToEnd(range) => {
+                            let start = usize::try_from(range.start).map_err(|_| Error::InvalidData("extent start too large"))?;
+                            if start >= idat_data.len() {
+                                return Err(Error::InvalidData("extent start exceeds idat size"));
+                            }
+                            buf.extend_from_slice(&idat_data[start..]).map_err(|_| Error::OutOfMemory)?;
+                        },
+                    }
+                }
+                Ok(())
+            },
+            ConstructionMethod::Item => {
+                Err(Error::Unsupported("construction_method 'item' not supported"))
+            },
+        }
+    };
+
+    // load data of relevant items
+    // For grid images, we need to load tiles in the order specified by iref
+    if is_grid {
+        // Extract each tile in order
+        for &tile_id in tile_item_ids.iter() {
+            let mut tile_data = TryVec::new();
+
+            if let Some(loc) = meta.iloc_items.iter().find(|loc| loc.item_id == tile_id) {
+                extract_item_data(loc, &mut tile_data)?;
             } else {
                 return Err(Error::InvalidData("grid tile not found in iloc"));
             }
@@ -990,27 +1023,7 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
                 continue;
             };
 
-            if loc.construction_method != ConstructionMethod::File {
-                return Err(Error::Unsupported("unsupported construction_method"));
-            }
-            for extent in loc.extents.iter() {
-                let mut found = false;
-                // try to find an overlapping mdat
-                for mdat in mdats.iter_mut() {
-                    if mdat.matches_extent(&extent.extent_range) {
-                        item_data.append(&mut mdat.data)?;
-                        found = true;
-                        break;
-                    } else if mdat.contains_extent(&extent.extent_range) {
-                        mdat.read_extent(&extent.extent_range, item_data)?;
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
-                    return Err(Error::InvalidData("iloc contains an extent that is not in mdat"));
-                }
-            }
+            extract_item_data(loc, item_data)?;
         }
     }
 
@@ -1043,6 +1056,7 @@ fn read_avif_meta<T: Read + Offset>(src: &mut BMFFBox<'_, T>, options: &ParseOpt
     let mut iloc_items = None;
     let mut item_references = TryVec::new();
     let mut properties = TryVec::new();
+    let mut idat = None;
 
     let mut iter = src.box_iter();
     while let Some(mut b) = iter.next_box()? {
@@ -1071,6 +1085,12 @@ fn read_avif_meta<T: Read + Offset>(src: &mut BMFFBox<'_, T>, options: &ParseOpt
             BoxType::ImagePropertiesBox => {
                 properties = read_iprp(&mut b, options)?;
             },
+            BoxType::ItemDataBox => {
+                if idat.is_some() {
+                    return Err(Error::InvalidData("There should be zero or one idat boxes"));
+                }
+                idat = Some(b.read_into_try_vec()?);
+            },
             _ => skip_box_content(&mut b)?,
         }
 
@@ -1097,6 +1117,7 @@ fn read_avif_meta<T: Read + Offset>(src: &mut BMFFBox<'_, T>, options: &ParseOpt
         primary_item_id,
         iloc_items: iloc_items.ok_or(Error::InvalidData("iloc missing"))?,
         item_infos,
+        idat,
     })
 }
 

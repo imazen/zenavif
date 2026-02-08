@@ -104,6 +104,7 @@ box_database!(
     ItemInfoBox                       0x6969_6e66, // "iinf"
     ItemInfoEntry                     0x696e_6665, // "infe"
     ItemLocationBox                   0x696c_6f63, // "iloc"
+    ItemDataBox                       0x6964_6174, // "idat" - item data for construction_method=1
     MovieBox                          0x6d6f_6f76, // "moov"
     MovieHeaderBox                    0x6d76_6864, // "mvhd"
     TrackBox                          0x7472_616b, // "trak"
