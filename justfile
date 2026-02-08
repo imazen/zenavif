@@ -68,3 +68,22 @@ test-integration:
 
 # Download vectors and run integration tests
 test-all: download-vectors test-integration
+
+# Build Docker image for libavif reference generation
+docker-build:
+    docker build -f Dockerfile.references -t zenavif-references .
+
+# Generate libavif reference images using Docker
+generate-references: download-vectors
+    mkdir -p tests/references/libavif
+    docker run --rm \
+        -v {{justfile_directory()}}/tests/vectors:/vectors:ro \
+        -v {{justfile_directory()}}/tests/references/libavif:/references \
+        zenavif-references
+
+# Run pixel verification tests (requires references)
+test-pixels:
+    cargo test --features managed --test pixel_verification -- --ignored --nocapture verify_against_libavif
+
+# Full pixel verification: generate references and test
+verify-pixels: generate-references test-pixels

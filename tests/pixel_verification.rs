@@ -231,6 +231,129 @@ fn verify_pixel_accuracy() {
     eprintln!("\n📊 Pixel Verification Results:");
     eprintln!("  Passed: {}", passed);
     eprintln!("  Failed: {}", failed);
-    
+
+    assert_eq!(failed, 0, "Pixel verification failed for {} files", failed);
+}
+
+/// Find all test vectors in the vectors directory
+fn find_test_vectors() -> Vec<PathBuf> {
+    let mut vectors = Vec::new();
+    let vectors_dir = Path::new("tests/vectors");
+
+    if !vectors_dir.exists() {
+        return vectors;
+    }
+
+    // Walk through all subdirectories
+    if let Ok(entries) = fs::read_dir(vectors_dir) {
+        for entry in entries.flatten() {
+            if let Ok(file_type) = entry.file_type() {
+                if file_type.is_dir() {
+                    // Check subdirectory for .avif files
+                    if let Ok(sub_entries) = fs::read_dir(entry.path()) {
+                        for sub_entry in sub_entries.flatten() {
+                            let path = sub_entry.path();
+                            if path.extension().and_then(|s| s.to_str()) == Some("avif") {
+                                vectors.push(path);
+                            }
+                        }
+                    }
+                } else if entry.path().extension().and_then(|s| s.to_str()) == Some("avif") {
+                    vectors.push(entry.path());
+                }
+            }
+        }
+    }
+
+    vectors.sort();
+    vectors
+}
+
+#[test]
+#[ignore]
+fn verify_against_libavif() {
+    let reference_dir = Path::new("tests/references/libavif");
+
+    if !reference_dir.exists() {
+        eprintln!("\n⚠️  No libavif references found!");
+        eprintln!("Run: just generate-references");
+        eprintln!("Or:  just docker-build && just generate-references");
+        panic!("libavif references required for pixel verification");
+    }
+
+    let vectors = find_test_vectors();
+    if vectors.is_empty() {
+        eprintln!("\n⚠️  No test vectors found!");
+        eprintln!("Run: just download-vectors");
+        panic!("test vectors required for pixel verification");
+    }
+
+    let config = DecoderConfig::new().threads(1);
+
+    let mut passed = 0;
+    let mut failed = 0;
+    let mut skipped = 0;
+
+    eprintln!("\n📊 Verifying pixel accuracy against libavif...\n");
+
+    for avif_path in vectors {
+        let basename = avif_path.file_stem().unwrap().to_str().unwrap();
+        let ref_path = reference_dir.join(format!("{}.png", basename));
+
+        if !ref_path.exists() {
+            eprintln!("  {:50} ⊘ No libavif reference", basename);
+            skipped += 1;
+            continue;
+        }
+
+        eprint!("  {:50} ", basename);
+
+        let data = match fs::read(&avif_path) {
+            Ok(data) => data,
+            Err(e) => {
+                eprintln!("✗ Read error: {}", e);
+                failed += 1;
+                continue;
+            }
+        };
+
+        match decode_with(&data, &config, &Unstoppable) {
+            Ok(image) => {
+                match compare_against_reference(&image, &ref_path, 1) {
+                    Ok(true) => {
+                        eprintln!("✓ Matches libavif");
+                        passed += 1;
+                    },
+                    Ok(false) => {
+                        eprintln!("✗ Pixel mismatch");
+                        failed += 1;
+                    },
+                    Err(e) => {
+                        eprintln!("✗ Compare error: {}", e);
+                        failed += 1;
+                    }
+                }
+            },
+            Err(e) => {
+                eprintln!("✗ Decode failed: {}", e);
+                failed += 1;
+            }
+        }
+    }
+
+    eprintln!("\n📊 Pixel Accuracy vs libavif:");
+    eprintln!("  Matches:  {}", passed);
+    eprintln!("  Mismatch: {}", failed);
+    eprintln!("  Skipped:  {}", skipped);
+
+    if failed > 0 {
+        eprintln!("\n❌ {} files have pixel mismatches with libavif", failed);
+        eprintln!("This indicates potential bugs in:");
+        eprintln!("  - YUV to RGB conversion");
+        eprintln!("  - Color space handling");
+        eprintln!("  - Alpha channel processing");
+        eprintln!("  - Chroma upsampling");
+    }
+
     assert_eq!(failed, 0, "Pixel verification failed for {} files", failed);
 }

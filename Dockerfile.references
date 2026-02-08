@@ -1,0 +1,43 @@
+# Dockerfile for generating libavif reference images
+FROM ubuntu:24.04
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    cmake \
+    ninja-build \
+    pkg-config \
+    g++ \
+    libaom-dev \
+    libdav1d-dev \
+    libyuv-dev \
+    libsharpyuv-dev \
+    libpng-dev \
+    libjpeg-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build libavif from source for latest version
+WORKDIR /build
+RUN git clone --depth 1 --branch v1.1.1 https://github.com/AOMediaCodec/libavif.git
+WORKDIR /build/libavif/build
+RUN cmake -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DAVIF_CODEC_AOM=ON \
+    -DAVIF_CODEC_DAV1D=ON \
+    -DAVIF_BUILD_APPS=ON \
+    .. && \
+    ninja && \
+    ninja install && \
+    ldconfig
+
+# Verify installation
+RUN avifdec --version
+
+WORKDIR /references
+VOLUME ["/vectors", "/references"]
+
+# Script to generate all references
+COPY scripts/generate-references.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/generate-references.sh
+
+ENTRYPOINT ["/usr/local/bin/generate-references.sh"]
