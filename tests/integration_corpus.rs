@@ -137,3 +137,40 @@ fn test_decode_specific_formats() {
         }
     }
 }
+
+#[test]
+fn test_yuv_crate_sanity() {
+    use yuv::{YuvPlanarImage, YuvRange, YuvStandardMatrix};
+    
+    let width = 4;
+    let height = 4;
+    
+    // Test 1: Gray (128,128,128) should stay gray
+    let y_plane = vec![128u8; width * height];
+    let u_plane = vec![128u8; width * height];
+    let v_plane = vec![128u8; width * height];
+    
+    let planar = YuvPlanarImage {
+        y_plane: &y_plane,
+        y_stride: width as u32,
+        u_plane: &u_plane,
+        u_stride: width as u32,
+        v_plane: &v_plane,
+        v_stride: width as u32,
+        width: width as u32,
+        height: height as u32,
+    };
+    
+    let mut rgb = vec![0u8; width * height * 3];
+    let rgb_stride = (width * 3) as u32;
+    
+    yuv::yuv444_to_rgb(&planar, &mut rgb, rgb_stride, YuvRange::Full, YuvStandardMatrix::Bt601).unwrap();
+    
+    eprintln!("Gray test: YUV (128, 128, 128) -> RGB ({}, {}, {})", rgb[0], rgb[1], rgb[2]);
+    eprintln!("Expected: RGB (128, 128, 128)");
+    
+    // Allow small rounding error
+    assert!((rgb[0] as i16 - 128).abs() <= 1, "Red channel off: {}", rgb[0]);
+    assert!((rgb[1] as i16 - 128).abs() <= 1, "Green channel off: {}", rgb[1]);
+    assert!((rgb[2] as i16 - 128).abs() <= 1, "Blue channel off: {}", rgb[2]);
+}

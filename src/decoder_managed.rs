@@ -652,6 +652,21 @@ impl ManagedAvifDecoder {
                     height: buffer_height as u32,
                 };
 
+                // Debug YUV420 conversion
+                if buffer_width == 768 || buffer_width == 1024 || buffer_width == 4 {
+                    eprintln!("\nDEBUG YUV conversion:");
+                    eprintln!("  Buffer: {}x{}, Display: {}x{}", buffer_width, buffer_height, display_width, display_height);
+                    eprintln!("  Y: w={} h={} stride={} len={}", y_view.width(), y_view.height(), y_view.stride(), y_view.as_slice().len());
+                    eprintln!("  U: w={} h={} stride={} len={}", u_view.width(), u_view.height(), u_view.stride(), u_view.as_slice().len());
+                    eprintln!("  V: w={} h={} stride={} len={}", v_view.width(), v_view.height(), v_view.as_slice().len());
+                    eprintln!("  Sampling: {:?}, Range: {:?}, Matrix: {:?}", sampling, yuv_range, matrix);
+
+                    // Print first few YUV values
+                    eprintln!("  First 4 Y pixels: {:?}", &y_view.as_slice()[..4.min(y_view.as_slice().len())]);
+                    eprintln!("  First 4 U pixels: {:?}", &u_view.as_slice()[..4.min(u_view.as_slice().len())]);
+                    eprintln!("  First 4 V pixels: {:?}", &v_view.as_slice()[..4.min(v_view.as_slice().len())]);
+                }
+
                 if has_alpha {
                     let mut out = vec![Rgba { r: 0u8, g: 0, b: 0, a: 255 }; buffer_pixel_count];
                     let rgb_stride = buffer_width as u32 * 4;
@@ -673,6 +688,15 @@ impl ManagedAvifDecoder {
                         ChromaSampling::Monochrome => unreachable!(),
                     }
                     .map_err(|e| at(Error::ColorConversion(e)))?;
+
+                    // Debug: print first few RGB values
+                    if buffer_width == 768 || buffer_width == 1024 || buffer_width == 4 {
+                        eprintln!("  First 4 RGB pixels after conversion:");
+                        for i in 0..4.min(out.len()) {
+                            eprintln!("    [{}] = RGB({}, {}, {})", i, out[i].r, out[i].g, out[i].b);
+                        }
+                    }
+
                     DecodedImage::Rgb8(ImgVec::new(out, buffer_width, buffer_height))
                 }
             }
