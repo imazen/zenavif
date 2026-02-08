@@ -154,13 +154,17 @@ impl ManagedAvifDecoder {
         Ok(Self { decoder, parser })
     }
 
-    /// Decode a single AV1 frame, flushing if needed for progressive/multi-layer streams.
+    /// Decode a single AV1 frame, handling progressive/multi-layer streams transparently.
+    ///
+    /// If the decoder buffers data internally (returns `Ok(None)`), flushes to retrieve
+    /// the composed frame. Always flushes afterward to reset state, so sequential calls
+    /// (e.g. primary then alpha) work without the caller needing to manage decoder state.
     ///
     /// Takes `decoder` explicitly to avoid borrowing `self` (which would conflict
     /// with borrows of `self.parser` for data access).
     fn decode_frame(decoder: &mut Rav1dDecoder, data: &[u8], context: &'static str) -> Result<Frame> {
-        match decoder.decode(data) {
-            Ok(Some(frame)) => Ok(frame),
+        let frame = match decoder.decode(data) {
+            Ok(Some(frame)) => frame,
             Ok(None) => {
                 // Progressive/multi-layer: flush to get the buffered frame
                 let frames = decoder.flush().map_err(|_e| {
@@ -174,13 +178,16 @@ impl ManagedAvifDecoder {
                         code: -1,
                         msg: context,
                     })
-                })
+                })?
             }
-            Err(_e) => Err(at(Error::Decode {
+            Err(_e) => return Err(at(Error::Decode {
                 code: -1,
                 msg: context,
             })),
-        }
+        };
+        // Reset decoder state so the next decode_frame call starts clean
+        let _ = decoder.flush();
+        Ok(frame)
     }
 
     /// Decode the primary image and optionally alpha channel
@@ -195,9 +202,6 @@ impl ManagedAvifDecoder {
         let primary_data = self.parser.primary_data()
             .map_err(|e| at(Error::from(e)))?;
         let primary_frame = Self::decode_frame(&mut self.decoder, &primary_data, "Failed to decode primary frame")?;
-
-        // Flush decoder state before alpha to prevent progressive sequence contamination
-        let _ = self.decoder.flush();
 
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
