@@ -80,19 +80,40 @@ struct AnimationParserData {
 ```rust
 impl<'data> AvifParser<'data> {
     /// Parse from borrowed bytes. Zero-copy: stores Cow::Borrowed.
-    /// All data extraction returns slices into the input.
+    /// Unlimited resource limits.
     pub fn from_bytes(data: &'data [u8]) -> Result<Self>
 
+    /// Parse from borrowed bytes with resource limits and cancellation.
+    pub fn from_bytes_with_config(
+        data: &'data [u8],
+        config: &DecodeConfig,
+        stop: &dyn Stop,
+    ) -> Result<Self>
+
     /// Parse from owned bytes. Stores Cow::Owned.
-    /// Data extraction returns slices into the owned buffer.
+    /// Unlimited resource limits.
     pub fn from_owned(data: Vec<u8>) -> Result<AvifParser<'static>>
+
+    /// Parse from owned bytes with resource limits and cancellation.
+    pub fn from_owned_with_config(
+        data: Vec<u8>,
+        config: &DecodeConfig,
+        stop: &dyn Stop,
+    ) -> Result<AvifParser<'static>>
 }
 
 /// std-only convenience
 #[cfg(feature = "std")]
 impl AvifParser<'static> {
-    /// Read all bytes then parse. Equivalent to from_owned(read_to_end()).
+    /// Read all bytes then parse. Unlimited resource limits.
     pub fn from_reader<R: Read>(reader: &mut R) -> Result<Self>
+
+    /// Read all bytes then parse with resource limits and cancellation.
+    pub fn from_reader_with_config<R: Read>(
+        reader: &mut R,
+        config: &DecodeConfig,
+        stop: &dyn Stop,
+    ) -> Result<Self>
 }
 ```
 
@@ -445,7 +466,7 @@ for frame in parser.frames() {
 1. Add MdatBounds, ItemExtents, FrameRef types
 2. Rewrite AvifParser struct with lifetime
 3. Implement parse_raw (skip mdat, record bounds)
-4. Implement from_bytes, from_owned, from_reader
+4. Implement from_bytes, from_owned, from_reader (and _with_config variants)
 5. Implement resolve_item, resolve_file_extents, resolve_idat_extents
 6. Implement primary_data, alpha_data, tile_data, frame, frames
 7. Implement to_avif_data bridge
@@ -454,6 +475,24 @@ for frame in parser.frames() {
 10. Delete old code (FrameDataIterator, duplicate methods)
 11. Run cargo fmt, clippy, test
 12. Commit
+
+## Resource Limits & Cancellation
+
+All constructors have `_with_config` variants accepting `&DecodeConfig` and `&dyn Stop`.
+The plain constructors use `DecodeConfig::unlimited()` and `&Unstoppable`.
+
+Error types include:
+- `Error::ResourceLimitExceeded(&'static str)` — limit exceeded before allocation
+- `Error::Stopped(enough::StopReason)` — cooperative cancellation via `Stop` trait
+
+Re-exports: `pub use enough::{Stop, StopReason, Unstoppable};`
+
+Checkpoints:
+- `stop.check()?` in top-level box iteration loop
+- `tracker.reserve(size)` before mdat reads, `tracker.release(size)` after
+- `tracker.validate_grid_tiles()` after collecting tile refs
+- `tracker.validate_animation_frames()` after moov parsing
+- `tracker.validate_total_megapixels()` after grid dimensions parsed
 
 ## Commit Strategy
 
