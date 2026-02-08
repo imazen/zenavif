@@ -86,6 +86,20 @@ just download-vectors
 just test-integration
 ```
 
+## Credits
+
+This project builds on excellent work by others:
+
+- **[rav1d](https://github.com/memorysafety/rav1d)** (BSD-2-Clause) — Pure Rust AV1 decoder (Rust port of [dav1d](https://code.videolan.org/videolan/dav1d)). Provides the AV1 decoding backend via its managed safe API.
+
+- **[avif-parse](https://github.com/nicoshev/avif-parse)** (MIT/Apache-2.0) — AVIF container parser for extracting image items and metadata from the ISOBMFF container.
+
+- **[yuv](https://github.com/nicoshev/yuvutils-rs)** (MIT) — YUV to RGB color conversion.
+
+- **[libavif](https://github.com/AOMediaCodec/libavif)** (BSD-2-Clause) — Reference AVIF implementation used for pixel-level verification and behavioral reference.
+
+- **Claude** (Anthropic) — AI-assisted development. Not all code manually reviewed — review critical paths before production use.
+
 ## License
 
 Sustainable, large-scale open source work requires a funding model, and I have been
