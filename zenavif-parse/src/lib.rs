@@ -270,6 +270,7 @@ pub(crate) struct AV1ConfigBox {
 
 /// Options for parsing AVIF files
 #[derive(Debug, Clone, Copy)]
+#[derive(Default)]
 pub struct ParseOptions {
     /// Enable lenient parsing mode
     ///
@@ -279,12 +280,6 @@ pub struct ParseOptions {
     ///
     /// Default: false (strict validation)
     pub lenient: bool,
-}
-
-impl Default for ParseOptions {
-    fn default() -> Self {
-        Self { lenient: false }
-    }
 }
 
 /// Grid configuration for tiled/grid-based AVIF images
@@ -821,7 +816,7 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
                 warn!("major_brand: {}", ftyp.major_brand);
                 return Err(Error::InvalidData("ftyp must be 'avif' or 'avis'"));
             }
-            let is_animated = ftyp.major_brand == b"avis";
+            let _is_animated = ftyp.major_brand == b"avis";
         } else {
             return Err(Error::InvalidData("'ftyp' box must occur first"));
         }

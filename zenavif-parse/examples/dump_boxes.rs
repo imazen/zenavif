@@ -23,8 +23,6 @@ fn read_box_header<R: Read>(r: &mut R) -> std::io::Result<Option<(u32, [u8; 4], 
 }
 
 fn dump_boxes<R: Read + Seek>(r: &mut R, depth: usize) -> std::io::Result<()> {
-    let start_pos = r.stream_position()?;
-    
     loop {
         let pos = r.stream_position()?;
         match read_box_header(r)? {
