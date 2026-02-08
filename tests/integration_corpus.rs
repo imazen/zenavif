@@ -56,38 +56,56 @@ fn test_decode_all_vectors() {
         eprint!("  {:50} ", path.file_name().unwrap().to_string_lossy());
 
         match fs::read(path) {
-            Ok(data) => match decode_with(&data, &config, &Unstoppable) {
-                Ok(image) => {
-                    let info = match &image {
-                        DecodedImage::Rgb8(img) => {
-                            format!("RGB8  {}x{}", img.width(), img.height())
-                        }
-                        DecodedImage::Rgba8(img) => {
-                            format!("RGBA8 {}x{}", img.width(), img.height())
-                        }
-                        DecodedImage::Rgb16(img) => {
-                            format!("RGB16 {}x{}", img.width(), img.height())
-                        }
-                        DecodedImage::Rgba16(img) => {
-                            format!("RGBA16 {}x{}", img.width(), img.height())
-                        }
-                        DecodedImage::Gray8(img) => {
-                            format!("GRAY8 {}x{}", img.width(), img.height())
-                        }
-                        DecodedImage::Gray16(img) => {
-                            format!("GRAY16 {}x{}", img.width(), img.height())
-                        }
-                        _ => format!("OTHER {}x{}", image.width(), image.height()),
-                    };
-                    eprintln!("✓ {}", info);
-                    passed += 1;
+            Ok(data) => {
+                let config = config.clone();
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    decode_with(&data, &config, &Unstoppable)
+                }));
+                match result {
+                    Ok(Ok(image)) => {
+                        let info = match &image {
+                            DecodedImage::Rgb8(img) => {
+                                format!("RGB8  {}x{}", img.width(), img.height())
+                            }
+                            DecodedImage::Rgba8(img) => {
+                                format!("RGBA8 {}x{}", img.width(), img.height())
+                            }
+                            DecodedImage::Rgb16(img) => {
+                                format!("RGB16 {}x{}", img.width(), img.height())
+                            }
+                            DecodedImage::Rgba16(img) => {
+                                format!("RGBA16 {}x{}", img.width(), img.height())
+                            }
+                            DecodedImage::Gray8(img) => {
+                                format!("GRAY8 {}x{}", img.width(), img.height())
+                            }
+                            DecodedImage::Gray16(img) => {
+                                format!("GRAY16 {}x{}", img.width(), img.height())
+                            }
+                            _ => format!("OTHER {}x{}", image.width(), image.height()),
+                        };
+                        eprintln!("✓ {}", info);
+                        passed += 1;
+                    }
+                    Ok(Err(e)) => {
+                        eprintln!("✗ {}", e);
+                        failed += 1;
+                        failed_files.push((path.clone(), e.to_string()));
+                    }
+                    Err(panic_info) => {
+                        let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                            s.to_string()
+                        } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                            s.clone()
+                        } else {
+                            "unknown panic".to_string()
+                        };
+                        eprintln!("✗ PANIC: {}", msg);
+                        failed += 1;
+                        failed_files.push((path.clone(), format!("PANIC: {}", msg)));
+                    }
                 }
-                Err(e) => {
-                    eprintln!("✗ {}", e);
-                    failed += 1;
-                    failed_files.push((path.clone(), e.to_string()));
-                }
-            },
+            }
             Err(e) => {
                 eprintln!("✗ Read error: {}", e);
                 failed += 1;
