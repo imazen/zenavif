@@ -2,12 +2,15 @@
 //!
 //! Safety: All intrinsics are protected by archmage's token system.
 //! The Desktop64 token proves AVX2 is available, making operations safe.
+//! This module uses #![forbid(unsafe_code)] - all SIMD is safe via #[arcane].
+
+#![forbid(unsafe_code)]
 
 use imgref::ImgVec;
 use rgb::RGB8;
 use crate::yuv_convert::{YuvRange, YuvMatrix};
-use archmage::prelude::*;
-use core::arch::x86_64::*;
+use archmage::prelude::*;  // Includes core::arch and safe_unaligned_simd
+use safe_unaligned_simd::x86_64::_mm_loadl_epi64;
 
 const YG: i32 = 18997;
 const YGB: i32 = -1160;
@@ -105,11 +108,10 @@ pub fn yuv420_to_rgb8_simd(
 }
 
 /// Process 8 pixels using AVX2
-/// 
-/// Safety: Token proves AVX2 is available, making all intrinsics safe to call.
-/// The unsafe block is required by Rust but operations are guaranteed safe.
-#[arcane]
-#[inline(always)]
+///
+/// Safety: Token proves AVX2 is available. #[rite] enables target_feature,
+/// making all intrinsics safe to call without unsafe blocks (Rust 1.85+).
+#[rite]
 fn process_8_pixels_avx2(
     _token: Desktop64,  // Token proves safety
     y: &[u8],
@@ -117,8 +119,6 @@ fn process_8_pixels_avx2(
     v: &[u8],
     out: &mut [RGB8],
 ) {
-    // SAFETY: Desktop64 token guarantees AVX2 is available
-    unsafe {
         let yg_vec = _mm256_set1_epi32(YG);
         let ub_vec = _mm256_set1_epi32(UB);
         let ug_vec = _mm256_set1_epi32(UG);
@@ -128,13 +128,19 @@ fn process_8_pixels_avx2(
         let bg_vec = _mm256_set1_epi32(BG);
         let br_vec = _mm256_set1_epi32(BR);
         let c0x0101 = _mm256_set1_epi32(0x0101);
-        
+
         // Load and convert Y, U, V to i32
-        let y_vals = _mm_loadl_epi64(y.as_ptr() as *const __m128i);
+        // safe_unaligned_simd provides safe array-based intrinsics via prelude
+        // For slices smaller than required, pad with zeros to meet alignment requirements
+        let mut y_padded = [0u8; 16];
+        y_padded[..8].copy_from_slice(&y[..8]);
+        let y_vals = _mm_loadl_epi64(&y_padded);  // Loads lower 8 bytes
         let y_8xi32 = _mm256_cvtepu8_epi32(y_vals);
-        
-        let u_vals_4 = _mm_cvtsi32_si128(u32::from_le_bytes([u[0], u[1], u[2], u[3]]) as i32);
-        let v_vals_4 = _mm_cvtsi32_si128(u32::from_le_bytes([v[0], v[1], v[2], v[3]]) as i32);
+
+        let u_arr: &[u8; 4] = (&u[..4]).try_into().unwrap();
+        let v_arr: &[u8; 4] = (&v[..4]).try_into().unwrap();
+        let u_vals_4 = _mm_cvtsi32_si128(u32::from_le_bytes(*u_arr) as i32);
+        let v_vals_4 = _mm_cvtsi32_si128(u32::from_le_bytes(*v_arr) as i32);
         let u_dup = _mm_unpacklo_epi8(u_vals_4, u_vals_4);
         let v_dup = _mm_unpacklo_epi8(v_vals_4, v_vals_4);
         let u_8xi32 = _mm256_cvtepu8_epi32(u_dup);
@@ -178,7 +184,6 @@ fn process_8_pixels_avx2(
                 b: ((b_64 >> (i * 8)) & 0xFF) as u8,
             };
         }
-    }
 }
 
 #[cfg(test)]
