@@ -863,6 +863,18 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
 
     // Extract grid configuration if this is a grid image
     let mut grid_config = if is_grid {
+        log::debug!("Grid: Looking for ImageGrid property for item_id={}", meta.primary_item_id);
+        log::debug!("Grid: Total properties available: {}", meta.properties.len());
+        for prop in &meta.properties {
+            log::debug!("Grid:   Property for item_id={}: {:?}", prop.item_id,
+                       match &prop.property {
+                           ItemProperty::ImageGrid(g) => format!("ImageGrid({:?})", g),
+                           ItemProperty::Channels(_) => "Channels".to_string(),
+                           ItemProperty::AuxiliaryType(_) => "AuxiliaryType".to_string(),
+                           ItemProperty::Unsupported => "Unsupported".to_string(),
+                       });
+        }
+
         meta.properties
             .iter()
             .find(|prop| {
@@ -870,7 +882,10 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
                     && matches!(prop.property, ItemProperty::ImageGrid(_))
             })
             .and_then(|prop| match &prop.property {
-                ItemProperty::ImageGrid(config) => Some(config.clone()),
+                ItemProperty::ImageGrid(config) => {
+                    log::debug!("Grid: Found explicit ImageGrid config: {:?}", config);
+                    Some(config.clone())
+                },
                 _ => None,
             })
     } else {
@@ -1342,16 +1357,24 @@ fn read_ipco<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
     let mut iter = src.box_iter();
     while let Some(mut b) = iter.next_box()? {
         // Must push for every property to have correct index for them
-        properties.push(match b.head.name {
+        let prop = match b.head.name {
             BoxType::PixelInformationBox => ItemProperty::Channels(read_pixi(&mut b, options)?),
             BoxType::AuxiliaryTypeProperty => ItemProperty::AuxiliaryType(read_auxc(&mut b, options)?),
-            BoxType::ImageGridBox => ItemProperty::ImageGrid(read_grid(&mut b, options)?),
+            BoxType::ImageGridBox => {
+                log::debug!("Grid: Parsing ImageGrid property box");
+                let grid = read_grid(&mut b, options)?;
+                log::debug!("Grid: Parsed ImageGrid: {:?}", grid);
+                ItemProperty::ImageGrid(grid)
+            },
             _ => {
+                log::debug!("Grid: Skipping property box type: {:?}", b.head.name);
                 skip_box_remain(&mut b)?;
                 ItemProperty::Unsupported
             },
-        })?;
+        };
+        properties.push(prop)?;
     }
+    log::debug!("Grid: Parsed {} properties from ipco", properties.len());
     Ok(properties)
 }
 

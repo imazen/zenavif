@@ -4,6 +4,7 @@ use std::env;
 use std::fs::File;
 
 fn main() {
+    env_logger::init();
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!("Usage: {} <avif-file>", args[0]);
