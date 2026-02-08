@@ -125,29 +125,21 @@ fn yuv420_to_rgb8_simd(
                 y_vals[i] = y_plane[y_idx + i] as f32;
             }
 
-            // Gather interpolated chroma values using scalar bilinear interpolation
-            let mut u_vals = [0f32; 8];
-            let mut v_vals = [0f32; 8];
-            for i in 0..8 {
-                let (u, v) = bilinear_chroma_sample(
-                    token,
-                    x_pos + i,
-                    y_pos,
-                    chroma_width,
-                    chroma_height,
-                    u_plane,
-                    u_stride,
-                    v_plane,
-                    v_stride,
-                );
-                u_vals[i] = u;
-                v_vals[i] = v;
-            }
+            // Vectorized chroma sampling for 8 pixels
+            let (u_vec, v_vec) = bilinear_chroma_sample_x8(
+                token,
+                x_pos,
+                y_pos,
+                chroma_width,
+                chroma_height,
+                u_plane,
+                u_stride,
+                v_plane,
+                v_stride,
+            );
 
-            // Load into SIMD vectors
+            // Load Y values into SIMD vector
             let y_vec = f32x8::from_array(token, y_vals);
-            let u_vec = f32x8::from_array(token, u_vals);
-            let v_vec = f32x8::from_array(token, v_vals);
 
             // Convert YUV to RGB using SIMD
             let (r_vec, g_vec, b_vec) =
@@ -205,6 +197,61 @@ fn yuv420_to_rgb8_simd(
         }
         ImgVec::new(cropped, width, height)
     }
+}
+
+/// SIMD helper: Bilinear chroma sample for 8 consecutive pixels
+#[rite]
+fn bilinear_chroma_sample_x8(
+    token: Desktop64,
+    x_start: usize,
+    y: usize,
+    chroma_width: usize,
+    chroma_height: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+) -> (f32x8, f32x8) {
+    // Calculate chroma y position (same for all 8 pixels in this row)
+    let chroma_y_raw = (y as f32 + 0.5) * 0.5 - 0.5;
+    let chroma_y = chroma_y_raw.max(0.0).min(chroma_height as f32 - 1.0);
+    let cy0 = chroma_y.floor() as usize;
+    let cy1 = (cy0 + 1).min(chroma_height - 1);
+    let fy = chroma_y - cy0 as f32;
+    let fy1 = 1.0 - fy;
+
+    // Process 8 pixels
+    let mut u_vals = [0f32; 8];
+    let mut v_vals = [0f32; 8];
+
+    for i in 0..8 {
+        let x = x_start + i;
+
+        // Calculate chroma x position
+        let chroma_x_raw = (x as f32 + 0.5) * 0.5 - 0.5;
+        let chroma_x = chroma_x_raw.max(0.0).min(chroma_width as f32 - 1.0);
+        let cx0 = chroma_x.floor() as usize;
+        let cx1 = (cx0 + 1).min(chroma_width - 1);
+        let fx = chroma_x - cx0 as f32;
+        let fx1 = 1.0 - fx;
+
+        // Load 4 surrounding chroma samples
+        let u00 = u_plane[cy0 * u_stride + cx0] as f32;
+        let u01 = u_plane[cy0 * u_stride + cx1] as f32;
+        let u10 = u_plane[cy1 * u_stride + cx0] as f32;
+        let u11 = u_plane[cy1 * u_stride + cx1] as f32;
+
+        let v00 = v_plane[cy0 * v_stride + cx0] as f32;
+        let v01 = v_plane[cy0 * v_stride + cx1] as f32;
+        let v10 = v_plane[cy1 * v_stride + cx0] as f32;
+        let v11 = v_plane[cy1 * v_stride + cx1] as f32;
+
+        // Bilinear interpolation
+        u_vals[i] = u00 * fx1 * fy1 + u01 * fx * fy1 + u10 * fx1 * fy + u11 * fx * fy;
+        v_vals[i] = v00 * fx1 * fy1 + v01 * fx * fy1 + v10 * fx1 * fy + v11 * fx * fy;
+    }
+
+    (f32x8::from_array(token, u_vals), f32x8::from_array(token, v_vals))
 }
 
 /// SIMD helper: Bilinear chroma sample for a single pixel
