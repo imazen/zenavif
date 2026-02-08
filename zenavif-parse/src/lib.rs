@@ -265,20 +265,49 @@ struct HandlerBox {
     handler_type: FourCC,
 }
 
-#[derive(Debug)]
-#[allow(unused)]
-pub(crate) struct AV1ConfigBox {
-    pub(crate) profile: u8,
-    pub(crate) level: u8,
-    pub(crate) tier: u8,
-    pub(crate) bit_depth: u8,
-    pub(crate) monochrome: bool,
-    pub(crate) chroma_subsampling_x: u8,
-    pub(crate) chroma_subsampling_y: u8,
-    pub(crate) chroma_sample_position: u8,
-    pub(crate) initial_presentation_delay_present: bool,
-    pub(crate) initial_presentation_delay_minus_one: u8,
-    pub(crate) config_obus: TryVec<u8>,
+/// AV1 codec configuration from the `av1C` property box.
+///
+/// Contains the AV1 codec parameters as signaled in the container.
+/// See AV1-ISOBMFF § 2.3.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AV1Config {
+    /// AV1 seq_profile (0=Main, 1=High, 2=Professional)
+    pub profile: u8,
+    /// AV1 seq_level_idx for operating point 0
+    pub level: u8,
+    /// AV1 seq_tier for operating point 0
+    pub tier: u8,
+    /// Bit depth (8, 10, or 12)
+    pub bit_depth: u8,
+    /// True if monochrome (no chroma planes)
+    pub monochrome: bool,
+    /// Chroma subsampling X (1 = horizontally subsampled)
+    pub chroma_subsampling_x: u8,
+    /// Chroma subsampling Y (1 = vertically subsampled)
+    pub chroma_subsampling_y: u8,
+    /// Chroma sample position (0=unknown, 1=vertical, 2=colocated)
+    pub chroma_sample_position: u8,
+}
+
+/// Colour information from the `colr` property box.
+///
+/// Can be either CICP-based (`nclx`) or an ICC profile (`rICC`/`prof`).
+/// See ISOBMFF § 12.1.5.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ColorInformation {
+    /// CICP-based color information (colour_type = 'nclx')
+    Nclx {
+        /// Colour primaries (ITU-T H.273 Table 2)
+        color_primaries: u16,
+        /// Transfer characteristics (ITU-T H.273 Table 3)
+        transfer_characteristics: u16,
+        /// Matrix coefficients (ITU-T H.273 Table 4)
+        matrix_coefficients: u16,
+        /// True if full range (0-255 for 8-bit), false if limited/studio range
+        full_range: bool,
+    },
+    /// ICC profile (colour_type = 'rICC' or 'prof')
+    IccProfile(std::vec::Vec<u8>),
 }
 
 /// Options for parsing AVIF files
@@ -546,6 +575,12 @@ pub struct AvifData {
     ///
     /// When present, primary_item contains the first frame
     pub animation: Option<AnimationConfig>,
+
+    /// AV1 codec configuration from the container's `av1C` property.
+    pub av1_config: Option<AV1Config>,
+
+    /// Colour information from the container's `colr` property.
+    pub color_info: Option<ColorInformation>,
 }
 
 // # Memory Usage
@@ -682,6 +717,8 @@ pub struct AvifParser<'data> {
     tiles: TryVec<ItemExtents>,
     animation_data: Option<AnimationParserData>,
     premultiplied_alpha: bool,
+    av1_config: Option<AV1Config>,
+    color_info: Option<ColorInformation>,
 }
 
 struct AnimationParserData {
@@ -861,7 +898,7 @@ impl<'data> AvifParser<'data> {
             .transpose()?;
 
         // Check for premultiplied alpha
-        let premultiplied_alpha = alpha_item_id.map_or(false, |alpha_id| {
+        let premultiplied_alpha = alpha_item_id.is_some_and(|alpha_id| {
             meta.item_references.iter().any(|iref| {
                 iref.from_item_id == meta.primary_item_id
                     && iref.to_item_id == alpha_id
@@ -874,7 +911,7 @@ impl<'data> AvifParser<'data> {
             .item_infos
             .iter()
             .find(|x| x.item_id == meta.primary_item_id)
-            .map_or(false, |info| info.item_type == b"grid");
+            .is_some_and(|info| info.item_type == b"grid");
 
         // Extract grid configuration and tile extents if this is a grid
         let (grid_config, tiles) = if is_grid {
@@ -904,6 +941,31 @@ impl<'data> AvifParser<'data> {
             (None, TryVec::new())
         };
 
+        // Extract av1C and colr for the primary item
+        let av1_config = meta.properties.iter()
+            .find_map(|p| {
+                if p.item_id == meta.primary_item_id {
+                    match &p.property {
+                        ItemProperty::AV1Config(c) => Some(c.clone()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            });
+
+        let color_info = meta.properties.iter()
+            .find_map(|p| {
+                if p.item_id == meta.primary_item_id {
+                    match &p.property {
+                        ItemProperty::ColorInformation(c) => Some(c.clone()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            });
+
         // Store animation metadata if present
         let animation_data = if let Some((media_timescale, sample_table, loop_count)) = parsed.animation_data {
             tracker.validate_animation_frames(sample_table.sample_sizes.len() as u32)?;
@@ -931,6 +993,8 @@ impl<'data> AvifParser<'data> {
             tiles,
             animation_data,
             premultiplied_alpha,
+            av1_config,
+            color_info,
         })
     }
 
@@ -1271,6 +1335,22 @@ impl<'data> AvifParser<'data> {
         self.premultiplied_alpha
     }
 
+    /// Get the AV1 codec configuration for the primary item, if present.
+    ///
+    /// This is parsed from the `av1C` property box in the container.
+    pub fn av1_config(&self) -> Option<&AV1Config> {
+        self.av1_config.as_ref()
+    }
+
+    /// Get colour information for the primary item, if present.
+    ///
+    /// This is parsed from the `colr` property box in the container.
+    /// For CICP/nclx values, this is the authoritative source and may
+    /// differ from values in the AV1 bitstream sequence header.
+    pub fn color_info(&self) -> Option<&ColorInformation> {
+        self.color_info.as_ref()
+    }
+
     /// Parse AV1 metadata from the primary item.
     pub fn primary_metadata(&self) -> Result<AV1Metadata> {
         let data = self.primary_data()?;
@@ -1342,6 +1422,8 @@ impl<'data> AvifParser<'data> {
             grid_config: self.grid_config.clone(),
             grid_tiles,
             animation,
+            av1_config: self.av1_config.clone(),
+            color_info: self.color_info.clone(),
         })
     }
 }
@@ -1937,7 +2019,7 @@ pub fn read_avif_with_config<T: Read>(
         .item_infos
         .iter()
         .find(|x| x.item_id == meta.primary_item_id)
-        .map_or(false, |info| {
+        .is_some_and(|info| {
             let is_g = info.item_type == b"grid";
             if is_g {
                 log::debug!("Grid image detected: primary_item_id={}", meta.primary_item_id);
@@ -2078,14 +2160,41 @@ pub fn read_avif_with_config<T: Read>(
             })
         });
 
+    // Extract av1C and colr for the primary item
+    let av1_config = meta.properties.iter()
+        .find_map(|p| {
+            if p.item_id == meta.primary_item_id {
+                match &p.property {
+                    ItemProperty::AV1Config(c) => Some(c.clone()),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        });
+
+    let color_info = meta.properties.iter()
+        .find_map(|p| {
+            if p.item_id == meta.primary_item_id {
+                match &p.property {
+                    ItemProperty::ColorInformation(c) => Some(c.clone()),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        });
+
     let mut context = AvifData {
-        premultiplied_alpha: alpha_item_id.map_or(false, |alpha_item_id| {
+        premultiplied_alpha: alpha_item_id.is_some_and(|alpha_item_id| {
             meta.item_references.iter().any(|iref| {
                 iref.from_item_id == meta.primary_item_id
                     && iref.to_item_id == alpha_item_id
                     && iref.item_type == b"prem"
             })
         }),
+        av1_config,
+        color_info,
         ..Default::default()
     };
 
@@ -2472,6 +2581,8 @@ pub(crate) enum ItemProperty {
     AuxiliaryType(AuxiliaryTypeProperty),
     ImageSpatialExtents(ImageSpatialExtents),
     ImageGrid(GridConfig),
+    AV1Config(AV1Config),
+    ColorInformation(ColorInformation),
     Unsupported,
 }
 
@@ -2482,6 +2593,8 @@ impl TryClone for ItemProperty {
             Self::AuxiliaryType(val) => Self::AuxiliaryType(val.try_clone()?),
             Self::ImageSpatialExtents(val) => Self::ImageSpatialExtents(*val),
             Self::ImageGrid(val) => Self::ImageGrid(val.clone()),
+            Self::AV1Config(val) => Self::AV1Config(val.clone()),
+            Self::ColorInformation(val) => Self::ColorInformation(val.clone()),
             Self::Unsupported => Self::Unsupported,
         })
     }
@@ -2540,6 +2653,13 @@ fn read_ipco<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
             BoxType::AuxiliaryTypeProperty => ItemProperty::AuxiliaryType(read_auxc(&mut b, options)?),
             BoxType::ImageSpatialExtentsBox => ItemProperty::ImageSpatialExtents(read_ispe(&mut b, options)?),
             BoxType::ImageGridBox => ItemProperty::ImageGrid(read_grid(&mut b, options)?),
+            BoxType::AV1CodecConfigurationBox => ItemProperty::AV1Config(read_av1c(&mut b)?),
+            BoxType::ColorInformationBox => {
+                match read_colr(&mut b) {
+                    Ok(colr) => ItemProperty::ColorInformation(colr),
+                    Err(_) => ItemProperty::Unsupported,
+                }
+            },
             _ => {
                 skip_box_remain(&mut b)?;
                 ItemProperty::Unsupported
@@ -2606,6 +2726,93 @@ fn read_auxc<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
     let aux_data = src.read_into_try_vec()?;
 
     Ok(AuxiliaryTypeProperty { aux_data })
+}
+
+/// Parse an AV1 Codec Configuration property box
+/// See AV1-ISOBMFF § 2.3
+fn read_av1c<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<AV1Config> {
+    // av1C is NOT a FullBox — it has no version/flags
+    let byte0 = src.read_u8()?;
+    let marker = byte0 >> 7;
+    let version = byte0 & 0x7F;
+
+    if marker != 1 {
+        return Err(Error::InvalidData("av1C marker must be 1"));
+    }
+    if version != 1 {
+        return Err(Error::Unsupported("av1C version must be 1"));
+    }
+
+    let byte1 = src.read_u8()?;
+    let profile = byte1 >> 5;
+    let level = byte1 & 0x1F;
+
+    let byte2 = src.read_u8()?;
+    let tier = byte2 >> 7;
+    let high_bitdepth = (byte2 >> 6) & 1;
+    let twelve_bit = (byte2 >> 5) & 1;
+    let monochrome = (byte2 >> 4) & 1 != 0;
+    let chroma_subsampling_x = (byte2 >> 3) & 1;
+    let chroma_subsampling_y = (byte2 >> 2) & 1;
+    let chroma_sample_position = byte2 & 0x03;
+
+    let byte3 = src.read_u8()?;
+    // byte3: 3 bits reserved, 1 bit initial_presentation_delay_present, 4 bits delay/reserved
+    // Not needed for image decoding.
+    let _ = byte3;
+
+    let bit_depth = if high_bitdepth != 0 {
+        if twelve_bit != 0 { 12 } else { 10 }
+    } else {
+        8
+    };
+
+    // Skip any configOBUs (remainder of box)
+    skip_box_remain(src)?;
+
+    Ok(AV1Config {
+        profile,
+        level,
+        tier,
+        bit_depth,
+        monochrome,
+        chroma_subsampling_x,
+        chroma_subsampling_y,
+        chroma_sample_position,
+    })
+}
+
+/// Parse a Colour Information property box
+/// See ISOBMFF § 12.1.5
+fn read_colr<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<ColorInformation> {
+    // colr is NOT a FullBox — no version/flags
+    let colour_type = be_u32(src)?;
+
+    match &colour_type.to_be_bytes() {
+        b"nclx" => {
+            let color_primaries = be_u16(src)?;
+            let transfer_characteristics = be_u16(src)?;
+            let matrix_coefficients = be_u16(src)?;
+            let full_range_byte = src.read_u8()?;
+            let full_range = (full_range_byte >> 7) != 0;
+            // Skip any remaining bytes
+            skip_box_remain(src)?;
+            Ok(ColorInformation::Nclx {
+                color_primaries,
+                transfer_characteristics,
+                matrix_coefficients,
+                full_range,
+            })
+        }
+        b"rICC" | b"prof" => {
+            let icc_data = src.read_into_try_vec()?;
+            Ok(ColorInformation::IccProfile(icc_data.to_vec()))
+        }
+        _ => {
+            skip_box_remain(src)?;
+            Err(Error::Unsupported("unsupported colr colour_type"))
+        }
+    }
 }
 
 /// Parse an Image Spatial Extents property box
@@ -3140,7 +3347,7 @@ fn read_ftyp<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<FileTypeBox> {
     let major = be_u32(src)?;
     let minor = be_u32(src)?;
     let bytes_left = src.bytes_left();
-    if bytes_left % 4 != 0 {
+    if !bytes_left.is_multiple_of(4) {
         return Err(Error::InvalidData("invalid ftyp size"));
     }
     // Is a brand_count of zero valid?

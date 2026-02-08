@@ -364,6 +364,51 @@ fn parser_metadata() {
 }
 
 #[test]
+fn parser_av1_config() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let av1c = parser.av1_config().expect("av1C should be present");
+    assert_eq!(av1c.profile, 0); // Main profile
+    assert_eq!(av1c.bit_depth, 8);
+    assert!(av1c.monochrome); // Monochrome.avif
+}
+
+#[test]
+fn parser_av1_config_alpha_file() {
+    let bytes = std::fs::read(IMAGE_AVIF_ALPHA).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let av1c = parser.av1_config().expect("av1C should be present");
+    assert_eq!(av1c.bit_depth, 8);
+    assert!(!av1c.monochrome);
+}
+
+#[test]
+fn parser_color_info() {
+    // Test colr parsing on a file that has one. The Microsoft test files
+    // may or may not have colr boxes, so we test parsing on what's available.
+    let bytes = std::fs::read(IMAGE_AVIF_ALPHA).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    // color_info may be None for files without colr — that's fine.
+    // Just verify the accessor doesn't panic.
+    let _color = parser.color_info();
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn eager_av1_config() {
+    let input = &mut std::fs::File::open(IMAGE_AVIF).expect("Unknown file");
+    let context = zenavif_parse::read_avif(input).expect("read_avif failed");
+
+    let av1c = context.av1_config.expect("av1C should be present");
+    assert_eq!(av1c.profile, 0);
+    assert_eq!(av1c.bit_depth, 8);
+    assert!(av1c.monochrome);
+}
+
+#[test]
 fn parser_alpha_data() {
     let bytes = std::fs::read(IMAGE_AVIF_ALPHA).expect("read file");
     let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
