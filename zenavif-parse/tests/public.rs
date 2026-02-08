@@ -9,6 +9,7 @@ static IMAGE_AVIF_EXTENTS: &str = "tests/kodim-extents.avif";
 static IMAGE_AVIF_CORRUPT: &str = "tests/bug-1655846.avif";
 static IMAGE_AVIF_CORRUPT_2: &str = "tests/bug-1661347.avif";
 static IMAGE_GRID_5X4: &str = "av1-avif/testFiles/Microsoft/Summer_in_Tomsk_720p_5x4_grid.avif";
+static ANIMATED_AVIF: &str = "link-u-samples/star-8bpc.avifs";
 static AOMEDIA_TEST_FILES: &str = "av1-avif/testFiles";
 static LINK_U_SAMPLES: &str = "link-u-samples";
 
@@ -86,6 +87,34 @@ fn grid_tile_ordering() {
     // The Microsoft 5×4 grid has tiles with varying sizes, confirming order matters
 }
 
+#[test]
+fn animated_avif_frame_extraction() {
+    // Test animation parsing from .avifs file
+    let input = &mut File::open(ANIMATED_AVIF).expect("Unknown file");
+    let avif = avif_parse::read_avif(input).expect("read_avif failed");
+
+    // Verify animation was detected and parsed
+    let animation = avif.animation.expect("Expected animation data");
+
+    // Verify frame count
+    assert_eq!(animation.frames.len(), 5, "Expected 5 frames");
+
+    // Verify all frames have valid data
+    for (i, frame) in animation.frames.iter().enumerate() {
+        assert!(!frame.data.is_empty(), "Frame {} should not be empty", i);
+        assert!(frame.duration_ms > 0, "Frame {} should have positive duration", i);
+    }
+
+    // Verify expected durations (star-8bpc.avifs has 100ms per frame)
+    for frame in &animation.frames {
+        assert_eq!(frame.duration_ms, 100, "Expected 100ms frame duration");
+    }
+
+    // Verify primary item contains first frame
+    assert_eq!(avif.primary_item.len(), animation.frames[0].data.len(),
+        "Primary item should match first frame");
+}
+
 fn test_dir(dir: &str) {
     let _ = env_logger::builder().is_test(true).filter_level(log::LevelFilter::max()).try_init();
     let mut errors = 0;
@@ -93,7 +122,8 @@ fn test_dir(dir: &str) {
     for entry in walkdir::WalkDir::new(dir) {
         let entry = entry.expect("AVIF entry");
         let path = entry.path();
-        if !path.is_file() || path.extension().unwrap_or_default() != "avif" {
+        let ext = path.extension().unwrap_or_default();
+        if !path.is_file() || (ext != "avif" && ext != "avifs") {
             continue; // Skip directories, ReadMe.txt, etc.
         }
         log::debug!("parsing {:?}", path.display());

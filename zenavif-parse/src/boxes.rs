@@ -124,8 +124,10 @@ box_database!(
     AuxiliaryTypeProperty             0x6175_7843, // "auxC"
     ImageSpatialExtentsBox            0x6973_7065, // "ispe" - image width and height
     ImageGridBox                      0x6772_6964, // "grid" - for grid/tiled images
+    VideoMediaHeaderBox               0x766d_6864, // "vmhd" - video media header (for animation)
+    DataInformationBox                0x6469_6e66, // "dinf" - data information (for animation)
+    DataReferenceBox                  0x6472_6566, // "dref" - data reference (for animation)
     SampleTableBox                    0x7374_626c, // "stbl"
-    SampleDescriptionBox              0x7374_7364, // "stsd"
     TimeToSampleBox                   0x7374_7473, // "stts"
     SampleToChunkBox                  0x7374_7363, // "stsc"
     SampleSizeBox                     0x7374_737a, // "stsz"

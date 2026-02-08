@@ -330,6 +330,41 @@ pub struct AnimationConfig {
     pub frames: TryVec<AnimationFrame>,
 }
 
+// Internal structures for animation parsing
+
+#[derive(Debug)]
+struct MovieHeader {
+    _timescale: u32,
+    _duration: u64,
+}
+
+#[derive(Debug)]
+struct MediaHeader {
+    timescale: u32,
+    _duration: u64,
+}
+
+#[derive(Debug)]
+struct TimeToSampleEntry {
+    sample_count: u32,
+    sample_delta: u32,
+}
+
+#[derive(Debug)]
+struct SampleToChunkEntry {
+    first_chunk: u32,
+    samples_per_chunk: u32,
+    _sample_description_index: u32,
+}
+
+#[derive(Debug)]
+struct SampleTable {
+    time_to_sample: TryVec<TimeToSampleEntry>,
+    sample_to_chunk: TryVec<SampleToChunkEntry>,
+    sample_sizes: TryVec<u32>,
+    chunk_offsets: TryVec<u64>,
+}
+
 #[derive(Debug, Default)]
 pub struct AvifData {
     /// AV1 data for the color channels.
@@ -866,6 +901,7 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
 
     let mut meta = None;
     let mut mdats = TryVec::new();
+    let mut animation_data: Option<(u32, SampleTable)> = None;
 
     while let Some(mut b) = iter.next_box()? {
         match b.head.name {
@@ -874,6 +910,9 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
                     return Err(Error::InvalidData("There should be zero or one meta boxes per ISO 14496-12:2015 § 8.11.1.1"));
                 }
                 meta = Some(read_avif_meta(&mut b, options)?);
+            },
+            BoxType::MovieBox => {
+                animation_data = read_moov(&mut b)?;
             },
             BoxType::MediaDataBox => {
                 if b.bytes_left() > 0 {
@@ -1123,6 +1162,25 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
             };
 
             extract_item_data(loc, item_data)?;
+        }
+    }
+
+    // Extract animation frames if this is an animated AVIF
+    if let Some((media_timescale, sample_table)) = animation_data {
+        log::debug!("Animation: extracting frames (media_timescale={})", media_timescale);
+        match extract_animation_frames(&sample_table, media_timescale, &mut mdats) {
+            Ok(frames) => {
+                if !frames.is_empty() {
+                    log::debug!("Animation: extracted {} frames", frames.len());
+                    context.animation = Some(AnimationConfig {
+                        loop_count: 0, // TODO: parse from edit list or meta
+                        frames,
+                    });
+                }
+            }
+            Err(e) => {
+                log::warn!("Animation: failed to extract frames: {}", e);
+            }
         }
     }
 
@@ -1531,6 +1589,374 @@ fn read_ispe<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
     }
 
     Ok(ImageSpatialExtents { width, height })
+}
+
+/// Parse a Movie Header box (mvhd)
+/// See ISO/IEC 14496-12:2015 § 8.2.2
+fn read_mvhd<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<MovieHeader> {
+    let version = src.read_u8()?;
+    let _flags = [src.read_u8()?, src.read_u8()?, src.read_u8()?];
+
+    let (timescale, duration) = if version == 1 {
+        let _creation_time = be_u64(src)?;
+        let _modification_time = be_u64(src)?;
+        let timescale = be_u32(src)?;
+        let duration = be_u64(src)?;
+        (timescale, duration)
+    } else {
+        let _creation_time = be_u32(src)?;
+        let _modification_time = be_u32(src)?;
+        let timescale = be_u32(src)?;
+        let duration = be_u32(src)?;
+        (timescale, duration as u64)
+    };
+
+    // Skip rest of mvhd (rate, volume, matrix, etc.)
+    skip_box_remain(src)?;
+
+    Ok(MovieHeader { _timescale: timescale, _duration: duration })
+}
+
+/// Parse a Media Header box (mdhd)
+/// See ISO/IEC 14496-12:2015 § 8.4.2
+fn read_mdhd<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<MediaHeader> {
+    let version = src.read_u8()?;
+    let _flags = [src.read_u8()?, src.read_u8()?, src.read_u8()?];
+
+    let (timescale, duration) = if version == 1 {
+        let _creation_time = be_u64(src)?;
+        let _modification_time = be_u64(src)?;
+        let timescale = be_u32(src)?;
+        let duration = be_u64(src)?;
+        (timescale, duration)
+    } else {
+        let _creation_time = be_u32(src)?;
+        let _modification_time = be_u32(src)?;
+        let timescale = be_u32(src)?;
+        let duration = be_u32(src)?;
+        (timescale, duration as u64)
+    };
+
+    // Skip language and pre_defined
+    skip_box_remain(src)?;
+
+    Ok(MediaHeader { timescale, _duration: duration })
+}
+
+/// Parse Time To Sample box (stts)
+/// See ISO/IEC 14496-12:2015 § 8.6.1.2
+fn read_stts<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<TimeToSampleEntry>> {
+    let _version = src.read_u8()?;
+    let _flags = [src.read_u8()?, src.read_u8()?, src.read_u8()?];
+    let entry_count = be_u32(src)?;
+
+    let mut entries = TryVec::new();
+    for _ in 0..entry_count {
+        entries.push(TimeToSampleEntry {
+            sample_count: be_u32(src)?,
+            sample_delta: be_u32(src)?,
+        })?;
+    }
+
+    Ok(entries)
+}
+
+/// Parse Sample To Chunk box (stsc)
+/// See ISO/IEC 14496-12:2015 § 8.7.4
+fn read_stsc<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<SampleToChunkEntry>> {
+    let _version = src.read_u8()?;
+    let _flags = [src.read_u8()?, src.read_u8()?, src.read_u8()?];
+    let entry_count = be_u32(src)?;
+
+    let mut entries = TryVec::new();
+    for _ in 0..entry_count {
+        entries.push(SampleToChunkEntry {
+            first_chunk: be_u32(src)?,
+            samples_per_chunk: be_u32(src)?,
+            _sample_description_index: be_u32(src)?,
+        })?;
+    }
+
+    Ok(entries)
+}
+
+/// Parse Sample Size box (stsz)
+/// See ISO/IEC 14496-12:2015 § 8.7.3
+fn read_stsz<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<u32>> {
+    let _version = src.read_u8()?;
+    let _flags = [src.read_u8()?, src.read_u8()?, src.read_u8()?];
+    let sample_size = be_u32(src)?;
+    let sample_count = be_u32(src)?;
+
+    let mut sizes = TryVec::new();
+    if sample_size == 0 {
+        // Variable sizes - read each one
+        for _ in 0..sample_count {
+            sizes.push(be_u32(src)?)?;
+        }
+    } else {
+        // Constant size for all samples
+        for _ in 0..sample_count {
+            sizes.push(sample_size)?;
+        }
+    }
+
+    Ok(sizes)
+}
+
+/// Parse Chunk Offset box (stco or co64)
+/// See ISO/IEC 14496-12:2015 § 8.7.5
+fn read_chunk_offsets<T: Read>(src: &mut BMFFBox<'_, T>, is_64bit: bool) -> Result<TryVec<u64>> {
+    let _version = src.read_u8()?;
+    let _flags = [src.read_u8()?, src.read_u8()?, src.read_u8()?];
+    let entry_count = be_u32(src)?;
+
+    let mut offsets = TryVec::new();
+    for _ in 0..entry_count {
+        let offset = if is_64bit {
+            be_u64(src)?
+        } else {
+            be_u32(src)? as u64
+        };
+        offsets.push(offset)?;
+    }
+
+    Ok(offsets)
+}
+
+/// Parse Sample Table box (stbl)
+/// See ISO/IEC 14496-12:2015 § 8.5
+fn read_stbl<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<SampleTable> {
+    let mut time_to_sample = TryVec::new();
+    let mut sample_to_chunk = TryVec::new();
+    let mut sample_sizes = TryVec::new();
+    let mut chunk_offsets = TryVec::new();
+
+    let mut iter = src.box_iter();
+    while let Some(mut b) = iter.next_box()? {
+        match b.head.name {
+            BoxType::TimeToSampleBox => {
+                time_to_sample = read_stts(&mut b)?;
+            }
+            BoxType::SampleToChunkBox => {
+                sample_to_chunk = read_stsc(&mut b)?;
+            }
+            BoxType::SampleSizeBox => {
+                sample_sizes = read_stsz(&mut b)?;
+            }
+            BoxType::ChunkOffsetBox => {
+                chunk_offsets = read_chunk_offsets(&mut b, false)?;
+            }
+            BoxType::ChunkLargeOffsetBox => {
+                chunk_offsets = read_chunk_offsets(&mut b, true)?;
+            }
+            _ => {
+                skip_box_remain(&mut b)?;
+            }
+        }
+    }
+
+    Ok(SampleTable {
+        time_to_sample,
+        sample_to_chunk,
+        sample_sizes,
+        chunk_offsets,
+    })
+}
+
+/// Parse animation from moov box
+/// Returns (media_timescale, sample_table)
+fn read_moov<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<(u32, SampleTable)>> {
+    let mut media_timescale: Option<u32> = None;
+    let mut sample_table: Option<SampleTable> = None;
+
+    let mut iter = src.box_iter();
+    while let Some(mut b) = iter.next_box()? {
+        match b.head.name {
+            BoxType::MovieHeaderBox => {
+                let _mvhd = read_mvhd(&mut b)?;
+            }
+            BoxType::TrackBox => {
+                // Parse track recursively
+                // Only use first video track, but consume all tracks
+                if media_timescale.is_none() {
+                    if let Some((timescale, stbl)) = read_trak(&mut b)? {
+                        media_timescale = Some(timescale);
+                        sample_table = Some(stbl);
+                    }
+                } else {
+                    skip_box_remain(&mut b)?;
+                }
+            }
+            _ => {
+                skip_box_remain(&mut b)?;
+            }
+        }
+    }
+
+    if let (Some(timescale), Some(stbl)) = (media_timescale, sample_table) {
+        Ok(Some((timescale, stbl)))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Parse track box (trak)
+/// Returns (media_timescale, sample_table) if this is a valid video track
+fn read_trak<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<(u32, SampleTable)>> {
+    let mut iter = src.box_iter();
+    while let Some(mut b) = iter.next_box()? {
+        if b.head.name == BoxType::MediaBox {
+            return read_mdia(&mut b);
+        } else {
+            skip_box_remain(&mut b)?;
+        }
+    }
+    Ok(None)
+}
+
+/// Parse media box (mdia)
+fn read_mdia<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<(u32, SampleTable)>> {
+    let mut media_timescale = 1000; // default
+    let mut sample_table: Option<SampleTable> = None;
+
+    let mut iter = src.box_iter();
+    while let Some(mut b) = iter.next_box()? {
+        match b.head.name {
+            BoxType::MediaHeaderBox => {
+                let mdhd = read_mdhd(&mut b)?;
+                media_timescale = mdhd.timescale;
+            }
+            BoxType::MediaInformationBox => {
+                sample_table = read_minf(&mut b)?;
+            }
+            _ => {
+                skip_box_remain(&mut b)?;
+            }
+        }
+    }
+
+    if let Some(stbl) = sample_table {
+        Ok(Some((media_timescale, stbl)))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Parse media information box (minf)
+fn read_minf<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<SampleTable>> {
+    let mut iter = src.box_iter();
+    while let Some(mut b) = iter.next_box()? {
+        if b.head.name == BoxType::SampleTableBox {
+            return Ok(Some(read_stbl(&mut b)?));
+        } else {
+            skip_box_remain(&mut b)?;
+        }
+    }
+    Ok(None)
+}
+
+/// Extract animation frames using sample table
+fn extract_animation_frames(
+    sample_table: &SampleTable,
+    media_timescale: u32,
+    mdats: &mut [MediaDataBox],
+) -> Result<TryVec<AnimationFrame>> {
+    let mut frames = TryVec::new();
+
+    // Build sample-to-chunk mapping (expand into per-sample info)
+    let mut sample_to_chunk_map = TryVec::new();
+    for (i, entry) in sample_table.sample_to_chunk.iter().enumerate() {
+        let next_first_chunk = sample_table
+            .sample_to_chunk
+            .get(i + 1)
+            .map(|e| e.first_chunk)
+            .unwrap_or(u32::MAX);
+
+        for chunk_idx in entry.first_chunk..next_first_chunk {
+            if chunk_idx > sample_table.chunk_offsets.len() as u32 {
+                break;
+            }
+            sample_to_chunk_map.push((chunk_idx, entry.samples_per_chunk))?;
+        }
+    }
+
+    // Calculate frame durations from time-to-sample
+    let mut frame_durations = TryVec::new();
+    for entry in &sample_table.time_to_sample {
+        for _ in 0..entry.sample_count {
+            // Convert from media timescale to milliseconds
+            let duration_ms = if media_timescale > 0 {
+                ((entry.sample_delta as u64) * 1000) / (media_timescale as u64)
+            } else {
+                0
+            };
+            frame_durations.push(duration_ms as u32)?;
+        }
+    }
+
+    // Extract each frame
+    let sample_count = sample_table.sample_sizes.len();
+    let mut current_sample = 0;
+
+    for (chunk_idx_1based, samples_in_chunk) in &sample_to_chunk_map {
+        let chunk_idx = (*chunk_idx_1based as usize).saturating_sub(1);
+        if chunk_idx >= sample_table.chunk_offsets.len() {
+            continue;
+        }
+
+        let chunk_offset = sample_table.chunk_offsets[chunk_idx];
+
+        for sample_in_chunk in 0..*samples_in_chunk {
+            if current_sample >= sample_count {
+                break;
+            }
+
+            let sample_size = sample_table.sample_sizes[current_sample];
+            let duration_ms = frame_durations.get(current_sample).copied().unwrap_or(0);
+
+            // Calculate offset within chunk
+            let mut offset_in_chunk = 0u64;
+            for s in 0..sample_in_chunk {
+                let prev_sample = current_sample.saturating_sub((sample_in_chunk - s) as usize);
+                if prev_sample < sample_count {
+                    offset_in_chunk += sample_table.sample_sizes[prev_sample] as u64;
+                }
+            }
+
+            let sample_offset = chunk_offset + offset_in_chunk;
+
+            // Extract frame data from mdat
+            let mut frame_data = TryVec::new();
+            let mut found = false;
+
+            for mdat in mdats.iter_mut() {
+                let range = ExtentRange::WithLength(Range {
+                    start: sample_offset,
+                    end: sample_offset + sample_size as u64,
+                });
+
+                if mdat.contains_extent(&range) {
+                    mdat.read_extent(&range, &mut frame_data)?;
+                    found = true;
+                    break;
+                }
+            }
+
+            if !found {
+                log::warn!("Animation frame {} not found in mdat", current_sample);
+            }
+
+            frames.push(AnimationFrame {
+                data: frame_data,
+                duration_ms,
+            })?;
+
+            current_sample += 1;
+        }
+    }
+
+    Ok(frames)
 }
 
 /// Parse an ImageGrid property box
