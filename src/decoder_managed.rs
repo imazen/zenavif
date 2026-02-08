@@ -154,6 +154,35 @@ impl ManagedAvifDecoder {
         Ok(Self { decoder, parser })
     }
 
+    /// Decode a single AV1 frame, flushing if needed for progressive/multi-layer streams.
+    ///
+    /// Takes `decoder` explicitly to avoid borrowing `self` (which would conflict
+    /// with borrows of `self.parser` for data access).
+    fn decode_frame(decoder: &mut Rav1dDecoder, data: &[u8], context: &'static str) -> Result<Frame> {
+        match decoder.decode(data) {
+            Ok(Some(frame)) => Ok(frame),
+            Ok(None) => {
+                // Progressive/multi-layer: flush to get the buffered frame
+                let frames = decoder.flush().map_err(|_e| {
+                    at(Error::Decode {
+                        code: -1,
+                        msg: "Failed to flush decoder",
+                    })
+                })?;
+                frames.into_iter().last().ok_or_else(|| {
+                    at(Error::Decode {
+                        code: -1,
+                        msg: context,
+                    })
+                })
+            }
+            Err(_e) => Err(at(Error::Decode {
+                code: -1,
+                msg: context,
+            })),
+        }
+    }
+
     /// Decode the primary image and optionally alpha channel
     pub fn decode(&mut self, stop: &impl Stop) -> Result<DecodedImage> {
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
@@ -165,42 +194,16 @@ impl ManagedAvifDecoder {
 
         let primary_data = self.parser.primary_data()
             .map_err(|e| at(Error::from(e)))?;
-        let primary_frame = self
-            .decoder
-            .decode(&primary_data)
-            .map_err(|_e| {
-                at(Error::Decode {
-                    code: -1,
-                    msg: "Failed to decode primary frame",
-                })
-            })?
-            .ok_or_else(|| {
-                at(Error::Decode {
-                    code: -1,
-                    msg: "No frame returned from decoder",
-                })
-            })?;
+        let primary_frame = Self::decode_frame(&mut self.decoder, &primary_data, "Failed to decode primary frame")?;
+
+        // Flush decoder state before alpha to prevent progressive sequence contamination
+        let _ = self.decoder.flush();
 
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
         let alpha_frame = if let Some(alpha_result) = self.parser.alpha_data() {
             let alpha_data = alpha_result.map_err(|e| at(Error::from(e)))?;
-            Some(
-                self.decoder
-                    .decode(&alpha_data)
-                    .map_err(|_e| {
-                        at(Error::Decode {
-                            code: -1,
-                            msg: "Failed to decode alpha frame",
-                        })
-                    })?
-                    .ok_or_else(|| {
-                        at(Error::Decode {
-                            code: -1,
-                            msg: "No alpha frame returned",
-                        })
-                    })?,
-            )
+            Some(Self::decode_frame(&mut self.decoder, &alpha_data, "Failed to decode alpha frame")?)
         } else {
             None
         };
@@ -225,21 +228,7 @@ impl ManagedAvifDecoder {
 
             let tile_data = self.parser.tile_data(i)
                 .map_err(|e| at(Error::from(e)))?;
-            let frame = self
-                .decoder
-                .decode(&tile_data)
-                .map_err(|_e| {
-                    at(Error::Decode {
-                        code: -1,
-                        msg: "Failed to decode grid tile",
-                    })
-                })?
-                .ok_or_else(|| {
-                    at(Error::Decode {
-                        code: -1,
-                        msg: "No frame returned for grid tile",
-                    })
-                })?;
+            let frame = Self::decode_frame(&mut self.decoder, &tile_data, "Failed to decode grid tile")?;
 
             tile_frames.push(frame);
         }
