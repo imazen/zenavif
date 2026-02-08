@@ -944,6 +944,63 @@ impl AvifParser {
 
         Err(Error::InvalidData("sample not found in chunk table"))
     }
+
+    /// Get grid configuration (if grid image)
+    pub fn grid_config(&self) -> Option<&GridConfig> {
+        self.grid_config.as_ref()
+    }
+
+    /// Get number of grid tiles
+    pub fn grid_tile_count(&self) -> usize {
+        self.grid_tile_extents.len()
+    }
+
+    /// Extract all grid tiles (on-demand)
+    pub fn grid_tiles(&self) -> Result<TryVec<TryVec<u8>>> {
+        let mut tiles = TryVec::new();
+        for i in 0..self.grid_tile_count() {
+            tiles.push(self.grid_tile(i)?)?;
+        }
+        Ok(tiles)
+    }
+
+    /// Check if alpha channel uses premultiplied alpha
+    pub fn premultiplied_alpha(&self) -> bool {
+        self.premultiplied_alpha
+    }
+
+    /// Convert to AvifData (loads all frames - high memory!)
+    ///
+    /// This method eagerly loads all animation frames and grid tiles,
+    /// which can use ~2× memory compared to on-demand extraction.
+    /// Only use this if you need the AvifData API.
+    pub fn to_avif_data(&self) -> Result<AvifData> {
+        let primary_item = self.primary_item()?;
+        let alpha_item = self.alpha_item().transpose()?;
+        let grid_tiles = self.grid_tiles()?;
+
+        let animation = if let Some(info) = self.animation_info() {
+            let mut frames = TryVec::new();
+            for i in 0..info.frame_count {
+                frames.push(self.animation_frame(i)?)?;
+            }
+            Some(AnimationConfig {
+                loop_count: info.loop_count,
+                frames,
+            })
+        } else {
+            None
+        };
+
+        Ok(AvifData {
+            primary_item,
+            alpha_item,
+            premultiplied_alpha: self.premultiplied_alpha,
+            grid_config: self.grid_config.clone(),
+            grid_tiles,
+            animation,
+        })
+    }
 }
 
 struct AvifInternalMeta {
