@@ -1146,6 +1146,23 @@ impl<'data> AvifParser<'data> {
             }
 
             let grid_config = Self::calculate_grid_config(&meta, &tile_ids)?;
+
+            // AVIF 1.2: transformative properties SHALL NOT be on grid tile items
+            for (tile_id, _) in tiles_with_index.iter() {
+                for prop in meta.properties.iter() {
+                    if prop.item_id == *tile_id {
+                        match &prop.property {
+                            ItemProperty::Rotation(_)
+                            | ItemProperty::Mirror(_)
+                            | ItemProperty::CleanAperture(_) => {
+                                warn!("grid tile {} has a transformative property (irot/imir/clap), violating AVIF spec", tile_id);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
             (Some(grid_config), tile_extents)
         } else {
             (None, TryVec::new())
