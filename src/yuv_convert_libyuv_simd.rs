@@ -1,4 +1,7 @@
 //! SIMD-optimized libyuv YUV to RGB conversion using AVX2
+//!
+//! Safety: All intrinsics are protected by archmage's token system.
+//! The Desktop64 token proves AVX2 is available, making operations safe.
 
 use imgref::ImgVec;
 use rgb::RGB8;
@@ -32,6 +35,9 @@ fn yuv_pixel(y: u8, u: u8, v: u8) -> RGB8 {
     }
 }
 
+/// Convert YUV420 to RGB8 using AVX2 SIMD
+/// 
+/// Safety: Token-gated via #[arcane] - all SIMD operations are safe
 #[arcane]
 pub fn yuv420_to_rgb8_simd(
     token: Desktop64,
@@ -46,7 +52,7 @@ pub fn yuv420_to_rgb8_simd(
     range: YuvRange,
     matrix: YuvMatrix,
 ) -> Option<ImgVec<RGB8>> {
-    if !matches!(range, YuvRange::Full) || !matches!(matrix, YuvMatrix::Bt709) {
+    if !matches!((range, matrix), (YuvRange::Full, YuvMatrix::Bt709)) {
         return None;
     }
     
@@ -98,15 +104,20 @@ pub fn yuv420_to_rgb8_simd(
     Some(ImgVec::new(out, width, height))
 }
 
+/// Process 8 pixels using AVX2
+/// 
+/// Safety: Token proves AVX2 is available, making all intrinsics safe to call.
+/// The unsafe block is required by Rust but operations are guaranteed safe.
 #[arcane]
 #[inline(always)]
 fn process_8_pixels_avx2(
-    _token: Desktop64,
+    _token: Desktop64,  // Token proves safety
     y: &[u8],
     u: &[u8],
     v: &[u8],
     out: &mut [RGB8],
 ) {
+    // SAFETY: Desktop64 token guarantees AVX2 is available
     unsafe {
         let yg_vec = _mm256_set1_epi32(YG);
         let ub_vec = _mm256_set1_epi32(UB);
@@ -138,19 +149,18 @@ fn process_8_pixels_avx2(
         let r_i32 = _mm256_srai_epi32(_mm256_add_epi32(_mm256_sub_epi32(y1, _mm256_mullo_epi32(v_8xi32, vr_vec)), br_vec), 6);
         
         // Pack i32 -> i16 -> u8 with lane fix
-        // First pack to i16 (with saturation)
         let zero = _mm256_setzero_si256();
-        let r_i16_lane = _mm256_packs_epi32(r_i32, zero);  // [r0..r3, 0..0 | r4..r7, 0..0]
+        let r_i16_lane = _mm256_packs_epi32(r_i32, zero);
         let g_i16_lane = _mm256_packs_epi32(g_i32, zero);
         let b_i16_lane = _mm256_packs_epi32(b_i32, zero);
         
-        // Fix lane order: permute so we get [r0..r7, 0..0]
-        let perm = _mm256_setr_epi32(0, 1, 4, 5, 2, 3, 6, 7);  // Swap middle 128-bit lanes
+        // Fix lane order with permute
+        let perm = _mm256_setr_epi32(0, 1, 4, 5, 2, 3, 6, 7);
         let r_i16 = _mm256_permutevar8x32_epi32(r_i16_lane, perm);
         let g_i16 = _mm256_permutevar8x32_epi32(g_i16_lane, perm);
         let b_i16 = _mm256_permutevar8x32_epi32(b_i16_lane, perm);
         
-        // Pack to u8 (with saturation to [0,255])
+        // Pack to u8 with saturation
         let r_u8 = _mm256_packus_epi16(r_i16, zero);
         let g_u8 = _mm256_packus_epi16(g_i16, zero);
         let b_u8 = _mm256_packus_epi16(b_i16, zero);
