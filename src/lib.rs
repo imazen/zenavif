@@ -64,6 +64,7 @@ pub mod yuv_convert;
 pub mod yuv_convert_fast;
 pub mod yuv_convert_libyuv;
 pub mod yuv_convert_libyuv_simd;
+pub mod yuv_convert_libyuv_16bit;
 
 pub use config::DecoderConfig;
 #[cfg(feature = "asm")]
