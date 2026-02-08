@@ -367,3 +367,189 @@ fn zero_copy_vs_copying_performance() {
         );
     }
 }
+
+// ============================================================================
+// Resource Limit Tests
+// ============================================================================
+
+#[test]
+fn resource_limit_peak_memory() {
+    let input = &mut File::open(IMAGE_AVIF).expect("Unknown file");
+
+    // Set very low peak memory limit (1KB) — mdat read will exceed this
+    let config = avif_parse::DecodeConfig::default()
+        .with_peak_memory_limit(1_000);
+
+    let result = avif_parse::read_avif_with_config(input, &config, &avif_parse::Unstoppable);
+
+    match result {
+        Err(avif_parse::Error::ResourceLimitExceeded(msg)) => {
+            assert_eq!(msg, "peak memory limit exceeded");
+        }
+        Ok(_) => panic!("Expected peak memory limit error"),
+        Err(e) => panic!("Unexpected error: {:?}", e),
+    }
+}
+
+#[test]
+fn resource_limit_total_megapixels() {
+    // Grid is 6400×2880 = 18.432 MP, set limit below that
+    let input = &mut File::open(IMAGE_GRID_5X4).expect("Unknown file");
+
+    let config = avif_parse::DecodeConfig::default()
+        .with_total_megapixels_limit(10);
+
+    let result = avif_parse::read_avif_with_config(input, &config, &avif_parse::Unstoppable);
+
+    match result {
+        Err(avif_parse::Error::ResourceLimitExceeded(msg)) => {
+            assert_eq!(msg, "total megapixels limit exceeded");
+        }
+        Ok(_) => panic!("Expected total megapixels limit error"),
+        Err(e) => panic!("Unexpected error: {:?}", e),
+    }
+}
+
+#[test]
+fn resource_limit_grid_tiles() {
+    // Grid has 20 tiles (5×4), set limit below that
+    let input = &mut File::open(IMAGE_GRID_5X4).expect("Unknown file");
+
+    let config = avif_parse::DecodeConfig::default()
+        .with_max_grid_tiles(10);
+
+    let result = avif_parse::read_avif_with_config(input, &config, &avif_parse::Unstoppable);
+
+    match result {
+        Err(avif_parse::Error::ResourceLimitExceeded(msg)) => {
+            assert_eq!(msg, "grid tile count limit exceeded");
+        }
+        Ok(_) => panic!("Expected grid tile count limit error"),
+        Err(e) => panic!("Unexpected error: {:?}", e),
+    }
+}
+
+#[test]
+fn resource_limit_animation_frames() {
+    // File has 5 frames, set limit below that
+    let input = &mut File::open(ANIMATED_AVIF).expect("Unknown file");
+
+    let config = avif_parse::DecodeConfig::default()
+        .with_max_animation_frames(3);
+
+    let result = avif_parse::read_avif_with_config(input, &config, &avif_parse::Unstoppable);
+
+    match result {
+        Err(avif_parse::Error::ResourceLimitExceeded(msg)) => {
+            assert_eq!(msg, "animation frame count limit exceeded");
+        }
+        Ok(_) => panic!("Expected animation frame count limit error"),
+        Err(e) => panic!("Unexpected error: {:?}", e),
+    }
+}
+
+#[test]
+fn cancellation_during_parse() {
+    struct ImmediatelyCancelled;
+    impl avif_parse::Stop for ImmediatelyCancelled {
+        fn check(&self) -> std::result::Result<(), avif_parse::StopReason> {
+            Err(avif_parse::StopReason::Cancelled)
+        }
+    }
+
+    let input = &mut File::open(IMAGE_AVIF).expect("Unknown file");
+    let config = avif_parse::DecodeConfig::default();
+    let result = avif_parse::read_avif_with_config(input, &config, &ImmediatelyCancelled);
+
+    match result {
+        Err(avif_parse::Error::Stopped(reason)) => {
+            assert_eq!(reason, avif_parse::StopReason::Cancelled);
+        }
+        Ok(_) => panic!("Expected cancellation"),
+        Err(e) => panic!("Unexpected error: {:?}", e),
+    }
+}
+
+#[test]
+fn unstoppable_completes() {
+    let input = &mut File::open(IMAGE_AVIF).expect("Unknown file");
+    let config = avif_parse::DecodeConfig::default();
+    let result = avif_parse::read_avif_with_config(input, &config, &avif_parse::Unstoppable);
+    assert!(result.is_ok(), "Unstoppable should never cancel");
+}
+
+#[test]
+fn decode_config_unlimited_backwards_compat() {
+    // Verify unlimited config produces identical results to read_avif
+    let result_old = avif_parse::read_avif(&mut File::open(IMAGE_AVIF).expect("Unknown file"))
+        .expect("read_avif failed");
+    let config = avif_parse::DecodeConfig::unlimited();
+    let result_new = avif_parse::read_avif_with_config(
+        &mut File::open(IMAGE_AVIF).expect("Unknown file"),
+        &config,
+        &avif_parse::Unstoppable,
+    )
+    .expect("read_avif_with_config failed");
+
+    assert_eq!(result_old.primary_item.len(), result_new.primary_item.len());
+    assert_eq!(result_old.primary_item.as_slice(), result_new.primary_item.as_slice());
+}
+
+#[test]
+fn decode_config_default_has_sane_limits() {
+    let config = avif_parse::DecodeConfig::default();
+    assert_eq!(config.peak_memory_limit, Some(1_000_000_000));
+    assert_eq!(config.total_megapixels_limit, Some(512));
+    assert_eq!(config.frame_megapixels_limit, Some(256));
+    assert_eq!(config.max_animation_frames, Some(10_000));
+    assert_eq!(config.max_grid_tiles, Some(1_000));
+    assert!(!config.lenient);
+}
+
+// Streaming parser resource limit tests
+
+#[test]
+fn streaming_resource_limit_grid_tiles() {
+    let input = &mut File::open(IMAGE_GRID_5X4).expect("Unknown file");
+    let config = avif_parse::DecodeConfig::default().with_max_grid_tiles(10);
+
+    let result = avif_parse::AvifParser::from_reader_with_config(
+        input,
+        &config,
+        &avif_parse::Unstoppable,
+    );
+
+    match result {
+        Err(avif_parse::Error::ResourceLimitExceeded(msg)) => {
+            assert_eq!(msg, "grid tile count limit exceeded");
+        }
+        Ok(_) => panic!("Expected grid tile count limit error"),
+        Err(e) => panic!("Unexpected error: {:?}", e),
+    }
+}
+
+#[test]
+fn streaming_cancellation_during_parse() {
+    struct ImmediatelyCancelled;
+    impl avif_parse::Stop for ImmediatelyCancelled {
+        fn check(&self) -> std::result::Result<(), avif_parse::StopReason> {
+            Err(avif_parse::StopReason::Cancelled)
+        }
+    }
+
+    let input = &mut File::open(IMAGE_AVIF).expect("Unknown file");
+    let config = avif_parse::DecodeConfig::default();
+    let result = avif_parse::AvifParser::from_reader_with_config(
+        input,
+        &config,
+        &ImmediatelyCancelled,
+    );
+
+    match result {
+        Err(avif_parse::Error::Stopped(reason)) => {
+            assert_eq!(reason, avif_parse::StopReason::Cancelled);
+        }
+        Ok(_) => panic!("Expected cancellation"),
+        Err(e) => panic!("Unexpected error: {:?}", e),
+    }
+}
