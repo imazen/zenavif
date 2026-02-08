@@ -36,11 +36,22 @@ env_logger = "0.11"
 walkdir = "2.4.0"
 
 [features]
-# Obsolete (fallible allocations are used anyway)
-mp4parse_fallible = []
+eager = []
 
 [badges]
 maintenance = { status = "passively-maintained" }
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
+
+[[example]]
+name = "dump_av1"
+required-features = ["eager"]
+
+[[example]]
+name = "inspect_grid"
+required-features = ["eager"]
+
+[[example]]
+name = "inspect_animation"
+required-features = ["eager"]

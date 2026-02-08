@@ -27,6 +27,7 @@ mod boxes;
 use crate::boxes::{BoxType, FourCC};
 
 /// This crate can be used from C.
+#[cfg(feature = "eager")]
 pub mod c_api;
 
 pub use enough::{Stop, StopReason, Unstoppable};
@@ -432,6 +433,7 @@ pub struct GridConfig {
 }
 
 /// Frame information for animated AVIF
+#[cfg(feature = "eager")]
 #[deprecated(since = "1.5.0", note = "Use `AvifParser::frame()` which returns `FrameRef` instead")]
 #[derive(Debug)]
 pub struct AnimationFrame {
@@ -442,6 +444,7 @@ pub struct AnimationFrame {
 }
 
 /// Animation configuration for animated AVIF (avis brand)
+#[cfg(feature = "eager")]
 #[deprecated(since = "1.5.0", note = "Use `AvifParser::animation_info()` and `AvifParser::frames()` instead")]
 #[derive(Debug)]
 #[allow(deprecated)]
@@ -487,6 +490,7 @@ struct SampleTable {
     chunk_offsets: TryVec<u64>,
 }
 
+#[cfg(feature = "eager")]
 #[deprecated(since = "1.5.0", note = "Use `AvifParser` for zero-copy parsing instead")]
 #[derive(Debug, Default)]
 #[allow(deprecated)]
@@ -564,6 +568,7 @@ pub struct AvifData {
 // For large animated files, consider using a streaming approach or processing frames
 // individually rather than loading the entire `AvifData` structure.
 
+#[cfg(feature = "eager")]
 #[allow(deprecated)]
 impl AvifData {
     #[deprecated(since = "1.5.0", note = "Use `AvifParser::from_reader()` instead")]
@@ -603,7 +608,7 @@ impl AV1Metadata {
     /// Parses raw AV1 bitstream (OBU sequence header) only.
     ///
     /// This is for the bare image payload from an encoder, not an AVIF/HEIF file.
-    /// To parse AVIF files, see [`AvifData::from_reader()`].
+    /// To parse AVIF files, see [`AvifParser::from_reader()`].
     #[inline(never)]
     pub fn parse_av1_bitstream(obu_bitstream: &[u8]) -> Result<Self> {
         let h = obu::parse_obu(obu_bitstream)?;
@@ -1286,6 +1291,7 @@ impl<'data> AvifParser<'data> {
     ///
     /// Provided for migration from the eager API. Prefer using `AvifParser`
     /// methods directly.
+    #[cfg(feature = "eager")]
     #[deprecated(since = "1.5.0", note = "Use AvifParser methods directly instead of converting to AvifData")]
     #[allow(deprecated)]
     pub fn to_avif_data(&self) -> Result<AvifData> {
@@ -1382,12 +1388,14 @@ struct AvifInternalMeta {
 
 /// A Media Data Box
 /// See ISO 14496-12:2015 § 8.1.1
+#[cfg(feature = "eager")]
 struct MediaDataBox {
     /// Offset of `data` from the beginning of the file. See `ConstructionMethod::File`
     offset: u64,
     data: TryVec<u8>,
 }
 
+#[cfg(feature = "eager")]
 impl MediaDataBox {
     /// Check whether the beginning of `extent` is within the bounds of the `MediaDataBox`.
     /// We assume extents to not cross box boundaries. If so, this will cause an error
@@ -1774,7 +1782,9 @@ fn skip_box_remain<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<()> {
 
 struct ResourceTracker<'a> {
     config: &'a DecodeConfig,
+    #[cfg(feature = "eager")]
     current_memory: u64,
+    #[cfg(feature = "eager")]
     peak_memory: u64,
 }
 
@@ -1782,11 +1792,14 @@ impl<'a> ResourceTracker<'a> {
     fn new(config: &'a DecodeConfig) -> Self {
         Self {
             config,
+            #[cfg(feature = "eager")]
             current_memory: 0,
+            #[cfg(feature = "eager")]
             peak_memory: 0,
         }
     }
 
+    #[cfg(feature = "eager")]
     fn reserve(&mut self, bytes: u64) -> Result<()> {
         self.current_memory = self.current_memory.saturating_add(bytes);
         self.peak_memory = self.peak_memory.max(self.current_memory);
@@ -1800,10 +1813,12 @@ impl<'a> ResourceTracker<'a> {
         Ok(())
     }
 
+    #[cfg(feature = "eager")]
     fn release(&mut self, bytes: u64) {
         self.current_memory = self.current_memory.saturating_sub(bytes);
     }
 
+    #[cfg(feature = "eager")]
     fn validate_total_megapixels(&self, width: u32, height: u32) -> Result<()> {
         if let Some(limit) = self.config.total_megapixels_limit {
             let megapixels = (width as u64)
@@ -1850,6 +1865,7 @@ impl<'a> ResourceTracker<'a> {
 /// * `f` - Reader for the AVIF file
 /// * `config` - Resource limits and parsing options
 /// * `stop` - Cancellation token (use [`Unstoppable`] if not needed)
+#[cfg(feature = "eager")]
 #[deprecated(since = "1.5.0", note = "Use `AvifParser::from_reader_with_config()` instead")]
 #[allow(deprecated)]
 pub fn read_avif_with_config<T: Read>(
@@ -2193,6 +2209,7 @@ pub fn read_avif_with_config<T: Read>(
 ///
 /// * `f` - Reader for the AVIF file
 /// * `options` - Parsing options (e.g., lenient mode)
+#[cfg(feature = "eager")]
 #[deprecated(since = "1.5.0", note = "Use `AvifParser::from_reader_with_config()` with `DecodeConfig::lenient()` instead")]
 #[allow(deprecated)]
 pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Result<AvifData> {
@@ -2207,6 +2224,7 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
 ///
 /// For resource limits, use [`read_avif_with_config`].
 /// For lenient parsing, use [`read_avif_with_options`].
+#[cfg(feature = "eager")]
 #[deprecated(since = "1.5.0", note = "Use `AvifParser::from_reader()` instead")]
 #[allow(deprecated)]
 pub fn read_avif<T: Read>(f: &mut T) -> Result<AvifData> {
@@ -2871,6 +2889,7 @@ fn read_minf<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<SampleTable>> {
 }
 
 /// Extract animation frames using sample table
+#[cfg(feature = "eager")]
 #[allow(deprecated)]
 fn extract_animation_frames(
     sample_table: &SampleTable,
