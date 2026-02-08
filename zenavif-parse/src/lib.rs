@@ -310,6 +310,93 @@ pub enum ColorInformation {
     IccProfile(std::vec::Vec<u8>),
 }
 
+/// Image rotation from the `irot` property box.
+///
+/// Specifies a counter-clockwise rotation to apply after decoding.
+/// See ISOBMFF § 12.1.4.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImageRotation {
+    /// Rotation angle in degrees counter-clockwise: 0, 90, 180, or 270.
+    pub angle: u16,
+}
+
+/// Image mirror from the `imir` property box.
+///
+/// Specifies a mirror (flip) axis to apply after rotation.
+/// See ISOBMFF § 12.1.4.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImageMirror {
+    /// Mirror axis: 0 = top-to-bottom (vertical axis, left-right flip),
+    /// 1 = left-to-right (horizontal axis, top-bottom flip).
+    pub axis: u8,
+}
+
+/// Clean aperture from the `clap` property box.
+///
+/// Defines a crop rectangle as a centered region. All values are
+/// stored as exact rationals (numerator/denominator).
+/// See ISOBMFF § 12.1.4.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CleanAperture {
+    /// Width of the clean aperture (numerator)
+    pub width_n: u32,
+    /// Width of the clean aperture (denominator)
+    pub width_d: u32,
+    /// Height of the clean aperture (numerator)
+    pub height_n: u32,
+    /// Height of the clean aperture (denominator)
+    pub height_d: u32,
+    /// Horizontal offset of the clean aperture center (numerator, signed)
+    pub horiz_off_n: i32,
+    /// Horizontal offset of the clean aperture center (denominator)
+    pub horiz_off_d: u32,
+    /// Vertical offset of the clean aperture center (numerator, signed)
+    pub vert_off_n: i32,
+    /// Vertical offset of the clean aperture center (denominator)
+    pub vert_off_d: u32,
+}
+
+/// Pixel aspect ratio from the `pasp` property box.
+///
+/// For AVIF, the spec requires this to be 1:1 if present.
+/// See ISOBMFF § 12.1.4.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PixelAspectRatio {
+    /// Horizontal spacing
+    pub h_spacing: u32,
+    /// Vertical spacing
+    pub v_spacing: u32,
+}
+
+/// Content light level info from the `clli` property box.
+///
+/// HDR metadata for display mapping.
+/// See ISOBMFF § 12.1.5 / ITU-T H.274.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContentLightLevel {
+    /// Maximum content light level (cd/m²)
+    pub max_content_light_level: u16,
+    /// Maximum picture average light level (cd/m²)
+    pub max_pic_average_light_level: u16,
+}
+
+/// Mastering display colour volume from the `mdcv` property box.
+///
+/// HDR metadata describing the mastering display's color volume.
+/// See ISOBMFF § 12.1.5 / SMPTE ST 2086.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MasteringDisplayColourVolume {
+    /// Display primaries: [(x, y); 3] in 0.00002 units (CIE 1931)
+    /// Order: green, blue, red (per SMPTE ST 2086)
+    pub primaries: [(u16, u16); 3],
+    /// White point (x, y) in 0.00002 units
+    pub white_point: (u16, u16),
+    /// Maximum display luminance in 0.0001 cd/m² units
+    pub max_luminance: u32,
+    /// Minimum display luminance in 0.0001 cd/m² units
+    pub min_luminance: u32,
+}
+
 /// Options for parsing AVIF files
 ///
 /// Prefer using [`DecodeConfig::lenient()`] with [`AvifParser`] instead.
@@ -581,6 +668,24 @@ pub struct AvifData {
 
     /// Colour information from the container's `colr` property.
     pub color_info: Option<ColorInformation>,
+
+    /// Image rotation from the container's `irot` property.
+    pub rotation: Option<ImageRotation>,
+
+    /// Image mirror from the container's `imir` property.
+    pub mirror: Option<ImageMirror>,
+
+    /// Clean aperture (crop) from the container's `clap` property.
+    pub clean_aperture: Option<CleanAperture>,
+
+    /// Pixel aspect ratio from the container's `pasp` property.
+    pub pixel_aspect_ratio: Option<PixelAspectRatio>,
+
+    /// Content light level from the container's `clli` property.
+    pub content_light_level: Option<ContentLightLevel>,
+
+    /// Mastering display colour volume from the container's `mdcv` property.
+    pub mastering_display: Option<MasteringDisplayColourVolume>,
 }
 
 // # Memory Usage
@@ -719,6 +824,12 @@ pub struct AvifParser<'data> {
     premultiplied_alpha: bool,
     av1_config: Option<AV1Config>,
     color_info: Option<ColorInformation>,
+    rotation: Option<ImageRotation>,
+    mirror: Option<ImageMirror>,
+    clean_aperture: Option<CleanAperture>,
+    pixel_aspect_ratio: Option<PixelAspectRatio>,
+    content_light_level: Option<ContentLightLevel>,
+    mastering_display: Option<MasteringDisplayColourVolume>,
 }
 
 struct AnimationParserData {
@@ -941,30 +1052,30 @@ impl<'data> AvifParser<'data> {
             (None, TryVec::new())
         };
 
-        // Extract av1C and colr for the primary item
-        let av1_config = meta.properties.iter()
-            .find_map(|p| {
-                if p.item_id == meta.primary_item_id {
-                    match &p.property {
-                        ItemProperty::AV1Config(c) => Some(c.clone()),
-                        _ => None,
+        // Extract properties for the primary item
+        macro_rules! find_prop {
+            ($variant:ident) => {
+                meta.properties.iter().find_map(|p| {
+                    if p.item_id == meta.primary_item_id {
+                        match &p.property {
+                            ItemProperty::$variant(c) => Some(c.clone()),
+                            _ => None,
+                        }
+                    } else {
+                        None
                     }
-                } else {
-                    None
-                }
-            });
+                })
+            };
+        }
 
-        let color_info = meta.properties.iter()
-            .find_map(|p| {
-                if p.item_id == meta.primary_item_id {
-                    match &p.property {
-                        ItemProperty::ColorInformation(c) => Some(c.clone()),
-                        _ => None,
-                    }
-                } else {
-                    None
-                }
-            });
+        let av1_config = find_prop!(AV1Config);
+        let color_info = find_prop!(ColorInformation);
+        let rotation = find_prop!(Rotation);
+        let mirror = find_prop!(Mirror);
+        let clean_aperture = find_prop!(CleanAperture);
+        let pixel_aspect_ratio = find_prop!(PixelAspectRatio);
+        let content_light_level = find_prop!(ContentLightLevel);
+        let mastering_display = find_prop!(MasteringDisplayColourVolume);
 
         // Store animation metadata if present
         let animation_data = if let Some((media_timescale, sample_table, loop_count)) = parsed.animation_data {
@@ -995,6 +1106,12 @@ impl<'data> AvifParser<'data> {
             premultiplied_alpha,
             av1_config,
             color_info,
+            rotation,
+            mirror,
+            clean_aperture,
+            pixel_aspect_ratio,
+            content_light_level,
+            mastering_display,
         })
     }
 
@@ -1351,6 +1468,36 @@ impl<'data> AvifParser<'data> {
         self.color_info.as_ref()
     }
 
+    /// Get rotation for the primary item, if present.
+    pub fn rotation(&self) -> Option<&ImageRotation> {
+        self.rotation.as_ref()
+    }
+
+    /// Get mirror for the primary item, if present.
+    pub fn mirror(&self) -> Option<&ImageMirror> {
+        self.mirror.as_ref()
+    }
+
+    /// Get clean aperture (crop) for the primary item, if present.
+    pub fn clean_aperture(&self) -> Option<&CleanAperture> {
+        self.clean_aperture.as_ref()
+    }
+
+    /// Get pixel aspect ratio for the primary item, if present.
+    pub fn pixel_aspect_ratio(&self) -> Option<&PixelAspectRatio> {
+        self.pixel_aspect_ratio.as_ref()
+    }
+
+    /// Get content light level info for the primary item, if present.
+    pub fn content_light_level(&self) -> Option<&ContentLightLevel> {
+        self.content_light_level.as_ref()
+    }
+
+    /// Get mastering display colour volume for the primary item, if present.
+    pub fn mastering_display(&self) -> Option<&MasteringDisplayColourVolume> {
+        self.mastering_display.as_ref()
+    }
+
     /// Parse AV1 metadata from the primary item.
     pub fn primary_metadata(&self) -> Result<AV1Metadata> {
         let data = self.primary_data()?;
@@ -1424,6 +1571,12 @@ impl<'data> AvifParser<'data> {
             animation,
             av1_config: self.av1_config.clone(),
             color_info: self.color_info.clone(),
+            rotation: self.rotation,
+            mirror: self.mirror,
+            clean_aperture: self.clean_aperture,
+            pixel_aspect_ratio: self.pixel_aspect_ratio,
+            content_light_level: self.content_light_level,
+            mastering_display: self.mastering_display,
         })
     }
 }
@@ -2160,30 +2313,30 @@ pub fn read_avif_with_config<T: Read>(
             })
         });
 
-    // Extract av1C and colr for the primary item
-    let av1_config = meta.properties.iter()
-        .find_map(|p| {
-            if p.item_id == meta.primary_item_id {
-                match &p.property {
-                    ItemProperty::AV1Config(c) => Some(c.clone()),
-                    _ => None,
+    // Extract properties for the primary item
+    macro_rules! find_prop {
+        ($variant:ident) => {
+            meta.properties.iter().find_map(|p| {
+                if p.item_id == meta.primary_item_id {
+                    match &p.property {
+                        ItemProperty::$variant(c) => Some(c.clone()),
+                        _ => None,
+                    }
+                } else {
+                    None
                 }
-            } else {
-                None
-            }
-        });
+            })
+        };
+    }
 
-    let color_info = meta.properties.iter()
-        .find_map(|p| {
-            if p.item_id == meta.primary_item_id {
-                match &p.property {
-                    ItemProperty::ColorInformation(c) => Some(c.clone()),
-                    _ => None,
-                }
-            } else {
-                None
-            }
-        });
+    let av1_config = find_prop!(AV1Config);
+    let color_info = find_prop!(ColorInformation);
+    let rotation = find_prop!(Rotation);
+    let mirror = find_prop!(Mirror);
+    let clean_aperture = find_prop!(CleanAperture);
+    let pixel_aspect_ratio = find_prop!(PixelAspectRatio);
+    let content_light_level = find_prop!(ContentLightLevel);
+    let mastering_display = find_prop!(MasteringDisplayColourVolume);
 
     let mut context = AvifData {
         premultiplied_alpha: alpha_item_id.is_some_and(|alpha_item_id| {
@@ -2195,6 +2348,12 @@ pub fn read_avif_with_config<T: Read>(
         }),
         av1_config,
         color_info,
+        rotation,
+        mirror,
+        clean_aperture,
+        pixel_aspect_ratio,
+        content_light_level,
+        mastering_display,
         ..Default::default()
     };
 
@@ -2583,6 +2742,12 @@ pub(crate) enum ItemProperty {
     ImageGrid(GridConfig),
     AV1Config(AV1Config),
     ColorInformation(ColorInformation),
+    Rotation(ImageRotation),
+    Mirror(ImageMirror),
+    CleanAperture(CleanAperture),
+    PixelAspectRatio(PixelAspectRatio),
+    ContentLightLevel(ContentLightLevel),
+    MasteringDisplayColourVolume(MasteringDisplayColourVolume),
     Unsupported,
 }
 
@@ -2595,6 +2760,12 @@ impl TryClone for ItemProperty {
             Self::ImageGrid(val) => Self::ImageGrid(val.clone()),
             Self::AV1Config(val) => Self::AV1Config(val.clone()),
             Self::ColorInformation(val) => Self::ColorInformation(val.clone()),
+            Self::Rotation(val) => Self::Rotation(*val),
+            Self::Mirror(val) => Self::Mirror(*val),
+            Self::CleanAperture(val) => Self::CleanAperture(*val),
+            Self::PixelAspectRatio(val) => Self::PixelAspectRatio(*val),
+            Self::ContentLightLevel(val) => Self::ContentLightLevel(*val),
+            Self::MasteringDisplayColourVolume(val) => Self::MasteringDisplayColourVolume(*val),
             Self::Unsupported => Self::Unsupported,
         })
     }
@@ -2660,6 +2831,12 @@ fn read_ipco<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
                     Err(_) => ItemProperty::Unsupported,
                 }
             },
+            BoxType::ImageRotationBox => ItemProperty::Rotation(read_irot(&mut b)?),
+            BoxType::ImageMirrorBox => ItemProperty::Mirror(read_imir(&mut b)?),
+            BoxType::CleanApertureBox => ItemProperty::CleanAperture(read_clap(&mut b)?),
+            BoxType::PixelAspectRatioBox => ItemProperty::PixelAspectRatio(read_pasp(&mut b)?),
+            BoxType::ContentLightLevelBox => ItemProperty::ContentLightLevel(read_clli(&mut b)?),
+            BoxType::MasteringDisplayColourVolumeBox => ItemProperty::MasteringDisplayColourVolume(read_mdcv(&mut b)?),
             _ => {
                 skip_box_remain(&mut b)?;
                 ItemProperty::Unsupported
@@ -2813,6 +2990,97 @@ fn read_colr<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<ColorInformation> {
             Err(Error::Unsupported("unsupported colr colour_type"))
         }
     }
+}
+
+/// Parse an Image Rotation property box.
+/// See ISOBMFF § 12.1.4. NOT a FullBox.
+fn read_irot<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<ImageRotation> {
+    let byte = src.read_u8()?;
+    let angle_code = byte & 0x03;
+    let angle = match angle_code {
+        0 => 0,
+        1 => 90,
+        2 => 180,
+        3 => 270,
+        _ => unreachable!(),
+    };
+    skip_box_remain(src)?;
+    Ok(ImageRotation { angle })
+}
+
+/// Parse an Image Mirror property box.
+/// See ISOBMFF § 12.1.4. NOT a FullBox.
+fn read_imir<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<ImageMirror> {
+    let byte = src.read_u8()?;
+    let axis = byte & 0x01;
+    skip_box_remain(src)?;
+    Ok(ImageMirror { axis })
+}
+
+/// Parse a Clean Aperture property box.
+/// See ISOBMFF § 12.1.4. NOT a FullBox.
+fn read_clap<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<CleanAperture> {
+    let width_n = be_u32(src)?;
+    let width_d = be_u32(src)?;
+    let height_n = be_u32(src)?;
+    let height_d = be_u32(src)?;
+    let horiz_off_n = be_i32(src)?;
+    let horiz_off_d = be_u32(src)?;
+    let vert_off_n = be_i32(src)?;
+    let vert_off_d = be_u32(src)?;
+    // Validate denominators are non-zero
+    if width_d == 0 || height_d == 0 || horiz_off_d == 0 || vert_off_d == 0 {
+        return Err(Error::InvalidData("clap denominator cannot be zero"));
+    }
+    skip_box_remain(src)?;
+    Ok(CleanAperture {
+        width_n, width_d,
+        height_n, height_d,
+        horiz_off_n, horiz_off_d,
+        vert_off_n, vert_off_d,
+    })
+}
+
+/// Parse a Pixel Aspect Ratio property box.
+/// See ISOBMFF § 12.1.4. NOT a FullBox.
+fn read_pasp<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<PixelAspectRatio> {
+    let h_spacing = be_u32(src)?;
+    let v_spacing = be_u32(src)?;
+    skip_box_remain(src)?;
+    Ok(PixelAspectRatio { h_spacing, v_spacing })
+}
+
+/// Parse a Content Light Level Info property box.
+/// See ISOBMFF § 12.1.5 / ITU-T H.274. NOT a FullBox.
+fn read_clli<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<ContentLightLevel> {
+    let max_content_light_level = be_u16(src)?;
+    let max_pic_average_light_level = be_u16(src)?;
+    skip_box_remain(src)?;
+    Ok(ContentLightLevel {
+        max_content_light_level,
+        max_pic_average_light_level,
+    })
+}
+
+/// Parse a Mastering Display Colour Volume property box.
+/// See ISOBMFF § 12.1.5 / SMPTE ST 2086. NOT a FullBox.
+fn read_mdcv<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<MasteringDisplayColourVolume> {
+    // 3 primaries, each (x, y) as u16
+    let primaries = [
+        (be_u16(src)?, be_u16(src)?),
+        (be_u16(src)?, be_u16(src)?),
+        (be_u16(src)?, be_u16(src)?),
+    ];
+    let white_point = (be_u16(src)?, be_u16(src)?);
+    let max_luminance = be_u32(src)?;
+    let min_luminance = be_u32(src)?;
+    skip_box_remain(src)?;
+    Ok(MasteringDisplayColourVolume {
+        primaries,
+        white_point,
+        max_luminance,
+        min_luminance,
+    })
 }
 
 /// Parse an Image Spatial Extents property box
@@ -3387,6 +3655,10 @@ fn be_u16<T: ReadBytesExt>(src: &mut T) -> Result<u16> {
 
 fn be_u32<T: ReadBytesExt>(src: &mut T) -> Result<u32> {
     src.read_u32::<byteorder::BigEndian>().map_err(From::from)
+}
+
+fn be_i32<T: ReadBytesExt>(src: &mut T) -> Result<i32> {
+    src.read_i32::<byteorder::BigEndian>().map_err(From::from)
 }
 
 fn be_u64<T: ReadBytesExt>(src: &mut T) -> Result<u64> {
