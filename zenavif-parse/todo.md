@@ -4,14 +4,16 @@ Compared against https://github.com/AOMediaCodec/av1-avif/blob/main/index.bs (v1
 
 ## Currently Supported
 
-- ftyp parsing, validates avif/avis major brand
+- ftyp parsing, validates avif/avis major brand, exposes major_brand and compatible_brands
 - meta box hierarchy: pitm, iinf/infe, iloc (v0/1/2), iref, iprp/ipco/ipma, idat
+- hdlr validation: handler_type must be 'pict'
 - Primary item: av01 and grid item types
 - Grid images: dimg references, tile ordering by dimgIdx, GridConfig from explicit ImageGrid and ispe fallback
+- Grid validation: warns on transformative properties on tile items (spec 1.2)
 - Alpha: auxl references with urn:mpeg:mpegB:cicp:systems:auxiliary:alpha
 - Premultiplied alpha: prem reference type
 - Animation: moov/trak/mdia/minf/stbl, sample table, frame duration/location
-- Properties: pixi, auxC, ispe, grid
+- Properties: pixi, auxC, ispe, grid, av1C, colr, irot, imir, clap, pasp, clli, mdcv, cclv, amve, a1op, lsel, a1lx
 - AV1 OBU metadata: sequence header parsing (bit depth, chroma, monochrome, dimensions)
 
 ## Priority 1 — Parse and Expose (needed by decoders)
@@ -41,8 +43,8 @@ These are transform/display properties. The parser should expose them; the decod
 
 - [x] hdlr — Parse and validate handler_type is 'pict'
 - [x] Expose compatible_brands and profile brands (MA1B, MA1A, avio)
-- [ ] Brand validation — Check miaf in compatible_brands per spec requirement
-- [ ] Validate no transformative properties on grid tile derivation chains (spec 1.2 constraint)
+- [ ] Brand validation — Check miaf in compatible_brands per spec requirement (all corpus files have it)
+- [x] Validate no transformative properties on grid tile derivation chains (spec 1.2 constraint, warns)
 
 ## Priority 5 — Advanced features (rare in practice)
 
