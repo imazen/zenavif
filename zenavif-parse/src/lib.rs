@@ -774,6 +774,65 @@ impl AvifParser {
             })
         }
     }
+
+    /// Extract primary item data (on-demand)
+    pub fn primary_item(&self) -> Result<TryVec<u8>> {
+        self.extract_item(&self.primary_item_extents)
+    }
+
+    /// Extract alpha item data (on-demand)
+    pub fn alpha_item(&self) -> Option<Result<TryVec<u8>>> {
+        self.alpha_item_extents
+            .as_ref()
+            .map(|extents| self.extract_item(extents))
+    }
+
+    /// Extract grid tile data by index (on-demand)
+    pub fn grid_tile(&self, index: usize) -> Result<TryVec<u8>> {
+        let extents = self
+            .grid_tile_extents
+            .get(index)
+            .ok_or(Error::InvalidData("tile index out of bounds"))?;
+        self.extract_item(extents)
+    }
+
+    /// Extract item data from extents (internal helper)
+    fn extract_item(&self, extents: &[ExtentRange]) -> Result<TryVec<u8>> {
+        let mut data = TryVec::new();
+        for extent in extents {
+            // Try idat first
+            if let Some(idat_data) = &self.idat {
+                if extent.start() == 0 {
+                    match extent {
+                        ExtentRange::WithLength(range) => {
+                            let len = (range.end - range.start) as usize;
+                            data.extend_from_slice(&idat_data[..len])?;
+                            continue;
+                        }
+                        ExtentRange::ToEnd(_) => {
+                            data.extend_from_slice(idat_data)?;
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            // Try mdat boxes
+            let mut found = false;
+            for mdat in &self.mdats {
+                if mdat.contains_extent(extent) {
+                    mdat.read_extent(extent, &mut data)?;
+                    found = true;
+                    break;
+                }
+            }
+
+            if !found {
+                return Err(Error::InvalidData("extent not found in mdat"));
+            }
+        }
+        Ok(data)
+    }
 }
 
 struct AvifInternalMeta {
