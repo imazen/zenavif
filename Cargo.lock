@@ -1584,8 +1584,6 @@ dependencies = [
 [[package]]
 name = "zenavif-parse"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "671ea3a254335a777619ff255214bea447d03ce2b7b2cb61e4eed8628078656b"
 dependencies = [
  "arrayvec",
  "bitreader",
