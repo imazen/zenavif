@@ -1,5 +1,8 @@
+#![deny(unsafe_code)]
 #![allow(clippy::missing_safety_doc)]
 //! Module for parsing ISO Base Media Format aka video/mp4 streams.
+//!
+//! This crate is written entirely in safe Rust code except for the C FFI bindings.
 
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -417,6 +420,26 @@ pub struct AvifData {
     /// When present, primary_item contains the first frame
     pub animation: Option<AnimationConfig>,
 }
+
+// # Memory Usage
+//
+// This implementation loads all image data into owned vectors (`TryVec<u8>`), which has
+// memory implications depending on the file type:
+//
+// - **Static images**: Single copy of compressed data (~5-50KB typical)
+//   - `primary_item`: compressed AV1 data
+//   - `alpha_item`: compressed alpha data (if present)
+//
+// - **Grid images**: All tiles loaded (~100KB-2MB for large grids)
+//   - `grid_tiles`: one compressed tile per grid cell
+//
+// - **Animated images**: All frames loaded eagerly (⚠️ HIGH MEMORY)
+//   - Internal mdat boxes: ~500KB for 95-frame video
+//   - Extracted frames: ~500KB duplicated in `animation.frames[].data`
+//   - **Total: ~2× file size in memory**
+//
+// For large animated files, consider using a streaming approach or processing frames
+// individually rather than loading the entire `AvifData` structure.
 
 impl AvifData {
     pub fn from_reader<R: Read>(reader: &mut R) -> Result<Self> {
