@@ -46,22 +46,10 @@ just fmt     # cargo fmt
    - **Fixed in:** rav1d-safe commit 4458106 + zenavif commit 7ce8fe8
    - **Root cause:** PlaneView used frame metadata height instead of buffer-derived height
    - **Solution:** Calculate actual_height from buffer.len() / stride (rav1d-safe), use PlaneView dimensions instead of metadata (zenavif)
-   - **Impact:** All 10 affected files now decode successfully
-   - **Result:** 100% success rate on parseable AVIF files (28/28)
 
-### Integration Test Results (Updated 2026-02-07)
+### Integration Test Results (Updated 2026-02-08)
 
-✅ **28/55 files decode successfully** (50.9% success rate)
-✅ **100% success on all parseable files** (28/28)
-
-- **27 files (49.1%)**: avif-parse limitations (expected, unfixable)
-  - 5 animated AVIF
-  - 4 grid-based collages
-  - 8 unknown sized box
-  - 2 unsupported construction_method
-  - 8 other parse errors
-
-**All non-parse failures eliminated!** The PlaneView height mismatch bug has been fixed in both rav1d-safe and zenavif.
+✅ **55/55 files decode successfully** (100% success rate)
 
 ## Investigation Notes
 
@@ -134,85 +122,7 @@ just verify-pixels         # Run pixel verification
 - `/home/lilith/work/zenavif/tests/zenavif-references/` (separate repo)
 - `/home/lilith/work/zenavif/tests/pixel_verification.rs`
 
-### rav1d-safe PlaneView Height Mismatch Bug (2026-02-07)
-
-**File:** `color_nogrid_alpha_nogrid_gainmap_grid.avif`
-
-**Root Cause:** rav1d-safe's `PlaneView16` reports incorrect height that doesn't match actual buffer size.
-
-**Evidence:**
-```
-DEBUG planar setup: width=128 height=200 sampling=Cs444
-  Y: 128x200 stride=256 buffer_len=32768
-  U: 128x200 stride=256 buffer_len=32768
-  V: 128x200 stride=256 buffer_len=32768
-```
-
-**Analysis:**
-- PlaneView reports: height=200, stride=256, buffer_len=32768
-- Expected buffer size: stride × height = 256 × 200 = 51,200
-- Actual buffer size: 32,768 = 256 × 128 rows
-- **Bug**: PlaneView.height = 200 but buffer only contains 128 rows
-
-**Impact:**
-- yuv crate validation detects the mismatch: `LumaPlaneSizeMismatch(expected: 51072, received: 32768)`
-- This happens BEFORE the bounds check panic at managed.rs:741
-- The bounds panic occurs because `.row(y)` tries to access row 128+, which doesn't exist
-
-**Upstream Issue:**
-Comprehensive bug report created at: `/home/lilith/work/rav1d-safe/BUG_PLANEVIEW_HEIGHT_MISMATCH.md`
-
-The bug report includes:
-- Exact reproduction steps with file paths
-- All 10 affected test files
-- Expected vs actual behavior measurements
-- Root cause analysis with suspected fix locations
-- Workarounds for downstream users
-- Ready for filing as GitHub issue
-
-**Location in rav1d-safe:**
-- `src/managed.rs`: PlaneView8/PlaneView16 construction
-- Likely issue in how `DisjointImmutGuard` slice is created from the picture data
-- Need to verify that `height * stride <= buffer.len()` invariant is maintained
-
-**Affected Files (10 total):**
-1. `color_nogrid_alpha_nogrid_gainmap_grid.avif` - expected 51072, got 32768
-2. `cosmos1650_yuv444_10bpc_p3pq.avif` - expected 902848, got 540672
-3. `seine_hdr_gainmap_small_srgb.avif` - expected 325712, got 208896
-4. `seine_hdr_gainmap_srgb.avif` - expected 325712, got 208896
-5. `seine_hdr_gainmap_wrongaltr.avif` - expected 325712, got 208896
-6. `supported_gainmap_writer_version_with_extra_bytes.avif` - expected 25444, got 16384
-7. `unsupported_gainmap_minimum_version.avif` - expected 25444, got 16384
-8. `unsupported_gainmap_version.avif` - expected 25444, got 16384
-9. `unsupported_gainmap_writer_version_with_extra_bytes.avif` - expected 25444, got 16384
-10. `weld_sato_12B_8B_q0.avif` - expected 1443520, got 811008
-
-**Pattern:** Many affected files are gainmap-related, suggesting the bug may be triggered by specific AV1 features or metadata configurations.
-
 ## Recent Changes
-
-### 2026-02-07: PlaneView Height Mismatch Bug Fixed ✅
-
-**Success:** Achieved 100% decode success on all parseable AVIF files (28/28)!
-
-1. **Root Cause Identified:**
-   - rav1d-safe's PlaneView reported metadata height that exceeded actual buffer size
-   - Example: height=200 but buffer only contained 128 rows
-   - Affected 10 test files (all gainmap-related)
-
-2. **Fixes Applied:**
-   - **rav1d-safe (commit 4458106):** Calculate actual_height from buffer.len() / stride
-   - **zenavif (commit 7ce8fe8):** Use PlaneView dimensions instead of frame metadata
-
-3. **Results:**
-   - Success rate improved: 32.7% → 50.9% (18/55 → 28/55)
-   - **All parseable files now decode: 100% (28/28)**
-   - Remaining 27 failures are avif-parse limitations (expected)
-
-4. **Documentation:**
-   - Comprehensive bug report: `/home/lilith/work/rav1d-safe/BUG_PLANEVIEW_HEIGHT_MISMATCH.md`
-   - Investigation notes in CLAUDE.md below
-   - Session summary in SESSION_SUMMARY.md
 
 ### 2026-02-06: Managed API Migration Complete
 

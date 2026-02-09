@@ -134,13 +134,11 @@ fn test_decode_all_vectors() {
         }
     }
 
-    // Allow some failures for now (malformed test files, unsupported features, etc)
-    // But we should decode at least 70% of files successfully
-    let pass_rate = passed as f64 / vectors.len() as f64;
+    // All 55 test vectors should decode successfully
     assert!(
-        pass_rate >= 0.70,
-        "Pass rate too low: {:.1}% (expected >= 70%)",
-        pass_rate * 100.0
+        failed == 0,
+        "Expected 100% pass rate but {failed} files failed: {:?}",
+        failed_files.iter().map(|(p, e)| format!("{}: {}", p.display(), e)).collect::<Vec<_>>()
     );
 }
 

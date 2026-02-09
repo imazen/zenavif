@@ -750,50 +750,31 @@ impl ManagedAvifDecoder {
 
                     let rgb_result = match sampling {
                         ChromaSampling::Cs420 => {
-                            // Try libyuv first (2.9x faster for BT.709 Full Range)
-                            yuv_convert_libyuv::yuv420_to_rgb8(
+                            yuv_convert::yuv420_to_rgb8(
                                 y_view.as_slice(), y_view.stride(),
                                 u_view.as_slice(), u_view.stride(),
                                 v_view.as_slice(), v_view.stride(),
                                 buffer_width, buffer_height,
                                 our_range, our_matrix,
-                            ).unwrap_or_else(|| yuv_convert::yuv420_to_rgb8(
-                                y_view.as_slice(), y_view.stride(),
-                                u_view.as_slice(), u_view.stride(),
-                                v_view.as_slice(), v_view.stride(),
-                                buffer_width, buffer_height,
-                                our_range, our_matrix,
-                            ))
+                            )
                         },
                         ChromaSampling::Cs422 => {
-                            yuv_convert_libyuv::yuv422_to_rgb8(
+                            yuv_convert::yuv422_to_rgb8(
                                 y_view.as_slice(), y_view.stride(),
                                 u_view.as_slice(), u_view.stride(),
                                 v_view.as_slice(), v_view.stride(),
                                 buffer_width, buffer_height,
                                 our_range, our_matrix,
-                            ).unwrap_or_else(|| yuv_convert::yuv422_to_rgb8(
-                                y_view.as_slice(), y_view.stride(),
-                                u_view.as_slice(), u_view.stride(),
-                                v_view.as_slice(), v_view.stride(),
-                                buffer_width, buffer_height,
-                                our_range, our_matrix,
-                            ))
+                            )
                         },
                         ChromaSampling::Cs444 => {
-                            yuv_convert_libyuv::yuv444_to_rgb8(
+                            yuv_convert::yuv444_to_rgb8(
                                 y_view.as_slice(), y_view.stride(),
                                 u_view.as_slice(), u_view.stride(),
                                 v_view.as_slice(), v_view.stride(),
                                 buffer_width, buffer_height,
                                 our_range, our_matrix,
-                            ).unwrap_or_else(|| yuv_convert::yuv444_to_rgb8(
-                                y_view.as_slice(), y_view.stride(),
-                                u_view.as_slice(), u_view.stride(),
-                                v_view.as_slice(), v_view.stride(),
-                                buffer_width, buffer_height,
-                                our_range, our_matrix,
-                            ))
+                            )
                         },
                         ChromaSampling::Monochrome => unreachable!(),
                     };
@@ -806,56 +787,36 @@ impl ManagedAvifDecoder {
 
                     DecodedImage::Rgba8(ImgVec::new(rgba_buf, buffer_width, buffer_height))
                 } else {
-                    // Use our own YUV to RGB conversion
                     let our_range = to_our_yuv_range(info.color_range);
                     let our_matrix = to_our_yuv_matrix(info.matrix_coefficients);
 
                     let result = match sampling {
                         ChromaSampling::Cs420 => {
-                            // Try libyuv first (2.9x faster for BT.709 Full Range)
-                            yuv_convert_libyuv::yuv420_to_rgb8(
+                            yuv_convert::yuv420_to_rgb8(
                                 y_view.as_slice(), y_view.stride(),
                                 u_view.as_slice(), u_view.stride(),
                                 v_view.as_slice(), v_view.stride(),
                                 buffer_width, buffer_height,
                                 our_range, our_matrix,
-                            ).unwrap_or_else(|| yuv_convert::yuv420_to_rgb8(
-                                y_view.as_slice(), y_view.stride(),
-                                u_view.as_slice(), u_view.stride(),
-                                v_view.as_slice(), v_view.stride(),
-                                buffer_width, buffer_height,
-                                our_range, our_matrix,
-                            ))
+                            )
                         },
                         ChromaSampling::Cs422 => {
-                            yuv_convert_libyuv::yuv422_to_rgb8(
+                            yuv_convert::yuv422_to_rgb8(
                                 y_view.as_slice(), y_view.stride(),
                                 u_view.as_slice(), u_view.stride(),
                                 v_view.as_slice(), v_view.stride(),
                                 buffer_width, buffer_height,
                                 our_range, our_matrix,
-                            ).unwrap_or_else(|| yuv_convert::yuv422_to_rgb8(
-                                y_view.as_slice(), y_view.stride(),
-                                u_view.as_slice(), u_view.stride(),
-                                v_view.as_slice(), v_view.stride(),
-                                buffer_width, buffer_height,
-                                our_range, our_matrix,
-                            ))
+                            )
                         },
                         ChromaSampling::Cs444 => {
-                            yuv_convert_libyuv::yuv444_to_rgb8(
+                            yuv_convert::yuv444_to_rgb8(
                                 y_view.as_slice(), y_view.stride(),
                                 u_view.as_slice(), u_view.stride(),
                                 v_view.as_slice(), v_view.stride(),
                                 buffer_width, buffer_height,
                                 our_range, our_matrix,
-                            ).unwrap_or_else(|| yuv_convert::yuv444_to_rgb8(
-                                y_view.as_slice(), y_view.stride(),
-                                u_view.as_slice(), u_view.stride(),
-                                v_view.as_slice(), v_view.stride(),
-                                buffer_width, buffer_height,
-                                our_range, our_matrix,
-                            ))
+                            )
                         },
                         ChromaSampling::Monochrome => unreachable!(),
                     };
