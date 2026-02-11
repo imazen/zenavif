@@ -6,6 +6,9 @@
 //! - Process 2 rows simultaneously for YUV420
 //! - Use AVX2 intrinsics for proper SIMD vectorization
 
+// These unsafe fn helpers use SIMD intrinsics that are safe within target_feature context.
+#![allow(unsafe_op_in_unsafe_fn)]
+
 use archmage::prelude::*;
 use imgref::ImgVec;
 use rgb::RGB8;
@@ -296,6 +299,7 @@ unsafe fn store_rgb_row(out: &mut [RGB8], r: __m256i, g: __m256i, b: __m256i) {
 ///
 /// Ported from yuv crate's avx2_interleave_rgb
 #[inline(always)]
+#[allow(dead_code)]
 unsafe fn interleave_rgb_avx2(r: __m256i, g: __m256i, b: __m256i) -> (__m256i, __m256i, __m256i) {
     use core::arch::x86_64::*;
 

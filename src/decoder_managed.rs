@@ -13,7 +13,6 @@ use crate::image::{
     TransferCharacteristics,
 };
 use crate::yuv_convert::{self, YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRange};
-use crate::yuv_convert_libyuv;
 use enough::Stop;
 use imgref::ImgVec;
 use rgb::{ComponentBytes, ComponentSlice, Rgb, Rgba};
@@ -141,6 +140,7 @@ impl ManagedAvifDecoder {
             threads: config.threads,
             apply_grain: config.apply_grain,
             frame_size_limit: config.frame_size_limit,
+            cpu_flags_mask: config.cpu_flags_mask,
             ..Default::default()
         };
 
@@ -163,31 +163,41 @@ impl ManagedAvifDecoder {
     /// Takes `decoder` explicitly to avoid borrowing `self` (which would conflict
     /// with borrows of `self.parser` for data access).
     fn decode_frame(decoder: &mut Rav1dDecoder, data: &[u8], context: &'static str) -> Result<Frame> {
-        let frame = match decoder.decode(data) {
-            Ok(Some(frame)) => frame,
-            Ok(None) => {
-                // Progressive/multi-layer: flush to get the buffered frame
-                let frames = decoder.flush().map_err(|_e| {
-                    at(Error::Decode {
-                        code: -1,
-                        msg: "Failed to flush decoder",
-                    })
-                })?;
-                frames.into_iter().last().ok_or_else(|| {
-                    at(Error::Decode {
-                        code: -1,
-                        msg: context,
-                    })
-                })?
+        // Send data and try to get a frame immediately
+        match decoder.decode(data) {
+            Ok(Some(frame)) => return Ok(frame),
+            Ok(None) => {}
+            Err(_e) => {
+                return Err(at(Error::Decode {
+                    code: -1,
+                    msg: context,
+                }));
             }
-            Err(_e) => return Err(at(Error::Decode {
+        }
+
+        // Frame not returned immediately — drain via get_frame (handles
+        // frame threading and progressive decode)
+        for _ in 0..1000 {
+            match decoder.get_frame() {
+                Ok(Some(frame)) => return Ok(frame),
+                Ok(None) => std::thread::yield_now(),
+                Err(_e) => break,
+            }
+        }
+
+        // Last resort: flush to force completion
+        let frames = decoder.flush().map_err(|_e| {
+            at(Error::Decode {
+                code: -1,
+                msg: "Failed to flush decoder",
+            })
+        })?;
+        frames.into_iter().last().ok_or_else(|| {
+            at(Error::Decode {
                 code: -1,
                 msg: context,
-            })),
-        };
-        // Reset decoder state so the next decode_frame call starts clean
-        let _ = decoder.flush();
-        Ok(frame)
+            })
+        })
     }
 
     /// Decode the primary image and optionally alpha channel
@@ -270,8 +280,8 @@ impl ManagedAvifDecoder {
         // Get dimensions from first tile (all tiles should be same size)
         let tile_width = tiles[0].width() as usize;
         let tile_height = tiles[0].height() as usize;
-        let bit_depth = tiles[0].bit_depth();
-        let layout = tiles[0].pixel_layout();
+        let _bit_depth = tiles[0].bit_depth();
+        let _layout = tiles[0].pixel_layout();
 
         // Calculate output dimensions
         let output_width = if grid_config.output_width > 0 {
@@ -321,7 +331,7 @@ impl ManagedAvifDecoder {
     fn stitch_rgb8(
         &self,
         tiles: Vec<DecodedImage>,
-        rows: usize,
+        _rows: usize,
         cols: usize,
         width: usize,
         height: usize,
@@ -354,7 +364,7 @@ impl ManagedAvifDecoder {
     fn stitch_rgba8(
         &self,
         tiles: Vec<DecodedImage>,
-        rows: usize,
+        _rows: usize,
         cols: usize,
         width: usize,
         height: usize,
@@ -386,7 +396,7 @@ impl ManagedAvifDecoder {
     fn stitch_rgb16(
         &self,
         tiles: Vec<DecodedImage>,
-        rows: usize,
+        _rows: usize,
         cols: usize,
         width: usize,
         height: usize,
@@ -418,7 +428,7 @@ impl ManagedAvifDecoder {
     fn stitch_rgba16(
         &self,
         tiles: Vec<DecodedImage>,
-        rows: usize,
+        _rows: usize,
         cols: usize,
         width: usize,
         height: usize,
@@ -451,7 +461,7 @@ impl ManagedAvifDecoder {
     fn stitch_gray8(
         &self,
         tiles: Vec<DecodedImage>,
-        rows: usize,
+        _rows: usize,
         cols: usize,
         width: usize,
         height: usize,
@@ -482,7 +492,7 @@ impl ManagedAvifDecoder {
     fn stitch_gray16(
         &self,
         tiles: Vec<DecodedImage>,
-        rows: usize,
+        _rows: usize,
         cols: usize,
         width: usize,
         height: usize,
@@ -732,6 +742,7 @@ impl ManagedAvifDecoder {
                     })
                 })?;
 
+                #[allow(unused_variables)]
                 let planar = YuvPlanarImage {
                     y_plane: y_view.as_slice(),
                     y_stride: y_view.stride() as u32,

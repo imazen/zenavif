@@ -9,6 +9,7 @@ use crate::yuv_convert_libyuv_simd;
 use archmage::prelude::*;
 
 /// YUV conversion constants for different matrix/range combinations
+#[allow(dead_code)]
 struct YuvConstants {
     yg: i32,
     ygb: i32,

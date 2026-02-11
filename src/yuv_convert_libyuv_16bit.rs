@@ -5,6 +5,7 @@ use rgb::RGB16;
 use crate::yuv_convert::{YuvRange, YuvMatrix};
 
 /// YUV conversion constants for 16-bit
+#[allow(dead_code)]
 struct YuvConstants16 {
     yg: i32,
     ygb: i32,

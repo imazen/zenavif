@@ -1,5 +1,4 @@
 use std::fs;
-use std::io::Write;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 use std::time::Instant;
@@ -18,7 +17,7 @@ fn main() {
 
     let start = Instant::now();
 
-    for (i, path_str) in paths.iter().enumerate() {
+    for (_i, path_str) in paths.iter().enumerate() {
         let path = Path::new(path_str);
         let name = path.file_name().unwrap_or_default().to_string_lossy();
 

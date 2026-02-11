@@ -11,7 +11,7 @@
 use archmage::prelude::*;
 use imgref::ImgVec;
 use magetypes::simd::f32x8;
-use rgb::{RGB8, RGB16, RGBA8, RGBA16};
+use rgb::RGB8;
 
 /// YUV color range
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
