@@ -539,9 +539,7 @@ impl AvifDecoder {
         .map_err(|e| at(Error::Parse(e)))?;
 
         // Extract metadata from the parsed AVIF
-        let metadata = parser
-            .primary_metadata()
-            .map_err(|e| at(Error::Parse(e)))?;
+        let metadata = parser.primary_metadata().map_err(|e| at(Error::Parse(e)))?;
 
         let chroma_sampling = match metadata.chroma_subsampling {
             (false, false) => ChromaSampling::Cs444,
@@ -590,7 +588,7 @@ impl AvifDecoder {
     }
 
     /// Decode the AVIF image
-    pub fn decode(&mut self, stop: &impl Stop) -> Result<DecodedImage> {
+    pub fn decode(&mut self, stop: &(impl Stop + ?Sized)) -> Result<DecodedImage> {
         // Check for cancellation before starting decode
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
@@ -598,7 +596,9 @@ impl AvifDecoder {
         let mut decoder = Rav1dDecoder::new(&self.config)?;
 
         // Decode color image
-        let primary_data = self.parser.primary_data()
+        let primary_data = self
+            .parser
+            .primary_data()
             .map_err(|e| at(Error::Parse(e)))?;
         let color_picture = decoder.decode(&primary_data)?;
 

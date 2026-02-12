@@ -161,7 +161,11 @@ impl ManagedAvifDecoder {
     ///
     /// Takes `decoder` explicitly to avoid borrowing `self` (which would conflict
     /// with borrows of `self.parser` for data access).
-    fn decode_frame(decoder: &mut Rav1dDecoder, data: &[u8], context: &'static str) -> Result<Frame> {
+    fn decode_frame(
+        decoder: &mut Rav1dDecoder,
+        data: &[u8],
+        context: &'static str,
+    ) -> Result<Frame> {
         // Send data and try to get a frame immediately
         match decoder.decode(data) {
             Ok(Some(frame)) => return Ok(frame),
@@ -200,7 +204,7 @@ impl ManagedAvifDecoder {
     }
 
     /// Decode the primary image and optionally alpha channel
-    pub fn decode(&mut self, stop: &impl Stop) -> Result<DecodedImage> {
+    pub fn decode(&mut self, stop: &(impl Stop + ?Sized)) -> Result<DecodedImage> {
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
         // Check if this is a grid image (tiled/multi-frame)
@@ -208,15 +212,22 @@ impl ManagedAvifDecoder {
             return self.decode_grid(stop);
         }
 
-        let primary_data = self.parser.primary_data()
-            .map_err(|e| at(Error::from(e)))?;
-        let primary_frame = Self::decode_frame(&mut self.decoder, &primary_data, "Failed to decode primary frame")?;
+        let primary_data = self.parser.primary_data().map_err(|e| at(Error::from(e)))?;
+        let primary_frame = Self::decode_frame(
+            &mut self.decoder,
+            &primary_data,
+            "Failed to decode primary frame",
+        )?;
 
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
         let alpha_frame = if let Some(alpha_result) = self.parser.alpha_data() {
             let alpha_data = alpha_result.map_err(|e| at(Error::from(e)))?;
-            Some(Self::decode_frame(&mut self.decoder, &alpha_data, "Failed to decode alpha frame")?)
+            Some(Self::decode_frame(
+                &mut self.decoder,
+                &alpha_data,
+                "Failed to decode alpha frame",
+            )?)
         } else {
             None
         };
@@ -227,7 +238,7 @@ impl ManagedAvifDecoder {
     }
 
     /// Decode a grid-based AVIF (tiled image)
-    fn decode_grid(&mut self, stop: &impl Stop) -> Result<DecodedImage> {
+    fn decode_grid(&mut self, stop: &(impl Stop + ?Sized)) -> Result<DecodedImage> {
         let grid_config = self
             .parser
             .grid_config()
@@ -239,9 +250,9 @@ impl ManagedAvifDecoder {
         for i in 0..self.parser.grid_tile_count() {
             stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
-            let tile_data = self.parser.tile_data(i)
-                .map_err(|e| at(Error::from(e)))?;
-            let frame = Self::decode_frame(&mut self.decoder, &tile_data, "Failed to decode grid tile")?;
+            let tile_data = self.parser.tile_data(i).map_err(|e| at(Error::from(e)))?;
+            let frame =
+                Self::decode_frame(&mut self.decoder, &tile_data, "Failed to decode grid tile")?;
 
             tile_frames.push(frame);
         }
@@ -257,7 +268,7 @@ impl ManagedAvifDecoder {
         &self,
         tiles: Vec<Frame>,
         grid_config: &zenavif_parse::GridConfig,
-        stop: &impl Stop,
+        stop: &(impl Stop + ?Sized),
     ) -> Result<DecodedImage> {
         if tiles.is_empty() {
             return Err(at(Error::Decode {
@@ -583,7 +594,7 @@ impl ManagedAvifDecoder {
         &self,
         primary: Frame,
         alpha: Option<Frame>,
-        stop: &impl Stop,
+        stop: &(impl Stop + ?Sized),
     ) -> Result<DecodedImage> {
         let width = primary.width() as usize;
         let height = primary.height() as usize;
@@ -661,7 +672,7 @@ impl ManagedAvifDecoder {
         primary: Frame,
         alpha: Option<Frame>,
         info: ImageInfo,
-        stop: &impl Stop,
+        stop: &(impl Stop + ?Sized),
     ) -> Result<DecodedImage> {
         let Planes::Depth8(planes) = primary.planes() else {
             return Err(at(Error::Decode {
@@ -759,40 +770,55 @@ impl ManagedAvifDecoder {
                     let our_matrix = to_our_yuv_matrix(info.matrix_coefficients);
 
                     let rgb_result = match sampling {
-                        ChromaSampling::Cs420 => {
-                            yuv_convert::yuv420_to_rgb8(
-                                y_view.as_slice(), y_view.stride(),
-                                u_view.as_slice(), u_view.stride(),
-                                v_view.as_slice(), v_view.stride(),
-                                buffer_width, buffer_height,
-                                our_range, our_matrix,
-                            )
-                        },
-                        ChromaSampling::Cs422 => {
-                            yuv_convert::yuv422_to_rgb8(
-                                y_view.as_slice(), y_view.stride(),
-                                u_view.as_slice(), u_view.stride(),
-                                v_view.as_slice(), v_view.stride(),
-                                buffer_width, buffer_height,
-                                our_range, our_matrix,
-                            )
-                        },
-                        ChromaSampling::Cs444 => {
-                            yuv_convert::yuv444_to_rgb8(
-                                y_view.as_slice(), y_view.stride(),
-                                u_view.as_slice(), u_view.stride(),
-                                v_view.as_slice(), v_view.stride(),
-                                buffer_width, buffer_height,
-                                our_range, our_matrix,
-                            )
-                        },
+                        ChromaSampling::Cs420 => yuv_convert::yuv420_to_rgb8(
+                            y_view.as_slice(),
+                            y_view.stride(),
+                            u_view.as_slice(),
+                            u_view.stride(),
+                            v_view.as_slice(),
+                            v_view.stride(),
+                            buffer_width,
+                            buffer_height,
+                            our_range,
+                            our_matrix,
+                        ),
+                        ChromaSampling::Cs422 => yuv_convert::yuv422_to_rgb8(
+                            y_view.as_slice(),
+                            y_view.stride(),
+                            u_view.as_slice(),
+                            u_view.stride(),
+                            v_view.as_slice(),
+                            v_view.stride(),
+                            buffer_width,
+                            buffer_height,
+                            our_range,
+                            our_matrix,
+                        ),
+                        ChromaSampling::Cs444 => yuv_convert::yuv444_to_rgb8(
+                            y_view.as_slice(),
+                            y_view.stride(),
+                            u_view.as_slice(),
+                            u_view.stride(),
+                            v_view.as_slice(),
+                            v_view.stride(),
+                            buffer_width,
+                            buffer_height,
+                            our_range,
+                            our_matrix,
+                        ),
                         ChromaSampling::Monochrome => unreachable!(),
                     };
 
                     // Convert RGB to RGBA (with alpha=255 default)
-                    let rgba_buf: Vec<Rgba<u8>> = rgb_result.buf()
+                    let rgba_buf: Vec<Rgba<u8>> = rgb_result
+                        .buf()
                         .iter()
-                        .map(|rgb| Rgba { r: rgb.r, g: rgb.g, b: rgb.b, a: 255 })
+                        .map(|rgb| Rgba {
+                            r: rgb.r,
+                            g: rgb.g,
+                            b: rgb.b,
+                            a: 255,
+                        })
                         .collect();
 
                     DecodedImage::Rgba8(ImgVec::new(rgba_buf, buffer_width, buffer_height))
@@ -801,33 +827,42 @@ impl ManagedAvifDecoder {
                     let our_matrix = to_our_yuv_matrix(info.matrix_coefficients);
 
                     let result = match sampling {
-                        ChromaSampling::Cs420 => {
-                            yuv_convert::yuv420_to_rgb8(
-                                y_view.as_slice(), y_view.stride(),
-                                u_view.as_slice(), u_view.stride(),
-                                v_view.as_slice(), v_view.stride(),
-                                buffer_width, buffer_height,
-                                our_range, our_matrix,
-                            )
-                        },
-                        ChromaSampling::Cs422 => {
-                            yuv_convert::yuv422_to_rgb8(
-                                y_view.as_slice(), y_view.stride(),
-                                u_view.as_slice(), u_view.stride(),
-                                v_view.as_slice(), v_view.stride(),
-                                buffer_width, buffer_height,
-                                our_range, our_matrix,
-                            )
-                        },
-                        ChromaSampling::Cs444 => {
-                            yuv_convert::yuv444_to_rgb8(
-                                y_view.as_slice(), y_view.stride(),
-                                u_view.as_slice(), u_view.stride(),
-                                v_view.as_slice(), v_view.stride(),
-                                buffer_width, buffer_height,
-                                our_range, our_matrix,
-                            )
-                        },
+                        ChromaSampling::Cs420 => yuv_convert::yuv420_to_rgb8(
+                            y_view.as_slice(),
+                            y_view.stride(),
+                            u_view.as_slice(),
+                            u_view.stride(),
+                            v_view.as_slice(),
+                            v_view.stride(),
+                            buffer_width,
+                            buffer_height,
+                            our_range,
+                            our_matrix,
+                        ),
+                        ChromaSampling::Cs422 => yuv_convert::yuv422_to_rgb8(
+                            y_view.as_slice(),
+                            y_view.stride(),
+                            u_view.as_slice(),
+                            u_view.stride(),
+                            v_view.as_slice(),
+                            v_view.stride(),
+                            buffer_width,
+                            buffer_height,
+                            our_range,
+                            our_matrix,
+                        ),
+                        ChromaSampling::Cs444 => yuv_convert::yuv444_to_rgb8(
+                            y_view.as_slice(),
+                            y_view.stride(),
+                            u_view.as_slice(),
+                            u_view.stride(),
+                            v_view.as_slice(),
+                            v_view.stride(),
+                            buffer_width,
+                            buffer_height,
+                            our_range,
+                            our_matrix,
+                        ),
                         ChromaSampling::Monochrome => unreachable!(),
                     };
 
@@ -873,7 +908,7 @@ impl ManagedAvifDecoder {
         primary: Frame,
         alpha: Option<Frame>,
         info: ImageInfo,
-        stop: &impl Stop,
+        stop: &(impl Stop + ?Sized),
     ) -> Result<DecodedImage> {
         let Planes::Depth16(planes) = primary.planes() else {
             return Err(at(Error::Decode {

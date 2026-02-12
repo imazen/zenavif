@@ -137,24 +137,36 @@ pub struct AvifEncodeJob<'a> {
 
 #[cfg(feature = "encode")]
 impl<'a> AvifEncodeJob<'a> {
-    fn do_encode_rgb8(self, img: ImgRef<'_, Rgb<u8>>) -> Result<zencodec_types::EncodeOutput, Error> {
+    fn do_encode_rgb8(
+        self,
+        img: ImgRef<'_, Rgb<u8>>,
+    ) -> Result<zencodec_types::EncodeOutput, Error> {
         let mut cfg = self.config.inner.clone();
         if let Some(exif) = self.exif {
             cfg = cfg.exif(exif.to_vec());
         }
         let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
         let result = crate::encode_rgb8(img, &cfg, stop).map_err(|e| e.into_inner())?;
-        Ok(zencodec_types::EncodeOutput::new(result.avif_file, ImageFormat::Avif))
+        Ok(zencodec_types::EncodeOutput::new(
+            result.avif_file,
+            ImageFormat::Avif,
+        ))
     }
 
-    fn do_encode_rgba8(self, img: ImgRef<'_, Rgba<u8>>) -> Result<zencodec_types::EncodeOutput, Error> {
+    fn do_encode_rgba8(
+        self,
+        img: ImgRef<'_, Rgba<u8>>,
+    ) -> Result<zencodec_types::EncodeOutput, Error> {
         let mut cfg = self.config.inner.clone();
         if let Some(exif) = self.exif {
             cfg = cfg.exif(exif.to_vec());
         }
         let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
         let result = crate::encode_rgba8(img, &cfg, stop).map_err(|e| e.into_inner())?;
-        Ok(zencodec_types::EncodeOutput::new(result.avif_file, ImageFormat::Avif))
+        Ok(zencodec_types::EncodeOutput::new(
+            result.avif_file,
+            ImageFormat::Avif,
+        ))
     }
 }
 
@@ -200,15 +212,24 @@ impl<'a> zencodec_types::EncodingJob<'a> for AvifEncodeJob<'a> {
         self
     }
 
-    fn encode_rgb8(self, img: ImgRef<'_, Rgb<u8>>) -> Result<zencodec_types::EncodeOutput, Self::Error> {
+    fn encode_rgb8(
+        self,
+        img: ImgRef<'_, Rgb<u8>>,
+    ) -> Result<zencodec_types::EncodeOutput, Self::Error> {
         self.do_encode_rgb8(img)
     }
 
-    fn encode_rgba8(self, img: ImgRef<'_, Rgba<u8>>) -> Result<zencodec_types::EncodeOutput, Self::Error> {
+    fn encode_rgba8(
+        self,
+        img: ImgRef<'_, Rgba<u8>>,
+    ) -> Result<zencodec_types::EncodeOutput, Self::Error> {
         self.do_encode_rgba8(img)
     }
 
-    fn encode_gray8(self, img: ImgRef<'_, rgb::Gray<u8>>) -> Result<zencodec_types::EncodeOutput, Self::Error> {
+    fn encode_gray8(
+        self,
+        img: ImgRef<'_, rgb::Gray<u8>>,
+    ) -> Result<zencodec_types::EncodeOutput, Self::Error> {
         // Expand grayscale to RGB
         let (buf, w, h) = img.to_contiguous_buf();
         let rgb: Vec<Rgb<u8>> = buf
@@ -297,10 +318,7 @@ fn to_pixel_data(img: crate::DecodedImage) -> zencodec_types::PixelData {
             let w = v.width();
             let h = v.height();
             let (buf, _, _) = v.as_ref().to_contiguous_buf();
-            let rgb: Vec<Rgb<u16>> = buf
-                .iter()
-                .map(|&g| Rgb { r: g, g, b: g })
-                .collect();
+            let rgb: Vec<Rgb<u16>> = buf.iter().map(|&g| Rgb { r: g, g, b: g }).collect();
             zencodec_types::PixelData::Rgb16(imgref::ImgVec::new(rgb, w, h))
         }
     }
@@ -404,8 +422,7 @@ impl<'a> zencodec_types::DecodingJob<'a> for AvifDecodeJob<'a> {
         let h = decoded.height() as u32;
         let has_alpha = decoded.has_alpha();
 
-        let info = zencodec_types::ImageInfo::new(w, h, ImageFormat::Avif)
-            .with_alpha(has_alpha);
+        let info = zencodec_types::ImageInfo::new(w, h, ImageFormat::Avif).with_alpha(has_alpha);
 
         let pixels = to_pixel_data(decoded);
         Ok(zencodec_types::DecodeOutput::new(pixels, info))
@@ -424,7 +441,14 @@ mod tests {
     fn encoding_default_roundtrip() {
         use zencodec_types::Encoding;
         let enc = AvifEncoding::new().with_quality(80.0);
-        let pixels = vec![Rgb { r: 128u8, g: 64, b: 32 }; 64];
+        let pixels = vec![
+            Rgb {
+                r: 128u8,
+                g: 64,
+                b: 32
+            };
+            64
+        ];
         let img = Img::new(pixels, 8, 8);
         let output = enc.encode_rgb8(img.as_ref()).unwrap();
         assert!(!output.bytes().is_empty());
@@ -464,17 +488,20 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encoding_with_metadata() {
-        use zencodec_types::Encoding;
+        use zencodec_types::{Encoding, EncodingJob};
         let enc = AvifEncoding::new().with_quality(80.0);
-        let pixels = vec![Rgb { r: 255u8, g: 0, b: 0 }; 16];
+        let pixels = vec![
+            Rgb {
+                r: 255u8,
+                g: 0,
+                b: 0
+            };
+            16
+        ];
         let img = Img::new(pixels, 4, 4);
 
         let exif = b"fake exif data";
-        let output = enc
-            .job()
-            .with_exif(exif)
-            .encode_rgb8(img.as_ref())
-            .unwrap();
+        let output = enc.job().with_exif(exif).encode_rgb8(img.as_ref()).unwrap();
         assert!(!output.bytes().is_empty());
     }
 
@@ -483,7 +510,14 @@ mod tests {
     fn decode_roundtrip() {
         use zencodec_types::{Decoding, Encoding};
         let enc = AvifEncoding::new().with_quality(80.0).with_effort(10);
-        let pixels = vec![Rgb { r: 200u8, g: 100, b: 50 }; 64];
+        let pixels = vec![
+            Rgb {
+                r: 200u8,
+                g: 100,
+                b: 50
+            };
+            64
+        ];
         let img = Img::new(pixels, 8, 8);
         let encoded = enc.encode_rgb8(img.as_ref()).unwrap();
 

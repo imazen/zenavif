@@ -4,8 +4,8 @@
 //! [`encode_rgb8`] / [`encode_rgba8`] / [`encode_rgb16`] / [`encode_rgba16`]
 //! for encoding images.
 
-use crate::error::Error;
 use crate::Result;
+use crate::error::Error;
 use enough::Stop;
 use imgref::ImgRef;
 use rgb::{Rgb, Rgba};

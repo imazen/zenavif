@@ -59,17 +59,17 @@ mod decoder_managed;
 mod encoder;
 mod error;
 mod image;
-#[cfg(feature = "zencodec")]
-mod zencodec;
 pub mod simd;
 #[doc(hidden)]
 pub mod yuv_convert;
 #[doc(hidden)]
 pub mod yuv_convert_fast;
 pub mod yuv_convert_libyuv;
-pub mod yuv_convert_libyuv_simd;
 pub mod yuv_convert_libyuv_16bit;
 pub mod yuv_convert_libyuv_autovec;
+pub mod yuv_convert_libyuv_simd;
+#[cfg(feature = "zencodec")]
+mod zencodec;
 
 pub use config::DecoderConfig;
 #[cfg(feature = "asm")]
@@ -78,19 +78,19 @@ pub use decoder::AvifDecoder;
 pub use decoder_managed::ManagedAvifDecoder;
 #[cfg(feature = "encode")]
 pub use encoder::{
-    EncodeBitDepth, EncodeAlphaMode, EncodeColorModel, EncodedImage, EncoderConfig, encode_rgb8,
+    EncodeAlphaMode, EncodeBitDepth, EncodeColorModel, EncodedImage, EncoderConfig, encode_rgb8,
     encode_rgb16, encode_rgba8, encode_rgba16,
 };
 pub use enough::{Stop, StopReason, Unstoppable};
-#[cfg(all(feature = "zencodec", any(feature = "managed", feature = "asm")))]
-pub use zencodec::{AvifDecoding, AvifDecodeJob};
-#[cfg(all(feature = "zencodec", feature = "encode"))]
-pub use zencodec::{AvifEncoding, AvifEncodeJob};
 pub use error::{Error, Result};
 pub use image::{
     ChromaSampling, ColorPrimaries, ColorRange, DecodedImage, ImageInfo, MatrixCoefficients,
     TransferCharacteristics,
 };
+#[cfg(all(feature = "zencodec", any(feature = "managed", feature = "asm")))]
+pub use zencodec::{AvifDecodeJob, AvifDecoding};
+#[cfg(all(feature = "zencodec", feature = "encode"))]
+pub use zencodec::{AvifEncodeJob, AvifEncoding};
 
 /// Decode an AVIF image with default settings
 ///
@@ -125,7 +125,11 @@ pub fn decode(data: &[u8]) -> Result<DecodedImage> {
 /// let avif_data = std::fs::read("image.avif").unwrap();
 /// let image = decode_with(&avif_data, &config, &Unstoppable).unwrap();
 /// ```
-pub fn decode_with(data: &[u8], config: &DecoderConfig, stop: &(impl Stop + ?Sized)) -> Result<DecodedImage> {
+pub fn decode_with(
+    data: &[u8],
+    config: &DecoderConfig,
+    stop: &(impl Stop + ?Sized),
+) -> Result<DecodedImage> {
     #[cfg(feature = "managed")]
     {
         let mut decoder = ManagedAvifDecoder::new(data, config)?;
@@ -177,8 +181,8 @@ pub fn encode_with(
         DecodedImage::Rgba8(img) => encode_rgba8(img.as_ref(), config, stop),
         DecodedImage::Rgb16(img) => encode_rgb16(img.as_ref(), config, stop),
         DecodedImage::Rgba16(img) => encode_rgba16(img.as_ref(), config, stop),
-        DecodedImage::Gray8(_) | DecodedImage::Gray16(_) => {
-            Err(whereat::at(Error::Unsupported("grayscale encoding not yet supported")))
-        }
+        DecodedImage::Gray8(_) | DecodedImage::Gray16(_) => Err(whereat::at(Error::Unsupported(
+            "grayscale encoding not yet supported",
+        ))),
     }
 }
