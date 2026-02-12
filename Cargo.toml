@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.93"
 license = "AGPL-3.0-or-later"
-description = "Pure Rust AVIF image decoder powered by rav1d"
+description = "Pure Rust AVIF image codec powered by rav1d and ravif"
 categories = ["multimedia::images"]
-keywords = ["avif", "decoder", "av1", "image", "rav1d"]
+keywords = ["avif", "decoder", "encoder", "av1", "image"]
 repository = "https://github.com/imazen/zenavif"
 
 [dependencies]
@@ -26,6 +26,8 @@ enough = "0.3.1"
 thiserror = { version = "2.0", default-features = false }
 whereat = "0.1.3"
 log = "0.4"
+ravif = { version = "0.13", default-features = false, optional = true }
+zencodec-types = { path = "../zencodec-types", optional = true }
 
 [dev-dependencies]
 env_logger = { version = "0.11", default-features = false }
@@ -51,4 +53,12 @@ default = ["managed"]
 asm = ["dep:rav1d", "rav1d/asm"]
 # Use 100% safe managed API (default - no unsafe code!)
 managed = ["dep:rav1d-safe"]
+# AVIF encoding via ravif (pure Rust by default)
+encode = ["dep:ravif"]
+# Encoding with hand-written assembly (fastest)
+encode-asm = ["encode", "ravif/asm"]
+# Encoding with multi-threading
+encode-threading = ["encode", "ravif/threading"]
+# zencodec-types trait implementations
+zencodec = ["dep:zencodec-types"]
 

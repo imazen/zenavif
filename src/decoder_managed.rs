@@ -140,7 +140,6 @@ impl ManagedAvifDecoder {
             threads: config.threads,
             apply_grain: config.apply_grain,
             frame_size_limit: config.frame_size_limit,
-            cpu_flags_mask: config.cpu_flags_mask,
             ..Default::default()
         };
 

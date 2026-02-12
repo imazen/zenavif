@@ -55,8 +55,12 @@ mod convert;
 mod decoder;
 #[cfg(feature = "managed")]
 mod decoder_managed;
+#[cfg(feature = "encode")]
+mod encoder;
 mod error;
 mod image;
+#[cfg(feature = "zencodec")]
+mod zencodec;
 pub mod simd;
 #[doc(hidden)]
 pub mod yuv_convert;
@@ -72,7 +76,16 @@ pub use config::DecoderConfig;
 pub use decoder::AvifDecoder;
 #[cfg(feature = "managed")]
 pub use decoder_managed::ManagedAvifDecoder;
+#[cfg(feature = "encode")]
+pub use encoder::{
+    EncodeBitDepth, EncodeAlphaMode, EncodeColorModel, EncodedImage, EncoderConfig, encode_rgb8,
+    encode_rgb16, encode_rgba8, encode_rgba16,
+};
 pub use enough::{Stop, StopReason, Unstoppable};
+#[cfg(all(feature = "zencodec", any(feature = "managed", feature = "asm")))]
+pub use zencodec::{AvifDecoding, AvifDecodeJob};
+#[cfg(all(feature = "zencodec", feature = "encode"))]
+pub use zencodec::{AvifEncoding, AvifEncodeJob};
 pub use error::{Error, Result};
 pub use image::{
     ChromaSampling, ColorPrimaries, ColorRange, DecodedImage, ImageInfo, MatrixCoefficients,
@@ -112,7 +125,7 @@ pub fn decode(data: &[u8]) -> Result<DecodedImage> {
 /// let avif_data = std::fs::read("image.avif").unwrap();
 /// let image = decode_with(&avif_data, &config, &Unstoppable).unwrap();
 /// ```
-pub fn decode_with(data: &[u8], config: &DecoderConfig, stop: &impl Stop) -> Result<DecodedImage> {
+pub fn decode_with(data: &[u8], config: &DecoderConfig, stop: &(impl Stop + ?Sized)) -> Result<DecodedImage> {
     #[cfg(feature = "managed")]
     {
         let mut decoder = ManagedAvifDecoder::new(data, config)?;
@@ -128,5 +141,44 @@ pub fn decode_with(data: &[u8], config: &DecoderConfig, stop: &impl Stop) -> Res
     #[cfg(not(any(feature = "managed", feature = "asm")))]
     {
         compile_error!("At least one feature must be enabled: managed or asm");
+    }
+}
+
+/// Encode a decoded image to AVIF with default settings
+///
+/// Supports Rgb8, Rgba8, Rgb16, and Rgba16 variants. Returns
+/// [`Error::Unsupported`] for grayscale inputs.
+///
+/// # Example
+///
+/// ```no_run
+/// let avif_data = std::fs::read("image.avif").unwrap();
+/// let image = zenavif::decode(&avif_data).unwrap();
+/// let encoded = zenavif::encode(&image).unwrap();
+/// std::fs::write("output.avif", &encoded.avif_file).unwrap();
+/// ```
+#[cfg(feature = "encode")]
+pub fn encode(image: &DecodedImage) -> Result<EncodedImage> {
+    encode_with(image, &EncoderConfig::default(), &Unstoppable)
+}
+
+/// Encode a decoded image to AVIF with custom settings and cancellation
+///
+/// Supports Rgb8, Rgba8, Rgb16, and Rgba16 variants. Returns
+/// [`Error::Unsupported`] for grayscale inputs.
+#[cfg(feature = "encode")]
+pub fn encode_with(
+    image: &DecodedImage,
+    config: &EncoderConfig,
+    stop: &(impl Stop + ?Sized),
+) -> Result<EncodedImage> {
+    match image {
+        DecodedImage::Rgb8(img) => encode_rgb8(img.as_ref(), config, stop),
+        DecodedImage::Rgba8(img) => encode_rgba8(img.as_ref(), config, stop),
+        DecodedImage::Rgb16(img) => encode_rgb16(img.as_ref(), config, stop),
+        DecodedImage::Rgba16(img) => encode_rgba16(img.as_ref(), config, stop),
+        DecodedImage::Gray8(_) | DecodedImage::Gray16(_) => {
+            Err(whereat::at(Error::Unsupported("grayscale encoding not yet supported")))
+        }
     }
 }

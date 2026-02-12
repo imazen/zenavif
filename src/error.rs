@@ -23,6 +23,10 @@ pub enum Error {
     #[error("Color conversion error: {0}")]
     ColorConversion(#[from] yuv::YuvError),
 
+    /// AV1 encode error
+    #[error("AV1 encode error: {0}")]
+    Encode(String),
+
     /// Unsupported feature
     #[error("Unsupported: {0}")]
     Unsupported(&'static str),

@@ -27,6 +27,18 @@ fmt:
 fmt-check:
     cargo fmt --check
 
+# Build with encode feature
+build-encode:
+    cargo build --features encode
+
+# Test with encode feature
+test-encode:
+    cargo test --features managed,encode
+
+# Clippy with managed + encode + zencodec features
+clippy-all:
+    cargo clippy --all-targets --features managed,encode,zencodec -- -D warnings
+
 # Full CI check
 ci: fmt-check clippy test
 

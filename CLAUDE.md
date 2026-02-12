@@ -37,6 +37,11 @@ just fmt     # cargo fmt
 
 ### rav1d-safe Issues
 
+0. **Nightly-only build breakage** - rav1d-safe commit `d3e21c0` uses `Arc::try_new` (unstable `allocator_api`)
+   - Breaks compilation on stable Rust 1.93
+   - **Workaround:** Revert to a commit before `8260914` or wait for upstream fix
+   - Also has `ENOMEM` not found in scope in `obu.rs`
+
 1. **Threading Race Condition** - DisjointMut overlap panic with multi-threaded decoding
    - Panic in `cdef.rs:339` / `cdef_apply.rs:76` with overlapping mutable borrows
    - Workaround: Use `threads: 1` for single-threaded decoding
