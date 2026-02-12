@@ -13,7 +13,7 @@ repository = "https://github.com/imazen/zenavif"
 # rav1d: C FFI-based decoder for asm feature (fastest)
 rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"], optional = true }
 # rav1d-safe: 100% safe managed API decoder (no c-ffi feature!)
-rav1d-safe = { path = "../rav1d-safe", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
+rav1d-safe = { version = "0.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
 archmage = { version = "0.5.0", features = ["macros", "safe_unaligned_simd"] }
 magetypes = "0.5.0"
 safe_unaligned_simd = "0.2.4"

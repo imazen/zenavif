@@ -1092,6 +1092,8 @@ dependencies = [
 [[package]]
 name = "rav1d-disjoint-mut"
 version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22e83fd5f0d30bde8a579bbfca59aaa57e910b763f99621109bb77b103034510"
 dependencies = [
  "aligned",
  "aligned-vec",
@@ -1101,6 +1103,8 @@ dependencies = [
 [[package]]
 name = "rav1d-safe"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ee0faae397edbece765ba42fd64fa6b808931261235d78f30adeee9880bac47"
 dependencies = [
  "archmage 0.6.0",
  "assert_matches",
