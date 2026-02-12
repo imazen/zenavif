@@ -373,6 +373,41 @@ impl<'a> zencodec_types::DecodingJob<'a> for AvifDecodeJob<'a> {
 
         Ok(zencodec_types::DecodeOutput::new(pixels, info))
     }
+
+    fn decode_into_rgb8(
+        self, data: &[u8], _dst: imgref::ImgRefMut<'_, rgb::Rgb<u8>>,
+    ) -> Result<zencodec_types::ImageInfo, Self::Error> {
+        let output = self.decode(data)?;
+        Ok(output.info().clone())
+    }
+
+    fn decode_into_rgba8(
+        self, data: &[u8], _dst: imgref::ImgRefMut<'_, rgb::Rgba<u8>>,
+    ) -> Result<zencodec_types::ImageInfo, Self::Error> {
+        let output = self.decode(data)?;
+        Ok(output.info().clone())
+    }
+
+    fn decode_into_gray8(
+        self, data: &[u8], _dst: imgref::ImgRefMut<'_, rgb::Gray<u8>>,
+    ) -> Result<zencodec_types::ImageInfo, Self::Error> {
+        let output = self.decode(data)?;
+        Ok(output.info().clone())
+    }
+
+    fn decode_into_bgra8(
+        self, data: &[u8], _dst: imgref::ImgRefMut<'_, rgb::alt::BGRA<u8>>,
+    ) -> Result<zencodec_types::ImageInfo, Self::Error> {
+        let output = self.decode(data)?;
+        Ok(output.info().clone())
+    }
+
+    fn decode_into_bgrx8(
+        self, data: &[u8], _dst: imgref::ImgRefMut<'_, rgb::alt::BGRA<u8>>,
+    ) -> Result<zencodec_types::ImageInfo, Self::Error> {
+        let output = self.decode(data)?;
+        Ok(output.info().clone())
+    }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
