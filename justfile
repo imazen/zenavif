@@ -33,11 +33,11 @@ build-encode:
 
 # Test with encode feature
 test-encode:
-    cargo test --features managed,encode
+    cargo test --features encode
 
-# Clippy with managed + encode + zencodec features
+# Clippy with encode features
 clippy-all:
-    cargo clippy --all-targets --features managed,encode,zencodec -- -D warnings
+    cargo clippy --all-targets --features encode -- -D warnings
 
 # Full CI check
 ci: fmt-check clippy test
@@ -49,11 +49,11 @@ decode-test:
 
 # Cross-test i686 (32-bit x86)
 test-i686:
-    cross test --no-default-features --features managed --target i686-unknown-linux-gnu
+    cross test --target i686-unknown-linux-gnu
 
 # Cross-test armv7 (32-bit ARM)
 test-armv7:
-    cross test --no-default-features --features managed --target armv7-unknown-linux-gnueabihf
+    cross test --target armv7-unknown-linux-gnueabihf
 
 # Run all cross tests
 test-cross: test-i686 test-armv7
@@ -76,7 +76,7 @@ download-vectors:
 
 # Run integration tests with test vectors
 test-integration:
-    cargo test --features managed --test integration_corpus -- --ignored --nocapture
+    cargo test --test integration_corpus -- --ignored --nocapture
 
 # Download vectors and run integration tests
 test-all: download-vectors test-integration
@@ -99,7 +99,7 @@ generate-references: download-vectors
 
 # Run pixel verification tests (requires references)
 test-pixels:
-    cargo test --features managed --test pixel_verification -- --ignored --nocapture verify_against_libavif
+    cargo test --test pixel_verification -- --ignored --nocapture verify_against_libavif
 
 # Full pixel verification: generate references and test
 verify-pixels: generate-references test-pixels

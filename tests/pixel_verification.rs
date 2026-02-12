@@ -18,7 +18,7 @@
 use enough::Unstoppable;
 use std::fs;
 use std::path::{Path, PathBuf};
-use zenavif::{DecodedImage, DecoderConfig, decode_with};
+use zenavif::{DecoderConfig, PixelData, decode_with};
 
 /// Generate reference PNGs for a test file
 /// This should be run once to create the reference images
@@ -39,7 +39,7 @@ fn generate_reference(
 
     // Convert to image-rs format and save
     match image {
-        DecodedImage::Rgb8(img) => {
+        PixelData::Rgb8(img) => {
             let width = img.width() as u32;
             let height = img.height() as u32;
             let mut buffer = image::RgbImage::new(width, height);
@@ -53,7 +53,7 @@ fn generate_reference(
 
             buffer.save(&output_path)?;
         }
-        DecodedImage::Rgba8(img) => {
+        PixelData::Rgba8(img) => {
             let width = img.width() as u32;
             let height = img.height() as u32;
             let mut buffer = image::RgbaImage::new(width, height);
@@ -67,7 +67,7 @@ fn generate_reference(
 
             buffer.save(&output_path)?;
         }
-        DecodedImage::Rgb16(img) => {
+        PixelData::Rgb16(img) => {
             // Convert 16-bit to 8-bit for PNG
             let width = img.width() as u32;
             let height = img.height() as u32;
@@ -103,14 +103,14 @@ fn generate_reference(
 
 /// Compare decoded image against reference PNG
 fn compare_against_reference(
-    image: &DecodedImage,
+    image: &PixelData,
     reference_path: &Path,
     max_diff: u8,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let reference = image::open(reference_path)?;
 
     match image {
-        DecodedImage::Rgb8(img) => {
+        PixelData::Rgb8(img) => {
             let ref_rgb = reference.to_rgb8();
             if img.width() != ref_rgb.width() as usize || img.height() != ref_rgb.height() as usize
             {

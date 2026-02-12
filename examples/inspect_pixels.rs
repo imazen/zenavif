@@ -9,7 +9,7 @@ fn main() {
     let img = zenavif::decode_with(&data, &config, &zenavif::Unstoppable).unwrap();
 
     match &img {
-        zenavif::DecodedImage::Rgb8(buf) => {
+        zenavif::PixelData::Rgb8(buf) => {
             println!("RGB8 {}x{}", buf.width(), buf.height());
             for y in 0..3.min(buf.height()) {
                 for x in 0..3.min(buf.width()) {
@@ -35,7 +35,7 @@ fn main() {
                 sb as f64 / count as f64
             );
         }
-        zenavif::DecodedImage::Rgba8(buf) => {
+        zenavif::PixelData::Rgba8(buf) => {
             println!("RGBA8 {}x{}", buf.width(), buf.height());
             for y in 0..3.min(buf.height()) {
                 for x in 0..3.min(buf.width()) {

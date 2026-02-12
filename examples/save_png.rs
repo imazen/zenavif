@@ -13,7 +13,7 @@ fn main() {
     let img = zenavif::decode_with(&data, &config, &zenavif::Unstoppable).unwrap();
 
     match &img {
-        zenavif::DecodedImage::Rgb8(buf) => {
+        zenavif::PixelData::Rgb8(buf) => {
             let w = buf.width() as u32;
             let h = buf.height() as u32;
             let mut rgb_data = Vec::with_capacity((w * h * 3) as usize);
@@ -27,7 +27,7 @@ fn main() {
             image::save_buffer(&png_path, &rgb_data, w, h, image::ColorType::Rgb8).unwrap();
             println!("Saved RGB8 {}x{} to {}", w, h, png_path);
         }
-        zenavif::DecodedImage::Rgba8(buf) => {
+        zenavif::PixelData::Rgba8(buf) => {
             let w = buf.width() as u32;
             let h = buf.height() as u32;
             let mut rgba_data = Vec::with_capacity((w * h * 4) as usize);

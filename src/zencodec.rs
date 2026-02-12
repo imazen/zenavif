@@ -4,9 +4,13 @@
 //! [`Encoding`] / [`Decoding`] traits from zencodec-types, wrapping the native
 //! zenavif API.
 
+#[cfg(feature = "encode")]
 use imgref::ImgRef;
+#[cfg(feature = "encode")]
 use rgb::{Rgb, Rgba};
-use zencodec_types::{ImageFormat, ImageMetadata, Stop};
+#[cfg(feature = "encode")]
+use zencodec_types::ImageMetadata;
+use zencodec_types::{ImageFormat, Stop};
 
 use crate::error::Error;
 
@@ -180,7 +184,6 @@ impl<'a> zencodec_types::EncodingJob<'a> for AvifEncodeJob<'a> {
     }
 
     fn with_metadata(mut self, meta: &'a ImageMetadata<'a>) -> Self {
-        // AVIF/ravif only supports EXIF embedding
         if let Some(exif) = meta.exif {
             self.exif = Some(exif);
         }
@@ -188,7 +191,6 @@ impl<'a> zencodec_types::EncodingJob<'a> for AvifEncodeJob<'a> {
     }
 
     fn with_icc(self, _icc: &'a [u8]) -> Self {
-        // ravif doesn't support ICC embedding; ignore
         self
     }
 
@@ -198,7 +200,6 @@ impl<'a> zencodec_types::EncodingJob<'a> for AvifEncodeJob<'a> {
     }
 
     fn with_xmp(self, _xmp: &'a [u8]) -> Self {
-        // ravif doesn't support XMP embedding; ignore
         self
     }
 
@@ -230,7 +231,6 @@ impl<'a> zencodec_types::EncodingJob<'a> for AvifEncodeJob<'a> {
         self,
         img: ImgRef<'_, rgb::Gray<u8>>,
     ) -> Result<zencodec_types::EncodeOutput, Self::Error> {
-        // Expand grayscale to RGB
         let (buf, w, h) = img.to_contiguous_buf();
         let rgb: Vec<Rgb<u8>> = buf
             .iter()
@@ -260,14 +260,12 @@ impl<'a> zencodec_types::EncodingJob<'a> for AvifEncodeJob<'a> {
 ///     .with_limit_pixels(100_000_000);
 /// let output = dec.decode(&avif_bytes)?;
 /// ```
-#[cfg(any(feature = "managed", feature = "asm"))]
 #[derive(Clone, Debug)]
 pub struct AvifDecoding {
     inner: crate::DecoderConfig,
     limit_file_size: Option<u64>,
 }
 
-#[cfg(any(feature = "managed", feature = "asm"))]
 impl AvifDecoding {
     /// Create a default AVIF decoder config.
     #[must_use]
@@ -290,41 +288,12 @@ impl AvifDecoding {
     }
 }
 
-#[cfg(any(feature = "managed", feature = "asm"))]
 impl Default for AvifDecoding {
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// Convert a zenavif `DecodedImage` to zencodec `PixelData`.
-#[cfg(any(feature = "managed", feature = "asm"))]
-fn to_pixel_data(img: crate::DecodedImage) -> zencodec_types::PixelData {
-    match img {
-        crate::DecodedImage::Rgb8(v) => zencodec_types::PixelData::Rgb8(v),
-        crate::DecodedImage::Rgba8(v) => zencodec_types::PixelData::Rgba8(v),
-        crate::DecodedImage::Rgb16(v) => zencodec_types::PixelData::Rgb16(v),
-        crate::DecodedImage::Rgba16(v) => zencodec_types::PixelData::Rgba16(v),
-        crate::DecodedImage::Gray8(v) => {
-            // zencodec PixelData::Gray8 uses Gray<u8>, zenavif uses u8
-            let w = v.width();
-            let h = v.height();
-            let (buf, _, _) = v.as_ref().to_contiguous_buf();
-            let gray: Vec<rgb::Gray<u8>> = buf.iter().map(|&b| rgb::Gray::new(b)).collect();
-            zencodec_types::PixelData::Gray8(imgref::ImgVec::new(gray, w, h))
-        }
-        crate::DecodedImage::Gray16(v) => {
-            // zencodec doesn't have Gray16; expand to Rgb16
-            let w = v.width();
-            let h = v.height();
-            let (buf, _, _) = v.as_ref().to_contiguous_buf();
-            let rgb: Vec<Rgb<u16>> = buf.iter().map(|&g| Rgb { r: g, g, b: g }).collect();
-            zencodec_types::PixelData::Rgb16(imgref::ImgVec::new(rgb, w, h))
-        }
-    }
-}
-
-#[cfg(any(feature = "managed", feature = "asm"))]
 impl zencodec_types::Decoding for AvifDecoding {
     type Error = Error;
     type Job<'a> = AvifDecodeJob<'a>;
@@ -335,7 +304,6 @@ impl zencodec_types::Decoding for AvifDecoding {
     }
 
     fn with_limit_memory(self, _bytes: u64) -> Self {
-        // zenavif doesn't have a memory limit; ignore
         self
     }
 
@@ -360,17 +328,12 @@ impl zencodec_types::Decoding for AvifDecoding {
     }
 
     fn probe(&self, data: &[u8]) -> Result<zencodec_types::ImageInfo, Self::Error> {
-        // Full decode to extract dimensions and metadata.
-        // A lighter-weight probe would require zenavif-parse's `eager` feature.
         let decoded = crate::decode_with(data, &self.inner, &enough::Unstoppable)
             .map_err(|e| e.into_inner())?;
 
-        let info = zencodec_types::ImageInfo::new(
-            decoded.width() as u32,
-            decoded.height() as u32,
-            ImageFormat::Avif,
-        )
-        .with_alpha(decoded.has_alpha());
+        let info =
+            zencodec_types::ImageInfo::new(decoded.width(), decoded.height(), ImageFormat::Avif)
+                .with_alpha(decoded.has_alpha());
 
         Ok(info)
     }
@@ -382,7 +345,6 @@ impl zencodec_types::Decoding for AvifDecoding {
 ///
 /// Created by [`AvifDecoding::job()`]. Borrows a stop token and is consumed
 /// by terminal decode methods.
-#[cfg(any(feature = "managed", feature = "asm"))]
 pub struct AvifDecodeJob<'a> {
     config: &'a AvifDecoding,
     stop: Option<&'a dyn Stop>,
@@ -390,7 +352,6 @@ pub struct AvifDecodeJob<'a> {
     limit_memory: Option<u64>,
 }
 
-#[cfg(any(feature = "managed", feature = "asm"))]
 impl<'a> zencodec_types::DecodingJob<'a> for AvifDecodeJob<'a> {
     type Error = Error;
 
@@ -416,15 +377,14 @@ impl<'a> zencodec_types::DecodingJob<'a> for AvifDecodeJob<'a> {
         }
 
         let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
-        let decoded = crate::decode_with(data, &cfg, stop).map_err(|e| e.into_inner())?;
+        let pixels = crate::decode_with(data, &cfg, stop).map_err(|e| e.into_inner())?;
 
-        let w = decoded.width() as u32;
-        let h = decoded.height() as u32;
-        let has_alpha = decoded.has_alpha();
+        let w = pixels.width();
+        let h = pixels.height();
+        let has_alpha = pixels.has_alpha();
 
         let info = zencodec_types::ImageInfo::new(w, h, ImageFormat::Avif).with_alpha(has_alpha);
 
-        let pixels = to_pixel_data(decoded);
         Ok(zencodec_types::DecodeOutput::new(pixels, info))
     }
 }
@@ -433,7 +393,9 @@ impl<'a> zencodec_types::DecodingJob<'a> for AvifDecodeJob<'a> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "encode")]
     use super::*;
+    #[cfg(feature = "encode")]
     use imgref::Img;
 
     #[cfg(feature = "encode")]
@@ -465,7 +427,7 @@ mod tests {
                 r: 100u8,
                 g: 150,
                 b: 200,
-                a: 128,
+                a: 128
             };
             64
         ];
@@ -505,7 +467,7 @@ mod tests {
         assert!(!output.bytes().is_empty());
     }
 
-    #[cfg(all(feature = "encode", any(feature = "managed", feature = "asm")))]
+    #[cfg(feature = "encode")]
     #[test]
     fn decode_roundtrip() {
         use zencodec_types::{Decoding, Encoding};

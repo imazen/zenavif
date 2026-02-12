@@ -161,7 +161,7 @@ fn run_comparison(
         };
 
         let (z_width, z_height, z_rgb) = match &img {
-            zenavif::DecodedImage::Rgb8(buf) => {
+            zenavif::PixelData::Rgb8(buf) => {
                 let w = buf.width() as u32;
                 let h = buf.height() as u32;
                 let mut rgb = Vec::with_capacity((w * h * 3) as usize);
@@ -174,7 +174,7 @@ fn run_comparison(
                 }
                 (w, h, rgb)
             }
-            zenavif::DecodedImage::Rgba8(buf) => {
+            zenavif::PixelData::Rgba8(buf) => {
                 let w = buf.width() as u32;
                 let h = buf.height() as u32;
                 let mut rgb = Vec::with_capacity((w * h * 3) as usize);

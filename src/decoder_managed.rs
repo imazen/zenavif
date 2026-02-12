@@ -9,7 +9,7 @@ use crate::config::DecoderConfig;
 use crate::convert::{add_alpha8, add_alpha16};
 use crate::error::{Error, Result};
 use crate::image::{
-    ChromaSampling, ColorPrimaries, ColorRange, DecodedImage, ImageInfo, MatrixCoefficients,
+    ChromaSampling, ColorPrimaries, ColorRange, ImageInfo, MatrixCoefficients,
     TransferCharacteristics,
 };
 use crate::yuv_convert::{self, YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRange};
@@ -18,6 +18,7 @@ use imgref::ImgVec;
 use rgb::{ComponentBytes, ComponentSlice, Rgb, Rgba};
 use whereat::at;
 use yuv::{YuvGrayImage, YuvPlanarImage, YuvRange, YuvStandardMatrix};
+use zencodec_types::PixelData;
 
 // Import managed API from rav1d-safe
 use rav1d_safe::src::managed::{
@@ -204,7 +205,7 @@ impl ManagedAvifDecoder {
     }
 
     /// Decode the primary image and optionally alpha channel
-    pub fn decode(&mut self, stop: &(impl Stop + ?Sized)) -> Result<DecodedImage> {
+    pub fn decode(&mut self, stop: &(impl Stop + ?Sized)) -> Result<PixelData> {
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
         // Check if this is a grid image (tiled/multi-frame)
@@ -238,7 +239,7 @@ impl ManagedAvifDecoder {
     }
 
     /// Decode a grid-based AVIF (tiled image)
-    fn decode_grid(&mut self, stop: &(impl Stop + ?Sized)) -> Result<DecodedImage> {
+    fn decode_grid(&mut self, stop: &(impl Stop + ?Sized)) -> Result<PixelData> {
         let grid_config = self
             .parser
             .grid_config()
@@ -269,7 +270,7 @@ impl ManagedAvifDecoder {
         tiles: Vec<Frame>,
         grid_config: &zenavif_parse::GridConfig,
         stop: &(impl Stop + ?Sized),
-    ) -> Result<DecodedImage> {
+    ) -> Result<PixelData> {
         if tiles.is_empty() {
             return Err(at(Error::Decode {
                 code: -1,
@@ -316,41 +317,44 @@ impl ManagedAvifDecoder {
 
         // Stitch tiles based on bit depth and alpha
         match &tile_images[0] {
-            DecodedImage::Rgb8(_) => {
+            PixelData::Rgb8(_) => {
                 self.stitch_rgb8(tile_images, rows, cols, output_width, output_height)
             }
-            DecodedImage::Rgba8(_) => {
+            PixelData::Rgba8(_) => {
                 self.stitch_rgba8(tile_images, rows, cols, output_width, output_height)
             }
-            DecodedImage::Rgb16(_) => {
+            PixelData::Rgb16(_) => {
                 self.stitch_rgb16(tile_images, rows, cols, output_width, output_height)
             }
-            DecodedImage::Rgba16(_) => {
+            PixelData::Rgba16(_) => {
                 self.stitch_rgba16(tile_images, rows, cols, output_width, output_height)
             }
-            DecodedImage::Gray8(_) => {
+            PixelData::Gray8(_) => {
                 self.stitch_gray8(tile_images, rows, cols, output_width, output_height)
             }
-            DecodedImage::Gray16(_) => {
+            PixelData::Gray16(_) => {
                 self.stitch_gray16(tile_images, rows, cols, output_width, output_height)
             }
+            _ => Err(at(Error::Unsupported(
+                "unsupported pixel format for grid stitching",
+            ))),
         }
     }
 
     /// Stitch RGB8 tiles into final image
     fn stitch_rgb8(
         &self,
-        tiles: Vec<DecodedImage>,
+        tiles: Vec<PixelData>,
         _rows: usize,
         cols: usize,
         width: usize,
         height: usize,
-    ) -> Result<DecodedImage> {
+    ) -> Result<PixelData> {
         use rgb::RGB8;
         let mut output = imgref::ImgVec::new(vec![RGB8::default(); width * height], width, height);
 
         for (tile_idx, tile) in tiles.iter().enumerate() {
-            if let DecodedImage::Rgb8(tile_img) = tile {
+            if let PixelData::Rgb8(tile_img) = tile {
                 let row = tile_idx / cols;
                 let col = tile_idx % cols;
                 let tile_w = tile_img.width();
@@ -367,23 +371,23 @@ impl ManagedAvifDecoder {
             }
         }
 
-        Ok(DecodedImage::Rgb8(output))
+        Ok(PixelData::Rgb8(output))
     }
 
     /// Stitch RGBA8 tiles into final image
     fn stitch_rgba8(
         &self,
-        tiles: Vec<DecodedImage>,
+        tiles: Vec<PixelData>,
         _rows: usize,
         cols: usize,
         width: usize,
         height: usize,
-    ) -> Result<DecodedImage> {
+    ) -> Result<PixelData> {
         use rgb::RGBA8;
         let mut output = imgref::ImgVec::new(vec![RGBA8::default(); width * height], width, height);
 
         for (tile_idx, tile) in tiles.iter().enumerate() {
-            if let DecodedImage::Rgba8(tile_img) = tile {
+            if let PixelData::Rgba8(tile_img) = tile {
                 let row = tile_idx / cols;
                 let col = tile_idx % cols;
                 let tile_w = tile_img.width();
@@ -399,23 +403,23 @@ impl ManagedAvifDecoder {
             }
         }
 
-        Ok(DecodedImage::Rgba8(output))
+        Ok(PixelData::Rgba8(output))
     }
 
     /// Stitch RGB16 tiles into final image
     fn stitch_rgb16(
         &self,
-        tiles: Vec<DecodedImage>,
+        tiles: Vec<PixelData>,
         _rows: usize,
         cols: usize,
         width: usize,
         height: usize,
-    ) -> Result<DecodedImage> {
+    ) -> Result<PixelData> {
         use rgb::RGB16;
         let mut output = imgref::ImgVec::new(vec![RGB16::default(); width * height], width, height);
 
         for (tile_idx, tile) in tiles.iter().enumerate() {
-            if let DecodedImage::Rgb16(tile_img) = tile {
+            if let PixelData::Rgb16(tile_img) = tile {
                 let row = tile_idx / cols;
                 let col = tile_idx % cols;
                 let tile_w = tile_img.width();
@@ -431,24 +435,24 @@ impl ManagedAvifDecoder {
             }
         }
 
-        Ok(DecodedImage::Rgb16(output))
+        Ok(PixelData::Rgb16(output))
     }
 
     /// Stitch RGBA16 tiles into final image
     fn stitch_rgba16(
         &self,
-        tiles: Vec<DecodedImage>,
+        tiles: Vec<PixelData>,
         _rows: usize,
         cols: usize,
         width: usize,
         height: usize,
-    ) -> Result<DecodedImage> {
+    ) -> Result<PixelData> {
         use rgb::RGBA16;
         let mut output =
             imgref::ImgVec::new(vec![RGBA16::default(); width * height], width, height);
 
         for (tile_idx, tile) in tiles.iter().enumerate() {
-            if let DecodedImage::Rgba16(tile_img) = tile {
+            if let PixelData::Rgba16(tile_img) = tile {
                 let row = tile_idx / cols;
                 let col = tile_idx % cols;
                 let tile_w = tile_img.width();
@@ -464,22 +468,23 @@ impl ManagedAvifDecoder {
             }
         }
 
-        Ok(DecodedImage::Rgba16(output))
+        Ok(PixelData::Rgba16(output))
     }
 
     /// Stitch Gray8 tiles into final image
     fn stitch_gray8(
         &self,
-        tiles: Vec<DecodedImage>,
+        tiles: Vec<PixelData>,
         _rows: usize,
         cols: usize,
         width: usize,
         height: usize,
-    ) -> Result<DecodedImage> {
-        let mut output = imgref::ImgVec::new(vec![0u8; width * height], width, height);
+    ) -> Result<PixelData> {
+        let mut output =
+            imgref::ImgVec::new(vec![rgb::Gray::new(0u8); width * height], width, height);
 
         for (tile_idx, tile) in tiles.iter().enumerate() {
-            if let DecodedImage::Gray8(tile_img) = tile {
+            if let PixelData::Gray8(tile_img) = tile {
                 let row = tile_idx / cols;
                 let col = tile_idx % cols;
                 let tile_w = tile_img.width();
@@ -495,22 +500,23 @@ impl ManagedAvifDecoder {
             }
         }
 
-        Ok(DecodedImage::Gray8(output))
+        Ok(PixelData::Gray8(output))
     }
 
     /// Stitch Gray16 tiles into final image
     fn stitch_gray16(
         &self,
-        tiles: Vec<DecodedImage>,
+        tiles: Vec<PixelData>,
         _rows: usize,
         cols: usize,
         width: usize,
         height: usize,
-    ) -> Result<DecodedImage> {
-        let mut output = imgref::ImgVec::new(vec![0u16; width * height], width, height);
+    ) -> Result<PixelData> {
+        let mut output =
+            imgref::ImgVec::new(vec![rgb::Gray::new(0u16); width * height], width, height);
 
         for (tile_idx, tile) in tiles.iter().enumerate() {
-            if let DecodedImage::Gray16(tile_img) = tile {
+            if let PixelData::Gray16(tile_img) = tile {
                 let row = tile_idx / cols;
                 let col = tile_idx % cols;
                 let tile_w = tile_img.width();
@@ -526,67 +532,70 @@ impl ManagedAvifDecoder {
             }
         }
 
-        Ok(DecodedImage::Gray16(output))
+        Ok(PixelData::Gray16(output))
     }
 
-    /// Convert rav1d Frame to zenavif DecodedImage
+    /// Convert rav1d Frame to zenavif PixelData
     /// Crop an image to the specified dimensions
-    fn crop_image(image: DecodedImage, width: usize, height: usize) -> Result<DecodedImage> {
+    fn crop_image(image: PixelData, width: usize, height: usize) -> Result<PixelData> {
         match image {
-            DecodedImage::Rgb8(img) => {
+            PixelData::Rgb8(img) => {
                 let mut cropped = vec![rgb::RGB8::default(); width * height];
                 for y in 0..height.min(img.height()) {
                     for x in 0..width.min(img.width()) {
                         cropped[y * width + x] = img[(x, y)];
                     }
                 }
-                Ok(DecodedImage::Rgb8(ImgVec::new(cropped, width, height)))
+                Ok(PixelData::Rgb8(ImgVec::new(cropped, width, height)))
             }
-            DecodedImage::Rgba8(img) => {
+            PixelData::Rgba8(img) => {
                 let mut cropped = vec![rgb::RGBA8::default(); width * height];
                 for y in 0..height.min(img.height()) {
                     for x in 0..width.min(img.width()) {
                         cropped[y * width + x] = img[(x, y)];
                     }
                 }
-                Ok(DecodedImage::Rgba8(ImgVec::new(cropped, width, height)))
+                Ok(PixelData::Rgba8(ImgVec::new(cropped, width, height)))
             }
-            DecodedImage::Rgb16(img) => {
+            PixelData::Rgb16(img) => {
                 let mut cropped = vec![rgb::RGB16::default(); width * height];
                 for y in 0..height.min(img.height()) {
                     for x in 0..width.min(img.width()) {
                         cropped[y * width + x] = img[(x, y)];
                     }
                 }
-                Ok(DecodedImage::Rgb16(ImgVec::new(cropped, width, height)))
+                Ok(PixelData::Rgb16(ImgVec::new(cropped, width, height)))
             }
-            DecodedImage::Rgba16(img) => {
+            PixelData::Rgba16(img) => {
                 let mut cropped = vec![rgb::RGBA16::default(); width * height];
                 for y in 0..height.min(img.height()) {
                     for x in 0..width.min(img.width()) {
                         cropped[y * width + x] = img[(x, y)];
                     }
                 }
-                Ok(DecodedImage::Rgba16(ImgVec::new(cropped, width, height)))
+                Ok(PixelData::Rgba16(ImgVec::new(cropped, width, height)))
             }
-            DecodedImage::Gray8(img) => {
-                let mut cropped = vec![0u8; width * height];
+            PixelData::Gray8(img) => {
+                let mut cropped = vec![rgb::Gray::new(0u8); width * height];
                 for y in 0..height.min(img.height()) {
                     for x in 0..width.min(img.width()) {
                         cropped[y * width + x] = img[(x, y)];
                     }
                 }
-                Ok(DecodedImage::Gray8(ImgVec::new(cropped, width, height)))
+                Ok(PixelData::Gray8(ImgVec::new(cropped, width, height)))
             }
-            DecodedImage::Gray16(img) => {
-                let mut cropped = vec![0u16; width * height];
+            PixelData::Gray16(img) => {
+                let mut cropped = vec![rgb::Gray::new(0u16); width * height];
                 for y in 0..height.min(img.height()) {
                     for x in 0..width.min(img.width()) {
                         cropped[y * width + x] = img[(x, y)];
                     }
                 }
-                Ok(DecodedImage::Gray16(ImgVec::new(cropped, width, height)))
+                Ok(PixelData::Gray16(ImgVec::new(cropped, width, height)))
             }
+            _ => Err(at(Error::Unsupported(
+                "unsupported pixel format for cropping",
+            ))),
         }
     }
 
@@ -595,7 +604,7 @@ impl ManagedAvifDecoder {
         primary: Frame,
         alpha: Option<Frame>,
         stop: &(impl Stop + ?Sized),
-    ) -> Result<DecodedImage> {
+    ) -> Result<PixelData> {
         let width = primary.width() as usize;
         let height = primary.height() as usize;
         let bit_depth = primary.bit_depth();
@@ -673,7 +682,7 @@ impl ManagedAvifDecoder {
         alpha: Option<Frame>,
         info: ImageInfo,
         stop: &(impl Stop + ?Sized),
-    ) -> Result<DecodedImage> {
+    ) -> Result<PixelData> {
         let Planes::Depth8(planes) = primary.planes() else {
             return Err(at(Error::Decode {
                 code: -1,
@@ -722,7 +731,7 @@ impl ManagedAvifDecoder {
                         matrix,
                     )
                     .map_err(|e| at(Error::ColorConversion(e)))?;
-                    DecodedImage::Rgba8(ImgVec::new(out, buffer_width, buffer_height))
+                    PixelData::Rgba8(ImgVec::new(out, buffer_width, buffer_height))
                 } else {
                     let mut out = vec![Rgb { r: 0u8, g: 0, b: 0 }; buffer_pixel_count];
                     let rgb_stride = buffer_width as u32 * 3;
@@ -734,7 +743,7 @@ impl ManagedAvifDecoder {
                         matrix,
                     )
                     .map_err(|e| at(Error::ColorConversion(e)))?;
-                    DecodedImage::Rgb8(ImgVec::new(out, buffer_width, buffer_height))
+                    PixelData::Rgb8(ImgVec::new(out, buffer_width, buffer_height))
                 }
             }
             sampling => {
@@ -821,7 +830,7 @@ impl ManagedAvifDecoder {
                         })
                         .collect();
 
-                    DecodedImage::Rgba8(ImgVec::new(rgba_buf, buffer_width, buffer_height))
+                    PixelData::Rgba8(ImgVec::new(rgba_buf, buffer_width, buffer_height))
                 } else {
                     let our_range = to_our_yuv_range(info.color_range);
                     let our_matrix = to_our_yuv_matrix(info.matrix_coefficients);
@@ -866,7 +875,7 @@ impl ManagedAvifDecoder {
                         ChromaSampling::Monochrome => unreachable!(),
                     };
 
-                    DecodedImage::Rgb8(result)
+                    PixelData::Rgb8(result)
                 }
             }
         };
@@ -909,7 +918,7 @@ impl ManagedAvifDecoder {
         alpha: Option<Frame>,
         info: ImageInfo,
         stop: &(impl Stop + ?Sized),
-    ) -> Result<DecodedImage> {
+    ) -> Result<PixelData> {
         let Planes::Depth16(planes) = primary.planes() else {
             return Err(at(Error::Decode {
                 code: -1,
@@ -974,7 +983,7 @@ impl ManagedAvifDecoder {
                         ),
                     }
                     .map_err(|e| at(Error::ColorConversion(e)))?;
-                    DecodedImage::Rgba16(ImgVec::new(out, buffer_width, buffer_height))
+                    PixelData::Rgba16(ImgVec::new(out, buffer_width, buffer_height))
                 } else {
                     let mut out = vec![
                         Rgb {
@@ -1009,7 +1018,7 @@ impl ManagedAvifDecoder {
                         ),
                     }
                     .map_err(|e| at(Error::ColorConversion(e)))?;
-                    DecodedImage::Rgb16(ImgVec::new(out, buffer_width, buffer_height))
+                    PixelData::Rgb16(ImgVec::new(out, buffer_width, buffer_height))
                 }
             }
             sampling => {
@@ -1116,7 +1125,7 @@ impl ManagedAvifDecoder {
                         (_, ChromaSampling::Monochrome) => unreachable!(),
                     }
                     .map_err(|e| at(Error::ColorConversion(e)))?;
-                    DecodedImage::Rgba16(ImgVec::new(out, buffer_width, buffer_height))
+                    PixelData::Rgba16(ImgVec::new(out, buffer_width, buffer_height))
                 } else {
                     let mut out = vec![
                         Rgb {
@@ -1194,7 +1203,7 @@ impl ManagedAvifDecoder {
                         (_, ChromaSampling::Monochrome) => unreachable!(),
                     }
                     .map_err(|e| at(Error::ColorConversion(e)))?;
-                    DecodedImage::Rgb16(ImgVec::new(out, buffer_width, buffer_height))
+                    PixelData::Rgb16(ImgVec::new(out, buffer_width, buffer_height))
                 }
             }
         };
@@ -1223,7 +1232,7 @@ impl ManagedAvifDecoder {
                 display_width,
                 display_height,
                 alpha_range,
-                info.bit_depth as u8,
+                info.bit_depth,
                 self.parser.premultiplied_alpha(),
             )?;
         }

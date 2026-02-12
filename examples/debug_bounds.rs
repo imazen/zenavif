@@ -13,17 +13,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = DecoderConfig::new().threads(1);
     match decode_with(&data, &config, &Unstoppable) {
         Ok(image) => {
-            use zenavif::DecodedImage;
+            use zenavif::PixelData;
             println!(
                 "✓ SUCCESS! Decoded image: {}x{}",
                 image.width(),
                 image.height()
             );
             match image {
-                DecodedImage::Rgb8(_) => println!("  Format: RGB8"),
-                DecodedImage::Rgba8(_) => println!("  Format: RGBA8"),
-                DecodedImage::Rgb16(_) => println!("  Format: RGB16"),
-                DecodedImage::Rgba16(_) => println!("  Format: RGBA16"),
+                PixelData::Rgb8(_) => println!("  Format: RGB8"),
+                PixelData::Rgba8(_) => println!("  Format: RGBA8"),
+                PixelData::Rgb16(_) => println!("  Format: RGB16"),
+                PixelData::Rgba16(_) => println!("  Format: RGBA16"),
                 _ => println!("  Format: Other"),
             }
         }

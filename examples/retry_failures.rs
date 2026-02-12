@@ -38,14 +38,14 @@ fn main() {
             Ok(Ok(img)) => {
                 passed += 1;
                 let dims = match &img {
-                    zenavif::DecodedImage::Rgb8(i) => format!("{}x{} rgb8", i.width(), i.height()),
-                    zenavif::DecodedImage::Rgba8(i) => {
+                    zenavif::PixelData::Rgb8(i) => format!("{}x{} rgb8", i.width(), i.height()),
+                    zenavif::PixelData::Rgba8(i) => {
                         format!("{}x{} rgba8", i.width(), i.height())
                     }
-                    zenavif::DecodedImage::Rgb16(i) => {
+                    zenavif::PixelData::Rgb16(i) => {
                         format!("{}x{} rgb16", i.width(), i.height())
                     }
-                    zenavif::DecodedImage::Rgba16(i) => {
+                    zenavif::PixelData::Rgba16(i) => {
                         format!("{}x{} rgba16", i.width(), i.height())
                     }
                     other => format!("{:?}", std::mem::discriminant(other)),

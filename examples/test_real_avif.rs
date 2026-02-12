@@ -1,7 +1,7 @@
 //! Test decoder with real AVIF file
 
 use std::fs;
-use zenavif::{DecodedImage, decode};
+use zenavif::{PixelData, decode};
 
 fn main() {
     let test_file = "tests/vectors/libavif/kodim03_yuv420_8bpc.avif";
@@ -18,12 +18,12 @@ fn main() {
             println!("✓ Successfully decoded {}", test_file);
 
             match &image {
-                DecodedImage::Rgb8(img) => {
+                PixelData::Rgb8(img) => {
                     println!("  Size: {}x{}", img.width(), img.height());
                     let first = img.buf()[0];
                     println!("  First pixel: R={}, G={}, B={}", first.r, first.g, first.b);
                 }
-                DecodedImage::Rgba8(img) => {
+                PixelData::Rgba8(img) => {
                     println!("  Size: {}x{}", img.width(), img.height());
                     let first = img.buf()[0];
                     println!(

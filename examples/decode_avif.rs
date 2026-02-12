@@ -1,8 +1,9 @@
 //! Example: Decode an AVIF file and save as PNG
 
+use rgb::ComponentBytes;
 use std::fs::File;
 use std::io::BufWriter;
-use zenavif::{DecodedImage, decode};
+use zenavif::{PixelData, decode};
 
 fn main() {
     // Read input file
@@ -30,7 +31,7 @@ fn main() {
     let mut encoder = png::Encoder::new(writer, width, height);
 
     match &image {
-        DecodedImage::Rgb8(img) => {
+        PixelData::Rgb8(img) => {
             encoder.set_color(png::ColorType::Rgb);
             encoder.set_depth(png::BitDepth::Eight);
             let mut writer = encoder.write_header().expect("Failed to write PNG header");
@@ -39,7 +40,7 @@ fn main() {
                 .write_image_data(&pixels)
                 .expect("Failed to write PNG data");
         }
-        DecodedImage::Rgba8(img) => {
+        PixelData::Rgba8(img) => {
             encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Eight);
             let mut writer = encoder.write_header().expect("Failed to write PNG header");
@@ -52,7 +53,7 @@ fn main() {
                 .write_image_data(&pixels)
                 .expect("Failed to write PNG data");
         }
-        DecodedImage::Rgb16(img) => {
+        PixelData::Rgb16(img) => {
             encoder.set_color(png::ColorType::Rgb);
             encoder.set_depth(png::BitDepth::Sixteen);
             let mut writer = encoder.write_header().expect("Failed to write PNG header");
@@ -66,7 +67,7 @@ fn main() {
                 .write_image_data(&pixels)
                 .expect("Failed to write PNG data");
         }
-        DecodedImage::Rgba16(img) => {
+        PixelData::Rgba16(img) => {
             encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Sixteen);
             let mut writer = encoder.write_header().expect("Failed to write PNG header");
@@ -80,19 +81,23 @@ fn main() {
                 .write_image_data(&pixels)
                 .expect("Failed to write PNG data");
         }
-        DecodedImage::Gray8(img) => {
+        PixelData::Gray8(img) => {
             encoder.set_color(png::ColorType::Grayscale);
             encoder.set_depth(png::BitDepth::Eight);
             let mut writer = encoder.write_header().expect("Failed to write PNG header");
             writer
-                .write_image_data(img.buf())
+                .write_image_data(img.buf().as_bytes())
                 .expect("Failed to write PNG data");
         }
-        DecodedImage::Gray16(img) => {
+        PixelData::Gray16(img) => {
             encoder.set_color(png::ColorType::Grayscale);
             encoder.set_depth(png::BitDepth::Sixteen);
             let mut writer = encoder.write_header().expect("Failed to write PNG header");
-            let pixels: Vec<u8> = img.buf().iter().flat_map(|v| v.to_be_bytes()).collect();
+            let pixels: Vec<u8> = img
+                .buf()
+                .iter()
+                .flat_map(|v| v.value().to_be_bytes())
+                .collect();
             writer
                 .write_image_data(&pixels)
                 .expect("Failed to write PNG data");

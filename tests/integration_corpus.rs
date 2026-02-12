@@ -6,7 +6,7 @@
 use enough::Unstoppable;
 use std::fs;
 use std::path::PathBuf;
-use zenavif::{DecodedImage, DecoderConfig, decode_with};
+use zenavif::{DecoderConfig, PixelData, decode_with};
 
 fn find_test_vectors() -> Vec<PathBuf> {
     let mut vectors = Vec::new();
@@ -64,22 +64,22 @@ fn test_decode_all_vectors() {
                 match result {
                     Ok(Ok(image)) => {
                         let info = match &image {
-                            DecodedImage::Rgb8(img) => {
+                            PixelData::Rgb8(img) => {
                                 format!("RGB8  {}x{}", img.width(), img.height())
                             }
-                            DecodedImage::Rgba8(img) => {
+                            PixelData::Rgba8(img) => {
                                 format!("RGBA8 {}x{}", img.width(), img.height())
                             }
-                            DecodedImage::Rgb16(img) => {
+                            PixelData::Rgb16(img) => {
                                 format!("RGB16 {}x{}", img.width(), img.height())
                             }
-                            DecodedImage::Rgba16(img) => {
+                            PixelData::Rgba16(img) => {
                                 format!("RGBA16 {}x{}", img.width(), img.height())
                             }
-                            DecodedImage::Gray8(img) => {
+                            PixelData::Gray8(img) => {
                                 format!("GRAY8 {}x{}", img.width(), img.height())
                             }
-                            DecodedImage::Gray16(img) => {
+                            PixelData::Gray16(img) => {
                                 format!("GRAY16 {}x{}", img.width(), img.height())
                             }
                             _ => format!("OTHER {}x{}", image.width(), image.height()),
@@ -162,12 +162,7 @@ fn test_decode_specific_formats() {
             eprintln!("Testing {}...", name);
             match decode_with(&data, &config, &Unstoppable) {
                 Ok(image) => {
-                    eprintln!(
-                        "  ✓ {}x{} @ {}bpp",
-                        image.width(),
-                        image.height(),
-                        image.bit_depth()
-                    );
+                    eprintln!("  ✓ {}x{}", image.width(), image.height());
                 }
                 Err(e) => {
                     eprintln!("  ⚠️  {}", e);

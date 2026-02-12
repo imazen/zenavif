@@ -1,10 +1,11 @@
 //! Alpha channel handling and premultiply conversion
 
 use crate::error::{Error, Result};
-use crate::image::{ColorRange, DecodedImage};
+use crate::image::ColorRange;
 use rgb::Rgba;
 use rgb::prelude::*;
 use whereat::at;
+use zencodec_types::PixelData;
 
 /// Scale a limited-range Y value to full range (8-bit)
 #[inline]
@@ -27,7 +28,7 @@ fn limited_to_full_16(y: u16, bit_depth: u8) -> u16 {
 
 /// Add 8-bit alpha channel to an image from Y plane data
 pub fn add_alpha8<'a>(
-    img: &mut DecodedImage,
+    img: &mut PixelData,
     alpha_rows: impl Iterator<Item = &'a [u8]>,
     width: usize,
     height: usize,
@@ -35,7 +36,7 @@ pub fn add_alpha8<'a>(
     premultiplied: bool,
 ) -> Result<()> {
     match img {
-        DecodedImage::Rgba8(img) => {
+        PixelData::Rgba8(img) => {
             if img.width() != width || img.height() != height {
                 return Err(at(Error::Unsupported("alpha size mismatch")));
             }
@@ -67,7 +68,7 @@ pub fn add_alpha8<'a>(
 
 /// Add 16-bit alpha channel to an image from Y plane data
 pub fn add_alpha16<'a>(
-    img: &mut DecodedImage,
+    img: &mut PixelData,
     alpha_rows: impl Iterator<Item = &'a [u16]>,
     width: usize,
     height: usize,
@@ -76,7 +77,7 @@ pub fn add_alpha16<'a>(
     premultiplied: bool,
 ) -> Result<()> {
     match img {
-        DecodedImage::Rgba16(img) => {
+        PixelData::Rgba16(img) => {
             if img.width() != width || img.height() != height {
                 return Err(at(Error::Unsupported("alpha size mismatch")));
             }

@@ -1,23 +1,24 @@
 //! # zenavif
 //!
-//! Pure Rust AVIF image decoder powered by [rav1d](https://github.com/memorysafety/rav1d).
+//! Pure Rust AVIF image codec powered by [rav1d](https://github.com/memorysafety/rav1d)
+//! and [ravif](https://lib.rs/crates/ravif).
 //!
-//! This crate provides a safe, ergonomic API for decoding AVIF images using
-//! the pure Rust rav1d AV1 decoder and avif-parse container parser.
+//! This crate provides a safe, ergonomic API for decoding and encoding AVIF images
+//! using the pure Rust rav1d AV1 decoder and avif-parse container parser.
 //!
 //! ## Quick Start
 //!
 //! ```no_run
-//! use zenavif::{decode, DecodedImage};
+//! use zenavif::{decode, PixelData};
 //!
 //! let avif_data = std::fs::read("image.avif").unwrap();
 //! let image = decode(&avif_data).unwrap();
 //!
 //! match image {
-//!     DecodedImage::Rgb8(img) => {
+//!     PixelData::Rgb8(img) => {
 //!         println!("RGB8 image: {}x{}", img.width(), img.height());
 //!     }
-//!     DecodedImage::Rgba8(img) => {
+//!     PixelData::Rgba8(img) => {
 //!         println!("RGBA8 image: {}x{}", img.width(), img.height());
 //!     }
 //!     _ => {}
@@ -26,11 +27,11 @@
 //!
 //! ## Features
 //!
-//! - **`managed`** (default): 100% safe managed API - no unsafe code!
-//! - **`asm`**: Hand-written assembly (fastest, uses C FFI)
+//! - **`asm`**: Hand-written assembly (fastest, uses C FFI) — overrides the default managed decoder
+//! - **`encode`**: AVIF encoding via ravif
 //!
-//! The default `managed` feature uses rav1d-safe's managed API which is
-//! completely safe Rust with zero unsafe code in the entire decode path.
+//! The default decoder uses rav1d-safe's managed API which is completely safe Rust
+//! with zero unsafe code in the entire decode path.
 //!
 //! ## Configuration
 //!
@@ -51,9 +52,8 @@
 
 mod config;
 mod convert;
-#[cfg(feature = "asm")]
+#[cfg(feature = "unsafe-asm")]
 mod decoder;
-#[cfg(feature = "managed")]
 mod decoder_managed;
 #[cfg(feature = "encode")]
 mod encoder;
@@ -68,13 +68,11 @@ pub mod yuv_convert_libyuv;
 pub mod yuv_convert_libyuv_16bit;
 pub mod yuv_convert_libyuv_autovec;
 pub mod yuv_convert_libyuv_simd;
-#[cfg(feature = "zencodec")]
 mod zencodec;
 
 pub use config::DecoderConfig;
-#[cfg(feature = "asm")]
+#[cfg(feature = "unsafe-asm")]
 pub use decoder::AvifDecoder;
-#[cfg(feature = "managed")]
 pub use decoder_managed::ManagedAvifDecoder;
 #[cfg(feature = "encode")]
 pub use encoder::{
@@ -84,13 +82,13 @@ pub use encoder::{
 pub use enough::{Stop, StopReason, Unstoppable};
 pub use error::{Error, Result};
 pub use image::{
-    ChromaSampling, ColorPrimaries, ColorRange, DecodedImage, ImageInfo, MatrixCoefficients,
+    ChromaSampling, ColorPrimaries, ColorRange, ImageInfo, MatrixCoefficients,
     TransferCharacteristics,
 };
-#[cfg(all(feature = "zencodec", any(feature = "managed", feature = "asm")))]
 pub use zencodec::{AvifDecodeJob, AvifDecoding};
-#[cfg(all(feature = "zencodec", feature = "encode"))]
+#[cfg(feature = "encode")]
 pub use zencodec::{AvifEncodeJob, AvifEncoding};
+pub use zencodec_types::PixelData;
 
 /// Decode an AVIF image with default settings
 ///
@@ -103,7 +101,7 @@ pub use zencodec::{AvifEncodeJob, AvifEncoding};
 /// let avif_data = std::fs::read("image.avif").unwrap();
 /// let image = zenavif::decode(&avif_data).unwrap();
 /// ```
-pub fn decode(data: &[u8]) -> Result<DecodedImage> {
+pub fn decode(data: &[u8]) -> Result<PixelData> {
     decode_with(data, &DecoderConfig::default(), &Unstoppable)
 }
 
@@ -129,22 +127,17 @@ pub fn decode_with(
     data: &[u8],
     config: &DecoderConfig,
     stop: &(impl Stop + ?Sized),
-) -> Result<DecodedImage> {
-    #[cfg(feature = "managed")]
-    {
-        let mut decoder = ManagedAvifDecoder::new(data, config)?;
-        decoder.decode(stop)
-    }
-
-    #[cfg(all(not(feature = "managed"), feature = "asm"))]
+) -> Result<PixelData> {
+    #[cfg(feature = "unsafe-asm")]
     {
         let mut decoder = AvifDecoder::new(data, config)?;
         decoder.decode(stop)
     }
 
-    #[cfg(not(any(feature = "managed", feature = "asm")))]
+    #[cfg(not(feature = "unsafe-asm"))]
     {
-        compile_error!("At least one feature must be enabled: managed or asm");
+        let mut decoder = ManagedAvifDecoder::new(data, config)?;
+        decoder.decode(stop)
     }
 }
 
@@ -162,7 +155,7 @@ pub fn decode_with(
 /// std::fs::write("output.avif", &encoded.avif_file).unwrap();
 /// ```
 #[cfg(feature = "encode")]
-pub fn encode(image: &DecodedImage) -> Result<EncodedImage> {
+pub fn encode(image: &PixelData) -> Result<EncodedImage> {
     encode_with(image, &EncoderConfig::default(), &Unstoppable)
 }
 
@@ -172,17 +165,17 @@ pub fn encode(image: &DecodedImage) -> Result<EncodedImage> {
 /// [`Error::Unsupported`] for grayscale inputs.
 #[cfg(feature = "encode")]
 pub fn encode_with(
-    image: &DecodedImage,
+    image: &PixelData,
     config: &EncoderConfig,
     stop: &(impl Stop + ?Sized),
 ) -> Result<EncodedImage> {
     match image {
-        DecodedImage::Rgb8(img) => encode_rgb8(img.as_ref(), config, stop),
-        DecodedImage::Rgba8(img) => encode_rgba8(img.as_ref(), config, stop),
-        DecodedImage::Rgb16(img) => encode_rgb16(img.as_ref(), config, stop),
-        DecodedImage::Rgba16(img) => encode_rgba16(img.as_ref(), config, stop),
-        DecodedImage::Gray8(_) | DecodedImage::Gray16(_) => Err(whereat::at(Error::Unsupported(
-            "grayscale encoding not yet supported",
+        PixelData::Rgb8(img) => encode_rgb8(img.as_ref(), config, stop),
+        PixelData::Rgba8(img) => encode_rgba8(img.as_ref(), config, stop),
+        PixelData::Rgb16(img) => encode_rgb16(img.as_ref(), config, stop),
+        PixelData::Rgba16(img) => encode_rgba16(img.as_ref(), config, stop),
+        _ => Err(whereat::at(Error::Unsupported(
+            "only RGB/RGBA 8/16-bit encoding is supported",
         ))),
     }
 }

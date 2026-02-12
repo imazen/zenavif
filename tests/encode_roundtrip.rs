@@ -1,12 +1,12 @@
 //! Roundtrip encode/decode tests for the encode feature
 
-#![cfg(all(feature = "encode", feature = "managed"))]
+#![cfg(feature = "encode")]
 
 use imgref::Img;
 use rgb::{Rgb, Rgba};
 use zenavif::{
-    DecodedImage, EncodeBitDepth, EncodeColorModel, EncoderConfig, encode, encode_rgb8,
-    encode_rgb16, encode_rgba8, encode_rgba16, encode_with,
+    EncodeBitDepth, EncodeColorModel, EncoderConfig, PixelData, encode, encode_rgb8, encode_rgb16,
+    encode_rgba8, encode_rgba16, encode_with,
 };
 
 /// Create a simple 16x16 RGB8 test image with a gradient
@@ -79,7 +79,7 @@ fn roundtrip_rgba8() {
 #[test]
 fn convenience_encode_rgb8() {
     let img = make_rgb8_image();
-    let decoded = DecodedImage::Rgb8(img);
+    let decoded = PixelData::Rgb8(img);
     let encoded = encode(&decoded).expect("convenience encode should succeed");
 
     assert!(!encoded.avif_file.is_empty());
@@ -91,7 +91,7 @@ fn convenience_encode_rgb8() {
 #[test]
 fn convenience_encode_rgba8() {
     let img = make_rgba8_image();
-    let decoded = DecodedImage::Rgba8(img);
+    let decoded = PixelData::Rgba8(img);
     let encoded = encode(&decoded).expect("convenience encode should succeed");
 
     assert!(!encoded.avif_file.is_empty());
@@ -188,7 +188,7 @@ fn roundtrip_rgba16() {
 #[test]
 fn convenience_encode_rgb16() {
     let img = make_rgb16_image();
-    let decoded = DecodedImage::Rgb16(img);
+    let decoded = PixelData::Rgb16(img);
     let encoded = encode(&decoded).expect("convenience encode should succeed");
 
     assert!(!encoded.avif_file.is_empty());
@@ -199,15 +199,15 @@ fn convenience_encode_rgb16() {
 
 #[test]
 fn unsupported_grayscale_input() {
-    let pixels: Vec<u8> = vec![128; 4];
+    let pixels: Vec<rgb::Gray<u8>> = vec![rgb::Gray::new(128); 4];
     let img = Img::new(pixels, 2, 2);
-    let decoded = DecodedImage::Gray8(img);
+    let decoded = PixelData::Gray8(img);
 
     let result = encode(&decoded);
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
-        err.to_string().contains("grayscale"),
+        err.to_string().contains("encoding is supported"),
         "error should mention grayscale: {err}"
     );
 }
@@ -215,7 +215,7 @@ fn unsupported_grayscale_input() {
 #[test]
 fn encode_with_custom_config() {
     let img = make_rgb8_image();
-    let decoded = DecodedImage::Rgb8(img);
+    let decoded = PixelData::Rgb8(img);
     let config = EncoderConfig::new().quality(50.0).speed(10);
 
     let encoded =
