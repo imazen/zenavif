@@ -102,8 +102,15 @@ impl zencodec_types::Encoding for AvifEncoding {
     type Error = Error;
     type Job<'a> = AvifEncodeJob<'a>;
 
-    fn with_limits(mut self, limits: &ResourceLimits) -> Self {
-        self.limits = limits.clone();
+    fn capabilities() -> &'static zencodec_types::CodecCapabilities {
+        static CAPS: zencodec_types::CodecCapabilities = zencodec_types::CodecCapabilities::new()
+            .with_encode_exif(true)
+            .with_encode_cancel(true);
+        &CAPS
+    }
+
+    fn with_limits(mut self, limits: ResourceLimits) -> Self {
+        self.limits = limits;
         self
     }
 
@@ -189,8 +196,8 @@ impl<'a> zencodec_types::EncodingJob<'a> for AvifEncodeJob<'a> {
         self
     }
 
-    fn with_limits(mut self, limits: &ResourceLimits) -> Self {
-        self.limits = limits.clone();
+    fn with_limits(mut self, limits: ResourceLimits) -> Self {
+        self.limits = limits;
         self
     }
 
@@ -238,7 +245,7 @@ impl<'a> zencodec_types::EncodingJob<'a> for AvifEncodeJob<'a> {
 /// use zenavif::AvifDecoding;
 ///
 /// let dec = AvifDecoding::new()
-///     .with_limits(&ResourceLimits::none().with_max_pixels(100_000_000));
+///     .with_limits(ResourceLimits::none().with_max_pixels(100_000_000));
 /// let output = dec.decode(&avif_bytes)?;
 /// ```
 #[derive(Clone, Debug)]
@@ -279,8 +286,14 @@ impl zencodec_types::Decoding for AvifDecoding {
     type Error = Error;
     type Job<'a> = AvifDecodeJob<'a>;
 
-    fn with_limits(mut self, limits: &ResourceLimits) -> Self {
-        self.limits = limits.clone();
+    fn capabilities() -> &'static zencodec_types::CodecCapabilities {
+        static CAPS: zencodec_types::CodecCapabilities = zencodec_types::CodecCapabilities::new()
+            .with_decode_cancel(true);
+        &CAPS
+    }
+
+    fn with_limits(mut self, limits: ResourceLimits) -> Self {
+        self.limits = limits;
         // Apply pixel limit to the underlying decoder config if set.
         if let Some(max_pixels) = limits.max_pixels {
             self.inner = self
@@ -306,7 +319,7 @@ impl zencodec_types::Decoding for AvifDecoding {
         }
     }
 
-    fn probe(&self, data: &[u8]) -> Result<zencodec_types::ImageInfo, Self::Error> {
+    fn probe_header(&self, data: &[u8]) -> Result<zencodec_types::ImageInfo, Self::Error> {
         let decoded = crate::decode_with(data, &self.inner, &enough::Unstoppable)
             .map_err(|e| e.into_inner())?;
 
@@ -338,8 +351,8 @@ impl<'a> zencodec_types::DecodingJob<'a> for AvifDecodeJob<'a> {
         self
     }
 
-    fn with_limits(mut self, limits: &ResourceLimits) -> Self {
-        self.limits = limits.clone();
+    fn with_limits(mut self, limits: ResourceLimits) -> Self {
+        self.limits = limits;
         self
     }
 
