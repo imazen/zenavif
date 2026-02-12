@@ -25,7 +25,7 @@ enough = "0.3.1"
 thiserror = { version = "2.0", default-features = false }
 whereat = "0.1.3"
 log = "0.4"
-ravif = { version = "0.13", default-features = false, optional = true }
+ravif = { path = "../ravif/ravif", default-features = false, optional = true }
 zencodec-types = { path = "../zencodec-types" }
 
 [dev-dependencies]
@@ -56,4 +56,6 @@ encode = ["dep:ravif"]
 encode-asm = ["encode", "ravif/asm"]
 # Encoding with multi-threading
 encode-threading = ["encode", "ravif/threading"]
+# Encoding with imazen/rav1e fork features (QM, VAQ, still-image tuning, lossless)
+encode-imazen = ["encode", "ravif/imazen"]
 

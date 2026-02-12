@@ -169,7 +169,10 @@ dependencies = [
  "anyhow",
  "arg_enum_proc_macro",
  "arrayvec",
+ "cc",
+ "libc",
  "log",
+ "nasm-rs",
  "num-rational",
  "num-traits",
  "pastey",
@@ -1126,9 +1129,7 @@ dependencies = [
 
 [[package]]
 name = "rav1e"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43b6dd56e85d9483277cde964fd1bdb0428de4fec5ebba7540995639a21cb32b"
+version = "0.8.0"
 dependencies = [
  "aligned-vec",
  "arbitrary",
@@ -1147,6 +1148,41 @@ dependencies = [
  "log",
  "maybe-rayon",
  "nasm-rs",
+ "new_debug_unreachable",
+ "noop_proc_macro",
+ "num-derive",
+ "num-traits",
+ "pastey",
+ "profiling",
+ "rand",
+ "rand_chacha",
+ "simd_helpers",
+ "thiserror",
+ "v_frame",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "rav1e"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43b6dd56e85d9483277cde964fd1bdb0428de4fec5ebba7540995639a21cb32b"
+dependencies = [
+ "aligned-vec",
+ "arbitrary",
+ "arg_enum_proc_macro",
+ "arrayvec",
+ "av-scenechange",
+ "av1-grain",
+ "bitstream-io",
+ "built",
+ "cfg-if",
+ "interpolate_name",
+ "itertools 0.14.0",
+ "libc",
+ "libfuzzer-sys",
+ "log",
+ "maybe-rayon",
  "new_debug_unreachable",
  "noop_proc_macro",
  "num-derive",
@@ -1171,22 +1207,20 @@ dependencies = [
  "imgref",
  "loop9",
  "quick-error",
- "rav1e",
+ "rav1e 0.8.1",
  "rayon",
  "rgb",
 ]
 
 [[package]]
 name = "ravif"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e52310197d971b0f5be7fe6b57530dcd27beb35c1b013f29d66c1ad73fbbcc45"
+version = "0.14.0"
 dependencies = [
  "avif-serialize",
  "imgref",
  "loop9",
  "quick-error",
- "rav1e",
+ "rav1e 0.8.0",
  "rayon",
  "rgb",
 ]
@@ -1616,7 +1650,7 @@ dependencies = [
  "png",
  "rav1d",
  "rav1d-safe",
- "ravif 0.13.0",
+ "ravif 0.14.0",
  "rgb",
  "safe_unaligned_simd",
  "thiserror",

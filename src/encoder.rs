@@ -79,6 +79,21 @@ pub struct EncoderConfig {
     pub(crate) alpha_color_mode: EncodeAlphaMode,
     pub(crate) threads: Option<usize>,
     pub(crate) exif: Option<Vec<u8>>,
+    /// Enable AV1 quantization matrices (imazen/rav1e fork)
+    #[cfg(feature = "encode-imazen")]
+    pub(crate) enable_qm: bool,
+    /// Enable variance adaptive quantization (imazen/rav1e fork)
+    #[cfg(feature = "encode-imazen")]
+    pub(crate) enable_vaq: bool,
+    /// VAQ strength 0.0–4.0 (imazen/rav1e fork)
+    #[cfg(feature = "encode-imazen")]
+    pub(crate) vaq_strength: f64,
+    /// Use Tune::StillImage instead of Tune::Psychovisual (imazen/rav1e fork)
+    #[cfg(feature = "encode-imazen")]
+    pub(crate) tune_still_image: bool,
+    /// Mathematically lossless encoding (quantizer=0) (imazen/rav1e fork)
+    #[cfg(feature = "encode-imazen")]
+    pub(crate) lossless: bool,
 }
 
 impl Default for EncoderConfig {
@@ -92,6 +107,16 @@ impl Default for EncoderConfig {
             alpha_color_mode: EncodeAlphaMode::default(),
             threads: None,
             exif: None,
+            #[cfg(feature = "encode-imazen")]
+            enable_qm: true,
+            #[cfg(feature = "encode-imazen")]
+            enable_vaq: true,
+            #[cfg(feature = "encode-imazen")]
+            vaq_strength: 0.5,
+            #[cfg(feature = "encode-imazen")]
+            tune_still_image: true,
+            #[cfg(feature = "encode-imazen")]
+            lossless: false,
         }
     }
 }
@@ -157,6 +182,56 @@ impl EncoderConfig {
         self.exif = Some(exif_data);
         self
     }
+
+    /// Enable/disable AV1 quantization matrices (imazen/rav1e fork).
+    ///
+    /// QM applies frequency-dependent quantization weights for ~10% BD-rate improvement.
+    /// Default: enabled.
+    #[cfg(feature = "encode-imazen")]
+    pub fn with_qm(mut self, enable: bool) -> Self {
+        self.enable_qm = enable;
+        self
+    }
+
+    /// Enable/disable variance adaptive quantization (imazen/rav1e fork).
+    ///
+    /// Allocates more bits to smooth regions, fewer to textured regions.
+    /// Default: enabled, strength 0.5.
+    #[cfg(feature = "encode-imazen")]
+    pub fn with_vaq(mut self, enable: bool, strength: f64) -> Self {
+        self.enable_vaq = enable;
+        self.vaq_strength = strength;
+        self
+    }
+
+    /// Enable/disable still-image tuning (imazen/rav1e fork).
+    ///
+    /// Uses perceptual distortion metric with reduced CDEF/deblock for detail preservation.
+    /// Default: enabled.
+    #[cfg(feature = "encode-imazen")]
+    pub fn with_still_image_tuning(mut self, enable: bool) -> Self {
+        self.tune_still_image = enable;
+        self
+    }
+
+    /// Enable/disable mathematically lossless encoding (imazen/rav1e fork).
+    ///
+    /// Sets quantizer to 0. Default: disabled.
+    #[cfg(feature = "encode-imazen")]
+    pub fn with_lossless(mut self, lossless: bool) -> Self {
+        self.lossless = lossless;
+        self
+    }
+
+    /// Convenience preset: optimal still image settings (imazen/rav1e fork).
+    ///
+    /// Enables QM, VAQ (strength 0.5), and still-image tuning.
+    #[cfg(feature = "encode-imazen")]
+    pub fn still_image_preset(self) -> Self {
+        self.with_qm(true)
+            .with_vaq(true, 0.5)
+            .with_still_image_tuning(true)
+    }
 }
 
 /// Build a ravif Encoder from our config
@@ -185,6 +260,14 @@ fn build_ravif_encoder(config: &EncoderConfig) -> ravif::Encoder<'_> {
     }
     if let Some(ref exif_data) = config.exif {
         enc = enc.with_exif(exif_data.as_slice());
+    }
+    #[cfg(feature = "encode-imazen")]
+    {
+        enc = enc
+            .with_qm(config.enable_qm)
+            .with_vaq(config.enable_vaq, config.vaq_strength)
+            .with_still_image_tuning(config.tune_still_image)
+            .with_lossless(config.lossless);
     }
     enc
 }
