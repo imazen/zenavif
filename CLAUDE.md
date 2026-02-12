@@ -192,3 +192,24 @@ Run with: `cargo bench --features managed`
 - ✅ Benchmark suite
 
 The core implementation is complete and production-ready!
+
+## TODO: Encoding Support (imazen/rav1e integration)
+
+### Target-Quality Convergence
+
+Add binary-search-over-quantizer to hit a target perceptual quality score. Decision needed on which metric to use:
+
+- **SSIMULACRA2** — Current standard for perceptual image quality. Well-correlated with human perception, fast-ssim2 crate exists. Used by JPEG XL tooling. Score range 0-100, ~70 is "good", ~90 is "excellent".
+- **Butteraugli** — Google's perceptual distance metric, used internally by JPEG XL encoder for adaptive quantization. More granular at high quality. No mature pure-Rust implementation yet.
+
+Decide: SSIMULACRA2 or Butteraugli (or both with SSIM2 as default)?
+
+### Encoding API
+
+Wire imazen/rav1e fork features through zenavif:
+- `with_quantization_matrices(bool)` — enable QM (~10% BD-rate)
+- `with_variance_aq(bool, strength: f64)` — enable VAQ (~5-8% BD-rate)
+- `with_tune_still_image()` — Tune::StillImage mode (~3-5% BD-rate)
+- `with_filter_intra(bool)` — auto-enabled at speed ≤ 6 (~3-5% BD-rate)
+- `with_lossless()` — quantizer=0, mathematically lossless
+- `with_target_quality(score: f64)` — converge on SSIMULACRA2/Butteraugli target
