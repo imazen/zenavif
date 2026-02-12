@@ -27,29 +27,29 @@ pub fn yuv420_to_rgb8_fast(
     height: usize,
 ) -> ImgVec<RGB8> {
     let mut out = vec![RGB8::default(); width * height];
-    
+
     // BT.709 coefficients in fixed-point (Q13 format: 8192 = 1.0)
     // Values from yuv crate for BT.709 full range
-    let y_coef: i16 = 9539;      // 1.164 * 8192
-    let cr_coef: i16 = 13075;    // 1.596 * 8192
-    let cb_coef: i16 = 16525;    // 2.018 * 8192
-    let g_coef_1: i16 = 6660;    // For U component (formula subtracts this)
-    let g_coef_2: i16 = 3209;    // For V component (formula subtracts this)
-    
+    let y_coef: i16 = 9539; // 1.164 * 8192
+    let cr_coef: i16 = 13075; // 1.596 * 8192
+    let cb_coef: i16 = 16525; // 2.018 * 8192
+    let g_coef_1: i16 = 6660; // For U component (formula subtracts this)
+    let g_coef_2: i16 = 3209; // For V component (formula subtracts this)
+
     // Bias values
     let y_bias: i16 = 16;
     let uv_bias: i16 = 128;
-    
+
     // Process 2 rows at a time for YUV420
     for y in (0..height).step_by(2) {
         let y0_row = y;
         let y1_row = (y + 1).min(height - 1);
         let chroma_row = y / 2;
-        
+
         // Process 32 pixels at a time
         for x in (0..width).step_by(32) {
             let pixels_remaining = (width - x).min(32);
-            
+
             if pixels_remaining < 32 {
                 // Handle remaining pixels with scalar code
                 for i in 0..pixels_remaining {
@@ -59,16 +59,19 @@ pub fn yuv420_to_rgb8_fast(
                         }
                         let px = x + i;
                         let chroma_x = px / 2;
-                        
+
                         let y_val = y_plane[row * y_stride + px] as i32 - y_bias as i32;
-                        let u_val = u_plane[chroma_row * u_stride + chroma_x] as i32 - uv_bias as i32;
-                        let v_val = v_plane[chroma_row * v_stride + chroma_x] as i32 - uv_bias as i32;
-                        
+                        let u_val =
+                            u_plane[chroma_row * u_stride + chroma_x] as i32 - uv_bias as i32;
+                        let v_val =
+                            v_plane[chroma_row * v_stride + chroma_x] as i32 - uv_bias as i32;
+
                         let y_scaled = (y_val * y_coef as i32) >> 13;
                         let r = y_scaled + ((v_val * cr_coef as i32) >> 13);
-                        let g = y_scaled - ((v_val * g_coef_1 as i32 + u_val * g_coef_2 as i32) >> 13);
+                        let g =
+                            y_scaled - ((v_val * g_coef_1 as i32 + u_val * g_coef_2 as i32) >> 13);
                         let b = y_scaled + ((u_val * cb_coef as i32) >> 13);
-                        
+
                         out[row * width + px] = RGB8 {
                             r: r.clamp(0, 255) as u8,
                             g: g.clamp(0, 255) as u8,
@@ -78,7 +81,7 @@ pub fn yuv420_to_rgb8_fast(
                 }
                 continue;
             }
-            
+
             // SIMD path for 32 pixels
             // Split the output buffer between row 0 and row 1
             let split_point = y1_row * width;
@@ -104,7 +107,7 @@ pub fn yuv420_to_rgb8_fast(
             );
         }
     }
-    
+
     ImgVec::new(out, width, height)
 }
 
@@ -158,8 +161,8 @@ fn process_32_pixels_420(
         // Expand chroma from 16 to 32 values using shuffle
         // Create a shuffle mask that duplicates each byte: [0,0,1,1,2,2,...]
         let shuf_expand = _mm256_setr_epi8(
-            0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7,
-            8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15,
+            0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13,
+            13, 14, 14, 15, 15,
         );
 
         // Broadcast 128-bit chroma to both lanes of 256-bit register
@@ -189,26 +192,22 @@ fn process_32_pixels_420(
 
         // Process low 16 pixels of row 0
         let (r0_lo, g0_lo, b0_lo) = yuv_to_rgb_i16(
-            y0_lo, u_lo, v_lo,
-            v_y_coef, v_cr_coef, v_cb_coef, v_g_coef_1, v_g_coef_2
+            y0_lo, u_lo, v_lo, v_y_coef, v_cr_coef, v_cb_coef, v_g_coef_1, v_g_coef_2,
         );
 
         // Process high 16 pixels of row 0
         let (r0_hi, g0_hi, b0_hi) = yuv_to_rgb_i16(
-            y0_hi, u_hi, v_hi,
-            v_y_coef, v_cr_coef, v_cb_coef, v_g_coef_1, v_g_coef_2
+            y0_hi, u_hi, v_hi, v_y_coef, v_cr_coef, v_cb_coef, v_g_coef_1, v_g_coef_2,
         );
 
         // Process low 16 pixels of row 1
         let (r1_lo, g1_lo, b1_lo) = yuv_to_rgb_i16(
-            y1_lo, u_lo, v_lo,
-            v_y_coef, v_cr_coef, v_cb_coef, v_g_coef_1, v_g_coef_2
+            y1_lo, u_lo, v_lo, v_y_coef, v_cr_coef, v_cb_coef, v_g_coef_1, v_g_coef_2,
         );
 
         // Process high 16 pixels of row 1
         let (r1_hi, g1_hi, b1_hi) = yuv_to_rgb_i16(
-            y1_hi, u_hi, v_hi,
-            v_y_coef, v_cr_coef, v_cb_coef, v_g_coef_1, v_g_coef_2
+            y1_hi, u_hi, v_hi, v_y_coef, v_cr_coef, v_cb_coef, v_g_coef_1, v_g_coef_2,
         );
 
         // Pack i16 back to u8 with saturation
@@ -305,16 +304,16 @@ unsafe fn interleave_rgb_avx2(r: __m256i, g: __m256i, b: __m256i) -> (__m256i, _
 
     // Shuffle masks to rearrange bytes for RGB interleaving
     let sh_b = _mm256_setr_epi8(
-        0, 11, 6, 1, 12, 7, 2, 13, 8, 3, 14, 9, 4, 15, 10, 5,
-        0, 11, 6, 1, 12, 7, 2, 13, 8, 3, 14, 9, 4, 15, 10, 5,
+        0, 11, 6, 1, 12, 7, 2, 13, 8, 3, 14, 9, 4, 15, 10, 5, 0, 11, 6, 1, 12, 7, 2, 13, 8, 3, 14,
+        9, 4, 15, 10, 5,
     );
     let sh_g = _mm256_setr_epi8(
-        5, 0, 11, 6, 1, 12, 7, 2, 13, 8, 3, 14, 9, 4, 15, 10,
-        5, 0, 11, 6, 1, 12, 7, 2, 13, 8, 3, 14, 9, 4, 15, 10,
+        5, 0, 11, 6, 1, 12, 7, 2, 13, 8, 3, 14, 9, 4, 15, 10, 5, 0, 11, 6, 1, 12, 7, 2, 13, 8, 3,
+        14, 9, 4, 15, 10,
     );
     let sh_r = _mm256_setr_epi8(
-        10, 5, 0, 11, 6, 1, 12, 7, 2, 13, 8, 3, 14, 9, 4, 15,
-        10, 5, 0, 11, 6, 1, 12, 7, 2, 13, 8, 3, 14, 9, 4, 15,
+        10, 5, 0, 11, 6, 1, 12, 7, 2, 13, 8, 3, 14, 9, 4, 15, 10, 5, 0, 11, 6, 1, 12, 7, 2, 13, 8,
+        3, 14, 9, 4, 15,
     );
 
     // Apply shuffles to each color channel
@@ -325,12 +324,12 @@ unsafe fn interleave_rgb_avx2(r: __m256i, g: __m256i, b: __m256i) -> (__m256i, _
     // Blend masks for selecting bytes from each shuffled vector
     // -1 (0xFF) selects from second source, 0 selects from first source
     let m0 = _mm256_setr_epi8(
-        0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0,
-        0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0,
+        0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1,
+        0, 0, -1, 0, 0,
     );
     let m1 = _mm256_setr_epi8(
-        0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0,
-        0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0,
+        0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0,
+        -1, 0, 0, -1, 0,
     );
 
     // Blend the shuffled values to create RGB pattern

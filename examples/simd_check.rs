@@ -9,7 +9,7 @@ fn main() {
     } else {
         println!("✗ AVX2/FMA NOT available - using scalar fallback");
     }
-    
+
     // Also check what CPU features are available
     println!("\nCPU Features:");
     println!("  SSE4.1: {}", is_x86_feature_detected!("sse4.1"));

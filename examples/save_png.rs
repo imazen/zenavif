@@ -1,8 +1,12 @@
 use std::fs;
 
 fn main() {
-    let avif_path = std::env::args().nth(1).expect("usage: save_png <avif-path> <output-png>");
-    let png_path = std::env::args().nth(2).expect("usage: save_png <avif-path> <output-png>");
+    let avif_path = std::env::args()
+        .nth(1)
+        .expect("usage: save_png <avif-path> <output-png>");
+    let png_path = std::env::args()
+        .nth(2)
+        .expect("usage: save_png <avif-path> <output-png>");
 
     let data = fs::read(&avif_path).unwrap();
     let config = zenavif::DecoderConfig::new().threads(1);

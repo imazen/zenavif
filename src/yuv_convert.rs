@@ -78,8 +78,7 @@ pub fn yuv420_to_rgb8(
         )
     } else {
         yuv420_to_rgb8_scalar(
-            y_plane, y_stride, u_plane, u_stride, v_plane, v_stride, width, height, range,
-            matrix,
+            y_plane, y_stride, u_plane, u_stride, v_plane, v_stride, width, height, range, matrix,
         )
     }
 }
@@ -278,8 +277,8 @@ fn bilinear_chroma_sample_x8(
 
     // Bilinear interpolation using FMA: u00*(1-fx)*(1-fy) + u01*fx*(1-fy) + u10*(1-fx)*fy + u11*fx*fy
     // Rearrange: ((u00*(1-fx) + u01*fx)*(1-fy)) + ((u10*(1-fx) + u11*fx)*fy)
-    let u_top = u01.mul_add(fx, u00 * fx1);     // u00*(1-fx) + u01*fx
-    let u_bot = u11.mul_add(fx, u10 * fx1);     // u10*(1-fx) + u11*fx
+    let u_top = u01.mul_add(fx, u00 * fx1); // u00*(1-fx) + u01*fx
+    let u_bot = u11.mul_add(fx, u10 * fx1); // u10*(1-fx) + u11*fx
     let u_result = u_bot.mul_add(fy_vec, u_top * fy1_vec); // u_top*(1-fy) + u_bot*fy
 
     let v_top = v01.mul_add(fx, v00 * fx1);

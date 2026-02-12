@@ -1,7 +1,9 @@
 use std::fs;
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: inspect_planes <avif-path>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: inspect_planes <avif-path>");
     let data = fs::read(&path).unwrap();
 
     // Parse AVIF container
@@ -50,43 +52,58 @@ fn main() {
     match frame.planes() {
         rav1d_safe::src::managed::Planes::Depth8(planes) => {
             let y = planes.y();
-            println!("Y plane: {}x{} stride={}", y.width(), y.height(), y.stride());
-            let y_data = y.as_slice();
             println!(
-                "Y first 10 values: {:?}",
-                &y_data[..10.min(y_data.len())]
+                "Y plane: {}x{} stride={}",
+                y.width(),
+                y.height(),
+                y.stride()
             );
+            let y_data = y.as_slice();
+            println!("Y first 10 values: {:?}", &y_data[..10.min(y_data.len())]);
             // Show Y mean
-            let y_mean: f64 =
-                y_data.iter().take(y.width() * y.height()).map(|&v| v as f64).sum::<f64>()
-                    / (y.width() * y.height()) as f64;
+            let y_mean: f64 = y_data
+                .iter()
+                .take(y.width() * y.height())
+                .map(|&v| v as f64)
+                .sum::<f64>()
+                / (y.width() * y.height()) as f64;
             println!("Y mean: {y_mean:.1}");
 
             if let Some(u) = planes.u() {
-                println!("U plane: {}x{} stride={}", u.width(), u.height(), u.stride());
-                let u_data = u.as_slice();
                 println!(
-                    "U first 10 values: {:?}",
-                    &u_data[..10.min(u_data.len())]
+                    "U plane: {}x{} stride={}",
+                    u.width(),
+                    u.height(),
+                    u.stride()
                 );
-                let u_mean: f64 =
-                    u_data.iter().take(u.width() * u.height()).map(|&v| v as f64).sum::<f64>()
-                        / (u.width() * u.height()) as f64;
+                let u_data = u.as_slice();
+                println!("U first 10 values: {:?}", &u_data[..10.min(u_data.len())]);
+                let u_mean: f64 = u_data
+                    .iter()
+                    .take(u.width() * u.height())
+                    .map(|&v| v as f64)
+                    .sum::<f64>()
+                    / (u.width() * u.height()) as f64;
                 println!("U mean: {u_mean:.1}");
             } else {
                 println!("U plane: MISSING");
             }
 
             if let Some(v) = planes.v() {
-                println!("V plane: {}x{} stride={}", v.width(), v.height(), v.stride());
-                let v_data = v.as_slice();
                 println!(
-                    "V first 10 values: {:?}",
-                    &v_data[..10.min(v_data.len())]
+                    "V plane: {}x{} stride={}",
+                    v.width(),
+                    v.height(),
+                    v.stride()
                 );
-                let v_mean: f64 =
-                    v_data.iter().take(v.width() * v.height()).map(|&v| v as f64).sum::<f64>()
-                        / (v.width() * v.height()) as f64;
+                let v_data = v.as_slice();
+                println!("V first 10 values: {:?}", &v_data[..10.min(v_data.len())]);
+                let v_mean: f64 = v_data
+                    .iter()
+                    .take(v.width() * v.height())
+                    .map(|&v| v as f64)
+                    .sum::<f64>()
+                    / (v.width() * v.height()) as f64;
                 println!("V mean: {v_mean:.1}");
             } else {
                 println!("V plane: MISSING");
@@ -94,7 +111,12 @@ fn main() {
         }
         rav1d_safe::src::managed::Planes::Depth16(planes) => {
             let y = planes.y();
-            println!("Y plane (16bit): {}x{} stride={}", y.width(), y.height(), y.stride());
+            println!(
+                "Y plane (16bit): {}x{} stride={}",
+                y.width(),
+                y.height(),
+                y.stride()
+            );
         }
     }
 }

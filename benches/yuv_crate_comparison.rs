@@ -1,9 +1,9 @@
 //! Benchmark: Our SIMD vs yuv crate (Balanced and Professional modes)
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkGroup};
 use criterion::measurement::WallTime;
-use zenavif::yuv_convert::{yuv420_to_rgb8, YuvRange as OurYuvRange, YuvMatrix as OurYuvMatrix};
-use yuv::{yuv420_to_rgb, YuvPlanarImage, YuvRange, YuvStandardMatrix};
+use criterion::{BenchmarkGroup, Criterion, black_box, criterion_group, criterion_main};
+use yuv::{YuvPlanarImage, YuvRange, YuvStandardMatrix, yuv420_to_rgb};
+use zenavif::yuv_convert::{YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRange, yuv420_to_rgb8};
 
 fn prepare_test_data(width: usize, height: usize) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let y_plane = vec![128u8; width * height];

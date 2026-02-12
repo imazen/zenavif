@@ -124,7 +124,7 @@ fn make_rgb16_image() -> Img<Vec<Rgb<u16>>> {
     for y in 0..16u16 {
         for x in 0..16u16 {
             pixels.push(Rgb {
-                r: x * 64,  // 0-960, within 10-bit range
+                r: x * 64, // 0-960, within 10-bit range
                 g: y * 64,
                 b: 512,
             });

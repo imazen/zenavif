@@ -1,10 +1,10 @@
 //! Quick comparison: Our SIMD vs yuv crate
 
-use std::time::Instant;
-use zenavif::yuv_convert::{yuv420_to_rgb8, YuvRange as OurYuvRange, YuvMatrix as OurYuvMatrix};
-use zenavif::yuv_convert_fast::yuv420_to_rgb8_fast;
-use yuv::{yuv420_to_rgb, YuvPlanarImage, YuvRange, YuvStandardMatrix};
 use archmage::prelude::*;
+use std::time::Instant;
+use yuv::{YuvPlanarImage, YuvRange, YuvStandardMatrix, yuv420_to_rgb};
+use zenavif::yuv_convert::{YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRange, yuv420_to_rgb8};
+use zenavif::yuv_convert_fast::yuv420_to_rgb8_fast;
 
 fn main() {
     let width = 1920;
@@ -23,10 +23,14 @@ fn main() {
     // Warmup
     for _ in 0..10 {
         let _ = yuv420_to_rgb8(
-            &y_plane, width,
-            &u_plane, (width + 1) / 2,
-            &v_plane, (width + 1) / 2,
-            width, height,
+            &y_plane,
+            width,
+            &u_plane,
+            (width + 1) / 2,
+            &v_plane,
+            (width + 1) / 2,
+            width,
+            height,
             OurYuvRange::Full,
             OurYuvMatrix::Bt709,
         );
@@ -36,10 +40,14 @@ fn main() {
     let start = Instant::now();
     for _ in 0..iterations {
         let _ = yuv420_to_rgb8(
-            &y_plane, width,
-            &u_plane, (width + 1) / 2,
-            &v_plane, (width + 1) / 2,
-            width, height,
+            &y_plane,
+            width,
+            &u_plane,
+            (width + 1) / 2,
+            &v_plane,
+            (width + 1) / 2,
+            width,
+            height,
             OurYuvRange::Full,
             OurYuvMatrix::Bt709,
         );
@@ -52,10 +60,14 @@ fn main() {
         for _ in 0..10 {
             let _ = yuv420_to_rgb8_fast(
                 token,
-                &y_plane, width,
-                &u_plane, (width + 1) / 2,
-                &v_plane, (width + 1) / 2,
-                width, height,
+                &y_plane,
+                width,
+                &u_plane,
+                (width + 1) / 2,
+                &v_plane,
+                (width + 1) / 2,
+                width,
+                height,
             );
         }
 
@@ -64,17 +76,24 @@ fn main() {
         for _ in 0..iterations {
             let _ = yuv420_to_rgb8_fast(
                 token,
-                &y_plane, width,
-                &u_plane, (width + 1) / 2,
-                &v_plane, (width + 1) / 2,
-                width, height,
+                &y_plane,
+                width,
+                &u_plane,
+                (width + 1) / 2,
+                &v_plane,
+                (width + 1) / 2,
+                width,
+                height,
             );
         }
         let fast_time = start.elapsed();
         let fast_avg = fast_time.as_micros() as f64 / iterations as f64 / 1000.0;
 
-        println!("  zenavif FAST:      {:>8.2} ms  ({:>6.1} Mpixels/s)",
-                 fast_avg, (width * height) as f64 / fast_avg / 1000.0);
+        println!(
+            "  zenavif FAST:      {:>8.2} ms  ({:>6.1} Mpixels/s)",
+            fast_avg,
+            (width * height) as f64 / fast_avg / 1000.0
+        );
     }
 
     // Warmup yuv crate
@@ -92,26 +111,56 @@ fn main() {
     let rgb_stride = width as u32 * 3;
 
     for _ in 0..10 {
-        yuv420_to_rgb(&yuv_image, &mut rgb, rgb_stride, YuvRange::Full, YuvStandardMatrix::Bt709).unwrap();
+        yuv420_to_rgb(
+            &yuv_image,
+            &mut rgb,
+            rgb_stride,
+            YuvRange::Full,
+            YuvStandardMatrix::Bt709,
+        )
+        .unwrap();
     }
 
     // Benchmark yuv crate (Balanced mode - default)
     let start = Instant::now();
     for _ in 0..iterations {
-        yuv420_to_rgb(&yuv_image, &mut rgb, rgb_stride, YuvRange::Full, YuvStandardMatrix::Bt709).unwrap();
+        yuv420_to_rgb(
+            &yuv_image,
+            &mut rgb,
+            rgb_stride,
+            YuvRange::Full,
+            YuvStandardMatrix::Bt709,
+        )
+        .unwrap();
     }
     let yuv_time = start.elapsed();
     let yuv_avg = yuv_time.as_micros() as f64 / iterations as f64 / 1000.0;
 
     // Results
     println!("Results:");
-    println!("  zenavif SIMD:      {:>8.2} ms  ({:>6.1} Mpixels/s)", our_avg, (width * height) as f64 / our_avg / 1000.0);
-    println!("  yuv crate (Bal):   {:>8.2} ms  ({:>6.1} Mpixels/s)", yuv_avg, (width * height) as f64 / yuv_avg / 1000.0);
+    println!(
+        "  zenavif SIMD:      {:>8.2} ms  ({:>6.1} Mpixels/s)",
+        our_avg,
+        (width * height) as f64 / our_avg / 1000.0
+    );
+    println!(
+        "  yuv crate (Bal):   {:>8.2} ms  ({:>6.1} Mpixels/s)",
+        yuv_avg,
+        (width * height) as f64 / yuv_avg / 1000.0
+    );
     println!();
-    
+
     if our_avg < yuv_avg {
-        println!("✅ zenavif is {:.1}x FASTER ({:.1}% speedup)", yuv_avg / our_avg, (yuv_avg - our_avg) / our_avg * 100.0);
+        println!(
+            "✅ zenavif is {:.1}x FASTER ({:.1}% speedup)",
+            yuv_avg / our_avg,
+            (yuv_avg - our_avg) / our_avg * 100.0
+        );
     } else {
-        println!("❌ zenavif is {:.1}x slower ({:.1}% slower)", our_avg / yuv_avg, (our_avg - yuv_avg) / yuv_avg * 100.0);
+        println!(
+            "❌ zenavif is {:.1}x slower ({:.1}% slower)",
+            our_avg / yuv_avg,
+            (our_avg - yuv_avg) / yuv_avg * 100.0
+        );
     }
 }

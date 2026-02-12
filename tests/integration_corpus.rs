@@ -138,7 +138,10 @@ fn test_decode_all_vectors() {
     assert!(
         failed == 0,
         "Expected 100% pass rate but {failed} files failed: {:?}",
-        failed_files.iter().map(|(p, e)| format!("{}: {}", p.display(), e)).collect::<Vec<_>>()
+        failed_files
+            .iter()
+            .map(|(p, e)| format!("{}: {}", p.display(), e))
+            .collect::<Vec<_>>()
     );
 }
 

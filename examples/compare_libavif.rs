@@ -13,7 +13,10 @@ fn find_avif_files(dir: &Path) -> Vec<PathBuf> {
             let path = entry.path();
             if path.is_dir() {
                 files.extend(find_avif_files(&path));
-            } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("avif")) {
+            } else if path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("avif"))
+            {
                 files.push(path);
             }
         }
@@ -36,7 +39,12 @@ struct Stats {
     compared: u32,
 }
 
-fn compare_pixels(zenavif_rgb: &[u8], ref_rgb: &[u8], width: u32, height: u32) -> (f64, u8, f64, u64) {
+fn compare_pixels(
+    zenavif_rgb: &[u8],
+    ref_rgb: &[u8],
+    width: u32,
+    height: u32,
+) -> (f64, u8, f64, u64) {
     // Returns (psnr, max_error, avg_error, wrong_pixels)
     let total_pixels = (width as u64) * (height as u64);
     let total_samples = total_pixels * 3;
@@ -199,7 +207,11 @@ fn run_comparison(
             let rel = path.strip_prefix(input_dir).unwrap_or(path);
             mismatches.push(format!(
                 "DIM\t{}\tzenavif={}x{}\tlibavif={}x{}",
-                rel.display(), z_width, z_height, r_width, r_height
+                rel.display(),
+                z_width,
+                z_height,
+                r_width,
+                r_height
             ));
             continue;
         }
@@ -219,22 +231,34 @@ fn run_comparison(
             stats.close_match += 1;
             mismatches.push(format!(
                 "CLOSE\t{}\tmax_err={}\tavg_err={:.4}\twrong={}/{}\tpsnr={:.1}",
-                rel.display(), max_err, avg_err, wrong_pixels,
-                (z_width as u64) * (z_height as u64), psnr
+                rel.display(),
+                max_err,
+                avg_err,
+                wrong_pixels,
+                (z_width as u64) * (z_height as u64),
+                psnr
             ));
         } else if max_err <= 10 {
             stats.minor_mismatch += 1;
             mismatches.push(format!(
                 "MINOR\t{}\tmax_err={}\tavg_err={:.4}\twrong={}/{}\tpsnr={:.1}",
-                rel.display(), max_err, avg_err, wrong_pixels,
-                (z_width as u64) * (z_height as u64), psnr
+                rel.display(),
+                max_err,
+                avg_err,
+                wrong_pixels,
+                (z_width as u64) * (z_height as u64),
+                psnr
             ));
         } else {
             stats.major_mismatch += 1;
             mismatches.push(format!(
                 "MAJOR\t{}\tmax_err={}\tavg_err={:.4}\twrong={}/{}\tpsnr={:.1}",
-                rel.display(), max_err, avg_err, wrong_pixels,
-                (z_width as u64) * (z_height as u64), psnr
+                rel.display(),
+                max_err,
+                avg_err,
+                wrong_pixels,
+                (z_width as u64) * (z_height as u64),
+                psnr
             ));
         }
     }
@@ -247,28 +271,36 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     // Parse --level arg first (so it doesn't get consumed as positional)
-    let level_filter = args.iter()
+    let level_filter = args
+        .iter()
         .position(|a| a == "--level")
         .and_then(|i| args.get(i + 1))
         .map(|s| s.as_str());
 
     // Collect positional args (skip program name and --level/value pairs)
-    let positional: Vec<&str> = args.iter().skip(1)
+    let positional: Vec<&str> = args
+        .iter()
+        .skip(1)
         .filter(|a| *a != "--level")
         .filter(|a| level_filter.map_or(true, |lf| a.as_str() != lf))
         .map(|s| s.as_str())
         .collect();
 
-    let input_dir = positional.first().map(|s| Path::new(*s))
+    let input_dir = positional
+        .first()
+        .map(|s| Path::new(*s))
         .unwrap_or(Path::new("/mnt/v/datasets/scraping/avif"));
-    let ref_dir = positional.get(1).map(|s| Path::new(*s))
+    let ref_dir = positional
+        .get(1)
+        .map(|s| Path::new(*s))
         .unwrap_or(Path::new("/mnt/v/output/zenavif/libavif-refs"));
     let report_dir = Path::new("/mnt/v/output/zenavif");
 
     let all_levels = cpu_levels();
     let levels: Vec<_> = match level_filter {
         Some("all") | None => all_levels,
-        Some(name) => all_levels.into_iter()
+        Some(name) => all_levels
+            .into_iter()
             .filter(|(n, _)| n.starts_with(name))
             .collect(),
     };
@@ -280,10 +312,21 @@ fn main() {
 
     let mut files = find_avif_files(input_dir);
     files.sort();
-    println!("Found {} AVIF files in {}", files.len(), input_dir.display());
+    println!(
+        "Found {} AVIF files in {}",
+        files.len(),
+        input_dir.display()
+    );
     println!("Reference dir: {}", ref_dir.display());
-    println!("Testing {} CPU level(s): {}", levels.len(),
-        levels.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", "));
+    println!(
+        "Testing {} CPU level(s): {}",
+        levels.len(),
+        levels
+            .iter()
+            .map(|(n, _)| *n)
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     println!();
 
     let start = Instant::now();
@@ -298,20 +341,54 @@ fn main() {
         println!("  Results ({:.1}s):", elapsed.as_secs_f64());
         println!("    Total:              {}", stats.total);
         println!("    Compared:           {}", stats.compared);
-        println!("    Exact match:        {} ({:.1}%)", stats.exact_match,
-            if stats.compared > 0 { stats.exact_match as f64 / stats.compared as f64 * 100.0 } else { 0.0 });
-        println!("    Close (err<=2):     {} ({:.1}%)", stats.close_match,
-            if stats.compared > 0 { stats.close_match as f64 / stats.compared as f64 * 100.0 } else { 0.0 });
-        println!("    Minor (err<=10):    {} ({:.1}%)", stats.minor_mismatch,
-            if stats.compared > 0 { stats.minor_mismatch as f64 / stats.compared as f64 * 100.0 } else { 0.0 });
-        println!("    Major (err>10):     {} ({:.1}%)", stats.major_mismatch,
-            if stats.compared > 0 { stats.major_mismatch as f64 / stats.compared as f64 * 100.0 } else { 0.0 });
+        println!(
+            "    Exact match:        {} ({:.1}%)",
+            stats.exact_match,
+            if stats.compared > 0 {
+                stats.exact_match as f64 / stats.compared as f64 * 100.0
+            } else {
+                0.0
+            }
+        );
+        println!(
+            "    Close (err<=2):     {} ({:.1}%)",
+            stats.close_match,
+            if stats.compared > 0 {
+                stats.close_match as f64 / stats.compared as f64 * 100.0
+            } else {
+                0.0
+            }
+        );
+        println!(
+            "    Minor (err<=10):    {} ({:.1}%)",
+            stats.minor_mismatch,
+            if stats.compared > 0 {
+                stats.minor_mismatch as f64 / stats.compared as f64 * 100.0
+            } else {
+                0.0
+            }
+        );
+        println!(
+            "    Major (err>10):     {} ({:.1}%)",
+            stats.major_mismatch,
+            if stats.compared > 0 {
+                stats.major_mismatch as f64 / stats.compared as f64 * 100.0
+            } else {
+                0.0
+            }
+        );
         println!("    Dim mismatch:       {}", stats.dimension_mismatch);
         println!("    Decode fail:        {}", stats.zenavif_fail);
         println!("    No reference:       {}", stats.libavif_missing);
         if stats.compared > 0 {
-            println!("    Avg max error:      {:.3}", stats.sum_max_err as f64 / stats.compared as f64);
-            println!("    Avg pixel error:    {:.6}", stats.sum_avg_err / stats.compared as f64);
+            println!(
+                "    Avg max error:      {:.3}",
+                stats.sum_max_err as f64 / stats.compared as f64
+            );
+            println!(
+                "    Avg pixel error:    {:.6}",
+                stats.sum_avg_err / stats.compared as f64
+            );
         }
 
         if !mismatches.is_empty() {

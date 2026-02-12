@@ -1,7 +1,9 @@
 use std::fs;
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: inspect_pixels <avif-path>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: inspect_pixels <avif-path>");
     let data = fs::read(&path).unwrap();
     let config = zenavif::DecoderConfig::new().threads(1);
     let img = zenavif::decode_with(&data, &config, &zenavif::Unstoppable).unwrap();

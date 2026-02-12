@@ -11,7 +11,10 @@ fn find_avif_files(dir: &Path) -> Vec<PathBuf> {
             let path = entry.path();
             if path.is_dir() {
                 files.extend(find_avif_files(&path));
-            } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("avif")) {
+            } else if path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("avif"))
+            {
                 files.push(path);
             }
         }
@@ -85,8 +88,14 @@ fn main() {
     println!();
     println!("=== Results ===");
     println!("Total:  {total}");
-    println!("Passed: {passed} ({:.1}%)", passed as f64 / total as f64 * 100.0);
-    println!("Failed: {failed} ({:.1}%)", failed as f64 / total as f64 * 100.0);
+    println!(
+        "Passed: {passed} ({:.1}%)",
+        passed as f64 / total as f64 * 100.0
+    );
+    println!(
+        "Failed: {failed} ({:.1}%)",
+        failed as f64 / total as f64 * 100.0
+    );
     println!("Time:   {:.1}s", elapsed.as_secs_f64());
     println!();
 

@@ -1,7 +1,9 @@
 use std::fs;
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: inspect_metadata <avif-path>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: inspect_metadata <avif-path>");
     let data = fs::read(&path).unwrap();
 
     let parse_config = zenavif_parse::DecodeConfig::default().lenient(true);

@@ -34,17 +34,14 @@ fn main() {
         let data = fs::read(path).expect("Failed to read file");
 
         let config = zenavif_parse::DecodeConfig::default().lenient(true);
-        let parser = match zenavif_parse::AvifParser::from_owned_with_config(
-            data,
-            &config,
-            &Unstoppable,
-        ) {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("  SKIP {}: parse error: {}", stem, e);
-                continue;
-            }
-        };
+        let parser =
+            match zenavif_parse::AvifParser::from_owned_with_config(data, &config, &Unstoppable) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("  SKIP {}: parse error: {}", stem, e);
+                    continue;
+                }
+            };
 
         // Extract primary AV1 data
         match parser.primary_data() {

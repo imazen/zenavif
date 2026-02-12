@@ -1,7 +1,7 @@
 //! Benchmark YUV to RGB conversion (SIMD vs scalar)
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use zenavif::yuv_convert::{yuv420_to_rgb8, YuvRange, YuvMatrix};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use zenavif::yuv_convert::{YuvMatrix, YuvRange, yuv420_to_rgb8};
 
 fn bench_yuv420_conversion(c: &mut Criterion) {
     // Check if SIMD is available
