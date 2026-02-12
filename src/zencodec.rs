@@ -10,7 +10,7 @@ use imgref::ImgRef;
 use rgb::{Rgb, Rgba};
 #[cfg(feature = "encode")]
 use zencodec_types::ImageMetadata;
-use zencodec_types::{ImageFormat, Stop};
+use zencodec_types::{ImageFormat, ResourceLimits, Stop};
 
 use crate::error::Error;
 
@@ -34,9 +34,7 @@ use crate::error::Error;
 #[derive(Clone, Debug)]
 pub struct AvifEncoding {
     inner: crate::EncoderConfig,
-    limit_pixels: Option<u64>,
-    limit_memory: Option<u64>,
-    limit_output: Option<u64>,
+    limits: ResourceLimits,
 }
 
 #[cfg(feature = "encode")]
@@ -46,9 +44,7 @@ impl AvifEncoding {
     pub fn new() -> Self {
         Self {
             inner: crate::EncoderConfig::new(),
-            limit_pixels: None,
-            limit_memory: None,
-            limit_output: None,
+            limits: ResourceLimits::none(),
         }
     }
 
@@ -61,6 +57,36 @@ impl AvifEncoding {
     /// Mutable access to the underlying [`crate::EncoderConfig`].
     pub fn inner_mut(&mut self) -> &mut crate::EncoderConfig {
         &mut self.inner
+    }
+
+    /// Set encode quality (0.0 = worst, 100.0 = lossless).
+    #[must_use]
+    pub fn with_quality(mut self, quality: f32) -> Self {
+        self.inner = self.inner.quality(quality);
+        self
+    }
+
+    /// Set encode effort/speed (0 = slowest/best, 10 = fastest).
+    #[must_use]
+    pub fn with_effort(mut self, effort: u32) -> Self {
+        self.inner = self.inner.speed(effort.min(10) as u8);
+        self
+    }
+
+    /// Enable or disable lossless encoding.
+    #[must_use]
+    pub fn with_lossless(mut self, lossless: bool) -> Self {
+        if lossless {
+            self.inner = self.inner.quality(100.0);
+        }
+        self
+    }
+
+    /// Set alpha channel quality (0.0 = worst, 100.0 = lossless).
+    #[must_use]
+    pub fn with_alpha_quality(mut self, quality: f32) -> Self {
+        self.inner = self.inner.alpha_quality(quality);
+        self
     }
 }
 
@@ -76,40 +102,8 @@ impl zencodec_types::Encoding for AvifEncoding {
     type Error = Error;
     type Job<'a> = AvifEncodeJob<'a>;
 
-    fn with_quality(mut self, quality: f32) -> Self {
-        self.inner = self.inner.quality(quality);
-        self
-    }
-
-    fn with_effort(mut self, effort: u32) -> Self {
-        self.inner = self.inner.speed(effort.min(10) as u8);
-        self
-    }
-
-    fn with_lossless(mut self, lossless: bool) -> Self {
-        if lossless {
-            self.inner = self.inner.quality(100.0);
-        }
-        self
-    }
-
-    fn with_alpha_quality(mut self, quality: f32) -> Self {
-        self.inner = self.inner.alpha_quality(quality);
-        self
-    }
-
-    fn with_limit_pixels(mut self, max: u64) -> Self {
-        self.limit_pixels = Some(max);
-        self
-    }
-
-    fn with_limit_memory(mut self, bytes: u64) -> Self {
-        self.limit_memory = Some(bytes);
-        self
-    }
-
-    fn with_limit_output(mut self, bytes: u64) -> Self {
-        self.limit_output = Some(bytes);
+    fn with_limits(mut self, limits: &ResourceLimits) -> Self {
+        self.limits = limits.clone();
         self
     }
 
@@ -118,8 +112,7 @@ impl zencodec_types::Encoding for AvifEncoding {
             config: self,
             stop: None,
             exif: None,
-            limit_pixels: None,
-            limit_memory: None,
+            limits: ResourceLimits::none(),
         }
     }
 }
@@ -135,12 +128,18 @@ pub struct AvifEncodeJob<'a> {
     config: &'a AvifEncoding,
     stop: Option<&'a dyn Stop>,
     exif: Option<&'a [u8]>,
-    limit_pixels: Option<u64>,
-    limit_memory: Option<u64>,
+    limits: ResourceLimits,
 }
 
 #[cfg(feature = "encode")]
 impl<'a> AvifEncodeJob<'a> {
+    /// Set EXIF metadata to embed in the encoded AVIF.
+    #[must_use]
+    pub fn with_exif(mut self, exif: &'a [u8]) -> Self {
+        self.exif = Some(exif);
+        self
+    }
+
     fn do_encode_rgb8(
         self,
         img: ImgRef<'_, Rgb<u8>>,
@@ -190,26 +189,8 @@ impl<'a> zencodec_types::EncodingJob<'a> for AvifEncodeJob<'a> {
         self
     }
 
-    fn with_icc(self, _icc: &'a [u8]) -> Self {
-        self
-    }
-
-    fn with_exif(mut self, exif: &'a [u8]) -> Self {
-        self.exif = Some(exif);
-        self
-    }
-
-    fn with_xmp(self, _xmp: &'a [u8]) -> Self {
-        self
-    }
-
-    fn with_limit_pixels(mut self, max: u64) -> Self {
-        self.limit_pixels = Some(max);
-        self
-    }
-
-    fn with_limit_memory(mut self, bytes: u64) -> Self {
-        self.limit_memory = Some(bytes);
+    fn with_limits(mut self, limits: &ResourceLimits) -> Self {
+        self.limits = limits.clone();
         self
     }
 
@@ -257,13 +238,13 @@ impl<'a> zencodec_types::EncodingJob<'a> for AvifEncodeJob<'a> {
 /// use zenavif::AvifDecoding;
 ///
 /// let dec = AvifDecoding::new()
-///     .with_limit_pixels(100_000_000);
+///     .with_limits(&ResourceLimits::none().with_max_pixels(100_000_000));
 /// let output = dec.decode(&avif_bytes)?;
 /// ```
 #[derive(Clone, Debug)]
 pub struct AvifDecoding {
     inner: crate::DecoderConfig,
-    limit_file_size: Option<u64>,
+    limits: ResourceLimits,
 }
 
 impl AvifDecoding {
@@ -272,7 +253,7 @@ impl AvifDecoding {
     pub fn new() -> Self {
         Self {
             inner: crate::DecoderConfig::new(),
-            limit_file_size: None,
+            limits: ResourceLimits::none(),
         }
     }
 
@@ -298,23 +279,22 @@ impl zencodec_types::Decoding for AvifDecoding {
     type Error = Error;
     type Job<'a> = AvifDecodeJob<'a>;
 
-    fn with_limit_pixels(mut self, max: u64) -> Self {
-        self.inner = self.inner.frame_size_limit(max.min(u32::MAX as u64) as u32);
-        self
-    }
-
-    fn with_limit_memory(self, _bytes: u64) -> Self {
-        self
-    }
-
-    fn with_limit_dimensions(mut self, width: u32, height: u32) -> Self {
-        let max = width as u64 * height as u64;
-        self.inner = self.inner.frame_size_limit(max.min(u32::MAX as u64) as u32);
-        self
-    }
-
-    fn with_limit_file_size(mut self, bytes: u64) -> Self {
-        self.limit_file_size = Some(bytes);
+    fn with_limits(mut self, limits: &ResourceLimits) -> Self {
+        self.limits = limits.clone();
+        // Apply pixel limit to the underlying decoder config if set.
+        if let Some(max_pixels) = limits.max_pixels {
+            self.inner = self
+                .inner
+                .frame_size_limit(max_pixels.min(u32::MAX as u64) as u32);
+        }
+        if let Some(max_w) = limits.max_width
+            && let Some(max_h) = limits.max_height
+        {
+            let max = max_w as u64 * max_h as u64;
+            self.inner = self
+                .inner
+                .frame_size_limit(max.min(u32::MAX as u64) as u32);
+        }
         self
     }
 
@@ -322,8 +302,7 @@ impl zencodec_types::Decoding for AvifDecoding {
         AvifDecodeJob {
             config: self,
             stop: None,
-            limit_pixels: None,
-            limit_memory: None,
+            limits: ResourceLimits::none(),
         }
     }
 
@@ -348,8 +327,7 @@ impl zencodec_types::Decoding for AvifDecoding {
 pub struct AvifDecodeJob<'a> {
     config: &'a AvifDecoding,
     stop: Option<&'a dyn Stop>,
-    limit_pixels: Option<u64>,
-    limit_memory: Option<u64>,
+    limits: ResourceLimits,
 }
 
 impl<'a> zencodec_types::DecodingJob<'a> for AvifDecodeJob<'a> {
@@ -360,20 +338,15 @@ impl<'a> zencodec_types::DecodingJob<'a> for AvifDecodeJob<'a> {
         self
     }
 
-    fn with_limit_pixels(mut self, max: u64) -> Self {
-        self.limit_pixels = Some(max);
-        self
-    }
-
-    fn with_limit_memory(mut self, bytes: u64) -> Self {
-        self.limit_memory = Some(bytes);
+    fn with_limits(mut self, limits: &ResourceLimits) -> Self {
+        self.limits = limits.clone();
         self
     }
 
     fn decode(self, data: &[u8]) -> Result<zencodec_types::DecodeOutput, Self::Error> {
         let mut cfg = self.config.inner.clone();
-        if let Some(max) = self.limit_pixels {
-            cfg = cfg.frame_size_limit(max.min(u32::MAX as u64) as u32);
+        if let Some(max_pixels) = self.limits.max_pixels {
+            cfg = cfg.frame_size_limit(max_pixels.min(u32::MAX as u64) as u32);
         }
 
         let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);

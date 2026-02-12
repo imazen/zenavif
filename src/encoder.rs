@@ -110,11 +110,11 @@ impl Default for EncoderConfig {
             #[cfg(feature = "encode-imazen")]
             enable_qm: true,
             #[cfg(feature = "encode-imazen")]
-            enable_vaq: true,
+            enable_vaq: false,
             #[cfg(feature = "encode-imazen")]
-            vaq_strength: 0.5,
+            vaq_strength: 1.0,
             #[cfg(feature = "encode-imazen")]
-            tune_still_image: true,
+            tune_still_image: false,
             #[cfg(feature = "encode-imazen")]
             lossless: false,
         }
