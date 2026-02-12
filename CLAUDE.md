@@ -199,10 +199,10 @@ The core implementation is complete and production-ready!
 
 Add binary-search-over-quantizer to hit a target perceptual quality score. Decision needed on which metric to use:
 
-- **SSIMULACRA2** — Current standard for perceptual image quality. Well-correlated with human perception, fast-ssim2 crate exists. Used by JPEG XL tooling. Score range 0-100, ~70 is "good", ~90 is "excellent".
-- **Butteraugli** — Google's perceptual distance metric, used internally by JPEG XL encoder for adaptive quantization. More granular at high quality. No mature pure-Rust implementation yet.
+- **Butteraugli** (`butteraugli` crate, imazen/butteraugli v0.4.0) — Pure Rust port of Google's perceptual distance metric. Already in our ecosystem. Used internally by JPEG XL encoder for adaptive quantization. More granular at high quality. rav1e's AQ masking already uses it.
+- **SSIMULACRA2** — Current standard for perceptual image quality. Well-correlated with human perception, `fast-ssim2` crate exists. Used by JPEG XL tooling. Score range 0-100, ~70 is "good", ~90 is "excellent".
 
-Decide: SSIMULACRA2 or Butteraugli (or both with SSIM2 as default)?
+Decide: Butteraugli or SSIMULACRA2 (or both)? Butteraugli is already a dependency for rav1e AQ masking.
 
 ### Encoding API
 
