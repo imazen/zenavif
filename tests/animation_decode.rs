@@ -155,3 +155,26 @@ fn frame_durations_sum_positive() {
         anim.frames.len()
     );
 }
+
+#[test]
+fn decode_12bpc_produces_16bit_with_full_range() {
+    let data = animated_vector("colors-animated-12bpc-keyframes-0-2-3.avif");
+    let anim = decode_animation(&data).unwrap();
+
+    for (i, frame) in anim.frames.iter().enumerate() {
+        match &frame.pixels {
+            zencodec_types::PixelData::Rgba16(img) => {
+                // Check that at least some pixels use values > 255 (proving 16-bit)
+                let max_val = img.buf().iter().map(|p| p.r.max(p.g).max(p.b)).max().unwrap_or(0);
+                eprintln!("frame {i}: {}x{} RGBA16, max channel value={max_val}", img.width(), img.height());
+                assert!(max_val > 255, "12bpc should produce values > 255, got max={max_val}");
+            }
+            zencodec_types::PixelData::Rgb16(img) => {
+                let max_val = img.buf().iter().map(|p| p.r.max(p.g).max(p.b)).max().unwrap_or(0);
+                eprintln!("frame {i}: {}x{} RGB16, max channel value={max_val}", img.width(), img.height());
+                assert!(max_val > 255, "12bpc should produce values > 255, got max={max_val}");
+            }
+            other => panic!("frame {i}: expected 16-bit, got {:?}", std::mem::discriminant(other)),
+        }
+    }
+}
