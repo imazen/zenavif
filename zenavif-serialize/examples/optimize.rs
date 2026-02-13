@@ -1,4 +1,4 @@
-use avif_serialize::Aviffy;
+use zenavif_serialize::Aviffy;
 use std::fs;
 use std::path::Path;
 

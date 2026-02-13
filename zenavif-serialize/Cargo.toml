@@ -1,15 +1,14 @@
 [package]
-name = "avif-serialize"
-version = "0.8.8"
-authors = ["Kornel Lesiński <kornel@geekhood.net>"]
+name = "zenavif-serialize"
+version = "0.9.0"
+authors = ["Kornel Lesiński <kornel@geekhood.net>", "Lilith River <lilith@imazen.io>"]
 edition = "2024"
 license = "BSD-3-Clause"
-description = "Minimal writer for AVIF header structure (MPEG/HEIF/MIAF/ISO-BMFF)"
+description = "AVIF container serializer (MPEG/HEIF/MIAF/ISO-BMFF) with animation and grid support"
 readme = "README.md"
 categories = ["multimedia::images", "encoding"]
 keywords = ["avif", "heif", "bmff", "av1", "mux"]
-repository = "https://github.com/kornelski/avif-serialize"
-homepage = "https://lib.rs/avif-serialize"
+repository = "https://github.com/imazen/zenavif-serialize"
 include = ["src/*.rs", "Cargo.toml", "README.md", "LICENSE"]
 rust-version = "1.85"
 
