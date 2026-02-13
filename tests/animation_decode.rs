@@ -165,16 +165,170 @@ fn decode_12bpc_produces_16bit_with_full_range() {
         match &frame.pixels {
             zencodec_types::PixelData::Rgba16(img) => {
                 // Check that at least some pixels use values > 255 (proving 16-bit)
-                let max_val = img.buf().iter().map(|p| p.r.max(p.g).max(p.b)).max().unwrap_or(0);
-                eprintln!("frame {i}: {}x{} RGBA16, max channel value={max_val}", img.width(), img.height());
-                assert!(max_val > 255, "12bpc should produce values > 255, got max={max_val}");
+                let max_val = img
+                    .buf()
+                    .iter()
+                    .map(|p| p.r.max(p.g).max(p.b))
+                    .max()
+                    .unwrap_or(0);
+                eprintln!(
+                    "frame {i}: {}x{} RGBA16, max channel value={max_val}",
+                    img.width(),
+                    img.height()
+                );
+                assert!(
+                    max_val > 255,
+                    "12bpc should produce values > 255, got max={max_val}"
+                );
             }
             zencodec_types::PixelData::Rgb16(img) => {
-                let max_val = img.buf().iter().map(|p| p.r.max(p.g).max(p.b)).max().unwrap_or(0);
-                eprintln!("frame {i}: {}x{} RGB16, max channel value={max_val}", img.width(), img.height());
-                assert!(max_val > 255, "12bpc should produce values > 255, got max={max_val}");
+                let max_val = img
+                    .buf()
+                    .iter()
+                    .map(|p| p.r.max(p.g).max(p.b))
+                    .max()
+                    .unwrap_or(0);
+                eprintln!(
+                    "frame {i}: {}x{} RGB16, max channel value={max_val}",
+                    img.width(),
+                    img.height()
+                );
+                assert!(
+                    max_val > 255,
+                    "12bpc should produce values > 255, got max={max_val}"
+                );
             }
-            other => panic!("frame {i}: expected 16-bit, got {:?}", std::mem::discriminant(other)),
+            other => panic!(
+                "frame {i}: expected 16-bit, got {:?}",
+                std::mem::discriminant(other)
+            ),
         }
+    }
+}
+
+#[cfg(feature = "encode")]
+#[test]
+fn animation_encode_decode_roundtrip_rgb8() {
+    use imgref::ImgVec;
+    use rgb::RGB8;
+    use zenavif::{AnimationFrame, EncoderConfig, encode_animation_rgb8};
+
+    // Create 3 frames of solid color: red, green, blue
+    let colors = [
+        RGB8 {
+            r: 200,
+            g: 30,
+            b: 30,
+        },
+        RGB8 {
+            r: 30,
+            g: 200,
+            b: 30,
+        },
+        RGB8 {
+            r: 30,
+            g: 30,
+            b: 200,
+        },
+    ];
+    let frames: Vec<AnimationFrame> = colors
+        .iter()
+        .map(|&c| AnimationFrame {
+            pixels: ImgVec::new(vec![c; 64 * 64], 64, 64),
+            duration_ms: 100,
+        })
+        .collect();
+
+    let config = EncoderConfig::new().quality(80.0).speed(10);
+    let encoded = encode_animation_rgb8(&frames, &config, &enough::Unstoppable).unwrap();
+    eprintln!(
+        "encoded {} frames, {} bytes",
+        encoded.frame_count,
+        encoded.avif_file.len()
+    );
+    assert_eq!(encoded.frame_count, 3);
+
+    // Decode it back
+    let decoded = decode_animation(&encoded.avif_file).unwrap();
+    assert_eq!(decoded.frames.len(), 3);
+    assert_eq!(decoded.info.frame_count, 3);
+
+    for (i, frame) in decoded.frames.iter().enumerate() {
+        assert_eq!(frame.pixels.width(), 64, "frame {i} width");
+        assert_eq!(frame.pixels.height(), 64, "frame {i} height");
+        assert_eq!(frame.duration_ms, 100, "frame {i} duration");
+        eprintln!(
+            "decoded frame {i}: {}x{}, {}ms",
+            frame.pixels.width(),
+            frame.pixels.height(),
+            frame.duration_ms
+        );
+    }
+}
+
+#[cfg(feature = "encode")]
+#[test]
+fn animation_encode_decode_roundtrip_rgba8() {
+    use imgref::ImgVec;
+    use rgb::RGBA8;
+    use zenavif::{AnimationFrameRgba, EncoderConfig, encode_animation_rgba8};
+
+    // 2 frames with semi-transparent pixels
+    let frames = vec![
+        AnimationFrameRgba {
+            pixels: ImgVec::new(
+                vec![
+                    RGBA8 {
+                        r: 255,
+                        g: 0,
+                        b: 0,
+                        a: 128
+                    };
+                    32 * 32
+                ],
+                32,
+                32,
+            ),
+            duration_ms: 200,
+        },
+        AnimationFrameRgba {
+            pixels: ImgVec::new(
+                vec![
+                    RGBA8 {
+                        r: 0,
+                        g: 0,
+                        b: 255,
+                        a: 200
+                    };
+                    32 * 32
+                ],
+                32,
+                32,
+            ),
+            duration_ms: 300,
+        },
+    ];
+
+    let config = EncoderConfig::new().quality(80.0).speed(10);
+    let encoded = encode_animation_rgba8(&frames, &config, &enough::Unstoppable).unwrap();
+    eprintln!(
+        "encoded {} frames, {} bytes",
+        encoded.frame_count,
+        encoded.avif_file.len()
+    );
+
+    let decoded = decode_animation(&encoded.avif_file).unwrap();
+    assert_eq!(decoded.frames.len(), 2);
+    assert!(decoded.info.has_alpha, "roundtrip should preserve alpha");
+
+    for (i, frame) in decoded.frames.iter().enumerate() {
+        assert!(frame.pixels.has_alpha(), "frame {i} should have alpha");
+        eprintln!(
+            "decoded frame {i}: {}x{}, {}ms, has_alpha={}",
+            frame.pixels.width(),
+            frame.pixels.height(),
+            frame.duration_ms,
+            frame.pixels.has_alpha()
+        );
     }
 }
