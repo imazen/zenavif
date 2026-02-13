@@ -9,8 +9,8 @@ use crate::config::DecoderConfig;
 use crate::convert::{add_alpha8, add_alpha16};
 use crate::error::{Error, Result};
 use crate::image::{
-    ChromaSampling, ColorPrimaries, ColorRange, ImageInfo, MatrixCoefficients,
-    TransferCharacteristics,
+    ChromaSampling, ColorPrimaries, ColorRange, DecodedAnimation, DecodedAnimationInfo,
+    DecodedFrame, ImageInfo, MatrixCoefficients, TransferCharacteristics,
 };
 use crate::yuv_convert::{self, YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRange};
 use enough::Stop;
@@ -168,40 +168,34 @@ impl ManagedAvifDecoder {
         context: &'static str,
     ) -> Result<Frame> {
         // Send data and try to get a frame immediately
-        match decoder.decode(data) {
-            Ok(Some(frame)) => return Ok(frame),
-            Ok(None) => {}
+        let frame = match decoder.decode(data) {
+            Ok(Some(frame)) => frame,
+            Ok(None) => {
+                // Progressive/multi-layer: flush to get the composed frame
+                let frames = decoder.flush().map_err(|_e| {
+                    at(Error::Decode {
+                        code: -1,
+                        msg: "Failed to flush decoder",
+                    })
+                })?;
+                frames.into_iter().last().ok_or_else(|| {
+                    at(Error::Decode {
+                        code: -1,
+                        msg: context,
+                    })
+                })?
+            }
             Err(_e) => {
                 return Err(at(Error::Decode {
                     code: -1,
                     msg: context,
                 }));
             }
-        }
-
-        // Frame not returned immediately — drain via get_frame (handles
-        // frame threading and progressive decode)
-        for _ in 0..1000 {
-            match decoder.get_frame() {
-                Ok(Some(frame)) => return Ok(frame),
-                Ok(None) => std::thread::yield_now(),
-                Err(_e) => break,
-            }
-        }
-
-        // Last resort: flush to force completion
-        let frames = decoder.flush().map_err(|_e| {
-            at(Error::Decode {
-                code: -1,
-                msg: "Failed to flush decoder",
-            })
-        })?;
-        frames.into_iter().last().ok_or_else(|| {
-            at(Error::Decode {
-                code: -1,
-                msg: context,
-            })
-        })
+        };
+        // Reset decoder state so the next decode_frame call starts clean
+        // (e.g. primary → alpha without cross-contamination)
+        let _ = decoder.flush();
+        Ok(frame)
     }
 
     /// Decode the primary image and optionally alpha channel
@@ -236,6 +230,116 @@ impl ManagedAvifDecoder {
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
         self.convert_to_image(primary_frame, alpha_frame, stop)
+    }
+
+    /// Decode an animated AVIF, returning all frames with timing info.
+    ///
+    /// Returns [`Error::Unsupported`] if the file is not animated.
+    /// Each frame's AV1 color (and optional alpha) data is decoded through
+    /// rav1d and converted to RGB/RGBA at the source bit depth.
+    ///
+    /// Color and alpha tracks use separate decoder instances because
+    /// inter-predicted frames depend on prior reference frames within
+    /// the same track.
+    pub fn decode_animation(&mut self, stop: &(impl Stop + ?Sized)) -> Result<DecodedAnimation> {
+        let anim_info = self
+            .parser
+            .animation_info()
+            .ok_or_else(|| at(Error::Unsupported("not an animated AVIF")))?;
+
+        // Create a dedicated alpha decoder when the animation has a separate
+        // alpha track. We can't share one decoder between two AV1 streams
+        // because inter-predicted frames need their track's reference frames.
+        let mut alpha_decoder = if anim_info.has_alpha {
+            let settings = Settings {
+                threads: 1,
+                ..Default::default()
+            };
+            Some(Rav1dDecoder::with_settings(settings).map_err(|_e| {
+                at(Error::Decode {
+                    code: -1,
+                    msg: "Failed to create alpha decoder",
+                })
+            })?)
+        } else {
+            None
+        };
+
+        let frame_count = anim_info.frame_count;
+        let mut frames = Vec::with_capacity(frame_count);
+
+        for i in 0..frame_count {
+            stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+
+            let frame_ref = self.parser.frame(i).map_err(|e| at(Error::from(e)))?;
+
+            let primary_frame = Self::decode_anim_frame(
+                &mut self.decoder,
+                &frame_ref.data,
+                "Failed to decode animation frame",
+            )?;
+
+            let alpha_frame = match (&mut alpha_decoder, &frame_ref.alpha_data) {
+                (Some(dec), Some(alpha_data)) => Some(Self::decode_anim_frame(
+                    dec,
+                    alpha_data,
+                    "Failed to decode animation alpha frame",
+                )?),
+                _ => None,
+            };
+
+            let pixels = self.convert_to_image(primary_frame, alpha_frame, stop)?;
+
+            frames.push(DecodedFrame {
+                pixels,
+                duration_ms: frame_ref.duration_ms,
+            });
+        }
+
+        Ok(DecodedAnimation {
+            frames,
+            info: DecodedAnimationInfo {
+                frame_count,
+                loop_count: anim_info.loop_count,
+                has_alpha: anim_info.has_alpha,
+                timescale: anim_info.timescale,
+            },
+        })
+    }
+
+    /// Decode a single frame within an animation sequence.
+    ///
+    /// Unlike [`decode_frame`], this does NOT flush the decoder, preserving
+    /// reference frames needed by subsequent inter-predicted frames.
+    fn decode_anim_frame(
+        decoder: &mut Rav1dDecoder,
+        data: &[u8],
+        context: &'static str,
+    ) -> Result<Frame> {
+        match decoder.decode(data) {
+            Ok(Some(frame)) => return Ok(frame),
+            Ok(None) => {}
+            Err(_e) => {
+                return Err(at(Error::Decode {
+                    code: -1,
+                    msg: context,
+                }));
+            }
+        }
+
+        // Frame not returned immediately — drain via get_frame
+        for _ in 0..10_000 {
+            match decoder.get_frame() {
+                Ok(Some(frame)) => return Ok(frame),
+                Ok(None) => std::thread::yield_now(),
+                Err(_e) => break,
+            }
+        }
+
+        Err(at(Error::Decode {
+            code: -1,
+            msg: context,
+        }))
     }
 
     /// Decode a grid-based AVIF (tiled image)

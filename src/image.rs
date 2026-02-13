@@ -116,6 +116,37 @@ pub struct ImageInfo {
     pub icc_profile: Option<Vec<u8>>,
 }
 
+/// A single decoded frame from an animated AVIF sequence.
+#[derive(Debug)]
+pub struct DecodedFrame {
+    /// Decoded pixel data for this frame.
+    pub pixels: zencodec_types::PixelData,
+    /// Duration of this frame in milliseconds.
+    pub duration_ms: u32,
+}
+
+/// Metadata about a decoded animation.
+#[derive(Debug, Clone)]
+pub struct DecodedAnimationInfo {
+    /// Number of frames in the animation.
+    pub frame_count: usize,
+    /// Number of times to loop (0 = infinite).
+    pub loop_count: u32,
+    /// Whether the animation has alpha.
+    pub has_alpha: bool,
+    /// Media timescale (ticks per second) of the color track.
+    pub timescale: u32,
+}
+
+/// A fully decoded animation: frames + metadata.
+#[derive(Debug)]
+pub struct DecodedAnimation {
+    /// Decoded frames in presentation order.
+    pub frames: Vec<DecodedFrame>,
+    /// Animation metadata.
+    pub info: DecodedAnimationInfo,
+}
+
 impl Default for ImageInfo {
     fn default() -> Self {
         Self {

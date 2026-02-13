@@ -83,8 +83,8 @@ pub use encoder::{
 pub use enough::{Stop, StopReason, Unstoppable};
 pub use error::{Error, Result};
 pub use image::{
-    ChromaSampling, ColorPrimaries, ColorRange, ImageInfo, MatrixCoefficients,
-    TransferCharacteristics,
+    ChromaSampling, ColorPrimaries, ColorRange, DecodedAnimation, DecodedAnimationInfo,
+    DecodedFrame, ImageInfo, MatrixCoefficients, TransferCharacteristics,
 };
 pub use zencodec::{AvifDecodeJob, AvifDecoding};
 #[cfg(feature = "encode")]
@@ -140,6 +140,37 @@ pub fn decode_with(
         let mut decoder = ManagedAvifDecoder::new(data, config)?;
         decoder.decode(stop)
     }
+}
+
+/// Decode an animated AVIF with default settings
+///
+/// Returns all frames with timing info, or [`Error::Unsupported`] if the
+/// file is not animated.
+///
+/// # Example
+///
+/// ```no_run
+/// let avif_data = std::fs::read("animation.avif").unwrap();
+/// let animation = zenavif::decode_animation(&avif_data).unwrap();
+/// for frame in &animation.frames {
+///     println!("{}x{} frame, {}ms", frame.pixels.width(), frame.pixels.height(), frame.duration_ms);
+/// }
+/// ```
+pub fn decode_animation(data: &[u8]) -> Result<DecodedAnimation> {
+    decode_animation_with(data, &DecoderConfig::default(), &Unstoppable)
+}
+
+/// Decode an animated AVIF with custom settings and cancellation support
+///
+/// Returns all frames with timing info, or [`Error::Unsupported`] if the
+/// file is not animated.
+pub fn decode_animation_with(
+    data: &[u8],
+    config: &DecoderConfig,
+    stop: &(impl Stop + ?Sized),
+) -> Result<DecodedAnimation> {
+    let mut decoder = ManagedAvifDecoder::new(data, config)?;
+    decoder.decode_animation(stop)
 }
 
 /// Encode a decoded image to AVIF with default settings
