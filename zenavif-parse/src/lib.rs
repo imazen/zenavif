@@ -974,7 +974,8 @@ pub struct AnimationInfo {
 
 /// Parsed structure from the box-level parse pass (no mdat data).
 struct ParsedStructure {
-    meta: AvifInternalMeta,
+    /// `None` for pure AVIF sequences (`avis` brand) that have only `moov`+`mdat`.
+    meta: Option<AvifInternalMeta>,
     mdat_bounds: TryVec<MdatBounds>,
     animation_data: Option<ParsedAnimationData>,
     major_brand: [u8; 4],
@@ -1104,7 +1105,11 @@ impl<'data> AvifParser<'data> {
             check_parser_state(&b.head, &b.content)?;
         }
 
-        let meta = meta.ok_or(Error::InvalidData("missing meta"))?;
+        // meta is required for still images, but pure AVIF sequences (avis brand)
+        // can have only moov+mdat with no meta box.
+        if meta.is_none() && animation_data.is_none() {
+            return Err(Error::InvalidData("missing meta"));
+        }
 
         Ok(ParsedStructure { meta, mdat_bounds, animation_data, major_brand, compatible_brands })
     }
@@ -1112,7 +1117,50 @@ impl<'data> AvifParser<'data> {
     /// Build an AvifParser from raw bytes + parsed structure.
     fn build(raw: Cow<'data, [u8]>, parsed: ParsedStructure, config: &DecodeConfig) -> Result<Self> {
         let tracker = ResourceTracker::new(config);
-        let meta = parsed.meta;
+
+        // Store animation metadata if present
+        let animation_data = if let Some(anim) = parsed.animation_data {
+            tracker.validate_animation_frames(anim.color_sample_table.sample_sizes.len() as u32)?;
+            Some(AnimationParserData {
+                media_timescale: anim.color_timescale,
+                sample_table: anim.color_sample_table,
+                alpha_media_timescale: anim.alpha_timescale,
+                alpha_sample_table: anim.alpha_sample_table,
+                loop_count: anim.loop_count,
+            })
+        } else {
+            None
+        };
+
+        // Pure sequence (no meta box): only animation methods will work.
+        let Some(meta) = parsed.meta else {
+            return Ok(Self {
+                raw,
+                mdat_bounds: parsed.mdat_bounds,
+                idat: None,
+                primary: ItemExtents { construction_method: ConstructionMethod::File, extents: TryVec::new() },
+                alpha: None,
+                grid_config: None,
+                tiles: TryVec::new(),
+                animation_data,
+                premultiplied_alpha: false,
+                av1_config: None,
+                color_info: None,
+                rotation: None,
+                mirror: None,
+                clean_aperture: None,
+                pixel_aspect_ratio: None,
+                content_light_level: None,
+                mastering_display: None,
+                content_colour_volume: None,
+                ambient_viewing: None,
+                operating_point: None,
+                layer_selector: None,
+                layered_image_indexing: None,
+                major_brand: parsed.major_brand,
+                compatible_brands: parsed.compatible_brands,
+            });
+        };
 
         // Get primary item extents
         let primary = Self::get_item_extents(&meta, meta.primary_item_id)?;
@@ -1233,20 +1281,6 @@ impl<'data> AvifParser<'data> {
         let operating_point = find_prop!(OperatingPointSelector);
         let layer_selector = find_prop!(LayerSelector);
         let layered_image_indexing = find_prop!(AV1LayeredImageIndexing);
-
-        // Store animation metadata if present
-        let animation_data = if let Some(anim) = parsed.animation_data {
-            tracker.validate_animation_frames(anim.color_sample_table.sample_sizes.len() as u32)?;
-            Some(AnimationParserData {
-                media_timescale: anim.color_timescale,
-                sample_table: anim.color_sample_table,
-                alpha_media_timescale: anim.alpha_timescale,
-                alpha_sample_table: anim.alpha_sample_table,
-                loop_count: anim.loop_count,
-            })
-        } else {
-            None
-        };
 
         // Clone idat
         let idat = if let Some(ref idat_data) = meta.idat {
@@ -2402,7 +2436,20 @@ pub fn read_avif_with_config<T: Read>(
         check_parser_state(&b.head, &b.content)?;
     }
 
-    let meta = meta.ok_or(Error::InvalidData("missing meta"))?;
+    // meta is required for still images; pure sequences can have only moov+mdat
+    if meta.is_none() && animation_data.is_none() {
+        return Err(Error::InvalidData("missing meta"));
+    }
+    let Some(meta) = meta else {
+        // Pure sequence: return minimal AvifData with no items
+        return Ok(AvifData {
+            primary_item: TryVec::new(),
+            alpha_item: None,
+            premultiplied_alpha: false,
+            animation_frames: Vec::new(),
+            loop_count: animation_data.as_ref().map_or(0, |a| a.loop_count),
+        });
+    };
 
     // Check if primary item is a grid (tiled image)
     let is_grid = meta
