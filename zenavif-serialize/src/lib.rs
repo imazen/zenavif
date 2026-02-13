@@ -8,6 +8,7 @@
 //!
 //! See [cavif](https://github.com/kornelski/cavif-rs) for a complete implementation.
 
+pub mod animated;
 mod boxes;
 pub mod constants;
 mod writer;
