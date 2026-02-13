@@ -154,7 +154,7 @@ impl MpegBox for MetaBox<'_> {
 /// Item Info box
 #[derive(Debug, Clone)]
 pub struct IinfBox {
-    pub items: ArrayVec<InfeBox, 3>,
+    pub items: ArrayVec<InfeBox, 4>,
 }
 
 impl MpegBox for IinfBox {
@@ -181,6 +181,8 @@ pub struct InfeBox {
     pub id: u16,
     pub typ: FourCC,
     pub name: &'static str,
+    /// Content type (only for `mime` items, e.g. "application/rdf+xml" for XMP)
+    pub content_type: &'static str,
 }
 
 impl MpegBox for InfeBox {
@@ -191,6 +193,7 @@ impl MpegBox for InfeBox {
         + 2 // item_protection_index
         + 4 // type
         + self.name.len() + 1 // nul-terminated
+        + if self.content_type.is_empty() { 0 } else { self.content_type.len() + 1 }
     }
 
     fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
@@ -199,7 +202,12 @@ impl MpegBox for InfeBox {
         b.u16(0)?;
         b.push(&self.typ.0)?;
         b.push(self.name.as_bytes())?;
-        b.u8(0)
+        b.u8(0)?;
+        if !self.content_type.is_empty() {
+            b.push(self.content_type.as_bytes())?;
+            b.u8(0)?;
+        }
+        Ok(())
     }
 }
 
@@ -257,8 +265,13 @@ pub enum IpcoProp {
     Ispe(IspeBox),
     AuxC(AuxCBox),
     Colr(ColrBox),
+    ColrIcc(ColrIccBox),
     Clli(ClliBox),
     Mdcv(MdcvBox),
+    Irot(IrotBox),
+    Imir(ImirBox),
+    Clap(ClapBox),
+    Pasp(PaspBox),
 }
 
 impl IpcoProp {
@@ -269,8 +282,13 @@ impl IpcoProp {
             Self::Ispe(p) => p.len(),
             Self::AuxC(p) => p.len(),
             Self::Colr(p) => p.len(),
+            Self::ColrIcc(p) => p.len(),
             Self::Clli(p) => p.len(),
             Self::Mdcv(p) => p.len(),
+            Self::Irot(p) => p.len(),
+            Self::Imir(p) => p.len(),
+            Self::Clap(p) => p.len(),
+            Self::Pasp(p) => p.len(),
         }
     }
 
@@ -281,8 +299,13 @@ impl IpcoProp {
             Self::Ispe(p) => p.write(w),
             Self::AuxC(p) => p.write(w),
             Self::Colr(p) => p.write(w),
+            Self::ColrIcc(p) => p.write(w),
             Self::Clli(p) => p.write(w),
             Self::Mdcv(p) => p.write(w),
+            Self::Irot(p) => p.write(w),
+            Self::Imir(p) => p.write(w),
+            Self::Clap(p) => p.write(w),
+            Self::Pasp(p) => p.write(w),
         }
     }
 }
@@ -290,7 +313,7 @@ impl IpcoProp {
 /// Item Property Container box
 #[derive(Debug, Clone)]
 pub struct IpcoBox {
-    props: ArrayVec<IpcoProp, 9>,
+    props: ArrayVec<IpcoProp, 16>,
 }
 
 impl IpcoBox {
@@ -392,7 +415,7 @@ impl MpegBox for IspeBox {
 #[derive(Debug, Clone)]
 pub struct IpmaEntry {
     pub item_id: u16,
-    pub prop_ids: ArrayVec<u8, 7>,
+    pub prop_ids: ArrayVec<u8, 12>,
 }
 
 #[derive(Debug, Clone)]
@@ -448,7 +471,7 @@ impl MpegBox for IrefEntryBox {
 
 #[derive(Debug, Clone)]
 pub struct IrefBox {
-    pub entries: ArrayVec<IrefEntryBox, 3>,
+    pub entries: ArrayVec<IrefEntryBox, 4>,
 }
 
 impl IrefBox {
@@ -647,7 +670,7 @@ impl MpegBox for PitmBox {
 pub struct IlocBox<'data> {
     /// update before writing
     pub absolute_offset_start: Option<NonZeroU32>,
-    pub items: ArrayVec<IlocItem<'data>, 3>,
+    pub items: ArrayVec<IlocItem<'data>, 4>,
 }
 
 #[derive(Debug, Clone)]
@@ -664,7 +687,7 @@ pub struct IlocExtent<'data> {
 
 impl MpegBox for IlocBox<'_> {
     #[inline(always)]
-    #[allow(unused_parens)]
+    #[allow(unused_parens, clippy::identity_op)]
     fn len(&self) -> usize {
         FULL_BOX_SIZE
         + 1 // offset_size, length_size
@@ -703,6 +726,129 @@ impl MpegBox for IlocBox<'_> {
             }
         }
         Ok(())
+    }
+}
+
+/// Image Rotation box (`irot`). NOT a FullBox.
+///
+/// Specifies counter-clockwise rotation. The `angle` field is the
+/// raw 2-bit code: 0 = 0°, 1 = 90°, 2 = 180°, 3 = 270°.
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct IrotBox {
+    /// Rotation code (0-3): 0=0°, 1=90° CCW, 2=180°, 3=270° CCW
+    pub angle: u8,
+}
+
+impl MpegBox for IrotBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE + 1
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"irot")?;
+        b.u8(self.angle & 0x03)
+    }
+}
+
+/// Image Mirror box (`imir`). NOT a FullBox.
+///
+/// Specifies a mirror axis to apply after rotation.
+/// `axis` = 0 means vertical axis (left-right flip),
+/// `axis` = 1 means horizontal axis (top-bottom flip).
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct ImirBox {
+    /// 0 = vertical axis (left-right flip), 1 = horizontal axis (top-bottom flip)
+    pub axis: u8,
+}
+
+impl MpegBox for ImirBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE + 1
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"imir")?;
+        b.u8(self.axis & 0x01)
+    }
+}
+
+/// Clean Aperture box (`clap`).
+///
+/// Defines a crop rectangle as centered rational values.
+/// 32 bytes payload: 4 pairs of (numerator u32, denominator u32),
+/// except offsets which are signed numerators.
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct ClapBox {
+    pub width_n: u32,
+    pub width_d: u32,
+    pub height_n: u32,
+    pub height_d: u32,
+    pub horiz_off_n: i32,
+    pub horiz_off_d: u32,
+    pub vert_off_n: i32,
+    pub vert_off_d: u32,
+}
+
+impl MpegBox for ClapBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE + 32
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"clap")?;
+        b.u32(self.width_n)?;
+        b.u32(self.width_d)?;
+        b.u32(self.height_n)?;
+        b.u32(self.height_d)?;
+        b.push(&self.horiz_off_n.to_be_bytes())?;
+        b.u32(self.horiz_off_d)?;
+        b.push(&self.vert_off_n.to_be_bytes())?;
+        b.u32(self.vert_off_d)
+    }
+}
+
+/// Pixel Aspect Ratio box (`pasp`).
+///
+/// 8 bytes payload: h_spacing (u32) + v_spacing (u32).
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct PaspBox {
+    pub h_spacing: u32,
+    pub v_spacing: u32,
+}
+
+impl MpegBox for PaspBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE + 8
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"pasp")?;
+        b.u32(self.h_spacing)?;
+        b.u32(self.v_spacing)
+    }
+}
+
+/// ColourInformationBox with ICC profile (colour_type = 'prof' or 'rICC').
+#[derive(Debug, Clone)]
+pub struct ColrIccBox {
+    pub icc_data: Vec<u8>,
+}
+
+impl MpegBox for ColrIccBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE + 4 + self.icc_data.len()
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"colr")?;
+        // 'prof' for restricted ICC profile (sufficient for AVIF)
+        b.u32(u32::from_be_bytes(*b"prof"))?;
+        b.push(&self.icc_data)
     }
 }
 

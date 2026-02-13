@@ -16,6 +16,9 @@ use crate::boxes::*;
 use arrayvec::ArrayVec;
 use std::io;
 
+// Re-export box types needed by the public API
+pub use crate::boxes::{Av1CBox, ClapBox, ClliBox, ColrBox, ColrIccBox, IrotBox, ImirBox, MdcvBox, PaspBox};
+
 /// Config for the serialization (allows setting advanced image properties).
 ///
 /// See [`Aviffy::new`].
@@ -24,6 +27,11 @@ pub struct Aviffy {
     colr: ColrBox,
     clli: Option<ClliBox>,
     mdcv: Option<MdcvBox>,
+    irot: Option<IrotBox>,
+    imir: Option<ImirBox>,
+    clap: Option<ClapBox>,
+    pasp: Option<PaspBox>,
+    icc_profile: Option<Vec<u8>>,
     min_seq_profile: u8,
     chroma_subsampling: (bool, bool),
     monochrome: bool,
@@ -31,6 +39,7 @@ pub struct Aviffy {
     height: u32,
     bit_depth: u8,
     exif: Option<Vec<u8>>,
+    xmp: Option<Vec<u8>>,
 }
 
 /// Makes an AVIF file given encoded AV1 data (create the data with [`rav1e`](https://lib.rs/rav1e))
@@ -58,6 +67,12 @@ pub fn serialize<W: io::Write>(into_output: W, color_av1_data: &[u8], alpha_av1_
         .write_slice(into_output, color_av1_data, alpha_av1_data)
 }
 
+impl Default for Aviffy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Aviffy {
     /// You will have to set image properties to match the AV1 bitstream.
     ///
@@ -76,7 +91,13 @@ impl Aviffy {
             colr: ColrBox::default(),
             clli: None,
             mdcv: None,
+            irot: None,
+            imir: None,
+            clap: None,
+            pasp: None,
+            icc_profile: None,
             exif: None,
+            xmp: None,
         }
     }
 
@@ -169,6 +190,67 @@ impl Aviffy {
         self
     }
 
+    /// Set image rotation (counter-clockwise).
+    ///
+    /// `angle` is a raw code: 0=0°, 1=90°, 2=180°, 3=270°.
+    /// Adds an `irot` property box.
+    #[inline]
+    pub fn set_rotation(&mut self, angle: u8) -> &mut Self {
+        self.irot = Some(IrotBox { angle: angle & 0x03 });
+        self
+    }
+
+    /// Set image mirror axis.
+    ///
+    /// `axis` = 0: vertical axis (left-right flip).
+    /// `axis` = 1: horizontal axis (top-bottom flip).
+    /// Adds an `imir` property box.
+    #[inline]
+    pub fn set_mirror(&mut self, axis: u8) -> &mut Self {
+        self.imir = Some(ImirBox { axis: axis & 0x01 });
+        self
+    }
+
+    /// Set clean aperture (crop rectangle).
+    ///
+    /// All values are rational numbers. Defines a centered crop region.
+    /// Adds a `clap` property box.
+    #[inline]
+    pub fn set_clean_aperture(&mut self, clap: ClapBox) -> &mut Self {
+        self.clap = Some(clap);
+        self
+    }
+
+    /// Set pixel aspect ratio.
+    ///
+    /// `h_spacing` / `v_spacing` defines the ratio. For square pixels use (1, 1).
+    /// Adds a `pasp` property box.
+    #[inline]
+    pub fn set_pixel_aspect_ratio(&mut self, h_spacing: u32, v_spacing: u32) -> &mut Self {
+        self.pasp = Some(PaspBox { h_spacing, v_spacing });
+        self
+    }
+
+    /// Set XMP metadata to be included in the AVIF file as a separate item.
+    ///
+    /// The data should be a valid XMP/RDF XML document.
+    #[inline]
+    pub fn set_xmp(&mut self, xmp: Vec<u8>) -> &mut Self {
+        self.xmp = Some(xmp);
+        self
+    }
+
+    /// Set ICC color profile to embed in the AVIF file.
+    ///
+    /// This adds a `colr` box with colour_type='prof'. When set, this
+    /// replaces the nclx `colr` box (they are mutually exclusive per spec,
+    /// though some files include both).
+    #[inline]
+    pub fn set_icc_profile(&mut self, icc_data: Vec<u8>) -> &mut Self {
+        self.icc_profile = Some(icc_data);
+        self
+    }
+
     /// Makes an AVIF file given encoded AV1 data (create the data with [`rav1e`](https://lib.rs/rav1e))
     ///
     /// `color_av1_data` is already-encoded AV1 image data for the color channels (YUV, RGB, etc.).
@@ -205,9 +287,9 @@ impl Aviffy {
         let mut ipma_entries = ArrayVec::new();
         let mut irefs = ArrayVec::new();
         let mut ipco = IpcoBox::new();
-        let color_image_id = 1;
-        let alpha_image_id = 2;
-        let exif_id = 3;
+        let color_image_id: u16 = 1;
+        let alpha_image_id: u16 = 2;
+        let mut next_item_id: u16 = 3;
         const ESSENTIAL_BIT: u8 = 0x80;
         let color_depth_bits = depth_bits;
         let alpha_depth_bits = depth_bits; // Sadly, the spec requires these to match.
@@ -216,6 +298,7 @@ impl Aviffy {
             id: color_image_id,
             typ: FourCC(*b"av01"),
             name: "",
+            content_type: "",
         });
 
         let ispe_prop = ipco.push(IpcoProp::Ispe(IspeBox { width, height })).ok_or(io::ErrorKind::InvalidInput)?;
@@ -244,8 +327,14 @@ impl Aviffy {
             prop_ids: from_array([ispe_prop, av1c_color_prop | ESSENTIAL_BIT, pixi_3]),
         };
 
-        // Redundant info, already in AV1
-        if self.colr != ColrBox::default() {
+        // ICC profile takes precedence over nclx if both set
+        if let Some(ref icc_data) = self.icc_profile {
+            let colr_icc_prop = ipco.push(IpcoProp::ColrIcc(ColrIccBox {
+                icc_data: icc_data.clone(),
+            })).ok_or(io::ErrorKind::InvalidInput)?;
+            ipma.prop_ids.push(colr_icc_prop);
+        } else if self.colr != ColrBox::default() {
+            // Redundant info, already in AV1
             let colr_color_prop = ipco.push(IpcoProp::Colr(self.colr)).ok_or(io::ErrorKind::InvalidInput)?;
             ipma.prop_ids.push(colr_color_prop);
         }
@@ -260,13 +349,37 @@ impl Aviffy {
             ipma.prop_ids.push(mdcv_prop);
         }
 
+        if let Some(irot) = self.irot {
+            let irot_prop = ipco.push(IpcoProp::Irot(irot)).ok_or(io::ErrorKind::InvalidInput)?;
+            ipma.prop_ids.push(irot_prop | ESSENTIAL_BIT);
+        }
+
+        if let Some(imir) = self.imir {
+            let imir_prop = ipco.push(IpcoProp::Imir(imir)).ok_or(io::ErrorKind::InvalidInput)?;
+            ipma.prop_ids.push(imir_prop | ESSENTIAL_BIT);
+        }
+
+        if let Some(clap) = self.clap {
+            let clap_prop = ipco.push(IpcoProp::Clap(clap)).ok_or(io::ErrorKind::InvalidInput)?;
+            ipma.prop_ids.push(clap_prop | ESSENTIAL_BIT);
+        }
+
+        if let Some(pasp) = self.pasp {
+            let pasp_prop = ipco.push(IpcoProp::Pasp(pasp)).ok_or(io::ErrorKind::InvalidInput)?;
+            ipma.prop_ids.push(pasp_prop);
+        }
+
         ipma_entries.push(ipma);
 
         if let Some(exif_data) = self.exif.as_deref() {
+            let exif_id = next_item_id;
+            next_item_id += 1;
+
             image_items.push(InfeBox {
                 id: exif_id,
                 typ: FourCC(*b"Exif"),
                 name: "",
+                content_type: "",
             });
 
             iloc_items.push(IlocItem {
@@ -281,11 +394,36 @@ impl Aviffy {
             });
         }
 
+        if let Some(xmp_data) = self.xmp.as_deref() {
+            let xmp_id = next_item_id;
+            next_item_id += 1;
+            let _ = next_item_id; // suppress unused warning
+
+            image_items.push(InfeBox {
+                id: xmp_id,
+                typ: FourCC(*b"mime"),
+                name: "",
+                content_type: "application/rdf+xml",
+            });
+
+            iloc_items.push(IlocItem {
+                id: xmp_id,
+                extents: [IlocExtent { data: xmp_data }],
+            });
+
+            irefs.push(IrefEntryBox {
+                from_id: xmp_id,
+                to_id: color_image_id,
+                typ: FourCC(*b"cdsc"),
+            });
+        }
+
         if let Some(alpha_data) = alpha_av1_data {
             image_items.push(InfeBox {
                 id: alpha_image_id,
                 typ: FourCC(*b"av01"),
                 name: "",
+                content_type: "",
             });
 
             irefs.push(IrefEntryBox {
@@ -642,4 +780,205 @@ fn no_hdr_metadata_by_default() {
     let parser = avif_parse::read_avif(&mut avif.as_slice()).unwrap();
     assert!(parser.content_light_level.is_none());
     assert!(parser.mastering_display.is_none());
+}
+
+#[test]
+fn rotation_roundtrip() {
+    let test_img = [1, 2, 3, 4, 5, 6];
+    for angle in 0..4u8 {
+        let avif = Aviffy::new()
+            .set_rotation(angle)
+            .to_vec(&test_img, None, 10, 20, 8);
+
+        let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+        let rot = parser.rotation().expect("irot box should be present");
+        let expected_angle = match angle {
+            0 => 0,
+            1 => 90,
+            2 => 180,
+            3 => 270,
+            _ => unreachable!(),
+        };
+        assert_eq!(rot.angle, expected_angle, "angle code {angle}");
+
+        // Verify data still parses
+        let ctx = avif_parse::read_avif(&mut avif.as_slice()).unwrap();
+        assert_eq!(ctx.primary_item.as_slice(), &test_img[..]);
+    }
+}
+
+#[test]
+fn mirror_roundtrip() {
+    let test_img = [1, 2, 3, 4, 5, 6];
+    for axis in 0..2u8 {
+        let avif = Aviffy::new()
+            .set_mirror(axis)
+            .to_vec(&test_img, None, 10, 20, 8);
+
+        let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+        let mir = parser.mirror().expect("imir box should be present");
+        assert_eq!(mir.axis, axis);
+    }
+}
+
+#[test]
+fn clap_roundtrip() {
+    let test_img = [1, 2, 3, 4, 5, 6];
+    let avif = Aviffy::new()
+        .set_clean_aperture(ClapBox {
+            width_n: 800, width_d: 1,
+            height_n: 600, height_d: 1,
+            horiz_off_n: 0, horiz_off_d: 1,
+            vert_off_n: 0, vert_off_d: 1,
+        })
+        .to_vec(&test_img, None, 10, 20, 8);
+
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+    let clap = parser.clean_aperture().expect("clap box should be present");
+    assert_eq!(clap.width_n, 800);
+    assert_eq!(clap.width_d, 1);
+    assert_eq!(clap.height_n, 600);
+    assert_eq!(clap.height_d, 1);
+    assert_eq!(clap.horiz_off_n, 0);
+    assert_eq!(clap.horiz_off_d, 1);
+    assert_eq!(clap.vert_off_n, 0);
+    assert_eq!(clap.vert_off_d, 1);
+}
+
+#[test]
+fn clap_with_negative_offset() {
+    let test_img = [1, 2, 3, 4, 5, 6];
+    let avif = Aviffy::new()
+        .set_clean_aperture(ClapBox {
+            width_n: 640, width_d: 1,
+            height_n: 480, height_d: 1,
+            horiz_off_n: -10, horiz_off_d: 1,
+            vert_off_n: -20, vert_off_d: 1,
+        })
+        .to_vec(&test_img, None, 10, 20, 8);
+
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+    let clap = parser.clean_aperture().expect("clap box should be present");
+    assert_eq!(clap.horiz_off_n, -10);
+    assert_eq!(clap.vert_off_n, -20);
+}
+
+#[test]
+fn pasp_roundtrip() {
+    let test_img = [1, 2, 3, 4, 5, 6];
+    let avif = Aviffy::new()
+        .set_pixel_aspect_ratio(2, 1)
+        .to_vec(&test_img, None, 10, 20, 8);
+
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+    let pasp = parser.pixel_aspect_ratio().expect("pasp box should be present");
+    assert_eq!(pasp.h_spacing, 2);
+    assert_eq!(pasp.v_spacing, 1);
+}
+
+#[test]
+fn icc_profile_roundtrip() {
+    let test_img = [1, 2, 3, 4, 5, 6];
+    // Fake ICC profile data (real profiles are much larger, but any bytes work for roundtrip)
+    let fake_icc = vec![0x00, 0x00, 0x00, 0x18, b'a', b'c', b's', b'p',
+                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let avif = Aviffy::new()
+        .set_icc_profile(fake_icc.clone())
+        .to_vec(&test_img, None, 10, 20, 8);
+
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+    let color_info = parser.color_info().expect("colr box should be present");
+    match color_info {
+        zenavif_parse::ColorInformation::IccProfile(data) => {
+            assert_eq!(data.as_slice(), &fake_icc[..]);
+        }
+        _ => panic!("expected ICC profile color info, got {:?}", color_info),
+    }
+}
+
+#[test]
+fn icc_overrides_nclx() {
+    let test_img = [1, 2, 3, 4, 5, 6];
+    let fake_icc = vec![1, 2, 3, 4];
+    // Setting both ICC and nclx: ICC should win
+    let avif = Aviffy::new()
+        .set_color_primaries(constants::ColorPrimaries::Bt2020)
+        .set_icc_profile(fake_icc.clone())
+        .to_vec(&test_img, None, 10, 20, 8);
+
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+    match parser.color_info() {
+        Some(zenavif_parse::ColorInformation::IccProfile(data)) => {
+            assert_eq!(data.as_slice(), &fake_icc[..]);
+        }
+        other => panic!("expected ICC profile, got {:?}", other),
+    }
+}
+
+#[test]
+fn xmp_roundtrip() {
+    let test_img = [1, 2, 3, 4, 5, 6];
+    let xmp_data = b"<x:xmpmeta xmlns:x='adobe:ns:meta/'><test/></x:xmpmeta>".to_vec();
+
+    let avif = Aviffy::new()
+        .set_xmp(xmp_data.clone())
+        .to_vec(&test_img, None, 10, 20, 8);
+
+    // Verify the primary data is intact
+    let ctx = avif_parse::read_avif(&mut avif.as_slice()).unwrap();
+    assert_eq!(ctx.primary_item.as_slice(), &test_img[..]);
+
+    // Verify XMP data is somewhere in the file
+    let xmp_str = b"<x:xmpmeta";
+    assert!(avif.windows(xmp_str.len()).any(|w| w == xmp_str),
+        "XMP data should be present in AVIF file");
+}
+
+#[test]
+fn rotation_and_mirror_combined() {
+    let test_img = [1, 2, 3, 4, 5, 6];
+    let avif = Aviffy::new()
+        .set_rotation(1)  // 90° CCW
+        .set_mirror(0)    // vertical axis
+        .to_vec(&test_img, None, 10, 20, 8);
+
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+    let rot = parser.rotation().expect("irot should be present");
+    let mir = parser.mirror().expect("imir should be present");
+    assert_eq!(rot.angle, 90);
+    assert_eq!(mir.axis, 0);
+}
+
+#[test]
+fn all_properties_combined() {
+    let test_img = [1, 2, 3, 4, 5, 6];
+    let test_alpha = [77, 88, 99];
+    let avif = Aviffy::new()
+        .set_rotation(2)
+        .set_mirror(1)
+        .set_clean_aperture(ClapBox {
+            width_n: 8, width_d: 1,
+            height_n: 18, height_d: 1,
+            horiz_off_n: 0, horiz_off_d: 1,
+            vert_off_n: 0, vert_off_d: 1,
+        })
+        .set_pixel_aspect_ratio(1, 1)
+        .set_content_light_level(1000, 400)
+        .set_mastering_display(
+            [(8500, 39850), (6550, 2300), (35400, 14600)],
+            (15635, 16450), 10_000_000, 50,
+        )
+        .to_vec(&test_img, Some(&test_alpha), 10, 20, 8);
+
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+    assert_eq!(parser.rotation().unwrap().angle, 180);
+    assert_eq!(parser.mirror().unwrap().axis, 1);
+    assert!(parser.clean_aperture().is_some());
+    assert!(parser.pixel_aspect_ratio().is_some());
+    assert!(parser.content_light_level().is_some());
+    assert!(parser.mastering_display().is_some());
+
+    let ctx = avif_parse::read_avif(&mut avif.as_slice()).unwrap();
+    assert_eq!(ctx.primary_item.as_slice(), &test_img[..]);
+    assert_eq!(ctx.alpha_item.as_deref().unwrap(), &test_alpha[..]);
 }
