@@ -1216,6 +1216,8 @@ static ANIM_12BPC_KF: &str = "tests/colors-animated-12bpc-keyframes-0-2-3.avif";
 static ANIM_8BPC_AUDIO: &str = "tests/colors-animated-8bpc-audio.avif";
 static ANIM_8BPC_DEPTH: &str = "tests/colors-animated-8bpc-depth-exif-xmp.avif";
 
+// -- Track association and metadata --
+
 #[test]
 fn anim_single_track_no_alpha() {
     let bytes = std::fs::read(ANIM_8BPC).expect("read file");
@@ -1248,7 +1250,10 @@ fn anim_two_tracks_with_alpha() {
     for i in 0..info.frame_count {
         let frame = parser.frame(i).expect("frame failed");
         assert!(!frame.data.is_empty(), "Frame {} color data empty", i);
-        let alpha = frame.alpha_data.as_ref().unwrap_or_else(|| panic!("Frame {} should have alpha", i));
+        let alpha = frame
+            .alpha_data
+            .as_ref()
+            .unwrap_or_else(|| panic!("Frame {} should have alpha", i));
         assert!(!alpha.is_empty(), "Frame {} alpha data empty", i);
     }
 }
@@ -1304,8 +1309,10 @@ fn anim_depth_track_with_alpha() {
     }
 }
 
+// -- Loop count (elst flags parsing) --
+
 #[test]
-fn anim_loop_count_single_track() {
+fn anim_loop_count_play_once() {
     // colors-animated-8bpc.avif has elst flags=0x000000 -> loop_count=1 (play once)
     let bytes = std::fs::read(ANIM_8BPC).expect("read file");
     let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
@@ -1315,7 +1322,217 @@ fn anim_loop_count_single_track() {
 }
 
 #[test]
-fn anim_frame_iterator_with_alpha() {
+fn anim_loop_count_infinite() {
+    // colors-animated-8bpc-alpha-exif-xmp.avif has elst flags=0x000001 -> infinite
+    let bytes = std::fs::read(ANIM_8BPC_ALPHA).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+    assert_eq!(info.loop_count, 0, "Expected loop_count=0 (infinite)");
+}
+
+#[test]
+fn anim_loop_count_audio_file() {
+    // Audio file uses v0 elst with flags=0 -> play once
+    let bytes = std::fs::read(ANIM_8BPC_AUDIO).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+    assert_eq!(info.loop_count, 1, "Audio file color track should play once");
+}
+
+// -- Zero-copy verification --
+
+#[test]
+fn anim_zerocopy_color_frames_borrowed() {
+    // from_bytes -> single-extent color frames should be Cow::Borrowed
+    let bytes = std::fs::read(ANIM_8BPC).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    for i in 0..5 {
+        let frame = parser.frame(i).expect("frame failed");
+        assert!(
+            matches!(frame.data, Cow::Borrowed(_)),
+            "Color frame {} should be Cow::Borrowed (zero-copy)",
+            i
+        );
+    }
+}
+
+#[test]
+fn anim_zerocopy_alpha_frames_borrowed() {
+    // from_bytes -> single-extent alpha frames should also be Cow::Borrowed
+    let bytes = std::fs::read(ANIM_8BPC_ALPHA).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    for i in 0..5 {
+        let frame = parser.frame(i).expect("frame failed");
+        assert!(
+            matches!(frame.data, Cow::Borrowed(_)),
+            "Color frame {} should be Cow::Borrowed",
+            i
+        );
+        let alpha = frame.alpha_data.as_ref().expect("alpha should be present");
+        assert!(
+            matches!(alpha, Cow::Borrowed(_)),
+            "Alpha frame {} should be Cow::Borrowed (zero-copy)",
+            i
+        );
+    }
+}
+
+#[test]
+fn anim_zerocopy_12bpc_alpha_borrowed() {
+    // 12bpc file also uses single extents -> Cow::Borrowed
+    let bytes = std::fs::read(ANIM_12BPC_KF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    for i in 0..5 {
+        let frame = parser.frame(i).expect("frame failed");
+        assert!(matches!(frame.data, Cow::Borrowed(_)));
+        let alpha = frame.alpha_data.as_ref().expect("alpha");
+        assert!(
+            matches!(alpha, Cow::Borrowed(_)),
+            "12bpc alpha frame {} should be Cow::Borrowed",
+            i
+        );
+    }
+}
+
+#[test]
+fn anim_zerocopy_color_points_into_raw_buffer() {
+    // Verify borrowed slices actually point into the original byte buffer
+    let bytes = std::fs::read(ANIM_8BPC_ALPHA).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let frame0 = parser.frame(0).expect("frame 0");
+    let frame1 = parser.frame(1).expect("frame 1");
+
+    if let (Cow::Borrowed(s0), Cow::Borrowed(s1)) = (&frame0.data, &frame1.data) {
+        // Both slices should have distinct, non-overlapping offsets into the file
+        let ptr0 = s0.as_ptr() as usize;
+        let ptr1 = s1.as_ptr() as usize;
+        assert_ne!(ptr0, ptr1, "Frames 0 and 1 should point to different offsets");
+
+        // Both should be within the original buffer
+        let buf_start = bytes.as_ptr() as usize;
+        let buf_end = buf_start + bytes.len();
+        assert!(ptr0 >= buf_start && ptr0 < buf_end, "Frame 0 should point into original buffer");
+        assert!(ptr1 >= buf_start && ptr1 < buf_end, "Frame 1 should point into original buffer");
+    } else {
+        panic!("Expected Cow::Borrowed for from_bytes");
+    }
+
+    // Same for alpha
+    if let (Some(Cow::Borrowed(a0)), Some(Cow::Borrowed(a1))) =
+        (&frame0.alpha_data, &frame1.alpha_data)
+    {
+        let buf_start = bytes.as_ptr() as usize;
+        let buf_end = buf_start + bytes.len();
+        let aptr0 = a0.as_ptr() as usize;
+        let aptr1 = a1.as_ptr() as usize;
+        assert_ne!(aptr0, aptr1, "Alpha frames 0 and 1 should differ");
+        assert!(aptr0 >= buf_start && aptr0 < buf_end, "Alpha 0 in buffer");
+        assert!(aptr1 >= buf_start && aptr1 < buf_end, "Alpha 1 in buffer");
+    } else {
+        panic!("Expected Cow::Borrowed alpha data");
+    }
+}
+
+// -- from_reader / from_owned path --
+
+#[test]
+fn anim_from_reader_alpha() {
+    let parser = zenavif_parse::AvifParser::from_reader(
+        &mut File::open(ANIM_8BPC_ALPHA).expect("open"),
+    )
+    .expect("parse failed");
+
+    let info = parser.animation_info().expect("animation");
+    assert_eq!(info.frame_count, 5);
+    assert!(info.has_alpha);
+    assert_eq!(info.loop_count, 0);
+
+    for i in 0..5 {
+        let frame = parser.frame(i).expect("frame");
+        assert!(!frame.data.is_empty());
+        assert!(frame.alpha_data.is_some());
+    }
+}
+
+#[test]
+fn anim_from_owned_alpha() {
+    let bytes = std::fs::read(ANIM_8BPC_ALPHA).expect("read");
+    let parser = zenavif_parse::AvifParser::from_owned(bytes).expect("parse failed");
+
+    let info = parser.animation_info().expect("animation");
+    assert_eq!(info.frame_count, 5);
+    assert!(info.has_alpha);
+
+    for i in 0..5 {
+        let frame = parser.frame(i).expect("frame");
+        assert!(!frame.data.is_empty());
+        let alpha = frame.alpha_data.as_ref().expect("alpha");
+        assert!(!alpha.is_empty());
+        // from_owned still produces Cow::Borrowed (borrows from internal owned buffer)
+        assert!(matches!(frame.data, Cow::Borrowed(_)));
+        assert!(matches!(alpha, Cow::Borrowed(_)));
+    }
+}
+
+#[test]
+fn anim_from_reader_audio_skipped() {
+    let parser = zenavif_parse::AvifParser::from_reader(
+        &mut File::open(ANIM_8BPC_AUDIO).expect("open"),
+    )
+    .expect("parse failed");
+
+    let info = parser.animation_info().expect("animation");
+    assert_eq!(info.frame_count, 5);
+    assert!(!info.has_alpha, "Audio track should be skipped");
+}
+
+// -- Edge cases and bounds --
+
+#[test]
+fn anim_frame_out_of_bounds_with_alpha() {
+    let bytes = std::fs::read(ANIM_8BPC_ALPHA).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    assert!(parser.frame(5).is_err(), "Frame 5 should be out of bounds (only 0-4 exist)");
+    assert!(parser.frame(100).is_err(), "Frame 100 should be out of bounds");
+}
+
+#[test]
+fn anim_still_image_no_alpha_data() {
+    let bytes = std::fs::read("tests/kodim-extents.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    assert!(parser.animation_info().is_none(), "Still image has no animation");
+    assert!(parser.frame(0).is_err(), "Still image has no frames");
+}
+
+#[test]
+fn anim_iterator_on_no_alpha() {
+    let bytes = std::fs::read(ANIM_8BPC).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let frames: Vec<_> = parser.frames().collect();
+    assert_eq!(frames.len(), 5);
+
+    for (i, result) in frames.iter().enumerate() {
+        let frame = result.as_ref().expect("frame failed");
+        assert!(!frame.data.is_empty());
+        assert!(
+            frame.alpha_data.is_none(),
+            "Frame {} should not have alpha via iterator",
+            i
+        );
+    }
+}
+
+#[test]
+fn anim_iterator_with_alpha() {
     let bytes = std::fs::read(ANIM_8BPC_ALPHA).expect("read file");
     let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
 
@@ -1325,6 +1542,66 @@ fn anim_frame_iterator_with_alpha() {
     for (i, result) in frames.iter().enumerate() {
         let frame = result.as_ref().expect("frame failed");
         assert!(!frame.data.is_empty());
-        assert!(frame.alpha_data.is_some(), "Frame {} should have alpha via iterator", i);
+        assert!(
+            frame.alpha_data.is_some(),
+            "Frame {} should have alpha via iterator",
+            i
+        );
     }
+}
+
+// -- Timescale --
+
+#[test]
+fn anim_timescale_exposed() {
+    // Verify timescale is propagated correctly for all test files
+    for (path, desc) in [
+        (ANIM_8BPC, "8bpc"),
+        (ANIM_8BPC_ALPHA, "8bpc+alpha"),
+        (ANIM_12BPC_KF, "12bpc"),
+        (ANIM_8BPC_AUDIO, "audio"),
+        (ANIM_8BPC_DEPTH, "depth"),
+    ] {
+        let bytes = std::fs::read(path).unwrap_or_else(|_| panic!("read {}", desc));
+        let parser =
+            zenavif_parse::AvifParser::from_bytes(&bytes).unwrap_or_else(|_| panic!("parse {}", desc));
+        let info = parser
+            .animation_info()
+            .unwrap_or_else(|| panic!("{} should be animated", desc));
+        assert!(info.timescale > 0, "{}: timescale should be positive", desc);
+    }
+}
+
+// -- Eager API (feature-gated) --
+
+#[cfg(feature = "eager")]
+#[test]
+fn anim_eager_loop_count_parsed() {
+    // Verify the eager API now has correct loop_count from elst
+    let input = &mut File::open(ANIM_8BPC_ALPHA).expect("open");
+    let avif = zenavif_parse::read_avif(input).expect("read_avif failed");
+
+    let animation = avif.animation.expect("Expected animation");
+    assert_eq!(animation.loop_count, 0, "Eager API should parse infinite loop from elst");
+    assert_eq!(animation.frames.len(), 5);
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn anim_eager_play_once() {
+    let input = &mut File::open(ANIM_8BPC).expect("open");
+    let avif = zenavif_parse::read_avif(input).expect("read_avif failed");
+
+    let animation = avif.animation.expect("Expected animation");
+    assert_eq!(animation.loop_count, 1, "Eager API should parse play-once from elst");
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn anim_eager_audio_skipped() {
+    let input = &mut File::open(ANIM_8BPC_AUDIO).expect("open");
+    let avif = zenavif_parse::read_avif(input).expect("read_avif failed");
+
+    let animation = avif.animation.expect("Expected animation");
+    assert_eq!(animation.frames.len(), 5, "Should only have color frames, audio skipped");
 }
