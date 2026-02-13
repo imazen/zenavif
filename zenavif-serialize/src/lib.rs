@@ -11,6 +11,7 @@
 pub mod animated;
 mod boxes;
 pub mod constants;
+pub mod grid;
 mod writer;
 
 use crate::boxes::*;
