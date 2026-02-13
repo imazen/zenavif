@@ -749,4 +749,67 @@ mod tests {
         });
         assert!(report.permutations_run >= 1);
     }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn f32_rgba_roundtrip() {
+        use zencodec_types::{Decoding, Encoding};
+
+        let pixels: Vec<Rgba<f32>> = (0..16 * 16)
+            .map(|i| {
+                let t = i as f32 / 255.0;
+                Rgba {
+                    r: t,
+                    g: (t * 0.7),
+                    b: (t * 0.3),
+                    a: 1.0,
+                }
+            })
+            .collect();
+        let img = imgref::ImgVec::new(pixels, 16, 16);
+
+        let enc = AvifEncoding::new().with_quality(100.0).with_effort(10);
+        let output = enc.encode_rgba_f32(img.as_ref()).unwrap();
+        assert!(!output.bytes().is_empty());
+
+        let dec = AvifDecoding::new();
+        let mut dst_img = imgref::ImgVec::new(
+            vec![Rgba { r: 0.0f32, g: 0.0, b: 0.0, a: 0.0 }; 16 * 16],
+            16,
+            16,
+        );
+        dec.decode_into_rgba_f32(output.bytes(), dst_img.as_mut())
+            .unwrap();
+
+        for p in dst_img.buf().iter() {
+            assert!(p.r >= 0.0 && p.r <= 1.0, "r out of range: {}", p.r);
+            assert!(p.g >= 0.0 && p.g <= 1.0, "g out of range: {}", p.g);
+            assert!(p.b >= 0.0 && p.b <= 1.0, "b out of range: {}", p.b);
+            assert!(p.a >= 0.0 && p.a <= 1.0, "a out of range: {}", p.a);
+        }
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn f32_gray_roundtrip() {
+        use zencodec_types::{Decoding, Encoding, Gray};
+
+        let pixels: Vec<Gray<f32>> = (0..16 * 16)
+            .map(|i| Gray(i as f32 / 255.0))
+            .collect();
+        let img = imgref::ImgVec::new(pixels, 16, 16);
+
+        let enc = AvifEncoding::new().with_quality(100.0).with_effort(10);
+        let output = enc.encode_gray_f32(img.as_ref()).unwrap();
+        assert!(!output.bytes().is_empty());
+
+        let dec = AvifDecoding::new();
+        let mut dst_img = imgref::ImgVec::new(vec![Gray(0.0f32); 16 * 16], 16, 16);
+        dec.decode_into_gray_f32(output.bytes(), dst_img.as_mut())
+            .unwrap();
+
+        for p in dst_img.buf().iter() {
+            assert!(p.0 >= 0.0 && p.0 <= 1.0, "gray out of range: {}", p.0);
+        }
+    }
 }
