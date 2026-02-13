@@ -6,8 +6,9 @@
 
 #[cfg(feature = "encode")]
 use imgref::ImgRef;
-#[cfg(feature = "encode")]
-use rgb::{Rgb, Rgba};
+use imgref::ImgRefMut;
+use rgb::alt::BGRA;
+use rgb::{Gray, Rgb, Rgba};
 #[cfg(feature = "encode")]
 use zencodec_types::ImageMetadata;
 use zencodec_types::{ImageFormat, ResourceLimits, Stop};
@@ -217,13 +218,95 @@ impl<'a> zencodec_types::EncodingJob<'a> for AvifEncodeJob<'a> {
 
     fn encode_gray8(
         self,
-        img: ImgRef<'_, rgb::Gray<u8>>,
+        img: ImgRef<'_, Gray<u8>>,
     ) -> Result<zencodec_types::EncodeOutput, Self::Error> {
         let (buf, w, h) = img.to_contiguous_buf();
         let rgb: Vec<Rgb<u8>> = buf
             .iter()
             .map(|p| {
                 let v = p.value();
+                Rgb { r: v, g: v, b: v }
+            })
+            .collect();
+        let rgb_img = imgref::ImgVec::new(rgb, w, h);
+        self.do_encode_rgb8(rgb_img.as_ref())
+    }
+
+    fn encode_bgra8(
+        self,
+        img: ImgRef<'_, BGRA<u8>>,
+    ) -> Result<zencodec_types::EncodeOutput, Self::Error> {
+        // Swizzle BGRA → RGBA, encode with alpha
+        let (buf, w, h) = img.to_contiguous_buf();
+        let rgba: Vec<Rgba<u8>> = buf
+            .iter()
+            .map(|p| Rgba { r: p.r, g: p.g, b: p.b, a: p.a })
+            .collect();
+        let rgba_img = imgref::ImgVec::new(rgba, w, h);
+        self.do_encode_rgba8(rgba_img.as_ref())
+    }
+
+    fn encode_bgrx8(
+        self,
+        img: ImgRef<'_, BGRA<u8>>,
+    ) -> Result<zencodec_types::EncodeOutput, Self::Error> {
+        // Swizzle BGRA → RGB (drop padding byte)
+        let (buf, w, h) = img.to_contiguous_buf();
+        let rgb: Vec<Rgb<u8>> = buf
+            .iter()
+            .map(|p| Rgb { r: p.r, g: p.g, b: p.b })
+            .collect();
+        let rgb_img = imgref::ImgVec::new(rgb, w, h);
+        self.do_encode_rgb8(rgb_img.as_ref())
+    }
+
+    fn encode_rgb_f32(
+        self,
+        img: ImgRef<'_, Rgb<f32>>,
+    ) -> Result<zencodec_types::EncodeOutput, Self::Error> {
+        use linear_srgb::default::linear_to_srgb_u8;
+        let (buf, w, h) = img.to_contiguous_buf();
+        let rgb: Vec<Rgb<u8>> = buf
+            .iter()
+            .map(|p| Rgb {
+                r: linear_to_srgb_u8(p.r.clamp(0.0, 1.0)),
+                g: linear_to_srgb_u8(p.g.clamp(0.0, 1.0)),
+                b: linear_to_srgb_u8(p.b.clamp(0.0, 1.0)),
+            })
+            .collect();
+        let rgb_img = imgref::ImgVec::new(rgb, w, h);
+        self.do_encode_rgb8(rgb_img.as_ref())
+    }
+
+    fn encode_rgba_f32(
+        self,
+        img: ImgRef<'_, Rgba<f32>>,
+    ) -> Result<zencodec_types::EncodeOutput, Self::Error> {
+        use linear_srgb::default::linear_to_srgb_u8;
+        let (buf, w, h) = img.to_contiguous_buf();
+        let rgba: Vec<Rgba<u8>> = buf
+            .iter()
+            .map(|p| Rgba {
+                r: linear_to_srgb_u8(p.r.clamp(0.0, 1.0)),
+                g: linear_to_srgb_u8(p.g.clamp(0.0, 1.0)),
+                b: linear_to_srgb_u8(p.b.clamp(0.0, 1.0)),
+                a: (p.a.clamp(0.0, 1.0) * 255.0 + 0.5) as u8,
+            })
+            .collect();
+        let rgba_img = imgref::ImgVec::new(rgba, w, h);
+        self.do_encode_rgba8(rgba_img.as_ref())
+    }
+
+    fn encode_gray_f32(
+        self,
+        img: ImgRef<'_, Gray<f32>>,
+    ) -> Result<zencodec_types::EncodeOutput, Self::Error> {
+        use linear_srgb::default::linear_to_srgb_u8;
+        let (buf, w, h) = img.to_contiguous_buf();
+        let rgb: Vec<Rgb<u8>> = buf
+            .iter()
+            .map(|g| {
+                let v = linear_to_srgb_u8(g.value().clamp(0.0, 1.0));
                 Rgb { r: v, g: v, b: v }
             })
             .collect();
@@ -375,38 +458,146 @@ impl<'a> zencodec_types::DecodingJob<'a> for AvifDecodeJob<'a> {
     }
 
     fn decode_into_rgb8(
-        self, data: &[u8], _dst: imgref::ImgRefMut<'_, rgb::Rgb<u8>>,
+        self,
+        data: &[u8],
+        mut dst: ImgRefMut<'_, Rgb<u8>>,
     ) -> Result<zencodec_types::ImageInfo, Self::Error> {
         let output = self.decode(data)?;
-        Ok(output.info().clone())
+        let info = output.info().clone();
+        let src = output.into_rgb8();
+        for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
+            let n = src_row.len().min(dst_row.len());
+            dst_row[..n].copy_from_slice(&src_row[..n]);
+        }
+        Ok(info)
     }
 
     fn decode_into_rgba8(
-        self, data: &[u8], _dst: imgref::ImgRefMut<'_, rgb::Rgba<u8>>,
+        self,
+        data: &[u8],
+        mut dst: ImgRefMut<'_, Rgba<u8>>,
     ) -> Result<zencodec_types::ImageInfo, Self::Error> {
         let output = self.decode(data)?;
-        Ok(output.info().clone())
+        let info = output.info().clone();
+        let src = output.into_rgba8();
+        for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
+            let n = src_row.len().min(dst_row.len());
+            dst_row[..n].copy_from_slice(&src_row[..n]);
+        }
+        Ok(info)
     }
 
     fn decode_into_gray8(
-        self, data: &[u8], _dst: imgref::ImgRefMut<'_, rgb::Gray<u8>>,
+        self,
+        data: &[u8],
+        mut dst: ImgRefMut<'_, Gray<u8>>,
     ) -> Result<zencodec_types::ImageInfo, Self::Error> {
         let output = self.decode(data)?;
-        Ok(output.info().clone())
+        let info = output.info().clone();
+        let src = output.into_rgb8();
+        for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
+            for (s, d) in src_row.iter().zip(dst_row.iter_mut()) {
+                let luma = ((s.r as u16 * 77 + s.g as u16 * 150 + s.b as u16 * 29) >> 8) as u8;
+                *d = Gray::new(luma);
+            }
+        }
+        Ok(info)
     }
 
     fn decode_into_bgra8(
-        self, data: &[u8], _dst: imgref::ImgRefMut<'_, rgb::alt::BGRA<u8>>,
+        self,
+        data: &[u8],
+        mut dst: ImgRefMut<'_, BGRA<u8>>,
     ) -> Result<zencodec_types::ImageInfo, Self::Error> {
         let output = self.decode(data)?;
-        Ok(output.info().clone())
+        let info = output.info().clone();
+        let src = output.into_rgba8();
+        for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
+            for (s, d) in src_row.iter().zip(dst_row.iter_mut()) {
+                *d = BGRA { b: s.b, g: s.g, r: s.r, a: s.a };
+            }
+        }
+        Ok(info)
     }
 
     fn decode_into_bgrx8(
-        self, data: &[u8], _dst: imgref::ImgRefMut<'_, rgb::alt::BGRA<u8>>,
+        self,
+        data: &[u8],
+        mut dst: ImgRefMut<'_, BGRA<u8>>,
     ) -> Result<zencodec_types::ImageInfo, Self::Error> {
         let output = self.decode(data)?;
-        Ok(output.info().clone())
+        let info = output.info().clone();
+        let src = output.into_rgb8();
+        for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
+            for (s, d) in src_row.iter().zip(dst_row.iter_mut()) {
+                *d = BGRA { b: s.b, g: s.g, r: s.r, a: 255 };
+            }
+        }
+        Ok(info)
+    }
+
+    fn decode_into_rgb_f32(
+        self,
+        data: &[u8],
+        mut dst: ImgRefMut<'_, Rgb<f32>>,
+    ) -> Result<zencodec_types::ImageInfo, Self::Error> {
+        use linear_srgb::default::srgb_to_linear;
+        let output = self.decode(data)?;
+        let info = output.info().clone();
+        // Use into_rgb_f32() to preserve full precision from 10/12-bit AVIF
+        let src = output.into_rgb_f32();
+        for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
+            for (s, d) in src_row.iter().zip(dst_row.iter_mut()) {
+                *d = Rgb {
+                    r: srgb_to_linear(s.r),
+                    g: srgb_to_linear(s.g),
+                    b: srgb_to_linear(s.b),
+                };
+            }
+        }
+        Ok(info)
+    }
+
+    fn decode_into_rgba_f32(
+        self,
+        data: &[u8],
+        mut dst: ImgRefMut<'_, Rgba<f32>>,
+    ) -> Result<zencodec_types::ImageInfo, Self::Error> {
+        use linear_srgb::default::srgb_to_linear;
+        let output = self.decode(data)?;
+        let info = output.info().clone();
+        let src = output.into_rgba_f32();
+        for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
+            for (s, d) in src_row.iter().zip(dst_row.iter_mut()) {
+                *d = Rgba {
+                    r: srgb_to_linear(s.r),
+                    g: srgb_to_linear(s.g),
+                    b: srgb_to_linear(s.b),
+                    a: s.a, // alpha is linear already
+                };
+            }
+        }
+        Ok(info)
+    }
+
+    fn decode_into_gray_f32(
+        self,
+        data: &[u8],
+        mut dst: ImgRefMut<'_, Gray<f32>>,
+    ) -> Result<zencodec_types::ImageInfo, Self::Error> {
+        use linear_srgb::default::srgb_to_linear;
+        let output = self.decode(data)?;
+        let info = output.info().clone();
+        let src = output.into_rgb_f32();
+        for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
+            for (s, d) in src_row.iter().zip(dst_row.iter_mut()) {
+                let r = srgb_to_linear(s.r);
+                let g = srgb_to_linear(s.g);
+                let b = srgb_to_linear(s.b);
+                *d = Gray::new(0.2126 * r + 0.7152 * g + 0.0722 * b);
+            }
+        }
+        Ok(info)
     }
 }
 
@@ -509,5 +700,53 @@ mod tests {
         assert_eq!(output.info().width, 8);
         assert_eq!(output.info().height, 8);
         assert_eq!(output.info().format, ImageFormat::Avif);
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn f32_roundtrip_all_simd_tiers() {
+        use archmage::testing::{for_each_token_permutation, CompileTimePolicy};
+        use zencodec_types::{Decoding, Encoding};
+
+        let report = for_each_token_permutation(CompileTimePolicy::Warn, |_perm| {
+            // Encode linear f32 → AVIF → decode back to f32
+            let pixels: Vec<Rgb<f32>> = (0..16 * 16)
+                .map(|i| {
+                    let t = i as f32 / 255.0;
+                    Rgb {
+                        r: t,
+                        g: (t * 0.7),
+                        b: (t * 0.3),
+                    }
+                })
+                .collect();
+            let img = imgref::ImgVec::new(pixels, 16, 16);
+
+            let enc = AvifEncoding::new().with_quality(100.0).with_effort(10);
+            let output = enc.encode_rgb_f32(img.as_ref()).unwrap();
+            assert!(!output.bytes().is_empty());
+
+            let dec = AvifDecoding::new();
+            let dst = vec![
+                Rgb {
+                    r: 0.0f32,
+                    g: 0.0,
+                    b: 0.0,
+                };
+                16 * 16
+            ];
+            let mut dst_img = imgref::ImgVec::new(dst, 16, 16);
+            let _info = dec
+                .decode_into_rgb_f32(output.bytes(), dst_img.as_mut())
+                .unwrap();
+
+            // Verify values are in valid range
+            for p in dst_img.buf().iter() {
+                assert!(p.r >= 0.0 && p.r <= 1.0, "r out of range: {}", p.r);
+                assert!(p.g >= 0.0 && p.g <= 1.0, "g out of range: {}", p.g);
+                assert!(p.b >= 0.0 && p.b <= 1.0, "b out of range: {}", p.b);
+            }
+        });
+        assert!(report.permutations_run >= 1);
     }
 }
