@@ -1205,3 +1205,126 @@ fn parser_cancellation_via_reader() {
         Err(e) => panic!("Unexpected error: {:?}", e),
     }
 }
+
+// ============================================================================
+// Multi-track animation tests
+// ============================================================================
+
+static ANIM_8BPC: &str = "tests/colors-animated-8bpc.avif";
+static ANIM_8BPC_ALPHA: &str = "tests/colors-animated-8bpc-alpha-exif-xmp.avif";
+static ANIM_12BPC_KF: &str = "tests/colors-animated-12bpc-keyframes-0-2-3.avif";
+static ANIM_8BPC_AUDIO: &str = "tests/colors-animated-8bpc-audio.avif";
+static ANIM_8BPC_DEPTH: &str = "tests/colors-animated-8bpc-depth-exif-xmp.avif";
+
+#[test]
+fn anim_single_track_no_alpha() {
+    let bytes = std::fs::read(ANIM_8BPC).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+    assert_eq!(info.frame_count, 5);
+    assert!(!info.has_alpha, "Single-track animation should not have alpha");
+    assert!(info.timescale > 0, "Timescale should be positive");
+
+    for i in 0..info.frame_count {
+        let frame = parser.frame(i).expect("frame failed");
+        assert!(!frame.data.is_empty(), "Frame {} empty", i);
+        assert!(frame.alpha_data.is_none(), "Frame {} should not have alpha", i);
+        assert!(frame.duration_ms > 0, "Frame {} should have positive duration", i);
+    }
+}
+
+#[test]
+fn anim_two_tracks_with_alpha() {
+    let bytes = std::fs::read(ANIM_8BPC_ALPHA).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+    assert_eq!(info.frame_count, 5);
+    assert!(info.has_alpha, "Two-track animation should have alpha");
+    // flags bit 0 set = infinite looping -> loop_count=0
+    assert_eq!(info.loop_count, 0, "Expected infinite loop (loop_count=0)");
+
+    for i in 0..info.frame_count {
+        let frame = parser.frame(i).expect("frame failed");
+        assert!(!frame.data.is_empty(), "Frame {} color data empty", i);
+        let alpha = frame.alpha_data.as_ref().unwrap_or_else(|| panic!("Frame {} should have alpha", i));
+        assert!(!alpha.is_empty(), "Frame {} alpha data empty", i);
+    }
+}
+
+#[test]
+fn anim_12bpc_with_alpha() {
+    let bytes = std::fs::read(ANIM_12BPC_KF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+    assert_eq!(info.frame_count, 5);
+    assert!(info.has_alpha, "12bpc animation should have alpha track");
+    assert_eq!(info.loop_count, 0, "Expected infinite loop");
+
+    for i in 0..info.frame_count {
+        let frame = parser.frame(i).expect("frame failed");
+        assert!(!frame.data.is_empty());
+        assert!(frame.alpha_data.is_some(), "Frame {} should have alpha", i);
+    }
+}
+
+#[test]
+fn anim_audio_track_skipped() {
+    let bytes = std::fs::read(ANIM_8BPC_AUDIO).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+    assert_eq!(info.frame_count, 5);
+    assert!(!info.has_alpha, "Audio track should not produce alpha");
+
+    // Audio track should be silently skipped - only color frames present
+    for i in 0..info.frame_count {
+        let frame = parser.frame(i).expect("frame failed");
+        assert!(!frame.data.is_empty());
+        assert!(frame.alpha_data.is_none());
+    }
+}
+
+#[test]
+fn anim_depth_track_with_alpha() {
+    let bytes = std::fs::read(ANIM_8BPC_DEPTH).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+    assert_eq!(info.frame_count, 5);
+    // This file has a depth/alpha track (auxv handler + tref/auxl)
+    assert!(info.has_alpha, "Depth file should have alpha track");
+
+    for i in 0..info.frame_count {
+        let frame = parser.frame(i).expect("frame failed");
+        assert!(!frame.data.is_empty());
+        assert!(frame.alpha_data.is_some(), "Frame {} should have alpha", i);
+    }
+}
+
+#[test]
+fn anim_loop_count_single_track() {
+    // colors-animated-8bpc.avif has elst flags=0x000000 -> loop_count=1 (play once)
+    let bytes = std::fs::read(ANIM_8BPC).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+    assert_eq!(info.loop_count, 1, "Expected loop_count=1 (play once)");
+}
+
+#[test]
+fn anim_frame_iterator_with_alpha() {
+    let bytes = std::fs::read(ANIM_8BPC_ALPHA).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let frames: Vec<_> = parser.frames().collect();
+    assert_eq!(frames.len(), 5);
+
+    for (i, result) in frames.iter().enumerate() {
+        let frame = result.as_ref().expect("frame failed");
+        assert!(!frame.data.is_empty());
+        assert!(frame.alpha_data.is_some(), "Frame {} should have alpha via iterator", i);
+    }
+}

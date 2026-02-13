@@ -670,6 +670,33 @@ struct SampleTable {
     chunk_offsets: TryVec<u64>,
 }
 
+/// A track reference entry (e.g., auxl, cdsc) parsed from a `tref` sub-box.
+#[derive(Debug)]
+struct TrackReference {
+    reference_type: FourCC,
+    track_ids: TryVec<u32>,
+}
+
+/// Parsed data from a single track box (`trak`).
+#[derive(Debug)]
+struct ParsedTrack {
+    track_id: u32,
+    handler_type: FourCC,
+    media_timescale: u32,
+    sample_table: SampleTable,
+    references: TryVec<TrackReference>,
+    loop_count: u32,
+}
+
+/// Paired color + optional alpha animation data after track association.
+struct ParsedAnimationData {
+    color_timescale: u32,
+    color_sample_table: SampleTable,
+    alpha_timescale: Option<u32>,
+    alpha_sample_table: Option<SampleTable>,
+    loop_count: u32,
+}
+
 #[cfg(feature = "eager")]
 #[deprecated(since = "1.5.0", note = "Use `AvifParser` for zero-copy parsing instead")]
 #[derive(Debug, Default)]
@@ -857,6 +884,8 @@ impl AV1Metadata {
 /// contiguous mdat extent, and `Cow::Owned` when extents must be concatenated.
 pub struct FrameRef<'a> {
     pub data: Cow<'a, [u8]>,
+    /// Alpha channel data for this frame, if the animation has a separate alpha track.
+    pub alpha_data: Option<Cow<'a, [u8]>>,
     pub duration_ms: u32,
 }
 
@@ -927,6 +956,8 @@ pub struct AvifParser<'data> {
 struct AnimationParserData {
     media_timescale: u32,
     sample_table: SampleTable,
+    alpha_media_timescale: Option<u32>,
+    alpha_sample_table: Option<SampleTable>,
     loop_count: u32,
 }
 
@@ -935,13 +966,17 @@ struct AnimationParserData {
 pub struct AnimationInfo {
     pub frame_count: usize,
     pub loop_count: u32,
+    /// Whether animation has a separate alpha track.
+    pub has_alpha: bool,
+    /// Media timescale (ticks per second) for the color track.
+    pub timescale: u32,
 }
 
 /// Parsed structure from the box-level parse pass (no mdat data).
 struct ParsedStructure {
     meta: AvifInternalMeta,
     mdat_bounds: TryVec<MdatBounds>,
-    animation_data: Option<(u32, SampleTable, u32)>,
+    animation_data: Option<ParsedAnimationData>,
     major_brand: [u8; 4],
     compatible_brands: std::vec::Vec<[u8; 4]>,
 }
@@ -1034,7 +1069,7 @@ impl<'data> AvifParser<'data> {
 
         let mut meta = None;
         let mut mdat_bounds = TryVec::new();
-        let mut animation_data: Option<(u32, SampleTable, u32)> = None;
+        let mut animation_data: Option<ParsedAnimationData> = None;
 
         while let Some(mut b) = iter.next_box()? {
             stop.check()?;
@@ -1049,8 +1084,9 @@ impl<'data> AvifParser<'data> {
                     meta = Some(read_avif_meta(&mut b, &parse_opts)?);
                 }
                 BoxType::MovieBox => {
-                    if let Some((media_timescale, sample_table)) = read_moov(&mut b)? {
-                        animation_data = Some((media_timescale, sample_table, 0));
+                    let tracks = read_moov(&mut b)?;
+                    if !tracks.is_empty() {
+                        animation_data = Some(associate_tracks(tracks)?);
                     }
                 }
                 BoxType::MediaDataBox => {
@@ -1199,9 +1235,15 @@ impl<'data> AvifParser<'data> {
         let layered_image_indexing = find_prop!(AV1LayeredImageIndexing);
 
         // Store animation metadata if present
-        let animation_data = if let Some((media_timescale, sample_table, loop_count)) = parsed.animation_data {
-            tracker.validate_animation_frames(sample_table.sample_sizes.len() as u32)?;
-            Some(AnimationParserData { media_timescale, sample_table, loop_count })
+        let animation_data = if let Some(anim) = parsed.animation_data {
+            tracker.validate_animation_frames(anim.color_sample_table.sample_sizes.len() as u32)?;
+            Some(AnimationParserData {
+                media_timescale: anim.color_timescale,
+                sample_table: anim.color_sample_table,
+                alpha_media_timescale: anim.alpha_timescale,
+                alpha_sample_table: anim.alpha_sample_table,
+                loop_count: anim.loop_count,
+            })
         } else {
             None
         };
@@ -1386,8 +1428,29 @@ impl<'data> AvifParser<'data> {
         let slice = raw.get(start..end)
             .ok_or(Error::InvalidData("frame not found in raw buffer"))?;
 
+        // Resolve alpha frame if alpha track exists and has this index
+        let alpha_data = if let Some(ref alpha_st) = anim.alpha_sample_table {
+            let alpha_timescale = anim.alpha_media_timescale.unwrap_or(anim.media_timescale);
+            if index < alpha_st.sample_sizes.len() {
+                let (a_offset, a_size) = self.calculate_sample_location(alpha_st, index)?;
+                let a_start = usize::try_from(a_offset)?;
+                let a_end = a_start.checked_add(a_size as usize)
+                    .ok_or(Error::InvalidData("alpha frame end overflow"))?;
+                let a_slice = raw.get(a_start..a_end)
+                    .ok_or(Error::InvalidData("alpha frame not found in raw buffer"))?;
+                let _ = alpha_timescale; // timescale used for duration, which comes from color track
+                Some(Cow::Borrowed(a_slice))
+            } else {
+                warn!("alpha track has fewer frames than color track (index {})", index);
+                None
+            }
+        } else {
+            None
+        };
+
         Ok(FrameRef {
             data: Cow::Borrowed(slice),
+            alpha_data,
             duration_ms,
         })
     }
@@ -1560,6 +1623,8 @@ impl<'data> AvifParser<'data> {
         self.animation_data.as_ref().map(|data| AnimationInfo {
             frame_count: data.sample_table.sample_sizes.len(),
             loop_count: data.loop_count,
+            has_alpha: data.alpha_sample_table.is_some(),
+            timescale: data.media_timescale,
         })
     }
 
@@ -2301,7 +2366,7 @@ pub fn read_avif_with_config<T: Read>(
 
     let mut meta = None;
     let mut mdats = TryVec::new();
-    let mut animation_data: Option<(u32, SampleTable)> = None;
+    let mut animation_data: Option<ParsedAnimationData> = None;
 
     let parse_opts = ParseOptions { lenient: config.lenient };
 
@@ -2316,7 +2381,10 @@ pub fn read_avif_with_config<T: Read>(
                 meta = Some(read_avif_meta(&mut b, &parse_opts)?);
             },
             BoxType::MovieBox => {
-                animation_data = read_moov(&mut b)?;
+                let tracks = read_moov(&mut b)?;
+                if !tracks.is_empty() {
+                    animation_data = Some(associate_tracks(tracks)?);
+                }
             },
             BoxType::MediaDataBox => {
                 if b.bytes_left() > 0 {
@@ -2628,17 +2696,17 @@ pub fn read_avif_with_config<T: Read>(
     }
 
     // Extract animation frames if this is an animated AVIF
-    if let Some((media_timescale, sample_table)) = animation_data {
-        let frame_count = sample_table.sample_sizes.len() as u32;
+    if let Some(anim) = animation_data {
+        let frame_count = anim.color_sample_table.sample_sizes.len() as u32;
         tracker.validate_animation_frames(frame_count)?;
 
-        log::debug!("Animation: extracting frames (media_timescale={})", media_timescale);
-        match extract_animation_frames(&sample_table, media_timescale, &mut mdats) {
+        log::debug!("Animation: extracting frames (media_timescale={})", anim.color_timescale);
+        match extract_animation_frames(&anim.color_sample_table, anim.color_timescale, &mut mdats) {
             Ok(frames) => {
                 if !frames.is_empty() {
                     log::debug!("Animation: extracted {} frames", frames.len());
                     context.animation = Some(AnimationConfig {
-                        loop_count: 0, // TODO: parse from edit list or meta
+                        loop_count: anim.loop_count,
                         frames,
                     });
                 }
@@ -3569,11 +3637,82 @@ fn read_stbl<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<SampleTable> {
     })
 }
 
-/// Parse animation from moov box
-/// Returns (media_timescale, sample_table)
-fn read_moov<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<(u32, SampleTable)>> {
-    let mut media_timescale: Option<u32> = None;
-    let mut sample_table: Option<SampleTable> = None;
+/// Parse Track Header box (tkhd)
+/// See ISO/IEC 14496-12:2015 § 8.3.2
+fn read_tkhd<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<u32> {
+    let version = src.read_u8()?;
+    let _flags = [src.read_u8()?, src.read_u8()?, src.read_u8()?];
+
+    let track_id = if version == 1 {
+        let _creation_time = be_u64(src)?;
+        let _modification_time = be_u64(src)?;
+        let track_id = be_u32(src)?;
+        let _reserved = be_u32(src)?;
+        let _duration = be_u64(src)?;
+        track_id
+    } else {
+        let _creation_time = be_u32(src)?;
+        let _modification_time = be_u32(src)?;
+        let track_id = be_u32(src)?;
+        let _reserved = be_u32(src)?;
+        let _duration = be_u32(src)?;
+        track_id
+    };
+
+    // Skip rest (reserved, layer, alternate_group, volume, matrix, width, height)
+    skip_box_remain(src)?;
+    Ok(track_id)
+}
+
+/// Parse Track Reference box (tref)
+/// See ISO/IEC 14496-12:2015 § 8.3.3
+///
+/// Contains sub-boxes typed by FourCC (e.g., `auxl`, `cdsc`), each with a list of track IDs.
+fn read_tref<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<TrackReference>> {
+    let mut refs = TryVec::new();
+    let mut iter = src.box_iter();
+    while let Some(mut b) = iter.next_box()? {
+        let reference_type = FourCC::from(u32::from(b.head.name));
+        let bytes_left = b.bytes_left();
+        if bytes_left < 4 || bytes_left % 4 != 0 {
+            skip_box_remain(&mut b)?;
+            continue;
+        }
+        let count = bytes_left / 4;
+        let mut track_ids = TryVec::new();
+        for _ in 0..count {
+            track_ids.push(be_u32(&mut b)?)?;
+        }
+        refs.push(TrackReference { reference_type, track_ids })?;
+    }
+    Ok(refs)
+}
+
+/// Parse Edit List box (elst) to extract loop count from flags.
+/// See ISO/IEC 14496-12:2015 § 8.6.6
+///
+/// Returns the loop count: flags bit 0 set = infinite looping (0), otherwise 1.
+fn read_elst<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<u32> {
+    let (version, flags) = read_fullbox_extra(src)?;
+
+    let entry_count = be_u32(src)?;
+    // Skip all entries
+    let entry_size: u64 = if version == 1 { 20 } else { 12 };
+    skip(src, entry_count as u64 * entry_size)?;
+    skip_box_remain(src)?;
+
+    // Bit 0 of flags: repeat (1 = infinite loop → loop_count=0, 0 = play once → loop_count=1)
+    if flags & 1 != 0 {
+        Ok(0) // infinite
+    } else {
+        Ok(1) // play once
+    }
+}
+
+/// Parse animation from moov box.
+/// Returns all parsed tracks.
+fn read_moov<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<ParsedTrack>> {
+    let mut tracks = TryVec::new();
 
     let mut iter = src.box_iter();
     while let Some(mut b) = iter.next_box()? {
@@ -3582,15 +3721,8 @@ fn read_moov<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<(u32, SampleTab
                 let _mvhd = read_mvhd(&mut b)?;
             }
             BoxType::TrackBox => {
-                // Parse track recursively
-                // Only use first video track, but consume all tracks
-                if media_timescale.is_none() {
-                    if let Some((timescale, stbl)) = read_trak(&mut b)? {
-                        media_timescale = Some(timescale);
-                        sample_table = Some(stbl);
-                    }
-                } else {
-                    skip_box_remain(&mut b)?;
+                if let Some(track) = read_trak(&mut b)? {
+                    tracks.push(track)?;
                 }
             }
             _ => {
@@ -3599,30 +3731,65 @@ fn read_moov<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<(u32, SampleTab
         }
     }
 
-    if let (Some(timescale), Some(stbl)) = (media_timescale, sample_table) {
-        Ok(Some((timescale, stbl)))
+    Ok(tracks)
+}
+
+/// Parse track box (trak).
+/// Returns a ParsedTrack if this track has a valid sample table.
+fn read_trak<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<ParsedTrack>> {
+    let mut track_id = 0u32;
+    let mut references = TryVec::new();
+    let mut loop_count = 1u32; // default: play once
+    let mut mdia_result: Option<(FourCC, u32, SampleTable)> = None;
+
+    let mut iter = src.box_iter();
+    while let Some(mut b) = iter.next_box()? {
+        match b.head.name {
+            BoxType::TrackHeaderBox => {
+                track_id = read_tkhd(&mut b)?;
+            }
+            BoxType::TrackReferenceBox => {
+                references = read_tref(&mut b)?;
+            }
+            BoxType::EditBox => {
+                // Parse edts to find elst
+                let mut edts_iter = b.box_iter();
+                while let Some(mut eb) = edts_iter.next_box()? {
+                    if eb.head.name == BoxType::EditListBox {
+                        loop_count = read_elst(&mut eb)?;
+                    } else {
+                        skip_box_remain(&mut eb)?;
+                    }
+                }
+            }
+            BoxType::MediaBox => {
+                mdia_result = read_mdia(&mut b)?;
+            }
+            _ => {
+                skip_box_remain(&mut b)?;
+            }
+        }
+    }
+
+    if let Some((handler_type, media_timescale, sample_table)) = mdia_result {
+        Ok(Some(ParsedTrack {
+            track_id,
+            handler_type,
+            media_timescale,
+            sample_table,
+            references,
+            loop_count,
+        }))
     } else {
         Ok(None)
     }
 }
 
-/// Parse track box (trak)
-/// Returns (media_timescale, sample_table) if this is a valid video track
-fn read_trak<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<(u32, SampleTable)>> {
-    let mut iter = src.box_iter();
-    while let Some(mut b) = iter.next_box()? {
-        if b.head.name == BoxType::MediaBox {
-            return read_mdia(&mut b);
-        } else {
-            skip_box_remain(&mut b)?;
-        }
-    }
-    Ok(None)
-}
-
-/// Parse media box (mdia)
-fn read_mdia<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<(u32, SampleTable)>> {
+/// Parse media box (mdia).
+/// Returns (handler_type, media_timescale, sample_table) if valid.
+fn read_mdia<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<(FourCC, u32, SampleTable)>> {
     let mut media_timescale = 1000; // default
+    let mut handler_type = FourCC::default();
     let mut sample_table: Option<SampleTable> = None;
 
     let mut iter = src.box_iter();
@@ -3631,6 +3798,10 @@ fn read_mdia<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<(u32, SampleTab
             BoxType::MediaHeaderBox => {
                 let mdhd = read_mdhd(&mut b)?;
                 media_timescale = mdhd.timescale;
+            }
+            BoxType::HandlerBox => {
+                let hdlr = read_hdlr(&mut b)?;
+                handler_type = hdlr.handler_type;
             }
             BoxType::MediaInformationBox => {
                 sample_table = read_minf(&mut b)?;
@@ -3642,10 +3813,82 @@ fn read_mdia<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<(u32, SampleTab
     }
 
     if let Some(stbl) = sample_table {
-        Ok(Some((media_timescale, stbl)))
+        Ok(Some((handler_type, media_timescale, stbl)))
     } else {
         Ok(None)
     }
+}
+
+/// Associate parsed tracks into color + optional alpha animation data.
+///
+/// - Color track: first with handler `pict` (fallback: first track with a sample table)
+/// - Alpha track: handler `auxv` with `tref/auxl` referencing color's track_id
+/// - Audio tracks (handler `soun`) are skipped
+fn associate_tracks(tracks: TryVec<ParsedTrack>) -> Result<ParsedAnimationData> {
+    // Find color track: first with handler_type == "pict"
+    let color_idx = tracks
+        .iter()
+        .position(|t| t.handler_type == b"pict")
+        .or_else(|| {
+            // Fallback: first track that isn't audio
+            tracks.iter().position(|t| t.handler_type != b"soun")
+        })
+        .ok_or(Error::InvalidData("no color track found in moov"))?;
+
+    let color_track_id = tracks[color_idx].track_id;
+
+    // Find alpha track: handler_type == "auxv" with tref/auxl referencing color track
+    let alpha_idx = tracks.iter().position(|t| {
+        t.handler_type == b"auxv"
+            && t.references.iter().any(|r| {
+                r.reference_type == b"auxl"
+                    && r.track_ids.iter().any(|&id| id == color_track_id)
+            })
+    });
+
+    if let Some(ai) = alpha_idx {
+        let alpha_frames = tracks[ai].sample_table.sample_sizes.len();
+        let color_frames = tracks[color_idx].sample_table.sample_sizes.len();
+        if alpha_frames != color_frames {
+            warn!(
+                "alpha track has {} frames but color track has {} frames",
+                alpha_frames, color_frames
+            );
+        }
+    }
+
+    // Destructure — we need to consume the vec
+    // Convert to a std vec so we can remove by index
+    let mut tracks_vec: std::vec::Vec<ParsedTrack> = tracks.into_iter().collect();
+
+    // Remove alpha first if it has a higher index to avoid shifting
+    let (color_track, alpha_track) = if let Some(ai) = alpha_idx {
+        if ai > color_idx {
+            let alpha = tracks_vec.remove(ai);
+            let color = tracks_vec.remove(color_idx);
+            (color, Some(alpha))
+        } else {
+            let color = tracks_vec.remove(color_idx);
+            let alpha = tracks_vec.remove(ai);
+            (color, Some(alpha))
+        }
+    } else {
+        let color = tracks_vec.remove(color_idx);
+        (color, None)
+    };
+
+    let (alpha_timescale, alpha_sample_table) = match alpha_track {
+        Some(t) => (Some(t.media_timescale), Some(t.sample_table)),
+        None => (None, None),
+    };
+
+    Ok(ParsedAnimationData {
+        color_timescale: color_track.media_timescale,
+        color_sample_table: color_track.sample_table,
+        alpha_timescale,
+        alpha_sample_table,
+        loop_count: color_track.loop_count,
+    })
 }
 
 /// Parse media information box (minf)

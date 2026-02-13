@@ -115,6 +115,7 @@ box_database!(
     MediaHeaderBox                    0x6d64_6864, // "mdhd"
     HandlerBox                        0x6864_6c72, // "hdlr"
     MediaInformationBox               0x6d69_6e66, // "minf"
+    TrackReferenceBox                 0x7472_6566, // "tref"
     ImageReferenceBox                 0x6972_6566, // "iref"
     ImagePropertiesBox                0x6970_7270, // "iprp"
     ItemPropertyContainerBox          0x6970_636f, // "ipco"
