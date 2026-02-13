@@ -240,7 +240,12 @@ impl<'a> zencodec_types::EncodingJob<'a> for AvifEncodeJob<'a> {
         let (buf, w, h) = img.to_contiguous_buf();
         let rgba: Vec<Rgba<u8>> = buf
             .iter()
-            .map(|p| Rgba { r: p.r, g: p.g, b: p.b, a: p.a })
+            .map(|p| Rgba {
+                r: p.r,
+                g: p.g,
+                b: p.b,
+                a: p.a,
+            })
             .collect();
         let rgba_img = imgref::ImgVec::new(rgba, w, h);
         self.do_encode_rgba8(rgba_img.as_ref())
@@ -254,7 +259,11 @@ impl<'a> zencodec_types::EncodingJob<'a> for AvifEncodeJob<'a> {
         let (buf, w, h) = img.to_contiguous_buf();
         let rgb: Vec<Rgb<u8>> = buf
             .iter()
-            .map(|p| Rgb { r: p.r, g: p.g, b: p.b })
+            .map(|p| Rgb {
+                r: p.r,
+                g: p.g,
+                b: p.b,
+            })
             .collect();
         let rgb_img = imgref::ImgVec::new(rgb, w, h);
         self.do_encode_rgb8(rgb_img.as_ref())
@@ -370,8 +379,8 @@ impl zencodec_types::Decoding for AvifDecoding {
     type Job<'a> = AvifDecodeJob<'a>;
 
     fn capabilities() -> &'static zencodec_types::CodecCapabilities {
-        static CAPS: zencodec_types::CodecCapabilities = zencodec_types::CodecCapabilities::new()
-            .with_decode_cancel(true);
+        static CAPS: zencodec_types::CodecCapabilities =
+            zencodec_types::CodecCapabilities::new().with_decode_cancel(true);
         &CAPS
     }
 
@@ -387,9 +396,7 @@ impl zencodec_types::Decoding for AvifDecoding {
             && let Some(max_h) = limits.max_height
         {
             let max = max_w as u64 * max_h as u64;
-            self.inner = self
-                .inner
-                .frame_size_limit(max.min(u32::MAX as u64) as u32);
+            self.inner = self.inner.frame_size_limit(max.min(u32::MAX as u64) as u32);
         }
         self
     }
@@ -514,7 +521,12 @@ impl<'a> zencodec_types::DecodingJob<'a> for AvifDecodeJob<'a> {
         let src = output.into_rgba8();
         for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
             for (s, d) in src_row.iter().zip(dst_row.iter_mut()) {
-                *d = BGRA { b: s.b, g: s.g, r: s.r, a: s.a };
+                *d = BGRA {
+                    b: s.b,
+                    g: s.g,
+                    r: s.r,
+                    a: s.a,
+                };
             }
         }
         Ok(info)
@@ -530,7 +542,12 @@ impl<'a> zencodec_types::DecodingJob<'a> for AvifDecodeJob<'a> {
         let src = output.into_rgb8();
         for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
             for (s, d) in src_row.iter().zip(dst_row.iter_mut()) {
-                *d = BGRA { b: s.b, g: s.g, r: s.r, a: 255 };
+                *d = BGRA {
+                    b: s.b,
+                    g: s.g,
+                    r: s.r,
+                    a: 255,
+                };
             }
         }
         Ok(info)
@@ -705,7 +722,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn f32_roundtrip_all_simd_tiers() {
-        use archmage::testing::{for_each_token_permutation, CompileTimePolicy};
+        use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
         use zencodec_types::{Decoding, Encoding};
 
         let report = for_each_token_permutation(CompileTimePolicy::Warn, |_perm| {
@@ -774,7 +791,15 @@ mod tests {
 
         let dec = AvifDecoding::new();
         let mut dst_img = imgref::ImgVec::new(
-            vec![Rgba { r: 0.0f32, g: 0.0, b: 0.0, a: 0.0 }; 16 * 16],
+            vec![
+                Rgba {
+                    r: 0.0f32,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 0.0
+                };
+                16 * 16
+            ],
             16,
             16,
         );
@@ -794,9 +819,7 @@ mod tests {
     fn f32_gray_roundtrip() {
         use zencodec_types::{Decoding, Encoding, Gray};
 
-        let pixels: Vec<Gray<f32>> = (0..16 * 16)
-            .map(|i| Gray(i as f32 / 255.0))
-            .collect();
+        let pixels: Vec<Gray<f32>> = (0..16 * 16).map(|i| Gray(i as f32 / 255.0)).collect();
         let img = imgref::ImgVec::new(pixels, 16, 16);
 
         let enc = AvifEncoding::new().with_quality(100.0).with_effort(10);

@@ -8,7 +8,7 @@ use crate::Result;
 use crate::error::Error;
 use enough::Stop;
 use imgref::{ImgRef, ImgVec};
-use rgb::{Rgb, Rgba, RGB8, RGBA8};
+use rgb::{RGB8, RGBA8, Rgb, Rgba};
 use whereat::at;
 
 /// Encoded AVIF image output
