@@ -76,8 +76,9 @@ pub use decoder::AvifDecoder;
 pub use decoder_managed::ManagedAvifDecoder;
 #[cfg(feature = "encode")]
 pub use encoder::{
-    EncodeAlphaMode, EncodeBitDepth, EncodeColorModel, EncodedImage, EncoderConfig, encode_rgb8,
-    encode_rgb16, encode_rgba8, encode_rgba16,
+    AnimationFrame, AnimationFrameRgba, EncodeAlphaMode, EncodeBitDepth, EncodeColorModel,
+    EncodedAnimation, EncodedImage, EncoderConfig, encode_animation_rgb8, encode_animation_rgba8,
+    encode_rgb8, encode_rgb16, encode_rgba8, encode_rgba16,
 };
 pub use enough::{Stop, StopReason, Unstoppable};
 pub use error::{Error, Result};

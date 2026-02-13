@@ -7,8 +7,8 @@
 use crate::Result;
 use crate::error::Error;
 use enough::Stop;
-use imgref::ImgRef;
-use rgb::{Rgb, Rgba};
+use imgref::{ImgRef, ImgVec};
+use rgb::{Rgb, Rgba, RGB8, RGBA8};
 use whereat::at;
 
 /// Encoded AVIF image output
@@ -393,5 +393,109 @@ pub fn encode_rgba16(
         avif_file: result.avif_file,
         color_byte_size: result.color_byte_size,
         alpha_byte_size: result.alpha_byte_size,
+    })
+}
+
+/// A single frame in an animated AVIF sequence
+#[derive(Clone)]
+pub struct AnimationFrame {
+    /// Frame pixel data (RGB8)
+    pub pixels: ImgVec<RGB8>,
+    /// Duration of this frame in milliseconds
+    pub duration_ms: u32,
+}
+
+/// A single frame with alpha in an animated AVIF sequence
+#[derive(Clone)]
+pub struct AnimationFrameRgba {
+    /// Frame pixel data (RGBA8)
+    pub pixels: ImgVec<RGBA8>,
+    /// Duration of this frame in milliseconds
+    pub duration_ms: u32,
+}
+
+/// Result of animated AVIF encoding
+#[non_exhaustive]
+#[derive(Clone)]
+pub struct EncodedAnimation {
+    /// Complete AVIF file bytes
+    pub avif_file: Vec<u8>,
+    /// Number of frames encoded
+    pub frame_count: usize,
+    /// Total duration in milliseconds
+    pub total_duration_ms: u64,
+}
+
+/// Encode a sequence of RGB8 frames into an animated AVIF
+///
+/// All frames must have the same dimensions. Each frame has its own
+/// duration in milliseconds.
+///
+/// # Arguments
+///
+/// * `frames` - Sequence of RGB8 frames with durations
+/// * `config` - Encoder configuration (quality, speed, etc.)
+/// * `stop` - Cancellation token (checked before encoding starts)
+pub fn encode_animation_rgb8(
+    frames: &[AnimationFrame],
+    config: &EncoderConfig,
+    stop: &(impl Stop + ?Sized),
+) -> Result<EncodedAnimation> {
+    stop.check().map_err(|e| at(Error::from(e)))?;
+    let enc = build_ravif_encoder(config);
+
+    let ravif_frames: Vec<ravif::AnimFrame<'_>> = frames
+        .iter()
+        .map(|f| ravif::AnimFrame {
+            rgb: f.pixels.as_ref(),
+            duration_ms: f.duration_ms,
+        })
+        .collect();
+
+    let result = enc
+        .encode_animation_rgb(&ravif_frames)
+        .map_err(|e| at(Error::Encode(e.to_string())))?;
+
+    Ok(EncodedAnimation {
+        avif_file: result.avif_file,
+        frame_count: result.frame_count,
+        total_duration_ms: result.total_duration_ms,
+    })
+}
+
+/// Encode a sequence of RGBA8 frames into an animated AVIF
+///
+/// All frames must have the same dimensions. If any frame has
+/// non-opaque alpha, an alpha track is included automatically.
+///
+/// # Arguments
+///
+/// * `frames` - Sequence of RGBA8 frames with durations
+/// * `config` - Encoder configuration (quality, speed, etc.)
+/// * `stop` - Cancellation token (checked before encoding starts)
+pub fn encode_animation_rgba8(
+    frames: &[AnimationFrameRgba],
+    config: &EncoderConfig,
+    stop: &(impl Stop + ?Sized),
+) -> Result<EncodedAnimation> {
+    stop.check().map_err(|e| at(Error::from(e)))?;
+    let enc = build_ravif_encoder(config);
+
+    let ravif_frames: Vec<ravif::AnimFrameRgba<'_>> = frames
+        .iter()
+        .map(|f| ravif::AnimFrameRgba {
+            rgba: f.pixels.as_ref(),
+            duration_ms: f.duration_ms,
+        })
+        .collect();
+
+    let result = enc
+        .encode_animation_rgba(&ravif_frames)
+        .map_err(|e| at(Error::Encode(e.to_string())))?;
+
+    Ok(EncodedAnimation {
+        avif_file: result.avif_file,
+        frame_count: result.frame_count,
+        total_duration_ms: result.total_duration_ms,
     })
 }
