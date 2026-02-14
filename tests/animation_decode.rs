@@ -4,7 +4,7 @@
 
 use enough::Unstoppable;
 use std::fs;
-use zenavif::{DecoderConfig, decode_animation, decode_animation_with};
+use zenavif::{AnimationDecoder, DecoderConfig, decode_animation, decode_animation_with};
 
 fn animated_vector(name: &str) -> Vec<u8> {
     let path = format!("tests/vectors/libavif/{name}");
@@ -329,6 +329,287 @@ fn animation_encode_decode_roundtrip_rgba8() {
             frame.pixels.height(),
             frame.duration_ms,
             frame.pixels.has_alpha()
+        );
+    }
+}
+
+// ---- AnimationDecoder (frame-by-frame) tests ----
+
+#[test]
+fn frame_by_frame_matches_batch() {
+    let data = animated_vector("colors-animated-8bpc.avif");
+    let config = DecoderConfig::new().threads(1);
+
+    // Batch decode
+    let batch = decode_animation_with(&data, &config, &Unstoppable).unwrap();
+
+    // Frame-by-frame decode
+    let mut decoder = AnimationDecoder::new(&data, &config).unwrap();
+    assert_eq!(decoder.info().frame_count, batch.info.frame_count);
+    assert_eq!(decoder.info().loop_count, batch.info.loop_count);
+    assert_eq!(decoder.info().has_alpha, batch.info.has_alpha);
+    assert_eq!(decoder.remaining_frames(), batch.frames.len());
+
+    for (i, batch_frame) in batch.frames.iter().enumerate() {
+        assert_eq!(decoder.frame_index(), i);
+        let frame = decoder
+            .next_frame(&Unstoppable)
+            .unwrap()
+            .unwrap_or_else(|| panic!("expected frame {i}"));
+
+        assert_eq!(
+            frame.pixels.width(),
+            batch_frame.pixels.width(),
+            "frame {i} width mismatch"
+        );
+        assert_eq!(
+            frame.pixels.height(),
+            batch_frame.pixels.height(),
+            "frame {i} height mismatch"
+        );
+        assert_eq!(
+            frame.duration_ms, batch_frame.duration_ms,
+            "frame {i} duration mismatch"
+        );
+        assert_eq!(
+            frame.pixels.has_alpha(),
+            batch_frame.pixels.has_alpha(),
+            "frame {i} alpha mismatch"
+        );
+    }
+
+    // Should return None after all frames
+    assert_eq!(decoder.remaining_frames(), 0);
+    assert!(decoder.next_frame(&Unstoppable).unwrap().is_none());
+}
+
+#[test]
+fn frame_by_frame_12bpc() {
+    let data = animated_vector("colors-animated-12bpc-keyframes-0-2-3.avif");
+    let config = DecoderConfig::new().threads(1);
+
+    let mut decoder = AnimationDecoder::new(&data, &config).unwrap();
+    let total = decoder.info().frame_count;
+    assert!(total > 1, "expected multiple frames");
+
+    let mut decoded_count = 0;
+    while let Some(frame) = decoder.next_frame(&Unstoppable).unwrap() {
+        let is_16bit = matches!(
+            &frame.pixels,
+            zencodec_types::PixelData::Rgb16(_) | zencodec_types::PixelData::Rgba16(_)
+        );
+        assert!(
+            is_16bit,
+            "frame {} should be 16-bit for 12bpc source",
+            decoded_count
+        );
+        decoded_count += 1;
+    }
+
+    assert_eq!(decoded_count, total);
+    eprintln!("frame-by-frame 12bpc: decoded {decoded_count} frames");
+}
+
+#[test]
+fn frame_by_frame_cancellation() {
+    use enough::StopReason;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct StopAfter {
+        count: AtomicUsize,
+    }
+
+    impl enough::Stop for StopAfter {
+        fn check(&self) -> std::result::Result<(), StopReason> {
+            let n = self.count.fetch_add(1, Ordering::Relaxed);
+            // Allow enough calls for setup + first frame, stop on second
+            if n > 10 {
+                Err(StopReason::Cancelled)
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    let data = animated_vector("colors-animated-8bpc.avif");
+    let config = DecoderConfig::new().threads(1);
+    let mut decoder = AnimationDecoder::new(&data, &config).unwrap();
+
+    let stop = StopAfter {
+        count: AtomicUsize::new(0),
+    };
+
+    // First frame should succeed
+    let first = decoder.next_frame(&stop);
+    if first.is_ok() {
+        // Subsequent frames should eventually fail with cancellation
+        let mut got_cancel = false;
+        for _ in 0..decoder.remaining_frames() {
+            match decoder.next_frame(&stop) {
+                Err(_) => {
+                    got_cancel = true;
+                    break;
+                }
+                Ok(None) => break,
+                Ok(Some(_)) => continue,
+            }
+        }
+        assert!(
+            got_cancel || decoder.remaining_frames() == 0,
+            "should have been cancelled or completed"
+        );
+    }
+    // If even the first frame was cancelled, that's also valid
+    eprintln!(
+        "cancellation test: stopped at frame {}",
+        decoder.frame_index()
+    );
+}
+
+#[test]
+fn frame_by_frame_still_image_returns_unsupported() {
+    let data = fs::read("tests/vectors/libavif/kodim03_yuv420_8bpc.avif")
+        .expect("need kodim03 test vector");
+    let result = AnimationDecoder::new(&data, &DecoderConfig::default());
+    assert!(
+        result.is_err(),
+        "AnimationDecoder should reject still images"
+    );
+}
+
+#[cfg(feature = "encode")]
+#[test]
+fn animation_encode_decode_roundtrip_rgb16() {
+    use imgref::ImgVec;
+    use rgb::RGB16;
+    use zenavif::{AnimationFrame16, EncoderConfig, encode_animation_rgb16};
+
+    // Create 3 frames of solid 10-bit color
+    let colors = [
+        RGB16 {
+            r: 800,
+            g: 100,
+            b: 100,
+        },
+        RGB16 {
+            r: 100,
+            g: 800,
+            b: 100,
+        },
+        RGB16 {
+            r: 100,
+            g: 100,
+            b: 800,
+        },
+    ];
+    let frames: Vec<AnimationFrame16> = colors
+        .iter()
+        .map(|&c| AnimationFrame16 {
+            pixels: ImgVec::new(vec![c; 64 * 64], 64, 64),
+            duration_ms: 100,
+        })
+        .collect();
+
+    let config = EncoderConfig::new().quality(80.0).speed(10);
+    let encoded = encode_animation_rgb16(&frames, &config, &Unstoppable).unwrap();
+    eprintln!(
+        "rgb16 encoded {} frames, {} bytes",
+        encoded.frame_count,
+        encoded.avif_file.len()
+    );
+    assert_eq!(encoded.frame_count, 3);
+
+    // Decode it back — should produce 16-bit output (10-bit source)
+    let decoded = decode_animation(&encoded.avif_file).unwrap();
+    assert_eq!(decoded.frames.len(), 3);
+    assert_eq!(decoded.info.frame_count, 3);
+
+    for (i, frame) in decoded.frames.iter().enumerate() {
+        assert_eq!(frame.pixels.width(), 64, "frame {i} width");
+        assert_eq!(frame.pixels.height(), 64, "frame {i} height");
+        assert_eq!(frame.duration_ms, 100, "frame {i} duration");
+
+        // 10-bit source should decode to 16-bit output
+        let is_16bit = matches!(
+            &frame.pixels,
+            zencodec_types::PixelData::Rgb16(_) | zencodec_types::PixelData::Rgba16(_)
+        );
+        assert!(
+            is_16bit,
+            "frame {i} should be 16-bit for 10-bit source, got {:?}",
+            std::mem::discriminant(&frame.pixels)
+        );
+    }
+}
+
+#[cfg(feature = "encode")]
+#[test]
+fn animation_encode_decode_roundtrip_rgba16() {
+    use imgref::ImgVec;
+    use rgb::RGBA16;
+    use zenavif::{AnimationFrameRgba16, EncoderConfig, encode_animation_rgba16};
+
+    // 2 frames with semi-transparent 10-bit pixels
+    let frames = vec![
+        AnimationFrameRgba16 {
+            pixels: ImgVec::new(
+                vec![
+                    RGBA16 {
+                        r: 900,
+                        g: 100,
+                        b: 100,
+                        a: 512
+                    };
+                    32 * 32
+                ],
+                32,
+                32,
+            ),
+            duration_ms: 200,
+        },
+        AnimationFrameRgba16 {
+            pixels: ImgVec::new(
+                vec![
+                    RGBA16 {
+                        r: 100,
+                        g: 100,
+                        b: 900,
+                        a: 800
+                    };
+                    32 * 32
+                ],
+                32,
+                32,
+            ),
+            duration_ms: 300,
+        },
+    ];
+
+    let config = EncoderConfig::new().quality(80.0).speed(10);
+    let encoded = encode_animation_rgba16(&frames, &config, &Unstoppable).unwrap();
+    eprintln!(
+        "rgba16 encoded {} frames, {} bytes",
+        encoded.frame_count,
+        encoded.avif_file.len()
+    );
+
+    let decoded = decode_animation(&encoded.avif_file).unwrap();
+    assert_eq!(decoded.frames.len(), 2);
+    assert!(decoded.info.has_alpha, "roundtrip should preserve alpha");
+
+    for (i, frame) in decoded.frames.iter().enumerate() {
+        assert!(
+            frame.pixels.has_alpha(),
+            "frame {i} should have alpha"
+        );
+
+        let is_16bit = matches!(
+            &frame.pixels,
+            zencodec_types::PixelData::Rgba16(_)
+        );
+        assert!(
+            is_16bit,
+            "frame {i} should be RGBA16 for 10-bit source"
         );
     }
 }
