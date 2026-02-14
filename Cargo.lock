@@ -1213,12 +1213,12 @@ dependencies = [
 name = "ravif"
 version = "0.14.0"
 dependencies = [
- "avif-serialize",
  "imgref",
  "loop9",
  "quick-error",
  "rayon",
  "rgb",
+ "zenavif-serialize",
  "zenrav1e",
 ]
 
@@ -1694,6 +1694,13 @@ dependencies = [
  "fallible_collections",
  "leb128",
  "log",
+]
+
+[[package]]
+name = "zenavif-serialize"
+version = "0.9.0"
+dependencies = [
+ "arrayvec",
 ]
 
 [[package]]

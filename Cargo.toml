@@ -17,7 +17,7 @@ rav1d-safe = { version = "0.1.0", default-features = false, features = ["bitdept
 archmage = { version = "0.6.1", features = ["macros", "safe_unaligned_simd"] }
 magetypes = "0.6"
 safe_unaligned_simd = "0.2.4"
-zenavif-parse = { path = "../zenavif-parse-animated" }
+zenavif-parse = { path = "../zenavif-parse" }
 yuv = "0.8.10"
 imgref = "1.12.0"
 rgb = { version = "0.8.52", default-features = false, features = ["as-bytes"] }
