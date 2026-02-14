@@ -431,6 +431,62 @@ pub struct AmbientViewingEnvironment {
     pub ambient_light_y: u16,
 }
 
+/// Per-channel gain map parameters from ISO 21496-1.
+///
+/// Each field is a rational number (numerator/denominator pair) describing
+/// how to apply the gain map for this channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GainMapChannel {
+    /// Minimum gain map value (numerator).
+    pub gain_map_min_n: i32,
+    /// Minimum gain map value (denominator).
+    pub gain_map_min_d: u32,
+    /// Maximum gain map value (numerator).
+    pub gain_map_max_n: i32,
+    /// Maximum gain map value (denominator).
+    pub gain_map_max_d: u32,
+    /// Gamma curve parameter (numerator).
+    pub gamma_n: u32,
+    /// Gamma curve parameter (denominator).
+    pub gamma_d: u32,
+    /// Base image offset (numerator).
+    pub base_offset_n: i32,
+    /// Base image offset (denominator).
+    pub base_offset_d: u32,
+    /// Alternate image offset (numerator).
+    pub alternate_offset_n: i32,
+    /// Alternate image offset (denominator).
+    pub alternate_offset_d: u32,
+}
+
+/// Gain map metadata from a ToneMapImage (`tmap`) derived image item.
+///
+/// Describes how to apply a gain map to convert between SDR and HDR
+/// renditions. The gain map is a separate AV1-encoded image that, combined
+/// with this metadata, allows reconstructing an HDR image from the SDR base.
+///
+/// See ISO 21496-1:2025 for the full specification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GainMapMetadata {
+    /// If true, each RGB channel has independent gain map parameters.
+    /// If false, `channels[0]` applies to all three channels.
+    pub is_multichannel: bool,
+    /// If true, the gain map is encoded in the base image's colour space.
+    /// If false, it's in the alternate image's colour space.
+    pub use_base_colour_space: bool,
+    /// Base HDR headroom (numerator).
+    pub base_hdr_headroom_n: u32,
+    /// Base HDR headroom (denominator).
+    pub base_hdr_headroom_d: u32,
+    /// Alternate HDR headroom (numerator).
+    pub alternate_hdr_headroom_n: u32,
+    /// Alternate HDR headroom (denominator).
+    pub alternate_hdr_headroom_d: u32,
+    /// Per-channel parameters. For single-channel mode, only index 0 is
+    /// meaningful (indices 1 and 2 are copies of index 0).
+    pub channels: [GainMapChannel; 3],
+}
+
 /// Operating point selector from the `a1op` property box.
 ///
 /// Selects which AV1 operating point to decode for multi-operating-point images.
@@ -806,6 +862,15 @@ pub struct AvifData {
     /// Raw XMP/XML data as UTF-8.
     pub xmp: Option<TryVec<u8>>,
 
+    /// Gain map metadata from a `tmap` derived image item.
+    pub gain_map_metadata: Option<GainMapMetadata>,
+
+    /// AV1-encoded gain map image data.
+    pub gain_map_item: Option<TryVec<u8>>,
+
+    /// Color information for the alternate (HDR) rendition from the `tmap` item.
+    pub gain_map_color_info: Option<ColorInformation>,
+
     /// Major brand from the `ftyp` box (e.g., `*b"avif"` or `*b"avis"`).
     pub major_brand: [u8; 4],
 
@@ -964,6 +1029,9 @@ pub struct AvifParser<'data> {
     layered_image_indexing: Option<AV1LayeredImageIndexing>,
     exif_item: Option<ItemExtents>,
     xmp_item: Option<ItemExtents>,
+    gain_map_metadata: Option<GainMapMetadata>,
+    gain_map: Option<ItemExtents>,
+    gain_map_color_info: Option<ColorInformation>,
     major_brand: [u8; 4],
     compatible_brands: std::vec::Vec<[u8; 4]>,
 }
@@ -1174,6 +1242,9 @@ impl<'data> AvifParser<'data> {
                 layered_image_indexing: None,
                 exif_item: None,
                 xmp_item: None,
+                gain_map_metadata: None,
+                gain_map: None,
+                gain_map_color_info: None,
                 major_brand: parsed.major_brand,
                 compatible_brands: parsed.compatible_brands,
             });
@@ -1287,6 +1358,62 @@ impl<'data> AvifParser<'data> {
             (None, TryVec::new())
         };
 
+        // Detect gain map (tmap derived image item)
+        let (gain_map_metadata, gain_map, gain_map_color_info) = {
+            let tmap_item = meta.item_infos.iter()
+                .find(|info| info.item_type == b"tmap");
+
+            if let Some(tmap_info) = tmap_item {
+                let tmap_id = tmap_info.item_id;
+
+                // Find dimg references FROM tmap TO its inputs
+                let mut inputs: TryVec<(u32, u16)> = TryVec::new();
+                for iref in meta.item_references.iter() {
+                    if iref.from_item_id == tmap_id && iref.item_type == b"dimg" {
+                        inputs.push((iref.to_item_id, iref.reference_index))?;
+                    }
+                }
+                inputs.sort_by_key(|&(_, idx)| idx);
+
+                if inputs.len() >= 2 {
+                    let base_item_id = inputs[0].0;
+                    let gmap_item_id = inputs[1].0;
+
+                    if base_item_id == meta.primary_item_id {
+                        // Read tmap item's data payload (ToneMapImage)
+                        let tmap_extents = Self::get_item_extents(&meta, tmap_id)?;
+                        let tmap_data = Self::resolve_extents_from_raw(
+                            raw.as_ref(), &parsed.mdat_bounds, &tmap_extents,
+                        )?;
+                        let metadata = parse_tone_map_image(&tmap_data)?;
+
+                        // Get gain map image extents
+                        let gmap_extents = Self::get_item_extents(&meta, gmap_item_id)?;
+
+                        // Get alternate color info from tmap item's properties
+                        let alt_color = meta.properties.iter().find_map(|p| {
+                            if p.item_id == tmap_id {
+                                match &p.property {
+                                    ItemProperty::ColorInformation(c) => Some(c.clone()),
+                                    _ => None,
+                                }
+                            } else {
+                                None
+                            }
+                        });
+
+                        (Some(metadata), Some(gmap_extents), alt_color)
+                    } else {
+                        (None, None, None)
+                    }
+                } else {
+                    (None, None, None)
+                }
+            } else {
+                (None, None, None)
+            }
+        };
+
         // Extract properties for the primary item
         macro_rules! find_prop {
             ($variant:ident) => {
@@ -1351,6 +1478,9 @@ impl<'data> AvifParser<'data> {
             layered_image_indexing,
             exif_item,
             xmp_item,
+            gain_map_metadata,
+            gain_map,
+            gain_map_color_info,
             major_brand: parsed.major_brand,
             compatible_brands: parsed.compatible_brands,
         })
@@ -1376,6 +1506,46 @@ impl<'data> AvifParser<'data> {
             construction_method: item.construction_method,
             extents,
         })
+    }
+
+    /// Resolve file-based item extents from a raw buffer during `build()`,
+    /// before `self` exists. Returns owned data (small payloads like tmap).
+    fn resolve_extents_from_raw(
+        raw: &[u8],
+        mdat_bounds: &[MdatBounds],
+        item: &ItemExtents,
+    ) -> Result<std::vec::Vec<u8>> {
+        if item.construction_method != ConstructionMethod::File {
+            return Err(Error::Unsupported("tmap item must use file construction method"));
+        }
+        let mut data = std::vec::Vec::new();
+        for extent in &item.extents {
+            let file_offset = extent.start();
+            let start = usize::try_from(file_offset)?;
+            let end = match extent {
+                ExtentRange::WithLength(range) => {
+                    let len = range.end.checked_sub(range.start)
+                        .ok_or(Error::InvalidData("extent range start > end"))?;
+                    start.checked_add(usize::try_from(len)?)
+                        .ok_or(Error::InvalidData("extent end overflow"))?
+                }
+                ExtentRange::ToEnd(_) => {
+                    // Find the mdat that contains this offset
+                    let mut found_end = raw.len();
+                    for mdat in mdat_bounds {
+                        if file_offset >= mdat.offset && file_offset < mdat.offset + mdat.length {
+                            found_end = usize::try_from(mdat.offset + mdat.length)?;
+                            break;
+                        }
+                    }
+                    found_end
+                }
+            };
+            let slice = raw.get(start..end)
+                .ok_or(Error::InvalidData("tmap extent out of bounds"))?;
+            data.extend_from_slice(slice);
+        }
+        Ok(data)
     }
 
     /// Resolve an item's data from the raw buffer, returning `Cow::Borrowed`
@@ -1785,6 +1955,27 @@ impl<'data> AvifParser<'data> {
         self.xmp_item.as_ref().map(|item| self.resolve_item(item))
     }
 
+    /// Gain map metadata, if a `tmap` derived image item is present.
+    ///
+    /// Describes how to apply a gain map to reconstruct an HDR rendition
+    /// from the SDR base image. See ISO 21496-1.
+    pub fn gain_map_metadata(&self) -> Option<&GainMapMetadata> {
+        self.gain_map_metadata.as_ref()
+    }
+
+    /// Gain map image data (AV1-encoded), if present.
+    pub fn gain_map_data(&self) -> Option<Result<Cow<'_, [u8]>>> {
+        self.gain_map.as_ref().map(|item| self.resolve_item(item))
+    }
+
+    /// Color information for the alternate (typically HDR) rendition.
+    ///
+    /// This comes from the `tmap` item's `colr` property and describes
+    /// the colour space of the tone-mapped output.
+    pub fn gain_map_color_info(&self) -> Option<&ColorInformation> {
+        self.gain_map_color_info.as_ref()
+    }
+
     /// Get the major brand from the `ftyp` box (e.g., `*b"avif"` or `*b"avis"`).
     pub fn major_brand(&self) -> &[u8; 4] {
         &self.major_brand
@@ -1889,6 +2080,13 @@ impl<'data> AvifParser<'data> {
                 let _ = v.extend_from_slice(&c);
                 v
             }),
+            gain_map_metadata: self.gain_map_metadata.clone(),
+            gain_map_item: self.gain_map_data().and_then(|r| r.ok()).map(|c| {
+                let mut v = TryVec::new();
+                let _ = v.extend_from_slice(&c);
+                v
+            }),
+            gain_map_color_info: self.gain_map_color_info.clone(),
             major_brand: self.major_brand,
             compatible_brands: self.compatible_brands.clone(),
         })
@@ -1935,6 +2133,8 @@ struct AvifInternalMeta {
     iloc_items: TryVec<ItemLocationBoxItem>,
     item_infos: TryVec<ItemInfoEntry>,
     idat: Option<TryVec<u8>>,
+    #[allow(dead_code)] // Parsed for future altr group support
+    entity_groups: TryVec<EntityGroup>,
 }
 
 /// A Media Data Box
@@ -2820,6 +3020,51 @@ pub fn read_avif_with_config<T: Read>(
         }
     }
 
+    // Extract gain map (tmap derived image item)
+    if let Some(tmap_info) = meta.item_infos.iter().find(|info| info.item_type == b"tmap") {
+        let tmap_id = tmap_info.item_id;
+
+        let mut inputs: TryVec<(u32, u16)> = TryVec::new();
+        for iref in meta.item_references.iter() {
+            if iref.from_item_id == tmap_id && iref.item_type == b"dimg" {
+                inputs.push((iref.to_item_id, iref.reference_index))?;
+            }
+        }
+        inputs.sort_by_key(|&(_, idx)| idx);
+
+        if inputs.len() >= 2 && inputs[0].0 == meta.primary_item_id {
+            let gmap_item_id = inputs[1].0;
+
+            // Read tmap item payload
+            if let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == tmap_id) {
+                let mut tmap_data = TryVec::new();
+                extract_item_data(loc, &mut tmap_data)?;
+                if let Ok(metadata) = parse_tone_map_image(&tmap_data) {
+                    context.gain_map_metadata = Some(metadata);
+                }
+            }
+
+            // Read gain map image data
+            if let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == gmap_item_id) {
+                let mut gmap_data = TryVec::new();
+                extract_item_data(loc, &mut gmap_data)?;
+                context.gain_map_item = Some(gmap_data);
+            }
+
+            // Get alternate color info from tmap item's properties
+            context.gain_map_color_info = meta.properties.iter().find_map(|p| {
+                if p.item_id == tmap_id {
+                    match &p.property {
+                        ItemProperty::ColorInformation(c) => Some(c.clone()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            });
+        }
+    }
+
     // Extract animation frames if this is an animated AVIF
     if let Some(anim) = animation_data {
         let frame_count = anim.color_sample_table.sample_sizes.len() as u32;
@@ -2875,6 +3120,124 @@ pub fn read_avif<T: Read>(f: &mut T) -> Result<AvifData> {
     read_avif_with_options(f, &ParseOptions::default())
 }
 
+/// An entity group from a GroupsListBox (`grpl`).
+///
+/// See ISO 14496-12:2024 § 8.15.3.
+#[allow(dead_code)] // Parsed for future altr group support
+struct EntityGroup {
+    group_type: FourCC,
+    group_id: u32,
+    entity_ids: TryVec<u32>,
+}
+
+/// Parse a GroupsListBox (`grpl`).
+///
+/// Each child box is an EntityToGroupBox with a grouping type given by its box type.
+/// See ISO 14496-12:2024 § 8.15.3.
+fn read_grpl<T: Read + Offset>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<EntityGroup>> {
+    let mut groups = TryVec::new();
+    let mut iter = src.box_iter();
+    while let Some(mut b) = iter.next_box()? {
+        let group_type = FourCC::from(u32::from(b.head.name));
+        // Read version and flags (not validated per spec flexibility)
+        let _version = b.read_u8()?;
+        let mut flags_buf = [0u8; 3];
+        b.read_exact(&mut flags_buf)?;
+
+        let group_id = be_u32(&mut b)?;
+        let num_entities = be_u32(&mut b)?;
+
+        let mut entity_ids = TryVec::new();
+        for _ in 0..num_entities {
+            entity_ids.push(be_u32(&mut b)?)?;
+        }
+
+        groups.push(EntityGroup {
+            group_type,
+            group_id,
+            entity_ids,
+        })?;
+
+        skip_box_remain(&mut b)?;
+        check_parser_state(&b.head, &b.content)?;
+    }
+    Ok(groups)
+}
+
+/// Parse a ToneMapImage (`tmap`) item payload into gain map metadata.
+///
+/// See ISO 21496-1:2025 for the payload format.
+fn parse_tone_map_image(data: &[u8]) -> Result<GainMapMetadata> {
+    let mut cursor = std::io::Cursor::new(data);
+
+    // version (u8) — must be 0
+    let version = cursor.read_u8()?;
+    if version != 0 {
+        return Err(Error::Unsupported("tmap version"));
+    }
+
+    // minimum_version (u16 BE) — must be 0
+    let minimum_version = be_u16(&mut cursor)?;
+    if minimum_version > 0 {
+        return Err(Error::Unsupported("tmap minimum version"));
+    }
+
+    // writer_version (u16 BE) — informational, must be >= minimum_version
+    let writer_version = be_u16(&mut cursor)?;
+    if writer_version < minimum_version {
+        return Err(Error::InvalidData("tmap writer_version < minimum_version"));
+    }
+
+    // Flags byte: is_multichannel (bit 7), use_base_colour_space (bit 6), reserved (bits 0-5)
+    let flags = cursor.read_u8()?;
+    let is_multichannel = (flags & 0x80) != 0;
+    let use_base_colour_space = (flags & 0x40) != 0;
+
+    // base_hdr_headroom and alternate_hdr_headroom
+    let base_hdr_headroom_n = be_u32(&mut cursor)?;
+    let base_hdr_headroom_d = be_u32(&mut cursor)?;
+    let alternate_hdr_headroom_n = be_u32(&mut cursor)?;
+    let alternate_hdr_headroom_d = be_u32(&mut cursor)?;
+
+    let channel_count = if is_multichannel { 3 } else { 1 };
+    let mut channels = [GainMapChannel {
+        gain_map_min_n: 0, gain_map_min_d: 0,
+        gain_map_max_n: 0, gain_map_max_d: 0,
+        gamma_n: 0, gamma_d: 0,
+        base_offset_n: 0, base_offset_d: 0,
+        alternate_offset_n: 0, alternate_offset_d: 0,
+    }; 3];
+
+    for ch in channels.iter_mut().take(channel_count) {
+        ch.gain_map_min_n = be_i32(&mut cursor)?;
+        ch.gain_map_min_d = be_u32(&mut cursor)?;
+        ch.gain_map_max_n = be_i32(&mut cursor)?;
+        ch.gain_map_max_d = be_u32(&mut cursor)?;
+        ch.gamma_n = be_u32(&mut cursor)?;
+        ch.gamma_d = be_u32(&mut cursor)?;
+        ch.base_offset_n = be_i32(&mut cursor)?;
+        ch.base_offset_d = be_u32(&mut cursor)?;
+        ch.alternate_offset_n = be_i32(&mut cursor)?;
+        ch.alternate_offset_d = be_u32(&mut cursor)?;
+    }
+
+    // Copy channel 0 to channels 1 and 2 if single-channel
+    if !is_multichannel {
+        channels[1] = channels[0];
+        channels[2] = channels[0];
+    }
+
+    Ok(GainMapMetadata {
+        is_multichannel,
+        use_base_colour_space,
+        base_hdr_headroom_n,
+        base_hdr_headroom_d,
+        alternate_hdr_headroom_n,
+        alternate_hdr_headroom_d,
+        channels,
+    })
+}
+
 /// Parse a metadata box in the context of an AVIF
 /// Currently requires the primary item to be an av01 item type and generates
 /// an error otherwise.
@@ -2892,6 +3255,7 @@ fn read_avif_meta<T: Read + Offset>(src: &mut BMFFBox<'_, T>, options: &ParseOpt
     let mut item_references = TryVec::new();
     let mut properties = TryVec::new();
     let mut idat = None;
+    let mut entity_groups = TryVec::new();
 
     let mut iter = src.box_iter();
     while let Some(mut b) = iter.next_box()? {
@@ -2925,6 +3289,9 @@ fn read_avif_meta<T: Read + Offset>(src: &mut BMFFBox<'_, T>, options: &ParseOpt
                     return Err(Error::InvalidData("There should be zero or one idat boxes"));
                 }
                 idat = Some(b.read_into_try_vec()?);
+            },
+            BoxType::GroupsListBox => {
+                entity_groups.append(&mut read_grpl(&mut b)?)?;
             },
             BoxType::HandlerBox => {
                 let hdlr = read_hdlr(&mut b)?;
@@ -2960,6 +3327,7 @@ fn read_avif_meta<T: Read + Offset>(src: &mut BMFFBox<'_, T>, options: &ParseOpt
         iloc_items: iloc_items.ok_or(Error::InvalidData("iloc missing"))?,
         item_infos,
         idat,
+        entity_groups,
     })
 }
 

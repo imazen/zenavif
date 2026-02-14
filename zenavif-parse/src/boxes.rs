@@ -228,4 +228,5 @@ box_database!(
     SortArtistEntry                   0x736f_6172, // "soar"
     SortAlbumArtistEntry              0x736f_6161, // "soaa"
     SortComposerEntry                 0x736f_636f, // "soco"
+    GroupsListBox                     0x6772_706c, // "grpl"
 );

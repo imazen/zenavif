@@ -1605,3 +1605,93 @@ fn anim_eager_audio_skipped() {
     let animation = avif.animation.expect("Expected animation");
     assert_eq!(animation.frames.len(), 5, "Should only have color frames, audio skipped");
 }
+
+// ============================================================================
+// Gain map (tmap) tests
+// ============================================================================
+
+#[test]
+fn parser_gain_map_basic() {
+    let bytes = std::fs::read("tests/gainmap/seine_sdr_gainmap_srgb.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    // Primary is SDR base image
+    let primary = parser.primary_data().expect("primary_data");
+    assert!(!primary.is_empty());
+
+    // Gain map metadata exists
+    let meta = parser.gain_map_metadata().expect("gain map metadata should be present");
+    assert!(meta.is_multichannel, "seine test file uses multichannel gain map");
+    assert!(meta.use_base_colour_space);
+    // HDR headroom: base=0/1, alternate=13/10
+    assert_eq!(meta.base_hdr_headroom_n, 0);
+    assert_eq!(meta.base_hdr_headroom_d, 1);
+    assert_eq!(meta.alternate_hdr_headroom_n, 13);
+    assert_eq!(meta.alternate_hdr_headroom_d, 10);
+    // Check channel 0 gain_map_min
+    assert_eq!(meta.channels[0].gain_map_min_n, -256907);
+    assert_eq!(meta.channels[0].gain_map_min_d, 1000000);
+    // Channels should differ (multichannel)
+    assert_ne!(meta.channels[0].gain_map_min_n, meta.channels[1].gain_map_min_n);
+
+    // Gain map image data is accessible
+    let gm_data = parser.gain_map_data().expect("gain_map_data should be Some").expect("should resolve");
+    assert!(!gm_data.is_empty(), "gain map data should not be empty");
+
+    // Alternate color info should be present on the tmap item
+    assert!(parser.gain_map_color_info().is_some(), "tmap colr property should be present");
+}
+
+#[test]
+fn parser_gain_map_grid() {
+    let bytes = std::fs::read("tests/gainmap/color_grid_gainmap_different_grid.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    // Should have grid config (color is a grid)
+    assert!(parser.grid_config().is_some(), "color image should be a grid");
+
+    // Should have gain map metadata
+    let meta = parser.gain_map_metadata().expect("gain map metadata should be present");
+    assert!(meta.alternate_hdr_headroom_d > 0);
+
+    // Gain map data should be accessible
+    assert!(parser.gain_map_data().is_some(), "gain map data should be present");
+}
+
+#[test]
+fn parser_no_gain_map_on_normal_image() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    assert!(parser.gain_map_metadata().is_none(), "normal images should not have gain map");
+    assert!(parser.gain_map_data().is_none());
+    assert!(parser.gain_map_color_info().is_none());
+}
+
+#[test]
+fn parser_gain_map_unsupported_version() {
+    let bytes = std::fs::read("tests/gainmap/unsupported_gainmap_version.avif").expect("read file");
+    let result = zenavif_parse::AvifParser::from_bytes(&bytes);
+    assert!(result.is_err(), "unsupported tmap version should fail");
+}
+
+#[test]
+fn parser_gain_map_unsupported_minimum_version() {
+    let bytes = std::fs::read("tests/gainmap/unsupported_gainmap_minimum_version.avif").expect("read file");
+    let result = zenavif_parse::AvifParser::from_bytes(&bytes);
+    assert!(result.is_err(), "unsupported tmap minimum version should fail");
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn eager_gain_map_basic() {
+    let bytes = std::fs::read("tests/gainmap/seine_sdr_gainmap_srgb.avif").expect("read file");
+    let input = &mut std::io::Cursor::new(&bytes);
+    let avif = zenavif_parse::read_avif(input).expect("read_avif");
+
+    assert!(avif.gain_map_metadata.is_some(), "eager: gain map metadata");
+    assert!(avif.gain_map_item.is_some(), "eager: gain map data");
+
+    let meta = avif.gain_map_metadata.unwrap();
+    assert!(meta.alternate_hdr_headroom_d > 0);
+}

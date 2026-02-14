@@ -1,8 +1,8 @@
-# avif-parse Fork
+# zenavif-parse Fork
 
-This fork extends [kornelski/avif-parse](https://github.com/kornelski/avif-parse) v1.4.0 with full AVIF feature support: grid images, animated AVIF, idat construction, and a zero-copy `AvifParser` API.
+This fork extends [kornelski/avif-parse](https://github.com/kornelski/avif-parse) with full AVIF 1.2 feature support for the [zenavif](https://github.com/imazen/zenavif) decoder.
 
-All upstream tests pass. All files in the AOM test suite and link-u animated samples parse correctly.
+Upstream merge base: v2.0.0. All upstream tests pass. All files in the AOM test suite and link-u animated samples parse correctly.
 
 ## Two Parsing APIs
 
@@ -10,27 +10,16 @@ All upstream tests pass. All files in the AOM test suite and link-u animated sam
 
 **Deprecated.** `AvifParser` is a strict superset — use it instead.
 
-Reads the entire file and copies all mdat data into memory. The `read_avif()` function signature is from upstream; the returned `AvifData` struct has been extended with grid config, animation config, and animation frames.
+Reads the entire file and copies all mdat data into memory. Requires the `eager` feature flag.
 
 ```rust
-use avif_parse::read_avif;
+use zenavif_parse::read_avif;
 use std::io::BufReader;
 use std::fs::File;
 
 let mut f = BufReader::new(File::open("image.avif")?);
 let data = read_avif(&mut f)?;
 av1_decode(&data.primary_item)?;
-if let Some(alpha) = &data.alpha_item {
-    av1_decode(alpha)?;
-}
-```
-
-For lenient parsing (skip non-critical validation errors):
-
-```rust
-use avif_parse::{read_avif_with_options, ParseOptions};
-
-let data = read_avif_with_options(&mut f, &ParseOptions { lenient: true })?;
 ```
 
 ### Zero-Copy: `AvifParser`
@@ -38,10 +27,12 @@ let data = read_avif_with_options(&mut f, &ParseOptions { lenient: true })?;
 Parses metadata without copying pixel data. Returns `Cow<[u8]>` — borrowed for single-extent items, owned (concatenated) for multi-extent items.
 
 ```rust
-use avif_parse::AvifParser;
+use zenavif_parse::{AvifParser, DecodeConfig};
+use enough::Unstoppable;
 
 let bytes = std::fs::read("image.avif")?;
-let parser = AvifParser::from_bytes(&bytes)?;
+let config = DecodeConfig::default();
+let parser = AvifParser::from_bytes_with_config(&bytes, &config, &Unstoppable)?;
 
 let primary = parser.primary_data()?;  // Cow<[u8]>
 av1_decode(&primary)?;
@@ -51,39 +42,23 @@ if let Some(alpha) = parser.alpha_data() {
 }
 ```
 
-Three constructors:
-
-- `from_bytes(&[u8])` — borrows the buffer; data access is zero-copy for single-extent items
-- `from_owned(Vec<u8>)` — takes ownership; returns `AvifParser<'static>`
-- `from_reader(impl Read)` — reads into an owned buffer; returns `AvifParser<'static>`
-
-All three have `_with_config` variants that accept a `DecodeConfig` for resource limits.
+Three constructors (`from_bytes`, `from_owned`, `from_reader`), each with a `_with_config` variant accepting `DecodeConfig` + `Stop` for resource limits and cooperative cancellation.
 
 ### Animated AVIF
 
 ```rust
-let parser = AvifParser::from_bytes(&bytes)?;
-
 if let Some(info) = parser.animation_info() {
-    for i in 0..info.frame_count {
-        let frame = parser.frame(i)?;
+    for frame in parser.frames() {
+        let frame = frame?;
         av1_decode(&frame.data)?;
-        // display for frame.duration_ms milliseconds
+        // frame.alpha_data is present if the animation has a separate alpha track
     }
-}
-
-// Or iterate:
-for frame in parser.frames() {
-    let frame = frame?;
-    av1_decode(&frame.data)?;
 }
 ```
 
 ### Grid Images
 
 ```rust
-let parser = AvifParser::from_bytes(&bytes)?;
-
 if let Some(grid) = parser.grid_config() {
     for i in 0..parser.grid_tile_count() {
         let tile = parser.tile_data(i)?;
@@ -92,21 +67,20 @@ if let Some(grid) = parser.grid_config() {
 }
 ```
 
-### AV1 Bitstream Metadata
-
-Extract sequence header info (dimensions, bit depth, chroma) without a full decode:
+### HDR Gain Maps (tmap)
 
 ```rust
-let meta = parser.primary_metadata()?;
-println!("{}x{}, {} bit", meta.image_width, meta.image_height, meta.bit_depth);
+if let Some(meta) = parser.gain_map_metadata() {
+    let gain_map_av1 = parser.gain_map_data().unwrap()?;
+    let alt_color = parser.gain_map_color_info();
+    // Use meta + gain_map_av1 + alt_color to reconstruct HDR
+}
 ```
 
-### Resource Limits
-
-`DecodeConfig` caps memory, megapixels, animation frames, and grid tiles during parsing:
+### Resource Limits and Cancellation
 
 ```rust
-use avif_parse::{AvifParser, DecodeConfig};
+use zenavif_parse::{AvifParser, DecodeConfig};
 
 let config = DecodeConfig::default()
     .with_peak_memory_limit(64 * 1024 * 1024)
@@ -114,45 +88,38 @@ let config = DecodeConfig::default()
     .with_max_animation_frames(500)
     .with_max_grid_tiles(64);
 
-let parser = AvifParser::from_bytes_with_config(&bytes, config)?;
+let parser = AvifParser::from_bytes_with_config(&bytes, &config, &stop)?;
 ```
-
-Use `DecodeConfig::unlimited()` to disable all limits.
-
-### Conversion (deprecated)
-
-`parser.to_avif_data()` converts to the deprecated `AvifData` type for migration from the eager API.
 
 ## Changes vs Upstream
 
-**New types and functions:**
-- `AvifParser<'data>` — zero-copy parser with `Cow`-based data access
-- `FrameRef<'a>` — animation frame with `Cow<'a, [u8]>` data and duration
-- `AnimationInfo` — frame count and loop count
-- `DecodeConfig` — resource limits builder
-- `AV1Metadata` — parsed AV1 sequence header
-- `read_avif_with_config()` — eager parse with resource limits
+**Parsing features:**
+- Zero-copy `AvifParser` with `Cow`-based data access
+- Grid images (iref dimg, ispe dimensions, tile ordering)
+- Animated AVIF (moov/trak, alpha tracks, stts timing, loop count)
+- HDR gain maps (tmap derived image items, ISO 21496-1 metadata)
+- HDR metadata: clli, mdcv, cclv, amve property boxes
+- EXIF and XMP metadata via cdsc references
+- Entity groups (grpl/altr box parsing)
+- idat construction method (iloc construction_method=1)
+- Cooperative cancellation via the `enough::Stop` trait
+- Resource limits (memory, megapixels, frames, tiles)
 
-**Parsing improvements:**
-- Size=0 box support (ISOBMFF "extends to EOF")
-- Lenient parsing mode via `ParseOptions`
-- Grid image parsing (iref dimg references, ispe dimensions)
-- Animated AVIF parsing (moov/trak, stts timing, stco/co64 offsets)
-- idat construction method support (iloc construction_method=1)
-- Correct construction_method handling (upstream guessed based on offset)
+**Feature flags:**
+- `eager` — enables deprecated `read_avif` / `AvifData` API
+- `c_api` — C FFI bindings
 
 **Backwards compatibility:**
-- `read_avif()` and `AvifData` unchanged
-- Default behavior is strict parsing
 - All upstream tests pass
+- Default behavior is strict parsing
 
 ## Testing
 
 ```bash
-cargo test
+cargo test --all-features
 ```
 
-Tests require the git submodules `av1-avif` and `link-u-samples` for corpus tests.
+Tests require git submodules `av1-avif` and `link-u-samples` for corpus tests.
 
 ## License
 
@@ -161,4 +128,4 @@ MPL-2.0 (same as upstream)
 ## Credits
 
 Original: https://github.com/kornelski/avif-parse
-Fork: Extended support for the zenavif project
+Fork: Extended for the zenavif project
