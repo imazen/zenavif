@@ -238,18 +238,20 @@ impl ManagedAvifDecoder {
     /// Each frame's AV1 color (and optional alpha) data is decoded through
     /// rav1d and converted to RGB/RGBA at the source bit depth.
     ///
+    /// For memory-efficient frame-by-frame decoding, use [`AnimationDecoder`]
+    /// instead.
+    ///
     /// Color and alpha tracks use separate decoder instances because
     /// inter-predicted frames depend on prior reference frames within
     /// the same track.
     pub fn decode_animation(&mut self, stop: &(impl Stop + ?Sized)) -> Result<DecodedAnimation> {
+        // AnimationDecoder can't reuse our parser (it owns its own),
+        // so we implement the loop directly here to avoid a redundant parse.
         let anim_info = self
             .parser
             .animation_info()
             .ok_or_else(|| at(Error::Unsupported("not an animated AVIF")))?;
 
-        // Create a dedicated alpha decoder when the animation has a separate
-        // alpha track. We can't share one decoder between two AV1 streams
-        // because inter-predicted frames need their track's reference frames.
         let mut alpha_decoder = if anim_info.has_alpha {
             let settings = Settings {
                 threads: 1,
@@ -1350,5 +1352,133 @@ impl ManagedAvifDecoder {
         }
 
         Ok(image)
+    }
+}
+
+/// Frame-by-frame animation decoder.
+///
+/// Yields one [`DecodedFrame`] at a time instead of loading the entire
+/// animation into memory, making it suitable for large animations.
+///
+/// # Example
+///
+/// ```no_run
+/// use zenavif::{AnimationDecoder, DecoderConfig};
+/// use enough::Unstoppable;
+///
+/// let data = std::fs::read("animation.avif").unwrap();
+/// let mut decoder = AnimationDecoder::new(&data, &DecoderConfig::default()).unwrap();
+/// while let Some(frame) = decoder.next_frame(&Unstoppable).unwrap() {
+///     println!("frame {}x{}, {}ms", frame.pixels.width(), frame.pixels.height(), frame.duration_ms);
+/// }
+/// ```
+pub struct AnimationDecoder {
+    /// Underlying decoder (owns parser + color decoder)
+    inner: ManagedAvifDecoder,
+    /// Separate decoder for the alpha track (inter-prediction needs its own state)
+    alpha_decoder: Option<Rav1dDecoder>,
+    /// Animation metadata
+    info: DecodedAnimationInfo,
+    /// Index of the next frame to decode
+    frame_index: usize,
+}
+
+impl AnimationDecoder {
+    /// Create a new frame-by-frame animation decoder.
+    ///
+    /// Returns [`Error::Unsupported`] if the file is not animated.
+    pub fn new(data: &[u8], config: &DecoderConfig) -> Result<Self> {
+        let inner = ManagedAvifDecoder::new(data, config)?;
+
+        let anim_info = inner
+            .parser
+            .animation_info()
+            .ok_or_else(|| at(Error::Unsupported("not an animated AVIF")))?;
+
+        let alpha_decoder = if anim_info.has_alpha {
+            let settings = Settings {
+                threads: 1,
+                ..Default::default()
+            };
+            Some(Rav1dDecoder::with_settings(settings).map_err(|_e| {
+                at(Error::Decode {
+                    code: -1,
+                    msg: "Failed to create alpha decoder",
+                })
+            })?)
+        } else {
+            None
+        };
+
+        let info = DecodedAnimationInfo {
+            frame_count: anim_info.frame_count,
+            loop_count: anim_info.loop_count,
+            has_alpha: anim_info.has_alpha,
+            timescale: anim_info.timescale,
+        };
+
+        Ok(Self {
+            inner,
+            alpha_decoder,
+            info,
+            frame_index: 0,
+        })
+    }
+
+    /// Animation metadata (frame count, loop count, etc.).
+    pub fn info(&self) -> &DecodedAnimationInfo {
+        &self.info
+    }
+
+    /// Decode and return the next frame, or `None` if all frames have been decoded.
+    pub fn next_frame(&mut self, stop: &(impl Stop + ?Sized)) -> Result<Option<DecodedFrame>> {
+        if self.frame_index >= self.info.frame_count {
+            return Ok(None);
+        }
+
+        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+
+        let frame_ref = self
+            .inner
+            .parser
+            .frame(self.frame_index)
+            .map_err(|e| at(Error::from(e)))?;
+
+        let primary_frame = ManagedAvifDecoder::decode_anim_frame(
+            &mut self.inner.decoder,
+            &frame_ref.data,
+            "Failed to decode animation frame",
+        )?;
+
+        let alpha_frame = match (&mut self.alpha_decoder, &frame_ref.alpha_data) {
+            (Some(dec), Some(alpha_data)) => Some(ManagedAvifDecoder::decode_anim_frame(
+                dec,
+                alpha_data,
+                "Failed to decode animation alpha frame",
+            )?),
+            _ => None,
+        };
+
+        let pixels = self
+            .inner
+            .convert_to_image(primary_frame, alpha_frame, stop)?;
+
+        let duration_ms = frame_ref.duration_ms;
+        self.frame_index += 1;
+
+        Ok(Some(DecodedFrame {
+            pixels,
+            duration_ms,
+        }))
+    }
+
+    /// Number of frames remaining (not yet decoded).
+    pub fn remaining_frames(&self) -> usize {
+        self.info.frame_count.saturating_sub(self.frame_index)
+    }
+
+    /// Index of the next frame that will be decoded (0-based).
+    pub fn frame_index(&self) -> usize {
+        self.frame_index
     }
 }

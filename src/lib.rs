@@ -73,7 +73,7 @@ mod zencodec;
 pub use config::DecoderConfig;
 #[cfg(feature = "unsafe-asm")]
 pub use decoder::AvifDecoder;
-pub use decoder_managed::ManagedAvifDecoder;
+pub use decoder_managed::{AnimationDecoder, ManagedAvifDecoder};
 #[cfg(feature = "encode")]
 pub use encoder::{
     AnimationFrame, AnimationFrameRgba, EncodeAlphaMode, EncodeBitDepth, EncodeColorModel,
