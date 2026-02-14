@@ -9,6 +9,7 @@ use crate::error::Error;
 use enough::Stop;
 use imgref::{ImgRef, ImgVec};
 use rgb::{RGB8, RGBA8, Rgb, Rgba};
+use rgb::{RGB16, RGBA16};
 use whereat::at;
 
 /// Encoded AVIF image output
@@ -594,6 +595,99 @@ pub fn encode_animation_rgba8(
 
     let result = enc
         .encode_animation_rgba(&ravif_frames)
+        .map_err(|e| at(Error::Encode(e.to_string())))?;
+
+    Ok(EncodedAnimation {
+        avif_file: result.avif_file,
+        frame_count: result.frame_count,
+        total_duration_ms: result.total_duration_ms,
+    })
+}
+
+/// A single 16-bit RGB frame in an animated AVIF sequence (10-bit values 0–1023)
+#[derive(Clone)]
+pub struct AnimationFrame16 {
+    /// Frame pixel data (RGB16, 10-bit values)
+    pub pixels: ImgVec<RGB16>,
+    /// Duration of this frame in milliseconds
+    pub duration_ms: u32,
+}
+
+/// A single 16-bit RGBA frame in an animated AVIF sequence (10-bit values 0–1023)
+#[derive(Clone)]
+pub struct AnimationFrameRgba16 {
+    /// Frame pixel data (RGBA16, 10-bit values)
+    pub pixels: ImgVec<RGBA16>,
+    /// Duration of this frame in milliseconds
+    pub duration_ms: u32,
+}
+
+/// Encode a sequence of 16-bit RGB frames into an animated AVIF (10-bit AV1)
+///
+/// Input values should be in 10-bit range (0–1023). All frames must have
+/// the same dimensions. Values outside this range will be clamped by the encoder.
+///
+/// # Arguments
+///
+/// * `frames` - Sequence of RGB16 frames with durations
+/// * `config` - Encoder configuration (quality, speed, etc.)
+/// * `stop` - Cancellation token (checked before encoding starts)
+pub fn encode_animation_rgb16(
+    frames: &[AnimationFrame16],
+    config: &EncoderConfig,
+    stop: &(impl Stop + ?Sized),
+) -> Result<EncodedAnimation> {
+    stop.check().map_err(|e| at(Error::from(e)))?;
+    let enc = build_ravif_encoder(config);
+
+    let ravif_frames: Vec<ravif::AnimFrame16<'_>> = frames
+        .iter()
+        .map(|f| ravif::AnimFrame16 {
+            rgb: f.pixels.as_ref(),
+            duration_ms: f.duration_ms,
+        })
+        .collect();
+
+    let result = enc
+        .encode_animation_rgb16(&ravif_frames)
+        .map_err(|e| at(Error::Encode(e.to_string())))?;
+
+    Ok(EncodedAnimation {
+        avif_file: result.avif_file,
+        frame_count: result.frame_count,
+        total_duration_ms: result.total_duration_ms,
+    })
+}
+
+/// Encode a sequence of 16-bit RGBA frames into an animated AVIF (10-bit AV1)
+///
+/// Input values should be in 10-bit range (0–1023). All frames must have
+/// the same dimensions. If any frame has non-opaque alpha (< 1023),
+/// an alpha track is included automatically.
+///
+/// # Arguments
+///
+/// * `frames` - Sequence of RGBA16 frames with durations
+/// * `config` - Encoder configuration (quality, speed, etc.)
+/// * `stop` - Cancellation token (checked before encoding starts)
+pub fn encode_animation_rgba16(
+    frames: &[AnimationFrameRgba16],
+    config: &EncoderConfig,
+    stop: &(impl Stop + ?Sized),
+) -> Result<EncodedAnimation> {
+    stop.check().map_err(|e| at(Error::from(e)))?;
+    let enc = build_ravif_encoder(config);
+
+    let ravif_frames: Vec<ravif::AnimFrameRgba16<'_>> = frames
+        .iter()
+        .map(|f| ravif::AnimFrameRgba16 {
+            rgba: f.pixels.as_ref(),
+            duration_ms: f.duration_ms,
+        })
+        .collect();
+
+    let result = enc
+        .encode_animation_rgba16(&ravif_frames)
         .map_err(|e| at(Error::Encode(e.to_string())))?;
 
     Ok(EncodedAnimation {
