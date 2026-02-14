@@ -70,33 +70,12 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
 name = "archmage"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afd4ad711cc49af9b537f61f28f25ccdac7c7505c43ac545644e9d18f2840954"
-dependencies = [
- "archmage-macros 0.6.0",
- "safe_unaligned_simd",
-]
-
-[[package]]
-name = "archmage"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61bd463aee29794a0318115ab857c2486842b28956c3f75365b304f1047b4758"
 dependencies = [
- "archmage-macros 0.7.0",
+ "archmage-macros",
  "safe_unaligned_simd",
-]
-
-[[package]]
-name = "archmage-macros"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "864c047340957b1c6fdfc6cf28054bab1cf52227480ab56ccf5ead8c684c544a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -768,7 +747,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d55dd4e83507ff9fe129b01669adca1e302ef346dac252ef59139c78def312a"
 dependencies = [
- "archmage 0.7.0",
+ "archmage",
 ]
 
 [[package]]
@@ -1141,29 +1120,30 @@ dependencies = [
  "parking_lot",
  "paste",
  "raw-cpuid",
- "strum",
+ "strum 0.26.3",
  "to_method",
  "zerocopy 0.7.35",
 ]
 
 [[package]]
 name = "rav1d-disjoint-mut"
-version = "0.1.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22e83fd5f0d30bde8a579bbfca59aaa57e910b763f99621109bb77b103034510"
+checksum = "731512a636cc44496761bdab72157735a78cfffcbc3f42d1b0a84ff5800e3bc7"
 dependencies = [
  "aligned",
  "aligned-vec",
- "zerocopy 0.7.35",
+ "zerocopy 0.8.39",
 ]
 
 [[package]]
 name = "rav1d-safe"
-version = "0.1.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ee0faae397edbece765ba42fd64fa6b808931261235d78f30adeee9880bac47"
+checksum = "79659370c00c7c9083cdea8aaa0b2dca7f77d16d86ecf6d7e3dda66cbd679f7d"
 dependencies = [
- "archmage 0.6.1",
+ "aligned",
+ "archmage",
  "assert_matches",
  "atomig",
  "bitflags",
@@ -1176,9 +1156,9 @@ dependencies = [
  "rav1d-disjoint-mut",
  "raw-cpuid",
  "safe_unaligned_simd",
- "strum",
+ "strum 0.27.2",
  "to_method",
- "zerocopy 0.7.35",
+ "zerocopy 0.8.39",
 ]
 
 [[package]]
@@ -1438,7 +1418,16 @@ version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fec0f0aef304996cf250b31b5a10dee7980c85da9d759361292b8bca5a18f06"
 dependencies = [
- "strum_macros",
+ "strum_macros 0.26.4",
+]
+
+[[package]]
+name = "strum"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
+dependencies = [
+ "strum_macros 0.27.2",
 ]
 
 [[package]]
@@ -1451,6 +1440,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rustversion",
+ "syn",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
  "syn",
 ]
 
@@ -1705,7 +1706,7 @@ dependencies = [
 name = "zenavif"
 version = "0.1.0"
 dependencies = [
- "archmage 0.7.0",
+ "archmage",
  "criterion",
  "enough",
  "env_logger",
@@ -1729,7 +1730,7 @@ dependencies = [
 
 [[package]]
 name = "zenavif-parse"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "arrayvec",
  "bitreader",
