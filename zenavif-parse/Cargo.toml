@@ -37,6 +37,8 @@ walkdir = "2.4.0"
 
 [features]
 eager = []
+# Export symbols for C
+c_api = []
 
 [badges]
 maintenance = { status = "actively-developed" }

@@ -34,7 +34,7 @@ mod boxes;
 use crate::boxes::{BoxType, FourCC};
 
 /// This crate can be used from C.
-#[cfg(feature = "eager")]
+#[cfg(feature = "c_api")]
 pub mod c_api;
 
 pub use enough::{Stop, StopReason, Unstoppable};
@@ -116,9 +116,8 @@ impl<T: Read> Read for OffsetReader<'_, T> {
     }
 }
 
-#[doc(hidden)]
-pub type TryVec<T> = fallible_collections::TryVec<T>;
-type TryString = fallible_collections::TryVec<u8>;
+pub(crate) type TryVec<T> = fallible_collections::TryVec<T>;
+pub(crate) type TryString = fallible_collections::TryVec<u8>;
 
 // To ensure we don't use stdlib allocating types by accident
 #[allow(dead_code)]
