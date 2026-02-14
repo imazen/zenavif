@@ -48,13 +48,11 @@ trait ToU64 {
     fn to_u64(self) -> u64;
 }
 
-/// Statically verify that the platform `usize` can fit within a `u64`.
-/// If the size won't fit on the given platform, this will fail at compile time, but if a type
-/// which can fail `TryInto<usize>` is used, it may panic.
+/// Infallible: usize always fits in u64.
 impl ToU64 for usize {
     fn to_u64(self) -> u64 {
         const _: () = assert!(std::mem::size_of::<usize>() <= std::mem::size_of::<u64>());
-        self.try_into().ok().unwrap()
+        self as u64
     }
 }
 
@@ -64,15 +62,13 @@ pub(crate) trait ToUsize {
     fn to_usize(self) -> usize;
 }
 
-/// Statically verify that the given type can fit within a `usize`.
-/// If the size won't fit on the given platform, this will fail at compile time, but if a type
-/// which can fail `TryInto<usize>` is used, it may panic.
+/// Infallible widening cast: `$from_type` always fits in `usize`.
 macro_rules! impl_to_usize_from {
     ( $from_type:ty ) => {
         impl ToUsize for $from_type {
             fn to_usize(self) -> usize {
                 const _: () = assert!(std::mem::size_of::<$from_type>() <= std::mem::size_of::<usize>());
-                self.try_into().ok().unwrap()
+                self as usize
             }
         }
     };
@@ -1629,7 +1625,8 @@ impl<'data> AvifParser<'data> {
                     break;
                 }
 
-                let chunk_offset = st.chunk_offsets[(chunk_idx - 1) as usize];
+                let chunk_offset = *st.chunk_offsets.get((chunk_idx - 1) as usize)
+                    .ok_or(Error::InvalidData("chunk index out of bounds"))?;
 
                 for sample_in_chunk in 0..entry.samples_per_chunk {
                     if current_sample == index {
@@ -2307,7 +2304,9 @@ fn read_box_header<T: ReadBytesExt>(src: &mut T) -> Result<BoxHeader> {
     } else {
         None
     };
-    assert!(offset <= size);
+    if offset > size {
+        return Err(Error::InvalidData("box header offset exceeds size"));
+    }
     Ok(BoxHeader { name, size, offset, uuid })
 }
 
@@ -3438,8 +3437,7 @@ fn read_irot<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<ImageRotation> {
         0 => 0,
         1 => 90,
         2 => 180,
-        3 => 270,
-        _ => unreachable!(),
+        _ => 270, // angle_code & 0x03 can only be 0..=3
     };
     skip_box_remain(src)?;
     Ok(ImageRotation { angle })
@@ -3987,7 +3985,9 @@ fn associate_tracks(tracks: TryVec<ParsedTrack>) -> Result<ParsedAnimationData> 
         })
         .ok_or(Error::InvalidData("no color track found in moov"))?;
 
-    let color_track_id = tracks[color_idx].track_id;
+    let color_track = tracks.get(color_idx)
+        .ok_or(Error::InvalidData("color track index out of bounds"))?;
+    let color_track_id = color_track.track_id;
 
     // Find alpha track: handler_type == "auxv" with tref/auxl referencing color track
     let alpha_idx = tracks.iter().position(|t| {
@@ -3999,8 +3999,12 @@ fn associate_tracks(tracks: TryVec<ParsedTrack>) -> Result<ParsedAnimationData> 
     });
 
     if let Some(ai) = alpha_idx {
-        let alpha_frames = tracks[ai].sample_table.sample_sizes.len();
-        let color_frames = tracks[color_idx].sample_table.sample_sizes.len();
+        let alpha_track = tracks.get(ai)
+            .ok_or(Error::InvalidData("alpha track index out of bounds"))?;
+        let color_track = tracks.get(color_idx)
+            .ok_or(Error::InvalidData("color track index out of bounds"))?;
+        let alpha_frames = alpha_track.sample_table.sample_sizes.len();
+        let color_frames = color_track.sample_table.sample_sizes.len();
         if alpha_frames != color_frames {
             warn!(
                 "alpha track has {} frames but color track has {} frames",
@@ -4107,22 +4111,24 @@ fn extract_animation_frames(
             continue;
         }
 
-        let chunk_offset = sample_table.chunk_offsets[chunk_idx];
+        let chunk_offset = *sample_table.chunk_offsets.get(chunk_idx)
+            .ok_or(Error::InvalidData("chunk offset index out of bounds"))?;
 
         for sample_in_chunk in 0..*samples_in_chunk {
             if current_sample >= sample_count {
                 break;
             }
 
-            let sample_size = sample_table.sample_sizes[current_sample];
+            let sample_size = *sample_table.sample_sizes.get(current_sample)
+                .ok_or(Error::InvalidData("sample size index out of bounds"))?;
             let duration_ms = frame_durations.get(current_sample).copied().unwrap_or(0);
 
             // Calculate offset within chunk
             let mut offset_in_chunk = 0u64;
             for s in 0..sample_in_chunk {
                 let prev_sample = current_sample.saturating_sub((sample_in_chunk - s) as usize);
-                if prev_sample < sample_count {
-                    offset_in_chunk += sample_table.sample_sizes[prev_sample] as u64;
+                if let Some(&prev_size) = sample_table.sample_sizes.get(prev_sample) {
+                    offset_in_chunk += prev_size as u64;
                 }
             }
 
