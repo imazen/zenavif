@@ -1406,7 +1406,7 @@ impl<'data> AvifParser<'data> {
             let slice = raw.get(start..end).ok_or(Error::InvalidData("extent out of bounds in raw buffer"))?;
             data.extend_from_slice(slice)?;
         }
-        Ok(Cow::Owned(data.to_vec()))
+        Ok(Cow::Owned(data.into_iter().collect()))
     }
 
     /// Convert an ExtentRange to a (start, end) byte range within the raw buffer.
@@ -1475,7 +1475,7 @@ impl<'data> AvifParser<'data> {
             };
             data.extend_from_slice(slice)?;
         }
-        Ok(Cow::Owned(data.to_vec()))
+        Ok(Cow::Owned(data.into_iter().collect()))
     }
 
     /// Resolve a single animation frame from the raw buffer.
@@ -1800,7 +1800,10 @@ impl<'data> AvifParser<'data> {
             if start >= raw.len() {
                 return Err(Error::InvalidData("EXIF offset exceeds item size"));
             }
-            Ok(Cow::Owned(raw[start..].to_vec()))
+            match raw {
+                Cow::Borrowed(slice) => Ok(Cow::Borrowed(&slice[start..])),
+                Cow::Owned(vec) => Ok(Cow::Owned(vec[start..].to_vec())),
+            }
         })
     }
 
