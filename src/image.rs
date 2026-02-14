@@ -1,5 +1,10 @@
 //! AVIF image metadata types
 
+pub use zenavif_parse::{
+    CleanAperture, ContentLightLevel, ImageMirror, ImageRotation, MasteringDisplayColourVolume,
+    PixelAspectRatio,
+};
+
 /// Chroma subsampling format
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChromaSampling {
@@ -114,6 +119,22 @@ pub struct ImageInfo {
     pub chroma_sampling: ChromaSampling,
     /// ICC color profile from the container's `colr` box, if present
     pub icc_profile: Option<Vec<u8>>,
+    /// Image rotation from the container's `irot` property
+    pub rotation: Option<ImageRotation>,
+    /// Image mirror from the container's `imir` property
+    pub mirror: Option<ImageMirror>,
+    /// Clean aperture (crop) from the container's `clap` property
+    pub clean_aperture: Option<CleanAperture>,
+    /// Pixel aspect ratio from the container's `pasp` property
+    pub pixel_aspect_ratio: Option<PixelAspectRatio>,
+    /// Content light level from the container's `clli` property
+    pub content_light_level: Option<ContentLightLevel>,
+    /// Mastering display colour volume from the container's `mdcv` property
+    pub mastering_display: Option<MasteringDisplayColourVolume>,
+    /// EXIF metadata (TIFF header onwards, AVIF offset prefix stripped)
+    pub exif: Option<Vec<u8>>,
+    /// XMP metadata (raw XML)
+    pub xmp: Option<Vec<u8>>,
 }
 
 /// A single decoded frame from an animated AVIF sequence.
@@ -162,6 +183,14 @@ impl Default for ImageInfo {
             color_range: ColorRange::default(),
             chroma_sampling: ChromaSampling::Cs420,
             icc_profile: None,
+            rotation: None,
+            mirror: None,
+            clean_aperture: None,
+            pixel_aspect_ratio: None,
+            content_light_level: None,
+            mastering_display: None,
+            exif: None,
+            xmp: None,
         }
     }
 }

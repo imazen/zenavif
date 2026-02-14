@@ -83,8 +83,9 @@ pub use encoder::{
 pub use enough::{Stop, StopReason, Unstoppable};
 pub use error::{Error, Result};
 pub use image::{
-    ChromaSampling, ColorPrimaries, ColorRange, DecodedAnimation, DecodedAnimationInfo,
-    DecodedFrame, ImageInfo, MatrixCoefficients, TransferCharacteristics,
+    ChromaSampling, CleanAperture, ColorPrimaries, ColorRange, ContentLightLevel,
+    DecodedAnimation, DecodedAnimationInfo, DecodedFrame, ImageInfo, ImageMirror, ImageRotation,
+    MasteringDisplayColourVolume, MatrixCoefficients, PixelAspectRatio, TransferCharacteristics,
 };
 pub use zencodec::{AvifDecodeJob, AvifDecoding};
 #[cfg(feature = "encode")]
