@@ -10,14 +10,14 @@ categories = ["multimedia::images", "encoding"]
 keywords = ["avif", "heif", "bmff", "av1", "mux"]
 repository = "https://github.com/imazen/zenavif-serialize"
 include = ["src/*.rs", "Cargo.toml", "README.md", "LICENSE"]
-rust-version = "1.85"
+rust-version = "1.93"
 
 [dependencies]
 arrayvec = "0.7.6"
 
 [dev-dependencies]
 mp4parse = "0.17"
-avif-parse = "2.0"
+zenavif-parse = { version = "0.3", path = "/home/lilith/work/zenavif-parse" }
 
 [badges]
 maintenance = { status = "passively-maintained" }

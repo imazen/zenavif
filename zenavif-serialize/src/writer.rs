@@ -1,4 +1,3 @@
-use std::convert::TryFrom;
 use std::io;
 
 #[allow(clippy::upper_case_acronyms)]

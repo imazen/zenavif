@@ -327,11 +327,10 @@ fn write_meta(
             }
 
             // Property 4: colr (optional)
-            if let Some(colr) = colr {
-                if *colr != ColrBox::default() {
+            if let Some(colr) = colr
+                && *colr != ColrBox::default() {
                     write_colr_nclx(out, colr);
                 }
-            }
 
             // Property 5: clli (optional)
             if let Some(clli) = clli {
@@ -539,12 +538,11 @@ fn write_track(
                     write_fullbox(out, 0, 0);
                     let mut entries: Vec<(u32, u32)> = Vec::new();
                     for &d in durations {
-                        if let Some(last) = entries.last_mut() {
-                            if last.1 == d {
+                        if let Some(last) = entries.last_mut()
+                            && last.1 == d {
                                 last.0 += 1;
                                 continue;
                             }
-                        }
                         entries.push((1, d));
                     }
                     write_u32(out, entries.len() as u32);

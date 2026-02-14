@@ -64,12 +64,11 @@ impl GridImage {
         return Err(io::Error::new(io::ErrorKind::InvalidInput,
             format!("tile_data.len() ({}) != rows*columns ({})", tile_data.len(), tile_count)));
     }
-    if let Some(alpha) = alpha_data {
-        if alpha.len() != tile_count {
+    if let Some(alpha) = alpha_data
+        && alpha.len() != tile_count {
             return Err(io::Error::new(io::ErrorKind::InvalidInput,
                 format!("alpha_data.len() ({}) != rows*columns ({})", alpha.len(), tile_count)));
         }
-    }
 
     let has_alpha = alpha_data.is_some() && image.alpha_config.is_some();
 

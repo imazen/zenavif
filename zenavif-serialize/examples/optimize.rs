@@ -7,19 +7,22 @@ fn main() {
 
     let avif_file = fs::read(&path).expect("Can't load input image");
 
-    let avif = avif_parse::read_avif(&mut avif_file.as_slice()).unwrap();
-    let info = avif.primary_item_metadata().unwrap();
+    let parser = zenavif_parse::AvifParser::from_owned(avif_file).unwrap();
+    let meta = parser.primary_metadata().expect("Can't read AV1 metadata");
+
+    let primary = parser.primary_data().expect("Can't read primary data");
+    let alpha = parser.alpha_data().and_then(|r| r.ok());
 
     let out = Aviffy::new()
-        .set_seq_profile(info.seq_profile)
-        .set_chroma_subsampling(info.chroma_subsampling)
-        .set_monochrome(info.monochrome)
+        .set_seq_profile(meta.seq_profile)
+        .set_chroma_subsampling(meta.chroma_subsampling)
+        .set_monochrome(meta.monochrome)
         .to_vec(
-            &avif.primary_item,
-            avif.alpha_item.as_deref(),
-            info.max_frame_width.get(),
-            info.max_frame_height.get(),
-            info.bit_depth,
+            primary.as_ref(),
+            alpha.as_deref(),
+            meta.max_frame_width.get(),
+            meta.max_frame_height.get(),
+            meta.bit_depth,
         );
 
     let new_path = Path::new(&path).with_extension("rewrite.avif");

@@ -654,10 +654,10 @@ fn test_roundtrip_parse_avif() {
     let test_alpha = [77, 88, 99];
     let avif = serialize_to_vec(&test_img, Some(&test_alpha), 10, 20, 8);
 
-    let ctx = avif_parse::read_avif(&mut avif.as_slice()).unwrap();
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
 
-    assert_eq!(&test_img[..], ctx.primary_item.as_slice());
-    assert_eq!(&test_alpha[..], ctx.alpha_item.as_deref().unwrap());
+    assert_eq!(&test_img[..], parser.primary_data().unwrap().as_ref());
+    assert_eq!(&test_alpha[..], parser.alpha_data().unwrap().unwrap().as_ref());
 }
 
 #[test]
@@ -668,10 +668,10 @@ fn test_roundtrip_parse_avif_colr() {
         .matrix_coefficients(constants::MatrixCoefficients::Bt709)
         .to_vec(&test_img, Some(&test_alpha), 10, 20, 8);
 
-    let ctx = avif_parse::read_avif(&mut avif.as_slice()).unwrap();
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
 
-    assert_eq!(&test_img[..], ctx.primary_item.as_slice());
-    assert_eq!(&test_alpha[..], ctx.alpha_item.as_deref().unwrap());
+    assert_eq!(&test_img[..], parser.primary_data().unwrap().as_ref());
+    assert_eq!(&test_alpha[..], parser.alpha_data().unwrap().unwrap().as_ref());
 }
 
 #[test]
@@ -680,11 +680,11 @@ fn premultiplied_flag() {
     let test_alpha = [55,66,77,88,99];
     let avif = Aviffy::new().premultiplied_alpha(true).to_vec(&test_img, Some(&test_alpha), 5, 5, 8);
 
-    let ctx = avif_parse::read_avif(&mut avif.as_slice()).unwrap();
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
 
-    assert!(ctx.premultiplied_alpha);
-    assert_eq!(&test_img[..], ctx.primary_item.as_slice());
-    assert_eq!(&test_alpha[..], ctx.alpha_item.as_deref().unwrap());
+    assert!(parser.premultiplied_alpha());
+    assert_eq!(&test_img[..], parser.primary_data().unwrap().as_ref());
+    assert_eq!(&test_alpha[..], parser.alpha_data().unwrap().unwrap().as_ref());
 }
 
 #[test]
@@ -769,9 +769,8 @@ fn hdr10_full_metadata() {
     assert_eq!(mdcv.min_luminance, 50);
 
     // Verify data integrity
-    let ctx = avif_parse::read_avif(&mut avif.as_slice()).unwrap();
-    assert_eq!(ctx.primary_item.as_slice(), &test_img[..]);
-    assert_eq!(ctx.alpha_item.as_deref().unwrap(), &test_alpha[..]);
+    assert_eq!(parser.primary_data().unwrap().as_ref(), &test_img[..]);
+    assert_eq!(parser.alpha_data().unwrap().unwrap().as_ref(), &test_alpha[..]);
 }
 
 #[test]
@@ -804,8 +803,7 @@ fn rotation_roundtrip() {
         assert_eq!(rot.angle, expected_angle, "angle code {angle}");
 
         // Verify data still parses
-        let ctx = avif_parse::read_avif(&mut avif.as_slice()).unwrap();
-        assert_eq!(ctx.primary_item.as_slice(), &test_img[..]);
+        assert_eq!(parser.primary_data().unwrap().as_ref(), &test_img[..]);
     }
 }
 
@@ -927,8 +925,8 @@ fn xmp_roundtrip() {
         .to_vec(&test_img, None, 10, 20, 8);
 
     // Verify the primary data is intact
-    let ctx = avif_parse::read_avif(&mut avif.as_slice()).unwrap();
-    assert_eq!(ctx.primary_item.as_slice(), &test_img[..]);
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+    assert_eq!(parser.primary_data().unwrap().as_ref(), &test_img[..]);
 
     // Verify XMP data is somewhere in the file
     let xmp_str = b"<x:xmpmeta";
@@ -980,7 +978,6 @@ fn all_properties_combined() {
     assert!(parser.content_light_level().is_some());
     assert!(parser.mastering_display().is_some());
 
-    let ctx = avif_parse::read_avif(&mut avif.as_slice()).unwrap();
-    assert_eq!(ctx.primary_item.as_slice(), &test_img[..]);
-    assert_eq!(ctx.alpha_item.as_deref().unwrap(), &test_alpha[..]);
+    assert_eq!(parser.primary_data().unwrap().as_ref(), &test_img[..]);
+    assert_eq!(parser.alpha_data().unwrap().unwrap().as_ref(), &test_alpha[..]);
 }
