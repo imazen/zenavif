@@ -123,7 +123,7 @@ decode_av1(&data.primary_item)?;
 
 ## Upstream contributions welcome
 
-All code in this fork is available under the same MPL-2.0 license as the original. The upstream maintainers are welcome to incorporate any or all changes — no attribution to this fork required. If specific features would be useful upstream in a different form, open an issue and we can restructure to fit.
+Any copyright claims to changes in this fork are released to and under the upstream license. If changes in this fork are desired upstream by the upstream maintainers, please open an issue requesting a PR.
 
 ## Credits
 
