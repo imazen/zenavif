@@ -736,6 +736,13 @@ struct TrackReference {
     track_ids: TryVec<u32>,
 }
 
+/// Codec properties extracted from a `stsd` VisualSampleEntry.
+#[derive(Debug, Clone, Default)]
+struct TrackCodecConfig {
+    av1_config: Option<AV1Config>,
+    color_info: Option<ColorInformation>,
+}
+
 /// Parsed data from a single track box (`trak`).
 #[derive(Debug)]
 struct ParsedTrack {
@@ -745,6 +752,7 @@ struct ParsedTrack {
     sample_table: SampleTable,
     references: TryVec<TrackReference>,
     loop_count: u32,
+    codec_config: TrackCodecConfig,
 }
 
 /// Paired color + optional alpha animation data after track association.
@@ -754,6 +762,7 @@ struct ParsedAnimationData {
     alpha_timescale: Option<u32>,
     alpha_sample_table: Option<SampleTable>,
     loop_count: u32,
+    color_codec_config: TrackCodecConfig,
 }
 
 #[cfg(feature = "eager")]
@@ -1042,6 +1051,7 @@ struct AnimationParserData {
     alpha_media_timescale: Option<u32>,
     alpha_sample_table: Option<SampleTable>,
     loop_count: u32,
+    codec_config: TrackCodecConfig,
 }
 
 /// Animation metadata from [`AvifParser`]
@@ -1210,13 +1220,18 @@ impl<'data> AvifParser<'data> {
                 alpha_media_timescale: anim.alpha_timescale,
                 alpha_sample_table: anim.alpha_sample_table,
                 loop_count: anim.loop_count,
+                codec_config: anim.color_codec_config,
             })
         } else {
             None
         };
 
         // Pure sequence (no meta box): only animation methods will work.
+        // Use codec config from the color track's stsd if available.
         let Some(meta) = parsed.meta else {
+            let track_config = animation_data.as_ref()
+                .map(|a| a.codec_config.clone())
+                .unwrap_or_default();
             return Ok(Self {
                 raw,
                 mdat_bounds: parsed.mdat_bounds,
@@ -1227,8 +1242,8 @@ impl<'data> AvifParser<'data> {
                 tiles: TryVec::new(),
                 animation_data,
                 premultiplied_alpha: false,
-                av1_config: None,
-                color_info: None,
+                av1_config: track_config.av1_config,
+                color_info: track_config.color_info,
                 rotation: None,
                 mirror: None,
                 clean_aperture: None,
@@ -1430,8 +1445,11 @@ impl<'data> AvifParser<'data> {
             };
         }
 
-        let av1_config = find_prop!(AV1Config);
-        let color_info = find_prop!(ColorInformation);
+        let track_config = animation_data.as_ref().map(|a| &a.codec_config);
+        let av1_config = find_prop!(AV1Config)
+            .or_else(|| track_config.and_then(|c| c.av1_config.clone()));
+        let color_info = find_prop!(ColorInformation)
+            .or_else(|| track_config.and_then(|c| c.color_info.clone()));
         let rotation = find_prop!(Rotation);
         let mirror = find_prop!(Mirror);
         let clean_aperture = find_prop!(CleanAperture);
@@ -3456,6 +3474,14 @@ fn read_iref<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
     Ok(item_references)
 }
 
+/// Properties that MUST be marked essential when associated with an item.
+/// See AVIF § 2.3.2.1.1 (a1op), HEIF § 6.5.11.1 (lsel), MIAF § 7.3.9 (clap, irot, imir).
+const MUST_BE_ESSENTIAL: &[&[u8; 4]] = &[b"a1op", b"lsel", b"clap", b"irot", b"imir"];
+
+/// Properties that MUST NOT be marked essential when associated with an item.
+/// See AVIF § 2.3.2.3.2 (a1lx).
+const MUST_NOT_BE_ESSENTIAL: &[&[u8; 4]] = &[b"a1lx"];
+
 fn read_iprp<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<TryVec<AssociatedProperty>> {
     let mut iter = src.box_iter();
     let mut properties = TryVec::new();
@@ -3476,16 +3502,61 @@ fn read_iprp<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
     let mut associated = TryVec::new();
     for a in associations {
         let index = match a.property_index {
-            0 => continue,
+            0 => {
+                // property_index 0 means no association; essential must also be 0
+                if a.essential {
+                    return Err(Error::InvalidData(
+                        "ipma property_index 0 must not be marked essential",
+                    ));
+                }
+                continue;
+            }
             x => x as usize - 1,
         };
-        if let Some(prop) = properties.get(index)
-            && *prop != ItemProperty::Unsupported {
-                associated.push(AssociatedProperty {
-                    item_id: a.item_id,
-                    property: prop.try_clone()?,
-                })?;
+
+        let Some(entry) = properties.get(index) else {
+            continue;
+        };
+
+        let is_supported = entry.property != ItemProperty::Unsupported;
+        let fourcc_bytes = &entry.fourcc.value;
+
+        if is_supported {
+            // Validate essential flag for known property types
+            if a.essential && MUST_NOT_BE_ESSENTIAL.contains(&fourcc_bytes) {
+                warn!("item {} has {} marked essential (spec forbids it)", a.item_id, entry.fourcc);
+                if !options.lenient {
+                    return Err(Error::InvalidData(
+                        "property must not be marked essential",
+                    ));
+                }
             }
+            if !a.essential && MUST_BE_ESSENTIAL.contains(&fourcc_bytes) {
+                warn!("item {} has {} not marked essential (spec requires it)", a.item_id, entry.fourcc);
+                if !options.lenient {
+                    return Err(Error::InvalidData(
+                        "property must be marked essential",
+                    ));
+                }
+            }
+
+            associated.push(AssociatedProperty {
+                item_id: a.item_id,
+                property: entry.property.try_clone()?,
+            })?;
+        } else if a.essential {
+            // Unknown property marked essential — this item cannot be correctly processed
+            warn!(
+                "item {} has unsupported property {} marked essential; item will be unusable",
+                a.item_id, entry.fourcc
+            );
+            if !options.lenient {
+                return Err(Error::Unsupported(
+                    "unsupported property marked as essential",
+                ));
+            }
+        }
+        // Unknown non-essential properties are silently skipped (they're optional)
     }
     Ok(associated)
 }
@@ -3546,7 +3617,6 @@ impl TryClone for ItemProperty {
 
 struct Association {
     item_id: u32,
-    #[allow(unused)]
     essential: bool,
     property_index: u16,
 }
@@ -3586,11 +3656,18 @@ fn read_ipma<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<Association>> {
     Ok(associations)
 }
 
-fn read_ipco<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<TryVec<ItemProperty>> {
+/// A parsed property with its box FourCC, for essential flag validation.
+struct IndexedProperty {
+    fourcc: FourCC,
+    property: ItemProperty,
+}
+
+fn read_ipco<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<TryVec<IndexedProperty>> {
     let mut properties = TryVec::new();
 
     let mut iter = src.box_iter();
     while let Some(mut b) = iter.next_box()? {
+        let fourcc: FourCC = b.head.name.into();
         // Must push for every property to have correct index for them
         let prop = match b.head.name {
             BoxType::PixelInformationBox => ItemProperty::Channels(read_pixi(&mut b, options)?),
@@ -3620,7 +3697,7 @@ fn read_ipco<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
                 ItemProperty::Unsupported
             },
         };
-        properties.push(prop)?;
+        properties.push(IndexedProperty { fourcc, property: prop })?;
     }
     Ok(properties)
 }
@@ -4089,17 +4166,86 @@ fn read_chunk_offsets<T: Read>(src: &mut BMFFBox<'_, T>, is_64bit: bool) -> Resu
     Ok(offsets)
 }
 
+/// Parse Sample Description box (stsd) to extract codec config from VisualSampleEntry.
+/// See ISO/IEC 14496-12:2015 § 8.5.2
+///
+/// For AVIF sequences, the VisualSampleEntry is `av01` which contains sub-boxes
+/// like `av1C` (codec config) and `colr` (color info), similar to ipco properties.
+fn read_stsd<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TrackCodecConfig> {
+    let _version = src.read_u8()?;
+    let _flags = [src.read_u8()?, src.read_u8()?, src.read_u8()?];
+    let entry_count = be_u32(src)?;
+
+    let mut config = TrackCodecConfig::default();
+
+    // Parse first entry only (AVIF tracks have one sample description)
+    let mut iter = src.box_iter();
+    for _ in 0..entry_count {
+        let Some(mut entry_box) = iter.next_box()? else {
+            break;
+        };
+
+        // Check if this is an av01 VisualSampleEntry
+        if entry_box.head.name != BoxType::AV1SampleEntry {
+            skip_box_remain(&mut entry_box)?;
+            continue;
+        }
+
+        // Skip VisualSampleEntry fixed fields (78 bytes total):
+        //   reserved[6] + data_ref_index[2] + pre_defined[2] + reserved[2] +
+        //   pre_defined[12] + width[2] + height[2] + horiz_res[4] + vert_res[4] +
+        //   reserved[4] + frame_count[2] + compressorname[32] + depth[2] + pre_defined[2]
+        const VISUAL_SAMPLE_ENTRY_SIZE: u64 = 78;
+        if entry_box.bytes_left() < VISUAL_SAMPLE_ENTRY_SIZE {
+            skip_box_remain(&mut entry_box)?;
+            continue;
+        }
+        skip(&mut entry_box, VISUAL_SAMPLE_ENTRY_SIZE)?;
+
+        // Parse sub-boxes within the VisualSampleEntry for av1C and colr
+        let mut sub_iter = entry_box.box_iter();
+        while let Some(mut sub_box) = sub_iter.next_box()? {
+            match sub_box.head.name {
+                BoxType::AV1CodecConfigurationBox => {
+                    config.av1_config = Some(read_av1c(&mut sub_box)?);
+                }
+                BoxType::ColorInformationBox => {
+                    if let Ok(colr) = read_colr(&mut sub_box) {
+                        config.color_info = Some(colr);
+                    } else {
+                        skip_box_remain(&mut sub_box)?;
+                    }
+                }
+                _ => {
+                    skip_box_remain(&mut sub_box)?;
+                }
+            }
+        }
+
+        // Only need the first av01 entry
+        if config.av1_config.is_some() {
+            break;
+        }
+    }
+
+    Ok(config)
+}
+
 /// Parse Sample Table box (stbl)
 /// See ISO/IEC 14496-12:2015 § 8.5
-fn read_stbl<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<SampleTable> {
+fn read_stbl<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<(SampleTable, TrackCodecConfig)> {
     let mut time_to_sample = TryVec::new();
     let mut sample_to_chunk = TryVec::new();
     let mut sample_sizes = TryVec::new();
     let mut chunk_offsets = TryVec::new();
+    let mut codec_config = TrackCodecConfig::default();
 
     let mut iter = src.box_iter();
     while let Some(mut b) = iter.next_box()? {
         match b.head.name {
+            BoxType::SampleDescriptionBox => {
+                codec_config = read_stsd(&mut b)?;
+            }
             BoxType::TimeToSampleBox => {
                 time_to_sample = read_stts(&mut b)?;
             }
@@ -4154,11 +4300,11 @@ fn read_stbl<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<SampleTable> {
         }
     }
 
-    Ok(SampleTable {
+    Ok((SampleTable {
         time_to_sample,
         sample_sizes,
         sample_offsets,
-    })
+    }, codec_config))
 }
 
 /// Parse Track Header box (tkhd)
@@ -4264,7 +4410,7 @@ fn read_trak<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<ParsedTrack>> {
     let mut track_id = 0u32;
     let mut references = TryVec::new();
     let mut loop_count = 1u32; // default: play once
-    let mut mdia_result: Option<(FourCC, u32, SampleTable)> = None;
+    let mut mdia_result: Option<(FourCC, u32, SampleTable, TrackCodecConfig)> = None;
 
     let mut iter = src.box_iter();
     while let Some(mut b) = iter.next_box()? {
@@ -4295,7 +4441,7 @@ fn read_trak<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<ParsedTrack>> {
         }
     }
 
-    if let Some((handler_type, media_timescale, sample_table)) = mdia_result {
+    if let Some((handler_type, media_timescale, sample_table, codec_config)) = mdia_result {
         Ok(Some(ParsedTrack {
             track_id,
             handler_type,
@@ -4303,6 +4449,7 @@ fn read_trak<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<ParsedTrack>> {
             sample_table,
             references,
             loop_count,
+            codec_config,
         }))
     } else {
         Ok(None)
@@ -4310,11 +4457,11 @@ fn read_trak<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<ParsedTrack>> {
 }
 
 /// Parse media box (mdia).
-/// Returns (handler_type, media_timescale, sample_table) if valid.
-fn read_mdia<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<(FourCC, u32, SampleTable)>> {
+/// Returns (handler_type, media_timescale, sample_table, codec_config) if valid.
+fn read_mdia<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<(FourCC, u32, SampleTable, TrackCodecConfig)>> {
     let mut media_timescale = 1000; // default
     let mut handler_type = FourCC::default();
-    let mut sample_table: Option<SampleTable> = None;
+    let mut stbl_result: Option<(SampleTable, TrackCodecConfig)> = None;
 
     let mut iter = src.box_iter();
     while let Some(mut b) = iter.next_box()? {
@@ -4328,7 +4475,7 @@ fn read_mdia<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<(FourCC, u32, S
                 handler_type = hdlr.handler_type;
             }
             BoxType::MediaInformationBox => {
-                sample_table = read_minf(&mut b)?;
+                stbl_result = read_minf(&mut b)?;
             }
             _ => {
                 skip_box_remain(&mut b)?;
@@ -4336,8 +4483,8 @@ fn read_mdia<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<(FourCC, u32, S
         }
     }
 
-    if let Some(stbl) = sample_table {
-        Ok(Some((handler_type, media_timescale, stbl)))
+    if let Some((stbl, codec_config)) = stbl_result {
+        Ok(Some((handler_type, media_timescale, stbl, codec_config)))
     } else {
         Ok(None)
     }
@@ -4414,6 +4561,7 @@ fn associate_tracks(tracks: TryVec<ParsedTrack>) -> Result<ParsedAnimationData> 
 
     Ok(ParsedAnimationData {
         color_timescale: color_track.media_timescale,
+        color_codec_config: color_track.codec_config,
         color_sample_table: color_track.sample_table,
         alpha_timescale,
         alpha_sample_table,
@@ -4422,7 +4570,7 @@ fn associate_tracks(tracks: TryVec<ParsedTrack>) -> Result<ParsedAnimationData> 
 }
 
 /// Parse media information box (minf)
-fn read_minf<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<SampleTable>> {
+fn read_minf<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<(SampleTable, TrackCodecConfig)>> {
     let mut iter = src.box_iter();
     while let Some(mut b) = iter.next_box()? {
         if b.head.name == BoxType::SampleTableBox {

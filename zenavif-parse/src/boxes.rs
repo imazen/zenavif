@@ -129,6 +129,7 @@ box_database!(
     DataInformationBox                0x6469_6e66, // "dinf" - data information (for animation)
     DataReferenceBox                  0x6472_6566, // "dref" - data reference (for animation)
     SampleTableBox                    0x7374_626c, // "stbl"
+    SampleDescriptionBox              0x7374_7364, // "stsd"
     TimeToSampleBox                   0x7374_7473, // "stts"
     SampleToChunkBox                  0x7374_7363, // "stsc"
     SampleSizeBox                     0x7374_737a, // "stsz"

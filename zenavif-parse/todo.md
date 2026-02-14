@@ -12,7 +12,8 @@ Compared against https://github.com/AOMediaCodec/av1-avif/blob/main/index.bs (v1
 - Grid validation: warns on transformative properties on tile items (spec 1.2)
 - Alpha: auxl references with urn:mpeg:mpegB:cicp:systems:auxiliary:alpha
 - Premultiplied alpha: prem reference type
-- Animation: moov/trak/mdia/minf/stbl, sample table, frame duration/location, alpha tracks
+- Animation: moov/trak/mdia/minf/stbl, sample table, frame duration/location, alpha tracks, stsd codec config
+- Essential property validation: must-be-essential (a1op, lsel, clap, irot, imir), must-not-be-essential (a1lx), unsupported-essential rejection
 - Properties: pixi, auxC, ispe, grid, av1C, colr, irot, imir, clap, pasp, clli, mdcv, cclv, amve, a1op, lsel, a1lx
 - AV1 OBU metadata: sequence header parsing (bit depth, chroma, monochrome, dimensions)
 - EXIF and XMP metadata via cdsc references
@@ -48,6 +49,8 @@ Compared against https://github.com/AOMediaCodec/av1-avif/blob/main/index.bs (v1
 - [x] Expose compatible_brands and profile brands (MA1B, MA1A, avio)
 - [ ] Brand validation — Check miaf in compatible_brands per spec requirement
 - [x] Validate no transformative properties on grid tile derivation chains (spec 1.2)
+- [x] Essential property validation — must-be-essential (a1op, lsel, clap, irot, imir), must-not-be-essential (a1lx), unsupported-essential rejection. Strict by default, lenient mode warns.
+- [x] stsd — Parse SampleDescriptionBox in animation tracks to extract av1C and colr from VisualSampleEntry. Track codec config used as fallback for pure sequences.
 
 ## Priority 5 — Advanced features (rare in practice)
 
