@@ -56,6 +56,22 @@ pub enum EncodeAlphaMode {
     Premultiplied,
 }
 
+/// Mastering display metadata for HDR encoding (SMPTE ST 2086)
+///
+/// All chromaticity values are in CIE 1931 0.16 fixed-point (0–65535 maps to 0.0–1.0).
+/// Luminance values use 24.8 (max) and 18.14 (min) fixed-point encoding.
+#[derive(Debug, Clone, Copy)]
+pub struct MasteringDisplayConfig {
+    /// Chromaticity coordinates for red, green, blue primaries: [(x, y); 3]
+    pub primaries: [(u16, u16); 3],
+    /// White point chromaticity (x, y)
+    pub white_point: (u16, u16),
+    /// Maximum display luminance (24.8 fixed-point cd/m²)
+    pub max_luminance: u32,
+    /// Minimum display luminance (18.14 fixed-point cd/m²)
+    pub min_luminance: u32,
+}
+
 /// Configuration for AVIF encoding
 ///
 /// Uses a builder pattern matching [`crate::DecoderConfig`].
@@ -79,6 +95,18 @@ pub struct EncoderConfig {
     pub(crate) alpha_color_mode: EncodeAlphaMode,
     pub(crate) threads: Option<usize>,
     pub(crate) exif: Option<Vec<u8>>,
+    /// XMP metadata to embed
+    pub(crate) xmp: Option<Vec<u8>>,
+    /// ICC color profile to embed
+    pub(crate) icc_profile: Option<Vec<u8>>,
+    /// Image rotation (counter-clockwise degrees: 0, 90, 180, 270)
+    pub(crate) rotation: Option<u8>,
+    /// Image mirror axis (0 = vertical, 1 = horizontal)
+    pub(crate) mirror: Option<u8>,
+    /// Content light level (max_cll, max_fall)
+    pub(crate) content_light_level: Option<(u16, u16)>,
+    /// Mastering display metadata
+    pub(crate) mastering_display: Option<MasteringDisplayConfig>,
     /// Enable AV1 quantization matrices (imazen/rav1e fork)
     #[cfg(feature = "encode-imazen")]
     pub(crate) enable_qm: bool,
@@ -107,6 +135,12 @@ impl Default for EncoderConfig {
             alpha_color_mode: EncodeAlphaMode::default(),
             threads: None,
             exif: None,
+            xmp: None,
+            icc_profile: None,
+            rotation: None,
+            mirror: None,
+            content_light_level: None,
+            mastering_display: None,
             #[cfg(feature = "encode-imazen")]
             enable_qm: true,
             #[cfg(feature = "encode-imazen")]
@@ -180,6 +214,45 @@ impl EncoderConfig {
     /// Embed EXIF metadata in the output
     pub fn exif(mut self, exif_data: Vec<u8>) -> Self {
         self.exif = Some(exif_data);
+        self
+    }
+
+    /// Embed XMP metadata in the output
+    pub fn xmp(mut self, xmp_data: Vec<u8>) -> Self {
+        self.xmp = Some(xmp_data);
+        self
+    }
+
+    /// Embed an ICC color profile in the output
+    pub fn icc_profile(mut self, profile: Vec<u8>) -> Self {
+        self.icc_profile = Some(profile);
+        self
+    }
+
+    /// Set image rotation (counter-clockwise degrees: 0, 90, 180, 270)
+    pub fn rotation(mut self, angle: u8) -> Self {
+        self.rotation = Some(angle);
+        self
+    }
+
+    /// Set image mirror axis (0 = vertical/left-right, 1 = horizontal/top-bottom)
+    pub fn mirror(mut self, axis: u8) -> Self {
+        self.mirror = Some(axis);
+        self
+    }
+
+    /// Set content light level metadata (HDR)
+    ///
+    /// * `max_cll` - Maximum content light level (cd/m²)
+    /// * `max_fall` - Maximum frame-average light level (cd/m²)
+    pub fn content_light_level(mut self, max_cll: u16, max_fall: u16) -> Self {
+        self.content_light_level = Some((max_cll, max_fall));
+        self
+    }
+
+    /// Set mastering display metadata (HDR, SMPTE ST 2086)
+    pub fn mastering_display(mut self, md: MasteringDisplayConfig) -> Self {
+        self.mastering_display = Some(md);
         self
     }
 
@@ -260,6 +333,36 @@ fn build_ravif_encoder(config: &EncoderConfig) -> ravif::Encoder<'_> {
     }
     if let Some(ref exif_data) = config.exif {
         enc = enc.with_exif(exif_data.as_slice());
+    }
+    if let Some(ref xmp_data) = config.xmp {
+        enc = enc.with_xmp(xmp_data.clone());
+    }
+    if let Some(ref icc) = config.icc_profile {
+        enc = enc.with_icc_profile(icc.clone());
+    }
+    if let Some(angle) = config.rotation {
+        enc = enc.with_rotation(angle);
+    }
+    if let Some(axis) = config.mirror {
+        enc = enc.with_mirror(axis);
+    }
+    if let Some((max_cll, max_fall)) = config.content_light_level {
+        enc = enc.with_content_light(ravif::ContentLight {
+            max_content_light_level: max_cll,
+            max_frame_average_light_level: max_fall,
+        });
+    }
+    if let Some(md) = config.mastering_display {
+        enc = enc.with_mastering_display(ravif::MasteringDisplay {
+            primaries: [
+                ravif::ChromaticityPoint { x: md.primaries[0].0, y: md.primaries[0].1 },
+                ravif::ChromaticityPoint { x: md.primaries[1].0, y: md.primaries[1].1 },
+                ravif::ChromaticityPoint { x: md.primaries[2].0, y: md.primaries[2].1 },
+            ],
+            white_point: ravif::ChromaticityPoint { x: md.white_point.0, y: md.white_point.1 },
+            max_luminance: md.max_luminance,
+            min_luminance: md.min_luminance,
+        });
     }
     #[cfg(feature = "encode-imazen")]
     {
