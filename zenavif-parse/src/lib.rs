@@ -793,6 +793,16 @@ pub struct AvifData {
     /// AV1 layered image indexing from the container's `a1lx` property.
     pub layered_image_indexing: Option<AV1LayeredImageIndexing>,
 
+    /// EXIF metadata from a `cdsc`-linked `Exif` item.
+    ///
+    /// Raw EXIF data (TIFF header onwards), with the 4-byte AVIF offset prefix stripped.
+    pub exif: Option<TryVec<u8>>,
+
+    /// XMP metadata from a `cdsc`-linked `mime` item.
+    ///
+    /// Raw XMP/XML data as UTF-8.
+    pub xmp: Option<TryVec<u8>>,
+
     /// Major brand from the `ftyp` box (e.g., `*b"avif"` or `*b"avis"`).
     pub major_brand: [u8; 4],
 
@@ -949,6 +959,8 @@ pub struct AvifParser<'data> {
     operating_point: Option<OperatingPointSelector>,
     layer_selector: Option<LayerSelector>,
     layered_image_indexing: Option<AV1LayeredImageIndexing>,
+    exif_item: Option<ItemExtents>,
+    xmp_item: Option<ItemExtents>,
     major_brand: [u8; 4],
     compatible_brands: std::vec::Vec<[u8; 4]>,
 }
@@ -1157,6 +1169,8 @@ impl<'data> AvifParser<'data> {
                 operating_point: None,
                 layer_selector: None,
                 layered_image_indexing: None,
+                exif_item: None,
+                xmp_item: None,
                 major_brand: parsed.major_brand,
                 compatible_brands: parsed.compatible_brands,
             });
@@ -1199,6 +1213,24 @@ impl<'data> AvifParser<'data> {
                     && iref.item_type == b"prem"
             })
         });
+
+        // Find EXIF/XMP items linked via cdsc references to the primary item
+        let mut exif_item = None;
+        let mut xmp_item = None;
+        for iref in meta.item_references.iter() {
+            if iref.to_item_id != meta.primary_item_id || iref.item_type != b"cdsc" {
+                continue;
+            }
+            let desc_item_id = iref.from_item_id;
+            let Some(info) = meta.item_infos.iter().find(|i| i.item_id == desc_item_id) else {
+                continue;
+            };
+            if info.item_type == b"Exif" && exif_item.is_none() {
+                exif_item = Some(Self::get_item_extents(&meta, desc_item_id)?);
+            } else if info.item_type == b"mime" && xmp_item.is_none() {
+                xmp_item = Some(Self::get_item_extents(&meta, desc_item_id)?);
+            }
+        }
 
         // Check if primary item is a grid (tiled image)
         let is_grid = meta
@@ -1314,6 +1346,8 @@ impl<'data> AvifParser<'data> {
             operating_point,
             layer_selector,
             layered_image_indexing,
+            exif_item,
+            xmp_item,
             major_brand: parsed.major_brand,
             compatible_brands: parsed.compatible_brands,
         })
@@ -1748,6 +1782,32 @@ impl<'data> AvifParser<'data> {
         self.layered_image_indexing.as_ref()
     }
 
+    /// Get EXIF metadata for the primary item, if present.
+    ///
+    /// Returns raw EXIF data (TIFF header onwards), with the 4-byte AVIF offset prefix stripped.
+    pub fn exif(&self) -> Option<Result<Cow<'_, [u8]>>> {
+        self.exif_item.as_ref().map(|item| {
+            let raw = self.resolve_item(item)?;
+            // AVIF EXIF items start with a 4-byte big-endian offset to the TIFF header
+            if raw.len() <= 4 {
+                return Err(Error::InvalidData("EXIF item too short"));
+            }
+            let offset = u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]) as usize;
+            let start = 4 + offset;
+            if start >= raw.len() {
+                return Err(Error::InvalidData("EXIF offset exceeds item size"));
+            }
+            Ok(Cow::Owned(raw[start..].to_vec()))
+        })
+    }
+
+    /// Get XMP metadata for the primary item, if present.
+    ///
+    /// Returns raw XMP/XML data.
+    pub fn xmp(&self) -> Option<Result<Cow<'_, [u8]>>> {
+        self.xmp_item.as_ref().map(|item| self.resolve_item(item))
+    }
+
     /// Get the major brand from the `ftyp` box (e.g., `*b"avif"` or `*b"avis"`).
     pub fn major_brand(&self) -> &[u8; 4] {
         &self.major_brand
@@ -1842,6 +1902,16 @@ impl<'data> AvifParser<'data> {
             operating_point: self.operating_point,
             layer_selector: self.layer_selector,
             layered_image_indexing: self.layered_image_indexing,
+            exif: self.exif().and_then(|r| r.ok()).map(|c| {
+                let mut v = TryVec::new();
+                let _ = v.extend_from_slice(&c);
+                v
+            }),
+            xmp: self.xmp().and_then(|r| r.ok()).map(|c| {
+                let mut v = TryVec::new();
+                let _ = v.extend_from_slice(&c);
+                v
+            }),
             major_brand: self.major_brand,
             compatible_brands: self.compatible_brands.clone(),
         })
@@ -2739,6 +2809,39 @@ pub fn read_avif_with_config<T: Read>(
             };
 
             extract_item_data(loc, item_data)?;
+        }
+    }
+
+    // Extract EXIF and XMP items linked via cdsc references to the primary item
+    for iref in meta.item_references.iter() {
+        if iref.to_item_id != meta.primary_item_id || iref.item_type != b"cdsc" {
+            continue;
+        }
+        let desc_item_id = iref.from_item_id;
+        let Some(info) = meta.item_infos.iter().find(|i| i.item_id == desc_item_id) else {
+            continue;
+        };
+        if info.item_type == b"Exif" {
+            if let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == desc_item_id) {
+                let mut raw = TryVec::new();
+                extract_item_data(loc, &mut raw)?;
+                // AVIF EXIF items start with a 4-byte big-endian offset to the TIFF header
+                if raw.len() > 4 {
+                    let offset = u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]) as usize;
+                    let start = 4 + offset;
+                    if start < raw.len() {
+                        let mut exif = TryVec::new();
+                        exif.extend_from_slice(&raw[start..])?;
+                        context.exif = Some(exif);
+                    }
+                }
+            }
+        } else if info.item_type == b"mime" {
+            if let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == desc_item_id) {
+                let mut xmp = TryVec::new();
+                extract_item_data(loc, &mut xmp)?;
+                context.xmp = Some(xmp);
+            }
         }
     }
 
