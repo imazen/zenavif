@@ -1,8 +1,15 @@
 #![deny(unsafe_code)]
 #![allow(clippy::missing_safety_doc)]
-//! Module for parsing ISO Base Media Format aka video/mp4 streams.
+//! AVIF container parser (ISOBMFF/MIAF demuxer).
 //!
-//! This crate is written entirely in safe Rust code except for the C FFI bindings.
+//! Extracts AV1 payloads, alpha channels, grid tiles, animation frames,
+//! and container metadata from AVIF files. Written in safe Rust with
+//! fallible allocations throughout.
+//!
+//! The primary API is [`AvifParser`], which performs zero-copy parsing by
+//! recording byte offsets and resolving data on demand.
+//!
+//! A legacy eager API ([`read_avif`]) is available behind the `eager` feature flag.
 
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -2513,11 +2520,7 @@ pub fn read_avif_with_config<T: Read>(
     let Some(meta) = meta else {
         // Pure sequence: return minimal AvifData with no items
         return Ok(AvifData {
-            primary_item: TryVec::new(),
-            alpha_item: None,
-            premultiplied_alpha: false,
-            animation_frames: Vec::new(),
-            loop_count: animation_data.as_ref().map_or(0, |a| a.loop_count),
+            ..Default::default()
         });
     };
 
@@ -2836,12 +2839,12 @@ pub fn read_avif_with_config<T: Read>(
                     }
                 }
             }
-        } else if info.item_type == b"mime" {
-            if let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == desc_item_id) {
-                let mut xmp = TryVec::new();
-                extract_item_data(loc, &mut xmp)?;
-                context.xmp = Some(xmp);
-            }
+        } else if info.item_type == b"mime"
+            && let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == desc_item_id)
+        {
+            let mut xmp = TryVec::new();
+            extract_item_data(loc, &mut xmp)?;
+            context.xmp = Some(xmp);
         }
     }
 

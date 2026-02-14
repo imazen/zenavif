@@ -15,12 +15,12 @@ license = "MPL-2.0"
 categories = ["multimedia::images"]
 repository = "https://github.com/imazen/zenavif-parse"
 readme = "README.md"
-include = ["/README.md", "/Cargo.toml", "/LICENSE", "/src/*.rs", "/avif_parse.h", "/examples/*.rs", "/tests/*.rs"]
+include = ["/README.md", "/Cargo.toml", "/LICENSE", "/src/*.rs", "/examples/*.rs", "/tests/*"]
 keywords = ["avif", "image", "parser", "demuxer", "heif"]
 rust-version = "1.92"
 
 [lib]
-crate-type = ["rlib", "staticlib"]
+crate-type = ["rlib"]
 
 [dependencies]
 byteorder = "1.5.0"
