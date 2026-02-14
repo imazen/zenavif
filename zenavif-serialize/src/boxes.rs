@@ -514,6 +514,7 @@ impl MpegBox for AuxlBox {
 
 /// ColourInformationBox
 #[derive(Debug, Copy, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct ColrBox {
     pub color_primaries: ColorPrimaries,
     pub transfer_characteristics: TransferCharacteristics,
@@ -553,11 +554,18 @@ impl MpegBox for ColrBox {
 /// Signals the content light level of HDR content to the display.
 /// Both values are in cd/m² (nits).
 #[derive(Debug, Copy, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct ClliBox {
     /// Maximum light level of any single pixel in the content (MaxCLL).
     pub max_content_light_level: u16,
     /// Maximum average light level of any single frame in the content (MaxFALL).
     pub max_pic_average_light_level: u16,
+}
+
+impl ClliBox {
+    pub fn new(max_content_light_level: u16, max_pic_average_light_level: u16) -> Self {
+        Self { max_content_light_level, max_pic_average_light_level }
+    }
 }
 
 impl MpegBox for ClliBox {
@@ -578,6 +586,7 @@ impl MpegBox for ClliBox {
 /// Describes the color volume of the mastering display used to author the content.
 /// This does not describe the content itself — see [`ClliBox`] for that.
 #[derive(Debug, Copy, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct MdcvBox {
     /// Display primaries in CIE 1931 xy chromaticity, encoded as the value × 50000.
     /// For example, D65 white (0.3127, 0.3290) encodes as (15635, 16450).
@@ -591,6 +600,12 @@ pub struct MdcvBox {
     /// Minimum luminance of the mastering display in cd/m² × 10000.
     /// For example, 0.005 cd/m² = 50.
     pub min_luminance: u32,
+}
+
+impl MdcvBox {
+    pub fn new(primaries: [(u16, u16); 3], white_point: (u16, u16), max_luminance: u32, min_luminance: u32) -> Self {
+        Self { primaries, white_point, max_luminance, min_luminance }
+    }
 }
 
 impl MpegBox for MdcvBox {
@@ -613,6 +628,7 @@ impl MpegBox for MdcvBox {
 }
 
 #[derive(Debug, Copy, Clone)]
+#[non_exhaustive]
 pub struct Av1CBox {
     pub seq_profile: u8,
     pub seq_level_idx_0: u8,
@@ -623,6 +639,23 @@ pub struct Av1CBox {
     pub chroma_subsampling_x: bool,
     pub chroma_subsampling_y: bool,
     pub chroma_sample_position: u8,
+}
+
+impl Default for Av1CBox {
+    /// Default: 8-bit 4:2:0, seq_profile=0, level=4
+    fn default() -> Self {
+        Self {
+            seq_profile: 0,
+            seq_level_idx_0: 4,
+            seq_tier_0: false,
+            high_bitdepth: false,
+            twelve_bit: false,
+            monochrome: false,
+            chroma_subsampling_x: true,
+            chroma_subsampling_y: true,
+            chroma_sample_position: 0,
+        }
+    }
 }
 
 impl MpegBox for Av1CBox {
@@ -734,9 +767,14 @@ impl MpegBox for IlocBox<'_> {
 /// Specifies counter-clockwise rotation. The `angle` field is the
 /// raw 2-bit code: 0 = 0°, 1 = 90°, 2 = 180°, 3 = 270°.
 #[derive(Debug, Copy, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct IrotBox {
     /// Rotation code (0-3): 0=0°, 1=90° CCW, 2=180°, 3=270° CCW
     pub angle: u8,
+}
+
+impl IrotBox {
+    pub fn new(angle: u8) -> Self { Self { angle } }
 }
 
 impl MpegBox for IrotBox {
@@ -757,9 +795,14 @@ impl MpegBox for IrotBox {
 /// `axis` = 0 means vertical axis (left-right flip),
 /// `axis` = 1 means horizontal axis (top-bottom flip).
 #[derive(Debug, Copy, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct ImirBox {
     /// 0 = vertical axis (left-right flip), 1 = horizontal axis (top-bottom flip)
     pub axis: u8,
+}
+
+impl ImirBox {
+    pub fn new(axis: u8) -> Self { Self { axis } }
 }
 
 impl MpegBox for ImirBox {
@@ -780,6 +823,7 @@ impl MpegBox for ImirBox {
 /// 32 bytes payload: 4 pairs of (numerator u32, denominator u32),
 /// except offsets which are signed numerators.
 #[derive(Debug, Copy, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct ClapBox {
     pub width_n: u32,
     pub width_d: u32,
@@ -789,6 +833,15 @@ pub struct ClapBox {
     pub horiz_off_d: u32,
     pub vert_off_n: i32,
     pub vert_off_d: u32,
+}
+
+impl ClapBox {
+    /// Create from width, height, and center offset as rational numbers (n/d pairs).
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(width_n: u32, width_d: u32, height_n: u32, height_d: u32,
+               horiz_off_n: i32, horiz_off_d: u32, vert_off_n: i32, vert_off_d: u32) -> Self {
+        Self { width_n, width_d, height_n, height_d, horiz_off_n, horiz_off_d, vert_off_n, vert_off_d }
+    }
 }
 
 impl MpegBox for ClapBox {
@@ -814,9 +867,14 @@ impl MpegBox for ClapBox {
 ///
 /// 8 bytes payload: h_spacing (u32) + v_spacing (u32).
 #[derive(Debug, Copy, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct PaspBox {
     pub h_spacing: u32,
     pub v_spacing: u32,
+}
+
+impl PaspBox {
+    pub fn new(h_spacing: u32, v_spacing: u32) -> Self { Self { h_spacing, v_spacing } }
 }
 
 impl MpegBox for PaspBox {
@@ -834,8 +892,13 @@ impl MpegBox for PaspBox {
 
 /// ColourInformationBox with ICC profile (colour_type = 'prof' or 'rICC').
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ColrIccBox {
     pub icc_data: Vec<u8>,
+}
+
+impl ColrIccBox {
+    pub fn new(icc_data: Vec<u8>) -> Self { Self { icc_data } }
 }
 
 impl MpegBox for ColrIccBox {

@@ -7,6 +7,7 @@ use crate::boxes::{Av1CBox, ClliBox, ColrBox, MdcvBox};
 
 /// A single pre-encoded animation frame.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct AnimFrame<'a> {
     /// AV1-encoded color data for this frame.
     pub color: &'a [u8],
@@ -18,48 +19,88 @@ pub struct AnimFrame<'a> {
     pub is_sync: bool,
 }
 
-/// Configuration for an animated AVIF image.
-pub struct AnimatedImage<'a> {
-    pub width: u32,
-    pub height: u32,
-    /// Timescale (ticks per second). Use 1000 for milliseconds.
-    pub timescale: u32,
-    /// Loop count: 0 = infinite looping.
-    pub loop_count: u32,
-    pub frames: &'a [AnimFrame<'a>],
-    /// AV1 codec configuration for color track.
-    pub color_config: Av1CBox,
-    /// AV1 codec configuration for alpha track (if frames have alpha).
-    pub alpha_config: Option<Av1CBox>,
-    /// AV1 sequence header OBU for color track.
-    pub color_seq_header: &'a [u8],
-    /// AV1 sequence header OBU for alpha track.
-    pub alpha_seq_header: Option<&'a [u8]>,
-    /// CICP color info (nclx). Optional — skipped if default.
-    pub colr: Option<ColrBox>,
-    /// Content Light Level Information (HDR).
-    pub clli: Option<ClliBox>,
-    /// Mastering Display Colour Volume (HDR).
-    pub mdcv: Option<MdcvBox>,
+impl<'a> AnimFrame<'a> {
+    /// Create a frame with color data and duration. Alpha defaults to `None`, sync to `false`.
+    pub fn new(color: &'a [u8], duration: u32) -> Self {
+        Self { color, alpha: None, duration, is_sync: false }
+    }
+
+    /// Set alpha data for this frame.
+    pub fn with_alpha(mut self, alpha: &'a [u8]) -> Self {
+        self.alpha = Some(alpha);
+        self
+    }
+
+    /// Mark this frame as a sync (key) frame.
+    pub fn with_sync(mut self, is_sync: bool) -> Self {
+        self.is_sync = is_sync;
+        self
+    }
 }
 
-/// Serialize an animated AVIF file from pre-encoded AV1 frame data.
+/// Builder for animated AVIF container serialization.
 ///
-/// Returns the complete AVIF file as a `Vec<u8>`.
-pub fn serialize_animated(image: &AnimatedImage<'_>) -> Vec<u8> {
-    let has_alpha = image.frames.iter().any(|f| f.alpha.is_some())
-        && image.alpha_config.is_some()
-        && image.alpha_seq_header.is_some();
+/// Holds codec configuration and optional metadata. Call [`serialize`](AnimatedImage::serialize)
+/// with per-encode data (dimensions, frames, sequence headers) to produce the AVIF file.
+pub struct AnimatedImage {
+    timescale: u32,
+    loop_count: u32,
+    color_config: Av1CBox,
+    alpha_config: Option<Av1CBox>,
+    colr: Option<ColrBox>,
+    clli: Option<ClliBox>,
+    mdcv: Option<MdcvBox>,
+}
 
-    let total_duration: u64 = image.frames.iter().map(|f| u64::from(f.duration)).sum();
-    let durations: Vec<u32> = image.frames.iter().map(|f| f.duration).collect();
-    let color_frames: Vec<&[u8]> = image.frames.iter().map(|f| f.color).collect();
+impl Default for AnimatedImage {
+    fn default() -> Self { Self::new() }
+}
+
+impl AnimatedImage {
+    /// Create with sensible defaults (timescale=1000ms, infinite loop, 8-bit 4:2:0).
+    pub fn new() -> Self {
+        Self {
+            timescale: 1000,
+            loop_count: 0,
+            color_config: Av1CBox::default(),
+            alpha_config: None,
+            colr: None,
+            clli: None,
+            mdcv: None,
+        }
+    }
+
+    /// Timescale in ticks per second. Default: 1000 (milliseconds).
+    pub fn set_timescale(&mut self, timescale: u32) -> &mut Self { self.timescale = timescale; self }
+    /// Loop count: 0 = infinite. Default: 0.
+    pub fn set_loop_count(&mut self, loop_count: u32) -> &mut Self { self.loop_count = loop_count; self }
+    /// AV1 codec configuration for the color track.
+    pub fn set_color_config(&mut self, config: Av1CBox) -> &mut Self { self.color_config = config; self }
+    /// AV1 codec configuration for the alpha track.
+    pub fn set_alpha_config(&mut self, config: Av1CBox) -> &mut Self { self.alpha_config = Some(config); self }
+    /// CICP color info (nclx).
+    pub fn set_colr(&mut self, colr: ColrBox) -> &mut Self { self.colr = Some(colr); self }
+    /// Content Light Level Information (HDR).
+    pub fn set_clli(&mut self, clli: ClliBox) -> &mut Self { self.clli = Some(clli); self }
+    /// Mastering Display Colour Volume (HDR).
+    pub fn set_mdcv(&mut self, mdcv: MdcvBox) -> &mut Self { self.mdcv = Some(mdcv); self }
+
+    /// Serialize an animated AVIF file from pre-encoded AV1 frame data.
+    pub fn serialize(&self, width: u32, height: u32, frames: &[AnimFrame<'_>],
+                     color_seq_header: &[u8], alpha_seq_header: Option<&[u8]>) -> Vec<u8> {
+    let has_alpha = frames.iter().any(|f| f.alpha.is_some())
+        && self.alpha_config.is_some()
+        && alpha_seq_header.is_some();
+
+    let total_duration: u64 = frames.iter().map(|f| u64::from(f.duration)).sum();
+    let durations: Vec<u32> = frames.iter().map(|f| f.duration).collect();
+    let color_frames: Vec<&[u8]> = frames.iter().map(|f| f.color).collect();
     let alpha_frames: Vec<&[u8]> = if has_alpha {
-        image.frames.iter().map(|f| f.alpha.unwrap_or(&[])).collect()
+        frames.iter().map(|f| f.alpha.unwrap_or(&[])).collect()
     } else {
         Vec::new()
     };
-    let sync_indices: Vec<u32> = image.frames.iter().enumerate()
+    let sync_indices: Vec<u32> = frames.iter().enumerate()
         .filter(|(_, f)| f.is_sync)
         .map(|(i, _)| (i + 1) as u32) // 1-indexed
         .collect();
@@ -74,32 +115,32 @@ pub fn serialize_animated(image: &AnimatedImage<'_>) -> Vec<u8> {
     // meta — declares primary item for still-frame interop
     write_meta(
         &mut out,
-        image.width,
-        image.height,
-        image.color_seq_header,
+        width,
+        height,
+        color_seq_header,
         color_frames.first().map(|f| f.len() as u32).unwrap_or(0),
-        &image.color_config,
-        image.colr.as_ref(),
-        image.clli.as_ref(),
-        image.mdcv.as_ref(),
+        &self.color_config,
+        self.colr.as_ref(),
+        self.clli.as_ref(),
+        self.mdcv.as_ref(),
     );
 
     // moov
     let moov_pos = begin_box(&mut out, b"moov");
-    write_mvhd(&mut out, image.timescale, total_duration, next_track_id);
+    write_mvhd(&mut out, self.timescale, total_duration, next_track_id);
     write_track(
-        &mut out, 1, image.width, image.height,
-        image.timescale, total_duration,
+        &mut out, 1, width, height,
+        self.timescale, total_duration,
         &color_frames, &durations, &sync_indices,
-        image.color_seq_header, &image.color_config,
+        color_seq_header, &self.color_config,
         false,
     );
     if has_alpha {
-        let alpha_seq = image.alpha_seq_header.unwrap();
-        let alpha_cfg = image.alpha_config.as_ref().unwrap();
+        let alpha_seq = alpha_seq_header.unwrap();
+        let alpha_cfg = self.alpha_config.as_ref().unwrap();
         write_track(
-            &mut out, 2, image.width, image.height,
-            image.timescale, total_duration,
+            &mut out, 2, width, height,
+            self.timescale, total_duration,
             &alpha_frames, &durations, &sync_indices,
             alpha_seq, alpha_cfg,
             true,
@@ -127,6 +168,7 @@ pub fn serialize_animated(image: &AnimatedImage<'_>) -> Vec<u8> {
     }
 
     out
+    }
 }
 
 // ─── Low-level helpers ───────────────────────────────────────────────
@@ -688,25 +730,13 @@ mod tests {
 
     #[test]
     fn serialize_color_only() {
-        let image = AnimatedImage {
-            width: 64,
-            height: 64,
-            timescale: 1000,
-            loop_count: 0,
-            frames: &[
-                AnimFrame { color: b"frame1color", alpha: None, duration: 100, is_sync: true },
-                AnimFrame { color: b"frame2color", alpha: None, duration: 200, is_sync: false },
-            ],
-            color_config: basic_av1c(),
-            alpha_config: None,
-            color_seq_header: b"seqhdr",
-            alpha_seq_header: None,
-            colr: None,
-            clli: None,
-            mdcv: None,
-        };
-
-        let avif = serialize_animated(&image);
+        let frames = [
+            AnimFrame::new(b"frame1color", 100).with_sync(true),
+            AnimFrame::new(b"frame2color", 200),
+        ];
+        let mut image = AnimatedImage::new();
+        image.set_color_config(basic_av1c());
+        let avif = image.serialize(64, 64, &frames, b"seqhdr", None);
 
         // Should start with ftyp avis
         assert_eq!(&avif[4..8], b"ftyp");
@@ -729,25 +759,14 @@ mod tests {
 
     #[test]
     fn serialize_with_alpha() {
-        let image = AnimatedImage {
-            width: 32,
-            height: 32,
-            timescale: 1000,
-            loop_count: 0,
-            frames: &[
-                AnimFrame { color: b"c1", alpha: Some(b"a1"), duration: 500, is_sync: true },
-                AnimFrame { color: b"c2", alpha: Some(b"a2"), duration: 500, is_sync: false },
-            ],
-            color_config: basic_av1c(),
-            alpha_config: Some(mono_av1c()),
-            color_seq_header: b"colseq",
-            alpha_seq_header: Some(b"alphaseq"),
-            colr: None,
-            clli: None,
-            mdcv: None,
-        };
-
-        let avif = serialize_animated(&image);
+        let frames = [
+            AnimFrame::new(b"c1", 500).with_alpha(b"a1").with_sync(true),
+            AnimFrame::new(b"c2", 500).with_alpha(b"a2"),
+        ];
+        let mut image = AnimatedImage::new();
+        image.set_color_config(basic_av1c());
+        image.set_alpha_config(mono_av1c());
+        let avif = image.serialize(32, 32, &frames, b"colseq", Some(b"alphaseq"));
 
         assert_eq!(&avif[4..8], b"ftyp");
         assert!(avif.windows(2).any(|w| w == b"c1"));
@@ -762,26 +781,14 @@ mod tests {
 
     #[test]
     fn frame_durations_roundtrip() {
-        let image = AnimatedImage {
-            width: 16,
-            height: 16,
-            timescale: 1000,
-            loop_count: 0,
-            frames: &[
-                AnimFrame { color: b"f1", alpha: None, duration: 100, is_sync: true },
-                AnimFrame { color: b"f2", alpha: None, duration: 200, is_sync: false },
-                AnimFrame { color: b"f3", alpha: None, duration: 300, is_sync: false },
-            ],
-            color_config: basic_av1c(),
-            alpha_config: None,
-            color_seq_header: b"seq",
-            alpha_seq_header: None,
-            colr: None,
-            clli: None,
-            mdcv: None,
-        };
-
-        let avif = serialize_animated(&image);
+        let frames = [
+            AnimFrame::new(b"f1", 100).with_sync(true),
+            AnimFrame::new(b"f2", 200),
+            AnimFrame::new(b"f3", 300),
+        ];
+        let mut image = AnimatedImage::new();
+        image.set_color_config(basic_av1c());
+        let avif = image.serialize(16, 16, &frames, b"seq", None);
         let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
         let info = parser.animation_info().expect("animation info");
         assert_eq!(info.frame_count, 3);

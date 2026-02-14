@@ -7,55 +7,71 @@ use crate::boxes::*;
 use arrayvec::ArrayVec;
 use std::io;
 
-/// Configuration for a grid AVIF image.
-pub struct GridImage<'a> {
-    /// Number of tile rows (1-256).
-    pub rows: u8,
-    /// Number of tile columns (1-256).
-    pub columns: u8,
-    /// Output image width in pixels.
-    pub output_width: u32,
-    /// Output image height in pixels.
-    pub output_height: u32,
-    /// Tile width in pixels (all tiles same width).
-    pub tile_width: u32,
-    /// Tile height in pixels (all tiles same height).
-    pub tile_height: u32,
-    /// AV1-encoded data for each tile, in row-major order.
-    /// Length must equal `rows * columns`.
-    pub tile_data: &'a [&'a [u8]],
-    /// Optional alpha data for each tile (same order as `tile_data`).
-    /// If `Some`, length must equal `rows * columns`.
-    pub alpha_data: Option<&'a [&'a [u8]]>,
-    /// AV1 codec configuration for color tiles.
-    pub color_config: Av1CBox,
-    /// AV1 codec configuration for alpha tiles (if alpha_data is present).
-    pub alpha_config: Option<Av1CBox>,
-    /// Bit depth (8, 10, or 12).
-    pub depth_bits: u8,
-    /// CICP color info. `None` omits the colr box.
-    pub colr: Option<ColrBox>,
-    /// Whether alpha is premultiplied.
-    pub premultiplied_alpha: bool,
+/// Builder for grid (tiled) AVIF container serialization.
+///
+/// Holds codec configuration and optional metadata. Call [`serialize`](GridImage::serialize)
+/// with per-encode data (layout, dimensions, tile data) to produce the AVIF file.
+pub struct GridImage {
+    color_config: Av1CBox,
+    alpha_config: Option<Av1CBox>,
+    depth_bits: u8,
+    colr: Option<ColrBox>,
+    premultiplied_alpha: bool,
 }
 
-/// Serialize a grid AVIF image.
-///
-/// Returns the complete AVIF file as a `Vec<u8>`.
-pub fn serialize_grid(image: &GridImage<'_>) -> io::Result<Vec<u8>> {
-    let tile_count = image.rows as usize * image.columns as usize;
-    if image.tile_data.len() != tile_count {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput,
-            format!("tile_data.len() ({}) != rows*columns ({})", image.tile_data.len(), tile_count)));
+impl Default for GridImage {
+    fn default() -> Self { Self::new() }
+}
+
+impl GridImage {
+    /// Create with sensible defaults (8-bit 4:2:0, no alpha, no colr).
+    pub fn new() -> Self {
+        Self {
+            color_config: Av1CBox::default(),
+            alpha_config: None,
+            depth_bits: 8,
+            colr: None,
+            premultiplied_alpha: false,
+        }
     }
-    if let Some(alpha) = image.alpha_data {
+
+    /// AV1 codec configuration for color tiles.
+    pub fn set_color_config(&mut self, config: Av1CBox) -> &mut Self { self.color_config = config; self }
+    /// AV1 codec configuration for alpha tiles.
+    pub fn set_alpha_config(&mut self, config: Av1CBox) -> &mut Self { self.alpha_config = Some(config); self }
+    /// Bit depth (8, 10, or 12). Default: 8.
+    pub fn set_depth_bits(&mut self, depth: u8) -> &mut Self { self.depth_bits = depth; self }
+    /// CICP color info (nclx).
+    pub fn set_colr(&mut self, colr: ColrBox) -> &mut Self { self.colr = Some(colr); self }
+    /// Whether alpha is premultiplied. Default: false.
+    pub fn set_premultiplied_alpha(&mut self, premultiplied: bool) -> &mut Self { self.premultiplied_alpha = premultiplied; self }
+
+    /// Serialize a grid AVIF image.
+    ///
+    /// - `rows`, `columns`: tile grid layout (1-256 each)
+    /// - `output_width`, `output_height`: final image dimensions
+    /// - `tile_width`, `tile_height`: dimensions of each tile
+    /// - `tile_data`: AV1-encoded data for each tile in row-major order (length must equal `rows * columns`)
+    /// - `alpha_data`: optional alpha tile data (same order and count as `tile_data`)
+    #[allow(clippy::too_many_arguments)]
+    pub fn serialize(&self, rows: u8, columns: u8,
+                     output_width: u32, output_height: u32,
+                     tile_width: u32, tile_height: u32,
+                     tile_data: &[&[u8]], alpha_data: Option<&[&[u8]]>) -> io::Result<Vec<u8>> {
+    let image = self;
+    let tile_count = rows as usize * columns as usize;
+    if tile_data.len() != tile_count {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput,
+            format!("tile_data.len() ({}) != rows*columns ({})", tile_data.len(), tile_count)));
+    }
+    if let Some(alpha) = alpha_data {
         if alpha.len() != tile_count {
             return Err(io::Error::new(io::ErrorKind::InvalidInput,
                 format!("alpha_data.len() ({}) != rows*columns ({})", alpha.len(), tile_count)));
         }
     }
 
-    let has_alpha = image.alpha_data.is_some() && image.alpha_config.is_some();
+    let has_alpha = alpha_data.is_some() && image.alpha_config.is_some();
 
     // Item IDs:
     // 1 = color grid item
@@ -69,14 +85,14 @@ pub fn serialize_grid(image: &GridImage<'_>) -> io::Result<Vec<u8>> {
 
     // Build the ImageGrid descriptor (item data for the grid item)
     let grid_descriptor = make_grid_descriptor(
-        image.rows, image.columns,
-        image.output_width, image.output_height,
+        rows, columns,
+        output_width, output_height,
     );
 
     let alpha_grid_descriptor = if has_alpha {
         Some(make_grid_descriptor(
-            image.rows, image.columns,
-            image.output_width, image.output_height,
+            rows, columns,
+            output_width, output_height,
         ))
     } else {
         None
@@ -91,13 +107,13 @@ pub fn serialize_grid(image: &GridImage<'_>) -> io::Result<Vec<u8>> {
 
     // Shared properties
     let ispe_output = ipco.push(IpcoProp::Ispe(IspeBox {
-        width: image.output_width,
-        height: image.output_height,
+        width: output_width,
+        height: output_height,
     })).ok_or(io::ErrorKind::InvalidInput)?;
 
     let ispe_tile = ipco.push(IpcoProp::Ispe(IspeBox {
-        width: image.tile_width,
-        height: image.tile_height,
+        width: tile_width,
+        height: tile_height,
     })).ok_or(io::ErrorKind::InvalidInput)?;
 
     let av1c_color = ipco.push(IpcoProp::Av1C(image.color_config)).ok_or(io::ErrorKind::InvalidInput)?;
@@ -270,8 +286,8 @@ pub fn serialize_grid(image: &GridImage<'_>) -> io::Result<Vec<u8>> {
         &grid_descriptor,
         alpha_grid_descriptor.as_deref(),
         alpha_grid_id,
-        image.tile_data,
-        image.alpha_data,
+        tile_data,
+        alpha_data,
         color_tile_base,
         alpha_tile_base,
         tile_count,
@@ -293,12 +309,12 @@ pub fn serialize_grid(image: &GridImage<'_>) -> io::Result<Vec<u8>> {
     }
 
     // Color tile data
-    for tile in image.tile_data {
+    for tile in tile_data {
         out.extend_from_slice(tile);
     }
 
     // Alpha tile data
-    if let Some(alpha) = image.alpha_data {
+    if let Some(alpha) = alpha_data {
         for tile in alpha {
             out.extend_from_slice(tile);
         }
@@ -310,6 +326,7 @@ pub fn serialize_grid(image: &GridImage<'_>) -> io::Result<Vec<u8>> {
     patch_iloc_offsets(&mut out, mdat_data_start);
 
     Ok(out)
+    }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -599,23 +616,10 @@ mod tests {
         let tiles: Vec<Vec<u8>> = (0..4).map(|i| vec![i as u8; 100]).collect();
         let tile_refs: Vec<&[u8]> = tiles.iter().map(|t| t.as_slice()).collect();
 
-        let image = GridImage {
-            rows: 2,
-            columns: 2,
-            output_width: 200,
-            output_height: 200,
-            tile_width: 100,
-            tile_height: 100,
-            tile_data: &tile_refs,
-            alpha_data: None,
-            color_config: basic_av1c(),
-            alpha_config: None,
-            depth_bits: 8,
-            colr: None,
-            premultiplied_alpha: false,
-        };
+        let mut image = GridImage::new();
+        image.set_color_config(basic_av1c());
 
-        let avif = serialize_grid(&image).unwrap();
+        let avif = image.serialize(2, 2, 200, 200, 100, 100, &tile_refs, None).unwrap();
 
         // Verify ftyp
         assert_eq!(&avif[4..8], b"ftyp");
@@ -642,23 +646,10 @@ mod tests {
         let tiles: Vec<Vec<u8>> = (0..3).map(|i| vec![(i + 10) as u8; 50]).collect();
         let tile_refs: Vec<&[u8]> = tiles.iter().map(|t| t.as_slice()).collect();
 
-        let image = GridImage {
-            rows: 1,
-            columns: 3,
-            output_width: 300,
-            output_height: 100,
-            tile_width: 100,
-            tile_height: 100,
-            tile_data: &tile_refs,
-            alpha_data: None,
-            color_config: basic_av1c(),
-            alpha_config: None,
-            depth_bits: 8,
-            colr: None,
-            premultiplied_alpha: false,
-        };
+        let mut image = GridImage::new();
+        image.set_color_config(basic_av1c());
 
-        let avif = serialize_grid(&image).unwrap();
+        let avif = image.serialize(1, 3, 300, 100, 100, 100, &tile_refs, None).unwrap();
         let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
         let grid = parser.grid_config().expect("grid config");
         assert_eq!(grid.rows, 1);
@@ -673,23 +664,11 @@ mod tests {
         let color_refs: Vec<&[u8]> = color_tiles.iter().map(|t| t.as_slice()).collect();
         let alpha_refs: Vec<&[u8]> = alpha_tiles.iter().map(|t| t.as_slice()).collect();
 
-        let image = GridImage {
-            rows: 2,
-            columns: 2,
-            output_width: 128,
-            output_height: 128,
-            tile_width: 64,
-            tile_height: 64,
-            tile_data: &color_refs,
-            alpha_data: Some(&alpha_refs),
-            color_config: basic_av1c(),
-            alpha_config: Some(mono_av1c()),
-            depth_bits: 8,
-            colr: None,
-            premultiplied_alpha: false,
-        };
+        let mut image = GridImage::new();
+        image.set_color_config(basic_av1c());
+        image.set_alpha_config(mono_av1c());
 
-        let avif = serialize_grid(&image).unwrap();
+        let avif = image.serialize(2, 2, 128, 128, 64, 64, &color_refs, Some(&alpha_refs)).unwrap();
 
         // Should contain all color and alpha tile data
         for tile in &color_tiles {
@@ -710,22 +689,8 @@ mod tests {
         let tiles = vec![vec![0u8; 10]];
         let tile_refs: Vec<&[u8]> = tiles.iter().map(|t| t.as_slice()).collect();
 
-        let image = GridImage {
-            rows: 2,
-            columns: 2,
-            output_width: 200,
-            output_height: 200,
-            tile_width: 100,
-            tile_height: 100,
-            tile_data: &tile_refs, // only 1, need 4
-            alpha_data: None,
-            color_config: basic_av1c(),
-            alpha_config: None,
-            depth_bits: 8,
-            colr: None,
-            premultiplied_alpha: false,
-        };
-
-        assert!(serialize_grid(&image).is_err());
+        let image = GridImage::new();
+        // only 1 tile, need 4
+        assert!(image.serialize(2, 2, 200, 200, 100, 100, &tile_refs, None).is_err());
     }
 }
