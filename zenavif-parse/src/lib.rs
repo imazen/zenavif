@@ -667,9 +667,10 @@ struct SampleToChunkEntry {
 #[derive(Debug)]
 struct SampleTable {
     time_to_sample: TryVec<TimeToSampleEntry>,
-    sample_to_chunk: TryVec<SampleToChunkEntry>,
     sample_sizes: TryVec<u32>,
-    chunk_offsets: TryVec<u64>,
+    /// Precomputed byte offset for each sample, derived from
+    /// sample_to_chunk + chunk_offsets + sample_sizes during parsing.
+    sample_offsets: TryVec<u64>,
 }
 
 /// A track reference entry (e.g., auxl, cdsc) parsed from a `tref` sub-box.
@@ -1605,47 +1606,17 @@ impl<'data> AvifParser<'data> {
         Ok(0)
     }
 
-    /// Calculate sample location (offset and size) from sample table.
+    /// Look up precomputed sample location (offset and size) from sample table.
     fn calculate_sample_location(&self, st: &SampleTable, index: usize) -> Result<(u64, u32)> {
-        let sample_size = *st
+        let offset = *st
+            .sample_offsets
+            .get(index)
+            .ok_or(Error::InvalidData("sample index out of bounds"))?;
+        let size = *st
             .sample_sizes
             .get(index)
             .ok_or(Error::InvalidData("sample index out of bounds"))?;
-
-        let mut current_sample = 0;
-        for (chunk_map_idx, entry) in st.sample_to_chunk.iter().enumerate() {
-            let next_first_chunk = st
-                .sample_to_chunk
-                .get(chunk_map_idx + 1)
-                .map(|e| e.first_chunk)
-                .unwrap_or(u32::MAX);
-
-            for chunk_idx in entry.first_chunk..next_first_chunk {
-                if chunk_idx == 0 || (chunk_idx as usize) > st.chunk_offsets.len() {
-                    break;
-                }
-
-                let chunk_offset = *st.chunk_offsets.get((chunk_idx - 1) as usize)
-                    .ok_or(Error::InvalidData("chunk index out of bounds"))?;
-
-                for sample_in_chunk in 0..entry.samples_per_chunk {
-                    if current_sample == index {
-                        let mut offset_in_chunk = 0u64;
-                        for s in 0..sample_in_chunk {
-                            let prev_idx = current_sample.saturating_sub((sample_in_chunk - s) as usize);
-                            if let Some(&prev_size) = st.sample_sizes.get(prev_idx) {
-                                offset_in_chunk += prev_size as u64;
-                            }
-                        }
-
-                        return Ok((chunk_offset + offset_in_chunk, sample_size));
-                    }
-                    current_sample += 1;
-                }
-            }
-        }
-
-        Err(Error::InvalidData("sample not found in chunk table"))
+        Ok((offset, size))
     }
 
     // ========================================
@@ -3782,11 +3753,43 @@ fn read_stbl<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<SampleTable> {
         }
     }
 
+    // Precompute per-sample byte offsets from sample_to_chunk + chunk_offsets + sample_sizes.
+    // This flattens the ISOBMFF indirection into a simple array for O(1) frame lookup.
+    let mut sample_offsets = TryVec::new();
+    let mut sample_idx = 0usize;
+    for (i, entry) in sample_to_chunk.iter().enumerate() {
+        let next_first_chunk = sample_to_chunk
+            .get(i + 1)
+            .map(|e| e.first_chunk)
+            .unwrap_or(u32::MAX);
+
+        for chunk_no in entry.first_chunk..next_first_chunk {
+            if chunk_no == 0 {
+                break;
+            }
+            let co_idx = (chunk_no - 1) as usize;
+            let chunk_offset = match chunk_offsets.get(co_idx) {
+                Some(&o) => o,
+                None => break,
+            };
+
+            let mut offset = chunk_offset;
+            for _ in 0..entry.samples_per_chunk {
+                if sample_idx >= sample_sizes.len() {
+                    break;
+                }
+                sample_offsets.push(offset)?;
+                offset += *sample_sizes.get(sample_idx)
+                    .ok_or(Error::InvalidData("sample index mismatch"))? as u64;
+                sample_idx += 1;
+            }
+        }
+    }
+
     Ok(SampleTable {
         time_to_sample,
-        sample_to_chunk,
         sample_sizes,
-        chunk_offsets,
+        sample_offsets,
     })
 }
 
@@ -4073,28 +4076,10 @@ fn extract_animation_frames(
 ) -> Result<TryVec<AnimationFrame>> {
     let mut frames = TryVec::new();
 
-    // Build sample-to-chunk mapping (expand into per-sample info)
-    let mut sample_to_chunk_map = TryVec::new();
-    for (i, entry) in sample_table.sample_to_chunk.iter().enumerate() {
-        let next_first_chunk = sample_table
-            .sample_to_chunk
-            .get(i + 1)
-            .map(|e| e.first_chunk)
-            .unwrap_or(u32::MAX);
-
-        for chunk_idx in entry.first_chunk..next_first_chunk {
-            if chunk_idx > sample_table.chunk_offsets.len() as u32 {
-                break;
-            }
-            sample_to_chunk_map.push((chunk_idx, entry.samples_per_chunk))?;
-        }
-    }
-
     // Calculate frame durations from time-to-sample
     let mut frame_durations = TryVec::new();
     for entry in &sample_table.time_to_sample {
         for _ in 0..entry.sample_count {
-            // Convert from media timescale to milliseconds
             let duration_ms = if media_timescale > 0 {
                 ((entry.sample_delta as u64) * 1000) / (media_timescale as u64)
             } else {
@@ -4104,67 +4089,38 @@ fn extract_animation_frames(
         }
     }
 
-    // Extract each frame
-    let sample_count = sample_table.sample_sizes.len();
-    let mut current_sample = 0;
+    // Extract each frame using precomputed sample offsets
+    for i in 0..sample_table.sample_sizes.len() {
+        let sample_offset = *sample_table.sample_offsets.get(i)
+            .ok_or(Error::InvalidData("sample offset index out of bounds"))?;
+        let sample_size = *sample_table.sample_sizes.get(i)
+            .ok_or(Error::InvalidData("sample size index out of bounds"))?;
+        let duration_ms = frame_durations.get(i).copied().unwrap_or(0);
 
-    for (chunk_idx_1based, samples_in_chunk) in &sample_to_chunk_map {
-        let chunk_idx = (*chunk_idx_1based as usize).saturating_sub(1);
-        if chunk_idx >= sample_table.chunk_offsets.len() {
-            continue;
-        }
+        let mut frame_data = TryVec::new();
+        let mut found = false;
 
-        let chunk_offset = *sample_table.chunk_offsets.get(chunk_idx)
-            .ok_or(Error::InvalidData("chunk offset index out of bounds"))?;
+        for mdat in mdats.iter_mut() {
+            let range = ExtentRange::WithLength(Range {
+                start: sample_offset,
+                end: sample_offset + sample_size as u64,
+            });
 
-        for sample_in_chunk in 0..*samples_in_chunk {
-            if current_sample >= sample_count {
+            if mdat.contains_extent(&range) {
+                mdat.read_extent(&range, &mut frame_data)?;
+                found = true;
                 break;
             }
-
-            let sample_size = *sample_table.sample_sizes.get(current_sample)
-                .ok_or(Error::InvalidData("sample size index out of bounds"))?;
-            let duration_ms = frame_durations.get(current_sample).copied().unwrap_or(0);
-
-            // Calculate offset within chunk
-            let mut offset_in_chunk = 0u64;
-            for s in 0..sample_in_chunk {
-                let prev_sample = current_sample.saturating_sub((sample_in_chunk - s) as usize);
-                if let Some(&prev_size) = sample_table.sample_sizes.get(prev_sample) {
-                    offset_in_chunk += prev_size as u64;
-                }
-            }
-
-            let sample_offset = chunk_offset + offset_in_chunk;
-
-            // Extract frame data from mdat
-            let mut frame_data = TryVec::new();
-            let mut found = false;
-
-            for mdat in mdats.iter_mut() {
-                let range = ExtentRange::WithLength(Range {
-                    start: sample_offset,
-                    end: sample_offset + sample_size as u64,
-                });
-
-                if mdat.contains_extent(&range) {
-                    mdat.read_extent(&range, &mut frame_data)?;
-                    found = true;
-                    break;
-                }
-            }
-
-            if !found {
-                log::warn!("Animation frame {} not found in mdat", current_sample);
-            }
-
-            frames.push(AnimationFrame {
-                data: frame_data,
-                duration_ms,
-            })?;
-
-            current_sample += 1;
         }
+
+        if !found {
+            log::warn!("Animation frame {} not found in mdat", i);
+        }
+
+        frames.push(AnimationFrame {
+            data: frame_data,
+            duration_ms,
+        })?;
     }
 
     Ok(frames)
