@@ -1,6 +1,6 @@
 [package]
 name = "zenavif-serialize"
-version = "0.9.0"
+version = "0.1.0"
 authors = ["Kornel Lesiński <kornel@geekhood.net>", "Lilith River <lilith@imazen.io>"]
 edition = "2024"
 license = "BSD-3-Clause"

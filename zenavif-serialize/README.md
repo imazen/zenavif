@@ -40,7 +40,7 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-zenavif-serialize = "0.9"
+zenavif-serialize = "0.1"
 ```
 
 ### Still image (minimal)
