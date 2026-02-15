@@ -118,31 +118,31 @@ fn encoder_config_builder_chains() {
     assert!(!encoded.avif_file.is_empty());
 }
 
-/// Create a simple 16x16 RGB16 test image with 10-bit values
+/// Create a simple 16x16 RGB16 test image with full u16 range values
 fn make_rgb16_image() -> Img<Vec<Rgb<u16>>> {
     let mut pixels = Vec::with_capacity(16 * 16);
     for y in 0..16u16 {
         for x in 0..16u16 {
             pixels.push(Rgb {
-                r: x * 64, // 0-960, within 10-bit range
-                g: y * 64,
-                b: 512,
+                r: x * 4096, // 0–61440, full u16 range
+                g: y * 4096,
+                b: 32768,
             });
         }
     }
     Img::new(pixels, 16, 16)
 }
 
-/// Create a simple 16x16 RGBA16 test image with 10-bit values
+/// Create a simple 16x16 RGBA16 test image with full u16 range values
 fn make_rgba16_image() -> Img<Vec<Rgba<u16>>> {
     let mut pixels = Vec::with_capacity(16 * 16);
     for y in 0..16u16 {
         for x in 0..16u16 {
             pixels.push(Rgba {
-                r: x * 64,
-                g: y * 64,
-                b: 512,
-                a: 800,
+                r: x * 4096,
+                g: y * 4096,
+                b: 32768,
+                a: 51200,
             });
         }
     }

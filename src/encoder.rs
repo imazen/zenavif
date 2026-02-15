@@ -438,12 +438,13 @@ pub fn encode_rgba8(
 
 /// Encode a 16-bit RGB image to AVIF (10-bit AV1)
 ///
-/// Input values should be in 10-bit range (0–1023). Values outside this
-/// range will be clamped by the encoder.
+/// Input values should be in full u16 range (0–65535), in the image's native
+/// transfer function (typically sRGB gamma). Values are scaled to 10-bit
+/// internally before encoding.
 ///
 /// # Arguments
 ///
-/// * `img` - RGB16 image buffer
+/// * `img` - RGB16 image buffer (0–65535)
 /// * `config` - Encoder configuration
 /// * `stop` - Cancellation token (checked before encoding starts)
 pub fn encode_rgb16(
@@ -451,11 +452,21 @@ pub fn encode_rgb16(
     config: &EncoderConfig,
     stop: &(impl Stop + ?Sized),
 ) -> Result<EncodedImage> {
+    use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at(Error::from(e)))?;
     let enc = build_ravif_encoder(config);
     let width = img.width();
     let height = img.height();
-    let pixels: Vec<[u16; 3]> = img.pixels().map(|p| [p.r, p.g, p.b]).collect();
+    let pixels: Vec<[u16; 3]> = img
+        .pixels()
+        .map(|p| {
+            [
+                scale_from_u16(p.r, 10),
+                scale_from_u16(p.g, 10),
+                scale_from_u16(p.b, 10),
+            ]
+        })
+        .collect();
     let result = enc
         .encode_raw_planes_10_bit(
             width,
@@ -475,13 +486,13 @@ pub fn encode_rgb16(
 
 /// Encode a 16-bit RGBA image to AVIF (10-bit AV1)
 ///
-/// Input color values should be in 10-bit range (0–1023). Alpha values
-/// should also be in 10-bit range. Values outside this range will be
-/// clamped by the encoder.
+/// Input values should be in full u16 range (0–65535), in the image's native
+/// transfer function (typically sRGB gamma). Values are scaled to 10-bit
+/// internally before encoding.
 ///
 /// # Arguments
 ///
-/// * `img` - RGBA16 image buffer
+/// * `img` - RGBA16 image buffer (0–65535)
 /// * `config` - Encoder configuration
 /// * `stop` - Cancellation token (checked before encoding starts)
 pub fn encode_rgba16(
@@ -489,12 +500,22 @@ pub fn encode_rgba16(
     config: &EncoderConfig,
     stop: &(impl Stop + ?Sized),
 ) -> Result<EncodedImage> {
+    use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at(Error::from(e)))?;
     let enc = build_ravif_encoder(config);
     let width = img.width();
     let height = img.height();
-    let pixels: Vec<[u16; 3]> = img.pixels().map(|p| [p.r, p.g, p.b]).collect();
-    let alpha: Vec<u16> = img.pixels().map(|p| p.a).collect();
+    let pixels: Vec<[u16; 3]> = img
+        .pixels()
+        .map(|p| {
+            [
+                scale_from_u16(p.r, 10),
+                scale_from_u16(p.g, 10),
+                scale_from_u16(p.b, 10),
+            ]
+        })
+        .collect();
+    let alpha: Vec<u16> = img.pixels().map(|p| scale_from_u16(p.a, 10)).collect();
     let result = enc
         .encode_raw_planes_10_bit(
             width,
@@ -616,19 +637,19 @@ pub fn encode_animation_rgba8(
     })
 }
 
-/// A single 16-bit RGB frame in an animated AVIF sequence (10-bit values 0–1023)
+/// A single 16-bit RGB frame in an animated AVIF sequence
 #[derive(Clone)]
 pub struct AnimationFrame16 {
-    /// Frame pixel data (RGB16, 10-bit values)
+    /// Frame pixel data (RGB16, full 0–65535 range)
     pub pixels: ImgVec<RGB16>,
     /// Duration of this frame in milliseconds
     pub duration_ms: u32,
 }
 
-/// A single 16-bit RGBA frame in an animated AVIF sequence (10-bit values 0–1023)
+/// A single 16-bit RGBA frame in an animated AVIF sequence
 #[derive(Clone)]
 pub struct AnimationFrameRgba16 {
-    /// Frame pixel data (RGBA16, 10-bit values)
+    /// Frame pixel data (RGBA16, full 0–65535 range)
     pub pixels: ImgVec<RGBA16>,
     /// Duration of this frame in milliseconds
     pub duration_ms: u32,
@@ -636,12 +657,13 @@ pub struct AnimationFrameRgba16 {
 
 /// Encode a sequence of 16-bit RGB frames into an animated AVIF (10-bit AV1)
 ///
-/// Input values should be in 10-bit range (0–1023). All frames must have
-/// the same dimensions. Values outside this range will be clamped by the encoder.
+/// Input values should be in full u16 range (0–65535), in the image's native
+/// transfer function (typically sRGB gamma). Values are scaled to 10-bit
+/// internally. All frames must have the same dimensions.
 ///
 /// # Arguments
 ///
-/// * `frames` - Sequence of RGB16 frames with durations
+/// * `frames` - Sequence of RGB16 frames with durations (0–65535)
 /// * `config` - Encoder configuration (quality, speed, etc.)
 /// * `stop` - Cancellation token (checked before encoding starts)
 pub fn encode_animation_rgb16(
@@ -649,14 +671,34 @@ pub fn encode_animation_rgb16(
     config: &EncoderConfig,
     stop: &(impl Stop + ?Sized),
 ) -> Result<EncodedAnimation> {
+    use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at(Error::from(e)))?;
     let enc = build_ravif_encoder(config);
 
-    let ravif_frames: Vec<ravif::AnimFrame16<'_>> = frames
+    // Scale each frame from 0–65535 to 10-bit (0–1023)
+    let scaled_frames: Vec<ImgVec<RGB16>> = frames
         .iter()
-        .map(|f| ravif::AnimFrame16 {
-            rgb: f.pixels.as_ref(),
-            duration_ms: f.duration_ms,
+        .map(|f| {
+            let scaled: Vec<RGB16> = f
+                .pixels
+                .buf()
+                .iter()
+                .map(|p| RGB16 {
+                    r: scale_from_u16(p.r, 10),
+                    g: scale_from_u16(p.g, 10),
+                    b: scale_from_u16(p.b, 10),
+                })
+                .collect();
+            ImgVec::new(scaled, f.pixels.width(), f.pixels.height())
+        })
+        .collect();
+
+    let ravif_frames: Vec<ravif::AnimFrame16<'_>> = scaled_frames
+        .iter()
+        .zip(frames.iter())
+        .map(|(scaled, orig)| ravif::AnimFrame16 {
+            rgb: scaled.as_ref(),
+            duration_ms: orig.duration_ms,
         })
         .collect();
 
@@ -673,13 +715,13 @@ pub fn encode_animation_rgb16(
 
 /// Encode a sequence of 16-bit RGBA frames into an animated AVIF (10-bit AV1)
 ///
-/// Input values should be in 10-bit range (0–1023). All frames must have
-/// the same dimensions. If any frame has non-opaque alpha (< 1023),
-/// an alpha track is included automatically.
+/// Input values should be in full u16 range (0–65535), in the image's native
+/// transfer function (typically sRGB gamma). Values are scaled to 10-bit
+/// internally. All frames must have the same dimensions.
 ///
 /// # Arguments
 ///
-/// * `frames` - Sequence of RGBA16 frames with durations
+/// * `frames` - Sequence of RGBA16 frames with durations (0–65535)
 /// * `config` - Encoder configuration (quality, speed, etc.)
 /// * `stop` - Cancellation token (checked before encoding starts)
 pub fn encode_animation_rgba16(
@@ -687,14 +729,35 @@ pub fn encode_animation_rgba16(
     config: &EncoderConfig,
     stop: &(impl Stop + ?Sized),
 ) -> Result<EncodedAnimation> {
+    use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at(Error::from(e)))?;
     let enc = build_ravif_encoder(config);
 
-    let ravif_frames: Vec<ravif::AnimFrameRgba16<'_>> = frames
+    // Scale each frame from 0–65535 to 10-bit (0–1023)
+    let scaled_frames: Vec<ImgVec<RGBA16>> = frames
         .iter()
-        .map(|f| ravif::AnimFrameRgba16 {
-            rgba: f.pixels.as_ref(),
-            duration_ms: f.duration_ms,
+        .map(|f| {
+            let scaled: Vec<RGBA16> = f
+                .pixels
+                .buf()
+                .iter()
+                .map(|p| RGBA16 {
+                    r: scale_from_u16(p.r, 10),
+                    g: scale_from_u16(p.g, 10),
+                    b: scale_from_u16(p.b, 10),
+                    a: scale_from_u16(p.a, 10),
+                })
+                .collect();
+            ImgVec::new(scaled, f.pixels.width(), f.pixels.height())
+        })
+        .collect();
+
+    let ravif_frames: Vec<ravif::AnimFrameRgba16<'_>> = scaled_frames
+        .iter()
+        .zip(frames.iter())
+        .map(|(scaled, orig)| ravif::AnimFrameRgba16 {
+            rgba: scaled.as_ref(),
+            duration_ms: orig.duration_ms,
         })
         .collect();
 

@@ -484,22 +484,22 @@ fn animation_encode_decode_roundtrip_rgb16() {
     use rgb::RGB16;
     use zenavif::{AnimationFrame16, EncoderConfig, encode_animation_rgb16};
 
-    // Create 3 frames of solid 10-bit color
+    // Create 3 frames of solid color (full u16 range)
     let colors = [
         RGB16 {
-            r: 800,
-            g: 100,
-            b: 100,
+            r: 51200,
+            g: 6400,
+            b: 6400,
         },
         RGB16 {
-            r: 100,
-            g: 800,
-            b: 100,
+            r: 6400,
+            g: 51200,
+            b: 6400,
         },
         RGB16 {
-            r: 100,
-            g: 100,
-            b: 800,
+            r: 6400,
+            g: 6400,
+            b: 51200,
         },
     ];
     let frames: Vec<AnimationFrame16> = colors
@@ -549,16 +549,16 @@ fn animation_encode_decode_roundtrip_rgba16() {
     use rgb::RGBA16;
     use zenavif::{AnimationFrameRgba16, EncoderConfig, encode_animation_rgba16};
 
-    // 2 frames with semi-transparent 10-bit pixels
+    // 2 frames with semi-transparent pixels (full u16 range)
     let frames = vec![
         AnimationFrameRgba16 {
             pixels: ImgVec::new(
                 vec![
                     RGBA16 {
-                        r: 900,
-                        g: 100,
-                        b: 100,
-                        a: 512
+                        r: 57600,
+                        g: 6400,
+                        b: 6400,
+                        a: 32768
                     };
                     32 * 32
                 ],
@@ -571,10 +571,10 @@ fn animation_encode_decode_roundtrip_rgba16() {
             pixels: ImgVec::new(
                 vec![
                     RGBA16 {
-                        r: 100,
-                        g: 100,
-                        b: 900,
-                        a: 800
+                        r: 6400,
+                        g: 6400,
+                        b: 57600,
+                        a: 51200
                     };
                     32 * 32
                 ],
