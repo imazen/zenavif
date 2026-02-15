@@ -18,7 +18,7 @@ arrayvec = "0.7.6"
 [dev-dependencies]
 avif-parse = "2.0"
 mp4parse = "0.17"
-zenavif-parse = { version = "0.3", path = "/home/lilith/work/zenavif-parse" }
+zenavif-parse = "0.3"
 
 [badges]
 maintenance = { status = "passively-maintained" }
