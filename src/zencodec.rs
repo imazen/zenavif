@@ -558,7 +558,7 @@ impl<'a> zencodec_types::DecodingJob<'a> for AvifDecodeJob<'a> {
         data: &[u8],
         mut dst: ImgRefMut<'_, Rgb<f32>>,
     ) -> Result<zencodec_types::ImageInfo, Self::Error> {
-        use linear_srgb::default::srgb_to_linear;
+        use linear_srgb::default::srgb_to_linear_fast;
         let output = self.decode(data)?;
         let info = output.info().clone();
         // Use into_rgb_f32() to preserve full precision from 10/12-bit AVIF
@@ -566,9 +566,9 @@ impl<'a> zencodec_types::DecodingJob<'a> for AvifDecodeJob<'a> {
         for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
             for (s, d) in src_row.iter().zip(dst_row.iter_mut()) {
                 *d = Rgb {
-                    r: srgb_to_linear(s.r),
-                    g: srgb_to_linear(s.g),
-                    b: srgb_to_linear(s.b),
+                    r: srgb_to_linear_fast(s.r),
+                    g: srgb_to_linear_fast(s.g),
+                    b: srgb_to_linear_fast(s.b),
                 };
             }
         }
@@ -580,16 +580,16 @@ impl<'a> zencodec_types::DecodingJob<'a> for AvifDecodeJob<'a> {
         data: &[u8],
         mut dst: ImgRefMut<'_, Rgba<f32>>,
     ) -> Result<zencodec_types::ImageInfo, Self::Error> {
-        use linear_srgb::default::srgb_to_linear;
+        use linear_srgb::default::srgb_to_linear_fast;
         let output = self.decode(data)?;
         let info = output.info().clone();
         let src = output.into_rgba_f32();
         for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
             for (s, d) in src_row.iter().zip(dst_row.iter_mut()) {
                 *d = Rgba {
-                    r: srgb_to_linear(s.r),
-                    g: srgb_to_linear(s.g),
-                    b: srgb_to_linear(s.b),
+                    r: srgb_to_linear_fast(s.r),
+                    g: srgb_to_linear_fast(s.g),
+                    b: srgb_to_linear_fast(s.b),
                     a: s.a, // alpha is linear already
                 };
             }
@@ -602,15 +602,15 @@ impl<'a> zencodec_types::DecodingJob<'a> for AvifDecodeJob<'a> {
         data: &[u8],
         mut dst: ImgRefMut<'_, Gray<f32>>,
     ) -> Result<zencodec_types::ImageInfo, Self::Error> {
-        use linear_srgb::default::srgb_to_linear;
+        use linear_srgb::default::srgb_to_linear_fast;
         let output = self.decode(data)?;
         let info = output.info().clone();
         let src = output.into_rgb_f32();
         for (src_row, dst_row) in src.as_ref().rows().zip(dst.rows_mut()) {
             for (s, d) in src_row.iter().zip(dst_row.iter_mut()) {
-                let r = srgb_to_linear(s.r);
-                let g = srgb_to_linear(s.g);
-                let b = srgb_to_linear(s.b);
+                let r = srgb_to_linear_fast(s.r);
+                let g = srgb_to_linear_fast(s.g);
+                let b = srgb_to_linear_fast(s.b);
                 *d = Gray::new(0.2126 * r + 0.7152 * g + 0.0722 * b);
             }
         }

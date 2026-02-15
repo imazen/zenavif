@@ -27,7 +27,7 @@ whereat = "0.1.3"
 log = "0.4"
 ravif = { package = "zenravif", path = "../ravif/ravif", default-features = false, optional = true }
 zencodec-types = { path = "../zencodec-types" }
-linear-srgb = "0.4"
+linear-srgb = "0.5"
 
 [dev-dependencies]
 archmage = { version = "0.7", features = ["std"] }
