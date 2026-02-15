@@ -989,7 +989,7 @@ fn all_properties_combined() {
 /// Helper: parse with avif-parse, return AvifData. Panics on parse failure.
 #[cfg(test)]
 fn parse_with_avif_parse(avif: &[u8]) -> avif_parse::AvifData {
-    avif_parse::read_avif(&mut avif.as_ref())
+    avif_parse::read_avif(&mut &*avif)
         .unwrap_or_else(|e| panic!("avif-parse failed to parse: {e:?}"))
 }
 

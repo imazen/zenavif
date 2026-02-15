@@ -685,7 +685,7 @@ mod tests {
 
     #[test]
     fn grid_wrong_tile_count_errors() {
-        let tiles = vec![vec![0u8; 10]];
+        let tiles = [vec![0u8; 10]];
         let tile_refs: Vec<&[u8]> = tiles.iter().map(|t| t.as_slice()).collect();
 
         let image = GridImage::new();
