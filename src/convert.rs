@@ -78,17 +78,18 @@ pub fn scale_pixels_to_u16(image: &mut PixelData, bit_depth: u8) {
 ///
 /// For 10-bit: `v >> 6` maps 0→0, 65535→1023
 /// For 12-bit: `v >> 4` maps 0→0, 65535→4095
-/// Uses rounding for better accuracy.
+///
+/// Uses truncation (top-bit extraction), which is the exact inverse of
+/// LSB replication in `scale_to_u16`. This gives lossless roundtrip for
+/// values produced by LSB replication, symmetric bias for arbitrary
+/// inputs, and lower max error than half-up rounding (63 vs 95 for 10-bit).
 #[inline]
 pub fn scale_from_u16(v: u16, bit_depth: u8) -> u16 {
     let shift = 16 - bit_depth;
     if shift == 0 {
         return v;
     }
-    // Add half the divisor for rounding
-    let half = 1u32 << (shift - 1);
-    let max = (1u32 << bit_depth) - 1;
-    ((v as u32 + half) >> shift).min(max) as u16
+    v >> shift
 }
 
 /// Add 8-bit alpha channel to an image from Y plane data
