@@ -591,7 +591,7 @@ dependencies = [
  "num-traits",
  "png",
  "qoi",
- "ravif 0.12.0",
+ "ravif",
  "rayon",
  "rgb",
  "tiff",
@@ -1212,19 +1212,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ravif"
-version = "0.14.0"
-dependencies = [
- "imgref",
- "loop9",
- "quick-error",
- "rayon",
- "rgb",
- "zenavif-serialize",
- "zenrav1e",
-]
-
-[[package]]
 name = "raw-cpuid"
 version = "11.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1718,7 +1705,6 @@ dependencies = [
  "png",
  "rav1d",
  "rav1d-safe",
- "ravif 0.14.0",
  "rgb",
  "safe_unaligned_simd",
  "thiserror",
@@ -1726,6 +1712,7 @@ dependencies = [
  "yuv",
  "zenavif-parse",
  "zencodec-types",
+ "zenravif",
 ]
 
 [[package]]
@@ -1743,7 +1730,7 @@ dependencies = [
 
 [[package]]
 name = "zenavif-serialize"
-version = "0.9.0"
+version = "0.1.0"
 dependencies = [
  "arrayvec",
 ]
@@ -1791,6 +1778,19 @@ dependencies = [
  "thiserror",
  "v_frame",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "zenravif"
+version = "0.1.0"
+dependencies = [
+ "imgref",
+ "loop9",
+ "quick-error",
+ "rayon",
+ "rgb",
+ "zenavif-serialize",
+ "zenrav1e",
 ]
 
 [[package]]
