@@ -47,7 +47,7 @@ pub struct Aviffy {
 /// Makes an AVIF file given encoded AV1 data (create the data with [`rav1e`](https://lib.rs/rav1e))
 ///
 /// `color_av1_data` is already-encoded AV1 image data for the color channels (YUV, RGB, etc.).
-/// [You can parse this information out of AV1 payload with `avif-parse`](https://docs.rs/avif-parse/latest/avif_parse/struct.AV1Metadata.html).
+/// [You can parse this information out of AV1 payload with `avif-parse`](https://docs.rs/zenavif-parse/latest/zenavif_parse/struct.AV1Metadata.html).
 ///
 /// The color image should have been encoded without chroma subsampling AKA YUV444 (`Cs444` in `rav1e`)
 /// AV1 handles full-res color so effortlessly, you should never need chroma subsampling ever again.
@@ -78,7 +78,7 @@ impl Default for Aviffy {
 impl Aviffy {
     /// You will have to set image properties to match the AV1 bitstream.
     ///
-    /// [You can get this information out of the AV1 payload with `avif-parse`](https://docs.rs/avif-parse/latest/avif_parse/struct.AV1Metadata.html).
+    /// [You can get this information out of the AV1 payload with `avif-parse`](https://docs.rs/zenavif-parse/latest/zenavif_parse/struct.AV1Metadata.html).
     #[inline]
     #[must_use]
     pub fn new() -> Self {
@@ -704,8 +704,8 @@ fn clli_roundtrip() {
         .set_content_light_level(1000, 400)
         .to_vec(&test_img, None, 10, 20, 8);
 
-    let parser = avif_parse::read_avif(&mut avif.as_slice()).unwrap();
-    let cll = parser.content_light_level.expect("clli box should be present");
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+    let cll = parser.content_light_level().expect("clli box should be present");
     assert_eq!(cll.max_content_light_level, 1000);
     assert_eq!(cll.max_pic_average_light_level, 400);
 }
@@ -727,8 +727,8 @@ fn mdcv_roundtrip() {
         .set_mastering_display(primaries, white_point, max_luminance, min_luminance)
         .to_vec(&test_img, None, 10, 20, 8);
 
-    let parser = avif_parse::read_avif(&mut avif.as_slice()).unwrap();
-    let mdcv = parser.mastering_display.expect("mdcv box should be present");
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+    let mdcv = parser.mastering_display().expect("mdcv box should be present");
     assert_eq!(mdcv.primaries, primaries);
     assert_eq!(mdcv.white_point, white_point);
     assert_eq!(mdcv.max_luminance, max_luminance);
@@ -754,15 +754,15 @@ fn hdr10_full_metadata() {
         .set_mastering_display(primaries, white_point, 40_000_000, 50)
         .to_vec(&test_img, Some(&test_alpha), 10, 20, 10);
 
-    let parser = avif_parse::read_avif(&mut avif.as_slice()).unwrap();
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
 
     // Verify CLLI
-    let cll = parser.content_light_level.expect("clli box should be present");
+    let cll = parser.content_light_level().expect("clli box should be present");
     assert_eq!(cll.max_content_light_level, 4000);
     assert_eq!(cll.max_pic_average_light_level, 1000);
 
     // Verify MDCV
-    let mdcv = parser.mastering_display.expect("mdcv box should be present");
+    let mdcv = parser.mastering_display().expect("mdcv box should be present");
     assert_eq!(mdcv.primaries, primaries);
     assert_eq!(mdcv.white_point, white_point);
     assert_eq!(mdcv.max_luminance, 40_000_000);
@@ -778,9 +778,9 @@ fn no_hdr_metadata_by_default() {
     let test_img = [1, 2, 3, 4, 5, 6];
     let avif = serialize_to_vec(&test_img, None, 10, 20, 8);
 
-    let parser = avif_parse::read_avif(&mut avif.as_slice()).unwrap();
-    assert!(parser.content_light_level.is_none());
-    assert!(parser.mastering_display.is_none());
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+    assert!(parser.content_light_level().is_none());
+    assert!(parser.mastering_display().is_none());
 }
 
 #[test]
