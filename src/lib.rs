@@ -65,7 +65,6 @@ pub mod yuv_convert;
 #[doc(hidden)]
 pub mod yuv_convert_fast;
 pub mod yuv_convert_libyuv;
-pub mod yuv_convert_libyuv_16bit;
 pub mod yuv_convert_libyuv_autovec;
 pub mod yuv_convert_libyuv_simd;
 mod zencodec;
