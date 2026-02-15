@@ -105,7 +105,7 @@ let avif_bytes = grid.serialize(
 
 ## Compatibility
 
-Produces files compatible with Chrome 85+, Firefox 92+, libavif, and other MIAF-conformant decoders.
+Output is tested against three independent AVIF parsers: [avif-parse](https://lib.rs/avif-parse), [zenavif-parse](https://lib.rs/zenavif-parse), and [mp4parse](https://lib.rs/mp4parse) (Mozilla). Browser compatibility has not been independently verified.
 
 ## License
 

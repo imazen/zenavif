@@ -981,3 +981,235 @@ fn all_properties_combined() {
     assert_eq!(parser.primary_data().unwrap().as_ref(), &test_img[..]);
     assert_eq!(parser.alpha_data().unwrap().unwrap().as_ref(), &test_alpha[..]);
 }
+
+// Tests using avif-parse (upstream parser) to verify broad compatibility.
+// avif-parse v2.0 only exposes primary_item, alpha_item, premultiplied_alpha,
+// clli, and mdcv. For other features we verify it at least parses without panic.
+
+/// Helper: parse with avif-parse, return AvifData. Panics on parse failure.
+#[cfg(test)]
+fn parse_with_avif_parse(avif: &[u8]) -> avif_parse::AvifData {
+    avif_parse::read_avif(&mut avif.as_ref())
+        .unwrap_or_else(|e| panic!("avif-parse failed to parse: {e:?}"))
+}
+
+#[test]
+fn avif_parse_basic_roundtrip() {
+    let color = b"av1colordata";
+    let avif = serialize_to_vec(color, None, 10, 20, 8);
+    let parsed = parse_with_avif_parse(&avif);
+    assert_eq!(parsed.primary_item.as_slice(), &color[..]);
+    assert!(parsed.alpha_item.is_none());
+}
+
+#[test]
+fn avif_parse_alpha_roundtrip() {
+    let color = b"av1colordata";
+    let alpha = b"alphadata";
+    let avif = serialize_to_vec(color, Some(alpha), 10, 20, 8);
+    let parsed = parse_with_avif_parse(&avif);
+    assert_eq!(parsed.primary_item.as_slice(), &color[..]);
+    assert_eq!(parsed.alpha_item.unwrap().as_slice(), &alpha[..]);
+}
+
+#[test]
+fn avif_parse_premultiplied_alpha() {
+    let color = [1, 2, 3, 4];
+    let alpha = [55, 66, 77, 88];
+    let avif = Aviffy::new().premultiplied_alpha(true)
+        .to_vec(&color, Some(&alpha), 5, 5, 8);
+    let parsed = parse_with_avif_parse(&avif);
+    assert!(parsed.premultiplied_alpha);
+    assert_eq!(parsed.primary_item.as_slice(), &color[..]);
+    assert_eq!(parsed.alpha_item.unwrap().as_slice(), &alpha[..]);
+}
+
+#[test]
+fn avif_parse_clli_roundtrip() {
+    let img = [1, 2, 3, 4, 5, 6];
+    let avif = Aviffy::new()
+        .set_content_light_level(1000, 400)
+        .to_vec(&img, None, 10, 20, 8);
+    let parsed = parse_with_avif_parse(&avif);
+    let cll = parsed.content_light_level.expect("clli should be present");
+    assert_eq!(cll.max_content_light_level, 1000);
+    assert_eq!(cll.max_pic_average_light_level, 400);
+}
+
+#[test]
+fn avif_parse_mdcv_roundtrip() {
+    let img = [1, 2, 3, 4, 5, 6];
+    let primaries = [(8500, 39850), (6550, 2300), (35400, 14600)];
+    let avif = Aviffy::new()
+        .set_mastering_display(primaries, (15635, 16450), 10_000_000, 50)
+        .to_vec(&img, None, 10, 20, 8);
+    let parsed = parse_with_avif_parse(&avif);
+    let mdcv = parsed.mastering_display.expect("mdcv should be present");
+    assert_eq!(mdcv.primaries, primaries);
+    assert_eq!(mdcv.white_point, (15635, 16450));
+    assert_eq!(mdcv.max_luminance, 10_000_000);
+    assert_eq!(mdcv.min_luminance, 50);
+}
+
+#[test]
+fn avif_parse_hdr10_full() {
+    let img = [1, 2, 3, 4, 5, 6];
+    let alpha = [77, 88, 99];
+    let avif = Aviffy::new()
+        .set_transfer_characteristics(constants::TransferCharacteristics::Smpte2084)
+        .set_color_primaries(constants::ColorPrimaries::Bt2020)
+        .set_matrix_coefficients(constants::MatrixCoefficients::Bt2020Ncl)
+        .set_content_light_level(4000, 1000)
+        .set_mastering_display(
+            [(8500, 39850), (6550, 2300), (35400, 14600)],
+            (15635, 16450), 40_000_000, 50,
+        )
+        .to_vec(&img, Some(&alpha), 10, 20, 10);
+    let parsed = parse_with_avif_parse(&avif);
+    assert_eq!(parsed.primary_item.as_slice(), &img[..]);
+    assert_eq!(parsed.alpha_item.unwrap().as_slice(), &alpha[..]);
+    assert!(parsed.content_light_level.is_some());
+    assert!(parsed.mastering_display.is_some());
+}
+
+// The following tests verify avif-parse doesn't crash on features it
+// doesn't expose fields for (transforms, metadata, animation, grid).
+
+#[test]
+fn avif_parse_survives_rotation() {
+    let img = [1, 2, 3, 4, 5, 6];
+    for angle in 0..4u8 {
+        let avif = Aviffy::new().set_rotation(angle).to_vec(&img, None, 10, 20, 8);
+        let parsed = parse_with_avif_parse(&avif);
+        assert_eq!(parsed.primary_item.as_slice(), &img[..]);
+    }
+}
+
+#[test]
+fn avif_parse_survives_mirror() {
+    let img = [1, 2, 3, 4, 5, 6];
+    for axis in 0..2u8 {
+        let avif = Aviffy::new().set_mirror(axis).to_vec(&img, None, 10, 20, 8);
+        let parsed = parse_with_avif_parse(&avif);
+        assert_eq!(parsed.primary_item.as_slice(), &img[..]);
+    }
+}
+
+#[test]
+fn avif_parse_survives_clap() {
+    let img = [1, 2, 3, 4, 5, 6];
+    let avif = Aviffy::new()
+        .set_clean_aperture(ClapBox {
+            width_n: 800, width_d: 1,
+            height_n: 600, height_d: 1,
+            horiz_off_n: 0, horiz_off_d: 1,
+            vert_off_n: 0, vert_off_d: 1,
+        })
+        .to_vec(&img, None, 10, 20, 8);
+    let parsed = parse_with_avif_parse(&avif);
+    assert_eq!(parsed.primary_item.as_slice(), &img[..]);
+}
+
+#[test]
+fn avif_parse_survives_pasp() {
+    let img = [1, 2, 3, 4, 5, 6];
+    let avif = Aviffy::new().set_pixel_aspect_ratio(2, 1).to_vec(&img, None, 10, 20, 8);
+    let parsed = parse_with_avif_parse(&avif);
+    assert_eq!(parsed.primary_item.as_slice(), &img[..]);
+}
+
+#[test]
+fn avif_parse_survives_icc_profile() {
+    let img = [1, 2, 3, 4, 5, 6];
+    let icc = vec![0, 0, 0, 24, b'a', b'c', b's', b'p', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let avif = Aviffy::new().set_icc_profile(icc).to_vec(&img, None, 10, 20, 8);
+    let parsed = parse_with_avif_parse(&avif);
+    assert_eq!(parsed.primary_item.as_slice(), &img[..]);
+}
+
+#[test]
+fn avif_parse_survives_exif() {
+    let img = b"av1colordata";
+    let avif = Aviffy::new()
+        .set_exif(b"exifdata".to_vec())
+        .to_vec(img, None, 10, 20, 8);
+    let parsed = parse_with_avif_parse(&avif);
+    assert_eq!(parsed.primary_item.as_slice(), &img[..]);
+}
+
+#[test]
+fn avif_parse_survives_xmp() {
+    let img = [1, 2, 3, 4, 5, 6];
+    let avif = Aviffy::new()
+        .set_xmp(b"<x:xmpmeta/>".to_vec())
+        .to_vec(&img, None, 10, 20, 8);
+    let parsed = parse_with_avif_parse(&avif);
+    assert_eq!(parsed.primary_item.as_slice(), &img[..]);
+}
+
+#[test]
+fn avif_parse_survives_all_properties() {
+    let img = [1, 2, 3, 4, 5, 6];
+    let alpha = [77, 88, 99];
+    let avif = Aviffy::new()
+        .set_rotation(2)
+        .set_mirror(1)
+        .set_clean_aperture(ClapBox {
+            width_n: 8, width_d: 1,
+            height_n: 18, height_d: 1,
+            horiz_off_n: 0, horiz_off_d: 1,
+            vert_off_n: 0, vert_off_d: 1,
+        })
+        .set_pixel_aspect_ratio(1, 1)
+        .set_content_light_level(1000, 400)
+        .set_mastering_display(
+            [(8500, 39850), (6550, 2300), (35400, 14600)],
+            (15635, 16450), 10_000_000, 50,
+        )
+        .set_exif(b"exif".to_vec())
+        .set_xmp(b"<xmp/>".to_vec())
+        .to_vec(&img, Some(&alpha), 10, 20, 8);
+    let parsed = parse_with_avif_parse(&avif);
+    assert_eq!(parsed.primary_item.as_slice(), &img[..]);
+    assert_eq!(parsed.alpha_item.unwrap().as_slice(), &alpha[..]);
+    assert!(parsed.content_light_level.is_some());
+    assert!(parsed.mastering_display.is_some());
+}
+
+#[test]
+fn avif_parse_survives_animated() {
+    use crate::animated::{AnimatedImage, AnimFrame};
+    let mut anim = AnimatedImage::new();
+    anim.set_timescale(1000);
+    anim.set_color_config(boxes::Av1CBox {
+        seq_profile: 0, seq_level_idx_0: 4, seq_tier_0: false,
+        high_bitdepth: false, twelve_bit: false, monochrome: false,
+        chroma_subsampling_x: true, chroma_subsampling_y: true,
+        chroma_sample_position: 0,
+    });
+    let frames = [
+        AnimFrame::new(b"frame0data", 33).with_sync(true),
+        AnimFrame::new(b"frame1data", 33),
+    ];
+    let avif = anim.serialize(320, 240, &frames, b"seqhdr", None);
+    // avif-parse may or may not support avis brand, but must not crash
+    let _ = avif_parse::read_avif(&mut avif.as_slice());
+}
+
+#[test]
+fn avif_parse_survives_grid() {
+    use crate::grid::GridImage;
+    let tiles: Vec<Vec<u8>> = (0..4).map(|i| vec![i as u8; 100]).collect();
+    let tile_refs: Vec<&[u8]> = tiles.iter().map(|t| t.as_slice()).collect();
+
+    let mut grid = GridImage::new();
+    grid.set_color_config(boxes::Av1CBox {
+        seq_profile: 0, seq_level_idx_0: 4, seq_tier_0: false,
+        high_bitdepth: false, twelve_bit: false, monochrome: false,
+        chroma_subsampling_x: true, chroma_subsampling_y: true,
+        chroma_sample_position: 0,
+    });
+    let avif = grid.serialize(2, 2, 200, 200, 100, 100, &tile_refs, None).unwrap();
+    // avif-parse may or may not support grid, but must not crash
+    let _ = avif_parse::read_avif(&mut avif.as_slice());
+}

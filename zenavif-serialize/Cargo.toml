@@ -16,6 +16,7 @@ rust-version = "1.93"
 arrayvec = "0.7.6"
 
 [dev-dependencies]
+avif-parse = "2.0"
 mp4parse = "0.17"
 zenavif-parse = { version = "0.3", path = "/home/lilith/work/zenavif-parse" }
 
