@@ -6,7 +6,7 @@
 #![deny(unsafe_code)]
 
 use crate::config::DecoderConfig;
-use crate::convert::{add_alpha8, add_alpha16};
+use crate::convert::{add_alpha8, add_alpha16, scale_pixels_to_u16};
 use crate::error::{Error, Result};
 use crate::image::{
     ChromaSampling, ColorPrimaries, ColorRange, DecodedAnimation, DecodedAnimationInfo,
@@ -773,8 +773,16 @@ impl ManagedAvifDecoder {
             pixel_aspect_ratio: self.parser.pixel_aspect_ratio().cloned(),
             content_light_level: self.parser.content_light_level().cloned(),
             mastering_display: self.parser.mastering_display().cloned(),
-            exif: self.parser.exif().and_then(|r| r.ok()).map(|c| c.into_owned()),
-            xmp: self.parser.xmp().and_then(|r| r.ok()).map(|c| c.into_owned()),
+            exif: self
+                .parser
+                .exif()
+                .and_then(|r| r.ok())
+                .map(|c| c.into_owned()),
+            xmp: self
+                .parser
+                .xmp()
+                .and_then(|r| r.ok())
+                .map(|c| c.into_owned()),
         };
 
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
@@ -1323,6 +1331,10 @@ impl ManagedAvifDecoder {
         };
 
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+
+        // Scale from native bit depth (e.g. 0–1023 for 10-bit) to full u16 (0–65535).
+        // Must happen before alpha attachment so unpremultiply uses correct 16-bit range.
+        scale_pixels_to_u16(&mut image, info.bit_depth);
 
         // Crop to display dimensions if needed
         if needs_crop {

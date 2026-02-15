@@ -356,11 +356,23 @@ fn build_ravif_encoder(config: &EncoderConfig) -> ravif::Encoder<'_> {
     if let Some(md) = config.mastering_display {
         enc = enc.with_mastering_display(ravif::MasteringDisplay {
             primaries: [
-                ravif::ChromaticityPoint { x: md.primaries[0].0, y: md.primaries[0].1 },
-                ravif::ChromaticityPoint { x: md.primaries[1].0, y: md.primaries[1].1 },
-                ravif::ChromaticityPoint { x: md.primaries[2].0, y: md.primaries[2].1 },
+                ravif::ChromaticityPoint {
+                    x: md.primaries[0].0,
+                    y: md.primaries[0].1,
+                },
+                ravif::ChromaticityPoint {
+                    x: md.primaries[1].0,
+                    y: md.primaries[1].1,
+                },
+                ravif::ChromaticityPoint {
+                    x: md.primaries[2].0,
+                    y: md.primaries[2].1,
+                },
             ],
-            white_point: ravif::ChromaticityPoint { x: md.white_point.0, y: md.white_point.1 },
+            white_point: ravif::ChromaticityPoint {
+                x: md.white_point.0,
+                y: md.white_point.1,
+            },
             max_luminance: md.max_luminance,
             min_luminance: md.min_luminance,
         });

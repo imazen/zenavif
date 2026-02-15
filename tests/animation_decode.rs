@@ -598,18 +598,9 @@ fn animation_encode_decode_roundtrip_rgba16() {
     assert!(decoded.info.has_alpha, "roundtrip should preserve alpha");
 
     for (i, frame) in decoded.frames.iter().enumerate() {
-        assert!(
-            frame.pixels.has_alpha(),
-            "frame {i} should have alpha"
-        );
+        assert!(frame.pixels.has_alpha(), "frame {i} should have alpha");
 
-        let is_16bit = matches!(
-            &frame.pixels,
-            zencodec_types::PixelData::Rgba16(_)
-        );
-        assert!(
-            is_16bit,
-            "frame {i} should be RGBA16 for 10-bit source"
-        );
+        let is_16bit = matches!(&frame.pixels, zencodec_types::PixelData::Rgba16(_));
+        assert!(is_16bit, "frame {i} should be RGBA16 for 10-bit source");
     }
 }
