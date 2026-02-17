@@ -87,9 +87,11 @@ pub use image::{
     DecodedAnimationInfo, DecodedFrame, ImageInfo, ImageMirror, ImageRotation,
     MasteringDisplayColourVolume, MatrixCoefficients, PixelAspectRatio, TransferCharacteristics,
 };
-pub use zencodec::{AvifDecodeJob, AvifDecoding};
+pub use zencodec::{
+    AvifDecodeJob, AvifDecoder as AvifZenDecoder, AvifDecoderConfig, AvifFrameDecoder,
+};
 #[cfg(feature = "encode")]
-pub use zencodec::{AvifEncodeJob, AvifEncoding};
+pub use zencodec::{AvifEncodeJob, AvifEncoder, AvifEncoderConfig, AvifFrameEncoder};
 pub use zencodec_types::PixelData;
 
 /// Decode an AVIF image with default settings
