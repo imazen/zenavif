@@ -525,7 +525,11 @@ impl Default for AvifDecoderConfig {
 
 static DECODE_CAPS: zencodec_types::CodecCapabilities = zencodec_types::CodecCapabilities::new()
     .with_decode_cancel(true)
-    .with_decode_animation(true);
+    .with_decode_animation(true)
+    .with_decode_icc(true)
+    .with_decode_exif(true)
+    .with_decode_xmp(true)
+    .with_decode_cicp(true);
 
 static DECODE_DESCRIPTORS: &[PixelDescriptor] =
     &[PixelDescriptor::RGB8_SRGB, PixelDescriptor::RGBA8_SRGB];
@@ -555,13 +559,10 @@ impl zencodec_types::DecoderConfig for AvifDecoderConfig {
     }
 
     fn probe_header(&self, data: &[u8]) -> Result<ImageInfo, Error> {
-        let decoded = crate::decode_with(data, &self.inner, &enough::Unstoppable)
-            .map_err(|e| e.into_inner())?;
-
-        let info = ImageInfo::new(decoded.width(), decoded.height(), ImageFormat::Avif)
-            .with_alpha(decoded.has_alpha());
-
-        Ok(info)
+        let decoder =
+            crate::ManagedAvifDecoder::new(data, &self.inner).map_err(|e| e.into_inner())?;
+        let native_info = decoder.probe_info().map_err(|e| e.into_inner())?;
+        Ok(convert_native_info(&native_info))
     }
 }
 
@@ -600,17 +601,17 @@ impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
     }
 
     fn output_info(&self, data: &[u8]) -> Result<zencodec_types::OutputInfo, Error> {
-        // AVIF requires a full decode to know dimensions, use probe
-        let decoded = crate::decode_with(data, &self.config.inner, &enough::Unstoppable)
+        let decoder = crate::ManagedAvifDecoder::new(data, &self.config.inner)
             .map_err(|e| e.into_inner())?;
-        let desc = if decoded.has_alpha() {
+        let native_info = decoder.probe_info().map_err(|e| e.into_inner())?;
+        let desc = if native_info.has_alpha {
             PixelDescriptor::RGBA8_SRGB
         } else {
             PixelDescriptor::RGB8_SRGB
         };
         Ok(zencodec_types::OutputInfo::full_decode(
-            decoded.width(),
-            decoded.height(),
+            native_info.width,
+            native_info.height,
             desc,
         ))
     }
@@ -625,13 +626,16 @@ impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
 
     fn frame_decoder(self, data: &[u8]) -> Result<AvifFrameDecoder, Error> {
         let cfg = self.effective_config();
-        let mut anim_dec = crate::AnimationDecoder::new(data, &cfg).map_err(|e| e.into_inner())?;
 
+        // Probe metadata before creating animation decoder (both parse the container,
+        // but ManagedAvifDecoder gives us the native ImageInfo for conversion).
+        let probe_dec =
+            crate::ManagedAvifDecoder::new(data, &cfg).map_err(|e| e.into_inner())?;
+        let native_info = probe_dec.probe_info().map_err(|e| e.into_inner())?;
+        drop(probe_dec);
+
+        let mut anim_dec = crate::AnimationDecoder::new(data, &cfg).map_err(|e| e.into_inner())?;
         let anim_info = anim_dec.info().clone();
-        let base_info = ImageInfo::new(0, 0, ImageFormat::Avif)
-            .with_alpha(anim_info.has_alpha)
-            .with_animation(true)
-            .with_frame_count(anim_info.frame_count as u32);
 
         // Eagerly decode all frames using the stop token
         let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
@@ -640,15 +644,14 @@ impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
             frames.push((frame.pixels, frame.duration_ms));
         }
 
-        // Update base_info with actual dimensions from first frame
-        let base_info = if let Some((px, _)) = frames.first() {
-            ImageInfo::new(px.width(), px.height(), ImageFormat::Avif)
-                .with_alpha(anim_info.has_alpha)
-                .with_animation(true)
-                .with_frame_count(anim_info.frame_count as u32)
-        } else {
-            base_info
-        };
+        // Build base info from probed metadata, override dimensions from decoded frame
+        let mut base_info = convert_native_info(&native_info)
+            .with_animation(true)
+            .with_frame_count(anim_info.frame_count as u32);
+        if let Some((px, _)) = frames.first() {
+            base_info.width = px.width();
+            base_info.height = px.height();
+        }
 
         Ok(AvifFrameDecoder {
             frames,
@@ -657,6 +660,92 @@ impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
             total_frames: anim_info.frame_count as u32,
         })
     }
+}
+
+// ── Native → trait metadata conversion ──────────────────────────────────────
+
+/// Convert AVIF rotation + mirror properties to EXIF orientation.
+///
+/// AVIF uses separate `irot` (rotation) and `imir` (mirror) boxes.
+/// The display pipeline applies: mirror first, then rotate (both CCW).
+fn avif_to_orientation(
+    rotation: Option<&zenavif_parse::ImageRotation>,
+    mirror: Option<&zenavif_parse::ImageMirror>,
+) -> zencodec_types::Orientation {
+    use zencodec_types::Orientation;
+    let angle = rotation.map(|r| r.angle).unwrap_or(0);
+    match (mirror.map(|m| m.axis), angle) {
+        (None, 0) => Orientation::Normal,
+        (None, 90) => Orientation::Rotate270,
+        (None, 180) => Orientation::Rotate180,
+        (None, 270) => Orientation::Rotate90,
+        (Some(0), 0) => Orientation::FlipHorizontal,
+        (Some(0), 90) => Orientation::Transpose,
+        (Some(0), 180) => Orientation::FlipVertical,
+        (Some(0), 270) => Orientation::Transverse,
+        (Some(1), 0) => Orientation::FlipVertical,
+        (Some(1), 90) => Orientation::Transverse,
+        (Some(1), 180) => Orientation::FlipHorizontal,
+        (Some(1), 270) => Orientation::Transpose,
+        _ => Orientation::Normal,
+    }
+}
+
+/// Convert zenavif's native `ImageInfo` to `zencodec_types::ImageInfo`.
+fn convert_native_info(native: &crate::image::ImageInfo) -> ImageInfo {
+    let orientation = avif_to_orientation(native.rotation.as_ref(), native.mirror.as_ref());
+
+    let cicp = zencodec_types::Cicp::new(
+        native.color_primaries.0,
+        native.transfer_characteristics.0,
+        native.matrix_coefficients.0,
+        native.color_range == crate::image::ColorRange::Full,
+    );
+
+    let channels: u8 = if native.monochrome {
+        if native.has_alpha { 2 } else { 1 }
+    } else if native.has_alpha {
+        4
+    } else {
+        3
+    };
+
+    let mut info = ImageInfo::new(native.width, native.height, ImageFormat::Avif)
+        .with_alpha(native.has_alpha)
+        .with_bit_depth(native.bit_depth)
+        .with_channel_count(channels)
+        .with_cicp(cicp)
+        .with_orientation(orientation);
+
+    if let Some(ref icc) = native.icc_profile {
+        info = info.with_icc_profile(icc.clone());
+    }
+    if let Some(ref exif) = native.exif {
+        info = info.with_exif(exif.clone());
+    }
+    if let Some(ref xmp) = native.xmp {
+        info = info.with_xmp(xmp.clone());
+    }
+    if let Some(ref cll) = native.content_light_level {
+        info = info.with_content_light_level(zencodec_types::ContentLightLevel::new(
+            cll.max_content_light_level,
+            cll.max_pic_average_light_level,
+        ));
+    }
+    if let Some(ref mdcv) = native.mastering_display {
+        info = info.with_mastering_display(zencodec_types::MasteringDisplay::new(
+            [
+                [mdcv.primaries[0].0, mdcv.primaries[0].1],
+                [mdcv.primaries[1].0, mdcv.primaries[1].1],
+                [mdcv.primaries[2].0, mdcv.primaries[2].1],
+            ],
+            [mdcv.white_point.0, mdcv.white_point.1],
+            mdcv.max_luminance,
+            mdcv.min_luminance,
+        ));
+    }
+
+    info
 }
 
 // ── Pixel conversion helpers ────────────────────────────────────────────────
@@ -723,13 +812,10 @@ impl zencodec_types::Decoder for AvifDecoder<'_> {
 
     fn decode(self, data: &[u8]) -> Result<DecodeOutput, Error> {
         let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
-        let pixels = crate::decode_with(data, &self.config, stop).map_err(|e| e.into_inner())?;
-
-        let w = pixels.width();
-        let h = pixels.height();
-        let has_alpha = pixels.has_alpha();
-
-        let info = ImageInfo::new(w, h, ImageFormat::Avif).with_alpha(has_alpha);
+        let mut decoder =
+            crate::ManagedAvifDecoder::new(data, &self.config).map_err(|e| e.into_inner())?;
+        let (pixels, native_info) = decoder.decode_full(stop).map_err(|e| e.into_inner())?;
+        let info = convert_native_info(&native_info);
         Ok(DecodeOutput::new(pixels, info))
     }
 

@@ -229,7 +229,132 @@ impl ManagedAvifDecoder {
 
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
+        let (pixels, _info) = self.convert_to_image(primary_frame, alpha_frame, stop)?;
+        Ok(pixels)
+    }
+
+    /// Decode the primary image and return both pixels and metadata.
+    pub fn decode_full(
+        &mut self,
+        stop: &(impl Stop + ?Sized),
+    ) -> Result<(PixelData, ImageInfo)> {
+        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+
+        if self.parser.grid_config().is_some() {
+            let pixels = self.decode_grid(stop)?;
+            let info = self.probe_info()?;
+            return Ok((pixels, info));
+        }
+
+        let primary_data = self.parser.primary_data().map_err(|e| at(Error::from(e)))?;
+        let primary_frame = Self::decode_frame(
+            &mut self.decoder,
+            &primary_data,
+            "Failed to decode primary frame",
+        )?;
+
+        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+
+        let alpha_frame = if let Some(alpha_result) = self.parser.alpha_data() {
+            let alpha_data = alpha_result.map_err(|e| at(Error::from(e)))?;
+            Some(Self::decode_frame(
+                &mut self.decoder,
+                &alpha_data,
+                "Failed to decode alpha frame",
+            )?)
+        } else {
+            None
+        };
+
+        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+
         self.convert_to_image(primary_frame, alpha_frame, stop)
+    }
+
+    /// Probe image metadata without decoding pixels.
+    ///
+    /// Uses the AVIF container parser and AV1 sequence header to extract
+    /// dimensions, color info, ICC profile, EXIF, XMP, orientation, and HDR metadata.
+    /// Does NOT do full AV1 frame decoding.
+    pub fn probe_info(&self) -> Result<ImageInfo> {
+        // Get dimensions from grid config or AV1 sequence header
+        let (width, height) = if let Some(grid) = self.parser.grid_config() {
+            (grid.output_width, grid.output_height)
+        } else {
+            let meta = self.parser.primary_metadata().map_err(|e| at(Error::from(e)))?;
+            (meta.max_frame_width.get() as u32, meta.max_frame_height.get() as u32)
+        };
+
+        let has_alpha = self.parser.alpha_metadata().is_some();
+
+        // AV1 config for bit depth
+        let bit_depth = self.parser.av1_config().map(|c| c.bit_depth).unwrap_or(8);
+
+        // CICP from container (colr box) or AV1 config fallback
+        let (color_primaries, transfer_characteristics, matrix_coefficients, color_range, icc_profile) =
+            match self.parser.color_info() {
+                Some(zenavif_parse::ColorInformation::Nclx {
+                    color_primaries: cp,
+                    transfer_characteristics: tc,
+                    matrix_coefficients: mc,
+                    full_range,
+                }) => (
+                    ColorPrimaries(*cp as u8),
+                    TransferCharacteristics(*tc as u8),
+                    MatrixCoefficients(*mc as u8),
+                    if *full_range { ColorRange::Full } else { ColorRange::Limited },
+                    None,
+                ),
+                Some(zenavif_parse::ColorInformation::IccProfile(icc)) => (
+                    ColorPrimaries::BT709,
+                    TransferCharacteristics::SRGB,
+                    MatrixCoefficients::BT601,
+                    ColorRange::Full,
+                    Some(icc.clone()),
+                ),
+                None => (
+                    ColorPrimaries::BT709,
+                    TransferCharacteristics::SRGB,
+                    MatrixCoefficients::BT601,
+                    ColorRange::Full,
+                    None,
+                ),
+            };
+
+        let chroma_sampling = self.parser.av1_config().map(|c| {
+            if c.monochrome {
+                ChromaSampling::Monochrome
+            } else if c.chroma_subsampling_x != 0 && c.chroma_subsampling_y != 0 {
+                ChromaSampling::Cs420
+            } else if c.chroma_subsampling_x != 0 {
+                ChromaSampling::Cs422
+            } else {
+                ChromaSampling::Cs444
+            }
+        }).unwrap_or(ChromaSampling::Cs420);
+
+        Ok(ImageInfo {
+            width,
+            height,
+            bit_depth,
+            has_alpha,
+            premultiplied_alpha: self.parser.premultiplied_alpha(),
+            monochrome: chroma_sampling == ChromaSampling::Monochrome,
+            color_primaries,
+            transfer_characteristics,
+            matrix_coefficients,
+            color_range,
+            chroma_sampling,
+            icc_profile,
+            rotation: self.parser.rotation().cloned(),
+            mirror: self.parser.mirror().cloned(),
+            clean_aperture: self.parser.clean_aperture().cloned(),
+            pixel_aspect_ratio: self.parser.pixel_aspect_ratio().cloned(),
+            content_light_level: self.parser.content_light_level().cloned(),
+            mastering_display: self.parser.mastering_display().cloned(),
+            exif: self.parser.exif().and_then(|r| r.ok()).map(|c| c.into_owned()),
+            xmp: self.parser.xmp().and_then(|r| r.ok()).map(|c| c.into_owned()),
+        })
     }
 
     /// Decode an animated AVIF, returning all frames with timing info.
@@ -290,7 +415,7 @@ impl ManagedAvifDecoder {
                 _ => None,
             };
 
-            let pixels = self.convert_to_image(primary_frame, alpha_frame, stop)?;
+            let (pixels, _info) = self.convert_to_image(primary_frame, alpha_frame, stop)?;
 
             frames.push(DecodedFrame {
                 pixels,
@@ -415,7 +540,7 @@ impl ManagedAvifDecoder {
         // Convert each tile to RGB/RGBA
         let mut tile_images = Vec::new();
         for tile in tiles {
-            let img = self.convert_to_image(tile, None, stop)?;
+            let (img, _info) = self.convert_to_image(tile, None, stop)?;
             tile_images.push(img);
         }
 
@@ -710,7 +835,7 @@ impl ManagedAvifDecoder {
         primary: Frame,
         alpha: Option<Frame>,
         stop: &(impl Stop + ?Sized),
-    ) -> Result<PixelData> {
+    ) -> Result<(PixelData, ImageInfo)> {
         let width = primary.width() as usize;
         let height = primary.height() as usize;
         let bit_depth = primary.bit_depth();
@@ -787,14 +912,16 @@ impl ManagedAvifDecoder {
 
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
-        match bit_depth {
+        let info_clone = info.clone();
+        let pixels = match bit_depth {
             8 => self.convert_8bit(primary, alpha, info, stop),
             10 | 12 => self.convert_16bit(primary, alpha, info, stop),
             _ => Err(at(Error::Decode {
                 code: -1,
                 msg: "Unsupported bit depth",
             })),
-        }
+        }?;
+        Ok((pixels, info_clone))
     }
 
     /// Convert 8-bit frame to RGB using yuv crate bulk conversion (zero-copy)
@@ -1471,7 +1598,7 @@ impl AnimationDecoder {
             _ => None,
         };
 
-        let pixels = self
+        let (pixels, _info) = self
             .inner
             .convert_to_image(primary_frame, alpha_frame, stop)?;
 
