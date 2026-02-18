@@ -123,6 +123,10 @@ impl zencodec_types::EncoderConfig for AvifEncoderConfig {
     type Error = Error;
     type Job<'a> = AvifEncodeJob<'a>;
 
+    fn format() -> ImageFormat {
+        ImageFormat::Avif
+    }
+
     fn supported_descriptors() -> &'static [PixelDescriptor] {
         ENCODE_DESCRIPTORS
     }
@@ -530,6 +534,10 @@ impl zencodec_types::DecoderConfig for AvifDecoderConfig {
     type Error = Error;
     type Job<'a> = AvifDecodeJob<'a>;
 
+    fn format() -> ImageFormat {
+        ImageFormat::Avif
+    }
+
     fn supported_descriptors() -> &'static [PixelDescriptor] {
         DECODE_DESCRIPTORS
     }
@@ -651,6 +659,57 @@ impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
     }
 }
 
+// ── Pixel conversion helpers ────────────────────────────────────────────────
+
+/// Convert AVIF-native pixel data to RGB8.
+///
+/// AVIF only produces `Rgb8` or `Rgba8`; this handles the Rgba8 → Rgb8 case.
+fn to_rgb8(pixels: PixelData) -> imgref::ImgVec<Rgb<u8>> {
+    match pixels {
+        PixelData::Rgb8(img) => img,
+        PixelData::Rgba8(img) => {
+            let w = img.width();
+            let h = img.height();
+            let buf: Vec<Rgb<u8>> = img
+                .into_buf()
+                .into_iter()
+                .map(|p| Rgb {
+                    r: p.r,
+                    g: p.g,
+                    b: p.b,
+                })
+                .collect();
+            imgref::ImgVec::new(buf, w, h)
+        }
+        other => unreachable!("AVIF decoder produced unexpected format: {other:?}"),
+    }
+}
+
+/// Convert AVIF-native pixel data to RGBA8.
+///
+/// AVIF only produces `Rgb8` or `Rgba8`; this handles the Rgb8 → Rgba8 case.
+fn to_rgba8(pixels: PixelData) -> imgref::ImgVec<Rgba<u8>> {
+    match pixels {
+        PixelData::Rgba8(img) => img,
+        PixelData::Rgb8(img) => {
+            let w = img.width();
+            let h = img.height();
+            let buf: Vec<Rgba<u8>> = img
+                .into_buf()
+                .into_iter()
+                .map(|p| Rgba {
+                    r: p.r,
+                    g: p.g,
+                    b: p.b,
+                    a: 255,
+                })
+                .collect();
+            imgref::ImgVec::new(buf, w, h)
+        }
+        other => unreachable!("AVIF decoder produced unexpected format: {other:?}"),
+    }
+}
+
 // ── Decoder ─────────────────────────────────────────────────────────────────
 
 /// Single-image AVIF decoder.
@@ -680,9 +739,10 @@ impl zencodec_types::Decoder for AvifDecoder<'_> {
         let desc = dst.descriptor();
         let w = dst.width();
         let h = dst.rows();
+        let pixels = output.into_pixels();
 
         if desc == PixelDescriptor::RGB8_SRGB {
-            let src = output.into_rgb8();
+            let src = to_rgb8(pixels);
             let row_bytes = w as usize * 3;
             for y in 0..h {
                 let src_row = src.as_ref().rows().nth(y as usize).unwrap();
@@ -691,7 +751,7 @@ impl zencodec_types::Decoder for AvifDecoder<'_> {
                 dst_row.copy_from_slice(src_row.as_bytes());
             }
         } else if desc == PixelDescriptor::RGBA8_SRGB {
-            let src = output.into_rgba8();
+            let src = to_rgba8(pixels);
             let row_bytes = w as usize * 4;
             for y in 0..h {
                 let src_row = src.as_ref().rows().nth(y as usize).unwrap();
@@ -700,7 +760,7 @@ impl zencodec_types::Decoder for AvifDecoder<'_> {
                 dst_row.copy_from_slice(src_row.as_bytes());
             }
         } else if desc == PixelDescriptor::BGRA8_SRGB {
-            let src = output.into_rgba8();
+            let src = to_rgba8(pixels);
             let row_bytes = w as usize * 4;
             for y in 0..h {
                 let src_row = src.as_ref().rows().nth(y as usize).unwrap();
@@ -714,7 +774,7 @@ impl zencodec_types::Decoder for AvifDecoder<'_> {
                 }
             }
         } else if desc == PixelDescriptor::GRAY8_SRGB {
-            let src = output.into_rgb8();
+            let src = to_rgb8(pixels);
             for y in 0..h {
                 let src_row = src.as_ref().rows().nth(y as usize).unwrap();
                 let dst_row = &mut dst.row_mut(y)[..w as usize];
@@ -725,49 +785,52 @@ impl zencodec_types::Decoder for AvifDecoder<'_> {
                 }
             }
         } else if desc == PixelDescriptor::RGBF32_LINEAR {
-            use linear_srgb::default::srgb_to_linear_fast;
-            let src = output.into_rgb_f32();
+            use linear_srgb::default::srgb_u8_to_linear;
+            let src = to_rgb8(pixels);
             let row_bytes = w as usize * 12;
             for y in 0..h {
                 let src_row = src.as_ref().rows().nth(y as usize).unwrap();
                 let dst_row = &mut dst.row_mut(y)[..row_bytes];
                 for (i, px) in src_row.iter().enumerate() {
                     let off = i * 12;
-                    dst_row[off..off + 4].copy_from_slice(&srgb_to_linear_fast(px.r).to_le_bytes());
+                    dst_row[off..off + 4]
+                        .copy_from_slice(&srgb_u8_to_linear(px.r).to_le_bytes());
                     dst_row[off + 4..off + 8]
-                        .copy_from_slice(&srgb_to_linear_fast(px.g).to_le_bytes());
+                        .copy_from_slice(&srgb_u8_to_linear(px.g).to_le_bytes());
                     dst_row[off + 8..off + 12]
-                        .copy_from_slice(&srgb_to_linear_fast(px.b).to_le_bytes());
+                        .copy_from_slice(&srgb_u8_to_linear(px.b).to_le_bytes());
                 }
             }
         } else if desc == PixelDescriptor::RGBAF32_LINEAR {
-            use linear_srgb::default::srgb_to_linear_fast;
-            let src = output.into_rgba_f32();
+            use linear_srgb::default::srgb_u8_to_linear;
+            let src = to_rgba8(pixels);
             let row_bytes = w as usize * 16;
             for y in 0..h {
                 let src_row = src.as_ref().rows().nth(y as usize).unwrap();
                 let dst_row = &mut dst.row_mut(y)[..row_bytes];
                 for (i, px) in src_row.iter().enumerate() {
                     let off = i * 16;
-                    dst_row[off..off + 4].copy_from_slice(&srgb_to_linear_fast(px.r).to_le_bytes());
+                    dst_row[off..off + 4]
+                        .copy_from_slice(&srgb_u8_to_linear(px.r).to_le_bytes());
                     dst_row[off + 4..off + 8]
-                        .copy_from_slice(&srgb_to_linear_fast(px.g).to_le_bytes());
+                        .copy_from_slice(&srgb_u8_to_linear(px.g).to_le_bytes());
                     dst_row[off + 8..off + 12]
-                        .copy_from_slice(&srgb_to_linear_fast(px.b).to_le_bytes());
-                    dst_row[off + 12..off + 16].copy_from_slice(&(px.a).to_le_bytes()); // alpha is linear already
+                        .copy_from_slice(&srgb_u8_to_linear(px.b).to_le_bytes());
+                    dst_row[off + 12..off + 16]
+                        .copy_from_slice(&(px.a as f32 / 255.0).to_le_bytes());
                 }
             }
         } else if desc == PixelDescriptor::GRAYF32_LINEAR {
-            use linear_srgb::default::srgb_to_linear_fast;
-            let src = output.into_rgb_f32();
+            use linear_srgb::default::srgb_u8_to_linear;
+            let src = to_rgb8(pixels);
             let row_bytes = w as usize * 4;
             for y in 0..h {
                 let src_row = src.as_ref().rows().nth(y as usize).unwrap();
                 let dst_row = &mut dst.row_mut(y)[..row_bytes];
                 for (i, px) in src_row.iter().enumerate() {
-                    let r = srgb_to_linear_fast(px.r);
-                    let g = srgb_to_linear_fast(px.g);
-                    let b = srgb_to_linear_fast(px.b);
+                    let r = srgb_u8_to_linear(px.r);
+                    let g = srgb_u8_to_linear(px.g);
+                    let b = srgb_u8_to_linear(px.b);
                     let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
                     dst_row[i * 4..(i + 1) * 4].copy_from_slice(&luma.to_le_bytes());
                 }
