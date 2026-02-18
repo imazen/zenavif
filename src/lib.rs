@@ -62,10 +62,12 @@ mod image;
 pub mod simd;
 #[doc(hidden)]
 pub mod yuv_convert;
+#[cfg(target_arch = "x86_64")]
 #[doc(hidden)]
 pub mod yuv_convert_fast;
 pub mod yuv_convert_libyuv;
 pub mod yuv_convert_libyuv_autovec;
+#[cfg(target_arch = "x86_64")]
 pub mod yuv_convert_libyuv_simd;
 mod zencodec;
 

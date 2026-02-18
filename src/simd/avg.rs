@@ -12,6 +12,12 @@ use archmage::{Desktop64, SimdToken, arcane};
 #[cfg(target_arch = "x86_64")]
 use core::arch::x86_64::*;
 
+#[cfg(target_arch = "wasm32")]
+use archmage::{Wasm128Token, SimdToken, arcane};
+
+#[cfg(target_arch = "wasm32")]
+use core::arch::wasm32::*;
+
 /// Rounding constant for pmulhrsw: 1024 = (1 << 10)
 /// pmulhrsw computes: (a * b + 16384) >> 15
 /// With b=1024: (a * 1024 + 16384) >> 15 ≈ (a + 1) >> 1 (with rounding)
@@ -105,6 +111,84 @@ pub fn avg_8bpc_avx2(
     }
 }
 
+/// AVG operation using wasm128 SIMD — processes 8 pixels at a time
+///
+/// Synthesizes pmulhrsw from i32x4_extmul + add + shift + narrow since
+/// WebAssembly SIMD128 has no direct pmulhrsw equivalent.
+#[cfg(target_arch = "wasm32")]
+#[arcane]
+pub fn avg_8bpc_wasm128(
+    _token: Wasm128Token,
+    dst: &mut [u8],
+    dst_stride: usize,
+    tmp1: &[i16],
+    tmp2: &[i16],
+    w: usize,
+    h: usize,
+) {
+    debug_assert!(tmp1.len() >= w * h, "tmp1 too small");
+    debug_assert!(tmp2.len() >= w * h, "tmp2 too small");
+    debug_assert!(dst.len() >= (h - 1) * dst_stride + w, "dst too small");
+
+    let round_const = i32x4_splat(16384);
+    let zero = i16x8_splat(0);
+    let pw_1024 = i16x8_splat(PW_1024);
+
+    for row in 0..h {
+        let tmp1_row = &tmp1[row * w..][..w];
+        let tmp2_row = &tmp2[row * w..][..w];
+        let dst_row = &mut dst[row * dst_stride..][..w];
+
+        let mut col = 0;
+        // Process 8 pixels at a time (128-bit: 8 x i16)
+        while col + 8 <= w {
+            let t1_arr: &[i16; 8] = tmp1_row[col..col + 8].try_into().unwrap();
+            let t2_arr: &[i16; 8] = tmp2_row[col..col + 8].try_into().unwrap();
+
+            let t1 = safe_unaligned_simd::wasm32::v128_load(t1_arr);
+            let t2 = safe_unaligned_simd::wasm32::v128_load(t2_arr);
+
+            // sum = tmp1 + tmp2
+            let sum = i16x8_add(t1, t2);
+
+            // Synthesize pmulhrsw(sum, 1024):
+            // result = (sum * 1024 + 16384) >> 15
+            // Use widening multiply to get full 32-bit products
+            let prod_lo = i32x4_extmul_low_i16x8(sum, pw_1024);
+            let prod_hi = i32x4_extmul_high_i16x8(sum, pw_1024);
+
+            // Add rounding constant
+            let rounded_lo = i32x4_add(prod_lo, round_const);
+            let rounded_hi = i32x4_add(prod_hi, round_const);
+
+            // Arithmetic right shift by 15
+            let shifted_lo = i32x4_shr(rounded_lo, 15);
+            let shifted_hi = i32x4_shr(rounded_hi, 15);
+
+            // Narrow i32x4 → i16x8 (signed saturation)
+            let narrowed = i16x8_narrow_i32x4(shifted_lo, shifted_hi);
+
+            // Pack i16x8 → u8x16 (unsigned saturation), low 8 bytes are the result
+            let packed = u8x16_narrow_i16x8(narrowed, zero);
+
+            // Store low 8 bytes
+            let val = i64x2_extract_lane::<0>(packed);
+            let bytes = val.to_ne_bytes();
+            dst_row[col..col + 8].copy_from_slice(&bytes);
+
+            col += 8;
+        }
+
+        // Scalar fallback for remaining pixels
+        while col < w {
+            let sum = tmp1_row[col].wrapping_add(tmp2_row[col]);
+            let avg = ((sum as i32 * 1024 + 16384) >> 15).clamp(0, 255) as u8;
+            dst_row[col] = avg;
+            col += 1;
+        }
+    }
+}
+
 /// Scalar fallback for AVG operation (for testing and non-AVX2 systems)
 pub fn avg_8bpc_scalar(
     dst: &mut [u8],
@@ -132,16 +216,20 @@ pub fn avg_8bpc_scalar(
 
 /// Runtime-dispatched AVG function
 ///
-/// Automatically selects AVX2 or scalar implementation based on CPU features.
+/// Automatically selects AVX2, wasm128, or scalar implementation based on CPU features.
 pub fn avg_8bpc(dst: &mut [u8], dst_stride: usize, tmp1: &[i16], tmp2: &[i16], w: usize, h: usize) {
     #[cfg(target_arch = "x86_64")]
     if let Some(token) = Desktop64::summon() {
-        // AVX2 available - use fast path
         avg_8bpc_avx2(token, dst, dst_stride, tmp1, tmp2, w, h);
         return;
     }
 
-    // Fallback to scalar
+    #[cfg(target_arch = "wasm32")]
+    if let Some(token) = Wasm128Token::summon() {
+        avg_8bpc_wasm128(token, dst, dst_stride, tmp1, tmp2, w, h);
+        return;
+    }
+
     avg_8bpc_scalar(dst, dst_stride, tmp1, tmp2, w, h);
 }
 
