@@ -70,9 +70,9 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
 name = "archmage"
-version = "0.7.0"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61bd463aee29794a0318115ab857c2486842b28956c3f75365b304f1047b4758"
+checksum = "fba21e64cb000b4890dc6348042557208486e5ea4e9f574b7f75f7a45e99e19d"
 dependencies = [
  "archmage-macros",
  "safe_unaligned_simd",
@@ -80,9 +80,9 @@ dependencies = [
 
 [[package]]
 name = "archmage-macros"
-version = "0.7.0"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02b01e2d131ffadba47bdff5d5e1d5d8a3b9743dc6b3d6ce4847ae2d6d306058"
+checksum = "35c9306deb9d68bc48cd4fa5ab2281b31c82ff2831360419ffbaf2f701b19a5a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -706,9 +706,7 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "linear-srgb"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "295a3bd374f231aea50f14b7c262e56a581b0ed44396ee78ba67ffa63a9e1f41"
+version = "0.5.4"
 dependencies = [
  "archmage",
  "bytemuck",
@@ -743,9 +741,9 @@ dependencies = [
 
 [[package]]
 name = "magetypes"
-version = "0.7.0"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d55dd4e83507ff9fe129b01669adca1e302ef346dac252ef59139c78def312a"
+checksum = "5963554492ae9c4248d5e761f734a97d79f5d7f07f4c81d708725be8a81f6819"
 dependencies = [
  "archmage",
 ]
@@ -1095,8 +1093,6 @@ dependencies = [
 [[package]]
 name = "rav1d-disjoint-mut"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "731512a636cc44496761bdab72157735a78cfffcbc3f42d1b0a84ff5800e3bc7"
 dependencies = [
  "aligned",
  "aligned-vec",
@@ -1105,9 +1101,7 @@ dependencies = [
 
 [[package]]
 name = "rav1d-safe"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79659370c00c7c9083cdea8aaa0b2dca7f77d16d86ecf6d7e3dda66cbd679f7d"
+version = "0.3.1"
 dependencies = [
  "aligned",
  "archmage",
@@ -1116,7 +1110,6 @@ dependencies = [
  "bitflags",
  "cc",
  "cfg-if",
- "libc",
  "nasm-rs",
  "parking_lot",
  "paste",

@@ -601,8 +601,8 @@ impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
     }
 
     fn output_info(&self, data: &[u8]) -> Result<zencodec_types::OutputInfo, Error> {
-        let decoder = crate::ManagedAvifDecoder::new(data, &self.config.inner)
-            .map_err(|e| e.into_inner())?;
+        let decoder =
+            crate::ManagedAvifDecoder::new(data, &self.config.inner).map_err(|e| e.into_inner())?;
         let native_info = decoder.probe_info().map_err(|e| e.into_inner())?;
         let desc = if native_info.has_alpha {
             PixelDescriptor::RGBA8_SRGB
@@ -629,8 +629,7 @@ impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
 
         // Probe metadata before creating animation decoder (both parse the container,
         // but ManagedAvifDecoder gives us the native ImageInfo for conversion).
-        let probe_dec =
-            crate::ManagedAvifDecoder::new(data, &cfg).map_err(|e| e.into_inner())?;
+        let probe_dec = crate::ManagedAvifDecoder::new(data, &cfg).map_err(|e| e.into_inner())?;
         let native_info = probe_dec.probe_info().map_err(|e| e.into_inner())?;
         drop(probe_dec);
 
@@ -879,8 +878,7 @@ impl zencodec_types::Decoder for AvifDecoder<'_> {
                 let dst_row = &mut dst.row_mut(y)[..row_bytes];
                 for (i, px) in src_row.iter().enumerate() {
                     let off = i * 12;
-                    dst_row[off..off + 4]
-                        .copy_from_slice(&srgb_u8_to_linear(px.r).to_le_bytes());
+                    dst_row[off..off + 4].copy_from_slice(&srgb_u8_to_linear(px.r).to_le_bytes());
                     dst_row[off + 4..off + 8]
                         .copy_from_slice(&srgb_u8_to_linear(px.g).to_le_bytes());
                     dst_row[off + 8..off + 12]
@@ -896,8 +894,7 @@ impl zencodec_types::Decoder for AvifDecoder<'_> {
                 let dst_row = &mut dst.row_mut(y)[..row_bytes];
                 for (i, px) in src_row.iter().enumerate() {
                     let off = i * 16;
-                    dst_row[off..off + 4]
-                        .copy_from_slice(&srgb_u8_to_linear(px.r).to_le_bytes());
+                    dst_row[off..off + 4].copy_from_slice(&srgb_u8_to_linear(px.r).to_le_bytes());
                     dst_row[off + 4..off + 8]
                         .copy_from_slice(&srgb_u8_to_linear(px.g).to_le_bytes());
                     dst_row[off + 8..off + 12]

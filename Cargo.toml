@@ -13,9 +13,9 @@ repository = "https://github.com/imazen/zenavif"
 # rav1d: C FFI-based decoder for asm feature (fastest)
 rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"], optional = true }
 # rav1d-safe: 100% safe managed API decoder (no c-ffi feature!)
-rav1d-safe = { version = "0.3.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
-archmage = { version = "0.7", features = ["macros", "safe_unaligned_simd"] }
-magetypes = "0.7"
+rav1d-safe = { version = "0.3", path = "../rav1d-safe", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
+archmage = { version = "0.8.4", features = ["macros", "safe_unaligned_simd"] }
+magetypes = "0.8.4"
 safe_unaligned_simd = "0.2.4"
 zenavif-parse = { path = "../zenavif-parse" }
 yuv = "0.8"
@@ -27,10 +27,10 @@ whereat = "0.1.3"
 log = "0.4"
 ravif = { package = "zenravif", path = "../ravif/ravif", default-features = false, optional = true }
 zencodec-types = { path = "../zencodec-types" }
-linear-srgb = "0.5"
+linear-srgb = { version = "0.5", path = "../linear-srgb" }
 
 [dev-dependencies]
-archmage = { version = "0.7", features = ["std"] }
+archmage = { version = "0.8.4", features = ["std"] }
 env_logger = { version = "0.11", default-features = false }
 png = "0.18.0"
 image = "0.25"

@@ -234,10 +234,7 @@ impl ManagedAvifDecoder {
     }
 
     /// Decode the primary image and return both pixels and metadata.
-    pub fn decode_full(
-        &mut self,
-        stop: &(impl Stop + ?Sized),
-    ) -> Result<(PixelData, ImageInfo)> {
+    pub fn decode_full(&mut self, stop: &(impl Stop + ?Sized)) -> Result<(PixelData, ImageInfo)> {
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
         if self.parser.grid_config().is_some() {
@@ -281,8 +278,14 @@ impl ManagedAvifDecoder {
         let (width, height) = if let Some(grid) = self.parser.grid_config() {
             (grid.output_width, grid.output_height)
         } else {
-            let meta = self.parser.primary_metadata().map_err(|e| at(Error::from(e)))?;
-            (meta.max_frame_width.get() as u32, meta.max_frame_height.get() as u32)
+            let meta = self
+                .parser
+                .primary_metadata()
+                .map_err(|e| at(Error::from(e)))?;
+            (
+                meta.max_frame_width.get() as u32,
+                meta.max_frame_height.get() as u32,
+            )
         };
 
         let has_alpha = self.parser.alpha_metadata().is_some();
@@ -291,47 +294,60 @@ impl ManagedAvifDecoder {
         let bit_depth = self.parser.av1_config().map(|c| c.bit_depth).unwrap_or(8);
 
         // CICP from container (colr box) or AV1 config fallback
-        let (color_primaries, transfer_characteristics, matrix_coefficients, color_range, icc_profile) =
-            match self.parser.color_info() {
-                Some(zenavif_parse::ColorInformation::Nclx {
-                    color_primaries: cp,
-                    transfer_characteristics: tc,
-                    matrix_coefficients: mc,
-                    full_range,
-                }) => (
-                    ColorPrimaries(*cp as u8),
-                    TransferCharacteristics(*tc as u8),
-                    MatrixCoefficients(*mc as u8),
-                    if *full_range { ColorRange::Full } else { ColorRange::Limited },
-                    None,
-                ),
-                Some(zenavif_parse::ColorInformation::IccProfile(icc)) => (
-                    ColorPrimaries::BT709,
-                    TransferCharacteristics::SRGB,
-                    MatrixCoefficients::BT601,
-                    ColorRange::Full,
-                    Some(icc.clone()),
-                ),
-                None => (
-                    ColorPrimaries::BT709,
-                    TransferCharacteristics::SRGB,
-                    MatrixCoefficients::BT601,
-                    ColorRange::Full,
-                    None,
-                ),
-            };
+        let (
+            color_primaries,
+            transfer_characteristics,
+            matrix_coefficients,
+            color_range,
+            icc_profile,
+        ) = match self.parser.color_info() {
+            Some(zenavif_parse::ColorInformation::Nclx {
+                color_primaries: cp,
+                transfer_characteristics: tc,
+                matrix_coefficients: mc,
+                full_range,
+            }) => (
+                ColorPrimaries(*cp as u8),
+                TransferCharacteristics(*tc as u8),
+                MatrixCoefficients(*mc as u8),
+                if *full_range {
+                    ColorRange::Full
+                } else {
+                    ColorRange::Limited
+                },
+                None,
+            ),
+            Some(zenavif_parse::ColorInformation::IccProfile(icc)) => (
+                ColorPrimaries::BT709,
+                TransferCharacteristics::SRGB,
+                MatrixCoefficients::BT601,
+                ColorRange::Full,
+                Some(icc.clone()),
+            ),
+            None => (
+                ColorPrimaries::BT709,
+                TransferCharacteristics::SRGB,
+                MatrixCoefficients::BT601,
+                ColorRange::Full,
+                None,
+            ),
+        };
 
-        let chroma_sampling = self.parser.av1_config().map(|c| {
-            if c.monochrome {
-                ChromaSampling::Monochrome
-            } else if c.chroma_subsampling_x != 0 && c.chroma_subsampling_y != 0 {
-                ChromaSampling::Cs420
-            } else if c.chroma_subsampling_x != 0 {
-                ChromaSampling::Cs422
-            } else {
-                ChromaSampling::Cs444
-            }
-        }).unwrap_or(ChromaSampling::Cs420);
+        let chroma_sampling = self
+            .parser
+            .av1_config()
+            .map(|c| {
+                if c.monochrome {
+                    ChromaSampling::Monochrome
+                } else if c.chroma_subsampling_x != 0 && c.chroma_subsampling_y != 0 {
+                    ChromaSampling::Cs420
+                } else if c.chroma_subsampling_x != 0 {
+                    ChromaSampling::Cs422
+                } else {
+                    ChromaSampling::Cs444
+                }
+            })
+            .unwrap_or(ChromaSampling::Cs420);
 
         Ok(ImageInfo {
             width,
@@ -352,8 +368,16 @@ impl ManagedAvifDecoder {
             pixel_aspect_ratio: self.parser.pixel_aspect_ratio().cloned(),
             content_light_level: self.parser.content_light_level().cloned(),
             mastering_display: self.parser.mastering_display().cloned(),
-            exif: self.parser.exif().and_then(|r| r.ok()).map(|c| c.into_owned()),
-            xmp: self.parser.xmp().and_then(|r| r.ok()).map(|c| c.into_owned()),
+            exif: self
+                .parser
+                .exif()
+                .and_then(|r| r.ok())
+                .map(|c| c.into_owned()),
+            xmp: self
+                .parser
+                .xmp()
+                .and_then(|r| r.ok())
+                .map(|c| c.into_owned()),
         })
     }
 

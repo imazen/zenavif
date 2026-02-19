@@ -545,13 +545,25 @@ fn yuv420_to_rgb8_wasm128(
 
             // Convert to RGB: R = Y + Vr*V, G = Y + Ug*U + Vg*V, B = Y + Ub*U
             let r = f32x4_add(y_norm, f32x4_mul(v_norm, vr_vec));
-            let g = f32x4_add(f32x4_add(y_norm, f32x4_mul(u_norm, ug_vec)), f32x4_mul(v_norm, vg_vec));
+            let g = f32x4_add(
+                f32x4_add(y_norm, f32x4_mul(u_norm, ug_vec)),
+                f32x4_mul(v_norm, vg_vec),
+            );
             let b = f32x4_add(y_norm, f32x4_mul(u_norm, ub_vec));
 
             // Scale to [0..255], clamp, round
-            let r_scaled = f32x4_nearest(f32x4_max(f32x4_min(f32x4_mul(r, scale_255), max_255), zero_v));
-            let g_scaled = f32x4_nearest(f32x4_max(f32x4_min(f32x4_mul(g, scale_255), max_255), zero_v));
-            let b_scaled = f32x4_nearest(f32x4_max(f32x4_min(f32x4_mul(b, scale_255), max_255), zero_v));
+            let r_scaled = f32x4_nearest(f32x4_max(
+                f32x4_min(f32x4_mul(r, scale_255), max_255),
+                zero_v,
+            ));
+            let g_scaled = f32x4_nearest(f32x4_max(
+                f32x4_min(f32x4_mul(g, scale_255), max_255),
+                zero_v,
+            ));
+            let b_scaled = f32x4_nearest(f32x4_max(
+                f32x4_min(f32x4_mul(b, scale_255), max_255),
+                zero_v,
+            ));
 
             // Extract and store
             let r0 = f32x4_extract_lane::<0>(r_scaled) as u8;
@@ -569,10 +581,26 @@ fn yuv420_to_rgb8_wasm128(
             let b2 = f32x4_extract_lane::<2>(b_scaled) as u8;
             let b3 = f32x4_extract_lane::<3>(b_scaled) as u8;
 
-            out[row_start + x_pos] = RGB8 { r: r0, g: g0, b: b0 };
-            out[row_start + x_pos + 1] = RGB8 { r: r1, g: g1, b: b1 };
-            out[row_start + x_pos + 2] = RGB8 { r: r2, g: g2, b: b2 };
-            out[row_start + x_pos + 3] = RGB8 { r: r3, g: g3, b: b3 };
+            out[row_start + x_pos] = RGB8 {
+                r: r0,
+                g: g0,
+                b: b0,
+            };
+            out[row_start + x_pos + 1] = RGB8 {
+                r: r1,
+                g: g1,
+                b: b1,
+            };
+            out[row_start + x_pos + 2] = RGB8 {
+                r: r2,
+                g: g2,
+                b: b2,
+            };
+            out[row_start + x_pos + 3] = RGB8 {
+                r: r3,
+                g: g3,
+                b: b3,
+            };
 
             x_pos += 4;
         }

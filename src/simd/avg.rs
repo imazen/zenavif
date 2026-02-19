@@ -13,7 +13,7 @@ use archmage::{Desktop64, SimdToken, arcane};
 use core::arch::x86_64::*;
 
 #[cfg(target_arch = "wasm32")]
-use archmage::{Wasm128Token, SimdToken, arcane};
+use archmage::{SimdToken, Wasm128Token, arcane};
 
 #[cfg(target_arch = "wasm32")]
 use core::arch::wasm32::*;
