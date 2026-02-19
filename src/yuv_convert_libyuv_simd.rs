@@ -5,6 +5,7 @@
 //! This module uses #![forbid(unsafe_code)] - all SIMD is safe via #[arcane].
 
 #![forbid(unsafe_code)]
+#![allow(clippy::too_many_arguments)]
 
 use crate::yuv_convert::{YuvMatrix, YuvRange};
 use archmage::prelude::*; // Includes core::arch and safe_unaligned_simd
@@ -204,8 +205,8 @@ fn process_8_pixels_avx2(
     let b_64 = _mm256_extract_epi64(b_u8, 0);
 
     // Write to output
-    for i in 0..8 {
-        out[i] = RGB8 {
+    for (i, px) in out[..8].iter_mut().enumerate() {
+        *px = RGB8 {
             r: ((r_64 >> (i * 8)) & 0xFF) as u8,
             g: ((g_64 >> (i * 8)) & 0xFF) as u8,
             b: ((b_64 >> (i * 8)) & 0xFF) as u8,

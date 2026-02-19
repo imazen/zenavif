@@ -83,6 +83,7 @@ pub fn scale_pixels_to_u16(image: &mut PixelData, bit_depth: u8) {
 /// LSB replication in `scale_to_u16`. This gives lossless roundtrip for
 /// values produced by LSB replication, symmetric bias for arbitrary
 /// inputs, and lower max error than half-up rounding (63 vs 95 for 10-bit).
+#[cfg(feature = "encode")]
 #[inline]
 pub fn scale_from_u16(v: u16, bit_depth: u8) -> u16 {
     let shift = 16 - bit_depth;

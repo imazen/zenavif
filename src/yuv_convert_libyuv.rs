@@ -2,6 +2,9 @@
 //!
 //! Supports BT.709 and BT.601 in both Full and Limited range
 
+// YUV conversion functions naturally require many plane/stride/dimension/matrix/range parameters.
+#![allow(clippy::too_many_arguments)]
+
 use crate::yuv_convert::{YuvMatrix, YuvRange};
 #[cfg(target_arch = "x86_64")]
 use crate::yuv_convert_libyuv_simd;
@@ -113,6 +116,7 @@ pub fn yuv420_to_rgb8(
 ) -> Option<ImgVec<RGB8>> {
     // Try SIMD first for BT.709 Full Range (most common)
     #[cfg(target_arch = "x86_64")]
+    #[allow(clippy::collapsible_if)]
     if matches!((range, matrix), (YuvRange::Full, YuvMatrix::Bt709)) {
         if let Some(token) = Desktop64::summon() {
             return yuv_convert_libyuv_simd::yuv420_to_rgb8_simd(

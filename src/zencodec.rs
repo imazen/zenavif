@@ -9,9 +9,11 @@ use rgb::{Rgb, Rgba};
 #[cfg(feature = "encode")]
 use zencodec_types::ImageMetadata;
 use zencodec_types::{
-    DecodeFrame, DecodeOutput, EncodeOutput, ImageFormat, ImageInfo, PixelData, PixelDescriptor,
-    PixelSlice, PixelSliceMut, ResourceLimits, Stop,
+    DecodeFrame, DecodeOutput, ImageFormat, ImageInfo, PixelData, PixelDescriptor, PixelSlice,
+    PixelSliceMut, ResourceLimits, Stop,
 };
+#[cfg(feature = "encode")]
+use zencodec_types::EncodeOutput;
 
 use crate::error::Error;
 
@@ -260,6 +262,7 @@ impl AvifEncoder<'_> {
 }
 
 /// Collect pixel data from a `PixelSlice` into contiguous bytes.
+#[cfg(feature = "encode")]
 fn collect_contiguous_bytes(pixels: &PixelSlice<'_>) -> Vec<u8> {
     let h = pixels.rows();
     let w = pixels.width();

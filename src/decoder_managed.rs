@@ -283,8 +283,8 @@ impl ManagedAvifDecoder {
                 .primary_metadata()
                 .map_err(|e| at(Error::from(e)))?;
             (
-                meta.max_frame_width.get() as u32,
-                meta.max_frame_height.get() as u32,
+                meta.max_frame_width.get(),
+                meta.max_frame_height.get(),
             )
         };
 

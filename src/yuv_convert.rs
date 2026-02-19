@@ -8,6 +8,9 @@
 //! - ITU-R BT.709 (HD video)
 //! - ITU-R BT.2020 (UHD video)
 
+// YUV conversion functions naturally require plane/stride/dimension/matrix/range parameters.
+#![allow(clippy::too_many_arguments)]
+
 use archmage::prelude::*;
 use imgref::ImgVec;
 #[cfg(target_arch = "x86_64")]
@@ -124,8 +127,8 @@ fn yuv420_to_rgb8_simd(
     let kg = 1.0 - kr - kb;
 
     // Chroma dimensions
-    let chroma_width = (width + 1) / 2;
-    let chroma_height = (height + 1) / 2;
+    let chroma_width = width.div_ceil(2);
+    let chroma_height = height.div_ceil(2);
 
     // Process row by row
     for y_pos in 0..height {
@@ -453,8 +456,8 @@ fn yuv420_to_rgb8_wasm128(
     let (kr, kb) = matrix_coefficients(matrix);
     let kg = 1.0 - kr - kb;
 
-    let chroma_width = (width + 1) / 2;
-    let chroma_height = (height + 1) / 2;
+    let chroma_width = width.div_ceil(2);
+    let chroma_height = height.div_ceil(2);
 
     // Precompute conversion coefficients
     let vr = 2.0 * (1.0 - kr);
@@ -659,8 +662,8 @@ fn yuv420_to_rgb8_scalar(
     let kg = 1.0 - kr - kb;
 
     // Chroma dimensions (half of luma for 4:2:0)
-    let chroma_width = (width + 1) / 2;
-    let chroma_height = (height + 1) / 2;
+    let chroma_width = width.div_ceil(2);
+    let chroma_height = height.div_ceil(2);
 
     for y in 0..height {
         for x in 0..width {

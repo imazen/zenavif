@@ -8,6 +8,8 @@
 
 // These unsafe fn helpers use SIMD intrinsics that are safe within target_feature context.
 #![allow(unsafe_op_in_unsafe_fn)]
+// YUV conversion functions naturally require many plane/stride/coefficient parameters.
+#![allow(clippy::too_many_arguments)]
 
 use archmage::prelude::*;
 use imgref::ImgVec;
@@ -145,7 +147,7 @@ fn process_32_pixels_420(
 
         // Broadcast UV bias and Y bias
         let y_corr = _mm256_set1_epi8(y_bias as i8);
-        let uv_corr = _mm256_set1_epi16(((uv_bias << 2) | (uv_bias >> 6)) as i16);
+        let uv_corr = _mm256_set1_epi16((uv_bias << 2) | (uv_bias >> 6));
 
         // Broadcast coefficients
         let v_y_coef = _mm256_set1_epi16(y_coef);
