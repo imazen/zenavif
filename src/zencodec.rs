@@ -178,6 +178,7 @@ impl zencodec_types::EncoderConfig for AvifEncoderConfig {
             config: self,
             stop: None,
             exif: None,
+            limits: ResourceLimits::none(),
         }
     }
 }
@@ -190,6 +191,7 @@ pub struct AvifEncodeJob<'a> {
     config: &'a AvifEncoderConfig,
     stop: Option<&'a dyn Stop>,
     exif: Option<&'a [u8]>,
+    limits: ResourceLimits,
 }
 
 #[cfg(feature = "encode")]
@@ -220,8 +222,8 @@ impl<'a> zencodec_types::EncodeJob<'a> for AvifEncodeJob<'a> {
         self
     }
 
-    fn with_limits(self, _limits: ResourceLimits) -> Self {
-        // AVIF encoder doesn't have resource limits
+    fn with_limits(mut self, limits: ResourceLimits) -> Self {
+        self.limits = limits;
         self
     }
 
@@ -230,6 +232,7 @@ impl<'a> zencodec_types::EncodeJob<'a> for AvifEncodeJob<'a> {
             config: self.config.inner.clone(),
             stop: self.stop,
             exif: self.exif,
+            limits: self.limits,
         }
     }
 
@@ -248,6 +251,7 @@ pub struct AvifEncoder<'a> {
     config: crate::EncoderConfig,
     stop: Option<&'a dyn Stop>,
     exif: Option<&'a [u8]>,
+    limits: ResourceLimits,
 }
 
 #[cfg(feature = "encode")]
@@ -283,6 +287,20 @@ impl zencodec_types::Encoder for AvifEncoder<'_> {
         let desc = pixels.descriptor();
         let w = pixels.width() as usize;
         let h = pixels.rows() as usize;
+
+        // Pre-flight limit checks
+        self.limits
+            .check_dimensions(w as u32, h as u32)
+            .map_err(|_| Error::ImageTooLarge {
+                width: w as u32,
+                height: h as u32,
+            })?;
+        let bpp = desc.bytes_per_pixel() as u64;
+        let estimated_mem = w as u64 * h as u64 * bpp;
+        self.limits
+            .check_memory(estimated_mem)
+            .map_err(|e| Error::Encode(format!("{e}")))?;
+
         let cfg = self.build_config();
         let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
 

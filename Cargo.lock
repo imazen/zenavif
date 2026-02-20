@@ -706,7 +706,9 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "linear-srgb"
-version = "0.5.4"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7687eee4c424bdb5f360d5d975a52baa0f56c1ce15e3c5cbef4af7d39e148092"
 dependencies = [
  "archmage",
  "bytemuck",
@@ -1093,6 +1095,8 @@ dependencies = [
 [[package]]
 name = "rav1d-disjoint-mut"
 version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "731512a636cc44496761bdab72157735a78cfffcbc3f42d1b0a84ff5800e3bc7"
 dependencies = [
  "aligned",
  "aligned-vec",
@@ -1102,6 +1106,8 @@ dependencies = [
 [[package]]
 name = "rav1d-safe"
 version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "075b421380b820e3a73e28fb43c30be88880d3641ee2b85c9f63a64e9a03d62b"
 dependencies = [
  "aligned",
  "archmage",
