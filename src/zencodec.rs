@@ -610,7 +610,6 @@ impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
     type Error = Error;
     type Decoder = AvifDecoder<'a>;
     type FrameDecoder = AvifFrameDecoder;
-
     fn with_stop(mut self, stop: &'a dyn Stop) -> Self {
         self.stop = Some(stop);
         self
@@ -680,6 +679,7 @@ impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
             total_frames: anim_info.frame_count as u32,
         })
     }
+
 }
 
 // ── Native → trait metadata conversion ──────────────────────────────────────
