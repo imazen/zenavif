@@ -951,7 +951,7 @@ impl zencodec_types::Decoder for AvifDecoder<'_> {
     fn decode_rows(
         self,
         data: &[u8],
-        _sink: &mut dyn FnMut(u32, PixelSlice<'_>),
+        _sink: &mut dyn zencodec_types::DecodeRowSink,
     ) -> Result<ImageInfo, Error> {
         let output = self.decode(data)?;
         Ok(output.info().clone())
@@ -1005,7 +1005,7 @@ impl zencodec_types::FrameDecoder for AvifFrameDecoder {
 
     fn next_frame_rows(
         &mut self,
-        _sink: &mut dyn FnMut(u32, PixelSlice<'_>),
+        _sink: &mut dyn zencodec_types::DecodeRowSink,
     ) -> Result<Option<ImageInfo>, Error> {
         Err(Error::Unsupported(
             "AVIF animation row-level decode not supported",
