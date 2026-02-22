@@ -1008,16 +1008,7 @@ impl zencodec_types::FrameDecoder for AvifFrameDecoder {
         ))
     }
 
-    fn next_frame_rows(
-        &mut self,
-        _sink: &mut dyn zencodec_types::DecodeRowSink,
-    ) -> Result<Option<ImageInfo>, Error> {
-        Err(Error::Unsupported(
-            "AVIF animation row-level decode not supported",
-        ))
-    }
 }
-
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
