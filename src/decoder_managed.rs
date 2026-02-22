@@ -1592,11 +1592,9 @@ impl ManagedAvifDecoder {
                 break;
             }
 
-            let min_bytes = output_width * strip_h * bpp;
-
             // Demand buffer from sink and stitch tiles into it
-            let buf = sink.demand(y_offset, strip_h as u32, min_bytes);
-            stitch_tile_row_into(buf, &row_tiles, output_width, strip_h, bpp);
+            let (buf, stride) = sink.demand(y_offset, strip_h as u32, output_width as u32, bpp);
+            stitch_tile_row_into(buf, stride, &row_tiles, output_width, strip_h, bpp);
 
             y_offset += strip_h as u32;
         }
@@ -1649,11 +1647,10 @@ fn write_pixel_data_to_sink(
     let h = pixels.height() as usize;
     let bpp = pixels.descriptor().bytes_per_pixel();
     let row_bytes = w * bpp;
-    let min_bytes = row_bytes * h;
-    let buf = sink.demand(0, h as u32, min_bytes);
+    let (buf, stride) = sink.demand(0, h as u32, w as u32, bpp);
 
     for y in 0..h {
-        let dst_start = y * row_bytes;
+        let dst_start = y * stride;
         let src = pixel_data_row_bytes(pixels, y);
         let copy_len = row_bytes.min(src.len());
         buf[dst_start..dst_start + copy_len].copy_from_slice(&src[..copy_len]);
@@ -1666,12 +1663,12 @@ fn write_pixel_data_to_sink(
 /// `output_width` for the rightmost tile.
 fn stitch_tile_row_into(
     buf: &mut [u8],
+    row_stride: usize,
     tiles: &[PixelData],
     output_width: usize,
     strip_h: usize,
     bpp: usize,
 ) {
-    let row_stride = output_width * bpp;
 
     for py in 0..strip_h {
         let row_start = py * row_stride;
