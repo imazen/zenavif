@@ -1516,6 +1516,182 @@ impl ManagedAvifDecoder {
 
         Ok(image)
     }
+
+    /// Decode with row-level streaming to a sink.
+    ///
+    /// For grid images, processes one tile-row at a time: decode tiles,
+    /// convert to RGB, stitch into the sink buffer, drop frames. Peak memory
+    /// is proportional to one tile-row instead of the full image.
+    ///
+    /// For single images, decodes the full frame then writes it as one strip.
+    pub fn decode_to_sink(
+        &mut self,
+        stop: &(impl Stop + ?Sized),
+        sink: &mut dyn zencodec_types::DecodeRowSink,
+    ) -> Result<ImageInfo> {
+        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+
+        if self.parser.grid_config().is_some() {
+            return self.decode_grid_to_sink(stop, sink);
+        }
+
+        // Single image: decode full, write as one strip
+        let (pixels, info) = self.decode_full(stop)?;
+        write_pixel_data_to_sink(&pixels, sink);
+        Ok(info)
+    }
+
+    /// Stream a grid image tile-row by tile-row to a sink.
+    fn decode_grid_to_sink(
+        &mut self,
+        stop: &(impl Stop + ?Sized),
+        sink: &mut dyn zencodec_types::DecodeRowSink,
+    ) -> Result<ImageInfo> {
+        let grid_config = self
+            .parser
+            .grid_config()
+            .expect("grid_config should be Some")
+            .clone();
+
+        let grid_rows = grid_config.rows as usize;
+        let cols = grid_config.columns as usize;
+        let output_width = grid_config.output_width as usize;
+        let output_height = grid_config.output_height as usize;
+
+        let mut y_offset = 0u32;
+
+        for grid_row in 0..grid_rows {
+            stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+
+            // Decode and convert tiles for this row one at a time.
+            // Each tile is decoded then converted before the next, so at most
+            // one raw Frame + one converted PixelData per tile is live.
+            let mut row_tiles: Vec<PixelData> = Vec::with_capacity(cols);
+            for col in 0..cols {
+                let tile_idx = grid_row * cols + col;
+                let tile_data = self
+                    .parser
+                    .tile_data(tile_idx)
+                    .map_err(|e| at(Error::from(e)))?;
+                let frame = Self::decode_frame(
+                    &mut self.decoder,
+                    &tile_data,
+                    "Failed to decode grid tile",
+                )?;
+                let (pixels, _info) = self.convert_to_image(frame, None, stop)?;
+                row_tiles.push(pixels);
+            }
+
+            // Get bytes per pixel from the first tile's format
+            let bpp = row_tiles[0].descriptor().bytes_per_pixel();
+            let tile_h = row_tiles[0].height() as usize;
+
+            // Last tile-row may be clipped to output dimensions
+            let strip_h = tile_h.min(output_height.saturating_sub(y_offset as usize));
+            if strip_h == 0 {
+                break;
+            }
+
+            let min_bytes = output_width * strip_h * bpp;
+
+            // Demand buffer from sink and stitch tiles into it
+            let buf = sink.demand(y_offset, strip_h as u32, min_bytes);
+            stitch_tile_row_into(buf, &row_tiles, output_width, strip_h, bpp);
+
+            y_offset += strip_h as u32;
+        }
+
+        self.probe_info()
+    }
+}
+
+/// Extract row `y` from a [`PixelData`] as a byte slice.
+///
+/// Uses [`ComponentBytes::as_bytes()`] for zero-copy access to the
+/// underlying pixel buffer. Only handles the formats that the AVIF
+/// decoder actually produces (Rgb8, Rgba8, Rgb16, Rgba16).
+fn pixel_data_row_bytes(pd: &PixelData, y: usize) -> &[u8] {
+    use rgb::ComponentBytes;
+    match pd {
+        PixelData::Rgb8(img) => {
+            let r = img.as_ref();
+            let start = y * r.stride();
+            r.buf()[start..start + r.width()].as_bytes()
+        }
+        PixelData::Rgba8(img) => {
+            let r = img.as_ref();
+            let start = y * r.stride();
+            r.buf()[start..start + r.width()].as_bytes()
+        }
+        PixelData::Rgb16(img) => {
+            let r = img.as_ref();
+            let start = y * r.stride();
+            r.buf()[start..start + r.width()].as_bytes()
+        }
+        PixelData::Rgba16(img) => {
+            let r = img.as_ref();
+            let start = y * r.stride();
+            r.buf()[start..start + r.width()].as_bytes()
+        }
+        other => unreachable!(
+            "AVIF decoder produced unexpected pixel format in grid: {:?}",
+            other.descriptor()
+        ),
+    }
+}
+
+/// Write all pixels from a [`PixelData`] to a sink as a single strip.
+fn write_pixel_data_to_sink(
+    pixels: &PixelData,
+    sink: &mut dyn zencodec_types::DecodeRowSink,
+) {
+    let w = pixels.width() as usize;
+    let h = pixels.height() as usize;
+    let bpp = pixels.descriptor().bytes_per_pixel();
+    let row_bytes = w * bpp;
+    let min_bytes = row_bytes * h;
+    let buf = sink.demand(0, h as u32, min_bytes);
+
+    for y in 0..h {
+        let dst_start = y * row_bytes;
+        let src = pixel_data_row_bytes(pixels, y);
+        let copy_len = row_bytes.min(src.len());
+        buf[dst_start..dst_start + copy_len].copy_from_slice(&src[..copy_len]);
+    }
+}
+
+/// Stitch a row of tiles into a flat output buffer.
+///
+/// Copies pixel rows from each tile side-by-side, clipping to
+/// `output_width` for the rightmost tile.
+fn stitch_tile_row_into(
+    buf: &mut [u8],
+    tiles: &[PixelData],
+    output_width: usize,
+    strip_h: usize,
+    bpp: usize,
+) {
+    let row_stride = output_width * bpp;
+
+    for py in 0..strip_h {
+        let row_start = py * row_stride;
+        let mut x_offset = 0usize;
+
+        for tile in tiles {
+            let tile_w = tile.width() as usize;
+            let actual_w = tile_w.min(output_width.saturating_sub(x_offset));
+            if actual_w == 0 {
+                continue;
+            }
+
+            let src = pixel_data_row_bytes(tile, py);
+            let copy_bytes = actual_w * bpp;
+            let dst_offset = row_start + x_offset * bpp;
+            buf[dst_offset..dst_offset + copy_bytes].copy_from_slice(&src[..copy_bytes]);
+
+            x_offset += tile_w;
+        }
+    }
 }
 
 /// Frame-by-frame animation decoder.

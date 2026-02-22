@@ -951,10 +951,15 @@ impl zencodec_types::Decoder for AvifDecoder<'_> {
     fn decode_rows(
         self,
         data: &[u8],
-        _sink: &mut dyn zencodec_types::DecodeRowSink,
+        sink: &mut dyn zencodec_types::DecodeRowSink,
     ) -> Result<ImageInfo, Error> {
-        let output = self.decode(data)?;
-        Ok(output.info().clone())
+        let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
+        let mut decoder =
+            crate::ManagedAvifDecoder::new(data, &self.config).map_err(|e| e.into_inner())?;
+        let native_info = decoder
+            .decode_to_sink(stop, sink)
+            .map_err(|e| e.into_inner())?;
+        Ok(convert_native_info(&native_info))
     }
 }
 
