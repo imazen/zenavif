@@ -265,20 +265,6 @@ impl AvifEncoder<'_> {
     }
 }
 
-/// Collect pixel data from a `PixelSlice` into contiguous bytes.
-#[cfg(feature = "encode")]
-fn collect_contiguous_bytes(pixels: &PixelSlice<'_>) -> Vec<u8> {
-    let h = pixels.rows();
-    let w = pixels.width();
-    let bpp = pixels.descriptor().bytes_per_pixel();
-    let row_bytes = w as usize * bpp;
-    let mut out = Vec::with_capacity(row_bytes * h as usize);
-    for y in 0..h {
-        out.extend_from_slice(&pixels.row(y)[..row_bytes]);
-    }
-    out
-}
-
 #[cfg(feature = "encode")]
 impl zencodec_types::Encoder for AvifEncoder<'_> {
     type Error = Error;
@@ -305,7 +291,7 @@ impl zencodec_types::Encoder for AvifEncoder<'_> {
         let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
 
         if desc == PixelDescriptor::RGB8_SRGB {
-            let raw = collect_contiguous_bytes(&pixels);
+            let raw = pixels.contiguous_bytes();
             let rgb: Vec<Rgb<u8>> = raw
                 .chunks_exact(3)
                 .map(|c| Rgb {
@@ -319,7 +305,7 @@ impl zencodec_types::Encoder for AvifEncoder<'_> {
                 crate::encode_rgb8(img.as_ref(), &cfg, stop).map_err(|e| e.into_inner())?;
             Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
         } else if desc == PixelDescriptor::RGBA8_SRGB {
-            let raw = collect_contiguous_bytes(&pixels);
+            let raw = pixels.contiguous_bytes();
             let rgba: Vec<Rgba<u8>> = raw
                 .chunks_exact(4)
                 .map(|c| Rgba {
@@ -334,7 +320,7 @@ impl zencodec_types::Encoder for AvifEncoder<'_> {
                 crate::encode_rgba8(img.as_ref(), &cfg, stop).map_err(|e| e.into_inner())?;
             Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
         } else if desc == PixelDescriptor::BGRA8_SRGB {
-            let raw = collect_contiguous_bytes(&pixels);
+            let raw = pixels.contiguous_bytes();
             let rgba: Vec<Rgba<u8>> = raw
                 .chunks_exact(4)
                 .map(|c| Rgba {
@@ -349,7 +335,7 @@ impl zencodec_types::Encoder for AvifEncoder<'_> {
                 crate::encode_rgba8(img.as_ref(), &cfg, stop).map_err(|e| e.into_inner())?;
             Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
         } else if desc == PixelDescriptor::GRAY8_SRGB {
-            let raw = collect_contiguous_bytes(&pixels);
+            let raw = pixels.contiguous_bytes();
             let rgb: Vec<Rgb<u8>> = raw.iter().map(|&g| Rgb { r: g, g, b: g }).collect();
             let img = imgref::ImgVec::new(rgb, w, h);
             let result =
@@ -357,7 +343,7 @@ impl zencodec_types::Encoder for AvifEncoder<'_> {
             Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
         } else if desc == PixelDescriptor::RGBF32_LINEAR {
             use linear_srgb::default::linear_to_srgb_u8;
-            let raw = collect_contiguous_bytes(&pixels);
+            let raw = pixels.contiguous_bytes();
             let rgb: Vec<Rgb<u8>> = raw
                 .chunks_exact(12)
                 .map(|c| {
@@ -377,7 +363,7 @@ impl zencodec_types::Encoder for AvifEncoder<'_> {
             Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
         } else if desc == PixelDescriptor::RGBAF32_LINEAR {
             use linear_srgb::default::linear_to_srgb_u8;
-            let raw = collect_contiguous_bytes(&pixels);
+            let raw = pixels.contiguous_bytes();
             let rgba: Vec<Rgba<u8>> = raw
                 .chunks_exact(16)
                 .map(|c| {
@@ -399,7 +385,7 @@ impl zencodec_types::Encoder for AvifEncoder<'_> {
             Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
         } else if desc == PixelDescriptor::GRAYF32_LINEAR {
             use linear_srgb::default::linear_to_srgb_u8;
-            let raw = collect_contiguous_bytes(&pixels);
+            let raw = pixels.contiguous_bytes();
             let rgb: Vec<Rgb<u8>> = raw
                 .chunks_exact(4)
                 .map(|c| {
