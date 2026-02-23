@@ -9,7 +9,7 @@ use rgb::{Rgb, Rgba};
 #[cfg(feature = "encode")]
 use zencodec_types::EncodeOutput;
 #[cfg(feature = "encode")]
-use zencodec_types::ImageMetadata;
+use zencodec_types::MetadataView;
 use zencodec_types::{
     DecodeFrame, DecodeOutput, ImageFormat, ImageInfo, PixelData, PixelDescriptor, PixelSlice,
     PixelSliceMut, ResourceLimits, Stop,
@@ -215,7 +215,7 @@ impl<'a> zencodec_types::EncodeJob<'a> for AvifEncodeJob<'a> {
         self
     }
 
-    fn with_metadata(mut self, meta: &'a ImageMetadata<'a>) -> Self {
+    fn with_metadata(mut self, meta: &'a MetadataView<'a>) -> Self {
         if let Some(exif) = meta.exif {
             self.exif = Some(exif);
         }

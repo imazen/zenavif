@@ -47,6 +47,10 @@ pub enum Error {
     /// Operation was cancelled via Stop trait
     #[error("Operation cancelled: {0:?}")]
     Cancelled(StopReason),
+
+    /// Unsupported codec operation
+    #[error(transparent)]
+    UnsupportedOperation(#[from] zencodec_types::UnsupportedOperation),
 }
 
 impl From<StopReason> for Error {
