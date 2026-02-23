@@ -7,13 +7,13 @@ use std::sync::Arc;
 
 use rgb::{Rgb, Rgba};
 #[cfg(feature = "encode")]
+use zencodec_types::EncodeOutput;
+#[cfg(feature = "encode")]
 use zencodec_types::ImageMetadata;
 use zencodec_types::{
     DecodeFrame, DecodeOutput, ImageFormat, ImageInfo, PixelData, PixelDescriptor, PixelSlice,
     PixelSliceMut, ResourceLimits, Stop,
 };
-#[cfg(feature = "encode")]
-use zencodec_types::EncodeOutput;
 
 use crate::error::Error;
 
@@ -665,7 +665,6 @@ impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
             total_frames: anim_info.frame_count as u32,
         })
     }
-
 }
 
 // ── Native → trait metadata conversion ──────────────────────────────────────
@@ -993,7 +992,6 @@ impl zencodec_types::FrameDecoder for AvifFrameDecoder {
             "AVIF animation decode_into not yet supported",
         ))
     }
-
 }
 // ── Tests ───────────────────────────────────────────────────────────────────
 

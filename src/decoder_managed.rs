@@ -282,10 +282,7 @@ impl ManagedAvifDecoder {
                 .parser
                 .primary_metadata()
                 .map_err(|e| at(Error::from(e)))?;
-            (
-                meta.max_frame_width.get(),
-                meta.max_frame_height.get(),
-            )
+            (meta.max_frame_width.get(), meta.max_frame_height.get())
         };
 
         let has_alpha = self.parser.alpha_metadata().is_some();
@@ -1639,10 +1636,7 @@ fn pixel_data_row_bytes(pd: &PixelData, y: usize) -> &[u8] {
 }
 
 /// Write all pixels from a [`PixelData`] to a sink as a single strip.
-fn write_pixel_data_to_sink(
-    pixels: &PixelData,
-    sink: &mut dyn zencodec_types::DecodeRowSink,
-) {
+fn write_pixel_data_to_sink(pixels: &PixelData, sink: &mut dyn zencodec_types::DecodeRowSink) {
     let w = pixels.width() as usize;
     let h = pixels.height() as usize;
     let bpp = pixels.descriptor().bytes_per_pixel();
@@ -1669,7 +1663,6 @@ fn stitch_tile_row_into(
     strip_h: usize,
     bpp: usize,
 ) {
-
     for py in 0..strip_h {
         let row_start = py * row_stride;
         let mut x_offset = 0usize;
