@@ -111,14 +111,25 @@ impl Default for AvifEncoderConfig {
 
 #[cfg(feature = "encode")]
 static ENCODE_CAPS: zencodec_types::CodecCapabilities = zencodec_types::CodecCapabilities::new()
+    .with_encode_icc(true)
     .with_encode_exif(true)
+    .with_encode_xmp(true)
     .with_encode_cancel(true)
+    .with_lossy(true)
+    .with_native_alpha(true)
     .with_effort_range(0, 10)
     .with_quality_range(0.0, 100.0);
 
 #[cfg(feature = "encode")]
-static ENCODE_DESCRIPTORS: &[PixelDescriptor] =
-    &[PixelDescriptor::RGB8_SRGB, PixelDescriptor::RGBA8_SRGB];
+static ENCODE_DESCRIPTORS: &[PixelDescriptor] = &[
+    PixelDescriptor::RGB8_SRGB,
+    PixelDescriptor::RGBA8_SRGB,
+    PixelDescriptor::BGRA8_SRGB,
+    PixelDescriptor::GRAY8_SRGB,
+    PixelDescriptor::RGBF32_LINEAR,
+    PixelDescriptor::RGBAF32_LINEAR,
+    PixelDescriptor::GRAYF32_LINEAR,
+];
 
 #[cfg(feature = "encode")]
 impl zencodec_types::EncoderConfig for AvifEncoderConfig {
@@ -178,6 +189,8 @@ impl zencodec_types::EncoderConfig for AvifEncoderConfig {
             config: self,
             stop: None,
             exif: None,
+            icc_profile: None,
+            xmp: None,
             limits: ResourceLimits::none(),
         }
     }
@@ -191,6 +204,8 @@ pub struct AvifEncodeJob<'a> {
     config: &'a AvifEncoderConfig,
     stop: Option<&'a dyn Stop>,
     exif: Option<&'a [u8]>,
+    icc_profile: Option<&'a [u8]>,
+    xmp: Option<&'a [u8]>,
     limits: ResourceLimits,
 }
 
@@ -219,6 +234,12 @@ impl<'a> zencodec_types::EncodeJob<'a> for AvifEncodeJob<'a> {
         if let Some(exif) = meta.exif {
             self.exif = Some(exif);
         }
+        if let Some(icc) = meta.icc_profile {
+            self.icc_profile = Some(icc);
+        }
+        if let Some(xmp) = meta.xmp {
+            self.xmp = Some(xmp);
+        }
         self
     }
 
@@ -232,6 +253,8 @@ impl<'a> zencodec_types::EncodeJob<'a> for AvifEncodeJob<'a> {
             config: self.config.inner.clone(),
             stop: self.stop,
             exif: self.exif,
+            icc_profile: self.icc_profile,
+            xmp: self.xmp,
             limits: self.limits,
         }
     }
@@ -251,6 +274,8 @@ pub struct AvifEncoder<'a> {
     config: crate::EncoderConfig,
     stop: Option<&'a dyn Stop>,
     exif: Option<&'a [u8]>,
+    icc_profile: Option<&'a [u8]>,
+    xmp: Option<&'a [u8]>,
     limits: ResourceLimits,
 }
 
@@ -260,6 +285,12 @@ impl AvifEncoder<'_> {
         let mut cfg = self.config.clone();
         if let Some(exif) = self.exif {
             cfg = cfg.exif(exif.to_vec());
+        }
+        if let Some(icc) = self.icc_profile {
+            cfg = cfg.icc_profile(icc.to_vec());
+        }
+        if let Some(xmp) = self.xmp {
+            cfg = cfg.xmp(xmp.to_vec());
         }
         cfg
     }
@@ -536,7 +567,8 @@ static DECODE_CAPS: zencodec_types::CodecCapabilities = zencodec_types::CodecCap
     .with_decode_icc(true)
     .with_decode_exif(true)
     .with_decode_xmp(true)
-    .with_decode_cicp(true);
+    .with_decode_cicp(true)
+    .with_native_alpha(true);
 
 static DECODE_DESCRIPTORS: &[PixelDescriptor] =
     &[PixelDescriptor::RGB8_SRGB, PixelDescriptor::RGBA8_SRGB];
