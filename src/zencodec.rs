@@ -544,6 +544,21 @@ impl AvifDecoderConfig {
     }
 
     /// Access the underlying [`crate::DecoderConfig`].
+    /// Set the number of decode threads (0 = auto).
+    #[must_use]
+    pub fn with_threads(mut self, threads: u32) -> Self {
+        self.inner = self.inner.threads(threads);
+        self
+    }
+
+    /// Apply film grain synthesis during decode.
+    #[must_use]
+    pub fn with_film_grain(mut self, apply: bool) -> Self {
+        self.inner = self.inner.apply_grain(apply);
+        self
+    }
+
+    /// Access the underlying [`crate::DecoderConfig`].
     #[must_use]
     pub fn inner(&self) -> &crate::DecoderConfig {
         &self.inner
