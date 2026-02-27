@@ -13,19 +13,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = DecoderConfig::new().threads(1);
     match decode_with(&data, &config, &Unstoppable) {
         Ok(image) => {
-            use zenavif::PixelData;
+            use zencodec_types::PixelDescriptor;
             println!(
                 "✓ SUCCESS! Decoded image: {}x{}",
                 image.width(),
                 image.height()
             );
-            match image {
-                PixelData::Rgb8(_) => println!("  Format: RGB8"),
-                PixelData::Rgba8(_) => println!("  Format: RGBA8"),
-                PixelData::Rgb16(_) => println!("  Format: RGB16"),
-                PixelData::Rgba16(_) => println!("  Format: RGBA16"),
-                _ => println!("  Format: Other"),
-            }
+            let desc = image.descriptor();
+            let fmt = if desc.layout_compatible(&PixelDescriptor::RGB8) {
+                "RGB8"
+            } else if desc.layout_compatible(&PixelDescriptor::RGBA8) {
+                "RGBA8"
+            } else if desc.layout_compatible(&PixelDescriptor::RGB16) {
+                "RGB16"
+            } else if desc.layout_compatible(&PixelDescriptor::RGBA16) {
+                "RGBA16"
+            } else {
+                "Other"
+            };
+            println!("  Format: {fmt}");
         }
         Err(e) => {
             eprintln!("✗ ERROR: {:?}", e);

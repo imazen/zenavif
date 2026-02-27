@@ -893,8 +893,7 @@ impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
         let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
         let mut frames: Vec<(PixelBuffer, u32)> = Vec::new();
         while let Some(frame) = anim_dec.next_frame(stop).map_err(|e| e.into_inner())? {
-            let buf: PixelBuffer = frame.pixels.into();
-            frames.push((buf, frame.duration_ms));
+            frames.push((frame.pixels, frame.duration_ms));
         }
 
         // Build base info from probed metadata, override dimensions from decoded frame
@@ -1074,8 +1073,7 @@ impl zencodec_types::Decode for AvifDecoder<'_> {
         let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
         let mut decoder =
             crate::ManagedAvifDecoder::new(data, &self.config).map_err(|e| e.into_inner())?;
-        let (pixel_data, native_info) = decoder.decode_full(stop).map_err(|e| e.into_inner())?;
-        let pixels: PixelBuffer = pixel_data.into();
+        let (pixels, native_info) = decoder.decode_full(stop).map_err(|e| e.into_inner())?;
         let pixels = negotiate_format(pixels, preferred);
         let info = convert_native_info(&native_info);
         Ok(DecodeOutput::new(pixels, info))

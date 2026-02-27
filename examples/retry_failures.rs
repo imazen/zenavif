@@ -2,6 +2,7 @@ use std::fs;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 use std::time::Instant;
+use zencodec_types::PixelDescriptor;
 
 fn main() {
     let error_log = Path::new("/mnt/v/output/zenavif/parse-failures/errors.txt");
@@ -37,18 +38,17 @@ fn main() {
         match result {
             Ok(Ok(img)) => {
                 passed += 1;
-                let dims = match &img {
-                    zenavif::PixelData::Rgb8(i) => format!("{}x{} rgb8", i.width(), i.height()),
-                    zenavif::PixelData::Rgba8(i) => {
-                        format!("{}x{} rgba8", i.width(), i.height())
-                    }
-                    zenavif::PixelData::Rgb16(i) => {
-                        format!("{}x{} rgb16", i.width(), i.height())
-                    }
-                    zenavif::PixelData::Rgba16(i) => {
-                        format!("{}x{} rgba16", i.width(), i.height())
-                    }
-                    other => format!("{:?}", std::mem::discriminant(other)),
+                let desc = img.descriptor();
+                let dims = if desc.layout_compatible(&PixelDescriptor::RGB8) {
+                    format!("{}x{} rgb8", img.width(), img.height())
+                } else if desc.layout_compatible(&PixelDescriptor::RGBA8) {
+                    format!("{}x{} rgba8", img.width(), img.height())
+                } else if desc.layout_compatible(&PixelDescriptor::RGB16) {
+                    format!("{}x{} rgb16", img.width(), img.height())
+                } else if desc.layout_compatible(&PixelDescriptor::RGBA16) {
+                    format!("{}x{} rgba16", img.width(), img.height())
+                } else {
+                    format!("{}x{} {:?}", img.width(), img.height(), desc)
                 };
                 println!("  OK   {name}: {dims}");
             }

@@ -141,7 +141,7 @@ pub struct ImageInfo {
 #[derive(Debug)]
 pub struct DecodedFrame {
     /// Decoded pixel data for this frame.
-    pub pixels: zencodec_types::PixelData,
+    pub pixels: zencodec_types::PixelBuffer,
     /// Duration of this frame in milliseconds.
     pub duration_ms: u32,
 }

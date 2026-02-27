@@ -18,7 +18,8 @@
 use enough::Unstoppable;
 use std::fs;
 use std::path::{Path, PathBuf};
-use zenavif::{DecoderConfig, PixelData, decode_with};
+use zenavif::{DecoderConfig, decode_with};
+use zencodec_types::{PixelBuffer, PixelDescriptor};
 
 /// Generate reference PNGs for a test file
 /// This should be run once to create the reference images
@@ -38,63 +39,62 @@ fn generate_reference(
     ));
 
     // Convert to image-rs format and save
-    match image {
-        PixelData::Rgb8(img) => {
-            let width = img.width() as u32;
-            let height = img.height() as u32;
-            let mut buffer = image::RgbImage::new(width, height);
+    let desc = image.descriptor();
+    if desc.layout_compatible(&PixelDescriptor::RGB8) {
+        let img = image.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
+        let width = img.width() as u32;
+        let height = img.height() as u32;
+        let mut buffer = image::RgbImage::new(width, height);
 
-            for y in 0..height {
-                for x in 0..width {
-                    let pixel = img[(x as usize, y as usize)];
-                    buffer.put_pixel(x, y, image::Rgb([pixel.r, pixel.g, pixel.b]));
-                }
+        for y in 0..height {
+            for x in 0..width {
+                let pixel = img[(x as usize, y as usize)];
+                buffer.put_pixel(x, y, image::Rgb([pixel.r, pixel.g, pixel.b]));
             }
-
-            buffer.save(&output_path)?;
         }
-        PixelData::Rgba8(img) => {
-            let width = img.width() as u32;
-            let height = img.height() as u32;
-            let mut buffer = image::RgbaImage::new(width, height);
 
-            for y in 0..height {
-                for x in 0..width {
-                    let pixel = img[(x as usize, y as usize)];
-                    buffer.put_pixel(x, y, image::Rgba([pixel.r, pixel.g, pixel.b, pixel.a]));
-                }
+        buffer.save(&output_path)?;
+    } else if desc.layout_compatible(&PixelDescriptor::RGBA8) {
+        let img = image.try_as_imgref::<rgb::Rgba<u8>>().unwrap();
+        let width = img.width() as u32;
+        let height = img.height() as u32;
+        let mut buffer = image::RgbaImage::new(width, height);
+
+        for y in 0..height {
+            for x in 0..width {
+                let pixel = img[(x as usize, y as usize)];
+                buffer.put_pixel(x, y, image::Rgba([pixel.r, pixel.g, pixel.b, pixel.a]));
             }
-
-            buffer.save(&output_path)?;
         }
-        PixelData::Rgb16(img) => {
-            // Convert 16-bit to 8-bit for PNG
-            let width = img.width() as u32;
-            let height = img.height() as u32;
-            let mut buffer = image::RgbImage::new(width, height);
 
-            for y in 0..height {
-                for x in 0..width {
-                    let pixel = img[(x as usize, y as usize)];
-                    // Scale from 16-bit to 8-bit
-                    buffer.put_pixel(
-                        x,
-                        y,
-                        image::Rgb([
-                            (pixel.r >> 8) as u8,
-                            (pixel.g >> 8) as u8,
-                            (pixel.b >> 8) as u8,
-                        ]),
-                    );
-                }
+        buffer.save(&output_path)?;
+    } else if desc.layout_compatible(&PixelDescriptor::RGB16) {
+        let img = image.try_as_imgref::<rgb::Rgb<u16>>().unwrap();
+        // Convert 16-bit to 8-bit for PNG
+        let width = img.width() as u32;
+        let height = img.height() as u32;
+        let mut buffer = image::RgbImage::new(width, height);
+
+        for y in 0..height {
+            for x in 0..width {
+                let pixel = img[(x as usize, y as usize)];
+                // Scale from 16-bit to 8-bit
+                buffer.put_pixel(
+                    x,
+                    y,
+                    image::Rgb([
+                        (pixel.r >> 8) as u8,
+                        (pixel.g >> 8) as u8,
+                        (pixel.b >> 8) as u8,
+                    ]),
+                );
             }
+        }
 
-            buffer.save(&output_path)?;
-        }
-        _ => {
-            eprintln!("Unsupported format for reference generation");
-            return Ok(());
-        }
+        buffer.save(&output_path)?;
+    } else {
+        eprintln!("Unsupported format for reference generation");
+        return Ok(());
     }
 
     println!("Generated reference: {:?}", output_path);
@@ -103,64 +103,62 @@ fn generate_reference(
 
 /// Compare decoded image against reference PNG
 fn compare_against_reference(
-    image: &PixelData,
+    image: &PixelBuffer,
     reference_path: &Path,
     max_diff: u8,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let reference = image::open(reference_path)?;
 
-    match image {
-        PixelData::Rgb8(img) => {
-            let ref_rgb = reference.to_rgb8();
-            if img.width() != ref_rgb.width() as usize || img.height() != ref_rgb.height() as usize
-            {
-                eprintln!(
-                    "Dimension mismatch: {}x{} vs {}x{}",
-                    img.width(),
-                    img.height(),
-                    ref_rgb.width(),
-                    ref_rgb.height()
-                );
-                return Ok(false);
-            }
+    let desc = image.descriptor();
+    if desc.layout_compatible(&PixelDescriptor::RGB8) {
+        let img = image.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
+        let ref_rgb = reference.to_rgb8();
+        if img.width() != ref_rgb.width() as usize || img.height() != ref_rgb.height() as usize {
+            eprintln!(
+                "Dimension mismatch: {}x{} vs {}x{}",
+                img.width(),
+                img.height(),
+                ref_rgb.width(),
+                ref_rgb.height()
+            );
+            return Ok(false);
+        }
 
-            let mut max_error = 0u8;
-            let mut error_count = 0;
+        let mut max_error = 0u8;
+        let mut error_count = 0;
 
-            for y in 0..img.height() {
-                for x in 0..img.width() {
-                    let our_pixel = img[(x, y)];
-                    let ref_pixel = ref_rgb.get_pixel(x as u32, y as u32);
+        for y in 0..img.height() {
+            for x in 0..img.width() {
+                let our_pixel = img[(x, y)];
+                let ref_pixel = ref_rgb.get_pixel(x as u32, y as u32);
 
-                    let diff_r = (our_pixel.r as i16 - ref_pixel[0] as i16).abs() as u8;
-                    let diff_g = (our_pixel.g as i16 - ref_pixel[1] as i16).abs() as u8;
-                    let diff_b = (our_pixel.b as i16 - ref_pixel[2] as i16).abs() as u8;
+                let diff_r = (our_pixel.r as i16 - ref_pixel[0] as i16).abs() as u8;
+                let diff_g = (our_pixel.g as i16 - ref_pixel[1] as i16).abs() as u8;
+                let diff_b = (our_pixel.b as i16 - ref_pixel[2] as i16).abs() as u8;
 
-                    let max_channel_diff = diff_r.max(diff_g).max(diff_b);
+                let max_channel_diff = diff_r.max(diff_g).max(diff_b);
 
-                    if max_channel_diff > max_diff {
-                        max_error = max_error.max(max_channel_diff);
-                        error_count += 1;
-                    }
+                if max_channel_diff > max_diff {
+                    max_error = max_error.max(max_channel_diff);
+                    error_count += 1;
                 }
             }
-
-            if error_count > 0 {
-                let total_pixels = img.width() * img.height();
-                let error_percent = (error_count as f64 / total_pixels as f64) * 100.0;
-                eprintln!(
-                    "Pixel errors: {} ({:.2}%), max error: {}",
-                    error_count, error_percent, max_error
-                );
-                return Ok(false);
-            }
-
-            Ok(true)
         }
-        _ => {
-            eprintln!("Format comparison not yet implemented");
-            Ok(true) // Skip for now
+
+        if error_count > 0 {
+            let total_pixels = img.width() * img.height();
+            let error_percent = (error_count as f64 / total_pixels as f64) * 100.0;
+            eprintln!(
+                "Pixel errors: {} ({:.2}%), max error: {}",
+                error_count, error_percent, max_error
+            );
+            return Ok(false);
         }
+
+        Ok(true)
+    } else {
+        eprintln!("Format comparison not yet implemented");
+        Ok(true) // Skip for now
     }
 }
 

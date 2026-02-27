@@ -6,7 +6,8 @@
 use enough::Unstoppable;
 use std::fs;
 use std::path::PathBuf;
-use zenavif::{DecoderConfig, PixelData, decode_with};
+use zenavif::{DecoderConfig, decode_with};
+use zencodec_types::PixelDescriptor;
 
 fn find_test_vectors() -> Vec<PathBuf> {
     let mut vectors = Vec::new();
@@ -63,27 +64,15 @@ fn test_decode_all_vectors() {
                 }));
                 match result {
                     Ok(Ok(image)) => {
-                        let info = match &image {
-                            PixelData::Rgb8(img) => {
-                                format!("RGB8  {}x{}", img.width(), img.height())
-                            }
-                            PixelData::Rgba8(img) => {
-                                format!("RGBA8 {}x{}", img.width(), img.height())
-                            }
-                            PixelData::Rgb16(img) => {
-                                format!("RGB16 {}x{}", img.width(), img.height())
-                            }
-                            PixelData::Rgba16(img) => {
-                                format!("RGBA16 {}x{}", img.width(), img.height())
-                            }
-                            PixelData::Gray8(img) => {
-                                format!("GRAY8 {}x{}", img.width(), img.height())
-                            }
-                            PixelData::Gray16(img) => {
-                                format!("GRAY16 {}x{}", img.width(), img.height())
-                            }
-                            _ => format!("OTHER {}x{}", image.width(), image.height()),
-                        };
+                        let desc = image.descriptor();
+                        let fmt = if desc.layout_compatible(&PixelDescriptor::RGB8) { "RGB8" }
+                            else if desc.layout_compatible(&PixelDescriptor::RGBA8) { "RGBA8" }
+                            else if desc.layout_compatible(&PixelDescriptor::RGB16) { "RGB16" }
+                            else if desc.layout_compatible(&PixelDescriptor::RGBA16) { "RGBA16" }
+                            else if desc.layout_compatible(&PixelDescriptor::GRAY8) { "GRAY8" }
+                            else if desc.layout_compatible(&PixelDescriptor::GRAY16) { "GRAY16" }
+                            else { "OTHER" };
+                        let info = format!("{:6} {}x{}", fmt, image.width(), image.height());
                         eprintln!("✓ {}", info);
                         passed += 1;
                     }

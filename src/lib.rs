@@ -9,20 +9,11 @@
 //! ## Quick Start
 //!
 //! ```no_run
-//! use zenavif::{decode, PixelData};
+//! use zenavif::decode;
 //!
 //! let avif_data = std::fs::read("image.avif").unwrap();
 //! let image = decode(&avif_data).unwrap();
-//!
-//! match image {
-//!     PixelData::Rgb8(img) => {
-//!         println!("RGB8 image: {}x{}", img.width(), img.height());
-//!     }
-//!     PixelData::Rgba8(img) => {
-//!         println!("RGBA8 image: {}x{}", img.width(), img.height());
-//!     }
-//!     _ => {}
-//! }
+//! println!("{}x{} {:?}", image.width(), image.height(), image.descriptor());
 //! ```
 //!
 //! ## Features
@@ -96,7 +87,7 @@ pub use zencodec::{
 };
 #[cfg(all(feature = "zencodec", feature = "encode"))]
 pub use zencodec::{AvifEncodeJob, AvifEncoder, AvifEncoderConfig, AvifFrameEncoder};
-pub use zencodec_types::PixelData;
+pub use zencodec_types::PixelBuffer;
 
 /// Decode an AVIF image with default settings
 ///
@@ -109,7 +100,7 @@ pub use zencodec_types::PixelData;
 /// let avif_data = std::fs::read("image.avif").unwrap();
 /// let image = zenavif::decode(&avif_data).unwrap();
 /// ```
-pub fn decode(data: &[u8]) -> Result<PixelData> {
+pub fn decode(data: &[u8]) -> Result<PixelBuffer> {
     decode_with(data, &DecoderConfig::default(), &Unstoppable)
 }
 
@@ -135,7 +126,7 @@ pub fn decode_with(
     data: &[u8],
     config: &DecoderConfig,
     stop: &(impl Stop + ?Sized),
-) -> Result<PixelData> {
+) -> Result<PixelBuffer> {
     #[cfg(feature = "unsafe-asm")]
     {
         let mut decoder = AvifDecoder::new(data, config)?;
@@ -182,7 +173,7 @@ pub fn decode_animation_with(
 
 /// Encode a decoded image to AVIF with default settings
 ///
-/// Supports Rgb8, Rgba8, Rgb16, and Rgba16 variants. Returns
+/// Supports Rgb8, Rgba8, Rgb16, and Rgba16 pixel formats. Returns
 /// [`Error::Unsupported`] for grayscale inputs.
 ///
 /// # Example
@@ -194,27 +185,38 @@ pub fn decode_animation_with(
 /// std::fs::write("output.avif", &encoded.avif_file).unwrap();
 /// ```
 #[cfg(feature = "encode")]
-pub fn encode(image: &PixelData) -> Result<EncodedImage> {
+pub fn encode(image: &PixelBuffer) -> Result<EncodedImage> {
     encode_with(image, &EncoderConfig::default(), &Unstoppable)
 }
 
 /// Encode a decoded image to AVIF with custom settings and cancellation
 ///
-/// Supports Rgb8, Rgba8, Rgb16, and Rgba16 variants. Returns
+/// Supports Rgb8, Rgba8, Rgb16, and Rgba16 pixel formats. Returns
 /// [`Error::Unsupported`] for grayscale inputs.
 #[cfg(feature = "encode")]
 pub fn encode_with(
-    image: &PixelData,
+    image: &PixelBuffer,
     config: &EncoderConfig,
     stop: &(impl Stop + ?Sized),
 ) -> Result<EncodedImage> {
-    match image {
-        PixelData::Rgb8(img) => encode_rgb8(img.as_ref(), config, stop),
-        PixelData::Rgba8(img) => encode_rgba8(img.as_ref(), config, stop),
-        PixelData::Rgb16(img) => encode_rgb16(img.as_ref(), config, stop),
-        PixelData::Rgba16(img) => encode_rgba16(img.as_ref(), config, stop),
-        _ => Err(whereat::at(Error::Unsupported(
+    use zencodec_types::PixelDescriptor;
+
+    let desc = image.descriptor();
+    if desc.layout_compatible(&PixelDescriptor::RGB8) {
+        let img = image.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
+        encode_rgb8(img, config, stop)
+    } else if desc.layout_compatible(&PixelDescriptor::RGBA8) {
+        let img = image.try_as_imgref::<rgb::Rgba<u8>>().unwrap();
+        encode_rgba8(img, config, stop)
+    } else if desc.layout_compatible(&PixelDescriptor::RGB16) {
+        let img = image.try_as_imgref::<rgb::Rgb<u16>>().unwrap();
+        encode_rgb16(img, config, stop)
+    } else if desc.layout_compatible(&PixelDescriptor::RGBA16) {
+        let img = image.try_as_imgref::<rgb::Rgba<u16>>().unwrap();
+        encode_rgba16(img, config, stop)
+    } else {
+        Err(whereat::at(Error::Unsupported(
             "only RGB/RGBA 8/16-bit encoding is supported",
-        ))),
+        )))
     }
 }

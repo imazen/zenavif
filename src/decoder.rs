@@ -9,8 +9,7 @@ use crate::image::{
     TransferCharacteristics,
 };
 use enough::Stop;
-use imgref::ImgVec;
-use zencodec_types::PixelData;
+use zencodec_types::PixelBuffer;
 
 // Conditionally import from rav1d or rav1d-safe based on feature
 #[cfg(feature = "unsafe-asm")]
@@ -589,7 +588,7 @@ impl AvifDecoder {
     }
 
     /// Decode the AVIF image
-    pub fn decode(&mut self, stop: &(impl Stop + ?Sized)) -> Result<PixelData> {
+    pub fn decode(&mut self, stop: &(impl Stop + ?Sized)) -> Result<PixelBuffer> {
         // Check for cancellation before starting decode
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
@@ -737,7 +736,7 @@ impl AvifDecoder {
         range: Range,
         matrix: yuv::color::MatrixCoefficients,
         has_alpha: bool,
-    ) -> Result<PixelData> {
+    ) -> Result<PixelBuffer> {
         let mc = if matrix == yuv::color::MatrixCoefficients::BT601 {
             yuv::color::MatrixCoefficients::Identity
         } else {
@@ -757,7 +756,8 @@ impl AvifDecoder {
                     out.push(Rgba::new(g, g, g, 0));
                 }
             }
-            Ok(PixelData::Rgba8(ImgVec::new(out, width, height)))
+            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
+                .expect("size verified").into())
         } else {
             let mut out = Vec::with_capacity(width * height);
             for row in planes.y_rows() {
@@ -765,7 +765,8 @@ impl AvifDecoder {
                     out.push(rgb::Gray::new(conv.to_luma(y)));
                 }
             }
-            Ok(PixelData::Gray8(ImgVec::new(out, width, height)))
+            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
+                .expect("size verified").into())
         }
     }
 
@@ -776,7 +777,7 @@ impl AvifDecoder {
         matrix: yuv::color::MatrixCoefficients,
         depth: Depth,
         has_alpha: bool,
-    ) -> Result<PixelData> {
+    ) -> Result<PixelBuffer> {
         let mc = if matrix == yuv::color::MatrixCoefficients::BT601 {
             yuv::color::MatrixCoefficients::Identity
         } else {
@@ -797,7 +798,8 @@ impl AvifDecoder {
                     out.push(Rgba::new(g, g, g, 0));
                 }
             }
-            Ok(PixelData::Rgba16(ImgVec::new(out, width, height)))
+            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
+                .expect("size verified").into())
         } else {
             let mut out = Vec::with_capacity(width * height);
             for row in planes.y_rows() {
@@ -805,7 +807,8 @@ impl AvifDecoder {
                     out.push(rgb::Gray::new(conv.to_luma(y)));
                 }
             }
-            Ok(PixelData::Gray16(ImgVec::new(out, width, height)))
+            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
+                .expect("size verified").into())
         }
     }
 
@@ -815,7 +818,7 @@ impl AvifDecoder {
         range: Range,
         matrix: yuv::color::MatrixCoefficients,
         has_alpha: bool,
-    ) -> Result<PixelData> {
+    ) -> Result<PixelBuffer> {
         let conv =
             RGBConvert::<u8>::new(range, matrix).map_err(|e| at(Error::ColorConversion(e)))?;
 
@@ -838,11 +841,13 @@ impl AvifDecoder {
         if has_alpha {
             let mut out = Vec::with_capacity(width * height);
             out.extend(px_iter.map(|px| conv.to_rgb(px).with_alpha(0)));
-            Ok(PixelData::Rgba8(ImgVec::new(out, width, height)))
+            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
+                .expect("size verified").into())
         } else {
             let mut out = Vec::with_capacity(width * height);
             out.extend(px_iter.map(|px| conv.to_rgb(px)));
-            Ok(PixelData::Rgb8(ImgVec::new(out, width, height)))
+            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
+                .expect("size verified").into())
         }
     }
 
@@ -853,7 +858,7 @@ impl AvifDecoder {
         matrix: yuv::color::MatrixCoefficients,
         depth: Depth,
         has_alpha: bool,
-    ) -> Result<PixelData> {
+    ) -> Result<PixelBuffer> {
         let conv = RGBConvert::<u16>::new(range, matrix, depth)
             .map_err(|e| at(Error::ColorConversion(e)))?;
 
@@ -876,11 +881,13 @@ impl AvifDecoder {
         if has_alpha {
             let mut out = Vec::with_capacity(width * height);
             out.extend(px_iter.map(|px| conv.to_rgb(px).with_alpha(0)));
-            Ok(PixelData::Rgba16(ImgVec::new(out, width, height)))
+            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
+                .expect("size verified").into())
         } else {
             let mut out = Vec::with_capacity(width * height);
             out.extend(px_iter.map(|px| conv.to_rgb(px)));
-            Ok(PixelData::Rgb16(ImgVec::new(out, width, height)))
+            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
+                .expect("size verified").into())
         }
     }
 }

@@ -5,7 +5,7 @@ use crate::image::ColorRange;
 use rgb::prelude::*;
 use rgb::{Rgb, Rgba};
 use whereat::at;
-use zencodec_types::PixelData;
+use zencodec_types::{PixelBuffer, PixelDescriptor};
 
 /// Scale a limited-range Y value to full range (8-bit)
 #[inline]
@@ -42,35 +42,34 @@ fn scale_to_u16(v: u16, bit_depth: u8) -> u16 {
     (v << shift) | (v >> (bit_depth - shift))
 }
 
-/// Scale all channels in a 16-bit PixelData from native bit depth to full u16 range.
+/// Scale all channels in a 16-bit PixelBuffer from native bit depth to full u16 range.
 ///
 /// This converts e.g. 10-bit values (0–1023) to full 16-bit (0–65535) using
 /// LSB replication for exact endpoint mapping.
-pub fn scale_pixels_to_u16(image: &mut PixelData, bit_depth: u8) {
+pub fn scale_pixels_to_u16(image: &mut PixelBuffer, bit_depth: u8) {
     if bit_depth >= 16 {
         return;
     }
-    match image {
-        PixelData::Rgb16(img) => {
-            for px in img.buf_mut().iter_mut() {
-                *px = Rgb {
-                    r: scale_to_u16(px.r, bit_depth),
-                    g: scale_to_u16(px.g, bit_depth),
-                    b: scale_to_u16(px.b, bit_depth),
-                };
-            }
+    let desc = image.descriptor();
+    if desc.layout_compatible(&PixelDescriptor::RGB16) {
+        let mut img = image.try_as_imgref_mut::<Rgb<u16>>().unwrap();
+        for px in img.buf_mut().iter_mut() {
+            *px = Rgb {
+                r: scale_to_u16(px.r, bit_depth),
+                g: scale_to_u16(px.g, bit_depth),
+                b: scale_to_u16(px.b, bit_depth),
+            };
         }
-        PixelData::Rgba16(img) => {
-            for px in img.buf_mut().iter_mut() {
-                *px = Rgba {
-                    r: scale_to_u16(px.r, bit_depth),
-                    g: scale_to_u16(px.g, bit_depth),
-                    b: scale_to_u16(px.b, bit_depth),
-                    a: scale_to_u16(px.a, bit_depth),
-                };
-            }
+    } else if desc.layout_compatible(&PixelDescriptor::RGBA16) {
+        let mut img = image.try_as_imgref_mut::<Rgba<u16>>().unwrap();
+        for px in img.buf_mut().iter_mut() {
+            *px = Rgba {
+                r: scale_to_u16(px.r, bit_depth),
+                g: scale_to_u16(px.g, bit_depth),
+                b: scale_to_u16(px.b, bit_depth),
+                a: scale_to_u16(px.a, bit_depth),
+            };
         }
-        _ => {}
     }
 }
 
@@ -95,38 +94,35 @@ pub fn scale_from_u16(v: u16, bit_depth: u8) -> u16 {
 
 /// Add 8-bit alpha channel to an image from Y plane data
 pub fn add_alpha8<'a>(
-    img: &mut PixelData,
+    buf: &mut PixelBuffer,
     alpha_rows: impl Iterator<Item = &'a [u8]>,
     width: usize,
     height: usize,
     alpha_range: ColorRange,
     premultiplied: bool,
 ) -> Result<()> {
-    match img {
-        PixelData::Rgba8(img) => {
-            if img.width() != width || img.height() != height {
-                return Err(at(Error::Unsupported("alpha size mismatch")));
-            }
+    let mut img = buf.try_as_imgref_mut::<Rgba<u8>>().ok_or_else(|| {
+        at(Error::Unsupported(
+            "cannot add 8-bit alpha to this image type",
+        ))
+    })?;
 
-            for (alpha_row, img_row) in alpha_rows.zip(img.rows_mut()) {
-                if alpha_row.len() < img_row.len() {
-                    return Err(at(Error::Unsupported("alpha width mismatch")));
-                }
-                for (&y, px) in alpha_row.iter().zip(img_row.iter_mut()) {
-                    px.a = match alpha_range {
-                        ColorRange::Full => y,
-                        ColorRange::Limited => limited_to_full_8(y),
-                    };
-                }
-                if premultiplied {
-                    unpremultiply8(img_row);
-                }
-            }
+    if img.width() != width || img.height() != height {
+        return Err(at(Error::Unsupported("alpha size mismatch")));
+    }
+
+    for (alpha_row, img_row) in alpha_rows.zip(img.rows_mut()) {
+        if alpha_row.len() < img_row.len() {
+            return Err(at(Error::Unsupported("alpha width mismatch")));
         }
-        _ => {
-            return Err(at(Error::Unsupported(
-                "cannot add 8-bit alpha to this image type",
-            )));
+        for (&y, px) in alpha_row.iter().zip(img_row.iter_mut()) {
+            px.a = match alpha_range {
+                ColorRange::Full => y,
+                ColorRange::Limited => limited_to_full_8(y),
+            };
+        }
+        if premultiplied {
+            unpremultiply8(img_row);
         }
     }
 
@@ -139,7 +135,7 @@ pub fn add_alpha8<'a>(
 /// 10-bit). They are range-converted (limited→full if needed) and then scaled
 /// to full u16 (0–65535) to match the already-scaled RGB channels.
 pub fn add_alpha16<'a>(
-    img: &mut PixelData,
+    buf: &mut PixelBuffer,
     alpha_rows: impl Iterator<Item = &'a [u16]>,
     width: usize,
     height: usize,
@@ -147,33 +143,30 @@ pub fn add_alpha16<'a>(
     bit_depth: u8,
     premultiplied: bool,
 ) -> Result<()> {
-    match img {
-        PixelData::Rgba16(img) => {
-            if img.width() != width || img.height() != height {
-                return Err(at(Error::Unsupported("alpha size mismatch")));
-            }
+    let mut img = buf.try_as_imgref_mut::<Rgba<u16>>().ok_or_else(|| {
+        at(Error::Unsupported(
+            "cannot add 16-bit alpha to this image type",
+        ))
+    })?;
 
-            for (alpha_row, img_row) in alpha_rows.zip(img.rows_mut()) {
-                if alpha_row.len() < img_row.len() {
-                    return Err(at(Error::Unsupported("alpha width mismatch")));
-                }
-                for (&y, px) in alpha_row.iter().zip(img_row.iter_mut()) {
-                    let a = match alpha_range {
-                        ColorRange::Full => y,
-                        ColorRange::Limited => limited_to_full_16(y, bit_depth),
-                    };
-                    // Scale from native bit depth to full u16
-                    px.a = scale_to_u16(a, bit_depth);
-                }
-                if premultiplied {
-                    unpremultiply16(img_row);
-                }
-            }
+    if img.width() != width || img.height() != height {
+        return Err(at(Error::Unsupported("alpha size mismatch")));
+    }
+
+    for (alpha_row, img_row) in alpha_rows.zip(img.rows_mut()) {
+        if alpha_row.len() < img_row.len() {
+            return Err(at(Error::Unsupported("alpha width mismatch")));
         }
-        _ => {
-            return Err(at(Error::Unsupported(
-                "cannot add 16-bit alpha to this image type",
-            )));
+        for (&y, px) in alpha_row.iter().zip(img_row.iter_mut()) {
+            let a = match alpha_range {
+                ColorRange::Full => y,
+                ColorRange::Limited => limited_to_full_16(y, bit_depth),
+            };
+            // Scale from native bit depth to full u16
+            px.a = scale_to_u16(a, bit_depth);
+        }
+        if premultiplied {
+            unpremultiply16(img_row);
         }
     }
 
