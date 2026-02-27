@@ -26,7 +26,7 @@ use zencodec_types::MetadataView;
 #[cfg(feature = "encode")]
 use zencodec_types::PixelSlice;
 use zencodec_types::{
-    ChannelType, DecodeFrame, DecodeOutput, ImageFormat, ImageInfo, PixelData, PixelDescriptor,
+    ChannelType, DecodeFrame, DecodeOutput, ImageFormat, ImageInfo, PixelBuffer, PixelDescriptor,
     ResourceLimits, Stop,
 };
 
@@ -661,11 +661,12 @@ impl AvifDecoderConfig {
     ) -> Result<ImageInfo, Error> {
         let output = self.decode(data)?;
         let info = output.info().clone();
-        let src = to_rgb8(output.into_pixels());
-        let w = dst.width().min(src.width());
-        let h = dst.height().min(src.height());
+        let src = output.into_pixels().to_rgb8();
+        let src_ref = src.as_imgref();
+        let w = dst.width().min(src_ref.width());
+        let h = dst.height().min(src_ref.height());
         for y in 0..h {
-            let src_row = src.as_ref().rows().nth(y).unwrap();
+            let src_row = src_ref.rows().nth(y).unwrap();
             let dst_row = &mut dst.rows_mut().nth(y).unwrap()[..w];
             dst_row.copy_from_slice(&src_row[..w]);
         }
@@ -680,11 +681,12 @@ impl AvifDecoderConfig {
     ) -> Result<ImageInfo, Error> {
         let output = self.decode(data)?;
         let info = output.info().clone();
-        let src = to_rgba8(output.into_pixels());
-        let w = dst.width().min(src.width());
-        let h = dst.height().min(src.height());
+        let src = output.into_pixels().to_rgba8();
+        let src_ref = src.as_imgref();
+        let w = dst.width().min(src_ref.width());
+        let h = dst.height().min(src_ref.height());
         for y in 0..h {
-            let src_row = src.as_ref().rows().nth(y).unwrap();
+            let src_row = src_ref.rows().nth(y).unwrap();
             let dst_row = &mut dst.rows_mut().nth(y).unwrap()[..w];
             dst_row.copy_from_slice(&src_row[..w]);
         }
@@ -700,11 +702,12 @@ impl AvifDecoderConfig {
         use linear_srgb::default::srgb_u8_to_linear;
         let output = self.decode(data)?;
         let info = output.info().clone();
-        let src = to_rgb8(output.into_pixels());
-        let w = dst.width().min(src.width());
-        let h = dst.height().min(src.height());
+        let src = output.into_pixels().to_rgb8();
+        let src_ref = src.as_imgref();
+        let w = dst.width().min(src_ref.width());
+        let h = dst.height().min(src_ref.height());
         for y in 0..h {
-            let src_row = src.as_ref().rows().nth(y).unwrap();
+            let src_row = src_ref.rows().nth(y).unwrap();
             let dst_row = &mut dst.rows_mut().nth(y).unwrap()[..w];
             for (i, px) in src_row[..w].iter().enumerate() {
                 dst_row[i] = Rgb {
@@ -726,11 +729,12 @@ impl AvifDecoderConfig {
         use linear_srgb::default::srgb_u8_to_linear;
         let output = self.decode(data)?;
         let info = output.info().clone();
-        let src = to_rgba8(output.into_pixels());
-        let w = dst.width().min(src.width());
-        let h = dst.height().min(src.height());
+        let src = output.into_pixels().to_rgba8();
+        let src_ref = src.as_imgref();
+        let w = dst.width().min(src_ref.width());
+        let h = dst.height().min(src_ref.height());
         for y in 0..h {
-            let src_row = src.as_ref().rows().nth(y).unwrap();
+            let src_row = src_ref.rows().nth(y).unwrap();
             let dst_row = &mut dst.rows_mut().nth(y).unwrap()[..w];
             for (i, px) in src_row[..w].iter().enumerate() {
                 dst_row[i] = Rgba {
@@ -753,11 +757,12 @@ impl AvifDecoderConfig {
         use linear_srgb::default::srgb_u8_to_linear;
         let output = self.decode(data)?;
         let info = output.info().clone();
-        let src = to_rgb8(output.into_pixels());
-        let w = dst.width().min(src.width());
-        let h = dst.height().min(src.height());
+        let src = output.into_pixels().to_rgb8();
+        let src_ref = src.as_imgref();
+        let w = dst.width().min(src_ref.width());
+        let h = dst.height().min(src_ref.height());
         for y in 0..h {
-            let src_row = src.as_ref().rows().nth(y).unwrap();
+            let src_row = src_ref.rows().nth(y).unwrap();
             let dst_row = &mut dst.rows_mut().nth(y).unwrap()[..w];
             for (i, px) in src_row[..w].iter().enumerate() {
                 let r = srgb_u8_to_linear(px.r);
@@ -886,9 +891,10 @@ impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
 
         // Eagerly decode all frames using the stop token
         let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
-        let mut frames = Vec::new();
+        let mut frames: Vec<(PixelBuffer, u32)> = Vec::new();
         while let Some(frame) = anim_dec.next_frame(stop).map_err(|e| e.into_inner())? {
-            frames.push((frame.pixels, frame.duration_ms));
+            let buf: PixelBuffer = frame.pixels.into();
+            frames.push((buf, frame.duration_ms));
         }
 
         // Build base info from probed metadata, override dimensions from decoded frame
@@ -997,125 +1003,15 @@ fn convert_native_info(native: &crate::image::ImageInfo) -> ImageInfo {
 
 // ── Pixel conversion helpers ────────────────────────────────────────────────
 
-/// Convert a 16-bit channel value to 8-bit.
-fn u16_to_u8(v: u16) -> u8 {
-    ((v as u32 * 255 + 32768) / 65535) as u8
-}
+// Pixel conversion helpers removed — PixelBuffer's to_rgb8()/to_rgba8() handle all formats.
 
-/// Convert AVIF-native pixel data to RGB8.
-///
-/// Handles Rgb8, Rgba8 (drop alpha), Rgb16 (downscale), Rgba16 (downscale + drop alpha).
-fn to_rgb8(pixels: PixelData) -> imgref::ImgVec<Rgb<u8>> {
-    match pixels {
-        PixelData::Rgb8(img) => img,
-        PixelData::Rgba8(img) => {
-            let w = img.width();
-            let h = img.height();
-            let buf: Vec<Rgb<u8>> = img
-                .into_buf()
-                .into_iter()
-                .map(|p| Rgb {
-                    r: p.r,
-                    g: p.g,
-                    b: p.b,
-                })
-                .collect();
-            imgref::ImgVec::new(buf, w, h)
-        }
-        PixelData::Rgb16(img) => {
-            let w = img.width();
-            let h = img.height();
-            let buf: Vec<Rgb<u8>> = img
-                .into_buf()
-                .into_iter()
-                .map(|p| Rgb {
-                    r: u16_to_u8(p.r),
-                    g: u16_to_u8(p.g),
-                    b: u16_to_u8(p.b),
-                })
-                .collect();
-            imgref::ImgVec::new(buf, w, h)
-        }
-        PixelData::Rgba16(img) => {
-            let w = img.width();
-            let h = img.height();
-            let buf: Vec<Rgb<u8>> = img
-                .into_buf()
-                .into_iter()
-                .map(|p| Rgb {
-                    r: u16_to_u8(p.r),
-                    g: u16_to_u8(p.g),
-                    b: u16_to_u8(p.b),
-                })
-                .collect();
-            imgref::ImgVec::new(buf, w, h)
-        }
-        other => unreachable!("AVIF decoder produced unexpected format: {other:?}"),
-    }
-}
-
-/// Convert AVIF-native pixel data to RGBA8.
-///
-/// Handles Rgba8, Rgb8 (add opaque alpha), Rgb16, Rgba16 (downscale).
-fn to_rgba8(pixels: PixelData) -> imgref::ImgVec<Rgba<u8>> {
-    match pixels {
-        PixelData::Rgba8(img) => img,
-        PixelData::Rgb8(img) => {
-            let w = img.width();
-            let h = img.height();
-            let buf: Vec<Rgba<u8>> = img
-                .into_buf()
-                .into_iter()
-                .map(|p| Rgba {
-                    r: p.r,
-                    g: p.g,
-                    b: p.b,
-                    a: 255,
-                })
-                .collect();
-            imgref::ImgVec::new(buf, w, h)
-        }
-        PixelData::Rgba16(img) => {
-            let w = img.width();
-            let h = img.height();
-            let buf: Vec<Rgba<u8>> = img
-                .into_buf()
-                .into_iter()
-                .map(|p| Rgba {
-                    r: u16_to_u8(p.r),
-                    g: u16_to_u8(p.g),
-                    b: u16_to_u8(p.b),
-                    a: u16_to_u8(p.a),
-                })
-                .collect();
-            imgref::ImgVec::new(buf, w, h)
-        }
-        PixelData::Rgb16(img) => {
-            let w = img.width();
-            let h = img.height();
-            let buf: Vec<Rgba<u8>> = img
-                .into_buf()
-                .into_iter()
-                .map(|p| Rgba {
-                    r: u16_to_u8(p.r),
-                    g: u16_to_u8(p.g),
-                    b: u16_to_u8(p.b),
-                    a: 255,
-                })
-                .collect();
-            imgref::ImgVec::new(buf, w, h)
-        }
-        other => unreachable!("AVIF decoder produced unexpected format: {other:?}"),
-    }
-}
-
-/// Apply preferred format negotiation to native decoder output.
+/// Apply preferred format negotiation to decoder output.
 ///
 /// If `preferred` is empty, returns `pixels` unchanged (native format).
 /// If `preferred` is non-empty, finds the first descriptor we can satisfy:
 /// - Same or lower bit depth: downconvert (caller explicitly asked for it)
 /// - Higher bit depth than native: skip (can't upscale losslessly)
-fn negotiate_format(pixels: PixelData, preferred: &[PixelDescriptor]) -> PixelData {
+fn negotiate_format(pixels: PixelBuffer, preferred: &[PixelDescriptor]) -> PixelBuffer {
     if preferred.is_empty() {
         return pixels;
     }
@@ -1137,26 +1033,22 @@ fn negotiate_format(pixels: PixelData, preferred: &[PixelDescriptor]) -> PixelDa
         // If caller wants 8-bit and we have 16-bit, downconvert.
         if pref.channel_type == ChannelType::U8 && native.channel_type == ChannelType::U16 {
             if pref.layout.has_alpha() {
-                return PixelData::Rgba8(pixels.to_rgba8());
+                return pixels.to_rgba8().into();
             }
-            return PixelData::Rgb8(pixels.to_rgb8());
+            return pixels.to_rgb8().into();
         }
 
         // Same bit depth but different layout (e.g., RGB vs RGBA).
         if pref.channel_type == native.channel_type {
             if pref.layout.has_alpha() && !native.layout.has_alpha() {
-                // Adding alpha = not lossless from source perspective, but acceptable
-                // (alpha=255 is the convention)
                 if native.channel_type == ChannelType::U8 {
-                    return PixelData::Rgba8(pixels.to_rgba8());
+                    return pixels.to_rgba8().into();
                 }
-                // For 16-bit, to_rgba8 loses precision — skip if we can't match
                 continue;
             }
             if !pref.layout.has_alpha() && native.layout.has_alpha() {
-                // Dropping alpha is lossy, but caller asked for it
                 if native.channel_type == ChannelType::U8 {
-                    return PixelData::Rgb8(pixels.to_rgb8());
+                    return pixels.to_rgb8().into();
                 }
                 continue;
             }
@@ -1182,7 +1074,8 @@ impl zencodec_types::Decode for AvifDecoder<'_> {
         let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
         let mut decoder =
             crate::ManagedAvifDecoder::new(data, &self.config).map_err(|e| e.into_inner())?;
-        let (pixels, native_info) = decoder.decode_full(stop).map_err(|e| e.into_inner())?;
+        let (pixel_data, native_info) = decoder.decode_full(stop).map_err(|e| e.into_inner())?;
+        let pixels: PixelBuffer = pixel_data.into();
         let pixels = negotiate_format(pixels, preferred);
         let info = convert_native_info(&native_info);
         Ok(DecodeOutput::new(pixels, info))
@@ -1196,7 +1089,7 @@ impl zencodec_types::Decode for AvifDecoder<'_> {
 /// Pre-decodes all frames eagerly since `AnimationDecoder` requires
 /// a stop token per-frame that can't be stored across calls.
 pub struct AvifFrameDecoder {
-    frames: Vec<(PixelData, u32)>,
+    frames: Vec<(PixelBuffer, u32)>,
     index: usize,
     info: Arc<ImageInfo>,
     total_frames: u32,
