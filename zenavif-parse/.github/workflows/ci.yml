@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-2025]
+        os: [ubuntu-latest, windows-latest]
 
     steps:
       - uses: actions/checkout@v6
@@ -50,7 +50,7 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-24.04-arm, name: Linux }
-          - { os: macos-15, name: macOS }
+          - { os: macos-latest, name: macOS }
           - { os: windows-11-arm, name: Windows }
 
     steps:
