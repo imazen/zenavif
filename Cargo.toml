@@ -60,4 +60,6 @@ encode-asm = ["encode", "ravif/asm"]
 encode-threading = ["encode", "ravif/threading"]
 # Encoding with imazen/zenrav1e fork features (QM, VAQ, still-image tuning, lossless)
 encode-imazen = ["encode", "ravif/imazen"]
+# Enable zencodec-types trait integration (broken pending trait update)
+zencodec = []
 

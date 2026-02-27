@@ -69,6 +69,7 @@ pub mod yuv_convert_libyuv;
 pub mod yuv_convert_libyuv_autovec;
 #[cfg(target_arch = "x86_64")]
 pub mod yuv_convert_libyuv_simd;
+#[cfg(feature = "zencodec")]
 mod zencodec;
 
 pub use config::DecoderConfig;
@@ -89,10 +90,11 @@ pub use image::{
     DecodedAnimationInfo, DecodedFrame, ImageInfo, ImageMirror, ImageRotation,
     MasteringDisplayColourVolume, MatrixCoefficients, PixelAspectRatio, TransferCharacteristics,
 };
+#[cfg(feature = "zencodec")]
 pub use zencodec::{
     AvifDecodeJob, AvifDecoder as AvifZenDecoder, AvifDecoderConfig, AvifFrameDecoder,
 };
-#[cfg(feature = "encode")]
+#[cfg(all(feature = "zencodec", feature = "encode"))]
 pub use zencodec::{AvifEncodeJob, AvifEncoder, AvifEncoderConfig, AvifFrameEncoder};
 pub use zencodec_types::PixelData;
 
