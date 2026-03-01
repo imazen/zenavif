@@ -757,7 +757,8 @@ impl AvifDecoder {
                 }
             }
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .expect("size verified").into())
+                .expect("size verified")
+                .into())
         } else {
             let mut out = Vec::with_capacity(width * height);
             for row in planes.y_rows() {
@@ -766,7 +767,8 @@ impl AvifDecoder {
                 }
             }
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .expect("size verified").into())
+                .expect("size verified")
+                .into())
         }
     }
 
@@ -799,7 +801,8 @@ impl AvifDecoder {
                 }
             }
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .expect("size verified").into())
+                .expect("size verified")
+                .into())
         } else {
             let mut out = Vec::with_capacity(width * height);
             for row in planes.y_rows() {
@@ -808,7 +811,8 @@ impl AvifDecoder {
                 }
             }
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .expect("size verified").into())
+                .expect("size verified")
+                .into())
         }
     }
 
@@ -842,12 +846,14 @@ impl AvifDecoder {
             let mut out = Vec::with_capacity(width * height);
             out.extend(px_iter.map(|px| conv.to_rgb(px).with_alpha(0)));
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .expect("size verified").into())
+                .expect("size verified")
+                .into())
         } else {
             let mut out = Vec::with_capacity(width * height);
             out.extend(px_iter.map(|px| conv.to_rgb(px)));
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .expect("size verified").into())
+                .expect("size verified")
+                .into())
         }
     }
 
@@ -882,12 +888,14 @@ impl AvifDecoder {
             let mut out = Vec::with_capacity(width * height);
             out.extend(px_iter.map(|px| conv.to_rgb(px).with_alpha(0)));
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .expect("size verified").into())
+                .expect("size verified")
+                .into())
         } else {
             let mut out = Vec::with_capacity(width * height);
             out.extend(px_iter.map(|px| conv.to_rgb(px)));
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .expect("size verified").into())
+                .expect("size verified")
+                .into())
         }
     }
 }

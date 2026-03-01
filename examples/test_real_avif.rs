@@ -1,8 +1,8 @@
 //! Test decoder with real AVIF file
 
 use std::fs;
-use zencodec_types::PixelDescriptor;
 use zenavif::decode;
+use zencodec_types::PixelDescriptor;
 
 fn main() {
     let test_file = "tests/vectors/libavif/kodim03_yuv420_8bpc.avif";

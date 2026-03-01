@@ -590,7 +590,10 @@ fn animation_encode_decode_roundtrip_rgba16() {
     for (i, frame) in decoded.frames.iter().enumerate() {
         assert!(frame.pixels.has_alpha(), "frame {i} should have alpha");
 
-        let is_rgba16 = frame.pixels.descriptor().layout_compatible(&zencodec_types::PixelDescriptor::RGBA16);
+        let is_rgba16 = frame
+            .pixels
+            .descriptor()
+            .layout_compatible(&zencodec_types::PixelDescriptor::RGBA16);
         assert!(is_rgba16, "frame {i} should be RGBA16 for 10-bit source");
     }
 }

@@ -2,8 +2,8 @@
 
 use std::fs::File;
 use std::io::BufWriter;
-use zencodec_types::PixelDescriptor;
 use zenavif::decode;
+use zencodec_types::PixelDescriptor;
 
 fn main() {
     // Read input file

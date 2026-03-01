@@ -65,13 +65,21 @@ fn test_decode_all_vectors() {
                 match result {
                     Ok(Ok(image)) => {
                         let desc = image.descriptor();
-                        let fmt = if desc.layout_compatible(&PixelDescriptor::RGB8) { "RGB8" }
-                            else if desc.layout_compatible(&PixelDescriptor::RGBA8) { "RGBA8" }
-                            else if desc.layout_compatible(&PixelDescriptor::RGB16) { "RGB16" }
-                            else if desc.layout_compatible(&PixelDescriptor::RGBA16) { "RGBA16" }
-                            else if desc.layout_compatible(&PixelDescriptor::GRAY8) { "GRAY8" }
-                            else if desc.layout_compatible(&PixelDescriptor::GRAY16) { "GRAY16" }
-                            else { "OTHER" };
+                        let fmt = if desc.layout_compatible(&PixelDescriptor::RGB8) {
+                            "RGB8"
+                        } else if desc.layout_compatible(&PixelDescriptor::RGBA8) {
+                            "RGBA8"
+                        } else if desc.layout_compatible(&PixelDescriptor::RGB16) {
+                            "RGB16"
+                        } else if desc.layout_compatible(&PixelDescriptor::RGBA16) {
+                            "RGBA16"
+                        } else if desc.layout_compatible(&PixelDescriptor::GRAY8) {
+                            "GRAY8"
+                        } else if desc.layout_compatible(&PixelDescriptor::GRAY16) {
+                            "GRAY16"
+                        } else {
+                            "OTHER"
+                        };
                         let info = format!("{:6} {}x{}", fmt, image.width(), image.height());
                         eprintln!("✓ {}", info);
                         passed += 1;

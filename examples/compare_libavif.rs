@@ -161,36 +161,37 @@ fn run_comparison(
         };
 
         let desc = img.descriptor();
-        let (z_width, z_height, z_rgb) = if desc.layout_compatible(&zencodec_types::PixelDescriptor::RGB8) {
-            let buf = img.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
-            let w = buf.width() as u32;
-            let h = buf.height() as u32;
-            let mut rgb = Vec::with_capacity((w * h * 3) as usize);
-            for row in buf.rows() {
-                for px in row {
-                    rgb.push(px.r);
-                    rgb.push(px.g);
-                    rgb.push(px.b);
+        let (z_width, z_height, z_rgb) =
+            if desc.layout_compatible(&zencodec_types::PixelDescriptor::RGB8) {
+                let buf = img.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
+                let w = buf.width() as u32;
+                let h = buf.height() as u32;
+                let mut rgb = Vec::with_capacity((w * h * 3) as usize);
+                for row in buf.rows() {
+                    for px in row {
+                        rgb.push(px.r);
+                        rgb.push(px.g);
+                        rgb.push(px.b);
+                    }
                 }
-            }
-            (w, h, rgb)
-        } else if desc.layout_compatible(&zencodec_types::PixelDescriptor::RGBA8) {
-            let buf = img.try_as_imgref::<rgb::Rgba<u8>>().unwrap();
-            let w = buf.width() as u32;
-            let h = buf.height() as u32;
-            let mut rgb = Vec::with_capacity((w * h * 3) as usize);
-            for row in buf.rows() {
-                for px in row {
-                    rgb.push(px.r);
-                    rgb.push(px.g);
-                    rgb.push(px.b);
+                (w, h, rgb)
+            } else if desc.layout_compatible(&zencodec_types::PixelDescriptor::RGBA8) {
+                let buf = img.try_as_imgref::<rgb::Rgba<u8>>().unwrap();
+                let w = buf.width() as u32;
+                let h = buf.height() as u32;
+                let mut rgb = Vec::with_capacity((w * h * 3) as usize);
+                for row in buf.rows() {
+                    for px in row {
+                        rgb.push(px.r);
+                        rgb.push(px.g);
+                        rgb.push(px.b);
+                    }
                 }
-            }
-            (w, h, rgb)
-        } else {
-            stats.libavif_missing += 1;
-            continue;
-        };
+                (w, h, rgb)
+            } else {
+                stats.libavif_missing += 1;
+                continue;
+            };
 
         let ref_img = match image::open(&ref_png) {
             Ok(img) => img,

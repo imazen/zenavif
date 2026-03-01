@@ -568,18 +568,14 @@ impl ManagedAvifDecoder {
         let descriptor = tile_images[0].descriptor();
         let bpp = descriptor.bytes_per_pixel();
         let data = vec![0u8; output_width * output_height * bpp];
-        let mut output = PixelBuffer::from_vec(
-            data,
-            output_width as u32,
-            output_height as u32,
-            descriptor,
-        )
-        .map_err(|_| {
-            at(Error::Decode {
-                code: -1,
-                msg: "failed to create output buffer for grid stitch",
-            })
-        })?;
+        let mut output =
+            PixelBuffer::from_vec(data, output_width as u32, output_height as u32, descriptor)
+                .map_err(|_| {
+                    at(Error::Decode {
+                        code: -1,
+                        msg: "failed to create output buffer for grid stitch",
+                    })
+                })?;
 
         for (tile_idx, tile) in tile_images.iter().enumerate() {
             let row = tile_idx / cols;
@@ -597,8 +593,7 @@ impl ManagedAvifDecoder {
                 let copy_bytes = copy_w * bpp;
                 let dst_row = out_slice.row_mut((dst_y + y) as u32);
                 let dst_start = dst_x * bpp;
-                dst_row[dst_start..dst_start + copy_bytes]
-                    .copy_from_slice(&src[..copy_bytes]);
+                dst_row[dst_start..dst_start + copy_bytes].copy_from_slice(&src[..copy_bytes]);
             }
         }
 
@@ -619,8 +614,7 @@ impl ManagedAvifDecoder {
         for y in 0..height.min(src_h) {
             let src_row = src.row(y as u32);
             let dst_start = y * width * bpp;
-            data[dst_start..dst_start + copy_bytes]
-                .copy_from_slice(&src_row[..copy_bytes]);
+            data[dst_start..dst_start + copy_bytes].copy_from_slice(&src_row[..copy_bytes]);
         }
 
         PixelBuffer::from_vec(data, width as u32, height as u32, descriptor).map_err(|_| {
@@ -782,7 +776,8 @@ impl ManagedAvifDecoder {
                     )
                     .map_err(|e| at(Error::ColorConversion(e)))?;
                     PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
-                        .expect("size verified").into()
+                        .expect("size verified")
+                        .into()
                 } else {
                     let mut out = vec![Rgb { r: 0u8, g: 0, b: 0 }; buffer_pixel_count];
                     let rgb_stride = buffer_width as u32 * 3;
@@ -795,7 +790,8 @@ impl ManagedAvifDecoder {
                     )
                     .map_err(|e| at(Error::ColorConversion(e)))?;
                     PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
-                        .expect("size verified").into()
+                        .expect("size verified")
+                        .into()
                 }
             }
             sampling => {
@@ -883,7 +879,8 @@ impl ManagedAvifDecoder {
                         .collect();
 
                     PixelBuffer::from_pixels(rgba_buf, buffer_width as u32, buffer_height as u32)
-                        .expect("size verified").into()
+                        .expect("size verified")
+                        .into()
                 } else {
                     let our_range = to_our_yuv_range(info.color_range);
                     let our_matrix = to_our_yuv_matrix(info.matrix_coefficients);
@@ -1037,7 +1034,8 @@ impl ManagedAvifDecoder {
                     }
                     .map_err(|e| at(Error::ColorConversion(e)))?;
                     PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
-                        .expect("size verified").into()
+                        .expect("size verified")
+                        .into()
                 } else {
                     let mut out = vec![
                         Rgb {
@@ -1073,7 +1071,8 @@ impl ManagedAvifDecoder {
                     }
                     .map_err(|e| at(Error::ColorConversion(e)))?;
                     PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
-                        .expect("size verified").into()
+                        .expect("size verified")
+                        .into()
                 }
             }
             sampling => {
@@ -1181,7 +1180,8 @@ impl ManagedAvifDecoder {
                     }
                     .map_err(|e| at(Error::ColorConversion(e)))?;
                     PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
-                        .expect("size verified").into()
+                        .expect("size verified")
+                        .into()
                 } else {
                     let mut out = vec![
                         Rgb {
@@ -1260,7 +1260,8 @@ impl ManagedAvifDecoder {
                     }
                     .map_err(|e| at(Error::ColorConversion(e)))?;
                     PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
-                        .expect("size verified").into()
+                        .expect("size verified")
+                        .into()
                 }
             }
         };
