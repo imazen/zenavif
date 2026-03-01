@@ -180,7 +180,7 @@ pub fn unpremultiply8(img_row: &mut [Rgba<u8>]) {
         if px.a != 255 && px.a != 0 {
             *px.rgb_mut() = px
                 .rgb()
-                .map(|c| (c as u16 * 255 / px.a as u16).min(255) as u8);
+                .map(|c| ((c as u16 * 255 + px.a as u16 / 2) / px.a as u16).min(255) as u8);
         }
     }
 }
