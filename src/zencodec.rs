@@ -248,6 +248,9 @@ impl zencodec_types::EncoderConfig for AvifEncoderConfig {
             icc_profile: None,
             xmp: None,
             limits: ResourceLimits::none(),
+            cicp: None,
+            content_light_level: None,
+            mastering_display: None,
         }
     }
 }
@@ -263,6 +266,9 @@ pub struct AvifEncodeJob<'a> {
     icc_profile: Option<&'a [u8]>,
     xmp: Option<&'a [u8]>,
     limits: ResourceLimits,
+    cicp: Option<zencodec_types::Cicp>,
+    content_light_level: Option<zencodec_types::ContentLightLevel>,
+    mastering_display: Option<zencodec_types::MasteringDisplay>,
 }
 
 #[cfg(feature = "encode")]
@@ -296,6 +302,15 @@ impl<'a> zencodec_types::EncodeJob<'a> for AvifEncodeJob<'a> {
         if let Some(xmp) = meta.xmp {
             self.xmp = Some(xmp);
         }
+        if let Some(cicp) = meta.cicp {
+            self.cicp = Some(cicp);
+        }
+        if let Some(cll) = meta.content_light_level {
+            self.content_light_level = Some(cll);
+        }
+        if let Some(mdcv) = meta.mastering_display {
+            self.mastering_display = Some(mdcv);
+        }
         self
     }
 
@@ -305,8 +320,35 @@ impl<'a> zencodec_types::EncodeJob<'a> for AvifEncodeJob<'a> {
     }
 
     fn encoder(self) -> Result<AvifEncoder<'a>, Error> {
+        let mut config = self.config.inner.clone();
+        // Apply CICP color metadata from MetadataView
+        if let Some(cicp) = self.cicp {
+            config = config
+                .color_primaries(cicp.color_primaries)
+                .transfer_characteristics(cicp.transfer_characteristics)
+                .matrix_coefficients(cicp.matrix_coefficients);
+        }
+        // Apply HDR metadata from MetadataView
+        if let Some(cll) = self.content_light_level {
+            config = config.content_light_level(
+                cll.max_content_light_level,
+                cll.max_frame_average_light_level,
+            );
+        }
+        if let Some(mdcv) = self.mastering_display {
+            config = config.mastering_display(crate::MasteringDisplayConfig {
+                primaries: [
+                    (mdcv.primaries[0][0], mdcv.primaries[0][1]),
+                    (mdcv.primaries[1][0], mdcv.primaries[1][1]),
+                    (mdcv.primaries[2][0], mdcv.primaries[2][1]),
+                ],
+                white_point: (mdcv.white_point[0], mdcv.white_point[1]),
+                max_luminance: mdcv.max_luminance,
+                min_luminance: mdcv.min_luminance,
+            });
+        }
         Ok(AvifEncoder {
-            config: self.config.inner.clone(),
+            config,
             stop: self.stop,
             exif: self.exif,
             icc_profile: self.icc_profile,
@@ -874,9 +916,7 @@ impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
         {
             desc = desc.with_transfer(tf);
         }
-        if let Some(p) =
-            zencodec_types::ColorPrimaries::from_cicp(native_info.color_primaries.0)
-        {
+        if let Some(p) = zencodec_types::ColorPrimaries::from_cicp(native_info.color_primaries.0) {
             desc = desc.with_primaries(p);
         }
         Ok(zencodec_types::OutputInfo::full_decode(
@@ -963,9 +1003,7 @@ fn avif_to_orientation(
 /// Set transfer function and color primaries from native CICP on the pixel buffer.
 fn set_cicp_on_pixels(pixels: PixelBuffer, info: &crate::image::ImageInfo) -> PixelBuffer {
     let mut desc = pixels.descriptor();
-    if let Some(tf) =
-        zencodec_types::TransferFunction::from_cicp(info.transfer_characteristics.0)
-    {
+    if let Some(tf) = zencodec_types::TransferFunction::from_cicp(info.transfer_characteristics.0) {
         desc = desc.with_transfer(tf);
     }
     if let Some(p) = zencodec_types::ColorPrimaries::from_cicp(info.color_primaries.0) {

@@ -108,6 +108,12 @@ pub struct EncoderConfig {
     pub(crate) content_light_level: Option<(u16, u16)>,
     /// Mastering display metadata
     pub(crate) mastering_display: Option<MasteringDisplayConfig>,
+    /// CICP color primaries code point (ITU-T H.273)
+    pub(crate) color_primaries: Option<u8>,
+    /// CICP transfer characteristics code point (ITU-T H.273)
+    pub(crate) transfer_characteristics: Option<u8>,
+    /// CICP matrix coefficients code point (ITU-T H.273)
+    pub(crate) matrix_coefficients: Option<u8>,
     /// Enable AV1 quantization matrices (imazen/rav1e fork)
     #[cfg(feature = "encode-imazen")]
     pub(crate) enable_qm: bool,
@@ -142,6 +148,9 @@ impl Default for EncoderConfig {
             mirror: None,
             content_light_level: None,
             mastering_display: None,
+            color_primaries: None,
+            transfer_characteristics: None,
+            matrix_coefficients: None,
             #[cfg(feature = "encode-imazen")]
             enable_qm: true,
             #[cfg(feature = "encode-imazen")]
@@ -257,6 +266,30 @@ impl EncoderConfig {
         self
     }
 
+    /// Set CICP color primaries code point (ITU-T H.273).
+    ///
+    /// Common values: 1 = BT.709/sRGB, 9 = BT.2020, 12 = Display P3.
+    pub fn color_primaries(mut self, cp: u8) -> Self {
+        self.color_primaries = Some(cp);
+        self
+    }
+
+    /// Set CICP transfer characteristics code point (ITU-T H.273).
+    ///
+    /// Common values: 1 = BT.709, 13 = sRGB, 16 = PQ (HDR10), 18 = HLG.
+    pub fn transfer_characteristics(mut self, tc: u8) -> Self {
+        self.transfer_characteristics = Some(tc);
+        self
+    }
+
+    /// Set CICP matrix coefficients code point (ITU-T H.273).
+    ///
+    /// Common values: 0 = Identity/RGB, 1 = BT.709, 6 = BT.601, 9 = BT.2020.
+    pub fn matrix_coefficients(mut self, mc: u8) -> Self {
+        self.matrix_coefficients = Some(mc);
+        self
+    }
+
     /// Enable/disable AV1 quantization matrices (imazen/rav1e fork).
     ///
     /// QM applies frequency-dependent quantization weights for ~10% BD-rate improvement.
@@ -305,6 +338,46 @@ impl EncoderConfig {
         self.with_qm(true)
             .with_vaq(true, 0.5)
             .with_still_image_tuning(true)
+    }
+}
+
+/// Convert a CICP color primaries code point to the ravif enum.
+fn cicp_to_color_primaries(cp: u8) -> ravif::ColorPrimaries {
+    match cp {
+        1 => ravif::ColorPrimaries::BT709,
+        4 => ravif::ColorPrimaries::BT470M,
+        5 => ravif::ColorPrimaries::BT470BG,
+        6 => ravif::ColorPrimaries::BT601,
+        7 => ravif::ColorPrimaries::SMPTE240,
+        8 => ravif::ColorPrimaries::GenericFilm,
+        9 => ravif::ColorPrimaries::BT2020,
+        10 => ravif::ColorPrimaries::XYZ,
+        11 => ravif::ColorPrimaries::SMPTE431,
+        12 => ravif::ColorPrimaries::SMPTE432,
+        22 => ravif::ColorPrimaries::EBU3213,
+        _ => ravif::ColorPrimaries::Unspecified,
+    }
+}
+
+/// Convert a CICP transfer characteristics code point to the ravif enum.
+fn cicp_to_transfer_characteristics(tc: u8) -> ravif::TransferCharacteristics {
+    match tc {
+        1 => ravif::TransferCharacteristics::BT709,
+        4 => ravif::TransferCharacteristics::BT470M,
+        5 => ravif::TransferCharacteristics::BT470BG,
+        6 => ravif::TransferCharacteristics::BT601,
+        7 => ravif::TransferCharacteristics::SMPTE240,
+        8 => ravif::TransferCharacteristics::Linear,
+        9 => ravif::TransferCharacteristics::Log100,
+        10 => ravif::TransferCharacteristics::Log100Sqrt10,
+        11 => ravif::TransferCharacteristics::IEC61966,
+        12 => ravif::TransferCharacteristics::BT1361,
+        13 => ravif::TransferCharacteristics::SRGB,
+        14 => ravif::TransferCharacteristics::BT2020_10Bit,
+        15 => ravif::TransferCharacteristics::BT2020_12Bit,
+        16 => ravif::TransferCharacteristics::SMPTE2084,
+        18 => ravif::TransferCharacteristics::HLG,
+        _ => ravif::TransferCharacteristics::Unspecified,
     }
 }
 
@@ -376,6 +449,12 @@ fn build_ravif_encoder(config: &EncoderConfig) -> ravif::Encoder<'_> {
             max_luminance: md.max_luminance,
             min_luminance: md.min_luminance,
         });
+    }
+    if let Some(cp) = config.color_primaries {
+        enc = enc.with_color_primaries(cicp_to_color_primaries(cp));
+    }
+    if let Some(tc) = config.transfer_characteristics {
+        enc = enc.with_transfer_characteristics(cicp_to_transfer_characteristics(tc));
     }
     #[cfg(feature = "encode-imazen")]
     {
