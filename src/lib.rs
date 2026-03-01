@@ -202,16 +202,16 @@ pub fn encode_with(
     use zencodec_types::PixelDescriptor;
 
     let desc = image.descriptor();
-    if desc.layout_compatible(&PixelDescriptor::RGB8) {
+    if desc.layout_compatible(PixelDescriptor::RGB8) {
         let img = image.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
         encode_rgb8(img, config, stop)
-    } else if desc.layout_compatible(&PixelDescriptor::RGBA8) {
+    } else if desc.layout_compatible(PixelDescriptor::RGBA8) {
         let img = image.try_as_imgref::<rgb::Rgba<u8>>().unwrap();
         encode_rgba8(img, config, stop)
-    } else if desc.layout_compatible(&PixelDescriptor::RGB16) {
+    } else if desc.layout_compatible(PixelDescriptor::RGB16) {
         let img = image.try_as_imgref::<rgb::Rgb<u16>>().unwrap();
         encode_rgb16(img, config, stop)
-    } else if desc.layout_compatible(&PixelDescriptor::RGBA16) {
+    } else if desc.layout_compatible(PixelDescriptor::RGBA16) {
         let img = image.try_as_imgref::<rgb::Rgba<u16>>().unwrap();
         encode_rgba16(img, config, stop)
     } else {

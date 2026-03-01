@@ -1,5 +1,8 @@
 # Feedback Log
 
+## 2026-02-27
+- User requested migration of all 7 example files from PixelData to PixelBuffer API.
+
 ## 2026-02-15
 - User: "by zen* codecs, please?? also make every struct nonexhaustive, and every enum too" — wants all public types in zencodec-types-api marked `#[non_exhaustive]` for forward compatibility.
 - User requested deep research on AVIF/AV1 transfer functions, bit depth, what values are stored in the bitstream, what libavif/image-rs output for u16, PNG 16-bit behavior, and performance implications of linearization.
