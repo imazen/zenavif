@@ -857,11 +857,28 @@ impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
         let decoder =
             crate::ManagedAvifDecoder::new(data, &self.config.inner).map_err(|e| e.into_inner())?;
         let native_info = decoder.probe_info().map_err(|e| e.into_inner())?;
-        let desc = if native_info.has_alpha {
+        let mut desc = if native_info.bit_depth > 8 {
+            if native_info.has_alpha {
+                PixelDescriptor::RGBA16_SRGB
+            } else {
+                PixelDescriptor::RGB16_SRGB
+            }
+        } else if native_info.has_alpha {
             PixelDescriptor::RGBA8_SRGB
         } else {
             PixelDescriptor::RGB8_SRGB
         };
+        // Override TF and primaries from CICP if available.
+        if let Some(tf) =
+            zencodec_types::TransferFunction::from_cicp(native_info.transfer_characteristics.0)
+        {
+            desc = desc.with_transfer(tf);
+        }
+        if let Some(p) =
+            zencodec_types::ColorPrimaries::from_cicp(native_info.color_primaries.0)
+        {
+            desc = desc.with_primaries(p);
+        }
         Ok(zencodec_types::OutputInfo::full_decode(
             native_info.width,
             native_info.height,
@@ -941,6 +958,20 @@ fn avif_to_orientation(
         (Some(1), 270) => Orientation::Transpose,
         _ => Orientation::Normal,
     }
+}
+
+/// Set transfer function and color primaries from native CICP on the pixel buffer.
+fn set_cicp_on_pixels(pixels: PixelBuffer, info: &crate::image::ImageInfo) -> PixelBuffer {
+    let mut desc = pixels.descriptor();
+    if let Some(tf) =
+        zencodec_types::TransferFunction::from_cicp(info.transfer_characteristics.0)
+    {
+        desc = desc.with_transfer(tf);
+    }
+    if let Some(p) = zencodec_types::ColorPrimaries::from_cicp(info.color_primaries.0) {
+        desc = desc.with_primaries(p);
+    }
+    pixels.with_descriptor(desc)
 }
 
 /// Convert zenavif's native `ImageInfo` to `zencodec_types::ImageInfo`.
@@ -1074,6 +1105,9 @@ impl zencodec_types::Decode for AvifDecoder<'_> {
         let mut decoder =
             crate::ManagedAvifDecoder::new(data, &self.config).map_err(|e| e.into_inner())?;
         let (pixels, native_info) = decoder.decode_full(stop).map_err(|e| e.into_inner())?;
+
+        // Set transfer function and primaries from CICP on the pixel descriptor.
+        let pixels = set_cicp_on_pixels(pixels, &native_info);
         let pixels = negotiate_format(pixels, preferred);
         let info = convert_native_info(&native_info);
         Ok(DecodeOutput::new(pixels, info))
