@@ -51,7 +51,7 @@ pub fn scale_pixels_to_u16(image: &mut PixelBuffer, bit_depth: u8) {
         return;
     }
     let desc = image.descriptor();
-    if desc.layout_compatible(&PixelDescriptor::RGB16) {
+    if desc.layout_compatible(PixelDescriptor::RGB16) {
         let mut img = image.try_as_imgref_mut::<Rgb<u16>>().unwrap();
         for px in img.buf_mut().iter_mut() {
             *px = Rgb {
@@ -60,7 +60,7 @@ pub fn scale_pixels_to_u16(image: &mut PixelBuffer, bit_depth: u8) {
                 b: scale_to_u16(px.b, bit_depth),
             };
         }
-    } else if desc.layout_compatible(&PixelDescriptor::RGBA16) {
+    } else if desc.layout_compatible(PixelDescriptor::RGBA16) {
         let mut img = image.try_as_imgref_mut::<Rgba<u16>>().unwrap();
         for px in img.buf_mut().iter_mut() {
             *px = Rgba {
