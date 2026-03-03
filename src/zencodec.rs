@@ -26,8 +26,8 @@ use zencodec_types::MetadataView;
 #[cfg(feature = "encode")]
 use zencodec_types::PixelSlice;
 use zencodec_types::{
-    ChannelType, DecodeFrame, DecodeOutput, ImageFormat, ImageInfo, PixelBuffer, PixelDescriptor,
-    ResourceLimits, Stop,
+    ChannelType, DecodeFrame, DecodeOutput, ImageFormat, ImageInfo, PixelBuffer,
+    PixelBufferConvertExt as _, PixelDescriptor, ResourceLimits, Stop,
 };
 
 use crate::error::Error;
@@ -1099,28 +1099,28 @@ fn negotiate_format(pixels: PixelBuffer, preferred: &[PixelDescriptor]) -> Pixel
     // Find first preferred descriptor we can produce.
     for pref in preferred {
         // Can't upscale bit depth losslessly.
-        if pref.channel_type.byte_size() > native.channel_type.byte_size() {
+        if pref.channel_type().byte_size() > native.channel_type().byte_size() {
             continue;
         }
 
         // If caller wants 8-bit and we have 16-bit, downconvert.
-        if pref.channel_type == ChannelType::U8 && native.channel_type == ChannelType::U16 {
-            if pref.layout.has_alpha() {
+        if pref.channel_type() == ChannelType::U8 && native.channel_type() == ChannelType::U16 {
+            if pref.layout().has_alpha() {
                 return pixels.to_rgba8().into();
             }
             return pixels.to_rgb8().into();
         }
 
         // Same bit depth but different layout (e.g., RGB vs RGBA).
-        if pref.channel_type == native.channel_type {
-            if pref.layout.has_alpha() && !native.layout.has_alpha() {
-                if native.channel_type == ChannelType::U8 {
+        if pref.channel_type() == native.channel_type() {
+            if pref.layout().has_alpha() && !native.layout().has_alpha() {
+                if native.channel_type() == ChannelType::U8 {
                     return pixels.to_rgba8().into();
                 }
                 continue;
             }
-            if !pref.layout.has_alpha() && native.layout.has_alpha() {
-                if native.channel_type == ChannelType::U8 {
+            if !pref.layout().has_alpha() && native.layout().has_alpha() {
+                if native.channel_type() == ChannelType::U8 {
                     return pixels.to_rgb8().into();
                 }
                 continue;
