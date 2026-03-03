@@ -785,8 +785,8 @@ pub fn yuv444_to_rgb8(
     ImgVec::new(out, width, height)
 }
 
-/// Get matrix coefficients (Kr, Kb) for the specified color space
-fn matrix_coefficients(matrix: YuvMatrix) -> (f32, f32) {
+/// Get matrix coefficients (Kr, Kb) for the specified color space.
+pub(crate) fn matrix_coefficients(matrix: YuvMatrix) -> (f32, f32) {
     match matrix {
         // ITU-R BT.601 (SD)
         YuvMatrix::Bt601 => (0.299, 0.114),
