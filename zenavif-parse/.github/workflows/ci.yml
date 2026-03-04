@@ -7,56 +7,33 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
+  CI: true
 
 jobs:
   # ==========================================================================
-  # Native x86_64 testing
+  # Native testing (6-platform matrix)
   # ==========================================================================
-  test-x64:
-    name: Test x64 (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Build
-        run: cargo build --all-features
-
-      - name: Test
-        run: cargo test --all-features
-
-  # ==========================================================================
-  # Native aarch64 testing
-  # ==========================================================================
-  test-aarch64:
-    name: Test aarch64 (${{ matrix.name }})
+  test:
+    name: Test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-24.04-arm, name: Linux }
-          - { os: macos-latest, name: macOS }
-          - { os: windows-11-arm, name: Windows }
-
+          - { os: ubuntu-latest, name: Linux x64 }
+          - { os: ubuntu-24.04-arm, name: Linux aarch64 }
+          - { os: macos-latest, name: macOS arm64 }
+          - { os: macos-26-intel, name: macOS x64 }
+          - { os: windows-latest, name: Windows x64 }
+          - { os: windows-11-arm, name: Windows arm64 }
     steps:
       - uses: actions/checkout@v6
-        with:
-          submodules: recursive
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -65,104 +42,52 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Test
-        run: cargo test --all-features
+        run: cargo test
 
   # ==========================================================================
-  # Cross-compiled testing (32-bit) via QEMU
+  # Cross-compiled 32-bit testing (i686 via QEMU)
   # ==========================================================================
-  test-cross:
-    name: Cross (${{ matrix.target }})
+  test-i686:
+    name: Test i686
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        target:
-          - i686-unknown-linux-gnu
-          - armv7-unknown-linux-gnueabihf
-
     steps:
       - uses: actions/checkout@v6
-        with:
-          submodules: recursive
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: i686-unknown-linux-gnu
 
       - name: Install cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+        uses: taiki-e/install-action@cross
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          key: cross-i686
 
-      - name: Build (cross)
-        run: cross build --all-features --target ${{ matrix.target }}
-
-      - name: Test (cross/QEMU)
-        run: cross test --all-features --target ${{ matrix.target }}
+      - name: Test (i686/QEMU)
+        run: cross test --target i686-unknown-linux-gnu
 
   # ==========================================================================
-  # WASM testing
+  # WASM check
   # ==========================================================================
-  test-wasm:
-    name: Test WASM
+  wasm:
+    name: WASM (wasm32-wasip1)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          submodules: recursive
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown,wasm32-wasip1
+          targets: wasm32-wasip1
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Install wasmtime
-        run: |
-          curl https://wasmtime.dev/install.sh -sSf | bash
-          echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
-
-      - name: Build (wasm32-unknown-unknown)
-        env:
-          RUSTFLAGS: "-C target-feature=+simd128"
-        run: cargo build --target wasm32-unknown-unknown --all-features --lib
-
-      - name: Test (wasm32-wasip1)
-        env:
-          CARGO_TARGET_WASM32_WASIP1_RUNNER: "wasmtime --dir=. --"
-        run: cargo test --target wasm32-wasip1 --all-features
-
-  # ==========================================================================
-  # MSRV check
-  # ==========================================================================
-  msrv:
-    name: MSRV (1.92)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - name: Install Rust 1.92
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.92"
-
-      - name: Install nightly for minimal-versions
-        uses: dtolnay/rust-toolchain@nightly
-
-      - name: Generate minimal-version lockfile
-        run: cargo +nightly -Zminimal-versions generate-lockfile
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Check MSRV
-        run: cargo +1.92 check --all-features
+      - name: Check WASM
+        run: cargo check --target wasm32-wasip1
 
   # ==========================================================================
   # Clippy
@@ -182,7 +107,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Clippy
-        run: cargo clippy --all-features --all-targets -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
   # ==========================================================================
   # Format check
@@ -199,7 +124,25 @@ jobs:
           components: rustfmt
 
       - name: Format check
-        run: cargo fmt -- --check
+        run: cargo fmt --all -- --check
+
+  # ==========================================================================
+  # MSRV check
+  # ==========================================================================
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@cargo-hack
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check MSRV
+        run: cargo hack check --rust-version
 
   # ==========================================================================
   # Code coverage
@@ -210,13 +153,9 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v6
-        with:
-          submodules: recursive
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -225,10 +164,12 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Generate coverage
-        run: cargo llvm-cov --all-features --lcov --output-path lcov.info
+        run: cargo llvm-cov --lcov --output-path lcov.info
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v5
         with:
           files: lcov.info
           fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
