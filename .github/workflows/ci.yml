@@ -35,7 +35,7 @@ jobs:
             -e 's|path = "\.\./zenavif-parse"|git = "https://github.com/imazen/zenavif-parse"|g' \
             -e 's|path = "\.\./zencodec-types"|git = "https://github.com/imazen/zencodec-types"|g' \
             -e 's|path = "\.\./zenpixels/zenpixels"|git = "https://github.com/imazen/zenpixels"|g' \
-            -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/zenrav1e"|g' \
+            -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/cavif-rs", branch = "main"|g' \
             Cargo.toml > Cargo.toml.ci && mv Cargo.toml.ci Cargo.toml
       - name: Build
         run: cargo build
@@ -63,7 +63,7 @@ jobs:
             -e 's|path = "\.\./zenavif-parse"|git = "https://github.com/imazen/zenavif-parse"|g' \
             -e 's|path = "\.\./zencodec-types"|git = "https://github.com/imazen/zencodec-types"|g' \
             -e 's|path = "\.\./zenpixels/zenpixels"|git = "https://github.com/imazen/zenpixels"|g' \
-            -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/zenrav1e"|g' \
+            -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/cavif-rs", branch = "main"|g' \
             Cargo.toml > Cargo.toml.ci && mv Cargo.toml.ci Cargo.toml
       - name: Test (i686)
         run: cross test --target i686-unknown-linux-gnu
@@ -86,7 +86,7 @@ jobs:
             -e 's|path = "\.\./zenavif-parse"|git = "https://github.com/imazen/zenavif-parse"|g' \
             -e 's|path = "\.\./zencodec-types"|git = "https://github.com/imazen/zencodec-types"|g' \
             -e 's|path = "\.\./zenpixels/zenpixels"|git = "https://github.com/imazen/zenpixels"|g' \
-            -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/zenrav1e"|g' \
+            -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/cavif-rs", branch = "main"|g' \
             Cargo.toml > Cargo.toml.ci && mv Cargo.toml.ci Cargo.toml
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
@@ -119,7 +119,7 @@ jobs:
             -e 's|path = "\.\./zenavif-parse"|git = "https://github.com/imazen/zenavif-parse"|g' \
             -e 's|path = "\.\./zencodec-types"|git = "https://github.com/imazen/zencodec-types"|g' \
             -e 's|path = "\.\./zenpixels/zenpixels"|git = "https://github.com/imazen/zenpixels"|g' \
-            -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/zenrav1e"|g' \
+            -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/cavif-rs", branch = "main"|g' \
             Cargo.toml > Cargo.toml.ci && mv Cargo.toml.ci Cargo.toml
       - name: Check MSRV
         run: cargo hack check --rust-version
@@ -141,7 +141,7 @@ jobs:
             -e 's|path = "\.\./zenavif-parse"|git = "https://github.com/imazen/zenavif-parse"|g' \
             -e 's|path = "\.\./zencodec-types"|git = "https://github.com/imazen/zencodec-types"|g' \
             -e 's|path = "\.\./zenpixels/zenpixels"|git = "https://github.com/imazen/zenpixels"|g' \
-            -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/zenrav1e"|g' \
+            -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/cavif-rs", branch = "main"|g' \
             Cargo.toml > Cargo.toml.ci && mv Cargo.toml.ci Cargo.toml
       - name: Generate coverage
         run: cargo llvm-cov --lcov --output-path lcov.info
