@@ -947,12 +947,88 @@ impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
 
     fn streaming_decoder(
         self,
-        _data: &'a [u8],
-        _preferred: &[PixelDescriptor],
+        data: &'a [u8],
+        preferred: &[PixelDescriptor],
     ) -> Result<AvifStreamingDecoder, Error> {
-        Err(Error::UnsupportedOperation(
-            zencodec_types::UnsupportedOperation::RowLevelDecode,
-        ))
+        let cfg = self.effective_config();
+        let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
+
+        let mut decoder =
+            crate::ManagedAvifDecoder::new(data, &cfg).map_err(|e| e.into_inner())?;
+        let native_info = decoder.probe_info().map_err(|e| e.into_inner())?;
+        let info = convert_native_info(&native_info);
+
+        if decoder.is_grid() {
+            let grid = decoder.grid_config().unwrap();
+            let output_width = grid.output_width;
+            let output_height = grid.output_height;
+
+            // Determine pixel descriptor by decoding first tile to probe its format.
+            // We'll decode the first tile-row as part of construction to get the descriptor,
+            // then discard it and start fresh (tiles are cheap to re-decode).
+            // Actually, we can infer from bit depth and alpha presence.
+            let base_desc = if native_info.bit_depth > 8 {
+                if native_info.has_alpha {
+                    PixelDescriptor::RGBA16_SRGB
+                } else {
+                    PixelDescriptor::RGB16_SRGB
+                }
+            } else if native_info.has_alpha {
+                PixelDescriptor::RGBA8_SRGB
+            } else {
+                PixelDescriptor::RGB8_SRGB
+            };
+
+            // Apply CICP metadata to descriptor. No format negotiation for
+            // the grid path — tiles produce native format and we stitch raw bytes.
+            let mut strip_descriptor = base_desc;
+            if let Some(tf) =
+                zenpixels::TransferFunction::from_cicp(native_info.transfer_characteristics.0)
+            {
+                strip_descriptor = strip_descriptor.with_transfer(tf);
+            }
+            if let Some(p) =
+                zenpixels::ColorPrimaries::from_cicp(native_info.color_primaries.0)
+            {
+                strip_descriptor = strip_descriptor.with_primaries(p);
+            }
+
+            return Ok(AvifStreamingDecoder {
+                info,
+                y_offset: 0,
+                output_width,
+                output_height,
+                decoder: Some(decoder),
+                grid_rows: grid.rows as u32,
+                grid_cols: grid.columns as u32,
+                current_grid_row: 0,
+                strip_descriptor,
+                strip_buffer: None,
+                full_pixels: None,
+            });
+        }
+
+        // Non-grid fallback: full decode upfront.
+        let (pixels, _native) = decoder.decode_full(stop).map_err(|e| e.into_inner())?;
+        let pixels = set_cicp_on_pixels(pixels, &native_info);
+        let pixels = negotiate_format(pixels, preferred);
+        let desc = pixels.descriptor();
+        let w = pixels.width();
+        let h = pixels.height();
+
+        Ok(AvifStreamingDecoder {
+            info,
+            y_offset: 0,
+            output_width: w,
+            output_height: h,
+            decoder: None,
+            grid_rows: 0,
+            grid_cols: 0,
+            current_grid_row: 0,
+            strip_descriptor: desc,
+            strip_buffer: None,
+            full_pixels: Some(pixels),
+        })
     }
 
     fn frame_decoder(
@@ -1180,23 +1256,124 @@ impl zencodec_types::Decode for AvifDecoder<'_> {
     }
 }
 
-/// Streaming decoder stub for AVIF (not supported).
+/// Streaming AVIF decoder with real tile-row streaming for grid images.
 ///
-/// AVIF requires full-frame decode (AV1 is not a streaming format),
-/// so streaming decode is not available.
-pub struct AvifStreamingDecoder;
+/// For grid (tiled) images, each [`next_batch`](zencodec_types::StreamingDecode::next_batch)
+/// call decodes one tile-row of AV1 tiles, color-converts them, and stitches
+/// them into a strip. Peak memory is proportional to one tile-row instead of
+/// the full image.
+///
+/// For non-grid images, the full frame is decoded on construction and emitted
+/// in fixed-height strips.
+pub struct AvifStreamingDecoder {
+    info: ImageInfo,
+    y_offset: u32,
+    output_width: u32,
+    output_height: u32,
+    /// Grid path: managed decoder for tile-row streaming.
+    decoder: Option<crate::ManagedAvifDecoder>,
+    grid_rows: u32,
+    grid_cols: u32,
+    current_grid_row: u32,
+    /// Pixel descriptor with CICP metadata for strip buffers.
+    strip_descriptor: PixelDescriptor,
+    /// Reusable strip buffer for the current tile-row (grid path).
+    strip_buffer: Option<PixelBuffer>,
+    /// Non-grid fallback: full decoded image, emit strips.
+    full_pixels: Option<PixelBuffer>,
+}
+
+impl AvifStreamingDecoder {
+    /// Default strip height for non-grid fallback.
+    const FALLBACK_STRIP_HEIGHT: u32 = 64;
+
+    /// Stitch decoded tiles horizontally into `self.strip_buffer`.
+    fn stitch_tiles(&mut self, tiles: &[PixelBuffer], strip_h: u32) {
+        let bpp = self.strip_descriptor.bytes_per_pixel();
+        let mut strip = PixelBuffer::new(self.output_width, strip_h, self.strip_descriptor);
+        {
+            let mut sm = strip.as_slice_mut();
+            for py in 0..strip_h {
+                let dst_row = sm.row_mut(py);
+                let mut x_offset = 0usize;
+                for tile in tiles {
+                    let tile_w = tile.width() as usize;
+                    let actual_w = tile_w.min((self.output_width as usize).saturating_sub(x_offset));
+                    if actual_w == 0 {
+                        continue;
+                    }
+                    let tile_slice = tile.as_slice();
+                    let src = tile_slice.row(py);
+                    let copy_bytes = actual_w * bpp;
+                    let dst_start = x_offset * bpp;
+                    dst_row[dst_start..dst_start + copy_bytes]
+                        .copy_from_slice(&src[..copy_bytes]);
+                    x_offset += tile_w;
+                }
+            }
+        }
+        self.strip_buffer = Some(strip);
+    }
+}
 
 impl zencodec_types::StreamingDecode for AvifStreamingDecoder {
     type Error = Error;
 
     fn next_batch(&mut self) -> Result<Option<(u32, PixelSlice<'_>)>, Error> {
-        Err(Error::UnsupportedOperation(
-            zencodec_types::UnsupportedOperation::RowLevelDecode,
-        ))
+        if self.y_offset >= self.output_height {
+            return Ok(None);
+        }
+
+        if self.decoder.is_some() {
+            // Grid path: decode one tile-row per call.
+            if self.current_grid_row >= self.grid_rows {
+                return Ok(None);
+            }
+
+            let tiles = self
+                .decoder
+                .as_mut()
+                .unwrap()
+                .decode_tile_row(
+                    self.current_grid_row as usize,
+                    self.grid_cols as usize,
+                    &enough::Unstoppable,
+                )
+                .map_err(|e| e.into_inner())?;
+
+            if tiles.is_empty() {
+                return Ok(None);
+            }
+
+            let tile_h = tiles[0].height();
+            let strip_h = tile_h.min(self.output_height.saturating_sub(self.y_offset));
+            if strip_h == 0 {
+                return Ok(None);
+            }
+
+            self.stitch_tiles(&tiles, strip_h);
+            self.current_grid_row += 1;
+
+            let y = self.y_offset;
+            self.y_offset += strip_h;
+            let slice = self.strip_buffer.as_ref().unwrap().as_slice().erase();
+            return Ok(Some((y, slice)));
+        }
+
+        // Non-grid fallback: emit strips from full_pixels.
+        if self.full_pixels.is_some() {
+            let h = Self::FALLBACK_STRIP_HEIGHT.min(self.output_height - self.y_offset);
+            let y = self.y_offset;
+            self.y_offset += h;
+            let slice = self.full_pixels.as_ref().unwrap().rows(y, h).erase();
+            return Ok(Some((y, slice)));
+        }
+
+        Ok(None)
     }
 
     fn info(&self) -> &ImageInfo {
-        panic!("StreamingDecode not supported for AVIF");
+        &self.info
     }
 }
 

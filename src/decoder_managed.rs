@@ -14,10 +14,10 @@ use crate::image::{
 };
 use crate::yuv_convert::{self, YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRange};
 use enough::Stop;
-use rgb::{ComponentBytes, ComponentSlice, Rgb, Rgba};
+use rgb::{Rgb, Rgba};
 use whereat::at;
 use yuv::{YuvGrayImage, YuvPlanarImage, YuvRange, YuvStandardMatrix};
-use zencodec_types::PixelBuffer;
+use zenpixels::PixelBuffer;
 
 // Import managed API from rav1d-safe
 use rav1d_safe::src::managed::{
@@ -769,7 +769,7 @@ impl ManagedAvifDecoder {
                     let rgb_stride = buffer_width as u32 * 4;
                     yuv::yuv400_to_rgba(
                         &gray,
-                        out.as_mut_slice().as_bytes_mut(),
+                        rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                         rgb_stride,
                         yuv_range,
                         matrix,
@@ -783,7 +783,7 @@ impl ManagedAvifDecoder {
                     let rgb_stride = buffer_width as u32 * 3;
                     yuv::yuv400_to_rgb(
                         &gray,
-                        out.as_mut_slice().as_bytes_mut(),
+                        rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                         rgb_stride,
                         yuv_range,
                         matrix,
@@ -1012,21 +1012,21 @@ impl ManagedAvifDecoder {
                     match info.bit_depth {
                         10 => yuv::y010_to_rgba10(
                             &gray,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
                         ),
                         12 => yuv::y012_to_rgba12(
                             &gray,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
                         ),
                         _ => yuv::y016_to_rgba16(
                             &gray,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
@@ -1049,21 +1049,21 @@ impl ManagedAvifDecoder {
                     match info.bit_depth {
                         10 => yuv::y010_to_rgb10(
                             &gray,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
                         ),
                         12 => yuv::y012_to_rgb12(
                             &gray,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
                         ),
                         _ => yuv::y016_to_rgb16(
                             &gray,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
@@ -1115,63 +1115,63 @@ impl ManagedAvifDecoder {
                     match (info.bit_depth, sampling) {
                         (10, ChromaSampling::Cs420) => yuv::i010_to_rgba10(
                             &planar,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
                         ),
                         (10, ChromaSampling::Cs422) => yuv::i210_to_rgba10(
                             &planar,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
                         ),
                         (10, ChromaSampling::Cs444) => yuv::i410_to_rgba10(
                             &planar,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
                         ),
                         (12, ChromaSampling::Cs420) => yuv::i012_to_rgba12(
                             &planar,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
                         ),
                         (12, ChromaSampling::Cs422) => yuv::i212_to_rgba12(
                             &planar,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
                         ),
                         (12, ChromaSampling::Cs444) => yuv::i412_to_rgba12(
                             &planar,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
                         ),
                         (_, ChromaSampling::Cs420) => yuv::i016_to_rgba16(
                             &planar,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
                         ),
                         (_, ChromaSampling::Cs422) => yuv::i216_to_rgba16(
                             &planar,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
                         ),
                         (_, ChromaSampling::Cs444) => yuv::i416_to_rgba16(
                             &planar,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
@@ -1195,63 +1195,63 @@ impl ManagedAvifDecoder {
                     match (info.bit_depth, sampling) {
                         (10, ChromaSampling::Cs420) => yuv::i010_to_rgb10(
                             &planar,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
                         ),
                         (10, ChromaSampling::Cs422) => yuv::i210_to_rgb10(
                             &planar,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
                         ),
                         (10, ChromaSampling::Cs444) => yuv::i410_to_rgb10(
                             &planar,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
                         ),
                         (12, ChromaSampling::Cs420) => yuv::i012_to_rgb12(
                             &planar,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
                         ),
                         (12, ChromaSampling::Cs422) => yuv::i212_to_rgb12(
                             &planar,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
                         ),
                         (12, ChromaSampling::Cs444) => yuv::i412_to_rgb12(
                             &planar,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
                         ),
                         (_, ChromaSampling::Cs420) => yuv::i016_to_rgb16(
                             &planar,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
                         ),
                         (_, ChromaSampling::Cs422) => yuv::i216_to_rgb16(
                             &planar,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
                         ),
                         (_, ChromaSampling::Cs444) => yuv::i416_to_rgb16(
                             &planar,
-                            out.as_mut_slice().as_mut_slice(),
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                             rgb_stride,
                             yuv_range,
                             matrix,
@@ -1300,6 +1300,44 @@ impl ManagedAvifDecoder {
         }
 
         Ok(image)
+    }
+
+    /// Whether this image is a grid (tiled) image.
+    pub(crate) fn is_grid(&self) -> bool {
+        self.parser.grid_config().is_some()
+    }
+
+    /// Grid configuration, if this is a grid image.
+    pub(crate) fn grid_config(&self) -> Option<zenavif_parse::GridConfig> {
+        self.parser.grid_config().cloned()
+    }
+
+    /// Decode one tile-row of a grid image, returning converted pixel buffers.
+    ///
+    /// Each tile is decoded from AV1 and color-converted before the next,
+    /// so peak memory is one raw Frame + one converted PixelBuffer per tile.
+    pub(crate) fn decode_tile_row(
+        &mut self,
+        grid_row: usize,
+        cols: usize,
+        stop: &(impl Stop + ?Sized),
+    ) -> Result<Vec<PixelBuffer>> {
+        let mut row_tiles = Vec::with_capacity(cols);
+        for col in 0..cols {
+            let tile_idx = grid_row * cols + col;
+            let tile_data = self
+                .parser
+                .tile_data(tile_idx)
+                .map_err(|e| at(Error::from(e)))?;
+            let frame = Self::decode_frame(
+                &mut self.decoder,
+                &tile_data,
+                "Failed to decode grid tile",
+            )?;
+            let (pixels, _info) = self.convert_to_image(frame, None, stop)?;
+            row_tiles.push(pixels);
+        }
+        Ok(row_tiles)
     }
 
     /// Decode with row-level streaming to a sink.
@@ -1367,8 +1405,9 @@ impl ManagedAvifDecoder {
                 row_tiles.push(pixels);
             }
 
-            // Get bytes per pixel from the first tile's format
-            let bpp = row_tiles[0].descriptor().bytes_per_pixel();
+            // Get descriptor and tile height from the first tile
+            let desc = row_tiles[0].descriptor();
+            let bpp = desc.bytes_per_pixel();
             let tile_h = row_tiles[0].height() as usize;
 
             // Last tile-row may be clipped to output dimensions
@@ -1378,8 +1417,25 @@ impl ManagedAvifDecoder {
             }
 
             // Demand buffer from sink and stitch tiles into it
-            let (buf, stride) = sink.demand(y_offset, strip_h as u32, output_width as u32, bpp);
-            stitch_tile_row_into(buf, stride, &row_tiles, output_width, strip_h, bpp);
+            let mut sink_buf = sink.demand(y_offset, strip_h as u32, output_width as u32, desc);
+            for py in 0..strip_h {
+                let dst_row = sink_buf.row_mut(py as u32);
+                let mut x_offset = 0usize;
+                for tile in &row_tiles {
+                    let tile_w = tile.width() as usize;
+                    let actual_w = tile_w.min(output_width.saturating_sub(x_offset));
+                    if actual_w == 0 {
+                        continue;
+                    }
+                    let tile_slice = tile.as_slice();
+                    let src = tile_slice.row(py as u32);
+                    let copy_bytes = actual_w * bpp;
+                    let dst_start = x_offset * bpp;
+                    dst_row[dst_start..dst_start + copy_bytes]
+                        .copy_from_slice(&src[..copy_bytes]);
+                    x_offset += tile_w;
+                }
+            }
 
             y_offset += strip_h as u32;
         }
@@ -1392,50 +1448,17 @@ impl ManagedAvifDecoder {
 fn write_pixels_to_sink(pixels: &PixelBuffer, sink: &mut dyn zencodec_types::DecodeRowSink) {
     let w = pixels.width() as usize;
     let h = pixels.height() as usize;
-    let bpp = pixels.descriptor().bytes_per_pixel();
+    let desc = pixels.descriptor();
+    let bpp = desc.bytes_per_pixel();
     let row_bytes = w * bpp;
-    let (buf, stride) = sink.demand(0, h as u32, w as u32, bpp);
+    let mut sink_buf = sink.demand(0, h as u32, w as u32, desc);
 
     let src_slice = pixels.as_slice();
     for y in 0..h {
-        let dst_start = y * stride;
+        let dst_row = sink_buf.row_mut(y as u32);
         let src = src_slice.row(y as u32);
-        let copy_len = row_bytes.min(src.len());
-        buf[dst_start..dst_start + copy_len].copy_from_slice(&src[..copy_len]);
-    }
-}
-
-/// Stitch a row of tiles into a flat output buffer.
-///
-/// Copies pixel rows from each tile side-by-side, clipping to
-/// `output_width` for the rightmost tile.
-fn stitch_tile_row_into(
-    buf: &mut [u8],
-    row_stride: usize,
-    tiles: &[PixelBuffer],
-    output_width: usize,
-    strip_h: usize,
-    bpp: usize,
-) {
-    for py in 0..strip_h {
-        let row_start = py * row_stride;
-        let mut x_offset = 0usize;
-
-        for tile in tiles {
-            let tile_w = tile.width() as usize;
-            let actual_w = tile_w.min(output_width.saturating_sub(x_offset));
-            if actual_w == 0 {
-                continue;
-            }
-
-            let tile_slice = tile.as_slice();
-            let src = tile_slice.row(py as u32);
-            let copy_bytes = actual_w * bpp;
-            let dst_offset = row_start + x_offset * bpp;
-            buf[dst_offset..dst_offset + copy_bytes].copy_from_slice(&src[..copy_bytes]);
-
-            x_offset += tile_w;
-        }
+        let copy_len = row_bytes.min(src.len()).min(dst_row.len());
+        dst_row[..copy_len].copy_from_slice(&src[..copy_len]);
     }
 }
 

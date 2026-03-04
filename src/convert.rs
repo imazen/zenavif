@@ -5,7 +5,7 @@ use crate::image::ColorRange;
 use rgb::prelude::*;
 use rgb::{Rgb, Rgba};
 use whereat::at;
-use zencodec_types::{PixelBuffer, PixelDescriptor};
+use zenpixels::{PixelBuffer, PixelDescriptor};
 
 /// Scale a limited-range Y value to full range (8-bit)
 #[inline]
