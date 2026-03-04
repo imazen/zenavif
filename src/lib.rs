@@ -199,7 +199,7 @@ pub fn encode_with(
     config: &EncoderConfig,
     stop: &(impl Stop + ?Sized),
 ) -> Result<EncodedImage> {
-    use zencodec_types::PixelDescriptor;
+    use zenpixels::PixelDescriptor;
 
     let desc = image.descriptor();
     if desc.layout_compatible(PixelDescriptor::RGB8) {
