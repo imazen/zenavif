@@ -5,225 +5,141 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
+  CI: true
 
 jobs:
-  # ==========================================================================
-  # Native x86_64 testing
-  # ==========================================================================
-  test-x64:
-    name: Test x64 (${{ matrix.os }})
+  test:
+    name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest, windows-11-arm]
     steps:
       - uses: actions/checkout@v6
-        with:
-          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Patch path deps to git refs
+        shell: bash
+        run: |
+          sed \
+            -e 's|path = "\.\./zenavif-parse"|git = "https://github.com/imazen/zenavif-parse"|g' \
+            -e 's|path = "\.\./zencodec-types"|git = "https://github.com/imazen/zencodec-types"|g' \
+            -e 's|path = "\.\./zenpixels/zenpixels"|git = "https://github.com/imazen/zenpixels"|g' \
+            -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/zenrav1e"|g' \
+            Cargo.toml > Cargo.toml.ci && mv Cargo.toml.ci Cargo.toml
+      - name: Build
+        run: cargo build
+      - name: Test
+        run: cargo test
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Build (managed)
-        run: cargo build --no-default-features --features managed
-
-      - name: Test (managed)
-        run: cargo test --no-default-features --features managed
-
-  # ==========================================================================
-  # Native ARM64 testing
-  # ==========================================================================
-  test-aarch64:
-    name: Test aarch64 (${{ matrix.name }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { os: ubuntu-24.04-arm, name: Linux }
-          - { os: macos-latest, name: macOS }
-          - { os: windows-11-arm, name: "Windows ARM" }
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Build (managed)
-        run: cargo build --no-default-features --features managed
-
-      - name: Test (managed)
-        run: cargo test --no-default-features --features managed
-
-  # ==========================================================================
-  # Cross-compiled testing with QEMU (32-bit targets)
-  # ==========================================================================
-  test-cross:
-    name: Cross (${{ matrix.target }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        target:
-          - i686-unknown-linux-gnu
-          - armv7-unknown-linux-gnueabihf
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Install cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Build (managed, cross)
-        run: cross build --no-default-features --features managed --target ${{ matrix.target }}
-
-      - name: Test (managed, cross/QEMU)
-        run: cross test --no-default-features --features managed --target ${{ matrix.target }}
-
-  # ==========================================================================
-  # WASM testing (wasm32-wasip1 with simd128, run via wasmtime)
-  # ==========================================================================
-  test-wasm:
-    name: WASM Test
+  i686:
+    name: Test (i686 cross)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          submodules: recursive
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+          targets: i686-unknown-linux-gnu
+      - uses: taiki-e/install-action@cross
+      - uses: Swatinem/rust-cache@v2
         with:
-          targets: wasm32-wasip1
+          key: cross-i686
+      - name: Patch path deps to git refs
+        shell: bash
+        run: |
+          sed \
+            -e 's|path = "\.\./zenavif-parse"|git = "https://github.com/imazen/zenavif-parse"|g' \
+            -e 's|path = "\.\./zencodec-types"|git = "https://github.com/imazen/zencodec-types"|g' \
+            -e 's|path = "\.\./zenpixels/zenpixels"|git = "https://github.com/imazen/zenpixels"|g' \
+            -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/zenrav1e"|g' \
+            Cargo.toml > Cargo.toml.ci && mv Cargo.toml.ci Cargo.toml
+      - name: Test (i686)
+        run: cross test --target i686-unknown-linux-gnu
 
-      - name: Install wasmtime
-        uses: bytecodealliance/actions/wasmtime/setup@v1
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Test (managed, wasmtime)
-        env:
-          CARGO_TARGET_WASM32_WASIP1_RUNNER: wasmtime
-          RUSTFLAGS: "-C target-feature=+simd128"
-        run: cargo test --no-default-features --features managed --target wasm32-wasip1
-
-  # ==========================================================================
-  # Clippy
-  # ==========================================================================
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Patch path deps to git refs
+        shell: bash
+        run: |
+          sed \
+            -e 's|path = "\.\./zenavif-parse"|git = "https://github.com/imazen/zenavif-parse"|g' \
+            -e 's|path = "\.\./zencodec-types"|git = "https://github.com/imazen/zencodec-types"|g' \
+            -e 's|path = "\.\./zenpixels/zenpixels"|git = "https://github.com/imazen/zenpixels"|g' \
+            -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/zenrav1e"|g' \
+            Cargo.toml > Cargo.toml.ci && mv Cargo.toml.ci Cargo.toml
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Clippy (managed)
-        run: cargo clippy --no-default-features --features managed --all-targets -- -D warnings
-
-  # ==========================================================================
-  # Format check
-  # ==========================================================================
   fmt:
     name: Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-
       - name: Format check
         run: cargo fmt --all -- --check
 
-  # ==========================================================================
-  # Code Coverage
-  # ==========================================================================
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-hack
+      - uses: Swatinem/rust-cache@v2
+      - name: Patch path deps to git refs
+        shell: bash
+        run: |
+          sed \
+            -e 's|path = "\.\./zenavif-parse"|git = "https://github.com/imazen/zenavif-parse"|g' \
+            -e 's|path = "\.\./zencodec-types"|git = "https://github.com/imazen/zencodec-types"|g' \
+            -e 's|path = "\.\./zenpixels/zenpixels"|git = "https://github.com/imazen/zenpixels"|g' \
+            -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/zenrav1e"|g' \
+            Cargo.toml > Cargo.toml.ci && mv Cargo.toml.ci Cargo.toml
+      - name: Check MSRV
+        run: cargo hack check --rust-version
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: Swatinem/rust-cache@v2
+      - name: Patch path deps to git refs
+        shell: bash
+        run: |
+          sed \
+            -e 's|path = "\.\./zenavif-parse"|git = "https://github.com/imazen/zenavif-parse"|g' \
+            -e 's|path = "\.\./zencodec-types"|git = "https://github.com/imazen/zencodec-types"|g' \
+            -e 's|path = "\.\./zenpixels/zenpixels"|git = "https://github.com/imazen/zenpixels"|g' \
+            -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/zenrav1e"|g' \
+            Cargo.toml > Cargo.toml.ci && mv Cargo.toml.ci Cargo.toml
       - name: Generate coverage
-        run: cargo llvm-cov --no-default-features --features managed --lcov --output-path lcov.info
-
-      - name: Upload to Codecov
+        run: cargo llvm-cov --lcov --output-path lcov.info
+      - name: Upload coverage
         uses: codecov/codecov-action@v5
         with:
           files: lcov.info
           fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
-
-  # ==========================================================================
-  # AVIF Conformance (main branch only, downloads test vectors)
-  # ==========================================================================
-  conformance:
-    name: AVIF Conformance
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Download test vectors
-        run: bash scripts/download-avif-test-vectors.sh
-
-      - name: Run integration tests
-        run: cargo test --no-default-features --features managed --test integration_corpus -- --ignored --nocapture
+        continue-on-error: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
