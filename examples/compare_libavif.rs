@@ -6,6 +6,14 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+fn avif_corpus_dir() -> String {
+    std::env::var("AVIF_CORPUS_DIR").unwrap_or_else(|_| "/mnt/v/datasets/scraping/avif".into())
+}
+
+fn zenavif_output_dir() -> String {
+    std::env::var("ZENAVIF_OUTPUT_DIR").unwrap_or_else(|_| "/mnt/v/output/zenavif".into())
+}
+
 fn find_avif_files(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     if let Ok(entries) = fs::read_dir(dir) {
@@ -286,15 +294,18 @@ fn main() {
         .map(|s| s.as_str())
         .collect();
 
+    let default_input = avif_corpus_dir();
+    let default_ref = format!("{}/libavif-refs", zenavif_output_dir());
+    let default_report = zenavif_output_dir();
     let input_dir = positional
         .first()
         .map(|s| Path::new(*s))
-        .unwrap_or(Path::new("/mnt/v/datasets/scraping/avif"));
+        .unwrap_or(Path::new(&default_input));
     let ref_dir = positional
         .get(1)
         .map(|s| Path::new(*s))
-        .unwrap_or(Path::new("/mnt/v/output/zenavif/libavif-refs"));
-    let report_dir = Path::new("/mnt/v/output/zenavif");
+        .unwrap_or(Path::new(&default_ref));
+    let report_dir = Path::new(&default_report);
 
     let all_levels = cpu_levels();
     let levels: Vec<_> = match level_filter {

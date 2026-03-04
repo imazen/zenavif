@@ -4,8 +4,13 @@ use std::path::Path;
 use std::time::Instant;
 use zencodec_types::PixelDescriptor;
 
+fn zenavif_output_dir() -> String {
+    std::env::var("ZENAVIF_OUTPUT_DIR").unwrap_or_else(|_| "/mnt/v/output/zenavif".into())
+}
+
 fn main() {
-    let error_log = Path::new("/mnt/v/output/zenavif/parse-failures/errors.txt");
+    let error_log_str = format!("{}/parse-failures/errors.txt", zenavif_output_dir());
+    let error_log = Path::new(&error_log_str);
     let data = fs::read_to_string(error_log).expect("read error log");
 
     let paths: Vec<&str> = data.lines().filter_map(|l| l.split('\t').next()).collect();

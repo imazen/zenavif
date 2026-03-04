@@ -22,9 +22,19 @@ fn find_avif_files(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
+fn avif_corpus_dir() -> String {
+    std::env::var("AVIF_CORPUS_DIR").unwrap_or_else(|_| "/mnt/v/datasets/scraping/avif".into())
+}
+
+fn zenavif_output_dir() -> String {
+    std::env::var("ZENAVIF_OUTPUT_DIR").unwrap_or_else(|_| "/mnt/v/output/zenavif".into())
+}
+
 fn main() {
-    let input_dir = Path::new("/mnt/v/datasets/scraping/avif");
-    let fail_dir = Path::new("/mnt/v/output/zenavif/parse-failures");
+    let input_str = avif_corpus_dir();
+    let fail_str = format!("{}/parse-failures", zenavif_output_dir());
+    let input_dir = Path::new(&input_str);
+    let fail_dir = Path::new(&fail_str);
 
     let mut files = find_avif_files(input_dir);
     files.sort();
