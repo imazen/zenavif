@@ -23,12 +23,11 @@ use rgb::{Rgb, Rgba};
 use zencodec_types::EncodeOutput;
 #[cfg(feature = "encode")]
 use zencodec_types::MetadataView;
-#[cfg(feature = "encode")]
-use zencodec_types::PixelSlice;
 use zencodec_types::{
-    ChannelType, DecodeFrame, DecodeOutput, ImageFormat, ImageInfo, PixelBuffer,
-    PixelBufferConvertExt as _, PixelDescriptor, ResourceLimits, Stop,
+    DecodeFrame, DecodeOutput, ImageFormat, ImageInfo, PixelBufferConvertExt as _, ResourceLimits,
+    Stop,
 };
+use zenpixels::{ChannelType, PixelBuffer, PixelDescriptor, PixelSlice};
 
 use crate::error::Error;
 
@@ -680,7 +679,7 @@ impl AvifDecoderConfig {
     /// Convenience: decode image with this config.
     pub fn decode(&self, data: &[u8]) -> Result<DecodeOutput, Error> {
         use zencodec_types::{Decode as _, DecodeJob as _, DecoderConfig as _};
-        self.job().decoder()?.decode(data, &[])
+        self.job().decoder(data, &[])?.decode()
     }
 
     /// Convenience: probe image header with this config.
@@ -881,6 +880,7 @@ impl<'a> AvifDecodeJob<'a> {
 impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
     type Error = Error;
     type Dec = AvifDecoder<'a>;
+    type StreamDec = AvifStreamingDecoder;
     type FrameDec = AvifFrameDecoder;
 
     fn with_stop(mut self, stop: &'a dyn Stop) -> Self {
@@ -917,11 +917,11 @@ impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
         };
         // Override TF and primaries from CICP if available.
         if let Some(tf) =
-            zencodec_types::TransferFunction::from_cicp(native_info.transfer_characteristics.0)
+            zenpixels::TransferFunction::from_cicp(native_info.transfer_characteristics.0)
         {
             desc = desc.with_transfer(tf);
         }
-        if let Some(p) = zencodec_types::ColorPrimaries::from_cicp(native_info.color_primaries.0) {
+        if let Some(p) = zenpixels::ColorPrimaries::from_cicp(native_info.color_primaries.0) {
             desc = desc.with_primaries(p);
         }
         Ok(zencodec_types::OutputInfo::full_decode(
@@ -931,15 +931,35 @@ impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
         ))
     }
 
-    fn decoder(self) -> Result<AvifDecoder<'a>, Error> {
+    fn decoder(
+        self,
+        data: &'a [u8],
+        preferred: &[PixelDescriptor],
+    ) -> Result<AvifDecoder<'a>, Error> {
         let cfg = self.effective_config();
         Ok(AvifDecoder {
             config: cfg,
             stop: self.stop,
+            data,
+            preferred: preferred.to_vec(),
         })
     }
 
-    fn frame_decoder(self, data: &[u8]) -> Result<AvifFrameDecoder, Error> {
+    fn streaming_decoder(
+        self,
+        _data: &'a [u8],
+        _preferred: &[PixelDescriptor],
+    ) -> Result<AvifStreamingDecoder, Error> {
+        Err(Error::UnsupportedOperation(
+            zencodec_types::UnsupportedOperation::RowLevelDecode,
+        ))
+    }
+
+    fn frame_decoder(
+        self,
+        data: &'a [u8],
+        preferred: &[PixelDescriptor],
+    ) -> Result<AvifFrameDecoder, Error> {
         let cfg = self.effective_config();
 
         // Probe metadata before creating animation decoder (both parse the container,
@@ -972,6 +992,7 @@ impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
             index: 0,
             info: Arc::new(base_info),
             total_frames: anim_info.frame_count as u32,
+            preferred: preferred.to_vec(),
         })
     }
 }
@@ -1008,10 +1029,10 @@ fn avif_to_orientation(
 /// Set transfer function and color primaries from native CICP on the pixel buffer.
 fn set_cicp_on_pixels(pixels: PixelBuffer, info: &crate::image::ImageInfo) -> PixelBuffer {
     let mut desc = pixels.descriptor();
-    if let Some(tf) = zencodec_types::TransferFunction::from_cicp(info.transfer_characteristics.0) {
+    if let Some(tf) = zenpixels::TransferFunction::from_cicp(info.transfer_characteristics.0) {
         desc = desc.with_transfer(tf);
     }
-    if let Some(p) = zencodec_types::ColorPrimaries::from_cicp(info.color_primaries.0) {
+    if let Some(p) = zenpixels::ColorPrimaries::from_cicp(info.color_primaries.0) {
         desc = desc.with_primaries(p);
     }
     pixels.with_descriptor(desc)
@@ -1138,22 +1159,44 @@ fn negotiate_format(pixels: PixelBuffer, preferred: &[PixelDescriptor]) -> Pixel
 pub struct AvifDecoder<'a> {
     config: crate::DecoderConfig,
     stop: Option<&'a dyn Stop>,
+    data: &'a [u8],
+    preferred: Vec<PixelDescriptor>,
 }
 
 impl zencodec_types::Decode for AvifDecoder<'_> {
     type Error = Error;
 
-    fn decode(self, data: &[u8], preferred: &[PixelDescriptor]) -> Result<DecodeOutput, Error> {
+    fn decode(self) -> Result<DecodeOutput, Error> {
         let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
         let mut decoder =
-            crate::ManagedAvifDecoder::new(data, &self.config).map_err(|e| e.into_inner())?;
+            crate::ManagedAvifDecoder::new(self.data, &self.config).map_err(|e| e.into_inner())?;
         let (pixels, native_info) = decoder.decode_full(stop).map_err(|e| e.into_inner())?;
 
         // Set transfer function and primaries from CICP on the pixel descriptor.
         let pixels = set_cicp_on_pixels(pixels, &native_info);
-        let pixels = negotiate_format(pixels, preferred);
+        let pixels = negotiate_format(pixels, &self.preferred);
         let info = convert_native_info(&native_info);
         Ok(DecodeOutput::new(pixels, info))
+    }
+}
+
+/// Streaming decoder stub for AVIF (not supported).
+///
+/// AVIF requires full-frame decode (AV1 is not a streaming format),
+/// so streaming decode is not available.
+pub struct AvifStreamingDecoder;
+
+impl zencodec_types::StreamingDecode for AvifStreamingDecoder {
+    type Error = Error;
+
+    fn next_batch(&mut self) -> Result<Option<(u32, PixelSlice<'_>)>, Error> {
+        Err(Error::UnsupportedOperation(
+            zencodec_types::UnsupportedOperation::RowLevelDecode,
+        ))
+    }
+
+    fn info(&self) -> &ImageInfo {
+        panic!("StreamingDecode not supported for AVIF");
     }
 }
 
@@ -1168,6 +1211,7 @@ pub struct AvifFrameDecoder {
     index: usize,
     info: Arc<ImageInfo>,
     total_frames: u32,
+    preferred: Vec<PixelDescriptor>,
 }
 
 impl zencodec_types::FrameDecode for AvifFrameDecoder {
@@ -1177,12 +1221,12 @@ impl zencodec_types::FrameDecode for AvifFrameDecoder {
         Some(self.total_frames)
     }
 
-    fn next_frame(&mut self, preferred: &[PixelDescriptor]) -> Result<Option<DecodeFrame>, Error> {
+    fn next_frame(&mut self) -> Result<Option<DecodeFrame>, Error> {
         if self.index >= self.frames.len() {
             return Ok(None);
         }
         let (pixels, duration_ms) = self.frames.remove(0);
-        let pixels = negotiate_format(pixels, preferred);
+        let pixels = negotiate_format(pixels, &self.preferred);
         let idx = self.index as u32;
         self.index += 1;
         Ok(Some(DecodeFrame::new(
@@ -1482,9 +1526,9 @@ mod tests {
         let config = AvifDecoderConfig::new();
         let decoded = config
             .job()
-            .decoder()
+            .decoder(encoded.bytes(), &[])
             .unwrap()
-            .decode(encoded.bytes(), &[])
+            .decode()
             .unwrap();
         assert_eq!(decoded.width(), 8);
         assert_eq!(decoded.height(), 8);
