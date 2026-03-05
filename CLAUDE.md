@@ -1,215 +1,85 @@
 # zenavif
 
-Pure Rust AVIF decoder wrapping rav1d (pure Rust AV1 decoder) and avif-parse.
+Pure Rust AVIF encoder/decoder wrapping rav1d-safe (pure Rust AV1 decoder) and zenavif-parse.
 
 ## Quick Commands
 
 ```bash
-just check   # cargo check
-just build   # cargo build --release
-just test    # cargo test
-just clippy  # cargo clippy with warnings as errors
-just fmt     # cargo fmt
+just check        # cargo check
+just build        # cargo build --release
+just test         # cargo test
+just clippy       # cargo clippy with warnings as errors
+just fmt          # cargo fmt
+just build-encode # cargo build --features encode
+just test-encode  # cargo test --features encode
 ```
 
 ## Architecture
 
+### Decoding
 - `src/lib.rs` - Public API, re-exports
 - `src/error.rs` - Error types with whereat location tracking
 - `src/config.rs` - DecoderConfig builder
 - `src/image.rs` - DecodedImage enum, ImageInfo metadata
-- `src/decoder.rs` - AvifDecoder wrapping rav1d FFI
+- `src/decoder_managed.rs` - Main decoder (100% safe Rust, rav1d-safe managed API)
+- `src/decoder.rs` - Legacy FFI decoder (behind `unsafe-asm` feature gate)
 - `src/convert.rs` - Alpha channel handling, unpremultiply
+
+### YUV Conversion
+- `src/yuv_convert.rs` - Float SIMD path (AVX2/FMA via archmage)
+- `src/yuv_convert_libyuv.rs` - Exact libyuv integer math (BT.709, BT.601)
+- `src/yuv_convert_libyuv_simd.rs` - AVX2 SIMD libyuv path
+- `src/yuv_convert_libyuv_autovec.rs` - Auto-vectorized libyuv variant
+- `src/yuv_convert_fast.rs` - Fast fixed-point integer path
 - `src/chroma.rs` - YUV chroma upsampling iterators
+
+### Encoding
+- `src/encoder.rs` - AVIF encoding via zenravif (behind `encode` feature)
+
+### Integration
+- `src/zencodec.rs` - zencodec-types trait implementations
 
 ## Dependencies
 
-- `rav1d` - Pure Rust AV1 decoder (C FFI interface)
-- `avif-parse` - AVIF container parser
-- `yuv` - YUV to RGB conversion
+- `rav1d-safe` - Pure Rust AV1 decoder (managed API, no C FFI)
+- `zenavif-parse` - AVIF container parser (path dep)
+- `zenravif` / `ravif` - AVIF encoder (optional, `encode` feature)
+- `zencodec-types` - Codec abstraction traits (path dep)
+- `zenpixels` - Pixel buffer types (path dep)
+- `archmage` / `magetypes` - Token-based safe SIMD
+- `yuv` - YUV to RGB conversion (supplementary)
 - `imgref` - Image buffer type
 - `rgb` - RGB pixel types
 - `enough` - Cooperative cancellation
 - `whereat` - Error location tracking
 - `thiserror` - Error derive macro
 
+## Features
+
+- `(default)` - Pure Rust decode only, safe SIMD via archmage
+- `encode` - AVIF encoding via zenravif
+- `encode-imazen` - Encoding with zenrav1e fork extras (QM, VAQ, still-image, lossless)
+- `encode-asm` - Encoding with hand-written assembly (fastest, unsafe)
+- `encode-threading` - Encoding with multi-threading
+- `unsafe-asm` - Decoding with hand-written assembly via C FFI (fastest, unsafe)
+- `zencodec` - zencodec-types trait integration
+- `_dev` - Expose internal YUV modules for profiling (not public API)
+
 ## Known Bugs
 
-### rav1d-safe Issues
+### rav1d-safe Threading Race Condition
+DisjointMut overlap panic with multi-threaded decoding (`cdef.rs` / `cdef_apply.rs`).
+Default is `threads: 1` as workaround. Upstream rav1d-safe issue.
 
-1. **Threading Race Condition** - DisjointMut overlap panic with multi-threaded decoding
-   - Panic in `cdef.rs:339` / `cdef_apply.rs:76` with overlapping mutable borrows
-   - Workaround: Use `threads: 1` for single-threaded decoding
-   - Upstream issue to report to rav1d-safe
+## TODO: Encoding Enhancements
 
-2. **PlaneView Height Mismatch** - ✅ **FIXED** (2026-02-07)
-   - **Fixed in:** rav1d-safe commit 4458106 + zenavif commit 7ce8fe8
-   - **Root cause:** PlaneView used frame metadata height instead of buffer-derived height
-   - **Solution:** Calculate actual_height from buffer.len() / stride (rav1d-safe), use PlaneView dimensions instead of metadata (zenavif)
+### Target-Quality Convergence (not yet implemented)
+Binary-search-over-quantizer to hit a target perceptual quality score.
+Decision needed: Butteraugli vs SSIMULACRA2 (or both).
 
-### Integration Test Results (Updated 2026-02-08)
-
-✅ **55/55 files decode successfully** (100% success rate)
-
-## Investigation Notes
-
-### Pixel Verification Against libavif (2026-02-07)
-
-**Status:** 🔴 CRITICAL ISSUES FOUND
-
-Implemented Docker-based pixel verification system comparing zenavif output against libavif v1.1.1 references.
-
-**Verification Infrastructure:**
-- `Dockerfile.references` - libavif v1.1.1 with dav1d 1.4.1 and aom 3.8.2
-- `scripts/generate-references.sh` - Decode all test vectors with avifdec
-- `tests/zenavif-references/` - Separate git repo with 51 reference PNGs (9.2MB)
-- `tests/pixel_verification.rs::verify_against_libavif` - Pixel comparison test
-
-**Commands:**
-```bash
-just docker-build          # Build libavif Docker image
-just generate-references   # Generate reference PNGs (requires zenavif-references repo)
-just verify-pixels         # Run pixel verification
-```
-
-**Results (51 references):**
-- ✅ 34 files match (up from 31 after dimension fix)
-- ❌ 17 files have mismatches (down from 20)
-- ⊘ 4 files skipped (libavif also failed to decode)
-
-**CRITICAL BUGS FOUND:**
-
-0. **Dimension Cropping Bug** - ✅ FIXED (2026-02-07):
-   - **Root cause:** Decoder used AV1 buffer dimensions (with padding/alignment) instead of AVIF display dimensions
-   - **Example:** white_1x1.avif produced 1x128 instead of 1x1
-   - **Fix:** Convert YUV using buffer dimensions (for validation), then crop to display dimensions
-   - **Impact:** Fixed white_1x1, extended_pixi, all HDR dimension mismatches
-   - **Result:** Pixel verification improved from 31/51 to 34/51 matches
-
-1. **Dimension Mismatches - Grid Files:**
-   - `sofa_grid1x5_420.avif`: zenavif produces 5120x154 (stitched) vs libavif 1024x770 (single tile)
-   - `sofa_grid1x5_420_reversed_dimg_order.avif`: Same issue
-   - **Root cause:** libavif decodes only primary image, zenavif stitches grid tiles
-   - **Expected behavior:** Unclear - need to check AVIF spec on grid decoding
-
-2. **Dimension Mismatches - Simple Files:**
-   - `white_1x1.avif`: zenavif produces 1x128 vs libavif 1x1
-   - `extended_pixi.avif`: zenavif produces 4x128 vs libavif 4x4
-   - **Root cause:** Unknown - possibly metadata vs actual data mismatch
-
-3. **Dimension Mismatches - Animated/Gainmap Files:**
-   - Multiple files show extra height: 150x256 vs 150x150, 200x256 vs 200x200, 400x384 vs 400x300
-   - Pattern: zenavif often adds 56 or 84 pixels of height
-   - **Root cause:** Possibly decoding multiple frames/layers instead of primary
-
-4. **YUV to RGB Conversion Errors:** ✅ **MOSTLY FIXED** (2026-02-07):
-   - **Fixed:** Implemented bilinear chroma upsampling for YUV420
-   - `kodim03_yuv420_8bpc.avif`: **0.46% pixels wrong** (max error: 5) - down from 16%
-   - `kodim23_yuv420_8bpc.avif`: **0.62% pixels wrong** (max error: 2) - down from 25%
-   - **Impact:** YUV420 conversion is now 99%+ accurate
-   - **Remaining errors:** Likely rounding differences in conversion formula or chroma positioning
-   - `extended_pixi.avif`: Still has 50% error (8 pixels) - needs investigation
-
-**TODO:**
-1. Fix dimension mismatches (highest priority)
-2. ✅ Fix YUV to RGB conversion (99%+ accurate with bilinear upsampling)
-3. Implement RGB16/RGBA comparison in pixel_verification.rs
-4. Investigate whether grid stitching is correct behavior
-
-**Files:**
-- `/home/lilith/work/zenavif/Dockerfile.references`
-- `/home/lilith/work/zenavif/scripts/generate-references.sh`
-- `/home/lilith/work/zenavif/tests/zenavif-references/` (separate repo)
-- `/home/lilith/work/zenavif/tests/pixel_verification.rs`
-
-## Recent Changes
-
-### 2026-02-06: Managed API Migration Complete
-
-### ✅ Managed API Migration Complete
-
-The managed decoder (`src/decoder_managed.rs`) is now fully functional and is the default. Key accomplishments:
-
-1. **Fixed all compilation errors** (51 → 0)
-   - Fixed enum variant names (Mono → Monochrome, etc.)
-   - Fixed `ImageInfo` construction with all required fields
-   - Added `to_yuv_matrix()` helper for YUV color space conversion
-   - Fixed error handling with proper `map_err` usage
-
-2. **Implemented complete YUV to RGB conversion**
-   - Proper row-iterator-based approach matching chroma.rs API
-   - Support for all chroma subsampling modes (420, 422, 444, Monochrome)
-   - Both 8-bit and 16-bit (10/12-bit) conversion paths
-
-3. **Implemented alpha channel handling**
-   - Creates RGBA images when alpha is present
-   - Properly handles premultiplied alpha
-   - Uses rav1d-safe's zero-copy managed API
-
-4. **100% safe Rust**
-   - No unsafe code in the managed decoder
-   - `#![deny(unsafe_code)]` at module level
-   - Uses rav1d-safe's managed API exclusively
-
-### Build Status
-
-- `cargo build --no-default-features --features managed` ✅ SUCCESS
-- `cargo build --release` (default features) ✅ SUCCESS  
-- `cargo test --features managed` ✅ 7/7 PASS
-
-### Tasks Completed (2026-02-06 evening session)
-
-All tasks from the handoff document are now complete:
-
-1. ✅ **Remove C FFI dependencies** - Verified Cargo.toml uses `default-features = false` for rav1d-safe, ensuring c-ffi is NOT enabled
-2. ✅ **Delete/rename old decoder** - decoder.rs properly gated behind `#[cfg(feature = "asm")]`
-3. ✅ **Integration tests** - Downloaded 55 AVIF test vectors, created comprehensive test infrastructure
-4. ✅ **CI configuration** - Full GitHub Actions CI/CD workflows (test, clippy, fmt, coverage, cross-compile, release)
-5. ✅ **Performance optimization** - Added criterion benchmarks, fixed all compiler warnings
-
-### Performance Baselines
-
-Using criterion benchmarks (single-threaded managed decoder):
-- **Small image (1x1):** 21 µs
-- **Medium image (512x256 RGBA):** 3.2 ms
-
-Run with: `cargo bench --features managed`
-
-### CI/CD Pipeline
-
-- ✅ Multi-OS testing (Ubuntu, Windows, macOS)
-- ✅ Cross-compilation (aarch64, musl)
-- ✅ Code coverage with codecov
-- ✅ Clippy with `-D warnings`
-- ✅ Format checking
-- ✅ Automated crates.io release workflow
-
-### Documentation
-
-- ✅ Comprehensive README with badges, examples, feature docs
-- ✅ GitHub Actions workflows
-- ✅ Integration test infrastructure
-- ✅ Benchmark suite
-
-The core implementation is complete and production-ready!
-
-## TODO: Encoding Support (imazen/rav1e integration)
-
-### Target-Quality Convergence
-
-Add binary-search-over-quantizer to hit a target perceptual quality score. Decision needed on which metric to use:
-
-- **Butteraugli** (`butteraugli` crate, imazen/butteraugli v0.4.0) — Pure Rust port of Google's perceptual distance metric. Already in our ecosystem. Used internally by JPEG XL encoder for adaptive quantization. More granular at high quality. rav1e's AQ masking already uses it.
-- **SSIMULACRA2** — Current standard for perceptual image quality. Well-correlated with human perception, `fast-ssim2` crate exists. Used by JPEG XL tooling. Score range 0-100, ~70 is "good", ~90 is "excellent".
-
-Decide: Butteraugli or SSIMULACRA2 (or both)? Butteraugli is already a dependency for rav1e AQ masking.
-
-### Encoding API
-
-Wire imazen/rav1e fork features through zenavif:
-- `with_quantization_matrices(bool)` — enable QM (~10% BD-rate)
-- `with_variance_aq(bool, strength: f64)` — enable VAQ (~5-8% BD-rate)
-- `with_tune_still_image()` — Tune::StillImage mode (~3-5% BD-rate)
-- `with_filter_intra(bool)` — auto-enabled at speed ≤ 6 (~3-5% BD-rate)
-- `with_lossless()` — quantizer=0, mathematically lossless
-- `with_target_quality(score: f64)` — converge on SSIMULACRA2/Butteraugli target
+### Encoding Features (`encode-imazen` feature gate)
+All wired through to zenrav1e fork. Benchmarked results (ravif 7265eea):
+- `with_qm(true)` - only measurable win (~10% BD-rate). Default enabled.
+- `with_vaq()` - hurts quality; psychovisual tune already includes SSIM boost.
+- `tune_still_image` - no effect; ravif disables CDEF at high quality levels.
+- `with_lossless` - implemented, works.
