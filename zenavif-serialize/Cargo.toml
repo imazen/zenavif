@@ -1,6 +1,6 @@
 [package]
 name = "zenavif-serialize"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Kornel Lesiński <kornel@geekhood.net>", "Lilith River <lilith@imazen.io>"]
 edition = "2024"
 license = "BSD-3-Clause"
@@ -18,7 +18,7 @@ arrayvec = "0.7.6"
 [dev-dependencies]
 avif-parse = "2.0"
 mp4parse = "0.17"
-zenavif-parse = "0.3"
+zenavif-parse = "0.4"
 
 [badges]
 maintenance = { status = "passively-maintained" }

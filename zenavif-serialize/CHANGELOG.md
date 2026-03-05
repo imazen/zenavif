@@ -1,9 +1,14 @@
 # Changelog
 
-## Unreleased (since v0.1.0)
+## 0.1.1
+
+### Added
+- `ChromaSubsampling` named struct with constants (`NONE`, `YUV420`, `YUV422`)
+- `set_chroma_subsampling()` now accepts `impl Into<ChromaSubsampling>` (tuples still work)
 
 ### Changed
 - Comprehensive CI: 7-platform matrix, i686, WASM, Codecov
+- zenavif-parse dependency bumped to 0.4
 
 ## 0.1.0
 
