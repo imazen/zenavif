@@ -34,40 +34,34 @@ jobs:
           - { os: windows-11-arm, name: Windows arm64 }
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Test
-        run: cargo test
+      - name: Test (all features)
+        run: cargo test --all-features
 
   # ==========================================================================
   # Cross-compiled 32-bit testing (i686 via QEMU)
   # ==========================================================================
-  test-i686:
-    name: Test i686
+  i686:
+    name: Test (i686)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
         with:
-          targets: i686-unknown-linux-gnu
+          submodules: recursive
 
-      - name: Install cross
-        uses: taiki-e/install-action@cross
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cross
+      - uses: Swatinem/rust-cache@v2
         with:
           key: cross-i686
 
-      - name: Test (i686/QEMU)
-        run: cross test --target i686-unknown-linux-gnu
+      - name: Test (i686/QEMU, all features)
+        run: cross test --target i686-unknown-linux-gnu --all-features
 
   # ==========================================================================
   # WASM check
@@ -77,14 +71,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip1
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
 
       - name: Check WASM
         run: cargo check --target wasm32-wasip1
@@ -97,17 +87,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
 
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-features --all-targets -- -D warnings
 
   # ==========================================================================
   # Format check
@@ -117,9 +103,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
 
@@ -134,12 +118,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-
-      - name: Install cargo-hack
-        uses: taiki-e/install-action@cargo-hack
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-hack
+      - uses: Swatinem/rust-cache@v2
 
       - name: Check MSRV
         run: cargo hack check --rust-version
@@ -150,26 +131,23 @@ jobs:
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: Swatinem/rust-cache@v2
 
       - name: Generate coverage
-        run: cargo llvm-cov --lcov --output-path lcov.info
+        run: cargo llvm-cov --all-features --lcov --output-path lcov.info
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v5
         with:
           files: lcov.info
           fail_ci_if_error: false
+        continue-on-error: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
