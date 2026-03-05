@@ -1,8 +1,14 @@
 # Changelog
 
-## Unreleased (since v0.3.0)
+## 0.4.0
+
+### Added
+- `ChromaSubsampling` named struct with constants (`NONE`, `YUV420`, `YUV422`)
+- `From<(bool, bool)>` and `From<ChromaSubsampling> for (bool, bool)` for compat
 
 ### Changed
+- **Breaking:** `AV1Metadata::chroma_subsampling` field type changed from `(bool, bool)` to `ChromaSubsampling`
+- `enough` dependency bumped to 0.4
 - Edition 2024
 - Comprehensive CI: 6-platform matrix, i686, WASM, Codecov
 
