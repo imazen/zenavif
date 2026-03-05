@@ -1,7 +1,7 @@
 #![allow(unused)]
 #![allow(bad_style)]
 
-use crate::{Error, Result};
+use crate::{ChromaSubsampling, Error, Result};
 
 use bitreader::BitReader;
 use std::num::{NonZeroU8, NonZeroU32};
@@ -219,7 +219,7 @@ pub(crate) struct SequenceHeaderObu {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ColorConfig {
-    pub chroma_subsampling: (bool, bool),
+    pub chroma_subsampling: ChromaSubsampling,
     pub chroma_sample_position: u8,
     pub separate_uv_delta_q: bool,
     pub color_range: u8,
@@ -268,7 +268,7 @@ fn color_config(b: &mut BitReader, seq_profile: u8) -> Result<ColorConfig> {
     let color_range;
     if monochrome {
         color_range = b.read_u8(1)?;
-        chroma_subsampling = (false, false);
+        chroma_subsampling = ChromaSubsampling::NONE;
         chroma_sample_position = 0;
         separate_uv_delta_q = false;
     } else if color_primaries == 1 //Bt709
@@ -276,27 +276,27 @@ fn color_config(b: &mut BitReader, seq_profile: u8) -> Result<ColorConfig> {
         && matrix_coefficients == 0
     {
         color_range = 1;
-        chroma_subsampling = (false, false);
+        chroma_subsampling = ChromaSubsampling::NONE;
         chroma_sample_position = 0;
         separate_uv_delta_q = false;
     } else {
         color_range = b.read_u8(1)?;
         if seq_profile == 0 {
-            chroma_subsampling = (true, true);
+            chroma_subsampling = ChromaSubsampling::YUV420;
         } else if seq_profile == 1 {
-            chroma_subsampling = (false, false);
+            chroma_subsampling = ChromaSubsampling::NONE;
         } else if bit_depth == 12 {
             let x = b.read_bool()?;
             chroma_subsampling = if x {
-                (x, b.read_bool()?)
+                ChromaSubsampling { horizontal: x, vertical: b.read_bool()? }
             } else {
-                (false, false)
+                ChromaSubsampling::NONE
             }
         } else {
-            chroma_subsampling = (true, false);
+            chroma_subsampling = ChromaSubsampling::YUV422;
         }
         debug_assert!(!monochrome);
-        chroma_sample_position = if chroma_subsampling.0 && chroma_subsampling.1 { b.read_u8(2)? } else { 0 };
+        chroma_sample_position = if chroma_subsampling.horizontal && chroma_subsampling.vertical { b.read_u8(2)? } else { 0 };
         separate_uv_delta_q = b.read_bool()?;
     }
 

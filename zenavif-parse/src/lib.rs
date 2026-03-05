@@ -926,6 +926,40 @@ impl AvifData {
     }
 }
 
+/// Chroma subsampling configuration for AV1/AVIF.
+///
+/// `(false, false)` = 4:4:4 (no subsampling).
+/// `(true, true)` = 4:2:0 (both axes subsampled).
+/// `(true, false)` = 4:2:2 (horizontal only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChromaSubsampling {
+    /// Whether the horizontal (X) axis is subsampled.
+    pub horizontal: bool,
+    /// Whether the vertical (Y) axis is subsampled.
+    pub vertical: bool,
+}
+
+impl ChromaSubsampling {
+    /// 4:4:4 — no chroma subsampling.
+    pub const NONE: Self = Self { horizontal: false, vertical: false };
+    /// 4:2:0 — both axes subsampled.
+    pub const YUV420: Self = Self { horizontal: true, vertical: true };
+    /// 4:2:2 — horizontal subsampling only.
+    pub const YUV422: Self = Self { horizontal: true, vertical: false };
+}
+
+impl From<(bool, bool)> for ChromaSubsampling {
+    fn from((h, v): (bool, bool)) -> Self {
+        Self { horizontal: h, vertical: v }
+    }
+}
+
+impl From<ChromaSubsampling> for (bool, bool) {
+    fn from(cs: ChromaSubsampling) -> Self {
+        (cs.horizontal, cs.vertical)
+    }
+}
+
 /// AV1 sequence header metadata parsed from an OBU bitstream.
 ///
 /// See [`AvifParser::primary_metadata()`] and [`AV1Metadata::parse_av1_bitstream()`].
@@ -940,8 +974,9 @@ pub struct AV1Metadata {
     pub bit_depth: u8,
     /// 0, 1 or 2 for the level of complexity
     pub seq_profile: u8,
-    /// Horizontal and vertical. `false` is full-res.
-    pub chroma_subsampling: (bool, bool),
+    /// Chroma subsampling. Use named fields (`horizontal`, `vertical`) or
+    /// constants like [`ChromaSubsampling::YUV420`].
+    pub chroma_subsampling: ChromaSubsampling,
     pub monochrome: bool,
 }
 
