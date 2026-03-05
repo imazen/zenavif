@@ -15,6 +15,9 @@ env:
   CI: true
 
 jobs:
+  # ==========================================================================
+  # Native testing (6-platform matrix)
+  # ==========================================================================
   test:
     name: Test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
@@ -22,42 +25,42 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux x64
-            os: ubuntu-latest
-          - name: Linux aarch64
-            os: ubuntu-24.04-arm
-          - name: macOS arm64
-            os: macos-latest
-          - name: macOS x64
-            os: macos-26-intel
-          - name: Windows x64
-            os: windows-latest
-          - name: Windows arm64
-            os: windows-11-arm
+          - { os: ubuntu-latest, name: Linux x64 }
+          - { os: ubuntu-24.04-arm, name: Linux aarch64 }
+          - { os: macos-latest, name: macOS arm64 }
+          - { os: macos-26-intel, name: macOS x64 }
+          - { os: windows-latest, name: Windows x64 }
+          - { os: windows-11-arm, name: Windows arm64 }
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Run tests
+
+      - name: Test
         run: cargo test
 
+  # ==========================================================================
+  # Cross-compiled 32-bit testing (i686 via QEMU)
+  # ==========================================================================
   i686:
-    name: Test (Linux i686)
+    name: Test (i686)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: i686-unknown-linux-gnu
       - uses: taiki-e/install-action@cross
       - uses: Swatinem/rust-cache@v2
         with:
           key: cross-i686
-      - name: Run tests (i686)
+
+      - name: Test (i686/QEMU)
         run: cross test --target i686-unknown-linux-gnu
 
+  # ==========================================================================
+  # WASM check
+  # ==========================================================================
   wasm:
-    name: WASM check
+    name: WASM (wasm32-wasip1)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -65,9 +68,13 @@ jobs:
         with:
           targets: wasm32-wasip1
       - uses: Swatinem/rust-cache@v2
+
       - name: Check WASM
         run: cargo check --target wasm32-wasip1
 
+  # ==========================================================================
+  # Clippy
+  # ==========================================================================
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
@@ -77,9 +84,13 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
 
+  # ==========================================================================
+  # Format check
+  # ==========================================================================
   fmt:
     name: Format
     runs-on: ubuntu-latest
@@ -88,9 +99,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - name: Check formatting
+
+      - name: Format check
         run: cargo fmt --all -- --check
 
+  # ==========================================================================
+  # MSRV check
+  # ==========================================================================
   msrv:
     name: MSRV
     runs-on: ubuntu-latest
@@ -99,9 +114,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-hack
       - uses: Swatinem/rust-cache@v2
+
       - name: Check MSRV
         run: cargo hack check --rust-version
 
+  # ==========================================================================
+  # Code coverage
+  # ==========================================================================
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
@@ -110,9 +129,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: Swatinem/rust-cache@v2
+
       - name: Generate coverage
         run: cargo llvm-cov --lcov --output-path lcov.info
-      - name: Upload coverage
+
+      - name: Upload to Codecov
         uses: codecov/codecov-action@v5
         with:
           files: lcov.info
