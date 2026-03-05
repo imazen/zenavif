@@ -702,7 +702,7 @@ impl AvifDecoderConfig {
     ) -> Result<ImageInfo, Error> {
         let output = self.decode(data)?;
         let info = output.info().clone();
-        let src = output.into_pixels().to_rgb8();
+        let src = output.into_buffer().to_rgb8();
         let src_ref = src.as_imgref();
         let w = dst.width().min(src_ref.width());
         let h = dst.height().min(src_ref.height());
@@ -722,7 +722,7 @@ impl AvifDecoderConfig {
     ) -> Result<ImageInfo, Error> {
         let output = self.decode(data)?;
         let info = output.info().clone();
-        let src = output.into_pixels().to_rgba8();
+        let src = output.into_buffer().to_rgba8();
         let src_ref = src.as_imgref();
         let w = dst.width().min(src_ref.width());
         let h = dst.height().min(src_ref.height());
@@ -743,7 +743,7 @@ impl AvifDecoderConfig {
         use linear_srgb::default::srgb_u8_to_linear;
         let output = self.decode(data)?;
         let info = output.info().clone();
-        let src = output.into_pixels().to_rgb8();
+        let src = output.into_buffer().to_rgb8();
         let src_ref = src.as_imgref();
         let w = dst.width().min(src_ref.width());
         let h = dst.height().min(src_ref.height());
@@ -770,7 +770,7 @@ impl AvifDecoderConfig {
         use linear_srgb::default::srgb_u8_to_linear;
         let output = self.decode(data)?;
         let info = output.info().clone();
-        let src = output.into_pixels().to_rgba8();
+        let src = output.into_buffer().to_rgba8();
         let src_ref = src.as_imgref();
         let w = dst.width().min(src_ref.width());
         let h = dst.height().min(src_ref.height());
@@ -798,7 +798,7 @@ impl AvifDecoderConfig {
         use linear_srgb::default::srgb_u8_to_linear;
         let output = self.decode(data)?;
         let info = output.info().clone();
-        let src = output.into_pixels().to_rgb8();
+        let src = output.into_buffer().to_rgb8();
         let src_ref = src.as_imgref();
         let w = dst.width().min(src_ref.width());
         let h = dst.height().min(src_ref.height());
@@ -1438,7 +1438,7 @@ mod tests {
         ];
         let img = Img::new(pixels, 8, 8);
         let output = enc.encode_rgb8(img.as_ref()).unwrap();
-        assert!(!output.bytes().is_empty());
+        assert!(!output.data().is_empty());
         assert_eq!(output.format(), ImageFormat::Avif);
     }
 
@@ -1457,7 +1457,7 @@ mod tests {
         ];
         let img = Img::new(pixels, 8, 8);
         let output = enc.encode_rgba8(img.as_ref()).unwrap();
-        assert!(!output.bytes().is_empty());
+        assert!(!output.data().is_empty());
     }
 
     #[cfg(feature = "encode")]
@@ -1467,7 +1467,7 @@ mod tests {
         let pixels = vec![rgb::Gray::new(128u8); 64];
         let img = Img::new(pixels, 8, 8);
         let output = enc.encode_gray8(img.as_ref()).unwrap();
-        assert!(!output.bytes().is_empty());
+        assert!(!output.data().is_empty());
     }
 
     #[cfg(feature = "encode")]
@@ -1493,7 +1493,7 @@ mod tests {
             .unwrap()
             .encode_rgb8(PixelSlice::from(img.as_ref()))
             .unwrap();
-        assert!(!output.bytes().is_empty());
+        assert!(!output.data().is_empty());
     }
 
     #[cfg(feature = "encode")]
@@ -1514,7 +1514,7 @@ mod tests {
         let encoded = enc.encode_rgb8(img.as_ref()).unwrap();
 
         let dec = AvifDecoderConfig::new();
-        let output = dec.decode(encoded.bytes()).unwrap();
+        let output = dec.decode(encoded.data()).unwrap();
         assert_eq!(output.info().width, 8);
         assert_eq!(output.info().height, 8);
         assert_eq!(output.info().format, ImageFormat::Avif);
@@ -1542,7 +1542,7 @@ mod tests {
                 .with_quality(100.0)
                 .with_effort_u32(10);
             let output = enc.encode_rgb_f32(img.as_ref()).unwrap();
-            assert!(!output.bytes().is_empty());
+            assert!(!output.data().is_empty());
 
             let dec = AvifDecoderConfig::new();
             let dst = vec![
@@ -1555,7 +1555,7 @@ mod tests {
             ];
             let mut dst_img = imgref::ImgVec::new(dst, 16, 16);
             let _info = dec
-                .decode_into_rgb_f32(output.bytes(), dst_img.as_mut())
+                .decode_into_rgb_f32(output.data(), dst_img.as_mut())
                 .unwrap();
 
             for p in dst_img.buf().iter() {
@@ -1587,7 +1587,7 @@ mod tests {
             .with_quality(100.0)
             .with_effort_u32(10);
         let output = enc.encode_rgba_f32(img.as_ref()).unwrap();
-        assert!(!output.bytes().is_empty());
+        assert!(!output.data().is_empty());
 
         let dec = AvifDecoderConfig::new();
         let mut dst_img = imgref::ImgVec::new(
@@ -1603,7 +1603,7 @@ mod tests {
             16,
             16,
         );
-        dec.decode_into_rgba_f32(output.bytes(), dst_img.as_mut())
+        dec.decode_into_rgba_f32(output.data(), dst_img.as_mut())
             .unwrap();
 
         for p in dst_img.buf().iter() {
@@ -1626,11 +1626,11 @@ mod tests {
             .with_quality(100.0)
             .with_effort_u32(10);
         let output = enc.encode_gray_f32(img.as_ref()).unwrap();
-        assert!(!output.bytes().is_empty());
+        assert!(!output.data().is_empty());
 
         let dec = AvifDecoderConfig::new();
         let mut dst_img = imgref::ImgVec::new(vec![Gray(0.0f32); 16 * 16], 16, 16);
-        dec.decode_into_gray_f32(output.bytes(), dst_img.as_mut())
+        dec.decode_into_gray_f32(output.data(), dst_img.as_mut())
             .unwrap();
 
         for p in dst_img.buf().iter() {
@@ -1703,7 +1703,7 @@ mod tests {
         let config = AvifDecoderConfig::new();
         let decoded = config
             .job()
-            .decoder(encoded.bytes(), &[])
+            .decoder(encoded.data(), &[])
             .unwrap()
             .decode()
             .unwrap();
