@@ -21,6 +21,40 @@ use std::io;
 // Re-export box types needed by the public API
 pub use crate::boxes::{Av1CBox, ClapBox, ClliBox, ColrBox, ColrIccBox, IrotBox, ImirBox, MdcvBox, PaspBox};
 
+/// Chroma subsampling configuration for AV1 encoding.
+///
+/// `(false, false)` = 4:4:4 (no subsampling).
+/// `(true, true)` = 4:2:0 (both axes subsampled).
+/// `(true, false)` = 4:2:2 (horizontal only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChromaSubsampling {
+    /// Whether the horizontal (X) axis is subsampled.
+    pub horizontal: bool,
+    /// Whether the vertical (Y) axis is subsampled.
+    pub vertical: bool,
+}
+
+impl ChromaSubsampling {
+    /// 4:4:4 — no chroma subsampling.
+    pub const NONE: Self = Self { horizontal: false, vertical: false };
+    /// 4:2:0 — both axes subsampled.
+    pub const YUV420: Self = Self { horizontal: true, vertical: true };
+    /// 4:2:2 — horizontal subsampling only.
+    pub const YUV422: Self = Self { horizontal: true, vertical: false };
+}
+
+impl From<(bool, bool)> for ChromaSubsampling {
+    fn from((h, v): (bool, bool)) -> Self {
+        Self { horizontal: h, vertical: v }
+    }
+}
+
+impl From<ChromaSubsampling> for (bool, bool) {
+    fn from(cs: ChromaSubsampling) -> Self {
+        (cs.horizontal, cs.vertical)
+    }
+}
+
 /// Config for the serialization (allows setting advanced image properties).
 ///
 /// See [`Aviffy::new`].
@@ -35,7 +69,7 @@ pub struct Aviffy {
     pasp: Option<PaspBox>,
     icc_profile: Option<Vec<u8>>,
     min_seq_profile: u8,
-    chroma_subsampling: (bool, bool),
+    chroma_subsampling: ChromaSubsampling,
     monochrome: bool,
     width: u32,
     height: u32,
@@ -85,7 +119,7 @@ impl Aviffy {
         Self {
             premultiplied_alpha: false,
             min_seq_profile: 1,
-            chroma_subsampling: (false, false),
+            chroma_subsampling: ChromaSubsampling::NONE,
             monochrome: false,
             width: 0,
             height: 0,
@@ -313,8 +347,8 @@ impl Aviffy {
             high_bitdepth: color_depth_bits >= 10,
             twelve_bit: color_depth_bits >= 12,
             monochrome: self.monochrome,
-            chroma_subsampling_x: self.chroma_subsampling.0,
-            chroma_subsampling_y: self.chroma_subsampling.1,
+            chroma_subsampling_x: self.chroma_subsampling.horizontal,
+            chroma_subsampling_y: self.chroma_subsampling.vertical,
             chroma_sample_position: 0,
         })).ok_or(io::ErrorKind::InvalidInput)?;
 
@@ -520,13 +554,15 @@ impl Aviffy {
         out
     }
 
-    /// `(false, false)` is 4:4:4
-    /// `(true, true)` is 4:2:0
+    /// Set chroma subsampling. Use [`ChromaSubsampling::NONE`] for 4:4:4,
+    /// [`ChromaSubsampling::YUV420`] for 4:2:0, etc.
+    ///
+    /// Also accepts `(bool, bool)` tuples for backward compatibility.
     ///
     /// `chroma_sample_position` is always 0. Don't use chroma subsampling with AVIF.
     #[inline]
-    pub fn set_chroma_subsampling(&mut self, subsampled_xy: (bool, bool)) -> &mut Self {
-        self.chroma_subsampling = subsampled_xy;
+    pub fn set_chroma_subsampling(&mut self, subsampling: impl Into<ChromaSubsampling>) -> &mut Self {
+        self.chroma_subsampling = subsampling.into();
         self
     }
 
