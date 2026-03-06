@@ -4,6 +4,7 @@
 
 // YUV conversion functions naturally require many plane/stride/dimension/matrix/range parameters.
 #![allow(clippy::too_many_arguments)]
+#![allow(dead_code)]
 
 use crate::yuv_convert::{YuvMatrix, YuvRange};
 #[cfg(target_arch = "x86_64")]

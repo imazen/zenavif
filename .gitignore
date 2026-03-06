@@ -1,4 +1,5 @@
 /target
+/debug_simd
 
 # Test vectors (large binary files - download with scripts/download-avif-test-vectors.sh)
 tests/vectors/

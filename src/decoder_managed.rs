@@ -1303,11 +1303,13 @@ impl ManagedAvifDecoder {
     }
 
     /// Whether this image is a grid (tiled) image.
+    #[allow(dead_code)]
     pub(crate) fn is_grid(&self) -> bool {
         self.parser.grid_config().is_some()
     }
 
     /// Grid configuration, if this is a grid image.
+    #[allow(dead_code)]
     pub(crate) fn grid_config(&self) -> Option<zenavif_parse::GridConfig> {
         self.parser.grid_config().cloned()
     }
@@ -1316,6 +1318,7 @@ impl ManagedAvifDecoder {
     ///
     /// Each tile is decoded from AV1 and color-converted before the next,
     /// so peak memory is one raw Frame + one converted PixelBuffer per tile.
+    #[allow(dead_code)]
     pub(crate) fn decode_tile_row(
         &mut self,
         grid_row: usize,
@@ -1329,11 +1332,8 @@ impl ManagedAvifDecoder {
                 .parser
                 .tile_data(tile_idx)
                 .map_err(|e| at(Error::from(e)))?;
-            let frame = Self::decode_frame(
-                &mut self.decoder,
-                &tile_data,
-                "Failed to decode grid tile",
-            )?;
+            let frame =
+                Self::decode_frame(&mut self.decoder, &tile_data, "Failed to decode grid tile")?;
             let (pixels, _info) = self.convert_to_image(frame, None, stop)?;
             row_tiles.push(pixels);
         }
@@ -1431,8 +1431,7 @@ impl ManagedAvifDecoder {
                     let src = tile_slice.row(py as u32);
                     let copy_bytes = actual_w * bpp;
                     let dst_start = x_offset * bpp;
-                    dst_row[dst_start..dst_start + copy_bytes]
-                        .copy_from_slice(&src[..copy_bytes]);
+                    dst_row[dst_start..dst_start + copy_bytes].copy_from_slice(&src[..copy_bytes]);
                     x_offset += tile_w;
                 }
             }

@@ -13,20 +13,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = DecoderConfig::new().threads(1);
     match decode_with(&data, &config, &Unstoppable) {
         Ok(image) => {
-            use zencodec_types::PixelDescriptor;
+            use zenpixels::PixelDescriptor;
             println!(
                 "✓ SUCCESS! Decoded image: {}x{}",
                 image.width(),
                 image.height()
             );
             let desc = image.descriptor();
-            let fmt = if desc.layout_compatible(&PixelDescriptor::RGB8) {
+            let fmt = if desc.layout_compatible(PixelDescriptor::RGB8) {
                 "RGB8"
-            } else if desc.layout_compatible(&PixelDescriptor::RGBA8) {
+            } else if desc.layout_compatible(PixelDescriptor::RGBA8) {
                 "RGBA8"
-            } else if desc.layout_compatible(&PixelDescriptor::RGB16) {
+            } else if desc.layout_compatible(PixelDescriptor::RGB16) {
                 "RGB16"
-            } else if desc.layout_compatible(&PixelDescriptor::RGBA16) {
+            } else if desc.layout_compatible(PixelDescriptor::RGBA16) {
                 "RGBA16"
             } else {
                 "Other"

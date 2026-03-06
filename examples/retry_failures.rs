@@ -2,7 +2,7 @@ use std::fs;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 use std::time::Instant;
-use zencodec_types::PixelDescriptor;
+use zenpixels::PixelDescriptor;
 
 fn zenavif_output_dir() -> String {
     std::env::var("ZENAVIF_OUTPUT_DIR").unwrap_or_else(|_| "/mnt/v/output/zenavif".into())
@@ -23,7 +23,7 @@ fn main() {
 
     let start = Instant::now();
 
-    for (_i, path_str) in paths.iter().enumerate() {
+    for path_str in paths.iter() {
         let path = Path::new(path_str);
         let name = path.file_name().unwrap_or_default().to_string_lossy();
 
@@ -44,13 +44,13 @@ fn main() {
             Ok(Ok(img)) => {
                 passed += 1;
                 let desc = img.descriptor();
-                let dims = if desc.layout_compatible(&PixelDescriptor::RGB8) {
+                let dims = if desc.layout_compatible(PixelDescriptor::RGB8) {
                     format!("{}x{} rgb8", img.width(), img.height())
-                } else if desc.layout_compatible(&PixelDescriptor::RGBA8) {
+                } else if desc.layout_compatible(PixelDescriptor::RGBA8) {
                     format!("{}x{} rgba8", img.width(), img.height())
-                } else if desc.layout_compatible(&PixelDescriptor::RGB16) {
+                } else if desc.layout_compatible(PixelDescriptor::RGB16) {
                     format!("{}x{} rgb16", img.width(), img.height())
-                } else if desc.layout_compatible(&PixelDescriptor::RGBA16) {
+                } else if desc.layout_compatible(PixelDescriptor::RGBA16) {
                     format!("{}x{} rgba16", img.width(), img.height())
                 } else {
                     format!("{}x{} {:?}", img.width(), img.height(), desc)

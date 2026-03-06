@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 #![allow(clippy::too_many_arguments)]
+#![allow(dead_code)]
 
 use crate::yuv_convert::{YuvMatrix, YuvRange};
 use archmage::prelude::*; // Includes core::arch and safe_unaligned_simd

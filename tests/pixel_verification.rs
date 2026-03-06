@@ -19,7 +19,7 @@ use enough::Unstoppable;
 use std::fs;
 use std::path::{Path, PathBuf};
 use zenavif::{DecoderConfig, decode_with};
-use zencodec_types::{PixelBuffer, PixelDescriptor};
+use zenpixels::{PixelBuffer, PixelDescriptor};
 
 /// Generate reference PNGs for a test file
 /// This should be run once to create the reference images
@@ -40,7 +40,7 @@ fn generate_reference(
 
     // Convert to image-rs format and save
     let desc = image.descriptor();
-    if desc.layout_compatible(&PixelDescriptor::RGB8) {
+    if desc.layout_compatible(PixelDescriptor::RGB8) {
         let img = image.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
         let width = img.width() as u32;
         let height = img.height() as u32;
@@ -54,7 +54,7 @@ fn generate_reference(
         }
 
         buffer.save(&output_path)?;
-    } else if desc.layout_compatible(&PixelDescriptor::RGBA8) {
+    } else if desc.layout_compatible(PixelDescriptor::RGBA8) {
         let img = image.try_as_imgref::<rgb::Rgba<u8>>().unwrap();
         let width = img.width() as u32;
         let height = img.height() as u32;
@@ -68,7 +68,7 @@ fn generate_reference(
         }
 
         buffer.save(&output_path)?;
-    } else if desc.layout_compatible(&PixelDescriptor::RGB16) {
+    } else if desc.layout_compatible(PixelDescriptor::RGB16) {
         let img = image.try_as_imgref::<rgb::Rgb<u16>>().unwrap();
         // Convert 16-bit to 8-bit for PNG
         let width = img.width() as u32;
@@ -110,7 +110,7 @@ fn compare_against_reference(
     let reference = image::open(reference_path)?;
 
     let desc = image.descriptor();
-    if desc.layout_compatible(&PixelDescriptor::RGB8) {
+    if desc.layout_compatible(PixelDescriptor::RGB8) {
         let img = image.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
         let ref_rgb = reference.to_rgb8();
         if img.width() != ref_rgb.width() as usize || img.height() != ref_rgb.height() as usize {
@@ -132,9 +132,9 @@ fn compare_against_reference(
                 let our_pixel = img[(x, y)];
                 let ref_pixel = ref_rgb.get_pixel(x as u32, y as u32);
 
-                let diff_r = (our_pixel.r as i16 - ref_pixel[0] as i16).abs() as u8;
-                let diff_g = (our_pixel.g as i16 - ref_pixel[1] as i16).abs() as u8;
-                let diff_b = (our_pixel.b as i16 - ref_pixel[2] as i16).abs() as u8;
+                let diff_r = (our_pixel.r as i16 - ref_pixel[0] as i16).unsigned_abs() as u8;
+                let diff_g = (our_pixel.g as i16 - ref_pixel[1] as i16).unsigned_abs() as u8;
+                let diff_b = (our_pixel.b as i16 - ref_pixel[2] as i16).unsigned_abs() as u8;
 
                 let max_channel_diff = diff_r.max(diff_g).max(diff_b);
 

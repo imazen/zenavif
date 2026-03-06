@@ -31,10 +31,7 @@ fn main() {
             } => {
                 println!(
                     "NCLX: cp={} tc={} mc={} full_range={}",
-                    *color_primaries as u16,
-                    *transfer_characteristics as u16,
-                    *matrix_coefficients as u16,
-                    full_range
+                    *color_primaries, *transfer_characteristics, *matrix_coefficients, full_range
                 );
             }
             zenavif_parse::ColorInformation::IccProfile(data) => {

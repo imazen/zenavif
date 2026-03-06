@@ -3,6 +3,7 @@
 //! Test if compiler can auto-vectorize with better hints
 
 #![allow(clippy::too_many_arguments)]
+#![allow(dead_code)]
 
 use crate::yuv_convert::{YuvMatrix, YuvRange};
 use imgref::ImgVec;

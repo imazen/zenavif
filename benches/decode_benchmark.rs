@@ -1,7 +1,8 @@
 //! Benchmarks for zenavif decoder
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use enough::Unstoppable;
+use std::hint::black_box;
 use zenavif::{DecoderConfig, decode_with};
 
 // Include test images as bytes

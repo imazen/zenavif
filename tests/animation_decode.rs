@@ -78,7 +78,7 @@ fn decode_12bpc_keyframes() {
 
     // 12bpc should produce 16-bit output
     for (i, frame) in anim.frames.iter().enumerate() {
-        let is_16bit = frame.pixels.descriptor().channel_type.byte_size() == 2;
+        let is_16bit = frame.pixels.descriptor().channel_type().byte_size() == 2;
         assert!(is_16bit, "frame {i} should be 16-bit for 12bpc source");
     }
 
@@ -159,9 +159,9 @@ fn decode_12bpc_produces_16bit_with_full_range() {
     let anim = decode_animation(&data).unwrap();
 
     for (i, frame) in anim.frames.iter().enumerate() {
-        use zencodec_types::PixelDescriptor;
+        use zenpixels::PixelDescriptor;
         let desc = frame.pixels.descriptor();
-        if desc.layout_compatible(&PixelDescriptor::RGBA16) {
+        if desc.layout_compatible(PixelDescriptor::RGBA16) {
             let img = frame.pixels.try_as_imgref::<rgb::Rgba<u16>>().unwrap();
             // Check that at least some pixels use values > 255 (proving 16-bit)
             let max_val = img
@@ -179,7 +179,7 @@ fn decode_12bpc_produces_16bit_with_full_range() {
                 max_val > 255,
                 "12bpc should produce values > 255, got max={max_val}"
             );
-        } else if desc.layout_compatible(&PixelDescriptor::RGB16) {
+        } else if desc.layout_compatible(PixelDescriptor::RGB16) {
             let img = frame.pixels.try_as_imgref::<rgb::Rgb<u16>>().unwrap();
             let max_val = img
                 .buf()
@@ -390,7 +390,7 @@ fn frame_by_frame_12bpc() {
 
     let mut decoded_count = 0;
     while let Some(frame) = decoder.next_frame(&Unstoppable).unwrap() {
-        let is_16bit = frame.pixels.descriptor().channel_type.byte_size() == 2;
+        let is_16bit = frame.pixels.descriptor().channel_type().byte_size() == 2;
         assert!(
             is_16bit,
             "frame {} should be 16-bit for 12bpc source",
@@ -523,7 +523,7 @@ fn animation_encode_decode_roundtrip_rgb16() {
         assert_eq!(frame.duration_ms, 100, "frame {i} duration");
 
         // 10-bit source should decode to 16-bit output
-        let is_16bit = frame.pixels.descriptor().channel_type.byte_size() == 2;
+        let is_16bit = frame.pixels.descriptor().channel_type().byte_size() == 2;
         assert!(
             is_16bit,
             "frame {i} should be 16-bit for 10-bit source, got {:?}",
@@ -593,7 +593,7 @@ fn animation_encode_decode_roundtrip_rgba16() {
         let is_rgba16 = frame
             .pixels
             .descriptor()
-            .layout_compatible(&zencodec_types::PixelDescriptor::RGBA16);
+            .layout_compatible(zenpixels::PixelDescriptor::RGBA16);
         assert!(is_rgba16, "frame {i} should be RGBA16 for 10-bit source");
     }
 }

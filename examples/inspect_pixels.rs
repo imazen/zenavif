@@ -1,5 +1,5 @@
 use std::fs;
-use zencodec_types::PixelDescriptor;
+use zenpixels::PixelDescriptor;
 
 fn main() {
     let path = std::env::args()
@@ -10,7 +10,7 @@ fn main() {
     let img = zenavif::decode_with(&data, &config, &zenavif::Unstoppable).unwrap();
 
     let desc = img.descriptor();
-    if desc.layout_compatible(&PixelDescriptor::RGB8) {
+    if desc.layout_compatible(PixelDescriptor::RGB8) {
         let buf = img.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
         println!("RGB8 {}x{}", buf.width(), buf.height());
         for y in 0..3.min(buf.height()) {
@@ -36,7 +36,7 @@ fn main() {
             sg as f64 / count as f64,
             sb as f64 / count as f64
         );
-    } else if desc.layout_compatible(&PixelDescriptor::RGBA8) {
+    } else if desc.layout_compatible(PixelDescriptor::RGBA8) {
         let buf = img.try_as_imgref::<rgb::Rgba<u8>>().unwrap();
         println!("RGBA8 {}x{}", buf.width(), buf.height());
         for y in 0..3.min(buf.height()) {

@@ -1,10 +1,10 @@
 //! # zenavif
 //!
-//! Pure Rust AVIF image codec powered by [rav1d](https://github.com/memorysafety/rav1d)
-//! and [ravif](https://lib.rs/crates/ravif).
+//! Pure Rust AVIF image codec powered by [rav1d-safe](https://github.com/memorysafety/rav1d)
+//! and [zenravif](https://lib.rs/crates/zenravif).
 //!
-//! This crate provides a safe, ergonomic API for decoding and encoding AVIF images
-//! using the pure Rust rav1d AV1 decoder and avif-parse container parser.
+//! Decodes and encodes AVIF images using the pure Rust rav1d AV1 decoder
+//! and zenavif-parse container parser.
 //!
 //! ## Quick Start
 //!
@@ -13,20 +13,21 @@
 //!
 //! let avif_data = std::fs::read("image.avif").unwrap();
 //! let image = decode(&avif_data).unwrap();
-//! println!("{}x{} {:?}", image.width(), image.height(), image.descriptor());
+//! println!("{}x{}", image.width(), image.height());
 //! ```
 //!
 //! ## Features
 //!
-//! - **`asm`**: Hand-written assembly (fastest, uses C FFI) — overrides the default managed decoder
-//! - **`encode`**: AVIF encoding via ravif
+//! - **`unsafe-asm`**: Hand-written assembly decoder via C FFI (fastest) — overrides the default safe decoder
+//! - **`encode`**: AVIF encoding via zenravif
+//! - **`zencodec`**: Integration with [`zencodec-types`](https://crates.io/crates/zencodec-types) traits
 //!
-//! The default decoder uses rav1d-safe's managed API which is completely safe Rust
+//! The default decoder uses rav1d-safe's managed API — completely safe Rust
 //! with zero unsafe code in the entire decode path.
 //!
 //! ## Configuration
 //!
-//! For more control over decoding, use `decode_with` with a `DecoderConfig`:
+//! For more control over decoding, use [`decode_with`] with a [`DecoderConfig`]:
 //!
 //! ```no_run
 //! use zenavif::{decode_with, DecoderConfig};
@@ -41,6 +42,12 @@
 //! let image = decode_with(&avif_data, &config, &Unstoppable).unwrap();
 //! ```
 
+#![cfg_attr(
+    not(any(feature = "unsafe-asm", feature = "_dev")),
+    forbid(unsafe_code)
+)]
+#![cfg_attr(feature = "_dev", deny(unsafe_code))]
+
 mod config;
 mod convert;
 #[cfg(feature = "unsafe-asm")]
@@ -50,16 +57,29 @@ mod decoder_managed;
 mod encoder;
 mod error;
 mod image;
+#[cfg(feature = "_dev")]
 pub mod simd;
-#[doc(hidden)]
+#[cfg(not(feature = "_dev"))]
+pub(crate) mod simd;
+#[cfg(feature = "_dev")]
 pub mod yuv_convert;
-#[cfg(target_arch = "x86_64")]
-#[doc(hidden)]
+#[cfg(not(feature = "_dev"))]
+pub(crate) mod yuv_convert;
+#[cfg(all(target_arch = "x86_64", feature = "_dev"))]
+#[allow(unsafe_code)]
 pub mod yuv_convert_fast;
+#[cfg(feature = "_dev")]
 pub mod yuv_convert_libyuv;
+#[cfg(not(feature = "_dev"))]
+pub(crate) mod yuv_convert_libyuv;
+#[cfg(feature = "_dev")]
 pub mod yuv_convert_libyuv_autovec;
-#[cfg(target_arch = "x86_64")]
+#[cfg(not(feature = "_dev"))]
+pub(crate) mod yuv_convert_libyuv_autovec;
+#[cfg(all(target_arch = "x86_64", feature = "_dev"))]
 pub mod yuv_convert_libyuv_simd;
+#[cfg(all(target_arch = "x86_64", not(feature = "_dev")))]
+pub(crate) mod yuv_convert_libyuv_simd;
 #[cfg(feature = "zencodec")]
 mod zencodec;
 

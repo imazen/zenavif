@@ -7,7 +7,7 @@ use enough::Unstoppable;
 use std::fs;
 use std::path::PathBuf;
 use zenavif::{DecoderConfig, decode_with};
-use zencodec_types::PixelDescriptor;
+use zenpixels::PixelDescriptor;
 
 fn find_test_vectors() -> Vec<PathBuf> {
     let mut vectors = Vec::new();
@@ -65,17 +65,17 @@ fn test_decode_all_vectors() {
                 match result {
                     Ok(Ok(image)) => {
                         let desc = image.descriptor();
-                        let fmt = if desc.layout_compatible(&PixelDescriptor::RGB8) {
+                        let fmt = if desc.layout_compatible(PixelDescriptor::RGB8) {
                             "RGB8"
-                        } else if desc.layout_compatible(&PixelDescriptor::RGBA8) {
+                        } else if desc.layout_compatible(PixelDescriptor::RGBA8) {
                             "RGBA8"
-                        } else if desc.layout_compatible(&PixelDescriptor::RGB16) {
+                        } else if desc.layout_compatible(PixelDescriptor::RGB16) {
                             "RGB16"
-                        } else if desc.layout_compatible(&PixelDescriptor::RGBA16) {
+                        } else if desc.layout_compatible(PixelDescriptor::RGBA16) {
                             "RGBA16"
-                        } else if desc.layout_compatible(&PixelDescriptor::GRAY8) {
+                        } else if desc.layout_compatible(PixelDescriptor::GRAY8) {
                             "GRAY8"
-                        } else if desc.layout_compatible(&PixelDescriptor::GRAY16) {
+                        } else if desc.layout_compatible(PixelDescriptor::GRAY16) {
                             "GRAY16"
                         } else {
                             "OTHER"

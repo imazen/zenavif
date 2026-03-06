@@ -2,8 +2,8 @@ use yuv::{YuvPlanarImage, YuvRange, YuvStandardMatrix};
 
 #[test]
 fn test_yuv_conversion_accuracy() {
-    let width = 1;
-    let height = 1;
+    let _width = 1;
+    let _height = 1;
 
     // Test several known YUV->RGB conversions for BT.601 Full range
     let test_cases = vec![

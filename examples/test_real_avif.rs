@@ -2,7 +2,7 @@
 
 use std::fs;
 use zenavif::decode;
-use zencodec_types::PixelDescriptor;
+use zenpixels::PixelDescriptor;
 
 fn main() {
     let test_file = "tests/vectors/libavif/kodim03_yuv420_8bpc.avif";
@@ -19,12 +19,12 @@ fn main() {
             println!("✓ Successfully decoded {}", test_file);
 
             let desc = image.descriptor();
-            if desc.layout_compatible(&PixelDescriptor::RGB8) {
+            if desc.layout_compatible(PixelDescriptor::RGB8) {
                 let img = image.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
                 println!("  Size: {}x{}", img.width(), img.height());
                 let first = img.buf()[0];
                 println!("  First pixel: R={}, G={}, B={}", first.r, first.g, first.b);
-            } else if desc.layout_compatible(&PixelDescriptor::RGBA8) {
+            } else if desc.layout_compatible(PixelDescriptor::RGBA8) {
                 let img = image.try_as_imgref::<rgb::Rgba<u8>>().unwrap();
                 println!("  Size: {}x{}", img.width(), img.height());
                 let first = img.buf()[0];

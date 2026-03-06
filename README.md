@@ -5,78 +5,90 @@
 [![Documentation](https://docs.rs/zenavif/badge.svg)](https://docs.rs/zenavif)
 [![License: AGPL/Commercial](https://img.shields.io/badge/License-AGPL%2FCommercial-blue.svg)](https://github.com/imazen/zenavif#license)
 
-Pure Rust AVIF image decoder powered by [rav1d](https://github.com/memorysafety/rav1d).
+Pure Rust AVIF image codec. Decodes and encodes AVIF images using
+[rav1d-safe](https://github.com/memorysafety/rav1d) (AV1 decoder) and
+[zenavif-parse](https://crates.io/crates/zenavif-parse) (AVIF container parser).
 
-## Features
+## What it does
 
-- **100% Safe Rust** - Default `managed` feature uses zero unsafe code
-- **Fast** - Optional `asm` feature uses hand-written assembly for maximum performance  
-- **Comprehensive** - Supports 8/10/12-bit, all chroma subsampling modes, alpha channel
-- **Ergonomic API** - Simple decode functions with detailed error types
-- **Cancellable** - Built-in cooperative cancellation support
+- Decodes 8/10/12-bit AVIF with all chroma subsampling modes (4:2:0, 4:2:2, 4:4:4, monochrome)
+- Handles alpha channels (straight and premultiplied)
+- Supports full and limited color range, HDR color spaces (BT.2020, P3, etc.)
+- Preserves EXIF, XMP, rotation, mirror, clean aperture, pixel aspect ratio, HDR metadata
+- Decodes animated AVIF sequences with per-frame timing
+- Encodes AVIF via [zenravif](https://github.com/imazen/cavif-rs) (optional `encode` feature)
+- 100% safe Rust by default. Zero `unsafe` in the decode path.
+- Cooperative cancellation via the [`enough`](https://crates.io/crates/enough) crate
 
 ## Quick Start
 
 ```rust
 use zenavif::decode;
 
-let avif_data = std::fs::read("image.avif")?;
-let image = decode(&avif_data)?;
-
-match image {
-    DecodedImage::Rgb8(img) => {
-        println!("RGB8 image: {}x{}", img.width(), img.height());
-    }
-    DecodedImage::Rgba8(img) => {
-        println!("RGBA8 image: {}x{}", img.width(), img.height());
-    }
-    _ => {}
-}
+let avif_data = std::fs::read("image.avif").unwrap();
+let image = decode(&avif_data).unwrap();
+println!("{}x{}", image.width(), image.height());
 ```
 
-## Features
-
-### `managed` (default)
-
-100% safe Rust implementation using [rav1d-safe](https://github.com/memorysafety/rav1d)'s managed API. No unsafe code in the entire decode path. Enforced by `#![deny(unsafe_code)]` at module level.
-
-### `asm`
-
-High-performance implementation using hand-written assembly. Uses C FFI for maximum speed. Best for production workloads where performance is critical.
-
-## Configuration
+### Custom configuration
 
 ```rust
 use zenavif::{decode_with, DecoderConfig};
 use enough::Unstoppable;
 
 let config = DecoderConfig::new()
-    .threads(4)               // Use 4 threads (0 = auto-detect)
-    .apply_grain(true)        // Apply film grain
-    .frame_size_limit(8192 * 8192); // Max 8K resolution
+    .threads(4)
+    .apply_grain(true)
+    .frame_size_limit(8192 * 8192);
 
-let image = decode_with(&avif_data, &config, &Unstoppable)?;
+let avif_data = std::fs::read("image.avif").unwrap();
+let image = decode_with(&avif_data, &config, &Unstoppable).unwrap();
 ```
 
-## Supported Formats
+### Animation
 
-- ✅ 8-bit, 10-bit, 12-bit color depth
-- ✅ 4:2:0, 4:2:2, 4:4:4 chroma subsampling
-- ✅ Monochrome (grayscale)
-- ✅ Alpha channel (straight and premultiplied)
-- ✅ Full and limited color range
-- ✅ HDR color spaces (BT.2020, P3, etc.)
-- ❌ Animated AVIF (use real AV1 video instead)
-- ❌ Grid-based collages
+```rust
+let avif_data = std::fs::read("animation.avif").unwrap();
+let animation = zenavif::decode_animation(&avif_data).unwrap();
+for frame in &animation.frames {
+    println!("{}x{} frame, {}ms",
+        frame.pixels.width(), frame.pixels.height(), frame.duration_ms);
+}
+```
+
+### Encoding (requires `encode` feature)
+
+```rust,ignore
+use zenavif::{encode, decode};
+
+let image = decode(&std::fs::read("input.avif").unwrap()).unwrap();
+let encoded = zenavif::encode(&image).unwrap();
+std::fs::write("output.avif", &encoded.avif_file).unwrap();
+```
+
+## Features
+
+| Feature | Description |
+|---|---|
+| *(default)* | Pure Rust decode via rav1d-safe. No unsafe code. |
+| `encode` | AVIF encoding via zenravif (pure Rust) |
+| `encode-asm` | Encoding with hand-written assembly (fastest, uses unsafe) |
+| `encode-threading` | Multi-threaded encoding |
+| `encode-imazen` | Encoding with zenrav1e fork extras (QM, lossless) |
+| `unsafe-asm` | Decoding with hand-written assembly via C FFI (fastest, uses unsafe) |
+| `zencodec` | Integration with [zencodec-types](https://crates.io/crates/zencodec-types) trait hierarchy |
 
 ## Building
 
 ```bash
-# Safe managed API (default)
+# Default safe decoder
 cargo build --release
 
-# Fast assembly version
-cargo build --release --no-default-features --features asm
+# With encoding
+cargo build --release --features encode
+
+# Fast assembly decoder (uses unsafe + C FFI)
+cargo build --release --features unsafe-asm
 
 # Run tests
 cargo test
@@ -92,9 +104,9 @@ This project builds on excellent work by others:
 
 - **[rav1d](https://github.com/memorysafety/rav1d)** (BSD-2-Clause) — Pure Rust AV1 decoder (Rust port of [dav1d](https://code.videolan.org/videolan/dav1d)). Provides the AV1 decoding backend via its managed safe API.
 
-- **[avif-parse](https://github.com/nicoshev/avif-parse)** (MIT/Apache-2.0) — AVIF container parser for extracting image items and metadata from the ISOBMFF container.
+- **[zenavif-parse](https://crates.io/crates/zenavif-parse)** (MIT/Apache-2.0) — AVIF container parser for extracting image items and metadata from the ISOBMFF container.
 
-- **[yuv](https://github.com/nicoshev/yuvutils-rs)** (MIT) — YUV to RGB color conversion.
+- **[yuv](https://crates.io/crates/yuv)** (MIT) — YUV to RGB color conversion.
 
 - **[libavif](https://github.com/AOMediaCodec/libavif)** (BSD-2-Clause) — Reference AVIF implementation used for pixel-level verification and behavioral reference.
 

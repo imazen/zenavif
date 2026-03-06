@@ -10,6 +10,7 @@
 
 // YUV conversion functions naturally require plane/stride/dimension/matrix/range parameters.
 #![allow(clippy::too_many_arguments)]
+#![allow(dead_code)]
 
 use archmage::prelude::*;
 use imgref::ImgVec;

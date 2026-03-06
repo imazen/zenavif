@@ -5,8 +5,8 @@
 use imgref::Img;
 use rgb::{Rgb, Rgba};
 use zenavif::{
-    EncodeBitDepth, EncodeColorModel, EncoderConfig, PixelBuffer, encode, encode_rgb8, encode_rgb16,
-    encode_rgba8, encode_rgba16, encode_with,
+    EncodeBitDepth, EncodeColorModel, EncoderConfig, PixelBuffer, encode, encode_rgb8,
+    encode_rgb16, encode_rgba8, encode_rgba16, encode_with,
 };
 
 /// Create a simple 16x16 RGB8 test image with a gradient

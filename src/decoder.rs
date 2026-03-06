@@ -9,7 +9,7 @@ use crate::image::{
     TransferCharacteristics,
 };
 use enough::Stop;
-use zencodec_types::PixelBuffer;
+use zenpixels::PixelBuffer;
 
 // Conditionally import from rav1d or rav1d-safe based on feature
 #[cfg(feature = "unsafe-asm")]
