@@ -1746,4 +1746,155 @@ mod tests {
         assert_eq!(decoded.width(), 8);
         assert_eq!(decoded.height(), 8);
     }
+
+    // ── Encoder trait roundtrip tests ──────────────────────────────────────
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encoder_trait_rgb8() {
+        use zencodec_types::{EncodeJob, Encoder, EncoderConfig};
+
+        let pixels: Vec<Rgb<u8>> = (0..16 * 16)
+            .map(|i| Rgb {
+                r: (i % 256) as u8,
+                g: ((i * 3) % 256) as u8,
+                b: ((i * 7) % 256) as u8,
+            })
+            .collect();
+        let img = imgref::ImgVec::new(pixels, 16, 16);
+        let config = AvifEncoderConfig::new().with_quality(60.0);
+        let encoder = config.job().encoder().unwrap();
+        let output = encoder
+            .encode(PixelSlice::from(img.as_ref()).into())
+            .unwrap();
+        assert!(!output.is_empty());
+        assert_eq!(output.format(), ImageFormat::Avif);
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encoder_trait_rgba8() {
+        use zencodec_types::{EncodeJob, Encoder, EncoderConfig};
+
+        let pixels: Vec<Rgba<u8>> = (0..16 * 16)
+            .map(|i| Rgba {
+                r: (i % 256) as u8,
+                g: ((i * 3) % 256) as u8,
+                b: ((i * 7) % 256) as u8,
+                a: ((i * 5) % 256) as u8,
+            })
+            .collect();
+        let img = imgref::ImgVec::new(pixels, 16, 16);
+        let config = AvifEncoderConfig::new().with_quality(60.0);
+        let encoder = config.job().encoder().unwrap();
+        let output = encoder
+            .encode(PixelSlice::from(img.as_ref()).into())
+            .unwrap();
+        assert!(!output.is_empty());
+        assert_eq!(output.format(), ImageFormat::Avif);
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encoder_trait_gray8() {
+        use zencodec_types::{EncodeJob, Encoder, EncoderConfig, Gray};
+
+        let pixels: Vec<Gray<u8>> = (0..16 * 16).map(|i| Gray((i % 256) as u8)).collect();
+        let img = imgref::ImgVec::new(pixels, 16, 16);
+        let config = AvifEncoderConfig::new().with_quality(60.0);
+        let encoder = config.job().encoder().unwrap();
+        let output = encoder
+            .encode(PixelSlice::from(img.as_ref()).into())
+            .unwrap();
+        assert!(!output.is_empty());
+        assert_eq!(output.format(), ImageFormat::Avif);
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encoder_trait_rgb_f32() {
+        use zencodec_types::{EncodeJob, Encoder, EncoderConfig};
+
+        let pixels: Vec<Rgb<f32>> = (0..16 * 16)
+            .map(|i| {
+                let t = i as f32 / 255.0;
+                Rgb {
+                    r: t,
+                    g: t * 0.5,
+                    b: t * 0.25,
+                }
+            })
+            .collect();
+        let img = imgref::ImgVec::new(pixels, 16, 16);
+        let config = AvifEncoderConfig::new().with_quality(60.0);
+        let encoder = config.job().encoder().unwrap();
+        let output = encoder
+            .encode(PixelSlice::from(img.as_ref()).into())
+            .unwrap();
+        assert!(!output.is_empty());
+        assert_eq!(output.format(), ImageFormat::Avif);
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encoder_trait_rgba_f32() {
+        use zencodec_types::{EncodeJob, Encoder, EncoderConfig};
+
+        let pixels: Vec<Rgba<f32>> = (0..16 * 16)
+            .map(|i| {
+                let t = i as f32 / 255.0;
+                Rgba {
+                    r: t,
+                    g: t * 0.5,
+                    b: t * 0.25,
+                    a: 1.0,
+                }
+            })
+            .collect();
+        let img = imgref::ImgVec::new(pixels, 16, 16);
+        let config = AvifEncoderConfig::new().with_quality(60.0);
+        let encoder = config.job().encoder().unwrap();
+        let output = encoder
+            .encode(PixelSlice::from(img.as_ref()).into())
+            .unwrap();
+        assert!(!output.is_empty());
+        assert_eq!(output.format(), ImageFormat::Avif);
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encoder_trait_gray_f32() {
+        use zencodec_types::{EncodeJob, Encoder, EncoderConfig, Gray};
+
+        let pixels: Vec<Gray<f32>> = (0..16 * 16).map(|i| Gray(i as f32 / 255.0)).collect();
+        let img = imgref::ImgVec::new(pixels, 16, 16);
+        let config = AvifEncoderConfig::new().with_quality(60.0);
+        let encoder = config.job().encoder().unwrap();
+        let output = encoder
+            .encode(PixelSlice::from(img.as_ref()).into())
+            .unwrap();
+        assert!(!output.is_empty());
+        assert_eq!(output.format(), ImageFormat::Avif);
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encoder_trait_dyn_encoder() {
+        use zencodec_types::{EncodeJob, EncoderConfig};
+
+        let pixels: Vec<Rgb<u8>> = vec![
+            Rgb {
+                r: 100,
+                g: 150,
+                b: 200
+            };
+            32 * 32
+        ];
+        let img = imgref::ImgVec::new(pixels, 32, 32);
+        let config = AvifEncoderConfig::new().with_quality(50.0);
+        let dyn_enc = config.job().dyn_encoder().unwrap();
+        let output = dyn_enc(PixelSlice::from(img.as_ref()).into()).unwrap();
+        assert!(!output.is_empty());
+        assert_eq!(output.format(), ImageFormat::Avif);
+    }
 }
