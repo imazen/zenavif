@@ -412,6 +412,46 @@ impl AvifEncoder<'_> {
 }
 
 #[cfg(feature = "encode")]
+impl zencodec_types::Encoder for AvifEncoder<'_> {
+    type Error = Error;
+
+    fn encode(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, Error> {
+        use zencodec_types::{
+            EncodeGray8 as _, EncodeGrayF32 as _, EncodeRgb8 as _, EncodeRgbF32 as _,
+            EncodeRgba8 as _, EncodeRgbaF32 as _,
+        };
+        use zenpixels::PixelFormat;
+
+        match pixels.descriptor().pixel_format() {
+            PixelFormat::Rgb8 => self.encode_rgb8(pixels.try_typed().unwrap()),
+            PixelFormat::Rgba8 => self.encode_rgba8(pixels.try_typed().unwrap()),
+            PixelFormat::Gray8 => self.encode_gray8(pixels.try_typed().unwrap()),
+            PixelFormat::RgbF32 => self.encode_rgb_f32(pixels.try_typed().unwrap()),
+            PixelFormat::RgbaF32 => self.encode_rgba_f32(pixels.try_typed().unwrap()),
+            PixelFormat::GrayF32 => self.encode_gray_f32(pixels.try_typed().unwrap()),
+            PixelFormat::Bgra8 => {
+                // Swizzle BGRA → RGBA and encode
+                let raw = pixels.contiguous_bytes();
+                let w = pixels.width() as usize;
+                let h = pixels.rows() as usize;
+                self.check_limits(w, h, 4)?;
+                let cfg = self.build_config();
+                let stop = self.stop_token();
+                let rgba: Vec<Rgba<u8>> = raw
+                    .chunks_exact(4)
+                    .map(|c| Rgba { r: c[2], g: c[1], b: c[0], a: c[3] })
+                    .collect();
+                let img = imgref::ImgVec::new(rgba, w, h);
+                let result =
+                    crate::encode_rgba8(img.as_ref(), &cfg, stop).map_err(|e| e.into_inner())?;
+                Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
+            }
+            _ => Err(zencodec_types::UnsupportedOperation::PixelFormat.into()),
+        }
+    }
+}
+
+#[cfg(feature = "encode")]
 impl zencodec_types::EncodeRgb8 for AvifEncoder<'_> {
     type Error = Error;
     fn encode_rgb8(self, pixels: PixelSlice<'_, Rgb<u8>>) -> Result<EncodeOutput, Error> {
@@ -803,9 +843,8 @@ impl AvifDecoderConfig {
         let w = dst.width().min(src_ref.width());
         let h = dst.height().min(src_ref.height());
         // BT.709 luma coefficients in linear light
-        let (kr, kb) = crate::yuv_convert::matrix_coefficients(
-            crate::yuv_convert::YuvMatrix::Bt709,
-        );
+        let (kr, kb) =
+            crate::yuv_convert::matrix_coefficients(crate::yuv_convert::YuvMatrix::Bt709);
         let kg = 1.0 - kr - kb;
         for y in 0..h {
             let src_row = src_ref.rows().nth(y).unwrap();
@@ -953,8 +992,7 @@ impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
         let cfg = self.effective_config();
         let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
 
-        let mut decoder =
-            crate::ManagedAvifDecoder::new(data, &cfg).map_err(|e| e.into_inner())?;
+        let mut decoder = crate::ManagedAvifDecoder::new(data, &cfg).map_err(|e| e.into_inner())?;
         let native_info = decoder.probe_info().map_err(|e| e.into_inner())?;
         let info = convert_native_info(&native_info);
 
@@ -987,9 +1025,7 @@ impl<'a> zencodec_types::DecodeJob<'a> for AvifDecodeJob<'a> {
             {
                 strip_descriptor = strip_descriptor.with_transfer(tf);
             }
-            if let Some(p) =
-                zenpixels::ColorPrimaries::from_cicp(native_info.color_primaries.0)
-            {
+            if let Some(p) = zenpixels::ColorPrimaries::from_cicp(native_info.color_primaries.0) {
                 strip_descriptor = strip_descriptor.with_primaries(p);
             }
 
@@ -1298,7 +1334,8 @@ impl AvifStreamingDecoder {
                 let mut x_offset = 0usize;
                 for tile in tiles {
                     let tile_w = tile.width() as usize;
-                    let actual_w = tile_w.min((self.output_width as usize).saturating_sub(x_offset));
+                    let actual_w =
+                        tile_w.min((self.output_width as usize).saturating_sub(x_offset));
                     if actual_w == 0 {
                         continue;
                     }
@@ -1306,8 +1343,7 @@ impl AvifStreamingDecoder {
                     let src = tile_slice.row(py);
                     let copy_bytes = actual_w * bpp;
                     let dst_start = x_offset * bpp;
-                    dst_row[dst_start..dst_start + copy_bytes]
-                        .copy_from_slice(&src[..copy_bytes]);
+                    dst_row[dst_start..dst_start + copy_bytes].copy_from_slice(&src[..copy_bytes]);
                     x_offset += tile_w;
                 }
             }
