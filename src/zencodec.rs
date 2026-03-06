@@ -178,6 +178,20 @@ static ENCODE_DESCRIPTORS: &[PixelDescriptor] = &[
     PixelDescriptor::RGBF32_LINEAR,
     PixelDescriptor::RGBAF32_LINEAR,
     PixelDescriptor::GRAYF32_LINEAR,
+    // f32 PQ BT.2020 (HDR)
+    PixelDescriptor::RGBF32_LINEAR
+        .with_transfer(zenpixels::TransferFunction::Pq)
+        .with_primaries(zenpixels::ColorPrimaries::Bt2020),
+    PixelDescriptor::RGBAF32_LINEAR
+        .with_transfer(zenpixels::TransferFunction::Pq)
+        .with_primaries(zenpixels::ColorPrimaries::Bt2020),
+    // f32 HLG BT.2020 (HDR)
+    PixelDescriptor::RGBF32_LINEAR
+        .with_transfer(zenpixels::TransferFunction::Hlg)
+        .with_primaries(zenpixels::ColorPrimaries::Bt2020),
+    PixelDescriptor::RGBAF32_LINEAR
+        .with_transfer(zenpixels::TransferFunction::Hlg)
+        .with_primaries(zenpixels::ColorPrimaries::Bt2020),
     // HDR — 16-bit with PQ/HLG transfer and BT.2020 primaries
     PixelDescriptor::RGB16_SRGB,
     PixelDescriptor::RGBA16_SRGB,
@@ -499,6 +513,62 @@ impl AvifEncoder<'_> {
                 .pixel_range(crate::EncodePixelRange::Limited);
         }
     }
+
+    /// Convert f32 RGB pixels to u16 and encode via the 16-bit path.
+    /// Used for HDR (PQ/HLG) f32 data that would be corrupted by linear_to_srgb_u8().
+    fn encode_f32_as_u16_rgb(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, Error> {
+        let w = pixels.width() as usize;
+        let h = pixels.rows() as usize;
+        self.check_limits(w, h, 6)?; // 6 bytes per u16 RGB pixel
+        let cfg = self.build_config();
+        let stop = self.stop_token();
+        let raw = pixels.contiguous_bytes();
+        let rgb: Vec<Rgb<u16>> = raw
+            .chunks_exact(12)
+            .map(|c| {
+                let r = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+                let g = f32::from_le_bytes([c[4], c[5], c[6], c[7]]);
+                let b = f32::from_le_bytes([c[8], c[9], c[10], c[11]]);
+                Rgb {
+                    r: (r.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16,
+                    g: (g.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16,
+                    b: (b.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16,
+                }
+            })
+            .collect();
+        let img = imgref::ImgVec::new(rgb, w, h);
+        let result = crate::encode_rgb16(img.as_ref(), &cfg, stop).map_err(|e| e.into_inner())?;
+        Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
+    }
+
+    /// Convert f32 RGBA pixels to u16 and encode via the 16-bit path.
+    /// Used for HDR (PQ/HLG) f32 data that would be corrupted by linear_to_srgb_u8().
+    fn encode_f32_as_u16_rgba(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, Error> {
+        let w = pixels.width() as usize;
+        let h = pixels.rows() as usize;
+        self.check_limits(w, h, 8)?; // 8 bytes per u16 RGBA pixel
+        let cfg = self.build_config();
+        let stop = self.stop_token();
+        let raw = pixels.contiguous_bytes();
+        let rgba: Vec<Rgba<u16>> = raw
+            .chunks_exact(16)
+            .map(|c| {
+                let r = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+                let g = f32::from_le_bytes([c[4], c[5], c[6], c[7]]);
+                let b = f32::from_le_bytes([c[8], c[9], c[10], c[11]]);
+                let a = f32::from_le_bytes([c[12], c[13], c[14], c[15]]);
+                Rgba {
+                    r: (r.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16,
+                    g: (g.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16,
+                    b: (b.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16,
+                    a: (a.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16,
+                }
+            })
+            .collect();
+        let img = imgref::ImgVec::new(rgba, w, h);
+        let result = crate::encode_rgba16(img.as_ref(), &cfg, stop).map_err(|e| e.into_inner())?;
+        Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
+    }
 }
 
 #[cfg(feature = "encode")]
@@ -515,6 +585,24 @@ impl zencodec_types::Encoder for AvifEncoder<'_> {
         // Propagate HDR color metadata from pixel descriptor to encoder config
         let desc = pixels.descriptor();
         self.apply_descriptor_color(desc);
+
+        // For f32 pixels with HDR transfer (PQ/HLG), convert to u16 and use 16-bit
+        // path to preserve HDR data. The default f32 path uses linear_to_srgb_u8()
+        // which would silently destroy HDR values.
+        let is_hdr_transfer = matches!(
+            desc.transfer,
+            zenpixels::TransferFunction::Pq | zenpixels::TransferFunction::Hlg
+        );
+
+        match desc.pixel_format() {
+            PixelFormat::RgbF32 if is_hdr_transfer => {
+                return self.encode_f32_as_u16_rgb(pixels);
+            }
+            PixelFormat::RgbaF32 if is_hdr_transfer => {
+                return self.encode_f32_as_u16_rgba(pixels);
+            }
+            _ => {}
+        }
 
         match desc.pixel_format() {
             PixelFormat::Rgb8 => self.encode_rgb8(pixels.try_typed().unwrap()),
@@ -2333,5 +2421,94 @@ mod tests {
         let output = encoder.encode(slice.into()).unwrap();
         assert!(!output.is_empty());
         assert_eq!(output.format(), ImageFormat::Avif);
+    }
+
+    #[test]
+    fn encoder_trait_rgb_f32_pq_bt2020() {
+        use zencodec_types::{EncodeJob, Encoder, EncoderConfig};
+        use zenpixels::{ColorPrimaries, TransferFunction};
+
+        // f32 PQ BT.2020 — should route through u16 path, not linear_to_srgb_u8
+        let pixels: Vec<Rgb<f32>> = (0..16 * 16)
+            .map(|i| {
+                let v = i as f32 / 256.0;
+                Rgb {
+                    r: v,
+                    g: v * 0.8,
+                    b: v * 0.6,
+                }
+            })
+            .collect();
+        let img = imgref::ImgVec::new(pixels, 16, 16);
+        let desc = PixelDescriptor::RGBF32_LINEAR
+            .with_transfer(TransferFunction::Pq)
+            .with_primaries(ColorPrimaries::Bt2020);
+        let slice = PixelSlice::from(img.as_ref()).with_descriptor(desc);
+        let config = AvifEncoderConfig::new().with_quality(60.0);
+        let encoder = config.job().encoder().unwrap();
+        let output = encoder.encode(slice.into()).unwrap();
+        assert!(!output.is_empty());
+        assert_eq!(output.format(), ImageFormat::Avif);
+    }
+
+    #[test]
+    fn encoder_trait_rgba_f32_hlg_bt2020() {
+        use zencodec_types::{EncodeJob, Encoder, EncoderConfig};
+        use zenpixels::{ColorPrimaries, TransferFunction};
+
+        // f32 HLG BT.2020 — should route through u16 path
+        let pixels: Vec<Rgba<f32>> = (0..16 * 16)
+            .map(|i| {
+                let v = i as f32 / 256.0;
+                Rgba {
+                    r: v,
+                    g: v * 0.7,
+                    b: v * 0.5,
+                    a: 1.0,
+                }
+            })
+            .collect();
+        let img = imgref::ImgVec::new(pixels, 16, 16);
+        let desc = PixelDescriptor::RGBAF32_LINEAR
+            .with_transfer(TransferFunction::Hlg)
+            .with_primaries(ColorPrimaries::Bt2020);
+        let slice = PixelSlice::from(img.as_ref()).with_descriptor(desc);
+        let config = AvifEncoderConfig::new().with_quality(60.0);
+        let encoder = config.job().encoder().unwrap();
+        let output = encoder.encode(slice.into()).unwrap();
+        assert!(!output.is_empty());
+        assert_eq!(output.format(), ImageFormat::Avif);
+    }
+
+    #[test]
+    fn encoder_trait_f32_pq_roundtrip_preserves_hdr() {
+        use zencodec_types::{EncodeJob, Encoder, EncoderConfig};
+        use zenpixels::{ColorPrimaries, TransferFunction};
+
+        // Encode f32 PQ data, decode, verify the output has >8-bit depth
+        // (proving it went through the u16 path, not the sRGB u8 path)
+        let pixels: Vec<Rgb<f32>> = (0..16 * 16)
+            .map(|i| {
+                let v = i as f32 / 256.0;
+                Rgb {
+                    r: v,
+                    g: v * 0.9,
+                    b: v * 0.7,
+                }
+            })
+            .collect();
+        let img = imgref::ImgVec::new(pixels, 16, 16);
+        let desc = PixelDescriptor::RGBF32_LINEAR
+            .with_transfer(TransferFunction::Pq)
+            .with_primaries(ColorPrimaries::Bt2020);
+        let slice = PixelSlice::from(img.as_ref()).with_descriptor(desc);
+        let config = AvifEncoderConfig::new().with_quality(90.0);
+        let encoder = config.job().encoder().unwrap();
+        let encoded = encoder.encode(slice.into()).unwrap();
+
+        // Decode and verify bit depth > 8 (proving 10-bit encode path was used)
+        let dec = AvifDecoderConfig::new();
+        let decoded = dec.decode(encoded.data()).unwrap();
+        assert!(decoded.info().source_color.bit_depth.unwrap_or(8) >= 10);
     }
 }
