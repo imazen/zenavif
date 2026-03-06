@@ -198,6 +198,24 @@ static ENCODE_DESCRIPTORS: &[PixelDescriptor] = &[
     // 16-bit Display P3 sRGB transfer
     PixelDescriptor::RGB16_SRGB.with_primaries(zenpixels::ColorPrimaries::DisplayP3),
     PixelDescriptor::RGBA16_SRGB.with_primaries(zenpixels::ColorPrimaries::DisplayP3),
+    // 16-bit PQ BT.2020 narrow range (broadcast HDR10)
+    PixelDescriptor::RGB16_SRGB
+        .with_transfer(zenpixels::TransferFunction::Pq)
+        .with_primaries(zenpixels::ColorPrimaries::Bt2020)
+        .with_signal_range(zenpixels::SignalRange::Narrow),
+    PixelDescriptor::RGBA16_SRGB
+        .with_transfer(zenpixels::TransferFunction::Pq)
+        .with_primaries(zenpixels::ColorPrimaries::Bt2020)
+        .with_signal_range(zenpixels::SignalRange::Narrow),
+    // 16-bit HLG BT.2020 narrow range (broadcast HLG)
+    PixelDescriptor::RGB16_SRGB
+        .with_transfer(zenpixels::TransferFunction::Hlg)
+        .with_primaries(zenpixels::ColorPrimaries::Bt2020)
+        .with_signal_range(zenpixels::SignalRange::Narrow),
+    PixelDescriptor::RGBA16_SRGB
+        .with_transfer(zenpixels::TransferFunction::Hlg)
+        .with_primaries(zenpixels::ColorPrimaries::Bt2020)
+        .with_signal_range(zenpixels::SignalRange::Narrow),
 ];
 
 #[cfg(feature = "encode")]
@@ -471,6 +489,14 @@ impl AvifEncoder<'_> {
         // For PQ/HLG, switch to 10-bit depth (the native HDR depth for AV1)
         if matches!(transfer, TransferFunction::Pq | TransferFunction::Hlg) {
             self.config = self.config.clone().bit_depth(crate::EncodeBitDepth::Ten);
+        }
+
+        // Map narrow signal range to limited pixel range
+        if desc.signal_range == zenpixels::SignalRange::Narrow {
+            self.config = self
+                .config
+                .clone()
+                .pixel_range(crate::EncodePixelRange::Limited);
         }
     }
 }
@@ -2277,5 +2303,35 @@ mod tests {
         let decoded = decoder.decode().unwrap();
         assert_eq!(decoded.info().width, 16);
         assert_eq!(decoded.info().height, 16);
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encoder_trait_pq_bt2020_narrow_range() {
+        use zencodec_types::{EncodeJob, Encoder, EncoderConfig};
+        use zenpixels::{ColorPrimaries, SignalRange, TransferFunction};
+
+        // PQ BT.2020 with narrow/limited signal range
+        let pixels: Vec<Rgb<u16>> = (0..16 * 16)
+            .map(|i| {
+                let v = (i * 256) as u16;
+                Rgb {
+                    r: v,
+                    g: v / 2,
+                    b: v / 3,
+                }
+            })
+            .collect();
+        let img = imgref::ImgVec::new(pixels, 16, 16);
+        let desc = PixelDescriptor::RGB16_SRGB
+            .with_transfer(TransferFunction::Pq)
+            .with_primaries(ColorPrimaries::Bt2020)
+            .with_signal_range(SignalRange::Narrow);
+        let slice = PixelSlice::from(img.as_ref()).with_descriptor(desc);
+        let config = AvifEncoderConfig::new().with_quality(60.0);
+        let encoder = config.job().encoder().unwrap();
+        let output = encoder.encode(slice.into()).unwrap();
+        assert!(!output.is_empty());
+        assert_eq!(output.format(), ImageFormat::Avif);
     }
 }

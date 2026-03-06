@@ -57,6 +57,21 @@ pub enum EncodeAlphaMode {
     Premultiplied,
 }
 
+/// Pixel value range for AV1 encoding.
+///
+/// Full range uses the entire value range (0–255 for 8-bit, 0–1023 for 10-bit).
+/// Limited/narrow range uses the broadcast range (16–235 luma, 16–240 chroma
+/// for 8-bit; 64–940 for 10-bit). Use limited range for broadcast/studio
+/// content that is already in narrow range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EncodePixelRange {
+    /// Full range (0–255 / 0–1023). Default.
+    #[default]
+    Full,
+    /// Limited/narrow range (16–235 / 64–940). For broadcast/studio content.
+    Limited,
+}
+
 /// Mastering display metadata for HDR encoding (SMPTE ST 2086)
 ///
 /// All chromaticity values are in CIE 1931 0.16 fixed-point (0–65535 maps to 0.0–1.0).
@@ -114,6 +129,8 @@ pub struct EncoderConfig {
     pub(crate) transfer_characteristics: Option<u8>,
     /// CICP matrix coefficients code point (ITU-T H.273)
     pub(crate) matrix_coefficients: Option<u8>,
+    /// Pixel range: full (0–255/0–1023) or limited/narrow (16–235/64–940)
+    pub(crate) pixel_range: Option<EncodePixelRange>,
     /// Enable AV1 quantization matrices (imazen/rav1e fork)
     #[cfg(feature = "encode-imazen")]
     pub(crate) enable_qm: bool,
@@ -151,6 +168,7 @@ impl Default for EncoderConfig {
             color_primaries: None,
             transfer_characteristics: None,
             matrix_coefficients: None,
+            pixel_range: None,
             #[cfg(feature = "encode-imazen")]
             enable_qm: true,
             #[cfg(feature = "encode-imazen")]
@@ -287,6 +305,15 @@ impl EncoderConfig {
     /// Common values: 0 = Identity/RGB, 1 = BT.709, 6 = BT.601, 9 = BT.2020.
     pub fn matrix_coefficients(mut self, mc: u8) -> Self {
         self.matrix_coefficients = Some(mc);
+        self
+    }
+
+    /// Set pixel value range for AV1 encoding.
+    ///
+    /// Default is full range. Use limited/narrow range for broadcast content
+    /// that already uses studio levels (16–235 for 8-bit, 64–940 for 10-bit).
+    pub fn pixel_range(mut self, range: EncodePixelRange) -> Self {
+        self.pixel_range = Some(range);
         self
     }
 
@@ -456,6 +483,12 @@ fn build_ravif_encoder(config: &EncoderConfig) -> ravif::Encoder<'_> {
     if let Some(tc) = config.transfer_characteristics {
         enc = enc.with_transfer_characteristics(cicp_to_transfer_characteristics(tc));
     }
+    if let Some(pr) = config.pixel_range {
+        enc = enc.with_pixel_range(match pr {
+            EncodePixelRange::Full => ravif::PixelRange::Full,
+            EncodePixelRange::Limited => ravif::PixelRange::Limited,
+        });
+    }
     #[cfg(feature = "encode-imazen")]
     {
         enc = enc
@@ -546,13 +579,17 @@ pub fn encode_rgb16(
             ]
         })
         .collect();
+    let pixel_range = match config.pixel_range {
+        Some(EncodePixelRange::Limited) => ravif::PixelRange::Limited,
+        _ => ravif::PixelRange::Full,
+    };
     let result = enc
         .encode_raw_planes_10_bit(
             width,
             height,
             pixels,
             None::<std::iter::Empty<u16>>,
-            ravif::PixelRange::Full,
+            pixel_range,
             ravif::MatrixCoefficients::Identity,
         )
         .map_err(|e| at(Error::Encode(e.to_string())))?;
@@ -595,13 +632,17 @@ pub fn encode_rgba16(
         })
         .collect();
     let alpha: Vec<u16> = img.pixels().map(|p| scale_from_u16(p.a, 10)).collect();
+    let pixel_range = match config.pixel_range {
+        Some(EncodePixelRange::Limited) => ravif::PixelRange::Limited,
+        _ => ravif::PixelRange::Full,
+    };
     let result = enc
         .encode_raw_planes_10_bit(
             width,
             height,
             pixels,
             Some(alpha),
-            ravif::PixelRange::Full,
+            pixel_range,
             ravif::MatrixCoefficients::Identity,
         )
         .map_err(|e| at(Error::Encode(e.to_string())))?;
