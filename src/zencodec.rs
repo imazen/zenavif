@@ -1124,8 +1124,8 @@ impl zc::decode::DecoderConfig for AvifDecoderConfig {
     type Error = At<Error>;
     type Job<'a> = AvifDecodeJob<'a>;
 
-    fn format() -> ImageFormat {
-        ImageFormat::Avif
+    fn formats() -> &'static [ImageFormat] {
+        &[ImageFormat::Avif]
     }
 
     fn supported_descriptors() -> &'static [PixelDescriptor] {
