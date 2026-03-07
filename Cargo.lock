@@ -741,9 +741,9 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "linear-srgb"
-version = "0.6.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40c9a589797e9ba985551ca1f2725358439d7d3ef8cd92aa1d41c925ff2becea"
+checksum = "ad4cadc069dae2158d5f87814de8958b88985b7bd1afe36f3bc9c1f607418fd5"
 dependencies = [
  "archmage 0.9.3",
  "bytemuck",
@@ -1666,6 +1666,7 @@ name = "zenavif"
 version = "0.1.0"
 dependencies = [
  "archmage 0.9.3",
+ "bytemuck",
  "criterion",
  "enough",
  "env_logger",
@@ -1685,6 +1686,7 @@ dependencies = [
  "zenavif-parse",
  "zencodec-types",
  "zenpixels",
+ "zenpixels-convert",
  "zenravif",
 ]
 
@@ -1712,13 +1714,8 @@ dependencies = [
 name = "zencodec-types"
 version = "0.1.0"
 dependencies = [
- "bytemuck",
  "enough",
- "imgref",
- "rgb",
- "whereat",
  "zenpixels",
- "zenpixels-convert",
 ]
 
 [[package]]

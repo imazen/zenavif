@@ -1350,7 +1350,7 @@ impl ManagedAvifDecoder {
     pub fn decode_to_sink(
         &mut self,
         stop: &(impl Stop + ?Sized),
-        sink: &mut dyn zencodec_types::DecodeRowSink,
+        sink: &mut dyn zc::decode::DecodeRowSink,
     ) -> Result<ImageInfo> {
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
@@ -1368,7 +1368,7 @@ impl ManagedAvifDecoder {
     fn decode_grid_to_sink(
         &mut self,
         stop: &(impl Stop + ?Sized),
-        sink: &mut dyn zencodec_types::DecodeRowSink,
+        sink: &mut dyn zc::decode::DecodeRowSink,
     ) -> Result<ImageInfo> {
         let grid_config = self
             .parser
@@ -1444,7 +1444,7 @@ impl ManagedAvifDecoder {
 }
 
 /// Write all pixels from a [`PixelBuffer`] to a sink as a single strip.
-fn write_pixels_to_sink(pixels: &PixelBuffer, sink: &mut dyn zencodec_types::DecodeRowSink) {
+fn write_pixels_to_sink(pixels: &PixelBuffer, sink: &mut dyn zc::decode::DecodeRowSink) {
     let w = pixels.width() as usize;
     let h = pixels.height() as usize;
     let desc = pixels.descriptor();

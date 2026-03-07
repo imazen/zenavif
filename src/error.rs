@@ -50,12 +50,21 @@ pub enum Error {
 
     /// Unsupported codec operation
     #[error(transparent)]
-    UnsupportedOperation(#[from] zencodec_types::UnsupportedOperation),
+    UnsupportedOperation(#[from] zc::UnsupportedOperation),
 }
 
 impl From<StopReason> for Error {
     fn from(reason: StopReason) -> Self {
         Error::Cancelled(reason)
+    }
+}
+
+impl zc::HasUnsupportedOperation for Error {
+    fn unsupported_operation(&self) -> Option<zc::UnsupportedOperation> {
+        match self {
+            Error::UnsupportedOperation(op) => Some(*op),
+            _ => None,
+        }
     }
 }
 

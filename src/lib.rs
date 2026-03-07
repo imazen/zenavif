@@ -107,7 +107,7 @@ pub use zencodec::{
     AvifDecodeJob, AvifDecoder as AvifZenDecoder, AvifDecoderConfig, AvifFrameDecoder,
 };
 #[cfg(all(feature = "zencodec", feature = "encode"))]
-pub use zencodec::{AvifEncodeJob, AvifEncoder, AvifEncoderConfig, AvifFrameEncoder};
+pub use zencodec::{AvifEncodeJob, AvifEncoder, AvifEncoderConfig};
 pub use zenpixels::PixelBuffer;
 
 /// Decode an AVIF image with default settings
