@@ -13,16 +13,17 @@
 //! | `DecoderConfig` | [`AvifDecoderConfig`] |
 //! | `DecodeJob<'a>` | [`AvifDecodeJob`] |
 //! | `Decode` | [`AvifDecoder`] |
-//! | `FrameDecode` | [`AvifFrameDecoder`] |
+//! | `FullFrameDecoder` | [`AvifFullFrameDecoder`] |
 
 use std::borrow::Cow;
 use std::sync::Arc;
 
 use enough::Stop;
 use rgb::{Rgb, Rgba};
+use zc::FullFrame;
 #[cfg(feature = "encode")]
 use zc::MetadataView;
-use zc::decode::{DecodeFrame, DecodeOutput};
+use zc::decode::DecodeOutput;
 #[cfg(feature = "encode")]
 use zc::encode::EncodeOutput;
 use zc::{ImageFormat, ImageInfo, ResourceLimits};
@@ -373,7 +374,7 @@ impl<'a> AvifEncodeJob<'a> {
 impl<'a> zc::encode::EncodeJob<'a> for AvifEncodeJob<'a> {
     type Error = At<Error>;
     type Enc = AvifEncoder<'a>;
-    type FrameEnc = ();
+    type FullFrameEnc = ();
 
     fn with_stop(mut self, stop: &'a dyn Stop) -> Self {
         self.stop = Some(stop);
@@ -456,7 +457,7 @@ impl<'a> zc::encode::EncodeJob<'a> for AvifEncodeJob<'a> {
         })
     }
 
-    fn frame_encoder(self) -> Result<(), At<Error>> {
+    fn full_frame_encoder(self) -> Result<(), At<Error>> {
         Err(at(Error::UnsupportedOperation(
             zc::UnsupportedOperation::AnimationEncode,
         )))
@@ -1168,7 +1169,7 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
     type Error = At<Error>;
     type Dec = AvifDecoder<'a>;
     type StreamDec = AvifStreamingDecoder<'a>;
-    type FrameDec = AvifFrameDecoder;
+    type FullFrameDec = AvifFullFrameDecoder;
 
     fn with_stop(mut self, stop: &'a dyn Stop) -> Self {
         self.stop = Some(stop);
@@ -1340,11 +1341,11 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
         })
     }
 
-    fn frame_decoder(
+    fn full_frame_decoder(
         self,
         data: Cow<'a, [u8]>,
         preferred: &[PixelDescriptor],
-    ) -> Result<AvifFrameDecoder, At<Error>> {
+    ) -> Result<AvifFullFrameDecoder, At<Error>> {
         let cfg = self.effective_config();
 
         // Probe metadata before creating animation decoder (both parse the container,
@@ -1360,12 +1361,13 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
             .with_animation(true)
             .with_frame_count(anim_info.frame_count as u32);
 
-        Ok(AvifFrameDecoder {
+        Ok(AvifFullFrameDecoder {
             anim_decoder: anim_dec,
             index: 0,
             info: Arc::new(base_info),
             total_frames: anim_info.frame_count as u32,
             preferred: preferred.to_vec(),
+            current_frame: None,
         })
     }
 }
@@ -1701,27 +1703,38 @@ impl zc::decode::StreamingDecode for AvifStreamingDecoder<'_> {
 
 // ── Frame Decoder ───────────────────────────────────────────────────────────
 
-/// Animation AVIF frame decoder.
+/// Animation AVIF full-frame decoder.
 ///
-/// Lazily decodes frames on demand. The `FrameDecode` trait doesn't pass
+/// Lazily decodes frames on demand. The `FullFrameDecoder` trait doesn't pass
 /// a stop token per-call, so per-frame cancellation is not available
 /// through this interface (use the native `AnimationDecoder` API for that).
-pub struct AvifFrameDecoder {
+pub struct AvifFullFrameDecoder {
     anim_decoder: crate::AnimationDecoder,
     index: usize,
     info: Arc<ImageInfo>,
     total_frames: u32,
     preferred: Vec<PixelDescriptor>,
+    /// Holds the current frame's pixels so `render_next_frame` can return
+    /// a borrowing `FullFrame<'_>`.
+    current_frame: Option<PixelBuffer>,
 }
 
-impl zc::decode::FrameDecode for AvifFrameDecoder {
+impl zc::decode::FullFrameDecoder for AvifFullFrameDecoder {
     type Error = At<Error>;
+
+    fn wrap_sink_error(err: zc::decode::SinkError) -> Self::Error {
+        at(Error::Encode(err.to_string()))
+    }
+
+    fn info(&self) -> &ImageInfo {
+        &self.info
+    }
 
     fn frame_count(&self) -> Option<u32> {
         Some(self.total_frames)
     }
 
-    fn next_frame(&mut self) -> Result<Option<DecodeFrame>, At<Error>> {
+    fn render_next_frame(&mut self) -> Result<Option<FullFrame<'_>>, At<Error>> {
         let frame = self
             .anim_decoder
             .next_frame(&enough::Unstoppable)
@@ -1732,12 +1745,10 @@ impl zc::decode::FrameDecode for AvifFrameDecoder {
         let pixels = negotiate_format(frame.pixels, &self.preferred);
         let idx = self.index as u32;
         self.index += 1;
-        Ok(Some(DecodeFrame::new(
-            pixels,
-            Arc::clone(&self.info),
-            frame.duration_ms,
-            idx,
-        )))
+        let duration_ms = frame.duration_ms;
+        self.current_frame = Some(pixels);
+        let slice = self.current_frame.as_ref().unwrap().as_slice().erase();
+        Ok(Some(FullFrame::new(slice, duration_ms, idx)))
     }
 }
 
@@ -2442,7 +2453,10 @@ mod tests {
 
         // Decode and verify we get pixels back
         let dec_config = AvifDecoderConfig::new();
-        let decoder = dec_config.job().decoder(Cow::Borrowed(encoded.data()), &[]).unwrap();
+        let decoder = dec_config
+            .job()
+            .decoder(Cow::Borrowed(encoded.data()), &[])
+            .unwrap();
         let decoded = decoder.decode().unwrap();
         assert_eq!(decoded.info().width, 16);
         assert_eq!(decoded.info().height, 16);

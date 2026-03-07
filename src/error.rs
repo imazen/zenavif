@@ -59,6 +59,5 @@ impl From<StopReason> for Error {
     }
 }
 
-
 /// Result type for zenavif operations with location tracking
 pub type Result<T, E = whereat::At<Error>> = core::result::Result<T, E>;

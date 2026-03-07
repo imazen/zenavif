@@ -104,7 +104,7 @@ pub use image::{
 };
 #[cfg(feature = "zencodec")]
 pub use zencodec::{
-    AvifDecodeJob, AvifDecoder as AvifZenDecoder, AvifDecoderConfig, AvifFrameDecoder,
+    AvifDecodeJob, AvifDecoder as AvifZenDecoder, AvifDecoderConfig, AvifFullFrameDecoder,
 };
 #[cfg(all(feature = "zencodec", feature = "encode"))]
 pub use zencodec::{AvifEncodeJob, AvifEncoder, AvifEncoderConfig};
