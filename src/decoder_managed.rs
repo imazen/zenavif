@@ -1381,22 +1381,8 @@ impl ManagedAvifDecoder {
         let output_width = grid_config.output_width as usize;
         let output_height = grid_config.output_height as usize;
 
-        // Probe descriptor for begin() — decode first tile to determine format
-        // We'll re-decode it in the loop, but this lets us call begin() upfront.
-        {
-            let tile_data = self.parser.tile_data(0).map_err(|e| at(Error::from(e)))?;
-            let frame = Self::decode_frame(
-                &mut self.decoder,
-                &tile_data,
-                "Failed to decode grid tile for probe",
-            )?;
-            let (pixels, _info) = self.convert_to_image(frame, None, stop)?;
-            let desc = pixels.descriptor();
-            sink.begin(output_width as u32, output_height as u32, desc)
-                .map_err(|e| at(Error::Encode(e.to_string())))?;
-        }
-
         let mut y_offset = 0u32;
+        let mut began = false;
 
         for grid_row in 0..grid_rows {
             stop.check().map_err(|e| at(Error::Cancelled(e)))?;
@@ -1431,6 +1417,13 @@ impl ManagedAvifDecoder {
                 break;
             }
 
+            // Signal begin on the first strip
+            if !began {
+                sink.begin(output_width as u32, output_height as u32, desc)
+                    .map_err(|e| at(Error::Encode(e.to_string())))?;
+                began = true;
+            }
+
             // Provide buffer from sink and stitch tiles into it
             let mut sink_buf = sink
                 .provide_next_buffer(y_offset, strip_h as u32, output_width as u32, desc)
@@ -1456,6 +1449,11 @@ impl ManagedAvifDecoder {
             y_offset += strip_h as u32;
         }
 
+        if began {
+            sink.finish()
+                .map_err(|e| at(Error::Encode(e.to_string())))?;
+        }
+
         self.probe_info()
     }
 }
@@ -1470,6 +1468,10 @@ fn write_pixels_to_sink(
     let desc = pixels.descriptor();
     let bpp = desc.bytes_per_pixel();
     let row_bytes = w * bpp;
+
+    sink.begin(w as u32, h as u32, desc)
+        .map_err(|e| at(Error::Encode(e.to_string())))?;
+
     let mut sink_buf = sink
         .provide_next_buffer(0, h as u32, w as u32, desc)
         .map_err(|e| at(Error::Encode(e.to_string())))?;
@@ -1481,6 +1483,10 @@ fn write_pixels_to_sink(
         let copy_len = row_bytes.min(src.len()).min(dst_row.len());
         dst_row[..copy_len].copy_from_slice(&src[..copy_len]);
     }
+
+    sink.finish()
+        .map_err(|e| at(Error::Encode(e.to_string())))?;
+
     Ok(())
 }
 
