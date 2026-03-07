@@ -1776,6 +1776,13 @@ impl zc::decode::FullFrameDecoder for AvifFullFrameDecoder {
             return Ok(Some(FullFrame::new(slice, duration_ms, idx)));
         }
     }
+
+    fn render_next_frame_to_sink(
+        &mut self,
+        sink: &mut dyn zc::decode::DecodeRowSink,
+    ) -> Result<Option<zc::decode::OutputInfo>, Self::Error> {
+        zc::decode::render_frame_to_sink_via_copy(self, sink)
+    }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
