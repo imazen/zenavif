@@ -59,14 +59,6 @@ impl From<StopReason> for Error {
     }
 }
 
-impl zc::HasUnsupportedOperation for Error {
-    fn unsupported_operation(&self) -> Option<zc::UnsupportedOperation> {
-        match self {
-            Error::UnsupportedOperation(op) => Some(*op),
-            _ => None,
-        }
-    }
-}
 
 /// Result type for zenavif operations with location tracking
 pub type Result<T, E = whereat::At<Error>> = core::result::Result<T, E>;
