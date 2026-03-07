@@ -1142,6 +1142,7 @@ impl zc::decode::DecoderConfig for AvifDecoderConfig {
             config: self,
             stop: None,
             limits: ResourceLimits::none(),
+            start_frame_index: 0,
         }
     }
 }
@@ -1153,6 +1154,7 @@ pub struct AvifDecodeJob<'a> {
     config: &'a AvifDecoderConfig,
     stop: Option<&'a dyn Stop>,
     limits: ResourceLimits,
+    start_frame_index: u32,
 }
 
 impl<'a> AvifDecodeJob<'a> {
@@ -1178,6 +1180,11 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
 
     fn with_limits(mut self, limits: ResourceLimits) -> Self {
         self.limits = limits;
+        self
+    }
+
+    fn with_start_frame_index(mut self, index: u32) -> Self {
+        self.start_frame_index = index;
         self
     }
 
@@ -1364,6 +1371,8 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
         Ok(AvifFullFrameDecoder {
             anim_decoder: anim_dec,
             index: 0,
+            frames_decoded: 0,
+            start_frame_index: self.start_frame_index,
             info: Arc::new(base_info),
             total_frames: anim_info.frame_count as u32,
             preferred: preferred.to_vec(),
@@ -1711,6 +1720,11 @@ impl zc::decode::StreamingDecode for AvifStreamingDecoder<'_> {
 pub struct AvifFullFrameDecoder {
     anim_decoder: crate::AnimationDecoder,
     index: usize,
+    /// Number of frames decoded so far (including skipped ones).
+    frames_decoded: u32,
+    /// Skip frames before this index. Frames are still decoded to maintain
+    /// correct compositing state, but not yielded to the caller.
+    start_frame_index: u32,
     info: Arc<ImageInfo>,
     total_frames: u32,
     preferred: Vec<PixelDescriptor>,
@@ -1735,20 +1749,32 @@ impl zc::decode::FullFrameDecoder for AvifFullFrameDecoder {
     }
 
     fn render_next_frame(&mut self) -> Result<Option<FullFrame<'_>>, At<Error>> {
-        let frame = self
-            .anim_decoder
-            .next_frame(&enough::Unstoppable)
-            .map_err(|e| e.into_inner())?;
-        let Some(frame) = frame else {
-            return Ok(None);
-        };
-        let pixels = negotiate_format(frame.pixels, &self.preferred);
-        let idx = self.index as u32;
-        self.index += 1;
-        let duration_ms = frame.duration_ms;
-        self.current_frame = Some(pixels);
-        let slice = self.current_frame.as_ref().unwrap().as_slice().erase();
-        Ok(Some(FullFrame::new(slice, duration_ms, idx)))
+        loop {
+            let frame = self
+                .anim_decoder
+                .next_frame(&enough::Unstoppable)
+                .map_err(|e| e.into_inner())?;
+            let Some(frame) = frame else {
+                return Ok(None);
+            };
+            let frame_index = self.frames_decoded;
+            self.frames_decoded += 1;
+
+            // Skip frames before the requested start index. We must still
+            // decode them to maintain correct compositing state, but we
+            // don't yield them to the caller.
+            if frame_index < self.start_frame_index {
+                continue;
+            }
+
+            let pixels = negotiate_format(frame.pixels, &self.preferred);
+            let idx = self.index as u32;
+            self.index += 1;
+            let duration_ms = frame.duration_ms;
+            self.current_frame = Some(pixels);
+            let slice = self.current_frame.as_ref().unwrap().as_slice().erase();
+            return Ok(Some(FullFrame::new(slice, duration_ms, idx)));
+        }
     }
 }
 
