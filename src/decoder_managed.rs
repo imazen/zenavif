@@ -809,7 +809,6 @@ impl ManagedAvifDecoder {
                     })
                 })?;
 
-                #[allow(unused_variables)]
                 let planar = YuvPlanarImage {
                     y_plane: y_view.as_slice(),
                     y_stride: y_view.stride() as u32,
@@ -822,63 +821,47 @@ impl ManagedAvifDecoder {
                 };
 
                 if has_alpha {
-                    // Use our accurate custom YUV to RGB conversion, then add alpha
-                    let our_range = to_our_yuv_range(info.color_range);
-                    let our_matrix = to_our_yuv_matrix(info.matrix_coefficients);
-
-                    let rgb_result = match sampling {
-                        ChromaSampling::Cs420 => yuv_convert::yuv420_to_rgb8(
-                            y_view.as_slice(),
-                            y_view.stride(),
-                            u_view.as_slice(),
-                            u_view.stride(),
-                            v_view.as_slice(),
-                            v_view.stride(),
-                            buffer_width,
-                            buffer_height,
-                            our_range,
-                            our_matrix,
+                    // Decode YUV directly to RGBA to avoid an intermediate RGB
+                    // allocation. Uses yuv crate bilinear functions for 420/422
+                    // (matching our custom YUV module's chroma upsampling quality)
+                    // and standard function for 444 (no upsampling needed).
+                    let mut out = vec![
+                        Rgba {
+                            r: 0u8,
+                            g: 0,
+                            b: 0,
+                            a: 255
+                        };
+                        buffer_pixel_count
+                    ];
+                    let rgb_stride = buffer_width as u32 * 4;
+                    match sampling {
+                        ChromaSampling::Cs420 => yuv::yuv420_to_rgba_bilinear(
+                            &planar,
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
                         ),
-                        ChromaSampling::Cs422 => yuv_convert::yuv422_to_rgb8(
-                            y_view.as_slice(),
-                            y_view.stride(),
-                            u_view.as_slice(),
-                            u_view.stride(),
-                            v_view.as_slice(),
-                            v_view.stride(),
-                            buffer_width,
-                            buffer_height,
-                            our_range,
-                            our_matrix,
+                        ChromaSampling::Cs422 => yuv::yuv422_to_rgba_bilinear(
+                            &planar,
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
                         ),
-                        ChromaSampling::Cs444 => yuv_convert::yuv444_to_rgb8(
-                            y_view.as_slice(),
-                            y_view.stride(),
-                            u_view.as_slice(),
-                            u_view.stride(),
-                            v_view.as_slice(),
-                            v_view.stride(),
-                            buffer_width,
-                            buffer_height,
-                            our_range,
-                            our_matrix,
+                        ChromaSampling::Cs444 => yuv::yuv444_to_rgba(
+                            &planar,
+                            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                            rgb_stride,
+                            yuv_range,
+                            matrix,
                         ),
                         ChromaSampling::Monochrome => unreachable!(),
-                    };
+                    }
+                    .map_err(|e| at(Error::ColorConversion(e)))?;
 
-                    // Convert RGB to RGBA (with alpha=255 default)
-                    let rgba_buf: Vec<Rgba<u8>> = rgb_result
-                        .buf()
-                        .iter()
-                        .map(|rgb| Rgba {
-                            r: rgb.r,
-                            g: rgb.g,
-                            b: rgb.b,
-                            a: 255,
-                        })
-                        .collect();
-
-                    PixelBuffer::from_pixels(rgba_buf, buffer_width as u32, buffer_height as u32)
+                    PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
                         .expect("size verified")
                         .into()
                 } else {
