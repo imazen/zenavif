@@ -15,6 +15,7 @@
 //! | `Decode` | [`AvifDecoder`] |
 //! | `FrameDecode` | [`AvifFrameDecoder`] |
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use enough::Stop;
@@ -945,7 +946,7 @@ impl AvifDecoderConfig {
     /// Convenience: decode image with this config.
     pub fn decode(&self, data: &[u8]) -> Result<DecodeOutput, At<Error>> {
         use zc::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
-        self.job().decoder(data, &[])?.decode()
+        self.job().decoder(Cow::Borrowed(data), &[])?.decode()
     }
 
     /// Convenience: probe image header with this config.
@@ -1217,13 +1218,13 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
 
     fn push_decoder(
         self,
-        data: &'a [u8],
+        data: Cow<'a, [u8]>,
         sink: &mut dyn zc::decode::DecodeRowSink,
         _preferred: &[PixelDescriptor],
     ) -> Result<zc::decode::OutputInfo, At<Error>> {
         let cfg = self.effective_config();
         let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
-        let mut decoder = crate::ManagedAvifDecoder::new(data, &cfg)?;
+        let mut decoder = crate::ManagedAvifDecoder::new(&data, &cfg)?;
         let native_info = decoder.decode_to_sink(stop, sink)?;
 
         let desc = if native_info.bit_depth > 8 {
@@ -1246,7 +1247,7 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
 
     fn decoder(
         self,
-        data: &'a [u8],
+        data: Cow<'a, [u8]>,
         preferred: &[PixelDescriptor],
     ) -> Result<AvifDecoder<'a>, At<Error>> {
         let cfg = self.effective_config();
@@ -1260,13 +1261,13 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
 
     fn streaming_decoder(
         self,
-        data: &'a [u8],
+        data: Cow<'a, [u8]>,
         preferred: &[PixelDescriptor],
     ) -> Result<AvifStreamingDecoder<'a>, At<Error>> {
         let cfg = self.effective_config();
         let stop: &'a dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
 
-        let mut decoder = crate::ManagedAvifDecoder::new(data, &cfg)?;
+        let mut decoder = crate::ManagedAvifDecoder::new(&data, &cfg)?;
         let native_info = decoder.probe_info()?;
         let info = convert_native_info(&native_info);
 
@@ -1341,18 +1342,18 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
 
     fn frame_decoder(
         self,
-        data: &'a [u8],
+        data: Cow<'a, [u8]>,
         preferred: &[PixelDescriptor],
     ) -> Result<AvifFrameDecoder, At<Error>> {
         let cfg = self.effective_config();
 
         // Probe metadata before creating animation decoder (both parse the container,
         // but ManagedAvifDecoder gives us the native ImageInfo for conversion).
-        let probe_dec = crate::ManagedAvifDecoder::new(data, &cfg)?;
+        let probe_dec = crate::ManagedAvifDecoder::new(&data, &cfg)?;
         let native_info = probe_dec.probe_info()?;
         drop(probe_dec);
 
-        let anim_dec = crate::AnimationDecoder::new(data, &cfg)?;
+        let anim_dec = crate::AnimationDecoder::new(&data, &cfg)?;
         let anim_info = anim_dec.info().clone();
 
         let base_info = convert_native_info(&native_info)
@@ -1560,7 +1561,7 @@ fn negotiate_format(pixels: PixelBuffer, preferred: &[PixelDescriptor]) -> Pixel
 pub struct AvifDecoder<'a> {
     config: crate::DecoderConfig,
     stop: Option<&'a dyn Stop>,
-    data: &'a [u8],
+    data: Cow<'a, [u8]>,
     preferred: Vec<PixelDescriptor>,
 }
 
@@ -1569,7 +1570,7 @@ impl zc::decode::Decode for AvifDecoder<'_> {
 
     fn decode(self) -> Result<DecodeOutput, At<Error>> {
         let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
-        let mut decoder = crate::ManagedAvifDecoder::new(self.data, &self.config)?;
+        let mut decoder = crate::ManagedAvifDecoder::new(&self.data, &self.config)?;
         let (pixels, native_info) = decoder.decode_full(stop)?;
 
         // Set transfer function and primaries from CICP on the pixel descriptor.
@@ -2028,7 +2029,7 @@ mod tests {
         let config = AvifDecoderConfig::new();
         let decoded = config
             .job()
-            .decoder(encoded.data(), &[])
+            .decoder(Cow::Borrowed(encoded.data()), &[])
             .unwrap()
             .decode()
             .unwrap();
@@ -2441,7 +2442,7 @@ mod tests {
 
         // Decode and verify we get pixels back
         let dec_config = AvifDecoderConfig::new();
-        let decoder = dec_config.job().decoder(encoded.data(), &[]).unwrap();
+        let decoder = dec_config.job().decoder(Cow::Borrowed(encoded.data()), &[]).unwrap();
         let decoded = decoder.decode().unwrap();
         assert_eq!(decoded.info().width, 16);
         assert_eq!(decoded.info().height, 16);
