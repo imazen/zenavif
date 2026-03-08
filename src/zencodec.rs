@@ -506,6 +506,13 @@ impl AvifEncoder<'_> {
         Ok(())
     }
 
+    fn make_output(&self, data: Vec<u8>) -> Result<EncodeOutput, At<Error>> {
+        self.limits
+            .check_output_size(data.len() as u64)
+            .map_err(|e| Error::Encode(format!("{e}")))?;
+        Ok(EncodeOutput::new(data, ImageFormat::Avif))
+    }
+
     fn stop_token(&self) -> &dyn Stop {
         self.stop.unwrap_or(&enough::Unstoppable)
     }
@@ -585,7 +592,7 @@ impl AvifEncoder<'_> {
             .collect();
         let img = imgref::ImgVec::new(rgb, w, h);
         let result = crate::encode_rgb16(img.as_ref(), &cfg, stop)?;
-        Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
+        self.make_output(result.avif_file)
     }
 
     /// Convert f32 RGBA pixels to u16 and encode via the 16-bit path.
@@ -614,7 +621,7 @@ impl AvifEncoder<'_> {
             .collect();
         let img = imgref::ImgVec::new(rgba, w, h);
         let result = crate::encode_rgba16(img.as_ref(), &cfg, stop)?;
-        Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
+        self.make_output(result.avif_file)
     }
 
     // ── Per-format encode helpers ──────────────────────────────────────
@@ -629,7 +636,7 @@ impl AvifEncoder<'_> {
         let rgb: &[Rgb<u8>] = bytemuck::cast_slice(&raw);
         let img = imgref::Img::new(rgb, w, h);
         let result = crate::encode_rgb8(img, &cfg, stop)?;
-        Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
+        self.make_output(result.avif_file)
     }
 
     fn do_encode_rgba8(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
@@ -642,7 +649,7 @@ impl AvifEncoder<'_> {
         let rgba: &[Rgba<u8>] = bytemuck::cast_slice(&raw);
         let img = imgref::Img::new(rgba, w, h);
         let result = crate::encode_rgba8(img, &cfg, stop)?;
-        Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
+        self.make_output(result.avif_file)
     }
 
     fn do_encode_gray8(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
@@ -656,7 +663,7 @@ impl AvifEncoder<'_> {
         let rgb: Vec<Rgb<u8>> = raw.iter().map(|&g| Rgb { r: g, g, b: g }).collect();
         let img = imgref::ImgVec::new(rgb, w, h);
         let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
-        Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
+        self.make_output(result.avif_file)
     }
 
     fn do_encode_rgb_f32(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
@@ -682,7 +689,7 @@ impl AvifEncoder<'_> {
             .collect();
         let img = imgref::ImgVec::new(rgb, w, h);
         let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
-        Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
+        self.make_output(result.avif_file)
     }
 
     fn do_encode_rgba_f32(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
@@ -710,7 +717,7 @@ impl AvifEncoder<'_> {
             .collect();
         let img = imgref::ImgVec::new(rgba, w, h);
         let result = crate::encode_rgba8(img.as_ref(), &cfg, stop)?;
-        Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
+        self.make_output(result.avif_file)
     }
 
     fn do_encode_gray_f32(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
@@ -731,7 +738,7 @@ impl AvifEncoder<'_> {
             .collect();
         let img = imgref::ImgVec::new(rgb, w, h);
         let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
-        Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
+        self.make_output(result.avif_file)
     }
 
     fn do_encode_rgb16(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
@@ -744,7 +751,7 @@ impl AvifEncoder<'_> {
         let rgb: &[Rgb<u16>] = bytemuck::cast_slice(&raw);
         let img = imgref::Img::new(rgb, w, h);
         let result = crate::encode_rgb16(img, &cfg, stop)?;
-        Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
+        self.make_output(result.avif_file)
     }
 
     fn do_encode_rgba16(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
@@ -757,7 +764,7 @@ impl AvifEncoder<'_> {
         let rgba: &[Rgba<u16>] = bytemuck::cast_slice(&raw);
         let img = imgref::Img::new(rgba, w, h);
         let result = crate::encode_rgba16(img, &cfg, stop)?;
-        Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
+        self.make_output(result.avif_file)
     }
 }
 
@@ -800,7 +807,7 @@ impl zc::encode::Encoder for AvifEncoder<'_> {
             }
             let img = imgref::ImgVec::new(rgb, w, h);
             let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
-            Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
+            self.make_output(result.avif_file)
         } else {
             // Zero-copy RGBA path — bytemuck cast the contiguous region
             if stride == w {
@@ -808,7 +815,7 @@ impl zc::encode::Encoder for AvifEncoder<'_> {
                 let rgba: &[Rgba<u8>] = bytemuck::cast_slice(pixel_bytes);
                 let img = imgref::Img::new(rgba, w, h);
                 let result = crate::encode_rgba8(img, &cfg, stop)?;
-                Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
+                self.make_output(result.avif_file)
             } else {
                 // Strided: use ImgRef with stride
                 let total_pixels = (h - 1) * stride + w;
@@ -816,7 +823,7 @@ impl zc::encode::Encoder for AvifEncoder<'_> {
                 let rgba: &[Rgba<u8>] = bytemuck::cast_slice(pixel_bytes);
                 let img = imgref::Img::new_stride(rgba, w, h, stride);
                 let result = crate::encode_rgba8(img, &cfg, stop)?;
-                Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
+                self.make_output(result.avif_file)
             }
         }
     }
@@ -874,7 +881,7 @@ impl zc::encode::Encoder for AvifEncoder<'_> {
                     .collect();
                 let img = imgref::ImgVec::new(rgba, w, h);
                 let result = crate::encode_rgba8(img.as_ref(), &cfg, stop)?;
-                Ok(EncodeOutput::new(result.avif_file, ImageFormat::Avif))
+                self.make_output(result.avif_file)
             }
             _ => Err(at(Error::UnsupportedOperation(
                 zc::UnsupportedOperation::PixelFormat,
@@ -1168,6 +1175,8 @@ static AVIF_DECODE_CAPABILITIES: zc::decode::DecodeCapabilities =
         .with_native_16bit(true)
         .with_native_alpha(true)
         .with_enforces_max_pixels(true)
+        .with_enforces_max_memory(true)
+        .with_enforces_max_input_bytes(true)
         .with_threads_supported_range(1, 256);
 
 impl zc::decode::DecoderConfig for AvifDecoderConfig {
@@ -1213,6 +1222,37 @@ impl<'a> AvifDecodeJob<'a> {
             cfg = cfg.frame_size_limit(max_pixels.min(u32::MAX as u64) as u32);
         }
         cfg
+    }
+
+    /// Check input data size against limits.
+    fn check_input_size(&self, data: &[u8]) -> Result<(), At<Error>> {
+        self.limits
+            .check_input_size(data.len() as u64)
+            .map_err(|e| Error::Encode(format!("{e}")))?;
+        Ok(())
+    }
+
+    /// Check decoded image dimensions and estimated memory against limits.
+    fn check_decode_limits(&self, info: &crate::image::ImageInfo) -> Result<(), At<Error>> {
+        self.limits
+            .check_dimensions(info.width, info.height)
+            .map_err(|_| Error::ImageTooLarge {
+                width: info.width,
+                height: info.height,
+            })?;
+        // Estimate output memory: width * height * max_bpp (4 bytes for RGBA8, 8 for RGBA16)
+        let bpp: u64 = if info.bit_depth > 8 {
+            if info.has_alpha { 8 } else { 6 }
+        } else if info.has_alpha {
+            4
+        } else {
+            3
+        };
+        let estimated_mem = info.width as u64 * info.height as u64 * bpp;
+        self.limits
+            .check_memory(estimated_mem)
+            .map_err(|e| Error::Encode(format!("{e}")))?;
+        Ok(())
     }
 }
 
@@ -1279,9 +1319,12 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
         sink: &mut dyn zc::decode::DecodeRowSink,
         _preferred: &[PixelDescriptor],
     ) -> Result<zc::decode::OutputInfo, At<Error>> {
+        self.check_input_size(&data)?;
         let cfg = self.effective_config();
         let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
         let mut decoder = crate::ManagedAvifDecoder::new(&data, &cfg)?;
+        let probe_info = decoder.probe_info()?;
+        self.check_decode_limits(&probe_info)?;
         let native_info = decoder.decode_to_sink(stop, sink)?;
 
         let desc = if native_info.bit_depth > 8 {
@@ -1307,12 +1350,14 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
         data: Cow<'a, [u8]>,
         preferred: &[PixelDescriptor],
     ) -> Result<AvifDecoder<'a>, At<Error>> {
+        self.check_input_size(&data)?;
         let cfg = self.effective_config();
         Ok(AvifDecoder {
             config: cfg,
             stop: self.stop,
             data,
             preferred: preferred.to_vec(),
+            limits: self.limits,
         })
     }
 
@@ -1321,11 +1366,13 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
         data: Cow<'a, [u8]>,
         preferred: &[PixelDescriptor],
     ) -> Result<AvifStreamingDecoder<'a>, At<Error>> {
+        self.check_input_size(&data)?;
         let cfg = self.effective_config();
         let stop: &'a dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
 
         let mut decoder = crate::ManagedAvifDecoder::new(&data, &cfg)?;
         let native_info = decoder.probe_info()?;
+        self.check_decode_limits(&native_info)?;
         let info = convert_native_info(&native_info);
 
         if decoder.is_grid() {
@@ -1404,12 +1451,14 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
         data: Cow<'a, [u8]>,
         preferred: &[PixelDescriptor],
     ) -> Result<AvifFullFrameDecoder, At<Error>> {
+        self.check_input_size(&data)?;
         let cfg = self.effective_config();
 
         // Probe metadata before creating animation decoder (both parse the container,
         // but ManagedAvifDecoder gives us the native ImageInfo for conversion).
         let probe_dec = crate::ManagedAvifDecoder::new(&data, &cfg)?;
         let native_info = probe_dec.probe_info()?;
+        self.check_decode_limits(&native_info)?;
         drop(probe_dec);
 
         let anim_dec = crate::AnimationDecoder::new(&data, &cfg)?;
@@ -1625,6 +1674,7 @@ pub struct AvifDecoder<'a> {
     stop: Option<&'a dyn Stop>,
     data: Cow<'a, [u8]>,
     preferred: Vec<PixelDescriptor>,
+    limits: ResourceLimits,
 }
 
 impl zc::decode::Decode for AvifDecoder<'_> {
@@ -1633,6 +1683,27 @@ impl zc::decode::Decode for AvifDecoder<'_> {
     fn decode(self) -> Result<DecodeOutput, At<Error>> {
         let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
         let mut decoder = crate::ManagedAvifDecoder::new(&self.data, &self.config)?;
+        let native_info = decoder.probe_info()?;
+
+        // Check dimensions and memory limits before the expensive pixel decode.
+        self.limits
+            .check_dimensions(native_info.width, native_info.height)
+            .map_err(|_| Error::ImageTooLarge {
+                width: native_info.width,
+                height: native_info.height,
+            })?;
+        let bpp: u64 = if native_info.bit_depth > 8 {
+            if native_info.has_alpha { 8 } else { 6 }
+        } else if native_info.has_alpha {
+            4
+        } else {
+            3
+        };
+        let estimated_mem = native_info.width as u64 * native_info.height as u64 * bpp;
+        self.limits
+            .check_memory(estimated_mem)
+            .map_err(|e| Error::Encode(format!("{e}")))?;
+
         let (pixels, native_info) = decoder.decode_full(stop)?;
 
         // Set transfer function and primaries from CICP on the pixel descriptor.
