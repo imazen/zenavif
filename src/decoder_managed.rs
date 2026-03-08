@@ -509,7 +509,12 @@ impl ManagedAvifDecoder {
         let grid_config = self
             .parser
             .grid_config()
-            .expect("grid_config should be Some")
+            .ok_or_else(|| {
+                at(Error::Decode {
+                    code: -1,
+                    msg: "Expected grid config but found none",
+                })
+            })?
             .clone();
 
         // Decode all tiles
@@ -801,7 +806,7 @@ impl ManagedAvifDecoder {
                     )
                     .map_err(|e| at(Error::ColorConversion(e)))?;
                     PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
-                        .expect("size verified")
+                        .map_err(|_| at(Error::OutOfMemory))?
                         .into()
                 } else {
                     let mut out = vec![Rgb { r: 0u8, g: 0, b: 0 }; buffer_pixel_count];
@@ -815,7 +820,7 @@ impl ManagedAvifDecoder {
                     )
                     .map_err(|e| at(Error::ColorConversion(e)))?;
                     PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
-                        .expect("size verified")
+                        .map_err(|_| at(Error::OutOfMemory))?
                         .into()
                 }
             }
@@ -892,7 +897,7 @@ impl ManagedAvifDecoder {
                     .map_err(|e| at(Error::ColorConversion(e)))?;
 
                     PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
-                        .expect("size verified")
+                        .map_err(|_| at(Error::OutOfMemory))?
                         .into()
                 } else {
                     let our_range = to_our_yuv_range(info.color_range);
@@ -1054,7 +1059,7 @@ impl ManagedAvifDecoder {
                     }
                     .map_err(|e| at(Error::ColorConversion(e)))?;
                     PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
-                        .expect("size verified")
+                        .map_err(|_| at(Error::OutOfMemory))?
                         .into()
                 } else {
                     let mut out = vec![
@@ -1091,7 +1096,7 @@ impl ManagedAvifDecoder {
                     }
                     .map_err(|e| at(Error::ColorConversion(e)))?;
                     PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
-                        .expect("size verified")
+                        .map_err(|_| at(Error::OutOfMemory))?
                         .into()
                 }
             }
@@ -1200,7 +1205,7 @@ impl ManagedAvifDecoder {
                     }
                     .map_err(|e| at(Error::ColorConversion(e)))?;
                     PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
-                        .expect("size verified")
+                        .map_err(|_| at(Error::OutOfMemory))?
                         .into()
                 } else {
                     let mut out = vec![
@@ -1280,7 +1285,7 @@ impl ManagedAvifDecoder {
                     }
                     .map_err(|e| at(Error::ColorConversion(e)))?;
                     PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
-                        .expect("size verified")
+                        .map_err(|_| at(Error::OutOfMemory))?
                         .into()
                 }
             }
@@ -1393,7 +1398,12 @@ impl ManagedAvifDecoder {
         let grid_config = self
             .parser
             .grid_config()
-            .expect("grid_config should be Some")
+            .ok_or_else(|| {
+                at(Error::Decode {
+                    code: -1,
+                    msg: "Expected grid config but found none",
+                })
+            })?
             .clone();
 
         let grid_rows = grid_config.rows as usize;
