@@ -882,7 +882,12 @@ impl ManagedAvifDecoder {
                             yuv_range,
                             matrix,
                         ),
-                        ChromaSampling::Monochrome => unreachable!(),
+                        ChromaSampling::Monochrome => {
+                            return Err(at(Error::Decode {
+                                code: -1,
+                                msg: "Monochrome should not reach chroma conversion",
+                            }));
+                        }
                     }
                     .map_err(|e| at(Error::ColorConversion(e)))?;
 
@@ -930,7 +935,12 @@ impl ManagedAvifDecoder {
                             our_range,
                             our_matrix,
                         ),
-                        ChromaSampling::Monochrome => unreachable!(),
+                        ChromaSampling::Monochrome => {
+                            return Err(at(Error::Decode {
+                                code: -1,
+                                msg: "Monochrome should not reach chroma conversion",
+                            }));
+                        }
                     };
 
                     PixelBuffer::from_imgvec(result).into()
