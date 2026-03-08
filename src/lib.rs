@@ -57,6 +57,7 @@ mod decoder_managed;
 pub mod detect;
 #[cfg(feature = "encode")]
 mod encoder;
+mod strip_convert;
 mod error;
 mod image;
 #[cfg(feature = "_dev")]
