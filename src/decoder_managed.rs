@@ -582,7 +582,11 @@ impl ManagedAvifDecoder {
         // Stitch tiles using byte-level row access (format-agnostic)
         let descriptor = tile_images[0].descriptor();
         let bpp = descriptor.bytes_per_pixel();
-        let data = vec![0u8; output_width * output_height * bpp];
+        let alloc_size = output_width
+            .checked_mul(output_height)
+            .and_then(|n| n.checked_mul(bpp))
+            .ok_or_else(|| at(Error::OutOfMemory))?;
+        let data = vec![0u8; alloc_size];
         let mut output =
             PixelBuffer::from_vec(data, output_width as u32, output_height as u32, descriptor)
                 .map_err(|_| {
@@ -624,7 +628,11 @@ impl ManagedAvifDecoder {
         let copy_w = width.min(src_w);
         let copy_bytes = copy_w * bpp;
 
-        let mut data = vec![0u8; width * height * bpp];
+        let alloc_size = width
+            .checked_mul(height)
+            .and_then(|n| n.checked_mul(bpp))
+            .ok_or_else(|| at(Error::OutOfMemory))?;
+        let mut data = vec![0u8; alloc_size];
         let src = image.as_slice();
         for y in 0..height.min(src_h) {
             let src_row = src.row(y as u32);
@@ -759,7 +767,9 @@ impl ManagedAvifDecoder {
         let has_alpha = alpha.is_some();
         let yuv_range = to_yuv_range(info.color_range);
         let matrix = to_yuv_matrix(info.matrix_coefficients);
-        let buffer_pixel_count = buffer_width * buffer_height;
+        let buffer_pixel_count = buffer_width
+            .checked_mul(buffer_height)
+            .ok_or_else(|| at(Error::OutOfMemory))?;
 
         let mut image = match info.chroma_sampling {
             ChromaSampling::Monochrome => {
@@ -984,7 +994,9 @@ impl ManagedAvifDecoder {
         let has_alpha = alpha.is_some();
         let yuv_range = to_yuv_range(info.color_range);
         let matrix = to_yuv_matrix(info.matrix_coefficients);
-        let buffer_pixel_count = buffer_width * buffer_height;
+        let buffer_pixel_count = buffer_width
+            .checked_mul(buffer_height)
+            .ok_or_else(|| at(Error::OutOfMemory))?;
 
         let mut image = match info.chroma_sampling {
             ChromaSampling::Monochrome => {
