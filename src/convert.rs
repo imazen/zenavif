@@ -231,10 +231,10 @@ mod tests {
     #[test]
     fn limited_to_full_16_endpoints() {
         // 10-bit
-        assert_eq!(limited_to_full_16(64, 10), 0);   // 16<<2 = 64
+        assert_eq!(limited_to_full_16(64, 10), 0); // 16<<2 = 64
         assert_eq!(limited_to_full_16(940, 10), 1023); // 235<<2 = 940
         // 12-bit
-        assert_eq!(limited_to_full_16(256, 12), 0);    // 16<<4 = 256
+        assert_eq!(limited_to_full_16(256, 12), 0); // 16<<4 = 256
         assert_eq!(limited_to_full_16(3760, 12), 4095); // 235<<4 = 3760
     }
 
