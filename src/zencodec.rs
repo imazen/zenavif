@@ -33,6 +33,27 @@ use zenpixels_convert::PixelBufferConvertExt as _;
 use crate::error::Error;
 use whereat::{At, at};
 
+/// Convert a [`zc::ThreadingPolicy`] to a concrete thread count.
+///
+/// Returns the thread count to pass to rav1e/ravif (encode) or dav1d/rav1d (decode).
+/// - `0` means "auto" (let the library pick based on available parallelism).
+/// - `1` means single-threaded.
+/// - Any other value is the requested thread count.
+fn policy_to_threads(policy: zc::ThreadingPolicy) -> u32 {
+    match policy {
+        zc::ThreadingPolicy::SingleThread => 1,
+        zc::ThreadingPolicy::LimitOrSingle { max_threads } => max_threads as u32,
+        zc::ThreadingPolicy::LimitOrAny {
+            preferred_max_threads,
+        } => preferred_max_threads as u32,
+        zc::ThreadingPolicy::Balanced => {
+            std::thread::available_parallelism().map_or(1, |n| (n.get() as u32 / 2).max(1))
+        }
+        zc::ThreadingPolicy::Unlimited => 0, // 0 = auto
+        _ => 0,                              // future variants: default to auto
+    }
+}
+
 // ── Encoding ────────────────────────────────────────────────────────────────
 
 /// AVIF encoder configuration implementing [`zc::encode::EncoderConfig`].
@@ -503,6 +524,15 @@ impl<'a> zc::encode::EncodeJob<'a> for AvifEncodeJob<'a> {
         }
         if let Some(mir) = self.mirror {
             config = config.mirror(mir);
+        }
+        // Apply threading policy from ResourceLimits.
+        // Skip Unlimited — it means "no preference", so keep the codec's own default.
+        if !matches!(self.limits.threading(), zc::ThreadingPolicy::Unlimited) {
+            let threads = policy_to_threads(self.limits.threading());
+            if threads > 0 {
+                config = config.threads(Some(threads as usize));
+            }
+            // threads == 0 only from future unknown variants; leave default
         }
         Ok(AvifEncoder {
             config,
@@ -1278,6 +1308,13 @@ impl<'a> AvifDecodeJob<'a> {
         let mut cfg = self.config.inner.clone();
         if let Some(max_pixels) = self.limits.max_pixels {
             cfg = cfg.frame_size_limit(max_pixels.min(u32::MAX as u64) as u32);
+        }
+        // Apply threading policy from ResourceLimits.
+        // Skip Unlimited — it means "no preference", so keep the codec's own default
+        // (which is 1 thread to avoid the rav1d-safe DisjointMut race condition).
+        if !matches!(self.limits.threading(), zc::ThreadingPolicy::Unlimited) {
+            let threads = policy_to_threads(self.limits.threading());
+            cfg = cfg.threads(threads);
         }
         cfg
     }
