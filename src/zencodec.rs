@@ -281,8 +281,9 @@ impl zc::encode::EncoderConfig for AvifEncoderConfig {
     fn with_generic_effort(mut self, effort: i32) -> Self {
         let clamped = effort.clamp(0, 10);
         self.trait_effort = Some(clamped);
-        // Invert: trait effort 0 (slowest) = AVIF speed 10 (fastest)
-        let speed = (10 - clamped) as u8;
+        // Invert: effort 0 = fastest (speed 10), effort 10 = slowest (speed 1)
+        // rav1e requires speed in 1..=10, so clamp the result
+        let speed = (10 - clamped).clamp(1, 10) as u8;
         self.inner = self.inner.speed(speed);
         self
     }
