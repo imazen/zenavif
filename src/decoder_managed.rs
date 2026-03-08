@@ -150,6 +150,21 @@ impl ManagedAvifDecoder {
             })
         })?;
 
+        // Validate dimensions against frame_size_limit before any decode work
+        if config.frame_size_limit > 0 {
+            let (width, height) = if let Some(grid) = parser.grid_config() {
+                (grid.output_width, grid.output_height)
+            } else if let Ok(meta) = parser.primary_metadata() {
+                (meta.max_frame_width.get(), meta.max_frame_height.get())
+            } else {
+                (0, 0) // unknown dimensions, skip check
+            };
+            let total_pixels = width.saturating_mul(height);
+            if total_pixels > config.frame_size_limit {
+                return Err(at(Error::ImageTooLarge { width, height }));
+            }
+        }
+
         Ok(Self { decoder, parser })
     }
 
