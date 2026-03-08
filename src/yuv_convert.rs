@@ -16,7 +16,7 @@ use archmage::prelude::*;
 use imgref::ImgVec;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::f32x8;
-use rgb::RGB8;
+use rgb::{Rgba, RGB8};
 
 #[cfg(target_arch = "wasm32")]
 use archmage::Wasm128Token;
@@ -849,6 +849,673 @@ fn yuv_to_rgb(y: f32, u: f32, v: f32, kr: f32, kg: f32, kb: f32, range: YuvRange
     let b = (b * 255.0).round().clamp(0.0, 255.0) as u8;
 
     (r, g, b)
+}
+
+// ── Strip-oriented conversion ───────────────────────────────────────────────
+//
+// These functions convert a subset of rows from full YUV planes, writing
+// directly to a caller-provided output buffer. The full plane data is
+// accessed for correct bilinear chroma upsampling at strip boundaries.
+
+/// Output pixel type for strip conversion.
+pub(crate) trait StripPixel: Copy {
+    fn from_rgb(r: u8, g: u8, b: u8) -> Self;
+}
+
+impl StripPixel for RGB8 {
+    #[inline(always)]
+    fn from_rgb(r: u8, g: u8, b: u8) -> Self {
+        RGB8 { r, g, b }
+    }
+}
+
+impl StripPixel for Rgba<u8> {
+    #[inline(always)]
+    fn from_rgb(r: u8, g: u8, b: u8) -> Self {
+        Rgba { r, g, b, a: 255 }
+    }
+}
+
+/// Convert a strip of YUV420 rows to RGB8.
+///
+/// Reads from full YUV planes (for correct bilinear chroma upsampling at
+/// strip boundaries) but only converts rows `y_start..y_start + strip_height`.
+/// Output is written to `out` starting at index 0, tightly packed at `width` pixels per row.
+pub fn yuv420_to_rgb8_strip(
+    y_plane: &[u8],
+    y_stride: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+    width: usize,
+    total_height: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    out: &mut [RGB8],
+) {
+    #[cfg(target_arch = "x86_64")]
+    if let Some(token) = Desktop64::summon() {
+        return yuv420_strip_simd(
+            token,
+            y_plane,
+            y_stride,
+            u_plane,
+            u_stride,
+            v_plane,
+            v_stride,
+            width,
+            total_height,
+            y_start,
+            strip_height,
+            range,
+            matrix,
+            out,
+        );
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    if let Some(token) = Wasm128Token::summon() {
+        return yuv420_strip_wasm128(
+            token,
+            y_plane,
+            y_stride,
+            u_plane,
+            u_stride,
+            v_plane,
+            v_stride,
+            width,
+            total_height,
+            y_start,
+            strip_height,
+            range,
+            matrix,
+            out,
+        );
+    }
+
+    yuv420_strip_scalar(
+        y_plane,
+        y_stride,
+        u_plane,
+        u_stride,
+        v_plane,
+        v_stride,
+        width,
+        total_height,
+        y_start,
+        strip_height,
+        range,
+        matrix,
+        out,
+    );
+}
+
+/// Convert a strip of YUV420 rows to RGBA8 (alpha channel set to 255).
+pub fn yuv420_to_rgba8_strip(
+    y_plane: &[u8],
+    y_stride: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+    width: usize,
+    total_height: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    out: &mut [Rgba<u8>],
+) {
+    #[cfg(target_arch = "x86_64")]
+    if let Some(token) = Desktop64::summon() {
+        return yuv420_strip_simd(
+            token,
+            y_plane,
+            y_stride,
+            u_plane,
+            u_stride,
+            v_plane,
+            v_stride,
+            width,
+            total_height,
+            y_start,
+            strip_height,
+            range,
+            matrix,
+            out,
+        );
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    if let Some(token) = Wasm128Token::summon() {
+        return yuv420_strip_wasm128(
+            token,
+            y_plane,
+            y_stride,
+            u_plane,
+            u_stride,
+            v_plane,
+            v_stride,
+            width,
+            total_height,
+            y_start,
+            strip_height,
+            range,
+            matrix,
+            out,
+        );
+    }
+
+    yuv420_strip_scalar(
+        y_plane,
+        y_stride,
+        u_plane,
+        u_stride,
+        v_plane,
+        v_stride,
+        width,
+        total_height,
+        y_start,
+        strip_height,
+        range,
+        matrix,
+        out,
+    );
+}
+
+/// Convert a strip of YUV422 rows to RGB8.
+pub fn yuv422_to_rgb8_strip(
+    y_plane: &[u8],
+    y_stride: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+    width: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    out: &mut [RGB8],
+) {
+    yuv422_strip_scalar(
+        y_plane, y_stride, u_plane, u_stride, v_plane, v_stride, width, y_start, strip_height,
+        range, matrix, out,
+    );
+}
+
+/// Convert a strip of YUV422 rows to RGBA8.
+pub fn yuv422_to_rgba8_strip(
+    y_plane: &[u8],
+    y_stride: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+    width: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    out: &mut [Rgba<u8>],
+) {
+    yuv422_strip_scalar(
+        y_plane, y_stride, u_plane, u_stride, v_plane, v_stride, width, y_start, strip_height,
+        range, matrix, out,
+    );
+}
+
+/// Convert a strip of YUV444 rows to RGB8.
+pub fn yuv444_to_rgb8_strip(
+    y_plane: &[u8],
+    y_stride: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+    width: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    out: &mut [RGB8],
+) {
+    yuv444_strip_scalar(
+        y_plane, y_stride, u_plane, u_stride, v_plane, v_stride, width, y_start, strip_height,
+        range, matrix, out,
+    );
+}
+
+/// Convert a strip of YUV444 rows to RGBA8.
+pub fn yuv444_to_rgba8_strip(
+    y_plane: &[u8],
+    y_stride: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+    width: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    out: &mut [Rgba<u8>],
+) {
+    yuv444_strip_scalar(
+        y_plane, y_stride, u_plane, u_stride, v_plane, v_stride, width, y_start, strip_height,
+        range, matrix, out,
+    );
+}
+
+// ── SIMD strip implementations ──────────────────────────────────────────────
+
+/// AVX2/FMA strip conversion for YUV420. Generic over output pixel type.
+///
+/// Reuses the existing `bilinear_chroma_sample_x8` and `yuv_to_rgb_simd`
+/// helpers. Only the output store and loop bounds differ from the full-frame
+/// variant.
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn yuv420_strip_simd<P: StripPixel>(
+    token: Desktop64,
+    y_plane: &[u8],
+    y_stride: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+    width: usize,
+    total_height: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    out: &mut [P],
+) {
+    let (kr, kb) = matrix_coefficients(matrix);
+    let kg = 1.0 - kr - kb;
+    let chroma_width = width.div_ceil(2);
+    let chroma_height = total_height.div_ceil(2);
+
+    let zero = f32x8::splat(token, 0.0);
+    let max_val = f32x8::splat(token, 255.0);
+
+    for row in 0..strip_height {
+        let y_pos = y_start + row;
+        let out_start = row * width;
+
+        let mut x_pos = 0;
+        while x_pos + 8 <= width {
+            let y_idx = y_pos * y_stride + x_pos;
+            let mut y_vals = [0f32; 8];
+            for i in 0..8 {
+                y_vals[i] = y_plane[y_idx + i] as f32;
+            }
+
+            let (u_vec, v_vec) = bilinear_chroma_sample_x8(
+                token,
+                x_pos,
+                y_pos,
+                chroma_width,
+                chroma_height,
+                u_plane,
+                u_stride,
+                v_plane,
+                v_stride,
+            );
+
+            let y_vec = f32x8::from_array(token, y_vals);
+            let (r_vec, g_vec, b_vec) =
+                yuv_to_rgb_simd(token, y_vec, u_vec, v_vec, kr, kg, kb, range);
+
+            let r_clamped = r_vec.clamp(zero, max_val).round();
+            let g_clamped = g_vec.clamp(zero, max_val).round();
+            let b_clamped = b_vec.clamp(zero, max_val).round();
+
+            let r_vals = r_clamped.to_array();
+            let g_vals = g_clamped.to_array();
+            let b_vals = b_clamped.to_array();
+
+            for i in 0..8 {
+                out[out_start + x_pos + i] =
+                    P::from_rgb(r_vals[i] as u8, g_vals[i] as u8, b_vals[i] as u8);
+            }
+
+            x_pos += 8;
+        }
+
+        // Scalar remainder
+        while x_pos < width {
+            let y_val = y_plane[y_pos * y_stride + x_pos] as f32;
+            let (u_val, v_val) = bilinear_chroma_sample(
+                token,
+                x_pos,
+                y_pos,
+                chroma_width,
+                chroma_height,
+                u_plane,
+                u_stride,
+                v_plane,
+                v_stride,
+            );
+            let (r, g, b) = yuv_to_rgb(y_val, u_val, v_val, kr, kg, kb, range);
+            out[out_start + x_pos] = P::from_rgb(r, g, b);
+            x_pos += 1;
+        }
+    }
+}
+
+/// wasm128 SIMD strip conversion for YUV420.
+#[cfg(target_arch = "wasm32")]
+#[arcane]
+fn yuv420_strip_wasm128<P: StripPixel>(
+    _token: Wasm128Token,
+    y_plane: &[u8],
+    y_stride: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+    width: usize,
+    total_height: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    out: &mut [P],
+) {
+    let (kr, kb) = matrix_coefficients(matrix);
+    let kg = 1.0 - kr - kb;
+    let chroma_width = width.div_ceil(2);
+    let chroma_height = total_height.div_ceil(2);
+
+    let vr = 2.0 * (1.0 - kr);
+    let ug = -2.0 * kb * (1.0 - kb) / kg;
+    let vg = -2.0 * kr * (1.0 - kr) / kg;
+    let ub = 2.0 * (1.0 - kb);
+
+    let vr_vec = f32x4_splat(vr);
+    let ug_vec = f32x4_splat(ug);
+    let vg_vec = f32x4_splat(vg);
+    let ub_vec = f32x4_splat(ub);
+    let scale_255 = f32x4_splat(255.0);
+    let zero_v = f32x4_splat(0.0);
+    let max_255 = f32x4_splat(255.0);
+
+    let (y_offset, y_scale, uv_center, uv_scale) = match range {
+        YuvRange::Full => (
+            f32x4_splat(0.0),
+            f32x4_splat(1.0 / 255.0),
+            f32x4_splat(128.0),
+            f32x4_splat(1.0 / 255.0),
+        ),
+        YuvRange::Limited => (
+            f32x4_splat(16.0),
+            f32x4_splat(1.0 / 219.0),
+            f32x4_splat(128.0),
+            f32x4_splat(1.0 / 224.0),
+        ),
+    };
+
+    for row in 0..strip_height {
+        let y_pos = y_start + row;
+        let out_start = row * width;
+
+        let chroma_y_raw = (y_pos as f32 + 0.5) * 0.5 - 0.5;
+        let chroma_y = chroma_y_raw.max(0.0).min(chroma_height as f32 - 1.0);
+        let cy0 = chroma_y.floor() as usize;
+        let cy1 = (cy0 + 1).min(chroma_height - 1);
+        let fy = chroma_y - cy0 as f32;
+
+        let mut x_pos = 0;
+        while x_pos + 4 <= width {
+            let y_idx = y_pos * y_stride + x_pos;
+            let y_arr = [
+                y_plane[y_idx] as f32,
+                y_plane[y_idx + 1] as f32,
+                y_plane[y_idx + 2] as f32,
+                y_plane[y_idx + 3] as f32,
+            ];
+            let y_vec = f32x4(y_arr[0], y_arr[1], y_arr[2], y_arr[3]);
+
+            let mut u_vals = [0f32; 4];
+            let mut v_vals = [0f32; 4];
+            for i in 0..4 {
+                let x = x_pos + i;
+                let chroma_x_raw = (x as f32 + 0.5) * 0.5 - 0.5;
+                let chroma_x = chroma_x_raw.max(0.0).min(chroma_width as f32 - 1.0);
+                let cx0 = chroma_x.floor() as usize;
+                let cx1 = (cx0 + 1).min(chroma_width - 1);
+                let fx = chroma_x - cx0 as f32;
+                let fx1 = 1.0 - fx;
+                let fy1 = 1.0 - fy;
+
+                let u00 = u_plane[cy0 * u_stride + cx0] as f32;
+                let u01 = u_plane[cy0 * u_stride + cx1] as f32;
+                let u10 = u_plane[cy1 * u_stride + cx0] as f32;
+                let u11 = u_plane[cy1 * u_stride + cx1] as f32;
+                u_vals[i] = u00 * fx1 * fy1 + u01 * fx * fy1 + u10 * fx1 * fy + u11 * fx * fy;
+
+                let v00 = v_plane[cy0 * v_stride + cx0] as f32;
+                let v01 = v_plane[cy0 * v_stride + cx1] as f32;
+                let v10 = v_plane[cy1 * v_stride + cx0] as f32;
+                let v11 = v_plane[cy1 * v_stride + cx1] as f32;
+                v_vals[i] = v00 * fx1 * fy1 + v01 * fx * fy1 + v10 * fx1 * fy + v11 * fx * fy;
+            }
+
+            let u_vec = f32x4(u_vals[0], u_vals[1], u_vals[2], u_vals[3]);
+            let v_vec = f32x4(v_vals[0], v_vals[1], v_vals[2], v_vals[3]);
+
+            let y_norm = f32x4_mul(f32x4_sub(y_vec, y_offset), y_scale);
+            let u_norm = f32x4_mul(f32x4_sub(u_vec, uv_center), uv_scale);
+            let v_norm = f32x4_mul(f32x4_sub(v_vec, uv_center), uv_scale);
+
+            let r = f32x4_add(y_norm, f32x4_mul(v_norm, vr_vec));
+            let g = f32x4_add(
+                f32x4_add(y_norm, f32x4_mul(u_norm, ug_vec)),
+                f32x4_mul(v_norm, vg_vec),
+            );
+            let b = f32x4_add(y_norm, f32x4_mul(u_norm, ub_vec));
+
+            let r_scaled = f32x4_nearest(f32x4_max(
+                f32x4_min(f32x4_mul(r, scale_255), max_255),
+                zero_v,
+            ));
+            let g_scaled = f32x4_nearest(f32x4_max(
+                f32x4_min(f32x4_mul(g, scale_255), max_255),
+                zero_v,
+            ));
+            let b_scaled = f32x4_nearest(f32x4_max(
+                f32x4_min(f32x4_mul(b, scale_255), max_255),
+                zero_v,
+            ));
+
+            for (i, lane) in [0u8, 1, 2, 3].iter().enumerate() {
+                let ri = match lane {
+                    0 => f32x4_extract_lane::<0>(r_scaled) as u8,
+                    1 => f32x4_extract_lane::<1>(r_scaled) as u8,
+                    2 => f32x4_extract_lane::<2>(r_scaled) as u8,
+                    _ => f32x4_extract_lane::<3>(r_scaled) as u8,
+                };
+                let gi = match lane {
+                    0 => f32x4_extract_lane::<0>(g_scaled) as u8,
+                    1 => f32x4_extract_lane::<1>(g_scaled) as u8,
+                    2 => f32x4_extract_lane::<2>(g_scaled) as u8,
+                    _ => f32x4_extract_lane::<3>(g_scaled) as u8,
+                };
+                let bi = match lane {
+                    0 => f32x4_extract_lane::<0>(b_scaled) as u8,
+                    1 => f32x4_extract_lane::<1>(b_scaled) as u8,
+                    2 => f32x4_extract_lane::<2>(b_scaled) as u8,
+                    _ => f32x4_extract_lane::<3>(b_scaled) as u8,
+                };
+                out[out_start + x_pos + i] = P::from_rgb(ri, gi, bi);
+            }
+
+            x_pos += 4;
+        }
+
+        // Scalar remainder
+        while x_pos < width {
+            let y_val = y_plane[y_pos * y_stride + x_pos] as f32;
+            let chroma_x_raw = (x_pos as f32 + 0.5) * 0.5 - 0.5;
+            let chroma_x = chroma_x_raw.max(0.0).min(chroma_width as f32 - 1.0);
+            let cx0 = chroma_x.floor() as usize;
+            let cx1 = (cx0 + 1).min(chroma_width - 1);
+            let fx = chroma_x - cx0 as f32;
+            let fx1 = 1.0 - fx;
+            let fy1 = 1.0 - fy;
+
+            let u00 = u_plane[cy0 * u_stride + cx0] as f32;
+            let u01 = u_plane[cy0 * u_stride + cx1] as f32;
+            let u10 = u_plane[cy1 * u_stride + cx0] as f32;
+            let u11 = u_plane[cy1 * u_stride + cx1] as f32;
+            let u_val = u00 * fx1 * fy1 + u01 * fx * fy1 + u10 * fx1 * fy + u11 * fx * fy;
+
+            let v00 = v_plane[cy0 * v_stride + cx0] as f32;
+            let v01 = v_plane[cy0 * v_stride + cx1] as f32;
+            let v10 = v_plane[cy1 * v_stride + cx0] as f32;
+            let v11 = v_plane[cy1 * v_stride + cx1] as f32;
+            let v_val = v00 * fx1 * fy1 + v01 * fx * fy1 + v10 * fx1 * fy + v11 * fx * fy;
+
+            let (r, g, b) = yuv_to_rgb(y_val, u_val, v_val, kr, kg, kb, range);
+            out[out_start + x_pos] = P::from_rgb(r, g, b);
+            x_pos += 1;
+        }
+    }
+}
+
+// ── Scalar strip implementations ────────────────────────────────────────────
+
+/// Scalar YUV420 strip with bilinear chroma upsampling. Generic over pixel type.
+fn yuv420_strip_scalar<P: StripPixel>(
+    y_plane: &[u8],
+    y_stride: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+    width: usize,
+    total_height: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    out: &mut [P],
+) {
+    let (kr, kb) = matrix_coefficients(matrix);
+    let kg = 1.0 - kr - kb;
+    let chroma_width = width.div_ceil(2);
+    let chroma_height = total_height.div_ceil(2);
+
+    for row in 0..strip_height {
+        let y_pos = y_start + row;
+        let out_start = row * width;
+
+        for x in 0..width {
+            let y_val = y_plane[y_pos * y_stride + x] as f32;
+
+            let chroma_x_raw = (x as f32 + 0.5) * 0.5 - 0.5;
+            let chroma_y_raw = (y_pos as f32 + 0.5) * 0.5 - 0.5;
+            let chroma_x = chroma_x_raw.max(0.0).min(chroma_width as f32 - 1.0);
+            let chroma_y = chroma_y_raw.max(0.0).min(chroma_height as f32 - 1.0);
+
+            let cx0 = chroma_x.floor() as usize;
+            let cy0 = chroma_y.floor() as usize;
+            let cx1 = (cx0 + 1).min(chroma_width - 1);
+            let cy1 = (cy0 + 1).min(chroma_height - 1);
+
+            let fx = chroma_x - cx0 as f32;
+            let fy = chroma_y - cy0 as f32;
+            let fx1 = 1.0 - fx;
+            let fy1 = 1.0 - fy;
+
+            let u00 = u_plane[cy0 * u_stride + cx0] as f32;
+            let u01 = u_plane[cy0 * u_stride + cx1] as f32;
+            let u10 = u_plane[cy1 * u_stride + cx0] as f32;
+            let u11 = u_plane[cy1 * u_stride + cx1] as f32;
+            let u_val = u00 * fx1 * fy1 + u01 * fx * fy1 + u10 * fx1 * fy + u11 * fx * fy;
+
+            let v00 = v_plane[cy0 * v_stride + cx0] as f32;
+            let v01 = v_plane[cy0 * v_stride + cx1] as f32;
+            let v10 = v_plane[cy1 * v_stride + cx0] as f32;
+            let v11 = v_plane[cy1 * v_stride + cx1] as f32;
+            let v_val = v00 * fx1 * fy1 + v01 * fx * fy1 + v10 * fx1 * fy + v11 * fx * fy;
+
+            let (r, g, b) = yuv_to_rgb(y_val, u_val, v_val, kr, kg, kb, range);
+            out[out_start + x] = P::from_rgb(r, g, b);
+        }
+    }
+}
+
+/// Scalar YUV422 strip conversion. Generic over pixel type.
+fn yuv422_strip_scalar<P: StripPixel>(
+    y_plane: &[u8],
+    y_stride: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+    width: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    out: &mut [P],
+) {
+    let (kr, kb) = matrix_coefficients(matrix);
+    let kg = 1.0 - kr - kb;
+
+    for row in 0..strip_height {
+        let y_pos = y_start + row;
+        let out_start = row * width;
+
+        for x in 0..width {
+            let y_val = y_plane[y_pos * y_stride + x] as f32;
+            let u_x = x / 2;
+            let u_val = u_plane[y_pos * u_stride + u_x] as f32;
+            let v_val = v_plane[y_pos * v_stride + u_x] as f32;
+
+            let (r, g, b) = yuv_to_rgb(y_val, u_val, v_val, kr, kg, kb, range);
+            out[out_start + x] = P::from_rgb(r, g, b);
+        }
+    }
+}
+
+/// Scalar YUV444 strip conversion. Generic over pixel type.
+fn yuv444_strip_scalar<P: StripPixel>(
+    y_plane: &[u8],
+    y_stride: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+    width: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    out: &mut [P],
+) {
+    let (kr, kb) = matrix_coefficients(matrix);
+    let kg = 1.0 - kr - kb;
+
+    for row in 0..strip_height {
+        let y_pos = y_start + row;
+        let out_start = row * width;
+
+        for x in 0..width {
+            let y_val = y_plane[y_pos * y_stride + x] as f32;
+            let u_val = u_plane[y_pos * u_stride + x] as f32;
+            let v_val = v_plane[y_pos * v_stride + x] as f32;
+
+            let (r, g, b) = yuv_to_rgb(y_val, u_val, v_val, kr, kg, kb, range);
+            out[out_start + x] = P::from_rgb(r, g, b);
+        }
+    }
 }
 
 #[cfg(test)]
