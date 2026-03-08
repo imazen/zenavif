@@ -11,7 +11,6 @@
 
 #![deny(unsafe_code)]
 
-use crate::convert::{add_alpha8, scale_pixels_to_u16, add_alpha16};
 use crate::error::{Error, Result};
 use crate::image::{ChromaSampling, ColorRange};
 use crate::yuv_convert::{self, YuvMatrix, YuvRange};
@@ -47,6 +46,7 @@ enum ConversionState {
         yuv_matrix: YuvMatrix,
         alpha_range: ColorRange,
         premultiplied: bool,
+        #[allow(dead_code)]
         buffer_width: usize,
         buffer_height: usize,
     },
@@ -135,6 +135,7 @@ impl StripConverter {
 
     /// Returns true if this converter does actual strip conversion
     /// (vs. slicing from a fully-converted buffer).
+    #[allow(dead_code)]
     pub fn is_true_streaming(&self) -> bool {
         matches!(self.state, ConversionState::Frames8 { .. })
     }
@@ -199,21 +200,19 @@ impl StripConverter {
                 premultiplied,
                 buffer_width: _,
                 buffer_height,
-            } => {
-                self.convert_strip_8bit(
-                    primary,
-                    alpha.as_ref(),
-                    *chroma_sampling,
-                    *yuv_range,
-                    *yuv_matrix,
-                    *alpha_range,
-                    *premultiplied,
-                    *buffer_height,
-                    y_start,
-                    strip_height,
-                    out_buf,
-                )
-            }
+            } => self.convert_strip_8bit(
+                primary,
+                alpha.as_ref(),
+                *chroma_sampling,
+                *yuv_range,
+                *yuv_matrix,
+                *alpha_range,
+                *premultiplied,
+                *buffer_height,
+                y_start,
+                strip_height,
+                out_buf,
+            ),
             ConversionState::FullPixels(pixels) => {
                 // Copy the strip from the full pixel buffer
                 let bpp = pixels.descriptor().bytes_per_pixel();
@@ -260,9 +259,9 @@ impl StripConverter {
 
         if has_alpha {
             // Convert YUV → RGBA8 (alpha=255), then overwrite alpha channel
-            let mut img = out_buf.try_as_imgref_mut::<Rgba<u8>>().ok_or_else(|| {
-                at(Error::Unsupported("expected RGBA8 buffer for alpha image"))
-            })?;
+            let mut img = out_buf
+                .try_as_imgref_mut::<Rgba<u8>>()
+                .ok_or_else(|| at(Error::Unsupported("expected RGBA8 buffer for alpha image")))?;
             let out_rgba = img.buf_mut();
 
             let u_view = planes.u().ok_or_else(|| {
@@ -361,7 +360,9 @@ impl StripConverter {
         } else {
             // Convert YUV → RGB8
             let mut img = out_buf.try_as_imgref_mut::<Rgb<u8>>().ok_or_else(|| {
-                at(Error::Unsupported("expected RGB8 buffer for non-alpha image"))
+                at(Error::Unsupported(
+                    "expected RGB8 buffer for non-alpha image",
+                ))
             })?;
             let out_rgb = img.buf_mut();
 
@@ -476,8 +477,16 @@ mod tests {
 
         // Full-frame conversion
         let full = crate::yuv_convert::yuv420_to_rgb8(
-            &y_plane, width, &u_plane, chroma_w, &v_plane, chroma_w, width, height,
-            YuvRange::Full, YuvMatrix::Bt709,
+            &y_plane,
+            width,
+            &u_plane,
+            chroma_w,
+            &v_plane,
+            chroma_w,
+            width,
+            height,
+            YuvRange::Full,
+            YuvMatrix::Bt709,
         );
 
         // Strip conversion with various strip heights
@@ -488,8 +497,18 @@ mod tests {
                 let h = strip_h.min(height - y_start);
                 let strip_out = &mut strip_result[y_start * width..(y_start + h) * width];
                 crate::yuv_convert::yuv420_to_rgb8_strip(
-                    &y_plane, width, &u_plane, chroma_w, &v_plane, chroma_w,
-                    width, height, y_start, h, YuvRange::Full, YuvMatrix::Bt709,
+                    &y_plane,
+                    width,
+                    &u_plane,
+                    chroma_w,
+                    &v_plane,
+                    chroma_w,
+                    width,
+                    height,
+                    y_start,
+                    h,
+                    YuvRange::Full,
+                    YuvMatrix::Bt709,
                     strip_out,
                 );
                 y_start += h;
@@ -512,10 +531,28 @@ mod tests {
         let u_plane = vec![128u8; (width / 2) * (height / 2)];
         let v_plane = vec![128u8; (width / 2) * (height / 2)];
 
-        let mut out = vec![Rgba { r: 0, g: 0, b: 0, a: 0 }; width * height];
+        let mut out = vec![
+            Rgba {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 0
+            };
+            width * height
+        ];
         crate::yuv_convert::yuv420_to_rgba8_strip(
-            &y_plane, width, &u_plane, width / 2, &v_plane, width / 2,
-            width, height, 0, height, YuvRange::Full, YuvMatrix::Bt709,
+            &y_plane,
+            width,
+            &u_plane,
+            width / 2,
+            &v_plane,
+            width / 2,
+            width,
+            height,
+            0,
+            height,
+            YuvRange::Full,
+            YuvMatrix::Bt709,
             &mut out,
         );
 

@@ -17,7 +17,7 @@ use enough::Stop;
 use rgb::{Rgb, Rgba};
 use whereat::at;
 use yuv::{YuvGrayImage, YuvPlanarImage, YuvRange, YuvStandardMatrix};
-use zenpixels::PixelBuffer;
+use zenpixels::{PixelBuffer, PixelDescriptor};
 
 // Import managed API from rav1d-safe
 use rav1d_safe::src::managed::{
@@ -280,6 +280,159 @@ impl ManagedAvifDecoder {
         stop.check().map_err(|e| at(Error::Cancelled(e)))?;
 
         self.convert_to_image(primary_frame, alpha_frame, stop)
+    }
+
+    /// Decode frames and return a StripConverter for cache-optimal streaming.
+    ///
+    /// For 8-bit color images, the decoded YUV frames are held in memory and
+    /// converted strip-by-strip on demand. For 16-bit or monochrome, falls back
+    /// to full-frame conversion (same allocation as `decode_full`).
+    ///
+    /// Returns `(StripConverter, ImageInfo)`.
+    pub(crate) fn decode_to_strip_converter(
+        &mut self,
+        stop: &(impl Stop + ?Sized),
+    ) -> Result<(crate::strip_convert::StripConverter, ImageInfo)> {
+        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+
+        let primary_data = self.parser.primary_data().map_err(|e| at(Error::from(e)))?;
+        let primary_frame = Self::decode_frame(
+            &mut self.decoder,
+            &primary_data,
+            "Failed to decode primary frame",
+        )?;
+
+        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+
+        let alpha_frame = if let Some(alpha_result) = self.parser.alpha_data() {
+            let alpha_data = alpha_result.map_err(|e| at(Error::from(e)))?;
+            Some(Self::decode_frame(
+                &mut self.decoder,
+                &alpha_data,
+                "Failed to decode alpha frame",
+            )?)
+        } else {
+            None
+        };
+
+        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+
+        let info = self.build_image_info(&primary_frame, alpha_frame.is_some())?;
+
+        let bit_depth = primary_frame.bit_depth();
+        let layout = primary_frame.pixel_layout();
+        let chroma_sampling = convert_chroma_sampling(layout);
+        let buffer_width = primary_frame.width() as usize;
+        let buffer_height = primary_frame.height() as usize;
+        let display_width = info.width as usize;
+        let display_height = info.height as usize;
+
+        let can_strip = bit_depth == 8
+            && !matches!(chroma_sampling, ChromaSampling::Monochrome)
+            && buffer_width == display_width
+            && buffer_height == display_height;
+
+        let converter = if can_strip {
+            let alpha_range = alpha_frame
+                .as_ref()
+                .map(|f| convert_color_range(f.color_info().color_range))
+                .unwrap_or(ColorRange::Full);
+
+            let descriptor = if alpha_frame.is_some() {
+                PixelDescriptor::RGBA8_SRGB
+            } else {
+                PixelDescriptor::RGB8_SRGB
+            };
+
+            crate::strip_convert::StripConverter::new(
+                primary_frame,
+                alpha_frame,
+                chroma_sampling,
+                to_our_yuv_range(info.color_range),
+                to_our_yuv_matrix(info.matrix_coefficients),
+                alpha_range,
+                self.parser.premultiplied_alpha(),
+                display_width,
+                display_height,
+                buffer_width,
+                buffer_height,
+                descriptor,
+            )
+        } else {
+            // Fallback: full conversion for 16-bit, monochrome, or cropped images
+            let (pixels, _) = self.convert_to_image(primary_frame, alpha_frame, stop)?;
+            crate::strip_convert::StripConverter::new_from_pixels(pixels)
+        };
+
+        Ok((converter, info))
+    }
+
+    /// Build ImageInfo from a decoded primary frame and parser metadata.
+    ///
+    /// Factored out of `convert_to_image` for reuse by `decode_to_strip_converter`.
+    fn build_image_info(&self, primary: &Frame, has_alpha: bool) -> Result<ImageInfo> {
+        let width = primary.width() as usize;
+        let height = primary.height() as usize;
+        let bit_depth = primary.bit_depth();
+        let layout = primary.pixel_layout();
+
+        let av1_color = primary.color_info();
+        let matrix_coefficients = convert_matrix(av1_color.matrix_coefficients);
+        let color_range = convert_color_range(av1_color.color_range);
+
+        let (color_primaries, transfer_characteristics, icc_profile) =
+            match self.parser.color_info() {
+                Some(zenavif_parse::ColorInformation::Nclx {
+                    color_primaries: cp,
+                    transfer_characteristics: tc,
+                    ..
+                }) => (
+                    ColorPrimaries(*cp as u8),
+                    TransferCharacteristics(*tc as u8),
+                    None,
+                ),
+                Some(zenavif_parse::ColorInformation::IccProfile(icc)) => (
+                    convert_color_primaries(av1_color.primaries),
+                    convert_transfer(av1_color.transfer_characteristics),
+                    Some(icc.clone()),
+                ),
+                None => (
+                    convert_color_primaries(av1_color.primaries),
+                    convert_transfer(av1_color.transfer_characteristics),
+                    None,
+                ),
+            };
+
+        Ok(ImageInfo {
+            width: width as u32,
+            height: height as u32,
+            bit_depth,
+            has_alpha,
+            premultiplied_alpha: self.parser.premultiplied_alpha(),
+            monochrome: matches!(layout, PixelLayout::I400),
+            color_primaries,
+            transfer_characteristics,
+            matrix_coefficients,
+            color_range,
+            chroma_sampling: convert_chroma_sampling(layout),
+            icc_profile,
+            rotation: self.parser.rotation().cloned(),
+            mirror: self.parser.mirror().cloned(),
+            clean_aperture: self.parser.clean_aperture().cloned(),
+            pixel_aspect_ratio: self.parser.pixel_aspect_ratio().cloned(),
+            content_light_level: self.parser.content_light_level().cloned(),
+            mastering_display: self.parser.mastering_display().cloned(),
+            exif: self
+                .parser
+                .exif()
+                .and_then(|r| r.ok())
+                .map(|c| c.into_owned()),
+            xmp: self
+                .parser
+                .xmp()
+                .and_then(|r| r.ok())
+                .map(|c| c.into_owned()),
+        })
     }
 
     /// Probe image metadata without decoding pixels.
@@ -1378,10 +1531,13 @@ impl ManagedAvifDecoder {
     /// Decode with row-level streaming to a sink.
     ///
     /// For grid images, processes one tile-row at a time: decode tiles,
-    /// convert to RGB, stitch into the sink buffer, drop frames. Peak memory
-    /// is proportional to one tile-row instead of the full image.
+    /// convert to RGB, stitch into the sink buffer, drop frames.
     ///
-    /// For single images, decodes the full frame then writes it as one strip.
+    /// For single 8-bit color images, the decoded YUV frame is converted
+    /// strip-by-strip directly into the sink's buffers. This eliminates the
+    /// full RGB allocation and keeps the working set in L2 cache.
+    ///
+    /// For 16-bit/monochrome images, falls back to full-frame conversion.
     pub fn decode_to_sink(
         &mut self,
         stop: &(impl Stop + ?Sized),
@@ -1393,9 +1549,54 @@ impl ManagedAvifDecoder {
             return self.decode_grid_to_sink(stop, sink);
         }
 
-        // Single image: decode full, write as one strip
-        let (pixels, info) = self.decode_full(stop)?;
-        write_pixels_to_sink(&pixels, sink)?;
+        // Single image: strip conversion, then copy rows to sink
+        let (converter, info) = self.decode_to_strip_converter(stop)?;
+        let width = converter.display_width() as u32;
+        let height = converter.display_height() as u32;
+        let desc = converter.descriptor();
+        let strip_h = converter.optimal_strip_height();
+        let bpp = desc.bytes_per_pixel();
+
+        sink.begin(width, height, desc)
+            .map_err(|e| at(Error::Encode(e.to_string())))?;
+
+        // Reusable strip buffer for conversion
+        let mut strip_pixels = PixelBuffer::new(width, strip_h as u32, desc);
+
+        let mut y_offset = 0usize;
+        while y_offset < height as usize {
+            stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+
+            let h = strip_h.min(height as usize - y_offset);
+
+            // Resize strip buffer for the last (possibly shorter) strip
+            if h < strip_h {
+                strip_pixels = PixelBuffer::new(width, h as u32, desc);
+            }
+
+            converter
+                .convert_strip(y_offset, h, &mut strip_pixels)
+                .map_err(|e| e.into_inner())?;
+
+            // Copy converted rows to sink buffer
+            let mut sink_buf = sink
+                .provide_next_buffer(y_offset as u32, h as u32, width, desc)
+                .map_err(|e| at(Error::Encode(e.to_string())))?;
+
+            let src = strip_pixels.as_slice();
+            let row_bytes = width as usize * bpp;
+            for row in 0..h {
+                let dst_row = sink_buf.row_mut(row as u32);
+                let src_row = src.row(row as u32);
+                dst_row[..row_bytes].copy_from_slice(&src_row[..row_bytes]);
+            }
+
+            y_offset += h;
+        }
+
+        sink.finish()
+            .map_err(|e| at(Error::Encode(e.to_string())))?;
+
         Ok(info)
     }
 
@@ -1496,38 +1697,6 @@ impl ManagedAvifDecoder {
 
         self.probe_info()
     }
-}
-
-/// Write all pixels from a [`PixelBuffer`] to a sink as a single strip.
-fn write_pixels_to_sink(
-    pixels: &PixelBuffer,
-    sink: &mut dyn zc::decode::DecodeRowSink,
-) -> Result<()> {
-    let w = pixels.width() as usize;
-    let h = pixels.height() as usize;
-    let desc = pixels.descriptor();
-    let bpp = desc.bytes_per_pixel();
-    let row_bytes = w * bpp;
-
-    sink.begin(w as u32, h as u32, desc)
-        .map_err(|e| at(Error::Encode(e.to_string())))?;
-
-    let mut sink_buf = sink
-        .provide_next_buffer(0, h as u32, w as u32, desc)
-        .map_err(|e| at(Error::Encode(e.to_string())))?;
-
-    let src_slice = pixels.as_slice();
-    for y in 0..h {
-        let dst_row = sink_buf.row_mut(y as u32);
-        let src = src_slice.row(y as u32);
-        let copy_len = row_bytes.min(src.len()).min(dst_row.len());
-        dst_row[..copy_len].copy_from_slice(&src[..copy_len]);
-    }
-
-    sink.finish()
-        .map_err(|e| at(Error::Encode(e.to_string())))?;
-
-    Ok(())
 }
 
 /// Frame-by-frame animation decoder.

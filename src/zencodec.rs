@@ -1463,7 +1463,7 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
     fn streaming_decoder(
         self,
         data: Cow<'a, [u8]>,
-        preferred: &[PixelDescriptor],
+        _preferred: &[PixelDescriptor],
     ) -> Result<AvifStreamingDecoder<'a>, At<Error>> {
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
@@ -1517,17 +1517,17 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
                 current_grid_row: 0,
                 strip_descriptor,
                 strip_buffer: None,
-                full_pixels: None,
+                strip_converter: None,
+                strip_height: 0,
             });
         }
 
-        // Non-grid fallback: full decode upfront.
-        let (pixels, _native) = decoder.decode_full(stop)?;
-        let pixels = set_cicp_on_pixels(pixels, &native_info);
-        let pixels = negotiate_format(pixels, preferred);
-        let desc = pixels.descriptor();
-        let w = pixels.width();
-        let h = pixels.height();
+        // Non-grid: decode YUV, set up strip converter for on-demand conversion.
+        let (converter, _native) = decoder.decode_to_strip_converter(stop)?;
+        let desc = converter.descriptor();
+        let w = converter.display_width() as u32;
+        let h = converter.display_height() as u32;
+        let strip_h = converter.optimal_strip_height() as u32;
 
         Ok(AvifStreamingDecoder {
             info,
@@ -1541,7 +1541,8 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
             current_grid_row: 0,
             strip_descriptor: desc,
             strip_buffer: None,
-            full_pixels: Some(pixels),
+            strip_converter: Some(converter),
+            strip_height: strip_h,
         })
     }
 
@@ -1824,8 +1825,12 @@ impl zc::decode::Decode for AvifDecoder<'_> {
 /// them into a strip. Peak memory is proportional to one tile-row instead of
 /// the full image.
 ///
-/// For non-grid images, the full frame is decoded on construction and emitted
-/// in fixed-height strips.
+/// For non-grid 8-bit color images, the decoded YUV frame is held in memory
+/// and converted strip-by-strip on demand. This eliminates the full RGB
+/// allocation and keeps the working set in L2 cache.
+///
+/// For non-grid 16-bit or monochrome images, falls back to full-frame
+/// conversion and emits fixed-height strips.
 pub struct AvifStreamingDecoder<'a> {
     info: ImageInfo,
     y_offset: u32,
@@ -1840,16 +1845,15 @@ pub struct AvifStreamingDecoder<'a> {
     current_grid_row: u32,
     /// Pixel descriptor with CICP metadata for strip buffers.
     strip_descriptor: PixelDescriptor,
-    /// Reusable strip buffer for the current tile-row (grid path).
+    /// Reusable strip buffer for the current tile-row or strip conversion.
     strip_buffer: Option<PixelBuffer>,
-    /// Non-grid fallback: full decoded image, emit strips.
-    full_pixels: Option<PixelBuffer>,
+    /// Non-grid strip conversion: holds decoded YUV frames, converts on demand.
+    strip_converter: Option<crate::strip_convert::StripConverter>,
+    /// Optimal strip height for the strip converter path.
+    strip_height: u32,
 }
 
 impl AvifStreamingDecoder<'_> {
-    /// Default strip height for non-grid fallback.
-    const FALLBACK_STRIP_HEIGHT: u32 = 64;
-
     /// Stitch decoded tiles horizontally into `self.strip_buffer`.
     fn stitch_tiles(&mut self, tiles: &[PixelBuffer], strip_h: u32) {
         let bpp = self.strip_descriptor.bytes_per_pixel();
@@ -1918,12 +1922,33 @@ impl zc::decode::StreamingDecode for AvifStreamingDecoder<'_> {
             return Ok(Some((y, slice)));
         }
 
-        // Non-grid fallback: emit strips from full_pixels.
-        if let Some(ref pixels) = self.full_pixels {
-            let h = Self::FALLBACK_STRIP_HEIGHT.min(self.output_height - self.y_offset);
+        // Non-grid: convert strip from decoded YUV frames on demand.
+        if let Some(ref converter) = self.strip_converter {
+            let remaining = self.output_height - self.y_offset;
+            let h = self.strip_height.min(remaining);
+            if h == 0 {
+                return Ok(None);
+            }
+
+            // Ensure strip buffer exists with the right dimensions
+            let desc = self.strip_descriptor;
+            let width = self.output_width;
+            let strip_buf = self
+                .strip_buffer
+                .get_or_insert_with(|| PixelBuffer::new(width, self.strip_height, desc));
+
+            // Resize if this is the last strip and it's shorter
+            if strip_buf.height() != h {
+                *strip_buf = PixelBuffer::new(width, h, desc);
+            }
+
+            converter
+                .convert_strip(self.y_offset as usize, h as usize, strip_buf)
+                .map_err(|e| e.into_inner())?;
+
             let y = self.y_offset;
             self.y_offset += h;
-            let slice = pixels.rows(y, h).erase();
+            let slice = self.strip_buffer.as_ref().unwrap().as_slice().erase();
             return Ok(Some((y, slice)));
         }
 

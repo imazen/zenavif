@@ -16,7 +16,7 @@ use archmage::prelude::*;
 use imgref::ImgVec;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::f32x8;
-use rgb::{Rgba, RGB8};
+use rgb::{RGB8, Rgba};
 
 #[cfg(target_arch = "wasm32")]
 use archmage::Wasm128Token;
@@ -1042,8 +1042,18 @@ pub fn yuv422_to_rgb8_strip(
     out: &mut [RGB8],
 ) {
     yuv422_strip_scalar(
-        y_plane, y_stride, u_plane, u_stride, v_plane, v_stride, width, y_start, strip_height,
-        range, matrix, out,
+        y_plane,
+        y_stride,
+        u_plane,
+        u_stride,
+        v_plane,
+        v_stride,
+        width,
+        y_start,
+        strip_height,
+        range,
+        matrix,
+        out,
     );
 }
 
@@ -1063,8 +1073,18 @@ pub fn yuv422_to_rgba8_strip(
     out: &mut [Rgba<u8>],
 ) {
     yuv422_strip_scalar(
-        y_plane, y_stride, u_plane, u_stride, v_plane, v_stride, width, y_start, strip_height,
-        range, matrix, out,
+        y_plane,
+        y_stride,
+        u_plane,
+        u_stride,
+        v_plane,
+        v_stride,
+        width,
+        y_start,
+        strip_height,
+        range,
+        matrix,
+        out,
     );
 }
 
@@ -1084,8 +1104,18 @@ pub fn yuv444_to_rgb8_strip(
     out: &mut [RGB8],
 ) {
     yuv444_strip_scalar(
-        y_plane, y_stride, u_plane, u_stride, v_plane, v_stride, width, y_start, strip_height,
-        range, matrix, out,
+        y_plane,
+        y_stride,
+        u_plane,
+        u_stride,
+        v_plane,
+        v_stride,
+        width,
+        y_start,
+        strip_height,
+        range,
+        matrix,
+        out,
     );
 }
 
@@ -1105,8 +1135,18 @@ pub fn yuv444_to_rgba8_strip(
     out: &mut [Rgba<u8>],
 ) {
     yuv444_strip_scalar(
-        y_plane, y_stride, u_plane, u_stride, v_plane, v_stride, width, y_start, strip_height,
-        range, matrix, out,
+        y_plane,
+        y_stride,
+        u_plane,
+        u_stride,
+        v_plane,
+        v_stride,
+        width,
+        y_start,
+        strip_height,
+        range,
+        matrix,
+        out,
     );
 }
 
