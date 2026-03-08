@@ -1375,7 +1375,11 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
     fn probe(&self, data: &[u8]) -> Result<ImageInfo, At<Error>> {
         let decoder = crate::ManagedAvifDecoder::new(data, &self.config.inner)?;
         let native_info = decoder.probe_info()?;
-        Ok(convert_native_info(&native_info))
+        let mut info = convert_native_info(&native_info);
+        if let Ok(probe) = crate::detect::probe(data) {
+            info = info.with_source_encoding_details(probe);
+        }
+        Ok(info)
     }
 
     fn output_info(&self, data: &[u8]) -> Result<zc::decode::OutputInfo, At<Error>> {
