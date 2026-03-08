@@ -757,7 +757,12 @@ impl AvifDecoder {
                 }
             }
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .expect("size verified")
+                .map_err(|_| {
+                    at(Error::Decode {
+                        code: -1,
+                        msg: "pixel buffer size mismatch",
+                    })
+                })?
                 .into())
         } else {
             let mut out = Vec::with_capacity(width * height);
@@ -767,7 +772,12 @@ impl AvifDecoder {
                 }
             }
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .expect("size verified")
+                .map_err(|_| {
+                    at(Error::Decode {
+                        code: -1,
+                        msg: "pixel buffer size mismatch",
+                    })
+                })?
                 .into())
         }
     }
@@ -801,7 +811,12 @@ impl AvifDecoder {
                 }
             }
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .expect("size verified")
+                .map_err(|_| {
+                    at(Error::Decode {
+                        code: -1,
+                        msg: "pixel buffer size mismatch",
+                    })
+                })?
                 .into())
         } else {
             let mut out = Vec::with_capacity(width * height);
@@ -811,7 +826,12 @@ impl AvifDecoder {
                 }
             }
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .expect("size verified")
+                .map_err(|_| {
+                    at(Error::Decode {
+                        code: -1,
+                        msg: "pixel buffer size mismatch",
+                    })
+                })?
                 .into())
         }
     }
@@ -839,20 +859,35 @@ impl AvifDecoder {
             ChromaSampling::Cs420 => {
                 Box::new(yuv_420(planes.y_rows(), planes.u_rows(), planes.v_rows()))
             }
-            ChromaSampling::Monochrome => unreachable!(),
+            ChromaSampling::Monochrome => {
+                return Err(at(Error::Decode {
+                    code: -1,
+                    msg: "Monochrome should not reach chroma conversion",
+                }));
+            }
         };
 
         if has_alpha {
             let mut out = Vec::with_capacity(width * height);
             out.extend(px_iter.map(|px| conv.to_rgb(px).with_alpha(0)));
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .expect("size verified")
+                .map_err(|_| {
+                    at(Error::Decode {
+                        code: -1,
+                        msg: "pixel buffer size mismatch",
+                    })
+                })?
                 .into())
         } else {
             let mut out = Vec::with_capacity(width * height);
             out.extend(px_iter.map(|px| conv.to_rgb(px)));
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .expect("size verified")
+                .map_err(|_| {
+                    at(Error::Decode {
+                        code: -1,
+                        msg: "pixel buffer size mismatch",
+                    })
+                })?
                 .into())
         }
     }
@@ -881,20 +916,35 @@ impl AvifDecoder {
             ChromaSampling::Cs420 => {
                 Box::new(yuv_420(planes.y_rows(), planes.u_rows(), planes.v_rows()))
             }
-            ChromaSampling::Monochrome => unreachable!(),
+            ChromaSampling::Monochrome => {
+                return Err(at(Error::Decode {
+                    code: -1,
+                    msg: "Monochrome should not reach chroma conversion",
+                }));
+            }
         };
 
         if has_alpha {
             let mut out = Vec::with_capacity(width * height);
             out.extend(px_iter.map(|px| conv.to_rgb(px).with_alpha(0)));
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .expect("size verified")
+                .map_err(|_| {
+                    at(Error::Decode {
+                        code: -1,
+                        msg: "pixel buffer size mismatch",
+                    })
+                })?
                 .into())
         } else {
             let mut out = Vec::with_capacity(width * height);
             out.extend(px_iter.map(|px| conv.to_rgb(px)));
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .expect("size verified")
+                .map_err(|_| {
+                    at(Error::Decode {
+                        code: -1,
+                        msg: "pixel buffer size mismatch",
+                    })
+                })?
                 .into())
         }
     }
