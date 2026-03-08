@@ -52,6 +52,8 @@ mod config;
 mod convert;
 #[cfg(feature = "unsafe-asm")]
 mod decoder;
+/// AVIF quality estimation and re-encoding recommendations.
+pub mod detect;
 mod decoder_managed;
 #[cfg(feature = "encode")]
 mod encoder;
