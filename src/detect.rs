@@ -153,9 +153,7 @@ pub fn probe(data: &[u8]) -> Result<AvifProbe, ProbeError> {
         return Err(ProbeError::Truncated);
     }
     let major_brand = &data[8..12];
-    let is_avif = major_brand == b"avif"
-        || major_brand == b"avis"
-        || major_brand == b"mif1";
+    let is_avif = major_brand == b"avif" || major_brand == b"avis" || major_brand == b"mif1";
     if !is_avif {
         // Check compatible brands
         let mut found = false;
@@ -211,8 +209,7 @@ pub fn probe(data: &[u8]) -> Result<AvifProbe, ProbeError> {
         let box_end = box_end.min(data.len());
 
         match box_type {
-            b"moov" | b"meta" | b"iprp" | b"ipco" | b"trak" | b"mdia" | b"minf"
-            | b"stbl" => {
+            b"moov" | b"meta" | b"iprp" | b"ipco" | b"trak" | b"mdia" | b"minf" | b"stbl" => {
                 // Container boxes — recurse into contents
                 let header_size = if box_type == b"meta" { 12 } else { 8 };
                 pos += header_size;
