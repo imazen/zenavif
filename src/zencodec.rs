@@ -1748,11 +1748,12 @@ impl zc::decode::FullFrameDecoder for AvifFullFrameDecoder {
         Some(self.total_frames)
     }
 
-    fn render_next_frame(&mut self) -> Result<Option<FullFrame<'_>>, At<Error>> {
+    fn render_next_frame(&mut self, stop: Option<&dyn zc::enough::Stop>) -> Result<Option<FullFrame<'_>>, At<Error>> {
+        let stop: &dyn zc::enough::Stop = stop.unwrap_or(&enough::Unstoppable);
         loop {
             let frame = self
                 .anim_decoder
-                .next_frame(&enough::Unstoppable)
+                .next_frame(stop)
                 .map_err(|e| e.into_inner())?;
             let Some(frame) = frame else {
                 return Ok(None);
@@ -1779,9 +1780,10 @@ impl zc::decode::FullFrameDecoder for AvifFullFrameDecoder {
 
     fn render_next_frame_to_sink(
         &mut self,
+        stop: Option<&dyn zc::enough::Stop>,
         sink: &mut dyn zc::decode::DecodeRowSink,
     ) -> Result<Option<zc::decode::OutputInfo>, Self::Error> {
-        zc::decode::render_frame_to_sink_via_copy(self, sink)
+        zc::decode::render_frame_to_sink_via_copy(self, stop, sink)
     }
 }
 
