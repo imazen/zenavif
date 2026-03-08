@@ -1805,7 +1805,11 @@ impl zc::decode::Decode for AvifDecoder<'_> {
         let pixels = set_cicp_on_pixels(pixels, &native_info);
         let pixels = negotiate_format(pixels, &self.preferred);
         let info = convert_native_info(&native_info);
-        Ok(DecodeOutput::new(pixels, info))
+        let mut output = DecodeOutput::new(pixels, info);
+        if let Ok(probe) = crate::detect::probe(&self.data) {
+            output = output.with_source_encoding_details(probe);
+        }
+        Ok(output)
     }
 }
 
