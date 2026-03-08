@@ -12,7 +12,8 @@ use zenpixels::{PixelBuffer, PixelDescriptor};
 fn limited_to_full_8(y: u8) -> u8 {
     // Limited range: Y ∈ [16, 235]
     // Full range: Y ∈ [0, 255]
-    let y = y as i16;
+    // Use i32 to avoid i16 overflow: (235-16)*255 = 55845 > i16::MAX
+    let y = y as i32;
     ((y - 16).max(0) * 255 / 219).min(255) as u8
 }
 
@@ -194,5 +195,58 @@ pub fn unpremultiply16(img_row: &mut [Rgba<u16>]) {
                 .rgb()
                 .map(|c| (c as u32 * 0xFFFF / px.a as u32).min(0xFFFF) as u16);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn limited_to_full_8_no_overflow() {
+        // Regression: i16 arithmetic overflowed for y > 144
+        // (y-16)*255 = (235-16)*255 = 55845 > i16::MAX (32767)
+        assert_eq!(limited_to_full_8(16), 0);
+        assert_eq!(limited_to_full_8(235), 255);
+        // y=145: (145-16)*255 = 32895 > 32767 — would overflow with i16
+        assert_eq!(limited_to_full_8(145), 150);
+        // y=200: (200-16)*255 = 46920 — definitely overflows i16
+        assert_eq!(limited_to_full_8(200), 214);
+        // Below range clamps to 0
+        assert_eq!(limited_to_full_8(0), 0);
+        assert_eq!(limited_to_full_8(15), 0);
+        // Above range clamps to 255
+        assert_eq!(limited_to_full_8(255), 255);
+    }
+
+    #[test]
+    fn limited_to_full_8_all_values_in_range() {
+        // Ensure no panic or overflow for any u8 input
+        for y in 0..=255u8 {
+            let result = limited_to_full_8(y);
+            assert!(result <= 255, "y={y} produced out-of-range result {result}");
+        }
+    }
+
+    #[test]
+    fn limited_to_full_16_endpoints() {
+        // 10-bit
+        assert_eq!(limited_to_full_16(64, 10), 0);   // 16<<2 = 64
+        assert_eq!(limited_to_full_16(940, 10), 1023); // 235<<2 = 940
+        // 12-bit
+        assert_eq!(limited_to_full_16(256, 12), 0);    // 16<<4 = 256
+        assert_eq!(limited_to_full_16(3760, 12), 4095); // 235<<4 = 3760
+    }
+
+    #[test]
+    fn scale_to_u16_endpoints() {
+        // 10-bit
+        assert_eq!(scale_to_u16(0, 10), 0);
+        assert_eq!(scale_to_u16(1023, 10), 65535);
+        // 12-bit
+        assert_eq!(scale_to_u16(0, 12), 0);
+        assert_eq!(scale_to_u16(4095, 12), 65535);
+        // 16-bit no-op
+        assert_eq!(scale_to_u16(12345, 16), 12345);
     }
 }
