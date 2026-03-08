@@ -4845,7 +4845,6 @@ fn check_parser_state<T>(header: &BoxHeader, left: &Take<T>) -> Result<(), Error
     if limit == 0 || header.size == u64::MAX {
         Ok(())
     } else {
-        debug_assert_eq!(0, limit, "bad parser state bytes left");
         Err(Error::InvalidData("unread box content or bad parser sync"))
     }
 }
