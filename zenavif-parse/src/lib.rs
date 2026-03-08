@@ -2383,12 +2383,16 @@ impl<T: Read> BMFFBox<'_, T> {
         // For size=0 boxes, size is set to u64::MAX, but after subtracting offset
         // (8 or 16 bytes), the limit will be slightly less. Check for values very
         // close to u64::MAX to detect these cases.
+        // Cap pre-allocation to 256 MB — the actual read_to_end will
+        // grow as needed if the box really is larger, and return early
+        // if the underlying reader has less data than claimed.
+        const MAX_PREALLOC: u64 = 256 * 1024 * 1024;
         let mut vec = if limit >= u64::MAX - BoxHeader::MIN_LARGE_SIZE {
             // Unknown size (size=0 box), read without pre-allocation
             std::vec::Vec::new()
         } else {
             let mut v = std::vec::Vec::new();
-            v.try_reserve_exact(limit as usize)
+            v.try_reserve_exact(limit.min(MAX_PREALLOC) as usize)
                 .map_err(|_| std::io::ErrorKind::OutOfMemory)?;
             v
         };
@@ -2410,14 +2414,16 @@ fn box_read_to_end() {
 }
 
 #[test]
-fn box_read_to_end_oom() {
+fn box_read_to_end_large_claim() {
+    // A box claiming huge size but backed by only 10 bytes should still succeed —
+    // read_to_end returns what's actually available, pre-allocation is capped.
     let tmp = &mut b"1234567890".as_slice();
     let mut src = BMFFBox {
         head: BoxHeader { name: BoxType::FileTypeBox, size: 5, offset: 0, uuid: None },
-        // Use a very large value to trigger OOM, but not near u64::MAX (which indicates size=0 boxes)
         content: <_ as Read>::take(tmp, u64::MAX / 2),
     };
-    assert!(src.read_into_try_vec().is_err());
+    let buf = src.read_into_try_vec().unwrap();
+    assert_eq!(buf.len(), 10);
 }
 
 struct BoxIter<'a, T> {
@@ -3427,7 +3433,8 @@ fn read_iinf<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
     } else {
         be_u32(src)?.to_usize()
     };
-    let mut item_infos = TryVec::with_capacity(entry_count)?;
+    // Cap pre-allocation: entry_count is untrusted, actual items come from box_iter
+    let mut item_infos = TryVec::with_capacity(entry_count.min(4096))?;
 
     let mut iter = src.box_iter();
     while let Some(mut b) = iter.next_box()? {
@@ -4730,7 +4737,8 @@ fn read_iloc<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
         IlocVersion::Two => iloc.read_u32(32)?,
     };
 
-    let mut items = TryVec::with_capacity(item_count.to_usize())?;
+    // Cap pre-allocation: item_count is untrusted, actual data is bounded by bitstream
+    let mut items = TryVec::with_capacity(item_count.to_usize().min(4096))?;
 
     for _ in 0..item_count {
         let item_id = match version {
