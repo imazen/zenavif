@@ -3021,4 +3021,44 @@ mod tests {
             "streaming_decoder should fail with max_input_bytes=100"
         );
     }
+
+    // ── ThreadingPolicy tests ──────────────────────────────────────────
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn single_thread_encode_decode_roundtrip() {
+        use zc::decode::{Decode, DecodeJob, DecoderConfig};
+        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+
+        // Encode with SingleThread threading policy
+        let pixels: Vec<Rgb<u8>> = vec![
+            Rgb {
+                r: 100,
+                g: 150,
+                b: 200,
+            };
+            16 * 16
+        ];
+        let img = imgref::ImgVec::new(pixels, 16, 16);
+        let config = AvifEncoderConfig::new().with_quality(80.0);
+        let limits = ResourceLimits::none().with_threading(zc::ThreadingPolicy::SingleThread);
+        let encoder = config.job().with_limits(limits).encoder().unwrap();
+        let encoded = encoder
+            .encode(PixelSlice::from(img.as_ref()).erase())
+            .unwrap();
+        assert!(!encoded.is_empty());
+
+        // Decode with SingleThread threading policy
+        let dec_config = AvifDecoderConfig::new();
+        let dec_limits = ResourceLimits::none().with_threading(zc::ThreadingPolicy::SingleThread);
+        let decoded = dec_config
+            .job()
+            .with_limits(dec_limits)
+            .decoder(Cow::Borrowed(encoded.data()), &[])
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert_eq!(decoded.info().width, 16);
+        assert_eq!(decoded.info().height, 16);
+    }
 }
