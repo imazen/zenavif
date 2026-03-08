@@ -57,13 +57,13 @@ mod decoder_managed;
 pub mod detect;
 #[cfg(feature = "encode")]
 mod encoder;
-mod strip_convert;
 mod error;
 mod image;
 #[cfg(feature = "_dev")]
 pub mod simd;
 #[cfg(not(feature = "_dev"))]
 pub(crate) mod simd;
+mod strip_convert;
 #[cfg(feature = "_dev")]
 pub mod yuv_convert;
 #[cfg(not(feature = "_dev"))]
