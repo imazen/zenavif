@@ -1748,7 +1748,10 @@ impl zc::decode::FullFrameDecoder for AvifFullFrameDecoder {
         Some(self.total_frames)
     }
 
-    fn render_next_frame(&mut self, stop: Option<&dyn zc::enough::Stop>) -> Result<Option<FullFrame<'_>>, At<Error>> {
+    fn render_next_frame(
+        &mut self,
+        stop: Option<&dyn zc::enough::Stop>,
+    ) -> Result<Option<FullFrame<'_>>, At<Error>> {
         let stop: &dyn zc::enough::Stop = stop.unwrap_or(&enough::Unstoppable);
         loop {
             let frame = self
