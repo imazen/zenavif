@@ -557,6 +557,18 @@ fn read_leb128(data: &[u8]) -> Option<(u64, usize)> {
     }
 }
 
+impl zc::SourceEncodingDetails for AvifProbe {
+    fn source_generic_quality(&self) -> Option<f32> {
+        self.quality.as_ref().map(|q| q.estimated_quality)
+    }
+
+    fn is_lossless(&self) -> bool {
+        // AVIF supports lossless but we can't reliably detect it from
+        // headers alone (QP=0 is near-lossless, not guaranteed lossless).
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
