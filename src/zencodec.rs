@@ -31,9 +31,7 @@ use zenpixels::{ChannelType, PixelBuffer, PixelDescriptor, PixelSlice};
 use zenpixels_convert::PixelBufferConvertExt as _;
 
 use crate::error::Error;
-use whereat::At;
-#[cfg(feature = "encode")]
-use whereat::at;
+use whereat::{At, at};
 
 // ── Encoding ────────────────────────────────────────────────────────────────
 
@@ -975,8 +973,18 @@ impl AvifDecoderConfig {
         let w = dst.width().min(src_ref.width());
         let h = dst.height().min(src_ref.height());
         for y in 0..h {
-            let src_row = src_ref.rows().nth(y).unwrap();
-            let dst_row = &mut dst.rows_mut().nth(y).unwrap()[..w];
+            let src_row = src_ref.rows().nth(y).ok_or_else(|| {
+                at(Error::Decode {
+                    code: -1,
+                    msg: "Source row index out of bounds",
+                })
+            })?;
+            let dst_row = &mut dst.rows_mut().nth(y).ok_or_else(|| {
+                at(Error::Decode {
+                    code: -1,
+                    msg: "Destination row index out of bounds",
+                })
+            })?[..w];
             dst_row.copy_from_slice(&src_row[..w]);
         }
         Ok(info)
@@ -995,8 +1003,18 @@ impl AvifDecoderConfig {
         let w = dst.width().min(src_ref.width());
         let h = dst.height().min(src_ref.height());
         for y in 0..h {
-            let src_row = src_ref.rows().nth(y).unwrap();
-            let dst_row = &mut dst.rows_mut().nth(y).unwrap()[..w];
+            let src_row = src_ref.rows().nth(y).ok_or_else(|| {
+                at(Error::Decode {
+                    code: -1,
+                    msg: "Source row index out of bounds",
+                })
+            })?;
+            let dst_row = &mut dst.rows_mut().nth(y).ok_or_else(|| {
+                at(Error::Decode {
+                    code: -1,
+                    msg: "Destination row index out of bounds",
+                })
+            })?[..w];
             dst_row.copy_from_slice(&src_row[..w]);
         }
         Ok(info)
@@ -1016,8 +1034,18 @@ impl AvifDecoderConfig {
         let w = dst.width().min(src_ref.width());
         let h = dst.height().min(src_ref.height());
         for y in 0..h {
-            let src_row = src_ref.rows().nth(y).unwrap();
-            let dst_row = &mut dst.rows_mut().nth(y).unwrap()[..w];
+            let src_row = src_ref.rows().nth(y).ok_or_else(|| {
+                at(Error::Decode {
+                    code: -1,
+                    msg: "Source row index out of bounds",
+                })
+            })?;
+            let dst_row = &mut dst.rows_mut().nth(y).ok_or_else(|| {
+                at(Error::Decode {
+                    code: -1,
+                    msg: "Destination row index out of bounds",
+                })
+            })?[..w];
             for (i, px) in src_row[..w].iter().enumerate() {
                 dst_row[i] = Rgb {
                     r: srgb_u8_to_linear(px.r),
@@ -1043,8 +1071,18 @@ impl AvifDecoderConfig {
         let w = dst.width().min(src_ref.width());
         let h = dst.height().min(src_ref.height());
         for y in 0..h {
-            let src_row = src_ref.rows().nth(y).unwrap();
-            let dst_row = &mut dst.rows_mut().nth(y).unwrap()[..w];
+            let src_row = src_ref.rows().nth(y).ok_or_else(|| {
+                at(Error::Decode {
+                    code: -1,
+                    msg: "Source row index out of bounds",
+                })
+            })?;
+            let dst_row = &mut dst.rows_mut().nth(y).ok_or_else(|| {
+                at(Error::Decode {
+                    code: -1,
+                    msg: "Destination row index out of bounds",
+                })
+            })?[..w];
             for (i, px) in src_row[..w].iter().enumerate() {
                 dst_row[i] = Rgba {
                     r: srgb_u8_to_linear(px.r),
@@ -1075,8 +1113,18 @@ impl AvifDecoderConfig {
             crate::yuv_convert::matrix_coefficients(crate::yuv_convert::YuvMatrix::Bt709);
         let kg = 1.0 - kr - kb;
         for y in 0..h {
-            let src_row = src_ref.rows().nth(y).unwrap();
-            let dst_row = &mut dst.rows_mut().nth(y).unwrap()[..w];
+            let src_row = src_ref.rows().nth(y).ok_or_else(|| {
+                at(Error::Decode {
+                    code: -1,
+                    msg: "Source row index out of bounds",
+                })
+            })?;
+            let dst_row = &mut dst.rows_mut().nth(y).ok_or_else(|| {
+                at(Error::Decode {
+                    code: -1,
+                    msg: "Destination row index out of bounds",
+                })
+            })?[..w];
             for (i, px) in src_row[..w].iter().enumerate() {
                 let r = srgb_u8_to_linear(px.r);
                 let g = srgb_u8_to_linear(px.g);
