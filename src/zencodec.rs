@@ -1328,7 +1328,9 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
         let info = convert_native_info(&native_info);
 
         if decoder.is_grid() {
-            let grid = decoder.grid_config().unwrap();
+            let grid = decoder
+                .grid_config()
+                .ok_or_else(|| at(Error::Unsupported("grid_config missing after is_grid()")))?;
             let output_width = grid.output_width;
             let output_height = grid.output_height;
 
