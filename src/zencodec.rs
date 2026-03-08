@@ -261,6 +261,63 @@ static AVIF_ENCODE_CAPABILITIES: zc::encode::EncodeCapabilities =
         .with_quality_range(0.0, 100.0)
         .with_threads_supported_range(1, 256);
 
+/// Map generic quality (libjpeg-turbo scale) to AVIF native quality.
+///
+/// Calibrated on CID22-512 corpus (209 images) to produce the same median
+/// SSIMULACRA2 as libjpeg-turbo at each quality level.
+#[cfg(feature = "encode")]
+fn calibrated_avif_quality(generic_q: f32) -> f32 {
+    const TABLE: &[(f32, f32)] = &[
+        (5.0, 5.0),
+        (10.0, 13.9),
+        (15.0, 23.9),
+        (20.0, 31.0),
+        (25.0, 36.1),
+        (30.0, 40.1),
+        (35.0, 43.4),
+        (40.0, 45.7),
+        (45.0, 48.0),
+        (50.0, 50.0),
+        (55.0, 52.1),
+        (60.0, 54.1),
+        (65.0, 56.6),
+        (70.0, 59.2),
+        (72.0, 60.7),
+        (75.0, 62.8),
+        (78.0, 65.1),
+        (80.0, 66.6),
+        (82.0, 68.5),
+        (85.0, 71.1),
+        (87.0, 72.6),
+        (90.0, 75.8),
+        (92.0, 78.3),
+        (95.0, 82.8),
+        (97.0, 85.5),
+        (99.0, 87.0),
+    ];
+    interp_quality(TABLE, generic_q)
+}
+
+/// Piecewise linear interpolation with clamping at table bounds.
+#[cfg(feature = "encode")]
+fn interp_quality(table: &[(f32, f32)], x: f32) -> f32 {
+    if x <= table[0].0 {
+        return table[0].1;
+    }
+    if x >= table[table.len() - 1].0 {
+        return table[table.len() - 1].1;
+    }
+    for i in 1..table.len() {
+        if x <= table[i].0 {
+            let (x0, y0) = table[i - 1];
+            let (x1, y1) = table[i];
+            let t = (x - x0) / (x1 - x0);
+            return y0 + t * (y1 - y0);
+        }
+    }
+    table[table.len() - 1].1
+}
+
 #[cfg(feature = "encode")]
 impl zc::encode::EncoderConfig for AvifEncoderConfig {
     type Error = At<Error>;
@@ -295,7 +352,8 @@ impl zc::encode::EncoderConfig for AvifEncoderConfig {
     fn with_generic_quality(mut self, quality: f32) -> Self {
         let clamped = quality.clamp(0.0, 100.0);
         self.trait_quality = Some(clamped);
-        self.inner = self.inner.quality(clamped);
+        let native = calibrated_avif_quality(clamped);
+        self.inner = self.inner.quality(native);
         self
     }
 
