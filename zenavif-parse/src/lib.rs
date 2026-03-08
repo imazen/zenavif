@@ -170,7 +170,6 @@ impl From<bitreader::BitReaderError> for Error {
     #[cfg_attr(debug_assertions, track_caller)]
     fn from(err: bitreader::BitReaderError) -> Self {
         log::warn!("bitreader: {err}");
-        debug_assert!(!matches!(err, bitreader::BitReaderError::TooManyBitsForType { .. })); // bug
         Self::InvalidData("truncated bits")
     }
 }
@@ -3745,8 +3744,8 @@ fn read_pixi<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
 
     let num_channels = usize::from(src.read_u8()?);
     let mut channels = ArrayVec::new();
-    channels.extend((0..num_channels.min(channels.capacity())).map(|_| 0));
-    debug_assert_eq!(num_channels, channels.len());
+    let clamped = num_channels.min(channels.capacity());
+    channels.extend((0..clamped).map(|_| 0));
     src.read_exact(&mut channels).map_err(|_| Error::InvalidData("invalid num_channels"))?;
 
     // In lenient mode, skip any extra bytes (e.g., extended_pixi.avif has 6 extra bytes)
