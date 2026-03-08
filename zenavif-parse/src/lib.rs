@@ -1821,7 +1821,7 @@ impl<'data> AvifParser<'data> {
                 } else {
                     0
                 };
-                return Ok(duration_ms as u32);
+                return Ok(u32::try_from(duration_ms).unwrap_or(u32::MAX));
             }
             current_sample += entry.sample_count as usize;
         }
@@ -2576,7 +2576,9 @@ fn skip_box_content<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<()> {
             .checked_sub(header.offset)
             .ok_or(Error::InvalidData("header offset > size"))?
     };
-    assert_eq!(to_skip, src.bytes_left());
+    if to_skip != src.bytes_left() {
+        return Err(Error::InvalidData("box content size mismatch"));
+    }
     skip(src, to_skip)
 }
 
@@ -4409,7 +4411,8 @@ fn read_elst<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<u32> {
     let entry_count = be_u32(src)?;
     // Skip all entries
     let entry_size: u64 = if version == 1 { 20 } else { 12 };
-    skip(src, entry_count as u64 * entry_size)?;
+    skip(src, (entry_count as u64).checked_mul(entry_size)
+        .ok_or(Error::InvalidData("edit list entry count overflow"))?)?;
     skip_box_remain(src)?;
 
     // Bit 0 of flags: repeat (1 = infinite loop → loop_count=0, 0 = play once → loop_count=1)
@@ -4642,7 +4645,7 @@ fn extract_animation_frames(
             } else {
                 0
             };
-            frame_durations.push(duration_ms as u32)?;
+            frame_durations.push(u32::try_from(duration_ms).unwrap_or(u32::MAX))?;
         }
     }
 
