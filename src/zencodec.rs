@@ -2669,4 +2669,227 @@ mod tests {
         let decoded = dec.decode(encoded.data()).unwrap();
         assert!(decoded.info().source_color.bit_depth.unwrap_or(8) >= 10);
     }
+
+    // ── ResourceLimits enforcement tests ──────────────────────────────────
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encode_max_output_bytes_rejects() {
+        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+
+        let pixels: Vec<Rgb<u8>> = vec![
+            Rgb {
+                r: 100,
+                g: 150,
+                b: 200,
+            };
+            32 * 32
+        ];
+        let img = imgref::ImgVec::new(pixels, 32, 32);
+        let config = AvifEncoderConfig::new().with_quality(80.0);
+        // 100 bytes is too small for any AVIF output
+        let limits = ResourceLimits::none().with_max_output(100);
+        let encoder = config.job().with_limits(limits).encoder().unwrap();
+        let result = encoder.encode(PixelSlice::from(img.as_ref()).erase());
+        assert!(
+            result.is_err(),
+            "encode should fail with max_output_bytes=100"
+        );
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn decode_max_input_bytes_rejects() {
+        use zc::decode::{Decode, DecodeJob, DecoderConfig};
+
+        // First encode a valid image
+        let pixels: Vec<Rgb<u8>> = vec![
+            Rgb {
+                r: 100,
+                g: 150,
+                b: 200,
+            };
+            32 * 32
+        ];
+        let img = imgref::ImgVec::new(pixels, 32, 32);
+        let encoded = AvifEncoderConfig::new()
+            .with_quality(80.0)
+            .encode_rgb8(img.as_ref())
+            .unwrap();
+        assert!(encoded.data().len() > 100);
+
+        // Decode with max_input_bytes=100 should fail
+        let config = AvifDecoderConfig::new();
+        let limits = ResourceLimits::none().with_max_input_bytes(100);
+        let result = config
+            .job()
+            .with_limits(limits)
+            .decoder(Cow::Borrowed(encoded.data()), &[])
+            .and_then(|dec| dec.decode());
+        assert!(
+            result.is_err(),
+            "decode should fail with max_input_bytes=100"
+        );
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn decode_max_width_rejects() {
+        use zc::decode::{Decode, DecodeJob, DecoderConfig};
+
+        // Encode a 32x32 image
+        let pixels: Vec<Rgb<u8>> = vec![
+            Rgb {
+                r: 100,
+                g: 150,
+                b: 200,
+            };
+            32 * 32
+        ];
+        let img = imgref::ImgVec::new(pixels, 32, 32);
+        let encoded = AvifEncoderConfig::new()
+            .with_quality(80.0)
+            .encode_rgb8(img.as_ref())
+            .unwrap();
+
+        // Decode with max_width=10 should fail for a 32-wide image
+        let config = AvifDecoderConfig::new();
+        let limits = ResourceLimits::none()
+            .with_max_width(10)
+            .with_max_height(10);
+        let result = config
+            .job()
+            .with_limits(limits)
+            .decoder(Cow::Borrowed(encoded.data()), &[])
+            .and_then(|dec| dec.decode());
+        assert!(
+            result.is_err(),
+            "decode should fail with max_width=10 for 32px image"
+        );
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn decode_max_memory_rejects() {
+        use zc::decode::{Decode, DecodeJob, DecoderConfig};
+
+        // Encode a 32x32 image
+        let pixels: Vec<Rgb<u8>> = vec![
+            Rgb {
+                r: 100,
+                g: 150,
+                b: 200,
+            };
+            32 * 32
+        ];
+        let img = imgref::ImgVec::new(pixels, 32, 32);
+        let encoded = AvifEncoderConfig::new()
+            .with_quality(80.0)
+            .encode_rgb8(img.as_ref())
+            .unwrap();
+
+        // 100 bytes of memory is not enough to decode a 32x32 image
+        let config = AvifDecoderConfig::new();
+        let limits = ResourceLimits::none().with_max_memory(100);
+        let result = config
+            .job()
+            .with_limits(limits)
+            .decoder(Cow::Borrowed(encoded.data()), &[])
+            .and_then(|dec| dec.decode());
+        assert!(
+            result.is_err(),
+            "decode should fail with max_memory_bytes=100"
+        );
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn decode_push_decoder_checks_input_size() {
+        use zc::decode::{DecodeJob, DecodeRowSink, DecoderConfig, SinkError};
+        use zenpixels::PixelSliceMut;
+
+        struct DiscardSink {
+            buf: Vec<u8>,
+        }
+        impl DecodeRowSink for DiscardSink {
+            fn provide_next_buffer(
+                &mut self,
+                _y: u32,
+                height: u32,
+                width: u32,
+                descriptor: PixelDescriptor,
+            ) -> Result<PixelSliceMut<'_>, SinkError> {
+                let bpp = descriptor.bytes_per_pixel();
+                let stride = width as usize * bpp;
+                let needed = height as usize * stride;
+                self.buf.resize(needed, 0);
+                Ok(
+                    PixelSliceMut::new(&mut self.buf, width, height, stride, descriptor)
+                        .expect("buffer sized correctly"),
+                )
+            }
+        }
+
+        // Encode a valid image
+        let pixels: Vec<Rgb<u8>> = vec![
+            Rgb {
+                r: 100,
+                g: 150,
+                b: 200,
+            };
+            32 * 32
+        ];
+        let img = imgref::ImgVec::new(pixels, 32, 32);
+        let encoded = AvifEncoderConfig::new()
+            .with_quality(80.0)
+            .encode_rgb8(img.as_ref())
+            .unwrap();
+
+        // push_decoder with max_input_bytes=100 should fail
+        let config = AvifDecoderConfig::new();
+        let limits = ResourceLimits::none().with_max_input_bytes(100);
+        let mut sink = DiscardSink { buf: Vec::new() };
+        let result = config.job().with_limits(limits).push_decoder(
+            Cow::Borrowed(encoded.data()),
+            &mut sink,
+            &[],
+        );
+        assert!(
+            result.is_err(),
+            "push_decoder should fail with max_input_bytes=100"
+        );
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn decode_streaming_checks_input_size() {
+        use zc::decode::{DecodeJob, DecoderConfig};
+
+        // Encode a valid image
+        let pixels: Vec<Rgb<u8>> = vec![
+            Rgb {
+                r: 100,
+                g: 150,
+                b: 200,
+            };
+            32 * 32
+        ];
+        let img = imgref::ImgVec::new(pixels, 32, 32);
+        let encoded = AvifEncoderConfig::new()
+            .with_quality(80.0)
+            .encode_rgb8(img.as_ref())
+            .unwrap();
+
+        // streaming_decoder with max_input_bytes=100 should fail
+        let config = AvifDecoderConfig::new();
+        let limits = ResourceLimits::none().with_max_input_bytes(100);
+        let result = config
+            .job()
+            .with_limits(limits)
+            .streaming_decoder(Cow::Borrowed(encoded.data()), &[]);
+        assert!(
+            result.is_err(),
+            "streaming_decoder should fail with max_input_bytes=100"
+        );
+    }
 }
