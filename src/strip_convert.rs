@@ -15,7 +15,6 @@ use crate::error::{Error, Result};
 use crate::image::{ChromaSampling, ColorRange};
 use crate::yuv_convert::{self, YuvMatrix, YuvRange};
 use rgb::{Rgb, Rgba};
-use whereat::at;
 use zenpixels::{PixelBuffer, PixelDescriptor};
 
 use rav1d_safe::src::managed::{Frame, Planes};
@@ -246,7 +245,7 @@ impl StripConverter {
         out_buf: &mut PixelBuffer,
     ) -> Result<()> {
         let Planes::Depth8(planes) = primary.planes() else {
-            return Err(at(Error::Decode {
+            return Err(at!(Error::Decode {
                 code: -1,
                 msg: "Expected 8-bit planes",
             }));
@@ -261,17 +260,17 @@ impl StripConverter {
             // Convert YUV → RGBA8 (alpha=255), then overwrite alpha channel
             let mut img = out_buf
                 .try_as_imgref_mut::<Rgba<u8>>()
-                .ok_or_else(|| at(Error::Unsupported("expected RGBA8 buffer for alpha image")))?;
+                .ok_or_else(|| at!(Error::Unsupported("expected RGBA8 buffer for alpha image")))?;
             let out_rgba = img.buf_mut();
 
             let u_view = planes.u().ok_or_else(|| {
-                at(Error::Decode {
+                at!(Error::Decode {
                     code: -1,
                     msg: "Missing U plane",
                 })
             })?;
             let v_view = planes.v().ok_or_else(|| {
-                at(Error::Decode {
+                at!(Error::Decode {
                     code: -1,
                     msg: "Missing V plane",
                 })
@@ -322,7 +321,7 @@ impl StripConverter {
                     out_rgba,
                 ),
                 ChromaSampling::Monochrome => {
-                    return Err(at(Error::Decode {
+                    return Err(at!(Error::Decode {
                         code: -1,
                         msg: "Monochrome should not reach strip chroma conversion",
                     }));
@@ -332,7 +331,7 @@ impl StripConverter {
             // Fuse alpha attachment while RGBA data is hot in cache
             if let Some(alpha_frame) = alpha {
                 let Planes::Depth8(alpha_planes) = alpha_frame.planes() else {
-                    return Err(at(Error::Decode {
+                    return Err(at!(Error::Decode {
                         code: -1,
                         msg: "Expected 8-bit alpha plane",
                     }));
@@ -360,20 +359,20 @@ impl StripConverter {
         } else {
             // Convert YUV → RGB8
             let mut img = out_buf.try_as_imgref_mut::<Rgb<u8>>().ok_or_else(|| {
-                at(Error::Unsupported(
+                at!(Error::Unsupported(
                     "expected RGB8 buffer for non-alpha image",
                 ))
             })?;
             let out_rgb = img.buf_mut();
 
             let u_view = planes.u().ok_or_else(|| {
-                at(Error::Decode {
+                at!(Error::Decode {
                     code: -1,
                     msg: "Missing U plane",
                 })
             })?;
             let v_view = planes.v().ok_or_else(|| {
-                at(Error::Decode {
+                at!(Error::Decode {
                     code: -1,
                     msg: "Missing V plane",
                 })
@@ -424,7 +423,7 @@ impl StripConverter {
                     out_rgb,
                 ),
                 ChromaSampling::Monochrome => {
-                    return Err(at(Error::Decode {
+                    return Err(at!(Error::Decode {
                         code: -1,
                         msg: "Monochrome should not reach strip chroma conversion",
                     }));

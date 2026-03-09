@@ -54,7 +54,6 @@ use rgb::prelude::*;
 use std::ffi::c_int;
 use std::ffi::c_void;
 use std::ptr::NonNull;
-use whereat::at;
 use yuv::YUV;
 use yuv::color::{Depth, Range};
 use yuv::convert::RGBConvert;
@@ -90,7 +89,7 @@ impl Rav1dDecoder {
         };
 
         if result.0 < 0 {
-            return Err(at(Error::Decode {
+            return Err(at!(Error::Decode {
                 code: result.0,
                 msg: "failed to open decoder",
             }));
@@ -110,7 +109,7 @@ impl Rav1dDecoder {
         const EAGAIN: c_int = -11; // Windows doesn't use EAGAIN but use same value
 
         let ctx = self.ctx.ok_or_else(|| {
-            at(Error::Decode {
+            at!(Error::Decode {
                 code: -1,
                 msg: "decoder context is null",
             })
@@ -136,7 +135,7 @@ impl Rav1dDecoder {
         };
 
         if result.0 < 0 {
-            return Err(at(Error::Decode {
+            return Err(at!(Error::Decode {
                 code: result.0,
                 msg: "failed to wrap data",
             }));
@@ -162,7 +161,7 @@ impl Rav1dDecoder {
                 }
                 // Otherwise continue trying to send
             } else if result.0 < 0 {
-                return Err(at(Error::Decode {
+                return Err(at!(Error::Decode {
                     code: result.0,
                     msg: "failed to send data to decoder",
                 }));
@@ -188,7 +187,7 @@ impl Rav1dDecoder {
                 std::thread::yield_now();
                 continue;
             } else {
-                return Err(at(Error::Decode {
+                return Err(at!(Error::Decode {
                     code: result.0,
                     msg: "failed to get picture",
                 }));
@@ -536,10 +535,12 @@ impl AvifDecoder {
             &parse_config,
             &enough::Unstoppable,
         )
-        .map_err(|e| at(Error::Parse(e)))?;
+        .map_err(|e| at!(Error::Parse(e)))?;
 
         // Extract metadata from the parsed AVIF
-        let metadata = parser.primary_metadata().map_err(|e| at(Error::Parse(e)))?;
+        let metadata = parser
+            .primary_metadata()
+            .map_err(|e| at!(Error::Parse(e)))?;
 
         let chroma_sampling = match metadata.chroma_subsampling {
             (false, false) => ChromaSampling::Cs444,
@@ -568,7 +569,7 @@ impl AvifDecoder {
         if config.frame_size_limit > 0 {
             let total_pixels = info.width.saturating_mul(info.height);
             if total_pixels > config.frame_size_limit {
-                return Err(at(Error::ImageTooLarge {
+                return Err(at!(Error::ImageTooLarge {
                     width: info.width,
                     height: info.height,
                 }));
@@ -590,7 +591,7 @@ impl AvifDecoder {
     /// Decode the AVIF image
     pub fn decode(&mut self, stop: &(impl Stop + ?Sized)) -> Result<PixelBuffer> {
         // Check for cancellation before starting decode
-        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+        stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         // Create decoder and decode the color image
         let mut decoder = Rav1dDecoder::new(&self.config)?;
@@ -599,11 +600,11 @@ impl AvifDecoder {
         let primary_data = self
             .parser
             .primary_data()
-            .map_err(|e| at(Error::Parse(e)))?;
+            .map_err(|e| at!(Error::Parse(e)))?;
         let color_picture = decoder.decode(&primary_data)?;
 
         // Check for cancellation after color decode
-        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+        stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         // Get color info from sequence header
         let seq_hdr = color_picture.seq_hdr();
@@ -628,7 +629,7 @@ impl AvifDecoder {
         let mut image = if bit_depth == 8 {
             let planes = color_picture
                 .yuv_planes_u8()
-                .ok_or_else(|| at(Error::Unsupported("failed to extract YUV planes")))?;
+                .ok_or_else(|| at!(Error::Unsupported("failed to extract YUV planes")))?;
 
             match planes.chroma_sampling() {
                 ChromaSampling::Monochrome => {
@@ -639,7 +640,7 @@ impl AvifDecoder {
         } else {
             let planes = color_picture
                 .yuv_planes_u16()
-                .ok_or_else(|| at(Error::Unsupported("failed to extract YUV planes")))?;
+                .ok_or_else(|| at!(Error::Unsupported("failed to extract YUV planes")))?;
 
             let depth = match bit_depth {
                 10 => Depth::Depth10,
@@ -659,11 +660,11 @@ impl AvifDecoder {
         drop(color_picture);
 
         // Check for cancellation before alpha decode
-        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+        stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         // Decode alpha channel if present
         if let Some(alpha_result) = self.parser.alpha_data() {
-            let alpha_data = alpha_result.map_err(|e| at(Error::Parse(e)))?;
+            let alpha_data = alpha_result.map_err(|e| at!(Error::Parse(e)))?;
             let alpha_picture = decoder.decode(&alpha_data)?;
 
             let alpha_range = alpha_picture
@@ -684,11 +685,11 @@ impl AvifDecoder {
             if alpha_bit_depth == 8 {
                 let (y_data, width, height, _) = alpha_picture
                     .y_plane_u8()
-                    .ok_or_else(|| at(Error::Unsupported("failed to extract alpha plane")))?;
+                    .ok_or_else(|| at!(Error::Unsupported("failed to extract alpha plane")))?;
 
                 let conv =
                     RGBConvert::<u8>::new(alpha_range, yuv::color::MatrixCoefficients::Identity)
-                        .map_err(|e| at(Error::ColorConversion(e)))?;
+                        .map_err(|e| at!(Error::ColorConversion(e)))?;
 
                 add_alpha8(
                     &mut image,
@@ -707,14 +708,14 @@ impl AvifDecoder {
 
                 let (y_data, width, height, _) = alpha_picture
                     .y_plane_u16()
-                    .ok_or_else(|| at(Error::Unsupported("failed to extract alpha plane")))?;
+                    .ok_or_else(|| at!(Error::Unsupported("failed to extract alpha plane")))?;
 
                 let conv = RGBConvert::<u16>::new(
                     alpha_range,
                     yuv::color::MatrixCoefficients::Identity,
                     depth,
                 )
-                .map_err(|e| at(Error::ColorConversion(e)))?;
+                .map_err(|e| at!(Error::ColorConversion(e)))?;
 
                 add_alpha16(
                     &mut image,
@@ -743,7 +744,7 @@ impl AvifDecoder {
             matrix
         };
 
-        let conv = RGBConvert::<u8>::new(range, mc).map_err(|e| at(Error::ColorConversion(e)))?;
+        let conv = RGBConvert::<u8>::new(range, mc).map_err(|e| at!(Error::ColorConversion(e)))?;
 
         let width = planes.width;
         let height = planes.height;
@@ -758,7 +759,7 @@ impl AvifDecoder {
             }
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
                 .map_err(|_| {
-                    at(Error::Decode {
+                    at!(Error::Decode {
                         code: -1,
                         msg: "pixel buffer size mismatch",
                     })
@@ -773,7 +774,7 @@ impl AvifDecoder {
             }
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
                 .map_err(|_| {
-                    at(Error::Decode {
+                    at!(Error::Decode {
                         code: -1,
                         msg: "pixel buffer size mismatch",
                     })
@@ -797,7 +798,7 @@ impl AvifDecoder {
         };
 
         let conv =
-            RGBConvert::<u16>::new(range, mc, depth).map_err(|e| at(Error::ColorConversion(e)))?;
+            RGBConvert::<u16>::new(range, mc, depth).map_err(|e| at!(Error::ColorConversion(e)))?;
 
         let width = planes.width;
         let height = planes.height;
@@ -812,7 +813,7 @@ impl AvifDecoder {
             }
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
                 .map_err(|_| {
-                    at(Error::Decode {
+                    at!(Error::Decode {
                         code: -1,
                         msg: "pixel buffer size mismatch",
                     })
@@ -827,7 +828,7 @@ impl AvifDecoder {
             }
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
                 .map_err(|_| {
-                    at(Error::Decode {
+                    at!(Error::Decode {
                         code: -1,
                         msg: "pixel buffer size mismatch",
                     })
@@ -844,7 +845,7 @@ impl AvifDecoder {
         has_alpha: bool,
     ) -> Result<PixelBuffer> {
         let conv =
-            RGBConvert::<u8>::new(range, matrix).map_err(|e| at(Error::ColorConversion(e)))?;
+            RGBConvert::<u8>::new(range, matrix).map_err(|e| at!(Error::ColorConversion(e)))?;
 
         let width = planes.width;
         let height = planes.height;
@@ -860,7 +861,7 @@ impl AvifDecoder {
                 Box::new(yuv_420(planes.y_rows(), planes.u_rows(), planes.v_rows()))
             }
             ChromaSampling::Monochrome => {
-                return Err(at(Error::Decode {
+                return Err(at!(Error::Decode {
                     code: -1,
                     msg: "Monochrome should not reach chroma conversion",
                 }));
@@ -872,7 +873,7 @@ impl AvifDecoder {
             out.extend(px_iter.map(|px| conv.to_rgb(px).with_alpha(0)));
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
                 .map_err(|_| {
-                    at(Error::Decode {
+                    at!(Error::Decode {
                         code: -1,
                         msg: "pixel buffer size mismatch",
                     })
@@ -883,7 +884,7 @@ impl AvifDecoder {
             out.extend(px_iter.map(|px| conv.to_rgb(px)));
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
                 .map_err(|_| {
-                    at(Error::Decode {
+                    at!(Error::Decode {
                         code: -1,
                         msg: "pixel buffer size mismatch",
                     })
@@ -901,7 +902,7 @@ impl AvifDecoder {
         has_alpha: bool,
     ) -> Result<PixelBuffer> {
         let conv = RGBConvert::<u16>::new(range, matrix, depth)
-            .map_err(|e| at(Error::ColorConversion(e)))?;
+            .map_err(|e| at!(Error::ColorConversion(e)))?;
 
         let width = planes.width;
         let height = planes.height;
@@ -917,7 +918,7 @@ impl AvifDecoder {
                 Box::new(yuv_420(planes.y_rows(), planes.u_rows(), planes.v_rows()))
             }
             ChromaSampling::Monochrome => {
-                return Err(at(Error::Decode {
+                return Err(at!(Error::Decode {
                     code: -1,
                     msg: "Monochrome should not reach chroma conversion",
                 }));
@@ -929,7 +930,7 @@ impl AvifDecoder {
             out.extend(px_iter.map(|px| conv.to_rgb(px).with_alpha(0)));
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
                 .map_err(|_| {
-                    at(Error::Decode {
+                    at!(Error::Decode {
                         code: -1,
                         msg: "pixel buffer size mismatch",
                     })
@@ -940,7 +941,7 @@ impl AvifDecoder {
             out.extend(px_iter.map(|px| conv.to_rgb(px)));
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
                 .map_err(|_| {
-                    at(Error::Decode {
+                    at!(Error::Decode {
                         code: -1,
                         msg: "pixel buffer size mismatch",
                     })
