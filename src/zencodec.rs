@@ -3239,4 +3239,63 @@ mod tests {
         fn _assert_trait<T: zc::decode::FullFrameDecoder>() {}
         _assert_trait::<AvifFullFrameDecoder>();
     }
+
+    #[test]
+    fn animated_avif_full_frame_decoder_roundtrip() {
+        use std::borrow::Cow;
+        use super::AvifDecoderConfig;
+        use zc::decode::{DecodeJob, DecoderConfig, FullFrameDecoder};
+
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../codec-corpus/avif-conformance/valid/2.avif");
+        if !path.exists() {
+            eprintln!("skipping: corpus file not found at {}", path.display());
+            return;
+        }
+        let data = std::fs::read(&path).unwrap();
+
+        let config = AvifDecoderConfig::new();
+        let mut decoder = config
+            .job()
+            .full_frame_decoder(Cow::Borrowed(&data), &[])
+            .expect("full_frame_decoder should succeed for animated AVIF");
+
+        // Verify metadata
+        let info = decoder.info();
+        assert!(info.has_animation, "should be detected as animation");
+        assert!(info.width > 0 && info.height > 0, "dimensions must be nonzero");
+
+        // frame_count and loop_count should be populated
+        let frame_count = decoder.frame_count();
+        assert!(frame_count.is_some(), "frame_count should be Some for animated AVIF");
+        let total = frame_count.unwrap();
+        assert!(total >= 2, "animated AVIF should have at least 2 frames, got {total}");
+
+        let loop_count = decoder.loop_count();
+        assert!(loop_count.is_some(), "loop_count should be Some for animated AVIF");
+
+        // Decode all frames
+        let mut frames_decoded = 0u32;
+        loop {
+            match decoder.render_next_frame(None) {
+                Ok(Some(frame)) => {
+                    assert_eq!(frame.frame_index(), frames_decoded);
+                    let pixels = frame.pixels();
+                    assert!(
+                        pixels.width() > 0 && pixels.rows() > 0,
+                        "frame {} pixels should have nonzero dimensions",
+                        frames_decoded
+                    );
+                    frames_decoded += 1;
+                }
+                Ok(None) => break,
+                Err(e) => panic!("render_next_frame failed at frame {frames_decoded}: {e}"),
+            }
+        }
+
+        assert_eq!(
+            frames_decoded, total,
+            "should decode exactly {total} frames, got {frames_decoded}"
+        );
+    }
 }
