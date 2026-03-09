@@ -89,6 +89,8 @@ pub(crate) mod yuv_convert_libyuv_simd;
 #[cfg(feature = "zencodec")]
 mod zencodec;
 
+use whereat::at;
+
 pub use config::DecoderConfig;
 #[cfg(feature = "unsafe-asm")]
 pub use decoder::AvifDecoder;
