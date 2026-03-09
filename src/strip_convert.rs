@@ -15,6 +15,7 @@ use crate::error::{Error, Result};
 use crate::image::{ChromaSampling, ColorRange};
 use crate::yuv_convert::{self, YuvMatrix, YuvRange};
 use rgb::{Rgb, Rgba};
+use whereat::at;
 use zenpixels::{PixelBuffer, PixelDescriptor};
 
 use rav1d_safe::src::managed::{Frame, Planes};

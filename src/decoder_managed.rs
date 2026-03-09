@@ -15,6 +15,7 @@ use crate::image::{
 use crate::yuv_convert::{self, YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRange};
 use enough::Stop;
 use rgb::{Rgb, Rgba};
+use whereat::at;
 use yuv::{YuvGrayImage, YuvPlanarImage, YuvRange, YuvStandardMatrix};
 use zenpixels::{PixelBuffer, PixelDescriptor};
 

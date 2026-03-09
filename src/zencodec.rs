@@ -31,7 +31,7 @@ use zenpixels::{ChannelType, PixelBuffer, PixelDescriptor, PixelSlice};
 use zenpixels_convert::PixelBufferConvertExt as _;
 
 use crate::error::Error;
-use whereat::At;
+use whereat::{At, at};
 
 /// Convert a [`zc::ThreadingPolicy`] to a concrete thread count.
 ///

@@ -54,6 +54,7 @@ use rgb::prelude::*;
 use std::ffi::c_int;
 use std::ffi::c_void;
 use std::ptr::NonNull;
+use whereat::at;
 use yuv::YUV;
 use yuv::color::{Depth, Range};
 use yuv::convert::RGBConvert;
