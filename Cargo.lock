@@ -80,11 +80,11 @@ dependencies = [
 
 [[package]]
 name = "archmage"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c06fce4ba08fb97a48343135a4a3a1306a402137650ce7f2e2d377af19135b6f"
+checksum = "8890833f60d40334c52df791e924456e3688eb54579973df1bcb6137fd40b59b"
 dependencies = [
- "archmage-macros 0.9.3",
+ "archmage-macros 0.9.4",
  "safe_unaligned_simd",
 ]
 
@@ -101,9 +101,9 @@ dependencies = [
 
 [[package]]
 name = "archmage-macros"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1313d66c52ca713bb53065953e1ecaa9bf69cb8f4e190aa08232ac5790a66dc1"
+checksum = "320a3958b3befe63e12cc761781da61013529f6d1697bcae0061c447ae2486fc"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -745,7 +745,7 @@ version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ad4cadc069dae2158d5f87814de8958b88985b7bd1afe36f3bc9c1f607418fd5"
 dependencies = [
- "archmage 0.9.3",
+ "archmage 0.9.4",
  "bytemuck",
  "magetypes",
  "num-traits",
@@ -777,11 +777,11 @@ dependencies = [
 
 [[package]]
 name = "magetypes"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06ba39f70cdfbbaea85cf5d82bfe84c83c8c00f0cc80243bee241c6a5227c3dd"
+checksum = "739934e720cab10b1ca37f0c3e34780bb4820ba272712e4b64d135f0dbe03d44"
 dependencies = [
- "archmage 0.9.3",
+ "archmage 0.9.4",
 ]
 
 [[package]]
@@ -1665,7 +1665,7 @@ dependencies = [
 name = "zenavif"
 version = "0.1.0"
 dependencies = [
- "archmage 0.9.3",
+ "archmage 0.9.4",
  "bytemuck",
  "criterion",
  "enough",
@@ -1685,7 +1685,7 @@ dependencies = [
  "yuv",
  "zenavif-parse",
  "zencodec-types",
- "zenpixels",
+ "zenpixels 0.1.0",
  "zenpixels-convert",
  "zenravif",
 ]
@@ -1715,7 +1715,7 @@ name = "zencodec-types"
 version = "0.1.0"
 dependencies = [
  "enough",
- "zenpixels",
+ "zenpixels 0.1.1",
 ]
 
 [[package]]
@@ -1723,6 +1723,15 @@ name = "zenpixels"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a5034cd8276387929cdc53b7cc8b391e140e7769183664dc76c0fc2a04891be"
+dependencies = [
+ "bytemuck",
+ "imgref",
+ "rgb",
+]
+
+[[package]]
+name = "zenpixels"
+version = "0.1.1"
 dependencies = [
  "bytemuck",
  "imgref",
@@ -1738,7 +1747,7 @@ dependencies = [
  "bytemuck",
  "linear-srgb",
  "rgb",
- "zenpixels",
+ "zenpixels 0.1.0",
 ]
 
 [[package]]
