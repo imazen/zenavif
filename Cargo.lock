@@ -572,6 +572,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "garb"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "232a3653471b7228242fec8669102c1991af35a5262c6eb18aa47d68d661a143"
+dependencies = [
+ "archmage 0.9.4",
+ "bytemuck",
+ "paste",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1685,7 +1696,7 @@ dependencies = [
  "yuv",
  "zenavif-parse",
  "zencodec-types",
- "zenpixels 0.1.0",
+ "zenpixels",
  "zenpixels-convert",
  "zenravif",
 ]
@@ -1715,18 +1726,7 @@ name = "zencodec-types"
 version = "0.1.0"
 dependencies = [
  "enough",
- "zenpixels 0.1.1",
-]
-
-[[package]]
-name = "zenpixels"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a5034cd8276387929cdc53b7cc8b391e140e7769183664dc76c0fc2a04891be"
-dependencies = [
- "bytemuck",
- "imgref",
- "rgb",
+ "zenpixels",
 ]
 
 [[package]]
@@ -1740,14 +1740,13 @@ dependencies = [
 
 [[package]]
 name = "zenpixels-convert"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bb9b620ebbacfdeb7ef943212c9ac4cbfa7d9f3e2ea1bdcc03d3ec7e1db3471"
+version = "0.1.1"
 dependencies = [
  "bytemuck",
+ "garb",
  "linear-srgb",
  "rgb",
- "zenpixels 0.1.0",
+ "zenpixels",
 ]
 
 [[package]]
