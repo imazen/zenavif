@@ -40,6 +40,10 @@ pub enum Error {
         height: u32,
     },
 
+    /// A resource limit was exceeded (memory, input size, output size, etc.)
+    #[error("Resource limit exceeded: {0}")]
+    ResourceLimit(String),
+
     /// Memory allocation failed
     #[error("Out of memory")]
     OutOfMemory,
