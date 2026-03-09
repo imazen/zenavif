@@ -22,13 +22,13 @@ use enough::Stop;
 use rgb::{Rgb, Rgba};
 use zc::FullFrame;
 #[cfg(feature = "encode")]
-use zc::MetadataView;
+use zc::Metadata;
 use zc::decode::DecodeOutput;
 #[cfg(feature = "encode")]
 use zc::encode::EncodeOutput;
 use zc::{ImageFormat, ImageInfo, ResourceLimits};
 use zenpixels::{ChannelType, PixelBuffer, PixelDescriptor, PixelSlice};
-use zenpixels_convert::PixelBufferConvertExt as _;
+use zenpixels_convert::{PixelBufferConvertExt as _, PixelBufferConvertTypedExt as _};
 
 use crate::error::Error;
 use whereat::{At, at};
@@ -268,7 +268,7 @@ static AVIF_ENCODE_CAPABILITIES: zc::encode::EncodeCapabilities =
         .with_exif(true)
         .with_xmp(true)
         .with_cicp(true)
-        .with_cancel(true)
+        .with_stop(true)
         .with_lossy(true)
         .with_lossless(cfg!(feature = "encode-imazen"))
         .with_hdr(true)
@@ -427,9 +427,9 @@ impl zc::encode::EncoderConfig for AvifEncoderConfig {
 pub struct AvifEncodeJob<'a> {
     config: &'a AvifEncoderConfig,
     stop: Option<&'a dyn Stop>,
-    exif: Option<&'a [u8]>,
-    icc_profile: Option<&'a [u8]>,
-    xmp: Option<&'a [u8]>,
+    exif: Option<Arc<[u8]>>,
+    icc_profile: Option<Arc<[u8]>>,
+    xmp: Option<Arc<[u8]>>,
     limits: ResourceLimits,
     cicp: Option<zc::Cicp>,
     content_light_level: Option<zc::ContentLightLevel>,
@@ -442,8 +442,8 @@ pub struct AvifEncodeJob<'a> {
 impl<'a> AvifEncodeJob<'a> {
     /// Set EXIF metadata to embed in the encoded AVIF.
     #[must_use]
-    pub fn with_exif(mut self, exif: &'a [u8]) -> Self {
-        self.exif = Some(exif);
+    pub fn with_exif(mut self, exif: impl Into<Arc<[u8]>>) -> Self {
+        self.exif = Some(exif.into());
         self
     }
 }
@@ -459,15 +459,15 @@ impl<'a> zc::encode::EncodeJob<'a> for AvifEncodeJob<'a> {
         self
     }
 
-    fn with_metadata(mut self, meta: &'a MetadataView<'a>) -> Self {
-        if let Some(exif) = meta.exif {
-            self.exif = Some(exif);
+    fn with_metadata(mut self, meta: &Metadata) -> Self {
+        if let Some(ref exif) = meta.exif {
+            self.exif = Some(exif.clone());
         }
-        if let Some(icc) = meta.icc_profile {
-            self.icc_profile = Some(icc);
+        if let Some(ref icc) = meta.icc_profile {
+            self.icc_profile = Some(icc.clone());
         }
-        if let Some(xmp) = meta.xmp {
-            self.xmp = Some(xmp);
+        if let Some(ref xmp) = meta.xmp {
+            self.xmp = Some(xmp.clone());
         }
         if let Some(cicp) = meta.cicp {
             self.cicp = Some(cicp);
@@ -492,14 +492,14 @@ impl<'a> zc::encode::EncodeJob<'a> for AvifEncodeJob<'a> {
 
     fn encoder(self) -> Result<AvifEncoder<'a>, At<Error>> {
         let mut config = self.config.inner.clone();
-        // Apply CICP color metadata from MetadataView
+        // Apply CICP color metadata from Metadata
         if let Some(cicp) = self.cicp {
             config = config
                 .color_primaries(cicp.color_primaries)
                 .transfer_characteristics(cicp.transfer_characteristics)
                 .matrix_coefficients(cicp.matrix_coefficients);
         }
-        // Apply HDR metadata from MetadataView
+        // Apply HDR metadata from Metadata
         if let Some(cll) = self.content_light_level {
             config = config.content_light_level(
                 cll.max_content_light_level,
@@ -507,15 +507,19 @@ impl<'a> zc::encode::EncodeJob<'a> for AvifEncodeJob<'a> {
             );
         }
         if let Some(mdcv) = self.mastering_display {
+            // Convert from f32 CIE xy (0.0–1.0) to 0.16 fixed-point (u16)
+            let xy_to_u16 = |v: f32| (v * 65535.0 + 0.5) as u16;
             config = config.mastering_display(crate::MasteringDisplayConfig {
                 primaries: [
-                    (mdcv.primaries[0][0], mdcv.primaries[0][1]),
-                    (mdcv.primaries[1][0], mdcv.primaries[1][1]),
-                    (mdcv.primaries[2][0], mdcv.primaries[2][1]),
+                    (xy_to_u16(mdcv.primaries_xy[0][0]), xy_to_u16(mdcv.primaries_xy[0][1])),
+                    (xy_to_u16(mdcv.primaries_xy[1][0]), xy_to_u16(mdcv.primaries_xy[1][1])),
+                    (xy_to_u16(mdcv.primaries_xy[2][0]), xy_to_u16(mdcv.primaries_xy[2][1])),
                 ],
-                white_point: (mdcv.white_point[0], mdcv.white_point[1]),
-                max_luminance: mdcv.max_luminance,
-                min_luminance: mdcv.min_luminance,
+                white_point: (xy_to_u16(mdcv.white_point_xy[0]), xy_to_u16(mdcv.white_point_xy[1])),
+                // 24.8 fixed-point: multiply by 256
+                max_luminance: (mdcv.max_luminance * 256.0 + 0.5) as u32,
+                // 18.14 fixed-point: multiply by 16384
+                min_luminance: (mdcv.min_luminance * 16384.0 + 0.5) as u32,
             });
         }
         // Apply rotation/mirror from orientation metadata
@@ -558,9 +562,9 @@ impl<'a> zc::encode::EncodeJob<'a> for AvifEncodeJob<'a> {
 pub struct AvifEncoder<'a> {
     config: crate::EncoderConfig,
     stop: Option<&'a dyn Stop>,
-    exif: Option<&'a [u8]>,
-    icc_profile: Option<&'a [u8]>,
-    xmp: Option<&'a [u8]>,
+    exif: Option<Arc<[u8]>>,
+    icc_profile: Option<Arc<[u8]>>,
+    xmp: Option<Arc<[u8]>>,
     limits: ResourceLimits,
 }
 
@@ -568,13 +572,13 @@ pub struct AvifEncoder<'a> {
 impl AvifEncoder<'_> {
     fn build_config(&self) -> crate::EncoderConfig {
         let mut cfg = self.config.clone();
-        if let Some(exif) = self.exif {
+        if let Some(ref exif) = self.exif {
             cfg = cfg.exif(exif.to_vec());
         }
-        if let Some(icc) = self.icc_profile {
+        if let Some(ref icc) = self.icc_profile {
             cfg = cfg.icc_profile(icc.to_vec());
         }
-        if let Some(xmp) = self.xmp {
+        if let Some(ref xmp) = self.xmp {
             cfg = cfg.xmp(xmp.to_vec());
         }
         cfg
@@ -1254,10 +1258,10 @@ static AVIF_DECODE_CAPABILITIES: zc::decode::DecodeCapabilities =
         .with_exif(true)
         .with_xmp(true)
         .with_cicp(true)
-        .with_cancel(true)
+        .with_stop(true)
         .with_animation(true)
         .with_cheap_probe(true)
-        .with_row_level(true)
+        .with_streaming(true)
         .with_hdr(true)
         .with_native_gray(true)
         .with_native_16bit(true)
@@ -1685,15 +1689,17 @@ fn convert_native_info(native: &crate::image::ImageInfo) -> ImageInfo {
         ));
     }
     if let Some(ref mdcv) = native.mastering_display {
+        // Convert from 0.00002 units (u16) to CIE 1931 xy (f32), and 0.0001 cd/m² (u32) to f32
+        let xy = |v: u16| v as f32 * 0.00002;
         info = info.with_mastering_display(zc::MasteringDisplay::new(
             [
-                [mdcv.primaries[0].0, mdcv.primaries[0].1],
-                [mdcv.primaries[1].0, mdcv.primaries[1].1],
-                [mdcv.primaries[2].0, mdcv.primaries[2].1],
+                [xy(mdcv.primaries[0].0), xy(mdcv.primaries[0].1)],
+                [xy(mdcv.primaries[1].0), xy(mdcv.primaries[1].1)],
+                [xy(mdcv.primaries[2].0), xy(mdcv.primaries[2].1)],
             ],
-            [mdcv.white_point.0, mdcv.white_point.1],
-            mdcv.max_luminance,
-            mdcv.min_luminance,
+            [xy(mdcv.white_point.0), xy(mdcv.white_point.1)],
+            mdcv.max_luminance as f32 * 0.0001,
+            mdcv.min_luminance as f32 * 0.0001,
         ));
     }
 
