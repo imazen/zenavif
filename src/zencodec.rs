@@ -31,7 +31,7 @@ use zenpixels::{ChannelType, PixelBuffer, PixelDescriptor, PixelSlice};
 use zenpixels_convert::PixelBufferConvertExt as _;
 
 use crate::error::Error;
-use whereat::{At, at};
+use whereat::At;
 
 /// Convert a [`zc::ThreadingPolicy`] to a concrete thread count.
 ///
@@ -545,7 +545,7 @@ impl<'a> zc::encode::EncodeJob<'a> for AvifEncodeJob<'a> {
     }
 
     fn full_frame_encoder(self) -> Result<(), At<Error>> {
-        Err(at(Error::UnsupportedOperation(
+        Err(at!(Error::UnsupportedOperation(
             zc::UnsupportedOperation::AnimationEncode,
         )))
     }
@@ -861,7 +861,7 @@ impl zc::encode::Encoder for AvifEncoder<'_> {
     type Error = At<Error>;
 
     fn reject(op: zc::UnsupportedOperation) -> At<Error> {
-        at(Error::UnsupportedOperation(op))
+        at!(Error::UnsupportedOperation(op))
     }
 
     fn encode_srgba8(
@@ -971,7 +971,7 @@ impl zc::encode::Encoder for AvifEncoder<'_> {
                 let result = crate::encode_rgba8(img.as_ref(), &cfg, stop)?;
                 self.make_output(result.avif_file)
             }
-            _ => Err(at(Error::UnsupportedOperation(
+            _ => Err(at!(Error::UnsupportedOperation(
                 zc::UnsupportedOperation::PixelFormat,
             ))),
         }
@@ -1070,13 +1070,13 @@ impl AvifDecoderConfig {
         let h = dst.height().min(src_ref.height());
         for y in 0..h {
             let src_row = src_ref.rows().nth(y).ok_or_else(|| {
-                at(Error::Decode {
+                at!(Error::Decode {
                     code: -1,
                     msg: "Source row index out of bounds",
                 })
             })?;
             let dst_row = &mut dst.rows_mut().nth(y).ok_or_else(|| {
-                at(Error::Decode {
+                at!(Error::Decode {
                     code: -1,
                     msg: "Destination row index out of bounds",
                 })
@@ -1100,13 +1100,13 @@ impl AvifDecoderConfig {
         let h = dst.height().min(src_ref.height());
         for y in 0..h {
             let src_row = src_ref.rows().nth(y).ok_or_else(|| {
-                at(Error::Decode {
+                at!(Error::Decode {
                     code: -1,
                     msg: "Source row index out of bounds",
                 })
             })?;
             let dst_row = &mut dst.rows_mut().nth(y).ok_or_else(|| {
-                at(Error::Decode {
+                at!(Error::Decode {
                     code: -1,
                     msg: "Destination row index out of bounds",
                 })
@@ -1131,13 +1131,13 @@ impl AvifDecoderConfig {
         let h = dst.height().min(src_ref.height());
         for y in 0..h {
             let src_row = src_ref.rows().nth(y).ok_or_else(|| {
-                at(Error::Decode {
+                at!(Error::Decode {
                     code: -1,
                     msg: "Source row index out of bounds",
                 })
             })?;
             let dst_row = &mut dst.rows_mut().nth(y).ok_or_else(|| {
-                at(Error::Decode {
+                at!(Error::Decode {
                     code: -1,
                     msg: "Destination row index out of bounds",
                 })
@@ -1168,13 +1168,13 @@ impl AvifDecoderConfig {
         let h = dst.height().min(src_ref.height());
         for y in 0..h {
             let src_row = src_ref.rows().nth(y).ok_or_else(|| {
-                at(Error::Decode {
+                at!(Error::Decode {
                     code: -1,
                     msg: "Source row index out of bounds",
                 })
             })?;
             let dst_row = &mut dst.rows_mut().nth(y).ok_or_else(|| {
-                at(Error::Decode {
+                at!(Error::Decode {
                     code: -1,
                     msg: "Destination row index out of bounds",
                 })
@@ -1210,13 +1210,13 @@ impl AvifDecoderConfig {
         let kg = 1.0 - kr - kb;
         for y in 0..h {
             let src_row = src_ref.rows().nth(y).ok_or_else(|| {
-                at(Error::Decode {
+                at!(Error::Decode {
                     code: -1,
                     msg: "Source row index out of bounds",
                 })
             })?;
             let dst_row = &mut dst.rows_mut().nth(y).ok_or_else(|| {
-                at(Error::Decode {
+                at!(Error::Decode {
                     code: -1,
                     msg: "Destination row index out of bounds",
                 })
@@ -1477,7 +1477,7 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
         if decoder.is_grid() {
             let grid = decoder
                 .grid_config()
-                .ok_or_else(|| at(Error::Unsupported("grid_config missing after is_grid()")))?;
+                .ok_or_else(|| at!(Error::Unsupported("grid_config missing after is_grid()")))?;
             let output_width = grid.output_width;
             let output_height = grid.output_height;
 
@@ -1990,7 +1990,7 @@ impl zc::decode::FullFrameDecoder for AvifFullFrameDecoder {
     type Error = At<Error>;
 
     fn wrap_sink_error(err: zc::decode::SinkError) -> Self::Error {
-        at(Error::ResourceLimit(err.to_string()))
+        at!(Error::ResourceLimit(err.to_string()))
     }
 
     fn info(&self) -> &ImageInfo {
@@ -3242,8 +3242,8 @@ mod tests {
 
     #[test]
     fn animated_avif_full_frame_decoder_roundtrip() {
-        use std::borrow::Cow;
         use super::AvifDecoderConfig;
+        use std::borrow::Cow;
         use zc::decode::{DecodeJob, DecoderConfig, FullFrameDecoder};
 
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -3263,16 +3263,28 @@ mod tests {
         // Verify metadata
         let info = decoder.info();
         assert!(info.has_animation, "should be detected as animation");
-        assert!(info.width > 0 && info.height > 0, "dimensions must be nonzero");
+        assert!(
+            info.width > 0 && info.height > 0,
+            "dimensions must be nonzero"
+        );
 
         // frame_count and loop_count should be populated
         let frame_count = decoder.frame_count();
-        assert!(frame_count.is_some(), "frame_count should be Some for animated AVIF");
+        assert!(
+            frame_count.is_some(),
+            "frame_count should be Some for animated AVIF"
+        );
         let total = frame_count.unwrap();
-        assert!(total >= 2, "animated AVIF should have at least 2 frames, got {total}");
+        assert!(
+            total >= 2,
+            "animated AVIF should have at least 2 frames, got {total}"
+        );
 
         let loop_count = decoder.loop_count();
-        assert!(loop_count.is_some(), "loop_count should be Some for animated AVIF");
+        assert!(
+            loop_count.is_some(),
+            "loop_count should be Some for animated AVIF"
+        );
 
         // Decode all frames
         let mut frames_decoded = 0u32;

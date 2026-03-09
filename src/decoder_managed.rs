@@ -15,7 +15,6 @@ use crate::image::{
 use crate::yuv_convert::{self, YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRange};
 use enough::Stop;
 use rgb::{Rgb, Rgba};
-use whereat::at;
 use yuv::{YuvGrayImage, YuvPlanarImage, YuvRange, YuvStandardMatrix};
 use zenpixels::{PixelBuffer, PixelDescriptor};
 
@@ -134,7 +133,7 @@ impl ManagedAvifDecoder {
             &parse_config,
             &enough::Unstoppable,
         )
-        .map_err(|e| at(Error::from(e)))?;
+        .map_err(|e| at!(Error::from(e)))?;
 
         let settings = Settings {
             threads: config.threads,
@@ -144,7 +143,7 @@ impl ManagedAvifDecoder {
         };
 
         let decoder = Rav1dDecoder::with_settings(settings).map_err(|_e| {
-            at(Error::Decode {
+            at!(Error::Decode {
                 code: -1,
                 msg: "Failed to create decoder",
             })
@@ -161,7 +160,7 @@ impl ManagedAvifDecoder {
             };
             let total_pixels = width.saturating_mul(height);
             if total_pixels > config.frame_size_limit {
-                return Err(at(Error::ImageTooLarge { width, height }));
+                return Err(at!(Error::ImageTooLarge { width, height }));
             }
         }
 
@@ -187,20 +186,20 @@ impl ManagedAvifDecoder {
             Ok(None) => {
                 // Progressive/multi-layer: flush to get the composed frame
                 let frames = decoder.flush().map_err(|_e| {
-                    at(Error::Decode {
+                    at!(Error::Decode {
                         code: -1,
                         msg: "Failed to flush decoder",
                     })
                 })?;
                 frames.into_iter().last().ok_or_else(|| {
-                    at(Error::Decode {
+                    at!(Error::Decode {
                         code: -1,
                         msg: context,
                     })
                 })?
             }
             Err(_e) => {
-                return Err(at(Error::Decode {
+                return Err(at!(Error::Decode {
                     code: -1,
                     msg: context,
                 }));
@@ -214,24 +213,27 @@ impl ManagedAvifDecoder {
 
     /// Decode the primary image and optionally alpha channel
     pub fn decode(&mut self, stop: &(impl Stop + ?Sized)) -> Result<PixelBuffer> {
-        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+        stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         // Check if this is a grid image (tiled/multi-frame)
         if self.parser.grid_config().is_some() {
             return self.decode_grid(stop);
         }
 
-        let primary_data = self.parser.primary_data().map_err(|e| at(Error::from(e)))?;
+        let primary_data = self
+            .parser
+            .primary_data()
+            .map_err(|e| at!(Error::from(e)))?;
         let primary_frame = Self::decode_frame(
             &mut self.decoder,
             &primary_data,
             "Failed to decode primary frame",
         )?;
 
-        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+        stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         let alpha_frame = if let Some(alpha_result) = self.parser.alpha_data() {
-            let alpha_data = alpha_result.map_err(|e| at(Error::from(e)))?;
+            let alpha_data = alpha_result.map_err(|e| at!(Error::from(e)))?;
             Some(Self::decode_frame(
                 &mut self.decoder,
                 &alpha_data,
@@ -241,7 +243,7 @@ impl ManagedAvifDecoder {
             None
         };
 
-        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+        stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         let (pixels, _info) = self.convert_to_image(primary_frame, alpha_frame, stop)?;
         Ok(pixels)
@@ -249,7 +251,7 @@ impl ManagedAvifDecoder {
 
     /// Decode the primary image and return both pixels and metadata.
     pub fn decode_full(&mut self, stop: &(impl Stop + ?Sized)) -> Result<(PixelBuffer, ImageInfo)> {
-        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+        stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         if self.parser.grid_config().is_some() {
             let pixels = self.decode_grid(stop)?;
@@ -257,17 +259,20 @@ impl ManagedAvifDecoder {
             return Ok((pixels, info));
         }
 
-        let primary_data = self.parser.primary_data().map_err(|e| at(Error::from(e)))?;
+        let primary_data = self
+            .parser
+            .primary_data()
+            .map_err(|e| at!(Error::from(e)))?;
         let primary_frame = Self::decode_frame(
             &mut self.decoder,
             &primary_data,
             "Failed to decode primary frame",
         )?;
 
-        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+        stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         let alpha_frame = if let Some(alpha_result) = self.parser.alpha_data() {
-            let alpha_data = alpha_result.map_err(|e| at(Error::from(e)))?;
+            let alpha_data = alpha_result.map_err(|e| at!(Error::from(e)))?;
             Some(Self::decode_frame(
                 &mut self.decoder,
                 &alpha_data,
@@ -277,7 +282,7 @@ impl ManagedAvifDecoder {
             None
         };
 
-        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+        stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         self.convert_to_image(primary_frame, alpha_frame, stop)
     }
@@ -293,19 +298,22 @@ impl ManagedAvifDecoder {
         &mut self,
         stop: &(impl Stop + ?Sized),
     ) -> Result<(crate::strip_convert::StripConverter, ImageInfo)> {
-        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+        stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
-        let primary_data = self.parser.primary_data().map_err(|e| at(Error::from(e)))?;
+        let primary_data = self
+            .parser
+            .primary_data()
+            .map_err(|e| at!(Error::from(e)))?;
         let primary_frame = Self::decode_frame(
             &mut self.decoder,
             &primary_data,
             "Failed to decode primary frame",
         )?;
 
-        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+        stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         let alpha_frame = if let Some(alpha_result) = self.parser.alpha_data() {
-            let alpha_data = alpha_result.map_err(|e| at(Error::from(e)))?;
+            let alpha_data = alpha_result.map_err(|e| at!(Error::from(e)))?;
             Some(Self::decode_frame(
                 &mut self.decoder,
                 &alpha_data,
@@ -315,7 +323,7 @@ impl ManagedAvifDecoder {
             None
         };
 
-        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+        stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         let info = self.build_image_info(&primary_frame, alpha_frame.is_some())?;
 
@@ -448,7 +456,7 @@ impl ManagedAvifDecoder {
             let meta = self
                 .parser
                 .primary_metadata()
-                .map_err(|e| at(Error::from(e)))?;
+                .map_err(|e| at!(Error::from(e)))?;
             (meta.max_frame_width.get(), meta.max_frame_height.get())
         };
 
@@ -563,7 +571,7 @@ impl ManagedAvifDecoder {
         let anim_info = self
             .parser
             .animation_info()
-            .ok_or_else(|| at(Error::Unsupported("not an animated AVIF")))?;
+            .ok_or_else(|| at!(Error::Unsupported("not an animated AVIF")))?;
 
         let mut alpha_decoder = if anim_info.has_alpha {
             let settings = Settings {
@@ -571,7 +579,7 @@ impl ManagedAvifDecoder {
                 ..Default::default()
             };
             Some(Rav1dDecoder::with_settings(settings).map_err(|_e| {
-                at(Error::Decode {
+                at!(Error::Decode {
                     code: -1,
                     msg: "Failed to create alpha decoder",
                 })
@@ -584,9 +592,9 @@ impl ManagedAvifDecoder {
         let mut frames = Vec::with_capacity(frame_count);
 
         for i in 0..frame_count {
-            stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+            stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
-            let frame_ref = self.parser.frame(i).map_err(|e| at(Error::from(e)))?;
+            let frame_ref = self.parser.frame(i).map_err(|e| at!(Error::from(e)))?;
 
             let primary_frame = Self::decode_anim_frame(
                 &mut self.decoder,
@@ -635,7 +643,7 @@ impl ManagedAvifDecoder {
             Ok(Some(frame)) => return Ok(frame),
             Ok(None) => {}
             Err(_e) => {
-                return Err(at(Error::Decode {
+                return Err(at!(Error::Decode {
                     code: -1,
                     msg: context,
                 }));
@@ -651,7 +659,7 @@ impl ManagedAvifDecoder {
             }
         }
 
-        Err(at(Error::Decode {
+        Err(at!(Error::Decode {
             code: -1,
             msg: context,
         }))
@@ -663,7 +671,7 @@ impl ManagedAvifDecoder {
             .parser
             .grid_config()
             .ok_or_else(|| {
-                at(Error::Decode {
+                at!(Error::Decode {
                     code: -1,
                     msg: "Expected grid config but found none",
                 })
@@ -673,16 +681,16 @@ impl ManagedAvifDecoder {
         // Decode all tiles
         let mut tile_frames = Vec::new();
         for i in 0..self.parser.grid_tile_count() {
-            stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+            stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
-            let tile_data = self.parser.tile_data(i).map_err(|e| at(Error::from(e)))?;
+            let tile_data = self.parser.tile_data(i).map_err(|e| at!(Error::from(e)))?;
             let frame =
                 Self::decode_frame(&mut self.decoder, &tile_data, "Failed to decode grid tile")?;
 
             tile_frames.push(frame);
         }
 
-        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+        stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         // Stitch tiles together
         self.stitch_tiles(tile_frames, &grid_config, stop)
@@ -696,7 +704,7 @@ impl ManagedAvifDecoder {
         stop: &(impl Stop + ?Sized),
     ) -> Result<PixelBuffer> {
         if tiles.is_empty() {
-            return Err(at(Error::Decode {
+            return Err(at!(Error::Decode {
                 code: -1,
                 msg: "No tiles to stitch",
             }));
@@ -706,7 +714,7 @@ impl ManagedAvifDecoder {
         let cols = grid_config.columns as usize;
 
         if tiles.len() != rows * cols {
-            return Err(at(Error::Decode {
+            return Err(at!(Error::Decode {
                 code: -1,
                 msg: "Tile count doesn't match grid dimensions",
             }));
@@ -735,7 +743,7 @@ impl ManagedAvifDecoder {
             tile_images.push(img);
         }
 
-        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+        stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         // Stitch tiles using byte-level row access (format-agnostic)
         let descriptor = tile_images[0].descriptor();
@@ -743,12 +751,12 @@ impl ManagedAvifDecoder {
         let alloc_size = output_width
             .checked_mul(output_height)
             .and_then(|n| n.checked_mul(bpp))
-            .ok_or_else(|| at(Error::OutOfMemory))?;
+            .ok_or_else(|| at!(Error::OutOfMemory))?;
         let data = vec![0u8; alloc_size];
         let mut output =
             PixelBuffer::from_vec(data, output_width as u32, output_height as u32, descriptor)
                 .map_err(|_| {
-                    at(Error::Decode {
+                    at!(Error::Decode {
                         code: -1,
                         msg: "failed to create output buffer for grid stitch",
                     })
@@ -789,7 +797,7 @@ impl ManagedAvifDecoder {
         let alloc_size = width
             .checked_mul(height)
             .and_then(|n| n.checked_mul(bpp))
-            .ok_or_else(|| at(Error::OutOfMemory))?;
+            .ok_or_else(|| at!(Error::OutOfMemory))?;
         let mut data = vec![0u8; alloc_size];
         let src = image.as_slice();
         for y in 0..height.min(src_h) {
@@ -799,7 +807,7 @@ impl ManagedAvifDecoder {
         }
 
         PixelBuffer::from_vec(data, width as u32, height as u32, descriptor).map_err(|_| {
-            at(Error::Decode {
+            at!(Error::Decode {
                 code: -1,
                 msg: "failed to create cropped buffer",
             })
@@ -886,13 +894,13 @@ impl ManagedAvifDecoder {
                 .map(|c| c.into_owned()),
         };
 
-        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+        stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         let info_clone = info.clone();
         let pixels = match bit_depth {
             8 => self.convert_8bit(primary, alpha, info, stop),
             10 | 12 => self.convert_16bit(primary, alpha, info, stop),
-            _ => Err(at(Error::Decode {
+            _ => Err(at!(Error::Decode {
                 code: -1,
                 msg: "Unsupported bit depth",
             })),
@@ -909,7 +917,7 @@ impl ManagedAvifDecoder {
         stop: &(impl Stop + ?Sized),
     ) -> Result<PixelBuffer> {
         let Planes::Depth8(planes) = primary.planes() else {
-            return Err(at(Error::Decode {
+            return Err(at!(Error::Decode {
                 code: -1,
                 msg: "Expected 8-bit planes",
             }));
@@ -927,7 +935,7 @@ impl ManagedAvifDecoder {
         let matrix = to_yuv_matrix(info.matrix_coefficients);
         let buffer_pixel_count = buffer_width
             .checked_mul(buffer_height)
-            .ok_or_else(|| at(Error::OutOfMemory))?;
+            .ok_or_else(|| at!(Error::OutOfMemory))?;
 
         let mut image = match info.chroma_sampling {
             ChromaSampling::Monochrome => {
@@ -957,9 +965,9 @@ impl ManagedAvifDecoder {
                         yuv_range,
                         matrix,
                     )
-                    .map_err(|e| at(Error::ColorConversion(e)))?;
+                    .map_err(|e| at!(Error::ColorConversion(e)))?;
                     PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
-                        .map_err(|_| at(Error::OutOfMemory))?
+                        .map_err(|_| at!(Error::OutOfMemory))?
                         .into()
                 } else {
                     let mut out = vec![Rgb { r: 0u8, g: 0, b: 0 }; buffer_pixel_count];
@@ -971,22 +979,22 @@ impl ManagedAvifDecoder {
                         yuv_range,
                         matrix,
                     )
-                    .map_err(|e| at(Error::ColorConversion(e)))?;
+                    .map_err(|e| at!(Error::ColorConversion(e)))?;
                     PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
-                        .map_err(|_| at(Error::OutOfMemory))?
+                        .map_err(|_| at!(Error::OutOfMemory))?
                         .into()
                 }
             }
             sampling => {
                 let y_view = planes.y();
                 let u_view = planes.u().ok_or_else(|| {
-                    at(Error::Decode {
+                    at!(Error::Decode {
                         code: -1,
                         msg: "Missing U plane",
                     })
                 })?;
                 let v_view = planes.v().ok_or_else(|| {
-                    at(Error::Decode {
+                    at!(Error::Decode {
                         code: -1,
                         msg: "Missing V plane",
                     })
@@ -1041,16 +1049,16 @@ impl ManagedAvifDecoder {
                             matrix,
                         ),
                         ChromaSampling::Monochrome => {
-                            return Err(at(Error::Decode {
+                            return Err(at!(Error::Decode {
                                 code: -1,
                                 msg: "Monochrome should not reach chroma conversion",
                             }));
                         }
                     }
-                    .map_err(|e| at(Error::ColorConversion(e)))?;
+                    .map_err(|e| at!(Error::ColorConversion(e)))?;
 
                     PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
-                        .map_err(|_| at(Error::OutOfMemory))?
+                        .map_err(|_| at!(Error::OutOfMemory))?
                         .into()
                 } else {
                     let our_range = to_our_yuv_range(info.color_range);
@@ -1094,7 +1102,7 @@ impl ManagedAvifDecoder {
                             our_matrix,
                         ),
                         ChromaSampling::Monochrome => {
-                            return Err(at(Error::Decode {
+                            return Err(at!(Error::Decode {
                                 code: -1,
                                 msg: "Monochrome should not reach chroma conversion",
                             }));
@@ -1106,7 +1114,7 @@ impl ManagedAvifDecoder {
             }
         };
 
-        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+        stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         // Crop to display dimensions if needed
         if needs_crop {
@@ -1116,7 +1124,7 @@ impl ManagedAvifDecoder {
         // Handle alpha channel if present
         if let Some(alpha_frame) = alpha {
             let Planes::Depth8(alpha_planes) = alpha_frame.planes() else {
-                return Err(at(Error::Decode {
+                return Err(at!(Error::Decode {
                     code: -1,
                     msg: "Expected 8-bit alpha plane",
                 }));
@@ -1146,7 +1154,7 @@ impl ManagedAvifDecoder {
         stop: &(impl Stop + ?Sized),
     ) -> Result<PixelBuffer> {
         let Planes::Depth16(planes) = primary.planes() else {
-            return Err(at(Error::Decode {
+            return Err(at!(Error::Decode {
                 code: -1,
                 msg: "Expected 16-bit planes",
             }));
@@ -1164,7 +1172,7 @@ impl ManagedAvifDecoder {
         let matrix = to_yuv_matrix(info.matrix_coefficients);
         let buffer_pixel_count = buffer_width
             .checked_mul(buffer_height)
-            .ok_or_else(|| at(Error::OutOfMemory))?;
+            .ok_or_else(|| at!(Error::OutOfMemory))?;
 
         let mut image = match info.chroma_sampling {
             ChromaSampling::Monochrome => {
@@ -1210,9 +1218,9 @@ impl ManagedAvifDecoder {
                             matrix,
                         ),
                     }
-                    .map_err(|e| at(Error::ColorConversion(e)))?;
+                    .map_err(|e| at!(Error::ColorConversion(e)))?;
                     PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
-                        .map_err(|_| at(Error::OutOfMemory))?
+                        .map_err(|_| at!(Error::OutOfMemory))?
                         .into()
                 } else {
                     let mut out = vec![
@@ -1247,22 +1255,22 @@ impl ManagedAvifDecoder {
                             matrix,
                         ),
                     }
-                    .map_err(|e| at(Error::ColorConversion(e)))?;
+                    .map_err(|e| at!(Error::ColorConversion(e)))?;
                     PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
-                        .map_err(|_| at(Error::OutOfMemory))?
+                        .map_err(|_| at!(Error::OutOfMemory))?
                         .into()
                 }
             }
             sampling => {
                 let y_view = planes.y();
                 let u_view = planes.u().ok_or_else(|| {
-                    at(Error::Decode {
+                    at!(Error::Decode {
                         code: -1,
                         msg: "Missing U plane",
                     })
                 })?;
                 let v_view = planes.v().ok_or_else(|| {
-                    at(Error::Decode {
+                    at!(Error::Decode {
                         code: -1,
                         msg: "Missing V plane",
                     })
@@ -1355,15 +1363,15 @@ impl ManagedAvifDecoder {
                             matrix,
                         ),
                         (_, ChromaSampling::Monochrome) => {
-                            return Err(at(Error::Decode {
+                            return Err(at!(Error::Decode {
                                 code: -1,
                                 msg: "Monochrome should not reach chroma conversion",
                             }));
                         }
                     }
-                    .map_err(|e| at(Error::ColorConversion(e)))?;
+                    .map_err(|e| at!(Error::ColorConversion(e)))?;
                     PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
-                        .map_err(|_| at(Error::OutOfMemory))?
+                        .map_err(|_| at!(Error::OutOfMemory))?
                         .into()
                 } else {
                     let mut out = vec![
@@ -1440,21 +1448,21 @@ impl ManagedAvifDecoder {
                             matrix,
                         ),
                         (_, ChromaSampling::Monochrome) => {
-                            return Err(at(Error::Decode {
+                            return Err(at!(Error::Decode {
                                 code: -1,
                                 msg: "Monochrome should not reach chroma conversion",
                             }));
                         }
                     }
-                    .map_err(|e| at(Error::ColorConversion(e)))?;
+                    .map_err(|e| at!(Error::ColorConversion(e)))?;
                     PixelBuffer::from_pixels(out, buffer_width as u32, buffer_height as u32)
-                        .map_err(|_| at(Error::OutOfMemory))?
+                        .map_err(|_| at!(Error::OutOfMemory))?
                         .into()
                 }
             }
         };
 
-        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+        stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         // Scale from native bit depth (e.g. 0–1023 for 10-bit) to full u16 (0–65535).
         // Must happen before alpha attachment so unpremultiply uses correct 16-bit range.
@@ -1468,7 +1476,7 @@ impl ManagedAvifDecoder {
         // Handle alpha channel if present
         if let Some(alpha_frame) = alpha {
             let Planes::Depth16(alpha_planes) = alpha_frame.planes() else {
-                return Err(at(Error::Decode {
+                return Err(at!(Error::Decode {
                     code: -1,
                     msg: "Expected 16-bit alpha plane",
                 }));
@@ -1519,7 +1527,7 @@ impl ManagedAvifDecoder {
             let tile_data = self
                 .parser
                 .tile_data(tile_idx)
-                .map_err(|e| at(Error::from(e)))?;
+                .map_err(|e| at!(Error::from(e)))?;
             let frame =
                 Self::decode_frame(&mut self.decoder, &tile_data, "Failed to decode grid tile")?;
             let (pixels, _info) = self.convert_to_image(frame, None, stop)?;
@@ -1543,7 +1551,7 @@ impl ManagedAvifDecoder {
         stop: &(impl Stop + ?Sized),
         sink: &mut dyn zc::decode::DecodeRowSink,
     ) -> Result<ImageInfo> {
-        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+        stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         if self.parser.grid_config().is_some() {
             return self.decode_grid_to_sink(stop, sink);
@@ -1558,14 +1566,14 @@ impl ManagedAvifDecoder {
         let bpp = desc.bytes_per_pixel();
 
         sink.begin(width, height, desc)
-            .map_err(|e| at(Error::Encode(e.to_string())))?;
+            .map_err(|e| at!(Error::Encode(e.to_string())))?;
 
         // Reusable strip buffer for conversion
         let mut strip_pixels = PixelBuffer::new(width, strip_h as u32, desc);
 
         let mut y_offset = 0usize;
         while y_offset < height as usize {
-            stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+            stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
             let h = strip_h.min(height as usize - y_offset);
 
@@ -1581,7 +1589,7 @@ impl ManagedAvifDecoder {
             // Copy converted rows to sink buffer
             let mut sink_buf = sink
                 .provide_next_buffer(y_offset as u32, h as u32, width, desc)
-                .map_err(|e| at(Error::Encode(e.to_string())))?;
+                .map_err(|e| at!(Error::Encode(e.to_string())))?;
 
             let src = strip_pixels.as_slice();
             let row_bytes = width as usize * bpp;
@@ -1595,7 +1603,7 @@ impl ManagedAvifDecoder {
         }
 
         sink.finish()
-            .map_err(|e| at(Error::Encode(e.to_string())))?;
+            .map_err(|e| at!(Error::Encode(e.to_string())))?;
 
         Ok(info)
     }
@@ -1610,7 +1618,7 @@ impl ManagedAvifDecoder {
             .parser
             .grid_config()
             .ok_or_else(|| {
-                at(Error::Decode {
+                at!(Error::Decode {
                     code: -1,
                     msg: "Expected grid config but found none",
                 })
@@ -1626,7 +1634,7 @@ impl ManagedAvifDecoder {
         let mut began = false;
 
         for grid_row in 0..grid_rows {
-            stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+            stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
             // Decode and convert tiles for this row one at a time.
             // Each tile is decoded then converted before the next, so at most
@@ -1637,7 +1645,7 @@ impl ManagedAvifDecoder {
                 let tile_data = self
                     .parser
                     .tile_data(tile_idx)
-                    .map_err(|e| at(Error::from(e)))?;
+                    .map_err(|e| at!(Error::from(e)))?;
                 let frame = Self::decode_frame(
                     &mut self.decoder,
                     &tile_data,
@@ -1661,14 +1669,14 @@ impl ManagedAvifDecoder {
             // Signal begin on the first strip
             if !began {
                 sink.begin(output_width as u32, output_height as u32, desc)
-                    .map_err(|e| at(Error::Encode(e.to_string())))?;
+                    .map_err(|e| at!(Error::Encode(e.to_string())))?;
                 began = true;
             }
 
             // Provide buffer from sink and stitch tiles into it
             let mut sink_buf = sink
                 .provide_next_buffer(y_offset, strip_h as u32, output_width as u32, desc)
-                .map_err(|e| at(Error::Encode(e.to_string())))?;
+                .map_err(|e| at!(Error::Encode(e.to_string())))?;
             for py in 0..strip_h {
                 let dst_row = sink_buf.row_mut(py as u32);
                 let mut x_offset = 0usize;
@@ -1692,7 +1700,7 @@ impl ManagedAvifDecoder {
 
         if began {
             sink.finish()
-                .map_err(|e| at(Error::Encode(e.to_string())))?;
+                .map_err(|e| at!(Error::Encode(e.to_string())))?;
         }
 
         self.probe_info()
@@ -1737,7 +1745,7 @@ impl AnimationDecoder {
         let anim_info = inner
             .parser
             .animation_info()
-            .ok_or_else(|| at(Error::Unsupported("not an animated AVIF")))?;
+            .ok_or_else(|| at!(Error::Unsupported("not an animated AVIF")))?;
 
         let alpha_decoder = if anim_info.has_alpha {
             let settings = Settings {
@@ -1745,7 +1753,7 @@ impl AnimationDecoder {
                 ..Default::default()
             };
             Some(Rav1dDecoder::with_settings(settings).map_err(|_e| {
-                at(Error::Decode {
+                at!(Error::Decode {
                     code: -1,
                     msg: "Failed to create alpha decoder",
                 })
@@ -1780,13 +1788,13 @@ impl AnimationDecoder {
             return Ok(None);
         }
 
-        stop.check().map_err(|e| at(Error::Cancelled(e)))?;
+        stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         let frame_ref = self
             .inner
             .parser
             .frame(self.frame_index)
-            .map_err(|e| at(Error::from(e)))?;
+            .map_err(|e| at!(Error::from(e)))?;
 
         let primary_frame = ManagedAvifDecoder::decode_anim_frame(
             &mut self.inner.decoder,

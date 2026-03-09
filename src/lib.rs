@@ -48,6 +48,9 @@
 )]
 #![cfg_attr(feature = "_dev", deny(unsafe_code))]
 
+// Crate info for whereat error tracing (enables at!() macro with GitHub links)
+whereat::define_at_crate_info!();
+
 mod config;
 mod convert;
 #[cfg(feature = "unsafe-asm")]
@@ -239,7 +242,7 @@ pub fn encode_with(
         let img = image.try_as_imgref::<rgb::Rgba<u16>>().unwrap();
         encode_rgba16(img, config, stop)
     } else {
-        Err(whereat::at(Error::Unsupported(
+        Err(at!(Error::Unsupported(
             "only RGB/RGBA 8/16-bit encoding is supported",
         )))
     }

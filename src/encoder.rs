@@ -10,7 +10,6 @@ use enough::Stop;
 use imgref::{ImgRef, ImgVec};
 use rgb::{RGB8, RGBA8, Rgb, Rgba};
 use rgb::{RGB16, RGBA16};
-use whereat::at;
 
 /// Encoded AVIF image output
 #[derive(Debug, Clone)]
@@ -512,11 +511,11 @@ pub fn encode_rgb8(
     config: &EncoderConfig,
     stop: &(impl Stop + ?Sized),
 ) -> Result<EncodedImage> {
-    stop.check().map_err(|e| at(Error::from(e)))?;
+    stop.check().map_err(|e| at!(Error::from(e)))?;
     let enc = build_ravif_encoder(config);
     let result = enc
         .encode_rgb(img)
-        .map_err(|e| at(Error::Encode(e.to_string())))?;
+        .map_err(|e| at!(Error::Encode(e.to_string())))?;
     Ok(EncodedImage {
         avif_file: result.avif_file,
         color_byte_size: result.color_byte_size,
@@ -536,11 +535,11 @@ pub fn encode_rgba8(
     config: &EncoderConfig,
     stop: &(impl Stop + ?Sized),
 ) -> Result<EncodedImage> {
-    stop.check().map_err(|e| at(Error::from(e)))?;
+    stop.check().map_err(|e| at!(Error::from(e)))?;
     let enc = build_ravif_encoder(config);
     let result = enc
         .encode_rgba(img)
-        .map_err(|e| at(Error::Encode(e.to_string())))?;
+        .map_err(|e| at!(Error::Encode(e.to_string())))?;
     Ok(EncodedImage {
         avif_file: result.avif_file,
         color_byte_size: result.color_byte_size,
@@ -565,7 +564,7 @@ pub fn encode_rgb16(
     stop: &(impl Stop + ?Sized),
 ) -> Result<EncodedImage> {
     use crate::convert::scale_from_u16;
-    stop.check().map_err(|e| at(Error::from(e)))?;
+    stop.check().map_err(|e| at!(Error::from(e)))?;
     let enc = build_ravif_encoder(config);
     let width = img.width();
     let height = img.height();
@@ -592,7 +591,7 @@ pub fn encode_rgb16(
             pixel_range,
             ravif::MatrixCoefficients::Identity,
         )
-        .map_err(|e| at(Error::Encode(e.to_string())))?;
+        .map_err(|e| at!(Error::Encode(e.to_string())))?;
     Ok(EncodedImage {
         avif_file: result.avif_file,
         color_byte_size: result.color_byte_size,
@@ -617,7 +616,7 @@ pub fn encode_rgba16(
     stop: &(impl Stop + ?Sized),
 ) -> Result<EncodedImage> {
     use crate::convert::scale_from_u16;
-    stop.check().map_err(|e| at(Error::from(e)))?;
+    stop.check().map_err(|e| at!(Error::from(e)))?;
     let enc = build_ravif_encoder(config);
     let width = img.width();
     let height = img.height();
@@ -645,7 +644,7 @@ pub fn encode_rgba16(
             pixel_range,
             ravif::MatrixCoefficients::Identity,
         )
-        .map_err(|e| at(Error::Encode(e.to_string())))?;
+        .map_err(|e| at!(Error::Encode(e.to_string())))?;
     Ok(EncodedImage {
         avif_file: result.avif_file,
         color_byte_size: result.color_byte_size,
@@ -698,7 +697,7 @@ pub fn encode_animation_rgb8(
     config: &EncoderConfig,
     stop: &(impl Stop + ?Sized),
 ) -> Result<EncodedAnimation> {
-    stop.check().map_err(|e| at(Error::from(e)))?;
+    stop.check().map_err(|e| at!(Error::from(e)))?;
     let enc = build_ravif_encoder(config);
 
     let ravif_frames: Vec<ravif::AnimFrame<'_>> = frames
@@ -711,7 +710,7 @@ pub fn encode_animation_rgb8(
 
     let result = enc
         .encode_animation_rgb(&ravif_frames)
-        .map_err(|e| at(Error::Encode(e.to_string())))?;
+        .map_err(|e| at!(Error::Encode(e.to_string())))?;
 
     Ok(EncodedAnimation {
         avif_file: result.avif_file,
@@ -735,7 +734,7 @@ pub fn encode_animation_rgba8(
     config: &EncoderConfig,
     stop: &(impl Stop + ?Sized),
 ) -> Result<EncodedAnimation> {
-    stop.check().map_err(|e| at(Error::from(e)))?;
+    stop.check().map_err(|e| at!(Error::from(e)))?;
     let enc = build_ravif_encoder(config);
 
     let ravif_frames: Vec<ravif::AnimFrameRgba<'_>> = frames
@@ -748,7 +747,7 @@ pub fn encode_animation_rgba8(
 
     let result = enc
         .encode_animation_rgba(&ravif_frames)
-        .map_err(|e| at(Error::Encode(e.to_string())))?;
+        .map_err(|e| at!(Error::Encode(e.to_string())))?;
 
     Ok(EncodedAnimation {
         avif_file: result.avif_file,
@@ -792,7 +791,7 @@ pub fn encode_animation_rgb16(
     stop: &(impl Stop + ?Sized),
 ) -> Result<EncodedAnimation> {
     use crate::convert::scale_from_u16;
-    stop.check().map_err(|e| at(Error::from(e)))?;
+    stop.check().map_err(|e| at!(Error::from(e)))?;
     let enc = build_ravif_encoder(config);
 
     // Scale each frame from 0–65535 to 10-bit (0–1023)
@@ -824,7 +823,7 @@ pub fn encode_animation_rgb16(
 
     let result = enc
         .encode_animation_rgb16(&ravif_frames)
-        .map_err(|e| at(Error::Encode(e.to_string())))?;
+        .map_err(|e| at!(Error::Encode(e.to_string())))?;
 
     Ok(EncodedAnimation {
         avif_file: result.avif_file,
@@ -850,7 +849,7 @@ pub fn encode_animation_rgba16(
     stop: &(impl Stop + ?Sized),
 ) -> Result<EncodedAnimation> {
     use crate::convert::scale_from_u16;
-    stop.check().map_err(|e| at(Error::from(e)))?;
+    stop.check().map_err(|e| at!(Error::from(e)))?;
     let enc = build_ravif_encoder(config);
 
     // Scale each frame from 0–65535 to 10-bit (0–1023)
@@ -883,7 +882,7 @@ pub fn encode_animation_rgba16(
 
     let result = enc
         .encode_animation_rgba16(&ravif_frames)
-        .map_err(|e| at(Error::Encode(e.to_string())))?;
+        .map_err(|e| at!(Error::Encode(e.to_string())))?;
 
     Ok(EncodedAnimation {
         avif_file: result.avif_file,
