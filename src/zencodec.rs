@@ -272,9 +272,9 @@ static AVIF_ENCODE_CAPABILITIES: zc::encode::EncodeCapabilities =
         .with_lossy(true)
         .with_lossless(cfg!(feature = "encode-imazen"))
         .with_hdr(true)
-        .with_native_gray(true)
+        .with_native_gray(false)
         .with_native_16bit(true)
-        .with_native_f32(true)
+        .with_native_f32(false)
         .with_native_alpha(true)
         .with_enforces_max_pixels(true)
         .with_enforces_max_memory(true)
@@ -1323,7 +1323,7 @@ impl<'a> AvifDecodeJob<'a> {
     fn check_input_size(&self, data: &[u8]) -> Result<(), At<Error>> {
         self.limits
             .check_input_size(data.len() as u64)
-            .map_err(|e| Error::Encode(format!("{e}")))?;
+            .map_err(|e| Error::ResourceLimit(format!("{e}")))?;
         Ok(())
     }
 
@@ -1346,7 +1346,7 @@ impl<'a> AvifDecodeJob<'a> {
         let estimated_mem = info.width as u64 * info.height as u64 * bpp;
         self.limits
             .check_memory(estimated_mem)
-            .map_err(|e| Error::Encode(format!("{e}")))?;
+            .map_err(|e| Error::ResourceLimit(format!("{e}")))?;
         Ok(())
     }
 }
@@ -1575,6 +1575,7 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
             start_frame_index: self.start_frame_index,
             info: Arc::new(base_info),
             total_frames: anim_info.frame_count as u32,
+            loop_count: anim_info.loop_count,
             preferred: preferred.to_vec(),
             current_frame: None,
         })
@@ -1802,7 +1803,7 @@ impl zc::decode::Decode for AvifDecoder<'_> {
         let estimated_mem = native_info.width as u64 * native_info.height as u64 * bpp;
         self.limits
             .check_memory(estimated_mem)
-            .map_err(|e| Error::Encode(format!("{e}")))?;
+            .map_err(|e| Error::ResourceLimit(format!("{e}")))?;
 
         let (pixels, native_info) = decoder.decode_full(stop)?;
 
@@ -1977,6 +1978,8 @@ pub struct AvifFullFrameDecoder {
     start_frame_index: u32,
     info: Arc<ImageInfo>,
     total_frames: u32,
+    /// Animation loop count (0 = infinite, n = play n times).
+    loop_count: u32,
     preferred: Vec<PixelDescriptor>,
     /// Holds the current frame's pixels so `render_next_frame` can return
     /// a borrowing `FullFrame<'_>`.
@@ -1987,7 +1990,7 @@ impl zc::decode::FullFrameDecoder for AvifFullFrameDecoder {
     type Error = At<Error>;
 
     fn wrap_sink_error(err: zc::decode::SinkError) -> Self::Error {
-        at(Error::Encode(err.to_string()))
+        at(Error::ResourceLimit(err.to_string()))
     }
 
     fn info(&self) -> &ImageInfo {
@@ -1996,6 +1999,10 @@ impl zc::decode::FullFrameDecoder for AvifFullFrameDecoder {
 
     fn frame_count(&self) -> Option<u32> {
         Some(self.total_frames)
+    }
+
+    fn loop_count(&self) -> Option<u32> {
+        Some(self.loop_count)
     }
 
     fn render_next_frame(
@@ -3130,5 +3137,127 @@ mod tests {
             .unwrap();
         assert_eq!(decoded.info().width, 16);
         assert_eq!(decoded.info().height, 16);
+    }
+
+    // ── Issue fix verification tests ──────────────────────────────────
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn decode_memory_limit_produces_resource_limit_error() {
+        use zc::decode::{DecodeJob, DecoderConfig};
+
+        // Encode a valid image
+        let pixels: Vec<Rgb<u8>> = vec![
+            Rgb {
+                r: 100,
+                g: 150,
+                b: 200,
+            };
+            32 * 32
+        ];
+        let img = imgref::ImgVec::new(pixels, 32, 32);
+        let encoded = AvifEncoderConfig::new()
+            .with_quality(80.0)
+            .encode_rgb8(img.as_ref())
+            .unwrap();
+
+        // Set max_memory to 1 byte — decode should fail with ResourceLimit, not Encode
+        let config = AvifDecoderConfig::new();
+        let limits = ResourceLimits::none().with_max_memory(1);
+        let result = config
+            .job()
+            .with_limits(limits)
+            .decoder(Cow::Borrowed(encoded.data()), &[]);
+        let err = result.unwrap_err();
+        let inner = err.inner();
+        assert!(
+            matches!(inner, Error::ResourceLimit(_)),
+            "expected Error::ResourceLimit, got: {inner:?}"
+        );
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn decode_input_size_limit_produces_resource_limit_error() {
+        use zc::decode::{DecodeJob, DecoderConfig};
+
+        // Encode a valid image
+        let pixels: Vec<Rgb<u8>> = vec![
+            Rgb {
+                r: 100,
+                g: 150,
+                b: 200,
+            };
+            32 * 32
+        ];
+        let img = imgref::ImgVec::new(pixels, 32, 32);
+        let encoded = AvifEncoderConfig::new()
+            .with_quality(80.0)
+            .encode_rgb8(img.as_ref())
+            .unwrap();
+
+        // Set max_input_bytes to 1 — decode should fail with ResourceLimit, not Encode
+        let config = AvifDecoderConfig::new();
+        let limits = ResourceLimits::none().with_max_input_bytes(1);
+        let result = config
+            .job()
+            .with_limits(limits)
+            .decoder(Cow::Borrowed(encoded.data()), &[]);
+        let err = result.unwrap_err();
+        let inner = err.inner();
+        assert!(
+            matches!(inner, Error::ResourceLimit(_)),
+            "expected Error::ResourceLimit, got: {inner:?}"
+        );
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encode_capabilities_no_native_gray_or_f32() {
+        use zc::encode::EncoderConfig;
+
+        let caps = AvifEncoderConfig::encode_capabilities();
+        assert!(
+            !caps.native_gray(),
+            "native_gray should be false: Gray8 expands to RGB"
+        );
+        assert!(
+            !caps.native_f32(),
+            "native_f32 should be false: f32 quantizes to u8/u16"
+        );
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn full_frame_decoder_returns_loop_count() {
+        use zc::decode::{DecodeJob, DecoderConfig, FullFrameDecoder};
+
+        // Encode a small image, then decode as animation (single-frame "animation")
+        let pixels: Vec<Rgb<u8>> = vec![
+            Rgb {
+                r: 100,
+                g: 150,
+                b: 200,
+            };
+            8 * 8
+        ];
+        let img = imgref::ImgVec::new(pixels, 8, 8);
+        let encoded = AvifEncoderConfig::new()
+            .with_quality(80.0)
+            .encode_rgb8(img.as_ref())
+            .unwrap();
+
+        let config = AvifDecoderConfig::new();
+        let dec = config
+            .job()
+            .full_frame_decoder(Cow::Borrowed(encoded.data()), &[])
+            .unwrap();
+
+        // loop_count() should return Some(_) — the specific value depends on
+        // what the container says (typically 1 for single images, 0 for infinite)
+        assert!(
+            dec.loop_count().is_some(),
+            "loop_count() should return Some for AVIF"
+        );
     }
 }
