@@ -32,7 +32,7 @@ ravif = { package = "zenravif", version = "0.1", path = "../ravif/ravif", defaul
 zencodec-types = { path = "../zencodec-types", version = "0.1" }
 zenpixels = { path = "../zenpixels/zenpixels", default-features = false, features = ["buffer"] }
 zenpixels-convert = { path = "../zenpixels/zenpixels-convert", default-features = false, features = ["buffer"] }
-linear-srgb = "0.6"
+linear-srgb = "0.6.3"
 
 [dev-dependencies]
 archmage = { version = "0.9.4", features = ["std"] }
