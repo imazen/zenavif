@@ -30,8 +30,8 @@ whereat = "0.1.3"
 log = "0.4"
 ravif = { package = "zenravif", version = "0.1", path = "../ravif/ravif", default-features = false, optional = true }
 zencodec-types = { path = "../zencodec-types", version = "0.1" }
-zenpixels = { version = "0.1", default-features = false, features = ["buffer"] }
-zenpixels-convert = { version = "0.1", default-features = false, features = ["buffer"] }
+zenpixels = { path = "../zenpixels/zenpixels", default-features = false, features = ["buffer"] }
+zenpixels-convert = { path = "../zenpixels/zenpixels-convert", default-features = false, features = ["buffer"] }
 linear-srgb = "0.6"
 
 [dev-dependencies]
