@@ -10,6 +10,7 @@ use enough::Stop;
 use imgref::{ImgRef, ImgVec};
 use rgb::{RGB8, RGBA8, Rgb, Rgba};
 use rgb::{RGB16, RGBA16};
+use whereat::at;
 
 /// Encoded AVIF image output
 #[derive(Debug, Clone)]
