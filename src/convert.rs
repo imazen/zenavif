@@ -224,7 +224,8 @@ mod tests {
         // Ensure no panic or overflow for any u8 input
         for y in 0..=255u8 {
             let result = limited_to_full_8(y);
-            assert!(result <= 255, "y={y} produced out-of-range result {result}");
+            // u8 is always <= 255, but verify the function doesn't panic
+            let _ = result;
         }
     }
 

@@ -258,9 +258,9 @@ pub fn probe(data: &[u8]) -> Result<AvifProbe, ProbeError> {
                 if colr_start + 4 <= box_end {
                     let colr_type = &data[colr_start..colr_start + 4];
                     if colr_type == b"nclx" && colr_start + 11 <= box_end {
-                        color_primaries = Some(data[colr_start + 4] as u8);
-                        transfer_characteristics = Some(data[colr_start + 6] as u8);
-                        matrix_coefficients = Some(data[colr_start + 8] as u8);
+                        color_primaries = Some(data[colr_start + 4]);
+                        transfer_characteristics = Some(data[colr_start + 6]);
+                        matrix_coefficients = Some(data[colr_start + 8]);
                         full_range = Some(data[colr_start + 10] & 0x80 != 0);
                     } else if colr_type == b"prof" || colr_type == b"rICC" {
                         has_icc = true;

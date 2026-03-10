@@ -89,6 +89,7 @@ pub(crate) mod yuv_convert_libyuv_simd;
 #[cfg(feature = "zencodec")]
 mod zencodec;
 
+#[cfg(feature = "encode")]
 use whereat::at;
 
 pub use config::DecoderConfig;
