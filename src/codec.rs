@@ -26,7 +26,7 @@ use zencodec::Metadata;
 use zencodec::decode::DecodeOutput;
 #[cfg(feature = "encode")]
 use zencodec::encode::EncodeOutput;
-use zencodec::{ImageFormat, ImageInfo, ResourceLimits};
+use zencodec::{ImageFormat, ImageInfo, ImageSequence, ResourceLimits};
 use zenpixels::{ChannelType, PixelBuffer, PixelDescriptor, PixelSlice};
 use zenpixels_convert::{PixelBufferConvertExt as _, PixelBufferConvertTypedExt as _};
 
@@ -1569,8 +1569,11 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
         let anim_info = anim_dec.info().clone();
 
         let base_info = convert_native_info(&native_info)
-            .with_animation(true)
-            .with_frame_count(anim_info.frame_count as u32);
+            .with_sequence(ImageSequence::Animation {
+                frame_count: Some(anim_info.frame_count as u32),
+                loop_count: Some(anim_info.loop_count),
+                random_access: true,
+            });
 
         Ok(AvifFullFrameDecoder {
             anim_decoder: anim_dec,
@@ -3268,7 +3271,7 @@ mod tests {
 
         // Verify metadata
         let info = decoder.info();
-        assert!(info.has_animation, "should be detected as animation");
+        assert!(info.is_animation(), "should be detected as animation");
         assert!(
             info.width > 0 && info.height > 0,
             "dimensions must be nonzero"
