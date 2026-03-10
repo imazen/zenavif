@@ -54,7 +54,7 @@ pub enum Error {
 
     /// Unsupported codec operation
     #[error(transparent)]
-    UnsupportedOperation(#[from] zc::UnsupportedOperation),
+    UnsupportedOperation(#[from] zencodec::UnsupportedOperation),
 }
 
 impl From<StopReason> for Error {

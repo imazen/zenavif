@@ -20,43 +20,43 @@ use std::sync::Arc;
 
 use enough::Stop;
 use rgb::{Rgb, Rgba};
-use zc::FullFrame;
+use zencodec::FullFrame;
 #[cfg(feature = "encode")]
-use zc::Metadata;
-use zc::decode::DecodeOutput;
+use zencodec::Metadata;
+use zencodec::decode::DecodeOutput;
 #[cfg(feature = "encode")]
-use zc::encode::EncodeOutput;
-use zc::{ImageFormat, ImageInfo, ResourceLimits};
+use zencodec::encode::EncodeOutput;
+use zencodec::{ImageFormat, ImageInfo, ResourceLimits};
 use zenpixels::{ChannelType, PixelBuffer, PixelDescriptor, PixelSlice};
 use zenpixels_convert::{PixelBufferConvertExt as _, PixelBufferConvertTypedExt as _};
 
 use crate::error::Error;
 use whereat::{At, at};
 
-/// Convert a [`zc::ThreadingPolicy`] to a concrete thread count.
+/// Convert a [`zencodec::ThreadingPolicy`] to a concrete thread count.
 ///
 /// Returns the thread count to pass to rav1e/ravif (encode) or dav1d/rav1d (decode).
 /// - `0` means "auto" (let the library pick based on available parallelism).
 /// - `1` means single-threaded.
 /// - Any other value is the requested thread count.
-fn policy_to_threads(policy: zc::ThreadingPolicy) -> u32 {
+fn policy_to_threads(policy: zencodec::ThreadingPolicy) -> u32 {
     match policy {
-        zc::ThreadingPolicy::SingleThread => 1,
-        zc::ThreadingPolicy::LimitOrSingle { max_threads } => max_threads as u32,
-        zc::ThreadingPolicy::LimitOrAny {
+        zencodec::ThreadingPolicy::SingleThread => 1,
+        zencodec::ThreadingPolicy::LimitOrSingle { max_threads } => max_threads as u32,
+        zencodec::ThreadingPolicy::LimitOrAny {
             preferred_max_threads,
         } => preferred_max_threads as u32,
-        zc::ThreadingPolicy::Balanced => {
+        zencodec::ThreadingPolicy::Balanced => {
             std::thread::available_parallelism().map_or(1, |n| (n.get() as u32 / 2).max(1))
         }
-        zc::ThreadingPolicy::Unlimited => 0, // 0 = auto
+        zencodec::ThreadingPolicy::Unlimited => 0, // 0 = auto
         _ => 0,                              // future variants: default to auto
     }
 }
 
 // ── Encoding ────────────────────────────────────────────────────────────────
 
-/// AVIF encoder configuration implementing [`zc::encode::EncoderConfig`].
+/// AVIF encoder configuration implementing [`zencodec::encode::EncoderConfig`].
 ///
 /// Wraps [`crate::EncoderConfig`] and tracks universal quality/effort/lossless
 /// settings for the trait interface.
@@ -64,7 +64,7 @@ fn policy_to_threads(policy: zc::ThreadingPolicy) -> u32 {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use zc::encode::EncoderConfig;
+/// use zencodec::encode::EncoderConfig;
 /// use zenavif::AvifEncoderConfig;
 ///
 /// let enc = AvifEncoderConfig::new()
@@ -140,7 +140,7 @@ impl AvifEncoderConfig {
 
     /// Convenience: encode RGB8 pixels with this config.
     pub fn encode_rgb8(&self, img: imgref::ImgRef<'_, Rgb<u8>>) -> Result<EncodeOutput, At<Error>> {
-        use zc::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
+        use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
         self.job().encoder()?.encode(PixelSlice::from(img).erase())
     }
 
@@ -149,7 +149,7 @@ impl AvifEncoderConfig {
         &self,
         img: imgref::ImgRef<'_, Rgba<u8>>,
     ) -> Result<EncodeOutput, At<Error>> {
-        use zc::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
+        use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
         self.job().encoder()?.encode(PixelSlice::from(img).erase())
     }
 
@@ -158,7 +158,7 @@ impl AvifEncoderConfig {
         &self,
         img: imgref::ImgRef<'_, rgb::Gray<u8>>,
     ) -> Result<EncodeOutput, At<Error>> {
-        use zc::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
+        use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
         self.job().encoder()?.encode(PixelSlice::from(img).erase())
     }
 
@@ -167,7 +167,7 @@ impl AvifEncoderConfig {
         &self,
         img: imgref::ImgRef<'_, Rgb<f32>>,
     ) -> Result<EncodeOutput, At<Error>> {
-        use zc::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
+        use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
         self.job().encoder()?.encode(PixelSlice::from(img).erase())
     }
 
@@ -176,7 +176,7 @@ impl AvifEncoderConfig {
         &self,
         img: imgref::ImgRef<'_, Rgba<f32>>,
     ) -> Result<EncodeOutput, At<Error>> {
-        use zc::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
+        use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
         self.job().encoder()?.encode(PixelSlice::from(img).erase())
     }
 
@@ -185,7 +185,7 @@ impl AvifEncoderConfig {
         &self,
         img: imgref::ImgRef<'_, rgb::Gray<f32>>,
     ) -> Result<EncodeOutput, At<Error>> {
-        use zc::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
+        use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
         self.job().encoder()?.encode(PixelSlice::from(img).erase())
     }
 }
@@ -262,8 +262,8 @@ static ENCODE_DESCRIPTORS: &[PixelDescriptor] = &[
 ];
 
 #[cfg(feature = "encode")]
-static AVIF_ENCODE_CAPABILITIES: zc::encode::EncodeCapabilities =
-    zc::encode::EncodeCapabilities::new()
+static AVIF_ENCODE_CAPABILITIES: zencodec::encode::EncodeCapabilities =
+    zencodec::encode::EncodeCapabilities::new()
         .with_icc(true)
         .with_exif(true)
         .with_xmp(true)
@@ -340,7 +340,7 @@ fn interp_quality(table: &[(f32, f32)], x: f32) -> f32 {
 }
 
 #[cfg(feature = "encode")]
-impl zc::encode::EncoderConfig for AvifEncoderConfig {
+impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
     type Error = At<Error>;
     type Job<'a> = AvifEncodeJob<'a>;
 
@@ -352,7 +352,7 @@ impl zc::encode::EncoderConfig for AvifEncoderConfig {
         ENCODE_DESCRIPTORS
     }
 
-    fn capabilities() -> &'static zc::encode::EncodeCapabilities {
+    fn capabilities() -> &'static zencodec::encode::EncodeCapabilities {
         &AVIF_ENCODE_CAPABILITIES
     }
 
@@ -431,9 +431,9 @@ pub struct AvifEncodeJob<'a> {
     icc_profile: Option<Arc<[u8]>>,
     xmp: Option<Arc<[u8]>>,
     limits: ResourceLimits,
-    cicp: Option<zc::Cicp>,
-    content_light_level: Option<zc::ContentLightLevel>,
-    mastering_display: Option<zc::MasteringDisplay>,
+    cicp: Option<zencodec::Cicp>,
+    content_light_level: Option<zencodec::ContentLightLevel>,
+    mastering_display: Option<zencodec::MasteringDisplay>,
     rotation: Option<u8>,
     mirror: Option<u8>,
 }
@@ -449,7 +449,7 @@ impl<'a> AvifEncodeJob<'a> {
 }
 
 #[cfg(feature = "encode")]
-impl<'a> zc::encode::EncodeJob<'a> for AvifEncodeJob<'a> {
+impl<'a> zencodec::encode::EncodeJob<'a> for AvifEncodeJob<'a> {
     type Error = At<Error>;
     type Enc = AvifEncoder<'a>;
     type FullFrameEnc = ();
@@ -531,7 +531,7 @@ impl<'a> zc::encode::EncodeJob<'a> for AvifEncodeJob<'a> {
         }
         // Apply threading policy from ResourceLimits.
         // Skip Unlimited — it means "no preference", so keep the codec's own default.
-        if !matches!(self.limits.threading(), zc::ThreadingPolicy::Unlimited) {
+        if !matches!(self.limits.threading(), zencodec::ThreadingPolicy::Unlimited) {
             let threads = policy_to_threads(self.limits.threading());
             if threads > 0 {
                 config = config.threads(Some(threads as usize));
@@ -550,7 +550,7 @@ impl<'a> zc::encode::EncodeJob<'a> for AvifEncodeJob<'a> {
 
     fn full_frame_encoder(self) -> Result<(), At<Error>> {
         Err(at!(Error::UnsupportedOperation(
-            zc::UnsupportedOperation::AnimationEncode,
+            zencodec::UnsupportedOperation::AnimationEncode,
         )))
     }
 }
@@ -861,10 +861,10 @@ impl AvifEncoder<'_> {
 }
 
 #[cfg(feature = "encode")]
-impl zc::encode::Encoder for AvifEncoder<'_> {
+impl zencodec::encode::Encoder for AvifEncoder<'_> {
     type Error = At<Error>;
 
-    fn reject(op: zc::UnsupportedOperation) -> At<Error> {
+    fn reject(op: zencodec::UnsupportedOperation) -> At<Error> {
         at!(Error::UnsupportedOperation(op))
     }
 
@@ -976,7 +976,7 @@ impl zc::encode::Encoder for AvifEncoder<'_> {
                 self.make_output(result.avif_file)
             }
             _ => Err(at!(Error::UnsupportedOperation(
-                zc::UnsupportedOperation::PixelFormat,
+                zencodec::UnsupportedOperation::PixelFormat,
             ))),
         }
     }
@@ -984,7 +984,7 @@ impl zc::encode::Encoder for AvifEncoder<'_> {
 
 // ── Decoding ────────────────────────────────────────────────────────────────
 
-/// AVIF decoder configuration implementing [`zc::decode::DecoderConfig`].
+/// AVIF decoder configuration implementing [`zencodec::decode::DecoderConfig`].
 #[derive(Clone, Debug)]
 pub struct AvifDecoderConfig {
     inner: crate::DecoderConfig,
@@ -1044,19 +1044,19 @@ impl AvifDecoderConfig {
 
     /// Convenience: decode image with this config.
     pub fn decode(&self, data: &[u8]) -> Result<DecodeOutput, At<Error>> {
-        use zc::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
+        use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
         self.job().decoder(Cow::Borrowed(data), &[])?.decode()
     }
 
     /// Convenience: probe image header with this config.
     pub fn probe_header(&self, data: &[u8]) -> Result<ImageInfo, At<Error>> {
-        use zc::decode::{DecodeJob as _, DecoderConfig as _};
+        use zencodec::decode::{DecodeJob as _, DecoderConfig as _};
         self.job().probe(data)
     }
 
     /// Convenience: probe full image metadata (may be expensive).
     pub fn probe_full(&self, data: &[u8]) -> Result<ImageInfo, At<Error>> {
-        use zc::decode::{DecodeJob as _, DecoderConfig as _};
+        use zencodec::decode::{DecodeJob as _, DecoderConfig as _};
         self.job().probe_full(data)
     }
 
@@ -1252,8 +1252,8 @@ static DECODE_DESCRIPTORS: &[PixelDescriptor] = &[
     PixelDescriptor::GRAY16_SRGB,
 ];
 
-static AVIF_DECODE_CAPABILITIES: zc::decode::DecodeCapabilities =
-    zc::decode::DecodeCapabilities::new()
+static AVIF_DECODE_CAPABILITIES: zencodec::decode::DecodeCapabilities =
+    zencodec::decode::DecodeCapabilities::new()
         .with_icc(true)
         .with_exif(true)
         .with_xmp(true)
@@ -1271,7 +1271,7 @@ static AVIF_DECODE_CAPABILITIES: zc::decode::DecodeCapabilities =
         .with_enforces_max_input_bytes(true)
         .with_threads_supported_range(1, 256);
 
-impl zc::decode::DecoderConfig for AvifDecoderConfig {
+impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
     type Error = At<Error>;
     type Job<'a> = AvifDecodeJob<'a>;
 
@@ -1283,7 +1283,7 @@ impl zc::decode::DecoderConfig for AvifDecoderConfig {
         DECODE_DESCRIPTORS
     }
 
-    fn capabilities() -> &'static zc::decode::DecodeCapabilities {
+    fn capabilities() -> &'static zencodec::decode::DecodeCapabilities {
         &AVIF_DECODE_CAPABILITIES
     }
 
@@ -1316,7 +1316,7 @@ impl<'a> AvifDecodeJob<'a> {
         // Apply threading policy from ResourceLimits.
         // Skip Unlimited — it means "no preference", so keep the codec's own default
         // (which is 1 thread to avoid the rav1d-safe DisjointMut race condition).
-        if !matches!(self.limits.threading(), zc::ThreadingPolicy::Unlimited) {
+        if !matches!(self.limits.threading(), zencodec::ThreadingPolicy::Unlimited) {
             let threads = policy_to_threads(self.limits.threading());
             cfg = cfg.threads(threads);
         }
@@ -1355,7 +1355,7 @@ impl<'a> AvifDecodeJob<'a> {
     }
 }
 
-impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
+impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
     type Error = At<Error>;
     type Dec = AvifDecoder<'a>;
     type StreamDec = AvifStreamingDecoder<'a>;
@@ -1386,7 +1386,7 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
         Ok(info)
     }
 
-    fn output_info(&self, data: &[u8]) -> Result<zc::decode::OutputInfo, At<Error>> {
+    fn output_info(&self, data: &[u8]) -> Result<zencodec::decode::OutputInfo, At<Error>> {
         let decoder = crate::ManagedAvifDecoder::new(data, &self.config.inner)?;
         let native_info = decoder.probe_info()?;
         let mut desc = if native_info.bit_depth > 8 {
@@ -1409,7 +1409,7 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
         if let Some(p) = zenpixels::ColorPrimaries::from_cicp(native_info.color_primaries.0) {
             desc = desc.with_primaries(p);
         }
-        Ok(zc::decode::OutputInfo::full_decode(
+        Ok(zencodec::decode::OutputInfo::full_decode(
             native_info.width,
             native_info.height,
             desc,
@@ -1419,9 +1419,9 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
     fn push_decoder(
         self,
         data: Cow<'a, [u8]>,
-        sink: &mut dyn zc::decode::DecodeRowSink,
+        sink: &mut dyn zencodec::decode::DecodeRowSink,
         _preferred: &[PixelDescriptor],
-    ) -> Result<zc::decode::OutputInfo, At<Error>> {
+    ) -> Result<zencodec::decode::OutputInfo, At<Error>> {
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
         let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
@@ -1441,7 +1441,7 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
         } else {
             PixelDescriptor::RGB8_SRGB
         };
-        Ok(zc::decode::OutputInfo::full_decode(
+        Ok(zencodec::decode::OutputInfo::full_decode(
             native_info.width,
             native_info.height,
             desc,
@@ -1595,8 +1595,8 @@ impl<'a> zc::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
 fn avif_to_orientation(
     rotation: Option<&zenavif_parse::ImageRotation>,
     mirror: Option<&zenavif_parse::ImageMirror>,
-) -> zc::Orientation {
-    use zc::Orientation;
+) -> zencodec::Orientation {
+    use zencodec::Orientation;
     let angle = rotation.map(|r| r.angle).unwrap_or(0);
     match (mirror.map(|m| m.axis), angle) {
         (None, 0) => Orientation::Normal,
@@ -1620,8 +1620,8 @@ fn avif_to_orientation(
 /// Inverse of [`avif_to_orientation`]. Returns `(rotation_code, mirror_axis)`.
 /// Rotation codes: 0=0°, 1=90°CCW, 2=180°, 3=270°CCW.
 #[cfg(feature = "encode")]
-fn orientation_to_avif(orientation: zc::Orientation) -> (Option<u8>, Option<u8>) {
-    use zc::Orientation;
+fn orientation_to_avif(orientation: zencodec::Orientation) -> (Option<u8>, Option<u8>) {
+    use zencodec::Orientation;
     match orientation {
         Orientation::Normal => (None, None),
         Orientation::FlipHorizontal => (Some(0), Some(0)), // mirror=0, no rotation
@@ -1647,11 +1647,11 @@ fn set_cicp_on_pixels(pixels: PixelBuffer, info: &crate::image::ImageInfo) -> Pi
     pixels.with_descriptor(desc)
 }
 
-/// Convert zenavif's native `ImageInfo` to `zc::ImageInfo`.
+/// Convert zenavif's native `ImageInfo` to `zencodec::ImageInfo`.
 fn convert_native_info(native: &crate::image::ImageInfo) -> ImageInfo {
     let orientation = avif_to_orientation(native.rotation.as_ref(), native.mirror.as_ref());
 
-    let cicp = zc::Cicp::new(
+    let cicp = zencodec::Cicp::new(
         native.color_primaries.0,
         native.transfer_characteristics.0,
         native.matrix_coefficients.0,
@@ -1683,7 +1683,7 @@ fn convert_native_info(native: &crate::image::ImageInfo) -> ImageInfo {
         info = info.with_xmp(xmp.clone());
     }
     if let Some(ref cll) = native.content_light_level {
-        info = info.with_content_light_level(zc::ContentLightLevel::new(
+        info = info.with_content_light_level(zencodec::ContentLightLevel::new(
             cll.max_content_light_level,
             cll.max_pic_average_light_level,
         ));
@@ -1691,7 +1691,7 @@ fn convert_native_info(native: &crate::image::ImageInfo) -> ImageInfo {
     if let Some(ref mdcv) = native.mastering_display {
         // Convert from 0.00002 units (u16) to CIE 1931 xy (f32), and 0.0001 cd/m² (u32) to f32
         let xy = |v: u16| v as f32 * 0.00002;
-        info = info.with_mastering_display(zc::MasteringDisplay::new(
+        info = info.with_mastering_display(zencodec::MasteringDisplay::new(
             [
                 [xy(mdcv.primaries[0].0), xy(mdcv.primaries[0].1)],
                 [xy(mdcv.primaries[1].0), xy(mdcv.primaries[1].1)],
@@ -1784,7 +1784,7 @@ pub struct AvifDecoder<'a> {
     limits: ResourceLimits,
 }
 
-impl zc::decode::Decode for AvifDecoder<'_> {
+impl zencodec::decode::Decode for AvifDecoder<'_> {
     type Error = At<Error>;
 
     fn decode(self) -> Result<DecodeOutput, At<Error>> {
@@ -1827,7 +1827,7 @@ impl zc::decode::Decode for AvifDecoder<'_> {
 
 /// Streaming AVIF decoder with real tile-row streaming for grid images.
 ///
-/// For grid (tiled) images, each [`next_batch`](zc::decode::StreamingDecode::next_batch)
+/// For grid (tiled) images, each [`next_batch`](zencodec::decode::StreamingDecode::next_batch)
 /// call decodes one tile-row of AV1 tiles, color-converts them, and stitches
 /// them into a strip. Peak memory is proportional to one tile-row instead of
 /// the full image.
@@ -1890,7 +1890,7 @@ impl AvifStreamingDecoder<'_> {
     }
 }
 
-impl zc::decode::StreamingDecode for AvifStreamingDecoder<'_> {
+impl zencodec::decode::StreamingDecode for AvifStreamingDecoder<'_> {
     type Error = At<Error>;
 
     fn next_batch(&mut self) -> Result<Option<(u32, PixelSlice<'_>)>, At<Error>> {
@@ -1992,10 +1992,10 @@ pub struct AvifFullFrameDecoder {
     current_frame: Option<PixelBuffer>,
 }
 
-impl zc::decode::FullFrameDecoder for AvifFullFrameDecoder {
+impl zencodec::decode::FullFrameDecoder for AvifFullFrameDecoder {
     type Error = At<Error>;
 
-    fn wrap_sink_error(err: zc::decode::SinkError) -> Self::Error {
+    fn wrap_sink_error(err: zencodec::decode::SinkError) -> Self::Error {
         at!(Error::ResourceLimit(err.to_string()))
     }
 
@@ -2013,9 +2013,9 @@ impl zc::decode::FullFrameDecoder for AvifFullFrameDecoder {
 
     fn render_next_frame(
         &mut self,
-        stop: Option<&dyn zc::enough::Stop>,
+        stop: Option<&dyn zencodec::enough::Stop>,
     ) -> Result<Option<FullFrame<'_>>, At<Error>> {
-        let stop: &dyn zc::enough::Stop = stop.unwrap_or(&enough::Unstoppable);
+        let stop: &dyn zencodec::enough::Stop = stop.unwrap_or(&enough::Unstoppable);
         loop {
             let frame = self
                 .anim_decoder
@@ -2046,10 +2046,10 @@ impl zc::decode::FullFrameDecoder for AvifFullFrameDecoder {
 
     fn render_next_frame_to_sink(
         &mut self,
-        stop: Option<&dyn zc::enough::Stop>,
-        sink: &mut dyn zc::decode::DecodeRowSink,
-    ) -> Result<Option<zc::decode::OutputInfo>, Self::Error> {
-        zc::decode::render_frame_to_sink_via_copy(self, stop, sink)
+        stop: Option<&dyn zencodec::enough::Stop>,
+        sink: &mut dyn zencodec::decode::DecodeRowSink,
+    ) -> Result<Option<zencodec::decode::OutputInfo>, Self::Error> {
+        zencodec::decode::render_frame_to_sink_via_copy(self, stop, sink)
     }
 }
 
@@ -2111,7 +2111,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encoding_with_metadata() {
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
         let enc = AvifEncoderConfig::new().with_quality(80.0);
         let pixels = vec![
             Rgb {
@@ -2283,7 +2283,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn effort_and_quality_getters() {
-        use zc::encode::EncoderConfig;
+        use zencodec::encode::EncoderConfig;
         let config = AvifEncoderConfig::new()
             .with_generic_quality(75.0)
             .with_generic_effort(5);
@@ -2296,7 +2296,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn four_layer_encode_flow() {
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 
         let pixels: Vec<Rgb<u8>> = vec![
             Rgb {
@@ -2322,7 +2322,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn four_layer_decode_flow() {
-        use zc::decode::{Decode, DecodeJob, DecoderConfig};
+        use zencodec::decode::{Decode, DecodeJob, DecoderConfig};
 
         let pixels: Vec<Rgb<u8>> = vec![
             Rgb {
@@ -2354,7 +2354,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encoder_trait_rgb8() {
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 
         let pixels: Vec<Rgb<u8>> = (0..16 * 16)
             .map(|i| Rgb {
@@ -2376,7 +2376,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encoder_trait_rgba8() {
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 
         let pixels: Vec<Rgba<u8>> = (0..16 * 16)
             .map(|i| Rgba {
@@ -2400,7 +2400,7 @@ mod tests {
     #[test]
     fn encoder_trait_gray8() {
         use rgb::Gray;
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 
         let pixels: Vec<Gray<u8>> = (0..16 * 16).map(|i| Gray((i % 256) as u8)).collect();
         let img = imgref::ImgVec::new(pixels, 16, 16);
@@ -2416,7 +2416,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encoder_trait_rgb_f32() {
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 
         let pixels: Vec<Rgb<f32>> = (0..16 * 16)
             .map(|i| {
@@ -2441,7 +2441,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encoder_trait_rgba_f32() {
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 
         let pixels: Vec<Rgba<f32>> = (0..16 * 16)
             .map(|i| {
@@ -2468,7 +2468,7 @@ mod tests {
     #[test]
     fn encoder_trait_gray_f32() {
         use rgb::Gray;
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 
         let pixels: Vec<Gray<f32>> = (0..16 * 16).map(|i| Gray(i as f32 / 255.0)).collect();
         let img = imgref::ImgVec::new(pixels, 16, 16);
@@ -2484,7 +2484,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encoder_trait_dyn_encoder() {
-        use zc::encode::{EncodeJob, EncoderConfig};
+        use zencodec::encode::{EncodeJob, EncoderConfig};
 
         let pixels: Vec<Rgb<u8>> = vec![
             Rgb {
@@ -2509,7 +2509,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encoder_trait_rgb16_srgb() {
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 
         let pixels: Vec<Rgb<u16>> = (0..16 * 16)
             .map(|i| {
@@ -2534,7 +2534,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encoder_trait_rgba16_srgb() {
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 
         let pixels: Vec<Rgba<u16>> = (0..16 * 16)
             .map(|i| {
@@ -2560,7 +2560,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encoder_trait_rgb16_pq_bt2020() {
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
         use zenpixels::{ColorPrimaries, TransferFunction};
 
         let pixels: Vec<Rgb<u16>> = (0..16 * 16)
@@ -2588,7 +2588,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encoder_trait_rgba16_pq_bt2020() {
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
         use zenpixels::{ColorPrimaries, TransferFunction};
 
         let pixels: Vec<Rgba<u16>> = (0..16 * 16)
@@ -2617,7 +2617,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encoder_trait_rgb16_hlg_bt2020() {
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
         use zenpixels::{ColorPrimaries, TransferFunction};
 
         let pixels: Vec<Rgb<u16>> = (0..16 * 16)
@@ -2645,7 +2645,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encoder_trait_rgba16_hlg_bt2020() {
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
         use zenpixels::{ColorPrimaries, TransferFunction};
 
         let pixels: Vec<Rgba<u16>> = (0..16 * 16)
@@ -2674,7 +2674,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encoder_trait_rgb16_display_p3() {
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
         use zenpixels::ColorPrimaries;
 
         let pixels: Vec<Rgb<u16>> = (0..16 * 16)
@@ -2700,7 +2700,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encoder_trait_rgba16_display_p3() {
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
         use zenpixels::ColorPrimaries;
 
         let pixels: Vec<Rgba<u16>> = (0..16 * 16)
@@ -2727,8 +2727,8 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encoder_trait_pq_bt2020_roundtrip() {
-        use zc::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
         use zenpixels::{ColorPrimaries, TransferFunction};
 
         // Encode with PQ/BT.2020 descriptor
@@ -2766,7 +2766,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encoder_trait_pq_bt2020_narrow_range() {
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
         use zenpixels::{ColorPrimaries, SignalRange, TransferFunction};
 
         // PQ BT.2020 with narrow/limited signal range
@@ -2795,7 +2795,7 @@ mod tests {
 
     #[test]
     fn encoder_trait_rgb_f32_pq_bt2020() {
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
         use zenpixels::{ColorPrimaries, TransferFunction};
 
         // f32 PQ BT.2020 — should route through u16 path, not linear_to_srgb_u8
@@ -2823,7 +2823,7 @@ mod tests {
 
     #[test]
     fn encoder_trait_rgba_f32_hlg_bt2020() {
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
         use zenpixels::{ColorPrimaries, TransferFunction};
 
         // f32 HLG BT.2020 — should route through u16 path
@@ -2852,7 +2852,7 @@ mod tests {
 
     #[test]
     fn encoder_trait_f32_pq_roundtrip_preserves_hdr() {
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
         use zenpixels::{ColorPrimaries, TransferFunction};
 
         // Encode f32 PQ data, decode, verify the output has >8-bit depth
@@ -2887,7 +2887,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encode_max_output_bytes_rejects() {
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 
         let pixels: Vec<Rgb<u8>> = vec![
             Rgb {
@@ -2912,7 +2912,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn decode_max_input_bytes_rejects() {
-        use zc::decode::{Decode, DecodeJob, DecoderConfig};
+        use zencodec::decode::{Decode, DecodeJob, DecoderConfig};
 
         // First encode a valid image
         let pixels: Vec<Rgb<u8>> = vec![
@@ -2947,7 +2947,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn decode_max_width_rejects() {
-        use zc::decode::{Decode, DecodeJob, DecoderConfig};
+        use zencodec::decode::{Decode, DecodeJob, DecoderConfig};
 
         // Encode a 32x32 image
         let pixels: Vec<Rgb<u8>> = vec![
@@ -2983,7 +2983,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn decode_max_memory_rejects() {
-        use zc::decode::{Decode, DecodeJob, DecoderConfig};
+        use zencodec::decode::{Decode, DecodeJob, DecoderConfig};
 
         // Encode a 32x32 image
         let pixels: Vec<Rgb<u8>> = vec![
@@ -3017,7 +3017,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn decode_push_decoder_checks_input_size() {
-        use zc::decode::{DecodeJob, DecodeRowSink, DecoderConfig, SinkError};
+        use zencodec::decode::{DecodeJob, DecodeRowSink, DecoderConfig, SinkError};
         use zenpixels::PixelSliceMut;
 
         struct DiscardSink {
@@ -3075,7 +3075,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn decode_streaming_checks_input_size() {
-        use zc::decode::{DecodeJob, DecoderConfig};
+        use zencodec::decode::{DecodeJob, DecoderConfig};
 
         // Encode a valid image
         let pixels: Vec<Rgb<u8>> = vec![
@@ -3110,8 +3110,8 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn single_thread_encode_decode_roundtrip() {
-        use zc::decode::{Decode, DecodeJob, DecoderConfig};
-        use zc::encode::{EncodeJob, Encoder, EncoderConfig};
+        use zencodec::decode::{Decode, DecodeJob, DecoderConfig};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
 
         // Encode with SingleThread threading policy
         let pixels: Vec<Rgb<u8>> = vec![
@@ -3124,7 +3124,7 @@ mod tests {
         ];
         let img = imgref::ImgVec::new(pixels, 16, 16);
         let config = AvifEncoderConfig::new().with_quality(80.0);
-        let limits = ResourceLimits::none().with_threading(zc::ThreadingPolicy::SingleThread);
+        let limits = ResourceLimits::none().with_threading(zencodec::ThreadingPolicy::SingleThread);
         let encoder = config.job().with_limits(limits).encoder().unwrap();
         let encoded = encoder
             .encode(PixelSlice::from(img.as_ref()).erase())
@@ -3133,7 +3133,7 @@ mod tests {
 
         // Decode with SingleThread threading policy
         let dec_config = AvifDecoderConfig::new();
-        let dec_limits = ResourceLimits::none().with_threading(zc::ThreadingPolicy::SingleThread);
+        let dec_limits = ResourceLimits::none().with_threading(zencodec::ThreadingPolicy::SingleThread);
         let decoded = dec_config
             .job()
             .with_limits(dec_limits)
@@ -3150,7 +3150,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn decode_memory_limit_produces_resource_limit_error() {
-        use zc::decode::{Decode, DecodeJob, DecoderConfig};
+        use zencodec::decode::{Decode, DecodeJob, DecoderConfig};
 
         // Encode a valid image
         let pixels: Vec<Rgb<u8>> = vec![
@@ -3191,7 +3191,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn decode_input_size_limit_produces_resource_limit_error() {
-        use zc::decode::{DecodeJob, DecoderConfig};
+        use zencodec::decode::{DecodeJob, DecoderConfig};
 
         // Encode a valid image
         let pixels: Vec<Rgb<u8>> = vec![
@@ -3227,7 +3227,7 @@ mod tests {
     #[cfg(feature = "encode")]
     #[test]
     fn encode_capabilities_no_native_gray_or_f32() {
-        use zc::encode::EncoderConfig;
+        use zencodec::encode::EncoderConfig;
         let caps = AvifEncoderConfig::capabilities();
         assert!(
             !caps.native_gray(),
@@ -3242,7 +3242,7 @@ mod tests {
     #[test]
     fn avif_full_frame_decoder_implements_trait() {
         // AvifFullFrameDecoder implements FullFrameDecoder which includes loop_count()
-        fn _assert_trait<T: zc::decode::FullFrameDecoder>() {}
+        fn _assert_trait<T: zencodec::decode::FullFrameDecoder>() {}
         _assert_trait::<AvifFullFrameDecoder>();
     }
 
@@ -3250,7 +3250,7 @@ mod tests {
     fn animated_avif_full_frame_decoder_roundtrip() {
         use super::AvifDecoderConfig;
         use std::borrow::Cow;
-        use zc::decode::{DecodeJob, DecoderConfig, FullFrameDecoder};
+        use zencodec::decode::{DecodeJob, DecoderConfig, FullFrameDecoder};
 
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../codec-corpus/avif-conformance/valid/2.avif");

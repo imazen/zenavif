@@ -554,7 +554,7 @@ fn read_leb128(data: &[u8]) -> Option<(u64, usize)> {
     }
 }
 
-impl zc::SourceEncodingDetails for AvifProbe {
+impl zencodec::SourceEncodingDetails for AvifProbe {
     fn source_generic_quality(&self) -> Option<f32> {
         self.quality.as_ref().map(|q| q.estimated_quality)
     }
