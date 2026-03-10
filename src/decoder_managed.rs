@@ -1550,7 +1550,7 @@ impl ManagedAvifDecoder {
     pub fn decode_to_sink(
         &mut self,
         stop: &(impl Stop + ?Sized),
-        sink: &mut dyn zc::decode::DecodeRowSink,
+        sink: &mut dyn zencodec::decode::DecodeRowSink,
     ) -> Result<ImageInfo> {
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
@@ -1613,7 +1613,7 @@ impl ManagedAvifDecoder {
     fn decode_grid_to_sink(
         &mut self,
         stop: &(impl Stop + ?Sized),
-        sink: &mut dyn zc::decode::DecodeRowSink,
+        sink: &mut dyn zencodec::decode::DecodeRowSink,
     ) -> Result<ImageInfo> {
         let grid_config = self
             .parser

@@ -87,7 +87,7 @@ pub mod yuv_convert_libyuv_simd;
 #[cfg(all(target_arch = "x86_64", not(feature = "_dev")))]
 pub(crate) mod yuv_convert_libyuv_simd;
 #[cfg(feature = "zencodec")]
-mod zencodec;
+mod codec;
 
 #[cfg(feature = "encode")]
 use whereat::at;
@@ -112,11 +112,11 @@ pub use image::{
     MasteringDisplayColourVolume, MatrixCoefficients, PixelAspectRatio, TransferCharacteristics,
 };
 #[cfg(feature = "zencodec")]
-pub use zencodec::{
+pub use codec::{
     AvifDecodeJob, AvifDecoder as AvifZenDecoder, AvifDecoderConfig, AvifFullFrameDecoder,
 };
 #[cfg(all(feature = "zencodec", feature = "encode"))]
-pub use zencodec::{AvifEncodeJob, AvifEncoder, AvifEncoderConfig};
+pub use codec::{AvifEncodeJob, AvifEncoder, AvifEncoderConfig};
 pub use zenpixels::PixelBuffer;
 
 /// Decode an AVIF image with default settings
