@@ -20,7 +20,7 @@
 //!
 //! - **`unsafe-asm`**: Hand-written assembly decoder via C FFI (fastest) — overrides the default safe decoder
 //! - **`encode`**: AVIF encoding via zenravif
-//! - **`zencodec`**: Integration with [`zencodec-types`](https://crates.io/crates/zencodec-types) traits
+//! - **`zencodec`**: Integration with [`zencodec`](https://crates.io/crates/zencodec) traits
 //!
 //! The default decoder uses rav1d-safe's managed API — completely safe Rust
 //! with zero unsafe code in the entire decode path.

@@ -33,7 +33,7 @@ jobs:
         run: |
           sed \
             -e 's|path = "\.\./zenavif-parse"|git = "https://github.com/imazen/zenavif-parse"|g' \
-            -e 's|path = "\.\./zencodec-types"|git = "https://github.com/imazen/zencodec-types"|g' \
+            -e 's|path = "\.\./zencodec"|git = "https://github.com/imazen/zencodec"|g' \
             -e 's|path = "\.\./zenpixels/zenpixels"|git = "https://github.com/imazen/zenpixels"|g' \
             -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/cavif-rs", branch = "main"|g' \
             Cargo.toml > Cargo.toml.ci && mv Cargo.toml.ci Cargo.toml
@@ -61,7 +61,7 @@ jobs:
         run: |
           sed \
             -e 's|path = "\.\./zenavif-parse"|git = "https://github.com/imazen/zenavif-parse"|g' \
-            -e 's|path = "\.\./zencodec-types"|git = "https://github.com/imazen/zencodec-types"|g' \
+            -e 's|path = "\.\./zencodec"|git = "https://github.com/imazen/zencodec"|g' \
             -e 's|path = "\.\./zenpixels/zenpixels"|git = "https://github.com/imazen/zenpixels"|g' \
             -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/cavif-rs", branch = "main"|g' \
             Cargo.toml > Cargo.toml.ci && mv Cargo.toml.ci Cargo.toml
@@ -84,7 +84,7 @@ jobs:
         run: |
           sed \
             -e 's|path = "\.\./zenavif-parse"|git = "https://github.com/imazen/zenavif-parse"|g' \
-            -e 's|path = "\.\./zencodec-types"|git = "https://github.com/imazen/zencodec-types"|g' \
+            -e 's|path = "\.\./zencodec"|git = "https://github.com/imazen/zencodec"|g' \
             -e 's|path = "\.\./zenpixels/zenpixels"|git = "https://github.com/imazen/zenpixels"|g' \
             -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/cavif-rs", branch = "main"|g' \
             Cargo.toml > Cargo.toml.ci && mv Cargo.toml.ci Cargo.toml
@@ -117,7 +117,7 @@ jobs:
         run: |
           sed \
             -e 's|path = "\.\./zenavif-parse"|git = "https://github.com/imazen/zenavif-parse"|g' \
-            -e 's|path = "\.\./zencodec-types"|git = "https://github.com/imazen/zencodec-types"|g' \
+            -e 's|path = "\.\./zencodec"|git = "https://github.com/imazen/zencodec"|g' \
             -e 's|path = "\.\./zenpixels/zenpixels"|git = "https://github.com/imazen/zenpixels"|g' \
             -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/cavif-rs", branch = "main"|g' \
             Cargo.toml > Cargo.toml.ci && mv Cargo.toml.ci Cargo.toml
@@ -139,7 +139,7 @@ jobs:
         run: |
           sed \
             -e 's|path = "\.\./zenavif-parse"|git = "https://github.com/imazen/zenavif-parse"|g' \
-            -e 's|path = "\.\./zencodec-types"|git = "https://github.com/imazen/zencodec-types"|g' \
+            -e 's|path = "\.\./zencodec"|git = "https://github.com/imazen/zencodec"|g' \
             -e 's|path = "\.\./zenpixels/zenpixels"|git = "https://github.com/imazen/zenpixels"|g' \
             -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/cavif-rs", branch = "main"|g' \
             Cargo.toml > Cargo.toml.ci && mv Cargo.toml.ci Cargo.toml

@@ -1699,7 +1699,7 @@ dependencies = [
  "whereat 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "yuv",
  "zenavif-parse",
- "zencodec-types",
+ "zencodec",
  "zenpixels",
  "zenpixels-convert",
  "zenravif",
@@ -1726,7 +1726,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zencodec-types"
+name = "zencodec"
 version = "0.1.0"
 dependencies = [
  "enough",
