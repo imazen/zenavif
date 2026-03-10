@@ -1,14 +1,18 @@
 //! AVIF decoder implementation wrapping rav1d
 
-use crate::chroma::{yuv_420, yuv_422, yuv_444};
+#![allow(unsafe_code)]
+
 use crate::config::DecoderConfig;
-use crate::convert::{add_alpha8, add_alpha16};
+use crate::convert::{add_alpha8, add_alpha16, scale_pixels_to_u16};
 use crate::error::{Error, Result};
 use crate::image::{
     ChromaSampling, ColorPrimaries, ColorRange, ImageInfo, MatrixCoefficients,
     TransferCharacteristics,
 };
 use enough::Stop;
+use rgb::{Rgb, Rgba};
+use whereat::at;
+use yuv::{YuvGrayImage, YuvPlanarImage, YuvRange, YuvStandardMatrix};
 use zenpixels::PixelBuffer;
 
 // Conditionally import from rav1d or rav1d-safe based on feature
@@ -49,15 +53,9 @@ use rav1d_safe::src::lib::{
 };
 #[cfg(feature = "safe-simd")]
 use rav1d_safe::src::send_sync_non_null::SendSyncNonNull;
-use rgb::Rgba;
-use rgb::prelude::*;
 use std::ffi::c_int;
 use std::ffi::c_void;
 use std::ptr::NonNull;
-use whereat::at;
-use yuv::YUV;
-use yuv::color::{Depth, Range};
-use yuv::convert::RGBConvert;
 
 /// Internal rav1d context wrapper with automatic cleanup
 struct Rav1dDecoder {
@@ -240,7 +238,7 @@ impl DecodedPicture {
         })
     }
 
-    /// Extract Y plane data as a Vec (copies the data)
+    /// Extract Y plane data as a contiguous Vec with stride = width (copies the data)
     fn y_plane_u8(&self) -> Option<(Vec<u8>, usize, usize, usize)> {
         let (w, h) = self.dimensions();
         let stride = self.picture.stride[0] as usize;
@@ -257,7 +255,7 @@ impl DecodedPicture {
         Some((pixels, w as usize, h as usize, stride))
     }
 
-    /// Extract Y plane data as 16-bit (copies the data)
+    /// Extract Y plane data as 16-bit contiguous Vec (copies the data)
     fn y_plane_u16(&self) -> Option<(Vec<u16>, usize, usize, usize)> {
         let (w, h) = self.dimensions();
         let stride = self.picture.stride[0] as usize;
@@ -275,7 +273,7 @@ impl DecodedPicture {
         Some((pixels, w as usize, h as usize, stride / 2))
     }
 
-    /// Extract all YUV planes as 8-bit
+    /// Extract all YUV planes as 8-bit with stride = width (copies the data)
     fn yuv_planes_u8(&self) -> Option<YuvPlanes8> {
         let (w, h) = self.dimensions();
         let layout = self.layout();
@@ -340,7 +338,7 @@ impl DecodedPicture {
         })
     }
 
-    /// Extract all YUV planes as 16-bit
+    /// Extract all YUV planes as 16-bit with stride = width (copies the data)
     fn yuv_planes_u16(&self) -> Option<YuvPlanes16> {
         let (w, h) = self.dimensions();
         let layout = self.layout();
@@ -415,7 +413,7 @@ impl Drop for DecodedPicture {
     }
 }
 
-/// 8-bit YUV plane data
+/// 8-bit YUV plane data (contiguous, stride = width)
 struct YuvPlanes8 {
     y: Vec<u8>,
     u: Vec<u8>,
@@ -429,24 +427,6 @@ struct YuvPlanes8 {
 }
 
 impl YuvPlanes8 {
-    fn y_rows(&self) -> impl Iterator<Item = &[u8]> {
-        self.y.chunks(self.width)
-    }
-
-    fn u_rows(&self) -> impl Iterator<Item = &[u8]> {
-        if self.chroma_width == 0 {
-            return [].chunks(1);
-        }
-        self.u.chunks(self.chroma_width)
-    }
-
-    fn v_rows(&self) -> impl Iterator<Item = &[u8]> {
-        if self.chroma_width == 0 {
-            return [].chunks(1);
-        }
-        self.v.chunks(self.chroma_width)
-    }
-
     fn chroma_sampling(&self) -> ChromaSampling {
         match self.layout {
             DAV1D_PIXEL_LAYOUT_I444 => ChromaSampling::Cs444,
@@ -458,7 +438,7 @@ impl YuvPlanes8 {
     }
 }
 
-/// 16-bit YUV plane data
+/// 16-bit YUV plane data (contiguous, stride = width)
 struct YuvPlanes16 {
     y: Vec<u16>,
     u: Vec<u16>,
@@ -472,24 +452,6 @@ struct YuvPlanes16 {
 }
 
 impl YuvPlanes16 {
-    fn y_rows(&self) -> impl Iterator<Item = &[u16]> {
-        self.y.chunks(self.width)
-    }
-
-    fn u_rows(&self) -> impl Iterator<Item = &[u16]> {
-        if self.chroma_width == 0 {
-            return [].chunks(1);
-        }
-        self.u.chunks(self.chroma_width)
-    }
-
-    fn v_rows(&self) -> impl Iterator<Item = &[u16]> {
-        if self.chroma_width == 0 {
-            return [].chunks(1);
-        }
-        self.v.chunks(self.chroma_width)
-    }
-
     fn chroma_sampling(&self) -> ChromaSampling {
         match self.layout {
             DAV1D_PIXEL_LAYOUT_I444 => ChromaSampling::Cs444,
@@ -501,19 +463,36 @@ impl YuvPlanes16 {
     }
 }
 
-/// Convert rav1d matrix coefficients to yuv crate's
-fn to_yuv_matrix(mc: Rav1dMatrixCoefficients) -> yuv::color::MatrixCoefficients {
+/// Convert rav1d matrix coefficients to yuv crate's YuvStandardMatrix
+fn to_yuv_matrix(mc: Rav1dMatrixCoefficients) -> YuvStandardMatrix {
     match mc {
-        Rav1dMatrixCoefficients::IDENTITY => yuv::color::MatrixCoefficients::Identity,
-        Rav1dMatrixCoefficients::BT709 => yuv::color::MatrixCoefficients::BT709,
-        Rav1dMatrixCoefficients::FCC => yuv::color::MatrixCoefficients::FCC,
-        Rav1dMatrixCoefficients::BT470BG => yuv::color::MatrixCoefficients::BT470BG,
-        Rav1dMatrixCoefficients::BT601 => yuv::color::MatrixCoefficients::BT601,
-        Rav1dMatrixCoefficients::SMPTE240 => yuv::color::MatrixCoefficients::SMPTE240,
-        Rav1dMatrixCoefficients::SMPTE_YCGCO => yuv::color::MatrixCoefficients::YCgCo,
-        Rav1dMatrixCoefficients::BT2020_NCL => yuv::color::MatrixCoefficients::BT2020NCL,
-        Rav1dMatrixCoefficients::BT2020_CL => yuv::color::MatrixCoefficients::BT2020CL,
-        _ => yuv::color::MatrixCoefficients::BT601, // Default fallback
+        Rav1dMatrixCoefficients::BT709 => YuvStandardMatrix::Bt709,
+        Rav1dMatrixCoefficients::FCC => YuvStandardMatrix::Fcc,
+        Rav1dMatrixCoefficients::BT470BG => YuvStandardMatrix::Bt470_6,
+        Rav1dMatrixCoefficients::BT601 => YuvStandardMatrix::Bt601,
+        Rav1dMatrixCoefficients::SMPTE240 => YuvStandardMatrix::Smpte240,
+        Rav1dMatrixCoefficients::BT2020_NCL | Rav1dMatrixCoefficients::BT2020_CL => {
+            YuvStandardMatrix::Bt2020
+        }
+        _ => YuvStandardMatrix::Bt601, // Default fallback
+    }
+}
+
+/// Convert rav1d color range to yuv crate's YuvRange
+fn to_yuv_range(color_range: u8) -> YuvRange {
+    if color_range != 0 {
+        YuvRange::Full
+    } else {
+        YuvRange::Limited
+    }
+}
+
+/// Convert rav1d color range to zenavif ColorRange
+fn to_color_range(color_range: u8) -> ColorRange {
+    if color_range != 0 {
+        ColorRange::Full
+    } else {
+        ColorRange::Limited
     }
 }
 
@@ -543,11 +522,13 @@ impl AvifDecoder {
             .primary_metadata()
             .map_err(|e| at!(Error::Parse(e)))?;
 
-        let chroma_sampling = match metadata.chroma_subsampling {
-            (false, false) => ChromaSampling::Cs444,
-            (true, false) => ChromaSampling::Cs422,
-            (true, true) => ChromaSampling::Cs420,
-            _ => ChromaSampling::Cs420,
+        let cs = metadata.chroma_subsampling;
+        let chroma_sampling = if cs.horizontal && cs.vertical {
+            ChromaSampling::Cs420
+        } else if cs.horizontal {
+            ChromaSampling::Cs422
+        } else {
+            ChromaSampling::Cs444
         };
 
         let has_alpha = parser.alpha_data().is_some();
@@ -564,6 +545,15 @@ impl AvifDecoder {
             matrix_coefficients: MatrixCoefficients::default(),
             color_range: ColorRange::default(),
             chroma_sampling,
+            icc_profile: None,
+            rotation: None,
+            mirror: None,
+            clean_aperture: None,
+            pixel_aspect_ratio: None,
+            content_light_level: None,
+            mastering_display: None,
+            exif: None,
+            xmp: None,
         };
 
         // Check frame size limit
@@ -609,24 +599,21 @@ impl AvifDecoder {
 
         // Get color info from sequence header
         let seq_hdr = color_picture.seq_hdr();
-        let range = seq_hdr
-            .map(|h| {
-                if h.color_range != 0 {
-                    Range::Full
-                } else {
-                    Range::Limited
-                }
-            })
-            .unwrap_or(Range::Limited);
+        let yuv_range = seq_hdr
+            .map(|h| to_yuv_range(h.color_range))
+            .unwrap_or(YuvRange::Limited);
+        let _color_range = seq_hdr
+            .map(|h| to_color_range(h.color_range))
+            .unwrap_or(ColorRange::Limited);
 
         let matrix = seq_hdr
             .map(|h| to_yuv_matrix(h.mtrx))
-            .unwrap_or(yuv::color::MatrixCoefficients::BT601);
+            .unwrap_or(YuvStandardMatrix::Bt601);
 
         let bit_depth = color_picture.bit_depth();
         let has_alpha = self.parser.alpha_data().is_some();
 
-        // Convert to RGB
+        // Convert to RGB using bulk yuv crate functions
         let mut image = if bit_depth == 8 {
             let planes = color_picture
                 .yuv_planes_u8()
@@ -634,26 +621,20 @@ impl AvifDecoder {
 
             match planes.chroma_sampling() {
                 ChromaSampling::Monochrome => {
-                    self.convert_mono8(&planes, range, matrix, has_alpha)?
+                    self.convert_mono8(&planes, yuv_range, matrix, has_alpha)?
                 }
-                _ => self.convert_yuv8(&planes, range, matrix, has_alpha)?,
+                _ => self.convert_yuv8(&planes, yuv_range, matrix, has_alpha)?,
             }
         } else {
             let planes = color_picture
                 .yuv_planes_u16()
                 .ok_or_else(|| at!(Error::Unsupported("failed to extract YUV planes")))?;
 
-            let depth = match bit_depth {
-                10 => Depth::Depth10,
-                12 => Depth::Depth12,
-                _ => Depth::Depth16,
-            };
-
             match planes.chroma_sampling() {
                 ChromaSampling::Monochrome => {
-                    self.convert_mono16(&planes, range, matrix, depth, has_alpha)?
+                    self.convert_mono16(&planes, yuv_range, matrix, bit_depth, has_alpha)?
                 }
-                _ => self.convert_yuv16(&planes, range, matrix, depth, has_alpha)?,
+                _ => self.convert_yuv16(&planes, yuv_range, matrix, bit_depth, has_alpha)?,
             }
         };
 
@@ -668,65 +649,47 @@ impl AvifDecoder {
             let alpha_data = alpha_result.map_err(|e| at!(Error::Parse(e)))?;
             let alpha_picture = decoder.decode(&alpha_data)?;
 
-            let alpha_range = alpha_picture
+            let alpha_color_range = alpha_picture
                 .seq_hdr()
-                .map(|h| {
-                    if h.color_range != 0 {
-                        Range::Full
-                    } else {
-                        Range::Limited
-                    }
-                })
-                .unwrap_or(Range::Limited);
+                .map(|h| to_color_range(h.color_range))
+                .unwrap_or(ColorRange::Limited);
 
             let alpha_bit_depth = alpha_picture.bit_depth();
             let premultiplied = self.parser.premultiplied_alpha();
 
-            // Alpha uses Identity matrix
             if alpha_bit_depth == 8 {
                 let (y_data, width, height, _) = alpha_picture
                     .y_plane_u8()
                     .ok_or_else(|| at!(Error::Unsupported("failed to extract alpha plane")))?;
-
-                let conv =
-                    RGBConvert::<u8>::new(alpha_range, yuv::color::MatrixCoefficients::Identity)
-                        .map_err(|e| at!(Error::ColorConversion(e)))?;
 
                 add_alpha8(
                     &mut image,
                     y_data.chunks(width),
                     width,
                     height,
-                    conv,
+                    alpha_color_range,
                     premultiplied,
                 )?;
             } else {
-                let depth = match alpha_bit_depth {
-                    10 => Depth::Depth10,
-                    12 => Depth::Depth12,
-                    _ => Depth::Depth16,
-                };
-
                 let (y_data, width, height, _) = alpha_picture
                     .y_plane_u16()
                     .ok_or_else(|| at!(Error::Unsupported("failed to extract alpha plane")))?;
-
-                let conv = RGBConvert::<u16>::new(
-                    alpha_range,
-                    yuv::color::MatrixCoefficients::Identity,
-                    depth,
-                )
-                .map_err(|e| at!(Error::ColorConversion(e)))?;
 
                 add_alpha16(
                     &mut image,
                     y_data.chunks(width),
                     width,
                     height,
-                    conv,
+                    alpha_color_range,
+                    alpha_bit_depth,
                     premultiplied,
                 )?;
             }
+        }
+
+        // Scale 10/12-bit output to full u16 range
+        if bit_depth > 8 && bit_depth < 16 {
+            scale_pixels_to_u16(&mut image, bit_depth);
         }
 
         Ok(image)
@@ -735,51 +698,58 @@ impl AvifDecoder {
     fn convert_mono8(
         &self,
         planes: &YuvPlanes8,
-        range: Range,
-        matrix: yuv::color::MatrixCoefficients,
+        yuv_range: YuvRange,
+        matrix: YuvStandardMatrix,
         has_alpha: bool,
     ) -> Result<PixelBuffer> {
-        let mc = if matrix == yuv::color::MatrixCoefficients::BT601 {
-            yuv::color::MatrixCoefficients::Identity
-        } else {
-            matrix
-        };
-
-        let conv = RGBConvert::<u8>::new(range, mc).map_err(|e| at!(Error::ColorConversion(e)))?;
-
         let width = planes.width;
         let height = planes.height;
+        let pixel_count = width
+            .checked_mul(height)
+            .ok_or_else(|| at!(Error::OutOfMemory))?;
+
+        let gray = YuvGrayImage {
+            y_plane: &planes.y,
+            y_stride: width as u32,
+            width: width as u32,
+            height: height as u32,
+        };
 
         if has_alpha {
-            let mut out = Vec::with_capacity(width * height);
-            for row in planes.y_rows() {
-                for &y in row {
-                    let g = conv.to_luma(y);
-                    out.push(Rgba::new(g, g, g, 0));
-                }
-            }
+            let mut out = vec![
+                Rgba {
+                    r: 0u8,
+                    g: 0,
+                    b: 0,
+                    a: 255
+                };
+                pixel_count
+            ];
+            let rgb_stride = width as u32 * 4;
+            yuv::yuv400_to_rgba(
+                &gray,
+                rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                rgb_stride,
+                yuv_range,
+                matrix,
+            )
+            .map_err(|e| at!(Error::ColorConversion(e)))?;
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .map_err(|_| {
-                    at!(Error::Decode {
-                        code: -1,
-                        msg: "pixel buffer size mismatch",
-                    })
-                })?
+                .map_err(|_| at!(Error::OutOfMemory))?
                 .into())
         } else {
-            let mut out = Vec::with_capacity(width * height);
-            for row in planes.y_rows() {
-                for &y in row {
-                    out.push(rgb::Gray::new(conv.to_luma(y)));
-                }
-            }
+            let mut out = vec![Rgb { r: 0u8, g: 0, b: 0 }; pixel_count];
+            let rgb_stride = width as u32 * 3;
+            yuv::yuv400_to_rgb(
+                &gray,
+                rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                rgb_stride,
+                yuv_range,
+                matrix,
+            )
+            .map_err(|e| at!(Error::ColorConversion(e)))?;
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .map_err(|_| {
-                    at!(Error::Decode {
-                        code: -1,
-                        msg: "pixel buffer size mismatch",
-                    })
-                })?
+                .map_err(|_| at!(Error::OutOfMemory))?
                 .into())
         }
     }
@@ -787,53 +757,98 @@ impl AvifDecoder {
     fn convert_mono16(
         &self,
         planes: &YuvPlanes16,
-        range: Range,
-        matrix: yuv::color::MatrixCoefficients,
-        depth: Depth,
+        yuv_range: YuvRange,
+        matrix: YuvStandardMatrix,
+        bit_depth: u8,
         has_alpha: bool,
     ) -> Result<PixelBuffer> {
-        let mc = if matrix == yuv::color::MatrixCoefficients::BT601 {
-            yuv::color::MatrixCoefficients::Identity
-        } else {
-            matrix
-        };
-
-        let conv =
-            RGBConvert::<u16>::new(range, mc, depth).map_err(|e| at!(Error::ColorConversion(e)))?;
-
         let width = planes.width;
         let height = planes.height;
+        let pixel_count = width
+            .checked_mul(height)
+            .ok_or_else(|| at!(Error::OutOfMemory))?;
+
+        let gray = YuvGrayImage {
+            y_plane: &planes.y,
+            y_stride: width as u32,
+            width: width as u32,
+            height: height as u32,
+        };
 
         if has_alpha {
-            let mut out = Vec::with_capacity(width * height);
-            for row in planes.y_rows() {
-                for &y in row {
-                    let g = conv.to_luma(y);
-                    out.push(Rgba::new(g, g, g, 0));
-                }
+            let mut out = vec![
+                Rgba {
+                    r: 0u16,
+                    g: 0,
+                    b: 0,
+                    a: 0xFFFF
+                };
+                pixel_count
+            ];
+            let rgb_stride = width as u32 * 4;
+            match bit_depth {
+                10 => yuv::y010_to_rgba10(
+                    &gray,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                12 => yuv::y012_to_rgba12(
+                    &gray,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                _ => yuv::y016_to_rgba16(
+                    &gray,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
             }
+            .map_err(|e| at!(Error::ColorConversion(e)))?;
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .map_err(|_| {
-                    at!(Error::Decode {
-                        code: -1,
-                        msg: "pixel buffer size mismatch",
-                    })
-                })?
+                .map_err(|_| at!(Error::OutOfMemory))?
                 .into())
         } else {
-            let mut out = Vec::with_capacity(width * height);
-            for row in planes.y_rows() {
-                for &y in row {
-                    out.push(rgb::Gray::new(conv.to_luma(y)));
-                }
+            let mut out = vec![
+                Rgb {
+                    r: 0u16,
+                    g: 0,
+                    b: 0
+                };
+                pixel_count
+            ];
+            let rgb_stride = width as u32 * 3;
+            match bit_depth {
+                10 => yuv::y010_to_rgb10(
+                    &gray,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                12 => yuv::y012_to_rgb12(
+                    &gray,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                _ => yuv::y016_to_rgb16(
+                    &gray,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
             }
+            .map_err(|e| at!(Error::ColorConversion(e)))?;
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .map_err(|_| {
-                    at!(Error::Decode {
-                        code: -1,
-                        msg: "pixel buffer size mismatch",
-                    })
-                })?
+                .map_err(|_| at!(Error::OutOfMemory))?
                 .into())
         }
     }
@@ -841,55 +856,108 @@ impl AvifDecoder {
     fn convert_yuv8(
         &self,
         planes: &YuvPlanes8,
-        range: Range,
-        matrix: yuv::color::MatrixCoefficients,
+        yuv_range: YuvRange,
+        matrix: YuvStandardMatrix,
         has_alpha: bool,
     ) -> Result<PixelBuffer> {
-        let conv =
-            RGBConvert::<u8>::new(range, matrix).map_err(|e| at!(Error::ColorConversion(e)))?;
-
         let width = planes.width;
         let height = planes.height;
+        let pixel_count = width
+            .checked_mul(height)
+            .ok_or_else(|| at!(Error::OutOfMemory))?;
 
-        let px_iter: Box<dyn Iterator<Item = YUV<u8>>> = match planes.chroma_sampling() {
-            ChromaSampling::Cs444 => {
-                Box::new(yuv_444(planes.y_rows(), planes.u_rows(), planes.v_rows()))
-            }
-            ChromaSampling::Cs422 => {
-                Box::new(yuv_422(planes.y_rows(), planes.u_rows(), planes.v_rows()))
-            }
-            ChromaSampling::Cs420 => {
-                Box::new(yuv_420(planes.y_rows(), planes.u_rows(), planes.v_rows()))
-            }
-            ChromaSampling::Monochrome => {
-                return Err(at!(Error::Decode {
-                    code: -1,
-                    msg: "Monochrome should not reach chroma conversion",
-                }));
-            }
+        let planar = YuvPlanarImage {
+            y_plane: &planes.y,
+            y_stride: width as u32,
+            u_plane: &planes.u,
+            u_stride: planes.chroma_width as u32,
+            v_plane: &planes.v,
+            v_stride: planes.chroma_width as u32,
+            width: width as u32,
+            height: height as u32,
         };
 
         if has_alpha {
-            let mut out = Vec::with_capacity(width * height);
-            out.extend(px_iter.map(|px| conv.to_rgb(px).with_alpha(0)));
-            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .map_err(|_| {
-                    at!(Error::Decode {
+            let mut out = vec![
+                Rgba {
+                    r: 0u8,
+                    g: 0,
+                    b: 0,
+                    a: 255
+                };
+                pixel_count
+            ];
+            let rgb_stride = width as u32 * 4;
+            match planes.chroma_sampling() {
+                ChromaSampling::Cs420 => yuv::yuv420_to_rgba_bilinear(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                ChromaSampling::Cs422 => yuv::yuv422_to_rgba_bilinear(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                ChromaSampling::Cs444 => yuv::yuv444_to_rgba(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                ChromaSampling::Monochrome => {
+                    return Err(at!(Error::Decode {
                         code: -1,
-                        msg: "pixel buffer size mismatch",
-                    })
-                })?
+                        msg: "Monochrome should not reach chroma conversion",
+                    }));
+                }
+            }
+            .map_err(|e| at!(Error::ColorConversion(e)))?;
+
+            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
+                .map_err(|_| at!(Error::OutOfMemory))?
                 .into())
         } else {
-            let mut out = Vec::with_capacity(width * height);
-            out.extend(px_iter.map(|px| conv.to_rgb(px)));
-            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .map_err(|_| {
-                    at!(Error::Decode {
+            let mut out = vec![Rgb { r: 0u8, g: 0, b: 0 }; pixel_count];
+            let rgb_stride = width as u32 * 3;
+            match planes.chroma_sampling() {
+                ChromaSampling::Cs420 => yuv::yuv420_to_rgb_bilinear(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                ChromaSampling::Cs422 => yuv::yuv422_to_rgb_bilinear(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                ChromaSampling::Cs444 => yuv::yuv444_to_rgb(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                ChromaSampling::Monochrome => {
+                    return Err(at!(Error::Decode {
                         code: -1,
-                        msg: "pixel buffer size mismatch",
-                    })
-                })?
+                        msg: "Monochrome should not reach chroma conversion",
+                    }));
+                }
+            }
+            .map_err(|e| at!(Error::ColorConversion(e)))?;
+
+            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
+                .map_err(|_| at!(Error::OutOfMemory))?
                 .into())
         }
     }
@@ -897,56 +965,200 @@ impl AvifDecoder {
     fn convert_yuv16(
         &self,
         planes: &YuvPlanes16,
-        range: Range,
-        matrix: yuv::color::MatrixCoefficients,
-        depth: Depth,
+        yuv_range: YuvRange,
+        matrix: YuvStandardMatrix,
+        bit_depth: u8,
         has_alpha: bool,
     ) -> Result<PixelBuffer> {
-        let conv = RGBConvert::<u16>::new(range, matrix, depth)
-            .map_err(|e| at!(Error::ColorConversion(e)))?;
-
         let width = planes.width;
         let height = planes.height;
+        let pixel_count = width
+            .checked_mul(height)
+            .ok_or_else(|| at!(Error::OutOfMemory))?;
 
-        let px_iter: Box<dyn Iterator<Item = YUV<u16>>> = match planes.chroma_sampling() {
-            ChromaSampling::Cs444 => {
-                Box::new(yuv_444(planes.y_rows(), planes.u_rows(), planes.v_rows()))
-            }
-            ChromaSampling::Cs422 => {
-                Box::new(yuv_422(planes.y_rows(), planes.u_rows(), planes.v_rows()))
-            }
-            ChromaSampling::Cs420 => {
-                Box::new(yuv_420(planes.y_rows(), planes.u_rows(), planes.v_rows()))
-            }
-            ChromaSampling::Monochrome => {
-                return Err(at!(Error::Decode {
-                    code: -1,
-                    msg: "Monochrome should not reach chroma conversion",
-                }));
-            }
+        let planar = YuvPlanarImage {
+            y_plane: &planes.y,
+            y_stride: width as u32,
+            u_plane: &planes.u,
+            u_stride: planes.chroma_width as u32,
+            v_plane: &planes.v,
+            v_stride: planes.chroma_width as u32,
+            width: width as u32,
+            height: height as u32,
         };
 
         if has_alpha {
-            let mut out = Vec::with_capacity(width * height);
-            out.extend(px_iter.map(|px| conv.to_rgb(px).with_alpha(0)));
-            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .map_err(|_| {
-                    at!(Error::Decode {
+            let mut out = vec![
+                Rgba {
+                    r: 0u16,
+                    g: 0,
+                    b: 0,
+                    a: 0xFFFF
+                };
+                pixel_count
+            ];
+            let rgb_stride = width as u32 * 4;
+            match (planes.chroma_sampling(), bit_depth) {
+                (ChromaSampling::Cs420, 10) => yuv::i010_to_rgba10_bilinear(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                (ChromaSampling::Cs420, 12) => yuv::i012_to_rgba12_bilinear(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                (ChromaSampling::Cs420, _) => yuv::i016_to_rgba16_bilinear(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                (ChromaSampling::Cs422, 10) => yuv::i210_to_rgba10(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                (ChromaSampling::Cs422, 12) => yuv::i212_to_rgba12(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                (ChromaSampling::Cs422, _) => yuv::i216_to_rgba16(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                (ChromaSampling::Cs444, 10) => yuv::i410_to_rgba(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                (ChromaSampling::Cs444, 12) => yuv::i412_to_rgba12(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                (ChromaSampling::Cs444, _) => yuv::i416_to_rgba16(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                (ChromaSampling::Monochrome, _) => {
+                    return Err(at!(Error::Decode {
                         code: -1,
-                        msg: "pixel buffer size mismatch",
-                    })
-                })?
+                        msg: "Monochrome should not reach chroma conversion",
+                    }));
+                }
+            }
+            .map_err(|e| at!(Error::ColorConversion(e)))?;
+
+            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
+                .map_err(|_| at!(Error::OutOfMemory))?
                 .into())
         } else {
-            let mut out = Vec::with_capacity(width * height);
-            out.extend(px_iter.map(|px| conv.to_rgb(px)));
-            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .map_err(|_| {
-                    at!(Error::Decode {
+            let mut out = vec![
+                Rgb {
+                    r: 0u16,
+                    g: 0,
+                    b: 0
+                };
+                pixel_count
+            ];
+            let rgb_stride = width as u32 * 3;
+            match (planes.chroma_sampling(), bit_depth) {
+                (ChromaSampling::Cs420, 10) => yuv::i010_to_rgb10_bilinear(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                (ChromaSampling::Cs420, 12) => yuv::i012_to_rgb12_bilinear(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                (ChromaSampling::Cs420, _) => yuv::i016_to_rgb16_bilinear(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                (ChromaSampling::Cs422, 10) => yuv::i210_to_rgb10(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                (ChromaSampling::Cs422, 12) => yuv::i212_to_rgb12(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                (ChromaSampling::Cs422, _) => yuv::i216_to_rgb16(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                (ChromaSampling::Cs444, 10) => yuv::i410_to_rgb10(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                (ChromaSampling::Cs444, 12) => yuv::i412_to_rgb12(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                (ChromaSampling::Cs444, _) => yuv::i416_to_rgb16(
+                    &planar,
+                    rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
+                    rgb_stride,
+                    yuv_range,
+                    matrix,
+                ),
+                (ChromaSampling::Monochrome, _) => {
+                    return Err(at!(Error::Decode {
                         code: -1,
-                        msg: "pixel buffer size mismatch",
-                    })
-                })?
+                        msg: "Monochrome should not reach chroma conversion",
+                    }));
+                }
+            }
+            .map_err(|e| at!(Error::ColorConversion(e)))?;
+
+            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
+                .map_err(|_| at!(Error::OutOfMemory))?
                 .into())
         }
     }
