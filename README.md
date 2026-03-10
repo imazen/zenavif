@@ -76,7 +76,7 @@ std::fs::write("output.avif", &encoded.avif_file).unwrap();
 | `encode-threading` | Multi-threaded encoding |
 | `encode-imazen` | Encoding with zenrav1e fork extras (QM, lossless) |
 | `unsafe-asm` | Decoding with hand-written assembly via C FFI (fastest, uses unsafe) |
-| `zencodec` | Integration with [zencodec-types](https://crates.io/crates/zencodec-types) trait hierarchy |
+| `zencodec` | Integration with [zencodec](https://crates.io/crates/zencodec) trait hierarchy |
 
 ## Building
 

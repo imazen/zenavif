@@ -37,14 +37,14 @@ just test-encode  # cargo test --features encode
 - `src/encoder.rs` - AVIF encoding via zenravif (behind `encode` feature)
 
 ### Integration
-- `src/zencodec.rs` - zencodec-types trait implementations
+- `src/zencodec.rs` - zencodec trait implementations
 
 ## Dependencies
 
 - `rav1d-safe` - Pure Rust AV1 decoder (managed API, no C FFI)
 - `zenavif-parse` - AVIF container parser (path dep)
 - `zenravif` / `ravif` - AVIF encoder (optional, `encode` feature)
-- `zencodec-types` - Codec abstraction traits (path dep)
+- `zencodec` - Codec abstraction traits (path dep)
 - `zenpixels` - Pixel buffer types (path dep)
 - `archmage` / `magetypes` - Token-based safe SIMD
 - `yuv` - YUV to RGB conversion (supplementary)
@@ -62,7 +62,7 @@ just test-encode  # cargo test --features encode
 - `encode-asm` - Encoding with hand-written assembly (fastest, unsafe)
 - `encode-threading` - Encoding with multi-threading
 - `unsafe-asm` - Decoding with hand-written assembly via C FFI (fastest, unsafe)
-- `zencodec` - zencodec-types trait integration
+- `zencodec` - zencodec trait integration
 - `_dev` - Expose internal YUV modules for profiling (not public API)
 
 ## Known Bugs

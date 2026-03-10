@@ -1,11 +1,11 @@
-//! zencodec-types trait implementations for zenavif.
+//! zencodec trait implementations for zenavif.
 //!
 //! Provides [`AvifEncoderConfig`] and [`AvifDecoderConfig`] types that implement
-//! the trait hierarchy from zencodec-types, wrapping the native zenavif API.
+//! the trait hierarchy from zencodec, wrapping the native zenavif API.
 //!
 //! # Trait mapping
 //!
-//! | zencodec-types | zenavif adapter |
+//! | zencodec | zenavif adapter |
 //! |----------------|-----------------|
 //! | `EncoderConfig` | [`AvifEncoderConfig`] |
 //! | `EncodeJob<'a>` | [`AvifEncodeJob`] |
