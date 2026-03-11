@@ -28,7 +28,7 @@ use zencodec::decode::DecodeOutput;
 use zencodec::encode::EncodeOutput;
 use zencodec::{ImageFormat, ImageInfo, ImageSequence, ResourceLimits};
 use zenpixels::{ChannelType, PixelBuffer, PixelDescriptor, PixelSlice};
-use zenpixels_convert::{PixelBufferConvertExt as _, PixelBufferConvertTypedExt as _};
+use zenpixels_convert::PixelBufferConvertTypedExt as _;
 
 use crate::error::Error;
 use whereat::{At, at};
@@ -50,7 +50,7 @@ fn policy_to_threads(policy: zencodec::ThreadingPolicy) -> u32 {
             std::thread::available_parallelism().map_or(1, |n| (n.get() as u32 / 2).max(1))
         }
         zencodec::ThreadingPolicy::Unlimited => 0, // 0 = auto
-        _ => 0,                              // future variants: default to auto
+        _ => 0,                                    // future variants: default to auto
     }
 }
 
@@ -511,11 +511,23 @@ impl<'a> zencodec::encode::EncodeJob<'a> for AvifEncodeJob<'a> {
             let xy_to_u16 = |v: f32| (v * 65535.0 + 0.5) as u16;
             config = config.mastering_display(crate::MasteringDisplayConfig {
                 primaries: [
-                    (xy_to_u16(mdcv.primaries_xy[0][0]), xy_to_u16(mdcv.primaries_xy[0][1])),
-                    (xy_to_u16(mdcv.primaries_xy[1][0]), xy_to_u16(mdcv.primaries_xy[1][1])),
-                    (xy_to_u16(mdcv.primaries_xy[2][0]), xy_to_u16(mdcv.primaries_xy[2][1])),
+                    (
+                        xy_to_u16(mdcv.primaries_xy[0][0]),
+                        xy_to_u16(mdcv.primaries_xy[0][1]),
+                    ),
+                    (
+                        xy_to_u16(mdcv.primaries_xy[1][0]),
+                        xy_to_u16(mdcv.primaries_xy[1][1]),
+                    ),
+                    (
+                        xy_to_u16(mdcv.primaries_xy[2][0]),
+                        xy_to_u16(mdcv.primaries_xy[2][1]),
+                    ),
                 ],
-                white_point: (xy_to_u16(mdcv.white_point_xy[0]), xy_to_u16(mdcv.white_point_xy[1])),
+                white_point: (
+                    xy_to_u16(mdcv.white_point_xy[0]),
+                    xy_to_u16(mdcv.white_point_xy[1]),
+                ),
                 // 24.8 fixed-point: multiply by 256
                 max_luminance: (mdcv.max_luminance * 256.0 + 0.5) as u32,
                 // 18.14 fixed-point: multiply by 16384
@@ -531,7 +543,10 @@ impl<'a> zencodec::encode::EncodeJob<'a> for AvifEncodeJob<'a> {
         }
         // Apply threading policy from ResourceLimits.
         // Skip Unlimited — it means "no preference", so keep the codec's own default.
-        if !matches!(self.limits.threading(), zencodec::ThreadingPolicy::Unlimited) {
+        if !matches!(
+            self.limits.threading(),
+            zencodec::ThreadingPolicy::Unlimited
+        ) {
             let threads = policy_to_threads(self.limits.threading());
             if threads > 0 {
                 config = config.threads(Some(threads as usize));
@@ -1316,7 +1331,10 @@ impl<'a> AvifDecodeJob<'a> {
         // Apply threading policy from ResourceLimits.
         // Skip Unlimited — it means "no preference", so keep the codec's own default
         // (which is 1 thread to avoid the rav1d-safe DisjointMut race condition).
-        if !matches!(self.limits.threading(), zencodec::ThreadingPolicy::Unlimited) {
+        if !matches!(
+            self.limits.threading(),
+            zencodec::ThreadingPolicy::Unlimited
+        ) {
             let threads = policy_to_threads(self.limits.threading());
             cfg = cfg.threads(threads);
         }
@@ -1568,12 +1586,11 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
         let anim_dec = crate::AnimationDecoder::new(&data, &cfg)?;
         let anim_info = anim_dec.info().clone();
 
-        let base_info = convert_native_info(&native_info)
-            .with_sequence(ImageSequence::Animation {
-                frame_count: Some(anim_info.frame_count as u32),
-                loop_count: Some(anim_info.loop_count),
-                random_access: true,
-            });
+        let base_info = convert_native_info(&native_info).with_sequence(ImageSequence::Animation {
+            frame_count: Some(anim_info.frame_count as u32),
+            loop_count: Some(anim_info.loop_count),
+            random_access: true,
+        });
 
         Ok(AvifFullFrameDecoder {
             anim_decoder: anim_dec,
@@ -2052,7 +2069,7 @@ impl zencodec::decode::FullFrameDecoder for AvifFullFrameDecoder {
         stop: Option<&dyn zencodec::enough::Stop>,
         sink: &mut dyn zencodec::decode::DecodeRowSink,
     ) -> Result<Option<zencodec::decode::OutputInfo>, Self::Error> {
-        zencodec::decode::render_frame_to_sink_via_copy(self, stop, sink)
+        zencodec::helpers::copy_frame_to_sink(self, stop, sink)
     }
 }
 
@@ -3136,7 +3153,8 @@ mod tests {
 
         // Decode with SingleThread threading policy
         let dec_config = AvifDecoderConfig::new();
-        let dec_limits = ResourceLimits::none().with_threading(zencodec::ThreadingPolicy::SingleThread);
+        let dec_limits =
+            ResourceLimits::none().with_threading(zencodec::ThreadingPolicy::SingleThread);
         let decoded = dec_config
             .job()
             .with_limits(dec_limits)

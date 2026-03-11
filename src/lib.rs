@@ -51,6 +51,8 @@
 // Crate info for whereat error tracing (enables at!() macro with GitHub links)
 whereat::define_at_crate_info!();
 
+#[cfg(feature = "zencodec")]
+mod codec;
 mod config;
 mod convert;
 #[cfg(feature = "unsafe-asm")]
@@ -86,12 +88,16 @@ pub(crate) mod yuv_convert_libyuv_autovec;
 pub mod yuv_convert_libyuv_simd;
 #[cfg(all(target_arch = "x86_64", not(feature = "_dev")))]
 pub(crate) mod yuv_convert_libyuv_simd;
-#[cfg(feature = "zencodec")]
-mod codec;
 
 #[cfg(feature = "encode")]
 use whereat::at;
 
+#[cfg(feature = "zencodec")]
+pub use codec::{
+    AvifDecodeJob, AvifDecoder as AvifZenDecoder, AvifDecoderConfig, AvifFullFrameDecoder,
+};
+#[cfg(all(feature = "zencodec", feature = "encode"))]
+pub use codec::{AvifEncodeJob, AvifEncoder, AvifEncoderConfig};
 pub use config::DecoderConfig;
 #[cfg(feature = "unsafe-asm")]
 pub use decoder::AvifDecoder;
@@ -111,12 +117,6 @@ pub use image::{
     DecodedAnimationInfo, DecodedFrame, ImageInfo, ImageMirror, ImageRotation,
     MasteringDisplayColourVolume, MatrixCoefficients, PixelAspectRatio, TransferCharacteristics,
 };
-#[cfg(feature = "zencodec")]
-pub use codec::{
-    AvifDecodeJob, AvifDecoder as AvifZenDecoder, AvifDecoderConfig, AvifFullFrameDecoder,
-};
-#[cfg(all(feature = "zencodec", feature = "encode"))]
-pub use codec::{AvifEncodeJob, AvifEncoder, AvifEncoderConfig};
 pub use zenpixels::PixelBuffer;
 
 /// Decode an AVIF image with default settings
