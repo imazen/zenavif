@@ -57,10 +57,7 @@ fn make_avif_exif() -> Vec<u8> {
 fn exif_metadata_roundtrip() {
     let exif_data = make_avif_exif();
 
-    let config = EncoderConfig::new()
-        .quality(80.0)
-        .speed(10)
-        .exif(exif_data);
+    let config = EncoderConfig::new().quality(80.0).speed(10).exif(exif_data);
 
     let info = encode_and_probe(&config);
     let decoded_exif = info.exif.expect("EXIF should be present after roundtrip");
@@ -88,7 +85,10 @@ fn xmp_metadata_roundtrip() {
 
     let info = encode_and_probe(&config);
     let decoded_xmp = info.xmp.expect("XMP should be present after roundtrip");
-    assert_eq!(decoded_xmp, xmp_data, "XMP data should survive roundtrip exactly");
+    assert_eq!(
+        decoded_xmp, xmp_data,
+        "XMP data should survive roundtrip exactly"
+    );
 }
 
 #[test]
@@ -155,7 +155,10 @@ fn content_light_level_roundtrip() {
     let cll = info
         .content_light_level
         .expect("content light level should be present");
-    assert_eq!(cll.max_content_light_level, 1000, "max_cll should roundtrip");
+    assert_eq!(
+        cll.max_content_light_level, 1000,
+        "max_cll should roundtrip"
+    );
     assert_eq!(
         cll.max_pic_average_light_level, 400,
         "max_fall should roundtrip"
@@ -188,10 +191,7 @@ fn mastering_display_roundtrip() {
 #[test]
 fn rotation_90_roundtrip() {
     // Encoder takes raw code: 1 = 90° CCW
-    let config = EncoderConfig::new()
-        .quality(80.0)
-        .speed(10)
-        .rotation(1);
+    let config = EncoderConfig::new().quality(80.0).speed(10).rotation(1);
 
     let info = encode_and_probe(&config);
     let rot = info.rotation.expect("rotation should be present");
@@ -201,10 +201,7 @@ fn rotation_90_roundtrip() {
 #[test]
 fn rotation_270_roundtrip() {
     // Encoder takes raw code: 3 = 270° CCW
-    let config = EncoderConfig::new()
-        .quality(80.0)
-        .speed(10)
-        .rotation(3);
+    let config = EncoderConfig::new().quality(80.0).speed(10).rotation(3);
 
     let info = encode_and_probe(&config);
     let rot = info.rotation.expect("rotation should be present");
@@ -213,10 +210,7 @@ fn rotation_270_roundtrip() {
 
 #[test]
 fn mirror_vertical_roundtrip() {
-    let config = EncoderConfig::new()
-        .quality(80.0)
-        .speed(10)
-        .mirror(0);
+    let config = EncoderConfig::new().quality(80.0).speed(10).mirror(0);
 
     let info = encode_and_probe(&config);
     let mir = info.mirror.expect("mirror should be present");
@@ -225,10 +219,7 @@ fn mirror_vertical_roundtrip() {
 
 #[test]
 fn mirror_horizontal_roundtrip() {
-    let config = EncoderConfig::new()
-        .quality(80.0)
-        .speed(10)
-        .mirror(1);
+    let config = EncoderConfig::new().quality(80.0).speed(10).mirror(1);
 
     let info = encode_and_probe(&config);
     let mir = info.mirror.expect("mirror should be present");
@@ -264,7 +255,11 @@ fn combined_metadata_roundtrip() {
     let info = encode_and_probe(&config);
 
     assert!(info.exif.is_some(), "EXIF should be present");
-    assert_eq!(info.xmp.as_deref(), Some(xmp_data.as_slice()), "XMP should match");
+    assert_eq!(
+        info.xmp.as_deref(),
+        Some(xmp_data.as_slice()),
+        "XMP should match"
+    );
     assert_eq!(info.color_primaries.0, 9);
     assert_eq!(info.transfer_characteristics.0, 16);
     let cll = info.content_light_level.expect("CLL present");
