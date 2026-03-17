@@ -76,6 +76,31 @@ pub struct Aviffy {
     bit_depth: u8,
     exif: Option<Vec<u8>>,
     xmp: Option<Vec<u8>>,
+    gain_map: Option<GainMapConfig>,
+}
+
+/// Configuration for an ISO 21496-1 gain map embedded in the AVIF container.
+///
+/// The gain map enables adaptive HDR rendering: an SDR base image combined
+/// with a gain map and tone-map metadata allows reconstructing an HDR rendition.
+struct GainMapConfig {
+    /// AV1-encoded gain map image data.
+    av1_data: Vec<u8>,
+    /// Width of the gain map image in pixels.
+    width: u32,
+    /// Height of the gain map image in pixels.
+    height: u32,
+    /// Bit depth of the gain map image (8, 10, or 12).
+    bit_depth: u8,
+    /// ISO 21496-1 binary metadata blob (the `tmap` item payload).
+    metadata: Vec<u8>,
+    /// CICP color information for the alternate (typically HDR) rendition.
+    /// Stored as a `colr` property on the `tmap` item.
+    alt_colr: Option<ColrBox>,
+    /// Chroma subsampling of the gain map AV1 data.
+    chroma_subsampling: ChromaSubsampling,
+    /// Whether the gain map is monochrome.
+    monochrome: bool,
 }
 
 /// Makes an AVIF file given encoded AV1 data (create the data with [`rav1e`](https://lib.rs/rav1e))
@@ -134,6 +159,7 @@ impl Aviffy {
             icc_profile: None,
             exif: None,
             xmp: None,
+            gain_map: None,
         }
     }
 
@@ -287,6 +313,71 @@ impl Aviffy {
         self
     }
 
+    /// Set gain map data for ISO 21496-1 tone mapping.
+    ///
+    /// Creates three items in the AVIF container:
+    /// - A gain map image item (`av01`) containing the AV1-encoded gain map
+    /// - A `tmap` derived image item referencing both the primary image and gain map
+    /// - The `tmap` item's payload containing the ISO 21496-1 metadata
+    ///
+    /// The `metadata` blob is the raw ISO 21496-1 binary format (version byte,
+    /// minimum_version, writer_version, flags, headroom, per-channel parameters).
+    ///
+    /// The gain map image is typically a lower-resolution, monochrome or RGB image
+    /// encoding the per-pixel gain needed to reconstruct the HDR rendition from
+    /// the SDR base.
+    #[inline]
+    pub fn set_gain_map(&mut self, av1_data: Vec<u8>, width: u32, height: u32, bit_depth: u8, metadata: Vec<u8>) -> &mut Self {
+        self.gain_map = Some(GainMapConfig {
+            av1_data,
+            width,
+            height,
+            bit_depth,
+            metadata,
+            alt_colr: None,
+            chroma_subsampling: ChromaSubsampling::YUV420,
+            monochrome: false,
+        });
+        self
+    }
+
+    /// Set the color information for the alternate (typically HDR) rendition.
+    ///
+    /// This CICP colr box is attached as a property of the `tmap` item,
+    /// telling decoders what colour space the tone-mapped output targets.
+    /// Only meaningful if [`set_gain_map`](Self::set_gain_map) has been called.
+    #[inline]
+    pub fn set_gain_map_alt_colr(&mut self, colr: ColrBox) -> &mut Self {
+        if let Some(ref mut gm) = self.gain_map {
+            gm.alt_colr = Some(colr);
+        }
+        self
+    }
+
+    /// Set chroma subsampling for the gain map AV1 data.
+    ///
+    /// Defaults to 4:2:0 if not called. Only meaningful if
+    /// [`set_gain_map`](Self::set_gain_map) has been called.
+    #[inline]
+    pub fn set_gain_map_chroma_subsampling(&mut self, subsampling: impl Into<ChromaSubsampling>) -> &mut Self {
+        if let Some(ref mut gm) = self.gain_map {
+            gm.chroma_subsampling = subsampling.into();
+        }
+        self
+    }
+
+    /// Set whether the gain map image is monochrome.
+    ///
+    /// Defaults to false. Only meaningful if
+    /// [`set_gain_map`](Self::set_gain_map) has been called.
+    #[inline]
+    pub fn set_gain_map_monochrome(&mut self, monochrome: bool) -> &mut Self {
+        if let Some(ref mut gm) = self.gain_map {
+            gm.monochrome = monochrome;
+        }
+        self
+    }
+
     /// Makes an AVIF file given encoded AV1 data (create the data with [`rav1e`](https://lib.rs/rav1e))
     ///
     /// `color_av1_data` is already-encoded AV1 image data for the color channels (YUV, RGB, etc.).
@@ -322,6 +413,7 @@ impl Aviffy {
         let mut iloc_items = ArrayVec::new();
         let mut ipma_entries = ArrayVec::new();
         let mut irefs = ArrayVec::new();
+        let mut multi_irefs: ArrayVec<IrefMultiEntryBox, 2> = ArrayVec::new();
         let mut ipco = IpcoBox::new();
         let color_image_id: u16 = 1;
         let alpha_image_id: u16 = 2;
@@ -433,7 +525,6 @@ impl Aviffy {
         if let Some(xmp_data) = self.xmp.as_deref() {
             let xmp_id = next_item_id;
             next_item_id += 1;
-            let _ = next_item_id; // suppress unused warning
 
             image_items.push(InfeBox {
                 id: xmp_id,
@@ -511,6 +602,89 @@ impl Aviffy {
                 extents: [IlocExtent { data: alpha_data }],
             });
         }
+        // Gain map: gain map image item (av01) + tmap derived image
+        if let Some(ref gm) = self.gain_map {
+            let gm_depth = gm.bit_depth;
+            let gain_map_id = next_item_id;
+            next_item_id += 1;
+            let tmap_id = next_item_id;
+            next_item_id += 1;
+            let _ = next_item_id;
+
+            // Gain map image item (av01)
+            image_items.push(InfeBox {
+                id: gain_map_id,
+                typ: FourCC(*b"av01"),
+                name: "",
+                content_type: "",
+            });
+
+            // Gain map ispe (may differ from primary dimensions)
+            let gm_ispe = ipco.push(IpcoProp::Ispe(IspeBox {
+                width: gm.width,
+                height: gm.height,
+            })).ok_or(io::ErrorKind::InvalidInput)?;
+
+            // Gain map av1C
+            let gm_av1c = ipco.push(IpcoProp::Av1C(Av1CBox {
+                seq_profile: if gm_depth >= 12 { 2 } else { 0 },
+                seq_level_idx_0: 31,
+                seq_tier_0: false,
+                high_bitdepth: gm_depth >= 10,
+                twelve_bit: gm_depth >= 12,
+                monochrome: gm.monochrome,
+                chroma_subsampling_x: gm.chroma_subsampling.horizontal,
+                chroma_subsampling_y: gm.chroma_subsampling.vertical,
+                chroma_sample_position: 0,
+            })).ok_or(io::ErrorKind::InvalidInput)?;
+
+            ipma_entries.push(IpmaEntry {
+                item_id: gain_map_id,
+                prop_ids: from_array([gm_ispe, gm_av1c | ESSENTIAL_BIT]),
+            });
+
+            // Gain map image data in iloc
+            iloc_items.push(IlocItem {
+                id: gain_map_id,
+                extents: [IlocExtent { data: &gm.av1_data }],
+            });
+
+            // tmap derived image item
+            image_items.push(InfeBox {
+                id: tmap_id,
+                typ: FourCC(*b"tmap"),
+                name: "",
+                content_type: "",
+            });
+
+            // tmap item properties: optional colr for alternate rendition
+            if let Some(alt_colr) = gm.alt_colr {
+                let tmap_colr = ipco.push(IpcoProp::Colr(alt_colr)).ok_or(io::ErrorKind::InvalidInput)?;
+                ipma_entries.push(IpmaEntry {
+                    item_id: tmap_id,
+                    prop_ids: from_array([tmap_colr]),
+                });
+            }
+
+            // tmap payload (ISO 21496-1 metadata) in iloc
+            iloc_items.push(IlocItem {
+                id: tmap_id,
+                extents: [IlocExtent { data: &gm.metadata }],
+            });
+
+            // dimg reference: tmap -> [primary, gain_map]
+            // Must be a single iref entry with reference_count=2 so the parser
+            // assigns reference_index 0 to primary and 1 to gain_map.
+            let mut to_ids = ArrayVec::new();
+            to_ids.push(color_image_id);
+            to_ids.push(gain_map_id);
+            multi_irefs.push(IrefMultiEntryBox {
+                from_id: tmap_id,
+                to_ids,
+                typ: FourCC(*b"dimg"),
+            });
+        }
+
         iloc_items.push(IlocItem {
             id: color_image_id,
             extents: [IlocExtent { data: color_av1_data }],
@@ -536,7 +710,7 @@ impl Aviffy {
                     // they must be assigned to the image
                     ipma: IpmaBox { entries: ipma_entries },
                 },
-                iref: IrefBox { entries: irefs },
+                iref: IrefBox { entries: irefs, multi_entries: multi_irefs },
             },
             // Here's the actual data. If HEIF wasn't such a kitchen sink, this
             // would have been the only data this file needs.
@@ -1247,5 +1421,217 @@ fn avif_parse_survives_grid() {
     });
     let avif = grid.serialize(2, 2, 200, 200, 100, 100, &tile_refs, None).unwrap();
     // avif-parse may or may not support grid, but must not crash
+    let _ = avif_parse::read_avif(&mut avif.as_slice());
+}
+
+// ─── Gain map / tmap tests ───────────────────────────────────────────
+
+/// Build a minimal ISO 21496-1 metadata blob (single-channel).
+///
+/// Format: version(u8) + minimum_version(u16) + writer_version(u16) + flags(u8)
+///   + base_hdr_headroom(u32×2) + alternate_hdr_headroom(u32×2)
+///   + per-channel: gain_map_min(i32+u32) + gain_map_max(i32+u32)
+///     + gamma(u32×2) + base_offset(i32+u32) + alternate_offset(i32+u32)
+#[cfg(test)]
+fn make_test_tmap_metadata(
+    is_multichannel: bool,
+    use_base_colour_space: bool,
+    base_headroom_n: u32,
+    base_headroom_d: u32,
+    alt_headroom_n: u32,
+    alt_headroom_d: u32,
+) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.push(0); // version
+    buf.extend_from_slice(&0u16.to_be_bytes()); // minimum_version
+    buf.extend_from_slice(&0u16.to_be_bytes()); // writer_version
+    let flags = (u8::from(is_multichannel) << 7) | (u8::from(use_base_colour_space) << 6);
+    buf.push(flags);
+
+    buf.extend_from_slice(&base_headroom_n.to_be_bytes());
+    buf.extend_from_slice(&base_headroom_d.to_be_bytes());
+    buf.extend_from_slice(&alt_headroom_n.to_be_bytes());
+    buf.extend_from_slice(&alt_headroom_d.to_be_bytes());
+
+    let channel_count = if is_multichannel { 3 } else { 1 };
+    for _ in 0..channel_count {
+        // gain_map_min = 0/1
+        buf.extend_from_slice(&0i32.to_be_bytes());
+        buf.extend_from_slice(&1u32.to_be_bytes());
+        // gain_map_max = 1/1
+        buf.extend_from_slice(&1i32.to_be_bytes());
+        buf.extend_from_slice(&1u32.to_be_bytes());
+        // gamma = 1/1
+        buf.extend_from_slice(&1u32.to_be_bytes());
+        buf.extend_from_slice(&1u32.to_be_bytes());
+        // base_offset = 0/1
+        buf.extend_from_slice(&0i32.to_be_bytes());
+        buf.extend_from_slice(&1u32.to_be_bytes());
+        // alternate_offset = 0/1
+        buf.extend_from_slice(&0i32.to_be_bytes());
+        buf.extend_from_slice(&1u32.to_be_bytes());
+    }
+    buf
+}
+
+#[test]
+fn gain_map_roundtrip() {
+    let primary_data = b"primary_av1_data";
+    let gain_map_data = b"gain_map_av1_data";
+    let metadata = make_test_tmap_metadata(false, true, 0, 1, 1, 1);
+
+    let avif = Aviffy::new()
+        .set_gain_map(gain_map_data.to_vec(), 4, 4, 8, metadata.clone())
+        .to_vec(primary_data, None, 10, 20, 8);
+
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+
+    // Primary data intact
+    assert_eq!(parser.primary_data().unwrap().as_ref(), &primary_data[..]);
+
+    // Gain map metadata should be detected
+    let gm_meta = parser.gain_map_metadata().expect("gain map metadata should be present");
+    assert!(!gm_meta.is_multichannel);
+    assert!(gm_meta.use_base_colour_space);
+    assert_eq!(gm_meta.base_hdr_headroom_n, 0);
+    assert_eq!(gm_meta.base_hdr_headroom_d, 1);
+    assert_eq!(gm_meta.alternate_hdr_headroom_n, 1);
+    assert_eq!(gm_meta.alternate_hdr_headroom_d, 1);
+
+    // Gain map image data should be extractable
+    let gm_data = parser.gain_map_data().expect("gain map data should be present").unwrap();
+    assert_eq!(gm_data.as_ref(), &gain_map_data[..]);
+}
+
+#[test]
+fn gain_map_with_alpha() {
+    let primary_data = b"primary_av1";
+    let alpha_data = b"alpha_av1";
+    let gain_map_data = b"gm_av1_data";
+    let metadata = make_test_tmap_metadata(false, true, 0, 1, 1, 1);
+
+    let avif = Aviffy::new()
+        .set_gain_map(gain_map_data.to_vec(), 4, 4, 8, metadata)
+        .to_vec(primary_data, Some(alpha_data), 10, 20, 8);
+
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+
+    // Primary + alpha data intact
+    assert_eq!(parser.primary_data().unwrap().as_ref(), &primary_data[..]);
+    assert_eq!(parser.alpha_data().unwrap().unwrap().as_ref(), &alpha_data[..]);
+
+    // Gain map detected
+    let gm_data = parser.gain_map_data().expect("gain map data present").unwrap();
+    assert_eq!(gm_data.as_ref(), &gain_map_data[..]);
+    assert!(parser.gain_map_metadata().is_some());
+}
+
+#[test]
+fn gain_map_multichannel_metadata() {
+    let primary_data = [1, 2, 3, 4, 5, 6];
+    let gain_map_data = [10, 20, 30, 40];
+    let metadata = make_test_tmap_metadata(true, false, 0, 1, 3, 1);
+
+    let avif = Aviffy::new()
+        .set_gain_map(gain_map_data.to_vec(), 2, 2, 8, metadata.clone())
+        .to_vec(&primary_data, None, 10, 20, 8);
+
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+    let gm_meta = parser.gain_map_metadata().expect("gain map metadata present");
+    assert!(gm_meta.is_multichannel);
+    assert!(!gm_meta.use_base_colour_space);
+    assert_eq!(gm_meta.alternate_hdr_headroom_n, 3);
+}
+
+#[test]
+fn gain_map_metadata_field_exact() {
+    // Known metadata blob -> embed -> extract -> verify field-by-field
+    let primary_data = [1, 2, 3, 4];
+    let gain_map_data = [99, 88, 77];
+    let metadata = make_test_tmap_metadata(false, true, 0, 1, 6, 1);
+
+    let avif = Aviffy::new()
+        .set_gain_map(gain_map_data.to_vec(), 1, 1, 8, metadata.clone())
+        .to_vec(&primary_data, None, 10, 20, 8);
+
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+    let gm_meta = parser.gain_map_metadata().expect("gain map metadata present");
+
+    assert_eq!(gm_meta.alternate_hdr_headroom_n, 6);
+    assert_eq!(gm_meta.alternate_hdr_headroom_d, 1);
+    assert_eq!(gm_meta.channels[0].gain_map_min_n, 0);
+    assert_eq!(gm_meta.channels[0].gain_map_min_d, 1);
+    assert_eq!(gm_meta.channels[0].gain_map_max_n, 1);
+    assert_eq!(gm_meta.channels[0].gain_map_max_d, 1);
+    assert_eq!(gm_meta.channels[0].gamma_n, 1);
+    assert_eq!(gm_meta.channels[0].gamma_d, 1);
+    assert_eq!(gm_meta.channels[0].base_offset_n, 0);
+    assert_eq!(gm_meta.channels[0].base_offset_d, 1);
+    assert_eq!(gm_meta.channels[0].alternate_offset_n, 0);
+    assert_eq!(gm_meta.channels[0].alternate_offset_d, 1);
+}
+
+#[test]
+fn gain_map_alt_colr_roundtrip() {
+    let primary_data = [1, 2, 3, 4, 5, 6];
+    let gain_map_data = [10, 20, 30];
+    let metadata = make_test_tmap_metadata(false, true, 0, 1, 1, 1);
+
+    let alt_colr = ColrBox {
+        color_primaries: constants::ColorPrimaries::Bt2020,
+        transfer_characteristics: constants::TransferCharacteristics::Smpte2084,
+        matrix_coefficients: constants::MatrixCoefficients::Bt2020Ncl,
+        full_range_flag: false,
+    };
+
+    let avif = Aviffy::new()
+        .set_gain_map(gain_map_data.to_vec(), 2, 2, 8, metadata)
+        .set_gain_map_alt_colr(alt_colr)
+        .to_vec(&primary_data, None, 10, 20, 8);
+
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+
+    // Gain map data intact
+    let gm_data = parser.gain_map_data().expect("gain map data present").unwrap();
+    assert_eq!(gm_data.as_ref(), &gain_map_data[..]);
+
+    // Verify alternate color info
+    let alt = parser.gain_map_color_info().expect("alt color info should be present");
+    match alt {
+        zenavif_parse::ColorInformation::Nclx {
+            color_primaries,
+            transfer_characteristics,
+            matrix_coefficients,
+            full_range,
+        } => {
+            assert_eq!(*color_primaries, 9); // BT.2020
+            assert_eq!(*transfer_characteristics, 16); // PQ
+            assert_eq!(*matrix_coefficients, 9); // BT.2020 NCL
+            assert!(!full_range);
+        }
+        other => panic!("expected NCLX color info, got: {:?}", other),
+    }
+}
+
+#[test]
+fn no_gain_map_by_default() {
+    let test_img = [1, 2, 3, 4, 5, 6];
+    let avif = serialize_to_vec(&test_img, None, 10, 20, 8);
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+    assert!(parser.gain_map_metadata().is_none(), "no gain map metadata by default");
+    assert!(parser.gain_map_data().is_none(), "no gain map data by default");
+}
+
+#[test]
+fn avif_parse_survives_gain_map() {
+    let primary_data = b"primary_color";
+    let gain_map_data = b"gain_map_pixels";
+    let metadata = make_test_tmap_metadata(false, true, 0, 1, 1, 1);
+
+    let avif = Aviffy::new()
+        .set_gain_map(gain_map_data.to_vec(), 4, 4, 8, metadata)
+        .to_vec(primary_data, None, 10, 20, 8);
+
+    // avif-parse (older parser) must not crash
     let _ = avif_parse::read_avif(&mut avif.as_slice());
 }

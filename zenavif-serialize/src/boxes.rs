@@ -154,7 +154,7 @@ impl MpegBox for MetaBox<'_> {
 /// Item Info box
 #[derive(Debug, Clone)]
 pub struct IinfBox {
-    pub items: ArrayVec<InfeBox, 4>,
+    pub items: ArrayVec<InfeBox, 8>,
 }
 
 impl MpegBox for IinfBox {
@@ -420,7 +420,7 @@ pub struct IpmaEntry {
 
 #[derive(Debug, Clone)]
 pub struct IpmaBox {
-    pub entries: ArrayVec<IpmaEntry, 2>,
+    pub entries: ArrayVec<IpmaEntry, 4>,
 }
 
 impl MpegBox for IpmaBox {
@@ -444,7 +444,7 @@ impl MpegBox for IpmaBox {
     }
 }
 
-/// Item Reference box
+/// Single-reference item reference entry (e.g., auxl, prem, cdsc).
 #[derive(Debug, Copy, Clone)]
 pub struct IrefEntryBox {
     pub from_id: u16,
@@ -469,26 +469,64 @@ impl MpegBox for IrefEntryBox {
     }
 }
 
+/// Multi-reference item reference entry (e.g., dimg from tmap to primary+gain_map).
+///
+/// Writes a single SingleItemTypeReferenceBox with `reference_count` equal to
+/// the number of `to_ids`, preserving the ordering that parsers rely on
+/// (e.g., `dimg` reference index 0 = base image, index 1 = gain map).
+#[derive(Debug, Clone)]
+pub struct IrefMultiEntryBox {
+    pub from_id: u16,
+    pub to_ids: ArrayVec<u16, 4>,
+    pub typ: FourCC,
+}
+
+impl MpegBox for IrefMultiEntryBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE
+            + 2 // from_id
+            + 2 // reference_count
+            + 2 * self.to_ids.len() // to_ids
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), self.typ.0)?;
+        b.u16(self.from_id)?;
+        b.u16(self.to_ids.len() as u16)?;
+        for &to_id in &self.to_ids {
+            b.u16(to_id)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct IrefBox {
-    pub entries: ArrayVec<IrefEntryBox, 4>,
+    pub entries: ArrayVec<IrefEntryBox, 6>,
+    pub multi_entries: ArrayVec<IrefMultiEntryBox, 2>,
 }
 
 impl IrefBox {
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.entries.is_empty() && self.multi_entries.is_empty()
     }
 }
 
 impl MpegBox for IrefBox {
     #[inline(always)]
     fn len(&self) -> usize {
-        FULL_BOX_SIZE + self.entries.iter().map(|e| e.len()).sum::<usize>()
+        FULL_BOX_SIZE
+            + self.entries.iter().map(|e| e.len()).sum::<usize>()
+            + self.multi_entries.iter().map(|e| e.len()).sum::<usize>()
     }
 
     fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
         let mut b = w.full_box(self.len(), *b"iref", 0)?;
         for entry in &self.entries {
+            entry.write(&mut b)?;
+        }
+        for entry in &self.multi_entries {
             entry.write(&mut b)?;
         }
         Ok(())
@@ -703,7 +741,7 @@ impl MpegBox for PitmBox {
 pub struct IlocBox<'data> {
     /// update before writing
     pub absolute_offset_start: Option<NonZeroU32>,
-    pub items: ArrayVec<IlocItem<'data>, 4>,
+    pub items: ArrayVec<IlocItem<'data>, 8>,
 }
 
 #[derive(Debug, Clone)]
