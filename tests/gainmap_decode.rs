@@ -113,8 +113,7 @@ fn decode_full_has_gain_map() {
 
     // Per-channel parameters should differ for multichannel
     assert_ne!(
-        gm.metadata.channels[0].gain_map_min_n,
-        gm.metadata.channels[1].gain_map_min_n,
+        gm.metadata.channels[0].gain_map_min_n, gm.metadata.channels[1].gain_map_min_n,
         "multichannel should have different per-channel values"
     );
 }
@@ -224,10 +223,7 @@ fn gain_map_small_dimensions() {
         ManagedAvifDecoder::new(&data, &DecoderConfig::default()).expect("decoder should open");
     let info = decoder.probe_info().expect("probe should succeed");
 
-    let gm = info
-        .gain_map
-        .as_ref()
-        .expect("gain map should be present");
+    let gm = info.gain_map.as_ref().expect("gain map should be present");
     assert!(
         !gm.gain_map_data.is_empty(),
         "small gain map data should be non-empty"
@@ -321,7 +317,10 @@ fn gain_map_data_has_valid_obu_structure() {
         obu_count += 1;
     }
 
-    assert!(obu_count >= 2, "gain map AV1 should have at least 2 OBUs (sequence header + frame), got {obu_count}");
+    assert!(
+        obu_count >= 2,
+        "gain map AV1 should have at least 2 OBUs (sequence header + frame), got {obu_count}"
+    );
 }
 
 // ============================================================================
