@@ -1841,6 +1841,11 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
         if let Ok(probe) = crate::detect::probe(&self.data) {
             output = output.with_source_encoding_details(probe);
         }
+        // Attach gain map as typed extras so callers can retrieve it via
+        // `output.extras::<zenavif_parse::AvifGainMap>()`.
+        if let Some(gm) = native_info.gain_map {
+            output = output.with_extras(gm);
+        }
         Ok(output)
     }
 }
@@ -3337,4 +3342,8 @@ mod tests {
             "should decode exactly {total} frames, got {frames_decoded}"
         );
     }
+
+    // Gain map zencodec extras tests are in tests/gainmap_decode.rs
+    // (integration test) to avoid pre-existing compile errors in this
+    // module when `encode` feature is not enabled.
 }

@@ -441,6 +441,7 @@ impl ManagedAvifDecoder {
                 .xmp()
                 .and_then(|r| r.ok())
                 .map(|c| c.into_owned()),
+            gain_map: self.parser.gain_map().and_then(|r| r.ok()),
         })
     }
 
@@ -551,6 +552,7 @@ impl ManagedAvifDecoder {
                 .xmp()
                 .and_then(|r| r.ok())
                 .map(|c| c.into_owned()),
+            gain_map: self.parser.gain_map().and_then(|r| r.ok()),
         })
     }
 
@@ -893,6 +895,7 @@ impl ManagedAvifDecoder {
                 .xmp()
                 .and_then(|r| r.ok())
                 .map(|c| c.into_owned()),
+            gain_map: self.parser.gain_map().and_then(|r| r.ok()),
         };
 
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;

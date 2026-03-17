@@ -1,8 +1,8 @@
 //! AVIF image metadata types
 
 pub use zenavif_parse::{
-    CleanAperture, ContentLightLevel, ImageMirror, ImageRotation, MasteringDisplayColourVolume,
-    PixelAspectRatio,
+    AvifGainMap, CleanAperture, ContentLightLevel, GainMapChannel, GainMapMetadata, ImageMirror,
+    ImageRotation, MasteringDisplayColourVolume, PixelAspectRatio,
 };
 
 /// Chroma subsampling format
@@ -135,6 +135,12 @@ pub struct ImageInfo {
     pub exif: Option<Vec<u8>>,
     /// XMP metadata (raw XML)
     pub xmp: Option<Vec<u8>>,
+    /// Gain map for SDR/HDR tone mapping (ISO 21496-1).
+    ///
+    /// Present when the AVIF file contains a `tmap` derived image item.
+    /// The `gain_map_data` field is a raw AV1 bitstream that can be decoded
+    /// separately with an AV1 decoder.
+    pub gain_map: Option<AvifGainMap>,
 }
 
 /// A single decoded frame from an animated AVIF sequence.
@@ -191,6 +197,7 @@ impl Default for ImageInfo {
             mastering_display: None,
             exif: None,
             xmp: None,
+            gain_map: None,
         }
     }
 }
