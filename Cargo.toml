@@ -41,6 +41,7 @@ env_logger = { version = "0.11", default-features = false }
 png = "0.18.0"
 image = "0.25"
 criterion = { version = "0.8", features = ["html_reports"] }
+fast-ssim2 = { path = "../fast-ssim2/ssimulacra2" }
 
 [[bench]]
 name = "decode_benchmark"
