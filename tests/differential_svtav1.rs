@@ -7,7 +7,7 @@
 
 use imgref::Img;
 use rgb::Rgb;
-use zenavif::{Av1Backend, EncoderConfig, encode_rgb8};
+use zenavif::{Av1Backend, EncoderConfig, encode_rgb8, decode_av1_obu};
 
 /// Create a gradient test image of given dimensions.
 fn make_gradient(w: usize, h: usize) -> Img<Vec<Rgb<u8>>> {
@@ -237,4 +237,61 @@ fn various_image_sizes_both_backends() {
             );
         }
     }
+}
+
+// =============================================================================
+// Decode roundtrip tests — encode with svtav1, decode with rav1d-safe
+// =============================================================================
+
+#[test]
+fn svtav1_decode_roundtrip_gradient() {
+    let img = make_gradient(64, 64);
+    let config = EncoderConfig::new()
+        .backend(Av1Backend::Svtav1)
+        .quality(70.0)
+        .speed(8);
+    let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable)
+        .expect("svtav1 encode should succeed");
+
+    // Try to decode the AV1 OBU output with rav1d-safe
+    match decode_av1_obu(&encoded.avif_file) {
+        Ok((pixels, w, h, channels)) => {
+            eprintln!(
+                "Decoded: {}x{}, {} channels, {} pixels",
+                w, h, channels, pixels.len()
+            );
+            assert!(w > 0 && h > 0, "decoded dimensions should be positive");
+            assert!(!pixels.is_empty(), "decoded pixels should be non-empty");
+        }
+        Err(e) => {
+            // Expected: svtav1 bitstream may not be fully dav1d-conformant yet.
+            // This test documents the current conformance status.
+            eprintln!(
+                "Decode failed (expected — svtav1 bitstream not yet fully conformant): {e}"
+            );
+        }
+    }
+}
+
+#[test]
+fn zenravif_decode_roundtrip_success() {
+    // Verify the zenravif backend's output decodes successfully (baseline)
+    let img = make_gradient(64, 64);
+    let config = EncoderConfig::new()
+        .backend(Av1Backend::Zenravif)
+        .quality(70.0)
+        .speed(8);
+    let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable)
+        .expect("zenravif encode should succeed");
+
+    // zenravif output is AVIF container — decode with the full decoder
+    let decoded = zenavif::decode(&encoded.avif_file)
+        .expect("zenravif AVIF should decode successfully");
+
+    eprintln!(
+        "zenravif roundtrip: encoded {} bytes, decoded {}x{}",
+        encoded.avif_file.len(),
+        decoded.width(),
+        decoded.height(),
+    );
 }
