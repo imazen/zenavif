@@ -1695,3 +1695,55 @@ fn eager_gain_map_basic() {
     let meta = avif.gain_map_metadata.unwrap();
     assert!(meta.alternate_hdr_headroom_d > 0);
 }
+
+#[test]
+fn parser_gain_map_convenience() {
+    let bytes = std::fs::read("tests/gainmap/seine_sdr_gainmap_srgb.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    // The convenience method returns the full bundle
+    let gm = parser
+        .gain_map()
+        .expect("gain_map() should be Some for this file")
+        .expect("gain_map data should resolve");
+
+    // Metadata matches individual accessor
+    let meta_direct = parser.gain_map_metadata().unwrap();
+    assert_eq!(gm.metadata, *meta_direct);
+
+    // Data matches individual accessor
+    let data_direct = parser.gain_map_data().unwrap().unwrap();
+    assert_eq!(gm.gain_map_data, data_direct.as_ref());
+
+    // Color info matches individual accessor
+    assert_eq!(gm.alt_color_info.as_ref(), parser.gain_map_color_info());
+
+    // Verify AV1 OBU header (gain map data is an AV1 bitstream)
+    // OBU type is in bits [4:1] of the first byte
+    assert!(!gm.gain_map_data.is_empty());
+    let first_byte = gm.gain_map_data[0];
+    let obu_type = (first_byte >> 3) & 0x0F;
+    // Valid OBU types: 1 (sequence header), 2 (TD), 3 (frame header), etc.
+    assert!(obu_type >= 1 && obu_type <= 8, "First OBU type should be valid AV1 OBU: got {obu_type}");
+}
+
+#[test]
+fn parser_gain_map_convenience_absent() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    assert!(parser.gain_map().is_none(), "normal images should return None from gain_map()");
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn eager_gain_map_convenience() {
+    let bytes = std::fs::read("tests/gainmap/seine_sdr_gainmap_srgb.avif").expect("read file");
+    let input = &mut std::io::Cursor::new(&bytes);
+    #[allow(deprecated)]
+    let avif = zenavif_parse::read_avif(input).expect("read_avif");
+
+    let gm = avif.gain_map().expect("AvifData::gain_map() should be Some");
+    assert!(gm.metadata.is_multichannel);
+    assert!(!gm.gain_map_data.is_empty());
+}

@@ -486,6 +486,36 @@ pub struct GainMapMetadata {
     pub channels: [GainMapChannel; 3],
 }
 
+/// Gain map information extracted from an AVIF container.
+///
+/// Bundles the ISO 21496-1 metadata, the raw AV1-encoded gain map image data,
+/// and the alternate rendition's color information into a single type.
+///
+/// The `gain_map_data` field contains an AV1 bitstream that can be decoded
+/// with any AV1 decoder (e.g., rav1d) to obtain the gain map pixel values.
+///
+/// # Example
+///
+/// ```no_run
+/// let bytes = std::fs::read("hdr.avif").unwrap();
+/// let parser = zenavif_parse::AvifParser::from_bytes(&bytes).unwrap();
+/// if let Some(Ok(gm)) = parser.gain_map() {
+///     println!("Gain map: {} bytes", gm.gain_map_data.len());
+///     println!("Multichannel: {}", gm.metadata.is_multichannel);
+/// }
+/// ```
+#[derive(Debug, Clone)]
+pub struct AvifGainMap {
+    /// ISO 21496-1 gain map metadata (parsed from the `tmap` item payload).
+    pub metadata: GainMapMetadata,
+    /// Raw AV1 bitstream of the gain map image. Decode with an AV1 decoder
+    /// to obtain the gain map pixel values.
+    pub gain_map_data: std::vec::Vec<u8>,
+    /// Color information for the alternate (typically HDR) rendition,
+    /// from the `tmap` item's `colr` property.
+    pub alt_color_info: Option<ColorInformation>,
+}
+
 /// Operating point selector from the `a1op` property box.
 ///
 /// Selects which AV1 operating point to decode for multi-operating-point images.
@@ -884,6 +914,24 @@ pub struct AvifData {
 
     /// Compatible brands from the `ftyp` box.
     pub compatible_brands: std::vec::Vec<[u8; 4]>,
+}
+
+#[cfg(feature = "eager")]
+#[allow(deprecated)]
+impl AvifData {
+    /// Get the full gain map bundle, if present.
+    ///
+    /// Consumes the gain map metadata and data from this `AvifData` and returns
+    /// an [`AvifGainMap`]. Returns `None` if no gain map metadata or data is present.
+    pub fn gain_map(&self) -> Option<AvifGainMap> {
+        let metadata = self.gain_map_metadata.as_ref()?.clone();
+        let gain_map_data = self.gain_map_item.as_ref()?.to_vec();
+        Some(AvifGainMap {
+            metadata,
+            gain_map_data,
+            alt_color_info: self.gain_map_color_info.clone(),
+        })
+    }
 }
 
 // # Memory Usage
@@ -2026,6 +2074,23 @@ impl<'data> AvifParser<'data> {
     /// the colour space of the tone-mapped output.
     pub fn gain_map_color_info(&self) -> Option<&ColorInformation> {
         self.gain_map_color_info.as_ref()
+    }
+
+    /// Get the full gain map bundle, if a `tmap` derived image item is present.
+    ///
+    /// Returns [`AvifGainMap`] containing metadata, raw AV1 gain map data,
+    /// and alternate rendition color info. Returns `None` if no gain map
+    /// is present, or `Some(Err(..))` if the gain map data cannot be resolved.
+    pub fn gain_map(&self) -> Option<Result<AvifGainMap>> {
+        let metadata = self.gain_map_metadata.as_ref()?.clone();
+        let data_extents = self.gain_map.as_ref()?;
+        let alt_color_info = self.gain_map_color_info.clone();
+
+        Some(self.resolve_item(data_extents).map(|data| AvifGainMap {
+            metadata,
+            gain_map_data: data.into_owned(),
+            alt_color_info,
+        }))
     }
 
     /// Get the major brand from the `ftyp` box (e.g., `*b"avif"` or `*b"avis"`).
