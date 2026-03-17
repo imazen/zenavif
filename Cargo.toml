@@ -29,6 +29,7 @@ thiserror = { version = "2.0", default-features = false }
 whereat = "0.1.3"
 log = "0.4"
 ravif = { package = "zenravif", version = "0.1", path = "../ravif/ravif", default-features = false, optional = true }
+svtav1 = { path = "/home/lilith/research/svtav1/svtav1-rs/svtav1", optional = true }
 zencodec = { path = "../zencodec", version = "0.1" }
 zenpixels = { path = "../zenpixels/zenpixels", default-features = false }
 zenpixels-convert = { path = "../zenpixels/zenpixels-convert", default-features = false, features = ["rgb"] }
@@ -107,6 +108,8 @@ encode-asm = ["encode", "ravif/asm"]
 encode-threading = ["encode", "ravif/threading"]
 # Encoding with imazen/zenrav1e fork features (QM, VAQ, still-image tuning, lossless)
 encode-imazen = ["encode", "ravif/imazen"]
+# Encoding with svtav1-rs backend (pure Rust SVT-AV1 port)
+encode-svtav1 = ["encode", "dep:svtav1"]
 # Enable zencodec trait integration
 zencodec = []
 # Expose internal YUV conversion modules for profiling/debugging. Not public API.
