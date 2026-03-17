@@ -55,6 +55,7 @@ whereat::define_at_crate_info!();
 mod codec;
 mod config;
 mod convert;
+mod decode_av1;
 #[cfg(feature = "unsafe-asm")]
 mod decoder;
 mod decoder_managed;
@@ -99,6 +100,7 @@ pub use codec::{
 #[cfg(all(feature = "zencodec", feature = "encode"))]
 pub use codec::{AvifEncodeJob, AvifEncoder, AvifEncoderConfig};
 pub use config::DecoderConfig;
+pub use decode_av1::decode_av1_obu;
 #[cfg(feature = "unsafe-asm")]
 pub use decoder::AvifDecoder;
 pub use decoder_managed::{AnimationDecoder, ManagedAvifDecoder};
