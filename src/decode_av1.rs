@@ -78,8 +78,10 @@ pub fn decode_av1_obu(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u8)> {
     let layout = frame.pixel_layout();
 
     let color_info = frame.color_info();
-    let yuv_range = if matches!(color_info.color_range, rav1d_safe::src::managed::ColorRange::Full)
-    {
+    let yuv_range = if matches!(
+        color_info.color_range,
+        rav1d_safe::src::managed::ColorRange::Full
+    ) {
         YuvRange::Full
     } else {
         YuvRange::Limited
@@ -469,7 +471,10 @@ mod tests {
         let info = decoder.probe_info().expect("should probe");
         let gm = info.gain_map.expect("seine test file should have gain map");
         let av1_data = &gm.gain_map_data;
-        assert!(!av1_data.is_empty(), "gain map AV1 data should be non-empty");
+        assert!(
+            !av1_data.is_empty(),
+            "gain map AV1 data should be non-empty"
+        );
 
         // Decode the raw AV1 OBU data
         let (pixels, width, height, channels) =

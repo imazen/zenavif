@@ -12,6 +12,28 @@ use rgb::{RGB8, RGBA8, Rgb, Rgba};
 use rgb::{RGB16, RGBA16};
 use whereat::at;
 
+/// Pre-encoded gain map data for embedding in an AVIF file.
+///
+/// Contains a pre-encoded AV1 bitstream of the gain map image plus the
+/// ISO 21496-1 binary metadata. Used for UltraHDR / SDR+HDR tone mapping.
+///
+/// The gain map is typically a lower-resolution, monochrome or RGB image
+/// encoding the per-pixel gain needed to reconstruct the HDR rendition from
+/// the SDR base image.
+#[derive(Debug, Clone)]
+pub struct GainMapConfig {
+    /// Pre-encoded AV1 bitstream of the gain map image.
+    pub av1_data: Vec<u8>,
+    /// Width of the gain map image in pixels.
+    pub width: u32,
+    /// Height of the gain map image in pixels.
+    pub height: u32,
+    /// Bit depth of the gain map AV1 data (typically 8 or 10).
+    pub bit_depth: u8,
+    /// ISO 21496-1 binary metadata blob.
+    pub metadata: Vec<u8>,
+}
+
 /// Encoded AVIF image output
 #[derive(Debug, Clone)]
 pub struct EncodedImage {
@@ -131,6 +153,8 @@ pub struct EncoderConfig {
     pub(crate) matrix_coefficients: Option<u8>,
     /// Pixel range: full (0–255/0–1023) or limited/narrow (16–235/64–940)
     pub(crate) pixel_range: Option<EncodePixelRange>,
+    /// Pre-encoded gain map for UltraHDR / ISO 21496-1
+    pub(crate) gain_map: Option<GainMapConfig>,
     /// Enable AV1 quantization matrices (imazen/rav1e fork)
     #[cfg(feature = "encode-imazen")]
     pub(crate) enable_qm: bool,
@@ -169,6 +193,7 @@ impl Default for EncoderConfig {
             transfer_characteristics: None,
             matrix_coefficients: None,
             pixel_range: None,
+            gain_map: None,
             #[cfg(feature = "encode-imazen")]
             enable_qm: true,
             #[cfg(feature = "encode-imazen")]
@@ -314,6 +339,34 @@ impl EncoderConfig {
     /// that already uses studio levels (16–235 for 8-bit, 64–940 for 10-bit).
     pub fn pixel_range(mut self, range: EncodePixelRange) -> Self {
         self.pixel_range = Some(range);
+        self
+    }
+
+    /// Embed a pre-encoded gain map for UltraHDR / ISO 21496-1.
+    ///
+    /// The gain map enables SDR/HDR tone mapping: the primary image is the SDR
+    /// base, and the gain map allows reconstruction of the HDR rendition.
+    ///
+    /// * `av1_data` - Pre-encoded AV1 bitstream of the gain map image.
+    /// * `width` - Width of the gain map image in pixels.
+    /// * `height` - Height of the gain map image in pixels.
+    /// * `bit_depth` - Bit depth of the gain map AV1 data (typically 8 or 10).
+    /// * `metadata` - ISO 21496-1 binary metadata blob.
+    pub fn with_gain_map(
+        mut self,
+        av1_data: Vec<u8>,
+        width: u32,
+        height: u32,
+        bit_depth: u8,
+        metadata: Vec<u8>,
+    ) -> Self {
+        self.gain_map = Some(GainMapConfig {
+            av1_data,
+            width,
+            height,
+            bit_depth,
+            metadata,
+        });
         self
     }
 
@@ -487,6 +540,15 @@ fn build_ravif_encoder(config: &EncoderConfig) -> ravif::Encoder<'_> {
         enc = enc.with_pixel_range(match pr {
             EncodePixelRange::Full => ravif::PixelRange::Full,
             EncodePixelRange::Limited => ravif::PixelRange::Limited,
+        });
+    }
+    if let Some(ref gm) = config.gain_map {
+        enc = enc.with_gain_map(ravif::GainMapData {
+            av1_data: gm.av1_data.clone(),
+            width: gm.width,
+            height: gm.height,
+            bit_depth: gm.bit_depth,
+            metadata: gm.metadata.clone(),
         });
     }
     #[cfg(feature = "encode-imazen")]

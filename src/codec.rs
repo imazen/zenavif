@@ -138,6 +138,24 @@ impl AvifEncoderConfig {
         self
     }
 
+    /// Embed a pre-encoded gain map for UltraHDR / ISO 21496-1.
+    ///
+    /// See [`crate::EncoderConfig::with_gain_map`] for details.
+    #[must_use]
+    pub fn with_gain_map(
+        mut self,
+        av1_data: Vec<u8>,
+        width: u32,
+        height: u32,
+        bit_depth: u8,
+        metadata: Vec<u8>,
+    ) -> Self {
+        self.inner = self
+            .inner
+            .with_gain_map(av1_data, width, height, bit_depth, metadata);
+        self
+    }
+
     /// Convenience: encode RGB8 pixels with this config.
     pub fn encode_rgb8(&self, img: imgref::ImgRef<'_, Rgb<u8>>) -> Result<EncodeOutput, At<Error>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
