@@ -7,7 +7,7 @@
 
 use imgref::Img;
 use rgb::Rgb;
-use zenavif::{Av1Backend, EncoderConfig, encode_rgb8, decode_av1_obu};
+use zenavif::{Av1Backend, EncoderConfig, decode_av1_obu, encode_rgb8};
 
 fn make_4k_gradient() -> Img<Vec<Rgb<u8>>> {
     let w = 3840;
@@ -119,9 +119,18 @@ fn encode_4k_comparison_table() {
     let mpx = 3840.0 * 2160.0 / 1_000_000.0;
 
     eprintln!("\n  4K (3840x2160) encoding comparison:");
-    eprintln!("  {:>8} {:>3} {:>3} | {:>8} | {:>6} | {:>6} | {:>8}",
-        "backend", "q", "s", "bytes", "bpp", "sec", "Mpx/s");
-    eprintln!("  {}|{}|{}|{}|{}", "-".repeat(18), "-".repeat(10), "-".repeat(8), "-".repeat(8), "-".repeat(10));
+    eprintln!(
+        "  {:>8} {:>3} {:>3} | {:>8} | {:>6} | {:>6} | {:>8}",
+        "backend", "q", "s", "bytes", "bpp", "sec", "Mpx/s"
+    );
+    eprintln!(
+        "  {}|{}|{}|{}|{}",
+        "-".repeat(18),
+        "-".repeat(10),
+        "-".repeat(8),
+        "-".repeat(8),
+        "-".repeat(10)
+    );
 
     for &(backend, name) in &[(Av1Backend::Zenravif, "rav1e"), (Av1Backend::Svtav1, "svt")] {
         for &q in &[40.0f32, 70.0] {
@@ -133,7 +142,13 @@ fn encode_4k_comparison_table() {
             let mpxs = mpx / secs;
             eprintln!(
                 "  {:>8} {:>3.0} {:>3} | {:>8} | {:>5.3} | {:>5.1}s | {:>7.2}",
-                name, q, 10, result.avif_file.len(), bpp, secs, mpxs
+                name,
+                q,
+                10,
+                result.avif_file.len(),
+                bpp,
+                secs,
+                mpxs
             );
         }
     }
@@ -145,9 +160,18 @@ fn encode_2k_1080p_comparison() {
     let mpx = 1920.0 * 1080.0 / 1_000_000.0;
 
     eprintln!("\n  1080p (1920x1080) encoding comparison:");
-    eprintln!("  {:>8} {:>3} {:>3} | {:>8} | {:>6} | {:>6} | {:>8}",
-        "backend", "q", "s", "bytes", "bpp", "sec", "Mpx/s");
-    eprintln!("  {}|{}|{}|{}|{}", "-".repeat(18), "-".repeat(10), "-".repeat(8), "-".repeat(8), "-".repeat(10));
+    eprintln!(
+        "  {:>8} {:>3} {:>3} | {:>8} | {:>6} | {:>6} | {:>8}",
+        "backend", "q", "s", "bytes", "bpp", "sec", "Mpx/s"
+    );
+    eprintln!(
+        "  {}|{}|{}|{}|{}",
+        "-".repeat(18),
+        "-".repeat(10),
+        "-".repeat(8),
+        "-".repeat(8),
+        "-".repeat(10)
+    );
 
     for &(backend, name) in &[(Av1Backend::Zenravif, "rav1e"), (Av1Backend::Svtav1, "svt")] {
         for &q in &[50.0f32, 80.0] {
@@ -160,7 +184,13 @@ fn encode_2k_1080p_comparison() {
                 let mpxs = mpx / secs;
                 eprintln!(
                     "  {:>8} {:>3.0} {:>3} | {:>8} | {:>5.3} | {:>5.1}s | {:>7.2}",
-                    name, q, s, result.avif_file.len(), bpp, secs, mpxs
+                    name,
+                    q,
+                    s,
+                    result.avif_file.len(),
+                    bpp,
+                    secs,
+                    mpxs
                 );
             }
         }

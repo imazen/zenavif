@@ -617,10 +617,7 @@ pub fn encode_rgb8(
 
 /// Encode an 8-bit RGB image using the svtav1-rs backend.
 #[cfg(feature = "encode-svtav1")]
-fn encode_rgb8_svtav1(
-    img: ImgRef<'_, Rgb<u8>>,
-    config: &EncoderConfig,
-) -> Result<EncodedImage> {
+fn encode_rgb8_svtav1(img: ImgRef<'_, Rgb<u8>>, config: &EncoderConfig) -> Result<EncodedImage> {
     let w = img.width();
     let h = img.height();
 
@@ -640,8 +637,12 @@ fn encode_rgb8_svtav1(
 
     // Set bit depth
     match config.bit_depth {
-        EncodeBitDepth::Ten => { enc = enc.with_bit_depth(10); }
-        EncodeBitDepth::Eight => { enc = enc.with_bit_depth(8); }
+        EncodeBitDepth::Ten => {
+            enc = enc.with_bit_depth(10);
+        }
+        EncodeBitDepth::Eight => {
+            enc = enc.with_bit_depth(8);
+        }
         _ => {}
     }
 

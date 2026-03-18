@@ -7,7 +7,7 @@
 
 use imgref::Img;
 use rgb::Rgb;
-use zenavif::{Av1Backend, EncoderConfig, encode_rgb8, decode_av1_obu};
+use zenavif::{Av1Backend, EncoderConfig, decode_av1_obu, encode_rgb8};
 
 /// Create a gradient test image of given dimensions.
 fn make_gradient(w: usize, h: usize) -> Img<Vec<Rgb<u8>>> {
@@ -54,7 +54,9 @@ fn psnr_rgb(a: &[Rgb<u8>], b: &[Rgb<u8>]) -> f64 {
         sse += d * d;
     }
     let mse = sse / a.len() as f64;
-    if mse < 0.01 { return 99.0; }
+    if mse < 0.01 {
+        return 99.0;
+    }
     10.0 * (255.0_f64 * 255.0 / mse).log10()
 }
 
@@ -126,8 +128,14 @@ fn compression_efficiency_comparison() {
         );
 
         // Both should produce reasonable output
-        assert!(result_r.avif_file.len() > 50, "zenravif q={quality}: too small");
-        assert!(result_s.avif_file.len() > 50, "svtav1 q={quality}: too small");
+        assert!(
+            result_r.avif_file.len() > 50,
+            "zenravif q={quality}: too small"
+        );
+        assert!(
+            result_s.avif_file.len() > 50,
+            "svtav1 q={quality}: too small"
+        );
     }
 }
 
@@ -183,7 +191,10 @@ fn svtav1_output_has_valid_obu_structure() {
     let forbidden = data[0] >> 7;
     assert_eq!(forbidden, 0, "forbidden bit must be 0");
     let obu_type = (data[0] >> 3) & 0xF;
-    assert_eq!(obu_type, 2, "first OBU should be Temporal Delimiter (type 2)");
+    assert_eq!(
+        obu_type, 2,
+        "first OBU should be Temporal Delimiter (type 2)"
+    );
 
     eprintln!("svtav1 OBU output: {} bytes, valid TD header", data.len());
 }
@@ -228,13 +239,13 @@ fn various_image_sizes_both_backends() {
                 Av1Backend::Zenravif => "zenravif",
                 Av1Backend::Svtav1 => "svtav1",
             };
-            let config = EncoderConfig::new().backend(backend).quality(60.0).speed(10);
+            let config = EncoderConfig::new()
+                .backend(backend)
+                .quality(60.0)
+                .speed(10);
             let result = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable)
                 .unwrap_or_else(|e| panic!("{name} {w}x{h}: {e}"));
-            assert!(
-                !result.avif_file.is_empty(),
-                "{name} {w}x{h}: empty output"
-            );
+            assert!(!result.avif_file.is_empty(), "{name} {w}x{h}: empty output");
         }
     }
 }
@@ -258,7 +269,10 @@ fn svtav1_decode_roundtrip_gradient() {
         Ok((pixels, w, h, channels)) => {
             eprintln!(
                 "Decoded: {}x{}, {} channels, {} pixels",
-                w, h, channels, pixels.len()
+                w,
+                h,
+                channels,
+                pixels.len()
             );
             assert!(w > 0 && h > 0, "decoded dimensions should be positive");
             assert!(!pixels.is_empty(), "decoded pixels should be non-empty");
@@ -266,9 +280,7 @@ fn svtav1_decode_roundtrip_gradient() {
         Err(e) => {
             // Expected: svtav1 bitstream may not be fully dav1d-conformant yet.
             // This test documents the current conformance status.
-            eprintln!(
-                "Decode failed (expected — svtav1 bitstream not yet fully conformant): {e}"
-            );
+            eprintln!("Decode failed (expected — svtav1 bitstream not yet fully conformant): {e}");
         }
     }
 }
@@ -285,8 +297,8 @@ fn zenravif_decode_roundtrip_success() {
         .expect("zenravif encode should succeed");
 
     // zenravif output is AVIF container — decode with the full decoder
-    let decoded = zenavif::decode(&encoded.avif_file)
-        .expect("zenravif AVIF should decode successfully");
+    let decoded =
+        zenavif::decode(&encoded.avif_file).expect("zenravif AVIF should decode successfully");
 
     eprintln!(
         "zenravif roundtrip: encoded {} bytes, decoded {}x{}",

@@ -7,7 +7,7 @@
 
 use imgref::Img;
 use rgb::Rgb;
-use zenavif::{Av1Backend, EncoderConfig, encode_rgb8, decode_av1_obu};
+use zenavif::{Av1Backend, EncoderConfig, decode_av1_obu, encode_rgb8};
 
 // =============================================================================
 // Test image generators
@@ -65,21 +65,32 @@ fn make_edges(w: usize, h: usize) -> Img<Vec<Rgb<u8>>> {
 
 /// Compute luma PSNR between source and decoded grayscale pixels.
 fn psnr_luma(source: &[Rgb<u8>], decoded: &[u8], channels: u8) -> f64 {
-    let n = source.len().min(if channels == 1 { decoded.len() } else { decoded.len() / 3 });
-    if n == 0 { return 0.0; }
+    let n = source.len().min(if channels == 1 {
+        decoded.len()
+    } else {
+        decoded.len() / 3
+    });
+    if n == 0 {
+        return 0.0;
+    }
     let mut sse = 0.0f64;
     for i in 0..n {
-        let src_y = 0.2126 * source[i].r as f64 + 0.7152 * source[i].g as f64 + 0.0722 * source[i].b as f64;
+        let src_y =
+            0.2126 * source[i].r as f64 + 0.7152 * source[i].g as f64 + 0.0722 * source[i].b as f64;
         let dec_y = if channels == 1 {
             decoded[i] as f64
         } else {
-            0.2126 * decoded[i * 3] as f64 + 0.7152 * decoded[i * 3 + 1] as f64 + 0.0722 * decoded[i * 3 + 2] as f64
+            0.2126 * decoded[i * 3] as f64
+                + 0.7152 * decoded[i * 3 + 1] as f64
+                + 0.0722 * decoded[i * 3 + 2] as f64
         };
         let d = src_y - dec_y;
         sse += d * d;
     }
     let mse = sse / n as f64;
-    if mse < 0.01 { return 99.0; }
+    if mse < 0.01 {
+        return 99.0;
+    }
     10.0 * (255.0 * 255.0 / mse).log10()
 }
 
@@ -101,7 +112,10 @@ fn large_512x512_both_backends() {
             .unwrap_or_else(|e| panic!("{name} 512x512: {e}"));
         let ms = start.elapsed().as_secs_f64() * 1000.0;
         let bpp = result.avif_file.len() as f64 * 8.0 / (512.0 * 512.0);
-        eprintln!("  {name} 512x512: {} bytes ({bpp:.2} bpp), {ms:.0}ms", result.avif_file.len());
+        eprintln!(
+            "  {name} 512x512: {} bytes ({bpp:.2} bpp), {ms:.0}ms",
+            result.avif_file.len()
+        );
         assert!(result.avif_file.len() > 100);
     }
 }
@@ -118,7 +132,10 @@ fn large_1024x768_svtav1_tiles() {
         .expect("svtav1 1024x768 should succeed");
     let ms = start.elapsed().as_secs_f64() * 1000.0;
     let bpp = result.avif_file.len() as f64 * 8.0 / (1024.0 * 768.0);
-    eprintln!("  svtav1 1024x768: {} bytes ({bpp:.2} bpp), {ms:.0}ms", result.avif_file.len());
+    eprintln!(
+        "  svtav1 1024x768: {} bytes ({bpp:.2} bpp), {ms:.0}ms",
+        result.avif_file.len()
+    );
     assert!(result.avif_file.len() > 500);
 }
 
@@ -133,7 +150,10 @@ fn size_quality_tradeoff_zenravif() {
     eprintln!("  quality | bytes  | bpp");
     eprintln!("  --------|--------|-----");
     for q in [20.0f32, 40.0, 60.0, 80.0, 95.0] {
-        let config = EncoderConfig::new().backend(Av1Backend::Zenravif).quality(q).speed(8);
+        let config = EncoderConfig::new()
+            .backend(Av1Backend::Zenravif)
+            .quality(q)
+            .speed(8);
         let result = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
         let bpp = result.avif_file.len() as f64 * 8.0 / (256.0 * 256.0);
         eprintln!("  {:>5.0}   | {:>6} | {bpp:.2}", q, result.avif_file.len());
@@ -147,7 +167,10 @@ fn size_quality_tradeoff_svtav1() {
     eprintln!("  quality | bytes  | bpp");
     eprintln!("  --------|--------|-----");
     for q in [20.0f32, 40.0, 60.0, 80.0, 95.0] {
-        let config = EncoderConfig::new().backend(Av1Backend::Svtav1).quality(q).speed(8);
+        let config = EncoderConfig::new()
+            .backend(Av1Backend::Svtav1)
+            .quality(q)
+            .speed(8);
         let result = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
         let bpp = result.avif_file.len() as f64 * 8.0 / (256.0 * 256.0);
         eprintln!("  {:>5.0}   | {:>6} | {bpp:.2}", q, result.avif_file.len());
@@ -161,14 +184,20 @@ fn size_quality_tradeoff_svtav1() {
 #[test]
 fn svtav1_decode_psnr_gradient() {
     let img = make_gradient(128, 128);
-    let config = EncoderConfig::new().backend(Av1Backend::Svtav1).quality(70.0).speed(8);
+    let config = EncoderConfig::new()
+        .backend(Av1Backend::Svtav1)
+        .quality(70.0)
+        .speed(8);
     let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
 
     match decode_av1_obu(&encoded.avif_file) {
         Ok((pixels, w, h, ch)) => {
             let source: Vec<Rgb<u8>> = img.pixels().collect();
             let p = psnr_luma(&source, &pixels, ch);
-            eprintln!("  svtav1 gradient 128x128 q=70: decoded {w}x{h}x{ch}, PSNR={p:.1} dB, {} bytes", encoded.avif_file.len());
+            eprintln!(
+                "  svtav1 gradient 128x128 q=70: decoded {w}x{h}x{ch}, PSNR={p:.1} dB, {} bytes",
+                encoded.avif_file.len()
+            );
             assert!(p > 15.0, "PSNR {p:.1} too low — encoding or decoding issue");
         }
         Err(e) => {
@@ -180,14 +209,20 @@ fn svtav1_decode_psnr_gradient() {
 #[test]
 fn svtav1_decode_psnr_edges() {
     let img = make_edges(128, 128);
-    let config = EncoderConfig::new().backend(Av1Backend::Svtav1).quality(80.0).speed(6);
+    let config = EncoderConfig::new()
+        .backend(Av1Backend::Svtav1)
+        .quality(80.0)
+        .speed(6);
     let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
 
     match decode_av1_obu(&encoded.avif_file) {
         Ok((pixels, w, h, ch)) => {
             let source: Vec<Rgb<u8>> = img.pixels().collect();
             let p = psnr_luma(&source, &pixels, ch);
-            eprintln!("  svtav1 edges 128x128 q=80: decoded {w}x{h}x{ch}, PSNR={p:.1} dB, {} bytes", encoded.avif_file.len());
+            eprintln!(
+                "  svtav1 edges 128x128 q=80: decoded {w}x{h}x{ch}, PSNR={p:.1} dB, {} bytes",
+                encoded.avif_file.len()
+            );
         }
         Err(e) => {
             eprintln!("  svtav1 edges decode failed: {e}");
@@ -198,13 +233,19 @@ fn svtav1_decode_psnr_edges() {
 #[test]
 fn svtav1_decode_large_512x384() {
     let img = make_gradient(512, 384);
-    let config = EncoderConfig::new().backend(Av1Backend::Svtav1).quality(60.0).speed(10);
+    let config = EncoderConfig::new()
+        .backend(Av1Backend::Svtav1)
+        .quality(60.0)
+        .speed(10);
     let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
 
     match decode_av1_obu(&encoded.avif_file) {
         Ok((pixels, w, h, ch)) => {
-            eprintln!("  svtav1 512x384 decoded: {w}x{h}x{ch}, {} decoded pixels, {} encoded bytes",
-                pixels.len(), encoded.avif_file.len());
+            eprintln!(
+                "  svtav1 512x384 decoded: {w}x{h}x{ch}, {} decoded pixels, {} encoded bytes",
+                pixels.len(),
+                encoded.avif_file.len()
+            );
             assert!(w >= 512 && h >= 384);
             assert!(!pixels.is_empty());
         }
@@ -245,12 +286,23 @@ fn comprehensive_all_configs() {
                     match encode_rgb8(img.as_ref(), &config, &enough::Unstoppable) {
                         Ok(r) => {
                             let ms = start.elapsed().as_secs_f64() * 1000.0;
-                            eprintln!("  {:>5} {:>4}x{:<4} q{:<3.0} s{:<2} | {:>7} | {:>6.0}ms",
-                                name, w, h, q, s, r.avif_file.len(), ms);
+                            eprintln!(
+                                "  {:>5} {:>4}x{:<4} q{:<3.0} s{:<2} | {:>7} | {:>6.0}ms",
+                                name,
+                                w,
+                                h,
+                                q,
+                                s,
+                                r.avif_file.len(),
+                                ms
+                            );
                             pass += 1;
                         }
                         Err(e) => {
-                            eprintln!("  {:>5} {:>4}x{:<4} q{:<3.0} s{:<2} | FAIL: {e}", name, w, h, q, s);
+                            eprintln!(
+                                "  {:>5} {:>4}x{:<4} q{:<3.0} s{:<2} | FAIL: {e}",
+                                name, w, h, q, s
+                            );
                             fail += 1;
                         }
                     }
