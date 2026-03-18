@@ -516,6 +516,42 @@ pub struct AvifGainMap {
     pub alt_color_info: Option<ColorInformation>,
 }
 
+/// Depth auxiliary image extracted from an AVIF container.
+///
+/// AVIF supports auxiliary images via `auxl` item references with `auxC` type
+/// properties, following the HEIF (ISO 23008-12) auxiliary image mechanism.
+/// Depth maps use the auxiliary type URN
+/// `urn:mpeg:mpegB:cicp:systems:auxiliary:depth` (MPEG-B Part 23) or the
+/// legacy HEVC-style `urn:mpeg:hevc:2015:auxid:2`.
+///
+/// The `data` field contains a raw AV1 bitstream that can be decoded with
+/// any AV1 decoder to obtain the depth image pixel values (typically
+/// monochrome 8-bit or 10-bit).
+///
+/// # Example
+///
+/// ```no_run
+/// let bytes = std::fs::read("portrait.avif").unwrap();
+/// let parser = zenavif_parse::AvifParser::from_bytes(&bytes).unwrap();
+/// if let Some(Ok(dm)) = parser.depth_map() {
+///     println!("Depth map: {}x{}, {} bytes AV1 data", dm.width, dm.height, dm.data.len());
+/// }
+/// ```
+#[derive(Debug, Clone)]
+pub struct AvifDepthMap {
+    /// Raw AV1 bitstream of the depth auxiliary image. Decode with an AV1
+    /// decoder to obtain grayscale depth pixel values.
+    pub data: std::vec::Vec<u8>,
+    /// Width of the depth image in pixels (from `ispe` property).
+    pub width: u32,
+    /// Height of the depth image in pixels (from `ispe` property).
+    pub height: u32,
+    /// AV1 codec configuration for the depth item (from `av1C` property).
+    pub av1_config: Option<AV1Config>,
+    /// Color information for the depth item (from `colr` property), if present.
+    pub color_info: Option<ColorInformation>,
+}
+
 /// Operating point selector from the `a1op` property box.
 ///
 /// Selects which AV1 operating point to decode for multi-operating-point images.
@@ -909,6 +945,21 @@ pub struct AvifData {
     /// Color information for the alternate (HDR) rendition from the `tmap` item.
     pub gain_map_color_info: Option<ColorInformation>,
 
+    /// Depth auxiliary image data, if present.
+    pub depth_item: Option<TryVec<u8>>,
+
+    /// Width of the depth auxiliary image (from `ispe`).
+    pub depth_width: u32,
+
+    /// Height of the depth auxiliary image (from `ispe`).
+    pub depth_height: u32,
+
+    /// AV1 codec configuration for the depth auxiliary item.
+    pub depth_av1_config: Option<AV1Config>,
+
+    /// Color information for the depth auxiliary item.
+    pub depth_color_info: Option<ColorInformation>,
+
     /// Major brand from the `ftyp` box (e.g., `*b"avif"` or `*b"avis"`).
     pub major_brand: [u8; 4],
 
@@ -930,6 +981,21 @@ impl AvifData {
             metadata,
             gain_map_data,
             alt_color_info: self.gain_map_color_info.clone(),
+        })
+    }
+
+    /// Get the depth auxiliary image bundle, if present.
+    ///
+    /// Returns [`AvifDepthMap`] with the raw AV1 depth data, dimensions,
+    /// and codec/color info. Returns `None` if no depth auxiliary is present.
+    pub fn depth_map(&self) -> Option<AvifDepthMap> {
+        let data = self.depth_item.as_ref()?.to_vec();
+        Some(AvifDepthMap {
+            data,
+            width: self.depth_width,
+            height: self.depth_height,
+            av1_config: self.depth_av1_config.clone(),
+            color_info: self.depth_color_info.clone(),
         })
     }
 }
@@ -1123,6 +1189,11 @@ pub struct AvifParser<'data> {
     gain_map_metadata: Option<GainMapMetadata>,
     gain_map: Option<ItemExtents>,
     gain_map_color_info: Option<ColorInformation>,
+    depth_item: Option<ItemExtents>,
+    depth_width: u32,
+    depth_height: u32,
+    depth_av1_config: Option<AV1Config>,
+    depth_color_info: Option<ColorInformation>,
     major_brand: [u8; 4],
     compatible_brands: std::vec::Vec<[u8; 4]>,
 }
@@ -1342,6 +1413,11 @@ impl<'data> AvifParser<'data> {
                 gain_map_metadata: None,
                 gain_map: None,
                 gain_map_color_info: None,
+                depth_item: None,
+                depth_width: 0,
+                depth_height: 0,
+                depth_av1_config: None,
+                depth_color_info: None,
                 major_brand: parsed.major_brand,
                 compatible_brands: parsed.compatible_brands,
             });
@@ -1384,6 +1460,74 @@ impl<'data> AvifParser<'data> {
                     && iref.item_type == b"prem"
             })
         });
+
+        // Find depth auxiliary item (auxl reference with depth auxC type)
+        let depth_item_id = meta
+            .item_references
+            .iter()
+            .filter(|iref| {
+                iref.to_item_id == meta.primary_item_id
+                    && iref.from_item_id != meta.primary_item_id
+                    && iref.item_type == b"auxl"
+            })
+            .map(|iref| iref.from_item_id)
+            .find(|&item_id| {
+                // Skip the alpha item if we already found one
+                if alpha_item_id == Some(item_id) {
+                    return false;
+                }
+                meta.properties.iter().any(|prop| {
+                    prop.item_id == item_id
+                        && match &prop.property {
+                            ItemProperty::AuxiliaryType(urn) => {
+                                is_depth_auxiliary_urn(urn.type_subtype().0)
+                            }
+                            _ => false,
+                        }
+                })
+            });
+
+        let (depth_item, depth_width, depth_height, depth_av1_config, depth_color_info) =
+            if let Some(depth_id) = depth_item_id {
+                let extents = Self::get_item_extents(&meta, depth_id)?;
+                // Get dimensions from ispe property
+                let dims = meta.properties.iter().find_map(|p| {
+                    if p.item_id == depth_id {
+                        match &p.property {
+                            ItemProperty::ImageSpatialExtents(e) => Some((e.width, e.height)),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                });
+                let (w, h) = dims.unwrap_or((0, 0));
+                // Get av1C property
+                let av1c = meta.properties.iter().find_map(|p| {
+                    if p.item_id == depth_id {
+                        match &p.property {
+                            ItemProperty::AV1Config(c) => Some(c.clone()),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                });
+                // Get colr property
+                let colr = meta.properties.iter().find_map(|p| {
+                    if p.item_id == depth_id {
+                        match &p.property {
+                            ItemProperty::ColorInformation(c) => Some(c.clone()),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                });
+                (Some(extents), w, h, av1c, colr)
+            } else {
+                (None, 0, 0, None, None)
+            };
 
         // Find EXIF/XMP items linked via cdsc references to the primary item
         let mut exif_item = None;
@@ -1581,6 +1725,11 @@ impl<'data> AvifParser<'data> {
             gain_map_metadata,
             gain_map,
             gain_map_color_info,
+            depth_item,
+            depth_width,
+            depth_height,
+            depth_av1_config,
+            depth_color_info,
             major_brand: parsed.major_brand,
             compatible_brands: parsed.compatible_brands,
         })
@@ -2093,6 +2242,50 @@ impl<'data> AvifParser<'data> {
         }))
     }
 
+    /// Check if a depth auxiliary image is present.
+    ///
+    /// Returns `true` if the AVIF container has an `auxl`-linked item with
+    /// a depth auxiliary type URN.
+    pub fn has_depth_map(&self) -> bool {
+        self.depth_item.is_some()
+    }
+
+    /// Get the raw AV1 bitstream of the depth auxiliary image, if present.
+    pub fn depth_map_data(&self) -> Option<Result<Cow<'_, [u8]>>> {
+        self.depth_item.as_ref().map(|item| self.resolve_item(item))
+    }
+
+    /// Get the full depth map bundle, if a depth auxiliary image is present.
+    ///
+    /// Returns [`AvifDepthMap`] containing the raw AV1 depth image data,
+    /// dimensions, codec config, and color info. Returns `None` if no depth
+    /// auxiliary is present, or `Some(Err(..))` if the data cannot be resolved.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// let bytes = std::fs::read("portrait.avif").unwrap();
+    /// let parser = zenavif_parse::AvifParser::from_bytes(&bytes).unwrap();
+    /// if let Some(Ok(dm)) = parser.depth_map() {
+    ///     println!("Depth: {}x{}, {} bytes", dm.width, dm.height, dm.data.len());
+    /// }
+    /// ```
+    pub fn depth_map(&self) -> Option<Result<AvifDepthMap>> {
+        let data_extents = self.depth_item.as_ref()?;
+        let av1_config = self.depth_av1_config.clone();
+        let color_info = self.depth_color_info.clone();
+        let width = self.depth_width;
+        let height = self.depth_height;
+
+        Some(self.resolve_item(data_extents).map(|data| AvifDepthMap {
+            data: data.into_owned(),
+            width,
+            height,
+            av1_config,
+            color_info,
+        }))
+    }
+
     /// Get the major brand from the `ftyp` box (e.g., `*b"avif"` or `*b"avis"`).
     pub fn major_brand(&self) -> &[u8; 4] {
         &self.major_brand
@@ -2204,6 +2397,15 @@ impl<'data> AvifParser<'data> {
                 v
             }),
             gain_map_color_info: self.gain_map_color_info.clone(),
+            depth_item: self.depth_map_data().and_then(|r| r.ok()).map(|c| {
+                let mut v = TryVec::new();
+                let _ = v.extend_from_slice(&c);
+                v
+            }),
+            depth_width: self.depth_width,
+            depth_height: self.depth_height,
+            depth_av1_config: self.depth_av1_config.clone(),
+            depth_color_info: self.depth_color_info.clone(),
             major_brand: self.major_brand,
             compatible_brands: self.compatible_brands.clone(),
         })
@@ -3190,6 +3392,77 @@ pub fn read_avif_with_config<T: Read>(
         }
     }
 
+    // Extract depth auxiliary image
+    {
+        let depth_item_id = meta
+            .item_references
+            .iter()
+            .filter(|iref| {
+                iref.to_item_id == meta.primary_item_id
+                    && iref.from_item_id != meta.primary_item_id
+                    && iref.item_type == b"auxl"
+            })
+            .map(|iref| iref.from_item_id)
+            .find(|&item_id| {
+                if alpha_item_id == Some(item_id) {
+                    return false;
+                }
+                meta.properties.iter().any(|prop| {
+                    prop.item_id == item_id
+                        && match &prop.property {
+                            ItemProperty::AuxiliaryType(urn) => {
+                                is_depth_auxiliary_urn(urn.type_subtype().0)
+                            }
+                            _ => false,
+                        }
+                })
+            });
+
+        if let Some(depth_id) = depth_item_id {
+            if let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == depth_id) {
+                let mut depth_data = TryVec::new();
+                extract_item_data(loc, &mut depth_data)?;
+                context.depth_item = Some(depth_data);
+            }
+            // Get dimensions from ispe
+            if let Some((w, h)) = meta.properties.iter().find_map(|p| {
+                if p.item_id == depth_id {
+                    match &p.property {
+                        ItemProperty::ImageSpatialExtents(e) => Some((e.width, e.height)),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            }) {
+                context.depth_width = w;
+                context.depth_height = h;
+            }
+            // Get av1C
+            context.depth_av1_config = meta.properties.iter().find_map(|p| {
+                if p.item_id == depth_id {
+                    match &p.property {
+                        ItemProperty::AV1Config(c) => Some(c.clone()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            });
+            // Get colr
+            context.depth_color_info = meta.properties.iter().find_map(|p| {
+                if p.item_id == depth_id {
+                    match &p.property {
+                        ItemProperty::ColorInformation(c) => Some(c.clone()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            });
+        }
+    }
+
     // Extract animation frames if this is an animated AVIF
     if let Some(anim) = animation_data {
         let frame_count = anim.color_sample_table.sample_sizes.len() as u32;
@@ -3866,6 +4139,16 @@ fn read_auxc<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
     let aux_data = src.read_into_try_vec()?;
 
     Ok(AuxiliaryTypeProperty { aux_data })
+}
+
+/// Check if an auxiliary type URN identifies a depth auxiliary image.
+///
+/// Recognizes two standard URNs:
+/// - `urn:mpeg:mpegB:cicp:systems:auxiliary:depth` (MPEG-B Part 23 / ISO 23091-2)
+/// - `urn:mpeg:hevc:2015:auxid:2` (HEVC-style, auxid 2 = depth)
+fn is_depth_auxiliary_urn(urn: &[u8]) -> bool {
+    urn == b"urn:mpeg:mpegB:cicp:systems:auxiliary:depth"
+        || urn == b"urn:mpeg:hevc:2015:auxid:2"
 }
 
 /// Parse an AV1 Codec Configuration property box

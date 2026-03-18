@@ -1747,3 +1747,104 @@ fn eager_gain_map_convenience() {
     assert!(gm.metadata.is_multichannel);
     assert!(!gm.gain_map_data.is_empty());
 }
+
+// ============================================================================
+// Depth auxiliary image tests
+// ============================================================================
+
+/// Detect depth auxiliary presence from the `auxl` + `auxC(depth)` item.
+#[test]
+fn parser_depth_map_present() {
+    let bytes = std::fs::read(ANIM_8BPC_DEPTH).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse");
+
+    assert!(
+        parser.has_depth_map(),
+        "depth file should have a depth auxiliary item"
+    );
+}
+
+/// Parse depth auxC URN and extract depth AV1 data.
+#[test]
+fn parser_depth_map_extract() {
+    let bytes = std::fs::read(ANIM_8BPC_DEPTH).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse");
+
+    let dm = parser
+        .depth_map()
+        .expect("depth_map() should be Some")
+        .expect("depth data should resolve");
+
+    assert!(!dm.data.is_empty(), "depth AV1 data should not be empty");
+    assert!(dm.width > 0, "depth width should be positive");
+    assert!(dm.height > 0, "depth height should be positive");
+    // AV1 bitstream starts with an OBU header
+    assert_ne!(dm.data.len(), 0);
+}
+
+/// Normal images gracefully return None for depth map.
+#[test]
+fn parser_no_depth_map_on_normal_image() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse");
+
+    assert!(
+        !parser.has_depth_map(),
+        "normal images should not have a depth map"
+    );
+    assert!(
+        parser.depth_map().is_none(),
+        "depth_map() should return None for normal images"
+    );
+}
+
+/// Gain map and depth can coexist (gain map absent, depth present here).
+#[test]
+fn parser_depth_without_gain_map() {
+    let bytes = std::fs::read(ANIM_8BPC_DEPTH).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse");
+
+    assert!(parser.has_depth_map(), "should have depth");
+    assert!(
+        parser.gain_map().is_none(),
+        "depth file should not have a gain map"
+    );
+}
+
+/// Verify depth map through the eager AvifData path.
+#[cfg(feature = "eager")]
+#[test]
+fn eager_depth_map_present() {
+    let bytes = std::fs::read(ANIM_8BPC_DEPTH).expect("read file");
+    let input = &mut std::io::Cursor::new(&bytes);
+    #[allow(deprecated)]
+    let avif = zenavif_parse::read_avif(input).expect("read_avif");
+
+    let dm = avif.depth_map().expect("AvifData::depth_map() should be Some");
+    assert!(!dm.data.is_empty(), "depth data should not be empty");
+    assert!(dm.width > 0);
+    assert!(dm.height > 0);
+}
+
+/// Verify depth map via to_avif_data() roundtrip.
+#[cfg(feature = "eager")]
+#[test]
+fn parser_to_avif_data_has_depth() {
+    let bytes = std::fs::read(ANIM_8BPC_DEPTH).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse");
+
+    #[allow(deprecated)]
+    let avif = parser.to_avif_data().expect("to_avif_data");
+
+    let dm = avif.depth_map().expect("depth_map() should be Some after roundtrip");
+    assert!(!dm.data.is_empty());
+
+    // Compare with direct parser extraction
+    let parser_dm = parser
+        .depth_map()
+        .expect("parser depth_map")
+        .expect("resolve");
+    assert_eq!(dm.data, parser_dm.data);
+    assert_eq!(dm.width, parser_dm.width);
+    assert_eq!(dm.height, parser_dm.height);
+}
