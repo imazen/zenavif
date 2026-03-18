@@ -1864,6 +1864,11 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
         if let Some(gm) = native_info.gain_map {
             output = output.with_extras(gm);
         }
+        // Attach depth map as typed extras so callers can retrieve it via
+        // `output.extras::<zenavif_parse::AvifDepthMap>()`.
+        if let Some(dm) = native_info.depth_map {
+            output = output.with_extras(dm);
+        }
         Ok(output)
     }
 }

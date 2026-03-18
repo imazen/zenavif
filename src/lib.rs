@@ -115,10 +115,10 @@ pub use encoder::{
 pub use enough::{Stop, StopReason, Unstoppable};
 pub use error::{Error, Result};
 pub use image::{
-    AvifGainMap, ChromaSampling, CleanAperture, ColorPrimaries, ColorRange, ContentLightLevel,
-    DecodedAnimation, DecodedAnimationInfo, DecodedFrame, GainMapChannel, GainMapMetadata,
-    ImageInfo, ImageMirror, ImageRotation, MasteringDisplayColourVolume, MatrixCoefficients,
-    PixelAspectRatio, TransferCharacteristics,
+    AvifDepthMap, AvifGainMap, ChromaSampling, CleanAperture, ColorPrimaries, ColorRange,
+    ContentLightLevel, DecodedAnimation, DecodedAnimationInfo, DecodedFrame, GainMapChannel,
+    GainMapMetadata, ImageInfo, ImageMirror, ImageRotation, MasteringDisplayColourVolume,
+    MatrixCoefficients, PixelAspectRatio, TransferCharacteristics,
 };
 pub use zenpixels::PixelBuffer;
 

@@ -1,8 +1,8 @@
 //! AVIF image metadata types
 
 pub use zenavif_parse::{
-    AvifGainMap, CleanAperture, ContentLightLevel, GainMapChannel, GainMapMetadata, ImageMirror,
-    ImageRotation, MasteringDisplayColourVolume, PixelAspectRatio,
+    AvifDepthMap, AvifGainMap, CleanAperture, ContentLightLevel, GainMapChannel, GainMapMetadata,
+    ImageMirror, ImageRotation, MasteringDisplayColourVolume, PixelAspectRatio,
 };
 
 /// Chroma subsampling format
@@ -141,6 +141,12 @@ pub struct ImageInfo {
     /// The `gain_map_data` field is a raw AV1 bitstream that can be decoded
     /// separately with an AV1 decoder.
     pub gain_map: Option<AvifGainMap>,
+    /// Depth auxiliary image, if present.
+    ///
+    /// Present when the AVIF file contains an `auxl`-linked item with a depth
+    /// auxiliary type (`auxC` property matching the MPEG-B depth URN).
+    /// The `data` field is a raw AV1 bitstream that can be decoded separately.
+    pub depth_map: Option<AvifDepthMap>,
 }
 
 /// A single decoded frame from an animated AVIF sequence.
@@ -198,6 +204,7 @@ impl Default for ImageInfo {
             exif: None,
             xmp: None,
             gain_map: None,
+            depth_map: None,
         }
     }
 }

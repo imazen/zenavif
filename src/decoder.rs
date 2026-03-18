@@ -555,6 +555,7 @@ impl AvifDecoder {
             exif: None,
             xmp: None,
             gain_map: None,
+            depth_map: None,
         };
 
         // Check frame size limit
