@@ -34,6 +34,7 @@ zencodec = { path = "../zencodec", version = "0.1" }
 zenpixels = { path = "../zenpixels/zenpixels", default-features = false }
 zenpixels-convert = { path = "../zenpixels/zenpixels-convert", default-features = false, features = ["rgb"] }
 linear-srgb = "0.6.3"
+zenode = { path = "../zenode/zenode", default-features = false, features = ["derive"], optional = true }
 
 [dev-dependencies]
 archmage = { version = "0.9.8", features = ["std"] }
@@ -113,6 +114,8 @@ encode-imazen = ["encode", "ravif/imazen"]
 encode-svtav1 = ["encode", "dep:svtav1"]
 # Enable zencodec trait integration
 zencodec = []
+# zenode pipeline node definitions
+zenode = ["dep:zenode"]
 # Expose internal YUV conversion modules for profiling/debugging. Not public API.
 _dev = []
 

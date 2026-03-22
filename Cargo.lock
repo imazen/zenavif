@@ -1823,6 +1823,7 @@ dependencies = [
  "yuv",
  "zenavif-parse",
  "zencodec",
+ "zenode",
  "zenpixels",
  "zenpixels-convert",
  "zenravif",
@@ -1855,6 +1856,22 @@ dependencies = [
  "enough",
  "whereat 0.1.4",
  "zenpixels",
+]
+
+[[package]]
+name = "zenode"
+version = "0.1.0"
+dependencies = [
+ "zenode-derive",
+]
+
+[[package]]
+name = "zenode-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
