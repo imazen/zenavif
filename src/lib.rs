@@ -90,8 +90,8 @@ pub mod yuv_convert_libyuv_simd;
 #[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), not(feature = "_dev")))]
 pub(crate) mod yuv_convert_libyuv_simd;
 
-// zenode node definitions
-#[cfg(feature = "zenode")]
+// zennode node definitions
+#[cfg(feature = "zennode")]
 pub mod zenode_defs;
 
 #[cfg(feature = "encode")]

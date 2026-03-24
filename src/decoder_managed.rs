@@ -138,6 +138,9 @@ impl ManagedAvifDecoder {
 
         let settings = Settings {
             threads: config.threads,
+            // AVIF is single-frame: disable frame threading (which causes
+            // DisjointMut overlap panics) but keep tile parallelism.
+            max_frame_delay: 1,
             apply_grain: config.apply_grain,
             frame_size_limit: config.frame_size_limit,
             ..Default::default()
@@ -580,7 +583,8 @@ impl ManagedAvifDecoder {
 
         let mut alpha_decoder = if anim_info.has_alpha {
             let settings = Settings {
-                threads: 1,
+                threads: config.threads,
+                max_frame_delay: 1,
                 ..Default::default()
             };
             Some(Rav1dDecoder::with_settings(settings).map_err(|_e| {
@@ -1756,7 +1760,8 @@ impl AnimationDecoder {
 
         let alpha_decoder = if anim_info.has_alpha {
             let settings = Settings {
-                threads: 1,
+                threads: config.threads,
+                max_frame_delay: 1,
                 ..Default::default()
             };
             Some(Rav1dDecoder::with_settings(settings).map_err(|_e| {
