@@ -40,6 +40,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
+      - name: Test (default)
+        run: cargo test
+
+      - name: Test (eager feature)
+        run: cargo test --features eager
+
+      - name: Test (c_api feature)
+        run: cargo test --features c_api
+
       - name: Test (all features)
         run: cargo test --all-features
 
