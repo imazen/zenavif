@@ -8,7 +8,7 @@
 //! | zencodec | zenavif adapter |
 //! |----------------|-----------------|
 //! | `EncoderConfig` | [`AvifEncoderConfig`] |
-//! | `EncodeJob<'a>` | [`AvifEncodeJob`] |
+//! | `EncodeJob` | [`AvifEncodeJob`] |
 //! | `Encoder` | [`AvifEncoder`] |
 //! | `DecoderConfig` | [`AvifDecoderConfig`] |
 //! | `DecodeJob<'a>` | [`AvifDecodeJob`] |
@@ -360,7 +360,7 @@ fn interp_quality(table: &[(f32, f32)], x: f32) -> f32 {
 #[cfg(feature = "encode")]
 impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
     type Error = At<Error>;
-    type Job<'a> = AvifEncodeJob<'a>;
+    type Job = AvifEncodeJob;
 
     fn format() -> ImageFormat {
         ImageFormat::Avif
@@ -421,7 +421,7 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
         self.inner.alpha_quality
     }
 
-    fn job(&self) -> AvifEncodeJob<'_> {
+    fn job(self) -> AvifEncodeJob {
         AvifEncodeJob {
             config: self,
             stop: None,
@@ -442,9 +442,9 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
 
 /// Per-operation AVIF encode job.
 #[cfg(feature = "encode")]
-pub struct AvifEncodeJob<'a> {
-    config: &'a AvifEncoderConfig,
-    stop: Option<&'a dyn Stop>,
+pub struct AvifEncodeJob {
+    config: AvifEncoderConfig,
+    stop: Option<zencodec::StopToken>,
     exif: Option<Arc<[u8]>>,
     icc_profile: Option<Arc<[u8]>>,
     xmp: Option<Arc<[u8]>>,
@@ -457,7 +457,7 @@ pub struct AvifEncodeJob<'a> {
 }
 
 #[cfg(feature = "encode")]
-impl<'a> AvifEncodeJob<'a> {
+impl AvifEncodeJob {
     /// Set EXIF metadata to embed in the encoded AVIF.
     #[must_use]
     pub fn with_exif(mut self, exif: impl Into<Arc<[u8]>>) -> Self {
@@ -467,12 +467,12 @@ impl<'a> AvifEncodeJob<'a> {
 }
 
 #[cfg(feature = "encode")]
-impl<'a> zencodec::encode::EncodeJob<'a> for AvifEncodeJob<'a> {
+impl zencodec::encode::EncodeJob for AvifEncodeJob {
     type Error = At<Error>;
-    type Enc = AvifEncoder<'a>;
+    type Enc = AvifEncoder;
     type FullFrameEnc = ();
 
-    fn with_stop(mut self, stop: &'a dyn Stop) -> Self {
+    fn with_stop(mut self, stop: zencodec::StopToken) -> Self {
         self.stop = Some(stop);
         self
     }
@@ -508,7 +508,7 @@ impl<'a> zencodec::encode::EncodeJob<'a> for AvifEncodeJob<'a> {
         self
     }
 
-    fn encoder(self) -> Result<AvifEncoder<'a>, At<Error>> {
+    fn encoder(self) -> Result<AvifEncoder, At<Error>> {
         let mut config = self.config.inner.clone();
         // Apply CICP color metadata from Metadata
         if let Some(cicp) = self.cicp {
@@ -592,9 +592,9 @@ impl<'a> zencodec::encode::EncodeJob<'a> for AvifEncodeJob<'a> {
 
 /// Single-image AVIF encoder.
 #[cfg(feature = "encode")]
-pub struct AvifEncoder<'a> {
+pub struct AvifEncoder {
     config: crate::EncoderConfig,
-    stop: Option<&'a dyn Stop>,
+    stop: Option<zencodec::StopToken>,
     exif: Option<Arc<[u8]>>,
     icc_profile: Option<Arc<[u8]>>,
     xmp: Option<Arc<[u8]>>,
@@ -602,7 +602,7 @@ pub struct AvifEncoder<'a> {
 }
 
 #[cfg(feature = "encode")]
-impl AvifEncoder<'_> {
+impl AvifEncoder {
     fn build_config(&self) -> crate::EncoderConfig {
         let mut cfg = self.config.clone();
         if let Some(ref exif) = self.exif {
@@ -639,7 +639,10 @@ impl AvifEncoder<'_> {
     }
 
     fn stop_token(&self) -> &dyn Stop {
-        self.stop.unwrap_or(&enough::Unstoppable)
+        match &self.stop {
+            Some(s) => s,
+            None => &enough::Unstoppable,
+        }
     }
 
     /// Set CICP color primaries and transfer characteristics from the pixel
@@ -894,7 +897,7 @@ impl AvifEncoder<'_> {
 }
 
 #[cfg(feature = "encode")]
-impl zencodec::encode::Encoder for AvifEncoder<'_> {
+impl zencodec::encode::Encoder for AvifEncoder {
     type Error = At<Error>;
 
     fn reject(op: zencodec::UnsupportedOperation) -> At<Error> {
@@ -1335,7 +1338,7 @@ impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
 /// Per-operation AVIF decode job.
 pub struct AvifDecodeJob<'a> {
     config: &'a AvifDecoderConfig,
-    stop: Option<&'a dyn Stop>,
+    stop: Option<zencodec::StopToken>,
     limits: ResourceLimits,
     start_frame_index: u32,
 }
@@ -1394,10 +1397,10 @@ impl<'a> AvifDecodeJob<'a> {
 impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
     type Error = At<Error>;
     type Dec = AvifDecoder<'a>;
-    type StreamDec = AvifStreamingDecoder<'a>;
+    type StreamDec = AvifStreamingDecoder;
     type FullFrameDec = AvifFullFrameDecoder;
 
-    fn with_stop(mut self, stop: &'a dyn Stop) -> Self {
+    fn with_stop(mut self, stop: zencodec::StopToken) -> Self {
         self.stop = Some(stop);
         self
     }
@@ -1460,7 +1463,10 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
     ) -> Result<zencodec::decode::OutputInfo, At<Error>> {
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
-        let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
+        let stop: &dyn Stop = match &self.stop {
+            Some(s) => s,
+            None => &enough::Unstoppable,
+        };
         let mut decoder = crate::ManagedAvifDecoder::new(&data, &cfg)?;
         let probe_info = decoder.probe_info()?;
         self.check_decode_limits(&probe_info)?;
@@ -1501,13 +1507,16 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
     }
 
     fn streaming_decoder(
-        self,
+        mut self,
         data: Cow<'a, [u8]>,
         _preferred: &[PixelDescriptor],
-    ) -> Result<AvifStreamingDecoder<'a>, At<Error>> {
+    ) -> Result<AvifStreamingDecoder, At<Error>> {
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
-        let stop: &'a dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
+        let stop_token = self
+            .stop
+            .take()
+            .unwrap_or_else(|| zencodec::StopToken::new(enough::Unstoppable));
 
         let mut decoder = crate::ManagedAvifDecoder::new(&data, &cfg)?;
         let native_info = decoder.probe_info()?;
@@ -1551,7 +1560,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
                 output_width,
                 output_height,
                 decoder: Some(decoder),
-                stop,
+                stop: stop_token,
                 grid_rows: grid.rows as u32,
                 grid_cols: grid.columns as u32,
                 current_grid_row: 0,
@@ -1563,7 +1572,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
         }
 
         // Non-grid: decode YUV, set up strip converter for on-demand conversion.
-        let (converter, _native) = decoder.decode_to_strip_converter(stop)?;
+        let (converter, _native) = decoder.decode_to_strip_converter(&stop_token)?;
         let desc = converter.descriptor();
         let w = converter.display_width() as u32;
         let h = converter.display_height() as u32;
@@ -1575,7 +1584,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
             output_width: w,
             output_height: h,
             decoder: None,
-            stop,
+            stop: stop_token,
             grid_rows: 0,
             grid_cols: 0,
             current_grid_row: 0,
@@ -1816,7 +1825,7 @@ fn negotiate_format(pixels: PixelBuffer, preferred: &[PixelDescriptor]) -> Pixel
 /// Single-image AVIF decoder.
 pub struct AvifDecoder<'a> {
     config: crate::DecoderConfig,
-    stop: Option<&'a dyn Stop>,
+    stop: Option<zencodec::StopToken>,
     data: Cow<'a, [u8]>,
     preferred: Vec<PixelDescriptor>,
     limits: ResourceLimits,
@@ -1826,7 +1835,10 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
     type Error = At<Error>;
 
     fn decode(self) -> Result<DecodeOutput, At<Error>> {
-        let stop: &dyn Stop = self.stop.unwrap_or(&enough::Unstoppable);
+        let stop: &dyn Stop = match &self.stop {
+            Some(s) => s,
+            None => &enough::Unstoppable,
+        };
         let mut decoder = crate::ManagedAvifDecoder::new(&self.data, &self.config)?;
         let native_info = decoder.probe_info()?;
 
@@ -1886,7 +1898,7 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
 ///
 /// For non-grid 16-bit or monochrome images, falls back to full-frame
 /// conversion and emits fixed-height strips.
-pub struct AvifStreamingDecoder<'a> {
+pub struct AvifStreamingDecoder {
     info: ImageInfo,
     y_offset: u32,
     output_width: u32,
@@ -1894,7 +1906,7 @@ pub struct AvifStreamingDecoder<'a> {
     /// Grid path: managed decoder for tile-row streaming.
     decoder: Option<crate::ManagedAvifDecoder>,
     /// Stop token for cancellable grid decoding.
-    stop: &'a dyn Stop,
+    stop: zencodec::StopToken,
     grid_rows: u32,
     grid_cols: u32,
     current_grid_row: u32,
@@ -1908,7 +1920,7 @@ pub struct AvifStreamingDecoder<'a> {
     strip_height: u32,
 }
 
-impl AvifStreamingDecoder<'_> {
+impl AvifStreamingDecoder {
     /// Stitch decoded tiles horizontally into `self.strip_buffer`.
     fn stitch_tiles(&mut self, tiles: &[PixelBuffer], strip_h: u32) {
         let bpp = self.strip_descriptor.bytes_per_pixel();
@@ -1938,7 +1950,7 @@ impl AvifStreamingDecoder<'_> {
     }
 }
 
-impl zencodec::decode::StreamingDecode for AvifStreamingDecoder<'_> {
+impl zencodec::decode::StreamingDecode for AvifStreamingDecoder {
     type Error = At<Error>;
 
     fn next_batch(&mut self) -> Result<Option<(u32, PixelSlice<'_>)>, At<Error>> {
@@ -1955,7 +1967,7 @@ impl zencodec::decode::StreamingDecode for AvifStreamingDecoder<'_> {
             let tiles = self.decoder.as_mut().unwrap().decode_tile_row(
                 self.current_grid_row as usize,
                 self.grid_cols as usize,
-                self.stop,
+                &self.stop,
             )?;
 
             if tiles.is_empty() {
