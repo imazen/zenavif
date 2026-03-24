@@ -41,6 +41,10 @@ jobs:
         run: cargo build
       - name: Test
         run: cargo test
+      - name: Check encode feature
+        run: cargo check --features encode
+      - name: Check encode-threading feature
+        run: cargo check --features encode-threading
 
   i686:
     name: Test (i686 cross)

@@ -2,9 +2,9 @@
 //!
 //! Key optimizations:
 //! - Fixed-point integer math (much faster than float)
-//! - Process 32 pixels at once
+//! - Process 32 pixels at once (AVX2) or 16 pixels (NEON)
 //! - Process 2 rows simultaneously for YUV420
-//! - Use AVX2 intrinsics for proper SIMD vectorization
+//! - Use AVX2/NEON intrinsics for proper SIMD vectorization
 
 // These unsafe fn helpers use SIMD intrinsics that are safe within target_feature context.
 #![allow(unsafe_op_in_unsafe_fn)]
@@ -15,7 +15,8 @@ use archmage::prelude::*;
 use imgref::ImgVec;
 use rgb::RGB8;
 
-/// Fast YUV420 to RGB8 using integer arithmetic (optimized path)
+/// Fast YUV420 to RGB8 using integer arithmetic (AVX2 path)
+#[cfg(target_arch = "x86_64")]
 #[arcane]
 pub fn yuv420_to_rgb8_fast(
     token: Desktop64,
@@ -113,6 +114,7 @@ pub fn yuv420_to_rgb8_fast(
     ImgVec::new(out, width, height)
 }
 
+#[cfg(target_arch = "x86_64")]
 #[rite]
 fn process_32_pixels_420(
     _token: Desktop64,
@@ -227,6 +229,7 @@ fn process_32_pixels_420(
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 #[inline(always)]
 unsafe fn expand_u8_to_i16_lo(v: __m256i) -> __m256i {
     use core::arch::x86_64::*;
@@ -234,6 +237,7 @@ unsafe fn expand_u8_to_i16_lo(v: __m256i) -> __m256i {
     _mm256_srli_epi16::<6>(v_dup)
 }
 
+#[cfg(target_arch = "x86_64")]
 #[inline(always)]
 unsafe fn expand_u8_to_i16_hi(v: __m256i) -> __m256i {
     use core::arch::x86_64::*;
@@ -241,6 +245,7 @@ unsafe fn expand_u8_to_i16_hi(v: __m256i) -> __m256i {
     _mm256_srli_epi16::<6>(v_dup)
 }
 
+#[cfg(target_arch = "x86_64")]
 #[inline(always)]
 unsafe fn yuv_to_rgb_i16(
     y: __m256i,
@@ -271,6 +276,7 @@ unsafe fn yuv_to_rgb_i16(
     (r, g, b)
 }
 
+#[cfg(target_arch = "x86_64")]
 #[inline(always)]
 unsafe fn store_rgb_row(out: &mut [RGB8], r: __m256i, g: __m256i, b: __m256i) {
     use core::arch::x86_64::*;
@@ -299,6 +305,7 @@ unsafe fn store_rgb_row(out: &mut [RGB8], r: __m256i, g: __m256i, b: __m256i) {
 /// Output: 3x 256-bit registers containing 96 bytes of interleaved RGBRGBRGB...
 ///
 /// Ported from yuv crate's avx2_interleave_rgb
+#[cfg(target_arch = "x86_64")]
 #[inline(always)]
 #[allow(dead_code)]
 unsafe fn interleave_rgb_avx2(r: __m256i, g: __m256i, b: __m256i) -> (__m256i, __m256i, __m256i) {
@@ -345,4 +352,294 @@ unsafe fn interleave_rgb_avx2(r: __m256i, g: __m256i, b: __m256i) -> (__m256i, _
     let rgb2 = _mm256_permute2x128_si256::<0x31>(p1, p2); // 0x31 = 49
 
     (rgb0, rgb1, rgb2)
+}
+
+// ============================================================================
+// NEON (aarch64) implementation
+// ============================================================================
+
+/// Fast YUV420 to RGB8 using integer arithmetic (NEON path)
+///
+/// Processes 16 pixels at a time using NEON 128-bit registers.
+/// Uses the same BT.709 fixed-point coefficients as the AVX2 path.
+#[cfg(target_arch = "aarch64")]
+#[arcane]
+pub fn yuv420_to_rgb8_fast_neon(
+    token: NeonToken,
+    y_plane: &[u8],
+    y_stride: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+    width: usize,
+    height: usize,
+) -> ImgVec<RGB8> {
+    let mut out = vec![RGB8::default(); width * height];
+
+    // BT.709 coefficients in fixed-point (Q13 format: 8192 = 1.0)
+    let y_coef: i16 = 9539; // 1.164 * 8192
+    let cr_coef: i16 = 13075; // 1.596 * 8192
+    let cb_coef: i16 = 16525; // 2.018 * 8192
+    let g_coef_1: i16 = 6660; // For V component (formula subtracts this)
+    let g_coef_2: i16 = 3209; // For U component (formula subtracts this)
+
+    // Bias values
+    let y_bias: i16 = 16;
+    let uv_bias: i16 = 128;
+
+    // Process 2 rows at a time for YUV420
+    for y in (0..height).step_by(2) {
+        let y0_row = y;
+        let y1_row = (y + 1).min(height - 1);
+        let chroma_row = y / 2;
+
+        // Process 16 pixels at a time with NEON
+        for x in (0..width).step_by(16) {
+            let pixels_remaining = (width - x).min(16);
+
+            if pixels_remaining < 16 {
+                // Handle remaining pixels with scalar code
+                for i in 0..pixels_remaining {
+                    for row in [y0_row, y1_row] {
+                        if row >= height {
+                            continue;
+                        }
+                        let px = x + i;
+                        let chroma_x = px / 2;
+
+                        let y_val = y_plane[row * y_stride + px] as i32 - y_bias as i32;
+                        let u_val =
+                            u_plane[chroma_row * u_stride + chroma_x] as i32 - uv_bias as i32;
+                        let v_val =
+                            v_plane[chroma_row * v_stride + chroma_x] as i32 - uv_bias as i32;
+
+                        let y_scaled = (y_val * y_coef as i32) >> 13;
+                        let r = y_scaled + ((v_val * cr_coef as i32) >> 13);
+                        let g =
+                            y_scaled - ((v_val * g_coef_1 as i32 + u_val * g_coef_2 as i32) >> 13);
+                        let b = y_scaled + ((u_val * cb_coef as i32) >> 13);
+
+                        out[row * width + px] = RGB8 {
+                            r: r.clamp(0, 255) as u8,
+                            g: g.clamp(0, 255) as u8,
+                            b: b.clamp(0, 255) as u8,
+                        };
+                    }
+                }
+                continue;
+            }
+
+            // NEON SIMD path for 16 pixels
+            // Split the output buffer between row 0 and row 1
+            let split_point = y1_row * width;
+            let (top_rows, bottom_rows) = out.split_at_mut(split_point);
+            let row0_out = &mut top_rows[y0_row * width + x..];
+            let row1_out = &mut bottom_rows[x..];
+
+            process_16_pixels_420_neon(
+                token,
+                &y_plane[y0_row * y_stride + x..],
+                &y_plane[y1_row * y_stride + x..],
+                &u_plane[chroma_row * u_stride + x / 2..],
+                &v_plane[chroma_row * v_stride + x / 2..],
+                row0_out,
+                row1_out,
+                y_coef,
+                cr_coef,
+                cb_coef,
+                g_coef_1,
+                g_coef_2,
+                y_bias,
+                uv_bias,
+            );
+        }
+    }
+
+    ImgVec::new(out, width, height)
+}
+
+/// Process 16 pixels of YUV420 using NEON intrinsics
+///
+/// Loads 16 Y values per row and 8 chroma values, expands chroma to 16 via
+/// duplication, then computes RGB using i16 fixed-point math with saturating
+/// narrowing to u8.
+#[cfg(target_arch = "aarch64")]
+#[rite]
+fn process_16_pixels_420_neon(
+    _token: NeonToken,
+    y0: &[u8],
+    y1: &[u8],
+    u: &[u8],
+    v: &[u8],
+    out0: &mut [RGB8],
+    out1: &mut [RGB8],
+    y_coef: i16,
+    cr_coef: i16,
+    cb_coef: i16,
+    g_coef_1: i16,
+    g_coef_2: i16,
+    y_bias: i16,
+    uv_bias: i16,
+) {
+    use core::arch::aarch64::*;
+
+    let out0 = &mut out0[..16];
+    let out1 = &mut out1[..16];
+
+    // Load 16 Y values for each row (safe via safe_unaligned_simd)
+    let y0_vals = safe_unaligned_simd::aarch64::vld1q_u8(y0[..16].try_into().unwrap());
+    let y1_vals = safe_unaligned_simd::aarch64::vld1q_u8(y1[..16].try_into().unwrap());
+
+    // Load 8 U and V values
+    let u_vals = safe_unaligned_simd::aarch64::vld1_u8(u[..8].try_into().unwrap());
+    let v_vals = safe_unaligned_simd::aarch64::vld1_u8(v[..8].try_into().unwrap());
+
+    // Broadcast bias values
+    let y_corr = vdupq_n_u8(y_bias as u8);
+    let uv_corr = vdupq_n_s16((uv_bias << 2) | (uv_bias >> 6));
+
+    // Broadcast coefficients
+    let v_y_coef = vdupq_n_s16(y_coef);
+    let v_cr_coef = vdupq_n_s16(cr_coef);
+    let v_cb_coef = vdupq_n_s16(cb_coef);
+    let v_g_coef_1 = vdupq_n_s16(g_coef_1);
+    let v_g_coef_2 = vdupq_n_s16(g_coef_2);
+
+    // Subtract Y bias (saturating)
+    let y0_sub = vqsubq_u8(y0_vals, y_corr);
+    let y1_sub = vqsubq_u8(y1_vals, y_corr);
+
+    // Expand chroma from 8 to 16 values by duplicating each byte
+    let u_expanded_lo = vzip1_u8(u_vals, u_vals);
+    let u_expanded_hi = vzip2_u8(u_vals, u_vals);
+    let u_expanded = vcombine_u8(u_expanded_lo, u_expanded_hi);
+    let v_expanded_lo = vzip1_u8(v_vals, v_vals);
+    let v_expanded_hi = vzip2_u8(v_vals, v_vals);
+    let v_expanded = vcombine_u8(v_expanded_lo, v_expanded_hi);
+
+    // Expand u8 to i16 by unpacking (self-duplicate + shift right)
+    let y0_lo = expand_u8_to_i16_lo_neon(y0_sub);
+    let y0_hi = expand_u8_to_i16_hi_neon(y0_sub);
+    let y1_lo = expand_u8_to_i16_lo_neon(y1_sub);
+    let y1_hi = expand_u8_to_i16_hi_neon(y1_sub);
+
+    let u_lo = expand_u8_to_i16_lo_neon(u_expanded);
+    let u_hi = expand_u8_to_i16_hi_neon(u_expanded);
+    let v_lo = expand_u8_to_i16_lo_neon(v_expanded);
+    let v_hi = expand_u8_to_i16_hi_neon(v_expanded);
+
+    // Subtract UV bias
+    let u_lo = vsubq_s16(u_lo, uv_corr);
+    let u_hi = vsubq_s16(u_hi, uv_corr);
+    let v_lo = vsubq_s16(v_lo, uv_corr);
+    let v_hi = vsubq_s16(v_hi, uv_corr);
+
+    // Process all pixels
+    let (r0_lo, g0_lo, b0_lo) = yuv_to_rgb_i16_neon(
+        y0_lo, u_lo, v_lo, v_y_coef, v_cr_coef, v_cb_coef, v_g_coef_1, v_g_coef_2,
+    );
+    let (r0_hi, g0_hi, b0_hi) = yuv_to_rgb_i16_neon(
+        y0_hi, u_hi, v_hi, v_y_coef, v_cr_coef, v_cb_coef, v_g_coef_1, v_g_coef_2,
+    );
+    let (r1_lo, g1_lo, b1_lo) = yuv_to_rgb_i16_neon(
+        y1_lo, u_lo, v_lo, v_y_coef, v_cr_coef, v_cb_coef, v_g_coef_1, v_g_coef_2,
+    );
+    let (r1_hi, g1_hi, b1_hi) = yuv_to_rgb_i16_neon(
+        y1_hi, u_hi, v_hi, v_y_coef, v_cr_coef, v_cb_coef, v_g_coef_1, v_g_coef_2,
+    );
+
+    // Pack i16 -> u8 with saturation
+    let r0 = vcombine_u8(vqmovun_s16(r0_lo), vqmovun_s16(r0_hi));
+    let g0 = vcombine_u8(vqmovun_s16(g0_lo), vqmovun_s16(g0_hi));
+    let b0 = vcombine_u8(vqmovun_s16(b0_lo), vqmovun_s16(b0_hi));
+
+    let r1 = vcombine_u8(vqmovun_s16(r1_lo), vqmovun_s16(r1_hi));
+    let g1 = vcombine_u8(vqmovun_s16(g1_lo), vqmovun_s16(g1_hi));
+    let b1 = vcombine_u8(vqmovun_s16(b1_lo), vqmovun_s16(b1_hi));
+
+    // Store to output
+    store_rgb_row_neon(out0, r0, g0, b0);
+    store_rgb_row_neon(out1, r1, g1, b1);
+}
+
+/// Expand u8 to i16 by unpacking low half (NEON equivalent of expand_u8_to_i16_lo)
+///
+/// Duplicates each byte and shifts right by 6, producing a 10-bit representation.
+#[cfg(target_arch = "aarch64")]
+#[rite(neon)]
+#[inline(always)]
+fn expand_u8_to_i16_lo_neon(v: uint8x16_t) -> int16x8_t {
+    // Interleave low bytes with themselves: [a0,a0,a1,a1,...,a7,a7]
+    let lo = vget_low_u8(v);
+    let dup = vzip1q_u8(vcombine_u8(lo, lo), vcombine_u8(lo, lo));
+    // Reinterpret as u16 and shift right by 6
+    let as_u16 = vreinterpretq_u16_u8(dup);
+    vreinterpretq_s16_u16(vshrq_n_u16::<6>(as_u16))
+}
+
+/// Expand u8 to i16 by unpacking high half (NEON equivalent of expand_u8_to_i16_hi)
+#[cfg(target_arch = "aarch64")]
+#[rite(neon)]
+#[inline(always)]
+fn expand_u8_to_i16_hi_neon(v: uint8x16_t) -> int16x8_t {
+    let hi = vget_high_u8(v);
+    let dup = vzip1q_u8(vcombine_u8(hi, hi), vcombine_u8(hi, hi));
+    let as_u16 = vreinterpretq_u16_u8(dup);
+    vreinterpretq_s16_u16(vshrq_n_u16::<6>(as_u16))
+}
+
+/// YUV to RGB conversion in i16 fixed-point (NEON)
+///
+/// Uses vqrdmulhq_s16 (saturating rounding doubling multiply high) as the
+/// NEON equivalent of _mm256_mulhrs_epi16.
+#[cfg(target_arch = "aarch64")]
+#[rite(neon)]
+#[inline(always)]
+fn yuv_to_rgb_i16_neon(
+    y: int16x8_t,
+    u: int16x8_t,
+    v: int16x8_t,
+    y_coef: int16x8_t,
+    cr_coef: int16x8_t,
+    cb_coef: int16x8_t,
+    g_coef_1: int16x8_t,
+    g_coef_2: int16x8_t,
+) -> (int16x8_t, int16x8_t, int16x8_t) {
+    // Scale Y with luma coefficient (mulhrs equivalent)
+    let y_scaled = vqrdmulhq_s16(y, y_coef);
+
+    // Compute color components
+    let v_cr = vqrdmulhq_s16(v, cr_coef);
+    let u_cb = vqrdmulhq_s16(u, cb_coef);
+    let v_g = vqrdmulhq_s16(v, g_coef_1);
+    let u_g = vqrdmulhq_s16(u, g_coef_2);
+
+    let r = vaddq_s16(y_scaled, v_cr);
+    let b = vaddq_s16(y_scaled, u_cb);
+    let g = vsubq_s16(y_scaled, vaddq_s16(v_g, u_g));
+
+    (r, g, b)
+}
+
+/// Store 16 RGB pixels from planar NEON registers to packed RGB8 output
+#[cfg(target_arch = "aarch64")]
+#[rite(neon)]
+#[inline(always)]
+fn store_rgb_row_neon(out: &mut [RGB8], r: uint8x16_t, g: uint8x16_t, b: uint8x16_t) {
+    let mut r_arr = [0u8; 16];
+    let mut g_arr = [0u8; 16];
+    let mut b_arr = [0u8; 16];
+
+    safe_unaligned_simd::aarch64::vst1q_u8(&mut r_arr, r);
+    safe_unaligned_simd::aarch64::vst1q_u8(&mut g_arr, g);
+    safe_unaligned_simd::aarch64::vst1q_u8(&mut b_arr, b);
+
+    for i in 0..16 {
+        out[i] = RGB8 {
+            r: r_arr[i],
+            g: g_arr[i],
+            b: b_arr[i],
+        };
+    }
 }

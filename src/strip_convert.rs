@@ -36,6 +36,7 @@ pub(crate) struct StripConverter {
     display_height: usize,
 }
 
+#[allow(clippy::large_enum_variant)]
 enum ConversionState {
     /// 8-bit: hold decoded frames, convert strips on demand.
     Frames8 {
@@ -60,6 +61,7 @@ impl StripConverter {
     /// For 8-bit color images, the frames are held and converted per-strip.
     /// For 16-bit or monochrome, the full frame is converted immediately
     /// (falling back to the existing conversion pipeline).
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         primary: Frame,
         alpha: Option<Frame>,

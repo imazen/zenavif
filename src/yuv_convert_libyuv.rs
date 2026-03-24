@@ -7,9 +7,9 @@
 #![allow(dead_code)]
 
 use crate::yuv_convert::{YuvMatrix, YuvRange};
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use crate::yuv_convert_libyuv_simd;
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use archmage::prelude::*;
 use imgref::ImgVec;
 use rgb::RGB8;
@@ -121,6 +121,17 @@ pub fn yuv420_to_rgb8(
     if matches!((range, matrix), (YuvRange::Full, YuvMatrix::Bt709)) {
         if let Some(token) = Desktop64::summon() {
             return yuv_convert_libyuv_simd::yuv420_to_rgb8_simd(
+                token, y_plane, y_stride, u_plane, u_stride, v_plane, v_stride, width, height,
+                range, matrix,
+            );
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[allow(clippy::collapsible_if)]
+    if matches!((range, matrix), (YuvRange::Full, YuvMatrix::Bt709)) {
+        if let Some(token) = NeonToken::summon() {
+            return yuv_convert_libyuv_simd::yuv420_to_rgb8_simd_neon(
                 token, y_plane, y_stride, u_plane, u_stride, v_plane, v_stride, width, height,
                 range, matrix,
             );

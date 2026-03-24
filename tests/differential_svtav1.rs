@@ -307,3 +307,277 @@ fn zenravif_decode_roundtrip_success() {
         decoded.height(),
     );
 }
+
+#[test]
+fn svtav1_decode_128x128() {
+    let img = make_gradient(128, 128);
+    let config = EncoderConfig::new()
+        .backend(Av1Backend::Svtav1)
+        .quality(70.0)
+        .speed(8);
+    let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable)
+        .expect("svtav1 128x128 encode should succeed");
+    eprintln!("128x128 encoded: {} bytes", encoded.avif_file.len());
+    match decode_av1_obu(&encoded.avif_file) {
+        Ok((pixels, w, h, ch)) => {
+            eprintln!("  Decoded: {w}x{h}x{ch}, {} pixels", pixels.len());
+        }
+        Err(e) => {
+            eprintln!("  Decode failed: {e}");
+            // Write to disk for hex inspection
+            std::fs::write("/tmp/svtav1_128x128.obu", &encoded.avif_file).ok();
+            eprintln!("  Written to /tmp/svtav1_128x128.obu for inspection");
+        }
+    }
+}
+
+#[test]
+fn svtav1_decode_64x64_speed8() {
+    let img = make_gradient(64, 64);
+    let config = EncoderConfig::new()
+        .backend(Av1Backend::Svtav1)
+        .quality(70.0)
+        .speed(8);
+    let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable)
+        .expect("svtav1 64x64 encode should succeed");
+    eprintln!("64x64 s8 encoded: {} bytes", encoded.avif_file.len());
+    match decode_av1_obu(&encoded.avif_file) {
+        Ok((pixels, w, h, ch)) => {
+            eprintln!("  Decoded: {w}x{h}x{ch}, {} pixels", pixels.len());
+        }
+        Err(e) => {
+            eprintln!("  Decode failed: {e}");
+            std::fs::write("/tmp/svtav1_64x64_s8.obu", &encoded.avif_file).ok();
+        }
+    }
+}
+
+#[test]
+fn svtav1_decode_size_sweep() {
+    // Sweep sizes to find exactly where decode breaks
+    for size in [32u32, 48, 64, 80, 96, 112, 128] {
+        let img = make_gradient(size as usize, size as usize);
+        let config = EncoderConfig::new()
+            .backend(Av1Backend::Svtav1)
+            .quality(50.0)
+            .speed(10); // fastest preset
+        let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable)
+            .unwrap_or_else(|e| panic!("{size}x{size} encode failed: {e}"));
+        
+        match decode_av1_obu(&encoded.avif_file) {
+            Ok((pixels, w, h, ch)) => {
+                eprintln!("  {size}x{size}: DECODE OK — {w}x{h}x{ch}, {} bytes encoded", encoded.avif_file.len());
+            }
+            Err(e) => {
+                eprintln!("  {size}x{size}: DECODE FAIL — {} bytes encoded, {e}", encoded.avif_file.len());
+            }
+        }
+    }
+}
+
+#[test]
+fn svtav1_decode_size_sweep_speed8() {
+    for size in [32u32, 64, 128] {
+        let img = make_gradient(size as usize, size as usize);
+        let config = EncoderConfig::new()
+            .backend(Av1Backend::Svtav1)
+            .quality(70.0)
+            .speed(8);
+        let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable)
+            .unwrap_or_else(|e| panic!("{size}x{size} encode failed: {e}"));
+        
+        match decode_av1_obu(&encoded.avif_file) {
+            Ok((pixels, w, h, ch)) => {
+                eprintln!("  s8 {size}x{size}: DECODE OK — {w}x{h}x{ch}, {} bytes", encoded.avif_file.len());
+            }
+            Err(e) => {
+                eprintln!("  s8 {size}x{size}: DECODE FAIL — {} bytes, {e}", encoded.avif_file.len());
+            }
+        }
+    }
+}
+
+#[test]
+fn svtav1_decode_speed_sweep_64x64() {
+    for speed in [4u8, 6, 8, 9, 10] {
+        let img = make_gradient(64, 64);
+        let config = EncoderConfig::new()
+            .backend(Av1Backend::Svtav1)
+            .quality(70.0)
+            .speed(speed);
+        let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
+        match decode_av1_obu(&encoded.avif_file) {
+            Ok((_, w, h, _)) => eprintln!("  64x64 s{speed}: OK ({w}x{h}), {} bytes", encoded.avif_file.len()),
+            Err(_) => eprintln!("  64x64 s{speed}: FAIL, {} bytes", encoded.avif_file.len()),
+        }
+    }
+}
+
+#[test]
+fn svtav1_decode_quality_sweep_64x64_s10() {
+    for q in [30.0f32, 50.0, 60.0, 70.0, 90.0] {
+        let img = make_gradient(64, 64);
+        let config = EncoderConfig::new()
+            .backend(Av1Backend::Svtav1)
+            .quality(q)
+            .speed(10);
+        let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
+        match decode_av1_obu(&encoded.avif_file) {
+            Ok((_, w, h, _)) => eprintln!("  64x64 q{q:.0} s10: OK ({w}x{h}), {} bytes", encoded.avif_file.len()),
+            Err(_) => eprintln!("  64x64 q{q:.0} s10: FAIL, {} bytes", encoded.avif_file.len()),
+        }
+    }
+}
+
+#[test]
+fn svtav1_decode_mid_sizes_speed8() {
+    for size in [64u32, 80, 96, 112, 128] {
+        let img = make_gradient(size as usize, size as usize);
+        let config = EncoderConfig::new()
+            .backend(Av1Backend::Svtav1)
+            .quality(70.0)
+            .speed(8);
+        let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
+        match decode_av1_obu(&encoded.avif_file) {
+            Ok((_, w, h, _)) => eprintln!("  s8 {size}x{size}: OK ({w}x{h}), {} bytes", encoded.avif_file.len()),
+            Err(_) => eprintln!("  s8 {size}x{size}: FAIL, {} bytes", encoded.avif_file.len()),
+        }
+    }
+}
+
+#[test]
+fn svtav1_decode_uniform_128x128() {
+    // All gray — should produce mostly skip blocks
+    let w = 128usize;
+    let h = 128usize;
+    let mut pixels = Vec::with_capacity(w * h);
+    for _ in 0..h {
+        for _ in 0..w {
+            pixels.push(rgb::Rgb { r: 128, g: 128, b: 128 });
+        }
+    }
+    let img = imgref::Img::new(pixels, w, h);
+    let config = EncoderConfig::new()
+        .backend(Av1Backend::Svtav1)
+        .quality(70.0)
+        .speed(8);
+    let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
+    match decode_av1_obu(&encoded.avif_file) {
+        Ok((_, w, h, _)) => eprintln!("  uniform 128x128: OK ({w}x{h}), {} bytes", encoded.avif_file.len()),
+        Err(e) => eprintln!("  uniform 128x128: FAIL, {} bytes, {e}", encoded.avif_file.len()),
+    }
+}
+
+#[test]
+fn svtav1_decode_direct_128x128() {
+    // Encode directly without zenavif's RGB→Y conversion
+    let pixels = vec![128u8; 128 * 128]; // uniform gray
+    let enc = svtav1::avif::AvifEncoder::new()
+        .with_quality(70.0)
+        .with_speed(8);
+    let obu = enc.encode_to_av1_obu(&pixels, 128, 128, 128).unwrap();
+    eprintln!("direct 128x128: {} bytes", obu.len());
+    match decode_av1_obu(&obu) {
+        Ok((_, w, h, _)) => eprintln!("  OK: {w}x{h}"),
+        Err(e) => eprintln!("  FAIL: {e}"),
+    }
+}
+
+#[test]
+fn svtav1_decode_direct_64x64() {
+    let pixels = vec![128u8; 64 * 64];
+    let enc = svtav1::avif::AvifEncoder::new()
+        .with_quality(70.0)
+        .with_speed(8);
+    let obu = enc.encode_to_av1_obu(&pixels, 64, 64, 64).unwrap();
+    eprintln!("direct 64x64: {} bytes", obu.len());
+    match decode_av1_obu(&obu) {
+        Ok((_, w, h, _)) => eprintln!("  OK: {w}x{h}"),
+        Err(e) => eprintln!("  FAIL: {e}"),
+    }
+}
+
+#[test]
+fn svtav1_decode_direct_gradient_64x64() {
+    let mut pixels = vec![0u8; 64 * 64];
+    for r in 0..64 {
+        for c in 0..64 {
+            pixels[r * 64 + c] = ((r * 4 + c * 2) % 256) as u8;
+        }
+    }
+    let enc = svtav1::avif::AvifEncoder::new()
+        .with_quality(70.0)
+        .with_speed(8);
+    let obu = enc.encode_to_av1_obu(&pixels, 64, 64, 64).unwrap();
+    eprintln!("direct gradient 64x64: {} bytes", obu.len());
+    match decode_av1_obu(&obu) {
+        Ok((_, w, h, _)) => eprintln!("  OK: {w}x{h}"),
+        Err(e) => eprintln!("  FAIL: {e}"),
+    }
+}
+
+#[test]
+fn svtav1_decode_direct_gradient_128x128() {
+    let mut pixels = vec![0u8; 128 * 128];
+    for r in 0..128 {
+        for c in 0..128 {
+            pixels[r * 128 + c] = ((r * 2 + c) % 256) as u8;
+        }
+    }
+    let enc = svtav1::avif::AvifEncoder::new()
+        .with_quality(70.0)
+        .with_speed(8);
+    let obu = enc.encode_to_av1_obu(&pixels, 128, 128, 128).unwrap();
+    eprintln!("direct gradient 128x128: {} bytes", obu.len());
+    match decode_av1_obu(&obu) {
+        Ok((_, w, h, _)) => eprintln!("  OK: {w}x{h}"),
+        Err(e) => {
+            eprintln!("  FAIL: {e}");
+            std::fs::write("/tmp/svtav1_grad128.obu", &obu).ok();
+        }
+    }
+}
+
+#[test]
+fn svtav1_dump_obu_comparison() {
+    // Save 64x64 and 128x128 gradient OBU files for byte comparison
+    let mut make = |size: usize| -> Vec<u8> {
+        let mut pixels = vec![0u8; size * size];
+        for r in 0..size {
+            for c in 0..size {
+                pixels[r * size + c] = ((r * 2 + c) % 256) as u8;
+            }
+        }
+        let enc = svtav1::avif::AvifEncoder::new().with_quality(70.0).with_speed(8);
+        enc.encode_to_av1_obu(&pixels, size as u32, size as u32, size as u32).unwrap()
+    };
+    let obu64 = make(64);
+    let obu128 = make(128);
+    std::fs::write("/tmp/svtav1_cmp_64.obu", &obu64).unwrap();
+    std::fs::write("/tmp/svtav1_cmp_128.obu", &obu128).unwrap();
+    eprintln!("64x64: {} bytes → /tmp/svtav1_cmp_64.obu", obu64.len());
+    eprintln!("128x128: {} bytes → /tmp/svtav1_cmp_128.obu", obu128.len());
+    
+    // Verify 64x64 decodes
+    match decode_av1_obu(&obu64) {
+        Ok(_) => eprintln!("64x64: DECODES OK"),
+        Err(e) => eprintln!("64x64: FAIL {e}"),
+    }
+    match decode_av1_obu(&obu128) {
+        Ok(_) => eprintln!("128x128: DECODES OK"),
+        Err(e) => eprintln!("128x128: FAIL {e}"),
+    }
+}
+
+#[test]
+fn svtav1_decode_128x64() {
+    let mut pixels = vec![0u8; 128 * 64];
+    for r in 0..64 { for c in 0..128 { pixels[r * 128 + c] = ((r * 2 + c) % 256) as u8; } }
+    let enc = svtav1::avif::AvifEncoder::new().with_quality(70.0).with_speed(8);
+    let obu = enc.encode_to_av1_obu(&pixels, 128, 64, 128).unwrap();
+    eprintln!("128x64: {} bytes", obu.len());
+    match decode_av1_obu(&obu) {
+        Ok((_, w, h, _)) => eprintln!("  OK: {w}x{h}"),
+        Err(e) => eprintln!("  FAIL: {e}"),
+    }
+}

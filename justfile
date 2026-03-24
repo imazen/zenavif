@@ -39,8 +39,13 @@ test-encode:
 clippy-all:
     cargo clippy --all-targets --features encode -- -D warnings
 
+# Test feature permutations
+feature-check:
+    cargo test --features encode
+    cargo test --features encode-threading
+
 # Full CI check
-ci: fmt-check clippy test
+ci: fmt-check clippy test feature-check
 
 # Run example decode_avif with test image
 decode-test:

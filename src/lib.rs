@@ -74,7 +74,7 @@ mod strip_convert;
 pub mod yuv_convert;
 #[cfg(not(feature = "_dev"))]
 pub(crate) mod yuv_convert;
-#[cfg(all(target_arch = "x86_64", feature = "_dev"))]
+#[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), feature = "_dev"))]
 #[allow(unsafe_code)]
 pub mod yuv_convert_fast;
 #[cfg(feature = "_dev")]
@@ -85,9 +85,9 @@ pub(crate) mod yuv_convert_libyuv;
 pub mod yuv_convert_libyuv_autovec;
 #[cfg(not(feature = "_dev"))]
 pub(crate) mod yuv_convert_libyuv_autovec;
-#[cfg(all(target_arch = "x86_64", feature = "_dev"))]
+#[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), feature = "_dev"))]
 pub mod yuv_convert_libyuv_simd;
-#[cfg(all(target_arch = "x86_64", not(feature = "_dev")))]
+#[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), not(feature = "_dev")))]
 pub(crate) mod yuv_convert_libyuv_simd;
 
 #[cfg(feature = "encode")]

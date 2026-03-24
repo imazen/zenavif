@@ -159,7 +159,7 @@ impl AvifEncoderConfig {
     /// Convenience: encode RGB8 pixels with this config.
     pub fn encode_rgb8(&self, img: imgref::ImgRef<'_, Rgb<u8>>) -> Result<EncodeOutput, At<Error>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
-        self.job().encoder()?.encode(PixelSlice::from(img).erase())
+        self.clone().job().encoder()?.encode(PixelSlice::from(img).erase())
     }
 
     /// Convenience: encode RGBA8 pixels with this config.
@@ -168,7 +168,7 @@ impl AvifEncoderConfig {
         img: imgref::ImgRef<'_, Rgba<u8>>,
     ) -> Result<EncodeOutput, At<Error>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
-        self.job().encoder()?.encode(PixelSlice::from(img).erase())
+        self.clone().job().encoder()?.encode(PixelSlice::from(img).erase())
     }
 
     /// Convenience: encode Gray8 pixels with this config.
@@ -177,7 +177,7 @@ impl AvifEncoderConfig {
         img: imgref::ImgRef<'_, rgb::Gray<u8>>,
     ) -> Result<EncodeOutput, At<Error>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
-        self.job().encoder()?.encode(PixelSlice::from(img).erase())
+        self.clone().job().encoder()?.encode(PixelSlice::from(img).erase())
     }
 
     /// Convenience: encode RGB f32 pixels with this config.
@@ -186,7 +186,7 @@ impl AvifEncoderConfig {
         img: imgref::ImgRef<'_, Rgb<f32>>,
     ) -> Result<EncodeOutput, At<Error>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
-        self.job().encoder()?.encode(PixelSlice::from(img).erase())
+        self.clone().job().encoder()?.encode(PixelSlice::from(img).erase())
     }
 
     /// Convenience: encode RGBA f32 pixels with this config.
@@ -195,7 +195,7 @@ impl AvifEncoderConfig {
         img: imgref::ImgRef<'_, Rgba<f32>>,
     ) -> Result<EncodeOutput, At<Error>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
-        self.job().encoder()?.encode(PixelSlice::from(img).erase())
+        self.clone().job().encoder()?.encode(PixelSlice::from(img).erase())
     }
 
     /// Convenience: encode Gray f32 pixels with this config.
@@ -204,7 +204,7 @@ impl AvifEncoderConfig {
         img: imgref::ImgRef<'_, rgb::Gray<f32>>,
     ) -> Result<EncodeOutput, At<Error>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
-        self.job().encoder()?.encode(PixelSlice::from(img).erase())
+        self.clone().job().encoder()?.encode(PixelSlice::from(img).erase())
     }
 }
 
