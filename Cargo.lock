@@ -80,11 +80,11 @@ dependencies = [
 
 [[package]]
 name = "archmage"
-version = "0.9.10"
+version = "0.9.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3277aaadcdb806f088022607cbc1f545d93f2be875ed308a17274006126a8e4"
+checksum = "b31252c47e70c7056709e9f98842aef4f709056c2b3a4f666c584f8cc37f7ca0"
 dependencies = [
- "archmage-macros 0.9.10",
+ "archmage-macros 0.9.12",
  "safe_unaligned_simd",
 ]
 
@@ -101,9 +101,9 @@ dependencies = [
 
 [[package]]
 name = "archmage-macros"
-version = "0.9.10"
+version = "0.9.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d21eb5f22a36e5509ba9ac633a6bf96ef9a2e5ef1b047a959dfcfbe975664205"
+checksum = "3a97189db9dffc2e13364c6f56461085d65743ff4d17890d6b80744203aae92b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -555,7 +555,7 @@ checksum = "8b3e85d14d419ba3e1db925519461c0d17a49bdd2d67ea6316fa965ca7acdf74"
 name = "fast-ssim2"
 version = "0.7.0"
 dependencies = [
- "archmage 0.9.10",
+ "archmage 0.9.12",
  "magetypes",
  "num-traits",
  "thiserror",
@@ -614,7 +614,7 @@ version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b7b87fd4550db5153983b6a4ccfa6050095afe31f9fd03492556e6a82d5a235"
 dependencies = [
- "archmage 0.9.10",
+ "archmage 0.9.12",
  "bytemuck",
  "paste",
 ]
@@ -791,7 +791,7 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 name = "linear-srgb"
 version = "0.6.3"
 dependencies = [
- "archmage 0.9.10",
+ "archmage 0.9.12",
  "bytemuck",
  "magetypes",
  "num-traits",
@@ -803,7 +803,7 @@ version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "125a2ceb187051329f82182e8aa5ad24a988749bb58c3ab5ee64ea65c0284bc8"
 dependencies = [
- "archmage 0.9.10",
+ "archmage 0.9.12",
  "bytemuck",
  "magetypes",
  "num-traits",
@@ -835,11 +835,11 @@ dependencies = [
 
 [[package]]
 name = "magetypes"
-version = "0.9.10"
+version = "0.9.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e687f5c9d3f0e6a06df3cbde6c271231c83b5a1b9b3dd3439014b355c770be9"
+checksum = "c805c315148e092279cd19d011ce4b22ff9d3cc593cca089364f6501d12087b1"
 dependencies = [
- "archmage 0.9.10",
+ "archmage 0.9.12",
 ]
 
 [[package]]
@@ -1507,7 +1507,7 @@ version = "0.1.0"
 name = "svtav1-dsp"
 version = "0.1.0"
 dependencies = [
- "archmage 0.9.10",
+ "archmage 0.9.12",
  "magetypes",
  "svtav1-tables",
  "svtav1-types",
@@ -1801,7 +1801,7 @@ checksum = "00f1f60154ad4ef9871d606765c3ea037cde93bbd77536327b594de8f82df1cb"
 name = "zenavif"
 version = "0.1.0"
 dependencies = [
- "archmage 0.9.10",
+ "archmage 0.9.12",
  "bytemuck",
  "criterion",
  "enough",
