@@ -100,7 +100,7 @@ impl Default for AvifEncode {
     }
 }
 
-#[cfg(feature = "zencodec")]
+#[cfg(all(feature = "zencodec", feature = "encode"))]
 impl AvifEncode {
     /// Convert this node into an [`crate::AvifEncoderConfig`].
     ///
@@ -203,6 +203,15 @@ impl AvifDecode {
         crate::AvifDecoderConfig::new().with_film_grain(self.film_grain)
     }
 }
+
+/// Register all AVIF zennode definitions with a registry.
+pub fn register(registry: &mut NodeRegistry) {
+    registry.register(&AVIF_ENCODE_NODE);
+    registry.register(&AVIF_DECODE_NODE);
+}
+
+/// All AVIF zennode definitions.
+pub static ALL: &[&dyn NodeDef] = &[&AVIF_ENCODE_NODE, &AVIF_DECODE_NODE];
 
 #[cfg(test)]
 mod tests {
@@ -372,8 +381,8 @@ mod tests {
         assert!(!dec.extract_gain_map);
     }
 
-    #[cfg(feature = "zencodec")]
-    mod codec_integration {
+    #[cfg(all(feature = "zencodec", feature = "encode"))]
+    mod encode_config_integration {
         use super::*;
 
         #[test]
@@ -439,6 +448,11 @@ mod tests {
                 crate::EncodeAlphaMode::Premultiplied
             );
         }
+    }
+
+    #[cfg(feature = "zencodec")]
+    mod decode_config_integration {
+        use super::*;
 
         #[test]
         fn decode_to_config_defaults() {
@@ -456,5 +470,23 @@ mod tests {
             let cfg = node.to_decoder_config();
             assert!(!cfg.inner().apply_grain);
         }
+    }
+
+    #[test]
+    fn registry_integration() {
+        let mut registry = NodeRegistry::new();
+        register(&mut registry);
+        assert!(registry.get("zenavif.encode").is_some());
+        assert!(registry.get("zenavif.decode").is_some());
+
+        // avif.q triggers the encode node
+        let result = registry.from_querystring("avif.q=80&avif.speed=4");
+        assert_eq!(result.instances.len(), 1);
+        assert_eq!(result.instances[0].schema().id, "zenavif.encode");
+
+        // avif.grain triggers the decode node
+        let result2 = registry.from_querystring("avif.grain=false");
+        assert_eq!(result2.instances.len(), 1);
+        assert_eq!(result2.instances[0].schema().id, "zenavif.decode");
     }
 }

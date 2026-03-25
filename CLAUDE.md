@@ -72,9 +72,9 @@ just test-encode  # cargo test --features encode
 
 ## Known Bugs
 
-### rav1d-safe Threading Race Condition
-DisjointMut overlap panic with multi-threaded decoding (`cdef.rs` / `cdef_apply.rs`).
-Default is `threads: 1` as workaround. Upstream rav1d-safe issue.
+### rav1d-safe Threading Race Condition (RESOLVED)
+DisjointMut overlap panic was caused by frame threading. Fix: `max_frame_delay=1`
+gives tile parallelism without frame threading. Default threads now 0 (auto-detect).
 
 ## TODO: Encoding Enhancements
 
