@@ -30,7 +30,7 @@ whereat = "0.1.4"
 log = "0.4"
 ravif = { package = "zenravif", version = "0.1", path = "../ravif/ravif", default-features = false, optional = true }
 svtav1 = { path = "/home/lilith/research/svtav1/svtav1-rs/svtav1", optional = true }
-zencodec = { version = "0.1.0" }
+zencodec = { version = "0.1.1" }
 zenpixels = { version = "0.2.0", default-features = false }
 zenpixels-convert = { version = "0.2.0", default-features = false, features = ["rgb"] }
 linear-srgb = "0.6.4"
