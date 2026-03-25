@@ -26,11 +26,25 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build
-        run: cargo build
-      - name: Test
+      - name: Test (default features)
         run: cargo test
-      - name: Check zencodec feature
+      - name: Test (no default features)
+        run: cargo test --no-default-features
+      - name: Test (zencodec feature)
+        run: cargo test --features zencodec
+
+  feature-check:
+    name: Feature permutations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check default
+        run: cargo check
+      - name: Check --no-default-features
+        run: cargo check --no-default-features
+      - name: Check --features zencodec
         run: cargo check --features zencodec
 
   i686:
@@ -57,8 +71,10 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Clippy
+      - name: Clippy (default)
         run: cargo clippy --all-targets -- -D warnings
+      - name: Clippy (zencodec)
+        run: cargo clippy --all-targets --features zencodec -- -D warnings
 
   fmt:
     name: Format

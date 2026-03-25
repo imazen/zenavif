@@ -574,7 +574,7 @@ mod tests {
     fn test_qp_to_quality_boundaries() {
         assert_eq!(qp_to_quality(0), 100.0);
         let worst = qp_to_quality(255);
-        assert!(worst >= 1.0 && worst <= 5.0, "QP 255 → {worst}");
+        assert!((1.0..=5.0).contains(&worst), "QP 255 → {worst}");
     }
 
     #[test]

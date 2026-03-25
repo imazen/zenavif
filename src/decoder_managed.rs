@@ -441,8 +441,9 @@ impl ManagedAvifDecoder {
                 .xmp()
                 .and_then(|r| r.ok())
                 .map(|c| c.into_owned()),
-            gain_map: self.parser.gain_map().and_then(|r| r.ok()),
-            depth_map: self.parser.depth_map().and_then(|r| r.ok()),
+            gain_map: self.extract_gain_map(),
+            // Depth map extraction requires zenavif-parse > 0.4.0 (not yet published).
+            depth_map: None,
         })
     }
 
@@ -553,8 +554,9 @@ impl ManagedAvifDecoder {
                 .xmp()
                 .and_then(|r| r.ok())
                 .map(|c| c.into_owned()),
-            gain_map: self.parser.gain_map().and_then(|r| r.ok()),
-            depth_map: self.parser.depth_map().and_then(|r| r.ok()),
+            gain_map: self.extract_gain_map(),
+            // Depth map extraction requires zenavif-parse > 0.4.0 (not yet published).
+            depth_map: None,
         })
     }
 
@@ -897,8 +899,9 @@ impl ManagedAvifDecoder {
                 .xmp()
                 .and_then(|r| r.ok())
                 .map(|c| c.into_owned()),
-            gain_map: self.parser.gain_map().and_then(|r| r.ok()),
-            depth_map: self.parser.depth_map().and_then(|r| r.ok()),
+            gain_map: self.extract_gain_map(),
+            // Depth map extraction requires zenavif-parse > 0.4.0 (not yet published).
+            depth_map: None,
         };
 
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
@@ -1506,8 +1509,24 @@ impl ManagedAvifDecoder {
     }
 
     /// Animation metadata from the AVIF container, if this is an animated AVIF.
+    #[allow(dead_code)] // Used by codec.rs when `zencodec` feature is enabled.
     pub(crate) fn animation_info(&self) -> Option<zenavif_parse::AnimationInfo> {
         self.parser.animation_info()
+    }
+
+    /// Extract the gain map from the AVIF container, if present.
+    ///
+    /// Bundles gain_map_metadata, gain_map_data, and gain_map_color_info from
+    /// the parser into a single [`AvifGainMap`](crate::image::AvifGainMap).
+    fn extract_gain_map(&self) -> Option<crate::image::AvifGainMap> {
+        let metadata = self.parser.gain_map_metadata()?.clone();
+        let data = self.parser.gain_map_data()?.ok()?.into_owned();
+        let alt_color_info = self.parser.gain_map_color_info().cloned();
+        Some(crate::image::AvifGainMap {
+            metadata,
+            gain_map_data: data,
+            alt_color_info,
+        })
     }
 
     /// Whether this image is a grid (tiled) image.

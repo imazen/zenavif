@@ -4,7 +4,9 @@
 //! are accessible from the decode output when an AVIF file contains a
 //! `tmap` derived image item.
 
-use zenavif::{AvifGainMap, DecoderConfig, ManagedAvifDecoder};
+#[cfg(feature = "zencodec")]
+use zenavif::AvifGainMap;
+use zenavif::{DecoderConfig, ManagedAvifDecoder};
 
 /// Path to an AVIF file with a gain map (SDR base + gain map for HDR)
 const SEINE_SDR_GAINMAP: &str = "tests/vectors/libavif/seine_sdr_gainmap_srgb.avif";

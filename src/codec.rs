@@ -2952,6 +2952,7 @@ mod tests {
         assert_eq!(output.format(), ImageFormat::Avif);
     }
 
+    #[cfg(feature = "encode")]
     #[test]
     fn encoder_trait_rgb_f32_pq_bt2020() {
         use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
@@ -2980,6 +2981,7 @@ mod tests {
         assert_eq!(output.format(), ImageFormat::Avif);
     }
 
+    #[cfg(feature = "encode")]
     #[test]
     fn encoder_trait_rgba_f32_hlg_bt2020() {
         use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
@@ -3009,6 +3011,7 @@ mod tests {
         assert_eq!(output.format(), ImageFormat::Avif);
     }
 
+    #[cfg(feature = "encode")]
     #[test]
     fn encoder_trait_f32_pq_roundtrip_preserves_hdr() {
         use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
@@ -3403,7 +3406,7 @@ mod tests {
     fn avif_animation_frame_decoder_implements_trait() {
         // AvifAnimationFrameDecoder implements AnimationFrameDecoder which includes loop_count()
         fn _assert_trait<T: zencodec::decode::AnimationFrameDecoder>() {}
-        _assert_trait::<AvifAnimationFrameDecoder>();
+        _assert_trait::<super::AvifAnimationFrameDecoder>();
     }
 
     #[test]

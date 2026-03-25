@@ -79,6 +79,16 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
 name = "archmage"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61bd463aee29794a0318115ab857c2486842b28956c3f75365b304f1047b4758"
+dependencies = [
+ "archmage-macros 0.7.0",
+ "safe_unaligned_simd",
+]
+
+[[package]]
+name = "archmage"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0fb818f2e02ca08cc6416725044fadc84bcf5a96e2eb7ab103c966123667d86"
@@ -95,6 +105,17 @@ checksum = "b31252c47e70c7056709e9f98842aef4f709056c2b3a4f666c584f8cc37f7ca0"
 dependencies = [
  "archmage-macros 0.9.12",
  "safe_unaligned_simd",
+]
+
+[[package]]
+name = "archmage-macros"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02b01e2d131ffadba47bdff5d5e1d5d8a3b9743dc6b3d6ce4847ae2d6d306058"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -200,10 +221,7 @@ dependencies = [
  "anyhow",
  "arg_enum_proc_macro",
  "arrayvec",
- "cc",
- "libc",
  "log",
- "nasm-rs",
  "num-rational",
  "num-traits",
  "pastey",
@@ -563,9 +581,11 @@ checksum = "8b3e85d14d419ba3e1db925519461c0d17a49bdd2d67ea6316fa965ca7acdf74"
 [[package]]
 name = "fast-ssim2"
 version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "699989c244d616b42dc6dd4f3dbde284c26700c280d6f39febac7f7c2471df7c"
 dependencies = [
- "archmage 0.9.12",
- "magetypes",
+ "archmage 0.7.0",
+ "magetypes 0.7.0",
  "num-traits",
  "thiserror",
  "yuvxyb",
@@ -804,7 +824,7 @@ checksum = "9f66e11d2bab842db599aaed858bfb0450f58ee9d274d9d478be46bcc6916316"
 dependencies = [
  "archmage 0.9.12",
  "bytemuck",
- "magetypes",
+ "magetypes 0.9.12",
  "num-traits",
 ]
 
@@ -830,6 +850,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fae87c125b03c1d2c0150c90365d7d6bcc53fb73a9acaef207d2d065860f062"
 dependencies = [
  "imgref",
+]
+
+[[package]]
+name = "magetypes"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d55dd4e83507ff9fe129b01669adca1e302ef346dac252ef59139c78def312a"
+dependencies = [
+ "archmage 0.7.0",
 ]
 
 [[package]]
@@ -1488,61 +1517,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "svtav1"
-version = "0.1.0"
-dependencies = [
- "svtav1-dsp",
- "svtav1-encoder",
- "svtav1-entropy",
- "svtav1-tables",
- "svtav1-types",
-]
-
-[[package]]
-name = "svtav1-disjoint-mut"
-version = "0.1.0"
-
-[[package]]
-name = "svtav1-dsp"
-version = "0.1.0"
-dependencies = [
- "archmage 0.9.12",
- "magetypes",
- "svtav1-tables",
- "svtav1-types",
-]
-
-[[package]]
-name = "svtav1-encoder"
-version = "0.1.0"
-dependencies = [
- "svtav1-disjoint-mut",
- "svtav1-dsp",
- "svtav1-entropy",
- "svtav1-tables",
- "svtav1-types",
-]
-
-[[package]]
-name = "svtav1-entropy"
-version = "0.1.0"
-dependencies = [
- "svtav1-tables",
- "svtav1-types",
-]
-
-[[package]]
-name = "svtav1-tables"
-version = "0.1.0"
-dependencies = [
- "svtav1-types",
-]
-
-[[package]]
-name = "svtav1-types"
-version = "0.1.0"
-
-[[package]]
 name = "syn"
 version = "2.0.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1806,13 +1780,12 @@ dependencies = [
  "imgref",
  "linear-srgb",
  "log",
- "magetypes",
+ "magetypes 0.9.12",
  "png",
  "rav1d",
  "rav1d-safe",
  "rgb",
  "safe_unaligned_simd",
- "svtav1",
  "thiserror",
  "whereat",
  "yuv",
@@ -1820,12 +1793,13 @@ dependencies = [
  "zencodec",
  "zenpixels",
  "zenpixels-convert",
- "zenravif",
 ]
 
 [[package]]
 name = "zenavif-parse"
 version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b8f61e23db02cf0b427b5464f5653f0ddbcb1184ca6b2c8fa14e87dd52f71bd"
 dependencies = [
  "arrayvec",
  "bitreader",
@@ -1834,13 +1808,6 @@ dependencies = [
  "fallible_collections",
  "leb128",
  "log",
-]
-
-[[package]]
-name = "zenavif-serialize"
-version = "0.1.1"
-dependencies = [
- "arrayvec",
 ]
 
 [[package]]
@@ -1880,55 +1847,6 @@ dependencies = [
  "rgb",
  "whereat",
  "zenpixels",
-]
-
-[[package]]
-name = "zenrav1e"
-version = "0.1.0"
-dependencies = [
- "aligned-vec",
- "arbitrary",
- "arg_enum_proc_macro",
- "arrayvec",
- "av-scenechange",
- "av1-grain",
- "bitstream-io",
- "built",
- "cc",
- "cfg-if",
- "interpolate_name",
- "itertools 0.14.0",
- "libc",
- "libfuzzer-sys",
- "log",
- "maybe-rayon",
- "nasm-rs",
- "new_debug_unreachable",
- "noop_proc_macro",
- "num-derive",
- "num-traits",
- "pastey",
- "profiling",
- "rand",
- "rand_chacha",
- "safe_unaligned_simd",
- "simd_helpers",
- "thiserror",
- "v_frame",
- "wasm-bindgen",
-]
-
-[[package]]
-name = "zenravif"
-version = "0.1.0"
-dependencies = [
- "imgref",
- "loop9",
- "quick-error",
- "rayon",
- "rgb",
- "zenavif-serialize",
- "zenrav1e",
 ]
 
 [[package]]

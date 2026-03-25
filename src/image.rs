@@ -1,9 +1,34 @@
 //! AVIF image metadata types
 
 pub use zenavif_parse::{
-    AvifDepthMap, AvifGainMap, CleanAperture, ContentLightLevel, GainMapChannel, GainMapMetadata,
+    CleanAperture, ColorInformation, ContentLightLevel, GainMapChannel, GainMapMetadata,
     ImageMirror, ImageRotation, MasteringDisplayColourVolume, PixelAspectRatio,
 };
+
+/// Gain map for SDR/HDR tone mapping (ISO 21496-1), bundled from AVIF container.
+///
+/// This struct combines the gain map metadata, raw AV1 bitstream data, and
+/// alternate rendition color info that are stored as separate items in the
+/// AVIF container.
+#[derive(Debug, Clone)]
+pub struct AvifGainMap {
+    /// ISO 21496-1 gain map metadata (parsed from the `tmap` item payload).
+    pub metadata: GainMapMetadata,
+    /// Raw AV1 bitstream of the gain map image.
+    pub gain_map_data: Vec<u8>,
+    /// Color information for the alternate (typically HDR) rendition.
+    pub alt_color_info: Option<ColorInformation>,
+}
+
+/// Depth auxiliary image extracted from an AVIF container.
+///
+/// Contains the raw AV1 bitstream for the depth auxiliary image, which can
+/// be decoded separately with an AV1 decoder to obtain depth pixel values.
+#[derive(Debug, Clone)]
+pub struct AvifDepthMap {
+    /// Raw AV1 bitstream of the depth auxiliary image.
+    pub data: Vec<u8>,
+}
 
 /// Chroma subsampling format
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
