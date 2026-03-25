@@ -1,4 +1,3 @@
-/target
 /debug_simd
 
 # Test vectors (large binary files - download with scripts/download-avif-test-vectors.sh)
@@ -9,3 +8,49 @@ tests/vectors/
 # But keep the download script
 !scripts/download-avif-test-vectors.sh
 tests/zenavif-references/
+
+# === Standard exclusions (do not depend on user ~/.gitignore) ===
+
+# Rust build artifacts
+target/
+
+# Fuzz build artifacts and crashes
+fuzz/target/
+fuzz/artifacts/
+
+# Profiling
+perf.data
+perf.data.old
+flamegraph.svg
+heaptrack.*.zst
+cachegrind.out.*
+callgrind.out.*
+massif.out.*
+
+# C/C++ build artifacts
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.rlib
+
+# Compiled binaries with no extension
+rust_out
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.iml
