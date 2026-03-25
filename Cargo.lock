@@ -45,6 +45,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "almost-enough"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20bd2aa12cb483fa294d7ce77c62faeb5daca051199d34e5152f70ecfa32688c"
+dependencies = [
+ "enough",
+]
+
+[[package]]
 name = "anes"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -610,9 +619,9 @@ dependencies = [
 
 [[package]]
 name = "garb"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b7b87fd4550db5153983b6a4ccfa6050095afe31f9fd03492556e6a82d5a235"
+checksum = "49be2cda31381aead2725e4c1ee466f25c72677feee8e27226570943a5726ddf"
 dependencies = [
  "archmage 0.9.12",
  "bytemuck",
@@ -786,16 +795,6 @@ name = "libm"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
-
-[[package]]
-name = "linear-srgb"
-version = "0.6.4"
-dependencies = [
- "archmage 0.9.12",
- "bytemuck",
- "magetypes",
- "num-traits",
-]
 
 [[package]]
 name = "linear-srgb"
@@ -1805,7 +1804,7 @@ dependencies = [
  "fast-ssim2",
  "image",
  "imgref",
- "linear-srgb 0.6.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "linear-srgb",
  "log",
  "magetypes",
  "png",
@@ -1848,6 +1847,7 @@ dependencies = [
 name = "zencodec"
 version = "0.1.0"
 dependencies = [
+ "almost-enough",
  "enough",
  "whereat",
  "zenpixels",
@@ -1867,9 +1867,10 @@ dependencies = [
 name = "zenpixels-convert"
 version = "0.2.0"
 dependencies = [
+ "archmage 0.9.12",
  "bytemuck",
  "garb",
- "linear-srgb 0.6.4",
+ "linear-srgb",
  "rgb",
  "whereat",
  "zenpixels",

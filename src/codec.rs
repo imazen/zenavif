@@ -477,15 +477,15 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         self
     }
 
-    fn with_metadata(mut self, meta: &Metadata) -> Self {
-        if let Some(ref exif) = meta.exif {
-            self.exif = Some(exif.clone());
+    fn with_metadata(mut self, meta: Metadata) -> Self {
+        if let Some(exif) = meta.exif {
+            self.exif = Some(exif);
         }
-        if let Some(ref icc) = meta.icc_profile {
-            self.icc_profile = Some(icc.clone());
+        if let Some(icc) = meta.icc_profile {
+            self.icc_profile = Some(icc);
         }
-        if let Some(ref xmp) = meta.xmp {
-            self.xmp = Some(xmp.clone());
+        if let Some(xmp) = meta.xmp {
+            self.xmp = Some(xmp);
         }
         if let Some(cicp) = meta.cicp {
             self.cicp = Some(cicp);
