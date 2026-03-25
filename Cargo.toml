@@ -35,7 +35,7 @@ log = "0.4.29"
 # Then uncomment these lines:
 # ravif = { package = "zenravif", version = "0.1.0", default-features = false, optional = true }
 # svtav1 = { version = "0.1.0", optional = true }
-zencodec = { version = "0.1.1" }
+zencodec = { version = "0.1.2" }
 zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 zenpixels = { version = "0.2.0", default-features = false, features = ["imgref", "rgb"] }
 zenpixels-convert = { version = "0.2.0", default-features = false, features = ["rgb"] }
