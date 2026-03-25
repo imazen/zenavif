@@ -24,11 +24,10 @@ pub struct DecoderConfig {
 impl Default for DecoderConfig {
     fn default() -> Self {
         Self {
-            // Default to 1 thread — AVIF is a single-frame format where frame
-            // threading provides no benefit (and causes DisjointMut overlap
-            // issues with the current guard tracking). Tile threading within
-            // the single frame still works fine.
-            threads: 1,
+            // Default to auto-detect threads. For single-frame AVIF, rav1d
+            // auto-derives max_frame_delay=1, giving tile parallelism without
+            // frame threading overhead.
+            threads: 0,
             apply_grain: true,
             frame_size_limit: 0,
             cpu_flags_mask: u32::MAX,

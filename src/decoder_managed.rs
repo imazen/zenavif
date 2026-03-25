@@ -592,7 +592,7 @@ impl ManagedAvifDecoder {
 
         let mut alpha_decoder = if anim_info.has_alpha {
             let settings = Settings {
-                threads: 1,
+                threads: 0,
                 ..Default::default()
             };
             Some(Rav1dDecoder::with_settings(settings).map_err(|_e| {
@@ -1790,7 +1790,7 @@ impl AnimationDecoder {
 
         let alpha_decoder = if anim_info.has_alpha {
             let settings = Settings {
-                threads: 1,
+                threads: config.threads,
                 ..Default::default()
             };
             Some(Rav1dDecoder::with_settings(settings).map_err(|_e| {
