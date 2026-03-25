@@ -33,7 +33,7 @@ svtav1 = { path = "/home/lilith/research/svtav1/svtav1-rs/svtav1", optional = tr
 zencodec = { path = "../zencodec", version = "0.1" }
 zenpixels = { path = "../zenpixels/zenpixels", default-features = false }
 zenpixels-convert = { path = "../zenpixels/zenpixels-convert", default-features = false, features = ["rgb"] }
-linear-srgb = "0.6.3"
+linear-srgb = "0.6.4"
 
 [dev-dependencies]
 archmage = { version = "0.9.8", features = ["std"] }
