@@ -34,10 +34,15 @@ just test-encode  # cargo test --features encode
 - `src/chroma.rs` - YUV chroma upsampling iterators
 
 ### Encoding
-- `src/encoder.rs` - AVIF encoding via zenravif (behind `encode` feature)
+- `src/encoder.rs` - AVIF encoding via zenravif (behind `encode` feature; currently disabled — zenravif not yet published)
 
-### Integration
-- `src/zencodec.rs` - zencodec trait implementations
+### Additional Source Files
+- `src/decode_av1.rs` - AV1 bitstream decoding entry points
+- `src/strip_convert.rs` - Strip-based pixel conversion utilities
+- `src/detect.rs` - AVIF file detection / sniffing
+- `src/codec.rs` - zencodec trait implementations
+- `src/zennode_defs.rs` - zennode pipeline node definitions (behind `zennode` feature)
+- `src/simd/` - SIMD acceleration modules
 
 ## Dependencies
 
