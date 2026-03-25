@@ -177,9 +177,7 @@ pub fn probe(data: &[u8]) -> Result<AvifProbe, ProbeError> {
                 Some(*fr),
                 false,
             ),
-            Some(zenavif_parse::ColorInformation::IccProfile(_)) => {
-                (None, None, None, None, true)
-            }
+            Some(zenavif_parse::ColorInformation::IccProfile(_)) => (None, None, None, None, true),
             None => (None, None, None, None, false),
         };
 
@@ -209,12 +207,10 @@ pub fn probe(data: &[u8]) -> Result<AvifProbe, ProbeError> {
     let lossless = meta.lossless;
 
     // Quality from frame header QP
-    let quality = meta.base_q_idx.map(|qp| {
-        QualityEstimate {
-            quantizer: qp,
-            estimated_quality: qp_to_quality(qp),
-            confidence: Confidence::FromFrameHeader,
-        }
+    let quality = meta.base_q_idx.map(|qp| QualityEstimate {
+        quantizer: qp,
+        estimated_quality: qp_to_quality(qp),
+        confidence: Confidence::FromFrameHeader,
     });
 
     // Build recommendations
@@ -434,9 +430,14 @@ mod tests {
             }
         }
 
-        eprintln!("\n  Probed {probed} files, {with_qp} with QP, {with_lossless} with lossless detection");
+        eprintln!(
+            "\n  Probed {probed} files, {with_qp} with QP, {with_lossless} with lossless detection"
+        );
         assert!(probed > 30, "Expected to probe >30 files, got {probed}");
         assert!(with_qp > 20, "Expected >20 files with QP, got {with_qp}");
-        assert!(with_lossless > 20, "Expected >20 files with lossless detection, got {with_lossless}");
+        assert!(
+            with_lossless > 20,
+            "Expected >20 files with lossless detection, got {with_lossless}"
+        );
     }
 }

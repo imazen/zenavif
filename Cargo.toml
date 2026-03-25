@@ -36,6 +36,7 @@ log = "0.4.29"
 # ravif = { package = "zenravif", version = "0.1.0", default-features = false, optional = true }
 # svtav1 = { version = "0.1.0", optional = true }
 zencodec = { version = "0.1.1" }
+zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 zenpixels = { version = "0.2.0", default-features = false, features = ["imgref", "rgb"] }
 zenpixels-convert = { version = "0.2.0", default-features = false, features = ["rgb"] }
 linear-srgb = "0.6.5"
@@ -120,6 +121,8 @@ encode-imazen = ["encode"]
 encode-svtav1 = ["encode"]
 # Enable zencodec trait integration
 zencodec = []
+# Enable zennode pipeline node definitions
+zennode = ["dep:zennode"]
 # Expose internal YUV conversion modules for profiling/debugging. Not public API.
 _dev = []
 

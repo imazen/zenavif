@@ -1241,14 +1241,12 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
         // Check resource limits
         let desc = pixels.descriptor();
         let bpp = desc.bytes_per_pixel() as u64;
-        self.limits
-            .check_dimensions(w, h)
-            .map_err(|_| {
-                at!(Error::ImageTooLarge {
-                    width: w,
-                    height: h,
-                })
-            })?;
+        self.limits.check_dimensions(w, h).map_err(|_| {
+            at!(Error::ImageTooLarge {
+                width: w,
+                height: h,
+            })
+        })?;
         self.limits
             .check_memory(w as u64 * h as u64 * bpp)
             .map_err(|e| at!(Error::Encode(format!("{e}"))))?;
@@ -1350,8 +1348,7 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
                         _ => unreachable!(),
                     })
                     .collect();
-                let result =
-                    crate::encode_animation_rgb8(&anim_frames, &self.config, stop_ref)?;
+                let result = crate::encode_animation_rgb8(&anim_frames, &self.config, stop_ref)?;
                 result.avif_file
             }
             BufferedFrame::Rgba8 { .. } => {
@@ -1369,8 +1366,7 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
                         _ => unreachable!(),
                     })
                     .collect();
-                let result =
-                    crate::encode_animation_rgba8(&anim_frames, &self.config, stop_ref)?;
+                let result = crate::encode_animation_rgba8(&anim_frames, &self.config, stop_ref)?;
                 result.avif_file
             }
             BufferedFrame::Rgb16 { .. } => {
@@ -1388,8 +1384,7 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
                         _ => unreachable!(),
                     })
                     .collect();
-                let result =
-                    crate::encode_animation_rgb16(&anim_frames, &self.config, stop_ref)?;
+                let result = crate::encode_animation_rgb16(&anim_frames, &self.config, stop_ref)?;
                 result.avif_file
             }
             BufferedFrame::Rgba16 { .. } => {
@@ -1407,8 +1402,7 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
                         _ => unreachable!(),
                     })
                     .collect();
-                let result =
-                    crate::encode_animation_rgba16(&anim_frames, &self.config, stop_ref)?;
+                let result = crate::encode_animation_rgba16(&anim_frames, &self.config, stop_ref)?;
                 result.avif_file
             }
         };
@@ -3930,7 +3924,9 @@ mod tests {
         use zencodec::decode::{AnimationFrameDecoder, DecodeJob, DecoderConfig};
         use zencodec::encode::{AnimationFrameEncoder, EncodeJob, EncoderConfig};
 
-        let config = AvifEncoderConfig::new().with_generic_quality(80.0).with_generic_effort(0);
+        let config = AvifEncoderConfig::new()
+            .with_generic_quality(80.0)
+            .with_generic_effort(0);
         let mut enc = config
             .job()
             .with_canvas_size(64, 64)
