@@ -6,14 +6,35 @@ use enough::Unstoppable;
 use std::fs;
 use zenavif::{AnimationDecoder, DecoderConfig, decode_animation, decode_animation_with};
 
-fn animated_vector(name: &str) -> Vec<u8> {
-    let path = format!("tests/vectors/libavif/{name}");
-    fs::read(&path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"))
+/// Load a test vector, returning None if the file doesn't exist (CI without vectors).
+fn load_vector(path: &str) -> Option<Vec<u8>> {
+    match fs::read(path) {
+        Ok(data) => Some(data),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!("skipping: {path} not found (download with: just download-vectors)");
+            None
+        }
+        Err(e) => panic!("Failed to read {path}: {e}"),
+    }
+}
+
+fn animated_vector(name: &str) -> Option<Vec<u8>> {
+    load_vector(&format!("tests/vectors/libavif/{name}"))
+}
+
+/// Return early from a test if the vector is None (missing in CI).
+macro_rules! require_vector {
+    ($expr:expr) => {
+        match $expr {
+            Some(data) => data,
+            None => return,
+        }
+    };
 }
 
 #[test]
 fn decode_8bpc_no_alpha() {
-    let data = animated_vector("colors-animated-8bpc.avif");
+    let data = require_vector!(animated_vector("colors-animated-8bpc.avif"));
     let anim = decode_animation(&data).unwrap();
 
     assert!(anim.frames.len() > 1, "expected multiple frames");
@@ -45,7 +66,7 @@ fn decode_8bpc_no_alpha() {
 
 #[test]
 fn decode_8bpc_with_alpha() {
-    let data = animated_vector("colors-animated-8bpc-alpha-exif-xmp.avif");
+    let data = require_vector!(animated_vector("colors-animated-8bpc-alpha-exif-xmp.avif"));
     let anim = decode_animation(&data).unwrap();
 
     assert!(anim.frames.len() > 1, "expected multiple frames");
@@ -71,7 +92,9 @@ fn decode_8bpc_with_alpha() {
 
 #[test]
 fn decode_12bpc_keyframes() {
-    let data = animated_vector("colors-animated-12bpc-keyframes-0-2-3.avif");
+    let data = require_vector!(animated_vector(
+        "colors-animated-12bpc-keyframes-0-2-3.avif"
+    ));
     let anim = decode_animation(&data).unwrap();
 
     assert!(anim.frames.len() > 1, "expected multiple frames");
@@ -94,7 +117,7 @@ fn decode_12bpc_keyframes() {
 #[test]
 fn decode_8bpc_audio_track_skipped() {
     // This file has color + audio tracks; audio should be skipped
-    let data = animated_vector("colors-animated-8bpc-audio.avif");
+    let data = require_vector!(animated_vector("colors-animated-8bpc-audio.avif"));
     let anim = decode_animation(&data).unwrap();
 
     assert!(anim.frames.len() > 1, "expected multiple frames");
@@ -108,7 +131,7 @@ fn decode_8bpc_audio_track_skipped() {
 
 #[test]
 fn decode_8bpc_depth() {
-    let data = animated_vector("colors-animated-8bpc-depth-exif-xmp.avif");
+    let data = require_vector!(animated_vector("colors-animated-8bpc-depth-exif-xmp.avif"));
     let anim = decode_animation(&data).unwrap();
 
     assert!(anim.frames.len() > 1, "expected multiple frames");
@@ -122,8 +145,9 @@ fn decode_8bpc_depth() {
 #[test]
 fn still_image_returns_unsupported() {
     // A non-animated AVIF should return Error::Unsupported
-    let data = fs::read("tests/vectors/libavif/kodim03_yuv420_8bpc.avif")
-        .expect("need kodim03 test vector");
+    let data = require_vector!(load_vector(
+        "tests/vectors/libavif/kodim03_yuv420_8bpc.avif"
+    ));
     let result = decode_animation(&data);
     assert!(
         result.is_err(),
@@ -133,7 +157,7 @@ fn still_image_returns_unsupported() {
 
 #[test]
 fn animation_with_config_and_cancellation() {
-    let data = animated_vector("colors-animated-8bpc.avif");
+    let data = require_vector!(animated_vector("colors-animated-8bpc.avif"));
     let config = DecoderConfig::new().threads(1);
     let anim = decode_animation_with(&data, &config, &Unstoppable).unwrap();
     assert!(anim.frames.len() > 1);
@@ -141,7 +165,7 @@ fn animation_with_config_and_cancellation() {
 
 #[test]
 fn frame_durations_sum_positive() {
-    let data = animated_vector("colors-animated-8bpc.avif");
+    let data = require_vector!(animated_vector("colors-animated-8bpc.avif"));
     let anim = decode_animation(&data).unwrap();
 
     let total_ms: u64 = anim.frames.iter().map(|f| f.duration_ms as u64).sum();
@@ -155,7 +179,9 @@ fn frame_durations_sum_positive() {
 
 #[test]
 fn decode_12bpc_produces_16bit_with_full_range() {
-    let data = animated_vector("colors-animated-12bpc-keyframes-0-2-3.avif");
+    let data = require_vector!(animated_vector(
+        "colors-animated-12bpc-keyframes-0-2-3.avif"
+    ));
     let anim = decode_animation(&data).unwrap();
 
     for (i, frame) in anim.frames.iter().enumerate() {
@@ -333,7 +359,7 @@ fn animation_encode_decode_roundtrip_rgba8() {
 
 #[test]
 fn frame_by_frame_matches_batch() {
-    let data = animated_vector("colors-animated-8bpc.avif");
+    let data = require_vector!(animated_vector("colors-animated-8bpc.avif"));
     let config = DecoderConfig::new().threads(1);
 
     // Batch decode
@@ -381,7 +407,9 @@ fn frame_by_frame_matches_batch() {
 
 #[test]
 fn frame_by_frame_12bpc() {
-    let data = animated_vector("colors-animated-12bpc-keyframes-0-2-3.avif");
+    let data = require_vector!(animated_vector(
+        "colors-animated-12bpc-keyframes-0-2-3.avif"
+    ));
     let config = DecoderConfig::new().threads(1);
 
     let mut decoder = AnimationDecoder::new(&data, &config).unwrap();
@@ -424,7 +452,7 @@ fn frame_by_frame_cancellation() {
         }
     }
 
-    let data = animated_vector("colors-animated-8bpc.avif");
+    let data = require_vector!(animated_vector("colors-animated-8bpc.avif"));
     let config = DecoderConfig::new().threads(1);
     let mut decoder = AnimationDecoder::new(&data, &config).unwrap();
 
@@ -461,8 +489,9 @@ fn frame_by_frame_cancellation() {
 
 #[test]
 fn frame_by_frame_still_image_returns_unsupported() {
-    let data = fs::read("tests/vectors/libavif/kodim03_yuv420_8bpc.avif")
-        .expect("need kodim03 test vector");
+    let data = require_vector!(load_vector(
+        "tests/vectors/libavif/kodim03_yuv420_8bpc.avif"
+    ));
     let result = AnimationDecoder::new(&data, &DecoderConfig::default());
     assert!(
         result.is_err(),

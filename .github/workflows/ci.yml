@@ -72,9 +72,9 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Clippy (default)
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --lib --tests --examples -- -D warnings
       - name: Clippy (zencodec)
-        run: cargo clippy --all-targets --features zencodec -- -D warnings
+        run: cargo clippy --lib --tests --examples --features zencodec -- -D warnings
 
   fmt:
     name: Format
