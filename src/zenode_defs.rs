@@ -73,6 +73,53 @@ impl Default for EncodeAvif {
     }
 }
 
+#[cfg(feature = "encode")]
+impl EncodeAvif {
+    /// Apply this node's explicitly-set params on top of an existing config.
+    ///
+    /// Fields at their default/sentinel value are skipped:
+    /// - `quality` and `avif_quality`: `-1` means not set
+    /// - `speed`: `6` is the default (only apply if changed)
+    /// - `lossless`: `false` means not set
+    /// - `alpha_quality`: `80` is the default (only apply if changed)
+    ///
+    /// Codec-specific `avif_quality` is applied AFTER generic `quality`,
+    /// so it takes precedence when both are set.
+    pub fn apply(
+        &self,
+        mut config: crate::AvifEncoderConfig,
+    ) -> crate::AvifEncoderConfig {
+        use zencodec::encode::EncoderConfig as _;
+
+        // Generic quality first (calibrated mapping)
+        if self.quality >= 0 {
+            config = config.with_generic_quality(self.quality as f32);
+        }
+        // Codec-specific quality override (direct AVIF quality)
+        if self.avif_quality >= 0 {
+            config = config.with_quality(self.avif_quality as f32);
+        }
+        // Encoding speed (1-10, only apply if changed from default 6)
+        if self.speed != 6 {
+            config = config.with_effort_u32(self.speed.clamp(1, 10) as u32);
+        }
+        // Lossless
+        if self.lossless {
+            config = config.with_lossless_mode(true);
+        }
+        // Alpha quality (only apply if changed from default 80)
+        if self.alpha_quality != 80 {
+            config = config.with_alpha_quality_value(self.alpha_quality as f32);
+        }
+        config
+    }
+
+    /// Build a config from scratch using only this node's params.
+    pub fn to_encoder_config(&self) -> crate::AvifEncoderConfig {
+        self.apply(crate::AvifEncoderConfig::new())
+    }
+}
+
 /// Register all AVIF zennode definitions with a registry.
 pub fn register(registry: &mut NodeRegistry) {
     registry.register(&ENCODE_AVIF_NODE);
@@ -204,6 +251,58 @@ mod tests {
         assert_eq!(enc.speed, 6);
         assert!(!enc.lossless);
         assert_eq!(enc.alpha_quality, 80);
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn to_encoder_config_defaults() {
+        let node = EncodeAvif::default();
+        let _config = node.to_encoder_config();
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn apply_generic_quality() {
+        let mut node = EncodeAvif::default();
+        node.quality = 80;
+        let config = node.to_encoder_config();
+        let q = zencodec::encode::EncoderConfig::generic_quality(&config);
+        assert!(q.is_some());
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn apply_codec_specific_overrides() {
+        let mut node = EncodeAvif::default();
+        node.quality = 50;
+        node.avif_quality = 90;
+        let _config = node.to_encoder_config();
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn apply_preserves_existing() {
+        let base = crate::AvifEncoderConfig::new()
+            .with_quality(75.0);
+        let node = EncodeAvif::default();
+        let _config = node.apply(base);
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn apply_lossless() {
+        let mut node = EncodeAvif::default();
+        node.lossless = true;
+        let _config = node.to_encoder_config();
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn apply_speed_and_alpha() {
+        let mut node = EncodeAvif::default();
+        node.speed = 3;
+        node.alpha_quality = 50;
+        let _config = node.to_encoder_config();
     }
 
     #[test]
