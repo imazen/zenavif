@@ -1505,6 +1505,11 @@ impl ManagedAvifDecoder {
         Ok(image)
     }
 
+    /// Animation metadata from the AVIF container, if this is an animated AVIF.
+    pub(crate) fn animation_info(&self) -> Option<zenavif_parse::AnimationInfo> {
+        self.parser.animation_info()
+    }
+
     /// Whether this image is a grid (tiled) image.
     #[allow(dead_code)]
     pub(crate) fn is_grid(&self) -> bool {

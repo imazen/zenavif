@@ -26,7 +26,9 @@ use zencodec::Metadata;
 use zencodec::decode::DecodeOutput;
 #[cfg(feature = "encode")]
 use zencodec::encode::EncodeOutput;
-use zencodec::{ImageFormat, ImageInfo, ImageSequence, ResourceLimits};
+use zencodec::{
+    GainMapPresence, ImageFormat, ImageInfo, ImageSequence, ResourceLimits, Supplements,
+};
 use zenpixels::{ChannelType, PixelBuffer, PixelDescriptor, PixelSlice};
 use zenpixels_convert::PixelBufferConvertTypedExt as _;
 
@@ -308,6 +310,7 @@ static AVIF_ENCODE_CAPABILITIES: zencodec::encode::EncodeCapabilities =
         .with_lossy(true)
         .with_lossless(cfg!(feature = "encode-imazen"))
         .with_hdr(true)
+        .with_gain_map(true)
         .with_native_gray(false)
         .with_native_16bit(true)
         .with_native_f32(false)
@@ -1300,10 +1303,8 @@ impl Default for AvifDecoderConfig {
 static DECODE_DESCRIPTORS: &[PixelDescriptor] = &[
     PixelDescriptor::RGB8_SRGB,
     PixelDescriptor::RGBA8_SRGB,
-    PixelDescriptor::GRAY8_SRGB,
     PixelDescriptor::RGB16_SRGB,
     PixelDescriptor::RGBA16_SRGB,
-    PixelDescriptor::GRAY16_SRGB,
 ];
 
 static AVIF_DECODE_CAPABILITIES: zencodec::decode::DecodeCapabilities =
@@ -1317,7 +1318,8 @@ static AVIF_DECODE_CAPABILITIES: zencodec::decode::DecodeCapabilities =
         .with_cheap_probe(true)
         .with_streaming(true)
         .with_hdr(true)
-        .with_native_gray(true)
+        .with_gain_map(true)
+        .with_native_gray(false)
         .with_native_16bit(true)
         .with_native_alpha(true)
         .with_enforces_max_pixels(true)
@@ -1437,6 +1439,14 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
         let decoder = crate::ManagedAvifDecoder::new(data, &self.config.inner)?;
         let native_info = decoder.probe_info()?;
         let mut info = convert_native_info(&native_info);
+        // Detect animation from the container's track structure.
+        if let Some(anim) = decoder.animation_info() {
+            info = info.with_sequence(ImageSequence::Animation {
+                frame_count: Some(anim.frame_count as u32),
+                loop_count: Some(anim.loop_count),
+                random_access: true,
+            });
+        }
         if let Ok(probe) = crate::detect::probe(data) {
             info = info.with_source_encoding_details(probe);
         }
@@ -1768,7 +1778,78 @@ fn convert_native_info(native: &crate::image::ImageInfo) -> ImageInfo {
         ));
     }
 
+    // Supplemental content flags: gain map, depth map.
+    let has_gain_map = native.gain_map.is_some();
+    let has_depth_map = native.depth_map.is_some();
+    if has_gain_map || has_depth_map {
+        let mut supplements = Supplements::default();
+        supplements.gain_map = has_gain_map;
+        supplements.depth_map = has_depth_map;
+        info = info.with_supplements(supplements);
+    }
+
+    // Gain map presence: Absent when definitively none, Available when metadata
+    // can be converted, Unknown otherwise (default).
+    if native.gain_map.is_some() {
+        info = info.with_gain_map(convert_gain_map_presence(native));
+    } else {
+        info = info.with_gain_map(GainMapPresence::Absent);
+    }
+
     info
+}
+
+/// Convert native AVIF gain map metadata to zencodec's `GainMapPresence`.
+///
+/// Parses the AV1 sequence header from the gain map data to extract dimensions,
+/// then converts the ISO 21496-1 metadata to zencodec's canonical representation.
+fn convert_gain_map_presence(native: &crate::image::ImageInfo) -> GainMapPresence {
+    let gm = match native.gain_map.as_ref() {
+        Some(gm) => gm,
+        None => return GainMapPresence::Absent,
+    };
+
+    // Parse AV1 sequence header to get gain map image dimensions.
+    let (width, height, gm_channels_from_av1) =
+        match zenavif_parse::AV1Metadata::parse_av1_bitstream(&gm.gain_map_data) {
+            Ok(meta) => (
+                meta.max_frame_width.get(),
+                meta.max_frame_height.get(),
+                if meta.monochrome { 1u8 } else { 3u8 },
+            ),
+            // If we can't parse the OBU, we know a gain map exists but can't
+            // extract its dimensions — report as Unknown rather than lying.
+            Err(_) => return GainMapPresence::Unknown,
+        };
+
+    let md = &gm.metadata;
+    let channels = if md.is_multichannel {
+        3u8
+    } else {
+        gm_channels_from_av1.min(1)
+    };
+
+    let convert_channel = |ch: &zenavif_parse::GainMapChannel| zencodec::GainMapChannel {
+        min: ch.gain_map_min_n as f64 / ch.gain_map_min_d as f64,
+        max: ch.gain_map_max_n as f64 / ch.gain_map_max_d as f64,
+        gamma: ch.gamma_n as f64 / ch.gamma_d as f64,
+        base_offset: ch.base_offset_n as f64 / ch.base_offset_d as f64,
+        alternate_offset: ch.alternate_offset_n as f64 / ch.alternate_offset_d as f64,
+    };
+
+    let mut params = zencodec::GainMapParams::default();
+    params.channels = [
+        convert_channel(&md.channels[0]),
+        convert_channel(&md.channels[1]),
+        convert_channel(&md.channels[2]),
+    ];
+    params.base_hdr_headroom = md.base_hdr_headroom_n as f64 / md.base_hdr_headroom_d as f64;
+    params.alternate_hdr_headroom =
+        md.alternate_hdr_headroom_n as f64 / md.alternate_hdr_headroom_d as f64;
+    params.use_base_color_space = md.use_base_colour_space;
+
+    let gm_info = zencodec::GainMapInfo::new(params, width, height, channels);
+    GainMapPresence::Available(Box::new(gm_info))
 }
 
 // ── Pixel conversion helpers ────────────────────────────────────────────────
