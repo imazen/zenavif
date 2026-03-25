@@ -560,8 +560,16 @@ impl zencodec::SourceEncodingDetails for AvifProbe {
     }
 
     fn is_lossless(&self) -> bool {
-        // AVIF supports lossless but we can't reliably detect it from
-        // headers alone (QP=0 is near-lossless, not guaranteed lossless).
+        // AV1 lossless mode requires base_q_idx=0 AND a lossless flag in
+        // the frame header (which enables identity transforms and skips
+        // quantization entirely). Our lightweight probe only extracts
+        // base_q_idx from the OBU data attached to the av1C box — it does
+        // not fully parse the frame header to check the lossless flag.
+        //
+        // QP=0 is a necessary condition for lossless but not sufficient:
+        // an encoder could use QP=0 with lossy chroma subsampling (4:2:0)
+        // or without the lossless flag, producing near-lossless output.
+        // We therefore return `false` rather than risk a false positive.
         false
     }
 }

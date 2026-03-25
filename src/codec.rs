@@ -455,6 +455,7 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
             mastering_display: None,
             rotation: None,
             mirror: None,
+            policy: None,
         }
     }
 }
@@ -475,6 +476,7 @@ pub struct AvifEncodeJob {
     mastering_display: Option<zencodec::MasteringDisplay>,
     rotation: Option<u8>,
     mirror: Option<u8>,
+    policy: Option<zencodec::encode::EncodePolicy>,
 }
 
 #[cfg(feature = "encode")]
@@ -526,6 +528,11 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
 
     fn with_limits(mut self, limits: ResourceLimits) -> Self {
         self.limits = limits;
+        self
+    }
+
+    fn with_policy(mut self, policy: zencodec::encode::EncodePolicy) -> Self {
+        self.policy = Some(policy);
         self
     }
 
@@ -592,12 +599,25 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
             }
             // threads == 0 only from future unknown variants; leave default
         }
+        // Apply encode policy: suppress metadata the policy disallows.
+        let exif = match self.policy {
+            Some(ref p) if !p.resolve_exif(true) => None,
+            _ => self.exif,
+        };
+        let icc_profile = match self.policy {
+            Some(ref p) if !p.resolve_icc(true) => None,
+            _ => self.icc_profile,
+        };
+        let xmp = match self.policy {
+            Some(ref p) if !p.resolve_xmp(true) => None,
+            _ => self.xmp,
+        };
         Ok(AvifEncoder {
             config,
             stop: self.stop,
-            exif: self.exif,
-            icc_profile: self.icc_profile,
-            xmp: self.xmp,
+            exif,
+            icc_profile,
+            xmp,
             limits: self.limits,
         })
     }
@@ -1349,6 +1369,7 @@ impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
             stop: None,
             limits: ResourceLimits::none(),
             start_frame_index: 0,
+            policy: None,
         }
     }
 }
@@ -1361,6 +1382,7 @@ pub struct AvifDecodeJob<'a> {
     stop: Option<zencodec::StopToken>,
     limits: ResourceLimits,
     start_frame_index: u32,
+    policy: Option<zencodec::decode::DecodePolicy>,
 }
 
 impl<'a> AvifDecodeJob<'a> {
@@ -1435,6 +1457,11 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
         self
     }
 
+    fn with_policy(mut self, policy: zencodec::decode::DecodePolicy) -> Self {
+        self.policy = Some(policy);
+        self
+    }
+
     fn probe(&self, data: &[u8]) -> Result<ImageInfo, At<Error>> {
         let decoder = crate::ManagedAvifDecoder::new(data, &self.config.inner)?;
         let native_info = decoder.probe_info()?;
@@ -1449,6 +1476,9 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
         }
         if let Ok(probe) = crate::detect::probe(data) {
             info = info.with_source_encoding_details(probe);
+        }
+        if let Some(ref policy) = self.policy {
+            apply_decode_policy(&mut info, policy);
         }
         Ok(info)
     }
@@ -1531,6 +1561,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
             data,
             preferred: preferred.to_vec(),
             limits: self.limits,
+            policy: self.policy,
         })
     }
 
@@ -1628,6 +1659,14 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
         data: Cow<'a, [u8]>,
         preferred: &[PixelDescriptor],
     ) -> Result<AvifAnimationFrameDecoder, At<Error>> {
+        // Reject animation when policy disallows it.
+        if let Some(ref policy) = self.policy
+            && !policy.resolve_animation(true)
+        {
+            return Err(at!(Error::UnsupportedOperation(
+                zencodec::UnsupportedOperation::AnimationDecode,
+            )));
+        }
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
 
@@ -1641,11 +1680,19 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
         let anim_dec = crate::AnimationDecoder::new(&data, &cfg)?;
         let anim_info = anim_dec.info().clone();
 
-        let base_info = convert_native_info(&native_info).with_sequence(ImageSequence::Animation {
-            frame_count: Some(anim_info.frame_count as u32),
-            loop_count: Some(anim_info.loop_count),
-            random_access: true,
-        });
+        let mut base_info =
+            convert_native_info(&native_info).with_sequence(ImageSequence::Animation {
+                frame_count: Some(anim_info.frame_count as u32),
+                loop_count: Some(anim_info.loop_count),
+                random_access: true,
+            });
+        // Attach source encoding details to the shared animation ImageInfo.
+        if let Ok(probe) = crate::detect::probe(&data) {
+            base_info = base_info.with_source_encoding_details(probe);
+        }
+        if let Some(ref policy) = self.policy {
+            apply_decode_policy(&mut base_info, policy);
+        }
 
         Ok(AvifAnimationFrameDecoder {
             anim_decoder: anim_dec,
@@ -1852,6 +1899,22 @@ fn convert_gain_map_presence(native: &crate::image::ImageInfo) -> GainMapPresenc
     GainMapPresence::Available(Box::new(gm_info))
 }
 
+/// Strip metadata from [`ImageInfo`] according to a [`DecodePolicy`](zencodec::decode::DecodePolicy).
+///
+/// When a policy flag resolves to `false` (default is `true` = allow), the
+/// corresponding metadata field is cleared so callers never see it.
+fn apply_decode_policy(info: &mut ImageInfo, policy: &zencodec::decode::DecodePolicy) {
+    if !policy.resolve_icc(true) {
+        info.source_color.icc_profile = None;
+    }
+    if !policy.resolve_exif(true) {
+        info.embedded_metadata.exif = None;
+    }
+    if !policy.resolve_xmp(true) {
+        info.embedded_metadata.xmp = None;
+    }
+}
+
 // ── Pixel conversion helpers ────────────────────────────────────────────────
 
 /// Check if two descriptors match on pixel format (channel type + alpha),
@@ -1928,6 +1991,7 @@ pub struct AvifDecoder<'a> {
     data: Cow<'a, [u8]>,
     preferred: Vec<PixelDescriptor>,
     limits: ResourceLimits,
+    policy: Option<zencodec::decode::DecodePolicy>,
 }
 
 impl zencodec::decode::Decode for AvifDecoder<'_> {
@@ -1965,7 +2029,10 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
         // Set transfer function and primaries from CICP on the pixel descriptor.
         let pixels = set_cicp_on_pixels(pixels, &native_info);
         let pixels = negotiate_format(pixels, &self.preferred);
-        let info = convert_native_info(&native_info);
+        let mut info = convert_native_info(&native_info);
+        if let Some(ref policy) = self.policy {
+            apply_decode_policy(&mut info, policy);
+        }
         let mut output = DecodeOutput::new(pixels, info);
         if let Ok(probe) = crate::detect::probe(&self.data) {
             output = output.with_source_encoding_details(probe);
