@@ -101,7 +101,7 @@ pub use codec::{
     AvifAnimationFrameDecoder, AvifDecodeJob, AvifDecoder as AvifZenDecoder, AvifDecoderConfig,
 };
 #[cfg(all(feature = "zencodec", feature = "encode"))]
-pub use codec::{AvifEncodeJob, AvifEncoder, AvifEncoderConfig};
+pub use codec::{AvifAnimationFrameEncoder, AvifEncodeJob, AvifEncoder, AvifEncoderConfig};
 pub use config::DecoderConfig;
 pub use decode_av1::decode_av1_obu;
 #[cfg(feature = "unsafe-asm")]

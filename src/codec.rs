@@ -13,6 +13,7 @@
 //! | `DecoderConfig` | [`AvifDecoderConfig`] |
 //! | `DecodeJob<'a>` | [`AvifDecodeJob`] |
 //! | `Decode` | [`AvifDecoder`] |
+//! | `AnimationFrameEncoder` | [`AvifAnimationFrameEncoder`] |
 //! | `AnimationFrameDecoder` | [`AvifAnimationFrameDecoder`] |
 
 use std::borrow::Cow;
@@ -311,6 +312,7 @@ static AVIF_ENCODE_CAPABILITIES: zencodec::encode::EncodeCapabilities =
         .with_lossless(cfg!(feature = "encode-imazen"))
         .with_hdr(true)
         .with_gain_map(true)
+        .with_animation(true)
         .with_native_gray(false)
         .with_native_16bit(true)
         .with_native_f32(false)
@@ -456,6 +458,8 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
             rotation: None,
             mirror: None,
             policy: None,
+            canvas_size: None,
+            loop_count: None,
         }
     }
 }
@@ -477,6 +481,8 @@ pub struct AvifEncodeJob {
     rotation: Option<u8>,
     mirror: Option<u8>,
     policy: Option<zencodec::encode::EncodePolicy>,
+    canvas_size: Option<(u32, u32)>,
+    loop_count: Option<Option<u32>>,
 }
 
 #[cfg(feature = "encode")]
@@ -493,7 +499,7 @@ impl AvifEncodeJob {
 impl zencodec::encode::EncodeJob for AvifEncodeJob {
     type Error = At<Error>;
     type Enc = AvifEncoder;
-    type AnimationFrameEnc = ();
+    type AnimationFrameEnc = AvifAnimationFrameEncoder;
 
     fn with_stop(mut self, stop: zencodec::StopToken) -> Self {
         self.stop = Some(stop);
@@ -622,10 +628,105 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         })
     }
 
-    fn animation_frame_encoder(self) -> Result<(), At<Error>> {
-        Err(at!(Error::UnsupportedOperation(
-            zencodec::UnsupportedOperation::AnimationEncode,
-        )))
+    fn with_canvas_size(mut self, width: u32, height: u32) -> Self {
+        self.canvas_size = Some((width, height));
+        self
+    }
+
+    fn with_loop_count(mut self, count: Option<u32>) -> Self {
+        self.loop_count = Some(count);
+        self
+    }
+
+    fn animation_frame_encoder(self) -> Result<AvifAnimationFrameEncoder, At<Error>> {
+        let mut config = self.config.inner.clone();
+        // Apply CICP color metadata
+        if let Some(cicp) = self.cicp {
+            config = config
+                .color_primaries(cicp.color_primaries)
+                .transfer_characteristics(cicp.transfer_characteristics)
+                .matrix_coefficients(cicp.matrix_coefficients);
+        }
+        // Apply HDR metadata
+        if let Some(cll) = self.content_light_level {
+            config = config.content_light_level(
+                cll.max_content_light_level,
+                cll.max_frame_average_light_level,
+            );
+        }
+        if let Some(mdcv) = self.mastering_display {
+            let xy_to_u16 = |v: f32| (v * 65535.0 + 0.5) as u16;
+            config = config.mastering_display(crate::MasteringDisplayConfig {
+                primaries: [
+                    (
+                        xy_to_u16(mdcv.primaries_xy[0][0]),
+                        xy_to_u16(mdcv.primaries_xy[0][1]),
+                    ),
+                    (
+                        xy_to_u16(mdcv.primaries_xy[1][0]),
+                        xy_to_u16(mdcv.primaries_xy[1][1]),
+                    ),
+                    (
+                        xy_to_u16(mdcv.primaries_xy[2][0]),
+                        xy_to_u16(mdcv.primaries_xy[2][1]),
+                    ),
+                ],
+                white_point: (
+                    xy_to_u16(mdcv.white_point_xy[0]),
+                    xy_to_u16(mdcv.white_point_xy[1]),
+                ),
+                max_luminance: (mdcv.max_luminance * 256.0 + 0.5) as u32,
+                min_luminance: (mdcv.min_luminance * 16384.0 + 0.5) as u32,
+            });
+        }
+        if let Some(rot) = self.rotation {
+            config = config.rotation(rot);
+        }
+        if let Some(mir) = self.mirror {
+            config = config.mirror(mir);
+        }
+        // Apply threading policy
+        if !matches!(
+            self.limits.threading(),
+            zencodec::ThreadingPolicy::Unlimited
+        ) {
+            let threads = policy_to_threads(self.limits.threading());
+            if threads > 0 {
+                config = config.threads(Some(threads as usize));
+            }
+        }
+        // Apply metadata
+        let policy = self.policy.as_ref();
+        if let Some(exif) = self.exif {
+            if policy.map_or(true, |p| p.resolve_exif(true)) {
+                config = config.exif(exif.to_vec());
+            }
+        }
+        if let Some(icc) = self.icc_profile {
+            if policy.map_or(true, |p| p.resolve_icc(true)) {
+                config = config.icc_profile(icc.to_vec());
+            }
+        }
+        if let Some(xmp) = self.xmp {
+            if policy.map_or(true, |p| p.resolve_xmp(true)) {
+                config = config.xmp(xmp.to_vec());
+            }
+        }
+
+        let (canvas_w, canvas_h) = match self.canvas_size {
+            Some((w, h)) => (Some(w), Some(h)),
+            None => (None, None),
+        };
+
+        Ok(AvifAnimationFrameEncoder {
+            config,
+            stop: self.stop,
+            frames: Vec::new(),
+            pixel_format: None,
+            canvas_width: canvas_w,
+            canvas_height: canvas_h,
+            limits: self.limits,
+        })
     }
 }
 
@@ -1056,6 +1157,267 @@ impl zencodec::encode::Encoder for AvifEncoder {
                 zencodec::UnsupportedOperation::PixelFormat,
             ))),
         }
+    }
+}
+
+// ── Animation Frame Encoder ──────────────────────────────────────────────────
+
+/// Buffered frame for animation encoding.
+#[cfg(feature = "encode")]
+enum BufferedFrame {
+    Rgb8 {
+        pixels: imgref::ImgVec<Rgb<u8>>,
+        duration_ms: u32,
+    },
+    Rgba8 {
+        pixels: imgref::ImgVec<Rgba<u8>>,
+        duration_ms: u32,
+    },
+    Rgb16 {
+        pixels: imgref::ImgVec<Rgb<u16>>,
+        duration_ms: u32,
+    },
+    Rgba16 {
+        pixels: imgref::ImgVec<Rgba<u16>>,
+        duration_ms: u32,
+    },
+}
+
+/// Full-frame animation encoder for AVIF.
+///
+/// Buffers frames and encodes them all on [`finish()`](zencodec::encode::AnimationFrameEncoder::finish).
+/// All frames must have the same dimensions and pixel format.
+#[cfg(feature = "encode")]
+pub struct AvifAnimationFrameEncoder {
+    config: crate::EncoderConfig,
+    stop: Option<zencodec::StopToken>,
+    frames: Vec<BufferedFrame>,
+    pixel_format: Option<zenpixels::PixelFormat>,
+    canvas_width: Option<u32>,
+    canvas_height: Option<u32>,
+    limits: ResourceLimits,
+}
+
+#[cfg(feature = "encode")]
+impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
+    type Error = At<Error>;
+
+    fn reject(op: zencodec::UnsupportedOperation) -> At<Error> {
+        at!(Error::UnsupportedOperation(op))
+    }
+
+    fn push_frame(
+        &mut self,
+        pixels: PixelSlice<'_>,
+        duration_ms: u32,
+        stop: Option<&dyn Stop>,
+    ) -> Result<(), At<Error>> {
+        // Check cancellation (combine per-call + owned stop)
+        if let Some(s) = stop {
+            s.check().map_err(|e| at!(Error::from(e)))?;
+        }
+        if let Some(ref s) = self.stop {
+            s.check().map_err(|e| at!(Error::from(e)))?;
+        }
+
+        let w = pixels.width();
+        let h = pixels.rows();
+
+        // Validate canvas dimensions match
+        match (self.canvas_width, self.canvas_height) {
+            (Some(cw), Some(ch)) if cw != w || ch != h => {
+                return Err(at!(Error::Encode(format!(
+                    "frame dimensions {}x{} don't match canvas {}x{}",
+                    w, h, cw, ch
+                ))));
+            }
+            (None, None) => {
+                self.canvas_width = Some(w);
+                self.canvas_height = Some(h);
+            }
+            _ => {}
+        }
+
+        // Check resource limits
+        let desc = pixels.descriptor();
+        let bpp = desc.bytes_per_pixel() as u64;
+        self.limits
+            .check_dimensions(w, h)
+            .map_err(|_| {
+                at!(Error::ImageTooLarge {
+                    width: w,
+                    height: h,
+                })
+            })?;
+        self.limits
+            .check_memory(w as u64 * h as u64 * bpp)
+            .map_err(|e| at!(Error::Encode(format!("{e}"))))?;
+
+        let fmt = desc.pixel_format();
+
+        // Validate consistent pixel format across frames
+        if let Some(expected) = self.pixel_format {
+            if fmt != expected {
+                return Err(at!(Error::Encode(format!(
+                    "pixel format mismatch: first frame was {expected:?}, this frame is {fmt:?}"
+                ))));
+            }
+        } else {
+            self.pixel_format = Some(fmt);
+        }
+
+        let raw = pixels.contiguous_bytes();
+        let wu = w as usize;
+        let hu = h as usize;
+
+        let frame = match fmt {
+            zenpixels::PixelFormat::Rgb8 => {
+                let rgb: Vec<Rgb<u8>> = bytemuck::cast_slice(&raw).to_vec();
+                BufferedFrame::Rgb8 {
+                    pixels: imgref::ImgVec::new(rgb, wu, hu),
+                    duration_ms,
+                }
+            }
+            zenpixels::PixelFormat::Rgba8 => {
+                let rgba: Vec<Rgba<u8>> = bytemuck::cast_slice(&raw).to_vec();
+                BufferedFrame::Rgba8 {
+                    pixels: imgref::ImgVec::new(rgba, wu, hu),
+                    duration_ms,
+                }
+            }
+            zenpixels::PixelFormat::Rgb16 => {
+                let rgb: Vec<Rgb<u16>> = bytemuck::cast_slice(&raw).to_vec();
+                BufferedFrame::Rgb16 {
+                    pixels: imgref::ImgVec::new(rgb, wu, hu),
+                    duration_ms,
+                }
+            }
+            zenpixels::PixelFormat::Rgba16 => {
+                let rgba: Vec<Rgba<u16>> = bytemuck::cast_slice(&raw).to_vec();
+                BufferedFrame::Rgba16 {
+                    pixels: imgref::ImgVec::new(rgba, wu, hu),
+                    duration_ms,
+                }
+            }
+            _ => {
+                return Err(at!(Error::UnsupportedOperation(
+                    zencodec::UnsupportedOperation::PixelFormat,
+                )));
+            }
+        };
+
+        self.frames.push(frame);
+        Ok(())
+    }
+
+    fn finish(self, stop: Option<&dyn Stop>) -> Result<EncodeOutput, At<Error>> {
+        if let Some(s) = stop {
+            s.check().map_err(|e| at!(Error::from(e)))?;
+        }
+        if let Some(ref s) = self.stop {
+            s.check().map_err(|e| at!(Error::from(e)))?;
+        }
+
+        if self.frames.is_empty() {
+            return Err(at!(Error::Encode("no frames to encode".into())));
+        }
+
+        let stop_ref: &dyn Stop = match (&self.stop, stop) {
+            (Some(owned), Some(per_call)) => {
+                // Can't easily combine — prefer per-call token
+                per_call.check().map_err(|e| at!(Error::from(e)))?;
+                owned.check().map_err(|e| at!(Error::from(e)))?;
+                &enough::Unstoppable
+            }
+            (Some(owned), None) => owned,
+            (None, Some(per_call)) => per_call,
+            (None, None) => &enough::Unstoppable,
+        };
+
+        let avif_file = match self.frames[0] {
+            BufferedFrame::Rgb8 { .. } => {
+                let anim_frames: Vec<crate::AnimationFrame> = self
+                    .frames
+                    .into_iter()
+                    .map(|f| match f {
+                        BufferedFrame::Rgb8 {
+                            pixels,
+                            duration_ms,
+                        } => crate::AnimationFrame {
+                            pixels,
+                            duration_ms,
+                        },
+                        _ => unreachable!(),
+                    })
+                    .collect();
+                let result =
+                    crate::encode_animation_rgb8(&anim_frames, &self.config, stop_ref)?;
+                result.avif_file
+            }
+            BufferedFrame::Rgba8 { .. } => {
+                let anim_frames: Vec<crate::AnimationFrameRgba> = self
+                    .frames
+                    .into_iter()
+                    .map(|f| match f {
+                        BufferedFrame::Rgba8 {
+                            pixels,
+                            duration_ms,
+                        } => crate::AnimationFrameRgba {
+                            pixels,
+                            duration_ms,
+                        },
+                        _ => unreachable!(),
+                    })
+                    .collect();
+                let result =
+                    crate::encode_animation_rgba8(&anim_frames, &self.config, stop_ref)?;
+                result.avif_file
+            }
+            BufferedFrame::Rgb16 { .. } => {
+                let anim_frames: Vec<crate::AnimationFrame16> = self
+                    .frames
+                    .into_iter()
+                    .map(|f| match f {
+                        BufferedFrame::Rgb16 {
+                            pixels,
+                            duration_ms,
+                        } => crate::AnimationFrame16 {
+                            pixels,
+                            duration_ms,
+                        },
+                        _ => unreachable!(),
+                    })
+                    .collect();
+                let result =
+                    crate::encode_animation_rgb16(&anim_frames, &self.config, stop_ref)?;
+                result.avif_file
+            }
+            BufferedFrame::Rgba16 { .. } => {
+                let anim_frames: Vec<crate::AnimationFrameRgba16> = self
+                    .frames
+                    .into_iter()
+                    .map(|f| match f {
+                        BufferedFrame::Rgba16 {
+                            pixels,
+                            duration_ms,
+                        } => crate::AnimationFrameRgba16 {
+                            pixels,
+                            duration_ms,
+                        },
+                        _ => unreachable!(),
+                    })
+                    .collect();
+                let result =
+                    crate::encode_animation_rgba16(&anim_frames, &self.config, stop_ref)?;
+                result.avif_file
+            }
+        };
+
+        self.limits
+            .check_output_size(avif_file.len() as u64)
+            .map_err(|e| at!(Error::Encode(format!("{e}"))))?;
+
+        Ok(EncodeOutput::new(avif_file, ImageFormat::Avif))
     }
 }
 
@@ -3469,6 +3831,21 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "encode")]
+    #[test]
+    fn avif_animation_frame_encoder_implements_trait() {
+        fn _assert_trait<T: zencodec::encode::AnimationFrameEncoder + Send + 'static>() {}
+        _assert_trait::<super::AvifAnimationFrameEncoder>();
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encode_capabilities_include_animation() {
+        use zencodec::encode::EncoderConfig;
+        let caps = AvifEncoderConfig::capabilities();
+        assert!(caps.animation(), "animation should be true");
+    }
+
     #[test]
     fn avif_animation_frame_decoder_implements_trait() {
         // AvifAnimationFrameDecoder implements AnimationFrameDecoder which includes loop_count()
@@ -3545,6 +3922,51 @@ mod tests {
             frames_decoded, total,
             "should decode exactly {total} frames, got {frames_decoded}"
         );
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn zencodec_animation_encode_decode_roundtrip() {
+        use zencodec::decode::{AnimationFrameDecoder, DecodeJob, DecoderConfig};
+        use zencodec::encode::{AnimationFrameEncoder, EncodeJob, EncoderConfig};
+
+        let config = AvifEncoderConfig::new().with_generic_quality(80.0).with_generic_effort(0);
+        let mut enc = config
+            .job()
+            .with_canvas_size(64, 64)
+            .with_loop_count(Some(0))
+            .animation_frame_encoder()
+            .expect("animation_frame_encoder should succeed");
+
+        // Push 3 solid-color RGB8 frames
+        let colors: [Rgb<u8>; 3] = [
+            Rgb { r: 255, g: 0, b: 0 },
+            Rgb { r: 0, g: 255, b: 0 },
+            Rgb { r: 0, g: 0, b: 255 },
+        ];
+        for color in &colors {
+            let pixels: Vec<Rgb<u8>> = vec![*color; 64 * 64];
+            let img = imgref::ImgVec::new(pixels, 64, 64);
+            let ps = PixelSlice::from(img.as_ref()).erase();
+            enc.push_frame(ps, 100, None).unwrap();
+        }
+
+        let output = enc.finish(None).expect("animation finish should succeed");
+        assert!(!output.is_empty(), "encoded animation should not be empty");
+
+        // Decode via zencodec animation frame decoder
+        let dec_config = AvifDecoderConfig::new();
+        let mut decoder = dec_config
+            .job()
+            .animation_frame_decoder(Cow::Borrowed(output.data()), &[])
+            .expect("should decode the animated AVIF");
+
+        assert_eq!(decoder.frame_count(), Some(3));
+        let mut count = 0u32;
+        while let Ok(Some(_frame)) = decoder.render_next_frame(None) {
+            count += 1;
+        }
+        assert_eq!(count, 3, "should decode exactly 3 frames");
     }
 
     // Gain map zencodec extras tests are in tests/gainmap_decode.rs
