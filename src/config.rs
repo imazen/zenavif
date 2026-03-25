@@ -13,6 +13,12 @@ pub struct DecoderConfig {
     /// Use to disable SIMD paths for testing. Default: all enabled.
     /// x86_64: bit 3 = AVX2, bit 2 = SSE4.1, bit 1 = SSSE3, bit 0 = SSE2
     pub(crate) cpu_flags_mask: u32,
+    /// Parser peak memory limit in bytes (forwarded to zenavif-parse).
+    pub(crate) parser_peak_memory_limit: Option<u64>,
+    /// Parser total megapixels limit (forwarded to zenavif-parse).
+    pub(crate) parser_total_megapixels_limit: Option<u32>,
+    /// Parser max animation frames (forwarded to zenavif-parse).
+    pub(crate) parser_max_animation_frames: Option<u32>,
 }
 
 impl Default for DecoderConfig {
@@ -26,6 +32,9 @@ impl Default for DecoderConfig {
             apply_grain: true,
             frame_size_limit: 0,
             cpu_flags_mask: u32::MAX,
+            parser_peak_memory_limit: None,
+            parser_total_megapixels_limit: None,
+            parser_max_animation_frames: None,
         }
     }
 }

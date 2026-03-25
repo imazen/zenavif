@@ -509,7 +509,17 @@ impl AvifDecoder {
     /// This parses the AVIF container but does not decode the AV1 data yet.
     pub fn new(data: &[u8], config: &DecoderConfig) -> Result<Self> {
         // Use zero-copy AvifParser — primary/alpha data returned as Cow::Borrowed
-        let parse_config = zenavif_parse::DecodeConfig::default().lenient(true);
+        let mut parse_config = zenavif_parse::DecodeConfig::default().lenient(true);
+        // Forward resource limits to the parser when configured.
+        if let Some(mem) = config.parser_peak_memory_limit {
+            parse_config = parse_config.with_peak_memory_limit(mem);
+        }
+        if let Some(mp) = config.parser_total_megapixels_limit {
+            parse_config = parse_config.with_total_megapixels_limit(mp);
+        }
+        if let Some(frames) = config.parser_max_animation_frames {
+            parse_config = parse_config.with_max_animation_frames(frames);
+        }
         let parser = zenavif_parse::AvifParser::from_owned_with_config(
             data.to_vec(),
             &parse_config,

@@ -726,6 +726,7 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
             canvas_width: canvas_w,
             canvas_height: canvas_h,
             limits: self.limits,
+            frame_count: 0,
         })
     }
 }
@@ -1196,6 +1197,8 @@ pub struct AvifAnimationFrameEncoder {
     canvas_width: Option<u32>,
     canvas_height: Option<u32>,
     limits: ResourceLimits,
+    /// Number of frames pushed so far, for max_frames enforcement.
+    frame_count: u32,
 }
 
 #[cfg(feature = "encode")]
@@ -1249,6 +1252,12 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
         })?;
         self.limits
             .check_memory(w as u64 * h as u64 * bpp)
+            .map_err(|e| at!(Error::Encode(format!("{e}"))))?;
+
+        // Enforce max_frames limit.
+        self.frame_count += 1;
+        self.limits
+            .check_frames(self.frame_count)
             .map_err(|e| at!(Error::Encode(format!("{e}"))))?;
 
         let fmt = desc.pixel_format();
@@ -1757,6 +1766,18 @@ impl<'a> AvifDecodeJob<'a> {
             let threads = policy_to_threads(self.limits.threading());
             cfg = cfg.threads(threads);
         }
+        // Forward resource limits to the container parser.
+        if let Some(mem) = self.limits.max_memory_bytes {
+            cfg.parser_peak_memory_limit = Some(mem);
+        }
+        if let Some(px) = self.limits.max_pixels {
+            // Convert pixels to megapixels (round up to avoid zero).
+            let mp = ((px + 999_999) / 1_000_000).min(u32::MAX as u64) as u32;
+            cfg.parser_total_megapixels_limit = Some(mp);
+        }
+        if let Some(frames) = self.limits.max_frames {
+            cfg.parser_max_animation_frames = Some(frames);
+        }
         cfg
     }
 
@@ -2060,6 +2081,8 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
             loop_count: anim_info.loop_count,
             preferred: preferred.to_vec(),
             current_frame: None,
+            limits: self.limits.clone(),
+            accumulated_ms: 0,
         })
     }
 }
@@ -2572,6 +2595,10 @@ pub struct AvifAnimationFrameDecoder {
     /// Holds the current frame's pixels so `render_next_frame` can return
     /// a borrowing `AnimationFrame<'_>`.
     current_frame: Option<PixelBuffer>,
+    /// Resource limits for frame count and animation duration enforcement.
+    limits: ResourceLimits,
+    /// Accumulated animation duration in milliseconds across all decoded frames.
+    accumulated_ms: u64,
 }
 
 impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
@@ -2608,6 +2635,17 @@ impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
             };
             let frame_index = self.frames_decoded;
             self.frames_decoded += 1;
+
+            // Enforce max_frames limit (counts all decoded frames, including skipped).
+            self.limits
+                .check_frames(self.frames_decoded)
+                .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
+
+            // Accumulate and enforce max_animation_ms.
+            self.accumulated_ms += frame.duration_ms as u64;
+            self.limits
+                .check_animation_ms(self.accumulated_ms)
+                .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
 
             // Skip frames before the requested start index. We must still
             // decode them to maintain correct compositing state, but we
