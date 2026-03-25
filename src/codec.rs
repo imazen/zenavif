@@ -2029,7 +2029,7 @@ impl zencodec::decode::StreamingDecode for AvifStreamingDecoder {
 
             converter
                 .convert_strip(self.y_offset as usize, h as usize, strip_buf)
-                .map_err(|e| e.into_inner())?;
+                .map_err(|e| e.decompose().0)?;
 
             let y = self.y_offset;
             self.y_offset += h;
@@ -2098,7 +2098,7 @@ impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
             let frame = self
                 .anim_decoder
                 .next_frame(stop)
-                .map_err(|e| e.into_inner())?;
+                .map_err(|e| e.decompose().0)?;
             let Some(frame) = frame else {
                 return Ok(None);
             };

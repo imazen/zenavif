@@ -2,45 +2,45 @@
 name = "zenavif"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.89"
+rust-version = "1.93"
 license = "AGPL-3.0-or-later"
 description = "Pure Rust AVIF image codec powered by rav1d and zenravif"
 categories = ["multimedia::images"]
 keywords = ["avif", "decoder", "encoder", "av1", "image"]
 repository = "https://github.com/imazen/zenavif"
 documentation = "https://docs.rs/zenavif"
-exclude = ["debug_simd", "Dockerfile.references", "Cross.toml", "scripts/", "tests/vectors/", "tests/zenavif-references/", "CLAUDE.md"]
+exclude = ["debug_simd", "Dockerfile.references", "Cross.toml", "scripts/", "tests/vectors/", "tests/zenavif-references/", "CLAUDE.md", "FEEDBACK.md"]
 
 [dependencies]
 # rav1d: C FFI-based decoder for asm feature (fastest)
 rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"], optional = true }
 # rav1d-safe: 100% safe managed API decoder (no c-ffi feature!)
 rav1d-safe = { version = "0.3.1", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
-archmage = { version = "0.9.8", features = ["macros"] }
-magetypes = "0.9.8"
+archmage = { version = "0.9.12", features = ["macros"] }
+magetypes = "0.9.12"
 safe_unaligned_simd = "0.2.5"
-zenavif-parse = { version = "0.4", path = "../zenavif-parse" }
-yuv = "0.8"
+zenavif-parse = { version = "0.4.0", path = "../zenavif-parse" }
+yuv = "0.8.12"
 imgref = "1.12.0"
 rgb = { version = "0.8.52", default-features = false, features = ["bytemuck"] }
-enough = "0.4"
-bytemuck = { version = "1", default-features = false, features = ["derive"] }
-thiserror = { version = "2.0", default-features = false }
+enough = "0.4.2"
+bytemuck = { version = "1.25.0", default-features = false, features = ["derive"] }
+thiserror = { version = "2.0.18", default-features = false }
 whereat = "0.1.4"
-log = "0.4"
-ravif = { package = "zenravif", version = "0.1", path = "../ravif/ravif", default-features = false, optional = true }
+log = "0.4.29"
+ravif = { package = "zenravif", version = "0.1.0", path = "../ravif/ravif", default-features = false, optional = true }
 svtav1 = { path = "/home/lilith/research/svtav1/svtav1-rs/svtav1", optional = true }
 zencodec = { version = "0.1.1" }
-zenpixels = { version = "0.2.0", default-features = false }
+zenpixels = { version = "0.2.0", default-features = false, features = ["imgref", "rgb"] }
 zenpixels-convert = { version = "0.2.0", default-features = false, features = ["rgb"] }
 linear-srgb = "0.6.4"
 
 [dev-dependencies]
-archmage = { version = "0.9.8", features = ["std"] }
-env_logger = { version = "0.11", default-features = false }
+archmage = { version = "0.9.12", features = ["std"] }
+env_logger = { version = "0.11.10", default-features = false }
 png = "0.18.0"
-image = "0.25"
-criterion = { version = "0.8", features = ["html_reports"] }
+image = "0.25.10"
+criterion = { version = "0.8.2", features = ["html_reports"] }
 fast-ssim2 = { path = "../fast-ssim2/ssimulacra2" }
 
 [[bench]]

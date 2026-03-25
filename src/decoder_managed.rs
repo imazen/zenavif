@@ -1591,7 +1591,7 @@ impl ManagedAvifDecoder {
 
             converter
                 .convert_strip(y_offset, h, &mut strip_pixels)
-                .map_err(|e| e.into_inner())?;
+                .map_err(|e| e.decompose().0)?;
 
             // Copy converted rows to sink buffer
             let mut sink_buf = sink

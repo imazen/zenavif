@@ -24,35 +24,20 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest, windows-11-arm]
     steps:
       - uses: actions/checkout@v6
-      - name: Configure git for private repos
-        run: git config --global url."https://x-access-token:${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Patch path deps to git refs
-        shell: bash
-        run: |
-          sed \
-            -e 's|path = "\.\./zenavif-parse"|git = "https://github.com/imazen/zenavif-parse"|g' \
-            -e 's|path = "\.\./zencodec"|git = "https://github.com/imazen/zencodec"|g' \
-            -e 's|path = "\.\./zenpixels/zenpixels"|git = "https://github.com/imazen/zenpixels"|g' \
-            -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/cavif-rs", branch = "main"|g' \
-            Cargo.toml > Cargo.toml.ci && mv Cargo.toml.ci Cargo.toml
       - name: Build
         run: cargo build
       - name: Test
         run: cargo test
-      - name: Check encode feature
-        run: cargo check --features encode
-      - name: Check encode-threading feature
-        run: cargo check --features encode-threading
+      - name: Check zencodec feature
+        run: cargo check --features zencodec
 
   i686:
     name: Test (i686 cross)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Configure git for private repos
-        run: git config --global url."https://x-access-token:${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: i686-unknown-linux-gnu
@@ -60,15 +45,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: cross-i686
-      - name: Patch path deps to git refs
-        shell: bash
-        run: |
-          sed \
-            -e 's|path = "\.\./zenavif-parse"|git = "https://github.com/imazen/zenavif-parse"|g' \
-            -e 's|path = "\.\./zencodec"|git = "https://github.com/imazen/zencodec"|g' \
-            -e 's|path = "\.\./zenpixels/zenpixels"|git = "https://github.com/imazen/zenpixels"|g' \
-            -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/cavif-rs", branch = "main"|g' \
-            Cargo.toml > Cargo.toml.ci && mv Cargo.toml.ci Cargo.toml
       - name: Test (i686)
         run: cross test --target i686-unknown-linux-gnu
 
@@ -77,21 +53,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Configure git for private repos
-        run: git config --global url."https://x-access-token:${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Patch path deps to git refs
-        shell: bash
-        run: |
-          sed \
-            -e 's|path = "\.\./zenavif-parse"|git = "https://github.com/imazen/zenavif-parse"|g' \
-            -e 's|path = "\.\./zencodec"|git = "https://github.com/imazen/zencodec"|g' \
-            -e 's|path = "\.\./zenpixels/zenpixels"|git = "https://github.com/imazen/zenpixels"|g' \
-            -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/cavif-rs", branch = "main"|g' \
-            Cargo.toml > Cargo.toml.ci && mv Cargo.toml.ci Cargo.toml
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
 
@@ -111,20 +76,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Configure git for private repos
-        run: git config --global url."https://x-access-token:${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-hack
       - uses: Swatinem/rust-cache@v2
-      - name: Patch path deps to git refs
-        shell: bash
-        run: |
-          sed \
-            -e 's|path = "\.\./zenavif-parse"|git = "https://github.com/imazen/zenavif-parse"|g' \
-            -e 's|path = "\.\./zencodec"|git = "https://github.com/imazen/zencodec"|g' \
-            -e 's|path = "\.\./zenpixels/zenpixels"|git = "https://github.com/imazen/zenpixels"|g' \
-            -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/cavif-rs", branch = "main"|g' \
-            Cargo.toml > Cargo.toml.ci && mv Cargo.toml.ci Cargo.toml
       - name: Check MSRV
         run: cargo hack check --rust-version
 
@@ -133,20 +87,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Configure git for private repos
-        run: git config --global url."https://x-access-token:${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: Swatinem/rust-cache@v2
-      - name: Patch path deps to git refs
-        shell: bash
-        run: |
-          sed \
-            -e 's|path = "\.\./zenavif-parse"|git = "https://github.com/imazen/zenavif-parse"|g' \
-            -e 's|path = "\.\./zencodec"|git = "https://github.com/imazen/zencodec"|g' \
-            -e 's|path = "\.\./zenpixels/zenpixels"|git = "https://github.com/imazen/zenpixels"|g' \
-            -e 's|path = "\.\./ravif/ravif"|git = "https://github.com/imazen/cavif-rs", branch = "main"|g' \
-            Cargo.toml > Cargo.toml.ci && mv Cargo.toml.ci Cargo.toml
       - name: Generate coverage
         run: cargo llvm-cov --lcov --output-path lcov.info
       - name: Upload coverage
