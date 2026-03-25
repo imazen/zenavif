@@ -363,13 +363,19 @@ fn svtav1_decode_size_sweep() {
             .speed(10); // fastest preset
         let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable)
             .unwrap_or_else(|e| panic!("{size}x{size} encode failed: {e}"));
-        
+
         match decode_av1_obu(&encoded.avif_file) {
             Ok((pixels, w, h, ch)) => {
-                eprintln!("  {size}x{size}: DECODE OK — {w}x{h}x{ch}, {} bytes encoded", encoded.avif_file.len());
+                eprintln!(
+                    "  {size}x{size}: DECODE OK — {w}x{h}x{ch}, {} bytes encoded",
+                    encoded.avif_file.len()
+                );
             }
             Err(e) => {
-                eprintln!("  {size}x{size}: DECODE FAIL — {} bytes encoded, {e}", encoded.avif_file.len());
+                eprintln!(
+                    "  {size}x{size}: DECODE FAIL — {} bytes encoded, {e}",
+                    encoded.avif_file.len()
+                );
             }
         }
     }
@@ -385,13 +391,19 @@ fn svtav1_decode_size_sweep_speed8() {
             .speed(8);
         let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable)
             .unwrap_or_else(|e| panic!("{size}x{size} encode failed: {e}"));
-        
+
         match decode_av1_obu(&encoded.avif_file) {
             Ok((pixels, w, h, ch)) => {
-                eprintln!("  s8 {size}x{size}: DECODE OK — {w}x{h}x{ch}, {} bytes", encoded.avif_file.len());
+                eprintln!(
+                    "  s8 {size}x{size}: DECODE OK — {w}x{h}x{ch}, {} bytes",
+                    encoded.avif_file.len()
+                );
             }
             Err(e) => {
-                eprintln!("  s8 {size}x{size}: DECODE FAIL — {} bytes, {e}", encoded.avif_file.len());
+                eprintln!(
+                    "  s8 {size}x{size}: DECODE FAIL — {} bytes, {e}",
+                    encoded.avif_file.len()
+                );
             }
         }
     }
@@ -407,7 +419,10 @@ fn svtav1_decode_speed_sweep_64x64() {
             .speed(speed);
         let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
         match decode_av1_obu(&encoded.avif_file) {
-            Ok((_, w, h, _)) => eprintln!("  64x64 s{speed}: OK ({w}x{h}), {} bytes", encoded.avif_file.len()),
+            Ok((_, w, h, _)) => eprintln!(
+                "  64x64 s{speed}: OK ({w}x{h}), {} bytes",
+                encoded.avif_file.len()
+            ),
             Err(_) => eprintln!("  64x64 s{speed}: FAIL, {} bytes", encoded.avif_file.len()),
         }
     }
@@ -423,8 +438,14 @@ fn svtav1_decode_quality_sweep_64x64_s10() {
             .speed(10);
         let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
         match decode_av1_obu(&encoded.avif_file) {
-            Ok((_, w, h, _)) => eprintln!("  64x64 q{q:.0} s10: OK ({w}x{h}), {} bytes", encoded.avif_file.len()),
-            Err(_) => eprintln!("  64x64 q{q:.0} s10: FAIL, {} bytes", encoded.avif_file.len()),
+            Ok((_, w, h, _)) => eprintln!(
+                "  64x64 q{q:.0} s10: OK ({w}x{h}), {} bytes",
+                encoded.avif_file.len()
+            ),
+            Err(_) => eprintln!(
+                "  64x64 q{q:.0} s10: FAIL, {} bytes",
+                encoded.avif_file.len()
+            ),
         }
     }
 }
@@ -439,8 +460,14 @@ fn svtav1_decode_mid_sizes_speed8() {
             .speed(8);
         let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
         match decode_av1_obu(&encoded.avif_file) {
-            Ok((_, w, h, _)) => eprintln!("  s8 {size}x{size}: OK ({w}x{h}), {} bytes", encoded.avif_file.len()),
-            Err(_) => eprintln!("  s8 {size}x{size}: FAIL, {} bytes", encoded.avif_file.len()),
+            Ok((_, w, h, _)) => eprintln!(
+                "  s8 {size}x{size}: OK ({w}x{h}), {} bytes",
+                encoded.avif_file.len()
+            ),
+            Err(_) => eprintln!(
+                "  s8 {size}x{size}: FAIL, {} bytes",
+                encoded.avif_file.len()
+            ),
         }
     }
 }
@@ -453,7 +480,11 @@ fn svtav1_decode_uniform_128x128() {
     let mut pixels = Vec::with_capacity(w * h);
     for _ in 0..h {
         for _ in 0..w {
-            pixels.push(rgb::Rgb { r: 128, g: 128, b: 128 });
+            pixels.push(rgb::Rgb {
+                r: 128,
+                g: 128,
+                b: 128,
+            });
         }
     }
     let img = imgref::Img::new(pixels, w, h);
@@ -463,8 +494,14 @@ fn svtav1_decode_uniform_128x128() {
         .speed(8);
     let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
     match decode_av1_obu(&encoded.avif_file) {
-        Ok((_, w, h, _)) => eprintln!("  uniform 128x128: OK ({w}x{h}), {} bytes", encoded.avif_file.len()),
-        Err(e) => eprintln!("  uniform 128x128: FAIL, {} bytes, {e}", encoded.avif_file.len()),
+        Ok((_, w, h, _)) => eprintln!(
+            "  uniform 128x128: OK ({w}x{h}), {} bytes",
+            encoded.avif_file.len()
+        ),
+        Err(e) => eprintln!(
+            "  uniform 128x128: FAIL, {} bytes, {e}",
+            encoded.avif_file.len()
+        ),
     }
 }
 
@@ -548,8 +585,11 @@ fn svtav1_dump_obu_comparison() {
                 pixels[r * size + c] = ((r * 2 + c) % 256) as u8;
             }
         }
-        let enc = svtav1::avif::AvifEncoder::new().with_quality(70.0).with_speed(8);
-        enc.encode_to_av1_obu(&pixels, size as u32, size as u32, size as u32).unwrap()
+        let enc = svtav1::avif::AvifEncoder::new()
+            .with_quality(70.0)
+            .with_speed(8);
+        enc.encode_to_av1_obu(&pixels, size as u32, size as u32, size as u32)
+            .unwrap()
     };
     let obu64 = make(64);
     let obu128 = make(128);
@@ -557,7 +597,7 @@ fn svtav1_dump_obu_comparison() {
     std::fs::write("/tmp/svtav1_cmp_128.obu", &obu128).unwrap();
     eprintln!("64x64: {} bytes → /tmp/svtav1_cmp_64.obu", obu64.len());
     eprintln!("128x128: {} bytes → /tmp/svtav1_cmp_128.obu", obu128.len());
-    
+
     // Verify 64x64 decodes
     match decode_av1_obu(&obu64) {
         Ok(_) => eprintln!("64x64: DECODES OK"),
@@ -572,8 +612,14 @@ fn svtav1_dump_obu_comparison() {
 #[test]
 fn svtav1_decode_128x64() {
     let mut pixels = vec![0u8; 128 * 64];
-    for r in 0..64 { for c in 0..128 { pixels[r * 128 + c] = ((r * 2 + c) % 256) as u8; } }
-    let enc = svtav1::avif::AvifEncoder::new().with_quality(70.0).with_speed(8);
+    for r in 0..64 {
+        for c in 0..128 {
+            pixels[r * 128 + c] = ((r * 2 + c) % 256) as u8;
+        }
+    }
+    let enc = svtav1::avif::AvifEncoder::new()
+        .with_quality(70.0)
+        .with_speed(8);
     let obu = enc.encode_to_av1_obu(&pixels, 128, 64, 128).unwrap();
     eprintln!("128x64: {} bytes", obu.len());
     match decode_av1_obu(&obu) {

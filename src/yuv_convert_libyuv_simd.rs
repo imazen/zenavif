@@ -303,13 +303,7 @@ pub fn yuv420_to_rgb8_simd_neon(
 /// (via archmage prelude), keeping the module `#![forbid(unsafe_code)]`.
 #[cfg(target_arch = "aarch64")]
 #[rite]
-fn process_8_pixels_neon(
-    _token: NeonToken,
-    y: &[u8],
-    u: &[u8],
-    v: &[u8],
-    out: &mut [RGB8],
-) {
+fn process_8_pixels_neon(_token: NeonToken, y: &[u8], u: &[u8], v: &[u8], out: &mut [RGB8]) {
     // NOTE: We do NOT `use core::arch::aarch64::*` here — the archmage prelude
     // provides safe wrappers for loads/stores that shadow the raw-pointer versions.
 
@@ -357,14 +351,14 @@ fn process_8_pixels_neon(
 
     // Process low 4 pixels
     let (r_lo, g_lo, b_lo) = yuv_to_rgb_neon_i32(
-        _token, y_lo, u_lo, v_lo, yg_vec, c0x0101, ub_vec, ug_vec, vg_vec, vr_vec, bb_vec,
-        bg_vec, br_vec,
+        _token, y_lo, u_lo, v_lo, yg_vec, c0x0101, ub_vec, ug_vec, vg_vec, vr_vec, bb_vec, bg_vec,
+        br_vec,
     );
 
     // Process high 4 pixels
     let (r_hi, g_hi, b_hi) = yuv_to_rgb_neon_i32(
-        _token, y_hi, u_hi, v_hi, yg_vec, c0x0101, ub_vec, ug_vec, vg_vec, vr_vec, bb_vec,
-        bg_vec, br_vec,
+        _token, y_hi, u_hi, v_hi, yg_vec, c0x0101, ub_vec, ug_vec, vg_vec, vr_vec, bb_vec, bg_vec,
+        br_vec,
     );
 
     // Narrow i32 -> i16 (truncating)

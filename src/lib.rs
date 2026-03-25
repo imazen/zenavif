@@ -87,7 +87,10 @@ pub mod yuv_convert_libyuv_autovec;
 pub(crate) mod yuv_convert_libyuv_autovec;
 #[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), feature = "_dev"))]
 pub mod yuv_convert_libyuv_simd;
-#[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), not(feature = "_dev")))]
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    not(feature = "_dev")
+))]
 pub(crate) mod yuv_convert_libyuv_simd;
 
 #[cfg(feature = "encode")]
@@ -95,7 +98,7 @@ use whereat::at;
 
 #[cfg(feature = "zencodec")]
 pub use codec::{
-    AvifDecodeJob, AvifDecoder as AvifZenDecoder, AvifDecoderConfig, AvifFullFrameDecoder,
+    AvifAnimationFrameDecoder, AvifDecodeJob, AvifDecoder as AvifZenDecoder, AvifDecoderConfig,
 };
 #[cfg(all(feature = "zencodec", feature = "encode"))]
 pub use codec::{AvifEncodeJob, AvifEncoder, AvifEncoderConfig};

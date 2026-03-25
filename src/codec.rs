@@ -13,14 +13,14 @@
 //! | `DecoderConfig` | [`AvifDecoderConfig`] |
 //! | `DecodeJob<'a>` | [`AvifDecodeJob`] |
 //! | `Decode` | [`AvifDecoder`] |
-//! | `FullFrameDecoder` | [`AvifFullFrameDecoder`] |
+//! | `AnimationFrameDecoder` | [`AvifAnimationFrameDecoder`] |
 
 use std::borrow::Cow;
 use std::sync::Arc;
 
 use enough::Stop;
 use rgb::{Rgb, Rgba};
-use zencodec::FullFrame;
+use zencodec::AnimationFrame;
 #[cfg(feature = "encode")]
 use zencodec::Metadata;
 use zencodec::decode::DecodeOutput;
@@ -159,7 +159,10 @@ impl AvifEncoderConfig {
     /// Convenience: encode RGB8 pixels with this config.
     pub fn encode_rgb8(&self, img: imgref::ImgRef<'_, Rgb<u8>>) -> Result<EncodeOutput, At<Error>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
-        self.clone().job().encoder()?.encode(PixelSlice::from(img).erase())
+        self.clone()
+            .job()
+            .encoder()?
+            .encode(PixelSlice::from(img).erase())
     }
 
     /// Convenience: encode RGBA8 pixels with this config.
@@ -168,7 +171,10 @@ impl AvifEncoderConfig {
         img: imgref::ImgRef<'_, Rgba<u8>>,
     ) -> Result<EncodeOutput, At<Error>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
-        self.clone().job().encoder()?.encode(PixelSlice::from(img).erase())
+        self.clone()
+            .job()
+            .encoder()?
+            .encode(PixelSlice::from(img).erase())
     }
 
     /// Convenience: encode Gray8 pixels with this config.
@@ -177,7 +183,10 @@ impl AvifEncoderConfig {
         img: imgref::ImgRef<'_, rgb::Gray<u8>>,
     ) -> Result<EncodeOutput, At<Error>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
-        self.clone().job().encoder()?.encode(PixelSlice::from(img).erase())
+        self.clone()
+            .job()
+            .encoder()?
+            .encode(PixelSlice::from(img).erase())
     }
 
     /// Convenience: encode RGB f32 pixels with this config.
@@ -186,7 +195,10 @@ impl AvifEncoderConfig {
         img: imgref::ImgRef<'_, Rgb<f32>>,
     ) -> Result<EncodeOutput, At<Error>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
-        self.clone().job().encoder()?.encode(PixelSlice::from(img).erase())
+        self.clone()
+            .job()
+            .encoder()?
+            .encode(PixelSlice::from(img).erase())
     }
 
     /// Convenience: encode RGBA f32 pixels with this config.
@@ -195,7 +207,10 @@ impl AvifEncoderConfig {
         img: imgref::ImgRef<'_, Rgba<f32>>,
     ) -> Result<EncodeOutput, At<Error>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
-        self.clone().job().encoder()?.encode(PixelSlice::from(img).erase())
+        self.clone()
+            .job()
+            .encoder()?
+            .encode(PixelSlice::from(img).erase())
     }
 
     /// Convenience: encode Gray f32 pixels with this config.
@@ -204,7 +219,10 @@ impl AvifEncoderConfig {
         img: imgref::ImgRef<'_, rgb::Gray<f32>>,
     ) -> Result<EncodeOutput, At<Error>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
-        self.clone().job().encoder()?.encode(PixelSlice::from(img).erase())
+        self.clone()
+            .job()
+            .encoder()?
+            .encode(PixelSlice::from(img).erase())
     }
 }
 
@@ -470,7 +488,7 @@ impl AvifEncodeJob {
 impl zencodec::encode::EncodeJob for AvifEncodeJob {
     type Error = At<Error>;
     type Enc = AvifEncoder;
-    type FullFrameEnc = ();
+    type AnimationFrameEnc = ();
 
     fn with_stop(mut self, stop: zencodec::StopToken) -> Self {
         self.stop = Some(stop);
@@ -581,7 +599,7 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         })
     }
 
-    fn full_frame_encoder(self) -> Result<(), At<Error>> {
+    fn animation_frame_encoder(self) -> Result<(), At<Error>> {
         Err(at!(Error::UnsupportedOperation(
             zencodec::UnsupportedOperation::AnimationEncode,
         )))
@@ -1398,7 +1416,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
     type Error = At<Error>;
     type Dec = AvifDecoder<'a>;
     type StreamDec = AvifStreamingDecoder;
-    type FullFrameDec = AvifFullFrameDecoder;
+    type AnimationFrameDec = AvifAnimationFrameDecoder;
 
     fn with_stop(mut self, stop: zencodec::StopToken) -> Self {
         self.stop = Some(stop);
@@ -1595,11 +1613,11 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
         })
     }
 
-    fn full_frame_decoder(
+    fn animation_frame_decoder(
         self,
         data: Cow<'a, [u8]>,
         preferred: &[PixelDescriptor],
-    ) -> Result<AvifFullFrameDecoder, At<Error>> {
+    ) -> Result<AvifAnimationFrameDecoder, At<Error>> {
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
 
@@ -1619,7 +1637,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
             random_access: true,
         });
 
-        Ok(AvifFullFrameDecoder {
+        Ok(AvifAnimationFrameDecoder {
             anim_decoder: anim_dec,
             index: 0,
             frames_decoded: 0,
@@ -2031,10 +2049,10 @@ impl zencodec::decode::StreamingDecode for AvifStreamingDecoder {
 
 /// Animation AVIF full-frame decoder.
 ///
-/// Lazily decodes frames on demand. The `FullFrameDecoder` trait doesn't pass
+/// Lazily decodes frames on demand. The `AnimationFrameDecoder` trait doesn't pass
 /// a stop token per-call, so per-frame cancellation is not available
 /// through this interface (use the native `AnimationDecoder` API for that).
-pub struct AvifFullFrameDecoder {
+pub struct AvifAnimationFrameDecoder {
     anim_decoder: crate::AnimationDecoder,
     index: usize,
     /// Number of frames decoded so far (including skipped ones).
@@ -2048,11 +2066,11 @@ pub struct AvifFullFrameDecoder {
     loop_count: u32,
     preferred: Vec<PixelDescriptor>,
     /// Holds the current frame's pixels so `render_next_frame` can return
-    /// a borrowing `FullFrame<'_>`.
+    /// a borrowing `AnimationFrame<'_>`.
     current_frame: Option<PixelBuffer>,
 }
 
-impl zencodec::decode::FullFrameDecoder for AvifFullFrameDecoder {
+impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
     type Error = At<Error>;
 
     fn wrap_sink_error(err: zencodec::decode::SinkError) -> Self::Error {
@@ -2074,7 +2092,7 @@ impl zencodec::decode::FullFrameDecoder for AvifFullFrameDecoder {
     fn render_next_frame(
         &mut self,
         stop: Option<&dyn zencodec::enough::Stop>,
-    ) -> Result<Option<FullFrame<'_>>, At<Error>> {
+    ) -> Result<Option<AnimationFrame<'_>>, At<Error>> {
         let stop: &dyn zencodec::enough::Stop = stop.unwrap_or(&enough::Unstoppable);
         loop {
             let frame = self
@@ -2100,7 +2118,7 @@ impl zencodec::decode::FullFrameDecoder for AvifFullFrameDecoder {
             let duration_ms = frame.duration_ms;
             self.current_frame = Some(pixels);
             let slice = self.current_frame.as_ref().unwrap().as_slice().erase();
-            return Ok(Some(FullFrame::new(slice, duration_ms, idx)));
+            return Ok(Some(AnimationFrame::new(slice, duration_ms, idx)));
         }
     }
 
@@ -3301,17 +3319,17 @@ mod tests {
     }
 
     #[test]
-    fn avif_full_frame_decoder_implements_trait() {
-        // AvifFullFrameDecoder implements FullFrameDecoder which includes loop_count()
-        fn _assert_trait<T: zencodec::decode::FullFrameDecoder>() {}
-        _assert_trait::<AvifFullFrameDecoder>();
+    fn avif_animation_frame_decoder_implements_trait() {
+        // AvifAnimationFrameDecoder implements AnimationFrameDecoder which includes loop_count()
+        fn _assert_trait<T: zencodec::decode::AnimationFrameDecoder>() {}
+        _assert_trait::<AvifAnimationFrameDecoder>();
     }
 
     #[test]
-    fn animated_avif_full_frame_decoder_roundtrip() {
+    fn animated_avif_animation_frame_decoder_roundtrip() {
         use super::AvifDecoderConfig;
         use std::borrow::Cow;
-        use zencodec::decode::{DecodeJob, DecoderConfig, FullFrameDecoder};
+        use zencodec::decode::{AnimationFrameDecoder, DecodeJob, DecoderConfig};
 
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../codec-corpus/avif-conformance/valid/2.avif");
@@ -3324,8 +3342,8 @@ mod tests {
         let config = AvifDecoderConfig::new();
         let mut decoder = config
             .job()
-            .full_frame_decoder(Cow::Borrowed(&data), &[])
-            .expect("full_frame_decoder should succeed for animated AVIF");
+            .animation_frame_decoder(Cow::Borrowed(&data), &[])
+            .expect("animation_frame_decoder should succeed for animated AVIF");
 
         // Verify metadata
         let info = decoder.info();
