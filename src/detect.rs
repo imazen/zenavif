@@ -14,6 +14,7 @@
 //!
 //! println!("{}x{}, {} bit", info.width, info.height, info.bit_depth);
 //! println!("Chroma: {:?}", info.chroma_sampling);
+//! println!("Lossless: {:?}", info.lossless);
 //!
 //! if let Some(q) = &info.quality {
 //!     println!("Estimated quality: {:.0} (QP {})", q.estimated_quality, q.quantizer);
@@ -39,6 +40,9 @@ pub struct AvifProbe {
     pub has_alpha: bool,
     /// Whether the image is animated.
     pub has_animation: bool,
+    /// Whether the encoding is lossless.
+    /// `None` if the frame header could not be parsed to determine this.
+    pub lossless: Option<bool>,
     /// Quality estimate from the AV1 quantizer, if extractable.
     pub quality: Option<QualityEstimate>,
     /// Color primaries (CICP).
@@ -135,202 +139,80 @@ impl std::error::Error for ProbeError {}
 
 /// Probe an AVIF file from its raw bytes.
 ///
-/// Parses the ISOBMFF container and AV1 codec configuration to extract
-/// image properties and estimate quality. No pixel decoding is performed.
+/// Parses the ISOBMFF container and AV1 bitstream to extract image properties,
+/// estimate quality, and detect lossy/lossless encoding. No pixel decoding is
+/// performed.
 pub fn probe(data: &[u8]) -> Result<AvifProbe, ProbeError> {
     if data.len() < 12 {
         return Err(ProbeError::TooShort);
     }
 
-    // Check for ISOBMFF container (ftyp box)
-    let ftyp_size = u32::from_be_bytes(data[0..4].try_into().unwrap()) as usize;
+    // Quick ftyp check before handing off to zenavif-parse
     if &data[4..8] != b"ftyp" {
         return Err(ProbeError::NotAvif);
     }
 
-    // Check major brand
-    if data.len() < 12 {
-        return Err(ProbeError::Truncated);
-    }
-    let major_brand = &data[8..12];
-    let is_avif = major_brand == b"avif" || major_brand == b"avis" || major_brand == b"mif1";
-    if !is_avif {
-        // Check compatible brands
-        let mut found = false;
-        let mut brand_pos = 16; // skip ftyp header + major_brand + minor_version
-        while brand_pos + 4 <= ftyp_size.min(data.len()) {
-            if &data[brand_pos..brand_pos + 4] == b"avif"
-                || &data[brand_pos..brand_pos + 4] == b"avis"
-            {
-                found = true;
-                break;
-            }
-            brand_pos += 4;
-        }
-        if !found {
-            return Err(ProbeError::NotAvif);
-        }
-    }
+    let parser = zenavif_parse::AvifParser::from_bytes(data).map_err(|e| match e {
+        zenavif_parse::Error::UnexpectedEOF => ProbeError::Truncated,
+        zenavif_parse::Error::InvalidData(_) => ProbeError::NotAvif,
+        _ => ProbeError::Truncated,
+    })?;
 
-    // Search for av1C box (AV1 Codec Configuration)
-    let mut width = 0u32;
-    let mut height = 0u32;
-    let mut bit_depth = 8u8;
-    let mut profile = 0u8;
-    let mut monochrome = false;
-    let mut subsampling_x = false;
-    let mut subsampling_y = false;
-    let mut has_alpha = false;
-    let mut has_animation = false;
-    let mut color_primaries = None;
-    let mut transfer_characteristics = None;
-    let mut matrix_coefficients = None;
-    let mut full_range = None;
-    let mut has_icc = false;
-    let mut found_av1c = false;
-    let mut quantizer: Option<u8> = None;
+    // Extract container-level metadata
+    let has_alpha = parser.alpha_data().is_some();
+    let has_animation = parser.animation_info().is_some();
 
-    // Scan ISOBMFF boxes
-    let mut pos = 0;
-    while pos + 8 <= data.len() {
-        let box_size = u32::from_be_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
-        let box_type = &data[pos + 4..pos + 8];
-        let box_end = if box_size == 0 {
-            data.len() // extends to end of file
-        } else if box_size == 1 {
-            // 64-bit extended size
-            if pos + 16 > data.len() {
-                break;
+    // Parse CICP / ICC from colr box
+    let (color_primaries, transfer_characteristics, matrix_coefficients, full_range, has_icc) =
+        match parser.color_info() {
+            Some(zenavif_parse::ColorInformation::Nclx {
+                color_primaries: cp,
+                transfer_characteristics: tc,
+                matrix_coefficients: mc,
+                full_range: fr,
+            }) => (
+                Some(*cp as u8),
+                Some(*tc as u8),
+                Some(*mc as u8),
+                Some(*fr),
+                false,
+            ),
+            Some(zenavif_parse::ColorInformation::IccProfile(_)) => {
+                (None, None, None, None, true)
             }
-            u64::from_be_bytes(data[pos + 8..pos + 16].try_into().unwrap()) as usize
-        } else {
-            pos + box_size
+            None => (None, None, None, None, false),
         };
-        let box_end = box_end.min(data.len());
 
-        match box_type {
-            b"moov" | b"meta" | b"iprp" | b"ipco" | b"trak" | b"mdia" | b"minf" | b"stbl" => {
-                // Container boxes — recurse into contents
-                let header_size = if box_type == b"meta" { 12 } else { 8 };
-                pos += header_size;
-                continue;
-            }
-            b"av1C" => {
-                // AV1 Codec Configuration Record
-                let cfg_start = pos + 8;
-                if cfg_start + 4 <= box_end {
-                    let b0 = data[cfg_start];
-                    let b1 = data[cfg_start + 1];
-                    let b2 = data[cfg_start + 2];
-                    let b3 = data[cfg_start + 3];
+    // Parse AV1 bitstream for sequence header + frame header
+    let primary_data = parser.primary_data().map_err(|_| ProbeError::NoAv1Config)?;
+    let meta = zenavif_parse::AV1Metadata::parse_av1_bitstream(&primary_data)
+        .map_err(|_| ProbeError::NoAv1Config)?;
 
-                    // marker(1) version(7) | seq_profile(3) seq_level(5)
-                    // seq_tier(1) high_bitdepth(1) twelve_bit(1) monochrome(1) ss_x(1) ss_y(1) chroma_pos(2)
-                    profile = (b1 >> 5) & 0x07;
-                    let high_bd = (b2 >> 6) & 1;
-                    let twelve = (b2 >> 5) & 1;
-                    monochrome = (b2 >> 4) & 1 != 0;
-                    subsampling_x = (b2 >> 3) & 1 != 0;
-                    subsampling_y = (b2 >> 2) & 1 != 0;
+    let width = meta.max_frame_width.get();
+    let height = meta.max_frame_height.get();
+    let bit_depth = meta.bit_depth;
+    let profile = meta.seq_profile;
+    let monochrome = meta.monochrome;
 
-                    bit_depth = if twelve != 0 {
-                        12
-                    } else if high_bd != 0 {
-                        10
-                    } else {
-                        8
-                    };
-
-                    let _ = b0; // marker + version
-                    let _ = b3; // reserved + initial_presentation_delay
-
-                    found_av1c = true;
-
-                    // Try to extract QP from OBU data following the config
-                    if cfg_start + 4 < box_end {
-                        quantizer = extract_qp_from_obus(&data[cfg_start + 4..box_end]);
-                    }
-                }
-            }
-            b"colr" => {
-                // Color information
-                let colr_start = pos + 8;
-                if colr_start + 4 <= box_end {
-                    let colr_type = &data[colr_start..colr_start + 4];
-                    if colr_type == b"nclx" && colr_start + 11 <= box_end {
-                        color_primaries = Some(data[colr_start + 4]);
-                        transfer_characteristics = Some(data[colr_start + 6]);
-                        matrix_coefficients = Some(data[colr_start + 8]);
-                        full_range = Some(data[colr_start + 10] & 0x80 != 0);
-                    } else if colr_type == b"prof" || colr_type == b"rICC" {
-                        has_icc = true;
-                    }
-                }
-            }
-            b"ispe" => {
-                // Image spatial extents
-                let ispe_start = pos + 8;
-                if ispe_start + 12 <= box_end {
-                    // version(4) + width(4) + height(4)
-                    width = u32::from_be_bytes(
-                        data[ispe_start + 4..ispe_start + 8].try_into().unwrap(),
-                    );
-                    height = u32::from_be_bytes(
-                        data[ispe_start + 8..ispe_start + 12].try_into().unwrap(),
-                    );
-                }
-            }
-            b"auxC" => {
-                // Auxiliary type property — alpha is "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha"
-                let aux_start = pos + 8;
-                if aux_start + 4 < box_end {
-                    let aux_data = &data[aux_start + 4..box_end];
-                    if aux_data.windows(5).any(|w| w == b"alpha") {
-                        has_alpha = true;
-                    }
-                }
-            }
-            b"avis" | b"mvhd" | b"tkhd" => {
-                // Animation markers
-                if box_type == b"mvhd" || box_type == b"tkhd" {
-                    has_animation = true;
-                }
-            }
-            _ => {}
-        }
-
-        if box_size < 8 {
-            break; // prevent infinite loop
-        }
-        pos = box_end;
-    }
-
-    if !found_av1c {
-        // Try to find av1C in raw OBU data (some files embed it differently)
-        // For now, fail gracefully
-        return Err(ProbeError::NoAv1Config);
-    }
-
-    // Also try to extract QP from the mdat box if we haven't found it yet
-    if quantizer.is_none() {
-        quantizer = find_qp_in_mdat(data);
-    }
-
+    let cs = meta.chroma_subsampling;
     let chroma_sampling = if monochrome {
         ChromaSampling::Monochrome
-    } else if subsampling_x && subsampling_y {
+    } else if cs.horizontal && cs.vertical {
         ChromaSampling::Yuv420
-    } else if subsampling_x {
+    } else if cs.horizontal {
         ChromaSampling::Yuv422
     } else {
         ChromaSampling::Yuv444
     };
 
-    let quality = quantizer.map(|qp| {
-        let estimated = qp_to_quality(qp);
+    // Lossless detection from frame header
+    let lossless = meta.lossless;
+
+    // Quality from frame header QP
+    let quality = meta.base_q_idx.map(|qp| {
         QualityEstimate {
             quantizer: qp,
-            estimated_quality: estimated,
+            estimated_quality: qp_to_quality(qp),
             confidence: Confidence::FromFrameHeader,
         }
     });
@@ -338,21 +220,24 @@ pub fn probe(data: &[u8]) -> Result<AvifProbe, ProbeError> {
     // Build recommendations
     let mut recommendations = Vec::new();
 
-    if let Some(ref q) = quality {
-        if q.estimated_quality > 85.0 {
-            recommendations.push(Recommendation::ReduceQuality);
-        }
-        if q.estimated_quality < 30.0 {
-            recommendations.push(Recommendation::AvoidReencoding);
+    if lossless == Some(true) {
+        // No quality reduction recommendations for lossless
+    } else {
+        if let Some(ref q) = quality {
+            if q.estimated_quality > 85.0 {
+                recommendations.push(Recommendation::ReduceQuality);
+            }
+            if q.estimated_quality < 30.0 {
+                recommendations.push(Recommendation::AvoidReencoding);
+            }
         }
     }
 
-    if chroma_sampling == ChromaSampling::Yuv444 && !monochrome {
+    if chroma_sampling == ChromaSampling::Yuv444 && !monochrome && lossless != Some(true) {
         recommendations.push(Recommendation::UseChromaSubsampling);
     }
 
     if bit_depth > 8 {
-        // Only suggest reduction if not HDR
         let is_hdr = transfer_characteristics
             .map(|tc| tc == 16 || tc == 18) // PQ or HLG
             .unwrap_or(false);
@@ -370,6 +255,7 @@ pub fn probe(data: &[u8]) -> Result<AvifProbe, ProbeError> {
         chroma_sampling,
         has_alpha,
         has_animation,
+        lossless,
         quality,
         color_primaries,
         transfer_characteristics,
@@ -423,154 +309,13 @@ fn qp_to_quality(qp: u8) -> f32 {
     quality.clamp(1.0, 100.0)
 }
 
-/// Try to extract the base QP from AV1 OBU data.
-///
-/// Looks for a frame header OBU and reads the base_q_idx field.
-fn extract_qp_from_obus(data: &[u8]) -> Option<u8> {
-    let mut pos = 0;
-    while pos < data.len() {
-        if pos >= data.len() {
-            return None;
-        }
-        let header_byte = data[pos];
-        let obu_type = (header_byte >> 3) & 0x0F;
-        let has_extension = (header_byte >> 2) & 1 != 0;
-        let has_size = (header_byte >> 1) & 1 != 0;
-        pos += 1;
-
-        if has_extension {
-            if pos >= data.len() {
-                return None;
-            }
-            pos += 1; // skip extension byte
-        }
-
-        let obu_size = if has_size {
-            let (size, consumed) = read_leb128(&data[pos..])?;
-            pos += consumed;
-            size as usize
-        } else {
-            data.len() - pos
-        };
-
-        let obu_end = (pos + obu_size).min(data.len());
-
-        // OBU type 1 = Sequence Header
-        // OBU type 6 = Frame (contains frame header)
-        // OBU type 3 = Frame Header
-        if obu_type == 6 || obu_type == 3 {
-            // Try to extract base_q_idx from frame header
-            if let Some(qp) = parse_frame_header_qp(&data[pos..obu_end]) {
-                return Some(qp);
-            }
-        }
-
-        pos = obu_end;
-    }
-    None
-}
-
-/// Try to find QP from OBU data inside an mdat box.
-fn find_qp_in_mdat(data: &[u8]) -> Option<u8> {
-    // Search for mdat box
-    let mut pos = 0;
-    while pos + 8 <= data.len() {
-        let box_size = u32::from_be_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
-        let box_type = &data[pos + 4..pos + 8];
-
-        if box_type == b"mdat" {
-            let mdat_start = pos + 8;
-            let mdat_end = if box_size > 0 {
-                (pos + box_size).min(data.len())
-            } else {
-                data.len()
-            };
-            if mdat_start < mdat_end {
-                return extract_qp_from_obus(&data[mdat_start..mdat_end]);
-            }
-        }
-
-        if box_size < 8 {
-            break;
-        }
-        pos += box_size;
-    }
-    None
-}
-
-/// Very basic frame header QP extraction.
-///
-/// This is a best-effort parse — AV1 frame headers are complex and
-/// context-dependent. We try to find base_q_idx which is the primary
-/// quality knob.
-fn parse_frame_header_qp(data: &[u8]) -> Option<u8> {
-    // AV1 frame header parsing requires a bit reader and knowledge of
-    // the sequence header to determine field sizes. For a lightweight
-    // probe, we use a heuristic: base_q_idx is typically the first
-    // 8-bit field after some variable-length fields.
-    //
-    // In practice, for still images encoded by common encoders, the
-    // frame header structure is fairly predictable:
-    //
-    // For KEY frames with show_existing_frame=0:
-    //   show_existing_frame(1) = 0
-    //   frame_type(2) = 0 (KEY_FRAME)
-    //   show_frame(1) = 1
-    //   ... (more fields)
-    //   ... base_q_idx(8)
-    //
-    // This is too fragile without a proper bit reader, so we only
-    // attempt it when the data looks like a typical still image frame.
-
-    if data.is_empty() {
-        return None;
-    }
-
-    // Simple heuristic: for AVIF (still images), base_q_idx is often
-    // at a predictable offset. But this is unreliable, so we return None
-    // for now and rely on extract_qp_from_obus finding it in OBU data
-    // attached to av1C.
-    //
-    // A proper implementation would need a full AV1 bit reader to handle
-    // the variable-length fields that precede base_q_idx.
-    None
-}
-
-/// Read LEB128 variable-length integer.
-fn read_leb128(data: &[u8]) -> Option<(u64, usize)> {
-    let mut value = 0u64;
-    let mut consumed = 0;
-    for (i, &byte) in data.iter().enumerate().take(8) {
-        value |= ((byte & 0x7F) as u64) << (i * 7);
-        consumed = i + 1;
-        if byte & 0x80 == 0 {
-            return Some((value, consumed));
-        }
-    }
-    if consumed > 0 {
-        Some((value, consumed))
-    } else {
-        None
-    }
-}
-
 impl zencodec::SourceEncodingDetails for AvifProbe {
     fn source_generic_quality(&self) -> Option<f32> {
         self.quality.as_ref().map(|q| q.estimated_quality)
     }
 
     fn is_lossless(&self) -> bool {
-        // AV1 lossless mode requires base_q_idx=0 AND a lossless flag in
-        // the frame header (which enables identity transforms and skips
-        // quantization entirely). Our lightweight probe only extracts
-        // base_q_idx from the OBU data attached to the av1C box — it does
-        // not fully parse the frame header to check the lossless flag.
-        //
-        // QP=0 is a necessary condition for lossless but not sufficient:
-        // an encoder could use QP=0 with lossy chroma subsampling (4:2:0)
-        // or without the lossless flag, producing near-lossless output.
-        // We therefore return `false` rather than risk a false positive.
-        false
+        self.lossless.unwrap_or(false)
     }
 }
 
@@ -603,18 +348,95 @@ mod tests {
 
     #[test]
     fn test_probe_not_avif() {
+        // Non-ftyp header → NotAvif before we even reach zenavif-parse
+        let mut data = vec![0u8; 32];
+        data[0..4].copy_from_slice(&12u32.to_be_bytes());
+        data[4..8].copy_from_slice(b"moov");
+        data[8..12].copy_from_slice(b"isom");
+        assert_eq!(probe(&data).unwrap_err(), ProbeError::NotAvif);
+
+        // Valid ftyp but non-AVIF brand → zenavif-parse rejects it
         let mut data = vec![0u8; 32];
         data[0..4].copy_from_slice(&12u32.to_be_bytes());
         data[4..8].copy_from_slice(b"ftyp");
         data[8..12].copy_from_slice(b"isom");
-        assert_eq!(probe(&data).unwrap_err(), ProbeError::NotAvif);
+        let err = probe(&data).unwrap_err();
+        assert!(err == ProbeError::NotAvif || err == ProbeError::Truncated);
     }
 
+    /// Probe all test vectors and check that lossless/QP detection works.
     #[test]
-    fn test_leb128() {
-        assert_eq!(read_leb128(&[0x00]), Some((0, 1)));
-        assert_eq!(read_leb128(&[0x7F]), Some((127, 1)));
-        assert_eq!(read_leb128(&[0x80, 0x01]), Some((128, 2)));
-        assert_eq!(read_leb128(&[0xE5, 0x8E, 0x26]), Some((624_485, 3)));
+    #[ignore] // requires test vectors: cargo test -- --ignored
+    fn test_probe_all_vectors() {
+        let dir = "tests/vectors/libavif";
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            eprintln!("No test vectors at {dir}");
+            return;
+        };
+
+        let mut probed = 0;
+        let mut with_qp = 0;
+        let mut with_lossless = 0;
+
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("avif") {
+                continue;
+            }
+
+            let data = std::fs::read(&path).unwrap();
+            let result = probe(&data);
+
+            let name = path.file_name().unwrap().to_str().unwrap();
+            match result {
+                Ok(info) => {
+                    assert!(info.width > 0 && info.height > 0, "{name}: zero dimensions");
+                    assert!(
+                        [8, 10, 12].contains(&info.bit_depth),
+                        "{name}: bad bit_depth {}",
+                        info.bit_depth
+                    );
+
+                    if let Some(ref q) = info.quality {
+                        assert!(
+                            (1.0..=100.0).contains(&q.estimated_quality),
+                            "{name}: quality {:.1} out of range",
+                            q.estimated_quality
+                        );
+                        with_qp += 1;
+                    }
+
+                    if info.lossless.is_some() {
+                        with_lossless += 1;
+                    }
+
+                    eprintln!(
+                        "  {name}: {}x{} {}bpc {:?} qp={:?} lossless={:?}",
+                        info.width,
+                        info.height,
+                        info.bit_depth,
+                        info.chroma_sampling,
+                        info.quality.as_ref().map(|q| q.quantizer),
+                        info.lossless,
+                    );
+
+                    // Source encoding details trait
+                    use zencodec::SourceEncodingDetails;
+                    if info.lossless == Some(true) {
+                        assert!(info.is_lossless(), "{name}: lossless but trait says false");
+                    }
+
+                    probed += 1;
+                }
+                Err(e) => {
+                    eprintln!("  {name}: probe failed: {e}");
+                }
+            }
+        }
+
+        eprintln!("\n  Probed {probed} files, {with_qp} with QP, {with_lossless} with lossless detection");
+        assert!(probed > 30, "Expected to probe >30 files, got {probed}");
+        assert!(with_qp > 20, "Expected >20 files with QP, got {with_qp}");
+        assert!(with_lossless > 20, "Expected >20 files with lossless detection, got {with_lossless}");
     }
 }
