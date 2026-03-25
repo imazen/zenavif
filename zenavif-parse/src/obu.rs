@@ -427,10 +427,10 @@ fn parse_frame_header_quantization(data: &[u8], seq: &SequenceHeaderObu) -> Resu
             seq.seq_force_screen_content_tools != 0
         };
 
-        if allow_screen_content_tools {
-            if seq.seq_force_integer_mv == SELECT_INTEGER_MV {
-                let _force_integer_mv = b.read_bool()?;
-            }
+        if allow_screen_content_tools
+            && seq.seq_force_integer_mv == SELECT_INTEGER_MV
+        {
+            let _force_integer_mv = b.read_bool()?;
         }
 
         if seq.frame_id_numbers_present_flag {
@@ -529,8 +529,8 @@ fn parse_frame_header_quantization(data: &[u8], seq: &SequenceHeaderObu) -> Resu
     let sb_size = if seq.use_128x128_superblock { 128u32 } else { 64u32 };
     let sb_shift = if seq.use_128x128_superblock { 5 } else { 4 };
     // Use max_frame_width/height from seq header (KEY_FRAME uses these unless overridden)
-    let mi_cols = (seq.max_frame_width.get() + 3) / 4; // in 4-sample MI units
-    let mi_rows = (seq.max_frame_height.get() + 3) / 4;
+    let mi_cols = seq.max_frame_width.get().div_ceil(4); // in 4-sample MI units
+    let mi_rows = seq.max_frame_height.get().div_ceil(4);
     let sb_cols = (mi_cols + (1 << sb_shift) - 1) >> sb_shift;
     let sb_rows = (mi_rows + (1 << sb_shift) - 1) >> sb_shift;
 
@@ -594,7 +594,6 @@ fn parse_frame_header_quantization(data: &[u8], seq: &SequenceHeaderObu) -> Resu
     let mut delta_q_v_ac = 0i8;
 
     if num_planes > 1 {
-        let using_qmatrix; // declared here, used later
         if seq.color.separate_uv_delta_q {
             delta_q_u_dc = read_delta_q(&mut b)?;
             delta_q_u_ac = read_delta_q(&mut b)?;
@@ -606,8 +605,7 @@ fn parse_frame_header_quantization(data: &[u8], seq: &SequenceHeaderObu) -> Resu
             delta_q_v_dc = delta_q_u_dc;
             delta_q_v_ac = delta_q_u_ac;
         }
-        using_qmatrix = b.read_bool()?;
-        let _ = using_qmatrix;
+        let _using_qmatrix = b.read_bool()?;
     }
 
     // Lossless requires base_q_idx==0 AND all delta-q values are 0
