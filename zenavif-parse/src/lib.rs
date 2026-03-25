@@ -1091,16 +1091,29 @@ pub struct AV1Metadata {
     /// constants like [`ChromaSubsampling::YUV420`].
     pub chroma_subsampling: ChromaSubsampling,
     pub monochrome: bool,
+    /// AV1 base quantizer index (0-255) from the first frame header.
+    /// `None` if the frame header could not be parsed.
+    /// 0 = lossless candidate, 255 = worst quality.
+    pub base_q_idx: Option<u8>,
+    /// Whether the encoding is lossless (all quantization parameters are zero
+    /// and chroma is not subsampled).
+    /// `None` if the frame header could not be parsed.
+    pub lossless: Option<bool>,
 }
 
 impl AV1Metadata {
-    /// Parses raw AV1 bitstream (OBU sequence header) only.
+    /// Parses raw AV1 bitstream (sequence header + optional frame header).
+    ///
+    /// Extracts sequence-level metadata and attempts to parse the first frame
+    /// header for quantization/lossless detection.
     ///
     /// This is for the bare image payload from an encoder, not an AVIF/HEIF file.
     /// To parse AVIF files, see [`AvifParser::from_reader()`].
     #[inline(never)]
     pub fn parse_av1_bitstream(obu_bitstream: &[u8]) -> Result<Self> {
-        let h = obu::parse_obu(obu_bitstream)?;
+        let (h, frame_quant) = obu::parse_obu_with_frame_info(obu_bitstream)?;
+        let no_chroma_subsampling = !h.color.chroma_subsampling.horizontal
+            && !h.color.chroma_subsampling.vertical;
         Ok(Self {
             still_picture: h.still_picture,
             max_frame_width: h.max_frame_width,
@@ -1109,6 +1122,8 @@ impl AV1Metadata {
             seq_profile: h.seq_profile,
             chroma_subsampling: h.color.chroma_subsampling,
             monochrome: h.color.monochrome,
+            base_q_idx: frame_quant.map(|fq| fq.base_q_idx),
+            lossless: frame_quant.map(|fq| fq.coded_lossless && no_chroma_subsampling),
         })
     }
 }
