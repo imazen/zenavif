@@ -38,7 +38,7 @@ log = "0.4.29"
 zencodec = { version = "0.1.1" }
 zenpixels = { version = "0.2.0", default-features = false, features = ["imgref", "rgb"] }
 zenpixels-convert = { version = "0.2.0", default-features = false, features = ["rgb"] }
-linear-srgb = "0.6.4"
+linear-srgb = "0.6.5"
 
 [dev-dependencies]
 archmage = { version = "0.9.12", features = ["std"] }
