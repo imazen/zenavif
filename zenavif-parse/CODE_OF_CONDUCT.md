@@ -1,3 +1,5 @@
+> **Note:** This Code of Conduct is inherited from the upstream avif-parse project (Mozilla). For zenavif-parse issues, contact the Imazen team.
+
 # Community Participation Guidelines
 
 This repository is governed by Mozilla's code of conduct and etiquette guidelines. 
