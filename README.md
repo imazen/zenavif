@@ -16,7 +16,7 @@ Pure Rust AVIF image codec. Decodes and encodes AVIF images using
 - Supports full and limited color range, HDR color spaces (BT.2020, P3, etc.)
 - Preserves EXIF, XMP, rotation, mirror, clean aperture, pixel aspect ratio, HDR metadata
 - Decodes animated AVIF sequences with per-frame timing
-- Encodes AVIF via [zenravif](https://github.com/imazen/cavif-rs) (optional `encode` feature)
+- Encodes AVIF via [zenravif](https://github.com/imazen/cavif-rs) (optional `encode` feature; requires local zenravif path dep — not yet published to crates.io)
 - 100% safe Rust by default. Zero `unsafe` in the decode path.
 - Cooperative cancellation via the [`enough`](https://crates.io/crates/enough) crate
 
