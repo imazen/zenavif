@@ -862,7 +862,7 @@ impl AvifEncoder {
             })
             .collect();
         let img = imgref::ImgVec::new(rgb, w, h);
-        let result = crate::encode_rgb16(img.as_ref(), &cfg, stop)?;
+        let result = crate::encode_rgb16(img.as_ref(), &cfg, stop, self.stop.as_ref())?;
         self.make_output(result.avif_file)
     }
 
@@ -906,7 +906,7 @@ impl AvifEncoder {
         let raw = pixels.contiguous_bytes();
         let rgb: &[Rgb<u8>] = bytemuck::cast_slice(&raw);
         let img = imgref::Img::new(rgb, w, h);
-        let result = crate::encode_rgb8(img, &cfg, stop)?;
+        let result = crate::encode_rgb8(img, &cfg, stop, self.stop.as_ref())?;
         self.make_output(result.avif_file)
     }
 
@@ -919,7 +919,7 @@ impl AvifEncoder {
         let raw = pixels.contiguous_bytes();
         let rgba: &[Rgba<u8>] = bytemuck::cast_slice(&raw);
         let img = imgref::Img::new(rgba, w, h);
-        let result = crate::encode_rgba8(img, &cfg, stop)?;
+        let result = crate::encode_rgba8(img, &cfg, stop, self.stop.as_ref())?;
         self.make_output(result.avif_file)
     }
 
@@ -933,7 +933,7 @@ impl AvifEncoder {
         // Gray → RGB for encoding (AVIF encoder expects color planes)
         let rgb: Vec<Rgb<u8>> = raw.iter().map(|&g| Rgb { r: g, g, b: g }).collect();
         let img = imgref::ImgVec::new(rgb, w, h);
-        let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
+        let result = crate::encode_rgb8(img.as_ref(), &cfg, stop, self.stop.as_ref())?;
         self.make_output(result.avif_file)
     }
 
@@ -959,7 +959,7 @@ impl AvifEncoder {
             })
             .collect();
         let img = imgref::ImgVec::new(rgb, w, h);
-        let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
+        let result = crate::encode_rgb8(img.as_ref(), &cfg, stop, self.stop.as_ref())?;
         self.make_output(result.avif_file)
     }
 
@@ -987,7 +987,7 @@ impl AvifEncoder {
             })
             .collect();
         let img = imgref::ImgVec::new(rgba, w, h);
-        let result = crate::encode_rgba8(img.as_ref(), &cfg, stop)?;
+        let result = crate::encode_rgba8(img.as_ref(), &cfg, stop, self.stop.as_ref())?;
         self.make_output(result.avif_file)
     }
 
@@ -1008,7 +1008,7 @@ impl AvifEncoder {
             })
             .collect();
         let img = imgref::ImgVec::new(rgb, w, h);
-        let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
+        let result = crate::encode_rgb8(img.as_ref(), &cfg, stop, self.stop.as_ref())?;
         self.make_output(result.avif_file)
     }
 
@@ -1021,7 +1021,7 @@ impl AvifEncoder {
         let raw = pixels.contiguous_bytes();
         let rgb: &[Rgb<u16>] = bytemuck::cast_slice(&raw);
         let img = imgref::Img::new(rgb, w, h);
-        let result = crate::encode_rgb16(img, &cfg, stop)?;
+        let result = crate::encode_rgb16(img, &cfg, stop, self.stop.as_ref())?;
         self.make_output(result.avif_file)
     }
 
@@ -1034,7 +1034,7 @@ impl AvifEncoder {
         let raw = pixels.contiguous_bytes();
         let rgba: &[Rgba<u16>] = bytemuck::cast_slice(&raw);
         let img = imgref::Img::new(rgba, w, h);
-        let result = crate::encode_rgba16(img, &cfg, stop)?;
+        let result = crate::encode_rgba16(img, &cfg, stop, self.stop.as_ref())?;
         self.make_output(result.avif_file)
     }
 }
@@ -1077,7 +1077,7 @@ impl zencodec::encode::Encoder for AvifEncoder {
                 }
             }
             let img = imgref::ImgVec::new(rgb, w, h);
-            let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
+            let result = crate::encode_rgb8(img.as_ref(), &cfg, stop, self.stop.as_ref())?;
             self.make_output(result.avif_file)
         } else {
             // Zero-copy RGBA path — bytemuck cast the contiguous region
@@ -1085,7 +1085,7 @@ impl zencodec::encode::Encoder for AvifEncoder {
                 let pixel_bytes = &data[..w * h * 4];
                 let rgba: &[Rgba<u8>] = bytemuck::cast_slice(pixel_bytes);
                 let img = imgref::Img::new(rgba, w, h);
-                let result = crate::encode_rgba8(img, &cfg, stop)?;
+                let result = crate::encode_rgba8(img, &cfg, stop, self.stop.as_ref())?;
                 self.make_output(result.avif_file)
             } else {
                 // Strided: use ImgRef with stride
@@ -1093,7 +1093,7 @@ impl zencodec::encode::Encoder for AvifEncoder {
                 let pixel_bytes = &data[..total_pixels * 4];
                 let rgba: &[Rgba<u8>] = bytemuck::cast_slice(pixel_bytes);
                 let img = imgref::Img::new_stride(rgba, w, h, stride);
-                let result = crate::encode_rgba8(img, &cfg, stop)?;
+                let result = crate::encode_rgba8(img, &cfg, stop, self.stop.as_ref())?;
                 self.make_output(result.avif_file)
             }
         }
@@ -1151,7 +1151,7 @@ impl zencodec::encode::Encoder for AvifEncoder {
                     })
                     .collect();
                 let img = imgref::ImgVec::new(rgba, w, h);
-                let result = crate::encode_rgba8(img.as_ref(), &cfg, stop)?;
+                let result = crate::encode_rgba8(img.as_ref(), &cfg, stop, self.stop.as_ref())?;
                 self.make_output(result.avif_file)
             }
             _ => Err(at!(Error::UnsupportedOperation(

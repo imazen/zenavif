@@ -485,7 +485,7 @@ fn cicp_to_transfer_characteristics(tc: u8) -> ravif::TransferCharacteristics {
 }
 
 /// Build a ravif Encoder from our config
-fn build_ravif_encoder(config: &EncoderConfig) -> ravif::Encoder<'_> {
+fn build_ravif_encoder(config: &EncoderConfig, stop: Option<&zencodec::StopToken>) -> ravif::Encoder<'_> {
     let mut enc = ravif::Encoder::new()
         .with_quality(config.quality)
         .with_speed(config.speed)
@@ -582,6 +582,15 @@ fn build_ravif_encoder(config: &EncoderConfig) -> ravif::Encoder<'_> {
             .with_still_image_tuning(config.tune_still_image)
             .with_lossless(config.lossless);
     }
+    // Forward stop token for per-superblock cooperative cancellation.
+    // When ravif's `stop` feature is enabled, this enables cancellation
+    // during encoding, not just between packets.
+    #[cfg(feature = "encode-stop")]
+    if let Some(token) = stop {
+        enc = enc.with_stop(token.clone());
+    }
+    #[cfg(not(feature = "encode-stop"))]
+    let _ = stop;
     enc
 }
 
@@ -596,6 +605,7 @@ pub fn encode_rgb8(
     img: ImgRef<'_, Rgb<u8>>,
     config: &EncoderConfig,
     stop: &(impl Stop + ?Sized),
+    stop_token: Option<&zencodec::StopToken>,
 ) -> Result<EncodedImage> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
 
@@ -604,7 +614,7 @@ pub fn encode_rgb8(
         return encode_rgb8_svtav1(img, config);
     }
 
-    let enc = build_ravif_encoder(config);
+    let enc = build_ravif_encoder(config, stop_token);
     let result = enc
         .encode_rgb(img)
         .map_err(|e| at!(Error::Encode(e.to_string())))?;
@@ -683,9 +693,10 @@ pub fn encode_rgba8(
     img: ImgRef<'_, Rgba<u8>>,
     config: &EncoderConfig,
     stop: &(impl Stop + ?Sized),
+    stop_token: Option<&zencodec::StopToken>,
 ) -> Result<EncodedImage> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let enc = build_ravif_encoder(config);
+    let enc = build_ravif_encoder(config, stop_token);
     let result = enc
         .encode_rgba(img)
         .map_err(|e| at!(Error::Encode(e.to_string())))?;
@@ -711,10 +722,11 @@ pub fn encode_rgb16(
     img: ImgRef<'_, Rgb<u16>>,
     config: &EncoderConfig,
     stop: &(impl Stop + ?Sized),
+    stop_token: Option<&zencodec::StopToken>,
 ) -> Result<EncodedImage> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let enc = build_ravif_encoder(config);
+    let enc = build_ravif_encoder(config, stop_token);
     let width = img.width();
     let height = img.height();
     let pixels: Vec<[u16; 3]> = img
@@ -763,10 +775,11 @@ pub fn encode_rgba16(
     img: ImgRef<'_, Rgba<u16>>,
     config: &EncoderConfig,
     stop: &(impl Stop + ?Sized),
+    stop_token: Option<&zencodec::StopToken>,
 ) -> Result<EncodedImage> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let enc = build_ravif_encoder(config);
+    let enc = build_ravif_encoder(config, stop_token);
     let width = img.width();
     let height = img.height();
     let pixels: Vec<[u16; 3]> = img
