@@ -1,10 +1,10 @@
 # zenavif-parse
 
-[![CI](https://github.com/imazen/zenavif-parse/actions/workflows/ci.yml/badge.svg)](https://github.com/imazen/zenavif-parse/actions/workflows/ci.yml)
-[![crates.io](https://img.shields.io/crates/v/zenavif-parse.svg)](https://crates.io/crates/zenavif-parse)
-[![docs.rs](https://docs.rs/zenavif-parse/badge.svg)](https://docs.rs/zenavif-parse)
-[![MSRV](https://img.shields.io/badge/MSRV-1.92-blue.svg?style=for-the-badge)]()
-[![license](https://img.shields.io/crates/l/zenavif-parse.svg)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenavif-parse/ci.yml?style=for-the-badge)](https://github.com/imazen/zenavif-parse/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/zenavif-parse?style=for-the-badge)](https://crates.io/crates/zenavif-parse)
+[![docs.rs](https://img.shields.io/docsrs/zenavif-parse?style=for-the-badge)](https://docs.rs/zenavif-parse)
+[![MSRV](https://img.shields.io/badge/MSRV-1.92-blue?style=for-the-badge)]()
+[![license](https://img.shields.io/crates/l/zenavif-parse?style=for-the-badge)](LICENSE)
 
 AVIF container parser (ISOBMFF/MIAF demuxer) that extracts AV1 payloads, alpha channels, grid tiles, and animation frames from AVIF files. Written entirely in safe Rust with fallible allocations throughout.
 

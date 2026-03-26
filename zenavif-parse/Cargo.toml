@@ -15,7 +15,7 @@ license = "MPL-2.0"
 categories = ["multimedia::images"]
 repository = "https://github.com/imazen/zenavif-parse"
 readme = "README.md"
-include = ["/README.md", "/Cargo.toml", "/LICENSE", "/src/*.rs", "/examples/*.rs", "/tests/*"]
+include = ["/README.md", "/Cargo.toml", "/LICENSE", "/src/*.rs", "/examples/*.rs"]
 keywords = ["avif", "image", "parser", "demuxer", "heif"]
 rust-version = "1.92"
 
@@ -38,7 +38,7 @@ walkdir = "2.4.0"
 [features]
 eager = []
 # Export symbols for C
-c_api = []
+c_api = ["eager"]
 
 [badges]
 maintenance = { status = "actively-developed" }
