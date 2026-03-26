@@ -198,9 +198,11 @@ impl AvifDecode {
     ///
     /// Maps zennode parameters to the zencodec-based decoder configuration:
     /// - `film_grain` -> [`crate::AvifDecoderConfig::with_film_grain`]
-    /// - `extract_gain_map` is stored but not yet wired (forward-looking)
+    /// - `extract_gain_map` -> [`crate::AvifDecoderConfig::with_extract_gain_map`]
     pub fn to_decoder_config(&self) -> crate::AvifDecoderConfig {
-        crate::AvifDecoderConfig::new().with_film_grain(self.film_grain)
+        crate::AvifDecoderConfig::new()
+            .with_film_grain(self.film_grain)
+            .with_extract_gain_map(self.extract_gain_map)
     }
 }
 

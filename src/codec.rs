@@ -1430,6 +1430,9 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
 #[derive(Clone, Debug)]
 pub struct AvifDecoderConfig {
     inner: crate::DecoderConfig,
+    /// When true, gain map and depth map data will be attached to
+    /// `DecodeOutput` extras. Default: false.
+    extract_gain_map: bool,
 }
 
 impl AvifDecoderConfig {
@@ -1438,6 +1441,7 @@ impl AvifDecoderConfig {
     pub fn new() -> Self {
         Self {
             inner: crate::DecoderConfig::new(),
+            extract_gain_map: false,
         }
     }
 
@@ -1470,6 +1474,21 @@ impl AvifDecoderConfig {
     #[must_use]
     pub fn with_film_grain(mut self, apply: bool) -> Self {
         self.inner = self.inner.apply_grain(apply);
+        self
+    }
+
+    /// Enable extraction of gain map and depth map data into `DecodeOutput`
+    /// extras.
+    ///
+    /// When enabled, the raw gain map (and depth map, when available) will be
+    /// attached to decode output so callers can retrieve them via
+    /// `output.extras::<AvifGainMap>()`. Default: **false**.
+    ///
+    /// `ImageInfo` metadata (`supplements`, `GainMapPresence`) is always
+    /// populated from container probe data regardless of this flag.
+    #[must_use]
+    pub fn with_extract_gain_map(mut self, extract: bool) -> Self {
+        self.extract_gain_map = extract;
         self
     }
 
@@ -1735,6 +1754,7 @@ impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
             limits: ResourceLimits::none(),
             start_frame_index: 0,
             policy: None,
+            extract_gain_map: self.extract_gain_map,
         }
     }
 }
@@ -1748,6 +1768,10 @@ pub struct AvifDecodeJob<'a> {
     limits: ResourceLimits,
     start_frame_index: u32,
     policy: Option<zencodec::decode::DecodePolicy>,
+    /// When true, attach gain map and depth map data to `DecodeOutput` extras.
+    /// Default: false. Metadata (supplements, `GainMapPresence`) is always
+    /// populated regardless of this flag.
+    extract_gain_map: bool,
 }
 
 impl<'a> AvifDecodeJob<'a> {
@@ -1779,6 +1803,21 @@ impl<'a> AvifDecodeJob<'a> {
             cfg.parser_max_animation_frames = Some(frames);
         }
         cfg
+    }
+
+    /// Enable extraction of gain map and depth map data into `DecodeOutput`
+    /// extras.
+    ///
+    /// When enabled, the raw gain map (and depth map, when available) will be
+    /// attached to the output so callers can retrieve them via
+    /// `output.extras::<AvifGainMap>()`. Default: **false**.
+    ///
+    /// `ImageInfo` metadata (`supplements`, `GainMapPresence`) is always
+    /// populated from container probe data regardless of this flag.
+    #[must_use]
+    pub fn with_extract_gain_map(mut self, extract: bool) -> Self {
+        self.extract_gain_map = extract;
+        self
     }
 
     /// Check input data size against limits.
@@ -1939,6 +1978,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
             preferred: preferred.to_vec(),
             limits: self.limits,
             policy: self.policy,
+            extract_gain_map: self.extract_gain_map,
         })
     }
 
@@ -2371,6 +2411,7 @@ pub struct AvifDecoder<'a> {
     preferred: Vec<PixelDescriptor>,
     limits: ResourceLimits,
     policy: Option<zencodec::decode::DecodePolicy>,
+    extract_gain_map: bool,
 }
 
 impl zencodec::decode::Decode for AvifDecoder<'_> {
@@ -2416,15 +2457,16 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
         if let Ok(probe) = crate::detect::probe(&self.data) {
             output = output.with_source_encoding_details(probe);
         }
-        // Attach gain map as typed extras so callers can retrieve it via
-        // `output.extras::<zenavif_parse::AvifGainMap>()`.
-        if let Some(gm) = native_info.gain_map {
-            output = output.with_extras(gm);
-        }
-        // Attach depth map as typed extras so callers can retrieve it via
-        // `output.extras::<zenavif_parse::AvifDepthMap>()`.
-        if let Some(dm) = native_info.depth_map {
-            output = output.with_extras(dm);
+        // Attach gain map / depth map as typed extras only when opted in.
+        // Metadata (`ImageInfo.supplements`, `GainMapPresence`) is always
+        // populated regardless — only the heavy data blobs are gated.
+        if self.extract_gain_map {
+            if let Some(gm) = native_info.gain_map {
+                output = output.with_extras(gm);
+            }
+            if let Some(dm) = native_info.depth_map {
+                output = output.with_extras(dm);
+            }
         }
         Ok(output)
     }
