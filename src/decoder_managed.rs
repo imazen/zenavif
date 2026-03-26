@@ -1587,6 +1587,7 @@ impl ManagedAvifDecoder {
     /// full RGB allocation and keeps the working set in L2 cache.
     ///
     /// For 16-bit/monochrome images, falls back to full-frame conversion.
+    #[cfg(feature = "zencodec")]
     pub fn decode_to_sink(
         &mut self,
         stop: &(impl Stop + ?Sized),
@@ -1650,6 +1651,7 @@ impl ManagedAvifDecoder {
     }
 
     /// Stream a grid image tile-row by tile-row to a sink.
+    #[cfg(feature = "zencodec")]
     fn decode_grid_to_sink(
         &mut self,
         stop: &(impl Stop + ?Sized),

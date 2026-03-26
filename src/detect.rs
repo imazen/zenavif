@@ -305,6 +305,7 @@ fn qp_to_quality(qp: u8) -> f32 {
     quality.clamp(1.0, 100.0)
 }
 
+#[cfg(feature = "zencodec")]
 impl zencodec::SourceEncodingDetails for AvifProbe {
     fn source_generic_quality(&self) -> Option<f32> {
         self.quality.as_ref().map(|q| q.estimated_quality)

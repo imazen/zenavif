@@ -53,6 +53,7 @@ pub enum Error {
     Cancelled(StopReason),
 
     /// Unsupported codec operation
+    #[cfg(feature = "zencodec")]
     #[error(transparent)]
     UnsupportedOperation(#[from] zencodec::UnsupportedOperation),
 }
