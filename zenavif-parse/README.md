@@ -143,4 +143,11 @@ This crate builds directly on work by:
 
 MPL-2.0 (unchanged from upstream).
 
-This crate doesn't include an AV1 decoder. For full AVIF decoding, see [zenavif](https://github.com/imazen/zenavif) which pairs this parser with [rav1d](https://github.com/memorysafety/rav1d).
+
+
+### Upstream Contribution
+
+This is a fork of [kornelski/avif-parse](https://github.com/kornelski/avif-parse) (MPL-2.0).
+We are willing to release our improvements under the original MPL-2.0
+license if upstream takes over maintenance of those improvements. We'd rather
+contribute back than maintain a parallel codebase. Open an issue or reach out.
