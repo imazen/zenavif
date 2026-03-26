@@ -224,7 +224,11 @@ pub fn decode_animation_with(
 /// ```
 #[cfg(feature = "encode")]
 pub fn encode(image: &PixelBuffer) -> Result<EncodedImage> {
-    encode_with(image, &EncoderConfig::default(), almost_enough::StopToken::new(Unstoppable))
+    encode_with(
+        image,
+        &EncoderConfig::default(),
+        almost_enough::StopToken::new(Unstoppable),
+    )
 }
 
 /// Encode a decoded image to AVIF with custom settings and cancellation

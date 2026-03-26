@@ -485,7 +485,10 @@ fn cicp_to_transfer_characteristics(tc: u8) -> ravif::TransferCharacteristics {
 }
 
 /// Build a ravif Encoder from our config
-fn build_ravif_encoder(config: &EncoderConfig, stop: almost_enough::StopToken) -> ravif::Encoder<'_> {
+fn build_ravif_encoder(
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> ravif::Encoder<'_> {
     let mut enc = ravif::Encoder::new()
         .with_quality(config.quality)
         .with_speed(config.speed)
