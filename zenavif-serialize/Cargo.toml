@@ -18,7 +18,7 @@ arrayvec = "0.7.6"
 [dev-dependencies]
 avif-parse = "2.0"
 mp4parse = "0.17"
-zenavif-parse = "0.4"
+zenavif-parse = "0.5.0"
 
 [badges]
 maintenance = { status = "passively-maintained" }
