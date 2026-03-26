@@ -1,9 +1,9 @@
 //! Benchmark: Our SIMD vs yuv crate (Balanced and Professional modes)
 
-use zenbench::criterion_compat::*;
-use zenbench::{criterion_group, criterion_main};
 use yuv::{YuvPlanarImage, YuvRange, YuvStandardMatrix, yuv420_to_rgb};
 use zenavif::yuv_convert::{YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRange, yuv420_to_rgb8};
+use zenbench::criterion_compat::*;
+use zenbench::{criterion_group, criterion_main};
 
 fn prepare_test_data(width: usize, height: usize) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let y_plane = vec![128u8; width * height];

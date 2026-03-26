@@ -1,10 +1,10 @@
 //! Benchmarks for zenavif decoder
 
-use zenbench::criterion_compat::*;
-use zenbench::{criterion_group, criterion_main};
 use enough::Unstoppable;
 use std::hint::black_box;
 use zenavif::{DecoderConfig, decode_with};
+use zenbench::criterion_compat::*;
+use zenbench::{criterion_group, criterion_main};
 
 // Include test images as bytes
 const SMALL_IMAGE: &[u8] = include_bytes!("../tests/vectors/libavif/white_1x1.avif");
