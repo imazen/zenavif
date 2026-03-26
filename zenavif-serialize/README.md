@@ -110,3 +110,12 @@ Output is tested against three independent AVIF parsers: [avif-parse](https://li
 ## License
 
 BSD-3-Clause. Original code copyright Cloudflare, Inc. Fork additions copyright Imazen LLC.
+
+
+
+### Upstream Contribution
+
+This is a fork of [kornelski/avif-serialize](https://github.com/kornelski/avif-serialize) (BSD-3-Clause).
+We are willing to release our improvements under the original BSD-3-Clause
+license if upstream takes over maintenance of those improvements. We'd rather
+contribute back than maintain a parallel codebase. Open an issue or reach out.
