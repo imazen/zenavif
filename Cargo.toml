@@ -32,7 +32,7 @@ ravif = { package = "zenravif", path = "../ravif/ravif", version = "0.1.0", defa
 # svtav1: disabled — produces corrupt bitstreams in most configurations (see svtav1-rs README)
 # svtav1 = { path = "/home/lilith/work/svtav1/svtav1-rs/svtav1", version = "0.1.0", optional = true }
 almost-enough = { version = "0.4.2", default-features = false }
-zencodec = { version = "0.1.4", optional = true }
+zencodec = { version = "0.1.5", optional = true }
 zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 zenpixels = { version = "0.2.0", default-features = false, features = ["imgref", "rgb"] }
 zenpixels-convert = { version = "0.2.0", default-features = false, features = ["rgb"] }
