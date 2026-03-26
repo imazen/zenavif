@@ -241,7 +241,10 @@ dependencies = [
  "anyhow",
  "arg_enum_proc_macro",
  "arrayvec",
+ "cc",
+ "libc",
  "log",
+ "nasm-rs",
  "num-rational",
  "num-traits",
  "pastey",
@@ -1895,6 +1898,7 @@ checksum = "00f1f60154ad4ef9871d606765c3ea037cde93bbd77536327b594de8f82df1cb"
 name = "zenavif"
 version = "0.1.0"
 dependencies = [
+ "almost-enough",
  "archmage 0.9.12",
  "bytemuck",
  "enough",
@@ -1919,11 +1923,14 @@ dependencies = [
  "zennode",
  "zenpixels",
  "zenpixels-convert",
+ "zenravif",
 ]
 
 [[package]]
 name = "zenavif-parse"
-version = "0.4.0"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d205737a3e1d5ea9b005efee79d53324a929fc8f0b06cd0bac42de52b65994a"
 dependencies = [
  "arrayvec",
  "bitreader",
@@ -1935,10 +1942,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "zenavif-serialize"
+version = "0.1.1"
+dependencies = [
+ "arrayvec",
+]
+
+[[package]]
 name = "zenbench"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05f11014a1bc8a177822c7f083a4bba8e2d592dcec3d02bd874980d42881cfc7"
+checksum = "fd13383ee045c949969f4d29996fc3e55e202d52702e597c09a97a28af2ef6ff"
 dependencies = [
  "clap",
  "fs4",
@@ -1950,9 +1964,9 @@ dependencies = [
 
 [[package]]
 name = "zencodec"
-version = "0.1.3"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84fcdf5bc9ea9f0b8d35d51cf6b94e21d4c4aadff62ec986764f3944aed77b2a"
+checksum = "ef26d77cfc62d281ed2e9a77b70d43d58451519e535f4669b9064e3b36ae1833"
 dependencies = [
  "almost-enough",
  "enough",
@@ -2001,6 +2015,57 @@ dependencies = [
  "rgb",
  "whereat",
  "zenpixels",
+]
+
+[[package]]
+name = "zenrav1e"
+version = "0.1.0"
+dependencies = [
+ "aligned-vec",
+ "arbitrary",
+ "arg_enum_proc_macro",
+ "arrayvec",
+ "av-scenechange",
+ "av1-grain",
+ "bitstream-io",
+ "built",
+ "cc",
+ "cfg-if",
+ "enough",
+ "interpolate_name",
+ "itertools",
+ "libc",
+ "libfuzzer-sys",
+ "log",
+ "maybe-rayon",
+ "nasm-rs",
+ "new_debug_unreachable",
+ "noop_proc_macro",
+ "num-derive",
+ "num-traits",
+ "pastey",
+ "profiling",
+ "rand",
+ "rand_chacha",
+ "safe_unaligned_simd",
+ "simd_helpers",
+ "thiserror",
+ "v_frame",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "zenravif"
+version = "0.1.0"
+dependencies = [
+ "almost-enough",
+ "imgref",
+ "loop9",
+ "quick-error",
+ "rayon",
+ "rgb",
+ "zenavif-serialize",
+ "zenrav1e",
 ]
 
 [[package]]
