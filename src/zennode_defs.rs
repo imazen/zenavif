@@ -15,9 +15,12 @@ use zennode::*;
 /// Exposes quality, speed, alpha quality, bit depth, chroma subsampling,
 /// color model, alpha mode, and lossless controls as pipeline parameters.
 ///
+/// All fields are `Option<T>` so the node acts as an overlay: only explicitly-set
+/// parameters are applied. `None` means "inherit from the base config."
+///
 /// Convert to [`crate::AvifEncoderConfig`] via
 /// [`to_encoder_config()`](AvifEncode::to_encoder_config) (requires `zencodec` feature).
-#[derive(Node, Clone, Debug)]
+#[derive(Node, Clone, Debug, Default)]
 #[node(id = "zenavif.encode", group = Encode, role = Encode)]
 #[node(tags("avif", "encode", "av1"))]
 pub struct AvifEncode {
@@ -25,28 +28,29 @@ pub struct AvifEncode {
     #[param(range(1.0..=100.0), default = 75.0, step = 1.0)]
     #[param(section = "Main", label = "Quality")]
     #[kv("avif.q", "avif.quality")]
-    pub quality: f32,
+    pub quality: Option<f32>,
 
     /// Encode speed (1 = slowest/best, 10 = fastest/worst).
     #[param(range(1..=10), default = 4)]
     #[param(section = "Main", label = "Speed")]
     #[kv("avif.speed")]
-    pub speed: u32,
+    pub speed: Option<u32>,
 
     /// Separate alpha channel quality (0.0 = use color quality).
     ///
-    /// When 0.0 (default), the color quality is used for alpha too.
+    /// When None (default), the color quality is used for alpha too.
     /// Set to a specific value (1.0-100.0) for independent alpha quality.
+    /// Set to 0.0 to explicitly use color quality.
     #[param(range(0.0..=100.0), default = 0.0, identity = 0.0, step = 1.0)]
     #[param(section = "Main", label = "Alpha Quality")]
     #[kv("avif.alpha_quality", "avif.aq")]
-    pub alpha_quality: f32,
+    pub alpha_quality: Option<f32>,
 
     /// Output bit depth: "auto", "8", or "10".
     #[param(default = "auto")]
     #[param(section = "Main", label = "Bit Depth")]
     #[kv("avif.depth")]
-    pub bit_depth: String,
+    pub bit_depth: Option<String>,
 
     /// Chroma subsampling: "420", "422", or "444".
     ///
@@ -55,15 +59,15 @@ pub struct AvifEncode {
     #[param(default = "444")]
     #[param(section = "Advanced", label = "Chroma Subsampling")]
     #[kv("avif.chroma")]
-    pub chroma_subsampling: String,
+    pub chroma_subsampling: Option<String>,
 
     /// Internal color model: "ycbcr" or "rgb".
     ///
-    /// YCbCr (default) produces smaller files. RGB may be better for lossless.
+    /// YCbCr produces smaller files. RGB may be better for lossless.
     #[param(default = "ycbcr")]
     #[param(section = "Advanced", label = "Color Model")]
     #[kv("avif.color_model")]
-    pub color_model: String,
+    pub color_model: Option<String>,
 
     /// Alpha handling mode: "clean", "dirty", or "premultiplied".
     ///
@@ -73,7 +77,7 @@ pub struct AvifEncode {
     #[param(default = "clean")]
     #[param(section = "Advanced", label = "Alpha Mode")]
     #[kv("avif.alpha_mode")]
-    pub alpha_mode: String,
+    pub alpha_mode: Option<String>,
 
     /// Enable mathematically lossless encoding.
     ///
@@ -82,106 +86,105 @@ pub struct AvifEncode {
     #[param(default = false)]
     #[param(section = "Advanced")]
     #[kv("avif.lossless")]
-    pub lossless: bool,
-}
-
-impl Default for AvifEncode {
-    fn default() -> Self {
-        Self {
-            quality: 75.0,
-            speed: 4,
-            alpha_quality: 0.0,
-            bit_depth: String::from("auto"),
-            chroma_subsampling: String::from("444"),
-            color_model: String::from("ycbcr"),
-            alpha_mode: String::from("clean"),
-            lossless: false,
-        }
-    }
+    pub lossless: Option<bool>,
 }
 
 #[cfg(all(feature = "zencodec", feature = "encode"))]
 impl AvifEncode {
     /// Convert this node into an [`crate::AvifEncoderConfig`].
     ///
-    /// Maps zennode parameters to the zencodec-based encoder configuration:
-    /// - `quality` -> [`AvifEncoderConfig::with_quality`]
-    /// - `speed` -> [`AvifEncoderConfig::with_effort_u32`]
-    /// - `alpha_quality` (if > 0) -> [`AvifEncoderConfig::with_alpha_quality_value`]
+    /// Maps zennode parameters to the zencodec-based encoder configuration.
+    /// Fields that are `None` use sensible defaults (quality=75, speed=4, etc.).
+    ///
+    /// - `quality` -> [`AvifEncoderConfig::with_quality`] (default 75.0)
+    /// - `speed` -> [`AvifEncoderConfig::with_effort_u32`] (default 4)
+    /// - `alpha_quality` (if Some and > 0) -> [`AvifEncoderConfig::with_alpha_quality_value`]
     /// - `lossless` -> [`AvifEncoderConfig::with_lossless_mode`]
     /// - `bit_depth` -> [`crate::EncodeBitDepth`] on the inner config
     /// - `color_model` -> [`crate::EncodeColorModel`] on the inner config
     /// - `alpha_mode` -> [`crate::EncodeAlphaMode`] on the inner config
     pub fn to_encoder_config(&self) -> crate::AvifEncoderConfig {
-        let mut cfg = crate::AvifEncoderConfig::new()
-            .with_quality(self.quality)
-            .with_effort_u32(self.speed);
+        let quality = self.quality.unwrap_or(75.0);
+        let speed = self.speed.unwrap_or(4);
 
-        if self.alpha_quality > 0.0 {
-            cfg = cfg.with_alpha_quality_value(self.alpha_quality);
+        let mut cfg = crate::AvifEncoderConfig::new()
+            .with_quality(quality)
+            .with_effort_u32(speed);
+
+        if let Some(aq) = self.alpha_quality {
+            if aq > 0.0 {
+                cfg = cfg.with_alpha_quality_value(aq);
+            }
         }
 
-        if self.lossless {
+        if let Some(true) = self.lossless {
             cfg = cfg.with_lossless_mode(true);
         }
 
         // Apply bit depth to the inner config
-        let depth = match self.bit_depth.as_str() {
-            "8" => crate::EncodeBitDepth::Eight,
-            "10" => crate::EncodeBitDepth::Ten,
-            _ => crate::EncodeBitDepth::Auto,
-        };
-        cfg.inner_mut().bit_depth = depth;
+        if let Some(ref depth_str) = self.bit_depth {
+            let depth = match depth_str.as_str() {
+                "8" => crate::EncodeBitDepth::Eight,
+                "10" => crate::EncodeBitDepth::Ten,
+                _ => crate::EncodeBitDepth::Auto,
+            };
+            cfg.inner_mut().bit_depth = depth;
+        }
 
         // Apply color model to the inner config
-        let model = match self.color_model.to_ascii_lowercase().as_str() {
-            "rgb" => crate::EncodeColorModel::Rgb,
-            _ => crate::EncodeColorModel::YCbCr,
-        };
-        cfg.inner_mut().color_model = model;
+        if let Some(ref model_str) = self.color_model {
+            let model = match model_str.to_ascii_lowercase().as_str() {
+                "rgb" => crate::EncodeColorModel::Rgb,
+                _ => crate::EncodeColorModel::YCbCr,
+            };
+            cfg.inner_mut().color_model = model;
+        }
 
         // Apply alpha mode to the inner config
-        let alpha = match self.alpha_mode.to_ascii_lowercase().as_str() {
-            "dirty" => crate::EncodeAlphaMode::UnassociatedDirty,
-            "premultiplied" => crate::EncodeAlphaMode::Premultiplied,
-            _ => crate::EncodeAlphaMode::UnassociatedClean,
-        };
-        cfg.inner_mut().alpha_color_mode = alpha;
+        if let Some(ref alpha_str) = self.alpha_mode {
+            let alpha = match alpha_str.to_ascii_lowercase().as_str() {
+                "dirty" => crate::EncodeAlphaMode::UnassociatedDirty,
+                "premultiplied" => crate::EncodeAlphaMode::Premultiplied,
+                _ => crate::EncodeAlphaMode::UnassociatedClean,
+            };
+            cfg.inner_mut().alpha_color_mode = alpha;
+        }
 
         cfg
     }
 
-    /// Apply this node's non-default fields onto an existing [`crate::AvifEncoderConfig`].
+    /// Apply this node's set fields onto an existing [`crate::AvifEncoderConfig`].
     ///
-    /// Fields that match [`AvifEncode::default()`] are skipped, preserving whatever
-    /// the incoming config already has. This lets pipeline nodes act as overlays:
-    /// only explicitly-set parameters are written.
+    /// Fields that are `None` are skipped, preserving whatever the incoming config
+    /// already has. This lets pipeline nodes act as overlays: only explicitly-set
+    /// parameters are written.
     pub fn apply(&self, mut config: crate::AvifEncoderConfig) -> crate::AvifEncoderConfig {
-        let defaults = Self::default();
-
         // Quality
-        if (self.quality - defaults.quality).abs() > f32::EPSILON {
-            config = config.with_quality(self.quality);
+        if let Some(quality) = self.quality {
+            config = config.with_quality(quality);
         }
 
         // Speed
-        if self.speed != defaults.speed {
-            config = config.with_effort_u32(self.speed);
+        if let Some(speed) = self.speed {
+            config = config.with_effort_u32(speed);
         }
 
-        // Alpha quality (0.0 means "use color quality", so only apply when non-default)
-        if (self.alpha_quality - defaults.alpha_quality).abs() > f32::EPSILON {
-            config = config.with_alpha_quality_value(self.alpha_quality);
+        // Alpha quality (0.0 means "use color quality", but we still apply it
+        // since the user explicitly set the field)
+        if let Some(aq) = self.alpha_quality {
+            if aq > 0.0 {
+                config = config.with_alpha_quality_value(aq);
+            }
         }
 
         // Lossless
-        if self.lossless != defaults.lossless {
-            config = config.with_lossless_mode(self.lossless);
+        if let Some(lossless) = self.lossless {
+            config = config.with_lossless_mode(lossless);
         }
 
         // Bit depth
-        if self.bit_depth != defaults.bit_depth {
-            let depth = match self.bit_depth.as_str() {
+        if let Some(ref depth_str) = self.bit_depth {
+            let depth = match depth_str.as_str() {
                 "8" => crate::EncodeBitDepth::Eight,
                 "10" => crate::EncodeBitDepth::Ten,
                 _ => crate::EncodeBitDepth::Auto,
@@ -190,8 +193,8 @@ impl AvifEncode {
         }
 
         // Color model
-        if self.color_model != defaults.color_model {
-            let model = match self.color_model.to_ascii_lowercase().as_str() {
+        if let Some(ref model_str) = self.color_model {
+            let model = match model_str.to_ascii_lowercase().as_str() {
                 "rgb" => crate::EncodeColorModel::Rgb,
                 _ => crate::EncodeColorModel::YCbCr,
             };
@@ -199,8 +202,8 @@ impl AvifEncode {
         }
 
         // Alpha mode
-        if self.alpha_mode != defaults.alpha_mode {
-            let alpha = match self.alpha_mode.to_ascii_lowercase().as_str() {
+        if let Some(ref alpha_str) = self.alpha_mode {
+            let alpha = match alpha_str.to_ascii_lowercase().as_str() {
                 "dirty" => crate::EncodeAlphaMode::UnassociatedDirty,
                 "premultiplied" => crate::EncodeAlphaMode::Premultiplied,
                 _ => crate::EncodeAlphaMode::UnassociatedClean,
@@ -298,31 +301,24 @@ mod tests {
         assert!(param_names.contains(&"color_model"));
         assert!(param_names.contains(&"alpha_mode"));
         assert!(param_names.contains(&"lossless"));
+
+        // All encode params should be marked optional
+        for p in schema.params {
+            assert!(p.optional, "param {} should be optional", p.name);
+        }
     }
 
     #[test]
     fn encode_default_values() {
         let node = AVIF_ENCODE_NODE.create_default().unwrap();
-        assert_eq!(node.get_param("quality"), Some(ParamValue::F32(75.0)));
-        assert_eq!(node.get_param("speed"), Some(ParamValue::U32(4)));
-        assert_eq!(node.get_param("alpha_quality"), Some(ParamValue::F32(0.0)));
-        assert_eq!(
-            node.get_param("bit_depth"),
-            Some(ParamValue::Str("auto".into()))
-        );
-        assert_eq!(
-            node.get_param("chroma_subsampling"),
-            Some(ParamValue::Str("444".into()))
-        );
-        assert_eq!(
-            node.get_param("color_model"),
-            Some(ParamValue::Str("ycbcr".into()))
-        );
-        assert_eq!(
-            node.get_param("alpha_mode"),
-            Some(ParamValue::Str("clean".into()))
-        );
-        assert_eq!(node.get_param("lossless"), Some(ParamValue::Bool(false)));
+        assert_eq!(node.get_param("quality"), Some(ParamValue::None));
+        assert_eq!(node.get_param("speed"), Some(ParamValue::None));
+        assert_eq!(node.get_param("alpha_quality"), Some(ParamValue::None));
+        assert_eq!(node.get_param("bit_depth"), Some(ParamValue::None));
+        assert_eq!(node.get_param("chroma_subsampling"), Some(ParamValue::None));
+        assert_eq!(node.get_param("color_model"), Some(ParamValue::None));
+        assert_eq!(node.get_param("alpha_mode"), Some(ParamValue::None));
+        assert_eq!(node.get_param("lossless"), Some(ParamValue::None));
     }
 
     #[test]
@@ -352,6 +348,9 @@ mod tests {
         assert_eq!(node.get_param("quality"), Some(ParamValue::F32(85.0)));
         assert_eq!(node.get_param("speed"), Some(ParamValue::U32(6)));
         assert_eq!(node.get_param("lossless"), Some(ParamValue::Bool(false)));
+        // Unset fields should be None
+        assert_eq!(node.get_param("alpha_quality"), Some(ParamValue::None));
+        assert_eq!(node.get_param("bit_depth"), Some(ParamValue::None));
         assert_eq!(kv.unconsumed().count(), 0);
     }
 
@@ -366,9 +365,37 @@ mod tests {
     fn encode_downcast() {
         let node = AVIF_ENCODE_NODE.create_default().unwrap();
         let enc = node.as_any().downcast_ref::<AvifEncode>().unwrap();
-        assert!((enc.quality - 75.0).abs() < f32::EPSILON);
-        assert_eq!(enc.speed, 4);
-        assert!(!enc.lossless);
+        assert_eq!(enc.quality, None);
+        assert_eq!(enc.speed, None);
+        assert_eq!(enc.lossless, None);
+    }
+
+    #[test]
+    fn encode_downcast_with_values() {
+        let mut kv = KvPairs::from_querystring("avif.q=85&avif.speed=6");
+        let node = AVIF_ENCODE_NODE.from_kv(&mut kv).unwrap().unwrap();
+        let enc = node.as_any().downcast_ref::<AvifEncode>().unwrap();
+        assert_eq!(enc.quality, Some(85.0));
+        assert_eq!(enc.speed, Some(6));
+        assert_eq!(enc.alpha_quality, None);
+        assert_eq!(enc.lossless, None);
+    }
+
+    #[test]
+    fn encode_set_then_clear() {
+        let mut enc = AvifEncode {
+            quality: Some(85.0),
+            speed: Some(6),
+            ..Default::default()
+        };
+
+        // Clear quality with ParamValue::None
+        assert!(enc.set_param("quality", ParamValue::None));
+        assert_eq!(enc.quality, None);
+        assert_eq!(enc.get_param("quality"), Some(ParamValue::None));
+
+        // Speed should still be set
+        assert_eq!(enc.speed, Some(6));
     }
 
     #[test]
@@ -384,6 +411,11 @@ mod tests {
         let param_names: alloc::vec::Vec<&str> = schema.params.iter().map(|p| p.name).collect();
         assert!(param_names.contains(&"film_grain"));
         assert!(param_names.contains(&"extract_gain_map"));
+
+        // Decode params are not optional (they are feature flags)
+        for p in schema.params {
+            assert!(!p.optional, "param {} should not be optional", p.name);
+        }
     }
 
     #[test]
@@ -452,15 +484,15 @@ mod tests {
             let node = AvifEncode::default();
             let cfg = node.to_encoder_config();
             let inner = cfg.inner();
+            // Default node (all None) uses fallback quality=75, speed=4
             assert!((inner.quality - 75.0).abs() < f32::EPSILON);
-            // speed 4 -> effort 4 -> inverted to speed in AvifEncoderConfig
             assert_eq!(inner.speed, 4);
         }
 
         #[test]
         fn encode_to_config_lossless() {
             let node = AvifEncode {
-                lossless: true,
+                lossless: Some(true),
                 ..Default::default()
             };
             let cfg = node.to_encoder_config();
@@ -471,7 +503,7 @@ mod tests {
         #[test]
         fn encode_to_config_alpha_quality() {
             let node = AvifEncode {
-                alpha_quality: 50.0,
+                alpha_quality: Some(50.0),
                 ..Default::default()
             };
             let cfg = node.to_encoder_config();
@@ -481,7 +513,7 @@ mod tests {
         #[test]
         fn encode_to_config_bit_depth() {
             let node = AvifEncode {
-                bit_depth: String::from("10"),
+                bit_depth: Some(String::from("10")),
                 ..Default::default()
             };
             let cfg = node.to_encoder_config();
@@ -491,7 +523,7 @@ mod tests {
         #[test]
         fn encode_to_config_color_model_rgb() {
             let node = AvifEncode {
-                color_model: String::from("rgb"),
+                color_model: Some(String::from("rgb")),
                 ..Default::default()
             };
             let cfg = node.to_encoder_config();
@@ -501,7 +533,7 @@ mod tests {
         #[test]
         fn encode_to_config_alpha_mode_premultiplied() {
             let node = AvifEncode {
-                alpha_mode: String::from("premultiplied"),
+                alpha_mode: Some(String::from("premultiplied")),
                 ..Default::default()
             };
             let cfg = node.to_encoder_config();
@@ -513,7 +545,7 @@ mod tests {
 
         #[test]
         fn apply_defaults_preserves_config() {
-            // A default AvifEncode applied to an existing config should not change it.
+            // A default AvifEncode (all None) applied to an existing config should not change it.
             let base = crate::AvifEncoderConfig::new()
                 .with_quality(90.0)
                 .with_effort_u32(2);
@@ -545,7 +577,7 @@ mod tests {
             let speed_before = base.inner().speed;
 
             let node = AvifEncode {
-                quality: 50.0,
+                quality: Some(50.0),
                 ..Default::default()
             };
             let result = node.apply(base);
@@ -569,7 +601,7 @@ mod tests {
             let speed_before = base.inner().speed;
 
             let node = AvifEncode {
-                lossless: true,
+                lossless: Some(true),
                 ..Default::default()
             };
             let result = node.apply(base);
