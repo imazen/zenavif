@@ -1740,7 +1740,7 @@ static AVIF_DECODE_CAPABILITIES: zencodec::decode::DecodeCapabilities =
 
 impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
     type Error = At<Error>;
-    type Job = AvifDecodeJob;
+    type Job<'a> = AvifDecodeJob;
 
     fn formats() -> &'static [ImageFormat] {
         &[ImageFormat::Avif]
@@ -1754,7 +1754,7 @@ impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
         &AVIF_DECODE_CAPABILITIES
     }
 
-    fn job(self) -> AvifDecodeJob {
+    fn job<'a>(self) -> Self::Job<'a> {
         let extract_gain_map = self.extract_gain_map;
         AvifDecodeJob {
             config: self,
