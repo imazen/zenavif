@@ -118,6 +118,3 @@ zencodec = ["dep:zencodec"]
 zennode = ["dep:zennode"]
 # Expose internal YUV conversion modules for profiling/debugging. Not public API.
 _dev = []
-
-[patch.crates-io]
-zenavif-parse = { path = "/home/lilith/work/zen/zenavif-parse" }
