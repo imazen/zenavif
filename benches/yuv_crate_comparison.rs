@@ -1,7 +1,7 @@
 //! Benchmark: Our SIMD vs yuv crate (Balanced and Professional modes)
 
-use criterion::measurement::WallTime;
-use criterion::{BenchmarkGroup, Criterion, black_box, criterion_group, criterion_main};
+use zenbench::criterion_compat::*;
+use zenbench::{criterion_group, criterion_main};
 use yuv::{YuvPlanarImage, YuvRange, YuvStandardMatrix, yuv420_to_rgb};
 use zenavif::yuv_convert::{YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRange, yuv420_to_rgb8};
 
@@ -21,7 +21,7 @@ fn bench_comparison(c: &mut Criterion) {
     let height = 1080;
     let (y_plane, u_plane, v_plane) = prepare_test_data(width, height);
 
-    group.throughput(criterion::Throughput::Elements((width * height) as u64));
+    group.throughput(Throughput::Elements((width * height) as u64));
 
     // Our SIMD implementation
     group.bench_function("zenavif_simd", |b| {

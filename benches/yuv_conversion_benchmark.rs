@@ -1,6 +1,7 @@
 //! Benchmark YUV to RGB conversion (SIMD vs scalar)
 
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use zenbench::criterion_compat::*;
+use zenbench::{criterion_group, criterion_main};
 use zenavif::yuv_convert::{YuvMatrix, YuvRange, yuv420_to_rgb8};
 
 fn bench_yuv420_conversion(c: &mut Criterion) {
@@ -28,7 +29,7 @@ fn bench_yuv420_conversion(c: &mut Criterion) {
         let u_plane = vec![128u8; uv_size];
         let v_plane = vec![128u8; uv_size];
 
-        group.throughput(criterion::Throughput::Elements((width * height) as u64));
+        group.throughput(Throughput::Elements((width * height) as u64));
 
         group.bench_with_input(
             BenchmarkId::from_parameter(name),

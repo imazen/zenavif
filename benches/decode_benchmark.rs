@@ -1,6 +1,7 @@
 //! Benchmarks for zenavif decoder
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use zenbench::criterion_compat::*;
+use zenbench::{criterion_group, criterion_main};
 use enough::Unstoppable;
 use std::hint::black_box;
 use zenavif::{DecoderConfig, decode_with};

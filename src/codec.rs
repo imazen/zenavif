@@ -891,7 +891,7 @@ impl AvifEncoder {
             })
             .collect();
         let img = imgref::ImgVec::new(rgba, w, h);
-        let result = crate::encode_rgba16(img.as_ref(), &cfg, stop)?;
+        let result = crate::encode_rgba16(img.as_ref(), &cfg, stop, None)?;
         self.make_output(result.avif_file)
     }
 
@@ -2505,12 +2505,11 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
         if self.extract_gain_map {
             if let Some(gm) = native_info.gain_map {
                 if let Some(metadata) = convert_gain_map_info(&gm) {
-                    let source = zencodec::gainmap::GainMapSource {
-                        data: gm.gain_map_data,
-                        format: zencodec::ImageFormat::Avif,
+                    let source = zencodec::gainmap::GainMapSource::new(
+                        gm.gain_map_data,
+                        zencodec::ImageFormat::Avif,
                         metadata,
-                        depth: 0,
-                    };
+                    );
                     output = output.with_extras(source);
                 }
             }
