@@ -28,7 +28,8 @@ bytemuck = { version = "1.25.0", default-features = false, features = ["derive"]
 thiserror = { version = "2.0.18", default-features = false }
 whereat = "0.1.4"
 log = "0.4.29"
-ravif = { package = "zenravif", path = "../ravif/ravif", version = "0.1.0", default-features = false, optional = true }
+ravif = { package = "zenravif", path = "../ravif/ravif", version = "0.1.0", default-features = false, optional = true, features = ["stop"] }
+almost-enough = { version = "0.4.2", default-features = false }
 zencodec = { version = "0.1.3", optional = true }
 zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 zenpixels = { version = "0.2.0", default-features = false, features = ["imgref", "rgb"] }
