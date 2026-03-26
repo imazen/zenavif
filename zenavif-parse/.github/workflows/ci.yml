@@ -1,0 +1,162 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CI: true
+
+jobs:
+  # ==========================================================================
+  # Native testing (6-platform matrix)
+  # ==========================================================================
+  test:
+    name: Test (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, name: Linux x64 }
+          - { os: ubuntu-24.04-arm, name: Linux aarch64 }
+          - { os: macos-latest, name: macOS arm64 }
+          - { os: macos-26-intel, name: macOS x64 }
+          - { os: windows-latest, name: Windows x64 }
+          - { os: windows-11-arm, name: Windows arm64 }
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test (default)
+        run: cargo test
+
+      - name: Test (eager feature)
+        run: cargo test --features eager
+
+      - name: Test (c_api feature)
+        run: cargo test --features c_api
+
+      - name: Test (all features)
+        run: cargo test --all-features
+
+  # ==========================================================================
+  # Cross-compiled 32-bit testing (i686 via QEMU)
+  # ==========================================================================
+  i686:
+    name: Test (i686)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cross
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cross-i686
+
+      - name: Test (i686/QEMU, all features)
+        run: cross test --target i686-unknown-linux-gnu --all-features
+
+  # ==========================================================================
+  # WASM check
+  # ==========================================================================
+  wasm:
+    name: WASM (wasm32-wasip1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check WASM
+        run: cargo check --target wasm32-wasip1
+
+  # ==========================================================================
+  # Clippy
+  # ==========================================================================
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Clippy
+        run: cargo clippy --all-features --all-targets -- -D warnings
+
+  # ==========================================================================
+  # Format check
+  # ==========================================================================
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+  # ==========================================================================
+  # MSRV check
+  # ==========================================================================
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-hack
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check MSRV
+        run: cargo hack check --rust-version
+
+  # ==========================================================================
+  # Code coverage
+  # ==========================================================================
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Generate coverage
+        run: cargo llvm-cov --all-features --lcov --output-path lcov.info
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: lcov.info
+          fail_ci_if_error: false
+        continue-on-error: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

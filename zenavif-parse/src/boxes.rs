@@ -104,6 +104,7 @@ box_database!(
     ItemInfoBox                       0x6969_6e66, // "iinf"
     ItemInfoEntry                     0x696e_6665, // "infe"
     ItemLocationBox                   0x696c_6f63, // "iloc"
+    ItemDataBox                       0x6964_6174, // "idat" - item data for construction_method=1
     MovieBox                          0x6d6f_6f76, // "moov"
     MovieHeaderBox                    0x6d76_6864, // "mvhd"
     TrackBox                          0x7472_616b, // "trak"
@@ -114,6 +115,7 @@ box_database!(
     MediaHeaderBox                    0x6d64_6864, // "mdhd"
     HandlerBox                        0x6864_6c72, // "hdlr"
     MediaInformationBox               0x6d69_6e66, // "minf"
+    TrackReferenceBox                 0x7472_6566, // "tref"
     ImageReferenceBox                 0x6972_6566, // "iref"
     ImagePropertiesBox                0x6970_7270, // "iprp"
     ItemPropertyContainerBox          0x6970_636f, // "ipco"
@@ -121,8 +123,11 @@ box_database!(
     ColorInformationBox               0x636f_6c72, // "colr"
     PixelInformationBox               0x7069_7869, // "pixi"
     AuxiliaryTypeProperty             0x6175_7843, // "auxC"
-    ContentLightLevelBox              0x636c_6c69, // "clli"
-    MasteringDisplayColourVolumeBox   0x6d64_6376, // "mdcv"
+    ImageSpatialExtentsBox            0x6973_7065, // "ispe" - image width and height
+    ImageGridBox                      0x6772_6964, // "grid" - for grid/tiled images
+    VideoMediaHeaderBox               0x766d_6864, // "vmhd" - video media header (for animation)
+    DataInformationBox                0x6469_6e66, // "dinf" - data information (for animation)
+    DataReferenceBox                  0x6472_6566, // "dref" - data reference (for animation)
     SampleTableBox                    0x7374_626c, // "stbl"
     SampleDescriptionBox              0x7374_7364, // "stsd"
     TimeToSampleBox                   0x7374_7473, // "stts"
@@ -142,6 +147,17 @@ box_database!(
     VPCodecConfigurationBox           0x7670_6343, // "vpcC"
     AV1SampleEntry                    0x6176_3031, // "av01"
     AV1CodecConfigurationBox          0x6176_3143, // "av1C"
+    ImageRotationBox                  0x6972_6f74, // "irot"
+    ImageMirrorBox                    0x696d_6972, // "imir"
+    CleanApertureBox                  0x636c_6170, // "clap"
+    PixelAspectRatioBox               0x7061_7370, // "pasp"
+    ContentLightLevelBox              0x636c_6c69, // "clli"
+    MasteringDisplayColourVolumeBox   0x6d64_6376, // "mdcv"
+    ContentColourVolumeBox            0x6363_6c76, // "cclv"
+    AmbientViewingEnvironmentBox      0x616d_7665, // "amve"
+    OperatingPointSelectorBox         0x6131_6f70, // "a1op"
+    LayerSelectorBox                  0x6c73_656c, // "lsel"
+    AV1LayeredImageIndexingBox        0x6131_6c78, // "a1lx"
     FLACSampleEntry                   0x664c_6143, // "fLaC"
     FLACSpecificBox                   0x6466_4c61, // "dfLa"
     OpusSampleEntry                   0x4f70_7573, // "Opus"
@@ -213,4 +229,5 @@ box_database!(
     SortArtistEntry                   0x736f_6172, // "soar"
     SortAlbumArtistEntry              0x736f_6161, // "soaa"
     SortComposerEntry                 0x736f_636f, // "soco"
+    GroupsListBox                     0x6772_706c, // "grpl"
 );

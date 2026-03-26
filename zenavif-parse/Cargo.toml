@@ -1,7 +1,8 @@
 [package]
-name = "avif-parse"
-version = "2.0.0"
+name = "zenavif-parse"
+version = "0.5.0"
 authors = [
+  "Lilith River <lilith@imazen.io>",
   "Kornel Lesiński <kornel@geekhood.net>",
   "Ralph Giles <giles@mozilla.com>",
   "Matthew Gregan <kinetik@flim.org>",
@@ -9,18 +10,17 @@ authors = [
   "Jon Bauman <jbauman@mozilla.com>",
 ]
 edition = "2024"
-description = "Parser for AVIF image files"
-documentation = "https://docs.rs/avif-parse/"
+description = "AVIF container parser with zero-copy AvifParser API, grid images, animation, and resource limits. Fork of avif-parse."
 license = "MPL-2.0"
 categories = ["multimedia::images"]
-repository = "https://github.com/kornelski/avif-parse"
+repository = "https://github.com/imazen/zenavif-parse"
 readme = "README.md"
-include = ["/README.md", "/Cargo.toml", "/LICENSE", "/src/*.rs", "/avif_parse.h"]
-keywords = ["demuxer", "image", "parser", "heif"]
-rust-version = "1.90"
+include = ["/README.md", "/Cargo.toml", "/LICENSE", "/src/*.rs", "/examples/*.rs"]
+keywords = ["avif", "image", "parser", "demuxer", "heif"]
+rust-version = "1.92"
 
 [lib]
-crate-type = ["rlib", "staticlib"]
+crate-type = ["rlib"]
 
 [dependencies]
 byteorder = "1.5.0"
@@ -29,17 +29,32 @@ leb128 = "0.2.5"
 log = "0.4.20"
 fallible_collections = { version = "0.5.1", default-features = false, features = ["std"] }
 arrayvec = "0.7.6"
+enough = { version = "0.4.2", features = ["std"] }
 
 [dev-dependencies]
-env_logger = "0.11"
+env_logger = "0.11.10"
 walkdir = "2.4.0"
 
 [features]
+eager = []
 # Export symbols for C
-c_api = []
+c_api = ["eager"]
 
 [badges]
-maintenance = { status = "passively-maintained" }
+maintenance = { status = "actively-developed" }
 
 [package.metadata.docs.rs]
+all-features = true
 targets = ["x86_64-unknown-linux-gnu"]
+
+[[example]]
+name = "dump_av1"
+required-features = ["eager"]
+
+[[example]]
+name = "inspect_grid"
+required-features = ["eager"]
+
+[[example]]
+name = "inspect_animation"
+required-features = ["eager"]

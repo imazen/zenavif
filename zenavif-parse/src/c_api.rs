@@ -1,3 +1,6 @@
+#![allow(unsafe_code)]
+#![allow(deprecated)]
+
 use crate::AvifData as AvifDataRust;
 
 /// Result of parsing an AVIF file. Contains AV1-compressed data.

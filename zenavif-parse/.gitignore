@@ -8,5 +8,50 @@ mp4parse_capi/examples/libmp4parse.a
 mp4parse_capi/examples/libmp4parse.a.out
 mp4parse_capi/examples/mp4parse.d
 mp4parse_capi/examples/test.o
-target/
 Cargo.lock
+
+# === Standard exclusions (do not depend on user ~/.gitignore) ===
+
+# Rust build artifacts
+target/
+
+# Fuzz build artifacts and crashes
+fuzz/target/
+fuzz/artifacts/
+
+# Profiling
+perf.data
+perf.data.old
+flamegraph.svg
+heaptrack.*.zst
+cachegrind.out.*
+callgrind.out.*
+massif.out.*
+
+# C/C++ build artifacts
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.rlib
+
+# Compiled binaries with no extension
+rust_out
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.iml
