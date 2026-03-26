@@ -224,7 +224,7 @@ pub fn decode_animation_with(
 /// ```
 #[cfg(feature = "encode")]
 pub fn encode(image: &PixelBuffer) -> Result<EncodedImage> {
-    encode_with(image, &EncoderConfig::default(), &Unstoppable)
+    encode_with(image, &EncoderConfig::default(), almost_enough::StopToken::new(Unstoppable))
 }
 
 /// Encode a decoded image to AVIF with custom settings and cancellation
@@ -235,7 +235,7 @@ pub fn encode(image: &PixelBuffer) -> Result<EncodedImage> {
 pub fn encode_with(
     image: &PixelBuffer,
     config: &EncoderConfig,
-    stop: &(impl Stop + ?Sized),
+    stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
     use zenpixels::PixelDescriptor;
 

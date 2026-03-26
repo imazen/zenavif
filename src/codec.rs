@@ -757,9 +757,6 @@ impl AvifEncoder {
         if let Some(ref xmp) = self.xmp {
             cfg = cfg.xmp(xmp.to_vec());
         }
-        if let Some(ref token) = self.stop {
-            cfg = cfg.with_stop_token(token.clone());
-        }
         cfg
     }
 
@@ -784,10 +781,10 @@ impl AvifEncoder {
         Ok(EncodeOutput::new(data, ImageFormat::Avif))
     }
 
-    fn stop_token(&self) -> &dyn Stop {
+    fn stop_token(&self) -> almost_enough::StopToken {
         match &self.stop {
-            Some(s) => s,
-            None => &enough::Unstoppable,
+            Some(s) => s.clone(),
+            None => almost_enough::StopToken::new(enough::Unstoppable),
         }
     }
 
@@ -1204,6 +1201,15 @@ pub struct AvifAnimationFrameEncoder {
     frame_count: u32,
 }
 
+impl AvifAnimationFrameEncoder {
+    fn stop_token(&self) -> almost_enough::StopToken {
+        match &self.stop {
+            Some(s) => s.clone(),
+            None => almost_enough::StopToken::new(enough::Unstoppable),
+        }
+    }
+}
+
 #[cfg(feature = "encode")]
 impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
     type Error = At<Error>;
@@ -1332,17 +1338,7 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
             return Err(at!(Error::Encode("no frames to encode".into())));
         }
 
-        let stop_ref: &dyn Stop = match (&self.stop, stop) {
-            (Some(owned), Some(per_call)) => {
-                // Can't easily combine — prefer per-call token
-                per_call.check().map_err(|e| at!(Error::from(e)))?;
-                owned.check().map_err(|e| at!(Error::from(e)))?;
-                &enough::Unstoppable
-            }
-            (Some(owned), None) => owned,
-            (None, Some(per_call)) => per_call,
-            (None, None) => &enough::Unstoppable,
-        };
+        let stop_token = self.stop_token();
 
         let avif_file = match self.frames[0] {
             BufferedFrame::Rgb8 { .. } => {
@@ -1360,7 +1356,7 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
                         _ => unreachable!(),
                     })
                     .collect();
-                let result = crate::encode_animation_rgb8(&anim_frames, &self.config, stop_ref)?;
+                let result = crate::encode_animation_rgb8(&anim_frames, &self.config, stop_token.clone())?;
                 result.avif_file
             }
             BufferedFrame::Rgba8 { .. } => {
@@ -1378,7 +1374,7 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
                         _ => unreachable!(),
                     })
                     .collect();
-                let result = crate::encode_animation_rgba8(&anim_frames, &self.config, stop_ref)?;
+                let result = crate::encode_animation_rgba8(&anim_frames, &self.config, stop_token.clone())?;
                 result.avif_file
             }
             BufferedFrame::Rgb16 { .. } => {
@@ -1396,7 +1392,7 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
                         _ => unreachable!(),
                     })
                     .collect();
-                let result = crate::encode_animation_rgb16(&anim_frames, &self.config, stop_ref)?;
+                let result = crate::encode_animation_rgb16(&anim_frames, &self.config, stop_token.clone())?;
                 result.avif_file
             }
             BufferedFrame::Rgba16 { .. } => {
@@ -1414,7 +1410,7 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
                         _ => unreachable!(),
                     })
                     .collect();
-                let result = crate::encode_animation_rgba16(&anim_frames, &self.config, stop_ref)?;
+                let result = crate::encode_animation_rgba16(&anim_frames, &self.config, stop_token.clone())?;
                 result.avif_file
             }
         };
