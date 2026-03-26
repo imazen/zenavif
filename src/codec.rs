@@ -1513,19 +1513,19 @@ impl AvifDecoderConfig {
     /// Convenience: decode image with this config.
     pub fn decode(&self, data: &[u8]) -> Result<DecodeOutput, At<Error>> {
         use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
-        self.job().decoder(Cow::Borrowed(data), &[])?.decode()
+        self.clone().job().decoder(Cow::Borrowed(data), &[])?.decode()
     }
 
     /// Convenience: probe image header with this config.
     pub fn probe_header(&self, data: &[u8]) -> Result<ImageInfo, At<Error>> {
         use zencodec::decode::{DecodeJob as _, DecoderConfig as _};
-        self.job().probe(data)
+        self.clone().job().probe(data)
     }
 
     /// Convenience: probe full image metadata (may be expensive).
     pub fn probe_full(&self, data: &[u8]) -> Result<ImageInfo, At<Error>> {
         use zencodec::decode::{DecodeJob as _, DecoderConfig as _};
-        self.job().probe_full(data)
+        self.clone().job().probe_full(data)
     }
 
     /// Convenience: decode into a pre-allocated RGB8 buffer.
@@ -1740,7 +1740,7 @@ static AVIF_DECODE_CAPABILITIES: zencodec::decode::DecodeCapabilities =
 
 impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
     type Error = At<Error>;
-    type Job<'a> = AvifDecodeJob<'a>;
+    type Job = AvifDecodeJob;
 
     fn formats() -> &'static [ImageFormat] {
         &[ImageFormat::Avif]
@@ -1754,14 +1754,15 @@ impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
         &AVIF_DECODE_CAPABILITIES
     }
 
-    fn job(&self) -> AvifDecodeJob<'_> {
+    fn job(self) -> AvifDecodeJob {
+        let extract_gain_map = self.extract_gain_map;
         AvifDecodeJob {
             config: self,
             stop: None,
             limits: ResourceLimits::none(),
             start_frame_index: 0,
             policy: None,
-            extract_gain_map: self.extract_gain_map,
+            extract_gain_map,
         }
     }
 }
@@ -1769,8 +1770,8 @@ impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
 // ── Decode Job ──────────────────────────────────────────────────────────────
 
 /// Per-operation AVIF decode job.
-pub struct AvifDecodeJob<'a> {
-    config: &'a AvifDecoderConfig,
+pub struct AvifDecodeJob {
+    config: AvifDecoderConfig,
     stop: Option<zencodec::StopToken>,
     limits: ResourceLimits,
     start_frame_index: u32,
@@ -1781,7 +1782,7 @@ pub struct AvifDecodeJob<'a> {
     extract_gain_map: bool,
 }
 
-impl<'a> AvifDecodeJob<'a> {
+impl AvifDecodeJob {
     fn effective_config(&self) -> crate::DecoderConfig {
         let mut cfg = self.config.inner.clone();
         if let Some(max_pixels) = self.limits.max_pixels {
@@ -1862,7 +1863,7 @@ impl<'a> AvifDecodeJob<'a> {
     }
 }
 
-impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob<'a> {
+impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
     type Error = At<Error>;
     type Dec = AvifDecoder<'a>;
     type StreamDec = AvifStreamingDecoder;
