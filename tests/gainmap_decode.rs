@@ -4,6 +4,7 @@
 //! are accessible from the decode output when an AVIF file contains a
 //! `tmap` derived image item.
 
+use enough::Unstoppable;
 use zenavif::{DecoderConfig, ManagedAvifDecoder};
 #[cfg(feature = "zencodec")]
 use zencodec::gainmap::GainMapSource;
@@ -125,7 +126,7 @@ fn decode_full_has_gain_map() {
     let mut decoder =
         ManagedAvifDecoder::new(&data, &DecoderConfig::default()).expect("decoder should open");
     let (_pixels, info) = decoder
-        .decode_full(&enough::Unstoppable)
+        .decode_full(&Unstoppable)
         .expect("decode should succeed");
 
     let gm = info
@@ -148,7 +149,7 @@ fn decode_full_no_gain_map() {
     let mut decoder =
         ManagedAvifDecoder::new(&data, &DecoderConfig::default()).expect("decoder should open");
     let (_pixels, info) = decoder
-        .decode_full(&enough::Unstoppable)
+        .decode_full(&Unstoppable)
         .expect("decode should succeed");
     assert!(
         info.gain_map.is_none(),

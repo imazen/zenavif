@@ -7,9 +7,14 @@
 
 use imgref::Img;
 use rgb::Rgb;
+use almost_enough::{StopToken, Unstoppable};
 use zenavif::{
     DecoderConfig, EncoderConfig, ManagedAvifDecoder, MasteringDisplayConfig, encode_rgb8,
 };
+
+fn stop() -> StopToken {
+    StopToken::new(Unstoppable)
+}
 
 /// Create a simple 16x16 RGB8 test image
 fn make_test_image() -> Img<Vec<Rgb<u8>>> {
@@ -29,7 +34,7 @@ fn make_test_image() -> Img<Vec<Rgb<u8>>> {
 fn encode_and_probe(config: &EncoderConfig) -> zenavif::ImageInfo {
     let img = make_test_image();
     let encoded =
-        encode_rgb8(img.as_ref(), config, &enough::Unstoppable).expect("encode should succeed");
+        encode_rgb8(img.as_ref(), config, stop()).expect("encode should succeed");
     let decoder = ManagedAvifDecoder::new(&encoded.avif_file, &DecoderConfig::default())
         .expect("decoder should open");
     decoder.probe_info().expect("probe should succeed")
@@ -282,12 +287,12 @@ fn decode_full_returns_metadata() {
         .transfer_characteristics(13); // sRGB
 
     let encoded =
-        encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).expect("encode should succeed");
+        encode_rgb8(img.as_ref(), &config, stop()).expect("encode should succeed");
 
     let mut decoder = ManagedAvifDecoder::new(&encoded.avif_file, &DecoderConfig::default())
         .expect("decoder should open");
     let (_pixels, info) = decoder
-        .decode_full(&enough::Unstoppable)
+        .decode_full(&Unstoppable)
         .expect("decode_full should succeed");
 
     assert_eq!(info.width, 16);
@@ -311,6 +316,6 @@ fn cancellation_during_encode() {
     let img = make_test_image();
     let config = EncoderConfig::new().quality(80.0).speed(10);
 
-    let result = encode_rgb8(img.as_ref(), &config, &AlreadyStopped);
+    let result = encode_rgb8(img.as_ref(), &config, StopToken::new(AlreadyStopped));
     assert!(result.is_err(), "encoding with cancelled token should fail");
 }

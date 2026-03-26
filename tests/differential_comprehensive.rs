@@ -7,7 +7,12 @@
 
 use imgref::Img;
 use rgb::Rgb;
+use almost_enough::{StopToken, Unstoppable};
 use zenavif::{Av1Backend, EncoderConfig, decode_av1_obu, encode_rgb8};
+
+fn stop() -> StopToken {
+    StopToken::new(Unstoppable)
+}
 
 // =============================================================================
 // Test image generators
@@ -108,7 +113,7 @@ fn large_512x512_both_backends() {
         };
         let config = EncoderConfig::new().backend(backend).quality(60.0).speed(8);
         let start = std::time::Instant::now();
-        let result = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable)
+        let result = encode_rgb8(img.as_ref(), &config, stop())
             .unwrap_or_else(|e| panic!("{name} 512x512: {e}"));
         let ms = start.elapsed().as_secs_f64() * 1000.0;
         let bpp = result.avif_file.len() as f64 * 8.0 / (512.0 * 512.0);
@@ -128,7 +133,7 @@ fn large_1024x768_svtav1_tiles() {
         .quality(50.0)
         .speed(10);
     let start = std::time::Instant::now();
-    let result = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable)
+    let result = encode_rgb8(img.as_ref(), &config, stop())
         .expect("svtav1 1024x768 should succeed");
     let ms = start.elapsed().as_secs_f64() * 1000.0;
     let bpp = result.avif_file.len() as f64 * 8.0 / (1024.0 * 768.0);
@@ -154,7 +159,7 @@ fn size_quality_tradeoff_zenravif() {
             .backend(Av1Backend::Zenravif)
             .quality(q)
             .speed(8);
-        let result = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
+        let result = encode_rgb8(img.as_ref(), &config, stop()).unwrap();
         let bpp = result.avif_file.len() as f64 * 8.0 / (256.0 * 256.0);
         eprintln!("  {:>5.0}   | {:>6} | {bpp:.2}", q, result.avif_file.len());
     }
@@ -171,7 +176,7 @@ fn size_quality_tradeoff_svtav1() {
             .backend(Av1Backend::Svtav1)
             .quality(q)
             .speed(8);
-        let result = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
+        let result = encode_rgb8(img.as_ref(), &config, stop()).unwrap();
         let bpp = result.avif_file.len() as f64 * 8.0 / (256.0 * 256.0);
         eprintln!("  {:>5.0}   | {:>6} | {bpp:.2}", q, result.avif_file.len());
     }
@@ -188,7 +193,7 @@ fn svtav1_decode_psnr_gradient() {
         .backend(Av1Backend::Svtav1)
         .quality(70.0)
         .speed(8);
-    let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
+    let encoded = encode_rgb8(img.as_ref(), &config, stop()).unwrap();
 
     match decode_av1_obu(&encoded.avif_file) {
         Ok((pixels, w, h, ch)) => {
@@ -213,7 +218,7 @@ fn svtav1_decode_psnr_edges() {
         .backend(Av1Backend::Svtav1)
         .quality(80.0)
         .speed(6);
-    let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
+    let encoded = encode_rgb8(img.as_ref(), &config, stop()).unwrap();
 
     match decode_av1_obu(&encoded.avif_file) {
         Ok((pixels, w, h, ch)) => {
@@ -237,7 +242,7 @@ fn svtav1_decode_large_512x384() {
         .backend(Av1Backend::Svtav1)
         .quality(60.0)
         .speed(10);
-    let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
+    let encoded = encode_rgb8(img.as_ref(), &config, stop()).unwrap();
 
     match decode_av1_obu(&encoded.avif_file) {
         Ok((pixels, w, h, ch)) => {
@@ -283,7 +288,7 @@ fn comprehensive_all_configs() {
                     };
                     let config = EncoderConfig::new().backend(backend).quality(q).speed(s);
                     let start = std::time::Instant::now();
-                    match encode_rgb8(img.as_ref(), &config, &enough::Unstoppable) {
+                    match encode_rgb8(img.as_ref(), &config, stop()) {
                         Ok(r) => {
                             let ms = start.elapsed().as_secs_f64() * 1000.0;
                             eprintln!(

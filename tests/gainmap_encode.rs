@@ -8,7 +8,12 @@
 
 use imgref::Img;
 use rgb::Rgb;
+use almost_enough::{StopToken, Unstoppable};
 use zenavif::{EncoderConfig, encode_rgb8};
+
+fn stop() -> StopToken {
+    StopToken::new(Unstoppable)
+}
 
 /// Build a minimal ISO 21496-1 binary metadata blob for testing.
 ///
@@ -80,7 +85,7 @@ fn encode_with_gain_map_produces_valid_avif() {
         metadata.clone(),
     );
 
-    let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable)
+    let encoded = encode_rgb8(img.as_ref(), &config, stop())
         .expect("encode with gain map should succeed");
 
     assert!(!encoded.avif_file.is_empty());
@@ -114,7 +119,7 @@ fn encode_without_gain_map_has_none() {
     let config = EncoderConfig::new().quality(80.0).speed(10);
 
     let encoded =
-        encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).expect("encode should succeed");
+        encode_rgb8(img.as_ref(), &config, stop()).expect("encode should succeed");
 
     let parser = zenavif_parse::AvifParser::from_bytes(&encoded.avif_file)
         .expect("output should be valid AVIF");
@@ -141,7 +146,7 @@ fn encode_gain_map_roundtrip_through_decode() {
     );
 
     let encoded =
-        encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).expect("encode should succeed");
+        encode_rgb8(img.as_ref(), &config, stop()).expect("encode should succeed");
 
     // Decode through zenavif's managed decoder and verify gain map comes through
     let decoder =
@@ -187,7 +192,7 @@ fn encode_gain_map_with_exif_and_icc() {
         .icc_profile(vec![0x00, 0x00, 0x02, 0x0C]) // minimal ICC header
         .with_gain_map(gain_map_av1.clone(), 2, 2, 8, metadata);
 
-    let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable)
+    let encoded = encode_rgb8(img.as_ref(), &config, stop())
         .expect("encode with gain map + metadata should succeed");
 
     let parser = zenavif_parse::AvifParser::from_bytes(&encoded.avif_file)

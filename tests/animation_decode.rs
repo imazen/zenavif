@@ -2,9 +2,13 @@
 //!
 //! Test vectors are at tests/vectors/libavif/colors-animated-*.avif
 
-use enough::Unstoppable;
+use almost_enough::{StopToken, Unstoppable};
 use std::fs;
 use zenavif::{AnimationDecoder, DecoderConfig, decode_animation, decode_animation_with};
+
+fn stop() -> StopToken {
+    StopToken::new(Unstoppable)
+}
 
 /// Load a test vector, returning None if the file doesn't exist (CI without vectors).
 fn load_vector(path: &str) -> Option<Vec<u8>> {
@@ -262,7 +266,7 @@ fn animation_encode_decode_roundtrip_rgb8() {
         .collect();
 
     let config = EncoderConfig::new().quality(80.0).speed(10);
-    let encoded = encode_animation_rgb8(&frames, &config, &enough::Unstoppable).unwrap();
+    let encoded = encode_animation_rgb8(&frames, &config, stop()).unwrap();
     eprintln!(
         "encoded {} frames, {} bytes",
         encoded.frame_count,
@@ -332,7 +336,7 @@ fn animation_encode_decode_roundtrip_rgba8() {
     ];
 
     let config = EncoderConfig::new().quality(80.0).speed(10);
-    let encoded = encode_animation_rgba8(&frames, &config, &enough::Unstoppable).unwrap();
+    let encoded = encode_animation_rgba8(&frames, &config, stop()).unwrap();
     eprintln!(
         "encoded {} frames, {} bytes",
         encoded.frame_count,
@@ -533,7 +537,7 @@ fn animation_encode_decode_roundtrip_rgb16() {
         .collect();
 
     let config = EncoderConfig::new().quality(80.0).speed(10);
-    let encoded = encode_animation_rgb16(&frames, &config, &Unstoppable).unwrap();
+    let encoded = encode_animation_rgb16(&frames, &config, stop()).unwrap();
     eprintln!(
         "rgb16 encoded {} frames, {} bytes",
         encoded.frame_count,
@@ -605,7 +609,7 @@ fn animation_encode_decode_roundtrip_rgba16() {
     ];
 
     let config = EncoderConfig::new().quality(80.0).speed(10);
-    let encoded = encode_animation_rgba16(&frames, &config, &Unstoppable).unwrap();
+    let encoded = encode_animation_rgba16(&frames, &config, stop()).unwrap();
     eprintln!(
         "rgba16 encoded {} frames, {} bytes",
         encoded.frame_count,
