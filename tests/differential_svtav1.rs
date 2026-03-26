@@ -5,9 +5,15 @@
 
 #![cfg(all(feature = "encode", feature = "encode-svtav1"))]
 
+use almost_enough::StopToken;
 use imgref::Img;
 use rgb::Rgb;
-use zenavif::{Av1Backend, EncoderConfig, decode_av1_obu, encode_rgb8};
+use zenavif::{Av1Backend, EncoderConfig, Unstoppable, decode_av1_obu, encode_rgb8};
+
+/// Create a StopToken that never stops (convenience for tests).
+fn stop() -> StopToken {
+    StopToken::new(Unstoppable)
+}
 
 /// Create a gradient test image of given dimensions.
 fn make_gradient(w: usize, h: usize) -> Img<Vec<Rgb<u8>>> {
@@ -75,7 +81,7 @@ fn both_backends_produce_output() {
         .backend(Av1Backend::Zenravif)
         .quality(quality)
         .speed(speed);
-    let result_rav1e = encode_rgb8(img.as_ref(), &config_rav1e, &enough::Unstoppable)
+    let result_rav1e = encode_rgb8(img.as_ref(), &config_rav1e, stop())
         .expect("zenravif encode should succeed");
 
     // Encode with svtav1
@@ -83,7 +89,7 @@ fn both_backends_produce_output() {
         .backend(Av1Backend::Svtav1)
         .quality(quality)
         .speed(speed);
-    let result_svtav1 = encode_rgb8(img.as_ref(), &config_svtav1, &enough::Unstoppable)
+    let result_svtav1 = encode_rgb8(img.as_ref(), &config_svtav1, stop())
         .expect("svtav1 encode should succeed");
 
     assert!(!result_rav1e.avif_file.is_empty(), "zenravif: empty output");
@@ -110,13 +116,13 @@ fn compression_efficiency_comparison() {
             .backend(Av1Backend::Zenravif)
             .quality(quality)
             .speed(8);
-        let result_r = encode_rgb8(img.as_ref(), &config_r, &enough::Unstoppable).unwrap();
+        let result_r = encode_rgb8(img.as_ref(), &config_r, stop()).unwrap();
 
         let config_s = EncoderConfig::new()
             .backend(Av1Backend::Svtav1)
             .quality(quality)
             .speed(8);
-        let result_s = encode_rgb8(img.as_ref(), &config_s, &enough::Unstoppable).unwrap();
+        let result_s = encode_rgb8(img.as_ref(), &config_s, stop()).unwrap();
 
         let ratio = result_s.avif_file.len() as f64 / result_r.avif_file.len() as f64;
         eprintln!(
@@ -152,7 +158,7 @@ fn encoding_speed_comparison() {
             .quality(60.0)
             .speed(speed);
         let start = std::time::Instant::now();
-        let _result_r = encode_rgb8(img.as_ref(), &config_r, &enough::Unstoppable).unwrap();
+        let _result_r = encode_rgb8(img.as_ref(), &config_r, stop()).unwrap();
         let time_r = start.elapsed();
 
         let config_s = EncoderConfig::new()
@@ -160,7 +166,7 @@ fn encoding_speed_comparison() {
             .quality(60.0)
             .speed(speed);
         let start = std::time::Instant::now();
-        let _result_s = encode_rgb8(img.as_ref(), &config_s, &enough::Unstoppable).unwrap();
+        let _result_s = encode_rgb8(img.as_ref(), &config_s, stop()).unwrap();
         let time_s = start.elapsed();
 
         let speedup = time_r.as_secs_f64() / time_s.as_secs_f64();
@@ -181,7 +187,7 @@ fn svtav1_output_has_valid_obu_structure() {
         .backend(Av1Backend::Svtav1)
         .quality(70.0)
         .speed(8);
-    let result = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
+    let result = encode_rgb8(img.as_ref(), &config, stop()).unwrap();
 
     // svtav1 returns raw AV1 OBU data (not AVIF container)
     let data = &result.avif_file;
@@ -212,7 +218,7 @@ fn quality_sweep_both_backends() {
         let mut prev_size = 0;
         for q in [20.0f32, 50.0, 80.0, 95.0] {
             let config = EncoderConfig::new().backend(backend).quality(q).speed(8);
-            let result = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
+            let result = encode_rgb8(img.as_ref(), &config, stop()).unwrap();
             assert!(!result.avif_file.is_empty(), "{name} q={q}: empty");
 
             // Higher quality should generally produce equal or larger output
@@ -243,7 +249,7 @@ fn various_image_sizes_both_backends() {
                 .backend(backend)
                 .quality(60.0)
                 .speed(10);
-            let result = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable)
+            let result = encode_rgb8(img.as_ref(), &config, stop())
                 .unwrap_or_else(|e| panic!("{name} {w}x{h}: {e}"));
             assert!(!result.avif_file.is_empty(), "{name} {w}x{h}: empty output");
         }
@@ -261,7 +267,7 @@ fn svtav1_decode_roundtrip_gradient() {
         .backend(Av1Backend::Svtav1)
         .quality(70.0)
         .speed(8);
-    let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable)
+    let encoded = encode_rgb8(img.as_ref(), &config, stop())
         .expect("svtav1 encode should succeed");
 
     // Try to decode the AV1 OBU output with rav1d-safe
@@ -293,7 +299,7 @@ fn zenravif_decode_roundtrip_success() {
         .backend(Av1Backend::Zenravif)
         .quality(70.0)
         .speed(8);
-    let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable)
+    let encoded = encode_rgb8(img.as_ref(), &config, stop())
         .expect("zenravif encode should succeed");
 
     // zenravif output is AVIF container — decode with the full decoder
@@ -315,7 +321,7 @@ fn svtav1_decode_128x128() {
         .backend(Av1Backend::Svtav1)
         .quality(70.0)
         .speed(8);
-    let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable)
+    let encoded = encode_rgb8(img.as_ref(), &config, stop())
         .expect("svtav1 128x128 encode should succeed");
     eprintln!("128x128 encoded: {} bytes", encoded.avif_file.len());
     match decode_av1_obu(&encoded.avif_file) {
@@ -338,7 +344,7 @@ fn svtav1_decode_64x64_speed8() {
         .backend(Av1Backend::Svtav1)
         .quality(70.0)
         .speed(8);
-    let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable)
+    let encoded = encode_rgb8(img.as_ref(), &config, stop())
         .expect("svtav1 64x64 encode should succeed");
     eprintln!("64x64 s8 encoded: {} bytes", encoded.avif_file.len());
     match decode_av1_obu(&encoded.avif_file) {
@@ -361,7 +367,7 @@ fn svtav1_decode_size_sweep() {
             .backend(Av1Backend::Svtav1)
             .quality(50.0)
             .speed(10); // fastest preset
-        let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable)
+        let encoded = encode_rgb8(img.as_ref(), &config, stop())
             .unwrap_or_else(|e| panic!("{size}x{size} encode failed: {e}"));
 
         match decode_av1_obu(&encoded.avif_file) {
@@ -389,7 +395,7 @@ fn svtav1_decode_size_sweep_speed8() {
             .backend(Av1Backend::Svtav1)
             .quality(70.0)
             .speed(8);
-        let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable)
+        let encoded = encode_rgb8(img.as_ref(), &config, stop())
             .unwrap_or_else(|e| panic!("{size}x{size} encode failed: {e}"));
 
         match decode_av1_obu(&encoded.avif_file) {
@@ -417,7 +423,7 @@ fn svtav1_decode_speed_sweep_64x64() {
             .backend(Av1Backend::Svtav1)
             .quality(70.0)
             .speed(speed);
-        let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
+        let encoded = encode_rgb8(img.as_ref(), &config, stop()).unwrap();
         match decode_av1_obu(&encoded.avif_file) {
             Ok((_, w, h, _)) => eprintln!(
                 "  64x64 s{speed}: OK ({w}x{h}), {} bytes",
@@ -436,7 +442,7 @@ fn svtav1_decode_quality_sweep_64x64_s10() {
             .backend(Av1Backend::Svtav1)
             .quality(q)
             .speed(10);
-        let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
+        let encoded = encode_rgb8(img.as_ref(), &config, stop()).unwrap();
         match decode_av1_obu(&encoded.avif_file) {
             Ok((_, w, h, _)) => eprintln!(
                 "  64x64 q{q:.0} s10: OK ({w}x{h}), {} bytes",
@@ -458,7 +464,7 @@ fn svtav1_decode_mid_sizes_speed8() {
             .backend(Av1Backend::Svtav1)
             .quality(70.0)
             .speed(8);
-        let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
+        let encoded = encode_rgb8(img.as_ref(), &config, stop()).unwrap();
         match decode_av1_obu(&encoded.avif_file) {
             Ok((_, w, h, _)) => eprintln!(
                 "  s8 {size}x{size}: OK ({w}x{h}), {} bytes",
@@ -492,7 +498,7 @@ fn svtav1_decode_uniform_128x128() {
         .backend(Av1Backend::Svtav1)
         .quality(70.0)
         .speed(8);
-    let encoded = encode_rgb8(img.as_ref(), &config, &enough::Unstoppable).unwrap();
+    let encoded = encode_rgb8(img.as_ref(), &config, stop()).unwrap();
     match decode_av1_obu(&encoded.avif_file) {
         Ok((_, w, h, _)) => eprintln!(
             "  uniform 128x128: OK ({w}x{h}), {} bytes",
