@@ -1201,6 +1201,7 @@ pub struct AvifAnimationFrameEncoder {
     frame_count: u32,
 }
 
+#[cfg(feature = "encode")]
 impl AvifAnimationFrameEncoder {
     fn stop_token(&self) -> almost_enough::StopToken {
         match &self.stop {
@@ -1356,7 +1357,8 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
                         _ => unreachable!(),
                     })
                     .collect();
-                let result = crate::encode_animation_rgb8(&anim_frames, &self.config, stop_token.clone())?;
+                let result =
+                    crate::encode_animation_rgb8(&anim_frames, &self.config, stop_token.clone())?;
                 result.avif_file
             }
             BufferedFrame::Rgba8 { .. } => {
@@ -1374,7 +1376,8 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
                         _ => unreachable!(),
                     })
                     .collect();
-                let result = crate::encode_animation_rgba8(&anim_frames, &self.config, stop_token.clone())?;
+                let result =
+                    crate::encode_animation_rgba8(&anim_frames, &self.config, stop_token.clone())?;
                 result.avif_file
             }
             BufferedFrame::Rgb16 { .. } => {
@@ -1392,7 +1395,8 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
                         _ => unreachable!(),
                     })
                     .collect();
-                let result = crate::encode_animation_rgb16(&anim_frames, &self.config, stop_token.clone())?;
+                let result =
+                    crate::encode_animation_rgb16(&anim_frames, &self.config, stop_token.clone())?;
                 result.avif_file
             }
             BufferedFrame::Rgba16 { .. } => {
@@ -1410,7 +1414,8 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
                         _ => unreachable!(),
                     })
                     .collect();
-                let result = crate::encode_animation_rgba16(&anim_frames, &self.config, stop_token.clone())?;
+                let result =
+                    crate::encode_animation_rgba16(&anim_frames, &self.config, stop_token.clone())?;
                 result.avif_file
             }
         };
