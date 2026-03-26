@@ -1480,9 +1480,12 @@ impl AvifDecoderConfig {
     /// Enable extraction of gain map and depth map data into `DecodeOutput`
     /// extras.
     ///
-    /// When enabled, the raw gain map (and depth map, when available) will be
-    /// attached to decode output so callers can retrieve them via
-    /// `output.extras::<AvifGainMap>()`. Default: **false**.
+    /// When enabled, the gain map is converted to a normalized
+    /// [`GainMapSource`](zencodec::gainmap::GainMapSource) and attached to
+    /// decode output so callers can retrieve it via
+    /// `output.extras::<zencodec::gainmap::GainMapSource>()`.
+    /// Depth maps (when available) are attached as
+    /// [`AvifDepthMap`](crate::AvifDepthMap). Default: **false**.
     ///
     /// `ImageInfo` metadata (`supplements`, `GainMapPresence`) is always
     /// populated from container probe data regardless of this flag.
@@ -1808,9 +1811,12 @@ impl<'a> AvifDecodeJob<'a> {
     /// Enable extraction of gain map and depth map data into `DecodeOutput`
     /// extras.
     ///
-    /// When enabled, the raw gain map (and depth map, when available) will be
-    /// attached to the output so callers can retrieve them via
-    /// `output.extras::<AvifGainMap>()`. Default: **false**.
+    /// When enabled, the gain map is converted to a normalized
+    /// [`GainMapSource`](zencodec::gainmap::GainMapSource) and attached to
+    /// decode output so callers can retrieve it via
+    /// `output.extras::<zencodec::gainmap::GainMapSource>()`.
+    /// Depth maps (when available) are attached as
+    /// [`AvifDepthMap`](crate::AvifDepthMap). Default: **false**.
     ///
     /// `ImageInfo` metadata (`supplements`, `GainMapPresence`) is always
     /// populated from container probe data regardless of this flag.
@@ -2275,6 +2281,22 @@ fn convert_gain_map_presence(native: &crate::image::ImageInfo) -> GainMapPresenc
         None => return GainMapPresence::Absent,
     };
 
+    match convert_gain_map_info(gm) {
+        Some(info) => GainMapPresence::Available(Box::new(info)),
+        // If we can't parse the OBU, we know a gain map exists but can't
+        // extract its dimensions — report as Unknown rather than lying.
+        None => GainMapPresence::Unknown,
+    }
+}
+
+/// Convert an [`AvifGainMap`](crate::image::AvifGainMap) to zencodec's
+/// [`GainMapInfo`](zencodec::GainMapInfo).
+///
+/// Parses the AV1 sequence header to extract dimensions, converts the
+/// ISO 21496-1 metadata fields, and optionally converts alt color info
+/// to a [`Cicp`](zencodec::Cicp). Returns `None` if the AV1 bitstream
+/// cannot be parsed.
+fn convert_gain_map_info(gm: &crate::image::AvifGainMap) -> Option<zencodec::GainMapInfo> {
     // Parse AV1 sequence header to get gain map image dimensions.
     let (width, height, gm_channels_from_av1) =
         match zenavif_parse::AV1Metadata::parse_av1_bitstream(&gm.gain_map_data) {
@@ -2283,9 +2305,7 @@ fn convert_gain_map_presence(native: &crate::image::ImageInfo) -> GainMapPresenc
                 meta.max_frame_height.get(),
                 if meta.monochrome { 1u8 } else { 3u8 },
             ),
-            // If we can't parse the OBU, we know a gain map exists but can't
-            // extract its dimensions — report as Unknown rather than lying.
-            Err(_) => return GainMapPresence::Unknown,
+            Err(_) => return None,
         };
 
     let md = &gm.metadata;
@@ -2314,8 +2334,30 @@ fn convert_gain_map_presence(native: &crate::image::ImageInfo) -> GainMapPresenc
         md.alternate_hdr_headroom_n as f64 / md.alternate_hdr_headroom_d as f64;
     params.use_base_color_space = md.use_base_colour_space;
 
-    let gm_info = zencodec::GainMapInfo::new(params, width, height, channels);
-    GainMapPresence::Available(Box::new(gm_info))
+    let mut gm_info = zencodec::GainMapInfo::new(params, width, height, channels);
+
+    // Convert alternate rendition color info to CICP / ICC.
+    match &gm.alt_color_info {
+        Some(zenavif_parse::ColorInformation::Nclx {
+            color_primaries,
+            transfer_characteristics,
+            matrix_coefficients,
+            full_range,
+        }) => {
+            gm_info = gm_info.with_alternate_cicp(zencodec::Cicp::new(
+                *color_primaries as u8,
+                *transfer_characteristics as u8,
+                *matrix_coefficients as u8,
+                *full_range,
+            ));
+        }
+        Some(zenavif_parse::ColorInformation::IccProfile(icc)) => {
+            gm_info = gm_info.with_alternate_icc(icc.clone());
+        }
+        None => {}
+    }
+
+    Some(gm_info)
 }
 
 /// Strip metadata from [`ImageInfo`] according to a [`DecodePolicy`](zencodec::decode::DecodePolicy).
@@ -2462,7 +2504,15 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
         // populated regardless — only the heavy data blobs are gated.
         if self.extract_gain_map {
             if let Some(gm) = native_info.gain_map {
-                output = output.with_extras(gm);
+                if let Some(metadata) = convert_gain_map_info(&gm) {
+                    let source = zencodec::gainmap::GainMapSource {
+                        data: gm.gain_map_data,
+                        format: zencodec::ImageFormat::Avif,
+                        metadata,
+                        depth: 0,
+                    };
+                    output = output.with_extras(source);
+                }
             }
             if let Some(dm) = native_info.depth_map {
                 output = output.with_extras(dm);

@@ -4,9 +4,9 @@
 //! are accessible from the decode output when an AVIF file contains a
 //! `tmap` derived image item.
 
-#[cfg(feature = "zencodec")]
-use zenavif::AvifGainMap;
 use zenavif::{DecoderConfig, ManagedAvifDecoder};
+#[cfg(feature = "zencodec")]
+use zencodec::gainmap::GainMapSource;
 
 /// Path to an AVIF file with a gain map (SDR base + gain map for HDR)
 const SEINE_SDR_GAINMAP: &str = "tests/vectors/libavif/seine_sdr_gainmap_srgb.avif";
@@ -365,13 +365,16 @@ fn decode_gain_map_via_zencodec_extras() {
         .decode()
         .expect("decode");
 
-    // Gain map should be attached as extras
+    // Gain map should be attached as normalized GainMapSource extras
     let gm = output
-        .extras::<AvifGainMap>()
+        .extras::<GainMapSource>()
         .expect("gain map should be present as extras");
-    assert!(gm.metadata.is_multichannel);
-    assert!(!gm.gain_map_data.is_empty());
-    assert!(gm.alt_color_info.is_some());
+    assert!(!gm.data.is_empty());
+    assert_eq!(gm.format, zencodec::ImageFormat::Avif);
+    assert_eq!(gm.depth, 0);
+    // Multi-channel gain map should have 3 channels in metadata
+    assert_eq!(gm.metadata.channels, 3);
+    assert!(gm.metadata.alternate_cicp.is_some());
 }
 
 #[cfg(feature = "zencodec")]
@@ -389,7 +392,7 @@ fn decode_no_gain_map_extras_on_normal_image() {
         .expect("decode");
 
     assert!(
-        output.extras::<AvifGainMap>().is_none(),
+        output.extras::<GainMapSource>().is_none(),
         "normal image should not have gain map extras"
     );
 }
