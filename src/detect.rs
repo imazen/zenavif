@@ -417,9 +417,12 @@ mod tests {
                     );
 
                     // Source encoding details trait
-                    use zencodec::SourceEncodingDetails;
-                    if info.lossless == Some(true) {
-                        assert!(info.is_lossless(), "{name}: lossless but trait says false");
+                    #[cfg(feature = "zencodec")]
+                    {
+                        use zencodec::SourceEncodingDetails;
+                        if info.lossless == Some(true) {
+                            assert!(info.is_lossless(), "{name}: lossless but trait says false");
+                        }
                     }
 
                     probed += 1;
