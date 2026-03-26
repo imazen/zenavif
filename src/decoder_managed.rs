@@ -305,6 +305,8 @@ impl ManagedAvifDecoder {
     /// to full-frame conversion (same allocation as `decode_full`).
     ///
     /// Returns `(StripConverter, ImageInfo)`.
+    // WIP: will be wired up as the streaming decode entry point
+    #[allow(dead_code)]
     pub(crate) fn decode_to_strip_converter(
         &mut self,
         stop: &(impl Stop + ?Sized),
@@ -389,6 +391,8 @@ impl ManagedAvifDecoder {
     /// Build ImageInfo from a decoded primary frame and parser metadata.
     ///
     /// Factored out of `convert_to_image` for reuse by `decode_to_strip_converter`.
+    // WIP: used by decode_to_strip_converter above
+    #[allow(dead_code)]
     fn build_image_info(&self, primary: &Frame, has_alpha: bool) -> Result<ImageInfo> {
         let width = primary.width() as usize;
         let height = primary.height() as usize;

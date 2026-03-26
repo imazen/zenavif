@@ -9,6 +9,8 @@
 //! and unpremultiply into a single pass per strip, keeping the output data
 //! hot in L1/L2 cache.
 
+// WIP: strip converter is implemented and tested but not yet wired into the public API
+#![allow(dead_code)]
 #![deny(unsafe_code)]
 
 use crate::error::{Error, Result};
