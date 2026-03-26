@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.5.0
+
+### Added
+- `AvifGainMap` type bundling gain map metadata, AV1 data, and alt color info
+- `AvifDepthMap` type for depth auxiliary image extraction (URN-based `auxl`/`auxC`)
+- `AvifData::gain_map()` and `AvifData::depth_map()` convenience methods (eager feature)
+- `AvifParser::gain_map()` and `AvifParser::depth_map()` methods
+- AV1 frame header parsing for lossless/QP detection
+- `AV1Metadata::base_q_idx` and `AV1Metadata::lossless` fields
+- `SequenceHeaderObu::frame_width_bits` and `frame_height_bits` fields
+- Fuzz targets (`fuzz_parse`, `fuzz_parse_limited`)
+
+### Changed
+- **Breaking:** `AV1Metadata` has two new fields (`base_q_idx`, `lossless`)
+- **Breaking:** `AvifData` has new depth-related fields
+- `c_api` feature now implies `eager`
+- `enough` bumped to 0.4.2, `env_logger` to 0.11.10
+- Test files excluded from published crate
+
+### Fixed
+- Removed `debug_assert!` panics on malformed AVIF input
+- Capped pre-allocations to prevent OOM on malformed containers
+- Replaced unchecked arithmetic with proper error handling
+- Clippy warnings in frame header parser and range-contains lint
+
 ## 0.4.0
 
 ### Added
