@@ -1724,7 +1724,7 @@ fn parser_gain_map_convenience() {
     let first_byte = gm.gain_map_data[0];
     let obu_type = (first_byte >> 3) & 0x0F;
     // Valid OBU types: 1 (sequence header), 2 (TD), 3 (frame header), etc.
-    assert!(obu_type >= 1 && obu_type <= 8, "First OBU type should be valid AV1 OBU: got {obu_type}");
+    assert!((1..=8).contains(&obu_type), "First OBU type should be valid AV1 OBU: got {obu_type}");
 }
 
 #[test]
