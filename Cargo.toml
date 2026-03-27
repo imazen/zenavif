@@ -43,7 +43,7 @@ archmage = { version = "0.9.12", features = ["std"] }
 env_logger = { version = "0.11.10", default-features = false }
 png = "0.18.0"
 image = "0.25.10"
-zenbench = { version = "0.1.1", features = ["criterion-compat"] }
+zenbench = { version = "0.1.2", features = ["criterion-compat"] }
 fast-ssim2 = "0.7.0"
 
 [[bench]]
