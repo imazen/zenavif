@@ -2,9 +2,9 @@
 
 #![cfg(feature = "encode")]
 
+use almost_enough::{StopToken, Unstoppable};
 use imgref::Img;
 use rgb::{Rgb, Rgba};
-use almost_enough::{StopToken, Unstoppable};
 use zenavif::{
     EncodeBitDepth, EncodeColorModel, EncoderConfig, PixelBuffer, encode, encode_rgb8,
     encode_rgb16, encode_rgba8, encode_rgba16, encode_with,
@@ -49,8 +49,7 @@ fn make_rgba8_image() -> Img<Vec<Rgba<u8>>> {
 fn roundtrip_rgb8() {
     let img = make_rgb8_image();
     let config = EncoderConfig::new().quality(80.0).speed(10);
-    let encoded =
-        encode_rgb8(img.as_ref(), &config, stop()).expect("encode should succeed");
+    let encoded = encode_rgb8(img.as_ref(), &config, stop()).expect("encode should succeed");
 
     assert!(!encoded.avif_file.is_empty());
     assert!(encoded.color_byte_size > 0);
@@ -67,8 +66,7 @@ fn roundtrip_rgb8() {
 fn roundtrip_rgba8() {
     let img = make_rgba8_image();
     let config = EncoderConfig::new().quality(80.0).speed(10);
-    let encoded =
-        encode_rgba8(img.as_ref(), &config, stop()).expect("encode should succeed");
+    let encoded = encode_rgba8(img.as_ref(), &config, stop()).expect("encode should succeed");
 
     assert!(!encoded.avif_file.is_empty());
     assert!(encoded.color_byte_size > 0);
@@ -118,8 +116,7 @@ fn encoder_config_builder_chains() {
         .exif(vec![0xFF, 0xD8]);
 
     let img = make_rgb8_image();
-    let encoded =
-        encode_rgb8(img.as_ref(), &config, stop()).expect("encode should succeed");
+    let encoded = encode_rgb8(img.as_ref(), &config, stop()).expect("encode should succeed");
     assert!(!encoded.avif_file.is_empty());
 }
 
@@ -158,8 +155,7 @@ fn make_rgba16_image() -> Img<Vec<Rgba<u16>>> {
 fn roundtrip_rgb16() {
     let img = make_rgb16_image();
     let config = EncoderConfig::new().quality(80.0).speed(10);
-    let encoded =
-        encode_rgb16(img.as_ref(), &config, stop()).expect("encode should succeed");
+    let encoded = encode_rgb16(img.as_ref(), &config, stop()).expect("encode should succeed");
 
     assert!(!encoded.avif_file.is_empty());
     assert!(encoded.color_byte_size > 0);
@@ -176,8 +172,7 @@ fn roundtrip_rgb16() {
 fn roundtrip_rgba16() {
     let img = make_rgba16_image();
     let config = EncoderConfig::new().quality(80.0).speed(10);
-    let encoded =
-        encode_rgba16(img.as_ref(), &config, stop()).expect("encode should succeed");
+    let encoded = encode_rgba16(img.as_ref(), &config, stop()).expect("encode should succeed");
 
     assert!(!encoded.avif_file.is_empty());
     assert!(encoded.color_byte_size > 0);
@@ -223,7 +218,6 @@ fn encode_with_custom_config() {
     let pb: PixelBuffer = zenpixels::PixelBuffer::from_imgvec(img).into();
     let config = EncoderConfig::new().quality(50.0).speed(10);
 
-    let encoded =
-        encode_with(&pb, &config, stop()).expect("encode_with should succeed");
+    let encoded = encode_with(&pb, &config, stop()).expect("encode_with should succeed");
     assert!(!encoded.avif_file.is_empty());
 }

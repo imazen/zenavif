@@ -5,9 +5,9 @@
 
 #![cfg(all(feature = "encode", feature = "encode-svtav1"))]
 
+use almost_enough::{StopToken, Unstoppable};
 use imgref::Img;
 use rgb::Rgb;
-use almost_enough::{StopToken, Unstoppable};
 use zenavif::{Av1Backend, EncoderConfig, decode_av1_obu, encode_rgb8};
 
 fn stop() -> StopToken {
@@ -82,8 +82,8 @@ fn encode_4k_svtav1_speed10() {
         .quality(50.0)
         .speed(10);
     let start = std::time::Instant::now();
-    let result = encode_rgb8(img.as_ref(), &config, stop())
-        .expect("svtav1 4K encode should succeed");
+    let result =
+        encode_rgb8(img.as_ref(), &config, stop()).expect("svtav1 4K encode should succeed");
     let elapsed = start.elapsed();
     let mpx = 3840.0 * 2160.0 / 1_000_000.0;
     let bpp = result.avif_file.len() as f64 * 8.0 / (3840.0 * 2160.0);
@@ -104,8 +104,8 @@ fn encode_4k_zenravif_speed10() {
         .quality(50.0)
         .speed(10);
     let start = std::time::Instant::now();
-    let result = encode_rgb8(img.as_ref(), &config, stop())
-        .expect("zenravif 4K encode should succeed");
+    let result =
+        encode_rgb8(img.as_ref(), &config, stop()).expect("zenravif 4K encode should succeed");
     let elapsed = start.elapsed();
     let mpx = 3840.0 * 2160.0 / 1_000_000.0;
     let bpp = result.avif_file.len() as f64 * 8.0 / (3840.0 * 2160.0);
@@ -211,8 +211,8 @@ fn encode_4k_zone_plate_svtav1() {
         .quality(50.0)
         .speed(10);
     let start = std::time::Instant::now();
-    let result = encode_rgb8(img.as_ref(), &config, stop())
-        .expect("svtav1 4K zone plate should succeed");
+    let result =
+        encode_rgb8(img.as_ref(), &config, stop()).expect("svtav1 4K zone plate should succeed");
     let elapsed = start.elapsed();
     let bpp = result.avif_file.len() as f64 * 8.0 / (3840.0 * 2160.0);
     eprintln!(
@@ -230,8 +230,8 @@ fn decode_4k_svtav1_output() {
         .backend(Av1Backend::Svtav1)
         .quality(40.0)
         .speed(10);
-    let encoded = encode_rgb8(img.as_ref(), &config, stop())
-        .expect("svtav1 4K encode should succeed");
+    let encoded =
+        encode_rgb8(img.as_ref(), &config, stop()).expect("svtav1 4K encode should succeed");
 
     eprintln!("  svtav1 4K encoded: {} bytes", encoded.avif_file.len());
 

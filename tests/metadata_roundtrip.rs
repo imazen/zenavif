@@ -5,9 +5,9 @@
 
 #![cfg(feature = "encode")]
 
+use almost_enough::{StopToken, Unstoppable};
 use imgref::Img;
 use rgb::Rgb;
-use almost_enough::{StopToken, Unstoppable};
 use zenavif::{
     DecoderConfig, EncoderConfig, ManagedAvifDecoder, MasteringDisplayConfig, encode_rgb8,
 };
@@ -33,8 +33,7 @@ fn make_test_image() -> Img<Vec<Rgb<u8>>> {
 
 fn encode_and_probe(config: &EncoderConfig) -> zenavif::ImageInfo {
     let img = make_test_image();
-    let encoded =
-        encode_rgb8(img.as_ref(), config, stop()).expect("encode should succeed");
+    let encoded = encode_rgb8(img.as_ref(), config, stop()).expect("encode should succeed");
     let decoder = ManagedAvifDecoder::new(&encoded.avif_file, &DecoderConfig::default())
         .expect("decoder should open");
     decoder.probe_info().expect("probe should succeed")
@@ -286,8 +285,7 @@ fn decode_full_returns_metadata() {
         .color_primaries(12) // Display P3
         .transfer_characteristics(13); // sRGB
 
-    let encoded =
-        encode_rgb8(img.as_ref(), &config, stop()).expect("encode should succeed");
+    let encoded = encode_rgb8(img.as_ref(), &config, stop()).expect("encode should succeed");
 
     let mut decoder = ManagedAvifDecoder::new(&encoded.avif_file, &DecoderConfig::default())
         .expect("decoder should open");

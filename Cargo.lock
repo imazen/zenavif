@@ -119,11 +119,11 @@ dependencies = [
 
 [[package]]
 name = "archmage"
-version = "0.9.12"
+version = "0.9.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b31252c47e70c7056709e9f98842aef4f709056c2b3a4f666c584f8cc37f7ca0"
+checksum = "2c62208fadf5c29826211a799472057dd164956fe3ae3ce63f62c267ca7cd123"
 dependencies = [
- "archmage-macros 0.9.12",
+ "archmage-macros 0.9.14",
  "safe_unaligned_simd",
 ]
 
@@ -151,9 +151,9 @@ dependencies = [
 
 [[package]]
 name = "archmage-macros"
-version = "0.9.12"
+version = "0.9.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a97189db9dffc2e13364c6f56461085d65743ff4d17890d6b80744203aae92b"
+checksum = "2673bdcd233efb45ba8f8bd8e915acdb2fa413140a01a18296e4b198ff6eae1f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -639,7 +639,7 @@ version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61ee8d8f5e43a45183480ea077c4e046e43ab9604928c87d6ad2080e666dc519"
 dependencies = [
- "archmage 0.9.12",
+ "archmage 0.9.14",
  "bytemuck",
  "paste",
 ]
@@ -805,9 +805,9 @@ version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4b75067bc1e8c2c28413cab5777c0fe8473499e55f2e09076b9076f344ce9d5"
 dependencies = [
- "archmage 0.9.12",
+ "archmage 0.9.14",
  "bytemuck",
- "magetypes 0.9.12",
+ "magetypes 0.9.14",
  "num-traits",
 ]
 
@@ -852,11 +852,11 @@ dependencies = [
 
 [[package]]
 name = "magetypes"
-version = "0.9.12"
+version = "0.9.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c805c315148e092279cd19d011ce4b22ff9d3cc593cca089364f6501d12087b1"
+checksum = "3b54a7a335556356f4dfccf45cbd29f66385a8ee35d5d6f3f084ed9ad6793608"
 dependencies = [
- "archmage 0.9.12",
+ "archmage 0.9.14",
 ]
 
 [[package]]
@@ -1899,7 +1899,7 @@ name = "zenavif"
 version = "0.1.0"
 dependencies = [
  "almost-enough",
- "archmage 0.9.12",
+ "archmage 0.9.14",
  "bytemuck",
  "enough",
  "env_logger",
@@ -1908,7 +1908,7 @@ dependencies = [
  "imgref",
  "linear-srgb",
  "log",
- "magetypes 0.9.12",
+ "magetypes 0.9.14",
  "png",
  "rav1d",
  "rav1d-safe",
@@ -1920,7 +1920,6 @@ dependencies = [
  "zenavif-parse",
  "zenbench",
  "zencodec",
- "zennode",
  "zenpixels",
  "zenpixels-convert",
  "zenravif",
@@ -1943,16 +1942,16 @@ dependencies = [
 
 [[package]]
 name = "zenavif-serialize"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "arrayvec",
 ]
 
 [[package]]
 name = "zenbench"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd13383ee045c949969f4d29996fc3e55e202d52702e597c09a97a28af2ef6ff"
+checksum = "608aa467d997f62def7d8a8f206c9fc1754ec61e159423c7d374eb4db1c5b01e"
 dependencies = [
  "clap",
  "fs4",
@@ -1964,9 +1963,9 @@ dependencies = [
 
 [[package]]
 name = "zencodec"
-version = "0.1.5"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7859f4791276d96421c828ce31e43f7b22c844b75d54130e6f6081e312207b0a"
+checksum = "4d055b475f345ab30e82f582cc1e54be97fcdf8a2ab6d427106a4195c2b899f2"
 dependencies = [
  "almost-enough",
  "enough",
@@ -1975,26 +1974,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "zennode"
-version = "0.1.0"
-dependencies = [
- "zennode-derive",
-]
-
-[[package]]
-name = "zennode-derive"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "zenpixels"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0828926cd37f826702d167dc46e15dde519279d20a30d458acabc122043c8325"
+checksum = "4705187b555bc476109a2113ca007282fdf327bcc9edb4c692ae1e4d489bc9b2"
 dependencies = [
  "bytemuck",
  "imgref",
@@ -2004,11 +1987,11 @@ dependencies = [
 
 [[package]]
 name = "zenpixels-convert"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15525e70fac3b3a6c2f7e3826c4e11376dd3ae885eaa7fe0aa252238381c3732"
+checksum = "45c79098f78c1ea6bb065f28c633f7ad42c93c0a58e1a2d1c3bcdeeac444d360"
 dependencies = [
- "archmage 0.9.12",
+ "archmage 0.9.14",
  "bytemuck",
  "garb",
  "linear-srgb",

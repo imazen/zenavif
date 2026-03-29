@@ -6,9 +6,9 @@
 
 #![cfg(feature = "encode")]
 
+use almost_enough::{StopToken, Unstoppable};
 use imgref::Img;
 use rgb::Rgb;
-use almost_enough::{StopToken, Unstoppable};
 use zenavif::{EncoderConfig, encode_rgb8};
 
 fn stop() -> StopToken {
@@ -85,8 +85,8 @@ fn encode_with_gain_map_produces_valid_avif() {
         metadata.clone(),
     );
 
-    let encoded = encode_rgb8(img.as_ref(), &config, stop())
-        .expect("encode with gain map should succeed");
+    let encoded =
+        encode_rgb8(img.as_ref(), &config, stop()).expect("encode with gain map should succeed");
 
     assert!(!encoded.avif_file.is_empty());
     assert!(encoded.color_byte_size > 0);
@@ -118,8 +118,7 @@ fn encode_without_gain_map_has_none() {
     let img = make_rgb8_image();
     let config = EncoderConfig::new().quality(80.0).speed(10);
 
-    let encoded =
-        encode_rgb8(img.as_ref(), &config, stop()).expect("encode should succeed");
+    let encoded = encode_rgb8(img.as_ref(), &config, stop()).expect("encode should succeed");
 
     let parser = zenavif_parse::AvifParser::from_bytes(&encoded.avif_file)
         .expect("output should be valid AVIF");
@@ -145,8 +144,7 @@ fn encode_gain_map_roundtrip_through_decode() {
         metadata.clone(),
     );
 
-    let encoded =
-        encode_rgb8(img.as_ref(), &config, stop()).expect("encode should succeed");
+    let encoded = encode_rgb8(img.as_ref(), &config, stop()).expect("encode should succeed");
 
     // Decode through zenavif's managed decoder and verify gain map comes through
     let decoder =

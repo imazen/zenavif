@@ -1513,7 +1513,10 @@ impl AvifDecoderConfig {
     /// Convenience: decode image with this config.
     pub fn decode(&self, data: &[u8]) -> Result<DecodeOutput, At<Error>> {
         use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
-        self.clone().job().decoder(Cow::Borrowed(data), &[])?.decode()
+        self.clone()
+            .job()
+            .decoder(Cow::Borrowed(data), &[])?
+            .decode()
     }
 
     /// Convenience: probe image header with this config.

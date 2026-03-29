@@ -5,9 +5,9 @@
 
 #![cfg(all(feature = "encode", feature = "encode-svtav1"))]
 
+use almost_enough::{StopToken, Unstoppable};
 use imgref::Img;
 use rgb::Rgb;
-use almost_enough::{StopToken, Unstoppable};
 use zenavif::{Av1Backend, EncoderConfig, decode_av1_obu, encode_rgb8};
 
 fn stop() -> StopToken {
@@ -133,8 +133,8 @@ fn large_1024x768_svtav1_tiles() {
         .quality(50.0)
         .speed(10);
     let start = std::time::Instant::now();
-    let result = encode_rgb8(img.as_ref(), &config, stop())
-        .expect("svtav1 1024x768 should succeed");
+    let result =
+        encode_rgb8(img.as_ref(), &config, stop()).expect("svtav1 1024x768 should succeed");
     let ms = start.elapsed().as_secs_f64() * 1000.0;
     let bpp = result.avif_file.len() as f64 * 8.0 / (1024.0 * 768.0);
     eprintln!(
