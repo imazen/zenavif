@@ -2151,19 +2151,19 @@ fn avif_to_orientation(
     use zencodec::Orientation;
     let angle = rotation.map(|r| r.angle).unwrap_or(0);
     match (mirror.map(|m| m.axis), angle) {
-        (None, 0) => Orientation::Normal,
+        (None, 0) => Orientation::Identity,
         (None, 90) => Orientation::Rotate270,
         (None, 180) => Orientation::Rotate180,
         (None, 270) => Orientation::Rotate90,
-        (Some(0), 0) => Orientation::FlipHorizontal,
+        (Some(0), 0) => Orientation::FlipH,
         (Some(0), 90) => Orientation::Transpose,
-        (Some(0), 180) => Orientation::FlipVertical,
+        (Some(0), 180) => Orientation::FlipV,
         (Some(0), 270) => Orientation::Transverse,
-        (Some(1), 0) => Orientation::FlipVertical,
+        (Some(1), 0) => Orientation::FlipV,
         (Some(1), 90) => Orientation::Transverse,
-        (Some(1), 180) => Orientation::FlipHorizontal,
+        (Some(1), 180) => Orientation::FlipH,
         (Some(1), 270) => Orientation::Transpose,
-        _ => Orientation::Normal,
+        _ => Orientation::Identity,
     }
 }
 
@@ -2175,10 +2175,10 @@ fn avif_to_orientation(
 fn orientation_to_avif(orientation: zencodec::Orientation) -> (Option<u8>, Option<u8>) {
     use zencodec::Orientation;
     match orientation {
-        Orientation::Normal => (None, None),
-        Orientation::FlipHorizontal => (Some(0), Some(0)), // mirror=0, no rotation
+        Orientation::Identity => (None, None),
+        Orientation::FlipH => (Some(0), Some(0)), // mirror=0, no rotation
         Orientation::Rotate180 => (Some(2), None),         // 180° CCW
-        Orientation::FlipVertical => (Some(2), Some(0)),   // mirror=0, 180° CCW
+        Orientation::FlipV => (Some(2), Some(0)),   // mirror=0, 180° CCW
         Orientation::Transpose => (Some(1), Some(0)),      // mirror=0, 90° CCW
         Orientation::Rotate90 => (Some(3), None),          // 270° CCW = 90° CW
         Orientation::Transverse => (Some(3), Some(0)),     // mirror=0, 270° CCW
