@@ -1,9 +1,4 @@
-# zenavif
-
-[![CI](https://github.com/imazen/zenavif/workflows/CI/badge.svg)](https://github.com/imazen/zenavif/actions)
-[![Crates.io](https://img.shields.io/crates/v/zenavif.svg)](https://crates.io/crates/zenavif)
-[![Documentation](https://docs.rs/zenavif/badge.svg)](https://docs.rs/zenavif)
-[![License: AGPL/Commercial](https://img.shields.io/badge/License-AGPL%2FCommercial-blue.svg)](https://github.com/imazen/zenavif#license)
+# zenavif ![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenavif/ci.yml?branch=main&style=for-the-badge) ![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-AGPL%2FCommercial-blue?style=for-the-badge)
 
 Pure Rust AVIF image codec. Decodes and encodes AVIF images using
 [rav1d-safe](https://github.com/memorysafety/rav1d) (AV1 decoder) and
@@ -16,6 +11,8 @@ Pure Rust AVIF image codec. Decodes and encodes AVIF images using
 - Supports full and limited color range, HDR color spaces (BT.2020, P3, etc.)
 - Preserves EXIF, XMP, rotation, mirror, clean aperture, pixel aspect ratio, HDR metadata
 - Decodes animated AVIF sequences with per-frame timing
+- Decodes gain maps (ISO 21496-1) and depth auxiliary images from AVIF containers
+- Encodes AVIF with optional gain map embedding via `GainMapConfig` (requires `encode` feature)
 - Encodes AVIF via [zenravif](https://github.com/imazen/cavif-rs) (optional `encode` feature; requires local zenravif path dep — not yet published to crates.io)
 - 100% safe Rust by default. Zero `unsafe` in the decode path.
 - Cooperative cancellation via the [`enough`](https://crates.io/crates/enough) crate
@@ -77,6 +74,7 @@ std::fs::write("output.avif", &encoded.avif_file).unwrap();
 | `encode-imazen` | Encoding with zenrav1e fork extras (QM, lossless) |
 | `unsafe-asm` | Decoding with hand-written assembly via C FFI (fastest, uses unsafe) |
 | `zencodec` | Integration with [zencodec](https://crates.io/crates/zencodec) trait hierarchy |
+| `zennode` | Pipeline node definitions for [zennode](https://github.com/imazen/zennode) graph engine |
 
 ## Building
 
@@ -110,7 +108,10 @@ This project builds on excellent work by others:
 
 - **[libavif](https://github.com/AOMediaCodec/libavif)** (BSD-2-Clause) — Reference AVIF implementation used for pixel-level verification and behavioral reference.
 
-- **Claude** (Anthropic) — AI-assisted development. Not all code manually reviewed — review critical paths before production use.
+## Limitations
+
+- The `encode` feature requires a local path dependency on zenravif, which is not yet published to crates.io.
+- This crate is not yet published to crates.io.
 
 ## License
 
@@ -136,3 +137,7 @@ Support sustainable and secure software; swap patch tuesday for patch leap-year.
 - **AGPL v3** — Free and open. Share your source if you distribute.
 
 See [LICENSE-COMMERCIAL](LICENSE-COMMERCIAL) for details.
+
+## AI-Generated Code Notice
+
+Developed with AI assistance (Claude, Anthropic). Not all code manually reviewed — review critical paths before production use.
