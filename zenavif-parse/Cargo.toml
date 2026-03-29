@@ -1,6 +1,6 @@
 [package]
 name = "zenavif-parse"
-version = "0.5.0"
+version = "0.5.1"
 authors = [
   "Lilith River <lilith@imazen.io>",
   "Kornel Lesiński <kornel@geekhood.net>",
