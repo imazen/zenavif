@@ -1,4 +1,4 @@
-# zenavif ![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenavif/ci.yml?branch=main&style=for-the-badge) ![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-AGPL%2FCommercial-blue?style=for-the-badge)
+# zenavif [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenavif/ci.yml?branch=main&style=for-the-badge)](https://github.com/imazen/zenavif/actions/workflows/ci.yml) [![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=for-the-badge)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field) [![License](https://img.shields.io/badge/License-AGPL%2FCommercial-blue?style=for-the-badge)](https://github.com/imazen/zenavif#license)
 
 Pure Rust AVIF image codec. Decodes and encodes AVIF images using
 [rav1d-safe](https://github.com/memorysafety/rav1d) (AV1 decoder) and
