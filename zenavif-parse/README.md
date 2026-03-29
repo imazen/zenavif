@@ -1,10 +1,4 @@
-# zenavif-parse
-
-[![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenavif-parse/ci.yml?style=for-the-badge)](https://github.com/imazen/zenavif-parse/actions/workflows/ci.yml)
-[![crates.io](https://img.shields.io/crates/v/zenavif-parse?style=for-the-badge)](https://crates.io/crates/zenavif-parse)
-[![docs.rs](https://img.shields.io/docsrs/zenavif-parse?style=for-the-badge)](https://docs.rs/zenavif-parse)
-[![MSRV](https://img.shields.io/badge/MSRV-1.92-blue?style=for-the-badge)]()
-[![license](https://img.shields.io/crates/l/zenavif-parse?style=for-the-badge)](LICENSE)
+# zenavif-parse [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenavif-parse/ci.yml?style=flat-square)](https://github.com/imazen/zenavif-parse/actions/workflows/ci.yml) [![crates.io](https://img.shields.io/crates/v/zenavif-parse?style=flat-square)](https://crates.io/crates/zenavif-parse) [![lib.rs](https://img.shields.io/badge/lib.rs-zenavif--parse-blue?style=flat-square)](https://lib.rs/crates/zenavif-parse) [![docs.rs](https://img.shields.io/docsrs/zenavif-parse?style=flat-square)](https://docs.rs/zenavif-parse) [![license](https://img.shields.io/crates/l/zenavif-parse?style=flat-square)](https://github.com/imazen/zenavif-parse#license)
 
 AVIF container parser (ISOBMFF/MIAF demuxer) that extracts AV1 payloads, alpha channels, grid tiles, and animation frames from AVIF files. Written entirely in safe Rust with fallible allocations throughout.
 
@@ -139,6 +133,28 @@ This crate builds directly on work by:
 - Mozilla — the original `mp4parse` crate that avif-parse forked from, used in Firefox
 - Ralph Giles, Matthew Gregan, Alfredo Yang, Jon Bauman — original mp4parse authors
 
+## Image tech I maintain
+
+| | |
+|:--|:--|
+| State of the art codecs<sup>[1]</sup> | [zenjpeg] · [zenpng] · [zenwebp] · [zengif] · [zenavif] ([rav1d-safe] · [zenrav1e] · **zenavif-parse** · [zenavif-serialize]) · [zenjxl] ([jxl-encoder] · [zenjxl-decoder]) · [zentiff] · [zenbitmaps] · [heic] · [zenraw] · [zenpdf] · [ultrahdr] · [mozjpeg-rs] · [webpx] |
+| Compression | [zenflate] · [zenzop] |
+| Processing | [zenresize] · [zenfilters] · [zenquant] · [zenblend] |
+| Metrics | [zensim] · [fast-ssim2] · [butteraugli] · [resamplescope-rs] · [codec-eval] · [codec-corpus] |
+| Pixel types & color | [zenpixels] · [zenpixels-convert] · [linear-srgb] · [garb] |
+| Pipeline | [zenpipe] · [zencodec] · [zencodecs] · [zenlayout] · [zennode] |
+| ImageResizer | [ImageResizer] (C#) — 24M+ NuGet downloads across all packages |
+| [Imageflow][] | Image optimization engine (Rust) — [.NET][imageflow-dotnet] · [node][imageflow-node] · [go][imageflow-go] — 9M+ NuGet downloads across all packages |
+| [Imageflow Server][] | [The fast, safe image server](https://www.imazen.io/) (Rust+C#) — 552K+ NuGet downloads, deployed by Fortune 500s and major brands |
+
+<sup>[1]</sup> <sub>as of 2026</sub>
+
+### General Rust awesomeness
+
+[archmage] · [magetypes] · [enough] · [whereat] · [zenbench] · [cargo-copter]
+
+[And other projects](https://www.imazen.io/open-source) · [GitHub @imazen](https://github.com/imazen) · [GitHub @lilith](https://github.com/lilith) · [lib.rs/~lilith](https://lib.rs/~lilith) · [NuGet](https://www.nuget.org/profiles/imazen) (over 30 million downloads / 87 packages)
+
 ## License
 
 MPL-2.0 (unchanged from upstream).
@@ -151,3 +167,56 @@ This is a fork of [kornelski/avif-parse](https://github.com/kornelski/avif-parse
 We are willing to release our improvements under the original MPL-2.0
 license if upstream takes over maintenance of those improvements. We'd rather
 contribute back than maintain a parallel codebase. Open an issue or reach out.
+
+[zenjpeg]: https://github.com/imazen/zenjpeg
+[zenpng]: https://github.com/imazen/zenpng
+[zenwebp]: https://github.com/imazen/zenwebp
+[zengif]: https://github.com/imazen/zengif
+[zenavif]: https://github.com/imazen/zenavif
+[zenjxl]: https://github.com/imazen/zenjxl
+[zentiff]: https://github.com/imazen/zentiff
+[zenbitmaps]: https://github.com/imazen/zenbitmaps
+[heic]: https://github.com/imazen/heic-decoder-rs
+[zenraw]: https://github.com/imazen/zenraw
+[zenpdf]: https://github.com/imazen/zenpdf
+[ultrahdr]: https://github.com/imazen/ultrahdr
+[jxl-encoder]: https://github.com/imazen/jxl-encoder
+[zenjxl-decoder]: https://github.com/imazen/zenjxl-decoder
+[rav1d-safe]: https://github.com/imazen/rav1d-safe
+[zenrav1e]: https://github.com/imazen/zenrav1e
+[mozjpeg-rs]: https://github.com/imazen/mozjpeg-rs
+[zenavif-serialize]: https://github.com/imazen/zenavif-serialize
+[webpx]: https://github.com/imazen/webpx
+[zenflate]: https://github.com/imazen/zenflate
+[zenzop]: https://github.com/imazen/zenzop
+[zenresize]: https://github.com/imazen/zenresize
+[zenfilters]: https://github.com/imazen/zenfilters
+[zenquant]: https://github.com/imazen/zenquant
+[zenblend]: https://github.com/imazen/zenblend
+[zensim]: https://github.com/imazen/zensim
+[fast-ssim2]: https://github.com/imazen/fast-ssim2
+[butteraugli]: https://github.com/imazen/butteraugli
+[zenpixels]: https://github.com/imazen/zenpixels
+[zenpixels-convert]: https://github.com/imazen/zenpixels
+[linear-srgb]: https://github.com/imazen/linear-srgb
+[garb]: https://github.com/imazen/garb
+[zenpipe]: https://github.com/imazen/zenpipe
+[zencodec]: https://github.com/imazen/zencodec
+[zencodecs]: https://github.com/imazen/zencodecs
+[zenlayout]: https://github.com/imazen/zenlayout
+[zennode]: https://github.com/imazen/zennode
+[Imageflow]: https://github.com/imazen/imageflow
+[Imageflow Server]: https://github.com/imazen/imageflow-server
+[imageflow-dotnet]: https://github.com/imazen/imageflow-dotnet
+[imageflow-node]: https://github.com/imazen/imageflow-node
+[imageflow-go]: https://github.com/imazen/imageflow-go
+[ImageResizer]: https://github.com/imazen/resizer
+[archmage]: https://github.com/imazen/archmage
+[magetypes]: https://github.com/imazen/archmage
+[enough]: https://github.com/imazen/enough
+[whereat]: https://github.com/lilith/whereat
+[zenbench]: https://github.com/imazen/zenbench
+[cargo-copter]: https://github.com/imazen/cargo-copter
+[resamplescope-rs]: https://github.com/imazen/resamplescope-rs
+[codec-eval]: https://github.com/imazen/codec-eval
+[codec-corpus]: https://github.com/imazen/codec-corpus
