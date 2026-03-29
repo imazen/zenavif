@@ -15,7 +15,7 @@ fn main() {
 
     let out = Aviffy::new()
         .set_seq_profile(meta.seq_profile)
-        .set_chroma_subsampling(meta.chroma_subsampling)
+        .set_chroma_subsampling(<(bool, bool)>::from(meta.chroma_subsampling))
         .set_monochrome(meta.monochrome)
         .to_vec(
             primary.as_ref(),
