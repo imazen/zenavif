@@ -1896,7 +1896,7 @@ checksum = "00f1f60154ad4ef9871d606765c3ea037cde93bbd77536327b594de8f82df1cb"
 
 [[package]]
 name = "zenavif"
-version = "0.1.0"
+version = "0.1.3"
 dependencies = [
  "almost-enough",
  "archmage 0.9.14",
