@@ -92,8 +92,8 @@ pub mod yuv_convert_libyuv_simd;
     not(feature = "_dev")
 ))]
 pub(crate) mod yuv_convert_libyuv_simd;
-#[cfg(feature = "zennode")]
-pub mod zennode_defs;
+// #[cfg(feature = "zennode")]
+// pub mod zennode_defs;
 
 #[cfg(feature = "encode")]
 use whereat::at;
