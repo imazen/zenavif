@@ -1150,9 +1150,9 @@ dependencies = [
 
 [[package]]
 name = "rav1d-safe"
-version = "0.4.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14c12a45014df74757f057eee1851adf95e8487ebed69502f16e01bc2bd90cee"
+checksum = "a707afbbbf57e9b74ce7b5dc1f253331b0a3e37e6076ac876435c10bb51e9200"
 dependencies = [
  "aligned",
  "archmage",
