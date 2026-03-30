@@ -2,13 +2,9 @@
 //!
 //! Test vectors are at tests/vectors/libavif/colors-animated-*.avif
 
-use almost_enough::{StopToken, Unstoppable};
+use almost_enough::Unstoppable;
 use std::fs;
 use zenavif::{AnimationDecoder, DecoderConfig, decode_animation, decode_animation_with};
-
-fn stop() -> StopToken {
-    StopToken::new(Unstoppable)
-}
 
 /// Load a test vector, returning None if the file doesn't exist (CI without vectors).
 fn load_vector(path: &str) -> Option<Vec<u8>> {

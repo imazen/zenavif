@@ -19,10 +19,8 @@ fn main() {
     eprintln!("Primary data: {} bytes", primary_data.len());
 
     // Decode with rav1d
-    let settings = rav1d_safe::src::managed::Settings {
-        threads: 1,
-        ..Default::default()
-    };
+    let mut settings = rav1d_safe::src::managed::Settings::default();
+    settings.threads = 1;
     let mut decoder = rav1d_safe::src::managed::Decoder::with_settings(settings).unwrap();
     let frame = match decoder.decode(&primary_data) {
         Ok(Some(f)) => f,

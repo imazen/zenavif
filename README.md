@@ -1,4 +1,4 @@
-# zenavif [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenavif/ci.yml?branch=main&style=for-the-badge)](https://github.com/imazen/zenavif/actions/workflows/ci.yml) [![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=for-the-badge)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field) [![License](https://img.shields.io/badge/License-AGPL%2FCommercial-blue?style=for-the-badge)](https://github.com/imazen/zenavif#license)
+# zenavif ![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenavif/ci.yml?style=flat-square&label=CI) ![crates.io](https://img.shields.io/crates/v/zenavif?style=flat-square) [![lib.rs](https://img.shields.io/crates/v/zenavif?style=flat-square&label=lib.rs&color=blue)](https://lib.rs/crates/zenavif) ![docs.rs](https://img.shields.io/docsrs/zenavif?style=flat-square) ![license](https://img.shields.io/crates/l/zenavif?style=flat-square)
 
 Pure Rust AVIF image codec. Decodes and encodes AVIF images using
 [rav1d-safe](https://github.com/memorysafety/rav1d) (AV1 decoder) and
@@ -13,7 +13,7 @@ Pure Rust AVIF image codec. Decodes and encodes AVIF images using
 - Decodes animated AVIF sequences with per-frame timing
 - Decodes gain maps (ISO 21496-1) and depth auxiliary images from AVIF containers
 - Encodes AVIF with optional gain map embedding via `GainMapConfig` (requires `encode` feature)
-- Encodes AVIF via [zenravif](https://github.com/imazen/cavif-rs) (optional `encode` feature; requires local zenravif path dep — not yet published to crates.io)
+- Encodes AVIF via [zenravif](https://lib.rs/crates/zenravif) (optional `encode` feature)
 - 100% safe Rust by default. Zero `unsafe` in the decode path.
 - Cooperative cancellation via the [`enough`](https://crates.io/crates/enough) crate
 
@@ -110,8 +110,7 @@ This project builds on excellent work by others:
 
 ## Limitations
 
-- The `encode` feature requires a local path dependency on zenravif, which is not yet published to crates.io.
-- This crate is not yet published to crates.io.
+- The `encode` feature is not yet available from a crates.io build (zenravif path dep needs wiring).
 
 ## Image tech I maintain
 
