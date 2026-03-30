@@ -1807,7 +1807,7 @@ impl AvifDecodeJob {
         }
         if let Some(px) = self.limits.max_pixels {
             // Convert pixels to megapixels (round up to avoid zero).
-            let mp = ((px + 999_999) / 1_000_000).min(u32::MAX as u64) as u32;
+            let mp = px.div_ceil(1_000_000).min(u32::MAX as u64) as u32;
             cfg.parser_total_megapixels_limit = Some(mp);
         }
         if let Some(frames) = self.limits.max_frames {
@@ -2135,7 +2135,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
             loop_count: anim_info.loop_count,
             preferred: preferred.to_vec(),
             current_frame: None,
-            limits: self.limits.clone(),
+            limits: self.limits,
             accumulated_ms: 0,
         })
     }
@@ -2180,12 +2180,12 @@ fn orientation_to_avif(orientation: zencodec::Orientation) -> (Option<u8>, Optio
     match orientation {
         Orientation::Identity => (None, None),
         Orientation::FlipH => (Some(0), Some(0)), // mirror=0, no rotation
-        Orientation::Rotate180 => (Some(2), None),         // 180° CCW
-        Orientation::FlipV => (Some(2), Some(0)),   // mirror=0, 180° CCW
-        Orientation::Transpose => (Some(1), Some(0)),      // mirror=0, 90° CCW
-        Orientation::Rotate90 => (Some(3), None),          // 270° CCW = 90° CW
-        Orientation::Transverse => (Some(3), Some(0)),     // mirror=0, 270° CCW
-        Orientation::Rotate270 => (Some(1), None),         // 90° CCW = 270° CW
+        Orientation::Rotate180 => (Some(2), None), // 180° CCW
+        Orientation::FlipV => (Some(2), Some(0)), // mirror=0, 180° CCW
+        Orientation::Transpose => (Some(1), Some(0)), // mirror=0, 90° CCW
+        Orientation::Rotate90 => (Some(3), None), // 270° CCW = 90° CW
+        Orientation::Transverse => (Some(3), Some(0)), // mirror=0, 270° CCW
+        Orientation::Rotate270 => (Some(1), None), // 90° CCW = 270° CW
         _ => (None, None),
     }
 }
@@ -2510,20 +2510,21 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
         // Attach gain map / depth map as typed extras only when opted in.
         // Metadata (`ImageInfo.supplements`, `GainMapPresence`) is always
         // populated regardless — only the heavy data blobs are gated.
-        if self.extract_gain_map {
-            if let Some(gm) = native_info.gain_map {
-                if let Some(metadata) = convert_gain_map_info(&gm) {
-                    let source = zencodec::gainmap::GainMapSource::new(
-                        gm.gain_map_data,
-                        zencodec::ImageFormat::Avif,
-                        metadata,
-                    );
-                    output = output.with_extras(source);
-                }
-            }
-            if let Some(dm) = native_info.depth_map {
-                output = output.with_extras(dm);
-            }
+        if self.extract_gain_map
+            && let Some(gm) = native_info.gain_map
+            && let Some(metadata) = convert_gain_map_info(&gm)
+        {
+            let source = zencodec::gainmap::GainMapSource::new(
+                gm.gain_map_data,
+                zencodec::ImageFormat::Avif,
+                metadata,
+            );
+            output = output.with_extras(source);
+        }
+        if self.extract_gain_map
+            && let Some(dm) = native_info.depth_map
+        {
+            output = output.with_extras(dm);
         }
         Ok(output)
     }
