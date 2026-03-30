@@ -15,36 +15,36 @@ exclude = ["debug_simd", "Dockerfile.references", "Cross.toml", "scripts/", "tes
 # rav1d: C FFI-based decoder for asm feature (fastest)
 rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"], optional = true }
 # rav1d-safe: 100% safe managed API decoder (no c-ffi feature!)
-rav1d-safe = { version = "0.3.1", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
-archmage = { version = "0.9.14", features = ["macros"] }
-magetypes = "0.9.14"
+rav1d-safe = { version = "0.4.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
+archmage = { version = "0.9.15", features = ["macros"] }
+magetypes = "0.9.15"
 safe_unaligned_simd = "0.2.5"
 zenavif-parse = "0.5.0"
 yuv = "0.8.12"
 imgref = "1.12.0"
 rgb = { version = "0.8.52", default-features = false, features = ["bytemuck"] }
-enough = "0.4.2"
+enough = "0.4.3"
 bytemuck = { version = "1.25.0", default-features = false, features = ["derive"] }
 thiserror = { version = "2.0.18", default-features = false }
-whereat = "0.1.4"
+whereat = "0.1.5"
 log = "0.4.29"
-ravif = { package = "zenravif", path = "../ravif/ravif", version = "0.1.0", default-features = false, optional = true, features = ["stop"] }
+ravif = { package = "zenravif", path = "../ravif/ravif", version = "0.1.1", default-features = false, optional = true, features = ["stop"] }
 # svtav1: disabled — produces corrupt bitstreams in most configurations (see svtav1-rs README)
 # svtav1 = { path = "/home/lilith/work/svtav1/svtav1-rs/svtav1", version = "0.1.0", optional = true }
-almost-enough = { version = "0.4.2", default-features = false }
+almost-enough = { version = "0.4.3", default-features = false }
 zencodec = { version = "0.1.11", optional = true }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 zenpixels = { version = "0.2.1", default-features = false, features = ["imgref", "rgb"] }
 zenpixels-convert = { version = "0.2.1", default-features = false, features = ["rgb"] }
-linear-srgb = "0.6.5"
+linear-srgb = "0.6.6"
 
 [dev-dependencies]
-archmage = { version = "0.9.14", features = ["std"] }
+archmage = { version = "0.9.15", features = ["std"] }
 env_logger = { version = "0.11.10", default-features = false }
 png = "0.18.0"
 image = "0.25.10"
 zenbench = { version = "0.1.2", features = ["criterion-compat"] }
-fast-ssim2 = "0.7.0"
+fast-ssim2 = "0.7.1"
 
 [[bench]]
 name = "decode_benchmark"

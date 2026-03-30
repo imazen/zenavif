@@ -60,10 +60,8 @@ pub fn decode_av1_obu(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u8)> {
         }));
     }
 
-    let settings = Settings {
-        threads: 1,
-        ..Default::default()
-    };
+    let mut settings = Settings::default();
+    settings.threads = 1;
 
     let mut decoder = Rav1dDecoder::with_settings(settings).map_err(|_e| {
         at!(Error::Decode {

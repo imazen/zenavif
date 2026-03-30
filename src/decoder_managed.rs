@@ -146,12 +146,10 @@ impl ManagedAvifDecoder {
         )
         .map_err(|e| at!(Error::from(e)))?;
 
-        let settings = Settings {
-            threads: config.threads,
-            apply_grain: config.apply_grain,
-            frame_size_limit: config.frame_size_limit,
-            ..Default::default()
-        };
+        let mut settings = Settings::default();
+        settings.threads = config.threads;
+        settings.apply_grain = config.apply_grain;
+        settings.frame_size_limit = config.frame_size_limit;
 
         let decoder = Rav1dDecoder::with_settings(settings).map_err(|_e| {
             at!(Error::Decode {
@@ -595,10 +593,8 @@ impl ManagedAvifDecoder {
             .ok_or_else(|| at!(Error::Unsupported("not an animated AVIF")))?;
 
         let mut alpha_decoder = if anim_info.has_alpha {
-            let settings = Settings {
-                threads: 0,
-                ..Default::default()
-            };
+            let mut settings = Settings::default();
+            settings.threads = 0;
             Some(Rav1dDecoder::with_settings(settings).map_err(|_e| {
                 at!(Error::Decode {
                     code: -1,
@@ -1795,10 +1791,8 @@ impl AnimationDecoder {
             .ok_or_else(|| at!(Error::Unsupported("not an animated AVIF")))?;
 
         let alpha_decoder = if anim_info.has_alpha {
-            let settings = Settings {
-                threads: config.threads,
-                ..Default::default()
-            };
+            let mut settings = Settings::default();
+            settings.threads = config.threads;
             Some(Rav1dDecoder::with_settings(settings).map_err(|_e| {
                 at!(Error::Decode {
                     code: -1,
