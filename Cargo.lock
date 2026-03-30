@@ -1892,6 +1892,8 @@ dependencies = [
 [[package]]
 name = "zenavif-serialize"
 version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bd8754ecfde1d4fe4100fb3a33540747e88f249f6eba090363dc06e2f889d76"
 dependencies = [
  "arrayvec",
 ]
@@ -1952,6 +1954,8 @@ dependencies = [
 [[package]]
 name = "zenrav1e"
 version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb9e4cb8deb0ebd49083d27d50a0078e4019b6f29f4e882b5b2f38b9bfe8c328"
 dependencies = [
  "aligned-vec",
  "arbitrary",
@@ -1989,6 +1993,8 @@ dependencies = [
 [[package]]
 name = "zenravif"
 version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95695202c3a6790c6811f6b5c3f0e0a3ea85dccb0ac1f4d6a24828c6e4bc08d8"
 dependencies = [
  "almost-enough",
  "imgref",
