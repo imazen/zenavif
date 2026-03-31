@@ -763,21 +763,21 @@ impl AvifEncoder {
     fn check_limits(&self, w: usize, h: usize, bpp: u64) -> Result<(), At<Error>> {
         self.limits
             .check_dimensions(w as u32, h as u32)
-            .map_err(|_| Error::ImageTooLarge {
+            .map_err(|_| at!(Error::ImageTooLarge {
                 width: w as u32,
                 height: h as u32,
-            })?;
+            }))?;
         let estimated_mem = w as u64 * h as u64 * bpp;
         self.limits
             .check_memory(estimated_mem)
-            .map_err(|e| Error::Encode(format!("{e}")))?;
+            .map_err(|e| at!(Error::Encode(format!("{e}"))))?;
         Ok(())
     }
 
     fn make_output(&self, data: Vec<u8>) -> Result<EncodeOutput, At<Error>> {
         self.limits
             .check_output_size(data.len() as u64)
-            .map_err(|e| Error::Encode(format!("{e}")))?;
+            .map_err(|e| at!(Error::Encode(format!("{e}"))))?;
         Ok(EncodeOutput::new(data, ImageFormat::Avif))
     }
 
@@ -1838,7 +1838,7 @@ impl AvifDecodeJob {
     fn check_input_size(&self, data: &[u8]) -> Result<(), At<Error>> {
         self.limits
             .check_input_size(data.len() as u64)
-            .map_err(|e| Error::ResourceLimit(format!("{e}")))?;
+            .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
         Ok(())
     }
 
@@ -1846,10 +1846,10 @@ impl AvifDecodeJob {
     fn check_decode_limits(&self, info: &crate::image::ImageInfo) -> Result<(), At<Error>> {
         self.limits
             .check_dimensions(info.width, info.height)
-            .map_err(|_| Error::ImageTooLarge {
+            .map_err(|_| at!(Error::ImageTooLarge {
                 width: info.width,
                 height: info.height,
-            })?;
+            }))?;
         // Estimate output memory: width * height * max_bpp (4 bytes for RGBA8, 8 for RGBA16)
         let bpp: u64 = if info.bit_depth > 8 {
             if info.has_alpha { 8 } else { 6 }
@@ -1861,7 +1861,7 @@ impl AvifDecodeJob {
         let estimated_mem = info.width as u64 * info.height as u64 * bpp;
         self.limits
             .check_memory(estimated_mem)
-            .map_err(|e| Error::ResourceLimit(format!("{e}")))?;
+            .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
         Ok(())
     }
 }
@@ -2478,10 +2478,10 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
         // Check dimensions and memory limits before the expensive pixel decode.
         self.limits
             .check_dimensions(native_info.width, native_info.height)
-            .map_err(|_| Error::ImageTooLarge {
+            .map_err(|_| at!(Error::ImageTooLarge {
                 width: native_info.width,
                 height: native_info.height,
-            })?;
+            }))?;
         let bpp: u64 = if native_info.bit_depth > 8 {
             if native_info.has_alpha { 8 } else { 6 }
         } else if native_info.has_alpha {
@@ -2492,7 +2492,7 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
         let estimated_mem = native_info.width as u64 * native_info.height as u64 * bpp;
         self.limits
             .check_memory(estimated_mem)
-            .map_err(|e| Error::ResourceLimit(format!("{e}")))?;
+            .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
 
         let (pixels, native_info) = decoder.decode_full(stop)?;
 
