@@ -34,8 +34,8 @@ ravif = { package = "zenravif", version = "0.1.1", default-features = false, opt
 almost-enough = { version = "0.4.3", default-features = false }
 zencodec = { version = "0.1.11", optional = true }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
-zenpixels = { version = "0.2.1", default-features = false, features = ["imgref", "rgb"] }
-zenpixels-convert = { version = "0.2.1", default-features = false, features = ["rgb"] }
+zenpixels = { version = "0.2.2", default-features = false, features = ["imgref", "rgb"] }
+zenpixels-convert = { version = "0.2.2", default-features = false, features = ["rgb"] }
 linear-srgb = "0.6.6"
 
 [dev-dependencies]
