@@ -103,13 +103,36 @@ let parser = AvifParser::from_bytes_with_config(
 
 Defaults: 1GB peak memory, 512MP total, 10k frames, 1k tiles. Use `DecodeConfig::unlimited()` to disable all limits.
 
+### zencodec integration (feature = "zencodec")
+
+The `zencodec` feature enables bidirectional `From` conversions between
+`GainMapMetadata` / `GainMapChannel` and their `zencodec::GainMapParams` /
+`zencodec::GainMapChannel` counterparts:
+
+```toml
+[dependencies]
+zenavif-parse = { version = "0.6", features = ["zencodec"] }
+zencodec = "0.1"
+```
+
+```rust
+// zenavif-parse rationals → zencodec f64 domain
+let params: zencodec::GainMapParams = zencodec::GainMapParams::from(&metadata);
+
+// zencodec f64 domain → zenavif-parse rationals (continued-fraction encoding)
+let metadata: zenavif_parse::GainMapMetadata = zenavif_parse::GainMapMetadata::from(&params);
+```
+
+Rational fractions are encoded using the continued-fraction algorithm, matching
+libultrahdr's canonical form.
+
 ### Legacy API (feature = "eager")
 
 The original `read_avif()` / `AvifData` API and C FFI are behind the `eager` feature flag, off by default.
 
 ```toml
 [dependencies]
-zenavif-parse = { version = "0.3", features = ["eager"] }
+zenavif-parse = { version = "0.6", features = ["eager"] }
 ```
 
 ```rust

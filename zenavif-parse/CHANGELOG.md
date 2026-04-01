@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0
+
+### Added
+- `GainMapMetadata::backward_direction` field (ISO 21496-1 flags byte bit 2). When true,
+  the base image is HDR and the alternate rendition is SDR (reversed from the default).
+  Previously this flag was silently ignored during parsing.
+- `zencodec` optional feature: enables `From<&GainMapMetadata>` → `zencodec::GainMapParams`
+  and the reverse `From<&zencodec::GainMapParams>` → `GainMapMetadata`. Rational fractions
+  are encoded using the continued-fraction algorithm (matching libultrahdr's canonical form).
+  Also provides `From<&GainMapChannel>` ↔ `From<&zencodec::GainMapChannel>`.
+
+### Changed
+- **Breaking:** `GainMapMetadata` has a new `backward_direction: bool` field. Code
+  constructing this struct with struct literal syntax must add `backward_direction: false`
+  (or the appropriate value). Parser output is not affected — the field is now populated
+  from the ISO 21496-1 flags byte.
+
 ## 0.5.0
 
 ### Added

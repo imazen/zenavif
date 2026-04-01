@@ -1802,6 +1802,171 @@ fn eager_gain_map_convenience() {
 }
 
 // ============================================================================
+// GainMapMetadata::to_bytes() roundtrip tests
+// ============================================================================
+
+/// Build a minimal single-channel ISO 21496-1 tmap metadata blob with
+/// specific field values for byte-exact roundtrip tests.
+fn make_tmap_bytes(
+    is_multichannel: bool,
+    use_base_colour_space: bool,
+    backward_direction: bool,
+    base_n: u32, base_d: u32,
+    alt_n: u32, alt_d: u32,
+) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.push(0u8); // version
+    buf.extend_from_slice(&0u16.to_be_bytes()); // minimum_version
+    buf.extend_from_slice(&0u16.to_be_bytes()); // writer_version
+    let flags = (u8::from(is_multichannel) << 7)
+        | (u8::from(use_base_colour_space) << 6)
+        | (u8::from(backward_direction) << 2);
+    buf.push(flags);
+    buf.extend_from_slice(&base_n.to_be_bytes());
+    buf.extend_from_slice(&base_d.to_be_bytes());
+    buf.extend_from_slice(&alt_n.to_be_bytes());
+    buf.extend_from_slice(&alt_d.to_be_bytes());
+    let channel_count = if is_multichannel { 3 } else { 1 };
+    for _ in 0..channel_count {
+        // gain_map_min = -1/4
+        buf.extend_from_slice(&(-1i32).to_be_bytes());
+        buf.extend_from_slice(&4u32.to_be_bytes());
+        // gain_map_max = 3/2
+        buf.extend_from_slice(&3i32.to_be_bytes());
+        buf.extend_from_slice(&2u32.to_be_bytes());
+        // gamma = 1/1
+        buf.extend_from_slice(&1u32.to_be_bytes());
+        buf.extend_from_slice(&1u32.to_be_bytes());
+        // base_offset = 1/64
+        buf.extend_from_slice(&1i32.to_be_bytes());
+        buf.extend_from_slice(&64u32.to_be_bytes());
+        // alternate_offset = 1/64
+        buf.extend_from_slice(&1i32.to_be_bytes());
+        buf.extend_from_slice(&64u32.to_be_bytes());
+    }
+    buf
+}
+
+#[test]
+fn gain_map_to_bytes_single_channel_roundtrip() {
+    // Build known bytes → parse → to_bytes → compare byte-for-byte
+    let original = make_tmap_bytes(false, true, false, 0, 1, 13, 10);
+    let meta = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&original)
+        .expect("parse_tmap_bytes should succeed");
+
+    assert!(!meta.is_multichannel);
+    assert!(meta.use_base_colour_space);
+    assert!(!meta.backward_direction);
+    assert_eq!(meta.channels[0].gain_map_min_n, -1);
+    assert_eq!(meta.channels[0].gain_map_min_d, 4);
+    assert_eq!(meta.channels[0].gain_map_max_n, 3);
+    assert_eq!(meta.channels[0].gain_map_max_d, 2);
+
+    let roundtripped = meta.to_bytes();
+    assert_eq!(original, roundtripped, "to_bytes() output should be byte-for-byte identical to input");
+}
+
+#[test]
+fn gain_map_to_bytes_multichannel_roundtrip() {
+    let original = make_tmap_bytes(true, false, false, 0, 1, 3, 1);
+    let meta = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&original)
+        .expect("parse_tmap_bytes multichannel");
+
+    assert!(meta.is_multichannel);
+    let roundtripped = meta.to_bytes();
+    assert_eq!(original, roundtripped, "multichannel to_bytes() must round-trip exactly");
+}
+
+#[test]
+fn gain_map_backward_direction_parse_and_roundtrip() {
+    // backward_direction = bit 2 of flags byte
+    let original = make_tmap_bytes(false, true, true, 0, 1, 6, 1);
+
+    // Verify the bit is set in the raw bytes (offset 5 = version(1) + min_ver(2) + writer_ver(2))
+    assert_eq!(original[5] & 0x04, 0x04, "bit 2 should be set in flags byte");
+
+    let meta = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&original)
+        .expect("parse with backward_direction");
+    assert!(meta.backward_direction, "backward_direction should be true");
+    assert!(meta.use_base_colour_space);
+    assert!(!meta.is_multichannel);
+
+    // Byte-exact roundtrip
+    let roundtripped = meta.to_bytes();
+    assert_eq!(original, roundtripped);
+    assert_eq!(roundtripped[5] & 0x04, 0x04, "bit 2 preserved in to_bytes output");
+}
+
+#[test]
+fn gain_map_real_file_to_bytes_struct_roundtrip() {
+    // Parse real AVIF → to_bytes → parse again → structs must be identical
+    let bytes = std::fs::read("tests/gainmap/seine_sdr_gainmap_srgb.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes");
+    let meta = parser.gain_map_metadata().expect("gain map metadata");
+
+    let serialized = meta.to_bytes();
+    let reparsed = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&serialized)
+        .expect("re-parse after to_bytes");
+
+    assert_eq!(*meta, reparsed, "struct roundtrip: parse → to_bytes → parse must be identical");
+}
+
+#[cfg(feature = "zencodec")]
+#[test]
+fn gain_map_zencodec_from_roundtrip_seine() {
+    // Parse real file → zencodec::GainMapParams → GainMapMetadata → compare with original
+    let bytes = std::fs::read("tests/gainmap/seine_sdr_gainmap_srgb.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes");
+    let meta = parser.gain_map_metadata().expect("gain map metadata");
+
+    // Convert to zencodec (f64) and back
+    let params = zencodec::GainMapParams::from(meta);
+    let reparsed = zenavif_parse::GainMapMetadata::from(&params);
+
+    // The continued-fraction encoding should recover the same rationals
+    assert_eq!(meta.is_multichannel, reparsed.is_multichannel);
+    assert_eq!(meta.use_base_colour_space, reparsed.use_base_colour_space);
+    assert_eq!(meta.backward_direction, reparsed.backward_direction);
+
+    // The CF algorithm works in f32 precision, so we compare f64 values rather
+    // than exact rationals. Epsilon is f32 precision relative to the value.
+    let eps = 1e-5f64;
+    let base_orig = meta.base_hdr_headroom_n as f64 / meta.base_hdr_headroom_d.max(1) as f64;
+    let base_rt = reparsed.base_hdr_headroom_n as f64 / reparsed.base_hdr_headroom_d.max(1) as f64;
+    assert!((base_orig - base_rt).abs() <= eps * base_orig.abs().max(1.0),
+        "base_hdr_headroom mismatch: {base_orig} vs {base_rt}");
+    let alt_orig = meta.alternate_hdr_headroom_n as f64 / meta.alternate_hdr_headroom_d.max(1) as f64;
+    let alt_rt = reparsed.alternate_hdr_headroom_n as f64 / reparsed.alternate_hdr_headroom_d.max(1) as f64;
+    assert!((alt_orig - alt_rt).abs() <= eps * alt_orig.abs().max(1.0),
+        "alternate_hdr_headroom mismatch: {alt_orig} vs {alt_rt}");
+
+    for i in 0..3 {
+        let a = &meta.channels[i];
+        let b = &reparsed.channels[i];
+        let orig_min = a.gain_map_min_n as f64 / a.gain_map_min_d.max(1) as f64;
+        let rt_min   = b.gain_map_min_n as f64 / b.gain_map_min_d.max(1) as f64;
+        assert!((orig_min - rt_min).abs() <= eps * orig_min.abs().max(1.0),
+            "channel {i} min mismatch: {orig_min} vs {rt_min} ({}/{} vs {}/{})",
+            a.gain_map_min_n, a.gain_map_min_d, b.gain_map_min_n, b.gain_map_min_d);
+    }
+}
+
+#[cfg(feature = "zencodec")]
+#[test]
+fn gain_map_zencodec_backward_direction_preserved() {
+    // Verify backward_direction survives the zencodec roundtrip
+    let original = make_tmap_bytes(false, false, true, 1, 4, 4, 1);
+    let meta = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&original).unwrap();
+    assert!(meta.backward_direction);
+
+    let params = zencodec::GainMapParams::from(&meta);
+    assert!(params.backward_direction, "zencodec must carry backward_direction");
+
+    let reparsed = zenavif_parse::GainMapMetadata::from(&params);
+    assert!(reparsed.backward_direction, "backward_direction must survive zencodec roundtrip");
+}
+
+// ============================================================================
 // Depth auxiliary image tests
 // ============================================================================
 

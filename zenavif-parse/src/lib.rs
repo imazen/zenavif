@@ -490,6 +490,53 @@ pub struct GainMapMetadata {
     pub channels: [GainMapChannel; 3],
 }
 
+impl GainMapMetadata {
+    /// Parse an ISO 21496-1 AVIF `tmap` item payload into a `GainMapMetadata`.
+    ///
+    /// This is the public mirror of the internal parser. Useful for testing
+    /// and for consumers who hold raw tmap payload bytes.
+    pub fn parse_tmap_bytes(data: &[u8]) -> Result<Self> {
+        parse_tone_map_image(data)
+    }
+
+    /// Serialize this metadata to the ISO 21496-1 AVIF `tmap` item payload format.
+    ///
+    /// This is the inverse of the internal `parse_tone_map_image` function and
+    /// produces the exact byte sequence expected in an AVIF `tmap` item. The
+    /// output can be passed to `zenavif_serialize::Aviffy::set_gain_map` or
+    /// used for byte-level roundtrip testing.
+    ///
+    /// The writer is always written as version 0 / minimum_version 0.
+    pub fn to_bytes(&self) -> std::vec::Vec<u8> {
+        let channel_count = if self.is_multichannel { 3usize } else { 1usize };
+        let mut buf = std::vec::Vec::with_capacity(5 + 8 + channel_count * 40);
+        buf.push(0u8); // version
+        buf.extend_from_slice(&0u16.to_be_bytes()); // minimum_version
+        buf.extend_from_slice(&0u16.to_be_bytes()); // writer_version
+        let flags = (u8::from(self.is_multichannel) << 7)
+            | (u8::from(self.use_base_colour_space) << 6)
+            | (u8::from(self.backward_direction) << 2);
+        buf.push(flags);
+        buf.extend_from_slice(&self.base_hdr_headroom_n.to_be_bytes());
+        buf.extend_from_slice(&self.base_hdr_headroom_d.to_be_bytes());
+        buf.extend_from_slice(&self.alternate_hdr_headroom_n.to_be_bytes());
+        buf.extend_from_slice(&self.alternate_hdr_headroom_d.to_be_bytes());
+        for ch in self.channels.iter().take(channel_count) {
+            buf.extend_from_slice(&ch.gain_map_min_n.to_be_bytes());
+            buf.extend_from_slice(&ch.gain_map_min_d.to_be_bytes());
+            buf.extend_from_slice(&ch.gain_map_max_n.to_be_bytes());
+            buf.extend_from_slice(&ch.gain_map_max_d.to_be_bytes());
+            buf.extend_from_slice(&ch.gamma_n.to_be_bytes());
+            buf.extend_from_slice(&ch.gamma_d.to_be_bytes());
+            buf.extend_from_slice(&ch.base_offset_n.to_be_bytes());
+            buf.extend_from_slice(&ch.base_offset_d.to_be_bytes());
+            buf.extend_from_slice(&ch.alternate_offset_n.to_be_bytes());
+            buf.extend_from_slice(&ch.alternate_offset_d.to_be_bytes());
+        }
+        buf
+    }
+}
+
 // ─── zencodec conversions ────────────────────────────────────────────
 
 #[cfg(feature = "zencodec")]
