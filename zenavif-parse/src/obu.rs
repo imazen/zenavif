@@ -628,7 +628,15 @@ fn tile_log2(d: u32, n: u32) -> u32 {
         return 0;
     }
     let mut k = 0;
-    while (d << (k + 1)) <= n {
+    while k < 31 {
+        // Use checked_shl to prevent overflow: d << 32 wraps to 0 in
+        // release builds, which would cause an infinite loop.
+        let Some(shifted) = d.checked_shl(k + 1) else {
+            break;
+        };
+        if shifted > n {
+            break;
+        }
         k += 1;
     }
     k
