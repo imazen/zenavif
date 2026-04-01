@@ -15,39 +15,39 @@ exclude = ["debug_simd", "Dockerfile.references", "Cross.toml", "scripts/", "tes
 # rav1d: C FFI-based decoder for asm feature (fastest)
 rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"], optional = true }
 # rav1d-safe: 100% safe managed API decoder (no c-ffi feature!)
-rav1d-safe = { version = "0.5.2", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
-archmage = { version = "0.9.15", features = ["macros"] }
-magetypes = "0.9.15"
+rav1d-safe = { git = "https://github.com/imazen/rav1d-safe.git", rev = "297451f", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
+archmage = { version = "0.9.15", features = ["macros"] , path = "../../archmage" }
+magetypes = { version = "0.9.15", path = "../../archmage/magetypes" }
 safe_unaligned_simd = "0.2.5"
-zenavif-parse = "0.5.1"
+zenavif-parse = { version = "0.5.1", path = "../zenavif-parse" }
 yuv = "0.8.12"
 imgref = "1.12.0"
 rgb = { version = "0.8.52", default-features = false, features = ["bytemuck"] }
 enough = "0.4.3"
 bytemuck = { version = "1.25.0", default-features = false, features = ["derive"] }
 thiserror = { version = "2.0.18", default-features = false }
-whereat = "0.1.5"
+whereat = { version = "0.1.5", path = "../whereat" }
 log = "0.4.29"
 ravif = { package = "zenravif", version = "0.1.1", default-features = false, optional = true, features = ["stop"] }
 # svtav1: disabled — produces corrupt bitstreams in most configurations (see svtav1-rs README)
 # svtav1 = { path = "/home/lilith/work/svtav1/svtav1-rs/svtav1", version = "0.1.0", optional = true }
 almost-enough = { version = "0.4.3", default-features = false }
-zencodec = { version = "0.1.11", optional = true }
+zencodec = { version = "0.1.11", optional = true , path = "../zencodec" }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
-zenpixels = { version = "0.2.2", default-features = false, features = ["imgref", "rgb"] }
-zenpixels-convert = { version = "0.2.2", default-features = false, features = ["rgb"] }
-linear-srgb = "0.6.6"
+zenpixels = { version = "0.2.2", default-features = false, features = ["imgref", "rgb"] , path = "../zenpixels/zenpixels" }
+zenpixels-convert = { version = "0.2.2", default-features = false, features = ["rgb"] , path = "../zenpixels/zenpixels-convert" }
+linear-srgb = { version = "0.6.6", path = "../linear-srgb" }
 
 [dev-dependencies]
 almost-enough = { version = "0.4.3", features = ["alloc"] }
-archmage = { version = "0.9.15", features = ["std"] }
+archmage = { version = "0.9.15", features = ["std"] , path = "../../archmage" }
 env_logger = { version = "0.11.10", default-features = false }
 png = "0.18.0"
 image = "0.25.10"
-zenbench = { version = "0.1.2", features = ["criterion-compat"] }
-fast-ssim2 = "0.7.1"
-zensim = { version = "0.2.4", features = ["imgref", "zenpixels"] }
-zensim-regress = "0.3.0"
+zenbench = { version = "0.1.2", features = ["criterion-compat"] , path = "../zenbench" }
+fast-ssim2 = { version = "0.7.1", path = "../fast-ssim2/fast-ssim2" }
+zensim = { version = "0.2.4", features = ["imgref", "zenpixels"] , path = "../zensim/zensim" }
+zensim-regress = { version = "0.3.0", path = "../zensim/zensim-regress" }
 
 [[bench]]
 name = "decode_benchmark"
