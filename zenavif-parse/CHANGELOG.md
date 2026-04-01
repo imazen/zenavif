@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.6.0
+## 0.6.0 — 2026-04-01
 
 ### Added
 - `GainMapMetadata::backward_direction` field (ISO 21496-1 flags byte bit 2). When true,
