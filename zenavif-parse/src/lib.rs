@@ -1253,7 +1253,7 @@ impl<'data> AvifParser<'data> {
     /// The returned parser borrows `data` — single-extent items will be
     /// returned as `Cow::Borrowed` slices into this buffer.
     pub fn from_bytes(data: &'data [u8]) -> Result<Self> {
-        Self::from_bytes_with_config(data, &DecodeConfig::unlimited(), &Unstoppable)
+        Self::from_bytes_with_config(data, &DecodeConfig::default(), &Unstoppable)
     }
 
     /// Parse AVIF from a borrowed byte slice with resource limits.
@@ -1271,7 +1271,7 @@ impl<'data> AvifParser<'data> {
     /// The returned parser owns the data — single-extent items will still
     /// be returned as `Cow::Borrowed` slices (borrowing from the internal buffer).
     pub fn from_owned(data: std::vec::Vec<u8>) -> Result<AvifParser<'static>> {
-        AvifParser::from_owned_with_config(data, &DecodeConfig::unlimited(), &Unstoppable)
+        AvifParser::from_owned_with_config(data, &DecodeConfig::default(), &Unstoppable)
     }
 
     /// Parse AVIF from an owned buffer with resource limits.
@@ -1286,17 +1286,33 @@ impl<'data> AvifParser<'data> {
 
     /// Parse AVIF from a reader (reads all bytes, then parses).
     pub fn from_reader<R: Read>(reader: &mut R) -> Result<AvifParser<'static>> {
-        AvifParser::from_reader_with_config(reader, &DecodeConfig::unlimited(), &Unstoppable)
+        AvifParser::from_reader_with_config(reader, &DecodeConfig::default(), &Unstoppable)
     }
 
     /// Parse AVIF from a reader with resource limits.
+    ///
+    /// If `config.peak_memory_limit` is set, reading is capped at that many
+    /// bytes to prevent unbounded allocation from an untrusted reader.
     pub fn from_reader_with_config<R: Read>(
         reader: &mut R,
         config: &DecodeConfig,
         stop: &dyn Stop,
     ) -> Result<AvifParser<'static>> {
-        let mut buf = std::vec::Vec::new();
-        reader.read_to_end(&mut buf)?;
+        let buf = if let Some(limit) = config.peak_memory_limit {
+            let mut limited = reader.take(limit.saturating_add(1));
+            let mut buf = std::vec::Vec::new();
+            limited.read_to_end(&mut buf)?;
+            if buf.len() as u64 > limit {
+                return Err(Error::ResourceLimitExceeded(
+                    "input exceeds peak_memory_limit",
+                ));
+            }
+            buf
+        } else {
+            let mut buf = std::vec::Vec::new();
+            reader.read_to_end(&mut buf)?;
+            buf
+        };
         AvifParser::from_owned_with_config(buf, config, stop)
     }
 
