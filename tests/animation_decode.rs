@@ -2,7 +2,9 @@
 //!
 //! Test vectors are at tests/vectors/libavif/colors-animated-*.avif
 
-use almost_enough::{StopExt, Unstoppable};
+#[cfg(feature = "encode")]
+use almost_enough::StopExt;
+use almost_enough::Unstoppable;
 use std::fs;
 use zenavif::{AnimationDecoder, DecoderConfig, decode_animation, decode_animation_with};
 
