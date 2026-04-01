@@ -99,9 +99,9 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
 name = "archmage"
-version = "0.9.15"
+version = "0.9.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f603b4bae8aa53923ec4c221610fec3bb16a3cba8e002a750323a30abd25f8f"
+checksum = "906d90739870dc217c19bac4b3d11541817679e875bc3ae03e66458f44ccac6b"
 dependencies = [
  "archmage-macros",
  "safe_unaligned_simd",
@@ -109,9 +109,9 @@ dependencies = [
 
 [[package]]
 name = "archmage-macros"
-version = "0.9.15"
+version = "0.9.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "237913c29ffeb6cda1ddc6e3a4ff21c2d2e5523e050dce04fa5889a3e8dabb99"
+checksum = "e2377968d27d15b6e6117b60026a12a76de7e79a40e1ac664158e2bc562d6d95"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -753,9 +753,9 @@ checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
 
 [[package]]
 name = "libc"
-version = "0.2.183"
+version = "0.2.184"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5b646652bf6661599e1da8901b3b9522896f01e736bad5f723fe7a3a27f899d"
+checksum = "48f5d2a454e16a5ea0f4ced81bd44e4cfc7bd3a507b61887c99fd3538b28e4af"
 
 [[package]]
 name = "libfuzzer-sys"
@@ -817,9 +817,9 @@ dependencies = [
 
 [[package]]
 name = "magetypes"
-version = "0.9.15"
+version = "0.9.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ce9b26ae600f31a427d5b6a29ce33f0825683dfe5fff0b11277fa3da890e52b"
+checksum = "397ac3d7c230570d454406a00bcb74e7b21551eadfa44242463030581631877e"
 dependencies = [
  "archmage",
 ]
@@ -1156,7 +1156,8 @@ dependencies = [
 [[package]]
 name = "rav1d-disjoint-mut"
 version = "0.3.0"
-source = "git+https://github.com/imazen/rav1d-safe.git?rev=297451f#297451fc54a7d29248501936dba2bf23b944bb0e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "731512a636cc44496761bdab72157735a78cfffcbc3f42d1b0a84ff5800e3bc7"
 dependencies = [
  "aligned",
  "aligned-vec",
@@ -1165,8 +1166,9 @@ dependencies = [
 
 [[package]]
 name = "rav1d-safe"
-version = "0.5.2"
-source = "git+https://github.com/imazen/rav1d-safe.git?rev=297451f#297451fc54a7d29248501936dba2bf23b944bb0e"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96991333ff8f8b8f1880c578ac76861add58ad3a361c2928a152f48dde8a9977"
 dependencies = [
  "aligned",
  "archmage",
@@ -1922,9 +1924,9 @@ dependencies = [
 
 [[package]]
 name = "zenbench"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "608aa467d997f62def7d8a8f206c9fc1754ec61e159423c7d374eb4db1c5b01e"
+checksum = "c270931cc788ca2d9a58e22042de041df91e051f4c57858ebae98e637cd666e4"
 dependencies = [
  "clap",
  "fs4",
