@@ -1635,3 +1635,69 @@ fn avif_parse_survives_gain_map() {
     // avif-parse (older parser) must not crash
     let _ = avif_parse::read_avif(&mut avif.as_slice());
 }
+
+#[test]
+fn gain_map_metadata_bytes_exact_roundtrip() {
+    // The raw metadata bytes we embed must come back byte-for-byte via to_bytes().
+    // This verifies that serialize → parse → to_bytes is lossless.
+    let primary_data = [1u8, 2, 3, 4];
+    let gain_map_data = [10u8, 20, 30];
+    let original_meta = make_test_tmap_metadata(false, true, 0, 1, 13, 10);
+
+    let avif = Aviffy::new()
+        .set_gain_map(gain_map_data.to_vec(), 1, 1, 8, original_meta.clone())
+        .to_vec(&primary_data, None, 10, 20, 8);
+
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+    let parsed = parser.gain_map_metadata().expect("gain map metadata present");
+    let roundtripped = parsed.to_bytes();
+
+    assert_eq!(original_meta, roundtripped,
+        "tmap payload bytes must survive serialize → parse → to_bytes unchanged");
+}
+
+#[test]
+fn gain_map_backward_direction_flag_roundtrip() {
+    // Build metadata with backward_direction=true (bit 2 of flags).
+    // Verify it survives serialize → parse → struct → to_bytes.
+    let primary_data = [1u8, 2, 3, 4];
+    let gain_map_data = [55u8, 66];
+
+    let mut meta_bytes = make_test_tmap_metadata(false, false, 0, 1, 4, 1);
+    // flags byte is at offset 5: set bit 2 (backward_direction)
+    meta_bytes[5] |= 0x04;
+
+    let avif = Aviffy::new()
+        .set_gain_map(gain_map_data.to_vec(), 1, 1, 8, meta_bytes.clone())
+        .to_vec(&primary_data, None, 10, 20, 8);
+
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+    let parsed = parser.gain_map_metadata().expect("gain map metadata");
+
+    assert!(parsed.backward_direction, "backward_direction must be parsed as true");
+    assert!(!parsed.use_base_colour_space);
+    assert!(!parsed.is_multichannel);
+
+    let roundtripped = parsed.to_bytes();
+    assert_eq!(meta_bytes, roundtripped, "backward_direction flag must survive full roundtrip");
+    assert_eq!(roundtripped[5] & 0x04, 0x04, "bit 2 must be set in roundtripped flags byte");
+}
+
+#[test]
+fn gain_map_multichannel_metadata_bytes_roundtrip() {
+    let primary_data = [1u8, 2, 3, 4, 5, 6];
+    let gain_map_data = [10u8, 20, 30, 40];
+    let original_meta = make_test_tmap_metadata(true, true, 0, 1, 3, 1);
+
+    let avif = Aviffy::new()
+        .set_gain_map(gain_map_data.to_vec(), 2, 2, 8, original_meta.clone())
+        .to_vec(&primary_data, None, 10, 20, 8);
+
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+    let parsed = parser.gain_map_metadata().expect("gain map metadata");
+    assert!(parsed.is_multichannel);
+
+    let roundtripped = parsed.to_bytes();
+    assert_eq!(original_meta, roundtripped,
+        "multichannel tmap payload bytes must survive roundtrip");
+}

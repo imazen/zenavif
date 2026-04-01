@@ -18,7 +18,7 @@ arrayvec = "0.7.6"
 [dev-dependencies]
 avif-parse = "2.0"
 mp4parse = "0.17"
-zenavif-parse = "0.5.1"
+zenavif-parse = { version = "0.6.0"}
 
 [badges]
 maintenance = { status = "passively-maintained" }
@@ -26,3 +26,6 @@ maintenance = { status = "passively-maintained" }
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
 rustdoc-args = ["--generate-link-to-definition"]
+
+[patch.crates-io]
+zenavif-parse = { path = "../zenavif-parse" }
