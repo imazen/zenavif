@@ -697,20 +697,20 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         }
         // Apply metadata
         let policy = self.policy.as_ref();
-        if let Some(exif) = self.exif {
-            if policy.map_or(true, |p| p.resolve_exif(true)) {
-                config = config.exif(exif.to_vec());
-            }
+        if let Some(exif) = self.exif
+            && policy.is_none_or(|p| p.resolve_exif(true))
+        {
+            config = config.exif(exif.to_vec());
         }
-        if let Some(icc) = self.icc_profile {
-            if policy.map_or(true, |p| p.resolve_icc(true)) {
-                config = config.icc_profile(icc.to_vec());
-            }
+        if let Some(icc) = self.icc_profile
+            && policy.is_none_or(|p| p.resolve_icc(true))
+        {
+            config = config.icc_profile(icc.to_vec());
         }
-        if let Some(xmp) = self.xmp {
-            if policy.map_or(true, |p| p.resolve_xmp(true)) {
-                config = config.xmp(xmp.to_vec());
-            }
+        if let Some(xmp) = self.xmp
+            && policy.is_none_or(|p| p.resolve_xmp(true))
+        {
+            config = config.xmp(xmp.to_vec());
         }
 
         let (canvas_w, canvas_h) = match self.canvas_size {
@@ -2835,7 +2835,7 @@ mod tests {
         let exif = b"fake exif data";
         let output = enc
             .job()
-            .with_exif(exif)
+            .with_exif(&exif[..])
             .encoder()
             .unwrap()
             .encode(PixelSlice::from(img.as_ref()).erase())

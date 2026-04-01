@@ -2,7 +2,7 @@
 //!
 //! Test vectors are at tests/vectors/libavif/colors-animated-*.avif
 
-use almost_enough::Unstoppable;
+use almost_enough::{StopExt, Unstoppable};
 use std::fs;
 use zenavif::{AnimationDecoder, DecoderConfig, decode_animation, decode_animation_with};
 
@@ -262,7 +262,7 @@ fn animation_encode_decode_roundtrip_rgb8() {
         .collect();
 
     let config = EncoderConfig::new().quality(80.0).speed(10);
-    let encoded = encode_animation_rgb8(&frames, &config, stop()).unwrap();
+    let encoded = encode_animation_rgb8(&frames, &config, Unstoppable.into_token()).unwrap();
     eprintln!(
         "encoded {} frames, {} bytes",
         encoded.frame_count,
@@ -332,7 +332,7 @@ fn animation_encode_decode_roundtrip_rgba8() {
     ];
 
     let config = EncoderConfig::new().quality(80.0).speed(10);
-    let encoded = encode_animation_rgba8(&frames, &config, stop()).unwrap();
+    let encoded = encode_animation_rgba8(&frames, &config, Unstoppable.into_token()).unwrap();
     eprintln!(
         "encoded {} frames, {} bytes",
         encoded.frame_count,
@@ -533,7 +533,7 @@ fn animation_encode_decode_roundtrip_rgb16() {
         .collect();
 
     let config = EncoderConfig::new().quality(80.0).speed(10);
-    let encoded = encode_animation_rgb16(&frames, &config, stop()).unwrap();
+    let encoded = encode_animation_rgb16(&frames, &config, Unstoppable.into_token()).unwrap();
     eprintln!(
         "rgb16 encoded {} frames, {} bytes",
         encoded.frame_count,
@@ -605,7 +605,7 @@ fn animation_encode_decode_roundtrip_rgba16() {
     ];
 
     let config = EncoderConfig::new().quality(80.0).speed(10);
-    let encoded = encode_animation_rgba16(&frames, &config, stop()).unwrap();
+    let encoded = encode_animation_rgba16(&frames, &config, Unstoppable.into_token()).unwrap();
     eprintln!(
         "rgba16 encoded {} frames, {} bytes",
         encoded.frame_count,
