@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.3 (2026-04-01)
+
+### Added
+- Gain map byte-exact and backward_direction parity tests
+
+### Changed
+- Bumped dependency versions (archmage, magetypes, enough, whereat, linear-srgb)
+- Removed local patch override for zenavif-parse
+
+## 0.1.2
+
+### Changed
+- Dependency updates and patch bumps
+
 ## 0.1.1
 
 ### Added
