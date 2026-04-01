@@ -1326,7 +1326,7 @@ impl<'data> AvifParser<'data> {
         let parse_opts = ParseOptions { lenient: config.lenient };
         let mut cursor = std::io::Cursor::new(data);
         let mut f = OffsetReader::new(&mut cursor);
-        let mut iter = BoxIter::new(&mut f);
+        let mut iter = BoxIter::with_max_remaining(&mut f, data.len() as u64);
 
         // 'ftyp' box must occur first; see ISO 14496-12:2015 § 4.3.1
         let (major_brand, compatible_brands) = if let Some(mut b) = iter.next_box()? {
@@ -2726,20 +2726,41 @@ fn box_read_to_end_large_claim() {
 
 struct BoxIter<'a, T> {
     src: &'a mut T,
+    /// Upper bound on bytes remaining in the source.
+    ///
+    /// Used to clamp claimed box sizes so that a malformed header
+    /// (e.g. claiming 4 GB when only 26 bytes remain) does not cause
+    /// multi-gigabyte allocations based on [`BMFFBox::bytes_left`].
+    max_remaining: u64,
 }
 
 impl<T: Read> BoxIter<'_, T> {
+    /// Create a BoxIter without a known data bound (used by streaming readers).
+    #[cfg(feature = "eager")]
     fn new(src: &mut T) -> BoxIter<'_, T> {
-        BoxIter { src }
+        BoxIter { src, max_remaining: u64::MAX }
+    }
+
+    fn with_max_remaining(src: &mut T, max_remaining: u64) -> BoxIter<'_, T> {
+        BoxIter { src, max_remaining }
     }
 
     fn next_box(&mut self) -> Result<Option<BMFFBox<'_, T>>> {
         let r = read_box_header(self.src);
         match r {
-            Ok(h) => Ok(Some(BMFFBox {
-                head: h,
-                content: self.src.take(h.size - h.offset),
-            })),
+            Ok(h) => {
+                let claimed = h.size - h.offset;
+                // Clamp the Take limit so that allocations based on
+                // bytes_left() cannot exceed the actual data available.
+                let clamped = claimed.min(self.max_remaining);
+                // Decrease our remaining budget by the clamped content
+                // size plus the header bytes already consumed.
+                self.max_remaining = self.max_remaining.saturating_sub(clamped.saturating_add(h.offset));
+                Ok(Some(BMFFBox {
+                    head: h,
+                    content: self.src.take(clamped),
+                }))
+            }
             Err(Error::UnexpectedEOF) => Ok(None),
             Err(e) => Err(e),
         }
@@ -2768,7 +2789,7 @@ impl<T: Read> BMFFBox<'_, T> {
     }
 
     fn box_iter(&mut self) -> BoxIter<'_, Self> {
-        BoxIter::new(self)
+        BoxIter::with_max_remaining(self, self.bytes_left())
     }
 }
 
@@ -4583,6 +4604,13 @@ fn read_stsz<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<u32>> {
     let _flags = [src.read_u8()?, src.read_u8()?, src.read_u8()?];
     let sample_size = be_u32(src)?;
     let sample_count = be_u32(src)?;
+
+    // Cap sample_count to avoid multi-GB allocations from malformed data.
+    // 64M entries * 4 bytes = 256 MB, a generous upper bound for real AVIF files.
+    const MAX_SAMPLE_COUNT: u32 = 64 * 1024 * 1024;
+    if sample_count > MAX_SAMPLE_COUNT {
+        return Err(Error::InvalidData("stsz sample_count exceeds maximum"));
+    }
 
     let mut sizes = TryVec::new();
     if sample_size == 0 {
