@@ -108,3 +108,31 @@ test-pixels:
 
 # Full pixel verification: generate references and test
 verify-pixels: generate-references test-pixels
+
+# --- link-u/avif-sample-images corpus (reproduces rav1d-safe#1) ---
+
+# Download link-u/avif-sample-images test corpus
+download-linku:
+    bash scripts/download-linku-samples.sh
+
+# Generate libavif reference PNGs for link-u corpus via Docker
+generate-linku-references: download-linku docker-build
+    mkdir -p tests/linku-references
+    docker run --rm \
+        -v {{justfile_directory()}}/tests/vectors/link-u:/vectors:ro \
+        -v {{justfile_directory()}}/tests/linku-references:/references \
+        -e VECTORS_DIR=/vectors \
+        -e REFERENCES_DIR=/references \
+        --entrypoint /usr/local/bin/generate-linku-references.sh \
+        zenavif-references
+
+# Decode all link-u samples (no reference comparison, catches panics)
+test-linku-decode: download-linku
+    cargo test --test linku_corpus -- --ignored --nocapture linku_decode_all
+
+# Compare link-u decode output against libavif references
+test-linku: download-linku
+    cargo test --test linku_corpus -- --ignored --nocapture linku_pixel_parity
+
+# Full link-u pipeline: download, generate references, compare
+verify-linku: generate-linku-references test-linku

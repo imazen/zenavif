@@ -8,6 +8,7 @@ tests/vectors/
 # But keep the download script
 !scripts/download-avif-test-vectors.sh
 tests/zenavif-references/
+tests/linku-references/
 
 # === Standard exclusions (do not depend on user ~/.gitignore) ===
 

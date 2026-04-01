@@ -1,0 +1,93 @@
+name: link-u corpus
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Allow manual trigger for debugging
+  workflow_dispatch:
+
+concurrency:
+  group: linku-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CI: true
+
+jobs:
+  # Decode-only test: catches panics (rav1d-safe#1) without needing libavif.
+  # Runs on ARM64 to reproduce the reported issue.
+  decode:
+    name: Decode (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest, windows-11-arm]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Download link-u samples
+        shell: bash
+        run: bash scripts/download-linku-samples.sh
+
+      - name: Decode all link-u samples
+        run: cargo test --test linku_corpus -- --ignored --nocapture linku_decode_all
+
+  # Pixel parity test: compares zenavif output against libavif avifdec.
+  # Only on Ubuntu where we can easily install libavif.
+  pixel-parity:
+    name: Pixel parity (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install libavif tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libavif-bin
+
+      - name: Show avifdec version
+        run: avifdec --version || true
+
+      - name: Download link-u samples
+        run: bash scripts/download-linku-samples.sh
+
+      - name: Generate libavif reference PNGs
+        run: |
+          mkdir -p tests/linku-references
+          VECTORS_DIR=tests/vectors/link-u REFERENCES_DIR=tests/linku-references \
+            bash scripts/generate-linku-references.sh
+
+      - name: Compare zenavif vs libavif
+        run: cargo test --test linku_corpus -- --ignored --nocapture linku_pixel_parity
+
+  # 32-bit decode test: catches pointer-width bugs
+  decode-i686:
+    name: Decode (i686 cross)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: i686-unknown-linux-gnu
+      - uses: taiki-e/install-action@cross
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cross-i686-linku
+
+      - name: Download link-u samples
+        run: bash scripts/download-linku-samples.sh
+
+      - name: Decode all link-u samples (i686)
+        run: cross test --target i686-unknown-linux-gnu --test linku_corpus -- --ignored --nocapture linku_decode_all

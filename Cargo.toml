@@ -46,6 +46,8 @@ png = "0.18.0"
 image = "0.25.10"
 zenbench = { version = "0.1.2", features = ["criterion-compat"] }
 fast-ssim2 = "0.7.1"
+zensim = { version = "0.2.4", features = ["imgref", "zenpixels"] }
+zensim-regress = "0.3.0"
 
 [[bench]]
 name = "decode_benchmark"

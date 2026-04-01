@@ -36,8 +36,9 @@ RUN avifdec --version
 WORKDIR /references
 VOLUME ["/vectors", "/references"]
 
-# Script to generate all references
+# Copy both reference generation scripts
 COPY scripts/generate-references.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/generate-references.sh
+COPY scripts/generate-linku-references.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/generate-references.sh /usr/local/bin/generate-linku-references.sh
 
 ENTRYPOINT ["/usr/local/bin/generate-references.sh"]
