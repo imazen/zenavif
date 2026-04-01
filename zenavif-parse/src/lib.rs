@@ -473,6 +473,10 @@ pub struct GainMapMetadata {
     /// If true, the gain map is encoded in the base image's colour space.
     /// If false, it's in the alternate image's colour space.
     pub use_base_colour_space: bool,
+    /// ISO 21496-1 backward direction flag (bit 2 of flags byte).
+    /// When true, the base image is HDR and the alternate is SDR.
+    /// Default false = base is SDR, alternate is HDR.
+    pub backward_direction: bool,
     /// Base HDR headroom (numerator).
     pub base_hdr_headroom_n: u32,
     /// Base HDR headroom (denominator).
@@ -484,6 +488,87 @@ pub struct GainMapMetadata {
     /// Per-channel parameters. For single-channel mode, only index 0 is
     /// meaningful (indices 1 and 2 are copies of index 0).
     pub channels: [GainMapChannel; 3],
+}
+
+// ─── zencodec conversions ────────────────────────────────────────────
+
+#[cfg(feature = "zencodec")]
+impl From<&GainMapChannel> for zencodec::GainMapChannel {
+    fn from(ch: &GainMapChannel) -> Self {
+        Self {
+            min: ch.gain_map_min_n as f64 / ch.gain_map_min_d.max(1) as f64,
+            max: ch.gain_map_max_n as f64 / ch.gain_map_max_d.max(1) as f64,
+            gamma: ch.gamma_n as f64 / ch.gamma_d.max(1) as f64,
+            base_offset: ch.base_offset_n as f64 / ch.base_offset_d.max(1) as f64,
+            alternate_offset: ch.alternate_offset_n as f64 / ch.alternate_offset_d.max(1) as f64,
+        }
+    }
+}
+
+#[cfg(feature = "zencodec")]
+impl From<&GainMapMetadata> for zencodec::GainMapParams {
+    fn from(md: &GainMapMetadata) -> Self {
+        let mut p = Self::default();
+        p.channels = [
+            zencodec::GainMapChannel::from(&md.channels[0]),
+            zencodec::GainMapChannel::from(&md.channels[1]),
+            zencodec::GainMapChannel::from(&md.channels[2]),
+        ];
+        p.base_hdr_headroom =
+            md.base_hdr_headroom_n as f64 / md.base_hdr_headroom_d.max(1) as f64;
+        p.alternate_hdr_headroom =
+            md.alternate_hdr_headroom_n as f64 / md.alternate_hdr_headroom_d.max(1) as f64;
+        p.use_base_color_space = md.use_base_colour_space;
+        p.backward_direction = md.backward_direction;
+        p
+    }
+}
+
+#[cfg(feature = "zencodec")]
+impl From<&zencodec::GainMapChannel> for GainMapChannel {
+    fn from(ch: &zencodec::GainMapChannel) -> Self {
+        use zencodec::gainmap::{Fraction, UFraction};
+        let min = Fraction::from_f64_cf(ch.min);
+        let max = Fraction::from_f64_cf(ch.max);
+        let gamma = UFraction::from_f64_cf(ch.gamma);
+        let base_off = Fraction::from_f64_cf(ch.base_offset);
+        let alt_off = Fraction::from_f64_cf(ch.alternate_offset);
+        Self {
+            gain_map_min_n: min.numerator,
+            gain_map_min_d: min.denominator,
+            gain_map_max_n: max.numerator,
+            gain_map_max_d: max.denominator,
+            gamma_n: gamma.numerator,
+            gamma_d: gamma.denominator,
+            base_offset_n: base_off.numerator,
+            base_offset_d: base_off.denominator,
+            alternate_offset_n: alt_off.numerator,
+            alternate_offset_d: alt_off.denominator,
+        }
+    }
+}
+
+#[cfg(feature = "zencodec")]
+impl From<&zencodec::GainMapParams> for GainMapMetadata {
+    fn from(p: &zencodec::GainMapParams) -> Self {
+        use zencodec::gainmap::UFraction;
+        let headroom_base = UFraction::from_f64_cf(p.base_hdr_headroom);
+        let headroom_alt = UFraction::from_f64_cf(p.alternate_hdr_headroom);
+        Self {
+            is_multichannel: !p.is_single_channel(),
+            use_base_colour_space: p.use_base_color_space,
+            backward_direction: p.backward_direction,
+            base_hdr_headroom_n: headroom_base.numerator,
+            base_hdr_headroom_d: headroom_base.denominator,
+            alternate_hdr_headroom_n: headroom_alt.numerator,
+            alternate_hdr_headroom_d: headroom_alt.denominator,
+            channels: [
+                GainMapChannel::from(&p.channels[0]),
+                GainMapChannel::from(&p.channels[1]),
+                GainMapChannel::from(&p.channels[2]),
+            ],
+        }
+    }
 }
 
 /// Gain map information extracted from an AVIF container.
@@ -3644,10 +3729,12 @@ fn parse_tone_map_image(data: &[u8]) -> Result<GainMapMetadata> {
         return Err(Error::InvalidData("tmap writer_version < minimum_version"));
     }
 
-    // Flags byte: is_multichannel (bit 7), use_base_colour_space (bit 6), reserved (bits 0-5)
+    // Flags byte: is_multichannel (bit 7), use_base_colour_space (bit 6),
+    // reserved (bit 5,4), common_denominator (bit 3), backward_direction (bit 2), reserved (bits 0-1)
     let flags = cursor.read_u8()?;
     let is_multichannel = (flags & 0x80) != 0;
     let use_base_colour_space = (flags & 0x40) != 0;
+    let backward_direction = (flags & 0x04) != 0;
 
     // base_hdr_headroom and alternate_hdr_headroom
     let base_hdr_headroom_n = be_u32(&mut cursor)?;
@@ -3686,6 +3773,7 @@ fn parse_tone_map_image(data: &[u8]) -> Result<GainMapMetadata> {
     Ok(GainMapMetadata {
         is_multichannel,
         use_base_colour_space,
+        backward_direction,
         base_hdr_headroom_n,
         base_hdr_headroom_d,
         alternate_hdr_headroom_n,
