@@ -36,7 +36,7 @@ zencodec = { version = "0.1.12", optional = true }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 zenpixels = { version = "0.2.2", default-features = false, features = ["imgref", "rgb"] }
 zenpixels-convert = { version = "0.2.2", default-features = false, features = ["rgb"] }
-linear-srgb = { version = "0.6"}
+linear-srgb = { version = "0.6.7"}
 
 [dev-dependencies]
 almost-enough = { version = "0.4.3", features = ["alloc"] }
