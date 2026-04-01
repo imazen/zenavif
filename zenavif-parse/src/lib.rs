@@ -4044,6 +4044,13 @@ fn read_ipma<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<Association>> {
     let mut associations = TryVec::new();
 
     let entry_count = be_u32(src)?;
+    // Each entry has at minimum: item_id (2 or 4 bytes) + association_count (1 byte)
+    let min_bytes_per_entry: u64 = if version == 0 { 3 } else { 5 };
+    if (entry_count as u64) * min_bytes_per_entry > src.bytes_left() {
+        return Err(Error::InvalidData(
+            "ipma entry_count exceeds remaining box bytes",
+        ));
+    }
     for _ in 0..entry_count {
         let item_id = if version == 0 {
             be_u16(src)?.into()
@@ -4513,6 +4520,12 @@ fn read_stts<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<TimeToSampleEnt
     let _version = src.read_u8()?;
     let _flags = [src.read_u8()?, src.read_u8()?, src.read_u8()?];
     let entry_count = be_u32(src)?;
+    // Each entry: sample_count (4) + sample_delta (4) = 8 bytes
+    if (entry_count as u64) * 8 > src.bytes_left() {
+        return Err(Error::InvalidData(
+            "stts entry_count exceeds remaining box bytes",
+        ));
+    }
 
     let mut entries = TryVec::new();
     for _ in 0..entry_count {
@@ -4531,6 +4544,12 @@ fn read_stsc<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<SampleToChunkEn
     let _version = src.read_u8()?;
     let _flags = [src.read_u8()?, src.read_u8()?, src.read_u8()?];
     let entry_count = be_u32(src)?;
+    // Each entry: first_chunk (4) + samples_per_chunk (4) + sample_desc_index (4) = 12 bytes
+    if (entry_count as u64) * 12 > src.bytes_left() {
+        return Err(Error::InvalidData(
+            "stsc entry_count exceeds remaining box bytes",
+        ));
+    }
 
     let mut entries = TryVec::new();
     for _ in 0..entry_count {
@@ -4554,6 +4573,12 @@ fn read_stsz<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<u32>> {
 
     let mut sizes = TryVec::new();
     if sample_size == 0 {
+        // Variable sizes: each entry is 4 bytes
+        if (sample_count as u64) * 4 > src.bytes_left() {
+            return Err(Error::InvalidData(
+                "stsz sample_count exceeds remaining box bytes",
+            ));
+        }
         // Variable sizes - read each one
         for _ in 0..sample_count {
             sizes.push(be_u32(src)?)?;
@@ -4574,6 +4599,12 @@ fn read_chunk_offsets<T: Read>(src: &mut BMFFBox<'_, T>, is_64bit: bool) -> Resu
     let _version = src.read_u8()?;
     let _flags = [src.read_u8()?, src.read_u8()?, src.read_u8()?];
     let entry_count = be_u32(src)?;
+    let bytes_per_entry: u64 = if is_64bit { 8 } else { 4 };
+    if (entry_count as u64) * bytes_per_entry > src.bytes_left() {
+        return Err(Error::InvalidData(
+            "chunk offset entry_count exceeds remaining box bytes",
+        ));
+    }
 
     let mut offsets = TryVec::new();
     for _ in 0..entry_count {
