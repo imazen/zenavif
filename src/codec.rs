@@ -2327,24 +2327,7 @@ fn convert_gain_map_info(gm: &crate::image::AvifGainMap) -> Option<zencodec::Gai
         gm_channels_from_av1.min(1)
     };
 
-    let convert_channel = |ch: &zenavif_parse::GainMapChannel| zencodec::GainMapChannel {
-        min: ch.gain_map_min_n as f64 / ch.gain_map_min_d as f64,
-        max: ch.gain_map_max_n as f64 / ch.gain_map_max_d as f64,
-        gamma: ch.gamma_n as f64 / ch.gamma_d as f64,
-        base_offset: ch.base_offset_n as f64 / ch.base_offset_d as f64,
-        alternate_offset: ch.alternate_offset_n as f64 / ch.alternate_offset_d as f64,
-    };
-
-    let mut params = zencodec::GainMapParams::default();
-    params.channels = [
-        convert_channel(&md.channels[0]),
-        convert_channel(&md.channels[1]),
-        convert_channel(&md.channels[2]),
-    ];
-    params.base_hdr_headroom = md.base_hdr_headroom_n as f64 / md.base_hdr_headroom_d as f64;
-    params.alternate_hdr_headroom =
-        md.alternate_hdr_headroom_n as f64 / md.alternate_hdr_headroom_d as f64;
-    params.use_base_color_space = md.use_base_colour_space;
+    let params = zencodec::GainMapParams::from(md);
 
     let mut gm_info = zencodec::GainMapInfo::new(params, width, height, channels);
 
