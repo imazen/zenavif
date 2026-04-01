@@ -3575,6 +3575,12 @@ fn read_grpl<T: Read + Offset>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<Entity
 
         let group_id = be_u32(&mut b)?;
         let num_entities = be_u32(&mut b)?;
+        // Each entity_id is 4 bytes
+        if (num_entities as u64) * 4 > b.bytes_left() {
+            return Err(Error::InvalidData(
+                "grpl num_entities exceeds remaining box bytes",
+            ));
+        }
 
         let mut entity_ids = TryVec::new();
         for _ in 0..num_entities {
@@ -3865,6 +3871,13 @@ fn read_iref<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
             be_u32(&mut b)?
         };
         let reference_count = be_u16(&mut b)?;
+        // Each to_item_id is 2 bytes (version 0) or 4 bytes (version 1)
+        let bytes_per_ref: u64 = if version == 0 { 2 } else { 4 };
+        if (reference_count as u64) * bytes_per_ref > b.bytes_left() {
+            return Err(Error::InvalidData(
+                "iref reference_count exceeds remaining box bytes",
+            ));
+        }
         for reference_index in 0..reference_count {
             let to_item_id = if version == 0 {
                 be_u16(&mut b)?.into()
