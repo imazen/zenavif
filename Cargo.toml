@@ -1,6 +1,6 @@
 [package]
 name = "zenavif"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.93"
 license = "AGPL-3.0-only OR LicenseRef-Imazen-Commercial"
@@ -19,7 +19,7 @@ rav1d-safe = { version = "0.5.3", default-features = false, features = ["bitdept
 archmage = { version = "0.9.15", features = ["macros"] }
 magetypes = { version = "0.9.15"}
 safe_unaligned_simd = "0.2.5"
-zenavif-parse = { version = "0.5.1"}
+zenavif-parse = "0.5.2"
 yuv = "0.8.12"
 imgref = "1.12.0"
 rgb = { version = "0.8.52", default-features = false, features = ["bytemuck"] }
