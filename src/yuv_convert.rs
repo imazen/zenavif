@@ -16,6 +16,7 @@ use archmage::prelude::*;
 use imgref::ImgVec;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::f32x8;
+use magetypes::simd::generic::f32x8 as GenericF32x8;
 use rgb::{RGB8, Rgba};
 
 #[cfg(target_arch = "wasm32")]
@@ -82,28 +83,149 @@ pub fn yuv420_to_rgb8(
     range: YuvRange,
     matrix: YuvMatrix,
 ) -> ImgVec<RGB8> {
-    #[cfg(target_arch = "x86_64")]
-    if let Some(token) = Desktop64::summon() {
-        return yuv420_to_rgb8_simd(
-            token, y_plane, y_stride, u_plane, u_stride, v_plane, v_stride, width, height, range,
-            matrix,
-        );
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    if let Some(token) = Wasm128Token::summon() {
-        return yuv420_to_rgb8_wasm128(
-            token, y_plane, y_stride, u_plane, u_stride, v_plane, v_stride, width, height, range,
-            matrix,
-        );
-    }
-
-    yuv420_to_rgb8_scalar(
-        y_plane, y_stride, u_plane, u_stride, v_plane, v_stride, width, height, range, matrix,
+    incant!(
+        yuv420_to_rgb8_inner(
+            y_plane, y_stride, u_plane, u_stride, v_plane, v_stride, width, height, range, matrix
+        ),
+        [v3, neon, wasm128, scalar]
     )
 }
 
-/// SIMD implementation of YUV420 to RGB8 conversion (AVX2/FMA)
+/// Generic SIMD YUV420->RGB8 with bilinear chroma upsampling.
+///
+/// Uses `GenericF32x8` (native 256-bit on x86, 2x128 on NEON/WASM, scalar fallback).
+/// Bilinear chroma gather is scalar (random access); matrix multiply + clamp are SIMD.
+#[magetypes(v3, neon, wasm128, scalar)]
+fn yuv420_to_rgb8_inner(
+    token: Token,
+    y_plane: &[u8],
+    y_stride: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+    width: usize,
+    height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+) -> ImgVec<RGB8> {
+    #[allow(non_camel_case_types)]
+    type f32x8 = GenericF32x8<Token>;
+    const LANES: usize = 8;
+
+    let mut out = vec![RGB8::default(); width * height];
+    let (kr, kb) = matrix_coefficients(matrix);
+    let kg = 1.0 - kr - kb;
+    let chroma_width = width.div_ceil(2);
+    let chroma_height = height.div_ceil(2);
+
+    let vr = 2.0 * (1.0 - kr);
+    let ug = -2.0 * kb * (1.0 - kb) / kg;
+    let vg = -2.0 * kr * (1.0 - kr) / kg;
+    let ub = 2.0 * (1.0 - kb);
+    let vr_vec = f32x8::splat(token, vr);
+    let ug_vec = f32x8::splat(token, ug);
+    let vg_vec = f32x8::splat(token, vg);
+    let ub_vec = f32x8::splat(token, ub);
+    let scale_255 = f32x8::splat(token, 255.0);
+    let zero = f32x8::zero(token);
+    let max_val = f32x8::splat(token, 255.0);
+
+    let (y_offset, y_scale, uv_center, uv_scale) = match range {
+        YuvRange::Full => (0.0f32, 1.0 / 255.0, 128.0, 1.0 / 255.0),
+        YuvRange::Limited => (16.0, 1.0 / 219.0, 128.0, 1.0 / 224.0),
+    };
+    let y_off = f32x8::splat(token, y_offset);
+    let y_sc = f32x8::splat(token, y_scale);
+    let uv_cen = f32x8::splat(token, uv_center);
+    let uv_sc = f32x8::splat(token, uv_scale);
+
+    for y_pos in 0..height {
+        let row_start = y_pos * width;
+        let chroma_y_raw = (y_pos as f32 + 0.5) * 0.5 - 0.5;
+        let chroma_y = chroma_y_raw.max(0.0).min(chroma_height as f32 - 1.0);
+        let cy0 = chroma_y.floor() as usize;
+        let cy1 = (cy0 + 1).min(chroma_height - 1);
+        let fy = chroma_y - cy0 as f32;
+
+        let mut x_pos = 0;
+        while x_pos + LANES <= width {
+            let y_idx = y_pos * y_stride + x_pos;
+            let mut y_vals = [0f32; 8];
+            for i in 0..LANES {
+                y_vals[i] = y_plane[y_idx + i] as f32;
+            }
+
+            let mut u_vals = [0f32; 8];
+            let mut v_vals = [0f32; 8];
+            for i in 0..LANES {
+                let x = x_pos + i;
+                let cx_raw = (x as f32 + 0.5) * 0.5 - 0.5;
+                let cx = cx_raw.max(0.0).min(chroma_width as f32 - 1.0);
+                let cx0 = cx.floor() as usize;
+                let cx1 = (cx0 + 1).min(chroma_width - 1);
+                let fx = cx - cx0 as f32;
+                let (fx1, fy1) = (1.0 - fx, 1.0 - fy);
+                u_vals[i] = u_plane[cy0 * u_stride + cx0] as f32 * fx1 * fy1
+                    + u_plane[cy0 * u_stride + cx1] as f32 * fx * fy1
+                    + u_plane[cy1 * u_stride + cx0] as f32 * fx1 * fy
+                    + u_plane[cy1 * u_stride + cx1] as f32 * fx * fy;
+                v_vals[i] = v_plane[cy0 * v_stride + cx0] as f32 * fx1 * fy1
+                    + v_plane[cy0 * v_stride + cx1] as f32 * fx * fy1
+                    + v_plane[cy1 * v_stride + cx0] as f32 * fx1 * fy
+                    + v_plane[cy1 * v_stride + cx1] as f32 * fx * fy;
+            }
+
+            let y_vec = f32x8::from_array(token, y_vals);
+            let u_vec = f32x8::from_array(token, u_vals);
+            let v_vec = f32x8::from_array(token, v_vals);
+            let y_norm = (y_vec - y_off) * y_sc;
+            let u_norm = (u_vec - uv_cen) * uv_sc;
+            let v_norm = (v_vec - uv_cen) * uv_sc;
+
+            let r = v_norm.mul_add(vr_vec, y_norm);
+            let g = v_norm.mul_add(vg_vec, u_norm.mul_add(ug_vec, y_norm));
+            let b = u_norm.mul_add(ub_vec, y_norm);
+            let r_out = (r * scale_255).max(zero).min(max_val).round();
+            let g_out = (g * scale_255).max(zero).min(max_val).round();
+            let b_out = (b * scale_255).max(zero).min(max_val).round();
+
+            let (ra, ga, ba) = (r_out.to_array(), g_out.to_array(), b_out.to_array());
+            for i in 0..LANES {
+                out[row_start + x_pos + i] = RGB8 {
+                    r: ra[i] as u8,
+                    g: ga[i] as u8,
+                    b: ba[i] as u8,
+                };
+            }
+            x_pos += LANES;
+        }
+
+        while x_pos < width {
+            let y_val = y_plane[y_pos * y_stride + x_pos] as f32;
+            let cx_raw = (x_pos as f32 + 0.5) * 0.5 - 0.5;
+            let cx = cx_raw.max(0.0).min(chroma_width as f32 - 1.0);
+            let cx0 = cx.floor() as usize;
+            let cx1 = (cx0 + 1).min(chroma_width - 1);
+            let fx = cx - cx0 as f32;
+            let (fx1, fy1) = (1.0 - fx, 1.0 - fy);
+            let u_val = u_plane[cy0 * u_stride + cx0] as f32 * fx1 * fy1
+                + u_plane[cy0 * u_stride + cx1] as f32 * fx * fy1
+                + u_plane[cy1 * u_stride + cx0] as f32 * fx1 * fy
+                + u_plane[cy1 * u_stride + cx1] as f32 * fx * fy;
+            let v_val = v_plane[cy0 * v_stride + cx0] as f32 * fx1 * fy1
+                + v_plane[cy0 * v_stride + cx1] as f32 * fx * fy1
+                + v_plane[cy1 * v_stride + cx0] as f32 * fx1 * fy
+                + v_plane[cy1 * v_stride + cx1] as f32 * fx * fy;
+            let (r, g, b) = yuv_to_rgb(y_val, u_val, v_val, kr, kg, kb, range);
+            out[row_start + x_pos] = RGB8 { r, g, b };
+            x_pos += 1;
+        }
+    }
+    ImgVec::new(out, width, height)
+}
+
+/// SIMD implementation of YUV420 to RGB8 conversion (AVX2/FMA, used by strip path)
 #[cfg(target_arch = "x86_64")]
 #[arcane]
 fn yuv420_to_rgb8_simd(
@@ -718,6 +840,7 @@ fn yuv420_to_rgb8_scalar(
 }
 
 /// Convert YUV422 to RGB8
+#[archmage::autoversion]
 pub fn yuv422_to_rgb8(
     y_plane: &[u8],
     y_stride: usize,
@@ -754,6 +877,7 @@ pub fn yuv422_to_rgb8(
 }
 
 /// Convert YUV444 to RGB8
+#[archmage::autoversion]
 pub fn yuv444_to_rgb8(
     y_plane: &[u8],
     y_stride: usize,
