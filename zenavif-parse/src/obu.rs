@@ -475,8 +475,8 @@ fn parse_frame_header_quantization(data: &[u8], seq: &SequenceHeaderObu) -> Resu
             // render_size
             let render_and_frame_size_different = b.read_bool()?;
             if render_and_frame_size_different {
-                let _render_width = 1 + b.read_u16(16)?;
-                let _render_height = 1 + b.read_u16(16)?;
+                let _render_width = 1u32 + b.read_u16(16)? as u32;
+                let _render_height = 1u32 + b.read_u16(16)? as u32;
             }
             // allow_intrabc
             if allow_screen_content_tools {
@@ -498,8 +498,8 @@ fn parse_frame_header_quantization(data: &[u8], seq: &SequenceHeaderObu) -> Resu
             }
             let render_and_frame_size_different = b.read_bool()?;
             if render_and_frame_size_different {
-                let _render_width = 1 + b.read_u16(16)?;
-                let _render_height = 1 + b.read_u16(16)?;
+                let _render_width = 1u32 + b.read_u16(16)? as u32;
+                let _render_height = 1u32 + b.read_u16(16)? as u32;
             }
             if allow_screen_content_tools {
                 let _allow_intrabc = b.read_bool()?;
