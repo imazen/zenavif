@@ -1,0 +1,43 @@
+# AVIF ISOBMFF box types
+"ftyp"
+"meta"
+"hdlr"
+"pitm"
+"iloc"
+"iinf"
+"infe"
+"iprp"
+"ipco"
+"ipma"
+"iref"
+"idat"
+"mdat"
+"grpl"
+"dinf"
+"ispe"
+"pixi"
+"colr"
+"auxC"
+"hvcC"
+
+# AVIF-specific identifiers
+"avif"
+"av01"
+"av1C"
+"mif1"
+"miaf"
+"avis"
+
+# AV1 OBU prefixes
+"\x0A\x07"
+"\x0A\x0B"
+"\x12"
+"\x32"
+
+# HEIF item types
+"dimg"
+"thmb"
+"auxl"
+"iden"
+"iovl"
+"grid"
