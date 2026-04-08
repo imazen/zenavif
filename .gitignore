@@ -55,3 +55,4 @@ Thumbs.db
 .idea/
 .vscode/
 *.iml
+!fuzz/Cargo.lock
