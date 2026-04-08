@@ -30,7 +30,7 @@ log = "0.4.20"
 fallible_collections = { version = "0.5.1", default-features = false, features = ["std"] }
 arrayvec = "0.7.6"
 enough = { version = "0.4.3", features = ["std"] }
-zencodec = { version = "0.1.12", optional = true, default-features = false }
+zencodec = { version = "0.1.13", optional = true, default-features = false }
 
 [dev-dependencies]
 env_logger = "0.11.10"
