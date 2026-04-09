@@ -148,7 +148,6 @@ impl ManagedAvifDecoder {
 
         let mut settings = Settings::default();
         settings.threads = config.threads;
-        settings.max_frame_delay = 1; // disable frame threading (DisjointMut race in rav1d CDEF)
         settings.apply_grain = config.apply_grain;
         settings.frame_size_limit = config.frame_size_limit;
 
@@ -596,7 +595,6 @@ impl ManagedAvifDecoder {
         let mut alpha_decoder = if anim_info.has_alpha {
             let mut settings = Settings::default();
             settings.threads = 0;
-            settings.max_frame_delay = 1; // disable frame threading (DisjointMut race in rav1d CDEF)
             Some(Rav1dDecoder::with_settings(settings).map_err(|_e| {
                 at!(Error::Decode {
                     code: -1,
@@ -1795,7 +1793,6 @@ impl AnimationDecoder {
         let alpha_decoder = if anim_info.has_alpha {
             let mut settings = Settings::default();
             settings.threads = config.threads;
-            settings.max_frame_delay = 1; // disable frame threading (DisjointMut race in rav1d CDEF)
             Some(Rav1dDecoder::with_settings(settings).map_err(|_e| {
                 at!(Error::Decode {
                     code: -1,

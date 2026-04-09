@@ -62,7 +62,6 @@ pub fn decode_av1_obu(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u8)> {
 
     let mut settings = Settings::default();
     settings.threads = 1;
-    settings.max_frame_delay = 1; // disable frame threading (DisjointMut race in rav1d CDEF)
 
     let mut decoder = Rav1dDecoder::with_settings(settings).map_err(|_e| {
         at!(Error::Decode {
