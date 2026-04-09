@@ -1,0 +1,420 @@
+# ISOBMFF/HEIF/AVIF fuzzing dictionary for zenavif-parse
+# Generated from parser source code and ISOBMFF/HEIF/AVIF specifications
+#
+# Box types, brands, handler types, item types, reference types,
+# color types, AV1 codec config bytes, OBU markers, auxiliary URNs,
+# and structural patterns used by the parser.
+
+# ============================================================
+# File-level box types (4-byte FourCC, big-endian)
+# ============================================================
+box_ftyp="ftyp"
+box_mdat="mdat"
+box_moov="moov"
+box_meta="meta"
+box_free="free"
+box_skip="skip"
+box_wide="wide"
+box_moof="moof"
+box_uuid="uuid"
+
+# ============================================================
+# Meta sub-boxes
+# ============================================================
+box_hdlr="hdlr"
+box_pitm="pitm"
+box_iloc="iloc"
+box_iinf="iinf"
+box_infe="infe"
+box_iref="iref"
+box_iprp="iprp"
+box_ipco="ipco"
+box_ipma="ipma"
+box_idat="idat"
+box_grpl="grpl"
+
+# ============================================================
+# Movie/sequence sub-boxes
+# ============================================================
+box_mvhd="mvhd"
+box_trak="trak"
+box_tkhd="tkhd"
+box_edts="edts"
+box_elst="elst"
+box_mdia="mdia"
+box_mdhd="mdhd"
+box_minf="minf"
+box_tref="tref"
+box_vmhd="vmhd"
+box_dinf="dinf"
+box_dref="dref"
+box_stbl="stbl"
+box_stsd="stsd"
+box_stts="stts"
+box_stsc="stsc"
+box_stsz="stsz"
+box_stco="stco"
+box_co64="co64"
+box_stss="stss"
+box_ctts="ctts"
+box_mvex="mvex"
+box_mehd="mehd"
+
+# ============================================================
+# Property boxes (inside ipco)
+# ============================================================
+prop_ispe="ispe"
+prop_pixi="pixi"
+prop_colr="colr"
+prop_auxC="auxC"
+prop_irot="irot"
+prop_imir="imir"
+prop_clap="clap"
+prop_pasp="pasp"
+prop_clli="clli"
+prop_mdcv="mdcv"
+prop_cclv="cclv"
+prop_amve="amve"
+prop_av1C="av1C"
+prop_a1op="a1op"
+prop_lsel="lsel"
+prop_a1lx="a1lx"
+prop_grid="grid"
+
+# ============================================================
+# Sample entry / codec boxes
+# ============================================================
+box_av01="av01"
+box_avc1="avc1"
+box_avc3="avc3"
+box_avcC="avcC"
+box_mp4a="mp4a"
+box_mp4v="mp4v"
+box_esds="esds"
+box_vp08="vp08"
+box_vp09="vp09"
+box_vpcC="vpcC"
+box_fLaC="fLaC"
+box_dfLa="dfLa"
+box_Opus="Opus"
+box_dOps="dOps"
+box_lpcm="lpcm"
+box_alac="alac"
+box_encv="encv"
+box_enca="enca"
+box_mp3=".mp3"
+
+# ============================================================
+# Protection / DRM boxes
+# ============================================================
+box_sinf="sinf"
+box_frma="frma"
+box_schm="schm"
+box_schi="schi"
+box_tenc="tenc"
+box_pssh="pssh"
+
+# ============================================================
+# Metadata boxes
+# ============================================================
+box_mhdr="mhdr"
+box_keys="keys"
+box_ilst="ilst"
+box_data="data"
+box_name="name"
+box_udta="udta"
+box_wave="wave"
+
+# ============================================================
+# Metadata tag entries (iTunes-style)
+# ============================================================
+tag_cprt="cprt"
+tag_gnre="gnre"
+tag_trkn="trkn"
+tag_disk="disk"
+tag_tmpo="tmpo"
+tag_cpil="cpil"
+tag_covr="covr"
+tag_rtng="rtng"
+tag_rate="rate"
+tag_stik="stik"
+tag_pcst="pcst"
+tag_catg="catg"
+tag_keyw="keyw"
+tag_purl="purl"
+tag_egid="egid"
+tag_desc="desc"
+tag_ldes="ldes"
+tag_tvnn="tvnn"
+tag_tvsh="tvsh"
+tag_tven="tven"
+tag_tvsn="tvsn"
+tag_tves="tves"
+tag_purd="purd"
+tag_pgap="pgap"
+tag_ownr="ownr"
+tag_hdvd="hdvd"
+tag_sonm="sonm"
+tag_soal="soal"
+tag_soar="soar"
+tag_soaa="soaa"
+tag_soco="soco"
+tag_aART="aART"
+
+# ============================================================
+# Brands (ftyp major_brand and compatible_brands)
+# ============================================================
+brand_avif="avif"
+brand_avis="avis"
+brand_mif1="mif1"
+brand_mif2="mif2"
+brand_msf1="msf1"
+brand_heic="heic"
+brand_heix="heix"
+brand_heim="heim"
+brand_heis="heis"
+brand_hevc="hevc"
+brand_hevx="hevx"
+brand_isom="isom"
+brand_iso2="iso2"
+brand_miaf="miaf"
+brand_MA1B="MA1B"
+brand_MA1A="MA1A"
+
+# ============================================================
+# Handler types (hdlr)
+# ============================================================
+hdlr_pict="pict"
+hdlr_vide="vide"
+hdlr_soun="soun"
+hdlr_auxv="auxv"
+
+# ============================================================
+# Item types (infe item_type)
+# av01 and grid also appear as box/property types above
+# ============================================================
+item_iovl="iovl"
+item_Exif="Exif"
+item_mime="mime"
+item_unci="unci"
+item_tmap="tmap"
+
+# ============================================================
+# Item reference types (iref sub-box types)
+# ============================================================
+iref_dimg="dimg"
+iref_auxl="auxl"
+iref_cdsc="cdsc"
+iref_prem="prem"
+iref_thmb="thmb"
+
+# ============================================================
+# Entity group types (grpl sub-box types)
+# ============================================================
+grpl_altr="altr"
+grpl_ster="ster"
+grpl_pymd="pymd"
+
+# ============================================================
+# Colour information types (colr colour_type)
+# ============================================================
+colr_nclx="nclx"
+colr_rICC="rICC"
+colr_prof="prof"
+
+# ============================================================
+# Auxiliary type URNs (auxC payload)
+# ============================================================
+urn_alpha="urn:mpeg:mpegB:cicp:systems:auxiliary:alpha"
+urn_depth="urn:mpeg:mpegB:cicp:systems:auxiliary:depth"
+urn_depth_hevc="urn:mpeg:hevc:2015:auxid:2"
+urn_prefix="urn:mpeg:"
+
+# ============================================================
+# AV1 codec configuration (av1C box content)
+# ============================================================
+# av1C marker=1, version=1 byte: 0x81
+av1c_marker_version="\x81"
+# Profile 0 (Main), level 5.1: 0x09
+av1c_p0_l51="\x81\x09"
+# Profile 0, level 3.0: 0x04
+av1c_p0_l30="\x81\x04"
+# Profile 0, level 4.0: 0x08
+av1c_p0_l40="\x81\x08"
+# Profile 1 (High), level 4.0: 0x28
+av1c_p1_l40="\x81\x28"
+# Profile 2 (Professional), level 5.1: 0x49
+av1c_p2_l51="\x81\x49"
+# Byte2: tier=0, high_bitdepth=0, twelve_bit=0, mono=0, chroma_ss_x=1, chroma_ss_y=1, chroma_pos=0 = 0x0C (YUV420 8bit)
+av1c_yuv420_8bit="\x0c"
+# Byte2: tier=0, high_bitdepth=1, twelve_bit=0, mono=0, ss_x=1, ss_y=1, pos=0 = 0x4C (YUV420 10bit)
+av1c_yuv420_10bit="\x4c"
+# Byte2: tier=0, high_bitdepth=1, twelve_bit=1, mono=0, ss_x=1, ss_y=1, pos=0 = 0x6C (YUV420 12bit)
+av1c_yuv420_12bit="\x6c"
+# Byte2: monochrome=1, ss_x=0, ss_y=0 = 0x10
+av1c_mono_8bit="\x10"
+# 4-byte av1C body: marker+ver, profile0+level4, yuv420_8bit, reserved
+av1c_body_420_8="\x81\x08\x0c\x00"
+# 4-byte av1C body: profile0+level5.1, yuv420_10bit
+av1c_body_420_10="\x81\x09\x4c\x00"
+
+# ============================================================
+# AV1 OBU type markers
+# ============================================================
+# OBU type 1 (Sequence Header), has_size=1: 0x0A
+obu_seq_header="\x0a"
+# OBU type 3 (Frame Header), has_size=1: 0x1A
+obu_frame_header="\x1a"
+# OBU type 6 (Frame), has_size=1: 0x32
+obu_frame="\x32"
+# OBU type 5 (Metadata), has_size=1: 0x2A
+obu_metadata="\x2a"
+# OBU type 2 (Temporal Delimiter), has_size=1: 0x12
+obu_temporal_delim="\x12"
+# OBU type 4 (Tile Group), has_size=1: 0x22
+obu_tile_group="\x22"
+# OBU type 8 (Padding), has_size=1: 0x42
+obu_padding="\x42"
+
+# ============================================================
+# FullBox version+flags patterns
+# ============================================================
+# Version 0, flags 0x000000
+fullbox_v0="\x00\x00\x00\x00"
+# Version 1, flags 0x000000
+fullbox_v1="\x01\x00\x00\x00"
+# Version 2, flags 0x000000
+fullbox_v2="\x02\x00\x00\x00"
+# Version 3, flags 0x000000
+fullbox_v3="\x03\x00\x00\x00"
+
+# ============================================================
+# Common box size patterns (big-endian u32 size + 4-byte type)
+# ============================================================
+# Size 8 (empty box): just header
+size_8="\x00\x00\x00\x08"
+# Size 12 (header + 4 bytes content)
+size_12="\x00\x00\x00\x0c"
+# Size 16 (header + 8 bytes content)
+size_16="\x00\x00\x00\x10"
+# Size 20
+size_20="\x00\x00\x00\x14"
+# Size 24
+size_24="\x00\x00\x00\x18"
+# Size 0 (extends to EOF) — same bytes as fullbox_v0
+# Size 1 (extended size follows, 64-bit)
+size_extended="\x00\x00\x00\x01"
+
+# ============================================================
+# Common box headers (size + type combined)
+# ============================================================
+# ftyp with typical size 20 (major+minor+1 brand)
+hdr_ftyp_20="\x00\x00\x00\x14ftyp"
+# ftyp with typical size 24 (major+minor+2 brands)
+hdr_ftyp_24="\x00\x00\x00\x18ftyp"
+# ftyp with typical size 28 (major+minor+3 brands)
+hdr_ftyp_28="\x00\x00\x00\x1cftyp"
+# ftyp with typical size 32 (major+minor+4 brands)
+hdr_ftyp_32="\x00\x00\x00\x20ftyp"
+# meta box header (size 0 = extends to EOF)
+hdr_meta_eof="\x00\x00\x00\x00meta"
+# mdat header with size 0
+hdr_mdat_eof="\x00\x00\x00\x00mdat"
+
+# ============================================================
+# Minimal ftyp box payloads (major_brand + minor_version)
+# ============================================================
+# "avif" + minor_version 0
+ftyp_avif_payload="avif\x00\x00\x00\x00"
+# "avis" + minor_version 0
+ftyp_avis_payload="avis\x00\x00\x00\x00"
+# "mif1" brand
+ftyp_mif1_payload="mif1\x00\x00\x00\x00"
+
+# ============================================================
+# tmap (tone map / gain map) payload patterns
+# ============================================================
+# tmap version 0, minimum_version 0, writer_version 0
+tmap_header="\x00\x00\x00\x00\x00"
+# tmap flags: multichannel=1, use_base_colour_space=1
+tmap_flags_multi="\xc0"
+# tmap flags: multichannel=0, use_base_colour_space=1
+tmap_flags_base_cs="\x40"
+# tmap flags: backward_direction=1
+tmap_flags_backward="\x04"
+
+# ============================================================
+# iloc construction method values
+# ============================================================
+# construction_method 0 (file offset)
+iloc_method_file="\x00\x00"
+# construction_method 1 (idat)
+iloc_method_idat="\x00\x01"
+# construction_method 2 (item offset, unsupported)
+iloc_method_item="\x00\x02"
+
+# ============================================================
+# Grid image patterns
+# ============================================================
+# Grid version 0, flags 0, 1 row, 1 col (simplest grid)
+grid_1x1="\x00\x00\x00\x01\x01"
+# Grid version 0, flags 0, 2 rows, 2 cols
+grid_2x2="\x00\x00\x00\x02\x02"
+# Grid version 0, flags 1 (32-bit dimensions), 1 row, 1 col
+grid_1x1_32bit="\x00\x00\x00\x01\x01\x01"
+
+# ============================================================
+# ispe (image spatial extents) patterns
+# ============================================================
+# Version 0, flags 0, width 256, height 256
+ispe_256x256="\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00"
+# Version 0, flags 0, width 1, height 1
+ispe_1x1="\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x01"
+
+# ============================================================
+# Common multi-byte integer patterns (big-endian)
+# Note: \x00\x00 duplicated by iloc_method_file, \x00\x00\x00\x00 by fullbox_v0
+# Note: \x00\x01 duplicated by iloc_method_idat
+# ============================================================
+# u64 = 0
+u64_zero="\x00\x00\x00\x00\x00\x00\x00\x00"
+# Maximum u32
+u32_max="\xff\xff\xff\xff"
+# Maximum u16
+u16_max="\xff\xff"
+
+# ============================================================
+# NCLX color information patterns
+# ============================================================
+# BT.709, sRGB, full range: CP=1, TC=13, MC=0, full_range=0x80
+nclx_srgb="\x00\x01\x00\x0d\x00\x00\x80"
+# BT.2020, PQ, NCL: CP=9, TC=16, MC=9, full_range=0x80
+nclx_pq_hdr="\x00\x09\x00\x10\x00\x09\x80"
+# BT.2020, HLG: CP=9, TC=18, MC=9, full_range=0x80
+nclx_hlg_hdr="\x00\x09\x00\x12\x00\x09\x80"
+# Unspecified: CP=2, TC=2, MC=2
+nclx_unspec="\x00\x02\x00\x02\x00\x02\x00"
+
+# ============================================================
+# pixi (pixel information) patterns
+# ============================================================
+# Version 0, flags 0, 3 channels, 8-bit each
+pixi_3ch_8bit="\x00\x00\x00\x00\x03\x08\x08\x08"
+# Version 0, flags 0, 3 channels, 10-bit each
+pixi_3ch_10bit="\x00\x00\x00\x00\x03\x0a\x0a\x0a"
+# Version 0, flags 0, 1 channel, 8-bit (monochrome)
+pixi_1ch_8bit="\x00\x00\x00\x00\x01\x08"
+
+# ============================================================
+# irot (image rotation) / imir (image mirror) byte values
+# \x00 already covered elsewhere; \x01 used by both irot(90) and imir(horiz)
+# ============================================================
+irot_or_imir_1="\x01"
+irot_180="\x02"
+irot_270="\x03"
+
+# ============================================================
+# Minimal AVIF file prefix (ftyp header + avif brand + meta)
+# ftyp(size=20): avif, minor=0, compat=avif
+# ============================================================
+avif_prefix="\x00\x00\x00\x14ftypavif\x00\x00\x00\x00avif"
