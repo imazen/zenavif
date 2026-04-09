@@ -24,9 +24,9 @@ pub struct DecoderConfig {
 impl Default for DecoderConfig {
     fn default() -> Self {
         Self {
-            // Default to auto-detect threads. For single-frame AVIF, rav1d
-            // auto-derives max_frame_delay=1, giving tile parallelism without
-            // frame threading overhead.
+            // Default to auto-detect threads. We always set max_frame_delay=1
+            // when creating rav1d decoders, giving tile parallelism without
+            // frame threading (which has a DisjointMut race in rav1d CDEF).
             threads: 0,
             apply_grain: true,
             frame_size_limit: 0,
