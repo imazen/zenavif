@@ -1867,7 +1867,7 @@ checksum = "00f1f60154ad4ef9871d606765c3ea037cde93bbd77536327b594de8f82df1cb"
 
 [[package]]
 name = "zenavif"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "almost-enough",
  "archmage",
@@ -1951,9 +1951,9 @@ dependencies = [
 
 [[package]]
 name = "zenpixels"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6671ce2ea4d3110e2aef9514cc48267291f50fab7b7eead43b36e7c887fb740"
+checksum = "94439a80006e7c0667781a60ebb73145db6e6792e546f187933bcc472b36dece"
 dependencies = [
  "bytemuck",
  "imgref",
