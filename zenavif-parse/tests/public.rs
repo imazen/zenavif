@@ -298,9 +298,10 @@ fn parser_from_bytes_rejects_malformed_ftyp_without_panicking() {
         0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x04, 0x01, 0xdc,
     ];
 
-    let result = std::panic::catch_unwind(|| zenavif_parse::AvifParser::from_bytes(&bytes));
-    assert!(result.is_ok(), "parser panicked on malformed AVIF");
-    assert!(result.unwrap().is_err(), "parser unexpectedly accepted malformed AVIF");
+    assert!(
+        zenavif_parse::AvifParser::from_bytes(&bytes).is_err(),
+        "parser should reject malformed AVIF (ftyp variant)"
+    );
 }
 
 #[test]
@@ -328,9 +329,10 @@ fn parser_from_bytes_rejects_malformed_meta_without_panicking() {
         0x04, 0x00, 0x00, 0x00, b'm', b'd', b'a', b't', 0x12, 0x00, 0x0a, 0x07, 0x38, 0x10,
     ];
 
-    let result = std::panic::catch_unwind(|| zenavif_parse::AvifParser::from_bytes(&bytes));
-    assert!(result.is_ok(), "parser panicked on malformed AVIF");
-    assert!(result.unwrap().is_err(), "parser unexpectedly accepted malformed AVIF");
+    assert!(
+        zenavif_parse::AvifParser::from_bytes(&bytes).is_err(),
+        "parser should reject malformed AVIF (meta variant)"
+    );
 }
 
 #[test]
