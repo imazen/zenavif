@@ -1967,6 +1967,262 @@ fn gain_map_zencodec_backward_direction_preserved() {
 }
 
 // ============================================================================
+// ISO 21496-1 fixture corpus tests
+// ============================================================================
+//
+// These fixtures come from the shared gain map spec audit corpus in
+// `gainmap-spec-status/test-vectors/sources/*_avif.bin`. They exercise every
+// wire-format degree of freedom (direction, channels, common_denom, negative
+// values, varied denominators, gamma, i32 boundary, writer_version, and all
+// flags combined) and catch the two historical bugs fixed in this commit:
+//
+//   - FLAG_COMMON_DENOMINATOR (bit 3) was previously ignored, so fixtures
+//     05, 06 and 22 would fail parse with UnexpectedEOF.
+//   - writer_version was dropped on parse and hardcoded to 0 on serialize,
+//     so fixture 21 could not round-trip byte-exactly.
+
+const FIX_DIR: &str = "tests/gainmap/iso21496-fixtures";
+
+fn load_fixture(name: &str) -> Vec<u8> {
+    let path = format!("{FIX_DIR}/{name}");
+    std::fs::read(&path).unwrap_or_else(|e| panic!("read fixture {path}: {e}"))
+}
+
+/// The 22-case fixture matrix. Tests that only need to enumerate the full
+/// corpus use this list.
+const ISO21496_FIXTURES: &[&str] = &[
+    "01_sdr_base_1ch_avif.bin",
+    "02_hdr_base_1ch_avif.bin",
+    "03_multi_channel_3_avif.bin",
+    "04_use_base_colour_space_avif.bin",
+    "05_common_denom_1ch_avif.bin",
+    "06_common_denom_3ch_avif.bin",
+    "07_negative_min_avif.bin",
+    "08_large_negative_min_avif.bin",
+    "09_max_4x_avif.bin",
+    "10_max_16x_avif.bin",
+    "11_denom_1_avif.bin",
+    "12_denom_10_avif.bin",
+    "13_denom_1000_avif.bin",
+    "14_denom_65535_avif.bin",
+    "15_denom_umax_avif.bin",
+    "16_gamma_half_avif.bin",
+    "17_gamma_quarter_avif.bin",
+    "18_gamma_large_avif.bin",
+    "19_i32_max_numerators_avif.bin",
+    "20_zero_offsets_avif.bin",
+    "21_writer_version_nonzero_avif.bin",
+    "22_all_flags_avif.bin",
+];
+
+/// Fixtures that use the full (non-common-denominator) wire form. `to_bytes()`
+/// should reproduce these byte-for-byte after a parse.
+const FULL_FORM_FIXTURES: &[&str] = &[
+    "01_sdr_base_1ch_avif.bin",
+    "02_hdr_base_1ch_avif.bin",
+    "03_multi_channel_3_avif.bin",
+    "04_use_base_colour_space_avif.bin",
+    "07_negative_min_avif.bin",
+    "08_large_negative_min_avif.bin",
+    "09_max_4x_avif.bin",
+    "10_max_16x_avif.bin",
+    "11_denom_1_avif.bin",
+    "12_denom_10_avif.bin",
+    "13_denom_1000_avif.bin",
+    "14_denom_65535_avif.bin",
+    "15_denom_umax_avif.bin",
+    "16_gamma_half_avif.bin",
+    "17_gamma_quarter_avif.bin",
+    "18_gamma_large_avif.bin",
+    "19_i32_max_numerators_avif.bin",
+    "20_zero_offsets_avif.bin",
+    "21_writer_version_nonzero_avif.bin",
+];
+
+/// Fixtures that use the common-denominator compact form. The parser expands
+/// these to the full form on output, so `to_bytes()` does NOT byte-match the
+/// original; only the parsed struct values are stable across a round-trip.
+const COMMON_DENOM_FIXTURES: &[&str] = &[
+    "05_common_denom_1ch_avif.bin",
+    "06_common_denom_3ch_avif.bin",
+    "22_all_flags_avif.bin",
+];
+
+#[test]
+fn iso21496_corpus_parse_all() {
+    // Every fixture must parse without error. Historically fixtures 05, 06,
+    // and 22 failed with UnexpectedEOF because FLAG_COMMON_DENOMINATOR was
+    // ignored.
+    for name in ISO21496_FIXTURES {
+        let bytes = load_fixture(name);
+        let meta = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&bytes)
+            .unwrap_or_else(|e| panic!("fixture {name}: parse failed: {e:?}"));
+        // Single-channel fixtures must replicate channel 0 to 1/2.
+        if !meta.is_multichannel {
+            assert_eq!(meta.channels[0], meta.channels[1], "{name}: ch0 != ch1");
+            assert_eq!(meta.channels[0], meta.channels[2], "{name}: ch0 != ch2");
+        }
+    }
+}
+
+#[test]
+fn iso21496_full_form_byte_exact_roundtrip() {
+    // Full-form fixtures must survive parse → to_bytes → bytes-equal-input.
+    for name in FULL_FORM_FIXTURES {
+        let bytes = load_fixture(name);
+        let meta = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&bytes)
+            .unwrap_or_else(|e| panic!("fixture {name}: parse failed: {e:?}"));
+        let out = meta.to_bytes();
+        assert_eq!(
+            out, bytes,
+            "fixture {name}: to_bytes() not byte-exact ({} vs {} bytes)",
+            out.len(),
+            bytes.len()
+        );
+    }
+}
+
+#[test]
+fn iso21496_common_denom_struct_roundtrip() {
+    // Common-denom fixtures serialize as full-form, so we compare structs
+    // across a parse → to_bytes → parse round-trip rather than bytes.
+    for name in COMMON_DENOM_FIXTURES {
+        let bytes = load_fixture(name);
+        let meta = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&bytes)
+            .unwrap_or_else(|e| panic!("fixture {name}: parse failed: {e:?}"));
+        let out = meta.to_bytes();
+        let reparsed = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&out)
+            .unwrap_or_else(|e| panic!("fixture {name}: reparse failed: {e:?}"));
+        assert_eq!(meta, reparsed, "fixture {name}: struct round-trip drift");
+        // to_bytes should emit non-common-denom form (flags bit 3 clear).
+        // Flags byte is at offset 5 (version + min_ver + writer_ver).
+        assert_eq!(
+            out[5] & 0x08,
+            0,
+            "fixture {name}: re-serialized output should not set FLAG_COMMON_DENOMINATOR"
+        );
+    }
+}
+
+#[test]
+fn iso21496_case_05_common_denom_1ch() {
+    // 05: flags = 0x08 (common_denom only); common_d=1000; base=0/1000;
+    // alt=1300/1000; single channel min=0/1000, max=1300/1000, gamma=1000/1000,
+    // base_off=16/1000, alt_off=16/1000.
+    let bytes = load_fixture("05_common_denom_1ch_avif.bin");
+    let m = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&bytes).expect("parse 05");
+
+    assert!(!m.is_multichannel);
+    assert!(!m.use_base_colour_space);
+    assert!(!m.backward_direction);
+    assert_eq!(m.writer_version, 0);
+    assert_eq!((m.base_hdr_headroom_n, m.base_hdr_headroom_d), (0, 1000));
+    assert_eq!(
+        (m.alternate_hdr_headroom_n, m.alternate_hdr_headroom_d),
+        (1300, 1000)
+    );
+    let c = m.channels[0];
+    assert_eq!((c.gain_map_min_n, c.gain_map_min_d), (0, 1000));
+    assert_eq!((c.gain_map_max_n, c.gain_map_max_d), (1300, 1000));
+    assert_eq!((c.gamma_n, c.gamma_d), (1000, 1000));
+    assert_eq!((c.base_offset_n, c.base_offset_d), (16, 1000));
+    assert_eq!((c.alternate_offset_n, c.alternate_offset_d), (16, 1000));
+    // Single-channel replication.
+    assert_eq!(m.channels[1], c);
+    assert_eq!(m.channels[2], c);
+}
+
+#[test]
+fn iso21496_case_06_common_denom_3ch() {
+    // 06: flags = 0x88 (multichannel + common_denom); 3 distinct channels.
+    let bytes = load_fixture("06_common_denom_3ch_avif.bin");
+    let m = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&bytes).expect("parse 06");
+
+    assert!(m.is_multichannel);
+    assert!(!m.use_base_colour_space);
+    assert!(!m.backward_direction);
+    assert_eq!((m.base_hdr_headroom_n, m.base_hdr_headroom_d), (0, 1000));
+    assert_eq!(
+        (m.alternate_hdr_headroom_n, m.alternate_hdr_headroom_d),
+        (1300, 1000)
+    );
+
+    let expected_max = [1300, 1500, 1200];
+    let expected_min = [0i32, -500, 0];
+    for (i, ch) in m.channels.iter().enumerate() {
+        assert_eq!(
+            (ch.gain_map_min_n, ch.gain_map_min_d),
+            (expected_min[i], 1000),
+            "ch{i} min"
+        );
+        assert_eq!(
+            (ch.gain_map_max_n, ch.gain_map_max_d),
+            (expected_max[i], 1000),
+            "ch{i} max"
+        );
+        assert_eq!((ch.gamma_n, ch.gamma_d), (1000, 1000));
+        assert_eq!((ch.base_offset_n, ch.base_offset_d), (16, 1000));
+        assert_eq!((ch.alternate_offset_n, ch.alternate_offset_d), (16, 1000));
+    }
+}
+
+#[test]
+fn iso21496_case_21_writer_version_nonzero() {
+    // 21: full form, writer_version = 1. Must be preserved on parse AND
+    // written on to_bytes, giving a byte-exact round-trip.
+    let bytes = load_fixture("21_writer_version_nonzero_avif.bin");
+    let m = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&bytes).expect("parse 21");
+    assert_eq!(m.writer_version, 1, "writer_version should parse as 1");
+
+    let out = m.to_bytes();
+    assert_eq!(
+        out, bytes,
+        "fixture 21: byte-exact round-trip required for full-form fixtures"
+    );
+    // The writer_version bytes live at offset 3..5.
+    assert_eq!(&out[3..5], &[0x00, 0x01]);
+}
+
+#[test]
+fn iso21496_case_22_all_flags() {
+    // 22: all four semantic flags set. Note the spec produces flags = 0xCC:
+    //   MULTI_CHANNEL (0x80) | USE_BASE_COLOUR_SPACE (0x40)
+    //     | COMMON_DENOMINATOR (0x08) | BACKWARD_DIRECTION (0x04)
+    //   = 0xCC.
+    let bytes = load_fixture("22_all_flags_avif.bin");
+    assert_eq!(
+        bytes[5], 0xCC,
+        "fixture 22 raw flags byte must be 0xCC (all four flags set)"
+    );
+
+    let m = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&bytes).expect("parse 22");
+    assert!(m.is_multichannel);
+    assert!(m.use_base_colour_space);
+    assert!(m.backward_direction);
+    // COMMON_DENOMINATOR is a wire-format detail, not reflected in the
+    // output struct. We assert it was honored by checking the common_d
+    // denominator is applied to every field.
+    assert_eq!((m.base_hdr_headroom_n, m.base_hdr_headroom_d), (1300, 1000));
+    assert_eq!(
+        (m.alternate_hdr_headroom_n, m.alternate_hdr_headroom_d),
+        (0, 1000)
+    );
+
+    let expected_min = [-1000i32, -500, -1500];
+    for (i, ch) in m.channels.iter().enumerate() {
+        assert_eq!(
+            (ch.gain_map_min_n, ch.gain_map_min_d),
+            (expected_min[i], 1000),
+            "ch{i} min"
+        );
+        assert_eq!((ch.gain_map_max_n, ch.gain_map_max_d), (0, 1000), "ch{i} max");
+        assert_eq!((ch.gamma_n, ch.gamma_d), (1000, 1000));
+        assert_eq!((ch.base_offset_n, ch.base_offset_d), (16, 1000));
+        assert_eq!((ch.alternate_offset_n, ch.alternate_offset_d), (16, 1000));
+    }
+}
+
+// ============================================================================
 // Depth auxiliary image tests
 // ============================================================================
 
