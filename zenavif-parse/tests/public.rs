@@ -1911,7 +1911,6 @@ fn gain_map_real_file_to_bytes_struct_roundtrip() {
     assert_eq!(*meta, reparsed, "struct roundtrip: parse → to_bytes → parse must be identical");
 }
 
-#[cfg(feature = "zencodec")]
 #[test]
 fn gain_map_zencodec_from_roundtrip_seine() {
     // Parse real file → zencodec::GainMapParams → GainMapMetadata → compare with original
@@ -1951,7 +1950,6 @@ fn gain_map_zencodec_from_roundtrip_seine() {
     }
 }
 
-#[cfg(feature = "zencodec")]
 #[test]
 fn gain_map_zencodec_backward_direction_preserved() {
     // Verify backward_direction survives the zencodec roundtrip

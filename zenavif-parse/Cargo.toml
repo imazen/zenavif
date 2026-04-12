@@ -17,7 +17,7 @@ repository = "https://github.com/imazen/zenavif-parse"
 readme = "README.md"
 include = ["/README.md", "/Cargo.toml", "/LICENSE", "/src/*.rs", "/examples/*.rs"]
 keywords = ["avif", "image", "parser", "demuxer", "heif"]
-rust-version = "1.92"
+rust-version = "1.93"
 
 [lib]
 crate-type = ["rlib"]
@@ -30,7 +30,7 @@ log = "0.4.20"
 fallible_collections = { version = "0.5.1", default-features = false, features = ["std"] }
 arrayvec = "0.7.6"
 enough = { version = "0.4.3", features = ["std"] }
-zencodec = { version = "0.1.13", optional = true, default-features = false }
+zencodec = { version = "0.1.13", default-features = false }
 
 [dev-dependencies]
 env_logger = "0.11.10"
@@ -40,8 +40,6 @@ walkdir = "2.4.0"
 eager = []
 # Export symbols for C
 c_api = ["eager"]
-# Enable From conversions to/from zencodec gain map types
-zencodec = ["dep:zencodec"]
 
 [badges]
 maintenance = { status = "actively-developed" }

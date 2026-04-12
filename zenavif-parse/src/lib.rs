@@ -555,7 +555,6 @@ impl GainMapMetadata {
 
 // ─── zencodec conversions ────────────────────────────────────────────
 
-#[cfg(feature = "zencodec")]
 impl From<&GainMapChannel> for zencodec::GainMapChannel {
     fn from(ch: &GainMapChannel) -> Self {
         Self {
@@ -568,7 +567,6 @@ impl From<&GainMapChannel> for zencodec::GainMapChannel {
     }
 }
 
-#[cfg(feature = "zencodec")]
 impl From<&GainMapMetadata> for zencodec::GainMapParams {
     fn from(md: &GainMapMetadata) -> Self {
         let mut p = Self::default();
@@ -587,7 +585,6 @@ impl From<&GainMapMetadata> for zencodec::GainMapParams {
     }
 }
 
-#[cfg(feature = "zencodec")]
 impl From<&zencodec::GainMapChannel> for GainMapChannel {
     fn from(ch: &zencodec::GainMapChannel) -> Self {
         use zencodec::gainmap::{Fraction, UFraction};
@@ -611,7 +608,6 @@ impl From<&zencodec::GainMapChannel> for GainMapChannel {
     }
 }
 
-#[cfg(feature = "zencodec")]
 impl From<&zencodec::GainMapParams> for GainMapMetadata {
     fn from(p: &zencodec::GainMapParams) -> Self {
         use zencodec::gainmap::UFraction;
