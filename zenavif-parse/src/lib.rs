@@ -5453,10 +5453,7 @@ fn read_iloc<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
             // Parsed but currently ignored, see `ItemLocationBoxExtent`
             let _extent_index = match &index_size {
                 None | Some(IlocFieldSize::Zero) => None,
-                Some(index_size) => {
-                    debug_assert!(version == IlocVersion::One || version == IlocVersion::Two);
-                    Some(iloc.read_u64(index_size.to_bits())?)
-                },
+                Some(index_size) => Some(iloc.read_u64(index_size.to_bits())?),
             };
 
             // Per ISO 14496-12:2015 § 8.11.3.1:

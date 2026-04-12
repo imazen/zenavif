@@ -345,7 +345,6 @@ fn color_config(b: &mut BitReader, seq_profile: u8) -> Result<ColorConfig> {
         } else {
             chroma_subsampling = ChromaSubsampling::YUV422;
         }
-        debug_assert!(!monochrome);
         chroma_sample_position = if chroma_subsampling.horizontal && chroma_subsampling.vertical { b.read_u8(2)? } else { 0 };
         separate_uv_delta_q = b.read_bool()?;
     }
