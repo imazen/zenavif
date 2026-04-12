@@ -5221,9 +5221,9 @@ fn associate_tracks(tracks: TryVec<ParsedTrack>) -> Result<ParsedAnimationData> 
         .ok_or(Error::InvalidData("color track index out of bounds"))?;
     let color_track_id = color_track.track_id;
 
-    // Find alpha track: handler_type == "auxv" with tref/auxl referencing color track
+    // Find alpha track: handler_type == "auxv" or "pict" with tref/auxl referencing color track
     let alpha_idx = tracks.iter().position(|t| {
-        t.handler_type == b"auxv"
+        matches!(&t.handler_type.value, b"auxv" | b"pict")
             && t.references.iter().any(|r| {
                 r.reference_type == b"auxl"
                     && r.track_ids.iter().any(|&id| id == color_track_id)
