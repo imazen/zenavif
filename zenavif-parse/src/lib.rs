@@ -477,6 +477,13 @@ pub struct GainMapMetadata {
     /// When true, the base image is HDR and the alternate is SDR.
     /// Default false = base is SDR, alternate is HDR.
     pub backward_direction: bool,
+    /// Writer version emitted by the producer (`writer_version` field of
+    /// the ISO 21496-1 header). Informational; must be >= `minimum_version`.
+    ///
+    /// Round-tripped through [`GainMapMetadata::to_bytes`]; the previous
+    /// implementation dropped this value on parse and hardcoded `0` on
+    /// serialize.
+    pub writer_version: u16,
     /// Base HDR headroom (numerator).
     pub base_hdr_headroom_n: u32,
     /// Base HDR headroom (denominator).
@@ -506,13 +513,22 @@ impl GainMapMetadata {
     /// output can be passed to `zenavif_serialize::Aviffy::set_gain_map` or
     /// used for byte-level roundtrip testing.
     ///
-    /// The writer is always written as version 0 / minimum_version 0.
+    /// Always writes the full (non-common-denominator) wire form: inputs that
+    /// were parsed from the `FLAG_COMMON_DENOMINATOR` compact layout are
+    /// re-expanded to per-field `(numerator, denominator)` pairs and the
+    /// compact form is NOT preserved.
+    // TODO: optional byte-exact preservation of common-denominator inputs
+    // would require storing `was_common_denom: Option<u32>` alongside the
+    // expanded fields and re-emitting the compact layout when set.
+    ///
+    /// `version` and `minimum_version` are always written as 0.
+    /// `writer_version` is emitted from `self.writer_version`.
     pub fn to_bytes(&self) -> std::vec::Vec<u8> {
         let channel_count = if self.is_multichannel { 3usize } else { 1usize };
-        let mut buf = std::vec::Vec::with_capacity(5 + 8 + channel_count * 40);
+        let mut buf = std::vec::Vec::with_capacity(6 + 16 + channel_count * 40);
         buf.push(0u8); // version
         buf.extend_from_slice(&0u16.to_be_bytes()); // minimum_version
-        buf.extend_from_slice(&0u16.to_be_bytes()); // writer_version
+        buf.extend_from_slice(&self.writer_version.to_be_bytes()); // writer_version
         let flags = (u8::from(self.is_multichannel) << 7)
             | (u8::from(self.use_base_colour_space) << 6)
             | (u8::from(self.backward_direction) << 2);
@@ -539,7 +555,6 @@ impl GainMapMetadata {
 
 // ─── zencodec conversions ────────────────────────────────────────────
 
-#[cfg(feature = "zencodec")]
 impl From<&GainMapChannel> for zencodec::GainMapChannel {
     fn from(ch: &GainMapChannel) -> Self {
         Self {
@@ -552,7 +567,6 @@ impl From<&GainMapChannel> for zencodec::GainMapChannel {
     }
 }
 
-#[cfg(feature = "zencodec")]
 impl From<&GainMapMetadata> for zencodec::GainMapParams {
     fn from(md: &GainMapMetadata) -> Self {
         let mut p = Self::default();
@@ -571,7 +585,6 @@ impl From<&GainMapMetadata> for zencodec::GainMapParams {
     }
 }
 
-#[cfg(feature = "zencodec")]
 impl From<&zencodec::GainMapChannel> for GainMapChannel {
     fn from(ch: &zencodec::GainMapChannel) -> Self {
         use zencodec::gainmap::{Fraction, UFraction};
@@ -595,7 +608,6 @@ impl From<&zencodec::GainMapChannel> for GainMapChannel {
     }
 }
 
-#[cfg(feature = "zencodec")]
 impl From<&zencodec::GainMapParams> for GainMapMetadata {
     fn from(p: &zencodec::GainMapParams) -> Self {
         use zencodec::gainmap::UFraction;
@@ -605,6 +617,9 @@ impl From<&zencodec::GainMapParams> for GainMapMetadata {
             is_multichannel: !p.is_single_channel(),
             use_base_colour_space: p.use_base_color_space,
             backward_direction: p.backward_direction,
+            // zencodec::GainMapParams does not carry writer_version — default
+            // to 0 when building a GainMapMetadata from a zencodec value.
+            writer_version: 0,
             base_hdr_headroom_n: headroom_base.numerator,
             base_hdr_headroom_d: headroom_base.denominator,
             alternate_hdr_headroom_n: headroom_alt.numerator,
@@ -3755,6 +3770,27 @@ fn read_grpl<T: Read + Offset>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<Entity
 /// Parse a ToneMapImage (`tmap`) item payload into gain map metadata.
 ///
 /// See ISO 21496-1:2025 for the payload format.
+// ISO 21496-1 flag bits. These values must match the (private) constants
+// in `zencodec::gainmap::FLAG_*`. They are redefined here so that
+// zenavif-parse can keep `zencodec` as an optional dependency (the
+// `zencodec` feature only controls the `From`/`Into` impls).
+//
+// If either crate changes a flag value the other must be updated — the
+// shared fixture corpus under `gainmap-spec-status/test-vectors/` is the
+// cross-check that prevents silent drift.
+/// Bit 7 — multichannel gain map (`zencodec::gainmap::FLAG_MULTI_CHANNEL`).
+const TMAP_FLAG_MULTI_CHANNEL: u8 = 0x80;
+/// Bit 6 — gain map uses base image colour space
+/// (`zencodec::gainmap::FLAG_USE_BASE_COLOUR_SPACE`).
+const TMAP_FLAG_USE_BASE_COLOUR_SPACE: u8 = 0x40;
+/// Bit 3 — common-denominator compact encoding
+/// (`zencodec::gainmap::FLAG_COMMON_DENOMINATOR`). When set, a single
+/// shared `u32` denominator precedes all numerators in the payload.
+const TMAP_FLAG_COMMON_DENOMINATOR: u8 = 0x08;
+/// Bit 2 — backward direction: base is HDR, alternate is SDR
+/// (`zencodec::gainmap::FLAG_BACKWARD_DIRECTION`).
+const TMAP_FLAG_BACKWARD_DIRECTION: u8 = 0x04;
+
 fn parse_tone_map_image(data: &[u8]) -> Result<GainMapMetadata> {
     let mut cursor = std::io::Cursor::new(data);
 
@@ -3777,17 +3813,13 @@ fn parse_tone_map_image(data: &[u8]) -> Result<GainMapMetadata> {
     }
 
     // Flags byte: is_multichannel (bit 7), use_base_colour_space (bit 6),
-    // reserved (bit 5,4), common_denominator (bit 3), backward_direction (bit 2), reserved (bits 0-1)
+    // reserved (bits 5,4), common_denominator (bit 3),
+    // backward_direction (bit 2), reserved (bits 0-1).
     let flags = cursor.read_u8()?;
-    let is_multichannel = (flags & 0x80) != 0;
-    let use_base_colour_space = (flags & 0x40) != 0;
-    let backward_direction = (flags & 0x04) != 0;
-
-    // base_hdr_headroom and alternate_hdr_headroom
-    let base_hdr_headroom_n = be_u32(&mut cursor)?;
-    let base_hdr_headroom_d = be_u32(&mut cursor)?;
-    let alternate_hdr_headroom_n = be_u32(&mut cursor)?;
-    let alternate_hdr_headroom_d = be_u32(&mut cursor)?;
+    let is_multichannel = (flags & TMAP_FLAG_MULTI_CHANNEL) != 0;
+    let use_base_colour_space = (flags & TMAP_FLAG_USE_BASE_COLOUR_SPACE) != 0;
+    let backward_direction = (flags & TMAP_FLAG_BACKWARD_DIRECTION) != 0;
+    let common_denominator = (flags & TMAP_FLAG_COMMON_DENOMINATOR) != 0;
 
     let channel_count = if is_multichannel { 3 } else { 1 };
     let mut channels = [GainMapChannel {
@@ -3798,17 +3830,65 @@ fn parse_tone_map_image(data: &[u8]) -> Result<GainMapMetadata> {
         alternate_offset_n: 0, alternate_offset_d: 0,
     }; 3];
 
-    for ch in channels.iter_mut().take(channel_count) {
-        ch.gain_map_min_n = be_i32(&mut cursor)?;
-        ch.gain_map_min_d = be_u32(&mut cursor)?;
-        ch.gain_map_max_n = be_i32(&mut cursor)?;
-        ch.gain_map_max_d = be_u32(&mut cursor)?;
-        ch.gamma_n = be_u32(&mut cursor)?;
-        ch.gamma_d = be_u32(&mut cursor)?;
-        ch.base_offset_n = be_i32(&mut cursor)?;
-        ch.base_offset_d = be_u32(&mut cursor)?;
-        ch.alternate_offset_n = be_i32(&mut cursor)?;
-        ch.alternate_offset_d = be_u32(&mut cursor)?;
+    let base_hdr_headroom_n;
+    let base_hdr_headroom_d;
+    let alternate_hdr_headroom_n;
+    let alternate_hdr_headroom_d;
+
+    if common_denominator {
+        // Compact layout used by libultrahdr:
+        //   common_d: u32 BE
+        //   base_hdr_headroom_n:  u32 BE   (uses common_d)
+        //   alt_hdr_headroom_n:   u32 BE   (uses common_d)
+        //   for each channel:
+        //     gain_map_min_n: i32 BE       (uses common_d)
+        //     gain_map_max_n: i32 BE
+        //     gamma_n:        u32 BE
+        //     base_offset_n:  i32 BE
+        //     alt_offset_n:   i32 BE
+        //
+        // We expand each numerator to `(n, common_d)` in the output so
+        // downstream code does not need to know about the compact form.
+        let common_d = be_u32(&mut cursor)?;
+        if common_d == 0 {
+            return Err(Error::InvalidData("tmap common_denominator is zero"));
+        }
+        base_hdr_headroom_n = be_u32(&mut cursor)?;
+        base_hdr_headroom_d = common_d;
+        alternate_hdr_headroom_n = be_u32(&mut cursor)?;
+        alternate_hdr_headroom_d = common_d;
+
+        for ch in channels.iter_mut().take(channel_count) {
+            ch.gain_map_min_n = be_i32(&mut cursor)?;
+            ch.gain_map_min_d = common_d;
+            ch.gain_map_max_n = be_i32(&mut cursor)?;
+            ch.gain_map_max_d = common_d;
+            ch.gamma_n = be_u32(&mut cursor)?;
+            ch.gamma_d = common_d;
+            ch.base_offset_n = be_i32(&mut cursor)?;
+            ch.base_offset_d = common_d;
+            ch.alternate_offset_n = be_i32(&mut cursor)?;
+            ch.alternate_offset_d = common_d;
+        }
+    } else {
+        // Full layout — each fraction has its own denominator.
+        base_hdr_headroom_n = be_u32(&mut cursor)?;
+        base_hdr_headroom_d = be_u32(&mut cursor)?;
+        alternate_hdr_headroom_n = be_u32(&mut cursor)?;
+        alternate_hdr_headroom_d = be_u32(&mut cursor)?;
+
+        for ch in channels.iter_mut().take(channel_count) {
+            ch.gain_map_min_n = be_i32(&mut cursor)?;
+            ch.gain_map_min_d = be_u32(&mut cursor)?;
+            ch.gain_map_max_n = be_i32(&mut cursor)?;
+            ch.gain_map_max_d = be_u32(&mut cursor)?;
+            ch.gamma_n = be_u32(&mut cursor)?;
+            ch.gamma_d = be_u32(&mut cursor)?;
+            ch.base_offset_n = be_i32(&mut cursor)?;
+            ch.base_offset_d = be_u32(&mut cursor)?;
+            ch.alternate_offset_n = be_i32(&mut cursor)?;
+            ch.alternate_offset_d = be_u32(&mut cursor)?;
+        }
     }
 
     // Copy channel 0 to channels 1 and 2 if single-channel
@@ -3821,6 +3901,7 @@ fn parse_tone_map_image(data: &[u8]) -> Result<GainMapMetadata> {
         is_multichannel,
         use_base_colour_space,
         backward_direction,
+        writer_version,
         base_hdr_headroom_n,
         base_hdr_headroom_d,
         alternate_hdr_headroom_n,
