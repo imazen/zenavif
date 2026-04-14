@@ -30,7 +30,7 @@ use zencodec::encode::EncodeOutput;
 use zencodec::{
     GainMapPresence, ImageFormat, ImageInfo, ImageSequence, ResourceLimits, Supplements,
 };
-use zenpixels::{ChannelType, PixelBuffer, PixelDescriptor, PixelSlice};
+use zenpixels::{ChannelType, ColorAuthority, PixelBuffer, PixelDescriptor, PixelSlice};
 use zenpixels_convert::PixelBufferConvertTypedExt as _;
 
 use crate::error::Error;
@@ -2234,6 +2234,10 @@ fn convert_native_info(native: &crate::image::ImageInfo) -> ImageInfo {
 
     if let Some(ref icc) = native.icc_profile {
         info = info.with_icc_profile(icc.clone());
+        // authority stays Icc (default) — ICC > nclx per MIAF spec
+    } else {
+        // No ICC → CICP (from nclx or AV1 SPS) is authoritative
+        info = info.with_color_authority(ColorAuthority::Cicp);
     }
     if let Some(ref exif) = native.exif {
         info = info.with_exif(exif.clone());
