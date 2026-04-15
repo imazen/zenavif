@@ -59,6 +59,8 @@ Thumbs.db
 # Tooling noise
 .superwork/
 .claude/
+.workongoing
+.jj/
 copter-report/
 .zenbench/
 .external-cache/

@@ -9,7 +9,7 @@
 //! The primary API is [`AvifParser`], which performs zero-copy parsing by
 //! recording byte offsets and resolving data on demand.
 //!
-//! A legacy eager API ([`read_avif`]) is available behind the `eager` feature flag.
+//! A legacy eager API (`read_avif`) is available behind the `eager` feature flag.
 
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -3771,9 +3771,9 @@ fn read_grpl<T: Read + Offset>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<Entity
 ///
 /// See ISO 21496-1:2025 for the payload format.
 // ISO 21496-1 flag bits. These values must match the (private) constants
-// in `zencodec::gainmap::FLAG_*`. They are redefined here so that
-// zenavif-parse can keep `zencodec` as an optional dependency (the
-// `zencodec` feature only controls the `From`/`Into` impls).
+// in `zencodec::gainmap::FLAG_*`. They are redefined here as local
+// constants to keep the parsing path decoupled from the public
+// `zencodec` constants.
 //
 // If either crate changes a flag value the other must be updated — the
 // shared fixture corpus under `gainmap-spec-status/test-vectors/` is the
