@@ -70,3 +70,4 @@ copter-report/
 .external-cache/
 Cargo.toml.original.txt
 *.rs.local
+.workongoing

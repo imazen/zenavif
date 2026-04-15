@@ -242,6 +242,8 @@ static ENCODE_DESCRIPTORS: &[PixelDescriptor] = &[
     PixelDescriptor::RGB8_SRGB,
     PixelDescriptor::RGBA8_SRGB,
     PixelDescriptor::BGRA8_SRGB,
+    PixelDescriptor::RGBX8_SRGB,
+    PixelDescriptor::BGRX8_SRGB,
     PixelDescriptor::GRAY8_SRGB,
     PixelDescriptor::RGBF32_LINEAR,
     PixelDescriptor::RGBAF32_LINEAR,
@@ -1154,6 +1156,46 @@ impl zencodec::encode::Encoder for AvifEncoder {
                     .collect();
                 let img = imgref::ImgVec::new(rgba, w, h);
                 let result = crate::encode_rgba8(img.as_ref(), &cfg, stop)?;
+                self.make_output(result.avif_file)
+            }
+            PixelFormat::Rgbx8 => {
+                // Byte 3 is padding — strip to 3-channel RGB.
+                let raw = pixels.contiguous_bytes();
+                let w = pixels.width() as usize;
+                let h = pixels.rows() as usize;
+                self.check_limits(w, h, 3)?;
+                let cfg = self.build_config();
+                let stop = self.stop_token();
+                let rgb: Vec<Rgb<u8>> = raw
+                    .chunks_exact(4)
+                    .map(|c| Rgb {
+                        r: c[0],
+                        g: c[1],
+                        b: c[2],
+                    })
+                    .collect();
+                let img = imgref::ImgVec::new(rgb, w, h);
+                let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
+                self.make_output(result.avif_file)
+            }
+            PixelFormat::Bgrx8 => {
+                // BGRA layout with padding byte — swap B↔R and strip to RGB.
+                let raw = pixels.contiguous_bytes();
+                let w = pixels.width() as usize;
+                let h = pixels.rows() as usize;
+                self.check_limits(w, h, 3)?;
+                let cfg = self.build_config();
+                let stop = self.stop_token();
+                let rgb: Vec<Rgb<u8>> = raw
+                    .chunks_exact(4)
+                    .map(|c| Rgb {
+                        r: c[2],
+                        g: c[1],
+                        b: c[0],
+                    })
+                    .collect();
+                let img = imgref::ImgVec::new(rgb, w, h);
+                let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
                 self.make_output(result.avif_file)
             }
             _ => Err(at!(Error::UnsupportedOperation(
@@ -2819,6 +2861,110 @@ mod tests {
         let img = Img::new(pixels, 8, 8);
         let output = enc.encode_gray8(img.as_ref()).unwrap();
         assert!(!output.data().is_empty());
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn supported_descriptors_includes_rgbx_and_bgrx() {
+        use zencodec::encode::EncoderConfig;
+        let desc = AvifEncoderConfig::supported_descriptors();
+        assert!(
+            desc.contains(&PixelDescriptor::RGBX8_SRGB),
+            "RGBX8_SRGB must be in supported_descriptors"
+        );
+        assert!(
+            desc.contains(&PixelDescriptor::BGRX8_SRGB),
+            "BGRX8_SRGB must be in supported_descriptors"
+        );
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encoding_rgbx8() {
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+
+        let w = 16u32;
+        let h = 16u32;
+        // RGBX layout: byte 3 is padding; set to non-opaque value to catch leaks.
+        let mut buf = Vec::with_capacity((w * h * 4) as usize);
+        for _ in 0..(w * h) {
+            buf.extend_from_slice(&[255, 128, 0, 0x13]);
+        }
+        let slice =
+            PixelSlice::new(&buf, w, h, (w * 4) as usize, PixelDescriptor::RGBX8_SRGB).unwrap();
+
+        let enc = AvifEncoderConfig::new().with_quality(80.0);
+        let output = enc.job().encoder().unwrap().encode(slice.erase()).unwrap();
+        assert!(!output.data().is_empty());
+        assert_eq!(output.format(), ImageFormat::Avif);
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encoding_bgrx8() {
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+
+        let w = 16u32;
+        let h = 16u32;
+        let mut buf = Vec::with_capacity((w * h * 4) as usize);
+        for _ in 0..(w * h) {
+            // BGR order, pad byte non-opaque
+            buf.extend_from_slice(&[0, 128, 255, 0x42]);
+        }
+        let slice =
+            PixelSlice::new(&buf, w, h, (w * 4) as usize, PixelDescriptor::BGRX8_SRGB).unwrap();
+
+        let enc = AvifEncoderConfig::new().with_quality(80.0);
+        let output = enc.job().encoder().unwrap().encode(slice.erase()).unwrap();
+        assert!(!output.data().is_empty());
+        assert_eq!(output.format(), ImageFormat::Avif);
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encode_rgbx8_matches_rgb8() {
+        // RGBX8 should produce the same bitstream as an equivalent RGB8 encode
+        // (both route through crate::encode_rgb8 with identical RGB bytes).
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+
+        let w = 16u32;
+        let h = 16u32;
+
+        let mut rgbx = Vec::with_capacity((w * h * 4) as usize);
+        let mut rgb = Vec::with_capacity((w * h * 3) as usize);
+        for i in 0..(w * h) {
+            let r = (i & 0xff) as u8;
+            let g = ((i >> 1) & 0xff) as u8;
+            let b = ((i >> 2) & 0xff) as u8;
+            rgbx.extend_from_slice(&[r, g, b, 0x55]);
+            rgb.extend_from_slice(&[r, g, b]);
+        }
+
+        let rgbx_slice =
+            PixelSlice::new(&rgbx, w, h, (w * 4) as usize, PixelDescriptor::RGBX8_SRGB).unwrap();
+        let rgb_slice =
+            PixelSlice::new(&rgb, w, h, (w * 3) as usize, PixelDescriptor::RGB8_SRGB).unwrap();
+
+        let rgbx_out = AvifEncoderConfig::new()
+            .with_quality(80.0)
+            .job()
+            .encoder()
+            .unwrap()
+            .encode(rgbx_slice.erase())
+            .unwrap();
+        let rgb_out = AvifEncoderConfig::new()
+            .with_quality(80.0)
+            .job()
+            .encoder()
+            .unwrap()
+            .encode(rgb_slice.erase())
+            .unwrap();
+
+        assert_eq!(
+            rgbx_out.data(),
+            rgb_out.data(),
+            "RGBX8 must encode identically to RGB8 (padding byte stripped)"
+        );
     }
 
     #[cfg(feature = "encode")]
