@@ -74,7 +74,6 @@ std::fs::write("output.avif", &encoded.avif_file).unwrap();
 | `encode-imazen` | Encoding with zenrav1e fork extras (QM, lossless) |
 | `unsafe-asm` | Decoding with hand-written assembly via C FFI (fastest, uses unsafe) |
 | `zencodec` | Integration with [zencodec](https://crates.io/crates/zencodec) trait hierarchy |
-| `zennode` | Pipeline node definitions for [zennode](https://github.com/imazen/zennode) graph engine |
 
 ## Building
 
