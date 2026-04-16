@@ -53,7 +53,7 @@ use almost_enough::{StopToken, Unstoppable};
 use imgref::Img;
 use rgb::Rgb;
 use zensim::{Zensim, ZensimProfile};
-use zensim_regress::{check_regression, RegressionTolerance};
+use zensim_regress::{RegressionTolerance, check_regression};
 
 #[derive(Debug, Clone, Copy)]
 enum TriState {
@@ -82,9 +82,9 @@ impl TriState {
 
 #[derive(Debug, Clone, Copy)]
 enum Bottomup {
-    Auto,    // let ravif pick
+    Auto, // let ravif pick
     Force(bool),
-    Both,    // sweep both Some(true) and Some(false)
+    Both, // sweep both Some(true) and Some(false)
 }
 
 impl Bottomup {
@@ -160,7 +160,7 @@ struct Args {
 impl Args {
     fn print_help(bin: &str) {
         eprintln!(
-"Usage: {bin} [flags]
+            "Usage: {bin} [flags]
 
 Encode-quality sweep for AVIF. Writes a TSV with columns:
   speed  quality  qm  bottomup  bit_depth  encode_ms  size_bytes  compression_ratio  zensim
@@ -194,7 +194,10 @@ Range syntax: START..=END:STEP (inclusive) or START..END:STEP (exclusive).
         let mut threads: Option<usize> = None;
 
         let raw: Vec<String> = env::args().collect();
-        let bin = raw.first().cloned().unwrap_or_else(|| "encode_sweep".into());
+        let bin = raw
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "encode_sweep".into());
         let mut it = raw.into_iter().skip(1);
         while let Some(arg) = it.next() {
             match arg.as_str() {
@@ -264,7 +267,11 @@ fn load_rgb(path: &Path) -> Result<Img<Vec<Rgb<u8>>>, String> {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let pixels: Vec<Rgb<u8>> = img
         .pixels()
-        .map(|p| Rgb { r: p[0], g: p[1], b: p[2] })
+        .map(|p| Rgb {
+            r: p[0],
+            g: p[1],
+            b: p[2],
+        })
         .collect();
     Ok(Img::new(pixels, w, h))
 }
