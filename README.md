@@ -63,6 +63,94 @@ let encoded = zenavif::encode(&image).unwrap();
 std::fs::write("output.avif", &encoded.avif_file).unwrap();
 ```
 
+### Encoding with custom config
+
+```rust,ignore
+use zenavif::{EncoderConfig, encode_rgb8};
+use almost_enough::Unstoppable;
+
+let config = EncoderConfig::new()
+    .quality(80.0)   // 1.0 (worst) to 100.0 (best)
+    .speed(4);       // 1 (slowest) to 10 (fastest)
+
+let encoded = encode_rgb8(img.as_ref(), &config, Unstoppable.into_token()).unwrap();
+std::fs::write("output.avif", &encoded.avif_file).unwrap();
+```
+
+## Encoder configuration guide
+
+### Speed vs quality tradeoffs
+
+Speed controls how much time the encoder spends optimizing. Higher speeds
+produce slightly larger files but encode much faster. Quality is comparable
+across speeds — the main tradeoff is encode time vs file size, not visual quality.
+
+Measured on a 512×512 photographic image (CID22 corpus), q80, 8-bit
+([full sweep data](benchmarks/avif_encode_fine_sweep_2026-04-16.tsv)):
+
+| Speed | Encode time | File size | Compression ratio | zensim |
+|------:|:----------:|:---------:|:-----------------:|:------:|
+| 1 | 1.1s | 55.9K | 14.1x | 85.4 |
+| 2 | 1.1s | 55.9K | 14.1x | 85.4 |
+| 4 | 0.8s | 56.5K | 13.9x | 85.5 |
+| 6 | 0.2s | 56.8K | 13.8x | 85.5 |
+| 10 | 78ms | 59.0K | 13.3x | 85.4 |
+
+Speed 4 is a good default. Speed 6 gives 4x faster encoding with identical quality.
+Speed 10 is best for real-time/interactive use — still good quality at ~80ms per frame.
+Speed 1-2 produce marginally smaller files but take 5-14x longer than speed 4.
+
+### Quality parameter
+
+The `quality` parameter maps to an AV1 quantizer index:
+
+| Quality | Use case | Typical compression |
+|--------:|----------|:-------------------:|
+| 30 | Thumbnails, previews | 100-120x |
+| 50 | Web images (aggressive) | 40-45x |
+| 65 | Web images (balanced) | 22-25x |
+| 80 | High quality (default) | 12-14x |
+| 95 | Near-lossless | 5-6x |
+| 100 | Lossless | 2-3x |
+
+### Quantization matrices (QM)
+
+With the `encode-imazen` feature, quantization matrices are enabled by default.
+QM applies frequency-dependent quantization weights that save **9-13% file size**
+with negligible quality impact (<1 zensim point at all speeds and quality levels).
+
+QM is automatically disabled for lossless encoding (quality 100).
+
+```rust,ignore
+// QM is on by default. To disable:
+let config = EncoderConfig::new()
+    .quality(80.0)
+    .with_qm(false);
+```
+
+### Bit depth
+
+The encoder matches output bit depth to input type by default:
+
+- `encode_rgb8` / `encode_rgba8` → 8-bit AV1
+- `encode_rgb16` / `encode_rgba16` → 10-bit AV1
+
+Override with `.bit_depth(EncodeBitDepth::Ten)` if you want 10-bit output
+from 8-bit input (slightly better quality at the cost of larger files and
+wider decoder compatibility requirements).
+
+### Decoder output depth
+
+The decoder outputs at the AV1 bitstream's native bit depth. Files encoded
+at 10-bit (common from other encoders that default to 10-bit) produce 16-bit
+`PixelBuffer` output. Use `prefer_8bit(true)` to downscale to 8-bit:
+
+```rust,ignore
+let config = DecoderConfig::new().prefer_8bit(true);
+let image = decode_with(&avif_data, &config, &Unstoppable).unwrap();
+// image is Rgb8 even if the AV1 bitstream was 10-bit
+```
+
 ## Features
 
 | Feature | Description |
