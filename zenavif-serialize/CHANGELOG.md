@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- Expanded `.gitignore` to cover tooling artifacts (`.superwork/`, `.claude/`, `.zenbench/`, `copter-report/`, profraw/profdata, fuzz logs, Cargo.toml backups) (4a5c9ca)
+
 ## 0.1.3 (2026-04-01)
 
 ### Added
