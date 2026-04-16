@@ -591,8 +591,11 @@ fn build_ravif_encoder(
     }
     #[cfg(feature = "encode-imazen")]
     {
+        // QM must be disabled for lossless (quantizer=0) — it produces
+        // invalid output. Safe for all lossy quality levels (q5-q95).
+        let qm = config.enable_qm && !config.lossless;
         enc = enc
-            .with_qm(config.enable_qm)
+            .with_qm(qm)
             .with_vaq(config.enable_vaq, config.vaq_strength)
             .with_still_image_tuning(config.tune_still_image)
             .with_lossless(config.lossless);

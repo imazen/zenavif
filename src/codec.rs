@@ -130,6 +130,10 @@ impl AvifEncoderConfig {
         self.lossless = lossless;
         if lossless {
             self.inner = self.inner.quality(100.0);
+            #[cfg(feature = "encode-imazen")]
+            {
+                self.inner = self.inner.with_lossless(true);
+            }
         }
         self
     }
@@ -429,6 +433,10 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
         self.lossless = lossless;
         if lossless {
             self.inner = self.inner.quality(100.0);
+            #[cfg(feature = "encode-imazen")]
+            {
+                self.inner = self.inner.with_lossless(true);
+            }
         }
         self
     }
