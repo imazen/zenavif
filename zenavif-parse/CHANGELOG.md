@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `GainMapMetadata::writer_version: u16` field — round-tripped through parse and
+  `to_bytes()` instead of being dropped on parse and hardcoded to 0 on serialize
+  (9ddab78).
+
+### Changed
+- `zencodec` is now a required dependency; the `From`/`Into` impls between
+  `GainMapMetadata` and `zencodec::GainMapParams` are always compiled (243ed6f).
+- Test suite no longer wraps parser calls in `catch_unwind`. A parser processing
+  untrusted input must never panic, so any reintroduced `debug_assert` or unwrap
+  surfaces as a loud test failure rather than a silently-swallowed panic
+  (065bab2).
+
+### Fixed
+- Parser no longer panics on several malformed AVIF inputs (e4e8eca, #2).
+- Accept `pict` in addition to `auxv` as the handler_type for animated alpha
+  auxiliary tracks; some AVIF sequences use `pict` for the alpha track that
+  references the color track via `tref`/`auxl` (7531df5, #1).
+- `parse_tone_map_image` now honours ISO 21496-1 bit 3 (`FLAG_COMMON_DENOMINATOR`),
+  reading the compact encoding and expanding each fraction to `(num, common_d)`
+  form. Four previously-failing ISO 21496-1 fixtures (05, 06, 21, 22) now pass;
+  added a 22-case fixture suite covering direction, channels, common-denom,
+  negative values, boundary fractions, varied denominators, gamma, writer_version,
+  and all-flags-combined cases (9ddab78, #4).
+- Corrected the 0.6.0 entry's description of `zencodec` (the dep is unconditional,
+  not an optional feature) and dropped an intra-doc link to `read_avif` that was
+  unresolved in default-feature builds; replaced with plain backticks. Refreshed
+  a stale inline comment near the ISO 21496-1 flag constants (f2224a2).
+
 ## 0.6.0 — 2026-04-01
 
 ### Added
