@@ -9,7 +9,7 @@ categories = ["multimedia::images"]
 keywords = ["avif", "decoder", "encoder", "av1", "image"]
 repository = "https://github.com/imazen/zenavif"
 documentation = "https://docs.rs/zenavif"
-exclude = ["debug_simd", "Dockerfile.references", "Cross.toml", "scripts/", "tests/vectors/", "tests/zenavif-references/", "tests/references/", "benchmarks/", "CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md", ".claude/", ".superwork/", ".zenbench/", "copter-report/", ".github/", "justfile", "Cargo.toml.original.txt", "fuzz/"]
+include = ["/src/**", "/README.md", "/CHANGELOG.md", "/LICENSE*", "/tests/**/*.rs", "/benches/**", "/examples/**"]
 
 [dependencies]
 # rav1d: C FFI-based decoder for asm feature (fastest)
