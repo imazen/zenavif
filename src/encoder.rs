@@ -52,7 +52,7 @@ pub enum EncodeBitDepth {
     Eight,
     /// 10 bits per channel
     Ten,
-    /// Automatic selection based on input
+    /// Match input depth: 8-bit input → 8-bit AV1, 16-bit input → 10-bit AV1
     #[default]
     Auto,
 }
@@ -485,18 +485,30 @@ fn cicp_to_transfer_characteristics(tc: u8) -> ravif::TransferCharacteristics {
 }
 
 /// Build a ravif Encoder from our config
+/// Resolve `EncodeBitDepth::Auto` based on whether the input is 8-bit or 16-bit.
+fn resolve_bit_depth(configured: EncodeBitDepth, input_is_16bit: bool) -> ravif::BitDepth {
+    match configured {
+        EncodeBitDepth::Eight => ravif::BitDepth::Eight,
+        EncodeBitDepth::Ten => ravif::BitDepth::Ten,
+        EncodeBitDepth::Auto => {
+            if input_is_16bit {
+                ravif::BitDepth::Ten
+            } else {
+                ravif::BitDepth::Eight
+            }
+        }
+    }
+}
+
 fn build_ravif_encoder(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
+    input_is_16bit: bool,
 ) -> ravif::Encoder<'_> {
     let mut enc = ravif::Encoder::new()
         .with_quality(config.quality)
         .with_speed(config.speed)
-        .with_bit_depth(match config.bit_depth {
-            EncodeBitDepth::Eight => ravif::BitDepth::Eight,
-            EncodeBitDepth::Ten => ravif::BitDepth::Ten,
-            EncodeBitDepth::Auto => ravif::BitDepth::Auto,
-        })
+        .with_bit_depth(resolve_bit_depth(config.bit_depth, input_is_16bit))
         .with_internal_color_model(match config.color_model {
             EncodeColorModel::YCbCr => ravif::ColorModel::YCbCr,
             EncodeColorModel::Rgb => ravif::ColorModel::RGB,
@@ -609,7 +621,7 @@ pub fn encode_rgb8(
         return encode_rgb8_svtav1(img, config);
     }
 
-    let enc = build_ravif_encoder(config, stop);
+    let enc = build_ravif_encoder(config, stop, false);
     let result = enc
         .encode_rgb(img)
         .map_err(|e: ravif::Error| at!(Error::Encode(e.to_string())))?;
@@ -690,7 +702,7 @@ pub fn encode_rgba8(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let enc = build_ravif_encoder(config, stop);
+    let enc = build_ravif_encoder(config, stop, false);
     let result = enc
         .encode_rgba(img)
         .map_err(|e: ravif::Error| at!(Error::Encode(e.to_string())))?;
@@ -719,7 +731,7 @@ pub fn encode_rgb16(
 ) -> Result<EncodedImage> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let enc = build_ravif_encoder(config, stop);
+    let enc = build_ravif_encoder(config, stop, true);
     let width = img.width();
     let height = img.height();
     let pixels: Vec<[u16; 3]> = img
@@ -771,7 +783,7 @@ pub fn encode_rgba16(
 ) -> Result<EncodedImage> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let enc = build_ravif_encoder(config, stop);
+    let enc = build_ravif_encoder(config, stop, true);
     let width = img.width();
     let height = img.height();
     let pixels: Vec<[u16; 3]> = img
@@ -851,7 +863,7 @@ pub fn encode_animation_rgb8(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let enc = build_ravif_encoder(config, stop);
+    let enc = build_ravif_encoder(config, stop, false);
 
     let ravif_frames: Vec<ravif::AnimFrame<'_>> = frames
         .iter()
@@ -888,7 +900,7 @@ pub fn encode_animation_rgba8(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let enc = build_ravif_encoder(config, stop);
+    let enc = build_ravif_encoder(config, stop, false);
 
     let ravif_frames: Vec<ravif::AnimFrameRgba<'_>> = frames
         .iter()
@@ -945,7 +957,7 @@ pub fn encode_animation_rgb16(
 ) -> Result<EncodedAnimation> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let enc = build_ravif_encoder(config, stop);
+    let enc = build_ravif_encoder(config, stop, true);
 
     // Scale each frame from 0–65535 to 10-bit (0–1023)
     let scaled_frames: Vec<ImgVec<RGB16>> = frames
@@ -1003,7 +1015,7 @@ pub fn encode_animation_rgba16(
 ) -> Result<EncodedAnimation> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let enc = build_ravif_encoder(config, stop);
+    let enc = build_ravif_encoder(config, stop, true);
 
     // Scale each frame from 0–65535 to 10-bit (0–1023)
     let scaled_frames: Vec<ImgVec<RGBA16>> = frames

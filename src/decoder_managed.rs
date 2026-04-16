@@ -6,7 +6,7 @@
 #![deny(unsafe_code)]
 
 use crate::config::DecoderConfig;
-use crate::convert::{add_alpha8, add_alpha16, scale_pixels_to_u16};
+use crate::convert::{add_alpha8, add_alpha16, downscale_to_8bit, scale_pixels_to_u16};
 use crate::error::{Error, Result};
 use crate::image::{
     ChromaSampling, ColorPrimaries, ColorRange, DecodedAnimation, DecodedAnimationInfo,
@@ -122,6 +122,7 @@ fn convert_chroma_sampling(layout: PixelLayout) -> ChromaSampling {
 pub struct ManagedAvifDecoder {
     decoder: Rav1dDecoder,
     parser: zenavif_parse::AvifParser<'static>,
+    prefer_8bit: bool,
 }
 
 impl ManagedAvifDecoder {
@@ -173,7 +174,11 @@ impl ManagedAvifDecoder {
             }
         }
 
-        Ok(Self { decoder, parser })
+        Ok(Self {
+            decoder,
+            parser,
+            prefer_8bit: config.prefer_8bit,
+        })
     }
 
     /// Decode a single AV1 frame, handling progressive/multi-layer streams transparently.
@@ -917,7 +922,7 @@ impl ManagedAvifDecoder {
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         let info_clone = info.clone();
-        let pixels = match bit_depth {
+        let mut pixels = match bit_depth {
             8 => self.convert_8bit(primary, alpha, info, stop),
             10 | 12 => self.convert_16bit(primary, alpha, info, stop),
             _ => Err(at!(Error::Decode {
@@ -925,6 +930,11 @@ impl ManagedAvifDecoder {
                 msg: "Unsupported bit depth",
             })),
         }?;
+
+        if self.prefer_8bit && bit_depth > 8 {
+            pixels = downscale_to_8bit(pixels);
+        }
+
         Ok((pixels, info_clone))
     }
 

@@ -19,6 +19,10 @@ pub struct DecoderConfig {
     pub(crate) parser_total_megapixels_limit: Option<u32>,
     /// Parser max animation frames (forwarded to zenavif-parse).
     pub(crate) parser_max_animation_frames: Option<u32>,
+    /// When true, 10/12-bit AV1 content is downscaled to 8-bit RGB output.
+    /// Most AVIF encoders (including zenravif) default to 10-bit encoding
+    /// even for 8-bit input. This option returns 8-bit output for those files.
+    pub(crate) prefer_8bit: bool,
 }
 
 impl Default for DecoderConfig {
@@ -34,6 +38,7 @@ impl Default for DecoderConfig {
             parser_peak_memory_limit: None,
             parser_total_megapixels_limit: None,
             parser_max_animation_frames: None,
+            prefer_8bit: false,
         }
     }
 }
@@ -86,6 +91,15 @@ impl DecoderConfig {
     /// up to SSE4.1 but disables AVX2.
     pub fn cpu_flags_mask(mut self, mask: u32) -> Self {
         self.cpu_flags_mask = mask;
+        self
+    }
+
+    /// Downscale 10/12-bit AV1 output to 8-bit RGB.
+    ///
+    /// Default: `false`. Enable when decoding files encoded at 10-bit from
+    /// 8-bit sources and you want 8-bit output without an external conversion.
+    pub fn prefer_8bit(mut self, prefer: bool) -> Self {
+        self.prefer_8bit = prefer;
         self
     }
 }

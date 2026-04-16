@@ -124,6 +124,9 @@ zencodec = ["dep:zencodec", "zenavif-parse/zencodec"]
 # Expose internal YUV conversion modules for profiling/debugging. Not public API.
 _dev = []
 
+[profile.test]
+opt-level = 2
+
 [lints.rust.unexpected_cfgs]
 level = "warn"
 check-cfg = ['cfg(feature, values("encode-svtav1"))']

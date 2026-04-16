@@ -43,6 +43,46 @@ fn scale_to_u16(v: u16, bit_depth: u8) -> u16 {
     (v << shift) | (v >> (bit_depth - shift))
 }
 
+/// Downscale a 16-bit PixelBuffer to 8-bit by taking the high byte of each channel.
+///
+/// Converts Rgb16 → Rgb8 and Rgba16 → Rgba8 in-place (reallocates to a new buffer).
+/// Values are assumed to be in full u16 range (0–65535) after `scale_pixels_to_u16`.
+pub fn downscale_to_8bit(image: PixelBuffer) -> PixelBuffer {
+    let desc = image.descriptor();
+    let w = image.width();
+    let h = image.height();
+    if desc.layout_compatible(PixelDescriptor::RGB16) {
+        let src = image.try_as_imgref::<Rgb<u16>>().unwrap();
+        let out: Vec<Rgb<u8>> = src
+            .pixels()
+            .map(|px| Rgb {
+                r: (px.r >> 8) as u8,
+                g: (px.g >> 8) as u8,
+                b: (px.b >> 8) as u8,
+            })
+            .collect();
+        PixelBuffer::from_pixels(out, w, h)
+            .expect("allocation should succeed for same dimensions")
+            .into()
+    } else if desc.layout_compatible(PixelDescriptor::RGBA16) {
+        let src = image.try_as_imgref::<Rgba<u16>>().unwrap();
+        let out: Vec<Rgba<u8>> = src
+            .pixels()
+            .map(|px| Rgba {
+                r: (px.r >> 8) as u8,
+                g: (px.g >> 8) as u8,
+                b: (px.b >> 8) as u8,
+                a: (px.a >> 8) as u8,
+            })
+            .collect();
+        PixelBuffer::from_pixels(out, w, h)
+            .expect("allocation should succeed for same dimensions")
+            .into()
+    } else {
+        image
+    }
+}
+
 /// Scale all channels in a 16-bit PixelBuffer from native bit depth to full u16 range.
 ///
 /// This converts e.g. 10-bit values (0–1023) to full 16-bit (0–65535) using

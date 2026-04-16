@@ -543,8 +543,9 @@ fn animation_encode_decode_roundtrip_rgb16() {
     );
     assert_eq!(encoded.frame_count, 3);
 
-    // Decode it back — should produce 16-bit output (10-bit source)
-    let decoded = decode_animation(&encoded.avif_file).unwrap();
+    // Decode with prefer_8bit(false) to get native 16-bit output
+    let config = DecoderConfig::new().prefer_8bit(false);
+    let decoded = decode_animation_with(&encoded.avif_file, &config, &Unstoppable).unwrap();
     assert_eq!(decoded.frames.len(), 3);
     assert_eq!(decoded.info.frame_count, 3);
 
@@ -553,7 +554,7 @@ fn animation_encode_decode_roundtrip_rgb16() {
         assert_eq!(frame.pixels.height(), 64, "frame {i} height");
         assert_eq!(frame.duration_ms, 100, "frame {i} duration");
 
-        // 10-bit source should decode to 16-bit output
+        // 10-bit source with prefer_8bit(false) should decode to 16-bit output
         let is_16bit = frame.pixels.descriptor().channel_type().byte_size() == 2;
         assert!(
             is_16bit,
@@ -614,7 +615,9 @@ fn animation_encode_decode_roundtrip_rgba16() {
         encoded.avif_file.len()
     );
 
-    let decoded = decode_animation(&encoded.avif_file).unwrap();
+    // Decode with prefer_8bit(false) to get native 16-bit output
+    let dec_config = DecoderConfig::new().prefer_8bit(false);
+    let decoded = decode_animation_with(&encoded.avif_file, &dec_config, &Unstoppable).unwrap();
     assert_eq!(decoded.frames.len(), 2);
     assert!(decoded.info.has_alpha, "roundtrip should preserve alpha");
 

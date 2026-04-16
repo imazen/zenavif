@@ -3,7 +3,7 @@
 #![allow(unsafe_code)]
 
 use crate::config::DecoderConfig;
-use crate::convert::{add_alpha8, add_alpha16, scale_pixels_to_u16};
+use crate::convert::{add_alpha8, add_alpha16, downscale_to_8bit, scale_pixels_to_u16};
 use crate::error::{Error, Result};
 use crate::image::{
     ChromaSampling, ColorPrimaries, ColorRange, ImageInfo, MatrixCoefficients,
@@ -702,6 +702,10 @@ impl AvifDecoder {
         // Scale 10/12-bit output to full u16 range
         if bit_depth > 8 && bit_depth < 16 {
             scale_pixels_to_u16(&mut image, bit_depth);
+        }
+
+        if self.config.prefer_8bit && bit_depth > 8 {
+            image = downscale_to_8bit(image);
         }
 
         Ok(image)
