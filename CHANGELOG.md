@@ -55,6 +55,13 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   profile, reflecting the AVIF/MIAF precedence of `ICC > nclx > AV1 SPS
   CICP`. When no `colr` box is present, CICP (populated from nclx or SPS
   fallback) is the authoritative colour description (7d6b4e6, #3).
+- `examples/encode_sweep.rs` — committed harness that regenerates the
+  per-image TSVs under `benchmarks/`. CLI accepts `--image`, `--speeds`,
+  `--qualities` (list or `START..=END:STEP`), `--qm {off,on,both}`, and
+  `--force-bottomup {auto,off,on,both}` — the last is what reproduces
+  zenrav1e#6's scenario now that ravif/40ddb66 disables bottom-up by
+  default. `just sweep -- <flags>` is the shortcut. Gated on
+  `encode-imazen,encode-threading`.
 
 ## [0.1.4] - 2026-04-05
 

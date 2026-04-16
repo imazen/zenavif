@@ -83,6 +83,11 @@ download-vectors:
 test-integration:
     cargo test --test integration_corpus -- --ignored --nocapture
 
+# Encode-quality sweep. Pass extra flags after `--`, e.g.
+#   just sweep -- --image /path/to/ref.png --speeds 1,2,4 --force-bottomup both
+sweep *ARGS:
+    cargo run --release --example encode_sweep --features encode-imazen,encode-threading -- {{ARGS}}
+
 # Download vectors and run integration tests
 test-all: download-vectors test-integration
 

@@ -103,6 +103,10 @@ required-features = ["_dev"]
 name = "yuv_profile"
 required-features = ["_dev"]
 
+[[example]]
+name = "encode_sweep"
+required-features = ["encode-imazen", "encode-threading"]
+
 [features]
 default = []
 # Decode with hand-written assembly via C FFI (fastest, uses unsafe)
