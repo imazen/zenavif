@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### QUEUED BREAKING CHANGES
+- Restore `GainMapMetadata::writer_version: u16` field for ISO 21496-1
+  round-trip fidelity. Removed in 0.6.2 to avoid a semver break; should
+  come back with `#[non_exhaustive]` on `GainMapMetadata` in the next
+  minor bump.
+
 ## [0.6.2] - 2026-04-17
 
 ### Changed
