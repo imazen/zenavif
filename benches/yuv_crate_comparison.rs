@@ -7,7 +7,7 @@ use zenbench::{criterion_group, criterion_main};
 
 fn prepare_test_data(width: usize, height: usize) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let y_plane = vec![128u8; width * height];
-    let uv_size = ((width + 1) / 2) * ((height + 1) / 2);
+    let uv_size = (width.div_ceil(2)) * (height.div_ceil(2));
     let u_plane = vec![128u8; uv_size];
     let v_plane = vec![128u8; uv_size];
     (y_plane, u_plane, v_plane)
@@ -30,9 +30,9 @@ fn bench_comparison(c: &mut Criterion) {
                 black_box(&y_plane),
                 black_box(width),
                 black_box(&u_plane),
-                black_box((width + 1) / 2),
+                black_box(width.div_ceil(2)),
                 black_box(&v_plane),
-                black_box((width + 1) / 2),
+                black_box(width.div_ceil(2)),
                 black_box(width),
                 black_box(height),
                 OurYuvRange::Full,
@@ -47,9 +47,9 @@ fn bench_comparison(c: &mut Criterion) {
             y_plane: &y_plane,
             y_stride: width as u32,
             u_plane: &u_plane,
-            u_stride: ((width + 1) / 2) as u32,
+            u_stride: (width.div_ceil(2)) as u32,
             v_plane: &v_plane,
-            v_stride: ((width + 1) / 2) as u32,
+            v_stride: (width.div_ceil(2)) as u32,
             width: width as u32,
             height: height as u32,
         };

@@ -10,7 +10,7 @@ fn main() {
 
     // Prepare test data
     let y_plane = vec![128u8; width * height];
-    let uv_size = ((width + 1) / 2) * ((height + 1) / 2);
+    let uv_size = (width.div_ceil(2)) * (height.div_ceil(2));
     let u_plane = vec![128u8; uv_size];
     let v_plane = vec![128u8; uv_size];
 
@@ -20,9 +20,9 @@ fn main() {
             &y_plane,
             width,
             &u_plane,
-            (width + 1) / 2,
+            width.div_ceil(2),
             &v_plane,
-            (width + 1) / 2,
+            width.div_ceil(2),
             width,
             height,
             YuvRange::Full,
@@ -37,9 +37,9 @@ fn main() {
             &y_plane,
             width,
             &u_plane,
-            (width + 1) / 2,
+            width.div_ceil(2),
             &v_plane,
-            (width + 1) / 2,
+            width.div_ceil(2),
             width,
             height,
             YuvRange::Full,

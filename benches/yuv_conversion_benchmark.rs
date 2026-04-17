@@ -25,7 +25,7 @@ fn bench_yuv420_conversion(c: &mut Criterion) {
     for (name, width, height) in sizes {
         // Prepare test data
         let y_plane = vec![128u8; width * height];
-        let uv_size = ((width + 1) / 2) * ((height + 1) / 2);
+        let uv_size = (width.div_ceil(2)) * (height.div_ceil(2));
         let u_plane = vec![128u8; uv_size];
         let v_plane = vec![128u8; uv_size];
 
@@ -40,9 +40,9 @@ fn bench_yuv420_conversion(c: &mut Criterion) {
                         black_box(&y_plane),
                         black_box(w),
                         black_box(&u_plane),
-                        black_box((w + 1) / 2),
+                        black_box(w.div_ceil(2)),
                         black_box(&v_plane),
-                        black_box((w + 1) / 2),
+                        black_box(w.div_ceil(2)),
                         black_box(w),
                         black_box(h),
                         YuvRange::Full,

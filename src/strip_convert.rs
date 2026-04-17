@@ -158,12 +158,8 @@ impl StripConverter {
         let total_per_row = row_bytes_out + row_bytes_in;
 
         // Target ~256 KB working set (fits in L2)
-        let target_bytes = 256 * 1024;
-        let mut h = if total_per_row > 0 {
-            target_bytes / total_per_row
-        } else {
-            16
-        };
+        let target_bytes: usize = 256 * 1024;
+        let mut h = target_bytes.checked_div(total_per_row).unwrap_or(16);
 
         // Clamp to reasonable bounds
         h = h.clamp(2, 64);

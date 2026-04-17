@@ -11,7 +11,7 @@ fn main() {
 
     // Create test pattern with varying Y, U, V values
     let mut y_plane = vec![0u8; width * height];
-    let uv_size = ((width + 1) / 2) * ((height + 1) / 2);
+    let uv_size = width.div_ceil(2) * height.div_ceil(2);
     let mut u_plane = vec![0u8; uv_size];
     let mut v_plane = vec![0u8; uv_size];
 
