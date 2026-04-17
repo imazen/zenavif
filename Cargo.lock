@@ -1909,7 +1909,7 @@ dependencies = [
 
 [[package]]
 name = "zenavif"
-version = "0.1.3"
+version = "0.1.5"
 dependencies = [
  "almost-enough",
  "archmage",
@@ -1981,9 +1981,9 @@ dependencies = [
 
 [[package]]
 name = "zencodec"
-version = "0.1.16"
+version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b86a563becc403bb3e98225c5715711b87cd1c32222659b7d84282c4f5800fe3"
+checksum = "d9d6c5fa157146c173fc779660e52923bc26a6e899891c43457e748b21b47b67"
 dependencies = [
  "almost-enough",
  "enough",
@@ -1993,9 +1993,9 @@ dependencies = [
 
 [[package]]
 name = "zenpixels"
-version = "0.2.7"
+version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a39c7b3b7b7881f6689a556ef3ab1245c1cec2f39f2cd919d92e6ce3d7dcd530"
+checksum = "f5b1f3d117906a196be9b5cfcddb7dd6d79e81e521d2258c31a55a51ea198abe"
 dependencies = [
  "bytemuck",
  "imgref",

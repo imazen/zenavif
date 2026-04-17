@@ -10,6 +10,8 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-04-17
+
 ### Added
 - Encoder `Auto` bit depth now matches input type: 8-bit input produces 8-bit
   AV1 and 16-bit input produces 10-bit AV1. Previously `Auto` always selected
@@ -40,6 +42,7 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   removes (ef0500d).
 - Minor documentation alignment between the zennode feature table in
   `README.md` and `Cargo.toml` (4b3a1df).
+- Bump zencodec to 0.1.19
 
 ### Fixed
 - `EncoderConfig::with_lossless()` and `with_lossless_mode()` (from the
