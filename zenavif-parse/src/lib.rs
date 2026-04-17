@@ -477,13 +477,6 @@ pub struct GainMapMetadata {
     /// When true, the base image is HDR and the alternate is SDR.
     /// Default false = base is SDR, alternate is HDR.
     pub backward_direction: bool,
-    /// Writer version emitted by the producer (`writer_version` field of
-    /// the ISO 21496-1 header). Informational; must be >= `minimum_version`.
-    ///
-    /// Round-tripped through [`GainMapMetadata::to_bytes`]; the previous
-    /// implementation dropped this value on parse and hardcoded `0` on
-    /// serialize.
-    pub writer_version: u16,
     /// Base HDR headroom (numerator).
     pub base_hdr_headroom_n: u32,
     /// Base HDR headroom (denominator).
@@ -522,13 +515,14 @@ impl GainMapMetadata {
     // expanded fields and re-emitting the compact layout when set.
     ///
     /// `version` and `minimum_version` are always written as 0.
-    /// `writer_version` is emitted from `self.writer_version`.
+    /// Writer version is always emitted as `0` (we don't claim any
+    /// extensions beyond the base ISO 21496-1 spec).
     pub fn to_bytes(&self) -> std::vec::Vec<u8> {
         let channel_count = if self.is_multichannel { 3usize } else { 1usize };
         let mut buf = std::vec::Vec::with_capacity(6 + 16 + channel_count * 40);
         buf.push(0u8); // version
         buf.extend_from_slice(&0u16.to_be_bytes()); // minimum_version
-        buf.extend_from_slice(&self.writer_version.to_be_bytes()); // writer_version
+        buf.extend_from_slice(&0u16.to_be_bytes()); // writer_version (always 0)
         let flags = (u8::from(self.is_multichannel) << 7)
             | (u8::from(self.use_base_colour_space) << 6)
             | (u8::from(self.backward_direction) << 2);
@@ -617,9 +611,6 @@ impl From<&zencodec::GainMapParams> for GainMapMetadata {
             is_multichannel: !p.is_single_channel(),
             use_base_colour_space: p.use_base_color_space,
             backward_direction: p.backward_direction,
-            // zencodec::GainMapParams does not carry writer_version — default
-            // to 0 when building a GainMapMetadata from a zencodec value.
-            writer_version: 0,
             base_hdr_headroom_n: headroom_base.numerator,
             base_hdr_headroom_d: headroom_base.denominator,
             alternate_hdr_headroom_n: headroom_alt.numerator,
@@ -3897,11 +3888,14 @@ fn parse_tone_map_image(data: &[u8]) -> Result<GainMapMetadata> {
         channels[2] = channels[0];
     }
 
+    // writer_version is parsed and validated (must be >= minimum_version)
+    // but not stored — we always emit 0 on serialize.
+    let _ = writer_version;
+
     Ok(GainMapMetadata {
         is_multichannel,
         use_base_colour_space,
         backward_direction,
-        writer_version,
         base_hdr_headroom_n,
         base_hdr_headroom_d,
         alternate_hdr_headroom_n,

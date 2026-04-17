@@ -1,6 +1,6 @@
 [package]
 name = "zenavif-parse"
-version = "0.6.1"
+version = "0.6.2"
 authors = [
   "Lilith River <lilith@imazen.io>",
   "Kornel Lesiński <kornel@geekhood.net>",
@@ -38,6 +38,9 @@ walkdir = "2.4.0"
 
 [features]
 eager = []
+# Deprecated no-op: zencodec is now a hard dependency.
+# Kept so existing Cargo.toml entries with features = ["zencodec"] don't break.
+zencodec = []
 # Export symbols for C
 c_api = ["eager"]
 

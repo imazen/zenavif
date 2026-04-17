@@ -2,14 +2,15 @@
 
 ## Unreleased
 
-### Added
-- `GainMapMetadata::writer_version: u16` field — round-tripped through parse and
-  `to_bytes()` instead of being dropped on parse and hardcoded to 0 on serialize
-  (9ddab78).
+## [0.6.2] - 2026-04-17
 
 ### Changed
 - `zencodec` is now a required dependency; the `From`/`Into` impls between
   `GainMapMetadata` and `zencodec::GainMapParams` are always compiled (243ed6f).
+  The `zencodec` feature is kept as a no-op for backward compatibility.
+- `GainMapMetadata::writer_version` field removed — `to_bytes()` always emits
+  writer_version=0. The field was added in unreleased code and never shipped;
+  the parser still validates writer_version >= minimum_version on decode.
 - Test suite no longer wraps parser calls in `catch_unwind`. A parser processing
   untrusted input must never panic, so any reintroduced `debug_assert` or unwrap
   surfaces as a loud test failure rather than a silently-swallowed panic

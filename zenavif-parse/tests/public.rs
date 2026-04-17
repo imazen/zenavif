@@ -2110,17 +2110,25 @@ fn iso21496_corpus_parse_all() {
 
 #[test]
 fn iso21496_full_form_byte_exact_roundtrip() {
-    // Full-form fixtures must survive parse → to_bytes → bytes-equal-input.
+    // Full-form fixtures must survive parse → to_bytes round-trip.
+    // writer_version (bytes 3..5) is always emitted as 0, so we compare
+    // with the input's writer_version zeroed for the byte-exact check.
     for name in FULL_FORM_FIXTURES {
         let bytes = load_fixture(name);
         let meta = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&bytes)
             .unwrap_or_else(|e| panic!("fixture {name}: parse failed: {e:?}"));
         let out = meta.to_bytes();
+        // Zero the writer_version in the expected bytes for comparison.
+        let mut expected = bytes.clone();
+        if expected.len() >= 5 {
+            expected[3] = 0;
+            expected[4] = 0;
+        }
         assert_eq!(
-            out, bytes,
+            out, expected,
             "fixture {name}: to_bytes() not byte-exact ({} vs {} bytes)",
             out.len(),
-            bytes.len()
+            expected.len()
         );
     }
 }
@@ -2158,7 +2166,6 @@ fn iso21496_case_05_common_denom_1ch() {
     assert!(!m.is_multichannel);
     assert!(!m.use_base_colour_space);
     assert!(!m.backward_direction);
-    assert_eq!(m.writer_version, 0);
     assert_eq!((m.base_hdr_headroom_n, m.base_hdr_headroom_d), (0, 1000));
     assert_eq!(
         (m.alternate_hdr_headroom_n, m.alternate_hdr_headroom_d),
@@ -2211,19 +2218,17 @@ fn iso21496_case_06_common_denom_3ch() {
 
 #[test]
 fn iso21496_case_21_writer_version_nonzero() {
-    // 21: full form, writer_version = 1. Must be preserved on parse AND
-    // written on to_bytes, giving a byte-exact round-trip.
+    // 21: full form, writer_version = 1 in input. We parse it (and validate
+    // it >= minimum_version) but don't store it — to_bytes() always emits 0.
     let bytes = load_fixture("21_writer_version_nonzero_avif.bin");
     let m = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&bytes).expect("parse 21");
-    assert_eq!(m.writer_version, 1, "writer_version should parse as 1");
 
     let out = m.to_bytes();
-    assert_eq!(
-        out, bytes,
-        "fixture 21: byte-exact round-trip required for full-form fixtures"
-    );
-    // The writer_version bytes live at offset 3..5.
-    assert_eq!(&out[3..5], &[0x00, 0x01]);
+    // writer_version bytes at offset 3..5 are now always 0.
+    assert_eq!(&out[3..5], &[0x00, 0x00]);
+    // Rest of the payload should match (skip the 2 writer_version bytes).
+    assert_eq!(&out[..3], &bytes[..3], "version + minimum_version match");
+    assert_eq!(&out[5..], &bytes[5..], "payload after writer_version matches");
 }
 
 #[test]
