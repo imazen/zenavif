@@ -604,10 +604,7 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         // Apply threading policy from ResourceLimits.
         // Skip Parallel — it means "use the ambient pool", so keep the codec's
         // own default rather than pinning a thread count.
-        if !matches!(
-            self.limits.threading(),
-            zencodec::ThreadingPolicy::Parallel
-        ) {
+        if !matches!(self.limits.threading(), zencodec::ThreadingPolicy::Parallel) {
             let threads = policy_to_threads(self.limits.threading());
             if threads > 0 {
                 config = config.threads(Some(threads as usize));
@@ -695,10 +692,7 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
             config = config.mirror(mir);
         }
         // Apply threading policy
-        if !matches!(
-            self.limits.threading(),
-            zencodec::ThreadingPolicy::Parallel
-        ) {
+        if !matches!(self.limits.threading(), zencodec::ThreadingPolicy::Parallel) {
             let threads = policy_to_threads(self.limits.threading());
             if threads > 0 {
                 config = config.threads(Some(threads as usize));
@@ -1846,10 +1840,7 @@ impl AvifDecodeJob {
         // Skip Parallel — it means "use the ambient pool", so keep the codec's
         // own default (which is 1 thread to avoid the rav1d-safe DisjointMut
         // race condition).
-        if !matches!(
-            self.limits.threading(),
-            zencodec::ThreadingPolicy::Parallel
-        ) {
+        if !matches!(self.limits.threading(), zencodec::ThreadingPolicy::Parallel) {
             let threads = policy_to_threads(self.limits.threading());
             cfg = cfg.threads(threads);
         }
