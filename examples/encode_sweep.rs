@@ -388,16 +388,38 @@ fn main() -> ExitCode {
                     let ms = t0.elapsed().as_millis();
 
                     let dec_config = zenavif::DecoderConfig::new().prefer_8bit(true);
-                    let score = zenavif::decode_with(&enc.avif_file, &dec_config, &Unstoppable)
-                        .ok()
-                        .and_then(|d| {
-                            d.try_as_imgref::<Rgb<u8>>().map(|decoded| {
-                                check_regression(&zensim, &img.as_ref(), &decoded, &tol)
-                                    .map(|r| r.score())
-                                    .unwrap_or(-999.0)
-                            })
-                        })
-                        .unwrap_or(-999.0);
+                    let dec_result = zenavif::decode_with(&enc.avif_file, &dec_config, &Unstoppable);
+                    let score = match &dec_result {
+                        Ok(d) => match d.try_as_imgref::<Rgb<u8>>() {
+                            Some(decoded) => match check_regression(&zensim, &img.as_ref(), &decoded, &tol) {
+                                Ok(r) => r.score(),
+                                Err(e) => {
+                                    eprintln!(
+                                        "[debug] s{speed} q{} qm={} regression err: {e}",
+                                        quality as u32,
+                                        if qm { "on" } else { "off" }
+                                    );
+                                    -999.0
+                                }
+                            },
+                            None => {
+                                eprintln!(
+                                    "[debug] s{speed} q{} qm={} try_as_imgref<Rgb<u8>> returned None",
+                                    quality as u32,
+                                    if qm { "on" } else { "off" }
+                                );
+                                -999.0
+                            }
+                        },
+                        Err(e) => {
+                            eprintln!(
+                                "[debug] s{speed} q{} qm={} decode err: {e}",
+                                quality as u32,
+                                if qm { "on" } else { "off" }
+                            );
+                            -999.0
+                        }
+                    };
                     let size = enc.avif_file.len();
                     let ratio = raw_size as f64 / size as f64;
 

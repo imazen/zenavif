@@ -591,11 +591,10 @@ fn build_ravif_encoder(
     }
     #[cfg(feature = "encode-imazen")]
     {
-        // QM must be disabled for lossless (quantizer=0) and at q>=96.
-        // At very low quantizers, QM in the imazen/zenrav1e fork produces
-        // severely degraded output (zensim cliff from ~76 at q=95 to ~49 at
-        // q=100, deterministic across speeds). Safe for q5..=q95.
-        let qm = config.enable_qm && !config.lossless && config.quality < 96.0;
+        // QM must be disabled for lossless (quantizer=0); zenravif/zenrav1e
+        // handles all other quality levels (the q>=96 cliff was fixed
+        // upstream in zenrav1e 0.1.4 — see imazen/zenrav1e#7).
+        let qm = config.enable_qm && !config.lossless;
         enc = enc
             .with_qm(qm)
             .with_vaq(config.enable_vaq, config.vaq_strength)

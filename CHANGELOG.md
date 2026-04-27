@@ -10,6 +10,27 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-04-27
+
+### Fixed
+- QM (quantization matrix) quality across the encoding range is now monotonic
+  and tracks QM-off within ±0.4 zensim from q=70 onward. Two bugs in zenrav1e
+  fixed upstream and pulled in via the bumped minimum zenravif dep:
+  (1) `qm_level_for_qindex` now uses libavif's still-image range `[4, 15]`
+  instead of all-intra-video `[4, 10]`, so near-lossless qindex bypasses QM
+  entirely instead of applying weights that multiplied the effective quantizer
+  2-3× on high-frequency coefficients; (2) `using_qmatrix` is now cleared when
+  the frame is coded-lossless or all selected QM levels are 15, fixing AV1
+  spec 6.8.11 conformance and rav1d primary-frame decode at quality=100.
+  Previously zensim collapsed from ~76 at q=95 (QM=on) to ~49 at q=100, and
+  the whole q≥60 range was 11–22 zensim points worse with QM on. See
+  imazen/zenrav1e#7. (0e7cefc, zenrav1e@30d37fc)
+
+### Changed
+- Bump minimum `zenravif` dependency to 0.1.2 (which requires zenrav1e 0.1.4)
+  to pull in the QM and lossless-conformance fixes. The temporary q≥96 QM
+  guard from 0e7cefc is removed — the fix lives upstream now.
+
 ## [0.1.5] - 2026-04-17
 
 ### Added

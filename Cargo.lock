@@ -1909,7 +1909,7 @@ dependencies = [
 
 [[package]]
 name = "zenavif"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "almost-enough",
  "archmage",
@@ -2023,9 +2023,9 @@ dependencies = [
 
 [[package]]
 name = "zenrav1e"
-version = "0.1.2"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea3a0480ad2ecd8da70dceb1d3b74dbe9e807992baccb52b33fa059692e317f7"
+checksum = "3c2f798defdace5a2d991e4f679697768cf256a3cef130bfa2d84702cebf3a76"
 dependencies = [
  "aligned-vec",
  "arbitrary",
@@ -2062,9 +2062,9 @@ dependencies = [
 
 [[package]]
 name = "zenravif"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95695202c3a6790c6811f6b5c3f0e0a3ea85dccb0ac1f4d6a24828c6e4bc08d8"
+checksum = "a588db445fb4871fa1f546eccd739217ac341cda92a0de9ad0972ecf470cb7d0"
 dependencies = [
  "almost-enough",
  "imgref",

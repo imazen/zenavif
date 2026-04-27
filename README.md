@@ -1,7 +1,7 @@
 # zenavif ![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenavif/ci.yml?style=flat-square&label=CI) ![crates.io](https://img.shields.io/crates/v/zenavif?style=flat-square) [![lib.rs](https://img.shields.io/crates/v/zenavif?style=flat-square&label=lib.rs&color=blue)](https://lib.rs/crates/zenavif) ![docs.rs](https://img.shields.io/docsrs/zenavif?style=flat-square) ![license](https://img.shields.io/crates/l/zenavif?style=flat-square)
 
 Pure Rust AVIF image codec. Decodes and encodes AVIF images using
-[rav1d-safe](https://github.com/memorysafety/rav1d) (AV1 decoder) and
+[rav1d-safe](https://github.com/imazen/rav1d-safe) (AV1 decoder) and
 [zenavif-parse](https://crates.io/crates/zenavif-parse) (AVIF container parser).
 
 ## What it does
@@ -116,10 +116,15 @@ The `quality` parameter maps to an AV1 quantizer index:
 ### Quantization matrices (QM)
 
 With the `encode-imazen` feature, quantization matrices are enabled by default.
-QM applies frequency-dependent quantization weights that save **9-13% file size**
-with negligible quality impact (<1 zensim point at all speeds and quality levels).
+QM applies frequency-dependent quantization weights that save **5-12% file size**
+at q≤50 and roughly break even on size at high quality. Quality impact is small:
+within ±0.4 zensim of QM-off from q=70 onward, and ≤2 zensim points at low q
+(measured across 5 CID22 test images at speed 6).
 
-QM is automatically disabled for lossless encoding (quality 100).
+QM is gracefully disabled for lossless encoding (`with_lossless(true)`); at
+quality=100 the underlying encoder also detects that all selected QM levels
+collapse to identity and clears the QM signaling, producing output equivalent
+to QM-off.
 
 ```rust,ignore
 // QM is on by default. To disable:
@@ -194,10 +199,6 @@ This project builds on excellent work by others:
 - **[yuv](https://crates.io/crates/yuv)** (MIT) — YUV to RGB color conversion.
 
 - **[libavif](https://github.com/AOMediaCodec/libavif)** (BSD-2-Clause) — Reference AVIF implementation used for pixel-level verification and behavioral reference.
-
-## Limitations
-
-- The `encode` feature is not yet available from a crates.io build (zenravif path dep needs wiring).
 
 ## Image tech I maintain
 
