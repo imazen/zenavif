@@ -44,16 +44,14 @@ use whereat::{At, at};
 /// - Any other value is the requested thread count.
 fn policy_to_threads(policy: zencodec::ThreadingPolicy) -> u32 {
     match policy {
-        zencodec::ThreadingPolicy::SingleThread => 1,
-        zencodec::ThreadingPolicy::LimitOrSingle { max_threads } => max_threads as u32,
-        zencodec::ThreadingPolicy::LimitOrAny {
-            preferred_max_threads,
-        } => preferred_max_threads as u32,
-        zencodec::ThreadingPolicy::Balanced => {
-            std::thread::available_parallelism().map_or(1, |n| (n.get() as u32 / 2).max(1))
-        }
-        zencodec::ThreadingPolicy::Unlimited => 0, // 0 = auto
-        _ => 0,                                    // future variants: default to auto
+        zencodec::ThreadingPolicy::Sequential => 1,
+        zencodec::ThreadingPolicy::Parallel => 0, // 0 = auto
+        // The enum is #[non_exhaustive] and includes deprecated legacy variants
+        // (SingleThread, LimitOrSingle, LimitOrAny, Balanced, Unlimited). 0
+        // (auto) is the safe default for any of those — the deprecated arms
+        // emit warnings at the construction site, which is where they should
+        // be fixed.
+        _ => 0,
     }
 }
 
@@ -604,10 +602,11 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
             config = config.mirror(mir);
         }
         // Apply threading policy from ResourceLimits.
-        // Skip Unlimited — it means "no preference", so keep the codec's own default.
+        // Skip Parallel — it means "use the ambient pool", so keep the codec's
+        // own default rather than pinning a thread count.
         if !matches!(
             self.limits.threading(),
-            zencodec::ThreadingPolicy::Unlimited
+            zencodec::ThreadingPolicy::Parallel
         ) {
             let threads = policy_to_threads(self.limits.threading());
             if threads > 0 {
@@ -698,7 +697,7 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         // Apply threading policy
         if !matches!(
             self.limits.threading(),
-            zencodec::ThreadingPolicy::Unlimited
+            zencodec::ThreadingPolicy::Parallel
         ) {
             let threads = policy_to_threads(self.limits.threading());
             if threads > 0 {
@@ -1844,11 +1843,12 @@ impl AvifDecodeJob {
             cfg = cfg.frame_size_limit(max_pixels.min(u32::MAX as u64) as u32);
         }
         // Apply threading policy from ResourceLimits.
-        // Skip Unlimited — it means "no preference", so keep the codec's own default
-        // (which is 1 thread to avoid the rav1d-safe DisjointMut race condition).
+        // Skip Parallel — it means "use the ambient pool", so keep the codec's
+        // own default (which is 1 thread to avoid the rav1d-safe DisjointMut
+        // race condition).
         if !matches!(
             self.limits.threading(),
-            zencodec::ThreadingPolicy::Unlimited
+            zencodec::ThreadingPolicy::Parallel
         ) {
             let threads = policy_to_threads(self.limits.threading());
             cfg = cfg.threads(threads);
@@ -3994,7 +3994,7 @@ mod tests {
         ];
         let img = imgref::ImgVec::new(pixels, 16, 16);
         let config = AvifEncoderConfig::new().with_quality(80.0);
-        let limits = ResourceLimits::none().with_threading(zencodec::ThreadingPolicy::SingleThread);
+        let limits = ResourceLimits::none().with_threading(zencodec::ThreadingPolicy::Sequential);
         let encoder = config.job().with_limits(limits).encoder().unwrap();
         let encoded = encoder
             .encode(PixelSlice::from(img.as_ref()).erase())
@@ -4004,7 +4004,7 @@ mod tests {
         // Decode with SingleThread threading policy
         let dec_config = AvifDecoderConfig::new();
         let dec_limits =
-            ResourceLimits::none().with_threading(zencodec::ThreadingPolicy::SingleThread);
+            ResourceLimits::none().with_threading(zencodec::ThreadingPolicy::Sequential);
         let decoded = dec_config
             .job()
             .with_limits(dec_limits)
