@@ -71,3 +71,10 @@ copter-report/
 Cargo.toml.original.txt
 *.rs.local
 .workongoing
+
+# Multi-agent coordination marker (per global CLAUDE.md)
+.workongoing
+
+# In-progress predictor sweep TSVs — final results committed after run completes
+# (with `jj --config snapshot.max-new-file-size=...`).
+benchmarks/rav1e_phase1a_*.tsv

@@ -99,9 +99,9 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
 name = "archmage"
-version = "0.9.22"
+version = "0.9.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4be5852641640dee1a03ac78956c7d9676cd84824a22ca5aa199fa7df730388"
+checksum = "6e6248da30f2b6de70645c7af5b3658cf7d6dde8557a542efab62d21be13567d"
 dependencies = [
  "archmage-macros",
  "safe_unaligned_simd",
@@ -109,9 +109,9 @@ dependencies = [
 
 [[package]]
 name = "archmage-macros"
-version = "0.9.22"
+version = "0.9.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22def31d68654cfa9cb2cd3a1384ac9922b68b70cd3e9aa7c80e1cc3cc913c0d"
+checksum = "0990742e24ab2b89d1b3623113cc474903d84151bef52e8b46d1ced2770c9ebb"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -609,9 +609,9 @@ dependencies = [
 
 [[package]]
 name = "garb"
-version = "0.2.5"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61ee8d8f5e43a45183480ea077c4e046e43ab9604928c87d6ad2080e666dc519"
+checksum = "ae3f56f280a24621bef5778559c4502d10136565311efa37a7b4ca257dce00ed"
 dependencies = [
  "archmage",
  "bytemuck",
@@ -817,9 +817,9 @@ dependencies = [
 
 [[package]]
 name = "magetypes"
-version = "0.9.22"
+version = "0.9.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0147b9e87be8566c570b5264b45a8ccc84f3bd39158678e39ed9102ae242aef"
+checksum = "98970401ec6a338f1762c7986866ead4ab2257747cb0c247c29c0f0c3718b78e"
 dependencies = [
  "archmage",
 ]
@@ -1908,6 +1908,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "zenanalyze"
+version = "0.1.0"
+dependencies = [
+ "archmage",
+ "garb",
+ "linear-srgb",
+ "magetypes",
+ "zenpixels",
+ "zenpixels-convert",
+]
+
+[[package]]
 name = "zenavif"
 version = "0.1.6"
 dependencies = [
@@ -1931,11 +1943,13 @@ dependencies = [
  "thiserror",
  "whereat",
  "yuv",
+ "zenanalyze",
  "zenavif-parse",
  "zenbench",
  "zencodec",
  "zenpixels",
  "zenpixels-convert",
+ "zenpredict",
  "zenravif",
  "zensim",
  "zensim-regress",
@@ -2020,6 +2034,15 @@ dependencies = [
  "rgb",
  "whereat",
  "zenpixels",
+]
+
+[[package]]
+name = "zenpredict"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

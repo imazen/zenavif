@@ -304,6 +304,21 @@ fn rgb_from_dynamic(img: &DynamicImage) -> ImgVec<RGB8> {
     ImgVec::new(buf, w as usize, h as usize)
 }
 
+/// Map (w, h) → "tiny"/"small"/"medium"/"large" by pixel count.
+/// Matches extract_features.rs and zenwebp/dev/zenwebp_pareto.rs.
+fn size_class_label(w: u32, h: u32) -> &'static str {
+    let n = (w as u64) * (h as u64);
+    if n < 64 * 64 {
+        "tiny"
+    } else if n < 256 * 256 {
+        "small"
+    } else if n < 1024 * 1024 {
+        "medium"
+    } else {
+        "large"
+    }
+}
+
 /// Resize so max(w, h) == target_maxdim. Skips upscaling. Lanczos3.
 fn resize_to_maxdim(src: &DynamicImage, target_maxdim: u32) -> Option<DynamicImage> {
     let (w, h) = src.dimensions();
@@ -407,9 +422,12 @@ fn main() -> ExitCode {
     let writer = Mutex::new(BufWriter::new(file));
     if writing_header {
         let mut w = writer.lock().unwrap();
+        // Schema: train_hybrid.py expects image_path, size_class, width,
+        // height, config_id (int), config_name, bytes, zensim. We add
+        // sha256/content_class/source/size_bucket for our own analysis.
         writeln!(
             w,
-            "sha256\tcontent_class\tsource\tw\th\tsize_bucket\tspeed\tq\tqm\tvaq\tvaq_strength\ttune_still\tconfig_id\tbytes\tzensim\tencode_ms\tdecode_ms"
+            "image_path\tsize_class\twidth\theight\tconfig_id\tconfig_name\tsha256\tcontent_class\tsource\tsize_bucket\tspeed\tq\tqm\tvaq\tvaq_strength\ttune_still\tbytes\tzensim\tencode_ms\tdecode_ms"
         )
         .unwrap();
         w.flush().ok();
@@ -448,7 +466,7 @@ fn main() -> ExitCode {
 
                 for &speed in &args.speeds {
                     for &q in &args.qualities {
-                        let config_id = format!(
+                        let config_name = format!(
                             "s{}_q{}_qm{}_vaq{}_strength{:.1}_tune{}",
                             speed,
                             q,
@@ -457,6 +475,15 @@ fn main() -> ExitCode {
                             args.vaq_strength,
                             args.tune_still as u8
                         );
+                        // Deterministic int id: speed * 10000 + q * 100 +
+                        // (qm<<6) + (vaq<<5) + (tune<<4) + round(strength*4)
+                        // — unique within Phase 1a's parameter grid.
+                        let config_id: u32 = (speed as u32) * 10000
+                            + (q as u32) * 100
+                            + ((args.qm as u32) << 6)
+                            + ((args.vaq as u32) << 5)
+                            + ((args.tune_still as u32) << 4)
+                            + ((args.vaq_strength * 4.0).round() as u32 & 0xF);
                         let key = format!("{}|{}|{}", entry.sha256, target, config_id);
                         if existing_keys.contains(&key) {
                             total_skipped.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -483,15 +510,20 @@ fn main() -> ExitCode {
                                 encode_ms,
                                 decode_ms,
                             }) => {
+                                let size_class = size_class_label(img.width() as u32, img.height() as u32);
                                 let mut w = writer.lock().unwrap();
                                 writeln!(
                                     w,
-                                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.2}\t{}\t{}\t{}\t{:.6}\t{:.2}\t{:.2}",
+                                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.2}\t{}\t{}\t{:.6}\t{:.2}\t{:.2}",
+                                    entry.path.display(),
+                                    size_class,
+                                    img.width(),
+                                    img.height(),
+                                    config_id,
+                                    config_name,
                                     entry.sha256,
                                     entry.content_class,
                                     entry.source,
-                                    img.width(),
-                                    img.height(),
                                     target,
                                     speed,
                                     q,
@@ -499,7 +531,6 @@ fn main() -> ExitCode {
                                     args.vaq as u8,
                                     args.vaq_strength,
                                     args.tune_still as u8,
-                                    config_id,
                                     bytes,
                                     zensim_score,
                                     encode_ms,

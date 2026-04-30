@@ -51,6 +51,11 @@
 // Crate info for whereat error tracing (enables at!() macro with GitHub links)
 whereat::define_at_crate_info!();
 
+#[cfg(feature = "auto-tune")]
+mod auto_tune;
+#[cfg(feature = "auto-tune")]
+pub use auto_tune::{AutoTuneError, AutoTuneOptions, QualityTarget};
+
 #[cfg(feature = "zencodec")]
 mod codec;
 mod config;
