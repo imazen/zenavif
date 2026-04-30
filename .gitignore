@@ -88,3 +88,4 @@ benchmarks/rav1e_picker_*.log
 benchmarks/rav1e_encode_ms_lut*.json
 benchmarks/rav1e_quality_lut*.json
 benchmarks/rav1e_picker_*.bin
+cron-logs/
