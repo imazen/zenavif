@@ -19,13 +19,16 @@ Cell taxonomy (CATEGORICAL_AXES):
     Phase 2 OAT confirms which macro knobs survive the cull threshold.
 
 Scalar prediction heads (SCALAR_AXES):
-  - quality (regression, 0..100)
-  - encode_ms (regression — the time-budget signal: lets the picker
-    surface speed saturation. The user-facing API can mask cells whose
-    predicted encode_ms exceeds a budget, then argmin bytes over what
-    remains.)
+  - (none in v0.1 — Phase 1a only varies speed/q; secondary knobs
+    like vaq_strength enter as scalars in v0.2 once Phase 2 OAT
+    confirms which survive the cull threshold.)
 
-So 10 cells × (1 bytes_log + 2 scalars) = 30 output dimensions.
+For time-budget constraints, encode_ms is exposed via a side
+lookup-table baked alongside the picker (median encode_ms / pixel
+per (speed, size_class) cell from the training data). The auto_tune
+runtime applies this LUT independently of the MLP forward pass.
+
+So 10 cells × (1 bytes_log + 0 scalars) = 10 output dimensions.
 
 The Phase 1a sweep emits config_name strings of the form:
   `s{speed}_q{q}_qm{qm}_vaq{vaq}_strength{vaq_strength}_tune{tune_still}`
@@ -131,15 +134,12 @@ ZQ_TARGETS = list(range(30, 70, 5)) + list(range(70, 96, 2))
 # sensitivity cull.
 CATEGORICAL_AXES = ["speed"]
 
-# `quality` is the target-resolving regression head. `encode_ms` is
-# the time-budget head — the user-facing API multiplies through this
-# to mask cells whose predicted encode_ms exceeds a budget.
-SCALAR_AXES = ["quality", "encode_ms"]
+# Phase 1a has no secondary scalar knobs (vaq_strength held constant
+# at 1.0). Phase 2+ adds vaq_strength here once the OAT cull confirms
+# vaq is a load-bearing macro knob.
+SCALAR_AXES: list = []
 SCALAR_SENTINELS: dict = {}
-SCALAR_DISPLAY_RANGES = {
-    "quality": (0, 100),
-    "encode_ms": (0, 5000),  # 0..5s; per-image-size median is ~30..500ms
-}
+SCALAR_DISPLAY_RANGES: dict = {}
 
 
 # ---------- Config-name parser ----------
