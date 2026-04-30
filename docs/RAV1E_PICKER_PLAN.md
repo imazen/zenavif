@@ -1,8 +1,33 @@
 # zenavif knob predictor — master plan
 
-**Status:** drafted 2026-04-30. v0.1 baked + integrated 2026-04-30 with
-known limitations (see "v0.1 limitations" below). Cron + Phase 2/3
-backfill is wired up to drive accuracy higher over the next week+.
+**Status:** drafted 2026-04-30. v0.1 baked + integrated 2026-04-30.
+Phase 2 OAT complete 2026-04-30 — 8 of 16 candidate knobs survived the
+cull threshold. Phase 3 nightly LHS sweep installed via cron; rotates
+through 64 LHS-sampled v0.2 tuples (one per night, full coverage in ~9
+weeks). Sunday 06:00 retrain consumes the accumulated v0.2 TSV.
+
+## Phase 2 OAT outcome (2026-04-30)
+
+117 (image, size) cells tested at speed=4, q=60. Cull rule: median
+|Δ% bytes| < 0.5 % AND p90 < 1.5 %.
+
+**Survivors (8):**
+- `qm` — +4.2 % bytes when off (median); promotes to CATEGORICAL_AXES
+- `partition_range coarse_16_64` — +2.75 % bytes / -0.27 zensim, faster
+- `rdo_tx_decision off` — +2.6 % bytes saves ~1 s encode time
+- `vaq_strength` (non-1.0) — 2-3 % savings at strength 2-3
+- `seg_boost` (1.5-2.0) — 1-2.5 % savings
+- `segmentation_complex on` — 2.65 % savings (median)
+- `encode_bottomup on` — 0.48 % savings, but p90 high → keep
+- `lrf on` — +0.63 % bytes, +0.082 zensim — small but consistent
+
+**Culled (8):**
+`cdef`, `complex_prediction_modes`, `fast_deblock`, `lru_on_skip`,
+`sgr_full`, `trellis`, `tune_still`, `vaq` (at default strength 1.0;
+non-default strengths surface via the `vaq_strength` scalar).
+
+`complex_prediction_modes=on` correctly culled: it would save 0.09 %
+bytes but loses 32.7 zensim points — confirmed broken (zenrav1e#5).
 
 ## Goal
 

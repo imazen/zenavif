@@ -89,4 +89,8 @@ benchmarks/rav1e_encode_ms_lut*.json
 benchmarks/rav1e_quality_lut*.json
 benchmarks/rav1e_picker_*.bin
 cron-logs/
-benchmarks/rav1e_phase2_oat_*.tsv
+# Phase 2 OAT TSV is small (~560 KB) + load-bearing provenance for
+# the cull → keep it. Just ignore the in-flight large rotating
+# Phase 3 TSVs which can balloon.
+benchmarks/rav1e_phase3_*.tsv
+benchmarks/rav1e_phase3_*.tsv.clean

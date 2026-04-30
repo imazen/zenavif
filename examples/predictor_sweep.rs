@@ -66,6 +66,13 @@ struct Args {
     vaq: bool,
     vaq_strength: f64,
     tune_still: bool,
+    // Phase 2 survivor overrides — None = use speed-preset default.
+    seg_boost: f64,
+    rdo_tx_off: bool, // true = override speed-preset to false
+    seg_complex_on: bool, // true = override speed-preset to true
+    bottomup_on: bool,
+    lrf_on: bool,
+    partition_range_idx: i8, // -1 = fine_4_16, 0 = preset, +1 = coarse_16_64
 }
 
 impl Args {
@@ -85,6 +92,12 @@ impl Args {
         let mut vaq = false;
         let mut vaq_strength = 1.0;
         let mut tune_still = true;
+        let mut seg_boost = 1.0;
+        let mut rdo_tx_off = false;
+        let mut seg_complex_on = false;
+        let mut bottomup_on = false;
+        let mut lrf_on = false;
+        let mut partition_range_idx: i8 = 0;
 
         let raw: Vec<String> = env::args().collect();
         let bin = raw
@@ -158,6 +171,48 @@ impl Args {
                         .parse::<bool>()
                         .map_err(|e| e.to_string())?;
                 }
+                "--seg-boost" => {
+                    seg_boost = iter
+                        .next()
+                        .ok_or("--seg-boost F")?
+                        .parse()
+                        .map_err(|e| format!("--seg-boost: {e}"))?;
+                }
+                "--rdo-tx-off" => {
+                    rdo_tx_off = iter
+                        .next()
+                        .ok_or("--rdo-tx-off BOOL")?
+                        .parse::<bool>()
+                        .map_err(|e| e.to_string())?;
+                }
+                "--seg-complex-on" => {
+                    seg_complex_on = iter
+                        .next()
+                        .ok_or("--seg-complex-on BOOL")?
+                        .parse::<bool>()
+                        .map_err(|e| e.to_string())?;
+                }
+                "--bottomup-on" => {
+                    bottomup_on = iter
+                        .next()
+                        .ok_or("--bottomup-on BOOL")?
+                        .parse::<bool>()
+                        .map_err(|e| e.to_string())?;
+                }
+                "--lrf-on" => {
+                    lrf_on = iter
+                        .next()
+                        .ok_or("--lrf-on BOOL")?
+                        .parse::<bool>()
+                        .map_err(|e| e.to_string())?;
+                }
+                "--partition-range-idx" => {
+                    partition_range_idx = iter
+                        .next()
+                        .ok_or("--partition-range-idx [-1|0|1]")?
+                        .parse()
+                        .map_err(|e| format!("--partition-range-idx: {e}"))?;
+                }
                 other => return Err(format!("unknown arg {other}")),
             }
         }
@@ -177,6 +232,12 @@ impl Args {
             vaq,
             vaq_strength,
             tune_still,
+            seg_boost,
+            rdo_tx_off,
+            seg_complex_on,
+            bottomup_on,
+            lrf_on,
+            partition_range_idx,
         })
     }
 }
@@ -464,26 +525,61 @@ fn main() -> ExitCode {
                 };
                 let img: ImgVec<RGB8> = rgb_from_dynamic(&resized);
 
+                // The v0.2 suffix collapses to empty when all survivors
+                // sit at their default values, so v0.1 short-form
+                // config_names round-trip unchanged.
+                let v02_default = args.seg_boost == 1.0
+                    && !args.rdo_tx_off
+                    && !args.seg_complex_on
+                    && !args.bottomup_on
+                    && !args.lrf_on
+                    && args.partition_range_idx == 0;
+                let v02_suffix = if v02_default {
+                    String::new()
+                } else {
+                    format!(
+                        "_seg{:.1}_rdo{}_segc{}_bu{}_lrf{}_pr{}",
+                        args.seg_boost,
+                        args.rdo_tx_off as u8,
+                        args.seg_complex_on as u8,
+                        args.bottomup_on as u8,
+                        args.lrf_on as u8,
+                        args.partition_range_idx,
+                    )
+                };
+
                 for &speed in &args.speeds {
                     for &q in &args.qualities {
                         let config_name = format!(
-                            "s{}_q{}_qm{}_vaq{}_strength{:.1}_tune{}",
+                            "s{}_q{}_qm{}_vaq{}_strength{:.1}_tune{}{}",
                             speed,
                             q,
                             args.qm as u8,
                             args.vaq as u8,
                             args.vaq_strength,
-                            args.tune_still as u8
+                            args.tune_still as u8,
+                            v02_suffix,
                         );
-                        // Deterministic int id: speed * 10000 + q * 100 +
-                        // (qm<<6) + (vaq<<5) + (tune<<4) + round(strength*4)
-                        // — unique within Phase 1a's parameter grid.
-                        let config_id: u32 = (speed as u32) * 10000
-                            + (q as u32) * 100
-                            + ((args.qm as u32) << 6)
-                            + ((args.vaq as u32) << 5)
-                            + ((args.tune_still as u32) << 4)
-                            + ((args.vaq_strength * 4.0).round() as u32 & 0xF);
+                        // Packed u32 id — stable across runs as long as
+                        // the bit layout doesn't change. Layout:
+                        //   speed(4) q(7) qm(1) vaq(1) strength*4(4)
+                        //   tune(1) segb*4(4) rdo(1) segc(1) bu(1) lrf(1)
+                        //   pridx+1(2) = 28 bits.
+                        let strength4 = (args.vaq_strength * 4.0).round() as u32 & 0xF;
+                        let segb4 = (args.seg_boost * 4.0).round() as u32 & 0xF;
+                        let pr2 = (args.partition_range_idx + 1).clamp(0, 3) as u32;
+                        let config_id: u32 = ((speed as u32) & 0xF)
+                            | (((q as u32) & 0x7F) << 4)
+                            | ((args.qm as u32) << 11)
+                            | ((args.vaq as u32) << 12)
+                            | (strength4 << 13)
+                            | ((args.tune_still as u32) << 17)
+                            | (segb4 << 18)
+                            | ((args.rdo_tx_off as u32) << 22)
+                            | ((args.seg_complex_on as u32) << 23)
+                            | ((args.bottomup_on as u32) << 24)
+                            | ((args.lrf_on as u32) << 25)
+                            | (pr2 << 26);
                         let key = format!("{}|{}|{}", entry.sha256, target, config_id);
                         if existing_keys.contains(&key) {
                             total_skipped.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -499,6 +595,12 @@ fn main() -> ExitCode {
                             args.vaq,
                             args.vaq_strength,
                             args.tune_still,
+                            args.seg_boost,
+                            args.rdo_tx_off,
+                            args.seg_complex_on,
+                            args.bottomup_on,
+                            args.lrf_on,
+                            args.partition_range_idx,
                             args.enc_threads,
                             &zensim,
                             &tol,
@@ -588,6 +690,12 @@ fn encode_one(
     vaq: bool,
     vaq_strength: f64,
     tune_still: bool,
+    seg_boost: f64,
+    rdo_tx_off: bool,
+    seg_complex_on: bool,
+    bottomup_on: bool,
+    lrf_on: bool,
+    partition_range_idx: i8,
     enc_threads: Option<usize>,
     zensim: &Zensim,
     tol: &RegressionTolerance,
@@ -600,6 +708,26 @@ fn encode_one(
         .with_vaq(vaq, vaq_strength)
         .with_still_image_tuning(tune_still)
         .with_stop(StopToken::new(Unstoppable));
+    if seg_boost != 1.0 {
+        enc = enc.with_seg_boost(seg_boost);
+    }
+    if rdo_tx_off {
+        enc = enc.with_rdo_tx_decision(Some(false));
+    }
+    if seg_complex_on {
+        enc = enc.with_segmentation_complex(Some(true));
+    }
+    if bottomup_on {
+        enc = enc.with_encode_bottomup(Some(true));
+    }
+    if lrf_on {
+        enc = enc.with_lrf(Some(true));
+    }
+    match partition_range_idx {
+        -1 => enc = enc.with_partition_range(Some((4, 16))),
+        1 => enc = enc.with_partition_range(Some((16, 64))),
+        _ => {}
+    }
     if let Some(n) = enc_threads {
         enc = enc.with_num_threads(Some(n));
     }

@@ -58,18 +58,19 @@ TMP="$(mktemp)"
   crontab -l 2>/dev/null || true
   cat <<EOF
 ${MARKER_BEGIN}
-# Phase 3+4 — nightly large-corpus sweep at 2:30am local. Resumable.
-# Appends to rav1e_phase34_${YEAR}.tsv; new (image, size, speed, q) tuples
-# only (existing rows skipped via --append key).
-30 2 * * * cd $ZENAVIF_DIR && /usr/bin/env -i PATH="\$HOME/.cargo/bin:/usr/bin:/bin" cargo run --release --example predictor_sweep --features encode-imazen,encode-threading -- --manifest $MANIFEST --output benchmarks/rav1e_phase34_${YEAR}.tsv --speeds 1..=10 --qualities 5..=100:5 --sizes 64,256,1024,4096 --max-images 200 --threads 16 --enc-threads 1 --append >> $LOG_DIR/phase34.log 2>&1
+# Phase 3 — nightly LHS-rotated sweep at 2:30am local. Picks one of
+# 64 LHS-sampled v0.2 knob tuples (DOY mod 64) and runs that single
+# tuple's speed×q sweep. Over ~9 weeks, full LHS coverage accumulates.
+30 2 * * * /usr/bin/env -i PATH="\$HOME/.cargo/bin:/usr/bin:/bin" HOME="\$HOME" $ZENAVIF_DIR/scripts/cron_lhs_sweep.sh
 
 # Phase 4a — feature extraction nightly at 2:00am local (before sweep).
 # Idempotent via --append; new (image, size) tuples only.
-0 2 * * * cd $ZENAVIF_DIR && /usr/bin/env -i PATH="\$HOME/.cargo/bin:/usr/bin:/bin" cargo run --release --example extract_features --features encode-imazen -- --manifest $MANIFEST --output benchmarks/rav1e_phase34_features_${YEAR}.tsv --sizes 64,256,1024,4096 --max-images 200 --threads 4 --append >> $LOG_DIR/features.log 2>&1
+0 2 * * * cd $ZENAVIF_DIR && /usr/bin/env -i PATH="\$HOME/.cargo/bin:/usr/bin:/bin" cargo run --release --example extract_features --features encode-imazen -- --manifest $MANIFEST --output benchmarks/rav1e_phase3_features_${YEAR}.tsv --sizes 64,256,1024,4096 --max-images 200 --threads 4 --append >> $LOG_DIR/features.log 2>&1
 
-# Weekly retrain + bake + safety gates Sundays 6am local.
-# Manual review of the produced model before committing.
-0 6 * * 0 cd $ZENAVIF_DIR && /usr/bin/env -i PATH="\$HOME/.cargo/bin:/usr/bin:/bin" PYTHONPATH=$ZENAVIF_DIR/training:$ZENANALYZE_DIR/zentrain/tools python3 $ZENANALYZE_DIR/zentrain/tools/train_hybrid.py --codec-config rav1e_picker_config >> $LOG_DIR/train.log 2>&1
+# Weekly retrain + bake + safety gates Sundays 6am local. Reads
+# RAV1E_PARETO_TSV / RAV1E_FEATURES_TSV env so it picks the v0.2 TSVs
+# accumulated by the LHS sweep.
+0 6 * * 0 cd $ZENAVIF_DIR && /usr/bin/env -i PATH="\$HOME/.cargo/bin:/usr/bin:/bin" RAV1E_PARETO_TSV=benchmarks/rav1e_phase3_${YEAR}.tsv RAV1E_FEATURES_TSV=benchmarks/rav1e_phase3_features_${YEAR}.tsv PYTHONPATH=$ZENAVIF_DIR/training:$ZENANALYZE_DIR/zentrain/tools python3 $ZENANALYZE_DIR/zentrain/tools/train_hybrid.py --codec-config rav1e_picker_config >> $LOG_DIR/train.log 2>&1
 ${MARKER_END}
 EOF
 } > "$TMP"

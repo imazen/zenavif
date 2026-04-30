@@ -1,5 +1,5 @@
 """
-Codec config for the zenavif rav1e knob picker — v0.1 (Phase 1a baseline).
+Codec config for the zenavif rav1e knob picker — v0.2 (post Phase 2 OAT).
 
 Used by `zentrain/tools/train_hybrid.py`. Defines paths to the
 predictor_sweep + extract_features TSVs, the feature subset the
@@ -14,27 +14,31 @@ Run training from the zenavif checkout:
             --codec-config rav1e_picker_config
 
 Cell taxonomy (CATEGORICAL_AXES):
-  - speed ∈ {1..10}  — 10 cells
-  - (Phase 2+) chroma_subsampling, qm, vaq, tune_still get added once
-    Phase 2 OAT confirms which macro knobs survive the cull threshold.
+  - speed ∈ {1..10}  — 10 levels
+  - qm ∈ {0, 1}      — 2 levels (Phase 2 OAT: +4.2 % bytes when off)
+  → 20 cells
 
-Scalar prediction heads (SCALAR_AXES):
-  - (none in v0.1 — Phase 1a only varies speed/q; secondary knobs
-    like vaq_strength enter as scalars in v0.2 once Phase 2 OAT
-    confirms which survive the cull threshold.)
+Scalar prediction heads (SCALAR_AXES, post Phase 2 OAT):
+  - vaq_strength (0.0..3.0)
+  - seg_boost (1.0..2.0)
+  - rdo_tx_decision_override (0/1; left as scalar so trainer learns
+    a probability and the runtime threshold-rounds)
+  - segmentation_complex_override
+  - encode_bottomup_override
+  - lrf_override
+  - partition_range_override (-1=fine, 0=preset, +1=coarse)
 
-For time-budget constraints, encode_ms is exposed via a side
-lookup-table baked alongside the picker (median encode_ms / pixel
-per (speed, size_class) cell from the training data). The auto_tune
-runtime applies this LUT independently of the MLP forward pass.
+CULLED knobs (Phase 2 OAT, median |Δ% bytes| < 0.5 % AND p90 < 1.5 %):
+  cdef, complex_prediction_modes, fast_deblock, lru_on_skip, sgr_full,
+  trellis, tune_still, vaq (at default strength 1.0; non-1.0 strengths
+  surface via vaq_strength scalar).
 
-So 10 cells × (1 bytes_log + 0 scalars) = 10 output dimensions.
+Sweep config_name strings have the form:
+  s{speed}_q{q}_qm{qm}_vaq{vaq}_strength{vaq_strength}_tune{tune_still}\
+   _seg{seg_boost}_rdo{rdo_tx}_segc{seg_complex}_bu{bottomup}_lrf{lrf}_pr{pr_idx}
 
-The Phase 1a sweep emits config_name strings of the form:
-  `s{speed}_q{q}_qm{qm}_vaq{vaq}_strength{vaq_strength}_tune{tune_still}`
-e.g. `s4_q60_qm1_vaq0_strength1.0_tune1`. The Phase 1a corpus holds
-qm/vaq/vaq_strength/tune_still constant; downstream phases add
-sweep coverage on those axes.
+The legacy short form (Phase 1a) is parsed too — extra knobs default
+to "preset" / 0 in the parsed dict so v0.1 + v0.2 rows mix cleanly.
 """
 
 from __future__ import annotations
@@ -137,50 +141,90 @@ ZQ_TARGETS = list(range(30, 70, 5)) + list(range(70, 96, 2))
 
 # ---------- Axis schema ----------
 
-# Phase 1a: only `speed` varies as a categorical axis. Phase 2+ will
-# extend with chroma_subsampling, qm, vaq, tune_still after the OAT
-# sensitivity cull.
-CATEGORICAL_AXES = ["speed"]
+# v0.2 schema (post Phase 2 OAT 2026-04-30).
+# qm survives the cull (median +4.2 % bytes when off) so promotes to
+# a categorical axis. vaq @ default strength is culled but
+# vaq_strength as a scalar is kept (non-default values save 2-3 %).
+CATEGORICAL_AXES = ["speed", "qm"]
 
-# Phase 1a has no secondary scalar knobs (vaq_strength held constant
-# at 1.0). Phase 2+ adds vaq_strength here once the OAT cull confirms
-# vaq is a load-bearing macro knob.
-SCALAR_AXES: list = []
+# Scalar heads — survivors with continuous-ish ranges.
+SCALAR_AXES: list = [
+    "vaq_strength",
+    "seg_boost",
+    "rdo_tx_off",  # 0 = preset (on at speed=4), 1 = forced off
+    "seg_complex_on",  # 0 = preset (off at speed=4), 1 = forced on
+    "bottomup_on",  # 0 = preset (off at speed=4), 1 = forced on
+    "lrf_on",  # 0 = preset, 1 = forced on
+    "partition_range_idx",  # -1=fine_4_16, 0=preset, +1=coarse_16_64
+]
 SCALAR_SENTINELS: dict = {}
-SCALAR_DISPLAY_RANGES: dict = {}
+SCALAR_DISPLAY_RANGES: dict = {
+    "vaq_strength": (0.0, 3.0),
+    "seg_boost": (1.0, 2.0),
+    "rdo_tx_off": (0, 1),
+    "seg_complex_on": (0, 1),
+    "bottomup_on": (0, 1),
+    "lrf_on": (0, 1),
+    "partition_range_idx": (-1, 1),
+}
 
 
 # ---------- Config-name parser ----------
 
-# Format: s{speed}_q{q}_qm{qm}_vaq{vaq}_strength{vaq_strength}_tune{tune_still}
-#   speed: u8 (1..10)
-#   q: u8 (target zensim approximation, 0..100)
-#   qm/vaq/tune_still: 0|1 booleans
-#   vaq_strength: f32 with one decimal
-# Examples:
-#   s4_q60_qm1_vaq0_strength1.0_tune1
-#   s10_q95_qm0_vaq1_strength0.5_tune0
-_CONFIG_RE = re.compile(
+# Phase 1a (v0.1) short form:
+#   s{speed}_q{q}_qm{qm}_vaq{vaq}_strength{vaq_strength}_tune{tune_still}
+# Phase 3+ (v0.2) full form appends the surviving knob axes:
+#   ..._seg{seg_boost}_rdo{rdo_tx}_segc{seg_complex}_bu{bottomup}_lrf{lrf}_pr{pr_idx}
+_CONFIG_RE_BASE = re.compile(
     r"^s(?P<speed>\d+)_q(?P<q>\d+)"
     r"_qm(?P<qm>\d+)_vaq(?P<vaq>\d+)"
     r"_strength(?P<strength>[\d.]+)"
-    r"_tune(?P<tune>\d+)$"
+    r"_tune(?P<tune>\d+)"
+    r"(?P<rest>.*)$"
+)
+_CONFIG_RE_REST = re.compile(
+    r"_seg(?P<seg>[\d.]+)"
+    r"_rdo(?P<rdo>\d+)"
+    r"_segc(?P<segc>\d+)"
+    r"_bu(?P<bu>\d+)"
+    r"_lrf(?P<lrf>\d+)"
+    r"_pr(?P<pr>-?\d+)$"
 )
 
 
 def parse_config_name(name: str) -> dict:
-    """Decompose a Phase 1a+ predictor_sweep config name into axes."""
-    m = _CONFIG_RE.match(name)
+    """Decompose a predictor_sweep config name into axes."""
+    m = _CONFIG_RE_BASE.match(name)
     if not m:
         raise ValueError(f"unparseable rav1e config name: {name}")
-    return {
+    out = {
         # Categorical (cells):
         "speed": int(m.group("speed")),
-        # Held constant in Phase 1a; will become categorical in Phase 2+:
         "qm": int(m.group("qm")),
+        # Scalars:
+        "vaq_strength": float(m.group("strength")),
+        # Defaults for missing v0.2 knobs — Phase 1a rows fall here:
+        "seg_boost": 1.0,
+        "rdo_tx_off": 0,
+        "seg_complex_on": 0,
+        "bottomup_on": 0,
+        "lrf_on": 0,
+        "partition_range_idx": 0,
+        # Pre-cull legacy keys we still parse but don't use as axes:
         "vaq": int(m.group("vaq")),
         "tune_still": int(m.group("tune")),
-        "vaq_strength": float(m.group("strength")),
-        # Scalars (q is the zensim-target axis, not a head):
+        # q is the target-zensim axis, not a head:
         "q": int(m.group("q")),
     }
+    rest = m.group("rest")
+    if rest:
+        rm = _CONFIG_RE_REST.match(rest)
+        if not rm:
+            raise ValueError(f"unparseable rav1e v0.2 suffix in: {name}")
+        out["seg_boost"] = float(rm.group("seg"))
+        out["rdo_tx_off"] = int(rm.group("rdo"))
+        out["seg_complex_on"] = int(rm.group("segc"))
+        out["bottomup_on"] = int(rm.group("bu"))
+        out["lrf_on"] = int(rm.group("lrf"))
+        out["partition_range_idx"] = int(rm.group("pr"))
+    return out
