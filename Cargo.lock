@@ -1940,6 +1940,7 @@ dependencies = [
  "rayon",
  "rgb",
  "safe_unaligned_simd",
+ "serde_json",
  "thiserror",
  "whereat",
  "yuv",
