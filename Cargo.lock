@@ -2062,9 +2062,7 @@ dependencies = [
 
 [[package]]
 name = "zenravif"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a588db445fb4871fa1f546eccd739217ac341cda92a0de9ad0972ecf470cb7d0"
+version = "0.1.3"
 dependencies = [
  "almost-enough",
  "imgref",

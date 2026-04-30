@@ -181,6 +181,42 @@ pub struct EncoderConfig {
     /// Mathematically lossless encoding (quantizer=0) (imazen/rav1e fork)
     #[cfg(feature = "encode-imazen")]
     pub(crate) lossless: bool,
+    /// Segmentation boost (1.0 = off, >1.0 widens per-segment QP deltas)
+    #[cfg(feature = "encode-imazen")]
+    pub(crate) seg_boost: Option<f64>,
+    /// Override CDEF on/off (None = use speed preset default)
+    #[cfg(feature = "encode-imazen")]
+    pub(crate) override_cdef: Option<bool>,
+    /// Override RDO transform-decision search
+    #[cfg(feature = "encode-imazen")]
+    pub(crate) override_rdo_tx_decision: Option<bool>,
+    /// Override SGR complexity (true = Full / 16 sets, false = Reduced / 8 sets)
+    #[cfg(feature = "encode-imazen")]
+    pub(crate) override_sgr_full: Option<bool>,
+    /// Override LRU on skip (loop restoration on no-coeff blocks)
+    #[cfg(feature = "encode-imazen")]
+    pub(crate) override_lru_on_skip: Option<bool>,
+    /// Override segmentation Complex (k-means) vs Simple
+    #[cfg(feature = "encode-imazen")]
+    pub(crate) override_segmentation_complex: Option<bool>,
+    /// Override bottom-up partition search vs top-down
+    #[cfg(feature = "encode-imazen")]
+    pub(crate) override_encode_bottomup: Option<bool>,
+    /// Override partition block-size range (min, max) in pixels
+    #[cfg(feature = "encode-imazen")]
+    pub(crate) override_partition_range: Option<(u8, u8)>,
+    /// Override prediction modes (true = ComplexAll, false = Simple)
+    #[cfg(feature = "encode-imazen")]
+    pub(crate) override_complex_prediction_modes: Option<bool>,
+    /// Override loop restoration filter on/off
+    #[cfg(feature = "encode-imazen")]
+    pub(crate) override_lrf: Option<bool>,
+    /// Override fast vs full deblock filter search
+    #[cfg(feature = "encode-imazen")]
+    pub(crate) override_fast_deblock: Option<bool>,
+    /// Override trellis quantization (Viterbi DP)
+    #[cfg(feature = "encode-imazen")]
+    pub(crate) trellis: Option<bool>,
 }
 
 impl Default for EncoderConfig {
@@ -216,6 +252,30 @@ impl Default for EncoderConfig {
             tune_still_image: false,
             #[cfg(feature = "encode-imazen")]
             lossless: false,
+            #[cfg(feature = "encode-imazen")]
+            seg_boost: None,
+            #[cfg(feature = "encode-imazen")]
+            override_cdef: None,
+            #[cfg(feature = "encode-imazen")]
+            override_rdo_tx_decision: None,
+            #[cfg(feature = "encode-imazen")]
+            override_sgr_full: None,
+            #[cfg(feature = "encode-imazen")]
+            override_lru_on_skip: None,
+            #[cfg(feature = "encode-imazen")]
+            override_segmentation_complex: None,
+            #[cfg(feature = "encode-imazen")]
+            override_encode_bottomup: None,
+            #[cfg(feature = "encode-imazen")]
+            override_partition_range: None,
+            #[cfg(feature = "encode-imazen")]
+            override_complex_prediction_modes: None,
+            #[cfg(feature = "encode-imazen")]
+            override_lrf: None,
+            #[cfg(feature = "encode-imazen")]
+            override_fast_deblock: None,
+            #[cfg(feature = "encode-imazen")]
+            trellis: None,
         }
     }
 }
@@ -442,6 +502,99 @@ impl EncoderConfig {
             .with_vaq(true, 0.5)
             .with_still_image_tuning(true)
     }
+
+    /// Set segmentation boost power. `1.0` = off, `>1.0` widens per-segment
+    /// QP deltas. None = leave at zenravif default (1.0).
+    #[cfg(feature = "encode-imazen")]
+    pub fn with_seg_boost(mut self, boost: Option<f64>) -> Self {
+        self.seg_boost = boost;
+        self
+    }
+
+    /// Override CDEF on/off (None = use speed preset default).
+    #[cfg(feature = "encode-imazen")]
+    pub fn with_cdef(mut self, enable: Option<bool>) -> Self {
+        self.override_cdef = enable;
+        self
+    }
+
+    /// Override RDO transform-decision search (None = use speed preset).
+    #[cfg(feature = "encode-imazen")]
+    pub fn with_rdo_tx_decision(mut self, enable: Option<bool>) -> Self {
+        self.override_rdo_tx_decision = enable;
+        self
+    }
+
+    /// Override SGR self-guided restoration to Full (16 parameter sets) vs
+    /// Reduced (8 sets at speed ≥5). None = use speed preset.
+    #[cfg(feature = "encode-imazen")]
+    pub fn with_sgr_full(mut self, enable: Option<bool>) -> Self {
+        self.override_sgr_full = enable;
+        self
+    }
+
+    /// Override searching loop restoration on skip blocks. None = preset.
+    #[cfg(feature = "encode-imazen")]
+    pub fn with_lru_on_skip(mut self, enable: Option<bool>) -> Self {
+        self.override_lru_on_skip = enable;
+        self
+    }
+
+    /// Override segmentation Complex (k-means) vs Simple. None = preset.
+    #[cfg(feature = "encode-imazen")]
+    pub fn with_segmentation_complex(mut self, enable: Option<bool>) -> Self {
+        self.override_segmentation_complex = enable;
+        self
+    }
+
+    /// Override bottom-up partition search (vs top-down at speed ≥4).
+    /// None = preset.
+    #[cfg(feature = "encode-imazen")]
+    pub fn with_encode_bottomup(mut self, enable: Option<bool>) -> Self {
+        self.override_encode_bottomup = enable;
+        self
+    }
+
+    /// Override partition block-size range. `min` and `max` must each be
+    /// one of `{4, 8, 16, 32, 64, 128}` and `min <= max`. Smaller mins
+    /// help text/screen content; larger maxes help smooth photo content.
+    /// None = preset.
+    #[cfg(feature = "encode-imazen")]
+    pub fn with_partition_range(mut self, range: Option<(u8, u8)>) -> Self {
+        self.override_partition_range = range;
+        self
+    }
+
+    /// Override prediction modes. `Some(true)` = ComplexAll (slow, all
+    /// intra modes). `Some(false)` = Simple (fast). None = preset.
+    #[cfg(feature = "encode-imazen")]
+    pub fn with_complex_prediction_modes(mut self, enable: Option<bool>) -> Self {
+        self.override_complex_prediction_modes = enable;
+        self
+    }
+
+    /// Override loop restoration filter (Wiener / SGR). Helps smooth/noisy
+    /// content; can over-soften line art. None = preset.
+    #[cfg(feature = "encode-imazen")]
+    pub fn with_lrf(mut self, enable: Option<bool>) -> Self {
+        self.override_lrf = enable;
+        self
+    }
+
+    /// Override fast vs full deblock filter search. None = preset.
+    #[cfg(feature = "encode-imazen")]
+    pub fn with_fast_deblock(mut self, enable: Option<bool>) -> Self {
+        self.override_fast_deblock = enable;
+        self
+    }
+
+    /// Override trellis quantization (Viterbi DP coefficient optimization).
+    /// None = leave at zenravif default (off).
+    #[cfg(feature = "encode-imazen")]
+    pub fn with_trellis(mut self, enable: Option<bool>) -> Self {
+        self.trellis = enable;
+        self
+    }
 }
 
 /// Convert a CICP color primaries code point to the ravif enum.
@@ -600,6 +753,23 @@ fn build_ravif_encoder(
             .with_vaq(config.enable_vaq, config.vaq_strength)
             .with_still_image_tuning(config.tune_still_image)
             .with_lossless(config.lossless);
+        if let Some(b) = config.seg_boost {
+            enc = enc.with_seg_boost(b);
+        }
+        enc = enc
+            .with_cdef(config.override_cdef)
+            .with_rdo_tx_decision(config.override_rdo_tx_decision)
+            .with_sgr_full(config.override_sgr_full)
+            .with_lru_on_skip(config.override_lru_on_skip)
+            .with_segmentation_complex(config.override_segmentation_complex)
+            .with_encode_bottomup(config.override_encode_bottomup)
+            .with_partition_range(config.override_partition_range)
+            .with_complex_prediction_modes(config.override_complex_prediction_modes)
+            .with_lrf(config.override_lrf)
+            .with_fast_deblock(config.override_fast_deblock);
+        if let Some(t) = config.trellis {
+            enc = enc.with_trellis(t);
+        }
     }
     // Forward stop token for per-superblock cooperative cancellation.
     enc = enc.with_stop(stop);
