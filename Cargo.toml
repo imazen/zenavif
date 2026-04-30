@@ -48,6 +48,7 @@ zenbench = { version = "0.1.2", features = ["criterion-compat"] }
 fast-ssim2 = { version = "0.8.0"}
 zensim = { version = "0.2.4", features = ["imgref", "zenpixels"] }
 zensim-regress = { version = "0.3.0"}
+rayon = "1.11.0"
 
 [[bench]]
 name = "decode_benchmark"

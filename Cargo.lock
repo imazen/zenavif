@@ -1925,6 +1925,7 @@ dependencies = [
  "png",
  "rav1d",
  "rav1d-safe",
+ "rayon",
  "rgb",
  "safe_unaligned_simd",
  "thiserror",
