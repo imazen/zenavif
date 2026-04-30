@@ -39,6 +39,7 @@ sweep coverage on those axes.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -46,8 +47,15 @@ from pathlib import Path
 
 # zenavif/examples/predictor_sweep.rs writes here. Bump the date when
 # rerunning the sweep on a new corpus or with a new config grid.
-PARETO = Path("benchmarks/rav1e_phase1a_2026-04-30.tsv")
-FEATURES = Path("benchmarks/rav1e_phase1a_features_2026-04-30.tsv")
+# Env override RAV1E_PARETO_TSV / RAV1E_FEATURES_TSV lets the orchestrator
+# point at a snapshot taken by training/clean_tsv.py while a live sweep
+# is appending — avoids the trainer racing the writer.
+PARETO = Path(os.environ.get("RAV1E_PARETO_TSV", "benchmarks/rav1e_phase1a_2026-04-30.tsv"))
+FEATURES = Path(
+    os.environ.get(
+        "RAV1E_FEATURES_TSV", "benchmarks/rav1e_phase1a_features_2026-04-30.tsv"
+    )
+)
 
 OUT_JSON = Path("benchmarks/rav1e_picker_v0_1.json")
 OUT_LOG = Path("benchmarks/rav1e_picker_v0_1.log")
