@@ -10,6 +10,37 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Added
+- 11 new `EncoderConfig` builder methods exposing internal speed-preset
+  overrides for content-aware encoding, all gated on `encode-imazen`:
+  `with_cdef`, `with_rdo_tx_decision`, `with_sgr_full`,
+  `with_lru_on_skip`, `with_segmentation_complex`, `with_encode_bottomup`,
+  `with_seg_boost`, `with_trellis`, plus 4 deeper knobs newly plumbed
+  through zenravif 0.1.3 — `with_partition_range`,
+  `with_complex_prediction_modes`, `with_lrf`, `with_fast_deblock`. Each
+  takes `Option<...>` where `None` keeps the speed-preset default.
+- New `auto-tune` cargo feature + `EncoderConfig::auto_tune(...)` API
+  that predicts optimal `(speed, quality)` knobs for a given image and
+  target zensim score via a baked MLP picker. Supports time-budget
+  constraints via `AutoTuneOptions::with_time_budget(Duration)` and
+  Pareto blending between bytes and encode_ms via
+  `with_pareto_weight(α ∈ [0, 1])`. The model file ships baked into
+  the binary via `include_bytes!`; until the first bake lands the
+  runtime returns `AutoTuneError::ModelNotBaked`. See
+  `docs/RAV1E_PICKER_PLAN.md` for the training pipeline.
+- `examples/predictor_sweep.rs` — multi-image, multi-size, multi-knob
+  sweep harness for picker training; resumable via `--append`.
+- `examples/extract_features.rs` — zenanalyze ~103-feature extractor
+  for the same corpus (matches `zentrain/tools/train_hybrid.py`'s
+  expected schema).
+- `examples/auto_tune_smoke.rs` — end-to-end smoke test for the
+  prediction path.
+- `scripts/install_predictor_cron.sh` — installs nightly local cron
+  jobs for incremental sweep growth + weekly retraining.
+- `scripts/train_bake_pipeline.sh` — orchestrates train → bake →
+  per-(speed, size) encode_ms LUT → per-(cell, target_zq) quality LUT
+  in a single invocation.
+
 ## [0.1.6] - 2026-04-27
 
 ### Fixed
