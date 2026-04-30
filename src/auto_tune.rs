@@ -123,7 +123,19 @@ pub enum AutoTuneError {
 // Baked artifacts. Replaced with real data by the bake pipeline.
 // Until the first bake lands these are zero-byte placeholders, and
 // every auto_tune call returns ModelNotBaked.
-const MODEL_BYTES: &[u8] = include_bytes!("models/rav1e_picker_v0_1.bin");
+//
+// `include_bytes!` doesn't guarantee alignment — it just emits a static
+// `[u8; N]`. zenpredict needs 4-byte alignment for the f32 sections
+// (scaler_mean, weights), so we route through a const-generic-aligned
+// wrapper. The static reference gives the compiler a stable address
+// with the chosen alignment.
+#[repr(C, align(4))]
+struct Align4<T: ?Sized>(T);
+
+static MODEL_BYTES_ALIGNED: &Align4<[u8]> = &Align4(*include_bytes!(
+    "models/rav1e_picker_v0_1.bin"
+));
+static MODEL_BYTES: &[u8] = &MODEL_BYTES_ALIGNED.0;
 const ENCODE_MS_LUT_JSON: &str =
     include_str!("models/rav1e_encode_ms_lut_v0_1.json");
 const QUALITY_LUT_JSON: &str = include_str!("models/rav1e_quality_lut_v0_1.json");
@@ -291,16 +303,26 @@ impl EncoderConfig {
         opts: AutoTuneOptions,
     ) -> Result<Self, AutoTuneError> {
         // 1. Load model. Empty/zero-byte placeholder until bake lands.
-        let model = zenpredict::Model::from_bytes(MODEL_BYTES)
-            .map_err(|_| AutoTuneError::ModelNotBaked)?;
+        let model = zenpredict::Model::from_bytes(MODEL_BYTES).map_err(|e| {
+            if MODEL_BYTES.len() < 16 {
+                AutoTuneError::ModelNotBaked
+            } else {
+                AutoTuneError::Inference(format!("Model::from_bytes: {e}"))
+            }
+        })?;
         let n_cells = (model.header().n_outputs as usize).max(1);
 
-        // 2. Read feature columns from baked metadata.
-        let feature_cols_raw = model
+        // 2. Read feature columns from baked metadata. The bake stores
+        // them under `zentrain.feature_columns` as utf8 with newline
+        // separators (one column per line).
+        let feature_cols_str = model
             .metadata()
-            .get_utf8("zenpicker.feature_columns")
-            .map_err(|e| AutoTuneError::Internal(Box::leak(format!("{e}").into_boxed_str())))?;
-        let feature_cols: Vec<&str> = feature_cols_raw.split(',').collect();
+            .get_utf8("zentrain.feature_columns")
+            .map_err(|e| AutoTuneError::Internal(Box::leak(format!("metadata: {e}").into_boxed_str())))?;
+        let feature_cols: Vec<&str> = feature_cols_str
+            .split(|c: char| c == '\n' || c == ',')
+            .filter(|s| !s.is_empty())
+            .collect();
 
         // 3. Run zenanalyze with exactly those features.
         // No `from_name` API — walk SUPPORTED and match snake_case.
@@ -318,24 +340,54 @@ impl EncoderConfig {
         let query = zenanalyze::feature::AnalysisQuery::new(feature_set);
         let analysis = zenanalyze::analyze_features_rgb8(rgb, width, height, &query);
 
-        let features: Vec<f32> = feature_cols
+        let raw_feats: Vec<f32> = feature_cols
             .iter()
             .map(|c| lookup(c).and_then(|f| analysis.get_f32(f)).unwrap_or(0.0))
             .collect();
 
-        // 4. Forward pass.
+        // 4. Engineer the feature vector to match train_hybrid.py:
+        //   raw_feats (n) + size_oh (4) +
+        //   [log_px, log_px², zq_norm, zq_norm², zq_norm*log_px] (5) +
+        //   zq_norm * raw_feats (n) + [icc_placeholder] (1)
+        // = 2n + 10 dims.
+        let target_zq = match target {
+            QualityTarget::Zensim(z) => z,
+        };
+        let pixels = (width as f32) * (height as f32);
+        let log_px = pixels.max(1.0).ln();
+        let zq_norm = target_zq / 100.0;
+        let size_oh = match (width as u64) * (height as u64) {
+            n if n < 64 * 64 => [1.0_f32, 0.0, 0.0, 0.0],
+            n if n < 256 * 256 => [0.0, 1.0, 0.0, 0.0],
+            n if n < 1024 * 1024 => [0.0, 0.0, 1.0, 0.0],
+            _ => [0.0, 0.0, 0.0, 1.0],
+        };
+        let n = raw_feats.len();
+        let mut features = Vec::with_capacity(2 * n + 10);
+        features.extend_from_slice(&raw_feats);
+        features.extend_from_slice(&size_oh);
+        features.extend_from_slice(&[
+            log_px,
+            log_px * log_px,
+            zq_norm,
+            zq_norm * zq_norm,
+            zq_norm * log_px,
+        ]);
+        for f in &raw_feats {
+            features.push(zq_norm * f);
+        }
+        features.push(0.0); // icc placeholder
+
+        // 5. Forward pass.
         let mut predictor = zenpredict::Predictor::new(model);
         let output = predictor
             .predict(&features)
             .map_err(|e| AutoTuneError::Inference(format!("{e}")))?;
         let bytes_log: Vec<f32> = output[..n_cells.min(output.len())].to_vec();
 
-        // 5. Apply masks: speed_range, time_budget.
+        // 6. Apply masks: speed_range, time_budget.
         let ms_lut = parse_encode_ms_lut(ENCODE_MS_LUT_JSON)?;
         let q_lut = parse_quality_lut(QUALITY_LUT_JSON)?;
-        let target_zq = match target {
-            QualityTarget::Zensim(z) => z,
-        };
         let zq_idx = nearest_target_zq_idx(&q_lut.target_zqs, target_zq)
             .ok_or(AutoTuneError::Internal("empty quality LUT"))?;
 

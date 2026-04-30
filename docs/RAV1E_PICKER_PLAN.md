@@ -1,6 +1,8 @@
 # zenavif knob predictor — master plan
 
-**Status:** drafted 2026-04-30. Awaiting user sign-off on scope before kicking off Phase 1 sweeps.
+**Status:** drafted 2026-04-30. v0.1 baked + integrated 2026-04-30 with
+known limitations (see "v0.1 limitations" below). Cron + Phase 2/3
+backfill is wired up to drive accuracy higher over the next week+.
 
 ## Goal
 
@@ -191,3 +193,31 @@ Total elapsed: **~10 days** of mostly-unattended compute + 2–3 active sessions
 ## Alternative if budget too tight
 
 If 6.5-day compute budget is infeasible, drop Stage 4 to **80 sources × 4 sizes × 6 speeds × 11 q × 4 surviving tuples = ~85 k encodes** (~6 h) at the cost of held-out validation accuracy. Stage 1+2+truncated-Stage-4 path delivers a v1 model in ~24 h compute at ~3–5 % BD-rate degradation vs full-budget version.
+
+## v0.1 limitations (post-bake snapshot, 2026-04-30)
+
+The first bake landed with these safety-gate violations, all bypassed via
+`ALLOW_UNSAFE=1` on the bake step. They have known root causes that the
+cron-driven backfill + Phase 2/3 sweeps will close:
+
+| Gate | v0.1 value | Threshold | Why | Resolves when |
+|---|---|---|---|---|
+| OVERFIT | train→val gap +5.57 pp (2.75 % → 8.32 %) | 2.0 pp | 50-image corpus, model fits training data | corpus grows past ~150 images via cron |
+| LOW_ARGMIN | val argmin_acc 15.7 % | 30 % | Only `speed` varies in Phase 1a, so many cells are equivalent at high q (encoder genuinely doesn't differentiate, picker can't either) | Phase 2 adds qm/vaq/tune_still macro-knob axes; argmin gains real choices |
+| PER_ZQ_TAIL | zq=88 p99 overhead 97.4 % | 80 % | Tail dominated by handful of (image, size) cells where the picker happens to mis-rank speed at a specific target | More images smooths the tail |
+| DATA_STARVED_SIZE | 84/120 (size_class, zq) cells have <50 train rows; tiny size class is worst (1–2 rows per zq) | 50 | 50-image corpus thin on 64×64 variants, since most CID22 sources are 512px (downscale to 64+256+512 only) | Cron pulls in larger sources from clic2025-1024 + gb82-sc + kadid10k; tiny variants accumulate |
+
+Today's bake is therefore a **runtime smoke** — it lights up the
+`auto_tune` API path so callers can integrate against it, but its
+predictions are not yet better than picking `speed=4` blindly. The cron
++ Phase 2/3 backfill is the path to real accuracy.
+
+### Acceptance criteria for v0.2
+
+- [ ] OVERFIT < 2.0 pp on the latest cron snapshot.
+- [ ] LOW_ARGMIN: val argmin_acc ≥ 30 %.
+- [ ] PER_ZQ_TAIL: zq p99 ≤ 60 %.
+- [ ] DATA_STARVED_SIZE: < 5 % of (size_class, zq) cells under 50 rows.
+- [ ] Phase 2 OAT-confirmed knobs added to CATEGORICAL_AXES /
+      SCALAR_AXES — picker sees real choices.
+- [ ] No more `ALLOW_UNSAFE=1` on the bake.

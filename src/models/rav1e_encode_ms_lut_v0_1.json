@@ -1,1 +1,128 @@
-{"placeholder": "run scripts/train_bake_pipeline.sh after Phase 1a sweep completes"}
+{
+  "median_ms_per_mpx": {
+    "speed1": {
+      "large": 25473.847,
+      "medium": 33263.702,
+      "small": 40042.961,
+      "tiny": 129612.63
+    },
+    "speed10": {
+      "large": 1562.948,
+      "medium": 2236.328,
+      "small": 3850.438,
+      "tiny": 12096.564
+    },
+    "speed2": {
+      "large": 24906.011,
+      "medium": 30201.06,
+      "small": 34047.852,
+      "tiny": 117553.9
+    },
+    "speed3": {
+      "large": 15228.157,
+      "medium": 19084.015,
+      "small": 23874.512,
+      "tiny": 80617.354
+    },
+    "speed4": {
+      "large": 13506.269,
+      "medium": 17407.227,
+      "small": 22706.299,
+      "tiny": 50672.201
+    },
+    "speed5": {
+      "large": 5316.677,
+      "medium": 7917.709,
+      "small": 10942.586,
+      "tiny": 21482.747
+    },
+    "speed6": {
+      "large": 5350.242,
+      "medium": 7736.969,
+      "small": 10805.664,
+      "tiny": 21819.321
+    },
+    "speed7": {
+      "large": 4126.253,
+      "medium": 5613.403,
+      "small": 8443.604,
+      "tiny": 17433.344
+    },
+    "speed8": {
+      "large": 4157.825,
+      "medium": 5623.705,
+      "small": 8236.084,
+      "tiny": 18190.104
+    },
+    "speed9": {
+      "large": 1946.94,
+      "medium": 2838.44,
+      "small": 4785.156,
+      "tiny": 14472.656
+    }
+  },
+  "p90_ms_per_mpx": {
+    "speed1": {
+      "large": 53191.328,
+      "medium": 61818.085,
+      "small": 88542.48,
+      "tiny": 235317.708
+    },
+    "speed10": {
+      "large": 2337.36,
+      "medium": 3484.955,
+      "small": 9143.066,
+      "tiny": 23175.872
+    },
+    "speed2": {
+      "large": 46027.174,
+      "medium": 56995.392,
+      "small": 75012.207,
+      "tiny": 221376.953
+    },
+    "speed3": {
+      "large": 25660.772,
+      "medium": 36324.305,
+      "small": 48173.828,
+      "tiny": 150957.031
+    },
+    "speed4": {
+      "large": 22585.468,
+      "medium": 31868.439,
+      "small": 43193.359,
+      "tiny": 96593.137
+    },
+    "speed5": {
+      "large": 8554.888,
+      "medium": 12545.013,
+      "small": 20425.092,
+      "tiny": 48196.615
+    },
+    "speed6": {
+      "large": 7597.733,
+      "medium": 12206.116,
+      "small": 19360.352,
+      "tiny": 50984.738
+    },
+    "speed7": {
+      "large": 5846.434,
+      "medium": 8820.19,
+      "small": 15058.594,
+      "tiny": 46565.755
+    },
+    "speed8": {
+      "large": 5547.895,
+      "medium": 8843.204,
+      "small": 15617.676,
+      "tiny": 40606.831
+    },
+    "speed9": {
+      "large": 2758.818,
+      "medium": 4714.456,
+      "small": 10449.219,
+      "tiny": 36864.099
+    }
+  },
+  "schema_version": 1,
+  "source": "benchmarks/rav1e_phase1a_2026-04-30.tsv"
+}

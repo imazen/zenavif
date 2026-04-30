@@ -91,7 +91,12 @@ fn main() -> ExitCode {
         }
     };
     let predict_ms = t0.elapsed().as_secs_f64() * 1000.0;
-    eprintln!("[predicted] (private fields hidden); auto_tune took {predict_ms:.1} ms");
+    eprintln!(
+        "[predicted] speed={} quality={} (auto_tune took {:.1} ms)",
+        cfg.speed_value(),
+        cfg.quality_value(),
+        predict_ms
+    );
 
     // Now actually encode using the predicted config.
     let buf: Vec<RGB8> = rgb_img

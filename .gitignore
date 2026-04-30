@@ -80,3 +80,11 @@ Cargo.toml.original.txt
 benchmarks/rav1e_phase1a_*.tsv
 training/__pycache__/
 benchmarks/rav1e_phase1a_*.tsv.clean
+
+# Training intermediates — large + reproducible from TSVs
+benchmarks/rav1e_picker_*.json
+benchmarks/rav1e_picker_*.manifest.json
+benchmarks/rav1e_picker_*.log
+benchmarks/rav1e_encode_ms_lut*.json
+benchmarks/rav1e_quality_lut*.json
+benchmarks/rav1e_picker_*.bin

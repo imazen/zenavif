@@ -305,6 +305,16 @@ impl EncoderConfig {
         self
     }
 
+    /// Read the currently configured quality.
+    pub fn quality_value(&self) -> f32 {
+        self.quality
+    }
+
+    /// Read the currently configured speed (1..=10).
+    pub fn speed_value(&self) -> u8 {
+        self.speed
+    }
+
     /// Set encoding speed (1 = slowest/best, 10 = fastest/worst)
     pub fn speed(mut self, speed: u8) -> Self {
         self.speed = speed;
