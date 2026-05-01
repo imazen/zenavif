@@ -9,19 +9,19 @@
 //!
 //! Three artifacts ship with the runtime, all `include_bytes!`'d:
 //!
-//! 1. **ZNPR model** (`src/models/rav1e_picker_v0_1.bin`) — the trained
+//! 1. **ZNPR model** (`src/models/rav1e_picker_v0_1_1.bin`) — the trained
 //!    MLP. Inputs: zenanalyze feature vector + log_pixels. Outputs:
 //!    `bytes` regression head per cell (one cell per speed preset).
 //!    `argmin_masked_in_range(features, (0, n_cells), mask, ...)`
 //!    selects the cell that minimizes predicted bytes for the user's
 //!    target.
 //!
-//! 2. **encode_ms LUT** (`src/models/rav1e_encode_ms_lut_v0_1.json`) —
+//! 2. **encode_ms LUT** (`src/models/rav1e_encode_ms_lut_v0_1_1.json`) —
 //!    median ms/MPx per (speed, size_class). Multiplied by the input's
 //!    pixel_count to estimate encode time. Used to mask cells where
 //!    predicted time > `with_time_budget`.
 //!
-//! 3. **quality LUT** (`src/models/rav1e_quality_lut_v0_1.json`) — per
+//! 3. **quality LUT** (`src/models/rav1e_quality_lut_v0_1_1.json`) — per
 //!    (cell, target_zq) → median q. Translates the picker's cell choice
 //!    + user target_zq into the actual encoder `quality` parameter.
 //!
@@ -133,12 +133,12 @@ pub enum AutoTuneError {
 struct Align4<T: ?Sized>(T);
 
 static MODEL_BYTES_ALIGNED: &Align4<[u8]> = &Align4(*include_bytes!(
-    "models/rav1e_picker_v0_1.bin"
+    "models/rav1e_picker_v0_1_1.bin"
 ));
 static MODEL_BYTES: &[u8] = &MODEL_BYTES_ALIGNED.0;
 const ENCODE_MS_LUT_JSON: &str =
-    include_str!("models/rav1e_encode_ms_lut_v0_1.json");
-const QUALITY_LUT_JSON: &str = include_str!("models/rav1e_quality_lut_v0_1.json");
+    include_str!("models/rav1e_encode_ms_lut_v0_1_1.json");
+const QUALITY_LUT_JSON: &str = include_str!("models/rav1e_quality_lut_v0_1_1.json");
 
 /// Per-(speed, size_class) median ms/MPx, parsed from the JSON LUT.
 struct EncodeMsLut {

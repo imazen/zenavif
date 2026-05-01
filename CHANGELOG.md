@@ -10,6 +10,17 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Changed
+- Bumped baked picker artifacts to `v0_1_1`: re-baked from a 4× larger
+  Phase 1a corpus (448 images / 89,601 sweep rows vs. 116 / 23,200 in
+  v0_1) with a wider 192³ MLP. Held-out student mean overhead drops
+  from 4.07 % → 3.88 % on the same val split. ZNPR + per-(speed,
+  size_class) encode_ms LUT + per-(cell, target_zq) quality LUT all
+  rev v0_1_1; auto_tune.rs `include_bytes!` paths updated. Old v0_1
+  artifacts dropped (git history preserves them).
+- Dropped `composites` feature from zenanalyze path-dep — feature was
+  removed upstream in zenanalyze@b1623ba.
+
 ### Added
 - 11 new `EncoderConfig` builder methods exposing internal speed-preset
   overrides for content-aware encoding, all gated on `encode-imazen`:

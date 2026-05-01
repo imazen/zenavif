@@ -1,0 +1,128 @@
+{
+  "median_ms_per_mpx": {
+    "speed1": {
+      "large": 12302.637,
+      "medium": 14050.598,
+      "small": 18800.354,
+      "tiny": 68410.096
+    },
+    "speed10": {
+      "large": 771.699,
+      "medium": 1139.755,
+      "small": 2096.212,
+      "tiny": 7094.727
+    },
+    "speed2": {
+      "large": 11068.945,
+      "medium": 13217.01,
+      "small": 17045.898,
+      "tiny": 61764.323
+    },
+    "speed3": {
+      "large": 7069.559,
+      "medium": 8549.042,
+      "small": 11800.639,
+      "tiny": 41593.122
+    },
+    "speed4": {
+      "large": 6288.381,
+      "medium": 7811.508,
+      "small": 10756.836,
+      "tiny": 27065.787
+    },
+    "speed5": {
+      "large": 2972.546,
+      "medium": 3453.217,
+      "small": 5132.345,
+      "tiny": 11865.916
+    },
+    "speed6": {
+      "large": 2669.883,
+      "medium": 3439.484,
+      "small": 5197.144,
+      "tiny": 11848.958
+    },
+    "speed7": {
+      "large": 2017.655,
+      "medium": 2624.13,
+      "small": 4196.777,
+      "tiny": 10269.552
+    },
+    "speed8": {
+      "large": 2036.896,
+      "medium": 2623.291,
+      "small": 4271.444,
+      "tiny": 9891.695
+    },
+    "speed9": {
+      "large": 1010.818,
+      "medium": 1419.22,
+      "small": 2589.315,
+      "tiny": 8408.963
+    }
+  },
+  "p90_ms_per_mpx": {
+    "speed1": {
+      "large": 44417.191,
+      "medium": 40079.041,
+      "small": 58273.926,
+      "tiny": 185950.521
+    },
+    "speed10": {
+      "large": 1884.356,
+      "medium": 2624.969,
+      "small": 6015.625,
+      "tiny": 16286.337
+    },
+    "speed2": {
+      "large": 33588.085,
+      "medium": 34808.35,
+      "small": 44379.883,
+      "tiny": 141671.512
+    },
+    "speed3": {
+      "large": 19518.814,
+      "medium": 22389.984,
+      "small": 29775.391,
+      "tiny": 96455.078
+    },
+    "speed4": {
+      "large": 17239.914,
+      "medium": 19836.273,
+      "small": 27817.383,
+      "tiny": 62273.185
+    },
+    "speed5": {
+      "large": 6535.053,
+      "medium": 8732.758,
+      "small": 13544.922,
+      "tiny": 27561.773
+    },
+    "speed6": {
+      "large": 6448.231,
+      "medium": 8733.368,
+      "small": 13130.285,
+      "tiny": 30127.18
+    },
+    "speed7": {
+      "large": 4818.916,
+      "medium": 6323.853,
+      "small": 10637.207,
+      "tiny": 22047.526
+    },
+    "speed8": {
+      "large": 4845.085,
+      "medium": 6329.183,
+      "small": 10722.656,
+      "tiny": 23173.828
+    },
+    "speed9": {
+      "large": 2341.223,
+      "medium": 3294.067,
+      "small": 6975.098,
+      "tiny": 18869.485
+    }
+  },
+  "schema_version": 1,
+  "source": "benchmarks/rav1e_phase1a_2026-04-30.tsv"
+}
