@@ -36,8 +36,20 @@ We have three categorically different artifact populations:
 | Tier | Audience | Cardinality | Per-record size | Visibility |
 |---|---|---|---|---|
 | **Oracle** | Picker training only | 10M+ | ~100 B (metrics: bytes, encode_ms, zensim, ssim2, butteraugli) | private |
-| **Coefficient browser** | Pareto exploration UI | ~100 K – 1 M | ~10–500 KB (encoded blob + metadata + thumbnail) | public |
-| **Squintly** | Public demos | ~1 K – 10 K | ~100 KB – 5 MB (encoded + reference) | public |
+| **Coefficient browser** | Pareto exploration UI | ~100 K – 1 M | encoded blob only (~5–500 KB); source + thumbnails decoded client-side | public |
+| **Squintly** | Public demos | ~1 K – 10 K | encoded blob only (~100 KB – 5 MB); source from sources/ bucket | public |
+
+**Decoded reference images are never stored.** Zensim, ssim2, and
+butteraugli are computed in-worker from in-memory decoded RGB; the
+decoded buffer is dropped on flush. The browser UI displays
+`<img src="r2://sources/{sha256}.{ext}">` and
+`<img src="r2://browser/{encoding_id}.avif">` side-by-side — the browser
+does the decode natively. No PNG round-tripping, ever.
+
+This simplifies tier sizing: the **browser tier** stores only the
+encoded artifact (the same bytes the encoder produced; AVIF/WebP/JXL).
+The **source bucket** is one-write-per-source, separate from the per-
+encoding stream.
 
 **Oracle is 99 % of the volume but 0.1 % of the byte cost.** Aggregating
 oracle records into Parquet/JSONL chunks and writing one chunk per
@@ -493,3 +505,256 @@ Annual R2 bill: **~$11**. Very fine.
 
 For comparison, current naive-per-blob design at 40 M records / yr =
 **$180/yr in writes alone**.
+
+---
+
+# Three open questions, answered
+
+## (a) How do we ensure work is never duplicated?
+
+Encodes can be expensive (~minute each at low speed × large image), so
+losing a sweep to duplicate work is real money. Coefficient already
+solves most of this — but the existing design assumes a single store
+that's locally scannable, and breaks down for distributed workers
+writing to R2.
+
+### What coefficient already gives us (verified in `src/`)
+
+1. **Deterministic encoding IDs.** `EncodingRecord::id` is
+   `sha256(source_hash || codec_name || codec_config || quality)`
+   (`src/version/encoding.rs:~180`). Two workers given the same
+   inputs produce the same ID — independent of which worker runs the
+   encode.
+2. **Write-once `SafeStore`.** `src/store/safe.rs:144` rejects an
+   `encoding_put` whose ID exists with different bytes (returns
+   `PutResult::Conflict`). Idempotent: same bytes for same ID returns
+   `AlreadyExists`. So even if two workers race on the same work-unit,
+   at most one set of bytes lands.
+3. **`skip_completed` in the planner.** `src/planner/mod.rs:334-362`
+   loads all known encoding IDs, drops tasks that match. Today this is
+   an O(N) full scan — fine at 100k records, breaks at 10M.
+
+### What we add for the R2 / Parquet world
+
+| Mechanism | Cost | Catches |
+|---|---|---|
+| **Manifest-based work assignment** | $0; in-memory | Different workers don't pick the same units |
+| **Pre-flight Bloom filter** (~12 bits/element, 15 MB for 10M IDs, 0.1% FP rate) | one R2 GET per worker (~1 ¢/sweep) | Work units already done in a previous run |
+| **Per-partition `_index.parquet`** (record_id → chunk_path, row_offset) | ~50 KB / partition; 5 MB total at 10M scale | Authoritative existence check on Bloom-filter false positives |
+| **Idempotent chunk filenames** (include content hash + run_id) | $0 | Crash-then-retry duplicate flushes — compactor dedupes by ID at merge time |
+
+The flow on a Vast.ai worker:
+
+1. Worker boots, fetches manifest = list of `(source_sha256, codec_id,
+   config_id, quality)` work units assigned to it.
+2. Worker fetches the latest `_dedup.bloom` from R2 (~15 MB once).
+3. For each work unit: `bloom.contains(encoding_id)` → if false, encode.
+   If true, fetch the partition's `_index.parquet` and confirm; only
+   skip on real hit.
+4. Encode → buffer → flush chunk every 50K rows OR 5 min.
+5. On flush, chunk filename includes `chunk-{timestamp}-{run_id}-
+   {sha256_of_payload}.parquet`. Atomic single-PUT to R2.
+6. Compactor (nightly cron) merges yesterday's chunks into daily
+   files; dedupes by `record_id` at merge time using DuckDB
+   `qualify row_number() over (partition by record_id) = 1`. So even
+   the bloom-FP-but-actually-different case gets resolved cleanly at
+   read time.
+
+The Bloom filter is rebuilt by the compactor as it walks the index.
+
+**Worst-case waste:** ~50K records (one buffer's worth, ~5 min of
+compute, ~$0.10) lost on a worker crash. No double-encoded records
+ever land in the merged read view — the compactor enforces uniqueness.
+
+### What needs implementing in the PR
+
+- `src/store/dedup.rs` — Bloom filter build + check + serialize to R2
+- `src/store/compact.rs` — periodic merge job (DuckDB-driven; ~50 LOC)
+- `src/planner/mod.rs:334-362` — switch from full HashSet load to
+  Bloom-filter probe (constant-memory)
+
+## (b) How do codecs evolve, and how do we coalesce versions?
+
+This is where coefficient has machinery that **isn't wired in yet**.
+The PR's biggest opportunity.
+
+### What exists (and what's missing)
+
+- `src/version/fingerprint.rs:55` — `CanarySet`: 15 fixed
+  (source_hash, quality) pairs. Encoding all 15 produces a stable
+  signature for a given (codec, version, build commit).
+- `src/version/fingerprint.rs:126` — `ConfigFingerprint`:
+  `sha256(concat(blob_hashes from CanarySet runs))`. **Two builds
+  produce identical fingerprints iff they produce identical bitstreams
+  on the canary inputs.** This is exactly the "did this version change
+  observable behavior?" test.
+- `src/version/fingerprint.rs:246` — `EquivalenceRegistry`: append-
+  only map `(codec_name, config_hash, fingerprint_hash) → version_id`.
+- **Gap:** the planner's skip path (`src/planner/mod.rs:334-362`)
+  hashes the codec_name as part of the encoding ID. If `codec_name`
+  encodes the version (e.g. `"zenavif-0.1.7"`), zenavif 0.1.6 and
+  0.1.7 produce different encoding IDs and we re-encode even when the
+  output is bit-identical.
+
+### Proposed wiring
+
+The fix is to **route codec identity through the EquivalenceRegistry
+before computing the encoding ID**. Concretely:
+
+1. **Worker startup**: encode the CanarySet at default quality with
+   the active build of each codec. Compute `ConfigFingerprint`.
+2. **Worker queries** `EquivalenceRegistry` (small file on R2,
+   `r2://config/equivalence.parquet`): "is fingerprint X already
+   registered?" → returns `version_id` (a stable u32 / sha256 prefix).
+   If new fingerprint, register it, get a new `version_id`.
+3. **Manifest carries `version_id`** for each work unit, not the
+   crate-version string. So the manifest is identical whether the
+   worker is on zenavif 0.1.6 or 0.1.7 with same fingerprint.
+4. **Encoding ID becomes**:
+   `sha256(source_hash || version_id || config_hash || quality)`.
+   Identical fingerprints share the same ID.
+5. **`crate_version` and `commit` go into the EncodingRecord**
+   metadata as provenance, but don't participate in the ID.
+
+When a real codec change happens (e.g., zenavif 0.2.0 with a new QM
+table → different bitstream), the canary fingerprint differs → new
+`version_id` is registered → new work units get new IDs → the worker
+encodes them. Old `version_id` results stay valid. Picker training
+queries can either pin a `version_id` (reproducible) or union over
+fingerprint-equivalent ones (latest).
+
+### What needs implementing in the PR
+
+- `src/version/equivalence_registry.rs` — read/write the registry
+  parquet on R2 (already exists in-memory at
+  `src/version/fingerprint.rs:246`; add persistence + Bloom filter)
+- `src/planner/mod.rs:344` — replace `codec.name()` in
+  encoding-ID input with `version_id` resolved from the registry
+- `src/bin/cloud_worker.rs` — call `register_canary_fingerprint()` at
+  startup, pin `version_id` for all subsequent encodes
+- `coefficient.toml [version]` — add `equivalence_registry_uri =
+  "r2://.../equivalence.parquet"`
+
+This is genuinely the missing piece. ~600 LOC, ~2 days. Worth a
+dedicated PR — call it **PR2.5** in the split, between the storage
+PRs and the Vast.ai PR.
+
+## (c) Server-free browsing across many parquet files
+
+You don't need a server. Here's the layered design:
+
+### Three layers, each handles a query class
+
+```
+Layer        Format                    Size       Updates           Use
+─────        ──────                    ────       ───────           ───
+Manifest     manifest.parquet           ~100 KB    every chunk flush  "what chunks exist?"
+Per-partition _index.parquet            ~50 KB     hourly compaction  "where is record X?"
+Data         chunk-*.parquet            ~1.2 MB    every 50K rows     full row data
+```
+
+The manifest is a single small parquet at the root of the bucket:
+
+```
+manifest.parquet schema:
+  partition_path   STRING  (e.g. "metrics/v1/codec=zenavif/year=2026/.../")
+  chunk_filename   STRING  (e.g. "chunk-2026-04-30T18-22-04Z-000017.parquet")
+  row_count        UINT64
+  byte_size        UINT64
+  schema_version   STRING  (e.g. "v1.3")
+  version_id       UINT32  (codec equivalence class)
+  encode_codec     STRING  ("zenavif" | "zenwebp" | "zenjpeg" | "zenjxl")
+  date             DATE    (for hive-pruning)
+  min_zensim       FLOAT
+  max_zensim       FLOAT
+```
+
+The browser fetches `manifest.parquet` once on page load (~100 KB,
+~30 ms over R2). All "find me chunks where codec=zenavif and
+zensim>80" queries answer from the manifest — no chunk reads.
+
+### Querying across files
+
+Two real options for the browser, by complexity:
+
+1. **hyparquet** (10 KB JS, [hyparam/hyparquet](https://github.com/hyparam/hyparquet)) for projection + range-scan reads. Single chunk
+   queries: "show me rows from this chunk where bytes < 10000".
+   No JOINs. Perfect for "load this one Pareto-frontier slice".
+
+2. **DuckDB-WASM** (~6 MB JS, cached after first load) for joins and
+   cross-chunk SQL. Reads R2 chunks via httpfs. The full Pareto
+   extraction query, the picker-training prep query, anything with
+   `GROUP BY` / `JOIN` / `WINDOW` — all client-side. Same SQL we'd
+   run in the local DuckDB CLI.
+
+The natural split: **default views in coefficient browser use
+hyparquet** (instant); **drill-down "explore" view uses DuckDB-WASM**
+(loads on first interaction). 6 MB cached download is fine for an
+analytics tool.
+
+### Do we join the parquet files?
+
+Yes, but at compaction time, not at write time. Three tiers:
+
+```
+                Latency target   Format                                   Files at 10M scale
+Hot (today)     low write cost   raw chunks, ~50K rows each               2,000+ chunks
+Warm (yesterday) low read cost   daily compactions, ~5M rows each          ~30 files
+Cold (>30 days) lowest read cost  monthly compactions, ~150M rows each     ~12 files
+```
+
+Compaction is one DuckDB statement run nightly:
+
+```sql
+COPY (
+  SELECT * FROM read_parquet('r2://metrics/v1/codec=*/year=2026/month=04/day=30/**/*.parquet')
+  QUALIFY row_number() OVER (PARTITION BY record_id ORDER BY timestamp) = 1
+) TO 'r2://metrics/v1/compacted/2026-04-30.parquet' (FORMAT 'parquet', COMPRESSION 'zstd', ROW_GROUP_SIZE 50000);
+```
+
+After compaction the day's hot chunks are deleted (or moved to
+`raw/2026-04-30/` for ~7 days as a retry safety net).
+
+The browser's default queries hit warm + cold (~40 files at 10M
+scale) — DuckDB-WASM glob `read_parquet('r2://.../compacted/*.parquet')`
+is fast. Drill-down into "today" hits the hot tier.
+
+### What needs implementing in the PR
+
+- `src/store/manifest.rs` — read/write `manifest.parquet`, append on
+  chunk flush
+- `src/store/compact.rs` — daily / monthly DuckDB compaction job (call
+  via `duckdb` Rust binding or shell out to the CLI)
+- `viewer/src/lib/duckdb_wasm.ts` — initialize DuckDB-WASM with R2
+  credentials (read-only, public bucket prefers no creds)
+- `viewer/src/lib/hyparquet.ts` — projection-only reader for fast
+  default views
+- `viewer/src/routes/explore/+page.svelte` — wire the two readers to
+  the existing explore page
+
+---
+
+# Rescue plan for coefficient's pending work
+
+You said the prior agent's session crashed. Two paths:
+
+1. **Rescue as wip** — I check what was being attempted (look at the
+   diff, the .workongoing description "v0.6 (44 features, Spearman∩
+   ablation, 192x192x192)" suggests a meta-train experiment), then
+   either:
+   - commit it as `wip(meta-train): v0.6 — 44 features, Spearman
+     ablation` on a `wip/meta-train-v0.6` branch
+   - or stash to a `.patch` file under `coefficient/.rescued/` and
+     leave a note so the original session can resume
+
+2. **Discard if confirmed unwanted** — only with your explicit
+   confirmation per global CLAUDE.md "NEVER discard changes you
+   didn't make" rule.
+
+I'd recommend option 1 (commit-to-branch) — it's reversible, preserves
+the work, and unblocks the new PR. But that needs your green light
+since I'd be committing on a branch and the prior agent might have
+intended different commit boundaries.
+
+Tell me to proceed and I'll inspect the diff, propose a commit
+message, then commit on a `wip/` branch and push it.
