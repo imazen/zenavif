@@ -90,7 +90,9 @@ jobs:
         with:
           components: rustfmt
       - name: Format check
-        run: cargo fmt --all -- --check
+        run: cargo fmt -- --check
+        # `--all` would recurse into the cloned ../zenanalyze path-dep,
+        # which has its own fmt-check pipeline. Stay scoped to zenavif.
 
   msrv:
     name: MSRV

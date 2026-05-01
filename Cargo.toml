@@ -116,6 +116,18 @@ required-features = ["_dev"]
 name = "encode_sweep"
 required-features = ["encode-imazen", "encode-threading"]
 
+[[example]]
+name = "predictor_sweep"
+required-features = ["encode-imazen"]
+
+[[example]]
+name = "phase2_oat"
+required-features = ["encode-imazen"]
+
+[[example]]
+name = "auto_tune_smoke"
+required-features = ["auto-tune"]
+
 [features]
 default = []
 # Decode with hand-written assembly via C FFI (fastest, uses unsafe)
