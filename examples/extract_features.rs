@@ -304,7 +304,7 @@ fn main() -> ExitCode {
 
     pool.install(|| {
         manifest.par_iter().for_each(|entry| {
-            let dyn_img = match ImageReader::open(&entry.path).and_then(|r| Ok(r.decode())) {
+            let dyn_img = match ImageReader::open(&entry.path).map(|r| r.decode()) {
                 Ok(Ok(img)) => img,
                 _ => {
                     eprintln!("skip (decode fail): {}", entry.path.display());
@@ -347,7 +347,10 @@ fn main() -> ExitCode {
                     write!(w_lock, "\t{}", feature_value_str(&row, *c)).ok();
                 }
                 writeln!(w_lock).ok();
-                if total_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 10 == 0 {
+                if total_done
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                    .is_multiple_of(10)
+                {
                     w_lock.flush().ok();
                     eprintln!(
                         "[done={} skipped={} failed={}]",
