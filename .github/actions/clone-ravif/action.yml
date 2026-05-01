@@ -1,0 +1,23 @@
+name: Clone cavif-rs for zenravif patch
+description: |
+  zenavif's Cargo.toml has [patch.crates-io] zenravif = { path =
+  "../ravif/ravif" } that pulls in unpublished zenravif 0.1.3 features
+  (4 deep-knob overrides for the rav1e knob predictor MLP). Cargo
+  resolves path-deps at manifest-parse time, so the directory must
+  exist on the build filesystem even when the patch isn't in the
+  active dependency graph. The repo is published at imazen/cavif-rs;
+  ../ravif here matches the local-dev convention.
+
+  Remove this action and the [patch.crates-io] block once zenravif
+  0.1.3 is published to crates.io.
+
+runs:
+  using: composite
+  steps:
+    - name: Clone imazen/cavif-rs into ../ravif
+      shell: bash
+      run: |
+        cd ..
+        if [ ! -d ravif ]; then
+          git clone --depth 1 https://github.com/imazen/cavif-rs.git ravif
+        fi
