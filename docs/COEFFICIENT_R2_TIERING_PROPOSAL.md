@@ -288,29 +288,167 @@ Single mega-PR is reviewable but slow. I'd split into 4 sequential PRs:
 
 Mergeable in any order after PR 1 lands.
 
-## Open design questions
+## Format choice for oracle chunks (decided)
 
-1. **Parquet vs Arrow IPC vs JSONL.gz** for oracle chunks? Parquet is
-   the right answer for long-term storage but Arrow IPC is faster for
-   in-flight workers. Could write Arrow IPC chunks and convert to
-   Parquet at compaction time.
+Researched 2026-04-30 (general-purpose agent). **Apache Parquet with
+zstd compression** is the right answer; the others are clearly worse
+for our specific workload.
 
-2. **Chunks index** — in-memory hash map flushed to JSON sidecar, vs
-   a SQLite sidecar that supports range queries on (codec, source_id,
-   q). I lean SQLite since downstream picker training already loads
-   the chunks for analysis and a SQLite index supports the join cheaply.
+### Crate pins
 
-3. **Tier policy at write-time vs read-time** — if we promote an
+```toml
+[dependencies]
+parquet      = { version = "58.1", default-features = false, features = ["arrow", "async", "snap", "zstd", "lz4"] }
+arrow        = "58.1"
+arrow-array  = "58.1"
+arrow-schema = "58.1"
+```
+
+`parquet2` is dead (last release Nov 2022); `arrow2` was deprecated in
+favor of unified arrow-rs. Don't pick either.
+
+### Why Parquet beats the alternatives for our schema
+
+- **Dictionary encoding crushes our low-cardinality strings.** `codec`
+  has 4 values, `size_class` has 4, `config_name` has bounded
+  cardinality. Parquet writes them as int8/int16 indexes + per-rowgroup
+  string dictionary; JSONL repeats the strings every row.
+- **Predicate + projection pushdown.** Pareto extraction is
+  `SELECT bytes, zensim WHERE target_zq=85 GROUP BY source_sha256`.
+  Parquet rowgroup statistics let DuckDB skip rowgroups where
+  `target_zq` is out of range. **No other format on the shortlist
+  matches this.**
+- **NaN handling is clean.** `butteraugli` has NaNs; modern arrow-rs
+  writer handles min/max stats correctly under Parquet 2.9+ spec.
+- **Schema evolution is "good enough":** add nullable columns at the
+  end, older chunks read back as `null`. Avoids rewriting on adding
+  e.g. `vmaf` later.
+- **DuckDB queries Parquet over R2 directly** via `httpfs` extension:
+  `read_parquet('r2://bucket/.../**/*.parquet', hive_partitioning=true)`.
+  No download / no proxy.
+- **Browser readability:** [hyparquet](https://github.com/hyparam/hyparquet)
+  is 10 KB minified pure JS, fetches the 512 KB footer via one range
+  request, then projects only the columns the UI asks for. Direct fit
+  for the coefficient web UI without a server-side proxy.
+
+### Expected size on our schema
+
+Mixed-numeric records (~100 B/row) compress to **~20-30 B/row** under
+zstd-3 with dictionary-encoded strings. **A 50 K-row chunk = ~1.2 MB.**
+Hits the sweet spot: rowgroup metadata overhead is amortized, R2 PUT
+cost per chunk is ~$0.000004.
+
+### What we explicitly rejected
+
+| Format | Why not |
+|---|---|
+| Arrow IPC / Feather v2 | ~2× larger compressed (no per-column encoding); good only for in-flight workers, bad for storage |
+| DuckDB native (.duckdb) | Single-writer per file — multiple Vast.ai workers writing the same file corrupt it |
+| JSONL+zstd | 30-50 % bigger than Parquet, no projection/predicate pushdown |
+| CBOR / MessagePack | No predicate pushdown; no DuckDB native reader |
+| Avro | Better schema evolution irrelevant here; weak JS readers; Rust crate still beta |
+| HDF5 | Effectively dead in the Rust analytics world for tabular data |
+
+### R2 layout (revised, hive-partitioned)
+
+```
+metrics/
+  v1/                              # schema version (bump on incompatible changes)
+    codec=zenavif/                 # hive partition — DuckDB skips before fetching
+      year=2026/month=04/day=30/
+        worker=vast-7a3f/
+          chunk-2026-04-30T18-22-04Z-000017.parquet
+          chunk-2026-04-30T18-22-04Z-000017.parquet.meta.json   # provenance sidecar
+```
+
+DuckDB's `hive_partitioning=true` reads partition keys from the path,
+so `WHERE codec='zenavif'` filters before any GET. Cuts R2 read costs.
+
+Filename rule: UTC ISO timestamp + monotonic counter for idempotent
+uploads. Glob `chunk-*.parquet`; the `.meta.json` sidecar (commit hash,
+host, run_id, no records) stays out of the data glob.
+
+### Worker write path (Rust skeleton)
+
+```rust
+use arrow_array::{RecordBatch, /* typed arrays */};
+use arrow_schema::{DataType, Field, Schema};
+use parquet::arrow::ArrowWriter;
+use parquet::basic::{Compression, ZstdLevel};
+use parquet::file::properties::{WriterProperties, EnabledStatistics};
+
+let props = WriterProperties::builder()
+    .set_compression(Compression::ZSTD(ZstdLevel::try_new(3).unwrap()))
+    .set_dictionary_enabled(true)
+    .set_column_dictionary_enabled("codec".into(), true)
+    .set_column_dictionary_enabled("config_name".into(), true)
+    .set_column_dictionary_enabled("size_class".into(), true)
+    .set_statistics_enabled(EnabledStatistics::Page)
+    .set_data_page_size_limit(1024 * 1024)        // 1 MiB pages
+    .set_max_row_group_size(50_000)
+    .build();
+
+let mut w = ArrowWriter::try_new(out, schema, Some(props))?;
+w.write(&record_batch_from(&records))?;
+w.close()?;
+```
+
+### Chunks index — decided: `_index.parquet` per partition
+
+A second small Parquet file per `codec=*/year=*/month=*/day=*/` that
+holds `(record_id, chunk_path, row_offset)`. Built by the worker on
+flush. Downstream tools that need random access by `record_id` query
+the index first, then the data chunk. Avoids the SQLite sidecar
+complexity I'd considered.
+
+### DuckDB query path (reference)
+
+```sql
+INSTALL httpfs; LOAD httpfs;
+CREATE SECRET (TYPE r2, KEY_ID '...', SECRET '...', ACCOUNT_ID '...');
+
+WITH ranked AS (
+  SELECT source_sha256, target_zq, codec, config_id, bytes, zensim,
+         row_number() OVER (PARTITION BY source_sha256, target_zq
+                            ORDER BY bytes ASC) AS rk
+  FROM read_parquet('r2://metrics/v1/codec=*/year=2026/**/*.parquet',
+                    hive_partitioning=true)
+  WHERE zensim >= target_zq
+)
+SELECT * FROM ranked WHERE rk = 1;
+```
+
+This is the single workflow that justifies Parquet over everything
+else on the list.
+
+### Migration ceiling
+
+If we ever exceed ~500 K chunks (R2 GET-list churn becomes the
+bottleneck), the upgrade is **DuckLake** or **Iceberg** sitting on
+top of the existing Parquet files. Both add a manifest layer without
+rewriting data. Don't try in-place schema migration on Parquet —
+write under `metrics/v2/...` and decommission `v1` after a transition
+window.
+
+## Remaining open design questions
+
+1. **Tier policy at write-time vs read-time** — if we promote an
    encoding from Oracle → BrowserPublic later (e.g., user marks it
    for a Squintly demo), do we re-encode and re-upload, or pre-write
-   a redacted blob that we materialize on demand? Re-encode is simpler
-   and rav1e at speed=4 is ~500 ms per image; not a real bottleneck.
+   a redacted blob that we materialize on demand? Re-encode is
+   simpler and rav1e at speed=4 is ~500 ms per image; not a real
+   bottleneck.
 
-4. **Multipart upload for large blobs** — Squintly tier may carry
+2. **Multipart upload for large blobs** — Squintly tier may carry
    5 MB AVIF stills. R2 supports S3-compat multipart but the existing
-   `SpacesStore` doesn't use it. Add multipart support in `R2Store`
-   if blob size > 8 MB? Or rely on the AWS SDK's auto-multipart in
-   the S3 client config.
+   `SpacesStore` doesn't use it. Rely on the AWS SDK's auto-multipart
+   in the S3 client config (handles >8 MB by default).
+
+3. **In-flight chunk durability** — workers buffer 50 K rows in
+   memory before flushing. On Vast.ai host reclaim, that's ~5 min
+   of work lost (~$0.10 of compute). Worth accepting; checkpointing
+   the buffer to local disk every 30 s would protect against it but
+   adds I/O complexity for marginal gain.
 
 ## Coordination needed
 
