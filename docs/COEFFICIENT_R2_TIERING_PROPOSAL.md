@@ -758,3 +758,146 @@ intended different commit boundaries.
 
 Tell me to proceed and I'll inspect the diff, propose a commit
 message, then commit on a `wip/` branch and push it.
+
+---
+
+# Two more design pinpoints (added 2026-05-01)
+
+## Local box and cloud workers share one substrate
+
+There is no "sync local upstream" step in the final design — the
+local 7950X is **just another worker writing to R2 via the same
+`BatchedRowStore<R2Store>` path the cloud workers use**. Idempotent
+keys (`record_id` derived from source+codec_version_id+config+quality)
+mean parallel workers can't double-write or corrupt each other's
+chunks; the compactor enforces uniqueness at merge time.
+
+Practical migration sequence:
+
+1. **One-shot migrator** (`zenavif/examples/migrate_tsv_to_r2.rs`,
+   post-PR2): walks the existing `benchmarks/rav1e_phase{1a,2,3}_*.tsv`
+   files, normalizes to the canonical schema, writes Parquet chunks to
+   the right hive partitions on R2. Idempotent — re-runs match by
+   `record_id` and skip already-present rows. Run once per historical
+   TSV, then those TSVs become reference data.
+2. **Sweep harness emits straight to R2.** `predictor_sweep.rs` gets
+   an `--r2-bucket` flag (or `R2_BUCKET` env) that swaps the TSV writer
+   for `BatchedRowStore<R2Store>`. Local TSV mode survives as
+   `--debug-tsv` for ad-hoc analysis but is no longer the canonical
+   output.
+3. **Cron rewrite.** The nightly LHS rotator stops writing local
+   TSVs. Sunday retrain reads from R2 (DuckDB
+   `read_parquet('r2://metrics/v1/codec=zenavif/**/*.parquet')`)
+   instead of from `benchmarks/`. Local box becomes pure compute, no
+   accumulated state.
+
+After step 3, the local 7950X and any rented Vast.ai box are
+interchangeable as workers — the only thing that distinguishes them
+is `worker_id` in the row metadata.
+
+## Score versions are first-class — same registry as codecs
+
+zensim 0.2.x and zensim 0.4 produce different scores for the same
+image pair. A row labelled "zensim=82.3" without a version tag is
+**not comparable** across upgrades. Coefficient already has the
+machinery for this — `src/version/metric.rs` defines
+`MetricVersionDef` parallel to `CodecVersionDef`, with the same
+`MatchRules` (semver + commit + required impl). The same gap that
+applies to codec versions (not wired into the planner skip path)
+applies here, and the same PR2.5 fix — wiring the `CanarySet` +
+fingerprint dance into the registry — covers both.
+
+The mechanic is identical:
+
+1. Worker boots with a pinned `ZensimProfile` (e.g. `v0_4_0`).
+2. Worker runs the metric `CanarySet` (a small fixed set of
+   reference image pairs at known target qualities; pre-computed
+   blob hashes stand in for what the canary metric should produce).
+3. The hash of the metric's actual outputs over the canary set is
+   the `ConfigFingerprint` for this metric build.
+4. Equivalence registry on R2 maps
+   `(kind=metric, name=zensim, config_hash, fingerprint_hash) →
+   version_id`. Two zensim builds with bit-identical canary outputs
+   share a `version_id` (e.g. a no-op patch bump). Different output
+   → different `version_id`.
+5. Every `MetricRecord` carries `(metric_name, version_id)`. The
+   picker training pipeline queries by `version_id`, never silently
+   mixing scores across incompatible versions.
+
+### Schema impact on the oracle Parquet
+
+The metric record's per-metric `version_id`s land alongside the
+score values. ~12 bytes/row total (3 × u32) with very low cardinality
+across the corpus, so dictionary encoding makes them ~free in
+storage.
+
+```
+record_id              STRING
+source_sha256          FIXED_SIZE_BINARY(32)
+codec_name             STRING       (dict-encoded)
+codec_version_id       UINT32       ← from EquivalenceRegistry
+config_id              UINT32
+target_zq              UINT8
+bytes                  UINT64
+encode_ms              FLOAT64
+zensim                 FLOAT32
+zensim_version_id      UINT32       ← from EquivalenceRegistry
+ssim2                  FLOAT32
+ssim2_version_id       UINT32
+butteraugli            FLOAT32  (nullable; sometimes not computed)
+butteraugli_version_id UINT32   (nullable iff value is)
+timestamp              INT64
+worker_id              STRING
+```
+
+### Equivalence registry layout on R2
+
+One Parquet file at the bucket root, append-only:
+
+```
+r2://metrics/v1/equivalence.parquet
+schema:
+  kind                STRING   ("codec" | "metric")
+  name                STRING   ("zenavif" | "zensim" | "ssim2" | …)
+  config_hash         STRING   (sha256 of normalized knob set)
+  fingerprint_hash    STRING   (sha256 of canary outputs)
+  version_id          UINT32   (assigned monotonically on first sight)
+  registered_at       INT64    (unix timestamp)
+  crate_version       STRING   (provenance: e.g. "0.4.0")
+  commit              STRING   (provenance: git sha)
+```
+
+Workers fetch it once at startup (~few KB, ~30ms over R2), look up
+or register their canary fingerprint, then pin the resolved
+`version_id` for the rest of the session.
+
+### Upgrade workflow (real example)
+
+When zenavif gets a QM behavior change (e.g. the v0.4.2 → v0.4.3
+fix that landed earlier this week):
+
+1. Old data: every row has `codec_version_id = 7` (whatever zensim
+   resolved the v0.4.2 fingerprint to)
+2. Workers come up on v0.4.3
+3. Canary fingerprint differs (QM produces different bitstreams)
+4. Registry assigns `codec_version_id = 8`
+5. New rows tagged with id=8; old rows still tagged with id=7
+6. Picker training: query for the codec, decide whether to use the
+   latest version_id only, the latest "fingerprint-equivalent set"
+   (in this case just {8}), or to union {7, 8} for max sample size
+   (acceptable iff the BD-rate delta is small, which it isn't here
+   — so we pin 8)
+7. Old data isn't deleted; it's just untrained-against. If we want
+   to backfill, a re-encode job picks up everything currently
+   tagged 7 and re-encodes with v0.4.3, producing rows tagged 8.
+
+zensim version bumps work identically.
+
+### What this means for the picker config
+
+`training/rav1e_picker_config.py` (and the equivalent zenwebp /
+zenjpeg / cross-codec configs) needs a way to filter by
+`version_id`. Add `CODEC_VERSION_IDS` and `METRIC_VERSION_IDS` lists
+(or "latest" sentinels) to the config, and have the trainer's
+`load_pareto` filter on those. Default to "latest fingerprint-
+equivalent set" so configs don't go stale silently.
