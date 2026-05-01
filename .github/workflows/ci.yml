@@ -63,6 +63,11 @@ jobs:
         with:
           key: cross-i686
       - name: Test (i686)
+        # Mount the workspace parent so cross's Docker container can
+        # see the cloned ../ravif and ../zenanalyze path-deps. Without
+        # this, cargo errors at manifest-load on the missing sources.
+        env:
+          CROSS_CONTAINER_OPTS: "-v ${{ github.workspace }}/..:${{ github.workspace }}/.."
         run: cross test --target i686-unknown-linux-gnu
 
   clippy:
