@@ -59,7 +59,7 @@ struct Args {
     qualities: Vec<u8>,
     sizes: Vec<u32>, // target maxdim
     max_images: Option<usize>,
-    threads: usize, // rayon outer
+    threads: usize,             // rayon outer
     enc_threads: Option<usize>, // per-encode (None = use single)
     append: bool,
     qm: bool,
@@ -68,7 +68,7 @@ struct Args {
     tune_still: bool,
     // Phase 2 survivor overrides — None = use speed-preset default.
     seg_boost: f64,
-    rdo_tx_off: bool, // true = override speed-preset to false
+    rdo_tx_off: bool,     // true = override speed-preset to false
     seg_complex_on: bool, // true = override speed-preset to true
     bottomup_on: bool,
     lrf_on: bool,
@@ -102,7 +102,13 @@ impl Args {
         let raw: Vec<String> = env::args().collect();
         let bin = raw
             .first()
-            .map(|s| Path::new(s).file_name().unwrap_or_default().to_string_lossy().into_owned())
+            .map(|s| {
+                Path::new(s)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
+            })
             .unwrap_or_else(|| "predictor_sweep".into());
 
         let mut iter = raw.iter().skip(1);
@@ -152,10 +158,18 @@ impl Args {
                 }
                 "--append" => append = true,
                 "--qm" => {
-                    qm = iter.next().ok_or("--qm BOOL")?.parse::<bool>().map_err(|e| e.to_string())?;
+                    qm = iter
+                        .next()
+                        .ok_or("--qm BOOL")?
+                        .parse::<bool>()
+                        .map_err(|e| e.to_string())?;
                 }
                 "--vaq" => {
-                    vaq = iter.next().ok_or("--vaq BOOL")?.parse::<bool>().map_err(|e| e.to_string())?;
+                    vaq = iter
+                        .next()
+                        .ok_or("--vaq BOOL")?
+                        .parse::<bool>()
+                        .map_err(|e| e.to_string())?;
                 }
                 "--vaq-strength" => {
                     vaq_strength = iter
@@ -278,7 +292,9 @@ fn parse_int_list_u32(s: &str) -> Result<Vec<u32>, String> {
         }
         if let Some((range, step_str)) = part.split_once(':') {
             let (lo, hi, inclusive) = parse_range(range)?;
-            let step: u32 = step_str.parse().map_err(|e| format!("bad step {step_str}: {e}"))?;
+            let step: u32 = step_str
+                .parse()
+                .map_err(|e| format!("bad step {step_str}: {e}"))?;
             let hi = if inclusive { hi } else { hi.saturating_sub(1) };
             let mut x = lo;
             while x <= hi {
@@ -358,10 +374,7 @@ fn read_manifest(path: &Path) -> Result<Vec<ManifestEntry>, String> {
 fn rgb_from_dynamic(img: &DynamicImage) -> ImgVec<RGB8> {
     let (w, h) = img.dimensions();
     let rgb8 = img.to_rgb8();
-    let buf: Vec<RGB8> = rgb8
-        .pixels()
-        .map(|p| RGB8::new(p[0], p[1], p[2]))
-        .collect();
+    let buf: Vec<RGB8> = rgb8.pixels().map(|p| RGB8::new(p[0], p[1], p[2])).collect();
     ImgVec::new(buf, w as usize, h as usize)
 }
 
@@ -744,8 +757,8 @@ fn encode_one(
     let decoded_ref: ImgRef<'_, Rgb<u8>> = decoded
         .try_as_imgref::<Rgb<u8>>()
         .ok_or("decoded buffer not Rgb<u8>")?;
-    let r = check_regression(zensim, &img, &decoded_ref, tol)
-        .map_err(|e| format!("zensim: {e}"))?;
+    let r =
+        check_regression(zensim, &img, &decoded_ref, tol).map_err(|e| format!("zensim: {e}"))?;
     let score = r.score();
 
     Ok(EncodeResult {

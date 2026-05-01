@@ -33,7 +33,9 @@ fn main() -> ExitCode {
         eprintln!(
             "usage: {} <image.png> <target_zensim>\n\
              env: AT_TIME_BUDGET_MS, AT_PARETO_WEIGHT (0..1), AT_SPEED_RANGE (e.g. 4..=8)",
-            args.first().map(String::as_str).unwrap_or("auto_tune_smoke")
+            args.first()
+                .map(String::as_str)
+                .unwrap_or("auto_tune_smoke")
         );
         return ExitCode::from(2);
     }
@@ -108,8 +110,8 @@ fn main() -> ExitCode {
     // Encode via the predicted config — the encoder builders accept it
     // directly. We use the ravif-level builder here for convenience.
     let _ = (cfg, img); // currently the public API plumbs through ravif::Encoder via
-                        // build_ravif_encoder; for the smoke test we simply confirm
-                        // that auto_tune returned a config without erroring.
+    // build_ravif_encoder; for the smoke test we simply confirm
+    // that auto_tune returned a config without erroring.
     eprintln!("[smoke] auto_tune produced an EncoderConfig — pipeline OK");
     ExitCode::from(0)
 }

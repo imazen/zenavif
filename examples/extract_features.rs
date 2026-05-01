@@ -248,7 +248,11 @@ fn main() -> ExitCode {
         manifest = stratified_subset(&manifest, n);
     }
 
-    eprintln!("manifest: {} images, sizes: {:?}", manifest.len(), args.sizes);
+    eprintln!(
+        "manifest: {} images, sizes: {:?}",
+        manifest.len(),
+        args.sizes
+    );
 
     if let Some(parent) = args.output.parent()
         && !parent.as_os_str().is_empty()

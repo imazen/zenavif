@@ -68,15 +68,27 @@ fn perturbations() -> Vec<Pert> {
         ("trellis", "on", |e| e.with_trellis(true)),
         // Internal speed-knob overrides (Option<bool>)
         ("cdef", "off", |e| e.with_cdef(Some(false))),
-        ("rdo_tx_decision", "off", |e| e.with_rdo_tx_decision(Some(false))),
+        ("rdo_tx_decision", "off", |e| {
+            e.with_rdo_tx_decision(Some(false))
+        }),
         ("sgr_full", "off", |e| e.with_sgr_full(Some(false))),
         ("lru_on_skip", "on", |e| e.with_lru_on_skip(Some(true))),
-        ("segmentation_complex", "on", |e| e.with_segmentation_complex(Some(true))),
-        ("encode_bottomup", "on", |e| e.with_encode_bottomup(Some(true))),
+        ("segmentation_complex", "on", |e| {
+            e.with_segmentation_complex(Some(true))
+        }),
+        ("encode_bottomup", "on", |e| {
+            e.with_encode_bottomup(Some(true))
+        }),
         // Deep knobs (newly plumbed)
-        ("partition_range", "fine_4_16", |e| e.with_partition_range(Some((4, 16)))),
-        ("partition_range", "coarse_16_64", |e| e.with_partition_range(Some((16, 64)))),
-        ("complex_prediction_modes", "on", |e| e.with_complex_prediction_modes(Some(true))),
+        ("partition_range", "fine_4_16", |e| {
+            e.with_partition_range(Some((4, 16)))
+        }),
+        ("partition_range", "coarse_16_64", |e| {
+            e.with_partition_range(Some((16, 64)))
+        }),
+        ("complex_prediction_modes", "on", |e| {
+            e.with_complex_prediction_modes(Some(true))
+        }),
         ("lrf", "off", |e| e.with_lrf(Some(false))),
         ("lrf", "on", |e| e.with_lrf(Some(true))),
         ("fast_deblock", "on", |e| e.with_fast_deblock(Some(true))),
@@ -210,10 +222,7 @@ fn resize_to_maxdim(src: &DynamicImage, target_maxdim: u32) -> Option<DynamicIma
 fn rgb_from_dynamic(img: &DynamicImage) -> ImgVec<RGB8> {
     let (w, h) = img.dimensions();
     let rgb8 = img.to_rgb8();
-    let buf: Vec<RGB8> = rgb8
-        .pixels()
-        .map(|p| RGB8::new(p[0], p[1], p[2]))
-        .collect();
+    let buf: Vec<RGB8> = rgb8.pixels().map(|p| RGB8::new(p[0], p[1], p[2])).collect();
     ImgVec::new(buf, w as usize, h as usize)
 }
 
@@ -266,8 +275,8 @@ fn encode_score(
     let decoded_ref = decoded
         .try_as_imgref::<Rgb<u8>>()
         .ok_or("decoded buffer not Rgb<u8>")?;
-    let r = check_regression(zensim, &img, &decoded_ref, tol)
-        .map_err(|e| format!("zensim: {e}"))?;
+    let r =
+        check_regression(zensim, &img, &decoded_ref, tol).map_err(|e| format!("zensim: {e}"))?;
 
     Ok(Outcome {
         bytes: result.avif_file.len(),
@@ -418,7 +427,10 @@ fn main() -> ExitCode {
                         }
                         Err(e) => {
                             total_failed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            eprintln!("FAIL {}/{}/{}/{}: {e}", entry.sha256, target, knob, value_label);
+                            eprintln!(
+                                "FAIL {}/{}/{}/{}: {e}",
+                                entry.sha256, target, knob, value_label
+                            );
                         }
                     }
                 }

@@ -132,12 +132,10 @@ pub enum AutoTuneError {
 #[repr(C, align(4))]
 struct Align4<T: ?Sized>(T);
 
-static MODEL_BYTES_ALIGNED: &Align4<[u8]> = &Align4(*include_bytes!(
-    "models/rav1e_picker_v0_1_1.bin"
-));
+static MODEL_BYTES_ALIGNED: &Align4<[u8]> =
+    &Align4(*include_bytes!("models/rav1e_picker_v0_1_1.bin"));
 static MODEL_BYTES: &[u8] = &MODEL_BYTES_ALIGNED.0;
-const ENCODE_MS_LUT_JSON: &str =
-    include_str!("models/rav1e_encode_ms_lut_v0_1_1.json");
+const ENCODE_MS_LUT_JSON: &str = include_str!("models/rav1e_encode_ms_lut_v0_1_1.json");
 const QUALITY_LUT_JSON: &str = include_str!("models/rav1e_quality_lut_v0_1_1.json");
 
 /// Per-(speed, size_class) median ms/MPx, parsed from the JSON LUT.
@@ -187,9 +185,9 @@ fn parse_encode_ms_lut(json: &str) -> Result<EncodeMsLut, AutoTuneError> {
             .strip_prefix("speed")
             .and_then(|s| s.parse().ok())
             .ok_or_else(|| AutoTuneError::LutMalformed(format!("bad cell key {k}")))?;
-        let sub = sub.as_object().ok_or_else(|| {
-            AutoTuneError::LutMalformed("cell value not object".into())
-        })?;
+        let sub = sub
+            .as_object()
+            .ok_or_else(|| AutoTuneError::LutMalformed("cell value not object".into()))?;
         let mut row = [f32::INFINITY; 4];
         for (sz_label, val) in sub {
             let idx = match sz_label.as_str() {
@@ -318,7 +316,9 @@ impl EncoderConfig {
         let feature_cols_str = model
             .metadata()
             .get_utf8("zentrain.feature_columns")
-            .map_err(|e| AutoTuneError::Internal(Box::leak(format!("metadata: {e}").into_boxed_str())))?;
+            .map_err(|e| {
+                AutoTuneError::Internal(Box::leak(format!("metadata: {e}").into_boxed_str()))
+            })?;
         let feature_cols: Vec<&str> = feature_cols_str
             .split(|c: char| c == '\n' || c == ',')
             .filter(|s| !s.is_empty())
