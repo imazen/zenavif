@@ -901,3 +901,194 @@ zenjpeg / cross-codec configs) needs a way to filter by
 (or "latest" sentinels) to the config, and have the trainer's
 `load_pareto` filter on those. Default to "latest fingerprint-
 equivalent set" so configs don't go stale silently.
+
+---
+
+# Bulk migration of historical work — what to import (added 2026-05-01)
+
+The user has accumulated dozens of hours of encoding + scoring across
+multiple codecs and harnesses, **most of it predating the canonical
+Parquet schema this proposal designs**. Quick inventory of what's
+out there:
+
+## What's locally on disk (≥10 KB benchmarks; non-finance)
+
+| Location | Format | Approx scale | Schema confidence |
+|---|---|---|---|
+| `~/work/zen/zenjpeg/benchmarks/zq_pareto_2026-04-29.tsv` | TSV | **3.5 M rows / 515 MB** | ✅ canonical (image_path, size_class, w, h, config_id, config_name, q, bytes, …) |
+| `~/work/zen/zenjpeg/benchmarks/zq_pareto_2026-04-28.tsv` | TSV | 34 MB | ✅ canonical |
+| `~/work/zen/zenwebp/benchmarks/zenwebp_pareto_2026-04-30_combined.tsv` | TSV | **2.7 M rows / 371 MB** | ✅ canonical |
+| `~/work/zen/zenwebp/benchmarks/zenwebp_pareto_2026-04-29.tsv` | TSV | 293 MB | ✅ canonical |
+| `~/work/zen/zenwebp/benchmarks/zenwebp_pareto_2026-04-30_sizedense.tsv` | TSV | 79 MB | ✅ canonical |
+| `~/work/zen/jxl-encoder/jxl-encoder/benchmarks/lossy_pareto_2026-04-30.tsv` | TSV | **610 K rows / 95 MB** | ✅ canonical (20 cols — extends base schema) |
+| `~/work/zen/jxl-encoder/jxl-encoder/benchmarks/lossless_pareto_2026-04-30.tsv` | TSV | 22 MB | ✅ canonical |
+| `~/work/zen/zenavif/benchmarks/rav1e_phase1a_2026-04-30.tsv` | TSV | 23 MB | ✅ canonical |
+| `~/work/zen/zenavif/benchmarks/rav1e_phase2_oat_2026-04-30.tsv` | TSV | 0.5 MB | ✅ canonical |
+| Feature TSVs (zenwebp / zenjpeg / zenavif / jxl-encoder) | TSV | tens of MB each | ✅ matches train_hybrid expected shape |
+| `/mnt/v/backups/home/oracle-d2-store/oracle-d2/pareto_rows.csv` | CSV | **30 MB** | 🟡 different schema (cross-codec; needs adapter) |
+| `/mnt/v/backups/home/oracle-d2-store/oracle-d2/blobs/` | per-encoding blobs | (size pending scan) | 🟡 hash-keyed already |
+| `~/work/all-the-images/corpus/encoding_results.json` | huge JSON array | **653 MB**, encoder_id="libjpeg-turbo-1.3.0" etc. | 🟡 different schema, NO scores yet (encode-only) |
+| `~/work/codec-eval/results/full_sweep_20260107.csv` | CSV | 6.4 MB | 🟡 older sweep harness, schema TBD |
+| `~/work/zen/retired/zenjpeg-dispatch/heuristic_outputs/results.csv` | CSV | 37 MB | 🟡 retired harness |
+| `~/work/downscaling-eval/results/cid22_full_2x/jpeg_results_*.json` | JSON | 4–6 MB each | 🟡 downscaling-specific |
+
+Total **~1.45 GB** of TSV/CSV/JSON in `~/work/**/benchmarks/` plus
+**30 MB** of `pareto_rows.csv` in the oracle-d2 backup at
+`/mnt/v/backups/home/oracle-d2-store/oracle-d2/`. Many CPU-days of
+encoding and scoring. More sits on tower NAS, DO Spaces, and GCS
+that we'll need to inventory separately.
+
+The oracle-d2 `pareto_rows.csv` (54 K rows) has a richer metric set
+than the per-codec sweeps:
+
+```
+schema: source_hash, bucket, w, h, codec_name, q, bpp, size_bytes,
+        ssim2, ssim2_pareto, butter, butter_pareto,
+        dssim, dssim_pareto, zensim
+```
+
+**Schema implication:** add `dssim` and `dssim_version_id` to the
+canonical Parquet schema. Cheap (~8 B/row, dict-compressed) and
+matches the existing oracle-d2 substrate so we don't lose columns
+on import. The `*_pareto` flags are derived/cacheable so we recompute
+on demand rather than storing.
+
+## Migration tiers
+
+Not all of this is worth importing into the same canonical Parquet
+substrate. Three tiers:
+
+### Tier A — bulk-import as-is (highest priority)
+
+**Newest canonical-schema TSVs from the active codec sweeps:**
+- zenjpeg: zq_pareto_2026-04-29 + features (3.5 M rows)
+- zenwebp: zenwebp_pareto_2026-04-30_combined + features (2.7 M rows)
+- jxl-encoder: lossy_pareto_2026-04-30 + features (610 K rows)
+- zenavif: rav1e_phase1a + phase2_oat + features (~25 K rows)
+
+These are the substrate the picker training pipelines already use.
+Matches the canonical schema (image_path / size_class / w / h /
+config_id / config_name / q / bytes / zensim / …) so the migrator is
+straightforward: stream-parse TSV → buffer → flush as Parquet to
+hive-partitioned R2 prefixes.
+
+**Provenance backfill** — these rows don't have `codec_version_id` or
+`metric_version_ids` baked in. Migrator needs:
+1. Read the TSV header + a sample of rows to detect the schema
+2. Cross-reference the file mtime + git log (`git log --all --since
+   "$(stat -c %y $tsv)" -- '*.rs'`) for the codec/metric crate to
+   resolve the active versions at sweep time
+3. Tag every row with the resolved `codec_version_id` and per-metric
+   `metric_version_id`s. If the resolved fingerprint isn't yet in
+   the registry, register it using a stored canary set.
+4. Rows where provenance can't be resolved cleanly get
+   `version_id = legacy_unknown` and a warning entry in the
+   migration log
+
+~1 day of work for the migrator (one Rust example), ~half a day to
+actually run + verify (depending on R2 upload speed).
+
+### Tier B — adapt-and-import (medium priority)
+
+**Different-schema sources that are still scientifically useful:**
+- oracle-d2 substrate (`pareto_rows.csv` — 30 MB cross-codec format
+  with codec_name field that conflates name+version like "zenjpeg-444-
+  e6-v0.4.2"). Has the picker_features sidecar at
+  `feature_utility/`.
+- all-the-images encoding_results.json — encoder_id includes version
+  ("libjpeg-turbo-1.3.0"), output_hash, output_bytes; NO scores yet.
+- codec-eval / downscaling-eval / retired/zenjpeg-dispatch outputs
+
+Each needs a per-source adapter (~50–100 LOC) to unmarshal into the
+canonical Parquet shape. Runs after Tier A.
+
+For all-the-images specifically: encoded blobs are already keyed by
+`output_hash` so re-scoring against the source corpus is feasible
+without re-encoding. Worth doing as a separate scoring pass post-
+migration so we have zensim/ssim2/butteraugli on those rows.
+
+### Tier C — reference-only / leave in place (low priority)
+
+- Massive working copies of obsolete sweep outputs (`zq_pareto_2026-
+  04-28.tsv` superseded by `2026-04-29.tsv`)
+- Per-experiment one-off CSVs that don't generalize (e.g.
+  `aq_sharpened_tuning.csv`)
+- Train output JSONs (`zq_bytes_hybrid_v2_1_*.json`) — derived
+  artifacts, recomputable
+
+These stay on disk as historical reference. Migrating them adds noise
+without analytical value. Leave a `legacy/` index file in R2 that
+lists the local paths + brief description so they're discoverable.
+
+## What the migrator looks like
+
+A single Rust binary with per-source adapters:
+
+```
+coefficient/src/bin/bulk_import.rs
+  --source <preset> | --tsv <path> [--schema <schema-name>]
+  --r2-bucket <name>
+  --equivalence-registry <path>   # for resolving version_ids
+  --dry-run                        # print what would be written
+  --partition-template <hive-template>
+  --max-rows-per-chunk 50000
+```
+
+Presets define the per-codec extraction logic:
+- `zenjpeg-canonical-v1` — the standard zenjpeg TSV format
+- `zenwebp-canonical-v1`
+- `zenavif-canonical-v1`
+- `jxl-encoder-canonical-v1`
+- `oracle-d2-pareto-rows`
+- `all-the-images-encoding-results`
+
+Each preset runs:
+1. Parse rows
+2. Resolve `codec_version_id` and `metric_version_id`s through the
+   equivalence registry (registering new entries if needed via a
+   manually-maintained `legacy_canary_fingerprints.json`)
+3. Stream into `BatchedRowStore<R2Store>` with the canonical hive
+   partition path
+4. Write a `migration_log.parquet` audit trail with row counts,
+   skipped/repaired rows, and the inferred provenance per source TSV
+
+## Approximate row counts after Tier A migration
+
+| Source | Approx rows | Tier |
+|---|---:|---|
+| zenjpeg combined | 3.5 M | A |
+| zenwebp combined | 2.7 M | A |
+| jxl-encoder lossy + lossless | 0.7 M | A |
+| zenavif phase1a + phase2 | 0.025 M | A |
+| oracle-d2 pareto_rows | ~0.09 M | B |
+| all-the-images encoding_results | ~5–10 M (encode-only, no scores) | B |
+| **Tier A total** | **~7 M rows** | |
+
+Storage cost on R2 after Parquet+zstd: ~7 M × 25 B/row = **175 MB**,
+roughly $0.003 / month for storage. Migration writes: 7 M / 50K = **140
+chunks** = $0.000 in writes (rounding error).
+
+## Risks / open questions
+
+1. **Re-running Tier A might duplicate rows.** Migrator must use
+   deterministic `record_id`s (sha256 of the standard tuple) so
+   re-running is idempotent at the merge step. The compactor's
+   `qualify row_number() over (partition by record_id) = 1` rule
+   covers it — but adds a compaction round.
+
+2. **Legacy `metric_version_id`** for old zensim runs. The local
+   zensim crate version at file mtime is the best signal but isn't
+   1:1 with output behavior (build flags, archmage feature gates,
+   etc.). Worst case: assign each TSV its own `version_id` that
+   means "zensim as built on this machine on this date" and let
+   the picker filter manually.
+
+3. **`all-the-images` is 4.4 GB of source corpus** (the JSON +
+   actual encoded blobs). Worth tier-B importing the metadata; the
+   blobs themselves stay where they are (or get hash-deduped into
+   `r2://sources/`).
+
+4. **DO Spaces / GCS / Firestore data** — coefficient has been
+   writing there. Need read access to those services (scripts owned
+   by the deployment, not local) before we can plan that part of
+   the migration. Out of scope for the local-disk pass.
