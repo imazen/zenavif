@@ -48,7 +48,9 @@ struct ManifestEntry {
     relative_path: String,
     axis_class: String,
     source: String,
+    #[allow(dead_code)]
     width: u32,
+    #[allow(dead_code)]
     height: u32,
 }
 

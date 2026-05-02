@@ -522,9 +522,7 @@ fn main() -> ExitCode {
 
     pool.install(|| {
         manifest.par_iter().for_each(|entry| {
-            let dyn_img = match ImageReader::open(&entry.path)
-                .and_then(|r| Ok(r.decode()))
-            {
+            let dyn_img = match ImageReader::open(&entry.path).map(|r| r.decode()) {
                 Ok(Ok(img)) => img,
                 _ => {
                     eprintln!("skip (decode fail): {}", entry.path.display());
@@ -652,7 +650,10 @@ fn main() -> ExitCode {
                                     decode_ms,
                                 )
                                 .ok();
-                                if total_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 100 == 0 {
+                                if total_done
+                                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                                    .is_multiple_of(100)
+                                {
                                     w.flush().ok();
                                     eprintln!(
                                         "[done={} attempts={} skipped={} failed={}]",
@@ -695,6 +696,7 @@ struct EncodeResult {
     decode_ms: f64,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn encode_one(
     img: Img<&[RGB8]>,
     speed: u8,
