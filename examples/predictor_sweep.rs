@@ -733,13 +733,20 @@ fn encode_one(
     if bottomup_on {
         enc = enc.with_encode_bottomup(Some(true));
     }
-    if lrf_on {
-        enc = enc.with_lrf(Some(true));
-    }
-    match partition_range_idx {
-        -1 => enc = enc.with_partition_range(Some((4, 16))),
-        1 => enc = enc.with_partition_range(Some((16, 64))),
-        _ => {}
+    // The 4 deepest knobs (lrf, partition_range, complex_prediction_modes,
+    // fast_deblock) live behind ravif's `__expert` feature now — apply
+    // via InternalParams instead of individual setters.
+    {
+        let mut params = ravif::expert::InternalParams::default();
+        if lrf_on {
+            params.lrf = Some(true);
+        }
+        match partition_range_idx {
+            -1 => params.partition_range = Some((4, 16)),
+            1 => params.partition_range = Some((16, 64)),
+            _ => {}
+        }
+        enc = enc.with_internal_params(params);
     }
     if let Some(n) = enc_threads {
         enc = enc.with_num_threads(Some(n));

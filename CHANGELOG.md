@@ -10,6 +10,29 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Added
+- New `__expert` cargo feature exposing `expert::InternalParams`, an
+  `Option<T>` struct of speed-preset overrides for the 4 deepest
+  content-dependent knobs (`partition_range`, `complex_prediction_modes`,
+  `lrf`, `fast_deblock`). Apply via
+  `EncoderConfig::with_internal_params(InternalParams)`.
+  `#[non_exhaustive]` + `Default` so callers tolerate field additions
+  in any patch. Each `None` keeps the speed preset's default; each
+  `Some(_)` overrides. Implies `encode-imazen` and pulls
+  `ravif/__expert` for the underlying overrides. Used by the rav1e
+  knob predictor MLP training harness; not for production code.
+
+### Changed
+- The 4 individual setters (`with_partition_range`,
+  `with_complex_prediction_modes`, `with_lrf`, `with_fast_deblock`)
+  added in Phase 0.5 are removed from the public API in favour of
+  `with_internal_params(InternalParams)`. Never published, so no
+  deprecation cycle. The other 11 `encode-imazen`-gated setters
+  (`with_qm`, `with_vaq`, `with_seg_boost`, `with_cdef`, etc.) stay
+  as-is — they're already in 0.1.6 published.
+- `predictor_sweep` and `phase2_oat` examples now require the
+  `__expert` feature (was `encode-imazen`).
+
 ### Changed
 - Bumped baked picker artifacts to `v0_1_1`: re-baked from a 4× larger
   Phase 1a corpus (448 images / 89,601 sweep rows vs. 116 / 23,200 in

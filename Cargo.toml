@@ -118,11 +118,11 @@ required-features = ["encode-imazen", "encode-threading"]
 
 [[example]]
 name = "predictor_sweep"
-required-features = ["encode-imazen"]
+required-features = ["__expert"]
 
 [[example]]
 name = "phase2_oat"
-required-features = ["encode-imazen"]
+required-features = ["__expert"]
 
 [[example]]
 name = "auto_tune_smoke"
@@ -140,6 +140,12 @@ encode-asm = ["encode", "ravif/asm"]
 encode-threading = ["encode", "ravif/threading"]
 # Encoding with imazen/zenrav1e fork features (QM, VAQ, still-image tuning, lossless)
 encode-imazen = ["encode", "ravif/imazen"]
+# Expert / unstable: exposes `InternalParams` for codec calibration sweeps
+# + the rav1e knob predictor MLP training pipeline. Double-underscore prefix
+# signals "private — do not depend on this in production code." Anything
+# in the `expert` module may change without semver bumps. Pulls zenravif's
+# `__expert` feature for the underlying speed-preset overrides.
+__expert = ["encode-imazen", "ravif/__expert"]
 # Auto-tune via the rav1e knob predictor MLP. Includes a baked ZNPR
 # model + zenanalyze feature extractor; adds ~30 KB to the binary.
 # See docs/RAV1E_PICKER_PLAN.md for the training pipeline.

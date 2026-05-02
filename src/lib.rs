@@ -69,6 +69,8 @@ pub mod detect;
 #[cfg(feature = "encode")]
 mod encoder;
 mod error;
+#[cfg(feature = "__expert")]
+pub mod expert;
 mod image;
 #[cfg(feature = "_dev")]
 pub mod simd;
