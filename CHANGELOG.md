@@ -10,6 +10,13 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-05-02
+
+### Changed
+- Bump minimum `zenravif` dependency to 0.1.3 (published with the
+  `__expert` + `InternalParams` surface). The local `[patch.crates-io]`
+  override is no longer needed and has been removed.
+
 ### Added
 - New `__expert` cargo feature exposing `expert::InternalParams`, an
   `Option<T>` struct of speed-preset overrides for the 4 deepest
