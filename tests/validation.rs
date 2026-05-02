@@ -3,10 +3,10 @@
 //! Each `ValidationError` variant gets one synthetic config that
 //! triggers it; default-constructed configs must always validate.
 
-use zenavif::{DecoderConfig, ValidationError};
+use zenavif::DecoderConfig;
 
 #[cfg(feature = "encode")]
-use zenavif::EncoderConfig;
+use zenavif::{EncoderConfig, ValidationError};
 
 // --------------------------------------------------------------------
 // Happy paths
