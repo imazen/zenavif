@@ -1,0 +1,352 @@
+//! Configuration validation.
+//!
+//! Provides [`ValidationError`] plus `validate()` methods on every
+//! public `Config` type. Existing encode/decode entry points keep
+//! their clamping behaviour — `validate()` is a fail-fast option
+//! callers can opt into for batch jobs that want hard rejection on
+//! out-of-range values rather than silent clamping.
+//!
+//! ```no_run
+//! # #[cfg(feature = "encode")] {
+//! use zenavif::EncoderConfig;
+//!
+//! let cfg = EncoderConfig::new().quality(150.0);
+//! assert!(cfg.validate().is_err()); // out of 0.0..=100.0
+//! # }
+//! ```
+//!
+//! Validation never mutates the config and never reports a "fixed"
+//! value — it reports the issue and lets the caller decide.
+
+use core::ops::RangeInclusive;
+
+/// Reasons a [`crate::EncoderConfig`], [`crate::DecoderConfig`], or
+/// [`crate::expert::InternalParams`] fails validation.
+///
+/// `#[non_exhaustive]` — variants may be added in any patch release as
+/// new configuration knobs are introduced.
+#[non_exhaustive]
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ValidationError {
+    // --- EncoderConfig ---
+    /// Encoder `quality` must be within `0.0..=100.0`.
+    #[error("encoder quality {value} out of valid range {valid:?}")]
+    QualityOutOfRange {
+        /// The offending value.
+        value: f32,
+        /// The valid range.
+        valid: RangeInclusive<f32>,
+    },
+
+    /// Encoder `alpha_quality` must be within `0.0..=100.0`.
+    #[error("encoder alpha_quality {value} out of valid range {valid:?}")]
+    AlphaQualityOutOfRange {
+        /// The offending value.
+        value: f32,
+        /// The valid range.
+        valid: RangeInclusive<f32>,
+    },
+
+    /// Encoder `speed` must be within `1..=10`.
+    #[error("encoder speed {value} out of valid range {valid:?}")]
+    SpeedOutOfRange {
+        /// The offending value.
+        value: u8,
+        /// The valid range.
+        valid: RangeInclusive<u8>,
+    },
+
+    /// Encoder `threads`, when `Some`, must be greater than zero.
+    /// Use `None` for the rayon default.
+    #[error("encoder threads must be > 0 when Some(_); got Some(0)")]
+    EncoderThreadsZero,
+
+    /// Encoder `rotation` must be one of `0`, `90`, `180`, `270`.
+    #[error("encoder rotation {value} invalid: must be one of {{0, 90, 180, 270}}")]
+    RotationInvalid {
+        /// The offending value.
+        value: u8,
+    },
+
+    /// Encoder `mirror` axis must be `0` (vertical) or `1` (horizontal).
+    #[error("encoder mirror {value} invalid: must be 0 (vertical) or 1 (horizontal)")]
+    MirrorInvalid {
+        /// The offending value.
+        value: u8,
+    },
+
+    /// CICP code-point fields (color_primaries, transfer_characteristics,
+    /// matrix_coefficients) must fit ITU-T H.273. The validator rejects
+    /// the reserved value `3`.
+    #[error("CICP {field} value {value} is reserved (3 is reserved per ITU-T H.273)")]
+    CicpReserved {
+        /// Which CICP field.
+        field: &'static str,
+        /// The offending value.
+        value: u8,
+    },
+
+    /// VAQ strength must be within `0.0..=4.0`.
+    #[error("VAQ strength {value} out of valid range {valid:?}")]
+    VaqStrengthOutOfRange {
+        /// The offending value.
+        value: f64,
+        /// The valid range.
+        valid: RangeInclusive<f64>,
+    },
+
+    /// Segmentation boost out of valid range. zenravif accepts
+    /// `0.5..=4.0`; `1.0` is "off" and `>1.0` widens deltas. Values
+    /// `<0.5` or `>4.0` are rejected.
+    #[error("seg_boost {value} out of valid range {valid:?}")]
+    SegBoostOutOfRange {
+        /// The offending value.
+        value: f64,
+        /// The valid range.
+        valid: RangeInclusive<f64>,
+    },
+
+    /// Two parameters that cannot both be set / both be true.
+    #[error("mutually exclusive: {a} and {b} cannot both be set")]
+    MutuallyExclusive {
+        /// First parameter name.
+        a: &'static str,
+        /// Second parameter name.
+        b: &'static str,
+    },
+
+    // --- DecoderConfig ---
+    /// Decoder `frame_size_limit` cannot use a sentinel reserved by
+    /// the validator. The current decoder treats `0` as "no limit"
+    /// at runtime, but for validation purposes a non-zero positive
+    /// limit must be supplied if the caller wants a bound. Use
+    /// `frame_size_limit(0)` plus skipping `validate()` to opt out.
+    /// Reserved for future use; not currently emitted.
+    #[error("decoder frame size limit {value} cannot be zero")]
+    DecoderFrameSizeLimitZero {
+        /// The offending value.
+        value: u64,
+    },
+
+    // --- expert::InternalParams ---
+    /// `partition_range` must satisfy `min <= max` and both bounds
+    /// must be in `{4, 8, 16, 32, 64}`. zenrav1e debug-asserts on
+    /// `128`, so it is rejected here.
+    #[error(
+        "partition_range {min}..{max} invalid: \
+         must satisfy min <= max and both ∈ {{4, 8, 16, 32, 64}}"
+    )]
+    PartitionRangeInvalid {
+        /// The offending lower bound.
+        min: u8,
+        /// The offending upper bound.
+        max: u8,
+    },
+}
+
+/// Returns true if `v` is a valid AV1 partition block-size bound.
+/// zenrav1e accepts `{4, 8, 16, 32, 64}`; `128` is reserved for
+/// future large-superblock support and triggers a debug-assert today.
+#[cfg(feature = "__expert")]
+fn partition_bound_ok(v: u8) -> bool {
+    matches!(v, 4 | 8 | 16 | 32 | 64)
+}
+
+#[cfg(feature = "__expert")]
+impl crate::expert::InternalParams {
+    /// Validate this `InternalParams` value.
+    ///
+    /// Returns `Err` if any `Some(_)` field is outside its accepted
+    /// range. The most relevant invariant is `partition_range`: both
+    /// bounds must be in `{4, 8, 16, 32, 64}` and `min <= max`. The
+    /// `128` superblock size is reserved for future AV1 large-superblock
+    /// support and triggers a zenrav1e debug-assert today.
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        if let Some((min, max)) = self.partition_range
+            && (!partition_bound_ok(min) || !partition_bound_ok(max) || min > max)
+        {
+            return Err(ValidationError::PartitionRangeInvalid { min, max });
+        }
+        // complex_prediction_modes / lrf / fast_deblock are bool
+        // overrides — every value of `Option<bool>` is well-formed.
+        Ok(())
+    }
+}
+
+#[cfg(feature = "encode")]
+impl crate::EncoderConfig {
+    /// Validate this `EncoderConfig` value.
+    ///
+    /// Returns `Err` on the first failed invariant. Validation does
+    /// not mutate the config; existing encode entry points still
+    /// clamp out-of-range values silently. Use this method when you
+    /// want hard rejection (batch jobs, calibration sweeps, public
+    /// HTTP endpoints) instead of silent clamping.
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        let q_range: RangeInclusive<f32> = 0.0..=100.0;
+
+        // quality
+        if !q_range.contains(&self.quality) || !self.quality.is_finite() {
+            return Err(ValidationError::QualityOutOfRange {
+                value: self.quality,
+                valid: q_range.clone(),
+            });
+        }
+
+        // alpha_quality
+        if let Some(aq) = self.alpha_quality
+            && (!q_range.contains(&aq) || !aq.is_finite())
+        {
+            return Err(ValidationError::AlphaQualityOutOfRange {
+                value: aq,
+                valid: q_range.clone(),
+            });
+        }
+
+        // speed: 1..=10. zenravif documents "1 = slowest/best, 10 = fastest/worst"
+        // and SpeedSettings::from_preset clamps; we reject 0 and >10.
+        let speed_range: RangeInclusive<u8> = 1..=10;
+        if !speed_range.contains(&self.speed) {
+            return Err(ValidationError::SpeedOutOfRange {
+                value: self.speed,
+                valid: speed_range,
+            });
+        }
+
+        // threads: Option<usize>. None = rayon default, Some(0) is meaningless.
+        if let Some(0) = self.threads {
+            return Err(ValidationError::EncoderThreadsZero);
+        }
+
+        // rotation: AVIF irot box stores the angle as a 2-bit
+        // quarter-turn code (0=0°, 1=90°, 2=180°, 3=270°). The
+        // serializer masks the input to `& 0x03`, so passing
+        // degrees (90, 180, 270) silently maps to wrong rotations.
+        // We require the irot code-point form {0, 1, 2, 3} for
+        // forwarding parity with zenravif's validator, which uses
+        // `ROTATION_RANGE = 0..=3`.
+        if let Some(angle) = self.rotation
+            && angle > 3
+        {
+            return Err(ValidationError::RotationInvalid { value: angle });
+        }
+
+        // mirror axis: AVIF imir spec — 0 = vertical, 1 = horizontal.
+        if let Some(axis) = self.mirror
+            && axis > 1
+        {
+            return Err(ValidationError::MirrorInvalid { value: axis });
+        }
+
+        // CICP code points (ITU-T H.273): 3 is reserved across all three fields.
+        if let Some(cp) = self.color_primaries
+            && cp == 3
+        {
+            return Err(ValidationError::CicpReserved {
+                field: "color_primaries",
+                value: cp,
+            });
+        }
+        if let Some(tc) = self.transfer_characteristics
+            && tc == 3
+        {
+            return Err(ValidationError::CicpReserved {
+                field: "transfer_characteristics",
+                value: tc,
+            });
+        }
+        if let Some(mc) = self.matrix_coefficients
+            && mc == 3
+        {
+            return Err(ValidationError::CicpReserved {
+                field: "matrix_coefficients",
+                value: mc,
+            });
+        }
+
+        // encode-imazen knobs.
+        #[cfg(feature = "encode-imazen")]
+        {
+            // VAQ strength range matches zenravif/zenrav1e's accepted
+            // band: 0.0 (off) through 4.0 (aggressive).
+            let vaq_range: RangeInclusive<f64> = 0.0..=4.0;
+            if !vaq_range.contains(&self.vaq_strength) || !self.vaq_strength.is_finite() {
+                return Err(ValidationError::VaqStrengthOutOfRange {
+                    value: self.vaq_strength,
+                    valid: vaq_range,
+                });
+            }
+
+            // seg_boost: zenravif's SEG_BOOST_RANGE = 0.5..=4.0.
+            let seg_range: RangeInclusive<f64> = 0.5..=4.0;
+            if let Some(b) = self.seg_boost
+                && (!b.is_finite() || !seg_range.contains(&b))
+            {
+                return Err(ValidationError::SegBoostOutOfRange {
+                    value: b,
+                    valid: seg_range,
+                });
+            }
+
+            // Cross-param: lossless overrides quality and is incompatible
+            // with VAQ enabled (zenravif disables QM internally for lossless;
+            // VAQ on top of quantizer=0 has no defined meaning).
+            if self.lossless && self.enable_vaq {
+                return Err(ValidationError::MutuallyExclusive {
+                    a: "lossless",
+                    b: "vaq",
+                });
+            }
+
+            // Cross-param: lossless + tune_still_image — still-image tuning
+            // changes deblock/CDEF tradeoffs that have no effect at q=0
+            // but the combination is conceptually nonsensical and the
+            // zenrav1e benchmark notes call out tune_still_image as a no-op
+            // at high q. We allow it; only the quantizer=0 vs VAQ pair is
+            // rejected because VAQ actively conflicts with the quantizer.
+        }
+
+        // expert::InternalParams forwarded fields. We re-validate the
+        // partition_range bounds at the EncoderConfig level so callers
+        // who set the field via `with_internal_params` get a single
+        // call site for validation.
+        #[cfg(feature = "__expert")]
+        {
+            if let Some((min, max)) = self.override_partition_range
+                && (!partition_bound_ok(min) || !partition_bound_ok(max) || min > max)
+            {
+                return Err(ValidationError::PartitionRangeInvalid { min, max });
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl crate::DecoderConfig {
+    /// Validate this `DecoderConfig` value.
+    ///
+    /// Returns `Err` on the first failed invariant. The decoder
+    /// itself accepts `frame_size_limit = 0` as "no limit"; this
+    /// method does **not** reject zero (no caller should be forced
+    /// to pick an arbitrary cap). It validates positively-set
+    /// numeric fields where a wrong value would silently misconfigure
+    /// the decoder.
+    ///
+    /// `threads = 0` is the documented "auto-detect" sentinel and is
+    /// accepted; positive values are also accepted. There is no
+    /// invalid threads value at the moment.
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        // Currently no DecoderConfig field has an invalid range:
+        //   - threads: 0 = auto, any u32 accepted.
+        //   - apply_grain: bool, every value valid.
+        //   - frame_size_limit: 0 = no limit, any u32 accepted.
+        //   - cpu_flags_mask: any u32 valid (0 = scalar-only).
+        //   - parser_*_limit: Option<_>, every value valid.
+        //   - prefer_8bit: bool, every value valid.
+        //
+        // The variant `DecoderFrameSizeLimitZero` is reserved for
+        // future use if a stricter mode is added.
+        Ok(())
+    }
+}
