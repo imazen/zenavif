@@ -10,6 +10,50 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Added
+- New `__expert` cargo feature exposing `expert::InternalParams`, an
+  `Option<T>` struct of speed-preset overrides for the 4 deepest
+  content-dependent knobs (`partition_range`, `complex_prediction_modes`,
+  `lrf`, `fast_deblock`). Apply via
+  `EncoderConfig::with_internal_params(InternalParams)`.
+  `#[non_exhaustive]` + `Default` so callers tolerate field additions
+  in any patch. Each `None` keeps the speed preset's default; each
+  `Some(_)` overrides. Implies `encode-imazen` and pulls
+  `ravif/__expert` for the underlying overrides. Used by the rav1e
+  knob predictor MLP training harness; not for production code.
+- Theory-of-operation docs on every `InternalParams` field covering
+  the AV1 pipeline stage, why a caller might override it, the
+  underlying mechanism, and the speed-preset interaction. Cross-
+  references `zenravif::expert::InternalParams` for source-line
+  citations into zenrav1e.
+- `tests/expert_internal_params.rs` — 12 permutation, idempotency,
+  combined-knob, default-as-baseline, reset, and forwarding-parity
+  tests for `InternalParams`. Verifies that zenavif's wrapper produces
+  byte-identical output to calling `zenravif::Encoder::with_internal_params`
+  directly with the same values. Gated on `__expert`.
+
+### Changed
+- The 4 individual setters (`with_partition_range`,
+  `with_complex_prediction_modes`, `with_lrf`, `with_fast_deblock`)
+  added in Phase 0.5 are removed from the public API in favour of
+  `with_internal_params(InternalParams)`. Never published, so no
+  deprecation cycle. The other 11 `encode-imazen`-gated setters
+  (`with_qm`, `with_vaq`, `with_seg_boost`, `with_cdef`, etc.) stay
+  as-is — they're already in 0.1.6 published.
+- `predictor_sweep` and `phase2_oat` examples now require the
+  `__expert` feature (was `encode-imazen`); `phase2_oat`'s deep-knob
+  perturbations rebuild on top of `ravif::expert::InternalParams`
+  rather than the removed individual setters.
+- `partition_range` doc and tests now reflect that zenrav1e
+  debug-asserts `max <= 64×64`; `128` is invalid (would panic in
+  debug builds). Valid values: `{4, 8, 16, 32, 64}`.
+
+### Build
+- `[patch.crates-io] zenravif` temporarily points at
+  `../ravif--expert/ravif` while ravif's `feat/expert-internal-params`
+  branch is unmerged. Revert to `../ravif/ravif` once that branch
+  lands; remove the patch entirely once zenravif 0.1.3 publishes.
+
 ### Changed
 - Bumped baked picker artifacts to `v0_1_1`: re-baked from a 4× larger
   Phase 1a corpus (448 images / 89,601 sweep rows vs. 116 / 23,200 in

@@ -48,7 +48,9 @@ struct ManifestEntry {
     relative_path: String,
     axis_class: String,
     source: String,
+    #[allow(dead_code)]
     width: u32,
+    #[allow(dead_code)]
     height: u32,
 }
 
@@ -260,13 +262,7 @@ fn main() -> ExitCode {
             write!(
                 w_lock,
                 "\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                entry.axis_class,
-                entry.source,
-                entry.relative_path,
-                size_class,
-                size_bucket,
-                w,
-                h
+                entry.axis_class, entry.source, entry.relative_path, size_class, size_bucket, w, h
             )
             .ok();
             for c in &cols {

@@ -565,36 +565,20 @@ impl EncoderConfig {
         self
     }
 
-    /// Override partition block-size range. `min` and `max` must each be
-    /// one of `{4, 8, 16, 32, 64, 128}` and `min <= max`. Smaller mins
-    /// help text/screen content; larger maxes help smooth photo content.
-    /// None = preset.
-    #[cfg(feature = "encode-imazen")]
-    pub fn with_partition_range(mut self, range: Option<(u8, u8)>) -> Self {
-        self.override_partition_range = range;
-        self
-    }
-
-    /// Override prediction modes. `Some(true)` = ComplexAll (slow, all
-    /// intra modes). `Some(false)` = Simple (fast). None = preset.
-    #[cfg(feature = "encode-imazen")]
-    pub fn with_complex_prediction_modes(mut self, enable: Option<bool>) -> Self {
-        self.override_complex_prediction_modes = enable;
-        self
-    }
-
-    /// Override loop restoration filter (Wiener / SGR). Helps smooth/noisy
-    /// content; can over-soften line art. None = preset.
-    #[cfg(feature = "encode-imazen")]
-    pub fn with_lrf(mut self, enable: Option<bool>) -> Self {
-        self.override_lrf = enable;
-        self
-    }
-
-    /// Override fast vs full deblock filter search. None = preset.
-    #[cfg(feature = "encode-imazen")]
-    pub fn with_fast_deblock(mut self, enable: Option<bool>) -> Self {
-        self.override_fast_deblock = enable;
+    /// Apply expert-only [`crate::expert::InternalParams`].
+    ///
+    /// **Unstable surface** — may change in any patch release; see
+    /// [`crate::expert`] module docs for the contract. Each `Some(_)`
+    /// field overrides a speed-preset default; each `None` leaves the
+    /// preset's value untouched. Calling this multiple times overwrites
+    /// previously-set fields wholesale (the struct is the unit of
+    /// configuration, not the individual fields).
+    #[cfg(feature = "__expert")]
+    pub fn with_internal_params(mut self, params: crate::expert::InternalParams) -> Self {
+        self.override_partition_range = params.partition_range;
+        self.override_complex_prediction_modes = params.complex_prediction_modes;
+        self.override_lrf = params.lrf;
+        self.override_fast_deblock = params.fast_deblock;
         self
     }
 
@@ -772,11 +756,21 @@ fn build_ravif_encoder(
             .with_sgr_full(config.override_sgr_full)
             .with_lru_on_skip(config.override_lru_on_skip)
             .with_segmentation_complex(config.override_segmentation_complex)
-            .with_encode_bottomup(config.override_encode_bottomup)
-            .with_partition_range(config.override_partition_range)
-            .with_complex_prediction_modes(config.override_complex_prediction_modes)
-            .with_lrf(config.override_lrf)
-            .with_fast_deblock(config.override_fast_deblock);
+            .with_encode_bottomup(config.override_encode_bottomup);
+        #[cfg(feature = "__expert")]
+        {
+            // The 4 deepest knobs live behind ravif's `__expert` feature.
+            // Mirror EncoderConfig's per-field overrides into ravif's
+            // InternalParams in one call. Build via Default + field
+            // assignment because `#[non_exhaustive]` prohibits struct
+            // literal construction outside the defining crate.
+            let mut params = ravif::expert::InternalParams::default();
+            params.partition_range = config.override_partition_range;
+            params.complex_prediction_modes = config.override_complex_prediction_modes;
+            params.lrf = config.override_lrf;
+            params.fast_deblock = config.override_fast_deblock;
+            enc = enc.with_internal_params(params);
+        }
         if let Some(t) = config.trellis {
             enc = enc.with_trellis(t);
         }

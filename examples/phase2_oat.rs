@@ -79,19 +79,40 @@ fn perturbations() -> Vec<Pert> {
         ("encode_bottomup", "on", |e| {
             e.with_encode_bottomup(Some(true))
         }),
-        // Deep knobs (newly plumbed)
+        // Deep knobs (zenravif __expert / InternalParams).
+        // Each closure builds a fresh InternalParams (so combinations
+        // don't leak between perturbations) and forwards via
+        // ravif::Encoder::with_internal_params.
         ("partition_range", "fine_4_16", |e| {
-            e.with_partition_range(Some((4, 16)))
+            let mut p = ravif::expert::InternalParams::default();
+            p.partition_range = Some((4, 16));
+            e.with_internal_params(p)
         }),
         ("partition_range", "coarse_16_64", |e| {
-            e.with_partition_range(Some((16, 64)))
+            let mut p = ravif::expert::InternalParams::default();
+            p.partition_range = Some((16, 64));
+            e.with_internal_params(p)
         }),
         ("complex_prediction_modes", "on", |e| {
-            e.with_complex_prediction_modes(Some(true))
+            let mut p = ravif::expert::InternalParams::default();
+            p.complex_prediction_modes = Some(true);
+            e.with_internal_params(p)
         }),
-        ("lrf", "off", |e| e.with_lrf(Some(false))),
-        ("lrf", "on", |e| e.with_lrf(Some(true))),
-        ("fast_deblock", "on", |e| e.with_fast_deblock(Some(true))),
+        ("lrf", "off", |e| {
+            let mut p = ravif::expert::InternalParams::default();
+            p.lrf = Some(false);
+            e.with_internal_params(p)
+        }),
+        ("lrf", "on", |e| {
+            let mut p = ravif::expert::InternalParams::default();
+            p.lrf = Some(true);
+            e.with_internal_params(p)
+        }),
+        ("fast_deblock", "on", |e| {
+            let mut p = ravif::expert::InternalParams::default();
+            p.fast_deblock = Some(true);
+            e.with_internal_params(p)
+        }),
     ]
 }
 
@@ -353,7 +374,7 @@ fn main() -> ExitCode {
 
     pool.install(|| {
         manifest.par_iter().for_each(|entry| {
-            let dyn_img = match ImageReader::open(&entry.path).and_then(|r| Ok(r.decode())) {
+            let dyn_img = match ImageReader::open(&entry.path).map(|r| r.decode()) {
                 Ok(Ok(img)) => img,
                 _ => {
                     eprintln!("skip (decode fail): {}", entry.path.display());
@@ -374,7 +395,7 @@ fn main() -> ExitCode {
                     let mut w = writer.lock().unwrap();
                     writeln!(
                         w,
-                        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.6}\t{:.2}",
+                        "{}\t{}\t{}\t{}\t{}\t{}\t{}\tbaseline\tdefault\t{}\t{:.6}\t{:.2}",
                         entry.path.display(),
                         sz,
                         img.width(),
@@ -382,8 +403,6 @@ fn main() -> ExitCode {
                         entry.sha256,
                         entry.content_class,
                         entry.source,
-                        "baseline",
-                        "default",
                         o.bytes,
                         o.zensim,
                         o.encode_ms,
@@ -414,8 +433,9 @@ fn main() -> ExitCode {
                                 o.encode_ms,
                             )
                             .ok();
-                            if total_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 50
-                                == 0
+                            if total_done
+                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                                .is_multiple_of(50)
                             {
                                 w.flush().ok();
                                 eprintln!(

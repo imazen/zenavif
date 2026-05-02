@@ -25,6 +25,21 @@ runs:
         if [ ! -d ravif ]; then
           git clone --depth 1 https://github.com/imazen/cavif-rs.git ravif
         fi
+    # TEMPORARY (zenavif PR #9): the `__expert` work depends on an
+    # unpublished zenravif 0.1.3 living on the cavif-rs branch
+    # `feat/expert-internal-params`. The active [patch.crates-io] block
+    # in zenavif's Cargo.toml points at `../ravif--expert/ravif`, so we
+    # must also clone that branch into a sibling directory. Once
+    # cavif-rs#1 merges and zenravif 0.1.3 is published, drop both this
+    # step and the patch block in Cargo.toml.
+    - name: Clone imazen/cavif-rs (feat/expert-internal-params) into ../ravif--expert
+      shell: bash
+      run: |
+        cd ..
+        if [ ! -d ravif--expert ]; then
+          git clone --depth 1 --branch feat/expert-internal-params \
+            https://github.com/imazen/cavif-rs.git ravif--expert
+        fi
     - name: Clone imazen/zenanalyze into ../zenanalyze
       shell: bash
       run: |

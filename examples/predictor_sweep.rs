@@ -522,9 +522,7 @@ fn main() -> ExitCode {
 
     pool.install(|| {
         manifest.par_iter().for_each(|entry| {
-            let dyn_img = match ImageReader::open(&entry.path)
-                .and_then(|r| Ok(r.decode()))
-            {
+            let dyn_img = match ImageReader::open(&entry.path).map(|r| r.decode()) {
                 Ok(Ok(img)) => img,
                 _ => {
                     eprintln!("skip (decode fail): {}", entry.path.display());
@@ -652,7 +650,10 @@ fn main() -> ExitCode {
                                     decode_ms,
                                 )
                                 .ok();
-                                if total_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 100 == 0 {
+                                if total_done
+                                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                                    .is_multiple_of(100)
+                                {
                                     w.flush().ok();
                                     eprintln!(
                                         "[done={} attempts={} skipped={} failed={}]",
@@ -695,6 +696,7 @@ struct EncodeResult {
     decode_ms: f64,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn encode_one(
     img: Img<&[RGB8]>,
     speed: u8,
@@ -733,13 +735,20 @@ fn encode_one(
     if bottomup_on {
         enc = enc.with_encode_bottomup(Some(true));
     }
-    if lrf_on {
-        enc = enc.with_lrf(Some(true));
-    }
-    match partition_range_idx {
-        -1 => enc = enc.with_partition_range(Some((4, 16))),
-        1 => enc = enc.with_partition_range(Some((16, 64))),
-        _ => {}
+    // The 4 deepest knobs (lrf, partition_range, complex_prediction_modes,
+    // fast_deblock) live behind ravif's `__expert` feature now — apply
+    // via InternalParams instead of individual setters.
+    {
+        let mut params = ravif::expert::InternalParams::default();
+        if lrf_on {
+            params.lrf = Some(true);
+        }
+        match partition_range_idx {
+            -1 => params.partition_range = Some((4, 16)),
+            1 => params.partition_range = Some((16, 64)),
+            _ => {}
+        }
+        enc = enc.with_internal_params(params);
     }
     if let Some(n) = enc_threads {
         enc = enc.with_num_threads(Some(n));

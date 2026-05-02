@@ -69,12 +69,15 @@ pub mod detect;
 #[cfg(feature = "encode")]
 mod encoder;
 mod error;
+#[cfg(feature = "__expert")]
+pub mod expert;
 mod image;
 #[cfg(feature = "_dev")]
 pub mod simd;
 #[cfg(not(feature = "_dev"))]
 pub(crate) mod simd;
 mod strip_convert;
+mod validation;
 #[cfg(feature = "_dev")]
 pub mod yuv_convert;
 #[cfg(not(feature = "_dev"))]
@@ -130,6 +133,7 @@ pub use image::{
     GainMapMetadata, ImageInfo, ImageMirror, ImageRotation, MasteringDisplayColourVolume,
     MatrixCoefficients, PixelAspectRatio, TransferCharacteristics,
 };
+pub use validation::ValidationError;
 pub use zenpixels::PixelBuffer;
 
 /// Decode an AVIF image with default settings
