@@ -172,7 +172,10 @@ rustdoc-args = ["--generate-link-to-definition"]
 
 # Temporary patch — pulls in unpublished zenravif 0.1.3 with the 4
 # deep-knob overrides used by the rav1e knob predictor MLP training
-# harness (see docs/RAV1E_PICKER_PLAN.md). Remove once zenravif 0.1.3
-# is published to crates.io.
+# harness (see docs/RAV1E_PICKER_PLAN.md). While ravif's
+# `feat/expert-internal-params` branch is unmerged, the patch points
+# at the sibling worktree path; revert to `../ravif/ravif` once that
+# branch lands. Remove the patch entirely once zenravif 0.1.3 is on
+# crates.io.
 [patch.crates-io]
-zenravif = { path = "../ravif/ravif" }
+zenravif = { path = "../ravif--expert/ravif" }
