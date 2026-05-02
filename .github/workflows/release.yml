@@ -13,7 +13,7 @@ jobs:
     - uses: actions/checkout@v6
       with:
         submodules: recursive
-    - uses: ./.github/actions/clone-ravif
+    - uses: ./.github/actions/clone-siblings
 
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable

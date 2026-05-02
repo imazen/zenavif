@@ -28,7 +28,7 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest, windows-11-arm]
     steps:
       - uses: actions/checkout@v6
-      - uses: ./.github/actions/clone-ravif
+      - uses: ./.github/actions/clone-siblings
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -50,7 +50,7 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm]
     steps:
       - uses: actions/checkout@v6
-      - uses: ./.github/actions/clone-ravif
+      - uses: ./.github/actions/clone-siblings
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -80,7 +80,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: ./.github/actions/clone-ravif
+      - uses: ./.github/actions/clone-siblings
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: i686-unknown-linux-gnu

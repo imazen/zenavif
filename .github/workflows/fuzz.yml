@@ -30,7 +30,7 @@ jobs:
           - fuzz_probe
     steps:
       - uses: actions/checkout@v6
-      - uses: ./.github/actions/clone-ravif
+      - uses: ./.github/actions/clone-siblings
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
         with:
@@ -77,7 +77,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: ./.github/actions/clone-ravif
+      - uses: ./.github/actions/clone-siblings
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
