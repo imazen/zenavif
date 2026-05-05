@@ -94,3 +94,15 @@ cron-logs/
 # Phase 3 TSVs which can balloon.
 benchmarks/rav1e_phase3_*.tsv
 benchmarks/rav1e_phase3_*.tsv.clean
+
+# Benchmark data files larger than 1 MB are archived to /mnt/v
+# (durable storage). Keep small summary .md / .log files in repo;
+# mass tabular data (.parquet, large .tsv, large .json from training
+# dumps) goes to /mnt/v or R2.
+benchmarks/*.parquet
+benchmarks/zenavif_pareto_v05c_*.tsv
+benchmarks/zenavif_pareto_*_extended.tsv
+benchmarks/zenavif_pareto_v04_2026-05-04*.tsv
+benchmarks/zenavif_features_v05c_*.tsv
+benchmarks/rav1e_phase1a_2026-04-30.parquet
+benchmarks/rav1e_phase1a_hybrid_*.json

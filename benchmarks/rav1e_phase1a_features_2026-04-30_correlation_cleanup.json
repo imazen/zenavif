@@ -1,0 +1,239 @@
+{
+  "source": "benchmarks/rav1e_phase1a_features_2026-04-30.tsv",
+  "threshold": 0.95,
+  "n_rows": 448,
+  "n_features_in": 103,
+  "n_features_dropped": 34,
+  "n_constant": 14,
+  "n_low_variance": 5,
+  "constant_columns": [
+    {
+      "name": "feat_alpha_present",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_alpha_used_fraction",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_alpha_bimodal_score",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_peak_luminance_nits",
+      "n_unique": 1,
+      "value": 80.0
+    },
+    {
+      "name": "feat_p99_luminance_nits",
+      "n_unique": 1,
+      "value": 80.0
+    },
+    {
+      "name": "feat_hdr_headroom_stops",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_hdr_pixel_fraction",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_wide_gamut_peak",
+      "n_unique": 1,
+      "value": 1.0
+    },
+    {
+      "name": "feat_wide_gamut_fraction",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_effective_bit_depth",
+      "n_unique": 1,
+      "value": 8.0
+    },
+    {
+      "name": "feat_hdr_present",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_gamut_coverage_srgb",
+      "n_unique": 1,
+      "value": 1.0
+    },
+    {
+      "name": "feat_gamut_coverage_p3",
+      "n_unique": 1,
+      "value": 1.0
+    },
+    {
+      "name": "feat_channel_count",
+      "n_unique": 1,
+      "value": 3.0
+    }
+  ],
+  "low_variance_columns": [
+    {
+      "name": "feat_indexed_palette_width",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_palette_fits_in_256",
+      "n_unique": 2
+    },
+    {
+      "name": "feat_is_grayscale",
+      "n_unique": 2
+    },
+    {
+      "name": "feat_max_dim",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_log_max_dim",
+      "n_unique": 3
+    }
+  ],
+  "clusters": [
+    {
+      "anchor": "feat_aq_map_p75",
+      "anchor_n_unique": 447,
+      "dropped": [
+        "feat_dct_compressibility_y"
+      ],
+      "cluster_size": 2,
+      "min_abs_corr_in_cluster": 0.9714699705535041
+    },
+    {
+      "anchor": "feat_block_misalignment_32",
+      "anchor_n_unique": 37,
+      "dropped": [
+        "feat_block_misalignment_64"
+      ],
+      "cluster_size": 2,
+      "min_abs_corr_in_cluster": 0.9976293595867665
+    },
+    {
+      "anchor": "feat_block_misalignment_8",
+      "anchor_n_unique": 30,
+      "dropped": [
+        "feat_block_misalignment_16"
+      ],
+      "cluster_size": 2,
+      "min_abs_corr_in_cluster": 0.9631255511875756
+    },
+    {
+      "anchor": "feat_chroma_complexity",
+      "anchor_n_unique": 444,
+      "dropped": [
+        "feat_colourfulness"
+      ],
+      "cluster_size": 2,
+      "min_abs_corr_in_cluster": 0.9679191481229192
+    },
+    {
+      "anchor": "feat_edge_density",
+      "anchor_n_unique": 441,
+      "dropped": [
+        "feat_aq_map_mean",
+        "feat_aq_map_p50",
+        "feat_laplacian_variance_p75",
+        "feat_noise_floor_y_p25",
+        "feat_noise_floor_y_p50",
+        "feat_quant_survival_y",
+        "feat_quant_survival_y_p25",
+        "feat_quant_survival_y_p50",
+        "feat_quant_survival_y_p75",
+        "feat_uniformity"
+      ],
+      "cluster_size": 11,
+      "min_abs_corr_in_cluster": 0.7616559489821848
+    },
+    {
+      "anchor": "feat_palette_fits_in_256",
+      "anchor_n_unique": 2,
+      "dropped": [
+        "feat_indexed_palette_width"
+      ],
+      "cluster_size": 2,
+      "min_abs_corr_in_cluster": 0.9997880663752623
+    },
+    {
+      "anchor": "feat_pixel_count",
+      "anchor_n_unique": 43,
+      "dropped": [
+        "feat_bitmap_bytes",
+        "feat_log10_pixels",
+        "feat_log2_pixels",
+        "feat_log_bitmap_bytes",
+        "feat_log_max_dim",
+        "feat_log_min_dim",
+        "feat_log_padded_pixels_16",
+        "feat_log_padded_pixels_32",
+        "feat_log_padded_pixels_64",
+        "feat_log_padded_pixels_8",
+        "feat_log_pixels",
+        "feat_log_pixels_rounded",
+        "feat_max_dim",
+        "feat_min_dim",
+        "feat_sqrt_pixels"
+      ],
+      "cluster_size": 16,
+      "min_abs_corr_in_cluster": 0.8924956011761513
+    },
+    {
+      "anchor": "feat_quant_survival_uv",
+      "anchor_n_unique": 389,
+      "dropped": [
+        "feat_dct_compressibility_uv",
+        "feat_noise_floor_uv_p75",
+        "feat_noise_floor_uv_p90",
+        "feat_quant_survival_uv_p75"
+      ],
+      "cluster_size": 5,
+      "min_abs_corr_in_cluster": 0.8640475158389689
+    }
+  ],
+  "drop_list": [
+    "feat_aq_map_mean",
+    "feat_aq_map_p50",
+    "feat_bitmap_bytes",
+    "feat_block_misalignment_16",
+    "feat_block_misalignment_64",
+    "feat_colourfulness",
+    "feat_dct_compressibility_uv",
+    "feat_dct_compressibility_y",
+    "feat_indexed_palette_width",
+    "feat_laplacian_variance_p75",
+    "feat_log10_pixels",
+    "feat_log2_pixels",
+    "feat_log_bitmap_bytes",
+    "feat_log_max_dim",
+    "feat_log_min_dim",
+    "feat_log_padded_pixels_16",
+    "feat_log_padded_pixels_32",
+    "feat_log_padded_pixels_64",
+    "feat_log_padded_pixels_8",
+    "feat_log_pixels",
+    "feat_log_pixels_rounded",
+    "feat_max_dim",
+    "feat_min_dim",
+    "feat_noise_floor_uv_p75",
+    "feat_noise_floor_uv_p90",
+    "feat_noise_floor_y_p25",
+    "feat_noise_floor_y_p50",
+    "feat_quant_survival_uv_p75",
+    "feat_quant_survival_y",
+    "feat_quant_survival_y_p25",
+    "feat_quant_survival_y_p50",
+    "feat_quant_survival_y_p75",
+    "feat_sqrt_pixels",
+    "feat_uniformity"
+  ]
+}
