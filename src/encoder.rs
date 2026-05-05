@@ -772,11 +772,24 @@ fn build_ravif_encoder(
             .with_sgr_full(config.override_sgr_full)
             .with_lru_on_skip(config.override_lru_on_skip)
             .with_segmentation_complex(config.override_segmentation_complex)
-            .with_encode_bottomup(config.override_encode_bottomup)
-            .with_partition_range(config.override_partition_range)
-            .with_complex_prediction_modes(config.override_complex_prediction_modes)
-            .with_lrf(config.override_lrf)
-            .with_fast_deblock(config.override_fast_deblock);
+            .with_encode_bottomup(config.override_encode_bottomup);
+        // partition_range, complex_prediction_modes, lrf, fast_deblock
+        // moved into InternalParams (gated on the `__expert` feature in
+        // ravif, which `encode-imazen` enables). Only apply when at least
+        // one override is set, to keep encoder behavior unchanged when the
+        // caller doesn't touch these knobs.
+        if config.override_partition_range.is_some()
+            || config.override_complex_prediction_modes.is_some()
+            || config.override_lrf.is_some()
+            || config.override_fast_deblock.is_some()
+        {
+            let mut params = ravif::expert::InternalParams::default();
+            params.partition_range = config.override_partition_range;
+            params.complex_prediction_modes = config.override_complex_prediction_modes;
+            params.lrf = config.override_lrf;
+            params.fast_deblock = config.override_fast_deblock;
+            enc = enc.with_internal_params(params);
+        }
         if let Some(t) = config.trellis {
             enc = enc.with_trellis(t);
         }
