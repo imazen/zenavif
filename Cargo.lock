@@ -2042,6 +2042,7 @@ name = "zenpredict"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "libm",
  "serde",
  "serde_json",
 ]

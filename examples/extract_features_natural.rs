@@ -260,13 +260,7 @@ fn main() -> ExitCode {
             write!(
                 w_lock,
                 "\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                entry.axis_class,
-                entry.source,
-                entry.relative_path,
-                size_class,
-                size_bucket,
-                w,
-                h
+                entry.axis_class, entry.source, entry.relative_path, size_class, size_bucket, w, h
             )
             .ok();
             for c in &cols {
