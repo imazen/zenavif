@@ -308,7 +308,7 @@ impl EncoderConfig {
                 AutoTuneError::Inference(format!("Model::from_bytes: {e}"))
             }
         })?;
-        let n_cells = (model.header().n_outputs as usize).max(1);
+        let n_cells = model.n_outputs().max(1);
 
         // 2. Read feature columns from baked metadata. The bake stores
         // them under `zentrain.feature_columns` as utf8 with newline
