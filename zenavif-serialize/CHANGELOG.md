@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+- Grid serializer no longer scans the output buffer for `0xBAADF00D` sentinels when patching `iloc` extent offsets; tile payloads that legitimately contain those bytes are no longer corrupted (05e2353)
+- Animated serializer no longer scans the output buffer for `0xDEADBEEF` / `0xDEADBEE0` sentinels; AV1 frame payloads containing those bytes are preserved exactly (5e4af02)
+- `tkhd` width and height encoding saturates at the 16.16 fixed-point maximum instead of debug-panicking / silently wrapping for dimensions >= 65536 (d4d1648)
+
 ## [0.1.4] - 2026-04-17
 
 ### Changed

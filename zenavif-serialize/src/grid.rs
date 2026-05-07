@@ -274,8 +274,8 @@ impl GridImage {
     // ftyp
     write_ftyp(&mut out);
 
-    // meta
-    write_meta_grid(
+    // meta — collects exact byte offsets of every iloc extent_offset placeholder
+    let iloc_offset_positions = write_meta_grid(
         &mut out,
         &image_items,
         &ipma_entries,
@@ -297,32 +297,43 @@ impl GridImage {
     let mdat_pos = begin_box(&mut out, b"mdat");
     let mdat_data_start = out.len() as u32;
 
-    // First: grid descriptors, then tiles (color grid, alpha grid, color tiles, alpha tiles)
-    // Actually, the iloc offset tracking is done in write_meta_grid with placeholders.
-    // We need to write the actual data in iloc order.
+    // Items are written into mdat in the same order as iloc entries:
+    // color grid descriptor, optional alpha grid descriptor, color tiles, optional alpha tiles.
+    // Track per-item offsets so we can patch the iloc table by exact position rather than
+    // scanning the entire output buffer for sentinel byte patterns (which would corrupt any
+    // user-supplied AV1 tile data that happened to contain the sentinel).
+    let mut item_offsets: Vec<u32> = Vec::with_capacity(iloc_offset_positions.len());
 
     // Grid descriptor data
+    item_offsets.push(out.len() as u32);
     out.extend_from_slice(&grid_descriptor);
     if let Some(ref agd) = alpha_grid_descriptor {
+        item_offsets.push(out.len() as u32);
         out.extend_from_slice(agd);
     }
 
     // Color tile data
     for tile in tile_data {
+        item_offsets.push(out.len() as u32);
         out.extend_from_slice(tile);
     }
 
     // Alpha tile data
     if let Some(alpha) = alpha_data {
         for tile in alpha {
+            item_offsets.push(out.len() as u32);
             out.extend_from_slice(tile);
         }
     }
 
     end_box(&mut out, mdat_pos);
 
-    // Patch iloc offsets
-    patch_iloc_offsets(&mut out, mdat_data_start);
+    debug_assert_eq!(iloc_offset_positions.len(), item_offsets.len());
+
+    // Patch iloc offsets at the exact positions where placeholders were emitted.
+    // No buffer-wide scanning — see note above.
+    let _ = mdat_data_start;
+    patch_iloc_offsets(&mut out, &iloc_offset_positions, &item_offsets);
 
     Ok(out)
     }
@@ -406,7 +417,11 @@ fn write_meta_grid(
     alpha_tile_base: u16,
     tile_count: usize,
     has_alpha: bool,
-) {
+) -> Vec<usize> {
+    // Records the exact byte offset of each iloc extent_offset placeholder, so the patch
+    // step can write directly to those positions instead of scanning the buffer for a
+    // sentinel byte pattern.
+    let mut iloc_offset_positions: Vec<usize> = Vec::new();
     let meta_pos = begin_box(out, b"meta");
     write_fullbox(out, 0, 0);
 
@@ -447,6 +462,7 @@ fn write_meta_grid(
         write_u16(out, primary_id);
         write_u16(out, 0); // data_reference_index
         write_u16(out, 1); // extent_count
+        iloc_offset_positions.push(out.len());
         write_u32(out, ILOC_PLACEHOLDER);
         write_u32(out, grid_descriptor.len() as u32);
 
@@ -455,6 +471,7 @@ fn write_meta_grid(
             write_u16(out, alpha_grid_id);
             write_u16(out, 0);
             write_u16(out, 1);
+            iloc_offset_positions.push(out.len());
             write_u32(out, ILOC_PLACEHOLDER);
             write_u32(out, alpha_grid_descriptor.map_or(0, |d| d.len() as u32));
         }
@@ -464,6 +481,7 @@ fn write_meta_grid(
             write_u16(out, color_tile_base + i as u16);
             write_u16(out, 0);
             write_u16(out, 1);
+            iloc_offset_positions.push(out.len());
             write_u32(out, ILOC_PLACEHOLDER);
             write_u32(out, tile.len() as u32);
         }
@@ -474,6 +492,7 @@ fn write_meta_grid(
                 write_u16(out, alpha_tile_base + i as u16);
                 write_u16(out, 0);
                 write_u16(out, 1);
+                iloc_offset_positions.push(out.len());
                 write_u32(out, ILOC_PLACEHOLDER);
                 write_u32(out, tile.len() as u32);
             }
@@ -551,29 +570,22 @@ fn write_meta_grid(
     }
 
     end_box(out, meta_pos);
+    iloc_offset_positions
 }
 
-/// Patch iloc placeholder offsets with actual mdat offsets.
-/// Items are laid out in iloc order: grid desc(s), then tiles.
-fn patch_iloc_offsets(out: &mut [u8], mdat_data_start: u32) {
-    let placeholder = ILOC_PLACEHOLDER.to_be_bytes();
-    let mut current_offset = mdat_data_start;
-    let mut i = 0;
-
-    while i + 4 <= out.len() {
-        if out[i..i + 4] == placeholder {
-            // Read the length that follows this offset (4 bytes after)
-            let len = if i + 8 <= out.len() {
-                u32::from_be_bytes([out[i + 4], out[i + 5], out[i + 6], out[i + 7]])
-            } else {
-                0
-            };
-
-            out[i..i + 4].copy_from_slice(&current_offset.to_be_bytes());
-            current_offset += len;
-            i += 8; // skip past offset + length
-        } else {
-            i += 1;
+/// Patch iloc extent_offset placeholders at recorded byte positions.
+///
+/// Writes each item's actual mdat offset into the precise 4-byte slot recorded when
+/// the placeholder was emitted. This avoids scanning the output for sentinel byte
+/// patterns, which would corrupt user-supplied AV1 tile payloads that happen to
+/// contain the same bytes (`ILOC_PLACEHOLDER`) — a real possibility for compressed
+/// data, and one an adversary could trigger deliberately.
+fn patch_iloc_offsets(out: &mut [u8], iloc_offset_positions: &[usize], item_offsets: &[u32]) {
+    debug_assert_eq!(iloc_offset_positions.len(), item_offsets.len());
+    for (&pos, &offset) in iloc_offset_positions.iter().zip(item_offsets.iter()) {
+        // Defensive bounds check; positions come from our own writes so this is structurally safe.
+        if pos + 4 <= out.len() {
+            out[pos..pos + 4].copy_from_slice(&offset.to_be_bytes());
         }
     }
 }
@@ -681,6 +693,47 @@ mod tests {
         let grid = parser.grid_config().expect("grid config");
         assert_eq!(grid.rows, 2);
         assert_eq!(grid.columns, 2);
+    }
+
+    #[test]
+    fn grid_tile_data_containing_iloc_sentinel_is_not_corrupted() {
+        // Regression: the iloc patcher used to scan the entire output buffer for
+        // 0xBAADF00D and overwrite any match. AV1 payloads can legitimately contain
+        // those bytes; this test deliberately seeds them and asserts that the tile
+        // data is preserved byte-for-byte after serialization.
+        let sentinel = ILOC_PLACEHOLDER.to_be_bytes();
+        let mut tile0 = vec![0xAAu8; 32];
+        tile0.extend_from_slice(&sentinel);            // raw sentinel
+        tile0.extend_from_slice(&[0xCC; 4]);            // would be read as "length"
+        tile0.extend_from_slice(&sentinel);            // adjacent second sentinel
+        tile0.extend_from_slice(&[0x11, 0x22, 0x33, 0x44]);
+        tile0.extend_from_slice(&[0xBB; 32]);
+
+        // Other tiles also carry the sentinel mid-payload.
+        let mut tile1 = vec![0x55u8; 16];
+        tile1.extend_from_slice(&sentinel);
+        tile1.extend_from_slice(&[0xEEu8; 80]);
+        let tile2 = vec![0x77u8; 64];
+        let mut tile3 = vec![0x88u8; 16];
+        tile3.extend_from_slice(&sentinel);
+        tile3.extend_from_slice(&[0x99u8; 16]);
+
+        let tiles = [tile0.clone(), tile1.clone(), tile2.clone(), tile3.clone()];
+        let tile_refs: Vec<&[u8]> = tiles.iter().map(|t| t.as_slice()).collect();
+
+        let mut image = GridImage::new();
+        image.set_color_config(basic_av1c());
+        let avif = image.serialize(2, 2, 200, 200, 100, 100, &tile_refs, None).unwrap();
+
+        // Resolve each tile via the iloc table and confirm its bytes match exactly.
+        let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+        assert_eq!(parser.grid_tile_count(), 4);
+        let originals = [tile0.as_slice(), tile1.as_slice(), tile2.as_slice(), tile3.as_slice()];
+        for (i, original) in originals.iter().enumerate() {
+            let got = parser.tile_data(i).expect("tile data");
+            assert_eq!(got.as_ref(), *original,
+                "tile {i} corrupted by placeholder scan or iloc misaligned");
+        }
     }
 
     #[test]
