@@ -2370,3 +2370,54 @@ fn parser_to_avif_data_has_depth() {
     assert_eq!(dm.width, parser_dm.width);
     assert_eq!(dm.height, parser_dm.height);
 }
+
+// ============================================================================
+// Audit H1 (2026-05-06): total_megapixels_limit must enforce on the default
+// (zero-copy) API. Previously was #[cfg(feature = "eager")]-gated and silently
+// ineffective for AvifParser::from_bytes_with_config callers.
+// ============================================================================
+
+#[test]
+fn parser_default_path_enforces_total_megapixels_limit_grid() {
+    let bytes = std::fs::read(IMAGE_GRID_5X4).expect("read file");
+    // 6400x2880 grid is ~18 MP; cap at 0 MP to force rejection.
+    let config = zenavif_parse::DecodeConfig::default()
+        .with_total_megapixels_limit(0);
+
+    let result = zenavif_parse::AvifParser::from_bytes_with_config(
+        &bytes, &config, &zenavif_parse::Unstoppable,
+    );
+    assert!(
+        result.is_err(),
+        "default-path AvifParser should reject grid output exceeding total_megapixels_limit"
+    );
+}
+
+#[test]
+fn parser_default_path_enforces_total_megapixels_limit_single_item() {
+    // bbb_4k.avif primary item ispe is 3840x2160 (~8.3 MP). Cap at 1 MP.
+    let bytes = std::fs::read("av1-avif/testFiles/Microsoft/bbb_4k.avif")
+        .expect("read file");
+    let config = zenavif_parse::DecodeConfig::default()
+        .with_total_megapixels_limit(1);
+
+    let result = zenavif_parse::AvifParser::from_bytes_with_config(
+        &bytes, &config, &zenavif_parse::Unstoppable,
+    );
+    assert!(
+        result.is_err(),
+        "default-path AvifParser should reject single-item ispe exceeding total_megapixels_limit"
+    );
+}
+
+#[test]
+fn parser_default_path_allows_within_total_megapixels_limit() {
+    // Same grid but with a generous limit — must succeed.
+    let bytes = std::fs::read(IMAGE_GRID_5X4).expect("read file");
+    let config = zenavif_parse::DecodeConfig::default()
+        .with_total_megapixels_limit(64);
+
+    zenavif_parse::AvifParser::from_bytes_with_config(
+        &bytes, &config, &zenavif_parse::Unstoppable,
+    ).expect("parser should accept grid within total_megapixels_limit");
+}

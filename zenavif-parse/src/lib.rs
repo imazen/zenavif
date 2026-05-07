@@ -1747,6 +1747,11 @@ impl<'data> AvifParser<'data> {
 
             let grid_config = Self::calculate_grid_config(&meta, &tile_ids)?;
 
+            // Enforce total_megapixels_limit on grid output dimensions on the
+            // default zero-copy path (the eager path also calls this at
+            // calculate_grid_config sites). H1 of the 2026-05-06 audit.
+            tracker.validate_total_megapixels(grid_config.output_width, grid_config.output_height)?;
+
             // AVIF 1.2: transformative properties SHALL NOT be on grid tile items
             for (tile_id, _) in tiles_with_index.iter() {
                 for prop in meta.properties.iter() {
@@ -1765,6 +1770,21 @@ impl<'data> AvifParser<'data> {
 
             (Some(grid_config), tile_extents)
         } else {
+            // Non-grid primary: enforce total_megapixels_limit on the primary
+            // item's ispe dimensions if present. H1 of 2026-05-06 audit.
+            let primary_dims = meta.properties.iter().find_map(|p| {
+                if p.item_id == meta.primary_item_id {
+                    match &p.property {
+                        ItemProperty::ImageSpatialExtents(e) => Some((e.width, e.height)),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            });
+            if let Some((w, h)) = primary_dims {
+                tracker.validate_total_megapixels(w, h)?;
+            }
             (None, TryVec::new())
         };
 
@@ -3087,7 +3107,6 @@ impl<'a> ResourceTracker<'a> {
         self.current_memory = self.current_memory.saturating_sub(bytes);
     }
 
-    #[cfg(feature = "eager")]
     fn validate_total_megapixels(&self, width: u32, height: u32) -> Result<()> {
         if let Some(limit) = self.config.total_megapixels_limit {
             let megapixels = (width as u64)
@@ -4973,6 +4992,26 @@ fn read_stbl<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<(SampleTable, TrackCod
 
     // Precompute per-sample byte offsets from sample_to_chunk + chunk_offsets + sample_sizes.
     // This flattens the ISOBMFF indirection into a simple array for O(1) frame lookup.
+    let sample_offsets = precompute_sample_offsets(&sample_to_chunk, &chunk_offsets, &sample_sizes)?;
+
+    Ok((SampleTable {
+        time_to_sample,
+        sample_sizes,
+        sample_offsets,
+    }, codec_config))
+}
+
+/// Flatten sample_to_chunk + chunk_offsets + sample_sizes into per-sample byte offsets.
+///
+/// Returns `Err(Error::InvalidData)` on offset overflow — a malicious or malformed
+/// `co64` chunk_offset close to `u64::MAX` combined with a non-zero sample_size
+/// would otherwise wrap and reposition AV1 frame starts at attacker-chosen offsets.
+/// (Audit H2, 2026-05-06.)
+fn precompute_sample_offsets(
+    sample_to_chunk: &TryVec<SampleToChunkEntry>,
+    chunk_offsets: &TryVec<u64>,
+    sample_sizes: &TryVec<u32>,
+) -> Result<TryVec<u64>> {
     let mut sample_offsets = TryVec::new();
     let mut sample_idx = 0usize;
     for (i, entry) in sample_to_chunk.iter().enumerate() {
@@ -4997,18 +5036,15 @@ fn read_stbl<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<(SampleTable, TrackCod
                     break;
                 }
                 sample_offsets.push(offset)?;
-                offset += *sample_sizes.get(sample_idx)
-                    .ok_or(Error::InvalidData("sample index mismatch"))? as u64;
+                let sample_size = *sample_sizes.get(sample_idx)
+                    .ok_or(Error::InvalidData("sample index mismatch"))?;
+                offset = offset.checked_add(sample_size as u64)
+                    .ok_or(Error::InvalidData("sample offset overflow"))?;
                 sample_idx += 1;
             }
         }
     }
-
-    Ok((SampleTable {
-        time_to_sample,
-        sample_sizes,
-        sample_offsets,
-    }, codec_config))
+    Ok(sample_offsets)
 }
 
 /// Parse Track Header box (tkhd)
@@ -5321,10 +5357,14 @@ fn extract_animation_frames(
         let mut frame_data = TryVec::new();
         let mut found = false;
 
+        let end = sample_offset
+            .checked_add(sample_size as u64)
+            .ok_or(Error::InvalidData("sample offset overflow"))?;
+
         for mdat in mdats.iter_mut() {
             let range = ExtentRange::WithLength(Range {
                 start: sample_offset,
-                end: sample_offset + sample_size as u64,
+                end,
             });
 
             if mdat.contains_extent(&range) {
@@ -5537,4 +5577,82 @@ fn be_i32<T: ReadBytesExt>(src: &mut T) -> Result<i32> {
 
 fn be_u64<T: ReadBytesExt>(src: &mut T) -> Result<u64> {
     src.read_u64::<byteorder::BigEndian>().map_err(From::from)
+}
+
+#[cfg(test)]
+mod sample_offset_overflow_tests {
+    use super::*;
+
+    fn s2c(first_chunk: u32, samples_per_chunk: u32) -> SampleToChunkEntry {
+        SampleToChunkEntry {
+            first_chunk,
+            samples_per_chunk,
+            _sample_description_index: 1,
+        }
+    }
+
+    /// Audit H2: a co64 chunk offset near u64::MAX combined with a non-zero
+    /// sample size used to wrap, repositioning subsequent samples at attacker-
+    /// chosen low offsets. We now reject with InvalidData.
+    #[test]
+    fn malicious_co64_offset_plus_size_overflow_is_rejected() {
+        let mut s2c_v = TryVec::new();
+        s2c_v.push(s2c(1, 2)).unwrap(); // 1 chunk, 2 samples per chunk
+        let mut chunk_offsets = TryVec::new();
+        chunk_offsets.push(u64::MAX - 5).unwrap(); // co64 near top
+        let mut sample_sizes = TryVec::new();
+        sample_sizes.push(10u32).unwrap(); // first sample @ MAX-5, MAX-5+10 wraps
+        sample_sizes.push(1u32).unwrap();
+
+        let result = precompute_sample_offsets(&s2c_v, &chunk_offsets, &sample_sizes);
+        match result {
+            Err(Error::InvalidData(msg)) => {
+                assert_eq!(msg, "sample offset overflow");
+            }
+            other => panic!("expected InvalidData(sample offset overflow), got {:?}", other),
+        }
+    }
+
+    /// Audit H3: same overflow class in eager `extract_animation_frames`'s
+    /// `sample_offset + sample_size as u64`. We only verify the arithmetic
+    /// behaviour here; the call site is now `checked_add` and exercises the
+    /// same Error::InvalidData path.
+    #[cfg(feature = "eager")]
+    #[test]
+    fn extract_animation_frames_rejects_offset_size_overflow() {
+        let mut sample_offsets = TryVec::new();
+        sample_offsets.push(u64::MAX - 5).unwrap();
+        let mut sample_sizes = TryVec::new();
+        sample_sizes.push(10u32).unwrap(); // MAX-5 + 10 wraps
+        let sample_table = SampleTable {
+            time_to_sample: TryVec::new(),
+            sample_sizes,
+            sample_offsets,
+        };
+        let mut mdats: [MediaDataBox; 0] = [];
+        let result = extract_animation_frames(&sample_table, 1, &mut mdats[..]);
+        match result {
+            Err(Error::InvalidData(msg)) => assert_eq!(msg, "sample offset overflow"),
+            other => panic!("expected InvalidData(sample offset overflow), got {:?}", other),
+        }
+    }
+
+    /// Sanity: a non-malicious table still computes offsets correctly.
+    #[test]
+    fn benign_offsets_compute_correctly() {
+        let mut s2c_v = TryVec::new();
+        s2c_v.push(s2c(1, 3)).unwrap();
+        let mut chunk_offsets = TryVec::new();
+        chunk_offsets.push(1000u64).unwrap();
+        let mut sample_sizes = TryVec::new();
+        sample_sizes.push(10u32).unwrap();
+        sample_sizes.push(20u32).unwrap();
+        sample_sizes.push(30u32).unwrap();
+
+        let offsets = precompute_sample_offsets(&s2c_v, &chunk_offsets, &sample_sizes).unwrap();
+        assert_eq!(offsets.len(), 3);
+        assert_eq!(*offsets.first().unwrap(), 1000);
+        assert_eq!(*offsets.get(1).unwrap(), 1010);
+        assert_eq!(*offsets.get(2).unwrap(), 1030);
+    }
 }
