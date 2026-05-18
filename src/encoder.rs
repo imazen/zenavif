@@ -528,7 +528,24 @@ impl EncoderConfig {
         self
     }
 
-    /// Override RDO transform-decision search (None = use speed preset).
+    /// Override RDO transform-decision search at speed ≥ 6.
+    ///
+    /// `None` (default) follows the speed preset: speed 6+ disables RDO TX
+    /// decision entirely (intra blocks use DCT-DCT only). `Some(true)` forces
+    /// a full per-block TX-type search; `Some(false)` keeps it disabled.
+    ///
+    /// **When to flip on:** quality-priority still-image encodes where the
+    /// 2-3× encode time cost is acceptable. Measured trade on a 63-image
+    /// stills corpus (CID22, speed 6, with QM on):
+    ///
+    /// | Config | Mean BD-Rate vs upstream | Encode time vs QM-only |
+    /// |---|---|---|
+    /// | `with_qm(true)` (default) | −10.1 % | 1.0× |
+    /// | `with_qm(true).with_rdo_tx_decision(Some(true))` | −10.3 % | ~3.0× |
+    ///
+    /// The marginal BD-rate gain over QM-only is small (~0.2 %), but on
+    /// individual images it ranges up to −31 %. Recommended only for one-shot
+    /// archival encodes, not bulk web pipelines.
     #[cfg(feature = "encode-imazen")]
     pub fn with_rdo_tx_decision(mut self, enable: Option<bool>) -> Self {
         self.override_rdo_tx_decision = enable;

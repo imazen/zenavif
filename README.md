@@ -133,6 +133,30 @@ let config = EncoderConfig::new()
     .with_qm(false);
 ```
 
+### TX RDO (quality-priority, optional)
+
+At speed ≥ 6 the encoder skips the per-block transform-type RDO search
+and uses DCT-DCT only for intra blocks. Forcing the full search back on
+is an opt-in quality knob:
+
+```rust,ignore
+let config = EncoderConfig::new()
+    .quality(95.0)
+    .with_qm(true)
+    .with_rdo_tx_decision(Some(true)); // archival / one-shot encode
+```
+
+Measured trade on a 63-image stills corpus (CID22, speed 6, with QM on):
+
+| Config | Mean BD-Rate vs upstream rav1e | Encode time |
+|---|---|---|
+| `with_qm(true)` (default) | −10.1 % | 1.0× |
+| `with_qm(true).with_rdo_tx_decision(Some(true))` | −10.3 % | ~3.0× |
+
+Mean gain over QM-only is small (~0.2 % BD-rate), but per-image gains
+range up to −31 %. Recommended only for archival / one-shot encodes,
+not bulk web pipelines.
+
 ### Bit depth
 
 The encoder matches output bit depth to input type by default:
