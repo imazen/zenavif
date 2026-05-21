@@ -379,7 +379,7 @@ impl EncoderConfig {
         features.push(0.0); // icc placeholder
 
         // 5. Forward pass.
-        let mut predictor = zenpredict::Predictor::new(model);
+        let mut predictor = zenpredict::Predictor::new(&model);
         let output = predictor
             .predict(&features)
             .map_err(|e| AutoTuneError::Inference(format!("{e}")))?;

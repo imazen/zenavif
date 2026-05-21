@@ -30,7 +30,7 @@ whereat = { version = "0.1.5"}
 log = "0.4.29"
 ravif = { package = "zenravif", version = "0.1.3", default-features = false, optional = true, features = ["stop"] }
 # Optional auto-tune deps — gated on `auto-tune` feature, off by default.
-zenpredict = { version = "0.1.0", path = "../zenanalyze/zenpredict", optional = true }
+zenpredict = { version = "0.2.1", path = "../zenanalyze/zenpredict", optional = true }
 zenanalyze = { version = "0.1.0", path = "../zenanalyze", optional = true, features = ["experimental"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"], optional = true }
 # svtav1: disabled — produces corrupt bitstreams in most configurations (see svtav1-rs README)
