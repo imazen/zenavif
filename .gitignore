@@ -75,6 +75,10 @@ Cargo.toml.original.txt
 # Multi-agent coordination marker (per global CLAUDE.md)
 .workongoing
 
+# Research-notes mirrors from zenpapers (gitignored canonical home)
+*_LEARNINGS.md
+*_LEARNINGS_FOR_*.md
+
 # In-progress predictor sweep TSVs — final results committed after run completes
 # (with `jj --config snapshot.max-new-file-size=...`).
 benchmarks/rav1e_phase1a_*.tsv
@@ -106,3 +110,4 @@ benchmarks/zenavif_pareto_v04_2026-05-04*.tsv
 benchmarks/zenavif_features_v05c_*.tsv
 benchmarks/rav1e_phase1a_2026-04-30.parquet
 benchmarks/rav1e_phase1a_hybrid_*.json
+benchmarks/zenavif_hybrid_v2_*.json

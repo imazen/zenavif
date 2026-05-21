@@ -1,0 +1,24 @@
+
+# Hybrid-heads picker — categorical bytes + scalar (none)
+Safety profile: size_optimal
+  bytes head: mean (squared error)
+  reach gate: none — any reachable cell allowed at inference
+Train rows: 4116, val rows: 1089
+n_cells: 10, output_dim: 20
+Student: MLP 114 -> 128 -> 128 -> 20, 33812 params (~66.0 KB f16)
+
+## Categorical cells
+   0: speed1                          (20 member configs)
+   1: speed2                          (20 member configs)
+   2: speed3                          (20 member configs)
+   3: speed4                          (20 member configs)
+   4: speed5                          (20 member configs)
+   5: speed6                          (20 member configs)
+   6: speed7                          (20 member configs)
+   7: speed8                          (20 member configs)
+   8: speed9                          (20 member configs)
+   9: speed10                         (20 member configs)
+
+## Argmin (categorical) — vs reachable per-row optimal
+  Teacher: mean 3.55%  argmin_acc 31.7%
+  Student: mean 3.73%  argmin_acc 28.4%
