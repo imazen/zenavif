@@ -88,3 +88,20 @@ All wired through to zenrav1e fork. Benchmarked results (ravif 7265eea):
 - `with_vaq()` - hurts quality; psychovisual tune already includes SSIM boost.
 - `tune_still_image` - no effect; ravif disables CDEF at high quality levels.
 - `with_lossless` - implemented, works.
+
+## Canonical training data + indexes (added 2026-05-20)
+
+**The canonical index for all ML data lives at `~/work/zen/DATA_PROVENANCE.md`.**
+
+Quick paths:
+- Trainer input: `/mnt/v/zen/zensim-training/canonical-2026-05-21/`
+- Master inventory: `~/work/zen/_ml-inventory-2026-05-20/00-MASTER-SYNTHESIS.md`
+- Per-codec picker audit: `~/work/zen/_ml-inventory-2026-05-20/05-per-codec-pickers.md`
+
+## ML/auto-tune status (2026-05-20)
+
+zenavif is the **only zen codec with a production picker.** `EncoderConfig::auto_tune()` (feature `auto-tune`) loads `src/models/rav1e_picker_v0_1_1.bin` (ZNPR v2, ~217 KB) + the two LUT JSONs and returns optimal (speed, quality) knobs for a `QualityTarget`. Reference implementation for any future codec picker wiring.
+
+Training intermediates from earlier 2026-05-04 sweep (`benchmarks/zenavif_picker_v0.{3,4,5}_2026-05-04.bin`) are kept for reproducibility; production wires `v0.1.1`.
+
+The training pipeline that produces a new `rav1e_picker_v*.bin` lives in `~/work/zen/zenanalyze/zentrain/` (Python). See `~/work/zen/_ml-inventory-2026-05-20/05-per-codec-pickers.md` for cross-codec picker design.
