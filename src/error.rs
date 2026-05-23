@@ -56,6 +56,10 @@ pub enum Error {
     #[cfg(feature = "zencodec")]
     #[error(transparent)]
     UnsupportedOperation(#[from] zencodec::UnsupportedOperation),
+
+    /// Backend dispatch failed (empty allowlist or every backend errored).
+    #[error("backend dispatch: {0}")]
+    Backend(String),
 }
 
 impl From<StopReason> for Error {

@@ -128,6 +128,10 @@ required-features = ["__expert"]
 name = "auto_tune_smoke"
 required-features = ["auto-tune"]
 
+[[example]]
+name = "bench_backends"
+required-features = ["backend-ffmpeg"]
+
 [features]
 default = []
 # Decode with hand-written assembly via C FFI (fastest, uses unsafe)
@@ -154,6 +158,11 @@ auto-tune = ["encode-imazen", "dep:zenpredict", "dep:zenanalyze", "dep:serde_jso
 # encode-svtav1 = ["encode", "dep:svtav1"]
 # Enable zencodec trait integration
 zencodec = ["dep:zencodec", "zenavif-parse/zencodec"]
+# Spike (2026-05-23): ffmpeg-shellout backend(s) for measuring HW AV1
+# decode (VA-API / D3D11VA / DXVA2 / CUDA) against rav1d-safe before
+# investing in native libva / Media Foundation FFI. Requires `ffmpeg`
+# in PATH at runtime.
+backend-ffmpeg = []
 # Enable zennode pipeline node definitions
 # zennode = ["dep:zennode"]
 # Expose internal YUV conversion modules for profiling/debugging. Not public API.

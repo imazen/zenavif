@@ -56,6 +56,9 @@ mod auto_tune;
 #[cfg(feature = "auto-tune")]
 pub use auto_tune::{AutoTuneError, AutoTuneOptions, QualityTarget};
 
+pub mod backend;
+#[cfg(feature = "backend-ffmpeg")]
+pub mod backend_ffmpeg;
 #[cfg(feature = "zencodec")]
 mod codec;
 mod config;
