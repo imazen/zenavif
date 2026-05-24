@@ -4,6 +4,7 @@
 //! with `dimg` references to individual AV1 tile items.
 
 use crate::boxes::*;
+use crate::{push_prop, ESSENTIAL_BIT};
 use arrayvec::ArrayVec;
 use std::io;
 
@@ -243,7 +244,6 @@ impl GridImage {
 // ─── Helpers ─────────────────────────────────────────────────────────
 
 const ILOC_PLACEHOLDER: u32 = 0xBAAD_F00D;
-const ESSENTIAL_BIT: u8 = 0x80;
 
 #[derive(Clone, Copy)]
 struct ItemIds {
@@ -298,10 +298,6 @@ fn validate_tile_counts(
         ));
     }
     Ok(())
-}
-
-fn push_prop(ipco: &mut IpcoBox, prop: IpcoProp) -> io::Result<u8> {
-    ipco.push(prop).ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))
 }
 
 fn prop_ids_from<I: IntoIterator<Item = u8>>(iter: I) -> ArrayVec<u8, 12> {

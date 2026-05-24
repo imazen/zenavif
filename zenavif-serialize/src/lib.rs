@@ -21,6 +21,116 @@ use std::io;
 // Re-export box types needed by the public API
 pub use crate::boxes::{Av1CBox, ClapBox, ClliBox, ColrBox, ColrIccBox, IrotBox, ImirBox, MdcvBox, PaspBox};
 
+/// IPMA association flag marking a property as essential (decoders must understand it
+/// or reject the file). Used on AV1 config, irot, imir, clap.
+pub(crate) const ESSENTIAL_BIT: u8 = 0x80;
+
+/// Push an ipco property and propagate the standard InvalidInput error on overflow.
+pub(crate) fn push_prop(ipco: &mut IpcoBox, prop: IpcoProp) -> io::Result<u8> {
+    ipco.push(prop).ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))
+}
+
+/// Append a single-extent metadata sidecar item (Exif, XMP) that describes the primary image
+/// via a `cdsc` reference.
+#[allow(clippy::too_many_arguments)]
+fn add_cdsc_sidecar<'data>(
+    image_items: &mut ArrayVec<InfeBox, 8>,
+    iloc_items: &mut ArrayVec<IlocItem<'data>, 8>,
+    irefs: &mut ArrayVec<IrefEntryBox, 6>,
+    next_item_id: &mut u16,
+    primary_id: u16,
+    typ: FourCC,
+    content_type: &'static str,
+    data: &'data [u8],
+) {
+    let id = *next_item_id;
+    *next_item_id += 1;
+    image_items.push(InfeBox { id, typ, name: "", content_type });
+    iloc_items.push(IlocItem { id, extents: [IlocExtent { data }] });
+    irefs.push(IrefEntryBox {
+        from_id: id,
+        to_id: primary_id,
+        typ: FourCC(*b"cdsc"),
+    });
+}
+
+/// Append a gain map (av01 item) plus a `tmap` derived image that references
+/// `[primary, gain_map]` via a multi-entry `dimg` iref.
+#[allow(clippy::too_many_arguments)]
+fn add_gain_map<'data>(
+    image_items: &mut ArrayVec<InfeBox, 8>,
+    ipma_entries: &mut ArrayVec<IpmaEntry, 4>,
+    multi_irefs: &mut ArrayVec<IrefMultiEntryBox, 2>,
+    iloc_items: &mut ArrayVec<IlocItem<'data>, 8>,
+    ipco: &mut IpcoBox,
+    next_item_id: &mut u16,
+    color_image_id: u16,
+    gm: &'data GainMapConfig,
+) -> io::Result<()> {
+    let gm_depth = gm.bit_depth;
+    let gain_map_id = *next_item_id;
+    *next_item_id += 1;
+    let tmap_id = *next_item_id;
+    *next_item_id += 1;
+
+    image_items.push(InfeBox {
+        id: gain_map_id,
+        typ: FourCC(*b"av01"),
+        name: "",
+        content_type: "",
+    });
+    let gm_ispe = push_prop(ipco, IpcoProp::Ispe(IspeBox { width: gm.width, height: gm.height }))?;
+    let gm_av1c = push_prop(ipco, IpcoProp::Av1C(Av1CBox {
+        seq_profile: if gm_depth >= 12 { 2 } else { 0 },
+        seq_level_idx_0: 31,
+        seq_tier_0: false,
+        high_bitdepth: gm_depth >= 10,
+        twelve_bit: gm_depth >= 12,
+        monochrome: gm.monochrome,
+        chroma_subsampling_x: gm.chroma_subsampling.horizontal,
+        chroma_subsampling_y: gm.chroma_subsampling.vertical,
+        chroma_sample_position: 0,
+    }))?;
+    ipma_entries.push(IpmaEntry {
+        item_id: gain_map_id,
+        prop_ids: from_array([gm_ispe, gm_av1c | ESSENTIAL_BIT]),
+    });
+    iloc_items.push(IlocItem {
+        id: gain_map_id,
+        extents: [IlocExtent { data: &gm.av1_data }],
+    });
+
+    image_items.push(InfeBox {
+        id: tmap_id,
+        typ: FourCC(*b"tmap"),
+        name: "",
+        content_type: "",
+    });
+    if let Some(alt_colr) = gm.alt_colr {
+        let tmap_colr = push_prop(ipco, IpcoProp::Colr(alt_colr))?;
+        ipma_entries.push(IpmaEntry {
+            item_id: tmap_id,
+            prop_ids: from_array([tmap_colr]),
+        });
+    }
+    iloc_items.push(IlocItem {
+        id: tmap_id,
+        extents: [IlocExtent { data: &gm.metadata }],
+    });
+
+    // Single iref entry with reference_count=2 so the parser assigns reference_index
+    // 0 to primary and 1 to gain_map, per ISO 23008-12 tmap conventions.
+    let mut to_ids = ArrayVec::new();
+    to_ids.push(color_image_id);
+    to_ids.push(gain_map_id);
+    multi_irefs.push(IrefMultiEntryBox {
+        from_id: tmap_id,
+        to_ids,
+        typ: FourCC(*b"dimg"),
+    });
+    Ok(())
+}
+
 /// Chroma subsampling configuration for AV1 encoding.
 ///
 /// `(false, false)` = 4:4:4 (no subsampling).
@@ -404,7 +514,14 @@ impl Aviffy {
         self.make_boxes(color_av1_data, alpha_av1_data, self.width, self.height, self.bit_depth)?.write(into_output)
     }
 
-    fn make_boxes<'data>(&'data self, color_av1_data: &'data [u8], alpha_av1_data: Option<&'data [u8]>, width: u32, height: u32, depth_bits: u8) -> io::Result<AvifFile<'data>> {
+    fn make_boxes<'data>(
+        &'data self,
+        color_av1_data: &'data [u8],
+        alpha_av1_data: Option<&'data [u8]>,
+        width: u32,
+        height: u32,
+        depth_bits: u8,
+    ) -> io::Result<AvifFile<'data>> {
         if ![8, 10, 12].contains(&depth_bits) {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "depth must be 8/10/12"));
         }
@@ -415,12 +532,10 @@ impl Aviffy {
         let mut irefs = ArrayVec::new();
         let mut multi_irefs: ArrayVec<IrefMultiEntryBox, 2> = ArrayVec::new();
         let mut ipco = IpcoBox::new();
+
         let color_image_id: u16 = 1;
         let alpha_image_id: u16 = 2;
         let mut next_item_id: u16 = 3;
-        const ESSENTIAL_BIT: u8 = 0x80;
-        let color_depth_bits = depth_bits;
-        let alpha_depth_bits = depth_bits; // Sadly, the spec requires these to match.
 
         image_items.push(InfeBox {
             id: color_image_id,
@@ -428,261 +543,37 @@ impl Aviffy {
             name: "",
             content_type: "",
         });
-
-        let ispe_prop = ipco.push(IpcoProp::Ispe(IspeBox { width, height })).ok_or(io::ErrorKind::InvalidInput)?;
-
-        // This is redundant, but Chrome wants it, and checks that it matches :(
-        let av1c_color_prop = ipco.push(IpcoProp::Av1C(Av1CBox {
-            seq_profile: self.min_seq_profile.max(if color_depth_bits >= 12 { 2 } else { 0 }),
-            seq_level_idx_0: 31,
-            seq_tier_0: false,
-            high_bitdepth: color_depth_bits >= 10,
-            twelve_bit: color_depth_bits >= 12,
-            monochrome: self.monochrome,
-            chroma_subsampling_x: self.chroma_subsampling.horizontal,
-            chroma_subsampling_y: self.chroma_subsampling.vertical,
-            chroma_sample_position: 0,
-        })).ok_or(io::ErrorKind::InvalidInput)?;
-
-        // Useless bloat
-        let pixi_3 = ipco.push(IpcoProp::Pixi(PixiBox {
-            channels: 3,
-            depth: color_depth_bits,
-        })).ok_or(io::ErrorKind::InvalidInput)?;
-
-        let mut ipma = IpmaEntry {
-            item_id: color_image_id,
-            prop_ids: from_array([ispe_prop, av1c_color_prop | ESSENTIAL_BIT, pixi_3]),
-        };
-
-        // ICC profile takes precedence over nclx if both set
-        if let Some(ref icc_data) = self.icc_profile {
-            let colr_icc_prop = ipco.push(IpcoProp::ColrIcc(ColrIccBox {
-                icc_data: icc_data.clone(),
-            })).ok_or(io::ErrorKind::InvalidInput)?;
-            ipma.prop_ids.push(colr_icc_prop);
-        } else if self.colr != ColrBox::default() {
-            // Redundant info, already in AV1
-            let colr_color_prop = ipco.push(IpcoProp::Colr(self.colr)).ok_or(io::ErrorKind::InvalidInput)?;
-            ipma.prop_ids.push(colr_color_prop);
-        }
-
-        if let Some(clli) = self.clli {
-            let clli_prop = ipco.push(IpcoProp::Clli(clli)).ok_or(io::ErrorKind::InvalidInput)?;
-            ipma.prop_ids.push(clli_prop);
-        }
-
-        if let Some(mdcv) = self.mdcv {
-            let mdcv_prop = ipco.push(IpcoProp::Mdcv(mdcv)).ok_or(io::ErrorKind::InvalidInput)?;
-            ipma.prop_ids.push(mdcv_prop);
-        }
-
-        if let Some(irot) = self.irot {
-            let irot_prop = ipco.push(IpcoProp::Irot(irot)).ok_or(io::ErrorKind::InvalidInput)?;
-            ipma.prop_ids.push(irot_prop | ESSENTIAL_BIT);
-        }
-
-        if let Some(imir) = self.imir {
-            let imir_prop = ipco.push(IpcoProp::Imir(imir)).ok_or(io::ErrorKind::InvalidInput)?;
-            ipma.prop_ids.push(imir_prop | ESSENTIAL_BIT);
-        }
-
-        if let Some(clap) = self.clap {
-            let clap_prop = ipco.push(IpcoProp::Clap(clap)).ok_or(io::ErrorKind::InvalidInput)?;
-            ipma.prop_ids.push(clap_prop | ESSENTIAL_BIT);
-        }
-
-        if let Some(pasp) = self.pasp {
-            let pasp_prop = ipco.push(IpcoProp::Pasp(pasp)).ok_or(io::ErrorKind::InvalidInput)?;
-            ipma.prop_ids.push(pasp_prop);
-        }
-
-        ipma_entries.push(ipma);
+        let ispe_prop = push_prop(&mut ipco, IpcoProp::Ispe(IspeBox { width, height }))?;
+        ipma_entries.push(self.build_color_ipma(&mut ipco, ispe_prop, color_image_id, depth_bits)?);
 
         if let Some(exif_data) = self.exif.as_deref() {
-            let exif_id = next_item_id;
-            next_item_id += 1;
-
-            image_items.push(InfeBox {
-                id: exif_id,
-                typ: FourCC(*b"Exif"),
-                name: "",
-                content_type: "",
-            });
-
-            iloc_items.push(IlocItem {
-                id: exif_id,
-                extents: [IlocExtent { data: exif_data }],
-            });
-
-            irefs.push(IrefEntryBox {
-                from_id: exif_id,
-                to_id: color_image_id,
-                typ: FourCC(*b"cdsc"),
-            });
+            add_cdsc_sidecar(
+                &mut image_items, &mut iloc_items, &mut irefs,
+                &mut next_item_id, color_image_id,
+                FourCC(*b"Exif"), "", exif_data,
+            );
         }
-
         if let Some(xmp_data) = self.xmp.as_deref() {
-            let xmp_id = next_item_id;
-            next_item_id += 1;
-
-            image_items.push(InfeBox {
-                id: xmp_id,
-                typ: FourCC(*b"mime"),
-                name: "",
-                content_type: "application/rdf+xml",
-            });
-
-            iloc_items.push(IlocItem {
-                id: xmp_id,
-                extents: [IlocExtent { data: xmp_data }],
-            });
-
-            irefs.push(IrefEntryBox {
-                from_id: xmp_id,
-                to_id: color_image_id,
-                typ: FourCC(*b"cdsc"),
-            });
+            add_cdsc_sidecar(
+                &mut image_items, &mut iloc_items, &mut irefs,
+                &mut next_item_id, color_image_id,
+                FourCC(*b"mime"), "application/rdf+xml", xmp_data,
+            );
         }
 
         if let Some(alpha_data) = alpha_av1_data {
-            image_items.push(InfeBox {
-                id: alpha_image_id,
-                typ: FourCC(*b"av01"),
-                name: "",
-                content_type: "",
-            });
-
-            irefs.push(IrefEntryBox {
-                from_id: alpha_image_id,
-                to_id: color_image_id,
-                typ: FourCC(*b"auxl"),
-            });
-
-            if self.premultiplied_alpha {
-                irefs.push(IrefEntryBox {
-                    from_id: color_image_id,
-                    to_id: alpha_image_id,
-                    typ: FourCC(*b"prem"),
-                });
-            }
-
-            let av1c_alpha_prop = ipco.push(boxes::IpcoProp::Av1C(Av1CBox {
-                seq_profile: if alpha_depth_bits >= 12 { 2 } else { 0 },
-                seq_level_idx_0: 31,
-                seq_tier_0: false,
-                high_bitdepth: alpha_depth_bits >= 10,
-                twelve_bit: alpha_depth_bits >= 12,
-                monochrome: true,
-                chroma_subsampling_x: true,
-                chroma_subsampling_y: true,
-                chroma_sample_position: 0,
-            })).ok_or(io::ErrorKind::InvalidInput)?;
-
-            // So pointless
-            let pixi_1 = ipco.push(IpcoProp::Pixi(PixiBox {
-                channels: 1,
-                depth: alpha_depth_bits,
-            })).ok_or(io::ErrorKind::InvalidInput)?;
-
-            // that's a silly way to add 1 bit of information, isn't it?
-            let auxc_prop = ipco.push(IpcoProp::AuxC(AuxCBox {
-                urn: "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha",
-            })).ok_or(io::ErrorKind::InvalidInput)?;
-
-            ipma_entries.push(IpmaEntry {
-                item_id: alpha_image_id,
-                prop_ids: from_array([ispe_prop, av1c_alpha_prop | ESSENTIAL_BIT, auxc_prop, pixi_1]),
-            });
-
-            // Use interleaved color and alpha, with alpha first.
-            // Makes it possible to display partial image.
-            iloc_items.push(IlocItem {
-                id: alpha_image_id,
-                extents: [IlocExtent { data: alpha_data }],
-            });
+            // Alpha depth is forced to match color depth — the spec requires this.
+            self.add_alpha_track(
+                &mut image_items, &mut ipma_entries, &mut irefs, &mut iloc_items,
+                &mut ipco, ispe_prop, color_image_id, alpha_image_id, depth_bits, alpha_data,
+            )?;
         }
-        // Gain map: gain map image item (av01) + tmap derived image
-        if let Some(ref gm) = self.gain_map {
-            let gm_depth = gm.bit_depth;
-            let gain_map_id = next_item_id;
-            next_item_id += 1;
-            let tmap_id = next_item_id;
-            next_item_id += 1;
-            let _ = next_item_id;
 
-            // Gain map image item (av01)
-            image_items.push(InfeBox {
-                id: gain_map_id,
-                typ: FourCC(*b"av01"),
-                name: "",
-                content_type: "",
-            });
-
-            // Gain map ispe (may differ from primary dimensions)
-            let gm_ispe = ipco.push(IpcoProp::Ispe(IspeBox {
-                width: gm.width,
-                height: gm.height,
-            })).ok_or(io::ErrorKind::InvalidInput)?;
-
-            // Gain map av1C
-            let gm_av1c = ipco.push(IpcoProp::Av1C(Av1CBox {
-                seq_profile: if gm_depth >= 12 { 2 } else { 0 },
-                seq_level_idx_0: 31,
-                seq_tier_0: false,
-                high_bitdepth: gm_depth >= 10,
-                twelve_bit: gm_depth >= 12,
-                monochrome: gm.monochrome,
-                chroma_subsampling_x: gm.chroma_subsampling.horizontal,
-                chroma_subsampling_y: gm.chroma_subsampling.vertical,
-                chroma_sample_position: 0,
-            })).ok_or(io::ErrorKind::InvalidInput)?;
-
-            ipma_entries.push(IpmaEntry {
-                item_id: gain_map_id,
-                prop_ids: from_array([gm_ispe, gm_av1c | ESSENTIAL_BIT]),
-            });
-
-            // Gain map image data in iloc
-            iloc_items.push(IlocItem {
-                id: gain_map_id,
-                extents: [IlocExtent { data: &gm.av1_data }],
-            });
-
-            // tmap derived image item
-            image_items.push(InfeBox {
-                id: tmap_id,
-                typ: FourCC(*b"tmap"),
-                name: "",
-                content_type: "",
-            });
-
-            // tmap item properties: optional colr for alternate rendition
-            if let Some(alt_colr) = gm.alt_colr {
-                let tmap_colr = ipco.push(IpcoProp::Colr(alt_colr)).ok_or(io::ErrorKind::InvalidInput)?;
-                ipma_entries.push(IpmaEntry {
-                    item_id: tmap_id,
-                    prop_ids: from_array([tmap_colr]),
-                });
-            }
-
-            // tmap payload (ISO 21496-1 metadata) in iloc
-            iloc_items.push(IlocItem {
-                id: tmap_id,
-                extents: [IlocExtent { data: &gm.metadata }],
-            });
-
-            // dimg reference: tmap -> [primary, gain_map]
-            // Must be a single iref entry with reference_count=2 so the parser
-            // assigns reference_index 0 to primary and 1 to gain_map.
-            let mut to_ids = ArrayVec::new();
-            to_ids.push(color_image_id);
-            to_ids.push(gain_map_id);
-            multi_irefs.push(IrefMultiEntryBox {
-                from_id: tmap_id,
-                to_ids,
-                typ: FourCC(*b"dimg"),
-            });
+        if let Some(gm) = &self.gain_map {
+            add_gain_map(
+                &mut image_items, &mut ipma_entries, &mut multi_irefs, &mut iloc_items,
+                &mut ipco, &mut next_item_id, color_image_id, gm,
+            )?;
         }
 
         iloc_items.push(IlocItem {
@@ -706,16 +597,130 @@ impl Aviffy {
                 },
                 iprp: IprpBox {
                     ipco,
-                    // It's not enough to define these properties,
-                    // they must be assigned to the image
                     ipma: IpmaBox { entries: ipma_entries },
                 },
                 iref: IrefBox { entries: irefs, multi_entries: multi_irefs },
             },
-            // Here's the actual data. If HEIF wasn't such a kitchen sink, this
-            // would have been the only data this file needs.
             mdat: MdatBox,
         })
+    }
+
+    fn build_color_ipma(
+        &self,
+        ipco: &mut IpcoBox,
+        ispe_prop: u8,
+        color_image_id: u16,
+        color_depth_bits: u8,
+    ) -> io::Result<IpmaEntry> {
+        // Av1C is redundant with the AV1 sequence header, but Chrome requires it
+        // and validates that it matches.
+        let av1c_color_prop = push_prop(ipco, IpcoProp::Av1C(Av1CBox {
+            seq_profile: self.min_seq_profile.max(if color_depth_bits >= 12 { 2 } else { 0 }),
+            seq_level_idx_0: 31,
+            seq_tier_0: false,
+            high_bitdepth: color_depth_bits >= 10,
+            twelve_bit: color_depth_bits >= 12,
+            monochrome: self.monochrome,
+            chroma_subsampling_x: self.chroma_subsampling.horizontal,
+            chroma_subsampling_y: self.chroma_subsampling.vertical,
+            chroma_sample_position: 0,
+        }))?;
+        let pixi_3 = push_prop(ipco, IpcoProp::Pixi(PixiBox { channels: 3, depth: color_depth_bits }))?;
+
+        let mut ipma = IpmaEntry {
+            item_id: color_image_id,
+            prop_ids: from_array([ispe_prop, av1c_color_prop | ESSENTIAL_BIT, pixi_3]),
+        };
+
+        // ICC profile takes precedence over nclx if both are set.
+        if let Some(ref icc_data) = self.icc_profile {
+            let p = push_prop(ipco, IpcoProp::ColrIcc(ColrIccBox { icc_data: icc_data.clone() }))?;
+            ipma.prop_ids.push(p);
+        } else if self.colr != ColrBox::default() {
+            let p = push_prop(ipco, IpcoProp::Colr(self.colr))?;
+            ipma.prop_ids.push(p);
+        }
+        if let Some(clli) = self.clli {
+            ipma.prop_ids.push(push_prop(ipco, IpcoProp::Clli(clli))?);
+        }
+        if let Some(mdcv) = self.mdcv {
+            ipma.prop_ids.push(push_prop(ipco, IpcoProp::Mdcv(mdcv))?);
+        }
+        if let Some(irot) = self.irot {
+            ipma.prop_ids.push(push_prop(ipco, IpcoProp::Irot(irot))? | ESSENTIAL_BIT);
+        }
+        if let Some(imir) = self.imir {
+            ipma.prop_ids.push(push_prop(ipco, IpcoProp::Imir(imir))? | ESSENTIAL_BIT);
+        }
+        if let Some(clap) = self.clap {
+            ipma.prop_ids.push(push_prop(ipco, IpcoProp::Clap(clap))? | ESSENTIAL_BIT);
+        }
+        if let Some(pasp) = self.pasp {
+            ipma.prop_ids.push(push_prop(ipco, IpcoProp::Pasp(pasp))?);
+        }
+        Ok(ipma)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn add_alpha_track<'data>(
+        &'data self,
+        image_items: &mut ArrayVec<InfeBox, 8>,
+        ipma_entries: &mut ArrayVec<IpmaEntry, 4>,
+        irefs: &mut ArrayVec<IrefEntryBox, 6>,
+        iloc_items: &mut ArrayVec<IlocItem<'data>, 8>,
+        ipco: &mut IpcoBox,
+        ispe_prop: u8,
+        color_image_id: u16,
+        alpha_image_id: u16,
+        alpha_depth_bits: u8,
+        alpha_data: &'data [u8],
+    ) -> io::Result<()> {
+        image_items.push(InfeBox {
+            id: alpha_image_id,
+            typ: FourCC(*b"av01"),
+            name: "",
+            content_type: "",
+        });
+        irefs.push(IrefEntryBox {
+            from_id: alpha_image_id,
+            to_id: color_image_id,
+            typ: FourCC(*b"auxl"),
+        });
+        if self.premultiplied_alpha {
+            irefs.push(IrefEntryBox {
+                from_id: color_image_id,
+                to_id: alpha_image_id,
+                typ: FourCC(*b"prem"),
+            });
+        }
+
+        let av1c_alpha_prop = push_prop(ipco, IpcoProp::Av1C(Av1CBox {
+            seq_profile: if alpha_depth_bits >= 12 { 2 } else { 0 },
+            seq_level_idx_0: 31,
+            seq_tier_0: false,
+            high_bitdepth: alpha_depth_bits >= 10,
+            twelve_bit: alpha_depth_bits >= 12,
+            monochrome: true,
+            chroma_subsampling_x: true,
+            chroma_subsampling_y: true,
+            chroma_sample_position: 0,
+        }))?;
+        let pixi_1 = push_prop(ipco, IpcoProp::Pixi(PixiBox { channels: 1, depth: alpha_depth_bits }))?;
+        let auxc_prop = push_prop(ipco, IpcoProp::AuxC(AuxCBox {
+            urn: "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha",
+        }))?;
+
+        ipma_entries.push(IpmaEntry {
+            item_id: alpha_image_id,
+            prop_ids: from_array([ispe_prop, av1c_alpha_prop | ESSENTIAL_BIT, auxc_prop, pixi_1]),
+        });
+
+        // Alpha-first iloc order lets a partial decode show alpha before color.
+        iloc_items.push(IlocItem {
+            id: alpha_image_id,
+            extents: [IlocExtent { data: alpha_data }],
+        });
+        Ok(())
     }
 
     /// Panics if the input arguments were invalid. Use [`Self::write`] to handle the errors.
