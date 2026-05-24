@@ -183,28 +183,38 @@ impl crate::EncoderConfig {
     /// want hard rejection (batch jobs, calibration sweeps, public
     /// HTTP endpoints) instead of silent clamping.
     pub fn validate(&self) -> Result<(), ValidationError> {
-        let q_range: RangeInclusive<f32> = 0.0..=100.0;
+        self.validate_quality_fields()?;
+        self.validate_speed_and_threads()?;
+        self.validate_transforms()?;
+        self.validate_cicp()?;
+        #[cfg(feature = "encode-imazen")]
+        self.validate_imazen_knobs()?;
+        #[cfg(feature = "__expert")]
+        self.validate_expert_overrides()?;
+        Ok(())
+    }
 
-        // quality
-        if !q_range.contains(&self.quality) || !self.quality.is_finite() {
+    fn validate_quality_fields(&self) -> Result<(), ValidationError> {
+        if !QUALITY_RANGE.contains(&self.quality) || !self.quality.is_finite() {
             return Err(ValidationError::QualityOutOfRange {
                 value: self.quality,
-                valid: q_range.clone(),
+                valid: QUALITY_RANGE,
             });
         }
-
-        // alpha_quality
         if let Some(aq) = self.alpha_quality
-            && (!q_range.contains(&aq) || !aq.is_finite())
+            && (!QUALITY_RANGE.contains(&aq) || !aq.is_finite())
         {
             return Err(ValidationError::AlphaQualityOutOfRange {
                 value: aq,
-                valid: q_range.clone(),
+                valid: QUALITY_RANGE,
             });
         }
+        Ok(())
+    }
 
-        // speed: 1..=10. zenravif documents "1 = slowest/best, 10 = fastest/worst"
-        // and SpeedSettings::from_preset clamps; we reject 0 and >10.
+    fn validate_speed_and_threads(&self) -> Result<(), ValidationError> {
+        // speed 1..=10: zenravif documents "1 = slowest/best, 10 = fastest/worst" and
+        // SpeedSettings::from_preset clamps; we reject 0 and >10 here for fail-fast callers.
         let speed_range: RangeInclusive<u8> = 1..=10;
         if !speed_range.contains(&self.speed) {
             return Err(ValidationError::SpeedOutOfRange {
@@ -212,115 +222,103 @@ impl crate::EncoderConfig {
                 valid: speed_range,
             });
         }
-
-        // threads: Option<usize>. None = rayon default, Some(0) is meaningless.
+        // threads: None = rayon default. Some(0) is meaningless.
         if let Some(0) = self.threads {
             return Err(ValidationError::EncoderThreadsZero);
         }
+        Ok(())
+    }
 
-        // rotation: AVIF irot box stores the angle as a 2-bit
-        // quarter-turn code (0=0°, 1=90°, 2=180°, 3=270°). The
-        // serializer masks the input to `& 0x03`, so passing
-        // degrees (90, 180, 270) silently maps to wrong rotations.
-        // We require the irot code-point form {0, 1, 2, 3} for
-        // forwarding parity with zenravif's validator, which uses
-        // `ROTATION_RANGE = 0..=3`.
+    fn validate_transforms(&self) -> Result<(), ValidationError> {
+        // rotation: AVIF irot box stores the angle as a 2-bit quarter-turn code
+        // (0=0°, 1=90°, 2=180°, 3=270°). The serializer masks input to `& 0x03`, so passing
+        // degrees would silently map to wrong rotations. We require irot code-point form
+        // {0..=3} matching zenravif's ROTATION_RANGE.
         if let Some(angle) = self.rotation
             && angle > 3
         {
             return Err(ValidationError::RotationInvalid { value: angle });
         }
-
         // mirror axis: AVIF imir spec — 0 = vertical, 1 = horizontal.
         if let Some(axis) = self.mirror
             && axis > 1
         {
             return Err(ValidationError::MirrorInvalid { value: axis });
         }
-
-        // CICP code points (ITU-T H.273): 3 is reserved across all three fields.
-        if let Some(cp) = self.color_primaries
-            && cp == 3
-        {
-            return Err(ValidationError::CicpReserved {
-                field: "color_primaries",
-                value: cp,
-            });
-        }
-        if let Some(tc) = self.transfer_characteristics
-            && tc == 3
-        {
-            return Err(ValidationError::CicpReserved {
-                field: "transfer_characteristics",
-                value: tc,
-            });
-        }
-        if let Some(mc) = self.matrix_coefficients
-            && mc == 3
-        {
-            return Err(ValidationError::CicpReserved {
-                field: "matrix_coefficients",
-                value: mc,
-            });
-        }
-
-        // encode-imazen knobs.
-        #[cfg(feature = "encode-imazen")]
-        {
-            // VAQ strength range matches zenravif/zenrav1e's accepted
-            // band: 0.0 (off) through 4.0 (aggressive).
-            let vaq_range: RangeInclusive<f64> = 0.0..=4.0;
-            if !vaq_range.contains(&self.vaq_strength) || !self.vaq_strength.is_finite() {
-                return Err(ValidationError::VaqStrengthOutOfRange {
-                    value: self.vaq_strength,
-                    valid: vaq_range,
-                });
-            }
-
-            // seg_boost: zenravif's SEG_BOOST_RANGE = 0.5..=4.0.
-            let seg_range: RangeInclusive<f64> = 0.5..=4.0;
-            if let Some(b) = self.seg_boost
-                && (!b.is_finite() || !seg_range.contains(&b))
-            {
-                return Err(ValidationError::SegBoostOutOfRange {
-                    value: b,
-                    valid: seg_range,
-                });
-            }
-
-            // Cross-param: lossless overrides quality and is incompatible
-            // with VAQ enabled (zenravif disables QM internally for lossless;
-            // VAQ on top of quantizer=0 has no defined meaning).
-            if self.lossless && self.enable_vaq {
-                return Err(ValidationError::MutuallyExclusive {
-                    a: "lossless",
-                    b: "vaq",
-                });
-            }
-
-            // Cross-param: lossless + tune_still_image — still-image tuning
-            // changes deblock/CDEF tradeoffs that have no effect at q=0
-            // but the combination is conceptually nonsensical and the
-            // zenrav1e benchmark notes call out tune_still_image as a no-op
-            // at high q. We allow it; only the quantizer=0 vs VAQ pair is
-            // rejected because VAQ actively conflicts with the quantizer.
-        }
-
-        // expert::InternalParams forwarded fields. We re-validate the
-        // partition_range bounds at the EncoderConfig level so callers
-        // who set the field via `with_internal_params` get a single
-        // call site for validation.
-        #[cfg(feature = "__expert")]
-        {
-            if let Some((min, max)) = self.override_partition_range
-                && (!partition_bound_ok(min) || !partition_bound_ok(max) || min > max)
-            {
-                return Err(ValidationError::PartitionRangeInvalid { min, max });
-            }
-        }
-
         Ok(())
     }
+
+    fn validate_cicp(&self) -> Result<(), ValidationError> {
+        // CICP code points per ITU-T H.273: value 3 is reserved across all three fields.
+        check_cicp_reserved(self.color_primaries, "color_primaries")?;
+        check_cicp_reserved(self.transfer_characteristics, "transfer_characteristics")?;
+        check_cicp_reserved(self.matrix_coefficients, "matrix_coefficients")?;
+        Ok(())
+    }
+
+    #[cfg(feature = "encode-imazen")]
+    fn validate_imazen_knobs(&self) -> Result<(), ValidationError> {
+        // VAQ strength matches zenravif/zenrav1e's accepted band: 0.0 (off) ..= 4.0 (aggressive).
+        let vaq_range: RangeInclusive<f64> = 0.0..=4.0;
+        if !vaq_range.contains(&self.vaq_strength) || !self.vaq_strength.is_finite() {
+            return Err(ValidationError::VaqStrengthOutOfRange {
+                value: self.vaq_strength,
+                valid: vaq_range,
+            });
+        }
+        // seg_boost: zenravif's SEG_BOOST_RANGE = 0.5..=4.0.
+        let seg_range: RangeInclusive<f64> = 0.5..=4.0;
+        if let Some(b) = self.seg_boost
+            && (!b.is_finite() || !seg_range.contains(&b))
+        {
+            return Err(ValidationError::SegBoostOutOfRange {
+                value: b,
+                valid: seg_range,
+            });
+        }
+        // Cross-param: lossless overrides quality and is incompatible with VAQ — zenravif
+        // disables QM internally for lossless; VAQ on top of quantizer=0 has no defined meaning.
+        // (lossless + tune_still_image is allowed; the still-image tuning is a no-op at q=0
+        // but conceptually conflict-free, unlike VAQ which actively fights the quantizer.)
+        if self.lossless && self.enable_vaq {
+            return Err(ValidationError::MutuallyExclusive {
+                a: "lossless",
+                b: "vaq",
+            });
+        }
+        Ok(())
+    }
+
+    // We re-validate forwarded expert::InternalParams bounds at the EncoderConfig level so
+    // callers who set the field via `with_internal_params` get a single call site for validation.
+    #[cfg(feature = "__expert")]
+    fn validate_expert_overrides(&self) -> Result<(), ValidationError> {
+        if let Some((min, max)) = self.override_partition_range
+            && (!partition_bound_ok(min) || !partition_bound_ok(max) || min > max)
+        {
+            return Err(ValidationError::PartitionRangeInvalid { min, max });
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "encode")]
+const QUALITY_RANGE: RangeInclusive<f32> = 0.0..=100.0;
+
+#[cfg(feature = "encode")]
+fn check_cicp_reserved(
+    field_value: Option<u8>,
+    field_name: &'static str,
+) -> Result<(), ValidationError> {
+    if let Some(v) = field_value
+        && v == 3
+    {
+        return Err(ValidationError::CicpReserved {
+            field: field_name,
+            value: v,
+        });
+    }
+    Ok(())
 }
 
 impl crate::DecoderConfig {
