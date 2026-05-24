@@ -54,271 +54,354 @@ impl GridImage {
     /// - `tile_data`: AV1-encoded data for each tile in row-major order (length must equal `rows * columns`)
     /// - `alpha_data`: optional alpha tile data (same order and count as `tile_data`)
     #[allow(clippy::too_many_arguments)]
-    pub fn serialize(&self, rows: u8, columns: u8,
-                     output_width: u32, output_height: u32,
-                     tile_width: u32, tile_height: u32,
-                     tile_data: &[&[u8]], alpha_data: Option<&[&[u8]]>) -> io::Result<Vec<u8>> {
-    let image = self;
-    let tile_count = rows as usize * columns as usize;
-    if tile_data.len() != tile_count {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput,
-            format!("tile_data.len() ({}) != rows*columns ({})", tile_data.len(), tile_count)));
+    pub fn serialize(
+        &self,
+        rows: u8,
+        columns: u8,
+        output_width: u32,
+        output_height: u32,
+        tile_width: u32,
+        tile_height: u32,
+        tile_data: &[&[u8]],
+        alpha_data: Option<&[&[u8]]>,
+    ) -> io::Result<Vec<u8>> {
+        let tile_count = rows as usize * columns as usize;
+        validate_tile_counts(tile_count, tile_data, alpha_data)?;
+
+        let has_alpha = alpha_data.is_some() && self.alpha_config.is_some();
+        let ids = ItemIds::assign(tile_count, has_alpha);
+
+        let grid_descriptor = make_grid_descriptor(rows, columns, output_width, output_height);
+        let alpha_grid_descriptor = has_alpha
+            .then(|| make_grid_descriptor(rows, columns, output_width, output_height));
+
+        let mut ipco = IpcoBox::new();
+        let ipco_ids = self.populate_ipco(
+            &mut ipco,
+            output_width,
+            output_height,
+            tile_width,
+            tile_height,
+            has_alpha,
+        )?;
+
+        let mut image_items: Vec<InfeBox> = Vec::new();
+        let mut ipma_entries: Vec<IpmaEntry> = Vec::new();
+        let mut irefs: Vec<IrefEntryBox> = Vec::new();
+
+        self.add_grid_items(
+            &mut image_items,
+            &mut ipma_entries,
+            &mut irefs,
+            ids,
+            ipco_ids,
+            has_alpha,
+        );
+        add_tile_items(
+            &mut image_items,
+            &mut ipma_entries,
+            &mut irefs,
+            ids,
+            ipco_ids,
+            tile_count,
+            has_alpha,
+        );
+
+        let mut out = Vec::new();
+        write_ftyp(&mut out);
+        let iloc_offset_positions = write_meta_grid(
+            &mut out,
+            &image_items,
+            &ipma_entries,
+            &ipco,
+            &irefs,
+            ids.color_grid_id,
+            &grid_descriptor,
+            alpha_grid_descriptor.as_deref(),
+            ids.alpha_grid_id,
+            tile_data,
+            alpha_data,
+            ids.color_tile_base,
+            ids.alpha_tile_base,
+            tile_count,
+            has_alpha,
+        );
+        let item_offsets = write_mdat(&mut out, &grid_descriptor, alpha_grid_descriptor.as_deref(), tile_data, alpha_data);
+
+        debug_assert_eq!(iloc_offset_positions.len(), item_offsets.len());
+        patch_iloc_offsets(&mut out, &iloc_offset_positions, &item_offsets);
+
+        Ok(out)
     }
-    if let Some(alpha) = alpha_data
-        && alpha.len() != tile_count {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput,
-                format!("alpha_data.len() ({}) != rows*columns ({})", alpha.len(), tile_count)));
-        }
 
-    let has_alpha = alpha_data.is_some() && image.alpha_config.is_some();
+    fn populate_ipco(
+        &self,
+        ipco: &mut IpcoBox,
+        output_width: u32,
+        output_height: u32,
+        tile_width: u32,
+        tile_height: u32,
+        has_alpha: bool,
+    ) -> io::Result<IpcoIds> {
+        let ispe_output = push_prop(ipco, IpcoProp::Ispe(IspeBox { width: output_width, height: output_height }))?;
+        let ispe_tile = push_prop(ipco, IpcoProp::Ispe(IspeBox { width: tile_width, height: tile_height }))?;
+        let av1c_color = push_prop(ipco, IpcoProp::Av1C(self.color_config))?;
+        let pixi_color = push_prop(
+            ipco,
+            IpcoProp::Pixi(PixiBox {
+                channels: if self.color_config.monochrome { 1 } else { 3 },
+                depth: self.depth_bits,
+            }),
+        )?;
 
-    // Item IDs:
-    // 1 = color grid item
-    // 2 = alpha grid item (if has_alpha)
-    // 3..3+N = color tile items
-    // 3+N..3+2N = alpha tile items (if has_alpha)
-    let color_grid_id: u16 = 1;
-    let alpha_grid_id: u16 = 2;
-    let color_tile_base: u16 = if has_alpha { 3 } else { 2 };
-    let alpha_tile_base: u16 = color_tile_base + tile_count as u16;
+        let colr = match self.colr {
+            Some(c) if c != ColrBox::default() => Some(push_prop(ipco, IpcoProp::Colr(c))?),
+            _ => None,
+        };
 
-    // Build the ImageGrid descriptor (item data for the grid item)
-    let grid_descriptor = make_grid_descriptor(
-        rows, columns,
-        output_width, output_height,
-    );
-
-    let alpha_grid_descriptor = if has_alpha {
-        Some(make_grid_descriptor(
-            rows, columns,
-            output_width, output_height,
-        ))
-    } else {
-        None
-    };
-
-    // Build box structures
-    let mut image_items: Vec<InfeBox> = Vec::new();
-    let mut ipma_entries: Vec<IpmaEntry> = Vec::new();
-    let mut irefs: Vec<IrefEntryBox> = Vec::new();
-    let mut ipco = IpcoBox::new();
-    const ESSENTIAL_BIT: u8 = 0x80;
-
-    // Shared properties
-    let ispe_output = ipco.push(IpcoProp::Ispe(IspeBox {
-        width: output_width,
-        height: output_height,
-    })).ok_or(io::ErrorKind::InvalidInput)?;
-
-    let ispe_tile = ipco.push(IpcoProp::Ispe(IspeBox {
-        width: tile_width,
-        height: tile_height,
-    })).ok_or(io::ErrorKind::InvalidInput)?;
-
-    let av1c_color = ipco.push(IpcoProp::Av1C(image.color_config)).ok_or(io::ErrorKind::InvalidInput)?;
-
-    let pixi_color = ipco.push(IpcoProp::Pixi(PixiBox {
-        channels: if image.color_config.monochrome { 1 } else { 3 },
-        depth: image.depth_bits,
-    })).ok_or(io::ErrorKind::InvalidInput)?;
-
-    // Optional colr
-    let colr_prop = if let Some(ref colr) = image.colr {
-        if *colr != ColrBox::default() {
-            Some(ipco.push(IpcoProp::Colr(*colr)).ok_or(io::ErrorKind::InvalidInput)?)
+        let (av1c_alpha, pixi_alpha, auxc_alpha) = if has_alpha {
+            let ac = push_prop(ipco, IpcoProp::Av1C(*self.alpha_config.as_ref().unwrap()))?;
+            let pa = push_prop(ipco, IpcoProp::Pixi(PixiBox { channels: 1, depth: self.depth_bits }))?;
+            let aux = push_prop(
+                ipco,
+                IpcoProp::AuxC(AuxCBox { urn: "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha" }),
+            )?;
+            (Some(ac), Some(pa), Some(aux))
         } else {
-            None
-        }
-    } else {
-        None
-    };
+            (None, None, None)
+        };
 
-    // Alpha AV1C + pixi + auxC (if applicable)
-    let (av1c_alpha, pixi_alpha, auxc_alpha) = if has_alpha {
-        let ac = ipco.push(IpcoProp::Av1C(*image.alpha_config.as_ref().unwrap())).ok_or(io::ErrorKind::InvalidInput)?;
-        let pa = ipco.push(IpcoProp::Pixi(PixiBox {
-            channels: 1,
-            depth: image.depth_bits,
-        })).ok_or(io::ErrorKind::InvalidInput)?;
-        let auxc = ipco.push(IpcoProp::AuxC(AuxCBox {
-            urn: "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha",
-        })).ok_or(io::ErrorKind::InvalidInput)?;
-        (Some(ac), Some(pa), Some(auxc))
-    } else {
-        (None, None, None)
-    };
+        Ok(IpcoIds {
+            ispe_output,
+            ispe_tile,
+            av1c_color,
+            pixi_color,
+            colr,
+            av1c_alpha,
+            pixi_alpha,
+            auxc_alpha,
+        })
+    }
 
-    // --- Color grid item ---
-    image_items.push(InfeBox {
-        id: color_grid_id,
-        typ: FourCC(*b"grid"),
-        name: "",
-        content_type: "",
-    });
-
-    // Grid item's ipma: ispe (output), pixi, and optionally colr
-    let mut grid_ipma = IpmaEntry {
-        item_id: color_grid_id,
-        prop_ids: {
-            let mut v = ArrayVec::new();
-            v.push(ispe_output);
-            v.push(pixi_color);
-            if let Some(colr_p) = colr_prop {
-                v.push(colr_p);
-            }
-            v
-        },
-    };
-    let _ = &mut grid_ipma; // suppress clippy
-    ipma_entries.push(grid_ipma);
-
-    // --- Alpha grid item ---
-    if has_alpha {
+    fn add_grid_items(
+        &self,
+        image_items: &mut Vec<InfeBox>,
+        ipma_entries: &mut Vec<IpmaEntry>,
+        irefs: &mut Vec<IrefEntryBox>,
+        ids: ItemIds,
+        ipco_ids: IpcoIds,
+        has_alpha: bool,
+    ) {
         image_items.push(InfeBox {
-            id: alpha_grid_id,
+            id: ids.color_grid_id,
             typ: FourCC(*b"grid"),
             name: "",
             content_type: "",
         });
-
-        irefs.push(IrefEntryBox {
-            from_id: alpha_grid_id,
-            to_id: color_grid_id,
-            typ: FourCC(*b"auxl"),
+        ipma_entries.push(IpmaEntry {
+            item_id: ids.color_grid_id,
+            prop_ids: prop_ids_from(
+                [ipco_ids.ispe_output, ipco_ids.pixi_color]
+                    .into_iter()
+                    .chain(ipco_ids.colr),
+            ),
         });
 
-        if image.premultiplied_alpha {
+        if !has_alpha {
+            return;
+        }
+
+        image_items.push(InfeBox {
+            id: ids.alpha_grid_id,
+            typ: FourCC(*b"grid"),
+            name: "",
+            content_type: "",
+        });
+        irefs.push(IrefEntryBox {
+            from_id: ids.alpha_grid_id,
+            to_id: ids.color_grid_id,
+            typ: FourCC(*b"auxl"),
+        });
+        if self.premultiplied_alpha {
             irefs.push(IrefEntryBox {
-                from_id: color_grid_id,
-                to_id: alpha_grid_id,
+                from_id: ids.color_grid_id,
+                to_id: ids.alpha_grid_id,
                 typ: FourCC(*b"prem"),
             });
         }
-
         ipma_entries.push(IpmaEntry {
-            item_id: alpha_grid_id,
-            prop_ids: {
-                let mut v = ArrayVec::new();
-                v.push(ispe_output);
-                v.push(pixi_alpha.unwrap());
-                v.push(auxc_alpha.unwrap());
-                v
-            },
+            item_id: ids.alpha_grid_id,
+            prop_ids: prop_ids_from([
+                ipco_ids.ispe_output,
+                ipco_ids.pixi_alpha.expect("alpha pixi when has_alpha"),
+                ipco_ids.auxc_alpha.expect("alpha auxc when has_alpha"),
+            ]),
         });
     }
+}
 
-    // --- Color tile items ---
-    for i in 0..tile_count {
-        let tile_id = color_tile_base + i as u16;
+// ─── Helpers ─────────────────────────────────────────────────────────
 
+const ILOC_PLACEHOLDER: u32 = 0xBAAD_F00D;
+const ESSENTIAL_BIT: u8 = 0x80;
+
+#[derive(Clone, Copy)]
+struct ItemIds {
+    color_grid_id: u16,
+    alpha_grid_id: u16,
+    color_tile_base: u16,
+    alpha_tile_base: u16,
+}
+
+impl ItemIds {
+    // Item ID layout: 1 = color grid, 2 = alpha grid (when present), then color tiles, then alpha tiles.
+    fn assign(tile_count: usize, has_alpha: bool) -> Self {
+        let color_tile_base: u16 = if has_alpha { 3 } else { 2 };
+        Self {
+            color_grid_id: 1,
+            alpha_grid_id: 2,
+            color_tile_base,
+            alpha_tile_base: color_tile_base + tile_count as u16,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct IpcoIds {
+    ispe_output: u8,
+    ispe_tile: u8,
+    av1c_color: u8,
+    pixi_color: u8,
+    colr: Option<u8>,
+    av1c_alpha: Option<u8>,
+    pixi_alpha: Option<u8>,
+    auxc_alpha: Option<u8>,
+}
+
+fn validate_tile_counts(
+    tile_count: usize,
+    tile_data: &[&[u8]],
+    alpha_data: Option<&[&[u8]]>,
+) -> io::Result<()> {
+    if tile_data.len() != tile_count {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("tile_data.len() ({}) != rows*columns ({})", tile_data.len(), tile_count),
+        ));
+    }
+    if let Some(alpha) = alpha_data
+        && alpha.len() != tile_count
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("alpha_data.len() ({}) != rows*columns ({})", alpha.len(), tile_count),
+        ));
+    }
+    Ok(())
+}
+
+fn push_prop(ipco: &mut IpcoBox, prop: IpcoProp) -> io::Result<u8> {
+    ipco.push(prop).ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))
+}
+
+fn prop_ids_from<I: IntoIterator<Item = u8>>(iter: I) -> ArrayVec<u8, 12> {
+    let mut v = ArrayVec::new();
+    for id in iter {
+        v.push(id);
+    }
+    v
+}
+
+#[derive(Clone, Copy)]
+struct TileGroup {
+    parent_grid_id: u16,
+    base_id: u16,
+    ispe_tile: u8,
+    av1c_essential: u8,
+    tile_count: usize,
+}
+
+fn add_tile_items(
+    image_items: &mut Vec<InfeBox>,
+    ipma_entries: &mut Vec<IpmaEntry>,
+    irefs: &mut Vec<IrefEntryBox>,
+    ids: ItemIds,
+    ipco_ids: IpcoIds,
+    tile_count: usize,
+    has_alpha: bool,
+) {
+    add_one_tile_group(image_items, ipma_entries, irefs, TileGroup {
+        parent_grid_id: ids.color_grid_id,
+        base_id: ids.color_tile_base,
+        ispe_tile: ipco_ids.ispe_tile,
+        av1c_essential: ipco_ids.av1c_color | ESSENTIAL_BIT,
+        tile_count,
+    });
+    if has_alpha {
+        add_one_tile_group(image_items, ipma_entries, irefs, TileGroup {
+            parent_grid_id: ids.alpha_grid_id,
+            base_id: ids.alpha_tile_base,
+            ispe_tile: ipco_ids.ispe_tile,
+            av1c_essential: ipco_ids.av1c_alpha.expect("alpha av1c when has_alpha") | ESSENTIAL_BIT,
+            tile_count,
+        });
+    }
+}
+
+fn add_one_tile_group(
+    image_items: &mut Vec<InfeBox>,
+    ipma_entries: &mut Vec<IpmaEntry>,
+    irefs: &mut Vec<IrefEntryBox>,
+    g: TileGroup,
+) {
+    for i in 0..g.tile_count {
+        let tile_id = g.base_id + i as u16;
         image_items.push(InfeBox {
             id: tile_id,
             typ: FourCC(*b"av01"),
             name: "",
             content_type: "",
         });
-
         irefs.push(IrefEntryBox {
-            from_id: color_grid_id,
+            from_id: g.parent_grid_id,
             to_id: tile_id,
             typ: FourCC(*b"dimg"),
         });
-
         ipma_entries.push(IpmaEntry {
             item_id: tile_id,
-            prop_ids: {
-                let mut v = ArrayVec::new();
-                v.push(ispe_tile);
-                v.push(av1c_color | ESSENTIAL_BIT);
-                v
-            },
+            prop_ids: prop_ids_from([g.ispe_tile, g.av1c_essential]),
         });
     }
+}
 
-    // --- Alpha tile items ---
-    if has_alpha {
-        for i in 0..tile_count {
-            let tile_id = alpha_tile_base + i as u16;
+/// Append mdat to `out` and return per-item byte offsets in the order matching iloc placeholders:
+/// color grid descriptor, optional alpha grid descriptor, color tiles, optional alpha tiles.
+///
+/// We record exact per-item offsets rather than scanning for sentinel byte patterns — AV1 payloads
+/// can legitimately contain any 4-byte sequence, so scan-and-patch is incorrect (and exploitable).
+fn write_mdat(
+    out: &mut Vec<u8>,
+    grid_descriptor: &[u8],
+    alpha_grid_descriptor: Option<&[u8]>,
+    tile_data: &[&[u8]],
+    alpha_data: Option<&[&[u8]]>,
+) -> Vec<u32> {
+    let mut item_offsets: Vec<u32> = Vec::new();
+    let mdat_pos = begin_box(out, b"mdat");
 
-            image_items.push(InfeBox {
-                id: tile_id,
-                typ: FourCC(*b"av01"),
-                name: "",
-                content_type: "",
-            });
-
-            irefs.push(IrefEntryBox {
-                from_id: alpha_grid_id,
-                to_id: tile_id,
-                typ: FourCC(*b"dimg"),
-            });
-
-            ipma_entries.push(IpmaEntry {
-                item_id: tile_id,
-                prop_ids: {
-                    let mut v = ArrayVec::new();
-                    v.push(ispe_tile);
-                    v.push(av1c_alpha.unwrap() | ESSENTIAL_BIT);
-                    v
-                },
-            });
-        }
-    }
-
-    // Now we need to use the animated.rs approach (begin_box/end_box) because the
-    // still-image AvifFile struct doesn't support variable item counts. We use the
-    // same pattern: write boxes with size placeholders, then patch offsets.
-
-    let mut out = Vec::new();
-
-    // ftyp
-    write_ftyp(&mut out);
-
-    // meta — collects exact byte offsets of every iloc extent_offset placeholder
-    let iloc_offset_positions = write_meta_grid(
-        &mut out,
-        &image_items,
-        &ipma_entries,
-        &ipco,
-        &irefs,
-        color_grid_id,
-        &grid_descriptor,
-        alpha_grid_descriptor.as_deref(),
-        alpha_grid_id,
-        tile_data,
-        alpha_data,
-        color_tile_base,
-        alpha_tile_base,
-        tile_count,
-        has_alpha,
-    );
-
-    // mdat
-    let mdat_pos = begin_box(&mut out, b"mdat");
-    let mdat_data_start = out.len() as u32;
-
-    // Items are written into mdat in the same order as iloc entries:
-    // color grid descriptor, optional alpha grid descriptor, color tiles, optional alpha tiles.
-    // Track per-item offsets so we can patch the iloc table by exact position rather than
-    // scanning the entire output buffer for sentinel byte patterns (which would corrupt any
-    // user-supplied AV1 tile data that happened to contain the sentinel).
-    let mut item_offsets: Vec<u32> = Vec::with_capacity(iloc_offset_positions.len());
-
-    // Grid descriptor data
     item_offsets.push(out.len() as u32);
-    out.extend_from_slice(&grid_descriptor);
-    if let Some(ref agd) = alpha_grid_descriptor {
+    out.extend_from_slice(grid_descriptor);
+
+    if let Some(agd) = alpha_grid_descriptor {
         item_offsets.push(out.len() as u32);
         out.extend_from_slice(agd);
     }
 
-    // Color tile data
     for tile in tile_data {
         item_offsets.push(out.len() as u32);
         out.extend_from_slice(tile);
     }
 
-    // Alpha tile data
     if let Some(alpha) = alpha_data {
         for tile in alpha {
             item_offsets.push(out.len() as u32);
@@ -326,22 +409,9 @@ impl GridImage {
         }
     }
 
-    end_box(&mut out, mdat_pos);
-
-    debug_assert_eq!(iloc_offset_positions.len(), item_offsets.len());
-
-    // Patch iloc offsets at the exact positions where placeholders were emitted.
-    // No buffer-wide scanning — see note above.
-    let _ = mdat_data_start;
-    patch_iloc_offsets(&mut out, &iloc_offset_positions, &item_offsets);
-
-    Ok(out)
-    }
+    end_box(out, mdat_pos);
+    item_offsets
 }
-
-// ─── Helpers ─────────────────────────────────────────────────────────
-
-const ILOC_PLACEHOLDER: u32 = 0xBAAD_F00D;
 
 fn make_grid_descriptor(rows: u8, columns: u8, width: u32, height: u32) -> Vec<u8> {
     let mut desc = Vec::new();
