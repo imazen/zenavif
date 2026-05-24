@@ -3434,79 +3434,25 @@ pub fn read_avif_with_config<T: Read>(
         ..Default::default()
     };
 
-    // Helper to extract item data from either mdat or idat
-    let mut extract_item_data = |loc: &ItemLocationBoxItem, buf: &mut TryVec<u8>| -> Result<()> {
-        match loc.construction_method {
-            ConstructionMethod::File => {
-                for extent in loc.extents.iter() {
-                    let mut found = false;
-                    for mdat in mdats.iter_mut() {
-                        if mdat.matches_extent(&extent.extent_range) {
-                            buf.append(&mut mdat.data)?;
-                            found = true;
-                            break;
-                        } else if mdat.contains_extent(&extent.extent_range) {
-                            mdat.read_extent(&extent.extent_range, buf)?;
-                            found = true;
-                            break;
-                        }
-                    }
-                    if !found {
-                        return Err(Error::InvalidData("iloc contains an extent that is not in mdat"));
-                    }
-                }
-                Ok(())
-            },
-            ConstructionMethod::Idat => {
-                let idat_data = meta.idat.as_ref().ok_or(Error::InvalidData("idat box missing but construction_method is Idat"))?;
-                for extent in loc.extents.iter() {
-                    match &extent.extent_range {
-                        ExtentRange::WithLength(range) => {
-                            let start = usize::try_from(range.start).map_err(|_| Error::InvalidData("extent start too large"))?;
-                            let end = usize::try_from(range.end).map_err(|_| Error::InvalidData("extent end too large"))?;
-                            if end > idat_data.len() {
-                                return Err(Error::InvalidData("extent exceeds idat size"));
-                            }
-                            buf.extend_from_slice(&idat_data[start..end]).map_err(|_| Error::OutOfMemory)?;
-                        },
-                        ExtentRange::ToEnd(range) => {
-                            let start = usize::try_from(range.start).map_err(|_| Error::InvalidData("extent start too large"))?;
-                            if start >= idat_data.len() {
-                                return Err(Error::InvalidData("extent start exceeds idat size"));
-                            }
-                            buf.extend_from_slice(&idat_data[start..]).map_err(|_| Error::OutOfMemory)?;
-                        },
-                    }
-                }
-                Ok(())
-            },
-            ConstructionMethod::Item => {
-                Err(Error::Unsupported("construction_method 'item' not supported"))
-            },
-        }
-    };
+    let mut extractor = ItemDataExtractor { mdats: &mut mdats, idat: meta.idat.as_ref() };
 
     // load data of relevant items
     // For grid images, we need to load tiles in the order specified by iref
     if is_grid {
-        // Extract each tile in order
         for (idx, &tile_id) in tile_item_ids.iter().enumerate() {
             if idx % 16 == 0 {
                 stop.check()?;
             }
 
             let mut tile_data = TryVec::new();
-
-            if let Some(loc) = meta.iloc_items.iter().find(|loc| loc.item_id == tile_id) {
-                extract_item_data(loc, &mut tile_data)?;
-            } else {
-                return Err(Error::InvalidData("grid tile not found in iloc"));
-            }
-
+            let loc = meta
+                .iloc_items
+                .iter()
+                .find(|loc| loc.item_id == tile_id)
+                .ok_or(Error::InvalidData("grid tile not found in iloc"))?;
+            extractor.extract(loc, &mut tile_data)?;
             context.grid_tiles.push(tile_data)?;
         }
-
-        // Set grid_config in context
         context.grid_config = grid_config;
     } else {
         // Standard single-frame AVIF: load primary_item and optional alpha_item
@@ -3518,12 +3464,97 @@ pub fn read_avif_with_config<T: Read>(
             } else {
                 continue;
             };
-
-            extract_item_data(loc, item_data)?;
+            extractor.extract(loc, item_data)?;
         }
     }
 
-    // Extract EXIF and XMP items linked via cdsc references to the primary item
+    extract_metadata_sidecars(&meta, &mut context, &mut extractor)?;
+    extract_gain_map(&meta, &mut context, &mut extractor)?;
+    extract_depth_auxiliary(&meta, alpha_item_id, &mut context, &mut extractor)?;
+
+    if let Some(anim) = animation_data {
+        extract_animation(anim, &mut mdats, &mut tracker, &mut context)?;
+    }
+
+    Ok(context)
+}
+
+/// Closure-state struct for resolving an iloc item's data into a `TryVec<u8>` buffer.
+///
+/// Captures the mutable `mdats` list (we drain from it; mutating in place avoids re-allocation)
+/// and the optional `idat` payload. Held briefly across the post-meta extraction phases so each
+/// phase doesn't have to thread mdats+idat through its signature.
+#[cfg(feature = "eager")]
+struct ItemDataExtractor<'a> {
+    mdats: &'a mut TryVec<MediaDataBox>,
+    idat: Option<&'a TryVec<u8>>,
+}
+
+#[cfg(feature = "eager")]
+impl ItemDataExtractor<'_> {
+    fn extract(&mut self, loc: &ItemLocationBoxItem, buf: &mut TryVec<u8>) -> Result<()> {
+        match loc.construction_method {
+            ConstructionMethod::File => self.extract_from_mdat(loc, buf),
+            ConstructionMethod::Idat => self.extract_from_idat(loc, buf),
+            ConstructionMethod::Item => Err(Error::Unsupported("construction_method 'item' not supported")),
+        }
+    }
+
+    fn extract_from_mdat(&mut self, loc: &ItemLocationBoxItem, buf: &mut TryVec<u8>) -> Result<()> {
+        for extent in loc.extents.iter() {
+            let mut found = false;
+            for mdat in self.mdats.iter_mut() {
+                if mdat.matches_extent(&extent.extent_range) {
+                    buf.append(&mut mdat.data)?;
+                    found = true;
+                    break;
+                } else if mdat.contains_extent(&extent.extent_range) {
+                    mdat.read_extent(&extent.extent_range, buf)?;
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                return Err(Error::InvalidData("iloc contains an extent that is not in mdat"));
+            }
+        }
+        Ok(())
+    }
+
+    fn extract_from_idat(&self, loc: &ItemLocationBoxItem, buf: &mut TryVec<u8>) -> Result<()> {
+        let idat_data = self.idat.ok_or(Error::InvalidData("idat box missing but construction_method is Idat"))?;
+        for extent in loc.extents.iter() {
+            match &extent.extent_range {
+                ExtentRange::WithLength(range) => {
+                    let start = usize::try_from(range.start).map_err(|_| Error::InvalidData("extent start too large"))?;
+                    let end = usize::try_from(range.end).map_err(|_| Error::InvalidData("extent end too large"))?;
+                    if end > idat_data.len() {
+                        return Err(Error::InvalidData("extent exceeds idat size"));
+                    }
+                    buf.extend_from_slice(&idat_data[start..end]).map_err(|_| Error::OutOfMemory)?;
+                },
+                ExtentRange::ToEnd(range) => {
+                    let start = usize::try_from(range.start).map_err(|_| Error::InvalidData("extent start too large"))?;
+                    if start >= idat_data.len() {
+                        return Err(Error::InvalidData("extent start exceeds idat size"));
+                    }
+                    buf.extend_from_slice(&idat_data[start..]).map_err(|_| Error::OutOfMemory)?;
+                },
+            }
+        }
+        Ok(())
+    }
+}
+
+/// EXIF and XMP items are sidecars linked to the primary image via a `cdsc` iref.
+/// EXIF items are prefixed by a 4-byte big-endian offset to the TIFF header (AVIF convention).
+#[cfg(feature = "eager")]
+#[allow(deprecated)]
+fn extract_metadata_sidecars(
+    meta: &AvifInternalMeta,
+    context: &mut AvifData,
+    extractor: &mut ItemDataExtractor<'_>,
+) -> Result<()> {
     for iref in meta.item_references.iter() {
         if iref.to_item_id != meta.primary_item_id || iref.item_type != b"cdsc" {
             continue;
@@ -3535,8 +3566,7 @@ pub fn read_avif_with_config<T: Read>(
         if info.item_type == b"Exif" {
             if let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == desc_item_id) {
                 let mut raw = TryVec::new();
-                extract_item_data(loc, &mut raw)?;
-                // AVIF EXIF items start with a 4-byte big-endian offset to the TIFF header
+                extractor.extract(loc, &mut raw)?;
                 if raw.len() > 4 {
                     let offset = u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]) as usize;
                     let start = 4 + offset;
@@ -3551,150 +3581,164 @@ pub fn read_avif_with_config<T: Read>(
             && let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == desc_item_id)
         {
             let mut xmp = TryVec::new();
-            extract_item_data(loc, &mut xmp)?;
+            extractor.extract(loc, &mut xmp)?;
             context.xmp = Some(xmp);
         }
     }
+    Ok(())
+}
 
-    // Extract gain map (tmap derived image item)
-    if let Some(tmap_info) = meta.item_infos.iter().find(|info| info.item_type == b"tmap") {
-        let tmap_id = tmap_info.item_id;
+/// Ultra HDR gain map: a `tmap` derived image item with a multi-entry `dimg` iref pointing at
+/// `[primary, gain_map_av01]` (in that index order). Per ISO 23008-12 + ISO 21496-1.
+#[cfg(feature = "eager")]
+#[allow(deprecated)]
+fn extract_gain_map(
+    meta: &AvifInternalMeta,
+    context: &mut AvifData,
+    extractor: &mut ItemDataExtractor<'_>,
+) -> Result<()> {
+    let Some(tmap_info) = meta.item_infos.iter().find(|info| info.item_type == b"tmap") else {
+        return Ok(());
+    };
+    let tmap_id = tmap_info.item_id;
 
-        let mut inputs: TryVec<(u32, u16)> = TryVec::new();
-        for iref in meta.item_references.iter() {
-            if iref.from_item_id == tmap_id && iref.item_type == b"dimg" {
-                inputs.push((iref.to_item_id, iref.reference_index))?;
-            }
+    let mut inputs: TryVec<(u32, u16)> = TryVec::new();
+    for iref in meta.item_references.iter() {
+        if iref.from_item_id == tmap_id && iref.item_type == b"dimg" {
+            inputs.push((iref.to_item_id, iref.reference_index))?;
         }
-        inputs.sort_by_key(|&(_, idx)| idx);
+    }
+    inputs.sort_by_key(|&(_, idx)| idx);
 
-        if inputs.len() >= 2 && inputs[0].0 == meta.primary_item_id {
-            let gmap_item_id = inputs[1].0;
+    if inputs.len() < 2 || inputs[0].0 != meta.primary_item_id {
+        return Ok(());
+    }
+    let gmap_item_id = inputs[1].0;
 
-            // Read tmap item payload
-            if let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == tmap_id) {
-                let mut tmap_data = TryVec::new();
-                extract_item_data(loc, &mut tmap_data)?;
-                if let Ok(metadata) = parse_tone_map_image(&tmap_data) {
-                    context.gain_map_metadata = Some(metadata);
-                }
-            }
-
-            // Read gain map image data
-            if let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == gmap_item_id) {
-                let mut gmap_data = TryVec::new();
-                extract_item_data(loc, &mut gmap_data)?;
-                context.gain_map_item = Some(gmap_data);
-            }
-
-            // Get alternate color info from tmap item's properties
-            context.gain_map_color_info = meta.properties.iter().find_map(|p| {
-                if p.item_id == tmap_id {
-                    match &p.property {
-                        ItemProperty::ColorInformation(c) => Some(c.clone()),
-                        _ => None,
-                    }
-                } else {
-                    None
-                }
-            });
+    if let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == tmap_id) {
+        let mut tmap_data = TryVec::new();
+        extractor.extract(loc, &mut tmap_data)?;
+        if let Ok(metadata) = parse_tone_map_image(&tmap_data) {
+            context.gain_map_metadata = Some(metadata);
         }
     }
 
-    // Extract depth auxiliary image
-    {
-        let depth_item_id = meta
-            .item_references
-            .iter()
-            .filter(|iref| {
-                iref.to_item_id == meta.primary_item_id
-                    && iref.from_item_id != meta.primary_item_id
-                    && iref.item_type == b"auxl"
-            })
-            .map(|iref| iref.from_item_id)
-            .find(|&item_id| {
-                if alpha_item_id == Some(item_id) {
-                    return false;
-                }
-                meta.properties.iter().any(|prop| {
-                    prop.item_id == item_id
-                        && match &prop.property {
-                            ItemProperty::AuxiliaryType(urn) => {
-                                is_depth_auxiliary_urn(urn.type_subtype().0)
-                            }
-                            _ => false,
+    if let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == gmap_item_id) {
+        let mut gmap_data = TryVec::new();
+        extractor.extract(loc, &mut gmap_data)?;
+        context.gain_map_item = Some(gmap_data);
+    }
+
+    context.gain_map_color_info = property_for(meta, tmap_id, |p| match p {
+        ItemProperty::ColorInformation(c) => Some(c.clone()),
+        _ => None,
+    });
+    Ok(())
+}
+
+/// Depth auxiliary image: an `auxl`-referenced item with a depth-typed AuxiliaryType URN.
+/// Excludes the alpha auxiliary (which uses a different URN family).
+#[cfg(feature = "eager")]
+#[allow(deprecated)]
+fn extract_depth_auxiliary(
+    meta: &AvifInternalMeta,
+    alpha_item_id: Option<u32>,
+    context: &mut AvifData,
+    extractor: &mut ItemDataExtractor<'_>,
+) -> Result<()> {
+    let Some(depth_id) = find_depth_aux_item(meta, alpha_item_id) else {
+        return Ok(());
+    };
+
+    if let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == depth_id) {
+        let mut depth_data = TryVec::new();
+        extractor.extract(loc, &mut depth_data)?;
+        context.depth_item = Some(depth_data);
+    }
+
+    if let Some((w, h)) = property_for(meta, depth_id, |p| match p {
+        ItemProperty::ImageSpatialExtents(e) => Some((e.width, e.height)),
+        _ => None,
+    }) {
+        context.depth_width = w;
+        context.depth_height = h;
+    }
+    context.depth_av1_config = property_for(meta, depth_id, |p| match p {
+        ItemProperty::AV1Config(c) => Some(c.clone()),
+        _ => None,
+    });
+    context.depth_color_info = property_for(meta, depth_id, |p| match p {
+        ItemProperty::ColorInformation(c) => Some(c.clone()),
+        _ => None,
+    });
+    Ok(())
+}
+#[cfg(feature = "eager")]
+fn find_depth_aux_item(meta: &AvifInternalMeta, alpha_item_id: Option<u32>) -> Option<u32> {
+    meta.item_references
+        .iter()
+        .filter(|iref| {
+            iref.to_item_id == meta.primary_item_id
+                && iref.from_item_id != meta.primary_item_id
+                && iref.item_type == b"auxl"
+        })
+        .map(|iref| iref.from_item_id)
+        .find(|&item_id| {
+            if alpha_item_id == Some(item_id) {
+                return false;
+            }
+            meta.properties.iter().any(|prop| {
+                prop.item_id == item_id
+                    && match &prop.property {
+                        ItemProperty::AuxiliaryType(urn) => {
+                            is_depth_auxiliary_urn(urn.type_subtype().0)
                         }
-                })
-            });
-
-        if let Some(depth_id) = depth_item_id {
-            if let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == depth_id) {
-                let mut depth_data = TryVec::new();
-                extract_item_data(loc, &mut depth_data)?;
-                context.depth_item = Some(depth_data);
-            }
-            // Get dimensions from ispe
-            if let Some((w, h)) = meta.properties.iter().find_map(|p| {
-                if p.item_id == depth_id {
-                    match &p.property {
-                        ItemProperty::ImageSpatialExtents(e) => Some((e.width, e.height)),
-                        _ => None,
+                        _ => false,
                     }
-                } else {
-                    None
-                }
-            }) {
-                context.depth_width = w;
-                context.depth_height = h;
-            }
-            // Get av1C
-            context.depth_av1_config = meta.properties.iter().find_map(|p| {
-                if p.item_id == depth_id {
-                    match &p.property {
-                        ItemProperty::AV1Config(c) => Some(c.clone()),
-                        _ => None,
-                    }
-                } else {
-                    None
-                }
-            });
-            // Get colr
-            context.depth_color_info = meta.properties.iter().find_map(|p| {
-                if p.item_id == depth_id {
-                    match &p.property {
-                        ItemProperty::ColorInformation(c) => Some(c.clone()),
-                        _ => None,
-                    }
-                } else {
-                    None
-                }
-            });
-        }
-    }
+            })
+        })
+}
 
-    // Extract animation frames if this is an animated AVIF
-    if let Some(anim) = animation_data {
-        let frame_count = anim.color_sample_table.sample_sizes.len() as u32;
-        tracker.validate_animation_frames(frame_count)?;
+/// Return the first property of the given item that matches `pick`, ignoring properties for
+/// other items.
+#[cfg(feature = "eager")]
+fn property_for<T>(meta: &AvifInternalMeta, item_id: u32, pick: impl Fn(&ItemProperty) -> Option<T>) -> Option<T> {
+    meta.properties
+        .iter()
+        .filter(|p| p.item_id == item_id)
+        .find_map(|p| pick(&p.property))
+}
 
-        log::debug!("Animation: extracting frames (media_timescale={})", anim.color_timescale);
-        match extract_animation_frames(&anim.color_sample_table, anim.color_timescale, &mut mdats) {
-            Ok(frames) => {
-                if !frames.is_empty() {
-                    log::debug!("Animation: extracted {} frames", frames.len());
-                    context.animation = Some(AnimationConfig {
-                        loop_count: anim.loop_count,
-                        frames,
-                    });
-                }
-            }
-            Err(e) => {
-                log::warn!("Animation: failed to extract frames: {}", e);
+/// Decode the animation sample table into per-frame buffers + duration. Sample-size count is
+/// validated against the resource budget before extracting; per-frame extraction errors are
+/// logged but do not fail the parse (the still-image branch may still be valid).
+#[cfg(feature = "eager")]
+#[allow(deprecated)]
+fn extract_animation(
+    anim: ParsedAnimationData,
+    mdats: &mut TryVec<MediaDataBox>,
+    tracker: &mut ResourceTracker,
+    context: &mut AvifData,
+) -> Result<()> {
+    let frame_count = anim.color_sample_table.sample_sizes.len() as u32;
+    tracker.validate_animation_frames(frame_count)?;
+
+    log::debug!("Animation: extracting frames (media_timescale={})", anim.color_timescale);
+    match extract_animation_frames(&anim.color_sample_table, anim.color_timescale, mdats) {
+        Ok(frames) => {
+            if !frames.is_empty() {
+                log::debug!("Animation: extracted {} frames", frames.len());
+                context.animation = Some(AnimationConfig {
+                    loop_count: anim.loop_count,
+                    frames,
+                });
             }
         }
+        Err(e) => {
+            log::warn!("Animation: failed to extract frames: {}", e);
+        }
     }
-
-    Ok(context)
+    Ok(())
 }
 
 /// Read the contents of an AVIF file with custom parsing options
