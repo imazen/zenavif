@@ -1914,6 +1914,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "zen-fuzz-regress"
+version = "0.1.0"
+
+[[package]]
 name = "zenanalyze"
 version = "0.1.0"
 dependencies = [
@@ -1950,6 +1954,7 @@ dependencies = [
  "thiserror",
  "whereat",
  "yuv",
+ "zen-fuzz-regress",
  "zenanalyze",
  "zenavif-parse",
  "zenbench",

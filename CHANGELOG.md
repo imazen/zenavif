@@ -10,6 +10,15 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Changed
+- `tests/fuzz_regression.rs` now uses the shared `zen-fuzz-regress`
+  test-helper crate (DEDUP-J2). Behaviour is unchanged — same
+  `fuzz/regression/` seeds, same four targets (`decode`,
+  `decode_limited`, `decode_animation`, `probe`), same
+  panic-propagation failure semantics. The ~60-line in-file
+  scaffolding (`collect_seeds` walk + skip dotfiles + per-seed read +
+  dispatch) is now provided by `RegressionSuite`.
+
 ### Added
 - `tests/fuzz_regression.rs` regression-harness template ported from
   zenwebp (DEDUP-J). Walks `fuzz/regression/` (incl. per-target
