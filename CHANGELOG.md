@@ -10,6 +10,15 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Added
+- `tests/fuzz_regression.rs` regression-harness template ported from
+  zenwebp (DEDUP-J). Walks `fuzz/regression/` (incl. per-target
+  subdirs) and runs every seed through `decode_with`,
+  `decode_animation_with`, `AnimationDecoder`, and
+  `ManagedAvifDecoder::probe_info` on the stable toolchain — no
+  nightly required. Drop minimized crash files into `fuzz/regression/`
+  to gate future regressions of fixed bugs.
+
 ## [0.1.7] - 2026-05-02
 
 ### Changed
