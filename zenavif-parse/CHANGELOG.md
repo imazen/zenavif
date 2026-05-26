@@ -8,6 +8,16 @@
   come back with `#[non_exhaustive]` on `GainMapMetadata` in the next
   minor bump.
 
+### Added
+
+- `tests/fuzz_regression.rs` regression-harness template ported from
+  zenwebp (DEDUP-J). Walks `fuzz/regression/` (incl. per-target subdirs)
+  and runs every seed through `AvifParser::from_bytes` and
+  `AvifParser::from_bytes_with_config` plus the parser's accessor methods
+  on the stable toolchain — no nightly required. Created
+  `fuzz/regression/README.md` documenting how to add minimized crash
+  seeds.
+
 ## [0.6.2] - 2026-04-17
 
 ### Changed
