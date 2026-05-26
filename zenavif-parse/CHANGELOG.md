@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Changed
+- `tests/fuzz_regression.rs` now uses the shared `zen-fuzz-regress`
+  test-helper crate (DEDUP-J2). Behaviour is unchanged — same
+  `fuzz/regression/` seeds, same two targets (`parse`, `parse_limited`),
+  same panic-propagation failure semantics. The in-file `collect_seeds`
+  scaffolding is now provided by `RegressionSuite`. Net shrinkage of
+  the harness from ~440 LOC (legacy multi-test scaffolding) to ~40 LOC.
+
 ### QUEUED BREAKING CHANGES
 - Restore `GainMapMetadata::writer_version: u16` field for ISO 21496-1
   round-trip fidelity. Removed in 0.6.2 to avoid a semver break; should
