@@ -44,7 +44,7 @@ linear-srgb = { version = "0.6.7"}
 
 [dev-dependencies]
 almost-enough = { version = "0.4.3", features = ["alloc"] }
-zen-fuzz-regress = { path = "../zen-fuzz-regress", version = "0.1.0" }
+zenutils-fuzz = "0.1.0"
 archmage = { version = "0.9.15", features = ["std"] }
 env_logger = { version = "0.11.10", default-features = false }
 png = "0.18.0"

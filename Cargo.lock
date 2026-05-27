@@ -1914,10 +1914,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "zen-fuzz-regress"
-version = "0.1.0"
-
-[[package]]
 name = "zenanalyze"
 version = "0.1.0"
 dependencies = [
@@ -1954,7 +1950,6 @@ dependencies = [
  "thiserror",
  "whereat",
  "yuv",
- "zen-fuzz-regress",
  "zenanalyze",
  "zenavif-parse",
  "zenbench",
@@ -1965,6 +1960,7 @@ dependencies = [
  "zenravif",
  "zensim",
  "zensim-regress",
+ "zenutils-fuzz",
 ]
 
 [[package]]
@@ -2142,6 +2138,12 @@ dependencies = [
  "thiserror",
  "zensim",
 ]
+
+[[package]]
+name = "zenutils-fuzz"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37b899d74803c7deaca2fdc1345ef9c04b5d5a09a61acce0223805c66c5bc7c7"
 
 [[package]]
 name = "zerocopy"
