@@ -1,0 +1,35 @@
+host: arm-zen (Hetzner cax21, aarch64 Neoverse-N1, 4 cores, 7.5 GB RAM)
+date: 2026-05-30
+toolchain: cargo 1.96.0 (stable); RUSTFLAGS unset (runtime SIMD dispatch, NO target-cpu=native)
+bench cmd: cargo bench --features _dev --bench yuv_conversion_benchmark -j2
+           (criterion via zenbench criterion-compat; auto A/B vs saved baseline)
+target_fn: zenavif::yuv_convert::yuv420_to_rgb8 (NEON path via incant![v3,neon,wasm128,scalar])
+base_commit: 31a9b54 (main: ci: prebuilt cargo-fuzz + pin gnu fuzz target)
+
+CHANGE: replace per-pixel libm floorf in the YUV420 bilinear chroma gather with
+a direct truncating cast (helper floor_nonneg_idx). Every call site clamps the
+input to [0.0, dim-1.0] before flooring, so for these non-negative finite inputs
+`x.floor() as usize == x as usize` and the returned fractional remainder is
+bit-identical. Applied to all 6 floor sites in the dispatched yuv420 path
+(generic-SIMD inner row loop's cy/cx, its scalar remainder, and the scalar
+strip fallback's cx/cy). floorf is an out-of-line libm call on aarch64 that
+does not inline into the NEON dispatch region, costing a call per chroma sample.
+
+MEASURED ARM RESULT (before -> after, criterion auto A/B):
+  512x256   : 1.5372 ms -> 1.2917 ms  (-15.97%, p<0.05)  85.3 -> 101.5 Melem/s
+  1920x1080 : 25.438 ms -> 21.668 ms  (-14.85%, p<0.05)  81.5 ->  95.7 Melem/s
+
+CORRECTNESS (byte-identical):
+  cargo test --release --features _dev --lib yuv_convert  ->  6/6 PASS on BOTH:
+    - x86_64 (AVX2 path, local 7950X)
+    - aarch64 (NEON path, on the box)
+  Includes:
+    - floor_nonneg_idx_matches_libm_floor: bit-exact vs x.floor() across boundary
+      values (exact integers, just-below/above, the 0.0/0.5 fracs that occur).
+    - yuv420_to_rgb8_byte_identical_to_reference: dispatched output == an
+      independent per-pixel libm-floor reference across 6 sizes x 2 ranges x
+      3 matrices (Bt601/Bt709/Bt2020, Full+Limited), random planes.
+
+note: an earlier baseline build under a non-login tmux shell failed to link
+(cc not on PATH in that env); fixed by running the build under `bash -lc`.
+The numbers above are from a successful login-shell build/bench.

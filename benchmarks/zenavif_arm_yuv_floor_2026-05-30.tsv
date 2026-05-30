@@ -1,0 +1,3 @@
+bench	size	pixels	before_ms	after_ms	before_Melem_s	after_Melem_s	criterion_change_pct	p_value
+yuv420_to_rgb8	512x256	131072	1.5372	1.2917	85.26	101.47	-15.97	<0.05
+yuv420_to_rgb8	1920x1080	2073600	25.438	21.668	81.52	95.69	-14.85	<0.05
