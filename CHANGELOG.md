@@ -16,9 +16,9 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   Inputs are pre-clamped to `[0, dim-1]`, so the output is byte-identical —
   verified on x86 (AVX2) and aarch64 (NEON) via a byte-identity test against an
   independent libm-floor reference (6 sizes × 2 ranges × 3 matrices). Measured
-  -16% / -15% wall time on aarch64 Neoverse-N1 (`yuv420_to_rgb8`: 1.54→1.29 ms
-  @512×256, 25.4→21.7 ms @1920×1080, p<0.05). See
-  `benchmarks/zenavif_arm_yuv_floor_2026-05-30.{tsv,meta}`.
+  -14.4% / -14.9% wall time on aarch64 Neoverse-N1 (`yuv420_to_rgb8`:
+  1.513→1.294 ms @512×256, 25.40→21.64 ms @1920×1080, criterion A/B p<0.05).
+  See `benchmarks/zenavif_arm_yuv_floor_2026-05-30.{tsv,meta}`.
 - `tests/fuzz_regression.rs` now uses the shared `zen-fuzz-regress`
   test-helper crate (DEDUP-J2). Behaviour is unchanged — same
   `fuzz/regression/` seeds, same four targets (`decode`,
