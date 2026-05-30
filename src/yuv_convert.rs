@@ -20,6 +20,23 @@ use magetypes::simd::f32x8;
 use magetypes::simd::generic::f32x8 as GenericF32x8;
 use rgb::{RGB8, Rgba};
 
+/// Floor of a value that is already known to be **non-negative and finite**,
+/// returned as the integer pixel index plus the f32 fractional remainder.
+///
+/// For any non-negative finite `x`, `x.floor()` equals `x` truncated toward
+/// zero, which is exactly what `x as usize` produces. Replacing the libm
+/// `floorf` call (an out-of-line call on aarch64 that does not inline into the
+/// NEON dispatch region) with a direct truncating cast is **bit-for-bit
+/// identical** here: every caller clamps the input to `[0.0, plane_dim - 1.0]`
+/// before calling, so `x >= 0.0` always holds. The returned `(idx, frac)` pair
+/// reproduces the original `(cx0, chroma_x - cx0)` exactly.
+#[inline(always)]
+fn floor_nonneg_idx(x: f32) -> (usize, f32) {
+    debug_assert!(x >= 0.0 && x.is_finite());
+    let idx = x as usize;
+    (idx, x - idx as f32)
+}
+
 /// YUV color range
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum YuvRange {
@@ -149,9 +166,8 @@ fn yuv420_to_rgb8_inner(
         // Chroma y position (same for all pixels in this row)
         let chroma_y_raw = (y_pos as f32 + 0.5) * 0.5 - 0.5;
         let chroma_y = chroma_y_raw.max(0.0).min(chroma_height as f32 - 1.0);
-        let cy0 = chroma_y.floor() as usize;
+        let (cy0, fy) = floor_nonneg_idx(chroma_y);
         let cy1 = (cy0 + 1).min(chroma_height - 1);
-        let fy = chroma_y - cy0 as f32;
 
         let mut x_pos = 0;
         while x_pos + LANES <= width {
@@ -228,9 +244,8 @@ fn yuv420_to_rgb8_inner(
 
             let chroma_x_raw = (x_pos as f32 + 0.5) * 0.5 - 0.5;
             let chroma_x = chroma_x_raw.max(0.0).min(chroma_width as f32 - 1.0);
-            let cx0 = chroma_x.floor() as usize;
+            let (cx0, fx) = floor_nonneg_idx(chroma_x);
             let cx1 = (cx0 + 1).min(chroma_width - 1);
-            let fx = chroma_x - cx0 as f32;
             let fx1 = 1.0 - fx;
             let fy1 = 1.0 - fy;
 
@@ -1167,13 +1182,11 @@ fn yuv420_strip_scalar<P: StripPixel>(
             let chroma_x = chroma_x_raw.max(0.0).min(chroma_width as f32 - 1.0);
             let chroma_y = chroma_y_raw.max(0.0).min(chroma_height as f32 - 1.0);
 
-            let cx0 = chroma_x.floor() as usize;
-            let cy0 = chroma_y.floor() as usize;
+            let (cx0, fx) = floor_nonneg_idx(chroma_x);
+            let (cy0, fy) = floor_nonneg_idx(chroma_y);
             let cx1 = (cx0 + 1).min(chroma_width - 1);
             let cy1 = (cy0 + 1).min(chroma_height - 1);
 
-            let fx = chroma_x - cx0 as f32;
-            let fy = chroma_y - cy0 as f32;
             let fx1 = 1.0 - fx;
             let fy1 = 1.0 - fy;
 
@@ -1265,6 +1278,116 @@ fn yuv444_strip_scalar<P: StripPixel>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `floor_nonneg_idx` must equal `(x.floor() as usize, x - x.floor())` for
+    /// every non-negative finite input, including exact-integer boundaries.
+    #[test]
+    fn floor_nonneg_idx_matches_libm_floor() {
+        let probes = [
+            0.0f32, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 7.0, 7.5, 15.0, 15.5, 16.0, 63.0, 63.5, 64.0,
+            127.0, 127.999_99, 128.0, 1022.5, 1023.0, 2046.5, 2047.0,
+        ];
+        for &x in &probes {
+            let (idx, frac) = floor_nonneg_idx(x);
+            assert_eq!(idx, x.floor() as usize, "idx mismatch at x={x}");
+            assert_eq!(frac.to_bits(), (x - x.floor()).to_bits(), "frac bits at x={x}");
+        }
+    }
+
+    /// xorshift PRNG for reproducible pseudo-random plane data.
+    fn fill_rand(buf: &mut [u8], seed: u32) {
+        let mut s = seed | 1;
+        for b in buf.iter_mut() {
+            s ^= s << 13;
+            s ^= s >> 17;
+            s ^= s << 5;
+            *b = (s & 0xFF) as u8;
+        }
+    }
+
+    /// Independent per-pixel reference for YUV420 bilinear upsample + convert,
+    /// written straight from the spec formula (uses libm `floor`, no shortcuts).
+    /// The dispatched `yuv420_to_rgb8` must be byte-identical to this.
+    fn ref_yuv420_to_rgb8(
+        y_plane: &[u8],
+        y_stride: usize,
+        u_plane: &[u8],
+        u_stride: usize,
+        v_plane: &[u8],
+        v_stride: usize,
+        width: usize,
+        height: usize,
+        range: YuvRange,
+        matrix: YuvMatrix,
+    ) -> Vec<RGB8> {
+        let (kr, kb) = matrix_coefficients(matrix);
+        let kg = 1.0 - kr - kb;
+        let chroma_width = width.div_ceil(2);
+        let chroma_height = height.div_ceil(2);
+        let mut out = vec![RGB8::default(); width * height];
+        for y_pos in 0..height {
+            let chroma_y_raw = (y_pos as f32 + 0.5) * 0.5 - 0.5;
+            let chroma_y = chroma_y_raw.max(0.0).min(chroma_height as f32 - 1.0);
+            let cy0 = chroma_y.floor() as usize;
+            let cy1 = (cy0 + 1).min(chroma_height - 1);
+            let fy = chroma_y - cy0 as f32;
+            for x in 0..width {
+                let y_val = y_plane[y_pos * y_stride + x] as f32;
+                let chroma_x_raw = (x as f32 + 0.5) * 0.5 - 0.5;
+                let chroma_x = chroma_x_raw.max(0.0).min(chroma_width as f32 - 1.0);
+                let cx0 = chroma_x.floor() as usize;
+                let cx1 = (cx0 + 1).min(chroma_width - 1);
+                let fx = chroma_x - cx0 as f32;
+                let fx1 = 1.0 - fx;
+                let fy1 = 1.0 - fy;
+                let u00 = u_plane[cy0 * u_stride + cx0] as f32;
+                let u01 = u_plane[cy0 * u_stride + cx1] as f32;
+                let u10 = u_plane[cy1 * u_stride + cx0] as f32;
+                let u11 = u_plane[cy1 * u_stride + cx1] as f32;
+                let u_val = u00 * fx1 * fy1 + u01 * fx * fy1 + u10 * fx1 * fy + u11 * fx * fy;
+                let v00 = v_plane[cy0 * v_stride + cx0] as f32;
+                let v01 = v_plane[cy0 * v_stride + cx1] as f32;
+                let v10 = v_plane[cy1 * v_stride + cx0] as f32;
+                let v11 = v_plane[cy1 * v_stride + cx1] as f32;
+                let v_val = v00 * fx1 * fy1 + v01 * fx * fy1 + v10 * fx1 * fy + v11 * fx * fy;
+                let (r, g, b) = yuv_to_rgb(y_val, u_val, v_val, kr, kg, kb, range);
+                out[y_pos * width + x] = RGB8 { r, g, b };
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn yuv420_to_rgb8_byte_identical_to_reference() {
+        // Odd + even dims, sub-lane, multi-lane, and a bench-sized case.
+        let sizes: [(usize, usize); 6] = [(1, 1), (3, 3), (8, 8), (9, 7), (17, 13), (64, 48)];
+        let ranges = [YuvRange::Full, YuvRange::Limited];
+        let matrices = [YuvMatrix::Bt601, YuvMatrix::Bt709, YuvMatrix::Bt2020];
+        let mut seed = 1u32;
+        for &(w, h) in &sizes {
+            let cw = w.div_ceil(2);
+            let ch = h.div_ceil(2);
+            let mut yb = vec![0u8; w * h];
+            let mut ub = vec![0u8; cw * ch];
+            let mut vb = vec![0u8; cw * ch];
+            for &range in &ranges {
+                for &matrix in &matrices {
+                    seed = seed.wrapping_mul(2654435761).wrapping_add(1);
+                    fill_rand(&mut yb, seed);
+                    fill_rand(&mut ub, seed ^ 0xABCD);
+                    fill_rand(&mut vb, seed ^ 0x1234);
+                    let got = yuv420_to_rgb8(&yb, w, &ub, cw, &vb, cw, w, h, range, matrix);
+                    let want = ref_yuv420_to_rgb8(&yb, w, &ub, cw, &vb, cw, w, h, range, matrix);
+                    let got_vec: Vec<RGB8> = got.into_buf();
+                    assert_eq!(
+                        got_vec.as_slice(),
+                        want.as_slice(),
+                        "mismatch {w}x{h} {range:?} {matrix:?}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_yuv_to_rgb_gray() {
