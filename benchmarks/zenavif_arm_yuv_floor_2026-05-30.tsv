@@ -1,3 +1,3 @@
-bench	size	pixels	before_ms	after_ms	criterion_change_pct	change_ci_low	change_ci_high	p_value
-yuv420_to_rgb8	512x256	131072	1.5126	1.2942	-14.43	-15.32	-13.49	0.00
-yuv420_to_rgb8	1920x1080	2073600	25.395	21.640	-14.92	-15.18	-14.61	0.00
+bench	size	pixels	pristine_mean_ms	optimized_mean_ms	delta	measurement_validity
+yuv420_to_rgb8	512x256	131072	2.62	2.65	+1.1% (within noise)	UNRELIABLE: 0 measured rounds, scalar-token path, no process lock
+yuv420_to_rgb8	1920x1080	2073600	41.69	41.79	+0.2% (within noise)	UNRELIABLE: 0 measured rounds, scalar-token path, no process lock

@@ -14,11 +14,13 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 - YUV420→RGB8 bilinear chroma upsampling now uses a direct truncating cast
   instead of `f32::floor` (libm `floorf`) for the per-pixel chroma index.
   Inputs are pre-clamped to `[0, dim-1]`, so the output is byte-identical —
-  verified on x86 (AVX2) and aarch64 (NEON) via a byte-identity test against an
-  independent libm-floor reference (6 sizes × 2 ranges × 3 matrices). Measured
-  -14.4% / -14.9% wall time on aarch64 Neoverse-N1 (`yuv420_to_rgb8`:
-  1.513→1.294 ms @512×256, 25.40→21.64 ms @1920×1080, criterion A/B p<0.05).
-  See `benchmarks/zenavif_arm_yuv_floor_2026-05-30.{tsv,meta}`.
+  verified on x86 (AVX2, full lib suite) and aarch64 (NEON) via a byte-identity
+  test against an independent libm-floor reference (6 sizes × 2 ranges × 3
+  matrices). This is a correctness-preserving refactor that drops a libm call
+  from the chroma-gather inner loop; a wall-time win was NOT demonstrated on ARM
+  (the yuv_conversion_benchmark gates SIMD on an x86-only token, so on aarch64 it
+  measures the scalar fallback, not the NEON path this change affects — measured
+  no change there). See `benchmarks/zenavif_arm_yuv_floor_2026-05-30.{tsv,meta}`.
 - `tests/fuzz_regression.rs` now uses the shared `zen-fuzz-regress`
   test-helper crate (DEDUP-J2). Behaviour is unchanged — same
   `fuzz/regression/` seeds, same four targets (`decode`,
