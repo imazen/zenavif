@@ -1290,7 +1290,11 @@ mod tests {
         for &x in &probes {
             let (idx, frac) = floor_nonneg_idx(x);
             assert_eq!(idx, x.floor() as usize, "idx mismatch at x={x}");
-            assert_eq!(frac.to_bits(), (x - x.floor()).to_bits(), "frac bits at x={x}");
+            assert_eq!(
+                frac.to_bits(),
+                (x - x.floor()).to_bits(),
+                "frac bits at x={x}"
+            );
         }
     }
 

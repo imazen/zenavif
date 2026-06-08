@@ -311,6 +311,14 @@ static AVIF_ENCODE_CAPABILITIES: zencodec::encode::EncodeCapabilities =
         .with_exif(true)
         .with_xmp(true)
         .with_cicp(true)
+        // AVIF's nclx (CICP) has been spec-mandated since the first MIAF/HEIF
+        // editions: the colour-information property is reader-authoritative — it
+        // overrides any in-bitstream colour and a default is always assumed — so a
+        // conforming reader honors nclx. CICP is therefore safe as the *sole* color
+        // carrier here; drop a redundant ICC, like JXL. (Contrast PNG's cICP, a far
+        // newer optional chunk that is not yet sole-safe.)
+        .with_cicp_is_valid_carrier(true)
+        .with_cicp_safe_sole_carrier(true)
         .with_stop(true)
         .with_lossy(true)
         .with_lossless(cfg!(feature = "encode-imazen"))
@@ -514,6 +522,7 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         self
     }
 
+    #[allow(deprecated)] // required trait method; callers use with_metadata_policy
     fn with_metadata(mut self, meta: Metadata) -> Self {
         if let Some(exif) = meta.exif {
             self.exif = Some(exif);
@@ -552,12 +561,17 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
 
     fn encoder(self) -> Result<AvifEncoder, At<Error>> {
         let mut config = self.config.inner.clone();
-        // Apply CICP color metadata from Metadata
-        if let Some(cicp) = self.cicp {
-            config = config
-                .color_primaries(cicp.color_primaries)
-                .transfer_characteristics(cicp.transfer_characteristics)
-                .matrix_coefficients(cicp.matrix_coefficients);
+        // Resolve the color *description* (ICC vs CICP code points) through
+        // zencodec's `resolve_color_emit` — the single source of truth for which
+        // color carrier we emit. It reconciles a caller-supplied CICP / ICC
+        // against AVIF's capabilities under the job's ColorEmitPolicy. The
+        // returned CICP (if any) is lowered to AVIF's nclx carrier (all three
+        // axes, so the matrix stays consistent); the ICC disposition picks the
+        // bytes to embed. This subsumes the old "apply self.cicp verbatim".
+        let (plan_cicp, plan_icc) =
+            resolve_avif_color(self.cicp, self.icc_profile, self.policy.as_ref());
+        if let Some(cicp) = plan_cicp {
+            config = apply_cicp_to_config(config, cicp);
         }
         // Apply HDR metadata from Metadata
         if let Some(cll) = self.content_light_level {
@@ -616,9 +630,12 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
             Some(ref p) if !p.resolve_exif(true) => None,
             _ => self.exif,
         };
+        // `plan_icc` already encodes the keep/synthesize/drop decision from
+        // resolve_color_emit. The coarse `embed_icc: Some(false)` gate is an
+        // explicit caller override that can still suppress an otherwise-kept ICC.
         let icc_profile = match self.policy {
             Some(ref p) if !p.resolve_icc(true) => None,
-            _ => self.icc_profile,
+            _ => plan_icc,
         };
         let xmp = match self.policy {
             Some(ref p) if !p.resolve_xmp(true) => None,
@@ -631,6 +648,7 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
             icc_profile,
             xmp,
             limits: self.limits,
+            caller_cicp: plan_cicp,
         })
     }
 
@@ -646,12 +664,12 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
 
     fn animation_frame_encoder(self) -> Result<AvifAnimationFrameEncoder, At<Error>> {
         let mut config = self.config.inner.clone();
-        // Apply CICP color metadata
-        if let Some(cicp) = self.cicp {
-            config = config
-                .color_primaries(cicp.color_primaries)
-                .transfer_characteristics(cicp.transfer_characteristics)
-                .matrix_coefficients(cicp.matrix_coefficients);
+        // Resolve color description the same way as the still path (single source
+        // of truth): lower the resolved CICP to nclx and carry the resolved ICC.
+        let (plan_cicp, plan_icc) =
+            resolve_avif_color(self.cicp, self.icc_profile, self.policy.as_ref());
+        if let Some(cicp) = plan_cicp {
+            config = apply_cicp_to_config(config, cicp);
         }
         // Apply HDR metadata
         if let Some(cll) = self.content_light_level {
@@ -705,7 +723,7 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         {
             config = config.exif(exif.to_vec());
         }
-        if let Some(icc) = self.icc_profile
+        if let Some(icc) = plan_icc
             && policy.is_none_or(|p| p.resolve_icc(true))
         {
             config = config.icc_profile(icc.to_vec());
@@ -734,6 +752,87 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
     }
 }
 
+/// Lower a [`zencodec::Cicp`] onto the native AVIF encoder config, writing all
+/// three nclx axes (primaries, transfer, matrix) so the config carries a
+/// coherent triple rather than a partial/stale one (the prior bug set only some
+/// axes). Note: on the default pure-Rust ravif path the *emitted* nclx matrix is
+/// determined by ravif's own YCbCr conversion (BT.601), so `config.matrix_
+/// coefficients` is informational there; it is read by the (currently disabled)
+/// svtav1 backend, which emits CICP only when all three axes are present.
+#[cfg(feature = "encode")]
+fn apply_cicp_to_config(
+    config: crate::EncoderConfig,
+    cicp: zencodec::Cicp,
+) -> crate::EncoderConfig {
+    config
+        .color_primaries(cicp.color_primaries)
+        .transfer_characteristics(cicp.transfer_characteristics)
+        .matrix_coefficients(cicp.matrix_coefficients)
+}
+
+/// Resolve which color description to emit for an AVIF encode, the single source
+/// of truth for the color carrier.
+///
+/// Feeds a [`zencodec::SourceColor`] (built from the caller's CICP and/or ICC)
+/// and AVIF's `AVIF_ENCODE_CAPABILITIES`
+/// through [`zencodec::resolve_color_emit`] under the job's
+/// [`ColorEmitPolicy`](zencodec::ColorEmitPolicy) (defaulting to
+/// [`Balanced`](zencodec::ColorEmitPolicy::Balanced)). Returns:
+///
+/// - the CICP to write to nclx (`None` ⇒ leave the descriptor / encoder default),
+/// - the ICC bytes to embed, materialized from the plan's
+///   [`IccDisposition`](zencodec::IccDisposition):
+///   [`KeepSource`](zencodec::IccDisposition::KeepSource) keeps the caller's
+///   bytes, [`SynthesizeFrom`](zencodec::IccDisposition::SynthesizeFrom) fetches
+///   a bundled profile for the primaries (sRGB ⇒ `None`, so nothing is embedded),
+///   and [`Drop`](zencodec::IccDisposition::Drop) emits no ICC.
+///
+/// Channel count is left unset here: pixels aren't known yet at job-build time,
+/// and the resolver's grayscale path still fires off an ICC that declares gray.
+#[cfg(feature = "encode")]
+fn resolve_avif_color(
+    cicp: Option<zencodec::Cicp>,
+    icc: Option<Arc<[u8]>>,
+    policy: Option<&zencodec::encode::EncodePolicy>,
+) -> (Option<zencodec::Cicp>, Option<Arc<[u8]>>) {
+    let mut src = zencodec::SourceColor::default();
+    if let Some(c) = cicp {
+        src = src.with_cicp(c).with_color_authority(ColorAuthority::Cicp);
+    }
+    if let Some(ref bytes) = icc {
+        src = src
+            .with_icc_profile(bytes.clone())
+            .with_color_authority(ColorAuthority::Icc);
+    }
+
+    let emit_policy = policy
+        .map(|p| p.resolve_color(zencodec::ColorEmitPolicy::Balanced))
+        .unwrap_or(zencodec::ColorEmitPolicy::Balanced);
+
+    let plan = zencodec::resolve_color_emit(&src, &AVIF_ENCODE_CAPABILITIES, emit_policy);
+
+    let icc_out = match plan.icc {
+        zencodec::IccDisposition::KeepSource => icc,
+        zencodec::IccDisposition::SynthesizeFrom(c) => {
+            // Transfer-aware lowering: `synthesize_icc_for_cicp` matches the TRC, so a
+            // BT.2020-PQ source never gets the SDR-TRC Rec.2020 profile. `Profile`
+            // → own a copy; `NotNeeded`/`NeedsCms`/`CmsUnsupported` → no ICC (nclx
+            // still carries the color, and AVIF nclx is a sole-safe carrier).
+            use zenpixels_convert::icc_profiles::SynthesizedIcc;
+            match zenpixels_convert::icc_profiles::synthesize_icc_for_cicp(c) {
+                SynthesizedIcc::Profile(bytes) => Some(Arc::<[u8]>::from(bytes.as_ref())),
+                _ => None,
+            }
+        }
+        zencodec::IccDisposition::Drop => None,
+        // IccDisposition is #[non_exhaustive]; a future variant defaults to not
+        // embedding an ICC (safe — nclx still carries the color).
+        _ => None,
+    };
+
+    (plan.cicp, icc_out)
+}
+
 // ── Encoder ─────────────────────────────────────────────────────────────────
 
 /// Single-image AVIF encoder.
@@ -745,6 +844,11 @@ pub struct AvifEncoder {
     icc_profile: Option<Arc<[u8]>>,
     xmp: Option<Arc<[u8]>>,
     limits: ResourceLimits,
+    /// CICP resolved by [`resolve_color_emit`] in `encoder()` (caller-supplied
+    /// CICP, possibly derived from an ICC). When set, it is the authority — the
+    /// pixel-descriptor color in `apply_descriptor_color` only fills axes this
+    /// leaves *unspecified*, so a caller's CICP is never clobbered.
+    caller_cicp: Option<zencodec::Cicp>,
 }
 
 #[cfg(feature = "encode")]
@@ -793,9 +897,13 @@ impl AvifEncoder {
         }
     }
 
-    /// Set CICP color primaries and transfer characteristics from the pixel
-    /// descriptor, unless already set by metadata. For HDR transfers (PQ/HLG),
-    /// also switches to 10-bit encoding depth.
+    /// Fill in CICP color axes from the pixel descriptor for the axes a
+    /// caller-supplied CICP left *unspecified*. A `Metadata`-set CICP (resolved
+    /// in `encoder()` into [`caller_cicp`](Self::caller_cicp) and already lowered
+    /// onto the config) is the authority and is never overwritten here — fixing
+    /// the prior bug where the descriptor unconditionally clobbered the caller's
+    /// primaries/transfer (and never set a matching matrix). For HDR transfers
+    /// (PQ/HLG), also switches to 10-bit encoding depth.
     fn apply_descriptor_color(&mut self, desc: PixelDescriptor) {
         use zenpixels::{ColorPrimaries, TransferFunction};
 
@@ -820,14 +928,39 @@ impl AvifEncoder {
             _ => None,
         };
 
-        // Only override config if not already set from metadata
-        if tc.is_some() || cp.is_some() {
-            if let Some(tc_val) = tc {
-                self.config = self.config.clone().transfer_characteristics(tc_val);
-            }
-            if let Some(cp_val) = cp {
-                self.config = self.config.clone().color_primaries(cp_val);
-            }
+        // Which axes did the caller's CICP already pin? An axis is "specified"
+        // only if caller_cicp is present AND the code point is not the H.273
+        // unspecified/reserved sentinel (primaries/transfer: 0 reserved, 2
+        // unspecified). Matrix 0 is Identity — a real value, not unspecified.
+        let caller = self.caller_cicp;
+        let cp_specified = caller.is_some_and(|c| !matches!(c.color_primaries, 0 | 2));
+        let tc_specified = caller.is_some_and(|c| !matches!(c.transfer_characteristics, 0 | 2));
+
+        // Fill only the unspecified axes from the descriptor, so the caller's
+        // CICP wins on the axes it pinned.
+        if let Some(tc_val) = tc
+            && !tc_specified
+        {
+            self.config = self.config.clone().transfer_characteristics(tc_val);
+        }
+        if let Some(cp_val) = cp
+            && !cp_specified
+        {
+            self.config = self.config.clone().color_primaries(cp_val);
+        }
+
+        // Keep the matrix consistent with the primaries/transfer we just wrote.
+        // When the caller supplied no CICP at all, its matrix wasn't applied in
+        // encoder(), so derive one from the descriptor here (RGB content ⇒
+        // Identity/0, matching `Cicp::from_descriptor`). This also lets the
+        // svtav1 backend — which emits nclx only when all three axes are set —
+        // carry the descriptor-derived color. When the caller DID supply a CICP,
+        // its matrix is already on the config; leave it alone.
+        if caller.is_none() && (cp.is_some() || tc.is_some()) {
+            let mc = zenpixels::Cicp::from_descriptor(&desc)
+                .map(|c| c.matrix_coefficients)
+                .unwrap_or(0);
+            self.config = self.config.clone().matrix_coefficients(mc);
         }
 
         // For PQ/HLG, switch to 10-bit depth (the native HDR depth for AV1)
@@ -3619,6 +3752,131 @@ mod tests {
         let decoded = decoder.decode().unwrap();
         assert_eq!(decoded.info().width, 16);
         assert_eq!(decoded.info().height, 16);
+    }
+
+    /// Regression for the `apply_descriptor_color` CICP-override bug: a
+    /// `Metadata`-set CICP must win over the pixel descriptor's color, and the
+    /// emitted nclx matrix must stay consistent with it. We hand pixels whose
+    /// descriptor reads sRGB / BT.709 (primaries=1) but set
+    /// `Metadata.cicp = DISPLAY_P3` (primaries=12); the decoded nclx must report
+    /// Display-P3, not the descriptor's BT.709.
+    #[cfg(feature = "encode")]
+    #[test]
+    fn caller_cicp_wins_over_descriptor_color() {
+        use zencodec::Cicp;
+        use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+
+        // sRGB / BT.709 descriptor pixels.
+        let pixels = vec![
+            Rgb {
+                r: 200u8,
+                g: 100,
+                b: 50,
+            };
+            16 * 16
+        ];
+        let img = imgref::ImgVec::new(pixels, 16, 16);
+        // PixelDescriptor::RGB8_SRGB ⇒ BT.709 primaries, sRGB transfer.
+        let slice = PixelSlice::from(img.as_ref()).with_descriptor(PixelDescriptor::RGB8_SRGB);
+
+        // Caller pins Display-P3 via Metadata. Use the blessed metadata path.
+        let meta = Metadata::none().with_cicp(Cicp::DISPLAY_P3);
+        let encoder = AvifEncoderConfig::new()
+            .with_quality(90.0)
+            .job()
+            .with_metadata_policy(meta, zencodec::MetadataPolicy::PreserveExact)
+            .encoder()
+            .unwrap();
+        let encoded = encoder.encode(slice.erase()).unwrap();
+        assert!(!encoded.is_empty());
+
+        // Decode and read back the nclx CICP.
+        let decoder = AvifDecoderConfig::new()
+            .job()
+            .decoder(Cow::Borrowed(encoded.data()), &[])
+            .unwrap();
+        let decoded = decoder.decode().unwrap();
+        let cicp = decoded
+            .info()
+            .source_color
+            .cicp
+            .expect("decoded AVIF must carry CICP");
+
+        // Caller's Display-P3 (primaries 12) wins over the descriptor's BT.709 (1).
+        assert_eq!(
+            cicp.color_primaries,
+            Cicp::DISPLAY_P3.color_primaries,
+            "caller's Display-P3 primaries must win over descriptor BT.709"
+        );
+        assert_eq!(
+            cicp.transfer_characteristics,
+            Cicp::DISPLAY_P3.transfer_characteristics,
+            "transfer must match the caller's CICP"
+        );
+        // The matrix code point must honestly describe the YCbCr math the encoder
+        // actually used. zenravif's default RGB path encodes via BT.601 YCbCr and
+        // writes matrix_coefficients = 6 — so the consistent value here is 6, NOT
+        // the caller CICP's Identity(0) (which describes an RGB-domain image, not
+        // how AVIF stored it). The bug was a *missing/stale* MC; the fix makes the
+        // emitted nclx a coherent triple {primaries:12, transfer:13, matrix:6}.
+        assert_eq!(
+            cicp.matrix_coefficients, 6,
+            "matrix must reflect the encoder's actual YCbCr matrix (BT.601)"
+        );
+    }
+
+    /// The descriptor still drives CICP when the caller supplies none — the
+    /// fallback the bug fix must preserve. sRGB/BT.709 descriptor with no
+    /// Metadata CICP ⇒ nclx reports BT.709 primaries with a consistent matrix.
+    #[cfg(feature = "encode")]
+    #[test]
+    fn descriptor_drives_cicp_without_caller_cicp() {
+        use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
+        use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+
+        let pixels = vec![
+            Rgb {
+                r: 30u8,
+                g: 200,
+                b: 120,
+            };
+            16 * 16
+        ];
+        let img = imgref::ImgVec::new(pixels, 16, 16);
+        let slice = PixelSlice::from(img.as_ref()).with_descriptor(PixelDescriptor::RGB8_SRGB);
+
+        // No Metadata CICP at all.
+        let encoder = AvifEncoderConfig::new()
+            .with_quality(90.0)
+            .job()
+            .encoder()
+            .unwrap();
+        let encoded = encoder.encode(slice.erase()).unwrap();
+
+        let decoder = AvifDecoderConfig::new()
+            .job()
+            .decoder(Cow::Borrowed(encoded.data()), &[])
+            .unwrap();
+        let decoded = decoder.decode().unwrap();
+        let cicp = decoded
+            .info()
+            .source_color
+            .cicp
+            .expect("decoded AVIF must carry CICP");
+
+        // Descriptor's BT.709 (primaries 1) flows through.
+        assert_eq!(
+            cicp.color_primaries, 1,
+            "descriptor BT.709 primaries must drive nclx when no caller CICP"
+        );
+        // As above, the emitted matrix reflects the encoder's actual YCbCr math
+        // (zenravif default RGB path = BT.601 = 6), kept consistent with the
+        // descriptor-driven primaries/transfer.
+        assert_eq!(
+            cicp.matrix_coefficients, 6,
+            "matrix must reflect the encoder's actual YCbCr matrix (BT.601)"
+        );
     }
 
     #[cfg(feature = "encode")]
