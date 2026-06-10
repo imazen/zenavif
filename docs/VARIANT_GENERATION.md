@@ -41,8 +41,8 @@ Every encode knob, classified per the zenjpeg taxonomy:
 | alpha_color_mode | metric | content-dependent (Clean rewrites color under transparency) |
 | threads | **metric, surprisingly** | tile count = `min(threads, w·h / min_tile_size²)`; **threads=None substitutes the host's core count → default encodes are not byte-reproducible across machines.** Sweep cells pin `Some(1)` |
 | rotation/mirror/CICP cp+tc/CLL/mastering/ICC/EXIF/XMP/gain map | dominance | pure container metadata: present ⇒ emit, no pixel change, no trial needed |
-| matrix_coefficients | **dead on zenravif** | the backend derives the signaled matrix from `color_model`; the field is read by the (dormant) svtav1 backend only. Documented on the setter, excluded from the fingerprint (byte-proven), deliberately set-but-informational in the zencodec wrapper |
-| backend | structural | `Svtav1` without its feature used to silently fall back to zenravif — `validate()` now rejects it |
+| matrix_coefficients | **dead** | no available backend reads the field — zenravif derives the signaled matrix from `color_model`, and its only reader was the deprecated svtav1 path. Documented on the setter, excluded from the fingerprint (byte-proven), deliberately set-but-informational in the zencodec wrapper for config coherence |
+| backend | structural | `Svtav1` is `#[deprecated]` and rejected by `validate()` (previously a silent fallback to zenravif); see open items |
 | override_cdef / rdo_tx / sgr / lru_on_skip / seg_complex / bottomup / partition_range / complex_pred / lrf / fast_deblock | metric | preset-derived; an override equal to its preset value is an alias (fingerprint merges it — byte-proven for CDEF) |
 
 **Exact trials: none.** The zenjpeg doc predicted "OBU/layout-level
@@ -141,9 +141,15 @@ infrastructure (zenmetrics fleet), not the validation harness.
 - 16-bit entry points ignore `color_model` (always identity RGB).
   Honoring YCbCr there would change bytes — queued as a deliberate
   decision, not slipped in.
-- The svtav1 backend is dormant (feature commented out). `validate()`
-  rejects it when uncompiled; if it returns, the fingerprint already
-  includes `matrix_coefficients` for it.
+- The svtav1 backend is **deprecated** (2026-06-10): the
+  `encode-svtav1` feature was never shipped (svtav1-rs produces
+  non-conformant bitstreams; the draft path returned raw OBUs as
+  `avif_file`), so the cfg'd encode path and its three differential
+  test files were removed — git history (pre-deprecation) has them if
+  the experiment resumes. `Av1Backend::Svtav1` carries `#[deprecated]`
+  and `validate()` rejects it unconditionally; a working svtav1
+  integration would land as a new variant that wraps OBUs in a real
+  AVIF container.
 - `EncodePlan` reports the **request** (e.g. tiles asked of zenrav1e);
   rav1e may quantize tile counts to powers of two internally. The
   fingerprint is unaffected (equal request ⇒ equal outcome) but plan

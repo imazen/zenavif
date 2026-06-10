@@ -768,9 +768,9 @@ impl Fnv {
 ///   uses (zenrav1e `api/internal.rs:1379`; encode-validated by
 ///   `sweep_validate`);
 /// - the CICP `matrix_coefficients` field is **excluded**: the zenravif
-///   backend derives the signaled matrix from the color model and never
-///   reads the field (encode-validated by `sweep_validate`; it IS
-///   hashed when the svtav1 backend is selected, which does read it).
+///   backend derives the signaled matrix from the color model, and no
+///   other backend exists (the deprecated svtav1 path was the field's
+///   only reader). Encode-validated by `sweep_validate`.
 ///
 /// `threads` is hashed as configured. `None` (machine-dependent tiling)
 /// never merges with anything — including another `None` spelling on a
@@ -784,7 +784,9 @@ impl Fnv {
 pub fn fingerprint(config: &EncoderConfig) -> u64 {
     let mut h = Fnv::new();
 
-    // Backend.
+    // Backend. The deprecated Svtav1 variant still hashes distinctly:
+    // conservative (validate() rejects it, so no plan carries it).
+    #[allow(deprecated)]
     h.u8(match config.backend {
         crate::Av1Backend::Zenravif => 0,
         crate::Av1Backend::Svtav1 => 1,
@@ -912,11 +914,9 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
     }
     h.opt_u8(config.color_primaries);
     h.opt_u8(config.transfer_characteristics);
-    // matrix_coefficients: read by the svtav1 backend only — excluded on
-    // zenravif (encode-validated; see fn docs).
-    if config.backend == crate::Av1Backend::Svtav1 {
-        h.opt_u8(config.matrix_coefficients);
-    }
+    // matrix_coefficients: excluded — no available backend reads it
+    // (zenravif derives the matrix from color_model; the deprecated
+    // svtav1 path was the only reader). Encode-validated; see fn docs.
     match config.gain_map.as_ref() {
         None => h.u8(0),
         Some(gm) => {
@@ -1112,13 +1112,13 @@ mod tests {
     }
 
     #[test]
-    fn matrix_coefficients_excluded_on_zenravif() {
+    fn matrix_coefficients_excluded() {
         let base = EncoderConfig::new().quality(50.0);
         let with_mc = base.clone().matrix_coefficients(9);
         assert_eq!(
             fingerprint(&base),
             fingerprint(&with_mc),
-            "zenravif backend never reads the CICP matrix field"
+            "no available backend reads the CICP matrix field"
         );
     }
 }

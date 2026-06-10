@@ -150,7 +150,18 @@ pub enum Av1Backend {
     /// zenrav1e (rav1e fork) — default, production-proven.
     #[default]
     Zenravif,
-    /// svtav1-rs — pure Rust SVT-AV1 port. Requires `encode-svtav1` feature.
+    /// svtav1-rs — pure Rust SVT-AV1 port experiment.
+    ///
+    /// No build can use this: the `encode-svtav1` feature was never
+    /// shipped (svtav1-rs produces non-conformant bitstreams in most
+    /// configurations, and the draft path returned raw AV1 OBUs instead
+    /// of an AVIF file). [`EncoderConfig::validate`] rejects it. The
+    /// variant is retained only for enum compatibility; a future
+    /// svtav1 backend would arrive as a new, working variant.
+    #[deprecated(
+        note = "the encode-svtav1 feature was never shipped and no build can encode with this \
+                backend; EncoderConfig::validate() rejects it"
+    )]
     Svtav1,
 }
 
@@ -313,10 +324,9 @@ impl EncoderConfig {
 
     /// Select the AV1 encoder backend.
     ///
-    /// - `Av1Backend::Zenravif` — production zenrav1e (default)
-    /// - `Av1Backend::Svtav1` — svtav1-rs pure Rust SVT-AV1 port
-    ///
-    /// The svtav1 backend requires the `encode-svtav1` feature flag.
+    /// Only `Av1Backend::Zenravif` (the default) is available; the
+    /// deprecated `Svtav1` variant is rejected by
+    /// [`validate`](Self::validate).
     pub fn backend(mut self, backend: Av1Backend) -> Self {
         self.backend = backend;
         self
@@ -458,12 +468,14 @@ impl EncoderConfig {
     ///
     /// Common values: 0 = Identity/RGB, 1 = BT.709, 6 = BT.601, 9 = BT.2020.
     ///
-    /// **Backend note:** the default zenravif backend derives the matrix
-    /// it actually signals from [`color_model`](Self::color_model)
-    /// (YCbCr → BT.601, RGB → Identity) and does not consult this field;
-    /// it is read by the svtav1 backend only. Use
-    /// [`resolve_plan`](Self::resolve_plan) to see the matrix an encode
-    /// will really carry
+    /// **Backend note:** the zenravif backend derives the matrix it
+    /// actually signals from [`color_model`](Self::color_model)
+    /// (YCbCr → BT.601, RGB → Identity); no available backend consults
+    /// this field (its only reader was the deprecated svtav1 path). It
+    /// is retained for config coherence — the zencodec layer mirrors
+    /// the source CICP triple onto the config — and for future
+    /// backends. Use [`resolve_plan`](Self::resolve_plan) to see the
+    /// matrix an encode will really carry
     /// ([`EncodePlan::matrix_coefficients_cicp`](crate::EncodePlan::matrix_coefficients_cicp)).
     pub fn matrix_coefficients(mut self, mc: u8) -> Self {
         self.matrix_coefficients = Some(mc);
@@ -886,11 +898,6 @@ pub fn encode_rgb8(
 ) -> Result<EncodedImage> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
 
-    #[cfg(feature = "encode-svtav1")]
-    if config.backend == Av1Backend::Svtav1 {
-        return encode_rgb8_svtav1(img, config);
-    }
-
     let enc = build_ravif_encoder(config, stop, false);
     let result = enc
         .encode_rgb(img)
@@ -899,63 +906,6 @@ pub fn encode_rgb8(
         avif_file: result.avif_file,
         color_byte_size: result.color_byte_size,
         alpha_byte_size: result.alpha_byte_size,
-    })
-}
-
-/// Encode an 8-bit RGB image using the svtav1-rs backend.
-#[cfg(feature = "encode-svtav1")]
-fn encode_rgb8_svtav1(img: ImgRef<'_, Rgb<u8>>, config: &EncoderConfig) -> Result<EncodedImage> {
-    let w = img.width();
-    let h = img.height();
-
-    // Convert RGB to Y plane (BT.709 luma: Y = 0.2126*R + 0.7152*G + 0.0722*B)
-    let mut y_plane = vec![0u8; w * h];
-    for (i, px) in img.pixels().enumerate() {
-        let y = (0.2126 * px.r as f64 + 0.7152 * px.g as f64 + 0.0722 * px.b as f64)
-            .round()
-            .clamp(0.0, 255.0) as u8;
-        y_plane[i] = y;
-    }
-
-    // Build svtav1 encoder with matching config
-    let mut enc = svtav1::avif::AvifEncoder::new()
-        .with_quality(config.quality)
-        .with_speed(config.speed);
-
-    // Set bit depth
-    match config.bit_depth {
-        EncodeBitDepth::Ten => {
-            enc = enc.with_bit_depth(10);
-        }
-        EncodeBitDepth::Eight => {
-            enc = enc.with_bit_depth(8);
-        }
-        _ => {}
-    }
-
-    // Set color space from CICP
-    if let (Some(cp), Some(tc), Some(mc)) = (
-        config.color_primaries,
-        config.transfer_characteristics,
-        config.matrix_coefficients,
-    ) {
-        let full_range = config.pixel_range == Some(EncodePixelRange::Full);
-        enc = enc.with_color_space(cp, tc, mc, full_range);
-    }
-
-    let av1_data = enc
-        .encode_to_av1_obu(&y_plane, w as u32, h as u32, w as u32)
-        .map_err(|e| at!(Error::Encode(format!("svtav1: {e}"))))?;
-
-    let color_byte_size = av1_data.len();
-
-    // Return raw AV1 OBU data as the avif_file field.
-    // When used with zenavif-serialize, the caller wraps this in an AVIF container.
-    // For direct use, the AV1 bitstream is valid standalone.
-    Ok(EncodedImage {
-        avif_file: av1_data,
-        color_byte_size,
-        alpha_byte_size: 0,
     })
 }
 

@@ -152,9 +152,8 @@ pub struct SpeedDerived {
 /// overrides, as the encoder will actually run it.
 ///
 /// Produced by [`EncoderConfig::resolve_plan`]. Fields describe the
-/// zenravif backend (the default); for [`Av1Backend::Svtav1`] only
-/// `backend` is meaningful and [`EncoderConfig::validate`] rejects the
-/// backend when its feature is absent from the build.
+/// zenravif backend — the only available one (the deprecated svtav1
+/// variant is rejected by [`EncoderConfig::validate`]).
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct EncodePlan {

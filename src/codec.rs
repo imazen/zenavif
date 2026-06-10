@@ -755,10 +755,11 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
 /// Lower a [`zencodec::Cicp`] onto the native AVIF encoder config, writing all
 /// three nclx axes (primaries, transfer, matrix) so the config carries a
 /// coherent triple rather than a partial/stale one (the prior bug set only some
-/// axes). Note: on the default pure-Rust ravif path the *emitted* nclx matrix is
-/// determined by ravif's own YCbCr conversion (BT.601), so `config.matrix_
-/// coefficients` is informational there; it is read by the (currently disabled)
-/// svtav1 backend, which emits CICP only when all three axes are present.
+/// axes). Note: the *emitted* nclx matrix is determined by ravif's own YCbCr
+/// conversion (BT.601), so `config.matrix_coefficients` is informational —
+/// no available backend consults it (its only reader was the deprecated
+/// svtav1 path); the coherent triple is kept for introspection and any
+/// future backend.
 #[cfg(feature = "encode")]
 fn apply_cicp_to_config(
     config: crate::EncoderConfig,
@@ -952,10 +953,10 @@ impl AvifEncoder {
         // Keep the matrix consistent with the primaries/transfer we just wrote.
         // When the caller supplied no CICP at all, its matrix wasn't applied in
         // encoder(), so derive one from the descriptor here (RGB content ⇒
-        // Identity/0, matching `Cicp::from_descriptor`). This also lets the
-        // svtav1 backend — which emits nclx only when all three axes are set —
-        // carry the descriptor-derived color. When the caller DID supply a CICP,
-        // its matrix is already on the config; leave it alone.
+        // Identity/0, matching `Cicp::from_descriptor`) so the config carries a
+        // coherent triple (informational — no available backend reads the
+        // matrix field). When the caller DID supply a CICP, its matrix is
+        // already on the config; leave it alone.
         if caller.is_none() && (cp.is_some() || tc.is_some()) {
             let mc = zenpixels::Cicp::from_descriptor(&desc)
                 .map(|c| c.matrix_coefficients)

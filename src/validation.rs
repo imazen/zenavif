@@ -230,10 +230,11 @@ impl crate::EncoderConfig {
     }
 
     fn validate_backend_and_color(&self) -> Result<(), ValidationError> {
-        // Backend availability: without this, encode_rgb8 silently falls
-        // back to zenravif when the svtav1 feature is absent (and the
-        // rgba/16-bit entry points never dispatch on the backend at all).
-        #[cfg(not(feature = "encode-svtav1"))]
+        // The deprecated svtav1 backend exists in no build (the
+        // encode-svtav1 feature was never shipped); without this check
+        // the encode entry points would silently serve the request with
+        // zenravif instead.
+        #[allow(deprecated)]
         if self.backend == crate::Av1Backend::Svtav1 {
             return Err(ValidationError::BackendUnavailable {
                 backend: "Av1Backend::Svtav1",

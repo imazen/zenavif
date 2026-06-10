@@ -160,13 +160,17 @@ fn chroma_subsampling_is_live() {
 /// validate() rejects the combinations the encoder would otherwise
 /// remap silently or reject only at encode time.
 #[test]
+#[allow(deprecated)] // deliberately exercises the deprecated Svtav1 variant
 fn validate_rejects_dead_and_contradictory_combos() {
     use zenavif::{Av1Backend, EncodeChromaSubsampling, EncodeColorModel};
 
-    // Svtav1 backend without the feature: encode_rgb8 would silently
-    // fall back to zenravif.
+    // The deprecated Svtav1 backend exists in no build: encode_rgb8
+    // would silently serve the request with zenravif.
     let svt = EncoderConfig::new().backend(Av1Backend::Svtav1);
-    assert!(svt.validate().is_err(), "Svtav1 without feature must fail");
+    assert!(
+        svt.validate().is_err(),
+        "deprecated Svtav1 must fail validate"
+    );
 
     // 4:2:0 has no defined meaning for identity-matrix RGB.
     let rgb420 = EncoderConfig::new()

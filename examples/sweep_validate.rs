@@ -8,8 +8,8 @@
 //! 1. **Fingerprint contract** — equal fingerprint ⇒ byte-identical
 //!    output, on real encodes of the documented alias/exclusion pairs:
 //!    the quality→quantizer mirror (q 80.0 vs 80.2), override == preset
-//!    value, `vaq_strength` with VAQ off, `matrix_coefficients` on the
-//!    zenravif backend, `alpha_quality` unset vs explicit — plus a
+//!    value, `vaq_strength` with VAQ off, the dead `matrix_coefficients`
+//!    field, `alpha_quality` unset vs explicit — plus a
 //!    distinct-fingerprint negative control (qm on vs off).
 //! 2. **No inert step** — every single-deviation label changes output
 //!    bytes vs the default stratum somewhere in the subset.
@@ -535,7 +535,7 @@ fn main() {
             expect_equal: false,
         },
         AliasPair {
-            label: "matrix_coefficients dead on zenravif: mc(9) vs unset",
+            label: "matrix_coefficients dead (no backend reads it): mc(9) vs unset",
             a: pin(EncoderConfig::new().quality(50.0).speed(6)).matrix_coefficients(9),
             b: pin(EncoderConfig::new().quality(50.0).speed(6)),
             expect_equal: true,

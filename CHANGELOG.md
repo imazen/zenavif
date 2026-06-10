@@ -10,6 +10,27 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Deprecated
+- `Av1Backend::Svtav1`. The `encode-svtav1` feature was never shipped
+  (svtav1-rs produces non-conformant bitstreams in most configurations, and
+  the draft path returned raw AV1 OBUs in the `avif_file` field instead of an
+  AVIF container), so no build could ever encode with it; `validate()` rejects
+  it unconditionally. The variant stays for enum compatibility — a working
+  svtav1 integration would land as a new variant.
+
+### Removed
+- The unreachable `encode-svtav1`-gated code: the `encode_rgb8_svtav1` draft
+  path, the backend dispatch in `encode_rgb8`, three differential test files
+  (`differential_svtav1.rs`, `differential_comprehensive.rs`,
+  `differential_4k.rs` — all cfg'd on the never-shipped feature and
+  referencing the commented-out path dep), the commented `svtav1` dependency
+  and feature lines, and the `check-cfg` allowance. None of this compiled in
+  any build; git history before this commit has the experiment if it resumes.
+  Consequence: the `matrix_coefficients` CICP field is now consumed by no
+  backend (zenravif derives the signaled matrix from `color_model`) — it is
+  retained, documented as informational, and excluded from the sweep
+  fingerprint on all backends.
+
 ### Fixed
 - **`alpha_quality` unset now follows the color quality, as its docs always
   promised.** zenravif's built-in default pins the alpha quantizer to the
