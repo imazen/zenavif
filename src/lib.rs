@@ -67,6 +67,8 @@ mod decoder_managed;
 /// AVIF quality estimation and re-encoding recommendations.
 pub mod detect;
 #[cfg(feature = "encode")]
+mod encode_plan;
+#[cfg(feature = "encode")]
 mod encoder;
 mod error;
 #[cfg(feature = "__expert")]
@@ -77,6 +79,10 @@ pub mod simd;
 #[cfg(not(feature = "_dev"))]
 pub(crate) mod simd;
 mod strip_convert;
+/// Budgeted sweep-plan construction over the encoder knob space
+/// (calibration tooling; unstable like everything behind `__expert`).
+#[cfg(feature = "__expert")]
+pub mod sweep;
 mod validation;
 #[cfg(feature = "_dev")]
 pub mod yuv_convert;
@@ -118,12 +124,14 @@ pub use decode_av1::decode_av1_obu;
 pub use decoder::AvifDecoder;
 pub use decoder_managed::{AnimationDecoder, ManagedAvifDecoder};
 #[cfg(feature = "encode")]
+pub use encode_plan::{EncodePlan, PlanInput, SpeedDerived, TilesResolution};
+#[cfg(feature = "encode")]
 pub use encoder::{
     AnimationFrame, AnimationFrame16, AnimationFrameRgba, AnimationFrameRgba16, Av1Backend,
-    EncodeAlphaMode, EncodeBitDepth, EncodeColorModel, EncodePixelRange, EncodedAnimation,
-    EncodedImage, EncoderConfig, GainMapConfig, MasteringDisplayConfig, encode_animation_rgb8,
-    encode_animation_rgb16, encode_animation_rgba8, encode_animation_rgba16, encode_rgb8,
-    encode_rgb16, encode_rgba8, encode_rgba16,
+    EncodeAlphaMode, EncodeBitDepth, EncodeChromaSubsampling, EncodeColorModel, EncodePixelRange,
+    EncodedAnimation, EncodedImage, EncoderConfig, GainMapConfig, MasteringDisplayConfig,
+    encode_animation_rgb8, encode_animation_rgb16, encode_animation_rgba8, encode_animation_rgba16,
+    encode_rgb8, encode_rgb16, encode_rgba8, encode_rgba16,
 };
 pub use enough::{Stop, StopReason, Unstoppable};
 pub use error::{Error, Result};

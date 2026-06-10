@@ -94,6 +94,27 @@ pub enum EncodePixelRange {
     Limited,
 }
 
+/// Chroma subsampling for the encoded color image.
+///
+/// The biggest rate knob after quality itself: 4:2:0 stores chroma at
+/// quarter resolution, cutting file size ~25–35 % on photographic
+/// content. Keep the 4:4:4 default for text, screen content, line art,
+/// or anything with sharp chroma edges.
+///
+/// 4:2:0 cannot be combined with [`EncodeColorModel::Rgb`] (the
+/// identity matrix has no meaningful "chroma" to subsample);
+/// [`EncoderConfig::validate`] rejects the pair and the encoder errors
+/// at encode time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EncodeChromaSubsampling {
+    /// Full-resolution chroma (4:4:4). Default, and recommended for AVIF.
+    #[default]
+    Yuv444,
+    /// Quarter-resolution chroma (4:2:0). Smaller files on photographic
+    /// content; not recommended for text or sharp synthetic edges.
+    Yuv420,
+}
+
 /// Mastering display metadata for HDR encoding (SMPTE ST 2086)
 ///
 /// All chromaticity values are in CIE 1931 0.16 fixed-point (0–65535 maps to 0.0–1.0).
@@ -141,6 +162,7 @@ pub struct EncoderConfig {
     pub(crate) alpha_quality: Option<f32>,
     pub(crate) bit_depth: EncodeBitDepth,
     pub(crate) color_model: EncodeColorModel,
+    pub(crate) chroma_subsampling: EncodeChromaSubsampling,
     pub(crate) alpha_color_mode: EncodeAlphaMode,
     pub(crate) threads: Option<usize>,
     pub(crate) exif: Option<Vec<u8>>,
@@ -228,6 +250,7 @@ impl Default for EncoderConfig {
             alpha_quality: None,
             bit_depth: EncodeBitDepth::default(),
             color_model: EncodeColorModel::default(),
+            chroma_subsampling: EncodeChromaSubsampling::default(),
             alpha_color_mode: EncodeAlphaMode::default(),
             threads: None,
             exif: None,
@@ -323,7 +346,9 @@ impl EncoderConfig {
 
     /// Set separate quality for the alpha channel
     ///
-    /// If not set, uses the same quality as color.
+    /// If not set, the alpha channel is encoded at the same quality as
+    /// color. (zenavif forwards this explicitly; zenravif's own default
+    /// would pin alpha to the quality-80 equivalent instead.)
     pub fn alpha_quality(mut self, quality: f32) -> Self {
         self.alpha_quality = Some(quality);
         self
@@ -340,6 +365,17 @@ impl EncoderConfig {
     /// YCbCr (default) produces smaller files. RGB may be better for lossless.
     pub fn color_model(mut self, model: EncodeColorModel) -> Self {
         self.color_model = model;
+        self
+    }
+
+    /// Set chroma subsampling for the encoded color image.
+    ///
+    /// Default is [`EncodeChromaSubsampling::Yuv444`] (full-resolution
+    /// chroma). 4:2:0 trades chroma resolution for ~25–35 % smaller
+    /// files on photographic content. Incompatible with
+    /// [`EncodeColorModel::Rgb`].
+    pub fn chroma_subsampling(mut self, subsampling: EncodeChromaSubsampling) -> Self {
+        self.chroma_subsampling = subsampling;
         self
     }
 
@@ -421,6 +457,14 @@ impl EncoderConfig {
     /// Set CICP matrix coefficients code point (ITU-T H.273).
     ///
     /// Common values: 0 = Identity/RGB, 1 = BT.709, 6 = BT.601, 9 = BT.2020.
+    ///
+    /// **Backend note:** the default zenravif backend derives the matrix
+    /// it actually signals from [`color_model`](Self::color_model)
+    /// (YCbCr → BT.601, RGB → Identity) and does not consult this field;
+    /// it is read by the svtav1 backend only. Use
+    /// [`resolve_plan`](Self::resolve_plan) to see the matrix an encode
+    /// will really carry
+    /// ([`EncodePlan::matrix_coefficients_cicp`](crate::EncodePlan::matrix_coefficients_cicp)).
     pub fn matrix_coefficients(mut self, mc: u8) -> Self {
         self.matrix_coefficients = Some(mc);
         self
@@ -648,9 +692,14 @@ fn cicp_to_transfer_characteristics(tc: u8) -> ravif::TransferCharacteristics {
     }
 }
 
-/// Build a ravif Encoder from our config
 /// Resolve `EncodeBitDepth::Auto` based on whether the input is 8-bit or 16-bit.
-fn resolve_bit_depth(configured: EncodeBitDepth, input_is_16bit: bool) -> ravif::BitDepth {
+///
+/// Shared by `build_ravif_encoder` and `EncoderConfig::resolve_plan` so
+/// the introspected plan cannot drift from what the encoder does.
+pub(crate) fn resolve_bit_depth(
+    configured: EncodeBitDepth,
+    input_is_16bit: bool,
+) -> ravif::BitDepth {
     match configured {
         EncodeBitDepth::Eight => ravif::BitDepth::Eight,
         EncodeBitDepth::Ten => ravif::BitDepth::Ten,
@@ -662,6 +711,28 @@ fn resolve_bit_depth(configured: EncodeBitDepth, input_is_16bit: bool) -> ravif:
             }
         }
     }
+}
+
+/// Effective alpha quality: unset follows the color quality, per the
+/// [`EncoderConfig::alpha_quality`] contract.
+///
+/// Shared by `build_ravif_encoder` and `EncoderConfig::resolve_plan`.
+/// zenravif's own default would otherwise leave the alpha quantizer at
+/// its quality-80 equivalent regardless of the configured color quality
+/// (zenravif 0.1.3 `av1encoder.rs`: `Default` sets `alpha_quantizer:
+/// quality_to_quantizer(80.)` and `with_quality` never touches it), so
+/// this must be forwarded explicitly.
+pub(crate) fn effective_alpha_quality(config: &EncoderConfig) -> f32 {
+    config.alpha_quality.unwrap_or(config.quality)
+}
+
+/// Effective QM after the lossless gate: quantization matrices are
+/// meaningless at quantizer 0, so lossless forces them off.
+///
+/// Shared by `build_ravif_encoder` and `EncoderConfig::resolve_plan`.
+#[cfg(feature = "encode-imazen")]
+pub(crate) fn effective_qm(config: &EncoderConfig) -> bool {
+    config.enable_qm && !config.lossless
 }
 
 fn build_ravif_encoder(
@@ -677,16 +748,20 @@ fn build_ravif_encoder(
             EncodeColorModel::YCbCr => ravif::ColorModel::YCbCr,
             EncodeColorModel::Rgb => ravif::ColorModel::RGB,
         })
+        .with_chroma_subsampling(match config.chroma_subsampling {
+            EncodeChromaSubsampling::Yuv444 => ravif::ChromaSubsampling::Yuv444,
+            EncodeChromaSubsampling::Yuv420 => ravif::ChromaSubsampling::Yuv420,
+        })
         .with_alpha_color_mode(match config.alpha_color_mode {
             EncodeAlphaMode::UnassociatedClean => ravif::AlphaColorMode::UnassociatedClean,
             EncodeAlphaMode::UnassociatedDirty => ravif::AlphaColorMode::UnassociatedDirty,
             EncodeAlphaMode::Premultiplied => ravif::AlphaColorMode::Premultiplied,
         })
-        .with_num_threads(config.threads);
-
-    if let Some(aq) = config.alpha_quality {
-        enc = enc.with_alpha_quality(aq);
-    }
+        .with_num_threads(config.threads)
+        // Always forwarded: zenravif's built-in default pins the alpha
+        // quantizer to the quality-80 equivalent instead of following
+        // the color quality (see `effective_alpha_quality`).
+        .with_alpha_quality(effective_alpha_quality(config));
     if let Some(ref exif_data) = config.exif {
         enc = enc.with_exif(exif_data.as_slice());
     }
@@ -758,7 +833,7 @@ fn build_ravif_encoder(
         // QM must be disabled for lossless (quantizer=0); zenravif/zenrav1e
         // handles all other quality levels (the q>=96 cliff was fixed
         // upstream in zenrav1e 0.1.4 — see imazen/zenrav1e#7).
-        let qm = config.enable_qm && !config.lossless;
+        let qm = effective_qm(config);
         enc = enc
             .with_qm(qm)
             .with_vaq(config.enable_vaq, config.vaq_strength)

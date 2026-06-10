@@ -130,6 +130,10 @@ name = "encode_sweep"
 required-features = ["encode-imazen", "encode-threading"]
 
 [[example]]
+name = "sweep_validate"
+required-features = ["__expert"]
+
+[[example]]
 name = "predictor_sweep"
 required-features = ["__expert"]
 

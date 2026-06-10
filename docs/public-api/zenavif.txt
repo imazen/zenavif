@@ -5,7 +5,7 @@
 # all-features section.
 # DO NOT EDIT BY HAND — commit regenerated changes together with the code.
 
-## default features (529 items)
+## default features (532 items)
 
 pub mod zenavif
 pub use zenavif::CleanAperture
@@ -230,6 +230,9 @@ impl !core::panic::unwind_safe::UnwindSafe for zenavif::Error
 pub zenavif::ValidationError::AlphaQualityOutOfRange
 pub zenavif::ValidationError::AlphaQualityOutOfRange::valid: core::ops::range::RangeInclusive<f32>
 pub zenavif::ValidationError::AlphaQualityOutOfRange::value: f32
+pub zenavif::ValidationError::BackendUnavailable
+pub zenavif::ValidationError::BackendUnavailable::backend: &'static str
+pub zenavif::ValidationError::BackendUnavailable::feature: &'static str
 pub zenavif::ValidationError::CicpReserved
 pub zenavif::ValidationError::CicpReserved::field: &'static str
 pub zenavif::ValidationError::CicpReserved::value: u8
@@ -537,7 +540,7 @@ pub fn zenavif::decode_av1_obu(&[u8]) -> zenavif::Result<(alloc::vec::Vec<u8>, u
 pub fn zenavif::decode_with(&[u8], &zenavif::DecoderConfig, &impl enough::Stop + ?core::marker::Sized) -> zenavif::Result<zenpixels::buffer::PixelBuffer>
 pub type zenavif::Result<T, E> = core::result::Result<T, E>
 
-## all features except _* (1071 items)
+## all features except _* (1214 items)
 
 pub mod zenavif
 pub use zenavif::CleanAperture
@@ -813,6 +816,27 @@ impl core::marker::Unpin for zenavif::EncodeBitDepth
 impl core::marker::UnsafeUnpin for zenavif::EncodeBitDepth
 impl core::panic::unwind_safe::RefUnwindSafe for zenavif::EncodeBitDepth
 impl core::panic::unwind_safe::UnwindSafe for zenavif::EncodeBitDepth
+pub enum zenavif::EncodeChromaSubsampling
+pub zenavif::EncodeChromaSubsampling::Yuv420
+pub zenavif::EncodeChromaSubsampling::Yuv444
+impl core::clone::Clone for zenavif::EncodeChromaSubsampling
+pub fn zenavif::EncodeChromaSubsampling::clone(&self) -> zenavif::EncodeChromaSubsampling
+impl core::cmp::Eq for zenavif::EncodeChromaSubsampling
+impl core::cmp::PartialEq for zenavif::EncodeChromaSubsampling
+pub fn zenavif::EncodeChromaSubsampling::eq(&self, &zenavif::EncodeChromaSubsampling) -> bool
+impl core::default::Default for zenavif::EncodeChromaSubsampling
+pub fn zenavif::EncodeChromaSubsampling::default() -> zenavif::EncodeChromaSubsampling
+impl core::fmt::Debug for zenavif::EncodeChromaSubsampling
+pub fn zenavif::EncodeChromaSubsampling::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for zenavif::EncodeChromaSubsampling
+impl core::marker::StructuralPartialEq for zenavif::EncodeChromaSubsampling
+impl core::marker::Freeze for zenavif::EncodeChromaSubsampling
+impl core::marker::Send for zenavif::EncodeChromaSubsampling
+impl core::marker::Sync for zenavif::EncodeChromaSubsampling
+impl core::marker::Unpin for zenavif::EncodeChromaSubsampling
+impl core::marker::UnsafeUnpin for zenavif::EncodeChromaSubsampling
+impl core::panic::unwind_safe::RefUnwindSafe for zenavif::EncodeChromaSubsampling
+impl core::panic::unwind_safe::UnwindSafe for zenavif::EncodeChromaSubsampling
 pub enum zenavif::EncodeColorModel
 pub zenavif::EncodeColorModel::Rgb
 pub zenavif::EncodeColorModel::YCbCr
@@ -908,10 +932,33 @@ impl core::marker::Unpin for zenavif::QualityTarget
 impl core::marker::UnsafeUnpin for zenavif::QualityTarget
 impl core::panic::unwind_safe::RefUnwindSafe for zenavif::QualityTarget
 impl core::panic::unwind_safe::UnwindSafe for zenavif::QualityTarget
+pub enum zenavif::TilesResolution
+pub zenavif::TilesResolution::Fixed(usize)
+pub zenavif::TilesResolution::MachineDependent
+pub zenavif::TilesResolution::MachineDependent::cap: usize
+impl core::clone::Clone for zenavif::TilesResolution
+pub fn zenavif::TilesResolution::clone(&self) -> zenavif::TilesResolution
+impl core::cmp::Eq for zenavif::TilesResolution
+impl core::cmp::PartialEq for zenavif::TilesResolution
+pub fn zenavif::TilesResolution::eq(&self, &zenavif::TilesResolution) -> bool
+impl core::fmt::Debug for zenavif::TilesResolution
+pub fn zenavif::TilesResolution::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for zenavif::TilesResolution
+impl core::marker::StructuralPartialEq for zenavif::TilesResolution
+impl core::marker::Freeze for zenavif::TilesResolution
+impl core::marker::Send for zenavif::TilesResolution
+impl core::marker::Sync for zenavif::TilesResolution
+impl core::marker::Unpin for zenavif::TilesResolution
+impl core::marker::UnsafeUnpin for zenavif::TilesResolution
+impl core::panic::unwind_safe::RefUnwindSafe for zenavif::TilesResolution
+impl core::panic::unwind_safe::UnwindSafe for zenavif::TilesResolution
 #[non_exhaustive] pub enum zenavif::ValidationError
 pub zenavif::ValidationError::AlphaQualityOutOfRange
 pub zenavif::ValidationError::AlphaQualityOutOfRange::valid: core::ops::range::RangeInclusive<f32>
 pub zenavif::ValidationError::AlphaQualityOutOfRange::value: f32
+pub zenavif::ValidationError::BackendUnavailable
+pub zenavif::ValidationError::BackendUnavailable::backend: &'static str
+pub zenavif::ValidationError::BackendUnavailable::feature: &'static str
 pub zenavif::ValidationError::CicpReserved
 pub zenavif::ValidationError::CicpReserved::field: &'static str
 pub zenavif::ValidationError::CicpReserved::value: u8
@@ -1355,6 +1402,44 @@ impl core::marker::Unpin for zenavif::DecoderConfig
 impl core::marker::UnsafeUnpin for zenavif::DecoderConfig
 impl core::panic::unwind_safe::RefUnwindSafe for zenavif::DecoderConfig
 impl core::panic::unwind_safe::UnwindSafe for zenavif::DecoderConfig
+#[non_exhaustive] pub struct zenavif::EncodePlan
+pub zenavif::EncodePlan::alpha_quantizer: core::option::Option<u8>
+pub zenavif::EncodePlan::alpha_speed: core::option::Option<zenavif::SpeedDerived>
+pub zenavif::EncodePlan::backend: zenavif::Av1Backend
+pub zenavif::EncodePlan::bit_depth: u8
+pub zenavif::EncodePlan::chroma_subsampling: zenavif::EncodeChromaSubsampling
+pub zenavif::EncodePlan::color_model: zenavif::EncodeColorModel
+pub zenavif::EncodePlan::has_exif: bool
+pub zenavif::EncodePlan::has_gain_map: bool
+pub zenavif::EncodePlan::has_icc: bool
+pub zenavif::EncodePlan::has_xmp: bool
+pub zenavif::EncodePlan::lossless: bool
+pub zenavif::EncodePlan::matrix_coefficients_cicp: u8
+pub zenavif::EncodePlan::pixel_range: zenavif::EncodePixelRange
+pub zenavif::EncodePlan::qm: bool
+pub zenavif::EncodePlan::quantizer: u8
+pub zenavif::EncodePlan::seg_boost: f64
+pub zenavif::EncodePlan::speed: zenavif::SpeedDerived
+pub zenavif::EncodePlan::speed_preset: u8
+pub zenavif::EncodePlan::tiles: zenavif::TilesResolution
+pub zenavif::EncodePlan::trellis: bool
+pub zenavif::EncodePlan::tune_still_image: bool
+pub zenavif::EncodePlan::vaq: bool
+pub zenavif::EncodePlan::vaq_strength: f64
+impl core::clone::Clone for zenavif::EncodePlan
+pub fn zenavif::EncodePlan::clone(&self) -> zenavif::EncodePlan
+impl core::cmp::PartialEq for zenavif::EncodePlan
+pub fn zenavif::EncodePlan::eq(&self, &zenavif::EncodePlan) -> bool
+impl core::fmt::Debug for zenavif::EncodePlan
+pub fn zenavif::EncodePlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for zenavif::EncodePlan
+impl core::marker::Freeze for zenavif::EncodePlan
+impl core::marker::Send for zenavif::EncodePlan
+impl core::marker::Sync for zenavif::EncodePlan
+impl core::marker::Unpin for zenavif::EncodePlan
+impl core::marker::UnsafeUnpin for zenavif::EncodePlan
+impl core::panic::unwind_safe::RefUnwindSafe for zenavif::EncodePlan
+impl core::panic::unwind_safe::UnwindSafe for zenavif::EncodePlan
 #[non_exhaustive] pub struct zenavif::EncodedAnimation
 pub zenavif::EncodedAnimation::avif_file: alloc::vec::Vec<u8>
 pub zenavif::EncodedAnimation::frame_count: usize
@@ -1389,6 +1474,7 @@ pub fn zenavif::EncoderConfig::alpha_color_mode(self, zenavif::EncodeAlphaMode) 
 pub fn zenavif::EncoderConfig::alpha_quality(self, f32) -> Self
 pub fn zenavif::EncoderConfig::backend(self, zenavif::Av1Backend) -> Self
 pub fn zenavif::EncoderConfig::bit_depth(self, zenavif::EncodeBitDepth) -> Self
+pub fn zenavif::EncoderConfig::chroma_subsampling(self, zenavif::EncodeChromaSubsampling) -> Self
 pub fn zenavif::EncoderConfig::color_model(self, zenavif::EncodeColorModel) -> Self
 pub fn zenavif::EncoderConfig::color_primaries(self, u8) -> Self
 pub fn zenavif::EncoderConfig::content_light_level(self, u16, u16) -> Self
@@ -1424,7 +1510,10 @@ pub fn zenavif::EncoderConfig::xmp(self, alloc::vec::Vec<u8>) -> Self
 impl zenavif::EncoderConfig
 pub fn zenavif::EncoderConfig::auto_tune(self, &[u8], u32, u32, zenavif::QualityTarget, zenavif::AutoTuneOptions) -> core::result::Result<Self, zenavif::AutoTuneError>
 impl zenavif::EncoderConfig
+pub fn zenavif::EncoderConfig::resolve_plan(&self, zenavif::PlanInput) -> zenavif::EncodePlan
+impl zenavif::EncoderConfig
 pub fn zenavif::EncoderConfig::validate(&self) -> core::result::Result<(), zenavif::ValidationError>
+pub fn zenavif::EncoderConfig::validate_for_input(&self, zenavif::PlanInput) -> core::result::Result<(), zenavif::ValidationError>
 impl core::clone::Clone for zenavif::EncoderConfig
 pub fn zenavif::EncoderConfig::clone(&self) -> zenavif::EncoderConfig
 impl core::default::Default for zenavif::EncoderConfig
@@ -1557,6 +1646,63 @@ impl core::marker::Unpin for zenavif::MatrixCoefficients
 impl core::marker::UnsafeUnpin for zenavif::MatrixCoefficients
 impl core::panic::unwind_safe::RefUnwindSafe for zenavif::MatrixCoefficients
 impl core::panic::unwind_safe::UnwindSafe for zenavif::MatrixCoefficients
+pub struct zenavif::PlanInput
+pub zenavif::PlanInput::height: u32
+pub zenavif::PlanInput::input_has_alpha: bool
+pub zenavif::PlanInput::input_is_16bit: bool
+pub zenavif::PlanInput::width: u32
+impl zenavif::PlanInput
+pub fn zenavif::PlanInput::rgb8(u32, u32) -> Self
+pub fn zenavif::PlanInput::rgba8(u32, u32) -> Self
+impl core::clone::Clone for zenavif::PlanInput
+pub fn zenavif::PlanInput::clone(&self) -> zenavif::PlanInput
+impl core::cmp::Eq for zenavif::PlanInput
+impl core::cmp::PartialEq for zenavif::PlanInput
+pub fn zenavif::PlanInput::eq(&self, &zenavif::PlanInput) -> bool
+impl core::fmt::Debug for zenavif::PlanInput
+pub fn zenavif::PlanInput::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for zenavif::PlanInput
+impl core::marker::StructuralPartialEq for zenavif::PlanInput
+impl core::marker::Freeze for zenavif::PlanInput
+impl core::marker::Send for zenavif::PlanInput
+impl core::marker::Sync for zenavif::PlanInput
+impl core::marker::Unpin for zenavif::PlanInput
+impl core::marker::UnsafeUnpin for zenavif::PlanInput
+impl core::panic::unwind_safe::RefUnwindSafe for zenavif::PlanInput
+impl core::panic::unwind_safe::UnwindSafe for zenavif::PlanInput
+#[non_exhaustive] pub struct zenavif::SpeedDerived
+pub zenavif::SpeedDerived::cdef: bool
+pub zenavif::SpeedDerived::complex_prediction_modes: bool
+pub zenavif::SpeedDerived::encode_bottomup: bool
+pub zenavif::SpeedDerived::fast_deblock: bool
+pub zenavif::SpeedDerived::fine_directional_intra: bool
+pub zenavif::SpeedDerived::inter_tx_split: bool
+pub zenavif::SpeedDerived::lrf: bool
+pub zenavif::SpeedDerived::lru_on_skip: bool
+pub zenavif::SpeedDerived::min_tile_size: u16
+pub zenavif::SpeedDerived::non_square_partition_max: u8
+pub zenavif::SpeedDerived::partition_range: (u8, u8)
+pub zenavif::SpeedDerived::rdo_tx_decision: bool
+pub zenavif::SpeedDerived::reduced_tx_set: bool
+pub zenavif::SpeedDerived::segmentation_complex: bool
+pub zenavif::SpeedDerived::sgr_complexity_full: bool
+pub zenavif::SpeedDerived::tx_domain_rate: bool
+impl core::clone::Clone for zenavif::SpeedDerived
+pub fn zenavif::SpeedDerived::clone(&self) -> zenavif::SpeedDerived
+impl core::cmp::Eq for zenavif::SpeedDerived
+impl core::cmp::PartialEq for zenavif::SpeedDerived
+pub fn zenavif::SpeedDerived::eq(&self, &zenavif::SpeedDerived) -> bool
+impl core::fmt::Debug for zenavif::SpeedDerived
+pub fn zenavif::SpeedDerived::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for zenavif::SpeedDerived
+impl core::marker::StructuralPartialEq for zenavif::SpeedDerived
+impl core::marker::Freeze for zenavif::SpeedDerived
+impl core::marker::Send for zenavif::SpeedDerived
+impl core::marker::Sync for zenavif::SpeedDerived
+impl core::marker::Unpin for zenavif::SpeedDerived
+impl core::marker::UnsafeUnpin for zenavif::SpeedDerived
+impl core::panic::unwind_safe::RefUnwindSafe for zenavif::SpeedDerived
+impl core::panic::unwind_safe::UnwindSafe for zenavif::SpeedDerived
 pub struct zenavif::TransferCharacteristics(pub u8)
 impl zenavif::TransferCharacteristics
 pub const zenavif::TransferCharacteristics::BT1361: Self

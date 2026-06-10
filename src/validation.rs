@@ -115,6 +115,18 @@ pub enum ValidationError {
         b: &'static str,
     },
 
+    /// The selected encoder backend is not compiled into this build.
+    /// Without this check the encode entry points silently fall back to
+    /// the zenravif backend — a config asking for one encoder would be
+    /// served by another.
+    #[error("backend {backend} requires the `{feature}` cargo feature, which is not enabled")]
+    BackendUnavailable {
+        /// The requested backend.
+        backend: &'static str,
+        /// The cargo feature that would enable it.
+        feature: &'static str,
+    },
+
     // --- DecoderConfig ---
     /// Decoder `frame_size_limit` cannot use a sentinel reserved by
     /// the validator. The current decoder treats `0` as "no limit"
@@ -187,10 +199,59 @@ impl crate::EncoderConfig {
         self.validate_speed_and_threads()?;
         self.validate_transforms()?;
         self.validate_cicp()?;
+        self.validate_backend_and_color()?;
         #[cfg(feature = "encode-imazen")]
         self.validate_imazen_knobs()?;
         #[cfg(feature = "__expert")]
         self.validate_expert_overrides()?;
+        Ok(())
+    }
+
+    /// Validate this config against a concrete input shape.
+    ///
+    /// Runs [`validate`](Self::validate) plus the config×input checks a
+    /// config-only pass cannot make. Today that is one rule: the 16-bit
+    /// entry points always encode identity-matrix RGB planes, and AV1
+    /// has no defined 4:2:0 subsampling for identity — the encoder
+    /// rejects the pair at encode time; this rejects it up front.
+    pub fn validate_for_input(
+        &self,
+        input: crate::encode_plan::PlanInput,
+    ) -> Result<(), ValidationError> {
+        self.validate()?;
+        if input.input_is_16bit && self.chroma_subsampling == crate::EncodeChromaSubsampling::Yuv420
+        {
+            return Err(ValidationError::MutuallyExclusive {
+                a: "chroma_subsampling=Yuv420",
+                b: "16-bit input (identity-RGB encode path)",
+            });
+        }
+        Ok(())
+    }
+
+    fn validate_backend_and_color(&self) -> Result<(), ValidationError> {
+        // Backend availability: without this, encode_rgb8 silently falls
+        // back to zenravif when the svtav1 feature is absent (and the
+        // rgba/16-bit entry points never dispatch on the backend at all).
+        #[cfg(not(feature = "encode-svtav1"))]
+        if self.backend == crate::Av1Backend::Svtav1 {
+            return Err(ValidationError::BackendUnavailable {
+                backend: "Av1Backend::Svtav1",
+                feature: "encode-svtav1",
+            });
+        }
+        // 4:2:0 has no defined meaning for the identity (RGB) matrix;
+        // zenravif rejects the pair at encode time
+        // (encode_raw_planes_internal: Error::Unsupported). Mirror of
+        // zenravif 0.1.3 Encoder::validate.
+        if self.chroma_subsampling == crate::EncodeChromaSubsampling::Yuv420
+            && self.color_model == crate::EncodeColorModel::Rgb
+        {
+            return Err(ValidationError::MutuallyExclusive {
+                a: "chroma_subsampling=Yuv420",
+                b: "color_model=Rgb",
+            });
+        }
         Ok(())
     }
 
