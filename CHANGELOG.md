@@ -11,6 +11,10 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 ## [Unreleased]
 
 ### Added
+- Versioned public-API surface snapshot at `docs/public-api/zenavif.txt`,
+  regenerated on every `cargo test` by `tests/public_api_doc.rs`
+  (`ZEN_API_DOC=check` verifies in CI's clippy job, `=off` skips); justfile
+  recipes `api-doc` / `api-doc-check`.
 - `zencodec::GainMapRender` wired through the decode trait path:
   `BaseOnly` (default) ignores the gain map entirely — no extras attached
   (previously `GainMapSource` attachment was gated only on the legacy

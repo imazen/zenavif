@@ -61,6 +61,8 @@ rayon = "1.11.0"
 # Path-pinned to the sibling checkout (see the [dependencies] note above);
 # test-only dep for the rav1e picker training.
 zenanalyze = { version = "0.2.0", path = "../zenanalyze", features = ["experimental"] }
+# Parses `cargo metadata` in tests/public_api_doc.rs (feature-list discovery).
+serde_json = "1.0.150"
 
 [[bench]]
 name = "decode_benchmark"

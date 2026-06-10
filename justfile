@@ -22,6 +22,15 @@ clippy:
 # Format code
 fmt:
     cargo fmt
+    cargo test -p zenavif --test public_api_doc
+
+# Regenerate the public-API surface snapshot only
+api-doc:
+    cargo test -p zenavif --test public_api_doc
+
+# Verify the committed snapshot is current (what CI runs)
+api-doc-check:
+    ZEN_API_DOC=check cargo test -p zenavif --test public_api_doc
 
 # Format check
 fmt-check:
