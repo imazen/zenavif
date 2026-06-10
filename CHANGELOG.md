@@ -10,7 +10,57 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Fixed
+- **`alpha_quality` unset now follows the color quality, as its docs always
+  promised.** zenravif's built-in default pins the alpha quantizer to the
+  quality-80 equivalent and `with_quality` never touches it, so an
+  alpha-bearing encode at `quality(30)` was silently encoding alpha at q80;
+  zenavif now forwards `alpha_quality.unwrap_or(quality)` explicitly. Output
+  bytes change for alpha-bearing encodes whose color quality ≠ 80. Pinned both
+  directions by `tests/encode_contracts.rs::alpha_quality_unset_follows_color_quality`.
+
 ### Added
+- **Variant-generation infrastructure** (the zenjpeg patterns, adopted per
+  `docs/VARIANT_GENERATION.md`):
+  - `EncoderConfig::resolve_plan(PlanInput) -> EncodePlan` — full static
+    resolution of what an encode will do: quantizers (color + alpha), the
+    qm×lossless gate, every speed-preset-derived search setting after
+    overrides, chroma subsampling, resolved bit depth / color model / CICP
+    matrix, and the tile count — including `TilesResolution::MachineDependent`
+    when `threads` is unset, because zenravif substitutes the *host core
+    count* into the tile formula and tile structure changes the bitstream
+    (default-config encodes are not byte-reproducible across machines).
+  - `EncoderConfig::validate()` now rejects `Av1Backend::Svtav1` when the
+    backend isn't compiled in (previously a silent fallback to zenravif) and
+    `Yuv420 × Rgb`; new `validate_for_input()` additionally rejects
+    `Yuv420 × 16-bit input` (the 16-bit entry points force identity-RGB).
+  - `EncoderConfig::chroma_subsampling(EncodeChromaSubsampling)` — 4:4:4
+    (default, unchanged) vs 4:2:0. The biggest AVIF rate knob was previously
+    hardwired to 4:4:4.
+  - `zenavif::sweep` (behind `__expert`): `SweepAxes` (`rd_core` /
+    `modes_full` + the `KnobProbe` single-deviation axis), `QualityGrid`,
+    `SweepBuilder` with a no-silent-caps budget ladder, validity filtering,
+    main-effects-first queue ordering, and a byte-identity `fingerprint`
+    over RESOLVED state (quality mediated by quantizer; override==preset
+    aliases merged; `vaq_strength` excluded when VAQ is off;
+    `matrix_coefficients` excluded on the zenravif backend — every exclusion
+    encode-proven). Sweep cells pin `threads(Some(1))` for cross-machine
+    reproducibility.
+  - `examples/sweep_validate.rs` — empirical axis validation (inert-step
+    detection, fingerprint contracts on real encodes, tiles/threads claims,
+    ssim2 sanity floor); results committed as
+    `benchmarks/sweep_validate_2026-06-10.tsv`. Its first runs caught two
+    real defects, both root-caused structurally and fixed: (1)
+    `with_vaq(true, 1.0)` is byte-identical to VAQ off — the
+    psychovisual/still tunes always compute the activity mask and zenrav1e
+    skips the strength rescale at 1.0 (`api/internal.rs:1379`); the sweep
+    vaq axis is `Option<f64>` now and the fingerprint hashes the active
+    form. (2) `lru_on_skip` is byte-inert on still-image encodes at speeds
+    2–8 (28/28 comparisons incl. skip-heavy flat content) — removed from
+    the curated probe set with the evidence in the provenance table.
+  - `tests/encode_contracts.rs` — encode-level pins for the alpha contract,
+    quantizer mediation (q 80.0 ≡ q 80.2 ≠ q 81.0 at the byte level),
+    subsampling liveness, and the new validate() rejections.
 - Versioned public-API surface snapshot at `docs/public-api/zenavif.txt`,
   regenerated on every `cargo test` by `tests/public_api_doc.rs`
   (`ZEN_API_DOC=check` verifies in CI's clippy job, `=off` skips); justfile

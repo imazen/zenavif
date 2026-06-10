@@ -189,7 +189,12 @@ pub struct EncodePlan {
     pub pixel_range: EncodePixelRange,
     /// Quantization matrices after the lossless gate.
     pub qm: bool,
-    /// Variance adaptive quantization enabled.
+    /// Variance adaptive quantization **with effect**: true only when
+    /// VAQ is enabled AND the strength differs from 1.0. The
+    /// psychovisual/still tunes always compute the activity mask, and
+    /// zenrav1e skips the VAQ rescale at strength 1.0, so
+    /// `with_vaq(true, 1.0)` is structurally byte-identical to off
+    /// (zenrav1e `api/internal.rs:1379`).
     pub vaq: bool,
     /// VAQ strength; only meaningful when `vaq` is true.
     pub vaq_strength: f64,
@@ -443,7 +448,7 @@ impl EncoderConfig {
             chroma_subsampling: self.chroma_subsampling,
             pixel_range: self.pixel_range.unwrap_or(EncodePixelRange::Full),
             qm: self.qm_effective(),
-            vaq: self.vaq_effective(),
+            vaq: self.vaq_active(),
             vaq_strength: self.vaq_strength_effective(),
             tune_still_image: self.tune_still_image_effective(),
             lossless: self.lossless_effective(),
@@ -487,6 +492,22 @@ impl EncoderConfig {
         {
             false
         }
+    }
+
+    /// Whether VAQ will actually change the encode. Under the
+    /// psychovisual/still-image tunes zenravif always uses, the
+    /// activity mask is computed regardless of `enable_vaq`; the knob's
+    /// only incremental effect is the strength rescale, which zenrav1e
+    /// explicitly skips at strength 1.0. So `with_vaq(true, 1.0)` is
+    /// byte-identical to VAQ off — structurally, not just empirically.
+    ///
+    /// Provenance: zenrav1e `api/internal.rs:1369` (`use_activity`
+    /// includes both tunes) and `:1379`
+    /// (`enable_vaq && vaq_strength != 1.0` gate). Byte-proven in
+    /// `sweep_validate` (first run flagged the 1.0 axis value as an
+    /// inert step across 24 encodes).
+    pub(crate) fn vaq_active(&self) -> bool {
+        self.vaq_effective() && self.vaq_strength_effective() != 1.0
     }
 
     pub(crate) fn vaq_strength_effective(&self) -> f64 {

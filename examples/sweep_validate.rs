@@ -2,8 +2,8 @@
 //!
 //! Encodes the default stratum plus every single-deviation stratum of
 //! [`SweepAxes::modes_full`] on a small mixed corpus (CID22-512 photos,
-//! synthetic noise / gradient / checkerboard at 256², one 64×64 tiny)
-//! and checks:
+//! synthetic noise / gradient / checkerboard / flat web-graphic at
+//! 256², one 64×64 tiny) and checks:
 //!
 //! 1. **Fingerprint contract** — equal fingerprint ⇒ byte-identical
 //!    output, on real encodes of the documented alias/exclusion pairs:
@@ -145,6 +145,35 @@ fn generate_checkerboard(w: usize, h: usize, cell: usize) -> ImgVec<Rgb<u8>> {
     ImgVec::new(px, w, h)
 }
 
+/// Mostly-flat web-graphic-like image: solid background with one small
+/// textured block. Exists to exercise knobs that only act on skip-heavy
+/// content — `lru_on_skip` in particular only changes decisions when
+/// entire loop-restoration units consist of skip blocks, which photos
+/// and noise never produce.
+fn generate_flat_logo(w: usize, h: usize) -> ImgVec<Rgb<u8>> {
+    let px = (0..h)
+        .flat_map(|y| {
+            (0..w).map(move |x| {
+                // 48×48 "logo" in the top-left quadrant; flat elsewhere.
+                if (32..80).contains(&x) && (32..80).contains(&y) {
+                    Rgb {
+                        r: mix(x as u32, y as u32, 5),
+                        g: mix(x as u32, y as u32, 6),
+                        b: 40,
+                    }
+                } else {
+                    Rgb {
+                        r: 245,
+                        g: 246,
+                        b: 248,
+                    }
+                }
+            })
+        })
+        .collect();
+    ImgVec::new(px, w, h)
+}
+
 /// Smooth photo-like gradient with mild texture (DCT-friendly content).
 fn generate_gradient(w: usize, h: usize) -> ImgVec<Rgb<u8>> {
     let px = (0..h)
@@ -251,6 +280,7 @@ fn main() {
     images.push(("noise256".into(), generate_noise(256, 256)));
     images.push(("checker256".into(), generate_checkerboard(256, 256, 8)));
     images.push(("gradient256".into(), generate_gradient(256, 256)));
+    images.push(("flatlogo256".into(), generate_flat_logo(256, 256)));
     images.push(("tiny64".into(), generate_gradient(64, 64)));
 
     // ------------------------------------------------------------------
@@ -314,20 +344,29 @@ fn main() {
 
     let zensim = Zensim::new(ZensimProfile::latest());
 
+    // zenrav1e's recursive partition RDO needs more than rayon's
+    // default 2 MB worker stack (observed: stack overflow at 256²,
+    // speed 2). All encode work runs in this big-stack pool.
+    let pool = rayon::ThreadPoolBuilder::new()
+        .stack_size(32 * 1024 * 1024)
+        .build()
+        .expect("rayon pool");
+
     // Encode the whole subset; cells pin threads=1, so parallelize
     // across (image, cell) pairs.
     let jobs: Vec<(usize, usize)> = (0..images.len())
         .flat_map(|i| (0..subset.len()).map(move |c| (i, c)))
         .collect();
     let t_all = Instant::now();
-    let results: Vec<((usize, usize), Result<Measure, String>)> = jobs
-        .par_iter()
-        .map(|&(ii, ci)| {
-            let (_, img) = &images[ii];
-            let m = encode_and_score(img.as_ref(), &subset[ci].config, &zensim);
-            ((ii, ci), m)
-        })
-        .collect();
+    let results: Vec<((usize, usize), Result<Measure, String>)> = pool.install(|| {
+        jobs.par_iter()
+            .map(|&(ii, ci)| {
+                let (_, img) = &images[ii];
+                let m = encode_and_score(img.as_ref(), &subset[ci].config, &zensim);
+                ((ii, ci), m)
+            })
+            .collect()
+    });
     eprintln!(
         "encoded {} cells in {:.1}s",
         results.len(),
@@ -441,6 +480,10 @@ fn main() {
     let noise = generate_noise(256, 256);
     let big_noise = generate_noise(512, 512);
     let pin = |c: EncoderConfig| c.threads(Some(1));
+    // Big-stack wrapper for the sequential contract encodes (same
+    // zenrav1e stack-depth issue as the subset pass).
+    let enc =
+        |img: Img<&[Rgb<u8>]>, cfg: &EncoderConfig| pool.install(|| encode_rgb8(img, cfg, stop()));
 
     struct AliasPair {
         label: &'static str,
@@ -480,6 +523,12 @@ fn main() {
             expect_equal: true,
         },
         AliasPair {
+            label: "vaq@1.0 is the structural no-op: on@1.0 vs off",
+            a: pin(EncoderConfig::new().quality(50.0).speed(6)).with_vaq(true, 1.0),
+            b: pin(EncoderConfig::new().quality(50.0).speed(6)).with_vaq(false, 1.0),
+            expect_equal: true,
+        },
+        AliasPair {
             label: "vaq_strength live when vaq on: 0.5 vs 2.0",
             a: pin(EncoderConfig::new().quality(50.0).speed(6)).with_vaq(true, 0.5),
             b: pin(EncoderConfig::new().quality(50.0).speed(6)).with_vaq(true, 2.0),
@@ -511,8 +560,8 @@ fn main() {
             ));
             continue;
         }
-        let ea = encode_rgb8(noise.as_ref(), &p.a, stop());
-        let eb = encode_rgb8(noise.as_ref(), &p.b, stop());
+        let ea = enc(noise.as_ref(), &p.a);
+        let eb = enc(noise.as_ref(), &p.b);
         match (ea, eb) {
             (Ok(a), Ok(b)) => {
                 let identical = a.avif_file == b.avif_file;
@@ -551,8 +600,8 @@ fn main() {
                 .speed(6)
                 .threads(Some(threads))
         };
-        let t1 = encode_rgb8(big_noise.as_ref(), &mk(1), stop());
-        let t2 = encode_rgb8(big_noise.as_ref(), &mk(2), stop());
+        let t1 = enc(big_noise.as_ref(), &mk(1));
+        let t2 = enc(big_noise.as_ref(), &mk(2));
         match (t1, t2) {
             (Ok(a), Ok(b)) => {
                 if a.avif_file == b.avif_file {
@@ -566,8 +615,8 @@ fn main() {
             (Err(e), _) | (_, Err(e)) => hard_failures.push(format!("tiles encode failed: {e}")),
         }
         let tiny = generate_gradient(64, 64);
-        let t1 = encode_rgb8(tiny.as_ref(), &mk(1), stop());
-        let t2 = encode_rgb8(tiny.as_ref(), &mk(2), stop());
+        let t1 = enc(tiny.as_ref(), &mk(1));
+        let t2 = enc(tiny.as_ref(), &mk(2));
         match (t1, t2) {
             (Ok(a), Ok(b)) => {
                 if a.avif_file != b.avif_file {

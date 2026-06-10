@@ -49,10 +49,11 @@
 //! | qm | on/off | true, false | ~10 % BD-rate win measured on 63-image CID22 stills (ravif 7265eea benchmarks; default on) |
 //! | subsampling | 444/420 | Yuv444, Yuv420 | the classic AVIF rate knob (~25–35 % on photos); previously unsweepable — zenavif only exposed 4:4:4 before this module landed |
 //! | bit_depth | 8/10 | Auto(→8 for RGB8 corpora), Ten | zenravif docs recommend 10-bit even for 8-bit input; sweep measures the claim |
-//! | vaq strength | 0.0–4.0 | on@1.0 (axis), 0.5 / 2.0 (probes) | bound = zenravif validate range; prior finding "VAQ hurts stills" (CLAUDE.md, ravif 7265eea) — steps exist to quantify, not to endorse. First validated by `sweep_validate` 2026-06-10 |
+//! | vaq strength | 0.0–4.0, **1.0 = structural no-op** | Some(0.5) (axis), 2.0 (probe) | bound = zenravif validate range. Strength 1.0 is byte-identical to VAQ off under the psychovisual/still tunes (zenrav1e `api/internal.rs:1379`; the harness's first run caught the 1.0 axis value as an inert step across 24 encodes — the axis is `Option<f64>` now so the no-op spelling can't be curated by accident). Prior finding "VAQ hurts stills" (CLAUDE.md, ravif 7265eea) — steps exist to quantify, not to endorse |
 //! | seg_boost | 0.5–4.0 | 1.5, 2.5 | bound = zenravif validate range (1.0 = off). Steps unmeasured before this module; validated for liveness (not goodness) by `sweep_validate` |
 //! | trellis | on/off | off, on | zenrav1e Viterbi DP; default off in zenravif |
 //! | deep-knob probes | see [`KnobProbe`] | one axis, single-deviation by construction | each probe flips one preset-derived setting both ways; fingerprint dedup removes the spellings that equal the preset |
+//! | lru_on_skip | on/off | **not curated** | byte-inert on still-image encodes at speeds 2–8 across photos/noise/checker/gradient/flat-logo, q10–q85 (28/28 comparisons, `sweep_validate` 2026-06-10). The search-on-skip-LRUs path resolves to the same restoration decisions on intra-only content; the preset only enables it at speed ≤ 1, outside the curated speed set. [`KnobProbe::LruOnSkip`] remains available for explicit speed ≤ 1 sweeps |
 //!
 //! Empirical validation harness: `examples/sweep_validate.rs`. It
 //! encodes the default stratum + every single-deviation stratum on
@@ -92,7 +93,11 @@ pub enum KnobProbe {
     RdoTxDecision(bool),
     /// Override SGR complexity Full (16 sets) vs Reduced (8).
     SgrFull(bool),
-    /// Override loop-restoration search on skip blocks.
+    /// Override loop-restoration search on skip blocks. Not in the
+    /// curated [`SweepAxes::modes_full`] set: byte-inert on still-image
+    /// encodes at speeds 2–8 (28/28 comparisons incl. skip-heavy flat
+    /// content, `sweep_validate` 2026-06-10). Probe it explicitly when
+    /// sweeping speed ≤ 1, where the preset turns it on.
     LruOnSkip(bool),
     /// Override segmentation Complex (k-means) vs Simple.
     SegmentationComplex(bool),
@@ -196,9 +201,13 @@ pub struct SweepAxes {
     pub bit_depths: Vec<EncodeBitDepth>,
     /// Internal color model.
     pub color_models: Vec<EncodeColorModel>,
-    /// Variance adaptive quantization on/off (strength 1.0; strength
-    /// steps live on the probe axis).
-    pub vaq: Vec<bool>,
+    /// Variance adaptive quantization: `None` = off, `Some(strength)`
+    /// = on at that strength. Strength 1.0 is NOT a useful "on" value —
+    /// it is structurally byte-identical to off (the psychovisual/still
+    /// tunes always compute the activity mask and zenrav1e skips the
+    /// rescale at 1.0; zenrav1e `api/internal.rs:1379`) — the planner
+    /// would just dedupe it away.
+    pub vaq: Vec<Option<f64>>,
     /// Trellis quantization on/off.
     pub trellis: Vec<bool>,
     /// Deep-knob single-deviation probes.
@@ -220,7 +229,7 @@ impl SweepAxes {
             ],
             bit_depths: vec![EncodeBitDepth::Auto, EncodeBitDepth::Ten],
             color_models: vec![EncodeColorModel::YCbCr],
-            vaq: vec![false],
+            vaq: vec![None],
             trellis: vec![false],
             probes: vec![KnobProbe::None],
         }
@@ -236,7 +245,9 @@ impl SweepAxes {
         let mut axes = Self::rd_core();
         axes.speeds.push(8);
         axes.color_models.push(EncodeColorModel::Rgb);
-        axes.vaq.push(true);
+        // 0.5 was the strength zenravif's still_image_preset documents;
+        // 2.0 lives on the probe axis. 1.0 is the structural no-op.
+        axes.vaq.push(Some(0.5));
         axes.trellis.push(true);
         axes.probes = vec![
             KnobProbe::None,
@@ -250,8 +261,10 @@ impl SweepAxes {
             KnobProbe::RdoTxDecision(false),
             KnobProbe::SgrFull(true),
             KnobProbe::SgrFull(false),
-            KnobProbe::LruOnSkip(true),
-            KnobProbe::LruOnSkip(false),
+            // LruOnSkip is deliberately absent: byte-inert on
+            // still-image encodes at every curated speed (28/28
+            // comparisons incl. flat skip-heavy content,
+            // sweep_validate 2026-06-10) — see the provenance table.
             KnobProbe::SegmentationComplex(true),
             KnobProbe::SegmentationComplex(false),
             KnobProbe::EncodeBottomup(true),
@@ -261,7 +274,8 @@ impl SweepAxes {
             // the module-docs provenance table.
             KnobProbe::SegBoost(1.5),
             KnobProbe::SegBoost(2.5),
-            KnobProbe::VaqStrength(0.5),
+            // VaqStrength(0.5) would alias the vaq-axis Some(0.5)
+            // stratum; only the 2.0 step adds information here.
             KnobProbe::VaqStrength(2.0),
             // __expert depth.
             KnobProbe::PartitionRange(4, 16),
@@ -544,7 +558,7 @@ struct Stratum {
     subsampling: EncodeChromaSubsampling,
     bit_depth: EncodeBitDepth,
     color_model: EncodeColorModel,
-    vaq: bool,
+    vaq: Option<f64>,
     trellis: bool,
     probe: KnobProbe,
 }
@@ -562,7 +576,7 @@ impl Stratum {
             // bytes depend on the host's core count.
             .threads(Some(1))
             .with_qm(self.qm)
-            .with_vaq(self.vaq, 1.0);
+            .with_vaq(self.vaq.is_some(), self.vaq.unwrap_or(1.0));
         let cfg = if self.trellis {
             cfg.with_trellis(Some(true))
         } else {
@@ -587,8 +601,8 @@ impl Stratum {
         if self.color_model == EncodeColorModel::Rgb {
             s.push_str("-rgb");
         }
-        if self.vaq {
-            s.push_str("-vaq");
+        if let Some(strength) = self.vaq {
+            s.push_str(&format!("-vaq{strength}"));
         }
         if self.trellis {
             s.push_str("-trel");
@@ -748,8 +762,10 @@ impl Fnv {
 /// - an override knob set to the value its speed preset already derives
 ///   merges with the unset spelling (the speed-derived settings are
 ///   hashed *after* overrides);
-/// - `vaq_strength` is hashed only when VAQ is enabled — zenrav1e never
-///   reads the strength when `enable_vaq` is false (encode-validated by
+/// - VAQ hashes as *active* (enabled AND strength ≠ 1.0): the strength
+///   is never read when VAQ is off, and the rescale is skipped at
+///   strength 1.0 under the psychovisual/still tunes zenravif always
+///   uses (zenrav1e `api/internal.rs:1379`; encode-validated by
 ///   `sweep_validate`);
 /// - the CICP `matrix_coefficients` field is **excluded**: the zenravif
 ///   backend derives the signaled matrix from the color model and never
@@ -817,9 +833,14 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
         crate::EncodeAlphaMode::Premultiplied => 2,
     });
 
-    // Coefficient-level knobs after gates.
+    // Coefficient-level knobs after gates. VAQ hashes its *active*
+    // form: enabled-at-strength-1.0 is structurally byte-identical to
+    // off (the psychovisual/still tunes always compute the activity
+    // mask; zenrav1e skips the rescale at 1.0 — api/internal.rs:1379,
+    // byte-proven by the harness's first run flagging the 1.0 axis
+    // value as inert).
     h.u8(u8::from(config.qm_effective()));
-    let vaq = config.vaq_effective();
+    let vaq = config.vaq_active();
     h.u8(u8::from(vaq));
     if vaq {
         h.f64(config.vaq_strength_effective());
@@ -924,7 +945,7 @@ mod tests {
             subsampling: vec![EncodeChromaSubsampling::Yuv444],
             bit_depths: vec![EncodeBitDepth::Auto],
             color_models: vec![EncodeColorModel::YCbCr],
-            vaq: vec![false],
+            vaq: vec![None],
             trellis: vec![false],
             probes: vec![KnobProbe::None],
         }
@@ -998,15 +1019,20 @@ mod tests {
             subsampling: EncodeChromaSubsampling::Yuv444,
             bit_depth: EncodeBitDepth::Auto,
             color_model: EncodeColorModel::YCbCr,
-            vaq: false,
+            vaq: None,
             trellis: false,
             probe: KnobProbe::None,
         };
         let a = base.build_config(50.0).with_vaq(false, 1.0);
         let b = base.build_config(50.0).with_vaq(false, 3.0);
         assert_eq!(fingerprint(&a), fingerprint(&b));
-        let c = base.build_config(50.0).with_vaq(true, 1.0);
-        assert_ne!(fingerprint(&a), fingerprint(&c));
+        // Enabled at strength 1.0 is the structural no-op spelling
+        // (zenrav1e api/internal.rs:1379) — it must alias OFF.
+        let noop = base.build_config(50.0).with_vaq(true, 1.0);
+        assert_eq!(fingerprint(&a), fingerprint(&noop));
+        // A strength with effect must not alias.
+        let live = base.build_config(50.0).with_vaq(true, 0.5);
+        assert_ne!(fingerprint(&a), fingerprint(&live));
     }
 
     #[test]
