@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+- Versioned public-API surface snapshot at `docs/public-api/zenavif-serialize.txt`,
+  regenerated on every `cargo test` via `tests/public_api_doc.rs`
+  (`ZEN_API_DOC=check` verifies in CI's clippy job, `=off` skips elsewhere).
+  Justfile recipes `api-doc` / `api-doc-check`.
+
 ### Fixed
 - Grid serializer no longer scans the output buffer for `0xBAADF00D` sentinels when patching `iloc` extent offsets; tile payloads that legitimately contain those bytes are no longer corrupted (05e2353)
 - Animated serializer no longer scans the output buffer for `0xDEADBEEF` / `0xDEADBEE0` sentinels; AV1 frame payloads containing those bytes are preserved exactly (5e4af02)
