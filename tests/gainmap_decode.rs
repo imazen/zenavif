@@ -352,6 +352,13 @@ fn gain_map_data_has_valid_obu_structure() {
 // Gain map through zencodec trait DecodeOutput extras
 // ============================================================================
 
+/// `GainMapRender::Components` surfaces BOTH the raw `GainMapSource` (AV1
+/// payload + metadata, for transcode) and the decoded
+/// [`zencodec::decode::DecodedGainMap`] (pixels + ISO 21496-1 params).
+///
+/// Gain-map extras are opt-in per the zencodec contract — the default
+/// (`BaseOnly`) decode attaches neither (see
+/// `gain_map_render_base_only_attaches_nothing`).
 #[cfg(feature = "zencodec")]
 #[test]
 fn decode_gain_map_via_zencodec_extras() {
@@ -361,6 +368,7 @@ fn decode_gain_map_via_zencodec_extras() {
     let dec = zenavif::AvifDecoderConfig::new();
     let output = dec
         .job()
+        .with_gain_map_render(zencodec::GainMapRender::Components)
         .decoder(std::borrow::Cow::Borrowed(&data), &[])
         .expect("decoder")
         .decode()
@@ -376,6 +384,70 @@ fn decode_gain_map_via_zencodec_extras() {
     // Multi-channel gain map should have 3 channels in metadata
     assert_eq!(gm.metadata.channels, 3);
     assert!(gm.metadata.alternate_cicp.is_some());
+
+    // ...and the DECODED gain map (Components contract).
+    let dgm = output
+        .extras::<zencodec::decode::DecodedGainMap>()
+        .expect("Components must surface the DecodedGainMap");
+    assert!(dgm.pixels.width() > 0 && dgm.pixels.height() > 0);
+    assert_eq!(dgm.metadata.channels, 3);
+}
+
+/// The default decode (`BaseOnly`) attaches no gain-map extras at all —
+/// the gain map is ignored, only `ImageInfo` metadata reports its presence.
+#[cfg(feature = "zencodec")]
+#[test]
+fn gain_map_render_base_only_attaches_nothing() {
+    use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
+
+    let data = require_vector!(load_vector(SEINE_SDR_GAINMAP));
+    let output = zenavif::AvifDecoderConfig::new()
+        .job()
+        .decoder(std::borrow::Cow::Borrowed(&data), &[])
+        .expect("decoder")
+        .decode()
+        .expect("decode");
+    assert!(output.extras::<GainMapSource>().is_none());
+    assert!(
+        output
+            .extras::<zencodec::decode::DecodedGainMap>()
+            .is_none()
+    );
+}
+
+/// zenavif does not reconstruct (`reconstructs_hdr()` is false):
+/// `ReconstructHdr` downgrades to surfacing Components per the zencodec
+/// contract — the base stays honestly SDR-labeled, never SDR-as-HDR.
+#[cfg(feature = "zencodec")]
+#[test]
+fn gain_map_render_reconstruct_downgrades_to_components() {
+    use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
+
+    assert!(
+        !<zenavif::AvifDecoderConfig as zencodec::decode::DecoderConfig>::capabilities()
+            .reconstructs_hdr()
+    );
+    let data = require_vector!(load_vector(SEINE_SDR_GAINMAP));
+    let output = zenavif::AvifDecoderConfig::new()
+        .job()
+        .with_gain_map_render(zencodec::GainMapRender::ReconstructHdr {
+            target_headroom: None,
+        })
+        .decoder(std::borrow::Cow::Borrowed(&data), &[])
+        .expect("decoder")
+        .decode()
+        .expect("decode");
+    // Surfaced, not applied: SDR base + decoded components.
+    assert!(
+        output
+            .extras::<zencodec::decode::DecodedGainMap>()
+            .is_some()
+    );
+    assert_ne!(
+        output.pixels().descriptor().channel_type(),
+        zenpixels::ChannelType::F32,
+        "base must stay SDR — zenavif never silently labels SDR as HDR"
+    );
 }
 
 #[cfg(feature = "zencodec")]

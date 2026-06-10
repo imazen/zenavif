@@ -1944,6 +1944,7 @@ impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
             start_frame_index: 0,
             policy: None,
             extract_gain_map,
+            gain_map_render: zencodec::GainMapRender::default(),
         }
     }
 }
@@ -1961,6 +1962,11 @@ pub struct AvifDecodeJob {
     /// Default: false. Metadata (supplements, `GainMapPresence`) is always
     /// populated regardless of this flag.
     extract_gain_map: bool,
+    /// Gain-map rendition intent (zencodec 0.1.21). `Components` (and
+    /// `ReconstructHdr`, which zenavif downgrades to surfacing — see
+    /// `with_gain_map_render`) additionally decodes the gain-map AV1 payload
+    /// into a [`zencodec::decode::DecodedGainMap`]. Default `BaseOnly`.
+    gain_map_render: zencodec::GainMapRender,
 }
 
 impl AvifDecodeJob {
@@ -2070,6 +2076,17 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         self
     }
 
+    /// zenavif surfaces gain maps but does not apply them
+    /// (`DecodeCapabilities::reconstructs_hdr()` is `false`): per the
+    /// [`GainMapRender::ReconstructHdr`] contract, a decoder without
+    /// reconstruction surfaces [`GainMapRender::Components`] instead — the
+    /// SDR base stays SDR-labeled and the caller applies the gain map one
+    /// layer up (ultrahdr-core).
+    fn with_gain_map_render(mut self, render: zencodec::GainMapRender) -> Self {
+        self.gain_map_render = render;
+        self
+    }
+
     fn probe(&self, data: &[u8]) -> Result<ImageInfo, At<Error>> {
         let decoder = crate::ManagedAvifDecoder::new(data, &self.config.inner)?;
         let native_info = decoder.probe_info()?;
@@ -2171,6 +2188,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
             limits: self.limits,
             policy: self.policy,
             extract_gain_map: self.extract_gain_map,
+            gain_map_render: self.gain_map_render,
         })
     }
 
@@ -2627,6 +2645,7 @@ pub struct AvifDecoder<'a> {
     limits: ResourceLimits,
     policy: Option<zencodec::decode::DecodePolicy>,
     extract_gain_map: bool,
+    gain_map_render: zencodec::GainMapRender,
 }
 
 impl zencodec::decode::Decode for AvifDecoder<'_> {
@@ -2674,13 +2693,48 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
         if let Ok(probe) = crate::detect::probe(&self.data) {
             output = output.with_source_encoding_details(probe);
         }
+        // Gain-map rendition intent. zenavif surfaces (it does not apply):
+        // Components decodes the gain-map AV1 payload into a DecodedGainMap;
+        // ReconstructHdr downgrades to Components per the zencodec contract
+        // (reconstructs_hdr() is false — the base stays honestly SDR-labeled
+        // and the caller applies via ultrahdr-core). Unknown future modes are
+        // refused, never mis-rendered.
+        let surface_components = match self.gain_map_render {
+            zencodec::GainMapRender::BaseOnly => false,
+            zencodec::GainMapRender::Components
+            | zencodec::GainMapRender::ReconstructHdr { .. } => true,
+            _ => {
+                return Err(at!(Error::Unsupported("unrecognized GainMapRender mode")));
+            }
+        };
+
         // Attach gain map / depth map as typed extras only when opted in.
         // Metadata (`ImageInfo.supplements`, `GainMapPresence`) is always
         // populated regardless — only the heavy data blobs are gated.
-        if self.extract_gain_map
+        if (self.extract_gain_map || surface_components)
             && let Some(gm) = native_info.gain_map
             && let Some(metadata) = convert_gain_map_info(&gm)
         {
+            // Components: decode the AV1-coded gain-map image into pixels.
+            // Errors only when a present gain map is malformed.
+            if surface_components {
+                let (px, gw, gh, channels) = crate::decode_av1_obu(&gm.gain_map_data)?;
+                let desc = if channels == 1 {
+                    PixelDescriptor::GRAY8_SRGB
+                } else {
+                    PixelDescriptor::RGB8_SRGB
+                };
+                let pixels = zenpixels::PixelBuffer::from_vec(px, gw, gh, desc).map_err(|_| {
+                    at!(Error::Decode {
+                        code: -1,
+                        msg: "gain-map pixel buffer creation failed",
+                    })
+                })?;
+                output = output.with_extras(zencodec::decode::DecodedGainMap::new(
+                    pixels,
+                    metadata.clone(),
+                ));
+            }
             let source = zencodec::gainmap::GainMapSource::new(
                 gm.gain_map_data,
                 zencodec::ImageFormat::Avif,
