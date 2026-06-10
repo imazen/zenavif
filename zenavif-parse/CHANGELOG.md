@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+- Versioned public-API surface snapshot at `docs/public-api/zenavif-parse.txt`,
+  regenerated on every `cargo test` via `tests/public_api_doc.rs`
+  (`ZEN_API_DOC=check` verifies in CI's clippy job, `=off` skips elsewhere).
+  Justfile recipes `api-doc` / `api-doc-check`.
+
 ### Changed
 - Added `CHANGELOG.md` to published package `include` list so release history ships with the crate.
 
