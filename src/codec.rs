@@ -2853,6 +2853,13 @@ fn reconstruct_hdr_pixels(
             msg: "gain-map apply failed (see ultrahdr-core validation rules)",
         })
     })?;
+    // The apply kernels emit constant alpha = 1.0 (structural, not
+    // scanned) — tag it Opaque so downstream encoders know the lane is
+    // not load-bearing without rescanning.
+    let desc = hdr
+        .descriptor()
+        .with_alpha(Some(zenpixels::AlphaMode::Opaque));
+    let hdr = hdr.with_descriptor(desc);
     let cll = measure_cll_linear(&hdr);
     Ok((hdr, cll))
 }
@@ -2982,7 +2989,7 @@ fn wants_gray_output(preferred: &[PixelDescriptor]) -> bool {
 /// gray preference can be satisfied exactly (an RGB-expanded mono buffer
 /// is R=G=B; luma of equal channels is the channel).
 fn negotiate_format(
-    pixels: PixelBuffer,
+    mut pixels: PixelBuffer,
     preferred: &[PixelDescriptor],
     source_is_gray: bool,
 ) -> PixelBuffer {
@@ -3008,10 +3015,28 @@ fn negotiate_format(
 
         // Grayscale preferences: satisfiable exactly only for monochrome
         // sources (never synthesize luma for color images here — that is
-        // a CMS decision, not format negotiation).
+        // a CMS decision, not format negotiation). The collapse goes
+        // through the load-bearing reduction, which VERIFIES R==G==B at
+        // the byte level (instead of trusting container metadata),
+        // rewrites in place with no allocation, and handles color
+        // signaling (an RGB-class ICC profile cannot describe a Gray
+        // layout — a gray-class variant is swapped in when derivable,
+        // otherwise the collapse is suppressed and we fall through
+        // honestly).
         if pref.layout() == zenpixels::ChannelLayout::Gray {
             if source_is_gray && pref.channel_type() == ChannelType::U8 {
-                return pixels.to_gray8().into();
+                use zenpixels_convert::PixelBufferLoadBearingExt as _;
+                pixels.reduce_to_load_bearing_format_in_place(true);
+                if pixels.descriptor().layout() == zenpixels::ChannelLayout::Gray {
+                    // 10/12-bit mono reduces to Gray16; honor the U8 ask.
+                    if pixels.descriptor().channel_type() == ChannelType::U16 {
+                        return crate::convert::downscale_to_8bit(pixels);
+                    }
+                    return pixels;
+                }
+                // Scan disagreed with the metadata, or an underivable
+                // RGB-class ICC suppressed the collapse: never fake
+                // gray — let the remaining preferences have their shot.
             }
             continue;
         }

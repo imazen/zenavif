@@ -38,6 +38,18 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   reaches zenavif when zenrav1e 0.1.5 releases and zenravif bumps;
   `tests/identity_roundtrip.rs` tolerances then tighten to exact.
 
+### Changed (load-bearing API integration)
+- The mono-source gray negotiation arm now uses zenpixels-convert's
+  `reduce_to_load_bearing_format_in_place` instead of `to_gray8()`: the
+  R==G==B collapse is byte-verified (not metadata-trusted), rewrites in
+  place with no allocation, and inherits the load-bearing module's color
+  signaling rules (an RGB-class ICC profile can't describe a Gray layout
+  — a gray-class variant is swapped in when derivable, otherwise the
+  collapse is suppressed and negotiation falls through honestly).
+- `ReconstructHdr` output now tags alpha `AlphaMode::Opaque` (the apply
+  kernels emit constant 1.0 structurally) so downstream encoders know
+  the lane isn't load-bearing without rescanning.
+
 ### Added (native grayscale decode — issue #5)
 - **Monochrome AVIFs decode to native `Gray8`/`Gray16`** (1-2 bytes/pixel
   instead of the 3-8x RGB expansion) through the zencodec adapter:
