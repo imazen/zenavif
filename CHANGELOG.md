@@ -10,6 +10,21 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Investigated + fixed upstream (lossless speed inversion — issue #8)
+- Root cause found and fixed in zenrav1e (c3567081, closes zenrav1e#9):
+  "lossless" never reached qindex 0 — the rate path floored it at 1, so
+  every lossless encode was qi=1 lossy with ±2 error on 7-28% of pixels,
+  and the speed "inversion" was RDO rationally spending bits against
+  that phantom distortion (slow speeds were 8-13% wrong pixels vs 17-27%
+  at fast speeds — size inversely tracked exactness;
+  `benchmarks/lossless_speed_sweep_2026-06-11.tsv`). With the fix,
+  roundtrips are bit-exact (0 mismatched pixels) on every source at
+  every speed and bytes are monotonically non-increasing with effort
+  (`benchmarks/lossless_speed_sweep_fixed_2026-06-11.tsv`).
+  `examples/lossless_speed_sweep.rs` is the permanent harness. The fix
+  reaches zenavif when zenrav1e 0.1.5 releases and zenravif bumps;
+  `tests/identity_roundtrip.rs` tolerances then tighten to exact.
+
 ### Added (native grayscale decode — issue #5)
 - **Monochrome AVIFs decode to native `Gray8`/`Gray16`** (1-2 bytes/pixel
   instead of the 3-8x RGB expansion) through the zencodec adapter:
