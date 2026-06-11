@@ -47,7 +47,7 @@ almost-enough = { version = "0.4.3", default-features = false }
 zencodec = { version = "0.1.21", optional = true }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 zenpixels = { version = "0.2.11", default-features = false, features = ["imgref", "rgb"] }
-zenpixels-convert = { version = "0.2.12", default-features = false, features = ["rgb"] }
+zenpixels-convert = { version = "0.2.13", default-features = false, features = ["rgb"] }
 linear-srgb = { version = "0.6.7"}
 
 [dev-dependencies]

@@ -1616,6 +1616,19 @@ pub struct AvifDecoderConfig {
     /// When true, gain map and depth map data will be attached to
     /// `DecodeOutput` extras. Default: false.
     extract_gain_map: bool,
+    /// How to handle the image's stored orientation (`irot`/`imir`).
+    ///
+    /// Default: [`OrientationHint::Preserve`](zencodec::OrientationHint::Preserve)
+    /// — the decoder does **not** bake the orientation into the pixels: decode
+    /// returns pixels in stored orientation and [`ImageInfo`] reports the
+    /// stored dims + the intrinsic [`Orientation`](zencodec::Orientation) tag.
+    /// With [`Correct`](zencodec::OrientationHint::Correct) the decoder applies
+    /// the orientation and reports display dimensions with
+    /// [`Orientation::Identity`](zencodec::Orientation::Identity).
+    ///
+    /// Set via [`with_orientation`](Self::with_orientation) or
+    /// [`DecodeJob::with_orientation`](zencodec::decode::DecodeJob::with_orientation).
+    orientation: zencodec::OrientationHint,
 }
 
 impl AvifDecoderConfig {
@@ -1625,7 +1638,17 @@ impl AvifDecoderConfig {
         Self {
             inner: crate::DecoderConfig::new(),
             extract_gain_map: false,
+            orientation: zencodec::OrientationHint::Preserve,
         }
+    }
+
+    /// Set how the decoder handles the image's stored orientation
+    /// (`irot`/`imir`). See [`orientation`](Self::orientation) for semantics.
+    /// Default [`OrientationHint::Preserve`](zencodec::OrientationHint::Preserve).
+    #[must_use]
+    pub fn with_orientation(mut self, hint: zencodec::OrientationHint) -> Self {
+        self.orientation = hint;
+        self
     }
 
     /// Set resource limits.
@@ -1938,6 +1961,7 @@ impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
 
     fn job<'a>(self) -> Self::Job<'a> {
         let extract_gain_map = self.extract_gain_map;
+        let orientation = self.orientation;
         AvifDecodeJob {
             config: self,
             stop: None,
@@ -1946,6 +1970,7 @@ impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
             policy: None,
             extract_gain_map,
             gain_map_render: zencodec::GainMapRender::default(),
+            orientation,
         }
     }
 }
@@ -1968,6 +1993,9 @@ pub struct AvifDecodeJob {
     /// `with_gain_map_render`) additionally decodes the gain-map AV1 payload
     /// into a [`zencodec::decode::DecodedGainMap`]. Default `BaseOnly`.
     gain_map_render: zencodec::GainMapRender,
+    /// How to handle the image's stored orientation (`irot`/`imir`).
+    /// Default [`OrientationHint::Preserve`](zencodec::OrientationHint::Preserve).
+    orientation: zencodec::OrientationHint,
 }
 
 impl AvifDecodeJob {
@@ -2088,10 +2116,22 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         self
     }
 
+    fn with_orientation(mut self, hint: zencodec::OrientationHint) -> Self {
+        self.orientation = hint;
+        self.config.orientation = hint;
+        self
+    }
+
     fn probe(&self, data: &[u8]) -> Result<ImageInfo, At<Error>> {
         let decoder = crate::ManagedAvifDecoder::new(data, &self.config.inner)?;
         let native_info = decoder.probe_info()?;
-        let mut info = convert_native_info(&native_info);
+        // `convert_native_info` reports the Preserve view (stored dims +
+        // intrinsic tag); rewrite to display dims + Identity on the bake path.
+        let mut info = apply_reported_orientation(
+            convert_native_info(&native_info),
+            &native_info,
+            self.orientation,
+        );
         // Detect animation from the container's track structure.
         if let Some(anim) = decoder.animation_info() {
             info = info.with_sequence(ImageSequence::Animation {
@@ -2132,19 +2172,37 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         if let Some(p) = zenpixels::ColorPrimaries::from_cicp(native_info.color_primaries.0) {
             desc = desc.with_primaries(p);
         }
-        Ok(zencodec::decode::OutputInfo::full_decode(
-            native_info.width,
-            native_info.height,
-            desc,
-        ))
+        // Report the post-orientation output dims + what the decoder bakes:
+        // `Correct` bakes the intrinsic orientation (output = display dims,
+        // `orientation_applied` = intrinsic); `Preserve` bakes nothing
+        // (output = stored dims, `orientation_applied` = Identity, caller orients).
+        let (w, h, _) = reported_dims_and_orientation(&native_info, self.orientation);
+        let orientation_applied = if will_auto_orient(self.orientation) {
+            intrinsic_orientation(&native_info)
+        } else {
+            zencodec::Orientation::Identity
+        };
+        Ok(zencodec::decode::OutputInfo::full_decode(w, h, desc)
+            .with_orientation_applied(orientation_applied))
     }
 
     fn push_decoder(
         self,
         data: Cow<'a, [u8]>,
         sink: &mut dyn zencodec::decode::DecodeRowSink,
-        _preferred: &[PixelDescriptor],
+        preferred: &[PixelDescriptor],
     ) -> Result<zencodec::decode::OutputInfo, At<Error>> {
+        // Bake path: orientation isn't row-local, so a true row-streamed sink
+        // would emit pixels in stored orientation. Route through a full decode
+        // (which bakes the buffer upright and reports display dims) and copy the
+        // baked rows to the sink. `Preserve` (default) keeps the native, low-
+        // memory streaming sink unchanged.
+        if will_auto_orient(self.orientation) {
+            return zencodec::helpers::copy_decode_to_sink(self, data, sink, preferred, |e| {
+                at!(Error::Encode(e.to_string()))
+            });
+        }
+
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
         let stop: &dyn Stop = match &self.stop {
@@ -2190,13 +2248,14 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
             policy: self.policy,
             extract_gain_map: self.extract_gain_map,
             gain_map_render: self.gain_map_render,
+            orientation: self.orientation,
         })
     }
 
     fn streaming_decoder(
         mut self,
         data: Cow<'a, [u8]>,
-        _preferred: &[PixelDescriptor],
+        preferred: &[PixelDescriptor],
     ) -> Result<AvifStreamingDecoder, At<Error>> {
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
@@ -2208,6 +2267,46 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         let mut decoder = crate::ManagedAvifDecoder::new(&data, &cfg)?;
         let native_info = decoder.probe_info()?;
         self.check_decode_limits(&native_info)?;
+
+        // Bake path: orientation is not strip-local (transposes need the whole
+        // image), so decode + bake the full buffer once and emit it in
+        // fixed-height strips. Mirrors `Decode::decode`'s buffer pipeline. The
+        // preserve path (default) falls through to the low-memory grid / strip-
+        // converter streaming below, unchanged.
+        if will_auto_orient(self.orientation) {
+            let (pixels, native_info) = decoder.decode_full(&stop_token)?;
+            let pixels = set_cicp_on_pixels(pixels, &native_info);
+            let pixels = negotiate_format(pixels, preferred);
+            let (baked, _orientation, w, h) =
+                bake_orientation(pixels, &native_info, self.orientation);
+            let strip_descriptor = baked.descriptor();
+            let info = apply_reported_orientation(
+                convert_native_info(&native_info),
+                &native_info,
+                self.orientation,
+            );
+            // Emit in cache-friendly fixed-height strips (or the whole image if
+            // it's short). The baked buffer is contiguous, so a strip is just a
+            // row-range view re-copied into a small buffer.
+            let strip_height = 64u32.min(h.max(1));
+            return Ok(AvifStreamingDecoder {
+                info,
+                y_offset: 0,
+                output_width: w,
+                output_height: h,
+                decoder: None,
+                stop: stop_token,
+                grid_rows: 0,
+                grid_cols: 0,
+                current_grid_row: 0,
+                strip_descriptor,
+                strip_buffer: None,
+                strip_converter: None,
+                strip_height,
+                baked: Some(baked),
+            });
+        }
+
         let info = convert_native_info(&native_info);
 
         if decoder.is_grid() {
@@ -2255,6 +2354,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
                 strip_buffer: None,
                 strip_converter: None,
                 strip_height: 0,
+                baked: None,
             });
         }
 
@@ -2279,6 +2379,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
             strip_buffer: None,
             strip_converter: Some(converter),
             strip_height: strip_h,
+            baked: None,
         })
     }
 
@@ -2308,12 +2409,19 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         let anim_dec = crate::AnimationDecoder::new(&data, &cfg)?;
         let anim_info = anim_dec.info().clone();
 
-        let mut base_info =
-            convert_native_info(&native_info).with_sequence(ImageSequence::Animation {
-                frame_count: Some(anim_info.frame_count as u32),
-                loop_count: Some(anim_info.loop_count),
-                random_access: true,
-            });
+        // `convert_native_info` reports the Preserve view (stored dims +
+        // intrinsic tag); the bake path rewrites the canvas to display dims +
+        // Identity, matching the per-frame buffers `render_next_frame` bakes.
+        let mut base_info = apply_reported_orientation(
+            convert_native_info(&native_info),
+            &native_info,
+            self.orientation,
+        )
+        .with_sequence(ImageSequence::Animation {
+            frame_count: Some(anim_info.frame_count as u32),
+            loop_count: Some(anim_info.loop_count),
+            random_access: true,
+        });
         // Attach source encoding details to the shared animation ImageInfo.
         if let Ok(probe) = crate::detect::probe(&data) {
             base_info = base_info.with_source_encoding_details(probe);
@@ -2321,6 +2429,14 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         if let Some(ref policy) = self.policy {
             apply_decode_policy(&mut base_info, policy);
         }
+
+        // Resolve the orientation to bake into each frame: the intrinsic
+        // transform on the bake path, `Identity` (no-op) on the preserve path.
+        let bake_to = if will_auto_orient(self.orientation) {
+            intrinsic_orientation(&native_info)
+        } else {
+            zencodec::Orientation::Identity
+        };
 
         Ok(AvifAnimationFrameDecoder {
             anim_decoder: anim_dec,
@@ -2334,6 +2450,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
             current_frame: None,
             limits: self.limits,
             accumulated_ms: 0,
+            bake_to,
         })
     }
 }
@@ -2365,6 +2482,97 @@ fn avif_to_orientation(
         (Some(1), 270) => Orientation::Transpose,
         _ => Orientation::Identity,
     }
+}
+
+// ── Orientation hint: Preserve (default) vs bake ────────────────────────────
+//
+// The zencodec adapter honors `OrientationHint` the same way zenjpeg and heic
+// do, so the codecs report orientation consistently. zenavif's orientation
+// source is the container's `irot`/`imir` transform boxes (NOT EXIF); the
+// native decoder leaves pixels in stored orientation, so the adapter is what
+// applies the transform when the caller asks for it.
+
+/// Whether the orientation hint requests baking the image's orientation into
+/// the decoded pixels. `Correct`/`CorrectAndTransform` bake; `Preserve`,
+/// `ExactTransform`, and any future variant do not (the safe default — keep
+/// pixels in stored orientation and report the orientation on `ImageInfo`).
+/// Mirrors heic's and zenjpeg's policy so the codecs agree.
+fn will_auto_orient(hint: zencodec::OrientationHint) -> bool {
+    use zencodec::OrientationHint;
+    matches!(
+        hint,
+        OrientationHint::Correct | OrientationHint::CorrectAndTransform(_)
+    )
+}
+
+/// The image's intrinsic orientation from its `irot`/`imir` container boxes —
+/// the net transform that, applied to the stored pixels, yields the upright
+/// (display) image. Equals what [`avif_to_orientation`] computes.
+fn intrinsic_orientation(native: &crate::image::ImageInfo) -> zencodec::Orientation {
+    avif_to_orientation(native.rotation.as_ref(), native.mirror.as_ref())
+}
+
+/// Bake the resolved orientation into a decoded buffer when the hint is on the
+/// bake path, and report the resulting `(orientation, width, height)` to put on
+/// `ImageInfo` / `OutputInfo`.
+///
+/// - `Preserve` (default): pixels are untouched; report the stored dims + the
+///   intrinsic orientation tag (callers apply it via `display_width/height`).
+/// - bake path (`Correct`/`CorrectAndTransform`): physically apply the
+///   intrinsic orientation (zenavif resolves the net transform to the intrinsic,
+///   matching heic); report the upright display dims + `Orientation::Identity`.
+///   A no-op bake (already-upright image) still reports `Identity` per the
+///   `OrientationHint::bakes()` contract.
+fn bake_orientation(
+    pixels: PixelBuffer,
+    native: &crate::image::ImageInfo,
+    hint: zencodec::OrientationHint,
+) -> (PixelBuffer, zencodec::Orientation, u32, u32) {
+    let intrinsic = intrinsic_orientation(native);
+    if !will_auto_orient(hint) {
+        let (w, h) = (pixels.width(), pixels.height());
+        return (pixels, intrinsic, w, h);
+    }
+    let baked = if intrinsic.is_identity() {
+        pixels
+    } else {
+        zenpixels_convert::orient::apply_orientation(pixels.as_slice(), intrinsic)
+    };
+    let (w, h) = (baked.width(), baked.height());
+    (baked, zencodec::Orientation::Identity, w, h)
+}
+
+/// Resolve the dims + orientation tag to report on `ImageInfo`/`OutputInfo`
+/// **without** a decoded buffer (probe paths). `native.width`/`height` are the
+/// stored (coded) dims. Mirrors [`bake_orientation`]'s reporting.
+fn reported_dims_and_orientation(
+    native: &crate::image::ImageInfo,
+    hint: zencodec::OrientationHint,
+) -> (u32, u32, zencodec::Orientation) {
+    let intrinsic = intrinsic_orientation(native);
+    if !will_auto_orient(hint) {
+        return (native.width, native.height, intrinsic);
+    }
+    let (w, h) = intrinsic.output_dimensions(native.width, native.height);
+    (w, h, zencodec::Orientation::Identity)
+}
+
+/// Rewrite an `ImageInfo` (built by [`convert_native_info`], which reports the
+/// `Preserve` view: stored dims + intrinsic tag) into the resolved reporting for
+/// `hint`. A no-op when the hint preserves; on the bake path it swaps to display
+/// dims + `Orientation::Identity`.
+fn apply_reported_orientation(
+    mut info: ImageInfo,
+    native: &crate::image::ImageInfo,
+    hint: zencodec::OrientationHint,
+) -> ImageInfo {
+    if !will_auto_orient(hint) {
+        return info;
+    }
+    let (w, h, orientation) = reported_dims_and_orientation(native, hint);
+    info.width = w;
+    info.height = h;
+    info.with_orientation(orientation)
 }
 
 /// Convert EXIF orientation to AVIF rotation raw code + mirror axis.
@@ -2647,6 +2855,9 @@ pub struct AvifDecoder<'a> {
     policy: Option<zencodec::decode::DecodePolicy>,
     extract_gain_map: bool,
     gain_map_render: zencodec::GainMapRender,
+    /// How to handle the image's stored orientation (`irot`/`imir`).
+    /// Default [`OrientationHint::Preserve`](zencodec::OrientationHint::Preserve).
+    orientation: zencodec::OrientationHint,
 }
 
 impl zencodec::decode::Decode for AvifDecoder<'_> {
@@ -2686,7 +2897,18 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
         // Set transfer function and primaries from CICP on the pixel descriptor.
         let pixels = set_cicp_on_pixels(pixels, &native_info);
         let pixels = negotiate_format(pixels, &self.preferred);
-        let mut info = convert_native_info(&native_info);
+        // Orientation policy: `Correct` bakes the intrinsic `irot`/`imir`
+        // orientation into the pixels and reports display dims + `Identity`;
+        // `Preserve` (default) keeps stored orientation and reports the
+        // intrinsic tag + stored dims. `convert_native_info` already reports the
+        // preserve view, so only the bake path rewrites it.
+        let (pixels, _orientation, _w, _h) =
+            bake_orientation(pixels, &native_info, self.orientation);
+        let mut info = apply_reported_orientation(
+            convert_native_info(&native_info),
+            &native_info,
+            self.orientation,
+        );
         if let Some(ref policy) = self.policy {
             apply_decode_policy(&mut info, policy);
         }
@@ -2785,6 +3007,12 @@ pub struct AvifStreamingDecoder {
     strip_converter: Option<crate::strip_convert::StripConverter>,
     /// Optimal strip height for the strip converter path.
     strip_height: u32,
+    /// Bake path (`OrientationHint::bakes()`): the fully-decoded, orientation-
+    /// baked buffer. Orientation is not strip-local (transposes need the whole
+    /// image), so the bake path materializes upright once and emits it in
+    /// fixed-height strips. `None` on the preserve path (the default), where the
+    /// grid / strip-converter fields drive low-memory streaming unchanged.
+    baked: Option<PixelBuffer>,
 }
 
 impl AvifStreamingDecoder {
@@ -2823,6 +3051,36 @@ impl zencodec::decode::StreamingDecode for AvifStreamingDecoder {
     fn next_batch(&mut self) -> Result<Option<(u32, PixelSlice<'_>)>, At<Error>> {
         if self.y_offset >= self.output_height {
             return Ok(None);
+        }
+
+        // Bake path: emit fixed-height strips copied from the pre-baked,
+        // orientation-corrected full buffer.
+        if let Some(ref baked) = self.baked {
+            let remaining = self.output_height - self.y_offset;
+            let h = self.strip_height.min(remaining);
+            if h == 0 {
+                return Ok(None);
+            }
+            let desc = self.strip_descriptor;
+            let width = self.output_width;
+            let strip_buf = self
+                .strip_buffer
+                .get_or_insert_with(|| PixelBuffer::new(width, h, desc));
+            if strip_buf.height() != h {
+                *strip_buf = PixelBuffer::new(width, h, desc);
+            }
+            {
+                let baked_slice = baked.as_slice();
+                let mut sm = strip_buf.as_slice_mut();
+                for row in 0..h {
+                    sm.row_mut(row)
+                        .copy_from_slice(baked_slice.row(self.y_offset + row));
+                }
+            }
+            let y = self.y_offset;
+            self.y_offset += h;
+            let slice = self.strip_buffer.as_ref().unwrap().as_slice().erase();
+            return Ok(Some((y, slice)));
         }
 
         if self.decoder.is_some() {
@@ -2921,6 +3179,11 @@ pub struct AvifAnimationFrameDecoder {
     limits: ResourceLimits,
     /// Accumulated animation duration in milliseconds across all decoded frames.
     accumulated_ms: u64,
+    /// Orientation to bake into every frame: the intrinsic `irot`/`imir`
+    /// transform on the bake path (`OrientationHint::bakes()`), or `Identity`
+    /// (no-op) on the preserve path (the default). Applied after format
+    /// negotiation, before the frame is yielded.
+    bake_to: zencodec::Orientation,
 }
 
 impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
@@ -2977,6 +3240,13 @@ impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
             }
 
             let pixels = negotiate_format(frame.pixels, &self.preferred);
+            // Bake orientation into the frame on the bake path; `Identity` is a
+            // no-op (preserve path keeps stored-orientation pixels unchanged).
+            let pixels = if self.bake_to.is_identity() {
+                pixels
+            } else {
+                zenpixels_convert::orient::apply_orientation(pixels.as_slice(), self.bake_to)
+            };
             let idx = self.index as u32;
             self.index += 1;
             let duration_ms = frame.duration_ms;

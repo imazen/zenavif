@@ -64,6 +64,19 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   public so harnesses can exercise single probes outside a full plan.
 
 ### Fixed
+- **zencodec adapter now honors `OrientationHint` (`irot`/`imir`).** The
+  `AvifDecodeJob` decode paths ignored the orientation hint, so `Correct` was
+  silently treated as `Preserve` — pixels stayed in stored orientation. The
+  adapter now bakes the container's intrinsic rotation/mirror into the decoded
+  pixels on the bake path (`Correct`/`CorrectAndTransform`) via
+  `zenpixels_convert::orient::apply_orientation`, reporting display dims +
+  `Orientation::Identity`; `Preserve` (the default) is unchanged (stored dims +
+  intrinsic tag). Covers the single-image, row-sink, streaming (grid + non-grid,
+  baked after tile stitching), and animation paths. Adds
+  `AvifDecoderConfig::with_orientation` + the `DecodeJob::with_orientation`
+  override; the native (non-zencodec) API is unchanged. Requires
+  zenpixels-convert 0.2.13 (the `orient` module). Pinned by
+  `tests/cov_zencodec.rs::orientation_*`.
 - **`alpha_quality` unset now follows the color quality, as its docs always
   promised.** zenravif's built-in default pins the alpha quantizer to the
   quality-80 equivalent and `with_quality` never touches it, so an

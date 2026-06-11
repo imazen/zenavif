@@ -540,7 +540,7 @@ pub fn zenavif::decode_av1_obu(&[u8]) -> zenavif::Result<(alloc::vec::Vec<u8>, u
 pub fn zenavif::decode_with(&[u8], &zenavif::DecoderConfig, &impl enough::Stop + ?core::marker::Sized) -> zenavif::Result<zenpixels::buffer::PixelBuffer>
 pub type zenavif::Result<T, E> = core::result::Result<T, E>
 
-## all features except _* (1215 items)
+## all features except _* (1217 items)
 
 pub mod zenavif
 pub use zenavif::CleanAperture
@@ -1130,6 +1130,7 @@ pub fn zenavif::AvifDecodeJob::push_decoder(self, alloc::borrow::Cow<'a, [u8]>, 
 pub fn zenavif::AvifDecodeJob::streaming_decoder(self, alloc::borrow::Cow<'a, [u8]>, &[zenpixels::descriptor::PixelDescriptor]) -> core::result::Result<zenavif::codec::AvifStreamingDecoder, whereat::at::At<zenavif::Error>>
 pub fn zenavif::AvifDecodeJob::with_gain_map_render(self, zencodec::gainmap::GainMapRender) -> Self
 pub fn zenavif::AvifDecodeJob::with_limits(self, zencodec::limits::ResourceLimits) -> Self
+pub fn zenavif::AvifDecodeJob::with_orientation(self, zencodec::orientation::OrientationHint) -> Self
 pub fn zenavif::AvifDecodeJob::with_policy(self, zencodec::policy::DecodePolicy) -> Self
 pub fn zenavif::AvifDecodeJob::with_start_frame_index(self, u32) -> Self
 pub fn zenavif::AvifDecodeJob::with_stop(self, almost_enough::stop_token::StopToken) -> Self
@@ -1168,6 +1169,7 @@ pub fn zenavif::AvifDecoderConfig::probe_header(&self, &[u8]) -> core::result::R
 pub fn zenavif::AvifDecoderConfig::with_extract_gain_map(self, bool) -> Self
 pub fn zenavif::AvifDecoderConfig::with_film_grain(self, bool) -> Self
 pub fn zenavif::AvifDecoderConfig::with_limits(self, zencodec::limits::ResourceLimits) -> Self
+pub fn zenavif::AvifDecoderConfig::with_orientation(self, zencodec::orientation::OrientationHint) -> Self
 pub fn zenavif::AvifDecoderConfig::with_threads(self, u32) -> Self
 impl core::clone::Clone for zenavif::AvifDecoderConfig
 pub fn zenavif::AvifDecoderConfig::clone(&self) -> zenavif::AvifDecoderConfig
