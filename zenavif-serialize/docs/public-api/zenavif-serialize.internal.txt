@@ -1,0 +1,48 @@
+# zenavif-serialize public API — doc(hidden) items and excluded-feature surface
+# excluded features: (none)
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   inherent methods                            9
+#   enum variants                               3
+#   trait roster entries (type × trait)        12
+#
+# per-module pub lines:
+#   (root)                            6
+#   constants                         6
+
+## items (12 lines)
+
+pub fn Aviffy::color_primaries(&mut self, constants::ColorPrimaries) -> &mut Self
+pub fn Aviffy::full_color_range(&mut self, bool) -> &mut Self
+pub fn Aviffy::matrix_coefficients(&mut self, constants::MatrixCoefficients) -> &mut Self
+pub fn Aviffy::premultiplied_alpha(&mut self, bool) -> &mut Self
+pub fn Aviffy::transfer_characteristics(&mut self, constants::TransferCharacteristics) -> &mut Self
+pub fn ChromaSubsampling::assert_fields_are_eq(&self)
+pub fn constants::ColorPrimaries::assert_fields_are_eq(&self)
+pub fn constants::MatrixCoefficients::assert_fields_are_eq(&self)
+pub fn constants::TransferCharacteristics::assert_fields_are_eq(&self)
+pub constants::TransferCharacteristics::Bt1361 = 12
+pub constants::TransferCharacteristics::Bt470BG = 5
+pub constants::TransferCharacteristics::Bt470M = 4
+
+## trait impls (12 types)
+
+Av1CBox: TrivialClone
+ChromaSubsampling: TrivialClone
+ClapBox: TrivialClone
+ClliBox: TrivialClone
+ColrBox: TrivialClone
+ImirBox: TrivialClone
+IrotBox: TrivialClone
+MdcvBox: TrivialClone
+PaspBox: TrivialClone
+constants::ColorPrimaries: TrivialClone
+constants::MatrixCoefficients: TrivialClone
+constants::TransferCharacteristics: TrivialClone
