@@ -38,6 +38,19 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   reaches zenavif when zenrav1e 0.1.5 releases and zenravif bumps;
   `tests/identity_roundtrip.rs` tolerances then tighten to exact.
 
+### Added (load-bearing ICC contract tests)
+- `codec::tests::negotiate_gray` pins the gray-collapse ICC rules in
+  zenavif's exact feature configuration (zenpixels-convert without
+  `icc-db`): no-context collapse with exact channel equality; sRGB ICC →
+  collapse with the RGB-class profile dropped to CICP-only (an RGB
+  profile must never ride on a Gray buffer); underivable ICC →
+  suppression that falls through to the next preference; and lying
+  metadata (mono-flagged but colorful pixels) → byte-verified refusal.
+  Upstream 0.2.13 audit: plan logic + all five signal outcomes tested,
+  174/174 bundled gray profiles GRAY-class and byte-identical to fresh
+  moxcms synthesis (zero-tolerance gate verified green locally — it is
+  `cms-moxcms`-gated and not exercised by upstream CI; reported).
+
 ### Changed (load-bearing API integration)
 - The mono-source gray negotiation arm now uses zenpixels-convert's
   `reduce_to_load_bearing_format_in_place` instead of `to_gray8()`: the

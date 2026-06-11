@@ -3566,6 +3566,125 @@ mod tests {
     #[cfg(feature = "encode")]
     use imgref::Img;
 
+    /// Pin the negotiate-layer gray collapse in zenavif's exact feature
+    /// configuration (zenpixels-convert with `default-features = false`,
+    /// i.e. NO `icc-db`): the load-bearing reduction byte-verifies
+    /// R==G==B instead of trusting metadata, and the ICC color-signaling
+    /// rules decide whether the collapse may proceed.
+    mod negotiate_gray {
+        use super::super::{format_matches, negotiate_format, wants_gray_output};
+        use alloc::sync::Arc;
+        use zenpixels::{Cicp, ColorContext, PixelBuffer, PixelDescriptor, PixelFormat};
+
+        extern crate alloc;
+
+        fn gray_content_rgb8(w: u32, h: u32) -> PixelBuffer {
+            let px: alloc::vec::Vec<rgb::Rgb<u8>> = (0..w * h)
+                .map(|i| {
+                    let g = (i * 7 % 256) as u8;
+                    rgb::Rgb { r: g, g, b: g }
+                })
+                .collect();
+            PixelBuffer::from_pixels(px, w, h).unwrap().into()
+        }
+
+        /// No color context (zenavif's decode reality today — ICC rides on
+        /// `ImageInfo`, never the buffer): Carry plan, collapse proceeds,
+        /// and the gray bytes equal the source channel exactly.
+        #[test]
+        fn collapses_without_context_and_matches_channel() {
+            let buf = gray_content_rgb8(9, 4);
+            let want: alloc::vec::Vec<u8> = (0..36).map(|i| (i * 7 % 256) as u8).collect();
+            let out = negotiate_format(buf, &[PixelDescriptor::GRAY8_SRGB], true);
+            assert_eq!(out.descriptor().pixel_format(), PixelFormat::Gray8);
+            let s = out.as_slice();
+            let got: alloc::vec::Vec<u8> = (0..4).flat_map(|y| s.row(y)[..9].to_vec()).collect();
+            assert_eq!(got, want, "gray must be the exact channel value");
+        }
+
+        /// sRGB-described ICC: the collapse is allowed and the RGB-class
+        /// ICC is dropped in favor of CICP-only signaling (an RGB profile
+        /// cannot describe a Gray layout; sRGB needs no profile at all).
+        #[test]
+        fn srgb_icc_collapses_and_drops_profile() {
+            let mut ctx = ColorContext::from_icc(alloc::vec![0u8; 16]);
+            ctx.cicp = Some(Cicp::SRGB);
+            let buf = gray_content_rgb8(8, 2).with_color_context(Arc::new(ctx));
+            let out = negotiate_format(buf, &[PixelDescriptor::GRAY8_SRGB], true);
+            assert_eq!(out.descriptor().pixel_format(), PixelFormat::Gray8);
+            let new_ctx = out
+                .as_slice()
+                .color_context()
+                .cloned()
+                .expect("cicp-only context survives the collapse");
+            assert!(
+                new_ctx.icc.is_none(),
+                "an RGB-class ICC must never ride on a Gray buffer"
+            );
+            assert_eq!(new_ctx.cicp, Some(Cicp::SRGB));
+        }
+
+        /// Underivable ICC (junk bytes, no cicp): the collapse is
+        /// suppressed and negotiation falls through to the NEXT
+        /// preference instead of mislabeling or faking gray. Without
+        /// `icc-db` this is also the path every non-sRGB profile takes.
+        #[test]
+        fn unknown_icc_suppresses_and_falls_through() {
+            let ctx = ColorContext::from_icc(alloc::vec![0xAAu8; 64]);
+            let buf = gray_content_rgb8(8, 2).with_color_context(Arc::new(ctx.clone()));
+            let out = negotiate_format(
+                buf,
+                &[PixelDescriptor::GRAY8_SRGB, PixelDescriptor::RGBA8_SRGB],
+                true,
+            );
+            assert_eq!(
+                out.descriptor().pixel_format(),
+                PixelFormat::Rgba8,
+                "suppressed collapse must fall through to the next preference"
+            );
+            assert!(
+                out.as_slice()
+                    .color_context()
+                    .is_some_and(|c| c.icc.is_some()),
+                "the original RGB-class context stays with the RGB-class pixels"
+            );
+        }
+
+        /// Metadata claims mono but the pixels are NOT R==G==B: the
+        /// byte-level verification refuses the collapse — this is the
+        /// trust-nothing property the load-bearing reduction buys over
+        /// `to_gray8()` (which would have averaged the lie into luma).
+        #[test]
+        fn lying_metadata_never_fakes_gray() {
+            let px: alloc::vec::Vec<rgb::Rgb<u8>> = (0..16)
+                .map(|i| rgb::Rgb {
+                    r: 200,
+                    g: (i * 3) as u8,
+                    b: 10,
+                })
+                .collect();
+            let buf: PixelBuffer = PixelBuffer::from_pixels(px, 8, 2).unwrap().into();
+            let out = negotiate_format(buf, &[PixelDescriptor::GRAY8_SRGB], true);
+            assert_ne!(
+                out.descriptor().pixel_format(),
+                PixelFormat::Gray8,
+                "colorful pixels must never collapse, whatever the metadata says"
+            );
+        }
+
+        /// Sanity for the helpers this arm depends on.
+        #[test]
+        fn helper_contracts() {
+            assert!(wants_gray_output(&[]));
+            assert!(wants_gray_output(&[PixelDescriptor::GRAY8_SRGB]));
+            assert!(!wants_gray_output(&[PixelDescriptor::RGB8_SRGB]));
+            assert!(format_matches(
+                PixelDescriptor::GRAY8_SRGB,
+                PixelDescriptor::GRAY8_SRGB
+            ));
+        }
+    }
+
     #[cfg(feature = "encode")]
     #[test]
     fn encoding_default_roundtrip() {
