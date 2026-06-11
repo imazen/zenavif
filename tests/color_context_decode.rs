@@ -113,11 +113,13 @@ fn gray_downscale_preserves_context() {
     );
 }
 
-/// HDR reconstruction output is context-free: the source's SDR signaling
-/// (sRGB ICC or CICP transfer) does not describe linear f32 pixels — the
-/// descriptor (Linear transfer + primaries) is the honest carrier.
+/// HDR reconstruction output carries a synthesized LINEAR CICP — source
+/// primaries (raw code point), H.273 transfer 8, identity matrix, full
+/// range. The source's SDR signaling (ICC or transfer) must not carry
+/// over, but the linear output IS describable and self-description
+/// shouldn't stop at the descriptor's folded enums.
 #[test]
-fn reconstructed_hdr_is_context_free() {
+fn reconstructed_hdr_carries_linear_cicp() {
     let data = std::fs::read("tests/vectors/libavif/seine_sdr_gainmap_srgb.avif").expect("vector");
     let out = zenavif::AvifDecoderConfig::new()
         .job()
@@ -130,31 +132,95 @@ fn reconstructed_hdr_is_context_free() {
         .expect("decode");
     let p = out.pixels();
     assert_eq!(p.descriptor().pixel_format(), PixelFormat::RgbaF32);
-    assert!(
-        p.color_context().is_none(),
-        "no SDR profile/CICP may claim to describe linear f32 output"
-    );
+    let ctx = p.color_context().expect("linear CICP context");
+    assert!(ctx.icc.is_none(), "no SDR ICC may ride linear f32 output");
+    let cicp = ctx.cicp.expect("cicp");
+    assert_eq!(cicp.transfer_characteristics, 8, "H.273 linear transfer");
+    assert_eq!(cicp.matrix_coefficients, 0, "identity matrix for RGB data");
+    assert!(cicp.full_range);
+    let src_cp = out
+        .info()
+        .source_color
+        .cicp
+        .expect("source cicp")
+        .color_primaries;
+    assert_eq!(cicp.color_primaries, src_cp, "source primaries carried raw");
 }
 
-/// The gray strip-converter streaming path is a known gap: strips do not
-/// yet carry the context (the converter owns the buffer before the
-/// adapter's attach point). Pin the CURRENT behavior so a future fix
-/// flips this assertion deliberately rather than silently.
+/// Streaming strips carry the same class-gated context as the buffered
+/// decode — the scratch strip buffer is rebuilt per batch, so the
+/// context is re-attached at emission (this was a drop bug, not a
+/// design gap).
 #[test]
-fn streaming_strips_do_not_yet_carry_context() {
+fn streaming_strips_carry_context() {
     use zencodec::decode::{DecodeJob as _, StreamingDecode as _};
 
     let data = std::fs::read("tests/vectors/zenavif/mono_gradient_8b_full.avif").expect("fixture");
+    let buffered_ctx = decode_pref(&data, &[])
+        .pixels()
+        .color_context()
+        .cloned()
+        .expect("buffered ctx");
+
     let mut dec = zenavif::AvifDecoderConfig::new()
         .job()
         .streaming_decoder(Cow::Borrowed(&data), &[])
         .expect("streaming_decoder");
-    if let Some((_, strip)) = dec.next_batch().expect("next_batch") {
+    let mut strips = 0;
+    while let Some((_, strip)) = dec.next_batch().expect("next_batch") {
         assert_eq!(strip.descriptor().layout(), ChannelLayout::Gray);
-        assert!(
-            strip.color_context().is_none(),
-            "documented gap: strip-converter path lacks context — if this \
-             starts passing a context, update this test and the CHANGELOG"
-        );
+        let ctx = strip
+            .color_context()
+            .expect("every emitted strip carries the context");
+        assert_eq!(ctx.cicp, buffered_ctx.cicp, "strip ctx == buffered ctx");
+        assert_eq!(ctx.icc, buffered_ctx.icc);
+        strips += 1;
     }
+    assert!(strips > 0);
+}
+
+/// Mono file carrying an RGB-class ICC (spec-questionable but in the
+/// wild): native gray is DECLINED so the profile — the most accurate
+/// color description present — stays attached to pixels it validly
+/// describes. A gray preference is then honestly suppressed by the
+/// load-bearing ICC rules (underivable without icc-db), not faked.
+#[test]
+fn mono_with_rgb_class_icc_stays_rgb() {
+    let data =
+        std::fs::read("tests/vectors/zenavif/mono_gradient_8b_rgbicc.avif").expect("fixture");
+    let out = decode_pref(&data, &[]);
+    let p = out.pixels();
+    assert_eq!(
+        p.descriptor().pixel_format(),
+        PixelFormat::Rgb8,
+        "RGB-class ICC must keep the RGB layout it describes"
+    );
+    let ctx = p.color_context().expect("ctx");
+    let icc = ctx.icc.as_deref().expect("profile rides the RGB pixels");
+    assert_eq!(&icc[16..20], b"RGB ");
+
+    // Gray preference: suppression, never a mislabeled collapse.
+    let out = decode_pref(&data, &[PixelDescriptor::GRAY8_SRGB]);
+    assert_ne!(
+        out.pixels().descriptor().layout(),
+        ChannelLayout::Gray,
+        "underivable RGB-class ICC suppresses the gray collapse"
+    );
+}
+
+/// Mono file with a MIAF-correct GRAY-class ICC: native gray proceeds
+/// and the profile rides the gray buffer.
+#[test]
+fn mono_with_gray_class_icc_decodes_native_gray() {
+    let data =
+        std::fs::read("tests/vectors/zenavif/mono_gradient_8b_grayicc.avif").expect("fixture");
+    let out = decode_pref(&data, &[]);
+    let p = out.pixels();
+    assert_eq!(p.descriptor().pixel_format(), PixelFormat::Gray8);
+    let ctx = p.color_context().expect("ctx");
+    let icc = ctx
+        .icc
+        .as_deref()
+        .expect("GRAY-class profile rides gray pixels");
+    assert_eq!(&icc[16..20], b"GRAY");
 }

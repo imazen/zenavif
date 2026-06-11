@@ -2286,7 +2286,12 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
             self.gain_map_render,
             zencodec::GainMapRender::ReconstructHdr { .. }
         ) && native_info.gain_map.is_some();
-        if mono_source && !reconstructing && !decoder.is_grid() && wants_gray_output(preferred) {
+        if mono_source
+            && !reconstructing
+            && !decoder.is_grid()
+            && icc_allows_native_gray(&native_info)
+            && wants_gray_output(preferred)
+        {
             decoder.set_native_gray(true);
         }
 
@@ -2330,6 +2335,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
                 strip_buffer: None,
                 strip_converter: None,
                 strip_height,
+                strip_color_context: baked.color_context().cloned(),
                 baked: Some(baked),
             });
         }
@@ -2374,6 +2380,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
                 strip_buffer: None,
                 strip_converter: None,
                 strip_height,
+                strip_color_context: baked.color_context().cloned(),
                 baked: Some(baked),
             });
         }
@@ -2425,12 +2432,19 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
                 strip_buffer: None,
                 strip_converter: None,
                 strip_height: 0,
+                strip_color_context: color_context_for_layout(
+                    &native_source_color(&native_info),
+                    strip_descriptor.layout(),
+                ),
                 baked: None,
             });
         }
 
         // Non-grid: decode YUV, set up strip converter for on-demand conversion.
-        let (converter, _native) = decoder.decode_to_strip_converter(&stop_token)?;
+        // Use the frame-era info the converter returns (not the probe-era
+        // one): the buffered path attaches its context from decode_full's
+        // info, and strips must describe pixels identically.
+        let (converter, frame_native) = decoder.decode_to_strip_converter(&stop_token)?;
         let desc = converter.descriptor();
         let w = converter.display_width() as u32;
         let h = converter.display_height() as u32;
@@ -2450,6 +2464,10 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
             strip_buffer: None,
             strip_converter: Some(converter),
             strip_height: strip_h,
+            strip_color_context: color_context_for_layout(
+                &native_source_color(&frame_native),
+                desc.layout(),
+            ),
             baked: None,
         })
     }
@@ -2704,9 +2722,23 @@ fn attach_color_context_class_gated(
     pixels: PixelBuffer,
     source_color: &zencodec::decode::SourceColor,
 ) -> PixelBuffer {
+    match color_context_for_layout(source_color, pixels.descriptor().layout()) {
+        Some(ctx) => pixels.with_color_context(ctx),
+        None => pixels,
+    }
+}
+
+/// The class-gated context [`attach_color_context_class_gated`] attaches,
+/// computed for a known layout — shared with the streaming decoder, whose
+/// strip scratch buffers are rebuilt per batch and need the context
+/// re-applied on every emitted slice.
+fn color_context_for_layout(
+    source_color: &zencodec::decode::SourceColor,
+    layout: zenpixels::ChannelLayout,
+) -> Option<Arc<zenpixels::ColorContext>> {
     let mut ctx = source_color.to_color_context();
     if let Some(icc) = &ctx.icc
-        && !icc_class_matches_layout(icc, pixels.descriptor().layout())
+        && !icc_class_matches_layout(icc, layout)
     {
         ctx.icc = None;
         if ctx.cicp.is_none() {
@@ -2716,19 +2748,15 @@ fn attach_color_context_class_gated(
         }
     }
     if ctx.icc.is_none() && ctx.cicp.is_none() {
-        return pixels;
+        return None;
     }
-    pixels.with_color_context(Arc::new(ctx))
+    Some(Arc::new(ctx))
 }
 
-/// [`attach_color_context_class_gated`] from zenavif's native info: build
-/// the [`zencodec::decode::SourceColor`] exactly the way
-/// [`convert_native_info`] does (raw CICP code points + full-range flag;
-/// ICC authority when ICC bytes are present, per MIAF).
-fn attach_source_color_context(
-    pixels: PixelBuffer,
-    native: &crate::image::ImageInfo,
-) -> PixelBuffer {
+/// Build the [`zencodec::decode::SourceColor`] for the native info the
+/// way [`convert_native_info`] does (raw CICP + full-range; ICC
+/// authority when ICC bytes are present, per MIAF).
+fn native_source_color(native: &crate::image::ImageInfo) -> zencodec::decode::SourceColor {
     let mut sc = zencodec::decode::SourceColor::default();
     sc.cicp = Some(zencodec::Cicp::new(
         native.color_primaries.0,
@@ -2742,7 +2770,31 @@ fn attach_source_color_context(
     } else {
         sc.color_authority = ColorAuthority::Cicp;
     }
-    attach_color_context_class_gated(pixels, &sc)
+    sc
+}
+
+/// Native-gray opt-in is declined when the file carries an ICC profile
+/// that cannot ride a Gray buffer (RGB-class or unclassifiable): the
+/// profile is the most accurate color description present, so keep the
+/// RGB layout it validly describes instead of stripping it. A gray
+/// preference then resolves through the load-bearing reduction, whose
+/// ICC rules swap or honestly suppress per-profile.
+fn icc_allows_native_gray(native: &crate::image::ImageInfo) -> bool {
+    match &native.icc_profile {
+        None => true,
+        Some(icc) => icc.len() >= 132 && &icc[16..20] == b"GRAY",
+    }
+}
+
+/// [`attach_color_context_class_gated`] from zenavif's native info: build
+/// the [`zencodec::decode::SourceColor`] exactly the way
+/// [`convert_native_info`] does (raw CICP code points + full-range flag;
+/// ICC authority when ICC bytes are present, per MIAF).
+fn attach_source_color_context(
+    pixels: PixelBuffer,
+    native: &crate::image::ImageInfo,
+) -> PixelBuffer {
+    attach_color_context_class_gated(pixels, &native_source_color(native))
 }
 
 fn set_cicp_on_pixels(pixels: PixelBuffer, info: &crate::image::ImageInfo) -> PixelBuffer {
@@ -2940,6 +2992,13 @@ fn reconstruct_hdr_pixels(
         .descriptor()
         .with_alpha(Some(zenpixels::AlphaMode::Opaque));
     let hdr = hdr.with_descriptor(desc);
+    // The linear output IS describable: source primaries (raw code
+    // point), H.273 transfer 8 (linear), identity matrix (RGB data),
+    // full range. No SDR ICC or transfer may carry over, but a linear
+    // CICP is strictly more self-describing than nothing — the enum
+    // descriptor folds primaries the raw code point keeps.
+    let linear_cicp = zencodec::Cicp::new(native_info.color_primaries.0, 8, 0, true);
+    let hdr = hdr.with_color_context(Arc::new(zenpixels::ColorContext::from_cicp(linear_cicp)));
     let cll = measure_cll_linear(&hdr);
     Ok((hdr, cll))
 }
@@ -3224,6 +3283,7 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
         if mono_source
             && !reconstructing
             && !decoder.is_grid()
+            && icc_allows_native_gray(&native_info)
             && wants_gray_output(&self.preferred)
         {
             decoder.set_native_gray(true);
@@ -3236,8 +3296,8 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
         // Self-describing pixels: attach the authoritative source color
         // (class-gated). Conversions, orientation, and the load-bearing
         // reduction all propagate it; the HDR reconstruction below
-        // replaces the buffer (linear f32 — no SDR profile describes it),
-        // which correctly leaves the HDR output context-free.
+        // replaces the buffer and re-tags it with a linear CICP (no SDR
+        // ICC/transfer may carry onto linear f32).
         let pixels = attach_source_color_context(pixels, &native_info);
         // HDR reconstruction (GainMapRender::ReconstructHdr): apply the
         // gain map to the SDR base via ultrahdr-core, BEFORE orientation
@@ -3383,6 +3443,12 @@ pub struct AvifStreamingDecoder {
     strip_converter: Option<crate::strip_convert::StripConverter>,
     /// Optimal strip height for the strip converter path.
     strip_height: u32,
+    /// Class-gated color context applied to every emitted strip: the
+    /// scratch `strip_buffer` is rebuilt per batch without one, so the
+    /// context is re-attached at emission. `None` when the source
+    /// carries no color signaling (or the HDR/bake source buffer had
+    /// none).
+    strip_color_context: Option<Arc<zenpixels::ColorContext>>,
     /// Bake path (`OrientationHint::bakes()`): the fully-decoded, orientation-
     /// baked buffer. Orientation is not strip-local (transposes need the whole
     /// image), so the bake path materializes upright once and emits it in
@@ -3456,6 +3522,10 @@ impl zencodec::decode::StreamingDecode for AvifStreamingDecoder {
             let y = self.y_offset;
             self.y_offset += h;
             let slice = self.strip_buffer.as_ref().unwrap().as_slice().erase();
+            let slice = match &self.strip_color_context {
+                Some(ctx) => slice.with_color_context(Arc::clone(ctx)),
+                None => slice,
+            };
             return Ok(Some((y, slice)));
         }
 
@@ -3487,6 +3557,10 @@ impl zencodec::decode::StreamingDecode for AvifStreamingDecoder {
             let y = self.y_offset;
             self.y_offset += strip_h;
             let slice = self.strip_buffer.as_ref().unwrap().as_slice().erase();
+            let slice = match &self.strip_color_context {
+                Some(ctx) => slice.with_color_context(Arc::clone(ctx)),
+                None => slice,
+            };
             return Ok(Some((y, slice)));
         }
 
@@ -3517,6 +3591,10 @@ impl zencodec::decode::StreamingDecode for AvifStreamingDecoder {
             let y = self.y_offset;
             self.y_offset += h;
             let slice = self.strip_buffer.as_ref().unwrap().as_slice().erase();
+            let slice = match &self.strip_color_context {
+                Some(ctx) => slice.with_color_context(Arc::clone(ctx)),
+                None => slice,
+            };
             return Ok(Some((y, slice)));
         }
 
