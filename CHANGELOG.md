@@ -31,6 +31,19 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   retained, documented as informational, and excluded from the sweep
   fingerprint on all backends.
 
+### Added (pattern 7: cell ids as durable identity)
+- `sweep::config_from_cell_id(base_id, q)` — reconstructs the exact
+  `EncoderConfig` from a sweep cell id (the ledger contract: ids stored in
+  TSV/parquet identity columns are regenerable years later). Parses through
+  the same stratum builder the planner uses; grammar documented on the
+  parser, additive-only, lossless numbers. `SweepAxes::by_name` resolves the
+  named plans for executor wiring. The grammar-totality test
+  (`cell_ids_roundtrip_to_their_configs`, fingerprint-exact over canonical +
+  alias spellings of the full `modes_full_alpha × Step5` plan) caught a real
+  tokenizer bug on its first run (`part4.16`'s separator dot eaten by the
+  float scanner). Remaining open for fleet use: the zenmetrics executor
+  wiring (checklist step 8 in zenjpeg's reference doc).
+
 ### Added (expert-knob parity + MLP training bridge)
 - `sweep::feature_columns()` + `SweepCell::feature_row(PlanInput)` — numeric
   knob vectors for picker/MLP training (zentrain): one column per knob,

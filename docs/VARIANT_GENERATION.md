@@ -161,6 +161,22 @@ dev≤1 stratum subset — minutes, not hours, while still encoding every
 single-deviation label. Full grids belong to the real sweep
 infrastructure (zenmetrics fleet), not the validation harness.
 
+## Cell ids are durable identity (pattern 7 — landed 2026-06-11)
+
+`sweep::config_from_cell_id(base_id, q)` reconstructs the exact
+`EncoderConfig` from a cell id alone, and `SweepAxes::by_name` resolves
+the named plans (`rd_core` / `modes_full` / `modes_full_alpha`) for
+executor use. The parser rebuilds through the **same stratum builder
+the planner uses**, so equal id ⇒ equal fingerprint by construction;
+consumers carrying `{cell, fp, plan}` verify the fingerprint after
+parsing. The grammar (documented on the parser) is additive-only;
+numbers are shortest-roundtrip `Display`. The
+`cell_ids_roundtrip_to_their_configs` test enforces totality —
+canonical AND alias spellings across the full `modes_full_alpha ×
+Step5` plan — and its first run caught a real tokenizer bug: the float
+scanner ate `part4.16`'s separator dot (the zenjpeg id-collision defect
+class, caught before any ledger row existed).
+
 ## Open items
 
 - zenravif 0.1.4: expose quantizer/speed resolution publicly; delete

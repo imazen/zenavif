@@ -1130,6 +1130,232 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
     h.0
 }
 
+// ============================================================================
+// Cell-id grammar: parse ids back to configs (the ledger contract)
+// ============================================================================
+
+impl SweepAxes {
+    /// Resolve a named plan's axes — the executor-facing entry point
+    /// (`--plan name` in zenmetrics chunk mode resolves through this).
+    /// Names are a wire contract: additive-only, never renamed.
+    #[must_use]
+    pub fn by_name(name: &str) -> Option<Self> {
+        match name {
+            "rd_core" => Some(Self::rd_core()),
+            "modes_full" => Some(Self::modes_full()),
+            "modes_full_alpha" => Some(Self::modes_full_alpha()),
+            _ => None,
+        }
+    }
+}
+
+/// Reconstruct the exact [`EncoderConfig`] a sweep cell id denotes.
+///
+/// `base_id` is the cell id without its `_q{q}` suffix (the split the
+/// ledger stores); `quality` is the grid point. Reconstruction goes
+/// through the **same** stratum builder the planner uses, so a parsed
+/// config cannot drift from the planner's: equal id ⇒ equal resolved
+/// state ⇒ equal [`fingerprint`].
+///
+/// The grammar (see `Stratum::id` / `KnobProbe::label`, which this
+/// parser mirrors token for token):
+///
+/// ```text
+/// s<speed>[-noqm][-420][-bd8|-bd10][-rgb][-vaq<f>][-trel][<probe>]
+/// probe := -cdef<0|1> | -rdotx<0|1> | -sgr<0|1> | -lru<0|1>
+///        | -segcx<0|1> | -bup<0|1> | -still | -sb<f> | -vaqs<f>
+///        | -part<u8>.<u8> | -cpred<0|1> | -lrf<0|1> | -fdb<0|1>
+///        | -aqd<signed f> | -adirty | -aprem
+/// ```
+///
+/// Numbers render with shortest-roundtrip `Display`, so parsing is
+/// lossless. Grammar evolution is additive-only: a new token's absence
+/// means "default", so every stored id stays valid. There are no
+/// non-self-describing cells in zenavif's planner (no opaque table
+/// bytes); unknown or duplicated tokens error.
+///
+/// Consumers that carry the cell fingerprint alongside the id
+/// (zenmetrics does) should verify `fingerprint(&config) == carried_fp`
+/// after parsing — it turns any grammar drift between the declaring and
+/// executing builds into a loud deterministic failure instead of a
+/// silently wrong encode.
+pub fn config_from_cell_id(base_id: &str, quality: f32) -> Result<EncoderConfig, String> {
+    let rest = base_id
+        .strip_prefix('s')
+        .ok_or_else(|| format!("cell id must start with 's<speed>': {base_id}"))?;
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    let speed: u8 = digits
+        .parse()
+        .map_err(|e| format!("bad speed in '{base_id}': {e}"))?;
+    let mut cur = &rest[digits.len()..];
+
+    let mut stratum = Stratum {
+        speed,
+        qm: true,
+        subsampling: EncodeChromaSubsampling::Yuv444,
+        bit_depth: EncodeBitDepth::Auto,
+        color_model: EncodeColorModel::YCbCr,
+        vaq: None,
+        trellis: false,
+        probe: KnobProbe::None,
+    };
+
+    // Scan a (possibly signed) decimal number off the front of `s`.
+    fn number<'a>(s: &'a str, id: &str, what: &str) -> Result<(f64, &'a str), String> {
+        let mut end = 0;
+        let b = s.as_bytes();
+        if end < b.len() && b[end] == b'-' {
+            end += 1;
+        }
+        while end < b.len() && (b[end].is_ascii_digit() || b[end] == b'.') {
+            end += 1;
+        }
+        let v: f64 = s[..end]
+            .parse()
+            .map_err(|e| format!("bad {what} number in '{id}': {e}"))?;
+        Ok((v, &s[end..]))
+    }
+    // Digits only — for tokens where '.' is a separator, not a decimal
+    // point (the part<min>.<max> pair). The float scanner would eat the
+    // separator (caught by cell_ids_roundtrip_to_their_configs).
+    fn integer<'a>(s: &'a str, id: &str, what: &str) -> Result<(u8, &'a str), String> {
+        let end = s.bytes().take_while(u8::is_ascii_digit).count();
+        let v: u8 = s[..end]
+            .parse()
+            .map_err(|e| format!("bad {what} integer in '{id}': {e}"))?;
+        Ok((v, &s[end..]))
+    }
+    fn bool01<'a>(s: &'a str, id: &str, what: &str) -> Result<(bool, &'a str), String> {
+        match s.as_bytes().first() {
+            Some(b'1') => Ok((true, &s[1..])),
+            Some(b'0') => Ok((false, &s[1..])),
+            _ => Err(format!("expected 0|1 after {what} in '{id}'")),
+        }
+    }
+    fn set_probe(st: &mut Stratum, p: KnobProbe, id: &str) -> Result<(), String> {
+        if st.probe != KnobProbe::None {
+            return Err(format!(
+                "duplicate probe token in '{id}': probes are single-deviation by construction"
+            ));
+        }
+        st.probe = p;
+        Ok(())
+    }
+
+    // Longest-prefix-first where prefixes overlap (-vaqs before -vaq).
+    while !cur.is_empty() {
+        let Some(tok) = cur.strip_prefix('-') else {
+            return Err(format!(
+                "expected '-' before token at '…{cur}' in '{base_id}'"
+            ));
+        };
+        cur = if let Some(t) = tok.strip_prefix("noqm") {
+            stratum.qm = false;
+            t
+        } else if let Some(t) = tok.strip_prefix("420") {
+            stratum.subsampling = EncodeChromaSubsampling::Yuv420;
+            t
+        } else if let Some(t) = tok.strip_prefix("bd10") {
+            stratum.bit_depth = EncodeBitDepth::Ten;
+            t
+        } else if let Some(t) = tok.strip_prefix("bd8") {
+            stratum.bit_depth = EncodeBitDepth::Eight;
+            t
+        } else if let Some(t) = tok.strip_prefix("rgb") {
+            stratum.color_model = EncodeColorModel::Rgb;
+            t
+        } else if let Some(t) = tok.strip_prefix("vaqs") {
+            let (v, t) = number(t, base_id, "vaqs")?;
+            set_probe(&mut stratum, KnobProbe::VaqStrength(v), base_id)?;
+            t
+        } else if let Some(t) = tok.strip_prefix("vaq") {
+            let (v, t) = number(t, base_id, "vaq")?;
+            stratum.vaq = Some(v);
+            t
+        } else if let Some(t) = tok.strip_prefix("trel") {
+            stratum.trellis = true;
+            t
+        } else if let Some(t) = tok.strip_prefix("cdef") {
+            let (v, t) = bool01(t, base_id, "cdef")?;
+            set_probe(&mut stratum, KnobProbe::Cdef(v), base_id)?;
+            t
+        } else if let Some(t) = tok.strip_prefix("rdotx") {
+            let (v, t) = bool01(t, base_id, "rdotx")?;
+            set_probe(&mut stratum, KnobProbe::RdoTxDecision(v), base_id)?;
+            t
+        } else if let Some(t) = tok.strip_prefix("sgr") {
+            let (v, t) = bool01(t, base_id, "sgr")?;
+            set_probe(&mut stratum, KnobProbe::SgrFull(v), base_id)?;
+            t
+        } else if let Some(t) = tok.strip_prefix("lru") {
+            let (v, t) = bool01(t, base_id, "lru")?;
+            set_probe(&mut stratum, KnobProbe::LruOnSkip(v), base_id)?;
+            t
+        } else if let Some(t) = tok.strip_prefix("segcx") {
+            let (v, t) = bool01(t, base_id, "segcx")?;
+            set_probe(&mut stratum, KnobProbe::SegmentationComplex(v), base_id)?;
+            t
+        } else if let Some(t) = tok.strip_prefix("bup") {
+            let (v, t) = bool01(t, base_id, "bup")?;
+            set_probe(&mut stratum, KnobProbe::EncodeBottomup(v), base_id)?;
+            t
+        } else if let Some(t) = tok.strip_prefix("still") {
+            set_probe(&mut stratum, KnobProbe::TuneStillImage, base_id)?;
+            t
+        } else if let Some(t) = tok.strip_prefix("sb") {
+            let (v, t) = number(t, base_id, "sb")?;
+            set_probe(&mut stratum, KnobProbe::SegBoost(v), base_id)?;
+            t
+        } else if let Some(t) = tok.strip_prefix("part") {
+            let (min, t) = integer(t, base_id, "part-min")?;
+            let Some(t) = t.strip_prefix('.') else {
+                return Err(format!("expected '.' in part token of '{base_id}'"));
+            };
+            let (max, t) = integer(t, base_id, "part-max")?;
+            set_probe(&mut stratum, KnobProbe::PartitionRange(min, max), base_id)?;
+            t
+        } else if let Some(t) = tok.strip_prefix("cpred") {
+            let (v, t) = bool01(t, base_id, "cpred")?;
+            set_probe(&mut stratum, KnobProbe::ComplexPredictionModes(v), base_id)?;
+            t
+        } else if let Some(t) = tok.strip_prefix("lrf") {
+            let (v, t) = bool01(t, base_id, "lrf")?;
+            set_probe(&mut stratum, KnobProbe::Lrf(v), base_id)?;
+            t
+        } else if let Some(t) = tok.strip_prefix("fdb") {
+            let (v, t) = bool01(t, base_id, "fdb")?;
+            set_probe(&mut stratum, KnobProbe::FastDeblock(v), base_id)?;
+            t
+        } else if let Some(t) = tok.strip_prefix("aqd") {
+            let (v, t) = number(t, base_id, "aqd")?;
+            set_probe(
+                &mut stratum,
+                KnobProbe::AlphaQualityDelta(v as f32),
+                base_id,
+            )?;
+            t
+        } else if let Some(t) = tok.strip_prefix("adirty") {
+            set_probe(
+                &mut stratum,
+                KnobProbe::AlphaMode(EncodeAlphaMode::UnassociatedDirty),
+                base_id,
+            )?;
+            t
+        } else if let Some(t) = tok.strip_prefix("aprem") {
+            set_probe(
+                &mut stratum,
+                KnobProbe::AlphaMode(EncodeAlphaMode::Premultiplied),
+                base_id,
+            )?;
+            t
+        } else {
+            return Err(format!("unknown token '-{tok}' in cell id '{base_id}'"));
+        };
+    }
+
+    Ok(stratum.build_config(quality))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1436,5 +1662,84 @@ mod tests {
         let prem =
             mk_cell(KnobProbe::AlphaMode(EncodeAlphaMode::Premultiplied), 60.0).feature_row(input);
         assert_eq!(prem[idx("alpha_color_mode")], 2.0);
+    }
+
+    /// Pattern-7 grammar totality: every id the planner can emit —
+    /// canonical AND alias spellings, across the largest axes set —
+    /// parses back to a config whose resolved-state fingerprint is
+    /// identical. This is the renderer/parser lockstep contract; it is
+    /// what makes a ledger row regenerable years later.
+    #[test]
+    fn cell_ids_roundtrip_to_their_configs() {
+        let plan = SweepBuilder::new(SweepAxes::modes_full_alpha(), QualityGrid::Step5).plan();
+        assert!(plan.cells.len() > 1000, "expected a large plan to attack");
+
+        let parse_q = |id: &str| -> (String, f32) {
+            let (base, q) = id.rsplit_once("_q").expect("id must carry _q suffix");
+            (base.to_string(), q.parse::<f32>().expect("lossless q"))
+        };
+
+        let mut checked = 0usize;
+        for cell in &plan.cells {
+            for id in std::iter::once(&cell.id).chain(cell.aliases.iter()) {
+                let (base, q) = parse_q(id);
+                let config =
+                    config_from_cell_id(&base, q).unwrap_or_else(|e| panic!("grammar gap: {e}"));
+                assert_eq!(
+                    fingerprint(&config),
+                    cell.fingerprint,
+                    "parsed config diverges from planner for id '{id}'"
+                );
+                checked += 1;
+            }
+        }
+        // Canonical cells + every merged alias spelling all roundtrip.
+        assert_eq!(
+            checked,
+            plan.cells.len() + plan.cells.iter().map(|c| c.aliases.len()).sum::<usize>()
+        );
+
+        // Id uniqueness over the largest axes set (attribution depends
+        // on it; collisions silently merge deltas).
+        let mut seen = std::collections::HashSet::new();
+        for c in &plan.cells {
+            assert!(seen.insert(&c.id), "duplicate cell id {}", c.id);
+        }
+    }
+
+    #[test]
+    fn cell_id_parser_rejects_malformed_ids() {
+        // Unknown token.
+        assert!(config_from_cell_id("s4-bogus", 50.0).is_err());
+        // Two probe tokens (single-deviation violated).
+        assert!(config_from_cell_id("s4-cdef1-lrf0", 50.0).is_err());
+        // Bad number.
+        assert!(config_from_cell_id("s4-vaq", 50.0).is_err());
+        // Missing speed.
+        assert!(config_from_cell_id("x4", 50.0).is_err());
+        // Trailing garbage.
+        assert!(config_from_cell_id("s4-cdef1x", 50.0).is_err());
+        // Signed alpha delta parses (the '-' inside a token).
+        let cfg = config_from_cell_id("s6-aqd-25", 60.0).expect("signed delta");
+        let probe_cfg = KnobProbe::AlphaQualityDelta(-25.0)
+            .apply(EncoderConfig::new().quality(60.0).speed(6).threads(Some(1)));
+        assert_eq!(fingerprint(&cfg), fingerprint(&probe_cfg));
+    }
+
+    #[test]
+    fn fingerprint_verification_catches_drift() {
+        // The consumer contract: parse, recompute, compare against the
+        // carried fp. A different cell's fp must not verify.
+        let a = config_from_cell_id("s4", 50.0).unwrap();
+        let b = config_from_cell_id("s4-noqm", 50.0).unwrap();
+        assert_ne!(fingerprint(&a), fingerprint(&b));
+    }
+
+    #[test]
+    fn plan_names_resolve() {
+        assert!(SweepAxes::by_name("rd_core").is_some());
+        assert!(SweepAxes::by_name("modes_full").is_some());
+        assert!(SweepAxes::by_name("modes_full_alpha").is_some());
+        assert!(SweepAxes::by_name("nonsense").is_none());
     }
 }
