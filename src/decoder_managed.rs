@@ -106,6 +106,11 @@ pub struct ManagedAvifDecoder {
     decoder: Rav1dDecoder,
     parser: zenavif_parse::AvifParser<'static>,
     prefer_8bit: bool,
+    /// When true, alpha-free monochrome images decode to native Gray8 /
+    /// Gray16 buffers (1 channel) instead of expanding to RGB. Off by
+    /// default — opted in by the zencodec adapter's format negotiation
+    /// (imazen/zenavif#5).
+    native_gray: bool,
 }
 
 impl ManagedAvifDecoder {
@@ -161,6 +166,7 @@ impl ManagedAvifDecoder {
             decoder,
             parser,
             prefer_8bit: config.prefer_8bit,
+            native_gray: false,
         })
     }
 
@@ -490,6 +496,13 @@ impl ManagedAvifDecoder {
     /// Uses the AVIF container parser and AV1 sequence header to extract
     /// dimensions, color info, ICC profile, EXIF, XMP, orientation, and HDR metadata.
     /// Does NOT do full AV1 frame decoding.
+    /// Opt in to native grayscale output for alpha-free monochrome
+    /// images (zencodec adapter negotiation; see `convert_*_monochrome_gray`).
+    #[cfg_attr(not(feature = "zencodec"), allow(dead_code))]
+    pub(crate) fn set_native_gray(&mut self, on: bool) {
+        self.native_gray = on;
+    }
+
     pub fn probe_info(&self) -> Result<ImageInfo> {
         // Get dimensions from grid config or AV1 sequence header
         let (width, height) = if let Some(grid) = self.parser.grid_config() {
@@ -997,6 +1010,9 @@ impl ManagedAvifDecoder {
             matrix,
         };
         let mut image = match (info.chroma_sampling, resolved) {
+            (ChromaSampling::Monochrome, _) if self.native_gray && !ctx.has_alpha => {
+                convert_8bit_monochrome_gray(&planes, ctx)?
+            }
             (ChromaSampling::Monochrome, _) => convert_8bit_monochrome(&planes, ctx)?,
             (ChromaSampling::Cs444, ResolvedMatrix::Identity) => {
                 convert_8bit_identity(&planes, ctx)?
@@ -1081,6 +1097,9 @@ impl ManagedAvifDecoder {
             matrix,
         };
         let mut image = match (info.chroma_sampling, resolved) {
+            (ChromaSampling::Monochrome, _) if self.native_gray && !ctx.has_alpha => {
+                convert_16bit_monochrome_gray(&planes, info.bit_depth, ctx)?
+            }
             (ChromaSampling::Monochrome, _) => {
                 convert_16bit_monochrome(&planes, info.bit_depth, ctx)?
             }
@@ -1525,6 +1544,89 @@ impl ConvertCtx {
 }
 
 /// 8-bit monochrome YUV→RGB(A) dispatch. `has_alpha` selects RGBA vs RGB output.
+/// Native Gray8 output for alpha-free monochrome (imazen/zenavif#5):
+/// 1 byte/pixel instead of the 3-4x RGB expansion. Range expansion goes
+/// through the same `yuv` crate kernel as the RGB path (per-row scratch),
+/// so gray output is bit-identical to the R channel of an RGB decode.
+fn convert_8bit_monochrome_gray(planes: &Planes8<'_>, ctx: ConvertCtx) -> Result<PixelBuffer> {
+    let y_view = planes.y();
+    let (w, h) = ctx.dims();
+    let (wu, hu) = (w as usize, h as usize);
+    let mut out = vec![rgb::Gray::<u8>::new(0); ctx.buffer_pixel_count];
+    let mut rgb_row = vec![Rgb { r: 0u8, g: 0, b: 0 }; wu];
+    let y_slice = y_view.as_slice();
+    let y_stride = y_view.stride();
+    for (row_idx, orow) in out.chunks_exact_mut(wu).enumerate().take(hu) {
+        let yrow = &y_slice[row_idx * y_stride..][..wu];
+        let gray = YuvGrayImage {
+            y_plane: yrow,
+            y_stride: w,
+            width: w,
+            height: 1,
+        };
+        yuv::yuv400_to_rgb(
+            &gray,
+            rgb::bytemuck::cast_slice_mut(rgb_row.as_mut_slice()),
+            w * 3,
+            ctx.yuv_range,
+            ctx.matrix,
+        )
+        .map_err(|e| at!(Error::ColorConversion(e)))?;
+        for (o, p) in orow.iter_mut().zip(&rgb_row) {
+            *o = rgb::Gray::new(p.r);
+        }
+    }
+    PixelBuffer::from_pixels(out, w, h)
+        .map(Into::into)
+        .map_err(|_| at!(Error::OutOfMemory))
+}
+
+/// Native Gray16 output for alpha-free 10/12-bit monochrome — same
+/// per-row shared-kernel scheme as [`convert_8bit_monochrome_gray`].
+/// Values are native-depth; the caller's `scale_pixels_to_u16` expands.
+fn convert_16bit_monochrome_gray(
+    planes: &Planes16<'_>,
+    bit_depth: u8,
+    ctx: ConvertCtx,
+) -> Result<PixelBuffer> {
+    let y_view = planes.y();
+    let (w, h) = ctx.dims();
+    let (wu, hu) = (w as usize, h as usize);
+    let mut out = vec![rgb::Gray::<u16>::new(0); ctx.buffer_pixel_count];
+    let mut rgb_row = vec![
+        Rgb {
+            r: 0u16,
+            g: 0,
+            b: 0
+        };
+        wu
+    ];
+    let y_slice = y_view.as_slice();
+    let y_stride = y_view.stride();
+    for (row_idx, orow) in out.chunks_exact_mut(wu).enumerate().take(hu) {
+        let yrow = &y_slice[row_idx * y_stride..][..wu];
+        let gray = YuvGrayImage {
+            y_plane: yrow,
+            y_stride: w,
+            width: w,
+            height: 1,
+        };
+        let out_bytes = rgb::bytemuck::cast_slice_mut(rgb_row.as_mut_slice());
+        match bit_depth {
+            10 => yuv::y010_to_rgb10(&gray, out_bytes, w * 3, ctx.yuv_range, ctx.matrix),
+            12 => yuv::y012_to_rgb12(&gray, out_bytes, w * 3, ctx.yuv_range, ctx.matrix),
+            _ => yuv::y016_to_rgb16(&gray, out_bytes, w * 3, ctx.yuv_range, ctx.matrix),
+        }
+        .map_err(|e| at!(Error::ColorConversion(e)))?;
+        for (o, p) in orow.iter_mut().zip(&rgb_row) {
+            *o = rgb::Gray::new(p.r);
+        }
+    }
+    PixelBuffer::from_pixels(out, w, h)
+        .map(Into::into)
+        .map_err(|_| at!(Error::OutOfMemory))
+}
+
 fn convert_8bit_monochrome(planes: &Planes8<'_>, ctx: ConvertCtx) -> Result<PixelBuffer> {
     let y_view = planes.y();
     let (w, h) = ctx.dims();

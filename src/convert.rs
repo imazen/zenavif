@@ -78,6 +78,15 @@ pub fn downscale_to_8bit(image: PixelBuffer) -> PixelBuffer {
         PixelBuffer::from_pixels(out, w, h)
             .expect("allocation should succeed for same dimensions")
             .into()
+    } else if desc.layout_compatible(PixelDescriptor::GRAY16) {
+        let src = image.try_as_imgref::<rgb::Gray<u16>>().unwrap();
+        let out: Vec<rgb::Gray<u8>> = src
+            .pixels()
+            .map(|px| rgb::Gray::new((px.value() >> 8) as u8))
+            .collect();
+        PixelBuffer::from_pixels(out, w, h)
+            .expect("allocation should succeed for same dimensions")
+            .into()
     } else {
         image
     }
@@ -110,6 +119,11 @@ pub fn scale_pixels_to_u16(image: &mut PixelBuffer, bit_depth: u8) {
                 b: scale_to_u16(px.b, bit_depth),
                 a: scale_to_u16(px.a, bit_depth),
             };
+        }
+    } else if desc.layout_compatible(PixelDescriptor::GRAY16) {
+        let mut img = image.try_as_imgref_mut::<rgb::Gray<u16>>().unwrap();
+        for px in img.buf_mut().iter_mut() {
+            *px = rgb::Gray::new(scale_to_u16(px.value(), bit_depth));
         }
     }
 }

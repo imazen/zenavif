@@ -1922,6 +1922,8 @@ static DECODE_DESCRIPTORS: &[PixelDescriptor] = &[
     PixelDescriptor::RGBA8_SRGB,
     PixelDescriptor::RGB16_SRGB,
     PixelDescriptor::RGBA16_SRGB,
+    PixelDescriptor::GRAY8_SRGB,
+    PixelDescriptor::GRAY16_SRGB,
 ];
 
 static AVIF_DECODE_CAPABILITIES: zencodec::decode::DecodeCapabilities =
@@ -1937,7 +1939,7 @@ static AVIF_DECODE_CAPABILITIES: zencodec::decode::DecodeCapabilities =
         .with_hdr(true)
         .with_gain_map(true)
         .with_reconstructs_hdr(true)
-        .with_native_gray(false)
+        .with_native_gray(true)
         .with_native_16bit(true)
         .with_native_alpha(true)
         .with_enforces_max_pixels(true)
@@ -2273,6 +2275,21 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         let native_info = decoder.probe_info()?;
         self.check_decode_limits(&native_info)?;
 
+        // Native grayscale opt-in (zenavif#5) — mirrors the buffered
+        // decode: alpha-free monochrome, not reconstructing, not a grid
+        // (the grid branch below stitches RGB tiles), gray negotiated.
+        // The monochrome strip path runs through full conversion +
+        // `StripConverter::new_from_pixels`, which carries the gray
+        // descriptor into the emitted strips.
+        let mono_source = native_info.monochrome && !native_info.has_alpha;
+        let reconstructing = matches!(
+            self.gain_map_render,
+            zencodec::GainMapRender::ReconstructHdr { .. }
+        ) && native_info.gain_map.is_some();
+        if mono_source && !reconstructing && !decoder.is_grid() && wants_gray_output(preferred) {
+            decoder.set_native_gray(true);
+        }
+
         // ReconstructHdr path: gain-map application is whole-image (the
         // map is sampled at an image-to-map scale ratio), so decode the
         // full buffer, reconstruct, then emit fixed-height strips —
@@ -2324,7 +2341,11 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         if will_auto_orient(self.orientation) {
             let (pixels, native_info) = decoder.decode_full(&stop_token)?;
             let pixels = set_cicp_on_pixels(pixels, &native_info);
-            let pixels = negotiate_format(pixels, preferred);
+            let pixels = negotiate_format(
+                pixels,
+                preferred,
+                native_info.monochrome && !native_info.has_alpha,
+            );
             let (baked, _orientation, w, h) =
                 bake_orientation(pixels, &native_info, self.orientation);
             let strip_descriptor = baked.descriptor();
@@ -2945,7 +2966,26 @@ fn format_matches(a: PixelDescriptor, b: PixelDescriptor) -> bool {
 ///
 /// Transfer function and color primaries on the native descriptor are preserved
 /// (set from CICP metadata). Negotiation only considers channel type and alpha.
-fn negotiate_format(pixels: PixelBuffer, preferred: &[PixelDescriptor]) -> PixelBuffer {
+/// Whether negotiation selects native grayscale output for an alpha-free
+/// monochrome source: yes with no preference (gray IS the native format,
+/// per the `native_gray` capability), or when the caller's first
+/// preference is a Gray layout. A leading RGB preference keeps the
+/// classic expanded decode.
+fn wants_gray_output(preferred: &[PixelDescriptor]) -> bool {
+    match preferred.first() {
+        None => true,
+        Some(p) => p.layout() == zenpixels::ChannelLayout::Gray,
+    }
+}
+
+/// `source_is_gray`: the *coded* image is alpha-free monochrome, so a
+/// gray preference can be satisfied exactly (an RGB-expanded mono buffer
+/// is R=G=B; luma of equal channels is the channel).
+fn negotiate_format(
+    pixels: PixelBuffer,
+    preferred: &[PixelDescriptor],
+    source_is_gray: bool,
+) -> PixelBuffer {
     if preferred.is_empty() {
         return pixels;
     }
@@ -2964,6 +3004,27 @@ fn negotiate_format(pixels: PixelBuffer, preferred: &[PixelDescriptor]) -> Pixel
         // Can't upscale bit depth losslessly.
         if pref.channel_type().byte_size() > native.channel_type().byte_size() {
             continue;
+        }
+
+        // Grayscale preferences: satisfiable exactly only for monochrome
+        // sources (never synthesize luma for color images here — that is
+        // a CMS decision, not format negotiation).
+        if pref.layout() == zenpixels::ChannelLayout::Gray {
+            if source_is_gray && pref.channel_type() == ChannelType::U8 {
+                return pixels.to_gray8().into();
+            }
+            continue;
+        }
+
+        // Gray native, color preference at the same depth: expand.
+        if native.layout() == zenpixels::ChannelLayout::Gray
+            && pref.channel_type() == native.channel_type()
+            && native.channel_type() == ChannelType::U8
+        {
+            if pref.layout().has_alpha() {
+                return pixels.to_rgba8().into();
+            }
+            return pixels.to_rgb8().into();
         }
 
         // If caller wants 8-bit and we have 16-bit, downconvert.
@@ -3044,6 +3105,25 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
             .check_memory(estimated_mem)
             .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
 
+        // Native grayscale opt-in (zenavif#5): alpha-free monochrome
+        // decodes straight to Gray8/Gray16 (1-2 bytes/pixel) when
+        // negotiation selects it. Grid composition stitches RGB tiles and
+        // HDR reconstruction needs an RGB base, so both stay expanded
+        // (a gray preference is then satisfied post-hoc in
+        // `negotiate_format` — exact, since mono RGB is R=G=B).
+        let mono_source = native_info.monochrome && !native_info.has_alpha;
+        let reconstructing = matches!(
+            self.gain_map_render,
+            zencodec::GainMapRender::ReconstructHdr { .. }
+        ) && native_info.gain_map.is_some();
+        if mono_source
+            && !reconstructing
+            && !decoder.is_grid()
+            && wants_gray_output(&self.preferred)
+        {
+            decoder.set_native_gray(true);
+        }
+
         let (pixels, native_info) = decoder.decode_full(stop)?;
 
         // Set transfer function and primaries from CICP on the pixel descriptor.
@@ -3071,7 +3151,7 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
             // BaseOnly / Components — or ReconstructHdr on a file with
             // no gain map, where the base IS the only rendition and an
             // honest SDR output is the correct rendering.
-            negotiate_format(pixels, &self.preferred)
+            negotiate_format(pixels, &self.preferred, mono_source)
         };
         // Orientation policy: `Correct` bakes the intrinsic `irot`/`imir`
         // orientation into the pixels and reports display dims + `Identity`;
@@ -3424,7 +3504,9 @@ impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
                 continue;
             }
 
-            let pixels = negotiate_format(frame.pixels, &self.preferred);
+            // Animation frames stay on the RGB path (native-gray opt-in is
+            // still-image only); no gray claims here.
+            let pixels = negotiate_format(frame.pixels, &self.preferred, false);
             // Bake orientation into the frame on the bake path; `Identity` is a
             // no-op (preserve path keeps stored-orientation pixels unchanged).
             let pixels = if self.bake_to.is_identity() {
