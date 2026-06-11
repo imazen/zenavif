@@ -45,6 +45,9 @@ zenanalyze = { version = "0.2.0", path = "../zenanalyze", optional = true, featu
 serde_json = { version = "1.0", default-features = false, features = ["std"], optional = true }
 almost-enough = { version = "0.4.3", default-features = false }
 zencodec = { version = "0.1.21", optional = true }
+# Gain-map application math for GainMapRender::ReconstructHdr (decode-side
+# HDR reconstruction). Pure math, no codec engines.
+ultrahdr-core = { version = "0.5.0", default-features = false, optional = true }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 zenpixels = { version = "0.2.11", default-features = false, features = ["imgref", "rgb"] }
 zenpixels-convert = { version = "0.2.13", default-features = false, features = ["rgb"] }
@@ -166,7 +169,7 @@ __expert = ["encode-imazen", "ravif/__expert"]
 # See docs/RAV1E_PICKER_PLAN.md for the training pipeline.
 auto-tune = ["encode-imazen", "dep:zenpredict", "dep:zenanalyze", "dep:serde_json"]
 # Enable zencodec trait integration
-zencodec = ["dep:zencodec", "zenavif-parse/zencodec"]
+zencodec = ["dep:zencodec", "zenavif-parse/zencodec", "dep:ultrahdr-core"]
 # Enable zennode pipeline node definitions
 # zennode = ["dep:zennode"]
 # Expose internal YUV conversion modules for profiling/debugging. Not public API.

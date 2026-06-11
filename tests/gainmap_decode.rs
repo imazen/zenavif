@@ -415,39 +415,226 @@ fn gain_map_render_base_only_attaches_nothing() {
     );
 }
 
-/// zenavif does not reconstruct (`reconstructs_hdr()` is false):
-/// `ReconstructHdr` downgrades to surfacing Components per the zencodec
-/// contract — the base stays honestly SDR-labeled, never SDR-as-HDR.
+/// Decode with `ReconstructHdr` and return the output (full boost when
+/// `target_headroom` is `None`).
+#[cfg(feature = "zencodec")]
+fn decode_reconstruct(data: &[u8], target_headroom: Option<f32>) -> zencodec::decode::DecodeOutput {
+    use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
+    zenavif::AvifDecoderConfig::new()
+        .job()
+        .with_gain_map_render(zencodec::GainMapRender::ReconstructHdr { target_headroom })
+        .decoder(std::borrow::Cow::Borrowed(data), &[])
+        .expect("decoder")
+        .decode()
+        .expect("decode")
+}
+
+/// Peak linear value (max over R,G,B of every pixel) of an RgbaF32 buffer.
+#[cfg(feature = "zencodec")]
+fn peak_linear(pixels: &zenpixels::PixelSlice<'_>) -> f32 {
+    assert_eq!(
+        pixels.descriptor().pixel_format(),
+        zenpixels::PixelFormat::RgbaF32
+    );
+    let stride = pixels.stride();
+    let bytes = pixels.as_strided_bytes();
+    let (w, h) = (pixels.width() as usize, pixels.rows() as usize);
+    let mut peak = f32::MIN;
+    for y in 0..h {
+        let row: &[f32] = rgb::bytemuck::cast_slice(&bytes[y * stride..][..w * 16]);
+        for px in row.chunks_exact(4) {
+            assert!(
+                px.iter().all(|v| v.is_finite()),
+                "reconstructed pixels must be finite"
+            );
+            peak = peak.max(px[0].max(px[1]).max(px[2]));
+        }
+    }
+    peak
+}
+
+/// zenavif reconstructs (`reconstructs_hdr()` is true): `ReconstructHdr`
+/// applies the gain map via ultrahdr-core. Output is linear f32 RGBA
+/// (1.0 = SDR white), CLL is measured from the reconstructed pixels, and
+/// the gain-map components are still surfaced for transcode use.
 #[cfg(feature = "zencodec")]
 #[test]
-fn gain_map_render_reconstruct_downgrades_to_components() {
-    use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
-
+fn gain_map_render_reconstructs_linear_hdr() {
     assert!(
-        !<zenavif::AvifDecoderConfig as zencodec::decode::DecoderConfig>::capabilities()
+        <zenavif::AvifDecoderConfig as zencodec::decode::DecoderConfig>::capabilities()
             .reconstructs_hdr()
     );
     let data = require_vector!(load_vector(SEINE_SDR_GAINMAP));
-    let output = zenavif::AvifDecoderConfig::new()
-        .job()
-        .with_gain_map_render(zencodec::GainMapRender::ReconstructHdr {
-            target_headroom: None,
-        })
-        .decoder(std::borrow::Cow::Borrowed(&data), &[])
-        .expect("decoder")
-        .decode()
-        .expect("decode");
-    // Surfaced, not applied: SDR base + decoded components.
+    let output = decode_reconstruct(&data, None);
+
+    let desc = output.pixels().descriptor();
+    assert_eq!(desc.pixel_format(), zenpixels::PixelFormat::RgbaF32);
+    assert_eq!(
+        desc.transfer(),
+        zenpixels::TransferFunction::Linear,
+        "reconstruction output is linear light (1.0 = SDR white)"
+    );
+
+    let peak = peak_linear(&output.pixels());
+    let gm = output
+        .extras::<GainMapSource>()
+        .expect("components still surfaced on ReconstructHdr");
+    let alt_headroom = gm.metadata.params.alternate_hdr_headroom as f32;
+    assert!(
+        alt_headroom > 0.0,
+        "seine vector's alternate rendition is HDR"
+    );
+    assert!(
+        peak > 1.02,
+        "full reconstruction must boost highlights past SDR white (peak {peak})"
+    );
+    assert!(
+        peak <= alt_headroom.exp2() * 1.10 + 0.1,
+        "peak {peak} exceeds the gain map's encoded envelope (2^{alt_headroom})"
+    );
+
+    // Envelope obligation: MaxCLL/MaxFALL measured from the output.
+    let cll = output
+        .info()
+        .source_color
+        .content_light_level
+        .expect("ReconstructHdr must populate measured CLL");
+    assert!(cll.max_content_light_level > 203, "peak above SDR white");
+    assert!(
+        cll.max_frame_average_light_level <= cll.max_content_light_level,
+        "FALL cannot exceed CLL"
+    );
+    assert_eq!(
+        cll.max_content_light_level,
+        (peak * 203.0).round() as u16,
+        "MaxCLL is the measured peak in nits"
+    );
+
+    // Components contract still honored alongside reconstruction.
     assert!(
         output
             .extras::<zencodec::decode::DecodedGainMap>()
             .is_some()
     );
-    assert_ne!(
-        output.pixels().descriptor().channel_type(),
-        zenpixels::ChannelType::F32,
-        "base must stay SDR — zenavif never silently labels SDR as HDR"
+}
+
+/// At `target_headroom = 1.0` (an SDR display) the weight is 0, the gain
+/// is 1.0, and the output is the linearized base — the ISO 21496-1
+/// formula collapses to `sdr + (base_offset - alternate_offset)`.
+#[cfg(feature = "zencodec")]
+#[test]
+fn reconstruct_at_sdr_headroom_matches_linearized_base() {
+    use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
+
+    let data = require_vector!(load_vector(SEINE_SDR_GAINMAP));
+    let hdr = decode_reconstruct(&data, Some(1.0));
+
+    // SDR reference decode of the same base.
+    let base = zenavif::AvifDecoderConfig::new()
+        .job()
+        .decoder(
+            std::borrow::Cow::Borrowed(&data),
+            &[zenpixels::PixelDescriptor::RGB8_SRGB],
+        )
+        .expect("decoder")
+        .decode()
+        .expect("decode");
+    let bp = base.pixels();
+    assert_eq!(bp.descriptor().pixel_format(), zenpixels::PixelFormat::Rgb8);
+
+    fn srgb_eotf(v: f32) -> f32 {
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
+    let hp = hdr.pixels();
+    let (w, h) = (hp.width() as usize, hp.rows() as usize);
+    assert_eq!((w, h), (bp.width() as usize, bp.rows() as usize));
+    let (hs, bs) = (hp.stride(), bp.stride());
+    let (hb, bb) = (hp.as_strided_bytes(), bp.as_strided_bytes());
+    let mut max_diff = 0.0f32;
+    for y in 0..h {
+        let hrow: &[f32] = rgb::bytemuck::cast_slice(&hb[y * hs..][..w * 16]);
+        let brow = &bb[y * bs..][..w * 3];
+        for x in 0..w {
+            for ch in 0..3 {
+                let expect = srgb_eotf(brow[x * 3 + ch] as f32 / 255.0);
+                let got = hrow[x * 4 + ch];
+                max_diff = max_diff.max((got - expect).abs());
+            }
+        }
+    }
+    // Tolerance covers the per-channel (base_offset − alternate_offset)
+    // residual the formula leaves at gain = 1, plus LUT rounding.
+    assert!(
+        max_diff < 0.02,
+        "boost=1.0 reconstruction must equal the linearized base (max diff {max_diff})"
     );
+}
+
+/// Reconstruction peak is monotonic in target headroom (weight is
+/// monotonic in display boost): SDR ≤ 2× ≤ full.
+#[cfg(feature = "zencodec")]
+#[test]
+fn reconstruct_headroom_is_monotonic() {
+    let data = require_vector!(load_vector(SEINE_SDR_GAINMAP));
+    let p1 = peak_linear(&decode_reconstruct(&data, Some(1.0)).pixels());
+    let p2 = peak_linear(&decode_reconstruct(&data, Some(2.0)).pixels());
+    let pf = peak_linear(&decode_reconstruct(&data, None).pixels());
+    assert!(
+        p1 <= p2 + 1e-4 && p2 <= pf + 1e-4,
+        "peaks must be monotonic in headroom: 1.0→{p1}, 2.0→{p2}, full→{pf}"
+    );
+    assert!(
+        pf > p1 + 0.01,
+        "full boost must actually exceed the SDR rendering ({pf} vs {p1})"
+    );
+}
+
+/// Streaming `ReconstructHdr` emits the same pixels as the buffered path
+/// (both run the shared whole-image reconstruction, strip-emitted).
+#[cfg(feature = "zencodec")]
+#[test]
+fn streaming_reconstruct_matches_buffered() {
+    use zencodec::decode::{DecodeJob as _, DecoderConfig as _, StreamingDecode as _};
+
+    let data = require_vector!(load_vector(SEINE_SDR_GAINMAP));
+    let buffered = decode_reconstruct(&data, None);
+    let bp = buffered.pixels();
+
+    let mut dec = zenavif::AvifDecoderConfig::new()
+        .job()
+        .with_gain_map_render(zencodec::GainMapRender::ReconstructHdr {
+            target_headroom: None,
+        })
+        .streaming_decoder(std::borrow::Cow::Borrowed(&data), &[])
+        .expect("streaming_decoder");
+    let cll = dec
+        .info()
+        .source_color
+        .content_light_level
+        .expect("streaming ReconstructHdr must also populate measured CLL");
+    assert!(cll.max_content_light_level > 203);
+
+    let (w, h) = (dec.info().width, dec.info().height);
+    assert_eq!((w, h), (bp.width(), bp.rows()));
+    let mut rows_seen = 0u32;
+    while let Some((y, strip)) = dec.next_batch().expect("next_batch") {
+        assert_eq!(
+            strip.descriptor().pixel_format(),
+            zenpixels::PixelFormat::RgbaF32
+        );
+        for r in 0..strip.rows() {
+            let got = strip.row(r);
+            let expect = bp.row(y + r);
+            assert_eq!(got, expect, "strip row {} differs from buffered", y + r);
+            rows_seen += 1;
+        }
+    }
+    assert_eq!(rows_seen, h, "stream must cover every row exactly once");
 }
 
 #[cfg(feature = "zencodec")]

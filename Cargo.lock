@@ -1540,6 +1540,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c7c4ceeeca15c8384bbc3e011dbd8fccb7f068a440b752b7d9b32ceb0ca0e2e8"
 
 [[package]]
+name = "ultrahdr-core"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d65bd22a90785bb7360076b599ffbc201aef2c5817d2e5f37f37357829d476e"
+dependencies = [
+ "bytemuck",
+ "enough",
+ "half",
+ "linear-srgb",
+ "thiserror",
+ "wide",
+ "zencodec",
+ "zenpixels",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1956,6 +1972,7 @@ dependencies = [
  "safe_unaligned_simd",
  "serde_json",
  "thiserror",
+ "ultrahdr-core",
  "whereat",
  "yuv",
  "zenanalyze",

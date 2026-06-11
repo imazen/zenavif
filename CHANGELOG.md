@@ -10,6 +10,20 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Added (HDR reconstruction — issue #17)
+- **`GainMapRender::ReconstructHdr` is now honored** (`reconstructs_hdr()`
+  capability is `true`): the decoder applies the ISO 21496-1 gain map to
+  the SDR base via `ultrahdr-core`, producing linear f32 RGBA (1.0 = SDR
+  white / 203 nits, base-image primaries). `target_headroom: Some(h)`
+  renders for an h×-SDR-white display; `None` reconstructs at the map's
+  encoded maximum. MaxCLL/MaxFALL are **measured** from the reconstructed
+  pixels per the zencodec envelope obligation, and the gain-map components
+  are still surfaced for transcode use. The streaming decoder reconstructs
+  whole-image and emits fixed-height strips (same shape as the
+  orientation-bake path); buffered and streaming outputs are bit-identical.
+  Alpha-carrying and >8-bit bases are refused loudly (use `Components` and
+  apply downstream); files without a gain map decode as honest SDR.
+
 ### Fixed (corpus integrity — issue #16)
 - The libavif corpus test now asserts the two `unsupported_gainmap_*`
   fixtures are **rejected with their version-gate errors** — they are

@@ -324,6 +324,7 @@ static AVIF_ENCODE_CAPABILITIES: zencodec::encode::EncodeCapabilities =
         .with_lossless(cfg!(feature = "encode-imazen"))
         .with_hdr(true)
         .with_gain_map(true)
+        .with_reconstructs_hdr(true)
         .with_animation(true)
         .with_native_gray(false)
         .with_native_16bit(true)
@@ -1935,6 +1936,7 @@ static AVIF_DECODE_CAPABILITIES: zencodec::decode::DecodeCapabilities =
         .with_streaming(true)
         .with_hdr(true)
         .with_gain_map(true)
+        .with_reconstructs_hdr(true)
         .with_native_gray(false)
         .with_native_16bit(true)
         .with_native_alpha(true)
@@ -1988,10 +1990,11 @@ pub struct AvifDecodeJob {
     /// Default: false. Metadata (supplements, `GainMapPresence`) is always
     /// populated regardless of this flag.
     extract_gain_map: bool,
-    /// Gain-map rendition intent (zencodec 0.1.21). `Components` (and
-    /// `ReconstructHdr`, which zenavif downgrades to surfacing — see
-    /// `with_gain_map_render`) additionally decodes the gain-map AV1 payload
-    /// into a [`zencodec::decode::DecodedGainMap`]. Default `BaseOnly`.
+    /// Gain-map rendition intent (zencodec 0.1.21). `Components` decodes
+    /// the gain-map AV1 payload into a
+    /// [`zencodec::decode::DecodedGainMap`]; `ReconstructHdr` additionally
+    /// applies it (ultrahdr-core) producing linear f32 HDR pixels — see
+    /// `with_gain_map_render`. Default `BaseOnly`.
     gain_map_render: zencodec::GainMapRender,
     /// How to handle the image's stored orientation (`irot`/`imir`).
     /// Default [`OrientationHint::Preserve`](zencodec::OrientationHint::Preserve).
@@ -2105,12 +2108,14 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         self
     }
 
-    /// zenavif surfaces gain maps but does not apply them
-    /// (`DecodeCapabilities::reconstructs_hdr()` is `false`): per the
-    /// [`GainMapRender::ReconstructHdr`] contract, a decoder without
-    /// reconstruction surfaces [`GainMapRender::Components`] instead — the
-    /// SDR base stays SDR-labeled and the caller applies the gain map one
-    /// layer up (ultrahdr-core).
+    /// `ReconstructHdr` applies the gain map to the SDR base via
+    /// ultrahdr-core (`DecodeCapabilities::reconstructs_hdr()` is `true`):
+    /// the output is linear f32 RGBA (1.0 = SDR white / 203 nits) in the
+    /// base image's primaries, MaxCLL/MaxFALL measured from the
+    /// reconstructed pixels, and the gain-map components still surfaced
+    /// for transcode use. Files without a gain map decode as honest SDR.
+    /// Alpha-carrying or >8-bit bases are refused loudly — use
+    /// [`GainMapRender::Components`] and apply downstream for those.
     fn with_gain_map_render(mut self, render: zencodec::GainMapRender) -> Self {
         self.gain_map_render = render;
         self
@@ -2267,6 +2272,49 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         let mut decoder = crate::ManagedAvifDecoder::new(&data, &cfg)?;
         let native_info = decoder.probe_info()?;
         self.check_decode_limits(&native_info)?;
+
+        // ReconstructHdr path: gain-map application is whole-image (the
+        // map is sampled at an image-to-map scale ratio), so decode the
+        // full buffer, reconstruct, then emit fixed-height strips —
+        // same shape as the orientation-bake path below. Files without
+        // a gain map fall through to honest SDR streaming.
+        if let zencodec::GainMapRender::ReconstructHdr { target_headroom } = self.gain_map_render
+            && native_info.gain_map.is_some()
+        {
+            let (pixels, native_info) = decoder.decode_full(&stop_token)?;
+            let pixels = set_cicp_on_pixels(pixels, &native_info);
+            let (hdr, (max_cll, max_fall)) =
+                reconstruct_hdr_pixels(pixels, &native_info, target_headroom, &stop_token)?;
+            let (baked, _orientation, w, h) = bake_orientation(hdr, &native_info, self.orientation);
+            let strip_descriptor = baked.descriptor();
+            let mut info = apply_reported_orientation(
+                convert_native_info(&native_info),
+                &native_info,
+                self.orientation,
+            );
+            // Measured envelope of the reconstructed pixels (zencodec
+            // contract: MaxCLL/MaxFALL are measured; mastering display
+            // passes through unchanged).
+            info =
+                info.with_content_light_level(zencodec::ContentLightLevel::new(max_cll, max_fall));
+            let strip_height = 64u32.min(h.max(1));
+            return Ok(AvifStreamingDecoder {
+                info,
+                y_offset: 0,
+                output_width: w,
+                output_height: h,
+                decoder: None,
+                stop: stop_token,
+                grid_rows: 0,
+                grid_cols: 0,
+                current_grid_row: 0,
+                strip_descriptor,
+                strip_buffer: None,
+                strip_converter: None,
+                strip_height,
+                baked: Some(baked),
+            });
+        }
 
         // Bake path: orientation is not strip-local (transposes need the whole
         // image), so decode + bake the full buffer once and emit it in
@@ -2713,6 +2761,110 @@ fn convert_gain_map_presence(native: &crate::image::ImageInfo) -> GainMapPresenc
 /// ISO 21496-1 metadata fields, and optionally converts alt color info
 /// to a [`Cicp`](zencodec::Cicp). Returns `None` if the AV1 bitstream
 /// cannot be parsed.
+/// Apply the gain map to a decoded SDR base, producing linear f32 RGBA
+/// HDR pixels (1.0 = SDR white / 203 nits, base image's primaries) plus
+/// the measured (MaxCLL, MaxFALL). Shared by the buffered and streaming
+/// decode paths so both honor [`zencodec::GainMapRender::ReconstructHdr`]
+/// identically. Call only when `native_info.gain_map` is `Some`.
+fn reconstruct_hdr_pixels(
+    pixels: zenpixels::PixelBuffer,
+    native_info: &crate::image::ImageInfo,
+    target_headroom: Option<f32>,
+    stop: &dyn Stop,
+) -> Result<(zenpixels::PixelBuffer, (u16, u16)), At<Error>> {
+    let gm = native_info
+        .gain_map
+        .as_ref()
+        .expect("reconstruct_hdr_pixels: gain map presence checked by caller");
+    // Honest-capability gates: the apply kernels read 8-bit RGB(A) bases
+    // and emit constant alpha = 1.0, so a real alpha channel or a >8-bit
+    // base cannot be reconstructed without corruption. The zencodec
+    // contract demands a loud refusal over silent degradation (use
+    // Components + apply downstream for those).
+    if native_info.has_alpha {
+        return Err(at!(Error::Decode {
+            code: -1,
+            msg: "ReconstructHdr with an alpha channel is unsupported \
+                  (apply emits opaque); use GainMapRender::Components",
+        }));
+    }
+    match pixels.descriptor().pixel_format() {
+        zenpixels::PixelFormat::Rgb8 | zenpixels::PixelFormat::Rgba8 => {}
+        _ => {
+            return Err(at!(Error::Decode {
+                code: -1,
+                msg: "ReconstructHdr requires an 8-bit base (10/12-bit not yet \
+                      supported); use GainMapRender::Components",
+            }));
+        }
+    }
+    let metadata = convert_gain_map_info(gm).ok_or_else(|| {
+        at!(Error::Decode {
+            code: -1,
+            msg: "gain map present but its ISO 21496-1 metadata failed to parse",
+        })
+    })?;
+    let (gpx, gw, gh, gch) = crate::decode_av1_obu(&gm.gain_map_data)?;
+    let gainmap = ultrahdr_core::GainMap {
+        width: gw,
+        height: gh,
+        channels: gch,
+        data: gpx,
+    };
+    let params = &metadata.params;
+    // None = full reconstruction at the gain map's encoded maximum
+    // headroom; Some(h) renders for a display with h× SDR-white
+    // capability (clamped inside ultrahdr-core's weight calculation).
+    let boost = target_headroom.unwrap_or_else(|| {
+        (params.alternate_hdr_headroom.max(params.base_hdr_headroom) as f32).exp2()
+    });
+    let hdr = ultrahdr_core::gainmap::apply_gainmap(
+        &pixels,
+        &gainmap,
+        params,
+        boost,
+        ultrahdr_core::HdrOutputFormat::LinearFloat,
+        stop,
+    )
+    .map_err(|_e| {
+        at!(Error::Decode {
+            code: -1,
+            msg: "gain-map apply failed (see ultrahdr-core validation rules)",
+        })
+    })?;
+    let cll = measure_cll_linear(&hdr);
+    Ok((hdr, cll))
+}
+
+/// Measure (MaxCLL, MaxFALL) in nits from linear f32 RGBA pixels where
+/// 1.0 = SDR white (203 nits): MaxCLL = peak of per-pixel max(R,G,B),
+/// MaxFALL = frame average of the same, both scaled by 203.
+fn measure_cll_linear(pixels: &zenpixels::PixelBuffer) -> (u16, u16) {
+    const SDR_WHITE_NITS: f32 = 203.0;
+    let slice = pixels.as_slice();
+    let bytes = slice.as_strided_bytes();
+    let stride = slice.stride();
+    let (w, h) = (slice.width() as usize, slice.rows() as usize);
+    let mut peak = 0.0f32;
+    let mut sum = 0.0f64;
+    for y in 0..h {
+        let row = &bytes[y * stride..][..w * 16];
+        let row_f32: &[f32] = rgb::bytemuck::cast_slice(row);
+        for px in row_f32.chunks_exact(4) {
+            let m = px[0].max(px[1]).max(px[2]).max(0.0);
+            peak = peak.max(m);
+            sum += f64::from(m);
+        }
+    }
+    let fall = if w * h > 0 {
+        (sum / (w * h) as f64) as f32
+    } else {
+        0.0
+    };
+    let to_nits = |v: f32| ((v * SDR_WHITE_NITS).round().clamp(0.0, 65535.0)) as u16;
+    (to_nits(peak), to_nits(fall))
+}
+
 fn convert_gain_map_info(gm: &crate::image::AvifGainMap) -> Option<zencodec::GainMapInfo> {
     // Parse AV1 sequence header to get gain map image dimensions.
     let (width, height, gm_channels_from_av1) =
@@ -2896,7 +3048,31 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
 
         // Set transfer function and primaries from CICP on the pixel descriptor.
         let pixels = set_cicp_on_pixels(pixels, &native_info);
-        let pixels = negotiate_format(pixels, &self.preferred);
+        // HDR reconstruction (GainMapRender::ReconstructHdr): apply the
+        // gain map to the SDR base via ultrahdr-core, BEFORE orientation
+        // bake (base and gain map share stored orientation) and before
+        // SDR format negotiation (the output is linear f32 RGBA, 1.0 =
+        // SDR white / 203 nits). MaxCLL/MaxFALL are MEASURED from the
+        // reconstructed pixels per the zencodec contract.
+        let mut reconstructed_cll: Option<(u16, u16)> = None;
+        let reconstruct_target = match self.gain_map_render {
+            zencodec::GainMapRender::ReconstructHdr { target_headroom }
+                if native_info.gain_map.is_some() =>
+            {
+                Some(target_headroom)
+            }
+            _ => None,
+        };
+        let pixels = if let Some(target_headroom) = reconstruct_target {
+            let (hdr, cll) = reconstruct_hdr_pixels(pixels, &native_info, target_headroom, stop)?;
+            reconstructed_cll = Some(cll);
+            hdr
+        } else {
+            // BaseOnly / Components — or ReconstructHdr on a file with
+            // no gain map, where the base IS the only rendition and an
+            // honest SDR output is the correct rendering.
+            negotiate_format(pixels, &self.preferred)
+        };
         // Orientation policy: `Correct` bakes the intrinsic `irot`/`imir`
         // orientation into the pixels and reports display dims + `Identity`;
         // `Preserve` (default) keeps stored orientation and reports the
@@ -2912,16 +3088,25 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
         if let Some(ref policy) = self.policy {
             apply_decode_policy(&mut info, policy);
         }
+        if let Some((max_cll, max_fall)) = reconstructed_cll {
+            // Measured envelope of the reconstructed pixels — the
+            // signaled CLL described the alternate rendition, this
+            // describes what we actually produced (zencodec contract:
+            // MaxCLL/MaxFALL are measured; mastering display passes
+            // through unchanged).
+            info =
+                info.with_content_light_level(zencodec::ContentLightLevel::new(max_cll, max_fall));
+        }
         let mut output = DecodeOutput::new(pixels, info);
         if let Ok(probe) = crate::detect::probe(&self.data) {
             output = output.with_source_encoding_details(probe);
         }
-        // Gain-map rendition intent. zenavif surfaces (it does not apply):
-        // Components decodes the gain-map AV1 payload into a DecodedGainMap;
-        // ReconstructHdr downgrades to Components per the zencodec contract
-        // (reconstructs_hdr() is false — the base stays honestly SDR-labeled
-        // and the caller applies via ultrahdr-core). Unknown future modes are
-        // refused, never mis-rendered.
+        // Gain-map rendition intent. Components decodes the gain-map AV1
+        // payload into a DecodedGainMap; ReconstructHdr ADDITIONALLY
+        // applies it to the base via ultrahdr-core (above) — the output
+        // pixels are linear f32 RGBA with 1.0 = SDR white, and the
+        // components are still surfaced for transcode use. Unknown
+        // future modes are refused, never mis-rendered.
         let surface_components = match self.gain_map_render {
             zencodec::GainMapRender::BaseOnly => false,
             zencodec::GainMapRender::Components
