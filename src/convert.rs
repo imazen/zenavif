@@ -51,6 +51,13 @@ pub fn downscale_to_8bit(image: PixelBuffer) -> PixelBuffer {
     let desc = image.descriptor();
     let w = image.width();
     let h = image.height();
+    // The rebuilds below construct fresh buffers — carry the color
+    // context across so downstream stages keep self-describing pixels.
+    let ctx = image.color_context().cloned();
+    let reattach = move |buf: PixelBuffer| match ctx {
+        Some(ctx) => buf.with_color_context(ctx),
+        None => buf,
+    };
     if desc.layout_compatible(PixelDescriptor::RGB16) {
         let src = image.try_as_imgref::<Rgb<u16>>().unwrap();
         let out: Vec<Rgb<u8>> = src
@@ -61,9 +68,11 @@ pub fn downscale_to_8bit(image: PixelBuffer) -> PixelBuffer {
                 b: (px.b >> 8) as u8,
             })
             .collect();
-        PixelBuffer::from_pixels(out, w, h)
-            .expect("allocation should succeed for same dimensions")
-            .into()
+        reattach(
+            PixelBuffer::from_pixels(out, w, h)
+                .expect("allocation should succeed for same dimensions")
+                .into(),
+        )
     } else if desc.layout_compatible(PixelDescriptor::RGBA16) {
         let src = image.try_as_imgref::<Rgba<u16>>().unwrap();
         let out: Vec<Rgba<u8>> = src
@@ -75,18 +84,22 @@ pub fn downscale_to_8bit(image: PixelBuffer) -> PixelBuffer {
                 a: (px.a >> 8) as u8,
             })
             .collect();
-        PixelBuffer::from_pixels(out, w, h)
-            .expect("allocation should succeed for same dimensions")
-            .into()
+        reattach(
+            PixelBuffer::from_pixels(out, w, h)
+                .expect("allocation should succeed for same dimensions")
+                .into(),
+        )
     } else if desc.layout_compatible(PixelDescriptor::GRAY16) {
         let src = image.try_as_imgref::<rgb::Gray<u16>>().unwrap();
         let out: Vec<rgb::Gray<u8>> = src
             .pixels()
             .map(|px| rgb::Gray::new((px.value() >> 8) as u8))
             .collect();
-        PixelBuffer::from_pixels(out, w, h)
-            .expect("allocation should succeed for same dimensions")
-            .into()
+        reattach(
+            PixelBuffer::from_pixels(out, w, h)
+                .expect("allocation should succeed for same dimensions")
+                .into(),
+        )
     } else {
         image
     }

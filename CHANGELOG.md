@@ -38,6 +38,22 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   reaches zenavif when zenrav1e 0.1.5 releases and zenravif bumps;
   `tests/identity_roundtrip.rs` tolerances then tighten to exact.
 
+### Added (self-describing decoded buffers)
+- **Decoded buffers now carry a `zenpixels::ColorContext`** — the
+  authoritative source color, selected through zencodec's drop-dupe
+  rules (`SourceColor::to_color_context`: ICC > nclx per MIAF, the
+  non-authoritative duplicate dropped) and **class-gated** so an
+  RGB-class ICC never rides a Gray-layout buffer (the raw H.273 CICP —
+  code points the descriptor enums fold away — stays as the fallback).
+  Attached on the buffered decode, streaming-bake, streaming-reconstruct
+  (SDR base), and animation paths; conversions, orientation bake, and
+  the load-bearing gray reduction all propagate it, and
+  `downscale_to_8bit` now carries it across its rebuilds. HDR
+  reconstruction output is deliberately context-free (no SDR profile
+  describes linear f32; the descriptor is the honest carrier). Known
+  gap, test-pinned: the strip-converter streaming path does not yet
+  attach contexts to strips.
+
 ### Added (load-bearing ICC contract tests)
 - `codec::tests::negotiate_gray` pins the gray-collapse ICC rules in
   zenavif's exact feature configuration (zenpixels-convert without

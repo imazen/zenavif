@@ -2300,6 +2300,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         {
             let (pixels, native_info) = decoder.decode_full(&stop_token)?;
             let pixels = set_cicp_on_pixels(pixels, &native_info);
+            let pixels = attach_source_color_context(pixels, &native_info);
             let (hdr, (max_cll, max_fall)) =
                 reconstruct_hdr_pixels(pixels, &native_info, target_headroom, &stop_token)?;
             let (baked, _orientation, w, h) = bake_orientation(hdr, &native_info, self.orientation);
@@ -2341,6 +2342,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         if will_auto_orient(self.orientation) {
             let (pixels, native_info) = decoder.decode_full(&stop_token)?;
             let pixels = set_cicp_on_pixels(pixels, &native_info);
+            let pixels = attach_source_color_context(pixels, &native_info);
             let pixels = negotiate_format(
                 pixels,
                 preferred,
@@ -2665,6 +2667,84 @@ fn orientation_to_avif(orientation: zencodec::Orientation) -> (Option<u8>, Optio
 }
 
 /// Set transfer function and color primaries from native CICP on the pixel buffer.
+/// Whether an ICC profile's device class (header bytes 16..20) is valid
+/// for the buffer's channel layout: GRAY-class on Gray/GrayAlpha,
+/// RGB-class on Rgb/Rgba/Bgra. Pairing them crosswise is invalid
+/// signaling (libpng, among others, rejects it).
+fn icc_class_matches_layout(icc: &[u8], layout: zenpixels::ChannelLayout) -> bool {
+    if icc.len() < 132 {
+        return false;
+    }
+    let class = &icc[16..20];
+    let buffer_gray = matches!(
+        layout,
+        zenpixels::ChannelLayout::Gray | zenpixels::ChannelLayout::GrayAlpha
+    );
+    if buffer_gray {
+        class == b"GRAY"
+    } else {
+        class == b"RGB "
+    }
+}
+
+/// Attach the authoritative source color to a decoded buffer as a
+/// [`zenpixels::ColorContext`], making the pixels self-describing for
+/// downstream stages (CMS, load-bearing reduction, re-encode).
+///
+/// The selection runs through zencodec's drop-dupe rules
+/// ([`zencodec::decode::SourceColor::to_color_context`]: the
+/// non-authoritative field is dropped — ICC > nclx per MIAF). The ICC is
+/// then class-gated against the buffer layout: an RGB-class profile
+/// never rides a Gray buffer (the raw CICP stays as the fallback signal
+/// — it carries the raw H.273 code points the descriptor enums fold
+/// away). The conversion/orientation/reduction stages all propagate the
+/// context; the load-bearing gray collapse swaps or suppresses per its
+/// own ICC rules.
+fn attach_color_context_class_gated(
+    pixels: PixelBuffer,
+    source_color: &zencodec::decode::SourceColor,
+) -> PixelBuffer {
+    let mut ctx = source_color.to_color_context();
+    if let Some(icc) = &ctx.icc
+        && !icc_class_matches_layout(icc, pixels.descriptor().layout())
+    {
+        ctx.icc = None;
+        if ctx.cicp.is_none() {
+            // The authority drop-dupe removed the CICP in favor of
+            // the (now-stripped) ICC; restore it as the fallback.
+            ctx.cicp = source_color.cicp;
+        }
+    }
+    if ctx.icc.is_none() && ctx.cicp.is_none() {
+        return pixels;
+    }
+    pixels.with_color_context(Arc::new(ctx))
+}
+
+/// [`attach_color_context_class_gated`] from zenavif's native info: build
+/// the [`zencodec::decode::SourceColor`] exactly the way
+/// [`convert_native_info`] does (raw CICP code points + full-range flag;
+/// ICC authority when ICC bytes are present, per MIAF).
+fn attach_source_color_context(
+    pixels: PixelBuffer,
+    native: &crate::image::ImageInfo,
+) -> PixelBuffer {
+    let mut sc = zencodec::decode::SourceColor::default();
+    sc.cicp = Some(zencodec::Cicp::new(
+        native.color_primaries.0,
+        native.transfer_characteristics.0,
+        native.matrix_coefficients.0,
+        native.color_range == crate::image::ColorRange::Full,
+    ));
+    if let Some(ref icc) = native.icc_profile {
+        sc.icc_profile = Some(Arc::<[u8]>::from(icc.as_slice()));
+        // authority stays Icc (SourceColor's default) — ICC > nclx per MIAF
+    } else {
+        sc.color_authority = ColorAuthority::Cicp;
+    }
+    attach_color_context_class_gated(pixels, &sc)
+}
+
 fn set_cicp_on_pixels(pixels: PixelBuffer, info: &crate::image::ImageInfo) -> PixelBuffer {
     let mut desc = pixels.descriptor();
     if let Some(tf) = zenpixels::TransferFunction::from_cicp(info.transfer_characteristics.0) {
@@ -3153,6 +3233,12 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
 
         // Set transfer function and primaries from CICP on the pixel descriptor.
         let pixels = set_cicp_on_pixels(pixels, &native_info);
+        // Self-describing pixels: attach the authoritative source color
+        // (class-gated). Conversions, orientation, and the load-bearing
+        // reduction all propagate it; the HDR reconstruction below
+        // replaces the buffer (linear f32 — no SDR profile describes it),
+        // which correctly leaves the HDR output context-free.
+        let pixels = attach_source_color_context(pixels, &native_info);
         // HDR reconstruction (GainMapRender::ReconstructHdr): apply the
         // gain map to the SDR base via ultrahdr-core, BEFORE orientation
         // bake (base and gain map share stored orientation) and before
@@ -3531,7 +3617,8 @@ impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
 
             // Animation frames stay on the RGB path (native-gray opt-in is
             // still-image only); no gray claims here.
-            let pixels = negotiate_format(frame.pixels, &self.preferred, false);
+            let pixels = attach_color_context_class_gated(frame.pixels, &self.info.source_color);
+            let pixels = negotiate_format(pixels, &self.preferred, false);
             // Bake orientation into the frame on the bake path; `Identity` is a
             // no-op (preserve path keeps stored-orientation pixels unchanged).
             let pixels = if self.bake_to.is_identity() {
@@ -3670,6 +3757,61 @@ mod tests {
                 PixelFormat::Gray8,
                 "colorful pixels must never collapse, whatever the metadata says"
             );
+        }
+
+        /// Class gate: an RGB-class ICC never rides a Gray buffer — it
+        /// is stripped and the raw CICP restored as the fallback signal.
+        #[test]
+        fn class_gate_strips_rgb_icc_from_gray() {
+            use super::super::attach_color_context_class_gated;
+            let mut icc = alloc::vec![0u8; 132];
+            icc[16..20].copy_from_slice(b"RGB ");
+            let mut sc = zencodec::decode::SourceColor::default();
+            sc.icc_profile = Some(Arc::<[u8]>::from(icc.as_slice()));
+            sc.cicp = Some(Cicp::SRGB);
+            // Icc authority (the default): to_color_context drops the cicp.
+            let gray: PixelBuffer =
+                PixelBuffer::from_pixels(alloc::vec![rgb::Gray::<u8>::new(7); 8], 4, 2)
+                    .unwrap()
+                    .into();
+            let out = attach_color_context_class_gated(gray, &sc);
+            let ctx = out.as_slice().color_context().cloned().expect("ctx");
+            assert!(ctx.icc.is_none(), "RGB-class ICC stripped from gray");
+            assert_eq!(
+                ctx.cicp,
+                Some(Cicp::SRGB),
+                "raw CICP restored as the fallback after the strip"
+            );
+
+            // Same source on an RGB-layout buffer: the ICC rides.
+            let rgbbuf: PixelBuffer =
+                PixelBuffer::from_pixels(alloc::vec![rgb::Rgb::<u8> { r: 7, g: 7, b: 7 }; 8], 4, 2)
+                    .unwrap()
+                    .into();
+            let out = attach_color_context_class_gated(rgbbuf, &sc);
+            let ctx = out.as_slice().color_context().cloned().expect("ctx");
+            assert!(ctx.icc.is_some(), "RGB-class ICC valid on RGB pixels");
+        }
+
+        /// A GRAY-class ICC is allowed onto gray output (mono AVIFs with
+        /// MIAF-correct profiles), and a truncated blob never passes.
+        #[test]
+        fn class_gate_accepts_gray_icc_and_rejects_short() {
+            use super::super::icc_class_matches_layout;
+            let mut gray_icc = alloc::vec![0u8; 132];
+            gray_icc[16..20].copy_from_slice(b"GRAY");
+            assert!(icc_class_matches_layout(
+                &gray_icc,
+                zenpixels::ChannelLayout::Gray
+            ));
+            assert!(!icc_class_matches_layout(
+                &gray_icc,
+                zenpixels::ChannelLayout::Rgb
+            ));
+            assert!(!icc_class_matches_layout(
+                &gray_icc[..64],
+                zenpixels::ChannelLayout::Gray
+            ));
         }
 
         /// Sanity for the helpers this arm depends on.
