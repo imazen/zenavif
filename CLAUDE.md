@@ -76,6 +76,19 @@ just test-encode  # cargo test --features encode
 
 ## Known Bugs
 
+### Identity (MC=0) decode + 16-bit encode plane order — CONFIRMED pixel corruption (issues #14, #15)
+Probe-verified 2026-06-11 (BT.601 back-solve arithmetic, see issue comments):
+1. **Decode**: `MatrixCoefficients::IDENTITY` falls into `_ => Bt601` in both
+   `to_yuv_matrix`/`to_our_yuv_matrix` (`decoder_managed.rs:71-94`) — every
+   identity-RGB AVIF decodes through BT.601 math (pure red → R=111,G=0,B=0).
+   Needs a no-matrix GBR passthrough arm (#15 + scope comment).
+2. **Encode 16-bit**: `encode_rgb16/rgba16` + 16-bit animation paths build
+   `[r,g,b]` tuples where the identity convention is **G,B,R** (zenravif's own
+   8-bit path is correct) — every 16-bit encode is channel-rotated for
+   conforming consumers (#14). Fix both IN LOCKSTEP with a pixel-value
+   roundtrip test: each fix alone makes the other visible in self-roundtrips.
+
+
 ### rav1d-safe Threading Race Condition (RESOLVED)
 DisjointMut overlap panic was caused by frame threading. Fix: `max_frame_delay=1`
 gives tile parallelism without frame threading. Default threads now 0 (auto-detect).
