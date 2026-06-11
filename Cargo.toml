@@ -91,6 +91,10 @@ name = "mono_encode_ab"
 required-features = ["encode-imazen"]
 
 [[example]]
+name = "lossless_speed_sweep"
+required-features = ["encode-imazen"]
+
+[[example]]
 name = "accuracy_check"
 required-features = ["_dev"]
 

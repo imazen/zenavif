@@ -1,0 +1,33 @@
+# lossless speed sweep — imazen/zenavif#8 reproduction + exactness (zenrav1e#9 link)
+# date: 2026-06-11 host: lilith zenavif commit: 48baf83 cmd: cargo run --release --features encode-imazen --example lossless_speed_sweep (1 thread, EncodeColorModel::Rgb identity)
+source	class	width	height	speed	bytes	ms	mismatched_px	mismatched_pct	max_delta
+tests/vectors/libavif/kodim23_yuv420_8bpc.avif	photo-natural	768	512	1	327489	4293	45035	11.45	2
+tests/vectors/libavif/kodim23_yuv420_8bpc.avif	photo-natural	768	512	2	327489	4053	45035	11.45	2
+tests/vectors/libavif/kodim23_yuv420_8bpc.avif	photo-natural	768	512	4	327880	3996	45260	11.51	2
+tests/vectors/libavif/kodim23_yuv420_8bpc.avif	photo-natural	768	512	6	292424	1270	84851	21.58	2
+tests/vectors/libavif/kodim23_yuv420_8bpc.avif	photo-natural	768	512	8	289794	797	88621	22.54	2
+tests/vectors/libavif/kodim23_yuv420_8bpc.avif	photo-natural	768	512	10	337214	305	106982	27.21	2
+tests/vectors/libavif/kodim03_yuv420_8bpc.avif	photo	768	512	1	280292	3929	30131	7.66	2
+tests/vectors/libavif/kodim03_yuv420_8bpc.avif	photo	768	512	2	280292	4016	30131	7.66	2
+tests/vectors/libavif/kodim03_yuv420_8bpc.avif	photo	768	512	4	280941	3753	30011	7.63	2
+tests/vectors/libavif/kodim03_yuv420_8bpc.avif	photo	768	512	6	266203	1152	68434	17.40	2
+tests/vectors/libavif/kodim03_yuv420_8bpc.avif	photo	768	512	8	264691	762	72662	18.48	2
+tests/vectors/libavif/kodim03_yuv420_8bpc.avif	photo	768	512	10	377224	275	95401	24.26	2
+tests/vectors/libavif/paris_icc_exif_xmp.avif	photo-detailed	403	302	1	141899	1843	16115	13.24	8
+tests/vectors/libavif/paris_icc_exif_xmp.avif	photo-detailed	403	302	2	141899	1733	16115	13.24	8
+tests/vectors/libavif/paris_icc_exif_xmp.avif	photo-detailed	403	302	4	141920	1420	16168	13.28	3
+tests/vectors/libavif/paris_icc_exif_xmp.avif	photo-detailed	403	302	6	120360	597	29320	24.09	2
+tests/vectors/libavif/paris_icc_exif_xmp.avif	photo-detailed	403	302	8	119258	415	30218	24.83	2
+tests/vectors/libavif/paris_icc_exif_xmp.avif	photo-detailed	403	302	10	175073	179	37938	31.17	2
+tests/vectors/libavif/colors_text_sdr_srgb.avif	screen-text	200	200	1	28512	509	4348	10.87	2
+tests/vectors/libavif/colors_text_sdr_srgb.avif	screen-text	200	200	2	28512	494	4348	10.87	2
+tests/vectors/libavif/colors_text_sdr_srgb.avif	screen-text	200	200	4	28571	433	4320	10.80	2
+tests/vectors/libavif/colors_text_sdr_srgb.avif	screen-text	200	200	6	28230	129	8389	20.97	2
+tests/vectors/libavif/colors_text_sdr_srgb.avif	screen-text	200	200	8	28134	118	8747	21.87	2
+tests/vectors/libavif/colors_text_sdr_srgb.avif	screen-text	200	200	10	30205	47	10479	26.20	2
+tests/vectors/libavif/colors_sdr_srgb.avif	synthetic-flat	200	200	1	24385	412	4257	10.64	3
+tests/vectors/libavif/colors_sdr_srgb.avif	synthetic-flat	200	200	2	24385	414	4257	10.64	3
+tests/vectors/libavif/colors_sdr_srgb.avif	synthetic-flat	200	200	4	24511	406	4189	10.47	2
+tests/vectors/libavif/colors_sdr_srgb.avif	synthetic-flat	200	200	6	22703	135	8344	20.86	2
+tests/vectors/libavif/colors_sdr_srgb.avif	synthetic-flat	200	200	8	22459	82	8759	21.90	2
+tests/vectors/libavif/colors_sdr_srgb.avif	synthetic-flat	200	200	10	21828	36	10432	26.08	2
