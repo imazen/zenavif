@@ -51,10 +51,10 @@ just test-encode  # cargo test --features encode
 ## Dependencies
 
 - `rav1d-safe` - Pure Rust AV1 decoder (managed API, no C FFI)
-- `zenavif-parse` - AVIF container parser (path dep)
+- `zenavif-parse` - AVIF container parser (registry dep)
 - `zenravif` / `ravif` - AVIF encoder (optional, `encode` feature)
-- `zencodec` - Codec abstraction traits (path dep)
-- `zenpixels` - Pixel buffer types (path dep)
+- `zencodec` - Codec abstraction traits (registry dep)
+- `zenpixels` - Pixel buffer types (registry dep)
 - `archmage` / `magetypes` - Token-based safe SIMD
 - `yuv` - YUV to RGB conversion (supplementary)
 - `imgref` - Image buffer type
