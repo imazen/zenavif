@@ -195,4 +195,29 @@ fn main() {
     let pat = gray_pattern(cw, ch);
     let av1 = encode_mono::<u8>(cw, ch, 8, PixelRange::Full, &pat);
     write_fixture(&dir, "mono_5x3_8b_full.avif", 5, 3, 8, &av1);
+
+    // ICC-carrying mono variants for color-context class-gate tests:
+    // minimal structurally-tagged profiles (header class at 16..20,
+    // 'acsp' at 36..40, 132+ bytes — what class gates inspect; not
+    // CMS-usable). RGB-class on a mono image is the spec-questionable
+    // in-the-wild case; GRAY-class is the MIAF-correct pairing.
+    let (w, h) = (96usize, 64usize);
+    let pat = gray_pattern(w, h);
+    let av1 = encode_mono::<u8>(w, h, 8, PixelRange::Full, &pat);
+    for (name, class) in [
+        ("mono_gradient_8b_rgbicc.avif", *b"RGB "),
+        ("mono_gradient_8b_grayicc.avif", *b"GRAY"),
+    ] {
+        let mut icc = vec![0u8; 144];
+        icc[0..4].copy_from_slice(&144u32.to_be_bytes());
+        icc[16..20].copy_from_slice(&class);
+        icc[36..40].copy_from_slice(b"acsp");
+        let avif = zenavif_serialize::Aviffy::new()
+            .set_monochrome(true)
+            .set_icc_profile(icc)
+            .to_vec(&av1, None, 96, 64, 8);
+        let path = format!("{dir}/{name}");
+        std::fs::write(&path, &avif).expect("write fixture");
+        println!("{path}: {} bytes (96x64 mono + {} ICC)", avif.len(), name);
+    }
 }
