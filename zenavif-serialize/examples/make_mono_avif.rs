@@ -99,12 +99,87 @@ fn write_fixture(dir: &str, name: &str, w: u32, h: u32, depth: u8, av1: &[u8]) {
     println!("{path}: {} bytes ({w}x{h}, {depth}-bit mono)", avif.len());
 }
 
+/// Encode the same gray content the way a gray-unaware path does:
+/// replicated into Y of a color encode with neutral chroma planes — what
+/// "expand gray to RGB then encode color" costs at the AV1 layer.
+fn encode_gray_as_color(
+    w: usize,
+    h: usize,
+    chroma: ChromaSampling,
+    gray8: &[u8],
+) -> Vec<u8> {
+    let enc = EncoderConfig {
+        width: w,
+        height: h,
+        bit_depth: 8,
+        chroma_sampling: chroma,
+        pixel_range: PixelRange::Full,
+        still_picture: true,
+        quantizer: 60,
+        min_quantizer: 0,
+        speed_settings: SpeedSettings::from_preset(6),
+        ..Default::default()
+    };
+    let cfg = Config::new().with_encoder_config(enc).with_threads(1);
+    let mut ctx: Context<u8> = cfg.new_context().expect("context");
+    let mut frame = ctx.new_frame();
+    // Gray expanded to YCbCr: Y = g (BT.601 luma of R=G=B equals g),
+    // chroma planes neutral (128).
+    frame.planes[0].copy_from_raw_u8(gray8, w, 1);
+    for p in 1..3 {
+        let cfgp = frame.planes[p].cfg.clone();
+        let (cw, ch) = ((w + cfgp.xdec) >> cfgp.xdec, (h + cfgp.ydec) >> cfgp.ydec);
+        let neutral = vec![128u8; cw * ch];
+        frame.planes[p].copy_from_raw_u8(&neutral, cw, 1);
+    }
+    ctx.send_frame(frame).expect("send_frame");
+    ctx.flush();
+    let mut out = Vec::new();
+    loop {
+        match ctx.receive_packet() {
+            Ok(pkt) => out.extend_from_slice(&pkt.data),
+            Err(EncoderStatus::Encoded) => continue,
+            Err(EncoderStatus::LimitReached) => break,
+            Err(e) => panic!("receive_packet: {e:?}"),
+        }
+    }
+    out
+}
+
 fn main() {
     let dir = std::env::args().nth(1).unwrap_or_else(|| ".".into());
     std::fs::create_dir_all(&dir).expect("create output dir");
 
     let (w, h) = (96usize, 64usize);
     let pat = gray_pattern(w, h);
+
+    // Size A/B for imazen/zenavif#6: true Cs400 monochrome vs the same
+    // content through color encodes with neutral chroma (the cost of a
+    // gray-unaware "expand to RGB" path), identical quantizer/speed.
+    // Multiple sizes — tiny images are dominated by fixed header costs.
+    for (aw, ah) in [(96usize, 64usize), (512, 512), (1024, 1024), (2048, 2048)] {
+        let apat = gray_pattern(aw, ah);
+        let t0 = std::time::Instant::now();
+        let mono = encode_mono::<u8>(aw, ah, 8, PixelRange::Full, &apat);
+        let t_mono = t0.elapsed();
+        let t0 = std::time::Instant::now();
+        let c420 = encode_gray_as_color(aw, ah, ChromaSampling::Cs420, &apat);
+        let t_420 = t0.elapsed();
+        let t0 = std::time::Instant::now();
+        let c444 = encode_gray_as_color(aw, ah, ChromaSampling::Cs444, &apat);
+        let t_444 = t0.elapsed();
+        println!(
+            "size A/B {aw}x{ah} (q60 s6 still, 1 thread): Cs400 = {} B {:.0?} | Cs420 = {} B ({:+.1}%) {:.0?} | Cs444 = {} B ({:+.1}%) {:.0?}",
+            mono.len(),
+            t_mono,
+            c420.len(),
+            (c420.len() as f64 - mono.len() as f64) / mono.len() as f64 * 100.0,
+            t_420,
+            c444.len(),
+            (c444.len() as f64 - mono.len() as f64) / mono.len() as f64 * 100.0,
+            t_444
+        );
+    }
 
     let av1 = encode_mono::<u8>(w, h, 8, PixelRange::Full, &pat);
     write_fixture(&dir, "mono_gradient_8b_full.avif", 96, 64, 8, &av1);
