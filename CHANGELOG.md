@@ -41,8 +41,9 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   (`cell_ids_roundtrip_to_their_configs`, fingerprint-exact over canonical +
   alias spellings of the full `modes_full_alpha × Step5` plan) caught a real
   tokenizer bug on its first run (`part4.16`'s separator dot eaten by the
-  float scanner). Remaining open for fleet use: the zenmetrics executor
-  wiring (checklist step 8 in zenjpeg's reference doc).
+  float scanner). The zenmetrics executor wiring (checklist step 8)
+  landed the same day (zenmetrics 96a31b90): both execution models,
+  e2e declare→jobexec→AVIF-bytes roundtrip + tampered-fp tripwire.
 
 ### Added (expert-knob parity + MLP training bridge)
 - `sweep::feature_columns()` + `SweepCell::feature_row(PlanInput)` — numeric
