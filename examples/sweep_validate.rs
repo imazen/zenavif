@@ -174,6 +174,28 @@ fn generate_flat_logo(w: usize, h: usize) -> ImgVec<Rgb<u8>> {
     ImgVec::new(px, w, h)
 }
 
+/// RGBA companion of [`generate_gradient`]: same color content plus a
+/// textured diagonal alpha gradient, non-opaque nearly everywhere so the
+/// alpha plane is emitted and carries real entropy. Exercises the alpha
+/// probes ([`SweepAxes::alpha_probes`]) on content where they can act.
+fn generate_rgba_gradient(w: usize, h: usize) -> ImgVec<rgb::Rgba<u8>> {
+    let px = (0..h)
+        .flat_map(|y| {
+            (0..w).map(move |x| {
+                let fx = x as f32 / w as f32;
+                let fy = y as f32 / h as f32;
+                rgb::Rgba {
+                    r: (fx * 200.0 + 30.0) as u8,
+                    g: (fy * 180.0 + 40.0) as u8,
+                    b: ((fx + fy) * 100.0 + (mix(x as u32, y as u32, 7) % 8) as f32) as u8,
+                    a: (((x + y) * 255 / (w + h - 2)) as u8) ^ (mix(x as u32, y as u32, 4) >> 3),
+                }
+            })
+        })
+        .collect();
+    ImgVec::new(px, w, h)
+}
+
 /// Smooth photo-like gradient with mild texture (DCT-friendly content).
 fn generate_gradient(w: usize, h: usize) -> ImgVec<Rgb<u8>> {
     let px = (0..h)
@@ -630,6 +652,61 @@ fn main() {
             }
             (Err(e), _) | (_, Err(e)) => {
                 hard_failures.push(format!("tiles tiny encode failed: {e}"))
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Check 4b: alpha probes (modes_full_alpha) — live on alpha-bearing
+    // content, byte-inert on RGB (no alpha plane to act on). Alpha cells
+    // are validated here on an RGBA leg instead of the main RGB subset
+    // precisely so the inert-step check stays meaningful for both.
+    // ------------------------------------------------------------------
+    {
+        let rgba = generate_rgba_gradient(192, 192);
+        let rgb = generate_gradient(192, 192);
+        let base_cfg = pin(EncoderConfig::new().quality(60.0).speed(6));
+        let enc_rgba = |cfg: &EncoderConfig| {
+            pool.install(|| zenavif::encode_rgba8(rgba.as_ref(), cfg, stop()))
+        };
+
+        let baseline_rgba = enc_rgba(&base_cfg);
+        let baseline_rgb = enc(rgb.as_ref(), &base_cfg);
+        match (&baseline_rgba, &baseline_rgb) {
+            (Ok(ba), Ok(bb)) => {
+                if ba.alpha_byte_size == 0 {
+                    hard_failures.push(
+                        "alpha leg: RGBA test image emitted no alpha plane — \
+                         the alpha-probe checks below would be vacuous"
+                            .into(),
+                    );
+                }
+                for probe in SweepAxes::alpha_probes() {
+                    let cfg = probe.apply(base_cfg.clone());
+                    match (enc_rgba(&cfg), enc(rgb.as_ref(), &cfg)) {
+                        (Ok(pa), Ok(pb)) => {
+                            if pa.avif_file == ba.avif_file {
+                                hard_failures.push(format!(
+                                    "INERT ALPHA STEP: {probe:?} never changed output \
+                                     bytes vs baseline on alpha-bearing 192² content"
+                                ));
+                            }
+                            if pb.avif_file != bb.avif_file {
+                                hard_failures.push(format!(
+                                    "alpha probe {probe:?} changed COLOR-ONLY output — \
+                                     alpha knobs must not couple into the color path"
+                                ));
+                            }
+                        }
+                        (Err(e), _) | (_, Err(e)) => {
+                            hard_failures
+                                .push(format!("alpha probe encode failed: {probe:?}: {e}"));
+                        }
+                    }
+                }
+            }
+            (Err(e), _) | (_, Err(e)) => {
+                hard_failures.push(format!("alpha baseline encode failed: {e}"));
             }
         }
     }

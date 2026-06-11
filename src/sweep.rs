@@ -54,6 +54,9 @@
 //! | trellis | on/off | off, on | zenrav1e Viterbi DP; default off in zenravif |
 //! | deep-knob probes | see [`KnobProbe`] | one axis, single-deviation by construction | each probe flips one preset-derived setting both ways; fingerprint dedup removes the spellings that equal the preset |
 //! | lru_on_skip | on/off | **not curated** | byte-inert on still-image encodes at speeds 2–8 across photos/noise/checker/gradient/flat-logo, q10–q85 (28/28 comparisons, `sweep_validate` 2026-06-10). The search-on-skip-LRUs path resolves to the same restoration decisions on intra-only content; the preset only enables it at speed ≤ 1, outside the curated speed set. [`KnobProbe::LruOnSkip`] remains available for explicit speed ≤ 1 sweeps |
+//! | lossless | on/off | **not curated** | a different product mode (quantizer pinned 0, QM force-off), not a point on the lossy RD curve a picker optimizes over; sweep it as its own dedicated run if needed |
+//! | alpha_quality delta | result clamps to 1–100 | ±25, [`modes_full_alpha`](SweepAxes::modes_full_alpha) only | expressed as a **delta against the grid q** to dodge the absolute-value-vs-moving-grid trap (zenjpeg's `chroma_quality` lesson); ±25 probes both the "alpha cheaper" and "alpha cleaner" directions. Validated live on alpha content / byte-inert on RGB by the harness's RGBA leg, 2026-06-11 |
+//! | alpha_color_mode | Clean/Dirty/Premultiplied | Dirty, Premultiplied probes ([`modes_full_alpha`](SweepAxes::modes_full_alpha) only) | pixel-changing on alpha content (Clean rewrites color under transparency; Premultiplied rescales). Validated live on alpha content by the harness's RGBA leg, 2026-06-11 |
 //!
 //! Empirical validation harness: `examples/sweep_validate.rs`. It
 //! encodes the default stratum + every single-deviation stratum on
@@ -69,8 +72,13 @@
 
 #![cfg(feature = "__expert")]
 
-use crate::encode_plan::{apply_overrides, quality_to_quantizer, speed_derived};
-use crate::encoder::{EncodeBitDepth, EncodeChromaSubsampling, EncodeColorModel, EncoderConfig};
+use crate::encode_plan::{
+    PlanInput, TilesResolution, apply_overrides, quality_to_quantizer, speed_derived,
+};
+use crate::encoder::{
+    EncodeAlphaMode, EncodeBitDepth, EncodeChromaSubsampling, EncodeColorModel, EncodePixelRange,
+    EncoderConfig,
+};
 
 // ============================================================================
 // Axes
@@ -119,15 +127,32 @@ pub enum KnobProbe {
     Lrf(bool),
     /// Override fast vs full deblock search.
     FastDeblock(bool),
+    /// Alpha quality as a **delta against the cell's quality**, clamped
+    /// to 1–100. A delta rather than an absolute value: the grid moves
+    /// q, so any static absolute alpha quality would be wrong at most
+    /// grid points (the trap zenjpeg documents for
+    /// `MozjpegRobidoux::chroma_quality`). `Delta(0.0)` is the
+    /// follow-color spelling and fingerprint-aliases the no-probe cell.
+    /// Only meaningful on alpha-bearing corpora — see
+    /// [`SweepAxes::modes_full_alpha`].
+    AlphaQualityDelta(f32),
+    /// Alpha handling mode (default `UnassociatedClean`). Pixel-changing
+    /// on alpha-bearing input. Only meaningful on alpha-bearing corpora.
+    AlphaMode(crate::EncodeAlphaMode),
 }
 
 impl KnobProbe {
+    /// Apply this probe's override onto a config — the same application
+    /// the planner uses when building cells. Public so harnesses can
+    /// exercise individual probes outside a full plan (e.g. the
+    /// validation harness's RGBA alpha leg).
     // `InternalParams` is #[non_exhaustive]: struct-literal construction
     // (clippy's suggested `..Default::default()` form) is not available
     // outside the defining module, so Default + field assignment is the
     // only spelling — same as build_ravif_encoder's.
     #[allow(clippy::field_reassign_with_default)]
-    fn apply(self, cfg: EncoderConfig) -> EncoderConfig {
+    #[must_use]
+    pub fn apply(self, cfg: EncoderConfig) -> EncoderConfig {
         match self {
             Self::None => cfg,
             Self::Cdef(v) => cfg.with_cdef(Some(v)),
@@ -159,6 +184,11 @@ impl KnobProbe {
                 params.fast_deblock = Some(v);
                 cfg.with_internal_params(params)
             }
+            Self::AlphaQualityDelta(d) => {
+                let aq = (cfg.quality_value() + d).clamp(1.0, 100.0);
+                cfg.alpha_quality(aq)
+            }
+            Self::AlphaMode(m) => cfg.alpha_color_mode(m),
         }
     }
 
@@ -181,6 +211,12 @@ impl KnobProbe {
             Self::ComplexPredictionModes(v) => format!("-cpred{}", b(v)),
             Self::Lrf(v) => format!("-lrf{}", b(v)),
             Self::FastDeblock(v) => format!("-fdb{}", b(v)),
+            Self::AlphaQualityDelta(d) => format!("-aqd{d}"),
+            Self::AlphaMode(m) => match m {
+                crate::EncodeAlphaMode::UnassociatedClean => "-aclean".into(),
+                crate::EncodeAlphaMode::UnassociatedDirty => "-adirty".into(),
+                crate::EncodeAlphaMode::Premultiplied => "-aprem".into(),
+            },
         }
     }
 }
@@ -288,6 +324,39 @@ impl SweepAxes {
         ];
         axes
     }
+
+    /// [`modes_full`](Self::modes_full) plus the alpha-plane probes,
+    /// for **alpha-bearing (RGBA) corpora**: alpha-quality deltas ±25
+    /// against the grid q and the non-default alpha handling modes.
+    ///
+    /// Kept out of `modes_full` deliberately: on RGB corpora no alpha
+    /// plane is emitted, every alpha probe is byte-inert there, and the
+    /// validation harness would (correctly) flag them as dead steps.
+    /// The harness instead validates these probes on an RGBA leg —
+    /// live on alpha content, byte-inert on RGB.
+    #[must_use]
+    pub fn modes_full_alpha() -> Self {
+        let mut axes = Self::modes_full();
+        axes.probes.extend(Self::alpha_probes());
+        axes
+    }
+
+    /// The curated alpha-plane probes (see
+    /// [`modes_full_alpha`](Self::modes_full_alpha)).
+    #[must_use]
+    pub fn alpha_probes() -> Vec<KnobProbe> {
+        vec![
+            // Deltas, not absolutes — the grid moves q (see
+            // KnobProbe::AlphaQualityDelta). ±25 spans the "alpha
+            // cheaper than color" and "alpha cleaner than color"
+            // directions; Delta(0.0) is the no-op spelling and would
+            // dedupe away.
+            KnobProbe::AlphaQualityDelta(-25.0),
+            KnobProbe::AlphaQualityDelta(25.0),
+            KnobProbe::AlphaMode(crate::EncodeAlphaMode::UnassociatedDirty),
+            KnobProbe::AlphaMode(crate::EncodeAlphaMode::Premultiplied),
+        ]
+    }
 }
 
 // ============================================================================
@@ -361,6 +430,133 @@ pub struct SweepCell {
     /// axis). 0 = the production-default cell; 1 = a main-effect probe;
     /// ≥2 = interaction combos. Cells are emitted in ascending order.
     pub deviations: u8,
+}
+
+/// Column names for [`SweepCell::feature_row`], in order.
+///
+/// The training-side contract for picker / MLP pipelines (zentrain):
+/// one numeric column per knob, resolved state where a mediator exists
+/// (`quantizer`, not just `quality`; the post-override speed-derived
+/// search settings, not the `Option` override spellings). Booleans are
+/// 0/1; enums are the small stable integers documented on
+/// [`SweepCell::feature_row`]. Append-only across zenavif versions —
+/// training data keyed by column name stays joinable.
+#[must_use]
+pub fn feature_columns() -> &'static [&'static str] {
+    &[
+        "quality",
+        "quantizer",
+        "alpha_quantizer",
+        "speed",
+        "qm",
+        "vaq",
+        "vaq_strength",
+        "tune_still_image",
+        "lossless",
+        "seg_boost",
+        "trellis",
+        "bit_depth",
+        "color_model",
+        "chroma_subsampling",
+        "pixel_range",
+        "alpha_color_mode",
+        "partition_min",
+        "partition_max",
+        "complex_prediction_modes",
+        "sgr_complexity_full",
+        "encode_bottomup",
+        "rdo_tx_decision",
+        "reduced_tx_set",
+        "fine_directional_intra",
+        "fast_deblock",
+        "lrf",
+        "cdef",
+        "inter_tx_split",
+        "tx_domain_rate",
+        "segmentation_complex",
+        "lru_on_skip",
+        "non_square_partition_max",
+        "min_tile_size",
+        "tiles",
+    ]
+}
+
+impl SweepCell {
+    /// Numeric knob vector for ML training, in [`feature_columns`]
+    /// order, resolved against `input` through the same path the
+    /// encoder runs ([`EncoderConfig::resolve_plan`]).
+    ///
+    /// Encodings: booleans 0/1; `alpha_quantizer` −1 when the input
+    /// declares no alpha; `color_model` YCbCr=0 / Rgb=1;
+    /// `chroma_subsampling` 4:4:4=0 / 4:2:0=1; `pixel_range` Full=0 /
+    /// Limited=1; `alpha_color_mode` Clean=0 / Dirty=1 /
+    /// Premultiplied=2; `tiles` −1 when machine-dependent (never the
+    /// case for planner cells, which pin `threads`).
+    ///
+    /// Resolved values are deliberately preferred over config
+    /// spellings: a model trained on `quantizer` and the post-override
+    /// search settings generalizes across the aliases the fingerprint
+    /// merges, instead of learning that q 80.0 and q 80.2 are
+    /// different inputs.
+    #[must_use]
+    pub fn feature_row(&self, input: PlanInput) -> Vec<f64> {
+        let plan = self.config.resolve_plan(input);
+        let b = |v: bool| if v { 1.0 } else { 0.0 };
+        let row = vec![
+            f64::from(self.quality),
+            f64::from(plan.quantizer),
+            plan.alpha_quantizer.map_or(-1.0, f64::from),
+            f64::from(plan.speed_preset),
+            b(plan.qm),
+            b(plan.vaq),
+            plan.vaq_strength,
+            b(plan.tune_still_image),
+            b(plan.lossless),
+            plan.seg_boost,
+            b(plan.trellis),
+            f64::from(plan.bit_depth),
+            match plan.color_model {
+                EncodeColorModel::YCbCr => 0.0,
+                EncodeColorModel::Rgb => 1.0,
+            },
+            match plan.chroma_subsampling {
+                EncodeChromaSubsampling::Yuv444 => 0.0,
+                EncodeChromaSubsampling::Yuv420 => 1.0,
+            },
+            match plan.pixel_range {
+                EncodePixelRange::Full => 0.0,
+                EncodePixelRange::Limited => 1.0,
+            },
+            match plan.alpha_color_mode {
+                EncodeAlphaMode::UnassociatedClean => 0.0,
+                EncodeAlphaMode::UnassociatedDirty => 1.0,
+                EncodeAlphaMode::Premultiplied => 2.0,
+            },
+            f64::from(plan.speed.partition_range.0),
+            f64::from(plan.speed.partition_range.1),
+            b(plan.speed.complex_prediction_modes),
+            b(plan.speed.sgr_complexity_full),
+            b(plan.speed.encode_bottomup),
+            b(plan.speed.rdo_tx_decision),
+            b(plan.speed.reduced_tx_set),
+            b(plan.speed.fine_directional_intra),
+            b(plan.speed.fast_deblock),
+            b(plan.speed.lrf),
+            b(plan.speed.cdef),
+            b(plan.speed.inter_tx_split),
+            b(plan.speed.tx_domain_rate),
+            b(plan.speed.segmentation_complex),
+            b(plan.speed.lru_on_skip),
+            f64::from(plan.speed.non_square_partition_max),
+            f64::from(plan.speed.min_tile_size),
+            match plan.tiles {
+                TilesResolution::Fixed(n) => n as f64,
+                TilesResolution::MachineDependent { .. } => -1.0,
+            },
+        ];
+        debug_assert_eq!(row.len(), feature_columns().len());
+        row
+    }
 }
 
 /// A mode axis collapsed by the budget ladder.
@@ -1120,5 +1316,125 @@ mod tests {
             fingerprint(&with_mc),
             "no available backend reads the CICP matrix field"
         );
+    }
+
+    #[test]
+    fn alpha_delta_zero_aliases_follow_color() {
+        let base = Stratum {
+            speed: 4,
+            qm: true,
+            subsampling: EncodeChromaSubsampling::Yuv444,
+            bit_depth: EncodeBitDepth::Auto,
+            color_model: EncodeColorModel::YCbCr,
+            vaq: None,
+            trellis: false,
+            probe: KnobProbe::None,
+        };
+        let none = base.build_config(60.0);
+        let delta0 = Stratum {
+            probe: KnobProbe::AlphaQualityDelta(0.0),
+            ..base
+        }
+        .build_config(60.0);
+        assert_eq!(
+            fingerprint(&none),
+            fingerprint(&delta0),
+            "Delta(0.0) is the follow-color spelling and must alias"
+        );
+        let delta_neg = Stratum {
+            probe: KnobProbe::AlphaQualityDelta(-25.0),
+            ..base
+        }
+        .build_config(60.0);
+        assert_ne!(fingerprint(&none), fingerprint(&delta_neg));
+    }
+
+    #[test]
+    fn modes_full_alpha_extends_and_validates() {
+        let plan = SweepBuilder::new(
+            SweepAxes::modes_full_alpha(),
+            QualityGrid::Explicit(vec![30.0, 60.0]),
+        )
+        .plan();
+        for probe_label in ["-aqd-25", "-aqd25", "-adirty", "-aprem"] {
+            assert!(
+                plan.cells.iter().any(|c| c.id.contains(probe_label)),
+                "alpha probe {probe_label} missing from modes_full_alpha plan"
+            );
+        }
+    }
+
+    #[test]
+    fn feature_row_matches_columns_and_resolves() {
+        let plan =
+            SweepBuilder::new(SweepAxes::rd_core(), QualityGrid::Explicit(vec![30.0])).plan();
+        let cols = feature_columns();
+        let idx = |name: &str| cols.iter().position(|c| *c == name).unwrap();
+
+        for cell in &plan.cells {
+            let row = cell.feature_row(PlanInput::rgb8(512, 512));
+            assert_eq!(row.len(), cols.len(), "row/column length mismatch");
+            assert_eq!(
+                row[idx("quantizer")],
+                f64::from(quality_to_quantizer(cell.quality)),
+                "quantizer column must match the resolved mirror"
+            );
+            assert_eq!(
+                row[idx("alpha_quantizer")],
+                -1.0,
+                "rgb8 input declares no alpha"
+            );
+            // Pinned threads ⇒ resolved tile request, never the -1
+            // machine-dependent sentinel. The value is min(1, cap):
+            // cap 0 at speeds whose min_tile_size exceeds 512.
+            assert!(
+                row[idx("tiles")] == 0.0 || row[idx("tiles")] == 1.0,
+                "pinned-thread cells must resolve tiles (got {})",
+                row[idx("tiles")]
+            );
+        }
+
+        // A probe flips exactly its resolved column.
+        let base = Stratum {
+            speed: 6,
+            qm: true,
+            subsampling: EncodeChromaSubsampling::Yuv444,
+            bit_depth: EncodeBitDepth::Auto,
+            color_model: EncodeColorModel::YCbCr,
+            vaq: None,
+            trellis: false,
+            probe: KnobProbe::None,
+        };
+        let mk_cell = |probe: KnobProbe, q: f32| SweepCell {
+            id: "t".into(),
+            config: Stratum { probe, ..base }.build_config(q),
+            quality: q,
+            fingerprint: 0,
+            aliases: Vec::new(),
+            deviations: 0,
+        };
+        let input = PlanInput::rgb8(512, 512);
+        // q30/speed6: preset cdef ON (low quality) — forcing off flips the column.
+        let on = mk_cell(KnobProbe::None, 30.0).feature_row(input);
+        let off = mk_cell(KnobProbe::Cdef(false), 30.0).feature_row(input);
+        assert_eq!(on[idx("cdef")], 1.0);
+        assert_eq!(off[idx("cdef")], 0.0);
+
+        // Alpha delta lands in alpha_quantizer on alpha-bearing input.
+        let a = mk_cell(KnobProbe::None, 60.0).feature_row(PlanInput::rgba8(512, 512));
+        let d = mk_cell(KnobProbe::AlphaQualityDelta(-25.0), 60.0)
+            .feature_row(PlanInput::rgba8(512, 512));
+        assert_eq!(
+            a[idx("alpha_quantizer")],
+            f64::from(quality_to_quantizer(60.0))
+        );
+        assert_eq!(
+            d[idx("alpha_quantizer")],
+            f64::from(quality_to_quantizer(35.0))
+        );
+        // Alpha mode column.
+        let prem =
+            mk_cell(KnobProbe::AlphaMode(EncodeAlphaMode::Premultiplied), 60.0).feature_row(input);
+        assert_eq!(prem[idx("alpha_color_mode")], 2.0);
     }
 }

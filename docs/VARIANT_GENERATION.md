@@ -26,7 +26,8 @@ Every encode knob, classified per the zenjpeg taxonomy:
 | knob | class | notes |
 |---|---|---|
 | quality | metric | fully mediated by the resolved quantizer — q 80.0 ≡ q 80.2 (quantizer 71), byte-proven in `encode_contracts` |
-| alpha_quality | metric | alpha-plane quantizer. **Unset follows the color quality** (fixed 2026-06-10; zenravif's default silently pinned it to the q80 equivalent) |
+| alpha_quality | metric | alpha-plane quantizer. **Unset follows the color quality** (fixed 2026-06-10; zenravif's default silently pinned it to the q80 equivalent). Swept as a **delta against the grid q** via `KnobProbe::AlphaQualityDelta` (±25, `modes_full_alpha`) — a delta, not an absolute, per zenjpeg's `chroma_quality` lesson |
+| alpha_color_mode | metric | pixel-changing on alpha content (Clean rewrites color under transparency, Premultiplied rescales). Probed in `modes_full_alpha`; reported by `EncodePlan::alpha_color_mode` |
 | speed | metric | drives the `SpeedTweaks` table (partition range, CDEF/LRF gates, tile floor) |
 | qm | metric | ~10 % BD-rate win on stills; default on; forced off by lossless |
 | vaq / vaq_strength | metric | strength is **inert when vaq is off**, and **strength 1.0 is a structural no-op even when vaq is on** — the psychovisual/still tunes always compute the activity mask and zenrav1e skips the rescale at 1.0 (`api/internal.rs:1379`). The harness's first run caught the 1.0 axis value as an inert step; the sweep axis is `Option<f64>` now so the no-op spelling can't be curated by accident, and the fingerprint hashes the *active* form |
@@ -125,6 +126,27 @@ tile additionally serializes each encode so sweeps parallelize cleanly
 *across* cells. The fingerprint hashes threads raw and never merges
 `None` with anything.
 
+## MLP / picker training contract
+
+`sweep::feature_columns()` + `SweepCell::feature_row(PlanInput)` are
+the training-side bridge to zentrain: one numeric column per knob,
+**resolved** where a mediator exists — `quantizer` rather than raw
+quality, the post-override speed-derived search settings rather than
+the `Option` override spellings. A model trained on resolved values
+generalizes across the aliases the fingerprint merges instead of
+learning that q 80.0 and q 80.2 are different inputs. Columns are
+append-only across versions; encodings (bool 0/1, enum small-int,
+−1 sentinels) are documented on `feature_row`. The intended row shape
+for a training table is
+`(image_id, cell.id, cell.fingerprint, feature_row…, bytes, metric…)`.
+
+Alpha-bearing corpora use `SweepAxes::modes_full_alpha()` — the alpha
+probes are kept out of `modes_full` because they are byte-inert without
+an alpha plane and would trip the RGB harness's inert-step check. The
+harness validates them on a dedicated RGBA leg instead: each alpha
+probe must change bytes on alpha content AND leave color-only encodes
+byte-identical (no coupling into the color path).
+
 ## Harness sizing
 
 AV1 encodes cost 100–1000× a JPEG encode, so the harness uses 256²
@@ -141,6 +163,9 @@ infrastructure (zenmetrics fleet), not the validation harness.
 - 16-bit entry points ignore `color_model` (always identity RGB).
   Honoring YCbCr there would change bytes — queued as a deliberate
   decision, not slipped in.
+- The harness's RGBA leg validates alpha-probe *liveness* only; a full
+  alpha RD sweep (modes_full_alpha over an RGBA corpus with per-cell
+  alpha-aware metrics) belongs to the real sweep infrastructure.
 - The svtav1 backend is **deprecated** (2026-06-10): the
   `encode-svtav1` feature was never shipped (svtav1-rs produces
   non-conformant bitstreams; the draft path returned raw OBUs as

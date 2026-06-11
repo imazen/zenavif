@@ -540,7 +540,7 @@ pub fn zenavif::decode_av1_obu(&[u8]) -> zenavif::Result<(alloc::vec::Vec<u8>, u
 pub fn zenavif::decode_with(&[u8], &zenavif::DecoderConfig, &impl enough::Stop + ?core::marker::Sized) -> zenavif::Result<zenpixels::buffer::PixelBuffer>
 pub type zenavif::Result<T, E> = core::result::Result<T, E>
 
-## all features except _* (1214 items)
+## all features except _* (1215 items)
 
 pub mod zenavif
 pub use zenavif::CleanAperture
@@ -1403,6 +1403,7 @@ impl core::marker::UnsafeUnpin for zenavif::DecoderConfig
 impl core::panic::unwind_safe::RefUnwindSafe for zenavif::DecoderConfig
 impl core::panic::unwind_safe::UnwindSafe for zenavif::DecoderConfig
 #[non_exhaustive] pub struct zenavif::EncodePlan
+pub zenavif::EncodePlan::alpha_color_mode: zenavif::EncodeAlphaMode
 pub zenavif::EncodePlan::alpha_quantizer: core::option::Option<u8>
 pub zenavif::EncodePlan::alpha_speed: core::option::Option<zenavif::SpeedDerived>
 pub zenavif::EncodePlan::backend: zenavif::Av1Backend

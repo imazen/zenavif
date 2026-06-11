@@ -31,6 +31,24 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   retained, documented as informational, and excluded from the sweep
   fingerprint on all backends.
 
+### Added (expert-knob parity + MLP training bridge)
+- `sweep::feature_columns()` + `SweepCell::feature_row(PlanInput)` — numeric
+  knob vectors for picker/MLP training (zentrain): one column per knob,
+  resolved values where a mediator exists (quantizer, post-override search
+  settings), bool 0/1 / small-int enum / −1-sentinel encodings, append-only
+  columns.
+- Alpha-plane sweep probes: `KnobProbe::AlphaQualityDelta` (a **delta against
+  the grid q**, ±25 curated — deltas dodge the absolute-value-vs-moving-grid
+  trap zenjpeg documents for `chroma_quality`) and `KnobProbe::AlphaMode`
+  (Dirty / Premultiplied), in the new `SweepAxes::modes_full_alpha()` /
+  `SweepAxes::alpha_probes()` presets for RGBA corpora. Kept out of
+  `modes_full` (byte-inert without an alpha plane); the validation harness
+  gained an RGBA leg proving each probe live on alpha content and
+  non-coupling on color-only encodes (`benchmarks/sweep_validate_2026-06-11.tsv`).
+- `EncodePlan.alpha_color_mode` — the alpha handling mode is pixel-changing
+  resolved state and is now reported by the plan. `KnobProbe::apply` is
+  public so harnesses can exercise single probes outside a full plan.
+
 ### Fixed
 - **`alpha_quality` unset now follows the color quality, as its docs always
   promised.** zenravif's built-in default pins the alpha quantizer to the

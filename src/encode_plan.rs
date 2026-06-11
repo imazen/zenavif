@@ -186,6 +186,11 @@ pub struct EncodePlan {
     pub chroma_subsampling: EncodeChromaSubsampling,
     /// Resolved pixel range (config default: full).
     pub pixel_range: EncodePixelRange,
+    /// Alpha handling mode. Pixel-changing on alpha-bearing input:
+    /// `UnassociatedClean` (default) rewrites color under transparent
+    /// pixels for compressibility, `Premultiplied` rescales color by
+    /// alpha. Irrelevant when no alpha plane is emitted.
+    pub alpha_color_mode: crate::EncodeAlphaMode,
     /// Quantization matrices after the lossless gate.
     pub qm: bool,
     /// Variance adaptive quantization **with effect**: true only when
@@ -446,6 +451,7 @@ impl EncoderConfig {
             matrix_coefficients_cicp,
             chroma_subsampling: self.chroma_subsampling,
             pixel_range: self.pixel_range.unwrap_or(EncodePixelRange::Full),
+            alpha_color_mode: self.alpha_color_mode,
             qm: self.qm_effective(),
             vaq: self.vaq_active(),
             vaq_strength: self.vaq_strength_effective(),
