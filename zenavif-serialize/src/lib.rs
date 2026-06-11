@@ -614,22 +614,43 @@ impl Aviffy {
     ) -> io::Result<IpmaEntry> {
         // Av1C is redundant with the AV1 sequence header, but Chrome requires it
         // and validates that it matches.
+        // Monochrome constraints (AV1 spec): mono_chrome=1 requires
+        // chroma_subsampling_x = chroma_subsampling_y = 1, and is only
+        // valid in seq_profile 0 (8/10-bit) or 2 (12-bit) — profile 1 is
+        // 4:4:4-only. Chrome validates av1C against the sequence header,
+        // so derive these here instead of trusting the caller's
+        // subsampling/min-profile settings.
+        let seq_profile = if self.monochrome {
+            if color_depth_bits >= 12 { 2 } else { 0 }
+        } else {
+            self.min_seq_profile.max(if color_depth_bits >= 12 { 2 } else { 0 })
+        };
+        let (sub_x, sub_y) = if self.monochrome {
+            (true, true)
+        } else {
+            (self.chroma_subsampling.horizontal, self.chroma_subsampling.vertical)
+        };
         let av1c_color_prop = push_prop(ipco, IpcoProp::Av1C(Av1CBox {
-            seq_profile: self.min_seq_profile.max(if color_depth_bits >= 12 { 2 } else { 0 }),
+            seq_profile,
             seq_level_idx_0: 31,
             seq_tier_0: false,
             high_bitdepth: color_depth_bits >= 10,
             twelve_bit: color_depth_bits >= 12,
             monochrome: self.monochrome,
-            chroma_subsampling_x: self.chroma_subsampling.horizontal,
-            chroma_subsampling_y: self.chroma_subsampling.vertical,
+            chroma_subsampling_x: sub_x,
+            chroma_subsampling_y: sub_y,
             chroma_sample_position: 0,
         }))?;
-        let pixi_3 = push_prop(ipco, IpcoProp::Pixi(PixiBox { channels: 3, depth: color_depth_bits }))?;
+        // MIAF: pixi channel count reflects the coded image — 1 for
+        // monochrome, 3 for color.
+        let pixi_color = push_prop(ipco, IpcoProp::Pixi(PixiBox {
+            channels: if self.monochrome { 1 } else { 3 },
+            depth: color_depth_bits,
+        }))?;
 
         let mut ipma = IpmaEntry {
             item_id: color_image_id,
-            prop_ids: from_array([ispe_prop, av1c_color_prop | ESSENTIAL_BIT, pixi_3]),
+            prop_ids: from_array([ispe_prop, av1c_color_prop | ESSENTIAL_BIT, pixi_color]),
         };
 
         // ICC profile takes precedence over nclx if both are set.
@@ -900,6 +921,54 @@ fn premultiplied_flag() {
     assert!(parser.premultiplied_alpha());
     assert_eq!(&test_img[..], parser.primary_data().unwrap().as_ref());
     assert_eq!(&test_alpha[..], parser.alpha_data().unwrap().unwrap().as_ref());
+}
+
+#[test]
+fn monochrome_primary_av1c_and_pixi() {
+    let test_img = [9u8, 8, 7, 6];
+    let avif = Aviffy::new()
+        .set_monochrome(true)
+        .to_vec(&test_img, None, 4, 4, 8);
+
+    // av1C payload for mono 8-bit: marker|version = 0x81, then
+    // profile(3) | level(5) = 0b000_11111, then tier(1)|hbd(1)|12b(1)|
+    // mono(1)|subx(1)|suby(1)|csp(2) = 0b0_0_0_1_1_1_00 = 0x1C.
+    let av1c_pos = avif
+        .windows(4)
+        .position(|w| w == b"av1C")
+        .expect("av1C box present");
+    let payload = &avif[av1c_pos + 4..av1c_pos + 8];
+    assert_eq!(payload[0], 0x81, "av1C marker/version");
+    assert_eq!(payload[1] >> 5, 0, "monochrome 8-bit must be seq_profile 0");
+    assert_eq!((payload[2] >> 4) & 1, 1, "mono_chrome flag set");
+    assert_eq!((payload[2] >> 3) & 1, 1, "chroma_subsampling_x forced to 1");
+    assert_eq!((payload[2] >> 2) & 1, 1, "chroma_subsampling_y forced to 1");
+
+    // pixi for the primary: version+flags(4) then num_channels=1, depth=8.
+    let pixi_pos = avif
+        .windows(4)
+        .position(|w| w == b"pixi")
+        .expect("pixi box present");
+    assert_eq!(
+        &avif[pixi_pos + 4..pixi_pos + 10],
+        &[0, 0, 0, 0, 1, 8],
+        "monochrome pixi must declare 1 channel"
+    );
+
+    // Still parses as a normal AVIF with the payload intact.
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+    assert_eq!(&test_img[..], parser.primary_data().unwrap().as_ref());
+}
+
+#[test]
+fn color_primary_av1c_and_pixi_unchanged() {
+    let test_img = [1u8, 2, 3];
+    let avif = Aviffy::new().to_vec(&test_img, None, 4, 4, 8);
+    let av1c_pos = avif.windows(4).position(|w| w == b"av1C").unwrap();
+    let payload = &avif[av1c_pos + 4..av1c_pos + 8];
+    assert_eq!((payload[2] >> 4) & 1, 0, "color image: mono_chrome clear");
+    let pixi_pos = avif.windows(4).position(|w| w == b"pixi").unwrap();
+    assert_eq!(&avif[pixi_pos + 4..pixi_pos + 10], &[0, 0, 0, 0, 3, 8]);
 }
 
 #[test]

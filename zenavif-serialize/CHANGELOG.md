@@ -9,6 +9,11 @@
   Justfile recipes `api-doc` / `api-doc-check`.
 
 ### Fixed
+- Monochrome primary images now serialize spec-correct properties: `pixi`
+  declares 1 channel (was hardcoded 3), `av1C` forces
+  `chroma_subsampling_x/y = 1` and seq_profile 0 (8/10-bit) or 2 (12-bit)
+  — profile 1 is 4:4:4-only and Chrome validates `av1C` against the
+  sequence header (supports imazen/zenavif#5/#6)
 - Grid serializer no longer scans the output buffer for `0xBAADF00D` sentinels when patching `iloc` extent offsets; tile payloads that legitimately contain those bytes are no longer corrupted (05e2353)
 - Animated serializer no longer scans the output buffer for `0xDEADBEEF` / `0xDEADBEE0` sentinels; AV1 frame payloads containing those bytes are preserved exactly (5e4af02)
 - `tkhd` width and height encoding saturates at the 16.16 fixed-point maximum instead of debug-panicking / silently wrapping for dimensions >= 65536 (d4d1648)
