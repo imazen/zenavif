@@ -324,7 +324,6 @@ static AVIF_ENCODE_CAPABILITIES: zencodec::encode::EncodeCapabilities =
         .with_lossless(cfg!(feature = "encode-imazen"))
         .with_hdr(true)
         .with_gain_map(true)
-        .with_reconstructs_hdr(true)
         .with_animation(true)
         .with_native_gray(false)
         .with_native_16bit(true)
