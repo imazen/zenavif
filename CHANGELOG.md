@@ -10,6 +10,16 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Fixed (corpus integrity — issue #16)
+- The libavif corpus test now asserts the two `unsupported_gainmap_*`
+  fixtures are **rejected with their version-gate errors** — they are
+  libavif's tmap version probes, designed to be refused; decoding one would
+  be the bug. The other 10 corpus failures (all Apple-style HDR gain-map
+  vectors with a size=0 `mdat`) were a zenavif-parse regression — fixed
+  upstream in zenavif-parse f3c9f043 (45/57 → 57/57-equivalent validated via
+  path-patch); the corpus goes fully green here when zenavif-parse 0.6.3 is
+  released and the dependency bumps.
+
 ### Fixed (pixel corruption — issues #14 + #15, landed in lockstep)
 - **Identity (MC=0) decode**: identity-RGB AVIFs were decoded through BT.601
   matrix math (`_ => Bt601` blind arms) — every pixel wrong (pure red came

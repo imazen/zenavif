@@ -49,12 +49,50 @@ fn test_decode_all_vectors() {
     // Use single-threaded decoder to avoid rav1d-safe threading issues
     let config = DecoderConfig::new().threads(1);
 
+    // Fixtures DESIGNED to be rejected (libavif's version-gate probes):
+    // a correct parser refuses them, so the contract here is "errors
+    // with the version-gate message", not "decodes". Decoding one of
+    // these would be the bug.
+    let expected_rejects: &[(&str, &str)] = &[
+        ("unsupported_gainmap_version.avif", "tmap version"),
+        (
+            "unsupported_gainmap_minimum_version.avif",
+            "tmap minimum version",
+        ),
+    ];
+
     let mut passed = 0;
     let mut failed = 0;
     let mut failed_files = Vec::new();
 
     for path in &vectors {
-        eprint!("  {:50} ", path.file_name().unwrap().to_string_lossy());
+        let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+        eprint!("  {:50} ", file_name);
+
+        if let Some((_, expected_err)) = expected_rejects.iter().find(|(n, _)| *n == file_name) {
+            match fs::read(path).map(|data| decode_with(&data, &config, &Unstoppable)) {
+                Ok(Err(e)) if e.to_string().contains(expected_err) => {
+                    eprintln!("✓ rejected as designed ({expected_err})");
+                    passed += 1;
+                }
+                Ok(Err(e)) => {
+                    eprintln!("✗ rejected with the WRONG error: {e}");
+                    failed += 1;
+                    failed_files.push((path.clone(), format!("wrong reject error: {e}")));
+                }
+                Ok(Ok(_)) => {
+                    eprintln!("✗ decoded a version-gate probe that must be rejected");
+                    failed += 1;
+                    failed_files.push((path.clone(), "decoded an expected-reject fixture".into()));
+                }
+                Err(e) => {
+                    eprintln!("✗ Read error: {e}");
+                    failed += 1;
+                    failed_files.push((path.clone(), format!("Read error: {e}")));
+                }
+            }
+            continue;
+        }
 
         match fs::read(path) {
             Ok(data) => {
