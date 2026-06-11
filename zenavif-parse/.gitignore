@@ -9,6 +9,7 @@ mp4parse_capi/examples/libmp4parse.a.out
 mp4parse_capi/examples/mp4parse.d
 mp4parse_capi/examples/test.o
 Cargo.lock
+!apidoc/Cargo.lock
 
 # === Standard exclusions (do not depend on user ~/.gitignore) ===
 

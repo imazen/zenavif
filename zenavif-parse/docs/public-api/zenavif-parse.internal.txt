@@ -1,0 +1,53 @@
+# zenavif-parse public API — doc(hidden) items and excluded-feature surface
+# excluded features: (none)
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   inherent methods                           16
+#   trait roster entries (type × trait)        15
+#
+# per-module pub lines:
+#   (root)                           16
+
+## items (16 lines)
+
+pub fn AV1Config::assert_fields_are_eq(&self)
+pub fn AV1LayeredImageIndexing::assert_fields_are_eq(&self)
+pub fn AmbientViewingEnvironment::assert_fields_are_eq(&self)
+pub fn ChromaSubsampling::assert_fields_are_eq(&self)
+pub fn CleanAperture::assert_fields_are_eq(&self)
+pub fn ColorInformation::assert_fields_are_eq(&self)
+pub fn ContentColourVolume::assert_fields_are_eq(&self)
+pub fn ContentLightLevel::assert_fields_are_eq(&self)
+pub fn GainMapChannel::assert_fields_are_eq(&self)
+pub fn GainMapMetadata::assert_fields_are_eq(&self)
+pub fn ImageMirror::assert_fields_are_eq(&self)
+pub fn ImageRotation::assert_fields_are_eq(&self)
+pub fn LayerSelector::assert_fields_are_eq(&self)
+pub fn MasteringDisplayColourVolume::assert_fields_are_eq(&self)
+pub fn OperatingPointSelector::assert_fields_are_eq(&self)
+pub fn PixelAspectRatio::assert_fields_are_eq(&self)
+
+## trait impls (15 types)
+
+AV1LayeredImageIndexing: TrivialClone
+AmbientViewingEnvironment: TrivialClone
+AnimationInfo: TrivialClone
+ChromaSubsampling: TrivialClone
+CleanAperture: TrivialClone
+ContentColourVolume: TrivialClone
+ContentLightLevel: TrivialClone
+GainMapChannel: TrivialClone
+ImageMirror: TrivialClone
+ImageRotation: TrivialClone
+LayerSelector: TrivialClone
+MasteringDisplayColourVolume: TrivialClone
+OperatingPointSelector: TrivialClone
+ParseOptions: TrivialClone
+PixelAspectRatio: TrivialClone

@@ -1,0 +1,16 @@
+# CI-free public-API snapshot runner — the only package depending on
+# zenutils-apidoc. The parent manifest is a single package (not a workspace),
+# so this package's own [workspace] table keeps cargo from attaching it to
+# anything; plain `cargo test` and every CI job (including --all-features
+# ones) never compile the apidoc tree or run rustdoc. Regenerate via
+# `just api-doc`.
+[package]
+name = "zenavif-parse-apidoc"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+zenutils-apidoc = "0.1.0"
+
+[workspace]

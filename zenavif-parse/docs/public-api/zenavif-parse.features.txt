@@ -1,0 +1,94 @@
+# zenavif-parse public API — additions from non-default features
+# features: c_api,eager,zencodec
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   pub modules                                 1
+#   pub types (struct/enum/trait/alias)         4
+#   free functions                              3
+#   inherent methods                            6
+#   struct fields                              40
+#   enum variants                               2
+#   trait roster entries (type × trait)         4
+#   auto-trait-complete types                   3
+#   auto-trait exceptions                       1
+#
+# per-module pub lines:
+#   (root)                           50
+#   c_api                             6
+
+## items (56 lines)
+
+pub mod c_api
+#[repr(C)] pub struct c_api::avif_data_t
+pub c_api::avif_data_t::alpha_data: *const u8
+pub c_api::avif_data_t::alpha_size: usize
+pub c_api::avif_data_t::premultiplied_alpha: u8
+pub c_api::avif_data_t::primary_data: *const u8
+pub c_api::avif_data_t::primary_size: usize
+#[no_mangle] pub unsafe c fn c_api::avif_data_free(*const c_api::avif_data_t)
+#[no_mangle] pub unsafe c fn c_api::avif_parse(*const u8, usize) -> *const c_api::avif_data_t
+pub struct AnimationConfig
+pub AnimationConfig::frames: fallible_collections::vec::TryVec<AnimationFrame>
+pub AnimationConfig::loop_count: u32
+pub struct AnimationFrame
+pub AnimationFrame::data: fallible_collections::vec::TryVec<u8>
+pub AnimationFrame::duration_ms: u32
+pub struct AvifData
+pub AvifData::alpha_item: core::option::Option<fallible_collections::vec::TryVec<u8>>
+pub AvifData::ambient_viewing: core::option::Option<AmbientViewingEnvironment>
+pub AvifData::animation: core::option::Option<AnimationConfig>
+pub AvifData::av1_config: core::option::Option<AV1Config>
+pub AvifData::clean_aperture: core::option::Option<CleanAperture>
+pub AvifData::color_info: core::option::Option<ColorInformation>
+pub AvifData::compatible_brands: alloc::vec::Vec<[u8; 4]>
+pub AvifData::content_colour_volume: core::option::Option<ContentColourVolume>
+pub AvifData::content_light_level: core::option::Option<ContentLightLevel>
+pub AvifData::depth_av1_config: core::option::Option<AV1Config>
+pub AvifData::depth_color_info: core::option::Option<ColorInformation>
+pub AvifData::depth_height: u32
+pub AvifData::depth_item: core::option::Option<fallible_collections::vec::TryVec<u8>>
+pub AvifData::depth_width: u32
+pub AvifData::exif: core::option::Option<fallible_collections::vec::TryVec<u8>>
+pub AvifData::gain_map_color_info: core::option::Option<ColorInformation>
+pub AvifData::gain_map_item: core::option::Option<fallible_collections::vec::TryVec<u8>>
+pub AvifData::gain_map_metadata: core::option::Option<GainMapMetadata>
+pub AvifData::grid_config: core::option::Option<GridConfig>
+pub AvifData::grid_tiles: fallible_collections::vec::TryVec<fallible_collections::vec::TryVec<u8>>
+pub AvifData::layer_selector: core::option::Option<LayerSelector>
+pub AvifData::layered_image_indexing: core::option::Option<AV1LayeredImageIndexing>
+pub AvifData::major_brand: [u8; 4]
+pub AvifData::mastering_display: core::option::Option<MasteringDisplayColourVolume>
+pub AvifData::mirror: core::option::Option<ImageMirror>
+pub AvifData::operating_point: core::option::Option<OperatingPointSelector>
+pub AvifData::pixel_aspect_ratio: core::option::Option<PixelAspectRatio>
+pub AvifData::premultiplied_alpha: bool
+pub AvifData::primary_item: fallible_collections::vec::TryVec<u8>
+pub AvifData::rotation: core::option::Option<ImageRotation>
+pub AvifData::xmp: core::option::Option<fallible_collections::vec::TryVec<u8>>
+pub fn AvifData::alpha_item_metadata(&self) -> Result<core::option::Option<AV1Metadata>>
+pub fn AvifData::from_reader<R: std::io::Read>(&mut R) -> Result<Self>
+pub fn AvifData::primary_item_metadata(&self) -> Result<AV1Metadata>
+pub fn AvifData::depth_map(&self) -> core::option::Option<AvifDepthMap>
+pub fn AvifData::gain_map(&self) -> core::option::Option<AvifGainMap>
+pub fn AvifParser<'data>::to_avif_data(&self) -> Result<AvifData>
+pub fn read_avif<T: std::io::Read>(&mut T) -> Result<AvifData>
+pub fn read_avif_with_config<T: std::io::Read>(&mut T, &DecodeConfig, &dyn enough::Stop) -> Result<AvifData>
+pub fn read_avif_with_options<T: std::io::Read>(&mut T, &ParseOptions) -> Result<AvifData>
+
+## trait impls (3 types)
+
+AnimationConfig: Debug
+AnimationFrame: Debug
+AvifData: Debug, Default
+
+## auto traits
+
+3 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+c_api::avif_data_t: !Send !Sync
