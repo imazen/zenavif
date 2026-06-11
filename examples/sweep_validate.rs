@@ -366,9 +366,14 @@ fn main() {
 
     let zensim = Zensim::new(ZensimProfile::latest());
 
-    // zenrav1e's recursive partition RDO needs more than rayon's
-    // default 2 MB worker stack (observed: stack overflow at 256²,
-    // speed 2). All encode work runs in this big-stack pool.
+    // 32 MB worker stacks: each encode→decode→score task peaks at
+    // ~0.5 MB of stack — dominated by rav1d-safe's `rav1d_open`
+    // decoder-context construction, NOT the encoder (gdb-verified
+    // 2026-06-11; zenrav1e encode needs ≤128 KB even at speed 2/q10
+    // noise). zensim's internal rayon joins let a blocked worker steal
+    // and stack additional whole task contexts on the same stack, so
+    // the 2 MB default dies probabilistically under load (observed
+    // once across ~600 tasks before this pool existed).
     let pool = rayon::ThreadPoolBuilder::new()
         .stack_size(32 * 1024 * 1024)
         .build()
@@ -503,7 +508,7 @@ fn main() {
     let big_noise = generate_noise(512, 512);
     let pin = |c: EncoderConfig| c.threads(Some(1));
     // Big-stack wrapper for the sequential contract encodes (same
-    // zenrav1e stack-depth issue as the subset pass).
+    // task-stacking stack-depth issue as the subset pass).
     let enc =
         |img: Img<&[Rgb<u8>]>, cfg: &EncoderConfig| pool.install(|| encode_rgb8(img, cfg, stop()));
 
