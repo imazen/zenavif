@@ -2910,7 +2910,14 @@ impl<T: Read> BoxIter<'_, T> {
                 let claimed = h.size - h.offset;
                 // Clamp the Take limit so that allocations based on
                 // bytes_left() cannot exceed the actual data available.
-                let clamped = claimed.min(self.max_remaining);
+                // The header bytes were already consumed from the
+                // source, so the budget available for CONTENT is
+                // max_remaining minus the header — without this the
+                // clamp overshoots by the header size and a size=0
+                // (extends-to-EOF) box reports more bytes_left() than
+                // the reader can deliver.
+                let available = self.max_remaining.saturating_sub(h.offset);
+                let clamped = claimed.min(available);
                 // Decrease our remaining budget by the clamped content
                 // size plus the header bytes already consumed.
                 self.max_remaining = self.max_remaining.saturating_sub(clamped.saturating_add(h.offset));
@@ -3048,10 +3055,23 @@ fn skip_box_content<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<()> {
     let to_skip = {
         let header = src.get_header();
         debug!("{header:?} (skipped)");
-        header
-            .size
-            .checked_sub(header.offset)
-            .ok_or(Error::InvalidData("header offset > size"))?
+        if header.size == u64::MAX {
+            // ISOBMFF size==0: the box extends to end-of-file (stored
+            // as the u64::MAX sentinel; valid for the last top-level
+            // box, usually `mdat`). `BoxIter::next_box` clamps the
+            // reader to the bytes actually available (the OOM guard),
+            // so the sentinel-derived length must not be compared
+            // against `bytes_left()` — the remaining bytes ARE the
+            // content. Real-world hit: libavif's Apple-style HDR
+            // gain-map vectors all carry a size=0 `mdat`
+            // (imazen/zenavif#16).
+            src.bytes_left()
+        } else {
+            header
+                .size
+                .checked_sub(header.offset)
+                .ok_or(Error::InvalidData("header offset > size"))?
+        }
     };
     if to_skip != src.bytes_left() {
         return Err(Error::InvalidData("box content size mismatch"));
@@ -5625,6 +5645,40 @@ fn be_u64<T: ReadBytesExt>(src: &mut T) -> Result<u64> {
 
 #[cfg(test)]
 mod sample_offset_overflow_tests {
+
+    /// ISOBMFF size==0 means "extends to end of file" (valid for the
+    /// last top-level box, usually `mdat`). The OOM clamp in
+    /// `BoxIter::next_box` bounds the reader to the real remaining
+    /// bytes; `skip_box_content` must not compare the u64::MAX
+    /// sentinel against that clamp (imazen/zenavif#16 — all of
+    /// libavif's Apple-style HDR gain-map vectors carry size=0 mdat).
+    #[test]
+    fn skip_box_content_accepts_size_zero_extends_to_eof() {
+        // 'free' box: size=16, 8 payload bytes; then 'mdat' with
+        // size32=0 (extends to EOF) and 5 payload bytes.
+        let mut bytes = std::vec::Vec::new();
+        bytes.extend_from_slice(&16u32.to_be_bytes());
+        bytes.extend_from_slice(b"free");
+        bytes.extend_from_slice(&[0u8; 8]);
+        bytes.extend_from_slice(&0u32.to_be_bytes());
+        bytes.extend_from_slice(b"mdat");
+        bytes.extend_from_slice(&[1, 2, 3, 4, 5]);
+
+        let mut cursor = std::io::Cursor::new(bytes.as_slice());
+        let total = bytes.len() as u64;
+        let mut iter = super::BoxIter::with_max_remaining(&mut cursor, total);
+
+        let mut free = iter.next_box().expect("iter").expect("free box");
+        super::skip_box_content(&mut free).expect("skip sized box");
+        drop(free);
+
+        let mut mdat = iter.next_box().expect("iter").expect("mdat box");
+        assert_eq!(mdat.bytes_left(), 5, "clamped to the real remainder");
+        super::skip_box_content(&mut mdat)
+            .expect("size=0 (extends-to-EOF) box must skip cleanly");
+        assert_eq!(mdat.bytes_left(), 0);
+    }
+
     use super::*;
 
     fn s2c(first_chunk: u32, samples_per_chunk: u32) -> SampleToChunkEntry {
