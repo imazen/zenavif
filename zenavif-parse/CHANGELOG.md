@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Fixed
+- **`size=0` (extends-to-EOF) boxes parse again** (imazen/zenavif#16,
+  f3c9f043): the OOM clamp added in 4fdc077 bounds the box reader to the
+  bytes actually available, but `skip_box_content` still compared the
+  `u64::MAX` extends-to-EOF sentinel against the clamped reader and failed
+  every such file with "box content size mismatch" — including all of
+  libavif's Apple-style HDR gain-map vectors, which carry a size=0 `mdat`
+  (10/57 of zenavif's corpus, validated 45/57 → 55/57). The sentinel now
+  skips exactly the remaining bytes.
+- The OOM clamp under-accounted the just-consumed header bytes, so a
+  clamped box could report more `bytes_left()` than the reader can deliver.
+  The content budget now subtracts the header first. Both behaviors pinned
+  by `skip_box_content_accepts_size_zero_extends_to_eof` (f3c9f043).
+
+
 ### Added
 - Versioned public-API surface snapshot at `docs/public-api/zenavif-parse.txt`,
   regenerated on every `cargo test` via `tests/public_api_doc.rs`
