@@ -1,0 +1,226 @@
+# zenavif public API — doc(hidden) items and excluded-feature surface
+# excluded features: __expert,_dev
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   pub modules                                 8
+#   pub types (struct/enum/trait/alias)        11
+#   free functions                             21
+#   inherent methods                           62
+#   struct fields                              27
+#   enum variants                              27
+#   trait roster entries (type × trait)        56
+#   auto-trait-complete types                  11
+#
+# per-module pub lines:
+#   (root)                           23
+#   detect                            4
+#   expert                            9
+#   simd                              3
+#   sweep                            79
+#   yuv_convert                      32
+#   yuv_convert_fast                  1
+#   yuv_convert_libyuv                3
+#   yuv_convert_libyuv_autovec        1
+#   yuv_convert_libyuv_simd           1
+
+## items (156 lines)
+
+#[non_exhaustive] pub enum sweep::KnobProbe
+#[non_exhaustive] pub struct expert::InternalParams
+pub enum sweep::QualityGrid
+pub enum yuv_convert::ChromaSubsampling
+pub enum yuv_convert::YuvMatrix
+pub enum yuv_convert::YuvRange
+pub fn Av1Backend::assert_fields_are_eq(&self)
+pub fn ChromaSampling::assert_fields_are_eq(&self)
+pub fn ColorPrimaries::assert_fields_are_eq(&self)
+pub fn ColorRange::assert_fields_are_eq(&self)
+pub fn EncodeAlphaMode::assert_fields_are_eq(&self)
+pub fn EncodeBitDepth::assert_fields_are_eq(&self)
+pub fn EncodeChromaSubsampling::assert_fields_are_eq(&self)
+pub fn EncodeColorModel::assert_fields_are_eq(&self)
+pub fn EncodePixelRange::assert_fields_are_eq(&self)
+pub fn EncoderConfig::with_internal_params(self, expert::InternalParams) -> Self
+pub fn MatrixCoefficients::assert_fields_are_eq(&self)
+pub fn PlanInput::assert_fields_are_eq(&self)
+pub fn SpeedDerived::assert_fields_are_eq(&self)
+pub fn TilesResolution::assert_fields_are_eq(&self)
+pub fn TransferCharacteristics::assert_fields_are_eq(&self)
+pub fn detect::ChromaSampling::assert_fields_are_eq(&self)
+pub fn detect::Confidence::assert_fields_are_eq(&self)
+pub fn detect::ProbeError::assert_fields_are_eq(&self)
+pub fn detect::Recommendation::assert_fields_are_eq(&self)
+pub fn expert::InternalParams::clone(&self) -> expert::InternalParams
+pub fn expert::InternalParams::default() -> expert::InternalParams
+pub fn expert::InternalParams::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn expert::InternalParams::validate(&self) -> core::result::Result<(), ValidationError>
+pub fn simd::avg_8bpc(&mut [u8], usize, &[i16], &[i16], usize, usize)
+pub fn simd::avg_8bpc_avx2(archmage::tokens::generated::x86::Desktop64, &mut [u8], usize, &[i16], &[i16], usize, usize)
+pub fn simd::avg_8bpc_scalar(&mut [u8], usize, &[i16], &[i16], usize, usize)
+pub fn sweep::DroppedAxis::clone(&self) -> sweep::DroppedAxis
+pub fn sweep::DroppedAxis::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::KnobProbe::apply(self, EncoderConfig) -> EncoderConfig
+pub fn sweep::KnobProbe::clone(&self) -> sweep::KnobProbe
+pub fn sweep::KnobProbe::eq(&self, &sweep::KnobProbe) -> bool
+pub fn sweep::KnobProbe::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::QualityGrid::clone(&self) -> sweep::QualityGrid
+pub fn sweep::QualityGrid::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::QualityGrid::points(&self) -> alloc::vec::Vec<f32>
+pub fn sweep::SweepAxes::alpha_probes() -> alloc::vec::Vec<sweep::KnobProbe>
+pub fn sweep::SweepAxes::by_name(&str) -> core::option::Option<Self>
+pub fn sweep::SweepAxes::clone(&self) -> sweep::SweepAxes
+pub fn sweep::SweepAxes::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::SweepAxes::modes_full() -> Self
+pub fn sweep::SweepAxes::modes_full_alpha() -> Self
+pub fn sweep::SweepAxes::rd_core() -> Self
+pub fn sweep::SweepBuilder::clone(&self) -> sweep::SweepBuilder
+pub fn sweep::SweepBuilder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::SweepBuilder::new(sweep::SweepAxes, sweep::QualityGrid) -> Self
+pub fn sweep::SweepBuilder::plan(&self) -> sweep::SweepPlan
+pub fn sweep::SweepBuilder::with_budget(self, usize) -> Self
+pub fn sweep::SweepCell::clone(&self) -> sweep::SweepCell
+pub fn sweep::SweepCell::feature_row(&self, PlanInput) -> alloc::vec::Vec<f64>
+pub fn sweep::SweepCell::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::SweepPlan::clone(&self) -> sweep::SweepPlan
+pub fn sweep::SweepPlan::encodes(&self, usize, usize) -> usize
+pub fn sweep::SweepPlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::config_from_cell_id(&str, f32) -> core::result::Result<EncoderConfig, alloc::string::String>
+pub fn sweep::feature_columns() -> &'static [&'static str]
+pub fn sweep::fingerprint(&EncoderConfig) -> u64
+pub fn yuv_convert::ChromaSubsampling::assert_fields_are_eq(&self)
+pub fn yuv_convert::ChromaSubsampling::clone(&self) -> yuv_convert::ChromaSubsampling
+pub fn yuv_convert::ChromaSubsampling::eq(&self, &yuv_convert::ChromaSubsampling) -> bool
+pub fn yuv_convert::ChromaSubsampling::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn yuv_convert::YuvMatrix::assert_fields_are_eq(&self)
+pub fn yuv_convert::YuvMatrix::clone(&self) -> yuv_convert::YuvMatrix
+pub fn yuv_convert::YuvMatrix::eq(&self, &yuv_convert::YuvMatrix) -> bool
+pub fn yuv_convert::YuvMatrix::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn yuv_convert::YuvRange::assert_fields_are_eq(&self)
+pub fn yuv_convert::YuvRange::clone(&self) -> yuv_convert::YuvRange
+pub fn yuv_convert::YuvRange::eq(&self, &yuv_convert::YuvRange) -> bool
+pub fn yuv_convert::YuvRange::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn yuv_convert::yuv420_to_rgb8(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix) -> imgref::ImgVec<rgb::RGB8>
+pub fn yuv_convert::yuv420_to_rgb8_strip(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix, &mut [rgb::RGB8])
+pub fn yuv_convert::yuv420_to_rgba8_strip(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix, &mut [rgb::formats::rgba::Rgba<u8>])
+pub fn yuv_convert::yuv422_to_rgb8(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix) -> imgref::ImgVec<rgb::RGB8>
+pub fn yuv_convert::yuv422_to_rgb8_strip(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix, &mut [rgb::RGB8])
+pub fn yuv_convert::yuv422_to_rgba8_strip(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix, &mut [rgb::formats::rgba::Rgba<u8>])
+pub fn yuv_convert::yuv444_to_rgb8(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix) -> imgref::ImgVec<rgb::RGB8>
+pub fn yuv_convert::yuv444_to_rgb8_strip(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix, &mut [rgb::RGB8])
+pub fn yuv_convert::yuv444_to_rgba8_strip(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix, &mut [rgb::formats::rgba::Rgba<u8>])
+pub fn yuv_convert_fast::yuv420_to_rgb8_fast(archmage::tokens::generated::x86::Desktop64, &[u8], usize, &[u8], usize, &[u8], usize, usize, usize) -> imgref::ImgVec<rgb::RGB8>
+pub fn yuv_convert_libyuv::yuv420_to_rgb8(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix) -> core::option::Option<imgref::ImgVec<rgb::RGB8>>
+pub fn yuv_convert_libyuv::yuv422_to_rgb8(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix) -> core::option::Option<imgref::ImgVec<rgb::RGB8>>
+pub fn yuv_convert_libyuv::yuv444_to_rgb8(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix) -> core::option::Option<imgref::ImgVec<rgb::RGB8>>
+pub fn yuv_convert_libyuv_autovec::yuv420_to_rgb8_autovec(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix) -> core::option::Option<imgref::ImgVec<rgb::RGB8>>
+pub fn yuv_convert_libyuv_simd::yuv420_to_rgb8_simd(archmage::tokens::generated::x86::Desktop64, &[u8], usize, &[u8], usize, &[u8], usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix) -> core::option::Option<imgref::ImgVec<rgb::RGB8>>
+pub mod expert
+pub mod simd
+pub mod sweep
+pub mod yuv_convert
+pub mod yuv_convert_fast
+pub mod yuv_convert_libyuv
+pub mod yuv_convert_libyuv_autovec
+pub mod yuv_convert_libyuv_simd
+pub struct sweep::DroppedAxis
+pub struct sweep::SweepAxes
+pub struct sweep::SweepBuilder
+pub struct sweep::SweepCell
+pub struct sweep::SweepPlan
+pub expert::InternalParams::complex_prediction_modes: core::option::Option<bool>
+pub expert::InternalParams::fast_deblock: core::option::Option<bool>
+pub expert::InternalParams::lrf: core::option::Option<bool>
+pub expert::InternalParams::partition_range: core::option::Option<(u8, u8)>
+pub sweep::DroppedAxis::axis: &'static str
+pub sweep::DroppedAxis::dropped: alloc::vec::Vec<alloc::string::String>
+pub sweep::DroppedAxis::kept: alloc::string::String
+pub sweep::KnobProbe::AlphaMode(EncodeAlphaMode)
+pub sweep::KnobProbe::AlphaQualityDelta(f32)
+pub sweep::KnobProbe::Cdef(bool)
+pub sweep::KnobProbe::ComplexPredictionModes(bool)
+pub sweep::KnobProbe::EncodeBottomup(bool)
+pub sweep::KnobProbe::FastDeblock(bool)
+pub sweep::KnobProbe::Lrf(bool)
+pub sweep::KnobProbe::LruOnSkip(bool)
+pub sweep::KnobProbe::None
+pub sweep::KnobProbe::PartitionRange(u8, u8)
+pub sweep::KnobProbe::RdoTxDecision(bool)
+pub sweep::KnobProbe::SegBoost(f64)
+pub sweep::KnobProbe::SegmentationComplex(bool)
+pub sweep::KnobProbe::SgrFull(bool)
+pub sweep::KnobProbe::TuneStillImage
+pub sweep::KnobProbe::VaqStrength(f64)
+pub sweep::QualityGrid::Explicit(alloc::vec::Vec<f32>)
+pub sweep::QualityGrid::Step5
+pub sweep::QualityGrid::TrainingDense
+pub sweep::SweepAxes::bit_depths: alloc::vec::Vec<EncodeBitDepth>
+pub sweep::SweepAxes::color_models: alloc::vec::Vec<EncodeColorModel>
+pub sweep::SweepAxes::probes: alloc::vec::Vec<sweep::KnobProbe>
+pub sweep::SweepAxes::qm: alloc::vec::Vec<bool>
+pub sweep::SweepAxes::speeds: alloc::vec::Vec<u8>
+pub sweep::SweepAxes::subsampling: alloc::vec::Vec<EncodeChromaSubsampling>
+pub sweep::SweepAxes::trellis: alloc::vec::Vec<bool>
+pub sweep::SweepAxes::vaq: alloc::vec::Vec<core::option::Option<f64>>
+pub sweep::SweepCell::aliases: alloc::vec::Vec<alloc::string::String>
+pub sweep::SweepCell::config: EncoderConfig
+pub sweep::SweepCell::deviations: u8
+pub sweep::SweepCell::fingerprint: u64
+pub sweep::SweepCell::id: alloc::string::String
+pub sweep::SweepCell::quality: f32
+pub sweep::SweepPlan::cells: alloc::vec::Vec<sweep::SweepCell>
+pub sweep::SweepPlan::dropped: alloc::vec::Vec<sweep::DroppedAxis>
+pub sweep::SweepPlan::duplicates_merged: usize
+pub sweep::SweepPlan::invalid_skipped: alloc::vec::Vec<alloc::string::String>
+pub sweep::SweepPlan::over_budget: bool
+pub sweep::SweepPlan::q_coarsenings: u32
+pub yuv_convert::ChromaSubsampling::Cs420
+pub yuv_convert::ChromaSubsampling::Cs422
+pub yuv_convert::ChromaSubsampling::Cs444
+pub yuv_convert::YuvMatrix::Bt2020
+pub yuv_convert::YuvMatrix::Bt601
+pub yuv_convert::YuvMatrix::Bt709
+pub yuv_convert::YuvRange::Full
+pub yuv_convert::YuvRange::Limited
+
+## trait impls (29 types)
+
+Av1Backend: TrivialClone
+ChromaSampling: TrivialClone
+ColorPrimaries: TrivialClone
+ColorRange: TrivialClone
+EncodeAlphaMode: TrivialClone
+EncodeBitDepth: TrivialClone
+EncodeChromaSubsampling: TrivialClone
+EncodeColorModel: TrivialClone
+EncodePixelRange: TrivialClone
+MasteringDisplayConfig: TrivialClone
+MatrixCoefficients: TrivialClone
+PlanInput: TrivialClone
+QualityTarget: TrivialClone
+SpeedDerived: TrivialClone
+TilesResolution: TrivialClone
+TransferCharacteristics: TrivialClone
+detect::ChromaSampling: TrivialClone
+detect::Confidence: TrivialClone
+expert::InternalParams: Clone, Debug, Default
+sweep::DroppedAxis: Clone, Debug
+sweep::KnobProbe: Clone, Copy, Debug, PartialEq, TrivialClone
+sweep::QualityGrid: Clone, Debug
+sweep::SweepAxes: Clone, Debug
+sweep::SweepBuilder: Clone, Debug
+sweep::SweepCell: Clone, Debug
+sweep::SweepPlan: Clone, Debug
+yuv_convert::ChromaSubsampling: Clone, Copy, Debug, Eq, PartialEq, TrivialClone
+yuv_convert::YuvMatrix: Clone, Copy, Debug, Eq, PartialEq, TrivialClone
+yuv_convert::YuvRange: Clone, Copy, Debug, Eq, PartialEq, TrivialClone
+
+## auto traits
+
+11 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

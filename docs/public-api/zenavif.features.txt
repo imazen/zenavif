@@ -1,0 +1,290 @@
+# zenavif public API — additions from non-default features
+# features: auto-tune,encode,encode-asm,encode-imazen,encode-threading,unsafe-asm,zencodec
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   pub types (struct/enum/trait/alias)        31
+#   free functions                             10
+#   inherent methods                           83
+#   struct fields                              71
+#   enum variants                              25
+#   trait roster entries (type × trait)        95
+#   auto-trait-complete types                  25
+#   auto-trait exceptions                       6
+#
+# per-module pub lines:
+#   (root)                          220
+
+## items (220 lines)
+
+pub enum AutoTuneError
+pub AutoTuneError::FeatureExtraction(alloc::string::String)
+pub AutoTuneError::Inference(alloc::string::String)
+pub AutoTuneError::Internal(&'static str)
+pub AutoTuneError::LutMalformed(alloc::string::String)
+pub AutoTuneError::ModelNotBaked
+pub AutoTuneError::NoCellAllowed
+pub AutoTuneError::TargetOutOfRange(f32)
+pub enum Av1Backend
+pub Av1Backend::Svtav1
+pub Av1Backend::Zenravif
+pub enum EncodeAlphaMode
+pub EncodeAlphaMode::Premultiplied
+pub EncodeAlphaMode::UnassociatedClean
+pub EncodeAlphaMode::UnassociatedDirty
+pub enum EncodeBitDepth
+pub EncodeBitDepth::Auto
+pub EncodeBitDepth::Eight
+pub EncodeBitDepth::Ten
+pub enum EncodeChromaSubsampling
+pub EncodeChromaSubsampling::Yuv420
+pub EncodeChromaSubsampling::Yuv444
+pub enum EncodeColorModel
+pub EncodeColorModel::Rgb
+pub EncodeColorModel::YCbCr
+pub enum EncodePixelRange
+pub EncodePixelRange::Full
+pub EncodePixelRange::Limited
+pub Error::UnsupportedOperation(zencodec::capabilities::UnsupportedOperation)
+pub enum QualityTarget
+pub QualityTarget::Zensim(f32)
+pub enum TilesResolution
+pub TilesResolution::Fixed(usize)
+pub TilesResolution::MachineDependent
+pub TilesResolution::MachineDependent::cap: usize
+pub struct AnimationFrame
+pub AnimationFrame::duration_ms: u32
+pub AnimationFrame::pixels: imgref::ImgVec<rgb::RGB8>
+pub struct AnimationFrame16
+pub AnimationFrame16::duration_ms: u32
+pub AnimationFrame16::pixels: imgref::ImgVec<rgb::RGB16>
+pub struct AnimationFrameRgba
+pub AnimationFrameRgba::duration_ms: u32
+pub AnimationFrameRgba::pixels: imgref::ImgVec<rgb::RGBA8>
+pub struct AnimationFrameRgba16
+pub AnimationFrameRgba16::duration_ms: u32
+pub AnimationFrameRgba16::pixels: imgref::ImgVec<rgb::RGBA16>
+pub struct AutoTuneOptions
+pub AutoTuneOptions::pareto_weight: f32
+pub AutoTuneOptions::speed_range: core::option::Option<core::ops::range::RangeInclusive<u8>>
+pub AutoTuneOptions::time_budget: core::option::Option<core::time::Duration>
+pub fn AutoTuneOptions::new() -> Self
+pub fn AutoTuneOptions::with_pareto_weight(self, f32) -> Self
+pub fn AutoTuneOptions::with_speed_range(self, core::ops::range::RangeInclusive<u8>) -> Self
+pub fn AutoTuneOptions::with_time_budget(self, core::time::Duration) -> Self
+pub struct AvifAnimationFrameDecoder
+pub struct AvifAnimationFrameEncoder
+pub struct AvifDecodeJob
+pub fn AvifDecodeJob::with_extract_gain_map(self, bool) -> Self
+pub struct AvifDecoder
+pub fn AvifDecoder::decode(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<zenpixels::buffer::PixelBuffer>
+pub fn AvifDecoder::info(&self) -> &ImageInfo
+pub fn AvifDecoder::new(&[u8], &DecoderConfig) -> Result<Self>
+pub struct AvifDecoderConfig
+pub fn AvifDecoderConfig::decode(&self, &[u8]) -> core::result::Result<zencodec::output::DecodeOutput, whereat::at::At<Error>>
+pub fn AvifDecoderConfig::decode_into_gray_f32(&self, &[u8], imgref::ImgRefMut<'_, rgb::formats::gray::Gray_v08<f32>>) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<Error>>
+pub fn AvifDecoderConfig::decode_into_rgb8(&self, &[u8], imgref::ImgRefMut<'_, rgb::formats::rgb::Rgb<u8>>) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<Error>>
+pub fn AvifDecoderConfig::decode_into_rgb_f32(&self, &[u8], imgref::ImgRefMut<'_, rgb::formats::rgb::Rgb<f32>>) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<Error>>
+pub fn AvifDecoderConfig::decode_into_rgba8(&self, &[u8], imgref::ImgRefMut<'_, rgb::formats::rgba::Rgba<u8>>) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<Error>>
+pub fn AvifDecoderConfig::decode_into_rgba_f32(&self, &[u8], imgref::ImgRefMut<'_, rgb::formats::rgba::Rgba<f32>>) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<Error>>
+pub fn AvifDecoderConfig::inner(&self) -> &DecoderConfig
+pub fn AvifDecoderConfig::inner_mut(&mut self) -> &mut DecoderConfig
+pub fn AvifDecoderConfig::new() -> Self
+pub fn AvifDecoderConfig::probe_full(&self, &[u8]) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<Error>>
+pub fn AvifDecoderConfig::probe_header(&self, &[u8]) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<Error>>
+pub fn AvifDecoderConfig::with_extract_gain_map(self, bool) -> Self
+pub fn AvifDecoderConfig::with_film_grain(self, bool) -> Self
+pub fn AvifDecoderConfig::with_limits(self, zencodec::limits::ResourceLimits) -> Self
+pub fn AvifDecoderConfig::with_orientation(self, zencodec::orientation::OrientationHint) -> Self
+pub fn AvifDecoderConfig::with_threads(self, u32) -> Self
+pub struct AvifEncodeJob
+pub fn AvifEncodeJob::with_exif(self, impl core::convert::Into<alloc::sync::Arc<[u8]>>) -> Self
+pub struct AvifEncoder
+pub struct AvifEncoderConfig
+pub fn AvifEncoderConfig::encode_gray8(&self, imgref::ImgRef<'_, rgb::formats::gray::Gray_v08<u8>>) -> core::result::Result<zencodec::output::EncodeOutput, whereat::at::At<Error>>
+pub fn AvifEncoderConfig::encode_gray_f32(&self, imgref::ImgRef<'_, rgb::formats::gray::Gray_v08<f32>>) -> core::result::Result<zencodec::output::EncodeOutput, whereat::at::At<Error>>
+pub fn AvifEncoderConfig::encode_rgb8(&self, imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u8>>) -> core::result::Result<zencodec::output::EncodeOutput, whereat::at::At<Error>>
+pub fn AvifEncoderConfig::encode_rgb_f32(&self, imgref::ImgRef<'_, rgb::formats::rgb::Rgb<f32>>) -> core::result::Result<zencodec::output::EncodeOutput, whereat::at::At<Error>>
+pub fn AvifEncoderConfig::encode_rgba8(&self, imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u8>>) -> core::result::Result<zencodec::output::EncodeOutput, whereat::at::At<Error>>
+pub fn AvifEncoderConfig::encode_rgba_f32(&self, imgref::ImgRef<'_, rgb::formats::rgba::Rgba<f32>>) -> core::result::Result<zencodec::output::EncodeOutput, whereat::at::At<Error>>
+pub fn AvifEncoderConfig::inner(&self) -> &EncoderConfig
+pub fn AvifEncoderConfig::inner_mut(&mut self) -> &mut EncoderConfig
+pub fn AvifEncoderConfig::new() -> Self
+pub fn AvifEncoderConfig::with_alpha_quality_value(self, f32) -> Self
+pub fn AvifEncoderConfig::with_effort_u32(self, u32) -> Self
+pub fn AvifEncoderConfig::with_gain_map(self, alloc::vec::Vec<u8>, u32, u32, u8, alloc::vec::Vec<u8>) -> Self
+pub fn AvifEncoderConfig::with_lossless_mode(self, bool) -> Self
+pub fn AvifEncoderConfig::with_quality(self, f32) -> Self
+pub struct AvifZenDecoder<'a>
+#[non_exhaustive] pub struct EncodePlan
+pub EncodePlan::alpha_color_mode: EncodeAlphaMode
+pub EncodePlan::alpha_quantizer: core::option::Option<u8>
+pub EncodePlan::alpha_speed: core::option::Option<SpeedDerived>
+pub EncodePlan::backend: Av1Backend
+pub EncodePlan::bit_depth: u8
+pub EncodePlan::chroma_subsampling: EncodeChromaSubsampling
+pub EncodePlan::color_model: EncodeColorModel
+pub EncodePlan::has_exif: bool
+pub EncodePlan::has_gain_map: bool
+pub EncodePlan::has_icc: bool
+pub EncodePlan::has_xmp: bool
+pub EncodePlan::lossless: bool
+pub EncodePlan::matrix_coefficients_cicp: u8
+pub EncodePlan::pixel_range: EncodePixelRange
+pub EncodePlan::qm: bool
+pub EncodePlan::quantizer: u8
+pub EncodePlan::seg_boost: f64
+pub EncodePlan::speed: SpeedDerived
+pub EncodePlan::speed_preset: u8
+pub EncodePlan::tiles: TilesResolution
+pub EncodePlan::trellis: bool
+pub EncodePlan::tune_still_image: bool
+pub EncodePlan::vaq: bool
+pub EncodePlan::vaq_strength: f64
+#[non_exhaustive] pub struct EncodedAnimation
+pub EncodedAnimation::avif_file: alloc::vec::Vec<u8>
+pub EncodedAnimation::frame_count: usize
+pub EncodedAnimation::total_duration_ms: u64
+pub struct EncodedImage
+pub EncodedImage::alpha_byte_size: usize
+pub EncodedImage::avif_file: alloc::vec::Vec<u8>
+pub EncodedImage::color_byte_size: usize
+pub struct EncoderConfig
+pub fn EncoderConfig::alpha_color_mode(self, EncodeAlphaMode) -> Self
+pub fn EncoderConfig::alpha_quality(self, f32) -> Self
+pub fn EncoderConfig::backend(self, Av1Backend) -> Self
+pub fn EncoderConfig::bit_depth(self, EncodeBitDepth) -> Self
+pub fn EncoderConfig::chroma_subsampling(self, EncodeChromaSubsampling) -> Self
+pub fn EncoderConfig::color_model(self, EncodeColorModel) -> Self
+pub fn EncoderConfig::color_primaries(self, u8) -> Self
+pub fn EncoderConfig::content_light_level(self, u16, u16) -> Self
+pub fn EncoderConfig::exif(self, alloc::vec::Vec<u8>) -> Self
+pub fn EncoderConfig::icc_profile(self, alloc::vec::Vec<u8>) -> Self
+pub fn EncoderConfig::mastering_display(self, MasteringDisplayConfig) -> Self
+pub fn EncoderConfig::matrix_coefficients(self, u8) -> Self
+pub fn EncoderConfig::mirror(self, u8) -> Self
+pub fn EncoderConfig::new() -> Self
+pub fn EncoderConfig::pixel_range(self, EncodePixelRange) -> Self
+pub fn EncoderConfig::quality(self, f32) -> Self
+pub fn EncoderConfig::quality_value(&self) -> f32
+pub fn EncoderConfig::rotation(self, u8) -> Self
+pub fn EncoderConfig::speed(self, u8) -> Self
+pub fn EncoderConfig::speed_value(&self) -> u8
+pub fn EncoderConfig::still_image_preset(self) -> Self
+pub fn EncoderConfig::threads(self, core::option::Option<usize>) -> Self
+pub fn EncoderConfig::transfer_characteristics(self, u8) -> Self
+pub fn EncoderConfig::with_cdef(self, core::option::Option<bool>) -> Self
+pub fn EncoderConfig::with_encode_bottomup(self, core::option::Option<bool>) -> Self
+pub fn EncoderConfig::with_gain_map(self, alloc::vec::Vec<u8>, u32, u32, u8, alloc::vec::Vec<u8>) -> Self
+pub fn EncoderConfig::with_lossless(self, bool) -> Self
+pub fn EncoderConfig::with_lru_on_skip(self, core::option::Option<bool>) -> Self
+pub fn EncoderConfig::with_qm(self, bool) -> Self
+pub fn EncoderConfig::with_rdo_tx_decision(self, core::option::Option<bool>) -> Self
+pub fn EncoderConfig::with_seg_boost(self, core::option::Option<f64>) -> Self
+pub fn EncoderConfig::with_segmentation_complex(self, core::option::Option<bool>) -> Self
+pub fn EncoderConfig::with_sgr_full(self, core::option::Option<bool>) -> Self
+pub fn EncoderConfig::with_still_image_tuning(self, bool) -> Self
+pub fn EncoderConfig::with_trellis(self, core::option::Option<bool>) -> Self
+pub fn EncoderConfig::with_vaq(self, bool, f64) -> Self
+pub fn EncoderConfig::xmp(self, alloc::vec::Vec<u8>) -> Self
+pub fn EncoderConfig::auto_tune(self, &[u8], u32, u32, QualityTarget, AutoTuneOptions) -> core::result::Result<Self, AutoTuneError>
+pub fn EncoderConfig::resolve_plan(&self, PlanInput) -> EncodePlan
+pub fn EncoderConfig::validate(&self) -> core::result::Result<(), ValidationError>
+pub fn EncoderConfig::validate_for_input(&self, PlanInput) -> core::result::Result<(), ValidationError>
+pub struct GainMapConfig
+pub GainMapConfig::av1_data: alloc::vec::Vec<u8>
+pub GainMapConfig::bit_depth: u8
+pub GainMapConfig::height: u32
+pub GainMapConfig::metadata: alloc::vec::Vec<u8>
+pub GainMapConfig::width: u32
+pub fn ManagedAvifDecoder::decode_to_sink(&mut self, &impl enough::Stop + ?core::marker::Sized, &mut dyn zencodec::sink::DecodeRowSink) -> Result<ImageInfo>
+pub struct MasteringDisplayConfig
+pub MasteringDisplayConfig::max_luminance: u32
+pub MasteringDisplayConfig::min_luminance: u32
+pub MasteringDisplayConfig::primaries: [(u16, u16); 3]
+pub MasteringDisplayConfig::white_point: (u16, u16)
+pub struct PlanInput
+pub PlanInput::height: u32
+pub PlanInput::input_has_alpha: bool
+pub PlanInput::input_is_16bit: bool
+pub PlanInput::width: u32
+pub fn PlanInput::rgb8(u32, u32) -> Self
+pub fn PlanInput::rgba8(u32, u32) -> Self
+#[non_exhaustive] pub struct SpeedDerived
+pub SpeedDerived::cdef: bool
+pub SpeedDerived::complex_prediction_modes: bool
+pub SpeedDerived::encode_bottomup: bool
+pub SpeedDerived::fast_deblock: bool
+pub SpeedDerived::fine_directional_intra: bool
+pub SpeedDerived::inter_tx_split: bool
+pub SpeedDerived::lrf: bool
+pub SpeedDerived::lru_on_skip: bool
+pub SpeedDerived::min_tile_size: u16
+pub SpeedDerived::non_square_partition_max: u8
+pub SpeedDerived::partition_range: (u8, u8)
+pub SpeedDerived::rdo_tx_decision: bool
+pub SpeedDerived::reduced_tx_set: bool
+pub SpeedDerived::segmentation_complex: bool
+pub SpeedDerived::sgr_complexity_full: bool
+pub SpeedDerived::tx_domain_rate: bool
+pub fn encode(&zenpixels::buffer::PixelBuffer) -> Result<EncodedImage>
+pub fn encode_animation_rgb16(&[AnimationFrame16], &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
+pub fn encode_animation_rgb8(&[AnimationFrame], &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
+pub fn encode_animation_rgba16(&[AnimationFrameRgba16], &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
+pub fn encode_animation_rgba8(&[AnimationFrameRgba], &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
+pub fn encode_rgb16(imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u16>>, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
+pub fn encode_rgb8(imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u8>>, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
+pub fn encode_rgba16(imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u16>>, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
+pub fn encode_rgba8(imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u8>>, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
+pub fn encode_with(&zenpixels::buffer::PixelBuffer, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
+
+## trait impls (32 types)
+
+AnimationFrame: Clone
+AnimationFrame16: Clone
+AnimationFrameRgba: Clone
+AnimationFrameRgba16: Clone
+AutoTuneError: Debug, Display, Error
+AutoTuneOptions: Clone, Debug, Default
+Av1Backend: Clone, Copy, Debug, Default, Eq, PartialEq
+AvifAnimationFrameDecoder: zencodec::traits::decoder::AnimationFrameDecoder
+AvifAnimationFrameEncoder: zencodec::traits::encoder::AnimationFrameEncoder
+AvifDecodeJob: zencodec::traits::decoding::DecodeJob<'a>
+AvifDecoderConfig: Clone, Debug, Default, zencodec::traits::decoding::DecoderConfig
+AvifEncodeJob: zencodec::traits::encoding::EncodeJob
+AvifEncoder: zencodec::traits::encoder::Encoder
+AvifEncoderConfig: Clone, Debug, Default, zencodec::traits::encoding::EncoderConfig
+AvifZenDecoder<'_>: zencodec::traits::decoder::Decode
+EncodeAlphaMode: Clone, Copy, Debug, Default, Eq, PartialEq
+EncodeBitDepth: Clone, Copy, Debug, Default, Eq, PartialEq
+EncodeChromaSubsampling: Clone, Copy, Debug, Default, Eq, PartialEq
+EncodeColorModel: Clone, Copy, Debug, Default, Eq, PartialEq
+EncodePixelRange: Clone, Copy, Debug, Default, Eq, PartialEq
+EncodePlan: Clone, Debug, PartialEq
+EncodedAnimation: Clone
+EncodedImage: Clone, Debug
+EncoderConfig: Clone, Debug, Default
+Error: From<zencodec::capabilities::UnsupportedOperation>
+GainMapConfig: Clone, Debug
+MasteringDisplayConfig: Clone, Copy, Debug
+PlanInput: Clone, Copy, Debug, Eq, PartialEq
+QualityTarget: Clone, Copy, Debug, PartialEq
+SpeedDerived: Clone, Copy, Debug, Eq, PartialEq
+TilesResolution: Clone, Copy, Debug, Eq, PartialEq
+detect::AvifProbe: zencodec::detect::SourceEncodingDetails
+
+## auto traits
+
+25 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+AvifAnimationFrameDecoder: !RefUnwindSafe !UnwindSafe
+AvifAnimationFrameEncoder: !RefUnwindSafe !UnwindSafe
+AvifDecodeJob: !RefUnwindSafe !UnwindSafe
+AvifEncodeJob: !RefUnwindSafe !UnwindSafe
+AvifEncoder: !RefUnwindSafe !UnwindSafe
+AvifZenDecoder<'a>: !RefUnwindSafe !UnwindSafe
