@@ -3,7 +3,12 @@
 Written 2026-06-10, adopting the patterns from zenjpeg's
 `docs/VARIANT_GENERATION.md` (the reference write-up; read it first —
 this document records only the zenavif-specific audit, decisions, and
-deltas). Adoption order followed the recommendation there:
+deltas). The codec-neutral lessons this adoption produced were folded
+back into that reference as its **wrapped-engine patterns 8–13**
+(zenjpeg commit 6fa2198): encode-pinned mirrors, ambient-machine-default
+pins, the three knob-liveness lies, the probe axis, resolved-state
+feature emission, and two-tier validation. Consult the reference for
+the generalized form; this doc keeps the zenavif evidence. Adoption order followed the recommendation there:
 discriminate knobs → `resolve_plan` → fingerprints → sweep planner →
 exact trials.
 
