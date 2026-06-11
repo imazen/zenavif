@@ -954,13 +954,18 @@ pub fn encode_rgb16(
     let enc = build_ravif_encoder(config, stop, true);
     let width = img.width();
     let height = img.height();
+    // Identity (MC=0) signaling means GBR plane order — plane 0 is G,
+    // 1 is B, 2 is R (H.273; zenravif's own 8-bit identity path writes
+    // the same order via `rgb_to_10_bit_gbr`). Feeding [r,g,b] here was
+    // issue #14: every 16-bit encode channel-rotated for conforming
+    // decoders. Pinned by tests/identity_roundtrip.rs.
     let pixels: Vec<[u16; 3]> = img
         .pixels()
         .map(|p| {
             [
-                scale_from_u16(p.r, 10),
                 scale_from_u16(p.g, 10),
                 scale_from_u16(p.b, 10),
+                scale_from_u16(p.r, 10),
             ]
         })
         .collect();
@@ -1006,13 +1011,14 @@ pub fn encode_rgba16(
     let enc = build_ravif_encoder(config, stop, true);
     let width = img.width();
     let height = img.height();
+    // GBR plane order under identity signaling — see encode_rgb16.
     let pixels: Vec<[u16; 3]> = img
         .pixels()
         .map(|p| {
             [
-                scale_from_u16(p.r, 10),
                 scale_from_u16(p.g, 10),
                 scale_from_u16(p.b, 10),
+                scale_from_u16(p.r, 10),
             ]
         })
         .collect();

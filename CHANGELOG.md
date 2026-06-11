@@ -10,6 +10,32 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Fixed (pixel corruption — issues #14 + #15, landed in lockstep)
+- **Identity (MC=0) decode**: identity-RGB AVIFs were decoded through BT.601
+  matrix math (`_ => Bt601` blind arms) — every pixel wrong (pure red came
+  back R=111 G=0 B=0). Identity now takes a no-matrix GBR passthrough
+  (8-bit + 10/12-bit, full + limited range; subsampled identity is rejected
+  per H.273). The strip fast-path routes identity to the full-conversion
+  path.
+- **16-bit encode plane order**: `encode_rgb16`/`encode_rgba16` fed
+  `[r,g,b]` plane tuples under identity signaling where the AV1 convention
+  (and zenravif's own 8-bit path) is **G,B,R** — every 16-bit encode was
+  channel-rotated for conforming decoders. Both bugs masked each other in
+  self-roundtrips; `tests/identity_roundtrip.rs` pins them together
+  (tolerance ≤2 documents zenrav1e#9: `with_lossless` is not bit-exact).
+- **H.273 matrix resolution** (`src/cicp_resolve.rs`, the consumer-side of
+  zenpixels#36's `Cicp::resolve_matrix` spec — migrates there when it
+  lands): unspecified/reserved MC resolves through the container `nclx`
+  matrix, else the documented AVIF-spec default (1/13/6) — never a silent
+  guess; MC=12 derives coefficients from the colour primaries (CP=9 → the
+  canonical BT.2020-NCL; P3 and friends decode **exactly** via the yuv
+  crate's custom-KR/KB path — `cosmos1650_yuv444_10bpc_p3pq` previously
+  decoded silently wrong through BT.601); MC=4 (FCC) now uses exact FCC
+  coefficients instead of a 601 approximation; genuinely unimplemented math
+  (YCgCo, BT.2020-CL, Y'D'zD'x, ICtCp, MC=13) errors loudly with the code
+  point named. 8-bit RGB conversions for matrices outside the in-house SIMD
+  tables (240M/FCC/derived) route through the yuv crate.
+
 ### Deprecated
 - `Av1Backend::Svtav1`. The `encode-svtav1` feature was never shipped
   (svtav1-rs produces non-conformant bitstreams in most configurations, and

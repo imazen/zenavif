@@ -8,23 +8,15 @@
 #![deny(unsafe_code)]
 
 use crate::error::{Error, Result};
-use rav1d_safe::src::managed::{
-    Decoder as Rav1dDecoder, Frame, MatrixCoefficients as Rav1dMatrixCoefficients, PixelLayout,
-    Planes, Settings,
-};
+use rav1d_safe::src::managed::{Decoder as Rav1dDecoder, Frame, PixelLayout, Planes, Settings};
 use rgb::Rgb;
 use whereat::at;
 use yuv::{YuvGrayImage, YuvPlanarImage, YuvRange, YuvStandardMatrix};
 
-/// Convert rav1d matrix coefficients to yuv crate's YuvStandardMatrix
-fn to_yuv_matrix(mc: Rav1dMatrixCoefficients) -> YuvStandardMatrix {
-    match mc {
-        Rav1dMatrixCoefficients::BT709 => YuvStandardMatrix::Bt709,
-        Rav1dMatrixCoefficients::BT601 => YuvStandardMatrix::Bt601,
-        Rav1dMatrixCoefficients::BT2020NCL => YuvStandardMatrix::Bt2020,
-        _ => YuvStandardMatrix::Bt601,
-    }
-}
+// The former blind `to_yuv_matrix` (`_ => Bt601`) is replaced by
+// `crate::cicp_resolve::resolve` — raw OBU streams carry no container,
+// so there is no nclx hint here; unspecified/unimplemented matrices
+// error honestly (imazen/zenavif#15).
 
 /// Decode a raw AV1 OBU bitstream to pixels.
 ///
@@ -84,12 +76,104 @@ pub fn decode_av1_obu(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u8)> {
     } else {
         YuvRange::Limited
     };
-    let matrix = to_yuv_matrix(color_info.matrix_coefficients);
-
+    let mc = color_info.matrix_coefficients as u8;
+    let cp = color_info.primaries as u8;
+    // Raw OBUs have no container; these streams come out of AVIF files
+    // (gain maps, auxiliaries), so the AVIF default disambiguates an
+    // unspecified MC exactly as it would for the embedding file.
+    let hint = Some(crate::cicp_resolve::AVIF_DEFAULT_MC);
     match layout {
-        PixelLayout::I400 => convert_monochrome(&frame, bit_depth, yuv_range, matrix),
-        _ => convert_to_rgb(&frame, bit_depth, yuv_range, matrix),
+        PixelLayout::I400 => {
+            // Monochrome has no chroma to matrix; any signaled MC is
+            // irrelevant to the gray plane. Use a placeholder.
+            convert_monochrome(&frame, bit_depth, yuv_range, YuvStandardMatrix::Bt601)
+        }
+        PixelLayout::I444
+            if matches!(
+                crate::cicp_resolve::resolve(mc, cp, hint),
+                Ok(crate::cicp_resolve::ResolvedMatrix::Identity)
+            ) =>
+        {
+            convert_identity_to_rgb(&frame, bit_depth, yuv_range)
+        }
+        _ => {
+            let resolved = crate::cicp_resolve::resolve(mc, cp, hint)?;
+            let matrix = resolved.to_yuv_std().ok_or_else(|| {
+                at!(Error::Unsupported(
+                    "identity (MC=0) requires 4:4:4 chroma; subsampled identity has no \
+                     defined reconstruction"
+                ))
+            })?;
+            convert_to_rgb(&frame, bit_depth, yuv_range, matrix)
+        }
     }
+}
+
+/// Identity (MC=0) conversion for raw OBU decode: planes are G,B,R —
+/// reorder + range expansion + (for 10/12-bit) downscale to 8-bit,
+/// matching this function family's 8-bit output contract.
+fn convert_identity_to_rgb(
+    frame: &Frame,
+    bit_depth: u8,
+    yuv_range: YuvRange,
+) -> Result<(Vec<u8>, u32, u32, u8)> {
+    let width = frame.width();
+    let height = frame.height();
+    let pixel_count = (width as usize)
+        .checked_mul(height as usize)
+        .ok_or_else(|| at!(Error::OutOfMemory))?;
+    let limited = matches!(yuv_range, YuvRange::Limited);
+    let mut out = vec![0u8; pixel_count * 3];
+
+    // Map a native-depth sample to full-range u8.
+    let to8 = |v: u32| -> u8 {
+        if limited {
+            let smin = 16u32 << (bit_depth - 8);
+            let span = 219u32 << (bit_depth - 8);
+            let c = v.saturating_sub(smin).min(span);
+            ((c * 255 + span / 2) / span) as u8
+        } else {
+            (v >> (bit_depth - 8)) as u8
+        }
+    };
+
+    macro_rules! reorder {
+        ($planes:expr) => {{
+            let g = $planes.y();
+            let b = $planes.u().ok_or_else(|| {
+                at!(Error::Decode {
+                    code: -1,
+                    msg: "identity content missing plane 1 (B)",
+                })
+            })?;
+            let r = $planes.v().ok_or_else(|| {
+                at!(Error::Decode {
+                    code: -1,
+                    msg: "identity content missing plane 2 (R)",
+                })
+            })?;
+            for (row_idx, ((g_row, b_row), r_row)) in g
+                .rows()
+                .zip(b.rows())
+                .zip(r.rows())
+                .enumerate()
+                .take(height as usize)
+            {
+                let out_row = &mut out[row_idx * width as usize * 3..][..width as usize * 3];
+                for x in 0..width as usize {
+                    out_row[x * 3] = to8(r_row[x] as u32);
+                    out_row[x * 3 + 1] = to8(g_row[x] as u32);
+                    out_row[x * 3 + 2] = to8(b_row[x] as u32);
+                }
+            }
+        }};
+    }
+    match frame.planes() {
+        Planes::Depth8(p) => reorder!(p),
+        Planes::Depth16(p) => reorder!(p),
+    }
+
+    Ok((out, width, height, 3))
 }
 
 /// Decode a single frame from AV1 OBU data, handling progressive/multi-layer

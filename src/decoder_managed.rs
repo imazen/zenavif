@@ -5,6 +5,7 @@
 
 #![deny(unsafe_code)]
 
+use crate::cicp_resolve::{self, ResolvedMatrix};
 use crate::config::DecoderConfig;
 use crate::convert::{add_alpha8, add_alpha16, downscale_to_8bit, scale_pixels_to_u16};
 use crate::error::{Error, Result};
@@ -67,30 +68,12 @@ fn convert_color_range(range: Rav1dColorRange) -> ColorRange {
     }
 }
 
-/// Convert zenavif MatrixCoefficients to yuv crate's YuvStandardMatrix
-fn to_yuv_matrix(mc: MatrixCoefficients) -> YuvStandardMatrix {
-    match mc {
-        MatrixCoefficients::BT709 => YuvStandardMatrix::Bt709,
-        MatrixCoefficients::BT601 | MatrixCoefficients::BT470BG | MatrixCoefficients::FCC => {
-            YuvStandardMatrix::Bt601
-        }
-        MatrixCoefficients::BT2020_NCL | MatrixCoefficients::BT2020_CL => YuvStandardMatrix::Bt2020,
-        MatrixCoefficients::SMPTE240 => YuvStandardMatrix::Smpte240,
-        _ => YuvStandardMatrix::Bt601,
-    }
-}
-
-/// Convert zenavif MatrixCoefficients to our YuvMatrix
-fn to_our_yuv_matrix(mc: MatrixCoefficients) -> OurYuvMatrix {
-    match mc {
-        MatrixCoefficients::BT709 => OurYuvMatrix::Bt709,
-        MatrixCoefficients::BT601 | MatrixCoefficients::BT470BG | MatrixCoefficients::FCC => {
-            OurYuvMatrix::Bt601
-        }
-        MatrixCoefficients::BT2020_NCL | MatrixCoefficients::BT2020_CL => OurYuvMatrix::Bt2020,
-        _ => OurYuvMatrix::Bt601, // Default to BT.601 for unknown
-    }
-}
+// The former `to_yuv_matrix` / `to_our_yuv_matrix` blind converters
+// (`_ => Bt601` on identity/CL/ICtCp/unspecified — silent chroma
+// corruption, imazen/zenavif#15) are replaced by
+// `crate::cicp_resolve::resolve`, which resolves H.273 code points
+// honestly (identity passthrough, hint for unspecified, derivation for
+// MC=12/13, loud errors for unimplemented math).
 
 /// Convert zenavif ColorRange to our YuvRange
 fn to_our_yuv_range(cr: ColorRange) -> OurYuvRange {
@@ -351,10 +334,14 @@ impl ManagedAvifDecoder {
         let display_width = info.width as usize;
         let display_height = info.height as usize;
 
+        let resolved = self.resolved_matrix_for(&info)?;
         let can_strip = bit_depth == 8
             && !matches!(chroma_sampling, ChromaSampling::Monochrome)
             && buffer_width == display_width
-            && buffer_height == display_height;
+            && buffer_height == display_height
+            // Identity (GBR reorder, no matrix) and SMPTE-240M (no
+            // in-house table) take the full-conversion path below.
+            && resolved.to_our().is_some();
 
         let converter = if can_strip {
             let alpha_range = alpha_frame
@@ -373,7 +360,9 @@ impl ManagedAvifDecoder {
                 alpha_frame,
                 chroma_sampling,
                 to_our_yuv_range(info.color_range),
-                to_our_yuv_matrix(info.matrix_coefficients),
+                resolved
+                    .to_our()
+                    .expect("can_strip guarantees an in-house matrix"),
                 alpha_range,
                 self.parser.premultiplied_alpha(),
                 display_width,
@@ -389,6 +378,38 @@ impl ManagedAvifDecoder {
         };
 
         Ok((converter, info))
+    }
+
+    /// Resolve the H.273 matrix for conversion, honestly.
+    ///
+    /// `info.matrix_coefficients` carries the *signaled* AV1-bitstream
+    /// code (kept raw for metadata passthrough); `info.color_primaries`
+    /// already carries the container-precedence effective primaries.
+    /// The container `nclx` matrix — discarded by the bitstream-
+    /// authoritative precedence — is consulted only as the hint for
+    /// MC=2/reserved, per the zenpixels#36 resolution contract.
+    fn resolved_matrix_for(&self, info: &ImageInfo) -> Result<ResolvedMatrix> {
+        // Hint chain for an unspecified/reserved bitstream MC, per the
+        // documented AVIF precedence ("container colr > AV1 bitstream >
+        // AVIF defaults 1/13/6"): a *valid* container `nclx` matrix
+        // first (its MC is otherwise discarded by the bitstream-
+        // authoritative precedence), else the AVIF-spec default —
+        // including when the nclx itself says MC=2, which the av1-avif
+        // guidance disambiguates to the defaults exactly like absent
+        // signaling (and which real ICC-centric writers emit). A spec
+        // default is documented disambiguation, not a guess; the
+        // honest-error class stays with genuinely unimplemented math
+        // (YCgCo/CL/ICtCp/underivable MC=12).
+        let hint = match self.parser.color_info() {
+            Some(zenavif_parse::ColorInformation::Nclx {
+                matrix_coefficients,
+                ..
+            }) if cicp_resolve::is_resolvable_hint(*matrix_coefficients as u8) => {
+                Some(*matrix_coefficients as u8)
+            }
+            _ => Some(cicp_resolve::AVIF_DEFAULT_MC),
+        };
+        cicp_resolve::resolve(info.matrix_coefficients.0, info.color_primaries.0, hint)
     }
 
     /// Build ImageInfo from a decoded primary frame and parser metadata.
@@ -918,9 +939,10 @@ impl ManagedAvifDecoder {
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         let info_clone = info.clone();
+        let resolved = self.resolved_matrix_for(&info)?;
         let mut pixels = match bit_depth {
-            8 => self.convert_8bit(primary, alpha, info, stop),
-            10 | 12 => self.convert_16bit(primary, alpha, info, stop),
+            8 => self.convert_8bit(primary, alpha, info, resolved, stop),
+            10 | 12 => self.convert_16bit(primary, alpha, info, resolved, stop),
             _ => Err(at!(Error::Decode {
                 code: -1,
                 msg: "Unsupported bit depth",
@@ -940,6 +962,7 @@ impl ManagedAvifDecoder {
         primary: Frame,
         alpha: Option<Frame>,
         info: ImageInfo,
+        resolved: ResolvedMatrix,
         stop: &(impl Stop + ?Sized),
     ) -> Result<PixelBuffer> {
         let Planes::Depth8(planes) = primary.planes() else {
@@ -958,7 +981,9 @@ impl ManagedAvifDecoder {
         let needs_crop = buffer_width != display_width || buffer_height != display_height;
         let has_alpha = alpha.is_some();
         let yuv_range = to_yuv_range(info.color_range);
-        let matrix = to_yuv_matrix(info.matrix_coefficients);
+        // Placeholder on the identity path: the identity converter never
+        // reads `ctx.matrix` (the branch below routes around it).
+        let matrix = resolved.to_yuv_std().unwrap_or(YuvStandardMatrix::Bt601);
         let buffer_pixel_count = buffer_width
             .checked_mul(buffer_height)
             .ok_or_else(|| at!(Error::OutOfMemory))?;
@@ -971,9 +996,18 @@ impl ManagedAvifDecoder {
             yuv_range,
             matrix,
         };
-        let mut image = match info.chroma_sampling {
-            ChromaSampling::Monochrome => convert_8bit_monochrome(&planes, ctx)?,
-            sampling => convert_8bit_planar(&planes, sampling, &info, ctx)?,
+        let mut image = match (info.chroma_sampling, resolved) {
+            (ChromaSampling::Monochrome, _) => convert_8bit_monochrome(&planes, ctx)?,
+            (ChromaSampling::Cs444, ResolvedMatrix::Identity) => {
+                convert_8bit_identity(&planes, ctx)?
+            }
+            (_, ResolvedMatrix::Identity) => {
+                return Err(at!(Error::Unsupported(
+                    "matrix_coefficients=0 (identity/GBR) requires 4:4:4 chroma; \
+                     subsampled identity has no defined reconstruction"
+                )));
+            }
+            (sampling, _) => convert_8bit_planar(&planes, sampling, &info, resolved, ctx)?,
         };
 
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
@@ -1013,6 +1047,7 @@ impl ManagedAvifDecoder {
         primary: Frame,
         alpha: Option<Frame>,
         info: ImageInfo,
+        resolved: ResolvedMatrix,
         stop: &(impl Stop + ?Sized),
     ) -> Result<PixelBuffer> {
         let Planes::Depth16(planes) = primary.planes() else {
@@ -1031,7 +1066,8 @@ impl ManagedAvifDecoder {
         let needs_crop = buffer_width != display_width || buffer_height != display_height;
         let has_alpha = alpha.is_some();
         let yuv_range = to_yuv_range(info.color_range);
-        let matrix = to_yuv_matrix(info.matrix_coefficients);
+        // Placeholder on the identity path (never read there).
+        let matrix = resolved.to_yuv_std().unwrap_or(YuvStandardMatrix::Bt601);
         let buffer_pixel_count = buffer_width
             .checked_mul(buffer_height)
             .ok_or_else(|| at!(Error::OutOfMemory))?;
@@ -1044,9 +1080,20 @@ impl ManagedAvifDecoder {
             yuv_range,
             matrix,
         };
-        let mut image = match info.chroma_sampling {
-            ChromaSampling::Monochrome => convert_16bit_monochrome(&planes, info.bit_depth, ctx)?,
-            sampling => convert_16bit_planar(&planes, sampling, info.bit_depth, ctx)?,
+        let mut image = match (info.chroma_sampling, resolved) {
+            (ChromaSampling::Monochrome, _) => {
+                convert_16bit_monochrome(&planes, info.bit_depth, ctx)?
+            }
+            (ChromaSampling::Cs444, ResolvedMatrix::Identity) => {
+                convert_16bit_identity(&planes, info.bit_depth, ctx)?
+            }
+            (_, ResolvedMatrix::Identity) => {
+                return Err(at!(Error::Unsupported(
+                    "matrix_coefficients=0 (identity/GBR) requires 4:4:4 chroma; \
+                     subsampled identity has no defined reconstruction"
+                )));
+            }
+            (sampling, _) => convert_16bit_planar(&planes, sampling, info.bit_depth, ctx)?,
         };
 
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
@@ -1532,10 +1579,146 @@ fn convert_8bit_monochrome(planes: &Planes8<'_>, ctx: ConvertCtx) -> Result<Pixe
 /// `has_alpha` selects RGBA (yuv crate bilinear/standard paths) vs RGB
 /// (our `yuv_convert` SIMD paths). `info` supplies `color_range` and
 /// `matrix_coefficients` for the RGB path.
+/// Identity (MC=0) 8-bit conversion: AV1 planes carry G,B,R — output is
+/// a reorder plus range expansion, no matrix math (H.273; the GBR
+/// convention zenravif's own `rgb_to_8_bit_gbr` writes). 4:4:4 only —
+/// callers guard. `ctx.matrix` is deliberately unread; alpha (when
+/// present) is attached by the caller afterwards, so this emits RGB(A)
+/// with a placeholder A like the planar paths do.
+fn convert_8bit_identity(planes: &Planes8<'_>, ctx: ConvertCtx) -> Result<PixelBuffer> {
+    let g_view = planes.y();
+    let b_view = planes.u().ok_or_else(|| {
+        at!(Error::Decode {
+            code: -1,
+            msg: "Identity content missing plane 1 (B)",
+        })
+    })?;
+    let r_view = planes.v().ok_or_else(|| {
+        at!(Error::Decode {
+            code: -1,
+            msg: "Identity content missing plane 2 (R)",
+        })
+    })?;
+
+    let (w, h) = (ctx.buffer_width, ctx.buffer_height);
+    let limited = matches!(ctx.yuv_range, YuvRange::Limited);
+    // Limited range on identity content uses the luma range (16–235)
+    // on all three planes (H.273 full-range flag semantics).
+    #[inline]
+    fn expand_limited(v: u8) -> u8 {
+        let c = u32::from(v.saturating_sub(16)).min(219);
+        ((c * 255 + 109) / 219) as u8
+    }
+    let map = |v: u8| if limited { expand_limited(v) } else { v };
+
+    let rows = g_view.rows().zip(b_view.rows()).zip(r_view.rows()).take(h);
+    if ctx.has_alpha {
+        let mut out: Vec<rgb::Rgba<u8>> = Vec::with_capacity(ctx.buffer_pixel_count);
+        for ((g_row, b_row), r_row) in rows {
+            for x in 0..w {
+                out.push(rgb::Rgba {
+                    r: map(r_row[x]),
+                    g: map(g_row[x]),
+                    b: map(b_row[x]),
+                    a: 255, // attached by the caller afterwards
+                });
+            }
+        }
+        PixelBuffer::from_pixels(out, w as u32, h as u32)
+            .map(Into::into)
+            .map_err(|_| at!(Error::OutOfMemory))
+    } else {
+        let mut out: Vec<Rgb<u8>> = Vec::with_capacity(ctx.buffer_pixel_count);
+        for ((g_row, b_row), r_row) in rows {
+            for x in 0..w {
+                out.push(Rgb {
+                    r: map(r_row[x]),
+                    g: map(g_row[x]),
+                    b: map(b_row[x]),
+                });
+            }
+        }
+        PixelBuffer::from_pixels(out, w as u32, h as u32)
+            .map(Into::into)
+            .map_err(|_| at!(Error::OutOfMemory))
+    }
+}
+
+/// Identity (MC=0) 10/12-bit conversion — see [`convert_8bit_identity`].
+/// Outputs native-bit-depth values; the caller's `scale_pixels_to_u16`
+/// expands to full u16 afterwards (same contract as the planar paths).
+fn convert_16bit_identity(
+    planes: &Planes16<'_>,
+    bit_depth: u8,
+    ctx: ConvertCtx,
+) -> Result<PixelBuffer> {
+    let g_view = planes.y();
+    let b_view = planes.u().ok_or_else(|| {
+        at!(Error::Decode {
+            code: -1,
+            msg: "Identity content missing plane 1 (B)",
+        })
+    })?;
+    let r_view = planes.v().ok_or_else(|| {
+        at!(Error::Decode {
+            code: -1,
+            msg: "Identity content missing plane 2 (R)",
+        })
+    })?;
+
+    let (w, h) = (ctx.buffer_width, ctx.buffer_height);
+    let limited = matches!(ctx.yuv_range, YuvRange::Limited);
+    let max = (1u32 << bit_depth) - 1;
+    // Studio range scaled by bit depth: min = 16<<(d-8), span = 219<<(d-8).
+    let smin = 16u32 << (bit_depth - 8);
+    let span = 219u32 << (bit_depth - 8);
+    let map = |v: u16| -> u16 {
+        if limited {
+            let c = u32::from(v).saturating_sub(smin).min(span);
+            ((c * max + span / 2) / span) as u16
+        } else {
+            v
+        }
+    };
+
+    let rows = g_view.rows().zip(b_view.rows()).zip(r_view.rows()).take(h);
+    if ctx.has_alpha {
+        let mut out: Vec<rgb::Rgba<u16>> = Vec::with_capacity(ctx.buffer_pixel_count);
+        for ((g_row, b_row), r_row) in rows {
+            for x in 0..w {
+                out.push(rgb::Rgba {
+                    r: map(r_row[x]),
+                    g: map(g_row[x]),
+                    b: map(b_row[x]),
+                    a: max as u16, // attached by the caller afterwards
+                });
+            }
+        }
+        PixelBuffer::from_pixels(out, w as u32, h as u32)
+            .map(Into::into)
+            .map_err(|_| at!(Error::OutOfMemory))
+    } else {
+        let mut out: Vec<Rgb<u16>> = Vec::with_capacity(ctx.buffer_pixel_count);
+        for ((g_row, b_row), r_row) in rows {
+            for x in 0..w {
+                out.push(Rgb {
+                    r: map(r_row[x]),
+                    g: map(g_row[x]),
+                    b: map(b_row[x]),
+                });
+            }
+        }
+        PixelBuffer::from_pixels(out, w as u32, h as u32)
+            .map(Into::into)
+            .map_err(|_| at!(Error::OutOfMemory))
+    }
+}
+
 fn convert_8bit_planar(
     planes: &Planes8<'_>,
     sampling: ChromaSampling,
     info: &ImageInfo,
+    resolved: ResolvedMatrix,
     ctx: ConvertCtx,
 ) -> Result<PixelBuffer> {
     let y_view = planes.y();
@@ -1566,13 +1749,52 @@ fn convert_8bit_planar(
 
     if ctx.has_alpha {
         convert_8bit_planar_rgba(&planar, sampling, ctx)
-    } else {
+    } else if let Some(our_matrix) = resolved.to_our() {
         let our_range = to_our_yuv_range(info.color_range);
-        let our_matrix = to_our_yuv_matrix(info.matrix_coefficients);
         convert_8bit_planar_rgb(
             &y_view, &u_view, &v_view, sampling, ctx, our_range, our_matrix,
         )
+    } else {
+        // Matrices outside the in-house tables (SMPTE-240M, FCC,
+        // chromaticity-derived custom KR/KB) decode exactly through the
+        // `yuv` crate. Identity never reaches here (guarded upstream).
+        convert_8bit_planar_rgb_yuvcrate(&planar, sampling, ctx)
     }
+}
+
+/// 8-bit planar YUV → RGB via the `yuv` crate — the fallback for
+/// matrices the in-house SIMD tables don't cover. Mirrors the RGBA
+/// arm's kernel choices (bilinear chroma for 4:2:0/4:2:2).
+fn convert_8bit_planar_rgb_yuvcrate(
+    planar: &YuvPlanarImage<'_, u8>,
+    sampling: ChromaSampling,
+    ctx: ConvertCtx,
+) -> Result<PixelBuffer> {
+    let (w, h) = ctx.dims();
+    let mut out = vec![Rgb { r: 0u8, g: 0, b: 0 }; ctx.buffer_pixel_count];
+    let rgb_stride = w * 3;
+    let out_bytes: &mut [u8] = rgb::bytemuck::cast_slice_mut(out.as_mut_slice());
+    match sampling {
+        ChromaSampling::Cs420 => {
+            yuv::yuv420_to_rgb_bilinear(planar, out_bytes, rgb_stride, ctx.yuv_range, ctx.matrix)
+        }
+        ChromaSampling::Cs422 => {
+            yuv::yuv422_to_rgb_bilinear(planar, out_bytes, rgb_stride, ctx.yuv_range, ctx.matrix)
+        }
+        ChromaSampling::Cs444 => {
+            yuv::yuv444_to_rgb(planar, out_bytes, rgb_stride, ctx.yuv_range, ctx.matrix)
+        }
+        ChromaSampling::Monochrome => {
+            return Err(at!(Error::Decode {
+                code: -1,
+                msg: "Monochrome should not reach chroma conversion",
+            }));
+        }
+    }
+    .map_err(|e| at!(Error::ColorConversion(e)))?;
+    PixelBuffer::from_pixels(out, w, h)
+        .map(Into::into)
+        .map_err(|_| at!(Error::OutOfMemory))
 }
 
 /// Decode 8-bit YUV planar to RGBA via the `yuv` crate.

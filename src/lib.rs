@@ -56,6 +56,7 @@ mod auto_tune;
 #[cfg(feature = "auto-tune")]
 pub use auto_tune::{AutoTuneError, AutoTuneOptions, QualityTarget};
 
+mod cicp_resolve;
 #[cfg(feature = "zencodec")]
 mod codec;
 mod config;
