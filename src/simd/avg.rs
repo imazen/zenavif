@@ -18,6 +18,11 @@ use archmage::{SimdToken, Wasm128Token, arcane};
 #[cfg(target_arch = "wasm32")]
 use core::arch::wasm32::*;
 
+#[cfg(target_arch = "aarch64")]
+use archmage::prelude::*;
+#[cfg(target_arch = "aarch64")]
+use archmage::{NeonToken, SimdToken, arcane};
+
 /// Rounding constant for pmulhrsw: 1024 = (1 << 10)
 /// pmulhrsw computes: (a * b + 16384) >> 15
 /// With b=1024: (a * 1024 + 16384) >> 15 ≈ (a + 1) >> 1 (with rounding)
@@ -189,6 +194,76 @@ pub fn avg_8bpc_wasm128(
     }
 }
 
+/// AVG operation using NEON — processes 16 pixels at a time
+///
+/// `vqrdmulhq_s16(a, b)` computes `saturate((2*a*b + 0x8000) >> 16)`,
+/// which equals pmulhrsw's `(a*b + 0x4000) >> 15` bit-for-bit; the
+/// saturating corner (`a*b == 2^30`) is unreachable with `b = 1024`.
+#[cfg(target_arch = "aarch64")]
+#[arcane]
+pub fn avg_8bpc_neon(
+    _token: NeonToken,
+    dst: &mut [u8],
+    dst_stride: usize,
+    tmp1: &[i16],
+    tmp2: &[i16],
+    w: usize,
+    h: usize,
+) {
+    debug_assert!(tmp1.len() >= w * h, "tmp1 too small");
+    debug_assert!(tmp2.len() >= w * h, "tmp2 too small");
+    debug_assert!(dst.len() >= (h - 1) * dst_stride + w, "dst too small");
+
+    let pw_1024 = vdupq_n_s16(PW_1024);
+
+    for row in 0..h {
+        let tmp1_row = &tmp1[row * w..][..w];
+        let tmp2_row = &tmp2[row * w..][..w];
+        let dst_row = &mut dst[row * dst_stride..][..w];
+
+        let mut col = 0;
+        // 16 pixels per iteration: two 8-lane i16 vectors in, one
+        // 16-byte u8 vector out.
+        while col + 16 <= w {
+            let t1_lo: &[i16; 8] = tmp1_row[col..col + 8].try_into().unwrap();
+            let t1_hi: &[i16; 8] = tmp1_row[col + 8..col + 16].try_into().unwrap();
+            let t2_lo: &[i16; 8] = tmp2_row[col..col + 8].try_into().unwrap();
+            let t2_hi: &[i16; 8] = tmp2_row[col + 8..col + 16].try_into().unwrap();
+
+            let a0 = vld1q_s16(t1_lo);
+            let a1 = vld1q_s16(t1_hi);
+            let b0 = vld1q_s16(t2_lo);
+            let b1 = vld1q_s16(t2_hi);
+
+            // sum = tmp1 + tmp2 (wrapping, like paddw)
+            let s0 = vaddq_s16(a0, b0);
+            let s1 = vaddq_s16(a1, b1);
+
+            // (sum * 1024 + 16384) >> 15
+            let m0 = vqrdmulhq_s16(s0, pw_1024);
+            let m1 = vqrdmulhq_s16(s1, pw_1024);
+
+            // Saturating narrow i16 -> u8 (clamps to [0, 255])
+            let lo = vqmovun_s16(m0);
+            let hi = vqmovun_s16(m1);
+            let packed = vcombine_u8(lo, hi);
+
+            let dst_arr: &mut [u8; 16] = (&mut dst_row[col..col + 16]).try_into().unwrap();
+            vst1q_u8(dst_arr, packed);
+
+            col += 16;
+        }
+
+        // Scalar tail
+        while col < w {
+            let sum = tmp1_row[col].wrapping_add(tmp2_row[col]);
+            let avg = ((sum as i32 * 1024 + 16384) >> 15).clamp(0, 255) as u8;
+            dst_row[col] = avg;
+            col += 1;
+        }
+    }
+}
+
 /// Scalar fallback for AVG operation (for testing and non-AVX2 systems)
 pub fn avg_8bpc_scalar(
     dst: &mut [u8],
@@ -221,6 +296,12 @@ pub fn avg_8bpc(dst: &mut [u8], dst_stride: usize, tmp1: &[i16], tmp2: &[i16], w
     #[cfg(target_arch = "x86_64")]
     if let Some(token) = Desktop64::summon() {
         avg_8bpc_avx2(token, dst, dst_stride, tmp1, tmp2, w, h);
+        return;
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    if let Some(token) = NeonToken::summon() {
+        avg_8bpc_neon(token, dst, dst_stride, tmp1, tmp2, w, h);
         return;
     }
 
@@ -329,6 +410,43 @@ mod tests {
             dst_avx2, dst_scalar,
             "Results differ for varying data pattern"
         );
+    }
+
+    /// Direct NEON-vs-scalar parity — fails loudly if the token is
+    /// unavailable so qemu/cross runs can't silently test scalar-only.
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn test_avg_neon_direct_matches_scalar() {
+        let token = NeonToken::summon().expect("NEON must be available on aarch64");
+        let w = 48; // 3x16 SIMD iterations + no tail, plus a 7-px-tail case below
+        let h = 3;
+        let tmp1: Vec<i16> = (0..w * h)
+            .map(|i| ((i * 37) as i16).wrapping_mul(13))
+            .collect();
+        let tmp2: Vec<i16> = (0..w * h)
+            .map(|i| ((i * 73 + 991) as i16).wrapping_mul(7))
+            .collect();
+        let mut dst_neon = vec![0u8; w * h];
+        let mut dst_scalar = vec![0u8; w * h];
+        avg_8bpc_neon(token, &mut dst_neon, w, &tmp1, &tmp2, w, h);
+        avg_8bpc_scalar(&mut dst_scalar, w, &tmp1, &tmp2, w, h);
+        assert_eq!(dst_neon, dst_scalar);
+
+        // Width with a scalar tail (23 = 16 + 7)
+        let w = 23;
+        let mut dst_neon = vec![0u8; w * h];
+        let mut dst_scalar = vec![0u8; w * h];
+        avg_8bpc_neon(
+            token,
+            &mut dst_neon,
+            w,
+            &tmp1[..w * h],
+            &tmp2[..w * h],
+            w,
+            h,
+        );
+        avg_8bpc_scalar(&mut dst_scalar, w, &tmp1[..w * h], &tmp2[..w * h], w, h);
+        assert_eq!(dst_neon, dst_scalar);
     }
 
     /// Test that the rounding is correct

@@ -10,6 +10,19 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Added (SIMD platform parity — issue #2)
+- **NEON bilinear AVG** (`src/simd/avg.rs`): 16 pixels/iteration via
+  `vqrdmulhq_s16` (bit-exact pmulhrsw for the 1024 multiplier — the
+  saturating corner is unreachable), wired into the runtime dispatch.
+  Parity vs scalar verified under qemu (`cross test
+  --target aarch64-unknown-linux-gnu`), including non-multiple-of-16
+  tails and a loud failure if the NEON token can't summon. Closes the
+  one production-relevant gap from the cross-platform audit: the
+  remaining table rows (`yuv_convert_fast`, `yuv_convert_libyuv_simd`)
+  are `_dev`/benchmark-only modules with no production call sites — the
+  production YUV strip/full converters in `yuv_convert.rs` already
+  cover wasm32 via `#[magetypes]` (v3/neon/wasm128).
+
 ### Investigated + fixed upstream (lossless speed inversion — issue #8)
 - Root cause found and fixed in zenrav1e (c3567081, closes zenrav1e#9):
   "lossless" never reached qindex 0 — the rate path floored it at 1, so
