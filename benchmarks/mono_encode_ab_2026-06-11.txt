@@ -1,0 +1,17 @@
+# mono encode A/B — imazen/zenavif#6 verification
+# date: 2026-06-11  host: lilith  zenavif-serialize commit: 938a071
+# cmd: cargo run --release --example make_mono_avif (zenavif-serialize); pure zenrav1e, q60 speed6 still_picture 1 thread
+size A/B 96x64 (q60 s6 still, 1 thread): Cs400 = 174 B 8ms | Cs420 = 180 B (+3.4%) 13ms | Cs444 = 179 B (+2.9%) 16ms
+size A/B 512x512 (q60 s6 still, 1 thread): Cs400 = 3776 B 320ms | Cs420 = 3798 B (+0.6%) 479ms | Cs444 = 3797 B (+0.6%) 634ms
+size A/B 1024x1024 (q60 s6 still, 1 thread): Cs400 = 15952 B 1s | Cs420 = 15837 B (-0.7%) 2s | Cs444 = 16002 B (+0.3%) 3s
+size A/B 2048x2048 (q60 s6 still, 1 thread): Cs400 = 57085 B 5s | Cs420 = 57047 B (-0.1%) 7s | Cs444 = 57052 B (-0.1%) 10s
+
+# zenavif current gray-as-RGB path (defaults: quality 83.2 speed 6; NOT settings-matched to above — QM etc. differ):
+96x64 gray-as-RGB (444): 608 bytes | decoded channel spread: max 0 on 0.0% of pixels
+96x64 gray-as-RGB (420): 608 bytes | decoded channel spread: max 0 on 0.0% of pixels
+512x512 gray-as-RGB (444): 13565 bytes | decoded channel spread: max 0 on 0.0% of pixels
+512x512 gray-as-RGB (420): 13566 bytes | decoded channel spread: max 0 on 0.0% of pixels
+1024x1024 gray-as-RGB (444): 50568 bytes | decoded channel spread: max 0 on 0.0% of pixels
+1024x1024 gray-as-RGB (420): 50568 bytes | decoded channel spread: max 0 on 0.0% of pixels
+2048x2048 gray-as-RGB (444): 196659 bytes | decoded channel spread: max 0 on 0.0% of pixels
+2048x2048 gray-as-RGB (420): 196659 bytes | decoded channel spread: max 0 on 0.0% of pixels
