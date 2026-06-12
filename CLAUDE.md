@@ -76,12 +76,17 @@ just test-encode  # cargo test --features encode
 
 ## Known Bugs
 
-### zenrav1e lossless is not bit-exact (zenrav1e#9)
-`with_lossless(true)` produces ±2 scatter on ~28 % of pixels (noise,
-speed 6, 8-bit, identity 4:4:4 full-range — measured via the identity
-passthrough, so the AV1 roundtrip is the only transform). The identity
-roundtrip tests carry a documented ≤2 tolerance until fixed; likely
-related to #8 (lossless speed inversion).
+### zenrav1e lossless ±2 — FIXED upstream, release-gated
+Root cause found and fixed 2026-06-11 (zenrav1e c3567081, zenrav1e#9
+closed): "lossless" never reached qindex 0 — the rate path floored it
+at 1, so every lossless encode was qi=1 lossy. The same fix resolves
+the zenavif#8 size-vs-speed inversion (validated bit-exact + monotonic
+via path-patch; `benchmarks/lossless_speed_sweep_fixed_2026-06-11.tsv`).
+**Until zenrav1e 0.1.5 releases and the zenravif → zenavif dep chain
+bumps**, registry builds still ship the broken behavior: the identity
+roundtrip tests keep their documented ≤2 tolerance and zenavif#8 stays
+open. At the dep bump: tighten `tests/identity_roundtrip.rs` to exact,
+re-run `examples/lossless_speed_sweep.rs`, close #8.
 
 
 ### rav1d-safe Threading Race Condition (RESOLVED)
