@@ -2736,15 +2736,17 @@ fn color_context_for_layout(
     layout: zenpixels::ChannelLayout,
 ) -> Option<Arc<zenpixels::ColorContext>> {
     let mut ctx = source_color.to_color_context();
-    if let Some(icc) = &ctx.icc
-        && !icc_class_matches_layout(icc, layout)
+    if let Some(icc) = ctx
+        .icc
+        .take_if(|icc| !icc_class_matches_layout(icc, layout))
     {
-        ctx.icc = None;
-        if ctx.cicp.is_none() {
-            // The authority drop-dupe removed the CICP in favor of
-            // the (now-stripped) ICC; restore it as the fallback.
-            ctx.cicp = source_color.cicp;
-        }
+        // Class mismatch: the profile cannot ride this layout. Its
+        // DERIVED CICP is the authoritative description (the profile
+        // outranked the signaled nclx per MIAF), so prefer it over both
+        // the drop-dupe survivor and the signaled fallback.
+        ctx.cicp = derived_cicp_from_icc(&icc)
+            .or(ctx.cicp)
+            .or(source_color.cicp);
     }
     if ctx.icc.is_none() && ctx.cicp.is_none() {
         return None;
@@ -2772,16 +2774,33 @@ fn native_source_color(native: &crate::image::ImageInfo) -> zencodec::decode::So
     sc
 }
 
-/// Native-gray opt-in is declined when the file carries an ICC profile
-/// that cannot ride a Gray buffer (RGB-class or unclassifiable): the
-/// profile is the most accurate color description present, so keep the
-/// RGB layout it validly describes instead of stripping it. A gray
-/// preference then resolves through the load-bearing reduction, whose
-/// ICC rules swap or honestly suppress per-profile.
+/// Derive an ICC profile's CICP description: an explicit embedded
+/// `cICP` tag first, then normalized-hash identification of well-known
+/// profiles. This is the same chain zenpixels-convert's load-bearing
+/// reduction uses to decide whether a gray collapse keeps accurate
+/// color signaling.
+fn derived_cicp_from_icc(icc: &[u8]) -> Option<zencodec::Cicp> {
+    zenpixels::icc::extract_cicp(icc)
+        .or_else(|| zenpixels::icc::identify_common(icc).and_then(|id| id.to_cicp()))
+}
+
+/// Whether native-gray output keeps accurate color for this file.
+///
+/// Gray files carrying RGB-class ICC profiles are common in the wild.
+/// When the profile's CICP is derivable, native gray is fine: the gray
+/// pixels get a CICP-only context (white point + transfer remain fully
+/// meaningful for single-channel data), so there is no need to expand
+/// to RGB just to honor the profile. Only an underivable RGB-class (or
+/// unclassifiable) profile declines native gray — the profile is then
+/// the sole accurate description and must stay on a layout it
+/// describes; a gray preference resolves through the load-bearing
+/// reduction's ICC rules instead.
 fn icc_allows_native_gray(native: &crate::image::ImageInfo) -> bool {
     match &native.icc_profile {
         None => true,
-        Some(icc) => icc.len() >= 132 && &icc[16..20] == b"GRAY",
+        Some(icc) => {
+            (icc.len() >= 132 && &icc[16..20] == b"GRAY") || derived_cicp_from_icc(icc).is_some()
+        }
     }
 }
 

@@ -208,6 +208,34 @@ fn mono_with_rgb_class_icc_stays_rgb() {
     );
 }
 
+/// Mono file with a REAL, identifiable RGB-class profile (Display P3 —
+/// the common in-the-wild pairing): native gray proceeds, the profile's
+/// CICP is derived (P3-D65 primaries + sRGB transfer — white point and
+/// transfer remain fully meaningful for single-channel data), and the
+/// gray buffer gets a CICP-only context. No RGB expansion needed to
+/// honor the profile.
+#[test]
+fn mono_with_derivable_rgb_icc_decodes_native_gray_with_cicp() {
+    let data = std::fs::read("tests/vectors/zenavif/mono_gradient_8b_p3icc.avif").expect("fixture");
+    let out = decode_pref(&data, &[]);
+    let p = out.pixels();
+    assert_eq!(
+        p.descriptor().pixel_format(),
+        PixelFormat::Gray8,
+        "derivable RGB profile must not force RGB expansion"
+    );
+    let ctx = p.color_context().expect("ctx");
+    assert!(ctx.icc.is_none(), "RGB-class bytes never ride gray pixels");
+    let cicp = ctx.cicp.expect("derived CICP rides the gray buffer");
+    assert_eq!(
+        (cicp.color_primaries, cicp.transfer_characteristics),
+        (12, 13),
+        "Display P3 identification: P3-D65 primaries + sRGB transfer"
+    );
+    // The source profile stays available for provenance on the info.
+    assert!(out.info().source_color.icc_profile.is_some());
+}
+
 /// Mono file with a MIAF-correct GRAY-class ICC: native gray proceeds
 /// and the profile rides the gray buffer.
 #[test]

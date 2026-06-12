@@ -38,6 +38,20 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   reaches zenavif when zenrav1e 0.1.5 releases and zenravif bumps;
   `tests/identity_roundtrip.rs` tolerances then tighten to exact.
 
+### Changed (gray + RGB-ICC refinement)
+- **Derivable RGB-class profiles no longer block native gray.** Gray
+  files carrying RGB ICC profiles are common in the wild; when the
+  profile's CICP is derivable (embedded `cICP` tag or normalized-hash
+  identification — the same chain the load-bearing reduction uses), the
+  decoder emits native Gray8/Gray16 with a **CICP-only context** (white
+  point + transfer remain fully meaningful for single-channel data, per
+  moxcms guidance) instead of expanding to RGB just to honor the
+  profile. Only underivable RGB-class profiles keep the RGB layout. The
+  class-gate fallback now also prefers the profile-DERIVED CICP over the
+  signaled nclx (the profile outranked it per MIAF). New fixture:
+  `mono_gradient_8b_p3icc.avif` (real Display P3 profile → gray + CICP
+  (12, 13)).
+
 ### Changed (devil's-advocate follow-ups on self-describing buffers)
 - **Streaming strips now carry the context** — the "known gap" was a
   plain drop bug: every emission path copies rows into a per-batch
