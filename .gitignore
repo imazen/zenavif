@@ -1,12 +1,20 @@
 /debug_simd
 
 # Test vectors (large binary files - download with scripts/download-avif-test-vectors.sh)
-tests/vectors/
+tests/vectors/*
 *.avif
 *.ivf
 *.obu
 # But keep the download script
 !scripts/download-avif-test-vectors.sh
+# Committed CI fixtures (~28 KB total): the tiny generated mono vectors plus
+# the one libavif vector the fail-loud tests read. Everything else under
+# tests/vectors/ stays download-only.
+!tests/vectors/zenavif/
+!tests/vectors/zenavif/*.avif
+!tests/vectors/libavif/
+tests/vectors/libavif/*
+!tests/vectors/libavif/kodim03_yuv420_8bpc.avif
 tests/zenavif-references/
 tests/linku-references/
 
