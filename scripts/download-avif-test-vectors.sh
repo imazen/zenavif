@@ -7,8 +7,10 @@ mkdir -p "$VECTORS_DIR"
 echo "Downloading AVIF test vectors..."
 
 # 1. libavif (most comprehensive)
+# Guard on a large known vector, not the directory: a handful of tiny
+# vectors are committed to git, so the directory always exists.
 echo "1/3 Downloading libavif tests..."
-if [ ! -d "$VECTORS_DIR/libavif" ]; then
+if [ ! -f "$VECTORS_DIR/libavif/seine_sdr_gainmap_srgb.avif" ]; then
     mkdir -p "$VECTORS_DIR/libavif"
     git clone --depth=1 https://github.com/AOMediaCodec/libavif.git /tmp/libavif-tests
     find /tmp/libavif-tests/tests -name "*.avif" -exec cp {} "$VECTORS_DIR/libavif/" \; 2>/dev/null || true

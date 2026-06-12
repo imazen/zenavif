@@ -27,6 +27,18 @@ jobs:
       - uses: ./.github/actions/clone-siblings
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # Some integration tests read libavif vectors fail-loud; the larger
+      # ones live outside git, so provision them here (cached per OS).
+      - name: Cache test vectors
+        id: vectors-cache
+        uses: actions/cache@v5
+        with:
+          path: tests/vectors
+          key: avif-test-vectors-${{ hashFiles('scripts/download-avif-test-vectors.sh') }}
+      - name: Download test vectors
+        if: steps.vectors-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: bash scripts/download-avif-test-vectors.sh
       - name: Test (default features)
         run: cargo test
       - name: Test (no default features)
