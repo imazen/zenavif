@@ -220,4 +220,17 @@ fn main() {
         std::fs::write(&path, &avif).expect("write fixture");
         println!("{path}: {} bytes (96x64 mono + {} ICC)", avif.len(), name);
     }
+
+    // Mono + a REAL, identifiable RGB-class profile (Display P3): gray
+    // files carrying RGB profiles are common in the wild, and the
+    // profile's CICP is derivable (normalized-hash identification), so
+    // decoders can emit native gray with an accurate CICP-only context
+    // instead of expanding to RGB just to honor the profile.
+    let avif = zenavif_serialize::Aviffy::new()
+        .set_monochrome(true)
+        .set_icc_profile(zenpixels_convert::icc_profiles::DISPLAY_P3_V4.to_vec())
+        .to_vec(&av1, None, 96, 64, 8);
+    let path = format!("{dir}/mono_gradient_8b_p3icc.avif");
+    std::fs::write(&path, &avif).expect("write fixture");
+    println!("{path}: {} bytes (96x64 mono + Display P3 ICC)", avif.len());
 }
