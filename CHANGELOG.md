@@ -10,6 +10,24 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Added (sweep planner — dense-sweep program)
+- **SCALAR ladder densification** for `zenpicker-train --scalar-axes` heads
+  (zenmetrics `docs/PLAN_SWEEPS.md` §5 gaps): seg_boost probes
+  {0.75, 1.5, 2.5, 4.0} (de-boost direction + validate endpoint) and
+  vaq_strength probes {0.25, 2.0, 3.0} (+ the 0.5 vaq-axis stratum). New
+  values ride the existing `-sb<f>`/`-vaqs<f>` id grammar and resolved-state
+  fingerprint. Direct quantizer (qp) axis documented as **blocked on encoder
+  knob** (no public quantizer setter in zenavif/zenravif; the resolved
+  quantizer is already the picker mediator via `feature_row`).
+- **Still-envelope equivalence finding (proven by encode, 28/28 × 3 pairs)**:
+  `vaq_strength(x)` ≡ `seg_boost(x)` byte-identically on still encodes (both
+  are the same log-domain exponent on the `spatiotemporal_scores` →
+  `segmentation_scores` chain; zenrav1e `internal.rs:1379`). Curated ladders
+  interleave values so the joint 8-point effective ladder is alias-free,
+  with a test guarding disjointness; the fingerprint deliberately
+  under-merges the spellings (animated/inter encodes may diverge). See
+  `docs/VARIANT_GENERATION.md`.
+
 ### Added (SIMD platform parity — issue #2)
 - **NEON bilinear AVG** (`src/simd/avg.rs`): 16 pixels/iteration via
   `vqrdmulhq_s16` (bit-exact pmulhrsw for the 1024 multiplier — the

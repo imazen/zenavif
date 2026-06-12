@@ -105,6 +105,42 @@ incomplete until an encode voted:
    table; `KnobProbe::LruOnSkip` remains for explicit speed ≤ 1 sweeps
    (the only region where the preset enables it).
 
+## Still-envelope equivalence: vaq_strength(x) ≡ seg_boost(x) (2026-06-12)
+
+A third knob-lie instance, caught while densifying the scalar ladders
+for the dense-sweep program: **`vaq_strength` and `seg_boost` are the
+same dial on still-image encodes.** The first draft of the dense
+ladders curated overlapping values (`VaqStrength(1.5)` next to the
+established `SegBoost(1.5)`, `VaqStrength(4.0)` next to
+`SegBoost(4.0)`), and the harness TSV showed each pair byte-identical
+on every image × quality — 28/28 per pair, including
+`SegBoost(0.5)` ≡ the vaq-axis `Some(0.5)` stratum.
+
+Mechanism (zenrav1e `api/internal.rs:1379` →
+`encoder.rs::{apply_vaq_strength, compute_segmentation_scores}`): VAQ
+raises `spatiotemporal_scores` to the power `strength`; segmentation
+then raises those scores to the power `boost`. On intra-only frames
+the only byte-affecting consumer of `spatiotemporal_scores` is
+`segmentation_scores`, so the bitstream sees only the product
+`strength × boost` of the log-domain exponents — `vaq(x)` and
+`seg_boost(x)` are indistinguishable, and a vaq-axis stratum combined
+with a seg_boost probe acts at `s·b`.
+
+Resolution, per the fingerprint discipline:
+
+- the **fingerprint deliberately under-merges** the two spellings
+  (it is config-only, and animated/inter encodes have a second
+  `spatiotemporal_scores` consumer — frame-importance RDO — where the
+  knobs genuinely diverge);
+- the **curated ladders interleave values instead of duplicating**:
+  vaq {0.25, 0.5 (axis), 2.0, 3.0} × seg_boost {0.75, 1.5, 2.5, 4.0}
+  — a joint 8-point effective ladder
+  {0.25, 0.5, 0.75, 1.5, 2.0, 2.5, 3.0, 4.0} with zero duplicate
+  encodes, enforced by the
+  `scalar_ladders_dense_distinct_and_roundtrip` disjointness guard;
+- picker training reads both columns from `feature_row` and can learn
+  the product structure on still corpora.
+
 ## The zenravif mirror problem
 
 zenjpeg's pattern 3 ("introspection calls the same function") cannot

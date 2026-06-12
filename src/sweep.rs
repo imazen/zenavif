@@ -49,12 +49,13 @@
 //! | qm | on/off | true, false | ~10 % BD-rate win measured on 63-image CID22 stills (ravif 7265eea benchmarks; default on) |
 //! | subsampling | 444/420 | Yuv444, Yuv420 | the classic AVIF rate knob (~25–35 % on photos); previously unsweepable — zenavif only exposed 4:4:4 before this module landed |
 //! | bit_depth | 8/10 | Auto(→8 for RGB8 corpora), Ten | zenravif docs recommend 10-bit even for 8-bit input; sweep measures the claim |
-//! | vaq strength | 0.0–4.0, **1.0 = structural no-op** | Some(0.5) (axis), 2.0 (probe) | bound = zenravif validate range. Strength 1.0 is byte-identical to VAQ off under the psychovisual/still tunes (zenrav1e `api/internal.rs:1379`; the harness's first run caught the 1.0 axis value as an inert step across 24 encodes — the axis is `Option<f64>` now so the no-op spelling can't be curated by accident). Prior finding "VAQ hurts stills" (CLAUDE.md, ravif 7265eea) — steps exist to quantify, not to endorse |
-//! | seg_boost | 0.5–4.0 | 1.5, 2.5 | bound = zenravif validate range (1.0 = off). Steps unmeasured before this module; validated for liveness (not goodness) by `sweep_validate` |
+//! | vaq strength (SCALAR) | 0.0–4.0, **1.0 = structural no-op** | Some(0.5) (axis); probes 2.0, 3.0, 0.25 | bound = zenravif validate range. Strength 1.0 is byte-identical to VAQ off under the psychovisual/still tunes (zenrav1e `api/internal.rs:1379`; the harness's first run caught the 1.0 axis value as an inert step across 24 encodes — the axis is `Option<f64>` now so the no-op spelling can't be curated by accident). Prior finding "VAQ hurts stills" (CLAUDE.md, ravif 7265eea) — steps exist to quantify, not to endorse. 0.0 stays out pending a semantics check (untested extreme of the rescale curve). **Still-envelope equivalence**: see the seg_boost row — values interleave with seg_boost's so the joint effective ladder {0.25, 0.5, 0.75, 1.5, 2.0, 2.5, 3.0, 4.0} is alias-free |
+//! | seg_boost (SCALAR) | 0.5–4.0 | 1.5, 2.5, 0.75, 4.0 | bound = zenravif validate range (1.0 = off). 1.5/2.5 validated live by `sweep_validate` 2026-06-10; 0.75 (de-boost direction) + 4.0 (validate endpoint) added 2026-06-12 (dense-sweep program). **Still-envelope equivalence (proven by encode 2026-06-12, 28/28 cells × 3 value pairs)**: `seg_boost(x)` is byte-identical to `vaq_strength(x)` at equal x on still encodes — on intra-only frames the only byte-affecting consumer of `spatiotemporal_scores` is `segmentation_scores`, and both knobs are the same log-domain exponent on that chain (zenrav1e `internal.rs:1379` applies vaq^s to spatiotemporal, then seg = spatiotemporal^boost). The fingerprint deliberately under-merges the spellings (config-only; animated/inter encodes may diverge); the curated ladders interleave values instead so no two curated cells alias |
 //! | trellis | on/off | off, on | zenrav1e Viterbi DP; default off in zenravif |
 //! | deep-knob probes | see [`KnobProbe`] | one axis, single-deviation by construction | each probe flips one preset-derived setting both ways; fingerprint dedup removes the spellings that equal the preset |
 //! | lru_on_skip | on/off | **not curated** | byte-inert on still-image encodes at speeds 2–8 across photos/noise/checker/gradient/flat-logo, q10–q85 (28/28 comparisons, `sweep_validate` 2026-06-10). The search-on-skip-LRUs path resolves to the same restoration decisions on intra-only content; the preset only enables it at speed ≤ 1, outside the curated speed set. [`KnobProbe::LruOnSkip`] remains available for explicit speed ≤ 1 sweeps |
 //! | lossless | on/off | **not curated** | a different product mode (quantizer pinned 0, QM force-off), not a point on the lossy RD curve a picker optimizes over; sweep it as its own dedicated run if needed |
+//! | quantizer (direct qp) | 0–255 | **axis blocked on encoder knob** | quality is the only public rate dial: neither zenavif's `EncoderConfig` nor zenravif exposes a direct-quantizer setter (`quality_to_quantizer` is internal mediation; zenravif `av1encoder.rs` has `with_quality`/`with_alpha_quality` only). Plans cannot pin qp until zenravif grows a `with_quantizer`-class `__expert` knob. The **resolved** quantizer is already the trained-on mediator via [`SweepCell::feature_row`] (`quantizer`/`alpha_quantizer` columns), so pickers see it today |
 //! | alpha_quality delta | result clamps to 1–100 | ±25, [`modes_full_alpha`](SweepAxes::modes_full_alpha) only | expressed as a **delta against the grid q** to dodge the absolute-value-vs-moving-grid trap (zenjpeg's `chroma_quality` lesson); ±25 probes both the "alpha cheaper" and "alpha cleaner" directions. Validated live on alpha content / byte-inert on RGB by the harness's RGBA leg, 2026-06-11 |
 //! | alpha_color_mode | Clean/Dirty/Premultiplied | Dirty, Premultiplied probes ([`modes_full_alpha`](SweepAxes::modes_full_alpha) only) | pixel-changing on alpha content (Clean rewrites color under transparency; Premultiplied rescales). Validated live on alpha content by the harness's RGBA leg, 2026-06-11 |
 //!
@@ -321,6 +322,26 @@ impl SweepAxes {
             KnobProbe::Lrf(false),
             KnobProbe::FastDeblock(true),
             KnobProbe::FastDeblock(false),
+            // SCALAR ladder densification (dense-sweep program,
+            // 2026-06-12) — appended after the established probe set so
+            // the budget ladder (tail-shed) drops the newest values
+            // first. The values interleave with the established steps
+            // to keep the EFFECTIVE still-image dial alias-free:
+            // vaq_strength(x) and seg_boost(x) are byte-identical at
+            // equal x on still encodes (both reduce to the same
+            // log-domain exponent on spatiotemporal_scores →
+            // segmentation_scores; zenrav1e internal.rs:1379 +
+            // encoder.rs apply_vaq_strength/compute_segmentation_scores
+            // — proven 28/28 by the 2026-06-12 harness on three value
+            // pairs), so the union ladder {0.25, 0.5v, 0.75s, 1.5s,
+            // 2.0v, 2.5s, 3.0v, 4.0s} covers 8 distinct effective
+            // values with zero duplicate encodes. Bounds + exclusions
+            // (vaq 1.0 no-op, vaq 0.0 pending semantics) in the
+            // module-docs provenance table.
+            KnobProbe::VaqStrength(3.0),
+            KnobProbe::SegBoost(0.75),
+            KnobProbe::VaqStrength(0.25),
+            KnobProbe::SegBoost(4.0),
         ];
         axes
     }
@@ -1455,6 +1476,92 @@ mod tests {
         // A strength with effect must not alias.
         let live = base.build_config(50.0).with_vaq(true, 0.5);
         assert_ne!(fingerprint(&a), fingerprint(&live));
+    }
+
+    #[test]
+    fn scalar_ladders_dense_distinct_and_roundtrip() {
+        // Dense-sweep program contract: the curated scalar ladders for
+        // seg_boost and vaq_strength stay dense (>= 4-6 distinct values
+        // per axis, both directions around the neutral point), every
+        // value yields a distinct fingerprint at a fixed stratum (dedup
+        // must not over-merge distinct scalar values), and each cell id
+        // parses back fingerprint-identical (the resolve_verified
+        // contract for arbitrary scalar values, not just registry
+        // presets).
+        let axes = SweepAxes::modes_full();
+        let mut sb: Vec<f64> = axes
+            .probes
+            .iter()
+            .filter_map(|p| match p {
+                KnobProbe::SegBoost(v) => Some(*v),
+                _ => None,
+            })
+            .collect();
+        sb.sort_by(f64::total_cmp);
+        assert_eq!(sb, vec![0.75, 1.5, 2.5, 4.0], "seg_boost ladder");
+        let mut vaq: Vec<f64> = axes
+            .probes
+            .iter()
+            .filter_map(|p| match p {
+                KnobProbe::VaqStrength(v) => Some(*v),
+                _ => None,
+            })
+            .collect();
+        // Plus the vaq-axis Some(0.5) stratum.
+        assert!(axes.vaq.contains(&Some(0.5)));
+        vaq.sort_by(f64::total_cmp);
+        assert_eq!(vaq, vec![0.25, 2.0, 3.0], "vaq_strength probe ladder");
+        assert!(
+            !vaq.contains(&1.0) && !vaq.contains(&0.5),
+            "1.0 is the structural no-op; 0.5 would alias the vaq-axis stratum"
+        );
+        // Still-envelope equivalence guard: vaq_strength(x) and
+        // seg_boost(x) are byte-identical at equal x on still encodes
+        // (proven by encode, 2026-06-12 harness), so the two curated
+        // ladders must stay value-DISJOINT — a shared value would be a
+        // duplicate encode the fingerprint deliberately doesn't merge.
+        let mut joint = vaq.clone();
+        joint.extend(axes.vaq.iter().filter_map(|v| *v)); // axis strength(s)
+        for v in &sb {
+            assert!(
+                !joint.contains(v),
+                "seg_boost {v} duplicates a vaq_strength value — \
+                 still-envelope alias (see module docs)"
+            );
+        }
+
+        let base = Stratum {
+            speed: 4,
+            qm: true,
+            subsampling: EncodeChromaSubsampling::Yuv444,
+            bit_depth: EncodeBitDepth::Auto,
+            color_model: EncodeColorModel::YCbCr,
+            vaq: None,
+            trellis: false,
+            probe: KnobProbe::None,
+        };
+        let mut fps = std::collections::BTreeMap::new();
+        fps.insert(fingerprint(&base.build_config(50.0)), "default".to_string());
+        for probe in axes
+            .probes
+            .iter()
+            .filter(|p| matches!(p, KnobProbe::SegBoost(_) | KnobProbe::VaqStrength(_)))
+        {
+            let s = Stratum {
+                probe: *probe,
+                ..base
+            };
+            let id = s.id();
+            let fp = fingerprint(&s.build_config(50.0));
+            if let Some(prev) = fps.insert(fp, id.clone()) {
+                panic!("fingerprint collision between {prev} and {id}");
+            }
+            // Round-trip: id → config → identical fingerprint.
+            let parsed = config_from_cell_id(&id, 50.0).unwrap();
+            assert_eq!(fingerprint(&parsed), fp, "parser drift for {id}");
+        }
+        // default + 4 seg_boost + 3 vaq_strength.
+        assert_eq!(fps.len(), 8, "scalar ladder size drifted");
     }
 
     #[test]
