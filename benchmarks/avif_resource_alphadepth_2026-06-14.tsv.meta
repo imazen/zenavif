@@ -1,0 +1,13 @@
+# avif_resource_calibrate
+commit: ebf440a
+host: lilith
+date: 2026-06-14
+bin: target/release/examples/avif_probe
+sizes: [512, 1024]
+speeds: [6]
+qualities: [75.0]
+alphas: ['rgb', 'rgba']
+depths: [8, 16]
+content_classes: ['ai-illustration', 'document', 'photo', 'plot', 'screenshot']
+n_srcs: 5
+measure: avif_probe VmHWM delta (per-op marginal working set) + wall (Instant) + user/sys (/proc/self/stat), threads=1; one process per op.

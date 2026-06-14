@@ -74,6 +74,8 @@ mod encoder;
 mod error;
 #[cfg(feature = "__expert")]
 pub mod expert;
+/// Calibrated encode/decode resource estimation (peak memory + time).
+pub mod heuristics;
 mod image;
 #[cfg(feature = "_dev")]
 pub mod simd;
