@@ -8,6 +8,8 @@
 //!
 //! See [cavif](https://github.com/kornelski/cavif-rs) for a complete implementation.
 
+#![forbid(unsafe_code)]
+
 pub mod animated;
 mod boxes;
 pub mod constants;
