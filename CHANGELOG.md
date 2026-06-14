@@ -10,6 +10,25 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Added
+- **Calibrated resource-estimation module (`heuristics`).** New
+  `zenavif::heuristics` with `EncodeEstimate` (min/typical/max peak memory +
+  `time_ms` + `output_bytes`), `DecodeEstimate` (peak memory + time +
+  output), and `estimate_encode(w,h,input_bpp,speed)` /
+  `estimate_decode(w,h,output_bpp)` — mirrors the zen per-codec pattern
+  (`zenwebp::heuristics`). Calibrated from real measurement, not guesses: a
+  new `examples/avif_probe` measures the marginal working set (`VmHWM`
+  delta) plus wall and user/sys CPU (`/proc/self/stat`, threads=1, one
+  process per op), swept by `scripts/avif_resource_calibrate.py` over
+  5 content classes × 256–2048 px × speed 4/6/8/10 × rgb/rgba × 8/10-bit
+  (`benchmarks/avif_resource_{main,alphadepth}_2026-06-14.tsv`). Model
+  captures that AVIF encode time is dominated by the AV1 `speed` preset
+  (~7.6/2.0/1.2/0.55 us/px at speed 4/6/8/10, single-thread, ~14× spread),
+  that AVIF is light on memory (encode ~40 B/px, decode ~18 B/px), and the
+  alpha (+7 B/px, +30 % time) and 10-bit (×1.55 mem, +40 % time) deltas.
+  Times are single-thread CPU; divide by thread count for wall latency.
+  (7d00689)
+
 ### Added (sweep planner — dense-sweep program)
 - **SCALAR ladder densification** for `zenpicker-train --scalar-axes` heads
   (zenmetrics `docs/PLAN_SWEEPS.md` §5 gaps): seg_boost probes
