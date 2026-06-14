@@ -19,6 +19,11 @@ Pure Rust AVIF image codec. Decodes and encodes AVIF images using
 
 ## Quick Start
 
+`decode` returns a [`PixelBuffer`](https://docs.rs/zenpixels) (re-exported as
+`zenavif::PixelBuffer`). It carries width, height, stride, bit depth, and color
+metadata — it is **not** a flat `Vec<u8>`. See *Getting RGBA8 pixels* below to
+get bytes.
+
 ```rust
 use zenavif::decode;
 
@@ -26,6 +31,37 @@ let avif_data = std::fs::read("image.avif").unwrap();
 let image = decode(&avif_data).unwrap();
 println!("{}x{}", image.width(), image.height());
 ```
+
+### Getting RGBA8 pixels
+
+To pull tightly-packed 8-bit RGBA bytes out of the decoded buffer (regardless of
+the source's channel order, subsampling, or bit depth), normalize with
+[`zenpixels-convert`](https://crates.io/crates/zenpixels-convert):
+
+```toml
+# Cargo.toml — add alongside zenavif
+zenpixels-convert = { version = "0.2.13", features = ["rgb"] }
+```
+
+```rust
+use zenavif::decode;
+use zenpixels_convert::PixelBufferConvertTypedExt; // brings to_rgba8() into scope
+
+let image = decode(&avif_data).unwrap();
+let rgba = image.to_rgba8();                  // PixelBuffer<Rgba<u8>>, always 8-bit RGBA
+let (w, h) = (rgba.width(), rgba.height());
+let bytes: Vec<u8> = rgba.copy_to_contiguous_bytes(); // w * h * 4, no row padding
+```
+
+`to_rgb8()`, `to_gray8()`, and `to_bgra8()` are also available. If you instead
+want to keep the buffer as `imgref` rows for re-encoding, add the `imgref`
+feature and use `try_as_imgref::<rgb::Rgba<u8>>()` (returns `None` unless the
+buffer is exactly RGBA8 — `to_rgba8()` is the conversion that never fails).
+
+> **Bit depth:** the decoder outputs the AV1 bitstream's native depth, so a
+> 10-bit file yields a **16-bit** `PixelBuffer`. `to_rgba8()` downscales to 8-bit
+> for you; if you want the decoder itself to emit 8-bit, set
+> `DecoderConfig::new().prefer_8bit(true)` (see *Decoder output depth*).
 
 ### Custom configuration
 
@@ -36,11 +72,35 @@ use enough::Unstoppable;
 let config = DecoderConfig::new()
     .threads(4)
     .apply_grain(true)
-    .frame_size_limit(8192 * 8192);
+    .frame_size_limit(8192 * 8192); // cap decoded dimensions — see note below
 
 let avif_data = std::fs::read("image.avif").unwrap();
 let image = decode_with(&avif_data, &config, &Unstoppable).unwrap();
 ```
+
+> **Server safety — `frame_size_limit` defaults to `0` (uncapped).** The bare
+> `decode()` entry point and a default `DecoderConfig` apply **no** width/height
+> limit, so a crafted file can request a very large frame and force a large
+> allocation. When decoding untrusted input, always call `decode_with` with an
+> explicit `.frame_size_limit(max_w * max_h)` sized to what your service accepts
+> (e.g. `8192 * 8192` ≈ 67 MP, or `12000 * 9000` ≈ 108 MP for phone photos).
+
+### Errors and cancellation
+
+`decode*`/`encode*` return `Result<_, whereat::At<Error>>`. The
+[`At`](https://docs.rs/whereat) wrapper records the source location for
+server-side logs; call `.error()` (or `.into_inner()`) to get the inner
+`Error` enum to match on, and map it to an HTTP status — malformed input
+(`Error::Parse`, `Error::Decode`, `ValidationError`) is a client `4xx`, while a
+resource trip from your `frame_size_limit` should be a `413`/`422`.
+
+Cancellation differs by direction, by design:
+
+- **Decode** takes `&(impl enough::Stop)` — pass `&enough::Unstoppable` for no
+  cancellation, or a real stopper to abort a slow decode from another thread.
+- **Encode** takes an `almost_enough::StopToken` (the encoder's backend uses the
+  `almost_enough` crate) — build one with `StopToken::new(enough::Unstoppable)`
+  for the no-op case, as the encode examples below show.
 
 ### Animation
 
@@ -66,16 +126,24 @@ std::fs::write("output.avif", &encoded.avif_file).unwrap();
 ### Encoding with custom config
 
 ```rust,ignore
-use zenavif::{EncoderConfig, encode_rgb8};
-use almost_enough::Unstoppable;
+use zenavif::{EncoderConfig, encode_with, decode, Unstoppable};
+use almost_enough::StopToken;
+
+let image = decode(&std::fs::read("input.avif").unwrap()).unwrap();
 
 let config = EncoderConfig::new()
     .quality(80.0)   // 1.0 (worst) to 100.0 (best)
     .speed(4);       // 1 (slowest) to 10 (fastest)
 
-let encoded = encode_rgb8(img.as_ref(), &config, Unstoppable.into_token()).unwrap();
+// StopToken::new(Unstoppable) is the no-op token; pass a real stopper to cancel.
+let encoded = encode_with(&image, &config, StopToken::new(Unstoppable)).unwrap();
 std::fs::write("output.avif", &encoded.avif_file).unwrap();
 ```
+
+`encode_with` takes a decoded `&PixelBuffer`. If you have raw pixels in hand,
+use `encode_rgb8` / `encode_rgba8` / `encode_rgb16` / `encode_rgba16`, which take
+an `imgref::ImgRef` of the matching `rgb` pixel type (e.g.
+`encode_rgb8(img, &config, StopToken::new(Unstoppable))`).
 
 ## Encoder configuration guide
 
