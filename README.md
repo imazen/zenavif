@@ -89,8 +89,8 @@ let image = decode_with(&avif_data, &config, &Unstoppable).unwrap();
 
 `decode*`/`encode*` return `Result<_, whereat::At<Error>>`. The
 [`At`](https://docs.rs/whereat) wrapper records the source location for
-server-side logs; call `.error()` (or `.into_inner()`) to get the inner
-`Error` enum to match on, and map it to an HTTP status — malformed input
+server-side logs; call `.error()` (borrow) or `.decompose().0` (owned) to get
+the inner `Error` enum to match on, and map it to an HTTP status — malformed input
 (`Error::Parse`, `Error::Decode`, `ValidationError`) is a client `4xx`, while a
 resource trip from your `frame_size_limit` should be a `413`/`422`.
 
