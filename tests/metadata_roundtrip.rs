@@ -171,11 +171,15 @@ fn content_light_level_roundtrip() {
 
 #[test]
 fn mastering_display_roundtrip() {
+    // `mdcv`-box units (ST 2086), written verbatim and read back the same:
+    // chroma ×50000 (here P3: green 0.265,0.690 → 13250,34500; D65 white),
+    // luminance ×10000. (This is a box-layout passthrough check — the cd/m²
+    // scaling lives in the zencodec adapter, exercised by an adapter round-trip.)
     let md_config = MasteringDisplayConfig {
         primaries: [(13250, 34500), (7500, 3000), (34000, 16000)],
         white_point: (15635, 16450),
-        max_luminance: 10000 << 8, // 10000 cd/m² in 24.8 fixed point
-        min_luminance: 50,         // ~0.003 cd/m² in 18.14 fixed point
+        max_luminance: 1000 * 10000, // 1000 cd/m² in 0.0001 units
+        min_luminance: 50,           // 0.005 cd/m² in 0.0001 units
     };
 
     let config = EncoderConfig::new()
@@ -188,7 +192,7 @@ fn mastering_display_roundtrip() {
         .mastering_display
         .expect("mastering display metadata should be present");
 
-    assert_eq!(mdcv.max_luminance, 10000 << 8);
+    assert_eq!(mdcv.max_luminance, 1000 * 10000);
     assert_eq!(mdcv.min_luminance, 50);
 }
 

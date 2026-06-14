@@ -115,19 +115,23 @@ pub enum EncodeChromaSubsampling {
     Yuv420,
 }
 
-/// Mastering display metadata for HDR encoding (SMPTE ST 2086)
+/// Mastering display metadata for HDR encoding (SMPTE ST 2086).
 ///
-/// All chromaticity values are in CIE 1931 0.16 fixed-point (0–65535 maps to 0.0–1.0).
-/// Luminance values use 24.8 (max) and 18.14 (min) fixed-point encoding.
+/// Fields are in the **`mdcv` box units** — they are written verbatim into the
+/// MP4 `mdcv` box and read back the same way, so they must already be ST-2086
+/// scaled (do NOT use 0.16/24.8/18.14 fixed-point — that earlier doc was wrong
+/// and produced ~1.31×/39× errors against compliant readers):
+/// - chromaticity x/y: CIE 1931 in **0.00002 units** (multiply CIE xy by 50000)
+/// - luminance: in **0.0001 cd/m² units** (multiply cd/m² by 10000)
 #[derive(Debug, Clone, Copy)]
 pub struct MasteringDisplayConfig {
-    /// Chromaticity coordinates for red, green, blue primaries: [(x, y); 3]
+    /// R, G, B primary chromaticities `[(x, y); 3]`, in 0.00002 units (xy×50000).
     pub primaries: [(u16, u16); 3],
-    /// White point chromaticity (x, y)
+    /// White point chromaticity `(x, y)`, in 0.00002 units (xy×50000).
     pub white_point: (u16, u16),
-    /// Maximum display luminance (24.8 fixed-point cd/m²)
+    /// Maximum display luminance, in 0.0001 cd/m² units (cd/m²×10000).
     pub max_luminance: u32,
-    /// Minimum display luminance (18.14 fixed-point cd/m²)
+    /// Minimum display luminance, in 0.0001 cd/m² units (cd/m²×10000).
     pub min_luminance: u32,
 }
 
