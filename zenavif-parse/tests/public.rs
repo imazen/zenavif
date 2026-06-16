@@ -130,7 +130,7 @@ fn test_dir(dir: &str) {
         }
         log::debug!("parsing {:?}", path.display());
         let input = &mut File::open(path).expect("bad file");
-        match zenavif_parse::read_avif(input) {
+        match zenavif_parse::read_avif(input).map_err(|e| e.decompose().0) {
             Ok(avif) => {
                 if avif.grid_config.is_none() {
                     avif.primary_item_metadata().unwrap();
@@ -991,7 +991,12 @@ fn test_dir_all_paths(dir: &str) {
             &zenavif_parse::Unstoppable,
         );
 
-        match (&eager_result, &parser_result) {
+        // Map each `At<Error>` to its inner `&Error` so the existing
+        // `Error::Unsupported(..)` patterns match the location-wrapped results.
+        match (
+            eager_result.as_ref().map_err(|e| e.error()),
+            parser_result.as_ref().map_err(|e| e.error()),
+        ) {
             (Ok(avif), Ok(parser)) => {
                 if avif.grid_config.is_none() {
                     let parser_primary = parser.primary_data()
@@ -1065,7 +1070,7 @@ fn resource_limit_peak_memory() {
     let config = zenavif_parse::DecodeConfig::default().with_peak_memory_limit(1_000);
     let result = zenavif_parse::read_avif_with_config(input, &config, &zenavif_parse::Unstoppable);
 
-    match result {
+    match result.map_err(|e| e.decompose().0) {
         Err(zenavif_parse::Error::ResourceLimitExceeded(msg)) => {
             assert_eq!(msg, "peak memory limit exceeded");
         }
@@ -1081,7 +1086,7 @@ fn resource_limit_total_megapixels() {
     let config = zenavif_parse::DecodeConfig::default().with_total_megapixels_limit(10);
     let result = zenavif_parse::read_avif_with_config(input, &config, &zenavif_parse::Unstoppable);
 
-    match result {
+    match result.map_err(|e| e.decompose().0) {
         Err(zenavif_parse::Error::ResourceLimitExceeded(msg)) => {
             assert_eq!(msg, "total megapixels limit exceeded");
         }
@@ -1097,7 +1102,7 @@ fn resource_limit_grid_tiles() {
     let config = zenavif_parse::DecodeConfig::default().with_max_grid_tiles(10);
     let result = zenavif_parse::read_avif_with_config(input, &config, &zenavif_parse::Unstoppable);
 
-    match result {
+    match result.map_err(|e| e.decompose().0) {
         Err(zenavif_parse::Error::ResourceLimitExceeded(msg)) => {
             assert_eq!(msg, "grid tile count limit exceeded");
         }
@@ -1113,7 +1118,7 @@ fn resource_limit_animation_frames() {
     let config = zenavif_parse::DecodeConfig::default().with_max_animation_frames(3);
     let result = zenavif_parse::read_avif_with_config(input, &config, &zenavif_parse::Unstoppable);
 
-    match result {
+    match result.map_err(|e| e.decompose().0) {
         Err(zenavif_parse::Error::ResourceLimitExceeded(msg)) => {
             assert_eq!(msg, "animation frame count limit exceeded");
         }
@@ -1136,7 +1141,7 @@ fn cancellation_during_parse() {
     let config = zenavif_parse::DecodeConfig::default();
     let result = zenavif_parse::read_avif_with_config(input, &config, &ImmediatelyCancelled);
 
-    match result {
+    match result.map_err(|e| e.decompose().0) {
         Err(zenavif_parse::Error::Stopped(reason)) => {
             assert_eq!(reason, zenavif_parse::StopReason::Cancelled);
         }
@@ -1224,7 +1229,7 @@ fn parser_resource_limit_grid_tiles() {
         &zenavif_parse::Unstoppable,
     );
 
-    match result {
+    match result.map_err(|e| e.decompose().0) {
         Err(zenavif_parse::Error::ResourceLimitExceeded(msg)) => {
             assert_eq!(msg, "grid tile count limit exceeded");
         }
@@ -1244,7 +1249,7 @@ fn parser_resource_limit_animation_frames() {
         &zenavif_parse::Unstoppable,
     );
 
-    match result {
+    match result.map_err(|e| e.decompose().0) {
         Err(zenavif_parse::Error::ResourceLimitExceeded(msg)) => {
             assert_eq!(msg, "animation frame count limit exceeded");
         }
@@ -1270,7 +1275,7 @@ fn parser_cancellation_during_parse() {
         &ImmediatelyCancelled,
     );
 
-    match result {
+    match result.map_err(|e| e.decompose().0) {
         Err(zenavif_parse::Error::Stopped(reason)) => {
             assert_eq!(reason, zenavif_parse::StopReason::Cancelled);
         }
@@ -1295,7 +1300,7 @@ fn parser_cancellation_via_reader() {
         &ImmediatelyCancelled,
     );
 
-    match result {
+    match result.map_err(|e| e.decompose().0) {
         Err(zenavif_parse::Error::Stopped(reason)) => {
             assert_eq!(reason, zenavif_parse::StopReason::Cancelled);
         }

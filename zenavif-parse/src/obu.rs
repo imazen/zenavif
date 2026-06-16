@@ -2,6 +2,7 @@
 #![allow(bad_style)]
 
 use crate::{ChromaSubsampling, Error, Result};
+use whereat::at;
 
 use bitreader::BitReader;
 use std::num::{NonZeroU8, NonZeroU32};
@@ -33,7 +34,7 @@ pub(crate) struct FrameQuantization {
 }
 
 fn get_byte(data: &mut &[u8]) -> Result<u8> {
-    let (&b, rest) = (*data).split_first().ok_or(Error::UnexpectedEOF)?;
+    let (&b, rest) = (*data).split_first().ok_or_else(|| at!(Error::UnexpectedEOF))?;
     *data = rest;
     Ok(b)
 }
@@ -62,7 +63,7 @@ pub(crate) fn parse_obu_with_frame_info(mut data: &[u8]) -> Result<(SequenceHead
 
     while !data.is_empty() {
         let h = obu_header(&mut data)?;
-        let remaining_data = data.get(..h.obu_size).ok_or(Error::UnexpectedEOF)?;
+        let remaining_data = data.get(..h.obu_size).ok_or_else(|| at!(Error::UnexpectedEOF))?;
         data = &data[h.obu_size..];
 
         if h.is_sequence_header() {
@@ -82,7 +83,7 @@ pub(crate) fn parse_obu_with_frame_info(mut data: &[u8]) -> Result<(SequenceHead
 
     match seq_header {
         Some(seq) => Ok((seq, frame_quant)),
-        None => Err(Error::UnexpectedEOF),
+        None => Err(at!(Error::UnexpectedEOF)),
     }
 }
 
@@ -90,12 +91,12 @@ impl SequenceHeaderObu {
     fn read(data: &[u8]) -> Result<Self> {
         let mut b = BitReader::new(data);
 
-        let seq_profile = b.read_u8(3)?;
+        let seq_profile = b.read_u8(3).map_err(|e| at!(Error::from(e)))?;
         if seq_profile > 2 {
-            return Err(Error::InvalidData("seq_profile"));
+            return Err(at!(Error::InvalidData("seq_profile")));
         }
-        let still_picture = b.read_bool()?;
-        let reduced_still_picture_header = b.read_bool()?;
+        let still_picture = b.read_bool().map_err(|e| at!(Error::from(e)))?;
+        let reduced_still_picture_header = b.read_bool().map_err(|e| at!(Error::from(e)))?;
 
         let decoder_model_info_present_flag = false;
         read_operating_points(
@@ -107,17 +108,17 @@ impl SequenceHeaderObu {
         let frame_dims = read_max_frame_dims(&mut b)?;
         let frame_ids = read_frame_id_config(&mut b, reduced_still_picture_header)?;
 
-        let use_128x128_superblock = b.read_bool()?;
-        let _enable_filter_intra = b.read_bool()?;
-        let _enable_intra_edge_filter = b.read_bool()?;
+        let use_128x128_superblock = b.read_bool().map_err(|e| at!(Error::from(e)))?;
+        let _enable_filter_intra = b.read_bool().map_err(|e| at!(Error::from(e)))?;
+        let _enable_intra_edge_filter = b.read_bool().map_err(|e| at!(Error::from(e)))?;
 
         let motion = read_motion_and_screen_content_flags(&mut b, reduced_still_picture_header)?;
 
-        let enable_superres = b.read_bool()?;
-        let enable_cdef = b.read_bool()?;
-        let enable_restoration = b.read_bool()?;
+        let enable_superres = b.read_bool().map_err(|e| at!(Error::from(e)))?;
+        let enable_cdef = b.read_bool().map_err(|e| at!(Error::from(e)))?;
+        let enable_restoration = b.read_bool().map_err(|e| at!(Error::from(e)))?;
         let color = color_config(&mut b, seq_profile)?;
-        let film_grain_params_present = b.read_bool()?;
+        let film_grain_params_present = b.read_bool().map_err(|e| at!(Error::from(e)))?;
 
         Ok(Self {
             color,
@@ -160,29 +161,29 @@ fn read_operating_points(
     decoder_model_info_present_flag: bool,
 ) -> Result<()> {
     if reduced_still_picture_header {
-        let _seq_level_idx = b.read_u8(5)?;
+        let _seq_level_idx = b.read_u8(5).map_err(|e| at!(Error::from(e)))?;
         return Ok(());
     }
 
-    let timing_info_present_flag = b.read_bool()?;
+    let timing_info_present_flag = b.read_bool().map_err(|e| at!(Error::from(e)))?;
     if timing_info_present_flag {
-        return Err(Error::Unsupported("timing_info_present_flag"));
+        return Err(at!(Error::Unsupported("timing_info_present_flag")));
     }
-    let initial_display_delay_present_flag = b.read_bool()?;
-    let operating_points_cnt = 1 + b.read_u8(5)?;
+    let initial_display_delay_present_flag = b.read_bool().map_err(|e| at!(Error::from(e)))?;
+    let operating_points_cnt = 1 + b.read_u8(5).map_err(|e| at!(Error::from(e)))?;
 
     for _ in 0..operating_points_cnt {
-        let _operating_point_idc = b.read_u16(12)?;
-        let seq_level_idx = b.read_u8(5)?;
-        let _seq_tier = if seq_level_idx > 7 { b.read_bool()? } else { false };
+        let _operating_point_idc = b.read_u16(12).map_err(|e| at!(Error::from(e)))?;
+        let seq_level_idx = b.read_u8(5).map_err(|e| at!(Error::from(e)))?;
+        let _seq_tier = if seq_level_idx > 7 { b.read_bool().map_err(|e| at!(Error::from(e)))? } else { false };
         if decoder_model_info_present_flag {
-            b.read_bool()?;
-            return Err(Error::Unsupported("decoder_model_info_present_flag"));
+            b.read_bool().map_err(|e| at!(Error::from(e)))?;
+            return Err(at!(Error::Unsupported("decoder_model_info_present_flag")));
         }
         if initial_display_delay_present_flag {
-            let initial_display_delay_present_for_this_op = b.read_bool()?;
+            let initial_display_delay_present_for_this_op = b.read_bool().map_err(|e| at!(Error::from(e)))?;
             if initial_display_delay_present_for_this_op {
-                let _initial_display_delay = 1 + b.read_u8(4)?;
+                let _initial_display_delay = 1 + b.read_u8(4).map_err(|e| at!(Error::from(e)))?;
             }
         }
     }
@@ -200,12 +201,12 @@ struct MaxFrameDims {
 /// frame width/height fields. Returns an error on the 0-after-+1 overflow
 /// case so the `NonZeroU32` check stays at the original position.
 fn read_max_frame_dims(b: &mut BitReader) -> Result<MaxFrameDims> {
-    let width_bits = 1 + b.read_u8(4)?;
-    let height_bits = 1 + b.read_u8(4)?;
-    let raw_width = 1 + b.read_u32(width_bits)?;
-    let raw_height = 1 + b.read_u32(height_bits)?;
-    let max_width = NonZeroU32::new(raw_width).ok_or(Error::InvalidData("overflow"))?;
-    let max_height = NonZeroU32::new(raw_height).ok_or(Error::InvalidData("overflow"))?;
+    let width_bits = 1 + b.read_u8(4).map_err(|e| at!(Error::from(e)))?;
+    let height_bits = 1 + b.read_u8(4).map_err(|e| at!(Error::from(e)))?;
+    let raw_width = 1 + b.read_u32(width_bits).map_err(|e| at!(Error::from(e)))?;
+    let raw_height = 1 + b.read_u32(height_bits).map_err(|e| at!(Error::from(e)))?;
+    let max_width = NonZeroU32::new(raw_width).ok_or_else(|| at!(Error::InvalidData("overflow")))?;
+    let max_height = NonZeroU32::new(raw_height).ok_or_else(|| at!(Error::InvalidData("overflow")))?;
     Ok(MaxFrameDims { max_width, max_height, width_bits, height_bits })
 }
 
@@ -216,9 +217,9 @@ struct FrameIdConfig {
 }
 
 fn read_frame_id_config(b: &mut BitReader, reduced_still_picture_header: bool) -> Result<FrameIdConfig> {
-    let present = if reduced_still_picture_header { false } else { b.read_bool()? };
-    let delta_length = if present { 2 + b.read_u8(4)? } else { 0 };
-    let additional_length = if present { 1 + b.read_u8(3)? } else { 0 };
+    let present = if reduced_still_picture_header { false } else { b.read_bool().map_err(|e| at!(Error::from(e)))? };
+    let delta_length = if present { 2 + b.read_u8(4).map_err(|e| at!(Error::from(e)))? } else { 0 };
+    let additional_length = if present { 1 + b.read_u8(3).map_err(|e| at!(Error::from(e)))? } else { 0 };
     Ok(FrameIdConfig { present, delta_length, additional_length })
 }
 
@@ -258,27 +259,27 @@ fn read_motion_and_screen_content_flags(
         return Ok(out);
     }
 
-    out.enable_interintra_compound = b.read_bool()?;
-    out.enable_masked_compound = b.read_bool()?;
-    out.enable_warped_motion = b.read_bool()?;
-    out.enable_dual_filter = b.read_bool()?;
-    out.enable_order_hint = b.read_bool()?;
+    out.enable_interintra_compound = b.read_bool().map_err(|e| at!(Error::from(e)))?;
+    out.enable_masked_compound = b.read_bool().map_err(|e| at!(Error::from(e)))?;
+    out.enable_warped_motion = b.read_bool().map_err(|e| at!(Error::from(e)))?;
+    out.enable_dual_filter = b.read_bool().map_err(|e| at!(Error::from(e)))?;
+    out.enable_order_hint = b.read_bool().map_err(|e| at!(Error::from(e)))?;
     if out.enable_order_hint {
-        out.enable_jnt_comp = b.read_bool()?;
-        out.enable_ref_frame_mvs = b.read_bool()?;
+        out.enable_jnt_comp = b.read_bool().map_err(|e| at!(Error::from(e)))?;
+        out.enable_ref_frame_mvs = b.read_bool().map_err(|e| at!(Error::from(e)))?;
     }
-    let seq_choose_screen_content_tools = b.read_bool()?;
+    let seq_choose_screen_content_tools = b.read_bool().map_err(|e| at!(Error::from(e)))?;
     if !seq_choose_screen_content_tools {
-        out.seq_force_screen_content_tools = b.read_u8(1)?;
+        out.seq_force_screen_content_tools = b.read_u8(1).map_err(|e| at!(Error::from(e)))?;
     }
     if out.seq_force_screen_content_tools > 0 {
-        let seq_choose_integer_mv = b.read_bool()?;
+        let seq_choose_integer_mv = b.read_bool().map_err(|e| at!(Error::from(e)))?;
         if !seq_choose_integer_mv {
-            out.seq_force_integer_mv = b.read_u8(1)?;
+            out.seq_force_integer_mv = b.read_u8(1).map_err(|e| at!(Error::from(e)))?;
         }
     }
     if out.enable_order_hint {
-        out.order_hint_bits = 1 + b.read_u8(3)?;
+        out.order_hint_bits = 1 + b.read_u8(3).map_err(|e| at!(Error::from(e)))?;
     }
     Ok(out)
 }
@@ -337,9 +338,9 @@ pub(crate) struct ColorConfig {
 }
 
 fn color_config(b: &mut BitReader, seq_profile: u8) -> Result<ColorConfig> {
-    let high_bitdepth = b.read_bool()?;
+    let high_bitdepth = b.read_bool().map_err(|e| at!(Error::from(e)))?;
     let bit_depth = if seq_profile == 2 && high_bitdepth {
-        let twelve_bit = b.read_bool()?;
+        let twelve_bit = b.read_bool().map_err(|e| at!(Error::from(e)))?;
         if twelve_bit {
             12
         } else {
@@ -353,16 +354,16 @@ fn color_config(b: &mut BitReader, seq_profile: u8) -> Result<ColorConfig> {
         }
     };
 
-    let monochrome = if seq_profile == 1 { false } else { b.read_bool()? };
+    let monochrome = if seq_profile == 1 { false } else { b.read_bool().map_err(|e| at!(Error::from(e)))? };
 
     let num_planes = if monochrome { 1 } else { 3 };
-    let color_description_present_flag = b.read_bool()?;
+    let color_description_present_flag = b.read_bool().map_err(|e| at!(Error::from(e)))?;
     let mut color_primaries = 2;
     let mut transfer_characteristics = 2;
     let matrix_coefficients = if color_description_present_flag {
-        color_primaries = b.read_u8(8)?;
-        transfer_characteristics = b.read_u8(8)?;
-        b.read_u8(8)?
+        color_primaries = b.read_u8(8).map_err(|e| at!(Error::from(e)))?;
+        transfer_characteristics = b.read_u8(8).map_err(|e| at!(Error::from(e)))?;
+        b.read_u8(8).map_err(|e| at!(Error::from(e)))?
     } else {
         2
     };
@@ -372,7 +373,7 @@ fn color_config(b: &mut BitReader, seq_profile: u8) -> Result<ColorConfig> {
     let separate_uv_delta_q;
     let color_range;
     if monochrome {
-        color_range = b.read_u8(1)?;
+        color_range = b.read_u8(1).map_err(|e| at!(Error::from(e)))?;
         chroma_subsampling = ChromaSubsampling::NONE;
         chroma_sample_position = 0;
         separate_uv_delta_q = false;
@@ -385,23 +386,23 @@ fn color_config(b: &mut BitReader, seq_profile: u8) -> Result<ColorConfig> {
         chroma_sample_position = 0;
         separate_uv_delta_q = false;
     } else {
-        color_range = b.read_u8(1)?;
+        color_range = b.read_u8(1).map_err(|e| at!(Error::from(e)))?;
         if seq_profile == 0 {
             chroma_subsampling = ChromaSubsampling::YUV420;
         } else if seq_profile == 1 {
             chroma_subsampling = ChromaSubsampling::NONE;
         } else if bit_depth == 12 {
-            let x = b.read_bool()?;
+            let x = b.read_bool().map_err(|e| at!(Error::from(e)))?;
             chroma_subsampling = if x {
-                ChromaSubsampling { horizontal: x, vertical: b.read_bool()? }
+                ChromaSubsampling { horizontal: x, vertical: b.read_bool().map_err(|e| at!(Error::from(e)))? }
             } else {
                 ChromaSubsampling::NONE
             }
         } else {
             chroma_subsampling = ChromaSubsampling::YUV422;
         }
-        chroma_sample_position = if chroma_subsampling.horizontal && chroma_subsampling.vertical { b.read_u8(2)? } else { 0 };
-        separate_uv_delta_q = b.read_bool()?;
+        chroma_sample_position = if chroma_subsampling.horizontal && chroma_subsampling.vertical { b.read_u8(2).map_err(|e| at!(Error::from(e)))? } else { 0 };
+        separate_uv_delta_q = b.read_bool().map_err(|e| at!(Error::from(e)))?;
     }
 
     Ok(ColorConfig {
@@ -421,10 +422,10 @@ fn color_config(b: &mut BitReader, seq_profile: u8) -> Result<ColorConfig> {
 /// Read a delta-q value from the bitstream.
 /// Returns 0 if the delta_coded flag is false, else reads su(7).
 fn read_delta_q(b: &mut BitReader) -> Result<i8> {
-    let delta_coded = b.read_bool()?;
+    let delta_coded = b.read_bool().map_err(|e| at!(Error::from(e)))?;
     if delta_coded {
         // su(7) — 7-bit signed value
-        Ok(b.read_i8(7)?)
+        Ok(b.read_i8(7).map_err(|e| at!(Error::from(e)))?)
     } else {
         Ok(0)
     }
@@ -477,48 +478,48 @@ fn read_uncompressed_header_until_tiles(
         });
     }
 
-    let show_existing_frame = b.read_bool()?;
+    let show_existing_frame = b.read_bool().map_err(|e| at!(Error::from(e)))?;
     if show_existing_frame {
-        return Err(Error::InvalidData("show_existing_frame"));
+        return Err(at!(Error::InvalidData("show_existing_frame")));
     }
 
-    let frame_type = b.read_u8(2)?;
-    let show_frame = b.read_bool()?;
+    let frame_type = b.read_u8(2).map_err(|e| at!(Error::from(e)))?;
+    let show_frame = b.read_bool().map_err(|e| at!(Error::from(e)))?;
     if !show_frame {
-        let _showable_frame = b.read_bool()?;
+        let _showable_frame = b.read_bool().map_err(|e| at!(Error::from(e)))?;
     }
 
     let error_resilient_mode = if frame_type == 3 /* SWITCH_FRAME */ {
         true
     } else {
-        b.read_bool()?
+        b.read_bool().map_err(|e| at!(Error::from(e)))?
     };
 
-    let _disable_cdf_update = b.read_bool()?;
+    let _disable_cdf_update = b.read_bool().map_err(|e| at!(Error::from(e)))?;
 
     let allow_screen_content_tools = if seq.seq_force_screen_content_tools == SELECT_SCREEN_CONTENT_TOOLS {
-        b.read_bool()?
+        b.read_bool().map_err(|e| at!(Error::from(e)))?
     } else {
         seq.seq_force_screen_content_tools != 0
     };
 
     if allow_screen_content_tools && seq.seq_force_integer_mv == SELECT_INTEGER_MV {
-        let _force_integer_mv = b.read_bool()?;
+        let _force_integer_mv = b.read_bool().map_err(|e| at!(Error::from(e)))?;
     }
 
     if seq.frame_id_numbers_present_flag {
         let id_len = seq.delta_frame_id_length + seq.additional_frame_id_length;
-        let _current_frame_id = b.read_u32(id_len)?;
+        let _current_frame_id = b.read_u32(id_len).map_err(|e| at!(Error::from(e)))?;
     }
 
     let frame_size_override_flag = if frame_type == 3 /* SWITCH_FRAME */ {
         true
     } else {
-        b.read_bool()?
+        b.read_bool().map_err(|e| at!(Error::from(e)))?
     };
 
     if seq.enable_order_hint {
-        let _order_hint = b.read_u32(seq.order_hint_bits)?;
+        let _order_hint = b.read_u32(seq.order_hint_bits).map_err(|e| at!(Error::from(e)))?;
     }
 
     // primary_ref_frame — only for non-intra, non-error-resilient
@@ -526,7 +527,7 @@ fn read_uncompressed_header_until_tiles(
         && frame_type != 2 /* INTRA_ONLY */
         && !error_resilient_mode
     {
-        let _primary_ref_frame = b.read_u8(3)?;
+        let _primary_ref_frame = b.read_u8(3).map_err(|e| at!(Error::from(e)))?;
     }
 
     // decoder_model_info — already errored on in the sequence header read
@@ -542,7 +543,7 @@ fn read_uncompressed_header_until_tiles(
         }
         _ => {
             // INTER or SWITCH — not expected for still AVIF, bail
-            return Err(Error::Unsupported("inter frame in probe"));
+            return Err(at!(Error::Unsupported("inter frame in probe")));
         }
     }
 
@@ -565,28 +566,28 @@ fn read_intra_frame_geometry(
     frame_size_override_flag: bool,
     allow_screen_content_tools: bool,
 ) -> Result<()> {
-    let _refresh_frame_flags = b.read_u8(8)?;
+    let _refresh_frame_flags = b.read_u8(8).map_err(|e| at!(Error::from(e)))?;
 
     if frame_size_override_flag {
-        let _frame_width = 1 + b.read_u32(seq.frame_width_bits)?;
-        let _frame_height = 1 + b.read_u32(seq.frame_height_bits)?;
+        let _frame_width = 1 + b.read_u32(seq.frame_width_bits).map_err(|e| at!(Error::from(e)))?;
+        let _frame_height = 1 + b.read_u32(seq.frame_height_bits).map_err(|e| at!(Error::from(e)))?;
     }
 
     if seq.enable_superres {
-        let use_superres = b.read_bool()?;
+        let use_superres = b.read_bool().map_err(|e| at!(Error::from(e)))?;
         if use_superres {
-            let _coded_denom = b.read_u8(3)?;
+            let _coded_denom = b.read_u8(3).map_err(|e| at!(Error::from(e)))?;
         }
     }
 
-    let render_and_frame_size_different = b.read_bool()?;
+    let render_and_frame_size_different = b.read_bool().map_err(|e| at!(Error::from(e)))?;
     if render_and_frame_size_different {
-        let _render_width = 1u32 + b.read_u16(16)? as u32;
-        let _render_height = 1u32 + b.read_u16(16)? as u32;
+        let _render_width = 1u32 + b.read_u16(16).map_err(|e| at!(Error::from(e)))? as u32;
+        let _render_height = 1u32 + b.read_u16(16).map_err(|e| at!(Error::from(e)))? as u32;
     }
 
     if allow_screen_content_tools {
-        let _allow_intrabc = b.read_bool()?;
+        let _allow_intrabc = b.read_bool().map_err(|e| at!(Error::from(e)))?;
     }
     Ok(())
 }
@@ -606,7 +607,7 @@ fn skip_tile_info(b: &mut BitReader, seq: &SequenceHeaderObu) -> Result<()> {
     let sb_cols = (mi_cols + (1 << sb_shift) - 1) >> sb_shift;
     let sb_rows = (mi_rows + (1 << sb_shift) - 1) >> sb_shift;
 
-    let uniform_tile_spacing_flag = b.read_bool()?;
+    let uniform_tile_spacing_flag = b.read_bool().map_err(|e| at!(Error::from(e)))?;
     if uniform_tile_spacing_flag {
         skip_uniform_tile_spacing(b, sb_cols, sb_rows)?;
     } else {
@@ -620,7 +621,7 @@ fn skip_uniform_tile_spacing(b: &mut BitReader, sb_cols: u32, sb_rows: u32) -> R
     let mut tile_cols_log2 = 0u32;
     let max_tile_cols_log2 = tile_log2(1, sb_cols);
     while tile_cols_log2 < max_tile_cols_log2 {
-        if !b.read_bool()? {
+        if !b.read_bool().map_err(|e| at!(Error::from(e)))? {
             break;
         }
         tile_cols_log2 += 1;
@@ -628,7 +629,7 @@ fn skip_uniform_tile_spacing(b: &mut BitReader, sb_cols: u32, sb_rows: u32) -> R
     let mut tile_rows_log2 = 0u32;
     let max_tile_rows_log2 = tile_log2(1, sb_rows);
     while tile_rows_log2 < max_tile_rows_log2 {
-        if !b.read_bool()? {
+        if !b.read_bool().map_err(|e| at!(Error::from(e)))? {
             break;
         }
         tile_rows_log2 += 1;
@@ -648,7 +649,7 @@ fn skip_non_uniform_tile_spacing(
     while start_sb < sb_cols {
         let max_width = sb_cols - start_sb;
         let width_bits = tile_log2(1, max_width.min(MAX_TILE_WIDTH as u32 / sb_size));
-        let width_in_sbs = 1 + b.read_u32(width_bits as u8)?;
+        let width_in_sbs = 1 + b.read_u32(width_bits as u8).map_err(|e| at!(Error::from(e)))?;
         widest_tile_sb = widest_tile_sb.max(width_in_sbs);
         start_sb += width_in_sbs;
     }
@@ -658,7 +659,7 @@ fn skip_non_uniform_tile_spacing(
         let max_tile_area_sb = MAX_TILE_AREA as u32 / (sb_size * sb_size);
         let max_tile_height = max_tile_area_sb.max(1) / widest_tile_sb.max(1);
         let height_bits = tile_log2(1, max_height.min(max_tile_height.max(1)));
-        let height_in_sbs = 1 + b.read_u32(height_bits as u8)?;
+        let height_in_sbs = 1 + b.read_u32(height_bits as u8).map_err(|e| at!(Error::from(e)))?;
         start_sb += height_in_sbs;
     }
     Ok(())
@@ -674,7 +675,7 @@ fn read_quantization_params(
     seq: &SequenceHeaderObu,
     num_planes: u8,
 ) -> Result<FrameQuantization> {
-    let base_q_idx = b.read_u8(8)?;
+    let base_q_idx = b.read_u8(8).map_err(|e| at!(Error::from(e)))?;
     let delta_q_y_dc = read_delta_q(b)?;
 
     let mut delta_q_u_dc = 0i8;
@@ -694,7 +695,7 @@ fn read_quantization_params(
             delta_q_v_dc = delta_q_u_dc;
             delta_q_v_ac = delta_q_u_ac;
         }
-        let _using_qmatrix = b.read_bool()?;
+        let _using_qmatrix = b.read_bool().map_err(|e| at!(Error::from(e)))?;
     }
 
     let coded_lossless = base_q_idx == 0
@@ -733,7 +734,7 @@ fn tile_log2(d: u32, n: u32) -> u32 {
 fn obu_header(data: &mut &[u8]) -> Result<Header> {
     let b = get_byte(data)?;
     if 0 != b & 0b1000_0000 {
-        return Err(Error::InvalidData("not obu"));
+        return Err(at!(Error::InvalidData("not obu")));
     }
 
     let obu_type = (b >> 3) & 0x0F;
@@ -747,9 +748,9 @@ fn obu_header(data: &mut &[u8]) -> Result<Header> {
 
     let obu_size = if obu_has_size_field {
         leb128::read::unsigned(data)
-            .map_err(|_| Error::InvalidData("leb"))?
+            .map_err(|_| at!(Error::InvalidData("leb")))?
             .try_into()
-            .map_err(|_| Error::UnexpectedEOF)?
+            .map_err(|_| at!(Error::UnexpectedEOF))?
     } else {
         data.len()
     };

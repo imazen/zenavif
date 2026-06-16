@@ -31,6 +31,7 @@ fallible_collections = { version = "0.5.1", default-features = false, features =
 arrayvec = "0.7.6"
 enough = { version = "0.4.3", features = ["std"] }
 zencodec = { version = "0.1.13", default-features = false }
+whereat = { version = "0.1.5" }
 
 [dev-dependencies]
 env_logger = "0.11.10"

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Changed (BREAKING)
+- **Error results now carry a `whereat` source location.** The public
+  `Result<T, E = Error>` alias is now `Result<T, E = whereat::At<Error>>`, so
+  every error returned from the parser records the file:line where it
+  originated (server-side production debuggability). All ~147 error origins in
+  the box/ILOC/OBU/sample-table/grid state machines are tagged via `at!()`, and
+  foreign errors (`bitreader`, `io`, `TryReserve`, `TryFromInt`) capture
+  location at the propagation site. Callers matching on the bare `Error` must
+  now unwrap the `At` first — `err.error()` borrows `&Error`, `err.decompose().0`
+  owns the `Error`. The underlying `Error` enum, its variants, and parsing
+  behavior are unchanged.
+
 ### Fixed
 - **i686/wasm32: `calculate_frame_duration` no longer overflows on a crafted
   `stts`.** The per-entry `current_sample += entry.sample_count as usize`
