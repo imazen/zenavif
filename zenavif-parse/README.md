@@ -50,6 +50,39 @@ Three constructors, each with a `_with_config` variant for resource limits:
 - `from_owned(Vec<u8>)` — takes ownership; returns `AvifParser<'static>`
 - `from_reader(impl Read)` — reads into an owned buffer; returns `AvifParser<'static>`
 
+#### What `primary_data()` returns (the byte contract)
+
+`primary_data()` returns `Result<Cow<[u8]>>` — the **raw item-payload bytes** sliced
+directly out of the file's `mdat` (or `idat`) box, exactly as stored. No bytes are
+synthesized, reordered, or stripped.
+
+- **It is the complete AV1 OBU temporal unit for the primary image, decoder-ready
+  as-is.** In a still AVIF the primary item's `mdat` extent holds the full coded OBU
+  stream *including the sequence-header OBU* — so you can hand the slice straight to an
+  AV1 decoder. (`primary_metadata()` proves this: it parses the sequence header out of
+  `primary_data()` directly, with nothing prepended.)
+- **The `av1C` config box is NOT prepended.** This crate parses `av1C` only for its
+  profile / level / bit-depth / chroma fields (exposed via `av1_config()`); its
+  `configOBUs` payload is skipped, because for AVIF the sequence header already lives
+  inline in the item data. You do **not** need to reconstruct or prepend anything.
+- `Cow::Borrowed` for the common single-extent case (zero copy, borrowed from the input
+  buffer); `Cow::Owned` only when an item spans multiple `iloc` extents and must be
+  concatenated.
+
+**Grid and animation primaries are the exception — `primary_data()` is not AV1 there:**
+
+- **Grid** (primary item type `grid`): `primary_data()` returns the *grid derivation
+  item's* own tiny extent (the `ImageGrid` header bytes), **not** decodable AV1, and
+  `primary_metadata()` will error trying to parse it. Detect this with
+  `grid_config().is_some()` and decode the tiles instead — see [Grid images](#grid-images)
+  below (`grid_tile_count()` + `tile_data(i)`).
+- **Animation cover still** (image sequence carrying a `meta` box): `primary_data()`
+  returns the still cover image's OBU stream (decoder-ready, as above), independent of
+  the animation tracks.
+- **Pure image sequence** (no `meta` box, `avis` only): there is no primary still — the
+  primary extent is empty and `primary_data()` returns an **empty** `Cow`. Use
+  `animation_info()` + `frames()` / `frame(i)` instead.
+
 ### Grid images
 
 ```rust
@@ -78,12 +111,82 @@ if let Some(info) = parser.animation_info() {
 
 ### AV1 metadata without decoding
 
+`primary_metadata()` returns a `Result<AV1Metadata>` parsed from the primary item's AV1
+sequence header (and first frame header) — no AV1 decode:
+
 ```rust
-let meta = parser.primary_metadata()?;
+let meta = parser.primary_metadata()?;   // -> zenavif_parse::AV1Metadata
 println!("{}x{}, {}bpc, chroma {:?}",
     meta.max_frame_width, meta.max_frame_height,
     meta.bit_depth, meta.chroma_subsampling);
+// also: meta.seq_profile, meta.monochrome, meta.base_q_idx, meta.lossless
 ```
+
+### Color / CICP for correct delivery
+
+For color-correct output you need the authoritative color signaling from the **container**
+`colr` box (CICP/nclx) or the embedded **ICC** profile — *not* the values inside the AV1
+bitstream. AVIF places the canonical color description in the container, and an
+`nclx` `colr` overrides anything in the sequence header. Read it with `color_info()`,
+which returns `Option<&ColorInformation>`:
+
+```rust
+use zenavif_parse::ColorInformation;
+
+match parser.color_info() {
+    Some(ColorInformation::Nclx {
+        color_primaries,           // u16 — CICP colour primaries (H.273 Table 2; e.g. 1 = BT.709, 9 = BT.2020, 12 = P3-D65)
+        transfer_characteristics,  // u16 — CICP transfer (H.273 Table 3; e.g. 13 = sRGB, 16 = PQ, 18 = HLG)
+        matrix_coefficients,       // u16 — CICP matrix (H.273 Table 4; e.g. 0 = identity/RGB, 1 = BT.709, 9 = BT.2020-NCL)
+        full_range,                // bool — true = full range, false = limited/studio range
+    }) => {
+        // Build your color transform from CICP (e.g. feed moxcms / your CMS).
+        let _ = (color_primaries, transfer_characteristics, matrix_coefficients, full_range);
+    }
+    Some(ColorInformation::IccProfile(icc)) => {
+        // Embedded ICC profile bytes (rICC/prof colour_type) — feed to your CMS.
+        let _ = icc; // &[u8]
+    }
+    None => {
+        // No colr box. Per AVIF/MIAF, assume the AV1 sequence header's CICP
+        // (available via decode), or fall back to BT.709 / limited range.
+    }
+}
+```
+
+`ColorInformation` is the single type for both cases — a CICP/`nclx` variant with the four
+integer/flag fields, or an `IccProfile(Vec<u8>)` variant. (Field name is
+`color_primaries`, US spelling.) An AVIF carries **one** of the two, never both, so a
+single `match` covers it.
+
+HDR / wide-gamut delivery often also needs the static metadata boxes, each exposed as its
+own accessor returning a borrowed `Option`:
+
+- `mastering_display()` → `Option<&MasteringDisplayColourVolume>` (`mdcv`)
+- `content_light_level()` → `Option<&ContentLightLevel>` (`clli`, MaxCLL / MaxFALL)
+- `content_colour_volume()` → `Option<&ContentColourVolume>` (`cclv`)
+- `ambient_viewing()` → `Option<&AmbientViewingEnvironment>` (`amve`)
+
+For Ultra HDR / gain-map workflows, `gain_map_color_info()` returns the gain map item's own
+`ColorInformation`, and `gain_map_metadata()` / `gain_map()` expose the tone-mapping
+parameters.
+
+### Error and metadata types
+
+- **Result / error type.** Public methods return `zenavif_parse::Result<T>`, which is
+  `Result<T, whereat::At<zenavif_parse::Error>>` — the error is wrapped in
+  [`whereat::At`](https://docs.rs/whereat) to carry source-location frames. Both
+  `zenavif_parse::Error` and `whereat::At<Error>` implement `std::error::Error`, so `?`
+  propagates cleanly into `Box<dyn std::error::Error>` / `anyhow::Error` (as the examples
+  here do). To inspect the inner enum, use `at.error()` (borrow) or `at.decompose()`
+  (consume). `Error` variants include `InvalidData`, `Unsupported`, `UnexpectedEOF`,
+  `Io`, `NoMoov`, `OutOfMemory`, `ResourceLimitExceeded`, and `Stopped` (cancellation).
+- **Color type.** `color_info()` / `gain_map_color_info()` return
+  `Option<&zenavif_parse::ColorInformation>` (enum: `Nclx { .. }` or `IccProfile(Vec<u8>)`).
+- **Metadata type.** `primary_metadata()` / `alpha_metadata()` return
+  `zenavif_parse::AV1Metadata` (a `#[non_exhaustive]` struct: `still_picture`,
+  `max_frame_width`, `max_frame_height`, `bit_depth`, `seq_profile`,
+  `chroma_subsampling`, `monochrome`, `base_q_idx`, `lossless`).
 
 ### Resource limits
 

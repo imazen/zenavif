@@ -35,6 +35,7 @@
   helps the owned-copy eager path.)
 
 ### Fixed
+- **docs(readme): document color/CICP extraction + `primary_data()` OBU contract + error/metadata type names** — found by an insulated external-developer (README-only) usability test. The README now shows how to read CICP/`nclx` (`color_primaries`/`transfer_characteristics`/`matrix_coefficients`/`full_range`) and embedded ICC via `color_info() -> Option<&ColorInformation>` (plus the `mdcv`/`clli`/`cclv`/`amve` HDR accessors), states the precise `primary_data()` byte contract (raw `mdat`/`idat` extent = the full AV1 OBU temporal unit with the sequence header inline, decoder-ready; `av1C` `configOBUs` not prepended; empty for a pure image sequence; grid-header bytes for a grid primary), and names the `Result`/`Error` (`whereat::At<Error>`, both `std::error::Error`) and `AV1Metadata` types. No code change.
 - **`AuxiliaryTypeProperty::type_subtype` is now panic-proof by construction**
   (8a5b1be, parity with upstream avif-parse 3801195). The split-on-NUL used
   `split_at(pos)` + `&rest[1..]`; the indices were always in range given a
