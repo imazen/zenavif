@@ -89,7 +89,8 @@ let image = decode_with(&avif_data, &config, &Unstoppable).unwrap();
 
 `decode*`/`encode*` return `Result<_, whereat::At<Error>>`. The
 [`At`](https://docs.rs/whereat) wrapper records the source location for
-server-side logs; call `.error()` (borrow) or `.decompose().0` (owned) to get
+server-side logs — read it with `.location()` (returns `Option<&Location>`, with
+`file()`/`line()`); call `.error()` (borrow) or `.decompose().0` (owned) to get
 the inner `Error` enum to match on, and map it to an HTTP status — malformed input
 (`Error::Parse`, `Error::Decode`, `ValidationError`) is a client `4xx`, while a
 resource trip from your `frame_size_limit` should be a `413`/`422`.
@@ -97,7 +98,11 @@ resource trip from your `frame_size_limit` should be a `413`/`422`.
 Cancellation differs by direction, by design:
 
 - **Decode** takes `&(impl enough::Stop)` — pass `&enough::Unstoppable` for no
-  cancellation, or a real stopper to abort a slow decode from another thread.
+  cancellation, or a real, thread-safe stopper from the
+  [`almost-enough`](https://crates.io/crates/almost-enough) crate (`cargo add
+  almost-enough`): `let stop = almost_enough::Stopper::new();`, then
+  `decode_with(bytes, &config, &stop)?`, and call `stop.cancel()` (it is `Clone`)
+  from a deadline/disconnect watcher thread.
 - **Encode** takes an `almost_enough::StopToken` (the encoder's backend uses the
   `almost_enough` crate) — build one with `StopToken::new(enough::Unstoppable)`
   for the no-op case, as the encode examples below show.
