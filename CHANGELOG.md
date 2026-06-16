@@ -10,6 +10,18 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Changed
+- **Decode is bounded by default (closes the decode fail-open part of #22).**
+  `DecoderConfig::default()` now defaults `frame_size_limit` to `120_000_000`
+  (120 MP, admits ~108 MP photos) instead of `0`. The pre-flight dimension
+  check (`decoder_managed.rs` / `decoder.rs`) only fires when the limit is
+  `> 0`, so `zenavif::decode(untrusted)` was previously unbounded by total
+  pixels; it now rejects over-120-MP frames with `Error::ImageTooLarge`
+  before any frame allocation. Non-breaking: `frame_size_limit(0)` still opts
+  out (unbounded), and the parser already inherits zenavif-parse's own caps
+  (512 MP / 1 GB peak). The frame-granularity cancellation sub-point of #22
+  stays open pending a rav1d-safe Stop hook.
+
 ### Added
 - **Calibrated resource-estimation module (`heuristics`).** New
   `zenavif::heuristics` with `EncodeEstimate` (min/typical/max peak memory +
