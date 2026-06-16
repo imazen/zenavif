@@ -20,6 +20,12 @@
   Justfile recipes `api-doc` / `api-doc-check`.
 
 ### Fixed
+- **README now states the AV1 input packaging contract**: `color_av1_data` must be
+  the raw AV1 OBU bitstream for a single keyframe with the sequence header in-band
+  (no length-prefix / Annex-B framing), `av1C` is built from builder settings rather
+  than parsed from the bitstream, dimensions/`depth_bits` are passed separately, and
+  `set_content_light_level` takes MaxCLL/MaxFALL in cd/m². Adds a signature reference
+  and documents that `colr` is omitted when no color field is set. README only.
 - **Raw TIFF Exif is now framed with the mandatory `exif_tiff_header_offset`**
   (0c43e53, port of upstream avif-serialize 37e6152). The HEIF/MIAF `Exif` item
   payload must begin with a 4-byte offset to the TIFF block; previously

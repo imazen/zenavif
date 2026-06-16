@@ -75,6 +75,78 @@ let avif_bytes = Aviffy::new()
 > Aviffy::new().write(&mut out, &color_av1, None, width, height, depth_bits)?;
 > ```
 
+### AV1 input contract
+
+For a muxer the byte-level input contract is the whole job, so it's worth stating
+exactly what `color_av1_data` must be. These are traced from the source, not
+assumed:
+
+- **Pass the raw AV1 OBU bitstream for a single keyframe, with the sequence
+  header OBU in-band.** The serializer copies the bytes verbatim into the image
+  data extent with no parsing or validation (`IlocExtent { data: color_av1_data }`,
+  `src/lib.rs:598`), and the still path stores no separate sequence header — the
+  `av1C` box it writes is the 4-byte config record only, no `configOBUs`
+  (`src/boxes.rs`, length `BASIC_BOX_SIZE + 4`). Decoders read the sequence
+  header from the payload, so it must be present there.
+- **No external framing** — no length prefix, no Annex-B start codes. Bytes go in
+  exactly as the AV1 encoder emitted them for one frame.
+- **Dimensions and `depth_bits` are passed as arguments, not parsed** (→ `ispe`
+  and `pixi`), and must match how the bitstream was encoded. `depth_bits` must be
+  `8`, `10`, or `12` (`src/lib.rs:536`).
+- **The `av1C` config record is built from the builder settings, not extracted
+  from the bitstream** — `set_monochrome` / `set_chroma_subsampling` /
+  `set_seq_profile` plus the depth determine its fields. Strict decoders (Chrome)
+  validate `av1C` against the in-band sequence header, so those settings must
+  agree with how the frame was encoded.
+- **Optional `alpha_av1_data`** is a separately-encoded **monochrome** AV1
+  bitstream for the alpha plane (`rav1e`'s `Cs400` / "YUV400"), under the same
+  raw-OBU contract.
+
+The animation and grid builders differ deliberately: they take the sequence
+header separately (`AnimatedImage::serialize(..., color_seq_header, ...)`,
+`set_color_config`) rather than in-band, which is why only the still path expects
+it inside the payload.
+
+#### Color signaling
+
+When neither an ICC profile nor any CICP color field is set, the `colr` box is
+**omitted entirely** (`src/lib.rs`: `colr` is written only when
+`self.colr != ColrBox::default()`) and decoders fall back to the in-band sequence
+header's signaling. Setting any of `set_color_primaries` /
+`set_transfer_characteristics` / `set_matrix_coefficients` / `set_full_range`
+writes an nclx `colr`; `set_icc_profile` writes a `prof` `colr` and takes
+precedence over nclx (the two are mutually exclusive per spec).
+
+`set_content_light_level(max_content_light_level, max_pic_average_light_level)`
+takes **MaxCLL then MaxFALL, both in cd/m² (nits)** — not the raw `clli`-box
+integers (`src/lib.rs:343`).
+
+### Signature reference
+
+```rust
+// Free function — infallible Vec path:
+pub fn serialize_to_vec(
+    color_av1_data: &[u8],
+    alpha_av1_data: Option<&[u8]>,
+    width: u32,
+    height: u32,
+    depth_bits: u8,
+) -> Vec<u8>;
+
+// Builder — same parameters, after configuring color/transforms/metadata:
+Aviffy::new()/* ...setters... */.to_vec(
+    color_av1_data: &[u8],
+    alpha_av1_data: Option<&[u8]>,
+    width: u32,
+    height: u32,
+    depth_bits: u8,
+) -> Vec<u8>;
+```
+
+Both `to_vec` and `serialize_to_vec` panic if box construction fails; on a request
+path with untrusted dimensions/depth, use `Aviffy::write` (see the server note
+above), which returns a `Result` instead.
+
 ### Animation
 
 ```rust
