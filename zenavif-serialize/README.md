@@ -64,6 +64,17 @@ let avif_bytes = Aviffy::new()
     .to_vec(&color_av1, alpha_av1.as_deref(), width, height, 10);
 ```
 
+> **Server note:** `to_vec` and `serialize_to_vec` return a `Vec<u8>` directly
+> and **panic** if box construction fails — most easily when `depth_bits` is not
+> `8`, `10`, or `12`. On a request path that handles untrusted dimensions/depth,
+> prefer `Aviffy::write`, which returns `io::Result<()>` and surfaces the failure
+> (e.g. `io::ErrorKind::InvalidInput`) instead of panicking:
+>
+> ```rust
+> let mut out = Vec::new();
+> Aviffy::new().write(&mut out, &color_av1, None, width, height, depth_bits)?;
+> ```
+
 ### Animation
 
 ```rust
