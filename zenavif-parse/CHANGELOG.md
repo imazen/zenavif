@@ -14,7 +14,19 @@
   owns the `Error`. The underlying `Error` enum, its variants, and parsing
   behavior are unchanged.
 
+### Changed
+- **Dev build: `env_logger` no longer pulls its default features** (3976225,
+  parity with upstream avif-parse 24ea3a2). Test logging only uses the builder
+  API, so dropping `auto-color`/`humantime`/`regex` trims the test-only
+  dependency graph with no behavior change. Library deps are unaffected.
+
 ### Fixed
+- **`AuxiliaryTypeProperty::type_subtype` is now panic-proof by construction**
+  (8a5b1be, parity with upstream avif-parse 3801195). The split-on-NUL used
+  `split_at(pos)` + `&rest[1..]`; the indices were always in range given a
+  `position()`-derived offset, so no panic was reachable, but the slicing now
+  uses `split_at_checked` + `get(1..).unwrap_or(rest)` so a future refactor
+  can't reintroduce one. Output is byte-identical.
 - **i686/wasm32: `calculate_frame_duration` no longer overflows on a crafted
   `stts`.** The per-entry `current_sample += entry.sample_count as usize`
   accumulator (and its comparison) could overflow 32-bit `usize` from an
