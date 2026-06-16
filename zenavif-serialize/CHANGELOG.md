@@ -9,6 +9,15 @@
   Justfile recipes `api-doc` / `api-doc-check`.
 
 ### Fixed
+- **Raw TIFF Exif is now framed with the mandatory `exif_tiff_header_offset`**
+  (0c43e53, port of upstream avif-serialize 37e6152). The HEIF/MIAF `Exif` item
+  payload must begin with a 4-byte offset to the TIFF block; previously
+  `set_exif` bytes were written verbatim, so a raw TIFF block (`II*\0`/`MM\0*` —
+  the usual form from JPEG APP1 / `kamadak-exif`) produced a malformed item whose
+  first 4 bytes a strict reader misreads as a bogus offset. Already-framed input
+  is detected and emitted unchanged; raw TIFF gets a zero-offset header prepended
+  as a separate iloc extent (payload bytes are not copied). `IlocItem.extents`
+  widened to hold up to two extents.
 - Monochrome primary images now serialize spec-correct properties: `pixi`
   declares 1 channel (was hardcoded 3), `av1C` forces
   `chroma_subsampling_x/y = 1` and seq_profile 0 (8/10-bit) or 2 (12-bit)
