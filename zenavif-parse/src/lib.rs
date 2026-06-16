@@ -3591,7 +3591,14 @@ impl ItemDataExtractor<'_> {
             let mut found = false;
             for mdat in self.mdats.iter_mut() {
                 if mdat.matches_extent(&extent.extent_range) {
-                    buf.append(&mut mdat.data).map_err(|e| at!(Error::from(e)))?;
+                    // Single-extent items (the common case) cover a whole mdat
+                    // exactly: move its buffer in instead of allocating + copying.
+                    // Multi-extent items append into an already-filled `buf`.
+                    if buf.is_empty() {
+                        *buf = core::mem::take(&mut mdat.data);
+                    } else {
+                        buf.append(&mut mdat.data).map_err(|e| at!(Error::from(e)))?;
+                    }
                     found = true;
                     break;
                 } else if mdat.contains_extent(&extent.extent_range) {
