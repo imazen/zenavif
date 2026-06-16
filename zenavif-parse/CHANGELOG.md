@@ -14,11 +14,25 @@
   owns the `Error`. The underlying `Error` enum, its variants, and parsing
   behavior are unchanged.
 
+### Added
+- **Reader entry points accept unsized readers (`&mut dyn Read`)** (c1c95e5,
+  parity with upstream avif-parse 8fc5fe0). `AvifParser::from_reader[_with_config]`
+  and the deprecated `read_avif[_with_options/_with_config]` now bound on
+  `Read + ?Sized`, so a `&mut dyn Read` trait object works without a generic
+  monomorphization per concrete reader. Pure bound relaxation — non-breaking.
+
 ### Changed
 - **Dev build: `env_logger` no longer pulls its default features** (3976225,
   parity with upstream avif-parse 24ea3a2). Test logging only uses the builder
   API, so dropping `auto-color`/`humantime`/`regex` trims the test-only
   dependency graph with no behavior change. Library deps are unaffected.
+- **`iloc` item loading moves a whole-mdat extent instead of realloc+copy**
+  (c2a92f0, parity with upstream avif-parse 440760b). When a single-extent item
+  covers an `mdat` exactly and the destination buffer is still empty, the mdat's
+  buffer is moved (`mem::take`) rather than allocating a new buffer and copying.
+  Multi-extent items still append. Output is byte-identical. (The zero-copy
+  `AvifParser` path already returns `Cow::Borrowed` for single extents; this
+  helps the owned-copy eager path.)
 
 ### Fixed
 - **`AuxiliaryTypeProperty::type_subtype` is now panic-proof by construction**
