@@ -72,18 +72,20 @@ use enough::Unstoppable;
 let config = DecoderConfig::new()
     .threads(4)
     .apply_grain(true)
-    .frame_size_limit(8192 * 8192); // cap decoded dimensions — see note below
+    .frame_size_limit(8192 * 8192); // tighten the 120 MP default — see note below
 
 let avif_data = std::fs::read("image.avif").unwrap();
 let image = decode_with(&avif_data, &config, &Unstoppable).unwrap();
 ```
 
-> **Server safety — `frame_size_limit` defaults to `0` (uncapped).** The bare
-> `decode()` entry point and a default `DecoderConfig` apply **no** width/height
-> limit, so a crafted file can request a very large frame and force a large
-> allocation. When decoding untrusted input, always call `decode_with` with an
-> explicit `.frame_size_limit(max_w * max_h)` sized to what your service accepts
-> (e.g. `8192 * 8192` ≈ 67 MP, or `12000 * 9000` ≈ 108 MP for phone photos).
+> **Server safety — `frame_size_limit` defaults to 120 MP (`120_000_000`).** The
+> bare `decode()` entry point and a default `DecoderConfig` enforce this cap
+> pre-flight, before any frame allocation, so an out-of-range frame fails fast
+> instead of forcing a large allocation. 120 MP admits ~108 MP phone photos
+> (`12000 * 9000`) while still bounding untrusted input by default. To tighten,
+> pass `.frame_size_limit(max_w * max_h)` sized to what your service accepts
+> (e.g. `8192 * 8192` ≈ 67 MP); to opt out entirely, pass
+> `.frame_size_limit(0)` (unbounded).
 
 ### Errors and cancellation
 
@@ -175,14 +177,15 @@ Speed 1-2 produce marginally smaller files but take 5-14x longer than speed 4.
 
 ### Quality parameter
 
-The `quality` parameter maps to an AV1 quantizer index:
+The `quality` parameter maps to an AV1 quantizer index. The default is **75**
+(high quality); the reference points below bracket the useful range:
 
 | Quality | Use case | Typical compression |
 |--------:|----------|:-------------------:|
 | 30 | Thumbnails, previews | 100-120x |
 | 50 | Web images (aggressive) | 40-45x |
 | 65 | Web images (balanced) | 22-25x |
-| 80 | High quality (default) | 12-14x |
+| 80 | High quality | 12-14x |
 | 95 | Near-lossless | 5-6x |
 | 100 | Lossless | 2-3x |
 
