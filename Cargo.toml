@@ -80,6 +80,10 @@ harness = false
 required-features = ["_dev"]
 
 [[example]]
+name = "avif_probe"
+required-features = ["encode"]
+
+[[example]]
 name = "mono_encode_ab"
 required-features = ["encode-imazen"]
 

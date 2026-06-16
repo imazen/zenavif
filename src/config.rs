@@ -143,6 +143,9 @@ mod tests {
     #[test]
     fn frame_size_limit_zero_opts_out() {
         let cfg = DecoderConfig::default().frame_size_limit(0);
-        assert_eq!(cfg.frame_size_limit, 0, "0 must remain the explicit opt-out");
+        assert_eq!(
+            cfg.frame_size_limit, 0,
+            "0 must remain the explicit opt-out"
+        );
     }
 }

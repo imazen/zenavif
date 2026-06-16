@@ -7,8 +7,8 @@
 //! *below* the fixture's 15 px to prove the same mechanism the 120 MP default
 //! arms; and we confirm `0` still opts out (decodes unbounded).
 
-use zenavif::{DecoderConfig, Error, decode_with};
 use enough::Unstoppable;
+use zenavif::{DecoderConfig, Error, decode_with};
 
 /// 5x3 (= 15 px) genuine monochrome AVIF, the smallest committed fixture.
 const MONO_5X3: &str = "tests/vectors/zenavif/mono_5x3_8b_full.avif";
@@ -23,7 +23,11 @@ fn over_limit_dimensions_rejected_preflight() {
     let data = std::fs::read(MONO_5X3).expect("fixture");
 
     // Sanity: with no cap the fixture decodes fine.
-    let ok = decode_with(&data, &DecoderConfig::new().frame_size_limit(0), &Unstoppable);
+    let ok = decode_with(
+        &data,
+        &DecoderConfig::new().frame_size_limit(0),
+        &Unstoppable,
+    );
     assert!(ok.is_ok(), "5x3 fixture must decode with the cap disabled");
 
     // Cap of 1 px < the fixture's pixel count → pre-flight rejection.
@@ -50,8 +54,12 @@ fn over_limit_dimensions_rejected_preflight() {
 #[test]
 fn zero_limit_opts_out_of_preflight() {
     let data = std::fs::read(MONO_5X3).expect("fixture");
-    let out = decode_with(&data, &DecoderConfig::new().frame_size_limit(0), &Unstoppable)
-        .expect("0 must opt out of the decode-side pixel cap");
+    let out = decode_with(
+        &data,
+        &DecoderConfig::new().frame_size_limit(0),
+        &Unstoppable,
+    )
+    .expect("0 must opt out of the decode-side pixel cap");
     assert_eq!((out.width(), out.height()), (5, 3));
 }
 
