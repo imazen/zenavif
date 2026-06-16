@@ -101,7 +101,17 @@ let parser = AvifParser::from_bytes_with_config(
 )?;
 ```
 
-Defaults: 1GB peak memory, 512MP total, 10k frames, 1k tiles. Use `DecodeConfig::unlimited()` to disable all limits.
+Defaults: 1GB peak memory, 512MP total, 10k frames, 1k tiles. Use `DecodeConfig::unlimited()` to disable all limits. The plain `from_bytes` / `from_owned` constructors are **not** unlimited — they apply these same defaults — but for untrusted uploads pass your own tighter `DecodeConfig` via the `_with_config` form.
+
+`&enough::Unstoppable` above is the no-op token. For real cancellation (a request deadline or shutdown), pass any [`enough::Stop`](https://docs.rs/enough); the simplest constructible token is `almost_enough::Stopper` (`cargo add almost-enough`) — `Clone`, with all clones sharing one flag:
+
+```rust
+let stopper = almost_enough::Stopper::new();
+let watch = stopper.clone();   // hand a clone to a watchdog/deadline thread
+// std::thread::spawn(move || { /* on deadline */ watch.cancel(); });
+let parser = AvifParser::from_bytes_with_config(&bytes, &config, &stopper)?;
+// once cancelled, parsing returns Err(Error::Stopped(..)).
+```
 
 ### zencodec integration (feature = "zencodec")
 
