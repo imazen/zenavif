@@ -1500,7 +1500,7 @@ impl<'data> AvifParser<'data> {
                     meta = Some(read_avif_meta(&mut b, &parse_opts)?);
                 }
                 BoxType::MovieBox => {
-                    let tracks = read_moov(&mut b)?;
+                    let tracks = read_moov(&mut b, stop)?;
                     if !tracks.is_empty() {
                         animation_data = Some(associate_tracks(tracks)?);
                     }
@@ -3225,7 +3225,7 @@ pub fn read_avif_with_config<T: Read>(
                 meta = Some(read_avif_meta(&mut b, &parse_opts)?);
             },
             BoxType::MovieBox => {
-                let tracks = read_moov(&mut b)?;
+                let tracks = read_moov(&mut b, stop)?;
                 if !tracks.is_empty() {
                     animation_data = Some(associate_tracks(tracks)?);
                 }
@@ -5025,7 +5025,10 @@ fn read_stsd<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TrackCodecConfig> {
 
 /// Parse Sample Table box (stbl)
 /// See ISO/IEC 14496-12:2015 § 8.5
-fn read_stbl<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<(SampleTable, TrackCodecConfig)> {
+fn read_stbl<T: Read>(
+    src: &mut BMFFBox<'_, T>,
+    stop: &dyn Stop,
+) -> Result<(SampleTable, TrackCodecConfig)> {
     let mut time_to_sample = TryVec::new();
     let mut sample_to_chunk = TryVec::new();
     let mut sample_sizes = TryVec::new();
@@ -5061,7 +5064,8 @@ fn read_stbl<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<(SampleTable, TrackCod
 
     // Precompute per-sample byte offsets from sample_to_chunk + chunk_offsets + sample_sizes.
     // This flattens the ISOBMFF indirection into a simple array for O(1) frame lookup.
-    let sample_offsets = precompute_sample_offsets(&sample_to_chunk, &chunk_offsets, &sample_sizes)?;
+    let sample_offsets =
+        precompute_sample_offsets(&sample_to_chunk, &chunk_offsets, &sample_sizes, stop)?;
 
     Ok((SampleTable {
         time_to_sample,
@@ -5080,6 +5084,7 @@ fn precompute_sample_offsets(
     sample_to_chunk: &TryVec<SampleToChunkEntry>,
     chunk_offsets: &TryVec<u64>,
     sample_sizes: &TryVec<u32>,
+    stop: &dyn Stop,
 ) -> Result<TryVec<u64>> {
     let mut sample_offsets = TryVec::new();
     let mut sample_idx = 0usize;
@@ -5103,6 +5108,12 @@ fn precompute_sample_offsets(
             for _ in 0..entry.samples_per_chunk {
                 if sample_idx >= sample_sizes.len() {
                     break;
+                }
+                // Cooperative cancellation: poll every 64k samples. The table is
+                // already bounded by the stsz/stco caps, but this keeps worst-case
+                // cancel latency low under the default limits.
+                if sample_idx.is_multiple_of(1 << 16) {
+                    stop.check()?;
                 }
                 sample_offsets.push(offset)?;
                 let sample_size = *sample_sizes.get(sample_idx)
@@ -5191,7 +5202,7 @@ fn read_elst<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<u32> {
 
 /// Parse animation from moov box.
 /// Returns all parsed tracks.
-fn read_moov<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<ParsedTrack>> {
+fn read_moov<T: Read>(src: &mut BMFFBox<'_, T>, stop: &dyn Stop) -> Result<TryVec<ParsedTrack>> {
     let mut tracks = TryVec::new();
 
     let mut iter = src.box_iter();
@@ -5201,7 +5212,7 @@ fn read_moov<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<ParsedTrack>> {
                 let _mvhd = read_mvhd(&mut b)?;
             }
             BoxType::TrackBox => {
-                if let Some(track) = read_trak(&mut b)? {
+                if let Some(track) = read_trak(&mut b, stop)? {
                     tracks.push(track)?;
                 }
             }
@@ -5216,7 +5227,7 @@ fn read_moov<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<ParsedTrack>> {
 
 /// Parse track box (trak).
 /// Returns a ParsedTrack if this track has a valid sample table.
-fn read_trak<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<ParsedTrack>> {
+fn read_trak<T: Read>(src: &mut BMFFBox<'_, T>, stop: &dyn Stop) -> Result<Option<ParsedTrack>> {
     let mut track_id = 0u32;
     let mut references = TryVec::new();
     let mut loop_count = 1u32; // default: play once
@@ -5243,7 +5254,7 @@ fn read_trak<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<ParsedTrack>> {
                 }
             }
             BoxType::MediaBox => {
-                mdia_result = read_mdia(&mut b)?;
+                mdia_result = read_mdia(&mut b, stop)?;
             }
             _ => {
                 skip_box_remain(&mut b)?;
@@ -5268,7 +5279,10 @@ fn read_trak<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<ParsedTrack>> {
 
 /// Parse media box (mdia).
 /// Returns (handler_type, media_timescale, sample_table, codec_config) if valid.
-fn read_mdia<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<(FourCC, u32, SampleTable, TrackCodecConfig)>> {
+fn read_mdia<T: Read>(
+    src: &mut BMFFBox<'_, T>,
+    stop: &dyn Stop,
+) -> Result<Option<(FourCC, u32, SampleTable, TrackCodecConfig)>> {
     let mut media_timescale = 1000; // default
     let mut handler_type = FourCC::default();
     let mut stbl_result: Option<(SampleTable, TrackCodecConfig)> = None;
@@ -5285,7 +5299,7 @@ fn read_mdia<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<(FourCC, u32, S
                 handler_type = hdlr.handler_type;
             }
             BoxType::MediaInformationBox => {
-                stbl_result = read_minf(&mut b)?;
+                stbl_result = read_minf(&mut b, stop)?;
             }
             _ => {
                 skip_box_remain(&mut b)?;
@@ -5380,11 +5394,14 @@ fn associate_tracks(tracks: TryVec<ParsedTrack>) -> Result<ParsedAnimationData> 
 }
 
 /// Parse media information box (minf)
-fn read_minf<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<Option<(SampleTable, TrackCodecConfig)>> {
+fn read_minf<T: Read>(
+    src: &mut BMFFBox<'_, T>,
+    stop: &dyn Stop,
+) -> Result<Option<(SampleTable, TrackCodecConfig)>> {
     let mut iter = src.box_iter();
     while let Some(mut b) = iter.next_box()? {
         if b.head.name == BoxType::SampleTableBox {
-            return Ok(Some(read_stbl(&mut b)?));
+            return Ok(Some(read_stbl(&mut b, stop)?));
         } else {
             skip_box_remain(&mut b)?;
         }
@@ -5707,7 +5724,7 @@ mod sample_offset_overflow_tests {
         sample_sizes.push(10u32).unwrap(); // first sample @ MAX-5, MAX-5+10 wraps
         sample_sizes.push(1u32).unwrap();
 
-        let result = precompute_sample_offsets(&s2c_v, &chunk_offsets, &sample_sizes);
+        let result = precompute_sample_offsets(&s2c_v, &chunk_offsets, &sample_sizes, &Unstoppable);
         match result {
             Err(Error::InvalidData(msg)) => {
                 assert_eq!(msg, "sample offset overflow");
@@ -5752,7 +5769,8 @@ mod sample_offset_overflow_tests {
         sample_sizes.push(20u32).unwrap();
         sample_sizes.push(30u32).unwrap();
 
-        let offsets = precompute_sample_offsets(&s2c_v, &chunk_offsets, &sample_sizes).unwrap();
+        let offsets =
+            precompute_sample_offsets(&s2c_v, &chunk_offsets, &sample_sizes, &Unstoppable).unwrap();
         assert_eq!(offsets.len(), 3);
         assert_eq!(*offsets.first().unwrap(), 1000);
         assert_eq!(*offsets.get(1).unwrap(), 1010);
