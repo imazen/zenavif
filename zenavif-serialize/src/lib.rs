@@ -13,15 +13,20 @@
 pub mod animated;
 mod boxes;
 pub mod constants;
+mod error;
 pub mod grid;
 mod writer;
 
 use crate::boxes::*;
 use arrayvec::ArrayVec;
 use std::io;
+use whereat::at;
+
+whereat::define_at_crate_info!();
 
 // Re-export box types needed by the public API
 pub use crate::boxes::{Av1CBox, ClapBox, ClliBox, ColrBox, ColrIccBox, IrotBox, ImirBox, MdcvBox, PaspBox};
+pub use crate::error::{Result, SerializeError};
 
 /// IPMA association flag marking a property as essential (decoders must understand it
 /// or reject the file). Used on AV1 config, irot, imir, clap.
@@ -232,7 +237,7 @@ struct GainMapConfig {
 /// Color and alpha must have the same dimensions and depth.
 ///
 /// Data is written (streamed) to `into_output`.
-pub fn serialize<W: io::Write>(into_output: W, color_av1_data: &[u8], alpha_av1_data: Option<&[u8]>, width: u32, height: u32, depth_bits: u8) -> io::Result<()> {
+pub fn serialize<W: io::Write>(into_output: W, color_av1_data: &[u8], alpha_av1_data: Option<&[u8]>, width: u32, height: u32, depth_bits: u8) -> Result<()> {
     Aviffy::new()
         .set_width(width)
         .set_height(height)
@@ -506,14 +511,18 @@ impl Aviffy {
     ///
     /// Data is written (streamed) to `into_output`.
     #[inline]
-    pub fn write<W: io::Write>(&self, into_output: W, color_av1_data: &[u8], alpha_av1_data: Option<&[u8]>, width: u32, height: u32, depth_bits: u8) -> io::Result<()> {
-        self.make_boxes(color_av1_data, alpha_av1_data, width, height, depth_bits)?.write(into_output)
+    pub fn write<W: io::Write>(&self, into_output: W, color_av1_data: &[u8], alpha_av1_data: Option<&[u8]>, width: u32, height: u32, depth_bits: u8) -> Result<()> {
+        self.make_boxes(color_av1_data, alpha_av1_data, width, height, depth_bits)?
+            .write(into_output)
+            .map_err(|e| at!(SerializeError::from(e)))
     }
 
     /// See [`Self::write`]
     #[inline]
-    pub fn write_slice<W: io::Write>(&self, into_output: W, color_av1_data: &[u8], alpha_av1_data: Option<&[u8]>) -> io::Result<()> {
-        self.make_boxes(color_av1_data, alpha_av1_data, self.width, self.height, self.bit_depth)?.write(into_output)
+    pub fn write_slice<W: io::Write>(&self, into_output: W, color_av1_data: &[u8], alpha_av1_data: Option<&[u8]>) -> Result<()> {
+        self.make_boxes(color_av1_data, alpha_av1_data, self.width, self.height, self.bit_depth)?
+            .write(into_output)
+            .map_err(|e| at!(SerializeError::from(e)))
     }
 
     fn make_boxes<'data>(
@@ -523,9 +532,9 @@ impl Aviffy {
         width: u32,
         height: u32,
         depth_bits: u8,
-    ) -> io::Result<AvifFile<'data>> {
+    ) -> Result<AvifFile<'data>> {
         if ![8, 10, 12].contains(&depth_bits) {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "depth must be 8/10/12"));
+            return Err(at!(SerializeError::InvalidInput("depth must be 8/10/12")));
         }
 
         let mut image_items = ArrayVec::new();
@@ -545,8 +554,12 @@ impl Aviffy {
             name: "",
             content_type: "",
         });
-        let ispe_prop = push_prop(&mut ipco, IpcoProp::Ispe(IspeBox { width, height }))?;
-        ipma_entries.push(self.build_color_ipma(&mut ipco, ispe_prop, color_image_id, depth_bits)?);
+        let ispe_prop = push_prop(&mut ipco, IpcoProp::Ispe(IspeBox { width, height }))
+            .map_err(|e| at!(SerializeError::from(e)))?;
+        ipma_entries.push(
+            self.build_color_ipma(&mut ipco, ispe_prop, color_image_id, depth_bits)
+                .map_err(|e| at!(SerializeError::from(e)))?,
+        );
 
         if let Some(exif_data) = self.exif.as_deref() {
             add_cdsc_sidecar(
@@ -568,14 +581,16 @@ impl Aviffy {
             self.add_alpha_track(
                 &mut image_items, &mut ipma_entries, &mut irefs, &mut iloc_items,
                 &mut ipco, ispe_prop, color_image_id, alpha_image_id, depth_bits, alpha_data,
-            )?;
+            )
+            .map_err(|e| at!(SerializeError::from(e)))?;
         }
 
         if let Some(gm) = &self.gain_map {
             add_gain_map(
                 &mut image_items, &mut ipma_entries, &mut multi_irefs, &mut iloc_items,
                 &mut ipco, &mut next_item_id, color_image_id, gm,
-            )?;
+            )
+            .map_err(|e| at!(SerializeError::from(e)))?;
         }
 
         iloc_items.push(IlocItem {

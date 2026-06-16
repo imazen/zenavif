@@ -6,27 +6,28 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenavif-serialize.txt 165 lines (supported surface) | zenavif-serialize.features.txt 0 added (features: none) | zenavif-serialize.internal.txt 24 lines (24 hidden + 0 excluded-feature)
+# files: zenavif-serialize.txt 172 lines (supported surface) | zenavif-serialize.features.txt 0 added (features: none) | zenavif-serialize.internal.txt 24 lines (24 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 4
-#   pub types (struct/enum/trait/alias)        17
+#   pub types (struct/enum/trait/alias)        19
 #   pub consts/statics                          3
 #   free functions                              3
 #   inherent methods                           54
 #   struct fields                              38
-#   enum variants                              27
-#   trait roster entries (type × trait)        61
+#   enum variants                              30
+#   trait roster entries (type × trait)        65
 #   auto-trait-complete types                  17
+#   auto-trait exceptions                       1
 #
 # per-module pub lines:
-#   (root)                           90
+#   (root)                           95
 #   animated                         18
 #   constants                        30
 #   grid                              8
 
-## items (146 lines)
+## items (151 lines)
 
 pub mod zenavif_serialize
 pub mod animated
@@ -88,6 +89,10 @@ pub fn grid::GridImage::set_color_config(&mut self, Av1CBox) -> &mut Self
 pub fn grid::GridImage::set_colr(&mut self, ColrBox) -> &mut Self
 pub fn grid::GridImage::set_depth_bits(&mut self, u8) -> &mut Self
 pub fn grid::GridImage::set_premultiplied_alpha(&mut self, bool) -> &mut Self
+#[non_exhaustive] pub enum SerializeError
+pub SerializeError::InvalidInput(&'static str)
+pub SerializeError::Io(std::io::error::Error)
+pub SerializeError::Oom
 #[non_exhaustive] pub struct Av1CBox
 pub Av1CBox::chroma_sample_position: u8
 pub Av1CBox::chroma_subsampling_x: bool
@@ -125,8 +130,8 @@ pub fn Aviffy::set_transfer_characteristics(&mut self, constants::TransferCharac
 pub fn Aviffy::set_width(&mut self, u32) -> &mut Self
 pub fn Aviffy::set_xmp(&mut self, alloc::vec::Vec<u8>) -> &mut Self
 pub fn Aviffy::to_vec(&self, &[u8], core::option::Option<&[u8]>, u32, u32, u8) -> alloc::vec::Vec<u8>
-pub fn Aviffy::write<W: std::io::Write>(&self, W, &[u8], core::option::Option<&[u8]>, u32, u32, u8) -> std::io::error::Result<()>
-pub fn Aviffy::write_slice<W: std::io::Write>(&self, W, &[u8], core::option::Option<&[u8]>) -> std::io::error::Result<()>
+pub fn Aviffy::write<W: std::io::Write>(&self, W, &[u8], core::option::Option<&[u8]>, u32, u32, u8) -> Result<()>
+pub fn Aviffy::write_slice<W: std::io::Write>(&self, W, &[u8], core::option::Option<&[u8]>) -> Result<()>
 pub struct ChromaSubsampling
 pub ChromaSubsampling::horizontal: bool
 pub ChromaSubsampling::vertical: bool
@@ -172,10 +177,11 @@ pub fn MdcvBox::new([(u16, u16); 3], (u16, u16), u32, u32) -> Self
 pub PaspBox::h_spacing: u32
 pub PaspBox::v_spacing: u32
 pub fn PaspBox::new(u32, u32) -> Self
-pub fn serialize<W: std::io::Write>(W, &[u8], core::option::Option<&[u8]>, u32, u32, u8) -> std::io::error::Result<()>
+pub fn serialize<W: std::io::Write>(W, &[u8], core::option::Option<&[u8]>, u32, u32, u8) -> Result<()>
 pub fn serialize_to_vec(&[u8], core::option::Option<&[u8]>, u32, u32, u8) -> alloc::vec::Vec<u8>
+pub type Result<T> = core::result::Result<T, whereat::at::At<SerializeError>>
 
-## trait impls (18 types)
+## trait impls (19 types)
 
 (bool, bool): From<ChromaSubsampling>
 Av1CBox: Clone, Copy, Debug, Default
@@ -189,6 +195,7 @@ ImirBox: Clone, Copy, Debug, PartialEq
 IrotBox: Clone, Copy, Debug, PartialEq
 MdcvBox: Clone, Copy, Debug, PartialEq
 PaspBox: Clone, Copy, Debug, PartialEq
+SerializeError: Debug, Display, Error, From<std::io::error::Error>
 animated::AnimFrame<'a>: Clone
 animated::AnimatedImage: Default
 constants::ColorPrimaries: Clone, Copy, Debug, Eq, PartialEq
@@ -199,3 +206,4 @@ grid::GridImage: Default
 ## auto traits
 
 17 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+SerializeError: !RefUnwindSafe !UnwindSafe

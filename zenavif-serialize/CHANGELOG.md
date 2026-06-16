@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### QUEUED BREAKING CHANGES
+<!-- Batch these into the next minor (0.x) release. -->
+- The `io::Write` muxing entry points (`serialize`, `Aviffy::write`,
+  `Aviffy::write_slice`) now return `Result<(), whereat::At<SerializeError>>`
+  instead of `io::Result<()>`, so failures carry a `file:line` source location
+  for server logs. New public `SerializeError` enum (`InvalidInput` / `Io` /
+  `Oom`) and `Result<T>` alias. Get the cause with `e.error()` / `e.decompose().0`.
+  The infallible `Vec` path (`serialize_to_vec`, `Aviffy::to_vec`) is unchanged,
+  and the per-byte `WriterBackend` write path stays bare (no per-write `At<>`
+  allocation — the crate deliberately avoids that overhead).
+
 ### Added
 - Versioned public-API surface snapshot at `docs/public-api/zenavif-serialize.txt`,
   regenerated on every `cargo test` via `tests/public_api_doc.rs`
