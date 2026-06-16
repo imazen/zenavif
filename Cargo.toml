@@ -151,6 +151,11 @@ required-features = ["__expert"]
 name = "auto_tune_smoke"
 required-features = ["auto-tune"]
 
+# Heaptrack allocation-profiling harness for the decode-from-bytes path.
+# Decode is in the default feature set (pure-Rust rav1d-safe); no extra features.
+[[example]]
+name = "heaptrack_decode"
+
 [features]
 default = []
 # Decode with hand-written assembly via C FFI (fastest, uses unsafe)

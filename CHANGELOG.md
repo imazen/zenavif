@@ -23,6 +23,19 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   stays open pending a rav1d-safe Stop hook.
 
 ### Added
+- `examples/heaptrack_decode.rs`: a reusable heaptrack/valgrind harness that
+  decodes an AVIF file from bytes via `zenavif::decode(..)` in a loop, for
+  profiling heap-allocation behaviour. Defaults to the committed
+  `tests/vectors/libavif/kodim03_yuv420_8bpc.avif` (768×512, 4:2:0 8-bit) decoded
+  8×; a path + iteration count can be passed. Driven by `just heaptrack-decode`.
+  Profiled result: heap **size** and leaks are healthy — peak 2.41 MiB (O(image)),
+  leaked pinned at ~28 across 2/8/16 iterations (one-time thread-pool statics, no
+  per-decode growth). Allocation **count** is a pathology — ~37,000/decode, of
+  which 99% are transient (0 B net) and concentrated in the **rav1d-safe** backend:
+  `compact_read_per_row` (325,917 total across 9 decodes) stages a strided plane
+  region into a fresh contiguous heap buffer per CDEF/loopfilter/intra-pred block.
+  The churn originates in the rav1d-safe dependency's safe-SIMD filter path, not
+  in zenavif's own container/YUV code. Tracked as a resource follow-up.
 - **Calibrated resource-estimation module (`heuristics`).** New
   `zenavif::heuristics` with `EncodeEstimate` (min/typical/max peak memory +
   `time_ms` + `output_bytes`), `DecodeEstimate` (peak memory + time +
