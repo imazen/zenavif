@@ -89,24 +89,24 @@ trait Offset {
 }
 
 /// Wraps a reader to track the current offset
-struct OffsetReader<'a, T> {
+struct OffsetReader<'a, T: ?Sized> {
     reader: &'a mut T,
     offset: u64,
 }
 
-impl<'a, T> OffsetReader<'a, T> {
+impl<'a, T: ?Sized> OffsetReader<'a, T> {
     fn new(reader: &'a mut T) -> Self {
         Self { reader, offset: 0 }
     }
 }
 
-impl<T> Offset for OffsetReader<'_, T> {
+impl<T: ?Sized> Offset for OffsetReader<'_, T> {
     fn offset(&self) -> u64 {
         self.offset
     }
 }
 
-impl<T: Read> Read for OffsetReader<'_, T> {
+impl<T: Read + ?Sized> Read for OffsetReader<'_, T> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let bytes_read = self.reader.read(buf)?;
         self.offset = self
@@ -1484,7 +1484,7 @@ impl<'data> AvifParser<'data> {
     }
 
     /// Parse AVIF from a reader (reads all bytes, then parses).
-    pub fn from_reader<R: Read>(reader: &mut R) -> Result<AvifParser<'static>> {
+    pub fn from_reader<R: Read + ?Sized>(reader: &mut R) -> Result<AvifParser<'static>> {
         AvifParser::from_reader_with_config(reader, &DecodeConfig::default(), &Unstoppable)
     }
 
@@ -1492,7 +1492,7 @@ impl<'data> AvifParser<'data> {
     ///
     /// If `config.peak_memory_limit` is set, reading is capped at that many
     /// bytes to prevent unbounded allocation from an untrusted reader.
-    pub fn from_reader_with_config<R: Read>(
+    pub fn from_reader_with_config<R: Read + ?Sized>(
         reader: &mut R,
         config: &DecodeConfig,
         stop: &dyn Stop,
@@ -3240,7 +3240,7 @@ impl<'a> ResourceTracker<'a> {
 #[cfg(feature = "eager")]
 #[deprecated(since = "1.5.0", note = "Use `AvifParser::from_reader_with_config()` instead")]
 #[allow(deprecated)]
-pub fn read_avif_with_config<T: Read>(
+pub fn read_avif_with_config<T: Read + ?Sized>(
     f: &mut T,
     config: &DecodeConfig,
     stop: &dyn Stop,
@@ -3838,7 +3838,7 @@ fn extract_animation(
 #[cfg(feature = "eager")]
 #[deprecated(since = "1.5.0", note = "Use `AvifParser::from_reader_with_config()` with `DecodeConfig::lenient()` instead")]
 #[allow(deprecated)]
-pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Result<AvifData> {
+pub fn read_avif_with_options<T: Read + ?Sized>(f: &mut T, options: &ParseOptions) -> Result<AvifData> {
     let config = DecodeConfig::unlimited().lenient(options.lenient);
     read_avif_with_config(f, &config, &Unstoppable)
 }
@@ -3853,7 +3853,7 @@ pub fn read_avif_with_options<T: Read>(f: &mut T, options: &ParseOptions) -> Res
 #[cfg(feature = "eager")]
 #[deprecated(since = "1.5.0", note = "Use `AvifParser::from_reader()` instead")]
 #[allow(deprecated)]
-pub fn read_avif<T: Read>(f: &mut T) -> Result<AvifData> {
+pub fn read_avif<T: Read + ?Sized>(f: &mut T) -> Result<AvifData> {
     read_avif_with_options(f, &ParseOptions::default())
 }
 

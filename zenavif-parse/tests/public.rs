@@ -254,6 +254,20 @@ fn parser_from_reader_primary() {
 }
 
 #[test]
+fn parser_from_reader_accepts_dyn_read() {
+    // The reader entry points accept unsized readers (`&mut dyn Read`), not just
+    // concrete `R: Read`. This would fail to compile without `R: Read + ?Sized`.
+    // Parity with upstream avif-parse 8fc5fe0.
+    let mut file = File::open(IMAGE_AVIF).expect("Unknown file");
+    let reader: &mut dyn std::io::Read = &mut file;
+    let parser = zenavif_parse::AvifParser::from_reader(reader)
+        .expect("from_reader(&mut dyn Read) failed");
+
+    let primary = parser.primary_data().expect("primary_data failed");
+    assert_eq!(primary.len(), 6979);
+}
+
+#[test]
 fn parser_from_owned_with_config() {
     let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
     let config = zenavif_parse::DecodeConfig::default();
