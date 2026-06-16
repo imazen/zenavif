@@ -951,10 +951,43 @@ struct SampleToChunkEntry {
     _sample_description_index: u32,
 }
 
+/// Per-sample byte sizes from the `stsz` box.
+///
+/// A constant-size table (`sample_size != 0`) stores only `(size, count)`, so
+/// it is represented without materializing `count` copies — a malformed ~12-byte
+/// `stsz` could otherwise declare `count = 64M` and force a 256 MB allocation
+/// from nothing (the box-size cross-check that bounds the variable branch does
+/// not apply to the constant branch). Sizes are synthesized on access instead.
+#[derive(Debug)]
+enum SampleSizes {
+    /// Every sample has the same size.
+    Constant { size: u32, count: usize },
+    /// Explicit per-sample sizes (length-bounded by the box bytes).
+    Variable(TryVec<u32>),
+}
+
+impl SampleSizes {
+    /// Number of samples in the table.
+    fn len(&self) -> usize {
+        match self {
+            SampleSizes::Constant { count, .. } => *count,
+            SampleSizes::Variable(v) => v.len(),
+        }
+    }
+
+    /// Size in bytes of sample `i`, or `None` if `i` is out of range.
+    fn get(&self, i: usize) -> Option<u32> {
+        match self {
+            SampleSizes::Constant { size, count } => (i < *count).then_some(*size),
+            SampleSizes::Variable(v) => v.get(i).copied(),
+        }
+    }
+}
+
 #[derive(Debug)]
 struct SampleTable {
     time_to_sample: TryVec<TimeToSampleEntry>,
-    sample_sizes: TryVec<u32>,
+    sample_sizes: SampleSizes,
     /// Precomputed byte offset for each sample, derived from
     /// sample_to_chunk + chunk_offsets + sample_sizes during parsing.
     sample_offsets: TryVec<u64>,
@@ -2253,7 +2286,7 @@ impl<'data> AvifParser<'data> {
             .sample_offsets
             .get(index)
             .ok_or_else(|| at!(Error::InvalidData("sample index out of bounds")))?;
-        let size = *st
+        let size = st
             .sample_sizes
             .get(index)
             .ok_or_else(|| at!(Error::InvalidData("sample index out of bounds")))?;
@@ -4925,39 +4958,41 @@ fn read_stsc<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<SampleToChunkEn
 
 /// Parse Sample Size box (stsz)
 /// See ISO/IEC 14496-12:2015 § 8.7.3
-fn read_stsz<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<u32>> {
+fn read_stsz<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<SampleSizes> {
     let _version = src.read_u8().map_err(|e| at!(Error::from(e)))?;
     let _flags = [src.read_u8().map_err(|e| at!(Error::from(e)))?, src.read_u8().map_err(|e| at!(Error::from(e)))?, src.read_u8().map_err(|e| at!(Error::from(e)))?];
     let sample_size = be_u32(src)?;
     let sample_count = be_u32(src)?;
 
     // Cap sample_count to avoid multi-GB allocations from malformed data.
-    // 64M entries * 4 bytes = 256 MB, a generous upper bound for real AVIF files.
+    // 64M is a generous upper bound for real AVIF files.
     const MAX_SAMPLE_COUNT: u32 = 64 * 1024 * 1024;
     if sample_count > MAX_SAMPLE_COUNT {
         return Err(at!(Error::InvalidData("stsz sample_count exceeds maximum")));
     }
 
-    let mut sizes = TryVec::new();
     if sample_size == 0 {
-        // Variable sizes: each entry is 4 bytes
+        // Variable sizes: each entry is 4 box bytes, so the box size bounds the
+        // count — read each one.
         if (sample_count as u64) * 4 > src.bytes_left() {
             return Err(at!(Error::InvalidData(
                 "stsz sample_count exceeds remaining box bytes",
             )));
         }
-        // Variable sizes - read each one
+        let mut sizes = TryVec::new();
         for _ in 0..sample_count {
             sizes.push(be_u32(src)?).map_err(|e| at!(Error::from(e)))?;
         }
+        Ok(SampleSizes::Variable(sizes))
     } else {
-        // Constant size for all samples
-        for _ in 0..sample_count {
-            sizes.push(sample_size).map_err(|e| at!(Error::from(e)))?;
-        }
+        // Constant size for all samples: store (size, count) directly instead
+        // of materializing `count` copies, so a tiny box (8 bytes of payload)
+        // cannot amplify into a 256 MB allocation.
+        Ok(SampleSizes::Constant {
+            size: sample_size,
+            count: sample_count as usize,
+        })
     }
-
-    Ok(sizes)
 }
 
 /// Parse Chunk Offset box (stco or co64)
@@ -5059,7 +5094,7 @@ fn read_stbl<T: Read>(
 ) -> Result<(SampleTable, TrackCodecConfig)> {
     let mut time_to_sample = TryVec::new();
     let mut sample_to_chunk = TryVec::new();
-    let mut sample_sizes = TryVec::new();
+    let mut sample_sizes = SampleSizes::Variable(TryVec::new());
     let mut chunk_offsets = TryVec::new();
     let mut codec_config = TrackCodecConfig::default();
 
@@ -5111,7 +5146,7 @@ fn read_stbl<T: Read>(
 fn precompute_sample_offsets(
     sample_to_chunk: &TryVec<SampleToChunkEntry>,
     chunk_offsets: &TryVec<u64>,
-    sample_sizes: &TryVec<u32>,
+    sample_sizes: &SampleSizes,
     stop: &dyn Stop,
 ) -> Result<TryVec<u64>> {
     let mut sample_offsets = TryVec::new();
@@ -5144,7 +5179,7 @@ fn precompute_sample_offsets(
                     stop.check().map_err(|e| at!(Error::from(e)))?;
                 }
                 sample_offsets.push(offset).map_err(|e| at!(Error::from(e)))?;
-                let sample_size = *sample_sizes.get(sample_idx)
+                let sample_size = sample_sizes.get(sample_idx)
                     .ok_or_else(|| at!(Error::InvalidData("sample index mismatch")))?;
                 offset = offset.checked_add(sample_size as u64)
                     .ok_or_else(|| at!(Error::InvalidData("sample offset overflow")))?;
@@ -5464,7 +5499,7 @@ fn extract_animation_frames(
     for i in 0..sample_table.sample_sizes.len() {
         let sample_offset = *sample_table.sample_offsets.get(i)
             .ok_or_else(|| at!(Error::InvalidData("sample offset index out of bounds")))?;
-        let sample_size = *sample_table.sample_sizes.get(i)
+        let sample_size = sample_table.sample_sizes.get(i)
             .ok_or_else(|| at!(Error::InvalidData("sample size index out of bounds")))?;
         let duration_ms = frame_durations.get(i).copied().unwrap_or(0);
 
@@ -5752,7 +5787,8 @@ mod sample_offset_overflow_tests {
         sample_sizes.push(10u32).unwrap(); // first sample @ MAX-5, MAX-5+10 wraps
         sample_sizes.push(1u32).unwrap();
 
-        let result = precompute_sample_offsets(&s2c_v, &chunk_offsets, &sample_sizes, &Unstoppable);
+        let result =
+            precompute_sample_offsets(&s2c_v, &chunk_offsets, &SampleSizes::Variable(sample_sizes), &Unstoppable);
         // Unwrap the `At<Error>` location wrapper to match on the inner `Error`.
         match result.map_err(|e| e.decompose().0) {
             Err(Error::InvalidData(msg)) => {
@@ -5775,7 +5811,7 @@ mod sample_offset_overflow_tests {
         sample_sizes.push(10u32).unwrap(); // MAX-5 + 10 wraps
         let sample_table = SampleTable {
             time_to_sample: TryVec::new(),
-            sample_sizes,
+            sample_sizes: SampleSizes::Variable(sample_sizes),
             sample_offsets,
         };
         let mut mdats: [MediaDataBox; 0] = [];
@@ -5800,10 +5836,27 @@ mod sample_offset_overflow_tests {
         sample_sizes.push(30u32).unwrap();
 
         let offsets =
-            precompute_sample_offsets(&s2c_v, &chunk_offsets, &sample_sizes, &Unstoppable).unwrap();
+            precompute_sample_offsets(&s2c_v, &chunk_offsets, &SampleSizes::Variable(sample_sizes), &Unstoppable)
+                .unwrap();
         assert_eq!(offsets.len(), 3);
         assert_eq!(*offsets.first().unwrap(), 1000);
         assert_eq!(*offsets.get(1).unwrap(), 1010);
         assert_eq!(*offsets.get(2).unwrap(), 1030);
+    }
+
+    /// #8: a constant-size stsz declaring a huge sample count must NOT
+    /// materialize one entry per sample (a ~12-byte box could otherwise force a
+    /// 256 MB allocation). The constant variant stores only (size, count) and
+    /// synthesizes sizes on access.
+    #[test]
+    fn constant_sample_sizes_do_not_allocate_per_sample() {
+        let sizes = SampleSizes::Constant {
+            size: 1,
+            count: 64 * 1024 * 1024, // 64M — would be 256 MB if materialized
+        };
+        assert_eq!(sizes.len(), 64 * 1024 * 1024);
+        assert_eq!(sizes.get(0), Some(1));
+        assert_eq!(sizes.get(64 * 1024 * 1024 - 1), Some(1));
+        assert_eq!(sizes.get(64 * 1024 * 1024), None);
     }
 }
