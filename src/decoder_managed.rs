@@ -104,6 +104,16 @@ fn convert_chroma_sampling(layout: PixelLayout) -> ChromaSampling {
 /// Managed decoder wrapper - 100% safe!
 pub struct ManagedAvifDecoder {
     decoder: Rav1dDecoder,
+    // TODO(whereat): every `self.parser.<m>(...)` (and the `AvifParser::from_owned_with_config`
+    // constructor) is currently consumed via `.map_err(|e| at!(Error::from(e)))?`. That is
+    // correct today: zenavif-parse (0.6.x) returns a *bare* `Error`, so `at!` is what starts
+    // the trace. When zenavif-parse begins returning `At<Error>` (the planned >=0.6.3
+    // trace-carrying release), switch those boundaries to `.map_err_at(Error::from)?` so the
+    // parser-side trace is preserved instead of discarded and re-started here. This mirrors the
+    // way ravif consumes the same parser. Sites in this file (line numbers may drift):
+    //   from_owned_with_config (~136), primary_data (~229, ~268, ~311), alpha_data
+    //   (~239, ~278, ~321), primary_metadata (~514), frame (~653, ~1471),
+    //   tile_data (~742, ~1204, ~1324).
     parser: zenavif_parse::AvifParser<'static>,
     prefer_8bit: bool,
     /// When true, alpha-free monochrome images decode to native Gray8 /
