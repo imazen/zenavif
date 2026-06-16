@@ -2199,9 +2199,14 @@ impl<'data> AvifParser<'data> {
         timescale: u32,
         index: usize,
     ) -> Result<u32> {
-        let mut current_sample = 0;
+        let mut current_sample: usize = 0;
         for entry in &st.time_to_sample {
-            if current_sample + entry.sample_count as usize > index {
+            // `sample_count` is attacker-controlled (stts box). Use saturating
+            // adds so a crafted table whose counts sum past usize::MAX cannot
+            // overflow on 32-bit targets (i686/wasm32). Saturation is correct
+            // here: sample indices are monotonic, so a saturated accumulator is
+            // still `> index` and the comparison stays well-defined.
+            if current_sample.saturating_add(entry.sample_count as usize) > index {
                 let duration_ms = if timescale > 0 {
                     ((entry.sample_delta as u64) * 1000) / (timescale as u64)
                 } else {
@@ -2209,7 +2214,7 @@ impl<'data> AvifParser<'data> {
                 };
                 return Ok(u32::try_from(duration_ms).unwrap_or(u32::MAX));
             }
-            current_sample += entry.sample_count as usize;
+            current_sample = current_sample.saturating_add(entry.sample_count as usize);
         }
         Ok(0)
     }

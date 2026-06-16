@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Fixed
+- **i686/wasm32: `calculate_frame_duration` no longer overflows on a crafted
+  `stts`.** The per-entry `current_sample += entry.sample_count as usize`
+  accumulator (and its comparison) could overflow 32-bit `usize` from an
+  attacker-controlled time-to-sample table, panicking in debug or wrapping in
+  release on 32-bit targets. Now uses `saturating_add` — semantically identical
+  on 64-bit (sums never approach `usize::MAX`), overflow-safe on 32-bit.
 - **`size=0` (extends-to-EOF) boxes parse again** (imazen/zenavif#16,
   f3c9f043): the OOM clamp added in 4fdc077 bounds the box reader to the
   bytes actually available, but `skip_box_content` still compared the
