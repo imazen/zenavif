@@ -581,8 +581,11 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
             );
         }
         if let Some(mdcv) = self.mastering_display {
-            // Convert from f32 CIE xy (0.0–1.0) to 0.16 fixed-point (u16)
-            let xy_to_u16 = |v: f32| (v * 65535.0 + 0.5) as u16;
+            // ST 2086 (the mdcv box): f32 CIE xy (0.0–1.0) → 0.00002 units
+            // (×50000), u16, stored verbatim by ravif/the box; the decoder
+            // reads ×0.00002. (Was ×65535 — off by 1.31× vs spec, and broke
+            // round-trip against our own decoder.)
+            let xy_to_u16 = |v: f32| (v * 50000.0 + 0.5) as u16;
             config = config.mastering_display(crate::MasteringDisplayConfig {
                 primaries: [
                     (
@@ -602,10 +605,10 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
                     xy_to_u16(mdcv.white_point_xy[0]),
                     xy_to_u16(mdcv.white_point_xy[1]),
                 ),
-                // 24.8 fixed-point: multiply by 256
-                max_luminance: (mdcv.max_luminance * 256.0 + 0.5) as u32,
-                // 18.14 fixed-point: multiply by 16384
-                min_luminance: (mdcv.min_luminance * 16384.0 + 0.5) as u32,
+                // ST 2086: cd/m² → 0.0001 units (×10000). (Was ×256.)
+                max_luminance: (mdcv.max_luminance * 10000.0 + 0.5) as u32,
+                // ST 2086: cd/m² → 0.0001 units (×10000). (Was ×16384.)
+                min_luminance: (mdcv.min_luminance * 10000.0 + 0.5) as u32,
             });
         }
         // Apply rotation/mirror from orientation metadata
