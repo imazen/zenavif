@@ -747,7 +747,9 @@ pub struct IlocBox<'data> {
 #[derive(Debug, Clone)]
 pub struct IlocItem<'data> {
     pub id: u16,
-    pub extents: [IlocExtent<'data>; 1],
+    /// Usually one extent. Raw TIFF Exif uses two: a 4-byte
+    /// `exif_tiff_header_offset` header followed by the TIFF payload.
+    pub extents: ArrayVec<IlocExtent<'data>, 2>,
 }
 
 #[derive(Debug, Copy, Clone)]

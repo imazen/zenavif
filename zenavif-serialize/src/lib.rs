@@ -43,12 +43,12 @@ fn add_cdsc_sidecar<'data>(
     primary_id: u16,
     typ: FourCC,
     content_type: &'static str,
-    data: &'data [u8],
+    extents: ArrayVec<IlocExtent<'data>, 2>,
 ) {
     let id = *next_item_id;
     *next_item_id += 1;
     image_items.push(InfeBox { id, typ, name: "", content_type });
-    iloc_items.push(IlocItem { id, extents: [IlocExtent { data }] });
+    iloc_items.push(IlocItem { id, extents });
     irefs.push(IrefEntryBox {
         from_id: id,
         to_id: primary_id,
@@ -99,7 +99,7 @@ fn add_gain_map<'data>(
     });
     iloc_items.push(IlocItem {
         id: gain_map_id,
-        extents: [IlocExtent { data: &gm.av1_data }],
+        extents: from_array([IlocExtent { data: &gm.av1_data }]),
     });
 
     image_items.push(InfeBox {
@@ -117,7 +117,7 @@ fn add_gain_map<'data>(
     }
     iloc_items.push(IlocItem {
         id: tmap_id,
-        extents: [IlocExtent { data: &gm.metadata }],
+        extents: from_array([IlocExtent { data: &gm.metadata }]),
     });
 
     // Single iref entry with reference_count=2 so the parser assigns reference_index
@@ -552,14 +552,14 @@ impl Aviffy {
             add_cdsc_sidecar(
                 &mut image_items, &mut iloc_items, &mut irefs,
                 &mut next_item_id, color_image_id,
-                FourCC(*b"Exif"), "", exif_data,
+                FourCC(*b"Exif"), "", exif_extents(exif_data),
             );
         }
         if let Some(xmp_data) = self.xmp.as_deref() {
             add_cdsc_sidecar(
                 &mut image_items, &mut iloc_items, &mut irefs,
                 &mut next_item_id, color_image_id,
-                FourCC(*b"mime"), "application/rdf+xml", xmp_data,
+                FourCC(*b"mime"), "application/rdf+xml", from_array([IlocExtent { data: xmp_data }]),
             );
         }
 
@@ -580,7 +580,7 @@ impl Aviffy {
 
         iloc_items.push(IlocItem {
             id: color_image_id,
-            extents: [IlocExtent { data: color_av1_data }],
+            extents: from_array([IlocExtent { data: color_av1_data }]),
         });
 
         Ok(AvifFile {
@@ -741,7 +741,7 @@ impl Aviffy {
         // Alpha-first iloc order lets a partial decode show alpha before color.
         iloc_items.push(IlocItem {
             id: alpha_image_id,
-            extents: [IlocExtent { data: alpha_data }],
+            extents: from_array([IlocExtent { data: alpha_data }]),
         });
         Ok(())
     }
@@ -843,6 +843,48 @@ fn from_array<const L1: usize, const L2: usize, T: Copy>(array: [T; L1]) -> Arra
     tmp
 }
 
+/// The 4-byte `exif_tiff_header_offset` prefix that a HEIF/MIAF Exif item must
+/// carry ahead of its TIFF block. Zero means the TIFF starts right after it.
+const EXIF_TIFF_OFFSET_ZERO: [u8; 4] = 0_u32.to_be_bytes();
+
+/// Build the iloc extents for an `Exif` item.
+///
+/// The HEIF/MIAF Exif item format requires the payload to begin with a 4-byte
+/// `exif_tiff_header_offset`. If the caller already supplied a framed item (the
+/// offset prefix plus a TIFF header where it points), it's emitted unchanged.
+/// Otherwise the input is treated as a raw TIFF block and the zero-offset header
+/// is prepended as a separate extent, so the original bytes aren't copied.
+fn exif_extents(exif: &[u8]) -> ArrayVec<IlocExtent<'_>, 2> {
+    if looks_like_heif_exif_item(exif) {
+        return from_array([IlocExtent { data: exif }]);
+    }
+
+    from_array([
+        IlocExtent { data: &EXIF_TIFF_OFFSET_ZERO },
+        IlocExtent { data: exif },
+    ])
+}
+
+/// Whether `exif` already starts with a 4-byte `exif_tiff_header_offset` that
+/// points at a TIFF header (i.e. it's an already-framed HEIF/MIAF Exif item).
+fn looks_like_heif_exif_item(exif: &[u8]) -> bool {
+    let Some(offset_bytes) = exif.get(..4) else {
+        return false;
+    };
+    let tiff_offset = u32::from_be_bytes(offset_bytes.try_into().unwrap()) as usize;
+    let Some(tiff_start) = 4_usize.checked_add(tiff_offset) else {
+        return false;
+    };
+
+    exif.get(tiff_start..).is_some_and(looks_like_tiff_header)
+}
+
+/// Whether `data` begins with a little-endian (`II*\0`) or big-endian (`MM\0*`)
+/// TIFF byte-order marker.
+fn looks_like_tiff_header(data: &[u8]) -> bool {
+    data.starts_with(b"II\x2a\0") || data.starts_with(b"MM\0\x2a")
+}
+
 /// See [`serialize`] for description. This one makes a `Vec` instead of using `io::Write`.
 #[must_use]
 #[track_caller]
@@ -877,13 +919,97 @@ fn test_roundtrip_parse_exif() {
     let test_img = b"av12356abc";
     let test_a = b"alpha";
     let avif = Aviffy::new()
-        .set_exif(b"lol".to_vec())
+        .set_exif(test_tiff_exif())
         .to_vec(test_img, Some(test_a), 10, 20, 8);
 
     let ctx = mp4parse::read_avif(&mut avif.as_slice(), mp4parse::ParseStrictness::Normal).unwrap();
 
     assert_eq!(&test_img[..], ctx.primary_item_coded_data().unwrap());
     assert_eq!(&test_a[..], ctx.alpha_item_coded_data().unwrap());
+}
+
+#[test]
+fn set_exif_stores_input_bytes_unchanged() {
+    // `set_exif` must not pre-frame: framing happens at serialization time.
+    let tiff_exif = test_tiff_exif();
+    let mut aviffy = Aviffy::new();
+    aviffy.set_exif(tiff_exif.clone());
+    assert_eq!(Some(tiff_exif), aviffy.exif);
+}
+
+#[test]
+fn raw_tiff_exif_uses_header_extent() {
+    // Raw TIFF input gets a 4-byte zero `exif_tiff_header_offset` prepended as a
+    // separate extent (the payload bytes are not copied).
+    let tiff_exif = test_tiff_exif();
+    let extents = exif_extents(&tiff_exif);
+
+    assert_eq!(2, extents.len());
+    assert_eq!(&EXIF_TIFF_OFFSET_ZERO[..], extents[0].data);
+    assert_eq!(tiff_exif.as_slice(), extents[1].data);
+}
+
+#[test]
+fn heif_exif_item_uses_single_extent() {
+    // Already-framed HEIF/MIAF Exif item is emitted unchanged.
+    let expected = test_heif_exif(&test_tiff_exif());
+    let extents = exif_extents(&expected);
+
+    assert_eq!(1, extents.len());
+    assert_eq!(expected.as_slice(), extents[0].data);
+}
+
+#[test]
+fn heif_exif_item_with_nonzero_offset_uses_single_extent() {
+    // A non-zero offset that still points at a TIFF header is treated as framed.
+    let mut expected = 2_u32.to_be_bytes().to_vec();
+    expected.extend_from_slice(&[0, 0]);
+    expected.extend_from_slice(&test_tiff_exif());
+    let extents = exif_extents(&expected);
+
+    assert_eq!(1, extents.len());
+    assert_eq!(expected.as_slice(), extents[0].data);
+}
+
+#[test]
+fn writes_heif_exif_header_before_raw_tiff_exif() {
+    // End-to-end: the serialized file contains the framed `[0u32][TIFF]` bytes.
+    let tiff_exif = test_tiff_exif();
+    let expected = test_heif_exif(&tiff_exif);
+    let avif = Aviffy::new().set_exif(tiff_exif).to_vec(b"av12356abc", None, 10, 20, 8);
+
+    assert!(avif.windows(expected.len()).any(|window| window == expected));
+}
+
+#[cfg(test)]
+fn test_heif_exif(tiff_exif: &[u8]) -> Vec<u8> {
+    let mut heif_exif = 0_u32.to_be_bytes().to_vec();
+    heif_exif.extend_from_slice(tiff_exif);
+    heif_exif
+}
+
+/// A minimal but structurally valid little-endian TIFF Exif block (`II*\0` …).
+#[cfg(test)]
+fn test_tiff_exif() -> Vec<u8> {
+    let make = b"zenavif-serialize\0";
+    let ifd0_offset = 8_u32;
+    let ifd0_entry_count = 1_u16;
+    let make_value_offset = 8 + 2 + 12 + 4;
+
+    let mut exif = Vec::new();
+    exif.extend_from_slice(b"II");
+    exif.extend_from_slice(&42_u16.to_le_bytes());
+    exif.extend_from_slice(&ifd0_offset.to_le_bytes());
+
+    exif.extend_from_slice(&ifd0_entry_count.to_le_bytes());
+    exif.extend_from_slice(&0x010f_u16.to_le_bytes());
+    exif.extend_from_slice(&2_u16.to_le_bytes());
+    exif.extend_from_slice(&(make.len() as u32).to_le_bytes());
+    exif.extend_from_slice(&(make_value_offset as u32).to_le_bytes());
+    exif.extend_from_slice(&0_u32.to_le_bytes());
+    exif.extend_from_slice(make);
+
+    exif
 }
 
 #[test]
