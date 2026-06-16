@@ -7,7 +7,12 @@ pub struct DecoderConfig {
     pub(crate) threads: u32,
     /// Whether to apply film grain synthesis
     pub(crate) apply_grain: bool,
-    /// Maximum frame size limit in pixels (0 = no limit)
+    /// Maximum decoded frame size in total pixels (width * height).
+    ///
+    /// Enforced pre-flight against the container's declared dimensions, before
+    /// any decode work or frame allocation. Defaults to 120_000_000 (120 MP,
+    /// admits ~108 MP photos) so untrusted decode is bounded by default.
+    /// `0` is the explicit opt-out — no decode-side pixel limit.
     pub(crate) frame_size_limit: u32,
     /// CPU feature flags mask (bitwise AND with detected features).
     /// Use to disable SIMD paths for testing. Default: all enabled.
@@ -33,8 +38,17 @@ impl Default for DecoderConfig {
             // frame threading overhead.
             threads: 0,
             apply_grain: true,
-            frame_size_limit: 0,
+            // Bound untrusted decode by default: 120 MP (admits ~108 MP photos).
+            // The enforcement at `decoder_managed.rs` / `decoder.rs` only fires
+            // when this is > 0, so this default is what makes the pre-flight
+            // dimension check actually run for `decode()` / `DecoderConfig::default()`.
+            // Use `frame_size_limit(0)` to opt out (unbounded).
+            frame_size_limit: 120_000_000,
             cpu_flags_mask: u32::MAX,
+            // `None` here does NOT mean "unbounded": the parser is constructed
+            // from `zenavif_parse::DecodeConfig::default()`, which carries its
+            // own sane caps (512 MP / 1 GB peak / 10k frames / 1k tiles). These
+            // overrides only *tighten* below the parser's defaults when set.
             parser_peak_memory_limit: None,
             parser_total_megapixels_limit: None,
             parser_max_animation_frames: None,
@@ -68,8 +82,10 @@ impl DecoderConfig {
 
     /// Set maximum frame size limit in total pixels
     ///
-    /// If width * height exceeds this limit, decoding will fail.
-    /// 0 means no limit.
+    /// If width * height exceeds this limit, decoding fails pre-flight with
+    /// [`Error::ImageTooLarge`](crate::Error::ImageTooLarge) before any frame
+    /// is allocated. Defaults to `120_000_000` (120 MP). Pass `0` to opt out
+    /// (no decode-side pixel limit).
     pub fn frame_size_limit(mut self, limit: u32) -> Self {
         self.frame_size_limit = limit;
         self
@@ -101,5 +117,35 @@ impl DecoderConfig {
     pub fn prefer_8bit(mut self, prefer: bool) -> Self {
         self.prefer_8bit = prefer;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression for imazen/zenavif#22 (decode fail-open): the default decode
+    /// pixel cap must be 120 MP, not `0` (unbounded). Because the pre-flight
+    /// dimension check in `decoder_managed.rs` / `decoder.rs` only fires when
+    /// `frame_size_limit > 0`, a `0` default left untrusted `decode()` unbounded.
+    #[test]
+    fn default_frame_size_limit_is_120mp_not_unbounded() {
+        assert_eq!(
+            DecoderConfig::default().frame_size_limit,
+            120_000_000,
+            "default decode frame_size_limit must be 120 MP so untrusted decode is bounded (zenavif#22)"
+        );
+        assert_eq!(DecoderConfig::new().frame_size_limit, 120_000_000);
+    }
+
+    /// The explicit opt-out must still work: `frame_size_limit(0)` disables the
+    /// decode-side pixel cap (preserves the documented `0 = unlimited` escape).
+    #[test]
+    fn frame_size_limit_zero_opts_out() {
+        let cfg = DecoderConfig::default().frame_size_limit(0);
+        assert_eq!(
+            cfg.frame_size_limit, 0,
+            "0 must remain the explicit opt-out"
+        );
     }
 }
