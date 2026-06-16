@@ -63,6 +63,14 @@ decode-test:
     mkdir -p /mnt/v/output/zenavif/test
     cargo run --release --example decode_avif -- {{justfile_directory()}}/../../aom-decode/tests/test.avif /mnt/v/output/zenavif/test/test.png
 
+# Profile decode-from-bytes heap allocations with heaptrack (needs heaptrack installed).
+# Defaults to the committed kodim03_yuv420_8bpc.avif (768x512) decoded 8x; pass a path +
+# iters to override. Inspect with: heaptrack_print /tmp/zenavif-ht.zst
+heaptrack-decode *ARGS:
+    cargo build -p zenavif --release --example heaptrack_decode
+    rm -f /tmp/zenavif-ht.zst
+    heaptrack --output /tmp/zenavif-ht ./target/release/examples/heaptrack_decode {{ARGS}}
+
 # Cross-test i686 (32-bit x86)
 test-i686:
     cross test --target i686-unknown-linux-gnu
