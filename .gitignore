@@ -119,3 +119,4 @@ benchmarks/zenavif_features_v05c_*.tsv
 benchmarks/rav1e_phase1a_2026-04-30.parquet
 benchmarks/rav1e_phase1a_hybrid_*.json
 benchmarks/zenavif_hybrid_v2_*.json
+.cargo/config.toml

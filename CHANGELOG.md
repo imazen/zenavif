@@ -11,6 +11,15 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 ## [Unreleased]
 
 ### Changed
+- **Preserve the encoder's whereat trace across the ravif boundary.** The
+  `encode_*` paths now convert ravif (zenravif) errors with
+  `.map_err_at(|e| Error::Encode(e.to_string())).at_crate(…)` instead of
+  `at!(Error::Encode(e.to_string()))`. The old form started a *fresh* trace and
+  discarded ravif's frames; `map_err_at` keeps the underlying `At<ravif::Error>`
+  trace (the originating encode site) and `at_crate` annotates the zenavif
+  boundary. Also bumps the `ravif`/`zenravif` dep to `0.2.0` (its `At<Error>`
+  public-error API) — the conversion now takes the inner `ravif::Error` via
+  `map_err_at`, which both preserves the trace and matches the new signature.
 - **Decode is bounded by default (closes the decode fail-open part of #22).**
   `DecoderConfig::default()` now defaults `frame_size_limit` to `120_000_000`
   (120 MP, admits ~108 MP photos) instead of `0`. The pre-flight dimension

@@ -28,7 +28,7 @@ bytemuck = { version = "1.25.0", default-features = false, features = ["derive"]
 thiserror = { version = "2.0.18", default-features = false }
 whereat = { version = "0.1.5"}
 log = "0.4.29"
-ravif = { package = "zenravif", version = "0.1.3", default-features = false, optional = true, features = ["stop"] }
+ravif = { package = "zenravif", version = "0.2.0", path = "../ravif/ravif", default-features = false, optional = true, features = ["stop"] }
 # Optional auto-tune deps — gated on `auto-tune` feature, off by default.
 # Path-pinned to the sibling checkout (CI clones ../zenanalyze); reqs track the
 # sibling's 0.2.0 — crates.io still has 0.1.0/0.1.x, so a registry release of

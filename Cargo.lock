@@ -1953,9 +1953,9 @@ dependencies = [
 
 [[package]]
 name = "zenpixels"
-version = "0.2.13"
+version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7337f9cebf33aabd9bf27b8bd87f883a18d276b64a36b139c53eb077e1089b7f"
+checksum = "515b2d87c361de4a3c1e4131a1de03d9cceab59cf599ac48235d46e60ef1768d"
 dependencies = [
  "bytemuck",
  "imgref",
@@ -1965,9 +1965,9 @@ dependencies = [
 
 [[package]]
 name = "zenpixels-convert"
-version = "0.2.13"
+version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab45d752d4211a62c95c3e8bf3a6959ccab1fa8c3ae47ea4ee6584d93614332f"
+checksum = "c49c5c25ca3577cef11f12f594a9966297d949c1a801f3a79ca9f5df74a09fa2"
 dependencies = [
  "archmage",
  "bytemuck",
@@ -2031,9 +2031,7 @@ dependencies = [
 
 [[package]]
 name = "zenravif"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51edf23ff0690e4a7c3c7df67ee2143709f9bf33ecb8785cfffa33bba95ac314"
+version = "0.2.0"
 dependencies = [
  "almost-enough",
  "imgref",
@@ -2041,6 +2039,7 @@ dependencies = [
  "quick-error",
  "rayon",
  "rgb",
+ "whereat",
  "zenavif-serialize",
  "zenrav1e",
 ]
