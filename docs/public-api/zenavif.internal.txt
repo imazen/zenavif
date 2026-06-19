@@ -11,11 +11,11 @@
 #
 #   pub modules                                 8
 #   pub types (struct/enum/trait/alias)        11
-#   free functions                             21
-#   inherent methods                           62
-#   struct fields                              27
+#   free functions                             22
+#   inherent methods                           65
+#   struct fields                              28
 #   enum variants                              27
-#   trait roster entries (type × trait)        56
+#   trait roster entries (type × trait)        58
 #   auto-trait-complete types                  11
 #
 # per-module pub lines:
@@ -23,14 +23,14 @@
 #   detect                            4
 #   expert                            9
 #   simd                              3
-#   sweep                            79
+#   sweep                            84
 #   yuv_convert                      32
 #   yuv_convert_fast                  1
 #   yuv_convert_libyuv                3
 #   yuv_convert_libyuv_autovec        1
 #   yuv_convert_libyuv_simd           1
 
-## items (156 lines)
+## items (161 lines)
 
 #[non_exhaustive] pub enum sweep::KnobProbe
 #[non_exhaustive] pub struct expert::InternalParams
@@ -80,17 +80,21 @@ pub fn sweep::SweepAxes::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt:
 pub fn sweep::SweepAxes::modes_full() -> Self
 pub fn sweep::SweepAxes::modes_full_alpha() -> Self
 pub fn sweep::SweepAxes::rd_core() -> Self
+pub fn sweep::SweepAxes::scalar_dense() -> Self
 pub fn sweep::SweepBuilder::clone(&self) -> sweep::SweepBuilder
 pub fn sweep::SweepBuilder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn sweep::SweepBuilder::new(sweep::SweepAxes, sweep::QualityGrid) -> Self
 pub fn sweep::SweepBuilder::plan(&self) -> sweep::SweepPlan
 pub fn sweep::SweepBuilder::with_budget(self, usize) -> Self
+pub fn sweep::SweepBuilder::with_compute_limit(self, u8) -> Self
+pub fn sweep::SweepBuilder::with_max_deviations(self, u8) -> Self
 pub fn sweep::SweepCell::clone(&self) -> sweep::SweepCell
 pub fn sweep::SweepCell::feature_row(&self, PlanInput) -> alloc::vec::Vec<f64>
 pub fn sweep::SweepCell::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn sweep::SweepPlan::clone(&self) -> sweep::SweepPlan
 pub fn sweep::SweepPlan::encodes(&self, usize, usize) -> usize
 pub fn sweep::SweepPlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn sweep::compute_tier(&EncoderConfig) -> u8
 pub fn sweep::config_from_cell_id(&str, f32) -> core::result::Result<EncoderConfig, alloc::string::String>
 pub fn sweep::feature_columns() -> &'static [&'static str]
 pub fn sweep::fingerprint(&EncoderConfig) -> u64
@@ -175,6 +179,7 @@ pub sweep::SweepCell::fingerprint: u64
 pub sweep::SweepCell::id: alloc::string::String
 pub sweep::SweepCell::quality: f32
 pub sweep::SweepPlan::cells: alloc::vec::Vec<sweep::SweepCell>
+pub sweep::SweepPlan::compute_tier_skipped: alloc::vec::Vec<alloc::string::String>
 pub sweep::SweepPlan::dropped: alloc::vec::Vec<sweep::DroppedAxis>
 pub sweep::SweepPlan::duplicates_merged: usize
 pub sweep::SweepPlan::invalid_skipped: alloc::vec::Vec<alloc::string::String>
@@ -189,7 +194,7 @@ pub yuv_convert::YuvMatrix::Bt709
 pub yuv_convert::YuvRange::Full
 pub yuv_convert::YuvRange::Limited
 
-## trait impls (29 types)
+## trait impls (31 types)
 
 Av1Backend: TrivialClone
 ChromaSampling: TrivialClone
@@ -210,6 +215,8 @@ TransferCharacteristics: TrivialClone
 detect::ChromaSampling: TrivialClone
 detect::Confidence: TrivialClone
 expert::InternalParams: Clone, Debug, Default
+heuristics::DecodeEstimate: TrivialClone
+heuristics::EncodeEstimate: TrivialClone
 sweep::DroppedAxis: Clone, Debug
 sweep::KnobProbe: Clone, Copy, Debug, PartialEq, TrivialClone
 sweep::QualityGrid: Clone, Debug

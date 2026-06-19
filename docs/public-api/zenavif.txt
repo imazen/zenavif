@@ -6,27 +6,28 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenavif.txt 248 lines (supported surface) | zenavif.features.txt 259 added (features: auto-tune,encode,encode-asm,encode-imazen,encode-threading,unsafe-asm,zencodec) | zenavif.internal.txt 186 lines (43 hidden + 258 excluded-feature)
+# files: zenavif.txt 263 lines (supported surface) | zenavif.features.txt 259 added (features: auto-tune,encode,encode-asm,encode-imazen,encode-threading,unsafe-asm,zencodec) | zenavif.internal.txt 193 lines (45 hidden + 263 excluded-feature)
 
 ## summary
 #
-#   pub modules                                 2
-#   pub types (struct/enum/trait/alias)        23
+#   pub modules                                 3
+#   pub types (struct/enum/trait/alias)        25
 #   pub consts/statics                         43
-#   free functions                              6
+#   free functions                              8
 #   inherent methods                           19
-#   struct fields                              78
+#   struct fields                              86
 #   enum variants                              42
 #   re-exports                                 12
-#   trait roster entries (type × trait)        77
-#   auto-trait-complete types                  19
+#   trait roster entries (type × trait)        83
+#   auto-trait-complete types                  21
 #   auto-trait exceptions                       3
 #
 # per-module pub lines:
-#   (root)                          183
+#   (root)                          184
 #   detect                           42
+#   heuristics                       12
 
-## items (224 lines)
+## items (237 lines)
 
 pub mod zenavif
 pub use CleanAperture
@@ -83,6 +84,19 @@ pub detect::QualityEstimate::confidence: detect::Confidence
 pub detect::QualityEstimate::estimated_quality: f32
 pub detect::QualityEstimate::quantizer: u8
 pub fn detect::probe(&[u8]) -> core::result::Result<detect::AvifProbe, detect::ProbeError>
+pub mod heuristics
+#[non_exhaustive] pub struct heuristics::DecodeEstimate
+pub heuristics::DecodeEstimate::output_bytes: u64
+pub heuristics::DecodeEstimate::peak_memory_bytes: u64
+pub heuristics::DecodeEstimate::time_ms: f32
+#[non_exhaustive] pub struct heuristics::EncodeEstimate
+pub heuristics::EncodeEstimate::output_bytes: u64
+pub heuristics::EncodeEstimate::peak_memory_bytes: u64
+pub heuristics::EncodeEstimate::peak_memory_bytes_max: u64
+pub heuristics::EncodeEstimate::peak_memory_bytes_min: u64
+pub heuristics::EncodeEstimate::time_ms: f32
+pub fn heuristics::estimate_decode(u32, u32, u8) -> core::option::Option<heuristics::DecodeEstimate>
+pub fn heuristics::estimate_encode(u32, u32, u8, u8) -> core::option::Option<heuristics::EncodeEstimate>
 pub enum ChromaSampling [also: detect]
 pub ChromaSampling::Cs420
 pub ChromaSampling::Cs422
@@ -253,7 +267,7 @@ pub fn decode_av1_obu(&[u8]) -> Result<(alloc::vec::Vec<u8>, u32, u32, u8)>
 pub fn decode_with(&[u8], &DecoderConfig, &impl enough::Stop + ?core::marker::Sized) -> Result<zenpixels::buffer::PixelBuffer>
 pub type Result<T, E> = core::result::Result<T, E>
 
-## trait impls (20 types)
+## trait impls (22 types)
 
 AvifDepthMap: Clone, Debug
 AvifGainMap: Clone, Debug
@@ -275,10 +289,12 @@ detect::Confidence: Clone, Copy, Debug, Eq, PartialEq
 detect::ProbeError: Clone, Debug, Display, Eq, Error, PartialEq
 detect::QualityEstimate: Clone, Debug
 detect::Recommendation: Clone, Debug, Eq, PartialEq
+heuristics::DecodeEstimate: Clone, Copy, Debug
+heuristics::EncodeEstimate: Clone, Copy, Debug
 
 ## auto traits
 
-19 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+21 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 AnimationDecoder: !RefUnwindSafe !UnwindSafe
 Error: !RefUnwindSafe !UnwindSafe
 ManagedAvifDecoder: !RefUnwindSafe !UnwindSafe

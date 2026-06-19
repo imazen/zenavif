@@ -378,6 +378,96 @@ impl SweepAxes {
             KnobProbe::AlphaMode(crate::EncodeAlphaMode::Premultiplied),
         ]
     }
+
+    /// Dense, isolated single-axis ladders over the CONTINUOUS knobs,
+    /// every CATEGORICAL axis pinned to its production default — the data
+    /// a trained **scalar head** (a per-knob continuous regression in the
+    /// picker pipeline) needs to fit `knob_value × quality → outcome`
+    /// (VARIANT_GENERATION patterns 17–18). Unlike
+    /// [`modes_full`](Self::modes_full) (which crosses every mode to map
+    /// *interactions* and explodes combinatorially), this preset samples
+    /// each continuous axis *densely enough to fit a curve* while leaving
+    /// the others at default, so a
+    /// [`SweepBuilder::with_max_deviations`]`(1)` plan is one isolated
+    /// ladder per knob — not a cartesian blow-up.
+    ///
+    /// Continuous axes covered (bounds/provenance in the module-docs
+    /// table):
+    ///
+    /// - **speed** — the dense `2..=10` ladder (default `4` first), every
+    ///   step the user can dial. Speed is the dominant term of
+    ///   [`compute_tier`] (and is INVERTED: a *higher* speed number is
+    ///   *faster*/cheaper, so the dense speed ladder is also the dense
+    ///   *compute* axis — each step is a distinct tier). Speed `1` is
+    ///   omitted (≈4× the cost of `2` for marginal RD movement, per the
+    ///   2026-04-16 sweep) and `0` is below the user range.
+    /// - **VAQ strength** — the `vaq` axis (`Option<f64>`): default `None`
+    ///   (off) first, then a dense strength ladder. `1.0` is excluded —
+    ///   it is the structural no-op (byte-identical to off; zenrav1e
+    ///   `api/internal.rs:1379`) and would dedupe back onto the default
+    ///   cell, so the ladder never double-encodes the default.
+    /// - **seg_boost** — the [`KnobProbe::SegBoost`] scalar: a dense
+    ///   ladder spanning the de-boost (`< 1.0`) and boost (`> 1.0`)
+    ///   directions. `1.0` (= off) is excluded for the same no-op reason.
+    ///   Its values stay value-DISJOINT from the VAQ-strength ladder:
+    ///   `seg_boost(x)` and `vaq_strength(x)` are byte-identical at equal
+    ///   `x` on still encodes (the still-envelope equivalence proven by
+    ///   the 2026-06-12 harness — both are the same log-domain exponent
+    ///   on `spatiotemporal_scores`), so a shared value would be a
+    ///   duplicate encode the fingerprint deliberately does not merge.
+    ///
+    /// Pair with [`SweepBuilder::with_max_deviations`]`(1)` and a dense
+    /// quality grid ([`QualityGrid::TrainingDense`]) for one clean
+    /// per-knob response curve across the quality range.
+    #[must_use]
+    pub fn scalar_dense() -> Self {
+        // CATEGORICAL axes pinned to their production defaults (the
+        // index-0 / default stratum): speed-default qm ON, 4:4:4, Auto
+        // bit-depth, YCbCr, trellis OFF, no deep-knob probes beyond the
+        // seg_boost ladder. Every cell is therefore a single deviation on
+        // exactly one continuous axis.
+        let mut speeds = vec![4u8];
+        // Dense compute/RD ladder over the usable speed range (default 4
+        // first, then the rest of 2..=10). Each value is a distinct
+        // compute_tier (speed is inverted — higher = faster = lower tier).
+        speeds.extend([2u8, 3, 5, 6, 7, 8, 9, 10]);
+
+        // VAQ-strength ladder on the `vaq` axis: None (default/off) first,
+        // then dense strengths. 1.0 excluded (structural no-op — aliases
+        // off). Values chosen disjoint from the seg_boost ladder below.
+        let mut vaq: Vec<Option<f64>> = vec![None];
+        vaq.extend(
+            [0.25f64, 0.5, 0.75, 1.5, 2.0, 2.5, 3.0, 4.0]
+                .into_iter()
+                .map(Some),
+        );
+
+        // seg_boost ladder on the probe axis: None (default/off) first,
+        // then dense boosts/de-boosts. 1.0 excluded (= off). Disjoint from
+        // the vaq strengths so the union effective dial is alias-free.
+        let probes = vec![
+            KnobProbe::None,
+            KnobProbe::SegBoost(0.6),
+            KnobProbe::SegBoost(0.8),
+            KnobProbe::SegBoost(1.2),
+            KnobProbe::SegBoost(1.6),
+            KnobProbe::SegBoost(2.2),
+            KnobProbe::SegBoost(2.8),
+            KnobProbe::SegBoost(3.4),
+            KnobProbe::SegBoost(4.0),
+        ];
+
+        Self {
+            speeds,
+            qm: vec![true],
+            subsampling: vec![EncodeChromaSubsampling::Yuv444],
+            bit_depths: vec![EncodeBitDepth::Auto],
+            color_models: vec![EncodeColorModel::YCbCr],
+            vaq,
+            trellis: vec![false],
+            probes,
+        }
+    }
 }
 
 // ============================================================================
@@ -599,6 +689,11 @@ pub struct SweepPlan {
     /// Stratum ids rejected by `EncoderConfig::validate()` (e.g.
     /// 4:2:0 × RGB).
     pub invalid_skipped: Vec<String>,
+    /// Cell ids dropped because their [`compute_tier`] exceeded the
+    /// [`SweepBuilder::with_compute_limit`] budget — the explicit
+    /// no-silent-caps report for the compute constraint (empty when no
+    /// limit was set).
+    pub compute_tier_skipped: Vec<String>,
     /// Mode axes collapsed to fit the budget — the explicit
     /// no-silent-caps report.
     pub dropped: Vec<DroppedAxis>,
@@ -622,6 +717,60 @@ impl SweepPlan {
 }
 
 // ============================================================================
+// Compute-resource tier
+// ============================================================================
+
+/// Coarse compute-cost tier of a config (`0` = cheapest). Higher tiers
+/// run more encoder passes or wider searches and cost more CPU per
+/// encode. Used by [`SweepBuilder::with_compute_limit`] to keep a sweep
+/// inside a compute budget, and public so the fleet harness and pickers
+/// can bound their candidate set the same way zenavif's `auto_tune`
+/// bounds its speed range. It is an **ordinal proxy**, not a calibrated
+/// millisecond estimate — compare tiers, don't read absolute cost into
+/// them.
+///
+/// ## The AV1 `speed` dial is INVERTED
+///
+/// zenravif's `speed` runs `1..=10` where **higher `speed` = FASTER =
+/// LESS compute** (`speed` 1 is slowest/best, 10 is fastest/worst — see
+/// [`EncoderConfig::speed`]). Lower speed numbers unlock the expensive
+/// searches (`sgr_complexity_full`/`segmentation_complex` at speed ≤ 2,
+/// `rdo_tx_decision` at speed ≤ 4, wider partition ranges, etc. —
+/// `encode_plan::speed_derived`), so a tier that *increased* with the
+/// `speed` number would be exactly backwards. The tier therefore inverts
+/// it: `MAX_SPEED − speed`, so slow/expensive `speed` 2 ⇒ a large base
+/// tier (`8`) and fast/cheap `speed` 10 ⇒ `0`.
+///
+/// ## Mapping
+///
+/// - **speed** (dominant term): `MAX_SPEED.saturating_sub(speed)` with
+///   `MAX_SPEED = 10` — so `speed` 10 → +0, 8 → +2, 4 → +6, 2 → +8.
+/// - **trellis** on: **+2** — the zenrav1e Viterbi coefficient search is
+///   a full extra optimization pass over every block.
+/// - **QM** on: **+1** — quantization-matrix derivation/application is a
+///   real (small) additional pass.
+///
+/// VAQ/seg_boost add no term: under the psychovisual/still tunes
+/// zenravif always uses, the activity mask is computed regardless, and
+/// these knobs only rescale it (no extra pass) — see
+/// [`EncoderConfig::vaq`](struct.EncoderConfig.html) / the module-docs
+/// table.
+#[must_use]
+pub fn compute_tier(config: &EncoderConfig) -> u8 {
+    /// zenravif's maximum (fastest/cheapest) speed preset; the tier
+    /// inverts against this so the number is monotone in CPU cost.
+    const MAX_SPEED: u8 = 10;
+    let mut tier = MAX_SPEED.saturating_sub(config.speed_value());
+    if config.trellis_effective() {
+        tier = tier.saturating_add(2);
+    }
+    if config.qm_effective() {
+        tier = tier.saturating_add(1);
+    }
+    tier
+}
+
+// ============================================================================
 // Builder
 // ============================================================================
 
@@ -632,6 +781,8 @@ pub struct SweepBuilder {
     axes: SweepAxes,
     grid: QualityGrid,
     budget: Option<usize>,
+    compute_limit: Option<u8>,
+    max_deviations: Option<u8>,
 }
 
 impl SweepBuilder {
@@ -642,6 +793,8 @@ impl SweepBuilder {
             axes,
             grid,
             budget: None,
+            compute_limit: None,
+            max_deviations: None,
         }
     }
 
@@ -657,6 +810,66 @@ impl SweepBuilder {
         self
     }
 
+    /// Constrain the plan to cells whose [`compute_tier`] is `<= max_tier`,
+    /// dropping the more expensive cells (recorded in
+    /// [`SweepPlan::compute_tier_skipped`], never silently). This is the
+    /// compute-resource constraint: a fleet with a tight CPU budget, or a
+    /// picker bounding its search to "fast" configs, asks for the cheap
+    /// end of the knob space. Because the speed dial is inverted (see
+    /// [`compute_tier`]), this keeps the FAST/high-speed cells and drops
+    /// the slow ones — `with_compute_limit(2)` keeps roughly speed ≥ 8.
+    /// Composes with [`with_budget`](Self::with_budget) (the compute
+    /// filter is applied first, then the budget ladder reduces whatever
+    /// remains).
+    #[must_use]
+    pub fn with_compute_limit(mut self, max_tier: u8) -> Self {
+        self.compute_limit = Some(max_tier);
+        self
+    }
+
+    /// Keep only cells within `max_deviations` axes of the default
+    /// stratum. `1` = main-effects only (the all-defaults cell plus every
+    /// single-axis probe, no interaction combos) — the isolated-axis
+    /// regime a trained **scalar head** trains on. Pair with
+    /// [`SweepAxes::scalar_dense`] for dense per-knob response curves
+    /// without the cartesian blow-up of the full cross.
+    #[must_use]
+    pub fn with_max_deviations(mut self, max_deviations: u8) -> Self {
+        self.max_deviations = Some(max_deviations);
+        self
+    }
+
+    /// Cross + apply the user constraints (compute-tier limit, then
+    /// deviation scope). Returns `(cells, invalid_skipped,
+    /// duplicates_merged, compute_tier_skipped)`.
+    fn build_cells(
+        &self,
+        axes: &SweepAxes,
+        q_points: &[f32],
+    ) -> (Vec<SweepCell>, Vec<String>, usize, Vec<String>) {
+        let (mut cells, invalid_skipped, duplicates_merged) = cross(axes, q_points);
+        let mut compute_tier_skipped = Vec::new();
+        if let Some(max_tier) = self.compute_limit {
+            cells.retain(|c| {
+                if compute_tier(&c.config) <= max_tier {
+                    true
+                } else {
+                    compute_tier_skipped.push(c.id.clone());
+                    false
+                }
+            });
+        }
+        if let Some(max_dev) = self.max_deviations {
+            cells.retain(|c| c.deviations <= max_dev);
+        }
+        (
+            cells,
+            invalid_skipped,
+            duplicates_merged,
+            compute_tier_skipped,
+        )
+    }
+
     /// Build the plan.
     #[must_use]
     pub fn plan(&self) -> SweepPlan {
@@ -667,7 +880,8 @@ impl SweepBuilder {
         let mut over_budget = false;
 
         loop {
-            let (cells, invalid_skipped, duplicates_merged) = cross(&axes, &q_points);
+            let (cells, invalid_skipped, duplicates_merged, compute_tier_skipped) =
+                self.build_cells(&axes, &q_points);
 
             let within = match self.budget {
                 None => true,
@@ -677,6 +891,7 @@ impl SweepBuilder {
                 return SweepPlan {
                     cells,
                     invalid_skipped,
+                    compute_tier_skipped,
                     dropped,
                     duplicates_merged,
                     q_coarsenings,
@@ -705,10 +920,12 @@ impl SweepBuilder {
 
             // Nothing left to reduce: report rather than sample.
             over_budget = true;
-            let (cells, invalid_skipped, duplicates_merged) = cross(&axes, &q_points);
+            let (cells, invalid_skipped, duplicates_merged, compute_tier_skipped) =
+                self.build_cells(&axes, &q_points);
             return SweepPlan {
                 cells,
                 invalid_skipped,
+                compute_tier_skipped,
                 dropped,
                 duplicates_merged,
                 q_coarsenings,
@@ -1165,6 +1382,7 @@ impl SweepAxes {
             "rd_core" => Some(Self::rd_core()),
             "modes_full" => Some(Self::modes_full()),
             "modes_full_alpha" => Some(Self::modes_full_alpha()),
+            "scalar_dense" => Some(Self::scalar_dense()),
             _ => None,
         }
     }
@@ -1847,6 +2065,87 @@ mod tests {
         assert!(SweepAxes::by_name("rd_core").is_some());
         assert!(SweepAxes::by_name("modes_full").is_some());
         assert!(SweepAxes::by_name("modes_full_alpha").is_some());
+        assert!(SweepAxes::by_name("scalar_dense").is_some());
         assert!(SweepAxes::by_name("nonsense").is_none());
+    }
+
+    #[test]
+    fn scalar_dense_is_isolated_and_speed_ladder_is_dense() {
+        let plan = SweepBuilder::new(SweepAxes::scalar_dense(), QualityGrid::Explicit(vec![50.0]))
+            .with_max_deviations(1)
+            .plan();
+        // Isolation: nothing beyond a single-axis deviation survives, so
+        // every probe is a clean per-knob response point for a scalar head.
+        assert!(
+            plan.cells.iter().all(|c| c.deviations <= 1),
+            "scalar_dense + max_deviations(1) must be main-effects only"
+        );
+        // Density of the COMPUTE (speed) axis: the dense speed ladder must
+        // surface ≥ 6 distinct compute tiers among the plan's cells —
+        // proof that the user's requested dense speed coverage is present.
+        let mut tiers: Vec<u8> = plan.cells.iter().map(|c| compute_tier(&c.config)).collect();
+        tiers.sort_unstable();
+        tiers.dedup();
+        assert!(
+            tiers.len() >= 6,
+            "speed ladder not dense enough: only {} distinct compute tiers {:?}",
+            tiers.len(),
+            tiers
+        );
+    }
+
+    #[test]
+    fn compute_tier_respects_speed_inversion() {
+        // The AV1 speed dial is INVERTED: higher speed = faster = cheaper.
+        // A fast speed (8) MUST yield a strictly smaller tier than a slow
+        // speed (2). Asserted explicitly so the inversion can never
+        // silently regress to "tier increases with the speed number".
+        let fast = EncoderConfig::new().quality(50.0).speed(8).threads(Some(1));
+        let slow = EncoderConfig::new().quality(50.0).speed(2).threads(Some(1));
+        assert!(
+            compute_tier(&fast) < compute_tier(&slow),
+            "INVERSION BROKEN: speed 8 (fast) tier {} must be < speed 2 (slow) tier {}",
+            compute_tier(&fast),
+            compute_tier(&slow),
+        );
+        // And the cheapest preset (fastest speed, qm off, no trellis) is
+        // the tier-0 floor.
+        let floor = EncoderConfig::new()
+            .quality(50.0)
+            .speed(10)
+            .threads(Some(1))
+            .with_qm(false);
+        assert_eq!(compute_tier(&floor), 0, "speed 10 + no-qm is the floor");
+        // Trellis adds real cost on top of the speed term.
+        let trel = slow.clone().with_trellis(Some(true));
+        assert!(
+            compute_tier(&trel) > compute_tier(&slow),
+            "trellis (extra coefficient pass) must raise the tier"
+        );
+    }
+
+    #[test]
+    fn with_compute_limit_drops_expensive_and_reports() {
+        let unlimited =
+            SweepBuilder::new(SweepAxes::modes_full(), QualityGrid::Explicit(vec![75.0])).plan();
+        let limited = SweepBuilder::new(SweepAxes::modes_full(), QualityGrid::Explicit(vec![75.0]))
+            .with_compute_limit(3)
+            .plan();
+        assert!(
+            !limited.cells.is_empty(),
+            "tier ≤ 3 (the fast/high-speed end) cells must survive"
+        );
+        assert!(
+            limited.cells.len() < unlimited.cells.len(),
+            "the compute limit must drop the expensive (slow-speed/trellis) cells"
+        );
+        assert!(
+            limited.cells.iter().all(|c| compute_tier(&c.config) <= 3),
+            "every surviving cell must be within the compute budget"
+        );
+        assert!(
+            !limited.compute_tier_skipped.is_empty(),
+            "dropped cells must be reported, never silently capped"
+        );
     }
 }

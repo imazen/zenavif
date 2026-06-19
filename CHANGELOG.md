@@ -32,6 +32,19 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   stays open pending a rav1d-safe Stop hook.
 
 ### Added
+- **Sweep generator: trained-scalar-head + compute-budget surface**
+  (`__expert`, VARIANT_GENERATION patterns 17–18). `SweepAxes::scalar_dense()`
+  gives each CONTINUOUS knob a dense isolated ladder (speed `2..=10`,
+  VAQ-strength, seg_boost) with every categorical axis pinned to its
+  production default — the per-knob response curves a scalar regression head
+  fits; pair with `with_max_deviations(1)`. `compute_tier(&EncoderConfig) -> u8`
+  is the ordinal CPU-cost proxy, driven primarily by speed **inverted** (AV1
+  `speed` is higher-is-faster, so tier = `10 − speed`; +2 trellis, +1 QM).
+  `SweepBuilder::with_compute_limit(max_tier)` drops cells over budget (the
+  fast/high-speed end survives), reported in the new
+  `SweepPlan::compute_tier_skipped` field — no silent caps.
+  `SweepBuilder::with_max_deviations(max)` scopes to main-effects-only.
+  `scalar_dense` is resolvable via `SweepAxes::by_name`. All additive.
 - `examples/heaptrack_decode.rs`: a reusable heaptrack/valgrind harness that
   decodes an AVIF file from bytes via `zenavif::decode(..)` in a loop, for
   profiling heap-allocation behaviour. Defaults to the committed
