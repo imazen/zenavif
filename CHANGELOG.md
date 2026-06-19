@@ -31,6 +31,21 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   (512 MP / 1 GB peak). The frame-granularity cancellation sub-point of #22
   stays open pending a rav1d-safe Stop hook.
 
+### Fixed
+- **Preserve whereat traces across the decode strip-conversion / animation
+  boundaries.** Three decode-path sites discarded the inner `At<Error>` trace
+  with `.map_err(|e| e.decompose().0)?` (`codec.rs` streaming `next_batch` +
+  `render_next_frame`, and `decoder_managed.rs` `decode_to_sink`). They now use
+  `.at()?`, which keeps the originating trace (`StripConverter::convert_strip` /
+  `AnimationDecoder::next_frame`) and adds a frame at the propagation site. New
+  `tests/whereat_trace_preservation.rs` drives a corrupt and a truncated AVIF
+  through `decode_with` and asserts the surfaced error carries a non-empty trace
+  (`frame_count() >= 1`). The parser boundaries (`parser.frame` / `tile_data` /
+  `primary_data`, etc.) keep `at!(Error::from(e))` — zenavif-parse `0.6.2`
+  returns a *bare* `Error`, so `at!` correctly starts the trace there (matching
+  the in-file `TODO(whereat)`); they switch to `map_err_at` only once
+  zenavif-parse ships its `At<Error>` API.
+
 ### Added
 - **Sweep generator: trained-scalar-head + compute-budget surface**
   (`__expert`, VARIANT_GENERATION patterns 17–18). `SweepAxes::scalar_dense()`

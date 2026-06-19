@@ -16,7 +16,7 @@ use crate::image::{
 use crate::yuv_convert::{self, YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRange};
 use enough::Stop;
 use rgb::{Rgb, Rgba};
-use whereat::at;
+use whereat::{ResultAtExt as _, at};
 use yuv::{YuvGrayImage, YuvPlanarImage, YuvRange, YuvStandardMatrix};
 use zenpixels::{PixelBuffer, PixelDescriptor};
 
@@ -1267,9 +1267,7 @@ impl ManagedAvifDecoder {
                 strip_pixels = PixelBuffer::new(width, h as u32, desc);
             }
 
-            converter
-                .convert_strip(y_offset, h, &mut strip_pixels)
-                .map_err(|e| e.decompose().0)?;
+            converter.convert_strip(y_offset, h, &mut strip_pixels).at()?;
 
             // Copy converted rows to sink buffer
             let mut sink_buf = sink

@@ -34,7 +34,7 @@ use zenpixels::{ChannelType, ColorAuthority, PixelBuffer, PixelDescriptor, Pixel
 use zenpixels_convert::PixelBufferConvertTypedExt as _;
 
 use crate::error::Error;
-use whereat::{At, at};
+use whereat::{At, ResultAtExt as _, at};
 
 /// Convert a [`zencodec::ThreadingPolicy`] to a concrete thread count.
 ///
@@ -3607,7 +3607,7 @@ impl zencodec::decode::StreamingDecode for AvifStreamingDecoder {
 
             converter
                 .convert_strip(self.y_offset as usize, h as usize, strip_buf)
-                .map_err(|e| e.decompose().0)?;
+                .at()?;
 
             let y = self.y_offset;
             self.y_offset += h;
@@ -3686,10 +3686,7 @@ impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
     ) -> Result<Option<AnimationFrame<'_>>, At<Error>> {
         let stop: &dyn zencodec::enough::Stop = stop.unwrap_or(&enough::Unstoppable);
         loop {
-            let frame = self
-                .anim_decoder
-                .next_frame(stop)
-                .map_err(|e| e.decompose().0)?;
+            let frame = self.anim_decoder.next_frame(stop).at()?;
             let Some(frame) = frame else {
                 return Ok(None);
             };
