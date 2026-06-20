@@ -10,6 +10,14 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### QUEUED BREAKING CHANGES
+<!-- Drop when zencodec 0.1.24 publishes. -->
+- Remove the `[patch.crates-io] zencodec = { git, rev = "0f71295" }` pin and
+  lower the `zencodec` dependency req from `0.1.24` back to a published
+  `^0.1.24`. The patch pins zencodec to the unreleased `estimate` API
+  (the published zencodec is `0.1.23`; bumping the req to `0.1.24` forces only
+  the git rev to satisfy it).
+
 ### Changed
 - **Preserve the encoder's whereat trace across the ravif boundary.** The
   `encode_*` paths now convert ravif (zenravif) errors with
@@ -47,6 +55,15 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   zenavif-parse ships its `At<Error>` API.
 
 ### Added
+- **vCPU-aware resource estimation via zencodec's unified `estimate` API.**
+  `AvifEncoderConfig::estimate_encode_resources(&ImageCharacteristics,
+  &ComputeEnvironment)` overrides the `zencodec::encode::EncoderConfig` default,
+  delegating to the calibrated `heuristics::estimate_encode` (memory / time /
+  output, keyed on the AV1 `speed` preset + input bytes-per-pixel) and folding
+  in core count via `ResourceEstimate::at_cores`. The crate's local
+  `heuristics::ThreadingInfo` is kept (decoupled from the optional `zencodec`
+  dep so a decode-only build still compiles) and mapped onto the shared
+  `zencodec::estimate::ThreadingInformation` only at the trait-impl boundary.
 - **Sweep generator: trained-scalar-head + compute-budget surface**
   (`__expert`, VARIANT_GENERATION patterns 17–18). `SweepAxes::scalar_dense()`
   gives each CONTINUOUS knob a dense isolated ladder (speed `2..=10`,
