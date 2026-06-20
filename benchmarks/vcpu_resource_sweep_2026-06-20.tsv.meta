@@ -1,0 +1,32 @@
+# vCPU resource sweep — zenavif (peak mem / peak heap / wall vs THREAD COUNT)
+date: 2026-06-20
+host: lilith
+cpu: AMD Ryzen 9 7950X 16-Core Processor
+ram: 59 GiB
+base_commit: 7697b87 (origin/main)
+jj_change: wvuxysomsvnz
+bin: target/release/examples/avif_probe  (built --features encode,encode-threading — encode-threading REQUIRED or threads no-op)
+source: downscale-only Lanczos ladder /tmp/jxl_vcpu_imgs/{256,1024,2048}.png (4032x3024 photo)
+grid: sizes {256,1024,2048}^2 × rav1e speed {6,10} (0=slowest..10=fastest) × threads {1,2,4,8,16,28}; q75, 8-bit rgb
+threading: zenavif wraps zenravif/AV1, natively TILE-parallel; EncoderConfig.threads(Some(n)) -> dedicated pool; tiles are mutable VIEWS into ONE shared FrameState (per-tile scratch small), so peak RSS ~thread-invariant. (the 'effort' column holds rav1e speed; path='lossy'.)
+measure: ONE PROCESS PER CELL, run-heavy (cgroup MemoryMax 32G), SERIAL, GLIBC_TUNABLES=glibc.malloc.mmap_threshold=131072.
+  - clean run (6 thread points): VmHWM delta (marginal WS) + VmHWM peak (peak RSS) + wall/user/sys + est_* (heuristics::estimate_encode, thread-independent) in-row.
+  - heaptrack run (threads {1,8,28}): allocator PEAK_HEAP + peak RSS.
+note: AVIF output bytes change SLIGHTLY with thread count (tile-count boundaries) — expected, not a bug.
+reproducer:
+  cargo build --release -p zenavif --features encode,encode-threading --example avif_probe
+  run-heavy --mem 32G -- bash scripts/vcpu_resource_sweep.sh target/release/examples/avif_probe /tmp/jxl_vcpu_imgs benchmarks/vcpu_resource_sweep_2026-06-20.tsv
+  python3 scripts/vcpu_resource_fit.py benchmarks/vcpu_resource_sweep_2026-06-20.tsv
+columns: codec content_class src width height pixels path effort(=speed) threads est_min_kb est_typ_kb est_max_kb est_time_ms meas_peak_heap_kb meas_peak_rss_kb meas_vmhwm_kb meas_delta_kb meas_wall_ms meas_user_ms meas_sys_ms bytes ok
+
+# --- FINDINGS (vCPU axis) ---
+# TIME: zenavif is the BEST-scaling zen encoder — AV1 tile parallelism scales near-linearly with SIZE:
+#   2048^2 speed6: 1.0x -> 9.95x (1->28T); 1024^2: 8.95x; 256^2 caps ~3.3x (few tiles at small size).
+#   speed10 (less compute): ~7x@16T. Efficiency still drops (66%@8T -> 36%@28T at 2048^2) so >16T = diminishing.
+#   est_encode's "divide by thread count" is closest-to-true here (real ~6-10x of the 28x ideal) but still optimistic.
+# MEMORY: peak RSS ~thread-INVARIANT (γ ≈ 0.03-0.15 MB/thread; peak grows ≤14%, even slightly NEGATIVE at 2048^2)
+#   because tiles are views into one shared FrameState. BUT heaptrack peak HEAP grows ~+65% at 28T (1024^2 e6:
+#   43.6 -> 71.8 MB) from per-tile CDFContext/scratch allocations — they show in the allocator high-water but
+#   are small vs the shared frame buffers in RSS. So budget peak RSS as ~flat, but the allocator churns per-tile.
+# EST vs MEASURED: working_pred/measured-delta = 0.43x (256^2, model UNDER at tiny) to 1.23x (>=1MP, slight over);
+#   est_max covers measured peak RSS 1.15-2.11x (safe). All single-photo — content axis needs the full sweep.

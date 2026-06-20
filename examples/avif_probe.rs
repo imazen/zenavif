@@ -6,14 +6,17 @@
 //! everything isolated to the codec call, so the binary floor, the PNG
 //! load, and (for decode) the prior encode don't contaminate it. Encode
 //! and decode are separate invocations (separate processes) so `VmHWM`
-//! gives a clean per-operation peak. Threads pinned to 1 for a clean
-//! per-pixel CPU model; wall ≈ user single-threaded.
+//! gives a clean per-operation peak. Encode threads default to 1 (clean
+//! per-pixel CPU model); pass a count as the optional 8th arg for the vCPU
+//! resource sweep (needs `--features encode,encode-threading` for the AV1
+//! tile threads to actually engage). The est_* columns are
+//! `heuristics::estimate_encode` (thread-independent) in the same row.
 //!
 //! Usage:
-//!   avif_probe <png> encode <quality> <speed> <8|16> <rgb|rgba> <out.avif>
+//!   avif_probe <png> encode <quality> <speed> <8|16> <rgb|rgba> <out.avif> [threads]
 //!   avif_probe <png> decode <quality> <speed> <8|16> <rgb|rgba> <in.avif>
-//! Prints: `delta_kb=<n> peak_kb=<n> wall_ms=<f> user_ms=<f> sys_ms=<f> bytes=<n>`
-//! (decode prints `bytes=` = decoded pixel count and also `w= h=`).
+//! Prints (encode): `delta_kb=<n> peak_kb=<n> wall_ms=<f> user_ms=<f> sys_ms=<f> \
+//!   bytes=<n> threads=<n> est_min_kb=<n> est_typ_kb=<n> est_max_kb=<n> est_time_ms=<f>`
 
 use std::fs;
 use std::time::Instant;
@@ -75,6 +78,10 @@ fn main() {
         &a[6],
         &a[7],
     );
+    // Optional 8th arg: encoder thread count for the vCPU resource sweep
+    // (default 1). zenravif/AV1 is natively tile-parallel — peak grows with
+    // tiles and wall drops with threads, the axis estimate_encode lacks.
+    let threads: usize = a.get(8).and_then(|s| s.parse().ok()).unwrap_or(1);
 
     if mode == "encode" {
         let img = image::open(path).expect("open png");
@@ -82,12 +89,31 @@ fn main() {
         let config = EncoderConfig::new()
             .quality(quality)
             .speed(speed)
-            .threads(Some(1))
+            .threads(Some(threads))
             .bit_depth(if depth == 16 {
                 EncodeBitDepth::Ten
             } else {
                 EncodeBitDepth::Eight
             });
+
+        // Model prediction (thread-independent). input_bpp from depth/alpha.
+        let input_bpp: u8 = match (depth, alpha.as_str()) {
+            (16, "rgba") => 8,
+            (16, _) => 6,
+            (_, "rgba") => 4,
+            _ => 3,
+        };
+        let est = zenavif::heuristics::estimate_encode(w as u32, h as u32, input_bpp, speed);
+        let (est_min, est_typ, est_max, est_t) = est
+            .map(|e| {
+                (
+                    e.peak_memory_bytes_min / 1024,
+                    e.peak_memory_bytes / 1024,
+                    e.peak_memory_bytes_max / 1024,
+                    e.time_ms,
+                )
+            })
+            .unwrap_or((0, 0, 0, 0.0));
 
         // Materialize input buffer BEFORE the baseline so the PNG load is
         // part of the floor, not the measured encode delta.
@@ -167,13 +193,19 @@ fn main() {
         let enc = encoded.expect("encode failed");
         fs::write(avif, &enc.avif_file).expect("write avif");
         println!(
-            "delta_kb={} peak_kb={} wall_ms={:.1} user_ms={:.1} sys_ms={:.1} bytes={}",
+            "delta_kb={} peak_kb={} wall_ms={:.1} user_ms={:.1} sys_ms={:.1} bytes={} \
+             threads={} est_min_kb={} est_typ_kb={} est_max_kb={} est_time_ms={:.1}",
             peak.saturating_sub(b0),
             peak,
             wall.as_secs_f64() * 1000.0,
             (cu1 - cu0) as f64 * TICK_MS,
             (cs1 - cs0) as f64 * TICK_MS,
-            enc.avif_file.len()
+            enc.avif_file.len(),
+            threads,
+            est_min,
+            est_typ,
+            est_max,
+            est_t,
         );
     } else {
         let data = fs::read(avif).expect("read avif");
