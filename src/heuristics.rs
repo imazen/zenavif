@@ -183,6 +183,88 @@ pub fn estimate_encode(
     })
 }
 
+/// How an encode scales across CPU cores (measured, single-photo sparse fit,
+/// `benchmarks/vcpu_resource_sweep_2026-06-20.tsv`). zenavif wraps the
+/// tile-parallel AV1 encoder, so it is the best-scaling zen codec — but wall
+/// time still does NOT scale as `1/cores`: the useful thread count is bounded
+/// by the AV1 tile count (which grows with image size), and Amdahl saturation
+/// applies. Use [`estimate_encode_threaded`].
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+pub struct ThreadingInfo {
+    /// Whether the encode uses more than one core at all.
+    pub parallel: bool,
+    /// Threads beyond this yield no further speedup (the AV1 tile count caps
+    /// it; scales with image size). 1 = serial.
+    pub max_useful_threads: u32,
+    /// Amdahl parallel fraction `p` fitted from measurement; peak speedup is
+    /// `1/(1-p)`. 0 = serial.
+    pub parallel_fraction: f32,
+    /// Extra peak working-set per added worker thread, bytes (the γ term —
+    /// small for peak RSS: tiles are views into one shared FrameState, though
+    /// per-tile contexts churn the allocator).
+    pub mem_bytes_per_thread: u64,
+}
+
+impl ThreadingInfo {
+    /// Threads that actually do work given `cores` available (clamped to
+    /// `max_useful_threads`).
+    #[must_use]
+    pub fn effective_threads(&self, cores: usize) -> u64 {
+        (cores.max(1) as u64).min(self.max_useful_threads.max(1) as u64)
+    }
+    /// Achieved wall-time speedup at `cores` (Amdahl, clamped). 1.0 = serial.
+    #[must_use]
+    pub fn speedup(&self, cores: usize) -> f32 {
+        let n = self.effective_threads(cores);
+        if !self.parallel || n <= 1 {
+            return 1.0;
+        }
+        let p = self.parallel_fraction as f64;
+        (1.0 / ((1.0 - p) + p / n as f64)) as f32
+    }
+}
+
+/// Threading characterisation for a zenavif (AV1) encode. Tile-parallel:
+/// `parallel_fraction` ≈ 0.93, and the useful thread count scales with the
+/// tile count (≈ `pixels / 65536`, clamped to `[4, 32]`) — measured ~3.3×
+/// at 256², ~9× at 1024², ~10× at 2048² (28 cores).
+#[must_use]
+pub fn encode_threading_info(pixels: u64) -> ThreadingInfo {
+    let tiles = (pixels / 65_536).clamp(4, 32) as u32;
+    ThreadingInfo {
+        parallel: true,
+        max_useful_threads: tiles,
+        parallel_fraction: 0.93,
+        mem_bytes_per_thread: 1_000_000,
+    }
+}
+
+/// [`estimate_encode`] adjusted for `cores` available CPU cores: `time_ms` is
+/// divided by the measured (saturating, tile-bounded) speedup and the peak
+/// terms gain the per-tile working-set. Returns `None` only on dimension
+/// overflow.
+#[must_use]
+pub fn estimate_encode_threaded(
+    width: u32,
+    height: u32,
+    input_bpp: u8,
+    speed: u8,
+    cores: usize,
+) -> Option<EncodeEstimate> {
+    let mut e = estimate_encode(width, height, input_bpp, speed)?;
+    let pixels = (width as u64).saturating_mul(height as u64);
+    let ti = encode_threading_info(pixels);
+    e.time_ms = (e.time_ms as f64 / ti.speedup(cores) as f64) as f32;
+    let extra = ti
+        .mem_bytes_per_thread
+        .saturating_mul(ti.effective_threads(cores).saturating_sub(1));
+    e.peak_memory_bytes_min = e.peak_memory_bytes_min.saturating_add(extra);
+    e.peak_memory_bytes = e.peak_memory_bytes.saturating_add(extra);
+    e.peak_memory_bytes_max = e.peak_memory_bytes_max.saturating_add(extra);
+    Some(e)
+}
+
 /// Estimate peak memory / time for an AVIF decode.
 ///
 /// * `width`, `height` — image dimensions in pixels.
