@@ -85,6 +85,7 @@ fn main() -> ExitCode {
         h,
         QualityTarget::Zensim(target),
         opts,
+        None,
     ) {
         Ok(c) => c,
         Err(e) => {

@@ -35,6 +35,11 @@ ravif = { package = "zenravif", version = "0.2.0", path = "../ravif/ravif", defa
 # zenavif needs zenanalyze/zenpredict published first.
 zenpredict = { version = "0.2.0", path = "../zenanalyze/zenpredict", optional = true }
 zenanalyze = { version = "0.2.0", path = "../zenanalyze", optional = true, features = ["experimental"] }
+# zenanalyze-api: the frozen 1.0, zero-dep feature contract (Request/Offer) the
+# auto-tuner uses to reuse a shared feature Offer. Git-rev (not the path style of
+# the deps above) pinned to the SAME rev as the other codecs so the frozen 1.0
+# type unifies in a multi-codec build.
+zenanalyze-api = { git = "https://github.com/imazen/zenanalyze", rev = "47b4d0f5f1abfff45a152e9a9f4de82fffd5afa6", optional = true }
 serde_json = { version = "1.0", default-features = false, features = ["std"], optional = true }
 almost-enough = { version = "0.4.3", default-features = false }
 zencodec = { version = "0.1.24", optional = true }
@@ -177,7 +182,7 @@ __expert = ["encode-imazen", "ravif/__expert"]
 # Auto-tune via the rav1e knob predictor MLP. Includes a baked ZNPR
 # model + zenanalyze feature extractor; adds ~30 KB to the binary.
 # See docs/RAV1E_PICKER_PLAN.md for the training pipeline.
-auto-tune = ["encode-imazen", "dep:zenpredict", "dep:zenanalyze", "dep:serde_json"]
+auto-tune = ["encode-imazen", "dep:zenpredict", "dep:zenanalyze", "dep:zenanalyze-api", "dep:serde_json"]
 # Enable zencodec trait integration
 zencodec = ["dep:zencodec", "zenavif-parse/zencodec", "dep:ultrahdr-core"]
 # Enable zennode pipeline node definitions

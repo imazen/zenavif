@@ -10,7 +10,7 @@ use almost_enough::Stop;
 use imgref::{ImgRef, ImgVec};
 use rgb::{RGB8, RGBA8, Rgb, Rgba};
 use rgb::{RGB16, RGBA16};
-use whereat::{at, ResultAtExt};
+use whereat::{ResultAtExt, at};
 
 /// Pre-encoded gain map data for embedding in an AVIF file.
 ///
@@ -905,7 +905,8 @@ pub fn encode_rgb8(
     let enc = build_ravif_encoder(config, stop, false);
     let result = enc
         .encode_rgb(img)
-        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string())).at_crate(crate::at_crate_info())?;
+        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
+        .at_crate(crate::at_crate_info())?;
     Ok(EncodedImage {
         avif_file: result.avif_file,
         color_byte_size: result.color_byte_size,
@@ -929,7 +930,8 @@ pub fn encode_rgba8(
     let enc = build_ravif_encoder(config, stop, false);
     let result = enc
         .encode_rgba(img)
-        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string())).at_crate(crate::at_crate_info())?;
+        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
+        .at_crate(crate::at_crate_info())?;
     Ok(EncodedImage {
         avif_file: result.avif_file,
         color_byte_size: result.color_byte_size,
@@ -986,7 +988,8 @@ pub fn encode_rgb16(
             pixel_range,
             ravif::MatrixCoefficients::Identity,
         )
-        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string())).at_crate(crate::at_crate_info())?;
+        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
+        .at_crate(crate::at_crate_info())?;
     Ok(EncodedImage {
         avif_file: result.avif_file,
         color_byte_size: result.color_byte_size,
@@ -1040,7 +1043,8 @@ pub fn encode_rgba16(
             pixel_range,
             ravif::MatrixCoefficients::Identity,
         )
-        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string())).at_crate(crate::at_crate_info())?;
+        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
+        .at_crate(crate::at_crate_info())?;
     Ok(EncodedImage {
         avif_file: result.avif_file,
         color_byte_size: result.color_byte_size,
@@ -1105,7 +1109,8 @@ pub fn encode_animation_rgb8(
 
     let result = enc
         .encode_animation_rgb(&ravif_frames)
-        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string())).at_crate(crate::at_crate_info())?;
+        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
+        .at_crate(crate::at_crate_info())?;
 
     Ok(EncodedAnimation {
         avif_file: result.avif_file,
@@ -1142,7 +1147,8 @@ pub fn encode_animation_rgba8(
 
     let result = enc
         .encode_animation_rgba(&ravif_frames)
-        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string())).at_crate(crate::at_crate_info())?;
+        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
+        .at_crate(crate::at_crate_info())?;
 
     Ok(EncodedAnimation {
         avif_file: result.avif_file,
@@ -1218,7 +1224,8 @@ pub fn encode_animation_rgb16(
 
     let result = enc
         .encode_animation_rgb16(&ravif_frames)
-        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string())).at_crate(crate::at_crate_info())?;
+        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
+        .at_crate(crate::at_crate_info())?;
 
     Ok(EncodedAnimation {
         avif_file: result.avif_file,
@@ -1277,7 +1284,8 @@ pub fn encode_animation_rgba16(
 
     let result = enc
         .encode_animation_rgba16(&ravif_frames)
-        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string())).at_crate(crate::at_crate_info())?;
+        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
+        .at_crate(crate::at_crate_info())?;
 
     Ok(EncodedAnimation {
         avif_file: result.avif_file,

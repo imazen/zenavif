@@ -1862,6 +1862,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "zenanalyze-api"
+version = "1.0.0"
+source = "git+https://github.com/imazen/zenanalyze?rev=47b4d0f5f1abfff45a152e9a9f4de82fffd5afa6#47b4d0f5f1abfff45a152e9a9f4de82fffd5afa6"
+
+[[package]]
 name = "zenavif"
 version = "0.1.7"
 dependencies = [
@@ -1888,6 +1893,7 @@ dependencies = [
  "whereat",
  "yuv",
  "zenanalyze",
+ "zenanalyze-api",
  "zenavif-parse",
  "zenbench",
  "zencodec",

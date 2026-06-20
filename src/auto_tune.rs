@@ -261,6 +261,32 @@ fn nearest_target_zq_idx(target_zqs: &[u32], target: f32) -> Option<usize> {
     Some(best)
 }
 
+/// Reuse a shared [`zenanalyze_api::Offer`]'s feature values for `feature_cols`
+/// (in the bake's column order) iff the offer's reuse key matches `model`'s
+/// stamps — same analyzer `major.minor`, `feature_defs_version`, and analysis
+/// `config_hash`. `None` → the caller runs its own analysis pass. The bake's
+/// columns carry a `feat_` prefix; the contract keys by the bare
+/// `AnalysisFeature::name`, so strip it to line the two conventions up.
+#[cfg(feature = "auto-tune")]
+fn reuse_from_offer(
+    offer: Option<&zenanalyze_api::Offer<'_>>,
+    model: &zenpredict::Model,
+    feature_cols: &[&str],
+) -> Option<Vec<f32>> {
+    let offer = offer?;
+    let names: Vec<&str> = feature_cols
+        .iter()
+        .map(|c| c.strip_prefix("feat_").unwrap_or(c))
+        .collect();
+    let request = zenanalyze_api::Request::new(
+        &names,
+        model.analyzer_version().unwrap_or(""),
+        model.feature_defs_version().unwrap_or(0),
+        model.feature_config_hash().unwrap_or(0),
+    );
+    offer.reuse_for(&request)
+}
+
 #[cfg(feature = "auto-tune")]
 impl EncoderConfig {
     /// Predict optimal encoder knobs for the given image and target.
@@ -282,6 +308,7 @@ impl EncoderConfig {
     ///         AutoTuneOptions::new()
     ///             .with_time_budget(Duration::from_millis(500))
     ///             .with_pareto_weight(0.2),
+    ///         None, // or Some(&offer) to reuse a shared zenanalyze-api Offer
     ///     )?;
     /// ```
     ///
@@ -299,6 +326,7 @@ impl EncoderConfig {
         height: u32,
         target: QualityTarget,
         opts: AutoTuneOptions,
+        offer: Option<&zenanalyze_api::Offer<'_>>,
     ) -> Result<Self, AutoTuneError> {
         // 1. Load model. Empty/zero-byte placeholder until bake lands.
         let model = zenpredict::Model::from_bytes(MODEL_BYTES).map_err(|e| {
@@ -324,26 +352,31 @@ impl EncoderConfig {
             .filter(|s| !s.is_empty())
             .collect();
 
-        // 3. Run zenanalyze with exactly those features.
-        // No `from_name` API — walk SUPPORTED and match snake_case.
-        let supported = zenanalyze::feature::FeatureSet::SUPPORTED;
-        let lookup = |col: &str| -> Option<zenanalyze::feature::AnalysisFeature> {
-            let target = col.strip_prefix("feat_")?;
-            supported.iter().find(|f| f.name() == target)
-        };
-        let mut feature_set = zenanalyze::feature::FeatureSet::new();
-        for c in &feature_cols {
-            if let Some(f) = lookup(c) {
-                feature_set = feature_set.with(f);
-            }
-        }
-        let query = zenanalyze::feature::AnalysisQuery::new(feature_set);
-        let analysis = zenanalyze::analyze_features_rgb8(rgb, width, height, &query);
-
-        let raw_feats: Vec<f32> = feature_cols
-            .iter()
-            .map(|c| lookup(c).and_then(|f| analysis.get_f32(f)).unwrap_or(0.0))
-            .collect();
+        // 3. Resolve the feature values. Prefer reusing a shared zenanalyze-api
+        // Offer (one upstream analysis pass shared across codecs) when its reuse
+        // key matches this baked model; otherwise run our own analysis.
+        let raw_feats: Vec<f32> =
+            reuse_from_offer(offer, &model, &feature_cols).unwrap_or_else(|| {
+                // Own-pass: run zenanalyze with exactly those features.
+                // No `from_name` API — walk SUPPORTED and match snake_case.
+                let supported = zenanalyze::feature::FeatureSet::SUPPORTED;
+                let lookup = |col: &str| -> Option<zenanalyze::feature::AnalysisFeature> {
+                    let target = col.strip_prefix("feat_")?;
+                    supported.iter().find(|f| f.name() == target)
+                };
+                let mut feature_set = zenanalyze::feature::FeatureSet::new();
+                for c in &feature_cols {
+                    if let Some(f) = lookup(c) {
+                        feature_set = feature_set.with(f);
+                    }
+                }
+                let query = zenanalyze::feature::AnalysisQuery::new(feature_set);
+                let analysis = zenanalyze::analyze_features_rgb8(rgb, width, height, &query);
+                feature_cols
+                    .iter()
+                    .map(|c| lookup(c).and_then(|f| analysis.get_f32(f)).unwrap_or(0.0))
+                    .collect()
+            });
 
         // 4. Engineer the feature vector to match train_hybrid.py:
         //   raw_feats (n) + size_oh (4) +
@@ -497,8 +530,81 @@ mod tests {
                 1,
                 QualityTarget::Zensim(85.0),
                 AutoTuneOptions::new(),
+                None,
             );
             assert!(matches!(r, Err(AutoTuneError::ModelNotBaked)));
         }
+    }
+
+    #[test]
+    fn auto_tune_offer_reuse_matches_own_pass() {
+        // The v3 model loads and predicts; reusing a shared zenanalyze-api Offer
+        // (same features, same reuse key) yields the SAME tuned config as the
+        // own-analysis path. 256x256 textured noise populates every feature.
+        let (w, h) = (256u32, 256u32);
+        let rgb: Vec<u8> = (0..(w * h * 3))
+            .map(|i| (i.wrapping_mul(7) % 251) as u8)
+            .collect();
+        let target = QualityTarget::Zensim(85.0);
+
+        // Build an Offer as an orchestrator would: the model's feature columns'
+        // analyzed values at the model's reuse key (bare names — strip `feat_`).
+        let model = zenpredict::Model::from_bytes(MODEL_BYTES).expect("v3 model loads");
+        let feat_cols: Vec<&str> = model.feature_columns().collect();
+        let bare: Vec<&str> = feat_cols
+            .iter()
+            .map(|c| c.strip_prefix("feat_").unwrap_or(c))
+            .collect();
+        let supported = zenanalyze::feature::FeatureSet::SUPPORTED;
+        let lookup = |n: &str| supported.iter().find(|f| f.name() == n);
+        let mut fs = zenanalyze::feature::FeatureSet::new();
+        for n in &bare {
+            if let Some(f) = lookup(n) {
+                fs = fs.with(f);
+            }
+        }
+        let analysis = zenanalyze::analyze_features_rgb8(
+            &rgb,
+            w,
+            h,
+            &zenanalyze::feature::AnalysisQuery::new(fs),
+        );
+        let values: Vec<f32> = bare
+            .iter()
+            .map(|n| lookup(n).and_then(|f| analysis.get_f32(f)).unwrap_or(0.0))
+            .collect();
+        let offer = zenanalyze_api::Offer::new(
+            &bare,
+            &values,
+            model.analyzer_version().unwrap_or(""),
+            model.feature_defs_version().unwrap_or(0),
+            model.feature_config_hash().unwrap_or(0),
+        );
+
+        // The offer is reuse-key-compatible and carries every feature → the
+        // reuse helper returns exactly the offered values, in column order.
+        assert_eq!(
+            reuse_from_offer(Some(&offer), &model, &feat_cols).as_deref(),
+            Some(values.as_slice()),
+            "a matching offer must be reused verbatim"
+        );
+
+        // End to end: own-pass and offer-reuse produce IDENTICAL results —
+        // whether a tuned config or the same LUT-coverage error — so the reuse is
+        // exactly equivalent to running our own analysis.
+        let own = EncoderConfig::new().auto_tune(&rgb, w, h, target, AutoTuneOptions::new(), None);
+        let via_offer = EncoderConfig::new().auto_tune(
+            &rgb,
+            w,
+            h,
+            target,
+            AutoTuneOptions::new(),
+            Some(&offer),
+        );
+        assert_eq!(
+            format!("{own:?}"),
+            format!("{via_offer:?}"),
+            "offer reuse must produce the same result as own-pass"
+        );
     }
 }

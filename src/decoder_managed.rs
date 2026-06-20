@@ -1267,7 +1267,9 @@ impl ManagedAvifDecoder {
                 strip_pixels = PixelBuffer::new(width, h as u32, desc);
             }
 
-            converter.convert_strip(y_offset, h, &mut strip_pixels).at()?;
+            converter
+                .convert_strip(y_offset, h, &mut strip_pixels)
+                .at()?;
 
             // Copy converted rows to sink buffer
             let mut sink_buf = sink
