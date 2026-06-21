@@ -196,10 +196,3 @@ opt-level = 2
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
 rustdoc-args = ["--generate-link-to-definition"]
-
-[patch.crates-io]
-# TEMPORARY: zencodec::estimate is unpublished; the published zencodec is
-# 0.1.23, so the req above is bumped to 0.1.24 to force ONLY this git rev to
-# satisfy it. Drop this patch + lower the req back to ^0.1.24 (published) when
-# zencodec 0.1.24 ships. See CHANGELOG QUEUED BREAKING CHANGES.
-zencodec = { git = "https://github.com/imazen/zencodec.git", rev = "0f71295" }

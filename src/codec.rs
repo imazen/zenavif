@@ -479,18 +479,17 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
         let bpp = image.descriptor().bytes_per_pixel() as u8;
         let lti = crate::heuristics::encode_threading_info(image.pixels());
         let ti = if lti.parallel {
-            ThreadingInformation::parallel(
-                lti.max_useful_threads,
-                lti.parallel_fraction,
-                lti.mem_bytes_per_thread,
-            )
+            // The AV1 encode saturates at `max_useful_threads` (the tile count,
+            // which scales with image size). The local `parallel_fraction` /
+            // `mem_bytes_per_thread` are not carried by the published
+            // ThreadingInformation, which models only the saturation knee.
+            ThreadingInformation::parallel(lti.max_useful_threads)
         } else {
             ThreadingInformation::SERIAL
         };
         match crate::heuristics::estimate_encode(image.width(), image.height(), bpp, speed) {
-            Some(e) => ResourceEstimate::new(e.peak_memory_bytes, e.time_ms)
-                .with_peak_range(e.peak_memory_bytes_min, e.peak_memory_bytes_max)
-                .with_output_bytes(e.output_bytes)
+            Some(e) => ResourceEstimate::new(e.peak_memory_bytes, e.time_ms as u64)
+                .with_peak_max(e.peak_memory_bytes_max)
                 .with_threading(ti)
                 .at_cores(compute.cores()),
             None => ResourceEstimate::conservative(image).at_cores(compute.cores()),

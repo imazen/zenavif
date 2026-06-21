@@ -10,15 +10,16 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
-### QUEUED BREAKING CHANGES
-<!-- Drop when zencodec 0.1.24 publishes. -->
-- Remove the `[patch.crates-io] zencodec = { git, rev = "0f71295" }` pin and
-  lower the `zencodec` dependency req from `0.1.24` back to a published
-  `^0.1.24`. The patch pins zencodec to the unreleased `estimate` API
-  (the published zencodec is `0.1.23`; bumping the req to `0.1.24` forces only
-  the git rev to satisfy it).
-
 ### Changed
+- **deps: migrate to published `zencodec 0.1.24` estimate API; drop git-rev
+  patch.** Removed the temporary `[patch.crates-io] zencodec = { git, rev =
+  "0f71295" }` now that `zencodec 0.1.24` is on crates.io. Migrated the
+  `estimate_encode_resources` mapping in `src/codec.rs` for the refined
+  `ResourceEstimate`: `new(peak, wall_ms: u64)` (was `f32`),
+  `with_peak_max(max)` (the `min` arg is gone), dropped the removed
+  `with_output_bytes`, and the encode `ThreadingInformation::parallel` is now
+  1-arg (`parallel(max_useful_threads)`; the `fraction` / `mem_per_thread` args
+  are gone). `cargo update -p zencodec` pulled published 0.1.24.
 - **Preserve the encoder's whereat trace across the ravif boundary.** The
   `encode_*` paths now convert ravif (zenravif) errors with
   `.map_err_at(|e| Error::Encode(e.to_string())).at_crate(…)` instead of
