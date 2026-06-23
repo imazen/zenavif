@@ -28,25 +28,57 @@
 //! decoder self-threads, so its wall can already be below `time_ms` on
 //! large images.
 //!
-//! ## Calibration (2026-06-14)
+//! ## Calibration (2026-06-14 time curve; 2026-06-23 ENCODE memory re-measure)
 //!
-//! Measured marginal working set (`avif_probe` `VmHWM` delta around the
-//! codec call — excludes the binary floor + input buffer) plus wall and
-//! user/sys CPU (`/proc/self/stat`, threads=1), one process per op, over a
-//! 5-class × 256–2048 px × speed 4/6/8/10 × rgb/rgba × 8/10-bit grid.
-//! Provenance: `benchmarks/avif_resource_main_2026-06-14.tsv` (mem +
-//! time-vs-speed) and `benchmarks/avif_resource_alphadepth_2026-06-14.tsv`
-//! (alpha + depth deltas); harness `scripts/avif_resource_calibrate.py`.
+//! Measured marginal working set (`VmHWM` delta around the codec call —
+//! excludes the binary floor + input buffer) plus wall and user/sys CPU
+//! (`/proc/self/stat`, threads=1), one process per op.
 //!
-//! Measured (8-bit, single-thread, working set is sub-linear in size so the
-//! per-pixel numbers are mid-range anchors, not the 12 MP limit):
+//! ### ENCODE peak memory — re-measured 2026-06-23 (VmHWM + heaptrack)
 //!
-//! | speed | encode us/px | encode mem B/px |
-//! |-------|--------------|-----------------|
-//! | 4     | 7.6          | ~38             |
-//! | 6     | 2.0          | ~43             |
-//! | 8     | 1.2          | ~43             |
-//! | 10    | 0.55         | ~46             |
+//! The earlier calibration over-predicted peak memory: the fixed overhead was
+//! set to 8 MiB and the slope to 40 B/px, but a fresh sweep
+//! (`examples/mem_probe_encode`, RGB8, threads=1, sizes 256–2048 px × speed
+//! {6,8,10} × content {photo, screenshot} × q {50,85}, 2 reps/cell) measured a
+//! **fixed intercept ≈ 4.6 MiB and a worst-case slope ≈ 30–38 B/px**. The
+//! old model was 2.0× over the measured typical at 256² (fixed-dominated),
+//! 1.25× at 1 MP, and 1.35× at 4 MP. Tightened to **5.5 MiB fixed + 37 B/px**,
+//! which keeps the TYP ≥ measured worst-case + 10 % at every swept size while
+//! cutting the over-prediction to 1.11–1.49×. Provenance:
+//! `benchmarks/zenavif_encode_mem_2026-06-23.tsv`.
+//!
+//! Measured ENCODE marginal (worst-case over content × speed × q, VmHWM):
+//!
+//! | size  | worst marginal | B/px (incl. intercept) |
+//! |-------|----------------|------------------------|
+//! | 256²  | 5.4 MiB        | 84                     |
+//! | 512²  | 13 MiB         | 51                     |
+//! | 1 MP  | 39 MiB         | 38                     |
+//! | 4 MP  | 124 MiB        | 31                     |
+//!
+//! heaptrack peak heap (requested, sets the MAX tier): 1 MP 47.9 MiB, 4 MP
+//! 155.6 MiB (includes the input buffer). Dependence: **quality** is the
+//! biggest knob (q85/q50 ≈ 1.28× — high quality holds more coefficients);
+//! **content** ≈ 1.26× (photo > screenshot); **speed** only ≈ 1.09× (speed-10
+//! is heaviest, so the model's speed-independence is conservatively fine —
+//! the constants are fit to the speed-10/q85/photo worst case). The MAX (1.8×)
+//! tier clears the heaptrack-requested heap by 1.6–1.9×.
+//!
+//! ### ENCODE time + alpha/depth (2026-06-14, unchanged)
+//!
+//! Time-vs-speed and the alpha/10-bit deltas are from the earlier grid
+//! (`benchmarks/avif_resource_main_2026-06-14.tsv` +
+//! `avif_resource_alphadepth_2026-06-14.tsv`; harness
+//! `scripts/avif_resource_calibrate.py`); the 2026-06-23 sweep covered only
+//! the RGB8 8-bit path, so the alpha (+7 B/px) and 10-bit (×1.55) memory
+//! factors are carried forward unchanged rather than extrapolated.
+//!
+//! | speed | encode us/px |
+//! |-------|--------------|
+//! | 4     | 7.6          |
+//! | 6     | 2.0          |
+//! | 8     | 1.2          |
+//! | 10    | 0.55         |
 //!
 //! Decode: ~18 B/px, ~0.06 us/px (≈ 30× cheaper than even fast encode).
 //! Alpha (separate plane): +7 B/px, +30 % encode time. 10-bit: ×1.55 mem,
@@ -84,13 +116,20 @@ pub struct DecodeEstimate {
     pub time_ms: f32,
 }
 
-// ── Calibrated constants (2026-06-14, avif_probe marginal working set) ──
+// ── Calibrated constants (encode mem: 2026-06-23 VmHWM+heaptrack re-measure;
+//    encode time + alpha/depth: 2026-06-14) ──
 
 /// Encoder fixed overhead (size-independent): AV1 plans, tables, tiles.
-const ENCODE_FIXED_OVERHEAD: u64 = 8 << 20;
+/// Re-measured 2026-06-23: the VmHWM intercept of the worst-case (photo,
+/// speed-10, q85) marginal fit is ~4.6 MiB; rounded up to 5.5 MiB so the TYP
+/// clears the measured worst case + 10 % at the smallest swept sizes.
+const ENCODE_FIXED_OVERHEAD: u64 = (5.5 * (1 << 20) as f64) as u64;
 /// Typical encoder marginal working set, bytes/pixel, 8-bit (sub-linear in
-/// size; ~43 at 1 MP, ~24 at 12 MP — 40 is a mid-range anchor).
-const ENCODE_BPP: f64 = 40.0;
+/// size: ~38 B/px effective at 1 MP, ~31 at 4 MP including the intercept).
+/// Re-measured 2026-06-23: 37 B/px is the tightest slope that, with the 5.5 MiB
+/// fixed term, keeps the TYP ≥ the measured worst case + 10 % across 256–2048 px
+/// (the old 40 over-predicted by up to 2.0× at small sizes).
+const ENCODE_BPP: f64 = 37.0;
 /// Extra working set for an alpha plane (encoded as a second AV1 image).
 const ENCODE_ALPHA_BPP: f64 = 7.0;
 /// 10-bit (16-bit input) inflates the encoder working set ~×1.55.
@@ -354,7 +393,7 @@ mod tests {
     }
 
     /// Alpha and 10-bit each add measurable encode cost; bracket the
-    /// measured 2048² encode mem (≈ 40 B/px → ~168 MB working at 8-bit).
+    /// re-measured 2048² encode mem (≈ 37 B/px → ~155 MB working at 8-bit).
     #[test]
     fn alpha_and_depth_add_cost() {
         let (w, h) = (2048, 2048);
@@ -372,12 +411,15 @@ mod tests {
             "10-bit adds mem"
         );
         assert!(rgb10.time_ms > rgb.time_ms, "10-bit adds time");
-        // 8-bit RGB working set ~40 B/px; typical peak = input + fixed +
-        // ~40·px must sit in a sane band around the measured ~168 MB working.
-        let working = rgb.peak_memory_bytes - (8 << 20) - px * 3;
+        // 8-bit RGB working set ~37 B/px (re-measured 2026-06-23); typical peak
+        // = input + ENCODE_FIXED_OVERHEAD + 37·px must sit in a sane band. Use
+        // the constant (not a literal) so the band tracks the calibrated fixed
+        // term; the worst-case measured slope is ~30–38 B/px, so [33, 45] frames
+        // the 37 anchor with margin on both sides.
+        let working = rgb.peak_memory_bytes - ENCODE_FIXED_OVERHEAD - px * 3;
         assert!(
-            working >= px * 30 && working <= px * 55,
-            "encode working {working} not ~40 B/px of {px}px"
+            working >= px * 33 && working <= px * 45,
+            "encode working {working} not ~37 B/px of {px}px"
         );
     }
 

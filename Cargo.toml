@@ -89,6 +89,10 @@ name = "avif_probe"
 required-features = ["encode"]
 
 [[example]]
+name = "mem_probe_encode"
+required-features = ["encode"]
+
+[[example]]
 name = "mono_encode_ab"
 required-features = ["encode-imazen"]
 

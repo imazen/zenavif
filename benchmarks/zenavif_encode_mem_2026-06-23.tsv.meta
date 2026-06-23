@@ -1,0 +1,56 @@
+# zenavif ENCODE peak-memory re-calibration — 2026-06-23
+#
+# Purpose: re-measure the encode peak-memory model in src/heuristics.rs
+# (estimate_encode -> ENCODE_FIXED_OVERHEAD + input + ENCODE_BPP*pixels). The
+# prior "2026-06-14" calibration over-predicted (8 MiB fixed + 40 B/px); this
+# sweep measured the true working set and tightened the constants while keeping
+# the TYP >= measured worst-case + 10% (OOM-safe, never under-predicts).
+#
+# Commit (code under test): 097e86d0 (zenavif 0.1.7), constants changed in the
+#   same commit that adds this file.
+# Host: WSL2 (AMD Ryzen 9 7950X, 128 GB), Linux 6.18 microsoft-standard-WSL2.
+# Harness: examples/mem_probe_encode.rs (one AVIF encode per process; reports
+#   VmHWM-marginal = peak RSS delta around the encode, EXCLUDING the binary
+#   floor; threads pinned to Some(1) for a clean single-thread working set).
+# Run: scripts in scratchpad; GLIBC_TUNABLES=glibc.malloc.mmap_threshold=131072
+#   (pins the WSL2 glibc arena so RSS doesn't swing between runs).
+#
+# Grid:
+#   sizes:   256, 512, 1024, 2048 (px square) = 0.065, 0.26, 1.05, 4.19 MP
+#   content: img (synthetic photo, RGB8), shot (synthetic screenshot, RGB8)
+#   speed:   6, 8, 10 (AV1 speed presets; speed<=4 at >=1024^2 skipped —
+#            single-thread AV1 search there is minutes-long)
+#   quality: 50, 85
+#   input:   RGB8 (input_bpp = 3), no alpha, 8-bit
+#   reps:    2 per cell (peak is a high-water; max-of-reps kept in the fit)
+#   threads: 1 (probe pins threads(Some(1)))
+#
+# Columns: w h pixels content mode speed quality out_bytes pre_rss_kb vmhwm_kb marginal_kb
+#   marginal_kb = vmhwm_kb - pre_rss_kb (the encode's working set incl. AV1 fixed
+#   overhead, EXCLUDING the input buffer materialized before pre_rss).
+#
+# Fit (worst-case over content x speed x q, marginal_KB = a + b*px):
+#   envelope: 5654 KB + 29.8 B/px,  R^2 = 0.998
+#   per-size worst marginal: 256^2 5.4 MiB, 512^2 13 MiB, 1 MP 39 MiB, 4 MP 124 MiB
+#   effective B/px incl intercept: 84 / 51 / 38 / 31 (sub-linear in size)
+#
+# heaptrack (peak heap consumption, requested -> sets the MAX tier; INCLUDES input):
+#   1 MP img/s10/q85: 47.86 MiB ;  4 MP img/s10/q85: 155.61 MiB
+#   (ht_*.zst kept in scratchpad, not committed)
+#
+# Dependence (model assumes mem is speed-independent; quality/content not modeled):
+#   quality:  q85/q50 marginal = 1.28x  (high quality holds more coefficients — biggest knob)
+#   content:  img/shot          = 1.26x  (photo heavier than screenshot)
+#   speed:    s10/s6            = 1.085x (speed-10 heaviest; speed-independence is
+#                                         conservatively fine — constants fit to the
+#                                         s10/q85/photo worst case)
+#
+# Outcome: ENCODE_FIXED_OVERHEAD 8 MiB -> 5.5 MiB ; ENCODE_BPP 40 -> 37 B/px.
+#   Over-prediction (model TYP / measured worst-case marginal), before -> after:
+#     256^2  2.00x -> 1.49x
+#     512^2  1.41x -> 1.16x
+#     1 MP   1.25x -> 1.11x
+#     4 MP   1.35x -> 1.24x
+#   TYP never under-predicts (min margin 1.107x at 1 MP). MAX(1.8x) clears the
+#   heaptrack-requested heap by 1.6-1.9x. Alpha (+7 B/px) and 10-bit (x1.55)
+#   factors were NOT re-measured (RGB8-only sweep) and are carried forward.

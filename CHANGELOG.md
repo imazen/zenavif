@@ -32,6 +32,22 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   parallel — tile decode parallelises, the YUV→RGB conversion does not).
 
 ### Changed
+- **Re-calibrate the ENCODE peak-memory model (was over-conservative).** A fresh
+  VmHWM + heaptrack sweep (`examples/mem_probe_encode`, RGB8, threads=1, sizes
+  256–2048 px × speed {6,8,10} × photo/screenshot × q {50,85}) showed the prior
+  "2026-06-14" constants over-predicted typical peak by up to 2.0× at small sizes
+  (the 8 MiB fixed term dominated a measured ~4.6 MiB intercept) and 1.35× at
+  4 MP. Tightened `ENCODE_FIXED_OVERHEAD` 8 MiB → 5.5 MiB and `ENCODE_BPP`
+  40 → 37 B/px in `src/heuristics.rs`. The TYP still clears the measured
+  worst-case marginal + 10 % at every swept size (min margin 1.107× at 1 MP — it
+  never under-predicts), and the MAX (1.8×) tier clears the heaptrack-requested
+  heap by 1.6–1.9×; over-prediction is now 1.11–1.49×. Found that encode memory
+  is driven mostly by **quality** (q85/q50 ≈ 1.28×) and **content** (photo/shot
+  ≈ 1.26×), and only ≈ 1.09× by speed — so the model's speed-independence is
+  conservatively fine (constants fit to the speed-10/q85/photo worst case). The
+  alpha (+7 B/px) and 10-bit (×1.55) memory factors were not re-measured
+  (RGB8-only sweep) and are carried forward unchanged. Provenance:
+  `benchmarks/zenavif_encode_mem_2026-06-23.tsv`.
 - **deps: migrate to published `zencodec 0.1.24` estimate API; drop git-rev
   patch.** Removed the temporary `[patch.crates-io] zencodec = { git, rev =
   "0f71295" }` now that `zencodec 0.1.24` is on crates.io. Migrated the
