@@ -1,14 +1,13 @@
-name: Clone path-dep sibling (zenanalyze)
+name: Clone path-dep siblings (zenanalyze, ravif)
 description: |
-  zenavif's Cargo.toml still has path deps on imazen/zenanalyze for
-  the optional `auto-tune` feature plus the dev-dep used by
-  `examples/extract_features.rs`. Cargo resolves path-deps at
-  manifest-parse time, so the directory must exist even when the
-  feature is off — clone the sibling here.
+  zenavif's Cargo.toml has path deps that Cargo resolves at manifest-parse
+  time, so the directories must exist even when the owning feature is off:
+    - imazen/zenanalyze   → ../zenanalyze (optional `auto-tune` + an example dev-dep)
+    - imazen/cavif-rs     → ../ravif      (the `zenravif` 0.2.0 encoder, behind `encode`)
 
-  (cavif-rs clone removed: zenravif 0.1.3 is on crates.io as of
-  2026-05-02, and the [patch.crates-io] override in zenavif's
-  Cargo.toml has been dropped.)
+  The `ravif`/`zenravif` path dep points at 0.2.0, which is unpublished (crates.io
+  has only 0.1.3), so the sibling must be cloned. Drop this step + switch
+  Cargo.toml back to a registry dep once zenravif 0.2.0 is published.
 
 runs:
   using: composite
@@ -19,4 +18,11 @@ runs:
         cd ..
         if [ ! -d zenanalyze ]; then
           git clone --depth 1 https://github.com/imazen/zenanalyze.git
+        fi
+    - name: Clone imazen/cavif-rs into ../ravif
+      shell: bash
+      run: |
+        cd ..
+        if [ ! -d ravif ]; then
+          git clone --depth 1 https://github.com/imazen/cavif-rs.git ravif
         fi
