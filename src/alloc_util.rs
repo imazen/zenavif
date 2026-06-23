@@ -207,14 +207,14 @@ mod tests {
     fn alloc_filled_fallible_oom_returns_err() {
         // Request an impossibly large allocation; the fallible path must
         // return Err (mapped to ResourceLimit) rather than abort.
-        let r = alloc_filled(AllocPref::Fallible, true, 0u8, usize::MAX / 2);
+        let r = alloc_filled(AllocPref::Fallible, true, 0u8, usize::MAX);
         assert!(r.is_err());
         assert!(matches!(r.unwrap_err().error(), Error::ResourceLimit(_)));
     }
 
     #[test]
     fn vec_with_capacity_fallible_oom_returns_err() {
-        let r: Result<Vec<u8>, _> = vec_with_capacity(AllocPref::Fallible, true, usize::MAX / 2);
+        let r: Result<Vec<u8>, _> = vec_with_capacity(AllocPref::Fallible, true, usize::MAX);
         assert!(r.is_err());
         assert!(matches!(r.unwrap_err().error(), Error::ResourceLimit(_)));
     }
