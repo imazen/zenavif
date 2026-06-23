@@ -42,7 +42,7 @@ zenanalyze = { version = "0.2.0", path = "../zenanalyze", optional = true, featu
 zenanalyze-api = { git = "https://github.com/imazen/zenanalyze", rev = "47b4d0f5f1abfff45a152e9a9f4de82fffd5afa6", optional = true }
 serde_json = { version = "1.0", default-features = false, features = ["std"], optional = true }
 almost-enough = { version = "0.4.3", default-features = false }
-zencodec = { version = "0.1.24", optional = true }
+zencodec = { version = "0.1.25", optional = true }
 # Gain-map application math for GainMapRender::ReconstructHdr (decode-side
 # HDR reconstruction). Pure math, no codec engines.
 ultrahdr-core = { version = "0.5.0", default-features = false, optional = true }

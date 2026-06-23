@@ -451,6 +451,55 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
         Some(self.lossless)
     }
 
+    /// Honor a [`Fidelity`](zencodec::encode::Fidelity) target as natively as
+    /// AVIF allows.
+    ///
+    /// - `Lossless` → true qindex-0 lossless **only** under `encode-imazen`
+    ///   (the only build where it is real, matching `capabilities().lossless()`).
+    ///   Otherwise it would be q100 lossy, so it degrades to top quality and is
+    ///   reported as `codec_quality`, never falsely as `Lossless`.
+    /// - `Lossy(CodecSpecificQuality(q))` → the AVIF quality dial.
+    /// - `Lossy(ApproxSsim2(s))` / `Lossy(ApproxButteraugli(d))` → AVIF has no
+    ///   native metric loop, so these map coarsely onto the quality dial and are
+    ///   reported as `codec_quality`, honest that no convergence happened.
+    fn with_fidelity(self, fidelity: zencodec::encode::Fidelity) -> Self {
+        use zencodec::encode::{Fidelity, LossyTarget};
+        match fidelity {
+            Fidelity::Lossless => {
+                // `with_lossless(true)` is only truly lossless under
+                // `encode-imazen`; elsewhere it sets `self.lossless = true` over
+                // a q100 lossy encode, which would make the report lie. Keep the
+                // report honest by not claiming lossless on those builds.
+                if cfg!(feature = "encode-imazen") {
+                    self.with_lossless(true)
+                } else {
+                    self.with_lossless(false).with_generic_quality(100.0)
+                }
+            }
+            Fidelity::Lossy(LossyTarget::CodecSpecificQuality(q)) => {
+                self.with_lossless(false).with_generic_quality(q)
+            }
+            Fidelity::Lossy(LossyTarget::ApproxSsim2(s)) => {
+                self.with_lossless(false).with_generic_quality(s)
+            }
+            Fidelity::Lossy(LossyTarget::ApproxButteraugli(d)) => {
+                let q = (96.0 - d * 12.0).clamp(0.0, 100.0);
+                self.with_lossless(false).with_generic_quality(q)
+            }
+            // `Fidelity` / `LossyTarget` are `#[non_exhaustive]`.
+            _ => self.with_lossless(false),
+        }
+    }
+
+    fn resolved_target_fidelity(&self) -> Option<zencodec::encode::Fidelity> {
+        use zencodec::encode::Fidelity;
+        if self.lossless {
+            Some(Fidelity::Lossless)
+        } else {
+            self.trait_quality.map(Fidelity::codec_quality)
+        }
+    }
+
     fn with_alpha_quality(mut self, quality: f32) -> Self {
         self.inner = self.inner.alpha_quality(quality);
         self
@@ -3825,6 +3874,46 @@ mod tests {
     use super::*;
     #[cfg(feature = "encode")]
     use imgref::Img;
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn fidelity_targets_roundtrip() {
+        use zencodec::encode::{EncoderConfig as _, Fidelity};
+
+        // Codec quality dial round-trips as itself, on the lossy path.
+        let cq = AvifEncoderConfig::new().with_fidelity(Fidelity::codec_quality(70.0));
+        assert_eq!(
+            cq.resolved_target_fidelity(),
+            Some(Fidelity::codec_quality(70.0))
+        );
+        assert_eq!(cq.is_lossless(), Some(false));
+
+        // SSIM2 + butteraugli map onto the quality dial, reported as codec_quality.
+        let s2 = AvifEncoderConfig::new().with_fidelity(Fidelity::ssim2(90.0));
+        assert_eq!(
+            s2.resolved_target_fidelity(),
+            Some(Fidelity::codec_quality(90.0))
+        );
+        let bt = AvifEncoderConfig::new().with_fidelity(Fidelity::butteraugli(2.0));
+        assert_eq!(
+            bt.resolved_target_fidelity(),
+            Some(Fidelity::codec_quality(72.0))
+        );
+
+        // Lossless is real (and reported) only under `encode-imazen`; otherwise
+        // it degrades to top quality and is NOT reported as lossless.
+        let ll = AvifEncoderConfig::new().with_fidelity(Fidelity::Lossless);
+        if cfg!(feature = "encode-imazen") {
+            assert_eq!(ll.resolved_target_fidelity(), Some(Fidelity::Lossless));
+            assert_eq!(ll.is_lossless(), Some(true));
+        } else {
+            assert_eq!(
+                ll.resolved_target_fidelity(),
+                Some(Fidelity::codec_quality(100.0))
+            );
+            assert_eq!(ll.is_lossless(), Some(false));
+        }
+    }
 
     /// `AllocPreference` must not change decoded pixels: decoding the same
     /// AVIF under `Fallible` (the `try_reserve` path), `Infallible` (the
