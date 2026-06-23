@@ -240,6 +240,30 @@ pub fn encode_threading_info(pixels: u64) -> ThreadingInfo {
     }
 }
 
+/// Threading characterisation for a zenavif (AV1) decode.
+///
+/// AVIF decode is only *partly* parallel: rav1d-safe decodes AV1 tiles in
+/// parallel (zenavif runs it with `max_frame_delay=1` — tile parallelism, no
+/// frame threading), but zenavif's own YUV→RGB(A) conversion is a single
+/// auto-vectorised pass, and most still images carry a single tile. So the
+/// useful-thread knee is far lower than the encode side and grows slowly with
+/// size. Unlike [`encode_threading_info`], whose `parallel_fraction` is fitted
+/// to measurement, this is a conservative model (decode threading is not
+/// separately benchmarked); the knee `pixels / 262144` clamped to `[1, 8]` errs
+/// toward serial so a scheduler does not over-promise speedup.
+#[must_use]
+pub fn decode_threading_info(pixels: u64) -> ThreadingInfo {
+    let knee = (pixels / 262_144).clamp(1, 8) as u32;
+    ThreadingInfo {
+        parallel: knee > 1,
+        max_useful_threads: knee,
+        // Modest parallel fraction: tile-decode parallelises, the conversion
+        // pass does not.
+        parallel_fraction: 0.5,
+        mem_bytes_per_thread: 0,
+    }
+}
+
 /// [`estimate_encode`] adjusted for `cores` available CPU cores: `time_ms` is
 /// divided by the measured (saturating, tile-bounded) speedup and the peak
 /// terms gain the per-tile working-set. Returns `None` only on dimension

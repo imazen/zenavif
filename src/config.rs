@@ -28,6 +28,15 @@ pub struct DecoderConfig {
     /// Most AVIF encoders (including zenravif) default to 10-bit encoding
     /// even for 8-bit input. This option returns 8-bit output for those files.
     pub(crate) prefer_8bit: bool,
+    /// Allocation-fallibility preference for zenavif's *own* decode buffers
+    /// (the full-image RGB(A) output, the grid-stitch canvas, the crop
+    /// destination, and the per-row YUV→RGB scratch). `CodecDefault` keeps each
+    /// site's own default (big untrusted buffers fallible, small scratch
+    /// infallible). Set from `zencodec::ResourceLimits::prefer_fallible_allocations`
+    /// at the `codec` trait boundary; the direct (non-`zencodec`) decode API
+    /// leaves it `CodecDefault` so behavior is unchanged. Does not affect the
+    /// AV1 frame/tile buffers, which live in the `rav1d-safe` dependency.
+    pub(crate) alloc_pref: crate::alloc_util::AllocPref,
 }
 
 impl Default for DecoderConfig {
@@ -53,6 +62,7 @@ impl Default for DecoderConfig {
             parser_total_megapixels_limit: None,
             parser_max_animation_frames: None,
             prefer_8bit: false,
+            alloc_pref: crate::alloc_util::AllocPref::CodecDefault,
         }
     }
 }

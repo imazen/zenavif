@@ -121,6 +121,12 @@ pub struct ManagedAvifDecoder {
     /// default — opted in by the zencodec adapter's format negotiation
     /// (imazen/zenavif#5).
     native_gray: bool,
+    /// Allocation-fallibility preference for zenavif's own decode buffers.
+    /// Threaded from [`DecoderConfig::alloc_pref`](crate::DecoderConfig) so the
+    /// big untrusted-sized output / grid / crop buffers and the per-row scratch
+    /// honor `Fallible` / `Infallible` overrides. `CodecDefault` keeps each
+    /// site's own default.
+    alloc_pref: crate::alloc_util::AllocPref,
 }
 
 impl ManagedAvifDecoder {
@@ -177,6 +183,7 @@ impl ManagedAvifDecoder {
             parser,
             prefer_8bit: config.prefer_8bit,
             native_gray: false,
+            alloc_pref: config.alloc_pref,
         })
     }
 
@@ -818,7 +825,9 @@ impl ManagedAvifDecoder {
             .checked_mul(output_height)
             .and_then(|n| n.checked_mul(bpp))
             .ok_or_else(|| at!(Error::OutOfMemory))?;
-        let data = vec![0u8; alloc_size];
+        // Full grid-stitch canvas, sized from the (untrusted) grid output
+        // dimensions → fallible by default.
+        let data = crate::alloc_util::alloc_filled(self.alloc_pref, true, 0u8, alloc_size)?;
         let mut output =
             PixelBuffer::from_vec(data, output_width as u32, output_height as u32, descriptor)
                 .map_err(|_| {
@@ -848,7 +857,12 @@ impl ManagedAvifDecoder {
     }
 
     /// Crop an image to the specified dimensions
-    fn crop_image(image: PixelBuffer, width: usize, height: usize) -> Result<PixelBuffer> {
+    fn crop_image(
+        image: PixelBuffer,
+        width: usize,
+        height: usize,
+        alloc_pref: crate::alloc_util::AllocPref,
+    ) -> Result<PixelBuffer> {
         let descriptor = image.descriptor();
         let bpp = descriptor.bytes_per_pixel();
         let src_w = image.width() as usize;
@@ -860,7 +874,9 @@ impl ManagedAvifDecoder {
             .checked_mul(height)
             .and_then(|n| n.checked_mul(bpp))
             .ok_or_else(|| at!(Error::OutOfMemory))?;
-        let mut data = vec![0u8; alloc_size];
+        // Full crop destination, sized from the display dimensions → fallible
+        // by default.
+        let mut data = crate::alloc_util::alloc_filled(alloc_pref, true, 0u8, alloc_size)?;
         let src = image.as_slice();
         for y in 0..height.min(src_h) {
             let src_row = src.row(y as u32);
@@ -1018,6 +1034,7 @@ impl ManagedAvifDecoder {
             has_alpha,
             yuv_range,
             matrix,
+            alloc_pref: self.alloc_pref,
         };
         let mut image = match (info.chroma_sampling, resolved) {
             (ChromaSampling::Monochrome, _) if self.native_gray && !ctx.has_alpha => {
@@ -1040,7 +1057,7 @@ impl ManagedAvifDecoder {
 
         // Crop to display dimensions if needed
         if needs_crop {
-            image = Self::crop_image(image, display_width, display_height)?;
+            image = Self::crop_image(image, display_width, display_height, self.alloc_pref)?;
         }
 
         // Handle alpha channel if present
@@ -1105,6 +1122,7 @@ impl ManagedAvifDecoder {
             has_alpha,
             yuv_range,
             matrix,
+            alloc_pref: self.alloc_pref,
         };
         let mut image = match (info.chroma_sampling, resolved) {
             (ChromaSampling::Monochrome, _) if self.native_gray && !ctx.has_alpha => {
@@ -1133,7 +1151,7 @@ impl ManagedAvifDecoder {
 
         // Crop to display dimensions if needed
         if needs_crop {
-            image = Self::crop_image(image, display_width, display_height)?;
+            image = Self::crop_image(image, display_width, display_height, self.alloc_pref)?;
         }
 
         // Handle alpha channel if present
@@ -1545,6 +1563,11 @@ struct ConvertCtx {
     yuv_range: YuvRange,
     /// `yuv` crate's standard color matrix (BT.601/BT.709/BT.2020).
     matrix: YuvStandardMatrix,
+    /// Allocation-fallibility preference for the output buffers allocated by
+    /// the YUV→RGB(A) helpers. The full-image `out` buffers are sized from the
+    /// (untrusted) AV1 frame dimensions, so they default to fallible; the
+    /// per-row `rgb_row` scratch is width-bounded and defaults to infallible.
+    alloc_pref: crate::alloc_util::AllocPref,
 }
 
 impl ConvertCtx {
@@ -1562,8 +1585,14 @@ fn convert_8bit_monochrome_gray(planes: &Planes8<'_>, ctx: ConvertCtx) -> Result
     let y_view = planes.y();
     let (w, h) = ctx.dims();
     let (wu, hu) = (w as usize, h as usize);
-    let mut out = vec![rgb::Gray::<u8>::new(0); ctx.buffer_pixel_count];
-    let mut rgb_row = vec![Rgb { r: 0u8, g: 0, b: 0 }; wu];
+    let mut out = crate::alloc_util::alloc_filled(
+        ctx.alloc_pref,
+        true,
+        rgb::Gray::<u8>::new(0),
+        ctx.buffer_pixel_count,
+    )?;
+    let mut rgb_row =
+        crate::alloc_util::alloc_filled(ctx.alloc_pref, false, Rgb { r: 0u8, g: 0, b: 0 }, wu)?;
     let y_slice = y_view.as_slice();
     let y_stride = y_view.stride();
     for (row_idx, orow) in out.chunks_exact_mut(wu).enumerate().take(hu) {
@@ -1602,15 +1631,22 @@ fn convert_16bit_monochrome_gray(
     let y_view = planes.y();
     let (w, h) = ctx.dims();
     let (wu, hu) = (w as usize, h as usize);
-    let mut out = vec![rgb::Gray::<u16>::new(0); ctx.buffer_pixel_count];
-    let mut rgb_row = vec![
+    let mut out = crate::alloc_util::alloc_filled(
+        ctx.alloc_pref,
+        true,
+        rgb::Gray::<u16>::new(0),
+        ctx.buffer_pixel_count,
+    )?;
+    let mut rgb_row = crate::alloc_util::alloc_filled(
+        ctx.alloc_pref,
+        false,
         Rgb {
             r: 0u16,
             g: 0,
-            b: 0
-        };
-        wu
-    ];
+            b: 0,
+        },
+        wu,
+    )?;
     let y_slice = y_view.as_slice();
     let y_stride = y_view.stride();
     for (row_idx, orow) in out.chunks_exact_mut(wu).enumerate().take(hu) {
@@ -1648,15 +1684,17 @@ fn convert_8bit_monochrome(planes: &Planes8<'_>, ctx: ConvertCtx) -> Result<Pixe
     };
 
     if ctx.has_alpha {
-        let mut out = vec![
+        let mut out = crate::alloc_util::alloc_filled(
+            ctx.alloc_pref,
+            true,
             Rgba {
                 r: 0u8,
                 g: 0,
                 b: 0,
-                a: 255
-            };
-            ctx.buffer_pixel_count
-        ];
+                a: 255,
+            },
+            ctx.buffer_pixel_count,
+        )?;
         let rgb_stride = w * 4;
         yuv::yuv400_to_rgba(
             &gray,
@@ -1670,7 +1708,12 @@ fn convert_8bit_monochrome(planes: &Planes8<'_>, ctx: ConvertCtx) -> Result<Pixe
             .map(Into::into)
             .map_err(|_| at!(Error::OutOfMemory))
     } else {
-        let mut out = vec![Rgb { r: 0u8, g: 0, b: 0 }; ctx.buffer_pixel_count];
+        let mut out = crate::alloc_util::alloc_filled(
+            ctx.alloc_pref,
+            true,
+            Rgb { r: 0u8, g: 0, b: 0 },
+            ctx.buffer_pixel_count,
+        )?;
         let rgb_stride = w * 3;
         yuv::yuv400_to_rgb(
             &gray,
@@ -1725,7 +1768,8 @@ fn convert_8bit_identity(planes: &Planes8<'_>, ctx: ConvertCtx) -> Result<PixelB
 
     let rows = g_view.rows().zip(b_view.rows()).zip(r_view.rows()).take(h);
     if ctx.has_alpha {
-        let mut out: Vec<rgb::Rgba<u8>> = Vec::with_capacity(ctx.buffer_pixel_count);
+        let mut out: Vec<rgb::Rgba<u8>> =
+            crate::alloc_util::vec_with_capacity(ctx.alloc_pref, true, ctx.buffer_pixel_count)?;
         for ((g_row, b_row), r_row) in rows {
             for x in 0..w {
                 out.push(rgb::Rgba {
@@ -1740,7 +1784,8 @@ fn convert_8bit_identity(planes: &Planes8<'_>, ctx: ConvertCtx) -> Result<PixelB
             .map(Into::into)
             .map_err(|_| at!(Error::OutOfMemory))
     } else {
-        let mut out: Vec<Rgb<u8>> = Vec::with_capacity(ctx.buffer_pixel_count);
+        let mut out: Vec<Rgb<u8>> =
+            crate::alloc_util::vec_with_capacity(ctx.alloc_pref, true, ctx.buffer_pixel_count)?;
         for ((g_row, b_row), r_row) in rows {
             for x in 0..w {
                 out.push(Rgb {
@@ -1795,7 +1840,8 @@ fn convert_16bit_identity(
 
     let rows = g_view.rows().zip(b_view.rows()).zip(r_view.rows()).take(h);
     if ctx.has_alpha {
-        let mut out: Vec<rgb::Rgba<u16>> = Vec::with_capacity(ctx.buffer_pixel_count);
+        let mut out: Vec<rgb::Rgba<u16>> =
+            crate::alloc_util::vec_with_capacity(ctx.alloc_pref, true, ctx.buffer_pixel_count)?;
         for ((g_row, b_row), r_row) in rows {
             for x in 0..w {
                 out.push(rgb::Rgba {
@@ -1810,7 +1856,8 @@ fn convert_16bit_identity(
             .map(Into::into)
             .map_err(|_| at!(Error::OutOfMemory))
     } else {
-        let mut out: Vec<Rgb<u16>> = Vec::with_capacity(ctx.buffer_pixel_count);
+        let mut out: Vec<Rgb<u16>> =
+            crate::alloc_util::vec_with_capacity(ctx.alloc_pref, true, ctx.buffer_pixel_count)?;
         for ((g_row, b_row), r_row) in rows {
             for x in 0..w {
                 out.push(Rgb {
@@ -1883,7 +1930,12 @@ fn convert_8bit_planar_rgb_yuvcrate(
     ctx: ConvertCtx,
 ) -> Result<PixelBuffer> {
     let (w, h) = ctx.dims();
-    let mut out = vec![Rgb { r: 0u8, g: 0, b: 0 }; ctx.buffer_pixel_count];
+    let mut out = crate::alloc_util::alloc_filled(
+        ctx.alloc_pref,
+        true,
+        Rgb { r: 0u8, g: 0, b: 0 },
+        ctx.buffer_pixel_count,
+    )?;
     let rgb_stride = w * 3;
     let out_bytes: &mut [u8] = rgb::bytemuck::cast_slice_mut(out.as_mut_slice());
     match sampling {
@@ -1919,15 +1971,17 @@ fn convert_8bit_planar_rgba(
     ctx: ConvertCtx,
 ) -> Result<PixelBuffer> {
     let (w, h) = ctx.dims();
-    let mut out = vec![
+    let mut out = crate::alloc_util::alloc_filled(
+        ctx.alloc_pref,
+        true,
         Rgba {
             r: 0u8,
             g: 0,
             b: 0,
-            a: 255
-        };
-        ctx.buffer_pixel_count
-    ];
+            a: 255,
+        },
+        ctx.buffer_pixel_count,
+    )?;
     let rgb_stride = w * 4;
     let out_bytes = rgb::bytemuck::cast_slice_mut(out.as_mut_slice());
     match sampling {
@@ -2031,15 +2085,17 @@ fn convert_16bit_monochrome(
     };
 
     if ctx.has_alpha {
-        let mut out = vec![
+        let mut out = crate::alloc_util::alloc_filled(
+            ctx.alloc_pref,
+            true,
             Rgba {
                 r: 0u16,
                 g: 0,
                 b: 0,
-                a: 0xFFFF
-            };
-            ctx.buffer_pixel_count
-        ];
+                a: 0xFFFF,
+            },
+            ctx.buffer_pixel_count,
+        )?;
         let rgb_stride = w * 4;
         let out_bytes = rgb::bytemuck::cast_slice_mut(out.as_mut_slice());
         match bit_depth {
@@ -2052,14 +2108,16 @@ fn convert_16bit_monochrome(
             .map(Into::into)
             .map_err(|_| at!(Error::OutOfMemory))
     } else {
-        let mut out = vec![
+        let mut out = crate::alloc_util::alloc_filled(
+            ctx.alloc_pref,
+            true,
             Rgb {
                 r: 0u16,
                 g: 0,
-                b: 0
-            };
-            ctx.buffer_pixel_count
-        ];
+                b: 0,
+            },
+            ctx.buffer_pixel_count,
+        )?;
         let rgb_stride = w * 3;
         let out_bytes = rgb::bytemuck::cast_slice_mut(out.as_mut_slice());
         match bit_depth {
@@ -2125,15 +2183,17 @@ fn convert_16bit_planar_rgba(
     ctx: ConvertCtx,
 ) -> Result<PixelBuffer> {
     let (w, h) = ctx.dims();
-    let mut out = vec![
+    let mut out = crate::alloc_util::alloc_filled(
+        ctx.alloc_pref,
+        true,
         Rgba {
             r: 0u16,
             g: 0,
             b: 0,
-            a: 0xFFFF
-        };
-        ctx.buffer_pixel_count
-    ];
+            a: 0xFFFF,
+        },
+        ctx.buffer_pixel_count,
+    )?;
     let rgb_stride = w * 4;
     let out_bytes = rgb::bytemuck::cast_slice_mut(out.as_mut_slice());
     let yuv_range = ctx.yuv_range;
@@ -2187,14 +2247,16 @@ fn convert_16bit_planar_rgb(
     ctx: ConvertCtx,
 ) -> Result<PixelBuffer> {
     let (w, h) = ctx.dims();
-    let mut out = vec![
+    let mut out = crate::alloc_util::alloc_filled(
+        ctx.alloc_pref,
+        true,
         Rgb {
             r: 0u16,
             g: 0,
-            b: 0
-        };
-        ctx.buffer_pixel_count
-    ];
+            b: 0,
+        },
+        ctx.buffer_pixel_count,
+    )?;
     let rgb_stride = w * 3;
     let out_bytes = rgb::bytemuck::cast_slice_mut(out.as_mut_slice());
     let yuv_range = ctx.yuv_range;

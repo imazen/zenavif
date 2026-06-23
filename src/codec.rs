@@ -2001,6 +2001,42 @@ impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
         &AVIF_DECODE_CAPABILITIES
     }
 
+    /// Core-adjusted resource estimate via zencodec's unified `estimate` API.
+    ///
+    /// Mirrors [`estimate_encode_resources`](AvifEncoderConfig::estimate_encode_resources):
+    /// delegates to the crate's calibrated [`crate::heuristics::estimate_decode`]
+    /// (peak memory / time, keyed on the decoded output bytes-per-pixel) and maps
+    /// the local [`crate::heuristics::ThreadingInfo`] onto the shared
+    /// [`zencodec::estimate::ThreadingInformation`] only here at the boundary, so
+    /// the local heuristics stay decoupled from the optional `zencodec`
+    /// dependency.
+    ///
+    /// The estimate covers the *whole* decode: the AV1 frame/tile working set
+    /// (owned by `rav1d-safe`) plus zenavif's own RGB(A) output buffer. AVIF
+    /// decode is only partly parallel (tile decode parallelises; the YUV→RGB
+    /// conversion does not), so the [`ThreadingInformation`] knee is
+    /// conservative — see [`crate::heuristics::decode_threading_info`].
+    fn estimate_decode_resources(
+        &self,
+        image: &zencodec::estimate::ImageCharacteristics,
+        compute: &zencodec::estimate::ComputeEnvironment,
+    ) -> zencodec::estimate::ResourceEstimate {
+        use zencodec::estimate::{ResourceEstimate, ThreadingInformation};
+        let bpp = image.descriptor().bytes_per_pixel() as u8;
+        let lti = crate::heuristics::decode_threading_info(image.pixels());
+        let ti = if lti.parallel {
+            ThreadingInformation::parallel(lti.max_useful_threads)
+        } else {
+            ThreadingInformation::SERIAL
+        };
+        match crate::heuristics::estimate_decode(image.width(), image.height(), bpp) {
+            Some(e) => ResourceEstimate::new(e.peak_memory_bytes, e.time_ms as u64)
+                .with_threading(ti)
+                .at_cores(compute.cores()),
+            None => ResourceEstimate::conservative(image).at_cores(compute.cores()),
+        }
+    }
+
     fn job<'a>(self) -> Self::Job<'a> {
         let extract_gain_map = self.extract_gain_map;
         let orientation = self.orientation;
@@ -2067,6 +2103,11 @@ impl AvifDecodeJob {
         if let Some(frames) = self.limits.max_frames {
             cfg.parser_max_animation_frames = Some(frames);
         }
+        // Honor the allocation-fallibility preference for zenavif's own decode
+        // buffers (output / grid / crop / per-row scratch). `CodecDefault` (the
+        // default) keeps each site's own default fallibility. The AV1 frame/tile
+        // buffers are owned by `rav1d-safe` and are not affected.
+        cfg.alloc_pref = self.limits.prefer_fallible_allocations.into();
         cfg
     }
 
@@ -3784,6 +3825,58 @@ mod tests {
     use super::*;
     #[cfg(feature = "encode")]
     use imgref::Img;
+
+    /// `AllocPreference` must not change decoded pixels: decoding the same
+    /// AVIF under `Fallible` (the `try_reserve` path), `Infallible` (the
+    /// `vec!` path), and the default (`CodecDefault`) must produce
+    /// byte-identical output. Uses a real 8-bit 4:2:0 photo fixture, which
+    /// exercises the big full-image RGB output buffer + the per-row scratch.
+    mod alloc_pref_decode {
+        use super::super::{AvifDecoderConfig, DecodeOutput, Error};
+        use alloc::borrow::Cow;
+        use whereat::At;
+        use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
+        use zencodec::{AllocPreference, ResourceLimits};
+
+        extern crate alloc;
+
+        /// A real, committed 8-bit 4:2:0 AVIF (kodim03). The default-features
+        /// (decode-only) build can decode it without the `encode` feature.
+        const KODIM03: &[u8] = include_bytes!("../tests/vectors/libavif/kodim03_yuv420_8bpc.avif");
+
+        fn decode_bytes(
+            encoded: &[u8],
+            pref: Option<AllocPreference>,
+        ) -> Result<Vec<u8>, At<Error>> {
+            let job = AvifDecoderConfig::new().job();
+            let job = match pref {
+                Some(p) => {
+                    job.with_limits(ResourceLimits::none().with_prefer_fallible_allocations(p))
+                }
+                None => job,
+            };
+            let out: DecodeOutput = job.decoder(Cow::Borrowed(encoded), &[])?.decode()?;
+            Ok(out.into_buffer().copy_to_contiguous_bytes())
+        }
+
+        #[test]
+        fn fallible_alloc_decode_matches_default() {
+            let default = decode_bytes(KODIM03, None).expect("default decode");
+            let fallible =
+                decode_bytes(KODIM03, Some(AllocPreference::Fallible)).expect("fallible decode");
+            let infallible = decode_bytes(KODIM03, Some(AllocPreference::Infallible))
+                .expect("infallible decode");
+            assert!(!default.is_empty(), "decode produced no pixels");
+            assert_eq!(
+                default, fallible,
+                "Fallible decode must be byte-identical to the default decode"
+            );
+            assert_eq!(
+                default, infallible,
+                "Infallible decode must be byte-identical to the default decode"
+            );
+        }
+    }
 
     /// Pin the negotiate-layer gray collapse in zenavif's exact feature
     /// configuration (zenpixels-convert with `default-features = false`,

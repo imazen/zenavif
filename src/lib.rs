@@ -51,6 +51,8 @@
 // Crate info for whereat error tracing (enables at!() macro with GitHub links)
 whereat::define_at_crate_info!();
 
+mod alloc_util;
+
 #[cfg(feature = "auto-tune")]
 mod auto_tune;
 #[cfg(feature = "auto-tune")]

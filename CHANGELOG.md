@@ -10,6 +10,27 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Added
+- **Honor `zencodec::AllocPreference` at zenavif's own decode allocations.**
+  The full-image RGB(A) output buffer, the grid-stitch canvas, the crop
+  destination, and the per-row YUV→RGB scratch now route through a 3-mode,
+  per-site allocation helper (`src/alloc_util.rs`). Big buffers sized from the
+  (untrusted) AV1 frame / grid dimensions default to the fallible
+  `try_reserve` path (graceful `Error::ResourceLimit` instead of an allocator
+  abort); the width-bounded per-row scratch defaults to the infallible `vec!`
+  path. `ResourceLimits::prefer_fallible_allocations` (`Fallible` /
+  `Infallible`) overrides every site; `CodecDefault` (the default) keeps each
+  site's own default, so behavior is unchanged. Wired only at the `zencodec`
+  `DecodeJob` boundary (`effective_config`) — the direct `zenavif::decode` API
+  leaves it `CodecDefault`. The AV1 frame/tile buffers live in the
+  `rav1d-safe` dependency and are out of scope (noted as a follow-up).
+- **`DecoderConfig::estimate_decode_resources` (zencodec `estimate` API).**
+  Mirrors `estimate_encode_resources`: delegates to the calibrated
+  `heuristics::estimate_decode` (peak memory + time from the decoded
+  bytes-per-pixel) and maps a new conservative `heuristics::decode_threading_info`
+  onto `zencodec::estimate::ThreadingInformation` (AVIF decode is only partly
+  parallel — tile decode parallelises, the YUV→RGB conversion does not).
+
 ### Changed
 - **deps: migrate to published `zencodec 0.1.24` estimate API; drop git-rev
   patch.** Removed the temporary `[patch.crates-io] zencodec = { git, rev =
