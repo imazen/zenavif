@@ -452,8 +452,12 @@ fn yuv_to_rgb_simd(
     (r * scale_255, g * scale_255, b * scale_255)
 }
 
-/// Convert YUV422 to RGB8
-#[autoversion]
+/// Convert YUV422 to RGB8 with horizontal bilinear chroma upsampling.
+///
+/// 4:2:2 chroma is full vertical resolution and half horizontal, so only the
+/// horizontal direction is interpolated (vertical is 1:1). The horizontal
+/// chroma siting matches the 4:2:0 path, which is byte-exact with libavif's
+/// default (bilinear) upsampling. Dispatches to AVX2/NEON/wasm SIMD or scalar.
 pub fn yuv422_to_rgb8(
     y_plane: &[u8],
     y_stride: usize,
@@ -466,20 +470,143 @@ pub fn yuv422_to_rgb8(
     range: YuvRange,
     matrix: YuvMatrix,
 ) -> ImgVec<RGB8> {
+    incant!(
+        yuv422_to_rgb8_inner(
+            y_plane, y_stride, u_plane, u_stride, v_plane, v_stride, width, height, range, matrix
+        ),
+        [v3, neon, wasm128, scalar]
+    )
+}
+
+/// Generic SIMD YUV422 → RGB8 with horizontal bilinear chroma upsampling.
+///
+/// Mirrors [`yuv420_to_rgb8_inner`] but with 1:1 vertical chroma (4:2:2 has full
+/// vertical resolution), so only horizontal interpolation is applied. The
+/// horizontal chroma gather is scalar (random access); matrix multiply, clamp,
+/// and store use SIMD.
+#[magetypes(v3, neon, wasm128, scalar)]
+fn yuv422_to_rgb8_inner(
+    token: Token,
+    y_plane: &[u8],
+    y_stride: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+    width: usize,
+    height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+) -> ImgVec<RGB8> {
+    #[allow(non_camel_case_types)]
+    type f32x8 = GenericF32x8<Token>;
+    const LANES: usize = 8;
+
     let mut out = vec![RGB8::default(); width * height];
 
     let (kr, kb) = matrix_coefficients(matrix);
     let kg = 1.0 - kr - kb;
 
-    for y in 0..height {
-        for x in 0..width {
-            let y_val = y_plane[y * y_stride + x] as f32;
-            let u_x = x / 2;
-            let u_val = u_plane[y * u_stride + u_x] as f32;
-            let v_val = v_plane[y * v_stride + u_x] as f32;
+    let chroma_width = width.div_ceil(2);
 
+    // Precompute SIMD constants (identical to the 4:2:0 path).
+    let vr = 2.0 * (1.0 - kr);
+    let ug = -2.0 * kb * (1.0 - kb) / kg;
+    let vg = -2.0 * kr * (1.0 - kr) / kg;
+    let ub = 2.0 * (1.0 - kb);
+
+    let vr_vec = f32x8::splat(token, vr);
+    let ug_vec = f32x8::splat(token, ug);
+    let vg_vec = f32x8::splat(token, vg);
+    let ub_vec = f32x8::splat(token, ub);
+    let scale_255 = f32x8::splat(token, 255.0);
+    let zero = f32x8::zero(token);
+    let max_val = f32x8::splat(token, 255.0);
+
+    let (y_offset, y_scale, uv_center, uv_scale) = match range {
+        YuvRange::Full => (0.0f32, 1.0 / 255.0, 128.0, 1.0 / 255.0),
+        YuvRange::Limited => (16.0, 1.0 / 219.0, 128.0, 1.0 / 224.0),
+    };
+    let y_off = f32x8::splat(token, y_offset);
+    let y_sc = f32x8::splat(token, y_scale);
+    let uv_cen = f32x8::splat(token, uv_center);
+    let uv_sc = f32x8::splat(token, uv_scale);
+
+    for y_pos in 0..height {
+        let row_start = y_pos * width;
+        // 4:2:2: chroma is full vertical resolution, so the chroma row index is
+        // the luma row index (no vertical interpolation).
+        let u_row = y_pos * u_stride;
+        let v_row = y_pos * v_stride;
+
+        let mut x_pos = 0;
+        while x_pos + LANES <= width {
+            let y_idx = y_pos * y_stride + x_pos;
+            let mut y_vals = [0f32; 8];
+            for i in 0..LANES {
+                y_vals[i] = y_plane[y_idx + i] as f32;
+            }
+
+            // Horizontal bilinear chroma gather (scalar -- random access).
+            let mut u_vals = [0f32; 8];
+            let mut v_vals = [0f32; 8];
+            for i in 0..LANES {
+                let x = x_pos + i;
+                let chroma_x_raw = (x as f32 + 0.5) * 0.5 - 0.5;
+                let chroma_x = chroma_x_raw.max(0.0).min(chroma_width as f32 - 1.0);
+                let (cx0, fx) = floor_nonneg_idx(chroma_x);
+                let cx1 = (cx0 + 1).min(chroma_width - 1);
+                let fx1 = 1.0 - fx;
+                u_vals[i] = u_plane[u_row + cx0] as f32 * fx1 + u_plane[u_row + cx1] as f32 * fx;
+                v_vals[i] = v_plane[v_row + cx0] as f32 * fx1 + v_plane[v_row + cx1] as f32 * fx;
+            }
+
+            let y_vec = f32x8::from_array(token, y_vals);
+            let u_vec = f32x8::from_array(token, u_vals);
+            let v_vec = f32x8::from_array(token, v_vals);
+
+            // Normalize
+            let y_norm = (y_vec - y_off) * y_sc;
+            let u_norm = (u_vec - uv_cen) * uv_sc;
+            let v_norm = (v_vec - uv_cen) * uv_sc;
+
+            // YUV to RGB with FMA
+            let r = v_norm.mul_add(vr_vec, y_norm);
+            let g = v_norm.mul_add(vg_vec, u_norm.mul_add(ug_vec, y_norm));
+            let b = u_norm.mul_add(ub_vec, y_norm);
+
+            // Scale, clamp, round
+            let r_out = (r * scale_255).max(zero).min(max_val).round();
+            let g_out = (g * scale_255).max(zero).min(max_val).round();
+            let b_out = (b * scale_255).max(zero).min(max_val).round();
+
+            let r_arr = r_out.to_array();
+            let g_arr = g_out.to_array();
+            let b_arr = b_out.to_array();
+            for i in 0..LANES {
+                out[row_start + x_pos + i] = RGB8 {
+                    r: r_arr[i] as u8,
+                    g: g_arr[i] as u8,
+                    b: b_arr[i] as u8,
+                };
+            }
+
+            x_pos += LANES;
+        }
+
+        // Scalar remainder
+        while x_pos < width {
+            let y_val = y_plane[y_pos * y_stride + x_pos] as f32;
+            let chroma_x_raw = (x_pos as f32 + 0.5) * 0.5 - 0.5;
+            let chroma_x = chroma_x_raw.max(0.0).min(chroma_width as f32 - 1.0);
+            let (cx0, fx) = floor_nonneg_idx(chroma_x);
+            let cx1 = (cx0 + 1).min(chroma_width - 1);
+            let fx1 = 1.0 - fx;
+            let u_val = u_plane[u_row + cx0] as f32 * fx1 + u_plane[u_row + cx1] as f32 * fx;
+            let v_val = v_plane[v_row + cx0] as f32 * fx1 + v_plane[v_row + cx1] as f32 * fx;
             let (r, g, b) = yuv_to_rgb(y_val, u_val, v_val, kr, kg, kb, range);
-            out[y * width + x] = RGB8 { r, g, b };
+            out[row_start + x_pos] = RGB8 { r, g, b };
+            x_pos += 1;
         }
     }
 
@@ -1225,16 +1352,26 @@ fn yuv422_strip_scalar<P: StripPixel>(
 ) {
     let (kr, kb) = matrix_coefficients(matrix);
     let kg = 1.0 - kr - kb;
+    let chroma_width = width.div_ceil(2);
 
     for row in 0..strip_height {
         let y_pos = y_start + row;
         let out_start = row * width;
+        // 4:2:2: chroma is full vertical resolution, so the chroma row index is
+        // the luma row index; only the horizontal direction is interpolated
+        // (matches the full-frame `yuv422_to_rgb8` path and libavif).
+        let u_row = y_pos * u_stride;
+        let v_row = y_pos * v_stride;
 
         for x in 0..width {
             let y_val = y_plane[y_pos * y_stride + x] as f32;
-            let u_x = x / 2;
-            let u_val = u_plane[y_pos * u_stride + u_x] as f32;
-            let v_val = v_plane[y_pos * v_stride + u_x] as f32;
+            let chroma_x_raw = (x as f32 + 0.5) * 0.5 - 0.5;
+            let chroma_x = chroma_x_raw.max(0.0).min(chroma_width as f32 - 1.0);
+            let (cx0, fx) = floor_nonneg_idx(chroma_x);
+            let cx1 = (cx0 + 1).min(chroma_width - 1);
+            let fx1 = 1.0 - fx;
+            let u_val = u_plane[u_row + cx0] as f32 * fx1 + u_plane[u_row + cx1] as f32 * fx;
+            let v_val = v_plane[v_row + cx0] as f32 * fx1 + v_plane[v_row + cx1] as f32 * fx;
 
             let (r, g, b) = yuv_to_rgb(y_val, u_val, v_val, kr, kg, kb, range);
             out[out_start + x] = P::from_rgb(r, g, b);
@@ -1382,6 +1519,77 @@ mod tests {
                     fill_rand(&mut vb, seed ^ 0x1234);
                     let got = yuv420_to_rgb8(&yb, w, &ub, cw, &vb, cw, w, h, range, matrix);
                     let want = ref_yuv420_to_rgb8(&yb, w, &ub, cw, &vb, cw, w, h, range, matrix);
+                    let got_vec: Vec<RGB8> = got.into_buf();
+                    assert_eq!(
+                        got_vec.as_slice(),
+                        want.as_slice(),
+                        "mismatch {w}x{h} {range:?} {matrix:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Independent per-pixel reference for YUV422 horizontal-bilinear upsample +
+    /// convert (vertical is 1:1 for 4:2:2). The dispatched `yuv422_to_rgb8` must
+    /// be byte-identical to this.
+    fn ref_yuv422_to_rgb8(
+        y_plane: &[u8],
+        y_stride: usize,
+        u_plane: &[u8],
+        u_stride: usize,
+        v_plane: &[u8],
+        v_stride: usize,
+        width: usize,
+        height: usize,
+        range: YuvRange,
+        matrix: YuvMatrix,
+    ) -> Vec<RGB8> {
+        let (kr, kb) = matrix_coefficients(matrix);
+        let kg = 1.0 - kr - kb;
+        let chroma_width = width.div_ceil(2);
+        let mut out = vec![RGB8::default(); width * height];
+        for y_pos in 0..height {
+            for x in 0..width {
+                let y_val = y_plane[y_pos * y_stride + x] as f32;
+                let chroma_x_raw = (x as f32 + 0.5) * 0.5 - 0.5;
+                let chroma_x = chroma_x_raw.max(0.0).min(chroma_width as f32 - 1.0);
+                let cx0 = chroma_x.floor() as usize;
+                let cx1 = (cx0 + 1).min(chroma_width - 1);
+                let fx = chroma_x - cx0 as f32;
+                let fx1 = 1.0 - fx;
+                // 4:2:2: chroma row index == luma row index (no vertical interp).
+                let u_val = u_plane[y_pos * u_stride + cx0] as f32 * fx1
+                    + u_plane[y_pos * u_stride + cx1] as f32 * fx;
+                let v_val = v_plane[y_pos * v_stride + cx0] as f32 * fx1
+                    + v_plane[y_pos * v_stride + cx1] as f32 * fx;
+                let (r, g, b) = yuv_to_rgb(y_val, u_val, v_val, kr, kg, kb, range);
+                out[y_pos * width + x] = RGB8 { r, g, b };
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn yuv422_to_rgb8_byte_identical_to_reference() {
+        // Odd + even dims, sub-lane, multi-lane, and a bench-sized case.
+        let sizes: [(usize, usize); 6] = [(1, 1), (3, 3), (8, 8), (9, 7), (17, 13), (64, 48)];
+        let ranges = [YuvRange::Full, YuvRange::Limited];
+        let matrices = [YuvMatrix::Bt601, YuvMatrix::Bt709, YuvMatrix::Bt2020];
+        let mut seed = 7u32;
+        for &(w, h) in &sizes {
+            let cw = w.div_ceil(2); // 4:2:2: half width, full height
+            let mut yb = vec![0u8; w * h];
+            let mut ub = vec![0u8; cw * h];
+            let mut vb = vec![0u8; cw * h];
+            for &range in &ranges {
+                for &matrix in &matrices {
+                    seed = seed.wrapping_mul(2654435761).wrapping_add(1);
+                    fill_rand(&mut yb, seed);
+                    fill_rand(&mut ub, seed ^ 0xABCD);
+                    fill_rand(&mut vb, seed ^ 0x1234);
+                    let got = yuv422_to_rgb8(&yb, w, &ub, cw, &vb, cw, w, h, range, matrix);
+                    let want = ref_yuv422_to_rgb8(&yb, w, &ub, cw, &vb, cw, w, h, range, matrix);
                     let got_vec: Vec<RGB8> = got.into_buf();
                     assert_eq!(
                         got_vec.as_slice(),
