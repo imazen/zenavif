@@ -622,6 +622,17 @@ impl AvifDecoder {
             .map(|h| to_yuv_matrix(h.mtrx))
             .unwrap_or(YuvStandardMatrix::Bt601);
 
+        // MC=0 (Identity / GBR): the planes are already G,B,R and the decode is
+        // a reorder + range expansion, NOT a YUV matrix. `to_yuv_matrix`
+        // collapses MC=0 into its Bt601 fallback, so detect identity from the
+        // raw code point here and branch to the identity path (4:4:4 only).
+        // This is imazen/zenavif#15 for the unsafe-asm backend — the default
+        // rav1d-safe path already does this via `cicp_resolve` + the identity
+        // converter; without it, GBR planes were silently BT.601-decoded.
+        let is_identity = seq_hdr
+            .map(|h| matches!(h.mtrx, Rav1dMatrixCoefficients::IDENTITY))
+            .unwrap_or(false);
+
         let bit_depth = color_picture.bit_depth();
         let has_alpha = self.parser.alpha_data().is_some();
 
@@ -635,6 +646,15 @@ impl AvifDecoder {
                 ChromaSampling::Monochrome => {
                     self.convert_mono8(&planes, yuv_range, matrix, has_alpha)?
                 }
+                ChromaSampling::Cs444 if is_identity => {
+                    self.convert_identity8(&planes, yuv_range, has_alpha)?
+                }
+                _ if is_identity => {
+                    return Err(at!(Error::Unsupported(
+                        "matrix_coefficients=0 (identity/GBR) requires 4:4:4 chroma; \
+                         subsampled identity has no defined reconstruction"
+                    )));
+                }
                 _ => self.convert_yuv8(&planes, yuv_range, matrix, has_alpha)?,
             }
         } else {
@@ -645,6 +665,15 @@ impl AvifDecoder {
             match planes.chroma_sampling() {
                 ChromaSampling::Monochrome => {
                     self.convert_mono16(&planes, yuv_range, matrix, bit_depth, has_alpha)?
+                }
+                ChromaSampling::Cs444 if is_identity => {
+                    self.convert_identity16(&planes, yuv_range, bit_depth, has_alpha)?
+                }
+                _ if is_identity => {
+                    return Err(at!(Error::Unsupported(
+                        "matrix_coefficients=0 (identity/GBR) requires 4:4:4 chroma; \
+                         subsampled identity has no defined reconstruction"
+                    )));
                 }
                 _ => self.convert_yuv16(&planes, yuv_range, matrix, bit_depth, has_alpha)?,
             }
@@ -972,6 +1001,108 @@ impl AvifDecoder {
             }
             .map_err(|e| at!(Error::ColorConversion(e)))?;
 
+            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
+                .map_err(|_| at!(Error::OutOfMemory))?
+                .into())
+        }
+    }
+
+    /// MC=0 (Identity / GBR), 8-bit, 4:4:4. The planes are G (plane 0), B
+    /// (plane 1), R (plane 2); decode is a reorder plus optional limited→full
+    /// range expansion. Mirrors the default backend's `convert_8bit_identity`.
+    fn convert_identity8(
+        &self,
+        planes: &YuvPlanes8,
+        yuv_range: YuvRange,
+        has_alpha: bool,
+    ) -> Result<PixelBuffer> {
+        let (width, height) = (planes.width, planes.height);
+        let pixel_count = width.checked_mul(height).ok_or_else(|| at!(Error::OutOfMemory))?;
+        let limited = matches!(yuv_range, YuvRange::Limited);
+        // H.273 full-range-flag: limited identity uses the luma range (16–235)
+        // on all three planes.
+        let map = |v: u8| -> u8 {
+            if limited {
+                let c = u32::from(v.saturating_sub(16)).min(219);
+                ((c * 255 + 109) / 219) as u8
+            } else {
+                v
+            }
+        };
+        // planes.y = G, planes.u = B, planes.v = R.
+        if has_alpha {
+            let mut out: Vec<Rgba<u8>> = Vec::with_capacity(pixel_count);
+            for i in 0..pixel_count {
+                out.push(Rgba {
+                    r: map(planes.v[i]),
+                    g: map(planes.y[i]),
+                    b: map(planes.u[i]),
+                    a: 255,
+                });
+            }
+            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
+                .map_err(|_| at!(Error::OutOfMemory))?
+                .into())
+        } else {
+            let mut out: Vec<Rgb<u8>> = Vec::with_capacity(pixel_count);
+            for i in 0..pixel_count {
+                out.push(Rgb {
+                    r: map(planes.v[i]),
+                    g: map(planes.y[i]),
+                    b: map(planes.u[i]),
+                });
+            }
+            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
+                .map_err(|_| at!(Error::OutOfMemory))?
+                .into())
+        }
+    }
+
+    /// MC=0 (Identity / GBR), 10/12/16-bit, 4:4:4. Output is native bit depth
+    /// (scaled to full u16 by the caller). Mirrors `convert_16bit_identity`.
+    fn convert_identity16(
+        &self,
+        planes: &YuvPlanes16,
+        yuv_range: YuvRange,
+        bit_depth: u8,
+        has_alpha: bool,
+    ) -> Result<PixelBuffer> {
+        let (width, height) = (planes.width, planes.height);
+        let pixel_count = width.checked_mul(height).ok_or_else(|| at!(Error::OutOfMemory))?;
+        let limited = matches!(yuv_range, YuvRange::Limited);
+        let max = (1u32 << bit_depth) - 1;
+        let smin = 16u32 << (bit_depth - 8);
+        let span = 219u32 << (bit_depth - 8);
+        let map = |v: u16| -> u16 {
+            if limited {
+                let c = u32::from(v).saturating_sub(smin).min(span);
+                ((c * max + span / 2) / span) as u16
+            } else {
+                v
+            }
+        };
+        if has_alpha {
+            let mut out: Vec<Rgba<u16>> = Vec::with_capacity(pixel_count);
+            for i in 0..pixel_count {
+                out.push(Rgba {
+                    r: map(planes.v[i]),
+                    g: map(planes.y[i]),
+                    b: map(planes.u[i]),
+                    a: max as u16,
+                });
+            }
+            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
+                .map_err(|_| at!(Error::OutOfMemory))?
+                .into())
+        } else {
+            let mut out: Vec<Rgb<u16>> = Vec::with_capacity(pixel_count);
+            for i in 0..pixel_count {
+                out.push(Rgb {
+                    r: map(planes.v[i]),
+                    g: map(planes.y[i]),
+                    b: map(planes.u[i]),
+                });
+            }
             Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
                 .map_err(|_| at!(Error::OutOfMemory))?
                 .into())
