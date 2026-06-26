@@ -1829,25 +1829,9 @@ impl AvifDecoderConfig {
     ) -> Result<ImageInfo, At<Error>> {
         let output = self.decode(data)?;
         let info = output.info().clone();
-        let src = output.into_buffer().to_rgb8();
-        let src_ref = src.as_imgref();
-        let w = dst.width().min(src_ref.width());
-        let h = dst.height().min(src_ref.height());
-        for y in 0..h {
-            let src_row = src_ref.rows().nth(y).ok_or_else(|| {
-                at!(Error::Decode {
-                    code: -1,
-                    msg: "Source row index out of bounds",
-                })
-            })?;
-            let dst_row = &mut dst.rows_mut().nth(y).ok_or_else(|| {
-                at!(Error::Decode {
-                    code: -1,
-                    msg: "Destination row index out of bounds",
-                })
-            })?[..w];
-            dst_row.copy_from_slice(&src_row[..w]);
-        }
+        map_rgb8_rows(&output.into_buffer(), &mut dst, |s, d| {
+            d.copy_from_slice(s);
+        });
         Ok(info)
     }
 
@@ -1859,25 +1843,9 @@ impl AvifDecoderConfig {
     ) -> Result<ImageInfo, At<Error>> {
         let output = self.decode(data)?;
         let info = output.info().clone();
-        let src = output.into_buffer().to_rgba8();
-        let src_ref = src.as_imgref();
-        let w = dst.width().min(src_ref.width());
-        let h = dst.height().min(src_ref.height());
-        for y in 0..h {
-            let src_row = src_ref.rows().nth(y).ok_or_else(|| {
-                at!(Error::Decode {
-                    code: -1,
-                    msg: "Source row index out of bounds",
-                })
-            })?;
-            let dst_row = &mut dst.rows_mut().nth(y).ok_or_else(|| {
-                at!(Error::Decode {
-                    code: -1,
-                    msg: "Destination row index out of bounds",
-                })
-            })?[..w];
-            dst_row.copy_from_slice(&src_row[..w]);
-        }
+        map_rgba8_rows(&output.into_buffer(), &mut dst, |s, d| {
+            d.copy_from_slice(s);
+        });
         Ok(info)
     }
 
@@ -1890,31 +1858,15 @@ impl AvifDecoderConfig {
         use linear_srgb::default::srgb_u8_to_linear;
         let output = self.decode(data)?;
         let info = output.info().clone();
-        let src = output.into_buffer().to_rgb8();
-        let src_ref = src.as_imgref();
-        let w = dst.width().min(src_ref.width());
-        let h = dst.height().min(src_ref.height());
-        for y in 0..h {
-            let src_row = src_ref.rows().nth(y).ok_or_else(|| {
-                at!(Error::Decode {
-                    code: -1,
-                    msg: "Source row index out of bounds",
-                })
-            })?;
-            let dst_row = &mut dst.rows_mut().nth(y).ok_or_else(|| {
-                at!(Error::Decode {
-                    code: -1,
-                    msg: "Destination row index out of bounds",
-                })
-            })?[..w];
-            for (i, px) in src_row[..w].iter().enumerate() {
-                dst_row[i] = Rgb {
+        map_rgb8_rows(&output.into_buffer(), &mut dst, |s, d| {
+            for (px, out) in s.iter().zip(d.iter_mut()) {
+                *out = Rgb {
                     r: srgb_u8_to_linear(px.r),
                     g: srgb_u8_to_linear(px.g),
                     b: srgb_u8_to_linear(px.b),
                 };
             }
-        }
+        });
         Ok(info)
     }
 
@@ -1927,32 +1879,16 @@ impl AvifDecoderConfig {
         use linear_srgb::default::srgb_u8_to_linear;
         let output = self.decode(data)?;
         let info = output.info().clone();
-        let src = output.into_buffer().to_rgba8();
-        let src_ref = src.as_imgref();
-        let w = dst.width().min(src_ref.width());
-        let h = dst.height().min(src_ref.height());
-        for y in 0..h {
-            let src_row = src_ref.rows().nth(y).ok_or_else(|| {
-                at!(Error::Decode {
-                    code: -1,
-                    msg: "Source row index out of bounds",
-                })
-            })?;
-            let dst_row = &mut dst.rows_mut().nth(y).ok_or_else(|| {
-                at!(Error::Decode {
-                    code: -1,
-                    msg: "Destination row index out of bounds",
-                })
-            })?[..w];
-            for (i, px) in src_row[..w].iter().enumerate() {
-                dst_row[i] = Rgba {
+        map_rgba8_rows(&output.into_buffer(), &mut dst, |s, d| {
+            for (px, out) in s.iter().zip(d.iter_mut()) {
+                *out = Rgba {
                     r: srgb_u8_to_linear(px.r),
                     g: srgb_u8_to_linear(px.g),
                     b: srgb_u8_to_linear(px.b),
                     a: px.a as f32 / 255.0,
                 };
             }
-        }
+        });
         Ok(info)
     }
 
@@ -1965,36 +1901,67 @@ impl AvifDecoderConfig {
         use linear_srgb::default::srgb_u8_to_linear;
         let output = self.decode(data)?;
         let info = output.info().clone();
-        let src = output.into_buffer().to_rgb8();
-        let src_ref = src.as_imgref();
-        let w = dst.width().min(src_ref.width());
-        let h = dst.height().min(src_ref.height());
         // BT.709 luma coefficients in linear light
         let (kr, kb) =
             crate::yuv_convert::matrix_coefficients(crate::yuv_convert::YuvMatrix::Bt709);
         let kg = 1.0 - kr - kb;
-        for y in 0..h {
-            let src_row = src_ref.rows().nth(y).ok_or_else(|| {
-                at!(Error::Decode {
-                    code: -1,
-                    msg: "Source row index out of bounds",
-                })
-            })?;
-            let dst_row = &mut dst.rows_mut().nth(y).ok_or_else(|| {
-                at!(Error::Decode {
-                    code: -1,
-                    msg: "Destination row index out of bounds",
-                })
-            })?[..w];
-            for (i, px) in src_row[..w].iter().enumerate() {
+        map_rgb8_rows(&output.into_buffer(), &mut dst, |s, d| {
+            for (px, out) in s.iter().zip(d.iter_mut()) {
                 let r = srgb_u8_to_linear(px.r);
                 let g = srgb_u8_to_linear(px.g);
                 let b = srgb_u8_to_linear(px.b);
-                let luma = kr * r + kg * g + kb * b;
-                dst_row[i] = rgb::Gray(luma);
+                *out = rgb::Gray(kr * r + kg * g + kb * b);
             }
-        }
+        });
         Ok(info)
+    }
+}
+
+/// Borrow a decoded buffer as `ImgRef<Rgb<u8>>`, converting only when it isn't
+/// already RGB8 sRGB — this skips the redundant identity convert + full-image
+/// allocation an unconditional `to_rgb8()` would do. Rows are walked in
+/// O(height) (the prior `nth(y)` per-row lookup was O(height²)). `f` writes
+/// each output row over the overlapping `min(width)`×`min(height)` region.
+fn map_rgb8_rows<D>(
+    buffer: &PixelBuffer,
+    dst: &mut imgref::ImgRefMut<'_, D>,
+    mut f: impl FnMut(&[Rgb<u8>], &mut [D]),
+) {
+    let converted;
+    let src = if buffer.descriptor() == PixelDescriptor::RGB8_SRGB {
+        buffer
+            .try_as_imgref::<Rgb<u8>>()
+            .expect("RGB8_SRGB buffer views as Rgb<u8>")
+    } else {
+        converted = buffer.to_rgb8();
+        converted.as_imgref()
+    };
+    let w = dst.width().min(src.width());
+    let h = dst.height().min(src.height());
+    for (src_row, dst_row) in src.rows().zip(dst.rows_mut()).take(h) {
+        f(&src_row[..w], &mut dst_row[..w]);
+    }
+}
+
+/// Like [`map_rgb8_rows`] but views the buffer as RGBA8 (preserving alpha).
+fn map_rgba8_rows<D>(
+    buffer: &PixelBuffer,
+    dst: &mut imgref::ImgRefMut<'_, D>,
+    mut f: impl FnMut(&[Rgba<u8>], &mut [D]),
+) {
+    let converted;
+    let src = if buffer.descriptor() == PixelDescriptor::RGBA8_SRGB {
+        buffer
+            .try_as_imgref::<Rgba<u8>>()
+            .expect("RGBA8_SRGB buffer views as Rgba<u8>")
+    } else {
+        converted = buffer.to_rgba8();
+        converted.as_imgref()
+    };
+    let w = dst.width().min(src.width());
+    let h = dst.height().min(src.height());
+    for (src_row, dst_row) in src.rows().zip(dst.rows_mut()).take(h) {
+        f(&src_row[..w], &mut dst_row[..w]);
     }
 }
 
