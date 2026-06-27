@@ -962,13 +962,16 @@ fn collapse<T: core::fmt::Debug + Clone>(
 
 /// Collapse the lowest-tier multi-valued axis by one value.
 fn collapse_one_axis(axes: &mut SweepAxes) -> Option<DroppedAxis> {
-    // Tier order: cheapest-to-lose first. qm and subsampling are the
-    // core RD axes and are never collapsed (floor = their full size);
-    // speeds keeps at least two points so RD-vs-cost stays measurable.
+    // Tier order: cheapest-to-lose first. qm, subsampling AND color_models
+    // are MANDATORY core axes — never collapsed. color_models was previously
+    // collapsed to floor=1 (YCbCr only), silently dropping the appended RGB
+    // color path and crippling the picker (RGB is 25-40% RD on suitable
+    // content). Color mode is mandatory per the zenmetrics
+    // docs/MANDATORY_SWEEP_AXES.md contract. speeds keeps at least two points
+    // so RD-vs-cost stays measurable.
     collapse("probes", &mut axes.probes, 1)
         .or_else(|| collapse("vaq", &mut axes.vaq, 1))
         .or_else(|| collapse("trellis", &mut axes.trellis, 1))
-        .or_else(|| collapse("color_models", &mut axes.color_models, 1))
         .or_else(|| collapse("bit_depths", &mut axes.bit_depths, 1))
         .or_else(|| collapse("speeds", &mut axes.speeds, 2))
 }
@@ -1622,6 +1625,33 @@ mod tests {
             assert!(c.deviations >= prev, "deviations must be non-decreasing");
             prev = c.deviations;
         }
+    }
+
+    #[test]
+    fn budget_never_sheds_mandatory_color_models() {
+        // Color mode (incl RGB) is MANDATORY (zenmetrics docs/MANDATORY_SWEEP_AXES.md).
+        // Pre-2026-06-27 a budgeted modes_full collapsed color_models to YCbCr-only,
+        // silently dropping RGB and crippling the picker. Lock that shut.
+        let axes = SweepAxes::modes_full();
+        assert!(
+            axes.color_models.iter().any(|c| matches!(c, EncodeColorModel::Rgb)),
+            "modes_full must declare the RGB color model"
+        );
+        let unbudgeted = SweepBuilder::new(axes.clone(), QualityGrid::Explicit(vec![50.0])).plan();
+        let plan = SweepBuilder::new(axes, QualityGrid::Explicit(vec![50.0]))
+            .with_budget((unbudgeted.cells.len() / 16).max(1))
+            .plan();
+        // color_models must NEVER be in the dropped manifest, at any budget.
+        assert!(
+            !plan.dropped.iter().any(|d| d.axis == "color_models"),
+            "color_models is mandatory; must never be shed. dropped: {:?}",
+            plan.dropped.iter().map(|d| d.axis).collect::<Vec<_>>()
+        );
+        // The RGB color path must survive the budget.
+        assert!(
+            plan.cells.iter().any(|c| c.id.contains("rgb")),
+            "RGB must survive a budgeted modes_full"
+        );
     }
 
     #[test]
