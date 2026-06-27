@@ -59,7 +59,6 @@ mod auto_tune;
 pub use auto_tune::{AutoTuneError, AutoTuneOptions, QualityTarget};
 
 mod cicp_resolve;
-#[cfg(feature = "zencodec")]
 mod codec;
 mod config;
 mod convert;
@@ -117,11 +116,10 @@ pub(crate) mod yuv_convert_libyuv_simd;
 #[cfg(feature = "encode")]
 use whereat::at;
 
-#[cfg(feature = "zencodec")]
 pub use codec::{
     AvifAnimationFrameDecoder, AvifDecodeJob, AvifDecoder as AvifZenDecoder, AvifDecoderConfig,
 };
-#[cfg(all(feature = "zencodec", feature = "encode"))]
+#[cfg(feature = "encode")]
 pub use codec::{AvifAnimationFrameEncoder, AvifEncodeJob, AvifEncoder, AvifEncoderConfig};
 pub use config::DecoderConfig;
 pub use decode_av1::decode_av1_obu;

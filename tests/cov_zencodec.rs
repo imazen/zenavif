@@ -7,8 +7,6 @@
 //! leaves pixels in stored orientation, so the adapter is what applies the
 //! transform when the caller asks for it.
 
-#![cfg(feature = "zencodec")]
-
 use std::borrow::Cow;
 
 use zenavif::AvifDecoderConfig;

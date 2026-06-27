@@ -525,7 +525,7 @@ impl AvifDecoder {
             &parse_config,
             &enough::Unstoppable,
         )
-        .map_err(|e| at!(Error::Parse(e)))?;
+        .map_err(|e| e.map_error(Error::Parse))?;
 
         // Extract metadata from the parsed AVIF. Like the default rav1d-safe
         // backend (decoder_managed), tolerate a metadata-parse failure here: a
@@ -614,7 +614,7 @@ impl AvifDecoder {
         let primary_data = self
             .parser
             .primary_data()
-            .map_err(|e| at!(Error::Parse(e)))?;
+            .map_err(|e| e.map_error(Error::Parse))?;
         let color_picture = decoder.decode(&primary_data)?;
 
         // Check for cancellation after color decode
@@ -698,7 +698,7 @@ impl AvifDecoder {
 
         // Decode alpha channel if present
         if let Some(alpha_result) = self.parser.alpha_data() {
-            let alpha_data = alpha_result.map_err(|e| at!(Error::Parse(e)))?;
+            let alpha_data = alpha_result.map_err(|e| e.map_error(Error::Parse))?;
             let alpha_picture = decoder.decode(&alpha_data)?;
 
             let alpha_color_range = alpha_picture
@@ -1028,7 +1028,9 @@ impl AvifDecoder {
         has_alpha: bool,
     ) -> Result<PixelBuffer> {
         let (width, height) = (planes.width, planes.height);
-        let pixel_count = width.checked_mul(height).ok_or_else(|| at!(Error::OutOfMemory))?;
+        let pixel_count = width
+            .checked_mul(height)
+            .ok_or_else(|| at!(Error::OutOfMemory))?;
         let limited = matches!(yuv_range, YuvRange::Limited);
         // H.273 full-range-flag: limited identity uses the luma range (16–235)
         // on all three planes.
@@ -1079,7 +1081,9 @@ impl AvifDecoder {
         has_alpha: bool,
     ) -> Result<PixelBuffer> {
         let (width, height) = (planes.width, planes.height);
-        let pixel_count = width.checked_mul(height).ok_or_else(|| at!(Error::OutOfMemory))?;
+        let pixel_count = width
+            .checked_mul(height)
+            .ok_or_else(|| at!(Error::OutOfMemory))?;
         let limited = matches!(yuv_range, YuvRange::Limited);
         let max = (1u32 << bit_depth) - 1;
         let smin = 16u32 << (bit_depth - 8);

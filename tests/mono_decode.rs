@@ -8,8 +8,6 @@
 //! expansion kernel as the RGB path, so `gray[i] == rgb[i].r` exactly —
 //! any drift between the two paths is a bug in one of them.
 
-#![cfg(feature = "zencodec")]
-
 use std::borrow::Cow;
 use zencodec::decode::{Decode as _, DecodeJob as _, DecodeOutput, DecoderConfig as _};
 use zenpixels::{ChannelLayout, PixelDescriptor, PixelFormat};

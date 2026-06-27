@@ -19,7 +19,9 @@ rav1d-safe = { version = "0.5.3", default-features = false, features = ["bitdept
 archmage = { version = "0.9.15", features = ["macros"] }
 magetypes = { version = "0.9.15"}
 safe_unaligned_simd = "0.2.5"
-zenavif-parse = "0.6.0"
+# 0.6.3+: parser entry points return `whereat::At<Error>`, and `Error` impls
+# `zencodec::CategorizedError` (delegated from this crate's `Error::Parse`).
+zenavif-parse = "0.6.3"
 yuv = "0.8.12"
 imgref = "1.12.0"
 rgb = { version = "0.8.52", default-features = false, features = ["bytemuck"] }
@@ -42,10 +44,13 @@ zenanalyze = { version = "0.2.0", path = "../zenanalyze", optional = true, featu
 zenanalyze-api = { git = "https://github.com/imazen/zenanalyze", rev = "47b4d0f5f1abfff45a152e9a9f4de82fffd5afa6", optional = true }
 serde_json = { version = "1.0", default-features = false, features = ["std"], optional = true }
 almost-enough = { version = "0.4.3", default-features = false }
-zencodec = { version = "0.1.25", optional = true }
+# zencodec trait integration is always built (the `codec` module implementing
+# Encoder/Decoder + the `CategorizedError` taxonomy), so this is a hard dep.
+zencodec = { version = "0.1.25" }
 # Gain-map application math for GainMapRender::ReconstructHdr (decode-side
-# HDR reconstruction). Pure math, no codec engines.
-ultrahdr-core = { version = "0.5.0", default-features = false, optional = true }
+# HDR reconstruction). Pure math, no codec engines. Used unconditionally by the
+# (now always-built) `codec` module, so it is a hard dep too.
+ultrahdr-core = { version = "0.5.0", default-features = false }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 zenpixels = { version = "0.2.11", default-features = false, features = ["imgref", "rgb"] }
 zenpixels-convert = { version = "0.2.13", default-features = false, features = ["rgb"] }
@@ -187,8 +192,6 @@ __expert = ["encode-imazen", "ravif/__expert"]
 # model + zenanalyze feature extractor; adds ~30 KB to the binary.
 # See docs/RAV1E_PICKER_PLAN.md for the training pipeline.
 auto-tune = ["encode-imazen", "dep:zenpredict", "dep:zenanalyze", "dep:zenanalyze-api", "dep:serde_json"]
-# Enable zencodec trait integration
-zencodec = ["dep:zencodec", "zenavif-parse/zencodec", "dep:ultrahdr-core"]
 # Enable zennode pipeline node definitions
 # zennode = ["dep:zennode"]
 # Expose internal YUV conversion modules for profiling/debugging. Not public API.
@@ -200,3 +203,10 @@ opt-level = 2
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
 rustdoc-args = ["--generate-link-to-definition"]
+
+[patch.crates-io]
+# TEMP (both): until zencodec 0.1.26 ships (PR #103, adds the `CategorizedError`
+# taxonomy) AND zenavif-parse's CategorizedError adoption (PR #17) merges +
+# releases. Remove both patches and bump the version deps once those land.
+zencodec = { git = "https://github.com/imazen/zencodec", branch = "cancellation-classification-99" }
+zenavif-parse = { git = "https://github.com/imazen/zenavif-parse", branch = "caterr-categorized-error" }

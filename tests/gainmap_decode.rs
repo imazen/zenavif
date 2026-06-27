@@ -6,7 +6,6 @@
 
 use enough::Unstoppable;
 use zenavif::{DecoderConfig, ManagedAvifDecoder};
-#[cfg(feature = "zencodec")]
 use zencodec::gainmap::GainMapSource;
 
 /// Path to an AVIF file with a gain map (SDR base + gain map for HDR)
@@ -359,7 +358,6 @@ fn gain_map_data_has_valid_obu_structure() {
 /// Gain-map extras are opt-in per the zencodec contract — the default
 /// (`BaseOnly`) decode attaches neither (see
 /// `gain_map_render_base_only_attaches_nothing`).
-#[cfg(feature = "zencodec")]
 #[test]
 fn decode_gain_map_via_zencodec_extras() {
     use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
@@ -395,7 +393,6 @@ fn decode_gain_map_via_zencodec_extras() {
 
 /// The default decode (`BaseOnly`) attaches no gain-map extras at all —
 /// the gain map is ignored, only `ImageInfo` metadata reports its presence.
-#[cfg(feature = "zencodec")]
 #[test]
 fn gain_map_render_base_only_attaches_nothing() {
     use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
@@ -417,7 +414,6 @@ fn gain_map_render_base_only_attaches_nothing() {
 
 /// Decode with `ReconstructHdr` and return the output (full boost when
 /// `target_headroom` is `None`).
-#[cfg(feature = "zencodec")]
 fn decode_reconstruct(data: &[u8], target_headroom: Option<f32>) -> zencodec::decode::DecodeOutput {
     use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
     zenavif::AvifDecoderConfig::new()
@@ -430,7 +426,6 @@ fn decode_reconstruct(data: &[u8], target_headroom: Option<f32>) -> zencodec::de
 }
 
 /// Peak linear value (max over R,G,B of every pixel) of an RgbaF32 buffer.
-#[cfg(feature = "zencodec")]
 fn peak_linear(pixels: &zenpixels::PixelSlice<'_>) -> f32 {
     assert_eq!(
         pixels.descriptor().pixel_format(),
@@ -457,7 +452,6 @@ fn peak_linear(pixels: &zenpixels::PixelSlice<'_>) -> f32 {
 /// applies the gain map via ultrahdr-core. Output is linear f32 RGBA
 /// (1.0 = SDR white), CLL is measured from the reconstructed pixels, and
 /// the gain-map components are still surfaced for transcode use.
-#[cfg(feature = "zencodec")]
 #[test]
 fn gain_map_render_reconstructs_linear_hdr() {
     assert!(
@@ -521,7 +515,6 @@ fn gain_map_render_reconstructs_linear_hdr() {
 /// At `target_headroom = 1.0` (an SDR display) the weight is 0, the gain
 /// is 1.0, and the output is the linearized base — the ISO 21496-1
 /// formula collapses to `sdr + (base_offset - alternate_offset)`.
-#[cfg(feature = "zencodec")]
 #[test]
 fn reconstruct_at_sdr_headroom_matches_linearized_base() {
     use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
@@ -577,7 +570,6 @@ fn reconstruct_at_sdr_headroom_matches_linearized_base() {
 
 /// Reconstruction peak is monotonic in target headroom (weight is
 /// monotonic in display boost): SDR ≤ 2× ≤ full.
-#[cfg(feature = "zencodec")]
 #[test]
 fn reconstruct_headroom_is_monotonic() {
     let data = require_vector!(load_vector(SEINE_SDR_GAINMAP));
@@ -596,7 +588,6 @@ fn reconstruct_headroom_is_monotonic() {
 
 /// Streaming `ReconstructHdr` emits the same pixels as the buffered path
 /// (both run the shared whole-image reconstruction, strip-emitted).
-#[cfg(feature = "zencodec")]
 #[test]
 fn streaming_reconstruct_matches_buffered() {
     use zencodec::decode::{DecodeJob as _, DecoderConfig as _, StreamingDecode as _};
@@ -637,7 +628,6 @@ fn streaming_reconstruct_matches_buffered() {
     assert_eq!(rows_seen, h, "stream must cover every row exactly once");
 }
 
-#[cfg(feature = "zencodec")]
 #[test]
 fn decode_no_gain_map_extras_on_normal_image() {
     use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
