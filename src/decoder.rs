@@ -527,57 +527,68 @@ impl AvifDecoder {
         )
         .map_err(|e| at!(Error::Parse(e)))?;
 
-        // Extract metadata from the parsed AVIF
-        let metadata = parser
-            .primary_metadata()
-            .map_err(|e| at!(Error::Parse(e)))?;
+        // Extract metadata from the parsed AVIF. Like the default rav1d-safe
+        // backend (decoder_managed), tolerate a metadata-parse failure here: a
+        // corrupt AV1 payload is a decode-stage failure, so deferring lets the
+        // error surface from the decode pipeline (carrying its whereat trace)
+        // instead of as an eager container-parse rejection at construction.
+        // See tests/whereat_trace_preservation.rs.
+        let info = match parser.primary_metadata() {
+            Ok(metadata) => {
+                // Reject oversized frames up front when a limit is configured.
+                if config.frame_size_limit > 0 {
+                    let total_pixels = metadata
+                        .max_frame_width
+                        .get()
+                        .saturating_mul(metadata.max_frame_height.get());
+                    if total_pixels > config.frame_size_limit {
+                        return Err(at!(Error::ImageTooLarge {
+                            width: metadata.max_frame_width.get(),
+                            height: metadata.max_frame_height.get(),
+                        }));
+                    }
+                }
 
-        let cs = metadata.chroma_subsampling;
-        let chroma_sampling = if cs.horizontal && cs.vertical {
-            ChromaSampling::Cs420
-        } else if cs.horizontal {
-            ChromaSampling::Cs422
-        } else {
-            ChromaSampling::Cs444
-        };
+                let cs = metadata.chroma_subsampling;
+                let chroma_sampling = if cs.horizontal && cs.vertical {
+                    ChromaSampling::Cs420
+                } else if cs.horizontal {
+                    ChromaSampling::Cs422
+                } else {
+                    ChromaSampling::Cs444
+                };
 
-        let has_alpha = parser.alpha_data().is_some();
-        let info = ImageInfo {
-            width: metadata.max_frame_width.get(),
-            height: metadata.max_frame_height.get(),
-            bit_depth: metadata.bit_depth,
-            has_alpha,
-            premultiplied_alpha: parser.premultiplied_alpha(),
-            monochrome: metadata.monochrome,
-            // Color info will be determined from decoded sequence header
-            color_primaries: ColorPrimaries::default(),
-            transfer_characteristics: TransferCharacteristics::default(),
-            matrix_coefficients: MatrixCoefficients::default(),
-            color_range: ColorRange::default(),
-            chroma_sampling,
-            icc_profile: None,
-            rotation: None,
-            mirror: None,
-            clean_aperture: None,
-            pixel_aspect_ratio: None,
-            content_light_level: None,
-            mastering_display: None,
-            exif: None,
-            xmp: None,
-            gain_map: None,
-            depth_map: None,
-        };
-
-        // Check frame size limit
-        if config.frame_size_limit > 0 {
-            let total_pixels = info.width.saturating_mul(info.height);
-            if total_pixels > config.frame_size_limit {
-                return Err(at!(Error::ImageTooLarge {
-                    width: info.width,
-                    height: info.height,
-                }));
+                ImageInfo {
+                    width: metadata.max_frame_width.get(),
+                    height: metadata.max_frame_height.get(),
+                    bit_depth: metadata.bit_depth,
+                    has_alpha: parser.alpha_data().is_some(),
+                    premultiplied_alpha: parser.premultiplied_alpha(),
+                    monochrome: metadata.monochrome,
+                    // Color info will be determined from decoded sequence header
+                    color_primaries: ColorPrimaries::default(),
+                    transfer_characteristics: TransferCharacteristics::default(),
+                    matrix_coefficients: MatrixCoefficients::default(),
+                    color_range: ColorRange::default(),
+                    chroma_sampling,
+                    icc_profile: None,
+                    rotation: None,
+                    mirror: None,
+                    clean_aperture: None,
+                    pixel_aspect_ratio: None,
+                    content_light_level: None,
+                    mastering_display: None,
+                    exif: None,
+                    xmp: None,
+                    gain_map: None,
+                    depth_map: None,
+                }
             }
-        }
+            // Corrupt/unreadable metadata: defer to decode(), which produces the
+            // real decode-stage error (with its trace) when the payload is fed
+            // to the AV1 decoder.
+            Err(_) => ImageInfo::default(),
+        };
 
         Ok(Self {
             parser,
