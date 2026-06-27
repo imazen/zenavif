@@ -33,11 +33,13 @@ use crate::error::Error;
 
 /// Crate-local mirror of `zencodec::AllocPreference`.
 ///
-/// Kept independent of the optional `zencodec` dependency so the core decode
-/// path (which is always compiled) does not gain a hard `zencodec`
-/// dependency. The `codec` module converts from `zencodec::AllocPreference`
-/// via [`From`] at the trait boundary.
+/// Kept independent of the `zencodec` types so the core decode path stays
+/// decoupled from the codec-trait layer. The `codec` module converts from
+/// `zencodec::AllocPreference` via [`From`] at the trait boundary.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+// `Fallible` / `Infallible` are constructed from `zencodec::AllocPreference`
+// (the `From` impl below); the variants exist so `resolve_fallible`'s match
+// stays exhaustive.
 pub(crate) enum AllocPref {
     /// Let each call site keep its own default fallibility. Preserves existing
     /// behavior. This is the default.
@@ -52,7 +54,6 @@ pub(crate) enum AllocPref {
     Infallible,
 }
 
-#[cfg(feature = "zencodec")]
 impl From<zencodec::AllocPreference> for AllocPref {
     fn from(pref: zencodec::AllocPreference) -> Self {
         match pref {
@@ -219,7 +220,6 @@ mod tests {
         assert!(matches!(r.unwrap_err().error(), Error::ResourceLimit(_)));
     }
 
-    #[cfg(feature = "zencodec")]
     #[test]
     fn from_zencodec_alloc_preference_maps_all_modes() {
         assert_eq!(

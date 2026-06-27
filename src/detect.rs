@@ -152,7 +152,9 @@ pub fn probe(data: &[u8]) -> Result<AvifProbe, ProbeError> {
         return Err(ProbeError::NotAvif);
     }
 
-    let parser = zenavif_parse::AvifParser::from_bytes(data).map_err(|e| match e {
+    // zenavif-parse 0.6.x returns `whereat::At<Error>`; inspect the inner error
+    // (`.error()` borrows `&Error`) to classify the probe failure.
+    let parser = zenavif_parse::AvifParser::from_bytes(data).map_err(|e| match e.error() {
         zenavif_parse::Error::UnexpectedEOF => ProbeError::Truncated,
         zenavif_parse::Error::InvalidData(_) => ProbeError::NotAvif,
         _ => ProbeError::Truncated,
@@ -305,7 +307,6 @@ fn qp_to_quality(qp: u8) -> f32 {
     quality.clamp(1.0, 100.0)
 }
 
-#[cfg(feature = "zencodec")]
 impl zencodec::SourceEncodingDetails for AvifProbe {
     fn source_generic_quality(&self) -> Option<f32> {
         self.quality.as_ref().map(|q| q.estimated_quality)
@@ -418,7 +419,6 @@ mod tests {
                     );
 
                     // Source encoding details trait
-                    #[cfg(feature = "zencodec")]
                     {
                         use zencodec::SourceEncodingDetails;
                         if info.lossless == Some(true) {

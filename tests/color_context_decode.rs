@@ -5,8 +5,6 @@
 //! load-bearing reduction propagate it; HDR reconstruction output is
 //! deliberately context-free (no SDR profile describes linear f32).
 
-#![cfg(feature = "zencodec")]
-
 use std::borrow::Cow;
 use zencodec::decode::{Decode as _, DecodeJob as _, DecodeOutput, DecoderConfig as _};
 use zenpixels::{ChannelLayout, PixelDescriptor, PixelFormat};

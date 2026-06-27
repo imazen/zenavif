@@ -11,6 +11,28 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 ## [Unreleased]
 
 ### Added
+- **Adopt the `zencodec` `CategorizedError` taxonomy (PR #103, final API).**
+  `Error` now `impl zencodec::CategorizedError` with
+  `codec_name() == Some("zenavif")` — a `&self` method (not an associated const,
+  so the trait stays dyn-compatible) — and an exhaustive `category()` mapping
+  every variant to one coarse `zencodec::ErrorCategory`, so consumers route on
+  the category (HTTP status, retry policy, logging) without naming the enum. The
+  `Parse` arm **delegates** to `zenavif_parse::Error`'s own `CategorizedError`
+  (zenavif-parse PR #17): a malformed container stays `MalformedImage`, a
+  truncated one `UnexpectedEof`, a parser cap `LimitsExceeded`. Other arms:
+  `Unsupported` → `UnsupportedImageFeature`; `ImageTooLarge` →
+  `LimitsExceeded(Pixels)`; `ResourceLimit` → `LimitsExceeded(Memory)` (the
+  `String` variant is a catch-all, so a representative kind is reported, with
+  the precise limit in `Display`); `OutOfMemory` → `OutOfMemory`;
+  `Cancelled(r)` → `r.category()`; `UnsupportedOperation(op)` → `op.category()`;
+  `Decode` / `ColorConversion` (foreign `yuv`) / `Encode` → `Internal`. `Decode`
+  is a grab-bag the decode pipeline reuses for decoder setup/flush faults and
+  internal invariant checks (e.g. "expected 8-bit planes") as well as some
+  malformed-input cases; with no structural signal to split it, the conservative
+  `Internal` is its best single category. Behind **temporary `[patch.crates-io]`
+  path pins** to the sibling `../zencodec` checkout (the taxonomy is
+  post-0.1.25, unreleased) and `../zenavif-parse` (0.7.0, unreleased) until both
+  publish. Additive (`#[non_exhaustive]` enum + opt-in trait).
 - Executable engineering-baseline gates (`docs/ENGINEERING_BASELINE.md` A2/A3/A6):
   `examples/gate_kit.rs` (`determinism`/`cells`/`ladder` subcommands on pinned
   integer-synthetic content) + `scripts/gates/gate_conformance.sh` (the PALCONF
@@ -310,6 +332,24 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   parallel — tile decode parallelises, the YUV→RGB conversion does not).
 
 ### Changed
+- **`zencodec` is now a required (non-optional) dependency.** The optional
+  `zencodec` cargo feature is removed; the codec-trait integration is always
+  built (the `codec` module implementing `Encoder`/`Decoder` +
+  `SourceEncodingDetails`, the `CategorizedError` impl, and
+  `From<zencodec::AllocPreference>`). `ultrahdr-core` (gain-map `ReconstructHdr`
+  math, previously pulled only by the `zencodec` feature) becomes a hard dep for
+  the same reason. The `cov_zencodec` / `color_context_decode` / `mono_decode` /
+  `gainmap_decode` integration tests are ungated (they run under default
+  `cargo test`); CI drops the now-redundant `--features zencodec`
+  test/check/clippy steps and provisions the downloaded AVIF vectors in the
+  `i686` and `coverage` jobs, which now run those decode tests.
+- **Migrate to zenavif-parse 0.7.0 `whereat::At<Error>` Result API.** zenavif-parse
+  now returns `whereat::At<Error>` (location-tracing) from its parser entry points;
+  zenavif's parse-error boundaries (`decoder_managed.rs`, `decoder.rs`,
+  `detect.rs`) switch to the trace-preserving `ResultAtExt::map_err_at(Error::Parse)`
+  / `At::map_error(Error::Parse)` (and `e.error()` for the probe-classification
+  match) instead of dropping-and-rewrapping the inner error. Required to consume
+  zenavif-parse's `CategorizedError`. Decode output is unchanged (error-path only).
 - **Re-calibrate the ENCODE peak-memory model (was over-conservative).** A fresh
   VmHWM + heaptrack sweep (`examples/mem_probe_encode`, RGB8, threads=1, sizes
   256–2048 px × speed {6,8,10} × photo/screenshot × q {50,85}) showed the prior

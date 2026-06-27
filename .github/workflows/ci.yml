@@ -48,8 +48,6 @@ jobs:
         run: cargo test
       - name: Test (no default features)
         run: cargo test --no-default-features
-      - name: Test (zencodec feature)
-        run: cargo test --features zencodec
 
   feature-check:
     name: Feature permutations
@@ -63,8 +61,6 @@ jobs:
         run: cargo check
       - name: Check --no-default-features
         run: cargo check --no-default-features
-      - name: Check --features zencodec
-        run: cargo check --features zencodec
 
   i686:
     name: Test (i686 cross)
@@ -79,6 +75,22 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: cross-i686
+      # zencodec integration is now always built, so the decode-correctness
+      # integration tests (cov_zencodec, color_context_decode) run here too and
+      # read downloaded vectors. Provision them (the cross container mounts the
+      # workspace, so host-downloaded tests/vectors is visible in-container).
+      - name: Cache test vectors
+        id: vectors-cache
+        uses: actions/cache@v5
+        with:
+          path: tests/vectors
+          key: avif-test-vectors-${{ hashFiles('scripts/download-avif-test-vectors.sh', 'scripts/download-linku-samples.sh') }}
+      - name: Download test vectors
+        if: steps.vectors-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          bash scripts/download-avif-test-vectors.sh
+          bash scripts/download-linku-samples.sh
       - name: Test (i686)
         # Mount the workspace parent so cross's Docker container can
         # see the cloned ../ravif and ../zenanalyze path-deps. Without
@@ -99,8 +111,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Clippy (default)
         run: cargo clippy --lib --tests --examples -- -D warnings
-      - name: Clippy (zencodec)
-        run: cargo clippy --lib --tests --examples --features zencodec -- -D warnings
 
   fmt:
     name: Format
@@ -137,6 +147,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: Swatinem/rust-cache@v2
+      # llvm-cov runs the integration tests; the now-always-built zencodec
+      # decode tests read downloaded vectors, so provision them here too.
+      - name: Cache test vectors
+        id: vectors-cache
+        uses: actions/cache@v5
+        with:
+          path: tests/vectors
+          key: avif-test-vectors-${{ hashFiles('scripts/download-avif-test-vectors.sh', 'scripts/download-linku-samples.sh') }}
+      - name: Download test vectors
+        if: steps.vectors-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          bash scripts/download-avif-test-vectors.sh
+          bash scripts/download-linku-samples.sh
       - name: Generate coverage
         run: cargo llvm-cov --lcov --output-path lcov.info
       - name: Upload coverage

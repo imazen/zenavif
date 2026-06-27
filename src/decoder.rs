@@ -525,7 +525,7 @@ impl AvifDecoder {
             &parse_config,
             &enough::Unstoppable,
         )
-        .map_err(|e| at!(Error::Parse(e)))?;
+        .map_err(|e| e.map_error(Error::Parse))?;
 
         // Extract metadata from the parsed AVIF. Like the default rav1d-safe
         // backend (decoder_managed), tolerate a metadata-parse failure here: a
@@ -614,7 +614,7 @@ impl AvifDecoder {
         let primary_data = self
             .parser
             .primary_data()
-            .map_err(|e| at!(Error::Parse(e)))?;
+            .map_err(|e| e.map_error(Error::Parse))?;
         let color_picture = decoder.decode(&primary_data)?;
 
         // Check for cancellation after color decode
@@ -698,7 +698,7 @@ impl AvifDecoder {
 
         // Decode alpha channel if present
         if let Some(alpha_result) = self.parser.alpha_data() {
-            let alpha_data = alpha_result.map_err(|e| at!(Error::Parse(e)))?;
+            let alpha_data = alpha_result.map_err(|e| e.map_error(Error::Parse))?;
             let alpha_picture = decoder.decode(&alpha_data)?;
 
             let alpha_color_range = alpha_picture
