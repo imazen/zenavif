@@ -5,11 +5,11 @@ authors = ["Kornel Lesiński <kornel@geekhood.net>", "Lilith River <lilith@imaze
 edition = "2024"
 license = "BSD-3-Clause"
 description = "AVIF container serializer (MPEG/HEIF/MIAF/ISO-BMFF) with animation and grid support"
-readme = "README.md"
+readme = "README.crates.md"
 categories = ["multimedia::images", "encoding"]
 keywords = ["avif", "heif", "bmff", "av1", "mux"]
 repository = "https://github.com/imazen/zenavif-serialize"
-include = ["src/*.rs", "Cargo.toml", "README.md", "LICENSE"]
+include = ["src/*.rs", "Cargo.toml", "README.crates.md", "LICENSE"]
 rust-version = "1.93"
 
 [dependencies]

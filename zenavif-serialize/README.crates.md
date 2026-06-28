@@ -1,4 +1,6 @@
-# zenavif-serialize [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenavif-serialize/ci.yml?style=flat-square&label=CI)](https://github.com/imazen/zenavif-serialize/actions/workflows/ci.yml) [![crates.io](https://img.shields.io/crates/v/zenavif-serialize?style=flat-square)](https://crates.io/crates/zenavif-serialize) [![lib.rs](https://img.shields.io/crates/v/zenavif-serialize?style=flat-square&label=lib.rs&color=blue)](https://lib.rs/crates/zenavif-serialize) [![docs.rs](https://img.shields.io/docsrs/zenavif-serialize?style=flat-square)](https://docs.rs/zenavif-serialize) [![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=flat-square)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field) [![license](https://img.shields.io/crates/l/zenavif-serialize?style=flat-square)](#license)
+<!-- GENERATED FROM README.md by zenutils gen-readme-crates.sh — DO NOT EDIT. -->
+
+# zenavif-serialize
 
 AVIF container serializer (muxer) in pure Rust. It wraps already-compressed AV1 bitstreams into MPEG/HEIF/MIAF/ISO-BMFF boxes for still images, animations, and grid layouts — it does **not** encode pixels itself. `#![forbid(unsafe_code)]`, `no_std`-compatible (with `alloc`), and depends only on `arrayvec` and `whereat`.
 

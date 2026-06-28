@@ -19,6 +19,15 @@
   (`ZEN_API_DOC=check` verifies in CI's clippy job, `=off` skips elsewhere).
   Justfile recipes `api-doc` / `api-doc-check`.
 
+### Changed
+- README overhaul: canonical badge row (added MSRV, dropped `branch=`, fixed the
+  lib.rs badge), a `## Quick start`, and a refreshed crosslink footer. Corrected
+  stale claims against source — the `io::Write` entry points return
+  `Result<(), whereat::At<SerializeError>>` (not `io::Result<()>`), the setter is
+  `set_full_color_range`, the example `use` paths use the `constants` / `animated`
+  / `grid` modules, and the crate depends on `arrayvec` + `whereat`. crates.io now
+  renders a badge-free `README.crates.md` (`readme = "README.crates.md"`).
+
 ### Fixed
 - **README now states the AV1 input packaging contract**: `color_av1_data` must be
   the raw AV1 OBU bitstream for a single keyframe with the sequence header in-band
