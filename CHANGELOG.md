@@ -10,6 +10,9 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Documentation
+- README overhaul: clickable badge row (CI/crates.io/lib.rs/docs.rs/MSRV/dual-license), `## Quick start` with a `[dependencies]` block, absolute links throughout, regenerated crosslink footer (now last), split crates.io README (`README.crates.md` via `readme =` + `include`), and a `benchmarks/README.md` methodology index.
+
 ### Added
 - **Honor `zencodec::AllocPreference` at zenavif's own decode allocations.**
   The full-image RGB(A) output buffer, the grid-stitch canvas, the crop

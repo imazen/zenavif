@@ -1,4 +1,6 @@
-# zenavif [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenavif/ci.yml?style=flat-square&label=CI)](https://github.com/imazen/zenavif/actions/workflows/ci.yml) [![crates.io](https://img.shields.io/crates/v/zenavif?style=flat-square)](https://crates.io/crates/zenavif) [![lib.rs](https://img.shields.io/crates/v/zenavif?style=flat-square&label=lib.rs&color=blue)](https://lib.rs/crates/zenavif) [![docs.rs](https://img.shields.io/docsrs/zenavif?style=flat-square)](https://docs.rs/zenavif) [![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=flat-square)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field) [![license](https://img.shields.io/badge/license-AGPL--3.0%20%2F%20Commercial-blue?style=flat-square)](#license)
+<!-- GENERATED FROM README.md by zenutils gen-readme-crates.sh — DO NOT EDIT. -->
+
+# zenavif
 
 Pure Rust AVIF image codec. Decodes and encodes AVIF images using
 [rav1d-safe](https://github.com/imazen/rav1d-safe) (AV1 decoder) and
@@ -166,19 +168,6 @@ Speed controls how much time the encoder spends optimizing. Higher speeds
 produce slightly larger files but encode much faster. Quality is comparable
 across speeds — the main tradeoff is encode time vs file size, not visual quality.
 
-<!-- crates.io:skip-start -->
-Measured on a 512×512 photographic image (CID22 corpus), q80, 8-bit
-([full sweep data](benchmarks/avif_encode_fine_sweep_2026-04-16.tsv) ·
-[methodology](benchmarks/README.md)):
-
-| Speed | Encode time | File size | Compression ratio | zensim |
-|------:|:----------:|:---------:|:-----------------:|:------:|
-| 1 | 1.1s | 55.9K | 14.1x | 85.4 |
-| 2 | 1.1s | 55.9K | 14.1x | 85.4 |
-| 4 | 0.8s | 56.5K | 13.9x | 85.5 |
-| 6 | 0.2s | 56.8K | 13.8x | 85.5 |
-| 10 | 78ms | 59.0K | 13.3x | 85.4 |
-<!-- crates.io:skip-end -->
 
 Speed 4 is a good default. Speed 6 gives 4x faster encoding with identical quality.
 Speed 10 is best for real-time/interactive use — still good quality at ~80ms per frame.
@@ -231,14 +220,6 @@ let config = EncoderConfig::new()
     .with_rdo_tx_decision(Some(true)); // archival / one-shot encode
 ```
 
-<!-- crates.io:skip-start -->
-Measured trade on a 63-image stills corpus (CID22, speed 6, with QM on):
-
-| Config | Mean BD-Rate vs upstream rav1e | Encode time |
-|---|---|---|
-| `with_qm(true)` (default) | −10.1 % | 1.0× |
-| `with_qm(true).with_rdo_tx_decision(Some(true))` | −10.3 % | ~3.0× |
-<!-- crates.io:skip-end -->
 
 Mean gain over QM-only is small (~0.2 % BD-rate), but per-image gains
 range up to −31 %. Recommended only for archival / one-shot encodes,
