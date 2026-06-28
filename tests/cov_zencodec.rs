@@ -309,3 +309,60 @@ fn orientation_streaming_preserve_keeps_stored_dims() {
         "streaming Preserve must report the intrinsic tag"
     );
 }
+
+// ── Pattern B: ErrorCategory + codec name survive Dyn dispatch (envelope) ────
+
+/// The load-bearing Pattern-B check: drive a malformed AVIF through
+/// [`DynDecoderConfig`](zencodec::decode::DynDecoderConfig), erase the error to
+/// `BoxedError` (`Box<dyn Error + Send + Sync>`), and prove a generic consumer
+/// still recovers the real [`ErrorCategory`](zencodec::ErrorCategory) **and** the
+/// originating codec name. Under Pattern A (`type Error = At<native>`), the boxed
+/// error carries no `CodecError` envelope, so `error_category()` / `codec_error()`
+/// return `None`; under Pattern B (this crate now) they return `Some(..)`.
+#[test]
+fn dyn_dispatch_recovers_category_and_codec_name() {
+    use zencodec::decode::DynDecoderConfig;
+    use zencodec::{CodecError, CodecErrorExt, ErrorCategory};
+
+    // Clearly-malformed input: an `ftyp avif` lead-in followed by garbage, with
+    // no valid box structure after it — long enough that the container parser
+    // actually inspects it rather than rejecting on length alone.
+    let bytes: &[u8] =
+        b"\x00\x00\x00\x18ftypavifmif1miafMA1B garbage-not-a-real-avif-container-payload!!!!";
+
+    // Typed (Pattern B) path: the genuine category zenavif assigns to this input.
+    // Derived at runtime so the assertion is robust to the exact parse variant,
+    // while still proving it is a real classification (not the `Internal`
+    // catch-all). In practice malformed containers land on `MalformedImage` or
+    // `UnexpectedEof`.
+    let typed = AvifDecoderConfig::new()
+        .job()
+        .probe(bytes)
+        .expect_err("malformed input must fail to probe");
+    let expected = typed.error().category();
+    assert_ne!(
+        expected,
+        ErrorCategory::Internal,
+        "a malformed container must get a real input classification, not the \
+         Internal catch-all (got {expected:?})"
+    );
+    assert_eq!(typed.error().codec(), Some("zenavif"));
+
+    // Dyn-dispatch path: erase to `BoxedError` and prove the category + codec
+    // name survive `Box<dyn Error>` erasure.
+    let dyn_cfg: &dyn DynDecoderConfig = &AvifDecoderConfig::new();
+    let erased = dyn_cfg
+        .dyn_job()
+        .probe(bytes)
+        .expect_err("malformed input must fail through dyn dispatch");
+    assert_eq!(
+        erased.error_category(),
+        Some(expected),
+        "ErrorCategory must survive Box<dyn Error> erasure (None under Pattern A)"
+    );
+    assert_eq!(
+        erased.codec_error().and_then(CodecError::codec),
+        Some("zenavif"),
+        "codec name must survive Box<dyn Error> erasure"
+    );
+}

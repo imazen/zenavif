@@ -35,6 +35,23 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   branch until both release. Additive (`#[non_exhaustive]` enum + opt-in trait).
 
 ### Changed
+- **zencodec trait impls return the `At<CodecError>` envelope (Pattern B).** Every
+  `zencodec` trait method (`EncoderConfig`/`EncodeJob`/`Encoder`/`AnimationFrameEncoder`
+  + `DecoderConfig`/`DecodeJob`/`Decode`/`StreamingDecode`/`AnimationFrameDecoder`)
+  now declares `type Error = whereat::At<zencodec::CodecError>` instead of
+  `At<Error>`. A generic consumer driving zenavif through `Dyn*` dispatch — where
+  the error is erased to `Box<dyn Error + Send + Sync>` — now recovers the coarse
+  `ErrorCategory` **and** the `"zenavif"` codec name via `CodecErrorExt`
+  (`error_category()` / `codec_error()`), which return `None` under the previous
+  native-error type. The native `Error` enum (the detail + category source, with
+  its `CategorizedError` impl including the `Parse` delegation) is **unchanged**,
+  and zenavif's inherent rich public API still returns `At<Error>` for direct
+  callers — only the zencodec trait boundary changed. Internally each trait method
+  keeps its verbatim logic in a private `*_inner` helper returning `At<Error>` and
+  re-wraps once at the boundary with `CodecError::of` (already-located errors,
+  trace preserved) or the new `From<Error> for At<CodecError>` bridge (bare errors
+  at reject / sink-wrap sites). Additive at the type level; visible only to
+  generic `zencodec`-trait consumers.
 - **`zencodec` is now a required (non-optional) dependency.** The optional
   `zencodec` cargo feature is removed; the codec-trait integration is always
   built (the `codec` module implementing `Encoder`/`Decoder` +
