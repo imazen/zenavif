@@ -22,6 +22,10 @@
   monomorphization per concrete reader. Pure bound relaxation — non-breaking.
 
 ### Changed
+- **README overhauled and split for crates.io.** `readme` now points to a
+  generated, badge-free `README.crates.md`; the GitHub `README.md` keeps the
+  full badge row, gains a Quick start, and ends with the canonical crosslink
+  footer. Docs/packaging only — no API or behavior change.
 - **Dev build: `env_logger` no longer pulls its default features** (3976225,
   parity with upstream avif-parse 24ea3a2). Test logging only uses the builder
   API, so dropping `auto-color`/`humantime`/`regex` trims the test-only

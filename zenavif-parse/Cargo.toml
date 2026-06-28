@@ -14,8 +14,8 @@ description = "AVIF container parser with zero-copy AvifParser API, grid images,
 license = "MPL-2.0"
 categories = ["multimedia::images"]
 repository = "https://github.com/imazen/zenavif-parse"
-readme = "README.md"
-include = ["/README.md", "/CHANGELOG.md", "/Cargo.toml", "/LICENSE", "/src/*.rs", "/examples/*.rs"]
+readme = "README.crates.md"
+include = ["/README.crates.md", "/CHANGELOG.md", "/Cargo.toml", "/LICENSE", "/src/*.rs", "/examples/*.rs"]
 keywords = ["avif", "image", "parser", "demuxer", "heif"]
 rust-version = "1.93"
 

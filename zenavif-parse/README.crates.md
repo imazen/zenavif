@@ -1,4 +1,6 @@
-# zenavif-parse [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenavif-parse/ci.yml?style=flat-square&label=CI)](https://github.com/imazen/zenavif-parse/actions/workflows/ci.yml) [![crates.io](https://img.shields.io/crates/v/zenavif-parse?style=flat-square)](https://crates.io/crates/zenavif-parse) [![lib.rs](https://img.shields.io/crates/v/zenavif-parse?style=flat-square&label=lib.rs&color=blue)](https://lib.rs/crates/zenavif-parse) [![docs.rs](https://img.shields.io/docsrs/zenavif-parse?style=flat-square)](https://docs.rs/zenavif-parse) [![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=flat-square)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field) [![license](https://img.shields.io/crates/l/zenavif-parse?style=flat-square)](#license)
+<!-- GENERATED FROM README.md by zenutils gen-readme-crates.sh — DO NOT EDIT. -->
+
+# zenavif-parse
 
 AVIF container parser (ISOBMFF/MIAF demuxer) that extracts AV1 payloads, alpha channels, grid tiles, and animation frames from AVIF files. Written entirely in safe Rust with fallible allocations throughout.
 
