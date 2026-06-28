@@ -132,6 +132,25 @@ impl zencodec::CategorizedError for Error {
     }
 }
 
+/// Bridge a bare native [`Error`] into the shared envelope as
+/// `At<zencodec::CodecError>` — the Pattern-B (envelope) error type the zencodec
+/// trait impls return. Used at the trait boundary for errors constructed *in
+/// place* (e.g. `Encoder::reject`, `AnimationFrameDecoder::wrap_sink_error`, the
+/// `push_decoder` sink-error wrap): `.into()` starts the location trace and wraps
+/// the categorized value in one step. An *already-located* `At<Error>` is
+/// converted with [`zencodec::CodecError::of`] instead (it keeps the existing
+/// trace; `From<At<Error>> for At<CodecError>` is impossible under the orphan
+/// rule). `#[track_caller]` records the call site as the trace origin, mirroring
+/// `at!`. The codec name (`"zenavif"`) and category come from this type's
+/// [`zencodec::CategorizedError`] impl, so the envelope is fully populated.
+impl From<Error> for whereat::At<zencodec::CodecError> {
+    #[track_caller]
+    fn from(e: Error) -> Self {
+        use whereat::ErrorAtExt;
+        zencodec::CodecError::of(e.start_at())
+    }
+}
+
 /// Result type for zenavif operations with location tracking
 pub type Result<T, E = whereat::At<Error>> = core::result::Result<T, E>;
 
@@ -211,7 +230,7 @@ mod error_category_tests {
         );
 
         // The blanket `impl CategorizedError for At<E>` forwards both axes.
-        let at_err = whereat::At::from(Error::Unsupported("x"));
+        let at_err = whereat::At::<Error>::from(Error::Unsupported("x"));
         assert_eq!(at_err.category(), C::UnsupportedImageFeature);
         assert_eq!(at_err.codec_name(), Some("zenavif"));
     }

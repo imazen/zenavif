@@ -28,7 +28,7 @@ use zencodec::decode::DecodeOutput;
 #[cfg(feature = "encode")]
 use zencodec::encode::EncodeOutput;
 use zencodec::{
-    GainMapPresence, ImageFormat, ImageInfo, ImageSequence, ResourceLimits, Supplements,
+    CodecError, GainMapPresence, ImageFormat, ImageInfo, ImageSequence, ResourceLimits, Supplements,
 };
 use zenpixels::{ChannelType, ColorAuthority, PixelBuffer, PixelDescriptor, PixelSlice};
 use zenpixels_convert::PixelBufferConvertTypedExt as _;
@@ -162,7 +162,10 @@ impl AvifEncoderConfig {
     }
 
     /// Convenience: encode RGB8 pixels with this config.
-    pub fn encode_rgb8(&self, img: imgref::ImgRef<'_, Rgb<u8>>) -> Result<EncodeOutput, At<Error>> {
+    pub fn encode_rgb8(
+        &self,
+        img: imgref::ImgRef<'_, Rgb<u8>>,
+    ) -> Result<EncodeOutput, At<CodecError>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
         self.clone()
             .job()
@@ -174,7 +177,7 @@ impl AvifEncoderConfig {
     pub fn encode_rgba8(
         &self,
         img: imgref::ImgRef<'_, Rgba<u8>>,
-    ) -> Result<EncodeOutput, At<Error>> {
+    ) -> Result<EncodeOutput, At<CodecError>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
         self.clone()
             .job()
@@ -186,7 +189,7 @@ impl AvifEncoderConfig {
     pub fn encode_gray8(
         &self,
         img: imgref::ImgRef<'_, rgb::Gray<u8>>,
-    ) -> Result<EncodeOutput, At<Error>> {
+    ) -> Result<EncodeOutput, At<CodecError>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
         self.clone()
             .job()
@@ -198,7 +201,7 @@ impl AvifEncoderConfig {
     pub fn encode_rgb_f32(
         &self,
         img: imgref::ImgRef<'_, Rgb<f32>>,
-    ) -> Result<EncodeOutput, At<Error>> {
+    ) -> Result<EncodeOutput, At<CodecError>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
         self.clone()
             .job()
@@ -210,7 +213,7 @@ impl AvifEncoderConfig {
     pub fn encode_rgba_f32(
         &self,
         img: imgref::ImgRef<'_, Rgba<f32>>,
-    ) -> Result<EncodeOutput, At<Error>> {
+    ) -> Result<EncodeOutput, At<CodecError>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
         self.clone()
             .job()
@@ -222,7 +225,7 @@ impl AvifEncoderConfig {
     pub fn encode_gray_f32(
         &self,
         img: imgref::ImgRef<'_, rgb::Gray<f32>>,
-    ) -> Result<EncodeOutput, At<Error>> {
+    ) -> Result<EncodeOutput, At<CodecError>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
         self.clone()
             .job()
@@ -394,7 +397,7 @@ fn interp_quality(table: &[(f32, f32)], x: f32) -> f32 {
 
 #[cfg(feature = "encode")]
 impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
-    type Error = At<Error>;
+    type Error = At<CodecError>;
     type Job = AvifEncodeJob;
 
     fn format() -> ImageFormat {
@@ -598,7 +601,7 @@ impl AvifEncodeJob {
 
 #[cfg(feature = "encode")]
 impl zencodec::encode::EncodeJob for AvifEncodeJob {
-    type Error = At<Error>;
+    type Error = At<CodecError>;
     type Enc = AvifEncoder;
     type AnimationFrameEnc = AvifAnimationFrameEncoder;
 
@@ -644,7 +647,7 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         self
     }
 
-    fn encoder(self) -> Result<AvifEncoder, At<Error>> {
+    fn encoder(self) -> Result<AvifEncoder, At<CodecError>> {
         let mut config = self.config.inner.clone();
         // Resolve the color *description* (ICC vs CICP code points) through
         // zencodec's `resolve_color_emit` — the single source of truth for which
@@ -750,7 +753,7 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         self
     }
 
-    fn animation_frame_encoder(self) -> Result<AvifAnimationFrameEncoder, At<Error>> {
+    fn animation_frame_encoder(self) -> Result<AvifAnimationFrameEncoder, At<CodecError>> {
         let mut config = self.config.inner.clone();
         // Resolve color description the same way as the still path (single source
         // of truth): lower the resolved CICP to nclx and carry the resolved ICC.
@@ -1283,10 +1286,12 @@ impl AvifEncoder {
 
 #[cfg(feature = "encode")]
 impl zencodec::encode::Encoder for AvifEncoder {
-    type Error = At<Error>;
+    type Error = At<CodecError>;
 
-    fn reject(op: zencodec::UnsupportedOperation) -> At<Error> {
-        at!(Error::UnsupportedOperation(op))
+    fn reject(op: zencodec::UnsupportedOperation) -> At<CodecError> {
+        // Bare native error exiting the trait boundary: `.into()` routes through
+        // `From<Error> for At<CodecError>`, locating + enveloping in one step.
+        Error::UnsupportedOperation(op).into()
     }
 
     fn encode_srgba8(
@@ -1296,150 +1301,13 @@ impl zencodec::encode::Encoder for AvifEncoder {
         width: u32,
         height: u32,
         stride_pixels: u32,
-    ) -> Result<EncodeOutput, At<Error>> {
-        let w = width as usize;
-        let h = height as usize;
-        let stride = stride_pixels as usize;
-        self.check_limits(w, h, 4)?;
-        let cfg = self.build_config();
-        let stop = self.stop_token();
-
-        if make_opaque {
-            // Strip alpha: RGBA → RGB in-place, then encode RGB
-            let mut rgb = Vec::with_capacity(w * h);
-            for y in 0..h {
-                let row_start = y * stride * 4;
-                let row = &data[row_start..row_start + w * 4];
-                for px in row.chunks_exact(4) {
-                    rgb.push(Rgb {
-                        r: px[0],
-                        g: px[1],
-                        b: px[2],
-                    });
-                }
-            }
-            let img = imgref::ImgVec::new(rgb, w, h);
-            let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
-            self.make_output(result.avif_file)
-        } else {
-            // Zero-copy RGBA path — bytemuck cast the contiguous region
-            if stride == w {
-                let pixel_bytes = &data[..w * h * 4];
-                let rgba: &[Rgba<u8>] = bytemuck::cast_slice(pixel_bytes);
-                let img = imgref::Img::new(rgba, w, h);
-                let result = crate::encode_rgba8(img, &cfg, stop)?;
-                self.make_output(result.avif_file)
-            } else {
-                // Strided: use ImgRef with stride
-                let total_pixels = (h - 1) * stride + w;
-                let pixel_bytes = &data[..total_pixels * 4];
-                let rgba: &[Rgba<u8>] = bytemuck::cast_slice(pixel_bytes);
-                let img = imgref::Img::new_stride(rgba, w, h, stride);
-                let result = crate::encode_rgba8(img, &cfg, stop)?;
-                self.make_output(result.avif_file)
-            }
-        }
+    ) -> Result<EncodeOutput, At<CodecError>> {
+        self.encode_srgba8_inner(data, make_opaque, width, height, stride_pixels)
+            .map_err(zencodec::CodecError::of)
     }
 
-    fn encode(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
-        use zenpixels::PixelFormat;
-
-        // Propagate HDR color metadata from pixel descriptor to encoder config
-        let desc = pixels.descriptor();
-        self.apply_descriptor_color(desc);
-
-        // For f32 pixels with HDR transfer (PQ/HLG), convert to u16 and use 16-bit
-        // path to preserve HDR data. The default f32 path uses linear_to_srgb_u8()
-        // which would silently destroy HDR values.
-        let is_hdr_transfer = matches!(
-            desc.transfer,
-            zenpixels::TransferFunction::Pq | zenpixels::TransferFunction::Hlg
-        );
-
-        match desc.pixel_format() {
-            PixelFormat::RgbF32 if is_hdr_transfer => {
-                return self.encode_f32_as_u16_rgb(pixels);
-            }
-            PixelFormat::RgbaF32 if is_hdr_transfer => {
-                return self.encode_f32_as_u16_rgba(pixels);
-            }
-            _ => {}
-        }
-
-        match desc.pixel_format() {
-            PixelFormat::Rgb8 => self.do_encode_rgb8(pixels),
-            PixelFormat::Rgba8 => self.do_encode_rgba8(pixels),
-            PixelFormat::Gray8 => self.do_encode_gray8(pixels),
-            PixelFormat::Rgb16 => self.do_encode_rgb16(pixels),
-            PixelFormat::Rgba16 => self.do_encode_rgba16(pixels),
-            PixelFormat::RgbF32 => self.do_encode_rgb_f32(pixels),
-            PixelFormat::RgbaF32 => self.do_encode_rgba_f32(pixels),
-            PixelFormat::GrayF32 => self.do_encode_gray_f32(pixels),
-            PixelFormat::Bgra8 => {
-                // Swizzle BGRA → RGBA and encode
-                let raw = pixels.contiguous_bytes();
-                let w = pixels.width() as usize;
-                let h = pixels.rows() as usize;
-                self.check_limits(w, h, 4)?;
-                let cfg = self.build_config();
-                let stop = self.stop_token();
-                let rgba: Vec<Rgba<u8>> = raw
-                    .chunks_exact(4)
-                    .map(|c| Rgba {
-                        r: c[2],
-                        g: c[1],
-                        b: c[0],
-                        a: c[3],
-                    })
-                    .collect();
-                let img = imgref::ImgVec::new(rgba, w, h);
-                let result = crate::encode_rgba8(img.as_ref(), &cfg, stop)?;
-                self.make_output(result.avif_file)
-            }
-            PixelFormat::Rgbx8 => {
-                // Byte 3 is padding — strip to 3-channel RGB.
-                let raw = pixels.contiguous_bytes();
-                let w = pixels.width() as usize;
-                let h = pixels.rows() as usize;
-                self.check_limits(w, h, 3)?;
-                let cfg = self.build_config();
-                let stop = self.stop_token();
-                let rgb: Vec<Rgb<u8>> = raw
-                    .chunks_exact(4)
-                    .map(|c| Rgb {
-                        r: c[0],
-                        g: c[1],
-                        b: c[2],
-                    })
-                    .collect();
-                let img = imgref::ImgVec::new(rgb, w, h);
-                let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
-                self.make_output(result.avif_file)
-            }
-            PixelFormat::Bgrx8 => {
-                // BGRA layout with padding byte — swap B↔R and strip to RGB.
-                let raw = pixels.contiguous_bytes();
-                let w = pixels.width() as usize;
-                let h = pixels.rows() as usize;
-                self.check_limits(w, h, 3)?;
-                let cfg = self.build_config();
-                let stop = self.stop_token();
-                let rgb: Vec<Rgb<u8>> = raw
-                    .chunks_exact(4)
-                    .map(|c| Rgb {
-                        r: c[2],
-                        g: c[1],
-                        b: c[0],
-                    })
-                    .collect();
-                let img = imgref::ImgVec::new(rgb, w, h);
-                let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
-                self.make_output(result.avif_file)
-            }
-            _ => Err(at!(Error::UnsupportedOperation(
-                zencodec::UnsupportedOperation::PixelFormat,
-            ))),
-        }
+    fn encode(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<CodecError>> {
+        self.encode_inner(pixels).map_err(zencodec::CodecError::of)
     }
 }
 
@@ -1495,10 +1363,12 @@ impl AvifAnimationFrameEncoder {
 
 #[cfg(feature = "encode")]
 impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
-    type Error = At<Error>;
+    type Error = At<CodecError>;
 
-    fn reject(op: zencodec::UnsupportedOperation) -> At<Error> {
-        at!(Error::UnsupportedOperation(op))
+    fn reject(op: zencodec::UnsupportedOperation) -> At<CodecError> {
+        // Bare native error exiting the trait boundary: `.into()` routes through
+        // `From<Error> for At<CodecError>`, locating + enveloping in one step.
+        Error::UnsupportedOperation(op).into()
     }
 
     fn push_frame(
@@ -1506,207 +1376,13 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
         pixels: PixelSlice<'_>,
         duration_ms: u32,
         stop: Option<&dyn Stop>,
-    ) -> Result<(), At<Error>> {
-        // Check cancellation (combine per-call + owned stop)
-        if let Some(s) = stop {
-            s.check().map_err(|e| at!(Error::from(e)))?;
-        }
-        if let Some(ref s) = self.stop {
-            s.check().map_err(|e| at!(Error::from(e)))?;
-        }
-
-        let w = pixels.width();
-        let h = pixels.rows();
-
-        // Validate canvas dimensions match
-        match (self.canvas_width, self.canvas_height) {
-            (Some(cw), Some(ch)) if cw != w || ch != h => {
-                return Err(at!(Error::Encode(format!(
-                    "frame dimensions {}x{} don't match canvas {}x{}",
-                    w, h, cw, ch
-                ))));
-            }
-            (None, None) => {
-                self.canvas_width = Some(w);
-                self.canvas_height = Some(h);
-            }
-            _ => {}
-        }
-
-        // Check resource limits
-        let desc = pixels.descriptor();
-        let bpp = desc.bytes_per_pixel() as u64;
-        self.limits.check_dimensions(w, h).map_err(|_| {
-            at!(Error::ImageTooLarge {
-                width: w,
-                height: h,
-            })
-        })?;
-        self.limits
-            .check_memory(w as u64 * h as u64 * bpp)
-            .map_err(|e| at!(Error::Encode(format!("{e}"))))?;
-
-        // Enforce max_frames limit.
-        self.frame_count += 1;
-        self.limits
-            .check_frames(self.frame_count)
-            .map_err(|e| at!(Error::Encode(format!("{e}"))))?;
-
-        let fmt = desc.pixel_format();
-
-        // Validate consistent pixel format across frames
-        if let Some(expected) = self.pixel_format {
-            if fmt != expected {
-                return Err(at!(Error::Encode(format!(
-                    "pixel format mismatch: first frame was {expected:?}, this frame is {fmt:?}"
-                ))));
-            }
-        } else {
-            self.pixel_format = Some(fmt);
-        }
-
-        let raw = pixels.contiguous_bytes();
-        let wu = w as usize;
-        let hu = h as usize;
-
-        let frame = match fmt {
-            zenpixels::PixelFormat::Rgb8 => {
-                let rgb: Vec<Rgb<u8>> = bytemuck::cast_slice(&raw).to_vec();
-                BufferedFrame::Rgb8 {
-                    pixels: imgref::ImgVec::new(rgb, wu, hu),
-                    duration_ms,
-                }
-            }
-            zenpixels::PixelFormat::Rgba8 => {
-                let rgba: Vec<Rgba<u8>> = bytemuck::cast_slice(&raw).to_vec();
-                BufferedFrame::Rgba8 {
-                    pixels: imgref::ImgVec::new(rgba, wu, hu),
-                    duration_ms,
-                }
-            }
-            zenpixels::PixelFormat::Rgb16 => {
-                let rgb: Vec<Rgb<u16>> = bytemuck::cast_slice(&raw).to_vec();
-                BufferedFrame::Rgb16 {
-                    pixels: imgref::ImgVec::new(rgb, wu, hu),
-                    duration_ms,
-                }
-            }
-            zenpixels::PixelFormat::Rgba16 => {
-                let rgba: Vec<Rgba<u16>> = bytemuck::cast_slice(&raw).to_vec();
-                BufferedFrame::Rgba16 {
-                    pixels: imgref::ImgVec::new(rgba, wu, hu),
-                    duration_ms,
-                }
-            }
-            _ => {
-                return Err(at!(Error::UnsupportedOperation(
-                    zencodec::UnsupportedOperation::PixelFormat,
-                )));
-            }
-        };
-
-        self.frames.push(frame);
-        Ok(())
+    ) -> Result<(), At<CodecError>> {
+        self.push_frame_inner(pixels, duration_ms, stop)
+            .map_err(zencodec::CodecError::of)
     }
 
-    fn finish(self, stop: Option<&dyn Stop>) -> Result<EncodeOutput, At<Error>> {
-        if let Some(s) = stop {
-            s.check().map_err(|e| at!(Error::from(e)))?;
-        }
-        if let Some(ref s) = self.stop {
-            s.check().map_err(|e| at!(Error::from(e)))?;
-        }
-
-        if self.frames.is_empty() {
-            return Err(at!(Error::Encode("no frames to encode".into())));
-        }
-
-        let stop_token = self.stop_token();
-
-        let avif_file = match self.frames[0] {
-            BufferedFrame::Rgb8 { .. } => {
-                let anim_frames: Vec<crate::AnimationFrame> = self
-                    .frames
-                    .into_iter()
-                    .map(|f| match f {
-                        BufferedFrame::Rgb8 {
-                            pixels,
-                            duration_ms,
-                        } => crate::AnimationFrame {
-                            pixels,
-                            duration_ms,
-                        },
-                        _ => unreachable!(),
-                    })
-                    .collect();
-                let result =
-                    crate::encode_animation_rgb8(&anim_frames, &self.config, stop_token.clone())?;
-                result.avif_file
-            }
-            BufferedFrame::Rgba8 { .. } => {
-                let anim_frames: Vec<crate::AnimationFrameRgba> = self
-                    .frames
-                    .into_iter()
-                    .map(|f| match f {
-                        BufferedFrame::Rgba8 {
-                            pixels,
-                            duration_ms,
-                        } => crate::AnimationFrameRgba {
-                            pixels,
-                            duration_ms,
-                        },
-                        _ => unreachable!(),
-                    })
-                    .collect();
-                let result =
-                    crate::encode_animation_rgba8(&anim_frames, &self.config, stop_token.clone())?;
-                result.avif_file
-            }
-            BufferedFrame::Rgb16 { .. } => {
-                let anim_frames: Vec<crate::AnimationFrame16> = self
-                    .frames
-                    .into_iter()
-                    .map(|f| match f {
-                        BufferedFrame::Rgb16 {
-                            pixels,
-                            duration_ms,
-                        } => crate::AnimationFrame16 {
-                            pixels,
-                            duration_ms,
-                        },
-                        _ => unreachable!(),
-                    })
-                    .collect();
-                let result =
-                    crate::encode_animation_rgb16(&anim_frames, &self.config, stop_token.clone())?;
-                result.avif_file
-            }
-            BufferedFrame::Rgba16 { .. } => {
-                let anim_frames: Vec<crate::AnimationFrameRgba16> = self
-                    .frames
-                    .into_iter()
-                    .map(|f| match f {
-                        BufferedFrame::Rgba16 {
-                            pixels,
-                            duration_ms,
-                        } => crate::AnimationFrameRgba16 {
-                            pixels,
-                            duration_ms,
-                        },
-                        _ => unreachable!(),
-                    })
-                    .collect();
-                let result =
-                    crate::encode_animation_rgba16(&anim_frames, &self.config, stop_token.clone())?;
-                result.avif_file
-            }
-        };
-
-        self.limits
-            .check_output_size(avif_file.len() as u64)
-            .map_err(|e| at!(Error::Encode(format!("{e}"))))?;
-
-        Ok(EncodeOutput::new(avif_file, ImageFormat::Avif))
+    fn finish(self, stop: Option<&dyn Stop>) -> Result<EncodeOutput, At<CodecError>> {
+        self.finish_inner(stop).map_err(zencodec::CodecError::of)
     }
 }
 
@@ -1816,7 +1492,7 @@ impl AvifDecoderConfig {
     }
 
     /// Convenience: decode image with this config.
-    pub fn decode(&self, data: &[u8]) -> Result<DecodeOutput, At<Error>> {
+    pub fn decode(&self, data: &[u8]) -> Result<DecodeOutput, At<CodecError>> {
         use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
         self.clone()
             .job()
@@ -1825,13 +1501,13 @@ impl AvifDecoderConfig {
     }
 
     /// Convenience: probe image header with this config.
-    pub fn probe_header(&self, data: &[u8]) -> Result<ImageInfo, At<Error>> {
+    pub fn probe_header(&self, data: &[u8]) -> Result<ImageInfo, At<CodecError>> {
         use zencodec::decode::{DecodeJob as _, DecoderConfig as _};
         self.clone().job().probe(data)
     }
 
     /// Convenience: probe full image metadata (may be expensive).
-    pub fn probe_full(&self, data: &[u8]) -> Result<ImageInfo, At<Error>> {
+    pub fn probe_full(&self, data: &[u8]) -> Result<ImageInfo, At<CodecError>> {
         use zencodec::decode::{DecodeJob as _, DecoderConfig as _};
         self.clone().job().probe_full(data)
     }
@@ -1841,7 +1517,7 @@ impl AvifDecoderConfig {
         &self,
         data: &[u8],
         mut dst: imgref::ImgRefMut<'_, Rgb<u8>>,
-    ) -> Result<ImageInfo, At<Error>> {
+    ) -> Result<ImageInfo, At<CodecError>> {
         let output = self.decode(data)?;
         let info = output.info().clone();
         map_rgb8_rows(&output.into_buffer(), &mut dst, |s, d| {
@@ -1855,7 +1531,7 @@ impl AvifDecoderConfig {
         &self,
         data: &[u8],
         mut dst: imgref::ImgRefMut<'_, Rgba<u8>>,
-    ) -> Result<ImageInfo, At<Error>> {
+    ) -> Result<ImageInfo, At<CodecError>> {
         let output = self.decode(data)?;
         let info = output.info().clone();
         map_rgba8_rows(&output.into_buffer(), &mut dst, |s, d| {
@@ -1869,7 +1545,7 @@ impl AvifDecoderConfig {
         &self,
         data: &[u8],
         mut dst: imgref::ImgRefMut<'_, Rgb<f32>>,
-    ) -> Result<ImageInfo, At<Error>> {
+    ) -> Result<ImageInfo, At<CodecError>> {
         use linear_srgb::default::srgb_u8_to_linear;
         let output = self.decode(data)?;
         let info = output.info().clone();
@@ -1890,7 +1566,7 @@ impl AvifDecoderConfig {
         &self,
         data: &[u8],
         mut dst: imgref::ImgRefMut<'_, Rgba<f32>>,
-    ) -> Result<ImageInfo, At<Error>> {
+    ) -> Result<ImageInfo, At<CodecError>> {
         use linear_srgb::default::srgb_u8_to_linear;
         let output = self.decode(data)?;
         let info = output.info().clone();
@@ -1912,7 +1588,7 @@ impl AvifDecoderConfig {
         &self,
         data: &[u8],
         mut dst: imgref::ImgRefMut<'_, rgb::Gray<f32>>,
-    ) -> Result<ImageInfo, At<Error>> {
+    ) -> Result<ImageInfo, At<CodecError>> {
         use linear_srgb::default::srgb_u8_to_linear;
         let output = self.decode(data)?;
         let info = output.info().clone();
@@ -2017,7 +1693,7 @@ static AVIF_DECODE_CAPABILITIES: zencodec::decode::DecodeCapabilities =
         .with_threads_supported_range(1, 256);
 
 impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
-    type Error = At<Error>;
+    type Error = At<CodecError>;
     type Job<'a> = AvifDecodeJob;
 
     fn formats() -> &'static [ImageFormat] {
@@ -2195,7 +1871,7 @@ impl AvifDecodeJob {
 }
 
 impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
-    type Error = At<Error>;
+    type Error = At<CodecError>;
     type Dec = AvifDecoder<'a>;
     type StreamDec = AvifStreamingDecoder;
     type AnimationFrameDec = AvifAnimationFrameDecoder;
@@ -2239,68 +1915,13 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         self
     }
 
-    fn probe(&self, data: &[u8]) -> Result<ImageInfo, At<Error>> {
-        let decoder = crate::ManagedAvifDecoder::new(data, &self.config.inner)?;
-        let native_info = decoder.probe_info()?;
-        // `convert_native_info` reports the Preserve view (stored dims +
-        // intrinsic tag); rewrite to display dims + Identity on the bake path.
-        let mut info = apply_reported_orientation(
-            convert_native_info(&native_info),
-            &native_info,
-            self.orientation,
-        );
-        // Detect animation from the container's track structure.
-        if let Some(anim) = decoder.animation_info() {
-            info = info.with_sequence(ImageSequence::Animation {
-                frame_count: Some(anim.frame_count as u32),
-                loop_count: Some(anim.loop_count),
-                random_access: true,
-            });
-        }
-        if let Ok(probe) = crate::detect::probe(data) {
-            info = info.with_source_encoding_details(probe);
-        }
-        if let Some(ref policy) = self.policy {
-            apply_decode_policy(&mut info, policy);
-        }
-        Ok(info)
+    fn probe(&self, data: &[u8]) -> Result<ImageInfo, At<CodecError>> {
+        self.probe_inner(data).map_err(zencodec::CodecError::of)
     }
 
-    fn output_info(&self, data: &[u8]) -> Result<zencodec::decode::OutputInfo, At<Error>> {
-        let decoder = crate::ManagedAvifDecoder::new(data, &self.config.inner)?;
-        let native_info = decoder.probe_info()?;
-        let mut desc = if native_info.bit_depth > 8 {
-            if native_info.has_alpha {
-                PixelDescriptor::RGBA16_SRGB
-            } else {
-                PixelDescriptor::RGB16_SRGB
-            }
-        } else if native_info.has_alpha {
-            PixelDescriptor::RGBA8_SRGB
-        } else {
-            PixelDescriptor::RGB8_SRGB
-        };
-        // Override TF and primaries from CICP if available.
-        if let Some(tf) =
-            zenpixels::TransferFunction::from_cicp(native_info.transfer_characteristics.0)
-        {
-            desc = desc.with_transfer(tf);
-        }
-        if let Some(p) = zenpixels::ColorPrimaries::from_cicp(native_info.color_primaries.0) {
-            desc = desc.with_primaries(p);
-        }
-        // Report the post-orientation output dims + what the decoder bakes:
-        // `Correct` bakes the intrinsic orientation (output = display dims,
-        // `orientation_applied` = intrinsic); `Preserve` bakes nothing
-        // (output = stored dims, `orientation_applied` = Identity, caller orients).
-        let (w, h, _) = reported_dims_and_orientation(&native_info, self.orientation);
-        let orientation_applied = if will_auto_orient(self.orientation) {
-            intrinsic_orientation(&native_info)
-        } else {
-            zencodec::Orientation::Identity
-        };
-        Ok(zencodec::decode::OutputInfo::full_decode(w, h, desc)
-            .with_orientation_applied(orientation_applied))
+    fn output_info(&self, data: &[u8]) -> Result<zencodec::decode::OutputInfo, At<CodecError>> {
+        self.output_info_inner(data)
+            .map_err(zencodec::CodecError::of)
     }
 
     fn push_decoder(
@@ -2308,349 +1929,52 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         data: Cow<'a, [u8]>,
         sink: &mut dyn zencodec::decode::DecodeRowSink,
         preferred: &[PixelDescriptor],
-    ) -> Result<zencodec::decode::OutputInfo, At<Error>> {
+    ) -> Result<zencodec::decode::OutputInfo, At<CodecError>> {
         // Bake path: orientation isn't row-local, so a true row-streamed sink
         // would emit pixels in stored orientation. Route through a full decode
         // (which bakes the buffer upright and reports display dims) and copy the
         // baked rows to the sink. `Preserve` (default) keeps the native, low-
         // memory streaming sink unchanged.
+        //
+        // `copy_decode_to_sink` is generic over `Self`, so it already returns
+        // `Self::Error` (= `At<CodecError>`); the sink-error wrap bridges a bare
+        // native `Error` into the envelope via `.into()`. The non-bake path keeps
+        // its verbatim `At<Error>` body in `push_decoder_inner` and is re-wrapped
+        // once at this boundary.
         if will_auto_orient(self.orientation) {
             return zencodec::helpers::copy_decode_to_sink(self, data, sink, preferred, |e| {
-                at!(Error::Encode(e.to_string()))
+                Error::Encode(e.to_string()).into()
             });
         }
-
-        self.check_input_size(&data)?;
-        let cfg = self.effective_config();
-        let stop: &dyn Stop = match &self.stop {
-            Some(s) => s,
-            None => &enough::Unstoppable,
-        };
-        let mut decoder = crate::ManagedAvifDecoder::new(&data, &cfg)?;
-        let probe_info = decoder.probe_info()?;
-        self.check_decode_limits(&probe_info)?;
-        let native_info = decoder.decode_to_sink(stop, sink)?;
-
-        let desc = if native_info.bit_depth > 8 {
-            if native_info.has_alpha {
-                PixelDescriptor::RGBA16_SRGB
-            } else {
-                PixelDescriptor::RGB16_SRGB
-            }
-        } else if native_info.has_alpha {
-            PixelDescriptor::RGBA8_SRGB
-        } else {
-            PixelDescriptor::RGB8_SRGB
-        };
-        Ok(zencodec::decode::OutputInfo::full_decode(
-            native_info.width,
-            native_info.height,
-            desc,
-        ))
+        self.push_decoder_inner(data, sink)
+            .map_err(zencodec::CodecError::of)
     }
 
     fn decoder(
         self,
         data: Cow<'a, [u8]>,
         preferred: &[PixelDescriptor],
-    ) -> Result<AvifDecoder<'a>, At<Error>> {
-        self.check_input_size(&data)?;
-        let cfg = self.effective_config();
-        Ok(AvifDecoder {
-            config: cfg,
-            stop: self.stop,
-            data,
-            preferred: preferred.to_vec(),
-            limits: self.limits,
-            policy: self.policy,
-            extract_gain_map: self.extract_gain_map,
-            gain_map_render: self.gain_map_render,
-            orientation: self.orientation,
-        })
+    ) -> Result<AvifDecoder<'a>, At<CodecError>> {
+        self.decoder_inner(data, preferred)
+            .map_err(zencodec::CodecError::of)
     }
 
     fn streaming_decoder(
-        mut self,
+        self,
         data: Cow<'a, [u8]>,
         preferred: &[PixelDescriptor],
-    ) -> Result<AvifStreamingDecoder, At<Error>> {
-        self.check_input_size(&data)?;
-        let cfg = self.effective_config();
-        let stop_token = self
-            .stop
-            .take()
-            .unwrap_or_else(|| zencodec::StopToken::new(enough::Unstoppable));
-
-        let mut decoder = crate::ManagedAvifDecoder::new(&data, &cfg)?;
-        let native_info = decoder.probe_info()?;
-        self.check_decode_limits(&native_info)?;
-
-        // Native grayscale opt-in (zenavif#5) — mirrors the buffered
-        // decode: alpha-free monochrome, not reconstructing, not a grid
-        // (the grid branch below stitches RGB tiles), gray negotiated.
-        // The monochrome strip path runs through full conversion +
-        // `StripConverter::new_from_pixels`, which carries the gray
-        // descriptor into the emitted strips.
-        let mono_source = native_info.monochrome && !native_info.has_alpha;
-        let reconstructing = matches!(
-            self.gain_map_render,
-            zencodec::GainMapRender::ReconstructHdr { .. }
-        ) && native_info.gain_map.is_some();
-        if mono_source
-            && !reconstructing
-            && !decoder.is_grid()
-            && icc_allows_native_gray(&native_info)
-            && wants_gray_output(preferred)
-        {
-            decoder.set_native_gray(true);
-        }
-
-        // ReconstructHdr path: gain-map application is whole-image (the
-        // map is sampled at an image-to-map scale ratio), so decode the
-        // full buffer, reconstruct, then emit fixed-height strips —
-        // same shape as the orientation-bake path below. Files without
-        // a gain map fall through to honest SDR streaming.
-        if let zencodec::GainMapRender::ReconstructHdr { target_headroom } = self.gain_map_render
-            && native_info.gain_map.is_some()
-        {
-            let (pixels, native_info) = decoder.decode_full(&stop_token)?;
-            let pixels = set_cicp_on_pixels(pixels, &native_info);
-            let pixels = attach_source_color_context(pixels, &native_info);
-            let (hdr, (max_cll, max_fall)) =
-                reconstruct_hdr_pixels(pixels, &native_info, target_headroom, &stop_token)?;
-            let (baked, _orientation, w, h) = bake_orientation(hdr, &native_info, self.orientation);
-            let strip_descriptor = baked.descriptor();
-            let mut info = apply_reported_orientation(
-                convert_native_info(&native_info),
-                &native_info,
-                self.orientation,
-            );
-            // Measured envelope of the reconstructed pixels (zencodec
-            // contract: MaxCLL/MaxFALL are measured; mastering display
-            // passes through unchanged).
-            info =
-                info.with_content_light_level(zencodec::ContentLightLevel::new(max_cll, max_fall));
-            let strip_height = 64u32.min(h.max(1));
-            return Ok(AvifStreamingDecoder {
-                info,
-                y_offset: 0,
-                output_width: w,
-                output_height: h,
-                decoder: None,
-                stop: stop_token,
-                grid_rows: 0,
-                grid_cols: 0,
-                current_grid_row: 0,
-                strip_descriptor,
-                strip_buffer: None,
-                strip_converter: None,
-                strip_height,
-                strip_color_context: baked.color_context().cloned(),
-                baked: Some(baked),
-            });
-        }
-
-        // Bake path: orientation is not strip-local (transposes need the whole
-        // image), so decode + bake the full buffer once and emit it in
-        // fixed-height strips. Mirrors `Decode::decode`'s buffer pipeline. The
-        // preserve path (default) falls through to the low-memory grid / strip-
-        // converter streaming below, unchanged.
-        if will_auto_orient(self.orientation) {
-            let (pixels, native_info) = decoder.decode_full(&stop_token)?;
-            let pixels = set_cicp_on_pixels(pixels, &native_info);
-            let pixels = attach_source_color_context(pixels, &native_info);
-            let pixels = negotiate_format(
-                pixels,
-                preferred,
-                native_info.monochrome && !native_info.has_alpha,
-            );
-            let (baked, _orientation, w, h) =
-                bake_orientation(pixels, &native_info, self.orientation);
-            let strip_descriptor = baked.descriptor();
-            let info = apply_reported_orientation(
-                convert_native_info(&native_info),
-                &native_info,
-                self.orientation,
-            );
-            // Emit in cache-friendly fixed-height strips (or the whole image if
-            // it's short). The baked buffer is contiguous, so a strip is just a
-            // row-range view re-copied into a small buffer.
-            let strip_height = 64u32.min(h.max(1));
-            return Ok(AvifStreamingDecoder {
-                info,
-                y_offset: 0,
-                output_width: w,
-                output_height: h,
-                decoder: None,
-                stop: stop_token,
-                grid_rows: 0,
-                grid_cols: 0,
-                current_grid_row: 0,
-                strip_descriptor,
-                strip_buffer: None,
-                strip_converter: None,
-                strip_height,
-                strip_color_context: baked.color_context().cloned(),
-                baked: Some(baked),
-            });
-        }
-
-        let info = convert_native_info(&native_info);
-
-        if decoder.is_grid() {
-            let grid = decoder
-                .grid_config()
-                .ok_or_else(|| at!(Error::Unsupported("grid_config missing after is_grid()")))?;
-            let output_width = grid.output_width;
-            let output_height = grid.output_height;
-
-            let base_desc = if native_info.bit_depth > 8 {
-                if native_info.has_alpha {
-                    PixelDescriptor::RGBA16_SRGB
-                } else {
-                    PixelDescriptor::RGB16_SRGB
-                }
-            } else if native_info.has_alpha {
-                PixelDescriptor::RGBA8_SRGB
-            } else {
-                PixelDescriptor::RGB8_SRGB
-            };
-
-            // Apply CICP metadata to descriptor. No format negotiation for
-            // the grid path — tiles produce native format and we stitch raw bytes.
-            let mut strip_descriptor = base_desc;
-            if let Some(tf) =
-                zenpixels::TransferFunction::from_cicp(native_info.transfer_characteristics.0)
-            {
-                strip_descriptor = strip_descriptor.with_transfer(tf);
-            }
-            if let Some(p) = zenpixels::ColorPrimaries::from_cicp(native_info.color_primaries.0) {
-                strip_descriptor = strip_descriptor.with_primaries(p);
-            }
-
-            return Ok(AvifStreamingDecoder {
-                info,
-                y_offset: 0,
-                output_width,
-                output_height,
-                decoder: Some(decoder),
-                stop: stop_token,
-                grid_rows: grid.rows as u32,
-                grid_cols: grid.columns as u32,
-                current_grid_row: 0,
-                strip_descriptor,
-                strip_buffer: None,
-                strip_converter: None,
-                strip_height: 0,
-                strip_color_context: color_context_for_layout(
-                    &native_source_color(&native_info),
-                    strip_descriptor.layout(),
-                ),
-                baked: None,
-            });
-        }
-
-        // Non-grid: decode YUV, set up strip converter for on-demand conversion.
-        // Use the frame-era info the converter returns (not the probe-era
-        // one): the buffered path attaches its context from decode_full's
-        // info, and strips must describe pixels identically.
-        let (converter, frame_native) = decoder.decode_to_strip_converter(&stop_token)?;
-        let desc = converter.descriptor();
-        let w = converter.display_width() as u32;
-        let h = converter.display_height() as u32;
-        let strip_h = converter.optimal_strip_height() as u32;
-
-        Ok(AvifStreamingDecoder {
-            info,
-            y_offset: 0,
-            output_width: w,
-            output_height: h,
-            decoder: None,
-            stop: stop_token,
-            grid_rows: 0,
-            grid_cols: 0,
-            current_grid_row: 0,
-            strip_descriptor: desc,
-            strip_buffer: None,
-            strip_converter: Some(converter),
-            strip_height: strip_h,
-            strip_color_context: color_context_for_layout(
-                &native_source_color(&frame_native),
-                desc.layout(),
-            ),
-            baked: None,
-        })
+    ) -> Result<AvifStreamingDecoder, At<CodecError>> {
+        self.streaming_decoder_inner(data, preferred)
+            .map_err(zencodec::CodecError::of)
     }
 
     fn animation_frame_decoder(
         self,
         data: Cow<'a, [u8]>,
         preferred: &[PixelDescriptor],
-    ) -> Result<AvifAnimationFrameDecoder, At<Error>> {
-        // Reject animation when policy disallows it.
-        if let Some(ref policy) = self.policy
-            && !policy.resolve_animation(true)
-        {
-            return Err(at!(Error::UnsupportedOperation(
-                zencodec::UnsupportedOperation::AnimationDecode,
-            )));
-        }
-        self.check_input_size(&data)?;
-        let cfg = self.effective_config();
-
-        // Probe metadata before creating animation decoder (both parse the container,
-        // but ManagedAvifDecoder gives us the native ImageInfo for conversion).
-        let probe_dec = crate::ManagedAvifDecoder::new(&data, &cfg)?;
-        let native_info = probe_dec.probe_info()?;
-        self.check_decode_limits(&native_info)?;
-        drop(probe_dec);
-
-        let anim_dec = crate::AnimationDecoder::new(&data, &cfg)?;
-        let anim_info = anim_dec.info().clone();
-
-        // `convert_native_info` reports the Preserve view (stored dims +
-        // intrinsic tag); the bake path rewrites the canvas to display dims +
-        // Identity, matching the per-frame buffers `render_next_frame` bakes.
-        let mut base_info = apply_reported_orientation(
-            convert_native_info(&native_info),
-            &native_info,
-            self.orientation,
-        )
-        .with_sequence(ImageSequence::Animation {
-            frame_count: Some(anim_info.frame_count as u32),
-            loop_count: Some(anim_info.loop_count),
-            random_access: true,
-        });
-        // Attach source encoding details to the shared animation ImageInfo.
-        if let Ok(probe) = crate::detect::probe(&data) {
-            base_info = base_info.with_source_encoding_details(probe);
-        }
-        if let Some(ref policy) = self.policy {
-            apply_decode_policy(&mut base_info, policy);
-        }
-
-        // Resolve the orientation to bake into each frame: the intrinsic
-        // transform on the bake path, `Identity` (no-op) on the preserve path.
-        let bake_to = if will_auto_orient(self.orientation) {
-            intrinsic_orientation(&native_info)
-        } else {
-            zencodec::Orientation::Identity
-        };
-
-        Ok(AvifAnimationFrameDecoder {
-            anim_decoder: anim_dec,
-            index: 0,
-            frames_decoded: 0,
-            start_frame_index: self.start_frame_index,
-            info: Arc::new(base_info),
-            total_frames: anim_info.frame_count as u32,
-            loop_count: anim_info.loop_count,
-            preferred: preferred.to_vec(),
-            current_frame: None,
-            limits: self.limits,
-            accumulated_ms: 0,
-            bake_to,
-        })
+    ) -> Result<AvifAnimationFrameDecoder, At<CodecError>> {
+        self.animation_frame_decoder_inner(data, preferred)
+            .map_err(zencodec::CodecError::of)
     }
 }
 
@@ -3367,9 +2691,952 @@ pub struct AvifDecoder<'a> {
 }
 
 impl zencodec::decode::Decode for AvifDecoder<'_> {
-    type Error = At<Error>;
+    type Error = At<CodecError>;
 
-    fn decode(self) -> Result<DecodeOutput, At<Error>> {
+    fn decode(self) -> Result<DecodeOutput, At<CodecError>> {
+        self.decode_inner().map_err(zencodec::CodecError::of)
+    }
+}
+
+/// Streaming AVIF decoder with real tile-row streaming for grid images.
+///
+/// For grid (tiled) images, each [`next_batch`](zencodec::decode::StreamingDecode::next_batch)
+/// call decodes one tile-row of AV1 tiles, color-converts them, and stitches
+/// them into a strip. Peak memory is proportional to one tile-row instead of
+/// the full image.
+///
+/// For non-grid 8-bit color images, the decoded YUV frame is held in memory
+/// and converted strip-by-strip on demand. This eliminates the full RGB
+/// allocation and keeps the working set in L2 cache.
+///
+/// For non-grid 16-bit or monochrome images, falls back to full-frame
+/// conversion and emits fixed-height strips.
+pub struct AvifStreamingDecoder {
+    info: ImageInfo,
+    y_offset: u32,
+    output_width: u32,
+    output_height: u32,
+    /// Grid path: managed decoder for tile-row streaming.
+    decoder: Option<crate::ManagedAvifDecoder>,
+    /// Stop token for cancellable grid decoding.
+    stop: zencodec::StopToken,
+    grid_rows: u32,
+    grid_cols: u32,
+    current_grid_row: u32,
+    /// Pixel descriptor with CICP metadata for strip buffers.
+    strip_descriptor: PixelDescriptor,
+    /// Reusable strip buffer for the current tile-row or strip conversion.
+    strip_buffer: Option<PixelBuffer>,
+    /// Non-grid strip conversion: holds decoded YUV frames, converts on demand.
+    strip_converter: Option<crate::strip_convert::StripConverter>,
+    /// Optimal strip height for the strip converter path.
+    strip_height: u32,
+    /// Class-gated color context applied to every emitted strip: the
+    /// scratch `strip_buffer` is rebuilt per batch without one, so the
+    /// context is re-attached at emission. `None` when the source
+    /// carries no color signaling (or the HDR/bake source buffer had
+    /// none).
+    strip_color_context: Option<Arc<zenpixels::ColorContext>>,
+    /// Bake path (`OrientationHint::bakes()`): the fully-decoded, orientation-
+    /// baked buffer. Orientation is not strip-local (transposes need the whole
+    /// image), so the bake path materializes upright once and emits it in
+    /// fixed-height strips. `None` on the preserve path (the default), where the
+    /// grid / strip-converter fields drive low-memory streaming unchanged.
+    baked: Option<PixelBuffer>,
+}
+
+impl AvifStreamingDecoder {
+    /// Stitch decoded tiles horizontally into `self.strip_buffer`.
+    fn stitch_tiles(&mut self, tiles: &[PixelBuffer], strip_h: u32) {
+        let bpp = self.strip_descriptor.bytes_per_pixel();
+        let mut strip = PixelBuffer::new(self.output_width, strip_h, self.strip_descriptor);
+        {
+            let mut sm = strip.as_slice_mut();
+            for py in 0..strip_h {
+                let dst_row = sm.row_mut(py);
+                let mut x_offset = 0usize;
+                for tile in tiles {
+                    let tile_w = tile.width() as usize;
+                    let actual_w =
+                        tile_w.min((self.output_width as usize).saturating_sub(x_offset));
+                    if actual_w == 0 {
+                        continue;
+                    }
+                    let tile_slice = tile.as_slice();
+                    let src = tile_slice.row(py);
+                    let copy_bytes = actual_w * bpp;
+                    let dst_start = x_offset * bpp;
+                    dst_row[dst_start..dst_start + copy_bytes].copy_from_slice(&src[..copy_bytes]);
+                    x_offset += tile_w;
+                }
+            }
+        }
+        self.strip_buffer = Some(strip);
+    }
+}
+
+impl zencodec::decode::StreamingDecode for AvifStreamingDecoder {
+    type Error = At<CodecError>;
+
+    fn next_batch(&mut self) -> Result<Option<(u32, PixelSlice<'_>)>, At<CodecError>> {
+        self.next_batch_inner().map_err(zencodec::CodecError::of)
+    }
+
+    fn info(&self) -> &ImageInfo {
+        &self.info
+    }
+}
+
+// ── Frame Decoder ───────────────────────────────────────────────────────────
+
+/// Animation AVIF full-frame decoder.
+///
+/// Lazily decodes frames on demand. The `AnimationFrameDecoder` trait doesn't pass
+/// a stop token per-call, so per-frame cancellation is not available
+/// through this interface (use the native `AnimationDecoder` API for that).
+pub struct AvifAnimationFrameDecoder {
+    anim_decoder: crate::AnimationDecoder,
+    index: usize,
+    /// Number of frames decoded so far (including skipped ones).
+    frames_decoded: u32,
+    /// Skip frames before this index. Frames are still decoded to maintain
+    /// correct compositing state, but not yielded to the caller.
+    start_frame_index: u32,
+    info: Arc<ImageInfo>,
+    total_frames: u32,
+    /// Animation loop count (0 = infinite, n = play n times).
+    loop_count: u32,
+    preferred: Vec<PixelDescriptor>,
+    /// Holds the current frame's pixels so `render_next_frame` can return
+    /// a borrowing `AnimationFrame<'_>`.
+    current_frame: Option<PixelBuffer>,
+    /// Resource limits for frame count and animation duration enforcement.
+    limits: ResourceLimits,
+    /// Accumulated animation duration in milliseconds across all decoded frames.
+    accumulated_ms: u64,
+    /// Orientation to bake into every frame: the intrinsic `irot`/`imir`
+    /// transform on the bake path (`OrientationHint::bakes()`), or `Identity`
+    /// (no-op) on the preserve path (the default). Applied after format
+    /// negotiation, before the frame is yielded.
+    bake_to: zencodec::Orientation,
+}
+
+impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
+    type Error = At<CodecError>;
+
+    fn wrap_sink_error(err: zencodec::decode::SinkError) -> Self::Error {
+        // Bare native error -> envelope via the `From<Error> for At<CodecError>` bridge.
+        Error::ResourceLimit(err.to_string()).into()
+    }
+
+    fn info(&self) -> &ImageInfo {
+        &self.info
+    }
+
+    fn frame_count(&self) -> Option<u32> {
+        Some(self.total_frames)
+    }
+
+    fn loop_count(&self) -> Option<u32> {
+        Some(self.loop_count)
+    }
+
+    fn render_next_frame(
+        &mut self,
+        stop: Option<&dyn zencodec::enough::Stop>,
+    ) -> Result<Option<AnimationFrame<'_>>, At<CodecError>> {
+        self.render_next_frame_inner(stop)
+            .map_err(zencodec::CodecError::of)
+    }
+
+    fn render_next_frame_to_sink(
+        &mut self,
+        stop: Option<&dyn zencodec::enough::Stop>,
+        sink: &mut dyn zencodec::decode::DecodeRowSink,
+    ) -> Result<Option<zencodec::decode::OutputInfo>, Self::Error> {
+        zencodec::helpers::copy_frame_to_sink(self, stop, sink)
+    }
+}
+
+// ── Pattern B envelope: the original At<Error> method bodies, moved to private
+// inherent `*_inner` helpers. Each zencodec trait method above is now a thin
+// `self.*_inner(..).map_err(zencodec::CodecError::of)` boundary that re-wraps the
+// located native error into the shared `At<CodecError>` envelope (Pattern B),
+// preserving the whereat trace. The inherent helpers keep the verbatim logic.
+
+#[cfg(feature = "encode")]
+impl AvifEncoder {
+    fn encode_srgba8_inner(
+        self,
+        data: &mut [u8],
+        make_opaque: bool,
+        width: u32,
+        height: u32,
+        stride_pixels: u32,
+    ) -> Result<EncodeOutput, At<Error>> {
+        let w = width as usize;
+        let h = height as usize;
+        let stride = stride_pixels as usize;
+        self.check_limits(w, h, 4)?;
+        let cfg = self.build_config();
+        let stop = self.stop_token();
+
+        if make_opaque {
+            // Strip alpha: RGBA → RGB in-place, then encode RGB
+            let mut rgb = Vec::with_capacity(w * h);
+            for y in 0..h {
+                let row_start = y * stride * 4;
+                let row = &data[row_start..row_start + w * 4];
+                for px in row.chunks_exact(4) {
+                    rgb.push(Rgb {
+                        r: px[0],
+                        g: px[1],
+                        b: px[2],
+                    });
+                }
+            }
+            let img = imgref::ImgVec::new(rgb, w, h);
+            let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
+            self.make_output(result.avif_file)
+        } else {
+            // Zero-copy RGBA path — bytemuck cast the contiguous region
+            if stride == w {
+                let pixel_bytes = &data[..w * h * 4];
+                let rgba: &[Rgba<u8>] = bytemuck::cast_slice(pixel_bytes);
+                let img = imgref::Img::new(rgba, w, h);
+                let result = crate::encode_rgba8(img, &cfg, stop)?;
+                self.make_output(result.avif_file)
+            } else {
+                // Strided: use ImgRef with stride
+                let total_pixels = (h - 1) * stride + w;
+                let pixel_bytes = &data[..total_pixels * 4];
+                let rgba: &[Rgba<u8>] = bytemuck::cast_slice(pixel_bytes);
+                let img = imgref::Img::new_stride(rgba, w, h, stride);
+                let result = crate::encode_rgba8(img, &cfg, stop)?;
+                self.make_output(result.avif_file)
+            }
+        }
+    }
+
+    fn encode_inner(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+        use zenpixels::PixelFormat;
+
+        // Propagate HDR color metadata from pixel descriptor to encoder config
+        let desc = pixels.descriptor();
+        self.apply_descriptor_color(desc);
+
+        // For f32 pixels with HDR transfer (PQ/HLG), convert to u16 and use 16-bit
+        // path to preserve HDR data. The default f32 path uses linear_to_srgb_u8()
+        // which would silently destroy HDR values.
+        let is_hdr_transfer = matches!(
+            desc.transfer,
+            zenpixels::TransferFunction::Pq | zenpixels::TransferFunction::Hlg
+        );
+
+        match desc.pixel_format() {
+            PixelFormat::RgbF32 if is_hdr_transfer => {
+                return self.encode_f32_as_u16_rgb(pixels);
+            }
+            PixelFormat::RgbaF32 if is_hdr_transfer => {
+                return self.encode_f32_as_u16_rgba(pixels);
+            }
+            _ => {}
+        }
+
+        match desc.pixel_format() {
+            PixelFormat::Rgb8 => self.do_encode_rgb8(pixels),
+            PixelFormat::Rgba8 => self.do_encode_rgba8(pixels),
+            PixelFormat::Gray8 => self.do_encode_gray8(pixels),
+            PixelFormat::Rgb16 => self.do_encode_rgb16(pixels),
+            PixelFormat::Rgba16 => self.do_encode_rgba16(pixels),
+            PixelFormat::RgbF32 => self.do_encode_rgb_f32(pixels),
+            PixelFormat::RgbaF32 => self.do_encode_rgba_f32(pixels),
+            PixelFormat::GrayF32 => self.do_encode_gray_f32(pixels),
+            PixelFormat::Bgra8 => {
+                // Swizzle BGRA → RGBA and encode
+                let raw = pixels.contiguous_bytes();
+                let w = pixels.width() as usize;
+                let h = pixels.rows() as usize;
+                self.check_limits(w, h, 4)?;
+                let cfg = self.build_config();
+                let stop = self.stop_token();
+                let rgba: Vec<Rgba<u8>> = raw
+                    .chunks_exact(4)
+                    .map(|c| Rgba {
+                        r: c[2],
+                        g: c[1],
+                        b: c[0],
+                        a: c[3],
+                    })
+                    .collect();
+                let img = imgref::ImgVec::new(rgba, w, h);
+                let result = crate::encode_rgba8(img.as_ref(), &cfg, stop)?;
+                self.make_output(result.avif_file)
+            }
+            PixelFormat::Rgbx8 => {
+                // Byte 3 is padding — strip to 3-channel RGB.
+                let raw = pixels.contiguous_bytes();
+                let w = pixels.width() as usize;
+                let h = pixels.rows() as usize;
+                self.check_limits(w, h, 3)?;
+                let cfg = self.build_config();
+                let stop = self.stop_token();
+                let rgb: Vec<Rgb<u8>> = raw
+                    .chunks_exact(4)
+                    .map(|c| Rgb {
+                        r: c[0],
+                        g: c[1],
+                        b: c[2],
+                    })
+                    .collect();
+                let img = imgref::ImgVec::new(rgb, w, h);
+                let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
+                self.make_output(result.avif_file)
+            }
+            PixelFormat::Bgrx8 => {
+                // BGRA layout with padding byte — swap B↔R and strip to RGB.
+                let raw = pixels.contiguous_bytes();
+                let w = pixels.width() as usize;
+                let h = pixels.rows() as usize;
+                self.check_limits(w, h, 3)?;
+                let cfg = self.build_config();
+                let stop = self.stop_token();
+                let rgb: Vec<Rgb<u8>> = raw
+                    .chunks_exact(4)
+                    .map(|c| Rgb {
+                        r: c[2],
+                        g: c[1],
+                        b: c[0],
+                    })
+                    .collect();
+                let img = imgref::ImgVec::new(rgb, w, h);
+                let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
+                self.make_output(result.avif_file)
+            }
+            _ => Err(at!(Error::UnsupportedOperation(
+                zencodec::UnsupportedOperation::PixelFormat,
+            ))),
+        }
+    }
+}
+
+#[cfg(feature = "encode")]
+impl AvifAnimationFrameEncoder {
+    fn push_frame_inner(
+        &mut self,
+        pixels: PixelSlice<'_>,
+        duration_ms: u32,
+        stop: Option<&dyn Stop>,
+    ) -> Result<(), At<Error>> {
+        // Check cancellation (combine per-call + owned stop)
+        if let Some(s) = stop {
+            s.check().map_err(|e| at!(Error::from(e)))?;
+        }
+        if let Some(ref s) = self.stop {
+            s.check().map_err(|e| at!(Error::from(e)))?;
+        }
+
+        let w = pixels.width();
+        let h = pixels.rows();
+
+        // Validate canvas dimensions match
+        match (self.canvas_width, self.canvas_height) {
+            (Some(cw), Some(ch)) if cw != w || ch != h => {
+                return Err(at!(Error::Encode(format!(
+                    "frame dimensions {}x{} don't match canvas {}x{}",
+                    w, h, cw, ch
+                ))));
+            }
+            (None, None) => {
+                self.canvas_width = Some(w);
+                self.canvas_height = Some(h);
+            }
+            _ => {}
+        }
+
+        // Check resource limits
+        let desc = pixels.descriptor();
+        let bpp = desc.bytes_per_pixel() as u64;
+        self.limits.check_dimensions(w, h).map_err(|_| {
+            at!(Error::ImageTooLarge {
+                width: w,
+                height: h,
+            })
+        })?;
+        self.limits
+            .check_memory(w as u64 * h as u64 * bpp)
+            .map_err(|e| at!(Error::Encode(format!("{e}"))))?;
+
+        // Enforce max_frames limit.
+        self.frame_count += 1;
+        self.limits
+            .check_frames(self.frame_count)
+            .map_err(|e| at!(Error::Encode(format!("{e}"))))?;
+
+        let fmt = desc.pixel_format();
+
+        // Validate consistent pixel format across frames
+        if let Some(expected) = self.pixel_format {
+            if fmt != expected {
+                return Err(at!(Error::Encode(format!(
+                    "pixel format mismatch: first frame was {expected:?}, this frame is {fmt:?}"
+                ))));
+            }
+        } else {
+            self.pixel_format = Some(fmt);
+        }
+
+        let raw = pixels.contiguous_bytes();
+        let wu = w as usize;
+        let hu = h as usize;
+
+        let frame = match fmt {
+            zenpixels::PixelFormat::Rgb8 => {
+                let rgb: Vec<Rgb<u8>> = bytemuck::cast_slice(&raw).to_vec();
+                BufferedFrame::Rgb8 {
+                    pixels: imgref::ImgVec::new(rgb, wu, hu),
+                    duration_ms,
+                }
+            }
+            zenpixels::PixelFormat::Rgba8 => {
+                let rgba: Vec<Rgba<u8>> = bytemuck::cast_slice(&raw).to_vec();
+                BufferedFrame::Rgba8 {
+                    pixels: imgref::ImgVec::new(rgba, wu, hu),
+                    duration_ms,
+                }
+            }
+            zenpixels::PixelFormat::Rgb16 => {
+                let rgb: Vec<Rgb<u16>> = bytemuck::cast_slice(&raw).to_vec();
+                BufferedFrame::Rgb16 {
+                    pixels: imgref::ImgVec::new(rgb, wu, hu),
+                    duration_ms,
+                }
+            }
+            zenpixels::PixelFormat::Rgba16 => {
+                let rgba: Vec<Rgba<u16>> = bytemuck::cast_slice(&raw).to_vec();
+                BufferedFrame::Rgba16 {
+                    pixels: imgref::ImgVec::new(rgba, wu, hu),
+                    duration_ms,
+                }
+            }
+            _ => {
+                return Err(at!(Error::UnsupportedOperation(
+                    zencodec::UnsupportedOperation::PixelFormat,
+                )));
+            }
+        };
+
+        self.frames.push(frame);
+        Ok(())
+    }
+
+    fn finish_inner(self, stop: Option<&dyn Stop>) -> Result<EncodeOutput, At<Error>> {
+        if let Some(s) = stop {
+            s.check().map_err(|e| at!(Error::from(e)))?;
+        }
+        if let Some(ref s) = self.stop {
+            s.check().map_err(|e| at!(Error::from(e)))?;
+        }
+
+        if self.frames.is_empty() {
+            return Err(at!(Error::Encode("no frames to encode".into())));
+        }
+
+        let stop_token = self.stop_token();
+
+        let avif_file = match self.frames[0] {
+            BufferedFrame::Rgb8 { .. } => {
+                let anim_frames: Vec<crate::AnimationFrame> = self
+                    .frames
+                    .into_iter()
+                    .map(|f| match f {
+                        BufferedFrame::Rgb8 {
+                            pixels,
+                            duration_ms,
+                        } => crate::AnimationFrame {
+                            pixels,
+                            duration_ms,
+                        },
+                        _ => unreachable!(),
+                    })
+                    .collect();
+                let result =
+                    crate::encode_animation_rgb8(&anim_frames, &self.config, stop_token.clone())?;
+                result.avif_file
+            }
+            BufferedFrame::Rgba8 { .. } => {
+                let anim_frames: Vec<crate::AnimationFrameRgba> = self
+                    .frames
+                    .into_iter()
+                    .map(|f| match f {
+                        BufferedFrame::Rgba8 {
+                            pixels,
+                            duration_ms,
+                        } => crate::AnimationFrameRgba {
+                            pixels,
+                            duration_ms,
+                        },
+                        _ => unreachable!(),
+                    })
+                    .collect();
+                let result =
+                    crate::encode_animation_rgba8(&anim_frames, &self.config, stop_token.clone())?;
+                result.avif_file
+            }
+            BufferedFrame::Rgb16 { .. } => {
+                let anim_frames: Vec<crate::AnimationFrame16> = self
+                    .frames
+                    .into_iter()
+                    .map(|f| match f {
+                        BufferedFrame::Rgb16 {
+                            pixels,
+                            duration_ms,
+                        } => crate::AnimationFrame16 {
+                            pixels,
+                            duration_ms,
+                        },
+                        _ => unreachable!(),
+                    })
+                    .collect();
+                let result =
+                    crate::encode_animation_rgb16(&anim_frames, &self.config, stop_token.clone())?;
+                result.avif_file
+            }
+            BufferedFrame::Rgba16 { .. } => {
+                let anim_frames: Vec<crate::AnimationFrameRgba16> = self
+                    .frames
+                    .into_iter()
+                    .map(|f| match f {
+                        BufferedFrame::Rgba16 {
+                            pixels,
+                            duration_ms,
+                        } => crate::AnimationFrameRgba16 {
+                            pixels,
+                            duration_ms,
+                        },
+                        _ => unreachable!(),
+                    })
+                    .collect();
+                let result =
+                    crate::encode_animation_rgba16(&anim_frames, &self.config, stop_token.clone())?;
+                result.avif_file
+            }
+        };
+
+        self.limits
+            .check_output_size(avif_file.len() as u64)
+            .map_err(|e| at!(Error::Encode(format!("{e}"))))?;
+
+        Ok(EncodeOutput::new(avif_file, ImageFormat::Avif))
+    }
+}
+
+impl AvifDecodeJob {
+    fn probe_inner(&self, data: &[u8]) -> Result<ImageInfo, At<Error>> {
+        let decoder = crate::ManagedAvifDecoder::new(data, &self.config.inner)?;
+        let native_info = decoder.probe_info()?;
+        // `convert_native_info` reports the Preserve view (stored dims +
+        // intrinsic tag); rewrite to display dims + Identity on the bake path.
+        let mut info = apply_reported_orientation(
+            convert_native_info(&native_info),
+            &native_info,
+            self.orientation,
+        );
+        // Detect animation from the container's track structure.
+        if let Some(anim) = decoder.animation_info() {
+            info = info.with_sequence(ImageSequence::Animation {
+                frame_count: Some(anim.frame_count as u32),
+                loop_count: Some(anim.loop_count),
+                random_access: true,
+            });
+        }
+        if let Ok(probe) = crate::detect::probe(data) {
+            info = info.with_source_encoding_details(probe);
+        }
+        if let Some(ref policy) = self.policy {
+            apply_decode_policy(&mut info, policy);
+        }
+        Ok(info)
+    }
+
+    fn output_info_inner(&self, data: &[u8]) -> Result<zencodec::decode::OutputInfo, At<Error>> {
+        let decoder = crate::ManagedAvifDecoder::new(data, &self.config.inner)?;
+        let native_info = decoder.probe_info()?;
+        let mut desc = if native_info.bit_depth > 8 {
+            if native_info.has_alpha {
+                PixelDescriptor::RGBA16_SRGB
+            } else {
+                PixelDescriptor::RGB16_SRGB
+            }
+        } else if native_info.has_alpha {
+            PixelDescriptor::RGBA8_SRGB
+        } else {
+            PixelDescriptor::RGB8_SRGB
+        };
+        // Override TF and primaries from CICP if available.
+        if let Some(tf) =
+            zenpixels::TransferFunction::from_cicp(native_info.transfer_characteristics.0)
+        {
+            desc = desc.with_transfer(tf);
+        }
+        if let Some(p) = zenpixels::ColorPrimaries::from_cicp(native_info.color_primaries.0) {
+            desc = desc.with_primaries(p);
+        }
+        // Report the post-orientation output dims + what the decoder bakes:
+        // `Correct` bakes the intrinsic orientation (output = display dims,
+        // `orientation_applied` = intrinsic); `Preserve` bakes nothing
+        // (output = stored dims, `orientation_applied` = Identity, caller orients).
+        let (w, h, _) = reported_dims_and_orientation(&native_info, self.orientation);
+        let orientation_applied = if will_auto_orient(self.orientation) {
+            intrinsic_orientation(&native_info)
+        } else {
+            zencodec::Orientation::Identity
+        };
+        Ok(zencodec::decode::OutputInfo::full_decode(w, h, desc)
+            .with_orientation_applied(orientation_applied))
+    }
+
+    fn decoder_inner<'a>(
+        self,
+        data: Cow<'a, [u8]>,
+        preferred: &[PixelDescriptor],
+    ) -> Result<AvifDecoder<'a>, At<Error>> {
+        self.check_input_size(&data)?;
+        let cfg = self.effective_config();
+        Ok(AvifDecoder {
+            config: cfg,
+            stop: self.stop,
+            data,
+            preferred: preferred.to_vec(),
+            limits: self.limits,
+            policy: self.policy,
+            extract_gain_map: self.extract_gain_map,
+            gain_map_render: self.gain_map_render,
+            orientation: self.orientation,
+        })
+    }
+
+    fn streaming_decoder_inner<'a>(
+        mut self,
+        data: Cow<'a, [u8]>,
+        preferred: &[PixelDescriptor],
+    ) -> Result<AvifStreamingDecoder, At<Error>> {
+        self.check_input_size(&data)?;
+        let cfg = self.effective_config();
+        let stop_token = self
+            .stop
+            .take()
+            .unwrap_or_else(|| zencodec::StopToken::new(enough::Unstoppable));
+
+        let mut decoder = crate::ManagedAvifDecoder::new(&data, &cfg)?;
+        let native_info = decoder.probe_info()?;
+        self.check_decode_limits(&native_info)?;
+
+        // Native grayscale opt-in (zenavif#5) — mirrors the buffered
+        // decode: alpha-free monochrome, not reconstructing, not a grid
+        // (the grid branch below stitches RGB tiles), gray negotiated.
+        // The monochrome strip path runs through full conversion +
+        // `StripConverter::new_from_pixels`, which carries the gray
+        // descriptor into the emitted strips.
+        let mono_source = native_info.monochrome && !native_info.has_alpha;
+        let reconstructing = matches!(
+            self.gain_map_render,
+            zencodec::GainMapRender::ReconstructHdr { .. }
+        ) && native_info.gain_map.is_some();
+        if mono_source
+            && !reconstructing
+            && !decoder.is_grid()
+            && icc_allows_native_gray(&native_info)
+            && wants_gray_output(preferred)
+        {
+            decoder.set_native_gray(true);
+        }
+
+        // ReconstructHdr path: gain-map application is whole-image (the
+        // map is sampled at an image-to-map scale ratio), so decode the
+        // full buffer, reconstruct, then emit fixed-height strips —
+        // same shape as the orientation-bake path below. Files without
+        // a gain map fall through to honest SDR streaming.
+        if let zencodec::GainMapRender::ReconstructHdr { target_headroom } = self.gain_map_render
+            && native_info.gain_map.is_some()
+        {
+            let (pixels, native_info) = decoder.decode_full(&stop_token)?;
+            let pixels = set_cicp_on_pixels(pixels, &native_info);
+            let pixels = attach_source_color_context(pixels, &native_info);
+            let (hdr, (max_cll, max_fall)) =
+                reconstruct_hdr_pixels(pixels, &native_info, target_headroom, &stop_token)?;
+            let (baked, _orientation, w, h) = bake_orientation(hdr, &native_info, self.orientation);
+            let strip_descriptor = baked.descriptor();
+            let mut info = apply_reported_orientation(
+                convert_native_info(&native_info),
+                &native_info,
+                self.orientation,
+            );
+            // Measured envelope of the reconstructed pixels (zencodec
+            // contract: MaxCLL/MaxFALL are measured; mastering display
+            // passes through unchanged).
+            info =
+                info.with_content_light_level(zencodec::ContentLightLevel::new(max_cll, max_fall));
+            let strip_height = 64u32.min(h.max(1));
+            return Ok(AvifStreamingDecoder {
+                info,
+                y_offset: 0,
+                output_width: w,
+                output_height: h,
+                decoder: None,
+                stop: stop_token,
+                grid_rows: 0,
+                grid_cols: 0,
+                current_grid_row: 0,
+                strip_descriptor,
+                strip_buffer: None,
+                strip_converter: None,
+                strip_height,
+                strip_color_context: baked.color_context().cloned(),
+                baked: Some(baked),
+            });
+        }
+
+        // Bake path: orientation is not strip-local (transposes need the whole
+        // image), so decode + bake the full buffer once and emit it in
+        // fixed-height strips. Mirrors `Decode::decode`'s buffer pipeline. The
+        // preserve path (default) falls through to the low-memory grid / strip-
+        // converter streaming below, unchanged.
+        if will_auto_orient(self.orientation) {
+            let (pixels, native_info) = decoder.decode_full(&stop_token)?;
+            let pixels = set_cicp_on_pixels(pixels, &native_info);
+            let pixels = attach_source_color_context(pixels, &native_info);
+            let pixels = negotiate_format(
+                pixels,
+                preferred,
+                native_info.monochrome && !native_info.has_alpha,
+            );
+            let (baked, _orientation, w, h) =
+                bake_orientation(pixels, &native_info, self.orientation);
+            let strip_descriptor = baked.descriptor();
+            let info = apply_reported_orientation(
+                convert_native_info(&native_info),
+                &native_info,
+                self.orientation,
+            );
+            // Emit in cache-friendly fixed-height strips (or the whole image if
+            // it's short). The baked buffer is contiguous, so a strip is just a
+            // row-range view re-copied into a small buffer.
+            let strip_height = 64u32.min(h.max(1));
+            return Ok(AvifStreamingDecoder {
+                info,
+                y_offset: 0,
+                output_width: w,
+                output_height: h,
+                decoder: None,
+                stop: stop_token,
+                grid_rows: 0,
+                grid_cols: 0,
+                current_grid_row: 0,
+                strip_descriptor,
+                strip_buffer: None,
+                strip_converter: None,
+                strip_height,
+                strip_color_context: baked.color_context().cloned(),
+                baked: Some(baked),
+            });
+        }
+
+        let info = convert_native_info(&native_info);
+
+        if decoder.is_grid() {
+            let grid = decoder
+                .grid_config()
+                .ok_or_else(|| at!(Error::Unsupported("grid_config missing after is_grid()")))?;
+            let output_width = grid.output_width;
+            let output_height = grid.output_height;
+
+            let base_desc = if native_info.bit_depth > 8 {
+                if native_info.has_alpha {
+                    PixelDescriptor::RGBA16_SRGB
+                } else {
+                    PixelDescriptor::RGB16_SRGB
+                }
+            } else if native_info.has_alpha {
+                PixelDescriptor::RGBA8_SRGB
+            } else {
+                PixelDescriptor::RGB8_SRGB
+            };
+
+            // Apply CICP metadata to descriptor. No format negotiation for
+            // the grid path — tiles produce native format and we stitch raw bytes.
+            let mut strip_descriptor = base_desc;
+            if let Some(tf) =
+                zenpixels::TransferFunction::from_cicp(native_info.transfer_characteristics.0)
+            {
+                strip_descriptor = strip_descriptor.with_transfer(tf);
+            }
+            if let Some(p) = zenpixels::ColorPrimaries::from_cicp(native_info.color_primaries.0) {
+                strip_descriptor = strip_descriptor.with_primaries(p);
+            }
+
+            return Ok(AvifStreamingDecoder {
+                info,
+                y_offset: 0,
+                output_width,
+                output_height,
+                decoder: Some(decoder),
+                stop: stop_token,
+                grid_rows: grid.rows as u32,
+                grid_cols: grid.columns as u32,
+                current_grid_row: 0,
+                strip_descriptor,
+                strip_buffer: None,
+                strip_converter: None,
+                strip_height: 0,
+                strip_color_context: color_context_for_layout(
+                    &native_source_color(&native_info),
+                    strip_descriptor.layout(),
+                ),
+                baked: None,
+            });
+        }
+
+        // Non-grid: decode YUV, set up strip converter for on-demand conversion.
+        // Use the frame-era info the converter returns (not the probe-era
+        // one): the buffered path attaches its context from decode_full's
+        // info, and strips must describe pixels identically.
+        let (converter, frame_native) = decoder.decode_to_strip_converter(&stop_token)?;
+        let desc = converter.descriptor();
+        let w = converter.display_width() as u32;
+        let h = converter.display_height() as u32;
+        let strip_h = converter.optimal_strip_height() as u32;
+
+        Ok(AvifStreamingDecoder {
+            info,
+            y_offset: 0,
+            output_width: w,
+            output_height: h,
+            decoder: None,
+            stop: stop_token,
+            grid_rows: 0,
+            grid_cols: 0,
+            current_grid_row: 0,
+            strip_descriptor: desc,
+            strip_buffer: None,
+            strip_converter: Some(converter),
+            strip_height: strip_h,
+            strip_color_context: color_context_for_layout(
+                &native_source_color(&frame_native),
+                desc.layout(),
+            ),
+            baked: None,
+        })
+    }
+
+    fn animation_frame_decoder_inner<'a>(
+        self,
+        data: Cow<'a, [u8]>,
+        preferred: &[PixelDescriptor],
+    ) -> Result<AvifAnimationFrameDecoder, At<Error>> {
+        // Reject animation when policy disallows it.
+        if let Some(ref policy) = self.policy
+            && !policy.resolve_animation(true)
+        {
+            return Err(at!(Error::UnsupportedOperation(
+                zencodec::UnsupportedOperation::AnimationDecode,
+            )));
+        }
+        self.check_input_size(&data)?;
+        let cfg = self.effective_config();
+
+        // Probe metadata before creating animation decoder (both parse the container,
+        // but ManagedAvifDecoder gives us the native ImageInfo for conversion).
+        let probe_dec = crate::ManagedAvifDecoder::new(&data, &cfg)?;
+        let native_info = probe_dec.probe_info()?;
+        self.check_decode_limits(&native_info)?;
+        drop(probe_dec);
+
+        let anim_dec = crate::AnimationDecoder::new(&data, &cfg)?;
+        let anim_info = anim_dec.info().clone();
+
+        // `convert_native_info` reports the Preserve view (stored dims +
+        // intrinsic tag); the bake path rewrites the canvas to display dims +
+        // Identity, matching the per-frame buffers `render_next_frame` bakes.
+        let mut base_info = apply_reported_orientation(
+            convert_native_info(&native_info),
+            &native_info,
+            self.orientation,
+        )
+        .with_sequence(ImageSequence::Animation {
+            frame_count: Some(anim_info.frame_count as u32),
+            loop_count: Some(anim_info.loop_count),
+            random_access: true,
+        });
+        // Attach source encoding details to the shared animation ImageInfo.
+        if let Ok(probe) = crate::detect::probe(&data) {
+            base_info = base_info.with_source_encoding_details(probe);
+        }
+        if let Some(ref policy) = self.policy {
+            apply_decode_policy(&mut base_info, policy);
+        }
+
+        // Resolve the orientation to bake into each frame: the intrinsic
+        // transform on the bake path, `Identity` (no-op) on the preserve path.
+        let bake_to = if will_auto_orient(self.orientation) {
+            intrinsic_orientation(&native_info)
+        } else {
+            zencodec::Orientation::Identity
+        };
+
+        Ok(AvifAnimationFrameDecoder {
+            anim_decoder: anim_dec,
+            index: 0,
+            frames_decoded: 0,
+            start_frame_index: self.start_frame_index,
+            info: Arc::new(base_info),
+            total_frames: anim_info.frame_count as u32,
+            loop_count: anim_info.loop_count,
+            preferred: preferred.to_vec(),
+            current_frame: None,
+            limits: self.limits,
+            accumulated_ms: 0,
+            bake_to,
+        })
+    }
+
+    fn push_decoder_inner(
+        self,
+        data: Cow<'_, [u8]>,
+        sink: &mut dyn zencodec::decode::DecodeRowSink,
+    ) -> Result<zencodec::decode::OutputInfo, At<Error>> {
+        self.check_input_size(&data)?;
+        let cfg = self.effective_config();
+        let stop: &dyn Stop = match &self.stop {
+            Some(s) => s,
+            None => &enough::Unstoppable,
+        };
+        let mut decoder = crate::ManagedAvifDecoder::new(&data, &cfg)?;
+        let probe_info = decoder.probe_info()?;
+        self.check_decode_limits(&probe_info)?;
+        let native_info = decoder.decode_to_sink(stop, sink)?;
+
+        let desc = if native_info.bit_depth > 8 {
+            if native_info.has_alpha {
+                PixelDescriptor::RGBA16_SRGB
+            } else {
+                PixelDescriptor::RGB16_SRGB
+            }
+        } else if native_info.has_alpha {
+            PixelDescriptor::RGBA8_SRGB
+        } else {
+            PixelDescriptor::RGB8_SRGB
+        };
+        Ok(zencodec::decode::OutputInfo::full_decode(
+            native_info.width,
+            native_info.height,
+            desc,
+        ))
+    }
+}
+
+impl AvifDecoder<'_> {
+    fn decode_inner(self) -> Result<DecodeOutput, At<Error>> {
         let stop: &dyn Stop = match &self.stop {
             Some(s) => s,
             None => &enough::Unstoppable,
@@ -3539,87 +3806,8 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
     }
 }
 
-/// Streaming AVIF decoder with real tile-row streaming for grid images.
-///
-/// For grid (tiled) images, each [`next_batch`](zencodec::decode::StreamingDecode::next_batch)
-/// call decodes one tile-row of AV1 tiles, color-converts them, and stitches
-/// them into a strip. Peak memory is proportional to one tile-row instead of
-/// the full image.
-///
-/// For non-grid 8-bit color images, the decoded YUV frame is held in memory
-/// and converted strip-by-strip on demand. This eliminates the full RGB
-/// allocation and keeps the working set in L2 cache.
-///
-/// For non-grid 16-bit or monochrome images, falls back to full-frame
-/// conversion and emits fixed-height strips.
-pub struct AvifStreamingDecoder {
-    info: ImageInfo,
-    y_offset: u32,
-    output_width: u32,
-    output_height: u32,
-    /// Grid path: managed decoder for tile-row streaming.
-    decoder: Option<crate::ManagedAvifDecoder>,
-    /// Stop token for cancellable grid decoding.
-    stop: zencodec::StopToken,
-    grid_rows: u32,
-    grid_cols: u32,
-    current_grid_row: u32,
-    /// Pixel descriptor with CICP metadata for strip buffers.
-    strip_descriptor: PixelDescriptor,
-    /// Reusable strip buffer for the current tile-row or strip conversion.
-    strip_buffer: Option<PixelBuffer>,
-    /// Non-grid strip conversion: holds decoded YUV frames, converts on demand.
-    strip_converter: Option<crate::strip_convert::StripConverter>,
-    /// Optimal strip height for the strip converter path.
-    strip_height: u32,
-    /// Class-gated color context applied to every emitted strip: the
-    /// scratch `strip_buffer` is rebuilt per batch without one, so the
-    /// context is re-attached at emission. `None` when the source
-    /// carries no color signaling (or the HDR/bake source buffer had
-    /// none).
-    strip_color_context: Option<Arc<zenpixels::ColorContext>>,
-    /// Bake path (`OrientationHint::bakes()`): the fully-decoded, orientation-
-    /// baked buffer. Orientation is not strip-local (transposes need the whole
-    /// image), so the bake path materializes upright once and emits it in
-    /// fixed-height strips. `None` on the preserve path (the default), where the
-    /// grid / strip-converter fields drive low-memory streaming unchanged.
-    baked: Option<PixelBuffer>,
-}
-
 impl AvifStreamingDecoder {
-    /// Stitch decoded tiles horizontally into `self.strip_buffer`.
-    fn stitch_tiles(&mut self, tiles: &[PixelBuffer], strip_h: u32) {
-        let bpp = self.strip_descriptor.bytes_per_pixel();
-        let mut strip = PixelBuffer::new(self.output_width, strip_h, self.strip_descriptor);
-        {
-            let mut sm = strip.as_slice_mut();
-            for py in 0..strip_h {
-                let dst_row = sm.row_mut(py);
-                let mut x_offset = 0usize;
-                for tile in tiles {
-                    let tile_w = tile.width() as usize;
-                    let actual_w =
-                        tile_w.min((self.output_width as usize).saturating_sub(x_offset));
-                    if actual_w == 0 {
-                        continue;
-                    }
-                    let tile_slice = tile.as_slice();
-                    let src = tile_slice.row(py);
-                    let copy_bytes = actual_w * bpp;
-                    let dst_start = x_offset * bpp;
-                    dst_row[dst_start..dst_start + copy_bytes].copy_from_slice(&src[..copy_bytes]);
-                    x_offset += tile_w;
-                }
-            }
-        }
-        self.strip_buffer = Some(strip);
-    }
-}
-
-impl zencodec::decode::StreamingDecode for AvifStreamingDecoder {
-    type Error = At<Error>;
-
-    fn next_batch(&mut self) -> Result<Option<(u32, PixelSlice<'_>)>, At<Error>> {
+    fn next_batch_inner(&mut self) -> Result<Option<(u32, PixelSlice<'_>)>, At<Error>> {
         if self.y_offset >= self.output_height {
             return Ok(None);
         }
@@ -3729,66 +3917,10 @@ impl zencodec::decode::StreamingDecode for AvifStreamingDecoder {
 
         Ok(None)
     }
-
-    fn info(&self) -> &ImageInfo {
-        &self.info
-    }
 }
 
-// ── Frame Decoder ───────────────────────────────────────────────────────────
-
-/// Animation AVIF full-frame decoder.
-///
-/// Lazily decodes frames on demand. The `AnimationFrameDecoder` trait doesn't pass
-/// a stop token per-call, so per-frame cancellation is not available
-/// through this interface (use the native `AnimationDecoder` API for that).
-pub struct AvifAnimationFrameDecoder {
-    anim_decoder: crate::AnimationDecoder,
-    index: usize,
-    /// Number of frames decoded so far (including skipped ones).
-    frames_decoded: u32,
-    /// Skip frames before this index. Frames are still decoded to maintain
-    /// correct compositing state, but not yielded to the caller.
-    start_frame_index: u32,
-    info: Arc<ImageInfo>,
-    total_frames: u32,
-    /// Animation loop count (0 = infinite, n = play n times).
-    loop_count: u32,
-    preferred: Vec<PixelDescriptor>,
-    /// Holds the current frame's pixels so `render_next_frame` can return
-    /// a borrowing `AnimationFrame<'_>`.
-    current_frame: Option<PixelBuffer>,
-    /// Resource limits for frame count and animation duration enforcement.
-    limits: ResourceLimits,
-    /// Accumulated animation duration in milliseconds across all decoded frames.
-    accumulated_ms: u64,
-    /// Orientation to bake into every frame: the intrinsic `irot`/`imir`
-    /// transform on the bake path (`OrientationHint::bakes()`), or `Identity`
-    /// (no-op) on the preserve path (the default). Applied after format
-    /// negotiation, before the frame is yielded.
-    bake_to: zencodec::Orientation,
-}
-
-impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
-    type Error = At<Error>;
-
-    fn wrap_sink_error(err: zencodec::decode::SinkError) -> Self::Error {
-        at!(Error::ResourceLimit(err.to_string()))
-    }
-
-    fn info(&self) -> &ImageInfo {
-        &self.info
-    }
-
-    fn frame_count(&self) -> Option<u32> {
-        Some(self.total_frames)
-    }
-
-    fn loop_count(&self) -> Option<u32> {
-        Some(self.loop_count)
-    }
-
-    fn render_next_frame(
+impl AvifAnimationFrameDecoder {
+    fn render_next_frame_inner(
         &mut self,
         stop: Option<&dyn zencodec::enough::Stop>,
     ) -> Result<Option<AnimationFrame<'_>>, At<Error>> {
@@ -3837,14 +3969,6 @@ impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
             let slice = self.current_frame.as_ref().unwrap().as_slice().erase();
             return Ok(Some(AnimationFrame::new(slice, duration_ms, idx)));
         }
-    }
-
-    fn render_next_frame_to_sink(
-        &mut self,
-        stop: Option<&dyn zencodec::enough::Stop>,
-        sink: &mut dyn zencodec::decode::DecodeRowSink,
-    ) -> Result<Option<zencodec::decode::OutputInfo>, Self::Error> {
-        zencodec::helpers::copy_frame_to_sink(self, stop, sink)
     }
 }
 
@@ -3903,11 +4027,11 @@ mod tests {
     /// byte-identical output. Uses a real 8-bit 4:2:0 photo fixture, which
     /// exercises the big full-image RGB output buffer + the per-row scratch.
     mod alloc_pref_decode {
-        use super::super::{AvifDecoderConfig, DecodeOutput, Error};
+        use super::super::{AvifDecoderConfig, DecodeOutput};
         use alloc::borrow::Cow;
         use whereat::At;
         use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
-        use zencodec::{AllocPreference, ResourceLimits};
+        use zencodec::{AllocPreference, CodecError, ResourceLimits};
 
         extern crate alloc;
 
@@ -3918,7 +4042,7 @@ mod tests {
         fn decode_bytes(
             encoded: &[u8],
             pref: Option<AllocPreference>,
-        ) -> Result<Vec<u8>, At<Error>> {
+        ) -> Result<Vec<u8>, At<CodecError>> {
             let job = AvifDecoderConfig::new().job();
             let job = match pref {
                 Some(p) => {
@@ -5475,10 +5599,21 @@ mod tests {
         };
         assert!(result.is_err(), "expected error from memory limit");
         let err = result.err().unwrap();
+        // Pattern B (envelope): the coarse category is read off `At<CodecError>`
+        // directly (native `Error::ResourceLimit` maps to `LimitsExceeded(Memory)`),
+        // and the native detail stays reachable via downcast — faithful to the
+        // original `matches!(.., Error::ResourceLimit(_))` intent.
+        assert_eq!(
+            err.error().category(),
+            zencodec::ErrorCategory::LimitsExceeded(zencodec::LimitKind::Memory),
+            "expected a memory LimitsExceeded category, got: {err}"
+        );
         assert!(
-            matches!(err.error(), Error::ResourceLimit(_)),
-            "expected Error::ResourceLimit, got: {}",
-            err
+            matches!(
+                err.error().detail().and_then(|d| d.downcast_ref::<Error>()),
+                Some(Error::ResourceLimit(_))
+            ),
+            "envelope must carry the native Error::ResourceLimit detail, got: {err}"
         );
     }
 
@@ -5511,10 +5646,21 @@ mod tests {
             .decoder(Cow::Borrowed(encoded.data()), &[]);
         assert!(result.is_err(), "expected error from memory limit");
         let err = result.err().unwrap();
+        // Pattern B (envelope): the coarse category is read off `At<CodecError>`
+        // directly (native `Error::ResourceLimit` maps to `LimitsExceeded(Memory)`),
+        // and the native detail stays reachable via downcast — faithful to the
+        // original `matches!(.., Error::ResourceLimit(_))` intent.
+        assert_eq!(
+            err.error().category(),
+            zencodec::ErrorCategory::LimitsExceeded(zencodec::LimitKind::Memory),
+            "expected a memory LimitsExceeded category, got: {err}"
+        );
         assert!(
-            matches!(err.error(), Error::ResourceLimit(_)),
-            "expected Error::ResourceLimit, got: {}",
-            err
+            matches!(
+                err.error().detail().and_then(|d| d.downcast_ref::<Error>()),
+                Some(Error::ResourceLimit(_))
+            ),
+            "envelope must carry the native Error::ResourceLimit detail, got: {err}"
         );
     }
 
