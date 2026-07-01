@@ -120,3 +120,9 @@ benchmarks/rav1e_phase1a_2026-04-30.parquet
 benchmarks/rav1e_phase1a_hybrid_*.json
 benchmarks/zenavif_hybrid_v2_*.json
 .cargo/config.toml
+
+# rd_gap harness generated outputs
+scripts/rd_gap/sample_images.tsv
+scripts/rd_gap/rd_gap_results.tsv
+scripts/rd_gap/*_summary.csv
+*.profraw

@@ -1,0 +1,20 @@
+# zenrav1e vs libaom-slow — SSIMULACRA2 RD-gap baseline (2026-06-30)
+# Regression anchor for scripts/rd_gap/. + = zenrav1e needs MORE bits than libaom-slow (worse).
+# Source: zenmetrics benchmarks/avif_vs_libaom_2026-06-30.md (28 imgs, clean-picker-corpus-2026-06-26).
+#   our-AVIF = canonical zenavif_lossy best-of (zenrav1e 22a58d58db1d, incl 10-bit variants);
+#   reference = libaom git 632172a4 aomenc 3.14.1 --cpu-used=2; scorer fast-ssim2-cli v0.6.0.
+# NOTE: scripts/rd_gap/ runs 8-bit-both (save_png handles RGB8 only), so its tracking series will
+#   differ slightly (mildly conservative toward zenrav1e — see README "8-bit only"). Use the harness's
+#   own first run as the ongoing anchor; these numbers are the authoritative headline gap.
+# BD-rate (integrated, per-image): median +25%  (28/28 images need more bits).
+target_ssim2	group	median_zenrav1e_larger_pct
+82	photos	16.3
+85	photos	11.8
+88	photos	7.8
+90	photos	18.5
+82	all28	22.8
+85	all28	15.9
+88	all28	21.8
+90	all28	23.8
+# Content note: the fam7 (7000-lilith-plots synthetic screen content) gap is +130..470% — AVIF is
+# weak on charts regardless; the honest headline is the PHOTOS row (~8-18%). Target: photos < 5%.
