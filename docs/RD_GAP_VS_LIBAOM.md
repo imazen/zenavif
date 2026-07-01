@@ -229,9 +229,11 @@ and raw numbers.
 2. **Implement the 6 extended partition types** (`HORZ_A/B`, `VERT_A/B`, `HORZ_4`/`VERT_4` — see
    "STILL OPEN" above). Highest-priority remaining photo-gap lever: measured 10-13% area share on
    libaom's side that zenrav1e cannot reach at all, structurally bigger than anything else on this
-   list. Real encoder work (new recursive encode patterns, 3-way and 4-way sub-block RD evaluation)
-   — cross-repo (zenrav1e), needs explicit scope sign-off before starting. Re-run
-   `scripts/rd_gap/inspect_diff.sh` after landing to confirm the area-share gap actually closes.
+   list. Tracked in [zenrav1e#26](https://github.com/imazen/zenrav1e/issues/26) — goal, phased
+   plan (HORZ_4/VERT_4 first, then HORZ_A/B/VERT_A/B), and success criteria. Real encoder work
+   (new recursive encode patterns, 3-way and 4-way sub-block RD evaluation) — cross-repo
+   (zenrav1e). Re-run `scripts/rd_gap/inspect_diff.sh` after landing to confirm the area-share gap
+   actually closes.
 3. **Implement palette mode in zenrav1e** (scoped: screen-content win, ~zero photo-gap effect —
    see confirmed findings above). Substantial encoder feature: color quantization (k-means per
    candidate block/plane), RD-gated size search (2-8), bitstream signaling (palette colors + index
