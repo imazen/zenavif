@@ -611,25 +611,30 @@ what zenrav1e's RDO search could reach.
 - Palette mode — ~0% effect on photos, a real win only for screen content.
 
 **Why the remaining +0.1% median (+2.2% mean) is likely diffuse, not one more missing lever:**
-the 8-photo aggregate bit-cost breakdown (`inspect_diff.sh` + `analyze_inspect_diff.py`) — taken
-before this session's fix, so its accounting below predates the +0.1% number — showed no single
-unexplained syntax element beyond what was already accounted for: `av1_read_tx_type`'s residual
-gap traces to the `rdo_tx_decision` gate (declined); `read_segment_id` is a known cross-encoder
-segmentation-approach artifact; `read_filter_intra_mode_info` is the known-broken, ruled-out
-feature; the remaining items (`read_intra_mode`, `read_angle_delta`, `read_golomb`, uv-mode
-signaling) are each under 1 percentage point of total bits. With `HORZ_4`/`VERT_4` now closing
-most of the gap the aggregate bit-cost breakdown predicted, the residual is plausibly close to
-"an aggregate of many small RDO/heuristic refinements... harder to close than a single lever" —
-re-running the bit-cost breakdown on the new baseline would confirm, not yet done.
+**Re-ran the aggregate bit-cost breakdown on the new baseline** (6-photo sample, current master
+with the `HORZ_4`/`VERT_4` fix) as flagged above — confirms the picture, no new large unexplained
+item appeared: `av1_read_tx_type` is still the single largest gap (2.9%→4.1%, +1.2pp, down
+slightly from the pre-fix +1.6pp) and still traces to the declined `rdo_tx_decision` gate, not a
+new bug; `read_partition` (1.5%→1.9%, +0.4pp) is the item Phase 2 (`HORZ_A/B`/`VERT_A/B`) would
+address, but it's small and likely partially substitutable already — those types' block sizes
+overlap plain `HORZ`/`VERT`, which are already offered, so the *marginal* value of also offering
+the mixed 3-way split is bounded well below the full line item. `read_segment_id` (cross-encoder
+segmentation artifact), `read_filter_intra_mode_info` (known-broken, ruled out), and the rest
+(`read_intra_mode`, `read_angle_delta`, `read_golomb`, uv-mode signaling) are each ≤1pp, same as
+before. **Conclusion: the residual is genuinely diffuse** — bounded mostly by a tradeoff already
+declined for good reason (matched-speed integrity) plus several sub-percentage-point items, not
+one more discoverable bug of the topdown/tx-type/ordinal-comparison shape.
 
 **What would actually move the needle from here:** `HORZ_A/B`/`VERT_A/B` (Phase 2, mixed-
-granularity 3-way splits — one half full-size, the other split again) is the most obvious
-remaining structural lever, though its area-share contribution wasn't separately measurable
-(overlaps plain HORZ/VERT block sizes in a size histogram) so its potential is unquantified.
-Beyond that, closing the mean/median gap fully would likely require either accepting the
-`rdo_tx_decision` speed cost (a scope/priority call, not a bug fix) or a broader RDO-cost-model
-accuracy improvement (the same root cause behind both the CfL-widening and partition-range-
-widening regressions) rather than a single discrete fix.
+granularity 3-way splits) is the only remaining structural lever, but the fresh diagnostic bounds
+its likely value below the already-small `read_partition` line item, and it's explicitly a larger,
+more complex implementation than Phase 1 (mixed-granularity recursion vs. Phase 1's uniform
+4-way split) — real corruption risk for a small, uncertain payoff. Beyond that, closing the
+mean/median gap fully would likely require either accepting the `rdo_tx_decision` speed cost (a
+scope/priority call, not a bug fix) or a broader RDO-cost-model accuracy improvement (the same
+root cause behind both the CfL-widening and partition-range-widening regressions) rather than a
+single discrete fix. Given the effort/expected-value balance, this was surfaced to the user as a
+judgment call rather than pursued unilaterally.
 
 ## The harness — `scripts/rd_gap/`
 
