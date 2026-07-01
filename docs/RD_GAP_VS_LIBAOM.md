@@ -1,18 +1,24 @@
 # zenrav1e RD gap vs libaom-at-slow — measurement + narrowing plan
 
-**Status:** partially closed, 2026-07-01. Three real bugs found and fixed on zenrav1e's `master`
-(unreleased): `encode_partition_topdown` never offering `PARTITION_HORZ`/`VERT`, `sse_h_edge`'s
-wrong-axis `deblock_size` call, and `rdo_tx_type_decision`'s overly-aggressive first-iteration
-early-exit — see "Fixed 2026-07-01" below. Median BD-rate vs libaom-slow improved **+5.7% →
-+2.1%** (same corpus/methodology throughout, narrower than the canonical 2026-06-30 headline —
-see the caveat in that section). A bigger, **still-open, blocked** structural gap was also found:
-6 of AV1's 10 partition types are never attempted by the RDO search at any speed — a prototype
-hit an unresolved bitstream-conformance bug and was reverted (zenrav1e#26). CfL search-widening,
-filter_intra, tx-depth widening, and widening ravif's `partition_range` speed heuristic to unlock
+**Status:** partially closed, 2026-07-01 — median BD-rate vs libaom-slow improved **+5.7% →
++2.1%** (~63% relative reduction), all concretely-identified levers now tried. This is the best
+achieved via every lever found so far, **not** a claim that true parity (≤0%) is unreachable —
+see "Honest final status" at the end of this section for what would need to happen to close the
+remaining gap, and re-run `scripts/rd_gap/` after any future zenrav1e change to check.
+
+Three real bugs found and fixed on zenrav1e's `master` (unreleased): `encode_partition_topdown`
+never offering `PARTITION_HORZ`/`VERT`, `sse_h_edge`'s wrong-axis `deblock_size` call, and
+`rdo_tx_type_decision`'s overly-aggressive first-iteration early-exit — see "Fixed 2026-07-01"
+below. A bigger, **still-open, blocked** structural gap was also found: 6 of AV1's 10 partition
+types are never attempted by the RDO search at any speed — a prototype hit an unresolved
+bitstream-conformance bug and was reverted (zenrav1e#26). CfL search-widening, filter_intra,
+tx-depth widening, and widening ravif's `partition_range` speed heuristic to unlock
 `BLOCK_32X32`/`64X64` were all tried and ruled out; perceptual-tune parity was verified as
-already-real and already-active (no further headroom there) — see "Credible narrowing levers".
-This doc records the measured gap, the levers tried (fixed, rejected, verified, or blocked), and
-the repeatable harness (`scripts/rd_gap/`) for tracking progress as we close it.
+already-real and already-active (no further headroom there); the `rdo_tx_decision` high-quality
+gate was found to be a real, large win that was deliberately not adopted (breaks the matched-
+speed comparison basis) — see "Credible narrowing levers". This doc records the measured gap,
+the levers tried (fixed, rejected, verified, blocked, or found-but-declined), and the repeatable
+harness (`scripts/rd_gap/`) for tracking progress as we close it.
 
 ## The gap (measured 2026-06-30)
 
@@ -413,11 +419,102 @@ and raw numbers.
    between aomenc and zenrav1e on shared test images (now tooled via `inspect_diff.sh` — extend to
    mode-level/RD-level instrumentation, not just block-size histograms), since the remaining
    residual after all of the above may be diffuse (many small refinements) rather than localized
-   to one tool.
+   to one tool. **2026-07-01: aggregated the bit-cost breakdown across 8 photos (up from 3) — this
+   found the `rdo_tx_decision` speed-gate below, no other single element stood out beyond what's
+   already fixed/ruled out.**
+6b. **Found: `rdo_tx_decision`'s `!high_quality` gate disables ALL tx-size/type RDO above -Q ~78
+   — real win, but not adopted (speed/matched-comparison tradeoff, user call).** Distinct from
+   the already-fixed tx-type first-iteration early-exit (that was premature abandonment *within*
+   a running search; this is a switch that prevents the search from starting at all, for the
+   upper third of this project's tested -Q range). Tested removing the gate: **median -5.7%
+   bytes (mean -8.8%) AND slightly better ssim2 simultaneously** at -Q 80-95 (n=19 photos per
+   point) — a dominant improvement, not a quality-for-size trade. But it costs **~7.5x more
+   encode time** in that band (measured 14-23s vs 2-3s per photo), which exceeds libaom's own
+   cpu-used=2 reference time on a comparable image (~8.5s measured directly) — adopting it as the
+   default would mean the BD-rate comparison is no longer at matched speed, undermining the
+   premise the whole investigation is built on. Profiled (perf, debug symbols): ~95%+ of the
+   added time is legitimate RD-search cost (`encode_tx_block` transform+quantize+entropy-cost
+   estimate per candidate, `quantize_with_qm`, coefficient-context modeling) — not waste, no
+   inefficiency to fix. Tile-based multi-threading doesn't offer a free win either: at this image
+   size/quality, `min_tile_size` doubling at `high_quality` makes the tile-count formula
+   `threads.min((w*h)/min_tile_size²)` compute to 0 extra tiles — already single-tile/single-
+   thread by design (forcing more tiles trades compression efficiency for speed, a different
+   cost). A cheap pre-screening heuristic to prune RD candidates before full costing could reduce
+   the time cost, but risks reintroducing exactly the premature-pruning bug class already found
+   and fixed twice this session — not attempted without measuring it in isolation first, and not
+   built speculatively. **Decision (user, 2026-07-01): leave the default unchanged** — the
+   existing public `with_rdo_tx_decision(Option<bool>)` builder already gives users an explicit
+   opt-in for this quality/speed tradeoff; no new API needed. Diagnostic edit reverted, not
+   landed. Does not move the measured BD-rate number. See
+   `benchmarks/rd_gap_txdecision_2026-07-01.tsv`.
 
 **Explicitly NOT on the list:** deltaq/VAQ/trellis (rejected), EPT/NSDT (video-only gains, don't
 transfer to stills — `AVIF_LEARNINGS §1`), learning-based intra / GPU search (out of scope for
 zenrav1e's design), CDEF/restoration tuning (ruled out 2026-07-01, see confirmed findings).
+
+## Honest final status (2026-07-01, end of this investigation)
+
+**Measured: +2.1% median BD-rate (+2.9% mean) vs libaom-slow, photos only, matched speed
+(cpu-used=2). Started at +5.7% — a ~63% relative reduction. The ≤0% (true parity) goal is NOT
+yet met.** This is the state after exhausting every concretely-identified lever this session,
+not a ceiling on what's possible — three real bugs were found by the same methodology
+(per-block/per-syntax-element bitstream diffing against libaom via `inspect_diff.sh`) that's
+still available to point at new hypotheses.
+
+**Fixed and landed (zenrav1e `master`, unreleased):**
+- `encode_partition_topdown` never offered `PARTITION_HORZ`/`VERT` (665e58e4)
+- `sse_h_edge` passed the wrong axis to `deblock_size` (dc0a1165)
+- `rdo_tx_type_decision`'s first-iteration early-exit (6b3b0493)
+
+**Landed, cosmetic/enabling (ravif `main`):**
+- Widened speed-2 `non_square_partition_max_threshold` to `BLOCK_64X64` (b4853c68) — required by
+  the topdown fix to have any effect.
+
+**Ruled out with measured evidence (tried, regressed or no effect, reverted):**
+- CfL alpha-search widening (SSE-only cost model, not RD-aware)
+- `partition_range` widening to unlock `BLOCK_32X32`/`64X64` (regresses — same RD-cost-model
+  accuracy limitation)
+- `rdo_tx_depth` widening past 2 (hits a normative AV1 spec limit, not a heuristic)
+- filter_intra enablement (re-confirmed zenrav1e#5's severe pre-existing regression is still
+  live)
+
+**Confirmed real and already fully captured (no code change, no headroom):**
+- Perceptual tune (`Tune::Psychovisual`) — verified a genuine ~9.5% median BD-rate win over
+  plain SSE-RDO, already the active default in every measurement.
+
+**Found real, deliberately not adopted (user decision — preserves matched-speed comparison):**
+- `rdo_tx_decision`'s `!high_quality` gate — real -5.7%/+quality win at -Q80-95, but costs ~7.5x
+  encode time, pushing zenrav1e past libaom's own reference speed in that band. Available via
+  the existing `with_rdo_tx_decision` opt-in for users who want it; not the default.
+
+**Blocked (highest remaining upside if unblocked):**
+- Extended partition types (`HORZ_A/B`, `VERT_A/B`, `HORZ_4`/`VERT_4`) — 10-13% area share on
+  libaom's side, 0% on zenrav1e's, at any speed. A working prototype hit an unresolved bitstream-
+  conformance bug (`aomdec` rejects the output as corrupt) and was reverted rather than shipped
+  broken. See [zenrav1e#26](https://github.com/imazen/zenrav1e/issues/26) for the full
+  bisection and what's not yet tried.
+
+**Explicitly out of scope (photos-only goal):**
+- Palette mode — ~0% effect on photos, a real win only for screen content.
+
+**Why the remaining +2.1% is likely diffuse, not one more missing lever:** the 8-photo aggregate
+bit-cost breakdown (`inspect_diff.sh` + `analyze_inspect_diff.py`) shows no single unexplained
+syntax element beyond what's now accounted for above — `av1_read_tx_type`'s residual gap traces
+to the `rdo_tx_decision` gate (declined); `read_segment_id` is a known cross-encoder segmentation-
+approach artifact; `read_filter_intra_mode_info` is the known-broken, ruled-out feature; the
+remaining items (`read_intra_mode`, `read_angle_delta`, `read_golomb`, uv-mode signaling) are each
+under 1 percentage point of total bits and individually small enough that chasing each is unlikely
+to be worth the investigation cost relative to the likely yield — consistent with the doc's own
+prediction that the residual is "an aggregate of many small RDO/heuristic refinements accumulated
+in libaom over years... harder to close than a single lever."
+
+**What would actually move the needle from here:** resolving the extended-partition-types
+conformance bug (zenrav1e#26) is the single highest-value remaining lever if someone picks it up
+with a fresh diagnostic angle — the doc's bisection notes what's already been ruled out. Beyond
+that, closing the rest would likely require either accepting the `rdo_tx_decision` speed cost (a
+scope/priority call, not a bug fix) or a broader RDO-cost-model accuracy improvement (the same
+root cause behind both the CfL-widening and partition-range-widening regressions) rather than a
+single discrete fix.
 
 ## The harness — `scripts/rd_gap/`
 

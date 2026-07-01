@@ -1,0 +1,71 @@
+# Measured impact of removing ravif's `!high_quality` gate on `rdo_tx_decision` (currently
+# disables ALL tx-size/type RDO search above -Q ~78, ravif/ravif/src/av1encoder.rs:1571). See
+# docs/RD_GAP_VS_LIBAOM.md "Credible narrowing levers" lever 6 for the writeup. RESULT: real,
+# large win on size+quality, but at a large encode-time cost that breaks the matched-speed
+# comparison basis this whole investigation is built on. DECISION (user call, 2026-07-01): leave
+# the default as-is; the finding is documented here and the existing `with_rdo_tx_decision`
+# override already gives users an opt-in path. Does not move the /goal's measured BD-rate number
+# (harness uses default knobs only).
+#
+# What this gate is: `rdo_tx_decision: Some(speed <= 4 && !high_quality)` where
+# `high_quality = quantizer < 80` (~cavif -Q 78 and above). When false, `rdo_tx_size_type_
+# with_filter_intra` (rdo.rs:788-871) returns the DCT_DCT/max-rect-size default immediately
+# (rdo.rs:824's early return) -- zero tx-size/type RDO for any block, at any size, across
+# -Q 78-95 (confirmed via agent source trace, distinct from the already-fixed tx-type
+# first-iteration early-exit -- that bug was premature abandonment *within* a running search;
+# this is a deliberate switch that prevents the search from *starting* at all in this range).
+#
+# Harness: scripts/rd_gap/run_gap.sh, zenrav1e-only (direct isolation vs current master),
+# cavif -s2, 19-photo corpus (family 7 excluded), Q={80,85,90,95} (the affected range only).
+# "master" = current master, unmodified (search OFF above -Q78, the shipped default);
+# "txdec_always_on" = master + the diagnostic-only edit dropping `&& !high_quality` (reverted
+# after measuring, never landed).
+#
+# Correctness: verified before measuring -- aomdec-clean + zenavif roundtrip clean on 3 photos
+# (family-7 screen content timed out during the smoke test at high Q -- consistent with the
+# search genuinely trying far more candidates on flat/synthetic content; out of scope for the
+# photos-only goal, not investigated further), pixel diff in normal lossy range (mean abs
+# 0.91-2.00).
+#
+# Direct isolation, bpp %change (txdec_always_on vs master) + ssim2 delta at matched -Q, n=19
+# photos per point (- = fewer bytes AND/OR + ssim2 = quality gain; this is NOT a quality-for-
+# size tradeoff, both improve together):
+q	median_bpp_pct	mean_bpp_pct	median_ssim2_delta	median_enc_time_ratio
+80	-7.405	-10.061	0.5231	7.425
+85	-5.237	-9.318	0.3077	7.616
+90	-4.264	-8.641	0.2362	7.736
+95	-4.000	-7.322	0.1013	7.505
+#
+# Overall (Q80-95, n=76): median bpp %chg = -5.659, mean = -8.836. Median encode-time ratio =
+# 7.565x, mean = 7.559x.
+#
+# Absolute encode time (o_1015, 1024x768 photo, master vs txdec_always_on):
+#   -Q80: 1958ms -> 14235ms   -Q85: 2107ms -> 16977ms   -Q90: 2467ms -> 19502ms   -Q95: 3100ms -> 23354ms
+# Reference: libaom cpu-used=2 (the "matched speed" baseline this whole investigation compares
+# against) measured directly on the same image at a comparable quality point: ~8.5s. The
+# txdec_always_on build EXCEEDS this reference by ~2-3x in the affected band -- adopting it as
+# the default would mean the BD-rate comparison is no longer at matched speed; the improvement
+# would come partly from spending more compute than the baseline it's measured against, not
+# purely from closing a completeness gap at equal effort.
+#
+# Profiling (perf record, debug symbols, Q90/o_1015, txdec_always_on build): ~95%+ of the added
+# time is legitimate RD-search cost, not waste -- encode_tx_block 40% self (forward transform +
+# quantize + entropy-context cost estimate per candidate), quantize_with_qm 13%, coefficient-
+# context modeling (get_nz_map_ctx/contexts) ~13%. No inefficiency to fix; the cost is inherent
+# to evaluating more tx-size x tx-type candidates per block. Tile-based multi-threading does not
+# offer a free win at this image size/quality either: zenrav1e's tile count is
+# threads.min((w*h)/min_tile_size^2), and min_tile_size doubles at high_quality (to 2048),
+# so a ~1MP image computes to 0 extra tiles (already single-tile/single-thread by design --
+# forcing more tiles would trade compression efficiency for speed, a different cost).
+#
+# CONCLUSION: real, measured, dominant (not tradeoff) improvement on size+quality, but the
+# mechanism costs ~7.5x encode time in the affected band with no algorithmic speedup available
+# without either (a) accepting a tile-parallelism compression-efficiency loss, or (b) a cheap
+# pre-screening heuristic to prune RD candidates before full costing -- which risks reintroducing
+# exactly the class of premature-pruning bug already found and fixed twice this session (topdown
+# partition candidates, tx-type first-iteration early-exit). Given that risk, no such heuristic
+# was attempted without measuring it in isolation first, and it was not built speculatively.
+# DECISION: leave the default (`&& !high_quality`) unchanged -- preserves the matched-speed
+# comparison basis for the /goal's BD-rate number. The existing public `with_rdo_tx_decision`
+# builder method already gives users an explicit opt-in for this quality/speed tradeoff; no new
+# API needed. Diagnostic edit reverted, not landed. Does not move the +2.1% median BD-rate figure.
