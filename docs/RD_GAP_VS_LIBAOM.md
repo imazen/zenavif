@@ -8,7 +8,8 @@ early-exit — see "Fixed 2026-07-01" below. Median BD-rate vs libaom-slow impro
 see the caveat in that section). A bigger, **still-open, blocked** structural gap was also found:
 6 of AV1's 10 partition types are never attempted by the RDO search at any speed — a prototype
 hit an unresolved bitstream-conformance bug and was reverted (zenrav1e#26). CfL search-widening,
-filter_intra, and tx-depth widening were all tried and ruled out (see "Credible narrowing
+filter_intra, tx-depth widening, and (most recently) widening ravif's `partition_range` speed
+heuristic to unlock `BLOCK_32X32`/`64X64` were all tried and ruled out (see "Credible narrowing
 levers"). This doc records the measured gap, the levers tried (fixed, rejected, or blocked), and
 the repeatable harness (`scripts/rd_gap/`) for tracking progress as we close it.
 
@@ -201,6 +202,57 @@ BLOCK_16X4 + BLOCK_8X32 + BLOCK_32X8 + BLOCK_16X64 + BLOCK_64X16` (the sizes onl
 sizing overlaps with plain HORZ/VERT block sizes so isn't separately visible in a block-size
 histogram — would need mode-decision-level instrumentation to isolate, not yet done.
 
+## RULED OUT, 2026-07-01: `BLOCK_32X32`/`BLOCK_64X64` at 0% usage — explained, not a bug, widening regresses
+
+Same inspect-diff methodology surfaced a second block-size anomaly: `BLOCK_32X32` and
+`BLOCK_64X64` sit at **exactly 0.00%** for zenrav1e on **3/3** tested photos (o_1015, o_2012,
+o_5004), vs libaom's 4–19% each — a large, consistent gap that looked like a third
+search-completeness bug in the same family as the topdown fix. **It isn't.**
+
+**Root cause (not a bug):** `encode_partition_topdown` and `rdo_partition_decision` handle
+`PARTITION_NONE` at large block sizes correctly when reached — the candidate list construction
+and RD-cost computation (`rdo_partition_none`, `rdo.rs:2034-2047`) are both complete. The actual
+gate is `must_split = is_square && (bsize > fi.partition_range.max || !has_cols || !has_rows)`
+(`encoder.rs:3272-3273`): when true, `PARTITION_SPLIT` is forced with **no candidate list built
+at all**. `fi.partition_range.max` isn't zenrav1e's own default — it's set by the *consuming*
+crate `ravif`'s `SpeedTweaks::from_my_preset` (`ravif/ravif/src/av1encoder.rs:1546-1553`), a
+deliberate 2021/2022 upstream tuning table:
+```rust
+partition_range: Some(match speed {
+    0 => (4, 64.min(max_block_size)),
+    1 if low_quality => (4, 64.min(max_block_size)),
+    2 if low_quality => (4, 32.min(max_block_size)),
+    1..=4 => (4, 16),           // <- speed 2, non-low-quality: this is the branch our
+    5..=8 => (8, 16),              sweep range (ssim2 70-92) mostly falls into
+    _ => (16, 16),
+}),
+```
+`low_quality = quantizer > 150`, `high_quality = quantizer < 80` (`max_block_size = 16` if
+`high_quality` else `64`). At speed 2 with anything but an aggressive/low quality target, this
+falls through to `(4, 16)` — structurally excluding 32x32/64x64 `NONE` regardless of content.
+Confirmed via `git log -p` on ravif: long-standing, deliberate, not an oversight. `zenavif`
+already mirrors and exposes this as an overridable expert knob (`override_partition_range`,
+`src/expert.rs:110`).
+
+**Tested anyway** (per this project's measure-before-deciding discipline): widened the
+speed-2/non-low-quality branch to `(4, 64.min(max_block_size))` (matching the low-quality
+branch), rebuilt, verified no corruption (5 photos aomdec-clean + zenavif roundtrip clean,
+pixel diff in normal lossy range), then measured direct isolation vs the unwidened build on the
+same 22-image corpus/Q-grid (`benchmarks/rd_gap_partitionrange_widen_2026-07-01.tsv`):
+
+**RESULT: regression.** At matched quantizer (not matched quality), the affected quality band
+(-Q 50–75, where `high_quality`'s clamp doesn't neutralize the change) costs **+1.4% to +1.8%
+more bytes** (median) for **~0 ssim2 change** (mean −0.08, i.e. not even a quality trade) — and
+**24–36% slower encode** in that band. 17/19 photos at -Q 60 got strictly worse; only 2 improved
+marginally. Root cause: unlike the topdown HORZ/VERT fix (pure addition, safe by construction),
+enabling large-block `NONE` isn't free — `rdo_partition_none`'s RD-cost estimate at 32x32/64x64
+apparently doesn't reliably reflect true bit cost on this corpus, so the search sometimes picks
+a large block its cost model likes but that actually costs more to encode. Same root-cause shape
+as the CfL-widening finding (RD-cost-model accuracy, not search completeness). **Reverted**
+(`ravif` restored to `b4853c68`, not landed). A real fix would need to improve the RD-cost
+estimate itself at large block sizes, not just permit more candidates for the existing one —
+larger, not attempted.
+
 **2026-07-01 attempt: implemented HORZ_4/VERT_4, found 2 real bugs (both fixed and landed),
 blocked by a 3rd (unresolved), reverted.** Wiring HORZ_4/VERT_4 into the dispatch/geometry/
 candidate-list surfaced two independent, genuine pre-existing bugs, both fixed regardless of
@@ -271,8 +323,10 @@ and raw numbers.
 5. **Update 2026-07-01: two real search-completeness bugs found and fixed (topdown partition,
    tx-type early-exit), cutting the median BD-rate gap from +5.7% to +2.1% (~63% relative).**
    Palette (~0% on photos), CDEF (noise), loop restoration (noise), tx-type *coverage*
-   (spec-complete), CfL search depth (SSE-only, widening doesn't help), and filter_intra
-   (severe pre-existing regression, unresolved) are all ruled out or blocked as further levers.
+   (spec-complete), CfL search depth (SSE-only, widening doesn't help), large-block
+   `partition_range` widening (RD-cost estimate at 32x32/64x64 not reliable enough to trust with
+   a wider range — regresses), and filter_intra (severe pre-existing regression, unresolved) are
+   all ruled out or blocked as further levers.
    Extended partition types remain the single largest still-open lever (10-13% area share) if
    its conformance bug gets resolved (zenrav1e#26). Beyond that: likely an aggregate of many
    small RDO/heuristic refinements accumulated in libaom over years (coefficient cost estimation
@@ -322,6 +376,16 @@ and raw numbers.
    fix needs `enable_filter_intra` decoupled from `prediction_modes` entirely, then bisecting the
    filter_intra RDO cost path itself — not attempted (time-boxed). See the reconfirmation comment
    on zenrav1e#5.
+3c. ~~Widen ravif's `partition_range` speed-2 heuristic to unlock BLOCK_32X32/64X64~~ **RULED
+   OUT, 2026-07-01.** See "RULED OUT... BLOCK_32X32/BLOCK_64X64" section above for the full
+   root-cause + measurement. Explains (doesn't fix) the 0%-large-block inspect-diff anomaly:
+   ravif's `SpeedTweaks::from_my_preset` caps `partition_range=(4,16)` at speed 2 for
+   non-low-quality targets, a deliberate 2021/2022 heuristic, not a bug. Widening it to `(4,
+   64.min(max_block_size))` regressed: +1.4-1.8% median bpp at ~0 ssim2 change in the affected
+   quality band (-Q 50-75), 24-36% slower encode, 17/19 photos worse at -Q 60 (not a mixed bag).
+   See `benchmarks/rd_gap_partitionrange_widen_2026-07-01.tsv`. Root cause: same shape as CfL
+   widening — `rdo_partition_none`'s RD-cost estimate at large sizes isn't reliable enough to
+   trust with a wider candidate range on this corpus. **Reverted, not on master.**
 4. **Implement palette mode in zenrav1e** (scoped: screen-content win, ~zero photo-gap effect —
    see confirmed findings above). Substantial encoder feature: color quantization (k-means per
    candidate block/plane), RD-gated size search (2-8), bitstream signaling (palette colors + index

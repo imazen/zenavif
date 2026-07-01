@@ -1,0 +1,69 @@
+# Measured impact of widening ravif's speed-2 partition_range from (4,16) to
+# (4, 64.min(max_block_size)) for the non-low-quality branch (ravif/ravif/src/av1encoder.rs,
+# SpeedTweaks::from_my_preset). See docs/RD_GAP_VS_LIBAOM.md "Credible narrowing levers" for
+# the writeup. RESULT: REGRESSION, reverted, not landed.
+#
+# Motivation: inspect-diff (scripts/rd_gap/inspect_diff.sh) showed zenrav1e at exactly 0.00%
+# BLOCK_32X32/BLOCK_64X64 usage on 3/3 tested photos at cavif -Q 65 -s2, vs libaom's 4-19%
+# each -- looked like a 3rd search-completeness bug in the same family as the topdown
+# HORZ/VERT fix and tx-type early-exit fix. Root-cause investigation (agent a83d552d5f2016502)
+# found it is NOT a bug: encode_partition_topdown's candidate-list construction and
+# rdo_partition_decision's NONE arm both handle large blocks correctly when reached: the gate
+# is `partition_range.max`, set by ravif's SpeedTweaks::from_my_preset (a deliberate 2021/2022
+# upstream heuristic), which caps speed 1-4 non-low-quality (quantizer<=150, i.e. most of this
+# project's mid/high-quality sweep range) to (4, 16) -- structurally excluding 32x32/64x64 NONE
+# candidates for exactly the quality range this investigation targets. Hypothesis: widening it
+# (matching the low_quality branch's more permissive range) might recover some of libaom's
+# large-flat-region efficiency. Tested empirically rather than assumed, per this project's
+# "measure before deciding" discipline (same as the CfL-widening experiment).
+#
+# Harness: scripts/rd_gap/run_gap.sh, zenrav1e-only (no libaom needed for direct isolation),
+# cavif -s2, 22-image sample_images.tsv corpus (19 photos + 3 family-7 screen-content excluded
+# from analysis), 12-point Q grid {30,40,50,55,60,65,70,75,80,85,90,95}. "prewiden" = current
+# master (665e58e4 + dc0a1165 + 6b3b0493, unwidened, (4,16) for speed2/non-low-quality);
+# "postwiden" = prewiden + the widen edit ((4, 64.min(max_block_size))). Direct comparison at
+# matched cavif -Q (NOT matched ssim2 -- both sides hit the same quantizer, so this isolates the
+# encoder's own bit-cost decision, not a bitrate-vs-quality tradeoff).
+#
+# Correctness: verified before measuring -- 5 photos aomdec-decoded clean + zenavif's own
+# decoder (rav1d-safe) roundtrip clean, pixel diff vs source in normal lossy range (mean abs
+# 1.85-3.40, matching the 2.4 baseline cited for the topdown fix). No corruption.
+#
+# Direct isolation, bpp change (postwiden vs prewiden) at matched -Q, + = postwiden needs MORE
+# bytes (worse), n=19 photos per point:
+q	median_bpp_change_pct	mean_bpp_change_pct	median_enc_time_ratio	note
+30	0.000	0.000	1.017	low_quality branch, unaffected (unchanged code path)
+40	0.000	0.000	0.991	low_quality branch, unaffected (unchanged code path)
+50	1.564	1.145	1.284	affected band
+55	1.376	1.237	1.237	affected band
+60	1.771	1.665	1.294	affected band
+65	1.402	1.333	1.309	affected band
+70	1.442	1.597	1.336	affected band
+75	1.363	1.313	1.359	affected band
+80	0.000	0.000	0.973	high_quality branch clamps max_block_size=16, unaffected (identical to pre-widen)
+85	0.000	0.000	1.006	high_quality branch clamps max_block_size=16, unaffected (identical to pre-widen)
+90	0.000	0.000	0.989	high_quality branch clamps max_block_size=16, unaffected (identical to pre-widen)
+95	0.000	0.000	0.985	high_quality branch clamps max_block_size=16, unaffected (identical to pre-widen)
+#
+# Overall (photos only, n=228 image*q pairs): median bpp %chg = 0.000, mean = +0.691%
+# Overall encode-time ratio (widened/master): median = 1.074x, mean = 1.136x (up to 1.36x in
+# the affected band alone)
+# ssim2 delta (postwiden - prewiden) at matched -Q: median = 0.0000, mean = -0.0796 (i.e. not
+# even a quality trade -- same or very slightly worse quality for more bytes)
+#
+# Per-image spread at q60 (the affected band): 17/19 photos WORSE (more bytes), only 2 slightly
+# better (-1.658%, -0.456%) -- NOT a mixed bag that nets out negative, a broad, consistent
+# regression. Several images (e.g. o_5016: +1.876% bytes AND ssim2 79.4->72.7, a real quality
+# drop) are lose-lose: more bytes for measurably worse quality.
+#
+# CONCLUSION: REGRESSION, not a bug fix. Widening the RDO candidate list at large block sizes is
+# NOT free-by-construction here (unlike the topdown HORZ/VERT fix, which added candidates without
+# touching any existing decision) -- rdo_partition_none's RD cost estimate at 32x32/64x64
+# apparently systematically underestimates true bit cost relative to smaller blocks on this
+# photo corpus, so allowing the search to pick NONE there sometimes picks a worse option it
+# scores as better. Same root-cause shape as the CfL-widening finding (SSE/RD-cost-model
+# accuracy limits, not search-completeness). A real fix would need to improve the large-block
+# RD cost estimate itself, not just permit more candidates -- larger, not attempted.
+# REVERTED (ravif src/av1encoder.rs restored to b4853c68, the pre-experiment state). Ruled out
+# as a lever; the 0% BLOCK_32X32/64X64 measurement is explained (a real, deliberate, correctly-
+# calibrated-as-is speed heuristic) but does not translate into a usable win.
