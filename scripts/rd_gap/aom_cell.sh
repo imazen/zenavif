@@ -12,6 +12,7 @@ AOMDEC="${AOMDEC:?set AOMDEC to a libaom aomdec build}"
 SCORER="${SCORER:?set SCORER to fast-ssim2-cli}"
 COLOR="${COLOR:-$(cd "$(dirname "$0")" && pwd)/color.py}"
 CPU="${AOM_CPU:-2}"
+EXTRA="${AOM_EXTRA:-}"
 
 IMG="$1"; W="$2"; H="$3"; FAM="$4"; FMT="$5"; CQ="$6"; TMP="$7"
 PX=$((W*H)); base=$(basename "$IMG" .png)
@@ -28,7 +29,7 @@ esac
 obu="$TMP/${base}.${FMT}.q${CQ}.obu"; decy="$TMP/${base}.${FMT}.q${CQ}.dec.y4m"; decp="$TMP/${base}.${FMT}.q${CQ}.dec.png"
 t0=$(date +%s.%N)
 "$AOMENC" --cpu-used="$CPU" --end-usage=q --cq-level="$CQ" $IN --passes=1 --lag-in-frames=0 \
-  --color-primaries=bt709 --transfer-characteristics=srgb $MC --output="$obu" "$y4m" > "$TMP/${base}.${FMT}.enc.log" 2>&1
+  --color-primaries=bt709 --transfer-characteristics=srgb $MC $EXTRA --output="$obu" "$y4m" > "$TMP/${base}.${FMT}.enc.log" 2>&1
 rc=$?; t1=$(date +%s.%N)
 enc_ms=$(python3 -c "print(f'{($t1-$t0)*1000:.1f}')")
 [ $rc -ne 0 ] && { echo "ENCFAIL libaom $FMT $CQ rc=$rc $(tail -1 "$TMP/${base}.${FMT}.enc.log")"; exit 1; }

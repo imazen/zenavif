@@ -1,0 +1,27 @@
+# libaom tool-ablation on the PHOTO gap — after palette ruled out (see
+# rd_gap_palette_ablation_2026-07-01.tsv), tests whether CDEF or loop restoration (the two
+# other headline AV1 in-loop-filter tools) explain the ~8-18% photo gap in
+# docs/RD_GAP_VS_LIBAOM.md. Same corpus/settings as the palette ablation, format 420,
+# cpu-used=2. 21/22 images (o_7002 timed out mid-run, not needed for the photo question).
+# Harness: scripts/rd_gap/tool_ablation.sh + analyze_tool_ablation.py (zenavif bcb3874fbb92).
+# libaom: git 632172a4 (aomenc 3.14.1). Scorer: fast-ssim2-cli v0.6.0.
+# + = disabling the tool costs MORE bits (i.e. the tool was helping libaom).
+# PHOTOS ONLY (families 1,2,3,5,6,8,9), matched-ssim2 frontier comparison:
+variant	target_ssim2	median_disable_cost_pct	mean_pct	n
+nocdef	82	0.2	0.5	18
+nocdef	85	0.3	0.7	18
+nocdef	88	0.3	0.8	14
+nocdef	90	-0.0	0.1	10
+norestore	82	-0.0	0.0	18
+norestore	85	-0.0	0.0	18
+norestore	88	-0.1	-0.5	14
+norestore	90	-0.0	0.3	10
+# -> Both CDEF and loop restoration (SGR+Wiener) are noise-level (<1%, no consistent sign)
+#    on this photo corpus at cpu-used=2. Neither explains the photo gap. zenrav1e already
+#    runs sgr_complexity=Full + cdef=true at s2 (speedsettings.rs), consistent with this
+#    result. The ~8-18% photo gap remains UNEXPLAINED by any single headline AV1 tool tested
+#    so far (palette, CDEF, restoration all ruled out; tx-type search for intra confirmed
+#    spec-complete by source read of RAV1E_TX_TYPES vs get_tx_set). Remaining candidates:
+#    CfL alpha-search bound (rdo_cfl_alpha uses an adaptive early-exit over +/-16, not
+#    exhaustive; unquantified), or an aggregate of many small RDO/heuristic refinements
+#    rather than one missing/incomplete feature. See RD_GAP_VS_LIBAOM.md for next steps.

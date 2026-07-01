@@ -1,0 +1,35 @@
+# libaom palette-mode ablation — isolates how much of the zenrav1e-vs-libaom RD gap
+# (docs/RD_GAP_VS_LIBAOM.md) is specifically attributable to palette mode, which zenrav1e's
+# encoder does not implement at all (write_use_palette_mode is hardcoded enable=false,
+# unreachable!() if called with true; zenrav1e#2 tracks it). Same aomenc settings/corpus as
+# the 2026-06-30 baseline, run TWICE per (image,cq): default (--enable-palette=1, implicit)
+# vs --enable-palette=0. Format 420 only. cpu-used=2. 22/22 images (o_7002 also captured
+# separately at matched-cq, see below).
+# Harness: scripts/rd_gap/palette_ablation.sh + analyze_palette_ablation.py (zenavif bcb3874fbb92).
+# libaom: git 632172a4 (aomenc 3.14.1). Scorer: fast-ssim2-cli v0.6.0.
+# + = disabling palette costs MORE bits (i.e. palette was helping libaom).
+#
+# PHOTOS (families 1,2,3,5,6,8,9; matched-ssim2 frontier comparison, n=18 at ssim2 82):
+target_ssim2	group	median_disable_palette_cost_pct	mean_pct	n
+82	photos	0.0	-0.0	18
+85	photos	0.0	-0.2	18
+88	photos	0.0	0.0	14
+90	photos	0.0	0.6	10
+# -> Palette is a NO-OP for this photo corpus: libaom's own RDO essentially never selects
+#    palette mode on photographic content in this cq range, so zenrav1e's missing palette
+#    support does NOT explain the ~8-18% photo gap. (17/18 photo images bit-identical on/off;
+#    family 9 showed a small +/-1-3% noise-level wobble, no consistent sign.)
+#
+# PLOTS (family 7 = 7000-lilith-plots synthetic screen content; matched-CQ comparison since
+# achieved ssim2 tops out ~65-70 in this cq range, below the 82-90 photo targets; n=24 = 3
+# images x 8 cq points):
+target_metric	group	median_disable_palette_cost_pct	mean_pct	min_pct	max_pct	n
+matched_cq	plots	51.8	54.5	22.4	102.9	24
+# -> On screen content, disabling palette costs a median +51.8% (up to +103%) more bytes at
+#    essentially the SAME achieved ssim2 (median delta -0.24, i.e. disabling palette is never
+#    a quality-for-rate trade here, strictly worse). Palette mode is the dominant explanation
+#    for the +130-470% fam7 gap in the 2026-06-30 baseline.
+#
+# CONCLUSION: palette-mode implementation in zenrav1e would be a large, clear win for
+# screen-content/synthetic AVIF encodes and ~zero measured effect on the photo gap. Priority
+# depends on whether screen content is part of the target traffic mix (see RD_GAP_VS_LIBAOM.md).

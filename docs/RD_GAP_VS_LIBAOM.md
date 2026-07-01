@@ -70,29 +70,73 @@ From `EXPERIMENTS-SURVEY-2026-05-17.md` + `AVIF_LEARNINGS.md §1`:
 plateau is documented across multiple prior experiments. New work must target the search-completeness
 ceiling instead.
 
-## Credible narrowing levers (priority order)
+## Confirmed findings (2026-07-01 audit — supersedes the "verify" framing below)
 
-The gap is a search-completeness ceiling (s1==s2, gap widens as libaom deepens). The levers are about
-finding RD the current best-speed search leaves on the table — measurement-first, per `AVIF_LEARNINGS §1`.
+Source-read + measured, not hypothesized. See `scripts/rd_gap/palette_ablation.sh` +
+`tool_ablation.sh` and `benchmarks/rd_gap_{palette,tool}_ablation_2026-07-01.tsv` for the harness
+and raw numbers.
 
-1. **Best-speed RDO completeness audit (highest priority, measurement not new code).** At zenrav1e's
-   slowest (s2), verify that **palette search, CfL parameter scan, and transform-kernel selection** are
-   not early-terminated where a fuller search would find bytes. libaom at cpu-used=0 does more of this;
-   zenrav1e may be shortcutting it even at s2. Probe with the harness's per-knob forced-on mode.
-2. **Investigate the s1==s2 clamp.** zenrav1e refuses to search deeper than s2. If that ceiling is an
-   artificial clamp rather than true convergence, exposing a deeper mode (fuller partition-RD /
-   tx-type / CfL search) could recover RD. Note bottom-up partition search was already rejected (zero
-   effect), so the lever is tx-kernel / CfL / palette *thoroughness*, not partition *order*.
-3. **Perceptual-tune parity.** aomenc gains from `--tune=ssimulacra2` (not used here, to stay fair);
-   zenrav1e's psy-tune "already covers VAQ." Verify psy-tune is competitive with libaom's default at
-   matched ssim2, and evaluate an ssimulacra2-aware tune. (Hypothesis — measure before building.)
-4. **Palette-RDO thoroughness for screen content.** The synthetic-content blowup (+130–470%) is partly
-   AVIF being a poor screen-content codec, but `AVIF_LEARNINGS` flags verifying palette RDO is not
-   early-terminated at speed≥6. Low priority for the photo gap; relevant if screen content matters.
+1. **Palette mode is 100% unimplemented in zenrav1e's encoder — not "early-terminated," never
+   available at any speed.** `write_use_palette_mode` (`src/context/block_unit.rs:777`) is always
+   called with `enable: false` (`src/encoder.rs:2392`); calling it with `true` hits `unreachable!()`
+   with the comment "palette mode is not implemented." Tracked since 2026-04-12 in zenrav1e#2
+   ("Filter intra + palette mode ... hits `unimplemented!()`"), still open. Default CDF tables for
+   palette size/color-index exist in `entropymode.rs` (spec-ported, e.g.
+   `default_palette_y_color_index_cdf`) but aren't wired into the live `CdfContext` struct — the
+   entropy-coding scaffolding is partial, the encoder-side search (color quantization, RD-gated size
+   2-8 selection, index-map coding) doesn't exist at all. `src/util/kmeans.rs` exists but is used
+   only for segmentation clustering, not palette color quantization.
+   - **Measured impact — libaom `--enable-palette=0` ablation, same corpus/settings as the baseline:**
+     **~0% effect on photos** (17/18 photo images bit-identical bpp with palette on vs off; the
+     18th, family 9, wobbles ±1-3% with no consistent sign — noise). **Median +51.8% (up to +103%)
+     more bytes on synthetic screen content (family 7 plots)** at matched cq / ~matched ssim2 — this
+     is the dominant explanation for the +130-470% plots gap. **Verdict: implementing palette would
+     be a large, clear win for screen-content AVIF and is NOT a lever for the photo gap.** Priority
+     depends on whether screen content is part of the target traffic mix.
+2. **Tx-type search for intra blocks is spec-complete — ruled out, not a gap.** `RAV1E_TX_TYPES`
+   (`src/transform/mod.rs:28`) contains exactly the 7 types of AV1's `TX_SET_INTRA_1` (DCT_DCT,
+   ADST_DCT, DCT_ADST, ADST_ADST, IDTX, V_DCT, H_DCT). The commented-out FLIPADST variants
+   ("TODO: Add a speed setting for FLIPADST") are real but **inter-only** — `get_tx_set`
+   (`src/context/transform_unit.rs:137`) never returns an INTER tx-set for intra blocks, so this
+   omission cannot affect AVIF (all-intra) encoding at all. No further work here for stills.
+3. **CDEF and loop restoration ruled out for the photo gap.** `--enable-cdef=0` and
+   `--enable-restoration=0` ablations on libaom (same photo corpus) both land under ±1% with no
+   consistent sign (noise-level) — neither tool is where libaom's photo-bpp advantage comes from,
+   at least not in a way a simple on/off toggle reveals. zenrav1e already runs `cdef=true` and
+   `sgr_complexity=Full` at s2 (`speedsettings.rs`), consistent with this result.
+4. **The ~8-18% photo gap (the honest headline) remains unexplained by any single tool tested so
+   far.** Palette, CDEF, and loop restoration are ruled out; tx-type search is confirmed complete.
+   The CfL alpha search (`rdo_cfl_alpha`, `src/rdo.rs:1786`) uses a bounded/adaptive early-exit
+   (scans α=1..16 per plane but breaks once `count < alpha`, i.e. after a couple of
+   non-improving steps) rather than an exhaustive scan — a plausible small remaining lever, but
+   **unquantified** (not yet ablated) and likely modest since libaom's own CfL search is also
+   bounded, not exhaustive. Leading hypothesis: the gap is an aggregate of many small RDO/heuristic
+   refinements accumulated in libaom over years (coefficient cost estimation precision, rate-control
+   qindex mapping, mode-search ordering, etc.) rather than one missing/incomplete feature — harder to
+   close than a single lever, and harder to measure via simple flag ablation.
+
+## Credible narrowing levers (priority order, updated 2026-07-01)
+
+1. **Implement palette mode in zenrav1e** (scoped: screen-content win, ~zero photo-gap effect —
+   see confirmed findings above). Substantial encoder feature: color quantization (k-means per
+   candidate block/plane), RD-gated size search (2-8), bitstream signaling (palette colors + index
+   map), `CdfContext` wiring for the already-spec-ported default CDF tables. rav1d-safe (zenavif's
+   decoder) already supports palette decode (`ipred.rs`, `recon.rs`, `safe_simd/pal.rs`), so no
+   decoder-side blocker for round-trip validation. Cross-repo work (zenrav1e) — needs explicit
+   scope sign-off before starting.
+2. **CfL alpha-search exhaustiveness ablation (cheap, do before committing to bigger photo-gap
+   work).** Quantify whether widening/removing the early-exit in `rdo_cfl_alpha` moves the photo
+   number at all before assuming it's negligible.
+3. **Perceptual-tune parity.** aomenc gains from `--tune=ssimulacra2` (not used in the baseline, to
+   stay fair); zenrav1e's psy-tune "already covers VAQ." Verify psy-tune is competitive with
+   libaom's default at matched ssim2. (Hypothesis — measure before building.)
+4. **Broader photo-gap root-causing** if 2-3 don't move the number: per-block mode-decision diffing
+   between aomenc and zenrav1e on shared test images (aomenc has stats/debug dump options), since no
+   single-tool ablation so far explains it — the remaining gap may be diffuse rather than localized.
 
 **Explicitly NOT on the list:** deltaq/VAQ/trellis (rejected), EPT/NSDT (video-only gains, don't
 transfer to stills — `AVIF_LEARNINGS §1`), learning-based intra / GPU search (out of scope for
-zenrav1e's design).
+zenrav1e's design), CDEF/restoration tuning (ruled out 2026-07-01, see confirmed findings).
 
 ## The harness — `scripts/rd_gap/`
 
