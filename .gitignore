@@ -90,7 +90,7 @@ Cargo.toml.original.txt
 # In-progress predictor sweep TSVs — final results committed after run completes
 # (with `jj --config snapshot.max-new-file-size=...`).
 benchmarks/rav1e_phase1a_*.tsv
-training/__pycache__/
+__pycache__/
 benchmarks/rav1e_phase1a_*.tsv.clean
 
 # Training intermediates — large + reproducible from TSVs

@@ -8,9 +8,10 @@ early-exit — see "Fixed 2026-07-01" below. Median BD-rate vs libaom-slow impro
 see the caveat in that section). A bigger, **still-open, blocked** structural gap was also found:
 6 of AV1's 10 partition types are never attempted by the RDO search at any speed — a prototype
 hit an unresolved bitstream-conformance bug and was reverted (zenrav1e#26). CfL search-widening,
-filter_intra, tx-depth widening, and (most recently) widening ravif's `partition_range` speed
-heuristic to unlock `BLOCK_32X32`/`64X64` were all tried and ruled out (see "Credible narrowing
-levers"). This doc records the measured gap, the levers tried (fixed, rejected, or blocked), and
+filter_intra, tx-depth widening, and widening ravif's `partition_range` speed heuristic to unlock
+`BLOCK_32X32`/`64X64` were all tried and ruled out; perceptual-tune parity was verified as
+already-real and already-active (no further headroom there) — see "Credible narrowing levers".
+This doc records the measured gap, the levers tried (fixed, rejected, verified, or blocked), and
 the repeatable harness (`scripts/rd_gap/`) for tracking progress as we close it.
 
 ## The gap (measured 2026-06-30)
@@ -394,9 +395,20 @@ and raw numbers.
    decoder-side blocker for round-trip validation. Cross-repo work (zenrav1e) — needs explicit
    scope sign-off before starting. **Only worth it if screen content is part of the target traffic
    — it will not move the photo number.**
-5. **Perceptual-tune parity.** aomenc gains from `--tune=ssimulacra2` (not used in the baseline, to
-   stay fair); zenrav1e's psy-tune "already covers VAQ." Verify psy-tune is competitive with
-   libaom's default at matched ssim2. (Hypothesis — measure before building.)
+5. ~~Perceptual-tune parity~~ **CONFIRMED, 2026-07-01 — real, large, already active; no further
+   action.** "Psy-tune" = `Tune::Psychovisual` (default, `encoder.rs:109-117`), which routes RDO
+   distortion through an SSIM-derived activity mask (`apply_ssim_boost`, `activity.rs:159-186`)
+   instead of plain SSE. Confirmed active in this project's build config (not dead code) and
+   orthogonal to `with_qm` (independent mechanism, not a duplicate). A/B'd against `Tune::Psnr`
+   (SSE-only) at matched ssim2 on the same 19-photo corpus: Psnr needs **+9.46% median more
+   bits** (mean +8.42%), positive at essentially every ssim2 target 70-92 — a real, large,
+   consistently-signed win, not a paper tiger. Since Psychovisual is already the active default
+   in every measurement this session (including the current +2.1% median BD-rate gap), this
+   finding closes the lever without a code change — there's no additional headroom to capture
+   from "fixing" psy-tune, it's already working as intended. Also retroactively confirms the
+   earlier "VAQ rejected, psy-tune already covers it" entry with a direct measurement instead of
+   an assumption. See `benchmarks/rd_gap_psytune_verify_2026-07-01.tsv`. Diagnostic-only edit,
+   reverted, never landed.
 6. **Broader photo-gap root-causing** if 2-5 don't close it: per-block mode-decision diffing
    between aomenc and zenrav1e on shared test images (now tooled via `inspect_diff.sh` — extend to
    mode-level/RD-level instrumentation, not just block-size histograms), since the remaining

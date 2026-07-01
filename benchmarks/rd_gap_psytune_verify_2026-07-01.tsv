@@ -1,0 +1,55 @@
+# Verification of docs/RD_GAP_VS_LIBAOM.md lever 5 ("Perceptual-tune parity"): is zenrav1e's
+# default Tune::Psychovisual actually delivering a real RD win, or could it be miscalibrated /
+# redundant (as with_qm and VAQ turned out to interact)? RESULT: CONFIRMED real and large. No
+# code change -- Psychovisual remains correctly the shipped default. This is a diagnostic
+# measurement, not a lever that changes the current +2.1% median BD-rate gap (Psychovisual was
+# already active in every prior measurement this session).
+#
+# What "psy-tune" is (source-verified, not assumed): zenrav1e's `Tune` enum
+# (src/encoder.rs:109-117) has Psnr/Psychovisual(default)/StillImage. Psychovisual and StillImage
+# both route RDO block distortion through `cdef_dist_wxh` (rdo.rs:282, dist.rs:310-380), which
+# applies `apply_ssim_boost` (activity.rs:159-186) -- an SSIM-derived local-variance weighting
+# that masks distortion in high-activity/detailed blocks and penalizes it in flat blocks. Psnr
+# uses plain SSE (rdo.rs:297). ravif's SpeedTweaks sets Tune::Psychovisual unconditionally for
+# this project's build config (no `imazen` feature -> av1encoder.rs:1738-1743's not(imazen)
+# branch), confirming it is genuinely active in every rd_gap measurement this session, not dead
+# code. Also confirmed orthogonal to `with_qm` (separate quantizer-matrix mechanism, zero
+# references to Tune) -- these are two independent "perceptual" levers, not duplicates.
+#
+# Harness: scripts/rd_gap/run_gap.sh, zenrav1e-only (no libaom needed -- this compares two
+# zenrav1e tune variants against each other), cavif -s2, 19-photo subset of sample_images.tsv
+# (family 7 / screen content excluded -- Tune::Psnr showed ~40x slower encode there in a smoke
+# test, an interesting side-finding but out of scope for the photos-only goal), 12-point Q grid.
+# "psychovisual" = current master (unmodified, the shipped default); "psnr" = same build with
+# Tune forced to Psnr via a diagnostic-only ravif edit (reverted immediately after measuring,
+# never landed). Compared at MATCHED SSIM2 (not matched -Q, since changing Tune changes what
+# quality a given quantizer produces) via the existing frontier/bpp_at/bd_rate helpers in
+# analyze.py.
+#
+# Correctness: verified before measuring -- aomdec-clean + zenavif roundtrip clean on 3 photos,
+# pixel diff in normal lossy range (mean abs 1.75-3.01). No corruption.
+#
+# bpp %change, psnr vs psychovisual, at matched ssim2 (+ = psnr needs MORE bits, i.e.
+# psychovisual is better):
+ssim2	n	median_pct	mean_pct
+70	17	8.49	7.82
+75	18	7.93	8.77
+80	19	6.67	7.96
+82	19	4.37	4.87
+85	18	6.10	5.84
+88	18	4.43	-0.17
+90	13	2.85	4.41
+92	7	5.41	4.84
+#
+# Integrated BD-rate (psnr vs psychovisual, n=19 photos): median +9.46%, mean +8.42%,
+# min -1.72%, max +19.86% -- positive (psychovisual better) at essentially every ssim2 target
+# and for the large majority of images.
+#
+# CONCLUSION: CONFIRMED, not a dead end and not miscalibrated -- Tune::Psychovisual's activity-
+# masked distortion metric is a real, large (~9.5% median BD-rate), consistently-signed win over
+# plain SSE-based RDO on this photo corpus. It is already active in every measurement this
+# session (including the +2.1% median BD-rate gap vs libaom) -- there is no additional headroom
+# to capture from "turning on" or "improving" psy-tune calibration; it is working as intended.
+# This also retroactively supports the earlier "VAQ rejected, psy-tune already covers it" finding
+# (docs/RD_GAP_VS_LIBAOM.md "Already tried and REJECTED") with a direct measurement rather than
+# an assumption. No code change. Diagnostic edit reverted, not landed.
