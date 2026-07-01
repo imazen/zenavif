@@ -169,6 +169,27 @@ BLOCK_16X4 + BLOCK_8X32 + BLOCK_32X8 + BLOCK_16X64 + BLOCK_64X16` (the sizes onl
 sizing overlaps with plain HORZ/VERT block sizes so isn't separately visible in a block-size
 histogram — would need mode-decision-level instrumentation to isolate, not yet done.
 
+**2026-07-01 attempt: implemented HORZ_4/VERT_4, found 2 real bugs (both fixed and landed),
+blocked by a 3rd (unresolved), reverted.** Wiring HORZ_4/VERT_4 into the dispatch/geometry/
+candidate-list surfaced two independent, genuine pre-existing bugs, both fixed regardless of
+this feature's fate:
+- A second hardcoded dispatch gap in `rdo_partition_decision` (same shape as the topdown fix).
+- **`dc0a1165`** (landed on `master`): `sse_h_edge` passed the wrong axis to `deblock_size`
+  (mismatching `filter_h_edge`'s own convention) — harmless for every previously-reachable tx
+  shape (masked by a `min(14, ...)` cap), but produces an out-of-bounds filter reach for
+  extreme-aspect tx like `TX_16X4`. Verified safe standalone on the full 22-image corpus.
+
+But even after both fixes, **encodes using HORZ_4/VERT_4 produce a bitstream libaom's own
+reference decoder (`aomdec`) rejects as corrupt** (`Corrupted segment_ids` / `Failed to decode
+tile data`) — rav1d-safe silently decodes it anyway (wrong per spec, no error), which is the
+worst case for this project's zero-corruption-tolerance bar. Root cause not found despite ruling
+out segmentation (any level, or fully disabled — "segment_ids" in the error is a red herring),
+CDEF/restoration (inactive at the tested quality regardless), and the angle-delta search
+(disabling it didn't help; cross-checked the `bsize >= BLOCK_8X8` angle-delta gate against
+libaom's `av1_use_angle_delta` — identical logic in both codebases, likely spec-conformant).
+**Reverted** (not on master) rather than ship a known-corrupt path. Full writeup + what's not
+yet tried: [zenrav1e#26 comment](https://github.com/imazen/zenrav1e/issues/26#issuecomment-4854718037).
+
 ## Confirmed findings (2026-07-01 audit — supersedes the "verify" framing below)
 
 Source-read + measured, not hypothesized. See `scripts/rd_gap/palette_ablation.sh` +
@@ -227,14 +248,21 @@ and raw numbers.
    2026-07-01" above. −1.8 to −2.8% median bpp at ssim2 70-85, BD-rate gap +5.7%→+3.6% median
    (narrower methodology; see caveat above). Unreleased.
 2. **Implement the 6 extended partition types** (`HORZ_A/B`, `VERT_A/B`, `HORZ_4`/`VERT_4` — see
-   "STILL OPEN" above). Highest-priority remaining photo-gap lever: measured 10-13% area share on
-   libaom's side that zenrav1e cannot reach at all, structurally bigger than anything else on this
-   list. Tracked in [zenrav1e#26](https://github.com/imazen/zenrav1e/issues/26) — goal, phased
-   plan (HORZ_4/VERT_4 first, then HORZ_A/B/VERT_A/B), and success criteria. Real encoder work
-   (new recursive encode patterns, 3-way and 4-way sub-block RD evaluation) — cross-repo
-   (zenrav1e). Re-run `scripts/rd_gap/inspect_diff.sh` after landing to confirm the area-share gap
-   actually closes.
-3. **Implement palette mode in zenrav1e** (scoped: screen-content win, ~zero photo-gap effect —
+   "STILL OPEN" above). **BLOCKED, 2026-07-01**: a HORZ_4/VERT_4 prototype hit a bitstream-
+   conformance bug (libaom's `aomdec` rejects the output as corrupt) that resisted diagnosis;
+   reverted rather than ship it. Two other real bugs found in the attempt ARE fixed and landed
+   (see "Fixed 2026-07-01" section above). Still the highest-*value* remaining lever (10-13% area
+   share) if the conformance bug gets resolved — see
+   [zenrav1e#26](https://github.com/imazen/zenrav1e/issues/26) for the full writeup and what's
+   not yet tried (filter_intra/CfL/tx-type eligibility checks, or a full syntax-element trace).
+   Do not re-attempt without a new diagnostic angle; re-treading the same bisection will waste
+   time the comment already covers.
+3. **Widen/remove the `rdo_cfl_alpha` early-exit and re-measure.** Bounded upside (<=1-2 points on
+   this corpus per the ablation above) — a same-repo, in-zenrav1e change (loosen the `count <
+   alpha` break, or make it a speed setting) with a fast measure/revert cycle. Promoted ahead of
+   palette/perceptual-tune since lever 2 is now blocked: this is the cheapest still-available
+   photo-gap lever.
+4. **Implement palette mode in zenrav1e** (scoped: screen-content win, ~zero photo-gap effect —
    see confirmed findings above). Substantial encoder feature: color quantization (k-means per
    candidate block/plane), RD-gated size search (2-8), bitstream signaling (palette colors + index
    map), `CdfContext` wiring for the already-spec-ported default CDF tables. rav1d-safe (zenavif's
@@ -242,9 +270,6 @@ and raw numbers.
    decoder-side blocker for round-trip validation. Cross-repo work (zenrav1e) — needs explicit
    scope sign-off before starting. **Only worth it if screen content is part of the target traffic
    — it will not move the photo number.**
-4. **Widen/remove the `rdo_cfl_alpha` early-exit and re-measure.** Bounded upside (<=1-2 points on
-   this corpus per the ablation above) — a same-repo, in-zenrav1e change (loosen the `count <
-   alpha` break, or make it a speed setting) with a fast measure/revert cycle.
 5. **Perceptual-tune parity.** aomenc gains from `--tune=ssimulacra2` (not used in the baseline, to
    stay fair); zenrav1e's psy-tune "already covers VAQ." Verify psy-tune is competitive with
    libaom's default at matched ssim2. (Hypothesis — measure before building.)
