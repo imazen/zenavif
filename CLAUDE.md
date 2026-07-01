@@ -89,6 +89,21 @@ open. At the dep bump: tighten `tests/identity_roundtrip.rs` to exact,
 re-run `examples/lossless_speed_sweep.rs`, close #8.
 
 
+### zenrav1e topdown partition search missing HORZ/VERT — FIXED upstream, release-gated
+Root cause found and fixed 2026-07-01 (zenrav1e@665e58e4, pushed to `master`):
+`encode_partition_topdown` (the only partition-search path cavif/zenavif use — bottom-up
+is forced off) hardcoded its RDO candidate list to `[SPLIT, NONE]`, so
+`PARTITION_HORZ`/`VERT` were never offered at any speed. This is also why cavif's `-s1`
+and `-s2` were byte-identical (`non_square_partition_max_threshold` only mattered in the
+unused bottom-up path). Companion `ravif@b4853c68` widens speed-2's threshold to
+`BLOCK_64X64`. Measured: median bpp −1.8% to −2.8% at ssim2 70-85; BD-rate gap vs libaom
++5.7%→+3.6% median (same-day, narrower methodology — see `docs/RD_GAP_VS_LIBAOM.md`).
+**Until zenrav1e releases past 0.1.4 and the zenravif → zenavif dep chain bumps**,
+registry builds still ship the pre-fix behavior. A second, larger, **still-open** gap was
+found in the same investigation: 6 of AV1's 10 partition types (HORZ_A/B, VERT_A/B,
+HORZ_4/VERT_4) are never attempted by zenrav1e's RDO search at any speed — see
+`docs/RD_GAP_VS_LIBAOM.md` "STILL OPEN" (measured 10-13% area share on libaom's side).
+
 ### rav1d-safe Threading Race Condition (RESOLVED)
 DisjointMut overlap panic was caused by frame threading. Fix: `max_frame_delay=1`
 gives tile parallelism without frame threading. Default threads now 0 (auto-detect).

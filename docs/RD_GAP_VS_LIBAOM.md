@@ -1,7 +1,10 @@
 # zenrav1e RD gap vs libaom-at-slow — measurement + narrowing plan
 
-**Status:** open. zenrav1e (our AV1 still-image encoder, the engine behind zenavif) is a genuinely
-weaker RD encoder than the latest libaom at slow settings. This doc records the measured gap, the
+**Status:** partially closed, 2026-07-01. The dominant driver of the photo-gap search-completeness
+ceiling — `encode_partition_topdown` never offering `PARTITION_HORZ`/`VERT` — is root-caused, fixed,
+measured, and pushed to zenrav1e's `master` (unreleased; see "Fixed 2026-07-01" below). A second,
+larger, **still-open** structural gap was found in the same investigation: 6 of AV1's 10 partition
+types are never attempted by the RDO search at any speed. This doc records the measured gap, the
 levers already tried-and-rejected (so we don't repeat them), the credible remaining levers, and the
 repeatable harness (`scripts/rd_gap/`) for tracking progress as we close it.
 
@@ -29,7 +32,9 @@ cavif/zenrav1e speed scale is **1 (best) → 10 (fast); there is no s0**, and **
 At **matched speed** (aomenc cpu-used=2 ≈ zenrav1e s2, both ≈0.088 Mpx/s) the gap is the ~10–18% above;
 and it *widens* as libaom is given more time (cpu-used=0), while zenrav1e cannot search deeper than s2.
 **Conclusion: zenrav1e's search ceiling sits below libaom's — this is an RD-completeness gap, not a
-speed/effort tradeoff.**
+speed/effort tradeoff.** *(2026-07-01: root cause found — see "Fixed 2026-07-01" below. s1==s2 wasn't
+"true convergence," it was a dead-code setting; the actual ceiling was a hardcoded 2-candidate list
+that no speed value ever affected.)*
 
 ### Why this matters beyond the encoder
 
@@ -69,6 +74,100 @@ From `EXPERIMENTS-SURVEY-2026-05-17.md` + `AVIF_LEARNINGS.md §1`:
 **A naive "improve AVIF RD" plan proposes exactly deltaq/VAQ/trellis. Those are dead ends here** — the
 plateau is documented across multiple prior experiments. New work must target the search-completeness
 ceiling instead.
+
+## Fixed 2026-07-01: `encode_partition_topdown` never offered PARTITION_HORZ/VERT
+
+**Root cause.** `encode_partition_topdown` (the ONLY partition-search path any current consumer
+uses — `encode_bottomup` is unconditionally forced `false` by ravif's `SpeedTweaks`, citing a
+QM/RDO-cost-model interaction) called `rdo_partition_decision` with a **hardcoded 2-element
+candidate list**: `&[PartitionType::PARTITION_SPLIT, PartitionType::PARTITION_NONE]`
+(`zenrav1e/src/encoder.rs:3306`, pre-fix). `PARTITION_HORZ`/`PARTITION_VERT` were never candidates,
+**at any speed, on any block, ever** — not gated by `non_square_partition_max_threshold` or
+anything else; that setting only existed inside the unused `encode_partition_bottomup` path. This
+is why cavif's `-s1` and `-s2` were byte-identical (md5-verified): neither speed's value for that
+setting ever reached code that used it. `rdo_partition_decision`'s internal dispatch already
+handled `PARTITION_HORZ`/`VERT` (grouped with `PARTITION_SPLIT` via the same generic
+`rdo_partition_simple` helper, shared with `encode_partition_bottomup`) — the RD-cost machinery
+was fully wired and tested, just never invoked with those two variants from the topdown call site.
+
+**Found via:** per-block AV1 decode-decision diffing against libaom, using aom's own bitstream
+inspector (`examples/inspect`, built with `-DCONFIG_INSPECTION=1 -DCONFIG_ACCOUNTING=1` —
+decodes ANY valid AV1 bitstream, not just aom's own). At matched byte size, zenrav1e showed
+**0% usage of BLOCK_8X16/16X8/8X4/4X8** on a perfectly SB-aligned image (1024×768, so it isn't a
+frame-border artifact) where libaom used them for **10–20% of the image area each**. See
+`scripts/rd_gap/inspect_diff.sh` + `analyze_inspect_diff.py`.
+
+**Fix:** `zenrav1e@665e58e4` (pushed to `master`) builds the candidate list conditionally —
+`PARTITION_HORZ` gated on `has_cols`, `PARTITION_VERT` on `has_rows && chroma_sampling !=
+Cs422` — both further gated by `bsize <= non_square_partition_max_threshold`, mirroring
+`encode_partition_bottomup`'s existing pattern and finally making that setting meaningful for the
+path that's actually used. Companion change `ravif@b4853c68` widens speed-2's threshold to
+`BLOCK_64X64` (from `BLOCK_32X32`) — RDO-safe by construction (more candidates can only tie or
+improve the result); spot-checked byte-identical on its own before the topdown fix existed, so it's
+free, not the source of the measured gain. **Verified**: 131 zenrav1e lib tests + doctests +
+`trellis_roundtrip` pass; `cargo fmt`/`clippy` clean; round-tripped through zenavif's own decoder
+(rav1d-safe) with no corruption (pixel diff vs the unfixed encode: mean abs 2.4, max 63 — normal
+lossy-reencode magnitude, not corruption).
+
+**Not yet consumable:** the fix is on zenrav1e's `master`, unreleased (crates.io still serves
+0.1.4). Same situation as the lossless ±2 fix in zenavif's own `CLAUDE.md` Known Bugs — needs a
+zenrav1e release + the ravif/zenavif dependency bump before registry builds pick it up.
+
+**Measured impact** (`scripts/rd_gap/rd_gap_{fixed,unfixed}_results.tsv`, 22-image photo corpus,
+cavif `-s2`, identical settings before/after — **narrower methodology than the 2026-06-30 baseline
+table above**: single cavif config/format, not the best-of-{speeds×formats×bit-depth} frontier, so
+absolute numbers aren't directly comparable to the +16.3/11.8/7.8/18.5% headline; the *relative*
+before/after delta is the valid signal here):
+
+Direct fixed-vs-unfixed (isolates the fix, no libaom involved):
+
+| ssim2 target | median bpp change | note |
+|---:|---:|---|
+| 70 | **−2.24%** | |
+| 75 | **−1.76%** | |
+| 80 | **−2.04%** | |
+| 82 | **−1.86%** | |
+| 85 | **−1.77%** | |
+| 88 | −0.08% | gain fades at very high quality |
+| 90 | +0.68% | small reversal, noisy (n=16, high-ssim2 rare in this q-grid) |
+| 92 | +4.56% | n=11, treat as noise |
+
+The win concentrates in **ssim2 70–85** — exactly the aggressive-compression range this workspace
+weights most heavily (see "Codec quality sweeps MUST cover q5-q60" in the global rules). At very
+high quality the marginal benefit of rectangular shapes shrinks (content is already using fine
+granularity) and the extra partition-type signaling bit may cost slightly more than it saves.
+
+Against the same-day libaom baseline (single format/config both sides):
+
+| | median BD-rate | mean BD-rate |
+|---|---:|---:|
+| unfixed | +5.7% | +7.5% |
+| fixed | **+3.6%** | **+4.5%** |
+
+A ~35–40% relative reduction in the measured BD-rate gap under this methodology. A full
+canonical-methodology re-measurement (best-of-many-configs frontier, matching the 2026-06-30
+table exactly) is a good follow-up once the fix ships in a real zenrav1e release.
+
+## STILL OPEN — 6 of AV1's 10 partition types never attempted at any speed
+
+Found in the same inspect-diff investigation, **not fixed by the above**. AV1 defines 10 partition
+types: `NONE, HORZ, VERT, SPLIT` (the ones just fixed above) plus `HORZ_A, HORZ_B, VERT_A, VERT_B,
+HORZ_4, VERT_4` (the "extended" set). zenrav1e's `PartitionType` enum and CDF/entropy-context
+plumbing (`context/partition_unit.rs`) know about all 10, but the RDO search
+(`encoder.rs`'s `partition_types` `ArrayVec<PartitionType, 3>` in `encode_partition_bottomup`, and
+now the topdown candidate list) only ever constructs `{HORZ, VERT, SPLIT}` — the extended 6 are
+never candidates anywhere, at any speed. `recon_intra.rs:155` has an explicit, long-standing TODO:
+`// TODO: Enable the case for PARTITION_VERT_A/B once they can be encoded by rav1e.` This is a
+bigger, structural gap than the topdown fix (which just unblocked already-implemented HORZ/VERT) —
+implementing extended partitions means new recursive encode patterns for 3-way (HORZ_A/B, VERT_A/B:
+one half full-size, the other split again) and 4-way 1:4 splits (HORZ_4/VERT_4), plus verifying the
+entropy-context wiring that's currently unused.
+
+**Measured area share** (post-topdown-fix inspect data, 3 photos): libaom uses `BLOCK_4X16 +
+BLOCK_16X4 + BLOCK_8X32 + BLOCK_32X8 + BLOCK_16X64 + BLOCK_64X16` (the sizes only reachable via
+`HORZ_4`/`VERT_4`) for **10–13% of image area**; zenrav1e: **0%**, always. `HORZ_A/B`/`VERT_A/B`
+sizing overlaps with plain HORZ/VERT block sizes so isn't separately visible in a block-size
+histogram — would need mode-decision-level instrumentation to isolate, not yet done.
 
 ## Confirmed findings (2026-07-01 audit — supersedes the "verify" framing below)
 
@@ -124,7 +223,16 @@ and raw numbers.
 
 ## Credible narrowing levers (priority order, updated 2026-07-01)
 
-1. **Implement palette mode in zenrav1e** (scoped: screen-content win, ~zero photo-gap effect —
+1. ~~Fix `encode_partition_topdown`'s hardcoded HORZ/VERT exclusion~~ **DONE** — see "Fixed
+   2026-07-01" above. −1.8 to −2.8% median bpp at ssim2 70-85, BD-rate gap +5.7%→+3.6% median
+   (narrower methodology; see caveat above). Unreleased.
+2. **Implement the 6 extended partition types** (`HORZ_A/B`, `VERT_A/B`, `HORZ_4`/`VERT_4` — see
+   "STILL OPEN" above). Highest-priority remaining photo-gap lever: measured 10-13% area share on
+   libaom's side that zenrav1e cannot reach at all, structurally bigger than anything else on this
+   list. Real encoder work (new recursive encode patterns, 3-way and 4-way sub-block RD evaluation)
+   — cross-repo (zenrav1e), needs explicit scope sign-off before starting. Re-run
+   `scripts/rd_gap/inspect_diff.sh` after landing to confirm the area-share gap actually closes.
+3. **Implement palette mode in zenrav1e** (scoped: screen-content win, ~zero photo-gap effect —
    see confirmed findings above). Substantial encoder feature: color quantization (k-means per
    candidate block/plane), RD-gated size search (2-8), bitstream signaling (palette colors + index
    map), `CdfContext` wiring for the already-spec-ported default CDF tables. rav1d-safe (zenavif's
@@ -132,17 +240,17 @@ and raw numbers.
    decoder-side blocker for round-trip validation. Cross-repo work (zenrav1e) — needs explicit
    scope sign-off before starting. **Only worth it if screen content is part of the target traffic
    — it will not move the photo number.**
-2. **Widen/remove the `rdo_cfl_alpha` early-exit and re-measure.** Bounded upside (<=1-2 points on
-   this corpus per the ablation above), but it's the cheapest remaining photo-gap lever — a
-   same-repo, in-zenrav1e change (loosen the `count < alpha` break, or make it a speed setting)
-   with a fast measure/revert cycle. Do this before investing in perceptual-tune or diffing.
-3. **Perceptual-tune parity.** aomenc gains from `--tune=ssimulacra2` (not used in the baseline, to
+4. **Widen/remove the `rdo_cfl_alpha` early-exit and re-measure.** Bounded upside (<=1-2 points on
+   this corpus per the ablation above) — a same-repo, in-zenrav1e change (loosen the `count <
+   alpha` break, or make it a speed setting) with a fast measure/revert cycle.
+5. **Perceptual-tune parity.** aomenc gains from `--tune=ssimulacra2` (not used in the baseline, to
    stay fair); zenrav1e's psy-tune "already covers VAQ." Verify psy-tune is competitive with
    libaom's default at matched ssim2. (Hypothesis — measure before building.)
-4. **Broader photo-gap root-causing** if 2-3 don't move the number: per-block mode-decision diffing
-   between aomenc and zenrav1e on shared test images (aomenc has stats/debug dump options), since no
-   single-tool ablation so far explains the remaining 6-16 points — the gap may be diffuse
-   (many small refinements) rather than localized to one tool.
+6. **Broader photo-gap root-causing** if 2-5 don't close it: per-block mode-decision diffing
+   between aomenc and zenrav1e on shared test images (now tooled via `inspect_diff.sh` — extend to
+   mode-level/RD-level instrumentation, not just block-size histograms), since the remaining
+   residual after all of the above may be diffuse (many small refinements) rather than localized
+   to one tool.
 
 **Explicitly NOT on the list:** deltaq/VAQ/trellis (rejected), EPT/NSDT (video-only gains, don't
 transfer to stills — `AVIF_LEARNINGS §1`), learning-based intra / GPU search (out of scope for
@@ -176,6 +284,38 @@ python3 analyze.py rd_gap_results.tsv # prints the per-ssim2-bin gap + content s
 **Regression tracking:** the committed baseline is `benchmarks/rd_gap_baseline_2026-06-30.tsv` (the
 2026-06-30 gap). After any zenrav1e RD change, re-run and diff — the photo-gap column is the number to
 drive down. Target: photo gap < 5% at ssim2 82–90 (from today's ~10–18%).
+
+**Tool-ablation sub-harnesses** (`palette_ablation.sh`, `tool_ablation.sh` +
+`analyze_{palette,tool}_ablation.py`): isolate how much of the gap a specific libaom flag accounts
+for, by running aomenc twice per (image, cq) — default vs the flag disabled — on the same corpus.
+`tool_ablation.sh` takes a `VARIANTS="label=flag ..."` env var so any future libaom knob (tune,
+deltaq mode, etc.) can be probed the same way. See `benchmarks/rd_gap_{palette,tool,cfl}_ablation_
+2026-07-01.tsv` for the palette/CDEF/restoration/CfL results.
+
+**Per-block decode-decision diffing** (`inspect_diff.sh` + `analyze_inspect_diff.py` +
+`obu_to_ivf.py`): the tool that found the `encode_partition_topdown` gap. Decodes matched-byte-size
+zenrav1e and libaom encodes with aom's own bitstream inspector and diffs per-4x4-cell
+partition/mode/txType/skip/palette/cfl plus per-syntax-element bit cost (libaom's Accounting API).
+Requires a **separately built** aom tree with introspection enabled (not the `AOMENC`/`AOMDEC` used
+above):
+```bash
+mkdir ~/work/aom/build_inspect && cd ~/work/aom/build_inspect
+cmake -B . -S .. -DCMAKE_BUILD_TYPE=Release -DCONFIG_INSPECTION=1 -DCONFIG_ACCOUNTING=1 \
+  $(other flags matching build_slow, see CMakeCache.txt)
+cmake --build . --target inspect aomdec aomenc -j 8
+```
+Then:
+```bash
+cd scripts/rd_gap
+CAVIF=~/work/zen/ravif/target/release/cavif AOMENC=~/work/aom/build_slow/aomenc \
+INSPECT=~/work/aom/build_inspect/examples/inspect \
+EXTRACT_AV1=$(git rev-parse --show-toplevel)/target/release/examples/extract_av1 \
+  bash inspect_diff.sh IMG W H Q_ZENRAV1E CQ_LIBAOM /tmp/outdir
+python3 analyze_inspect_diff.py /tmp/outdir/zenrav1e.json /tmp/outdir/libaom.json
+```
+Pick `Q_ZENRAV1E`/`CQ_LIBAOM` to land close in encoded bytes first (re-run once, check the printed
+byte ratio). `extract_av1` (zenavif's own example, no `encode` feature needed) pulls the raw AV1
+payload out of cavif's AVIF container; libaom's `--obu` flag does the same on its side natively.
 
 ## References
 - `AVIF_LEARNINGS.md` §1 — full research synthesis (tried/rejected + actionable), gitignored, mirrored

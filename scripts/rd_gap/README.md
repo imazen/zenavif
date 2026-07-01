@@ -4,9 +4,23 @@ Measures the SSIMULACRA2 rate-distortion gap between our AVIF encoder (zenrav1e,
 `cavif`) and the reference (libaom `aomenc` at slow), so every zenrav1e change can be
 scored against the current baseline. Background + full plan: [`../../docs/RD_GAP_VS_LIBAOM.md`](../../docs/RD_GAP_VS_LIBAOM.md).
 
-**Current gap (2026-06-30 baseline):** our AVIF is ~**10–18% larger on photos** at matched
-ssim2 (BD-rate +25%, 28/28 images) — an RD-completeness gap, not a speed handicap (zenrav1e
-s1==s2 is already its best; no s0). Baseline: [`../../benchmarks/rd_gap_baseline_2026-06-30.tsv`](../../benchmarks/rd_gap_baseline_2026-06-30.tsv).
+**2026-07-01: found + fixed the dominant photo-gap driver.** `encode_partition_topdown`
+(the only partition-search path cavif/zenavif use) hardcoded its RDO candidate list to
+`[SPLIT, NONE]` — `PARTITION_HORZ`/`VERT` were never offered, at any speed, ever. Fixed
+in `zenrav1e@665e58e4` (pushed to `master`, unreleased). Measured: median bpp −1.8% to
+−2.8% at ssim2 70-85. A **bigger, still-open** gap was found in the same investigation:
+6 of AV1's 10 partition types (`HORZ_A/B`, `VERT_A/B`, `HORZ_4`/`VERT_4`) are never
+attempted by the RDO search at any speed (10-13% area share on libaom's side). Full
+story: [`../../docs/RD_GAP_VS_LIBAOM.md`](../../docs/RD_GAP_VS_LIBAOM.md) "Fixed
+2026-07-01" + "STILL OPEN". New tools: `inspect_diff.sh` / `analyze_inspect_diff.py` /
+`obu_to_ivf.py` (per-block AV1 decode-decision diffing against libaom via aom's own
+bitstream inspector — this is what found the gap; see the doc for build instructions).
+
+**Original gap (2026-06-30 baseline, best-of-many-configs methodology):** our AVIF was
+~**10–18% larger on photos** at matched ssim2 (BD-rate +25%, 28/28 images) — an
+RD-completeness gap, not a speed handicap (zenrav1e s1==s2 was byte-identical, now known
+to be because the topdown bug made the speed setting dead code, not "true convergence").
+Baseline: [`../../benchmarks/rd_gap_baseline_2026-06-30.tsv`](../../benchmarks/rd_gap_baseline_2026-06-30.tsv).
 
 ## How it works
 

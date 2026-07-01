@@ -1,0 +1,39 @@
+# Measured impact of the encode_partition_topdown HORZ/VERT fix (zenrav1e@665e58e4, pushed to
+# master, unreleased; companion ravif@b4853c68). See docs/RD_GAP_VS_LIBAOM.md "Fixed 2026-07-01"
+# for the full root-cause writeup (encode_partition_topdown hardcoded its RDO candidate list to
+# [PARTITION_SPLIT, PARTITION_NONE] -- PARTITION_HORZ/VERT were never offered at any speed, on any
+# block, ever; this is the only partition-search path cavif/zenavif use since encode_bottomup is
+# forced off by ravif's SpeedTweaks).
+#
+# Harness: scripts/rd_gap/run_gap.sh, zenrav1e-only (AOMENC unset), cavif -s2, 22-image photo
+# corpus (clean-picker-corpus-2026-06-26, same as the other 2026-07-01 ablations), 12-point Q
+# grid. "unfixed" = pre-fix zenrav1e via git-reverted encoder.rs + rebuild; "fixed" = the pushed
+# commit. Both runs used the IDENTICAL corpus/settings/day. Raw per-image data (gitignored,
+# regenerable): scripts/rd_gap/rd_gap_{fixed,unfixed}_results.tsv.
+# NOTE: this is a NARROWER methodology than the 2026-06-30 canonical baseline (single cavif
+# config/format here, vs that baseline's best-of-{speed x format x bit-depth} frontier) -- the
+# absolute numbers below are not directly comparable to the +16.3/11.8/7.8/18.5% headline. The
+# before/after DELTA under this identical methodology is the valid signal.
+#
+# Direct fixed-vs-unfixed (isolates the fix; no libaom involved), bpp change at matched ssim2,
+# + = fixed needs MORE bits (worse), - = fixed needs FEWER bits (better):
+target_ssim2	median_fixed_bpp_change_pct	n	note
+70	-2.24	20
+75	-1.76	22
+80	-2.04	22
+82	-1.86	22
+85	-1.77	21
+88	-0.08	21	gain fades at very high quality
+90	0.68	16	small reversal; noisy, high-ssim2 rare in this q-grid
+92	4.56	11	n too small, treat as noise
+#
+# Against the same-day libaom baseline (single format/config both sides; libaom data from
+# scripts/rd_gap/palette_ablation_results.tsv, palette=1 rows = default libaom):
+condition	median_bdrate_pct	mean_bdrate_pct	n
+unfixed_vs_libaom	5.7	7.5	19
+fixed_vs_libaom	3.6	4.5	19
+# -> ~35-40% relative reduction in the measured BD-rate gap under this methodology. The win
+#    concentrates at ssim2 70-85 (the aggressive-compression range this workspace weights most
+#    heavily), fading above ssim2 88. A full canonical-methodology re-measurement (matching the
+#    2026-06-30 table's best-of-many-configs frontier) is a good follow-up once the fix ships in
+#    an actual zenrav1e release.
