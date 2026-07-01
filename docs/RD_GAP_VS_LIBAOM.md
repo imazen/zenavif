@@ -1,12 +1,16 @@
 # zenrav1e RD gap vs libaom-at-slow — measurement + narrowing plan
 
-**Status:** partially closed, 2026-07-01. The dominant driver of the photo-gap search-completeness
-ceiling — `encode_partition_topdown` never offering `PARTITION_HORZ`/`VERT` — is root-caused, fixed,
-measured, and pushed to zenrav1e's `master` (unreleased; see "Fixed 2026-07-01" below). A second,
-larger, **still-open** structural gap was found in the same investigation: 6 of AV1's 10 partition
-types are never attempted by the RDO search at any speed. This doc records the measured gap, the
-levers already tried-and-rejected (so we don't repeat them), the credible remaining levers, and the
-repeatable harness (`scripts/rd_gap/`) for tracking progress as we close it.
+**Status:** partially closed, 2026-07-01. Three real bugs found and fixed on zenrav1e's `master`
+(unreleased): `encode_partition_topdown` never offering `PARTITION_HORZ`/`VERT`, `sse_h_edge`'s
+wrong-axis `deblock_size` call, and `rdo_tx_type_decision`'s overly-aggressive first-iteration
+early-exit — see "Fixed 2026-07-01" below. Median BD-rate vs libaom-slow improved **+5.7% →
++2.1%** (same corpus/methodology throughout, narrower than the canonical 2026-06-30 headline —
+see the caveat in that section). A bigger, **still-open, blocked** structural gap was also found:
+6 of AV1's 10 partition types are never attempted by the RDO search at any speed — a prototype
+hit an unresolved bitstream-conformance bug and was reverted (zenrav1e#26). CfL search-widening,
+filter_intra, and tx-depth widening were all tried and ruled out (see "Credible narrowing
+levers"). This doc records the measured gap, the levers tried (fixed, rejected, or blocked), and
+the repeatable harness (`scripts/rd_gap/`) for tracking progress as we close it.
 
 ## The gap (measured 2026-06-30)
 
@@ -70,6 +74,7 @@ From `EXPERIMENTS-SURVEY-2026-05-17.md` + `AVIF_LEARNINGS.md §1`:
 | LRU on skip | zero effect | rejected |
 | Bottom-up partition search | zero effect | rejected |
 | SVT-AV1 integration | maintenance burden; zenrav1e proven | rejected |
+| Widen `rdo_tx_depth` past 2 (chasing `read_selected_tx_size` 0.3% vs libaom 1.0%) | `MAX_TX_DEPTH=2` is a normative AV1 spec limit (`tx_depth` syntax element), not a tunable heuristic — caught immediately by the existing `encode_8bit_in_u16_does_not_trip_cdef_range_assert` test (2026-07-01) | rejected |
 
 **A naive "improve AVIF RD" plan proposes exactly deltaq/VAQ/trellis. Those are dead ends here** — the
 plateau is documented across multiple prior experiments. New work must target the search-completeness
@@ -142,11 +147,38 @@ Against the same-day libaom baseline (single format/config both sides):
 | | median BD-rate | mean BD-rate |
 |---|---:|---:|
 | unfixed | +5.7% | +7.5% |
-| fixed | **+3.6%** | **+4.5%** |
+| fixed (topdown + deblock only) | +3.6% | +4.5% |
+| **current master** (+ tx-type fix below) | **+2.1%** | **+2.9%** |
 
-A ~35–40% relative reduction in the measured BD-rate gap under this methodology. A full
-canonical-methodology re-measurement (best-of-many-configs frontier, matching the 2026-06-30
-table exactly) is a good follow-up once the fix ships in a real zenrav1e release.
+A ~63% relative reduction in the measured BD-rate gap under this methodology, from all fixes
+combined. A full canonical-methodology re-measurement (best-of-many-configs frontier, matching
+the 2026-06-30 table exactly) is a good follow-up once the fixes ship in a real zenrav1e release.
+
+## Fixed 2026-07-01 (3): `rdo_tx_type_decision`'s overly-aggressive first-iteration early-exit
+
+**Root cause.** The tx-type RDO search (`rdo_tx_type_decision`) tried `RAV1E_TX_TYPES` in order
+(`DCT_DCT` always first, since it's index 0) and **abandoned the entire tx-type search for a
+given tx size** if `DCT_DCT` alone already cost more than `cur_best_rd` — the best RD found
+across *other tx sizes* so far. This assumes DCT_DCT's cost is representative of what any tx
+type could achieve at this size; it isn't always — content where a non-DCT type (ADST/IDTX/
+V_DCT/H_DCT/etc.) wins by a wide margin at that specific size never gets evaluated, since the
+search bails before trying it.
+
+**Found via:** the inspect-diff per-syntax-element bit-cost breakdown (built for the topdown-fix
+investigation, `scripts/rd_gap/analyze_inspect_diff.py`) showed `av1_read_tx_type` at 2.5% of
+total bits for zenrav1e vs 3.6% for libaom — libaom spending *more* bits choosing non-DCT types
+suggested zenrav1e's search wasn't finding them as often as it plausibly could.
+
+**Fix:** `zenrav1e@6b3b0493` (pushed to `master`) removes the early-exit — every candidate tx
+type in the set is now evaluated regardless of how the first one scored. Also drops the
+`cur_best_rd` parameter, left fully unused once the early-exit using it was removed.
+**Verified**: 131 lib tests + doctests + `trellis_roundtrip` pass; fmt/clippy clean; 22-image
+encode+`aomdec`-decode correctness sweep clean (no regressions).
+
+**Measured impact** (`benchmarks/rd_gap_txtype_fix_2026-07-01.tsv`, same methodology/caveats as
+the topdown fix): direct isolation shows median bpp **−0.3% to −1.2%** at ssim2 70-82 (same
+quality-range profile as the topdown fix, fading to exactly 0 at 85+). BD-rate gap vs libaom
+improved **+3.6% → +2.1%** median (+4.5% → +2.9% mean) on top of the topdown+deblock fixes.
 
 ## STILL OPEN — 6 of AV1's 10 partition types never attempted at any speed
 
@@ -236,21 +268,28 @@ and raw numbers.
    ~0/slightly negative, not a fraction of 1-2%.** The 1-2% upper bound was real, but zenrav1e's
    search was already capturing most of it; the gap between "CfL entirely off" and "CfL as
    currently searched" was smaller than between "as currently searched" and "exhaustive."
-5. **The ~8-18% photo gap (the honest headline) remains mostly unexplained after five tools
-   ruled out or bounded small.** Palette (~0%), CDEF (noise), loop restoration (noise), and
-   tx-type completeness (spec-complete) are ruled out; CfL upper-bounds at ~1-2 points. That
-   leaves roughly **6-16 percentage points unaccounted for** by any single named AV1 tool.
-   Leading hypothesis: an aggregate of many small RDO/heuristic refinements accumulated in
-   libaom over years (coefficient cost estimation precision, rate-control qindex mapping,
-   mode-search ordering, partition/tx early-exit thresholds tuned finer than zenrav1e's, etc.)
-   rather than one missing/incomplete feature — harder to close than a single lever, and harder
-   to measure via simple flag ablation since there's no single flag to toggle.
+5. **Update 2026-07-01: two real search-completeness bugs found and fixed (topdown partition,
+   tx-type early-exit), cutting the median BD-rate gap from +5.7% to +2.1% (~63% relative).**
+   Palette (~0% on photos), CDEF (noise), loop restoration (noise), tx-type *coverage*
+   (spec-complete), CfL search depth (SSE-only, widening doesn't help), and filter_intra
+   (severe pre-existing regression, unresolved) are all ruled out or blocked as further levers.
+   Extended partition types remain the single largest still-open lever (10-13% area share) if
+   its conformance bug gets resolved (zenrav1e#26). Beyond that: likely an aggregate of many
+   small RDO/heuristic refinements accumulated in libaom over years (coefficient cost estimation
+   precision, rate-control qindex mapping, mode-search ordering, etc.) rather than one remaining
+   missing feature — harder to close than a single lever, and harder to measure via simple flag
+   ablation since there's no single flag to toggle.
 
 ## Credible narrowing levers (priority order, updated 2026-07-01)
 
 1. ~~Fix `encode_partition_topdown`'s hardcoded HORZ/VERT exclusion~~ **DONE** — see "Fixed
    2026-07-01" above. −1.8 to −2.8% median bpp at ssim2 70-85, BD-rate gap +5.7%→+3.6% median
    (narrower methodology; see caveat above). Unreleased.
+1b. ~~Fix `rdo_tx_type_decision`'s first-iteration early-exit~~ **DONE** — see "Fixed 2026-07-01
+   (3)" above. −0.3 to −1.2% median bpp at ssim2 70-82, BD-rate gap +3.6%→+2.1% median on top of
+   the topdown+deblock fixes. Unreleased. (Distinct from the "tx-type completeness" finding below
+   — that's about `RAV1E_TX_TYPES`' *coverage* of the spec's tx-type set, already spec-complete;
+   this is about the RDO *search* over that set being cut short too early.)
 2. **Implement the 6 extended partition types** (`HORZ_A/B`, `VERT_A/B`, `HORZ_4`/`VERT_4` — see
    "STILL OPEN" above). **BLOCKED, 2026-07-01**: a HORZ_4/VERT_4 prototype hit a bitstream-
    conformance bug (libaom's `aomdec` rejects the output as corrupt) that resisted diagnosis;
@@ -331,7 +370,10 @@ python3 analyze.py rd_gap_results.tsv # prints the per-ssim2-bin gap + content s
 
 **Regression tracking:** the committed baseline is `benchmarks/rd_gap_baseline_2026-06-30.tsv` (the
 2026-06-30 gap). After any zenrav1e RD change, re-run and diff — the photo-gap column is the number to
-drive down. Target: photo gap < 5% at ssim2 82–90 (from today's ~10–18%).
+drive down. **Target: true RD parity (median BD-rate ≤ 0% vs libaom-slow on the photo corpus,
+matched speed) — not just "small enough."** Current: median +2.1% (mean +2.9%), down from +5.7%
+at the start of the 2026-07-01 investigation. See "Fixed 2026-07-01" and "Credible narrowing
+levers" above for what's landed, ruled out, and still open.
 
 **Tool-ablation sub-harnesses** (`palette_ablation.sh`, `tool_ablation.sh` +
 `analyze_{palette,tool}_ablation.py`): isolate how much of the gap a specific libaom flag accounts

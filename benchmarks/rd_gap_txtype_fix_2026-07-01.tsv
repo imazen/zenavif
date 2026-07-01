@@ -1,0 +1,35 @@
+# Measured impact of removing rdo_tx_type_decision's first-iteration early-exit
+# (zenrav1e@6b3b0493, pushed to master, unreleased). See docs/RD_GAP_VS_LIBAOM.md "Fixed
+# 2026-07-01" for the full writeup. The tx-type RDO search bailed out of trying any non-DCT_DCT
+# type whenever DCT_DCT alone (always tried first) already cost more than the best RD found
+# across other tx sizes so far -- content where a non-DCT type wins by a wide margin at that
+# specific size never got a chance. Found via the inspect-diff per-syntax-element bit-cost
+# breakdown: av1_read_tx_type showed libaom spending more bits (2.5%->3.6%) than zenrav1e on
+# tx-type signaling, suggesting the search wasn't finding non-DCT winners as often as it could.
+#
+# Harness: scripts/rd_gap/run_gap.sh, cavif -s2, 22-image photo corpus, 12-point Q grid, same
+# methodology as the topdown-fix measurement. "fixed" = topdown+deblock fixes only (665e58e4 +
+# dc0a1165); "txtype" = fixed + this change (now master's actual state, 6b3b0493).
+#
+# Direct txtype-vs-fixed (isolates this change; no libaom involved), bpp change at matched
+# ssim2, - = txtype needs FEWER bits (better):
+target_ssim2	median_txtype_bpp_change_pct	mean_pct	n	photos_median_pct
+70	-0.94	-0.85	20	-0.68
+75	-1.16	-3.10	22	-0.84
+80	-1.06	-2.15	22	-0.89
+82	-0.28	-1.91	22	-0.17
+85	0.00	-0.78	21	0.00
+88	0.00	-0.27	21	0.00
+90	0.00	0.07	16	0.00
+92	0.00	0.08	11	0.00
+#
+# Against the same-day libaom baseline (single format/config both sides):
+condition	median_bdrate_pct	mean_bdrate_pct	n
+fixed_vs_libaom (before this fix)	3.6	4.5	19
+txtype_vs_libaom (after this fix, current master state)	2.1	2.9	19
+#
+# CONCLUSION: real, consistent win concentrated at ssim2 70-82 (same quality-range profile as
+# the topdown fix), fading to exactly 0 at 85+ (the tx-size RDO search converges to the same
+# choice regardless once quality is high enough that most/all tx types get tried anyway).
+# ~42% relative reduction in the measured BD-rate gap (median) on top of the topdown+deblock
+# fixes. Kept; landed on zenrav1e master.
