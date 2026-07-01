@@ -258,7 +258,8 @@ and raw numbers.
    (see "Fixed 2026-07-01" section above). Still the highest-*value* remaining lever (10-13% area
    share) if the conformance bug gets resolved — see
    [zenrav1e#26](https://github.com/imazen/zenrav1e/issues/26) for the full writeup and what's
-   not yet tried (filter_intra/CfL/tx-type eligibility checks, or a full syntax-element trace).
+   not yet tried (CfL/tx-type eligibility checks, or a full syntax-element trace — filter_intra
+   is separately ruled out, see lever below).
    Do not re-attempt without a new diagnostic angle; re-treading the same bisection will waste
    time the comment already covers.
 3. ~~Widen/remove the `rdo_cfl_alpha` early-exit~~ **RULED OUT, 2026-07-01.** Tried (removed the
@@ -269,6 +270,19 @@ and raw numbers.
    *signal*, net-negative for the outer RD comparison. **Reverted, not on master.** A real fix
    would need to make the search RD-aware (weigh signaling cost, not just SSE) — larger, not
    attempted.
+3b. ~~Enable `filter_intra`~~ **RULED OUT, re-confirmed 2026-07-01.** This is why
+   `read_filter_intra_mode_info` is 0% for zenrav1e in the inspect-diff bit-cost breakdown:
+   `enable_filter_intra` requires `prediction_modes >= ComplexKeyframes`, and ravif forces
+   `Simple` — [zenrav1e#5](https://github.com/imazen/zenrav1e/issues/5) (closed) documents a
+   severe (12 dB) PSNR regression when that's relaxed. Re-tested today: **still just as broken**
+   (ssim2 80→18.7, encode time 0.x s→11.4s on the same repro shape) — the CDF fixes referenced in
+   that issue (`d696f4d`/`2d0ae25`/`04129b4`, already on master) did not resolve it. Also newly
+   confirmed: **not specific to `ComplexAll`** — `ComplexKeyframes` alone (which the issue's own
+   analysis says is equivalent to `ComplexAll` for all-keyframe stills) produces byte-identical,
+   equally-broken output, so there's no simple "use the narrower complex tier" workaround. A real
+   fix needs `enable_filter_intra` decoupled from `prediction_modes` entirely, then bisecting the
+   filter_intra RDO cost path itself — not attempted (time-boxed). See the reconfirmation comment
+   on zenrav1e#5.
 4. **Implement palette mode in zenrav1e** (scoped: screen-content win, ~zero photo-gap effect —
    see confirmed findings above). Substantial encoder feature: color quantization (k-means per
    candidate block/plane), RD-gated size search (2-8), bitstream signaling (palette colors + index
