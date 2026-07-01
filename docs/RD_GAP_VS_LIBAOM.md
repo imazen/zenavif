@@ -104,16 +104,23 @@ and raw numbers.
    consistent sign (noise-level) — neither tool is where libaom's photo-bpp advantage comes from,
    at least not in a way a simple on/off toggle reveals. zenrav1e already runs `cdef=true` and
    `sgr_complexity=Full` at s2 (`speedsettings.rs`), consistent with this result.
-4. **The ~8-18% photo gap (the honest headline) remains unexplained by any single tool tested so
-   far.** Palette, CDEF, and loop restoration are ruled out; tx-type search is confirmed complete.
-   The CfL alpha search (`rdo_cfl_alpha`, `src/rdo.rs:1786`) uses a bounded/adaptive early-exit
-   (scans α=1..16 per plane but breaks once `count < alpha`, i.e. after a couple of
-   non-improving steps) rather than an exhaustive scan — a plausible small remaining lever, but
-   **unquantified** (not yet ablated) and likely modest since libaom's own CfL search is also
-   bounded, not exhaustive. Leading hypothesis: the gap is an aggregate of many small RDO/heuristic
-   refinements accumulated in libaom over years (coefficient cost estimation precision, rate-control
-   qindex mapping, mode-search ordering, etc.) rather than one missing/incomplete feature — harder to
-   close than a single lever, and harder to measure via simple flag ablation.
+4. **CfL bounds at ~1-2 points, real but not the dominant driver.** `--enable-cfl-intra=0` on
+   libaom (photos, same corpus): median **+1.2 to +1.7%** more bytes (mean +1.9-2.8%), consistent
+   sign across all four ssim2 targets — a real signal, unlike CDEF/restoration's noise. This is
+   an **upper bound**: it's "CfL entirely off" vs libaom's full search, not a like-for-like
+   search-depth comparison. zenrav1e already implements CfL (`rdo_cfl_alpha`, `src/rdo.rs:1786`,
+   bounded/adaptive early-exit over α=1..16, breaking once `count < alpha`) rather than having
+   none, so the recoverable fraction from tightening its search is *some fraction* of 1-2%, not
+   the whole thing. See `benchmarks/rd_gap_cfl_ablation_2026-07-01.tsv`.
+5. **The ~8-18% photo gap (the honest headline) remains mostly unexplained after five tools
+   ruled out or bounded small.** Palette (~0%), CDEF (noise), loop restoration (noise), and
+   tx-type completeness (spec-complete) are ruled out; CfL upper-bounds at ~1-2 points. That
+   leaves roughly **6-16 percentage points unaccounted for** by any single named AV1 tool.
+   Leading hypothesis: an aggregate of many small RDO/heuristic refinements accumulated in
+   libaom over years (coefficient cost estimation precision, rate-control qindex mapping,
+   mode-search ordering, partition/tx early-exit thresholds tuned finer than zenrav1e's, etc.)
+   rather than one missing/incomplete feature — harder to close than a single lever, and harder
+   to measure via simple flag ablation since there's no single flag to toggle.
 
 ## Credible narrowing levers (priority order, updated 2026-07-01)
 
@@ -123,16 +130,19 @@ and raw numbers.
    map), `CdfContext` wiring for the already-spec-ported default CDF tables. rav1d-safe (zenavif's
    decoder) already supports palette decode (`ipred.rs`, `recon.rs`, `safe_simd/pal.rs`), so no
    decoder-side blocker for round-trip validation. Cross-repo work (zenrav1e) — needs explicit
-   scope sign-off before starting.
-2. **CfL alpha-search exhaustiveness ablation (cheap, do before committing to bigger photo-gap
-   work).** Quantify whether widening/removing the early-exit in `rdo_cfl_alpha` moves the photo
-   number at all before assuming it's negligible.
+   scope sign-off before starting. **Only worth it if screen content is part of the target traffic
+   — it will not move the photo number.**
+2. **Widen/remove the `rdo_cfl_alpha` early-exit and re-measure.** Bounded upside (<=1-2 points on
+   this corpus per the ablation above), but it's the cheapest remaining photo-gap lever — a
+   same-repo, in-zenrav1e change (loosen the `count < alpha` break, or make it a speed setting)
+   with a fast measure/revert cycle. Do this before investing in perceptual-tune or diffing.
 3. **Perceptual-tune parity.** aomenc gains from `--tune=ssimulacra2` (not used in the baseline, to
    stay fair); zenrav1e's psy-tune "already covers VAQ." Verify psy-tune is competitive with
    libaom's default at matched ssim2. (Hypothesis — measure before building.)
 4. **Broader photo-gap root-causing** if 2-3 don't move the number: per-block mode-decision diffing
    between aomenc and zenrav1e on shared test images (aomenc has stats/debug dump options), since no
-   single-tool ablation so far explains it — the remaining gap may be diffuse rather than localized.
+   single-tool ablation so far explains the remaining 6-16 points — the gap may be diffuse
+   (many small refinements) rather than localized to one tool.
 
 **Explicitly NOT on the list:** deltaq/VAQ/trellis (rejected), EPT/NSDT (video-only gains, don't
 transfer to stills — `AVIF_LEARNINGS §1`), learning-based intra / GPU search (out of scope for

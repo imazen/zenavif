@@ -1,0 +1,24 @@
+# libaom CfL (chroma-from-luma) ablation on the PHOTO gap — after palette/CDEF/restoration
+# ruled out (see rd_gap_{palette,tool}_ablation_2026-07-01.tsv), tests whether CfL entirely
+# on-vs-off brackets a meaningful share of the ~8-18% photo gap in docs/RD_GAP_VS_LIBAOM.md.
+# This is an UPPER BOUND on what a search-depth difference could matter: zenrav1e already
+# implements CfL (rdo_cfl_alpha, src/rdo.rs:1786) with a bounded/adaptive alpha search, not
+# "no CfL" — so the true zenrav1e-vs-libaom CfL delta is some fraction of this number, not
+# all of it. Same corpus/settings as the other 2026-07-01 ablations, format 420, cpu-used=2,
+# 22/22 images. Harness: scripts/rd_gap/tool_ablation.sh (VARIANTS="baseline=
+# nocfl=--enable-cfl-intra=0"), zenavif dc22ee15adcc. libaom: git 632172a4 (aomenc 3.14.1).
+# Scorer: fast-ssim2-cli v0.6.0.
+# + = disabling CfL costs MORE bits (i.e. CfL was helping libaom).
+# PHOTOS ONLY (families 1,2,3,5,6,8,9), matched-ssim2 frontier comparison:
+variant	target_ssim2	median_disable_cost_pct	mean_pct	n
+nocfl	82	1.7	2.4	18
+nocfl	85	1.3	2.1	18
+nocfl	88	1.4	1.9	14
+nocfl	90	1.2	2.8	10
+# -> Real, consistent-sign signal (unlike CDEF/restoration's noise) but small: CfL's total
+#    value to libaom on this photo corpus is ~1.2-2.8% (median 1.2-1.7%). Since zenrav1e already
+#    has a working (if bounded/adaptive, not exhaustive) CfL alpha search, the RECOVERABLE
+#    fraction from tightening it is <= this number, likely well under it. Upper-bounds CfL's
+#    contribution to the ~8-18% photo gap at roughly 1-2 percentage points -- real, but not the
+#    dominant driver. Majority of the photo gap (~6-16 points) remains unexplained by any single
+#    tool tested (palette, CDEF, restoration, tx-type, now CfL). See RD_GAP_VS_LIBAOM.md.

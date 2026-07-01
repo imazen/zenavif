@@ -127,4 +127,5 @@ scripts/rd_gap/rd_gap_results.tsv
 scripts/rd_gap/*_summary.csv
 scripts/rd_gap/palette_ablation_results.tsv
 scripts/rd_gap/tool_ablation_results.tsv
+scripts/rd_gap/cfl_ablation_results.tsv
 *.profraw
