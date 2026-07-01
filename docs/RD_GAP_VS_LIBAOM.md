@@ -231,7 +231,11 @@ and raw numbers.
    search-depth comparison. zenrav1e already implements CfL (`rdo_cfl_alpha`, `src/rdo.rs:1786`,
    bounded/adaptive early-exit over α=1..16, breaking once `count < alpha`) rather than having
    none, so the recoverable fraction from tightening its search is *some fraction* of 1-2%, not
-   the whole thing. See `benchmarks/rd_gap_cfl_ablation_2026-07-01.tsv`.
+   the whole thing. See `benchmarks/rd_gap_cfl_ablation_2026-07-01.tsv`. **Update: tried widening
+   the search (see "Credible narrowing levers" #3) — the recoverable fraction turned out to be
+   ~0/slightly negative, not a fraction of 1-2%.** The 1-2% upper bound was real, but zenrav1e's
+   search was already capturing most of it; the gap between "CfL entirely off" and "CfL as
+   currently searched" was smaller than between "as currently searched" and "exhaustive."
 5. **The ~8-18% photo gap (the honest headline) remains mostly unexplained after five tools
    ruled out or bounded small.** Palette (~0%), CDEF (noise), loop restoration (noise), and
    tx-type completeness (spec-complete) are ruled out; CfL upper-bounds at ~1-2 points. That
@@ -257,11 +261,14 @@ and raw numbers.
    not yet tried (filter_intra/CfL/tx-type eligibility checks, or a full syntax-element trace).
    Do not re-attempt without a new diagnostic angle; re-treading the same bisection will waste
    time the comment already covers.
-3. **Widen/remove the `rdo_cfl_alpha` early-exit and re-measure.** Bounded upside (<=1-2 points on
-   this corpus per the ablation above) — a same-repo, in-zenrav1e change (loosen the `count <
-   alpha` break, or make it a speed setting) with a fast measure/revert cycle. Promoted ahead of
-   palette/perceptual-tune since lever 2 is now blocked: this is the cheapest still-available
-   photo-gap lever.
+3. ~~Widen/remove the `rdo_cfl_alpha` early-exit~~ **RULED OUT, 2026-07-01.** Tried (removed the
+   `count < alpha` break, fully exhaustive +/-16 search); measured noise-level, slightly negative
+   in aggregate (BD-rate +3.6%→+3.8%, direct isolation -0.2% to +0.5% with no consistent sign —
+   see `benchmarks/rd_gap_cfl_widening_2026-07-01.tsv`). Root cause: `rdo_cfl_alpha` optimizes SSE
+   only (not RD) — a wider search sometimes finds a lower-distortion alpha that costs more bits to
+   *signal*, net-negative for the outer RD comparison. **Reverted, not on master.** A real fix
+   would need to make the search RD-aware (weigh signaling cost, not just SSE) — larger, not
+   attempted.
 4. **Implement palette mode in zenrav1e** (scoped: screen-content win, ~zero photo-gap effect —
    see confirmed findings above). Substantial encoder feature: color quantization (k-means per
    candidate block/plane), RD-gated size search (2-8), bitstream signaling (palette colors + index

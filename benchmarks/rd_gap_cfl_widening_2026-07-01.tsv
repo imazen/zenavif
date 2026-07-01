@@ -1,0 +1,34 @@
+# Measured impact of widening rdo_cfl_alpha's search (removed the `count < alpha` early-exit,
+# making the +/-16 alpha search exhaustive). Tried as lever #3 in docs/RD_GAP_VS_LIBAOM.md after
+# zenrav1e#26 (extended partition types) hit an unresolved conformance bug. RULED OUT -- reverted,
+# not on master.
+#
+# Harness: scripts/rd_gap/run_gap.sh, cavif -s2, 22-image photo corpus, 12-point Q grid, same
+# methodology as the topdown-fix measurement. "fixed" = topdown+deblock fixes only (665e58e4 +
+# dc0a1165, master's actual state); "cflwide" = fixed + the reverted CfL change.
+#
+# Direct cflwide-vs-fixed (isolates the CfL change; no libaom involved), bpp change at matched
+# ssim2, + = cflwide needs MORE bits (worse):
+target_ssim2	median_cflwide_bpp_change_pct	mean_pct	n	photos_median_pct
+70	0.52	1.08	20	0.47
+75	0.21	0.59	22	0.11
+80	0.18	1.91	22	0.17
+82	-0.17	0.46	22	0.12
+85	0.19	1.32	21	0.13
+88	0.13	-0.25	21	0.06
+90	-0.09	0.03	16	-0.18
+92	-0.04	-0.20	11	-0.18
+#
+# Against the same-day libaom baseline (fixed vs cflwide, both merged with the same libaom rows):
+condition	median_bdrate_pct	mean_bdrate_pct	n
+fixed_vs_libaom (baseline, master's actual state)	3.6	4.5	19
+cflwide_vs_libaom	3.8	4.8	19
+#
+# CONCLUSION: noise-level, no consistent direction, slightly negative in aggregate. Root cause:
+# rdo_cfl_alpha optimizes SSE only ("We're not doing RDO here" per the code's own comment) --
+# widening the search sometimes finds a lower-SSE alpha that costs MORE BITS to signal
+# (cfl:alpha_u/v entropy cost scales with |alpha|), producing a worse RD outcome despite lower
+# distortion. This is not simply "search deeper == better" for a distortion-only inner loop whose
+# result feeds an outer RD comparison. Reverted (increased encode time for zero measured benefit).
+# A REAL fix here would need to make the alpha search RD-aware (rate-aware, not SSE-only), which
+# is a different, larger change than "widen the search range" -- not attempted.
