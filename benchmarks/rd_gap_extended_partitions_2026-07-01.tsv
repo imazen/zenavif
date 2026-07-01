@@ -1,0 +1,49 @@
+# Measured impact of fixing the zenrav1e#26 HORZ_4/VERT_4 conformance bug (a BlockSize
+# ordinal-vs-dimension mismatch in the angle_delta/palette gates, zenrav1e@2866397e) and
+# implementing Phase 1 of extended AV1 partition types (PARTITION_HORZ_4/VERT_4 in the
+# RDO search, zenrav1e@0f49c821 -> re-hashed to 7d254289 after a doc-fixup amend). See
+# docs/RD_GAP_VS_LIBAOM.md "Fixed 2026-07-01 (4)" for the full writeup.
+#
+# Harness: scripts/rd_gap/run_gap.sh, cavif -s2, 22-image photo corpus, 12-point Q grid
+# (30 40 50 55 60 65 70 75 80 85 90 95), same methodology as the topdown/tx-type fixes.
+# "before" = master before this session's changes (6b3b0493, topdown+deblock+tx-type
+# fixes only, 0% HORZ_4/VERT_4 usage, structurally unreachable); "after" = before + the
+# ordinal fix + HORZ_4/VERT_4 (current master). libaom baseline reused verbatim from the
+# tx-type fix's same-corpus/same-settings measurement (scripts/rd_gap/libaom_only.tsv,
+# derived from merged_txtype_vs_libaom.tsv) since libaom itself is unaffected by this
+# change -- not re-run.
+#
+# Direct after-vs-before (isolates this change; no libaom involved), bpp change at
+# matched ssim2, - = after needs FEWER bits (better):
+target_ssim2	median_after_vs_before_bpp_pct	mean_pct	n	photos_median_pct
+70	-0.44	-1.10	20	-0.47
+75	-0.72	-0.83	22	-0.93
+80	-0.61	-0.09	22	-0.63
+82	-1.51	-0.42	22	-1.59
+85	-0.87	0.16	21	-0.91
+88	-1.09	-3.00	21	-1.88
+90	-0.47	0.65	16	-0.59
+92	-0.17	2.71	11	-0.57
+#
+# Against the same-day libaom baseline (single format/config both sides):
+condition	median_bdrate_pct	mean_bdrate_pct	n
+before_vs_libaom (current master, pre-this-session)	2.1	2.9	19
+after_vs_libaom (after this session's fix, current master)	0.1	2.2	19
+#
+# Corruption-fix verification (separate 5-quality-level x 22-image sweep, not part of the
+# RD-gap grid above): 110/110 cells aomdec-clean after the fix (was 100% "Corrupted
+# segment_ids"/"Failed to decode tile data" with HORZ_4/VERT_4 wired but the ordinal fix
+# reverted, direct A/B confirmed on the same repro). Extended block-size area share
+# 1.8-56% per cell. See tests/vectors and the zenrav1e#26 issue comment for the full
+# verification writeup.
+#
+# CONCLUSION: real, consistently-signed win across the full ssim2 70-92 range (every
+# median AND every photos_median negative) -- smaller in magnitude than the topdown fix
+# (-1.8% to -2.8%) but real. Median BD-rate gap vs libaom-slow closes from +2.1% to
+# +0.1% (~95% relative reduction from this session's starting point, ~98% relative
+# reduction from the original +5.7% baseline at the start of the whole 2026-07-01
+# investigation) -- effectively at parity on the median. Mean BD-rate improves less
+# (+2.9% -> +2.2%), and a few individual quality targets show a positive mean despite a
+# negative median (ssim2 85/90/92, small n at the high-quality end, consistent with the
+# same-shaped noise seen in the topdown/tx-type fixes' own high-quality tail). Landed on
+# zenrav1e master; closes zenrav1e#26.

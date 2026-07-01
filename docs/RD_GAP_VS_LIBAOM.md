@@ -1,18 +1,21 @@
 # zenrav1e RD gap vs libaom-at-slow — measurement + narrowing plan
 
-**Status:** partially closed, 2026-07-01 — median BD-rate vs libaom-slow improved **+5.7% →
-+2.1%** (~63% relative reduction), all concretely-identified levers now tried. This is the best
-achieved via every lever found so far, **not** a claim that true parity (≤0%) is unreachable —
-see "Honest final status" at the end of this section for what would need to happen to close the
-remaining gap, and re-run `scripts/rd_gap/` after any future zenrav1e change to check.
+**Status:** effectively closed on the median, 2026-07-01 — median BD-rate vs libaom-slow improved
+**+5.7% → +0.1%** (~98% relative reduction; mean +2.9%→+2.2%), all concretely-identified levers
+now tried. This is the best achieved via every lever found so far, **not** a claim that true
+parity on the mean is unreachable — see "Honest final status" at the end of this section for
+what would need to happen to close the remaining gap, and re-run `scripts/rd_gap/` after any
+future zenrav1e change to check.
 
-Three real bugs found and fixed on zenrav1e's `master` (unreleased): `encode_partition_topdown`
-never offering `PARTITION_HORZ`/`VERT`, `sse_h_edge`'s wrong-axis `deblock_size` call, and
-`rdo_tx_type_decision`'s overly-aggressive first-iteration early-exit — see "Fixed 2026-07-01"
-below. A bigger, **still-open, blocked** structural gap was also found: 6 of AV1's 10 partition
-types are never attempted by the RDO search at any speed — a prototype hit an unresolved
-bitstream-conformance bug and was reverted (zenrav1e#26). CfL search-widening, filter_intra,
-tx-depth widening, and widening ravif's `partition_range` speed heuristic to unlock
+Four real bugs found and fixed on zenrav1e's `master` (unreleased): `encode_partition_topdown`
+never offering `PARTITION_HORZ`/`VERT`, `sse_h_edge`'s wrong-axis `deblock_size` call,
+`rdo_tx_type_decision`'s overly-aggressive first-iteration early-exit, and a `BlockSize`
+ordinal-vs-dimension mismatch in the `angle_delta`/palette gates that was blocking
+`PARTITION_HORZ_4`/`VERT_4` — see "Fixed 2026-07-01" and "Fixed 2026-07-01 (4)" below. The
+`HORZ_4`/`VERT_4` fix closed the single largest remaining structural gap: 2 of AV1's 6 "extended"
+partition types (of 10 total) are now attempted by the RDO search; the other 4 (`HORZ_A/B`,
+`VERT_A/B`) remain unimplemented (Phase 2, not attempted this session). CfL search-widening,
+filter_intra, tx-depth widening, and widening ravif's `partition_range` speed heuristic to unlock
 `BLOCK_32X32`/`64X64` were all tried and ruled out; perceptual-tune parity was verified as
 already-real and already-active (no further headroom there); the `rdo_tx_decision` high-quality
 gate was found to be a real, large win that was deliberately not adopted (breaks the matched-
@@ -209,6 +212,113 @@ BLOCK_16X4 + BLOCK_8X32 + BLOCK_32X8 + BLOCK_16X64 + BLOCK_64X16` (the sizes onl
 sizing overlaps with plain HORZ/VERT block sizes so isn't separately visible in a block-size
 histogram — would need mode-decision-level instrumentation to isolate, not yet done.
 
+**Update 2026-07-01: `HORZ_4`/`VERT_4` (2 of the 6) are now fixed** — the blocker was a real
+conformance bug, not a missing feature. See "Fixed 2026-07-01 (4)" below.
+`HORZ_A/B`/`VERT_A/B` (the other 4) remain unimplemented.
+
+## Fixed 2026-07-01 (4): extended partition types (`HORZ_4`/`VERT_4`) — the zenrav1e#26 conformance bug
+
+**Root cause.** `BlockSize` has a **custom `PartialOrd`** (`src/partition.rs:165-179`) based
+on `width()`/`height()`, not the enum's declaration order. libaom's
+`av1_use_angle_delta(bsize) { return bsize >= BLOCK_8X8; }` (`av1/common/reconintra.h:59`)
+is a genuinely *ordinal* C-enum comparison — `BLOCK_4X16`/`BLOCK_16X4` have discriminants
+16/17 (appended after all 16 classic sizes), so libaom's check is `true` for them
+regardless of their 4:16/16:4 aspect ratio. zenrav1e's textually-identical
+`bsize >= BlockSize::BLOCK_8X8` is NOT ordinal: for `BLOCK_4X16` (4,16) vs `BLOCK_8X8`
+(8,8), width 4<8 but height 16>8 -- an *incomparable* pair under the width/height
+`PartialOrd`, so `>=` silently evaluates `false`. The encoder skipped writing
+`angle_delta` for directional-mode `BLOCK_4X16`/`BLOCK_16X4` blocks -- exactly the two
+most common `HORZ_4`/`VERT_4` sub-block sizes -- while any spec-conformant decoder
+expects to read one. Missing symbol -> bitstream desync -> the "Corrupted segment_ids" /
+"Failed to decode tile data" `aomdec` errors from the previous attempt (zenrav1e#26). The
+same divergence hits `av1_allow_palette`'s ordinal `sb_type >= BLOCK_8X8`
+(`av1/common/blockd.h:1503-1509`), config-gated behind `allow_screen_content_tools` so a
+secondary, not the repro trigger, but fixed for the same reason.
+
+**Ruled out as the same bug class** (verified byte-identical or dimension-correct against
+libaom source, not assumed): `cfl_allowed()`, `av1_filter_intra_allowed_bsize`,
+`partition_gather_horz_alike`/`vert_alike` (identical except an inconsequential
+`bsize != BLOCK_128X128` guard -- 128x128 superblocks are unsupported in this codebase),
+`max_txsize_rect_lookup`, `partition_context_lookup`, `size_group_lookup`,
+`num_pels_log2_lookup`, `has_tr_tables`, `has_bl_tables` (all byte-identical to libaom's
+tables for all 22 block sizes). Also corrected in passing: the "bottom-up is forced off"
+framing in `CLAUDE.md`'s Known Bugs was imprecise -- `encode_partition_bottomup` is
+additionally forced (regardless of the `encode_bottomup` speed setting) for any
+superblock straddling the frame's right/bottom edge; harmless here since Phase 1 only
+wires `HORZ_4`/`VERT_4` into the topdown candidate list, never bottomup's.
+
+**Verified causally, not just correlated:** reverting only the new `ge_8x8_ordinal()`
+helper (keeping the `HORZ_4`/`VERT_4` wiring) reproduces the exact `aomdec` error
+verbatim on the same repro; restoring it makes every cell decode cleanly again.
+
+**Fix:** `zenrav1e@2866397e` adds `BlockSize::ge_8x8_ordinal()` (an explicit
+`!matches!(self, BLOCK_4X4 | BLOCK_4X8 | BLOCK_8X4)`) and swaps it in at the four call
+sites needing libaom's ordinal semantics: the luma/chroma `write_angle_delta` gates, the
+RDO angle-delta-search gate, and the palette gate.
+
+**Re-implemented Phase 1** (`zenrav1e@7d254289`) per the design already documented in
+zenrav1e#26: `PARTITION_HORZ_4`/`VERT_4` in `encode_partition_topdown`'s candidate list
+(gated on `non_square_partition_max_threshold`, an exact `{16X16,32X32,64X64}` size
+match, and **strict full containment** of the parent block -- not just the half-point
+`has_cols`/`has_rows` check `HORZ`/`VERT` use -- sidestepping the spec's
+conditional-4th-sub-block case for this first pass), `rdo_partition_decision` +
+`get_sub_partitions` dispatch, and `rdo_partition_simple`'s quarter-sliver offset
+geometry (a different formula from the 2x2 quadrant grid `HORZ`/`VERT`/`SPLIT` share,
+since `subsize` for these two types already IS the sliver, not a half-sized child).
+
+**Verified** (22 images x 5 quality levels = 110 cells): `aomdec` clean on 100% of cells
+(0 corrupt, was 100% corrupt before the fix on the same repro). Extended block-size
+(`BLOCK_4X16`/`16X4`/`8X32`/`32X8`/`16X64`/`64X16`) area share 1.8-56% per cell across
+the corpus (vs 0% before) -- confirms broad, not one-lucky-case, usage. 32x32-parent
+slivers (`BLOCK_8X32`/`32X8`) additionally appear at low quality once `partition_range`
+(ravif's pre-existing speed-2 heuristic, unrelated to this fix) permits 32x32 blocks to
+reach the candidate list at all; `BLOCK_64X16`/`16X64` not reached at speed 2, consistent
+with (not a new instance of) the "RULED OUT... `BLOCK_32X32`/`64X64` at 0% usage" finding
+below -- not reachable at default speed-2 settings regardless of partition type.
+rav1d-safe round-trip pixel diff scales monotonically with quality (0.16-9.3 mean abs,
+normal lossy-reencode behavior, no corruption signature). 131 lib tests + doctests pass;
+fmt/clippy clean.
+
+**Measured impact** (`benchmarks/rd_gap_extended_partitions_2026-07-01.tsv`, same
+methodology as the topdown/tx-type fixes -- direct before/after isolation, libaom
+baseline reused from the tx-type fix's same-corpus/same-settings measurement since
+libaom itself is unaffected by this change):
+
+Direct after-vs-before (isolates this change; no libaom involved), bpp change at matched
+ssim2, `-` = after needs FEWER bits (better):
+
+| ssim2 target | median bpp change | mean | photos median |
+|---:|---:|---:|---:|
+| 70 | **−0.44%** | −1.10% | −0.47% |
+| 75 | **−0.72%** | −0.83% | −0.93% |
+| 80 | **−0.61%** | −0.09% | −0.63% |
+| 82 | **−1.51%** | −0.42% | −1.59% |
+| 85 | **−0.87%** | +0.16% | −0.91% |
+| 88 | **−1.09%** | −3.00% | −1.88% |
+| 90 | **−0.47%** | +0.65% | −0.59% |
+| 92 | **−0.17%** | +2.71% | −0.57% |
+
+Every median AND every photos-median is negative across the full 70-92 range -- a real,
+consistently-signed win, smaller in magnitude than the topdown fix (−1.8% to −2.8%) but
+real. A few individual targets show a positive *mean* despite a negative median (85/90/92,
+small n at the high-quality tail) — the same noise shape the topdown/tx-type fixes' own
+high-quality tail showed.
+
+Against the same-day libaom baseline (single format/config both sides):
+
+| | median BD-rate | mean BD-rate |
+|---|---:|---:|
+| before (current master, pre-this-session) | +2.1% | +2.9% |
+| **after** (this fix, current master) | **+0.1%** | **+2.2%** |
+
+**Median BD-rate gap vs libaom-slow closes from +2.1% to +0.1%** — a ~95% relative
+reduction from this session's starting point, ~98% relative reduction from the +5.7%
+baseline at the start of the whole 2026-07-01 investigation. Effectively at parity on
+the median. Mean improves less (+2.9%→+2.2%), consistent with the mean-vs-median
+divergence already visible in the direct-isolation table above.
+
+This closes zenrav1e#26.
+
 ## RULED OUT, 2026-07-01: `BLOCK_32X32`/`BLOCK_64X64` at 0% usage — explained, not a bug, widening regresses
 
 Same inspect-diff methodology surfaced a second block-size anomaly: `BLOCK_32X32` and
@@ -352,16 +462,14 @@ and raw numbers.
    — that's about `RAV1E_TX_TYPES`' *coverage* of the spec's tx-type set, already spec-complete;
    this is about the RDO *search* over that set being cut short too early.)
 2. **Implement the 6 extended partition types** (`HORZ_A/B`, `VERT_A/B`, `HORZ_4`/`VERT_4` — see
-   "STILL OPEN" above). **BLOCKED, 2026-07-01**: a HORZ_4/VERT_4 prototype hit a bitstream-
-   conformance bug (libaom's `aomdec` rejects the output as corrupt) that resisted diagnosis;
-   reverted rather than ship it. Two other real bugs found in the attempt ARE fixed and landed
-   (see "Fixed 2026-07-01" section above). Still the highest-*value* remaining lever (10-13% area
-   share) if the conformance bug gets resolved — see
-   [zenrav1e#26](https://github.com/imazen/zenrav1e/issues/26) for the full writeup and what's
-   not yet tried (CfL/tx-type eligibility checks, or a full syntax-element trace — filter_intra
-   is separately ruled out, see lever below).
-   Do not re-attempt without a new diagnostic angle; re-treading the same bisection will waste
-   time the comment already covers.
+   "STILL OPEN" above). **DONE for HORZ_4/VERT_4, 2026-07-01** (2 of 6): the "unresolved
+   bitstream-conformance bug" from the first prototype attempt turned out to be a real,
+   fixable `BlockSize` ordinal-vs-dimension mismatch (see "Fixed 2026-07-01 (4)" above) — not
+   a fundamental blocker. Fixed + implemented; median BD-rate gap +2.1%→+0.1%.
+   [zenrav1e#26](https://github.com/imazen/zenrav1e/issues/26) closed. `HORZ_A/B`/`VERT_A/B`
+   (the mixed 3-way types, the other 4) remain **unimplemented** — would need a new tracking
+   issue if picked up; their area-share contribution is unquantified (overlaps plain HORZ/VERT
+   sizes in a block-size histogram, unlike HORZ_4/VERT_4's own distinct sizes).
 3. ~~Widen/remove the `rdo_cfl_alpha` early-exit~~ **RULED OUT, 2026-07-01.** Tried (removed the
    `count < alpha` break, fully exhaustive +/-16 search); measured noise-level, slightly negative
    in aggregate (BD-rate +3.6%→+3.8%, direct isolation -0.2% to +0.5% with no consistent sign —
@@ -452,19 +560,23 @@ and raw numbers.
 transfer to stills — `AVIF_LEARNINGS §1`), learning-based intra / GPU search (out of scope for
 zenrav1e's design), CDEF/restoration tuning (ruled out 2026-07-01, see confirmed findings).
 
-## Honest final status (2026-07-01, end of this investigation)
+## Honest final status (2026-07-01, updated after the extended-partition-types fix)
 
-**Measured: +2.1% median BD-rate (+2.9% mean) vs libaom-slow, photos only, matched speed
-(cpu-used=2). Started at +5.7% — a ~63% relative reduction. The ≤0% (true parity) goal is NOT
-yet met.** This is the state after exhausting every concretely-identified lever this session,
-not a ceiling on what's possible — three real bugs were found by the same methodology
-(per-block/per-syntax-element bitstream diffing against libaom via `inspect_diff.sh`) that's
-still available to point at new hypotheses.
+**Measured: +0.1% median BD-rate (+2.2% mean) vs libaom-slow, photos only, matched speed
+(cpu-used=2). Started at +5.7% — a ~98% relative reduction. Effectively at parity on the
+median; the ≤0% (true parity) goal is NOT quite met on mean, but very close.** This
+supersedes the prior +2.1%/+2.9% snapshot below (kept for history) — the "Blocked" extended-
+partition-types item turned out to be a real, fixable conformance bug, not a genuine gap in
+what zenrav1e's RDO search could reach.
 
 **Fixed and landed (zenrav1e `master`, unreleased):**
 - `encode_partition_topdown` never offered `PARTITION_HORZ`/`VERT` (665e58e4)
 - `sse_h_edge` passed the wrong axis to `deblock_size` (dc0a1165)
 - `rdo_tx_type_decision`'s first-iteration early-exit (6b3b0493)
+- `BlockSize` ordinal-vs-dimension mismatch in `angle_delta`/palette gates, blocking
+  `PARTITION_HORZ_4`/`VERT_4` (2866397e) + Phase 1 of extended partition types
+  re-implemented on top (7d254289) — see "Fixed 2026-07-01 (4)" above. Median BD-rate
+  +2.1%→+0.1%.
 
 **Landed, cosmetic/enabling (ravif `main`):**
 - Widened speed-2 `non_square_partition_max_threshold` to `BLOCK_64X64` (b4853c68) — required by
@@ -487,34 +599,37 @@ still available to point at new hypotheses.
   encode time, pushing zenrav1e past libaom's own reference speed in that band. Available via
   the existing `with_rdo_tx_decision` opt-in for users who want it; not the default.
 
-**Blocked (highest remaining upside if unblocked):**
-- Extended partition types (`HORZ_A/B`, `VERT_A/B`, `HORZ_4`/`VERT_4`) — 10-13% area share on
-  libaom's side, 0% on zenrav1e's, at any speed. A working prototype hit an unresolved bitstream-
-  conformance bug (`aomdec` rejects the output as corrupt) and was reverted rather than shipped
-  broken. See [zenrav1e#26](https://github.com/imazen/zenrav1e/issues/26) for the full
-  bisection and what's not yet tried.
+**Resolved this session (was "Blocked" as of the prior snapshot):**
+- Extended partition types, `HORZ_4`/`VERT_4` (2 of the 6) — the earlier "unresolved
+  bitstream-conformance bug" was a `BlockSize` ordinal-vs-dimension mismatch in the
+  `angle_delta`/palette gates (see "Fixed 2026-07-01 (4)" above). Fixed + implemented;
+  median BD-rate gap +2.1%→+0.1%. `HORZ_A/B`/`VERT_A/B` (the other 4) remain unimplemented
+  — [zenrav1e#26](https://github.com/imazen/zenrav1e/issues/26) is closed for Phase 1;
+  Phase 2 (the mixed 3-way types) would need its own tracking issue if picked up.
 
 **Explicitly out of scope (photos-only goal):**
 - Palette mode — ~0% effect on photos, a real win only for screen content.
 
-**Why the remaining +2.1% is likely diffuse, not one more missing lever:** the 8-photo aggregate
-bit-cost breakdown (`inspect_diff.sh` + `analyze_inspect_diff.py`) shows no single unexplained
-syntax element beyond what's now accounted for above — `av1_read_tx_type`'s residual gap traces
-to the `rdo_tx_decision` gate (declined); `read_segment_id` is a known cross-encoder segmentation-
-approach artifact; `read_filter_intra_mode_info` is the known-broken, ruled-out feature; the
-remaining items (`read_intra_mode`, `read_angle_delta`, `read_golomb`, uv-mode signaling) are each
-under 1 percentage point of total bits and individually small enough that chasing each is unlikely
-to be worth the investigation cost relative to the likely yield — consistent with the doc's own
-prediction that the residual is "an aggregate of many small RDO/heuristic refinements accumulated
-in libaom over years... harder to close than a single lever."
+**Why the remaining +0.1% median (+2.2% mean) is likely diffuse, not one more missing lever:**
+the 8-photo aggregate bit-cost breakdown (`inspect_diff.sh` + `analyze_inspect_diff.py`) — taken
+before this session's fix, so its accounting below predates the +0.1% number — showed no single
+unexplained syntax element beyond what was already accounted for: `av1_read_tx_type`'s residual
+gap traces to the `rdo_tx_decision` gate (declined); `read_segment_id` is a known cross-encoder
+segmentation-approach artifact; `read_filter_intra_mode_info` is the known-broken, ruled-out
+feature; the remaining items (`read_intra_mode`, `read_angle_delta`, `read_golomb`, uv-mode
+signaling) are each under 1 percentage point of total bits. With `HORZ_4`/`VERT_4` now closing
+most of the gap the aggregate bit-cost breakdown predicted, the residual is plausibly close to
+"an aggregate of many small RDO/heuristic refinements... harder to close than a single lever" —
+re-running the bit-cost breakdown on the new baseline would confirm, not yet done.
 
-**What would actually move the needle from here:** resolving the extended-partition-types
-conformance bug (zenrav1e#26) is the single highest-value remaining lever if someone picks it up
-with a fresh diagnostic angle — the doc's bisection notes what's already been ruled out. Beyond
-that, closing the rest would likely require either accepting the `rdo_tx_decision` speed cost (a
-scope/priority call, not a bug fix) or a broader RDO-cost-model accuracy improvement (the same
-root cause behind both the CfL-widening and partition-range-widening regressions) rather than a
-single discrete fix.
+**What would actually move the needle from here:** `HORZ_A/B`/`VERT_A/B` (Phase 2, mixed-
+granularity 3-way splits — one half full-size, the other split again) is the most obvious
+remaining structural lever, though its area-share contribution wasn't separately measurable
+(overlaps plain HORZ/VERT block sizes in a size histogram) so its potential is unquantified.
+Beyond that, closing the mean/median gap fully would likely require either accepting the
+`rdo_tx_decision` speed cost (a scope/priority call, not a bug fix) or a broader RDO-cost-model
+accuracy improvement (the same root cause behind both the CfL-widening and partition-range-
+widening regressions) rather than a single discrete fix.
 
 ## The harness — `scripts/rd_gap/`
 
@@ -544,9 +659,9 @@ python3 analyze.py rd_gap_results.tsv # prints the per-ssim2-bin gap + content s
 **Regression tracking:** the committed baseline is `benchmarks/rd_gap_baseline_2026-06-30.tsv` (the
 2026-06-30 gap). After any zenrav1e RD change, re-run and diff — the photo-gap column is the number to
 drive down. **Target: true RD parity (median BD-rate ≤ 0% vs libaom-slow on the photo corpus,
-matched speed) — not just "small enough."** Current: median +2.1% (mean +2.9%), down from +5.7%
-at the start of the 2026-07-01 investigation. See "Fixed 2026-07-01" and "Credible narrowing
-levers" above for what's landed, ruled out, and still open.
+matched speed) — not just "small enough."** Current: median +0.1% (mean +2.2%), down from +5.7%
+at the start of the 2026-07-01 investigation (effectively at parity on the median). See "Fixed
+2026-07-01 (4)" and "Honest final status" above for what's landed, ruled out, and still open.
 
 **Tool-ablation sub-harnesses** (`palette_ablation.sh`, `tool_ablation.sh` +
 `analyze_{palette,tool}_ablation.py`): isolate how much of the gap a specific libaom flag accounts

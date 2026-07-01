@@ -91,18 +91,40 @@ re-run `examples/lossless_speed_sweep.rs`, close #8.
 
 ### zenrav1e topdown partition search missing HORZ/VERT — FIXED upstream, release-gated
 Root cause found and fixed 2026-07-01 (zenrav1e@665e58e4, pushed to `master`):
-`encode_partition_topdown` (the only partition-search path cavif/zenavif use — bottom-up
-is forced off) hardcoded its RDO candidate list to `[SPLIT, NONE]`, so
-`PARTITION_HORZ`/`VERT` were never offered at any speed. This is also why cavif's `-s1`
-and `-s2` were byte-identical (`non_square_partition_max_threshold` only mattered in the
-unused bottom-up path). Companion `ravif@b4853c68` widens speed-2's threshold to
-`BLOCK_64X64`. Measured: median bpp −1.8% to −2.8% at ssim2 70-85; BD-rate gap vs libaom
-+5.7%→+3.6% median (same-day, narrower methodology — see `docs/RD_GAP_VS_LIBAOM.md`).
-**Until zenrav1e releases past 0.1.4 and the zenravif → zenavif dep chain bumps**,
-registry builds still ship the pre-fix behavior. A second, larger, **still-open** gap was
-found in the same investigation: 6 of AV1's 10 partition types (HORZ_A/B, VERT_A/B,
-HORZ_4/VERT_4) are never attempted by zenrav1e's RDO search at any speed — see
-`docs/RD_GAP_VS_LIBAOM.md` "STILL OPEN" (measured 10-13% area share on libaom's side).
+`encode_partition_topdown` (the primary partition-search path cavif/zenavif use; ravif's
+own `encode_bottomup` speed setting is off by default, but `encode_partition_bottomup`
+is ALSO forced regardless of that setting for any superblock straddling the frame's
+right/bottom edge — corrected 2026-07-01, see below) hardcoded its RDO candidate list to
+`[SPLIT, NONE]`, so `PARTITION_HORZ`/`VERT` were never offered at any speed. This is also
+why cavif's `-s1` and `-s2` were byte-identical (`non_square_partition_max_threshold`
+only mattered in the bottom-up path). Companion `ravif@b4853c68` widens speed-2's
+threshold to `BLOCK_64X64`. Measured: median bpp −1.8% to −2.8% at ssim2 70-85; BD-rate
+gap vs libaom +5.7%→+3.6% median (same-day, narrower methodology — see
+`docs/RD_GAP_VS_LIBAOM.md`). **Until zenrav1e releases past 0.1.4 and the zenravif →
+zenavif dep chain bumps**, registry builds still ship the pre-fix behavior.
+
+**2026-07-01: extended partition types (HORZ_4/VERT_4) — FIXED, root cause was a
+`BlockSize` ordinal-vs-dimension mismatch, upstream, release-gated.** The 6-of-10-types
+gap referenced above (measured 10-13% area share on libaom's side) turned out to be
+blocked on a real bitstream-conformance bug, not a missing feature. Root cause: libaom's
+`av1_use_angle_delta`/`av1_allow_palette` gate several per-block syntax elements on
+`bsize >= BLOCK_8X8`, which is a genuinely *ordinal* comparison in libaom's C
+`BLOCK_SIZE` enum (the six "extended" 4:1-aspect sizes are numbered after every classic
+size, so the comparison is always `true` for them regardless of actual dimensions).
+zenrav1e's textually-identical `bsize >= BlockSize::BLOCK_8X8` is NOT ordinal — `BlockSize`
+has a custom width/height-based `PartialOrd`, under which `BLOCK_4X16`/`BLOCK_16X4` are
+*incomparable* with `BLOCK_8X8` (one dimension smaller, one larger), so `>=` silently
+evaluated `false` where it should have been `true`. The encoder skipped writing a
+required `angle_delta` syntax element for directional-mode blocks of those two sizes —
+a missing-symbol bitstream desync that `aomdec` correctly rejected as corrupt (the exact
+symptom the previous attempt hit and reverted, per zenrav1e#26). Fixed via
+`BlockSize::ge_8x8_ordinal()` (zenrav1e@2866397e) + Phase 1 of `PARTITION_HORZ_4`/`VERT_4`
+re-implemented on top (zenrav1e@7d254289). Verified clean on 110 cells (22-image photo
+corpus x 5 quality levels): 0 `aomdec` corruption (was 100% corrupt before the ordinal
+fix, direct A/B confirmed causality), extended block-size area share 1.8-56% per cell,
+rav1d-safe round-trip pixel diff scaling normally with quality. `PARTITION_HORZ_A/B`/
+`VERT_A/B` (4 of the original 6) remain unimplemented. Measured RD impact:
+`docs/RD_GAP_VS_LIBAOM.md` "Fixed 2026-07-01 (4)".
 
 ### rav1d-safe Threading Race Condition (RESOLVED)
 DisjointMut overlap panic was caused by frame threading. Fix: `max_frame_delay=1`
