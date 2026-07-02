@@ -609,6 +609,81 @@ s1(deep)+tune configs. **Availability:** `Tune::Ssimulacra2` selects it; wiring 
 zenavif/zenravif defaults is a release-gated follow-up at the zenrav1e dep bump (raw
 sweeps: /mnt/v/output/zenavif/tune-ss2-2026-07-02/, see the benchmarks pointer file).
 
+## Per-SB delta_q + Variance Boost — SHIPPED 2026-07-02 (release-gated): tier-2 gap +10.10% → +5.63% (s2)
+
+**Mechanism #1 for the residual tier-2 gap** (user directive: algorithmic solutions with
+offline-fit constants). zenrav1e coded NO delta_q syntax at all — the `//write_q_deltas()`
+stub sat unused since the rav1e import, so libaom's fine-grained per-SB q allocation had no
+zenrav1e counterpart and the tune's step-5 attempt had to route through segmentation (and
+double-boosted flats, +1.92%). Landed on zenrav1e master:
+
+- `d125713f` **per-SB delta_q syntax** (inert): frame-header `delta_q_present`/`delta_q_res`
+  (5.9.17), per-SB `delta_q_index` symbol at the first block of each SB with the spec's
+  SB-sized-skip omission, per-tile qindex predictor mirroring the decoder, `delta_q_cdf`
+  (dav1d-identical default), qindex plumbed through quantize/dequant/rate via `get_qidx`
+  composing with segmentation exactly like dav1d `init_quant_tables`. Includes a
+  `BlockContextCheckpoint` fix for the rollback-unprotected `code_deltas` flag (same
+  side-state class as zenrav1e#27) that any delta coding would have silently desynced on.
+- `66733720` **Variance Boost through real delta_q** for `Tune::Ssimulacra2` (libaom
+  `DELTA_Q_VARIANCE_BOOST`, allintra_vis.c rev 632172a4, SVT-AV1-PSY lineage): activity-mask
+  8×8 variances → octile-5 1:2:1 sample → aom's still-picture boost curve (exact
+  `av1_convert_q_to_qindex` scan semantics, qindex damping `(base+544)/1279`, cap 80,
+  floor MINQ+1) → deadzone-rounded delta at aom's res 1/2/4/8-by-base-qindex; per-SB RDO
+  distortion follow `(ac_q(base)/ac_q(sb))²` (the λ-side of libaom's per-SB rdmult
+  tracking); segmentation disabled while active.
+- `165e83b1` **strength 1.0 baked** from the fit below; dev sweep gates stripped.
+
+**Strength fit** (train26 corpus per Corpus hygiene above, 24×12q, s2+tune, direct BD vs
+boost-off, decision rule pre-registered before data: median-ssim2 rank, butteraugli veto
+ba3n>+1.0%/bamax>+1.5%, ties ≤0.3% → better ba3n → lower strength):
+
+| arm | ssim2 med / mean / better | ba3n med | bamax med | verdict |
+|---|---|---|---|---|
+| **1.0** | **−2.34% / −2.24% / 19/24** | **−1.13%** | **−0.76%** | **SHIPS** |
+| 2.0 | −2.09% / −2.50% / 17/24 | −1.09% | −0.32% | tie→1.0 |
+| 3.0 (aom default) | −2.20% / −1.82% / 18/24 | −0.46% | +0.75% | tie→1.0 |
+| 4.5 | −1.45% / −0.15% / 14/24 | +1.07% | +5.51% | VETOED |
+| 6.0 | −0.74% / −0.02% / 14/24 | +1.74% | +4.54% | VETOED |
+| 3.0 + segmentation kept | −0.37% / −0.70% / 13/24 | +0.63% | +5.41% | VETOED |
+
+libaom's default 3.0 does not transfer: zenrav1e's Psychovisual pipeline already
+activity-masks distortion, so the optimal *allocation* boost on top is gentler (inverted-U
+on ssim2, monotone butteraugli decay with strength). Strength 1.0 is non-regressing on
+effectively every train26 family (worst +0.34%, one photo); smooth-gradient photos peak at
+strength 2 (5004_nps −15.0% — per-image strength is a picker-knob candidate). The
+keep-segmentation arm re-confirms the double-boost diagnosis with real syntax.
+
+**Legacy-corpus confirm at strength 1.0** (continuity with the committed baselines; fresh
+same-day aom baselines — the tune session's raws were lost with its scratchpad, and the
+fresh ones reproduce the committed tune positions to 3 decimals):
+
+| ref (photos n=19, ssim2 BD) | s2+tune (committed) | s2+tune+deltaq | s1+tune (committed) | s1+tune+deltaq |
+|---|---|---|---|---|
+| direct vs tune-only | — | **−1.81%** med (13/19) | — | **−1.19%** med (14/19; ba3n −0.72, bamax −1.59 — all norms agree) |
+| cpu0-default | −3.43% | **−5.07%** (13/19) | −3.63% | **−5.38%** (16/19) |
+| cpu2 (libaom-slow) | −4.78% | **−6.86%** (15/19) | −6.22% | **−7.18%** (17/19) |
+| cpu0-ss2tune (tier 2) | +10.10% | **+5.63%** (6/19 win) | +8.71% | **+5.02%** med / +3.49% mean (7/19 win) |
+
+Butteraugli on the legacy confirm: 3n −0.39% med / max +0.42% med (neutral; the fit corpus
+had both clearly negative). **The 3 named holdouts** (TEST/VAL-split origins — illustration
+only): **o_5004 is largely rescued at s1** — direct −8.96% ssim2 with butteraugli agreeing
+(−13.7/−14.4), flipping to a WIN vs cpu0-default (+7.38→−1.09); at s2 it improves directly
+(−1.11) though its vs-cpu0 number wobbles +4.45→+5.94. o_9051: s2 +8.51→+2.72 vs
+cpu0-default and now BEATS cpu0-ss2tune at both speeds (−7.40 s2 / −6.73 s1); s1 vs
+cpu0-default wobbles +2.81→+3.63. **o_6629 regresses (+14.15→+32.66 s2, +14.19→+26.42
+s1)** — at q30-40 the one-directional boost + segmentation-off misallocates on this
+ultra-flat gradient (+30% bytes for worse ssim2 at matched -Q; from q50 up the deltaq
+curve dominates). o_6629 stays THE residual coefficient-RD outlier; the boost is not its
+fix and per-image gating (picker) is the tracked follow-up.
+
+**Conformance:** 110/110 cells (aomdec + rav1d-safe) × {s2, s1-deep} × {strength 3.0,
+shipped 1.0} = 4 clean sweeps; local cross-decoder byte-agreement on 2/4-tile,
+1000×700 straddle, 10-bit, keep-seg arm, and 20 tiny-frame cells spanning every
+`delta_q_res` tier. The syntax fixed one latent trap on the way in: `code_deltas` was
+rollback-unprotected in `BlockContextCheckpoint` (LF-delta scaffolding shared it,
+inertly). Full data: `benchmarks/rd_gap_deltaq_2026-07-02.tsv` + pointer file
+(`/mnt/v/output/zenavif/deltaq-2026-07-02/`).
+
 ## RULED OUT, 2026-07-01: `BLOCK_32X32`/`BLOCK_64X64` at 0% usage — explained, not a bug, widening regresses
 
 Same inspect-diff methodology surfaced a second block-size anomaly: `BLOCK_32X32` and

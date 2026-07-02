@@ -1,0 +1,103 @@
+# Per-SB delta_q + Variance Boost -- 2026-07-02 -- sweeps on zenavif-sweep-1 (Hetzner ccx63 48c), analysis host lilith
+# zenrav1e: base=master 64a081d4 (Tune::Ssimulacra2); landed this program: d125713f (per-SB delta_q syntax, inert) -> 66733720 (Tune::Ssimulacra2 Variance Boost via real delta_q, strength 3.0 + dev env gates) -> 9d14e662 (changelog) -> 165e83b1 (bake strength 1.0 from the fit below + strip env gates)
+# fit harness: cavif -s2 --depth 8 + ZENRAVIF_TUNE=ssimulacra2 (ravif dev-patch, reverted at landing), train26 corpus (24 TRAIN-split origins, 12 content families) x Q{30,40,50,55,60,65,70,75,80,85,90,95}, JOBS=24, fast-ssim2 + butteraugli(3-norm,max) per cell
+# decision rule PRE-REGISTERED before any arm data: rank arms by median ssim2-BD vs boost-off; VETO if ba3n>+1.0% or bamax>+1.5%; ties (<=0.3%) -> better ba3n -> lower strength; keep-segmentation arm same rule +0.3% bar
+# conformance (BLOCKING, ran before landing): 110/110 cells aomdec+rav1d-safe clean at s2+tune+deltaq AND s1(deep)+tune+deltaq (legacy 22-image corpus x Q{30,50,60,75,90}), at strength 3.0 AND re-run at the shipped 1.0; local cross-decoder byte-agreement additionally on 2/4-tile, 1000x700 straddle, 10-bit, keep-seg arm, and 20 tiny-frame cells (64x64..640x360, q40..q235 covering all delta_q_res tiers)
+# enc_ms in raw TSVs: fit arms ran solo (clean); dq0 baseline + confirm runs ran under box contention -- do NOT use those for speed claims
+# raw sweeps: /mnt/v/output/zenavif/deltaq-2026-07-02/ (companion pointer file). NOTE box died externally mid-first-sweep (~21:56Z, presumed lingering teardown from the prior agent session); arms str1..segB + cpu0-ss2 re-ran clean on a fresh box; byte-identity of the rebuilt encoder was probe-verified before reuse
+#
+# === strength fit (train26, direct BD-rate vs t26_s2_dq0 boost-off baseline; negative = fewer bits at matched quality) ===
+# arm	ssim2_median	ssim2_mean	ssim2_better_on	ba3n_median	bamax_median	verdict
+# strength_1.0	-2.344	-2.244	19/24	-1.128	-0.761	WINNER (ships as DELTAQ_VARIANCE_BOOST_STRENGTH=1.0)
+# strength_2.0	-2.092	-2.495	17/24	-1.092	-0.322	tie-broken to 1.0 (rule 3: ba3n then lower strength)
+# strength_3.0_aom_default	-2.204	-1.822	18/24	-0.464	+0.747	tie-broken to 1.0
+# strength_4.5	-1.449	-0.150	14/24	+1.069	+5.507	VETOED (butteraugli)
+# strength_6.0	-0.742	-0.022	14/24	+1.742	+4.536	VETOED (butteraugli)
+# strength_3.0_keep_segmentation	-0.369	-0.702	13/24	+0.628	+5.414	VETOED (butteraugli) -- re-confirms the segmentation double-boost with real delta_q syntax
+#
+# === winner (strength 1.0) per-family ssim2-BD medians, train26 ===
+# fam	n	median
+# 1200_interiors	1	-5.01
+# 1400_nature	1	-2.37
+# 1600_food	1	-3.17
+# 2000_people	1	-5.59
+# 5000_nps_photos	2	-2.00
+# 6000_scans_patents	2	-0.93
+# 6600_scans_illustrations	1	-4.45
+# 7000_plots	4	-1.68
+# 8100_web_screenshots	4	-0.26
+# 9000_photo	1	+0.34
+# 9094_gen_illustrations	2	-2.67
+# 9226_gen_products	4	-1.19
+# notable: smooth-gradient photos peak at strength 2 (5004_nps: -15.04% at str2 vs -2.62% at str1) -> per-image strength via the picker is a follow-up candidate
+#
+# === legacy 22-image corpus CONFIRM at strength 1.0 (continuity with the committed 2026-07-02 baselines; MIXED-SPLIT corpus, illustration not fit) ===
+# s2+tune+deltaq (photos n=19, ssim2 BD):
+# comparison	median	mean	wins
+# direct vs s2+tune (tune_composed13)	-1.814	-1.335	13/19
+# direct_ba3n	-0.385	+0.387	10/19
+# direct_bamax	+0.424	+0.521	9/19
+# vs cpu0-default (fresh baseline)	-5.065	-3.692	13/19	(s2+tune was -3.426)
+# vs cpu2 (fresh)	-6.857	-5.635	15/19	(s2+tune was -4.775)
+# vs cpu0-ss2tune / tier-2 (fresh)	+5.633	+4.963	6/19	(s2+tune was +10.098)
+# s1(deep)+tune+deltaq (photos n=19, ssim2 BD):
+# comparison	median	mean	wins
+# direct vs s1+tune (tune_s1speed)	-1.194	-1.124	14/19	(ba3n -0.722 med, bamax -1.592 med -- all norms agree at s1)
+# vs cpu0-default (fresh)	-5.380	-5.067	16/19	(s1+tune was -3.63)
+# vs cpu2 (fresh)	-7.182	-6.985	17/19	(s1+tune was -6.22)
+# vs cpu0-ss2tune / tier-2 (fresh)	+5.022	+3.490	7/19	(s1+tune was +8.71)
+#
+# === the 3 named per-image holdouts (vs cpu0-default, s2; TEST/VAL-split origins -- illustration only) ===
+# image	tune_only	tune_plus_deltaq	note
+# o_6629	+14.15	+32.66	REGRESSES (s1: +14.19 -> +26.42): ultra-flat gradient; at q30-40 the one-directional boost + segmentation-off misallocates (+30% bytes, worse ssim2); known coefficient-RD pathology, now clearly the dominant residual outlier
+# o_5004	+4.45	+5.94	vs cpu0-default slightly worse at s2, direct -1.11; LARGELY RESCUED AT S1: direct -8.96 (ba -13.7/-14.4 agree), vs cpu0-default +7.38 -> -1.09 (flips to a win); its train26 origin (5004_nps) is the biggest strength-2 winner (-15.0)
+# o_9051	+8.51	+2.72	improves at s2; beats cpu0-ss2tune at both speeds (-7.40 s2 / -6.73 s1); s1 vs cpu0-default wobbles +2.81 -> +3.63
+#
+# === per-image fit detail (train26, ssim2 BD vs boost-off) ===
+image	family	bd_str1	bd_str2	bd_str3	bd_str4p5	bd_str6	bd_str3_segB
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024.png	1200	-5.0103	-6.8840	-7.6332	-6.9737	-4.9036	-5.8723
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024.png	1400	-2.3705	-1.6368	-0.6571	+1.6684	+3.4714	+1.1503
+1614_food_dessert-plate-upside-down_valladolid-mexico_s23u_iso640-f1p7_20230917-213342_4000x3000.sdr.s1024.png	1600	-3.1665	-4.4747	-4.2375	-3.7628	-2.8944	-4.1798
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024.png	2000	-5.5906	-4.8150	-4.6338	-2.4648	-0.5065	-4.2823
+5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	5000	-2.6204	-15.0360	-7.5825	+4.9089	-17.9858	-10.0495
+5048_nps_romo-2018-longs-peak-keyhole-route_gray_p01_2550x4200.sdr.s1024.png	5000	-1.3750	-1.8664	-3.3803	-2.1378	-2.0788	-2.2206
+6018_scans-patents_lynn-conway-us5046022-1bit_p019_2320x3408.sdr.s1024.png	6000	-2.8361	-3.1807	-3.7978	-4.1351	-4.1433	-2.3527
+6096_scans-patents_martha-jones-us77494-rescan-gray_p002_2479x3230.sdr.s1024.png	6000	+0.9827	+0.3516	+0.7948	+0.8295	+1.8037	+0.7555
+6606_scans-illustrations_haeckel-red-algae_plate0065_5015x7275.sdr.s1024.png	6600	-4.4514	-4.0101	-2.7915	-2.0349	-0.9779	+1.0766
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024.png	7000	-0.0751	-1.8566	-0.1061	-2.6185	-3.3097	+0.2595
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.s1024.png	7000	-11.0470	-11.0470	-11.0470	-11.0470	-11.0470	-0.3586
+7052_plots_line-00222-s2f495179_1024x1024.sdr.s1024.png	7000	-2.3176	-2.3176	-2.3176	-2.3176	-2.3176	-0.3791
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024.png	7000	-1.0478	-1.0478	-1.0478	-1.0478	-1.0478	+0.2233
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.s1024.png	8100	-2.5515	-3.1637	-2.6343	-1.3501	+0.0957	-0.8178
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024.png	8100	+0.4213	+0.2197	+1.0682	+2.5811	+3.1727	+0.6551
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	8100	-0.4099	+6.8546	+4.3322	+13.4746	+20.2392	+5.0764
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024.png	8100	-0.1035	+0.7983	-0.4168	+0.3927	-0.2669	-0.6546
+9074_gen_clipart_teapot-classic_1024x1536.sdr.s1024.png	9000	+0.3356	+3.1589	+6.6760	+8.7204	+11.1124	+5.6559
+9100_gen_illustrations_bath-candles-evening_1024x1536.sdr.s1024.png	9094	-1.4884	-1.4994	-0.4856	+0.9810	+3.6199	-1.4075
+9118_gen_illustrations_farmers-market-stall_1536x1024.sdr.s1024.png	9094	-3.8612	-4.7345	-4.1873	-4.0961	-1.7550	-3.8945
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024.png	9226	+0.0494	+1.0488	+2.9670	+5.3134	+5.7769	+4.0518
+9678_gen_products-grocery_cereal-box-coral_p0439_1024x1536.sdr.s1024.png	9226	-2.4284	-2.8779	-2.0909	-1.5483	+0.0245	+1.1172
+9868_gen_products-sporting-goods_rain-shell-jacket_feature_p0629_1024x1536.sdr.s1024.png	9226	+0.4481	+1.3260	+2.4921	+5.0639	+5.7570	+1.9600
+9958_gen_products-whitelabeled-beverages_beverage-smoothie-bottle_p0716_1024x1536.sdr.s1024.png	9226	-3.3450	-3.1958	-3.0019	-1.9987	-2.3717	-2.3524
+#
+# === legacy per-image s2 detail (ssim2 BD) ===
+image	fam	direct_vs_tune	vs_cpu0def	vs_cpu2	vs_cpu0ss2
+o_1015.png.scale1024x768.png	1	-6.717	-16.242	-16.824	+6.183
+o_1023.png.scale1024x768.png	1	-4.935	-16.937	-18.293	+3.769
+o_1029.png.scale1024x768.png	1	-3.034	-11.121	-13.903	+8.332
+o_2012.png.scale1024x768.png	2	-5.113	-7.514	-9.517	+8.927
+o_2202.png.scale1024x1024.png	2	-3.819	-5.065	-6.857	+8.522
+o_3003.png.scale1024x725.png	3	-0.954	-0.689	-1.304	+14.634
+o_3006.png.scale1024x763.png	3	-2.290	-16.145	-17.572	+5.633
+o_3008.png.scale1024x738.png	3	+4.487	+1.012	+0.363	+16.730
+o_5004.png.scale1024x724.png	5	-1.107	+5.938	+3.343	+29.919
+o_5016.png.scale1024x549.png	5	+0.206	-16.280	-18.715	-6.289
+o_6610.png.scale1024x806.png	6	-6.683	-7.698	-8.919	+12.355
+o_6629.png.scale1024x949.png	6	+18.529	+32.664	+31.644	+24.891
+o_6632.png.scale1024x939.png	6	-12.068	+0.434	-2.537	+1.454
+o_8106.png.scale1024x640.png	8	-0.639	-6.591	-9.659	-9.479
+o_8107.png.scale1024x640.png	8	+0.877	-2.612	-6.000	-3.725
+o_8110.png.scale1024x640.png	8	+0.999	-4.056	-6.484	-6.701
+o_9051.png.scale1024x1024.png	9	-3.149	+2.718	+3.215	-7.398
+o_9067.png.scale1024x1024.png	9	-1.814	-5.645	-7.976	+3.232
+o_9077.png.scale1024x1024.png	9	+1.867	+3.684	-1.078	-16.701

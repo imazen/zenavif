@@ -53,11 +53,52 @@ alongside ssim2. Full data `benchmarks/rd_gap_tune_ss2_stages_2026-07-02/`.
 | 2 | frame λ ×(200..128)/128 | +4.41% (0/22) | +3.36% | +2.86% | **DROP** — aom-calibrated rdmult weight doesn't transfer to zenrav1e's Daala λ |
 | 3 | ss2 QM curves (+QM on) | **−7.79%** (21/21) | −6.00% | −8.16% | KEEP — biggest single lever; required the two zenrav1e#29 fixes first |
 | 4 | trellis λ×0.25 | +0.01% (9/22) | +0.10% | +0.78% | **DROP** (λ×1.0 arm also +0.21% med, better 6/20) |
-| 5 | Variance Boost via segmentation | +1.92% (7/22) | +2.21% | +3.24% | **DROP** — zenrav1e's activity-masked segmentation already allocates by variance; aom's curve on top double-boosts flats (o_6629 +36%, o_6632 +30%, o_5004/o_2012 +10.5%) while only screen content gains (o_7002 −10.5%) |
+| 5 | Variance Boost via segmentation | +1.92% (7/22) | +2.21% | +3.24% | **DROP** — zenrav1e's activity-masked segmentation already allocates by variance; aom's curve on top double-boosts flats (o_6629 +36%, o_6632 +30%, o_5004/o_2012 +10.5%) while only screen content gains (o_7002 −10.5%). **SUPERSEDED 2026-07-02 (later): re-implemented through REAL per-SB delta_q syntax — see §5-revisited below.** |
 
 Notable: every keep/drop decision is metric-consistent — ssim2 and both
 butteraugli norms agree in sign on every step, so no ss2-vs-IQ divergent knob
 had to fall back to the TUNE_IQ value.
+
+## §5-revisited (2026-07-02, later): Variance Boost through REAL per-SB delta_q — SHIPS at strength 1.0
+
+The step-5 drop above was a verdict on the *segmentation channel*, not the
+mechanism. zenrav1e gained true per-SB delta_q coding (`zenrav1e@d125713f`:
+frame-header `delta_q_present`/`delta_q_res`, per-SB `delta_q_index` symbol
+with spec-exact skip-SB omission and per-tile predictor, dequant/rate via
+the SB qindex — plus a checkpoint fix for the rollback-unprotected
+`code_deltas` flag any delta coding would have desynced on), and the boost
+was rewired through it (`zenrav1e@66733720`): activity-mask 8×8 variances →
+octile-5 1:2:1 sample → aom's still-picture curve → real delta_q, with
+per-SB RDO distortion follow `(ac_q(base)/ac_q(sb))²` and segmentation
+DISABLED while active.
+
+**Strength fit** (train26 corpus, 24 train-split origins × 12 q, s2+tune,
+direct BD vs boost-off, pre-registered rule: median ssim2 rank +
+butteraugli veto at ba3n>+1.0%/bamax>+1.5%, ties ≤0.3% → better ba3n →
+lower strength; `zenrav1e@165e83b1` bakes the winner):
+
+| strength | ssim2 med / mean / better | ba3n med | bamax med | verdict |
+|---|---|---|---|---|
+| **1.0** | **−2.34% / −2.24% / 19/24** | **−1.13%** | **−0.76%** | **SHIPS** |
+| 2.0 | −2.09% / −2.50% / 17/24 | −1.09% | −0.32% | tie→1.0 |
+| 3.0 (aom default) | −2.20% / −1.82% / 18/24 | −0.46% | +0.75% | tie→1.0 |
+| 4.5 | −1.45% / −0.15% / 14/24 | +1.07% | +5.51% | VETOED |
+| 6.0 | −0.74% / −0.02% / 14/24 | +1.74% | +4.54% | VETOED |
+| 3.0 + segmentation kept | −0.37% / −0.70% / 13/24 | +0.63% | +5.41% | VETOED |
+
+Findings: (1) libaom's default 3.0 does NOT transfer — zenrav1e's
+Psychovisual pipeline already activity-masks distortion, so a gentler
+allocation boost is optimal; the strength response is an inverted-U on
+ssim2 with monotone butteraugli decay. (2) The keep-segmentation arm
+re-confirms the double-boost diagnosis with real syntax. (3) Strength 1.0
+is non-regressing on effectively every family (worst +0.34%, one photo);
+smooth-gradient photos peak at strength 2 (train26 5004: −15.0% — the
+o_5004 origin), making per-image strength a picker-knob candidate.
+Conformance: 110/110 cells (aomdec + rav1d-safe) at s2+tune and
+s1-deep+tune, at strength 3.0 AND at the shipped 1.0; cross-decoder
+byte-agreement additionally verified on multi-tile/straddle/10-bit/tiny
+frames. Full data: `benchmarks/rd_gap_deltaq_2026-07-02.tsv` + the
+companion pointer file.
 
 ## libaom mechanism (file:line at the pinned rev)
 

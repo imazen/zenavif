@@ -197,6 +197,24 @@ tier-2 gap vs cpu0-ss2tune +11.08% → +8.71%. 220/220 conformance cells clean.
 (the sweep used a dev-only ZENRAVIF_TUNE env passthrough, reverted) and decide
 the default for still images.
 
+### zenrav1e per-SB delta_q + Variance Boost — SHIPPED upstream 2026-07-02 (later), release-gated
+zenrav1e gained true per-SB delta_q coding (`d125713f`, inert syntax; the
+encoder previously coded none) and `Tune::Ssimulacra2` now drives libaom's
+DELTA_Q_VARIANCE_BOOST through it (`66733720` + `165e83b1`: strength 1.0
+offline-fit on train26 — aom's 3.0 default over-boosts on top of zenrav1e's
+activity masking; 4.5/6/keep-segmentation arms butteraugli-vetoed).
+Segmentation is disabled while the boost is active. Measured (legacy-corpus
+confirm, photos n=19): s2 tier-2 gap +10.10% → +5.63% median, vs cpu0-default
+−3.43% → −5.07%, direct −1.81% on top of the tune; s1 numbers in
+docs/RD_GAP_VS_LIBAOM.md "Per-SB delta_q + Variance Boost". 4×110-cell
+conformance clean (both speeds × strength 3.0 + shipped 1.0). Known residual:
+o_6629 (ultra-flat gradient TEST-split origin) regresses further with the
+boost (+14.2 → +32.7 vs cpu0-default; q30-40 misallocation) — per-image
+strength/gating via the picker is the tracked follow-up, alongside strength-2
+for smooth photos (train26 5004_nps −15.0% at str2). **At the zenrav1e dep
+bump:** nothing extra to wire beyond the tune itself (the boost rides
+`Tune::Ssimulacra2`); re-run the QM benchmark note below still applies.
+
 ### zenrav1e QM encodes diverged from conforming decoders — FIXED upstream, release-gated
 Two composing bugs (zenrav1e#29, both fixed on master 2026-07-02) made
 `enable_qm=true` encodes decode differently than the encoder's own

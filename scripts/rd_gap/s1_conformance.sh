@@ -24,7 +24,11 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SAMPLE="${SAMPLE:-$HERE/sample_images.tsv}"
 OUT="${OUT:-$HERE/s1_conformance.tsv}"
-WORK="${WORK:-/tmp/s1_conformance_work}"; mkdir -p "$WORK"
+# PID-suffixed default: two concurrent runs sharing one WORK dir clobber
+# each other's per-image temp dirs and silently LOSE ROWS (the `rm -rf $tmp`
+# per worker races the other run's `cat $part`). Override WORK explicitly
+# only with per-run-unique paths.
+WORK="${WORK:-/tmp/s1_conformance_work.$$}"; mkdir -p "$WORK"
 CAVIF="${CAVIF:?set CAVIF}"; SAVE_PNG="${SAVE_PNG:?set SAVE_PNG}"
 AOMDEC="${AOMDEC:?set AOMDEC}"; SCORER="${SCORER:?set SCORER}"
 EXTRACT_AV1="${EXTRACT_AV1:-/home/lilith/work/zen/zenavif/target/release/examples/extract_av1}"
