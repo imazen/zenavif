@@ -187,6 +187,19 @@ The prange (4,64) s2 widening itself REMAINS RULED OUT on clean data (+0.48% med
 worse 15/22; `benchmarks/rd_gap_prange_retest_2026-07-02.tsv`) — but now with 7/22 winners
 (three at −1.8..−2.5%), making a content-adaptive large-block gate a feature-hints candidate.
 
+### zenrav1e QM encodes diverged from conforming decoders — FIXED upstream, release-gated
+Two composing bugs (zenrav1e#29, both fixed on master 2026-07-02) made
+`enable_qm=true` encodes decode differently than the encoder's own
+reconstruction: (1) `qm_v` was gated on frame-level diff_uv_delta instead of
+the sequence's separate_uv_delta_q (u==v chroma delta-qs → aomdec-rejected
+frames; fixed zenrav1e@9a8eaf61), and (2) every rectangular TX quantized with
+transposed QM weights (rav1e stores coefficients transposed; the table lookup
+didn't swap w/h like rav1d-safe's does; fixed zenrav1e@2310c7be). zenavif's
+`with_qm(true)` default ships both until the zenrav1e release past 0.1.4 +
+dep bump; effect at the shipped near-flat levels 12-15 is small but real.
+**At the dep bump: re-run the QM benchmark** — the "~10% BD-rate win" for
+with_qm(true) was measured with transposed rect weights.
+
 ### rav1d-safe Threading Race Condition (RESOLVED)
 DisjointMut overlap panic was caused by frame threading. Fix: `max_frame_delay=1`
 gives tile parallelism without frame threading. Default threads now 0 (auto-detect).

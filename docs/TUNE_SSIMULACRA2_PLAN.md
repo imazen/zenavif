@@ -1,13 +1,45 @@
 # `Tune::Ssimulacra2` for zenrav1e — libaom mechanism study + implementation plan
 
-**Status: design complete (2026-07-02), implementation pending.** Produced by a source-level
-study of libaom's `--tune=ssimulacra2` at the exact rev we benchmark against
+**Status: implemented 2026-07-02 (items 1–5), per-step A/B measurement in flight.** Produced
+by a source-level study of libaom's `--tune=ssimulacra2` at the exact rev we benchmark against
 (`632172a468f5e91c5b40daaa0a91f4a291c63af4`, aomenc 3.14.1). Motivation: that tune alone
 measures **−13.33% median BD-rate** (ssim2-scored) over aom cpu0-default on our photo harness
 (`docs/RD_GAP_VS_LIBAOM.md` — the tier-2 "aom at its absolute best" target is aom cpu0+this
 tune, vs which current zenrav1e master is +15.67% median). Implementing an equivalent tune is
 the largest single known lever, and the general shape (a `Tune` variant driving allocation +
 RDO reweighting) is the template for other metric tunes (butteraugli, etc.).
+
+## Implementation status (2026-07-02)
+
+Items 1–5 implemented in the `zenrav1e--tune` workspace as `Tune::Ssimulacra2`
+(commit `ec6f3c89` and successors on top of master), each mechanism behind a
+dev-only `ZENRAV1E_SS2_STAGE` env gate (1=chroma deltaq, 2=+frame λ, 3=+QM
+curves, 4=+trellis λ, 5=+variance boost) for cumulative A/B sweeps; gates strip
+at landing. Tune-off byte-identity vs master proven (cavif Q60/Q85, master
+binary vs workspace binary, and stage-0 vs Psychovisual). Item 5 uses the plan's
+segmentation channel but reproduces aom's full qindex-domain damping
+(`(base+544)/1279`, cap 80, MINQ+1) rather than raw `qstep_ratio²`, converting
+the boosted qindex back to a scale via `(ac_q(base)/ac_q(sb_qindex))²`.
+
+**Two pre-existing zenrav1e QM bugs found and fixed on the way (zenrav1e#29,
+both landed on master 2026-07-02):** the QM implementation this plan builds on
+was silently diverging from conforming decoders —
+1. `qm_v` was written only when the frame's u/v delta-qs differed; AV1 5.9.12
+   gates it on the sequence `separate_uv_delta_q` (always 1 here). The tune's
+   u==v chroma deltas made every QM frame corrupt to aomdec (fixed `9a8eaf61`).
+2. Every rectangular TX quantized with **transposed QM weights**: rav1e stores
+   coefficients transposed (like dav1d) and rav1d-safe's table mapping swaps
+   w/h on purpose; zenrav1e's `qm_table()` didn't. Self-consistent inside the
+   encoder, wrong on every decoder — invisible at near-flat levels 12–15,
+   catastrophic at ss2-curve levels (decoded ssim2 85.7→55.7 at cavif Q85
+   before the fix, 83.9 after; fixed `2310c7be` + transpose-pair tests).
+   The historical "with_qm(true) ≈10% BD-rate win" predates this fix and
+   deserves re-measurement at the dep bump.
+
+Harness: `scripts/rd_gap` cells grew optional butteraugli 3-norm/max columns
+(`BUTTER` env; zenavif `5e84d3f6`) implementing the metric-gaming protocol
+below; `bd_metric.py` computes BD-rate on either metric (butteraugli quality
+axis = −log distance).
 
 ## libaom mechanism (file:line at the pinned rev)
 
