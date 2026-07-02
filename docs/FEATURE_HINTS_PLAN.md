@@ -70,6 +70,8 @@ structurally exists** via segmentation + `seg_boost` (`encoder.rs:901`).
 | (iii) tx-type priors | `rdo_tx_type_decision` `rdo.rs:1896` (now exhaustive by design) | low value; re-introduces pruning risk — defer |
 | (iv) per-SB deltaq / perceptual importance | blend external importance into `segmentation_scores` before `segmentation_optimize` (`segmentation.rs:23`) | metric-tune track; evaluate on zensim-A/butteraugli, **not** ssim2 (psy-tune already optimizes SSIM-shaped distortion; global deltaq was rejected under ssim2) |
 | (v) early NONE/SPLIT forcing | degenerate case of (i) (`min==max`) | fold into (i) |
+| (vi) **content-adaptive large-block gate** (NEW 2026-07-02, RD not speed): per-image or per-SB widen `partition_range.max` 16→32/64 only where large blocks help | same `fi.partition_range` hooks as (i), but raising `max` instead of `min` | the prange (4,64) re-test on the fixed estimate split 7/22 winners (−1.8..−2.5%) vs 15/22 losers (`benchmarks/rd_gap_prange_retest_2026-07-02.tsv`) — a global default loses, but the split correlates with content; a hint that predicts "this image/SB benefits from 64-blocks" captures the wins. Global per-image head first (cheap, no per-SB risk), per-SB later |
+| (vii) **per-image `split_trial_depth` selection** (NEW 2026-07-02): choose trial-estimate depth 1 vs 2 per image | `split_trial_depth` knob landed at zenrav1e@2fac1af6 | depth-2 rescued the worst p64 outliers in the s1 ablation (o_5004 +12.3→+3.6) and improved 5/5 early p64 images but lost the wins+median rule overall at ~extra cost — i.e. it helps exactly where large-block ranking is hard. Candidate: predict when depth-2 pays (likely the same smooth/large-block-ambiguous content class as (vi) and the 8 s1 losers) |
 
 ## (C) Architecture
 
