@@ -17,6 +17,10 @@ IMG="$1"; W="$2"; H="$3"; FAM="$4"; Q="$5"; TMP="$6"
 PX=$((W*H)); base=$(basename "$IMG" .png)
 avif="$TMP/${base}.q${Q}.avif"; decp="$TMP/${base}.q${Q}.dec.png"
 
+source "$(dirname "${BASH_SOURCE[0]}")/cell_cache.sh"
+rd_cache_row_key "$CAVIF" "$IMG" "zr" "q=$Q" "s=$SPEED" "d=$DEPTH" "butter=${BUTTER:+on}"
+if row=$(rd_cache_row_get); then printf '%s\n' "$row"; exit 0; fi
+
 t0=$(date +%s.%N)
 "$CAVIF" -f -Q "$Q" -s "$SPEED" --depth "$DEPTH" -o "$avif" "$IMG" > "$TMP/${base}.q${Q}.enc.log" 2>&1
 rc=$?; t1=$(date +%s.%N)
@@ -25,6 +29,17 @@ enc_ms=$(python3 -c "print(f'{($t1-$t0)*1000:.1f}')")
 
 bytes=$(stat -c%s "$avif")
 bpp=$(python3 -c "print(f'{$bytes*8/$PX:.5f}')")
+
+rd_cache_score_key "$avif" "$IMG" "$SAVE_PNG" "$SCORER" "${BUTTER:-off}"
+if sc=$(rd_cache_score_get); then
+  read -r ss b3 bmax <<< "$sc"
+  rm -f "$avif"
+  row=$(printf 'zenrav1e\tdefault\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$Q" "$bytes" "$bpp" "$ss" "$enc_ms" "$b3" "$bmax")
+  rd_cache_row_put "$row"
+  printf '%s\n' "$row"
+  exit 0
+fi
+
 "$SAVE_PNG" "$avif" "$decp" > /dev/null 2>&1 || { echo "DECFAIL zenrav1e Q$Q"; exit 1; }
 ss=$("$SCORER" image "$IMG" "$decp" 2>/dev/null | grep -oE '[0-9.]+' | head -1)
 [ -z "$ss" ] && ss="NA"
@@ -45,5 +60,8 @@ except Exception:
   [ -z "$b3" ] && b3="NA"; [ -z "$bmax" ] && bmax="NA"
 fi
 
+[ "$ss" != "NA" ] && rd_cache_score_put "$ss" "$b3" "$bmax"
 rm -f "$avif" "$decp"
-printf 'zenrav1e\tdefault\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$Q" "$bytes" "$bpp" "$ss" "$enc_ms" "$b3" "$bmax"
+row=$(printf 'zenrav1e\tdefault\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$Q" "$bytes" "$bpp" "$ss" "$enc_ms" "$b3" "$bmax")
+[ "$ss" != "NA" ] && rd_cache_row_put "$row"
+printf '%s\n' "$row"

@@ -27,6 +27,11 @@ case "$FMT" in
 esac
 
 obu="$TMP/${base}.${FMT}.q${CQ}.obu"; decy="$TMP/${base}.${FMT}.q${CQ}.dec.y4m"; decp="$TMP/${base}.${FMT}.q${CQ}.dec.png"
+
+source "$(dirname "${BASH_SOURCE[0]}")/cell_cache.sh"
+rd_cache_row_key "$AOMENC" "$IMG" "aom" "fmt=$FMT" "cq=$CQ" "cpu=$CPU" "extra=$EXTRA" "butter=${BUTTER:+on}"
+if row=$(rd_cache_row_get); then printf '%s\n' "$row"; exit 0; fi
+
 t0=$(date +%s.%N)
 "$AOMENC" --cpu-used="$CPU" --end-usage=q --cq-level="$CQ" $IN --passes=1 --lag-in-frames=0 \
   --color-primaries=bt709 --transfer-characteristics=srgb $MC $EXTRA --output="$obu" "$y4m" > "$TMP/${base}.${FMT}.enc.log" 2>&1
@@ -56,4 +61,6 @@ except Exception:
 fi
 
 rm -f "$obu" "$decy" "$decp"
-printf 'libaom\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$FMT" "$CQ" "$bytes" "$bpp" "$ss" "$enc_ms" "$b3" "$bmax"
+row=$(printf 'libaom\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$FMT" "$CQ" "$bytes" "$bpp" "$ss" "$enc_ms" "$b3" "$bmax")
+[ "$ss" != "NA" ] && rd_cache_row_put "$row"
+printf '%s\n' "$row"

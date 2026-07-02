@@ -12,7 +12,18 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SAMPLE="${SAMPLE:-$HERE/sample_images.tsv}"
 OUT="${OUT:-$HERE/rd_gap_results.tsv}"
-WORK="${WORK:-/mnt/v/output/zenavif/rd_gap_work}"; mkdir -p "$WORK"
+# PID-suffixed default: two concurrent runs sharing one WORK dir clobber
+# each other's per-image temp dirs and silently LOSE ROWS (the `rm -rf $tmp`
+# per worker races the other run's `cat $part`). Override WORK explicitly
+# only with per-run-unique paths.
+WORK="${WORK:-/mnt/v/output/zenavif/rd_gap_work.$$}"; mkdir -p "$WORK"
+# Deterministic cell cache (see cell_cache.sh): auto-enable when the standard
+# cache dir exists (on the sweep box it lives inside the disk snapshot, so it
+# survives teardown/restore). RD_CACHE=off bypasses; timing sweeps MUST bypass.
+if [ -z "${RD_CACHE_DIR:-}" ] && [ -d /home/lilith/sweep_cache ]; then
+  export RD_CACHE_DIR=/home/lilith/sweep_cache
+fi
+[ -n "${RD_CACHE_DIR:-}" ] && echo "[rd_gap] cell cache: $RD_CACHE_DIR (RD_CACHE=off to bypass; cached rows replay original enc_ms)"
 JOBS="${JOBS:-6}"
 QGRID_ZR="${QGRID_ZR:-30 40 50 55 60 65 70 75 80 85 90 95}"    # cavif quality (higher = better)
 CQGRID_AOM="${CQGRID_AOM:-8 16 24 32 40 48 56 63}"             # aomenc cq-level (lower = better)

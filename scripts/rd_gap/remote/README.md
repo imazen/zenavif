@@ -134,3 +134,29 @@ missing — nothing half-works.
   `SAVE_PNG`, `SCORER`, `AOMENC`, `AOMDEC` to the box's builds and `JOBS=22`.
 - provision-time apt installs are fine here (one interactive pet box, not a
   fleet image; fleet images must bake dependencies — see global CLAUDE.md).
+
+## Iteration speed (added 2026-07-02)
+
+**Deterministic cell cache** (`../cell_cache.sh`, wired into both cell scripts):
+row-level (encoder-binary × image × knobs → full row; hit skips everything) +
+score-level (avif-bytes × decoder × scorers → ssim2/butteraugli; hit skips
+decode+score — shares scores across arms when a gated knob produces identical
+bytes on some content). Auto-enabled when `/home/lilith/sweep_cache` exists
+(create it on the box once; it lives inside the disk snapshot so the cache
+SURVIVES teardown/restore). ~1000× on a row hit (measured 18.5s → 0.017s).
+Key includes every `ZENRAV1E_*/ZENRAVIF_*/RAV1E_*/AOM_*` env var + binary +
+image content hashes; declare ad-hoc knobs via `RD_CACHE_EXTRA`. **Timing
+sweeps must set `RD_CACHE=off`** — cached rows replay the original enc_ms.
+Practical effect: re-running a baseline arm is free; aom baselines never
+re-encode; a failed sweep re-run only redoes missing cells.
+
+**Two-stage fitting grids**: for multi-arm FITTING, rank arms on a coarse grid
+first (`QGRID_ZR="30 50 60 75 85 95"` = half the cells; BD ordering is stable
+with 6 points), then confirm ONLY the winner on the full 12-point grid.
+Final landing verdicts always use the full grid.
+
+**Arm-parallel boxes**: `BOX_NAME=zenavif-sweep-2 FROM_SNAPSHOT=auto
+./provision.sh` brings up a second box from the same snapshot in ~4 min;
+`BOX_NAME=... ./run_remote.sh ...` targets it. Cost per cell is identical
+(you pay cell-seconds either way) — wall-clock divides by the box count.
+Same teardown discipline per box.
