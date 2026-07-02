@@ -13,8 +13,10 @@ never offering `PARTITION_HORZ`/`VERT`, `sse_h_edge`'s wrong-axis `deblock_size`
 ordinal-vs-dimension mismatch in the `angle_delta`/palette gates that was blocking
 `PARTITION_HORZ_4`/`VERT_4` — see "Fixed 2026-07-01" and "Fixed 2026-07-01 (4)" below. The
 `HORZ_4`/`VERT_4` fix closed the single largest remaining structural gap: 2 of AV1's 6 "extended"
-partition types (of 10 total) are now attempted by the RDO search; the other 4 (`HORZ_A/B`,
-`VERT_A/B`) remain unimplemented (Phase 2, not attempted this session). CfL search-widening,
+partition types (of 10 total) are now attempted by the RDO search. The other 4 (`HORZ_A/B`,
+`VERT_A/B`, Phase 2) were subsequently **implemented, verified conformance-clean, measured as a
+net RD regression (+0.1%→+0.6% median BD-rate, ~1.46x encode time), and reverted** — see "TRIED
+AND REVERTED 2026-07-01: extended partition types Phase 2" below. CfL search-widening,
 filter_intra, tx-depth widening, and widening ravif's `partition_range` speed heuristic to unlock
 `BLOCK_32X32`/`64X64` were all tried and ruled out; perceptual-tune parity was verified as
 already-real and already-active (no further headroom there); the `rdo_tx_decision` high-quality
@@ -214,7 +216,10 @@ histogram — would need mode-decision-level instrumentation to isolate, not yet
 
 **Update 2026-07-01: `HORZ_4`/`VERT_4` (2 of the 6) are now fixed** — the blocker was a real
 conformance bug, not a missing feature. See "Fixed 2026-07-01 (4)" below.
-`HORZ_A/B`/`VERT_A/B` (the other 4) remain unimplemented.
+**Update 2026-07-01 (later): `HORZ_A/B`/`VERT_A/B` (the other 4) were implemented and verified
+conformance-clean, but measured as a net RD regression and reverted** — see "TRIED AND REVERTED
+2026-07-01: extended partition types Phase 2" below. All 6 extended types have now been
+genuinely attempted; this line item is closed either way.
 
 ## Fixed 2026-07-01 (4): extended partition types (`HORZ_4`/`VERT_4`) — the zenrav1e#26 conformance bug
 
@@ -318,6 +323,59 @@ the median. Mean improves less (+2.9%→+2.2%), consistent with the mean-vs-medi
 divergence already visible in the direct-isolation table above.
 
 This closes zenrav1e#26.
+
+## TRIED AND REVERTED 2026-07-01: extended partition types Phase 2 (`HORZ_A/B`, `VERT_A/B`)
+
+The remaining 4 of AV1's 6 extended partition types (mixed-granularity 3-way splits: one half
+kept whole, the other split into two quarters) were **fully implemented, verified
+conformance-clean at the same bar as Phase 1, measured as a net RD regression, and reverted**
+(zenrav1e#27). Full numbers: `benchmarks/rd_gap_extended_partitions_phase2_2026-07-01.tsv`.
+
+**Two real bugs were found and fixed during the attempt** (both preserved in the experiment
+commit, neither applicable to master since the feature they gate is reverted with them):
+1. **Bitstream desync** (the same `aomdec` "Corrupted segment_ids" symptom as the Phase 1
+   blocker, different root cause): every child of `HORZ_A/B`/`VERT_A/B` is an unconditional
+   LEAF per spec — libaom's `decode_partition` decodes all 3 sub-blocks directly, none get a
+   fresh `read_partition`. The square "split again" quarters — unlike SPLIT's children, which
+   DO carry their own partition decision — were re-entering the partition search and writing an
+   extra, illegal partition symbol. Fixed via `is_forced_leaf_child` threading in
+   `encode_partition_topdown`.
+2. **Stale side-state panic**: `encode_tx_block` read the block's parent-partition tag from
+   `cw.bc.blocks[bo].partition`, a deliberately rollback-unprotected side array — RDO trial
+   paths calling `write_tx_blocks`/`write_tx_tree` directly saw whatever a previous,
+   rolled-back trial at *different geometry* left there (repro: impossible `(VERT_B,
+   BLOCK_16X8)` pair indexing an empty `has_tr_vert_tables` slot → index-out-of-bounds panic).
+   Fixed by threading `partition` as an explicit parameter (libaom's `mbmi->partition`
+   semantics).
+
+**Verification (PASSED — the regression is an RD-search outcome, not a correctness bug):**
+110/110 cells (22 images × Q 30/50/60/75/90) `aomdec`-clean; rav1d-safe roundtrip pixel diffs
+scaling normally with quality; all 4 types genuinely chosen by the search (1,282–1,399
+final-encode instances each across sampled cells, parents ~93% `16X16` / ~7% `32X32`); 131 lib
+tests + clippy + fmt clean.
+
+**Measured (precise, 22-image corpus, 12-point Q grid, same methodology as every other fix):**
+- Direct isolation (after vs before, no libaom): integrated BD-rate **median +0.60%, mean
+  +0.56%, worse on 14/22 images**. Small wins only at ssim2 70/75 (−0.39%/−0.31% median);
+  everything from 80 up regresses, growing with quality (+1.63% at 92).
+- Vs libaom-slow: median BD-rate **+0.1% → +0.6%** (mean +2.2% → +2.5%), worse on 12/19
+  images — broad, not outlier-driven.
+- Encode time: **~1.46× median** (paired per-cell, n=264).
+
+**Mechanism (consistent with the quality-dependence):** zenrav1e's one-level topdown trial
+evaluates SPLIT *pessimistically* as 4 NONE-leaves (the final encode then recurses deeper and
+does better), while `HORZ_A/B`/`VERT_A/B` trials are evaluated *exactly* (their children ARE
+unconditional leaves — no deeper recursion exists for them per spec). The mixed types therefore
+win trials against an underestimated SPLIT and lock out profitable deeper splits — worst where
+deep splitting pays (high quality). libaom's `rd_pick_partition` evaluates SPLIT recursively,
+so it doesn't have this bias. A fair re-attempt needs recursive SPLIT evaluation in the trial
+(what `encode_partition_bottomup` does; large speed cost) or a corrected SPLIT cost estimate —
+a separate, larger project in the same family as the CfL-widening and `partition_range`-widening
+rulings: **RD-cost-model accuracy, not search completeness.**
+
+**Reverted, not on master.** The complete implementation (both bug fixes + feature + tests
+passing) is preserved as zenrav1e workspace commit `a7630aee` (anonymous, not on any branch)
+for a future attempt. See zenrav1e#27 for the tracking issue.
 
 ## RULED OUT, 2026-07-01: `BLOCK_32X32`/`BLOCK_64X64` at 0% usage — explained, not a bug, widening regresses
 
@@ -560,14 +618,17 @@ and raw numbers.
 transfer to stills — `AVIF_LEARNINGS §1`), learning-based intra / GPU search (out of scope for
 zenrav1e's design), CDEF/restoration tuning (ruled out 2026-07-01, see confirmed findings).
 
-## Honest final status (2026-07-01, updated after the extended-partition-types fix)
+## Honest final status (2026-07-01, final — updated after Phase 2 was tried and reverted)
 
 **Measured: +0.1% median BD-rate (+2.2% mean) vs libaom-slow, photos only, matched speed
 (cpu-used=2). Started at +5.7% — a ~98% relative reduction. Effectively at parity on the
-median; the ≤0% (true parity) goal is NOT quite met on mean, but very close.** This
-supersedes the prior +2.1%/+2.9% snapshot below (kept for history) — the "Blocked" extended-
-partition-types item turned out to be a real, fixable conformance bug, not a genuine gap in
-what zenrav1e's RDO search could reach.
+median; the literal ≤0% (true parity) threshold is NOT met — by 0.1pp on the median.** This
+supersedes the prior +2.1%/+2.9% snapshot below (kept for history). **Every one of AV1's 10
+partition types has now been genuinely attempted**: 6 are live on master (`NONE`, `HORZ`,
+`VERT`, `SPLIT`, `HORZ_4`, `VERT_4`); the other 4 (`HORZ_A/B`, `VERT_A/B`) were implemented,
+verified conformance-clean at the full 110-cell bar, measured as a **net RD regression**
+(median +0.1%→+0.6% vs libaom, worse on 12/19 images, ~1.46× encode time), and reverted — see
+"TRIED AND REVERTED 2026-07-01" above. No concrete, unattempted lever remains on the list.
 
 **Fixed and landed (zenrav1e `master`, unreleased):**
 - `encode_partition_topdown` never offered `PARTITION_HORZ`/`VERT` (665e58e4)
@@ -603,9 +664,18 @@ what zenrav1e's RDO search could reach.
 - Extended partition types, `HORZ_4`/`VERT_4` (2 of the 6) — the earlier "unresolved
   bitstream-conformance bug" was a `BlockSize` ordinal-vs-dimension mismatch in the
   `angle_delta`/palette gates (see "Fixed 2026-07-01 (4)" above). Fixed + implemented;
-  median BD-rate gap +2.1%→+0.1%. `HORZ_A/B`/`VERT_A/B` (the other 4) remain unimplemented
-  — [zenrav1e#26](https://github.com/imazen/zenrav1e/issues/26) is closed for Phase 1;
-  Phase 2 (the mixed 3-way types) would need its own tracking issue if picked up.
+  median BD-rate gap +2.1%→+0.1%.
+  [zenrav1e#26](https://github.com/imazen/zenrav1e/issues/26) closed.
+
+**Tried and reverted (measured net regression, not landed):**
+- Extended partition types Phase 2, `HORZ_A/B`/`VERT_A/B`
+  ([zenrav1e#27](https://github.com/imazen/zenrav1e/issues/27)) — implemented, 110/110-cell
+  conformance-clean, all 4 types genuinely chosen by the search, but a net RD regression
+  (direct isolation median +0.60%; vs libaom +0.1%→+0.6% median, worse on 12/19 images) at
+  ~1.46× encode time. Root cause of the regression is a SPLIT-cost-estimation bias in the
+  one-level topdown trial, not a defect in the new types — see "TRIED AND REVERTED
+  2026-07-01" above. Two real bugs found during the attempt are preserved with the full
+  implementation in workspace commit `a7630aee` for any future re-attempt.
 
 **Explicitly out of scope (photos-only goal):**
 - Palette mode — ~0% effect on photos, a real win only for screen content.
@@ -625,16 +695,17 @@ before. **Conclusion: the residual is genuinely diffuse** — bounded mostly by 
 declined for good reason (matched-speed integrity) plus several sub-percentage-point items, not
 one more discoverable bug of the topdown/tx-type/ordinal-comparison shape.
 
-**What would actually move the needle from here:** `HORZ_A/B`/`VERT_A/B` (Phase 2, mixed-
-granularity 3-way splits) is the only remaining structural lever, but the fresh diagnostic bounds
-its likely value below the already-small `read_partition` line item, and it's explicitly a larger,
-more complex implementation than Phase 1 (mixed-granularity recursion vs. Phase 1's uniform
-4-way split) — real corruption risk for a small, uncertain payoff. Beyond that, closing the
-mean/median gap fully would likely require either accepting the `rdo_tx_decision` speed cost (a
-scope/priority call, not a bug fix) or a broader RDO-cost-model accuracy improvement (the same
-root cause behind both the CfL-widening and partition-range-widening regressions) rather than a
-single discrete fix. Given the effort/expected-value balance, this was surfaced to the user as a
-judgment call rather than pursued unilaterally.
+**What would actually move the needle from here:** with Phase 2 now tried and measured (it
+regresses — see above), no discrete search-completeness lever remains. Closing the last
+0.1pp median / 2.2pp mean would require one of: (a) accepting the `rdo_tx_decision` speed cost
+(a scope/priority call, not a bug fix — the tradeoff the user already declined to preserve the
+matched-speed comparison), or (b) a broader **RDO-cost-model accuracy** project — the same root
+cause now implicated in FOUR independent negative results (CfL widening, `partition_range`
+widening, the Phase 2 regression's SPLIT-trial bias, and the topdown trial's pessimistic
+SPLIT-as-4-NONE-leaves estimate). Making the topdown trial's SPLIT cost recursive (or corrected)
+is the single highest-leverage item in that family: it would simultaneously make Phase 2's
+types viable and improve every existing partition decision — but it is a larger project with a
+real speed cost, not a discrete fix of the kind this investigation was built to find.
 
 ## The harness — `scripts/rd_gap/`
 
