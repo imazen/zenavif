@@ -10,11 +10,11 @@
 #                                  #   + the images they reference
 #   SYNC_DELETE=1 ./sync.sh        # exact mirror (delete remote files gone locally)
 #
-# Synced repos (see common.sh ZEN_REPOS): ravif zenrav1e zenrav1e--phase2v2
-# zenavif zenanalyze fast-ssim2. zenrav1e--phase2v2 is required while ravif's
-# dev-only [patch.crates-io] points at it; zenanalyze is a zenavif path
-# dev-dependency (needed to build the examples). If you repoint the patch at a
-# different workspace, add that workspace to ZEN_REPOS.
+# Synced repos: see common.sh ZEN_REPOS (a trailing '?' marks a tree optional —
+# skipped with a note when absent locally, e.g. a dev-patch export that was
+# cleaned up). zenanalyze is a zenavif path dev-dependency (needed to build the
+# examples). If you point a dev-patch at a different workspace/export, add that
+# tree to ZEN_REPOS.
 source "$(dirname "$0")/common.sh"
 load_token
 require_box_ip
@@ -33,8 +33,13 @@ declare -A EXTRA_EXCLUDES=(
 [ "${SYNC_DELETE:-0}" = 1 ] && RSYNC_BASE+=(--delete)
 
 for r in "${ZEN_REPOS[@]}"; do
+  optional=""
+  case "$r" in *\?) optional=1; r="${r%\?}";; esac
   src="$HOME/work/zen/$r"
-  [ -d "$src" ] || die "missing local repo: $src (ZEN_REPOS in common.sh is stale?)"
+  if [ ! -d "$src" ]; then
+    [ -n "$optional" ] && { note "SKIP optional zen/$r (not present locally)"; continue; }
+    die "missing local repo: $src (ZEN_REPOS in common.sh is stale?)"
+  fi
   note "sync zen/$r ..."
   # shellcheck disable=SC2086  # EXTRA_EXCLUDES is a flag string, split intended
   box_rsync "${RSYNC_BASE[@]}" ${EXTRA_EXCLUDES[$r]:-} "$src/" "root@$BOX_IP:/home/lilith/work/zen/$r/"

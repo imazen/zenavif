@@ -18,8 +18,11 @@ encode-loop search, plus per-SB hints that safely prune search. Companion to
    qm{on,off} × {444,420} × bd{8,10} × {YCbCr,RGB}, q∈{5,15,30,50,70,85,95}, with
    `encode_ms`/`decode_ms` (`~/work/zen/DATA_PROVENANCE.md:571-832`).
 3. **Critical drift caveat: canonical encodes used pre-parity zenrav1e `22a58d58`.** Master
-   now has 5 RD fixes (through `b073182c`, parity −0.65% median). Knob→bytes labels drifted
-   1-5%; Phase 0 must quantify before training knob heads.
+   now has 5 RD fixes + 2 QM fixes + tune infra (`64a081d4`). **QUANTIFIED 2026-07-02
+   (P0.2, see the P0 phase entry):** aggregate |Δbytes| p50 = 0.21% but knob-correlated —
+   s2 −3.36% / s4 −1.23% signed p50 vs s6/s8 ≈ 0; ssim2 |Δ| p90 = 1.36 pts; encode_ms
+   1.36-2.59× on every cell. Speed/qm heads + encode_ms LUTs need re-encoded labels;
+   subsampling/bit-depth/color heads can train on existing labels.
 
 ## Recommended v1 scope
 
@@ -55,8 +58,11 @@ implementation or family routing to another codec, not a knob.
 
 **zenanalyze has no ROI API** (only `mirror_tile_packed` padding for tiny inputs,
 `src/lib.rs:570-621`). Running `analyze_features_rgb8` on ~240 64×64 crops/MP repeats per-call
-setup (~265 KB allocs, plan build) and degenerates the stripe sampler — cost unmeasured,
-assume bad; a proper **tiled single-pass mode is a zenanalyze v2 additive feature**, not v1.
+setup (~265 KB allocs, plan build) and degenerates the stripe sampler — **cost now measured
+(P0.1, section D): 42-106 µs/call on percentile-free subsets = 10-25 ms/MP (fine), but 799
+µs/call if the set includes percentile features (<128 px tile-refill), and ~90% of a 64² call
+is per-call overhead** — so a proper **tiled single-pass mode is a zenanalyze v2 additive
+feature** worth ~5-10×, not v1.
 Meanwhile **zenrav1e already computes per-block features**: `ActivityMask::from_plane`
 (per-8×8 luma variance, `activity.rs:23`) and per-block
 `spatiotemporal_scores`/`segmentation_scores` (`encoder.rs:811,814,850`) feeding k-means
@@ -90,19 +96,87 @@ structurally exists** via segmentation + `seg_boost` (`encoder.rs:901`).
 - **v1 hint producer**: derive per-SB ranges from zenrav1e's *own* ActivityMask (zero
   cross-crate data); zenanalyze tiled mode is the v2 upgrade once its cost is measured.
 
-## (D) Cost model
+## (D) Cost model — MEASURED 2026-07-02 (P0.1)
 
-Measured: full-SUPPORTED zenanalyze = **9.5 ms at 4 MP** RGB8 (AVX2, no native; README
-"Performance"); tier costs at 4 MP: T1 ≈1 ms, T2 ≈2 ms, T3 ≈3 ms, Palette ≈1 ms. zenrav1e s2
-≈ **0.088 Mpx/s ≈ 11 s/MP** (RD_GAP); even s8 is ≫100× the analysis cost. Analysis is free at
-any speed tier; no 1 MP/64×64 numbers exist — P0 measures them (zenbench, 4-size ×
-tier-subset grid per the sweep discipline).
+zenbench grid on **real photo crops** (4 distinct crops/size; 64²/256² from
+clean-picker-corpus renditions, 1024²/2048² from FiveK photos, 4096² = 2×2 mosaics of
+distinct FiveK 2048² crops), `analyze_features` RGB8, AVX2, no `target-cpu=native`.
+Full data: `zenanalyze/benchmarks/feature_cost_grid_2026-07-02.tsv` (+ raw zenbench JSON at
+`/mnt/v/output/zenanalyze/per_tier_cost_grid_2026-07-02.json`); harness
+`zenanalyze/examples/per_tier_cost_grid.rs`; crops builder
+`zenanalyze/scripts/make_costgrid_crops.py`. Medians of 4 crops:
+
+| subset (cumulative passes) | 64² | 256² | 1024² (1 MP) | 2048² (4 MP) | 4096² (16.8 MP) |
+|---|--:|--:|--:|--:|--:|
+| t1 (full Tier-1 kernel) | 42 µs | 824 µs | 5.59 ms | 8.97 ms | 19.0 ms |
+| t1+t2 | 43 µs | 837 µs | 5.45 ms | 8.59 ms | 18.9 ms |
+| t1+t2+t3 | 106 µs | 2.12 ms | 7.45 ms | 12.4 ms | 28.1 ms |
+| t1+t2+t3+palette | 106 µs | 2.04 ms | 7.45 ms | 12.6 ms | 27.4 ms |
+| full `SUPPORTED` (97) | **799 µs** | 2.55 ms | 8.21 ms | 14.3 ms | 32.1 ms |
+
+Findings (all measured, workstation 7950X):
+
+1. **Scaling is strongly SUB-LINEAR** — the stripe/block sampling budgets are crate
+   invariants, so per-pixel cost falls with size (t1: 10.3 ns/px at 64² → 1.13 ns/px at
+   16.8 MP). A linear `total = α + β·px` fit is therefore a poor model shape: fitted over
+   the whole grid it gives (α, β) = t1 (2.33 ms, 1.04 ns/px), t1t2 (2.40 ms, 1.02),
+   t1t2t3 (3.32 ms, 1.53), t1t2t3_pal (3.30 ms, 1.50), full (3.42 ms, 1.79) — usable
+   ONLY ≥1 MP; it over-predicts small sizes by ~50× because the true curve saturates.
+   **Use the table (or the per-64² direct numbers) below 1 MP, the fit above.**
+2. **The real fixed per-call overhead is the direct 64² measurement**: 42-106 µs
+   (subset-dependent) — ~90% of a 64² call is per-call setup (~265 KB allocs + plan
+   build + sampler floors), since the same pixels inside a 16.8 MP call cost ~1-1.7 ns/px.
+3. **Tile-refill cliff at <128 px (per-SB landmine):** `full SUPPORTED` at 64² costs
+   **799 µs — 7.5× t1t2t3** — because the percentile/windowed families
+   (`aq_map_p*`, `noise_floor_*`, `quant_survival_*`, `luma_kurtosis`, …) drop below
+   `MIN_TILE_DIM = 128` and trigger a mirror-tile to 128² plus a SECOND full analyze
+   pass (zenanalyze `src/lib.rs` tiny-input refill). **Per-SB hinting must request a
+   percentile-free subset** (t1 → t1t2t3_pal are all safe: 42-106 µs/call).
+4. **Per-SB affordability at 64×64 (≈240 SB/MP):** t1 = 10.1 ms/MP, t1t2t3 = 25.4 ms/MP
+   of added analysis. vs zenrav1e s2 ≈ 11 s/MP that is 0.09-0.23% — free. Even at the
+   fast end (s8 ≈ 0.5-1 s/MP) it is ~1-3% — acceptable for a fast-mode-only hint, but
+   the per-call fixed cost dominates (point 2), so the zenanalyze **v2 tiled
+   single-pass mode remains the right upgrade** (shares setup across SBs; expected
+   ~5-10× cheaper than 240 independent calls).
+5. Full-frame analysis stays negligible at every size that matters: 8.2 ms at 1 MP /
+   32 ms at 16.8 MP vs multi-second encodes.
+6. Prior README-derived numbers ("9.5 ms at 4 MP full-SUPPORTED") were measured on
+   different content; real-photo crops cost ~14 ms at 4 MP. Content matters ~±15%
+   (crop spread in the TSV); the ranking and orders of magnitude are unchanged.
 
 ## Phases + gates
 
-- **P0 (measure)**: (1) zenbench zenanalyze cost grid incl. 64×64; (2) drift check: re-encode
-  22-image × 7q × 8-cell sample on post-parity zenrav1e vs canonical rows — if |Δbytes|
-  median >2%, knob heads need fresh labels.
+- **P0 (measure) — DONE 2026-07-02.**
+  **(1) Cost grid**: measured, see section (D). 64×64 per-SB analysis is affordable
+  (42-106 µs/call on percentile-free subsets; 0.09-0.23% of s2 encode time) with two
+  hard constraints: request a percentile-free FeatureSet (else the <128 px tile-refill
+  costs 7.5×) and treat the per-call fixed overhead (~90% of a 64² call) as the v2
+  tiled-mode motivation.
+  **(2) Label drift** (`benchmarks/drift_check_2026-07-02.tsv`, raw at
+  `/mnt/v/output/zenavif/drift-2026-07-02/` + Tower; harness
+  `examples/drift_reencode.rs` + `scripts/rd_gap/sample_drift_cells.py` +
+  `scripts/rd_gap/remote/run_drift.sh`, Hetzner ccx63): 8 images × 6 cells
+  (s2/s4/s4-bd10/s6-420/s6-rgb/s8-noqm) × 7 q = 336 cells, two legs.
+  *Control leg* (registry zenrav1e 0.1.4): reproduced the canonical dataset
+  **336/336 byte-identical, ssim2 exact** — route, planner fingerprints (336/336
+  match), decoder, and scorer all validated; every master-leg delta is pure zenrav1e.
+  *Master leg* (zenrav1e `64a081d4`): |Δbytes| **p50 = 0.21%** (aggregate gate ≤2%
+  PASSES), p90 = 4.50%, max 12.3%; 139/336 byte-identical. **BUT the drift is
+  knob-correlated, not noise**: signed Δbytes p50 by cell — s2 **−3.36%** (0/56
+  identical), s4 −1.23%, s4-bd10 −1.13%, s6-420 ±0 (45/56 identical), s6-rgb ±0
+  (38/56), s8-noqm ±0 (56/56 identical). ssim2 |Δ| p90 = **1.36 pts** (max 5.5,
+  mean +0.21 — better quality AND smaller files on slow speeds, as the parity fixes
+  intend). encode_ms drifted **everywhere**: master/base p50 ratio 1.36× (s6-420) to
+  2.59× (s2) — even byte-identical s8-noqm costs 1.66×.
+  **Verdict — P1 go/no-go: SPLIT.** The aggregate ≤2% gate passes, but knob heads
+  that must *rank speeds/qm* (and any encode_ms/time-budget LUT) would train on
+  labels biased exactly along the ranked axis (s2 bytes shrink 3.4% while s8 doesn't
+  move; s2 encode cost 2.6×). → **(a) speed/qm heads + all encode_ms LUTs: re-encode
+  labels after the zenrav1e dep bump** (fresh sweep, not retrofit). **(b)
+  subsampling/bit-depth/color-model heads: existing labels are usable now** — their
+  cells' bytes are stable (420/rgb/bd10-vs-bd8 contrasts drift ≤1.1% and mostly 0),
+  so a P1 scoped to those heads can proceed on `2026-07-01-zensimA` labels. No
+  retraining was started (per P0 scope).
 - **P1 (global, existing data)**: retrain picker on `2026-07-01-zensimA/zenavif_lossy` with
   heads for subsampling/bit-depth/color/qm + budget-gated rdo_tx_decision rule + grayscale
   rule. Gate: held-out test-split bytes at matched zensim-A ≥2% below current picker, no p95

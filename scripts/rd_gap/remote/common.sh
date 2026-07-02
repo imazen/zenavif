@@ -27,7 +27,13 @@ KNOWN_HOSTS="$HOME/.ssh/known_hosts.zenavif-sweep"     # per-box file (IPs get r
 # zenpixels + zencodec ride along because zenavif's local (gitignored)
 # .cargo/config.toml `paths`-overrides into them; that config file syncs with
 # the zenavif tree, so its targets must exist on the box too.
-ZEN_REPOS=(ravif zenrav1e zenrav1e--tune zenavif zenanalyze fast-ssim2 zenpixels zencodec)
+# zenrav1e--tune was removed at the tune-ss2 landing (2026-07-02). A trailing
+# '?' marks a tree OPTIONAL: sync.sh skips it with a note instead of dying.
+# zenrav1e--drift-master is the P0 drift-check dev-patch target (regenerate:
+#   mkdir -p ~/work/zen/zenrav1e--drift-master && \
+#     git -C ~/work/zen/zenrav1e archive <rev> | tar -x -C ~/work/zen/zenrav1e--drift-master
+# see FEATURE_HINTS_PLAN.md P0 + run_drift.sh).
+ZEN_REPOS=(ravif zenrav1e 'zenrav1e--drift-master?' zenavif zenanalyze fast-ssim2 zenpixels zencodec)
 AOM_SRC="$HOME/work/aom"
 AOM_PIN="632172a468f5e91c5b40daaa0a91f4a291c63af4"  # docs/RD_GAP_VS_LIBAOM.md pinned rev
 RD_GAP_DIR="/home/lilith/work/zen/zenavif/scripts/rd_gap"  # same path on both ends

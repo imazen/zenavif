@@ -1,0 +1,62 @@
+# P0 label-drift check: canonical zenavif_lossy (zenrav1e 22a58d58-era labels) vs zenrav1e master 64a081d4
+# host=zenavif-sweep-1 (Hetzner ccx63, 48c) date=2026-07-02 zenavif_git=f8d2c0f harness=examples/drift_reencode.rs
+# sample: 8 images x 6 cells (s2,s4,s4-bd10,s6-420,s6-rgb,s8-noqm) x 7 q = 336 cells (scripts/rd_gap/sample_drift_cells.py)
+# legs: base = registry zenrav1e 0.1.4 (reproduced stored bytes 336/336 EXACTLY, ssim2 exact -- route control)
+#       master = dev-patched zenrav1e 64a081d4 export (5 partition-search fixes + 2 QM fixes + tune infra)
+# full row TSVs + all encoded avifs: /mnt/v/output/zenavif/drift-2026-07-02/ (see drift-2026-07-02.pointer.md)
+metric	scope	value
+cells	all	336
+byte_identical	all	139
+abs_dbytes_pct_p50	all	0.207
+abs_dbytes_pct_p90	all	4.496
+abs_dbytes_pct_max	all	12.311
+signed_dbytes_pct_mean	all	-1.154
+abs_dssim2_p50	all	0.0328
+abs_dssim2_p90	all	1.3582
+abs_dssim2_max	all	5.4774
+signed_dssim2_mean	all	+0.2130
+abs_dbytes_pct_p50	cell=s2	3.647
+signed_dbytes_pct_p50	cell=s2	-3.363
+signed_dssim2_p50	cell=s2	+0.3950
+byte_identical	cell=s2	0/56
+abs_dbytes_pct_p50	cell=s4	1.560
+signed_dbytes_pct_p50	cell=s4	-1.233
+signed_dssim2_p50	cell=s4	+0.0822
+byte_identical	cell=s4	0/56
+abs_dbytes_pct_p50	cell=s4-bd10	1.332
+signed_dbytes_pct_p50	cell=s4-bd10	-1.130
+signed_dssim2_p50	cell=s4-bd10	+0.0992
+byte_identical	cell=s4-bd10	0/56
+abs_dbytes_pct_p50	cell=s6-420	0.000
+signed_dbytes_pct_p50	cell=s6-420	+0.000
+signed_dssim2_p50	cell=s6-420	+0.0000
+byte_identical	cell=s6-420	45/56
+abs_dbytes_pct_p50	cell=s6-rgb	0.000
+signed_dbytes_pct_p50	cell=s6-rgb	+0.000
+signed_dssim2_p50	cell=s6-rgb	+0.0000
+byte_identical	cell=s6-rgb	38/56
+abs_dbytes_pct_p50	cell=s8-noqm	0.000
+signed_dbytes_pct_p50	cell=s8-noqm	+0.000
+signed_dssim2_p50	cell=s8-noqm	+0.0000
+byte_identical	cell=s8-noqm	56/56
+abs_dbytes_pct_p50	image=o_1016.png.scale216x384(82944px)	0.588
+abs_dbytes_pct_p50	image=o_1544.png.scale192x256(49152px)	0.376
+abs_dbytes_pct_p50	image=o_5338.png.scale495x640(316800px)	0.223
+abs_dbytes_pct_p50	image=o_7026.png.scale512x512(262144px)	0.032
+abs_dbytes_pct_p50	image=o_8134.png.scale640x400(256000px)	0.119
+abs_dbytes_pct_p50	image=o_8384.png.scale480x640(307200px)	0.289
+abs_dbytes_pct_p50	image=o_9252.png.scale768x768(589824px)	0.106
+abs_dbytes_pct_p50	image=o_9584.png.scale597x896(534912px)	0.167
+abs_dbytes_pct_p50	q=5	0.306
+abs_dbytes_pct_p50	q=15	0.349
+abs_dbytes_pct_p50	q=30	0.223
+abs_dbytes_pct_p50	q=50	0.106
+abs_dbytes_pct_p50	q=70	0.112
+abs_dbytes_pct_p50	q=85	0.274
+abs_dbytes_pct_p50	q=95	0.314
+encode_time_ratio_p50	cell=s2	2.586
+encode_time_ratio_p50	cell=s4	1.992
+encode_time_ratio_p50	cell=s4-bd10	1.585
+encode_time_ratio_p50	cell=s6-420	1.358
+encode_time_ratio_p50	cell=s6-rgb	1.388
+encode_time_ratio_p50	cell=s8-noqm	1.658
