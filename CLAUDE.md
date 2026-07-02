@@ -138,6 +138,17 @@ zenrav1e#27 stays open re-scoped to the trial-SPLIT-cost-accuracy dependency. Se
 `docs/RD_GAP_VS_LIBAOM.md` "TRIED AND REVERTED 2026-07-01" +
 `benchmarks/rd_gap_extended_partitions_phase2_2026-07-01.tsv`.
 
+**2026-07-02: trial-SPLIT-cost accuracy — FIXED, TRUE RD PARITY REACHED, upstream,
+release-gated.** The dependency above is resolved: `zenrav1e@b073182c` (master) refines each
+SPLIT child's trial cost to min(NONE-leaf, tell-metered child-SPLIT symbol + 4 quarter
+NONE-leaves), eliminating the pessimistic bias. Measured: **BD-rate vs libaom-slow median
++0.0695% → −0.6487% (crosses the ≤0% parity target), mean +2.1734% → +0.2373%**, improved
+16/19 images, 1.057x median encode time; 110/110 aomdec-clean + 110/110 rav1d-safe roundtrip.
+This also unblocks a Phase 2 re-attempt from `a7630aee` (the types regressed against the
+then-underestimated SPLIT). Registry builds ship pre-fix behavior until zenrav1e releases past
+0.1.4 + the dep chain bumps. See `docs/RD_GAP_VS_LIBAOM.md` "Fixed 2026-07-02" +
+`benchmarks/rd_gap_splitcost_2026-07-02.tsv`.
+
 ### rav1d-safe Threading Race Condition (RESOLVED)
 DisjointMut overlap panic was caused by frame threading. Fix: `max_frame_delay=1`
 gives tile parallelism without frame threading. Default threads now 0 (auto-detect).

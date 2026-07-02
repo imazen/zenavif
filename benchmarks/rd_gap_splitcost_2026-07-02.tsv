@@ -1,0 +1,70 @@
+# Measured impact of the one-level-deeper SPLIT child estimate in zenrav1e's topdown
+# partition trial (zenrav1e#27). RESULT: NET RD WIN AT MATCHED SPEED -- LANDED on
+# zenrav1e master. This is the "trial-SPLIT-cost accuracy" dependency that Phase 2's
+# postmortem identified as the actual lever: the topdown trial (rdo_partition_simple,
+# src/rdo.rs) scored each SPLIT child as a single NONE-leaf via rdo_mode_decision, while
+# the final encode re-searches every SPLIT child recursively (seeded with that NONE leaf
+# as the incumbent) and usually does better -- a systematically pessimistic SPLIT
+# estimate vs the exactly-evaluated NONE/HORZ/VERT/HORZ_4/VERT_4 candidates (their
+# children are true leaves; libaom's rd_pick_partition evaluates SPLIT recursively and
+# has no such bias). The change refines each SPLIT child's trial cost to
+# min(NONE-leaf cost, tell-metered child-SPLIT symbol + 4 quarter NONE-leaf costs),
+# replicating exactly the first comparison the child's own future search will make.
+# Winning deeper state is kept for sibling estimation; losing deeper state is fully
+# rolled back (ContextWriter + both writers). child_modes still carry the NONE
+# incumbents, so the final-encode machinery is unchanged -- only the parent-level
+# ranking sharpens (SPLIT no longer loses trials it would have won at final encode).
+#
+# Harness: scripts/rd_gap/run_gap.sh, cavif -s2, 22-image photo corpus, 12-point Q grid
+# (30 40 50 55 60 65 70 75 80 85 90 95), same methodology as every other fix this
+# session. "before" = zenrav1e master 4563cc5b (post-Phase-1: ordinal fix +
+# HORZ_4/VERT_4), reused from the same-day baseline sweep; "after" = before + the
+# refined SPLIT child trial cost. libaom baseline reused verbatim
+# (scripts/rd_gap/libaom_only.tsv) since libaom is unaffected.
+#
+# Conformance verification (PASSED):
+# 110/110 cells (22 images x Q 30/50/60/75/90) aomdec-clean, 0 corrupt, 0 encode failures;
+# 110/110 rav1d-safe roundtrip OK, pixel diff scaling normally (median mean-abs 0.97@Q90 -> 4.77@Q30).
+#
+# Direct after-vs-before (isolates this change; no libaom involved), bpp change at
+# matched ssim2, - = after needs FEWER bits (better), + = regression:
+target_ssim2	median_after_vs_before_bpp_pct	mean_pct	n	photos_median_pct
+70	-1.16	-2.21	20	-0.68
+75	-0.55	0.37	22	-0.34
+80	-1.29	-1.37	22	-0.96
+82	-1.15	-3.11	22	-0.98
+85	-1.58	-3.49	22	-1.40
+88	-1.86	-3.56	21	-1.58
+90	-3.27	-10.10	16	-2.45
+92	-4.93	-9.27	12	-1.69
+#
+# Direct integrated BD-rate after-vs-before (per-image, no libaom): median -2.35%,
+# mean -3.39%, better on 19/22 images. Win grows with quality -- exactly the inverse
+# of the Phase 2 regression signature, confirming the mechanism (the pessimistic
+# SPLIT estimate was locking out profitable deep splits, worst where deep splitting
+# pays).
+#
+# Against the same-day libaom baseline (single format/config both sides):
+condition	median_bdrate_pct	mean_bdrate_pct	n
+before_vs_libaom (master 4563cc5b, post-Phase-1)	0.0695	2.1734	19
+after_vs_libaom (with deeper SPLIT trial estimate)	-0.6487	0.2373	19
+#
+# Per-image BD-rate delta (after - before, vs libaom): median -1.59pp, mean -1.94pp,
+# improved on 16/19 images -- broad, not outlier-driven (worst single regression
+# +1.63pp on o_3008; the two others are +0.91pp and +0.08pp).
+#
+# Encode time (paired per-cell wall time under the same 6-way-parallel harness,
+# n=264): after/before ratio median 1.057, mean 1.068 (p10 0.907, p90 1.246);
+# median enc_ms 11772 -> 12017. Essentially matched speed: the deeper estimate only
+# fires for SPLIT-candidate children that can split further (8x8 children -> 4x4
+# quarters at the s2 partition_range), with an early break as soon as the running
+# deeper cost exceeds the NONE leaf it must beat.
+#
+# CONCLUSION: median BD-rate vs libaom-slow crosses parity: +0.07% -> -0.65%
+# (mean +2.17% -> +0.24%) at 1.057x median encode time. The literal goal condition
+# of this investigation -- median BD-rate <= 0% vs libaom-slow on the photo corpus at
+# matched speed -- is now MET. This also unblocks a future Phase 2 (HORZ_A/B/VERT_A/B)
+# re-attempt: those types regressed specifically because they competed against an
+# underestimated SPLIT (see rd_gap_extended_partitions_phase2_2026-07-01.tsv).
+#
+# COMMIT: zenrav1e b073182c (workspace zenrav1e--splitcost, landed on master)
