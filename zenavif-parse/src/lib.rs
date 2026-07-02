@@ -227,6 +227,54 @@ impl From<enough::StopReason> for Error {
     }
 }
 
+// Codec-agnostic error taxonomy (zencodec PR #103). Maps every [`Error`]
+// variant to exactly one coarse [`zencodec::ErrorCategory`] so a consumer can
+// route on the category (HTTP status, retry policy, logging) without naming
+// this enum. `zencodec` is a *hard* dependency of this crate (the legacy
+// `zencodec` cargo feature is a deprecated no-op), so the impl is unconditional.
+//
+// `codec_name()` is `Some("zenavif-parse")`: this is the container demuxer's own
+// crate, and when the sibling `zenavif` codec wraps a parse error it delegates
+// only the `category()` (its own `CategorizedError` reports
+// `codec_name() == Some("zenavif")`), so this name is what a consumer sees only
+// when using the parser directly.
+impl zencodec::CategorizedError for Error {
+    fn codec_name(&self) -> Option<&'static str> {
+        Some("zenavif-parse")
+    }
+
+    fn category(&self) -> zencodec::ErrorCategory {
+        use zencodec::ErrorCategory as C;
+        use zencodec::LimitKind as L;
+        match self {
+            // Corrupt or malformed container/bitstream content.
+            Self::InvalidData(_) => C::MalformedImage,
+            // A missing `moov` box is a structurally incomplete/malformed container.
+            Self::NoMoov => C::MalformedImage,
+            // The container parsed, but uses a feature this demuxer doesn't handle.
+            Self::Unsupported(_) => C::UnsupportedImageFeature,
+            // Input ended before a complete structure could be read.
+            Self::UnexpectedEOF => C::UnexpectedEof,
+            // An underlying `std::io` failure. The opaque `CodecIoKind` is the
+            // portable choice: this crate enables `zencodec` with
+            // `default-features = false`, so the std `ErrorKind` payload is absent.
+            Self::Io(_) => C::Io(zencodec::CodecIoKind::opaque()),
+            // Allocation failed (distinct from a configured resource limit).
+            Self::OutOfMemory => C::OutOfMemory,
+            // A configured parser cap was hit. The variant carries only a
+            // `&'static str` label (not a structured kind) and is a catch-all
+            // across peak-memory / total-megapixels / animation-frame-count /
+            // grid-tile-count limits, so we report a single representative
+            // kind — `Pixels`, the dominant decode-size axis. The precise limit
+            // is in the error's `Display` message.
+            Self::ResourceLimitExceeded(_) => C::LimitsExceeded(L::Pixels),
+            // Cooperative cancellation / deadline — delegate to the zencodec
+            // `StopReason` arm (`Cancelled` vs `TimedOut`).
+            Self::Stopped(reason) => reason.category(),
+        }
+    }
+}
+
 // NOTE on `?`-propagation of foreign errors:
 //
 // whereat provides a blanket `impl<E> From<E> for At<E>`, which gives us
@@ -249,6 +297,60 @@ impl From<enough::StopReason> for Error {
 /// Use [`At::error`] (borrow) or [`At::decompose`] (consume) to inspect the
 /// inner [`Error`].
 pub type Result<T, E = whereat::At<Error>> = std::result::Result<T, E>;
+
+#[cfg(test)]
+mod error_category_tests {
+    use super::Error;
+    use zencodec::{CategorizedError, ErrorCategory as C, LimitKind as L};
+
+    #[test]
+    fn error_category_mapping() {
+        assert_eq!(Error::InvalidData("x").codec_name(), Some("zenavif-parse"));
+
+        // Malformed / corrupt container content.
+        assert_eq!(Error::InvalidData("bad").category(), C::MalformedImage);
+        assert_eq!(Error::NoMoov.category(), C::MalformedImage);
+
+        // Parser doesn't handle this container feature.
+        assert_eq!(
+            Error::Unsupported("construction method").category(),
+            C::UnsupportedImageFeature
+        );
+
+        // Truncated input.
+        assert_eq!(Error::UnexpectedEOF.category(), C::UnexpectedEof);
+
+        // Underlying I/O.
+        assert_eq!(
+            Error::Io(std::io::Error::other("disk")).category(),
+            C::Io(zencodec::CodecIoKind::opaque())
+        );
+
+        // Allocation failure.
+        assert_eq!(Error::OutOfMemory.category(), C::OutOfMemory);
+
+        // Configured parser cap -> representative LimitKind::Pixels.
+        assert_eq!(
+            Error::ResourceLimitExceeded("total megapixels limit exceeded").category(),
+            C::LimitsExceeded(L::Pixels)
+        );
+
+        // Cooperative cancellation / deadline -> delegated to StopReason.
+        assert_eq!(
+            Error::Stopped(enough::StopReason::Cancelled).category(),
+            C::Cancelled
+        );
+        assert_eq!(
+            Error::Stopped(enough::StopReason::TimedOut).category(),
+            C::TimedOut
+        );
+
+        // The blanket `impl CategorizedError for At<E>` forwards both axes.
+        let at_err = whereat::At::from(Error::InvalidData("x"));
+        assert_eq!(at_err.category(), C::MalformedImage);
+        assert_eq!(at_err.codec_name(), Some("zenavif-parse"));
+    }
+}
 
 /// Basic ISO box structure.
 ///

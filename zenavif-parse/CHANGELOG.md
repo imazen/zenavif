@@ -15,6 +15,26 @@
   behavior are unchanged.
 
 ### Added
+- **Adopt the `zencodec` `CategorizedError` taxonomy (PR #103).** `Error` now
+  `impl zencodec::CategorizedError` with `codec_name() == Some("zenavif-parse")`
+  (a `&self` method, not an associated const, so the trait stays dyn-compatible)
+  and an exhaustive `category()` mapping every variant to one coarse
+  `zencodec::ErrorCategory`, so consumers route on the category (HTTP status,
+  retry policy, logging) without naming the enum. Mapping: `InvalidData` /
+  `NoMoov` → `MalformedImage`; `Unsupported` → `UnsupportedImageFeature`;
+  `UnexpectedEOF` → `UnexpectedEof`; `Io` → `Io(CodecIoKind::opaque())`;
+  `OutOfMemory` → `OutOfMemory`;
+  `ResourceLimitExceeded` → `LimitsExceeded(Pixels)` (the `&'static str` label is
+  a catch-all over peak-memory / megapixels / frame-count / grid-tile caps, so a
+  single representative kind is reported — the precise limit stays in `Display`);
+  `Stopped(r)` delegates to the zencodec `StopReason` arm (`Cancelled` /
+  `TimedOut`). The blanket `impl CategorizedError for At<E>` forwards both axes
+  through the crate's `whereat::At<Error>` results. `zencodec` is a hard
+  dependency here (the legacy `zencodec` cargo feature is a deprecated no-op),
+  so the impl is unconditional. Additive (`#[non_exhaustive]` enum + opt-in
+  trait); behind a **temporary `[patch.crates-io]` pin** to the unreleased
+  `cancellation-classification-99` branch — remove the patch and bump the
+  `zencodec` dependency once `zencodec 0.1.26` ships.
 - **Reader entry points accept unsized readers (`&mut dyn Read`)** (c1c95e5,
   parity with upstream avif-parse 8fc5fe0). `AvifParser::from_reader[_with_config]`
   and the deprecated `read_avif[_with_options/_with_config]` now bound on
