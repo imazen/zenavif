@@ -1,6 +1,6 @@
 # `Tune::Ssimulacra2` for zenrav1e — libaom mechanism study + implementation plan
 
-**Status: implemented 2026-07-02 (items 1–5), per-step A/B measurement in flight.** Produced
+**Status: COMPLETE 2026-07-02 — measured, composed, landed as `zenrav1e@a37faea8` (`Tune::Ssimulacra2`, release-gated for zenavif).** Final composition: chroma delta-q + ss2 QM curves; the other three mechanisms measured as regressions on zenrav1e and were dropped (verdict table below). Results: s2 −4.28% / s1-deep −3.57% median ssim2 BD vs tune-off; cpu0-default beaten at both speeds; tier-2 gap +11.08% → +8.71% (s1). Full record: `docs/RD_GAP_VS_LIBAOM.md` "Tune::Ssimulacra2 — SHIPPED 2026-07-02" + `benchmarks/rd_gap_tune_ss2_2026-07-02.tsv`. Produced
 by a source-level study of libaom's `--tune=ssimulacra2` at the exact rev we benchmark against
 (`632172a468f5e91c5b40daaa0a91f4a291c63af4`, aomenc 3.14.1). Motivation: that tune alone
 measures **−13.33% median BD-rate** (ssim2-scored) over aom cpu0-default on our photo harness
@@ -40,6 +40,24 @@ Harness: `scripts/rd_gap` cells grew optional butteraugli 3-norm/max columns
 (`BUTTER` env; zenavif `5e84d3f6`) implementing the metric-gaming protocol
 below; `bd_metric.py` computes BD-rate on either metric (butteraugli quality
 axis = −log distance).
+
+## Per-step A/B verdicts (2026-07-02, 22-image corpus, Q30–95, cavif s2)
+
+Direct step isolation (stage k vs stage k−1, integrated BD-rate, median /
+better-on; negative = better). Metric-gaming check: butteraugli 3-norm + max
+alongside ssim2. Full data `benchmarks/rd_gap_tune_ss2_stages_2026-07-02/`.
+
+| step | mechanism | ssim2 | ba_3n | ba_max | verdict |
+|---|---|---|---|---|---|
+| 1 | chroma delta-q (444: ac +clamp(qi/2,0,24)) | **−2.79%** (20/22) | −0.39% | −1.38% | KEEP |
+| 2 | frame λ ×(200..128)/128 | +4.41% (0/22) | +3.36% | +2.86% | **DROP** — aom-calibrated rdmult weight doesn't transfer to zenrav1e's Daala λ |
+| 3 | ss2 QM curves (+QM on) | **−7.79%** (21/21) | −6.00% | −8.16% | KEEP — biggest single lever; required the two zenrav1e#29 fixes first |
+| 4 | trellis λ×0.25 | +0.01% (9/22) | +0.10% | +0.78% | **DROP** (λ×1.0 arm also +0.21% med, better 6/20) |
+| 5 | Variance Boost via segmentation | +1.92% (7/22) | +2.21% | +3.24% | **DROP** — zenrav1e's activity-masked segmentation already allocates by variance; aom's curve on top double-boosts flats (o_6629 +36%, o_6632 +30%, o_5004/o_2012 +10.5%) while only screen content gains (o_7002 −10.5%) |
+
+Notable: every keep/drop decision is metric-consistent — ssim2 and both
+butteraugli norms agree in sign on every step, so no ss2-vs-IQ divergent knob
+had to fall back to the TUNE_IQ value.
 
 ## libaom mechanism (file:line at the pinned rev)
 

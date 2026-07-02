@@ -1,0 +1,93 @@
+# Tune::Ssimulacra2 measurement program -- 2026-07-02 -- sweeps on zenavif-sweep-1 (Hetzner ccx63 48c), analysis host lilith
+# zenrav1e: base=master 2fac1af6; landed chain: 9a8eaf61 (qm_v fix) -> 2310c7be (rect-QM orientation fix) -> a37faea8 (Tune::Ssimulacra2) -> 64a081d4 (changelog); staged impl preserved as workspace commit 6257b65f
+# harness: cavif -s2 --depth 8 (4:4:4), 22-image corpus x Q{30,40,50,55,60,65,70,75,80,85,90,95}, JOBS=22, fast-ssim2 + butteraugli(3-norm,max) per cell
+# refs: cpu0def/cpu0ss2 = aomenc 3.14.1 cpu-used=0 (default / --tune=ssimulacra2), cpu2 = cpu-used=2, all 420, same-day baselines
+# raw sweep TSVs (incl. butteraugli columns): /mnt/v/output/zenavif/tune-ss2-2026-07-02/ (see companion pointer file)
+# tune-off continuity: tune_base.tsv vs committed splitcost baseline = +0.0000% direct BD on all 22 (byte-identical encodes)
+#
+# === per-step DIRECT isolation (stage k vs k-1, integrated BD-rate; negative = better) ===
+# step	mechanism	ssim2_median	ssim2_better_on	butteraugli3n_median	butteraugli_max_median	verdict
+# 1	chroma delta-q (444 ac +clamp(qi/2,0,24))	-2.787	20/22	-0.385	-1.384	KEEP
+# 2	frame lambda x(200..128)/128	+4.414	0/22	+3.357	+2.859	DROP (aom rdmult calibration does not transfer)
+# 3	ss2 QM level curves (+QM on)	-7.786	21/21	-5.997	-8.155	KEEP (required zenrav1e#29 fixes)
+# 4a	trellis lambda x0.25	+0.015	9/22	+0.098	+0.776	DROP
+# 4b	trellis lambda x1.0 (vs composed 1+3)	+0.206	6/20	+0.121	+0.797	DROP
+# 5	Variance Boost via segmentation	+1.924	7/22	+2.212	+3.241	DROP (double-boosts flats vs activity masking; helps only family-7 screen content)
+#
+# === composed tune (mechanisms 1+3) vs tune-off base, cavif s2, direct ===
+# metric	median	mean	better_on
+# ssim2	-4.278	-4.717	20/22
+# butteraugli_3n	-2.525	-1.150	16/22
+# butteraugli_max	-3.705	-1.100	15/22
+#
+# === repositioning vs libaom (19 photos, ssim2 BD-rate) ===
+# ref	base_median	tune_median	delta_median	improved
+# cpu0-default	+1.471	-3.427	-4.129	17/19
+# cpu2 (libaom-slow)	-0.649	-4.775	-4.126	17/19
+# cpu0+tune=ssimulacra2	+15.671	+10.098	-4.277	19/19
+#
+# === per-image (ssim2 BD-rate %, s2): direct tune-vs-base + vs refs; LOSER = one of the 8 s1-deep cpu0def losers ===
+# image	fam	direct	vs_cpu0ss2_tune	vs_cpu0ss2_base	vs_cpu0def_tune	vs_cpu2_tune	loser
+# o_1015	1	-9.526	+14.340	+25.322	-9.855	-10.483	
+# o_1023	1	-3.552	+8.456	+11.202	-12.798	-14.102	
+# o_1029	1	-2.545	+10.098	+11.632	-9.730	-12.346	
+# o_2012	2	-4.590	+14.840	+19.116	-2.658	-4.775	
+# o_2202	2	-5.673	+12.979	+20.120	-1.435	-3.541	LOSER
+# o_3003	3	-7.597	+16.247	+23.277	+0.543	+0.124	LOSER
+# o_3006	3	-8.103	+7.904	+15.671	-14.219	-15.698	
+# o_3008	3	-12.603	+15.760	+33.390	-3.603	-4.346	LOSER
+# o_5004	5	-5.376	+24.724	+33.564	+4.445	+2.357	LOSER
+# o_5016	5	-9.786	-7.414	+2.861	-17.322	-19.648	
+# o_6610	6	-3.967	+16.804	+26.716	-2.404	-3.482	
+# o_6629	6	-9.067	+18.916	+27.019	+14.150	+13.193	LOSER
+# o_6632	6	+1.095	+14.574	+16.222	+14.741	+11.003	LOSER
+# o_7000	7	-5.555	n/a	n/a	n/a	n/a	
+# o_7001	7	-0.951	n/a	n/a	n/a	n/a	
+# o_7002	7	-6.154	n/a	n/a	n/a	n/a	
+# o_8106	8	-2.687	-9.614	-5.959	-6.196	-9.288	
+# o_8107	8	-1.572	-4.622	-2.963	-3.426	-6.759	
+# o_8110	8	-1.902	-3.498	-2.403	-5.265	-7.474	
+# o_9051	9	+0.474	-3.987	-3.847	+8.508	+8.622	LOSER
+# o_9067	9	-1.681	+4.855	+6.090	-3.910	-6.251	
+# o_9077	9	-2.469	-19.081	-16.436	+0.664	-3.253	LOSER
+#
+# === conformance (110 cells = 22 images x Q{30,50,60,75,90}) ===
+# config	aomdec	rav1d-safe
+# s2 + tune	110/110 OK	110/110 OK
+# s1(deep,dev-flipped ravif) + tune	110/110 OK	110/110 OK
+#
+# === s1 deep + tune (final config): direct vs shipped-s1 baseline + vs refs (ssim2 BD-rate) ===
+# aggregate	median	mean	better/improved
+# direct s1tune vs s1	-3.572	-4.465	22/22
+# vs cpu0-ss2tune (tier-2)	+11.081 -> +8.710	+9.467 -> +4.870	18/19
+# vs cpu0-default	-0.968 -> -3.629	+0.390 -> -3.999	18/19 (per-image wins 11/19 -> 16/19)
+# vs cpu2 (libaom-slow)	-3.013 -> -6.221	-1.535 -> -5.880	18/19
+#
+# === s1+tune per-image (ssim2 BD-rate %); LOSER = the 8 images where shipped s1 lost to cpu0-default ===
+# image	fam	direct_vs_s1	vs_cpu0def_tune	vs_cpu0def_s1base	vs_cpu0ss2_tune	loser_status
+# o_1015	1	-9.159	-10.177	-1.893	+13.960	
+# o_1023	1	-3.309	-12.725	-10.583	+8.710	
+# o_1029	1	-0.934	-8.872	-9.173	+11.147	
+# o_2012	2	-3.611	-4.179	-0.968	+12.598	
+# o_2202	2	-4.160	-3.111	+1.103	+10.469	LOSER->WIN
+# o_3003	3	-7.628	-1.357	+6.662	+13.805	LOSER->WIN
+# o_3006	3	-8.365	-14.997	-8.035	+6.952	
+# o_3008	3	-11.744	-3.429	+9.868	+13.276	LOSER->WIN
+# o_5004	5	-5.338	+7.377	+11.050	+27.628	LOSER (improved 3.7pp)
+# o_5016	5	-6.762	-16.058	-9.694	-5.958	
+# o_6610	6	-5.328	-5.049	-0.093	+15.657	
+# o_6629	6	-9.585	+14.187	+25.313	+14.871	LOSER (improved 11.1pp)
+# o_6632	6	-2.998	-1.119	+2.195	-1.818	LOSER->WIN
+# o_7000	7	-3.534	n/a	n/a	n/a	
+# o_7001	7	-0.885	n/a	n/a	n/a	
+# o_7002	7	-5.826	n/a	n/a	n/a	
+# o_8106	8	-1.627	-4.495	-3.112	-7.571	
+# o_8107	8	-2.086	-3.629	-1.792	-4.736	
+# o_8110	8	-1.022	-3.199	-2.266	-7.832	
+# o_9051	9	-0.025	+2.808	+3.065	-9.229	LOSER (~flat)
+# o_9067	9	-2.296	-6.849	-4.845	+1.414	
+# o_9077	9	-2.007	-1.100	+0.604	-20.816	LOSER->WIN
+#
+# 5 of the 8 s1-losers FLIP to per-image wins vs cpu0-default; the other 3 improve
+# (o_6629 by 11.1pp). At s1+tune, 7/19 photos now beat cpu0+tune=ssimulacra2 itself
+# (o_5016, o_6632, o_8106, o_8107, o_8110, o_9051, o_9077).

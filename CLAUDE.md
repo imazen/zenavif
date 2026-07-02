@@ -187,6 +187,16 @@ The prange (4,64) s2 widening itself REMAINS RULED OUT on clean data (+0.48% med
 worse 15/22; `benchmarks/rd_gap_prange_retest_2026-07-02.tsv`) — but now with 7/22 winners
 (three at −1.8..−2.5%), making a content-adaptive large-block gate a feature-hints candidate.
 
+### Tune::Ssimulacra2 — SHIPPED upstream 2026-07-02, release-gated
+`zenrav1e@a37faea8` adds `Tune::Ssimulacra2` (aom-parity chroma delta-q + ss2
+QM curves; the other three aom mechanisms measured as regressions and were
+dropped — see docs/TUNE_SSIMULACRA2_PLAN.md). Measured: s2 −4.28% / s1-deep
+−3.57% median ssim2 BD vs tune-off, beats aom cpu0-default at both speeds,
+tier-2 gap vs cpu0-ss2tune +11.08% → +8.71%. 220/220 conformance cells clean.
+**At the zenrav1e dep bump:** wire tune selection through zenravif/zenavif
+(the sweep used a dev-only ZENRAVIF_TUNE env passthrough, reverted) and decide
+the default for still images.
+
 ### zenrav1e QM encodes diverged from conforming decoders — FIXED upstream, release-gated
 Two composing bugs (zenrav1e#29, both fixed on master 2026-07-02) made
 `enable_qm=true` encodes decode differently than the encoder's own

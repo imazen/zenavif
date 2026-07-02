@@ -521,6 +521,69 @@ both speeds on registry deps (6/6 cells md5). At the zenrav1e ≥0.2 dep bump: f
 const, uncomment the two apply lines, drop two `allow(dead_code)`. Until then registry
 `-s1` behaves exactly as before.
 
+## Tune::Ssimulacra2 — SHIPPED 2026-07-02 (release-gated): the metric-tune lever lands, cpu0-default beaten at BOTH speeds
+
+**The tier-2 program's named lever** (docs/TUNE_SSIMULACRA2_PLAN.md): port libaom's
+`--tune=ssimulacra2` mechanisms, A/B-measure each with ssim2 AND butteraugli, keep only
+what wins on THIS encoder. Landed as `zenrav1e@a37faea8` (`Tune::Ssimulacra2`), preceded
+by two pre-existing QM bugs the work exposed and fixed (zenrav1e#29, both on master):
+
+- **`qm_v` header gating** (`9a8eaf61`): written only when the frame's u/v delta-qs
+  differed; AV1 5.9.12 gates it on the sequence `separate_uv_delta_q` (always 1 here).
+  Any QM frame with u==v delta-qs was corrupt to aomdec and silently mis-parsed by
+  dav1d-lineage decoders. Masked by the Daala chroma offsets (u≠v almost always).
+- **Transposed rectangular QM tables** (`2310c7be`): rav1e stores coefficients
+  transposed (like dav1d) but `qm_table()` didn't swap w/h the way rav1d-safe's mapping
+  deliberately does — every rect TX quantized with transposed weights, self-consistent
+  in the encoder but wrong on every decoder. Invisible at the near-flat levels 12–15 the
+  old curve picks; catastrophic at ss2-curve levels (decoded ssim2 85.7→55.7 at Q85
+  before the fix). The historical "with_qm(true) ≈10% BD-rate win" predates this fix
+  and needs re-measurement at the dep bump.
+
+### Per-step verdicts (each stage A/B'd cumulatively, 22-image corpus, s2)
+
+| mechanism | ssim2 med | butteraugli 3n / max | verdict |
+|---|---|---|---|
+| chroma delta-q (4:4:4 ac +clamp(qi/2,0,24)) | **−2.79%** (20/22) | −0.39% / −1.38% | ships |
+| frame rdmult weight ×(200..128)/128 | +4.41% (0/22) | +3.36% / +2.86% | dropped — aom-calibrated rdmult doesn't transfer to the Daala λ |
+| ss2 QM level curves (+QM always on) | **−7.79%** (21/21) | −6.00% / −8.16% | ships — biggest single lever of the whole program |
+| trellis λ×0.25 / ×1.0 | +0.01% / +0.21% | ~0 / +0.8% | dropped |
+| Variance Boost via segmentation | +1.92% (7/22) | +2.21% / +3.24% | dropped — double-boosts flats vs the existing activity masking; helps only family-7 screen content (o_7002 −10.5%). Full staged impl preserved as zenrav1e workspace commit `6257b65f` |
+
+Every keep/drop is metric-consistent (ssim2 and both butteraugli norms agree in sign), so
+no ss2-vs-IQ divergent knob needed the TUNE_IQ fallback. Tune-off is byte-identical to
+master (proven per-encode + 22-image sweep continuity +0.0000%).
+
+### Composed results (mechanisms 1+3; benchmarks/rd_gap_tune_ss2_2026-07-02.tsv)
+
+**s2 + tune** (direct vs tune-off: ssim2 −4.28% med / −4.72% mean, better 20/22;
+butteraugli 3n −2.53%, max −3.71%):
+
+| ref | s2 master | s2 + tune |
+|---|---|---|
+| cpu0-default | +1.47% | **−3.43%** med / −2.62% mean |
+| cpu2 (libaom-slow) | −0.65% | **−4.77%** |
+| cpu0-ss2tune (tier 2) | +15.67% | **+10.10%** (improved 19/19) |
+
+**s1 deep + tune** (direct vs shipped s1: **−3.57% med / −4.46% mean, better on 22/22**):
+
+| ref | s1 shipped | s1 + tune |
+|---|---|---|
+| cpu0-default | −0.97% med, 11/19 wins | **−3.63% med / −4.00% mean, 16/19 wins** |
+| cpu2 (libaom-slow) | −3.01% | **−6.22%** |
+| cpu0-ss2tune (tier 2) | +11.08% | **+8.71%** med / +4.87% mean (improved 18/19) |
+
+**The 8 s1-loser images: 5 flip to per-image wins vs cpu0-default** (o_2202 +1.1→−3.1,
+o_3003 +6.7→−1.4, o_3008 +9.9→−3.4, o_6632 +2.2→−1.1, o_9077 +0.6→−1.1); the other 3
+improve (o_6629 +25.3→+14.2, o_5004 +11.1→+7.4, o_9051 +3.1→+2.8). 7/19 photos now beat
+cpu0+tune=ssimulacra2 itself. The remaining tier-2 gap concentrates in the same smooth-
+content coefficient-level-RD images the s1 postmortem identified.
+
+**Conformance:** 110/110 aomdec-clean + 110/110 rav1d-safe at BOTH s2+tune and
+s1(deep)+tune configs. **Availability:** `Tune::Ssimulacra2` selects it; wiring into
+zenavif/zenravif defaults is a release-gated follow-up at the zenrav1e dep bump (raw
+sweeps: /mnt/v/output/zenavif/tune-ss2-2026-07-02/, see the benchmarks pointer file).
+
 ## RULED OUT, 2026-07-01: `BLOCK_32X32`/`BLOCK_64X64` at 0% usage — explained, not a bug, widening regresses
 
 Same inspect-diff methodology surfaced a second block-size anomaly: `BLOCK_32X32` and
