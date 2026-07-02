@@ -28,6 +28,31 @@ speed comparison basis) — see "Credible narrowing levers". This doc records th
 the levers tried (fixed, rejected, verified, blocked, or found-but-declined), and the repeatable
 harness (`scripts/rd_gap/`) for tracking progress.
 
+## Corpus + split hygiene (added 2026-07-02, per user directive)
+
+**The fitting corpus is now `scripts/rd_gap/sample_images_train26.tsv`** — 24 origins picked
+by k-means K=24 (centroid-nearest per cluster) over 94 zenanalyze features on imazen-26,
+**TRAIN origins only** under the canonical LSD split (`zenmetrics/scripts/picker/
+origin_split.py::split_of`, locked in `zensim/docs/DATA_SPLITS.md` §2a: last digit
+{0,2,4,6,8}=train, {1,3,5}=val, {7,9}=test). Renditions: 1024-long-edge linear-light Lanczos
+downscale-only at `/mnt/v/output/rd-gap-train26-2026-07-02/` (+`_MANIFEST.json` provenance;
+selector adapted from `zenmetrics/scripts/sweep/knobablation_firstcut_select.py`). 12 content
+classes — this reflects imazen's real web workload (screens, AI products, scans, plots — not
+photo-pure), so report **per-family slices** alongside the medians; photo-parity claims
+remain per-family. Usage: `SAMPLE=$HERE/sample_images_train26.tsv ./run_gap.sh` (or via
+run_remote.sh `SAMPLE=` passthrough); aom baselines for it need one `aom_only.sh` run per
+config.
+
+**Why:** the legacy 22-image corpus (`sample_images.tsv`, clean-picker-corpus-2026-06-26)
+MIXES splits — o_1029/o_6629/o_8107/o_9067/o_9077 are TEST origins and
+o_1015/o_1023/o_3003/o_9051/o_7001 are VAL under the LSD rule. Every constant landed up to
+2026-07-02 (tune mechanisms, s1 config, partition decisions) was A/B'd on that mixed corpus;
+the *mechanisms* are sound (butteraugli-gated, mostly aom ports) but per-image claims about
+val/test origins (e.g. the o_6629 holdout) must not feed later model-evaluation claims on
+those buckets. **New encoder-constant fits happen on train26; the legacy corpus stays for
+continuity comparisons against the 2026-07-02 baselines** until aom baselines are rebased
+onto train26.
+
 ## The gap (measured 2026-06-30)
 
 Paired per-image bpp, our AVIF **larger** than libaom-slow at matched SSIMULACRA2 (cpu-used=2, 28

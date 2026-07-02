@@ -64,7 +64,7 @@ env_logger = { version = "0.11.10", default-features = false }
 png = "0.18.0"
 image = "0.25.10"
 zenbench = { version = "0.1.2", features = ["criterion-compat"] }
-fast-ssim2 = { version = "0.8.0"}
+fast-ssim2 = { version = "0.8.0", features = ["imgref"] }
 zensim = { version = "0.2.4", features = ["imgref", "zenpixels"] }
 zensim-regress = { version = "0.3.0"}
 rayon = "1.11.0"
@@ -165,6 +165,13 @@ required-features = ["__expert"]
 name = "auto_tune_smoke"
 required-features = ["auto-tune"]
 
+# P0 label-drift re-encode harness (docs/FEATURE_HINTS_PLAN.md P0.2):
+# re-encodes sampled canonical-dataset cells on the currently-resolved
+# zenrav1e and scores them the way the sweep did.
+[[example]]
+name = "drift_reencode"
+required-features = ["__expert"]
+
 # Heaptrack allocation-profiling harness for the decode-from-bytes path.
 # Decode is in the default feature set (pure-Rust rav1d-safe); no extra features.
 [[example]]
@@ -208,3 +215,11 @@ opt-level = 2
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
 rustdoc-args = ["--generate-link-to-definition"]
+
+# DEV-ONLY (P0 feature-hints drift check, 2026-07-02): resolve zenrav1e from
+# the exported master tree (64a081d4) for the drift master leg. Patches only
+# apply at the build-root manifest, so this lives here and not (only) in
+# ravif's workspace manifest. REVERT after the drift legs — registry builds
+# stay on zenrav1e 0.1.4 until the release-gated dep-chain bump.
+[patch.crates-io]
+zenrav1e = { path = "../zenrav1e--drift-master" }
