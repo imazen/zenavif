@@ -122,9 +122,21 @@ symptom the previous attempt hit and reverted, per zenrav1e#26). Fixed via
 re-implemented on top (zenrav1e@7d254289). Verified clean on 110 cells (22-image photo
 corpus x 5 quality levels): 0 `aomdec` corruption (was 100% corrupt before the ordinal
 fix, direct A/B confirmed causality), extended block-size area share 1.8-56% per cell,
-rav1d-safe round-trip pixel diff scaling normally with quality. `PARTITION_HORZ_A/B`/
-`VERT_A/B` (4 of the original 6) remain unimplemented. Measured RD impact:
+rav1d-safe round-trip pixel diff scaling normally with quality. Measured RD impact:
 `docs/RD_GAP_VS_LIBAOM.md` "Fixed 2026-07-01 (4)".
+
+**2026-07-01 (later): `PARTITION_HORZ_A/B`/`VERT_A/B` (Phase 2, the other 4 of 6) —
+implemented, verified conformance-clean, measured as a NET RD REGRESSION, reverted.**
+Same 110-cell aomdec-clean bar as Phase 1, all 4 types genuinely chosen by the search —
+but direct-isolation BD-rate median +0.60% (worse on 14/22 images), median BD-rate vs
+libaom-slow +0.1%→+0.6%, ~1.46x encode time. Root cause of the regression is a
+SPLIT-cost-estimation bias in zenrav1e's one-level topdown trial (SPLIT evaluated
+pessimistically as 4 NONE-leaves while the mixed 3-way types are evaluated exactly),
+not a defect in the new types. Not on zenrav1e master; the full implementation (plus 2
+real bug fixes it required) is preserved as zenrav1e workspace commit `a7630aee`.
+zenrav1e#27 stays open re-scoped to the trial-SPLIT-cost-accuracy dependency. See
+`docs/RD_GAP_VS_LIBAOM.md` "TRIED AND REVERTED 2026-07-01" +
+`benchmarks/rd_gap_extended_partitions_phase2_2026-07-01.tsv`.
 
 ### rav1d-safe Threading Race Condition (RESOLVED)
 DisjointMut overlap panic was caused by frame threading. Fix: `max_frame_delay=1`
