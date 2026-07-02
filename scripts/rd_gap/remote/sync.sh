@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Rsync the LOCAL WORKING TREES (including uncommitted WIP — that is the point:
+# the box tests exactly what your checkout builds), the pinned libaom source,
+# and the corpus subset referenced by sample_images.tsv, all to MIRRORED
+# absolute paths on the box. Fast delta on re-runs.
+#
+#   ./sync.sh                      # repos + aom + default corpus subset
+#   ./sync.sh /path/extra.tsv ...  # ALSO sync these sample TSVs (to
+#                                  #   /home/lilith/sweep_in/<basename> on the box)
+#                                  #   + the images they reference
+#   SYNC_DELETE=1 ./sync.sh        # exact mirror (delete remote files gone locally)
+#
+# Synced repos (see common.sh ZEN_REPOS): ravif zenrav1e zenrav1e--phase2v2
+# zenavif zenanalyze fast-ssim2. zenrav1e--phase2v2 is required while ravif's
+# dev-only [patch.crates-io] points at it; zenanalyze is a zenavif path
+# dev-dependency (needed to build the examples). If you repoint the patch at a
+# different workspace, add that workspace to ZEN_REPOS.
+source "$(dirname "$0")/common.sh"
+load_token
+require_box_ip
+
+t0=$(date +%s)
+RSYNC_BASE=(-az --info=stats1 --human-readable
+  --exclude 'target/' --exclude '.git/' --exclude '.jj/' --exclude '.workongoing'
+  --exclude '__pycache__/' --exclude '*.profraw')
+# Big, build-irrelevant subtrees (anchored at each repo root):
+declare -A EXTRA_EXCLUDES=(
+  [zenavif]="--exclude /fuzz/ --exclude /benchmarks/ --exclude /cron-logs/"
+  [zenanalyze]="--exclude /benchmarks/"
+  [zenpixels]="--exclude /benchmarks/"
+  [zencodec]="--exclude /benchmarks/"
+)
+[ "${SYNC_DELETE:-0}" = 1 ] && RSYNC_BASE+=(--delete)
+
+for r in "${ZEN_REPOS[@]}"; do
+  src="$HOME/work/zen/$r"
+  [ -d "$src" ] || die "missing local repo: $src (ZEN_REPOS in common.sh is stale?)"
+  note "sync zen/$r ..."
+  # shellcheck disable=SC2086  # EXTRA_EXCLUDES is a flag string, split intended
+  box_rsync "${RSYNC_BASE[@]}" ${EXTRA_EXCLUDES[$r]:-} "$src/" "root@$BOX_IP:/home/lilith/work/zen/$r/"
+done
+
+# Provenance: the ravif [patch.crates-io] target decides WHICH zenrav1e tree the
+# box's cavif builds from (concurrent sessions toggle it for A/B measurements) —
+# print what this sync just shipped so every run is attributable.
+note "ravif patch state shipped: $(grep -A3 '^\[patch.crates-io\]' "$HOME/work/zen/ravif/Cargo.toml" | grep -m1 zenrav1e || echo '(no patch — registry zenrav1e)')"
+
+# Decoder fallback: the zenavif decode examples occasionally don't build from
+# the WIP tree (e.g. a sibling-repo contract change mid-flight). Ship the
+# CURRENT LOCAL binaries — the exact decoders the local harness runs — so
+# build_remote.sh can fall back LOUDLY instead of leaving the box unusable.
+EXDIR="$HOME/work/zen/zenavif/target/release/examples"
+if [ -x "$EXDIR/save_png" ] && [ -x "$EXDIR/extract_av1" ] && [ -x "$EXDIR/decode_avif" ]; then
+  note "sync decoder fallback binaries (local target/release/examples) ..."
+  { for b in save_png extract_av1 decode_avif; do
+      echo "$(sha256sum "$EXDIR/$b" | cut -c1-16)  built $(date -u -r "$EXDIR/$b" +%Y-%m-%dT%H:%MZ)  $b"
+    done; } > /tmp/decoder_fallback_manifest.txt
+  box_ssh "mkdir -p /home/lilith/decoder_fallback"
+  box_rsync -az "$EXDIR/save_png" "$EXDIR/extract_av1" "$EXDIR/decode_avif" \
+    /tmp/decoder_fallback_manifest.txt "root@$BOX_IP:/home/lilith/decoder_fallback/"
+else
+  note "WARNING: local decoder examples not all built — no fallback synced (source build must succeed on the box)"
+fi
+
+# libaom source at the pinned rev (build dirs stay local; the box builds its own).
+aom_rev="$(git -C "$AOM_SRC" rev-parse HEAD)"
+if [ "$aom_rev" != "$AOM_PIN" ] && [ "${ALLOW_AOM_DRIFT:-0}" != 1 ]; then
+  die "local ~/work/aom is at $aom_rev but the harness pins $AOM_PIN (ALLOW_AOM_DRIFT=1 to sync anyway)"
+fi
+note "sync aom source (rev ${aom_rev:0:12}) ..."
+box_rsync "${RSYNC_BASE[@]}" --exclude 'build*/' "$AOM_SRC/" "root@$BOX_IP:/home/lilith/work/aom/"
+box_ssh "echo $aom_rev > /home/lilith/work/aom/.synced_rev"
+
+# Corpus: every image referenced by the default sample TSV + any TSVs passed as
+# args, copied to the SAME absolute path on the box => TSVs need no rewriting.
+list="$(mktemp)"; trap 'rm -f "$list"' EXIT
+tsvs=("$RD_GAP_DIR/sample_images.tsv" "$@")
+for tsv in "${tsvs[@]}"; do
+  [ -f "$tsv" ] || die "sample tsv not found: $tsv"
+  tail -n +2 "$tsv" | cut -f1
+done | sort -u | sed 's|^/||' > "$list"
+missing=0
+while read -r rel; do
+  [ -f "/$rel" ] || { echo "MISSING corpus image: /$rel" >&2; missing=1; }
+done < "$list"
+[ "$missing" = 0 ] || die "corpus images missing locally — regenerate the TSV (make_sample.sh)"
+note "sync corpus ($(wc -l < "$list") images) ..."
+box_rsync -az --info=stats1 --files-from="$list" / "root@$BOX_IP:/"
+
+# Ad-hoc TSVs land in sweep_in/ (they already contain valid absolute image paths).
+for tsv in "$@"; do
+  box_rsync -az "$tsv" "root@$BOX_IP:$REMOTE_IN_DIR/$(basename "$tsv")"
+  note "extra sample synced — use with:  ./run_remote.sh SAMPLE=$REMOTE_IN_DIR/$(basename "$tsv") ..."
+done
+
+note "SYNC DONE in $(( $(date +%s) - t0 ))s"
