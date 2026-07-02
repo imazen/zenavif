@@ -20,14 +20,14 @@ KNOWN_HOSTS="$HOME/.ssh/known_hosts.zenavif-sweep"     # per-box file (IPs get r
 
 # The box MIRRORS the local absolute layout (/home/lilith/work/..., /mnt/v/...).
 # Why: ravif/Cargo.toml's dev-only [patch.crates-io] points at an ABSOLUTE path
-# (/home/lilith/work/zen/zenrav1e--phase2v2) and sample_images.tsv lists absolute
+# (workspace paths when a dev-patch targets one) and sample_images.tsv lists absolute
 # /mnt/v/... corpus paths. Mirroring means zero path rewriting anywhere: the same
 # TSVs, scripts, and manifests work verbatim on both ends.
 #
 # zenpixels + zencodec ride along because zenavif's local (gitignored)
 # .cargo/config.toml `paths`-overrides into them; that config file syncs with
 # the zenavif tree, so its targets must exist on the box too.
-ZEN_REPOS=(ravif zenrav1e zenrav1e--phase2v2 zenavif zenanalyze fast-ssim2 zenpixels zencodec)
+ZEN_REPOS=(ravif zenrav1e zenavif zenanalyze fast-ssim2 zenpixels zencodec)
 AOM_SRC="$HOME/work/aom"
 AOM_PIN="632172a468f5e91c5b40daaa0a91f4a291c63af4"  # docs/RD_GAP_VS_LIBAOM.md pinned rev
 RD_GAP_DIR="/home/lilith/work/zen/zenavif/scripts/rd_gap"  # same path on both ends

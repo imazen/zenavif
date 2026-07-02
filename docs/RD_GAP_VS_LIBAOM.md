@@ -611,6 +611,16 @@ and raw numbers.
    See `benchmarks/rd_gap_partitionrange_widen_2026-07-01.tsv`. Root cause: same shape as CfL
    widening — `rdo_partition_none`'s RD-cost estimate at large sizes isn't reliable enough to
    trust with a wider candidate range on this corpus. **Reverted, not on master.**
+   **RE-TEST 2026-07-02 (on the fixed SPLIT estimate): BLOCKED — exposed a NEW latent
+   corruption bug on master.** The 2026-07-01 ruling was measured under the biased SPLIT
+   estimate, so a re-test was warranted; it instead found that `b073182c`'s one-level-deeper
+   SPLIT child estimate emits **corrupt bitstreams** (`aomdec`: "Corrupted segment_ids";
+   rav1d-safe also rejects) when `partition_range` allows 32×32/64×64 in the −Q 50-75 band —
+   a path never exercised at the shipped max=16, but reachable TODAY via the public
+   `override_partition_range` expert API. 46/264 sweep cells failed (and the harness silently
+   dropped the rows — `run_gap.sh` needs a loud-failure fix). RD conclusions deferred until
+   the corruption fix lands on master (assigned to the s1-mode work, which hits the same
+   combination); the re-test then re-runs cleanly.
 4. **Implement palette mode in zenrav1e** (scoped: screen-content win, ~zero photo-gap effect —
    see confirmed findings above). Substantial encoder feature: color quantization (k-means per
    candidate block/plane), RD-gated size search (2-8), bitstream signaling (palette colors + index
