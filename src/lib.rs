@@ -20,6 +20,7 @@
 //!
 //! - **`unsafe-asm`**: Hand-written assembly decoder via C FFI (fastest) — overrides the default safe decoder
 //! - **`encode`**: AVIF encoding via zenravif
+//! - **`target-quality`**: [`encode_rgb8_with_target`] — converge on a requested SSIMULACRA2/zensim score
 //! - **`zencodec`**: Integration with [`zencodec`](https://crates.io/crates/zencodec) traits
 //!
 //! The default decoder uses rav1d-safe's managed API — completely safe Rust
@@ -88,6 +89,10 @@ mod strip_convert;
 /// (calibration tooling; unstable like everything behind `__expert`).
 #[cfg(feature = "__expert")]
 pub mod sweep;
+#[cfg(feature = "target-quality")]
+mod target_quality;
+#[cfg(feature = "target-quality")]
+pub use target_quality::{TargetMetric, TargetOptions, TargetedEncode, encode_rgb8_with_target};
 mod validation;
 #[cfg(feature = "_dev")]
 pub mod yuv_convert;

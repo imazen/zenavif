@@ -1634,7 +1634,9 @@ mod tests {
         // silently dropping RGB and crippling the picker. Lock that shut.
         let axes = SweepAxes::modes_full();
         assert!(
-            axes.color_models.iter().any(|c| matches!(c, EncodeColorModel::Rgb)),
+            axes.color_models
+                .iter()
+                .any(|c| matches!(c, EncodeColorModel::Rgb)),
             "modes_full must declare the RGB color model"
         );
         let unbudgeted = SweepBuilder::new(axes.clone(), QualityGrid::Explicit(vec![50.0])).plan();

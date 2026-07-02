@@ -14,6 +14,14 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 - README overhaul: clickable badge row (CI/crates.io/lib.rs/docs.rs/MSRV/dual-license), `## Quick start` with a `[dependencies]` block, absolute links throughout, regenerated crosslink footer (now last), split crates.io README (`README.crates.md` via `readme =` + `include`), and a `benchmarks/README.md` methodology index.
 
 ### Added
+- **Precise perceptual-quality targeting** (`target-quality` feature):
+  `encode_rgb8_with_target` converges the encoder on a requested SSIMULACRA2
+  or zensim score via an encode→decode→score bracketed secant search
+  (typically 3–5 encodes at ±0.5 tolerance). New `TargetMetric` /
+  `TargetOptions` / `TargetedEncode` types; selection policy returns the
+  smallest file inside the target band and reports `converged` honestly
+  when the target is unreachable. Contract tests in
+  `tests/target_quality.rs`.
 - **Honor `zencodec::AllocPreference` at zenavif's own decode allocations.**
   The full-image RGB(A) output buffer, the grid-stitch canvas, the crop
   destination, and the per-row YUV→RGB scratch now route through a 3-mode,
