@@ -1,0 +1,53 @@
+# Phase 2 v2: PARTITION_HORZ_A/B/VERT_A/B re-measured on the FIXED SPLIT trial estimate
+# (zenrav1e#27). RESULT: the 2026-07-01 regression FLIPPED TO A WIN -- confirming the
+# SPLIT-bias root cause -- but at 1.461x median encode time it exceeds the 1.2x matched-speed
+# gate for the s2 default. DISPOSITION: preserved as the prime -s1 deep-mode ingredient
+# (zenrav1e workspace commit dfed8eda, integration of a7630aee onto b073182c). Not on master.
+#
+# Semantic integration notes: the one-level-deeper SPLIT child estimate (b073182c) is guarded
+# to genuine SPLIT children only (mixed-3-way children are spec-mandated leaves, already
+# exact); A/B square quarters keep writing no partition symbol in trials; combined
+# checkpoint/rollback discipline re-derived for every path.
+#
+# Harness: scripts/rd_gap/run_gap.sh, cavif -s2, 22-image photo corpus, 12-point Q grid.
+# "before" = master b073182c (rd_gap_splitcost.tsv sweep reused); libaom baselines: cpu2
+# (libaom_only.tsv), cpu0-default and cpu0-ssimulacra2 (aom_cpu0_{default,ssim2}.tsv,
+# 2026-07-02, see aom_only.sh).
+#
+# Direct isolation (after vs before, no libaom), bpp %change at matched ssim2:
+target_ssim2	median_after_vs_before_bpp_pct	mean_pct	n	photos_median_pct
+70	-0.54	-0.74	20	-0.36
+75	-0.42	-2.36	22	-0.41
+80	-0.25	-0.87	22	-0.37
+82	-0.23	0.19	22	-0.20
+85	-0.43	-1.37	22	-0.17
+88	-0.14	0.10	20	0.03
+90	-0.13	-0.05	16	-0.09
+92	-0.04	-0.06	11	0.04
+#
+# Integrated BD-rate, direct isolation: median -0.5759%, mean -0.4917%, better on 17/22
+# (v1 on the biased estimate was +0.60% median, worse on 14/22 -- see
+# rd_gap_extended_partitions_phase2_2026-07-01.tsv).
+#
+# Against the reference encoders (median/mean BD-rate, n=19):
+condition	median_bdrate_pct	mean_bdrate_pct
+master_vs_cpu2	-0.6487	+0.2373
+phase2v2_vs_cpu2	-1.8657	-0.3859
+master_vs_cpu0_default	+1.4710	+2.2353
+phase2v2_vs_cpu0_default	+0.9164	+1.5991
+master_vs_cpu0_ssim2tune	+15.6713	+12.6629
+phase2v2_vs_cpu0_ssim2tune	+11.2107	+11.7635
+#
+# Encode time: 1.461x median (1.456x mean, p10 1.319, p90 1.559; n=32 dedicated AB/BA-ordered
+# paired cells -- the earlier in-sweep 1.45-1.49x estimate confirmed under controlled pairing).
+#
+# Conformance: 110/110 cells (22 images x Q 30/50/60/75/90) aomdec-clean + rav1d-safe
+# roundtrip OK, pixel diffs scaling normally; 131 lib tests + clippy -D warnings + fmt clean.
+#
+# CONCLUSION: all 10 AV1 partition types are now a measured net WIN when the SPLIT estimate is
+# fair -- vs cpu2 the margin doubles to -1.87% median with the mean also negative. At 1.46x
+# encode time this is the prime ingredient for the -s1 deep mode (s1 is currently
+# byte-identical to s2, reserved for exactly this class of beyond-matched-speed win); it is
+# NOT the s2 default. Remaining to cpu0-default from here: +0.92% median (rdo_tx_decision
+# unlock alone measured -4.0 to -7.4% in its band -- the s1 bundle should cross it); to
+# cpu0-ssim2tune: +11.21% median (the Tune::Ssimulacra2 track, docs/TUNE_SSIMULACRA2_PLAN.md).

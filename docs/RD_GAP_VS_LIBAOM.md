@@ -378,6 +378,18 @@ rulings: **RD-cost-model accuracy, not search completeness.**
 passing) is preserved as zenrav1e workspace commit `a7630aee` (anonymous, not on any branch)
 for a future attempt. See zenrav1e#27 for the tracking issue.
 
+**UPDATE 2026-07-02 (Phase 2 v2): re-measured on the fixed SPLIT estimate — the regression
+FLIPPED TO A WIN, confirming the root cause.** `a7630aee` semantically re-integrated onto
+`b073182c` (deeper estimate guarded to genuine SPLIT children; A/B quarters keep symbol-free
+trials; rollback discipline re-derived): direct isolation **−0.5759% median / −0.4917% mean,
+better on 17/22** (v1: +0.60%, worse on 14/22); vs libaom-cpu2 **−0.65% → −1.87% median with
+the mean also negative** (+0.24% → −0.39%); vs cpu0-default +1.47% → +0.92%; vs
+cpu0-ssim2tune +15.67% → +11.21%. 110/110 aomdec-clean + roundtrip, tests/clippy/fmt green.
+**Encode time 1.461× median (n=32 dedicated paired cells)** — above the 1.2× matched-speed
+gate, so NOT the s2 default: preserved as zenrav1e workspace commit `dfed8eda`, the prime
+ingredient for the `-s1` deep mode. Full numbers:
+`benchmarks/rd_gap_phase2v2_2026-07-02.tsv`.
+
 ## Fixed 2026-07-02: pessimistic SPLIT cost estimate in the topdown partition trial — PARITY REACHED
 
 **The fix that crossed the ≤0% parity line** — and the direct product of the Phase 2 postmortem
