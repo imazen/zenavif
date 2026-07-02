@@ -1,0 +1,40 @@
+# partition_range (4,16)->(4,64) at speed 2, RE-TESTED on the fixed SPLIT estimate
+# (zenrav1e master 3fa735dc: splitcost fix b073182c + the 64-parent sliver corruption fix).
+# VERDICT: STILL A NET REGRESSION -- the 2026-07-01 ruling re-confirms on clean data; the
+# widening is reverted and is NOT an s2 candidate. The s1 deep mode must MEASURE its own
+# partition_range choice (ablation vs (4,32)/(4,16)) rather than assume (4,64).
+#
+# Provenance: remote box zenavif-sweep-1 (snapshot-restored), 22-image photo corpus,
+# 12-point Q grid, cavif -s2 built from zenrav1e 3fa735dc + ravif TEMP-SWEEP s2 arm
+# (4, 64.min(max_block_size)); 264/264 cells present, ZERO failed cells (the corruption fix
+# validated at full-corpus scale in the same run -- the 2026-07-02 first attempt lost 46/264
+# cells to the now-fixed TX_64X16/16X64 sliver corruption + silent harness dropping).
+# Baseline: rd_gap_splitcost.tsv (master b073182c local sweep; bytes/ssim2 are
+# deterministic cross-machine, verified bit-identical previously). enc_ms not compared
+# (cross-machine).
+#
+# Direct isolation, BD-rate of prange(4,64) vs master (negative = widening better):
+metric	value
+median_bdrate_pct	+0.4839
+mean_bdrate_pct	+0.3249
+better_images	7/22
+best_1	-2.498% o_6632.png.scale1024x939
+best_2	-1.860% o_2202.png.scale1024x1024
+best_3	-1.807% o_5004.png.scale1024x724
+worst_1	+3.010% o_5016.png.scale1024x549
+worst_2	+2.398% o_6629.png.scale1024x949
+worst_3	+1.418% o_2012.png.scale1024x768
+#
+# Against the reference encoders (median BD-rate, n=19 photos):
+condition	median_bdrate_pct	mean_bdrate_pct
+master_vs_cpu2	-0.6487	+0.2373
+prange64_vs_cpu2	+0.4015	+0.6821
+master_vs_cpu0_default	+1.4710	+2.2353
+prange64_vs_cpu0_default	+2.2287	+2.6891
+#
+# Interpretation: the SPLIT-estimate fix DID help the widened range (2026-07-01 was
+# worse-on-17/19 with no sub-negative-1% winners; now 7/22 win, three at -1.8..-2.5%), but
+# rdo_partition_none's large-size cost estimate remains untrustworthy in aggregate: the
+# median flips parity back to positive vs cpu2. The per-image split (big winners AND big
+# losers) makes this a candidate for a future content-adaptive large-block gate
+# (zenanalyze feature-hints track), not a global default.

@@ -625,7 +625,16 @@ and raw numbers.
    found during the fix; that depth bound is now a hard assert in all builds) + inter frames
    without `enable_inter_txfm_split` don't offer 64-parent 4-way candidates. Byte-identical
    at shipped configs; 16/16 previously-failing cells clean on both decoders. Validating the
-   real 64-dim sliver transforms: zenrav1e#28. The clean (4,64) RD re-test runs next.
+   real 64-dim sliver transforms: zenrav1e#28.
+   **Clean re-test verdict (same day): the RULING STANDS.** 264/264 cells, zero failures
+   (the sweep doubles as full-corpus validation of the corruption fix). Direct isolation
+   **+0.4839% median / +0.3249% mean, worse on 15/22**; vs cpu2 the median gives back parity
+   (−0.6487% → +0.4015%). The estimate fix did help (2026-07-01 had 17/19 worse and no big
+   winners; now 7/22 win, three at −1.8..−2.5%) but large-block NONE cost estimation remains
+   untrustworthy in aggregate. Reverted again; NOT an s2 candidate. The s1 mode must ablate
+   its own partition_range choice rather than assume (4,64). The win/loss split marks this
+   as a future content-adaptive gate candidate (zenanalyze feature-hints track). Data:
+   `benchmarks/rd_gap_prange_retest_2026-07-02.tsv`.
 4. **Implement palette mode in zenrav1e** (scoped: screen-content win, ~zero photo-gap effect —
    see confirmed findings above). Substantial encoder feature: color quantization (k-means per
    candidate block/plane), RD-gated size search (2-8), bitstream signaling (palette colors + index
