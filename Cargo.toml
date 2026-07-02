@@ -215,11 +215,3 @@ opt-level = 2
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
 rustdoc-args = ["--generate-link-to-definition"]
-
-# DEV-ONLY (P0 feature-hints drift check, 2026-07-02): resolve zenrav1e from
-# the exported master tree (64a081d4) for the drift master leg. Patches only
-# apply at the build-root manifest, so this lives here and not (only) in
-# ravif's workspace manifest. REVERT after the drift legs — registry builds
-# stay on zenrav1e 0.1.4 until the release-gated dep-chain bump.
-[patch.crates-io]
-zenrav1e = { path = "../zenrav1e--drift-master" }
