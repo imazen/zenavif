@@ -611,16 +611,21 @@ and raw numbers.
    See `benchmarks/rd_gap_partitionrange_widen_2026-07-01.tsv`. Root cause: same shape as CfL
    widening — `rdo_partition_none`'s RD-cost estimate at large sizes isn't reliable enough to
    trust with a wider candidate range on this corpus. **Reverted, not on master.**
-   **RE-TEST 2026-07-02 (on the fixed SPLIT estimate): BLOCKED — exposed a NEW latent
-   corruption bug on master.** The 2026-07-01 ruling was measured under the biased SPLIT
-   estimate, so a re-test was warranted; it instead found that `b073182c`'s one-level-deeper
-   SPLIT child estimate emits **corrupt bitstreams** (`aomdec`: "Corrupted segment_ids";
-   rav1d-safe also rejects) when `partition_range` allows 32×32/64×64 in the −Q 50-75 band —
-   a path never exercised at the shipped max=16, but reachable TODAY via the public
-   `override_partition_range` expert API. 46/264 sweep cells failed (and the harness silently
-   dropped the rows — `run_gap.sh` needs a loud-failure fix). RD conclusions deferred until
-   the corruption fix lands on master (assigned to the s1-mode work, which hits the same
-   combination); the re-test then re-runs cleanly.
+   **RE-TEST 2026-07-02 (on the fixed SPLIT estimate): first run exposed a latent corruption
+   bug on master — root-caused, FIXED (`zenrav1e@3fa735dc`), re-test pending re-run.** At
+   `partition_range` (4,64) the −Q 50-75 band (exactly where the widening activates) produced
+   bitstreams BOTH `aomdec` ("Corrupted segment_ids") and rav1d-safe reject; 46/264 sweep
+   cells failed and the harness silently dropped the rows (`run_gap.sh` needs a loud-failure
+   fix). Initial attribution to `b073182c`'s deeper SPLIT estimate was **wrong** — a
+   six-variant mechanism bisect exonerated it (corruption survives disabling the estimate
+   entirely). True root cause: HORZ_4/VERT_4 at BLOCK_64X64 parents emit BLOCK_64X16/16X64
+   slivers whose max transforms TX_64X16/TX_16X64 are dead code upstream and desync when
+   coded. Fix: intra slivers cap to TX_32X16/16X32 + the tx-size RDO walk shrinks by the
+   consumed level (else it writes an out-of-alphabet depth-3 symbol — a second corruption
+   found during the fix; that depth bound is now a hard assert in all builds) + inter frames
+   without `enable_inter_txfm_split` don't offer 64-parent 4-way candidates. Byte-identical
+   at shipped configs; 16/16 previously-failing cells clean on both decoders. Validating the
+   real 64-dim sliver transforms: zenrav1e#28. The clean (4,64) RD re-test runs next.
 4. **Implement palette mode in zenrav1e** (scoped: screen-content win, ~zero photo-gap effect —
    see confirmed findings above). Substantial encoder feature: color quantization (k-means per
    candidate block/plane), RD-gated size search (2-8), bitstream signaling (palette colors + index
