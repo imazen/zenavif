@@ -155,6 +155,20 @@ TO A WIN** (direct isolation −0.5759% median, better 17/22; vs cpu2 −0.65%�
 deep-mode ingredient (above the 1.2× matched-speed gate for s2). See
 `benchmarks/rd_gap_phase2v2_2026-07-02.tsv`.
 
+**2026-07-02 (final): the `-s1` deep mode SHIPPED, release-gated.** zenrav1e master gained
+two default-off knobs — `mixed_3way_partitions` (`efbe0cf2`, the gated Phase 2 v2) and
+`split_trial_depth` (`2fac1af6`, recursive SPLIT-trial refinement) — both byte-identical
+off (9/9-cell md5 each). ravif main (`9d2b97c`) arms s1 with mixed-3way + unconditional
+rdo_tx_decision + partition_range (4,32) (winner of a 16/32/64 × depth{1,2} ablation)
+behind `S1_DEEP_ARMS_LIVE = false` until the zenrav1e dep bump (byte-identical until then,
+6/6-cell md5 vs b4853c68 on registry deps; flip the const + uncomment 2 apply lines at the
+bump). Measured at the live config: **median BD-rate −0.97% vs libaom cpu-used=0
+(slowest-best; s2 was +1.47%), −3.01% vs cpu2, 11/19 photos win per-image; 8 named photos
+still lose (o_6629 +25.3 worst) — partition levers exhausted, residual is
+coefficient-level RD.** 110/110 aomdec+rav1d conformance at the shipped config (+3 more
+110-cell configs). ~3.7× cpu0 wall per cell (RD-first mode by design). Full record:
+`docs/RD_GAP_VS_LIBAOM.md` "s1 deep mode" + `benchmarks/rd_gap_s1_2026-07-02.tsv`.
+
 ### zenrav1e 64×64-parent HORZ_4/VERT_4 sliver corruption — FIXED upstream, release-gated
 Found 2026-07-02 by the partition_range re-test: BLOCK_64X16/16X64 slivers (only reachable
 with `partition_range` max=64, e.g. via the public `override_partition_range`) coded their

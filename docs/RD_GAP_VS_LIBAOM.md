@@ -3,8 +3,10 @@
 **Status: TRUE RD PARITY REACHED, 2026-07-02** — median BD-rate vs libaom-slow improved
 **+5.7% → −0.65%** (mean +7.5%→+0.24%), crossing the ≤0% parity target at matched speed
 (1.057× median encode time). The final lever was the trial-SPLIT-cost accuracy fix ("Fixed
-2026-07-02" below), on top of the four 2026-07-01 bug fixes. Re-run `scripts/rd_gap/` after
-any future zenrav1e change to check for regressions.
+2026-07-02" below), on top of the four 2026-07-01 bug fixes. **Same day, the `-s1` deep
+mode shipped (release-gated): median −0.97% vs libaom cpu-used=0 (its slowest-best) and
+−3.01% vs cpu2, winning 11/19 photos per-image — see "s1 deep mode" below.** Re-run
+`scripts/rd_gap/` after any future zenrav1e change to check for regressions.
 
 Five real defects found and fixed on zenrav1e's `master` (unreleased): `encode_partition_topdown`
 never offering `PARTITION_HORZ`/`VERT`, `sse_h_edge`'s wrong-axis `deblock_size` call,
@@ -429,6 +431,96 @@ every other fix):
 This also unblocks a Phase 2 re-attempt: `HORZ_A/B`/`VERT_A/B` (preserved at `a7630aee`)
 regressed specifically because they competed against the underestimated SPLIT.
 
+## s1 deep mode — SHIPPED 2026-07-02 (release-gated): beats libaom cpu-used=0 on the median, 11/19 photos per-image
+
+**cavif `-s1` is now a real maximum-RD mode** (it had been byte-identical to `-s2` — a
+dead-code speed arm — until the 2026-07-01 topdown fix). Goal (user directive): beat
+libaom's slowest-best operating point (`aomenc --cpu-used=0`, default tune) **per-image**
+across the quality range on the photo harness, with speed explicitly subordinate to RD
+("s1 can be slower — push for best RD").
+
+### The s1 bundle (ravif `SpeedTweaks::from_my_preset`, speed == 1)
+
+- `mixed_3way_partitions: true` — `PARTITION_HORZ_A/B`/`VERT_A/B` in the topdown search
+  (zenrav1e `efbe0cf2`, new default-off knob; the Phase 2 v2 integration from #27).
+- `rdo_tx_decision: true` at EVERY quality — drops the `!high_quality` gate (the measured
+  −5.7%-bytes-AND-better-ssim2 lever at -Q80-95 that was declined for s2's matched-speed
+  basis, §6b above).
+- `partition_range: (4, 32.min(max_block_size))` at every quality — the winner of a
+  16/32/64 ablation (below).
+- `split_trial_depth: 1` — depth 2 (zenrav1e `2fac1af6`, new default-off knob: recursive
+  SPLIT-trial refinement) was measured and does NOT ship; see the ablation.
+- Pre-existing (previously dead) s1-vs-s2 arm differences also became live: `lru_on_skip:
+  true`, `min_tile_size: 2048`.
+
+### partition_range × trial-depth ablation
+
+Decision rule pre-registered before any data: most per-image wins vs cpu0-default →
+tiebreak median → tiebreak median vs cpu2. 22-image corpus × 12-Q grid, zenavif-sweep-1
+(Hetzner ccx63), run-ids `20260702T{125426,130629,131031,135710,135725}Z`; full per-image
+tables in `benchmarks/rd_gap_s1_2026-07-02.tsv`.
+
+| arm | vs cpu0-default med / mean | wins/19 | vs cpu2 med | vs s2 direct med |
+|---|---|---|---|---|
+| s2 (reference) | +1.471 / +2.235 | 9/19 | −0.649 | 0 |
+| s1 (4,16) | −0.263 / +1.539 | 10/19 | −1.785 | −1.111 |
+| **s1 (4,32) — ships** | **−0.968 / +0.390** | **11/19** | **−3.013** | **−2.059** |
+| s1 (4,64) | −0.056 / +0.314 | 10/19 | −2.206 | −1.236 |
+| s1 (4,32)+depth2 | −0.674 / −0.065 | 10/19 | −2.726 | −2.049 |
+| s1 (4,64)+depth2 | −0.118 / −0.082 | 10/19 | −2.258 | −2.097 |
+
+Mechanism: the (4,16) arm's big losers are SMOOTH images (o_6629/o_6632/o_9051: mean|grad|
+≈3 vs ≈11 for typical winners) — large-block starvation. (4,32) rescues them (o_6632
++14.0→+2.2, o_9051 +9.5→+3.1) at small cost on textured content; (4,64) helps only o_6629
+further (+25→+13) while bleeding elsewhere — the large-block NONE cost estimate is still
+the limiter (same family as the s2 prange-widen ruling). `split_trial_depth=2` sharpens
+exactly that ranking and rescues the worst outliers (o_5004 +12.3→+3.6 at 64; o_3008
++9.9→+6.9 at 32; mean flips negative), but costs the median and one marginal win — under
+the pre-registered rule depth 1 ships. Depth 2's content-dependent flip (helps textured,
+hurts smooth: the NONE-leaf-only deeper estimate over-credits SPLIT where big flat blocks
+are right) is the follow-up lever if the per-image picker ever selects s1 knobs.
+
+### Verdict vs "beats libaom's slowest-best on everything always"
+
+**Median: yes — s1 needs 0.97% fewer bits than aomenc cpu-used=0 at matched ssim2 (s2:
++1.47% more), and beats cpu-used=2 by −3.01% median.** Banded medians vs cpu0-default are
+negative at every ssim2 target 70–90. **Per-image: 11/19 — NOT everything.** The 8
+still-losing photos, worst first (BD-rate vs cpu0-default at the shipped config): o_6629
++25.3, o_5004 +11.1, o_3008 +9.9, o_3003 +6.7, o_9051 +3.1, o_6632 +2.2, o_2202 +1.1,
+o_9077 +0.6. No tested config wins them all simultaneously — even an oracle picking the
+best arm per image would still lose 7 (o_3003/o_3008/o_5004/o_6629/o_6632/o_9051/o_9077
+are positive under every arm). These are cpu0-only gaps (all but o_6629/o_6632 BEAT
+cpu-used=2 at s1): libaom's slowest mode pulls ahead through search depth zenrav1e does
+not yet have — partition-type/depth is now exhausted as a lever (all 10 types + deeper
+trials measured); the residual is coefficient-level RD (trellis-class optimization,
+cost-model precision at large blocks) and remains open. Honest summary: **s1 beats
+libaom-slowest-best broadly and on the median, decisively beats it at matched speed, but
+"everything always" is not yet reached — 8 named photos still lose, tracked with measured
+per-image data.**
+
+### Conformance + speed
+
+- 110/110 cells (22 img × Q30/50/60/75/90) `aomdec`-clean + rav1d-safe roundtrip at the
+  shipped config (`s1_conformance_p32d1.tsv`), and independently at (4,16)+d1,
+  (4,32)+d2, (4,64)+d2 (440 verified cells total this session); ssim2 monotone with
+  quality throughout.
+- Speed: box-native per-cell median, s1 ≈ 3.7× aomenc cpu-used=0 wall (n=4 images × 3 cq;
+  upper bound — the s1 side ran under 22-wide sweep contention, cpu0 under 4-wide). The
+  box runs cpu0 at 1.38× the local workstation's wall (median, n=12 matched cells).
+  Cross-TSV enc_ms comparisons under different contention are invalid (a known-1.06×
+  paired case reads as 3.2× cross-TSV), so only the box-native sample is load-bearing.
+  s1 is deliberately slower than cpu0 — RD-first per the user directive.
+
+### Release gating
+
+zenrav1e knobs are landed (master `efbe0cf2` + `2fac1af6`, both default-off,
+byte-identical off — 9/9-cell md5 each) but unreleased; registry serves 0.1.4. ravif's s1
+arms landed on `main` behind `SpeedTweaks::S1_DEEP_ARMS_LIVE = false` with the two knob
+apply-lines commented — `from_my_preset` output verified byte-identical to b4853c68 at
+both speeds on registry deps (6/6 cells md5). At the zenrav1e ≥0.2 dep bump: flip the
+const, uncomment the two apply lines, drop two `allow(dead_code)`. Until then registry
+`-s1` behaves exactly as before.
+
 ## RULED OUT, 2026-07-01: `BLOCK_32X32`/`BLOCK_64X64` at 0% usage — explained, not a bug, widening regresses
 
 Same inspect-diff methodology surfaced a second block-size anomaly: `BLOCK_32X32` and
@@ -772,16 +864,17 @@ viable and improve every existing partition decision" was half-validated immedia
 existing partition decision improved — that's the −0.72pp median swing); the Phase 2-viability
 half remains untested (`a7630aee` re-attempt).
 
-**What remains beyond parity (optional follow-ups, in expected-value order):**
-1. **Phase 2 re-attempt on the fixed SPLIT estimate** — `HORZ_A/B`/`VERT_A/B` from `a7630aee`,
-   re-measured against the new baseline (zenrav1e#27). Most promising path to pushing the
-   **mean** (+0.24%) below zero too.
-2. **`rdo_tx_decision` high-quality gate** — still a real, large win at -Q80-95, still costs
-   ~7.5× encode time in that band; remains a user scope/priority call via the existing
-   `with_rdo_tx_decision` opt-in.
-3. **CfL RD-aware alpha search** — the CfL-widening experiment's root cause (SSE-only search)
-   is the same cost-model-accuracy family; a signaling-cost-aware search might recover the
-   1-2pp the ablation bounded.
+**What remains beyond parity (updated 2026-07-02 after the s1 ship):**
+1. ~~Phase 2 re-attempt~~ / ~~rdo_tx high-quality gate~~ — **both SHIPPED in the `-s1` deep
+   mode** (see "s1 deep mode" above): mixed 3-way types + unconditional tx RDO +
+   partition_range (4,32), median −0.97% vs libaom cpu0 / −3.01% vs cpu2.
+2. **The 8 remaining per-image cpu0 losers** (o_6629 +25.3 worst) — partition-type/depth
+   levers are exhausted (all 10 types + depth-2 trials measured); the residual is
+   coefficient-level RD (trellis-class optimization, large-block cost-model precision).
+3. **Per-image s1 knob selection via the picker** — depth-2 and prange-64 each win on
+   content the shipped config loses (o_5004 +11.1→+3.6 with 64+depth2; o_6629 +25.3→+13.1
+   with 64) — an oracle picker would rescue 1 more image and large fractions of 4 others.
+4. **CfL RD-aware alpha search** — unchanged from before (1-2pp bound).
 
 ## The harness — `scripts/rd_gap/`
 
