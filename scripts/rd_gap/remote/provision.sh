@@ -4,19 +4,37 @@
 # through zenfleet (zenmetrics/scripts/jobsys), not copies of this script.
 #
 #   ./provision.sh            # create zenavif-sweep-1 (ccx63) if absent, install deps
+#   FROM_SNAPSHOT=auto ./provision.sh   # restore from the newest zenavif-sweep snapshot
+#   FROM_SNAPSHOT=<image-id> ./provision.sh
 #
-# COST: ccx63 is ~EUR 1.61/h gross (fsn1/nbg1/hel1). Tear down when done:
-#   ./teardown.sh --yes
+# COST: ccx63 is ~EUR 1.61/h gross (fsn1/nbg1/hel1). The box is EXPENSIVE to
+# keep idle — when the day's sweeps are done, snapshot+delete instead of
+# leaving it running:  ./teardown.sh --snapshot --yes
+# (restore later with FROM_SNAPSHOT=auto; deps/toolchain/aom-build all come
+# back with the disk, so provisioning from snapshot skips the apt/rustup step.)
 source "$(dirname "$0")/common.sh"
 load_token
 
+from_snapshot=""
 if "$HCLOUD" server describe "$BOX_NAME" >/dev/null 2>&1; then
   note "box '$BOX_NAME' already exists — reusing it"
 else
+  image="$BOX_IMAGE"
+  if [ -n "${FROM_SNAPSHOT:-}" ]; then
+    if [ "$FROM_SNAPSHOT" = auto ]; then
+      image="$("$HCLOUD" image list --type snapshot -o noheader -o columns=id,description \
+        | awk '/zenavif-sweep/ {print $1}' | tail -1)"
+      [ -n "$image" ] || die "FROM_SNAPSHOT=auto: no snapshot with 'zenavif-sweep' in its description found"
+    else
+      image="$FROM_SNAPSHOT"
+    fi
+    from_snapshot=1
+    note "restoring from snapshot image $image"
+  fi
   created=""
   for loc in $BOX_LOCATIONS; do
-    note "creating $BOX_NAME ($BOX_TYPE, $BOX_IMAGE) in $loc ..."
-    if "$HCLOUD" server create --name "$BOX_NAME" --type "$BOX_TYPE" --image "$BOX_IMAGE" \
+    note "creating $BOX_NAME ($BOX_TYPE, image $image) in $loc ..."
+    if "$HCLOUD" server create --name "$BOX_NAME" --type "$BOX_TYPE" --image "$image" \
          --location "$loc" --ssh-key "$SSH_KEY_NAME" --label purpose=rd-gap-sweeps; then
       created="$loc"; break
     fi
@@ -34,6 +52,15 @@ for i in $(seq 1 60); do
   sleep 5
 done
 [ -n "$up" ] || die "SSH to root@$BOX_IP not up after 5 min"
+
+if [ -n "$from_snapshot" ]; then
+  note "snapshot restore: verifying baked deps instead of reinstalling ..."
+  box_ssh '"$HOME/.cargo/bin/rustc" -V && cmake --version | head -1 && python3 -c "import numpy, PIL" && echo "SNAPSHOT DEPS OK"' \
+    || die "snapshot box missing baked deps — provision from scratch instead (unset FROM_SNAPSHOT)"
+  note "PROVISIONED (from snapshot): $BOX_NAME @ $BOX_IP"
+  note "next: ./sync.sh && ./build_remote.sh   (sync is a delta — fast on a snapshot restore)"
+  exit 0
+fi
 
 note "installing deps (idempotent) ..."
 box_ssh 'bash -s' <<'REMOTE'
