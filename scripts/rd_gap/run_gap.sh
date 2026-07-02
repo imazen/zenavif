@@ -19,7 +19,7 @@ CQGRID_AOM="${CQGRID_AOM:-8 16 24 32 40 48 56 63}"             # aomenc cq-level
 AOMFMTS="${AOMFMTS:-420 444}"
 export COLOR="$HERE/color.py"
 
-echo -e "image\tw\th\tfamily\tencoder\tfmt\tq\tbytes\tbpp\tssim2\tenc_ms" > "$OUT"
+echo -e "image\tw\th\tfamily\tencoder\tfmt\tq\tbytes\tbpp\tssim2\tenc_ms\tbutteraugli_3n\tbutteraugli_max" > "$OUT"
 [ -n "${AOMENC:-}" ] && echo "[rd_gap] both encoders (zenrav1e + libaom)" || echo "[rd_gap] zenrav1e only (AOMENC unset)"
 
 worker() {

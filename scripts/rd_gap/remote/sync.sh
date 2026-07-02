@@ -62,6 +62,14 @@ else
   note "WARNING: local decoder examples not all built — no fallback synced (source build must succeed on the box)"
 fi
 
+# butteraugli (lives outside ~/work/zen): scorer for the metric-gaming guard
+# columns (BUTTER env in the cell scripts).
+if [ -d "$HOME/work/butteraugli" ]; then
+  note "sync butteraugli ..."
+  box_rsync "${RSYNC_BASE[@]}" --exclude 'reference-sources/' --exclude '*.out.*' --exclude 'perf.data*' \
+    "$HOME/work/butteraugli/" "root@$BOX_IP:/home/lilith/work/butteraugli/"
+fi
+
 # libaom source at the pinned rev (build dirs stay local; the box builds its own).
 aom_rev="$(git -C "$AOM_SRC" rev-parse HEAD)"
 if [ "$aom_rev" != "$AOM_PIN" ] && [ "${ALLOW_AOM_DRIFT:-0}" != 1 ]; then

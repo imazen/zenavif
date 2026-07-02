@@ -29,5 +29,21 @@ bpp=$(python3 -c "print(f'{$bytes*8/$PX:.5f}')")
 ss=$("$SCORER" image "$IMG" "$decp" 2>/dev/null | grep -oE '[0-9.]+' | head -1)
 [ -z "$ss" ] && ss="NA"
 
+# Optional butteraugli scoring (metric-gaming guard for the ss2-tune work):
+# set BUTTER to the butteraugli-cli binary to add libjxl-style 3-norm + max
+# columns; unset leaves NA (older TSVs stay comparable by column name).
+b3="NA"; bmax="NA"
+if [ -n "${BUTTER:-}" ]; then
+  bout=$("$BUTTER" --json "$IMG" "$decp" 2>/dev/null | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    print("%.6f %.6f" % (d["pnorm_3"], d["score"]))
+except Exception:
+    print("NA NA")')
+  b3="${bout%% *}"; bmax="${bout##* }"
+  [ -z "$b3" ] && b3="NA"; [ -z "$bmax" ] && bmax="NA"
+fi
+
 rm -f "$avif" "$decp"
-printf 'zenrav1e\tdefault\t%s\t%s\t%s\t%s\t%s\n' "$Q" "$bytes" "$bpp" "$ss" "$enc_ms"
+printf 'zenrav1e\tdefault\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$Q" "$bytes" "$bpp" "$ss" "$enc_ms" "$b3" "$bmax"

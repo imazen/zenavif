@@ -41,5 +41,19 @@ python3 "$COLOR" from_y4m "$decy" "$FMT" "$IMG" "$decp"
 ss=$("$SCORER" image "$IMG" "$decp" 2>/dev/null | grep -oE '[0-9.]+' | head -1)
 [ -z "$ss" ] && ss="NA"
 
+# Optional butteraugli columns (see zenrav1e_cell.sh)
+b3="NA"; bmax="NA"
+if [ -n "${BUTTER:-}" ]; then
+  bout=$("$BUTTER" --json "$IMG" "$decp" 2>/dev/null | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    print("%.6f %.6f" % (d["pnorm_3"], d["score"]))
+except Exception:
+    print("NA NA")')
+  b3="${bout%% *}"; bmax="${bout##* }"
+  [ -z "$b3" ] && b3="NA"; [ -z "$bmax" ] && bmax="NA"
+fi
+
 rm -f "$obu" "$decy" "$decp"
-printf 'libaom\t%s\t%s\t%s\t%s\t%s\t%s\n' "$FMT" "$CQ" "$bytes" "$bpp" "$ss" "$enc_ms"
+printf 'libaom\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$FMT" "$CQ" "$bytes" "$bpp" "$ss" "$enc_ms" "$b3" "$bmax"

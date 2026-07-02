@@ -32,6 +32,7 @@ getv() { local e; for e in ${ENVS[@]+"${ENVS[@]}"}; do [[ "$e" == "$1="* ]] && {
 have CAVIF    || ENVS+=("CAVIF=/home/lilith/work/zen/ravif/target/release/cavif")
 have SAVE_PNG || ENVS+=("SAVE_PNG=/home/lilith/work/zen/zenavif/target/release/examples/save_png")
 have SCORER   || ENVS+=("SCORER=/home/lilith/work/zen/fast-ssim2/target/release/fast-ssim2-cli")
+have BUTTER   || ENVS+=("BUTTER=/home/lilith/work/butteraugli/target/release/butteraugli")
 have AOMENC   || ENVS+=("AOMENC=/home/lilith/work/aom/build_slow/aomenc")
 have AOMDEC   || ENVS+=("AOMDEC=/home/lilith/work/aom/build_slow/aomdec")
 have JOBS     || ENVS+=("JOBS=22")

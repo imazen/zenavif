@@ -59,6 +59,13 @@ phase "fast-ssim2-cli"
 # the plain workspace-root build is the documented way to get it.
 cbuild fastssim2_build /home/lilith/work/zen/fast-ssim2 build --release
 
+phase "butteraugli-cli (metric-gaming guard scorer)"
+if [ -d /home/lilith/work/butteraugli ]; then
+  cbuild butteraugli_build /home/lilith/work/butteraugli build --release -p butteraugli-cli
+else
+  echo "butteraugli tree not synced -- BUTTER columns will be NA"
+fi
+
 phase "zenavif examples (save_png extract_av1 decode_avif)"
 # Primary: build from the synced tree. Fallback (LOUD): the decoder binaries
 # sync.sh shipped from the workstation — the same decoders the local harness
@@ -98,7 +105,8 @@ for b in \
   /home/lilith/work/zen/zenavif/target/release/examples/save_png \
   /home/lilith/work/zen/zenavif/target/release/examples/extract_av1 \
   /home/lilith/work/zen/zenavif/target/release/examples/decode_avif \
-  /home/lilith/work/zen/fast-ssim2/target/release/fast-ssim2-cli
+  /home/lilith/work/zen/fast-ssim2/target/release/fast-ssim2-cli \
+  /home/lilith/work/butteraugli/target/release/butteraugli
 do
   if [ -x "$b" ]; then
     echo "OK  $(sha256sum "$b" | cut -c1-16)  $(stat -c '%8s' "$b")  $b"
