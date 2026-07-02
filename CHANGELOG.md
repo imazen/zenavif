@@ -22,8 +22,10 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   smallest file inside the target band and reports `converged` honestly
   when the target is unreachable. RGBA variant
   (`encode_rgba8_with_target`): zensim scores alpha natively; SSIMULACRA2
-  composites both sides onto mid-gray. Contract tests in
-  `tests/target_quality.rs`.
+  composites both sides onto mid-gray. 16-bit variant
+  (`encode_rgb16_with_target`, 10-bit AV1): ssim2 scored natively at
+  16-bit, zensim on an identical 8-bit view of both sides. Contract tests
+  in `tests/target_quality.rs`.
 - **Honor `zencodec::AllocPreference` at zenavif's own decode allocations.**
   The full-image RGB(A) output buffer, the grid-stitch canvas, the crop
   destination, and the per-row YUV→RGB scratch now route through a 3-mode,

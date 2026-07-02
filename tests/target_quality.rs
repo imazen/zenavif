@@ -206,3 +206,45 @@ fn rgba_target_converges_and_respects_alpha_scoring() {
     // The encode really carried an alpha payload.
     assert!(out.encoded.alpha_byte_size > 0, "alpha plane missing");
 }
+
+#[test]
+fn rgb16_target_converges() {
+    // 16-bit version of the structured test image (10-bit AV1 encode path).
+    let (w, h) = (160usize, 160usize);
+    let pixels: Vec<Rgb<u16>> = (0..h)
+        .flat_map(|y| {
+            (0..w).map(move |x| {
+                let dx = x as f32 - w as f32 / 2.0;
+                let dy = y as f32 - h as f32 / 2.0;
+                let r = (dx * dx + dy * dy).sqrt() / (w as f32 / 2.0);
+                let base = ((200.0 - 120.0 * r.min(1.0)) * 257.0) as u16;
+                let tex = u16::from(mix(x as u32, y as u32, 7)) << 4;
+                Rgb {
+                    r: base.saturating_add(tex),
+                    g: base,
+                    b: 65535 - base,
+                }
+            })
+        })
+        .collect();
+    let img = imgref::ImgVec::new(pixels, w, h);
+    let opts = TargetOptions {
+        tolerance: 1.5,
+        max_encodes: 8,
+        ..Default::default()
+    };
+    let out = zenavif::encode_rgb16_with_target(
+        img.as_ref(),
+        &base_config(),
+        TargetMetric::Ssim2(80.0),
+        &opts,
+        stop(),
+    )
+    .expect("targeted rgb16 encode");
+    assert!(
+        out.converged,
+        "rgb16 ssim2 80: got {:.2} at q {:.1} after {} encodes",
+        out.score, out.quality, out.encodes
+    );
+    assert!(!out.encoded.avif_file.is_empty());
+}

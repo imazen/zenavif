@@ -142,6 +142,34 @@ pub fn encode_rgba8_with_target(
     })
 }
 
+/// Encode a 16-bit RGB image to AVIF (10-bit AV1), converging on a target
+/// perceptual score.
+///
+/// Same search and selection policy as [`encode_rgb8_with_target`]. Scoring
+/// runs on the 16-bit decode (`prefer_8bit(false)`): SSIMULACRA2 natively at
+/// 16-bit precision; zensim on an 8-bit view (`>> 8` of both sides — the
+/// current zensim profile is calibrated for 8-bit input), applied
+/// identically to source and decode.
+///
+/// # Errors
+///
+/// Returns the first encode/decode/score error encountered, or
+/// cancellation via `stop`.
+pub fn encode_rgb16_with_target(
+    img: ImgRef<'_, Rgb<u16>>,
+    config: &EncoderConfig,
+    target: TargetMetric,
+    options: &TargetOptions,
+    stop: StopToken,
+) -> Result<TargetedEncode> {
+    search_target(target, options, &stop, |q, stop| {
+        let cfg = config.clone().quality(q);
+        let enc = crate::encoder::encode_rgb16(img, &cfg, stop.clone())?;
+        let s = score_rgb16(target, img, &enc.avif_file, stop)?;
+        Ok((enc, s))
+    })
+}
+
 /// The bracketed secant/bisection search shared by every input variant.
 /// `encode_and_score(quality, stop)` performs one full trial iteration.
 fn search_target(
@@ -316,6 +344,60 @@ fn score_rgba8(
         }
         TargetMetric::Zensim(_) => zensim_score(&source, &dec_img),
     }
+}
+
+/// Decode `avif` at 16-bit and score against an RGB16 source (see
+/// `encode_rgb16_with_target` for the per-metric precision notes).
+fn score_rgb16(
+    target: TargetMetric,
+    source: ImgRef<'_, Rgb<u16>>,
+    avif: &[u8],
+    stop: &StopToken,
+) -> Result<f64> {
+    let dec_config = DecoderConfig::new().prefer_8bit(false);
+    let decoded = crate::decode_with(avif, &dec_config, stop)?;
+    let dec_img: ImgRef<'_, Rgb<u16>> = decoded.try_as_imgref::<Rgb<u16>>().ok_or_else(|| {
+        at!(Error::Encode(
+            "target-quality: decoded image not RGB16-viewable".to_string()
+        ))
+    })?;
+    match target {
+        TargetMetric::Ssim2(_) => {
+            let a = to_triplet16_img(source);
+            let b = to_triplet16_img(dec_img);
+            fast_ssim2::compute_ssimulacra2(a.as_ref(), b.as_ref())
+                .map_err(|e| at!(Error::Encode(format!("target-quality ssim2: {e}"))))
+        }
+        TargetMetric::Zensim(_) => {
+            let a = downconvert8(source);
+            let b = downconvert8(dec_img);
+            zensim_score(&a.as_ref(), &b.as_ref())
+        }
+    }
+}
+
+fn to_triplet16_img(src: ImgRef<'_, Rgb<u16>>) -> ImgVec<[u16; 3]> {
+    let (w, h) = (src.width(), src.height());
+    let mut out = Vec::with_capacity(w * h);
+    for row in src.rows() {
+        out.extend(row.iter().map(|p| [p.r, p.g, p.b]));
+    }
+    ImgVec::new(out, w, h)
+}
+
+/// 16→8-bit view for zensim (calibrated on 8-bit input); identical
+/// treatment of source and decode keeps the comparison unbiased.
+fn downconvert8(src: ImgRef<'_, Rgb<u16>>) -> ImgVec<Rgb<u8>> {
+    let (w, h) = (src.width(), src.height());
+    let mut out = Vec::with_capacity(w * h);
+    for row in src.rows() {
+        out.extend(row.iter().map(|p| Rgb {
+            r: (p.r >> 8) as u8,
+            g: (p.g >> 8) as u8,
+            b: (p.b >> 8) as u8,
+        }));
+    }
+    ImgVec::new(out, w, h)
 }
 
 fn ssim2_score(a: ImgRef<'_, [u8; 3]>, b: ImgRef<'_, [u8; 3]>) -> Result<f64> {

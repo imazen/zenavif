@@ -93,7 +93,8 @@ pub mod sweep;
 mod target_quality;
 #[cfg(feature = "target-quality")]
 pub use target_quality::{
-    TargetMetric, TargetOptions, TargetedEncode, encode_rgb8_with_target, encode_rgba8_with_target,
+    TargetMetric, TargetOptions, TargetedEncode, encode_rgb8_with_target, encode_rgb16_with_target,
+    encode_rgba8_with_target,
 };
 mod validation;
 #[cfg(feature = "_dev")]
