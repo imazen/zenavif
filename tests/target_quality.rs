@@ -163,3 +163,46 @@ fn converged_result_reaches_target_band_with_smallest_file() {
         out.score
     );
 }
+
+#[test]
+fn rgba_target_converges_and_respects_alpha_scoring() {
+    use rgb::Rgba;
+    // Textured color + a real alpha gradient (mirrors encode_contracts.rs's
+    // alpha-image rationale: the alpha plane must carry signal).
+    let (w, h) = (160usize, 160usize);
+    let pixels: Vec<Rgba<u8>> = (0..h)
+        .flat_map(|y| {
+            (0..w).map(move |x| {
+                let base = ((x * 255) / w.max(1)) as u8;
+                Rgba {
+                    r: base,
+                    g: 255 - base,
+                    b: (mix(x as u32, y as u32, 5) >> 2).saturating_add(100),
+                    a: (((x + y) * 255) / (w + h - 2)) as u8,
+                }
+            })
+        })
+        .collect();
+    let img = imgref::ImgVec::new(pixels, w, h);
+    let opts = TargetOptions {
+        tolerance: 1.5,
+        max_encodes: 8,
+        ..Default::default()
+    };
+    let out = zenavif::encode_rgba8_with_target(
+        img.as_ref(),
+        &base_config(),
+        TargetMetric::Ssim2(78.0),
+        &opts,
+        stop(),
+    )
+    .expect("targeted rgba encode");
+    assert!(
+        out.converged,
+        "rgba ssim2 78: got {:.2} at q {:.1} after {} encodes",
+        out.score, out.quality, out.encodes
+    );
+    assert!(!out.encoded.avif_file.is_empty());
+    // The encode really carried an alpha payload.
+    assert!(out.encoded.alpha_byte_size > 0, "alpha plane missing");
+}

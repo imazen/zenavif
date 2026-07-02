@@ -92,7 +92,9 @@ pub mod sweep;
 #[cfg(feature = "target-quality")]
 mod target_quality;
 #[cfg(feature = "target-quality")]
-pub use target_quality::{TargetMetric, TargetOptions, TargetedEncode, encode_rgb8_with_target};
+pub use target_quality::{
+    TargetMetric, TargetOptions, TargetedEncode, encode_rgb8_with_target, encode_rgba8_with_target,
+};
 mod validation;
 #[cfg(feature = "_dev")]
 pub mod yuv_convert;

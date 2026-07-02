@@ -184,9 +184,10 @@ gives tile parallelism without frame threading. Default threads now 0 (auto-dete
 bracketed secant search over quality converging on `TargetMetric::Ssim2` or
 `::Zensim` (per the 2026-07-02 user directive: quality/ssim2/zensim, not
 Butteraugli). Selection policy: smallest file inside the target band;
-honest `converged=false` when unreachable. Contract tests:
-`tests/target_quality.rs` (4 tests, ~0.3 s). NOT YET COVERED: RGBA8
-(alpha-aware scoring decision needed), 16-bit inputs, animation.
+honest `converged=false` when unreachable. RGBA8 covered too
+(`encode_rgba8_with_target`: zensim scores RGBA natively; ssim2 composites
+on mid-gray). Contract tests: `tests/target_quality.rs` (5 tests, ~0.6 s).
+NOT YET COVERED: 16-bit inputs, animation.
 
 ### Encoding Features (`encode-imazen` feature gate)
 All wired through to zenrav1e fork. Benchmarked results (ravif 7265eea):

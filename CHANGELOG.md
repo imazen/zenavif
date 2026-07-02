@@ -20,7 +20,9 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   (typically 3–5 encodes at ±0.5 tolerance). New `TargetMetric` /
   `TargetOptions` / `TargetedEncode` types; selection policy returns the
   smallest file inside the target band and reports `converged` honestly
-  when the target is unreachable. Contract tests in
+  when the target is unreachable. RGBA variant
+  (`encode_rgba8_with_target`): zensim scores alpha natively; SSIMULACRA2
+  composites both sides onto mid-gray. Contract tests in
   `tests/target_quality.rs`.
 - **Honor `zencodec::AllocPreference` at zenavif's own decode allocations.**
   The full-image RGB(A) output buffer, the grid-stitch canvas, the crop

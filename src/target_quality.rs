@@ -12,7 +12,7 @@
 //! Enabled by the `target-quality` feature (pulls `fast-ssim2` and `zensim`).
 
 use crate::config::DecoderConfig;
-use crate::encoder::{EncodedImage, EncoderConfig, encode_rgb8};
+use crate::encoder::{EncodedImage, EncoderConfig, encode_rgb8, encode_rgba8};
 use crate::error::{Error, Result};
 use almost_enough::{Stop, StopToken};
 use imgref::{ImgRef, ImgVec};
@@ -105,6 +105,51 @@ pub fn encode_rgb8_with_target(
     options: &TargetOptions,
     stop: StopToken,
 ) -> Result<TargetedEncode> {
+    search_target(target, options, &stop, |q, stop| {
+        let cfg = config.clone().quality(q);
+        let enc = encode_rgb8(img, &cfg, stop.clone())?;
+        let s = score_rgb8(target, img, &enc.avif_file, stop)?;
+        Ok((enc, s))
+    })
+}
+
+/// Encode an RGBA8 image to AVIF, converging on a target perceptual score.
+///
+/// Same search and selection policy as [`encode_rgb8_with_target`].
+/// **Alpha handling in scoring:** [`TargetMetric::Zensim`] scores the RGBA
+/// pixels natively (zensim is alpha-aware, straight-alpha semantics);
+/// [`TargetMetric::Ssim2`] composites both source and decode onto a mid-gray
+/// (128) background first, since SSIMULACRA2 is defined on opaque RGB. The
+/// alpha plane's own quantizer is NOT searched — set it via
+/// [`EncoderConfig::alpha_quality`] as usual.
+///
+/// # Errors
+///
+/// Returns the first encode/decode/score error encountered, or
+/// cancellation via `stop`.
+pub fn encode_rgba8_with_target(
+    img: ImgRef<'_, rgb::Rgba<u8>>,
+    config: &EncoderConfig,
+    target: TargetMetric,
+    options: &TargetOptions,
+    stop: StopToken,
+) -> Result<TargetedEncode> {
+    search_target(target, options, &stop, |q, stop| {
+        let cfg = config.clone().quality(q);
+        let enc = encode_rgba8(img, &cfg, stop.clone())?;
+        let s = score_rgba8(target, img, &enc.avif_file, stop)?;
+        Ok((enc, s))
+    })
+}
+
+/// The bracketed secant/bisection search shared by every input variant.
+/// `encode_and_score(quality, stop)` performs one full trial iteration.
+fn search_target(
+    target: TargetMetric,
+    options: &TargetOptions,
+    stop: &StopToken,
+    mut encode_and_score: impl FnMut(f32, &StopToken) -> Result<(EncodedImage, f64)>,
+) -> Result<TargetedEncode> {
     let t = target.value();
     let tol = options.tolerance.max(0.0);
     let (min_q, max_q) = (
@@ -133,10 +178,8 @@ pub fn encode_rgb8_with_target(
     while encodes < max_encodes {
         stop.check().map_err(|e| at!(Error::from(e)))?;
 
-        let cfg = config.clone().quality(q);
-        let enc = encode_rgb8(img, &cfg, stop.clone())?;
+        let (enc, s) = encode_and_score(q, stop)?;
         encodes += 1;
-        let s = score_encode(target, img, &enc.avif_file, &stop)?;
 
         let better_any = best_any
             .as_ref()
@@ -224,8 +267,8 @@ fn initial_guess(t: f64) -> f32 {
     }
 }
 
-/// Decode `avif` with zenavif's own decoder and score it against `source`.
-fn score_encode(
+/// Decode `avif` with zenavif's own decoder and score it against an RGB8 source.
+fn score_rgb8(
     target: TargetMetric,
     source: ImgRef<'_, Rgb<u8>>,
     avif: &[u8],
@@ -242,16 +285,49 @@ fn score_encode(
         TargetMetric::Ssim2(_) => {
             let a = to_triplet_img(source);
             let b = to_triplet_img(dec_img);
-            fast_ssim2::compute_ssimulacra2(a.as_ref(), b.as_ref())
-                .map_err(|e| at!(Error::Encode(format!("target-quality ssim2: {e}"))))
+            ssim2_score(a.as_ref(), b.as_ref())
         }
-        TargetMetric::Zensim(_) => {
-            let z = zensim::Zensim::new(zensim::ZensimProfile::latest());
-            z.compute(&source, &dec_img)
-                .map(|r| r.score())
-                .map_err(|e| at!(Error::Encode(format!("target-quality zensim: {e}"))))
-        }
+        TargetMetric::Zensim(_) => zensim_score(&source, &dec_img),
     }
+}
+
+/// Decode `avif` and score it against an RGBA8 source. Zensim scores RGBA
+/// natively (alpha-aware); SSIMULACRA2 gets both sides composited onto
+/// mid-gray (see `encode_rgba8_with_target`).
+fn score_rgba8(
+    target: TargetMetric,
+    source: ImgRef<'_, rgb::Rgba<u8>>,
+    avif: &[u8],
+    stop: &StopToken,
+) -> Result<f64> {
+    let dec_config = DecoderConfig::new().prefer_8bit(true);
+    let decoded = crate::decode_with(avif, &dec_config, stop)?;
+    let dec_img: ImgRef<'_, rgb::Rgba<u8>> =
+        decoded.try_as_imgref::<rgb::Rgba<u8>>().ok_or_else(|| {
+            at!(Error::Encode(
+                "target-quality: decoded image not RGBA8-viewable".to_string()
+            ))
+        })?;
+    match target {
+        TargetMetric::Ssim2(_) => {
+            let a = composite_on_gray(source);
+            let b = composite_on_gray(dec_img);
+            ssim2_score(a.as_ref(), b.as_ref())
+        }
+        TargetMetric::Zensim(_) => zensim_score(&source, &dec_img),
+    }
+}
+
+fn ssim2_score(a: ImgRef<'_, [u8; 3]>, b: ImgRef<'_, [u8; 3]>) -> Result<f64> {
+    fast_ssim2::compute_ssimulacra2(a, b)
+        .map_err(|e| at!(Error::Encode(format!("target-quality ssim2: {e}"))))
+}
+
+fn zensim_score(a: &impl zensim::ImageSource, b: &impl zensim::ImageSource) -> Result<f64> {
+    let z = zensim::Zensim::new(zensim::ZensimProfile::latest());
+    z.compute(a, b)
+        .map(|r| r.score())
+        .map_err(|e| at!(Error::Encode(format!("target-quality zensim: {e}"))))
 }
 
 /// fast-ssim2 wants `ImgRef<[u8; 3]>`; zenavif buffers are `Rgb<u8>`.
@@ -261,6 +337,22 @@ fn to_triplet_img(src: ImgRef<'_, Rgb<u8>>) -> ImgVec<[u8; 3]> {
     let mut out = Vec::with_capacity(w * h);
     for row in src.rows() {
         out.extend(row.iter().map(|p| [p.r, p.g, p.b]));
+    }
+    ImgVec::new(out, w, h)
+}
+
+/// Straight-alpha composite onto a mid-gray (128) background, producing the
+/// opaque RGB view SSIMULACRA2 is defined on. Applied identically to source
+/// and decode, so background choice cannot favor either side.
+fn composite_on_gray(src: ImgRef<'_, rgb::Rgba<u8>>) -> ImgVec<[u8; 3]> {
+    let (w, h) = (src.width(), src.height());
+    let mut out = Vec::with_capacity(w * h);
+    for row in src.rows() {
+        out.extend(row.iter().map(|p| {
+            let a = u16::from(p.a);
+            let blend = |c: u8| -> u8 { ((u16::from(c) * a + 128 * (255 - a) + 127) / 255) as u8 };
+            [blend(p.r), blend(p.g), blend(p.b)]
+        }));
     }
     ImgVec::new(out, w, h)
 }
