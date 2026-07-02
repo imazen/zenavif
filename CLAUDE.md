@@ -149,6 +149,30 @@ then-underestimated SPLIT). Registry builds ship pre-fix behavior until zenrav1e
 0.1.4 + the dep chain bumps. See `docs/RD_GAP_VS_LIBAOM.md` "Fixed 2026-07-02" +
 `benchmarks/rd_gap_splitcost_2026-07-02.tsv`.
 
+**2026-07-02 (later): Phase 2 v2 re-measured on the fixed estimate — the regression FLIPPED
+TO A WIN** (direct isolation −0.5759% median, better 17/22; vs cpu2 −0.65%→−1.87% median) at
+1.461× encode time → preserved as zenrav1e workspace commit `dfed8eda`, the prime `-s1`
+deep-mode ingredient (above the 1.2× matched-speed gate for s2). See
+`benchmarks/rd_gap_phase2v2_2026-07-02.tsv`.
+
+### zenrav1e 64×64-parent HORZ_4/VERT_4 sliver corruption — FIXED upstream, release-gated
+Found 2026-07-02 by the partition_range re-test: BLOCK_64X16/16X64 slivers (only reachable
+with `partition_range` max=64, e.g. via the public `override_partition_range`) coded their
+never-validated TX_64X16/TX_16X64 max transforms and desynced BOTH `aomdec` ("Corrupted
+segment_ids") and rav1d-safe. Initial attribution to `b073182c`'s deeper SPLIT estimate was
+WRONG — exonerated by a six-variant bisect. Fixed `zenrav1e@3fa735dc`: intra slivers cap to
+TX_32X16/16X32, the tx-size RDO walk shrinks by the consumed level (else an out-of-alphabet
+depth-3 symbol — a second latent corruption caught in the same fix; that bound is now a hard
+assert in all builds), inter frames without `enable_inter_txfm_split` don't offer 64-parent
+4-way candidates. Byte-identical at shipped configs; 264/264-cell clean sweep at (4,64).
+zenrav1e#28 tracks validating the real 64-dim sliver transforms. Registry builds can hit the
+corruption via `override_partition_range` until zenrav1e releases past 0.1.4. The bisect
+lesson (silent-corruption bug classes + the s.replace() trap) is in the project memory.
+
+The prange (4,64) s2 widening itself REMAINS RULED OUT on clean data (+0.48% median direct,
+worse 15/22; `benchmarks/rd_gap_prange_retest_2026-07-02.tsv`) — but now with 7/22 winners
+(three at −1.8..−2.5%), making a content-adaptive large-block gate a feature-hints candidate.
+
 ### rav1d-safe Threading Race Condition (RESOLVED)
 DisjointMut overlap panic was caused by frame threading. Fix: `max_frame_delay=1`
 gives tile parallelism without frame threading. Default threads now 0 (auto-detect).
