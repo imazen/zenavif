@@ -841,6 +841,102 @@ libaom's `av1_use_angle_delta` — identical logic in both codebases, likely spe
 **Reverted** (not on master) rather than ship a known-corrupt path. Full writeup + what's not
 yet tried: [zenrav1e#26 comment](https://github.com/imazen/zenrav1e/issues/26#issuecomment-4854718037).
 
+## IMPLEMENTED 2026-07-03: palette mode (item 4) — release-gated
+
+zenrav1e master now carries the full AV1 luma palette tool (zenrav1e@68a8d81f syntax
+writers + CDF wiring, @5f82e2d4 search/recon/RDO, @cda831e7 AA-aware detection +
+`PaletteMode`, @df27117c 10-bit roundtrip; default **OFF** behind
+`SpeedSettings.prediction.palette = PaletteMode::{Off, Auto, Always}` and the rav1e
+binary's `--palette`). Search is the libaom av1_rd_pick_palette_intra_sby shape
+(top-color + k-means families, neighbor-cache snapping) trialed through the real
+bitstream writers — full flag+size+colors+index-map rate, no `discount_color_cost`
+(their overuse bug b:421196988). `Auto` ports
+`estimate_screen_content_antialiasing_aware` (their all-intra default since 3.14.0) as
+a per-key-frame gate that also drops `allow_screen_content_tools` signaling on photos.
+UV palette search and palette-in-inter-frames are not implemented (conformant
+omissions; the UV flag is coded "off").
+
+**Conformance:** every palette-armed cell across all measurement sweeps (720+ cells,
+both partition paths, q 60-220, 8-bit; plus a 10-bit in-repo roundtrip) decodes
+aomdec-clean AND byte-agrees (raw I420 md5) with rav1d-safe. Synthetic screen content
+round-trips with LOSSLESS luma at ~1/8 the palette-off bytes
+(zenrav1e tests/palette_roundtrip.rs).
+
+**Measured RD (train26 24-origin sample, q{60,100,140,180,220} × s{2,6}, rav1e IVF
+layer, color-exact color.py scoring, `--lrf false --filter-intra false` to isolate
+zenrav1e#32/#33; 720 cells, 0 conformance failures; per-image table in
+`benchmarks/palette_ab_train26_2026-07-03.tsv`, raw pointer alongside):**
+
+Per-family median BD-rate, bytes at matched quality (negative = palette wins),
+`always` vs `off`, with butteraugli-pnorm3 BD as the metric-gaming guard:
+
+| family | n | s2 ssim2-BD | s2 bp3-BD | s6 ssim2-BD | s6 bp3-BD |
+|---|--:|--:|--:|--:|--:|
+| 7000 plots | 4 | **−20.6%** | −21.9% | **−65.9%** | −65.4% |
+| 8100 web screenshots | 4 | −3.4% | −2.3% | **−22.0%** | −25.0% |
+| 6000 scans/patents | 3 | −1.4% | +0.0% | **−21.8%** | −27.6% |
+| 5000 nps maps | 2 | −0.7% | −2.6% | −8.9% | −11.2% |
+| 9000 gen illust/products | 7 | −0.9% | −1.2% | −0.9% | −2.2% |
+| 1000 photos | 3 | +0.7% | −0.1% | −0.1% | −0.4% |
+| 2000 people | 1 | +0.1% | −0.3% | −0.2% | +0.7% |
+
+Same-q view: photos are a true **no-op** (dssim2 median +0.00, dbytes −0.0%); the
+worst always-arm cell anywhere is dssim2 −1.45 (butteraugli neutral) — the
+b:421196988 overuse shape does **not** reproduce with full-rate RD trials. The big
+wins concentrate exactly where the ablation predicted: plots −62.7% bytes at same-q
+median (s6) with +4.2 ssim2 on top. Encode cost: +4-12% at s2, +58-189% relative at
+s6 on photos (fast encodes, wasted search — `Auto` removes it); plots encode 13-16%
+FASTER with palette (palette blocks skip transform/RDO work).
+
+`Auto` (detection) vs `off`: identical to `always` on the fired images —
+plots 7028/7050/7052, text screenshots 8268/8302/8414, 1-bit scan 6018, product
+shot 9868 — and a no-op (±flag-bit noise) on every rejected image. Detection
+faithfully reproduces libaom (verified: aomenc default vs `--enable-palette=0` is
+byte-identical on 7058), which means it also inherits libaom's conservatism: it
+rejects the gradient-heavy plot 7058 (always-BD −28.6% at s6) and the mixed
+photo/text screenshot 8196 (−4.5%), leaving real wins on the table. Detection
+threshold tuning / a zenanalyze picker head is the follow-up for that remainder.
+
+**Family-7 continuity (the +130-470% headline):** same legacy plots
+(o_7000/7001/7002), same-day 3-arm re-measurement against aomenc `--cpu-used=2`
+(the doc's matched-speed reference; rav1e IVF layer, 420, color-exact scoring,
+zr q-grid extended to q10 so the frontiers overlap; raw rows in
+`benchmarks/palette_fam7_continuity_2026-07-03.tsv`). In 420 these plots
+saturate at ssim2 ≈67-70, so the gap is evaluated at the midpoint of the
+frontier overlap per image — at the top of the achievable quality range,
+where the original headline numbers lived:
+
+| image | matched ssim2 | aom bpp | off gap | always gap | auto gap |
+|---|--:|--:|--:|--:|--:|
+| o_7000 | 66.9 | 0.349 | +174% | **+70%** | +70% |
+| o_7001 | 70.0 | 0.105 | +297% | **+99%** | +99% |
+| o_7002 | 69.6 | 0.411 | +179% | **+71%** | +71% |
+| **median** | | | **+179%** | **+71%** | +71% |
+
+The legacy band reproduces on the off arm (+174..297%, same shape as the
+original +130-470% multi-format table), and palette cuts it to +70-99% —
+roughly **60% of the excess bits over libaom removed**. Auto equals Always
+byte-for-byte on all three (detection fires). Notably, palette-off zenrav1e
+could not even *reach* libaom-cq63's quality floor on o_7001 within the
+original q40-220 grid (aomenc's worst point beat zenrav1e's best at 3.6×
+fewer bits); the palette arm crosses it at q60. The residual +70-99% is
+non-palette headroom (intraBC and coefficient-level RD are the known
+candidates).
+
+**Measurement-config caveat discovered en route:** three separate encoder-recon
+divergences were found while scoring this work — forced-skip intra blocks never
+predicting into the recon (FIXED, zenrav1e@b30dd752), LRF (zenrav1e#32, open) and
+filter-intra (zenrav1e#33, open) desyncing the encoder recon from what aomdec+rav1d
+(byte-agreeing) decode. All three depress decoded-quality scores of s≤6 zenrav1e
+output on smooth content; the palette tables above use the isolated config. Existing
+photo-gap numbers in this doc predate that isolation and are systematically
+pessimistic about zenrav1e wherever filter-intra fired (ravif keeps LRF off at normal
+quality but filter-intra ON).
+
+**At the zenrav1e dep bump:** wire `PaletteMode` through zenravif/zenavif (encoder
+options; the zenanalyze picker is the natural owner of Off/Auto/Always per image —
+detection features are cheap), then re-measure the screen tier gap.
+
 ## Confirmed findings (2026-07-01 audit — supersedes the "verify" framing below)
 
 Source-read + measured, not hypothesized. See `scripts/rd_gap/palette_ablation.sh` +
@@ -848,7 +944,8 @@ Source-read + measured, not hypothesized. See `scripts/rd_gap/palette_ablation.s
 and raw numbers.
 
 1. **Palette mode is 100% unimplemented in zenrav1e's encoder — not "early-terminated," never
-   available at any speed.** `write_use_palette_mode` (`src/context/block_unit.rs:777`) is always
+   available at any speed.** *(2026-07-03: superseded — implemented and measured, see the
+   status block above.)* `write_use_palette_mode` (`src/context/block_unit.rs:777`) is always
    called with `enable: false` (`src/encoder.rs:2392`); calling it with `true` hits `unreachable!()`
    with the comment "palette mode is not implemented." Tracked since 2026-04-12 in zenrav1e#2
    ("Filter intra + palette mode ... hits `unimplemented!()`"), still open. Default CDF tables for

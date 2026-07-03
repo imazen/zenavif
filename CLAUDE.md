@@ -239,6 +239,34 @@ dep bump; effect at the shipped near-flat levels 12-15 is small but real.
 **At the dep bump: re-run the QM benchmark** — the "~10% BD-rate win" for
 with_qm(true) was measured with transposed rect weights.
 
+### zenrav1e palette mode — IMPLEMENTED upstream 2026-07-03, release-gated
+The screen-content palette tool (RD_GAP item 4) is fully implemented on
+zenrav1e master (68a8d81f, 5f82e2d4, cda831e7, df27117c + changelog), default
+OFF behind `SpeedSettings.prediction.palette = PaletteMode::{Off, Auto,
+Always}` (`--palette` on the rav1e CLI). Luma-only search (UV flag coded
+"off" — conformant); `Auto` ports libaom's AA-aware screen-content detection.
+Conformance: every palette-on cell measured (720+ cells across sweeps)
+decodes aomdec-clean AND byte-agrees (raw I420 md5) with rav1d-safe; the
+in-repo roundtrip encodes synthetic screen content to LOSSLESS luma at ~1/8
+the palette-off bytes. RD numbers: `docs/RD_GAP_VS_LIBAOM.md` item 4 status +
+`benchmarks/palette_*_2026-07-03.tsv`. **At the zenrav1e dep bump:** wire
+`PaletteMode` through zenravif/zenavif (picker owns Off/Auto/Always per
+image) and re-measure the screen-content tier gap.
+
+### zenrav1e LRF + filter-intra desync encoder recon from decoders (OPEN upstream)
+Found 2026-07-03 while measuring palette (zenrav1e#32, #33): at s<=7 (LRF)
+and s<=6 (filter-intra, enabled when prediction_modes >= ComplexKeyframes),
+zenrav1e's own recon diverges from what aomdec AND rav1d-safe (byte-agreeing
+with each other) decode — running drift up to ~50 luma RMSE on smooth
+content; a third composing bug (forced-skip intra blocks never wrote their
+prediction into the recon) is FIXED upstream (zenrav1e@b30dd752).
+**Measurement impact:** decoded-quality scores of zenrav1e/cavif output are
+systematically depressed wherever these tools fire — ravif disables LRF at
+normal quality (low-q cells affected only), but filter-intra is ON in cavif
+at s1/s2, so rd_gap/tune-sweep photo numbers carry unintended error. Isolate
+with `--lrf false --filter-intra false` (overrides added upstream). Re-check
+tier measurements after the upstream fixes land.
+
 ### rav1d-safe Threading Race Condition (RESOLVED)
 DisjointMut overlap panic was caused by frame threading. Fix: `max_frame_delay=1`
 gives tile parallelism without frame threading. Default threads now 0 (auto-detect).
