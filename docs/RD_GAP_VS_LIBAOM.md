@@ -1,6 +1,100 @@
 # zenrav1e RD gap vs libaom-at-slow — measurement + narrowing plan
 
-**Status: TRUE RD PARITY REACHED, 2026-07-02** — median BD-rate vs libaom-slow improved
+**Status: see "CURRENT POSITION (consolidated 2026-07-03)" immediately below** — one
+fresh measurement of the composed shipped config: legacy photos median **−12.3% vs
+libaom cpu2 / −11.6% vs cpu0-default / tier-2 (cpu0+ss2tune) dead even** at s2, with
+butteraugli agreeing and zr-s2 *cheaper* than the tier-2 reference it ties.
+
+## CURRENT POSITION (consolidated 2026-07-03)
+
+**One fresh measurement of the composed shipped configuration, superseding the day's
+stacked deltas as the current-position statement** (the per-mechanism sections below
+remain the isolation evidence; this section is what the composed config measures TODAY).
+~12 mechanisms landed on zenrav1e master over 2026-07-02/03: the partition-search fixes,
+the `-s1` deep mode, `Tune::Ssimulacra2` (chroma delta-q + ss2 QM curves + variance-boost
+1.0 + QM-dist ratio + LF schedule {7,5,3}@{80,160}), palette mode + AA detection, and the
+recon fixes (`b30dd752`/`32477046`/`17cff82f`/`c1fab5b3`) — each was measured in
+isolation as it landed; this is the ONE authoritative composed statement.
+
+**Config under test (bit-reproducible):** cavif `-s2` / `-s1` `--depth 8` from
+**zenrav1e master@origin `c9c2d5f7`** (code tip `9a05d54a`) via the ravif dev-patch
+(ravif main `9d2b97cc` + path dep + `ZENRAVIF_TUNE`/`ZENRAVIF_PALETTE` env passthroughs +
+`S1_DEEP_ARMS_LIVE=true`; patch sha256 `d8a40c47…`, full diff in the raw dir, reverted
+after) — **Tune::Ssimulacra2 armed + palette=Auto armed**. References: pinned libaom
+`632172a4` (aomenc 3.14.1), 420, cq 8–63 (the deltaq-2026-07-02 tier-table convention);
+all three legacy refs re-encoded fresh and verified **176/176 cells value-identical** to
+the saved deltaq baselines (three independent passes). Scoring: fast-ssim2 + butteraugli
+3-norm/max, decoded-vs-source; zr decoded by zenavif's own save_png (rav1d-safe), aom by
+aomdec+color.py. Box: zenavif-sweep-1 (ccx63). Full tables:
+`benchmarks/rd_gap_final_2026-07-03.tsv`; raws
+`/mnt/v/output/zenavif/final-2026-07-03/` (+ pointer, SHA256SUMS, Tower mirror).
+
+**Conformance at the composed config: s2 110/110 + s1 110/110** (aomdec AND rav1d-safe,
+legacy 22 × Q{30,50,60,75,90}); 0 FAILED_CELLS across all 12 measurement runs.
+
+### The ladder (legacy photos n=19, ssim2 BD-rate; negative = zenrav1e needs fewer bits)
+
+| ref | s2 med / mean / wins | s2 ba3n / bamax med | s2 time | s1 med / mean / wins | s1 ba3n / bamax med | s1 time |
+|---|---|---|---|---|---|---|
+| cpu2 (matched-speed "slow") | **−12.29 / −11.94 / 17/19** | −6.77 / −4.84 | 3.04× | **−12.06 / −12.16 / 17/19** | −7.76 / −3.45 | 8.01× |
+| cpu0 default (slowest-best) | **−11.58 / −10.03 / 16/19** | −4.16 / −4.39 | 1.55× | **−11.31 / −10.27 / 17/19** | −3.38 / −1.89 | 4.08× |
+| cpu0 --tune=ssimulacra2 (tier 2) | **+0.05 / −1.17 / 9/19** | −2.50 / −4.91 | 1.01× | **+0.37 / −1.38 / 9/19** | −1.60 / −5.07 | 2.67× |
+
+Both butteraugli norms are **negative against every reference at both speeds** — no
+metric gaming; where the tier-2 ssim2 median rides ~0, butteraugli says zenrav1e wins
+outright. The tier-2 knife-edge (±0.4 around 0 across recent measurements) is o_9051
+sitting at the median. Legacy all-22 (plots included): s2 −11.84 / −10.47 / +0.44,
+s1 −11.93 / −10.56 / +0.75, **zero reach failures** vs every ref (the historic
+o_7001-class "aom floor unreachable" failure is eliminated — palette + the 12-pt grid
+give frontier overlap everywhere on the legacy corpus).
+
+### train26 (fitting corpus, 24 TRAIN origins — FIRST aom-referenced statement)
+
+| ref | scope | s2 med / mean / wins | s1 med / mean / wins |
+|---|---|---|---|
+| cpu2 | all (n=22†) | **−13.33 / −11.30 / 18/22** | **−13.66 / −12.51 / 19/22** |
+| cpu2 | photos (n=20) | −13.33 / −13.54 / 17/20 | −13.66 / −13.65 / 18/20 |
+| cpu0-default | all (n=23†) | −10.91 / −5.80 / 15/23 | −11.15 / −7.43 / 16/23 |
+| cpu0-ss2tune (tier 2) | all (n=21†) | **−0.34 / −3.24 / 11/21** | **−0.11 / −3.27 / 11/21** |
+| cpu0-ss2tune | photos (n=20) | −0.15 / −1.66 / 10/20 | −0.02 / −1.70 / 10/20 |
+
+**The tier-2 median crosses on the fitting corpus at both speeds** (means clearly
+negative). † n<24: aom's 420 frontier collapses to <4 unique points on saturated screen
+content — NOT silently dropped: `7028_plots` = aom saturates at ssim2 64.0@0.095 bpp
+while zr's *floor* (64.9@0.075 bpp) beats aom's best on both axes → zr dominates aom's
+entire achievable range (inverse reach-failure, categorical win); `7052_plots` = aom's
+near-lossless top 89.4@0.014 bpp vs zr 1.35× bytes (s2) / 1.27× (s1) at matched quality
+— the real remaining saturated-screen-tail loss. Per-family s2 medians vs cpu2:
+interiors −23.1, screenshots −19.3 (4/4), gen-illustrations −19.4, nps −12.1, people
+−11.4, nature −11.2, food −9.0, products −3.9, scans/patents +0.8 (1-bit rescans),
+plots split (7058 −37.8 / 7050 +59.9 — 7050 is the worst remaining cell).
+
+### Historic holdouts (TEST/VAL-split origins — illustration only)
+
+| img | s2 cpu2 / cpu0def / tier2 | s1 cpu2 / cpu0def / tier2 | verdict |
+|---|---|---|---|
+| o_5004 | −23.3 / −21.1 / +0.05 | −23.0 / −20.7 / +0.90 | **RESCUED** (was +3.3/+5.9/+29.9 pre-qmdist) |
+| o_6629 | −0.3 / +0.7 / +4.2 | −3.7 / −2.7 / +0.4 | moved to ~even; s1 now WINS vs cpu2+cpu0def (was +31.6/+32.7/+24.9) |
+| o_9051 | +11.8 / +11.7 / +0.1 | +12.9 / +12.3 / +1.6 | the remaining material loser vs cpu2/cpu0def; ~even at tier-2 |
+
+### Encode time (fresh cells, RD_CACHE=off refs, sequential solo runs, Σ enc_ms)
+
+Legacy all-22: zr-s2 = **2.65× cpu2, 1.15× cpu0-default, 0.86× cpu0-ss2tune** (the full
+tune at s2 is *cheaper* than the tier-2 reference it ties); zr-s1 = 6.91× / 3.00× /
+2.24×. train26: s2 = 3.50× / 1.38× / 0.98×; s1 = 9.18× / 3.62× / 2.56×. Photos-only
+ladder ratios in the table above (plots shift the mix: palette makes zr fast on plots
+while aom cpu0 crawls on them).
+
+### What this supersedes / keeps
+
+This section is the current position; the dated sections below (deltaq, qmdist, lfsharp,
+s1 deep mode, Tune::Ssimulacra2, palette, partition fixes) remain the per-mechanism
+isolation evidence and are NOT invalidated. Everything above is release-gated the same
+way: registry builds ship pre-fix behavior until zenrav1e releases past 0.1.4 and the
+zenravif → zenavif dep chain bumps.
+
+**Historical status (2026-07-02, superseded by the section above): TRUE RD PARITY
+REACHED** — median BD-rate vs libaom-slow improved
 **+5.7% → −0.65%** (mean +7.5%→+0.24%), crossing the ≤0% parity target at matched speed
 (1.057× median encode time). The final lever was the trial-SPLIT-cost accuracy fix ("Fixed
 2026-07-02" below), on top of the four 2026-07-01 bug fixes. **Same day, the `-s1` deep

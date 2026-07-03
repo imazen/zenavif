@@ -169,6 +169,21 @@ coefficient-level RD.** 110/110 aomdec+rav1d conformance at the shipped config (
 110-cell configs). ~3.7× cpu0 wall per cell (RD-first mode by design). Full record:
 `docs/RD_GAP_VS_LIBAOM.md` "s1 deep mode" + `benchmarks/rd_gap_s1_2026-07-02.tsv`.
 
+**2026-07-03 CONSOLIDATED CURRENT POSITION (one fresh measurement of the composed
+shipped config — supersedes the stacked per-mechanism deltas as the status statement).**
+cavif s2/s1 + Tune::Ssimulacra2 + palette=Auto at zenrav1e master `c9c2d5f7`: legacy
+photos (n=19) ssim2 BD median **−12.29% vs cpu2 / −11.58% vs cpu0-default / +0.05%
+(dead even) vs cpu0-ss2tune** at s2 (s1: −12.06/−11.31/+0.37), butteraugli negative vs
+every ref at both speeds, and zr-s2 runs at **0.86–0.98× the wall cost of the
+cpu0-ss2tune reference it ties** (1.15× cpu0-default; s1 = 2.2–2.6×/3.0–3.6× resp.).
+train26 (24 TRAIN origins, first aom-referenced statement): vs cpu2 −13.33 (s2) /
+−13.66 (s1) median, **tier-2 median crosses at both speeds** (−0.34/−0.11, means −3.2).
+Holdouts: o_5004 RESCUED (−23 vs cpu2), o_6629 ~even (s1 wins vs cpu2+cpu0def), o_9051
+remains the one material loser (+12 vs cpu2, ~even at tier-2). Zero reach failures on
+legacy; conformance 220/220 at the composed config. Full record:
+`docs/RD_GAP_VS_LIBAOM.md` "CURRENT POSITION (consolidated 2026-07-03)" +
+`benchmarks/rd_gap_final_2026-07-03.tsv` (+ pointer to raws).
+
 ### zenrav1e 64×64-parent HORZ_4/VERT_4 sliver corruption — FIXED upstream, release-gated
 Found 2026-07-02 by the partition_range re-test: BLOCK_64X16/16X64 slivers (only reachable
 with `partition_range` max=64, e.g. via the public `override_partition_range`) coded their

@@ -1,0 +1,319 @@
+# CONSOLIDATED RE-STATEMENT -- one fresh measurement of the composed shipped config vs all libaom references -- 2026-07-03 -- sweeps on zenavif-sweep-1 (Hetzner ccx63 48c, restored from snapshot 404271314), analysis host lilith
+# supersedes-as-current-position: the per-mechanism tier tables of 2026-07-02/03 (deltaq/qmdist/lfsharp/desyncfix) remain the isolation evidence; THIS table is the composed-config statement
+# zenrav1e: master@origin c9c2d5f7 (docs tip; last code commit 9a05d54a) -- includes partition fixes + s1-deep knobs + Tune::Ssimulacra2 (chroma-deltaq, ss2 QM curves, variance-boost 1.0, QM-dist ratio, LF schedule {7,5,3}@{80,160}) + palette mode + AA detection + recon fixes b30dd752/32477046/17cff82f/c1fab5b3 + zenrav1e#29 QM fixes
+# cavif: ravif main 9d2b97cc + DEV-PATCH (path dep -> ~/work/zen/zenrav1e, ZENRAVIF_TUNE/ZENRAVIF_PALETTE env passthroughs, S1_DEEP_ARMS_LIVE=true + mixed_3way/split_trial_depth apply lines) -- patch sha256 d8a40c47678b54cc, full diff in raw dir; patch REVERTED after the sweep (never committed)
+# arming (BIT-REPRODUCIBLE): env ZENRAVIF_TUNE=ssimulacra2 ZENRAVIF_PALETTE=auto; cavif -f -Q<q> -s{2,1} --depth 8; zr grid Q{30,40,50,55,60,65,70,75,80,85,90,95}
+# aom refs: pinned 632172a4 (aomenc 3.14.1) build_slow; --cpu-used={2,0} [--tune=ssimulacra2 for tier-2] --end-usage=q --cq-level={8,16,24,32,40,48,56,63} --i420 --passes=1 --lag-in-frames=0 --color-primaries=bt709 --transfer-characteristics=srgb --matrix-coefficients=bt470bg; fmt 420 (deltaq-2026-07-02 tier-table convention)
+# binaries (sha256/16): cavif 39918ae4e829a842, aomenc 187a2533efe8f3cb, aomdec bcf1813b7a0e7f63, save_png b1f67521f4b2fd77 (zenavif src @ fd273837), fast-ssim2-cli 9927781d42f5f32d, butteraugli 94fb99873f1db9fb
+# corpora: legacy scripts/rd_gap/sample_images.tsv (22 img = 19 photos + 3 fam-7 plots; MIXED train/val/test splits -- continuity corpus) + scripts/rd_gap/sample_images_train26.tsv (24 TRAIN-split origins, 12 content families)
+# scoring: fast-ssim2 (canonical score_ssim2) + butteraugli 3-norm/max per cell; zr decoded by zenavif save_png (rav1d-safe), aom by aomdec+color.py (color-exact BT.601-full)
+# reference continuity: all 3 legacy aom refs re-encoded fresh and verified 176/176 cells value-identical (bytes/bpp/ssim2) to the saved deltaq-2026-07-02 baselines (cacheverify_*.tsv in raw dir)
+# conformance at the composed config: s2 110/110 + s1 110/110 (aomdec AND rav1d-safe, legacy 22 x Q{30,50,60,75,90}); sweep cells: 0 FAILED_CELLS in all 10 runs
+# enc_ms: zr sweeps + aom refs all fresh encodes, sequential solo runs (JOBS=22/24 per-image parallelism, single-threaded encoders, 48 dedicated cores); aom timing runs RD_CACHE=off
+# raw sweeps: /mnt/v/output/zenavif/final-2026-07-03/ (SHA256SUMS; Tower mirror) -- companion pointer file alongside this TSV
+# BD convention: per-image monotone-frontier hull, log-bytes trapezoid over overlapping ssim2 (bd_arm.py); negative = zenrav1e needs fewer bits at matched quality; photos = family-7xxx excluded
+#
+# === THE LADDER: legacy photos n=19 (family-7 excluded), ssim2 BD-rate vs libaom refs; ba3n/bamax = butteraugli 3-norm/max BD medians; time = sum(zr enc)/sum(ref enc), photos, fresh cells ===
+# speed	ref	ssim2_median	ssim2_mean	wins	ba3n_med	bamax_med	enc_time_ratio
+# s2	cpu2	-12.29	-11.94	17/19	-6.77	-4.84	3.04x
+# s2	cpu0-default	-11.58	-10.03	16/19	-4.16	-4.39	1.55x
+# s2	cpu0-ss2tune	+0.05	-1.17	9/19	-2.50	-4.91	1.01x
+# s1	cpu2	-12.06	-12.16	17/19	-7.76	-3.45	8.01x
+# s1	cpu0-default	-11.31	-10.27	17/19	-3.38	-1.89	4.08x
+# s1	cpu0-ss2tune	+0.37	-1.38	9/19	-1.60	-5.07	2.67x
+#
+# === legacy ALL 22 (plots included, palette=Auto): s2 vs cpu2 -11.84 med (17/22), vs cpu0-default -10.47 (16/22), tier2 +0.44 (9/22); s1 -11.93 (17/22) / -10.56 (17/22) / +0.75 (9/22); ZERO reach failures at both speeds vs all refs (historic o_7001-class reach failure ELIMINATED by palette + 12-pt grid) ===
+#
+# === train26 (24 TRAIN origins; n<24 = per-image BD-undefined by aom-420 frontier collapse, characterized below) ===
+# speed	ref	scope	n	ssim2_median	ssim2_mean	wins
+# s2	cpu2	all	22	-13.33	-11.30	18/22
+# s2	cpu2	photos(no fam-7)	20	-13.33	-13.54	17/20
+# s2	cpu0-default	all	23	-10.91	-5.80	15/23
+# s2	cpu0-ss2tune	all	21	-0.34	-3.24	11/21
+# s2	cpu0-ss2tune	photos	20	-0.15	-1.66	10/20
+# s1	cpu2	all	22	-13.66	-12.51	19/22
+# s1	cpu0-default	all	23	-11.15	-7.43	16/23
+# s1	cpu0-ss2tune	all	21	-0.11	-3.27	11/21
+# s1	cpu0-ss2tune	photos	20	-0.02	-1.70	10/20
+#
+# === BD-undefined cells (aom 420 frontier collapses to <4 unique points on saturated screen content; NOT dropped silently) ===
+# 7028_plots vs cpu2: aom saturates at ssim2 64.0@0.095bpp; zr's floor (64.9@0.075bpp) beats aom's best on BOTH axes at both speeds -> zr dominates aom's entire achievable range (inverse reach-failure, categorical zr win)
+# 7052_plots vs cpu2: aom near-lossless top 89.4@0.014bpp; zr at matched ssim2 = 1.35x bytes (s2) / 1.27x (s1) -> real zr loss on the saturated-screen tail, hidden from BD by frontier collapse
+# legacy plots (BD defined, 12-pt grid): s2 vs cpu2 o_7000 +24.9 / o_7001 +38.6 / o_7002 +11.9 (was +163..297% gap-at-top palette-off; palette=Auto fires on all three)
+#
+# === the 3 historic holdouts (TEST/VAL-split origins, illustration only) ===
+# img	s2 cpu2 / cpu0def / tier2	s1 cpu2 / cpu0def / tier2	verdict
+# o_5004	-23.32 / -21.12 / +0.05	-22.98 / -20.72 / +0.90	RESCUED (was +3.3/+5.9/+29.9 pre-qmdist)
+# o_6629	-0.33 / +0.72 / +4.24	-3.71 / -2.70 / +0.37	moved to ~even; s1 WINS vs cpu2+cpu0def (was +31.6/+32.7/+24.9 at deltaq era)
+# o_9051	+11.76 / +11.66 / +0.12	+12.85 / +12.33 / +1.61	the remaining material loser vs cpu2/cpu0def; ~even at tier-2 (aom's ss2 tune also hurts aom on this image)
+#
+# === encode-time totals (all images incl. plots; Sum enc_ms, fresh RD_CACHE=off refs, sequential solo runs, JOBS=22/24) ===
+# legacy: zr_s2=3462s zr_s1=9043s cpu2=1308s cpu0def=3018s cpu0ss2=4039s -> s2: 2.65x/1.15x/0.86x; s1: 6.91x/3.00x/2.24x
+# train26: zr_s2=3293s zr_s1=8648s cpu2=942s cpu0def=2389s cpu0ss2=3376s -> s2: 3.50x/1.38x/0.98x; s1: 9.18x/3.62x/2.56x
+# (zr s2 with the full tune is CHEAPER than the cpu0-ss2tune reference it ties: 0.86x legacy / 0.98x train26)
+#
+corpus	image	family	speed	ref	bd_ssim2	bd_ba3n	bd_bamax	reach_bppx
+legacy	o_1015.png.scale1024x768.png	1	s2	cpu2	-18.6814	-14.5553	-20.6619	NA
+legacy	o_1023.png.scale1024x768.png	1	s2	cpu2	-24.0313	-6.7736	-14.6970	NA
+legacy	o_1029.png.scale1024x768.png	1	s2	cpu2	-23.7783	-8.3615	-14.2150	NA
+legacy	o_2012.png.scale1024x768.png	2	s2	cpu2	-10.8574	+3.4188	+3.2059	NA
+legacy	o_2202.png.scale1024x1024.png	2	s2	cpu2	-10.0700	+9.2985	+5.8209	NA
+legacy	o_3003.png.scale1024x725.png	3	s2	cpu2	-12.1075	-2.4173	-9.0295	NA
+legacy	o_3006.png.scale1024x763.png	3	s2	cpu2	-21.3866	-11.5612	-33.4762	NA
+legacy	o_3008.png.scale1024x738.png	3	s2	cpu2	-11.5711	+0.6809	+5.7242	NA
+legacy	o_5004.png.scale1024x724.png	5	s2	cpu2	-23.3191	-15.6831	-15.0971	NA
+legacy	o_5016.png.scale1024x549.png	5	s2	cpu2	-22.6382	-29.7534	-30.1184	NA
+legacy	o_6610.png.scale1024x806.png	6	s2	cpu2	-15.3906	-5.6683	+0.6308	NA
+legacy	o_6629.png.scale1024x949.png	6	s2	cpu2	-0.3268	-17.5526	+5.1951	NA
+legacy	o_6632.png.scale1024x939.png	6	s2	cpu2	-4.4075	+7.4004	+1.4822	NA
+legacy	o_7000.png.scale1024x1024.png	7	s2	cpu2	+24.9394	NA	NA	NA
+legacy	o_7001.png.scale1024x1024.png	7	s2	cpu2	+38.6238	NA	NA	NA
+legacy	o_7002.png.scale1024x1024.png	7	s2	cpu2	+11.9391	+3.4987	NA	NA
+legacy	o_8106.png.scale1024x640.png	8	s2	cpu2	-15.9469	-22.1252	-40.4937	NA
+legacy	o_8107.png.scale1024x640.png	8	s2	cpu2	-8.4918	-6.6916	-8.0168	NA
+legacy	o_8110.png.scale1024x640.png	8	s2	cpu2	-12.2948	-7.6654	-4.8447	NA
+legacy	o_9051.png.scale1024x1024.png	9	s2	cpu2	+11.7622	+6.3724	+9.4571	NA
+legacy	o_9067.png.scale1024x1024.png	9	s2	cpu2	-14.1776	-10.5945	-4.3780	NA
+legacy	o_9077.png.scale1024x1024.png	9	s2	cpu2	+10.8913	+3.8466	+7.8470	NA
+legacy	o_1015.png.scale1024x768.png	1	s2	cpu0-default	-18.1308	-12.9125	-22.5410	NA
+legacy	o_1023.png.scale1024x768.png	1	s2	cpu0-default	-22.7706	-5.7584	-13.2786	NA
+legacy	o_1029.png.scale1024x768.png	1	s2	cpu0-default	-21.0453	-7.1229	-18.7640	NA
+legacy	o_2012.png.scale1024x768.png	2	s2	cpu0-default	-8.8594	+4.9558	+8.4755	NA
+legacy	o_2202.png.scale1024x1024.png	2	s2	cpu0-default	-8.1954	+10.9699	+14.1863	NA
+legacy	o_3003.png.scale1024x725.png	3	s2	cpu0-default	-11.5839	-2.0394	-2.8811	NA
+legacy	o_3006.png.scale1024x763.png	3	s2	cpu0-default	-19.9965	-7.0283	-15.6105	NA
+legacy	o_3008.png.scale1024x738.png	3	s2	cpu0-default	-10.8707	+0.8227	-5.1965	NA
+legacy	o_5004.png.scale1024x724.png	5	s2	cpu0-default	-21.1163	-13.4409	-2.3102	NA
+legacy	o_5016.png.scale1024x549.png	5	s2	cpu0-default	-20.3531	-29.7896	-29.5381	NA
+legacy	o_6610.png.scale1024x806.png	6	s2	cpu0-default	-14.2034	-4.1550	+0.8694	NA
+legacy	o_6629.png.scale1024x949.png	6	s2	cpu0-default	+0.7185	-15.0689	-4.7621	NA
+legacy	o_6632.png.scale1024x939.png	6	s2	cpu0-default	-1.4137	+9.2353	-0.4428	NA
+legacy	o_7000.png.scale1024x1024.png	7	s2	cpu0-default	+31.5523	NA	NA	NA
+legacy	o_7001.png.scale1024x1024.png	7	s2	cpu0-default	+39.8565	NA	NA	NA
+legacy	o_7002.png.scale1024x1024.png	7	s2	cpu0-default	+15.4293	+17.3021	NA	NA
+legacy	o_8106.png.scale1024x640.png	8	s2	cpu0-default	-13.0447	-20.6737	-40.7311	NA
+legacy	o_8107.png.scale1024x640.png	8	s2	cpu0-default	-5.1654	-3.7903	+0.7074	NA
+legacy	o_8110.png.scale1024x640.png	8	s2	cpu0-default	-10.0624	-5.4888	-5.3190	NA
+legacy	o_9051.png.scale1024x1024.png	9	s2	cpu0-default	+11.6649	+8.4586	+7.1243	NA
+legacy	o_9067.png.scale1024x1024.png	9	s2	cpu0-default	-12.0322	-2.7777	-4.3917	NA
+legacy	o_9077.png.scale1024x1024.png	9	s2	cpu0-default	+15.8428	+7.3212	+17.3515	NA
+legacy	o_1015.png.scale1024x768.png	1	s2	cpu0-ss2tune	+3.6783	-6.7226	-5.9461	NA
+legacy	o_1023.png.scale1024x768.png	1	s2	cpu0-ss2tune	-3.3389	+4.7432	+5.3044	NA
+legacy	o_1029.png.scale1024x768.png	1	s2	cpu0-ss2tune	-3.8621	+2.6130	-0.9619	NA
+legacy	o_2012.png.scale1024x768.png	2	s2	cpu0-ss2tune	+7.2147	+3.3249	+3.5302	NA
+legacy	o_2202.png.scale1024x1024.png	2	s2	cpu0-ss2tune	+4.7758	+1.1869	-9.3195	NA
+legacy	o_3003.png.scale1024x725.png	3	s2	cpu0-ss2tune	+2.2609	+5.8556	-6.8306	NA
+legacy	o_3006.png.scale1024x763.png	3	s2	cpu0-ss2tune	+0.7668	+6.4567	+4.9266	NA
+legacy	o_3008.png.scale1024x738.png	3	s2	cpu0-ss2tune	+5.1888	-4.0057	-13.4917	NA
+legacy	o_5004.png.scale1024x724.png	5	s2	cpu0-ss2tune	+0.0504	-3.5652	-11.9917	NA
+legacy	o_5016.png.scale1024x549.png	5	s2	cpu0-ss2tune	-10.8509	-27.2551	-27.9078	NA
+legacy	o_6610.png.scale1024x806.png	6	s2	cpu0-ss2tune	+5.1121	+7.0842	+0.9373	NA
+legacy	o_6629.png.scale1024x949.png	6	s2	cpu0-ss2tune	+4.2429	-28.5751	-35.1095	NA
+legacy	o_6632.png.scale1024x939.png	6	s2	cpu0-ss2tune	-1.2362	+0.6752	-18.4390	NA
+legacy	o_7000.png.scale1024x1024.png	7	s2	cpu0-ss2tune	+30.9725	NA	NA	NA
+legacy	o_7001.png.scale1024x1024.png	7	s2	cpu0-ss2tune	+37.2027	+35.8820	NA	NA
+legacy	o_7002.png.scale1024x1024.png	7	s2	cpu0-ss2tune	+15.1837	+8.4462	NA	NA
+legacy	o_8106.png.scale1024x640.png	8	s2	cpu0-ss2tune	-9.2509	-33.2939	NA	NA
+legacy	o_8107.png.scale1024x640.png	8	s2	cpu0-ss2tune	-6.2491	-7.2689	-3.7576	NA
+legacy	o_8110.png.scale1024x640.png	8	s2	cpu0-ss2tune	-11.4578	-9.0153	-11.5899	NA
+legacy	o_9051.png.scale1024x1024.png	9	s2	cpu0-ss2tune	+0.1158	+2.7171	+6.0382	NA
+legacy	o_9067.png.scale1024x1024.png	9	s2	cpu0-ss2tune	-2.7990	-2.4995	+2.6159	NA
+legacy	o_9077.png.scale1024x1024.png	9	s2	cpu0-ss2tune	-6.6274	-4.8368	-3.8755	NA
+legacy	o_1015.png.scale1024x768.png	1	s1	cpu2	-18.9756	-14.8444	-18.7047	NA
+legacy	o_1023.png.scale1024x768.png	1	s1	cpu2	-23.8695	-7.8616	-14.1601	NA
+legacy	o_1029.png.scale1024x768.png	1	s1	cpu2	-23.3571	-9.6053	-15.1738	NA
+legacy	o_2012.png.scale1024x768.png	2	s1	cpu2	-11.8553	+0.3873	-1.8279	NA
+legacy	o_2202.png.scale1024x1024.png	2	s1	cpu2	-11.2608	+6.7342	+8.6106	NA
+legacy	o_3003.png.scale1024x725.png	3	s1	cpu2	-12.0566	-3.6085	-12.7204	NA
+legacy	o_3006.png.scale1024x763.png	3	s1	cpu2	-21.4639	-12.6952	-30.7692	NA
+legacy	o_3008.png.scale1024x738.png	3	s1	cpu2	-12.0009	-0.1182	+11.6018	NA
+legacy	o_5004.png.scale1024x724.png	5	s1	cpu2	-22.9838	-15.9124	-20.9725	NA
+legacy	o_5016.png.scale1024x549.png	5	s1	cpu2	-21.7735	-29.7556	-26.6036	NA
+legacy	o_6610.png.scale1024x806.png	6	s1	cpu2	-15.6861	-7.7646	-2.2334	NA
+legacy	o_6629.png.scale1024x949.png	6	s1	cpu2	-3.7126	-18.0764	+12.5474	NA
+legacy	o_6632.png.scale1024x939.png	6	s1	cpu2	-6.8189	+5.3489	+7.3856	NA
+legacy	o_7000.png.scale1024x1024.png	7	s1	cpu2	+24.3636	NA	NA	NA
+legacy	o_7001.png.scale1024x1024.png	7	s1	cpu2	+37.3858	NA	NA	NA
+legacy	o_7002.png.scale1024x1024.png	7	s1	cpu2	+11.7493	+3.8185	NA	NA
+legacy	o_8106.png.scale1024x640.png	8	s1	cpu2	-14.2270	-20.6155	-34.9277	NA
+legacy	o_8107.png.scale1024x640.png	8	s1	cpu2	-8.1823	-6.3107	-6.8399	NA
+legacy	o_8110.png.scale1024x640.png	8	s1	cpu2	-9.4952	-4.6031	+1.7108	NA
+legacy	o_9051.png.scale1024x1024.png	9	s1	cpu2	+12.8542	+7.3413	+13.3825	NA
+legacy	o_9067.png.scale1024x1024.png	9	s1	cpu2	-14.4116	-9.7793	-3.4548	NA
+legacy	o_9077.png.scale1024x1024.png	9	s1	cpu2	+8.2398	+3.4230	+4.5519	NA
+legacy	o_1015.png.scale1024x768.png	1	s1	cpu0-default	-18.4297	-13.2181	-21.4898	NA
+legacy	o_1023.png.scale1024x768.png	1	s1	cpu0-default	-22.5997	-6.8653	-12.3644	NA
+legacy	o_1029.png.scale1024x768.png	1	s1	cpu0-default	-20.6086	-8.4321	-19.5627	NA
+legacy	o_2012.png.scale1024x768.png	2	s1	cpu0-default	-9.9016	+1.7830	+2.6615	NA
+legacy	o_2202.png.scale1024x1024.png	2	s1	cpu0-default	-9.4328	+8.3268	+16.7570	NA
+legacy	o_3003.png.scale1024x725.png	3	s1	cpu0-default	-11.5317	-3.2301	-6.9024	NA
+legacy	o_3006.png.scale1024x763.png	3	s1	cpu0-default	-20.0866	-8.2957	-11.9864	NA
+legacy	o_3008.png.scale1024x738.png	3	s1	cpu0-default	-11.3074	+0.0073	+0.7687	NA
+legacy	o_5004.png.scale1024x724.png	5	s1	cpu0-default	-20.7196	-13.6290	-6.9532	NA
+legacy	o_5016.png.scale1024x549.png	5	s1	cpu0-default	-19.4330	-29.7589	-25.6287	NA
+legacy	o_6610.png.scale1024x806.png	6	s1	cpu0-default	-14.5158	-6.3066	-1.8873	NA
+legacy	o_6629.png.scale1024x949.png	6	s1	cpu0-default	-2.7010	-15.8578	+0.9884	NA
+legacy	o_6632.png.scale1024x939.png	6	s1	cpu0-default	-3.9000	+7.1077	+4.3914	NA
+legacy	o_7000.png.scale1024x1024.png	7	s1	cpu0-default	+30.9468	NA	NA	NA
+legacy	o_7001.png.scale1024x1024.png	7	s1	cpu0-default	+38.6105	NA	NA	NA
+legacy	o_7002.png.scale1024x1024.png	7	s1	cpu0-default	+15.2336	+17.6748	NA	NA
+legacy	o_8106.png.scale1024x640.png	8	s1	cpu0-default	-11.2194	-19.1203	-35.0772	NA
+legacy	o_8107.png.scale1024x640.png	8	s1	cpu0-default	-4.8429	-3.3779	+2.1538	NA
+legacy	o_8110.png.scale1024x640.png	8	s1	cpu0-default	-7.0589	-2.3385	+1.0464	NA
+legacy	o_9051.png.scale1024x1024.png	9	s1	cpu0-default	+12.3292	+9.2162	+10.9685	NA
+legacy	o_9067.png.scale1024x1024.png	9	s1	cpu0-default	-12.3066	-1.8638	-3.4301	NA
+legacy	o_9077.png.scale1024x1024.png	9	s1	cpu0-default	+13.1169	+6.8622	+13.3848	NA
+legacy	o_1015.png.scale1024x768.png	1	s1	cpu0-ss2tune	+3.3053	-7.0176	-2.8215	NA
+legacy	o_1023.png.scale1024x768.png	1	s1	cpu0-ss2tune	-3.0800	+3.5333	+7.5167	NA
+legacy	o_1029.png.scale1024x768.png	1	s1	cpu0-ss2tune	-3.3280	+1.2035	-2.3218	NA
+legacy	o_2012.png.scale1024x768.png	2	s1	cpu0-ss2tune	+5.7095	+0.1516	-1.9734	NA
+legacy	o_2202.png.scale1024x1024.png	2	s1	cpu0-ss2tune	+3.4358	-1.3305	-7.0354	NA
+legacy	o_3003.png.scale1024x725.png	3	s1	cpu0-ss2tune	+2.4475	+4.3402	-10.7883	NA
+legacy	o_3006.png.scale1024x763.png	3	s1	cpu0-ss2tune	+0.5939	+4.8706	+9.3746	NA
+legacy	o_3008.png.scale1024x738.png	3	s1	cpu0-ss2tune	+4.3515	-4.9473	-8.8355	NA
+legacy	o_5004.png.scale1024x724.png	5	s1	cpu0-ss2tune	+0.8987	-3.6962	-15.7570	NA
+legacy	o_5016.png.scale1024x549.png	5	s1	cpu0-ss2tune	-9.8390	-27.3661	-23.9876	NA
+legacy	o_6610.png.scale1024x806.png	6	s1	cpu0-ss2tune	+4.8088	+4.5715	-0.6053	NA
+legacy	o_6629.png.scale1024x949.png	6	s1	cpu0-ss2tune	+0.3674	-29.3564	-30.5633	NA
+legacy	o_6632.png.scale1024x939.png	6	s1	cpu0-ss2tune	-4.3429	-1.4452	-14.3986	NA
+legacy	o_7000.png.scale1024x1024.png	7	s1	cpu0-ss2tune	+30.3674	NA	NA	NA
+legacy	o_7001.png.scale1024x1024.png	7	s1	cpu0-ss2tune	+35.9761	+33.6952	NA	NA
+legacy	o_7002.png.scale1024x1024.png	7	s1	cpu0-ss2tune	+14.9733	+8.7799	NA	NA
+legacy	o_8106.png.scale1024x640.png	8	s1	cpu0-ss2tune	-7.1634	-31.9216	NA	NA
+legacy	o_8107.png.scale1024x640.png	8	s1	cpu0-ss2tune	-5.8869	-7.0626	-3.1010	NA
+legacy	o_8110.png.scale1024x640.png	8	s1	cpu0-ss2tune	-7.6953	-5.3929	-7.5101	NA
+legacy	o_9051.png.scale1024x1024.png	9	s1	cpu0-ss2tune	+1.6064	+3.7927	+9.6704	NA
+legacy	o_9067.png.scale1024x1024.png	9	s1	cpu0-ss2tune	-3.2436	-1.5964	+3.5520	NA
+legacy	o_9077.png.scale1024x1024.png	9	s1	cpu0-ss2tune	-9.2483	-4.8802	-7.0484	NA
+train26	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024.png	1200	s2	cpu2	-23.0998	-3.1212	-8.1493	NA
+train26	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024.png	1400	s2	cpu2	-11.2007	-13.3832	-19.4534	NA
+train26	1614_food_dessert-plate-upside-down_valladolid-mexico_s23u_iso640-f1p7_20230917-213342_4000x3000.sdr.s1024.png	1600	s2	cpu2	-9.0404	+5.7491	+6.6078	NA
+train26	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024.png	2000	s2	cpu2	-11.3664	-7.3142	-3.2619	NA
+train26	5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	5000	s2	cpu2	-22.3762	-13.9806	-9.6619	NA
+train26	5048_nps_romo-2018-longs-peak-keyhole-route_gray_p01_2550x4200.sdr.s1024.png	5000	s2	cpu2	-1.8927	-3.7143	-3.8568	NA
+train26	6018_scans-patents_lynn-conway-us5046022-1bit_p019_2320x3408.sdr.s1024.png	6000	s2	cpu2	-1.9620	-0.9066	-10.4487	NA
+train26	6096_scans-patents_martha-jones-us77494-rescan-gray_p002_2479x3230.sdr.s1024.png	6000	s2	cpu2	+3.6026	+4.9614	+1.3043	NA
+train26	6606_scans-illustrations_haeckel-red-algae_plate0065_5015x7275.sdr.s1024.png	6600	s2	cpu2	-38.9371	-52.0591	-58.6331	NA
+train26	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.s1024.png	7000	s2	cpu2	+59.8904	NA	NA	NA
+train26	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024.png	7000	s2	cpu2	-37.7661	-22.2150	-23.1460	NA
+train26	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.s1024.png	8100	s2	cpu2	-17.4832	-13.5864	-17.1797	NA
+train26	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024.png	8100	s2	cpu2	-18.8340	-31.6867	NA	NA
+train26	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	8100	s2	cpu2	-33.4468	-57.5653	NA	NA
+train26	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024.png	8100	s2	cpu2	-19.6702	-15.7906	-11.6549	NA
+train26	9074_gen_clipart_teapot-classic_1024x1536.sdr.s1024.png	9000	s2	cpu2	-4.1658	-4.6131	-4.7016	NA
+train26	9100_gen_illustrations_bath-candles-evening_1024x1536.sdr.s1024.png	9094	s2	cpu2	-17.0410	+6.2302	+40.8054	NA
+train26	9118_gen_illustrations_farmers-market-stall_1536x1024.sdr.s1024.png	9094	s2	cpu2	-21.7363	-4.4911	+7.8937	NA
+train26	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024.png	9226	s2	cpu2	+0.5456	+2.2516	+9.6032	NA
+train26	9678_gen_products-grocery_cereal-box-coral_p0439_1024x1536.sdr.s1024.png	9226	s2	cpu2	-15.2927	-12.4180	-6.1892	NA
+train26	9868_gen_products-sporting-goods_rain-shell-jacket_feature_p0629_1024x1536.sdr.s1024.png	9226	s2	cpu2	-8.2634	-5.2825	-4.6063	NA
+train26	9958_gen_products-whitelabeled-beverages_beverage-smoothie-bottle_p0716_1024x1536.sdr.s1024.png	9226	s2	cpu2	+0.9099	-0.0753	+25.4441	NA
+train26	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024.png	1200	s2	cpu0-default	-22.4490	-2.4452	-7.0856	NA
+train26	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024.png	1400	s2	cpu0-default	-10.9118	-13.1501	-15.5523	NA
+train26	1614_food_dessert-plate-upside-down_valladolid-mexico_s23u_iso640-f1p7_20230917-213342_4000x3000.sdr.s1024.png	1600	s2	cpu0-default	-8.8679	+6.4768	+4.8334	NA
+train26	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024.png	2000	s2	cpu0-default	-10.2455	-6.5736	-7.1691	NA
+train26	5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	5000	s2	cpu0-default	-20.4661	-12.0349	-2.0398	NA
+train26	5048_nps_romo-2018-longs-peak-keyhole-route_gray_p01_2550x4200.sdr.s1024.png	5000	s2	cpu0-default	+1.4602	-0.5993	-3.0713	NA
+train26	6018_scans-patents_lynn-conway-us5046022-1bit_p019_2320x3408.sdr.s1024.png	6000	s2	cpu0-default	+2.4296	+3.9717	-2.5316	NA
+train26	6096_scans-patents_martha-jones-us77494-rescan-gray_p002_2479x3230.sdr.s1024.png	6000	s2	cpu0-default	+11.8552	+15.6035	+12.3622	NA
+train26	6606_scans-illustrations_haeckel-red-algae_plate0065_5015x7275.sdr.s1024.png	6600	s2	cpu0-default	-38.4416	-51.4920	-52.2340	NA
+train26	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.s1024.png	7000	s2	cpu0-default	+63.6047	NA	NA	NA
+train26	7052_plots_line-00222-s2f495179_1024x1024.sdr.s1024.png	7000	s2	cpu0-default	+60.3569	+49.5597	NA	NA
+train26	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024.png	7000	s2	cpu0-default	-34.0357	-18.8708	-23.5784	NA
+train26	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.s1024.png	8100	s2	cpu0-default	-15.7965	-11.3828	-13.5583	NA
+train26	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024.png	8100	s2	cpu0-default	-17.3020	NA	-58.8248	NA
+train26	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	8100	s2	cpu0-default	-26.9894	-57.4529	NA	NA
+train26	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024.png	8100	s2	cpu0-default	-15.8341	-13.2247	-15.9108	NA
+train26	9074_gen_clipart_teapot-classic_1024x1536.sdr.s1024.png	9000	s2	cpu0-default	+1.9319	+1.0850	+1.1319	NA
+train26	9100_gen_illustrations_bath-candles-evening_1024x1536.sdr.s1024.png	9094	s2	cpu0-default	-16.2911	+7.1140	+60.1496	NA
+train26	9118_gen_illustrations_farmers-market-stall_1536x1024.sdr.s1024.png	9094	s2	cpu0-default	-20.9020	-3.9403	+4.0281	NA
+train26	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024.png	9226	s2	cpu0-default	+2.7226	+5.2074	+14.1575	NA
+train26	9678_gen_products-grocery_cereal-box-coral_p0439_1024x1536.sdr.s1024.png	9226	s2	cpu0-default	-13.8823	-11.4078	+0.1753	NA
+train26	9868_gen_products-sporting-goods_rain-shell-jacket_feature_p0629_1024x1536.sdr.s1024.png	9226	s2	cpu0-default	-6.4069	-3.3072	+4.2709	NA
+train26	9958_gen_products-whitelabeled-beverages_beverage-smoothie-bottle_p0716_1024x1536.sdr.s1024.png	9226	s2	cpu0-default	+1.0955	+0.5207	+22.5834	NA
+train26	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024.png	1200	s2	cpu0-ss2tune	+5.1064	+5.4142	-1.8448	NA
+train26	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024.png	1400	s2	cpu0-ss2tune	-2.7902	-6.8077	-7.5985	NA
+train26	1614_food_dessert-plate-upside-down_valladolid-mexico_s23u_iso640-f1p7_20230917-213342_4000x3000.sdr.s1024.png	1600	s2	cpu0-ss2tune	+4.8281	+10.2669	+11.4218	NA
+train26	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024.png	2000	s2	cpu0-ss2tune	+1.7811	+0.1990	-5.9395	NA
+train26	5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	5000	s2	cpu0-ss2tune	-0.8460	-2.2350	-5.7474	NA
+train26	5048_nps_romo-2018-longs-peak-keyhole-route_gray_p01_2550x4200.sdr.s1024.png	5000	s2	cpu0-ss2tune	+3.2445	+8.5995	+10.8598	NA
+train26	6018_scans-patents_lynn-conway-us5046022-1bit_p019_2320x3408.sdr.s1024.png	6000	s2	cpu0-ss2tune	+11.2624	+10.5499	+11.9845	NA
+train26	6096_scans-patents_martha-jones-us77494-rescan-gray_p002_2479x3230.sdr.s1024.png	6000	s2	cpu0-ss2tune	-1.1118	+7.4249	+5.6533	NA
+train26	6606_scans-illustrations_haeckel-red-algae_plate0065_5015x7275.sdr.s1024.png	6600	s2	cpu0-ss2tune	-19.4976	-46.3811	-43.4793	NA
+train26	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024.png	7000	s2	cpu0-ss2tune	-34.8846	-24.9220	-27.0210	NA
+train26	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.s1024.png	8100	s2	cpu0-ss2tune	-2.3962	-7.9110	NA	NA
+train26	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024.png	8100	s2	cpu0-ss2tune	-26.6466	NA	NA	NA
+train26	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	8100	s2	cpu0-ss2tune	-31.5265	-50.7478	-57.7053	NA
+train26	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024.png	8100	s2	cpu0-ss2tune	+12.2686	+6.7505	+38.4257	NA
+train26	9074_gen_clipart_teapot-classic_1024x1536.sdr.s1024.png	9000	s2	cpu0-ss2tune	+6.2523	+0.1410	-4.1372	NA
+train26	9100_gen_illustrations_bath-candles-evening_1024x1536.sdr.s1024.png	9094	s2	cpu0-ss2tune	+5.3614	+8.7098	+41.1886	NA
+train26	9118_gen_illustrations_farmers-market-stall_1536x1024.sdr.s1024.png	9094	s2	cpu0-ss2tune	-1.1374	+2.3893	+32.8556	NA
+train26	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024.png	9226	s2	cpu0-ss2tune	+0.0478	+1.4050	+5.9129	NA
+train26	9678_gen_products-grocery_cereal-box-coral_p0439_1024x1536.sdr.s1024.png	9226	s2	cpu0-ss2tune	-0.8241	-3.0801	+6.7845	NA
+train26	9868_gen_products-sporting-goods_rain-shell-jacket_feature_p0629_1024x1536.sdr.s1024.png	9226	s2	cpu0-ss2tune	-0.3379	-1.4414	-6.2101	NA
+train26	9958_gen_products-whitelabeled-beverages_beverage-smoothie-bottle_p0716_1024x1536.sdr.s1024.png	9226	s2	cpu0-ss2tune	+3.8437	-1.1966	+0.7716	NA
+train26	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024.png	1200	s1	cpu2	-22.8989	-4.4812	-5.4691	NA
+train26	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024.png	1400	s1	cpu2	-11.4442	-13.8515	-14.9199	NA
+train26	1614_food_dessert-plate-upside-down_valladolid-mexico_s23u_iso640-f1p7_20230917-213342_4000x3000.sdr.s1024.png	1600	s1	cpu2	-9.5586	+3.0807	+0.9185	NA
+train26	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024.png	2000	s1	cpu2	-11.7278	-9.2978	-8.0466	NA
+train26	5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	5000	s1	cpu2	-21.9017	-14.1989	-13.0369	NA
+train26	5048_nps_romo-2018-longs-peak-keyhole-route_gray_p01_2550x4200.sdr.s1024.png	5000	s1	cpu2	-1.6678	-6.4427	-4.5759	NA
+train26	6018_scans-patents_lynn-conway-us5046022-1bit_p019_2320x3408.sdr.s1024.png	6000	s1	cpu2	-0.9351	-1.3335	-10.7208	NA
+train26	6096_scans-patents_martha-jones-us77494-rescan-gray_p002_2479x3230.sdr.s1024.png	6000	s1	cpu2	+1.8300	-5.2528	-10.9680	NA
+train26	6606_scans-illustrations_haeckel-red-algae_plate0065_5015x7275.sdr.s1024.png	6600	s1	cpu2	-38.6842	-52.1907	-58.6483	NA
+train26	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.s1024.png	7000	s1	cpu2	+35.4594	NA	NA	NA
+train26	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024.png	7000	s1	cpu2	-37.6069	-21.7770	-22.6884	NA
+train26	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.s1024.png	8100	s1	cpu2	-17.1102	-13.1459	-22.0048	NA
+train26	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024.png	8100	s1	cpu2	-17.5870	-32.1749	NA	NA
+train26	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	8100	s1	cpu2	-34.5618	-57.2253	NA	NA
+train26	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024.png	8100	s1	cpu2	-18.3677	-13.6244	-9.2338	NA
+train26	9074_gen_clipart_teapot-classic_1024x1536.sdr.s1024.png	9000	s1	cpu2	-5.7799	-4.7588	-6.7019	NA
+train26	9100_gen_illustrations_bath-candles-evening_1024x1536.sdr.s1024.png	9094	s1	cpu2	-16.9665	+4.2402	+28.8382	NA
+train26	9118_gen_illustrations_farmers-market-stall_1536x1024.sdr.s1024.png	9094	s1	cpu2	-20.9240	-4.9933	-3.4201	NA
+train26	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024.png	9226	s1	cpu2	+0.6864	+1.0569	+9.2103	NA
+train26	9678_gen_products-grocery_cereal-box-coral_p0439_1024x1536.sdr.s1024.png	9226	s1	cpu2	-15.5907	-14.0891	-17.3285	NA
+train26	9868_gen_products-sporting-goods_rain-shell-jacket_feature_p0629_1024x1536.sdr.s1024.png	9226	s1	cpu2	-8.6218	-6.5777	-4.7321	NA
+train26	9958_gen_products-whitelabeled-beverages_beverage-smoothie-bottle_p0716_1024x1536.sdr.s1024.png	9226	s1	cpu2	-1.2028	-2.6387	+17.1208	NA
+train26	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024.png	1200	s1	cpu0-default	-22.2418	-3.8136	-4.3470	NA
+train26	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024.png	1400	s1	cpu0-default	-11.1480	-13.6064	-10.8249	NA
+train26	1614_food_dessert-plate-upside-down_valladolid-mexico_s23u_iso640-f1p7_20230917-213342_4000x3000.sdr.s1024.png	1600	s1	cpu0-default	-9.3764	+3.8177	-1.1335	NA
+train26	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024.png	2000	s1	cpu0-default	-10.6204	-8.6012	-11.7634	NA
+train26	5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	5000	s1	cpu0-default	-20.0032	-12.2106	-5.4148	NA
+train26	5048_nps_romo-2018-longs-peak-keyhole-route_gray_p01_2550x4200.sdr.s1024.png	5000	s1	cpu0-default	+1.6539	-3.4061	-3.3927	NA
+train26	6018_scans-patents_lynn-conway-us5046022-1bit_p019_2320x3408.sdr.s1024.png	6000	s1	cpu0-default	+3.3457	+3.0163	-3.0746	NA
+train26	6096_scans-patents_martha-jones-us77494-rescan-gray_p002_2479x3230.sdr.s1024.png	6000	s1	cpu0-default	+9.5513	+3.6537	-2.5638	NA
+train26	6606_scans-illustrations_haeckel-red-algae_plate0065_5015x7275.sdr.s1024.png	6600	s1	cpu0-default	-38.1746	-51.6236	-52.2564	NA
+train26	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.s1024.png	7000	s1	cpu0-default	+38.5664	NA	NA	NA
+train26	7052_plots_line-00222-s2f495179_1024x1024.sdr.s1024.png	7000	s1	cpu0-default	+50.4324	+45.0258	NA	NA
+train26	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024.png	7000	s1	cpu0-default	-33.8712	-18.4396	-22.3922	NA
+train26	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.s1024.png	8100	s1	cpu0-default	-15.3984	-10.7354	-14.5736	NA
+train26	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024.png	8100	s1	cpu0-default	-16.0384	NA	-49.1889	NA
+train26	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	8100	s1	cpu0-default	-28.2055	-57.1126	NA	NA
+train26	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024.png	8100	s1	cpu0-default	-14.2279	-10.9150	-13.6228	NA
+train26	9074_gen_clipart_teapot-classic_1024x1536.sdr.s1024.png	9000	s1	cpu0-default	+0.2527	+1.2207	-1.2462	NA
+train26	9100_gen_illustrations_bath-candles-evening_1024x1536.sdr.s1024.png	9094	s1	cpu0-default	-16.2143	+5.0791	+47.8571	NA
+train26	9118_gen_illustrations_farmers-market-stall_1536x1024.sdr.s1024.png	9094	s1	cpu0-default	-20.0786	-4.4424	-8.1398	NA
+train26	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024.png	9226	s1	cpu0-default	+2.8251	+3.6259	+12.2792	NA
+train26	9678_gen_products-grocery_cereal-box-coral_p0439_1024x1536.sdr.s1024.png	9226	s1	cpu0-default	-14.1947	-13.0112	-10.0354	NA
+train26	9868_gen_products-sporting-goods_rain-shell-jacket_feature_p0629_1024x1536.sdr.s1024.png	9226	s1	cpu0-default	-6.7726	-4.6031	+4.2766	NA
+train26	9958_gen_products-whitelabeled-beverages_beverage-smoothie-bottle_p0716_1024x1536.sdr.s1024.png	9226	s1	cpu0-default	-1.0315	-2.0510	+14.4179	NA
+train26	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024.png	1200	s1	cpu0-ss2tune	+5.5379	+3.9291	+1.0154	NA
+train26	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024.png	1400	s1	cpu0-ss2tune	-2.9503	-7.2821	-2.5955	NA
+train26	1614_food_dessert-plate-upside-down_valladolid-mexico_s23u_iso640-f1p7_20230917-213342_4000x3000.sdr.s1024.png	1600	s1	cpu0-ss2tune	+4.1972	+7.5731	+5.6558	NA
+train26	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024.png	2000	s1	cpu0-ss2tune	+1.2246	-2.0200	-10.8656	NA
+train26	5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	5000	s1	cpu0-ss2tune	-0.1940	-2.1636	-9.5196	NA
+train26	5048_nps_romo-2018-longs-peak-keyhole-route_gray_p01_2550x4200.sdr.s1024.png	5000	s1	cpu0-ss2tune	+3.5912	+5.7671	+10.6031	NA
+train26	6018_scans-patents_lynn-conway-us5046022-1bit_p019_2320x3408.sdr.s1024.png	6000	s1	cpu0-ss2tune	+12.0987	+9.6870	+9.4385	NA
+train26	6096_scans-patents_martha-jones-us77494-rescan-gray_p002_2479x3230.sdr.s1024.png	6000	s1	cpu0-ss2tune	-2.6112	-0.8006	-5.4261	NA
+train26	6606_scans-illustrations_haeckel-red-algae_plate0065_5015x7275.sdr.s1024.png	6600	s1	cpu0-ss2tune	-19.1457	-46.5644	-43.5124	NA
+train26	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024.png	7000	s1	cpu0-ss2tune	-34.7456	-24.4808	-26.7330	NA
+train26	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.s1024.png	8100	s1	cpu0-ss2tune	-1.7475	-7.4310	NA	NA
+train26	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024.png	8100	s1	cpu0-ss2tune	-25.4448	NA	NA	NA
+train26	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	8100	s1	cpu0-ss2tune	-32.6120	-50.3477	-55.6777	NA
+train26	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024.png	8100	s1	cpu0-ss2tune	+14.5540	+7.4409	+27.9117	NA
+train26	9074_gen_clipart_teapot-classic_1024x1536.sdr.s1024.png	9000	s1	cpu0-ss2tune	+4.0558	-0.4193	-6.5345	NA
+train26	9100_gen_illustrations_bath-candles-evening_1024x1536.sdr.s1024.png	9094	s1	cpu0-ss2tune	+5.8581	+6.4641	+30.5466	NA
+train26	9118_gen_illustrations_farmers-market-stall_1536x1024.sdr.s1024.png	9094	s1	cpu0-ss2tune	-0.1117	+1.8817	+18.3651	NA
+train26	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024.png	9226	s1	cpu0-ss2tune	+0.0710	-0.1185	+5.1165	NA
+train26	9678_gen_products-grocery_cereal-box-coral_p0439_1024x1536.sdr.s1024.png	9226	s1	cpu0-ss2tune	-1.3100	-4.8548	-5.1720	NA
+train26	9868_gen_products-sporting-goods_rain-shell-jacket_feature_p0629_1024x1536.sdr.s1024.png	9226	s1	cpu0-ss2tune	-0.6831	-2.7225	-6.3567	NA
+train26	9958_gen_products-whitelabeled-beverages_beverage-smoothie-bottle_p0716_1024x1536.sdr.s1024.png	9226	s1	cpu0-ss2tune	+1.6682	-3.7596	-5.9015	NA
