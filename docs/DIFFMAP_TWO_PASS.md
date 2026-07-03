@@ -117,17 +117,55 @@ from single-pass and decodes cleanly through rav1d-safe**; 179/179 zenrav1e
 lib tests, 37+5 ravif tests, 67 zenavif lib tests + 3 pooling unit tests
 green.
 
-## A/B protocol (in progress)
+## A/B protocol + interim verdict (2026-07-03, arms still running)
 
 {train26, legacy} × {single, twopass}, s2 + `ZENRAVIF_TUNE=ssimulacra2` base
 (the shipped composed config), 12-pt Q grid {30..95}, 8-bit, single-threaded
-cells × 6-way pool. **butteraugli-BD is the target, ssim2 is the veto**
-(roles inverted vs the tune-ss2 program): a step that wins butteraugli but
-regresses ssim2 beyond noise gets investigated, both metrics reported
-per-family. zensim as a third opinion where cheap. o_9051-class check: does
-the spatial loop crack the per-image outliers the scalar loop can't
-(o_3003/o_3008/o_5004/o_6629/o_6632/o_9051/o_9077)? Results land in
-`benchmarks/` + this doc when the sweep completes.
+cells × 10-way pool. **butteraugli-BD is the target, ssim2 is the veto**
+(roles inverted vs the tune-ss2 program). zensim third-opinion: NOT measured
+(the harness cells score ssim2 + butteraugli only; noted honestly).
+o_9051-class check pending the final legacy data — with the prior that
+libaom's own loop cracks that class on *their* base (o_9051 −5.92% ba3n,
+o_3003 −3.84, o_5004 −3.71, o_6632 −3.48, o_9077 −2.75; only o_6629 +2.38 —
+from the evaluate-first per-image data).
+
+**INTERIM VERDICT — the direct aom-formula port at λ-parity REGRESSES on the
+tuned base.** train26 (24 imgs, complete pair): butteraugli-3n median
+**+2.20%** (3/24 better), ba-max +3.25%, ssim2 +1.88% (5/24), 2.01× time.
+Legacy partial (n=14 paired): ba3n +2.20% (3/14), same shape. Mechanism
+autopsy (per-q paired deltas): pass-2 files are uniformly **~6% smaller**
+with quality dropping — after geomean normalization the give-back side
+(weight > 1) dominates on this base and its RD trade is negative; at q95
+the shape approaches break-even (−5% bytes at ~0 quality delta), at low q it
+over-steers. Strength 0.5 (partial n=17): ba3n **+0.93%** (6/17) — halving
+strength halves the damage but does not cross zero; the knob is a shrinkage
+factor on a correction that mis-fires directionally for enough superblocks.
+Worst family: 9226 smooth gradients (+7.84% at str1.0) — exactly where the
+tune's Variance Boost already acts, implicating base-correction conflict
+(the same double-allocation class as the measured segmentation+boost
+stacking regression).
+
+Why the evaluate-first GO did not transfer: that measurement was aom's tune
+vs **aom's untuned default** — a base with none of zenrav1e's landed
+perceptual allocation (activity-masked cdef-dist, Variance Boost delta-q,
+ss2 QM curves, chroma delta-q). Our base has already spent most of the
+headroom the diffmap can see; correcting the residual at aom's strength
+over-corrects. The mechanisms-not-constants lesson, again — this time the
+*operating point* didn't transfer either.
+
+Diagnosis arms in flight (each isolates one hypothesis):
+- `tune-off base × {single, twopass}` — does the identical map pay on an
+  untuned base (base-conflict hypothesis)? If yes, the loop's home is the
+  fast/non-tune path or the map must become boost-aware.
+- `boost-only clamp (weight_hi=1.0)` — no give-back side (the bytes autopsy
+  fingered it); the Variance-Boost-shaped one-directional variant.
+- `probe_quality=40` — libaom's fixed-quality preliminary pass (their q96
+  trick): a content-intrinsic degradation signal instead of the
+  self-referential real-q residual, and a cheaper pass 1.
+- Conformance (both samplings) at the shipped knobs.
+
+Final tables land in `benchmarks/rd_gap_twopass_2026-07-03.tsv` + this
+section when the arms complete.
 
 ## Dep-bump checklist additions (zenrav1e > 0.1.4)
 
