@@ -14,6 +14,17 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 - README overhaul: clickable badge row (CI/crates.io/lib.rs/docs.rs/MSRV/dual-license), `## Quick start` with a `[dependencies]` block, absolute links throughout, regenerated crosslink footer (now last), split crates.io README (`README.crates.md` via `readme =` + `include`), and a `benchmarks/README.md` methodology index.
 
 ### Added
+- **Hyperparameter-expert label store + first threshold-rule heads**
+  (FEATURE_HINTS_PLAN §E): `scripts/hyperparam/build_label_store.py` aggregates
+  every mechanism fit sweep + the wedge dataset into one queryable parquet
+  (14,880 rows / 50 arms, per-row arm knobs + encoder_rev + q_kind + LSD split
+  + feature-join; block storage + Tower, pointer in `benchmarks/`), and three
+  first-cut rule fits land their evaluations in
+  `benchmarks/hyperparam_*_2026-07-03.tsv`: the zenanalyze palette gate
+  (`patch_fraction > 0.197` → Always — the graduating head), the size-decay
+  attribution (1024→512 decay is a high-quality-band loss; ss2-QM top suspect),
+  and the per-image variance-boost rule (not deployable at n=24; global 1.0
+  stands). Report: `docs/HYPERPARAM_FIRST_CUT_2026-07-03.md`.
 - **Precise perceptual-quality targeting** (`target-quality` feature):
   `encode_rgb8_with_target` converges the encoder on a requested SSIMULACRA2
   or zensim score via an encode→decode→score bracketed secant search

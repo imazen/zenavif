@@ -194,6 +194,21 @@ dense-sampling rules from the sweep discipline when a head graduates to real tra
 per-family reporting. Runtime side stays the shipped ZNPR/`auto_tune` machinery — new
 heads, not new infrastructure.
 
+**STATUS 2026-07-03 — label store BUILT + first three threshold cuts MEASURED**
+(full report: `docs/HYPERPARAM_FIRST_CUT_2026-07-03.md`): the store is
+`/mnt/v/output/zenavif/hyperparam-labels-2026-07-03/labels.parquet` (14,880 rows /
+50 arms across tune-ss2 + deltaq + qmdist + lfsharp + desyncfix + wedge +
+palette-ab; 100% feature-join on train26+wedge corpora; builder + append protocol
+`scripts/hyperparam/build_label_store.py`; Tower-mirrored). Verdicts: **palette
+gate `patch_fraction > 0.197` → Always is the graduating head** (LOOCV-stable,
+val-firing sanity clean, fires where the ported detection is downscale-dead; needs
+the ≤512 + shipped-config A/B before landing); **size decay narrowed** — the
+1024→512 step is entirely a high-quality-band loss on photo content, top suspect
+ss2-QM curves, 768-cell isolation A/B specced; **per-image boost strength NOT
+deployable** (LOOCV ≈ global-1.0 at n=24; fam-9226's residual is palette/QM-shaped,
+not boost-shaped; needs val + dense-strength labels). MLP heads: not warranted on
+any of the three yet — in every case the LABELS underfit before the rule does.
+
 ## Phases + gates
 
 - **P0 (measure) — DONE 2026-07-02.**

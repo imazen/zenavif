@@ -1,0 +1,64 @@
+# hyperparam-expert first cut: size-conditional tune strength — decay attribution (FEATURE_HINTS section E; wedge #3)
+# source: wedge-2026-07-03 zr vs cpu2 full crops via the label store; BD + 25%/75%-band bpp gaps per (origin,size)
+# NO per-mechanism arms exist below 1024 — this is a measured narrowing + A/B spec, not a proof (see script docstring)
+# decay_slope = -d(bd_cpu2)/d(log2 px) over each origin's size ladder (>=3 sizes incl 256); positive = we lose advantage as size shrinks
+origin_id	size_class	px	family	bd_cpu2	gap_lowq_pct	gap_highq_pct	feature_join	slot	decay_slope
+1238	1024	786432	1200	-15.5788	-33.0610	-8.7949	/mnt/v/output/imazen-26-png/1200-lilith-interiors/1238_interiors_open-doorway-interior_casa-vicens-barcelona_zfold7_iso250-f2p2_20260319-170237_4000x3000.sdr.png|full|1024	1024	1.5919
+1238	2048	3145728	1200	-12.9843	-25.5945	-13.4464	/mnt/v/output/imazen-26-png/1200-lilith-interiors/1238_interiors_open-doorway-interior_casa-vicens-barcelona_zfold7_iso250-f2p2_20260319-170237_4000x3000.sdr.png|full|2048	top	1.5919
+1238	256	49152	1200	-3.4027	-18.0708	-4.2484	/mnt/v/output/imazen-26-png/1200-lilith-interiors/1238_interiors_open-doorway-interior_casa-vicens-barcelona_zfold7_iso250-f2p2_20260319-170237_4000x3000.sdr.png|full|256	256	1.5919
+1238	512	196608	1200	-12.4854	-30.1243	-6.7098	/mnt/v/output/imazen-26-png/1200-lilith-interiors/1238_interiors_open-doorway-interior_casa-vicens-barcelona_zfold7_iso250-f2p2_20260319-170237_4000x3000.sdr.png|full|512	512	1.5919
+1480	1024	786432	1400	-14.6129	-21.2421	-7.2115	/mnt/v/output/imazen-26-png/1400-lilith-nature/1480_nature_snowcapped-mountain-seascape_kumomi-matsuzaki-japan_s23u_iso50-f4p9_20250307-122938_4000x3000.sdr.png|full|1024	1024	3.0278
+1480	2048	3145728	1400	-14.6630	-22.0809	-12.4320	/mnt/v/output/imazen-26-png/1400-lilith-nature/1480_nature_snowcapped-mountain-seascape_kumomi-matsuzaki-japan_s23u_iso50-f4p9_20250307-122938_4000x3000.sdr.png|full|2048	top	3.0278
+1480	256	49152	1400	3.7782	-3.3480	7.7520	/mnt/v/output/imazen-26-png/1400-lilith-nature/1480_nature_snowcapped-mountain-seascape_kumomi-matsuzaki-japan_s23u_iso50-f4p9_20250307-122938_4000x3000.sdr.png|full|256	256	3.0278
+1480	512	196608	1400	-9.3814	-18.3882	-0.8086	/mnt/v/output/imazen-26-png/1400-lilith-nature/1480_nature_snowcapped-mountain-seascape_kumomi-matsuzaki-japan_s23u_iso50-f4p9_20250307-122938_4000x3000.sdr.png|full|512	512	3.0278
+2026	1024	699392	2000	-13.0414	-15.7122	-9.4472	/mnt/v/output/imazen-26-png/2000-unsplash-people/2026_people_by-willian-justen-de-vasconcellos-3f1eju2ib4u-unsplash_5637x3758.sdr.png|full|1024	1024	1.6831
+2026	2048	2795520	2000	-17.2368	-20.9324	-11.3959	/mnt/v/output/imazen-26-png/2000-unsplash-people/2026_people_by-willian-justen-de-vasconcellos-3f1eju2ib4u-unsplash_5637x3758.sdr.png|full|2048	top	1.6831
+2026	256	43776	2000	-6.4675	-11.3230	-5.2983	/mnt/v/output/imazen-26-png/2000-unsplash-people/2026_people_by-willian-justen-de-vasconcellos-3f1eju2ib4u-unsplash_5637x3758.sdr.png|full|256	256	1.6831
+2026	512	174592	2000	-11.6956	-15.5668	-8.8186	/mnt/v/output/imazen-26-png/2000-unsplash-people/2026_people_by-willian-justen-de-vasconcellos-3f1eju2ib4u-unsplash_5637x3758.sdr.png|full|512	512	1.6831
+5318	1024	809984	5300	20.8928	10.2767	35.1905	/mnt/v/output/imazen-26-png/5300-noaa-hurricane-documents/5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.png|full|1024	1024	-0.6318
+5318	2048	3241984	5300	0.9030	10.0985	-0.6521	/mnt/v/output/imazen-26-png/5300-noaa-hurricane-documents/5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.png|full|2048	top	-0.6318
+5318	256	50688	5300	5.0985	-0.1282	2.5426	/mnt/v/output/imazen-26-png/5300-noaa-hurricane-documents/5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.png|full|256	256	-0.6318
+5318	512	202752	5300	-4.3473	-8.1315	1.9179	/mnt/v/output/imazen-26-png/5300-noaa-hurricane-documents/5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.png|full|512	512	-0.6318
+6070	1024	804864	6000	-2.2022	-8.1205	3.2864	/mnt/v/output/imazen-26-png/6000-lilith-scans-public-patents/lynn_conway_us5046022_printrescangray300/6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.png|full|1024	1024	0.1914
+6070	2048	3219456	6000	-2.9748	-14.5758	-4.0850	/mnt/v/output/imazen-26-png/6000-lilith-scans-public-patents/lynn_conway_us5046022_printrescangray300/6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.png|full|2048	top	0.1914
+6070	256	50176	6000	-3.4701	-13.2312	-3.2226	/mnt/v/output/imazen-26-png/6000-lilith-scans-public-patents/lynn_conway_us5046022_printrescangray300/6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.png|full|256	256	0.1914
+6070	512	201216	6000	3.1237	-2.8953	6.6385	/mnt/v/output/imazen-26-png/6000-lilith-scans-public-patents/lynn_conway_us5046022_printrescangray300/6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.png|full|512	512	0.1914
+6606	1024	722944	6600	-20.0447	-14.0822	-12.0581	/mnt/v/output/imazen-26-png/6600-ia-scans-manuscript-illustrations/6606_scans-illustrations_haeckel-red-algae_plate0065_5015x7275.sdr.png|full|1024	1024	1.9284
+6606	2048	2891776	6600	-27.7786	-24.5671	-51.3250	/mnt/v/output/imazen-26-png/6600-ia-scans-manuscript-illustrations/6606_scans-illustrations_haeckel-red-algae_plate0065_5015x7275.sdr.png|full|2048	top	1.9284
+6606	256	45056	6600	-16.7617	-0.4117	-10.3530	/mnt/v/output/imazen-26-png/6600-ia-scans-manuscript-illustrations/6606_scans-illustrations_haeckel-red-algae_plate0065_5015x7275.sdr.png|full|256	256	1.9284
+6606	512	180736	6600	-14.4915	-14.9604	3.2732	/mnt/v/output/imazen-26-png/6600-ia-scans-manuscript-illustrations/6606_scans-illustrations_haeckel-red-algae_plate0065_5015x7275.sdr.png|full|512	512	1.9284
+7050	256	65536	7000	-1.3356	-9.2062	-7.4218	/mnt/v/output/imazen-26-png/7000-lilith-plots/grids/7050_plots_line-00166-s010fb6d2_1024x1024.sdr.png|full|256	256	
+7050	512	262144	7000	15.9577	10.4657	29.4700	/mnt/v/output/imazen-26-png/7000-lilith-plots/grids/7050_plots_line-00166-s010fb6d2_1024x1024.sdr.png|full|512	512	
+7050	native	1048576	7000				/mnt/v/output/imazen-26-png/7000-lilith-plots/grids/7050_plots_line-00166-s010fb6d2_1024x1024.sdr.png|full|native	top	
+7052	256	65536	7000	-0.9627	-6.5897	1.8266	/mnt/v/output/imazen-26-png/7000-lilith-plots/grids/7052_plots_line-00222-s2f495179_1024x1024.sdr.png|full|256	256	-21.9020
+7052	512	262144	7000	-10.8402	-12.0475	5.1335	/mnt/v/output/imazen-26-png/7000-lilith-plots/grids/7052_plots_line-00222-s2f495179_1024x1024.sdr.png|full|512	512	-21.9020
+7052	native	1048576	7000	86.6451	53.3313	104.9315	/mnt/v/output/imazen-26-png/7000-lilith-plots/grids/7052_plots_line-00222-s2f495179_1024x1024.sdr.png|full|native	top	-21.9020
+7064	256	65536	7000	-5.1592	1.3841	-9.5492	/mnt/v/output/imazen-26-png/7000-lilith-plots/lines/7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.png|full|256	256	-0.3946
+7064	512	262144	7000	-1.4564	4.3767	-5.1511	/mnt/v/output/imazen-26-png/7000-lilith-plots/lines/7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.png|full|512	512	-0.3946
+7064	native	1048576	7000	-3.5808	-24.8973	19.0796	/mnt/v/output/imazen-26-png/7000-lilith-plots/lines/7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.png|full|native	top	-0.3946
+7080	256	65536	7000	2.5447	8.3889	2.2170	/mnt/v/output/imazen-26-png/7000-lilith-plots/polygons/7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.png|full|256	256	1.9396
+7080	512	262144	7000	-6.5873	-10.3412	-3.3526	/mnt/v/output/imazen-26-png/7000-lilith-plots/polygons/7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.png|full|512	512	1.9396
+7080	native	1048576	7000	-5.2137	-5.9906	-4.7517	/mnt/v/output/imazen-26-png/7000-lilith-plots/polygons/7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.png|full|native	top	1.9396
+8196	1024	589824	8100	-12.9821	-18.9802	-5.1052	/mnt/v/output/imazen-26-png/8100-lilith-web-screenshots/1920x1080/8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.png|full|1024	1024	3.2443
+8196	256	36864	8100	1.8187	-0.4066	6.7777	/mnt/v/output/imazen-26-png/8100-lilith-web-screenshots/1920x1080/8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.png|full|256	256	3.2443
+8196	512	147456	8100	-6.4009	-15.8696	-1.6677	/mnt/v/output/imazen-26-png/8100-lilith-web-screenshots/1920x1080/8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.png|full|512	512	3.2443
+8196	native	2073600	8100	-16.9526	-23.0017	-9.3167	/mnt/v/output/imazen-26-png/8100-lilith-web-screenshots/1920x1080/8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.png|full|native	top	3.2443
+8464	256	36864	8100	2.0810	0.8060	-2.0008	/mnt/v/output/imazen-26-png/8100-lilith-web-screenshots/other/8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.png|full|256	256	0.0662
+8464	512	147456	8100	2.7986	-3.0329	10.8059	/mnt/v/output/imazen-26-png/8100-lilith-web-screenshots/other/8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.png|full|512	512	0.0662
+8464	native	250125	8100	1.5995	-11.4681	13.8970	/mnt/v/output/imazen-26-png/8100-lilith-web-screenshots/other/8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.png|full|native	top	0.0662
+9098	1024	699392	9094	-17.5420	-34.4115	-6.6604	/mnt/v/output/imazen-26-png/9094-lilith-ai-illustrations/9098_gen_illustrations_baker-flour-dust-light_1024x1536.sdr.png|full|1024	1024	2.9839
+9098	256	43776	9094	-4.4365	-20.1446	-6.0122	/mnt/v/output/imazen-26-png/9094-lilith-ai-illustrations/9098_gen_illustrations_baker-flour-dust-light_1024x1536.sdr.png|full|256	256	2.9839
+9098	512	174592	9094	-12.6185	-27.5015	-2.0225	/mnt/v/output/imazen-26-png/9094-lilith-ai-illustrations/9098_gen_illustrations_baker-flour-dust-light_1024x1536.sdr.png|full|512	512	2.9839
+9098	native	1572864	9094	-20.0013	-34.5214	-8.6169	/mnt/v/output/imazen-26-png/9094-lilith-ai-illustrations/9098_gen_illustrations_baker-flour-dust-light_1024x1536.sdr.png|full|native	top	2.9839
+9118	1024	699392	9094	-14.8626	-28.6063	-4.4534	/mnt/v/output/imazen-26-png/9094-lilith-ai-illustrations/9118_gen_illustrations_farmers-market-stall_1536x1024.sdr.png|full|1024	1024	1.6036
+9118	256	43776	9094	-8.8982	-11.3268	-5.0906	/mnt/v/output/imazen-26-png/9094-lilith-ai-illustrations/9118_gen_illustrations_farmers-market-stall_1536x1024.sdr.png|full|256	256	1.6036
+9118	512	174592	9094	-12.3008	-23.2085	-8.6722	/mnt/v/output/imazen-26-png/9094-lilith-ai-illustrations/9118_gen_illustrations_farmers-market-stall_1536x1024.sdr.png|full|512	512	1.6036
+9118	native	1572864	9094	-17.4788	-27.2012	-5.7211	/mnt/v/output/imazen-26-png/9094-lilith-ai-illustrations/9118_gen_illustrations_farmers-market-stall_1536x1024.sdr.png|full|native	top	1.6036
+9446	1024	699392	9226	-0.4119	-10.3957	2.0050	/mnt/v/output/imazen-26-png/9226-lilith-ai-products/clothing/womens/activewear/9446_gen_products-clothing-womens-activewear_romper-active-sage_onmodel_p0207_1024x1536.sdr.png|full|1024	1024	2.2736
+9446	256	43776	9226	8.2136	0.7224	6.2361	/mnt/v/output/imazen-26-png/9226-lilith-ai-products/clothing/womens/activewear/9446_gen_products-clothing-womens-activewear_romper-active-sage_onmodel_p0207_1024x1536.sdr.png|full|256	256	2.2736
+9446	512	174592	9226	5.7896	1.1148	6.7872	/mnt/v/output/imazen-26-png/9226-lilith-ai-products/clothing/womens/activewear/9446_gen_products-clothing-womens-activewear_romper-active-sage_onmodel_p0207_1024x1536.sdr.png|full|512	512	2.2736
+9446	native	1572864	9226	-3.0638	-11.8951	-7.1324	/mnt/v/output/imazen-26-png/9226-lilith-ai-products/clothing/womens/activewear/9446_gen_products-clothing-womens-activewear_romper-active-sage_onmodel_p0207_1024x1536.sdr.png|full|native	top	2.2736
+9908	1024	699392	9226	26.3872	27.5031	25.3700	/mnt/v/output/imazen-26-png/9226-lilith-ai-products/whitelabeled-beauty/9908_gen_products-whitelabeled-beauty_amber-serum-bottle-skincare_p0669_1024x1536.sdr.png|full|1024	1024	0.7528
+9908	256	43776	9226	28.0763	40.5351	26.3186	/mnt/v/output/imazen-26-png/9226-lilith-ai-products/whitelabeled-beauty/9908_gen_products-whitelabeled-beauty_amber-serum-bottle-skincare_p0669_1024x1536.sdr.png|full|256	256	0.7528
+9908	512	174592	9226	29.6499	44.1275	22.4375	/mnt/v/output/imazen-26-png/9226-lilith-ai-products/whitelabeled-beauty/9908_gen_products-whitelabeled-beauty_amber-serum-bottle-skincare_p0669_1024x1536.sdr.png|full|512	512	0.7528
+9908	native	1572864	9226	24.5435	26.6563	20.2295	/mnt/v/output/imazen-26-png/9226-lilith-ai-products/whitelabeled-beauty/9908_gen_products-whitelabeled-beauty_amber-serum-bottle-skincare_p0669_1024x1536.sdr.png|full|native	top	0.7528
