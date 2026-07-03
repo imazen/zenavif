@@ -156,8 +156,9 @@ Headline findings:
 **STATUS 2026-07-03 (later still) — the speed-conditional follow-up RAN and
 SHIPPED.** Script `scripts/hyperparam/fit_palette_speed_threshold.py`, record
 `benchmarks/hyperparam_palette_speed_ab_2026-07-03.tsv`. Arms τ {0.197, 0.10,
-0.05, fire-always} × s{2,6,8}. **391 of the 436 evaluated cells came from the
-store/TSV with zero fresh encodes** — both palette outcomes (off/always/auto)
+0.05, fire-always} × s{2,6,8}. **391 of the 481 evaluated BD cells came from the
+store/TSV with zero fresh encodes** (the other 90 derive from the single
+fresh s8 run below) — both palette outcomes (off/always/auto)
 were already measured per (file, speed), so a threshold arm is a pure per-cell
 selection (fire → veto-adjusted always, quiet → auto). The only fresh data:
 the s8 corroboration run (90 files × 3 arms × 5q = 1,350 cells, 72 s on the

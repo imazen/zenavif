@@ -20,7 +20,7 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   prior rule) and 0.05 at speed ≥ 6 (`PALETTE_GATE_PATCH_FRACTION_FAST` +
   `palette_gate_threshold(speed)`); `palette_gate_for_rgb8` gains the speed
   param and `auto_tune` passes the speed it just picked. Measured: arms
-  {0.197, 0.10, 0.05, fire-always} × s{2,6,8}, 391/436 cells derived offline
+  {0.197, 0.10, 0.05, fire-always} × s{2,6,8}, 391/481 BD cells derived offline
   from the label store + mech-A/B TSV (a threshold arm is a per-cell selection
   over already-measured off/always/auto outcomes) + one fresh 1,350-cell s8
   iso run (byte-continuity sha-proven, 0 conformance failures). s2 keeps
