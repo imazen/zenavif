@@ -30,6 +30,38 @@ enc_ms=$(python3 -c "print(f'{($t1-$t0)*1000:.1f}')")
 bytes=$(stat -c%s "$avif")
 bpp=$(python3 -c "print(f'{$bytes*8/$PX:.5f}')")
 
+# Opt-in palette/bitstream conformance (zero-corruption bar for palette-armed
+# sweeps): extract the AV1 payload, require (a) aomdec — the reference
+# decoder — decodes it cleanly, and (b) aomdec's raw I420 output byte-agrees
+# with rav1d-safe's (ivf_raw example). Any failure fails the CELL loudly.
+# Set PALCONF=1 plus AOMDEC + IVF_RAW (+ optional EXTRACT_AV1/OBU2IVF paths).
+# Off by default: byte-identical behavior for existing sweeps. When enabled,
+# segregate the row-cache keyspace via RD_CACHE_EXTRA (PALCONF is not part of
+# the cache key).
+if [ -n "${PALCONF:-}" ]; then
+  EXTRACT_AV1="${EXTRACT_AV1:-/home/lilith/work/zen/zenavif/target/release/examples/extract_av1}"
+  OBU2IVF="${OBU2IVF:-$(dirname "${BASH_SOURCE[0]}")/obu_to_ivf.py}"
+  : "${AOMDEC:?PALCONF=1 needs AOMDEC}"; : "${IVF_RAW:?PALCONF=1 needs IVF_RAW}"
+  rm -rf "$TMP/${base}.q${Q}.obu"; mkdir -p "$TMP/${base}.q${Q}.obu"
+  civf="$TMP/${base}.q${Q}.conf.ivf"
+  if ! "$EXTRACT_AV1" "$avif" "$TMP/${base}.q${Q}.obu" > /dev/null 2>&1; then
+    echo "CONFFAIL zenrav1e Q$Q extract_av1"; exit 1
+  fi
+  cobu=$(ls "$TMP/${base}.q${Q}.obu"/*.obu 2>/dev/null | head -1)
+  { [ -n "$cobu" ] && python3 "$OBU2IVF" "$cobu" "$civf" "$W" "$H" > /dev/null 2>&1; } \
+    || { echo "CONFFAIL zenrav1e Q$Q obu_to_ivf"; exit 1; }
+  "$AOMDEC" --summary -o /dev/null "$civf" > /dev/null 2>&1 \
+    || { echo "CONFFAIL zenrav1e Q$Q aomdec-rejects"; exit 1; }
+  "$AOMDEC" --rawvideo -o "$civf.aom.raw" "$civf" > /dev/null 2>&1 \
+    || { echo "CONFFAIL zenrav1e Q$Q aomdec-raw"; exit 1; }
+  "$IVF_RAW" "$cobu" "$civf.rav1d.raw" > /dev/null 2>&1 \
+    || { echo "CONFFAIL zenrav1e Q$Q rav1d-safe"; exit 1; }
+  amd5=$(md5sum < "$civf.aom.raw" | cut -d' ' -f1)
+  rmd5=$(md5sum < "$civf.rav1d.raw" | cut -d' ' -f1)
+  rm -rf "$TMP/${base}.q${Q}.obu" "$civf" "$civf.aom.raw" "$civf.rav1d.raw"
+  [ "$amd5" = "$rmd5" ] || { echo "CONFFAIL zenrav1e Q$Q MD5DISAGREE aom=$amd5 rav1d=$rmd5"; exit 1; }
+fi
+
 rd_cache_score_key "$avif" "$IMG" "$SAVE_PNG" "$SCORER" "${BUTTER:-off}"
 if sc=$(rd_cache_score_get); then
   read -r ss b3 bmax <<< "$sc"
