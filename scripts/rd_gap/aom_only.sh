@@ -14,7 +14,7 @@ SAMPLE="${SAMPLE:-$HERE/sample_images.tsv}"
 OUT="${OUT:-$HERE/aom_only_results.tsv}"
 # PID-suffixed default: two concurrent runs sharing one WORK dir clobber each
 # other's per-image temp dirs and silently LOSE ROWS (same fix as run_gap.sh).
-WORK="${WORK:-/mnt/v/output/zenavif/rd_gap_work_aomonly.$$}"; mkdir -p "$WORK"
+WORK="${WORK:-/tmp/rd_gap_work_aomonly.$$}"; mkdir -p "$WORK"  # local disk: see run_gap.sh WORK note
 JOBS="${JOBS:-6}"
 CQGRID_AOM="${CQGRID_AOM:-8 16 24 32 40 48 56 63}"
 AOMFMTS="${AOMFMTS:-420}"

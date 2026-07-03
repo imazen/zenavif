@@ -16,7 +16,11 @@ OUT="${OUT:-$HERE/rd_gap_results.tsv}"
 # each other's per-image temp dirs and silently LOSE ROWS (the `rm -rf $tmp`
 # per worker races the other run's `cat $part`). Override WORK explicitly
 # only with per-run-unique paths.
-WORK="${WORK:-/mnt/v/output/zenavif/rd_gap_work.$$}"; mkdir -p "$WORK"
+# WORK on LOCAL disk by default: /mnt/v (drvfs) stalls under WSL memory
+# reclaim (mini_init drop_caches) and transiently EIOs the per-cell temp
+# churn — a 2026-07-03 stall failed ~60 cells across 6 workers in one
+# burst. Only durable outputs belong on /mnt/v; temps go local.
+WORK="${WORK:-/tmp/rd_gap_work.$$}"; mkdir -p "$WORK"
 # Deterministic cell cache (see cell_cache.sh): auto-enable when the standard
 # cache dir exists (on the sweep box it lives inside the disk snapshot, so it
 # survives teardown/restore). RD_CACHE=off bypasses; timing sweeps MUST bypass.
