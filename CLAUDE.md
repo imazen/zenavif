@@ -311,6 +311,17 @@ old "12 dB regression" (zenrav1e#5) was the desync, the pin stays on RD
 grounds. No zenavif-side action at the dep bump (decode path unaffected;
 encode bytes unchanged).
 
+### zenrav1e intraBC chunk A — SHIPPED upstream 2026-07-03, release-gated
+`zenrav1e@7a59e569` adds intra block copy behind
+`SpeedSettings.prediction.intrabc` / `--intrabc` (default off,
+byte-identical off). Wedge-#1 anchors vs the palette+UV base: 7052
+−34.9/−39.4% ssim2-BD (s2/s6), 7050 −17.6/−23.6%; `PaletteMode::Auto`
+detection-gates it (photos verified byte-identical). fam-7 legacy ladder:
+off +169% → palette +75% → +UV +55% → +intraBC +57% (chunk-B hash search
+is the legacy-plot headroom, zenrav1e#30 item 3). Blanket-Always
+regresses photos (+3..8%, spec filters-off trade) — never ship intrabc
+without the Auto gate or a zenavif-side content gate.
+
 ### zenrav1e CDF undo-log cross-field overspill — FIXED upstream, release-gated
 The RDO CDF undo log restored fixed-width (16-word) snapshots with
 partition-sequenced rollback, resurrecting stale adaptive state across

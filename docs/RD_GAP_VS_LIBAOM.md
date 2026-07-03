@@ -1191,6 +1191,38 @@ compile-time bound (zenrav1e@e86235b5, regression test
 `cdf_log_rollback_is_exact_length_across_field_boundaries`); bug-class 6 in the project
 memory (fixed-width undo logs over adjacent adaptive state).
 
+**2026-07-03 (later still, 2): intraBC chunk A landed upstream (zenrav1e@7a59e569,
+release-gated) — the wedge-#1 owner engaged.** Evaluate-first verdict on aomenc's own
+delta (`--enable-intrabc=0` vs auto, cpu2-default + cpu6-ss2tune, 18 screen/plot/doc
+files; raw rows in the scratch A/B feeding this section): far above the 2% defer bar —
+7052 −55.6% bytes at cpu2 same-quality (min ratio 0.269), 7050 −33.5%/−52.5%,
+fam-7 legacy −33% both speeds, screens 0-20%, photos ~0 → IMPLEMENT. Chunk A ships DV
+prediction (rav1d `decode_b` dual), the `av1_is_dv_valid` port (256-px delay +
+wavefront), fullpel all-plane copy MC, seeded diamond SAD search + top-2 full-rate RD
+trials, per-block flag + DV coding via the inter tx/coef path; default off behind
+`SpeedSettings.prediction.intrabc` / `--intrabc` (byte-identity off 80/80). With
+`PaletteMode::Auto` the AA-aware detection's stricter intraBC criterion gates it —
+VERIFIED byte-identical on photos and firing on plots (7052 q100 s6 3503→2026 B).
+
+Measured on the same corpus vs the palette+UV base (blanket `--palette always
+--intrabc`, isolated config; rows in `benchmarks/uvpal_ab_2026-07-03.tsv`):
+**7052 −34.9%/−39.4% ssim2-BD (s2/s6; q60 byte ratios 0.39/0.42), 7050
+−17.6%/−23.6%**, 8414 −4.3%, fam-7000 median −2.3%/−1.8%; blanket-on regresses photos
++3..+8% (in-loop filters hard-off frame-wide per spec) — which is precisely why the
+detection gate is the production path, and why `Auto` was verified photo-byte-identical.
+Conformance: 200/200 armed corpus cells aomdec-clean + rav1d-safe raw-md5 agree;
+in-repo roundtrips at BOTH samplings shrink exactly-repeating non-palettizable content
+to ~0.52x. Encode cost ~1.15-1.25x (7052 FASTER: copies skip transform work).
+
+**fam-7 legacy continuity (the +130-470% → +61-99% headline), extended:** at the same
+matched top-of-range ssim2 vs aomenc cpu2 (420): median gap **+169% (off) → +75%
+(+palette) → +55% (+UV palette) → +57% (+intraBC)**. The UV palette removes another
+~20 points of the legacy residual; chunk-A intraBC is neutral THERE (fullpel/even-DV
+diamond search misses the legacy plots' repeats that aom's hash search finds — its −33%
+on those files is the chunk-B headroom, zenrav1e#30 item 3) while owning the wedge
+anchors above. The remaining ~+55% on legacy plots is coefficient-level RD +
+intraBC-search headroom.
+
 **2026-07-03 (later): the zenanalyze palette gate landed (release-gated) after a
 val-confirmed mechanism A/B.** The detection-conservatism remainder above plus the
 wedge finding that the AA-aware detection dies on ANY downscaled screen content are

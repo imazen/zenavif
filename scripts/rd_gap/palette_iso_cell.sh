@@ -28,12 +28,16 @@ cell="$TMP/${base}.s${SPEED}.q${Q}.${ARM}"
 ivf="$cell.ivf"
 
 source "$(dirname "${BASH_SOURCE[0]}")/cell_cache.sh"
-rd_cache_row_key "$RAV1E" "$IMG" "pal_iso" "s=$SPEED" "q=$Q" "arm=$ARM" "butter=${BUTTER:+on}"
+rd_cache_row_key "$RAV1E" "$IMG" "pal_iso" "s=$SPEED" "q=$Q" "arm=$ARM" "extra=${EXTRA_RAV1E:-}" "butter=${BUTTER:+on}"
 if row=$(rd_cache_row_get); then printf '%s\n' "$row"; exit 0; fi
 
 t0=$(date +%s.%N)
+# EXTRA_RAV1E: additive passthrough for extra encoder flags (e.g.
+# --intrabc); default empty keeps historical byte behavior. It is part of
+# the cell cache key via the arm/key line below when callers encode it in
+# ARM naming; standalone use MUST use a fresh cache dir or RD_CACHE=off.
 "$RAV1E" "$Y4M" --still-picture --threads 1 --lrf false --filter-intra false \
-  -s "$SPEED" --quantizer "$Q" --palette "$ARM" -o "$ivf" -y > "$cell.enc.log" 2>&1
+  -s "$SPEED" --quantizer "$Q" --palette "$ARM" ${EXTRA_RAV1E:-} -o "$ivf" -y > "$cell.enc.log" 2>&1
 rc=$?; t1=$(date +%s.%N)
 enc_ms=$(python3 -c "print(f'{($t1-$t0)*1000:.1f}')")
 { [ $rc -ne 0 ] || [ ! -s "$ivf" ]; } && { echo "ENCFAIL $base s$SPEED q$Q $ARM rc=$rc"; exit 1; }
