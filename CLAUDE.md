@@ -311,6 +311,18 @@ old "12 dB regression" (zenrav1e#5) was the desync, the pin stays on RD
 grounds. No zenavif-side action at the dep bump (decode path unaffected;
 encode bytes unchanged).
 
+### zenrav1e CDF undo-log cross-field overspill — FIXED upstream, release-gated
+The RDO CDF undo log restored fixed-width (16-word) snapshots with
+partition-sequenced rollback, resurrecting stale adaptive state across
+field boundaries (bug-class 6, silent-corruption memory). Latent since
+the log existed; became a live bitstream desync the moment the UV palette
+began adapting `palette_uv_color_index_cdf[0][0]` (adjacent to the luma
+map table). Fixed zenrav1e@e86235b5 (exact-length snapshots + compile-time
+bounds + regression test). The UV palette itself landed zenrav1e@a3b72033
+(same PaletteMode knob, default Off; plots −2.0/−2.6% ssim2-BD median vs
+the luma-palette base, conformance 200/200 @420 + 84/84 @444 both-decoder
+md5). Registry builds ship neither until the zenrav1e release past 0.1.4.
+
 ### zenrav1e QM encodes diverged from conforming decoders — FIXED upstream, release-gated
 Two composing bugs (zenrav1e#29, both fixed on master 2026-07-02) made
 `enable_qm=true` encodes decode differently than the encoder's own

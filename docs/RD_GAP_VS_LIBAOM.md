@@ -1158,6 +1158,39 @@ quality but filter-intra ON).
 options; the zenanalyze picker is the natural owner of Off/Auto/Always per image —
 detection features are cheap), then re-measure the screen tier gap.
 
+**2026-07-03 (later still): UV (chroma) palette landed upstream (zenrav1e@a3b72033,
+release-gated) — plus a latent CDF-undo-log corruption fixed en route
+(zenrav1e@e86235b5).** The previously-"off"-coded UV flag now carries a real joint
+(U,V) palette: libaom `av1_rd_pick_palette_intra_sbuv`'s per-size 2-D k-means
+candidates PLUS a dominant-pairs family (2-D analogue of the luma top-colors family;
+k-means-only search measurably misses exact palettes on palette-exact content),
+U colors coded min-step-0 against the U neighbor cache, V raw-vs-wraparound-delta by
+libaom's exact rate arithmetic, one shared chroma index map — all trialed through the
+real writers on top of the winning luma side (libaom's decoupled sby-then-sbuv shape).
+Same `PaletteMode` knob, default Off, byte-identity off re-verified 48/48 vs 17e67842.
+
+Measured vs the shipped luma-palette base (`--palette always` both arms, isolated
+config, q{60,100,140,180,220} × s{2,6}; `benchmarks/uvpal_ab_2026-07-03.tsv`):
+fam-7000 plots ssim2-BD median **−1.95% (s2) / −2.59% (s6)** with butteraugli-pnorm3
+BD agreeing (−4.5%/−8.3% median; 7050 −9.0%/−7.2% ssim2 at q60 byte ratios 0.83/0.79);
+legacy fam-7 anchors (o_7000/7001/7002) −2.55%/−5.73% ssim2 median (butteraugli mixed
+at s6: +1.9% median on those three — chroma palettization trades smooth-chroma DCT for
+quantized flats; noted, not gating); 8100 screenshots −0.5%/−1.1%; photos ±0.0-0.65%
+(noise, both signs). Conformance: 200/200 corpus cells (420) + 84/84 at 444 aomdec-clean
+AND rav1d-safe raw-md5-agreeing, plus in-repo exact-chroma roundtrips at both samplings,
+odd-dims/tiny frames, and 10-bit.
+
+The conformance sweep also exposed a LATENT ENCODER BUG shipped since the CDF undo log
+existed: the log captured/restored fixed 16-word snapshots regardless of CDF length, and
+its small/large partitions roll back sequentially rather than globally LIFO — so a luma
+n=8 color-index update at the last `palette_y_color_index_cdf` row spilled its snapshot
+over `palette_uv_color_index_cdf[0][0]`, and rollbacks resurrected stale UV CDF state
+(encoder-only state no decoder reaches ⇒ content-dependent desync; silent for luma-only
+palettes whose adjacent bytes never changed). Fixed with exact-length snapshots + a
+compile-time bound (zenrav1e@e86235b5, regression test
+`cdf_log_rollback_is_exact_length_across_field_boundaries`); bug-class 6 in the project
+memory (fixed-width undo logs over adjacent adaptive state).
+
 **2026-07-03 (later): the zenanalyze palette gate landed (release-gated) after a
 val-confirmed mechanism A/B.** The detection-conservatism remainder above plus the
 wedge finding that the AA-aware detection dies on ANY downscaled screen content are

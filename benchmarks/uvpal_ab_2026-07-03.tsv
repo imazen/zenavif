@@ -1,0 +1,1209 @@
+# uvpal_ab_2026-07-03: UV (chroma) palette A/B vs shipped luma-palette base
+# zenrav1e master arm = 17e67842 (--palette always), ws arm = a3b72033 (--palette always, UV palette live) both on top of the e86235b5 cdf-log fix (ws only)
+# harness: scripts/rd_gap/palette_iso_cell.sh isolated config (rav1e IVF, 420 color-exact, --lrf false --filter-intra false), q{60,100,140,180,220} x s{2,6}
+# conformance: ws arm 200/200 cells aomdec-clean + rav1d-safe raw-md5 agree; 444 pass 84/84 (s{2,6} x q{60,140,220} x 14 screen-class files); butteraugli pnorm3 scored from persisted streams (/mnt/v/output/uvpal-ab-2026-07-03/streams)
+# host: lilith 2026-07-03
+# --- master arm rows ---
+image	speed	q	arm	bytes	enc_ms	ssim2	butter_max	butter_p3	md5_agree
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	60	off	26918	6166.6	80.02394056	NA	NA	na
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	60	always	26929	6582.5	80.41230557	NA	NA	yes
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	100	off	20738	5671.8	79.27665582	NA	NA	na
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	100	always	20576	5899.1	78.84132377	NA	NA	yes
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	140	off	14572	4667.6	76.10816672	NA	NA	na
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	140	always	14119	4990.3	76.35578065	NA	NA	yes
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	180	off	9603	4365.5	63.95073265	NA	NA	na
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	180	always	9539	4194.2	67.49849688	NA	NA	yes
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	220	off	5692	3014.2	39.21166066	NA	NA	na
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	220	always	5855	3299.5	41.33488532	NA	NA	yes
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	60	off	38920	1054.6	80.04673616	NA	NA	na
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	60	always	34424	1554.0	79.50332773	NA	NA	yes
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	100	off	29152	989.2	78.45537850	NA	NA	na
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	100	always	24519	1638.7	78.84007506	NA	NA	yes
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	140	off	19484	884.5	73.08882177	NA	NA	na
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	140	always	16341	1293.7	75.35937966	NA	NA	yes
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	180	off	12011	745.5	59.49500763	NA	NA	na
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	180	always	11051	1080.3	68.11967064	NA	NA	yes
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	220	off	7143	594.4	29.95872822	NA	NA	na
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	220	always	6972	947.5	46.81382004	NA	NA	yes
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	60	off	26737	7782.0	63.13494571	NA	NA	na
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	60	always	16838	5099.9	63.44019212	NA	NA	yes
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	100	off	22734	7139.9	63.32748541	NA	NA	na
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	100	always	14748	4512.7	63.56802778	NA	NA	yes
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	140	off	19583	6700.3	60.28232587	NA	NA	na
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	140	always	12979	3979.5	61.90495372	NA	NA	yes
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	180	off	14686	5255.8	52.51720424	NA	NA	na
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	180	always	10661	3487.5	58.16880148	NA	NA	yes
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	220	off	9506	4253.9	27.59092781	NA	NA	na
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	220	always	7990	3127.9	35.55335008	NA	NA	yes
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	60	off	68126	1453.6	63.21530700	NA	NA	na
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	60	always	16989	1028.8	63.48023464	NA	NA	yes
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	100	off	52733	1379.9	62.06703382	NA	NA	na
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	100	always	14799	915.9	63.59027859	NA	NA	yes
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	140	off	35894	1149.3	58.21598686	NA	NA	na
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	140	always	13009	863.4	62.39937082	NA	NA	yes
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	180	off	20430	997.1	44.77236389	NA	NA	na
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	180	always	10812	701.2	56.77829914	NA	NA	yes
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	220	off	10486	779.7	16.93031698	NA	NA	na
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	220	always	8383	553.6	31.66645325	NA	NA	yes
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	60	off	6647	12535.8	88.76848402	NA	NA	na
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	60	always	5715	10109.1	89.38928836	NA	NA	yes
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	100	off	4673	10382.2	88.17496441	NA	NA	na
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	100	always	3811	9497.0	88.92940902	NA	NA	yes
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	140	off	2979	8502.6	86.34573180	NA	NA	na
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	140	always	2519	6993.6	88.71115698	NA	NA	yes
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	180	off	2677	6435.5	71.88449894	NA	NA	na
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	180	always	2197	4786.0	86.60811926	NA	NA	yes
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	220	off	2023	4903.8	38.35440857	NA	NA	na
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	220	always	1852	4164.1	65.55238136	NA	NA	yes
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	60	off	18202	1251.0	88.57401068	NA	NA	na
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	60	always	5247	1253.7	89.32803279	NA	NA	yes
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	100	off	13592	1195.6	87.21116951	NA	NA	na
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	100	always	3632	1071.9	88.88679762	NA	NA	yes
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	140	off	9227	1144.1	83.87240065	NA	NA	na
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	140	always	2322	838.3	88.60287377	NA	NA	yes
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	180	off	5798	980.2	65.20242931	NA	NA	na
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	180	always	2090	735.1	83.99496410	NA	NA	yes
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	220	off	4057	864.8	19.67103021	NA	NA	na
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	220	always	1927	682.6	56.63500840	NA	NA	yes
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	60	off	6236	12562.9	83.37253304	NA	NA	na
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	60	always	5592	9707.4	83.71789178	NA	NA	yes
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	100	off	5390	9601.3	83.47024417	NA	NA	na
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	100	always	4485	9348.6	83.40479586	NA	NA	yes
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	140	off	4604	8903.1	79.67242105	NA	NA	na
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	140	always	4005	8127.7	81.06840207	NA	NA	yes
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	180	off	3442	7789.0	71.92838321	NA	NA	na
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	180	always	3275	5850.3	74.28914121	NA	NA	yes
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	220	off	2874	4283.0	52.51695904	NA	NA	na
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	220	always	2697	4000.8	59.72864739	NA	NA	yes
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	60	off	22396	1426.7	83.25417767	NA	NA	na
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	60	always	5378	1168.4	83.45437793	NA	NA	yes
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	100	off	17743	1196.7	82.34757181	NA	NA	na
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	100	always	4470	891.3	83.52827264	NA	NA	yes
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	140	off	13339	1280.3	77.60909346	NA	NA	na
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	140	always	4034	802.8	81.84481920	NA	NA	yes
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	180	off	9306	956.6	66.03052684	NA	NA	na
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	180	always	3572	707.9	80.01636348	NA	NA	yes
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	220	off	5726	821.7	43.99508736	NA	NA	na
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	220	always	3262	662.4	71.96993023	NA	NA	yes
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	60	off	19059	3556.6	84.85068143	NA	NA	na
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	60	always	18115	3440.6	84.53937551	NA	NA	yes
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	100	off	15956	3309.6	82.54878795	NA	NA	na
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	100	always	14530	3152.2	83.28903966	NA	NA	yes
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	140	off	12538	2882.2	77.34070480	NA	NA	na
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	140	always	11680	2590.7	78.97693309	NA	NA	yes
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	180	off	8757	2467.4	67.21694028	NA	NA	na
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	180	always	8192	2281.1	70.10955998	NA	NA	yes
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	220	off	5226	1831.8	38.76500987	NA	NA	na
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	220	always	4981	1636.7	42.05019128	NA	NA	yes
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	60	off	31441	467.3	83.77285669	NA	NA	na
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	60	always	19076	672.1	84.33207546	NA	NA	yes
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	100	off	24723	446.4	80.83456343	NA	NA	na
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	100	always	15151	850.0	82.82051543	NA	NA	yes
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	140	off	17369	373.5	72.30343767	NA	NA	na
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	140	always	11885	520.4	78.12569438	NA	NA	yes
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	180	off	10549	335.7	58.97408523	NA	NA	na
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	180	always	8490	510.7	68.30486202	NA	NA	yes
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	220	off	5559	235.9	28.32562133	NA	NA	na
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	220	always	5195	376.8	39.07292308	NA	NA	yes
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	60	off	18725	3718.5	81.68218817	NA	NA	na
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	60	always	17752	3608.7	81.66922500	NA	NA	yes
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	100	off	15953	3508.8	81.29419911	NA	NA	na
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	100	always	14311	3203.4	81.19232094	NA	NA	yes
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	140	off	13322	3031.0	77.37114565	NA	NA	na
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	140	always	11450	2403.1	78.37959119	NA	NA	yes
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	180	off	9956	2687.9	70.84517929	NA	NA	na
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	180	always	8854	2053.5	72.11561490	NA	NA	yes
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	220	off	6522	1762.8	50.38444801	NA	NA	na
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	220	always	5710	1600.7	52.03056797	NA	NA	yes
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	60	off	35882	557.8	80.99025040	NA	NA	na
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	60	always	18345	665.1	81.42820420	NA	NA	yes
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	100	off	28818	582.9	78.61777796	NA	NA	na
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	100	always	14207	578.0	80.41188177	NA	NA	yes
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	140	off	20672	390.6	73.42423976	NA	NA	na
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	140	always	11628	501.1	77.28997439	NA	NA	yes
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	180	off	12908	322.0	60.32005181	NA	NA	na
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	180	always	8938	449.5	73.03643174	NA	NA	yes
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	220	off	6908	263.3	36.99547438	NA	NA	na
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	220	always	5786	370.7	51.64338767	NA	NA	yes
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	60	off	98162	10995.2	86.37750048	NA	NA	na
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	60	always	98046	11900.5	86.45366861	NA	NA	yes
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	100	off	70531	9546.8	81.40177508	NA	NA	na
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	100	always	70351	10373.0	81.82319553	NA	NA	yes
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	140	off	43985	7443.5	71.07745948	NA	NA	na
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	140	always	43939	7784.9	71.23395427	NA	NA	yes
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	180	off	23514	5660.5	50.39714355	NA	NA	na
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	180	always	23565	5993.4	50.95108877	NA	NA	yes
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	220	off	10971	3867.4	19.67159392	NA	NA	na
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	220	always	10897	4377.4	18.74089244	NA	NA	yes
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	60	off	112828	1329.3	86.15422941	NA	NA	na
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	60	always	104789	2223.1	85.90029750	NA	NA	yes
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	100	off	80621	1191.4	80.89588360	NA	NA	na
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	100	always	74323	1982.6	80.92004479	NA	NA	yes
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	140	off	49586	962.3	70.08405262	NA	NA	na
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	140	always	46032	1796.2	70.25686178	NA	NA	yes
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	180	off	25686	823.7	48.99199891	NA	NA	na
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	180	always	24765	1434.1	50.03701065	NA	NA	yes
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	220	off	11196	586.7	16.91086743	NA	NA	na
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	220	always	11390	1139.2	17.71258849	NA	NA	yes
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	60	off	52267	8414.5	83.40740357	NA	NA	na
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	60	always	52086	8995.8	83.34332052	NA	NA	yes
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	100	off	41637	7423.5	81.50693975	NA	NA	na
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	100	always	40924	7420.3	81.36496952	NA	NA	yes
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	140	off	30636	6268.2	76.98947501	NA	NA	na
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	140	always	30045	6205.0	77.16576207	NA	NA	yes
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	180	off	20015	5032.6	59.82887202	NA	NA	na
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	180	always	19885	5068.1	61.49633636	NA	NA	yes
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	220	off	10358	3576.1	26.91142866	NA	NA	na
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	220	always	10441	3921.1	29.29002823	NA	NA	yes
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	60	off	75247	1105.8	82.77395415	NA	NA	na
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	60	always	57672	1995.8	83.08917326	NA	NA	yes
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	100	off	57446	934.9	80.16917042	NA	NA	na
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	100	always	43979	1544.5	81.48661784	NA	NA	yes
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	140	off	39208	836.4	72.89730696	NA	NA	na
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	140	always	32207	1430.3	76.11760849	NA	NA	yes
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	180	off	22664	680.9	55.67726669	NA	NA	na
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	180	always	21199	1154.3	60.12973820	NA	NA	yes
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	220	off	10430	532.5	24.09245544	NA	NA	na
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	220	always	10840	970.2	26.26312241	NA	NA	yes
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	60	off	55101	9628.3	85.31147112	NA	NA	na
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	60	always	55079	9911.9	85.64491835	NA	NA	yes
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	100	off	44611	8786.1	83.53240547	NA	NA	na
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	100	always	44506	9317.9	83.63664655	NA	NA	yes
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	140	off	34209	7571.2	79.19372087	NA	NA	na
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	140	always	34012	7619.9	79.49266895	NA	NA	yes
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	180	off	24152	5942.6	66.81477297	NA	NA	na
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	180	always	23957	6712.2	65.60065703	NA	NA	yes
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	220	off	14377	4244.2	35.65032522	NA	NA	na
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	220	always	14346	4657.8	35.51865177	NA	NA	yes
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	60	off	83329	1403.3	84.54342275	NA	NA	na
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	60	always	64110	2105.8	85.12305365	NA	NA	yes
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	100	off	66107	1271.3	81.37596144	NA	NA	na
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	100	always	50845	1856.6	83.31079564	NA	NA	yes
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	140	off	47534	1042.6	72.87626004	NA	NA	na
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	140	always	37407	1613.1	77.09326986	NA	NA	yes
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	180	off	29875	857.7	54.25651617	NA	NA	na
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	180	always	25764	1390.0	63.20950771	NA	NA	yes
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	220	off	15384	623.0	20.21102763	NA	NA	na
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	220	always	14606	1143.4	30.52077769	NA	NA	yes
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	60	off	90879	13578.2	82.13505255	NA	NA	na
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	60	always	90883	14630.6	82.15123983	NA	NA	yes
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	100	off	72598	11995.3	78.27408142	NA	NA	na
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	100	always	72779	13138.3	78.29662855	NA	NA	yes
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	140	off	55428	10020.5	66.47490026	NA	NA	na
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	140	always	55198	10385.1	68.19378834	NA	NA	yes
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	180	off	39247	8370.5	43.21509852	NA	NA	na
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	180	always	39379	8554.9	45.54397387	NA	NA	yes
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	220	off	23047	5422.5	3.78795192	NA	NA	na
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	220	always	22837	5894.7	7.43047782	NA	NA	yes
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	60	off	144593	1734.9	81.07217198	NA	NA	na
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	60	always	107176	2581.4	81.69455840	NA	NA	yes
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	100	off	115098	1555.7	76.08936616	NA	NA	na
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	100	always	83225	2337.3	78.15396187	NA	NA	yes
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	140	off	81515	1301.7	59.91898774	NA	NA	na
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	140	always	61465	2050.5	69.26978193	NA	NA	yes
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	180	off	49008	1075.1	41.70463795	NA	NA	na
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	180	always	42702	1799.6	52.08001693	NA	NA	yes
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	220	off	22137	748.0	1.88148685	NA	NA	na
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	220	always	23292	1660.2	10.53834293	NA	NA	yes
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	60	off	136070	25279.8	72.47494359	NA	NA	na
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	60	always	135837	27639.8	72.37502952	NA	NA	yes
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	100	off	108565	22904.0	71.42828103	NA	NA	na
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	100	always	108530	23641.1	71.54942858	NA	NA	yes
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	140	off	79353	19516.6	68.80425242	NA	NA	na
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	140	always	79262	20302.9	68.83527757	NA	NA	yes
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	180	off	52940	16040.0	61.58512018	NA	NA	na
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	180	always	52914	17142.0	60.78897428	NA	NA	yes
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	220	off	30382	13364.1	38.07224812	NA	NA	na
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	220	always	30410	13515.9	38.37129475	NA	NA	yes
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	60	off	203108	3217.2	72.34720583	NA	NA	na
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	60	always	175356	4669.0	72.29703878	NA	NA	yes
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	100	off	154565	2883.6	71.35871899	NA	NA	na
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	100	always	134373	4389.1	71.64366362	NA	NA	yes
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	140	off	106941	2623.8	67.81585042	NA	NA	na
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	140	always	96243	3895.8	68.47318592	NA	NA	yes
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	180	off	67024	2312.4	58.50770083	NA	NA	na
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	180	always	64272	3547.2	61.09634162	NA	NA	yes
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	220	off	36938	1841.8	36.45081829	NA	NA	na
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	220	always	35995	3434.0	37.27848919	NA	NA	yes
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	60	off	192027	32577.1	64.72954116	NA	NA	na
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	60	always	191883	33407.1	64.77140292	NA	NA	yes
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	100	off	153384	29463.1	63.06515350	NA	NA	na
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	100	always	152975	29884.7	63.13307187	NA	NA	yes
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	140	off	113041	24139.4	58.02812773	NA	NA	na
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	140	always	112273	24510.6	58.12525415	NA	NA	yes
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	180	off	78109	19750.5	42.26708375	NA	NA	na
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	180	always	77403	19258.9	43.16593255	NA	NA	yes
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	220	off	48278	15753.2	5.01066902	NA	NA	na
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	220	always	48149	15470.8	7.59533942	NA	NA	yes
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	60	off	364997	4155.4	64.19380121	NA	NA	na
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	60	always	261398	5561.0	64.59477244	NA	NA	yes
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	100	off	282963	3551.5	61.65721839	NA	NA	na
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	100	always	208326	5236.1	63.05784811	NA	NA	yes
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	140	off	196558	3173.5	54.09099301	NA	NA	na
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	140	always	151239	4686.3	57.81867147	NA	NA	yes
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	180	off	119755	2629.1	35.56699483	NA	NA	na
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	180	always	97212	4346.9	42.90108541	NA	NA	yes
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	220	off	63812	2041.3	5.58051209	NA	NA	na
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	220	always	59947	3539.5	7.29485955	NA	NA	yes
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	60	off	181803	21474.0	90.36151653	NA	NA	na
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	60	always	181623	22738.5	90.33661546	NA	NA	yes
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	100	off	147607	19195.4	87.32620841	NA	NA	na
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	100	always	147732	19146.7	87.69503225	NA	NA	yes
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	140	off	113529	15845.0	80.80966719	NA	NA	na
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	140	always	113002	16654.7	80.87463602	NA	NA	yes
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	180	off	78084	12508.2	68.18511585	NA	NA	na
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	180	always	77632	12580.6	68.54368818	NA	NA	yes
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	220	off	41675	7907.0	36.62983844	NA	NA	na
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	220	always	41636	9044.4	37.25000452	NA	NA	yes
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	60	off	256113	1654.7	89.13630568	NA	NA	na
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	60	always	208941	2483.2	90.21208135	NA	NA	yes
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	100	off	207785	1475.0	85.05162550	NA	NA	na
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	100	always	166465	2300.4	87.58134612	NA	NA	yes
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	140	off	150268	1228.0	79.60521876	NA	NA	na
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	140	always	126311	2000.2	81.62899137	NA	NA	yes
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	180	off	90871	1002.4	63.10188064	NA	NA	na
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	180	always	86258	1705.3	68.07788092	NA	NA	yes
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	220	off	40460	808.7	32.31275328	NA	NA	na
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	220	always	40618	1644.2	31.74247444	NA	NA	yes
+o_7001.png.scale1024x1024	2	60	off	43466	17379.4	69.66478462	NA	NA	na
+o_7001.png.scale1024x1024	2	60	always	25072	11757.3	69.78174587	NA	NA	yes
+o_7001.png.scale1024x1024	2	100	off	35182	16641.0	69.74255320	NA	NA	na
+o_7001.png.scale1024x1024	2	100	always	23603	11348.7	69.55785336	NA	NA	yes
+o_7001.png.scale1024x1024	2	140	off	32218	14491.2	68.17623999	NA	NA	na
+o_7001.png.scale1024x1024	2	140	always	22042	9308.3	68.76050847	NA	NA	yes
+o_7001.png.scale1024x1024	2	180	off	26657	13548.0	60.78278089	NA	NA	na
+o_7001.png.scale1024x1024	2	180	always	20076	8232.4	65.56680674	NA	NA	yes
+o_7001.png.scale1024x1024	2	220	off	21770	10809.7	38.32294314	NA	NA	na
+o_7001.png.scale1024x1024	2	220	always	17791	7206.9	52.26962319	NA	NA	yes
+o_7001.png.scale1024x1024	6	60	off	183908	2849.8	67.97815126	NA	NA	na
+o_7001.png.scale1024x1024	6	60	always	28724	1827.7	69.84565771	NA	NA	yes
+o_7001.png.scale1024x1024	6	100	off	148505	2579.0	65.30704824	NA	NA	na
+o_7001.png.scale1024x1024	6	100	always	26993	1672.0	69.63798490	NA	NA	yes
+o_7001.png.scale1024x1024	6	140	off	107889	2444.7	55.76041389	NA	NA	na
+o_7001.png.scale1024x1024	6	140	always	25186	1555.5	68.84111407	NA	NA	yes
+o_7001.png.scale1024x1024	6	180	off	65858	2136.9	33.95769431	NA	NA	na
+o_7001.png.scale1024x1024	6	180	always	23016	1292.6	66.11183407	NA	NA	yes
+o_7001.png.scale1024x1024	6	220	off	35503	2419.5	3.71414144	NA	NA	na
+o_7001.png.scale1024x1024	6	220	always	20154	996.0	54.61029372	NA	NA	yes
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	60	off	73612	11138.1	85.00102762	NA	NA	na
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	60	always	73612	12573.9	85.00102762	NA	NA	yes
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	100	off	47500	9695.5	79.30143355	NA	NA	na
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	100	always	47500	9782.5	79.30143355	NA	NA	yes
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	140	off	25800	6561.4	67.07669678	NA	NA	na
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	140	always	25848	7367.0	67.09629414	NA	NA	yes
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	180	off	12291	4236.0	47.29672159	NA	NA	na
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	180	always	12291	5065.0	47.29672159	NA	NA	yes
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	220	off	5322	2630.0	18.26913225	NA	NA	na
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	220	always	5322	3843.0	18.26913225	NA	NA	yes
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	60	off	75674	1268.2	84.88658894	NA	NA	na
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	60	always	75832	2679.8	84.89294339	NA	NA	yes
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	100	off	49214	1030.5	79.02282646	NA	NA	na
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	100	always	49153	2186.8	79.00596958	NA	NA	yes
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	140	off	27013	1050.0	67.54217642	NA	NA	na
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	140	always	26926	1784.2	67.39650315	NA	NA	yes
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	180	off	12890	537.1	47.39949136	NA	NA	na
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	180	always	12932	1544.7	47.72217889	NA	NA	yes
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	220	off	5496	333.9	17.09852348	NA	NA	na
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	220	always	5494	1039.1	17.18625370	NA	NA	yes
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	60	off	236653	20437.9	83.99186937	NA	NA	na
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	60	always	236567	21785.7	84.00600906	NA	NA	yes
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	100	off	166559	17971.7	76.08689431	NA	NA	na
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	100	always	166273	18932.0	76.12876121	NA	NA	yes
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	140	off	97376	14161.3	57.73623452	NA	NA	na
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	140	always	97282	15305.7	57.61567776	NA	NA	yes
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	180	off	43803	9742.1	21.63703771	NA	NA	na
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	180	always	43753	10431.4	21.01637035	NA	NA	yes
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	220	off	15818	6049.9	26.89694893	NA	NA	na
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	220	always	15839	6836.2	27.26419713	NA	NA	yes
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	60	off	248460	2380.7	83.55109687	NA	NA	na
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	60	always	247884	4497.7	83.45697900	NA	NA	yes
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	100	off	175273	2009.1	75.48800982	NA	NA	na
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	100	always	175049	4088.1	75.72936020	NA	NA	yes
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	140	off	102297	1602.4	56.70401001	NA	NA	na
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	140	always	102347	3239.9	56.96401495	NA	NA	yes
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	180	off	44896	1050.2	19.82549323	NA	NA	na
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	180	always	44932	2387.2	19.84619484	NA	NA	yes
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	220	off	16174	679.5	27.42781633	NA	NA	na
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	220	always	16204	1594.0	27.84202461	NA	NA	yes
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	60	off	25558	4810.3	87.74987611	NA	NA	na
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	60	always	25578	4827.6	87.63400425	NA	NA	yes
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	100	off	17846	3895.6	84.77180814	NA	NA	na
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	100	always	17792	4081.4	84.47451179	NA	NA	yes
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	140	off	11582	3190.6	78.75207540	NA	NA	na
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	140	always	11586	3217.0	79.02608319	NA	NA	yes
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	180	off	6842	2242.5	67.22824006	NA	NA	na
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	180	always	6837	2502.8	67.61590857	NA	NA	yes
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	220	off	3795	1574.7	48.06288185	NA	NA	na
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	220	always	3760	1759.7	47.86846525	NA	NA	yes
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	60	off	29533	611.5	87.69084513	NA	NA	na
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	60	always	29165	1140.0	87.60575256	NA	NA	yes
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	100	off	20741	536.4	84.38724726	NA	NA	na
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	100	always	20364	980.0	84.44636251	NA	NA	yes
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	140	off	13200	451.3	78.17183295	NA	NA	na
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	140	always	13235	873.2	78.60907461	NA	NA	yes
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	180	off	7580	361.8	66.48522701	NA	NA	na
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	180	always	7726	736.2	66.83662756	NA	NA	yes
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	220	off	4174	265.0	47.82217113	NA	NA	na
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	220	always	4177	592.4	47.84649436	NA	NA	yes
+o_7000.png.scale1024x1024	2	60	off	119482	34339.6	66.64277046	NA	NA	na
+o_7000.png.scale1024x1024	2	60	always	77931	23030.3	66.95341184	NA	NA	yes
+o_7000.png.scale1024x1024	2	100	off	101008	31653.9	64.95829716	NA	NA	na
+o_7000.png.scale1024x1024	2	100	always	72662	21131.4	65.97376214	NA	NA	yes
+o_7000.png.scale1024x1024	2	140	off	86806	27700.3	60.28864795	NA	NA	na
+o_7000.png.scale1024x1024	2	140	always	66323	18589.6	63.59942881	NA	NA	yes
+o_7000.png.scale1024x1024	2	180	off	66901	23589.5	47.30938910	NA	NA	na
+o_7000.png.scale1024x1024	2	180	always	59035	17282.6	55.38075435	NA	NA	yes
+o_7000.png.scale1024x1024	2	220	off	55239	20142.1	9.55717747	NA	NA	na
+o_7000.png.scale1024x1024	2	220	always	50085	14219.1	34.67819301	NA	NA	yes
+o_7000.png.scale1024x1024	6	60	off	466231	4405.3	66.06030305	NA	NA	na
+o_7000.png.scale1024x1024	6	60	always	86584	3820.7	66.96103339	NA	NA	yes
+o_7000.png.scale1024x1024	6	100	off	378856	3944.0	63.22803636	NA	NA	na
+o_7000.png.scale1024x1024	6	100	always	81374	3397.2	66.05250027	NA	NA	yes
+o_7000.png.scale1024x1024	6	140	off	277349	3299.6	55.46875977	NA	NA	na
+o_7000.png.scale1024x1024	6	140	always	74588	2942.2	64.06990400	NA	NA	yes
+o_7000.png.scale1024x1024	6	180	off	175524	3027.6	34.67808428	NA	NA	na
+o_7000.png.scale1024x1024	6	180	always	66401	2509.6	56.92913985	NA	NA	yes
+o_7000.png.scale1024x1024	6	220	off	92336	2445.2	7.56551414	NA	NA	na
+o_7000.png.scale1024x1024	6	220	always	56039	1987.1	39.51246235	NA	NA	yes
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	60	off	159575	19239.4	84.83293603	NA	NA	na
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	60	always	159575	20435.7	84.83293603	NA	NA	yes
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	100	off	97973	14427.2	78.90555163	NA	NA	na
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	100	always	98101	15614.8	78.94695504	NA	NA	yes
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	140	off	55422	10697.1	68.15810253	NA	NA	na
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	140	always	55362	11311.1	68.11214588	NA	NA	yes
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	180	off	27357	7158.6	43.43419477	NA	NA	na
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	180	always	27340	8003.4	43.19120223	NA	NA	yes
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	220	off	12605	4731.8	5.18611945	NA	NA	na
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	220	always	12613	5324.1	5.90176818	NA	NA	yes
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	60	off	164667	2184.7	84.27094079	NA	NA	na
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	60	always	164559	4217.2	84.42422412	NA	NA	yes
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	100	off	103000	1632.0	78.69502272	NA	NA	na
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	100	always	102606	3211.8	78.72656110	NA	NA	yes
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	140	off	58396	1282.8	67.61440408	NA	NA	na
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	140	always	58451	2686.6	67.87912218	NA	NA	yes
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	180	off	28646	961.1	43.10877040	NA	NA	na
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	180	always	28632	2274.8	43.41920727	NA	NA	yes
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	220	off	13164	646.3	6.45167527	NA	NA	na
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	220	always	13226	1701.8	6.23963640	NA	NA	yes
+o_7002.png.scale1024x1024	2	60	off	137953	36904.4	69.25132173	NA	NA	na
+o_7002.png.scale1024x1024	2	60	always	91434	25279.8	69.56897885	NA	NA	yes
+o_7002.png.scale1024x1024	2	100	off	106010	33532.5	67.88808211	NA	NA	na
+o_7002.png.scale1024x1024	2	100	always	82619	22645.5	68.90852300	NA	NA	yes
+o_7002.png.scale1024x1024	2	140	off	92573	28549.7	62.34928916	NA	NA	na
+o_7002.png.scale1024x1024	2	140	always	74508	19741.4	66.46680907	NA	NA	yes
+o_7002.png.scale1024x1024	2	180	off	73629	24261.6	45.52357833	NA	NA	na
+o_7002.png.scale1024x1024	2	180	always	65072	17744.9	56.87223559	NA	NA	yes
+o_7002.png.scale1024x1024	2	220	off	61296	19616.4	4.49692005	NA	NA	na
+o_7002.png.scale1024x1024	2	220	always	55416	14424.6	29.78124874	NA	NA	yes
+o_7002.png.scale1024x1024	6	60	off	499292	4414.5	68.93723993	NA	NA	na
+o_7002.png.scale1024x1024	6	60	always	99567	3910.9	69.76648633	NA	NA	yes
+o_7002.png.scale1024x1024	6	100	off	405306	3897.0	66.12934911	NA	NA	na
+o_7002.png.scale1024x1024	6	100	always	91605	3473.8	69.03767681	NA	NA	yes
+o_7002.png.scale1024x1024	6	140	off	296482	3338.9	55.30501037	NA	NA	na
+o_7002.png.scale1024x1024	6	140	always	82584	3046.7	66.71925962	NA	NA	yes
+o_7002.png.scale1024x1024	6	180	off	187068	2834.7	30.08852066	NA	NA	na
+o_7002.png.scale1024x1024	6	180	always	72346	2587.3	58.88880770	NA	NA	yes
+o_7002.png.scale1024x1024	6	220	off	99550	2418.0	12.96856631	NA	NA	na
+o_7002.png.scale1024x1024	6	220	always	59844	2020.3	37.14895388	NA	NA	yes
+# --- ws (UV palette) arm rows ---
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	60	always	14429	5296.2	63.79008276	NA	NA	yes
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	100	always	13372	4857.7	63.75804048	NA	NA	yes
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	140	always	11976	4594.7	63.21238081	NA	NA	yes
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	180	always	10401	4047.0	59.89785982	NA	NA	yes
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	220	always	8217	3419.6	38.29042848	NA	NA	yes
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	60	always	14494	1343.0	63.80630435	NA	NA	yes
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	100	always	13293	1094.0	63.75983428	NA	NA	yes
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	140	always	11804	1074.8	63.33422781	NA	NA	yes
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	180	always	10466	940.0	60.27255943	NA	NA	yes
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	220	always	8427	807.5	40.17578844	NA	NA	yes
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	60	always	26812	7719.8	80.39027516	NA	NA	yes
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	100	always	20445	6829.0	79.04536960	NA	NA	yes
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	140	always	14234	5730.4	76.30559364	NA	NA	yes
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	180	always	9686	4702.9	68.67823334	NA	NA	yes
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	220	always	5871	3804.8	41.69279955	NA	NA	yes
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	60	always	33612	2220.8	80.13390017	NA	NA	yes
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	100	always	23954	1895.9	79.10732567	NA	NA	yes
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	140	always	16357	1614.3	76.69158197	NA	NA	yes
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	180	always	11163	1510.0	69.47116923	NA	NA	yes
+7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	220	always	6853	1276.0	44.67472620	NA	NA	yes
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	60	always	4643	10440.5	83.88321534	NA	NA	yes
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	100	always	3842	9688.3	84.17059259	NA	NA	yes
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	140	always	3636	8552.9	82.38111882	NA	NA	yes
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	180	always	3155	6105.2	78.57063862	NA	NA	yes
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	220	always	2756	4397.1	64.17799061	NA	NA	yes
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	60	always	4249	1565.1	83.94334876	NA	NA	yes
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	100	always	3660	1167.8	84.27227317	NA	NA	yes
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	140	always	3589	1060.5	82.98746493	NA	NA	yes
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	180	always	3445	1215.1	82.07680427	NA	NA	yes
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	220	always	3386	812.9	74.09746898	NA	NA	yes
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	60	always	5663	13427.3	89.44327668	NA	NA	yes
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	100	always	3850	11031.3	89.30906583	NA	NA	yes
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	140	always	2574	8970.0	89.28260684	NA	NA	yes
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	180	always	2100	6108.9	87.50370592	NA	NA	yes
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	220	always	1876	4744.4	64.20492088	NA	NA	yes
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	60	always	5101	1885.8	89.47543826	NA	NA	yes
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	100	always	3503	1722.9	89.35057917	NA	NA	yes
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	140	always	2405	1694.3	88.90503973	NA	NA	yes
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	180	always	2265	1084.7	85.00660954	NA	NA	yes
+7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	220	always	2033	939.3	56.92913466	NA	NA	yes
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	60	always	18110	3988.4	84.59310834	NA	NA	yes
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	100	always	14537	3657.4	83.32234118	NA	NA	yes
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	140	always	11513	3301.9	79.52069531	NA	NA	yes
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	180	always	8218	2526.2	70.33119065	NA	NA	yes
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	220	always	4992	1874.9	41.93286282	NA	NA	yes
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	60	always	19103	997.5	84.42007321	NA	NA	yes
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	100	always	15111	824.5	82.66654079	NA	NA	yes
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	140	always	11880	691.3	78.35715651	NA	NA	yes
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	180	always	8524	599.2	68.80255738	NA	NA	yes
+8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	220	always	5224	652.7	40.72954803	NA	NA	yes
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	60	always	17732	4022.3	81.66472294	NA	NA	yes
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	100	always	14245	3334.8	81.10602710	NA	NA	yes
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	140	always	11465	2683.5	77.88523698	NA	NA	yes
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	180	always	8760	2316.2	73.27862447	NA	NA	yes
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	220	always	5676	1826.3	52.98103947	NA	NA	yes
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	60	always	18381	837.5	81.28305322	NA	NA	yes
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	100	always	14154	781.3	79.83209223	NA	NA	yes
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	140	always	11635	609.5	77.36025786	NA	NA	yes
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	180	always	8866	538.4	73.69810189	NA	NA	yes
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	220	always	5765	494.7	52.00901552	NA	NA	yes
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	60	always	98046	14063.3	86.45366861	NA	NA	yes
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	100	always	70357	12019.1	81.33456828	NA	NA	yes
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	140	always	43895	9173.7	71.01556178	NA	NA	yes
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	180	always	23565	7180.3	50.95108877	NA	NA	yes
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	220	always	10888	4932.3	19.43507301	NA	NA	yes
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	60	always	104785	3545.4	86.08848895	NA	NA	yes
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	100	always	74284	3238.4	81.15928501	NA	NA	yes
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	140	always	45947	2654.0	70.60274253	NA	NA	yes
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	180	always	24817	2148.8	50.13541346	NA	NA	yes
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	220	always	11384	1702.7	18.27279456	NA	NA	yes
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	60	always	52064	10064.7	83.35108941	NA	NA	yes
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	100	always	40899	8608.9	81.46804526	NA	NA	yes
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	140	always	30049	7474.8	77.07886791	NA	NA	yes
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	180	always	19907	5594.9	60.83182803	NA	NA	yes
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	220	always	10460	4523.6	27.75320436	NA	NA	yes
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	60	always	57802	2270.2	83.23785381	NA	NA	yes
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	100	always	43933	2030.6	81.59563236	NA	NA	yes
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	140	always	32213	1785.1	76.30224266	NA	NA	yes
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	180	always	21170	1506.8	60.87071735	NA	NA	yes
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	220	always	10902	1286.6	27.00952066	NA	NA	yes
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	60	always	55074	11744.6	85.51733452	NA	NA	yes
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	100	always	44506	10772.7	83.54096580	NA	NA	yes
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	140	always	33930	9193.4	79.28535626	NA	NA	yes
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	180	always	23957	7134.1	65.60065703	NA	NA	yes
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	220	always	14368	5105.4	37.05986411	NA	NA	yes
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	60	always	64185	3086.9	84.97757956	NA	NA	yes
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	100	always	51014	2713.5	83.21527474	NA	NA	yes
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	140	always	37633	2381.7	77.53656457	NA	NA	yes
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	180	always	25745	1931.9	63.81444030	NA	NA	yes
+5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	220	always	14665	1645.5	32.76598763	NA	NA	yes
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	60	always	135749	31765.9	72.34264407	NA	NA	yes
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	100	always	108531	27189.9	71.62558296	NA	NA	yes
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	140	always	79410	22676.0	67.98253333	NA	NA	yes
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	180	always	53005	19415.1	61.49860648	NA	NA	yes
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	220	always	30532	14805.6	38.84268067	NA	NA	yes
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	60	always	174859	6540.8	72.54103403	NA	NA	yes
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	100	always	133652	5884.6	71.85031805	NA	NA	yes
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	140	always	96371	5210.2	68.73689156	NA	NA	yes
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	180	always	64687	4750.9	60.91402201	NA	NA	yes
+7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	220	always	36671	4185.4	37.97410136	NA	NA	yes
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	60	always	91023	17006.0	82.28039059	NA	NA	yes
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	100	always	72594	15456.1	78.61089666	NA	NA	yes
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	140	always	55237	11848.4	68.54203454	NA	NA	yes
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	180	always	39376	9803.6	46.00632936	NA	NA	yes
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	220	always	22837	6977.9	7.43047782	NA	NA	yes
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	60	always	107646	4132.1	81.84245698	NA	NA	yes
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	100	always	83307	3629.5	78.22176115	NA	NA	yes
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	140	always	61424	3347.4	69.33086882	NA	NA	yes
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	180	always	42864	2793.9	51.62790327	NA	NA	yes
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	220	always	23292	2370.4	10.53834293	NA	NA	yes
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	60	always	191886	39353.6	64.89389941	NA	NA	yes
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	100	always	152738	34959.0	63.17111021	NA	NA	yes
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	140	always	112479	28337.4	58.45090265	NA	NA	yes
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	180	always	77717	22257.8	42.55051578	NA	NA	yes
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	220	always	48210	18196.2	7.00772782	NA	NA	yes
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	60	always	261069	8707.0	65.16051649	NA	NA	yes
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	100	always	207599	7575.6	63.83475068	NA	NA	yes
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	140	always	151814	6885.6	59.12315547	NA	NA	yes
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	180	always	98056	6090.9	44.85192146	NA	NA	yes
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	220	always	60518	5404.4	8.19464740	NA	NA	yes
+o_7001.png.scale1024x1024	2	60	always	23962	12117.8	70.45704294	NA	NA	yes
+o_7001.png.scale1024x1024	2	100	always	23186	10842.0	70.38925717	NA	NA	yes
+o_7001.png.scale1024x1024	2	140	always	21661	10087.8	69.90220706	NA	NA	yes
+o_7001.png.scale1024x1024	2	180	always	20194	9285.3	68.83111257	NA	NA	yes
+o_7001.png.scale1024x1024	2	220	always	18237	7971.1	54.98124124	NA	NA	yes
+o_7001.png.scale1024x1024	6	60	always	25512	1896.9	70.48137800	NA	NA	yes
+o_7001.png.scale1024x1024	6	100	always	24905	1453.9	70.45708110	NA	NA	yes
+o_7001.png.scale1024x1024	6	140	always	23911	1521.4	70.18531698	NA	NA	yes
+o_7001.png.scale1024x1024	6	180	always	22626	1279.1	69.35596933	NA	NA	yes
+o_7001.png.scale1024x1024	6	220	always	20577	1119.5	57.87221975	NA	NA	yes
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	60	always	181623	25322.6	90.33661546	NA	NA	yes
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	100	always	147732	21691.3	87.69503225	NA	NA	yes
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	140	always	113002	18334.3	80.87463602	NA	NA	yes
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	180	always	77632	14081.4	68.54368818	NA	NA	yes
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	220	always	41636	9343.8	37.25000452	NA	NA	yes
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	60	always	208941	2829.1	90.21208135	NA	NA	yes
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	100	always	166465	2578.5	87.58134612	NA	NA	yes
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	140	always	126311	2211.7	81.62899137	NA	NA	yes
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	180	always	86258	1841.7	68.07788092	NA	NA	yes
+6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	220	always	40618	1521.1	31.74247444	NA	NA	yes
+o_7000.png.scale1024x1024	2	60	always	71594	25073.1	67.33307082	NA	NA	yes
+o_7000.png.scale1024x1024	2	100	always	68875	22701.2	66.94082662	NA	NA	yes
+o_7000.png.scale1024x1024	2	140	always	65448	20675.8	65.97359609	NA	NA	yes
+o_7000.png.scale1024x1024	2	180	always	60819	18224.1	61.36171108	NA	NA	yes
+o_7000.png.scale1024x1024	2	220	always	52343	16144.5	39.99687973	NA	NA	yes
+o_7000.png.scale1024x1024	6	60	always	76068	4437.0	67.38213035	NA	NA	yes
+o_7000.png.scale1024x1024	6	100	always	73243	3825.8	67.14362091	NA	NA	yes
+o_7000.png.scale1024x1024	6	140	always	70087	3212.8	66.62038650	NA	NA	yes
+o_7000.png.scale1024x1024	6	180	always	65636	2689.2	62.61502269	NA	NA	yes
+o_7000.png.scale1024x1024	6	220	always	58147	2617.6	45.35828954	NA	NA	yes
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	60	always	25566	5571.0	87.61672322	NA	NA	yes
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	100	always	17792	4668.9	84.47451179	NA	NA	yes
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	140	always	11604	3923.4	78.87927021	NA	NA	yes
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	180	always	6832	2809.1	67.40997977	NA	NA	yes
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	220	always	3755	2071.1	47.93209999	NA	NA	yes
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	60	always	29252	1730.2	87.49154530	NA	NA	yes
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	100	always	20509	1484.1	84.42893247	NA	NA	yes
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	140	always	13244	1288.4	78.35317650	NA	NA	yes
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	180	always	7720	1070.6	66.69001213	NA	NA	yes
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	220	always	4189	873.1	47.96440076	NA	NA	yes
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	60	always	73647	14003.6	84.95612147	NA	NA	yes
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	100	always	47500	11235.4	79.30143355	NA	NA	yes
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	140	always	25848	8793.6	67.09629414	NA	NA	yes
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	180	always	12291	6394.0	47.29672159	NA	NA	yes
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	220	always	5322	3981.8	18.26913225	NA	NA	yes
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	60	always	75893	3914.2	84.90861820	NA	NA	yes
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	100	always	49169	3291.1	79.00952238	NA	NA	yes
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	140	always	27067	2743.2	67.56054046	NA	NA	yes
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	180	always	12881	2192.2	47.36572026	NA	NA	yes
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	220	always	5494	1717.5	17.18625370	NA	NA	yes
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	60	always	236413	26019.6	83.97431868	NA	NA	yes
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	100	always	166447	22073.7	76.11199865	NA	NA	yes
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	140	always	97421	17906.4	57.70229602	NA	NA	yes
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	180	always	43567	12417.4	21.42247550	NA	NA	yes
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	220	always	15825	8017.1	26.85909298	NA	NA	yes
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	60	always	247256	7123.8	83.54265417	NA	NA	yes
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	100	always	175006	6256.0	75.63284570	NA	NA	yes
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	140	always	102454	5735.7	57.02087864	NA	NA	yes
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	180	always	44906	3939.3	19.99245998	NA	NA	yes
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	220	always	16188	2745.1	27.26932667	NA	NA	yes
+o_7002.png.scale1024x1024	2	60	always	85942	28339.2	69.73835109	NA	NA	yes
+o_7002.png.scale1024x1024	2	100	always	78274	26157.5	69.47563000	NA	NA	yes
+o_7002.png.scale1024x1024	2	140	always	73147	22823.2	68.61556443	NA	NA	yes
+o_7002.png.scale1024x1024	2	180	always	66776	20230.6	61.35629277	NA	NA	yes
+o_7002.png.scale1024x1024	2	220	always	58275	17158.2	36.96932964	NA	NA	yes
+o_7002.png.scale1024x1024	6	60	always	91871	5227.5	69.67918939	NA	NA	yes
+o_7002.png.scale1024x1024	6	100	always	83082	4618.7	69.54549499	NA	NA	yes
+o_7002.png.scale1024x1024	6	140	always	77262	3895.0	68.95563910	NA	NA	yes
+o_7002.png.scale1024x1024	6	180	always	71277	3146.4	63.02856124	NA	NA	yes
+o_7002.png.scale1024x1024	6	220	always	62175	2671.2	44.21336447	NA	NA	yes
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	60	always	159574	23527.7	84.91666491	NA	NA	yes
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	100	always	98078	18388.0	78.91413951	NA	NA	yes
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	140	always	55427	13362.0	68.19776534	NA	NA	yes
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	180	always	27312	9422.0	43.24864402	NA	NA	yes
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	220	always	12613	6460.0	5.90176818	NA	NA	yes
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	60	always	164465	6747.2	84.48339840	NA	NA	yes
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	100	always	102615	5086.8	78.71721853	NA	NA	yes
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	140	always	58422	4230.6	67.90109592	NA	NA	yes
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	180	always	28644	3435.5	43.56943634	NA	NA	yes
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	220	always	13226	2665.7	6.23963640	NA	NA	yes
+# --- butteraugli pnorm3/max rescore rows (arm_dir master|ws2) ---
+#butter	master	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	180	always	2.803883	8.525846
+#butter	master	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	140	always	1.510281	3.411217
+#butter	master	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	100	always	0.877750	2.045162
+#butter	master	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	180	off	2.753392	6.954070
+#butter	master	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	140	off	1.501737	3.387388
+#butter	master	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	100	off	0.882852	2.034190
+#butter	master	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	60	always	0.580052	1.368279
+#butter	master	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	220	always	5.187564	18.332937
+#butter	master	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	100	always	0.899474	2.045800
+#butter	master	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	220	off	4.820048	12.462139
+#butter	master	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	60	off	0.581665	1.315573
+#butter	master	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	100	off	0.904197	2.005739
+#butter	master	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	220	off	4.821536	11.717317
+#butter	master	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	220	always	4.869814	12.664886
+#butter	master	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	180	off	2.762720	6.266826
+#butter	master	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	180	always	2.754108	6.696907
+#butter	master	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	140	always	1.515586	3.307218
+#butter	master	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	140	off	1.525238	3.582749
+#butter	master	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	60	off	0.606506	1.507399
+#butter	master	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	140	off	1.624506	4.585710
+#butter	master	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	60	always	0.600297	1.369435
+#butter	master	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	140	always	1.625709	4.585771
+#butter	master	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	100	always	1.212099	4.061191
+#butter	master	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	100	off	1.129283	2.800220
+#butter	master	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	220	off	8.415491	40.409645
+#butter	master	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	180	off	2.882885	10.183463
+#butter	master	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	220	always	8.403587	40.423222
+#butter	master	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	180	always	2.816648	8.981208
+#butter	master	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	60	always	0.877927	2.872176
+#butter	master	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	60	off	0.877927	2.872176
+#butter	master	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	180	always	2.677863	7.741292
+#butter	master	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	140	always	1.602667	4.110520
+#butter	master	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	100	off	1.137665	3.003539
+#butter	master	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	140	off	1.603534	3.809355
+#butter	master	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	180	off	2.670733	7.746999
+#butter	master	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	100	always	1.135764	2.975161
+#butter	master	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	100	always	0.960366	2.471228
+#butter	master	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	100	off	0.960366	2.471228
+#butter	master	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	60	always	0.892159	2.690161
+#butter	master	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	60	off	0.898179	2.809381
+#butter	master	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	220	always	4.574066	12.530464
+#butter	master	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	220	off	4.700998	14.258743
+#butter	master	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	140	off	1.584914	4.560504
+#butter	master	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	140	always	1.568575	3.975540
+#butter	master	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	220	off	4.364999	14.461845
+#butter	master	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	180	always	2.585283	8.223729
+#butter	master	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	220	always	4.364999	14.461845
+#butter	master	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	180	off	2.585283	8.223729
+#butter	master	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	140	off	1.501372	4.046065
+#butter	master	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	140	always	1.507615	4.046614
+#butter	master	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	100	always	0.960844	2.126043
+#butter	master	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	60	always	0.734144	2.152377
+#butter	master	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	100	off	0.966788	2.445691
+#butter	master	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	60	off	0.734144	2.152377
+#butter	master	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	220	always	4.404882	14.852053
+#butter	master	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	60	off	0.727274	2.051686
+#butter	master	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	60	always	0.720966	1.764304
+#butter	master	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	180	always	2.457279	6.525764
+#butter	master	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	220	off	4.348277	14.851886
+#butter	master	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	180	off	2.456484	6.619611
+#butter	master	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	180	off	1.959079	6.712476
+#butter	master	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	140	off	1.518932	5.817253
+#butter	master	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	180	always	2.223982	8.596561
+#butter	master	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	100	always	1.513579	6.388684
+#butter	master	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	140	always	1.512418	5.783775
+#butter	master	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	100	off	1.505373	6.308714
+#butter	master	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	60	off	1.474693	6.243103
+#butter	master	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	220	always	3.760725	14.084382
+#butter	master	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	220	off	3.808452	14.312315
+#butter	master	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	100	off	1.516123	6.219087
+#butter	master	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	60	always	1.463969	6.213240
+#butter	master	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	100	always	1.497771	6.252007
+#butter	master	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	180	always	2.057307	7.333003
+#butter	master	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	220	always	3.754132	13.162127
+#butter	master	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	140	always	1.548085	6.023266
+#butter	master	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	180	off	2.490722	7.507613
+#butter	master	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	140	off	1.752790	6.614927
+#butter	master	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	220	off	4.486199	14.229664
+#butter	master	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	60	always	1.467100	6.193775
+#butter	master	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	60	off	1.459562	6.026668
+#butter	master	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	140	always	0.941101	3.196594
+#butter	master	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	100	always	0.624295	2.132457
+#butter	master	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	140	off	0.954289	3.196594
+#butter	master	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	100	off	0.625965	1.930505
+#butter	master	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	220	off	3.860277	10.373285
+#butter	master	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	60	always	0.452206	1.491276
+#butter	master	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	60	off	0.449310	1.371165
+#butter	master	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	180	off	1.726009	5.195002
+#butter	master	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	180	always	1.718812	5.234463
+#butter	master	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	220	always	3.794814	10.080535
+#butter	master	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	180	always	1.741199	5.284988
+#butter	master	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	100	off	0.814911	3.625180
+#butter	master	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	100	always	0.629462	2.004031
+#butter	master	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	140	always	0.971394	3.903298
+#butter	master	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	140	off	1.130206	3.625180
+#butter	master	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	180	off	2.321021	7.398028
+#butter	master	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	100	always	2.300607	8.765345
+#butter	master	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	100	off	2.281925	8.181331
+#butter	master	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	220	always	4.290455	12.113352
+#butter	master	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	60	off	0.553716	2.365723
+#butter	master	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	60	always	0.472986	1.684610
+#butter	master	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	220	off	4.727247	15.481151
+#butter	master	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	180	always	2.804776	10.718704
+#butter	master	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	140	off	2.490103	9.904366
+#butter	master	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	220	always	4.071177	14.476151
+#butter	master	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	180	off	3.188799	12.386761
+#butter	master	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	140	always	2.460610	9.709339
+#butter	master	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	220	off	4.990126	22.637735
+#butter	master	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	60	off	2.317701	9.150433
+#butter	master	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	140	always	2.506419	9.593633
+#butter	master	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	60	always	2.290572	8.978342
+#butter	master	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	140	off	2.654502	9.884246
+#butter	master	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	100	always	2.306722	9.068723
+#butter	master	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	100	off	2.358598	8.902851
+#butter	master	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	220	always	3.943166	13.509439
+#butter	master	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	180	off	3.174258	10.565613
+#butter	master	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	220	off	4.742506	16.187311
+#butter	master	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	180	always	2.743605	10.419811
+#butter	master	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	60	off	2.294384	8.968889
+#butter	master	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	60	always	2.279385	8.987449
+#butter	master	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	140	off	1.657372	7.777624
+#butter	master	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	100	always	1.544603	7.094898
+#butter	master	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	180	off	2.070349	8.751040
+#butter	master	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	140	always	1.574154	7.074915
+#butter	master	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	100	off	1.525893	6.870199
+#butter	master	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	180	always	1.870589	8.543101
+#butter	master	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	60	off	1.538836	6.890573
+#butter	master	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	100	always	1.528962	7.095935
+#butter	master	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	60	always	1.511914	6.845534
+#butter	master	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	220	always	2.604620	10.955467
+#butter	master	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	100	off	1.563373	7.158708
+#butter	master	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	220	off	2.808570	11.026131
+#butter	master	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	140	always	1.553268	7.060010
+#butter	master	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	180	always	1.645928	8.112403
+#butter	master	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	220	always	1.778109	8.054751
+#butter	master	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	140	off	1.617523	7.320660
+#butter	master	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	180	off	1.814004	7.253112
+#butter	master	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	220	off	2.959578	11.205065
+#butter	master	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	60	always	1.511977	6.808026
+#butter	master	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	140	always	0.726325	3.077210
+#butter	master	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	140	off	0.852357	3.563562
+#butter	master	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	60	off	1.529633	7.164848
+#butter	master	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	100	always	0.627349	2.796016
+#butter	master	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	100	off	0.705212	3.266986
+#butter	master	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	220	always	1.456966	6.052855
+#butter	master	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	60	off	0.751198	3.421394
+#butter	master	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	180	always	0.716971	3.068632
+#butter	master	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	60	always	0.639388	2.856715
+#butter	master	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	180	off	1.210276	5.376598
+#butter	master	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	220	off	2.627771	13.434028
+#butter	master	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	180	always	0.746572	3.192449
+#butter	master	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	140	always	0.705317	3.076061
+#butter	master	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	100	always	0.631428	2.796854
+#butter	master	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	100	off	0.685020	2.861662
+#butter	master	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	140	off	0.800413	3.055994
+#butter	master	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	180	off	1.358868	4.428357
+#butter	master	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	220	always	1.436028	5.144123
+#butter	master	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	60	always	0.639880	2.855626
+#butter	master	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	60	off	0.655818	2.857059
+#butter	master	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	220	off	3.396747	8.842090
+#butter	master	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	100	off	1.226780	3.931714
+#butter	master	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	100	always	1.226813	3.930918
+#butter	master	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	140	always	1.373168	4.408769
+#butter	master	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	180	off	2.267042	10.147769
+#butter	master	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	140	off	1.502448	7.227565
+#butter	master	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	180	always	2.009842	6.477766
+#butter	master	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	220	always	4.166161	18.013985
+#butter	master	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	220	off	4.769408	22.165012
+#butter	master	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	100	off	1.292793	4.111267
+#butter	master	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	60	off	1.198750	3.797365
+#butter	master	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	60	always	1.196601	3.854160
+#butter	master	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	100	always	1.226531	3.815113
+#butter	master	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	140	always	1.353969	4.584279
+#butter	master	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	140	off	1.477977	4.385961
+#butter	master	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	60	always	1.203565	3.868829
+#butter	master	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	220	always	3.840207	13.521936
+#butter	master	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	180	off	2.246364	6.505147
+#butter	master	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	60	off	1.216724	3.741189
+#butter	master	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	180	always	1.997111	7.039282
+#butter	master	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	220	off	4.165312	12.756149
+#butter	master	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	100	always	2.620953	6.543324
+#butter	master	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	140	off	2.664586	6.777847
+#butter	master	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	180	off	2.644989	7.689711
+#butter	master	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	140	always	2.612649	6.667275
+#butter	master	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	180	always	2.634715	6.787059
+#butter	master	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	100	off	2.638066	6.527288
+#butter	master	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	60	off	2.618706	6.407907
+#butter	master	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	60	always	2.617717	6.486116
+#butter	master	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	220	off	3.794393	11.420954
+#butter	master	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	100	always	2.581158	6.328995
+#butter	master	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	220	always	4.015917	14.745575
+#butter	master	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	100	off	2.654240	6.507651
+#butter	master	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	180	off	2.760682	7.134790
+#butter	master	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	140	off	2.618689	6.323394
+#butter	master	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	140	always	2.634193	6.764805
+#butter	master	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	180	always	2.650117	8.371578
+#butter	master	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	220	always	3.874133	13.873568
+#butter	master	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	220	off	4.153425	14.584944
+#butter	master	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	140	always	1.574428	6.178357
+#butter	master	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	100	always	1.328917	4.615911
+#butter	master	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	100	off	1.322784	4.861034
+#butter	master	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	140	off	1.534313	5.979591
+#butter	master	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	60	always	2.652802	6.554904
+#butter	master	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	60	off	2.628979	6.402077
+#butter	master	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	180	off	2.185899	8.540434
+#butter	master	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	60	always	1.242318	4.311305
+#butter	master	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	60	off	1.254340	4.233422
+#butter	master	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	180	always	2.143433	8.998800
+#butter	master	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	220	always	8.038377	43.975372
+#butter	master	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	220	off	3.667947	12.799290
+#butter	master	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	180	always	2.217201	10.336744
+#butter	master	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	140	always	1.600635	7.079355
+#butter	master	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	180	off	2.338061	9.610898
+#butter	master	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	140	off	1.667145	7.336738
+#butter	master	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	100	off	1.356884	4.952185
+#butter	master	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	100	always	1.342350	4.754153
+#butter	master	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	100	off	0.975773	3.541272
+#butter	master	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	100	always	0.895670	3.029197
+#butter	master	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	60	off	1.257533	4.474187
+#butter	master	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	220	off	3.807460	14.200335
+#butter	master	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	60	always	1.285300	4.374670
+#butter	master	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	220	always	3.438414	13.421851
+#butter	master	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	180	always	2.495288	7.338638
+#butter	master	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	220	always	4.438707	12.020545
+#butter	master	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	180	off	2.468964	6.887746
+#butter	master	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	140	always	1.393977	3.785845
+#butter	master	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	220	off	4.458773	12.774791
+#butter	master	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	140	off	1.394410	4.113140
+#butter	master	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	60	always	0.805254	3.317742
+#butter	master	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	140	always	1.413516	4.338051
+#butter	master	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	100	off	0.977626	3.333309
+#butter	master	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	60	off	0.793778	3.198269
+#butter	master	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	100	always	0.982358	3.573484
+#butter	master	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	140	off	1.455986	4.399813
+#butter	master	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	60	always	0.840352	3.424180
+#butter	master	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	180	always	2.461677	6.404704
+#butter	master	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	60	off	0.839128	3.348526
+#butter	master	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	180	off	2.496366	6.777797
+#butter	master	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	220	always	4.519590	13.205562
+#butter	master	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	220	off	4.528686	12.778783
+#butter	master	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	100	always	1.896369	7.190152
+#butter	master	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	100	off	1.839958	7.135462
+#butter	master	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	140	always	1.839871	6.628696
+#butter	master	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	180	always	2.120313	6.732314
+#butter	master	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	180	off	2.171714	6.989884
+#butter	master	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	140	off	1.833594	6.734539
+#butter	master	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	60	off	1.865723	7.148537
+#butter	master	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	100	off	1.886421	7.203681
+#butter	master	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	100	always	1.886796	7.133345
+#butter	master	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	60	always	1.852977	6.978310
+#butter	master	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	220	off	4.128454	13.754110
+#butter	master	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	220	always	4.052560	12.811603
+#butter	master	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	180	off	2.587211	9.116157
+#butter	master	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	140	off	2.079996	7.374327
+#butter	master	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	140	always	1.916245	7.143942
+#butter	master	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	220	off	4.270896	12.572725
+#butter	master	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	220	always	4.178451	14.461360
+#butter	master	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	180	always	2.141553	6.733161
+#butter	master	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	140	off	2.051526	7.443985
+#butter	master	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	140	always	1.981370	7.356050
+#butter	master	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	100	off	1.861530	6.801588
+#butter	master	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	100	always	1.900606	6.974302
+#butter	master	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	60	off	1.869693	6.945603
+#butter	master	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	60	always	1.898410	7.072251
+#butter	master	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	220	always	3.188254	9.419217
+#butter	master	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	180	off	2.338238	7.976305
+#butter	master	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	60	off	1.930938	7.079848
+#butter	master	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	60	always	1.915529	7.017294
+#butter	master	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	180	always	2.218107	8.024618
+#butter	master	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	220	off	3.492915	9.995315
+#butter	master	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	100	off	1.962727	7.190652
+#butter	master	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	180	always	2.111038	7.322745
+#butter	master	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	140	always	1.900927	6.872981
+#butter	master	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	140	off	2.070065	7.096317
+#butter	master	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	100	always	1.903738	6.971074
+#butter	master	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	180	off	2.720364	8.349752
+#butter	master	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	220	off	4.307110	12.282286
+#butter	master	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	220	always	3.214739	10.527513
+#butter	master	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	60	always	1.922703	7.062186
+#butter	master	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	60	off	1.935887	7.060183
+#butter	master	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	100	always	0.946892	2.223670
+#butter	master	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	100	off	0.929744	2.055776
+#butter	master	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	180	off	2.335691	6.498660
+#butter	master	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	220	off	4.401685	12.993942
+#butter	master	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	140	off	1.399146	4.161014
+#butter	master	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	220	always	4.319930	12.577121
+#butter	master	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	140	always	1.340337	3.410962
+#butter	master	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	180	always	2.246186	5.566412
+#butter	master	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	60	off	0.830396	2.088137
+#butter	master	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	60	always	0.821579	1.917629
+#butter	master	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	100	off	1.061690	2.245815
+#butter	master	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	140	off	1.635109	3.880611
+#butter	master	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	100	always	0.991502	2.156962
+#butter	master	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	140	always	1.321009	3.291903
+#butter	master	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	220	off	5.100656	13.348693
+#butter	master	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	180	off	3.099254	11.650414
+#butter	master	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	60	off	0.878899	2.072435
+#butter	master	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	180	always	2.144716	7.216976
+#butter	master	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	220	always	4.465613	12.877344
+#butter	master	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	60	always	0.860772	2.000513
+#butter	master	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	140	always	1.283604	4.340826
+#butter	master	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	100	off	1.238957	4.563416
+#butter	master	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	180	always	1.789187	5.332793
+#butter	master	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	180	off	1.900974	6.010464
+#butter	master	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	140	off	1.291094	4.326771
+#butter	master	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	100	always	1.226522	4.569830
+#butter	master	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	60	off	1.235246	4.465558
+#butter	master	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	100	always	1.233292	4.407385
+#butter	master	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	60	always	1.237331	4.465660
+#butter	master	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	100	off	1.249448	4.315100
+#butter	master	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	220	off	3.521513	10.127517
+#butter	master	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	220	always	3.349020	10.121082
+#butter	master	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	140	always	1.260810	4.199384
+#butter	master	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	180	off	2.358708	7.664280
+#butter	master	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	180	always	1.809139	5.659986
+#butter	master	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	220	off	4.182845	12.223052
+#butter	master	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	220	always	3.544842	11.269355
+#butter	master	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	140	off	1.495080	4.493004
+#butter	master	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	60	always	1.191624	4.263482
+#butter	master	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	60	off	1.224054	4.363069
+#butter	master	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	100	always	0.869328	2.661275
+#butter	master	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	140	always	1.295532	3.654214
+#butter	master	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	100	off	0.864786	2.647080
+#butter	master	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	140	off	1.285425	3.658966
+#butter	master	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	180	always	2.260994	6.795689
+#butter	master	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	180	off	2.281021	7.041427
+#butter	master	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	220	always	4.163942	14.701004
+#butter	master	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	60	always	0.666382	2.216904
+#butter	master	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	60	off	0.671081	2.301740
+#butter	master	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	220	off	4.061783	13.647402
+#butter	master	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	140	always	1.306629	4.008451
+#butter	master	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	100	off	0.857350	2.320588
+#butter	master	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	180	always	2.182779	6.560889
+#butter	master	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	140	off	1.294026	3.807992
+#butter	master	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	100	always	0.856357	2.507038
+#butter	master	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	180	off	2.194144	6.884650
+#butter	master	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	220	off	3.920030	12.994140
+#butter	master	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	220	always	3.986426	13.585477
+#butter	master	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	60	always	0.689650	2.400421
+#butter	master	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	60	off	0.697485	2.484325
+#butter	master	o_7000.png.scale1024x1024	2	100	off	2.421561	7.271867
+#butter	master	o_7000.png.scale1024x1024	2	100	always	2.417025	7.153096
+#butter	master	o_7000.png.scale1024x1024	2	140	off	2.546460	7.587137
+#butter	master	o_7000.png.scale1024x1024	2	180	always	2.996241	11.336075
+#butter	master	o_7000.png.scale1024x1024	2	180	off	3.093356	10.844228
+#butter	master	o_7000.png.scale1024x1024	2	220	off	4.809853	18.327913
+#butter	master	o_7000.png.scale1024x1024	2	140	always	2.440468	7.428553
+#butter	master	o_7000.png.scale1024x1024	2	220	always	4.135726	15.514186
+#butter	master	o_7000.png.scale1024x1024	2	60	always	2.411189	7.108576
+#butter	master	o_7000.png.scale1024x1024	2	60	off	2.412214	7.125000
+#butter	master	o_7000.png.scale1024x1024	6	100	always	2.420505	7.176650
+#butter	master	o_7000.png.scale1024x1024	6	140	always	2.437130	7.231200
+#butter	master	o_7000.png.scale1024x1024	6	100	off	2.460542	7.230774
+#butter	master	o_7000.png.scale1024x1024	6	140	off	2.612833	7.655748
+#butter	master	o_7000.png.scale1024x1024	6	60	always	2.411587	7.064856
+#butter	master	o_7000.png.scale1024x1024	6	180	always	2.536717	9.340662
+#butter	master	o_7000.png.scale1024x1024	6	220	always	3.844837	16.070835
+#butter	master	o_7000.png.scale1024x1024	6	180	off	3.327203	8.526418
+#butter	master	o_7000.png.scale1024x1024	6	220	off	5.711944	13.904102
+#butter	master	o_7000.png.scale1024x1024	6	60	off	2.416160	7.185395
+#butter	master	o_7001.png.scale1024x1024	2	140	off	2.628554	9.024863
+#butter	master	o_7001.png.scale1024x1024	2	100	off	2.363922	8.050726
+#butter	master	o_7001.png.scale1024x1024	2	180	off	2.689908	9.550965
+#butter	master	o_7001.png.scale1024x1024	2	100	always	2.420393	8.477157
+#butter	master	o_7001.png.scale1024x1024	2	180	always	2.500672	9.034608
+#butter	master	o_7001.png.scale1024x1024	2	140	always	2.501352	8.689231
+#butter	master	o_7001.png.scale1024x1024	2	60	off	2.439635	8.542906
+#butter	master	o_7001.png.scale1024x1024	2	220	always	3.200777	12.852634
+#butter	master	o_7001.png.scale1024x1024	2	60	always	2.440570	8.505141
+#butter	master	o_7001.png.scale1024x1024	6	100	always	2.389586	8.022591
+#butter	master	o_7001.png.scale1024x1024	2	220	off	4.095490	14.957828
+#butter	master	o_7001.png.scale1024x1024	6	100	off	2.478637	8.300366
+#butter	master	o_7001.png.scale1024x1024	6	220	always	2.908240	12.319325
+#butter	master	o_7001.png.scale1024x1024	6	140	always	2.392460	7.948597
+#butter	master	o_7001.png.scale1024x1024	6	180	always	2.414171	7.818581
+#butter	master	o_7001.png.scale1024x1024	6	220	off	5.766007	16.775295
+#butter	master	o_7001.png.scale1024x1024	6	140	off	2.635742	8.325409
+#butter	master	o_7001.png.scale1024x1024	6	180	off	3.417144	10.081114
+#butter	master	o_7001.png.scale1024x1024	6	60	always	2.397194	8.164642
+#butter	master	o_7001.png.scale1024x1024	6	60	off	2.442552	8.465878
+#butter	master	o_7002.png.scale1024x1024	2	140	always	2.252688	8.785478
+#butter	master	o_7002.png.scale1024x1024	2	100	always	2.127579	7.499651
+#butter	master	o_7002.png.scale1024x1024	2	140	off	2.406932	9.425296
+#butter	master	o_7002.png.scale1024x1024	2	100	off	2.132076	7.353304
+#butter	master	o_7002.png.scale1024x1024	2	60	off	2.111972	7.153025
+#butter	master	o_7002.png.scale1024x1024	2	180	off	2.741607	9.886347
+#butter	master	o_7002.png.scale1024x1024	2	60	always	2.116491	7.253392
+#butter	master	o_7002.png.scale1024x1024	2	180	always	2.579452	10.573753
+#butter	master	o_7002.png.scale1024x1024	2	220	off	4.652890	15.641550
+#butter	master	o_7002.png.scale1024x1024	2	220	always	4.542653	20.064878
+#butter	master	o_7002.png.scale1024x1024	6	100	always	2.124518	7.423405
+#butter	master	o_7002.png.scale1024x1024	6	140	always	2.164676	7.447486
+#butter	master	o_7002.png.scale1024x1024	6	180	always	2.317758	7.891858
+#butter	master	o_7002.png.scale1024x1024	6	100	off	2.172332	7.053054
+#butter	master	o_7002.png.scale1024x1024	6	140	off	2.388280	7.232517
+#butter	master	o_7002.png.scale1024x1024	6	180	off	3.293802	7.695032
+#butter	master	o_7002.png.scale1024x1024	6	220	always	4.083121	17.645248
+#butter	master	o_7002.png.scale1024x1024	6	60	always	2.099879	7.039036
+#butter	ws2	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	100	always	0.879727	2.048305
+#butter	ws2	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	140	always	1.502743	3.380289
+#butter	master	o_7002.png.scale1024x1024	6	220	off	5.851437	16.170364
+#butter	master	o_7002.png.scale1024x1024	6	60	off	2.111471	6.862594
+#butter	ws2	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	180	always	2.748970	6.702101
+#butter	ws2	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	220	always	5.024794	16.245291
+#butter	ws2	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	140	always	1.519757	3.347642
+#butter	ws2	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	180	always	2.750466	6.716226
+#butter	ws2	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	100	always	0.900271	1.918158
+#butter	ws2	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	2	60	always	0.579137	1.271404
+#butter	ws2	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	180	always	2.815456	8.982492
+#butter	ws2	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	220	always	4.847169	11.990449
+#butter	ws2	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	100	always	1.128911	2.926053
+#butter	ws2	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	140	always	1.606835	3.829239
+#butter	ws2	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	220	always	8.403587	40.423222
+#butter	ws2	1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024	6	60	always	0.604397	1.539789
+#butter	ws2	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	2	60	always	0.881663	2.838549
+#butter	ws2	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	140	always	1.600013	3.998938
+#butter	ws2	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	180	always	2.686144	7.737424
+#butter	ws2	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	60	always	0.893100	2.833879
+#butter	ws2	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	220	always	4.574066	12.530464
+#butter	ws2	1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024	6	100	always	1.138077	2.798827
+#butter	ws2	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	100	always	0.960366	2.471228
+#butter	ws2	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	220	always	4.364999	14.461845
+#butter	ws2	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	60	always	0.736530	2.152377
+#butter	ws2	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	140	always	1.568575	3.975540
+#butter	ws2	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	100	always	0.968850	2.449478
+#butter	ws2	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	2	180	always	2.585283	8.223729
+#butter	ws2	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	140	always	1.524356	6.025489
+#butter	ws2	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	100	always	1.514111	6.388678
+#butter	ws2	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	140	always	1.504186	4.046614
+#butter	ws2	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	220	always	4.404882	14.852053
+#butter	ws2	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	180	always	2.490303	6.555529
+#butter	ws2	2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024	6	60	always	0.726648	2.022603
+#butter	ws2	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	100	always	1.496276	6.216255
+#butter	ws2	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	220	always	3.741310	14.457108
+#butter	ws2	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	140	always	1.592841	6.275208
+#butter	ws2	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	180	always	2.223982	8.596561
+#butter	ws2	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	180	always	2.142338	7.974392
+#butter	ws2	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	2	60	always	1.448261	6.033273
+#butter	ws2	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	60	always	1.474993	6.212938
+#butter	ws2	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	220	always	3.794814	10.080535
+#butter	ws2	5318_noaa_nhc-al072022-fiona_p21_2550x3300.sdr.full.s1024	6	220	always	3.756860	12.700001
+#butter	ws2	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	140	always	0.941101	3.196594
+#butter	ws2	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	180	always	1.718812	5.234463
+#butter	ws2	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	100	always	0.624295	2.132457
+#butter	ws2	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	180	always	1.741199	5.284988
+#butter	ws2	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	2	60	always	0.452206	1.491276
+#butter	ws2	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	60	always	0.472986	1.684610
+#butter	ws2	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	140	always	0.971394	3.903298
+#butter	ws2	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	100	always	0.629462	2.004031
+#butter	ws2	6070_scans-patents_lynn-conway-us5046022-rescan-gray_p012_2479x3230.sdr.full.s1024	6	220	always	4.290455	12.113352
+#butter	ws2	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	180	always	2.864904	11.310885
+#butter	ws2	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	100	always	2.276265	9.063780
+#butter	ws2	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	100	always	2.275123	9.063785
+#butter	ws2	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	60	always	2.272123	9.063779
+#butter	ws2	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	140	always	2.284104	9.063630
+#butter	ws2	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	2	220	always	3.737641	14.219442
+#butter	ws2	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	100	always	1.500840	6.793551
+#butter	ws2	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	140	always	1.523728	6.819978
+#butter	ws2	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	60	always	2.270463	9.063787
+#butter	ws2	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	180	always	2.856095	11.314510
+#butter	ws2	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	140	always	2.281922	9.064244
+#butter	ws2	7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024	6	220	always	3.540795	14.074383
+#butter	ws2	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	140	always	1.503261	6.811008
+#butter	ws2	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	180	always	1.483215	6.657670
+#butter	ws2	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	180	always	1.696020	8.092841
+#butter	ws2	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	60	always	1.513157	6.809996
+#butter	ws2	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	2	220	always	2.489054	11.471416
+#butter	ws2	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	100	always	1.496285	6.794430
+#butter	ws2	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	140	always	0.683732	2.909824
+#butter	ws2	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	180	always	0.660940	2.897340
+#butter	ws2	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	100	always	0.620675	2.738433
+#butter	ws2	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	60	always	1.500971	6.816506
+#butter	ws2	7050_plots_line-00166-s010fb6d2_1024x1024.sdr.full.native	6	220	always	1.638951	7.714133
+#butter	ws2	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	220	always	1.387067	6.032218
+#butter	ws2	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	220	always	1.412597	5.011211
+#butter	ws2	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	60	always	0.631333	2.737611
+#butter	ws2	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	140	always	0.669911	2.898297
+#butter	ws2	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	180	always	0.672000	2.885512
+#butter	ws2	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	2	60	always	0.625627	2.737123
+#butter	ws2	7052_plots_line-00222-s2f495179_1024x1024.sdr.full.native	6	100	always	0.624521	2.737712
+#butter	ws2	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	180	always	3.025374	14.747543
+#butter	ws2	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	140	always	1.348454	4.208701
+#butter	ws2	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	220	always	3.889765	14.257003
+#butter	ws2	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	100	always	1.224067	3.901898
+#butter	ws2	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	100	always	1.218551	3.794542
+#butter	ws2	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	2	60	always	1.197853	3.901392
+#butter	ws2	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	100	always	2.627930	6.542630
+#butter	ws2	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	140	always	2.748305	6.872944
+#butter	ws2	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	180	always	1.928271	6.842327
+#butter	ws2	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	140	always	1.334593	4.603711
+#butter	ws2	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	60	always	1.198582	3.853471
+#butter	ws2	7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024	6	220	always	3.832473	13.527887
+#butter	ws2	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	60	always	2.640611	6.385400
+#butter	ws2	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	180	always	2.768878	7.365999
+#butter	ws2	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	180	always	2.734612	7.264860
+#butter	ws2	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	140	always	2.698800	6.858963
+#butter	ws2	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	100	always	2.595332	6.356740
+#butter	ws2	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	2	220	always	3.846837	13.586339
+#butter	ws2	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	140	always	1.589539	6.905065
+#butter	ws2	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	220	always	3.770043	14.238013
+#butter	ws2	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	100	always	1.277315	4.293877
+#butter	ws2	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	180	always	2.072943	9.307476
+#butter	ws2	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	60	always	2.622386	6.380170
+#butter	ws2	7064_plots_line-concentric-00230-s6a3b9505_1024x1024.sdr.full.native	6	220	always	3.927308	14.113454
+#butter	ws2	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	2	60	always	1.211328	4.001974
+#butter	ws2	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	140	always	1.347509	4.812779
+#butter	ws2	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	220	always	3.277803	12.168959
+#butter	ws2	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	100	always	1.313176	4.544158
+#butter	ws2	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	60	always	1.239576	4.220125
+#butter	ws2	7080_plots_line-polygons-00081-s68404bb1_1024x1024.sdr.full.native	6	180	always	2.119004	9.856780
+#butter	ws2	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	180	always	2.495288	7.338638
+#butter	ws2	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	220	always	4.648534	14.741150
+#butter	ws2	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	100	always	0.978058	3.629008
+#butter	ws2	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	140	always	1.408149	4.159484
+#butter	ws2	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	100	always	0.950134	3.320401
+#butter	ws2	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	2	60	always	0.805254	3.317742
+#butter	ws2	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	100	always	1.873637	7.123737
+#butter	ws2	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	60	always	0.803107	3.266339
+#butter	ws2	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	180	always	2.453453	6.412579
+#butter	ws2	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	140	always	1.893178	7.298028
+#butter	ws2	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	140	always	1.445390	4.569433
+#butter	ws2	8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.full.s1024	6	220	always	4.441294	12.132559
+#butter	ws2	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	60	always	1.857117	7.012948
+#butter	ws2	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	180	always	2.132702	6.821013
+#butter	ws2	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	220	always	4.017679	12.919417
+#butter	ws2	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	100	always	1.892072	7.153136
+#butter	ws2	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	140	always	1.882909	7.024092
+#butter	ws2	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	2	180	always	2.165938	6.844641
+#butter	ws2	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	140	always	1.969402	7.203336
+#butter	ws2	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	180	always	2.081894	7.226395
+#butter	ws2	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	100	always	1.910952	6.990783
+#butter	ws2	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	220	always	3.175032	8.990561
+#butter	ws2	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	60	always	1.886691	7.045483
+#butter	ws2	8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024	6	220	always	4.158619	14.474828
+#butter	ws2	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	2	60	always	1.911772	7.014318
+#butter	ws2	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	100	always	1.914910	6.999117
+#butter	ws2	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	140	always	1.935263	7.043434
+#butter	ws2	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	180	always	2.125703	7.479465
+#butter	ws2	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	220	always	3.380728	10.924481
+#butter	ws2	8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024	6	60	always	1.913130	7.014429
+#butter	ws2	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	60	always	0.820268	1.931637
+#butter	ws2	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	100	always	0.933068	2.000711
+#butter	ws2	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	140	always	1.322703	3.833030
+#butter	ws2	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	220	always	4.319930	12.577121
+#butter	ws2	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	100	always	0.994910	2.280797
+#butter	ws2	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	2	180	always	2.240500	5.902527
+#butter	ws2	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	140	always	1.252848	4.312303
+#butter	ws2	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	100	always	1.226470	4.569028
+#butter	ws2	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	60	always	0.856873	2.019283
+#butter	ws2	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	180	always	2.150170	7.215865
+#butter	ws2	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	220	always	4.465613	12.877344
+#butter	ws2	8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024	6	140	always	1.325178	3.270670
+#butter	ws2	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	180	always	1.805042	5.353710
+#butter	ws2	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	180	always	1.807694	5.659976
+#butter	ws2	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	60	always	1.236617	4.465635
+#butter	ws2	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	2	220	always	3.376618	10.626838
+#butter	ws2	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	100	always	1.235742	4.402526
+#butter	ws2	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	140	always	1.253341	4.223536
+#butter	ws2	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	60	always	1.189643	4.262273
+#butter	ws2	8464_web-screenshots_weather-forecast-nyc_dpr1_page1_667x375.sdr.full.native	6	220	always	3.532658	11.057147
+#butter	ws2	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	140	always	1.295581	3.817457
+#butter	ws2	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	180	always	2.327365	8.177550
+#butter	ws2	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	100	always	0.869328	2.661275
+#butter	ws2	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	220	always	4.109894	13.749525
+#butter	ws2	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	2	60	always	0.666576	2.239664
+#butter	ws2	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	60	always	0.695718	2.434397
+#butter	ws2	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	140	always	1.286758	3.645824
+#butter	ws2	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	220	always	3.958869	13.750026
+#butter	ws2	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	180	always	2.199722	6.503093
+#butter	ws2	9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024	6	100	always	0.858765	2.443869
+#butter	ws2	o_7000.png.scale1024x1024	2	100	always	2.415778	7.090839
+#butter	ws2	o_7000.png.scale1024x1024	2	140	always	2.439039	7.518950
+#butter	ws2	o_7000.png.scale1024x1024	2	220	always	3.929447	15.763543
+#butter	ws2	o_7000.png.scale1024x1024	2	180	always	2.607121	8.864442
+#butter	ws2	o_7000.png.scale1024x1024	2	60	always	2.413110	7.090431
+#butter	ws2	o_7000.png.scale1024x1024	6	100	always	2.415399	7.091550
+#butter	ws2	o_7001.png.scale1024x1024	2	100	always	2.406680	8.437322
+#butter	ws2	o_7001.png.scale1024x1024	2	140	always	2.425357	8.177625
+#butter	ws2	o_7000.png.scale1024x1024	6	60	always	2.411502	7.091168
+#butter	ws2	o_7000.png.scale1024x1024	6	180	always	2.532542	8.637511
+#butter	ws2	o_7000.png.scale1024x1024	6	140	always	2.441449	7.517191
+#butter	ws2	o_7000.png.scale1024x1024	6	220	always	4.103349	15.643182
+#butter	ws2	o_7001.png.scale1024x1024	6	100	always	2.403049	8.294425
+#butter	ws2	o_7001.png.scale1024x1024	6	140	always	2.415546	8.187622
+#butter	ws2	o_7001.png.scale1024x1024	2	60	always	2.405197	8.294496
+#butter	ws2	o_7001.png.scale1024x1024	2	180	always	2.435959	9.052807
+#butter	ws2	o_7001.png.scale1024x1024	6	180	always	2.425936	8.180252
+#butter	ws2	o_7001.png.scale1024x1024	2	220	always	3.101412	12.034938
+#butter	ws2	o_7001.png.scale1024x1024	6	220	always	3.147029	13.115071
+#butter	ws2	o_7001.png.scale1024x1024	6	60	always	2.407146	8.292313
+#butter	ws2	o_7002.png.scale1024x1024	2	100	always	2.107070	7.050313
+#butter	ws2	o_7002.png.scale1024x1024	2	140	always	2.236241	8.944252
+#butter	ws2	o_7002.png.scale1024x1024	2	180	always	2.814255	12.690266
+#butter	ws2	o_7002.png.scale1024x1024	2	220	always	4.280513	19.163403
+#butter	ws2	o_7002.png.scale1024x1024	6	60	always	2.100736	7.018247
+#butter	ws2	o_7002.png.scale1024x1024	6	100	always	2.110840	7.050307
+#butter	ws2	o_7002.png.scale1024x1024	6	140	always	2.130034	7.050234
+#butter	ws2	o_7002.png.scale1024x1024	2	60	always	2.101137	7.052414
+#butter	ws2	o_7002.png.scale1024x1024	6	180	always	2.897838	13.617197
+#butter	ws2	o_7002.png.scale1024x1024	6	220	always	4.229645	19.017784
