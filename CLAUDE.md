@@ -233,6 +233,24 @@ for smooth photos (train26 5004_nps −15.0% at str2). **At the zenrav1e dep
 bump:** nothing extra to wire beyond the tune itself (the boost rides
 `Tune::Ssimulacra2`); re-run the QM benchmark note below still applies.
 
+### zenrav1e encoder-recon desyncs: filter-intra (#33) + LRF sgr-skip (#32) — FIXED upstream 2026-07-03, release-gated
+zenrav1e#33: filter-intra blocks got DC_PRED's edge prep (topleft=128, no left
+at x==0) and read the left edge upside-down — encoder recon diverged from
+aomdec/rav1d-safe by 17-25 luma RMSE at rav1e speeds ≤6 (fixed
+zenrav1e@32477046; recon now byte-agrees, 120/120 train26 conformance cells).
+zenrav1e#32 as reported was this same bug misattributed (bisect skipped s7;
+LRF byte-exact on 27 isolation cells); one real latent class — signaled
+sgrproj unapplied to recon at cdef-off+lrf-on (API-only) — fixed
+zenrav1e@17cff82f (probe: examples/recon_probe.rs). **cavif/zenravif were
+never exposed**: ravif pins complex_prediction_modes=Some(false) →
+filter-intra sequence-off at every speed, so cavif encodes are byte-identical
+across the fixes — no rd_gap history invalidated, tier-2 recovery 0.00%.
+Arming filter-intra post-fix was measured and REJECTED (+1.82% ssim2 med,
+ba3n veto, 1.70× time; `benchmarks/rd_gap_desyncfix_2026-07-03.tsv`) — the
+old "12 dB regression" (zenrav1e#5) was the desync, the pin stays on RD
+grounds. No zenavif-side action at the dep bump (decode path unaffected;
+encode bytes unchanged).
+
 ### zenrav1e QM encodes diverged from conforming decoders — FIXED upstream, release-gated
 Two composing bugs (zenrav1e#29, both fixed on master 2026-07-02) made
 `enable_qm=true` encodes decode differently than the encoder's own

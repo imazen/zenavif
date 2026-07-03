@@ -1,0 +1,41 @@
+# zenrav1e#32/#33 encoder-recon desync fixes -- measurement close-out -- 2026-07-03 -- local host (7950X), analysis host lilith
+# zenrav1e: pre-fix base=master 9b79b442; fixes landed 32477046 (#33 filter-intra edge prep + left-column orientation) + 17cff82f (#32 sgrproj cdef-off skip; adds examples/recon_probe.rs) + changelog c9c2d5f7
+# harness: cavif --depth 8 + ZENRAVIF_TUNE=ssimulacra2 (ravif dev-patch in throwaway workspace ravif--desynctune, never committed), train26 corpus (24 TRAIN origins), full Q{30,40,50,55,60,65,70,75,80,85,90,95}, JOBS=6, RD_CACHE=off, fast-ssim2 + butteraugli(3n,max); fi-on arm adds ZENRAVIF_FILTER_INTRA=1 -> SpeedSettings.prediction.filter_intra=Some(true)
+# raw sweeps: /mnt/v/output/zenavif/desyncfix-2026-07-03/ (SHA256SUMS inside; includes the 120-cell + 45-cell conformance TSVs)
+#
+# === HEADLINE: the shipped cavif config is BYTE-NEUTRAL across both fixes -- no rd_gap history is invalidated ===
+# ravif pins complex_prediction_modes=Some(false) -> PredictionModesSetting::Simple -> enable_filter_intra=false at the
+# sequence level at EVERY speed (ravif/src/av1encoder.rs:1590, commit f07d552) -- issue #33's "ravif does NOT disable
+# filter intra" exposure claim was wrong. cavif s2+tune encodes byte-identical pre-fix vs post-fix: 8/8 spot cells
+# (1236/5048/5004 x Q30/50/60/75) + probe cells; the shipped arm below therefore serves BOTH lineages.
+# The #32 sgr-skip only fires at cdef-off+lrf-on (API-only config; ravif keeps cdef on wherever lrf is on).
+# => free win for shipped cavif: 0.00%; tier-2 residual recovered by the fixes: 0.00% (tier-2 numbers stand as committed).
+#
+# === desync verification (the issues' own metric: encoder recon vs conforming decoders, luma RMSE) ===
+# case	pre-fix	post-fix
+# #33 repro 1236 q60 still --lrf false, s2/s4/s6	17.5/24.7/25.2	0.000/0.000/0.000
+# #33 rav1d-safe cross-check s2/s4/s6 (all planes)	--	0.000 (byte-agree with aomdec AND recon)
+# #32-as-reported 5048 s2 q100 (fi ON + lrf ON)	4.281 (45.6 in issue, pre-b30dd752)	0.000
+# #32 isolation: fi OFF + lrf ON (27 cells: 3img x s0/s2/s6 x q140/200/240, pre-fix binary)	all 0.000	(LRF exonerated -- reported repro was #33; bisect skipped s7)
+# #32 latent class: cdef=0 lrf=1 via API (recon_probe), 5048 q140/q200	0.387/0.580	0.000 (also 1236+6606, vs aomdec AND rav1d-safe)
+# feature-off byte-identity: --filter-intra false s2/s6 x 2img	byte-identical	(fix is a no-op with the tool off)
+# cdef-on byte-identity across #32 fix: 2 cells	byte-identical	(removed branch never fired)
+#
+# === conformance (rav1e binary s2 defaults = filter-intra ON, 24 train26 images x Q{25,64,102,127,178}) ===
+# 120/120 aomdec-clean; 120/120 recon==aomdec; 120/120 recon==rav1d-safe (45 odd-dim cells re-run after a
+# harness-side chroma-ceil tooling fix; the codec was never at fault)
+#
+# === re-measurement sweeps (train26, s2+tune, full 12-q grid, direct BD; negative = arm needs fewer bits) ===
+# arm	ssim2_med	ssim2_mean	ssim2_better	ba3n_med	bamax_med	time_ratio	verdict
+# shipped(post-fix) vs qmdist committed full_t26_s2_win	-0.7194	-1.6885	20/24	-0.4417	-1.3803	(cross-lineage)	lineage continuity: delta is the intervening b30dd752 skip-recon landing (1/288 cells byte-exact), NOT these fixes
+# fi-on vs shipped (same cavif-fix binary, env-armed)	+1.8224	+1.9717	2/24	+1.3260	-0.5381	1.696x	REJECTED: arming filter-intra regresses ssim2 AND trips the ba3n veto (+1.0%) at 1.7x time; stays off by policy
+#
+# fi-on per-family (ssim2 med): 1200 +1.74 | 1400 +1.91 | 1600 +3.99 | 2000 +3.04 | 5000(smooth photos) +1.51 |
+#   6000 +1.89 | 6600 +0.61 | 7000(plots) +1.88 (7052 -2.53 only clear winner) | 8100 +2.05 | 9000 +3.29 |
+#   9094 +1.57 | 9226 +3.31 -- the tool loses everywhere incl. the smooth-photo families the desync theory hoped to rescue
+#
+# === the unlock the fixes DO deliver ===
+# spot (5048 gray q60 s2+tune, filter-intra armed): ssim2 59.50 pre-fix -> 75.11 post-fix (shipped fi-off 75.00).
+# ravif's "12 dB PSNR regression / broken cost estimation" (zenrav1e#5) that forced the complex_prediction_modes pin
+# WAS this desync; the tool is now correctly evaluable -- and correctly rejected on RD grounds at s2+tune.
+# rav1e-binary/API users at s<=6 get the real fix: their recon (and hence RDO) no longer diverges from decoders.

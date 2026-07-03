@@ -843,6 +843,59 @@ sharpness≠0) — NOT ported; closest prior art is the measured-rejected sharpn
 trellis surface. Raw sweeps: `/mnt/v/output/zenavif/lfsharp-2026-07-03/` +
 `benchmarks/rd_gap_lfsharp_2026-07-03.tsv`.
 
+## Fixed 2026-07-03: zenrav1e#32/#33 encoder-recon desyncs — shipped-config NEUTRALITY verified, filter-intra measured and REJECTED
+
+**The fixes** (zenrav1e `32477046` #33 filter-intra, `17cff82f` #32 LRF, changelog
+`c9c2d5f7`): filter-intra blocks got DC_PRED's edge preparation (top-left corner fed 128
+instead of the recon pixel; empty left column at x==0) AND read the bottom-to-top left
+edge buffer upside-down — every filter-intra block's prediction diverged from conforming
+decoders, compounding to 17-25 luma RMSE at rav1e speeds ≤ 6. The issue-#32 LRF report
+was this same bug misattributed (its speed bisect jumped s6→s8; the missing s7 rung —
+LRF on, filter-intra off — measures 0.000, and LRF application is byte-exact on 27
+isolation cells). One real latent LRF desync existed and is fixed: an inherited 2019
+skip left *signaled* sgrproj units unapplied in the recon for cdef-off+lrf-on configs
+(API-only; RMSE 0.387-0.580 → 0.000, measured via the new zenrav1e
+`examples/recon_probe.rs`). Desync metric at the shipped fixes: **0.000 luma RMSE
+recon-vs-aomdec-vs-rav1d-safe** on the repro corpus (s2/s4/s6/s0) and 120/120 train26
+conformance cells (rav1e s2 defaults = filter-intra ON, Q{25,64,102,127,178}).
+
+**The headline for THIS program: cavif was never exposed — every rd_gap number stands.**
+ravif pins `complex_prediction_modes: Some(false)` → `PredictionModesSetting::Simple` →
+`enable_filter_intra = false` at every speed (`ravif/src/av1encoder.rs:1590`, f07d552),
+and its lrf-on configs keep cdef on. cavif s2+tune encodes are **byte-identical between
+pre-fix and post-fix zenrav1e** (8/8 spot cells + sweep-level). Issue #33's exposure
+claim ("ravif does NOT disable filter intra — rd_gap photo measurements systematically
+pessimistic on smooth content") was **wrong**; the free win for the shipped config is
+**0.00%, and the tier-2 residual recovered by these fixes is 0.00%**. (In the LF-sharpness
+section's baseline-lineage note above, the +2.12 → −1.54 tier-2 move belongs to the
+same-day **palette + skip-recon (b30dd752)** landings — measured here as −0.72% median
+ssim2 on train26 via lineage continuity (1/288 cells byte-exact vs the qmdist committed
+arm) — NOT to the desync fixes, which are byte-neutral for cavif.)
+
+**Filter-intra, measured honestly for the first time and REJECTED** (train26, s2+tune,
+full 12-q grid, direct isolation, `ZENRAVIF_FILTER_INTRA=1` dev-arm forcing
+`prediction.filter_intra = Some(true)`):
+
+| arm | ssim2 med / mean / better | ba3n med | bamax med | time |
+|---|---|---|---|---|
+| fi-on vs shipped | **+1.82% / +1.97% / 2/24** | +1.33% (veto: >+1.0%) | −0.54% | 1.70× |
+
+Worse on 22/24 images including the smooth-photo families the desync theory hoped to
+rescue (fam 5000 +1.51% med; 5004 +1.72, 5048 +1.31); only 7052 (line plot) clearly wins
+(−2.53). ravif's historical "ComplexAll causes 12 dB PSNR regression" (zenrav1e#5) **was
+the desync** — spot: 5048 q60 fi-on ssim2 59.50 pre-fix → 75.11 post-fix (shipped
+75.00) — but with correct predictions the tool is still a net RD loss at s2+tune and
+**stays off by measured policy, not by workaround**. The `complex_prediction_modes`
+pin's justification in ravif should cite this measurement going forward. Who the fixes
+DO help: `rav1e`-binary/API users at s ≤ 6 (recon and RDO no longer diverge from what
+decoders produce) and any future config that arms cdef-off+lrf-on.
+
+Data: `benchmarks/rd_gap_desyncfix_2026-07-03.tsv` +
+`/mnt/v/output/zenavif/desyncfix-2026-07-03/` (both sweep arms, conformance TSVs,
+SHA256SUMS). zenrav1e#5 can close against the fi-on measurement; `tests/
+trellis_roundtrip.rs`'s loose `PSNR > 10` gate ("rav1d-safe is not bit-exact...") can
+now be tightened — the inexactness was these encoder bugs, not rav1d-safe.
+
 ## RULED OUT, 2026-07-01: `BLOCK_32X32`/`BLOCK_64X64` at 0% usage — explained, not a bug, widening regresses
 
 Same inspect-diff methodology surfaced a second block-size anomaly: `BLOCK_32X32` and
