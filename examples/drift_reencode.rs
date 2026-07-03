@@ -30,8 +30,8 @@ use std::time::Instant;
 
 use imgref::ImgRef;
 use rgb::Rgb;
-use zenavif::sweep::{QualityGrid, SweepAxes, SweepBuilder, SweepCell};
 use zenavif::DecoderConfig;
+use zenavif::sweep::{QualityGrid, SweepAxes, SweepBuilder, SweepCell};
 
 const Q_GRID: [f32; 7] = [5.0, 15.0, 30.0, 50.0, 70.0, 85.0, 95.0];
 const PLAN_BUDGET: usize = 400;
@@ -199,7 +199,11 @@ fn main() {
     let mut results = results.into_inner().unwrap();
     results.sort_by_key(|(i, _)| *i);
     let mut f = std::fs::File::create(&out).expect("create out tsv");
-    writeln!(f, "{header}\tleg\tnew_bytes\tnew_encode_ms\tnew_decode_ms\tnew_ssim2\terr").unwrap();
+    writeln!(
+        f,
+        "{header}\tleg\tnew_bytes\tnew_encode_ms\tnew_decode_ms\tnew_ssim2\terr"
+    )
+    .unwrap();
     for (_, line) in &results {
         writeln!(f, "{line}").unwrap();
     }
@@ -229,10 +233,13 @@ fn run_row(
         r.rest.join("\t")
     );
     match encode_score(r, by_cell_q, png_cache, leg, encoded_dir) {
-        Ok((bytes, enc_ms, dec_ms, ssim2)) => format!(
-            "{passthrough}\t{leg}\t{bytes}\t{enc_ms:.3}\t{dec_ms:.3}\t{ssim2:.6}\t"
+        Ok((bytes, enc_ms, dec_ms, ssim2)) => {
+            format!("{passthrough}\t{leg}\t{bytes}\t{enc_ms:.3}\t{dec_ms:.3}\t{ssim2:.6}\t")
+        }
+        Err(e) => format!(
+            "{passthrough}\t{leg}\t0\t0\t0\tnan\t{}",
+            e.replace('\t', " ")
         ),
-        Err(e) => format!("{passthrough}\t{leg}\t0\t0\t0\tnan\t{}", e.replace('\t', " ")),
     }
 }
 
@@ -270,8 +277,12 @@ fn encode_score(
     // Decode + narrow to RGB8 exactly like zenmetrics' decode_avif +
     // pixel_slice_to_rgb8 (threads(1); RowConverter to RGB8_SRGB).
     let t = Instant::now();
-    let buf = zenavif::decode_with(&avif, &DecoderConfig::new().threads(1), &enough::Unstoppable)
-        .map_err(|e| format!("decode: {e}"))?;
+    let buf = zenavif::decode_with(
+        &avif,
+        &DecoderConfig::new().threads(1),
+        &enough::Unstoppable,
+    )
+    .map_err(|e| format!("decode: {e}"))?;
     let dec = {
         use zenpixels::PixelDescriptor;
         use zenpixels_convert::converter::RowConverter;

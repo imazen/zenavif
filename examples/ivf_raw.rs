@@ -52,7 +52,10 @@ fn decode_all(data: &[u8]) -> Result<Frame, String> {
     if let Ok(mut fl) = dec.flush() {
         frames.append(&mut fl);
     }
-    frames.into_iter().last().ok_or_else(|| "no frames decoded".into())
+    frames
+        .into_iter()
+        .last()
+        .ok_or_else(|| "no frames decoded".into())
 }
 
 fn main() -> ExitCode {
@@ -76,7 +79,10 @@ fn main() -> ExitCode {
         }
     };
     if frame.bit_depth() != 8 {
-        eprintln!("FAIL {input}: bit depth {} unsupported (8-bit only)", frame.bit_depth());
+        eprintln!(
+            "FAIL {input}: bit depth {} unsupported (8-bit only)",
+            frame.bit_depth()
+        );
         return ExitCode::FAILURE;
     }
     let (w, h) = (frame.width() as usize, frame.height() as usize);

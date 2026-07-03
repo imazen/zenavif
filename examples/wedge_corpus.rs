@@ -59,8 +59,12 @@ fn parse_picks(path: &Path) -> Result<Vec<Pick>, String> {
         let l = line.trim();
         let grab = |l: &str, key: &str| -> Option<String> {
             let pat = format!("\"{key}\":");
-            l.strip_prefix(&pat)
-                .map(|rest| rest.trim().trim_end_matches(',').trim_matches('"').to_string())
+            l.strip_prefix(&pat).map(|rest| {
+                rest.trim()
+                    .trim_end_matches(',')
+                    .trim_matches('"')
+                    .to_string()
+            })
         };
         if let Some(v) = grab(l, "image_path") {
             ip = Some(v);
@@ -172,7 +176,9 @@ fn main() -> ExitCode {
     let query = AnalysisQuery::new(FeatureSet::SUPPORTED);
     let cols: Vec<AnalysisFeature> = FeatureSet::SUPPORTED.iter().collect();
 
-    let mut map = String::from("file\torigin_path\torigin_id\tcontent_class\tfamily\tcrop_label\tsize_class\twidth\theight\n");
+    let mut map = String::from(
+        "file\torigin_path\torigin_id\tcontent_class\tfamily\tcrop_label\tsize_class\twidth\theight\n",
+    );
     // (pixels, sample-row) for descending-pixel scheduling order
     let mut sample_rows: Vec<(u64, String)> = Vec::new();
     let mut cpu0_rows: Vec<(u64, String)> = Vec::new();
@@ -183,7 +189,10 @@ fn main() -> ExitCode {
     verify.push('\n');
 
     for p in &picks {
-        let img = match ImageReader::open(&p.image_path).map_err(|e| e.to_string()).and_then(|r| r.decode().map_err(|e| e.to_string())) {
+        let img = match ImageReader::open(&p.image_path)
+            .map_err(|e| e.to_string())
+            .and_then(|r| r.decode().map_err(|e| e.to_string()))
+        {
             Ok(i) => i,
             Err(e) => {
                 eprintln!("DECODE FAIL {}: {e}", p.image_path.display());
@@ -213,8 +222,16 @@ fn main() -> ExitCode {
                 let resized = resize_to_maxdim(&variant, target);
                 let (rw, rh) = resized.dimensions();
                 let rgb8 = resized.to_rgb8();
-                let size_class = if target == 0 { "native".to_string() } else { target.to_string() };
-                let ftag = if target == 0 { "native".to_string() } else { format!("s{target}") };
+                let size_class = if target == 0 {
+                    "native".to_string()
+                } else {
+                    target.to_string()
+                };
+                let ftag = if target == 0 {
+                    "native".to_string()
+                } else {
+                    format!("s{target}")
+                };
                 let fname = format!("{stem}.{crop_label}.{ftag}.png");
                 let fpath = pngdir.join(&fname);
                 rgb8.save(&fpath).expect("save png");
@@ -252,7 +269,10 @@ fn main() -> ExitCode {
 
     fs::write(outdir.join("corpus_map.tsv"), map).expect("write corpus_map");
     fs::write(outdir.join("verify_features.tsv"), verify).expect("write verify_features");
-    for (name, mut rows) in [("sample_wedge_all.tsv", sample_rows), ("sample_wedge_cpu0.tsv", cpu0_rows)] {
+    for (name, mut rows) in [
+        ("sample_wedge_all.tsv", sample_rows),
+        ("sample_wedge_cpu0.tsv", cpu0_rows),
+    ] {
         rows.sort_by(|a, b| b.0.cmp(&a.0));
         let f = File::create(outdir.join(name)).expect("create sample tsv");
         let mut w = BufWriter::new(f);
