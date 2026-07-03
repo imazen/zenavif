@@ -67,6 +67,7 @@ SRC = {
     "desyncfix": "/mnt/v/output/zenavif/desyncfix-2026-07-03",
     "palette": "/mnt/v/output/zenrav1e-palette/sweep-20260703-final2",
     "palmech": "/mnt/v/output/rd-gap-palette-ab-2026-07-03/results",
+    "sizedecay": "/mnt/v/output/zenavif/sizedecay-2026-07-03",
 }
 # palette-mech A/B val corpus (14 VAL-LSD origins materialized with the wedge
 # conventions; join-verified 108/108) — see its _MANIFEST.json + picks_val14.json
@@ -244,6 +245,53 @@ def sources():
                   arm_id=None, knob_json=None,
                   encoder_rev="zenrav1e@32477046 (rav1e CLI, isolated: still-picture threads=1 lrf=false filter-intra=false)",
                   q_kind="rav1e_quantizer", speed=None, rows=2700))
+
+    # --- size-decay isolation A/B (2026-07-03) — wedge #3 / HYPERPARAM rule 2:
+    # leave-one-out Tune::Ssimulacra2 mechanism arms x sizes {256,512,1024} on
+    # the 12-origin photo-like TRAIN (wedge26 files) + 12-origin VAL
+    # (palette-val files) ladders; 16-pt q grid (the 12-pt grid + 78/82/88/92
+    # high-q densification — the decay lives in the high-q band). Encoder:
+    # zenrav1e--sizedecay workspace commit 1428ecdd on master c9c2d5f7 via
+    # ravif--wedge@9d2b97c (ZENRAV1E_SD_DISABLE leave-one-out gates +
+    # ZENRAV1E_SD_RAMP long-edge ramp trials; env-unset byte-identical to the
+    # master binary — md5-gated locally AND on-box). Verdict: qmdist convicted
+    # for the size decay (pre-registered rule), everything else acquitted;
+    # ramp trials + val in the same source. enc_ms cache-replayed on hits —
+    # never use for speed claims.
+    sd_rev = ("zenrav1e-ws@1428ecdd on c9c2d5f7 via ravif--wedge@9d2b97c "
+              "(SD gates; env-unset == master md5)")
+    sd_arms = [("sd_full.tsv", "sizedecay/full_s2",
+                J(speed=2, tune="ssimulacra2", palette="auto")),
+               ("sd_off.tsv", "sizedecay/off_s2",
+                J(speed=2, tune="off", palette="auto"))]
+    sd_arms += [(f"sd_no_{m}.tsv", f"sizedecay/no-{m}_s2",
+                 J(speed=2, tune="ssimulacra2", palette="auto", sd_disable=m))
+                for m in ("chromadq", "qmcurves", "boost", "qmdist", "lfsharp")]
+    for fn, arm, knob in sd_arms:
+        s.append(dict(path=f"{SRC['sizedecay']}/train_arms/{fn}", kind="rd_tsv",
+                      corpus="mech26", sweep_source="sizedecay-2026-07-03",
+                      arm_id=arm, knob_json=knob, encoder_rev=sd_rev,
+                      q_kind="cavif_q", speed=2, rows=576))
+    for fn, arm, knob in sd_arms[:2]:
+        s.append(dict(path=f"{SRC['sizedecay']}/val_arms/{fn}", kind="rd_tsv",
+                      corpus="mech26", sweep_source="sizedecay-2026-07-03",
+                      arm_id=arm + "-val", knob_json=knob, encoder_rev=sd_rev,
+                      q_kind="cavif_q", speed=2, rows=576))
+    s.append(dict(path=f"{SRC['sizedecay']}/val_cpu2/val_cpu2.tsv", kind="rd_tsv",
+                  corpus="mech26", sweep_source="sizedecay-2026-07-03",
+                  arm_id="sizedecay/ref-cpu2-val",
+                  knob_json=J(encoder="aomenc", cpu_used=2, fmt="420+444"),
+                  encoder_rev="aomenc-3.14.1@632172a4", q_kind="aom_cq",
+                  speed=2, rows=576))
+    for m256 in ("0", "0.25", "0.5"):
+        s.append(dict(path=f"{SRC['sizedecay']}/ramp_arms/sd_ramp_qmdist_{m256}.tsv",
+                      kind="rd_tsv", corpus="mech26",
+                      sweep_source="sizedecay-2026-07-03",
+                      arm_id=f"sizedecay/ramp-qmdist-m{m256}_s2",
+                      knob_json=J(speed=2, tune="ssimulacra2", palette="auto",
+                                  sd_ramp=f"qmdist:{m256}",
+                                  ramp="longedge clamp((log2(maxdim)-8)/2, m256, 1)"),
+                      encoder_rev=sd_rev, q_kind="cavif_q", speed=2, rows=384))
     return s
 
 

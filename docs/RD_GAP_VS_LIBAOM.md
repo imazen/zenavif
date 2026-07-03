@@ -1173,6 +1173,103 @@ rav1d-safe raw-md5 agreement on every palette-armed cell). Full record:
 `benchmarks/hyperparam_palette_mech_ab_2026-07-03.tsv` + raw at
 `/mnt/v/output/rd-gap-palette-ab-2026-07-03/`.
 
+## Size-decay isolation A/B — MEASURED 2026-07-03: four of five tune mechanisms ACQUITTED for the small-size decay; the QM-dist ratio convicted and its size ramp SHIPPED
+
+**Program**: WEDGE_MAP wedge #3 / HYPERPARAM_FIRST_CUT rule 2's specified follow-up. The wedge
+measured the shipped config's advantage vs libaom cpu2 decaying monotonically below 1024
+(−13.0 med @1024 → −6.5 @512 → −1.15 @256, entirely high-q-band at the first step), and the
+ranked suspects were the Tune::Ssimulacra2 constants — all fit at 1024 only, led by the ss2 QM
+level curves. This A/B isolates each mechanism per size with leave-one-out arms.
+
+**Method**: dev workspace `zenrav1e--sizedecay` (dev arms preserved as workspace commit
+`1428ecdd` on master `c9c2d5f7`) adds `ZENRAV1E_SD_DISABLE=<mech>` gates for the five tune
+mechanisms (chromadq, qmcurves, boost, qmdist, lfsharp) + `ZENRAV1E_SD_RAMP=<mech>:<m256>`
+long-edge strength-ramp trial arms (m = clamp((log2(maxdim)−8)/2, m256, 1.0); LONG EDGE, not
+px area, so non-square 1024-class renditions keep m=1.0). Byte gates: env-unset == master
+binary md5 (18/18 cells, local + box); every disable gate live (45/45); ramp m=1 == full-tune
+md5; ramp m256=0 @256 == disable md5. Arms: {full, off, no_×5} × 12 photo-like TRAIN wedge
+origins (plots excluded) × {256, 512, 1024|native} × 16-q grid (12-pt + 78/82/88/92 — the
+decay lives in the high-q band), BUTTER on, cavif s2 depth 8, palette auto constant across
+arms. Box zenavif-sweep-1 (snapshot restore), 252/252 train file-arms clean. Held-out: {full,
+off} + fresh cpu2 refs on 12 VAL-LSD origins (palette-val corpus renditions). Decision rule
+PRE-REGISTERED before any arm data (raw dir `DECISION_RULE.md`): convict X iff c(1024) ≤ −1.0
+AND (c(256)−c(1024) ≥ +2.0 or c(256) ≥ +0.3), where c = median BD(full vs no_X). Full record:
+`benchmarks/hyperparam_size_decay_ab_2026-07-03.tsv`; raw sweeps
+`/mnt/v/output/zenavif/sizedecay-2026-07-03/` (Tower-mirrored).
+
+### The attribution table (TRAIN, medians)
+
+Mechanism contribution c(size) = direct ssim2 BD of full-tune vs tune-minus-mechanism
+(negative = the mechanism saves bits at that size):
+
+| mechanism | c(1024) | c(512) | c(256) | high-q band 1024→256 | verdict |
+|---|--:|--:|--:|---|---|
+| chroma delta-q | −2.23 | −2.67 | −3.17 | −0.93 → −3.15 (grows) | ACQUITTED — win GROWS toward small |
+| **ss2 QM curves** | **−8.81** | **−8.28** | **−7.23** | −2.82 → −4.59 (grows) | **ACQUITTED — the top suspect keeps ≥82% of its win at 256** |
+| variance boost | +0.24 | +0.29 | −0.86 | mixed | not convictable (fails the c(1024) ≤ −1.0 floor on this photo-like subset; helps only at 256) |
+| **QM-dist ratio** | **−3.48** | **−2.13** | **−0.96** | **−0.90 → +0.35 → +0.53 (flips positive ≤512)** | **CONVICTED: decay +2.52 ≥ +2.0 on 8/12 origins; the only mechanism with a consistent positive decay slope (med +0.60 / mean +0.51)** |
+| LF sharpness | −0.66 | −0.29 | −0.38 | flat | not convictable (fingerprint below the 1.0 floor) |
+
+Butteraugli sharpens the qmdist story: at 256 its marginal is ssim2 −0.96 but butteraugli
+ba3n +0.45 / bamax +1.33 (**the mechanism costs butteraugli exactly where its ssim2 win is
+thinnest**); at 512/1024 both metrics favor it. Per-origin, the decay concentrates on the
+wedge's steepest photo-like decayers (9098 +7.9, 1238 +5.0, 1480 +4.6, 9118 +3.8 BD points
+lost 1024→256; 9098/9118 flip outright positive at 256), while doc/synthetic content
+(6070/5318/9908) anti-decays.
+
+### Most of the wedge decay is NOT the tune: vs-cpu2 decomposition
+
+| | TRAIN full | TRAIN off | TRAIN delta | VAL full | VAL off | VAL delta |
+|---|--:|--:|--:|--:|--:|--:|
+| 1024 | −14.83 | −1.13 | −13.70 | −1.42 | +0.56 | −1.98 |
+| 512 | −10.18 | +0.81 | −10.99 | +0.96 | +5.56 | −4.60 |
+| 256 | −1.98 | +4.17 | −6.15 | +7.90 | +12.72 | −4.83 |
+
+The tune-OFF baseline itself loses ~5.3 (train) / ~12.2 (val) BD points to cpu2 from
+1024→256 — decay that no tune-constant scaling can fix. Within-zr the tune's total win
+holds at every size (train −14.38 → −13.18 → −10.42, 12/12 better each; val −7.42 → −7.25 →
+−5.61), and on VAL the tune's vs-cpu2 delta actually GROWS toward small (−1.98 → −4.83).
+(The val corpus is screen-heavier — palette-program picks — which explains its weaker
+absolute position; the decay SHAPE reproduces.)
+
+### The qmdist strength ramp — inverted-U, m256=0.5 SHIPS (zenrav1e@b0098eb1)
+
+Trials m(long edge) = clamp((log2(maxdim)−8)/2, m256, 1.0), BD(full vs ramp), positive =
+ramp wins:
+
+| arm | 256 | 512 | butteraugli 256 (3n/max) |
+|---|--:|--:|---|
+| m256 = 0 (ratio off at 256) | −0.96 (3/12) | +0.87 | +0.45 / +1.33 |
+| m256 = 0.25 | +0.68 (10/12) | +0.87 | +1.67 / +3.00 |
+| **m256 = 0.5** | **+1.03 (11/12)** | **+0.87 (9/12)** | **+1.94 / +3.32** |
+
+The response is non-monotone: HALF strength beats BOTH full strength and off at small sizes
+— the 1024-fitted ratio overshoots on downscaled content but still carries signal.
+**VAL confirms the winner: +1.12 @256 (11/12 better), +1.00 @512, butteraugli agreeing
+(+1.7/+2.9 @256).** Ship bar (pre-registered): ssim2 median ≥ +0.3 at both convicted sizes,
+butteraugli veto, val confirm, byte-identity at 1024 — all pass; m256=0.5 beats 0.25 by
+> 0.3 so no tie-break needed.
+
+**Landed as `zenrav1e@b0098eb1`** (master): `qm_dist_ratio_m = clamp((log2(long_edge) −
+8)/2, 0.5, 1.0)`, exact u128 path at m=1.0. Gates: tune-off 9/9 byte-identical to master;
+tune-on @1024 == master md5; the landing binary reproduces the measured trial arm md5 on
+9/9 cells (256/512/1024 × Q{30,60,85}); **conformance 180/180** (36-file size ladder ×
+Q{30,50,60,75,90}, aomdec decode + aomdec/rav1d-safe raw-md5 agreement — the change is
+RDO-only, no header/syntax change). 170 lib tests (3 new), clippy clean. Release-gated like
+the rest of the tune: registry builds get it after the next zenrav1e release + dep bump.
+
+### Consequences
+
+- **The wedge #3 owner hypothesis ("re-fit the tune constants below 1024") is refuted for
+  4 of 5 mechanisms** — their leave-one-out contributions show weakening them at small
+  sizes LOSES bits.
+- The remaining ≤512 vs-cpu2 decay lives in non-tune coding behavior (and cpu2's own
+  small-size strength): partition/coding defaults at small px are the revised suspect.
+- Boost's inverse profile (+0.24 @1024 / −0.86 @256 on photo-like content, inside noise)
+  is a possible future inverse-conditional — noted, not actioned.
+- The dev leave-one-out + ramp trial arms remain available as zenrav1e workspace commit
+  `1428ecdd` for any future per-mechanism size program.
+
 ## Confirmed findings (2026-07-01 audit — supersedes the "verify" framing below)
 
 Source-read + measured, not hypothesized. See `scripts/rd_gap/palette_ablation.sh` +

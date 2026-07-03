@@ -12,7 +12,7 @@ fitted on TRAIN-LSD origins only.
 | head | rule | verdict |
 |---|---|---|
 | palette gate (wedge #6) | `patch_fraction > 0.197` → `PaletteMode::Always` | **GRADUATED — mechanism A/B CONFIRMED on val 2026-07-03 (see the status block in the rule-1 section below); wiring landed release-gated (`src/palette_gate.rs` + `auto_tune`).** LOOCV-stable, val-firing sanity clean, fires on 15/16 small wedge cells where the ported detection is dead. MLP not warranted. |
-| size-conditional tune (wedge #3) | attribution, not yet a rule | **Decay narrowed, not convicted**: the 1024→512 step is entirely a high-quality-band loss on photo-like content; top suspect = ss2 QM curves. Needs the per-size isolation A/B (768 cells). |
+| size-conditional tune (wedge #3) | qmdist ramp m=clamp((log2(longedge)−8)/2, 0.5, 1.0) | **A/B RAN 2026-07-03 — top suspect (ss2 QM curves) ACQUITTED; the QM-dist ratio convicted, its half-strength size ramp SHIPPED (zenrav1e@b0098eb1: train +1.03/+0.87 @256/512 vs full, VAL +1.12/+1.00, butteraugli agreeing). Most of the vs-cpu2 decay is the tune-OFF baseline's own (see the rule-2 STATUS block).** |
 | variance-boost strength (wedge #2) | `luma_histogram_entropy > 2.61` → 2.0 else 1.0 (best found) | **NOT deployable**: LOOCV ≈ global-1.0 (mean −2.36 vs −2.24, median regresses). Oracle headroom +0.93 concentrated in one content class. MLP not warranted at n=24 — labels underfit, not the model. |
 
 ## Phase 1 — the label store
@@ -203,6 +203,38 @@ wedge full-crop corpus — 16 origins × 6q × 4 arms × 2 sizes = **768 cells**
 cell-cache cheap; the same isolation ladder the 1024 program used with one size axis
 added.
 
+**STATUS 2026-07-03 (later) — the isolation A/B RAN (expanded: 7 leave-one-out arms ×
+3 sizes × 16-q dense-high-q grid = 4,032 train cells + val + ramp trials); the
+ranked-suspect list was WRONG in a useful way.** Full record:
+`benchmarks/hyperparam_size_decay_ab_2026-07-03.tsv`, raw + the PRE-REGISTERED decision
+rule at `/mnt/v/output/zenavif/sizedecay-2026-07-03/`, RD_GAP_VS_LIBAOM.md "Size-decay
+isolation A/B". Headlines:
+
+- **Suspect #1 (ss2 QM curves) ACQUITTED**: its leave-one-out contribution holds at every
+  size (−8.81 @1024 → −7.23 @256, 12/12 better at 256) — scaling it down at small px would
+  LOSE most of the tune's biggest win. Chroma delta-q GROWS toward small (−2.23 → −3.17);
+  LF sharpness is flat below the conviction floor; boost is ≈0 at 512/1024 on the
+  photo-like subset and helps only at 256 (−0.86) — the inverse of the decay hypothesis.
+- **The un-suspected mechanism convicted**: the QM-dist ratio decays −3.48 → −2.13 → −0.96
+  (8/12 origins, +2.52 ≥ the pre-registered +2.0 bar), its high-q band flips positive at
+  ≤512, and at 256 it is butteraugli-adverse (ba3n +0.45 / bamax +1.33) while its ssim2 win
+  is thinnest — exactly the high-q-band signature the wedge measured.
+- **The proposal graduated — re-based to LONG EDGE and SHIPPED**: m(px) became
+  m(longedge) = clamp((log2(maxdim)−8)/2, M256, 1.0) (the rendition classes are
+  long-edge-defined; byte-identity at the shipped 1024 class must hold for non-square
+  frames). M256 trials {0, 0.25, 0.5} on the convicted qmdist measured an **inverted-U**:
+  half strength beats BOTH full and off (train +1.03 @256 / +0.87 @512 median vs full,
+  11/12 and 9/12 better; M256=0 fails at −0.96 @256), **VAL-confirmed** (+1.12 / +1.00,
+  butteraugli agreeing +1.1..+3.3 everywhere). Landed as `zenrav1e@b0098eb1`
+  (`qm_dist_ratio_m`, exact u128 path at m=1.0; tune-off + 1024 byte-identity md5-gated;
+  conformance 180/180 aomdec + rav1d-safe). Release-gated with the rest of the tune.
+- **Most of the wedge decay is NOT the tune**: the tune-off baseline itself loses ~5.3
+  (train) / ~12.2 (val) BD points vs cpu2 from 1024→256, while the tune's within-zr total
+  holds at every size (train −14.38 → −10.42, 12/12 better; val −7.42 → −5.61) and its
+  vs-cpu2 delta GROWS toward small on val (−1.98 → −4.83). The wedge #3 residual owner
+  moves to non-tune small-px coding behavior (partition/coding defaults) + cpu2's own
+  small-size strength.
+
 ## Rule 3 — per-image variance-boost strength (wedge #2): not deployable yet
 
 **Script**: `scripts/hyperparam/fit_boost_strength.py`; TSV:
@@ -248,8 +280,10 @@ inverted-U with instability above 3 (5048: str2 vetoed, str3 clean).
    follow-up: the speed-conditional threshold (val refit wants τ≈0.05-0.07 at
    s≥6 where palette wins even on quiet classes; +0.17..+0.18 mean BD
    available) and flipping the encoder forward at the zenrav1e dep bump.
-2. **Size-decay isolation A/B** (768 cells) to convict the QM-curve suspect, then
-   calibrate M256 for the proposed log-px ramp.
+2. **Size-decay isolation A/B** — ~~768 cells to convict the QM-curve suspect~~
+   **DONE 2026-07-03**: QM curves acquitted, qmdist convicted, M256=0.5 long-edge ramp
+   shipped (zenrav1e@b0098eb1); the residual decay is baseline-side (see the rule-2
+   STATUS block). Follow-up candidate: small-px A/B of the NON-tune coding defaults.
 3. Boost-strength head: parked until the val + dense-strength labels exist (fold
    into the next box sweep as extra arms; the store's append protocol takes them
    directly).

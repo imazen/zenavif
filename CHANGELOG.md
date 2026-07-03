@@ -14,6 +14,20 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 - README overhaul: clickable badge row (CI/crates.io/lib.rs/docs.rs/MSRV/dual-license), `## Quick start` with a `[dependencies]` block, absolute links throughout, regenerated crosslink footer (now last), split crates.io README (`README.crates.md` via `readme =` + `include`), and a `benchmarks/README.md` methodology index.
 
 ### Added
+- **Size-decay isolation A/B (wedge #3) — verdicts + the qmdist size ramp**:
+  leave-one-out Tune::Ssimulacra2 mechanism arms × {256,512,1024} renditions
+  (`scripts/rd_gap/sizedecay_arms.sh` driver + `scripts/hyperparam/`
+  `analyze_size_decay_ab.py`, train/val sample ladders in `scripts/rd_gap/`)
+  acquitted 4 of 5 tune mechanisms for the small-size decay (the top suspect
+  ss2-QM curves keeps ≥82% of its win at 256), convicted the QM-dist ratio
+  (−3.48 → −0.96 median 1024→256), and shipped its half-strength long-edge
+  ramp upstream (`zenrav1e@b0098eb1`, release-gated; train +1.03/+0.87 @
+  256/512 vs full strength, VAL +1.12/+1.00, butteraugli agreeing,
+  conformance 180/180). Most of the wedge decay measured as the tune-OFF
+  baseline's own vs-cpu2 decay — the wedge #3 owner moves to non-tune
+  small-px coding defaults. Record:
+  `benchmarks/hyperparam_size_decay_ab_2026-07-03.tsv` (+ raw pointer),
+  `docs/RD_GAP_VS_LIBAOM.md` "Size-decay isolation A/B".
 - **Hyperparameter-expert label store + first threshold-rule heads**
   (FEATURE_HINTS_PLAN §E): `scripts/hyperparam/build_label_store.py` aggregates
   every mechanism fit sweep + the wedge dataset into one queryable parquet

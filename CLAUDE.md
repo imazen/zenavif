@@ -219,6 +219,12 @@ nonzero-sharpness encodes desyncing encoder recon from conforming decoders —
 docs/RD_GAP_VS_LIBAOM.md "LF sharpness schedule"). Same-day desync fixes
 (#32 LRF, #33 filter-intra) + these landed tier-2 medians CROSSED at BOTH
 speeds pre-sharpness (s2 −1.54, s1 −2.10 on fresh 2026-07-03 baselines).
+2026-07-03 (later): the size-decay isolation A/B acquitted 4/5 tune
+mechanisms for the small-rendition decay and shipped a size-conditional
+strength for the QM-dist ratio (`zenrav1e@b0098eb1`:
+qm_dist_ratio_m = clamp((log2(longedge)−8)/2, 0.5, 1.0); train +1.03/+0.87
+@256/512 vs full strength, VAL-confirmed, conformance 180/180 — see
+docs/RD_GAP_VS_LIBAOM.md "Size-decay isolation A/B").
 **At the zenrav1e dep bump:** wire tune selection through zenravif/zenavif
 (the sweep used a dev-only ZENRAVIF_TUNE env passthrough, reverted) and decide
 the default for still images. From the libavif v1.4.0 study
