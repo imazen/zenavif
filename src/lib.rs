@@ -101,6 +101,11 @@ pub use target_quality::{
     TargetMetric, TargetOptions, TargetedEncode, encode_rgb8_with_target, encode_rgb16_with_target,
     encode_rgba8_with_target,
 };
+/// Butteraugli-diffmap-guided two-pass encoding (spatial closed loop).
+#[cfg(feature = "two-pass-butteraugli")]
+pub mod two_pass;
+#[cfg(feature = "two-pass-butteraugli")]
+pub use two_pass::{FRAME_HINTS_LIVE, TwoPassEncode, TwoPassOptions, encode_rgb8_two_pass};
 mod validation;
 #[cfg(feature = "_dev")]
 pub mod yuv_convert;

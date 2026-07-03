@@ -34,6 +34,9 @@ ravif = { package = "zenravif", version = "0.2.0", path = "../ravif/ravif", defa
 # (`target-quality` feature). Same versions as the dev-dependency copies.
 fast-ssim2 = { version = "0.8.0", optional = true, features = ["imgref", "rayon"] }
 zensim = { version = "0.2.4", optional = true, features = ["imgref", "zenpixels"] }
+# Optional two-pass diffmap dep — butteraugli per-pixel error map drives the
+# per-SB quantizer-scale second pass (`two-pass-butteraugli` feature).
+butteraugli = { version = "0.9.3", optional = true }
 # Optional auto-tune deps — gated on `auto-tune` feature, off by default.
 # Path-pinned to the sibling checkout (CI clones ../zenanalyze); reqs track the
 # sibling's 0.2.0 — crates.io still has 0.1.0/0.1.x, so a registry release of
@@ -190,6 +193,13 @@ encode = ["dep:ravif"]
 # Precise perceptual-quality targeting: encode->decode->score convergence on
 # a requested SSIMULACRA2 / zensim score (encode_rgb8_with_target).
 target-quality = ["encode", "dep:fast-ssim2", "dep:zensim"]
+# Butteraugli-diffmap-guided second pass (spatial closed loop): encode,
+# decode, pool the per-pixel butteraugli map per 64×64 superblock, re-encode
+# with per-SB quantizer scaling (encode_rgb8_two_pass). Pulls zenravif's
+# `__expert` passthrough internally without exposing zenavif's own
+# `__expert` surface. RELEASE-GATED at runtime behind
+# `zenravif::FRAME_HINTS_LIVE` (fails honestly until the zenrav1e dep bump).
+two-pass-butteraugli = ["encode-imazen", "ravif/__expert", "dep:butteraugli"]
 # Encoding with hand-written assembly (fastest, uses unsafe)
 encode-asm = ["encode", "ravif/asm"]
 # Encoding with multi-threading

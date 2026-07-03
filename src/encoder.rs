@@ -260,6 +260,13 @@ pub struct EncoderConfig {
     /// dep bump — see `src/palette_gate.rs` module docs.
     #[cfg(feature = "encode-imazen")]
     pub(crate) palette_preference: Option<crate::palette_gate::PalettePreference>,
+    /// Per-64×64-superblock AC quantizer scale map for the color encode
+    /// (the butteraugli-diffmap-guided second pass sets this internally —
+    /// see [`crate::two_pass`]). Forwarded through zenravif's expert
+    /// `sb_q_scale` passthrough; release-gated there behind
+    /// `zenravif::FRAME_HINTS_LIVE`.
+    #[cfg(feature = "two-pass-butteraugli")]
+    pub(crate) sb_q_scale: Option<Box<[f32]>>,
 }
 
 impl Default for EncoderConfig {
@@ -322,6 +329,8 @@ impl Default for EncoderConfig {
             trellis: None,
             #[cfg(feature = "encode-imazen")]
             palette_preference: None,
+            #[cfg(feature = "two-pass-butteraugli")]
+            sb_q_scale: None,
         }
     }
 }
@@ -898,18 +907,28 @@ fn build_ravif_encoder(
             .with_lru_on_skip(config.override_lru_on_skip)
             .with_segmentation_complex(config.override_segmentation_complex)
             .with_encode_bottomup(config.override_encode_bottomup);
-        #[cfg(feature = "__expert")]
+        #[cfg(any(feature = "__expert", feature = "two-pass-butteraugli"))]
         {
-            // The 4 deepest knobs live behind ravif's `__expert` feature.
-            // Mirror EncoderConfig's per-field overrides into ravif's
-            // InternalParams in one call. Build via Default + field
-            // assignment because `#[non_exhaustive]` prohibits struct
-            // literal construction outside the defining crate.
+            // The deepest knobs live behind ravif's `__expert` feature
+            // (which `two-pass-butteraugli` also enables, without exposing
+            // zenavif's own `__expert` surface). Mirror EncoderConfig's
+            // per-field overrides into ravif's InternalParams in one call.
+            // Build via Default + field assignment because
+            // `#[non_exhaustive]` prohibits struct literal construction
+            // outside the defining crate.
             let mut params = ravif::expert::InternalParams::default();
-            params.partition_range = config.override_partition_range;
-            params.complex_prediction_modes = config.override_complex_prediction_modes;
-            params.lrf = config.override_lrf;
-            params.fast_deblock = config.override_fast_deblock;
+            #[cfg(feature = "__expert")]
+            {
+                params.partition_range = config.override_partition_range;
+                params.complex_prediction_modes = config.override_complex_prediction_modes;
+                params.lrf = config.override_lrf;
+                params.fast_deblock = config.override_fast_deblock;
+            }
+            // Closed-loop per-SB quantizer scale map (two-pass driver).
+            #[cfg(feature = "two-pass-butteraugli")]
+            {
+                params.sb_q_scale = config.sb_q_scale.clone();
+            }
             enc = enc.with_internal_params(params);
         }
         if let Some(t) = config.trellis {
