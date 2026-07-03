@@ -154,9 +154,14 @@ over-corrects. The mechanisms-not-constants lesson, again — this time the
 *operating point* didn't transfer either.
 
 Diagnosis arms in flight (each isolates one hypothesis):
-- `tune-off base × {single, twopass}` — does the identical map pay on an
-  untuned base (base-conflict hypothesis)? If yes, the loop's home is the
-  fast/non-tune path or the map must become boost-aware.
+- `tune-off base × {single, twopass}` — **MEASURED: still regresses.**
+  ba3n +1.57% median (8/24 better), ssim2 +1.45%, 1.66× — smaller than the
+  tuned-base loss (+2.20%) but same sign WITHOUT the Variance Boost / ss2
+  tune in the base. Base-conflict is a contributor, not the cause: even
+  zenrav1e's *default* allocation (Tune::Psychovisual + activity-masked
+  cdef-dist) already carries most of the masking signal butteraugli would
+  add — there is no aom-default-like "unmasked" base in zenrav1e to
+  correct.
 - `boost-only clamp (weight_hi=1.0)` — no give-back side (the bytes autopsy
   fingered it); the Variance-Boost-shaped one-directional variant.
 - `probe_quality=40` — libaom's fixed-quality preliminary pass (their q96
