@@ -908,13 +908,13 @@ where the original headline numbers lived:
 
 | image | matched ssim2 | aom bpp | off gap | always gap | auto gap |
 |---|--:|--:|--:|--:|--:|
-| o_7000 | 66.9 | 0.349 | +174% | **+70%** | +70% |
+| o_7000 | 66.9 | 0.349 | +163% | **+61%** | +61% |
 | o_7001 | 70.0 | 0.105 | +297% | **+99%** | +99% |
-| o_7002 | 69.6 | 0.411 | +179% | **+71%** | +71% |
-| **median** | | | **+179%** | **+71%** | +71% |
+| o_7002 | 69.6 | 0.411 | +176% | **+72%** | +72% |
+| **median** | | | **+176%** | **+72%** | +72% |
 
-The legacy band reproduces on the off arm (+174..297%, same shape as the
-original +130-470% multi-format table), and palette cuts it to +70-99% —
+The legacy band reproduces on the off arm (+163..297%, same shape as the
+original +130-470% multi-format table), and palette cuts it to +61-99% —
 roughly **60% of the excess bits over libaom removed**. Auto equals Always
 byte-for-byte on all three (detection fires). Notably, palette-off zenrav1e
 could not even *reach* libaom-cq63's quality floor on o_7001 within the
