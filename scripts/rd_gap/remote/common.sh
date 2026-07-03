@@ -35,7 +35,12 @@ KNOWN_HOSTS="$HOME/.ssh/known_hosts.zenavif-sweep"     # per-box file (IPs get r
 # see FEATURE_HINTS_PLAN.md P0 + run_drift.sh).
 # zenrav1e--deltaq is the per-SB delta-q + variance-boost jj workspace
 # (ravif's dev-only [patch.crates-io] targets it during the strength fit).
-ZEN_REPOS=(ravif zenrav1e 'zenrav1e--drift-master?' 'zenrav1e--deltaq?' 'zenrav1e--qmdist?' 'zenrav1e--lfsharp?' zenavif zenanalyze fast-ssim2 zenpixels zencodec)
+# ravif--wedge + zenrav1e--wedge are the WEDGE-FINDER program's PRIVATE clones
+# (ravif@main + zenrav1e@master-tip with the dev-only tune/palette env
+# passthroughs applied in the clone, NOT in the shared ravif tree — avoids
+# contending for the ravif [patch.crates-io] slot with concurrent A/B sessions;
+# run with CAVIF=/home/lilith/work/zen/ravif--wedge/target/release/cavif).
+ZEN_REPOS=(ravif zenrav1e 'zenrav1e--drift-master?' 'zenrav1e--deltaq?' 'zenrav1e--qmdist?' 'zenrav1e--lfsharp?' 'ravif--wedge?' 'zenrav1e--wedge?' zenavif zenanalyze fast-ssim2 zenpixels zencodec)
 AOM_SRC="$HOME/work/aom"
 AOM_PIN="632172a468f5e91c5b40daaa0a91f4a291c63af4"  # docs/RD_GAP_VS_LIBAOM.md pinned rev
 RD_GAP_DIR="/home/lilith/work/zen/zenavif/scripts/rd_gap"  # same path on both ends
