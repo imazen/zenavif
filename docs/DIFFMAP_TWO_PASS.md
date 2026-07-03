@@ -258,3 +258,40 @@ remain paired and honest.
 - `Cargo.lock` on zenavif main intentionally lacks the `butteraugli` entries
   until the dep bump (the landable commit adds the dep; the lock regenerates
   on first build/CI).
+
+## FINAL VERDICT (2026-07-04, coordinator close-out): DROP as default/recommendation
+
+The boost-only strength push completed the response curve (coordinator-run
+after the session died mid-arm; single baseline regenerated + two arms fresh,
+288 rows each, `/mnt/v/output/zenavif/twopass-2026-07-03/`):
+
+| arm (vs single, train26) | ba3n med (better) | ba-max med | ssim2 med | time |
+|---|---|---|---|---|
+| aom-formula str1.0 | +2.20% (3/24) | +3.25% | +1.88% | 2.01× |
+| boost-only str1.0 | +0.10% (10/24) | −0.04% | +0.19% | 1.94× |
+| boost-only str1.5 | +0.38% all / **+0.0015% photos** (10/24) | +1.06% | +0.43% | 2.03× |
+| boost-only str2.0 | +1.00% (6/24) | +3.11% | +0.95% | 2.03× |
+
+An inverted response with its optimum AT break-even: no strength crosses
+positive on any norm. The mechanism's premise — that a butteraugli map finds
+misallocation the encoder can't see — is FALSE on this base: zenrav1e's
+open-loop perceptual allocation (activity-masked psy distortion + Variance
+Boost + ss2 QM curves + chroma delta-q) already spends the headroom the map
+detects; the o_9051-class inversion (7/7 outliers worse under the loop) is
+the sharpest form of the finding. libaom's tune=butteraugli pays BECAUSE
+their default base is unmasked; ours is not.
+
+**What survives (landed, keep):** the `FrameHints` per-SB AC-q-scale API
+(zenrav1e c4047cec — trial-rollback-safe, decoder-followed), the
+metric-pluggable two-pass driver (butteraugli | ssim2 maps; zensim
+profile-B slots in when it ships), the harness (`run_2p_ab.sh` /
+`two_pass_cell` / `twopass_report.py`), and the measured record here. The
+promising future consumer is NOT a trial-encode loop but **analysis-derived
+hints at zero extra encodes** (zenanalyze features → FrameHints — the
+feature-hints program's P3/P4), and external callers with per-region
+priorities (saliency, faces) who can now express them.
+
+**Blocking follow-up if the two-pass feature is ever shipped live:** the
+futex hang (4/220 cells, ~2% incidence, tracked in the issue filed at
+close-out) must be root-caused; the per-cell timeout guard is a harness
+mitigation, not a fix.

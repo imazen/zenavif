@@ -1,0 +1,18 @@
+# Diffmap-guided two-pass (tune=butteraugli analog) -- FINAL RECORD 2026-07-03/04
+# Program: docs/DIFFMAP_TWO_PASS.md (mechanism, evaluate-first GO on aom's own encoder,
+# per-arm forensics, futex-hang note). All arms: train26 24 images x 12q, s2 +
+# ZENRAVIF_TUNE=ssimulacra2 base, butteraugli-BD target / ssim2 veto (INVERTED roles).
+# Raw: /mnt/v/output/zenavif/twopass-2026-07-03/ (coordinator arms) + the session's
+# incremental doc commits (b2378fa..ff1846e). VERDICT: DROP as default -- boost-only
+# response is an inverted-U with optimum AT break-even; no strength crosses positive.
+# Infrastructure kept: FrameHints API (zenrav1e c4047cec), metric-pluggable driver.
+arm	ba3n_med	ba3n_better	bamax_med	ssim2_med	time_ratio	verdict
+aom_formula_str1.0	+2.20	3/24	+3.25	+1.88	2.01	REGRESSES
+aom_formula_str0.5	+0.93	6/17	NA	NA	NA	shrinkage-no-crossing (partial n=17)
+tuneoff_base_str1.0	+1.57	8/24	NA	+1.45	1.66	regresses on default base too
+probe_q40	+0.75	3/24	+0.96	+0.38	2.17	probe signal does not rescue
+boostonly_str1.0	+0.10	10/24	-0.04	+0.19	1.94	BREAK-EVEN (give-back convicted)
+boostonly_str1.5	+0.38	10/24	+1.06	+0.43	2.03	photos exact zero (+0.0015)
+boostonly_str2.0	+1.00	6/24	+3.11	+0.95	2.03	regresses (inverted-U confirmed)
+# legacy str1.0 (o_9051-class): ba3n +3.65 med (5/22); 7/7 outliers WORSE (inversion vs aom)
+# conformance: 180/180 (90/90 per sampling) at shipped knobs; 4 cells futex-hung pre-guard
