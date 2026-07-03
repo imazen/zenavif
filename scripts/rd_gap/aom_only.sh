@@ -42,7 +42,10 @@ worker() {
       printf 'CELLFAIL\t%s\tlibaom-%s\tcq%s\t%s\n' "$bn" "$fmt" "$q" "${r:-none}" >> "$WORK/failures.tsv"
     fi
   done; done
-  cat "$part" >> "$OUT"
+  # flock: concurrent worker appends to one file are NOT atomic on /mnt/v
+  # (drvfs) — cache-hit workers finishing simultaneously lost rows (261/576
+  # landed, 2026-07-03). Serialize the append through a lock on the output.
+  flock "$OUT" -c "cat '$part' >> '$OUT'"
   if (( fails > 0 )); then
     cp "$tmp/err.log" "$WORK/err.$bn.log" 2>/dev/null || true
     echo "  [$(date -u +%H:%M:%SZ)] done $bn rows=$(wc -l < "$part") FAILED_CELLS=$fails (err: $WORK/err.$bn.log)"

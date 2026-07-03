@@ -62,7 +62,10 @@ worker() {
       fi
     done; done
   fi
-  cat "$part" >> "$OUT"
+  # flock: concurrent worker appends to one file are NOT atomic on /mnt/v
+  # (drvfs) — cache-hit workers finishing simultaneously lost rows (261/576
+  # landed, 2026-07-03). Serialize the append through a lock on the output.
+  flock "$OUT" -c "cat '$part' >> '$OUT'"
   if (( fails > 0 )); then
     # keep err.log for postmortem instead of deleting it with the tmp dir
     cp "$tmp/err.log" "$WORK/err.$bn.log" 2>/dev/null || true
