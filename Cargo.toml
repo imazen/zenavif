@@ -154,6 +154,10 @@ name = "sweep_validate"
 required-features = ["__expert"]
 
 [[example]]
+name = "target_hug_bench"
+required-features = ["target-quality"]
+
+[[example]]
 name = "predictor_sweep"
 required-features = ["__expert"]
 
