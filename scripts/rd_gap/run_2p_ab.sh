@@ -15,7 +15,25 @@ WORK="${WORK:-/tmp/rd_gap_work_2p.$$}"; mkdir -p "$WORK"  # local disk: see run_
 JOBS="${JOBS:-6}"
 QGRID_ZR="${QGRID_ZR:-30 40 50 55 60 65 70 75 80 85 90 95}"
 
-echo -e "image\tw\th\tfamily\tencoder\tfmt\tq\tbytes\tbpp\tssim2\tenc_ms\tbutteraugli_3n\tbutteraugli_max" > "$OUT"
+# RESUME: when OUT already exists, keep rows for images whose q-grid is
+# complete and re-run only the rest (gap-fill after transient cell failures
+# -- drvfs EIO bursts, mid-run kills). Fresh runs are unaffected.
+NEED=$(echo $QGRID_ZR | wc -w)
+declare -A DONE_IMGS
+if [ -s "$OUT" ]; then
+  keep="$WORK/keep.tsv"
+  head -1 "$OUT" > "$keep"
+  while read -r img n; do
+    if [ "$n" = "$NEED" ]; then
+      awk -F'\t' -v i="$img" '$1==i' "$OUT" >> "$keep"
+      DONE_IMGS[$img]=1
+    fi
+  done < <(tail -n +2 "$OUT" | cut -f1 | sort | uniq -c | awk '{print $2, $1}')
+  mv -f "$keep" "$OUT"
+  echo "[2p_ab] RESUME: kept ${#DONE_IMGS[@]} complete images in $OUT"
+else
+  echo -e "image\tw\th\tfamily\tencoder\tfmt\tq\tbytes\tbpp\tssim2\tenc_ms\tbutteraugli_3n\tbutteraugli_max" > "$OUT"
+fi
 echo "[2p_ab] mode=${TP_MODE:?} strength=${TP_STRENGTH:-1.0} speed=${ZENRAV1E_SPEED:-2} tune='${ZENRAVIF_TUNE:-}' q='$QGRID_ZR'"
 
 worker() {
@@ -49,6 +67,7 @@ running=0
 while IFS=$'\t' read -r img w h fam; do
   [ -z "${img:-}" ] && continue
   [ -f "$img" ] || { echo "  skip missing: $img"; continue; }
+  [ -n "${DONE_IMGS[$(basename "$img")]:-}" ] && continue
   worker "$img" "$w" "$h" "$fam" &
   running=$((running+1)); if (( running >= JOBS )); then wait -n; running=$((running-1)); fi
 done < <(tail -n +2 "$SAMPLE")
