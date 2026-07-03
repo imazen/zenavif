@@ -174,8 +174,13 @@ Diagnosis arms in flight (each isolates one hypothesis):
   cdef-dist) already carries most of the masking signal butteraugli would
   add — there is no aom-default-like "unmasked" base in zenrav1e to
   correct.
-- `boost-only clamp (weight_hi=1.0)` — no give-back side (the bytes autopsy
-  fingered it); the Variance-Boost-shaped one-directional variant.
+- `boost-only clamp (weight_hi=1.0)` — **MEASURED: BREAK-EVEN, the
+  give-back side WAS the poison.** ba3n +0.10% median (10/24 better),
+  ba-max **−0.04% (12/24 — the first zero-crossing of the program)**,
+  ssim2 +0.19%, 1.94×. Removing the coarsen-the-over-served half (the bytes
+  autopsy's suspect) recovers the entire +2.20% regression. Follow-up arms
+  queued: boost-only at strength 1.5 / 2.0 (is there a win past
+  break-even?).
 - `probe_quality=40` — libaom's fixed-quality preliminary pass (their q96
   trick): a content-intrinsic degradation signal instead of the
   self-referential real-q residual, and a cheaper pass 1.
