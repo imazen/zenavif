@@ -1,0 +1,38 @@
+# speed-conditional palette-gate threshold A/B (follow-up to hyperparam_palette_mech_ab; 100% offline store/TSV selection, 0 fresh encodes)
+# arms: tau {0.197 shipped, 0.10, 0.05} + fire-always, per speed {2,6}; cells = mech-ab TSV (iso+shipped configs) + palette-ab-final2 train26@1024
+# fit view = mean(fire?veto_adj_always:0) [fit_palette_gate.py continuity]; deploy view = mean(fire?veto_adj_always:bd_auto) [three_way bd_rule] — DEPLOY decides
+# butteraugli veto per cell (ba3n>+1.0 or bamax>+1.5): fired vetoed wins never banked (max(bd,0))
+# won bar: veto-adj bd_always <= -0.5; d_dep_vs_shipped = arm dep_mean - shipped-0.197 dep_mean (negative = arm better)
+scope	arm	tau	fires	n	fired_vetoed	fit_mean	dep_mean	dep_median	fw	fl	mw	ql	d_dep_vs_shipped
+s2 TRAIN (fit)	t0.197	0.1970	106	152	29	-3.4790	-3.4633	-0.1594	56	50	5	41	0.0000
+s2 TRAIN (fit)	t0.10	0.1000	108	152	30	-3.4642	-3.4633	-0.1594	56	52	5	39	0.0000
+s2 TRAIN (fit)	t0.05	0.0500	109	152	31	-3.4642	-3.4557	-0.1491	56	53	5	38	0.0076
+s2 TRAIN (fit)	always	-1.0000	152	152	44	-3.4478	-3.4478	-0.0384	61	91	0	0	0.0155
+s2 VAL (confirm)	t0.197	0.1970	58	84	14	-1.6461	-1.6626	-0.2284	33	25	2	24	0.0000
+s2 VAL (confirm)	t0.10	0.1000	62	84	15	-1.6626	-1.6626	-0.2284	34	28	1	21	0.0000
+s2 VAL (confirm)	t0.05	0.0500	66	84	15	-1.6561	-1.6911	-0.2840	35	31	0	18	-0.0285
+s2 VAL (confirm)	always	-1.0000	84	84	19	-1.6293	-1.6293	-0.0617	35	49	0	0	0.0333
+s2 VAL iso	t0.197	0.1970	29	42	10	-1.5138	-1.5821	-0.2906	16	13	2	11	0.0000
+s2 VAL iso	t0.10	0.1000	31	42	10	-1.5719	-1.5821	-0.2906	17	14	1	10	0.0000
+s2 VAL iso	t0.05	0.0500	33	42	10	-1.6001	-1.6657	-0.6224	18	15	0	9	-0.0836
+s2 VAL iso	always	-1.0000	42	42	13	-1.5711	-1.5711	0.0000	18	24	0	0	0.0110
+s2 VAL shipped	t0.197	0.1970	29	42	4	-1.7784	-1.7431	-0.2284	17	12	0	13	0.0000
+s2 VAL shipped	t0.10	0.1000	31	42	5	-1.7533	-1.7431	-0.2284	17	14	0	11	0.0000
+s2 VAL shipped	t0.05	0.0500	33	42	5	-1.7121	-1.7165	-0.2284	17	16	0	9	0.0267
+s2 VAL shipped	always	-1.0000	42	42	6	-1.6876	-1.6876	-0.2205	17	25	0	0	0.0556
+s6 TRAIN (fit)	t0.197	0.1970	45	72	5	-11.9672	-12.0511	-2.6887	39	6	11	16	0.0000
+s6 TRAIN (fit)	t0.10	0.1000	46	72	5	-12.0135	-12.0511	-2.6887	40	6	10	16	0.0000
+s6 TRAIN (fit)	t0.05	0.0500	47	72	5	-12.0651	-12.0976	-3.5228	41	6	9	16	-0.0465
+s6 TRAIN (fit)	always	-1.0000	72	72	13	-12.2423	-12.2423	-3.5228	50	22	0	0	-0.1912
+s6 VAL (confirm)	t0.197	0.1970	57	83	2	-11.4676	-11.5636	-7.4245	54	3	14	12	0.0000
+s6 VAL (confirm)	t0.10	0.1000	61	83	2	-11.5600	-11.5636	-7.4245	56	5	12	10	0.0000
+s6 VAL (confirm)	t0.05	0.0500	65	83	2	-11.6404	-11.6377	-7.4245	60	5	8	10	-0.0741
+s6 VAL (confirm)	always	-1.0000	83	83	6	-11.8242	-11.8242	-7.4245	68	15	0	0	-0.2606
+s6 VAL iso	t0.197	0.1970	29	42	2	-11.7775	-11.8622	-5.8490	27	2	6	7	0.0000
+s6 VAL iso	t0.10	0.1000	31	42	2	-11.8594	-11.8622	-5.8490	28	3	5	6	0.0000
+s6 VAL iso	t0.05	0.0500	33	42	2	-11.9360	-11.9382	-5.8490	30	3	3	6	-0.0760
+s6 VAL iso	always	-1.0000	42	42	5	-12.0374	-12.0374	-5.8490	33	9	0	0	-0.1752
+s6 VAL shipped	t0.197	0.1970	28	41	0	-11.1502	-11.2578	-8.5867	27	1	8	5	0.0000
+s6 VAL shipped	t0.10	0.1000	30	41	0	-11.2533	-11.2578	-8.5867	28	2	7	4	0.0000
+s6 VAL shipped	t0.05	0.0500	32	41	0	-11.3376	-11.3299	-8.5867	30	2	5	4	-0.0721
+s6 VAL shipped	always	-1.0000	41	41	1	-11.6058	-11.6058	-8.5867	35	6	0	0	-0.3480
