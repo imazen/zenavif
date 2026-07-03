@@ -1,0 +1,44 @@
+# SSIMULACRA2 goal-hugging measurement: encode_rgb8_with_target (target-quality feature)
+# 12 train26 images (every other row of sample_images_train26.tsv) x targets {60,75,85},
+# speed 6, threads 1, tolerance 0.5, max_encodes 6. Harness: examples/target_hug_bench.rs.
+# zenavif @ 87d6e090-era working tree, registry zenrav1e 0.1.4 path. Host: lilith 7950X.
+# RESULTS: |err| median 0.228 / p90 0.425 / max 2.329; 34/36 converged; encodes median 4 max 6;
+# wall ms median 3247. The 2 non-converged cells over-shot on synthetic content (clipart teapot
+# +2.33 @75, plot +0.72 @60) where the quality->score curve steps discretely -- honestly flagged.
+image	target	achieved	err	encodes	converged	bytes	ms
+5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	60	60.198	+0.198	3	true	69789	3184
+5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	75	74.516	-0.484	3	true	111552	3601
+5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	85	84.942	-0.058	1	true	186708	1446
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024.png	60	60.238	+0.238	4	true	6802	3219
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024.png	75	75.362	+0.362	4	true	11842	2645
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024.png	85	84.825	-0.175	4	true	22460	2583
+9118_gen_illustrations_farmers-market-stall_1536x1024.sdr.s1024.png	60	60.003	+0.003	3	true	122618	5350
+9118_gen_illustrations_farmers-market-stall_1536x1024.sdr.s1024.png	75	75.394	+0.394	2	true	202463	3214
+9118_gen_illustrations_farmers-market-stall_1536x1024.sdr.s1024.png	85	85.219	+0.219	4	true	318274	7228
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024.png	60	60.148	+0.148	5	true	111752	6058
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024.png	75	74.742	-0.258	3	true	170370	4116
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024.png	85	85.324	+0.324	1	true	272938	1548
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024.png	60	59.796	-0.204	4	true	164837	9743
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024.png	75	75.291	+0.291	3	true	259328	6238
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024.png	85	85.318	+0.318	1	true	396724	2468
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	60	60.114	+0.114	5	true	12299	2318
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	75	75.256	+0.256	5	true	20538	1832
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	85	85.328	+0.328	3	true	31255	1117
+5048_nps_romo-2018-longs-peak-keyhole-route_gray_p01_2550x4200.sdr.s1024.png	60	59.855	-0.145	4	true	59309	3761
+5048_nps_romo-2018-longs-peak-keyhole-route_gray_p01_2550x4200.sdr.s1024.png	75	74.813	-0.187	4	true	90524	2922
+5048_nps_romo-2018-longs-peak-keyhole-route_gray_p01_2550x4200.sdr.s1024.png	85	85.003	+0.003	3	true	132498	2356
+9074_gen_clipart_teapot-classic_1024x1536.sdr.s1024.png	60	59.668	-0.332	4	true	5814	3112
+9074_gen_clipart_teapot-classic_1024x1536.sdr.s1024.png	75	77.329	+2.329	6	false	10721	4704
+9074_gen_clipart_teapot-classic_1024x1536.sdr.s1024.png	85	84.942	-0.058	5	true	17137	3206
+9678_gen_products-grocery_cereal-box-coral_p0439_1024x1536.sdr.s1024.png	60	60.292	+0.292	3	true	19201	2772
+9678_gen_products-grocery_cereal-box-coral_p0439_1024x1536.sdr.s1024.png	75	75.237	+0.237	3	true	36683	2464
+9678_gen_products-grocery_cereal-box-coral_p0439_1024x1536.sdr.s1024.png	85	84.969	-0.031	4	true	80246	3793
+1614_food_dessert-plate-upside-down_valladolid-mexico_s23u_iso640-f1p7_20230917-213342_4000x3000.sdr.s1024.png	60	59.943	-0.057	4	true	30955	5102
+1614_food_dessert-plate-upside-down_valladolid-mexico_s23u_iso640-f1p7_20230917-213342_4000x3000.sdr.s1024.png	75	75.207	+0.207	4	true	51500	4300
+1614_food_dessert-plate-upside-down_valladolid-mexico_s23u_iso640-f1p7_20230917-213342_4000x3000.sdr.s1024.png	85	85.018	+0.018	4	true	91183	4985
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024.png	60	60.719	+0.719	6	false	25683	8433
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024.png	75	74.715	-0.285	3	true	42871	3275
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024.png	85	85.425	+0.425	3	true	66753	3408
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.s1024.png	60	60.098	+0.098	4	true	9073	4940
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.s1024.png	75	75.348	+0.348	3	true	13957	2684
+7050_plots_line-00166-s010fb6d2_1024x1024.sdr.s1024.png	85	84.970	-0.030	4	true	17321	3693
