@@ -202,6 +202,29 @@ The prange (4,64) s2 widening itself REMAINS RULED OUT on clean data (+0.48% med
 worse 15/22; `benchmarks/rd_gap_prange_retest_2026-07-02.tsv`) — but now with 7/22 winners
 (three at −1.8..−2.5%), making a content-adaptive large-block gate a feature-hints candidate.
 
+**2026-07-03 follow-up (zenrav1e#34, FIXED upstream `1dabba91`): the 3fa735dc sliver cap was
+itself only half-sound.** The cap is decoder-followable only via the written intra tx-size
+depth — a TX_MODE_SELECT symbol. With `rdo_tx_decision=false` (frame header TX_MODE_LARGEST,
+e.g. ravif's high-quality band, or stock zenrav1e speed 6-8) no tx-size symbol exists and
+conforming decoders derived the uncapped TX_64X16/16X64 against capped coefficient units —
+guaranteed desync at every 4-way 64-parent pick. Found by the sizedecay non-tune (4,64)
+isolation arm (100% DECFAIL at q≥78); bisected latent-since-`7d254289` (pre-Phase-1
+(4,64)+rdo-off was CLEAN, so plain TX_64X64/64X32/32X64 code fine under LARGEST — the
+"never-validated 64-dim transforms" framing above was too broad). Fix: intra 64-parent 4-way
+candidates now require `tx_mode_select`; hard asserts at both cap sites. 6/6 corrupt shapes
+verified clean under aomdec+rav1d-safe; byte-identical at shipped defaults. Registry builds
+carry BOTH sliver bugs until the release past 0.1.4.
+
+### ravif 4:2:0 output non-conformant — OPEN (zenavif#29)
+Found 2026-07-03 by the sizedecay non-tune `yuv420` diagnostic arm (PALCONF gating): every
+AVIF produced via `ChromaSubsampling::Yuv420` / `cavif --yuv 420` is REJECTED by aomdec
+("Corrupted segment_ids" on registry zenrav1e 0.1.4, "Failed to decode tile data" on master
+b0098eb1) at every quality/size, while rav1d-safe tolerates the streams (which is why
+round-trip tests never caught it). zenrav1e CLI 420 y4m encodes are clean — the trigger is
+in ravif's 420 wiring or a zenrav1e API surface only ravif exercises with Cs420. Exonerated
+by A/B: segmentation off/simple, rdo_tx on, CDEF on, palette off/always, min-partition.
+zenavif's default 444 is unaffected. Do NOT ship/benchmark 420 until fixed.
+
 ### Tune::Ssimulacra2 — SHIPPED upstream 2026-07-02, release-gated
 `zenrav1e@a37faea8` adds `Tune::Ssimulacra2` (aom-parity chroma delta-q + ss2
 QM curves; the other three aom mechanisms measured as regressions and were

@@ -69,6 +69,13 @@ for arm in $ARMS; do
     yuv420) export CAVIF_EXTRA="--yuv 420" ;;
     combo32) export ZENRAVIF_SD2_PRANGE=4,32 ZENRAVIF_SD2_RDOTX=1 \
                     ZENRAVIF_SD2_CDEF=1 ZENRAVIF_SD2_LRF=1 ;;
+    # follow-up arms (2nd driver pass): psnr isolates the Psychovisual
+    # activity-masked metric itself; combo64 = combo with 64-max partitions,
+    # VALID only because rdotx dodges zenrav1e#34's non-RDO 64-dim TX bug
+    # (PALCONF still gates every cell).
+    psnr) export ZENRAVIF_TUNE=psnr ;;
+    combo64) export ZENRAVIF_SD2_PRANGE=4,64 ZENRAVIF_SD2_RDOTX=1 \
+                    ZENRAVIF_SD2_CDEF=1 ZENRAVIF_SD2_LRF=1 ;;
     ship*) echo "[sd_nontune] arm $arm needs explicit env (ship-shape trial)" ;;
     *) echo "[sd_nontune] unknown arm $arm" >&2; exit 2 ;;
   esac
