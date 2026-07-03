@@ -2,12 +2,30 @@
 //! expert" rule that replaces zenrav1e's ported AA-aware screen-content
 //! detection where downscaling has blinded it.
 //!
-//! # The rule
+//! # The rule (speed-conditional since 2026-07-03)
 //!
-//! Fire `PaletteMode::Always` iff `patch_fraction > 0.197`; otherwise keep
-//! `PaletteMode::Auto` (the encoder's own per-keyframe detection). No model
-//! file — a single-threshold descriptor rule, same shape as the planned
+//! Fire `PaletteMode::Always` iff `patch_fraction` exceeds the speed tier's
+//! threshold; otherwise keep `PaletteMode::Auto` (the encoder's own
+//! per-keyframe detection). No model file — a per-speed-tier
+//! single-threshold descriptor rule, same shape as the planned
 //! Yuv400-for-grayscale gate (`GrayscaleScore >= 0.99`).
+//!
+//! | speed tier | threshold | provenance |
+//! |---|---|---|
+//! | slow, `speed <= 5` | `> 0.197` | first-cut fit + mechanism A/B (fitted and confirmed at s2; s1/s3-s5 unmeasured — the conservative fewer-fires side) |
+//! | fast, `speed >= 6` | `> 0.05`  | speed-conditional A/B (fitted at s6 train, confirmed s6 val, corroborated at s8; s7/s9/s10 same-tier assumption) |
+//!
+//! At fast speeds the encoder's RDO search is weak enough that the palette
+//! tool's exact-color path wins even on quiet illustration-ish content
+//! (6600-class scans: −0.6..−2.6 BD at s6, butteraugli agreeing), while at
+//! s2 the same firings measured ≈0-to-negative — the threshold is genuinely
+//! speed-conditional. 0.05 keeps photos out (val photo firing rate 2.9% vs
+//! 0.4% at 0.197; val photo patch_fraction p90 0.008 / p95 0.032): firing
+//! costs palette search time (median 1.80× at s6 / 2.13× at s8 on fired
+//! cells), so the residual −0.19 mean BD sitting below pf 0.05
+//! (9094/1000-class cells overlapping the photo pf distribution) is
+//! deliberately left unclaimed at the speed-oriented tier.
+//! `benchmarks/hyperparam_palette_speed_ab_2026-07-03.tsv`.
 //!
 //! # Provenance (measured, not designed)
 //!
@@ -56,22 +74,54 @@ pub enum PalettePreference {
     Off,
 }
 
-/// The fitted gate threshold on zenanalyze `patch_fraction`.
+/// The slow-tier (speed ≤ 5) gate threshold on zenanalyze `patch_fraction`.
 ///
-/// Fit 2026-07-03 on the §E label store (LOOCV −10.91 vs −11.05 ceiling) and
-/// re-validated by the mechanism A/B's val-origin refit (see module docs).
-/// `patch_fraction` ∈ [0,1]: fraction of sampled blocks exactly matching
-/// another block — photos p90 ≈ 0.037, screens p50 ≈ 0.726.
+/// Fit 2026-07-03 on the §E label store (LOOCV −10.91 vs −11.05 ceiling),
+/// re-validated by the mechanism A/B's val-origin refit, and re-confirmed by
+/// the speed-conditional A/B (s2 refit plateau keeps 0.197; lower arms add
+/// nothing consistent at s2 — see module docs). `patch_fraction` ∈ [0,1]:
+/// fraction of sampled blocks exactly matching another block — photos p90 ≈
+/// 0.037, screens p50 ≈ 0.726.
 pub const PALETTE_GATE_PATCH_FRACTION: f32 = 0.197;
 
-/// The deterministic palette gate: `patch_fraction > 0.197` → [`PalettePreference::Always`].
+/// The fast-tier (speed ≥ [`PALETTE_GATE_FAST_TIER_MIN_SPEED`]) threshold.
+///
+/// Speed-conditional A/B 2026-07-03: at s6 the t0.05 arm improved deploy
+/// mean BD −0.047 (train) / −0.074 (val) over 0.197 with every flipped
+/// winner butteraugli-clean, while keeping the photo firing rate at 2.9%.
+/// The deeper refit picks (0.01-0.015) and fire-always claim another −0.19
+/// mean but cross into the photo `patch_fraction` mass at 1.80×/2.13×
+/// (s6/s8) fired encode cost — rejected for a speed tier. Corroborated at
+/// s8 (−0.044 val, same direction — see the benchmarks TSV).
+pub const PALETTE_GATE_PATCH_FRACTION_FAST: f32 = 0.05;
+
+/// First encoder speed of the fast gate tier (rav1e/ravif speed domain,
+/// 1-10). Measured at s6 + s8; the boundary sits at 6 because 5-and-below
+/// was never measured to benefit from the lower threshold (s2 measured
+/// against it) — the unmeasured s3-s5 default to the conservative
+/// fewer-fires slow tier.
+pub const PALETTE_GATE_FAST_TIER_MIN_SPEED: u8 = 6;
+
+/// The gate threshold for an encoder speed (see the module-docs table).
+#[must_use]
+pub fn palette_gate_threshold(speed: u8) -> f32 {
+    if speed >= PALETTE_GATE_FAST_TIER_MIN_SPEED {
+        PALETTE_GATE_PATCH_FRACTION_FAST
+    } else {
+        PALETTE_GATE_PATCH_FRACTION
+    }
+}
+
+/// The deterministic palette gate: `patch_fraction >` the speed tier's
+/// threshold → [`PalettePreference::Always`] (0.197 at speed ≤ 5, 0.05 at
+/// speed ≥ 6 — see the module docs for the measured provenance).
 ///
 /// Degrades cleanly: a non-finite `patch_fraction` (analysis failed,
 /// feature unavailable) returns [`PalettePreference::Auto`] — the encoder's
 /// own detection stays in charge, which is exactly the pre-gate behavior.
 #[must_use]
-pub fn palette_gate(patch_fraction: f32) -> PalettePreference {
-    if patch_fraction.is_finite() && patch_fraction > PALETTE_GATE_PATCH_FRACTION {
+pub fn palette_gate(patch_fraction: f32, speed: u8) -> PalettePreference {
+    if patch_fraction.is_finite() && patch_fraction > palette_gate_threshold(speed) {
         PalettePreference::Always
     } else {
         PalettePreference::Auto
@@ -85,6 +135,10 @@ pub fn palette_gate(patch_fraction: f32) -> PalettePreference {
 /// keyed by the live analyzer instead of a baked model (this rule has no
 /// model file).
 ///
+/// `speed` is the encoder speed the gate's recommendation will run at
+/// (rav1e/ravif 1-10) — it selects the tier threshold per the module docs;
+/// [`crate::EncoderConfig::auto_tune`] passes the speed it just picked.
+///
 /// Any failure path — empty pixels, feature missing from the offer AND
 /// unanalyzable — resolves to [`PalettePreference::Auto`] (clean degrade).
 #[cfg(feature = "auto-tune")]
@@ -94,6 +148,7 @@ pub fn palette_gate_for_rgb8(
     width: u32,
     height: u32,
     offer: Option<&zenanalyze_api::Offer<'_>>,
+    speed: u8,
 ) -> PalettePreference {
     use zenanalyze::feature::{AnalysisFeature, AnalysisQuery, FeatureSet};
 
@@ -109,12 +164,11 @@ pub fn palette_gate_for_rgb8(
             zenanalyze::feature_defs_version(),
             0, // canonical default analysis config
         );
-        if let Some(values) = offer.reuse_for(&request) {
-            if let Some(&pf) = values.first() {
-                if pf.is_finite() {
-                    return palette_gate(pf);
-                }
-            }
+        if let Some(values) = offer.reuse_for(&request)
+            && let Some(&pf) = values.first()
+            && pf.is_finite()
+        {
+            return palette_gate(pf, speed);
         }
     }
 
@@ -126,7 +180,7 @@ pub fn palette_gate_for_rgb8(
     let query = AnalysisQuery::new(FeatureSet::new().with(FEATURE));
     let analysis = zenanalyze::analyze_features_rgb8(rgb, width, height, &query);
     match analysis.get_f32(FEATURE) {
-        Some(pf) if pf.is_finite() => palette_gate(pf),
+        Some(pf) if pf.is_finite() => palette_gate(pf, speed),
         _ => PalettePreference::Auto,
     }
 }
@@ -136,25 +190,61 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rule_thresholds() {
-        // The rule is strict-greater at the fitted threshold.
-        assert_eq!(palette_gate(0.197), PalettePreference::Auto);
-        assert_eq!(palette_gate(0.198), PalettePreference::Always);
-        assert_eq!(palette_gate(0.0), PalettePreference::Auto);
-        assert_eq!(palette_gate(1.0), PalettePreference::Always);
-        // Measured corpus anchors (imazen26_features_2026-06-23.parquet):
-        // screens keep patch_fraction >= 0.44 down to 256px; photos <= 0.008.
-        assert_eq!(palette_gate(0.44), PalettePreference::Always);
-        assert_eq!(palette_gate(0.008), PalettePreference::Auto);
+    fn rule_thresholds_slow_tier() {
+        // The rule is strict-greater at the fitted threshold; the slow tier
+        // (speed <= 5) is byte-identical to the pre-speed-conditional rule.
+        for speed in 1..=5u8 {
+            assert_eq!(palette_gate(0.197, speed), PalettePreference::Auto);
+            assert_eq!(palette_gate(0.198, speed), PalettePreference::Always);
+            assert_eq!(palette_gate(0.0, speed), PalettePreference::Auto);
+            assert_eq!(palette_gate(1.0, speed), PalettePreference::Always);
+            // Measured corpus anchors (imazen26_features_2026-06-23.parquet):
+            // screens keep patch_fraction >= 0.44 down to 256px; photos <= 0.008.
+            assert_eq!(palette_gate(0.44, speed), PalettePreference::Always);
+            assert_eq!(palette_gate(0.008, speed), PalettePreference::Auto);
+        }
+    }
+
+    #[test]
+    fn rule_thresholds_fast_tier() {
+        // speed >= 6: strict-greater at 0.05.
+        for speed in 6..=10u8 {
+            assert_eq!(palette_gate(0.05, speed), PalettePreference::Auto);
+            assert_eq!(palette_gate(0.051, speed), PalettePreference::Always);
+            assert_eq!(palette_gate(0.0, speed), PalettePreference::Auto);
+            // Photo p90 anchor (0.032) stays quiet even at the fast tier.
+            assert_eq!(palette_gate(0.032, speed), PalettePreference::Auto);
+        }
+    }
+
+    #[test]
+    fn speed_conditional_band() {
+        // The measured speed-conditional band (0.05, 0.197]: quiet at slow
+        // speeds, fired at fast speeds — e.g. the 6600-class scans (pf
+        // 0.060-0.072) whose forced palette wins only at s6.
+        for pf in [0.06f32, 0.072, 0.113, 0.197] {
+            assert_eq!(palette_gate(pf, 2), PalettePreference::Auto);
+            assert_eq!(palette_gate(pf, 5), PalettePreference::Auto);
+            assert_eq!(palette_gate(pf, 6), PalettePreference::Always);
+            assert_eq!(palette_gate(pf, 8), PalettePreference::Always);
+        }
+        // Tier boundary is exactly at PALETTE_GATE_FAST_TIER_MIN_SPEED.
+        assert_eq!(palette_gate_threshold(5), PALETTE_GATE_PATCH_FRACTION);
+        assert_eq!(palette_gate_threshold(6), PALETTE_GATE_PATCH_FRACTION_FAST);
     }
 
     #[test]
     fn non_finite_degrades_to_auto() {
         // Any non-finite feature value is an analysis failure — Auto is the
         // safe reading (the encoder's own detection stays in charge).
-        assert_eq!(palette_gate(f32::NAN), PalettePreference::Auto);
-        assert_eq!(palette_gate(f32::NEG_INFINITY), PalettePreference::Auto);
-        assert_eq!(palette_gate(f32::INFINITY), PalettePreference::Auto);
+        for speed in [2u8, 6] {
+            assert_eq!(palette_gate(f32::NAN, speed), PalettePreference::Auto);
+            assert_eq!(
+                palette_gate(f32::NEG_INFINITY, speed),
+                PalettePreference::Auto
+            );
+            assert_eq!(palette_gate(f32::INFINITY, speed), PalettePreference::Auto);
+        }
     }
 
     /// Screen-like synthetic content (repeated flat patches) fires the gate;
@@ -171,15 +261,21 @@ mod tests {
             .flat_map(|y| {
                 (0..w).flat_map(move |x| {
                     let tile = ((x / 16) + (y / 16)) % 2;
-                    if tile == 0 { [255u8, 255, 255] } else { [0u8, 32, 128] }
+                    if tile == 0 {
+                        [255u8, 255, 255]
+                    } else {
+                        [0u8, 32, 128]
+                    }
                 })
             })
             .collect();
-        assert_eq!(
-            palette_gate_for_rgb8(&screen, w, h, None),
-            PalettePreference::Always,
-            "flat repeated tiles must fire the gate"
-        );
+        for speed in [2u8, 6] {
+            assert_eq!(
+                palette_gate_for_rgb8(&screen, w, h, None, speed),
+                PalettePreference::Always,
+                "flat repeated tiles must fire the gate at every tier"
+            );
+        }
 
         // Photo-like: strong aperiodic hash noise around mid-gray. The DCT
         // signature behind patch_fraction is DC-invariant and sign-based, so
@@ -204,18 +300,27 @@ mod tests {
                 })
             })
             .collect();
-        assert_eq!(
-            palette_gate_for_rgb8(&photo, w, h, None),
-            PalettePreference::Auto,
-            "smooth noisy gradient must not fire the gate"
-        );
+        for speed in [2u8, 6] {
+            assert_eq!(
+                palette_gate_for_rgb8(&photo, w, h, None, speed),
+                PalettePreference::Auto,
+                "aperiodic hash noise must not fire the gate at any tier"
+            );
+        }
     }
 
     /// Degrade path: empty/degenerate input recommends Auto.
     #[cfg(feature = "auto-tune")]
     #[test]
     fn degenerate_input_degrades_to_auto() {
-        assert_eq!(palette_gate_for_rgb8(&[], 0, 0, None), PalettePreference::Auto);
+        assert_eq!(
+            palette_gate_for_rgb8(&[], 0, 0, None, 2),
+            PalettePreference::Auto
+        );
+        assert_eq!(
+            palette_gate_for_rgb8(&[], 0, 0, None, 6),
+            PalettePreference::Auto
+        );
     }
 
     /// A matching Offer is reused verbatim (no own-pass): supplying a fired
@@ -236,7 +341,7 @@ mod tests {
         // Pixels say "photo" (flat gray = zero repetition? flat IS repetitive —
         // use empty pixels: with a valid offer the pixels are never touched).
         assert_eq!(
-            palette_gate_for_rgb8(&[], 0, 0, Some(&offer)),
+            palette_gate_for_rgb8(&[], 0, 0, Some(&offer), 2),
             PalettePreference::Always,
             "offered patch_fraction=0.9 must fire without an analysis pass"
         );

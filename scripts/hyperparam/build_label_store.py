@@ -245,6 +245,17 @@ def sources():
                   arm_id=None, knob_json=None,
                   encoder_rev="zenrav1e@32477046 (rav1e CLI, isolated: still-picture threads=1 lrf=false filter-intra=false)",
                   q_kind="rav1e_quantizer", speed=None, rows=2700))
+    # s8 corroboration run for the SPEED-CONDITIONAL threshold A/B (fresh
+    # encodes on the restored zenavif-sweep-1 box; binary byte-continuity
+    # with the mech run sha-proven against the kept 7052 s2-q60-auto IVF).
+    # Conformance: 1350/1350 aomdec-decoded, 900/900 palette-armed cells
+    # raw-md5-agreed with rav1d-safe. enc_ms JOBS=22-contended (always/off
+    # within-cell ratio median 2.13x is the honest fired-cost signal).
+    s.append(dict(path=f"{SRC['palmech']}/pal_iso_s8.tsv", kind="palette_sizes_tsv",
+                  corpus="mech26", sweep_source="palette-mech-iso-s8-2026-07-03",
+                  arm_id=None, knob_json=None,
+                  encoder_rev="zenrav1e@32477046 (rav1e CLI, isolated: still-picture threads=1 lrf=false filter-intra=false)",
+                  q_kind="rav1e_quantizer", speed=None, rows=1350))
 
     # --- size-decay isolation A/B (2026-07-03) — wedge #3 / HYPERPARAM rule 2:
     # leave-one-out Tune::Ssimulacra2 mechanism arms x sizes {256,512,1024} on
@@ -611,6 +622,9 @@ def main():
                                           "timing sidecar benchmarks/hyperparam_palette_mech_timing_"
                                           "2026-07-03.tsv is the authoritative time source",
             "palette-mech-iso-2026-07-03": "JOBS=26 concurrent single-threaded rav1e cells — contended",
+            "palette-mech-iso-s8-2026-07-03": "JOBS=22 concurrent single-threaded rav1e cells — contended; "
+                                              "within-cell always/off ratio (median 2.13x, p90 3.27x) is the "
+                                              "honest fired-cost signal at s8",
         },
         "palette_pipeline_caveat": "palette-ab rows: rav1e CLI on color.py-converted 420 y4m, aomdec decode, "
                                    "isolated config (still-picture, threads=1, lrf=false, filter-intra=false). "
@@ -618,7 +632,9 @@ def main():
                                    "deltas valid. All cells passed aomdec; palette-armed cells additionally "
                                    "passed aomdec-vs-rav1d-safe md5 agreement. Same pipeline + conformance "
                                    "bar for palette-mech-iso-2026-07-03 (1800/1800 armed cells md5-agree, "
-                                   "zenrav1e@32477046, scripts/rd_gap/palette_iso_cell.sh); the shipped "
+                                   "zenrav1e@32477046, scripts/rd_gap/palette_iso_cell.sh) and for "
+                                   "palette-mech-iso-s8-2026-07-03 (900/900 armed cells md5-agree, same "
+                                   "binary sha-continuity-proven, IVFs kept in ivf_s8/); the shipped "
                                    "palette-mech-ab cavif arms were PALCONF-verified per cell instead "
                                    "(extract_av1 -> aomdec + rav1d-safe raw-md5, scripts/rd_gap/"
                                    "zenrav1e_cell.sh PALCONF=1). Grid caveat: shipped s2 arms are 12-pt "

@@ -47,6 +47,7 @@ Usage: python3 fit_palette_speed_threshold.py   (writes
 benchmarks/hyperparam_palette_speed_ab_2026-07-03.tsv + prints the tables)
 """
 
+import argparse
 import os
 import sys
 
@@ -64,6 +65,27 @@ OUT_TSV = os.path.join(HERE, "../../benchmarks/hyperparam_palette_speed_ab_2026-
 SHIPPED = 0.197
 ARMS = [("t0.197", 0.197), ("t0.10", 0.10), ("t0.05", 0.05), ("always", -1.0)]
 WIN_BAR = -0.5
+
+
+def load_iso_s8(path):
+    """Fresh s8 iso-config run (same corpus, binary chain byte-continuity
+    proven via the kept-IVF sha probe): per-cell BDs through the exact
+    analyze_palette_mech_ab conventions (read_iso + bd_frame)."""
+    from analyze_palette_mech_ab import bd_frame, load_meta, read_iso
+    meta = load_meta()
+    rows = read_iso(path, meta)
+    assert set(rows["speed"].unique()) == {8}, "expected an s8-only run"
+    piv = bd_frame(rows, meta, "iso")
+    piv = piv.rename(columns={
+        "bd_always": "bd_always", "bd_auto": "bd_auto",
+        "ba3n_always": "ba3n_always", "bamax_always": "bamax_always"})
+    piv["cell"] = (piv["origin_id"].astype(str) + "."
+                   + np.where(piv["crop_label"] != "full",
+                              piv["crop_label"], piv["size_slot"]))
+    keep = ["cell", "config", "speed", "split", "cgroup", "size_slot",
+            "patch_fraction", "fires", "bd_auto", "bd_always",
+            "ba3n_always", "bamax_always"]
+    return piv[keep]
 
 
 def load_cells():
@@ -192,9 +214,20 @@ def flips(df, tau, label):
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--iso-s8", help="fresh s8 iso run TSV (pal_iso_s8.tsv)")
+    args = ap.parse_args()
+
     cells = load_cells()
+    speeds = [2, 6]
+    if args.iso_s8:
+        s8 = load_iso_s8(args.iso_s8)
+        print(f"iso s8 cells: {len(s8)} "
+              f"({s8.groupby('split').size().to_dict()})")
+        cells = pd.concat([cells, s8], ignore_index=True)
+        speeds.append(8)
     recs = []
-    for spd in (2, 6):
+    for spd in speeds:
         s = cells[cells["speed"] == spd]
         tr, va = s[s["split"] == "train"], s[s["split"] == "val"]
         print(f"\n{'=' * 78}\nSPEED {spd}\n{'=' * 78}")
@@ -212,7 +245,7 @@ def main():
 
     hdr = [
         "speed-conditional palette-gate threshold A/B (follow-up to hyperparam_palette_mech_ab; 100% offline store/TSV selection, 0 fresh encodes)",
-        "arms: tau {0.197 shipped, 0.10, 0.05} + fire-always, per speed {2,6}; cells = mech-ab TSV (iso+shipped configs) + palette-ab-final2 train26@1024",
+        "arms: tau {0.197 shipped, 0.10, 0.05} + fire-always, per speed {2,6,8}; cells = mech-ab TSV (iso+shipped configs) + palette-ab-final2 train26@1024 + fresh iso s8 (byte-continuity sha-proven)",
         "fit view = mean(fire?veto_adj_always:0) [fit_palette_gate.py continuity]; deploy view = mean(fire?veto_adj_always:bd_auto) [three_way bd_rule] — DEPLOY decides",
         "butteraugli veto per cell (ba3n>+1.0 or bamax>+1.5): fired vetoed wins never banked (max(bd,0))",
         "won bar: veto-adj bd_always <= -0.5; d_dep_vs_shipped = arm dep_mean - shipped-0.197 dep_mean (negative = arm better)",

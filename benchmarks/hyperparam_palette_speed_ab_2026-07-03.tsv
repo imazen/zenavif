@@ -1,5 +1,5 @@
 # speed-conditional palette-gate threshold A/B (follow-up to hyperparam_palette_mech_ab; 100% offline store/TSV selection, 0 fresh encodes)
-# arms: tau {0.197 shipped, 0.10, 0.05} + fire-always, per speed {2,6}; cells = mech-ab TSV (iso+shipped configs) + palette-ab-final2 train26@1024
+# arms: tau {0.197 shipped, 0.10, 0.05} + fire-always, per speed {2,6,8}; cells = mech-ab TSV (iso+shipped configs) + palette-ab-final2 train26@1024 + fresh iso s8 (byte-continuity sha-proven)
 # fit view = mean(fire?veto_adj_always:0) [fit_palette_gate.py continuity]; deploy view = mean(fire?veto_adj_always:bd_auto) [three_way bd_rule] — DEPLOY decides
 # butteraugli veto per cell (ba3n>+1.0 or bamax>+1.5): fired vetoed wins never banked (max(bd,0))
 # won bar: veto-adj bd_always <= -0.5; d_dep_vs_shipped = arm dep_mean - shipped-0.197 dep_mean (negative = arm better)
@@ -36,3 +36,15 @@ s6 VAL shipped	t0.197	0.1970	28	41	0	-11.1502	-11.2578	-8.5867	27	1	8	5	0.0000
 s6 VAL shipped	t0.10	0.1000	30	41	0	-11.2533	-11.2578	-8.5867	28	2	7	4	0.0000
 s6 VAL shipped	t0.05	0.0500	32	41	0	-11.3376	-11.3299	-8.5867	30	2	5	4	-0.0721
 s6 VAL shipped	always	-1.0000	41	41	1	-11.6058	-11.6058	-8.5867	35	6	0	0	-0.3480
+s8 TRAIN (fit)	t0.197	0.1970	29	48	2	-9.2213	-9.2830	-1.2469	25	4	8	11	0.0000
+s8 TRAIN (fit)	t0.10	0.1000	30	48	2	-9.2508	-9.2830	-1.2469	26	4	7	11	0.0000
+s8 TRAIN (fit)	t0.05	0.0500	30	48	2	-9.2508	-9.2830	-1.2469	26	4	7	11	0.0000
+s8 TRAIN (fit)	always	-1.0000	48	48	7	-9.5097	-9.5097	-1.9029	33	15	0	0	-0.2266
+s8 VAL (confirm)	t0.197	0.1970	29	42	2	-12.2554	-12.3542	-7.7302	25	4	5	8	0.0000
+s8 VAL (confirm)	t0.10	0.1000	31	42	2	-12.3277	-12.3542	-7.7302	26	5	4	7	0.0000
+s8 VAL (confirm)	t0.05	0.0500	33	42	2	-12.3731	-12.3985	-7.7302	27	6	3	6	-0.0443
+s8 VAL (confirm)	always	-1.0000	42	42	6	-12.4909	-12.4909	-7.7302	30	12	0	0	-0.1367
+s8 VAL iso	t0.197	0.1970	29	42	2	-12.2554	-12.3542	-7.7302	25	4	5	8	0.0000
+s8 VAL iso	t0.10	0.1000	31	42	2	-12.3277	-12.3542	-7.7302	26	5	4	7	0.0000
+s8 VAL iso	t0.05	0.0500	33	42	2	-12.3731	-12.3985	-7.7302	27	6	3	6	-0.0443
+s8 VAL iso	always	-1.0000	42	42	6	-12.4909	-12.4909	-7.7302	30	12	0	0	-0.1367

@@ -311,6 +311,33 @@ fires ≈0 bytes + 1.06× median time. Record:
 `benchmarks/hyperparam_palette_mech_{ab,timing}_2026-07-03.tsv` + raw
 `/mnt/v/output/rd-gap-palette-ab-2026-07-03/`.
 
+**2026-07-03 (later still): the gate threshold is SPEED-CONDITIONAL —
+measured + SHIPPED.** The mech A/B's val-refit anomaly (0.046-0.066)
+resolved: real at fast speeds only. A/B of τ {0.197, 0.10, 0.05,
+fire-always} × s{2,6,8}: 391 cells 100% OFFLINE (a threshold arm is a pure
+per-cell selection over the already-measured off/always/auto outcomes —
+mech-ab TSV + palette-ab-final2 store rows) + one fresh 1350-cell s8 iso
+run (72 s box time, binary byte-continuity sha-proven against the kept
+7052 IVF, 0 conformance failures, 900/900 armed cells md5-agree). s2 KEEPS
+0.197 (refit plateau confirms; t0.05's val −0.028 is one iso cell
+contradicted by the shipped config). s6+s8 confirm τ=0.05: deploy-mean vs
+0.197 −0.047 train / −0.074 val (s6), −0.044 val (s8), every flipped
+winner butteraugli-clean (6600-class scan-illustrations). fire-always is
+nominally best (−0.14..−0.26 val) but its extra value sits at pf ≤ 0.05
+INSIDE the photo pf mass — 100% photo firing at 1.80× (s6) / 2.13× (s8)
+fired encode cost — rejected for the speed tier; residual ≈−0.19 mean is
+feature-capacity (pf can't separate the 9094/1000-class fast-speed winners
+from photos), not threshold placement. Shipped:
+`palette_gate(pf, speed)` — s≤5 → 0.197 (byte-identical to the pre-change
+rule), s≥6 → 0.05 (measured at 6+8; s7/s9/s10 same-tier assumption);
+`palette_gate_for_rgb8(.., speed)`; `auto_tune` passes its picked speed.
+Record: `benchmarks/hyperparam_palette_speed_ab_2026-07-03.tsv` +
+`scripts/hyperparam/fit_palette_speed_threshold.py` (deterministic — all
+tables re-derivable by re-running it); label store gained
+`palette-mech-iso-s8-2026-07-03` (1,350 rows, 100% join; 29,358 rows / 78
+arms total); s8 IVFs `/mnt/v/output/rd-gap-palette-ab-2026-07-03/ivf_s8/`
+(Tower-mirrored, sha-verified).
+
 **At the zenrav1e dep bump (>0.1.4):**
 1. ravif: add the palette pass-through builder (same shape as its other
    `override_*` plumbing; the WEDGE-FINDER `ZENRAVIF_PALETTE` env passthrough
@@ -320,10 +347,7 @@ fires ≈0 bytes + 1.06× median time. Record:
    drop the `let _ = &config.palette_preference;` placeholder;
 3. re-run the PALCONF conformance protocol (`scripts/rd_gap/zenrav1e_cell.sh`
    PALCONF=1) on a palette-armed sample + re-measure the screen-content tier
-   gap;
-4. follow-up (measured, not landed): speed-conditional threshold — the val
-   refit wants τ≈0.05-0.07 at s≥6 (forced palette wins even on quiet classes
-   there; +0.17 mean BD available).
+   gap.
 
 ### zenrav1e LRF + filter-intra desync encoder recon from decoders (OPEN upstream)
 Found 2026-07-03 while measuring palette (zenrav1e#32, #33): at s<=7 (LRF)

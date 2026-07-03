@@ -14,6 +14,23 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 - README overhaul: clickable badge row (CI/crates.io/lib.rs/docs.rs/MSRV/dual-license), `## Quick start` with a `[dependencies]` block, absolute links throughout, regenerated crosslink footer (now last), split crates.io README (`README.crates.md` via `readme =` + `include`), and a `benchmarks/README.md` methodology index.
 
 ### Added
+- **Speed-conditional palette-gate threshold** (follow-up A/B to the mechanism
+  A/B; release-gated like the gate itself): `palette_gate(patch_fraction, speed)`
+  now uses per-speed-tier thresholds — 0.197 at speed ≤ 5 (byte-identical to the
+  prior rule) and 0.05 at speed ≥ 6 (`PALETTE_GATE_PATCH_FRACTION_FAST` +
+  `palette_gate_threshold(speed)`); `palette_gate_for_rgb8` gains the speed
+  param and `auto_tune` passes the speed it just picked. Measured: arms
+  {0.197, 0.10, 0.05, fire-always} × s{2,6,8}, 391/436 cells derived offline
+  from the label store + mech-A/B TSV (a threshold arm is a per-cell selection
+  over already-measured off/always/auto outcomes) + one fresh 1,350-cell s8
+  iso run (byte-continuity sha-proven, 0 conformance failures). s2 keeps
+  0.197; s6 confirms 0.05 (deploy −0.047 train / −0.074 val vs 0.197, flips
+  butteraugli-clean); s8 corroborates (−0.044 val). fire-always measured
+  nominally best but rejected: its extra value sits inside the photo
+  patch_fraction mass at 1.80×/2.13× (s6/s8) fired encode cost.
+  `benchmarks/hyperparam_palette_speed_ab_2026-07-03.tsv` +
+  `scripts/hyperparam/fit_palette_speed_threshold.py`; label store +1,350 rows
+  (`palette-mech-iso-s8-2026-07-03`).
 - **Size-decay isolation A/B (wedge #3) — verdicts + the qmdist size ramp**:
   leave-one-out Tune::Ssimulacra2 mechanism arms × {256,512,1024} renditions
   (`scripts/rd_gap/sizedecay_arms.sh` driver + `scripts/hyperparam/`

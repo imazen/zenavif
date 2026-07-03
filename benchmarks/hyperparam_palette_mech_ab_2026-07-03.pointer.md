@@ -7,6 +7,15 @@ RD_CACHE=off). Analysis: `scripts/hyperparam/analyze_palette_mech_ab.py`;
 console dump with the three-way/confusion/refit tables:
 `/mnt/v/output/rd-gap-palette-ab-2026-07-03/analysis_console.txt`.
 
+**Same-day follow-up (speed-conditional threshold A/B)**:
+`hyperparam_palette_speed_ab_2026-07-03.tsv` +
+`scripts/hyperparam/fit_palette_speed_threshold.py`. Raw s8 corroboration
+run lives in THIS dir: `results/pal_iso_s8.tsv` (1,350 cells, run
+20260703T092704Z, binary byte-continuity sha-proven) + `ivf_s8/` (all 1,350
+streams, Tower-mirrored); manifest keys `runs["results/pal_iso_s8.tsv"]` +
+`speed_conditional_followup`. Label store append:
+`palette-mech-iso-s8-2026-07-03` (+1,350 rows → 29,358 / 78 arms).
+
 ## Canonical raw data (block storage)
 
 - `/mnt/v/output/rd-gap-palette-ab-2026-07-03/` — run TSVs (`results/`: 6
