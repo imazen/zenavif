@@ -12,13 +12,17 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SAMPLE="${SAMPLE:-$HERE/sample_images.tsv}"
 OUT="${OUT:-$HERE/aom_only_results.tsv}"
-WORK="${WORK:-/mnt/v/output/zenavif/rd_gap_work_aomonly}"; mkdir -p "$WORK"
+# PID-suffixed default: two concurrent runs sharing one WORK dir clobber each
+# other's per-image temp dirs and silently LOSE ROWS (same fix as run_gap.sh).
+WORK="${WORK:-/mnt/v/output/zenavif/rd_gap_work_aomonly.$$}"; mkdir -p "$WORK"
 JOBS="${JOBS:-6}"
 CQGRID_AOM="${CQGRID_AOM:-8 16 24 32 40 48 56 63}"
 AOMFMTS="${AOMFMTS:-420}"
 export COLOR="$HERE/color.py"
 
-echo -e "image\tw\th\tfamily\tencoder\tfmt\tq\tbytes\tbpp\tssim2\tenc_ms" > "$OUT"
+# Header matches run_gap.sh (aom_cell.sh emits the butteraugli columns whenever
+# BUTTER is set; the old 11-col header silently misaligned those rows).
+echo -e "image\tw\th\tfamily\tencoder\tfmt\tq\tbytes\tbpp\tssim2\tenc_ms\tbutteraugli_3n\tbutteraugli_max" > "$OUT"
 echo "[aom_only] cpu=${AOM_CPU:-2} extra='${AOM_EXTRA:-}' fmts='$AOMFMTS' cq='$CQGRID_AOM'"
 
 worker() {
@@ -27,12 +31,24 @@ worker() {
   local part="$tmp/rows.tsv"; : > "$part"
   local bn; bn=$(basename "$img")
   local q fmt r
+  local fails=0
   for fmt in $AOMFMTS; do for q in $CQGRID_AOM; do
     r=$(bash "$HERE/aom_cell.sh" "$img" "$w" "$h" "$fam" "$fmt" "$q" "$tmp" 2>>"$tmp/err.log")
-    [[ "$r" == libaom* ]] && printf '%s\t%s\t%s\t%s\t%s\n' "$bn" "$w" "$h" "$fam" "$r" >> "$part"
+    if [[ "$r" == libaom* ]]; then
+      printf '%s\t%s\t%s\t%s\t%s\n' "$bn" "$w" "$h" "$fam" "$r" >> "$part"
+    else
+      fails=$((fails+1))
+      echo "  [$(date -u +%H:%M:%SZ)] CELL FAILED $bn libaom-$fmt cq$q: ${r:-<no output>}" >&2
+      printf 'CELLFAIL\t%s\tlibaom-%s\tcq%s\t%s\n' "$bn" "$fmt" "$q" "${r:-none}" >> "$WORK/failures.tsv"
+    fi
   done; done
   cat "$part" >> "$OUT"
-  echo "  [$(date -u +%H:%M:%SZ)] done $bn rows=$(wc -l < "$part")"
+  if (( fails > 0 )); then
+    cp "$tmp/err.log" "$WORK/err.$bn.log" 2>/dev/null || true
+    echo "  [$(date -u +%H:%M:%SZ)] done $bn rows=$(wc -l < "$part") FAILED_CELLS=$fails (err: $WORK/err.$bn.log)"
+  else
+    echo "  [$(date -u +%H:%M:%SZ)] done $bn rows=$(wc -l < "$part")"
+  fi
   rm -rf "$tmp"
 }
 
@@ -44,4 +60,7 @@ while IFS=$'\t' read -r img w h fam; do
   running=$((running+1)); if (( running >= JOBS )); then wait -n; running=$((running-1)); fi
 done < <(tail -n +2 "$SAMPLE")
 wait
+if [ -s "$WORK/failures.tsv" ]; then
+  echo "[aom_only] WARNING: $(wc -l < "$WORK/failures.tsv") FAILED CELLS -- results are INCOMPLETE. See $WORK/failures.tsv + $WORK/err.*.log" >&2
+fi
 echo "[aom_only] COMPLETE rows=$(($(wc -l < "$OUT")-1)) -> $OUT"
