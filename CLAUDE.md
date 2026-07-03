@@ -266,7 +266,11 @@ qm_dist_ratio_m = clamp((log2(longedge)−8)/2, 0.5, 1.0); train +1.03/+0.87
 docs/RD_GAP_VS_LIBAOM.md "Size-decay isolation A/B").
 **At the zenrav1e dep bump:** wire tune selection through zenravif/zenavif
 (the sweep used a dev-only ZENRAVIF_TUNE env passthrough, reverted) and decide
-the default for still images. From the libavif v1.4.0 study
+the default for still images. Also: **encode_plan mirror update (dep-bump)** —
+`src/encode_plan.rs` mirrors the REGISTRY-era SpeedTweaks table by design;
+refresh it to the released table in the same change (s1 deep arms, the
+SMALL_PX_RDO_TX_LIVE small-rendition tx-RDO flip [ravif@2a69a9dc, user
+sign-off 2026-07-03], partition_range arms, palette/tune knob forwards). From the libavif v1.4.0 study
 (`docs/LIBAVIF_1_4_STUDY.md`, mechanisms c3/c5): (1) **never apply a
 perceptual tune to the ALPHA channel** — libavif measured ringing from
 perceptual tunes on alpha and pins alpha to tune=psnr; A/B our alpha path
