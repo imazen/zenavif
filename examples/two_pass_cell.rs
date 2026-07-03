@@ -5,7 +5,7 @@
 //! toggle is the only variable.
 //!
 //! Usage:
-//!   two_pass_cell <in.png> <out.avif> <quality> <speed> <single|twopass> [strength]
+//!   two_pass_cell <in.png> <out.avif> <quality> <speed> <single|twopass> [strength] [420|444]
 //!
 //! Stdout (tab-separated):
 //!   mode<TAB>bytes<TAB>enc_ms<TAB>pass1_bytes<TAB>pass1_ba3n<TAB>pass1_bamax
@@ -46,6 +46,13 @@ fn main() {
     let speed: u8 = args[4].parse().expect("speed");
     let mode = args[5].as_str();
     let strength: f64 = args.get(6).map(|s| s.parse().expect("strength")).unwrap_or(1.0);
+    // Chroma subsampling: 444 default (cavif's CLI default = the rd_gap
+    // harness convention); 420 for the both-sampling conformance leg.
+    let chroma = match args.get(7).map(String::as_str) {
+        None | Some("444") => zenavif::EncodeChromaSubsampling::Yuv444,
+        Some("420") => zenavif::EncodeChromaSubsampling::Yuv420,
+        Some(other) => panic!("bad chroma {other} (420|444)"),
+    };
 
     let img = load_png_rgb(input);
     // 8-bit forced: the rd_gap harness decodes with `save_png` (RGB8-only),
@@ -53,7 +60,8 @@ fn main() {
     let config = EncoderConfig::new()
         .quality(quality)
         .speed(speed)
-        .bit_depth(zenavif::EncodeBitDepth::Eight);
+        .bit_depth(zenavif::EncodeBitDepth::Eight)
+        .chroma_subsampling(chroma);
     let stop = StopToken::new(Unstoppable);
 
     let t0 = std::time::Instant::now();

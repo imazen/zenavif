@@ -142,7 +142,7 @@ def main():
   print("metric\tn\tmedian_bd%\tmean_bd%\tbetter\ttime_ratio")
   for m in metrics:
     r = one_metric(
-      args.base, args.arm, m, args.per_image and m == "ssim2",
+      args.base, args.arm, m, args.per_image,
       args.encoder_base, args.encoder_arm, args.photos_only,
     )
     if r is None:
