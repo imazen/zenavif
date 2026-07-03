@@ -189,6 +189,33 @@ Diagnosis arms in flight (each isolates one hypothesis):
 Final tables land in `benchmarks/rd_gap_twopass_2026-07-03.tsv` + this
 section when the arms complete.
 
+### Measurement integrity — incident log + reconciliation
+
+Three transient failure bursts hit the arms; every one is recorded, root-
+caused, and the final data is complete (failures TSVs preserved alongside
+the raw arm TSVs in the /mnt/v archive):
+
+1. **drvfs EIO burst** (17:14Z, legacy-single, 10 cells): the documented
+   `/mnt/v` WSL-memory-reclaim stall class (see `run_gap.sh` WORK note) —
+   source-image opens EIO'd. Gap-filled via RESUME; final 264/264.
+2. **Harness reaped the backgrounded driver** (~17:41Z, mid legacy-twopass,
+   arm died at 169/264) and the failover chain deadlocked on a
+   self-matching `pgrep -f` (the watch pattern appeared in the monitor's own
+   cmdline) — ~1h stall until a sentinel broke it. Re-run via RESUME; final
+   264/264. Hardening landed: stall watchdog keyed on actual cell-process
+   count + TSV growth, RESUME in the runner (`322ece36`).
+3. **Live-edit offset corruption** (18:53Z, str0.5, 10 cells): an in-place
+   rewrite of the cell script corrupted in-flight bash readers (bash reads
+   scripts incrementally by offset). Gap-filled; final 288/288. Discipline
+   adopted: live-harness files are only replaced atomically (tmp + `mv` —
+   running readers keep the old inode); the cache-disabled key-derivation
+   noise that buried the first burst's diagnosis is also fixed
+   (`de765183`).
+
+Timing note: enc_ms/time_ratio for gap-filled arms mixes fresh and
+re-encoded cells (same binary, same box, no row-cache replays) — ratios
+remain paired and honest.
+
 ## Dep-bump checklist additions (zenrav1e > 0.1.4)
 
 1. ravif: flip `FRAME_HINTS_LIVE` to `true`, swap the plain send for the
