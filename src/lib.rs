@@ -105,7 +105,9 @@ pub use target_quality::{
 #[cfg(feature = "two-pass-butteraugli")]
 pub mod two_pass;
 #[cfg(feature = "two-pass-butteraugli")]
-pub use two_pass::{FRAME_HINTS_LIVE, TwoPassEncode, TwoPassOptions, encode_rgb8_two_pass};
+pub use two_pass::{
+    FRAME_HINTS_LIVE, TwoPassEncode, TwoPassMetric, TwoPassOptions, encode_rgb8_two_pass,
+};
 mod validation;
 #[cfg(feature = "_dev")]
 pub mod yuv_convert;

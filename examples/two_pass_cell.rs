@@ -5,7 +5,11 @@
 //! toggle is the only variable.
 //!
 //! Usage:
-//!   two_pass_cell <in.png> <out.avif> <quality> <speed> <single|twopass> [strength] [420|444]
+//!   two_pass_cell <in.png> <out.avif> <quality> <speed> <single|twopass> [strength] [420|444] [clamp_hi]
+//!
+//! `clamp_hi` caps the post-normalization rdmult-domain weight (default 2.5
+//! = libaom). `1.0` makes the map boost-only (worst superblocks get more
+//! bits, nothing gives bits back) — the variance-boost-shaped variant.
 //!
 //! Stdout (tab-separated):
 //!   mode<TAB>bytes<TAB>enc_ms<TAB>pass1_bytes<TAB>pass1_ba3n<TAB>pass1_bamax
@@ -45,13 +49,27 @@ fn main() {
     let quality: f32 = args[3].parse().expect("quality");
     let speed: u8 = args[4].parse().expect("speed");
     let mode = args[5].as_str();
-    let strength: f64 = args.get(6).map(|s| s.parse().expect("strength")).unwrap_or(1.0);
+    let strength: f64 = args
+        .get(6)
+        .map(|s| s.parse().expect("strength"))
+        .unwrap_or(1.0);
     // Chroma subsampling: 444 default (cavif's CLI default = the rd_gap
     // harness convention); 420 for the both-sampling conformance leg.
     let chroma = match args.get(7).map(String::as_str) {
         None | Some("444") => zenavif::EncodeChromaSubsampling::Yuv444,
         Some("420") => zenavif::EncodeChromaSubsampling::Yuv420,
         Some(other) => panic!("bad chroma {other} (420|444)"),
+    };
+    let clamp_hi: f64 = args
+        .get(8)
+        .map(|s| s.parse().expect("clamp_hi"))
+        .unwrap_or(2.5);
+    // Error-map backend (arg 9): "butteraugli" today; ssim2 / zensim
+    // profile-B land here when their crates expose per-pixel maps.
+    let metric = match args.get(9).map(String::as_str) {
+        None => zenavif::TwoPassMetric::Butteraugli,
+        Some(name) => zenavif::TwoPassMetric::from_name(name)
+            .unwrap_or_else(|| panic!("unknown two-pass metric {name}")),
     };
 
     let img = load_png_rgb(input);
@@ -74,7 +92,9 @@ fn main() {
         }
         "twopass" => {
             let options = TwoPassOptions {
+                metric,
                 strength,
+                weight_clamp: (0.4, clamp_hi),
                 ..Default::default()
             };
             let two = encode_rgb8_two_pass(img.as_ref(), &config, &options, stop)
