@@ -303,6 +303,59 @@ def sources():
                                   sd_ramp=f"qmdist:{m256}",
                                   ramp="longedge clamp((log2(maxdim)-8)/2, m256, 1)"),
                       encoder_rev=sd_rev, q_kind="cavif_q", speed=2, rows=384))
+
+    # --- size-decay NON-TUNE isolation A/B (2026-07-03) — the tune-off
+    # baseline's own small-px decay. Arms ADD one coding tool each to the
+    # tune-OFF (Psychovisual) + palette-auto baseline, unconditional at all q,
+    # via ZENRAVIF_SD2_* dev passthroughs (ravif--wedge@9d2b97c+dev ->
+    # zenrav1e--wedge @ master b0098eb1; base env-unset verified
+    # byte-identical to the box sizedecay off arm 576/576 cells). Armed cells
+    # ran the PALCONF aomdec+rav1d-safe conformance gate. prange464 was
+    # DROPPED (zenrav1e#34, fixed 1dabba91); yuv420 produced NO rows — every
+    # cell aomdec-rejected (zenavif#29, ravif 420 non-conformance). psnr +
+    # combo64 arms ran against master 1dabba91 (#34 fix; base byte-identity
+    # re-verified). Verdicts: NO arm met the pre-registered size-conviction;
+    # segmentation value FADES toward small (see the RD_GAP section).
+    ntd = "/mnt/v/output/zenavif/sizedecay-nontune-2026-07-03"
+    nt_rev = ("ravif--wedge@9d2b97c+SD2 -> zenrav1e master b0098eb1 "
+              "(psnr/combo64: 1dabba91; base byte-identical to off arm)")
+    for fn, arm, knob in [
+        ("sdn_base.tsv", "sdnontune/base_s2", J(speed=2, tune="off", palette="auto")),
+        ("sdn_prange432.tsv", "sdnontune/prange432_s2",
+         J(speed=2, tune="off", palette="auto", sd2_prange="4,32")),
+        ("sdn_rdotx.tsv", "sdnontune/rdotx_s2",
+         J(speed=2, tune="off", palette="auto", sd2_rdotx=1)),
+        ("sdn_cdef.tsv", "sdnontune/cdef_s2",
+         J(speed=2, tune="off", palette="auto", sd2_cdef=1)),
+        ("sdn_lrf.tsv", "sdnontune/lrf_s2",
+         J(speed=2, tune="off", palette="auto", sd2_lrf=1)),
+        ("sdn_segoff.tsv", "sdnontune/segoff_s2",
+         J(speed=2, tune="off", palette="auto", sd2_seg="off")),
+        ("sdn_combo32.tsv", "sdnontune/combo32_s2",
+         J(speed=2, tune="off", palette="auto", sd2_prange="4,32",
+           sd2_rdotx=1, sd2_cdef=1, sd2_lrf=1)),
+        ("sdn_psnr.tsv", "sdnontune/psnr_s2", J(speed=2, tune="psnr", palette="auto")),
+        ("sdn_combo64.tsv", "sdnontune/combo64_s2",
+         J(speed=2, tune="off", palette="auto", sd2_prange="4,64",
+           sd2_rdotx=1, sd2_cdef=1, sd2_lrf=1)),
+    ]:
+        s.append(dict(path=f"{ntd}/train_arms/{fn}", kind="rd_tsv",
+                      corpus="mech26", sweep_source="sizedecay-nontune-2026-07-03",
+                      arm_id=arm, knob_json=knob, encoder_rev=nt_rev,
+                      q_kind="cavif_q", speed=2, rows=576))
+    # aom cpu0 reference at 256 (12 train origins x 8 cq x 420+444)
+    s.append(dict(path=f"{ntd}/train_arms/aom_cpu0_256.tsv", kind="rd_tsv",
+                  corpus="mech26", sweep_source="sizedecay-nontune-2026-07-03",
+                  arm_id="sdnontune/ref-cpu0-256",
+                  knob_json=J(encoder="aomenc", cpu_used=0, fmt="420+444"),
+                  encoder_rev="aomenc-3.14.1@632172a4", q_kind="aom_cq",
+                  speed=0, rows=192))
+    # val ship-candidate confirm (rdotx on the 24-file <=512 val slice)
+    s.append(dict(path=f"{ntd}/val_arms/sdn_rdotx.tsv", kind="rd_tsv",
+                  corpus="mech26", sweep_source="sizedecay-nontune-2026-07-03",
+                  arm_id="sdnontune/rdotx_s2-val",
+                  knob_json=J(speed=2, tune="off", palette="auto", sd2_rdotx=1),
+                  encoder_rev=nt_rev, q_kind="cavif_q", speed=2, rows=384))
     return s
 
 

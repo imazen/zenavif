@@ -276,6 +276,16 @@ isolation A/B". Headlines:
   moves to non-tune small-px coding behavior (partition/coding defaults) + cpu2's own
   small-size strength.
 
+**STATUS 2026-07-03 (later still) — the NON-TUNE follow-up A/B RAN (9 arms x 3 sizes,
+pre-registered rule, per-armed-cell conformance): NO coding default convicted.** The
+residual decay = zr's activity/psy adaptive layer fading on downscaled content (psnr
+arm: 7.5 BD @1024 -> 4.4 @256; segoff arm: 4.1 -> 1.8, overlapping) vs aom's uniform
+keyframe toolset. rdotx-below-1024 passed the ship bar on TRAIN + VAL (+0.80/+0.88 and
++1.44/+1.30, unanimous both) and landed byte-neutral as ravif@bae4880
+(SMALL_PX_RDO_TX_LIVE=false; flip pending policy sign-off). Bugs: zenrav1e#34 fixed
+upstream (1dabba91), zenavif#29 open (ravif 420 non-conformance). Full record:
+RD_GAP_VS_LIBAOM.md "Non-tune size-decay isolation A/B".
+
 ## Rule 3 — per-image variance-boost strength (wedge #2): not deployable yet
 
 **Script**: `scripts/hyperparam/fit_boost_strength.py`; TSV:

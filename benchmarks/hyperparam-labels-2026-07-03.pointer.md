@@ -6,7 +6,7 @@ rules / future heads fit against a single store instead of one-shot TSVs.
 
 - **Block storage (canonical):**
   `/mnt/v/output/zenavif/hyperparam-labels-2026-07-03/labels.parquet` (629 KB,
-  14,880 rows × 34 cols, 50 arms) + `_MANIFEST.json` (build commit, per-source
+  35,118 rows × 34 cols, 89 arms as of 2026-07-03 late — incl. the sizedecay + sizedecay-nontune sources) + `_MANIFEST.json` (build commit, per-source
   row counts, join coverage, honesty contract: encoder_rev validity domains,
   q_kind semantics, enc_ms reliability, palette-pipeline caveat, exclusions)
 - **Tower mirror (sha256-verified):**

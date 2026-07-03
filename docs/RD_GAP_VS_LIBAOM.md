@@ -1270,6 +1270,110 @@ the rest of the tune: registry builds get it after the next zenrav1e release + d
 - The dev leave-one-out + ramp trial arms remain available as zenrav1e workspace commit
   `1428ecdd` for any future per-mechanism size program.
 
+## Non-tune size-decay isolation A/B — MEASURED 2026-07-03: NO coding default convicted; the decay is zr's adaptive layer FADING on downscaled content; two conformance bugs found (one fixed upstream); the rdotx small-px lever landed byte-neutral pending sign-off
+
+**Program**: the specified follow-up to the section above — the tune-OFF (Psychovisual)
+baseline owns most of the small-rendition decay vs aomenc cpu2 (train −1.13 → +0.81 →
++4.17, val +0.56 → +5.56 → +12.72 median BD at 1024→512→256). These arms isolate the
+DEFAULT coding-path suspects one at a time, unconditional at all q, tune OFF + palette
+auto constant: the quality-keyed ravif SpeedTweaks gates (partition (4,16)@hi-q cap,
+rdo_tx off at hi-q, CDEF+LRF off above ~Q50, Complex segmentation), chroma 444-vs-420,
+Tune::Psnr (the whole activity/psy layer), and composites.
+
+**Method**: driver `scripts/rd_gap/sizedecay_nontune_arms.sh` (ZENRAVIF_SD2_* dev
+passthroughs in the ravif--wedge clone; env-unset verified byte-identical to the
+sizedecay `off` arm on ALL 576 train cells — bytes exact, ssim2 exact, butteraugli
+≤1e-6), 12 photo-like TRAIN wedge origins × {256,512,1024|native} × 16-q grid, BUTTER
+on, per-armed-cell aomdec + rav1d-safe raw-md5 conformance (PALCONF; zero failures on
+every kept arm). Decision rule PRE-REGISTERED before any arm data
+(`/mnt/v/output/zenavif/sizedecay-nontune-2026-07-03/DECISION_RULE.md`, with a
+post-registration deviations note): convict arm X iff w(256) ≥ +1.0 AND (w(256)−w(1024)
+≥ +1.0 OR w(1024) ≤ +0.3), butteraugli veto; w = median BD(base vs arm), positive = the
+arm saves bits. Analyzer: `scripts/hyperparam/analyze_sizedecay_nontune.py`; summary
+TSV `benchmarks/hyperparam_sizedecay_nontune_2026-07-03.tsv`; raws Tower-mirrored.
+
+### Pre-A/B structural evidence (aom `inspect --all` at byte-matched cells)
+
+- 1480 nature @256, zr q85 vs aom-420 cq32 (±3% bytes): aom puts 36.5% of area in ≥32×32
+  blocks (25.0% BLOCK_64X64 riding TX_64X64) where zr has 0% — the (4,16) hi-q cap
+  binding (zr baseQIndex 36 < 80 ⇒ `high_quality`). zr pays 517b of segment_ids (0.9% of
+  the file) vs aom 0; aom spends MORE on tx-type/tx-size/filter-intra signaling.
+- Same image @1024: aom's ≥32-block share is >50% vs zr 0% — the cap binds at 1024 just
+  as hard, yet zr holds −2.56 BD there. zr's coefficient-side strengths (psy-RDO
+  allocation + segmentation AQ) mask the block-structure deficit at 1024 and fade at 256.
+- 5343 doc-scan @256 (worst val decayer): aom 48% BLOCK_64X64 + 64% TX_32X32 area; zr 74%
+  BLOCK_16X16/TX_16X16. Nearly equal coefficient bit pools (13.8kb vs 14.0kb) but aom
+  rides 32×32 transforms to ssim2 92.8 vs zr 92.0 at −10% bytes.
+- Screen tools are NOT the synthetic-content story at 256: BOTH encoders' AA-aware screen
+  detection stays silent on downscaled renditions (zr palette auto==off byte-count-equal;
+  aom `--enable-palette=0 --enable-intrabc=0` byte-identical).
+- aom cpu0 headroom at 256 is modest: cpu0-default beats cpu2 by only −3.55 median BD
+  (12 train origins; the win concentrates low-q: −9.1% vs −3.2% band medians) — cpu2 is
+  a fair small-px target, not a strawman.
+
+### The arms (train; w = median BD(base vs arm), positive = arm saves bits)
+
+| arm | 256 | 512 | 1024 | verdict |
+|---|--:|--:|--:|---|
+| prange432 (hi-q 16→32 cap lift) | −0.32 | −0.49 | −0.26 | not convicted — loses everywhere ALONE (butteraugli −1.7..−2.2 agrees): without tx RDO the extra 32-blocks are mispriced. The clamp is not independently size-hostile |
+| rdotx (tx RDO also at hi-q) | **+0.80** | **+0.88** | +0.70 | not convicted (uniform: 35/35 images better, butteraugli +1.3..+2.5) — the known matched-speed tradeoff. Its WIN is size-flat; its COST is size-conditional (~6.5× the changed hi-q cells: 0.3→2.0s @256, 1.2→7.6s @512, 4.6→32s @1024) |
+| cdef (on above ~Q50) | −0.05 | +0.05 | +0.05 | not convicted — dead zero; ravif's gate is right |
+| lrf (on above ~Q50) | −0.13 | −0.24 | −0.25 | not convicted — mild loss everywhere; gate right |
+| segoff (drop Complex segmentation) | −1.83 | −3.00 | −4.12 | not convicted (removal loses everywhere) — but the VALUE FADES: 4.12@1024 → 3.00@512 → 1.83@256, strongest at low-q (−6.49 → −2.02) |
+| psnr (Tune::Psnr vs the Psychovisual base) | −4.42 | −6.15 | −7.52 | not convicted (removal loses everywhere) — the whole activity layer's value FADES: 7.52@1024 → 4.42@256 (−3.10). Note Tune::Psnr also drops the activity-scored segmentation deltas, so this fade SUBSUMES most of segoff's — overlapping, not additive |
+| combo32 (prange432+rdotx+cdef+lrf) | +0.23 | +0.09 | +0.23 | not convicted — underperforms rdotx alone (prange432 drags); mean ≫ median (a few smooth-gradient 9908-class images love 32-blocks) |
+| combo64 ((4,64)+rdotx+cdef+lrf, post-#34 fix) | +0.01 | +0.17 | +0.11 | not convicted — the 64-block widening washes out even WITH tx RDO (medians ~0; butteraugli +2.1/+1.1 mildly positive; mean ≫ median again — outlier smooth-gradient images). rdotx ALONE dominates it at every size. 0 conformance failures across 576 cells = live validation of the #34 fix |
+| yuv420 | — | — | — | NO DATA: every cell failed the aomdec gate → **zenavif#29** (ravif 4:2:0 emits non-conformant AV1 on registry AND master; rav1d-safe masks it — zenavif round-trips never noticed). Do not ship/benchmark 420 until fixed |
+| prange464 alone | — | — | — | DROPPED mid-arm: 100% DECFAIL at q≥78 → **zenrav1e#34**, root-caused by bisect + probes and **FIXED upstream (`1dabba91`)**: the 3fa735dc sliver TX cap is decoder-followable only under TX_MODE_SELECT; with rdo_tx off (TX_MODE_LARGEST) decoders derive the uncapped TX_64X16/16X64 → guaranteed desync. Latent since 7d254289; also reachable via stock zenrav1e speeds 6-8 on intra frames. Intra 64-parent 4-ways now require `tx_mode_select` + hard asserts at both cap sites; 6/6 corrupt shapes verified clean, byte-identical at shipped configs, 170 lib tests |
+
+### The verdict: what the small-px decay actually is
+
+1. **No single coding default is size-hostile** under the pre-registered rule. The
+   quality-keyed ravif gates are individually correct (cdef/lrf/prange) or uniformly
+   valuable (rdotx).
+2. **zr's content-adaptive layer fades on downscaled content.** The Psychovisual
+   activity-masked metric + activity-scored segmentation AQ are worth 7.5 BD at 1024
+   and only 4.4 at 256 (psnr arm); segmentation alone 4.1 → 1.8 (segoff arm;
+   overlapping subsets of the same layer). Lanczos downscaling compresses the local
+   activity range, so masking/AQ has less differentiation to exploit — while aom's
+   uniform tools (keyframe coeff-opt trellis `rd_sf.perform_coeff_opt=2`,
+   av1/encoder/speed_features.c:383/415 @632172a4; full intra tx-size search;
+   filter_intra with pruning, speed_features.c:431; resolution-keyed speed features,
+   `set_good_speed_feature_framesize_dependent` speed_features.c:711) hold their value.
+   The RELATIVE position therefore decays even though nothing on zr's side "breaks."
+   Re-calibrating the activity/segmentation machinery for small/dense renditions is the
+   honest follow-up program (feature-hints: px is a free input).
+3. **The one ship-bar-passing lever: rdotx below 1024** (uniform win, size-trivial cost
+   at ≤512). TRAIN +0.80 @256 / +0.88 @512 (12/12 at both), butteraugli +2.5/+1.7;
+   **VAL CONFIRMED +1.44 @256 / +1.30 @512 (12/12 at both, butteraugli +3.7/+2.9,
+   0 conformance failures)** — the screen-heavy val corpus benefits ~2× train.
+   vs-cpu2 medians: train 256 +4.17 → **+3.31**, 512 +0.81 → **−0.46** (flips to a
+   win); val 256 +12.72 → **+9.22**, 512 +5.56 → **+4.04**. Landed byte-neutral as
+   `ravif@bae4880` (`SMALL_PX_RDO_TX_LIVE=false`, from_my_preset now takes the long
+   edge): NOT flipped live because the pre-registered ship rule covers convicted arms
+   only and this is a policy enable (matched-effort normalization — aom's own
+   resolution-keyed philosophy), not a conviction. Flip = 1 const + the zenavif
+   encode_plan.rs mirror update; interaction with Tune::Ssimulacra2 unmeasured (measure
+   at flip time).
+
+### Consequences for the wedge map
+
+- Wedge #3's residual (≤512 vs cpu2) is now FULLY attributed: tune constants (ramp
+  shipped), the fading adaptive layer (measured, future re-calibration program), the
+  rdotx effort lever (landed, pending flip), and aom's uniform toolset (coeff-opt/
+  filter-intra — the documented implementable gaps).
+- The val screen-heavy decay (5343/6091/9021-class) is NOT screen tools (both encoders'
+  detection is dead at ≤512) — it is generic: TX_32X32 energy compaction on 64-blocks +
+  trellis. Palette/intraBC remain native-scale-only levers (wedge #6).
+- combo64's 1024-class result (median +0.11, mean +1.5 — outlier-driven by 9908-class smooth gradients) belongs to the LARGE-px s2 program (the
+  1024 byte-identity gate excludes it from the small-px ship anyway); it revisits the
+  ruled-out prange-(4,64) with the tx-RDO pairing the 2026-07-02 retest lacked.
+
+**Full record**: `benchmarks/hyperparam_sizedecay_nontune_2026-07-03.tsv` (per-image
+BDs), raws + decision rule + bug repros at
+`/mnt/v/output/zenavif/sizedecay-nontune-2026-07-03/` (Tower-mirrored), label store
+sweep_source `sizedecay-nontune-2026-07-03`.
+
 ## Confirmed findings (2026-07-01 audit — supersedes the "verify" framing below)
 
 Source-read + measured, not hypothesized. See `scripts/rd_gap/palette_ablation.sh` +

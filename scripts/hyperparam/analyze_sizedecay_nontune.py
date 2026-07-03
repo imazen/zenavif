@@ -122,8 +122,10 @@ def main():
     D = pd.DataFrame(recs)
 
     print(f"\n######## {args.split}: w = BD(base vs arm) per size — POSITIVE = arm saves bits ########")
+    if D.empty:
+        sys.exit("no comparable arm rows (only base present?)")
     arm_order = [a for a in ("prange464", "prange432", "rdotx", "cdef", "lrf",
-                             "segoff", "yuv420", "combo") if a in set(D["arm"])]
+                             "segoff", "yuv420", "combo32", "combo64", "psnr") if a in set(D["arm"])]
     arm_order += [a for a in sorted(set(D["arm"])) if a not in arm_order]
     rows = []
     for a in arm_order:

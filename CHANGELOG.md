@@ -10,6 +10,26 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Fixed
+- rd_gap harness: per-worker result appends are now flock-serialized (drvfs
+  append races silently dropped 315/576 rows on cache-hit-fast runs) and the
+  per-cell WORK dir defaults to local disk (drvfs transiently EIOs whole
+  worker batches under WSL memory reclaim) (6884b7b, 17c428a).
+
+### Added
+- Size-decay NON-TUNE isolation A/B: driver
+  `scripts/rd_gap/sizedecay_nontune_arms.sh` (9 arms over the quality-keyed
+  ravif SpeedTweaks gates + Tune::Psnr + composites, per-armed-cell
+  aomdec+rav1d-safe conformance), analyzer
+  `scripts/hyperparam/analyze_sizedecay_nontune.py`, label-store source block,
+  summary `benchmarks/hyperparam_sizedecay_nontune_2026-07-03.tsv`. Verdict:
+  no coding default convicted; the tune-off small-px decay decomposes into
+  zr's content-adaptive strengths fading on downscaled renditions
+  (Psychovisual metric value 7.5->4.4 BD, segmentation AQ 4.1->1.8 BD,
+  1024->256) — see RD_GAP_VS_LIBAOM.md. Found + upstream-fixed zenrav1e#34
+  (TX_MODE_SELECT sliver gate) and found zenavif#29 (ravif 4:2:0
+  non-conformance, open).
+
 ### Documentation
 - README overhaul: clickable badge row (CI/crates.io/lib.rs/docs.rs/MSRV/dual-license), `## Quick start` with a `[dependencies]` block, absolute links throughout, regenerated crosslink footer (now last), split crates.io README (`README.crates.md` via `readme =` + `include`), and a `benchmarks/README.md` methodology index.
 
