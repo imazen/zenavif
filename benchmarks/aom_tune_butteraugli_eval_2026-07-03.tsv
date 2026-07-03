@@ -1,0 +1,27 @@
+# aom tune=butteraugli vs default (same binary, CONFIG_TUNE_BUTTERAUGLI=1 local build @632172a, libjxl 0.8.2 static), BD-rate % (negative = tune wins)
+# git zenavif--diffmap 2e8e9912; corpora: legacy scripts/rd_gap/sample_images.tsv (22), train26 sample_images_train26.tsv (24); 420, cq {8..63}; raw: /mnt/v/output/zenavif/aom-butter-eval-2026-07-03 (+Tower mirror)
+corpus	cpu	scope	metric	n	median_bd%	mean_bd%	better	time_ratio
+legacy	2	all	ssim2	22	-0.3153	-0.3293	11/22	1.086
+legacy	2	all	butteraugli_3n	20	-3.5955	-2.3385	16/20	1.088
+legacy	2	all	butteraugli_max	19	-3.0763	-1.1272	11/19	1.094
+legacy	2	photos	ssim2	19	-0.7595	-0.3444	10/19	1.094
+legacy	2	photos	butteraugli_3n	19	-3.4790	-2.2507	15/19	1.094
+legacy	2	photos	butteraugli_max	19	-3.0763	-1.1272	11/19	1.094
+legacy	6	all	ssim2	22	+0.1697	+0.1238	11/22	1.370
+legacy	6	all	butteraugli_3n	20	-2.6106	-1.9101	14/20	1.395
+legacy	6	all	butteraugli_max	19	-2.5335	-3.5537	14/19	1.430
+legacy	6	photos	ssim2	19	-0.5608	+0.0504	10/19	1.430
+legacy	6	photos	butteraugli_3n	19	-2.6573	-2.0327	14/19	1.430
+legacy	6	photos	butteraugli_max	19	-2.5335	-3.5537	14/19	1.430
+train26	2	all	ssim2	22	-1.5614	-1.0140	18/22	1.282
+train26	2	all	butteraugli_3n	23	-2.1763	-1.7888	17/23	1.294
+train26	2	all	butteraugli_max	20	-2.6154	-3.0746	13/20	1.274
+train26	2	photos	ssim2	20	-1.8571	-1.1059	17/20	1.270
+train26	2	photos	butteraugli_3n	20	-2.5242	-1.9242	15/20	1.270
+train26	2	photos	butteraugli_max	18	-2.6154	-3.7197	12/18	1.264
+train26	6	all	ssim2	22	-0.6388	+0.1269	13/22	1.505
+train26	6	all	butteraugli_3n	22	-2.4017	-2.0137	18/22	1.504
+train26	6	all	butteraugli_max	19	-2.3396	-0.7052	11/19	1.499
+train26	6	photos	ssim2	20	-0.8072	-0.1948	13/20	1.510
+train26	6	photos	butteraugli_3n	20	-2.4017	-1.9719	16/20	1.510
+train26	6	photos	butteraugli_max	18	-1.5294	-0.6144	10/18	1.502

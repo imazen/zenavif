@@ -297,6 +297,24 @@ for smooth photos (train26 5004_nps −15.0% at str2). **At the zenrav1e dep
 bump:** nothing extra to wire beyond the tune itself (the boost rides
 `Tune::Ssimulacra2`); re-run the QM benchmark note below still applies.
 
+### Butteraugli diffmap two-pass (spatial closed loop) — SHIPPED 2026-07-03, release-gated
+The libaom `tune=butteraugli` analog, adapted to the landed per-SB delta_q:
+zenrav1e@c4047cec adds `FrameHints { sb_q_scale }` (metric-free external
+per-SB AC-q scale input, byte-identical when absent/neutral, composes on top
+of Variance Boost); ravif@13b1ca4b passes it through
+`expert::InternalParams.sb_q_scale` behind `pub const FRAME_HINTS_LIVE =
+false`; zenavif@2e8e9912 ships the driver `encode_rgb8_two_pass` (feature
+`two-pass-butteraugli`): encode → decode (own decoder) → butteraugli diffmap
+→ aom-formula pool per SB (12-norm, mse/ba weight, geomean, clamp
+[0.4,2.5]) → λ→q translation (weight^(strength/2)) → re-encode. Evaluate-
+first verdict on aom's own tune (CONFIG_TUNE_BUTTERAUGLI=1 local build +
+libjxl 0.8.2 static): photos −2.4..−3.5% median butteraugli-3n BD at
+cpu2/cpu6 with ssim2 neutral-to-better on BOTH corpora
+(`benchmarks/aom_tune_butteraugli_eval_2026-07-03.tsv`). ~2.05× wall.
+Full record + dep-bump checklist: `docs/DIFFMAP_TWO_PASS.md`. **At the
+zenrav1e dep bump:** flip `FRAME_HINTS_LIVE`, uncomment ravif's hinted send,
+re-run `tests/two_pass.rs` + the A/B on registry deps.
+
 ### zenrav1e encoder-recon desyncs: filter-intra (#33) + LRF sgr-skip (#32) — FIXED upstream 2026-07-03, release-gated
 zenrav1e#33: filter-intra blocks got DC_PRED's edge prep (topleft=128, no left
 at x==0) and read the left edge upside-down — encoder recon diverged from

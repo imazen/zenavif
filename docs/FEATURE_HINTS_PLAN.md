@@ -81,14 +81,27 @@ structurally exists** via segmentation + `seg_boost` (`encoder.rs:901`).
 
 ## (C) Architecture
 
+**STATUS 2026-07-03 — the FrameHints skeleton is REAL (first channel shipped,
+release-gated).** zenrav1e@c4047cec landed `pub struct FrameHints { sb_q_scale:
+Option<Box<[f32]>> }` (`#[non_exhaustive]`, so the per-SB partition/mode-budget
+channels below are additive) carried as `Option<Arc<FrameHints>>` on
+`FrameInvariants` via `FrameParameters.frame_hints`, applied through the landed
+per-SB delta_q machinery; ravif@13b1ca4b passes it through
+`expert::InternalParams.sb_q_scale` (release-gated `FRAME_HINTS_LIVE`); the
+first consumer is the P4-track butteraugli diffmap two-pass
+(zenavif@2e8e9912, `docs/DIFFMAP_TWO_PASS.md`) — external importance judged on
+butteraugli exactly as (B)(iv) prescribed, but through real delta-q instead of
+the segmentation blend (the boost work showed segmentation stacking
+double-boosts).
+
 - **zenrav1e**: one new optional input, no deps: `pub struct FrameHints {
   sb_partition_range: Option<Box<[PartitionRange]>>, sb_intra_mode_budget: Option<Box<[u8]>>,
   sb_importance: Option<Box<[f32]>> }` (SB raster order), carried as
   `Option<Arc<FrameHints>>` on `FrameInvariants` next to `activity_mask` (`encoder.rs:809`),
   consulted at the three hooks above. Standalone-usable; hints are plain data like
-  ActivityMask.
+  ActivityMask. *(Shipped shape: `sb_q_scale` first; the other channels remain planned.)*
 - **ravif**: pass-through builder, same shape as existing `override_*` plumbing
-  (av1encoder.rs:1260).
+  (av1encoder.rs:1260). *(Shipped: `InternalParams.sb_q_scale`.)*
 - **zenavif**: owns feature extraction + prediction (already depends on
   zenanalyze/zenpredict/zenanalyze-api under `auto-tune`, Cargo.toml:37-43, pinned api rev
   `47b4d0f5`); extends `auto_tune` with new heads and builds `FrameHints`. The Offer-reuse

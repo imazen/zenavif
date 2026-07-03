@@ -17,6 +17,14 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   worker batches under WSL memory reclaim) (6884b7b, 17c428a).
 
 ### Added
+- `two-pass-butteraugli` feature: `encode_rgb8_two_pass` — butteraugli-
+  diffmap-guided second pass (spatial closed loop; libaom `tune=butteraugli`
+  analog through zenrav1e's per-SB delta-q). Release-gated at runtime behind
+  `zenravif::FRAME_HINTS_LIVE` (fails honestly until the zenrav1e dep bump);
+  evaluate-first verdict (aom's own tune: −2.4..−3.5% median butteraugli-3n
+  BD on photos, ssim2 neutral-to-better) + mechanism + dep-bump checklist in
+  `docs/DIFFMAP_TWO_PASS.md`; A/B harness `scripts/rd_gap/zenavif_2p_cell.sh`
+  + `run_2p_ab.sh` + `examples/two_pass_cell.rs` (2e8e9912).
 - Size-decay NON-TUNE isolation A/B: driver
   `scripts/rd_gap/sizedecay_nontune_arms.sh` (9 arms over the quality-keyed
   ravif SpeedTweaks gates + Tune::Psnr + composites, per-armed-cell
