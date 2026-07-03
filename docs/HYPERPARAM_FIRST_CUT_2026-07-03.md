@@ -18,7 +18,9 @@ fitted on TRAIN-LSD origins only.
 ## Phase 1 — the label store
 
 `/mnt/v/output/zenavif/hyperparam-labels-2026-07-03/labels.parquet` — **14,880 rows × 34
-cols, 50 arms** (Tower mirror sha-verified). Builder:
+cols, 50 arms** at first cut; **28,008 rows / 75 arms** after the same-day palette-mech
+(+6,216) and size-decay (+6,912, `sweep_source=sizedecay-2026-07-03`, 100% feature-join)
+appends (Tower mirror sha-verified). Builder:
 `scripts/hyperparam/build_label_store.py` (append protocol in its docstring +
 `_MANIFEST.json`); shared fit helpers: `scripts/hyperparam/hp_common.py` (imports
 `bd_arm.py` BD conventions and the canonical `origin_split.py` — never re-implements
