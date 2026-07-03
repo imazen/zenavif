@@ -215,15 +215,31 @@ candidates now require `tx_mode_select`; hard asserts at both cap sites. 6/6 cor
 verified clean under aomdec+rav1d-safe; byte-identical at shipped defaults. Registry builds
 carry BOTH sliver bugs until the release past 0.1.4.
 
-### ravif 4:2:0 output non-conformant — OPEN (zenavif#29)
-Found 2026-07-03 by the sizedecay non-tune `yuv420` diagnostic arm (PALCONF gating): every
-AVIF produced via `ChromaSubsampling::Yuv420` / `cavif --yuv 420` is REJECTED by aomdec
-("Corrupted segment_ids" on registry zenrav1e 0.1.4, "Failed to decode tile data" on master
-b0098eb1) at every quality/size, while rav1d-safe tolerates the streams (which is why
-round-trip tests never caught it). zenrav1e CLI 420 y4m encodes are clean — the trigger is
-in ravif's 420 wiring or a zenrav1e API surface only ravif exercises with Cs420. Exonerated
-by A/B: segmentation off/simple, rdo_tx on, CDEF on, palette off/always, min-partition.
-zenavif's default 444 is unaffected. Do NOT ship/benchmark 420 until fixed.
+### 4:2:0 sliver-chroma desync (was "ravif 4:2:0 non-conformant") — FIXED upstream, master-only (zenavif#29 → zenrav1e#35)
+Found 2026-07-03 by the sizedecay non-tune `yuv420` diagnostic arm (PALCONF gating);
+root-caused + fixed same day. **The issue's original scope was half wrong: registry
+zenrav1e 0.1.4 is NOT affected** (re-verified 63/63 cells clean on plain ravif@main +
+0.1.4 — the discovery sweep's "registry" leg had evidently run a master-backed binary).
+Real scope: zenrav1e MASTER only, introduced by `7d254289` (HORZ_4/VERT_4, 2026-07-01,
+git-bisected). Root cause: the chroma TU-grid math in `write_tx_blocks`/`write_tx_tree`
+shifted mi dims by the subsampling with a 1×1 zero-fallback — correct for the classic
+4x4..8x8 pairing shapes, but for `BLOCK_16X4`@420 it clobbered the 2×1-mi coded-chroma
+extent and the divide by TX_8X4's 2-mi width truncated the TU loop to ZERO iterations:
+no chroma TUs written while conforming decoders parse a TX_8X4 TU there
+(`Subsampled_Size[16X4][1][1]=8X4`, spec 5.11.38). Only {16X4, 4X16} hit it = H4/V4 on
+16×16 parents; 444 has no pairing → clean, which is why the partition program's 110-cell
+sweep (444, cavif default) missed it. The zenrav1e CLI can't reach the types at any speed
+(preset ≥2 caps the non-square threshold at 8×8; ≤1 is bottom-up) — ravif's s2
+(topdown + threshold 64×64 + prange (4,16)) had maximum exposure. Fixed
+`zenrav1e@17e67842`: TU grid from `BlockSize::subsampled_size`; regression gate
+`tests/sliver_chroma_roundtrip.rs` (fails pre-fix, liveness-checked). Verified: 258/258
+420 cells (43 renditions × 6 q) aomdec-clean + aomdec==rav1d-safe raw md5
+(`benchmarks/conformance_420_sliver_fix_2026-07-03.tsv`); 36/36 444 cells byte-identical
+pre/post. **No released ravif/zenavif version ever shipped it** (0.1.4 predates topdown
+4-way types). rav1d-safe masked 33/33 corpus repros (decoded garbage without error; the
+synthetic test stream it does reject — data-dependent) → filed imazen/rav1d-safe#422;
+zenavif round-trip tests alone remain insufficient as a conformance gate — keep the
+aomdec PALCONF leg in sweeps.
 
 ### Tune::Ssimulacra2 — SHIPPED upstream 2026-07-02, release-gated
 `zenrav1e@a37faea8` adds `Tune::Ssimulacra2` (aom-parity chroma delta-q + ss2
