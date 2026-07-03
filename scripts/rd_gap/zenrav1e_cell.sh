@@ -18,11 +18,13 @@ PX=$((W*H)); base=$(basename "$IMG" .png)
 avif="$TMP/${base}.q${Q}.avif"; decp="$TMP/${base}.q${Q}.dec.png"
 
 source "$(dirname "${BASH_SOURCE[0]}")/cell_cache.sh"
-rd_cache_row_key "$CAVIF" "$IMG" "zr" "q=$Q" "s=$SPEED" "d=$DEPTH" "butter=${BUTTER:+on}"
+# CAVIF_EXTRA: optional extra cavif CLI args (e.g. "--yuv 420"); part of the
+# cache key so armed runs never collide with the default-flag rows.
+rd_cache_row_key "$CAVIF" "$IMG" "zr" "q=$Q" "s=$SPEED" "d=$DEPTH" "extra=${CAVIF_EXTRA:-}" "butter=${BUTTER:+on}"
 if row=$(rd_cache_row_get); then printf '%s\n' "$row"; exit 0; fi
 
 t0=$(date +%s.%N)
-"$CAVIF" -f -Q "$Q" -s "$SPEED" --depth "$DEPTH" -o "$avif" "$IMG" > "$TMP/${base}.q${Q}.enc.log" 2>&1
+"$CAVIF" -f -Q "$Q" -s "$SPEED" --depth "$DEPTH" ${CAVIF_EXTRA:-} -o "$avif" "$IMG" > "$TMP/${base}.q${Q}.enc.log" 2>&1
 rc=$?; t1=$(date +%s.%N)
 enc_ms=$(python3 -c "print(f'{($t1-$t0)*1000:.1f}')")
 { [ $rc -ne 0 ] || [ ! -s "$avif" ]; } && { echo "ENCFAIL zenrav1e Q$Q rc=$rc $(tail -1 "$TMP/${base}.q${Q}.enc.log" 2>/dev/null)"; exit 1; }
