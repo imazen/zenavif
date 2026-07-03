@@ -195,7 +195,14 @@ dropped — see docs/TUNE_SSIMULACRA2_PLAN.md). Measured: s2 −4.28% / s1-deep
 tier-2 gap vs cpu0-ss2tune +11.08% → +8.71%. 220/220 conformance cells clean.
 **At the zenrav1e dep bump:** wire tune selection through zenravif/zenavif
 (the sweep used a dev-only ZENRAVIF_TUNE env passthrough, reverted) and decide
-the default for still images.
+the default for still images. From the libavif v1.4.0 study
+(`docs/LIBAVIF_1_4_STUDY.md`, mechanisms c3/c5): (1) **never apply a
+perceptual tune to the ALPHA channel** — libavif measured ringing from
+perceptual tunes on alpha and pins alpha to tune=psnr; A/B our alpha path
+(currently Tune::Psychovisual) and pin accordingly; (2) if the ss2 tune
+becomes the still default, **re-fit the quality→quantizer curve** — libavif's
+precedent (their new piecewise LUT compensates tune=iq's higher spend at
+matched QP); our curve diverges from their mapping above q70.
 
 ### zenrav1e per-SB delta_q + Variance Boost — SHIPPED upstream 2026-07-02 (later), release-gated
 zenrav1e gained true per-SB delta_q coding (`d125713f`, inert syntax; the
