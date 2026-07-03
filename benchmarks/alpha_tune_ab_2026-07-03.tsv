@@ -1,0 +1,37 @@
+# Alpha-plane tune A/B: Tune::Psychovisual (ravif alpha default) vs Tune::Psnr -- 2026-07-03 -- zenavif@87d6e090, zenrav1e local master 165e83b1 (0.2.0)
+# Motivation: libavif v1.4.0 switched alpha SSIM->PSNR ('AOM_TUNE_SSIM causes ringing for alpha'); zenavif encodes alpha with Psychovisual (imazen/zenavif#28)
+# Harness: scratch crate (path-dep zenrav1e), 512x512 Cs400 stills, speed preset 4, still_picture, min_quantizer=quantizer; decode aomdec 3.14.1; ring zone = flat(5x5 min==max) pixels within Chebyshev<=6 of an edge (4-nbr grad>8), excluding edge pixels
+# q71 = ravif alpha default (quality 80). VERDICT (preliminary, synthetic): high-amplitude flat-zone ringing (ring_max 41-72, maxerr 111-189) appears under Psychovisual on mask content at q>=96 (+hard_shapes q48); Psnr suppresses it (ring_max<=6 in 6/8 shape cells) but has its own outliers (aa_shapes q48 maxerr 110; low-amplitude dither cnt at q128). Both tunes clean at default q71. Phenomenon CONFIRMED, default flip NOT yet justified -- needs real-corpus alpha A/B on the ravif encode path (blocked on qmdist dev-patch state 2026-07-03).
+content	tune	q	bytes	psnr	maxerr	zone_n	ring_mean	ring_max	ring_cnt2
+aa_shapes	psychovisual	48	5201	47.060	9	34655	0.3657	3	15
+aa_shapes	psnr	48	5196	41.280	110	34655	0.5416	35	470
+aa_shapes	psychovisual	71	4325	54.009	18	34655	0.0750	2	0
+aa_shapes	psnr	71	4546	55.361	8	34655	0.1432	2	0
+aa_shapes	psychovisual	96	3527	39.361	116	34655	0.5884	41	818
+aa_shapes	psnr	96	3746	52.148	60	34655	0.1413	2	0
+aa_shapes	psychovisual	128	2485	46.862	31	34655	0.2106	17	271
+aa_shapes	psnr	128	2696	44.603	56	34655	0.8051	6	3765
+hard_shapes	psychovisual	48	4227	39.821	189	36288	0.6195	42	553
+hard_shapes	psnr	48	4402	52.888	4	36288	0.2668	3	35
+hard_shapes	psychovisual	71	4001	48.822	5	36288	0.1308	2	0
+hard_shapes	psnr	71	4079	53.638	5	36288	0.1225	2	0
+hard_shapes	psychovisual	96	3762	34.057	111	36288	1.3375	72	2300
+hard_shapes	psnr	96	3444	61.622	5	36288	0.0054	2	0
+hard_shapes	psychovisual	128	3424	44.483	44	36288	0.7954	15	4490
+hard_shapes	psnr	128	3021	47.072	10	36288	1.2857	6	9057
+gradient	psychovisual	48	1234	56.657	3	0	0.0000	0	0
+gradient	psnr	48	1158	56.503	3	0	0.0000	0	0
+gradient	psychovisual	71	1021	55.963	4	0	0.0000	0	0
+gradient	psnr	71	948	55.739	4	0	0.0000	0	0
+gradient	psychovisual	96	904	55.311	4	0	0.0000	0	0
+gradient	psnr	96	792	54.847	4	0	0.0000	0	0
+gradient	psychovisual	128	628	53.844	4	0	0.0000	0	0
+gradient	psnr	128	554	53.187	3	0	0.0000	0	0
+feathered	psychovisual	48	945	54.378	3	0	0.0000	0	0
+feathered	psnr	48	898	59.257	3	0	0.0000	0	0
+feathered	psychovisual	71	755	59.505	4	0	0.0000	0	0
+feathered	psnr	71	720	52.782	27	0	0.0000	0	0
+feathered	psychovisual	96	679	53.359	27	0	0.0000	0	0
+feathered	psnr	96	629	56.283	10	0	0.0000	0	0
+feathered	psychovisual	128	501	55.818	6	0	0.0000	0	0
+feathered	psnr	128	474	55.718	6	0	0.0000	0	0

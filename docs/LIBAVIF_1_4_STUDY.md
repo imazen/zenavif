@@ -344,6 +344,44 @@ verified un-gated) and is **strictly harder than libavif's default** on the ssim
 6. **CDEF_ADAPTIVE thresholds:** fold into the same sweep as (3) if convenient; expect
    noise on photos.
 
+## 5b. Measured addendum (2026-07-03) — tracking + first gap measurements
+
+Tracking: **imazen/zenavif#28** (wrapper-side: alpha tune, defaults arm, quality-curve
+re-fit) + **imazen/zenrav1e#30** (encoder-side: LF sharpness, AA screen gate, intraBC).
+
+**libavif-defaults baseline arm — MEASURED** (`benchmarks/rd_gap_libavif_defaults_arm_2026-07-03.tsv`;
+`aomenc --allintra --tune=iq --cpu-used=6` at aom 3.14.1 = libavif v1.4.2's pin, legacy
+22-image corpus, 420, vs the same-corpus 2026-07-02 committed baselines; BD-rate on ssim2):
+
+| pair | ALL median | photos median | wins |
+|---|---:|---:|---|
+| tune=iq benefit at speed 6 (vs cpu6-default) | **−13.16%** | −12.69% | 15/19 |
+| libavif-v1.4-defaults vs aomenc cpu0-default | **+0.14%** | −0.91% | 9/19 |
+| libavif-v1.4-defaults vs aomenc cpu2-default | −2.21% | −2.91% | 11/19 |
+| OURS s2+tune+deltaq vs libavif-defaults | −3.63% | **−3.63%** | 15/22 (12/16 photos) |
+| OURS s1-deep+tune+deltaq vs libavif-defaults | −3.38% | **−4.16%** | 15/22 (12/16 photos) |
+
+Readings: (1) tune=iq's −13% at speed 6 corroborates libaom's up-to-12% CLIC claim on our
+corpus — **typical libavif v1.4 output at speed 6 now matches an untuned cpu0 encode**
+(the ecosystem baseline moved a full cpu0's worth of quality); (2) our shipped
+tune+deltaq configs beat libavif-defaults on photos at both speeds; (3) the fam-7
+synthetic plots lose +49–51% — the palette gap, unchanged; (4) libaom's tune-iq at speed
+6 collapses on the smooth-gradient outliers (o_9077 +54.7%, o_9051 +31.6% vs
+cpu0-default) — exactly where our strength-1.0 variance-boost refit wins biggest against
+it (−28.5/−19.4%), corroborating the strength-3.0-doesn't-transfer finding.
+
+**Alpha tune A/B — phenomenon CONFIRMED, flip not yet justified**
+(`benchmarks/alpha_tune_ab_2026-07-03.tsv`; synthetic 512² alpha masks as Cs400 stills,
+zenrav1e master 165e83b1, speed 4, q {48,71,96,128}, aomdec decode, ringing = |err| on
+flat pixels within 6 px of an edge): Psychovisual (our current alpha tune) produces
+high-amplitude flat-zone ringing on mask content — ring_max 41–72, maxerr 111–189 — at
+q≥96 (and hard-edge masks at q48); Psnr suppresses it (ring_max ≤6 in 6/8 shape cells)
+but shows two counter-cells (aa q48 maxerr 110; low-amplitude dither at q128). **Both
+tunes are clean at ravif's default alpha operating point (q71)**, so libavif's ringing
+claim transfers to zenrav1e but bites at lower alpha quality than our default. Landing
+decision needs the real-corpus A/B on the ravif encode path (blocked 2026-07-03 on the
+qmdist session's live ravif dev-patch) — tracked in #28.
+
 ## 6. Honesty / verification notes
 
 - All libaom cites are at **3.14.1** (`632172a4`, our local checkout — shallow clone, 1
