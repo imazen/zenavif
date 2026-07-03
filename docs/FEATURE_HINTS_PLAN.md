@@ -144,6 +144,42 @@ Findings (all measured, workstation 7950X):
    different content; real-photo crops cost ~14 ms at 4 MP. Content matters ~±15%
    (crop spread in the TSV); the ranking and orders of magnitude are unchanged.
 
+## (E) The hyperparameter expert (added 2026-07-02, user directive)
+
+**Concept**: for encoder hyperparameters with **no globally-optimal value** — measured
+repeatedly this week — a zenanalyze-features → hyperparameter-vector predictor (ZNPR MLP,
+the shipped `auto_tune` pattern) picks per-image values. Evidence that "no perfect
+solution" is the norm, not the exception:
+- variance-boost strength: global winner 1.0, but smooth photos peak at 2.0 (5004_nps
+  −15.0% at s=2) and o_6629-class flat gradients regress at ANY global strength
+  (`benchmarks/rd_gap_deltaq_2026-07-02.tsv`);
+- 64-block gate: 7/22 winners at −1.8..−2.5% vs 15/22 losers (`rd_gap_prange_retest`);
+- `split_trial_depth` 2: rescued p64 outliers, lost the global rule;
+- `rdo_tx_decision`: −5.7% median in its band at 7.5× time — pure budget question.
+
+**Two products, in priority order:**
+1. **Fast mode that needs less brute force** (the primary goal): predict per-image
+   {partition_range min/max, intra mode budget, tx-RDO on/off + budget, trial depth,
+   boost strength, tune selection} so an s4-s6-class speed approaches s2 RD — the
+   predictor REPLACES search rather than adding to it. The P0 cost grid makes the
+   analysis side free (≤14 ms at 4 MP full-SUPPORTED vs ~seconds of encode).
+2. **Quality mode top-up**: the same heads at s1/s2 capture wins global constants
+   provably cannot (the per-image residual vs cpu0-ss2tune).
+
+**Training data is already being produced as a side effect**: every mechanism fit sweep
+(strength arms, prange arms, depth arms — per-image × per-arm × per-q rows with ssim2 AND
+butteraugli on train26) is exactly a labeled hyperparameter-response surface. Formalize:
+accumulate fit-sweep TSVs into a label store (image → arm → RD outcome) instead of
+treating them as one-shot artifacts; new fit sweeps append. When a head needs denser
+labels, the cell cache + coarse-grid convention makes arm re-runs cheap.
+
+**Method discipline** (unchanged from the rest of this plan): interpretable threshold
+rules on 2-3 features FIRST, MLP head only where thresholds demonstrably underfit;
+train26/LSD split hygiene; butteraugli in the selection rule (veto), not just ssim2;
+dense-sampling rules from the sweep discipline when a head graduates to real training;
+per-family reporting. Runtime side stays the shipped ZNPR/`auto_tune` machinery — new
+heads, not new infrastructure.
+
 ## Phases + gates
 
 - **P0 (measure) — DONE 2026-07-02.**
