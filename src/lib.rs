@@ -75,6 +75,11 @@ mod encode_plan;
 #[cfg(feature = "encode")]
 mod encoder;
 mod error;
+/// Deterministic zenanalyze palette gate (FEATURE_HINTS §E rule 1).
+#[cfg(feature = "encode")]
+pub mod palette_gate;
+#[cfg(feature = "encode")]
+pub use palette_gate::PalettePreference;
 #[cfg(feature = "__expert")]
 pub mod expert;
 /// Calibrated encode/decode resource estimation (peak memory + time).

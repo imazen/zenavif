@@ -254,6 +254,12 @@ pub struct EncoderConfig {
     /// Override trellis quantization (Viterbi DP)
     #[cfg(feature = "encode-imazen")]
     pub(crate) trellis: Option<bool>,
+    /// Palette-mode preference for the AV1 screen-content palette tool
+    /// (imazen/zenrav1e fork). `None` = encoder default. RELEASE-GATED:
+    /// stored + introspectable today, applied at the zenrav1e-past-0.1.4
+    /// dep bump — see `src/palette_gate.rs` module docs.
+    #[cfg(feature = "encode-imazen")]
+    pub(crate) palette_preference: Option<crate::palette_gate::PalettePreference>,
 }
 
 impl Default for EncoderConfig {
@@ -314,6 +320,8 @@ impl Default for EncoderConfig {
             override_fast_deblock: None,
             #[cfg(feature = "encode-imazen")]
             trellis: None,
+            #[cfg(feature = "encode-imazen")]
+            palette_preference: None,
         }
     }
 }
@@ -666,6 +674,31 @@ impl EncoderConfig {
         self.trellis = enable;
         self
     }
+
+    /// Palette-mode preference for the AV1 screen-content palette tool.
+    /// `None` = encoder default. Set automatically by
+    /// [`Self::auto_tune`] via the deterministic
+    /// [`crate::palette_gate::palette_gate`] descriptor rule, or manually.
+    ///
+    /// **RELEASE-GATED**: registry `zenrav1e` 0.1.4 has no palette tool, so
+    /// the stored preference is not yet forwarded to the encoder — the
+    /// forwarding line in `build_ravif_encoder` is commented until the
+    /// zenravif → zenrav1e dep chain bumps past 0.1.4 (see
+    /// `src/palette_gate.rs` docs + the CLAUDE.md dep-bump checklist).
+    #[cfg(feature = "encode-imazen")]
+    pub fn with_palette_preference(
+        mut self,
+        pref: Option<crate::palette_gate::PalettePreference>,
+    ) -> Self {
+        self.palette_preference = pref;
+        self
+    }
+
+    /// The stored palette-mode preference (see [`Self::with_palette_preference`]).
+    #[cfg(feature = "encode-imazen")]
+    pub fn palette_preference_value(&self) -> Option<crate::palette_gate::PalettePreference> {
+        self.palette_preference
+    }
 }
 
 /// Convert a CICP color primaries code point to the ravif enum.
@@ -882,6 +915,19 @@ fn build_ravif_encoder(
         if let Some(t) = config.trellis {
             enc = enc.with_trellis(t);
         }
+        // UNCOMMENT at the zenrav1e dep bump (the palette tool lands
+        // post-0.1.4, zenrav1e@68a8d81f..df27117c; ravif gains the
+        // pass-through builder then — see src/palette_gate.rs + CLAUDE.md
+        // "Known Bugs" dep-bump checklist). Until then the preference is
+        // stored/introspectable but not forwarded:
+        // if let Some(pref) = config.palette_preference {
+        //     enc = enc.with_palette(match pref {
+        //         crate::palette_gate::PalettePreference::Auto => ravif::PaletteMode::Auto,
+        //         crate::palette_gate::PalettePreference::Always => ravif::PaletteMode::Always,
+        //         crate::palette_gate::PalettePreference::Off => ravif::PaletteMode::Off,
+        //     });
+        // }
+        let _ = &config.palette_preference; // release-gated; silence unused-field until the bump
     }
     // Forward stop token for per-superblock cooperative cancellation.
     enc = enc.with_stop(stop);

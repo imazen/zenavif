@@ -506,8 +506,20 @@ impl EncoderConfig {
             .filter(|q| *q >= 0)
             .ok_or(AutoTuneError::TargetOutOfRange(target_zq))?;
 
-        // 7. Apply.
-        Ok(self.speed(speed).quality(q as f32))
+        // 7. Deterministic descriptor heads (no model file): the palette
+        // gate (FEATURE_HINTS §E rule 1, `patch_fraction > 0.197` →
+        // PaletteMode::Always where the encoder's own AA-aware detection is
+        // downscale-blind). Reuses the same Offer contract; degrades to
+        // Auto on any analysis failure. RELEASE-GATED downstream: the
+        // preference is stored on the config today and forwarded to the
+        // encoder at the zenrav1e dep bump (see src/palette_gate.rs).
+        let palette = crate::palette_gate::palette_gate_for_rgb8(rgb, width, height, offer);
+
+        // 8. Apply.
+        Ok(self
+            .speed(speed)
+            .quality(q as f32)
+            .with_palette_preference(Some(palette)))
     }
 }
 
