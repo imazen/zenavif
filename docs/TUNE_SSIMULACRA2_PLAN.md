@@ -100,6 +100,30 @@ byte-agreement additionally verified on multi-tile/straddle/10-bit/tiny
 frames. Full data: `benchmarks/rd_gap_deltaq_2026-07-02.tsv` + the
 companion pointer file.
 
+## Item 6 revisited (2026-07-03): QM-weighted RD distortion — SHIPS as the ratio composition
+
+The "lower priority" call on item 6 was half right: the *literal* aom mechanism
+(force tx-domain distortion + weight it — aom does force it, rdopt_utils.h
+`set_tx_domain_dist_params` early-returns `use_transform_domain_distortion=1`
+whenever QM_PSNR is selected) measured **+4.47% median WORSE** on zenrav1e,
+because the domain switch alone costs +6.07% (cdef_dist's activity masking is
+worth more than tx-domain SSE) while the weighting recovers only −2.57% of it.
+The trellis surface re-measured as a regression too (+0.3..0.6% at 1.66× time,
+weighted or not — item 4's verdict stands).
+
+The mechanism's *intent* ships instead (landed `zenrav1e@3710a573` +
+`@4279a673`): `qm_dist_ratio` (rides the
+tune) scales the psy luma distortion by the per-block QM-weighted/unweighted
+tx-error ratio — the frequency discount composed WITH activity masking.
+Measured: direct −1.78%/−1.71% median ssim2 (s2/s1, train26 12-pt, butteraugli
+agreeing on all norms, ~1.01× time); legacy tier-2 gap +5.63% → +2.12% (s2)
+and **+5.02% → −1.94% at s1 — the tier-2 median CROSSES**; o_6629 (the
+residual outlier) −13.5/−15.3% direct, vs cpu0-default +26.4 → +7.6 (s1). The
+user-opt-in trellis under the tune also gains the forward-QM `get_coeff_dist`
+weighting (≈0 vs unweighted, softer butteraugli max, dequant-consistent).
+Full record: `docs/RD_GAP_VS_LIBAOM.md` "QM-weighted RD distortion" +
+`benchmarks/rd_gap_qmdist_2026-07-03.tsv`.
+
 ## libaom mechanism (file:line at the pinned rev)
 
 **Entry point.** `AOM_TUNE_SSIMULACRA2 = 11` (`aom/aomcx.h:1812`). `handle_tuning()`
@@ -212,6 +236,9 @@ Add `Tune::Ssimulacra2` to `src/encoder.rs:109-117`; extend the `matches!` gates
 6. **QM-weighted tx distortion** — weight `RawDistortion` (`encoder.rs:1918-1932`) and trellis
    coeff dist by `qm²`. Lower priority: Psychovisual RDO is pixel-domain `cdef_dist`
    (`rdo.rs:282-295`), so this lever is smaller here than in aom.
+   **DONE 2026-07-03 — shipped as the ratio composition; see "Item 6 revisited" above**
+   (the literal weighting measured as a regression exactly because of the pixel-domain
+   point this note made; the ratio form captures the intent).
 7. **Filters** — align StillImage's existing CDEF scaling (`encoder.rs:1436-1444`) and deblock
    sharpness (`encoder.rs:3679-3687`) to aom's thresholds (constant sharpness 7; CDEF off ≤32
    / halved ≤220 / zeroed ≤140).

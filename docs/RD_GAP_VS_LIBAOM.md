@@ -684,6 +684,91 @@ rollback-unprotected in `BlockContextCheckpoint` (LF-delta scaffolding shared it
 inertly). Full data: `benchmarks/rd_gap_deltaq_2026-07-02.tsv` + pointer file
 (`/mnt/v/output/zenavif/deltaq-2026-07-02/`).
 
+## QM-weighted RD distortion (dist_metric=QM_PSNR analog) — SHIPPED 2026-07-03 (release-gated): the s1 TIER-2 MEDIAN CROSSES (+5.02% → −1.94%)
+
+**Mechanism #2 for the residual tier-2 gap** (TUNE_SSIMULACRA2_PLAN item 6). aom's ss2
+tune sets `dist_metric=AOM_DIST_METRIC_QM_PSNR`: coefficient-domain RD error is scaled by
+the forward QM weight before squaring (`av1_block_error_qm` tx_search.c, `get_coeff_dist`
+txb_rdopt_utils.h, rev 632172a4), and aom **forcibly enables tx-domain distortion**
+whenever that metric is selected (rdopt_utils.h `set_tx_domain_dist_params`) — at
+cpu0+ss2tune both surfaces are live in the reference. zenrav1e's RDO was QM-blind: the
+tune's QM curves reshape dequant error per frequency, but decisions still priced every
+frequency's error equally.
+
+**Forward weights from the ported inverse tables.** zenrav1e stores only the spec's
+dequant-side weights; libaom's stored forward table satisfies `wt == round(1024/iwt)`
+exactly (verified numerically vs quant_common.c), so `QM_FWD_WEIGHT[iwt]` derives it. The
+weight lookup uses the same storage-order indexing as `dequantize_with_qm`, so the
+zenrav1e#29 rect-orientation fix carries over by construction.
+
+**Round 1 — the literal aom routing loses; the isolated mechanism wins** (coarse grid,
+train26, s2+tune, direct BD vs tune baseline):
+
+| arm | ssim2 med | better | verdict |
+|---|---|---|---|
+| tx-domain switch, unweighted (control) | +6.07% | 1/23 | the switch alone forfeits cdef_dist activity masking |
+| QM-weighted tx-domain (aom-literal) | +4.47% | 3/23 | REJECTED — recovers under half the handicap |
+| *isolation: weighted vs unweighted tx-domain* | **−2.57%** | 16/23 | the weighting itself is real |
+| trellis forced on, unweighted / QM-weighted | +0.32% / +0.55% | 4/23, 3/23 | REJECTED (1.66× time; re-confirms item-4) |
+
+aom can route RD through weighted tx-domain SSE because it has no perceptual pixel metric
+to lose; zenrav1e's `cdef_dist` (measured ~9.5% vs plain SSE) is worth more than the
+frequency discount. **Round 2 — ratio composition:** keep the psy pixel metric and scale
+its luma term by the per-trial QM-weighted/unweighted tx-error ratio (`Σw/Σu`,
+accumulated per TX in `write_tx_block`, applied in `compute_distortion`) — exactly the
+frequency-dependent forgiveness QM dequant applies to that block's error spectrum,
+composed with activity masking instead of replacing it. Skip trials stay undiscounted
+(mirrors tx-domain skip pricing).
+
+**Direct isolation, full 12-pt grid, train26** (all three metrics agree at both speeds;
+~1.01-1.02× encode time — the accumulation loops are noise vs transforms):
+
+| config | ssim2 med / mean / better | ba3n med | bamax med |
+|---|---|---|---|
+| s2+tune+ratio vs s2+tune | **−1.78% / −1.45% / 15/24** | −1.46% | −0.37% |
+| s1+tune+ratio vs s1+tune | **−1.71% / −1.52% / 15/24** | −1.51% | −2.49% |
+
+Per-family: flat-gradient photos are the big winners (5004_nps −18.8%; fam 5000 −11.0%
+median), screenshots −3.4%, interiors/nature/illustrations −2..−6; synthetic line plots
+(fam 7000) lose +5.6% — the discount misprices sharp synthetic HF edges (palette-mode
+content anyway; photos-first program accepts).
+
+**Legacy-corpus confirm (photos n=19, ssim2 BD, deltaq-2026-07-02 baselines + same-day
+aom refs):**
+
+| ref | s2+tune+deltaq | s2 +ratio | s1+tune+deltaq | s1 +ratio |
+|---|---|---|---|---|
+| direct vs shipped | — | **−1.60%** med / −2.30% mean (16/19; ba3n −1.35, bamax −4.66) | — | **−2.51%** med / −2.61% mean (15/19; ba3n −1.24, bamax −2.11) |
+| cpu0-default | −5.07% | **−7.90%** (14/19) | −5.38% | **−7.85%** (16/19) |
+| cpu2 (libaom-slow) | −6.86% | **−8.49%** (14/19) | −7.18% | **−9.75%** (16/19) |
+| cpu0-ss2tune (tier 2) | +5.63% | **+2.12%** med / +3.65% mean (9/19 win) | +5.02% | **−1.94%** med / +1.30% mean (10/19 win) |
+
+**THE TIER-2 MEDIAN IS CROSSED at s1: −1.94%.** zenrav1e s1+tune now beats libaom
+cpu-used=0 *with its own --tune=ssimulacra2* — the "aom at its absolute best" reference
+this tier was defined against — on the median, with 10/19 per-image wins. The mean stays
+positive (+1.30%), pulled by the two remaining per-image losers (o_5004 +21.9, o_6629
++7.9).
+
+**o_6629 — THE residual coefficient-RD outlier — is finally moved:** s2 direct −13.5%
+ssim2 / −12.6% ba3n / −22.3% bamax; s1 direct −15.3%/−11.4%/−10.7%. vs cpu0-default:
+s2 +32.7 → +13.6, s1 +26.4 → **+7.6**; tier-2 s1 → +7.9. The item-6 hypothesis (the QM
+discount fixes its q30-40 misallocation on the ultra-flat gradient) is confirmed — the
+first lever to touch it since the s1 postmortem named it. o_9051 stays a per-image
+tier-2 win (−1.9 at both speeds) though it's a direct-isolation loser at s1 (+5.19).
+o_5004 improves everywhere that matters at s1 (direct −3.39; vs cpu0-default flips to
+a −2.78 win) but its butteraugli 3-norm disagrees on this image (+12.7) and it remains
+the largest tier-2 outlier (+21.9) — with o_6629 largely fixed, o_5004 is now the top
+per-image target (picker-gating candidate).
+
+**Conformance:** 110/110 s2 + 110/110 s1 cells (aomdec + rav1d-safe, legacy 22-image
+corpus × Q{30,50,60,75,90}) at the shipped config — encoder-internal decision change,
+no new syntax, zero corruption. **Landed:** zenrav1e `3710a573` (mechanism + measured
+arms) + `4279a673` (landing shape, dev gates stripped), rebased over the same-day
+palette + skip-recon landings (byte-gates re-verified on each new base)
+(`qm_dist_ratio` + `qm_weighted_trellis` ride `Tune::Ssimulacra2`; dev gates stripped;
+tune-off byte-identity vs master binary verified, stripped envs inert). Raw sweeps:
+`/mnt/v/output/zenavif/qmdist-2026-07-03/` + `benchmarks/rd_gap_qmdist_2026-07-03.tsv`.
+
 ## RULED OUT, 2026-07-01: `BLOCK_32X32`/`BLOCK_64X64` at 0% usage — explained, not a bug, widening regresses
 
 Same inspect-diff methodology surfaced a second block-size anomaly: `BLOCK_32X32` and

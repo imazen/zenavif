@@ -193,6 +193,10 @@ QM curves; the other three aom mechanisms measured as regressions and were
 dropped — see docs/TUNE_SSIMULACRA2_PLAN.md). Measured: s2 −4.28% / s1-deep
 −3.57% median ssim2 BD vs tune-off, beats aom cpu0-default at both speeds,
 tier-2 gap vs cpu0-ss2tune +11.08% → +8.71%. 220/220 conformance cells clean.
+Since extended by per-SB delta_q Variance Boost (tier-2 → +5.63%/+5.02%) and
+the QM-weighted RD distortion ratio (2026-07-03, tier-2 s2 +5.63% → +2.12%,
+s1 +5.02% → **−1.94% — tier-2 median crossed**;
+docs/RD_GAP_VS_LIBAOM.md "QM-weighted RD distortion").
 **At the zenrav1e dep bump:** wire tune selection through zenravif/zenavif
 (the sweep used a dev-only ZENRAVIF_TUNE env passthrough, reverted) and decide
 the default for still images. From the libavif v1.4.0 study

@@ -1,0 +1,55 @@
+# QM-weighted RD distortion (dist_metric=QM_PSNR analog, TUNE_SSIMULACRA2_PLAN item 6) -- 2026-07-03 -- sweeps on zenavif-sweep-1 (Hetzner ccx63 48c), analysis host lilith
+# zenrav1e: base=master 165e83b1 (Tune::Ssimulacra2 incl. deltaq strength 1.0); measured via workspace commits 17a311ce (staged arms, env-gated) -> 45204079 (ratio-composition arm); LANDED as 3710a573 (mechanism) + 4279a673 (landing shape, gates stripped), rebased over the same-day palette (df27117c) + skip-recon (b30dd752) landings with byte-gates re-verified on each base
+# harness: cavif --depth 8 + ZENRAVIF_TUNE=ssimulacra2 (ravif dev-patch, reverted at landing), train26 corpus (24 TRAIN-split origins, 12 content families), JOBS=24, fast-ssim2 + butteraugli(3-norm,max) per cell; coarse grid Q{30,50,60,75,85,95} for arm ranking, full Q{30,40,50,55,60,65,70,75,80,85,90,95} for finals; legacy 22-image corpus for the tier-2 confirm vs the deltaq-2026-07-02 saved baselines (same-day aom refs)
+# decision rule PRE-REGISTERED before any arm data (scratchpad DECISION_RULE.md): rank arms by median ssim2-BD vs tune baseline; VETO if ba3n>+1.0% or bamax>+1.5%; ties <=0.3% -> better ba3n -> fewer changed surfaces; unweighted "stage 1" arms are controls
+# baseline continuity: s2_base coarse cells vs the deltaq session's t26_s2_dq_str1 (env-strength 1.0, older binary): 144/144 cells bpp-EXACT -- baked strength reproduces the fit run bit-for-bit
+#
+# === Round 1: literal aom QM_PSNR routing (coarse grid, direct BD vs s2+tune baseline; negative = fewer bits at matched quality) ===
+# arm	ssim2_median	ssim2_mean	ssim2_better_on	ba3n_median	bamax_median	enc_time_vs_base	verdict
+# tx1_txdomain_unweighted_control	+6.069	+5.850	1/23	--	--	0.97x	control: the domain switch alone forfeits cdef_dist activity masking
+# tx2_txdomain_QM_weighted	+4.472	+3.800	3/23	--	--	0.99x	REJECTED as net regression...
+# tx2_vs_tx1_weighting_isolated	-2.565	-1.697	16/23	--	--	--	...but the QM weighting itself is a real win inside the tx-domain frame -> motivated Round 2
+# tr1_trellis_on_unweighted	+0.317	+0.652	4/23	+0.904	+1.836	1.66x	REJECTED (re-confirms the 2026-07-02 item-4 verdict)
+# tr2_trellis_on_QM_weighted	+0.546	+0.577	3/23	+0.734	+0.373	1.66x	REJECTED as tune default; weighting itself ~0 vs tr1 (+0.07 med) with softer bamax -> ships only for explicit enable_trellis+tune
+# tx2tr2_both_weighted	+5.382	+4.548	3/23	+5.067	+8.778	--	REJECTED
+#
+# === Round 2: ratio composition (keep psy pixel metric, scale luma by per-trial QM-weighted/unweighted tx-error ratio) ===
+# arm	ssim2_median	ssim2_mean	ssim2_better_on	ba3n_median	bamax_median	enc_time_vs_base	verdict
+# tx3_ratio_coarse	-1.404	-1.223	16/23	-0.829	+1.280	1.01x	WINNER (bamax inside the +1.5 veto line at coarse; negative at full grid)
+# tx3_ratio_FULL_12pt	-1.783	-1.445	15/24	-1.460	-0.371	1.01x	all three metrics agree at the median -> SHIPS
+#
+# === winner (ratio) per-family ssim2-BD medians, train26 full grid ===
+# fam	n	median
+# 1200_interiors	1	-5.96
+# 1400_nature	1	-2.37
+# 1600_food	1	+0.21
+# 2000_people	1	+0.54
+# 5000_nps_photos	2	-11.01
+# 6000_scans_patents	2	+2.70
+# 6600_scans_illustrations	1	-6.47
+# 7000_plots	4	+5.57
+# 8100_web_screenshots	4	-3.44
+# 9000_photo	1	+0.27
+# 9094_gen_illustrations	2	-3.35
+# 9226	4	-1.11
+# notable: 5004_nps flat-gradient -18.85% (the o_5004 origin class); plots (synthetic sharp-HF line art) is the one losing family -- the QM discount misprices synthetic HF edges; photos-first program accepts (plots are palette-mode content, see palette findings)
+#
+# === finals: direct isolation, full 12-pt grid, train26 (ratio arm vs same-speed tune baseline) ===
+# config	ssim2_median	ssim2_mean	ssim2_better_on	ba3n_median	bamax_median	enc_time
+# s2+tune+ratio vs s2+tune	-1.783	-1.445	15/24	-1.460	-0.371	1.01x
+# s1+tune+ratio vs s1+tune	-1.705	-1.519	15/24	-1.511	-2.491	1.02x
+#
+# === legacy 22-image corpus confirm (photos n=19, ssim2 BD unless noted; baselines = deltaq-2026-07-02 TSVs incl same-day aom refs) ===
+# ref	s2_tune_deltaq_shipped	s2_+ratio	s1_tune_deltaq_shipped	s1_+ratio
+# direct vs shipped	--	-1.601 med / -2.301 mean (16/19; ba3n -1.353, bamax -4.658)	--	-2.514 med / -2.608 mean (15/19; ba3n -1.242, bamax -2.109)
+# aom cpu0-default	-5.065	-7.903 (14/19)	-5.380	-7.851 (16/19)
+# aom cpu2 (libaom-slow)	-6.857	-8.488 (14/19)	-7.181	-9.749 (16/19)
+# aom cpu0-ss2tune (TIER 2)	+5.633	+2.123 med / +3.650 mean (9/19 win)	+5.021	-1.939 med / +1.301 mean (10/19 win)  <- TIER-2 MEDIAN CROSSED
+# o_6629 (THE residual coeff-RD outlier, ultra-flat gradient): s2 direct -13.48 ssim2 / -12.55 ba3n / -22.29 bamax, s1 direct -15.25/-11.44/-10.72; vs cpu0-default s2 +32.66 -> +13.60, s1 +26.42 -> +7.64; tier-2 s1 -> +7.87 -- the item-6 hypothesis (QM discount fixes its q30-40 misallocation) CONFIRMED
+# o_5004: s1 direct -3.39 ssim2 (ba3n disagrees +12.7 on this image), vs cpu0-default flips to -2.78 WIN; tier-2 +21.92 -- now the largest remaining per-image outlier (picker-gating candidate)
+# o_9051: s2 direct +4.62 / s1 +5.19 (a direct-isolation loser); tier-2 -1.9 at both speeds (still a per-image win vs cpu0-ss2tune)
+#
+# === conformance (BLOCKING, ran before landing) ===
+# 110/110 s2 + 110/110 s1 cells clean (aomdec AND rav1d-safe roundtrip, legacy 22-image corpus x Q{30,50,60,75,90}), arm binary whose bitstreams are byte-identical to the landed code (gate-verified)
+#
+# raw sweeps: /mnt/v/output/zenavif/qmdist-2026-07-03/ (companion pointer file)
