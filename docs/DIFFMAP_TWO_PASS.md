@@ -181,9 +181,10 @@ Diagnosis arms in flight (each isolates one hypothesis):
   autopsy's suspect) recovers the entire +2.20% regression. Follow-up arms
   queued: boost-only at strength 1.5 / 2.0 (is there a win past
   break-even?).
-- `probe_quality=40` — libaom's fixed-quality preliminary pass (their q96
-  trick): a content-intrinsic degradation signal instead of the
-  self-referential real-q residual, and a cheaper pass 1.
+- `probe_quality=40` — **MEASURED: still regresses** (ba3n +0.75% median,
+  3/24 better, ba-max +0.96%, ssim2 +0.38%, 2.17×). libaom's fixed-quality
+  probe signal does NOT rescue the symmetric formula — consistent with the
+  give-back side, not the signal shape, being the poison.
 - Conformance (both samplings) at the shipped knobs.
 
 Final tables land in `benchmarks/rd_gap_twopass_2026-07-03.tsv` + this
