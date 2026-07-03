@@ -129,6 +129,18 @@ libaom's own loop cracks that class on *their* base (o_9051 −5.92% ba3n,
 o_3003 −3.84, o_5004 −3.71, o_6632 −3.48, o_9077 −2.75; only o_6629 +2.38 —
 from the evaluate-first per-image data).
 
+**o_9051-class outcome (legacy complete, str1.0): INVERTED from aom — the
+loop makes every outlier WORSE.** o_6632 +10.42% ba3n, o_9077 +9.92,
+o_9051 +8.46, o_6629 +6.13, o_3008 +3.52, o_5004 +1.26, o_3003 +0.81 (7/7
+regress; several are the corpus-worst cells). On aom's base the same
+mechanism's biggest wins were these images (o_9051 −5.92%): their default
+allocator under-serves smooth/gradient content, the map flags it, the boost
+fixes it. zenrav1e's base (Variance Boost + activity masking + psy tune)
+already over-serves exactly those superblocks — the butteraugli map flags
+the same banding-prone flats and composes a second boost on top (o_6629's
+known boost over-allocation class). Full legacy str1.0: ba3n **+3.65%**
+median (5/22), ba-max +5.21%, ssim2 +1.70%, 1.99×.
+
 **INTERIM VERDICT — the direct aom-formula port at λ-parity REGRESSES on the
 tuned base.** train26 (24 imgs, complete pair): butteraugli-3n median
 **+2.20%** (3/24 better), ba-max +3.25%, ssim2 +1.88% (5/24), 2.01× time.
