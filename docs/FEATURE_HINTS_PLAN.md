@@ -173,6 +173,20 @@ accumulate fit-sweep TSVs into a label store (image → arm → RD outcome) inst
 treating them as one-shot artifacts; new fit sweeps append. When a head needs denser
 labels, the cell cache + coarse-grid convention makes arm re-runs cheap.
 
+**First size/crop-axis entry in the label store (2026-07-03, WEDGE-FINDER):**
+`/mnt/v/output/rd-gap-wedge-2026-07-03/wedge_dataset.parquet` — 2,598 cells over K=16
+train-LSD origins × sizes {256,512,1024,2048|native} × c50 quadrants × arms {zr-best,
+zr-paletteoff, cpu2, cpu0}, each row carrying a `feature_join` key that joins EXACTLY
+(verified 123/123) to its precomputed row in `imazen26_features_2026-06-23.parquet`.
+These are the program's first labels below 1024px. Head candidates it directly feeds
+(see docs/WEDGE_MAP_2026-07-03.md for the ranked list + correlations): size-conditional
+tune/QM curve offset (parity at 256px, −13%→−1.15% median decay), per-image
+variance-boost/QM-discount strength for the 9226 smooth-gradient family (+13.7 med,
+32% of corpus), a zenanalyze palette gate (ported AA-aware detection stops firing on
+ANY downscaled screen content — byte ratio 1.000 at ≤512 vs −12..−39% BD wins at
+native), and per-SB/region hints for quadrant wedges (spread up to 61.7 BD points
+inside one image; c50 crops of 1480/9908/7052).
+
 **Method discipline** (unchanged from the rest of this plan): interpretable threshold
 rules on 2-3 features FIRST, MLP head only where thresholds demonstrably underfit;
 train26/LSD split hygiene; butteraugli in the selection rule (veto), not just ssim2;

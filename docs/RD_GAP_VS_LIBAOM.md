@@ -8,6 +8,15 @@ mode shipped (release-gated): median −0.97% vs libaom cpu-used=0 (its slowest-
 −3.01% vs cpu2, winning 11/19 photos per-image — see "s1 deep mode" below.** Re-run
 `scripts/rd_gap/` after any future zenrav1e change to check for regressions.
 
+**2026-07-03 — the WEDGE MAP extends the program over size (256/512/1024/2048) and
+c50 quadrant crops** (everything above was measured at 1024-full only): the 1024 win
+reproduces (continuity PASS) but decays monotonically to **parity at 256px**, family
+9226 (AI product shots, ~32% of imazen-26) is a systemic loss at every size, aom's
+near-lossless screen floor is unreachable on grid plots (3.4–3.9× bpp "reach
+failures" invisible to BD), and palette-Auto detection stops firing on ANY downscaled
+screen content. Ranked wedge list + feature correlations + the labeled per-cell
+dataset: `docs/WEDGE_MAP_2026-07-03.md`.
+
 Five real defects found and fixed on zenrav1e's `master` (unreleased): `encode_partition_topdown`
 never offering `PARTITION_HORZ`/`VERT`, `sse_h_edge`'s wrong-axis `deblock_size` call,
 `rdo_tx_type_decision`'s overly-aggressive first-iteration early-exit, a `BlockSize`

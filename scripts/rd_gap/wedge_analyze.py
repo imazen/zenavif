@@ -162,6 +162,15 @@ def main():
             e[f"bd_{ref}"] = bd_rate(zf, rf) if zf and rf else None
             g = gap_at_mid(zf, rf) if zf and rf else None
             e[f"mid_{ref}"], e[f"gap_{ref}"], e[f"refbpp_{ref}"] = g if g else (None, None, None)
+            # REACH FAILURE (7050-class): the ref frontier's floor quality sits at or
+            # above zr's ceiling — BD/gap have no overlap and would silently DROP the
+            # cell, hiding a catastrophic loss. Record bpp ratio at the near-touch.
+            e[f"reach_{ref}"] = None
+            if zf and rf and e[f"bd_{ref}"] is None and e[f"gap_{ref}"] is None:
+                z_top_s, z_top_b = max(zf, key=lambda p: p[0])
+                r_lo_s, r_lo_b = min(rf, key=lambda p: p[0])
+                if r_lo_s >= z_top_s - 0.5:
+                    e[f"reach_{ref}"] = (z_top_s, z_top_b, r_lo_s, r_lo_b)
         summ[fn] = e
 
     have_zr = args.zr is not None and any(fr.get((fn, "zr")) for fn in files)
@@ -206,6 +215,13 @@ def main():
             print(f"{str(g):>34} {len(v):>3} {np.median(v):>+8.2f} {np.mean(v):>+8.2f} {win:>4} {len(v)-win:>4}")
 
     if have_zr:
+        rfail = [e for e in summ.values() if e.get("reach_cpu2")]
+        if rfail:
+            print("\n=== REACH FAILURES vs cpu2 (ref frontier floor >= zr ceiling; BD undefined, loss is a RATIO) ===")
+            print(f"{'file':>64} {'zr_best':>15} {'aom_floor':>15} {'bppx':>6}")
+            for e in sorted(rfail, key=lambda x: -(x["reach_cpu2"][1] / x["reach_cpu2"][3])):
+                zs, zb, rs, rb = e["reach_cpu2"]
+                print(f"{e['file'][:64]:>64} {zb:.4f}@{zs:5.1f} {rb:.4f}@{rs:5.1f} {zb/rb:>5.1f}x")
         table(lambda e: (e["family"], e["size_slot"]), "family x size_slot")
         table(lambda e: e["size_slot"], "size_slot")
         table(lambda e: e["crop_label"] if e["crop_label"] != "full" else f"full@{e['size_slot']}", "crop")
@@ -358,6 +374,8 @@ def main():
                     cols[c].append(float("nan"))
             for ref in ("cpu2", "cpu0"):
                 cols[f"file_bd_{ref}"].append(e[f"bd_{ref}"] if e[f"bd_{ref}"] is not None else float("nan"))
+            r = e.get("reach_cpu2")
+            cols["file_reach_cpu2_bppx"].append(r[1] / r[3] if r else float("nan"))
             # canonical feature-row join key into imazen26_features_2026-06-23.parquet
             cols["feature_join"].append(
                 f"{opath.get(m['origin_id'], '')}|{m['crop_label']}|{m['size_class']}")
@@ -368,13 +386,16 @@ def main():
         with open(args.summary_tsv, "w") as f:
             w = csv.writer(f, delimiter="\t")
             w.writerow(["file", "origin_id", "family", "content_class", "crop_label", "size_class",
-                        "size_slot", "px", "bd_cpu2", "gap_mid_cpu2", "mid_ssim2_cpu2", "bd_cpu0"])
+                        "size_slot", "px", "bd_cpu2", "gap_mid_cpu2", "mid_ssim2_cpu2", "bd_cpu0",
+                        "reach_cpu2_bppx"])
             for fn in files:
                 e = summ[fn]
+                r = e.get("reach_cpu2")
                 w.writerow([fn, e["origin_id"], e["family"], e["content_class"], e["crop_label"],
                             e["size_class"], e["size_slot"], e["px"],
                             *(f"{e[k]:.3f}" if e[k] is not None else "NA"
-                              for k in ("bd_cpu2", "gap_cpu2", "mid_cpu2", "bd_cpu0"))])
+                              for k in ("bd_cpu2", "gap_cpu2", "mid_cpu2", "bd_cpu0")),
+                            f"{r[1]/r[3]:.2f}" if r else "NA"])
         print(f"wrote {args.summary_tsv}")
 
 
