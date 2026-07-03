@@ -71,6 +71,12 @@ fn main() {
         Some(name) => zenavif::TwoPassMetric::from_name(name)
             .unwrap_or_else(|| panic!("unknown two-pass metric {name}")),
     };
+    // Probe quality (arg 10): "none" or a fixed pass-1 quality (libaom's
+    // preliminary-pass shape).
+    let probe_quality: Option<f32> = match args.get(10).map(String::as_str) {
+        None | Some("none") => None,
+        Some(v) => Some(v.parse().expect("probe_quality")),
+    };
 
     let img = load_png_rgb(input);
     // 8-bit forced: the rd_gap harness decodes with `save_png` (RGB8-only),
@@ -95,6 +101,7 @@ fn main() {
                 metric,
                 strength,
                 weight_clamp: (0.4, clamp_hi),
+                probe_quality,
                 ..Default::default()
             };
             let two = encode_rgb8_two_pass(img.as_ref(), &config, &options, stop)

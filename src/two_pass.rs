@@ -112,6 +112,15 @@ pub struct TwoPassOptions {
     pub hf_asymmetry: f32,
     /// Butteraugli intensity target in nits (SDR convention: 80).
     pub intensity_target: f32,
+    /// When `Some(q)`, pass 1 encodes at this FIXED quality instead of the
+    /// caller's — libaom's preliminary-pass shape (their loop probes at
+    /// fixed `q_index 96` regardless of the target rate), which makes the
+    /// error map a quasi-content-intrinsic "where does this content
+    /// degrade" signal instead of a self-referential residual of the very
+    /// allocation being corrected. A mid-low probe (e.g. `40.0`) also
+    /// makes pass 1 cheaper than the real encode. `None` = probe at the
+    /// caller's quality (the v1 behavior).
+    pub probe_quality: Option<f32>,
 }
 
 impl Default for TwoPassOptions {
@@ -124,6 +133,7 @@ impl Default for TwoPassOptions {
             pool_exponent: 12.0,
             hf_asymmetry: 1.0,
             intensity_target: 80.0,
+            probe_quality: None,
         }
     }
 }
@@ -222,8 +232,15 @@ pub fn encode_rgb8_two_pass(
         )));
     }
 
-    // Pass 1: the normal encode at the caller's config.
-    let pass1 = encode_rgb8(img, config, stop.clone())?;
+    // Pass 1: the probe encode — the caller's config, optionally at a
+    // fixed probe quality (libaom's preliminary-pass shape).
+    let pass1 = match options.probe_quality {
+        Some(pq) => {
+            let probe_cfg = config.clone().quality(pq);
+            encode_rgb8(img, &probe_cfg, stop.clone())?
+        }
+        None => encode_rgb8(img, config, stop.clone())?,
+    };
 
     // Decode with our own decoder — the pixels a user gets.
     let dec_config = DecoderConfig::new().prefer_8bit(true);

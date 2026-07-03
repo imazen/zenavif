@@ -18,6 +18,7 @@ STRENGTH="${TP_STRENGTH:-1.0}"
 CHROMA="${TP_CHROMA:-444}"
 CLAMP_HI="${TP_CLAMP_HI:-2.5}"
 METRIC="${TP_METRIC:-butteraugli}"
+PROBE_Q="${TP_PROBE_Q:-none}"
 
 IMG="$1"; W="$2"; H="$3"; FAM="$4"; Q="$5"; TMP="$6"
 PX=$((W*H)); base=$(basename "$IMG" .png)
@@ -25,11 +26,11 @@ avif="$TMP/${base}.q${Q}.${MODE}.avif"; decp="$TMP/${base}.q${Q}.${MODE}.dec.png
 
 source "$(dirname "${BASH_SOURCE[0]}")/cell_cache.sh"
 rd_cache_row_key "$TP_CELL" "$IMG" "zen2p" "q=$Q" "s=$SPEED" "mode=$MODE" "str=$STRENGTH" \
-  "chroma=$CHROMA" "clamphi=$CLAMP_HI" "metric=$METRIC" "tune=${ZENRAVIF_TUNE:-}" "butter=${BUTTER:+on}"
+  "chroma=$CHROMA" "clamphi=$CLAMP_HI" "metric=$METRIC" "probeq=$PROBE_Q" "tune=${ZENRAVIF_TUNE:-}" "butter=${BUTTER:+on}"
 if row=$(rd_cache_row_get); then printf '%s\n' "$row"; exit 0; fi
 
 t0=$(date +%s.%N)
-stats=$("$TP_CELL" "$IMG" "$avif" "$Q" "$SPEED" "$MODE" "$STRENGTH" "$CHROMA" "$CLAMP_HI" "$METRIC" 2> "$TMP/${base}.q${Q}.${MODE}.enc.log")
+stats=$("$TP_CELL" "$IMG" "$avif" "$Q" "$SPEED" "$MODE" "$STRENGTH" "$CHROMA" "$CLAMP_HI" "$METRIC" "$PROBE_Q" 2> "$TMP/${base}.q${Q}.${MODE}.enc.log")
 rc=$?; t1=$(date +%s.%N)
 enc_ms=$(python3 -c "print(f'{($t1-$t0)*1000:.1f}')")
 { [ $rc -ne 0 ] || [ ! -s "$avif" ]; } && { echo "ENCFAIL zenavif-2p $MODE Q$Q rc=$rc $(tail -1 "$TMP/${base}.q${Q}.${MODE}.enc.log" 2>/dev/null)"; exit 1; }
