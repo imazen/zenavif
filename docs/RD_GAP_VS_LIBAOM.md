@@ -1064,6 +1064,21 @@ quality but filter-intra ON).
 options; the zenanalyze picker is the natural owner of Off/Auto/Always per image —
 detection features are cheap), then re-measure the screen tier gap.
 
+**2026-07-03 (later): the zenanalyze palette gate landed (release-gated) after a
+val-confirmed mechanism A/B.** The detection-conservatism remainder above plus the
+wedge finding that the AA-aware detection dies on ANY downscaled screen content are
+now handled zenavif-side: `patch_fraction > 0.197` → `PaletteMode::Always`
+(`zenavif src/palette_gate.rs`, wired into `auto_tune`, encoder-forward commented
+until the dep bump). Measured on 14 held-out VAL origins × sizes {256,512,1024} ×
+both configs: where the gate fires and detection is dead the rule recovers
+−10..−39% BD at s6 (6091 patents @1024: auto +0.04 vs always −39.5) and
+−3.3..−15.2% at s2 @1024; photos never fire; false fires cost ≈0 bytes +
+1.06× median encode time; 0 conformance failures in 6,216 cells (aomdec +
+rav1d-safe raw-md5 agreement on every palette-armed cell). Full record:
+`docs/HYPERPARAM_FIRST_CUT_2026-07-03.md` rule-1 status +
+`benchmarks/hyperparam_palette_mech_ab_2026-07-03.tsv` + raw at
+`/mnt/v/output/rd-gap-palette-ab-2026-07-03/`.
+
 ## Confirmed findings (2026-07-01 audit — supersedes the "verify" framing below)
 
 Source-read + measured, not hypothesized. See `scripts/rd_gap/palette_ablation.sh` +

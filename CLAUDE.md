@@ -274,9 +274,35 @@ Conformance: every palette-on cell measured (720+ cells across sweeps)
 decodes aomdec-clean AND byte-agrees (raw I420 md5) with rav1d-safe; the
 in-repo roundtrip encodes synthetic screen content to LOSSLESS luma at ~1/8
 the palette-off bytes. RD numbers: `docs/RD_GAP_VS_LIBAOM.md` item 4 status +
-`benchmarks/palette_*_2026-07-03.tsv`. **At the zenrav1e dep bump:** wire
-`PaletteMode` through zenravif/zenavif (picker owns Off/Auto/Always per
-image) and re-measure the screen-content tier gap.
+`benchmarks/palette_*_2026-07-03.tsv`.
+
+**2026-07-03 (later): the zenavif-side palette GATE landed, val-confirmed,
+release-gated.** `src/palette_gate.rs`: `patch_fraction > 0.197` →
+`PalettePreference::Always` else `Auto` (degrades to Auto whenever features
+are unavailable); `EncoderConfig::with_palette_preference` stores it;
+`auto_tune` sets it via the Offer-reuse contract. Mechanism A/B (14 held-out
+VAL origins × sizes {256,512,1024} × configs {isolated rav1e CLI, shipped
+cavif} × s{2,6}; 6,216 cells, 0 conformance failures): where the gate fires
+and the encoder's AA-detection is downscale-dead, the rule recovers
+−10..−39% BD at s6 and −3.3..−15.2% at s2 @1024; photos never fire; false
+fires ≈0 bytes + 1.06× median time. Record:
+`docs/HYPERPARAM_FIRST_CUT_2026-07-03.md` rule-1 status +
+`benchmarks/hyperparam_palette_mech_{ab,timing}_2026-07-03.tsv` + raw
+`/mnt/v/output/rd-gap-palette-ab-2026-07-03/`.
+
+**At the zenrav1e dep bump (>0.1.4):**
+1. ravif: add the palette pass-through builder (same shape as its other
+   `override_*` plumbing; the WEDGE-FINDER `ZENRAVIF_PALETTE` env passthrough
+   in `ravif--wedge` is the reference implementation);
+2. zenavif: uncomment the forward block in `src/encoder.rs`
+   `build_ravif_encoder` (marked "UNCOMMENT at the zenrav1e dep bump") and
+   drop the `let _ = &config.palette_preference;` placeholder;
+3. re-run the PALCONF conformance protocol (`scripts/rd_gap/zenrav1e_cell.sh`
+   PALCONF=1) on a palette-armed sample + re-measure the screen-content tier
+   gap;
+4. follow-up (measured, not landed): speed-conditional threshold — the val
+   refit wants τ≈0.05-0.07 at s≥6 (forced palette wins even on quiet classes
+   there; +0.17 mean BD available).
 
 ### zenrav1e LRF + filter-intra desync encoder recon from decoders (OPEN upstream)
 Found 2026-07-03 while measuring palette (zenrav1e#32, #33): at s<=7 (LRF)

@@ -196,18 +196,35 @@ heads, not new infrastructure.
 
 **STATUS 2026-07-03 — label store BUILT + first three threshold cuts MEASURED**
 (full report: `docs/HYPERPARAM_FIRST_CUT_2026-07-03.md`): the store is
-`/mnt/v/output/zenavif/hyperparam-labels-2026-07-03/labels.parquet` (14,880 rows /
-50 arms across tune-ss2 + deltaq + qmdist + lfsharp + desyncfix + wedge +
-palette-ab; 100% feature-join on train26+wedge corpora; builder + append protocol
+`/mnt/v/output/zenavif/hyperparam-labels-2026-07-03/labels.parquet` (21,096 rows /
+62 arms across tune-ss2 + deltaq + qmdist + lfsharp + desyncfix + wedge +
+palette-ab + palette-mech; 100% feature-join on train26+wedge+mech26 corpora;
+builder + append protocol
 `scripts/hyperparam/build_label_store.py`; Tower-mirrored). Verdicts: **palette
 gate `patch_fraction > 0.197` → Always is the graduating head** (LOOCV-stable,
-val-firing sanity clean, fires where the ported detection is downscale-dead; needs
-the ≤512 + shipped-config A/B before landing); **size decay narrowed** — the
+val-firing sanity clean, fires where the ported detection is downscale-dead);
+**size decay narrowed** — the
 1024→512 step is entirely a high-quality-band loss on photo content, top suspect
 ss2-QM curves, 768-cell isolation A/B specced; **per-image boost strength NOT
 deployable** (LOOCV ≈ global-1.0 at n=24; fam-9226's residual is palette/QM-shaped,
 not boost-shaped; needs val + dense-strength labels). MLP heads: not warranted on
 any of the three yet — in every case the LABELS underfit before the rule does.
+
+**STATUS 2026-07-03 (later) — the palette gate CONFIRMED on val + LANDED as the
+first deterministic descriptor head** (the "Yuv400-for-grayscale"-shaped rule
+family in table A, now real): mechanism A/B across palette {off,always,auto} ×
+sizes {256,512,1024} × configs {isolated rav1e CLI s2+s6, shipped cavif s2+s6}
+on the wedge fired/quiet/photo subset + a 14-origin VAL corpus. Shipped s6 val
+where detection is dead: rule −10..−39% BD (auto ≈0); s2 val @1024 −3.3..−15.2;
+zero val miss&won at s2, false fires ≈0-cost (max +3.46 vetoed), fired-file
+time 1.06× median. Threshold 0.197 re-validated (pooled refit = identical fire
+set; val-only refit wants ~0.05-0.07 — an s6-only phenomenon → documented
+speed-conditional follow-up). Runtime: `src/palette_gate.rs`
+(`palette_gate_for_rgb8` = Offer-reuse or one-feature Tier-1 pass, degrades to
+Auto), wired into `auto_tune`, forwarded to the encoder **at the zenrav1e dep
+bump** (CLAUDE.md checklist). Full record:
+`docs/HYPERPARAM_FIRST_CUT_2026-07-03.md` rule-1 status block +
+`benchmarks/hyperparam_palette_mech_ab_2026-07-03.tsv`.
 
 ## Phases + gates
 

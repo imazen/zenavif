@@ -11,7 +11,7 @@ fitted on TRAIN-LSD origins only.
 
 | head | rule | verdict |
 |---|---|---|
-| palette gate (wedge #6) | `patch_fraction > 0.197` → `PaletteMode::Always` | **STRONGEST — graduate to mechanism A/B.** LOOCV-stable, val-firing sanity clean, fires on 15/16 small wedge cells where the ported detection is dead. MLP not warranted. |
+| palette gate (wedge #6) | `patch_fraction > 0.197` → `PaletteMode::Always` | **GRADUATED — mechanism A/B CONFIRMED on val 2026-07-03 (see the status block in the rule-1 section below); wiring landed release-gated (`src/palette_gate.rs` + `auto_tune`).** LOOCV-stable, val-firing sanity clean, fires on 15/16 small wedge cells where the ported detection is dead. MLP not warranted. |
 | size-conditional tune (wedge #3) | attribution, not yet a rule | **Decay narrowed, not convicted**: the 1024→512 step is entirely a high-quality-band loss on photo-like content; top suspect = ss2 QM curves. Needs the per-size isolation A/B (768 cells). |
 | variance-boost strength (wedge #2) | `luma_histogram_entropy > 2.61` → 2.0 else 1.0 (best found) | **NOT deployable**: LOOCV ≈ global-1.0 (mean −2.36 vs −2.24, median regresses). Oracle headroom +0.93 concentrated in one content class. MLP not warranted at n=24 — labels underfit, not the model. |
 
@@ -112,6 +112,52 @@ Wiring shape: zenavif `auto_tune`/expert plumbs `PaletteMode::Always` when the g
 fires (ravif already exposes the palette knob; feature cost is a Tier-1 zenanalyze
 call, ≤14 ms at 4 MP per the P0 cost grid).
 
+**STATUS 2026-07-03 (later) — mechanism A/B RUN, all three data needs met,
+CONFIRMED on val; wiring LANDED release-gated.** Full record:
+`benchmarks/hyperparam_palette_mech_ab_2026-07-03.tsv` (+ `_timing`),
+analysis `scripts/hyperparam/analyze_palette_mech_ab.py`, raw + manifest
+`/mnt/v/output/rd-gap-palette-ab-2026-07-03/`, val corpus (14 VAL-LSD origins,
+join-verified 108/108) `/mnt/v/output/rd-gap-palette-val-2026-07-03/`; label
+store gained `palette-mech-ab` (shipped cavif s2 12-pt + s6 6-pt) +
+`palette-mech-iso` (rav1e CLI s2+s6) — 6,216 rows, 100% feature-join.
+Headline findings:
+
+- **Transfer to the shipped config holds, and the win concentrates where
+  detection is dead.** Shipped s6 val, gate-fired classes: 6000 patents @1024
+  auto +0.04 (dead) → rule **−39.5**; 8100 screenshots rule −28.5/−16.5/−15.6
+  at 1024/512/256 (auto −12.6/−0.3/−0.0); 9000 clipart −12..−22.6 (auto ≈0);
+  9226 products −4.1..−5.8. Shipped s2 val: 8100@1024 −9.94 vs auto −5.34,
+  6000@1024 −3.97 vs −0.54, 7000@1024 −15.2 vs −12.9.
+- **The ≤512 recovery is speed-dependent**: real at s6 (above), real-but-small
+  at 512 s2 (−0.6..−3.2), ≈0 at 256 s2 — at 256 the RDO itself declines
+  palette blocks on Lanczos-softened content (off==always byte-identical on
+  many cells), so the gate neither wins nor costs bytes there.
+- **Confusion (val)**: s2 17 fire&won / 12 fire&lost (losses tiny: median
+  +0.27, max +3.46 — the one butteraugli-vetoed cell 5343@256), **0 miss&won**;
+  s6 27 fire&won / 1 fire&lost (+0.46 max). The s6 miss&won cells (6621, 9165,
+  1055, 9905@256: −0.7..−4.5 unclaimed) are quiet-class content where forced
+  palette wins *only at s6* — conservative-gate upside, not harm.
+- **False-fire cost**: photos never fire (0/12 val photo cells); fired-file
+  encode time median **1.06×** p90 1.16× max 1.19× (RD_CACHE=off, idle box) —
+  cheaper than the 1024-label estimate (1.07-1.8×).
+- **Threshold**: train + pooled refits KEEP 0.197 (shipped pooled refit =
+  IDENTICAL fire set at τ=0.1963); val-only refits move DOWN to 0.046-0.066
+  (+0.165/+0.184 mean BD available) — **entirely an s6 phenomenon** (at s6
+  palette wins even on quiet classes). Shipped threshold stays 0.197; a
+  speed-conditional threshold (fire more at s≥6) is the documented follow-up.
+- **Conformance: zero corruption anywhere.** 1800/1800 isolated palette-armed
+  cells aomdec+rav1d-safe raw-md5 agree; every shipped always/auto cell passed
+  the new PALCONF gate (`zenrav1e_cell.sh`).
+
+**Wiring (landed, release-gated)**: `src/palette_gate.rs` — `PalettePreference`
++ `palette_gate(patch_fraction)` (the pure rule) + `palette_gate_for_rgb8`
+(auto-tune feature: Offer-reuse per the auto_tune contract, else one-feature
+zenanalyze pass; degrades to Auto on any failure); `EncoderConfig::
+with_palette_preference` stores it (encode-imazen); `auto_tune` now sets it on
+every successful pick. The forward-to-encoder line in `build_ravif_encoder` is
+**commented until the zenrav1e dep bump** (registry 0.1.4 has no palette tool)
+— see the CLAUDE.md dep-bump checklist.
+
 ## Rule 2 — size-conditional tune strength (wedge #3): attribution
 
 **Script**: `scripts/hyperparam/fit_size_decay.py`; TSV:
@@ -197,11 +243,11 @@ inverted-U with instability above 3 (5048: str2 vetoed, str3 clean).
 
 ## Recommended next dispatch
 
-1. **Palette-gate mechanism A/B** (graduates first): palette {off, always} ×
-   {256, 512, 1024} × {isolated, shipped-cavif} on the wedge fired-class subset +
-   val-origin cells. Cheapest measured-upside head: s6-class speeds have −4.9 mean
-   BD sitting behind a dead detector, and the gate's false-fire cost is ≈0 BD +
-   1.07-1.8× encode time on fired cells only.
+1. **Palette-gate mechanism A/B** — ~~graduates first~~ **DONE 2026-07-03,
+   confirmed + landed** (status block in the rule-1 section above). Remaining
+   follow-up: the speed-conditional threshold (val refit wants τ≈0.05-0.07 at
+   s≥6 where palette wins even on quiet classes; +0.17..+0.18 mean BD
+   available) and flipping the encoder forward at the zenrav1e dep bump.
 2. **Size-decay isolation A/B** (768 cells) to convict the QM-curve suspect, then
    calibrate M256 for the proposed log-px ramp.
 3. Boost-strength head: parked until the val + dense-strength labels exist (fold

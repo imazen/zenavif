@@ -66,7 +66,11 @@ SRC = {
     "lfsharp": "/mnt/v/output/zenavif/lfsharp-2026-07-03",
     "desyncfix": "/mnt/v/output/zenavif/desyncfix-2026-07-03",
     "palette": "/mnt/v/output/zenrav1e-palette/sweep-20260703-final2",
+    "palmech": "/mnt/v/output/rd-gap-palette-ab-2026-07-03/results",
 }
+# palette-mech A/B val corpus (14 VAL-LSD origins materialized with the wedge
+# conventions; join-verified 108/108) — see its _MANIFEST.json + picks_val14.json
+PALVAL_DIR = "/mnt/v/output/rd-gap-palette-val-2026-07-03"
 
 RD_COLS = ["image", "w", "h", "family", "encoder", "fmt", "q", "bytes", "bpp",
            "ssim2", "enc_ms", "butteraugli_3n", "butteraugli_max"]
@@ -210,6 +214,36 @@ def sources():
                   sweep_source="palette-ab-final2-2026-07-03", arm_id=None, knob_json=None,
                   encoder_rev="zenrav1e@49982460 (rav1e CLI, isolated: still-picture threads=1 lrf=false filter-intra=false)",
                   q_kind="rav1e_quantizer", speed=None, rows=720))
+
+    # --- palette-gate mechanism A/B (2026-07-03) — the rule-1 graduation data:
+    # palette {off,always,auto} x sizes {256,512,1024|native,c50} x configs
+    # {shipped cavif s2+s6, isolated rav1e CLI s2+s6} on wedge fired/quiet/photo
+    # train files + the 14-origin VAL corpus (first val RD labels for the gate).
+    # Shipped arms: ravif--wedge@9d2b97c -> zenrav1e--wedge@32477046 (byte-
+    # continuous with the wedge zr arms, verified 7052.native q60 = 2646 B).
+    # always/auto cells PALCONF-verified (aomdec + rav1d-safe raw md5 agree).
+    palmech_rev = "zenrav1e@32477046 via ravif--wedge@9d2b97c (box zenavif-sweep-2)"
+    for fn, arm, pal, spd, rows in [
+        ("pal_shipped_always.tsv", "palette-mech/shipped-always_s2", "always", 2, 1464),
+        ("pal_shipped_off.tsv", "palette-mech/shipped-off_s2", "off", 2, 792),
+        ("pal_shipped_auto.tsv", "palette-mech/shipped-auto_s2", "auto", 2, 504),
+        ("pal_shipped_s6_always.tsv", "palette-mech/shipped-always_s6", "always", 6, 252),
+        ("pal_shipped_s6_off.tsv", "palette-mech/shipped-off_s6", "off", 6, 252),
+        ("pal_shipped_s6_auto.tsv", "palette-mech/shipped-auto_s6", "auto", 6, 252),
+    ]:
+        s.append(dict(path=f"{SRC['palmech']}/{fn}", kind="rd_tsv", corpus="mech26",
+                      sweep_source="palette-mech-ab-2026-07-03", arm_id=arm,
+                      knob_json=J(speed=spd, tune="ssimulacra2", palette=pal, depth=8),
+                      encoder_rev=palmech_rev, q_kind="cavif_q", speed=spd, rows=rows))
+    # Isolated-config arms (same binary chain, rav1e CLI; conformance: every
+    # palette-armed cell aomdec-decoded AND raw-md5-agreed with rav1d-safe —
+    # 1800/1800). enc_ms contended (JOBS=26); the timing sidecar TSV is the
+    # authoritative time source for this sweep.
+    s.append(dict(path=f"{SRC['palmech']}/pal_iso_all.tsv", kind="palette_sizes_tsv",
+                  corpus="mech26", sweep_source="palette-mech-iso-2026-07-03",
+                  arm_id=None, knob_json=None,
+                  encoder_rev="zenrav1e@32477046 (rav1e CLI, isolated: still-picture threads=1 lrf=false filter-intra=false)",
+                  q_kind="rav1e_quantizer", speed=None, rows=2700))
     return s
 
 
@@ -234,6 +268,17 @@ def load_wedge_map():
     with open(WEDGE_MAP) as f:
         for row in csv.DictReader(f, delimiter="\t"):
             row["origin_path"] = opath.get(row["origin_id"])
+            m[row["file"]] = row
+    return m
+
+
+def load_mech26_map():
+    """wedge26 ∪ palette-val corpora (both materialized with the wedge
+    conventions and join-verified against the features parquet: 123/123 +
+    108/108)."""
+    m = dict(load_wedge_map())
+    with open(f"{PALVAL_DIR}/corpus_map.tsv") as f:
+        for row in csv.DictReader(f, delimiter="\t"):
             m[row["file"]] = row
     return m
 
@@ -267,6 +312,7 @@ def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     t26 = load_train26_map()
     wmap = load_wedge_map()
+    mmap = load_mech26_map()
 
     # feature-join universe (existence + dims verification)
     ft = pq.read_table(FEATURES_PARQUET, columns=["image_path", "crop_label", "size_class", "width", "height"])
@@ -316,6 +362,13 @@ def main():
                     crop, sc = m["crop_label"], m["size_class"]
                     fj = feature_join_for(opath, crop, sc, w, h)
                     fj_exact = True if fj else None  # wedge corpus pixel-verified 123/123
+                elif src["corpus"] == "mech26":
+                    m = mmap.get(img)
+                    assert m, f"{path}: mech26 image not in corpus maps: {img}"
+                    oid, opath, cclass = m["origin_id"], m["origin_path"], m["content_class"]
+                    crop, sc = m["crop_label"], m["size_class"]
+                    fj = feature_join_for(opath, crop, sc, w, h)
+                    fj_exact = True if fj else None  # both corpora pixel-verified
                 else:  # legacy22
                     oid = lsd_origin_id(img)
                     opath, cclass, crop, sc = None, None, "full", "1024"
@@ -365,6 +418,40 @@ def main():
                      sweep_source=src["sweep_source"], source_file=base,
                      encoder_rev=src["encoder_rev"],
                      feature_join=fj, feature_join_exact=False if fj else None,
+                     file_bd_cpu2=None, file_bd_cpu0=None, file_reach_cpu2_bppx=None)
+                n += 1
+            assert n == src["rows"], f"{path}: {n} rows != expected {src['rows']}"
+        elif kind == "palette_sizes_tsv":
+            # run_palette_iso.sh output over the mech26 corpus (wedge + val
+            # renditions at their materialized sizes/crops).
+            n = 0
+            with open(path) as f:
+                lines = [ln for ln in f if not ln.startswith("#")]
+            for r in csv.DictReader(lines, delimiter="\t"):
+                img = r["image"] + ".png"
+                m = mmap.get(img)
+                assert m, f"{path}: image not in mech26 corpus maps: {img}"
+                w, h = int(m["width"]), int(m["height"])
+                spd = int(r["speed"])
+                arm = r["arm"]
+                crop, sc = m["crop_label"], m["size_class"]
+                fj = feature_join_for(m["origin_path"], crop, sc, w, h)
+                emit(image_id=img, corpus="mech26", origin_id=m["origin_id"],
+                     origin_path=m["origin_path"], split=split_of(img),
+                     content_class=m["content_class"], family=m.get("family"),
+                     crop_label=crop, size_class=sc,
+                     size_slot=size_slot(crop, sc), w=w, h=h, px=w * h,
+                     encoder="zenrav1e", fmt="420(y4m)", speed=spd,
+                     arm_id=f"palette-mech-iso/{arm}_s{spd}",
+                     knob_json=J(cli="rav1e", speed=spd, still_picture=True, threads=1,
+                                 lrf=False, filter_intra=False, palette=arm),
+                     q=float(r["q"]), q_kind=src["q_kind"], bytes=int(r["bytes"]),
+                     bpp=int(r["bytes"]) * 8.0 / (w * h), ssim2=float(r["ssim2"]),
+                     butteraugli_3n=float(r["butter_p3"]), butteraugli_max=float(r["butter_max"]),
+                     enc_ms=float(r["enc_ms"]) if r.get("enc_ms") else None,
+                     sweep_source=src["sweep_source"], source_file=base,
+                     encoder_rev=src["encoder_rev"],
+                     feature_join=fj, feature_join_exact=True if fj else None,
                      file_bd_cpu2=None, file_bd_cpu0=None, file_reach_cpu2_bppx=None)
                 n += 1
             assert n == src["rows"], f"{path}: {n} rows != expected {src['rows']}"
@@ -472,12 +559,24 @@ def main():
             "desyncfix-2026-07-03": "LOCAL workstation (7950X), JOBS=6 — different host than every other source",
             "wedge-2026-07-03": "arm-parallel boxes (each arm solo per box)",
             "palette-ab-final2-2026-07-03": "local workstation, rav1e CLI single-threaded",
+            "palette-mech-ab-2026-07-03": "JOBS=12-28 concurrent (box-2) — contended; the RD_CACHE=off "
+                                          "timing sidecar benchmarks/hyperparam_palette_mech_timing_"
+                                          "2026-07-03.tsv is the authoritative time source",
+            "palette-mech-iso-2026-07-03": "JOBS=26 concurrent single-threaded rav1e cells — contended",
         },
         "palette_pipeline_caveat": "palette-ab rows: rav1e CLI on color.py-converted 420 y4m, aomdec decode, "
                                    "isolated config (still-picture, threads=1, lrf=false, filter-intra=false). "
                                    "Absolute ssim2/butteraugli NOT comparable to cavif rows; within-source arm "
                                    "deltas valid. All cells passed aomdec; palette-armed cells additionally "
-                                   "passed aomdec-vs-rav1d-safe md5 agreement.",
+                                   "passed aomdec-vs-rav1d-safe md5 agreement. Same pipeline + conformance "
+                                   "bar for palette-mech-iso-2026-07-03 (1800/1800 armed cells md5-agree, "
+                                   "zenrav1e@32477046, scripts/rd_gap/palette_iso_cell.sh); the shipped "
+                                   "palette-mech-ab cavif arms were PALCONF-verified per cell instead "
+                                   "(extract_av1 -> aomdec + rav1d-safe raw-md5, scripts/rd_gap/"
+                                   "zenrav1e_cell.sh PALCONF=1). Grid caveat: shipped s2 arms are 12-pt "
+                                   "while the reused wedge off/auto rows are 6-pt — restrict BD pairs to "
+                                   "the common grid (analyze_palette_mech_ab.py does; mixing densities "
+                                   "biases small-size trapezoids by +1..+4%).",
         "excluded": [
             "all *conformance*.tsv (pass/fail artifacts, different schema, not RD labels)",
             "zenrav1e-palette superseded runs (sweep-20260703, -auto, -colorpy) and fam7-continuity "
