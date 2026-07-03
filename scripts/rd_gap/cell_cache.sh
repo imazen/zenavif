@@ -54,6 +54,11 @@ _rd_env_knobs() {
 
 # rd_cache_row_key <encoder_bin> <img> <tag...>  → sets RD_ROW_KEY
 rd_cache_row_key() {
+  # Disabled cache: skip key derivation entirely. Previously _rd_sha_file's
+  # bare $RD_CACHE_DIR died in a set -u subshell on every call (harmless but
+  # noisy: an "unbound variable" line per cell in err.log) and the binary +
+  # image were content-hashed for a key nothing would read.
+  _rd_cache_enabled || { RD_ROW_KEY=""; return 0; }
   local bin="$1" img="$2"; shift 2
   RD_ROW_KEY=$(printf 'row1|%s|%s|%s|%s' \
     "$(_rd_sha_file "$bin")" "$(_rd_sha_file "$img")" "$*" "$(_rd_env_knobs)" \
