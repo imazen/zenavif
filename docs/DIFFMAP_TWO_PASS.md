@@ -185,7 +185,22 @@ Diagnosis arms in flight (each isolates one hypothesis):
   3/24 better, ba-max +0.96%, ssim2 +0.38%, 2.17×). libaom's fixed-quality
   probe signal does NOT rescue the symmetric formula — consistent with the
   give-back side, not the signal shape, being the poison.
-- Conformance (both samplings) at the shipped knobs.
+- Conformance (both samplings) at the shipped knobs — **MEASURED
+  (partial): 180/180 OK, exactly 90/90 per sampling (420 + 444), 18/22
+  legacy images** — zero aomdec rejections, zero aomdec/rav1d-safe raw
+  mismatches. The remaining 4 images' cells never ran: their workers hit
+  the futex hang below. Re-run queued with the per-cell timeout guard.
+
+### Known bug: rare in-process futex hang (v2 cell binary)
+
+4/220 conformance cells hung 76-90 min in `futex_` (kernel wait, no
+progress) — an in-process deadlock, ~2% incidence, first seen on the
+conformance run (v2 binary = metric-seam + probe build; suspects: the
+butteraugli crate's default rayon pool or decoder threading under 10-way
+process parallelism; the 420 leg ran here for the first time but 444 cells
+hung too). Needs a proper hunt BEFORE the two-pass feature ever ships
+live. Mitigation landed for the harness: `timeout 600` per cell (an
+ENCFAIL + RESUME gap-fill instead of a wedged pipeline).
 
 Final tables land in `benchmarks/rd_gap_twopass_2026-07-03.tsv` + this
 section when the arms complete.

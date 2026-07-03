@@ -30,7 +30,7 @@ rd_cache_row_key "$TP_CELL" "$IMG" "zen2p" "q=$Q" "s=$SPEED" "mode=$MODE" "str=$
 if row=$(rd_cache_row_get); then printf '%s\n' "$row"; exit 0; fi
 
 t0=$(date +%s.%N)
-stats=$("$TP_CELL" "$IMG" "$avif" "$Q" "$SPEED" "$MODE" "$STRENGTH" "$CHROMA" "$CLAMP_HI" "$METRIC" "$PROBE_Q" 2> "$TMP/${base}.q${Q}.${MODE}.enc.log")
+stats=$(timeout 600 "$TP_CELL" "$IMG" "$avif" "$Q" "$SPEED" "$MODE" "$STRENGTH" "$CHROMA" "$CLAMP_HI" "$METRIC" "$PROBE_Q" 2> "$TMP/${base}.q${Q}.${MODE}.enc.log")
 rc=$?; t1=$(date +%s.%N)
 enc_ms=$(python3 -c "print(f'{($t1-$t0)*1000:.1f}')")
 { [ $rc -ne 0 ] || [ ! -s "$avif" ]; } && { echo "ENCFAIL zenavif-2p $MODE Q$Q rc=$rc $(tail -1 "$TMP/${base}.q${Q}.${MODE}.enc.log" 2>/dev/null)"; exit 1; }
