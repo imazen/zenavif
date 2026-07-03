@@ -193,10 +193,17 @@ QM curves; the other three aom mechanisms measured as regressions and were
 dropped — see docs/TUNE_SSIMULACRA2_PLAN.md). Measured: s2 −4.28% / s1-deep
 −3.57% median ssim2 BD vs tune-off, beats aom cpu0-default at both speeds,
 tier-2 gap vs cpu0-ss2tune +11.08% → +8.71%. 220/220 conformance cells clean.
-Since extended by per-SB delta_q Variance Boost (tier-2 → +5.63%/+5.02%) and
+Since extended by per-SB delta_q Variance Boost (tier-2 → +5.63%/+5.02%),
 the QM-weighted RD distortion ratio (2026-07-03, tier-2 s2 +5.63% → +2.12%,
 s1 +5.02% → **−1.94% — tier-2 median crossed**;
-docs/RD_GAP_VS_LIBAOM.md "QM-weighted RD distortion").
+docs/RD_GAP_VS_LIBAOM.md "QM-weighted RD distortion"), and the LF sharpness
+schedule {7,5,3}@{80,160} (2026-07-03, zenrav1e#30 item 1 / zenrav1e@9a05d54a:
+direct −0.43%/−0.42% med at s2/s1, butteraugli sign-divergent but far under
+veto, 220/220 conformance; the groundwork commit c1fab5b3 also fixed
+nonzero-sharpness encodes desyncing encoder recon from conforming decoders —
+docs/RD_GAP_VS_LIBAOM.md "LF sharpness schedule"). Same-day desync fixes
+(#32 LRF, #33 filter-intra) + these landed tier-2 medians CROSSED at BOTH
+speeds pre-sharpness (s2 −1.54, s1 −2.10 on fresh 2026-07-03 baselines).
 **At the zenrav1e dep bump:** wire tune selection through zenravif/zenavif
 (the sweep used a dev-only ZENRAVIF_TUNE env passthrough, reverted) and decide
 the default for still images. From the libavif v1.4.0 study

@@ -124,6 +124,26 @@ weighting (≈0 vs unweighted, softer butteraugli max, dequant-consistent).
 Full record: `docs/RD_GAP_VS_LIBAOM.md` "QM-weighted RD distortion" +
 `benchmarks/rd_gap_qmdist_2026-07-03.tsv`.
 
+## Item 7 (2026-07-03): LF sharpness schedule — SHIPS {7,5,3}@{80,160} (zenrav1e#30 item 1)
+
+The last un-A/B'd tune-IQ ingredient (LIBAVIF_1_4_STUDY §c4). Full record:
+`RD_GAP_VS_LIBAOM.md` "LF sharpness schedule — SHIPPED 2026-07-03" +
+`benchmarks/rd_gap_lfsharp_2026-07-03.tsv`. Verdict: Tune::StillImage's dormant
+{7,5,3}@{80,160} schedule ships under the tune — direct isolation −0.43%/−0.42%
+median ssim2 (s2/s1, train26 full grid, 19/24 both) and −0.67%/−0.66% on legacy
+photos; aom's const-7 tied on ssim2 and lost the pre-registered ba3n tiebreak;
+tune-IQ's adaptive clamp missed the ship bar. **First tune ingredient where
+butteraugli's sign diverges from ssim2** (+0.1..0.3% med on train26, far under
+the +1.0/+1.5 veto; flat on legacy photos) — the sharpness blur-vs-blocking
+trade; aom ships it on subjective grounds. Groundwork fix shipped with it: the
+deblock filter + level search now honor the header field at all (every
+nonzero-sharpness encode had recon ≠ conforming decoders before
+zenrav1e@c1fab5b3). 220/220 conformance cells. NOT ported: aom `sharpness`'s
+second surface, the quantizer-rounding bias (av1_quantize.c:607-620, qrounding
+48→64) — closest prior art is the measured-rejected sharpness-7 trellis (item
+4); flagged in zenrav1e#30 as a possible separate micro-A/B. Picker-knob
+candidate: per-image sharpness (bi-level scans want 0, text screenshots −4.8%).
+
 ## libaom mechanism (file:line at the pinned rev)
 
 **Entry point.** `AOM_TUNE_SSIMULACRA2 = 11` (`aom/aomcx.h:1812`). `handle_tuning()`

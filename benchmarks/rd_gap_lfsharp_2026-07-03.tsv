@@ -1,0 +1,57 @@
+# LF sharpness schedule for Tune::Ssimulacra2 (zenrav1e#30 item 1, TUNE_SSIMULACRA2_PLAN item 7 / LIBAVIF_1_4_STUDY c4) -- 2026-07-03 -- sweeps on zenavif-sweep-1 (Hetzner ccx63 48c, from snapshot), analysis host lilith
+# zenrav1e: base=master 9b79b442 (post palette/skip-recon landings); measured via workspace zenrav1e--lfsharp commits aba01be7 (deblock filter+optimizer honor header sharpness; exact 7.14.4 inverse tables, exhaustive tests) + 0f5e4c47 (dev env arms, stripped at landing)
+# harness: cavif --depth 8 + ZENRAVIF_TUNE=ssimulacra2 (ravif dev-patch: path dep + tune passthrough + S1_DEEP_ARMS_LIVE=true for s1 runs; all reverted at landing), train26 corpus (24 train-split origins), JOBS=12x4 concurrent, fast-ssim2 + butteraugli(3n,max) per cell; coarse Q{30,50,60,75,85,95} ranking, full 12-pt Q{30..95} finals; legacy 22-image corpus for tier-2 vs deltaq-2026-07-02 aom refs
+# decision rule PRE-REGISTERED (raw-dir README before analysis): rank median ssim2 BD vs sharpness-0 base; VETO ba3n>+1.0% or bamax>+1.5%; ties <=0.3% -> better ba3n -> less sharpness intervention; ship bar median <= -0.3% butteraugli-clean, else keep 0
+# byte-identity gates: 18/18 md5 (3 img x Q{30,60,85} x {tune-off, tune-on-env-unset}) master binary vs workspace binary IDENTICAL; adaptive arm q30 = base bytes (qindex>160 -> clamp 0) confirms qindex gating
+#
+# === coarse ranking (train26 6-pt, s2+tune, direct BD vs sharpness-0 base; negative = fewer bits at matched quality) ===
+# arm	ssim2_median	ssim2_mean	ssim2_better_on	ba3n_median	bamax_median	enc_time_vs_base	verdict
+# const7_aom_ss2_iq_allintra	-0.5008	-0.4094	18/24	+0.1812	+0.1745	1.00x	ties still on ssim2 (0.0015%); loses ba3n tiebreak
+# adaptive_tuneIQ_{7,1,0}@{112,160}	-0.2281	-0.3126	17/24	+0.0665	+0.0117	1.00x	cleanest butteraugli but misses the -0.3% ship bar
+# still_{7,5,3}@{80,160}	-0.4993	-0.4214	18/24	+0.1054	+0.1411	1.00x	WINNER by tiebreak (better ba3n at tied ssim2)
+#
+# === winner (still) full 12-pt grid, train26, s2+tune direct isolation ===
+# config	ssim2_median	ssim2_mean	ssim2_better_on	ba3n_median	bamax_median	enc_time_vs_base
+# s2_still_vs_s2_lf0_FULL	-0.4307	-0.4695	19/24	+0.1085	+0.2946	1.00x
+# NOTE: first tune ingredient where butteraugli DISAGREES IN SIGN with ssim2 (prior steps were all metric-consistent). Both norms are far under the pre-registered veto (+1.0/+1.5); aom ships LF sharpness for its SS2/IQ tunes on subjective-sharpness grounds (picklpf.c:220-231). Recorded honestly: this knob trades a small butteraugli (blocking) cost for a larger ssim2 (edge retention) win.
+#
+# === winner (still) per-family ssim2-BD medians, train26 full grid s2 ===
+# fam	n	median
+# 1200_interiors	1	-0.91
+# 1400_nature	1	-0.65
+# 1600_food	1	-1.18
+# 2000_people	1	-0.12
+# 5000_nps	2	-0.58
+# 6000_scans-patents	2	+1.44
+# 6600_scans-illustrations	1	-0.42
+# 7000_plots	4	+0.10
+# 8100_web-screenshots	4	-0.50
+# 9000_gen	1	-0.42
+# 9094_gen-illustrations	2	-0.67
+# 9226_gen-products	4	-0.36
+# (losers concentrate in bi-level content: 1-bit patent rescans +1.2/+1.3, clipart +0.87 -- sharpness suppresses the deblocking those rely on at low q; biggest winner: LKML text screenshot -4.8 coarse)
+#
+# === winner (still) s1-deep confirm (S1_DEEP_ARMS_LIVE dev-flipped; flipped binary verified s2-byte-identical on box) ===
+# config	ssim2_median	ssim2_mean	ssim2_better_on	ba3n_median	bamax_median	enc_time_vs_base
+# s1_still_vs_s1_lf0_t26_FULL	-0.4155	-0.4395	19/24	+0.0759	+0.0390	0.99x
+# s1_still_vs_s1_lf0_legacy_photos	-0.6583	-0.2550	14/19	+0.1184	+0.0382	1.00x
+# s2_still_vs_s2_lf0_legacy_photos	-0.6673	-0.4278	16/19	+0.0006	-0.1239	0.99x
+#
+# === legacy tier table (photos n=19, ssim2 BD vs deltaq-2026-07-02 aom refs; fresh lf0 baselines at master 9b79b442) ===
+# ref	s2_lf0	s2_still	s1_lf0	s1_still
+# cpu0_ss2tune_tier2	-1.5381	+0.1775	-2.1010	-0.7058
+# cpu0_default	-10.0995	-10.8238	-10.4306	-11.2716
+# cpu2_libaom_slow	-11.1764	-12.0558	-11.8762	-12.1939
+# tier2 MEANS: s2 -0.6792 -> -0.9618, s1 -1.4662 -> -1.5199 (both improve)
+# NOTE tier-2 medians ride a knife edge: o_9051 is the only material tier-2 loser (s2 -1.54 -> +0.23, s1 -4.05 -> -0.71) and lands ON the median at s2 / becomes the s1 median; 14-16 of 19 images' tier-2 BD improve or are flat at both speeds, the cpu0-default/cpu2 tiers improve at both speeds, and the s1 tier-2 median stays CROSSED (-0.71). Context: master's tier-2 moved +2.12 -> -1.54 (s2) / -1.94 -> -2.10 (s1) between the qmdist measurement and this baseline via the same-day palette + skip-recon landings (not this change).
+#
+# === conformance (110-cell: legacy 22 x Q{30,50,60,75,90}, schedule armed via env) ===
+# config	aomdec_ok	rav1d_ok
+# s2_still	110/110	110/110
+# s1_deep_still	110/110	110/110
+#
+# === landing (pushed, master@origin 9a05d54a) ===
+# zenrav1e c1fab5b3 (deblock filter+optimizer honor header sharpness; exact 7.14.4 inverse tables + exhaustive tests; sharpness-0 byte-identical 18/18 md5; measured pre-rebase as aba01be7)
+# zenrav1e 9a05d54a (lf_sharpness: Tune::StillImage | Tune::Ssimulacra2 -> {7,5,3}@{80,160}; env gates stripped)
+# landed default byte-reproduces the measured still arm (3-cell md5) and tune-off stays byte-identical vs master (3-cell md5)
+# rebased over BOTH same-day desync landings -- 32477046 (filter-intra #33) then 17cff82f (LRF sgrproj #32) -- tune-off gate re-verified at each new base (6/6 + 3/3 md5 + tune-fires)

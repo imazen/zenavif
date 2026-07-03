@@ -778,6 +778,71 @@ palette + skip-recon landings (byte-gates re-verified on each new base)
 tune-off byte-identity vs master binary verified, stripped envs inert). Raw sweeps:
 `/mnt/v/output/zenavif/qmdist-2026-07-03/` + `benchmarks/rd_gap_qmdist_2026-07-03.tsv`.
 
+## LF sharpness schedule — SHIPPED 2026-07-03 (release-gated): zenrav1e#30 item 1, the last un-A/B'd tune-IQ ingredient
+
+From the libavif-1.4 study (`LIBAVIF_1_4_STUDY.md` §c4). aom writes LF `sharpness=7` to
+the frame header for allintra/IQ/SS2 (picklpf.c:220-231 @ 632172a4); tune-IQ additionally
+clamps by qindex {≤112→7, ≤160→1, else 0} (picklpf.c:232-249, costs a little ss2 at low q
+— why aom's SS2 tune omits it). zenrav1e wrote the field only under `Tune::StillImage` —
+and **the encoder's own filter ignored it**: recon diverged from every conforming decoder
+for any nonzero sharpness, and `deblock_filter_optimize` priced levels for thresholds the
+decoder would not use.
+
+**Groundwork (`zenrav1e@c1fab5b3`, measured as aba01be7):** the deblock filter + level
+optimizer honor header sharpness — exact const-built inverse tables for the AV1 7.14.4
+threshold derivation (rav1e's inverted minimal-level formulation), verified exhaustively
+against the forward map (3 new unit tests); the schedule is decided once per frame BEFORE
+tile encoding (delayed-LF RDO included); lossless forced 0. Sharpness-0 output is
+byte-identical (18/18-cell md5 gate).
+
+**4-arm A/B** (train26 coarse ranking → winner full 12-pt grid + legacy confirm;
+pre-registered rule in the raw-dir README: median ssim2 rank, butteraugli veto at
+ba3n>+1.0%/bamax>+1.5%, ties ≤0.3% → better ba3n, ship bar −0.3%):
+
+| arm | ssim2 med (coarse) | ba3n med | bamax med | verdict |
+|---|---|---|---|---|
+| const 7 (aom SS2/IQ/allintra) | −0.50% (18/24) | +0.18% | +0.17% | ties `still`, loses ba3n tiebreak |
+| adaptive {7,1,0}@{112,160} (tune-IQ) | −0.23% (17/24) | +0.07% | +0.01% | misses the −0.3% ship bar |
+| **still {7,5,3}@{80,160}** (zenrav1e's dormant StillImage schedule) | **−0.50% (18/24)** | +0.11% | +0.14% | **WINNER** |
+
+**Winner, full grids (direct isolation, ~1.00× encode time):**
+
+| config | ssim2 med / mean / better | ba3n med | bamax med |
+|---|---|---|---|
+| s2 still vs lf0, train26 | **−0.43% / −0.47% / 19/24** | +0.11% | +0.29% |
+| s1 still vs lf0, train26 | **−0.42% / −0.44% / 19/24** | +0.08% | +0.04% |
+| s2 still vs lf0, legacy photos | **−0.67% / −0.43% / 16/19** | +0.00% | −0.12% |
+| s1 still vs lf0, legacy photos | **−0.66% / −0.26% / 14/19** | +0.12% | +0.04% |
+
+**Metric-divergence note (first of its kind in the tune):** butteraugli's *sign* diverges
+from ssim2 on train26 (+0.1..0.3% med, far under the veto; flat-to-negative on legacy
+photos). Sharpness trades a small blocking cost for a larger edge-retention win — aom
+ships it for SS2/IQ on subjective-sharpness grounds. Losers concentrate in bi-level
+content (1-bit patent scans +1.2/+1.4): sharpness suppresses the deblocking that content
+relies on at low q. Per-image sharpness is a plausible picker knob later (text
+screenshots love it: LKML page −4.8%).
+
+**Tier movement (photos n=19, fresh lf0 baselines at master 9b79b442):** master's s2
+tier-2 median had already CROSSED between the qmdist measurement and this baseline
+(+2.12 → −1.54; the same-day palette + skip-recon + filter-intra/LRF desync fixes, not
+this change). With the schedule: tier-2 medians ride the o_9051 knife edge (s2 −1.54 →
++0.18, s1 −2.10 → −0.71) — o_9051 is the *only* material tier-2 loser (s1 −4.05 → −0.71)
+and lands on/near the median at both speeds, while 14-16/19 images' tier-2 BD improve or
+stay flat, tier-2 MEANS improve (s2 −0.68 → −0.96, s1 −1.47 → −1.52), the s1 tier-2
+median stays crossed, and the cpu0-default / cpu2 tiers improve at both speeds (s2
+−10.10 → −10.82 / −11.18 → −12.06; s1 −10.43 → −11.27 / −11.88 → −12.19).
+
+**Conformance:** 110/110 s2 + 110/110 s1-deep (aomdec + rav1d-safe), schedule armed —
+decoder-visible header field + filter-behavior change. **Landed:** `zenrav1e@c1fab5b3` +
+`zenrav1e@9a05d54a` (schedule: `lf_sharpness()` returns {7,5,3}@{80,160} for
+StillImage | Ssimulacra2; dev gates stripped), rebased over the same-day #33 + #32
+desync landings with the tune-off byte-gate re-verified at each base; the landed default
+byte-reproduces the measured `still` arm (3-cell md5). aom's `sharpness` knob also
+carries a quantizer-rounding bias (av1_quantize.c:607-620, qrounding 48→64 when
+sharpness≠0) — NOT ported; closest prior art is the measured-rejected sharpness-7
+trellis surface. Raw sweeps: `/mnt/v/output/zenavif/lfsharp-2026-07-03/` +
+`benchmarks/rd_gap_lfsharp_2026-07-03.tsv`.
+
 ## RULED OUT, 2026-07-01: `BLOCK_32X32`/`BLOCK_64X64` at 0% usage — explained, not a bug, widening regresses
 
 Same inspect-diff methodology surfaced a second block-size anomaly: `BLOCK_32X32` and
