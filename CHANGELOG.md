@@ -20,7 +20,8 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   mechanism-liveness audit + ranked wedge list seed the fast-mode program.
   Harness `scripts/rd_gap/chain_speed_ladder.sh` + `analyze_speed_ladder.py`;
   `docs/SPEED_LADDER.md` + `benchmarks/rd_gap_speed_ladder_2026-07-04.tsv`;
-  label store +9,776 fast-tier rows (speedladder-2026-07-04 sources).
+  label store +9,776 fast-tier rows (speedladder-2026-07-04 sources)
+  (5aacaca1, f4924263).
 - **`examples/hang_stress.rs` — the zenavif#30 futex-hang repro/stress loop**
   (encode→decode→butteraugli→encode, `fast`/`full`/`decode`/`butter` modes).
   Found the root cause of the two-pass conformance hang: a rav1d-safe
