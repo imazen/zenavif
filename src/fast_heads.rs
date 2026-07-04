@@ -1,0 +1,339 @@
+//! Per-image fast-tier budget heads — the FAST_TIER_PARITY_PLAN Phase P2
+//! "prediction replaces search" rules (FEATURE_HINTS §E hyperparameter
+//! expert, second and third deterministic descriptor heads after
+//! [`crate::palette_gate`]).
+//!
+//! Two pure threshold rules choose per-image search budgets for the s6-class
+//! fast mode, spending the expensive levers only where the measured
+//! per-image response surfaces say they pay:
+//!
+//! # Head 1 — TX budget (`speed 6..=8`)
+//!
+//! | rule (in order) | budget | measured why |
+//! |---|---|---|
+//! | `patch_fraction > 0.8505` | [`TxBudget::Largest`] | razor-edge tiled plots (fam-7000-class) PAY +3.8..+19.3% BD under depth-1 size-RDO — withholding is a pure win (and saves the 1.67× tx time) |
+//! | `dct_compressibility_y < 8.352` | [`TxBudget::Min`] | hard-to-compress texture (products/people class) leaves half the tx step on the table under size-only RDO; the full "min" set (size1 + type RDO + reduced set) pays −2.6..−5.6% extra there |
+//! | otherwise | [`TxBudget::Size1`] | the landed global default (P0: 51% of the s6→s4 step at 1.67×) |
+//!
+//! Fit 2026-07-04 on the fastwins per-image surfaces (train26, veto-adjusted
+//! BD, LOOCV leave-one-origin-out): rule −5.84 mean at 2.04× vs global-size1
+//! −5.03 at 1.67× (s6); the W-only form dominates global-size1 on BOTH axes
+//! (−5.42 at 1.56×). s8 same shape (−6.21 at 1.92× vs −4.94 at 1.43×).
+//! `benchmarks/hyperparam_tx_budget_2026-07-04.tsv`.
+//!
+//! # Head 2 — partition budget (`speed == 6`)
+//!
+//! | rule | budget | measured why |
+//! |---|---|---|
+//! | `gradient_fraction_smooth < 0.4105` | [`PartitionBudget::Max32`] | flat/synthetic content (plots/clipart/products/screens) is where 32-px partitions pay (fam-7000 m32 recovery 255%); photos (high smooth-gradient fraction) measured m32-adverse in the prange re-test |
+//! | otherwise | [`PartitionBudget::Ship`] | the landed P1 pruned-liveness point (r16no4_bkvg2) |
+//!
+//! Fit 2026-07-04 on the p1part per-image surfaces: LOOCV −5.46 mean at
+//! 2.41× vs global-ship −4.73 at 2.15× and global-vg2 −5.20 at 2.46× (beats
+//! the vg2 rung on both axes). The withhold side measured NO stable win
+//! (partition liveness pays on 24/24 train images — unlike tx); at s8/s4 the
+//! per-image head adds ~nothing over the right global rung, so this head is
+//! s6-only. `benchmarks/hyperparam_partition_budget_2026-07-04.tsv`.
+//!
+//! # Head 3 — intra-mode budget: measured, NOT a per-image head
+//!
+//! The top-7-vs-top-3 keyframe intra response (ComplexKeyframes +
+//! `filter_intra=Some(false)`, the zenrav1e#5-safe form) measured as a small
+//! BROAD win (s6 median −0.56%, s8 −1.17%, 17/24 better, composition-stable
+//! on the partition ship point) with a single +1.4 regressor — no honest
+//! per-image structure at n=24. It is a global fast-mode arm candidate
+//! (ravif SpeedTweaks side), not a zenavif head. No top-5 knob exists in
+//! zenrav1e (`num_modes_rdo` is hardcoded 7-or-3 at rdo.rs:1623) — a
+//! mid-point budget would need a new encoder knob.
+//!
+//! # Release gating
+//!
+//! Registry `zenrav1e` 0.1.4 has none of the underlying knobs (tx-RDO
+//! decouple d82c16ba, topdown_prune 725f5f71/767c8ff5 landed on master
+//! post-0.1.4), so today this module only *recommends*. Forwarding needs the
+//! zenrav1e release + zenravif expert passthroughs for
+//! `rdo_tx_type_override`/`reduced_tx_set`/`topdown_prune`/
+//! `non_square_partition_max_threshold` (additive `InternalParams` fields,
+//! same shape as the landed `sb_q_scale`) — see the CLAUDE.md dep-bump
+//! checklist.
+
+/// Per-image transform-search budget for the fast tier (head 1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TxBudget {
+    /// Withhold tx-size RDO entirely (`TX_MODE_LARGEST`, the stock s6+
+    /// table): razor-edge tiled content where size-RDO pays bytes.
+    Largest,
+    /// Depth-1 tx-size RDO, DCT-only — the landed global default
+    /// (`S6_TX_SIZE_RDO_LIVE` arm).
+    #[default]
+    Size1,
+    /// Size1 + tx-type RDO over the reduced set — the P0 "min" point
+    /// (92% of the s6→s4 tx step at 4.6× solo).
+    Min,
+}
+
+/// Per-image partition-search budget for the fast tier (head 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PartitionBudget {
+    /// The landed P1 pruned-liveness point (rects live at 16×16, 4-ways
+    /// SPLIT-dominant-gated, breakout + homogeneity vargate 2.0).
+    #[default]
+    Ship,
+    /// Ship + partition max 16→32 with 4-ways fully live (the measured
+    /// `r16m32_bkvg2` pareto tip) — flat/synthetic content only.
+    Max32,
+}
+
+/// Head-1 withhold threshold on zenanalyze `patch_fraction` (id 23).
+///
+/// Above it, per-image tx-size RDO measured as a regression (the three
+/// train26 razor-edge plots: +3.8/+8.2/+19.3 veto-adjusted BD); the gate
+/// separates them from content-ful screens (8196 pf 0.38 WINS −7.4) at
+/// every fitted λ and both speeds.
+pub const TX_GATE_PATCH_FRACTION_LARGEST: f32 = 0.8505;
+
+/// Head-1 deep threshold on zenanalyze `dct_compressibility_y` (id 21).
+///
+/// Below it (texture the DCT compacts poorly), the "min" tx set pays its
+/// 2.7× solo premium over size1 (train26: 2000/9228/9958-class, −2.6..−4.5
+/// extra BD). Fit at λ=1.0 (BD% per 1.0× solo-time unit).
+pub const TX_GATE_DCT_COMPRESSIBILITY_MIN: f32 = 8.352;
+
+/// Head-2 upgrade threshold on zenanalyze `gradient_fraction_smooth`
+/// (id 120). Below it (flat/synthetic, not smooth-gradient photo), the
+/// Max32 partition rung pays (m32 recovery 255% on fam-7000; photos
+/// measured m32-adverse in the prange (4,64) re-test).
+pub const PART_GATE_GRADIENT_SMOOTH_MAX32: f32 = 0.4105;
+
+/// First encoder speed of the tx head's measured tier (fit at s6, s8).
+pub const TX_HEAD_MIN_SPEED: u8 = 6;
+/// Last encoder speed of the tx head's measured tier.
+pub const TX_HEAD_MAX_SPEED: u8 = 8;
+/// The partition head's measured speed (the Max32 rung was measured at s6
+/// only; s8/s4 per-image selection measured ≈ null over the global rung).
+pub const PART_HEAD_SPEED: u8 = 6;
+
+/// Head 1: per-image TX budget from two descriptor features (see module
+/// docs). Outside `speed 6..=8`, or on non-finite features, returns the
+/// tier default [`TxBudget::Size1`] — which the speed table already
+/// applies, i.e. "no per-image override".
+#[must_use]
+pub fn tx_budget_gate(patch_fraction: f32, dct_compressibility_y: f32, speed: u8) -> TxBudget {
+    if !(TX_HEAD_MIN_SPEED..=TX_HEAD_MAX_SPEED).contains(&speed) {
+        return TxBudget::Size1;
+    }
+    if patch_fraction.is_finite() && patch_fraction > TX_GATE_PATCH_FRACTION_LARGEST {
+        TxBudget::Largest
+    } else if dct_compressibility_y.is_finite()
+        && dct_compressibility_y < TX_GATE_DCT_COMPRESSIBILITY_MIN
+    {
+        TxBudget::Min
+    } else {
+        TxBudget::Size1
+    }
+}
+
+/// Head 2: per-image partition budget (s6 only; see module docs).
+/// Non-finite feature or off-tier speed → [`PartitionBudget::Ship`].
+#[must_use]
+pub fn partition_budget_gate(gradient_fraction_smooth: f32, speed: u8) -> PartitionBudget {
+    if speed == PART_HEAD_SPEED
+        && gradient_fraction_smooth.is_finite()
+        && gradient_fraction_smooth < PART_GATE_GRADIENT_SMOOTH_MAX32
+    {
+        PartitionBudget::Max32
+    } else {
+        PartitionBudget::Ship
+    }
+}
+
+/// The composed per-image fast-tier recommendation (both heads).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FastTierBudgets {
+    /// Head-1 transform-search budget.
+    pub tx: TxBudget,
+    /// Head-2 partition-search budget.
+    pub partition: PartitionBudget,
+}
+
+/// Run both budget heads on RGB8 pixels via zenanalyze, reusing a shared
+/// [`zenanalyze_api::Offer`] when its reuse key matches (the same
+/// orchestrator contract as [`crate::palette_gate::palette_gate_for_rgb8`]).
+/// Any failure path returns the defaults (Size1 + Ship — the landed global
+/// fast-mode configuration, i.e. a clean no-override degrade).
+#[cfg(feature = "auto-tune")]
+#[must_use]
+pub fn fast_tier_budgets_for_rgb8(
+    rgb: &[u8],
+    width: u32,
+    height: u32,
+    offer: Option<&zenanalyze_api::Offer<'_>>,
+    speed: u8,
+) -> FastTierBudgets {
+    use zenanalyze::feature::{AnalysisFeature, AnalysisQuery, FeatureSet};
+
+    const FEATURES: [AnalysisFeature; 3] = [
+        AnalysisFeature::PatchFraction,
+        AnalysisFeature::DctCompressibilityY,
+        AnalysisFeature::GradientFractionSmooth,
+    ];
+    let names = [FEATURES[0].name(), FEATURES[1].name(), FEATURES[2].name()];
+
+    let mk = |pf: f32, dcty: f32, gfs: f32| FastTierBudgets {
+        tx: tx_budget_gate(pf, dcty, speed),
+        partition: partition_budget_gate(gfs, speed),
+    };
+
+    if let Some(offer) = offer {
+        let request = zenanalyze_api::Request::new(
+            &names,
+            zenanalyze::analyzer_version(),
+            zenanalyze::feature_defs_version(),
+            0,
+        );
+        if let Some(values) = offer.reuse_for(&request)
+            && let [pf, dcty, gfs] = values[..]
+        {
+            return mk(pf, dcty, gfs);
+        }
+    }
+
+    if rgb.is_empty() || width == 0 || height == 0 {
+        return FastTierBudgets::default();
+    }
+    let query = AnalysisQuery::new(
+        FeatureSet::new()
+            .with(FEATURES[0])
+            .with(FEATURES[1])
+            .with(FEATURES[2]),
+    );
+    let analysis = zenanalyze::analyze_features_rgb8(rgb, width, height, &query);
+    match (
+        analysis.get_f32(FEATURES[0]),
+        analysis.get_f32(FEATURES[1]),
+        analysis.get_f32(FEATURES[2]),
+    ) {
+        (Some(pf), Some(dcty), Some(gfs)) => mk(pf, dcty, gfs),
+        _ => FastTierBudgets::default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tx_gate_measured_anchors() {
+        // train26 anchors from the fit TSV: the three razor-edge plots
+        // (pf 0.901/0.994/0.998) withhold; the min class (dcty 7.9/7.1/3.2)
+        // deepens; 8196 screenshot (pf 0.379, dcty 30.5) stays size1.
+        for s in [6u8, 7, 8] {
+            assert_eq!(tx_budget_gate(0.901, 12.1, s), TxBudget::Largest);
+            assert_eq!(tx_budget_gate(0.998, 201.6, s), TxBudget::Largest);
+            assert_eq!(tx_budget_gate(0.002, 7.9, s), TxBudget::Min);
+            assert_eq!(tx_budget_gate(0.582, 7.1, s), TxBudget::Min);
+            assert_eq!(tx_budget_gate(0.379, 30.5, s), TxBudget::Size1);
+            // Withhold outranks deep when both fire (7028: pf .90, dcty 12.1
+            // is not < 8.35 anyway; construct the ordering case explicitly).
+            assert_eq!(tx_budget_gate(0.9, 1.0, s), TxBudget::Largest);
+        }
+        // Off-tier speeds: no override.
+        for s in [2u8, 4, 5, 9, 10] {
+            assert_eq!(tx_budget_gate(0.998, 1.0, s), TxBudget::Size1);
+        }
+    }
+
+    #[test]
+    fn partition_gate_measured_anchors() {
+        // m32 class anchors (gfs 0.081/0.111/0.298) vs photo class
+        // (0.716/0.783); 9868 sits just inside the fitted 0.4105 (0.4086).
+        assert_eq!(partition_budget_gate(0.081, 6), PartitionBudget::Max32);
+        assert_eq!(partition_budget_gate(0.4086, 6), PartitionBudget::Max32);
+        assert_eq!(partition_budget_gate(0.4105, 6), PartitionBudget::Ship);
+        assert_eq!(partition_budget_gate(0.716, 6), PartitionBudget::Ship);
+        // s6-only head.
+        for s in [2u8, 4, 5, 7, 8, 9, 10] {
+            assert_eq!(partition_budget_gate(0.081, s), PartitionBudget::Ship);
+        }
+    }
+
+    #[test]
+    fn non_finite_degrades_to_defaults() {
+        assert_eq!(tx_budget_gate(f32::NAN, f32::NAN, 6), TxBudget::Size1);
+        assert_eq!(tx_budget_gate(f32::NAN, 5.0, 6), TxBudget::Min);
+        assert_eq!(tx_budget_gate(0.9, f32::NAN, 6), TxBudget::Largest);
+        assert_eq!(partition_budget_gate(f32::NAN, 6), PartitionBudget::Ship);
+    }
+
+    /// The synthetic screen/photo pair from the palette-gate tests, run
+    /// through the real zenanalyze pass: tiled flat content must land in
+    /// the withhold+Max32 corner; hash-noise photo content must stay at
+    /// the Size1+Ship defaults.
+    #[cfg(feature = "auto-tune")]
+    #[test]
+    fn budgets_for_synthetic_content() {
+        let (w, h) = (256u32, 256u32);
+        let screen: Vec<u8> = (0..h)
+            .flat_map(|y| {
+                (0..w).flat_map(move |x| {
+                    if ((x / 16) + (y / 16)) % 2 == 0 {
+                        [255u8, 255, 255]
+                    } else {
+                        [0u8, 32, 128]
+                    }
+                })
+            })
+            .collect();
+        let b = fast_tier_budgets_for_rgb8(&screen, w, h, None, 6);
+        assert_eq!(b.tx, TxBudget::Largest, "tiled flat content withholds tx RDO");
+        assert_eq!(b.partition, PartitionBudget::Max32, "flat content upgrades to 32-blocks");
+
+        // Photo-side probe for the PARTITION gate: gradient_fraction_smooth
+        // measures smooth-gradient mass (photo bokeh/sky), so the honest
+        // high-gfs synthetic is a smooth gradient (probed: gfs 0.936 vs the
+        // 0.4105 threshold; hash NOISE probes at gfs 0.237 — noise is
+        // genuinely Max32-side content for this gate, matching the fit's
+        // "flat/synthetic vs smooth-gradient-photo" split). The gradient's
+        // patch_fraction collides to 1.0 (the DC-invariant signature
+        // collision documented in palette_gate tests), so only the
+        // partition assertion is meaningful here.
+        let photo: Vec<u8> = (0..h)
+            .flat_map(|y| {
+                (0..w).flat_map(move |x| {
+                    let g = ((x + y) * 255 / 510) as u8;
+                    [g, g, 255 - g]
+                })
+            })
+            .collect();
+        let b = fast_tier_budgets_for_rgb8(&photo, w, h, None, 6);
+        assert_eq!(
+            b.partition,
+            PartitionBudget::Ship,
+            "smooth-gradient (photo-like) content stays at ship"
+        );
+    }
+
+    /// Offer reuse short-circuits analysis (the auto_tune orchestrator
+    /// contract) — values order matches the request's feature-name order.
+    #[cfg(feature = "auto-tune")]
+    #[test]
+    fn offer_reuse_short_circuits() {
+        use zenanalyze::feature::AnalysisFeature;
+        let names = [
+            AnalysisFeature::PatchFraction.name(),
+            AnalysisFeature::DctCompressibilityY.name(),
+            AnalysisFeature::GradientFractionSmooth.name(),
+        ];
+        let values = [0.95f32, 50.0, 0.1];
+        let offer = zenanalyze_api::Offer::new(
+            &names,
+            &values,
+            zenanalyze::analyzer_version(),
+            zenanalyze::feature_defs_version(),
+            0,
+        );
+        let b = fast_tier_budgets_for_rgb8(&[], 0, 0, Some(&offer), 6);
+        assert_eq!(b.tx, TxBudget::Largest);
+        assert_eq!(b.partition, PartitionBudget::Max32);
+    }
+}

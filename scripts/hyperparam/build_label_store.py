@@ -71,6 +71,7 @@ SRC = {
     "speedladder": "/mnt/v/output/zenavif/speedladder-2026-07-04",
     "fastwins": "/mnt/v/output/zenavif/fastwins-20260704",
     "p1part": "/mnt/v/output/zenavif/p1part-20260704",
+    "p2heads": "/mnt/v/output/zenavif/p2heads-20260704",
 }
 # palette-mech A/B val corpus (14 VAL-LSD origins materialized with the wedge
 # conventions; join-verified 108/108) — see its _MANIFEST.json + picks_val14.json
@@ -522,6 +523,81 @@ def sources():
                           corpus="train26", sweep_source="p1part-2026-07-04",
                           arm_id=f"p1part/confirm-s{spd}-{arm}", knob_json=json.dumps(k, sort_keys=True),
                           encoder_rev=p1_rev_w2, q_kind="cavif_q", speed=spd, rows=288))
+
+    # --- P2HEADS arms (2026-07-04, FAST_TIER_PARITY P2) ---
+    # Head-3 intra-mode-budget axis (top-7 keyframe intra RDO with
+    # filter_intra=Some(false), the zenrav1e#5-safe form; base = forced
+    # top-3) + the composed per-image fast mode (heads 1+2 frozen threshold
+    # rules; per-(tx,partition)-class sub-runs merged by class name) on
+    # train26 AND the 14-origin VAL-LSD corpus (honest held-out). All
+    # tune-ss2+palette, PALCONF-clean. Binary chain: zenrav1e master
+    # 39f0ecdd (INCLUDES the one-sided margin fix 767c8ff5 — an earlier
+    # stale-workspace pass at e944ea71 ran symmetric semantics and was
+    # discarded; base cells byte-match p1part 144/144, ship cells re-verified
+    # byte-identical after the fix). Composed classes ride SIZE1/MIN tx envs
+    # x ship(r16no4_bkvg2)/m32(r16m32_bkvg2) prune envs; *i7* arms add
+    # global top-7 intra. enc_ms contended (JOBS=24); solo wall in p2t_*.tsv
+    # (raw dir only).
+    p2_rev = "zenrav1e@39f0ecdd via ravif 0191489b+p2heads-devpatch(bd0b33d2)"
+    p2d = SRC["p2heads"]
+    p2_tx = {"none": {}, "size1": dict(tx_size_rdo=1, tx_size_depth=1),
+             "min": dict(tx_size_rdo=1, tx_size_depth=1, tx_type_rdo=1, reduced_tx=1)}
+    p2_part = {"ship": dict(rect_thr=16, prune_4wm=0.0, prune_bk=1.0, prune_varg=2.0),
+               "m32": dict(rect_thr=16, part_max=32, prune_bk=1.0, prune_varg=2.0)}
+    for name, spd, extra in [
+        ("s6-base", 6, {}), ("s6-intra7", 6, dict(intra_modes=7)),
+        ("s6-ship", 6, p2_part["ship"]),
+        ("s6-intra7ship", 6, dict(intra_modes=7, **p2_part["ship"])),
+        ("s8-base", 8, {}), ("s8-intra7", 8, dict(intra_modes=7)),
+    ]:
+        k = dict(p2_tx["size1"], speed=spd, tune="ssimulacra2", palette="auto",
+                 threads=1, **extra)
+        s.append(dict(path=f"{p2d}/p2_{name.replace('-', '_', 1)}.tsv", kind="rd_tsv",
+                      corpus="train26", sweep_source="p2heads-2026-07-04",
+                      arm_id=f"p2heads/{name}", knob_json=json.dumps(k, sort_keys=True),
+                      encoder_rev=p2_rev, q_kind="cavif_q", speed=spd, rows=144))
+    for nm, path, rows_, k in [
+        ("confirm-s6-base", "p2_conf_s6_base.tsv", 288, dict(p2_tx["size1"], grid="full12q")),
+        ("confirm-s6-ship", "p2_conf_s6_ship.tsv", 288,
+         dict(p2_tx["size1"], grid="full12q", **p2_part["ship"])),
+    ]:
+        k.update(speed=6, tune="ssimulacra2", palette="auto", threads=1)
+        s.append(dict(path=f"{p2d}/{path}", kind="rd_tsv",
+                      corpus="train26", sweep_source="p2heads-2026-07-04",
+                      arm_id=f"p2heads/{nm}", knob_json=json.dumps(k, sort_keys=True),
+                      encoder_rev=p2_rev, q_kind="cavif_q", speed=6, rows=rows_))
+    p2_cls_n = dict(none_ship=2, none_m32=1, size1_ship=13, size1_m32=5,
+                    min_ship=1, min_m32=2)
+    p2v_cls_n = dict(none_ship=1, none_m32=2, size1_ship=5, size1_m32=3,
+                     min_ship=1, min_m32=2)
+    for i7 in ("", "i7"):
+        for cls, n in p2_cls_n.items():
+            tx, part = cls.rsplit("_", 1)
+            k = dict(p2_tx[tx], speed=6, tune="ssimulacra2", palette="auto",
+                     threads=1, grid="full12q", **p2_part[part])
+            if i7:
+                k.update(intra_modes=7)
+            s.append(dict(path=f"{p2d}/p2c{i7}_{cls}.tsv", kind="rd_tsv",
+                          corpus="train26", sweep_source="p2heads-2026-07-04",
+                          arm_id=f"p2heads/composed{i7}-{cls}",
+                          knob_json=json.dumps(k, sort_keys=True),
+                          encoder_rev=p2_rev, q_kind="cavif_q", speed=6, rows=n * 12))
+    # VAL leg (mech26 corpus machinery — same val pngs as the palette-mech A/B)
+    for nm, path, rows_, k in (
+        [("val-base", "p2v_base.tsv", 168, dict(p2_tx["size1"])),
+         ("val-ship", "p2v_ship.tsv", 168, dict(p2_tx["size1"], **p2_part["ship"]))]
+        + [(f"val-composed-{cls}", f"p2vc_{cls}.tsv", n * 12,
+            dict(p2_tx[cls.rsplit('_', 1)[0]], **p2_part[cls.rsplit('_', 1)[1]]))
+           for cls, n in p2v_cls_n.items()]
+        + [(f"val-composedi7-{cls}", f"p2vi7_{cls}.tsv", n * 12,
+            dict(p2_tx[cls.rsplit('_', 1)[0]], intra_modes=7,
+                 **p2_part[cls.rsplit('_', 1)[1]]))
+           for cls, n in p2v_cls_n.items()]):
+        k.update(speed=6, tune="ssimulacra2", palette="auto", threads=1, grid="full12q")
+        s.append(dict(path=f"{p2d}/{path}", kind="rd_tsv",
+                      corpus="mech26", sweep_source="p2heads-2026-07-04",
+                      arm_id=f"p2heads/{nm}", knob_json=json.dumps(k, sort_keys=True),
+                      encoder_rev=p2_rev, q_kind="cavif_q", speed=6, rows=rows_))
     return s
 
 

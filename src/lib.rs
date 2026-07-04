@@ -80,6 +80,12 @@ mod error;
 pub mod palette_gate;
 #[cfg(feature = "encode")]
 pub use palette_gate::PalettePreference;
+/// Per-image fast-tier budget heads (FEATURE_HINTS §E heads 2+3 — the
+/// FAST_TIER_PARITY P2 tx/partition budget rules).
+#[cfg(feature = "encode")]
+pub mod fast_heads;
+#[cfg(feature = "encode")]
+pub use fast_heads::{FastTierBudgets, PartitionBudget, TxBudget};
 #[cfg(feature = "__expert")]
 pub mod expert;
 /// Calibrated encode/decode resource estimation (peak memory + time).

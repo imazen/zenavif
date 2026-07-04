@@ -515,11 +515,20 @@ impl EncoderConfig {
         // dep bump (see src/palette_gate.rs).
         let palette = crate::palette_gate::palette_gate_for_rgb8(rgb, width, height, offer, speed);
 
+        // 7b. Fast-tier budget heads (FAST_TIER_PARITY P2): per-image tx +
+        // partition search budgets for the s6-class fast tier. Same Offer
+        // contract; off-tier speeds and analysis failures degrade to the
+        // speed table's global defaults (Size1 + Ship). RELEASE-GATED
+        // downstream like the palette preference (src/fast_heads.rs).
+        let budgets =
+            crate::fast_heads::fast_tier_budgets_for_rgb8(rgb, width, height, offer, speed);
+
         // 8. Apply.
         Ok(self
             .speed(speed)
             .quality(q as f32)
-            .with_palette_preference(Some(palette)))
+            .with_palette_preference(Some(palette))
+            .with_fast_tier_budgets(Some(budgets)))
     }
 }
 

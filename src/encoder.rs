@@ -269,6 +269,13 @@ pub struct EncoderConfig {
     /// dep bump — see `src/palette_gate.rs` module docs.
     #[cfg(feature = "encode-imazen")]
     pub(crate) palette_preference: Option<crate::palette_gate::PalettePreference>,
+    /// Per-image fast-tier search budgets (tx + partition heads,
+    /// FAST_TIER_PARITY P2). `None` = the speed table's globals.
+    /// RELEASE-GATED like `palette_preference`: stored + introspectable
+    /// today, applied at the zenrav1e-past-0.1.4 dep bump (needs the
+    /// zenravif expert tx/prune passthroughs — see `src/fast_heads.rs`).
+    #[cfg(feature = "encode-imazen")]
+    pub(crate) fast_tier_budgets: Option<crate::fast_heads::FastTierBudgets>,
     /// Per-64×64-superblock AC quantizer scale map for the color encode
     /// (the butteraugli-diffmap-guided second pass sets this internally —
     /// see [`crate::two_pass`]). Forwarded through zenravif's expert
@@ -340,6 +347,8 @@ impl Default for EncoderConfig {
             trellis: None,
             #[cfg(feature = "encode-imazen")]
             palette_preference: None,
+            #[cfg(feature = "encode-imazen")]
+            fast_tier_budgets: None,
             #[cfg(feature = "two-pass-butteraugli")]
             sb_q_scale: None,
         }
@@ -755,6 +764,30 @@ impl EncoderConfig {
     #[cfg(feature = "encode-imazen")]
     pub fn palette_preference_value(&self) -> Option<crate::palette_gate::PalettePreference> {
         self.palette_preference
+    }
+
+    /// Per-image fast-tier search budgets (tx + partition heads). `None` =
+    /// keep the speed table's global configuration. Set automatically by
+    /// [`Self::auto_tune`] via the [`crate::fast_heads`] descriptor rules,
+    /// or manually.
+    ///
+    /// **RELEASE-GATED**: registry `zenrav1e` 0.1.4 has none of the
+    /// underlying knobs; the stored budgets are not yet forwarded to the
+    /// encoder (see `src/fast_heads.rs` module docs + the CLAUDE.md
+    /// dep-bump checklist).
+    #[cfg(feature = "encode-imazen")]
+    pub fn with_fast_tier_budgets(
+        mut self,
+        budgets: Option<crate::fast_heads::FastTierBudgets>,
+    ) -> Self {
+        self.fast_tier_budgets = budgets;
+        self
+    }
+
+    /// The stored fast-tier budgets (see [`Self::with_fast_tier_budgets`]).
+    #[cfg(feature = "encode-imazen")]
+    pub fn fast_tier_budgets_value(&self) -> Option<crate::fast_heads::FastTierBudgets> {
+        self.fast_tier_budgets
     }
 }
 

@@ -138,6 +138,35 @@ if [[ " $PHASES " == *" val "* ]]; then
   done
 fi
 
+if [[ " $PHASES " == *" composedi7 "* ]]; then
+  say "=== PHASE composedi7: composed classes + global intra7 (stage 2) ==="
+  # Head-3 verdict from the intra phase: top-7 is a small broad GLOBAL win
+  # with no per-image structure (one +1.4 regressor, n=1 — no honest rule).
+  # Stage 2 measures the composed mode with intra7 folded in globally.
+  for cls in $CLASSES; do
+    smp="$HERE/sample_p2c_${cls}.tsv"
+    [ -f "$smp" ] || continue
+    run_one "$OUTDIR/p2ci7_${cls}.tsv" "$(cls_rows "$smp" 12)" "${common[@]}" \
+      SAMPLE="$smp" QGRID_ZR="$QFULL" ZENRAV1E_SPEED=6 CAVIF_EXTRA="--threads 1" \
+      $(cls_env "$cls") $I7
+  done
+  for cls in $CLASSES; do
+    smp="$HERE/sample_p2valc_${cls}.tsv"
+    [ -f "$smp" ] || continue
+    run_one "$OUTDIR/p2vi7_${cls}.tsv" "$(cls_rows "$smp" 12)" "${common[@]}" \
+      SAMPLE="$smp" QGRID_ZR="$QFULL" ZENRAV1E_SPEED=6 CAVIF_EXTRA="--threads 1" \
+      $(cls_env "$cls") $I7
+  done
+  tim2=(RD_CACHE=off JOBS=1 QGRID_ZR="40 65 85")
+  for cls in $CLASSES; do
+    smp="$HERE/sample_p2c_${cls}.tsv"
+    [ -f "$smp" ] || continue
+    run_one "$OUTDIR/p2ti7_c_${cls}.tsv" "$(cls_rows "$smp" 3)" "${common[@]}" \
+      "${tim2[@]}" SAMPLE="$smp" ZENRAV1E_SPEED=6 CAVIF_EXTRA="--threads 1" \
+      $(cls_env "$cls") $I7
+  done
+fi
+
 if [[ " $PHASES " == *" timing "* ]]; then
   say "=== PHASE timing: solo wall (JOBS=1, RD_CACHE=off, q{40,65,85}) ==="
   tim=(RD_CACHE=off JOBS=1 QGRID_ZR="40 65 85")
