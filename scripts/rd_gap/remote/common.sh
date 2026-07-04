@@ -43,7 +43,11 @@ KNOWN_HOSTS="$HOME/.ssh/known_hosts.zenavif-sweep"     # per-box file (IPs get r
 # zenrav1e--sizedecay is the size-decay isolation A/B jj workspace (wedge #3:
 # ZENRAV1E_SD_DISABLE leave-one-out mechanism gates; ravif--wedge's path dep
 # targets it during that program).
-ZEN_REPOS=(ravif zenrav1e 'zenrav1e--drift-master?' 'zenrav1e--deltaq?' 'zenrav1e--qmdist?' 'zenrav1e--lfsharp?' 'ravif--wedge?' 'zenrav1e--wedge?' 'zenrav1e--sizedecay?' zenavif zenanalyze fast-ssim2 zenpixels zencodec)
+# ravif--fastwins + zenrav1e--fastwins are the P0 fastwins jj workspaces
+# (FAST_TIER_PARITY_PLAN P0: tile-policy pareto + decomposed tx-RDO knobs;
+# ravif--fastwins carries the DEV-ONLY env-passthrough patch and its path dep
+# targets zenrav1e--fastwins).
+ZEN_REPOS=(ravif zenrav1e 'zenrav1e--drift-master?' 'zenrav1e--deltaq?' 'zenrav1e--qmdist?' 'zenrav1e--lfsharp?' 'ravif--wedge?' 'zenrav1e--wedge?' 'zenrav1e--sizedecay?' 'ravif--fastwins?' 'zenrav1e--fastwins?' zenavif zenanalyze fast-ssim2 zenpixels zencodec)
 AOM_SRC="$HOME/work/aom"
 AOM_PIN="632172a468f5e91c5b40daaa0a91f4a291c63af4"  # docs/RD_GAP_VS_LIBAOM.md pinned rev
 RD_GAP_DIR="/home/lilith/work/zen/zenavif/scripts/rd_gap"  # same path on both ends
