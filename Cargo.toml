@@ -240,3 +240,9 @@ rustdoc-args = ["--generate-link-to-definition"]
 [[example]]
 name = "two_pass_cell"
 required-features = ["two-pass-butteraugli"]
+
+[patch.crates-io]
+# Committed dev patch (same posture as the ../ravif path dep): zenravif needs
+# zenavif-serialize 0.2.0 (set_gain_map_alt_icc), unpublished — this pin supplies it
+# to the whole graph. Drop at the zenavif-serialize 0.2.0 publish.
+zenavif-serialize = { git = "https://github.com/imazen/zenavif-serialize", rev = "4c90d4dd02ef1684fa2230c6aaa2b5ef51e6a926" }

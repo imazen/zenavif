@@ -2014,9 +2014,7 @@ dependencies = [
 
 [[package]]
 name = "zenrav1e"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c2f798defdace5a2d991e4f679697768cf256a3cef130bfa2d84702cebf3a76"
+version = "0.2.0"
 dependencies = [
  "aligned-vec",
  "arbitrary",
@@ -2049,6 +2047,7 @@ dependencies = [
  "thiserror",
  "v_frame 0.3.9",
  "wasm-bindgen",
+ "whereat",
 ]
 
 [[package]]
@@ -2173,3 +2172,8 @@ checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
 dependencies = [
  "zune-core",
 ]
+
+[[patch.unused]]
+name = "zenavif-serialize"
+version = "0.2.0"
+source = "git+https://github.com/imazen/zenavif-serialize?rev=4c90d4dd02ef1684fa2230c6aaa2b5ef51e6a926#4c90d4dd02ef1684fa2230c6aaa2b5ef51e6a926"

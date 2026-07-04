@@ -125,7 +125,10 @@ pub enum EncodeChromaSubsampling {
 /// - luminance: in **0.0001 cd/m² units** (multiply cd/m² by 10000)
 #[derive(Debug, Clone, Copy)]
 pub struct MasteringDisplayConfig {
-    /// R, G, B primary chromaticities `[(x, y); 3]`, in 0.00002 units (xy×50000).
+    /// Display primary chromaticities `[(x, y); 3]`, in 0.00002 units
+    /// (xy×50000), **in `mdcv` wire order: GREEN, BLUE, RED** (the
+    /// SMPTE ST 2086 / HEVC SEI slot order; written verbatim into the box
+    /// and read back the same by `MasteringDisplayColourVolume`).
     pub primaries: [(u16, u16); 3],
     /// White point chromaticity `(x, y)`, in 0.00002 units (xy×50000).
     pub white_point: (u16, u16),
@@ -203,6 +206,12 @@ pub struct EncoderConfig {
     pub(crate) pixel_range: Option<EncodePixelRange>,
     /// Pre-encoded gain map for UltraHDR / ISO 21496-1
     pub(crate) gain_map: Option<GainMapConfig>,
+    /// CICP colr for the gain map's alternate rendition (`tmap` item colr):
+    /// (primaries, transfer, matrix, full_range)
+    pub(crate) gain_map_alt_colr: Option<(u8, u8, u8, bool)>,
+    /// ICC profile for the gain map's alternate rendition (`tmap` item
+    /// `colr` of type `prof`)
+    pub(crate) gain_map_alt_icc: Option<std::vec::Vec<u8>>,
     /// Enable AV1 quantization matrices (imazen/rav1e fork)
     #[cfg(feature = "encode-imazen")]
     pub(crate) enable_qm: bool,
@@ -293,6 +302,8 @@ impl Default for EncoderConfig {
             matrix_coefficients: None,
             pixel_range: None,
             gain_map: None,
+            gain_map_alt_colr: None,
+            gain_map_alt_icc: None,
             #[cfg(feature = "encode-imazen")]
             enable_qm: true,
             #[cfg(feature = "encode-imazen")]
@@ -537,6 +548,43 @@ impl EncoderConfig {
             bit_depth,
             metadata,
         });
+        self
+    }
+
+    /// Set the CICP color description of the gain map's **alternate
+    /// rendition** — written as a `colr` (nclx) property on the `tmap`
+    /// item, telling readers what color space the fully-boosted rendition
+    /// targets (e.g. BT.2020 + PQ for an SDR base carrying an HDR map).
+    ///
+    /// Code points are raw ITU-T H.273 values. Only meaningful together
+    /// with [`EncoderConfig::with_gain_map`]. Values outside the muxer's
+    /// supported set fail at encode time with an honest error rather than
+    /// being silently dropped.
+    pub fn with_gain_map_alt_color(
+        mut self,
+        color_primaries: u8,
+        transfer_characteristics: u8,
+        matrix_coefficients: u8,
+        full_range: bool,
+    ) -> Self {
+        self.gain_map_alt_colr = Some((
+            color_primaries,
+            transfer_characteristics,
+            matrix_coefficients,
+            full_range,
+        ));
+        self
+    }
+
+    /// Set an ICC profile as the color description of the gain map's
+    /// **alternate rendition** — written as a `colr` box of type `prof` on
+    /// the `tmap` item. May be combined with
+    /// [`EncoderConfig::with_gain_map_alt_color`] (ISOBMFF permits one
+    /// `colr` of each type per item); libavif interop vectors exist with an
+    /// ICC-form tmap colr. Only meaningful together with
+    /// [`EncoderConfig::with_gain_map`].
+    pub fn with_gain_map_alt_icc(mut self, icc_profile: Vec<u8>) -> Self {
+        self.gain_map_alt_icc = Some(icc_profile);
         self
     }
 
@@ -797,7 +845,7 @@ fn build_ravif_encoder(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
     input_is_16bit: bool,
-) -> ravif::Encoder<'_> {
+) -> Result<ravif::Encoder<'_>> {
     let mut enc = ravif::Encoder::new()
         .with_quality(config.quality)
         .with_speed(config.speed)
@@ -878,12 +926,41 @@ fn build_ravif_encoder(
         });
     }
     if let Some(ref gm) = config.gain_map {
+        // The muxed `av1C` (and `ispe`) of the gain-map item must describe
+        // the actual byte-carried bitstream — derive subsampling/monochrome
+        // from its sequence header and validate the caller-declared
+        // dimensions/depth against it, instead of writing defaults that can
+        // lie about the payload (e.g. a 4:4:4 map muxed as 4:2:0).
+        let md = zenavif_parse::AV1Metadata::parse_av1_bitstream(&gm.av1_data).map_err(|e| {
+            at!(Error::Encode(format!(
+                "gain map AV1 payload failed to parse: {e}"
+            )))
+        })?;
+        if (md.max_frame_width.get(), md.max_frame_height.get()) != (gm.width, gm.height) {
+            return Err(at!(Error::Encode(format!(
+                "gain map dimensions {}x{} do not match its AV1 payload ({}x{})",
+                gm.width, gm.height, md.max_frame_width, md.max_frame_height
+            ))));
+        }
+        if md.bit_depth != gm.bit_depth {
+            return Err(at!(Error::Encode(format!(
+                "gain map bit depth {} does not match its AV1 payload ({})",
+                gm.bit_depth, md.bit_depth
+            ))));
+        }
         enc = enc.with_gain_map(ravif::GainMapData {
             av1_data: gm.av1_data.clone(),
             width: gm.width,
             height: gm.height,
             bit_depth: gm.bit_depth,
             metadata: gm.metadata.clone(),
+            alt_colr_cicp: config.gain_map_alt_colr,
+            chroma_subsampling: (
+                md.chroma_subsampling.horizontal,
+                md.chroma_subsampling.vertical,
+            ),
+            monochrome: md.monochrome,
+            alt_icc: config.gain_map_alt_icc.clone(),
         });
     }
     #[cfg(feature = "encode-imazen")]
@@ -950,7 +1027,7 @@ fn build_ravif_encoder(
     }
     // Forward stop token for per-superblock cooperative cancellation.
     enc = enc.with_stop(stop);
-    enc
+    Ok(enc)
 }
 
 /// Encode an 8-bit RGB image to AVIF
@@ -967,7 +1044,7 @@ pub fn encode_rgb8(
 ) -> Result<EncodedImage> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
 
-    let enc = build_ravif_encoder(config, stop, false);
+    let enc = build_ravif_encoder(config, stop, false)?;
     let result = enc
         .encode_rgb(img)
         .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
@@ -998,7 +1075,7 @@ pub fn encode_gray8(
 ) -> Result<EncodedImage> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
 
-    let enc = build_ravif_encoder(config, stop, false);
+    let enc = build_ravif_encoder(config, stop, false)?;
     let result = enc
         .encode_gray8(img)
         .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
@@ -1023,7 +1100,7 @@ pub fn encode_rgba8(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let enc = build_ravif_encoder(config, stop, false);
+    let enc = build_ravif_encoder(config, stop, false)?;
     let result = enc
         .encode_rgba(img)
         .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
@@ -1053,7 +1130,7 @@ pub fn encode_rgb16(
 ) -> Result<EncodedImage> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let enc = build_ravif_encoder(config, stop, true);
+    let enc = build_ravif_encoder(config, stop, true)?;
     let width = img.width();
     let height = img.height();
     // Identity (MC=0) signaling means GBR plane order — plane 0 is G,
@@ -1111,7 +1188,7 @@ pub fn encode_rgba16(
 ) -> Result<EncodedImage> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let enc = build_ravif_encoder(config, stop, true);
+    let enc = build_ravif_encoder(config, stop, true)?;
     let width = img.width();
     let height = img.height();
     // GBR plane order under identity signaling — see encode_rgb16.
@@ -1193,7 +1270,7 @@ pub fn encode_animation_rgb8(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let enc = build_ravif_encoder(config, stop, false);
+    let enc = build_ravif_encoder(config, stop, false)?;
 
     let ravif_frames: Vec<ravif::AnimFrame<'_>> = frames
         .iter()
@@ -1231,7 +1308,7 @@ pub fn encode_animation_rgba8(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let enc = build_ravif_encoder(config, stop, false);
+    let enc = build_ravif_encoder(config, stop, false)?;
 
     let ravif_frames: Vec<ravif::AnimFrameRgba<'_>> = frames
         .iter()
@@ -1289,7 +1366,7 @@ pub fn encode_animation_rgb16(
 ) -> Result<EncodedAnimation> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let enc = build_ravif_encoder(config, stop, true);
+    let enc = build_ravif_encoder(config, stop, true)?;
 
     // Scale each frame from 0–65535 to 10-bit (0–1023)
     let scaled_frames: Vec<ImgVec<RGB16>> = frames
@@ -1348,7 +1425,7 @@ pub fn encode_animation_rgba16(
 ) -> Result<EncodedAnimation> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let enc = build_ravif_encoder(config, stop, true);
+    let enc = build_ravif_encoder(config, stop, true)?;
 
     // Scale each frame from 0–65535 to 10-bit (0–1023)
     let scaled_frames: Vec<ImgVec<RGBA16>> = frames

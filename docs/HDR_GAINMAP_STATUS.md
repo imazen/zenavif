@@ -61,14 +61,17 @@ an unpublished release it says so.
 | Gain map + EXIF + ICC coexistence | works | `encode_gain_map_with_exif_and_icc` |
 | Gain map on a 10-bit PQ base (+clli/mdcv) | works | `pq10_base_with_gain_map_roundtrips` |
 | `GainMapMetadata::to_bytes()` normal-form metadata re-serialization | works | zenavif-parse (since 0.6.0) |
-| **tmap alternate-rendition colr on encode** | **in flight** | `EncoderConfig::with_gain_map_alt_color` + zenravif `GainMapData.alt_colr_cicp` — see “Known roundtrip gaps” |
-| **av1C honesty for byte-carried maps** | **in flight** | payload-derived subsampling/monochrome + dims/depth validation — same change |
-| Real-vector decode→re-encode roundtrip contracts | **in flight** | `tests/gainmap_roundtrip.rs` (4 classes), lands with the fix |
+| tmap alternate-rendition colr on encode (nclx + ICC) | works | `EncoderConfig::with_gain_map_alt_color` / `with_gain_map_alt_icc` → zenravif `GainMapData.{alt_colr_cicp,alt_icc}` → zenavif-serialize; `tests/gainmap_roundtrip.rs` |
+| av1C honesty for byte-carried maps (subsampling/mono/profile) | works | payload-derived from the AV1 sequence header + dims/depth validation (mismatch = encode error); av1C-honesty assertion in `tests/gainmap_roundtrip.rs` |
+| libavif-discoverable mux (`tmap` brand + `grpl/altr` + tmap `ispe` + map `pixi`) | works | avifgainmaputil `printmetadata` **IDENTICAL 4/4** vs original vectors; `tonemap` render differs only by base re-encode loss (max 14–27/255, mean ≈1 at q85) |
+| Real-vector decode→re-encode roundtrip contracts | works | `tests/gainmap_roundtrip.rs` — 4 classes green: SDR-base 3ch 4:4:4 + PQ alt, HDR-base backward + sRGB alt, small-map dims, ICC-base + ICC alt |
 
-### Known roundtrip gaps (being fixed in the same change series)
+### Roundtrip gaps found and FIXED 2026-07-03
 
-Found 2026-07-03 by probing the seine vector family (all gain maps there are
-**4:4:4 full-color 8-bit**, and every file carries a tmap `colr`):
+Found by probing the seine vector family (all gain maps there are
+**4:4:4 full-color 8-bit**, and every file carries a tmap `colr`); all fixed
+across zenavif-serialize (`bb888f6b..4c90d4dd`), zenravif (`0a8a9e83`), and
+zenavif (this change):
 
 1. **tmap alternate colr dropped on encode.** Decode extracts it
    (`AvifGainMap.alt_color_info`); the encode chain (zenavif `GainMapConfig` →
@@ -76,8 +79,10 @@ Found 2026-07-03 by probing the seine vector family (all gain maps there are
    lost the alternate rendition's CICP (e.g. the PQ signal on an SDR base).
    zenavif-serialize already has `set_gain_map_alt_colr` — the fix threads it
    through zenravif and exposes `EncoderConfig::with_gain_map_alt_color`.
-   nclx-only: **every libavif vector's alt colr is nclx** (the `_icc` vector's
-   ICC is on the *base*); an ICC alternate is documented-unsupported.
+   The `_icc` vector's tmap colr is an **ICC profile** (3144-byte sRGB, on
+   the *alternate*, alongside an ICC base) — so the fix also carries an ICC
+   form: zenavif-serialize `set_gain_map_alt_icc` (landed `bb888f6b`) +
+   `EncoderConfig::with_gain_map_alt_icc`.
 2. **Gain-map item `av1C` wrote defaults (4:2:0, color) instead of the
    payload's real properties.** A byte-carried 4:4:4 map (the seine family)
    was muxed with an av1C claiming 4:2:0. Fix: parse the payload's sequence
@@ -86,10 +91,18 @@ Found 2026-07-03 by probing the seine vector family (all gain maps there are
    against the payload (mismatch = honest encode error). Consequence: the
    gain-map payload must now be real AV1 — hand-rolled test blobs no longer
    encode.
-3. **Gain-map item's own colr** (libavif writes an `unspecified` nclx on the
+3. **libavif could not discover our tmap at all** (found by
+   avifgainmaputil cross-validation): the mux lacked the `tmap` compatible
+   brand (ISO 23008-12:2024/AMD1 §10.2.6 — libavif ignores tmap items
+   without it), the `grpl`/`altr` entity group marking the tmap item as
+   the preferred alternative to the primary, the tmap item's mandatory
+   `ispe`, and the gain-map item's mandatory `pixi` (strict-mode reject).
+   All four now written; libavif 1.4.1 reads our gain maps and prints
+   metadata identical to its own vectors.
+4. **Gain-map item's own colr** (libavif writes an `unspecified` nclx on the
    map item itself) is not written and not exposed by zenavif-parse. Readers
    use the tmap colr + ISO metadata for rendering; parity for this box is
-   out of scope for now.
+   out of scope for now (documented residual).
 
 ### zencodec trait layer (cross-codec gain-map encode)
 

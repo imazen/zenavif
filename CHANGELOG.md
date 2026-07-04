@@ -21,8 +21,11 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   TEMPORARY non-default gate: requires zenravif ≥ cavif-rs@89668f13 (CI's
   clone-siblings provides it); fold into `encode` at the next zenravif bump.
   Without the feature, Gray8 keeps the pixel-safe RGB-expansion path.
-
 ### Fixed
+- `MasteringDisplayConfig::primaries` doc: the slot order is the `mdcv` wire
+  order **GREEN, BLUE, RED** (ST 2086 / HEVC SEI), not R,G,B as previously
+  claimed — values were always written verbatim, so following the old doc
+  produced swapped primaries for conforming readers.
 - **Untrusted-input hardening, decode path** (zenavif#18 items 2–3):
   `StripConverter::new` no longer `panic!`s on unsupported
   (bit_depth, chroma) combinations — replaced by `try_new`, whose
