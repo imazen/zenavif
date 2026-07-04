@@ -72,6 +72,7 @@ fn add_gain_map<'data>(
     ipco: &mut IpcoBox,
     next_item_id: &mut u16,
     color_image_id: u16,
+    base_size: (u32, u32),
     gm: &'data GainMapConfig,
 ) -> io::Result<u16> {
     let gm_depth = gm.bit_depth;
@@ -127,6 +128,13 @@ fn add_gain_map<'data>(
         content_type: "",
     });
     let mut tmap_props: ArrayVec<u8, 12> = ArrayVec::new();
+    // The tmap derived item's mandatory ispe: the tone-mapped output has
+    // the base image's dimensions (readers reject the tmap without it).
+    // ipco dedup collapses this onto the primary's ispe property.
+    tmap_props.push(push_prop(
+        ipco,
+        IpcoProp::Ispe(IspeBox { width: base_size.0, height: base_size.1 }),
+    )?);
     if let Some(alt_colr) = gm.alt_colr {
         tmap_props.push(push_prop(ipco, IpcoProp::Colr(alt_colr))?);
     }
@@ -679,7 +687,7 @@ impl Aviffy {
         if let Some(gm) = &self.gain_map {
             tmap_item_id = Some(add_gain_map(
                 &mut image_items, &mut ipma_entries, &mut multi_irefs, &mut iloc_items,
-                &mut ipco, &mut next_item_id, color_image_id, gm,
+                &mut ipco, &mut next_item_id, color_image_id, (width, height), gm,
             )
             .map_err(|e| at!(SerializeError::from(e)))?);
         }
