@@ -605,13 +605,11 @@ mod tests {
     #[test]
     fn decode_gain_map_from_avif_test_file() {
         let avif_path = "tests/vectors/libavif/seine_sdr_gainmap_srgb.avif";
-        let avif_data = match std::fs::read(avif_path) {
-            Ok(data) => data,
-            Err(_) => {
-                eprintln!("skipping: test vector not found at {avif_path}");
-                return;
-            }
-        };
+        // Fail-loud: CI provisions the vectors (see ci.yml "Download test
+        // vectors"); locally run `just download-vectors` first. A silent
+        // skip here would fake coverage (no-graceful-skips policy).
+        let avif_data = std::fs::read(avif_path)
+            .unwrap_or_else(|e| panic!("read {avif_path}: {e} (run: just download-vectors)"));
 
         // Parse the AVIF to extract the gain map AV1 data
         let config = crate::config::DecoderConfig::default();

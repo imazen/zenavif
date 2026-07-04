@@ -24,25 +24,13 @@ fn stop() -> StopToken {
     StopToken::new(Unstoppable)
 }
 
-fn load_vector(name: &str) -> Option<Vec<u8>> {
+/// Fail-loud vector loader: CI provisions the vectors (ci.yml "Download
+/// test vectors"); locally run `just download-vectors`. A silent skip
+/// would fake coverage (no-graceful-skips policy).
+fn load_vector(name: &str) -> Vec<u8> {
     let path = format!("tests/vectors/libavif/{name}");
-    match std::fs::read(&path) {
-        Ok(data) => Some(data),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            eprintln!("skipping: {path} not found (download with: just download-vectors)");
-            None
-        }
-        Err(e) => panic!("Failed to read {path}: {e}"),
-    }
-}
-
-macro_rules! require_vector {
-    ($expr:expr) => {
-        match $expr {
-            Some(data) => data,
-            None => return,
-        }
-    };
+    std::fs::read(&path)
+        .unwrap_or_else(|e| panic!("Failed to read {path}: {e} (run: just download-vectors)"))
 }
 
 /// Scan raw AVIF bytes for every `av1C` box payload (marker+profile byte +
@@ -77,7 +65,7 @@ fn scan_av1c(data: &[u8]) -> Vec<(u8, bool, bool, bool, bool, bool)> {
 /// `base_16bit`: re-encode the base as 16-bit (10-bit AV1) when the source
 /// base is HDR, else 8-bit.
 fn roundtrip_vector(name: &str, base_16bit: bool) {
-    let data = require_vector!(load_vector(name));
+    let data = load_vector(name);
 
     // ---- decode & extract everything ---------------------------------
     let dcfg = DecoderConfig::new().prefer_8bit(false);

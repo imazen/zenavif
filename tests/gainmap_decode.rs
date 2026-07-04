@@ -29,26 +29,12 @@ const SEINE_HDR_GAINMAP_SMALL: &str = "tests/vectors/libavif/seine_hdr_gainmap_s
 const NOGRID_ALPHA_NOGRID_GAINMAP_GRID: &str =
     "tests/vectors/libavif/color_nogrid_alpha_nogrid_gainmap_grid.avif";
 
-/// Load a test vector, returning None if the file doesn't exist (CI without vectors).
-fn load_vector(path: &str) -> Option<Vec<u8>> {
-    match std::fs::read(path) {
-        Ok(data) => Some(data),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            eprintln!("skipping: {path} not found (download with: just download-vectors)");
-            None
-        }
-        Err(e) => panic!("Failed to read {path}: {e}"),
-    }
-}
-
-/// Return early from a test if the vector is None (missing in CI).
-macro_rules! require_vector {
-    ($expr:expr) => {
-        match $expr {
-            Some(data) => data,
-            None => return,
-        }
-    };
+/// Load a test vector, fail-loud when missing: CI provisions the vectors
+/// (ci.yml "Download test vectors"); locally run `just download-vectors`.
+/// A silent skip would fake coverage (no-graceful-skips policy).
+fn load_vector(path: &str) -> Vec<u8> {
+    std::fs::read(path)
+        .unwrap_or_else(|e| panic!("Failed to read {path}: {e} (run: just download-vectors)"))
 }
 
 // ============================================================================
@@ -57,7 +43,7 @@ macro_rules! require_vector {
 
 #[test]
 fn probe_gain_map_present() {
-    let data = require_vector!(load_vector(SEINE_SDR_GAINMAP));
+    let data = (load_vector(SEINE_SDR_GAINMAP));
     let decoder =
         ManagedAvifDecoder::new(&data, &DecoderConfig::default()).expect("decoder should open");
     let info = decoder.probe_info().expect("probe should succeed");
@@ -95,7 +81,7 @@ fn probe_gain_map_present() {
 
 #[test]
 fn probe_gain_map_absent() {
-    let data = require_vector!(load_vector(WHITE_1X1));
+    let data = (load_vector(WHITE_1X1));
     let decoder =
         ManagedAvifDecoder::new(&data, &DecoderConfig::default()).expect("decoder should open");
     let info = decoder.probe_info().expect("probe should succeed");
@@ -104,7 +90,7 @@ fn probe_gain_map_absent() {
 
 #[test]
 fn probe_hdr_gain_map_present() {
-    let data = require_vector!(load_vector(SEINE_HDR_GAINMAP));
+    let data = (load_vector(SEINE_HDR_GAINMAP));
     let decoder =
         ManagedAvifDecoder::new(&data, &DecoderConfig::default()).expect("decoder should open");
     let info = decoder.probe_info().expect("probe should succeed");
@@ -122,7 +108,7 @@ fn probe_hdr_gain_map_present() {
 
 #[test]
 fn decode_full_has_gain_map() {
-    let data = require_vector!(load_vector(SEINE_SDR_GAINMAP));
+    let data = (load_vector(SEINE_SDR_GAINMAP));
     let mut decoder =
         ManagedAvifDecoder::new(&data, &DecoderConfig::default()).expect("decoder should open");
     let (_pixels, info) = decoder
@@ -145,7 +131,7 @@ fn decode_full_has_gain_map() {
 
 #[test]
 fn decode_full_no_gain_map() {
-    let data = require_vector!(load_vector(WHITE_1X1));
+    let data = (load_vector(WHITE_1X1));
     let mut decoder =
         ManagedAvifDecoder::new(&data, &DecoderConfig::default()).expect("decoder should open");
     let (_pixels, info) = decoder
@@ -163,7 +149,7 @@ fn decode_full_no_gain_map() {
 
 #[test]
 fn gain_map_channel_params_valid() {
-    let data = require_vector!(load_vector(SEINE_SDR_GAINMAP));
+    let data = (load_vector(SEINE_SDR_GAINMAP));
     let decoder =
         ManagedAvifDecoder::new(&data, &DecoderConfig::default()).expect("decoder should open");
     let info = decoder.probe_info().expect("probe should succeed");
@@ -202,7 +188,7 @@ fn gain_map_channel_params_valid() {
 fn unsupported_gainmap_version_still_decodes_base() {
     // Parser rejects unsupported tmap versions, so ManagedAvifDecoder::new fails.
     // This is the expected behavior — we test that the parse error is surfaced.
-    let data = require_vector!(load_vector(UNSUPPORTED_VERSION));
+    let data = (load_vector(UNSUPPORTED_VERSION));
     let result = ManagedAvifDecoder::new(&data, &DecoderConfig::default());
     // The parser should reject this file due to unsupported tmap version
     assert!(
@@ -213,7 +199,7 @@ fn unsupported_gainmap_version_still_decodes_base() {
 
 #[test]
 fn unsupported_gainmap_minimum_version_rejected() {
-    let data = require_vector!(load_vector(UNSUPPORTED_MIN_VERSION));
+    let data = (load_vector(UNSUPPORTED_MIN_VERSION));
     let result = ManagedAvifDecoder::new(&data, &DecoderConfig::default());
     assert!(
         result.is_err(),
@@ -223,7 +209,7 @@ fn unsupported_gainmap_minimum_version_rejected() {
 
 #[test]
 fn supported_writer_version_with_extra_bytes() {
-    let data = require_vector!(load_vector(SUPPORTED_WRITER_EXTRA));
+    let data = (load_vector(SUPPORTED_WRITER_EXTRA));
     let decoder =
         ManagedAvifDecoder::new(&data, &DecoderConfig::default()).expect("decoder should open");
     let info = decoder.probe_info().expect("probe should succeed");
@@ -243,7 +229,7 @@ fn supported_writer_version_with_extra_bytes() {
 
 #[test]
 fn gain_map_small_dimensions() {
-    let data = require_vector!(load_vector(SEINE_HDR_GAINMAP_SMALL));
+    let data = (load_vector(SEINE_HDR_GAINMAP_SMALL));
     let decoder =
         ManagedAvifDecoder::new(&data, &DecoderConfig::default()).expect("decoder should open");
     let info = decoder.probe_info().expect("probe should succeed");
@@ -264,7 +250,7 @@ fn gain_map_small_dimensions() {
 
 #[test]
 fn nogrid_color_with_gainmap_grid() {
-    let data = require_vector!(load_vector(NOGRID_ALPHA_NOGRID_GAINMAP_GRID));
+    let data = (load_vector(NOGRID_ALPHA_NOGRID_GAINMAP_GRID));
     let decoder =
         ManagedAvifDecoder::new(&data, &DecoderConfig::default()).expect("decoder should open");
     let info = decoder.probe_info().expect("probe should succeed");
@@ -283,7 +269,7 @@ fn nogrid_color_with_gainmap_grid() {
 
 #[test]
 fn gain_map_data_has_valid_obu_structure() {
-    let data = require_vector!(load_vector(SEINE_SDR_GAINMAP));
+    let data = (load_vector(SEINE_SDR_GAINMAP));
     let decoder =
         ManagedAvifDecoder::new(&data, &DecoderConfig::default()).expect("decoder should open");
     let info = decoder.probe_info().expect("probe should succeed");
@@ -364,7 +350,7 @@ fn gain_map_data_has_valid_obu_structure() {
 fn decode_gain_map_via_zencodec_extras() {
     use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
 
-    let data = require_vector!(load_vector(SEINE_SDR_GAINMAP));
+    let data = (load_vector(SEINE_SDR_GAINMAP));
     let dec = zenavif::AvifDecoderConfig::new();
     let output = dec
         .job()
@@ -400,7 +386,7 @@ fn decode_gain_map_via_zencodec_extras() {
 fn gain_map_render_base_only_attaches_nothing() {
     use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
 
-    let data = require_vector!(load_vector(SEINE_SDR_GAINMAP));
+    let data = (load_vector(SEINE_SDR_GAINMAP));
     let output = zenavif::AvifDecoderConfig::new()
         .job()
         .decoder(std::borrow::Cow::Borrowed(&data), &[])
@@ -464,7 +450,7 @@ fn gain_map_render_reconstructs_linear_hdr() {
         <zenavif::AvifDecoderConfig as zencodec::decode::DecoderConfig>::capabilities()
             .reconstructs_hdr()
     );
-    let data = require_vector!(load_vector(SEINE_SDR_GAINMAP));
+    let data = (load_vector(SEINE_SDR_GAINMAP));
     let output = decode_reconstruct(&data, None);
 
     let desc = output.pixels().descriptor();
@@ -526,7 +512,7 @@ fn gain_map_render_reconstructs_linear_hdr() {
 fn reconstruct_at_sdr_headroom_matches_linearized_base() {
     use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
 
-    let data = require_vector!(load_vector(SEINE_SDR_GAINMAP));
+    let data = (load_vector(SEINE_SDR_GAINMAP));
     let hdr = decode_reconstruct(&data, Some(1.0));
 
     // SDR reference decode of the same base.
@@ -580,7 +566,7 @@ fn reconstruct_at_sdr_headroom_matches_linearized_base() {
 #[cfg(feature = "zencodec")]
 #[test]
 fn reconstruct_headroom_is_monotonic() {
-    let data = require_vector!(load_vector(SEINE_SDR_GAINMAP));
+    let data = (load_vector(SEINE_SDR_GAINMAP));
     let p1 = peak_linear(&decode_reconstruct(&data, Some(1.0)).pixels());
     let p2 = peak_linear(&decode_reconstruct(&data, Some(2.0)).pixels());
     let pf = peak_linear(&decode_reconstruct(&data, None).pixels());
@@ -601,7 +587,7 @@ fn reconstruct_headroom_is_monotonic() {
 fn streaming_reconstruct_matches_buffered() {
     use zencodec::decode::{DecodeJob as _, DecoderConfig as _, StreamingDecode as _};
 
-    let data = require_vector!(load_vector(SEINE_SDR_GAINMAP));
+    let data = (load_vector(SEINE_SDR_GAINMAP));
     let buffered = decode_reconstruct(&data, None);
     let bp = buffered.pixels();
 
@@ -642,7 +628,7 @@ fn streaming_reconstruct_matches_buffered() {
 fn decode_no_gain_map_extras_on_normal_image() {
     use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
 
-    let data = require_vector!(load_vector(WHITE_1X1));
+    let data = (load_vector(WHITE_1X1));
     let dec = zenavif::AvifDecoderConfig::new();
     let output = dec
         .job()

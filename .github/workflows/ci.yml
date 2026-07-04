@@ -11,6 +11,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # CI does not clone the ../codec-corpus sibling; declare it absent so
+  # corpus-gated tests skip via the caller (no-graceful-skips policy).
+  ZENAVIF_NO_CODEC_CORPUS: "1"
   CARGO_TERM_COLOR: always
   CI: true
 

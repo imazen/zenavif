@@ -5561,13 +5561,28 @@ mod tests {
         use std::borrow::Cow;
         use zencodec::decode::{AnimationFrameDecoder, DecodeJob, DecoderConfig};
 
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../codec-corpus/avif-conformance/valid/2.avif");
-        if !path.exists() {
-            eprintln!("skipping: corpus file not found at {}", path.display());
+        // This fixture lives in the codec-corpus repo, which CI does not
+        // clone. Per the no-graceful-skips policy the skip decision belongs
+        // to the CALLER: environments without the corpus declare it via
+        // ZENAVIF_NO_CODEC_CORPUS=1 (set in ci.yml); everywhere else a
+        // missing file is a loud failure, never a silent pass. (The old
+        // `../codec-corpus` + exists()-return silently no-oped everywhere:
+        // the corpus checkout lives one level further up.)
+        if std::env::var_os("ZENAVIF_NO_CODEC_CORPUS").is_some() {
             return;
         }
-        let data = std::fs::read(&path).unwrap();
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let rel = "codec-corpus/avif-conformance/valid/2.avif";
+        let path = [manifest.join("..").join(rel), manifest.join("../..").join(rel)]
+            .into_iter()
+            .find(|p| p.exists())
+            .unwrap_or_else(|| {
+                panic!(
+                    "codec-corpus fixture {rel} not found beside {} (clone                      imazen/codec-corpus at ~/work/, or set                      ZENAVIF_NO_CODEC_CORPUS=1 to declare it absent)",
+                    manifest.display()
+                )
+            });
+        let data = std::fs::read(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
 
         let config = AvifDecoderConfig::new();
         let mut decoder = config

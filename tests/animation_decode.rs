@@ -12,11 +12,10 @@ use zenavif::{AnimationDecoder, DecoderConfig, decode_animation, decode_animatio
 fn load_vector(path: &str) -> Option<Vec<u8>> {
     match fs::read(path) {
         Ok(data) => Some(data),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            eprintln!("skipping: {path} not found (download with: just download-vectors)");
-            None
-        }
-        Err(e) => panic!("Failed to read {path}: {e}"),
+        // Fail-loud on missing vectors: CI provisions them (ci.yml
+        // "Download test vectors"); locally run `just download-vectors`.
+        // A silent skip fakes coverage (no-graceful-skips policy).
+        Err(e) => panic!("Failed to read {path}: {e} (run: just download-vectors)"),
     }
 }
 
