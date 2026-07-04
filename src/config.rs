@@ -103,7 +103,13 @@ impl DecoderConfig {
 
     /// Set CPU feature flags mask.
     ///
-    /// Controls which SIMD code paths are used by masking detected CPU features.
+    /// **Currently inert** (zenavif#18 docs audit): the value is stored and
+    /// validated but not yet threaded into SIMD dispatch — the safe decode
+    /// path selects its SIMD tier through archmage token detection
+    /// unconditionally. Kept on the builder so wiring it up later is not a
+    /// breaking change; do not rely on it to force scalar decode today.
+    ///
+    /// Intended semantics (once wired): mask detected CPU features.
     /// Default is `u32::MAX` (all features enabled).
     ///
     /// # x86_64 flag bits
@@ -113,8 +119,8 @@ impl DecoderConfig {
     /// - `1 << 3` = AVX2
     /// - `1 << 4` = AVX-512 ICL
     ///
-    /// Setting to `0` forces scalar-only decode. Setting to `0b0111` (7) allows
-    /// up to SSE4.1 but disables AVX2.
+    /// Setting to `0` would force scalar-only decode; `0b0111` (7) would allow
+    /// up to SSE4.1 but disable AVX2.
     pub fn cpu_flags_mask(mut self, mask: u32) -> Self {
         self.cpu_flags_mask = mask;
         self

@@ -16,7 +16,11 @@ use crate::image::{
 use crate::yuv_convert::{self, YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRange};
 use enough::Stop;
 use rgb::{Rgb, Rgba};
-use whereat::{ResultAtExt as _, at};
+use whereat::at;
+// `.at()` is only called from the `zencodec`-gated strip glue below; an
+// unconditional import trips unused_imports on default-features builds.
+#[cfg(feature = "zencodec")]
+use whereat::ResultAtExt as _;
 use yuv::{YuvGrayImage, YuvPlanarImage, YuvRange, YuvStandardMatrix};
 use zenpixels::{PixelBuffer, PixelDescriptor};
 
@@ -366,7 +370,12 @@ impl ManagedAvifDecoder {
             // in-house table) take the full-conversion path below.
             && resolved.to_our().is_some();
 
-        let converter = if can_strip {
+        let mut strip = None;
+        let mut fallback_frames = Some((primary_frame, alpha_frame));
+        if can_strip {
+            let (primary_frame, alpha_frame) = fallback_frames
+                .take()
+                .expect("frames present before try_new");
             let alpha_range = alpha_frame
                 .as_ref()
                 .map(|f| convert_color_range(f.color_info().color_range))
@@ -378,7 +387,7 @@ impl ManagedAvifDecoder {
                 PixelDescriptor::RGB8_SRGB
             };
 
-            crate::strip_convert::StripConverter::new(
+            match crate::strip_convert::StripConverter::try_new(
                 primary_frame,
                 alpha_frame,
                 chroma_sampling,
@@ -393,11 +402,23 @@ impl ManagedAvifDecoder {
                 buffer_width,
                 buffer_height,
                 descriptor,
-            )
-        } else {
-            // Fallback: full conversion for 16-bit, monochrome, or cropped images
-            let (pixels, _) = self.convert_to_image(primary_frame, alpha_frame, stop)?;
-            crate::strip_convert::StripConverter::new_from_pixels(pixels)
+            ) {
+                Ok(converter) => strip = Some(converter),
+                // `can_strip` and `try_new` disagreed on strip support
+                // (defense in depth, zenavif#18): take the full-conversion
+                // fallback instead of aborting.
+                Err(frames) => fallback_frames = Some(frames),
+            }
+        }
+        let converter = match (strip, fallback_frames) {
+            (Some(converter), _) => converter,
+            (None, Some((primary_frame, alpha_frame))) => {
+                // Fallback: full conversion for 16-bit, monochrome, or
+                // cropped images.
+                let (pixels, _) = self.convert_to_image(primary_frame, alpha_frame, stop)?;
+                crate::strip_convert::StripConverter::new_from_pixels(pixels)
+            }
+            (None, None) => unreachable!("frames either converted or handed back"),
         };
 
         Ok((converter, info))
@@ -662,7 +683,10 @@ impl ManagedAvifDecoder {
         };
 
         let frame_count = anim_info.frame_count;
-        let mut frames = Vec::with_capacity(frame_count);
+        // The frame count comes from the (untrusted) container sample
+        // tables; reserve fallibly so an absurd declared count degrades to
+        // a graceful error instead of an allocator abort (zenavif#21).
+        let mut frames = crate::alloc_util::vec_with_capacity(self.alloc_pref, true, frame_count)?;
 
         for i in 0..frame_count {
             stop.check().map_err(|e| at!(Error::Cancelled(e)))?;

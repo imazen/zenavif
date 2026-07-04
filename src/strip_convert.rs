@@ -58,13 +58,24 @@ enum ConversionState {
 }
 
 impl StripConverter {
-    /// Create a strip converter from decoded frames.
+    /// Create a strip converter from decoded frames, if the format supports
+    /// per-strip conversion.
     ///
     /// For 8-bit color images, the frames are held and converted per-strip.
-    /// For 16-bit or monochrome, the full frame is converted immediately
-    /// (falling back to the existing conversion pipeline).
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    /// For formats without a strip path (16-bit, monochrome) the frames are
+    /// handed back in `Err` so the caller can run the full-conversion
+    /// fallback ([`Self::new_from_pixels`]) instead.
+    ///
+    /// Untrusted-input note (zenavif#18): this used to `panic!` on
+    /// unsupported (bit_depth, chroma) combinations. Since both values are
+    /// derived from the decoded (attacker-supplied) bitstream, a mismatch
+    /// between a caller's gate and this check must degrade to the fallback
+    /// path, never abort the process.
+    // result_large_err: the Ok variant holds the same frames plus more, so
+    // boxing the Err tuple would shrink nothing overall; this runs once per
+    // decoded image, not in a loop.
+    #[allow(clippy::too_many_arguments, clippy::result_large_err)]
+    pub fn try_new(
         primary: Frame,
         alpha: Option<Frame>,
         chroma_sampling: ChromaSampling,
@@ -77,11 +88,11 @@ impl StripConverter {
         buffer_width: usize,
         buffer_height: usize,
         descriptor: PixelDescriptor,
-    ) -> Self {
+    ) -> Result<Self, (Frame, Option<Frame>)> {
         let bit_depth = primary.bit_depth();
 
         if bit_depth == 8 && !matches!(chroma_sampling, ChromaSampling::Monochrome) {
-            StripConverter {
+            Ok(StripConverter {
                 state: ConversionState::Frames8 {
                     primary,
                     alpha,
@@ -96,16 +107,11 @@ impl StripConverter {
                 descriptor,
                 display_width,
                 display_height,
-            }
+            })
         } else {
-            // Fallback: can't do strip conversion for this format yet.
-            // Caller should use `new_from_pixels` instead.
-            // This branch shouldn't be reached if callers check properly.
-            panic!(
-                "StripConverter::new called for unsupported format: bit_depth={}, chroma={:?}. \
-                 Use new_from_pixels for 16-bit and monochrome images.",
-                bit_depth, chroma_sampling
-            );
+            // No strip path for this format (16-bit or monochrome): hand
+            // the frames back for full conversion + new_from_pixels.
+            Err((primary, alpha))
         }
     }
 

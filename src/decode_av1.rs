@@ -109,6 +109,18 @@ pub fn decode_av1_obu(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u8)> {
     }
 }
 
+/// 3-bytes-per-pixel output length with an explicit overflow check.
+///
+/// On 32-bit targets (i686, wasm32) a pixel count can survive the
+/// width×height `checked_mul` and still wrap on `* 3`; a wrapped length
+/// would under-allocate and then panic on the first out-of-bounds row
+/// (zenavif#18). Also reachable on 64-bit with pathological pixel counts.
+fn rgb_byte_len(pixel_count: usize) -> Result<usize> {
+    pixel_count
+        .checked_mul(3)
+        .ok_or_else(|| at!(Error::OutOfMemory))
+}
+
 /// Identity (MC=0) conversion for raw OBU decode: planes are G,B,R —
 /// reorder + range expansion + (for 10/12-bit) downscale to 8-bit,
 /// matching this function family's 8-bit output contract.
@@ -123,7 +135,14 @@ fn convert_identity_to_rgb(
         .checked_mul(height as usize)
         .ok_or_else(|| at!(Error::OutOfMemory))?;
     let limited = matches!(yuv_range, YuvRange::Limited);
-    let mut out = vec![0u8; pixel_count * 3];
+    // Full-image output buffer sized from the (untrusted) decoded frame
+    // dimensions → fallible by default (zenavif#21).
+    let mut out = crate::alloc_util::alloc_filled(
+        crate::alloc_util::AllocPref::CodecDefault,
+        true,
+        0u8,
+        rgb_byte_len(pixel_count)?,
+    )?;
 
     // Map a native-depth sample to full-range u8.
     let to8 = |v: u32| -> u8 {
@@ -232,7 +251,12 @@ fn convert_monochrome(
         // For monochrome, we need Y-to-gray conversion respecting range
         // Use yuv crate's yuv400_to_rgb which produces R=G=B=luma, then
         // extract just one channel.
-        let mut rgb_out = vec![Rgb { r: 0u8, g: 0, b: 0 }; pixel_count];
+        let mut rgb_out = crate::alloc_util::alloc_filled(
+            crate::alloc_util::AllocPref::CodecDefault,
+            true,
+            Rgb { r: 0u8, g: 0, b: 0 },
+            pixel_count,
+        )?;
         let rgb_stride = width * 3;
         let gray = YuvGrayImage {
             y_plane: y_view.as_slice(),
@@ -250,7 +274,12 @@ fn convert_monochrome(
         .map_err(|e| at!(Error::ColorConversion(e)))?;
 
         // Extract just the R channel (R=G=B for monochrome)
-        let gray_pixels: Vec<u8> = rgb_out.iter().map(|px| px.r).collect();
+        let mut gray_pixels: Vec<u8> = crate::alloc_util::vec_with_capacity(
+            crate::alloc_util::AllocPref::CodecDefault,
+            true,
+            pixel_count,
+        )?;
+        gray_pixels.extend(rgb_out.iter().map(|px| px.r));
         Ok((gray_pixels, width, height, 1))
     } else {
         let Planes::Depth16(planes) = frame.planes() else {
@@ -261,10 +290,14 @@ fn convert_monochrome(
         };
 
         let y_view = planes.y();
-        let pixel_count_u = width as usize * height as usize;
 
         // Convert 10/12-bit Y plane through yuv crate, then scale to 8-bit
-        let mut rgb16_out = vec![Rgb::<u16> { r: 0, g: 0, b: 0 }; pixel_count_u];
+        let mut rgb16_out = crate::alloc_util::alloc_filled(
+            crate::alloc_util::AllocPref::CodecDefault,
+            true,
+            Rgb::<u16> { r: 0, g: 0, b: 0 },
+            pixel_count,
+        )?;
         let rgb_stride = width * 3;
         let gray = YuvGrayImage {
             y_plane: y_view.as_slice(),
@@ -300,10 +333,12 @@ fn convert_monochrome(
 
         // Scale 10/12/16-bit down to 8-bit, extracting just the R channel
         let shift = bit_depth.saturating_sub(8);
-        let gray_pixels: Vec<u8> = rgb16_out
-            .iter()
-            .map(|px| (px.r >> shift).min(255) as u8)
-            .collect();
+        let mut gray_pixels: Vec<u8> = crate::alloc_util::vec_with_capacity(
+            crate::alloc_util::AllocPref::CodecDefault,
+            true,
+            pixel_count,
+        )?;
+        gray_pixels.extend(rgb16_out.iter().map(|px| (px.r >> shift).min(255) as u8));
         Ok((gray_pixels, width, height, 1))
     }
 }
@@ -355,7 +390,12 @@ fn convert_to_rgb(
             height,
         };
 
-        let mut out = vec![Rgb { r: 0u8, g: 0, b: 0 }; pixel_count];
+        let mut out = crate::alloc_util::alloc_filled(
+            crate::alloc_util::AllocPref::CodecDefault,
+            true,
+            Rgb { r: 0u8, g: 0, b: 0 },
+            pixel_count,
+        )?;
         let rgb_stride = width * 3;
 
         match layout {
@@ -419,7 +459,12 @@ fn convert_to_rgb(
             height,
         };
 
-        let mut out = vec![Rgb::<u16> { r: 0, g: 0, b: 0 }; pixel_count];
+        let mut out = crate::alloc_util::alloc_filled(
+            crate::alloc_util::AllocPref::CodecDefault,
+            true,
+            Rgb::<u16> { r: 0, g: 0, b: 0 },
+            pixel_count,
+        )?;
         let rgb_stride = width * 3;
 
         match (layout, bit_depth) {
@@ -492,7 +537,11 @@ fn convert_to_rgb(
 
         // Scale 10/12/16-bit RGB down to 8-bit
         let shift = bit_depth.saturating_sub(8);
-        let mut bytes = Vec::with_capacity(pixel_count * 3);
+        let mut bytes: Vec<u8> = crate::alloc_util::vec_with_capacity(
+            crate::alloc_util::AllocPref::CodecDefault,
+            true,
+            rgb_byte_len(pixel_count)?,
+        )?;
         for px in &out {
             bytes.push((px.r >> shift).min(255) as u8);
             bytes.push((px.g >> shift).min(255) as u8);
@@ -510,6 +559,24 @@ mod tests {
     fn empty_data_returns_error() {
         let result = decode_av1_obu(&[]);
         assert!(result.is_err());
+    }
+
+    /// zenavif#18 (3): the `pixel_count * 3` RGB byte length must be a
+    /// checked multiply. On i686/wasm32 a width×height that survives the
+    /// pixel-count check can still wrap on `* 3`; the same expression is
+    /// reachable on 64-bit with a pathological pixel count. A wrapped
+    /// length would under-allocate and panic on the first row write.
+    #[test]
+    fn rgb_byte_len_overflow_is_an_error_not_a_wrap() {
+        // Overflows `* 3` on every pointer width.
+        assert!(rgb_byte_len(usize::MAX / 2).is_err());
+        // The largest representable AV1 frame (65536×65536) must stay valid
+        // on 64-bit. On 32-bit targets the pixel count itself overflows
+        // (`checked_mul` returns None) and is caught before rgb_byte_len.
+        if let Some(px) = 65536usize.checked_mul(65536) {
+            assert_eq!(rgb_byte_len(px).unwrap(), px * 3);
+        }
+        assert_eq!(rgb_byte_len(4).unwrap(), 12);
     }
 
     #[test]

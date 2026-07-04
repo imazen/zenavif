@@ -11,6 +11,23 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 ## [Unreleased]
 
 ### Fixed
+- **Untrusted-input hardening, decode path** (zenavif#18 items 2–3):
+  `StripConverter::new` no longer `panic!`s on unsupported
+  (bit_depth, chroma) combinations — replaced by `try_new`, whose
+  unsupported case hands the frames back and the decoder takes the
+  full-conversion fallback (defense in depth; both values come from the
+  attacker-supplied bitstream). The RGB output byte length
+  (`pixel_count * 3`) is now a checked multiply returning
+  `Error::OutOfMemory` instead of wrapping and under-allocating on
+  i686/wasm32 (`rgb_byte_len` + unit test). `DecoderConfig::cpu_flags_mask`
+  rustdoc now states the knob is currently inert rather than implying it
+  gates SIMD dispatch.
+- **Decode allocations are now fallible on the managed path** (zenavif#21):
+  the raw-OBU RGB/gray output buffers (`decode_av1.rs`, five sites) and the
+  animation frame table reservation (`decode_animation`) route through
+  `alloc_util` `try_reserve` helpers, returning a graceful error instead of
+  aborting the process on OOM — completing the coverage started by the
+  grid-stitch canvas and `convert_to_image` buffers.
 - rd_gap harness: per-worker result appends are now flock-serialized (drvfs
   append races silently dropped 315/576 rows on cache-hit-fast runs) and the
   per-cell WORK dir defaults to local disk (drvfs transiently EIOs whole
