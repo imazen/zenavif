@@ -1,15 +1,17 @@
 //! Decode an IVF-contained (or bare-OBU) AV1 still frame via rav1d-safe and
 //! dump the raw planar pixels — byte-compatible with
-//! `aomdec --rawvideo --i420 -o out.raw in.ivf` for 8-bit I420, so
-//! `md5sum` of the two outputs is a decoder byte-agreement check
-//! (the conformance protocol for palette-armed encodes: aomdec must decode
-//! cleanly AND byte-agree with rav1d-safe; see
-//! docs/RD_GAP_VS_LIBAOM.md "IMPLEMENTED 2026-07-03: palette mode").
+//! `aomdec --rawvideo -o out.raw in.ivf`, so `md5sum` of the two outputs is
+//! a decoder byte-agreement check (the conformance protocol for
+//! palette-armed and HDR encodes: aomdec must decode cleanly AND byte-agree
+//! with rav1d-safe; see docs/RD_GAP_VS_LIBAOM.md "IMPLEMENTED 2026-07-03:
+//! palette mode").
 //!
 //! Usage: ivf_raw <in.ivf|in.obu> <out.raw>
 //!
 //! Output layout: Y rows (visible width), then U, then V (subsampled dims
-//! ceil(w/2) x ceil(h/2) for I420; full for I444; absent for I400). 8-bit only.
+//! ceil(w/2) x ceil(h/2) for I420; full for I444; absent for I400).
+//! 8-bit: 1 byte/sample; 10/12-bit: 2 bytes/sample little-endian
+//! (matches aomdec's high-bitdepth `--rawvideo` output on LE hosts).
 
 use rav1d_safe::src::managed::{Decoder, Frame, PixelLayout, Planes, Settings};
 use std::io::Write;
@@ -78,13 +80,6 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    if frame.bit_depth() != 8 {
-        eprintln!(
-            "FAIL {input}: bit depth {} unsupported (8-bit only)",
-            frame.bit_depth()
-        );
-        return ExitCode::FAILURE;
-    }
     let (w, h) = (frame.width() as usize, frame.height() as usize);
     let layout = frame.pixel_layout();
     let (cw, ch) = match layout {
@@ -93,23 +88,45 @@ fn main() -> ExitCode {
         PixelLayout::I422 => (w.div_ceil(2), h),
         PixelLayout::I444 => (w, h),
     };
-    let Planes::Depth8(planes) = frame.planes() else {
-        eprintln!("FAIL {input}: expected 8-bit planes");
-        return ExitCode::FAILURE;
-    };
 
-    let mut out = Vec::with_capacity(w * h + 2 * cw * ch);
-    for row in planes.y().rows().take(h) {
-        out.extend_from_slice(&row[..w]);
-    }
-    if cw > 0 {
-        for view in [planes.u(), planes.v()] {
-            let Some(p) = view else {
-                eprintln!("FAIL {input}: missing chroma plane for {layout:?}");
-                return ExitCode::FAILURE;
-            };
-            for row in p.rows().take(ch) {
-                out.extend_from_slice(&row[..cw]);
+    // 8-bit: 1 byte/sample. 10/12-bit: 2 bytes/sample little-endian —
+    // matching `aomdec --rawvideo` high-bitdepth output on LE hosts.
+    let mut out = Vec::with_capacity((w * h + 2 * cw * ch) * 2);
+    match frame.planes() {
+        Planes::Depth8(planes) => {
+            for row in planes.y().rows().take(h) {
+                out.extend_from_slice(&row[..w]);
+            }
+            if cw > 0 {
+                for view in [planes.u(), planes.v()] {
+                    let Some(p) = view else {
+                        eprintln!("FAIL {input}: missing chroma plane for {layout:?}");
+                        return ExitCode::FAILURE;
+                    };
+                    for row in p.rows().take(ch) {
+                        out.extend_from_slice(&row[..cw]);
+                    }
+                }
+            }
+        }
+        Planes::Depth16(planes) => {
+            for row in planes.y().rows().take(h) {
+                for &v in &row[..w] {
+                    out.extend_from_slice(&v.to_le_bytes());
+                }
+            }
+            if cw > 0 {
+                for view in [planes.u(), planes.v()] {
+                    let Some(p) = view else {
+                        eprintln!("FAIL {input}: missing chroma plane for {layout:?}");
+                        return ExitCode::FAILURE;
+                    };
+                    for row in p.rows().take(ch) {
+                        for &v in &row[..cw] {
+                            out.extend_from_slice(&v.to_le_bytes());
+                        }
+                    }
+                }
             }
         }
     }

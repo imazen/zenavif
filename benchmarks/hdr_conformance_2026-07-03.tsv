@@ -1,0 +1,25 @@
+# HDR 10-bit PQ conformance grid -- zenavif encode_rgb16 (identity/GBR, full range, cICP echo + clli/mdcv) -> extract_av1 -> aomdec(build_slow) {--summary clean, --rawvideo md5} vs rav1d-safe (examples/ivf_raw, 16-bit LE extension)
+# workspace gainmap on main 7f15cb83; chain zenavif->zenravif(../ravif WC=a2842092+speed-ladder env-passthrough devpatch)->zenrav1e git 184a616f; host lilith; 2026-07-03
+# sources: imazen-26-hdr-grid (16-bit PNG cICP P1/T16/M0); + 12-bit cell: examples/twelvebit_probe (ravif BitDepth::Twelve, 64x48) -> aomdec clean + md5 agree
+source	size	quality	speed	bytes	aomdec	md5_agree
+1064-castle	384x512	25	8	4487	clean	yes
+1069-night	384x512	25	8	8507	clean	yes
+1227-glass	384x512	25	8	5598	clean	yes
+1064-castle	384x512	40	8	9194	clean	yes
+1069-night	384x512	40	8	16166	clean	yes
+1227-glass	384x512	40	8	11283	clean	yes
+1064-castle	384x512	63	8	25131	clean	yes
+1069-night	384x512	63	8	35117	clean	yes
+1227-glass	384x512	63	8	28862	clean	yes
+1064-castle	384x512	80	8	50837	clean	yes
+1069-night	384x512	80	8	59443	clean	yes
+1227-glass	384x512	80	8	57527	clean	yes
+1064-castle	384x512	90	8	88913	clean	yes
+1069-night	384x512	90	8	90553	clean	yes
+1227-glass	384x512	90	8	101014	clean	yes
+1064-castle	120x160	80	8	6119	clean	yes
+1064-castle	1536x2048	80	8	736921	clean	yes
+1069-night	120x160	63	8	5859	clean	yes
+1064-castle	384x512	80	4	49733	clean	yes
+1227-glass	384x512	63	4	26821	clean	yes
+probe12-synthetic	64x48	90	8	1574	clean	yes
