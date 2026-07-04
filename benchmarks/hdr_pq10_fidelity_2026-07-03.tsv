@@ -1,0 +1,9 @@
+# PQ10 encode/decode pixel fidelity vs quality — synthetic 64x48 HDR content (ramp+patches+speculars)
+# commit:  workspace gainmap @ main e2ba71ca; chain: zenavif->zenravif(../ravif WC=a2842092+speed-ladder devpatch)->zenrav1e master 184a616f; host: lilith; date: 2026-07-03
+# cmd: cargo run --release --features encode --example hdr_fidelity_probe
+quality	speed	bytes	max_abs_diff_16bit	max_10bit_steps	mean_abs_diff_16bit
+80	8	949	3075	48	132
+90	8	1125	1665	26	85
+95	8	1407	607	9	50
+99	8	2229	221	3	30
+90	4	642	1537	24	59
