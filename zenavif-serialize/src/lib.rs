@@ -194,6 +194,7 @@ pub struct Aviffy {
     exif: Option<Vec<u8>>,
     xmp: Option<Vec<u8>>,
     gain_map: Option<GainMapConfig>,
+    max_output_bytes: Option<usize>,
 }
 
 /// Configuration for an ISO 21496-1 gain map embedded in the AVIF container.
@@ -277,7 +278,34 @@ impl Aviffy {
             exif: None,
             xmp: None,
             gain_map: None,
+            max_output_bytes: None,
         }
+    }
+
+    /// Set an upper bound on the serialized file size in bytes (opt-in
+    /// resource limit; zenavif-serialize#3).
+    ///
+    /// The muxer's output size is essentially the sum of the caller-supplied
+    /// payloads plus fixed headers, so this is a guard for callers passing
+    /// through data they don't fully control (e.g. a server muxing
+    /// user-influenced AV1 payloads). When the projected file size exceeds
+    /// the cap, the fallible entry points ([`Self::write`],
+    /// [`Self::write_slice`], [`Self::try_to_vec`]) return
+    /// [`io::ErrorKind::InvalidInput`] *before* any output is produced;
+    /// the panicking convenience wrappers ([`Self::to_vec`]) panic, per
+    /// their documented contract.
+    ///
+    /// Default: no limit.
+    #[inline]
+    pub fn set_max_output_bytes(&mut self, max_bytes: usize) -> &mut Self {
+        self.max_output_bytes = Some(max_bytes);
+        self
+    }
+
+    /// Alias for [`Self::set_max_output_bytes`].
+    #[inline]
+    pub fn with_max_output_bytes(&mut self, max_bytes: usize) -> &mut Self {
+        self.set_max_output_bytes(max_bytes)
     }
 
     /// If set, must match the AV1 color payload, and will result in `colr` box added to AVIF.
@@ -512,7 +540,7 @@ impl Aviffy {
     /// Data is written (streamed) to `into_output`.
     #[inline]
     pub fn write<W: io::Write>(&self, into_output: W, color_av1_data: &[u8], alpha_av1_data: Option<&[u8]>, width: u32, height: u32, depth_bits: u8) -> Result<()> {
-        self.make_boxes(color_av1_data, alpha_av1_data, width, height, depth_bits)?
+        self.checked_boxes(color_av1_data, alpha_av1_data, width, height, depth_bits)?
             .write(into_output)
             .map_err(|e| at!(SerializeError::from(e)))
     }
@@ -520,9 +548,31 @@ impl Aviffy {
     /// See [`Self::write`]
     #[inline]
     pub fn write_slice<W: io::Write>(&self, into_output: W, color_av1_data: &[u8], alpha_av1_data: Option<&[u8]>) -> Result<()> {
-        self.make_boxes(color_av1_data, alpha_av1_data, self.width, self.height, self.bit_depth)?
+        self.checked_boxes(color_av1_data, alpha_av1_data, self.width, self.height, self.bit_depth)?
             .write(into_output)
             .map_err(|e| at!(SerializeError::from(e)))
+    }
+
+    /// [`Self::make_boxes`] plus the opt-in output-size cap
+    /// ([`Self::set_max_output_bytes`]), applied before any output is
+    /// produced. All serialization entry points route through this.
+    fn checked_boxes<'data>(
+        &'data self,
+        color_av1_data: &'data [u8],
+        alpha_av1_data: Option<&'data [u8]>,
+        width: u32,
+        height: u32,
+        depth_bits: u8,
+    ) -> Result<AvifFile<'data>> {
+        let file = self.make_boxes(color_av1_data, alpha_av1_data, width, height, depth_bits)?;
+        if let Some(cap) = self.max_output_bytes
+            && file.file_size() > cap
+        {
+            return Err(at!(SerializeError::InvalidInput(
+                "serialized AVIF would exceed the configured max_output_bytes cap"
+            )));
+        }
+        Ok(file)
     }
 
     fn make_boxes<'data>(
@@ -761,14 +811,28 @@ impl Aviffy {
         Ok(())
     }
 
-    /// Panics if the input arguments were invalid. Use [`Self::write`] to handle the errors.
+    /// Panics if the input arguments were invalid (or the
+    /// [`Self::set_max_output_bytes`] cap is exceeded). Use
+    /// [`Self::try_to_vec`] or [`Self::write`] to handle the errors instead.
     #[must_use]
     #[track_caller]
     pub fn to_vec(&self, color_av1_data: &[u8], alpha_av1_data: Option<&[u8]>, width: u32, height: u32, depth_bits: u8) -> Vec<u8> {
-        let mut file = self.make_boxes(color_av1_data, alpha_av1_data, width, height, depth_bits).unwrap();
+        self.try_to_vec(color_av1_data, alpha_av1_data, width, height, depth_bits).unwrap()
+    }
+
+    /// Fallible variant of [`Self::to_vec`]: returns the serialized AVIF as
+    /// bytes, or a located [`SerializeError`] on invalid input (e.g.
+    /// `depth_bits` not 8/10/12), an exceeded
+    /// [`Self::set_max_output_bytes`] cap, or allocation failure — instead
+    /// of panicking (zenavif-serialize#6).
+    ///
+    /// Prefer this on request paths that cannot afford a panic; `to_vec`
+    /// remains the panic-on-misuse convenience wrapper.
+    pub fn try_to_vec(&self, color_av1_data: &[u8], alpha_av1_data: Option<&[u8]>, width: u32, height: u32, depth_bits: u8) -> Result<Vec<u8>> {
+        let mut file = self.checked_boxes(color_av1_data, alpha_av1_data, width, height, depth_bits)?;
         let mut out = Vec::new();
-        file.write_to_vec(&mut out).unwrap();
-        out
+        file.write_to_vec(&mut out).map_err(|e| at!(SerializeError::from(e)))?;
+        Ok(out)
     }
 
     /// Set chroma subsampling. Use [`ChromaSubsampling::NONE`] for 4:4:4,
@@ -901,10 +965,20 @@ fn looks_like_tiff_header(data: &[u8]) -> bool {
 }
 
 /// See [`serialize`] for description. This one makes a `Vec` instead of using `io::Write`.
+///
+/// Panics on invalid input (e.g. bad `depth_bits`); prefer
+/// [`try_serialize_to_vec`] on paths that cannot afford a panic.
 #[must_use]
 #[track_caller]
 pub fn serialize_to_vec(color_av1_data: &[u8], alpha_av1_data: Option<&[u8]>, width: u32, height: u32, depth_bits: u8) -> Vec<u8> {
     Aviffy::new().to_vec(color_av1_data, alpha_av1_data, width, height, depth_bits)
+}
+
+/// Fallible variant of [`serialize_to_vec`]: returns a located
+/// [`SerializeError`] on invalid input instead of panicking
+/// (zenavif-serialize#6).
+pub fn try_serialize_to_vec(color_av1_data: &[u8], alpha_av1_data: Option<&[u8]>, width: u32, height: u32, depth_bits: u8) -> Result<Vec<u8>> {
+    Aviffy::new().try_to_vec(color_av1_data, alpha_av1_data, width, height, depth_bits)
 }
 
 #[test]
@@ -927,6 +1001,63 @@ fn test_roundtrip_parse_mp4_alpha() {
 
     assert_eq!(&test_img[..], ctx.primary_item_coded_data().unwrap());
     assert_eq!(&test_a[..], ctx.alpha_item_coded_data().unwrap());
+}
+
+/// zenavif-serialize#6: the fallible Vec APIs must return `Err` (not panic)
+/// on invalid input, and produce byte-identical output on valid input.
+#[test]
+fn try_to_vec_errors_instead_of_panicking() {
+    let test_img = b"av12356abc";
+
+    // Invalid depth: Err, not panic.
+    let err = Aviffy::new().try_to_vec(test_img, None, 10, 20, 9).unwrap_err();
+    assert!(matches!(err.error(), SerializeError::InvalidInput(_)), "{err}");
+    let err = try_serialize_to_vec(test_img, None, 10, 20, 42).unwrap_err();
+    assert!(matches!(err.error(), SerializeError::InvalidInput(_)), "{err}");
+
+    // Missing dimensions: Err, not panic.
+    assert!(Aviffy::new().try_to_vec(test_img, None, 0, 0, 8).is_err());
+
+    // Valid input: identical bytes to the panicking wrappers.
+    let fallible = Aviffy::new().try_to_vec(test_img, None, 10, 20, 8).unwrap();
+    let panicky = Aviffy::new().to_vec(test_img, None, 10, 20, 8);
+    assert_eq!(fallible, panicky);
+    assert_eq!(
+        try_serialize_to_vec(test_img, None, 10, 20, 8).unwrap(),
+        serialize_to_vec(test_img, None, 10, 20, 8)
+    );
+}
+
+/// The panic-on-misuse contract of `to_vec` is unchanged (zenavif-serialize#6
+/// is additive).
+#[test]
+#[should_panic]
+fn to_vec_still_panics_on_bad_depth() {
+    let _ = Aviffy::new().to_vec(b"av1", None, 10, 20, 9);
+}
+
+/// zenavif-serialize#3: opt-in output-size cap fires before any output.
+#[test]
+fn max_output_bytes_cap_is_enforced() {
+    let test_img = b"av12356abc";
+
+    // A cap far below any real AVIF: everything fails cleanly.
+    let mut capped = Aviffy::new();
+    capped.set_max_output_bytes(16);
+    let err = capped.try_to_vec(test_img, None, 10, 20, 8).unwrap_err();
+    assert!(matches!(err.error(), SerializeError::InvalidInput(_)), "{err}");
+
+    // The streaming writer rejects it before writing a single byte.
+    let mut sink = Vec::new();
+    assert!(capped.write(&mut sink, test_img, None, 10, 20, 8).is_err());
+    assert!(sink.is_empty(), "cap must fire before any output is produced");
+
+    // A generous cap changes nothing.
+    let mut roomy = Aviffy::new();
+    roomy.with_max_output_bytes(1 << 20);
+    let capped_out = roomy.try_to_vec(test_img, None, 10, 20, 8).unwrap();
+    let uncapped_out = Aviffy::new().try_to_vec(test_img, None, 10, 20, 8).unwrap();
+    assert_eq!(capped_out, uncapped_out);
 }
 
 #[test]

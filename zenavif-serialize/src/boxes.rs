@@ -48,6 +48,19 @@ impl AvifFile<'_> {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "missing width/height"));
         }
 
+        // Structural 32-bit ceiling (zenavif-serialize#3): iloc extent
+        // offsets/lengths are serialized as u32 and box sizes use the plain
+        // 32-bit form (no largesize). A file over u32::MAX bytes would
+        // silently truncate `data.len() as u32` and wrap `next_start` in
+        // IlocBox::write — a corrupt file, not an error. Reject it up front;
+        // every write path funnels through here before emitting output.
+        if u32::try_from(self.file_size()).is_err() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "AVIF output would exceed u32::MAX bytes; 32-bit iloc offsets/box sizes cannot represent it",
+            ));
+        }
+
         self.fix_iloc_positions();
 
         out.try_reserve_exact(self.ftyp.len() + self.meta.len())?;
@@ -67,7 +80,11 @@ impl AvifFile<'_> {
         let initial = out.len();
         self.write_header(out)?;
 
-        let _ = self.mdat.write(&mut Writer::new(out), &self.meta.iloc);
+        // Propagate mdat write failures: swallowing them returned Ok with a
+        // truncated buffer (silent corruption on OOM).
+        self.mdat
+            .write(&mut Writer::new(out), &self.meta.iloc)
+            .map_err(|_| io::ErrorKind::OutOfMemory)?;
         let written = out.len() - initial;
         debug_assert_eq!(expected_file_size, written);
         Ok(())
@@ -792,9 +809,16 @@ impl MpegBox for IlocBox<'_> {
             b.u16(0)?;
             b.u16(item.extents.len() as _)?; // num extents
             for ex in &item.extents {
-                let len = ex.data.len() as u32;
+                // In u32 range by AvifFile::write_header's file-size guard
+                // (a >u32::MAX output is rejected before any write); the
+                // checked ops are a corruption backstop, not a live path.
+                debug_assert!(u32::try_from(ex.data.len()).is_ok());
+                let len = u32::try_from(ex.data.len()).unwrap_or(u32::MAX);
                 b.u32(next_start)?;
-                next_start += len;
+                next_start = next_start.checked_add(len).unwrap_or_else(|| {
+                    debug_assert!(false, "iloc offset overflow prevented by write_header guard");
+                    u32::MAX
+                });
                 b.u32(len)?;
             }
         }

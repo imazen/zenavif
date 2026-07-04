@@ -2,7 +2,7 @@
 
 # zenavif-serialize
 
-AVIF container serializer (muxer) in pure Rust. It wraps already-compressed AV1 bitstreams into MPEG/HEIF/MIAF/ISO-BMFF boxes for still images, animations, and grid layouts — it does **not** encode pixels itself. `#![forbid(unsafe_code)]`, `no_std`-compatible (with `alloc`), and depends only on `arrayvec` and `whereat`.
+AVIF container serializer (muxer) in pure Rust. It wraps already-compressed AV1 bitstreams into MPEG/HEIF/MIAF/ISO-BMFF boxes for still images, animations, and grid layouts — it does **not** encode pixels itself. `#![forbid(unsafe_code)]`, and depends only on `arrayvec` and `whereat` (uses `std::io` for output).
 
 Pair it with an AV1 encoder such as [zenrav1e](https://lib.rs/zenrav1e) for a pure-Rust AVIF encoding path.
 
@@ -37,7 +37,7 @@ signaling, transforms, metadata, animation, and grids.
 - **Color spaces** — full CICP support (BT.709, BT.2020, Display P3, PQ, HLG, etc.)
 - **ICC profiles**, EXIF, and XMP metadata embedding
 - **8/10/12-bit** depth
-- **`no_std` compatible** (with `alloc`)
+- **Pure safe Rust** — `#![forbid(unsafe_code)]`; uses `std::io` (not `no_std`)
 
 ## Configuring color, transforms & metadata
 

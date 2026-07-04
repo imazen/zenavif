@@ -6,15 +6,15 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenavif-serialize.txt 172 lines (supported surface) | zenavif-serialize.features.txt 0 added (features: none) | zenavif-serialize.internal.txt 24 lines (24 hidden + 0 excluded-feature)
+# files: zenavif-serialize.txt 176 lines (supported surface) | zenavif-serialize.features.txt 0 added (features: none) | zenavif-serialize.internal.txt 24 lines (24 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 4
 #   pub types (struct/enum/trait/alias)        19
 #   pub consts/statics                          3
-#   free functions                              3
-#   inherent methods                           54
+#   free functions                              4
+#   inherent methods                           57
 #   struct fields                              38
 #   enum variants                              30
 #   trait roster entries (type × trait)        65
@@ -22,12 +22,12 @@
 #   auto-trait exceptions                       1
 #
 # per-module pub lines:
-#   (root)                           95
+#   (root)                           99
 #   animated                         18
 #   constants                        30
 #   grid                              8
 
-## items (151 lines)
+## items (155 lines)
 
 pub mod zenavif_serialize
 pub mod animated
@@ -120,6 +120,7 @@ pub fn Aviffy::set_height(&mut self, u32) -> &mut Self
 pub fn Aviffy::set_icc_profile(&mut self, alloc::vec::Vec<u8>) -> &mut Self
 pub fn Aviffy::set_mastering_display(&mut self, [(u16, u16); 3], (u16, u16), u32, u32) -> &mut Self
 pub fn Aviffy::set_matrix_coefficients(&mut self, constants::MatrixCoefficients) -> &mut Self
+pub fn Aviffy::set_max_output_bytes(&mut self, usize) -> &mut Self
 pub fn Aviffy::set_mirror(&mut self, u8) -> &mut Self
 pub fn Aviffy::set_monochrome(&mut self, bool) -> &mut Self
 pub fn Aviffy::set_pixel_aspect_ratio(&mut self, u32, u32) -> &mut Self
@@ -130,6 +131,8 @@ pub fn Aviffy::set_transfer_characteristics(&mut self, constants::TransferCharac
 pub fn Aviffy::set_width(&mut self, u32) -> &mut Self
 pub fn Aviffy::set_xmp(&mut self, alloc::vec::Vec<u8>) -> &mut Self
 pub fn Aviffy::to_vec(&self, &[u8], core::option::Option<&[u8]>, u32, u32, u8) -> alloc::vec::Vec<u8>
+pub fn Aviffy::try_to_vec(&self, &[u8], core::option::Option<&[u8]>, u32, u32, u8) -> Result<alloc::vec::Vec<u8>>
+pub fn Aviffy::with_max_output_bytes(&mut self, usize) -> &mut Self
 pub fn Aviffy::write<W: std::io::Write>(&self, W, &[u8], core::option::Option<&[u8]>, u32, u32, u8) -> Result<()>
 pub fn Aviffy::write_slice<W: std::io::Write>(&self, W, &[u8], core::option::Option<&[u8]>) -> Result<()>
 pub struct ChromaSubsampling
@@ -179,6 +182,7 @@ pub PaspBox::v_spacing: u32
 pub fn PaspBox::new(u32, u32) -> Self
 pub fn serialize<W: std::io::Write>(W, &[u8], core::option::Option<&[u8]>, u32, u32, u8) -> Result<()>
 pub fn serialize_to_vec(&[u8], core::option::Option<&[u8]>, u32, u32, u8) -> alloc::vec::Vec<u8>
+pub fn try_serialize_to_vec(&[u8], core::option::Option<&[u8]>, u32, u32, u8) -> Result<alloc::vec::Vec<u8>>
 pub type Result<T> = core::result::Result<T, whereat::at::At<SerializeError>>
 
 ## trait impls (19 types)

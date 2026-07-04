@@ -14,6 +14,16 @@
   allocation — the crate deliberately avoids that overhead).
 
 ### Added
+- **Fallible `Vec` serialization** (zenavif-serialize#6): `Aviffy::try_to_vec`
+  and free `try_serialize_to_vec` return `Result<Vec<u8>>` (located
+  `SerializeError`) instead of panicking on invalid input — for request paths
+  that cannot afford a panic. `to_vec` / `serialize_to_vec` keep their
+  documented panic-on-misuse contract and now route through the same checked
+  path.
+- **Opt-in output-size cap** (zenavif-serialize#3):
+  `Aviffy::set_max_output_bytes` / `with_max_output_bytes` rejects a
+  projected file size above the cap before any output is produced
+  (`SerializeError::InvalidInput`).
 - Versioned public-API surface snapshot at `docs/public-api/zenavif-serialize.txt`,
   regenerated on every `cargo test` via `tests/public_api_doc.rs`
   (`ZEN_API_DOC=check` verifies in CI's clippy job, `=off` skips elsewhere).
@@ -29,6 +39,18 @@
   renders a badge-free `README.crates.md` (`readme = "README.crates.md"`).
 
 ### Fixed
+- **Outputs over `u32::MAX` bytes are rejected instead of silently corrupted**
+  (zenavif-serialize#3): iloc extent offsets/lengths are serialized as `u32`
+  (no largesize), so a >4 GiB file truncated `data.len() as u32` and wrapped
+  `next_start` — a structurally corrupt file with no error. `write_header` now
+  guards the projected file size up front (every entry point funnels through
+  it), and the iloc arithmetic is checked as a backstop. `write_to_vec` also
+  no longer swallows mdat write errors (OOM previously returned `Ok` with a
+  truncated buffer).
+- **README `no_std` claim removed** (zenavif-serialize#3): the crate uses
+  `std::io` throughout; README.md and README.crates.md said `no_std`-compatible
+  in three places. Replaced with the accurate `#![forbid(unsafe_code)]` + `std::io`
+  statement.
 - **README now states the AV1 input packaging contract**: `color_av1_data` must be
   the raw AV1 OBU bitstream for a single keyframe with the sequence header in-band
   (no length-prefix / Annex-B framing), `av1C` is built from builder settings rather
