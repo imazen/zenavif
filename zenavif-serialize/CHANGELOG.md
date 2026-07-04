@@ -18,6 +18,13 @@ version is pre-bumped to prevent an accidental semver-violating 0.1.5.
   allocation — the crate deliberately avoids that overhead).
 
 ### Added
+- **Gain-mapped files are now discoverable by libavif**: `set_gain_map`
+  output gains the `tmap` compatible brand (ISO 23008-12:2024/AMD1 §10.2.6)
+  and a `grpl`/`altr` entity group marking the tmap item as the preferred
+  alternative to the primary — both required by libavif's reader, which
+  previously reported "does not contain a gain map" for our mux. The
+  gain-map item's `av1C` `seq_profile` is now derived from
+  subsampling/depth/monochrome (4:4:4 maps were mislabeled profile 0).
 - **`Aviffy::set_gain_map_alt_icc`** — ICC profile for the gain map's
   alternate rendition, written as a `colr` box of type `prof` on the `tmap`
   item (may be combined with the nclx `set_gain_map_alt_colr`; ISOBMFF allows

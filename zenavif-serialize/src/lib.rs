@@ -73,7 +73,7 @@ fn add_gain_map<'data>(
     next_item_id: &mut u16,
     color_image_id: u16,
     gm: &'data GainMapConfig,
-) -> io::Result<()> {
+) -> io::Result<u16> {
     let gm_depth = gm.bit_depth;
     let gain_map_id = *next_item_id;
     *next_item_id += 1;
@@ -157,7 +157,7 @@ fn add_gain_map<'data>(
         to_ids,
         typ: FourCC(*b"dimg"),
     });
-    Ok(())
+    Ok(tmap_id)
 }
 
 /// Chroma subsampling configuration for AV1 encoding.
@@ -675,12 +675,13 @@ impl Aviffy {
             .map_err(|e| at!(SerializeError::from(e)))?;
         }
 
+        let mut tmap_item_id = None;
         if let Some(gm) = &self.gain_map {
-            add_gain_map(
+            tmap_item_id = Some(add_gain_map(
                 &mut image_items, &mut ipma_entries, &mut multi_irefs, &mut iloc_items,
                 &mut ipco, &mut next_item_id, color_image_id, gm,
             )
-            .map_err(|e| at!(SerializeError::from(e)))?;
+            .map_err(|e| at!(SerializeError::from(e)))?);
         }
 
         iloc_items.push(IlocItem {
@@ -688,11 +689,30 @@ impl Aviffy {
             extents: from_array([IlocExtent { data: color_av1_data }]),
         });
 
+        // ISO 23008-12:2024/AMD1 § 10.2.6: files carrying a tone-map derived
+        // image item SHALL list the `tmap` brand; readers (libavif) ignore
+        // the gain map without it.
+        let mut compatible_brands: ArrayVec<FourCC, 3> =
+            [FourCC(*b"mif1"), FourCC(*b"miaf")].into_iter().collect();
+        if tmap_item_id.is_some() {
+            compatible_brands.push(FourCC(*b"tmap"));
+        }
+        // Gain-map readers locate the tmap item through an `altr` entity
+        // group where it precedes (is preferred to) the primary item.
+        let grpl = tmap_item_id.map(|tmap_id| {
+            let group_id = next_item_id; // ids share one space; keep unique
+            let mut ids: ArrayVec<u32, 4> = ArrayVec::new();
+            ids.push(u32::from(tmap_id));
+            ids.push(u32::from(color_image_id));
+            let mut altr = ArrayVec::new();
+            altr.push((u32::from(group_id), ids));
+            GrplBox { altr }
+        });
         Ok(AvifFile {
             ftyp: FtypBox {
                 major_brand: FourCC(*b"avif"),
                 minor_version: 0,
-                compatible_brands: [FourCC(*b"mif1"), FourCC(*b"miaf")].into(),
+                compatible_brands,
             },
             meta: MetaBox {
                 hdlr: HdlrBox {},
@@ -707,6 +727,7 @@ impl Aviffy {
                     ipma: IpmaBox { entries: ipma_entries },
                 },
                 iref: IrefBox { entries: irefs, multi_entries: multi_irefs },
+                grpl,
             },
             mdat: MdatBox,
         })
@@ -2052,6 +2073,42 @@ fn gain_map_av1c_profile_follows_subsampling() {
         }
     }
     assert!(found, "expected a profile-1 4:4:4 av1C for the gain map item");
+}
+
+#[test]
+fn gain_map_writes_tmap_brand_and_altr_group() {
+    let metadata = make_test_tmap_metadata(false, true, 0, 1, 1, 1);
+    let avif = Aviffy::new()
+        .set_gain_map(vec![10, 20, 30], 2, 2, 8, metadata)
+        .to_vec(&[1, 2, 3], None, 10, 20, 8);
+    // ftyp compatible_brands must include 'tmap' (ISO 23008-12 AMD1 §10.2.6
+    // — libavif ignores the gain map without it).
+    let ftyp_end = 8 + u32::from_be_bytes(avif[0..4].try_into().unwrap()) as usize - 8;
+    let ftyp = &avif[..ftyp_end + 8];
+    assert!(
+        ftyp.windows(4).any(|w| w == b"tmap"),
+        "ftyp must list the tmap brand"
+    );
+    // A grpl/altr group must exist with the tmap item id FIRST (preferred
+    // alternative), then the primary item id.
+    let gi = avif.windows(4).position(|w| w == b"grpl").expect("grpl box");
+    let ai = avif[gi..].windows(4).position(|w| w == b"altr").expect("altr box") + gi;
+    // altr payload: version/flags(4) group_id(4) num(4) ids(4*n)
+    let num = u32::from_be_bytes(avif[ai + 12..ai + 16].try_into().unwrap());
+    assert_eq!(num, 2, "altr lists tmap + primary");
+    let first = u32::from_be_bytes(avif[ai + 16..ai + 20].try_into().unwrap());
+    let second = u32::from_be_bytes(avif[ai + 20..ai + 24].try_into().unwrap());
+    assert!(first != second);
+    // Primary item id is 1 in this muxer; the tmap item must come first.
+    assert_eq!(second, 1, "primary id second (tmap preferred)");
+    // No gain map -> neither brand nor group.
+    let plain = Aviffy::new().to_vec(&[1, 2, 3], None, 10, 20, 8);
+    let plain_ftyp_len = u32::from_be_bytes(plain[0..4].try_into().unwrap()) as usize;
+    assert!(
+        !plain[..plain_ftyp_len].windows(4).any(|w| w == b"tmap"),
+        "no tmap brand without a gain map"
+    );
+    assert!(!plain.windows(4).any(|w| w == b"grpl"));
 }
 
 #[test]

@@ -108,7 +108,7 @@ const FULL_BOX_SIZE: usize = BASIC_BOX_SIZE + 4;
 pub struct FtypBox {
     pub major_brand: FourCC,
     pub minor_version: u32,
-    pub compatible_brands: ArrayVec<FourCC, 2>,
+    pub compatible_brands: ArrayVec<FourCC, 3>,
 }
 
 /// File Type box (chunk)
@@ -141,6 +141,45 @@ pub struct MetaBox<'data> {
     pub pitm: PitmBox,
     pub iprp: IprpBox,
     pub iref: IrefBox,
+    /// GroupsListBox — written when any entity group exists (e.g. the
+    /// `altr` group marking a `tmap` item as the preferred alternative
+    /// to the primary item, required by gain-map readers).
+    pub grpl: Option<GrplBox>,
+}
+
+/// GroupsListBox (`grpl`) holding `altr` EntityToGroupBoxes
+/// (ISO/IEC 14496-12 § 8.15.3).
+#[derive(Debug, Clone)]
+pub struct GrplBox {
+    /// `altr` groups: (group_id, entity ids in preference order).
+    pub altr: ArrayVec<(u32, ArrayVec<u32, 4>), 2>,
+}
+
+impl MpegBox for GrplBox {
+    #[inline]
+    fn len(&self) -> usize {
+        // grpl is a plain box containing EntityToGroupBoxes; each altr is a
+        // FullBox: header + group_id(4) + num_entities(4) + 4*n entity ids.
+        BASIC_BOX_SIZE
+            + self
+                .altr
+                .iter()
+                .map(|(_, ids)| FULL_BOX_SIZE + 8 + 4 * ids.len())
+                .sum::<usize>()
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"grpl")?;
+        for (group_id, ids) in &self.altr {
+            let mut g = b.full_box(FULL_BOX_SIZE + 8 + 4 * ids.len(), *b"altr", 0)?;
+            g.u32(*group_id)?;
+            g.u32(ids.len() as u32)?;
+            for id in ids {
+                g.u32(*id)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl MpegBox for MetaBox<'_> {
@@ -153,6 +192,7 @@ impl MpegBox for MetaBox<'_> {
             + self.iinf.len()
             + self.iprp.len()
             + if !self.iref.is_empty() { self.iref.len() } else { 0 }
+            + self.grpl.as_ref().map_or(0, |g| g.len())
     }
 
     fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
@@ -164,7 +204,11 @@ impl MpegBox for MetaBox<'_> {
         if !self.iref.is_empty() {
             self.iref.write(&mut b)?;
         }
-        self.iprp.write(&mut b)
+        self.iprp.write(&mut b)?;
+        if let Some(ref grpl) = self.grpl {
+            grpl.write(&mut b)?;
+        }
+        Ok(())
     }
 }
 
