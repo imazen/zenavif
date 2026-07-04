@@ -47,6 +47,12 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   (302be267).
 
 ### Fixed
+- **Vector/corpus tests no longer silently skip** (no-graceful-skips
+  policy, c1533f48): libavif-vector loaders fail loud (CI provisions the
+  vectors; locally `just download-vectors`), and the codec-corpus animation
+  roundtrip — whose `../codec-corpus` path never resolved, so it silently
+  no-oped everywhere since inception — now really runs, with corpus-less
+  environments declaring `ZENAVIF_NO_CODEC_CORPUS=1` in the visible CI chain.
 - `MasteringDisplayConfig::primaries` doc: the slot order is the `mdcv` wire
   order **GREEN, BLUE, RED** (ST 2086 / HEVC SEI), not R,G,B as previously
   claimed — values were always written verbatim, so following the old doc
