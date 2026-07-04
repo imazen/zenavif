@@ -125,8 +125,12 @@ TSV_HEADER = [
     "(p1part passthroughs + ZENRAVIF_REDUCED_TX + ZENRAVIF_INTRA_MODES; box cavif sha256/16 bd0b33d2ec5ef156). "
     "INCIDENT: a first pass ran a stale workspace (e944ea71, symmetric margins) -- caught by 6/144 "
     "byte-continuity vs p1part ship cells, wiped, re-run; base cells byte-match p1part 144/144 on both passes",
-    "Frozen rules: tx = {patch_fraction>0.8505 -> LARGEST | dct_compressibility_y<8.352 -> MIN | else SIZE1} "
-    "(s6-s8); partition = {gradient_fraction_smooth<0.4105 -> M32(r16m32_bkvg2) | else SHIP(r16no4_bkvg2)} (s6)",
+    "Rules v1 (produced the box class samples): tx = {pf>0.8505 -> LARGEST | dcty<8.352 -> MIN | else SIZE1} "
+    "(s6-s8); partition = {gradient_fraction_smooth<0.4105 -> M32(r16m32_bkvg2) | else SHIP(r16no4_bkvg2)} (s6). "
+    "Rules v2 (DEPLOYED, the VAL attribution revision -- see src/fast_heads.rs): W conjunctive pf>0.8505 AND "
+    "dcty>100 (razor-edge only; the pf-only withhold false-fired on val charts, factoring cells p2vx_* put "
+    "8103's +12.6 loss entirely on the withhold); D capped pf<=0.8505. v2 remaps 3 images (7028,5343,8103) "
+    "onto measured cells (p2rx_*/p2vx_*); composed-v2 rows below use them",
     "All arms train26/val14 tune-ss2 + palette auto, --threads 1, BUTTER on, PALCONF=1 (0 CELLFAIL/CONFFAIL); "
     "composed = per-(tx,part)-class 12q sub-runs merged; intra7 = ComplexKeyframes + filter_intra=Some(false); "
     "BD per-image monotone-frontier hull (bd_arm.py), vetoadj = max(bd,0) when arm ba3n>+1.0 or bamax>+1.5",
@@ -211,6 +215,27 @@ def main():
         summarize("composed-v2 vs s6+size1 base", Tc2, section="composed")
         summarize("composed-v2 vs global-ship", Tcs2, section="composed")
 
+    # ---- composed-v2 + global intra7 (stage 2) ----
+    comp_i7 = None
+    if os.path.exists(os.path.join(d, "p2ci7_min_m32.tsv")):
+        parts = []
+        for cls in CLASSES:
+            pth = os.path.join(d, f"p2ci7_{cls}.tsv")
+            if os.path.exists(pth):
+                t = load_tsv(pth)
+                t["p2class"] = cls
+                parts.append(t)
+        comp_i7 = pd.concat(parts, ignore_index=True)
+        rx7 = os.path.join(d, "p2rx_7028_size1_m32_i7.tsv")
+        if os.path.exists(rx7):
+            t = load_tsv(rx7)
+            t["p2class"] = "size1_m32"
+            comp_i7 = pd.concat(
+                [comp_i7[~comp_i7["image"].str.contains("7028")], t],
+                ignore_index=True)
+        Tci7 = veto_frame(base, comp_i7)
+        summarize("composed-v2+i7 vs base", Tci7, section="composed")
+
     fam = pd.DataFrame({
         "family": [fam_of(i) for i in Tc.index],
         "composed": Tc["adj"], "ship": Ts["adj"].reindex(Tc.index),
@@ -257,6 +282,27 @@ def main():
             Tvcs2 = veto_frame(vship, vcomp_v2)
             summarize("VAL composed-v2 vs base", Tvc2, section="val")
             summarize("VAL composed-v2 vs global-ship", Tvcs2, section="val")
+        # composed-v2 + i7 on val
+        if os.path.exists(os.path.join(d, "p2vi7_min_m32.tsv")):
+            parts = []
+            for cls in CLASSES:
+                pth = os.path.join(d, f"p2vi7_{cls}.tsv")
+                if os.path.exists(pth):
+                    t = load_tsv(pth)
+                    t["p2class"] = cls
+                    parts.append(t)
+            vci7 = pd.concat(parts, ignore_index=True)
+            vx7 = os.path.join(d, "p2rx_valx2_size1_m32_i7.tsv")
+            if os.path.exists(vx7):
+                t = load_tsv(vx7)
+                t["p2class"] = "size1_m32"
+                vci7 = pd.concat(
+                    [vci7[~vci7["image"].str.contains("5343|8103")], t],
+                    ignore_index=True)
+            summarize("VAL composed-v2+i7 vs base", veto_frame(vbase, vci7),
+                      section="val")
+            summarize("VAL composed-v2+i7 vs ship", veto_frame(vship, vci7),
+                      section="val")
         print("\n  VAL per-image composed-vs-ship (adj; negative = head beats global):")
         for img, r in Tvcs.sort_values("adj").iterrows():
             cls = vcomp.loc[vcomp["image"] == img, "p2class"].iloc[0]
@@ -267,13 +313,16 @@ def main():
     print("\n=== PARITY: vs cached aom-allintra refs (photos = t26 minus fam-7000) ===")
     store = load_store(sweep_source="speedladder-2026-07-04")
     refs = {}
-    for ref in ["aom-cpu4def-ai", "aom-cpu4iq-ai", "aom-cpu6iq-ai", "aom-cpu6def-ai"]:
+    for ref in ["aom-cpu4def-ai", "aom-cpu4iq-ai", "aom-cpu6iq-ai",
+                "aom-cpu6def-ai", "aom-cpu2def-ai", "aom-cpu2iq-ai"]:
         r = store[store["arm_id"] == f"speedladder/{ref}"]
         refs[ref] = r
     # map store image_id -> chain image basename (same basenames)
     parity_arms = [("composed", comp), ("global-ship", ship)]
     if comp_v2 is not None:
         parity_arms.insert(1, ("composed-v2", comp_v2))
+    if comp_i7 is not None:
+        parity_arms.insert(2, ("composed-v2+i7", comp_i7))
     for arm_name, arm_df in parity_arms:
         print(f"  --- {arm_name} ---")
         for ref, rdf in refs.items():
@@ -369,6 +418,33 @@ def main():
             emit("timing", "global_size1ship", "solo_ratio_vs_plain", len(common),
                  s1ship[common].sum() / plain[common].sum(),
                  (s1ship[common] / plain[common]).median(), "-")
+        # v2 composed timing (7028 -> its measured (size1,m32) solo cells)
+        x7028 = solo_sum("p2t_7028_size1_m32.tsv")
+        if x7028 is not None:
+            c2 = comp_s.copy()
+            for img, ms in x7028.items():
+                c2[img] = ms
+            r2 = c2[common].sum() / plain[common].sum()
+            print(f"  composed-v2 total       {c2[common].sum() / 1000:8.1f} s  "
+                  f"ratio {r2:.3f}x vs plain s6")
+            emit("timing", "composed_v2", "solo_ratio_vs_plain", len(common),
+                 r2, (c2[common] / plain[common]).median(), "-")
+        # composed + global i7 timing (v1 classes; measured p2ti7 cells)
+        ci7 = {}
+        for cls in CLASSES:
+            si = solo_sum(f"p2ti7_c_{cls}.tsv")
+            if si is not None:
+                ci7.update(si.to_dict())
+        ci7 = pd.Series(ci7)
+        com7 = plain.index.intersection(ci7.index)
+        if len(com7):
+            r7 = ci7[com7].sum() / plain[com7].sum()
+            print(f"  composed+i7 total       {ci7[com7].sum() / 1000:8.1f} s  "
+                  f"ratio {r7:.3f}x vs plain s6  (i7 marginal "
+                  f"{ci7[com7].sum() / comp_s[com7].sum():.3f}x on the composed mix)")
+            emit("timing", "composed_i7", "solo_ratio_vs_plain", len(com7),
+                 r7, ci7[com7].sum() / comp_s[com7].sum(),
+                 "-", "mean col = i7 marginal on composed")
 
     if args.tsv:
         with open(args.tsv, "w") as f:

@@ -111,6 +111,35 @@ encode approaches s2 decisions without s2 search. Threshold rules first (the pal
 proved the pattern: one feature, LOOCV-validated, shipped), MLP heads only where thresholds
 demonstrably underfit. Per-SB hints (FrameHints is live: c4047cec) follow per-image heads.
 
+**DONE 2026-07-04 (per-image heads; record `benchmarks/rd_gap_p2heads_2026-07-04.tsv`,
+full report `docs/HYPERPARAM_P2_HEADS_2026-07-04.md`).** Two heads shipped release-gated
+in `src/fast_heads.rs` (pure descriptor rules, auto_tune-wired, palette-gate pattern;
+MLP nowhere warranted — thresholds never demonstrably underfit at n=24):
+**tx budget** {Largest|Size1|Min}: withhold size-RDO on razor-edge line tilings
+(`pf>0.8505 && dcty>100` — the conjunctive dcty bound is a VAL attribution revision:
+the pf-only fit false-fired on pf-high CHARTS, factoring cells put +18.1 of 8103's
++12.6 composed loss on the withhold alone), deepen to size1+types+reduced on smooth
+low-α content (`pf≤0.8505 && dcty<8.352`; the type-RDO-on-sparse-AC win), s6-s8;
+**partition budget** {Ship|Max32}: 32-blocks on flat/synthetic (`gfs<0.4105`), s6 —
+the only LOOCV-stable partition rule (liveness pays 24/24, withhold has no stable win;
+s8/s4 per-image ≈ null over the right global rung). **Head 3 (intra) is NOT a per-image
+head**: top-7 keyframe intra (ComplexKeyframes+filter_intra=off) = small broad GLOBAL
+win (s6 −0.56/s8 −1.17 med, composition-stable, one +1.4 regressor) → ravif SpeedTweaks
+arm candidate; no top-5 knob exists (`num_modes_rdo` hardcoded 7|3) — the one missing
+encoder knob P2 found. **Composed s6 mode (12q, PALCONF-clean)**: train26 −4.38 med vs
+s6+size1 base (global-ship −2.89); deviating images −5.13 mean vs ship (10/11); VAL
+(14 held-out origins) −3.98 med vs base, deviators −2.41 mean (6/8, worst +0.32).
+**Parity: the last open fast-tier column CROSSED the band — photos vs cpu4iq-ai
++2.88/+0.91 (ship) → +0.57 ssim2 / −0.94 ba3n median, inside ±1% on both metrics
+(−0.35/−1.70 with the intra arm); below the curve vs cpu4def/cpu6iq/cpu6def, and
+composed-v2 (measured wall 3.45× plain-s6 ≈ 3.54 s/MP) STRICTLY DOMINATES
+cpu2def-ai (better both metrics at 0.75× its time).** The intra global arm landed
+ravif-side release-gated (S6_INTRA7_LIVE @4b98f0f8) but measured 1.49× marginal on
+the composed mix for −0.39/−1.34 med (train/val) — a flip-decision ingredient, not
+a free default. Follow-ups in the report §data-gaps (s8 m32 rung unmeasured; pf
+0.85-0.99 band n=5; the remaining cpu2iq-ai +4.4 column is the s4-tier bracket at
+1.27× the composed+i7 wall).
+
 ## Phase P3 — the remaining structural tools
 - **intraBC chunk B** (hash search): −33% evidence on repeating content (zenrav1e#30);
   chunk A landed. Matters for screens at every tier.

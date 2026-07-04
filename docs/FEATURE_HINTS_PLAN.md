@@ -223,6 +223,20 @@ deployable** (LOOCV ≈ global-1.0 at n=24; fam-9226's residual is palette/QM-sh
 not boost-shaped; needs val + dense-strength labels). MLP heads: not warranted on
 any of the three yet — in every case the LABELS underfit before the rule does.
 
+**STATUS 2026-07-04 — heads 2+3 SHIPPED (release-gated) + the intra axis
+measured: FAST_TIER_PARITY P2 complete.** `src/fast_heads.rs` (auto_tune-wired):
+per-image TX budget {Largest|Size1|Min} (razor-edge withhold `pf>0.8505 &&
+dcty>100`, VAL-attribution-revised conjunctive form; smooth-content deepen
+`pf≤0.8505 && dcty<8.352`) at s6-8 + partition budget {Ship|Max32}
+(`gradient_fraction_smooth<0.4105`) at s6. Composed s6 mode: train26 −4.38
+med vs s6+size1 base (deviators −5.13 mean vs global-ship), VAL −3.98
+(deviators −2.41, worst +0.32); photos-vs-cpu4iq-ai +0.57/−0.94 med — inside
+the ±1% parity band. The intra-mode-budget axis measured NOT-a-head (broad
+global −0.56/−1.17 med win, no per-image structure; no top-5 knob exists —
+`num_modes_rdo` hardcoded 7|3). MLP heads: still nowhere warranted. Full
+record `docs/HYPERPARAM_P2_HEADS_2026-07-04.md` +
+`benchmarks/rd_gap_p2heads_2026-07-04.tsv`.
+
 **STATUS 2026-07-03 (later) — the palette gate CONFIRMED on val + LANDED as the
 first deterministic descriptor head** (the "Yuv400-for-grayscale"-shaped rule
 family in table A, now real): mechanism A/B across palette {off,always,auto} ×

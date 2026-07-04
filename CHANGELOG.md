@@ -11,6 +11,34 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 ## [Unreleased]
 
 ### Added
+- P2HEADS (FAST_TIER_PARITY_PLAN Phase P2, "prediction replaces search"): the
+  per-image hyperparameter fast mode. Two new deterministic descriptor heads in
+  `src/fast_heads.rs` (release-gated recommend-only, the palette-gate pattern;
+  wired into `auto_tune`): a TX budget head ({Largest|Size1|Min} via
+  `patch_fraction>0.8505 && dct_compressibility_y>100` withhold /
+  `pf<=0.8505 && dcty<8.352` deepen, s6-s8) and a partition budget head
+  ({Ship|Max32} via `gradient_fraction_smooth<0.4105`, s6). Fit from the label
+  store's fastwins/p1part per-image surfaces (veto-adjusted, LOOCV), the
+  conjunctive bounds from a val attribution factoring that convicted the
+  pf-only withhold (8103: (none,ship) +18.1 vs (size1,m32) −1.9). Composed s6
+  fast mode measured at 12q (box, zenrav1e 39f0ecdd): train26 −4.38 med /
+  −7.07 mean vs the s6+size1 base (23/24) vs global-ship −2.89/−4.80; on the
+  11 deviating images −5.13 mean vs ship (10/11); VAL (14 held-out origins)
+  −3.98/−5.19 vs base, deviators −2.41 mean (6/8, worst real loss +0.32).
+  Parity movement (photos vs cached aom-allintra refs): vs cpu4iq-ai
+  +2.88/+0.91 (ship) → **+0.57 ssim2 / −0.94 ba3n median — inside the ±1%
+  band** (−0.35/−1.70 with the ravif intra arm); below the curve vs
+  cpu4def/cpu6iq/cpu6def; composed-v2 (measured wall 3.45× plain-s6)
+  strictly dominates cpu2def-ai. Head-3 (intra budget)
+  measured NOT-a-head: top-7 keyframe intra (ComplexKeyframes +
+  `filter_intra=Some(false)`) is a small broad global win (s6 −0.56 / s8
+  −1.17 med, composition-stable) with no per-image structure; no top-5 knob
+  exists in zenrav1e (`num_modes_rdo` hardcoded 7|3) — recorded as a ravif
+  SpeedTweaks arm candidate. All 0 CELLFAIL / 0 CONFFAIL (PALCONF every
+  cell). Fits `benchmarks/hyperparam_{tx,partition}_budget_2026-07-04.tsv`;
+  record `benchmarks/rd_gap_p2heads_2026-07-04.tsv` (+ pointer, Tower
+  mirror); harness `scripts/rd_gap/chain_p2heads.sh`; label store
+  `p2heads-2026-07-04` sources.
 - FASTWINS P0 (FAST_TIER_PARITY_PLAN): both speed-ladder cheap wins measured and
   landed upstream — (1) the cavif default-tiling byte hazard is FIXED live on
   ravif main 55f8c935 (tiles capped to ≥1 MP each; old 48-core default cost

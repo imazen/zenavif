@@ -1,0 +1,110 @@
+# P2HEADS (FAST_TIER_PARITY_PLAN Phase P2) -- 2026-07-04 -- per-image hyperparameter heads: tx budget + partition budget (frozen threshold rules) + intra-mode-budget axis + composed fast mode
+# Box zenavif-sweep-1 (ccx63 48c, FROM_SNAPSHOT=auto); harness scripts/rd_gap/chain_p2heads.sh; analyzer scripts/hyperparam/analyze_p2_composed.py; fits scripts/hyperparam/fit_{tx,partition}_budget.py
+# Code: zenrav1e master 39f0ecdd (INCLUDES one-sided margin fix 767c8ff5) via ravif--p2heads devpatch (p1part passthroughs + ZENRAVIF_REDUCED_TX + ZENRAVIF_INTRA_MODES; box cavif sha256/16 bd0b33d2ec5ef156). INCIDENT: a first pass ran a stale workspace (e944ea71, symmetric margins) -- caught by 6/144 byte-continuity vs p1part ship cells, wiped, re-run; base cells byte-match p1part 144/144 on both passes
+# Rules v1 (produced the box class samples): tx = {pf>0.8505 -> LARGEST | dcty<8.352 -> MIN | else SIZE1} (s6-s8); partition = {gradient_fraction_smooth<0.4105 -> M32(r16m32_bkvg2) | else SHIP(r16no4_bkvg2)} (s6). Rules v2 (DEPLOYED, the VAL attribution revision -- see src/fast_heads.rs): W conjunctive pf>0.8505 AND dcty>100 (razor-edge only; the pf-only withhold false-fired on val charts, factoring cells p2vx_* put 8103's +12.6 loss entirely on the withhold); D capped pf<=0.8505. v2 remaps 3 images (7028,5343,8103) onto measured cells (p2rx_*/p2vx_*); composed-v2 rows below use them
+# All arms train26/val14 tune-ss2 + palette auto, --threads 1, BUTTER on, PALCONF=1 (0 CELLFAIL/CONFFAIL); composed = per-(tx,part)-class 12q sub-runs merged; intra7 = ComplexKeyframes + filter_intra=Some(false); BD per-image monotone-frontier hull (bd_arm.py), vetoadj = max(bd,0) when arm ba3n>+1.0 or bamax>+1.5
+# parity rows: per-image BD vs the CACHED speedladder aom-allintra refs (photos = t26 minus fam-7000, n=20); timing rows: solo JOBS=1 RD_CACHE=off q{40,65,85} wall ratios vs plain s6-tune
+section	name	metric	n	median	mean	better	extra
+intra	s6 intra7 vs size1-base	ssim2_vetoadj	24	-0.5621	-0.7231	17/24	vetoed=3
+intra	s6 intra7 vs size1-base	butteraugli_3n	24	-0.7505	-0.8544	19/24	
+intra	s6 intra7 vs size1-base	butteraugli_max	24	-0.9251	-1.3269	16/24	
+intra	s6 intra7 ON SHIP vs ship	ssim2_vetoadj	24	-0.8288	-0.7743	16/24	vetoed=1
+intra	s6 intra7 ON SHIP vs ship	butteraugli_3n	24	-1.1560	-0.8693	18/24	
+intra	s6 intra7 ON SHIP vs ship	butteraugli_max	24	-0.5118	-1.5184	14/24	
+intra	s8 intra7 vs size1-base	ssim2_vetoadj	24	-1.1699	-1.0255	16/24	vetoed=6
+intra	s8 intra7 vs size1-base	butteraugli_3n	24	-1.0586	-1.1930	21/24	
+intra	s8 intra7 vs size1-base	butteraugli_max	24	-0.4409	-1.1112	15/24	
+composed	composed vs s6+size1 base	ssim2_vetoadj	24	-4.3784	-7.1056	23/24	vetoed=1
+composed	composed vs s6+size1 base	butteraugli_3n	24	-3.4008	-5.9706	24/24	
+composed	composed vs s6+size1 base	butteraugli_max	23	-2.9108	-4.4868	18/23	
+composed	global-ship vs s6+size1	ssim2_vetoadj	24	-2.8930	-4.7992	23/24	vetoed=1
+composed	global-ship vs s6+size1	butteraugli_3n	24	-2.5104	-3.7682	24/24	
+composed	global-ship vs s6+size1	butteraugli_max	24	-2.4494	-3.3363	19/24	
+composed	composed vs global-ship	ssim2_vetoadj	24	+0.0000	-2.3858	10/24	vetoed=1
+composed	composed vs global-ship	butteraugli_3n	24	+0.0000	-2.3283	10/24	
+composed	composed vs global-ship	butteraugli_max	23	+0.0000	-1.8284	8/23	
+composed	composed-v2 vs s6+size1 base	ssim2_vetoadj	24	-4.3784	-7.0699	23/24	vetoed=1
+composed	composed-v2 vs s6+size1 base	butteraugli_3n	24	-3.4008	-5.9146	24/24	
+composed	composed-v2 vs s6+size1 base	butteraugli_max	23	-2.9108	-4.4088	18/23	
+composed	composed-v2 vs global-ship	ssim2_vetoadj	24	+0.0000	-2.3491	10/24	vetoed=1
+composed	composed-v2 vs global-ship	butteraugli_3n	24	+0.0000	-2.2699	10/24	
+composed	composed-v2 vs global-ship	butteraugli_max	23	+0.0000	-1.7463	8/23	
+composed	composed-v2+i7 vs base	ssim2_vetoadj	24	-4.7724	-7.3834	22/24	vetoed=2
+composed	composed-v2+i7 vs base	butteraugli_3n	24	-4.1166	-6.5943	24/24	
+composed	composed-v2+i7 vs base	butteraugli_max	23	-3.5455	-4.6616	20/23	
+val	VAL composed vs base	ssim2_vetoadj	13	-3.5696	-4.1600	11/13	vetoed=2
+val	VAL composed vs base	butteraugli_3n	13	-3.5604	-3.3055	12/13	
+val	VAL composed vs base	butteraugli_max	13	-2.1186	-0.5380	10/13	
+val	VAL global-ship vs base	ssim2_vetoadj	14	-3.4098	-4.6067	13/14	vetoed=1
+val	VAL global-ship vs base	butteraugli_3n	14	-2.5994	-4.2242	14/14	
+val	VAL global-ship vs base	butteraugli_max	14	-1.0178	-3.2370	11/14	
+val	VAL composed vs global-ship	ssim2_vetoadj	13	+0.0000	-0.3545	4/13	vetoed=3
+val	VAL composed vs global-ship	butteraugli_3n	13	+0.0000	+0.0094	6/13	
+val	VAL composed vs global-ship	butteraugli_max	13	+0.0000	+1.8510	4/13	
+val	VAL composed-v2 vs base	ssim2_vetoadj	13	-3.9815	-5.1874	12/13	vetoed=1
+val	VAL composed-v2 vs base	butteraugli_3n	13	-3.5604	-4.4837	13/13	
+val	VAL composed-v2 vs base	butteraugli_max	13	-2.3115	-2.8569	11/13	
+val	VAL composed-v2 vs global-ship	ssim2_vetoadj	13	+0.0000	-1.4801	6/13	vetoed=1
+val	VAL composed-v2 vs global-ship	butteraugli_3n	13	-0.4093	-1.2247	8/13	
+val	VAL composed-v2 vs global-ship	butteraugli_max	13	+0.0000	-0.5674	5/13	
+val	VAL composed-v2+i7 vs base	ssim2_vetoadj	13	-5.3178	-6.5954	13/13	vetoed=0
+val	VAL composed-v2+i7 vs base	butteraugli_3n	13	-4.5934	-5.1524	13/13	
+val	VAL composed-v2+i7 vs base	butteraugli_max	13	-2.2037	-3.9707	13/13	
+val	VAL composed-v2+i7 vs ship	ssim2_vetoadj	13	-1.4924	-2.7486	11/13	vetoed=2
+val	VAL composed-v2+i7 vs ship	butteraugli_3n	13	-1.5205	-1.9209	12/13	
+val	VAL composed-v2+i7 vs ship	butteraugli_max	13	-1.4016	-1.7078	9/13	
+parity	composed_vs_aom-cpu4def-ai	ssim2	20	-5.9921	+4.3263	12/20	
+parity	composed_vs_aom-cpu4def-ai	butteraugli_3n	20	-6.2895	-9.9016	15/20	
+parity	composed_vs_aom-cpu4iq-ai	ssim2	20	+0.5717	+1.1731	9/20	
+parity	composed_vs_aom-cpu4iq-ai	butteraugli_3n	20	-0.9412	-5.1164	11/20	
+parity	composed_vs_aom-cpu6iq-ai	ssim2	20	-7.2129	-6.1718	18/20	
+parity	composed_vs_aom-cpu6iq-ai	butteraugli_3n	20	-7.5615	-12.3240	17/20	
+parity	composed_vs_aom-cpu6def-ai	ssim2	20	-13.9704	-2.1355	16/20	
+parity	composed_vs_aom-cpu6def-ai	butteraugli_3n	20	-14.3840	-17.8258	19/20	
+parity	composed_vs_aom-cpu2def-ai	ssim2	20	-3.2289	+10.7918	11/20	
+parity	composed_vs_aom-cpu2def-ai	butteraugli_3n	20	-1.8182	-5.9598	13/20	
+parity	composed_vs_aom-cpu2iq-ai	ssim2	20	+5.7180	+5.3659	4/20	
+parity	composed_vs_aom-cpu2iq-ai	butteraugli_3n	20	+4.6585	-0.0012	8/20	
+parity	composed-v2_vs_aom-cpu4def-ai	ssim2	20	-5.9921	+4.3263	12/20	
+parity	composed-v2_vs_aom-cpu4def-ai	butteraugli_3n	20	-6.2895	-9.9016	15/20	
+parity	composed-v2_vs_aom-cpu4iq-ai	ssim2	20	+0.5717	+1.1731	9/20	
+parity	composed-v2_vs_aom-cpu4iq-ai	butteraugli_3n	20	-0.9412	-5.1164	11/20	
+parity	composed-v2_vs_aom-cpu6iq-ai	ssim2	20	-7.2129	-6.1718	18/20	
+parity	composed-v2_vs_aom-cpu6iq-ai	butteraugli_3n	20	-7.5615	-12.3240	17/20	
+parity	composed-v2_vs_aom-cpu6def-ai	ssim2	20	-13.9704	-2.1355	16/20	
+parity	composed-v2_vs_aom-cpu6def-ai	butteraugli_3n	20	-14.3840	-17.8258	19/20	
+parity	composed-v2_vs_aom-cpu2def-ai	ssim2	20	-3.2289	+10.7918	11/20	
+parity	composed-v2_vs_aom-cpu2def-ai	butteraugli_3n	20	-1.8182	-5.9598	13/20	
+parity	composed-v2_vs_aom-cpu2iq-ai	ssim2	20	+5.7180	+5.3659	4/20	
+parity	composed-v2_vs_aom-cpu2iq-ai	butteraugli_3n	20	+4.6585	-0.0012	8/20	
+parity	composed-v2+i7_vs_aom-cpu4def-ai	ssim2	20	-6.9211	+3.2064	13/20	
+parity	composed-v2+i7_vs_aom-cpu4def-ai	butteraugli_3n	20	-6.4767	-9.8893	16/20	
+parity	composed-v2+i7_vs_aom-cpu4iq-ai	ssim2	20	-0.3475	+0.1887	10/20	
+parity	composed-v2+i7_vs_aom-cpu4iq-ai	butteraugli_3n	20	-1.7025	-5.1270	12/20	
+parity	composed-v2+i7_vs_aom-cpu6iq-ai	ssim2	20	-8.4243	-7.1183	18/20	
+parity	composed-v2+i7_vs_aom-cpu6iq-ai	butteraugli_3n	20	-8.9247	-12.4344	18/20	
+parity	composed-v2+i7_vs_aom-cpu6def-ai	ssim2	20	-14.9182	-3.0627	16/20	
+parity	composed-v2+i7_vs_aom-cpu6def-ai	butteraugli_3n	20	-14.6115	-18.2001	19/20	
+parity	composed-v2+i7_vs_aom-cpu2def-ai	ssim2	20	-3.4318	+9.6321	12/20	
+parity	composed-v2+i7_vs_aom-cpu2def-ai	butteraugli_3n	20	-3.0937	-5.9357	14/20	
+parity	composed-v2+i7_vs_aom-cpu2iq-ai	ssim2	20	+4.4010	+4.3736	6/20	
+parity	composed-v2+i7_vs_aom-cpu2iq-ai	butteraugli_3n	20	+4.0406	-0.0187	8/20	
+parity	global-ship_vs_aom-cpu4def-ai	ssim2	20	-4.5586	+5.5541	11/20	
+parity	global-ship_vs_aom-cpu4def-ai	butteraugli_3n	20	-6.2895	-8.7706	14/20	
+parity	global-ship_vs_aom-cpu4iq-ai	ssim2	20	+2.8804	+2.4978	7/20	
+parity	global-ship_vs_aom-cpu4iq-ai	butteraugli_3n	20	+0.9138	-3.9113	9/20	
+parity	global-ship_vs_aom-cpu6iq-ai	ssim2	20	-5.8883	-4.9563	18/20	
+parity	global-ship_vs_aom-cpu6iq-ai	butteraugli_3n	20	-6.7344	-11.3251	17/20	
+parity	global-ship_vs_aom-cpu6def-ai	ssim2	20	-12.4527	-1.0768	16/20	
+parity	global-ship_vs_aom-cpu6def-ai	butteraugli_3n	20	-13.5570	-17.0601	19/20	
+parity	global-ship_vs_aom-cpu2def-ai	ssim2	20	-0.1630	+12.0399	10/20	
+parity	global-ship_vs_aom-cpu2def-ai	butteraugli_3n	20	-1.8182	-4.7579	12/20	
+parity	global-ship_vs_aom-cpu2iq-ai	ssim2	20	+8.4721	+6.7481	3/20	
+parity	global-ship_vs_aom-cpu2iq-ai	butteraugli_3n	20	+5.6535	+1.2111	6/20	
+timing	p2t_size1	solo_ratio_vs_plain	4	+1.3433	+1.3433	-	
+timing	p2t_intra7	solo_ratio_vs_plain	4	+1.8535	+1.8535	-	
+timing	p2t_intra7ship	solo_ratio_vs_plain	4	+3.9822	+3.9822	-	
+timing	composed	solo_ratio_vs_plain	24	+3.4352	+3.4302	-	
+timing	global_size1ship	solo_ratio_vs_plain	24	+2.9984	+3.0652	-	
+timing	composed_v2	solo_ratio_vs_plain	24	+3.4458	+3.4302	-	
+timing	composed_i7	solo_ratio_vs_plain	24	+5.1092	+1.4873	-	mean col = i7 marginal on composed

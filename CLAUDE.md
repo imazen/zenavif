@@ -397,6 +397,32 @@ gates measured dead in both semantics; skip-gated breakout a null at every
 τ. **At the zenrav1e dep bump:** flip the const + uncomment the
 topdown_prune apply block in ravif `speed_settings()`.
 
+### P2 per-image budget heads (fast_heads) — LANDED 2026-07-04, release-gated
+`src/fast_heads.rs` (wired into `auto_tune`, recommend-only like the palette
+gate): TX budget {Largest|Size1|Min} — withhold size-RDO on razor-edge
+line tilings (`patch_fraction>0.8505 && dct_compressibility_y>100`), deepen
+to size1+types+reduced on smooth low-α content (`pf<=0.8505 && dcty<8.352`),
+s6-s8 — and partition budget {Ship|Max32} — 32-px blocks on flat/synthetic
+content (`gradient_fraction_smooth<0.4105`), s6. Composed s6 mode measured
+12q (record `benchmarks/rd_gap_p2heads_2026-07-04.tsv`): train26 −4.38 med
+vs s6+size1 base vs global-ship −2.89 (deviators −5.13 mean, 10/11); VAL
+14-origin transfer −3.98 med (deviators −2.41 mean, 6/8, worst +0.32);
+photos-vs-cpu4iq-ai median +0.57 ssim2 / −0.94 ba3n (inside the ±1% parity
+band; ship was +2.88/+0.91). The W-gate's conjunctive dcty bound is a VAL
+attribution revision (pf-only withhold convicted by factoring cells: 8103
+(none,ship) +18.1 vs (size1,m32) −1.9). Head-3 verdict: intra top-7
+(ComplexKeyframes + filter_intra=Some(false)) is a GLOBAL arm candidate
+(s6 −0.56/s8 −1.17 med, no per-image structure; no top-5 knob exists —
+`num_modes_rdo` hardcoded 7|3 at rdo.rs:1623). **At the zenrav1e dep bump:**
+(1) add zenravif expert passthroughs for `rdo_tx_type_override` /
+`reduced_tx_set` / `topdown_prune` / `non_square_partition_max_threshold`
+(additive, sb_q_scale shape); (2) forward `EncoderConfig::fast_tier_budgets`
+in `build_ravif_encoder` (Largest → size override off; Min → +type override
++ reduced set; Max32 → part_max 32 + 4-ways ungated per r16m32_bkvg2);
+(3) flip ravif's `S6_INTRA7_LIVE` + uncomment its apply block (landed
+release-gated ravif@4b98f0f8: `ComplexKeyframes` + `filter_intra=Some(false)`
+at s6-8 — measured −0.56/−1.17 med + composed+i7 val 13/13).
+
 ### zenrav1e QM encodes diverged from conforming decoders — FIXED upstream, release-gated
 Two composing bugs (zenrav1e#29, both fixed on master 2026-07-02) made
 `enable_qm=true` encodes decode differently than the encoder's own
