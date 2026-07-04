@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+**Next release from main is 0.7.0** — the breaking error-API migrations below
+(`feat(error)!` `At<Error>` returns + the CategorizedError taxonomy) are already
+on main; the manifest is pre-bumped so a publish from head cannot ship them as
+a 0.6.x patch. **0.6.3 (the size=0-box fix, imazen/zenavif#16) must be published
+from commit `c36b822`**, the pre-break release-prep point (CI green there).
+
 ### Changed (BREAKING)
 - **Error results now carry a `whereat` source location.** The public
   `Result<T, E = Error>` alias is now `Result<T, E = whereat::At<Error>>`, so
