@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+**Next release is 0.2.0** — the breaking changes below are already on main
+(the `At<SerializeError>` write-path migration landed), so the manifest
+version is pre-bumped to prevent an accidental semver-violating 0.1.5.
+
 ### QUEUED BREAKING CHANGES
 <!-- Batch these into the next minor (0.x) release. -->
 - The `io::Write` muxing entry points (`serialize`, `Aviffy::write`,
