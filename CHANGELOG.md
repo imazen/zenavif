@@ -21,6 +21,31 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   TEMPORARY non-default gate: requires zenravif ≥ cavif-rs@89668f13 (CI's
   clone-siblings provides it); fold into `encode` at the next zenravif bump.
   Without the feature, Gray8 keeps the pixel-safe RGB-expansion path.
+- **HDR contract tests + conformance evidence**: 10-bit PQ/HLG encode→decode
+  roundtrips assert CICP echo, clli/mdcv (verbatim G,B,R wire order), re-encode
+  chain preservation, and measured pixel-fidelity bounds
+  (`tests/hdr_roundtrip.rs`, 5720e260); 21-cell aomdec + rav1d-safe md5
+  cross-decoder grid, all clean/agreeing, incl. a 12-bit cell
+  (`benchmarks/hdr_conformance_2026-07-03.tsv`, ebc8f525). `examples/ivf_raw`
+  now dumps 10/12-bit raw (2-byte LE, aomdec-compatible).
+- **Gain-map render evidence**: `examples/gainmap_render_probe` — ReconstructHdr
+  envelope verified on 4 SDR-base vectors × 3 headrooms; HDR-base (10-bit)
+  reconstruction is an honest documented refusal (dfc878e5).
+- `docs/HDR_GAINMAP_STATUS.md`: verified capability tables, measured roundtrip
+  gaps, release gates (66ee0be5; finalized 302be267).
+- `EncoderConfig::with_gain_map_alt_color` / `with_gain_map_alt_icc` +
+  payload-derived gain-map `av1C` (subsampling/monochrome from the AV1
+  sequence header; declared dims/depth validated against it — a mismatched
+  or unparseable payload is now an honest encode error). Real-vector
+  roundtrip contracts: `tests/gainmap_roundtrip.rs`, 4 classes (SDR-base
+  4:4:4 multichannel + PQ alt, HDR-base backward + sRGB alt, small-map,
+  ICC-base + ICC alt), asserting byte-carry, metadata normal-form equality,
+  alt-colr roundtrip, and av1C honesty. Cross-validated with libavif 1.4.1:
+  avifgainmaputil printmetadata identical 4/4 vs the original vectors
+  (needed the zenavif-serialize tmap-brand/altr/ispe/pixi + seq_profile
+  fixes and zenravif GainMapData carriers, all landed on their mains)
+  (302be267).
+
 ### Fixed
 - `MasteringDisplayConfig::primaries` doc: the slot order is the `mdcv` wire
   order **GREEN, BLUE, RED** (ST 2086 / HEVC SEI), not R,G,B as previously
