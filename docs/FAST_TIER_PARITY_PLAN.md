@@ -52,6 +52,47 @@ time, each A/B'd at its tier's time budget (the discipline that built the qualit
    early-exit pruning (their `partition_search_breakout`/none-vs-split thresholds and ML
    gates at `speed_features.c:711`-family, pinned rev) instead of candidate deletion.
    The SPLIT-trial estimate (b073182c) is exactly the cost model a breakout needs — reuse it.
+   **DONE 2026-07-04 (P1PART; record `benchmarks/rd_gap_p1part_2026-07-04.tsv`).**
+   Mechanism landed: zenrav1e `PartitionSpeedSettings::topdown_prune` (725f5f71 +
+   one-sided fix 767c8ff5; default-off, 27/27 md5 + 144/144 sentinel byte-identical
+   off) — NONE-first candidate walk (the existing per-child early exit then bounds
+   every SPLIT/rect/4-way trial against the NONE incumbent) + none_breakout
+   (skip-gated τ·λ·pels) + rect/4-way NONE-dominance margins + the 4×4-log-var
+   homogeneity gate (aom allintra `prune_rect_part_using_4x4_var_deviation` port).
+   Gate decomposition on train26 s6 (tune-ss2, vs the s6+size1 base): liveness
+   ceiling r16 = −3.47/−3.28/−3.52 med (ssim2/ba3n/bamax, 24/24) at 2.91× solo =
+   **90% of the whole remaining (s6+size1)→s4 step**; +max32 −4.11 (107%) at 2.93×;
+   32-rects DEAD (+0.16 over max32 for +1.0×). **Margins are a measured dead end in
+   BOTH semantics** (symmetric kept 26% — killed exactly the SPLIT-dominant
+   razor-edge content; one-sided 46-48%, and 0.10-vs-0.25 margins not differing
+   shows the lost rect wins sit where NONE dominates the split estimate — the
+   contested-band premise is false on our cost model). **Skip-gated breakout is a
+   null at every τ** (≡ vargate's shadow). **The homogeneity vargate is the gate
+   that pays**: vg2.0 keeps 94% (−3.28) at 2.45× solo — and it is a shape prior,
+   not just a cost gate (no4+vg2 beats no4-alone on RD: skipped rect leaves on
+   smooth blocks redirect into deeper SPLIT recursion). Shipped (release-gated
+   ravif `S6_PART_PRUNE_LIVE=false` @ 0191489b, byte-identical off 18/18):
+   rect threshold 8×8→16×16 at s4-s8 + the gate triple {none_breakout 1.0,
+   four_way_margin 0.0 (rects always live, 4-ways only on SPLIT-dominant
+   blocks), homogeneity_gate 2.0} — cheaper than ungated liveness at every
+   tier (solo 2.16/2.08/1.75× vs 2.33/2.23/1.91×, s6/s8/s4). Full-grid 12q
+   confirms: s6 −2.89/−2.51/−2.45 (24/24 both primaries), s8
+   −3.00/−2.49/−2.86 (24/24), s4 −1.94/−2.32/−2.74 (22/23); no bamax veto.
+   **Ladder-column movement (photos, vs the cached aom-allintra refs): s6 vs
+   cpu4def-ai +1.4→−4.6/−6.3 CROSSED both metrics, vs cpu4iq-ai +7.1→+2.9
+   ssim2 / +0.9 ba3n (near-parity at an arm ~0.77× our wall); s8 vs
+   cpu6iq-ai +0.3→−3.6/−5.1 CROSSED; s4 vs cpu2def-ai +2.8→−0.9/−5.6
+   CROSSED, vs cpu4iq-ai +1.3→−0.5/−1.1 CROSSED. The s6 column is
+   converging: two of its three reference pairings now sit below the curve,
+   and the third (cpu4iq) gap fell from +11.4 (plain s6-tune) → +7.1
+   (size1) → +2.9 (composed).** s6 wedge recovery of the remaining step:
+   interiors 60%, food 68%, 1600 50%, nps 63%, scans 183%, screens 175%,
+   ALL 77%. Honest budget note: the ~1.3-1.7× per-lever aspiration is NOT
+   met — the cheapest measured liveness point is 1.75-2.2×; rects-only
+   (four_way_margin −1.0) at ~1.8×/−2.40 is the documented fallback. Beyond-budget arms (vg2 at
+   2.45×, m32+vg2 −3.89 at 2.93× = the pareto tip recovering 104% of the remaining
+   step) recorded as P2 per-image-hint targets: the partition budget is now a
+   measured per-image dial, exactly what FEATURE_HINTS §E needs.
 2. **Tx search**: depth-limited size RDO + reduced (not DCT-only) type sets per tier (P0's
    decomposition seeds this); aom's tx-type pruning-by-model is the reference.
 3. **Intra mode budget**: replace the hard top-3 with SATD-margin adaptive budgets

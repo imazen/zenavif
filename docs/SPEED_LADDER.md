@@ -253,7 +253,13 @@ FEATURE_HINTS "fast mode that needs less brute force" program surface: per-image
    end (RD_GAP doc) but the web-workload tiers (libavif speed 6 ≈ cpu6-ai class) are
    +5-14% behind at matched time even with the full tune, and the ravif speed table's
    toolset amputations (not zenrav1e's search) look like the first-order cause.
-2. Cheap-win queue (from the liveness audit + wedges): rect-gate 16×16/32×32 at s4-s6,
+2. Cheap-win queue (from the liveness audit + wedges): ~~rect-gate 16×16/32×32 at
+   s4-s6~~ **DONE 2026-07-04 (P1PART, P1 lever 1)**: rect threshold 16×16 at s4-s8
+   under the zenrav1e `topdown_prune` NONE-first walk, 4-ways gated off, landed
+   release-gated on ravif main (−2.40/−1.75/−2.47 s6 medians at ~1.8× solo; the
+   full prune-pareto incl. vargate points at 88-104% recovery of the remaining
+   s6→s4 step is in `benchmarks/rd_gap_p1part_2026-07-04.tsv`; 32×32-rects
+   measured DEAD: +0.16 BD over max32-alone for +1.0× time),
    ~~content-gated tx RDO at s6~~ **DONE 2026-07-04 un-gated** (size-half depth-1
    landed release-gated at s6-s8, 51% of the s6→s4 step at 1.67×; FASTWINS P0),
    ~~reduced_tx_set at s6/s8~~ **measured null**, s10

@@ -440,43 +440,84 @@ def sources():
     # landed baseline (tx-size RDO depth-1); s4 rides the stock table. All
     # train26 tune-ss2+palette, PALCONF-clean; RD = coarse 6-q, confirm =
     # full 12-q; enc_ms contended (JOBS=24) — solo wall in timing_*.tsv.
-    p1_rev = "zenrav1e@725f5f71 via ravif 4f2caa93+p1part-devpatch"
+    # Wave 1 (_pr1/_pr2/_bk/no4 + shape arms) ran zenrav1e 725f5f71 with the
+    # ORIGINAL SYMMETRIC margin semantics; waves 2-4 ran 767c8ff5 (one-sided
+    # NONE-dominance margins). base2 is the 144/144 byte-identity sentinel
+    # across the change (knob-off arms identical on both revs).
+    p1_rev_w1 = "zenrav1e@725f5f71 (symmetric margins) via ravif 4f2caa93+p1part-devpatch"
+    p1_rev_w2 = "zenrav1e@767c8ff5 (one-sided margins) via ravif 4f2caa93+p1part-devpatch"
     p1d = SRC["p1part"]
-    p1_knobs = {
+    p1_w1 = {
         "base":       J(),
         "r16":        J(rect_thr=16),
-        "r16no4":     J(rect_thr=16, prune_4wm=0.0),
+        "r16no4":     J(rect_thr=16, prune_4wm=0.0, margin_semantics="sym"),
         "r16m32":     J(rect_thr=16, part_max=32),
         "r32m32":     J(rect_thr=32, part_max=32),
         "r16_bk":     J(rect_thr=16, prune_bk=1.0),
-        "r16_pr1":    J(rect_thr=16, prune_bk=1.0, prune_rectm=0.25, prune_4wm=0.05, prune_varg=3.0),
-        "r16_pr2":    J(rect_thr=16, prune_bk=2.0, prune_rectm=0.15, prune_4wm=0.05, prune_varg=3.0),
-        "r16m32_pr1": J(rect_thr=16, part_max=32, prune_bk=1.0, prune_rectm=0.25, prune_4wm=0.05, prune_varg=3.0),
-        "r16m32_pr2": J(rect_thr=16, part_max=32, prune_bk=2.0, prune_rectm=0.15, prune_4wm=0.05, prune_varg=3.0),
+        "r16_pr1":    J(rect_thr=16, prune_bk=1.0, prune_rectm=0.25, prune_4wm=0.05, prune_varg=3.0, margin_semantics="sym"),
+        "r16_pr2":    J(rect_thr=16, prune_bk=2.0, prune_rectm=0.15, prune_4wm=0.05, prune_varg=3.0, margin_semantics="sym"),
+        "r16m32_pr1": J(rect_thr=16, part_max=32, prune_bk=1.0, prune_rectm=0.25, prune_4wm=0.05, prune_varg=3.0, margin_semantics="sym"),
+        "r16m32_pr2": J(rect_thr=16, part_max=32, prune_bk=2.0, prune_rectm=0.15, prune_4wm=0.05, prune_varg=3.0, margin_semantics="sym"),
     }
-    P1_S6 = list(p1_knobs)
-    P1_S8 = ["base", "r16", "r16_pr1", "r16_pr2"]
-    P1_S4 = ["base", "r16", "r16_pr1"]
-    for spd, arms in ((6, P1_S6), (8, P1_S8), (4, P1_S4)):
+    p1_w2 = {
+        "base2":        J(),
+        "r16_pr3":      J(rect_thr=16, prune_bk=1.0, prune_rectm=0.25, prune_4wm=0.05, prune_varg=3.0, margin_semantics="1side"),
+        "r16_pr4":      J(rect_thr=16, prune_bk=2.0, prune_rectm=0.10, prune_4wm=0.02, prune_varg=3.0, margin_semantics="1side"),
+        "r16_vg3":      J(rect_thr=16, prune_varg=3.0),
+        "r16_vg2":      J(rect_thr=16, prune_varg=2.0),
+        "r16no4_pr3":   J(rect_thr=16, prune_4wm=0.0, prune_bk=1.0, prune_rectm=0.25, prune_varg=3.0, margin_semantics="1side"),
+        "r16m32_pr3":   J(rect_thr=16, part_max=32, prune_bk=1.0, prune_rectm=0.25, prune_4wm=0.05, prune_varg=3.0, margin_semantics="1side"),
+        "r16_bkvg2":    J(rect_thr=16, prune_bk=1.0, prune_varg=2.0),
+        "r16_bkvg3":    J(rect_thr=16, prune_bk=1.0, prune_varg=3.0),
+        "r16_bk4vg2":   J(rect_thr=16, prune_bk=4.0, prune_varg=2.0),
+        "r16no4_bkvg2": J(rect_thr=16, prune_4wm=0.0, prune_bk=1.0, prune_varg=2.0, margin_semantics="1side"),
+        "r16m32_bkvg2": J(rect_thr=16, part_max=32, prune_bk=1.0, prune_varg=2.0),
+        "r16no4_1side": J(rect_thr=16, prune_4wm=0.0, margin_semantics="1side"),
+    }
+    P1 = [
+        (6, "p1_w1", ["base", "r16", "r16no4", "r16m32", "r32m32", "r16_bk",
+                      "r16_pr1", "r16_pr2", "r16m32_pr1", "r16m32_pr2"]),
+        (8, "p1_w1", ["base", "r16", "r16_pr1", "r16_pr2"]),
+        (4, "p1_w1", ["base", "r16", "r16_pr1"]),
+        (6, "p1_w2", ["base2", "r16_pr3", "r16_pr4", "r16_vg3", "r16_vg2",
+                      "r16no4_pr3", "r16m32_pr3", "r16_bkvg2", "r16_bkvg3",
+                      "r16_bk4vg2", "r16no4_bkvg2", "r16m32_bkvg2"]),
+        (8, "p1_w2", ["r16_pr3", "r16_pr4", "r16_bkvg2", "r16no4_bkvg2"]),
+        (4, "p1_w2", ["r16_pr3", "r16_pr4", "r16_bkvg2", "r16no4_bkvg2"]),
+    ]
+    for spd, wave, arms in P1:
+        knobs = p1_w1 if wave == "p1_w1" else p1_w2
+        rev = p1_rev_w1 if wave == "p1_w1" else p1_rev_w2
         for arm in arms:
-            k = json.loads(p1_knobs[arm])
+            k = json.loads(knobs[arm])
             k.update(speed=spd, tune="ssimulacra2", palette="auto", threads=1)
             if spd in (6, 8):
                 k.update(tx_size_rdo=1, tx_size_depth=1)  # P0 landed baseline
             s.append(dict(path=f"{p1d}/p1_s{spd}_{arm}.tsv", kind="rd_tsv",
                           corpus="train26", sweep_source="p1part-2026-07-04",
                           arm_id=f"p1part/s{spd}-{arm}", knob_json=json.dumps(k, sort_keys=True),
-                          encoder_rev=p1_rev, q_kind="cavif_q", speed=spd, rows=144))
-    for spd, arms in ((6, ("base", "r16_pr1")), (8, ("base", "r16_pr1")), (4, ("base", "r16_pr1"))):
-        for arm in arms:
-            k = json.loads(p1_knobs[arm])
+                          encoder_rev=rev, q_kind="cavif_q", speed=spd, rows=144))
+    # Wave-4 supplement: plain no4 (one-sided rev) at s8/s4.
+    for spd in (8, 4):
+        k = json.loads(p1_w2["r16no4_1side"])
+        k.update(speed=spd, tune="ssimulacra2", palette="auto", threads=1)
+        if spd == 8:
+            k.update(tx_size_rdo=1, tx_size_depth=1)
+        s.append(dict(path=f"{p1d}/p1_s{spd}_r16no4.tsv", kind="rd_tsv",
+                      corpus="train26", sweep_source="p1part-2026-07-04",
+                      arm_id=f"p1part/s{spd}-r16no4", knob_json=json.dumps(k, sort_keys=True),
+                      encoder_rev=p1_rev_w2, q_kind="cavif_q", speed=spd, rows=144))
+    # Confirm grids: the landed configuration (r16no4) + base, full 12-q.
+    for spd in (6, 8, 4):
+        for arm in ("base", "r16no4"):
+            k = json.loads(p1_w1["base"] if arm == "base" else p1_w2["r16no4_1side"])
             k.update(speed=spd, tune="ssimulacra2", palette="auto", threads=1, grid="full12q")
             if spd in (6, 8):
                 k.update(tx_size_rdo=1, tx_size_depth=1)
             s.append(dict(path=f"{p1d}/confirm_s{spd}_{arm}.tsv", kind="rd_tsv",
                           corpus="train26", sweep_source="p1part-2026-07-04",
                           arm_id=f"p1part/confirm-s{spd}-{arm}", knob_json=json.dumps(k, sort_keys=True),
-                          encoder_rev=p1_rev, q_kind="cavif_q", speed=spd, rows=288))
+                          encoder_rev=p1_rev_w2, q_kind="cavif_q", speed=spd, rows=288))
     return s
 
 

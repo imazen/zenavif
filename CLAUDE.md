@@ -374,6 +374,29 @@ bounds + regression test). The UV palette itself landed zenrav1e@a3b72033
 the luma-palette base, conformance 200/200 @420 + 84/84 @444 both-decoder
 md5). Registry builds ship neither until the zenrav1e release past 0.1.4.
 
+### Fast-tier partition liveness (P1 lever 1) — SHIPPED upstream 2026-07-04, release-gated
+zenrav1e master gained `PartitionSpeedSettings::topdown_prune` (725f5f71 +
+one-sided margin fix 767c8ff5; default-off, byte-identical off 27/27 md5 +
+144/144 base2 sentinel): NONE-first top-down candidate walk + none_breakout /
+NONE-dominance margins / 4×4-log-var homogeneity gate. ravif main landed the
+s4-s8 arms behind `S6_PART_PRUNE_LIVE=false` (0191489b): rect threshold
+8×8→16×16 + the measured gate triple {none_breakout 1.0, four_way_margin
+0.0 = 4-ways only on SPLIT-dominant blocks, homogeneity_gate 2.0} — cheaper
+than ungated liveness at every tier (solo 2.16/2.08/1.75× s6/s8/s4). The
+threshold value is ALSO gated (live in bottom-up edge-SB coding on registry
+builds); 18/18 md5 byte-identical gated. Full-grid confirms (train26
+tune-ss2, ssim2/ba3n/bamax medians): s6 −2.89/−2.51/−2.45 (24/24), s8
+−3.00/−2.49/−2.86 (24/24), s4 −1.94/−2.32/−2.74 (22/23); no bamax veto.
+Ladder movement: s6 vs cpu4def-ai +1.4→−4.6/−6.3 (crossed), s8 vs
+cpu6iq-ai +0.3→−3.6/−5.1 (crossed), s4 vs cpu2def-ai +2.8→−0.9/−5.6
+(crossed); s6 wedge recovery of the remaining step: interiors 60%, food
+68%, nps 63%, ALL 77%. The mapped prune-pareto (vargate arms keeping
+88-104% of the remaining s6→s4 step at 2.4-2.9×) is recorded as P2
+per-image-hint targets in `benchmarks/rd_gap_p1part_2026-07-04.tsv`. Margin
+gates measured dead in both semantics; skip-gated breakout a null at every
+τ. **At the zenrav1e dep bump:** flip the const + uncomment the
+topdown_prune apply block in ravif `speed_settings()`.
+
 ### zenrav1e QM encodes diverged from conforming decoders — FIXED upstream, release-gated
 Two composing bugs (zenrav1e#29, both fixed on master 2026-07-02) made
 `enable_qm=true` encodes decode differently than the encoder's own
