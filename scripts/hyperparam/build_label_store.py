@@ -69,6 +69,7 @@ SRC = {
     "palmech": "/mnt/v/output/rd-gap-palette-ab-2026-07-03/results",
     "sizedecay": "/mnt/v/output/zenavif/sizedecay-2026-07-03",
     "speedladder": "/mnt/v/output/zenavif/speedladder-2026-07-04",
+    "fastwins": "/mnt/v/output/zenavif/fastwins-20260704",
 }
 # palette-mech A/B val corpus (14 VAL-LSD origins materialized with the wedge
 # conventions; join-verified 108/108) — see its _MANIFEST.json + picks_val14.json
@@ -389,6 +390,47 @@ def sources():
                       corpus="train26", sweep_source="speedladder-2026-07-04",
                       arm_id=f"ref/aom-{g}_420", knob_json=J(encoder="aomenc", cpu_used=cpu, tune=tune, fmt="420"),
                       encoder_rev="aomenc-3.14.1@632172a4", q_kind="aom_cq", speed=cpu, rows=192))
+
+    # --- FASTWINS P0 arms (2026-07-04) — the s4->s6 rdo_tx cliff decomposition
+    # (tx-size vs tx-type vs depth vs reduced-set, the P1 tx-search seed labels)
+    # + the tile-count RD curve (w1_* --threads N arms measure the OLD default
+    # tile formula min(threads, px/min_tile^2); pool size is bitstream-inert).
+    # All train26 tune-ss2+palette, PALCONF-clean; RD = coarse 6-q, confirm =
+    # full 12-q. enc_ms contended (JOBS=24) — solo wall lives in the raw dir's
+    # timing_*.tsv, not appended here.
+    fw_rev = "zenrav1e@d82c16ba via ravif 55f8c935+7baad5f9+devpatch-86de6714"
+    fwd = SRC["fastwins"]
+    fw_knobs = {
+        "base":   J(),
+        "size1":  J(tx_size_rdo=1, tx_size_depth=1),
+        "size2":  J(tx_size_rdo=1),
+        "type":   J(tx_type_rdo=1),
+        "typred": J(tx_type_rdo=1, reduced_tx=1),
+        "min":    J(tx_size_rdo=1, tx_size_depth=1, tx_type_rdo=1, reduced_tx=1),
+        "full":   J(tx_size_rdo=1, tx_type_rdo=1),
+        "red":    J(reduced_tx=1),
+    }
+    for spd, arms in ((6, list(fw_knobs)), (8, ["base", "size1", "min", "red"])):
+        for arm in arms:
+            k = json.loads(fw_knobs[arm]); k.update(speed=spd, tune="ssimulacra2", palette="auto", threads=1)
+            s.append(dict(path=f"{fwd}/w2_s{spd}_{arm}.tsv", kind="rd_tsv",
+                          corpus="train26", sweep_source="fastwins-2026-07-04",
+                          arm_id=f"fastwins/s{spd}-{arm}", knob_json=json.dumps(k, sort_keys=True),
+                          encoder_rev=fw_rev, q_kind="cavif_q", speed=spd, rows=144))
+    for spd, thrs in ((6, (2, 4, 8, 16, 48)), (4, (1, 4, 8, 48))):
+        for t in thrs:
+            s.append(dict(path=f"{fwd}/w1_s{spd}_thr{t}.tsv", kind="rd_tsv",
+                          corpus="train26", sweep_source="fastwins-2026-07-04",
+                          arm_id=f"fastwins/s{spd}-thr{t}-oldtilepolicy",
+                          knob_json=J(speed=spd, tune="ssimulacra2", palette="auto", threads=t, tile_policy="old"),
+                          encoder_rev=fw_rev, q_kind="cavif_q", speed=spd, rows=144))
+    for spd in (6, 8):
+        for arm in ("base", "size1"):
+            k = json.loads(fw_knobs[arm]); k.update(speed=spd, tune="ssimulacra2", palette="auto", threads=1, grid="full12q")
+            s.append(dict(path=f"{fwd}/confirm_s{spd}_{arm}.tsv", kind="rd_tsv",
+                          corpus="train26", sweep_source="fastwins-2026-07-04",
+                          arm_id=f"fastwins/confirm-s{spd}-{arm}", knob_json=json.dumps(k, sort_keys=True),
+                          encoder_rev=fw_rev, q_kind="cavif_q", speed=spd, rows=288))
     return s
 
 

@@ -1,0 +1,124 @@
+# FASTWINS P0 (FAST_TIER_PARITY_PLAN) -- 2026-07-04 -- win1 cavif default-tiling byte hazard + win2 s4->s6 rdo_tx cliff decomposition
+# Box zenavif-sweep-1 (ccx63 48c, snapshot lineage 404626301); harness scripts/rd_gap/chain_fastwins.sh; cell cache + PALCONF as SPEED_LADDER
+# Code: zenrav1e master d82c16ba (decoupled rdo_tx_size_override/rdo_tx_type_override/rdo_tx_size_depth, default-off, 27/27-cell md5 byte-identical off vs ac8c4ef3)
+#       ravif main 55f8c935 (TILE_RD_MIN_AREA=1MP default tile policy, LIVE) + 7baad5f9 (s6-s8 depth-1 tx-size RDO arms, S6_TX_SIZE_RDO_LIVE=false release-gated) + 4f2caa93 (changelog)
+#       DEV-ONLY measurement patch 86de671466d1 (raw dir ravif_devpatch_fastwins_2026-07-04.diff; never lands)
+# Binaries sha256/16: cavif ab6435e9265603f4 (RD arms; pre-policy => --threads N arms measure the OLD default formula), cavif ea8b75444e2617e3 (confirm+timing, policy live)
+# Arms: train26 24 img, tune-ss2+palette auto, BUTTER on, PALCONF=1 every RD/confirm cell; RD = coarse 6-q {30,50,60,75,85,95}; confirm = full 12-q; timing = solo JOBS=1 RD_CACHE=off 4img x q{40,65,85} (wall incl ~108 ms/MP PNG decode)
+# Conformance: 4,176/4,176 cells clean (aomdec decodes + md5 == rav1d-safe): TX_MODE_SELECT at s6/s8, type-RDO under TX_MODE_LARGEST, reduced-set, multi-tile up to 64 tiles. ARM CI note: zenrav1e aarch64 leg red via rav1d-safe#14 (own agent) -- x86 gates only here.
+# Raw: /mnt/v/output/zenavif/fastwins-20260704/ (SHA256SUMS, README.txt, Tower mirror; pointer file alongside this TSV)
+# BD convention: per-image monotone-frontier hull vs the named base, negative = arm needs fewer bits at matched quality (bd_arm.py); time_ratio in RD tables = contended JOBS=24 enc_ms (corroboration only); headline time = solo section
+#
+# === WIN-2: s6 tx decomposition (vs w2_s6_base, coarse grid) ===
+arm	metric	n	median_bd%	mean_bd%	better	time_ratio_rdpar
+s6_size1	ssim2	24	-2.7718	-5.0485	19/24	1.550
+s6_size1	butteraugli_3n	23	-4.3841	-6.6339	20/23	1.560
+s6_size1	butteraugli_max	23	-6.7138	-7.6726	19/23	1.560
+s6_size2	ssim2	23	-3.4415	-5.7420	20/23	1.708
+s6_size2	butteraugli_3n	22	-4.6707	-7.6435	20/22	1.715
+s6_size2	butteraugli_max	22	-7.3910	-9.8248	21/22	1.715
+s6_type	ssim2	24	-4.5017	-4.4646	17/24	2.421
+s6_type	butteraugli_3n	23	-4.2589	-4.7701	17/23	2.443
+s6_type	butteraugli_max	23	+0.2929	-1.8983	10/23	2.443
+s6_typred	ssim2	23	-4.2115	-4.2453	17/23	2.198
+s6_typred	butteraugli_3n	23	-3.6626	-4.1049	17/23	2.198
+s6_typred	butteraugli_max	23	-1.9513	-2.4644	13/23	2.198
+s6_min	ssim2	23	-7.5648	-6.8834	17/23	3.603
+s6_min	butteraugli_3n	22	-6.1850	-7.9560	18/22	3.652
+s6_min	butteraugli_max	22	-6.4014	-7.0793	17/22	3.652
+s6_full	ssim2	23	-7.9997	-6.6189	19/23	5.362
+s6_full	butteraugli_3n	23	-7.0249	-5.4254	19/23	5.377
+s6_full	butteraugli_max	23	-6.4115	-6.9109	18/23	5.377
+s6_red	ssim2	24	+0.0048	+0.0087	11/24	1.046
+s6_red	butteraugli_3n	23	+0.0661	+0.0074	9/23	1.049
+s6_red	butteraugli_max	23	+0.1431	+0.4543	10/23	1.049
+#
+# === WIN-2: s8 shortlist (vs w2_s8_base, coarse grid) ===
+s8_size1	ssim2	24	-2.9264	-4.9510	20/24	1.401
+s8_size1	butteraugli_3n	23	-4.4070	-6.6252	20/23	1.405
+s8_size1	butteraugli_max	23	-6.4717	-8.4479	19/23	1.405
+s8_min	ssim2	23	-7.2279	-7.1347	19/23	2.769
+s8_min	butteraugli_3n	22	-7.1552	-8.5362	17/22	2.776
+s8_min	butteraugli_max	22	-8.8956	-8.0908	16/22	2.776
+s8_red	ssim2	24	+0.0548	+0.0633	7/24	1.046
+s8_red	butteraugli_3n	23	+0.0104	+0.0059	11/23	1.048
+s8_red	butteraugli_max	23	-0.0059	-0.0846	12/23	1.048
+#
+# === WIN-2: FULL-GRID landing confirm (12-q, vs confirm_s*_base) ===
+confirm_s6_size1	ssim2	24	-2.7793	-4.1721	18/24	1.534
+confirm_s6_size1	butteraugli_3n	23	-3.9465	-6.5128	20/23	1.538
+confirm_s6_size1	butteraugli_max	23	-6.0096	-8.3246	19/23	1.538
+confirm_s8_size1	ssim2	24	-2.8949	-4.2130	18/24	1.399
+confirm_s8_size1	butteraugli_3n	23	-3.5163	-6.4787	20/23	1.398
+confirm_s8_size1	butteraugli_max	23	-5.4892	-8.0666	21/23	1.398
+#
+# === WIN-2: per-family ssim2 BD (s6 coarse) + s6->s4 step recovery ===
+family	n	s4step_bd	size1_bd	min_bd	size1_recovery_of_step
+1200	1	-5.23	-2.38	-5.00	46%
+1400	1	-5.03	-1.69	-4.40	34%
+1600	1	-7.91	-2.34	-7.95	30%
+2000	1	-4.19	-0.52	-4.20	12%
+5000	2	-14.97	-11.27	-12.91	75%
+6000	2	-15.93	-14.20	-13.98	89%
+6600	1	-9.43	-5.61	-7.56	59%
+7000	2	-17.40	-12.67	-11.06	73%
+8100	4	-4.54	-0.14	+0.43	3%
+9000	1	-28.63	-21.84	-22.84	76%
+9094	2	-5.87	-2.46	-4.88	42%
+9226	4	-11.52	-7.41	-9.77	64%
+ALL	22	-8.26	-4.20	-7.60	size1=51% min=92%
+# known cost: fam-7000 near-lossless-floor plots pay +2..18% bytes on ~3KB files under size-RDO (worst 7050: q30 -16 ssim2 at +1% bytes -- an RD-model misfire on razor-edge palette content; the intraBC/near-lossless program owns this class)
+#
+# === WIN-1: tile-count RD cost (vs --threads 1; tiles = min(threads, px/min_tile^2) OLD formula) ===
+arm	metric	n	median_bd%	mean_bd%	better	time_ratio_rdpar
+s6_thr2	ssim2	24	+0.9647	+2.6125	0/24	0.698
+s6_thr2	butteraugli_3n	23	+0.7117	+1.7464	0/23	0.699
+s6_thr2	butteraugli_max	23	+0.3815	+1.8838	7/23	0.699
+s6_thr4	ssim2	24	+1.9036	+5.5429	0/24	0.511
+s6_thr4	butteraugli_3n	23	+1.6175	+3.8276	0/23	0.512
+s6_thr4	butteraugli_max	23	+1.3061	+3.8964	4/23	0.512
+s6_thr8	ssim2	23	+3.4246	+7.7656	0/23	0.427
+s6_thr8	butteraugli_3n	22	+2.5570	+2.9471	0/22	0.429
+s6_thr8	butteraugli_max	23	+2.3574	+7.0838	5/23	0.427
+s6_thr16	ssim2	24	+5.3694	+16.8132	0/24	0.391
+s6_thr16	butteraugli_3n	23	+4.0785	+10.4181	0/23	0.392
+s6_thr16	butteraugli_max	23	+4.4024	+11.5059	0/23	0.392
+s6_thr48	ssim2	22	+7.4005	+8.6305	0/22	0.405
+s6_thr48	butteraugli_3n	22	+5.3471	+6.7241	0/22	0.405
+s6_thr48	butteraugli_max	22	+5.7310	+6.8782	1/22	0.405
+s4_thr4	ssim2	22	+2.0813	+2.4811	0/22	0.569
+s4_thr4	butteraugli_3n	22	+1.5957	+1.7169	0/22	0.569
+s4_thr4	butteraugli_max	22	+1.9732	+2.6403	4/22	0.569
+s4_thr8	ssim2	22	+3.4201	+3.9825	0/22	0.556
+s4_thr8	butteraugli_3n	22	+2.2184	+2.7171	0/22	0.556
+s4_thr8	butteraugli_max	22	+1.9851	+2.8920	4/22	0.556
+s4_thr48	ssim2	22	+4.4146	+5.2416	0/22	0.540
+s4_thr48	butteraugli_3n	22	+3.1443	+3.8863	0/22	0.540
+s4_thr48	butteraugli_max	21	+4.4201	+4.5600	3/21	0.535
+# NOT ONE image improves under any tiling level (0/2x better everywhere): tiling is a pure RD loss axis at 1024px
+# same-quantizer byte medians (local fine curve, 3 img x 3 q, explicit ZENRAVIF_TILES): s6 t2 +0.86% t4 +1.98% t8 +2.73% t16 +4.62% t32 +5.62% t64 +7.94%; s4 similar; worst cells Q30 smooth content up to +28-30%
+# pool-size inertness: ZENRAVIF_TILES=4 --threads 48 == --threads 4 md5-identical (bitstream depends on tiles only)
+#
+# === SOLO TIMING (median wall ms/MP incl ~108 ms/MP PNG decode; 4 img x 3 q) ===
+arm	ms_per_MP	vs_base
+s6_base_thr1	1029	1.00x
+s6_size1_thr1	1718	1.67x
+s6_min_thr1	4708	4.57x
+s8_base_thr1	725	1.00x
+s8_size1_thr1	1036	1.43x
+s8_min_thr1	2439	3.37x
+s6_oldpolicy_thr1	1021	1.00x_speedup
+s6_oldpolicy_thr2	561	1.82x_speedup
+s6_oldpolicy_thr4	345	2.96x_speedup
+s6_oldpolicy_thr8	219	4.66x_speedup
+s6_oldpolicy_thr16	181	5.63x_speedup
+s6_oldpolicy_thr48	173	5.91x_speedup
+s4_oldpolicy_thr1	5918	1.00x_speedup
+s4_oldpolicy_thr8	1176	5.03x_speedup
+s4_oldpolicy_thr48	884	6.69x_speedup
+s6_default_old(no_flag,48c)	170	-
+s6_default_new(no_flag,48c)	1005	give_back=5.91x
+s4_default_old(no_flag,48c)	871	-
+s4_default_new(no_flag,48c)	5911	give_back=6.79x
+# WIN-1 verdict: old 48-core default bought 5.9x (s6) / 6.8x (s4) wall for +7.4% median BD (0/24 better, worst cell +19.9% bytes); new TILE_RD_MIN_AREA=1MP default: <=1MP never tiles -- bytes identical 1..48 cores (gates 18/18+18/18 md5), --threads 1 byte-identical (18/18)
+# WIN-2 verdict: land size1 (tx-SIZE RDO depth1, DCT-only) at s6-s8 release-gated: full-grid s6 -2.78/-3.95/-6.01 med (18-20/24) at 1.67x solo; s8 -2.89/-3.52/-5.49 at 1.43x; recovers 51% of the s6->s4 step (min=92% at 4.6x solo recorded as P1 seed, not shipped); type-RDO alone VETOED (bamax +0.29, 2.4x); reduced_tx_set alone measured null (kills SPEED_LADDER cheap-win #2)

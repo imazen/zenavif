@@ -11,6 +11,22 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 ## [Unreleased]
 
 ### Added
+- FASTWINS P0 (FAST_TIER_PARITY_PLAN): both speed-ladder cheap wins measured and
+  landed upstream — (1) the cavif default-tiling byte hazard is FIXED live on
+  ravif main 55f8c935 (tiles capped to ≥1 MP each; old 48-core default cost
+  +7.4% median ssim2 BD at s6 with 0/24 images better at any tile count;
+  `--threads 1` and 1..48-core defaults byte-identical, 18/18+18/18 md5); (2)
+  the s4→s6 rdo_tx cliff is decomposed via new default-off zenrav1e knobs
+  (d82c16ba: `rdo_tx_size_override`/`rdo_tx_type_override`/`rdo_tx_size_depth`)
+  and the winning size-half depth-1 arm landed release-gated at s6-s8 (ravif
+  7baad5f9, `S6_TX_SIZE_RDO_LIVE`): 51% of the s6→s4 RD step at 1.67× solo
+  (full-grid s6 −2.78/−3.95/−6.01 ssim2/ba3n/bamax median), s8 −2.89 at 1.43×;
+  type-half standalone butteraugli-max-vetoed, reduced_tx_set standalone a
+  measured null. 4,176/4,176 armed cells aomdec+rav1d-safe conformance-clean.
+  Harness `scripts/rd_gap/chain_fastwins.sh`; verdicts
+  `benchmarks/rd_gap_fastwins_2026-07-04.tsv` (+ pointer, Tower mirror); label
+  store `fastwins-2026-07-04` sources; zenavif consumes both at the zenravif
+  dep bump (see CLAUDE.md "FASTWINS P0").
 - SPEED-LADDER GAP MAP: first fast-tier measurement of the RD-gap program —
   zenrav1e s{2,4,6,8,10} × {tune-ss2+palette, off} vs libaom `--allintra`
   cpu{2,4,6,8,9} × {default, `--tune=iq`}, train26 + legacy, per-cell aomdec +

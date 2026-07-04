@@ -17,14 +17,33 @@ CDEF/LRF only ≲Q50). Amputation saves the *whole* cost of a tool and loses the
 value; pruning keeps most value for a fraction of cost. Parity = replace amputation with
 pruning, then let prediction replace search where it can.
 
-## Phase P0 — cheap wins (IN FLIGHT, fastwins agent)
-- **cavif default-threading byte hazard**: default tiling costs +3.6% bytes at s6 on 48
-  cores. Fix the default policy (bytes must not degrade silently with core count);
-  measured pareto of tiles-vs-bytes-vs-time.
-- **The s4→s6 rdo_tx cliff** (single cleanest wedge: s6×interiors +103 BD): decompose
-  size-RDO vs type-RDO (the boolean couples them), find a depth-limited/reduced-set
-  operating point that recovers most of the wedge inside an s6 time budget; new default-off
-  zenrav1e knob if the boolean is too blunt.
+## Phase P0 — cheap wins (**DONE 2026-07-04**; record `benchmarks/rd_gap_fastwins_2026-07-04.tsv`)
+- **cavif default-threading byte hazard — FIXED, LIVE on ravif main (55f8c935).**
+  The +3.6% single-cell number under-sold it: full BD curve vs 1 tile at s6 is
+  +0.96/+1.90/+3.42/+5.37/+7.40% median at 2/4/8/16/64 tiles with **0/24 images
+  better at any level** (pool size bitstream-inert; tiles are zenrav1e's only
+  intra-frame parallelism; 48c wall speedup saturates at 5.9×/6.8× s6/s4). New
+  default: tiles capped to ≥1 MP each (`TILE_RD_MIN_AREA`) — ≤1 MP never tiles,
+  bytes identical 1..48 cores (18/18 md5), `--threads 1` byte-identical (18/18).
+  Give-back reported honestly: 48c 1 MP defaults 170→1005 (s6) / 871→5911 (s4)
+  ms/MP; explicit `-s`/`--threads` keep the speed available.
+- **The s4→s6 rdo_tx cliff — DECOMPOSED + LANDED (release-gated).** New zenrav1e
+  default-off knobs (d82c16ba: `rdo_tx_size_override`/`rdo_tx_type_override`/
+  `rdo_tx_size_depth`, byte-identical off 27/27 md5) split the boolean. Verdict:
+  the SIZE half depth-limited to 1 (DCT-only) is the efficient point — **51% of
+  the whole s6→s4 RD step (−8.26% median at 4.49×) for 1.67× solo**; full-grid
+  confirm s6 −2.78/−3.95/−6.01 (ssim2/ba3n/bamax, 18-20/24 better), s8
+  −2.89/−3.52/−5.49 at 1.43×. Landed on ravif main 7baad5f9 as s6-s8 arms behind
+  `S6_TX_SIZE_RDO_LIVE=false` (flip at the zenrav1e dep bump). TYPE half alone:
+  2.4× + butteraugli-max veto (+0.29) — rejected standalone. size1+reduced-types
+  ("min") = 92% of the step at 4.6× solo — **the P1 tx-search seed point** (item 2
+  below): per-family recovery fractions in the TSV (photo/scan/clipart wedges
+  75-89% recovered by size alone; interiors/food/nature only 12-46% → their
+  remainder is partition-owned, P1 item 1). reduced_tx_set standalone: measured
+  null at s6/s8. 4,176/4,176 armed cells aomdec+rav1d-safe clean. Wedge caveat:
+  fam-7000 near-lossless plots pay +2..18% bytes on ~3 KB files under size-RDO
+  (7050 q30 quality crater: RD model misfires on razor-edge palette content) —
+  owned by the intraBC/near-lossless program (P3).
 
 ## Phase P1 — the pruning-schedule rebuild (mechanism work, the core of parity)
 Replace ravif's per-speed amputation table with graduated search budgets, one lever at a

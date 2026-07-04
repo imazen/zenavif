@@ -279,6 +279,24 @@ becomes the still default, **re-fit the quality→quantizer curve** — libavif'
 precedent (their new piecewise LUT compensates tune=iq's higher spend at
 matched QP); our curve diverges from their mapping above q70.
 
+### FASTWINS P0 (2026-07-04): tile-policy default FIXED (live) + s6-s8 tx-size RDO arms (release-gated)
+FAST_TIER_PARITY_PLAN Phase P0, record `benchmarks/rd_gap_fastwins_2026-07-04.tsv`:
+(1) **ravif main 55f8c935 (LIVE)** — default tile count now capped to ≥1 MP per
+tile (`TILE_RD_MIN_AREA`): the old `min(threads, px/min_tile²)` default cost
++7.4% median ssim2 BD at s6 on 48 cores (0/24 images better at ANY tile count;
+`--threads 1` byte-identical 18/18, default==threads-1 18/18; give-back 5.9×/6.8×
+wall at s6/s4 — the pool is bitstream-inert and tiles are zenrav1e's only
+intra-frame parallelism). zenavif inherits at the next zenravif dep bump.
+(2) **zenrav1e d82c16ba** — decoupled `rdo_tx_size_override` / `rdo_tx_type_override`
+/ `rdo_tx_size_depth` (default-off, 27/27 md5 byte-identical); **ravif 7baad5f9**
+arms s6-s8 with SIZE-half depth-1 (DCT-only) behind `S6_TX_SIZE_RDO_LIVE=false`:
+full-grid s6 −2.78/−3.95/−6.01 med (ssim2/ba3n/bamax) at 1.67× solo, s8
+−2.89/−3.52/−5.49 at 1.43× — 51% of the whole s6→s4 step; type-half standalone
+butteraugli-max-vetoed; reduced_tx_set standalone measured null. 4,176/4,176
+armed cells aomdec+rav1d-safe clean. **At the zenrav1e dep bump:** flip
+`S6_TX_SIZE_RDO_LIVE` + uncomment its two apply lines (same flip pattern as
+S1_DEEP_ARMS_LIVE), and include both knobs in the encode_plan mirror refresh.
+
 ### zenrav1e per-SB delta_q + Variance Boost — SHIPPED upstream 2026-07-02 (later), release-gated
 zenrav1e gained true per-SB delta_q coding (`d125713f`, inert syntax; the
 encoder previously coded none) and `Tune::Ssimulacra2` now drives libaom's

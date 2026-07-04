@@ -80,8 +80,8 @@ Cargo.toml.original.txt
 *.rs.local
 .workongoing
 
-# Multi-agent coordination marker (per global CLAUDE.md)
-.workongoing
+# Multi-agent coordination markers (per global CLAUDE.md; suffixed variants per agent)
+.workongoing*
 
 # Research-notes mirrors from zenpapers (gitignored canonical home)
 *_LEARNINGS.md

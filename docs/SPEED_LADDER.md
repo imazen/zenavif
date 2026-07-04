@@ -78,15 +78,30 @@ Not in the cavif path at any speed: trellis, VAQ, seg_boost, FrameHints/sb_q_sca
 (`src/palette_gate.rs` τ=0.197 s≤5 / 0.05 s≥6 — release-gated `auto_tune` wiring,
 NOT exercised by cavif's in-encoder AA detection).
 
-### Wrapper-level threading/tiling hazard (measured)
+### Wrapper-level threading/tiling hazard (measured → **FIXED 2026-07-04**, FASTWINS P0)
 
-cavif with default `--threads` (= host cores) computes `tiles =
+cavif with default `--threads` (= host cores) computed `tiles =
 threads.min(px / min_tile_size²)`; `min_tile_size` falls to 128–256 at s≥4, so on a
-48-core box a 1 MP s6 encode splits into every tile it can — **+3.6% bytes measured**
-(84,383 → 87,388 B, 5004_nps @Q60 s6, threads 1 vs 48) and the bitstream becomes
-core-count-dependent. All ladder arms pin `--threads 1`. Product note: zenavif callers
-on many-core hosts hit this by default at fast speeds; a tiles-vs-speed policy (or
-decoupling tile count from thread count) is a wrapper-level candidate.
+48-core box a 1 MP s6 encode split into 64 tiles and the bitstream was
+core-count-dependent. All ladder arms pin `--threads 1`.
+
+**Full curve measured (train26 BD vs 1 tile, s6):** 2 tiles +0.96% / 4 +1.90 / 8
++3.42 / 16 +5.37 / 48→64 **+7.40% median ssim2 BD — 0/24 images better at ANY tile
+count** (both butteraugli norms agree); same-quantizer bytes worst at low q on smooth
+content (up to +28% at Q30, 64 tiles). Mechanism: per-tile CDF-adaptation restart +
+cross-tile intra-prediction truncation (the per-tile fixed waste is a big share of
+small files); pool size is bitstream-inert (ZENRAVIF_TILES=4 == --threads 4, md5) and
+tiles are zenrav1e's ONLY intra-frame parallelism (`encode_tile` par_iter — no
+row-mt), so the old default bought wall exclusively with bytes: solo 48c speedup
+saturates at 5.9× (s6) / 6.8× (s4).
+
+**Fix (ravif main 55f8c935, LIVE):** default tile count capped so each tile keeps
+≥ `TILE_RD_MIN_AREA` = 1 MP — ≤1 MP images never tile (bytes identical from 1 to 48
+cores, 18/18 md5; `--threads 1` byte-identical to the old policy, 18/18), larger
+images tile only as far as ≥1 MP tiles allow. Honest give-back on 48c 1 MP stills:
+s6 170→1005 ms/MP, s4 871→5911 (speed remains available explicitly via `-s`;
+`--threads` still sizes the pool). zenavif inherits at the next zenravif dep bump.
+Record: `benchmarks/rd_gap_fastwins_2026-07-04.tsv`.
 
 ### Cheap-win flags (off at a fast tier, plausibly trivial cost there)
 
@@ -99,6 +114,15 @@ decoupling tile count from thread count) is a wrapper-level candidate.
    full tx set keeps the *signaling alphabet* wide, so DCT_DCT costs more bits to
    write than it would under the reduced set. reduced_tx_set=true at s6/s8 is a
    pure signaling-cost win (unmeasured, expected small) plus ladder consistency.
+   **MEASURED NULL 2026-07-04 (FASTWINS P0)**: +0.00/+0.07/+0.14 median BD at
+   s6, +0.05/+0.01/−0.01 at s8 — the CDFs adapt DCT_DCT to negligible cost
+   either way. Dead as a standalone win; `benchmarks/rd_gap_fastwins_2026-07-04.tsv`.
+   The s4→s6 rdo_tx cliff itself is DECOMPOSED + LANDED (release-gated): tx-SIZE
+   RDO depth-1 with DCT-only types recovers 51% of the whole s6→s4 step at 1.67×
+   solo (s6 full-grid −2.78/−3.95/−6.01 median, 18-20/24; s8 −2.89/−3.52/−5.49 at
+   1.43×) — ravif 7baad5f9 (`S6_TX_SIZE_RDO_LIVE`), zenrav1e d82c16ba knobs.
+   tx-TYPE RDO alone: 2.4× with a butteraugli-max veto (+0.29) — only pays
+   composed (size1+reduced = 92% of the step at 4.6× solo; P1 seed, not shipped).
 3. **SMALL_PX_RDO_TX stops at s≤4**: small renditions at s6 (a common libavif-speed-6
    thumbnail shape) don't keep tx RDO. Extending the gate to s6 mirrors its philosophy
    (small frames = affordable deep search).
@@ -230,8 +254,11 @@ FEATURE_HINTS "fast mode that needs less brute force" program surface: per-image
    +5-14% behind at matched time even with the full tune, and the ravif speed table's
    toolset amputations (not zenrav1e's search) look like the first-order cause.
 2. Cheap-win queue (from the liveness audit + wedges): rect-gate 16×16/32×32 at s4-s6,
-   content-gated tx RDO at s6, reduced_tx_set at s6/s8 (signaling-only win), s10
-   partition floor (8,16)-or-(4,16) + CDEF re-enable, SMALL_PX_RDO_TX extension to s6.
+   ~~content-gated tx RDO at s6~~ **DONE 2026-07-04 un-gated** (size-half depth-1
+   landed release-gated at s6-s8, 51% of the s6→s4 step at 1.67×; FASTWINS P0),
+   ~~reduced_tx_set at s6/s8~~ **measured null**, s10
+   partition floor (8,16)-or-(4,16) + CDEF re-enable, SMALL_PX_RDO_TX extension to s6
+   (partially covered: the landed s6-s8 arm gives small renditions depth-1 size RDO too).
 3. The tune should be DEFAULT at every speed for still images (it is never worse at
    fast tiers and is cheaper at s2) — reinforces the dep-bump decision in CLAUDE.md.
 4. Label store: the 40 RD arms + 6 anchors appended as `speedladder-2026-07-04`
