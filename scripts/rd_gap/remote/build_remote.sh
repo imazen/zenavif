@@ -66,7 +66,7 @@ else
   echo "butteraugli tree not synced -- BUTTER columns will be NA"
 fi
 
-phase "zenavif examples (save_png extract_av1 decode_avif)"
+phase "zenavif examples (save_png extract_av1 decode_avif ivf_raw)"
 # Primary: build from the synced tree. Fallback (LOUD): the decoder binaries
 # sync.sh shipped from the workstation — the same decoders the local harness
 # runs — for when a sibling-repo contract change mid-flight breaks the WIP
@@ -74,12 +74,12 @@ phase "zenavif examples (save_png extract_av1 decode_avif)"
 EXDIR=/home/lilith/work/zen/zenavif/target/release/examples
 FBDIR=/home/lilith/decoder_fallback
 cd /home/lilith/work/zen/zenavif
-if cargo build --release --example save_png --example extract_av1 --example decode_avif \
+if cargo build --release --example save_png --example extract_av1 --example decode_avif --example ivf_raw \
      > /tmp/zenavif_build.log 2>&1; then
   tail -2 /tmp/zenavif_build.log
   rm -f "$EXDIR/.synced_from_workstation"
   echo "zenavif decoders: BUILT FROM SOURCE on the box"
-elif [ -x "$FBDIR/save_png" ] && [ -x "$FBDIR/extract_av1" ] && [ -x "$FBDIR/decode_avif" ]; then
+elif [ -x "$FBDIR/save_png" ] && [ -x "$FBDIR/extract_av1" ] && [ -x "$FBDIR/decode_avif" ] && [ -x "$FBDIR/ivf_raw" ]; then
   echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
   echo '!! zenavif examples DO NOT BUILD from the current synced tree. Tail:'
   tail -12 /tmp/zenavif_build.log | sed 's/^/!!   /'
@@ -88,7 +88,7 @@ elif [ -x "$FBDIR/save_png" ] && [ -x "$FBDIR/extract_av1" ] && [ -x "$FBDIR/dec
   sed 's/^/!!   /' "$FBDIR/decoder_fallback_manifest.txt" 2>/dev/null || true
   echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
   mkdir -p "$EXDIR"
-  cp -f "$FBDIR/save_png" "$FBDIR/extract_av1" "$FBDIR/decode_avif" "$EXDIR/"
+  cp -f "$FBDIR/save_png" "$FBDIR/extract_av1" "$FBDIR/decode_avif" "$FBDIR/ivf_raw" "$EXDIR/"
   cp -f "$FBDIR/decoder_fallback_manifest.txt" "$EXDIR/.synced_from_workstation"
 else
   echo "CARGO FAILED building zenavif examples AND no synced fallback binaries exist:"
@@ -105,6 +105,7 @@ for b in \
   /home/lilith/work/zen/zenavif/target/release/examples/save_png \
   /home/lilith/work/zen/zenavif/target/release/examples/extract_av1 \
   /home/lilith/work/zen/zenavif/target/release/examples/decode_avif \
+  /home/lilith/work/zen/zenavif/target/release/examples/ivf_raw \
   /home/lilith/work/zen/fast-ssim2/target/release/fast-ssim2-cli \
   /home/lilith/work/butteraugli/target/release/butteraugli
 do
