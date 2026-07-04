@@ -598,6 +598,26 @@ def sources():
                       corpus="mech26", sweep_source="p2heads-2026-07-04",
                       arm_id=f"p2heads/{nm}", knob_json=json.dumps(k, sort_keys=True),
                       encoder_rev=p2_rev, q_kind="cavif_q", speed=6, rows=rows_))
+    # Attribution-factoring + rules-v2 reassignment cells: the val W-gate
+    # false-fire conviction (8103 (none,ship) +18.1 vs (size1,m32) -1.9) and
+    # the three v2-remapped images' measured cells.
+    for nm, path, corpus_, rows_, k in [
+        ("valx-size1-m32", "p2vx_size1_m32.tsv", "mech26", 24,
+         dict(p2_tx["size1"], **p2_part["m32"])),
+        ("valx-none-ship", "p2vx_none_ship.tsv", "mech26", 24,
+         dict(**p2_part["ship"])),
+        ("rx-7028-size1-m32", "p2rx_7028_size1_m32.tsv", "train26", 12,
+         dict(p2_tx["size1"], **p2_part["m32"])),
+        ("rx-7028-size1-m32-i7", "p2rx_7028_size1_m32_i7.tsv", "train26", 12,
+         dict(p2_tx["size1"], intra_modes=7, **p2_part["m32"])),
+        ("valx2-size1-m32-i7", "p2rx_valx2_size1_m32_i7.tsv", "mech26", 24,
+         dict(p2_tx["size1"], intra_modes=7, **p2_part["m32"])),
+    ]:
+        k.update(speed=6, tune="ssimulacra2", palette="auto", threads=1, grid="full12q")
+        s.append(dict(path=f"{p2d}/{path}", kind="rd_tsv",
+                      corpus=corpus_, sweep_source="p2heads-2026-07-04",
+                      arm_id=f"p2heads/{nm}", knob_json=json.dumps(k, sort_keys=True),
+                      encoder_rev=p2_rev, q_kind="cavif_q", speed=6, rows=rows_))
     return s
 
 

@@ -167,6 +167,38 @@ if [[ " $PHASES " == *" composedi7 "* ]]; then
   done
 fi
 
+if [[ " $PHASES " == *" valx "* ]]; then
+  say "=== PHASE valx: head-attribution factoring for the val none-class ==="
+  # 8103's composed (none,m32) lost +12.6 vs ship — but the composed cell
+  # confounds the tx withhold with the m32 upgrade. Factor: (size1,m32) and
+  # (none,ship) for the two val W-gate fires (5343, 8103).
+  smp="$HERE/sample_p2valx2.tsv"
+  run_one "$OUTDIR/p2vx_size1_m32.tsv" "$(cls_rows "$smp" 12)" "${common[@]}" \
+    SAMPLE="$smp" QGRID_ZR="$QFULL" ZENRAV1E_SPEED=6 CAVIF_EXTRA="--threads 1" \
+    $SIZE1 $M32
+  run_one "$OUTDIR/p2vx_none_ship.tsv" "$(cls_rows "$smp" 12)" "${common[@]}" \
+    SAMPLE="$smp" QGRID_ZR="$QFULL" ZENRAV1E_SPEED=6 CAVIF_EXTRA="--threads 1" \
+    $SHIP
+fi
+
+if [[ " $PHASES " == *" valx2 "* ]]; then
+  say "=== PHASE valx2: revised-rule reassignment cells (post-val W/D bounds) ==="
+  # Revised gates (harm-avoiding, every assignment measured-backed):
+  # W += dcty>100 (fires only the razor-edge pair 7050/7052);
+  # D += pf<=0.8505 (5343/8103 land in (size1,m32) — their measured-best).
+  # Reassigned: 7028 -> (size1,m32). Cells here: 7028 (size1,m32) ± i7,
+  # 5343/8103 (size1,m32)+i7 (the non-i7 cells exist from valx).
+  run_one "$OUTDIR/p2rx_7028_size1_m32.tsv" 12 "${common[@]}" \
+    SAMPLE="$HERE/sample_p2c_7028.tsv" QGRID_ZR="$QFULL" ZENRAV1E_SPEED=6 \
+    CAVIF_EXTRA="--threads 1" $SIZE1 $M32
+  run_one "$OUTDIR/p2rx_7028_size1_m32_i7.tsv" 12 "${common[@]}" \
+    SAMPLE="$HERE/sample_p2c_7028.tsv" QGRID_ZR="$QFULL" ZENRAV1E_SPEED=6 \
+    CAVIF_EXTRA="--threads 1" $SIZE1 $M32 $I7
+  run_one "$OUTDIR/p2rx_valx2_size1_m32_i7.tsv" 24 "${common[@]}" \
+    SAMPLE="$HERE/sample_p2valx2.tsv" QGRID_ZR="$QFULL" ZENRAV1E_SPEED=6 \
+    CAVIF_EXTRA="--threads 1" $SIZE1 $M32 $I7
+fi
+
 if [[ " $PHASES " == *" timing "* ]]; then
   say "=== PHASE timing: solo wall (JOBS=1, RD_CACHE=off, q{40,65,85}) ==="
   tim=(RD_CACHE=off JOBS=1 QGRID_ZR="40 65 85")
@@ -187,6 +219,12 @@ if [[ " $PHASES " == *" timing "* ]]; then
     SAMPLE="$SAMPLE_TIM" ZENRAV1E_SPEED=6 CAVIF_EXTRA="--threads 1" $SIZE1 $SHIP $I7
   run_one "$OUTDIR/p2t_size1.tsv" 12 "${common[@]}" "${tim[@]}" \
     SAMPLE="$SAMPLE_TIM" ZENRAV1E_SPEED=6 CAVIF_EXTRA="--threads 1" $SIZE1
+  # v2-revision timing: 7028's revised class is (size1,m32).
+  if [ -f "$HERE/sample_p2c_7028.tsv" ]; then
+    run_one "$OUTDIR/p2t_7028_size1_m32.tsv" 3 "${common[@]}" "${tim[@]}" \
+      SAMPLE="$HERE/sample_p2c_7028.tsv" ZENRAV1E_SPEED=6 \
+      CAVIF_EXTRA="--threads 1" $SIZE1 $M32
+  fi
 fi
 
 say "chain complete."

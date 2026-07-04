@@ -11,12 +11,21 @@ the deploy rules as explicit constants, applies them to the train26 corpus
 per distinct (tx, part) class for the box chain (chain_p2heads.sh) — per-class
 env sub-runs need zero harness changes.
 
-FROZEN RULES (s6; fit 2026-07-04, train26, LOOCV-validated):
-  tx head   : patch_fraction > 0.8505            -> none   (withhold size-RDO)
-              elif dct_compressibility_y < 8.352 -> min    (size1+types+reduced)
+FROZEN RULES v2 (s6; train fit 2026-07-04 + the same-day VAL attribution
+revision — see benchmarks/rd_gap_p2heads_2026-07-04.tsv):
+  tx head   : pf > 0.8505 AND dcty > 100        -> none   (withhold size-RDO;
+              the razor-edge line-tiling class only)
+              elif pf <= 0.8505 AND dcty < 8.352 -> min   (size1+types+reduced)
               else                               -> size1
   part head : gradient_fraction_smooth < 0.4105  -> m32    (r16m32_bkvg2)
               else                               -> ship   (r16no4_bkvg2)
+
+HISTORY: the v1 rules (pf-only withhold, un-capped min) produced the box
+class samples the composed run measured; the VAL factoring cells (p2vx_*)
+convicted the pf-only withhold (8103: (none,ship) +18.1 vs (size1,m32)
+-1.9) and v2 remaps exactly three images (7028, 5343, 8103) onto classes
+whose cells were ALSO measured (p2rx_*/p2vx_*). Re-running this script
+emits the v2 classes.
 """
 
 import os
@@ -34,8 +43,14 @@ PART_GFS_M32 = 0.4105
 FEATS = ["patch_fraction", "dct_compressibility_y", "gradient_fraction_smooth"]
 
 
+TX_DCTY_RAZOR = 100.0  # v2 conjunctive withhold bound (see docstring)
+
+
 def choose(pf, dcty, gfs):
-    tx = "none" if pf > TX_PF_NONE else ("min" if dcty < TX_DCTY_MIN else "size1")
+    if pf > TX_PF_NONE:
+        tx = "none" if dcty > TX_DCTY_RAZOR else "size1"
+    else:
+        tx = "min" if dcty < TX_DCTY_MIN else "size1"
     part = "m32" if gfs < PART_GFS_M32 else "ship"
     return tx, part
 

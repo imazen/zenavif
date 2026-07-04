@@ -101,16 +101,51 @@ def fam_of(img):
     return _FAM.get(img, _FAM.get(os.path.basename(img), "?"))
 
 
-def summarize(name, T, fams=None):
+def summarize(name, T, fams=None, section=None):
     v = T["adj"].dropna()
     print(f"  {name:28s} n={len(v):2d} med {v.median():+7.3f} mean {v.mean():+7.3f} "
           f"better {(v < 0).sum()}/{len(v)} vetoed {int(T['veto'].sum())}")
+    if section:
+        emit(section, name, "ssim2_vetoadj", len(v), v.median(), v.mean(),
+             f"{(v < 0).sum()}/{len(v)}", f"vetoed={int(T['veto'].sum())}")
+        for col, mn in (("bd_ba3n", "butteraugli_3n"), ("bd_bamax", "butteraugli_max")):
+            b = T[col].dropna()
+            if len(b):
+                emit(section, name, mn, len(b), b.median(), b.mean(),
+                     f"{(b < 0).sum()}/{len(b)}")
+
+
+TSV_ROWS = []
+TSV_HEADER = [
+    "P2HEADS (FAST_TIER_PARITY_PLAN Phase P2) -- 2026-07-04 -- per-image hyperparameter heads: "
+    "tx budget + partition budget (frozen threshold rules) + intra-mode-budget axis + composed fast mode",
+    "Box zenavif-sweep-1 (ccx63 48c, FROM_SNAPSHOT=auto); harness scripts/rd_gap/chain_p2heads.sh; "
+    "analyzer scripts/hyperparam/analyze_p2_composed.py; fits scripts/hyperparam/fit_{tx,partition}_budget.py",
+    "Code: zenrav1e master 39f0ecdd (INCLUDES one-sided margin fix 767c8ff5) via ravif--p2heads devpatch "
+    "(p1part passthroughs + ZENRAVIF_REDUCED_TX + ZENRAVIF_INTRA_MODES; box cavif sha256/16 bd0b33d2ec5ef156). "
+    "INCIDENT: a first pass ran a stale workspace (e944ea71, symmetric margins) -- caught by 6/144 "
+    "byte-continuity vs p1part ship cells, wiped, re-run; base cells byte-match p1part 144/144 on both passes",
+    "Frozen rules: tx = {patch_fraction>0.8505 -> LARGEST | dct_compressibility_y<8.352 -> MIN | else SIZE1} "
+    "(s6-s8); partition = {gradient_fraction_smooth<0.4105 -> M32(r16m32_bkvg2) | else SHIP(r16no4_bkvg2)} (s6)",
+    "All arms train26/val14 tune-ss2 + palette auto, --threads 1, BUTTER on, PALCONF=1 (0 CELLFAIL/CONFFAIL); "
+    "composed = per-(tx,part)-class 12q sub-runs merged; intra7 = ComplexKeyframes + filter_intra=Some(false); "
+    "BD per-image monotone-frontier hull (bd_arm.py), vetoadj = max(bd,0) when arm ba3n>+1.0 or bamax>+1.5",
+    "parity rows: per-image BD vs the CACHED speedladder aom-allintra refs (photos = t26 minus fam-7000, n=20); "
+    "timing rows: solo JOBS=1 RD_CACHE=off q{40,65,85} wall ratios vs plain s6-tune",
+]
+
+
+def emit(section, name, metric, n, med, mean, better, extra=""):
+    TSV_ROWS.append((section, name, metric, n, f"{med:+.4f}", f"{mean:+.4f}",
+                     better, extra))
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("outdir", nargs="?",
                     default="/mnt/v/output/zenavif/p2heads-20260704")
+    ap.add_argument("--tsv", default=None,
+                    help="write the summary TSV (benchmarks record)")
     args = ap.parse_args()
     d = args.outdir
 
@@ -128,7 +163,7 @@ def main():
             continue
         T = veto_frame(load_tsv(bp), load_tsv(ap_))
         tables[tag] = T
-        summarize(tag, T)
+        summarize(tag, T, section="intra")
     if "s6 intra7 vs size1-base" in tables:
         T = tables["s6 intra7 vs size1-base"]
         T2 = T.copy()
@@ -159,9 +194,22 @@ def main():
     Tc = veto_frame(base, comp)
     Ts = veto_frame(base, ship)
     Tcs = veto_frame(ship, comp)
-    summarize("composed vs s6+size1 base", Tc)
-    summarize("global-ship vs s6+size1", Ts)
-    summarize("composed vs global-ship", Tcs)
+    summarize("composed vs s6+size1 base", Tc, section="composed")
+    summarize("global-ship vs s6+size1", Ts, section="composed")
+    summarize("composed vs global-ship", Tcs, section="composed")
+
+    # ---- rules v2 (post-val attribution): swap 7028 -> (size1,m32) ----
+    rx = os.path.join(d, "p2rx_7028_size1_m32.tsv")
+    comp_v2 = None
+    if os.path.exists(rx):
+        rx_t = load_tsv(rx)
+        rx_t["p2class"] = "size1_m32"
+        comp_v2 = pd.concat(
+            [comp[~comp["image"].str.contains("7028")], rx_t], ignore_index=True)
+        Tc2 = veto_frame(base, comp_v2)
+        Tcs2 = veto_frame(ship, comp_v2)
+        summarize("composed-v2 vs s6+size1 base", Tc2, section="composed")
+        summarize("composed-v2 vs global-ship", Tcs2, section="composed")
 
     fam = pd.DataFrame({
         "family": [fam_of(i) for i in Tc.index],
@@ -177,6 +225,9 @@ def main():
     # ---------- val transfer ----------
     print("\n=== VAL transfer (14 VAL-LSD origins, s6, 12q) ===")
     vb = os.path.join(d, "p2v_base.tsv")
+    if os.path.exists(vb) and not os.path.exists(os.path.join(d, "p2v_ship.tsv")):
+        print("  (val leg incomplete — skipping)")
+        vb = "/nonexistent"
     if os.path.exists(vb):
         vbase = load_tsv(vb)
         vship = load_tsv(os.path.join(d, "p2v_ship.tsv"))
@@ -191,9 +242,21 @@ def main():
         Tvc = veto_frame(vbase, vcomp)
         Tvs = veto_frame(vbase, vship)
         Tvcs = veto_frame(vship, vcomp)
-        summarize("VAL composed vs base", Tvc)
-        summarize("VAL global-ship vs base", Tvs)
-        summarize("VAL composed vs global-ship", Tvcs)
+        summarize("VAL composed vs base", Tvc, section="val")
+        summarize("VAL global-ship vs base", Tvs, section="val")
+        summarize("VAL composed vs global-ship", Tvcs, section="val")
+        # rules v2: 5343 + 8103 -> (size1,m32) (measured factoring cells)
+        vx = os.path.join(d, "p2vx_size1_m32.tsv")
+        if os.path.exists(vx):
+            vx_t = load_tsv(vx)
+            vx_t["p2class"] = "size1_m32"
+            vcomp_v2 = pd.concat(
+                [vcomp[~vcomp["image"].str.contains("5343|8103")], vx_t],
+                ignore_index=True)
+            Tvc2 = veto_frame(vbase, vcomp_v2)
+            Tvcs2 = veto_frame(vship, vcomp_v2)
+            summarize("VAL composed-v2 vs base", Tvc2, section="val")
+            summarize("VAL composed-v2 vs global-ship", Tvcs2, section="val")
         print("\n  VAL per-image composed-vs-ship (adj; negative = head beats global):")
         for img, r in Tvcs.sort_values("adj").iterrows():
             cls = vcomp.loc[vcomp["image"] == img, "p2class"].iloc[0]
@@ -208,7 +271,10 @@ def main():
         r = store[store["arm_id"] == f"speedladder/{ref}"]
         refs[ref] = r
     # map store image_id -> chain image basename (same basenames)
-    for arm_name, arm_df in [("composed", comp), ("global-ship", ship)]:
+    parity_arms = [("composed", comp), ("global-ship", ship)]
+    if comp_v2 is not None:
+        parity_arms.insert(1, ("composed-v2", comp_v2))
+    for arm_name, arm_df in parity_arms:
         print(f"  --- {arm_name} ---")
         for ref, rdf in refs.items():
             per = {}
@@ -229,6 +295,8 @@ def main():
             if len(v):
                 print(f"    vs {ref:15s} ssim2: n={len(v):2d} med {v.median():+7.2f} "
                       f"mean {v.mean():+7.2f} better {(v < 0).sum()}/{len(v)}")
+                emit("parity", f"{arm_name}_vs_{ref}", "ssim2", len(v),
+                     v.median(), v.mean(), f"{(v < 0).sum()}/{len(v)}")
             # butteraugli_3n leg
             per = {}
             for img in sorted(arm_df["image"].unique()):
@@ -251,6 +319,8 @@ def main():
             if len(v):
                 print(f"    vs {ref:15s} ba3n : n={len(v):2d} med {v.median():+7.2f} "
                       f"mean {v.mean():+7.2f} better {(v < 0).sum()}/{len(v)}")
+                emit("parity", f"{arm_name}_vs_{ref}", "butteraugli_3n", len(v),
+                     v.median(), v.mean(), f"{(v < 0).sum()}/{len(v)}")
 
     # ---------- solo timing ----------
     print("\n=== SOLO timing (JOBS=1 RD_CACHE=off, q{40,65,85}; wall enc_ms sums) ===")
@@ -282,12 +352,32 @@ def main():
         print("  per-image composed/plain ratio: "
               f"min {r.iloc[0]:.2f} med {r.median():.2f} max {r.iloc[-1]:.2f}")
     for nm in ["p2t_size1.tsv", "p2t_intra7.tsv", "p2t_intra7ship.tsv"]:
-        s = solo_sum(nm)
-        if s is not None and plain is not None:
-            com = s.index.intersection(plain.index)
+        sr = solo_sum(nm)
+        if sr is not None and plain is not None:
+            com = sr.index.intersection(plain.index)
             if len(com):
-                print(f"  {nm:22s} ratio vs plain (4-img): "
-                      f"{s[com].sum() / plain[com].sum():.3f}x")
+                r = sr[com].sum() / plain[com].sum()
+                print(f"  {nm:22s} ratio vs plain (4-img): {r:.3f}x")
+                emit("timing", nm.replace(".tsv", ""), "solo_ratio_vs_plain",
+                     len(com), r, r, "-")
+    if plain is not None and len(comp_s):
+        common = plain.index.intersection(comp_s.index)
+        emit("timing", "composed", "solo_ratio_vs_plain", len(common),
+             comp_s[common].sum() / plain[common].sum(),
+             (comp_s[common] / plain[common]).median(), "-")
+        if s1ship is not None:
+            emit("timing", "global_size1ship", "solo_ratio_vs_plain", len(common),
+                 s1ship[common].sum() / plain[common].sum(),
+                 (s1ship[common] / plain[common]).median(), "-")
+
+    if args.tsv:
+        with open(args.tsv, "w") as f:
+            for ln in TSV_HEADER:
+                f.write(f"# {ln}\n")
+            f.write("section\tname\tmetric\tn\tmedian\tmean\tbetter\textra\n")
+            for r in TSV_ROWS:
+                f.write("\t".join(str(x) for x in r) + "\n")
+        print(f"\nwrote {args.tsv}")
 
 
 if __name__ == "__main__":

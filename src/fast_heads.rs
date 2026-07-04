@@ -9,17 +9,20 @@
 //!
 //! # Head 1 — TX budget (`speed 6..=8`)
 //!
-//! | rule (in order) | budget | measured why |
+//! | rule (in order; both gates CONJUNCTIVE on two features) | budget | measured why |
 //! |---|---|---|
-//! | `patch_fraction > 0.8505` | [`TxBudget::Largest`] | razor-edge tiled plots (fam-7000-class) PAY +3.8..+19.3% BD under depth-1 size-RDO — withholding is a pure win (and saves the 1.67× tx time) |
-//! | `dct_compressibility_y < 8.352` | [`TxBudget::Min`] | hard-to-compress texture (products/people class) leaves half the tx step on the table under size-only RDO; the full "min" set (size1 + type RDO + reduced set) pays −2.6..−5.6% extra there |
+//! | `patch_fraction > 0.8505 && dct_compressibility_y > 100` | [`TxBudget::Largest`] | razor-edge tiled plots (7050/7052-class: repeating patches + extreme DCT α) PAY +8.2..+19.3% BD under depth-1 size-RDO — withholding is a pure win (and saves the 1.67× tx time). The dcty bound is the VAL-attribution tightening: pf-high CHART content (5343/8103, dcty ≈ 8) still wants size-RDO |
+//! | `patch_fraction <= 0.8505 && dct_compressibility_y < 8.352` | [`TxBudget::Min`] | SMOOTH/easy content (dcty = libwebp α, HIGHER = harder; products/people run 3..8 vs photo median ~16): sparse-AC residuals are where tx-TYPE RDO over the reduced set pays its premium (train −2.6..−4.5 extra BD; val 9021/9631 −6.4/−4.2 clean) |
 //! | otherwise | [`TxBudget::Size1`] | the landed global default (P0: 51% of the s6→s4 step at 1.67×) |
 //!
-//! Fit 2026-07-04 on the fastwins per-image surfaces (train26, veto-adjusted
-//! BD, LOOCV leave-one-origin-out): rule −5.84 mean at 2.04× vs global-size1
-//! −5.03 at 1.67× (s6); the W-only form dominates global-size1 on BOTH axes
-//! (−5.42 at 1.56×). s8 same shape (−6.21 at 1.92× vs −4.94 at 1.43×).
-//! `benchmarks/hyperparam_tx_budget_2026-07-04.tsv`.
+//! First fit 2026-07-04 on the fastwins per-image surfaces (train26,
+//! veto-adjusted BD, LOOCV leave-one-origin-out): rule −5.84 mean at 2.04×
+//! vs global-size1 −5.03 at 1.67× (s6); the withhold-only form dominates
+//! global-size1 on BOTH axes (−5.42 at 1.56×). s8 same shape (−6.21 at
+//! 1.92× vs −4.94 at 1.43×). The conjunctive bounds above are the val
+//! attribution revision (fewer fires than the train-only fit — see the
+//! constants' docs). `benchmarks/hyperparam_tx_budget_2026-07-04.tsv` +
+//! `rd_gap_p2heads_2026-07-04.tsv`.
 //!
 //! # Head 2 — partition budget (`speed == 6`)
 //!
@@ -86,17 +89,36 @@ pub enum PartitionBudget {
 
 /// Head-1 withhold threshold on zenanalyze `patch_fraction` (id 23).
 ///
-/// Above it, per-image tx-size RDO measured as a regression (the three
-/// train26 razor-edge plots: +3.8/+8.2/+19.3 veto-adjusted BD); the gate
-/// separates them from content-ful screens (8196 pf 0.38 WINS −7.4) at
-/// every fitted λ and both speeds.
+/// Above it AND above [`TX_GATE_DCT_RAZOR_MIN`], per-image tx-size RDO
+/// measured as a regression (train26 razor-edge plots 7050/7052: +19.3/+8.2
+/// veto-adjusted BD). The pf axis alone is NOT sufficient: the VAL
+/// attribution factoring (2026-07-04) showed pf-high CHART content (5343
+/// hurricane chart, 8103 bls chart, pf 0.936-0.939) still WANTS size-RDO
+/// ((none,ship) cost +18.1 ssim2 on 8103 while (size1,m32) won −1.9) —
+/// hence the conjunctive dcty bound below.
 pub const TX_GATE_PATCH_FRACTION_LARGEST: f32 = 0.8505;
+
+/// Head-1 withhold co-threshold on `dct_compressibility_y` (id 21 —
+/// libwebp α, HIGHER = harder to compress): the razor-edge near-lossless
+/// class that size-RDO genuinely harms sits at EXTREME α (7050/7052:
+/// 162.9/201.6) while the pf-high content that still wants size-RDO sits
+/// ≤ 12.1 (7028/5343/8103). Bound
+/// placed conservatively between the clusters (post-val tightening,
+/// support n=5 in the pf>0.85 band; fires strictly FEWER images than the
+/// train-only fit — harm-avoiding direction). This class is owned by the
+/// intraBC/near-lossless program (P3); the gate is the interim guard.
+pub const TX_GATE_DCT_RAZOR_MIN: f32 = 100.0;
 
 /// Head-1 deep threshold on zenanalyze `dct_compressibility_y` (id 21).
 ///
-/// Below it (texture the DCT compacts poorly), the "min" tx set pays its
-/// 2.7× solo premium over size1 (train26: 2000/9228/9958-class, −2.6..−4.5
-/// extra BD). Fit at λ=1.0 (BD% per 1.0× solo-time unit).
+/// Below it — SMOOTH/easy content with sparse AC (α well under the photo
+/// median ~16), where tx-TYPE selection over the reduced set is the
+/// classic residual win — AND at `patch_fraction ≤`
+/// [`TX_GATE_PATCH_FRACTION_LARGEST`], the "min" tx set pays its 2.7× solo
+/// premium over size1 (train26 2000/9228/9958 −2.6..−4.5 extra BD; VAL
+/// 9021/9631 −6.4/−4.2 vs global-ship, clean butteraugli). The pf cap
+/// keeps pf-high chart content (5343/8103-class, dcty 8.1-8.3) in Size1 —
+/// their measured-best class (VAL factoring cells).
 pub const TX_GATE_DCT_COMPRESSIBILITY_MIN: f32 = 8.352;
 
 /// Head-2 upgrade threshold on zenanalyze `gradient_fraction_smooth`
@@ -122,9 +144,13 @@ pub fn tx_budget_gate(patch_fraction: f32, dct_compressibility_y: f32, speed: u8
     if !(TX_HEAD_MIN_SPEED..=TX_HEAD_MAX_SPEED).contains(&speed) {
         return TxBudget::Size1;
     }
-    if patch_fraction.is_finite() && patch_fraction > TX_GATE_PATCH_FRACTION_LARGEST {
+    let pf_high = patch_fraction.is_finite() && patch_fraction > TX_GATE_PATCH_FRACTION_LARGEST;
+    let pf_low = patch_fraction.is_finite() && patch_fraction <= TX_GATE_PATCH_FRACTION_LARGEST;
+    if pf_high && dct_compressibility_y.is_finite() && dct_compressibility_y > TX_GATE_DCT_RAZOR_MIN
+    {
         TxBudget::Largest
-    } else if dct_compressibility_y.is_finite()
+    } else if pf_low
+        && dct_compressibility_y.is_finite()
         && dct_compressibility_y < TX_GATE_DCT_COMPRESSIBILITY_MIN
     {
         TxBudget::Min
@@ -224,22 +250,28 @@ mod tests {
 
     #[test]
     fn tx_gate_measured_anchors() {
-        // train26 anchors from the fit TSV: the three razor-edge plots
-        // (pf 0.901/0.994/0.998) withhold; the min class (dcty 7.9/7.1/3.2)
-        // deepens; 8196 screenshot (pf 0.379, dcty 30.5) stays size1.
+        // Anchors from the fit + VAL factoring: the razor-edge pair
+        // 7050/7052 (pf>.85 AND dcty>100) withholds; pf-high CHART content
+        // (7028 dcty 12.1, 5343 8.1, 8103 8.3) stays Size1 — the val
+        // factoring measured (size1,m32) as their best class; the min class
+        // (pf<=.85, dcty 7.9/7.1/3.2 + val 9021 4.3 / 9631 1.8) deepens;
+        // 8196 screenshot (pf .379, dcty 30.5) stays size1.
         for s in [6u8, 7, 8] {
-            assert_eq!(tx_budget_gate(0.901, 12.1, s), TxBudget::Largest);
+            assert_eq!(tx_budget_gate(0.994, 162.9, s), TxBudget::Largest);
             assert_eq!(tx_budget_gate(0.998, 201.6, s), TxBudget::Largest);
+            assert_eq!(tx_budget_gate(0.901, 12.1, s), TxBudget::Size1);
+            assert_eq!(tx_budget_gate(0.939, 8.1, s), TxBudget::Size1);
+            assert_eq!(tx_budget_gate(0.936, 8.3, s), TxBudget::Size1);
             assert_eq!(tx_budget_gate(0.002, 7.9, s), TxBudget::Min);
             assert_eq!(tx_budget_gate(0.582, 7.1, s), TxBudget::Min);
+            assert_eq!(tx_budget_gate(0.834, 4.3, s), TxBudget::Min);
             assert_eq!(tx_budget_gate(0.379, 30.5, s), TxBudget::Size1);
-            // Withhold outranks deep when both fire (7028: pf .90, dcty 12.1
-            // is not < 8.35 anyway; construct the ordering case explicitly).
-            assert_eq!(tx_budget_gate(0.9, 1.0, s), TxBudget::Largest);
+            // pf-high + dcty-low: NEITHER gate (the 5343/8103 corner).
+            assert_eq!(tx_budget_gate(0.9, 1.0, s), TxBudget::Size1);
         }
         // Off-tier speeds: no override.
         for s in [2u8, 4, 5, 9, 10] {
-            assert_eq!(tx_budget_gate(0.998, 1.0, s), TxBudget::Size1);
+            assert_eq!(tx_budget_gate(0.998, 201.6, s), TxBudget::Size1);
         }
     }
 
@@ -259,9 +291,13 @@ mod tests {
 
     #[test]
     fn non_finite_degrades_to_defaults() {
+        // Both gates are CONJUNCTIVE on two features — any non-finite input
+        // falls through to Size1 (never spend or withhold on unverified
+        // content).
         assert_eq!(tx_budget_gate(f32::NAN, f32::NAN, 6), TxBudget::Size1);
-        assert_eq!(tx_budget_gate(f32::NAN, 5.0, 6), TxBudget::Min);
-        assert_eq!(tx_budget_gate(0.9, f32::NAN, 6), TxBudget::Largest);
+        assert_eq!(tx_budget_gate(f32::NAN, 5.0, 6), TxBudget::Size1);
+        assert_eq!(tx_budget_gate(0.9, f32::NAN, 6), TxBudget::Size1);
+        assert_eq!(tx_budget_gate(0.2, f32::NAN, 6), TxBudget::Size1);
         assert_eq!(partition_budget_gate(f32::NAN, 6), PartitionBudget::Ship);
     }
 
@@ -285,8 +321,21 @@ mod tests {
             })
             .collect();
         let b = fast_tier_budgets_for_rgb8(&screen, w, h, None, 6);
-        assert_eq!(b.tx, TxBudget::Largest, "tiled flat content withholds tx RDO");
-        assert_eq!(b.partition, PartitionBudget::Max32, "flat content upgrades to 32-blocks");
+        // Flat 2-color tiles have HIGH patch_fraction but LOW DCT α (most
+        // blocks are flat -> sparse AC), so the revised conjunctive W-gate
+        // correctly does NOT withhold (the withhold class is razor-edge
+        // line tilings with EXTREME α, pinned by the measured-anchor test);
+        // the partition head upgrades flat content to 32-blocks.
+        assert_eq!(
+            b.tx,
+            TxBudget::Size1,
+            "flat tiles are not the razor-edge withhold class"
+        );
+        assert_eq!(
+            b.partition,
+            PartitionBudget::Max32,
+            "flat content upgrades to 32-blocks"
+        );
 
         // Photo-side probe for the PARTITION gate: gradient_fraction_smooth
         // measures smooth-gradient mass (photo bokeh/sky), so the honest
@@ -324,7 +373,7 @@ mod tests {
             AnalysisFeature::DctCompressibilityY.name(),
             AnalysisFeature::GradientFractionSmooth.name(),
         ];
-        let values = [0.95f32, 50.0, 0.1];
+        let values = [0.95f32, 150.0, 0.1];
         let offer = zenanalyze_api::Offer::new(
             &names,
             &values,
