@@ -68,20 +68,47 @@ fn make_rgb8_image() -> Img<Vec<Rgb<u8>>> {
     Img::new(pixels, 16, 16)
 }
 
+/// Encode a real (tiny) gain-map AV1 payload and return (obu, w, h, depth).
+///
+/// The container mux derives the gain-map item's `av1C` from the payload's
+/// sequence header and validates declared dims/depth against it, so tests
+/// must carry a real bitstream (a hand-rolled byte blob no longer encodes).
+fn make_real_gain_map() -> (Vec<u8>, u32, u32, u8) {
+    let (w, h) = (16usize, 12usize);
+    let pixels: Vec<Rgb<u8>> = (0..w * h)
+        .map(|i| {
+            let v = ((i * 255) / (w * h)) as u8;
+            Rgb { r: v, g: v, b: v }
+        })
+        .collect();
+    let img = Img::new(pixels, w, h);
+    let cfg = EncoderConfig::new().quality(85.0).speed(10);
+    let encoded = encode_rgb8(img.as_ref(), &cfg, stop()).expect("map encode");
+    let parser = zenavif_parse::AvifParser::from_bytes(&encoded.avif_file).expect("map parses");
+    let obu = parser.primary_data().expect("map primary").into_owned();
+    let md = zenavif_parse::AV1Metadata::parse_av1_bitstream(&obu).expect("map seq header");
+    (
+        obu,
+        md.max_frame_width.get(),
+        md.max_frame_height.get(),
+        md.bit_depth,
+    )
+}
+
 #[test]
 fn encode_with_gain_map_produces_valid_avif() {
     let img = make_rgb8_image();
     let metadata = make_test_tmap_metadata();
 
-    // Use a small dummy AV1 payload for the gain map.
-    // The container just stores these bytes as-is; no AV1 decoding happens during encode.
-    let gain_map_av1 = vec![0x12, 0x00, 0x0A, 0x0A, 0x00, 0x00, 0x00, 0x04, 0x2C, 0xC6];
+    // Real (tiny) AV1 payload: the encode path parses the payload's
+    // sequence header to derive the muxed av1C and validate dims/depth.
+    let (gain_map_av1, gw, gh, gdepth) = make_real_gain_map();
 
     let config = EncoderConfig::new().quality(80.0).speed(10).with_gain_map(
         gain_map_av1.clone(),
-        4,
-        4,
-        8,
+        gw,
+        gh,
+        gdepth,
         metadata.clone(),
     );
 
@@ -134,13 +161,13 @@ fn encode_without_gain_map_has_none() {
 fn encode_gain_map_roundtrip_through_decode() {
     let img = make_rgb8_image();
     let metadata = make_test_tmap_metadata();
-    let gain_map_av1 = vec![0x12, 0x00, 0x0A, 0x0A, 0x00, 0x00, 0x00, 0x04, 0x2C, 0xC6];
+    let (gain_map_av1, gw, gh, gdepth) = make_real_gain_map();
 
     let config = EncoderConfig::new().quality(80.0).speed(10).with_gain_map(
         gain_map_av1.clone(),
-        4,
-        4,
-        8,
+        gw,
+        gh,
+        gdepth,
         metadata.clone(),
     );
 
@@ -181,14 +208,14 @@ fn encode_gain_map_roundtrip_through_decode() {
 fn encode_gain_map_with_exif_and_icc() {
     let img = make_rgb8_image();
     let metadata = make_test_tmap_metadata();
-    let gain_map_av1 = vec![0xAA, 0xBB, 0xCC];
+    let (gain_map_av1, gw, gh, gdepth) = make_real_gain_map();
 
     let config = EncoderConfig::new()
         .quality(80.0)
         .speed(10)
         .exif(vec![0xFF, 0xD8, 0x00, 0x00])
         .icc_profile(vec![0x00, 0x00, 0x02, 0x0C]) // minimal ICC header
-        .with_gain_map(gain_map_av1.clone(), 2, 2, 8, metadata);
+        .with_gain_map(gain_map_av1.clone(), gw, gh, gdepth, metadata);
 
     let encoded = encode_rgb8(img.as_ref(), &config, stop())
         .expect("encode with gain map + metadata should succeed");
