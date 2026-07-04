@@ -87,8 +87,21 @@ fn add_gain_map<'data>(
         content_type: "",
     });
     let gm_ispe = push_prop(ipco, IpcoProp::Ispe(IspeBox { width: gm.width, height: gm.height }))?;
+    // AV1 seq_profile rules: 0 (Main) = 8/10-bit 4:2:0 or mono;
+    // 1 (High) = 8/10-bit 4:4:4; 2 (Professional) = 12-bit anything,
+    // or 8/10-bit 4:2:2. Deriving from depth alone mislabeled 4:4:4
+    // gain maps as profile 0.
+    let gm_profile = if gm_depth >= 12 {
+        2
+    } else if gm.chroma_subsampling.horizontal && !gm.chroma_subsampling.vertical {
+        2 // 4:2:2
+    } else if !gm.chroma_subsampling.horizontal && !gm.chroma_subsampling.vertical && !gm.monochrome {
+        1 // 4:4:4
+    } else {
+        0 // 4:2:0 or monochrome
+    };
     let gm_av1c = push_prop(ipco, IpcoProp::Av1C(Av1CBox {
-        seq_profile: if gm_depth >= 12 { 2 } else { 0 },
+        seq_profile: gm_profile,
         seq_level_idx_0: 31,
         seq_tier_0: false,
         high_bitdepth: gm_depth >= 10,
@@ -2012,6 +2025,33 @@ fn gain_map_alt_icc_roundtrip() {
         }
         other => panic!("expected ICC color info, got: {:?}", other),
     }
+}
+
+#[test]
+fn gain_map_av1c_profile_follows_subsampling() {
+    let metadata = make_test_tmap_metadata(false, true, 0, 1, 1, 1);
+    // 4:4:4 (no subsampling), color, 8-bit -> seq_profile must be 1 (High).
+    let avif = Aviffy::new()
+        .set_gain_map(vec![10, 20, 30], 2, 2, 8, metadata)
+        .set_gain_map_chroma_subsampling(ChromaSubsampling::NONE)
+        .to_vec(&[1, 2, 3], None, 10, 20, 8);
+    // Locate every av1C box and check one claims profile 1 with ss=00.
+    let mut found = false;
+    for i in 0..avif.len().saturating_sub(8) {
+        if &avif[i..i + 4] == b"av1C" && avif[i + 4] == 0x81 {
+            let profile = avif[i + 5] >> 5;
+            let b2 = avif[i + 6];
+            let (ssx, ssy) = ((b2 >> 3) & 1, (b2 >> 2) & 1);
+            if profile == 1 && ssx == 0 && ssy == 0 {
+                found = true;
+            }
+            assert!(
+                !(profile == 0 && ssx == 0 && ssy == 0),
+                "4:4:4 av1C must not claim profile 0"
+            );
+        }
+    }
+    assert!(found, "expected a profile-1 4:4:4 av1C for the gain map item");
 }
 
 #[test]
