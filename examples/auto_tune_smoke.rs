@@ -42,7 +42,7 @@ fn main() -> ExitCode {
     let path = std::path::Path::new(&args[1]);
     let target: f32 = args[2].parse().expect("bad target_zensim");
 
-    let dyn_img = match ImageReader::open(path).and_then(|r| Ok(r.decode())) {
+    let dyn_img = match ImageReader::open(path).map(|r| r.decode()) {
         Ok(Ok(img)) => img,
         _ => {
             eprintln!("failed to decode {}", path.display());

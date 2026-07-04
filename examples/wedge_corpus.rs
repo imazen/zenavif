@@ -273,7 +273,7 @@ fn main() -> ExitCode {
         ("sample_wedge_all.tsv", sample_rows),
         ("sample_wedge_cpu0.tsv", cpu0_rows),
     ] {
-        rows.sort_by(|a, b| b.0.cmp(&a.0));
+        rows.sort_by_key(|r| std::cmp::Reverse(r.0));
         let f = File::create(outdir.join(name)).expect("create sample tsv");
         let mut w = BufWriter::new(f);
         writeln!(w, "image\tw\th\tfamily").unwrap();

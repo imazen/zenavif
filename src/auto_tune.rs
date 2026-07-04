@@ -348,7 +348,7 @@ impl EncoderConfig {
                 AutoTuneError::Internal(Box::leak(format!("metadata: {e}").into_boxed_str()))
             })?;
         let feature_cols: Vec<&str> = feature_cols_str
-            .split(|c: char| c == '\n' || c == ',')
+            .split(['\n', ','])
             .filter(|s| !s.is_empty())
             .collect();
 
@@ -383,9 +383,7 @@ impl EncoderConfig {
         //   [log_px, log_px², zq_norm, zq_norm², zq_norm*log_px] (5) +
         //   zq_norm * raw_feats (n) + [icc_placeholder] (1)
         // = 2n + 10 dims.
-        let target_zq = match target {
-            QualityTarget::Zensim(z) => z,
-        };
+        let QualityTarget::Zensim(target_zq) = target;
         let pixels = (width as f32) * (height as f32);
         let log_px = pixels.max(1.0).ln();
         let zq_norm = target_zq / 100.0;
@@ -433,10 +431,10 @@ impl EncoderConfig {
         let mut encode_ms_est = vec![f32::INFINITY; n_cells];
         for cell in 0..n_cells {
             let speed = (cell + 1) as u8;
-            if let Some(ref range) = opts.speed_range {
-                if !range.contains(&speed) {
-                    continue;
-                }
+            if let Some(ref range) = opts.speed_range
+                && !range.contains(&speed)
+            {
+                continue;
             }
             // Cell unreachable for this target_zq?
             if cell < q_lut.median_q.len()
@@ -452,10 +450,10 @@ impl EncoderConfig {
                 .unwrap_or(f32::INFINITY);
             let est = ms_per_mpx * mpx;
             encode_ms_est[cell] = est;
-            if let Some(b) = budget_ms {
-                if est > b {
-                    continue;
-                }
+            if let Some(b) = budget_ms
+                && est > b
+            {
+                continue;
             }
             allowed[cell] = true;
         }

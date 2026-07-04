@@ -186,7 +186,7 @@ fn main() {
                 let line = run_row(r, by_cell_q, png_cache, leg, encoded_dir);
                 results.lock().unwrap().push((i, line));
                 let d = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                if d % 25 == 0 || d == n_rows {
+                if d.is_multiple_of(25) || d == n_rows {
                     eprintln!(
                         "[{leg}] {d}/{n_rows} done, {:.1}s elapsed",
                         t0.elapsed().as_secs_f64()
