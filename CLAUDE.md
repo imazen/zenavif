@@ -454,6 +454,24 @@ tier measurements after the upstream fixes land.
 DisjointMut overlap panic was caused by frame threading. Fix: `max_frame_delay=1`
 gives tile parallelism without frame threading. Default threads now 0 (auto-detect).
 
+### rav1d-safe tile-threading CDEF/loop-filter race + panic wedge (zenavif#30) — FIXED upstream, release-gated
+The two-pass conformance futex hang (4/220 cells frozen 76-90 min, 0 CPU) was
+a rav1d-safe tile-worker `overlapping DisjointMut` panic — the loop filter's
+compact-COW guards covered/rewrote tap rows CDEF legitimately touches (luma
+window applied to chroma + write-back of unmodified pixels) — and a dead
+worker wedged `rav1d_decode_frame`'s completion wait forever. In `unchecked`
+builds the same defect could silently clobber concurrent CDEF output
+(stale-byte write-back) instead of panicking. Fixed 2026-07-03 in
+rav1d-safe@49df1fc0 (diff-based write-back + plane-accurate tap windows +
+worker panics now fail decode with an error in ms; regression tests +
+trigger vector committed upstream; 6,000/6,000 stress iterations + full md5
+conformance clean). zenavif repro: `examples/hang_stress.rs` (~10+ parallel
+instances; 420/q30 hottest). **Until rav1d-safe releases past 0.5.7 and the
+zenavif dep bump**, registry builds ship the panic+wedge behavior — decode
+under heavy parallel tile-threaded load can still rarely hang. At the dep
+bump: raise the rav1d-safe minimum past 0.5.7 and re-run the hang_stress
+verification.
+
 ## TODO: Encoding Enhancements
 
 ### Target-Quality Convergence — IMPLEMENTED for RGB8 (2026-07-02)

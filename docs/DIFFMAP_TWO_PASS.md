@@ -191,16 +191,27 @@ Diagnosis arms in flight (each isolates one hypothesis):
   mismatches. The remaining 4 images' cells never ran: their workers hit
   the futex hang below. Re-run queued with the per-cell timeout guard.
 
-### Known bug: rare in-process futex hang (v2 cell binary)
+### Known bug: rare in-process futex hang (v2 cell binary) — ROOT-CAUSED + FIXED upstream 2026-07-03, release-gated
 
 4/220 conformance cells hung 76-90 min in `futex_` (kernel wait, no
-progress) — an in-process deadlock, ~2% incidence, first seen on the
-conformance run (v2 binary = metric-seam + probe build; suspects: the
-butteraugli crate's default rayon pool or decoder threading under 10-way
-process parallelism; the 420 leg ran here for the first time but 444 cells
-hung too). Needs a proper hunt BEFORE the two-pass feature ever ships
-live. Mitigation landed for the harness: `timeout 600` per cell (an
-ENCFAIL + RESUME gap-fill instead of a wedged pipeline).
+progress) under 10-way process parallelism. Root cause (zenavif#30, closed;
+full forensics there): NOT butteraugli/rayon — a **rav1d-safe tile-worker
+panic** (`overlapping DisjointMut`, `picture.rs` via CDEF padding vs the
+loop filter's tile-threading compact-COW guards) killed one worker, whose
+claimed task could then never complete, so `rav1d_decode_frame`'s
+completion wait blocked forever (all threads parked → 0 CPU, `futex_`).
+The four hung cells were exactly the first-420 cells of the four largest
+images; the panic messages sat unread in their `enc.log`s the whole time
+(`/tmp/tp_conf.3354053`, preserved in the issue). Both halves are fixed in
+rav1d-safe@49df1fc0 (guards narrowed to dav1d's exact read/write sets +
+worker panics now fail the decode with an error in ms instead of wedging),
+with regression tests + the committed trigger vector upstream. zenavif's
+`examples/hang_stress.rs` is the product-path stress loop that found it
+(613/613 full-stack cells clean on the patched chain, 14-way, hot-cell
+weighted; plus 9,600 clean decode-stress iterations upstream). **Release-gated:**
+registry builds ship rav1d-safe 0.5.7 (panic+wedge behavior) until the
+rav1d-safe release past 0.5.7 and the zenavif dep bump; the harness
+`timeout 600` per cell stays as belt-and-suspenders until then.
 
 Final tables land in `benchmarks/rd_gap_twopass_2026-07-03.tsv` + this
 section when the arms complete.

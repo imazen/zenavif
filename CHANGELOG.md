@@ -11,6 +11,14 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 ## [Unreleased]
 
 ### Added
+- **`examples/hang_stress.rs` — the zenavif#30 futex-hang repro/stress loop**
+  (encode→decode→butteraugli→encode, `fast`/`full`/`decode`/`butter` modes).
+  Found the root cause of the two-pass conformance hang: a rav1d-safe
+  tile-worker `overlapping DisjointMut` panic (loop-filter compact-COW guards
+  vs CDEF) wedged the decode wait forever. Fixed upstream in
+  rav1d-safe@49df1fc0 (release-gated until the dep bump past 0.5.7 — see
+  CLAUDE.md Known Bugs); verified 613/613 full-stack cells clean on the
+  patched chain. Closes zenavif#30.
 - **`encode-mono` feature — true monochrome (Cs400) encode for Gray8 input**
   (zenavif#6): `encode_gray8` / the codec Gray8 path route through zenravif's
   new `Encoder::encode_gray8`, coding a luma-only bitstream (no chroma planes,

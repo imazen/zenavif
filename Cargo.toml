@@ -241,6 +241,12 @@ rustdoc-args = ["--generate-link-to-definition"]
 name = "two_pass_cell"
 required-features = ["two-pass-butteraugli"]
 
+# zenavif#30 futex-hang repro/stress loop (found the rav1d-safe tile-threading
+# CDEF/loop-filter guard race; kept as the product-path stress harness).
+[[example]]
+name = "hang_stress"
+required-features = ["two-pass-butteraugli"]
+
 [patch.crates-io]
 # Committed dev patch (same posture as the ../ravif path dep): zenravif needs
 # zenavif-serialize 0.2.0 (set_gain_map_alt_icc), unpublished — this pin supplies it
