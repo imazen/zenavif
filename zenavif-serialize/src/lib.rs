@@ -88,6 +88,12 @@ fn add_gain_map<'data>(
         content_type: "",
     });
     let gm_ispe = push_prop(ipco, IpcoProp::Ispe(IspeBox { width: gm.width, height: gm.height }))?;
+    // MIAF: coded items carry a mandatory pixi (strict readers reject
+    // the gain-map item without one).
+    let gm_pixi = push_prop(ipco, IpcoProp::Pixi(PixiBox {
+        channels: if gm.monochrome { 1 } else { 3 },
+        depth: gm.bit_depth,
+    }))?;
     // AV1 seq_profile rules: 0 (Main) = 8/10-bit 4:2:0 or mono;
     // 1 (High) = 8/10-bit 4:4:4; 2 (Professional) = 12-bit anything,
     // or 8/10-bit 4:2:2. Deriving from depth alone mislabeled 4:4:4
@@ -114,7 +120,7 @@ fn add_gain_map<'data>(
     }))?;
     ipma_entries.push(IpmaEntry {
         item_id: gain_map_id,
-        prop_ids: from_array([gm_ispe, gm_av1c | ESSENTIAL_BIT]),
+        prop_ids: from_array([gm_ispe, gm_pixi, gm_av1c | ESSENTIAL_BIT]),
     });
     iloc_items.push(IlocItem {
         id: gain_map_id,
