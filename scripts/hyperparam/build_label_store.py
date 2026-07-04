@@ -70,6 +70,7 @@ SRC = {
     "sizedecay": "/mnt/v/output/zenavif/sizedecay-2026-07-03",
     "speedladder": "/mnt/v/output/zenavif/speedladder-2026-07-04",
     "fastwins": "/mnt/v/output/zenavif/fastwins-20260704",
+    "p1part": "/mnt/v/output/zenavif/p1part-20260704",
 }
 # palette-mech A/B val corpus (14 VAL-LSD origins materialized with the wedge
 # conventions; join-verified 108/108) — see its _MANIFEST.json + picks_val14.json
@@ -431,6 +432,51 @@ def sources():
                           corpus="train26", sweep_source="fastwins-2026-07-04",
                           arm_id=f"fastwins/confirm-s{spd}-{arm}", knob_json=json.dumps(k, sort_keys=True),
                           encoder_rev=fw_rev, q_kind="cavif_q", speed=spd, rows=288))
+
+    # --- P1PART partition liveness+pruning arms (2026-07-04, P1 lever 1) ---
+    # Rect/4-way partitions kept LIVE at fast tiers (rect_thr / part_max axes)
+    # with the zenrav1e topdown_prune knob controlling cost (none_breakout /
+    # rect+4way rel-gap margins / homogeneity gate). s6/s8 arms ride the P0
+    # landed baseline (tx-size RDO depth-1); s4 rides the stock table. All
+    # train26 tune-ss2+palette, PALCONF-clean; RD = coarse 6-q, confirm =
+    # full 12-q; enc_ms contended (JOBS=24) — solo wall in timing_*.tsv.
+    p1_rev = "zenrav1e@725f5f71 via ravif 4f2caa93+p1part-devpatch"
+    p1d = SRC["p1part"]
+    p1_knobs = {
+        "base":       J(),
+        "r16":        J(rect_thr=16),
+        "r16no4":     J(rect_thr=16, prune_4wm=0.0),
+        "r16m32":     J(rect_thr=16, part_max=32),
+        "r32m32":     J(rect_thr=32, part_max=32),
+        "r16_bk":     J(rect_thr=16, prune_bk=1.0),
+        "r16_pr1":    J(rect_thr=16, prune_bk=1.0, prune_rectm=0.25, prune_4wm=0.05, prune_varg=3.0),
+        "r16_pr2":    J(rect_thr=16, prune_bk=2.0, prune_rectm=0.15, prune_4wm=0.05, prune_varg=3.0),
+        "r16m32_pr1": J(rect_thr=16, part_max=32, prune_bk=1.0, prune_rectm=0.25, prune_4wm=0.05, prune_varg=3.0),
+        "r16m32_pr2": J(rect_thr=16, part_max=32, prune_bk=2.0, prune_rectm=0.15, prune_4wm=0.05, prune_varg=3.0),
+    }
+    P1_S6 = list(p1_knobs)
+    P1_S8 = ["base", "r16", "r16_pr1", "r16_pr2"]
+    P1_S4 = ["base", "r16", "r16_pr1"]
+    for spd, arms in ((6, P1_S6), (8, P1_S8), (4, P1_S4)):
+        for arm in arms:
+            k = json.loads(p1_knobs[arm])
+            k.update(speed=spd, tune="ssimulacra2", palette="auto", threads=1)
+            if spd in (6, 8):
+                k.update(tx_size_rdo=1, tx_size_depth=1)  # P0 landed baseline
+            s.append(dict(path=f"{p1d}/p1_s{spd}_{arm}.tsv", kind="rd_tsv",
+                          corpus="train26", sweep_source="p1part-2026-07-04",
+                          arm_id=f"p1part/s{spd}-{arm}", knob_json=json.dumps(k, sort_keys=True),
+                          encoder_rev=p1_rev, q_kind="cavif_q", speed=spd, rows=144))
+    for spd, arms in ((6, ("base", "r16_pr1")), (8, ("base", "r16_pr1")), (4, ("base", "r16_pr1"))):
+        for arm in arms:
+            k = json.loads(p1_knobs[arm])
+            k.update(speed=spd, tune="ssimulacra2", palette="auto", threads=1, grid="full12q")
+            if spd in (6, 8):
+                k.update(tx_size_rdo=1, tx_size_depth=1)
+            s.append(dict(path=f"{p1d}/confirm_s{spd}_{arm}.tsv", kind="rd_tsv",
+                          corpus="train26", sweep_source="p1part-2026-07-04",
+                          arm_id=f"p1part/confirm-s{spd}-{arm}", knob_json=json.dumps(k, sort_keys=True),
+                          encoder_rev=p1_rev, q_kind="cavif_q", speed=spd, rows=288))
     return s
 
 
