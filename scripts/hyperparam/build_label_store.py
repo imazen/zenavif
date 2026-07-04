@@ -68,6 +68,7 @@ SRC = {
     "palette": "/mnt/v/output/zenrav1e-palette/sweep-20260703-final2",
     "palmech": "/mnt/v/output/rd-gap-palette-ab-2026-07-03/results",
     "sizedecay": "/mnt/v/output/zenavif/sizedecay-2026-07-03",
+    "speedladder": "/mnt/v/output/zenavif/speedladder-2026-07-04",
 }
 # palette-mech A/B val corpus (14 VAL-LSD origins materialized with the wedge
 # conventions; join-verified 108/108) — see its _MANIFEST.json + picks_val14.json
@@ -356,6 +357,38 @@ def sources():
                   arm_id="sdnontune/rdotx_s2-val",
                   knob_json=J(speed=2, tune="off", palette="auto", sd2_rdotx=1),
                   encoder_rev=nt_rev, q_kind="cavif_q", speed=2, rows=384))
+
+    # --- SPEED-LADDER GAP MAP arms (2026-07-04) — the fast-tier labels the drift
+    # verdict wanted re-encoded at current master (speed/qm heads + encode_ms LUTs):
+    # zr s{2,4,6,8,10} x {tune-ss2+palette, off} + aom --allintra cpu{2,4,6,8,9} x
+    # {default, iq} on train26 + legacy, BUTTER on, every zr cell PALCONF-clean.
+    # RD-row enc_ms = JOBS=22/24 on 48 dedicated cores (corroboration grade);
+    # timing_* rows = solo RD_CACHE=off JOBS=1 (honest wall). --threads 1 pinned.
+    sl_rev = "zenrav1e@184a616f (master tip c4047cec) via ravif a284209+devpatch-b2180ec2"
+    sl_aom_rev = "aomenc-3.14.1@632172a4 --allintra"
+    sld = SRC["speedladder"]
+    for corpus, tag, nzr, naom in (("train26", "t26", 288, 192), ("legacy22", "leg", 264, 176)):
+        for spd in (2, 4, 6, 8, 10):
+            for cfg, knob in (("tune", J(speed=spd, tune="ssimulacra2", palette="auto", threads=1)),
+                              ("off", J(speed=spd, tune="off", threads=1))):
+                s.append(dict(path=f"{sld}/zr_{tag}_s{spd}_{cfg}.tsv", kind="rd_tsv",
+                              corpus=corpus, sweep_source="speedladder-2026-07-04",
+                              arm_id=f"speedladder/zr-s{spd}-{cfg}", knob_json=knob,
+                              encoder_rev=sl_rev, q_kind="cavif_q", speed=spd, rows=nzr))
+        for cpu in (2, 4, 6, 8, 9):
+            for t, knob in (("def", J(encoder="aomenc", cpu_used=cpu, usage="allintra", tune="default", fmt="420")),
+                            ("iq", J(encoder="aomenc", cpu_used=cpu, usage="allintra", tune="iq", fmt="420"))):
+                s.append(dict(path=f"{sld}/aom_{tag}_cpu{cpu}{t}.tsv", kind="rd_tsv",
+                              corpus=corpus, sweep_source="speedladder-2026-07-04",
+                              arm_id=f"speedladder/aom-cpu{cpu}{t}-ai", knob_json=knob,
+                              encoder_rev=sl_aom_rev, q_kind="aom_cq", speed=cpu, rows=naom))
+    # t26 GOOD-mode anchor replays (values == deltaq-2026-07-02-convention refs; the
+    # store previously had these for legacy only)
+    for g, cpu, tune in (("cpu2", 2, "default"), ("cpu0def", 0, "default"), ("cpu0ss2", 0, "ssimulacra2")):
+        s.append(dict(path=f"{sld}/aomgood_t26_{g}.tsv", kind="rd_tsv",
+                      corpus="train26", sweep_source="speedladder-2026-07-04",
+                      arm_id=f"ref/aom-{g}_420", knob_json=J(encoder="aomenc", cpu_used=cpu, tune=tune, fmt="420"),
+                      encoder_rev="aomenc-3.14.1@632172a4", q_kind="aom_cq", speed=cpu, rows=192))
     return s
 
 

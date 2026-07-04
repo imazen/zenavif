@@ -11,6 +11,16 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 ## [Unreleased]
 
 ### Added
+- SPEED-LADDER GAP MAP: first fast-tier measurement of the RD-gap program —
+  zenrav1e s{2,4,6,8,10} × {tune-ss2+palette, off} vs libaom `--allintra`
+  cpu{2,4,6,8,9} × {default, `--tune=iq`}, train26 + legacy, per-cell aomdec +
+  rav1d-safe conformance (5,520 cells clean), solo wall-time pass. Verdict:
+  aom's allintra ladder pareto-dominates every zr arm at matched wall-time on
+  photos (no fast-tier crossover); tune mandatory + nearly free at fast tiers;
+  mechanism-liveness audit + ranked wedge list seed the fast-mode program.
+  Harness `scripts/rd_gap/chain_speed_ladder.sh` + `analyze_speed_ladder.py`;
+  `docs/SPEED_LADDER.md` + `benchmarks/rd_gap_speed_ladder_2026-07-04.tsv`;
+  label store +9,776 fast-tier rows (speedladder-2026-07-04 sources).
 - **`examples/hang_stress.rs` — the zenavif#30 futex-hang repro/stress loop**
   (encode→decode→butteraugli→encode, `fast`/`full`/`decode`/`butter` modes).
   Found the root cause of the two-pass conformance hang: a rav1d-safe
@@ -87,7 +97,6 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   per-cell WORK dir defaults to local disk (drvfs transiently EIOs whole
   worker batches under WSL memory reclaim) (6884b7b, 17c428a).
 
-### Added
 - `two-pass-butteraugli` feature: `encode_rgb8_two_pass` — butteraugli-
   diffmap-guided second pass (spatial closed loop; libaom `tune=butteraugli`
   analog through zenrav1e's per-SB delta-q). Release-gated at runtime behind

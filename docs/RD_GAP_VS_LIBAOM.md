@@ -102,6 +102,16 @@ mode shipped (release-gated): median −0.97% vs libaom cpu-used=0 (its slowest-
 −3.01% vs cpu2, winning 11/19 photos per-image — see "s1 deep mode" below.** Re-run
 `scripts/rd_gap/` after any future zenrav1e change to check for regressions.
 
+**2026-07-04 — the SPEED-LADDER GAP MAP extends the program over the SPEED axis**
+(zr s2-s10 × tune/off vs libaom `--allintra` cpu2-9 × default/`--tune=iq` — the first
+fast-tier measurement; everything above is s1/s2 vs GOOD-mode cpu0/cpu2): **the aom
+allintra ladder pareto-dominates every zr arm at matched wall-time on photos** (no
+crossover; gap +2..+8% at the slow end widening to +33..+49% at s10; the tune is
+mandatory and nearly free at fast tiers; GOOD-mode references are themselves off the
+aom pareto). 5,520 fast-tier cells PALCONF-clean (no new conformance bugs). Ranked
+fast-tier wedge list + mechanism-liveness audit + the s2-off/s2-tune time inversion:
+`docs/SPEED_LADDER.md` + `benchmarks/rd_gap_speed_ladder_2026-07-04.tsv`.
+
 **2026-07-03 — the WEDGE MAP extends the program over size (256/512/1024/2048) and
 c50 quadrant crops** (everything above was measured at 1024-full only): the 1024 win
 reproduces (continuity PASS) but decays monotonically to **parity at 256px**, family

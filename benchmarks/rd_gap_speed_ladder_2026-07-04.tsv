@@ -1,0 +1,705 @@
+# SPEED-LADDER GAP MAP -- zenrav1e s{2,4,6,8,10} x {tune-ss2+palette, tune-off} vs libaom --allintra cpu{2,4,6,8,9} x {default, --tune=iq} -- 2026-07-04 -- sweeps on zenavif-sweep-1 (Hetzner ccx63 48c, restored from snapshot 404331993), analysis host lilith
+# FIRST fast-tier measurement of the program (everything to date was s1/s2 vs cpu0/cpu2); libavif defaults to speed 6 -- this is the web-workload operating range
+# zenrav1e: master@origin 184a616f (code tip c4047cec) -- includes all 2026-07-02/03 landings (partition fixes, s1-deep knobs, Tune::Ssimulacra2 incl size-conditional QM-dist b0098eb1, palette+AA detection incl chroma palette (default-off) a3b72033, cdf-log fix e86235b5, 4:2:0 sliver TU fix 17e67842, intrabc chunk-A (default-off) 7a59e569, FrameHints (default-off) c4047cec)
+# cavif: ravif main@origin a284209 (code 13b1ca4, SMALL_PX_RDO_TX_LIVE=true [inert at 1024px], sb_q_scale release-gated) + DEV-PATCH (path dep -> ~/work/zen/zenrav1e, ZENRAVIF_TUNE/ZENRAVIF_PALETTE env passthroughs, S1_DEEP_ARMS_LIVE=true [inert at s>=2]) -- patch sha256 b2180ec28e61e447, full diff in raw dir; patch REVERTED after the sweep (never committed)
+# arming (BIT-REPRODUCIBLE): zr arms cavif -f -Q<q> -s{2,4,6,8,10} --threads 1 --depth 8; tune cfg = env ZENRAVIF_TUNE=ssimulacra2 ZENRAVIF_PALETTE=auto, off cfg = no env; Q grid {30,40,50,55,60,65,70,75,80,85,90,95}
+# --threads 1 pinned: cavif default threads (= host cores) inflates tiles at fast speeds (min_tile_size 128-256 at s>=4) -- measured +3.6% bytes at s6/48-thread vs 1-thread (84383 -> 87388 B, 5004_nps Q60); tiling also makes the bitstream core-count-dependent. See docs/SPEED_LADDER.md.
+# aom arms: pinned 632172a4 (aomenc 3.14.1) build_slow; --allintra --cpu-used={2,4,6,8,9} [--tune=iq] --end-usage=q --cq-level={8,16,24,32,40,48,56,63} --i420 --passes=1 --lag-in-frames=0 --color-primaries=bt709 --transfer-characteristics=srgb --matrix-coefficients=bt470bg; fmt 420. --allintra = the libavif-1.4 still-image operating mode; --tune=iq verified present in the pinned build. GOOD-mode continuity anchors (cpu2-default / cpu0-default / cpu0-ss2tune, deltaq-2026-07-02 convention) replayed from the cell cache.
+# binaries (sha256/16): cavif beb3b1ff7edfac2b, aomenc 187a2533efe8f3cb, aomdec bcf1813b7a0e7f63, save_png df7ceba40f523401, extract_av1 a628a3c4b1a8ddae, ivf_raw b5da3acd5f7b78de, fast-ssim2-cli 9927781d42f5f32d, butteraugli 94fb99873f1db9fb (zenavif src @ 5aacaca1)
+# corpora: train26 (24 TRAIN-split origins, 12 families) + legacy 22 (19 photos + 3 fam-7 plots; continuity); 1024-long-edge renditions
+# conformance (zero-corruption bar): EVERY zenrav1e RD cell ran PALCONF -- extract_av1 -> aomdec decodes cleanly AND raw output md5-agrees with rav1d-safe (ivf_raw); fast tiers exercise TX_MODE_LARGEST + reduced-tx paths the slow tiers never hit
+# scoring: fast-ssim2 (canonical) + butteraugli 3-norm/max per cell; zr decoded by zenavif save_png (rav1d-safe), aom by aomdec+color.py (color-exact BT.601-full)
+# timing: separate solo pass, RD_CACHE=off JOBS=1, 4 img x 3 q x every arm (sample_timing4.tsv: nps photo / nature closeup / lkml screenshot / AI product), single-threaded encoders (aomenc verified 100% CPU). CONVENTION ASYMMETRY: zr wall includes PNG decode + RGB->YUV (~80ms/0.74MP, PIL proxy) while aom encodes a pre-made y4m -- conservative AGAINST zr at fast tiers; noted where it matters.
+# RD-sweep enc_ms: sequential solo runs (JOBS=22/24 per-image parallelism, single-threaded encoders, 48 dedicated cores) -- corroboration only; headline time = solo pass
+# raw sweeps: /mnt/v/output/zenavif/speedladder-2026-07-04/ (SHA256SUMS; Tower mirror) -- companion pointer file alongside this TSV
+# BD convention: per-image monotone-frontier hull, log-bytes trapezoid over overlapping ssim2 (bd_arm.py); negative = zenrav1e needs fewer bits at matched quality; photos = family-7xxx excluded
+# analysis: scripts/rd_gap/analyze_speed_ladder.py (this file consolidates its output); harness scripts/rd_gap/chain_speed_ladder.sh
+#
+# === SOLO TIMING (RD_CACHE=off, JOBS=1, 4 img x 3 q per arm; median wall ms/MP; zr includes PNG decode ~108 ms/MP) ===
+arm	ms_per_MP	p25	p75	n
+aom-cpu9def-ai	41	31	53	12
+aom-cpu9iq-ai	49	39	60	12
+aom-cpu8def-ai	125	70	168	12
+aom-cpu8iq-ai	165	93	217	12
+zr-s10-off	231	208	279	12
+zr-s10-tune	281	246	600	12
+aom-cpu6def-ai	361	240	429	12
+aom-cpu6iq-ai	470	308	542	12
+zr-s8-off	667	578	761	12
+zr-s8-tune	723	650	1476	12
+zr-s6-off	905	800	1089	12
+zr-s6-tune	1026	918	1918	12
+aom-cpu4def-ai	1978	1232	2601	12
+aom-cpu4iq-ai	2779	1521	3609	12
+zr-s4-off	4175	3117	6523	12
+aom-cpu2def-ai	4707	2572	6900	12
+zr-s4-tune	5898	3342	8846	12
+aom-cpu2iq-ai	6639	3857	10080	12
+zr-s2-tune	17647	9319	26943	12
+zr-s2-off	22640	8102	34897	12
+#
+# === MATCHED-WALL-TIME PAIRING t26 (photos n=20; each zr arm vs nearest-log-time aom arm; + = zr needs more bits) ===
+zr_arm	ms_per_MP	nearest_aom	aom_ms_per_MP	time_ratio	bd_ssim2_med	bd_ba3n_med	wins_ssim2
+zr-s10-off	231	aom-cpu8iq-ai	165	1.40x	+59.26	+45.81	0/20
+zr-s10-tune	281	aom-cpu6def-ai	361	0.78x	+32.62	+27.91	0/20
+zr-s2-off	22640	aom-cpu2iq-ai	6639	3.41x	+12.08	+9.40	0/20
+zr-s2-tune	17647	aom-cpu2iq-ai	6639	2.66x	+2.42	+3.22	8/20
+zr-s4-off	4175	aom-cpu2def-ai	4707	0.89x	+17.65	+6.68	1/20
+zr-s4-tune	5898	aom-cpu2iq-ai	6639	0.89x	+6.40	+6.50	5/20
+zr-s6-off	905	aom-cpu6iq-ai	470	1.93x	+25.40	+14.47	0/20
+zr-s6-tune	1026	aom-cpu4def-ai	1978	0.52x	+5.38	+2.15	8/20
+zr-s8-off	667	aom-cpu6iq-ai	470	1.42x	+30.92	+17.01	0/20
+zr-s8-tune	723	aom-cpu6iq-ai	470	1.54x	+5.86	+4.13	5/20
+#
+# === MATCHED-WALL-TIME PAIRING leg (photos n=19; each zr arm vs nearest-log-time aom arm; + = zr needs more bits) ===
+zr_arm	ms_per_MP	nearest_aom	aom_ms_per_MP	time_ratio	bd_ssim2_med	bd_ba3n_med	wins_ssim2
+zr-s10-off	231	aom-cpu8iq-ai	165	1.40x	+57.61	+31.93	0/19
+zr-s10-tune	281	aom-cpu6def-ai	361	0.78x	+49.04	+36.52	1/19
+zr-s2-off	22640	aom-cpu2iq-ai	6639	3.41x	+12.92	+8.36	2/19
+zr-s2-tune	17647	aom-cpu2iq-ai	6639	2.66x	+0.60	+0.02	7/19
+zr-s4-off	4175	aom-cpu2def-ai	4707	0.89x	+11.41	+7.24	2/19
+zr-s4-tune	5898	aom-cpu2iq-ai	6639	0.89x	+7.90	+3.89	3/19
+zr-s6-off	905	aom-cpu6iq-ai	470	1.93x	+27.46	+11.66	0/19
+zr-s6-tune	1026	aom-cpu4def-ai	1978	0.52x	+13.61	-1.82	5/19
+zr-s8-off	667	aom-cpu6iq-ai	470	1.42x	+30.25	+14.14	0/19
+zr-s8-tune	723	aom-cpu6iq-ai	470	1.54x	+7.68	+3.74	3/19
+#
+# === TIME-NORMALIZED PARETO t26 (BD ssim2 photos vs aom-cpu6iq-ai; GOOD anchors have no solo timing in this pass) ===
+arm	ms_per_MP	bd_median	bd_mean	wins
+aom-cpu9def-ai	41	+27.32	+38.49	4/20
+aom-cpu9iq-ai	49	+23.76	+29.98	3/20
+aom-cpu8def-ai	125	-2.40	+2.18	11/20
+aom-cpu8iq-ai	165	+11.33	+8.73	3/20
+zr-s10-off	231	+69.87	+82.39	0/20
+zr-s10-tune	281	+45.07	+50.37	0/20
+aom-cpu6def-ai	361	+5.59	-2.97	8/20
+aom-cpu6iq-ai	470	+0.00	+0.00	-
+zr-s8-off	667	+30.92	+36.58	0/20
+zr-s8-tune	723	+5.86	+9.75	5/20
+zr-s6-off	905	+25.40	+32.84	0/20
+zr-s6-tune	1026	+3.66	+6.09	7/20
+aom-cpu4def-ai	1978	-3.65	-8.21	13/20
+aom-cpu4iq-ai	2779	-7.45	-6.57	18/20
+zr-s4-off	4175	+8.12	+13.50	0/20
+aom-cpu2def-ai	4707	-8.84	-12.60	16/20
+zr-s4-tune	5898	-6.40	-5.04	16/20
+aom-cpu2iq-ai	6639	-11.04	-8.26	18/20
+zr-s2-tune	17647	-10.65	-9.09	18/20
+zr-s2-off	22640	+1.29	+3.49	8/20
+aom-cpu0def-good	NA	-1.08	+0.82	11/20
+aom-cpu0ss2-good	NA	-12.51	-12.30	19/20
+aom-cpu2-good	NA	+0.10	+3.31	10/20
+#
+# === TIME-NORMALIZED PARETO leg (BD ssim2 photos vs aom-cpu6iq-ai; GOOD anchors have no solo timing in this pass) ===
+arm	ms_per_MP	bd_median	bd_mean	wins
+aom-cpu9def-ai	41	+44.78	+44.24	6/19
+aom-cpu9iq-ai	49	+25.02	+39.20	4/19
+aom-cpu8def-ai	125	+8.57	+6.40	8/19
+aom-cpu8iq-ai	165	+9.21	+8.44	5/19
+zr-s10-off	231	+69.46	+87.73	0/19
+zr-s10-tune	281	+38.36	+56.22	0/19
+aom-cpu6def-ai	361	+2.29	-3.13	9/19
+aom-cpu6iq-ai	470	+0.00	+0.00	-
+zr-s8-off	667	+30.25	+37.06	0/19
+zr-s8-tune	723	+7.68	+9.97	3/19
+zr-s6-off	905	+27.46	+27.99	0/19
+zr-s6-tune	1026	+5.26	+5.39	5/19
+aom-cpu4def-ai	1978	-8.87	-10.52	13/19
+aom-cpu4iq-ai	2779	-7.42	-7.77	19/19
+zr-s4-off	4175	+10.81	+10.50	4/19
+aom-cpu2def-ai	4707	-8.37	-9.58	16/19
+zr-s4-tune	5898	-6.42	-5.81	18/19
+aom-cpu2iq-ai	6639	-10.98	-9.27	18/19
+zr-s2-tune	17647	-12.41	-10.31	18/19
+zr-s2-off	22640	-0.54	+1.34	10/19
+aom-cpu0def-good	NA	-0.14	-0.45	10/19
+aom-cpu0ss2-good	NA	-13.84	-13.09	18/19
+aom-cpu2-good	NA	+2.26	+2.47	8/19
+#
+# === BD MATRIX t26: zr arms x aom-allintra refs (tune arms: ssim2+ba3n both scopes; off arms: ssim2 photos only; FULL matrix in raw dir final_analysis_*.txt) ===
+zr_arm	ref_arm	metric	scope	n	median	mean	wins
+zr-s10-off	aom-cpu2def-ai	ssim2	photos	20	+85.61	+107.48	0/20
+zr-s10-off	aom-cpu2iq-ai	ssim2	photos	20	+88.92	+103.95	0/20
+zr-s10-off	aom-cpu4def-ai	ssim2	photos	20	+73.67	+95.17	0/20
+zr-s10-off	aom-cpu4iq-ai	ssim2	photos	20	+82.74	+97.15	0/20
+zr-s10-off	aom-cpu6def-ai	ssim2	photos	20	+61.08	+82.58	0/20
+zr-s10-off	aom-cpu6iq-ai	ssim2	photos	20	+69.87	+82.39	0/20
+zr-s10-off	aom-cpu8def-ai	ssim2	photos	20	+57.66	+69.47	0/20
+zr-s10-off	aom-cpu8iq-ai	ssim2	photos	20	+59.26	+65.83	0/20
+zr-s10-off	aom-cpu9def-ai	ssim2	photos	20	+25.14	+30.45	1/20
+zr-s10-off	aom-cpu9iq-ai	ssim2	photos	20	+26.45	+32.93	0/20
+zr-s10-tune	aom-cpu2def-ai	ssim2	photos	20	+61.62	+74.46	0/20
+zr-s10-tune	aom-cpu2def-ai	ssim2	all	22	+61.62	+78.07	0/22
+zr-s10-tune	aom-cpu2def-ai	butteraugli_3n	photos	20	+47.45	+61.09	1/20
+zr-s10-tune	aom-cpu2def-ai	butteraugli_3n	all	22	+50.16	+64.50	1/22
+zr-s10-tune	aom-cpu2iq-ai	ssim2	photos	20	+58.79	+68.38	0/20
+zr-s10-tune	aom-cpu2iq-ai	ssim2	all	22	+58.79	+69.81	0/22
+zr-s10-tune	aom-cpu2iq-ai	butteraugli_3n	photos	20	+57.21	+71.72	0/20
+zr-s10-tune	aom-cpu2iq-ai	butteraugli_3n	all	22	+63.51	+74.16	0/22
+zr-s10-tune	aom-cpu4def-ai	ssim2	photos	20	+53.71	+64.00	0/20
+zr-s10-tune	aom-cpu4def-ai	ssim2	all	22	+53.71	+68.28	0/22
+zr-s10-tune	aom-cpu4def-ai	butteraugli_3n	photos	20	+42.53	+54.05	1/20
+zr-s10-tune	aom-cpu4def-ai	butteraugli_3n	all	22	+44.93	+57.36	1/22
+zr-s10-tune	aom-cpu4iq-ai	ssim2	photos	20	+55.44	+62.36	0/20
+zr-s10-tune	aom-cpu4iq-ai	ssim2	all	22	+55.44	+66.05	0/22
+zr-s10-tune	aom-cpu4iq-ai	butteraugli_3n	photos	20	+50.92	+62.14	0/20
+zr-s10-tune	aom-cpu4iq-ai	butteraugli_3n	all	22	+56.60	+64.95	0/22
+zr-s10-tune	aom-cpu6def-ai	ssim2	photos	20	+32.62	+52.60	0/20
+zr-s10-tune	aom-cpu6def-ai	ssim2	all	22	+32.62	+51.97	0/22
+zr-s10-tune	aom-cpu6def-ai	butteraugli_3n	photos	20	+27.91	+38.65	1/20
+zr-s10-tune	aom-cpu6def-ai	butteraugli_3n	all	22	+27.91	+40.52	1/22
+zr-s10-tune	aom-cpu6iq-ai	ssim2	photos	20	+45.07	+50.37	0/20
+zr-s10-tune	aom-cpu6iq-ai	ssim2	all	22	+45.07	+51.50	0/22
+zr-s10-tune	aom-cpu6iq-ai	butteraugli_3n	photos	20	+42.41	+49.48	0/20
+zr-s10-tune	aom-cpu6iq-ai	butteraugli_3n	all	22	+42.41	+50.98	0/22
+zr-s10-tune	aom-cpu8def-ai	ssim2	photos	20	+36.32	+43.83	0/20
+zr-s10-tune	aom-cpu8def-ai	ssim2	all	21	+35.69	+40.36	1/21
+zr-s10-tune	aom-cpu8def-ai	butteraugli_3n	photos	20	+9.14	+16.06	4/20
+zr-s10-tune	aom-cpu8def-ai	butteraugli_3n	all	22	+9.14	+16.41	5/22
+zr-s10-tune	aom-cpu8iq-ai	ssim2	photos	20	+34.87	+37.87	0/20
+zr-s10-tune	aom-cpu8iq-ai	ssim2	all	22	+34.87	+35.94	1/22
+zr-s10-tune	aom-cpu8iq-ai	butteraugli_3n	photos	20	+24.01	+29.49	1/20
+zr-s10-tune	aom-cpu8iq-ai	butteraugli_3n	all	22	+24.01	+29.27	2/22
+zr-s10-tune	aom-cpu9def-ai	ssim2	photos	20	+4.53	+11.51	8/20
+zr-s10-tune	aom-cpu9def-ai	ssim2	all	21	+4.00	+7.11	9/21
+zr-s10-tune	aom-cpu9def-ai	butteraugli_3n	photos	20	-2.72	-6.32	12/20
+zr-s10-tune	aom-cpu9def-ai	butteraugli_3n	all	22	-2.72	-9.02	13/22
+zr-s10-tune	aom-cpu9iq-ai	ssim2	photos	20	+10.08	+12.00	5/20
+zr-s10-tune	aom-cpu9iq-ai	ssim2	all	21	+7.05	+7.59	6/21
+zr-s10-tune	aom-cpu9iq-ai	butteraugli_3n	photos	20	+6.98	+2.19	6/20
+zr-s10-tune	aom-cpu9iq-ai	butteraugli_3n	all	22	+6.98	-0.51	7/22
+zr-s2-off	aom-cpu2def-ai	ssim2	photos	20	+5.44	+20.69	8/20
+zr-s2-off	aom-cpu2iq-ai	ssim2	photos	20	+12.08	+15.93	0/20
+zr-s2-off	aom-cpu4def-ai	ssim2	photos	20	-0.19	+13.52	10/20
+zr-s2-off	aom-cpu4iq-ai	ssim2	photos	20	+7.29	+11.58	4/20
+zr-s2-off	aom-cpu6def-ai	ssim2	photos	20	-8.00	+7.32	14/20
+zr-s2-off	aom-cpu6iq-ai	ssim2	photos	20	+1.29	+3.49	8/20
+zr-s2-off	aom-cpu8def-ai	ssim2	photos	20	-14.74	-1.91	11/20
+zr-s2-off	aom-cpu8iq-ai	ssim2	photos	20	-11.04	-3.56	16/20
+zr-s2-off	aom-cpu9def-ai	ssim2	photos	20	-28.93	-21.44	16/20
+zr-s2-off	aom-cpu9iq-ai	ssim2	photos	20	-24.52	-19.69	16/20
+zr-s2-tune	aom-cpu2def-ai	ssim2	photos	20	-4.48	+7.30	11/20
+zr-s2-tune	aom-cpu2def-ai	ssim2	all	22	-4.48	+10.53	12/22
+zr-s2-tune	aom-cpu2def-ai	butteraugli_3n	photos	19	-5.46	-6.22	12/19
+zr-s2-tune	aom-cpu2def-ai	butteraugli_3n	all	21	-5.46	-3.09	13/21
+zr-s2-tune	aom-cpu2iq-ai	ssim2	photos	20	+2.42	+2.14	8/20
+zr-s2-tune	aom-cpu2iq-ai	ssim2	all	22	+2.42	+5.93	9/22
+zr-s2-tune	aom-cpu2iq-ai	butteraugli_3n	photos	19	+3.22	+0.24	7/19
+zr-s2-tune	aom-cpu2iq-ai	butteraugli_3n	all	22	+2.05	+3.20	9/22
+zr-s2-tune	aom-cpu4def-ai	ssim2	photos	20	-7.12	+1.03	16/20
+zr-s2-tune	aom-cpu4def-ai	ssim2	all	22	-7.12	+4.85	17/22
+zr-s2-tune	aom-cpu4def-ai	butteraugli_3n	photos	19	-7.50	-10.05	16/19
+zr-s2-tune	aom-cpu4def-ai	butteraugli_3n	all	21	-7.50	-6.55	17/21
+zr-s2-tune	aom-cpu4iq-ai	ssim2	photos	20	-3.22	-1.98	16/20
+zr-s2-tune	aom-cpu4iq-ai	ssim2	all	22	-3.22	+2.52	17/22
+zr-s2-tune	aom-cpu4iq-ai	butteraugli_3n	photos	19	-3.32	-5.05	11/19
+zr-s2-tune	aom-cpu4iq-ai	butteraugli_3n	all	21	-3.32	-1.15	12/21
+zr-s2-tune	aom-cpu6def-ai	ssim2	photos	20	-17.76	-5.31	16/20
+zr-s2-tune	aom-cpu6def-ai	ssim2	all	22	-17.76	-5.39	17/22
+zr-s2-tune	aom-cpu6def-ai	butteraugli_3n	photos	19	-16.58	-18.06	19/19
+zr-s2-tune	aom-cpu6def-ai	butteraugli_3n	all	21	-16.58	-16.31	20/21
+zr-s2-tune	aom-cpu6iq-ai	ssim2	photos	20	-10.65	-9.09	18/20
+zr-s2-tune	aom-cpu6iq-ai	ssim2	all	22	-10.65	-9.03	19/22
+zr-s2-tune	aom-cpu6iq-ai	butteraugli_3n	photos	19	-9.85	-12.28	18/19
+zr-s2-tune	aom-cpu6iq-ai	butteraugli_3n	all	20	-10.83	-13.10	19/20
+zr-s2-tune	aom-cpu8def-ai	ssim2	photos	20	-21.67	-11.35	13/20
+zr-s2-tune	aom-cpu8def-ai	ssim2	all	21	-18.73	-10.75	13/21
+zr-s2-tune	aom-cpu8def-ai	butteraugli_3n	photos	19	-28.22	-29.75	19/19
+zr-s2-tune	aom-cpu8def-ai	butteraugli_3n	all	21	-28.22	-29.18	21/21
+zr-s2-tune	aom-cpu8iq-ai	ssim2	photos	20	-21.32	-15.06	16/20
+zr-s2-tune	aom-cpu8iq-ai	ssim2	all	22	-21.32	-16.88	18/22
+zr-s2-tune	aom-cpu8iq-ai	butteraugli_3n	photos	19	-21.78	-22.83	19/19
+zr-s2-tune	aom-cpu8iq-ai	butteraugli_3n	all	21	-21.78	-23.40	21/21
+zr-s2-tune	aom-cpu9def-ai	ssim2	photos	20	-39.53	-29.22	17/20
+zr-s2-tune	aom-cpu9def-ai	ssim2	all	21	-41.33	-32.56	18/21
+zr-s2-tune	aom-cpu9def-ai	butteraugli_3n	photos	19	-41.20	-41.19	19/19
+zr-s2-tune	aom-cpu9def-ai	butteraugli_3n	all	21	-41.47	-45.00	21/21
+zr-s2-tune	aom-cpu9iq-ai	ssim2	photos	20	-30.71	-29.27	17/20
+zr-s2-tune	aom-cpu9iq-ai	ssim2	all	21	-31.32	-32.61	18/21
+zr-s2-tune	aom-cpu9iq-ai	butteraugli_3n	photos	19	-34.62	-36.36	19/19
+zr-s2-tune	aom-cpu9iq-ai	butteraugli_3n	all	21	-36.12	-40.40	21/21
+zr-s4-off	aom-cpu2def-ai	ssim2	photos	20	+17.65	+30.97	1/20
+zr-s4-off	aom-cpu2iq-ai	ssim2	photos	20	+22.32	+26.72	0/20
+zr-s4-off	aom-cpu4def-ai	ssim2	photos	20	+11.37	+22.93	5/20
+zr-s4-off	aom-cpu4iq-ai	ssim2	photos	20	+15.19	+22.72	0/20
+zr-s4-off	aom-cpu6def-ai	ssim2	photos	20	+2.98	+15.90	8/20
+zr-s4-off	aom-cpu6iq-ai	ssim2	photos	20	+8.12	+13.50	0/20
+zr-s4-off	aom-cpu8def-ai	ssim2	photos	20	+1.22	+6.57	10/20
+zr-s4-off	aom-cpu8iq-ai	ssim2	photos	20	-5.68	+5.32	13/20
+zr-s4-off	aom-cpu9def-ai	ssim2	photos	20	-21.12	-15.09	16/20
+zr-s4-off	aom-cpu9iq-ai	ssim2	photos	20	-16.85	-12.97	16/20
+zr-s4-tune	aom-cpu2def-ai	ssim2	photos	20	+2.81	+11.98	9/20
+zr-s4-tune	aom-cpu2def-ai	ssim2	all	22	+2.81	+14.15	10/22
+zr-s4-tune	aom-cpu2def-ai	butteraugli_3n	photos	20	-3.33	-4.02	11/20
+zr-s4-tune	aom-cpu2def-ai	butteraugli_3n	all	22	-3.33	-3.22	12/22
+zr-s4-tune	aom-cpu2iq-ai	ssim2	photos	20	+6.40	+6.70	5/20
+zr-s4-tune	aom-cpu2iq-ai	ssim2	all	22	+6.40	+8.16	6/22
+zr-s4-tune	aom-cpu2iq-ai	butteraugli_3n	photos	20	+6.50	+2.05	5/20
+zr-s4-tune	aom-cpu2iq-ai	butteraugli_3n	all	22	+6.50	+2.36	6/22
+zr-s4-tune	aom-cpu4def-ai	ssim2	photos	20	-2.69	+5.56	11/20
+zr-s4-tune	aom-cpu4def-ai	ssim2	all	22	-2.69	+8.01	12/22
+zr-s4-tune	aom-cpu4def-ai	butteraugli_3n	photos	20	-5.29	-8.04	12/20
+zr-s4-tune	aom-cpu4def-ai	butteraugli_3n	all	22	-5.29	-7.24	13/22
+zr-s4-tune	aom-cpu4iq-ai	ssim2	photos	20	+1.33	+2.47	7/20
+zr-s4-tune	aom-cpu4iq-ai	ssim2	all	22	+1.33	+4.67	8/22
+zr-s4-tune	aom-cpu4iq-ai	butteraugli_3n	photos	20	+2.63	-3.17	7/20
+zr-s4-tune	aom-cpu4iq-ai	butteraugli_3n	all	22	+2.63	-2.64	8/22
+zr-s4-tune	aom-cpu6def-ai	ssim2	photos	20	-12.82	-1.17	16/20
+zr-s4-tune	aom-cpu6def-ai	ssim2	all	22	-12.82	-2.29	17/22
+zr-s4-tune	aom-cpu6def-ai	butteraugli_3n	photos	20	-13.21	-16.23	19/20
+zr-s4-tune	aom-cpu6def-ai	butteraugli_3n	all	22	-13.21	-16.29	21/22
+zr-s4-tune	aom-cpu6iq-ai	ssim2	photos	20	-6.40	-5.04	16/20
+zr-s4-tune	aom-cpu6iq-ai	ssim2	all	22	-6.40	-6.33	18/22
+zr-s4-tune	aom-cpu6iq-ai	butteraugli_3n	photos	20	-6.73	-10.55	16/20
+zr-s4-tune	aom-cpu6iq-ai	butteraugli_3n	all	22	-6.73	-10.80	17/22
+zr-s4-tune	aom-cpu8def-ai	ssim2	photos	20	-17.89	-7.38	13/20
+zr-s4-tune	aom-cpu8def-ai	ssim2	all	21	-16.37	-7.61	14/21
+zr-s4-tune	aom-cpu8def-ai	butteraugli_3n	photos	20	-26.99	-27.88	20/20
+zr-s4-tune	aom-cpu8def-ai	butteraugli_3n	all	22	-29.62	-29.03	22/22
+zr-s4-tune	aom-cpu8iq-ai	ssim2	photos	20	-18.63	-11.51	16/20
+zr-s4-tune	aom-cpu8iq-ai	ssim2	all	21	-18.75	-13.44	17/21
+zr-s4-tune	aom-cpu8iq-ai	butteraugli_3n	photos	20	-18.72	-21.48	20/20
+zr-s4-tune	aom-cpu8iq-ai	butteraugli_3n	all	22	-20.23	-23.11	22/22
+zr-s4-tune	aom-cpu9def-ai	ssim2	photos	20	-35.30	-26.20	17/20
+zr-s4-tune	aom-cpu9def-ai	ssim2	all	21	-39.51	-29.65	18/21
+zr-s4-tune	aom-cpu9def-ai	butteraugli_3n	photos	20	-38.92	-40.85	20/20
+zr-s4-tune	aom-cpu9def-ai	butteraugli_3n	all	22	-39.90	-43.74	22/22
+zr-s4-tune	aom-cpu9iq-ai	ssim2	photos	20	-27.60	-26.27	17/20
+zr-s4-tune	aom-cpu9iq-ai	ssim2	all	21	-27.95	-29.70	18/21
+zr-s4-tune	aom-cpu9iq-ai	butteraugli_3n	photos	19	-32.06	-33.71	19/19
+zr-s4-tune	aom-cpu9iq-ai	butteraugli_3n	all	21	-34.08	-37.15	21/21
+zr-s6-off	aom-cpu2def-ai	ssim2	photos	20	+34.85	+53.09	1/20
+zr-s6-off	aom-cpu2iq-ai	ssim2	photos	20	+43.75	+48.97	0/20
+zr-s6-off	aom-cpu4def-ai	ssim2	photos	20	+33.85	+43.67	2/20
+zr-s6-off	aom-cpu4iq-ai	ssim2	photos	20	+38.32	+43.48	0/20
+zr-s6-off	aom-cpu6def-ai	ssim2	photos	20	+19.48	+35.11	2/20
+zr-s6-off	aom-cpu6iq-ai	ssim2	photos	20	+25.40	+32.84	0/20
+zr-s6-off	aom-cpu8def-ai	ssim2	photos	20	+17.80	+24.45	4/20
+zr-s6-off	aom-cpu8iq-ai	ssim2	photos	20	+13.03	+22.23	2/20
+zr-s6-off	aom-cpu9def-ai	ssim2	photos	20	-10.80	-2.39	13/20
+zr-s6-off	aom-cpu9iq-ai	ssim2	photos	20	-5.98	+0.23	13/20
+zr-s6-tune	aom-cpu2def-ai	ssim2	photos	20	+9.85	+24.95	7/20
+zr-s6-tune	aom-cpu2def-ai	ssim2	all	22	+14.15	+30.27	7/22
+zr-s6-tune	aom-cpu2def-ai	butteraugli_3n	photos	20	+5.45	+7.91	6/20
+zr-s6-tune	aom-cpu2def-ai	butteraugli_3n	all	23	+8.46	+12.29	6/23
+zr-s6-tune	aom-cpu2iq-ai	ssim2	photos	20	+17.46	+19.16	2/20
+zr-s6-tune	aom-cpu2iq-ai	ssim2	all	22	+17.46	+24.59	2/22
+zr-s6-tune	aom-cpu2iq-ai	butteraugli_3n	photos	20	+13.28	+14.69	3/20
+zr-s6-tune	aom-cpu2iq-ai	butteraugli_3n	all	23	+13.39	+19.14	3/23
+zr-s6-tune	aom-cpu4def-ai	ssim2	photos	20	+5.38	+17.64	8/20
+zr-s6-tune	aom-cpu4def-ai	ssim2	all	22	+11.14	+23.68	8/22
+zr-s6-tune	aom-cpu4def-ai	butteraugli_3n	photos	20	+2.15	+3.29	8/20
+zr-s6-tune	aom-cpu4def-ai	butteraugli_3n	all	23	+5.62	+8.10	8/23
+zr-s6-tune	aom-cpu4iq-ai	ssim2	photos	20	+11.44	+14.37	3/20
+zr-s6-tune	aom-cpu4iq-ai	ssim2	all	22	+12.86	+21.26	3/22
+zr-s6-tune	aom-cpu4iq-ai	butteraugli_3n	photos	20	+9.08	+8.66	4/20
+zr-s6-tune	aom-cpu4iq-ai	butteraugli_3n	all	23	+9.25	+13.72	4/23
+zr-s6-tune	aom-cpu6def-ai	ssim2	photos	20	-1.88	+9.75	10/20
+zr-s6-tune	aom-cpu6def-ai	ssim2	all	22	-1.88	+10.92	11/22
+zr-s6-tune	aom-cpu6def-ai	butteraugli_3n	photos	20	-5.43	-6.30	15/20
+zr-s6-tune	aom-cpu6def-ai	butteraugli_3n	all	23	-3.52	-3.52	16/23
+zr-s6-tune	aom-cpu6iq-ai	ssim2	photos	20	+3.66	+6.09	7/20
+zr-s6-tune	aom-cpu6iq-ai	ssim2	all	22	+4.61	+7.68	7/22
+zr-s6-tune	aom-cpu6iq-ai	butteraugli_3n	photos	20	+1.41	+0.24	8/20
+zr-s6-tune	aom-cpu6iq-ai	butteraugli_3n	all	22	+1.41	+0.21	9/22
+zr-s6-tune	aom-cpu8def-ai	ssim2	photos	20	-7.15	+3.61	11/20
+zr-s6-tune	aom-cpu8def-ai	ssim2	all	21	-6.85	+4.14	11/21
+zr-s6-tune	aom-cpu8def-ai	butteraugli_3n	photos	20	-15.11	-20.06	19/20
+zr-s6-tune	aom-cpu8def-ai	butteraugli_3n	all	23	-13.88	-19.69	21/23
+zr-s6-tune	aom-cpu8iq-ai	ssim2	photos	20	-7.77	-1.03	13/20
+zr-s6-tune	aom-cpu8iq-ai	ssim2	all	22	-7.77	-1.85	15/22
+zr-s6-tune	aom-cpu8iq-ai	butteraugli_3n	photos	20	-10.28	-12.23	16/20
+zr-s6-tune	aom-cpu8iq-ai	butteraugli_3n	all	23	-10.44	-13.44	18/23
+zr-s6-tune	aom-cpu9def-ai	ssim2	photos	20	-24.78	-17.60	15/20
+zr-s6-tune	aom-cpu9def-ai	ssim2	all	21	-25.69	-21.49	16/21
+zr-s6-tune	aom-cpu9def-ai	butteraugli_3n	photos	20	-30.26	-34.47	20/20
+zr-s6-tune	aom-cpu9def-ai	butteraugli_3n	all	23	-30.59	-39.88	23/23
+zr-s6-tune	aom-cpu9iq-ai	ssim2	photos	20	-20.19	-17.64	16/20
+zr-s6-tune	aom-cpu9iq-ai	ssim2	all	21	-23.00	-21.53	17/21
+zr-s6-tune	aom-cpu9iq-ai	butteraugli_3n	photos	20	-23.39	-29.00	20/20
+zr-s6-tune	aom-cpu9iq-ai	butteraugli_3n	all	23	-26.76	-34.75	23/23
+zr-s8-off	aom-cpu2def-ai	ssim2	photos	20	+42.22	+57.02	1/20
+zr-s8-off	aom-cpu2iq-ai	ssim2	photos	20	+48.09	+53.12	0/20
+zr-s8-off	aom-cpu4def-ai	ssim2	photos	20	+38.94	+47.49	2/20
+zr-s8-off	aom-cpu4iq-ai	ssim2	photos	20	+41.50	+47.48	0/20
+zr-s8-off	aom-cpu6def-ai	ssim2	photos	20	+25.47	+38.59	1/20
+zr-s8-off	aom-cpu6iq-ai	ssim2	photos	20	+30.92	+36.58	0/20
+zr-s8-off	aom-cpu8def-ai	ssim2	photos	20	+20.56	+27.62	1/20
+zr-s8-off	aom-cpu8iq-ai	ssim2	photos	20	+18.93	+25.39	0/20
+zr-s8-off	aom-cpu9def-ai	ssim2	photos	20	-10.66	-0.02	13/20
+zr-s8-off	aom-cpu9iq-ai	ssim2	photos	20	-4.04	+2.43	13/20
+zr-s8-tune	aom-cpu2def-ai	ssim2	photos	20	+14.16	+28.98	6/20
+zr-s8-tune	aom-cpu2def-ai	ssim2	all	22	+18.22	+34.21	6/22
+zr-s8-tune	aom-cpu2def-ai	butteraugli_3n	photos	20	+6.96	+12.05	4/20
+zr-s8-tune	aom-cpu2def-ai	butteraugli_3n	all	23	+13.45	+16.86	4/23
+zr-s8-tune	aom-cpu2iq-ai	ssim2	photos	20	+18.71	+23.21	2/20
+zr-s8-tune	aom-cpu2iq-ai	ssim2	all	22	+19.69	+28.48	2/22
+zr-s8-tune	aom-cpu2iq-ai	butteraugli_3n	photos	20	+16.33	+18.92	3/20
+zr-s8-tune	aom-cpu2iq-ai	butteraugli_3n	all	23	+17.79	+23.71	3/23
+zr-s8-tune	aom-cpu4def-ai	ssim2	photos	20	+9.53	+21.45	7/20
+zr-s8-tune	aom-cpu4def-ai	ssim2	all	22	+15.11	+27.42	7/22
+zr-s8-tune	aom-cpu4def-ai	butteraugli_3n	photos	20	+4.62	+7.30	8/20
+zr-s8-tune	aom-cpu4def-ai	butteraugli_3n	all	23	+10.43	+12.50	8/23
+zr-s8-tune	aom-cpu4iq-ai	ssim2	photos	20	+14.11	+18.33	3/20
+zr-s8-tune	aom-cpu4iq-ai	ssim2	all	22	+16.01	+25.11	3/22
+zr-s8-tune	aom-cpu4iq-ai	butteraugli_3n	photos	20	+11.91	+12.70	3/20
+zr-s8-tune	aom-cpu4iq-ai	butteraugli_3n	all	23	+12.10	+18.35	3/23
+zr-s8-tune	aom-cpu6def-ai	ssim2	photos	20	+1.33	+13.25	10/20
+zr-s8-tune	aom-cpu6def-ai	ssim2	all	22	+1.33	+14.26	11/22
+zr-s8-tune	aom-cpu6def-ai	butteraugli_3n	photos	20	-2.22	-2.70	11/20
+zr-s8-tune	aom-cpu6def-ai	butteraugli_3n	all	23	-0.71	+0.30	12/23
+zr-s8-tune	aom-cpu6iq-ai	ssim2	photos	20	+5.86	+9.75	5/20
+zr-s8-tune	aom-cpu6iq-ai	ssim2	all	22	+6.60	+11.19	5/22
+zr-s8-tune	aom-cpu6iq-ai	butteraugli_3n	photos	20	+4.13	+3.99	5/20
+zr-s8-tune	aom-cpu6iq-ai	butteraugli_3n	all	22	+4.13	+4.52	5/22
+zr-s8-tune	aom-cpu8def-ai	ssim2	photos	20	+5.62	+6.67	9/20
+zr-s8-tune	aom-cpu8def-ai	ssim2	all	21	+8.63	+7.07	9/21
+zr-s8-tune	aom-cpu8def-ai	butteraugli_3n	photos	20	-12.78	-17.05	17/20
+zr-s8-tune	aom-cpu8def-ai	butteraugli_3n	all	23	-12.60	-16.42	19/23
+zr-s8-tune	aom-cpu8iq-ai	ssim2	photos	20	-4.68	+2.10	12/20
+zr-s8-tune	aom-cpu8iq-ai	ssim2	all	22	-4.87	+1.14	14/22
+zr-s8-tune	aom-cpu8iq-ai	butteraugli_3n	photos	20	-7.24	-9.07	14/20
+zr-s8-tune	aom-cpu8iq-ai	butteraugli_3n	all	23	-7.53	-10.01	16/23
+zr-s8-tune	aom-cpu9def-ai	ssim2	photos	20	-22.59	-15.37	15/20
+zr-s8-tune	aom-cpu9def-ai	ssim2	all	21	-24.01	-19.37	16/21
+zr-s8-tune	aom-cpu9def-ai	butteraugli_3n	photos	20	-27.60	-32.15	20/20
+zr-s8-tune	aom-cpu9def-ai	butteraugli_3n	all	23	-28.57	-37.57	23/23
+zr-s8-tune	aom-cpu9iq-ai	ssim2	photos	20	-17.82	-15.35	16/20
+zr-s8-tune	aom-cpu9iq-ai	ssim2	all	21	-20.21	-19.34	17/21
+zr-s8-tune	aom-cpu9iq-ai	butteraugli_3n	photos	20	-19.76	-26.56	20/20
+zr-s8-tune	aom-cpu9iq-ai	butteraugli_3n	all	23	-22.92	-32.31	23/23
+#
+# === BD MATRIX leg: zr arms x aom-allintra refs (tune arms: ssim2+ba3n both scopes; off arms: ssim2 photos only; FULL matrix in raw dir final_analysis_*.txt) ===
+zr_arm	ref_arm	metric	scope	n	median	mean	wins
+zr-s10-off	aom-cpu2def-ai	ssim2	photos	19	+78.45	+102.21	0/19
+zr-s10-off	aom-cpu2iq-ai	ssim2	photos	19	+89.87	+111.91	0/19
+zr-s10-off	aom-cpu4def-ai	ssim2	photos	19	+89.74	+105.83	0/19
+zr-s10-off	aom-cpu4iq-ai	ssim2	photos	19	+82.36	+105.59	0/19
+zr-s10-off	aom-cpu6def-ai	ssim2	photos	19	+76.29	+91.06	0/19
+zr-s10-off	aom-cpu6iq-ai	ssim2	photos	19	+69.46	+87.73	0/19
+zr-s10-off	aom-cpu8def-ai	ssim2	photos	19	+67.49	+71.83	0/19
+zr-s10-off	aom-cpu8iq-ai	ssim2	photos	19	+57.61	+67.68	0/19
+zr-s10-off	aom-cpu9def-ai	ssim2	photos	19	+22.81	+35.23	3/19
+zr-s10-off	aom-cpu9iq-ai	ssim2	photos	19	+25.31	+32.30	0/19
+zr-s10-tune	aom-cpu2def-ai	ssim2	photos	19	+62.47	+71.42	0/19
+zr-s10-tune	aom-cpu2def-ai	ssim2	all	19	+62.47	+71.42	0/19
+zr-s10-tune	aom-cpu2def-ai	butteraugli_3n	photos	19	+57.10	+70.14	0/19
+zr-s10-tune	aom-cpu2def-ai	butteraugli_3n	all	19	+57.10	+70.14	0/19
+zr-s10-tune	aom-cpu2iq-ai	ssim2	photos	19	+59.62	+76.39	0/19
+zr-s10-tune	aom-cpu2iq-ai	ssim2	all	19	+59.62	+76.39	0/19
+zr-s10-tune	aom-cpu2iq-ai	butteraugli_3n	photos	19	+49.69	+74.49	0/19
+zr-s10-tune	aom-cpu2iq-ai	butteraugli_3n	all	19	+49.69	+74.49	0/19
+zr-s10-tune	aom-cpu4def-ai	ssim2	photos	19	+66.25	+75.09	0/19
+zr-s10-tune	aom-cpu4def-ai	ssim2	all	19	+66.25	+75.09	0/19
+zr-s10-tune	aom-cpu4def-ai	butteraugli_3n	photos	19	+52.67	+62.47	0/19
+zr-s10-tune	aom-cpu4def-ai	butteraugli_3n	all	19	+52.67	+62.47	0/19
+zr-s10-tune	aom-cpu4iq-ai	ssim2	photos	19	+52.21	+71.60	0/19
+zr-s10-tune	aom-cpu4iq-ai	ssim2	all	19	+52.21	+71.60	0/19
+zr-s10-tune	aom-cpu4iq-ai	butteraugli_3n	photos	19	+44.92	+65.99	0/19
+zr-s10-tune	aom-cpu4iq-ai	butteraugli_3n	all	19	+44.92	+65.99	0/19
+zr-s10-tune	aom-cpu6def-ai	ssim2	photos	19	+49.04	+63.00	1/19
+zr-s10-tune	aom-cpu6def-ai	ssim2	all	19	+49.04	+63.00	1/19
+zr-s10-tune	aom-cpu6def-ai	butteraugli_3n	photos	19	+36.52	+42.84	0/19
+zr-s10-tune	aom-cpu6def-ai	butteraugli_3n	all	19	+36.52	+42.84	0/19
+zr-s10-tune	aom-cpu6iq-ai	ssim2	photos	19	+38.36	+56.22	0/19
+zr-s10-tune	aom-cpu6iq-ai	ssim2	all	19	+38.36	+56.22	0/19
+zr-s10-tune	aom-cpu6iq-ai	butteraugli_3n	photos	19	+32.57	+54.48	0/19
+zr-s10-tune	aom-cpu6iq-ai	butteraugli_3n	all	19	+32.57	+54.48	0/19
+zr-s10-tune	aom-cpu8def-ai	ssim2	photos	19	+37.81	+46.95	0/19
+zr-s10-tune	aom-cpu8def-ai	ssim2	all	19	+37.81	+46.95	0/19
+zr-s10-tune	aom-cpu8def-ai	butteraugli_3n	photos	19	+19.93	+18.10	4/19
+zr-s10-tune	aom-cpu8def-ai	butteraugli_3n	all	19	+19.93	+18.10	4/19
+zr-s10-tune	aom-cpu8iq-ai	ssim2	photos	19	+43.12	+41.11	0/19
+zr-s10-tune	aom-cpu8iq-ai	ssim2	all	19	+43.12	+41.11	0/19
+zr-s10-tune	aom-cpu8iq-ai	butteraugli_3n	photos	19	+24.90	+30.78	0/19
+zr-s10-tune	aom-cpu8iq-ai	butteraugli_3n	all	19	+24.90	+30.78	0/19
+zr-s10-tune	aom-cpu9def-ai	ssim2	photos	19	+8.07	+17.31	8/19
+zr-s10-tune	aom-cpu9def-ai	ssim2	all	19	+8.07	+17.31	8/19
+zr-s10-tune	aom-cpu9def-ai	butteraugli_3n	photos	19	-4.73	-3.12	11/19
+zr-s10-tune	aom-cpu9def-ai	butteraugli_3n	all	19	-4.73	-3.12	11/19
+zr-s10-tune	aom-cpu9iq-ai	ssim2	photos	19	+8.33	+12.10	4/19
+zr-s10-tune	aom-cpu9iq-ai	ssim2	all	19	+8.33	+12.10	4/19
+zr-s10-tune	aom-cpu9iq-ai	butteraugli_3n	photos	19	+8.30	+4.82	5/19
+zr-s10-tune	aom-cpu9iq-ai	butteraugli_3n	all	19	+8.30	+4.82	5/19
+zr-s2-off	aom-cpu2def-ai	ssim2	photos	19	+1.80	+7.68	8/19
+zr-s2-off	aom-cpu2iq-ai	ssim2	photos	19	+12.92	+14.05	2/19
+zr-s2-off	aom-cpu4def-ai	ssim2	photos	19	-1.84	+13.15	10/19
+zr-s2-off	aom-cpu4iq-ai	ssim2	photos	19	+10.26	+11.02	5/19
+zr-s2-off	aom-cpu6def-ai	ssim2	photos	19	-14.43	+6.23	12/19
+zr-s2-off	aom-cpu6iq-ai	ssim2	photos	19	-0.54	+1.34	10/19
+zr-s2-off	aom-cpu8def-ai	ssim2	photos	19	-15.24	-2.86	11/19
+zr-s2-off	aom-cpu8iq-ai	ssim2	photos	19	-12.93	-5.42	11/19
+zr-s2-off	aom-cpu9def-ai	ssim2	photos	19	-35.55	-19.55	13/19
+zr-s2-off	aom-cpu9iq-ai	ssim2	photos	19	-25.75	-21.26	14/19
+zr-s2-tune	aom-cpu2def-ai	ssim2	photos	19	-6.53	-2.11	12/19
+zr-s2-tune	aom-cpu2def-ai	ssim2	all	22	-5.65	+6.92	12/22
+zr-s2-tune	aom-cpu2def-ai	butteraugli_3n	photos	19	-7.48	-6.00	13/19
+zr-s2-tune	aom-cpu2def-ai	butteraugli_3n	all	22	-5.76	+4.41	13/22
+zr-s2-tune	aom-cpu2iq-ai	ssim2	photos	19	+0.60	+0.91	7/19
+zr-s2-tune	aom-cpu2iq-ai	ssim2	all	22	+1.99	+9.96	7/22
+zr-s2-tune	aom-cpu2iq-ai	butteraugli_3n	photos	19	+0.02	-2.18	9/19
+zr-s2-tune	aom-cpu2iq-ai	butteraugli_3n	all	22	+1.38	+8.49	9/22
+zr-s2-tune	aom-cpu4def-ai	ssim2	photos	19	-8.18	+2.28	12/19
+zr-s2-tune	aom-cpu4def-ai	ssim2	all	22	-4.22	+7.44	12/22
+zr-s2-tune	aom-cpu4def-ai	butteraugli_3n	photos	19	-10.81	-10.23	16/19
+zr-s2-tune	aom-cpu4def-ai	butteraugli_3n	all	22	-10.07	-2.06	16/22
+zr-s2-tune	aom-cpu4iq-ai	ssim2	photos	19	-3.18	-1.73	13/19
+zr-s2-tune	aom-cpu4iq-ai	ssim2	all	22	-1.83	+4.08	13/22
+zr-s2-tune	aom-cpu4iq-ai	butteraugli_3n	photos	19	-4.57	-6.92	16/19
+zr-s2-tune	aom-cpu4iq-ai	butteraugli_3n	all	22	-3.97	+0.91	16/22
+zr-s2-tune	aom-cpu6def-ai	ssim2	photos	19	-20.90	-4.08	14/19
+zr-s2-tune	aom-cpu6def-ai	ssim2	all	22	-14.81	-2.86	15/22
+zr-s2-tune	aom-cpu6def-ai	butteraugli_3n	photos	19	-19.27	-20.30	19/19
+zr-s2-tune	aom-cpu6def-ai	butteraugli_3n	all	22	-18.76	-15.36	19/22
+zr-s2-tune	aom-cpu6iq-ai	ssim2	photos	19	-12.41	-10.31	18/19
+zr-s2-tune	aom-cpu6iq-ai	ssim2	all	22	-9.41	-7.90	19/22
+zr-s2-tune	aom-cpu6iq-ai	butteraugli_3n	photos	19	-12.25	-13.52	19/19
+zr-s2-tune	aom-cpu6iq-ai	butteraugli_3n	all	22	-12.11	-9.27	19/22
+zr-s2-tune	aom-cpu8def-ai	ssim2	photos	19	-20.37	-12.05	13/19
+zr-s2-tune	aom-cpu8def-ai	ssim2	all	22	-22.61	-14.44	16/22
+zr-s2-tune	aom-cpu8def-ai	butteraugli_3n	photos	19	-31.47	-32.42	19/19
+zr-s2-tune	aom-cpu8def-ai	butteraugli_3n	all	22	-30.94	-31.27	22/22
+zr-s2-tune	aom-cpu8iq-ai	ssim2	photos	19	-19.73	-15.93	14/19
+zr-s2-tune	aom-cpu8iq-ai	ssim2	all	22	-20.62	-17.64	17/22
+zr-s2-tune	aom-cpu8iq-ai	butteraugli_3n	photos	19	-22.71	-24.96	19/19
+zr-s2-tune	aom-cpu8iq-ai	butteraugli_3n	all	22	-22.06	-24.87	22/22
+zr-s2-tune	aom-cpu9def-ai	ssim2	photos	19	-42.96	-27.69	14/19
+zr-s2-tune	aom-cpu9def-ai	ssim2	all	22	-44.24	-34.66	17/22
+zr-s2-tune	aom-cpu9def-ai	butteraugli_3n	photos	19	-42.67	-43.24	19/19
+zr-s2-tune	aom-cpu9def-ai	butteraugli_3n	all	22	-43.33	-48.60	22/22
+zr-s2-tune	aom-cpu9iq-ai	ssim2	photos	19	-34.54	-30.83	17/19
+zr-s2-tune	aom-cpu9iq-ai	ssim2	all	22	-36.93	-37.64	20/22
+zr-s2-tune	aom-cpu9iq-ai	butteraugli_3n	photos	19	-33.99	-37.86	19/19
+zr-s2-tune	aom-cpu9iq-ai	butteraugli_3n	all	22	-39.57	-43.95	22/22
+zr-s4-off	aom-cpu2def-ai	ssim2	photos	19	+11.41	+17.12	2/19
+zr-s4-off	aom-cpu2iq-ai	ssim2	photos	19	+23.20	+24.36	0/19
+zr-s4-off	aom-cpu4def-ai	ssim2	photos	19	+10.60	+22.53	4/19
+zr-s4-off	aom-cpu4iq-ai	ssim2	photos	19	+18.67	+21.14	0/19
+zr-s4-off	aom-cpu6def-ai	ssim2	photos	19	-5.17	+14.36	11/19
+zr-s4-off	aom-cpu6iq-ai	ssim2	photos	19	+10.81	+10.50	4/19
+zr-s4-off	aom-cpu8def-ai	ssim2	photos	19	-11.18	+4.52	11/19
+zr-s4-off	aom-cpu8iq-ai	ssim2	photos	19	-1.35	+2.41	10/19
+zr-s4-off	aom-cpu9def-ai	ssim2	photos	19	-28.54	-13.98	13/19
+zr-s4-off	aom-cpu9iq-ai	ssim2	photos	19	-17.35	-15.17	12/19
+zr-s4-tune	aom-cpu2def-ai	ssim2	photos	19	-0.56	+2.54	10/19
+zr-s4-tune	aom-cpu2def-ai	ssim2	all	22	+1.11	+12.81	10/22
+zr-s4-tune	aom-cpu2def-ai	butteraugli_3n	photos	19	-1.41	-1.41	11/19
+zr-s4-tune	aom-cpu2def-ai	butteraugli_3n	all	22	-0.06	+9.62	11/22
+zr-s4-tune	aom-cpu2iq-ai	ssim2	photos	19	+7.90	+5.96	3/19
+zr-s4-tune	aom-cpu2iq-ai	ssim2	all	22	+8.21	+16.04	3/22
+zr-s4-tune	aom-cpu2iq-ai	butteraugli_3n	photos	19	+3.89	+2.38	4/19
+zr-s4-tune	aom-cpu2iq-ai	butteraugli_3n	all	22	+4.38	+13.60	4/22
+zr-s4-tune	aom-cpu4def-ai	ssim2	photos	19	-0.82	+6.99	10/19
+zr-s4-tune	aom-cpu4def-ai	ssim2	all	22	+2.11	+13.20	10/22
+zr-s4-tune	aom-cpu4def-ai	butteraugli_3n	photos	19	-5.65	-5.77	13/19
+zr-s4-tune	aom-cpu4def-ai	butteraugli_3n	all	22	-4.84	+3.00	13/22
+zr-s4-tune	aom-cpu4iq-ai	ssim2	photos	19	+2.53	+3.23	5/19
+zr-s4-tune	aom-cpu4iq-ai	ssim2	all	22	+4.28	+10.01	5/22
+zr-s4-tune	aom-cpu4iq-ai	butteraugli_3n	photos	19	-1.67	-2.60	11/19
+zr-s4-tune	aom-cpu4iq-ai	butteraugli_3n	all	22	-0.13	+5.84	11/22
+zr-s4-tune	aom-cpu6def-ai	ssim2	photos	19	-12.69	+0.07	14/19
+zr-s4-tune	aom-cpu6def-ai	ssim2	all	22	-10.12	+1.80	14/22
+zr-s4-tune	aom-cpu6def-ai	butteraugli_3n	photos	19	-16.54	-16.42	19/19
+zr-s4-tune	aom-cpu6def-ai	butteraugli_3n	all	22	-15.62	-11.18	19/22
+zr-s4-tune	aom-cpu6iq-ai	ssim2	photos	19	-6.42	-5.81	18/19
+zr-s4-tune	aom-cpu6iq-ai	ssim2	all	22	-5.69	-2.91	18/22
+zr-s4-tune	aom-cpu6iq-ai	butteraugli_3n	photos	19	-8.45	-9.42	18/19
+zr-s4-tune	aom-cpu6iq-ai	butteraugli_3n	all	22	-8.11	-4.88	18/22
+zr-s4-tune	aom-cpu8def-ai	ssim2	photos	19	-19.26	-8.37	13/19
+zr-s4-tune	aom-cpu8def-ai	ssim2	all	22	-18.07	-10.29	16/22
+zr-s4-tune	aom-cpu8def-ai	butteraugli_3n	photos	19	-27.55	-29.27	19/19
+zr-s4-tune	aom-cpu8def-ai	butteraugli_3n	all	22	-27.52	-28.08	22/22
+zr-s4-tune	aom-cpu8iq-ai	ssim2	photos	19	-16.52	-12.17	14/19
+zr-s4-tune	aom-cpu8iq-ai	ssim2	all	22	-17.19	-13.73	17/22
+zr-s4-tune	aom-cpu8iq-ai	butteraugli_3n	photos	19	-18.62	-21.70	19/19
+zr-s4-tune	aom-cpu8iq-ai	butteraugli_3n	all	22	-18.28	-21.57	22/22
+zr-s4-tune	aom-cpu9def-ai	ssim2	photos	19	-39.90	-24.82	14/19
+zr-s4-tune	aom-cpu9def-ai	ssim2	all	22	-41.14	-31.58	17/22
+zr-s4-tune	aom-cpu9def-ai	butteraugli_3n	photos	19	-37.64	-40.71	19/19
+zr-s4-tune	aom-cpu9def-ai	butteraugli_3n	all	22	-39.01	-46.21	22/22
+zr-s4-tune	aom-cpu9iq-ai	ssim2	photos	19	-30.70	-27.82	16/19
+zr-s4-tune	aom-cpu9iq-ai	ssim2	all	22	-32.24	-34.58	19/22
+zr-s4-tune	aom-cpu9iq-ai	butteraugli_3n	photos	19	-31.10	-35.31	19/19
+zr-s4-tune	aom-cpu9iq-ai	butteraugli_3n	all	22	-35.11	-41.54	22/22
+zr-s6-off	aom-cpu2def-ai	ssim2	photos	19	+31.32	+36.38	0/19
+zr-s6-off	aom-cpu2iq-ai	ssim2	photos	19	+39.86	+44.16	0/19
+zr-s6-off	aom-cpu4def-ai	ssim2	photos	19	+30.30	+41.49	0/19
+zr-s6-off	aom-cpu4iq-ai	ssim2	photos	19	+37.66	+40.27	0/19
+zr-s6-off	aom-cpu6def-ai	ssim2	photos	19	+14.42	+31.81	2/19
+zr-s6-off	aom-cpu6iq-ai	ssim2	photos	19	+27.46	+27.99	0/19
+zr-s6-off	aom-cpu8def-ai	ssim2	photos	19	+9.32	+20.76	6/19
+zr-s6-off	aom-cpu8iq-ai	ssim2	photos	19	+12.85	+17.71	4/19
+zr-s6-off	aom-cpu9def-ai	ssim2	photos	19	-17.40	-1.68	12/19
+zr-s6-off	aom-cpu9iq-ai	ssim2	photos	19	-6.05	-3.93	11/19
+zr-s6-tune	aom-cpu2def-ai	ssim2	photos	19	+11.79	+15.89	5/19
+zr-s6-tune	aom-cpu2def-ai	ssim2	all	22	+13.25	+27.03	5/22
+zr-s6-tune	aom-cpu2def-ai	butteraugli_3n	photos	19	+3.51	+10.31	8/19
+zr-s6-tune	aom-cpu2def-ai	butteraugli_3n	all	22	+10.16	+21.83	8/22
+zr-s6-tune	aom-cpu2iq-ai	ssim2	photos	19	+20.78	+18.71	0/19
+zr-s6-tune	aom-cpu2iq-ai	ssim2	all	22	+21.70	+29.82	0/22
+zr-s6-tune	aom-cpu2iq-ai	butteraugli_3n	photos	19	+11.80	+14.12	2/19
+zr-s6-tune	aom-cpu2iq-ai	butteraugli_3n	all	22	+13.32	+26.02	2/22
+zr-s6-tune	aom-cpu4def-ai	ssim2	photos	19	+13.61	+20.33	5/19
+zr-s6-tune	aom-cpu4def-ai	ssim2	all	22	+14.86	+27.01	5/22
+zr-s6-tune	aom-cpu4def-ai	butteraugli_3n	photos	19	-1.82	+5.37	10/19
+zr-s6-tune	aom-cpu4def-ai	butteraugli_3n	all	22	+6.10	+14.40	10/22
+zr-s6-tune	aom-cpu4iq-ai	ssim2	photos	19	+16.86	+15.64	1/19
+zr-s6-tune	aom-cpu4iq-ai	ssim2	all	22	+17.27	+23.05	1/22
+zr-s6-tune	aom-cpu4iq-ai	butteraugli_3n	photos	19	+7.68	+8.61	4/19
+zr-s6-tune	aom-cpu4iq-ai	butteraugli_3n	all	22	+8.55	+17.27	4/22
+zr-s6-tune	aom-cpu6def-ai	ssim2	photos	19	-2.72	+12.44	10/19
+zr-s6-tune	aom-cpu6def-ai	ssim2	all	22	+5.78	+14.14	10/22
+zr-s6-tune	aom-cpu6def-ai	butteraugli_3n	photos	19	-7.30	-6.61	14/19
+zr-s6-tune	aom-cpu6def-ai	butteraugli_3n	all	22	-6.51	-1.35	14/22
+zr-s6-tune	aom-cpu6iq-ai	ssim2	photos	19	+5.26	+5.39	5/19
+zr-s6-tune	aom-cpu6iq-ai	ssim2	all	22	+6.02	+8.49	5/22
+zr-s6-tune	aom-cpu6iq-ai	butteraugli_3n	photos	19	-1.20	+0.93	10/19
+zr-s6-tune	aom-cpu6iq-ai	butteraugli_3n	all	22	+2.11	+5.44	10/22
+zr-s6-tune	aom-cpu8def-ai	ssim2	photos	19	-5.05	+3.43	11/19
+zr-s6-tune	aom-cpu8def-ai	ssim2	all	22	-9.45	+1.36	14/22
+zr-s6-tune	aom-cpu8def-ai	butteraugli_3n	photos	19	-19.20	-21.19	19/19
+zr-s6-tune	aom-cpu8def-ai	butteraugli_3n	all	22	-19.18	-20.13	22/22
+zr-s6-tune	aom-cpu8iq-ai	ssim2	photos	19	-5.62	-1.84	13/19
+zr-s6-tune	aom-cpu8iq-ai	ssim2	all	22	-8.41	-3.69	16/22
+zr-s6-tune	aom-cpu8iq-ai	butteraugli_3n	photos	19	-12.60	-12.99	18/19
+zr-s6-tune	aom-cpu8iq-ai	butteraugli_3n	all	22	-12.46	-13.13	21/22
+zr-s6-tune	aom-cpu9def-ai	ssim2	photos	19	-26.22	-15.73	14/19
+zr-s6-tune	aom-cpu9def-ai	ssim2	all	22	-31.26	-23.32	17/22
+zr-s6-tune	aom-cpu9def-ai	butteraugli_3n	photos	19	-27.38	-34.24	19/19
+zr-s6-tune	aom-cpu9def-ai	butteraugli_3n	all	22	-29.74	-40.51	22/22
+zr-s6-tune	aom-cpu9iq-ai	ssim2	photos	19	-17.58	-19.79	14/19
+zr-s6-tune	aom-cpu9iq-ai	ssim2	all	22	-22.14	-27.23	17/22
+zr-s6-tune	aom-cpu9iq-ai	butteraugli_3n	photos	19	-20.68	-28.43	19/19
+zr-s6-tune	aom-cpu9iq-ai	butteraugli_3n	all	22	-25.71	-35.51	22/22
+zr-s8-off	aom-cpu2def-ai	ssim2	photos	19	+35.71	+46.70	0/19
+zr-s8-off	aom-cpu2iq-ai	ssim2	photos	19	+47.27	+54.35	0/19
+zr-s8-off	aom-cpu4def-ai	ssim2	photos	19	+38.24	+51.35	0/19
+zr-s8-off	aom-cpu4iq-ai	ssim2	photos	19	+41.47	+50.19	0/19
+zr-s8-off	aom-cpu6def-ai	ssim2	photos	19	+18.73	+40.47	1/19
+zr-s8-off	aom-cpu6iq-ai	ssim2	photos	19	+30.25	+37.06	0/19
+zr-s8-off	aom-cpu8def-ai	ssim2	photos	19	+17.69	+27.77	4/19
+zr-s8-off	aom-cpu8iq-ai	ssim2	photos	19	+20.20	+24.70	1/19
+zr-s8-off	aom-cpu9def-ai	ssim2	photos	19	-13.46	+2.55	12/19
+zr-s8-off	aom-cpu9iq-ai	ssim2	photos	19	-4.35	+0.43	11/19
+zr-s8-tune	aom-cpu2def-ai	ssim2	photos	19	+15.49	+20.91	4/19
+zr-s8-tune	aom-cpu2def-ai	ssim2	all	22	+19.32	+31.42	4/22
+zr-s8-tune	aom-cpu2def-ai	butteraugli_3n	photos	19	+4.14	+15.56	4/19
+zr-s8-tune	aom-cpu2def-ai	butteraugli_3n	all	22	+14.31	+26.41	4/22
+zr-s8-tune	aom-cpu2iq-ai	ssim2	photos	19	+23.98	+23.87	0/19
+zr-s8-tune	aom-cpu2iq-ai	ssim2	all	22	+25.46	+34.35	0/22
+zr-s8-tune	aom-cpu2iq-ai	butteraugli_3n	photos	19	+14.47	+19.36	2/19
+zr-s8-tune	aom-cpu2iq-ai	butteraugli_3n	all	22	+16.42	+30.60	2/22
+zr-s8-tune	aom-cpu4def-ai	ssim2	photos	19	+16.62	+25.27	3/19
+zr-s8-tune	aom-cpu4def-ai	ssim2	all	22	+19.65	+31.33	3/22
+zr-s8-tune	aom-cpu4def-ai	butteraugli_3n	photos	19	+0.08	+10.39	9/19
+zr-s8-tune	aom-cpu4def-ai	butteraugli_3n	all	22	+10.14	+18.74	9/22
+zr-s8-tune	aom-cpu4iq-ai	ssim2	photos	19	+18.73	+20.68	0/19
+zr-s8-tune	aom-cpu4iq-ai	ssim2	all	22	+21.77	+27.45	0/22
+zr-s8-tune	aom-cpu4iq-ai	butteraugli_3n	photos	19	+10.01	+13.55	3/19
+zr-s8-tune	aom-cpu4iq-ai	butteraugli_3n	all	22	+10.97	+21.55	3/22
+zr-s8-tune	aom-cpu6def-ai	ssim2	photos	19	+1.12	+16.75	8/19
+zr-s8-tune	aom-cpu6def-ai	ssim2	all	22	+7.50	+17.90	8/22
+zr-s8-tune	aom-cpu6def-ai	butteraugli_3n	photos	19	-4.73	-2.35	12/19
+zr-s8-tune	aom-cpu6def-ai	butteraugli_3n	all	22	-1.27	+2.36	12/22
+zr-s8-tune	aom-cpu6iq-ai	ssim2	photos	19	+7.68	+9.97	3/19
+zr-s8-tune	aom-cpu6iq-ai	ssim2	all	22	+9.18	+12.49	3/22
+zr-s8-tune	aom-cpu6iq-ai	butteraugli_3n	photos	19	+3.74	+5.55	7/19
+zr-s8-tune	aom-cpu6iq-ai	butteraugli_3n	all	22	+5.00	+9.45	7/22
+zr-s8-tune	aom-cpu8def-ai	ssim2	photos	19	-3.17	+6.97	11/19
+zr-s8-tune	aom-cpu8def-ai	ssim2	all	22	-5.51	+4.34	14/22
+zr-s8-tune	aom-cpu8def-ai	butteraugli_3n	photos	19	-17.02	-17.80	19/19
+zr-s8-tune	aom-cpu8def-ai	butteraugli_3n	all	22	-16.77	-17.20	22/22
+zr-s8-tune	aom-cpu8iq-ai	ssim2	photos	19	-0.43	+1.86	10/19
+zr-s8-tune	aom-cpu8iq-ai	ssim2	all	22	-4.91	-0.47	13/22
+zr-s8-tune	aom-cpu8iq-ai	butteraugli_3n	photos	19	-9.27	-9.34	16/19
+zr-s8-tune	aom-cpu8iq-ai	butteraugli_3n	all	22	-9.29	-9.96	19/22
+zr-s8-tune	aom-cpu9def-ai	ssim2	photos	19	-23.01	-13.31	13/19
+zr-s8-tune	aom-cpu9def-ai	ssim2	all	22	-28.58	-21.22	16/22
+zr-s8-tune	aom-cpu9def-ai	butteraugli_3n	photos	19	-25.58	-31.74	19/19
+zr-s8-tune	aom-cpu9def-ai	butteraugli_3n	all	22	-27.78	-38.35	22/22
+zr-s8-tune	aom-cpu9iq-ai	ssim2	photos	19	-16.72	-17.22	14/19
+zr-s8-tune	aom-cpu9iq-ai	ssim2	all	22	-19.38	-25.01	17/22
+zr-s8-tune	aom-cpu9iq-ai	butteraugli_3n	photos	19	-19.01	-25.75	19/19
+zr-s8-tune	aom-cpu9iq-ai	butteraugli_3n	all	22	-22.25	-33.19	22/22
+#
+# === PER-FAMILY BD t26 (tune arms vs matched-time aom; ssim2 median per family; worst image) ===
+zr_arm	ref	family	n	median	worst_img	worst_bd
+zr-s10-tune	aom-cpu6def-ai	1200	1	+95.13	1236_interiors_ornate-arched-interior_casa-v	+95.13
+zr-s10-tune	aom-cpu6def-ai	1400	1	+8.09	1438_nature_orange-flowers-closeup_kyoto-bot	+8.09
+zr-s10-tune	aom-cpu6def-ai	1600	1	+26.91	1614_food_dessert-plate-upside-down_valladol	+26.91
+zr-s10-tune	aom-cpu6def-ai	2000	1	+6.69	2000_people_by-alexander-aguero-enppvuxbcce-	+6.69
+zr-s10-tune	aom-cpu6def-ai	5000	2	+27.49	5048_nps_romo-2018-longs-peak-keyhole-route_	+33.03
+zr-s10-tune	aom-cpu6def-ai	6000	2	+46.86	6096_scans-patents_martha-jones-us77494-resc	+57.49
+zr-s10-tune	aom-cpu6def-ai	6600	1	+13.29	6606_scans-illustrations_haeckel-red-algae_p	+13.29
+zr-s10-tune	aom-cpu6def-ai	7000	2	+45.70	7058_plots_line-tiling-00248-s7c5ddcfb_1024x	+73.86
+zr-s10-tune	aom-cpu6def-ai	8100	4	+27.65	8414_web-screenshots_lkml-lists-index_dpr1_p	+147.16
+zr-s10-tune	aom-cpu6def-ai	9000	1	+142.82	9074_gen_clipart_teapot-classic_1024x1536.sd	+142.82
+zr-s10-tune	aom-cpu6def-ai	9094	2	+112.19	9100_gen_illustrations_bath-candles-evening_	+133.33
+zr-s10-tune	aom-cpu6def-ai	9226	4	+40.01	9228_gen_products-accessories_cateye-sunglas	+63.84
+zr-s2-tune	aom-cpu2iq-ai	1200	1	+17.12	1236_interiors_ornate-arched-interior_casa-v	+17.12
+zr-s2-tune	aom-cpu2iq-ai	1400	1	-2.84	1438_nature_orange-flowers-closeup_kyoto-bot	-2.84
+zr-s2-tune	aom-cpu2iq-ai	1600	1	+3.41	1614_food_dessert-plate-upside-down_valladol	+3.41
+zr-s2-tune	aom-cpu2iq-ai	2000	1	+1.63	2000_people_by-alexander-aguero-enppvuxbcce-	+1.63
+zr-s2-tune	aom-cpu2iq-ai	5000	2	+3.80	5004_nps_blca-black-canyon-2023_color_p02_70	+5.15
+zr-s2-tune	aom-cpu2iq-ai	6000	2	+12.26	6018_scans-patents_lynn-conway-us5046022-1bi	+15.97
+zr-s2-tune	aom-cpu2iq-ai	6600	1	-21.02	6606_scans-illustrations_haeckel-red-algae_p	-21.02
+zr-s2-tune	aom-cpu2iq-ai	7000	2	+43.90	7052_plots_line-00222-s2f495179_1024x1024.sd	+118.41
+zr-s2-tune	aom-cpu2iq-ai	8100	4	-4.01	8414_web-screenshots_lkml-lists-index_dpr1_p	+20.84
+zr-s2-tune	aom-cpu2iq-ai	9000	1	-0.08	9074_gen_clipart_teapot-classic_1024x1536.sd	-0.08
+zr-s2-tune	aom-cpu2iq-ai	9094	2	+3.37	9118_gen_illustrations_farmers-market-stall_	+4.25
+zr-s2-tune	aom-cpu2iq-ai	9226	4	+1.10	9958_gen_products-whitelabeled-beverages_bev	+2.64
+zr-s4-tune	aom-cpu2iq-ai	1200	1	+19.40	1236_interiors_ornate-arched-interior_casa-v	+19.40
+zr-s4-tune	aom-cpu2iq-ai	1400	1	-0.71	1438_nature_orange-flowers-closeup_kyoto-bot	-0.71
+zr-s4-tune	aom-cpu2iq-ai	1600	1	+7.02	1614_food_dessert-plate-upside-down_valladol	+7.02
+zr-s4-tune	aom-cpu2iq-ai	2000	1	+6.37	2000_people_by-alexander-aguero-enppvuxbcce-	+6.37
+zr-s4-tune	aom-cpu2iq-ai	5000	2	+7.17	5004_nps_blca-black-canyon-2023_color_p02_70	+8.62
+zr-s4-tune	aom-cpu2iq-ai	6000	2	+14.50	6018_scans-patents_lynn-conway-us5046022-1bi	+17.38
+zr-s4-tune	aom-cpu2iq-ai	6600	1	-18.61	6606_scans-illustrations_haeckel-red-algae_p	-18.61
+zr-s4-tune	aom-cpu2iq-ai	7000	2	+22.79	7050_plots_line-00166-s010fb6d2_1024x1024.sd	+74.93
+zr-s4-tune	aom-cpu2iq-ai	8100	4	+0.97	8414_web-screenshots_lkml-lists-index_dpr1_p	+34.81
+zr-s4-tune	aom-cpu2iq-ai	9000	1	+6.58	9074_gen_clipart_teapot-classic_1024x1536.sd	+6.58
+zr-s4-tune	aom-cpu2iq-ai	9094	2	+5.47	9118_gen_illustrations_farmers-market-stall_	+6.43
+zr-s4-tune	aom-cpu2iq-ai	9226	4	+6.97	9958_gen_products-whitelabeled-beverages_bev	+12.97
+zr-s6-tune	aom-cpu4def-ai	1200	1	+102.75	1236_interiors_ornate-arched-interior_casa-v	+102.75
+zr-s6-tune	aom-cpu4def-ai	1400	1	+6.42	1438_nature_orange-flowers-closeup_kyoto-bot	+6.42
+zr-s6-tune	aom-cpu4def-ai	1600	1	-2.48	1614_food_dessert-plate-upside-down_valladol	-2.48
+zr-s6-tune	aom-cpu4def-ai	2000	1	-6.60	2000_people_by-alexander-aguero-enppvuxbcce-	-6.60
+zr-s6-tune	aom-cpu4def-ai	5000	2	+32.48	5004_nps_blca-black-canyon-2023_color_p02_70	+36.94
+zr-s6-tune	aom-cpu4def-ai	6000	2	+20.24	6096_scans-patents_martha-jones-us77494-resc	+40.35
+zr-s6-tune	aom-cpu4def-ai	6600	1	-27.96	6606_scans-illustrations_haeckel-red-algae_p	-27.96
+zr-s6-tune	aom-cpu4def-ai	7000	2	+84.10	7052_plots_line-00222-s2f495179_1024x1024.sd	+124.70
+zr-s6-tune	aom-cpu4def-ai	8100	4	-10.39	8414_web-screenshots_lkml-lists-index_dpr1_p	+24.51
+zr-s6-tune	aom-cpu4def-ai	9000	1	+30.64	9074_gen_clipart_teapot-classic_1024x1536.sd	+30.64
+zr-s6-tune	aom-cpu4def-ai	9094	2	+59.31	9100_gen_illustrations_bath-candles-evening_	+129.81
+zr-s6-tune	aom-cpu4def-ai	9226	4	+10.10	9228_gen_products-accessories_cateye-sunglas	+22.59
+zr-s8-tune	aom-cpu6iq-ai	1200	1	+12.98	1236_interiors_ornate-arched-interior_casa-v	+12.98
+zr-s8-tune	aom-cpu6iq-ai	1400	1	-0.98	1438_nature_orange-flowers-closeup_kyoto-bot	-0.98
+zr-s8-tune	aom-cpu6iq-ai	1600	1	+7.34	1614_food_dessert-plate-upside-down_valladol	+7.34
+zr-s8-tune	aom-cpu6iq-ai	2000	1	+2.13	2000_people_by-alexander-aguero-enppvuxbcce-	+2.13
+zr-s8-tune	aom-cpu6iq-ai	5000	2	+12.48	5048_nps_romo-2018-longs-peak-keyhole-route_	+22.94
+zr-s8-tune	aom-cpu6iq-ai	6000	2	+15.86	6096_scans-patents_martha-jones-us77494-resc	+32.00
+zr-s8-tune	aom-cpu6iq-ai	6600	1	-13.10	6606_scans-illustrations_haeckel-red-algae_p	-13.10
+zr-s8-tune	aom-cpu6iq-ai	7000	2	+25.58	7052_plots_line-00222-s2f495179_1024x1024.sd	+39.05
+zr-s8-tune	aom-cpu6iq-ai	8100	4	-3.75	8414_web-screenshots_lkml-lists-index_dpr1_p	+5.87
+zr-s8-tune	aom-cpu6iq-ai	9000	1	+58.79	9074_gen_clipart_teapot-classic_1024x1536.sd	+58.79
+zr-s8-tune	aom-cpu6iq-ai	9094	2	+20.40	9100_gen_illustrations_bath-candles-evening_	+40.09
+zr-s8-tune	aom-cpu6iq-ai	9226	4	+9.46	9228_gen_products-accessories_cateye-sunglas	+24.09
+#
+# === CONTINUITY (fresh arms vs committed baselines) ===
+# leg s2-tune vs cpu2-GOOD: -12.52 med / 17/19 (final-2026-07-03: -12.29 / 17/19); vs cpu0def-GOOD -11.55 / 16/19 (was -11.58 / 16/19); vs cpu0ss2-GOOD +0.05 / 9/19 (was +0.05 / 9/19) -- PASS
+# t26 s2-tune vs cpu2-GOOD: -13.33 / 17/20 (final: -13.33 / 17/20) -- PASS; fresh s2-tune vs final s2-tune same-arm: median 0.00, mean -1.14 (5/23 improved by the 4 new zenrav1e master commits, 0 worse)
+# GOOD anchor replays: values identical to committed deltaq-2026-07-02-convention baselines (cell-cache replay + spot re-encodes)
+#
+# === CONFORMANCE ===
+# 5,520 zenrav1e RD cells (t26 2,880 + leg 2,640; all 10 arms x 12 q) ran PALCONF: extract_av1 -> aomdec clean decode AND raw md5 == rav1d-safe. 0 CONFFAIL, 0 CELLFAIL. The fast tiers' TX_MODE_LARGEST / reduced-tx / (8,16)+(16,16) partition paths are conformance-clean -- NO NEW BUGS.
+#
+# === VERDICT (time-normalized, photos) ===
+# The libaom --allintra ladder pareto-dominates every zenrav1e arm at matched wall-time on photos, on BOTH corpora, on ssim2 AND butteraugli. There is NO fast-tier crossover; the matched-time gap WIDENS with speed:
+#   ~6 s/MP class:   zr-s4-tune +6.4/+7.9 (t26/leg) vs aom-cpu2iq-ai at 0.89x time; zr-s2-tune +2.4/+0.6 vs same ref at 2.66x time
+#   ~0.5-2 s/MP:     zr-s6-tune +5.4/+13.6 vs cpu4def at 0.52x time; zr-s8-tune +5.9/+7.7 vs cpu6iq at 1.54x time
+#   ~0.3 s/MP:       zr-s10-tune +32.6/+49.0 vs cpu6def at 0.78x time (s10 is a cliff: partition (16,16), no CDEF/LRF)
+# The one frontier touch: quality tip on legacy -- zr-s2-tune -12.41 vs cpu6iq beats the best aom-ai arm (cpu2iq -10.98) by -1.4% at 2.66x its time (t26: dead even at same ratio).
+# Tune-off is not shippable at ANY fast tier: +12 to +70 vs matched refs (tune worth 10-40 BD points at fast tiers, and CHEAPER at s2 -- palette rescues plots, boost replaces Complex segmentation).
+# Historical GOOD-mode references are off the pareto: aomenc GOOD cpu2 is ~4x slower than cpu2-allintra AND lower quality than cpu2iq-ai (cpu2-good +2.26 vs cpu6iq on leg). All prior "matched-speed vs cpu2 / slowest-best vs cpu0" wins stand, but the ALLINTRA schedule is what the ecosystem actually runs (libavif), and against it the zr speed schedule is behind at every point.
+# aom-side anomaly (both corpora): tune=iq at cpu-used 8 LOSES ssim2 vs cpu8-default (+11.9 med t26) while WINNING butteraugli (-11.2) -- iq's fast-tier value is metric-dependent; at cpu6 iq wins both.
+# Timing-convention asymmetry: zr wall includes PNG decode + RGB->YUV (~108 ms/MP, PIL proxy); aom encodes a pre-made y4m. Adjusting zr down by that constant does not change any verdict above (largest effect at s10: 281 -> ~173 ms/MP, still +27..+35 vs the aom arms bracketing that time).

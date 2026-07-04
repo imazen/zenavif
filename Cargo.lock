@@ -2014,7 +2014,9 @@ dependencies = [
 
 [[package]]
 name = "zenrav1e"
-version = "0.2.0"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c2f798defdace5a2d991e4f679697768cf256a3cef130bfa2d84702cebf3a76"
 dependencies = [
  "aligned-vec",
  "arbitrary",
@@ -2047,7 +2049,6 @@ dependencies = [
  "thiserror",
  "v_frame 0.3.9",
  "wasm-bindgen",
- "whereat",
 ]
 
 [[package]]

@@ -5,8 +5,8 @@ dataset aggregated into one queryable per-(image, arm, q) parquet so threshold
 rules / future heads fit against a single store instead of one-shot TSVs.
 
 - **Block storage (canonical):**
-  `/mnt/v/output/zenavif/hyperparam-labels-2026-07-03/labels.parquet` (629 KB,
-  35,118 rows × 34 cols, 89 arms as of 2026-07-03 late — incl. the sizedecay + sizedecay-nontune sources) + `_MANIFEST.json` (build commit, per-source
+  `/mnt/v/output/zenavif/hyperparam-labels-2026-07-03/labels.parquet` (1.8 MB,
+  44,894 rows × 34 cols, 111 arms as of 2026-07-04 — incl. the sizedecay + sizedecay-nontune + speedladder sources) + `_MANIFEST.json` (build commit, per-source
   row counts, join coverage, honesty contract: encoder_rev validity domains,
   q_kind semantics, enc_ms reliability, palette-pipeline caveat, exclusions)
 - **Tower mirror (sha256-verified):**
@@ -17,7 +17,10 @@ rules / future heads fit against a single store instead of one-shot TSVs.
   a SOURCES entry and re-running.
 - **Sources aggregated:** tune-ss2-2026-07-02, deltaq-2026-07-02,
   qmdist-2026-07-03, lfsharp-2026-07-03, desyncfix-2026-07-03, wedge-2026-07-03
-  (parquet + paletteoff TSV), palette-ab-final2-2026-07-03 — each with per-file
+  (parquet + paletteoff TSV), palette-ab-final2-2026-07-03, speedladder-2026-07-04
+  (the fast-tier zr s2-s10 x tune/off + aom-allintra cpu2-9 x def/iq labels the
+  drift verdict wanted; 9,776 rows; RD-row enc_ms is corroboration-grade -- the
+  solo wall numbers live in benchmarks/rd_gap_speed_ladder_2026-07-04.tsv) — each with per-file
   arm_id / knob_json / encoder_rev / q_kind.
 - **Feature join:** `origin_path|crop_label|size_class` into
   `imazen26_features_2026-06-23.parquet`; wedge rows pixel-exact (123/123),
