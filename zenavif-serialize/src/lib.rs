@@ -98,10 +98,10 @@ fn add_gain_map<'data>(
     // 1 (High) = 8/10-bit 4:4:4; 2 (Professional) = 12-bit anything,
     // or 8/10-bit 4:2:2. Deriving from depth alone mislabeled 4:4:4
     // gain maps as profile 0.
-    let gm_profile = if gm_depth >= 12 {
-        2
-    } else if gm.chroma_subsampling.horizontal && !gm.chroma_subsampling.vertical {
-        2 // 4:2:2
+    let gm_profile = if gm_depth >= 12
+        || (gm.chroma_subsampling.horizontal && !gm.chroma_subsampling.vertical)
+    {
+        2 // 12-bit anything, or 8/10-bit 4:2:2
     } else if !gm.chroma_subsampling.horizontal && !gm.chroma_subsampling.vertical && !gm.monochrome {
         1 // 4:4:4
     } else {
