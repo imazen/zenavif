@@ -150,6 +150,8 @@ pub use decoder::AvifDecoder;
 pub use decoder_managed::{AnimationDecoder, ManagedAvifDecoder};
 #[cfg(feature = "encode")]
 pub use encode_plan::{EncodePlan, PlanInput, SpeedDerived, TilesResolution};
+#[cfg(feature = "encode-mono")]
+pub use encoder::encode_gray8;
 #[cfg(feature = "encode")]
 pub use encoder::{
     AnimationFrame, AnimationFrame16, AnimationFrameRgba, AnimationFrameRgba16, Av1Backend,

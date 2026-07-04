@@ -979,6 +979,37 @@ pub fn encode_rgb8(
     })
 }
 
+/// Encode an 8-bit grayscale image to AVIF as true monochrome AV1 (Cs400).
+///
+/// The bitstream codes only a luma plane — no chroma planes exist and the
+/// chroma RDO is skipped entirely, which measures 2–3× faster than the
+/// gray→RGB expansion path at output-byte parity (imazen/zenavif#6,
+/// `benchmarks/mono_encode_ab_2026-06-11.txt`). The container carries
+/// spec-correct mono `av1C`/`pixi` properties.
+///
+/// `img` holds one `u8` luma sample per pixel (sRGB transfer). The
+/// configured chroma subsampling is irrelevant (there is no chroma);
+/// bit depth, quality, and speed apply as for color.
+#[cfg(feature = "encode-mono")]
+pub fn encode_gray8(
+    img: ImgRef<'_, u8>,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedImage> {
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+
+    let enc = build_ravif_encoder(config, stop, false);
+    let result = enc
+        .encode_gray8(img)
+        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
+        .at_crate(crate::at_crate_info())?;
+    Ok(EncodedImage {
+        avif_file: result.avif_file,
+        color_byte_size: result.color_byte_size,
+        alpha_byte_size: result.alpha_byte_size,
+    })
+}
+
 /// Encode an 8-bit RGBA image to AVIF
 ///
 /// # Arguments

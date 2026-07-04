@@ -1157,11 +1157,26 @@ impl AvifEncoder {
         let cfg = self.build_config();
         let stop = self.stop_token();
         let raw = pixels.contiguous_bytes();
-        // Gray → RGB for encoding (AVIF encoder expects color planes)
-        let rgb: Vec<Rgb<u8>> = raw.iter().map(|&g| Rgb { r: g, g, b: g }).collect();
-        let img = imgref::ImgVec::new(rgb, w, h);
-        let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
-        self.make_output(result.avif_file)
+        #[cfg(feature = "encode-mono")]
+        {
+            // True monochrome AV1 (Cs400): luma-only bitstream, no chroma
+            // RDO — measured 2-3x faster at output-byte parity vs the RGB
+            // expansion (imazen/zenavif#6).
+            let img = imgref::ImgRef::new(&raw, w, h);
+            let result = crate::encode_gray8(img, &cfg, stop)?;
+            self.make_output(result.avif_file)
+        }
+        #[cfg(not(feature = "encode-mono"))]
+        {
+            // Gray → RGB for encoding. RGB→YCbCr of R=G=B is exactly
+            // neutral chroma, so this is pixel-safe — just slower (chroma
+            // RDO still runs). The `encode-mono` feature routes through
+            // zenravif's Cs400 path instead.
+            let rgb: Vec<Rgb<u8>> = raw.iter().map(|&g| Rgb { r: g, g, b: g }).collect();
+            let img = imgref::ImgVec::new(rgb, w, h);
+            let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
+            self.make_output(result.avif_file)
+        }
     }
 
     fn do_encode_rgb_f32(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {

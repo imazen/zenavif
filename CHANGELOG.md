@@ -10,6 +10,18 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Added
+- **`encode-mono` feature — true monochrome (Cs400) encode for Gray8 input**
+  (zenavif#6): `encode_gray8` / the codec Gray8 path route through zenravif's
+  new `Encoder::encode_gray8`, coding a luma-only bitstream (no chroma planes,
+  no chroma RDO — measured 2–3× faster at output-byte parity vs the gray→RGB
+  expansion, `benchmarks/mono_encode_ab_2026-06-11.txt`). End-to-end gate
+  `tests/mono_encode_roundtrip.rs` proves the sequence header signals
+  `mono_chrome=1` and the file decodes back to native Gray8 via rav1d-safe.
+  TEMPORARY non-default gate: requires zenravif ≥ cavif-rs@89668f13 (CI's
+  clone-siblings provides it); fold into `encode` at the next zenravif bump.
+  Without the feature, Gray8 keeps the pixel-safe RGB-expansion path.
+
 ### Fixed
 - **Untrusted-input hardening, decode path** (zenavif#18 items 2–3):
   `StripConverter::new` no longer `panic!`s on unsupported

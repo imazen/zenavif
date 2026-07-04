@@ -206,6 +206,13 @@ encode-asm = ["encode", "ravif/asm"]
 encode-threading = ["encode", "ravif/threading"]
 # Encoding with imazen/zenrav1e fork features (QM, VAQ, still-image tuning, lossless)
 encode-imazen = ["encode", "ravif/imazen"]
+# True monochrome (Cs400) encode for Gray8 input: encode_gray8 routes through
+# zenravif's Encoder::encode_gray8 (luma-only bitstream — chroma RDO skipped,
+# measured 2-3x faster at byte parity; imazen/zenavif#6). TEMPORARY GATE:
+# requires zenravif with encode_gray8 (imazen/cavif-rs main >= 89668f13, which
+# CI's clone-siblings provides). Fold into `encode` once local sibling
+# checkouts are past the speed-ladder dev-patch / at the next zenravif bump.
+encode-mono = ["encode"]
 # Expert / unstable: exposes `InternalParams` for codec calibration sweeps
 # + the rav1e knob predictor MLP training pipeline. Double-underscore prefix
 # signals "private — do not depend on this in production code." Anything

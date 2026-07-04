@@ -431,7 +431,10 @@ arms total); s8 IVFs `/mnt/v/output/rd-gap-palette-ab-2026-07-03/ivf_s8/`
    drop the `let _ = &config.palette_preference;` placeholder;
 3. re-run the PALCONF conformance protocol (`scripts/rd_gap/zenrav1e_cell.sh`
    PALCONF=1) on a palette-armed sample + re-measure the screen-content tier
-   gap.
+   gap;
+4. fold the `encode-mono` feature into `encode` (zenavif#6: true Cs400 gray
+   encode; the gate exists only because local sibling ravif checkouts may
+   predate cavif-rs@89668f13 — CI already builds it via clone-siblings).
 
 ### zenrav1e LRF + filter-intra desync encoder recon from decoders (OPEN upstream)
 Found 2026-07-03 while measuring palette (zenrav1e#32, #33): at s<=7 (LRF)
