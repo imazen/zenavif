@@ -55,13 +55,13 @@ note "ravif patch state shipped: $(grep -A3 '^\[patch.crates-io\]' "$HOME/work/z
 # CURRENT LOCAL binaries — the exact decoders the local harness runs — so
 # build_remote.sh can fall back LOUDLY instead of leaving the box unusable.
 EXDIR="$HOME/work/zen/zenavif/target/release/examples"
-if [ -x "$EXDIR/save_png" ] && [ -x "$EXDIR/extract_av1" ] && [ -x "$EXDIR/decode_avif" ]; then
+if [ -x "$EXDIR/save_png" ] && [ -x "$EXDIR/extract_av1" ] && [ -x "$EXDIR/decode_avif" ] && [ -x "$EXDIR/ivf_raw" ]; then
   note "sync decoder fallback binaries (local target/release/examples) ..."
-  { for b in save_png extract_av1 decode_avif; do
+  { for b in save_png extract_av1 decode_avif ivf_raw; do
       echo "$(sha256sum "$EXDIR/$b" | cut -c1-16)  built $(date -u -r "$EXDIR/$b" +%Y-%m-%dT%H:%MZ)  $b"
     done; } > /tmp/decoder_fallback_manifest.txt
   box_ssh "mkdir -p /home/lilith/decoder_fallback"
-  box_rsync -az "$EXDIR/save_png" "$EXDIR/extract_av1" "$EXDIR/decode_avif" \
+  box_rsync -az "$EXDIR/save_png" "$EXDIR/extract_av1" "$EXDIR/decode_avif" "$EXDIR/ivf_raw" \
     /tmp/decoder_fallback_manifest.txt "root@$BOX_IP:/home/lilith/decoder_fallback/"
 else
   note "WARNING: local decoder examples not all built — no fallback synced (source build must succeed on the box)"
