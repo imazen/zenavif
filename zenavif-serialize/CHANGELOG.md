@@ -14,6 +14,11 @@
   allocation — the crate deliberately avoids that overhead).
 
 ### Added
+- **`Aviffy::set_gain_map_alt_icc`** — ICC profile for the gain map's
+  alternate rendition, written as a `colr` box of type `prof` on the `tmap`
+  item (may be combined with the nclx `set_gain_map_alt_colr`; ISOBMFF allows
+  one `colr` of each type). Matches libavif interop vectors whose tmap colr
+  is an ICC profile (`seine_sdr_gainmap_srgb_icc.avif`).
 - **Fallible `Vec` serialization** (zenavif-serialize#6): `Aviffy::try_to_vec`
   and free `try_serialize_to_vec` return `Result<Vec<u8>>` (located
   `SerializeError`) instead of panicking on invalid input — for request paths

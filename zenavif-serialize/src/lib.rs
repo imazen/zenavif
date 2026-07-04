@@ -113,11 +113,20 @@ fn add_gain_map<'data>(
         name: "",
         content_type: "",
     });
+    let mut tmap_props: ArrayVec<u8, 12> = ArrayVec::new();
     if let Some(alt_colr) = gm.alt_colr {
-        let tmap_colr = push_prop(ipco, IpcoProp::Colr(alt_colr))?;
+        tmap_props.push(push_prop(ipco, IpcoProp::Colr(alt_colr))?);
+    }
+    if let Some(ref alt_icc) = gm.alt_icc {
+        tmap_props.push(push_prop(
+            ipco,
+            IpcoProp::ColrIcc(ColrIccBox { icc_data: alt_icc.clone() }),
+        )?);
+    }
+    if !tmap_props.is_empty() {
         ipma_entries.push(IpmaEntry {
             item_id: tmap_id,
-            prop_ids: from_array([tmap_colr]),
+            prop_ids: tmap_props,
         });
     }
     iloc_items.push(IlocItem {
@@ -215,6 +224,9 @@ struct GainMapConfig {
     /// CICP color information for the alternate (typically HDR) rendition.
     /// Stored as a `colr` property on the `tmap` item.
     alt_colr: Option<ColrBox>,
+    /// ICC profile for the alternate rendition. Stored as a `colr` box of
+    /// type `prof` on the `tmap` item.
+    alt_icc: Option<Vec<u8>>,
     /// Chroma subsampling of the gain map AV1 data.
     chroma_subsampling: ChromaSubsampling,
     /// Whether the gain map is monochrome.
@@ -480,6 +492,7 @@ impl Aviffy {
             bit_depth,
             metadata,
             alt_colr: None,
+            alt_icc: None,
             chroma_subsampling: ChromaSubsampling::YUV420,
             monochrome: false,
         });
@@ -495,6 +508,20 @@ impl Aviffy {
     pub fn set_gain_map_alt_colr(&mut self, colr: ColrBox) -> &mut Self {
         if let Some(ref mut gm) = self.gain_map {
             gm.alt_colr = Some(colr);
+        }
+        self
+    }
+
+    /// Set an ICC profile for the alternate (typically HDR) rendition.
+    ///
+    /// Written as a `colr` box of type `prof` on the `tmap` item. May be
+    /// combined with [`set_gain_map_alt_colr`](Self::set_gain_map_alt_colr)
+    /// (ISOBMFF permits one `colr` of each type per item). Only meaningful
+    /// if [`set_gain_map`](Self::set_gain_map) has been called.
+    #[inline]
+    pub fn set_gain_map_alt_icc(&mut self, icc_data: Vec<u8>) -> &mut Self {
+        if let Some(ref mut gm) = self.gain_map {
+            gm.alt_icc = Some(icc_data);
         }
         self
     }
@@ -1958,6 +1985,32 @@ fn gain_map_alt_colr_roundtrip() {
             assert!(!full_range);
         }
         other => panic!("expected NCLX color info, got: {:?}", other),
+    }
+}
+
+#[test]
+fn gain_map_alt_icc_roundtrip() {
+    let primary_data = [1, 2, 3, 4, 5, 6];
+    let gain_map_data = [10, 20, 30];
+    let metadata = make_test_tmap_metadata(false, true, 0, 1, 1, 1);
+    // Minimal ICC-looking blob (the parser returns the payload verbatim).
+    let alt_icc = vec![0x00, 0x00, 0x00, 0x18, b'a', b'c', b's', b'p', 0, 1, 2, 3];
+
+    let avif = Aviffy::new()
+        .set_gain_map(gain_map_data.to_vec(), 2, 2, 8, metadata)
+        .set_gain_map_alt_icc(alt_icc.clone())
+        .to_vec(&primary_data, None, 10, 20, 8);
+
+    let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+    let gm_data = parser.gain_map_data().expect("gain map data present").unwrap();
+    assert_eq!(gm_data.as_ref(), &gain_map_data[..]);
+
+    let alt = parser.gain_map_color_info().expect("alt color info should be present");
+    match alt {
+        zenavif_parse::ColorInformation::IccProfile(data) => {
+            assert_eq!(data.as_slice(), &alt_icc[..], "tmap ICC payload verbatim");
+        }
+        other => panic!("expected ICC color info, got: {:?}", other),
     }
 }
 
