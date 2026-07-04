@@ -507,10 +507,14 @@ def sources():
                       corpus="train26", sweep_source="p1part-2026-07-04",
                       arm_id=f"p1part/s{spd}-r16no4", knob_json=json.dumps(k, sort_keys=True),
                       encoder_rev=p1_rev_w2, q_kind="cavif_q", speed=spd, rows=144))
-    # Confirm grids: the landed configuration (r16no4) + base, full 12-q.
+    # Confirm grids: base + the 4wm-only config + the SHIPPED gate triple
+    # (r16no4_bkvg2 = the landed s4-s8 configuration), full 12-q.
     for spd in (6, 8, 4):
-        for arm in ("base", "r16no4"):
-            k = json.loads(p1_w1["base"] if arm == "base" else p1_w2["r16no4_1side"])
+        for arm in ("base", "r16no4", "r16no4_bkvg2"):
+            k = json.loads(
+                p1_w1["base"] if arm == "base"
+                else p1_w2["r16no4_1side"] if arm == "r16no4"
+                else p1_w2["r16no4_bkvg2"])
             k.update(speed=spd, tune="ssimulacra2", palette="auto", threads=1, grid="full12q")
             if spd in (6, 8):
                 k.update(tx_size_rdo=1, tx_size_depth=1)
