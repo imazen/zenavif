@@ -276,3 +276,18 @@ FEATURE_HINTS "fast mode that needs less brute force" program surface: per-image
    heads + the new top-5 intra knob), with the residual measured structural (intraBC /
    iq-AQ / near-lossless classes; per-family quantification in FAST_TIER_PARITY_PLAN
    §s4-tier + `benchmarks/rd_gap_s4tier_2026-07-04.tsv`).
+
+---
+
+## ADDENDUM 2026-07-05 — the s10 cliff is CLOSED against the JPEG anchor (S10 program)
+
+The s9/s10 rows were re-tiered against a JPEG scoreboard (user direction: at
+this class the competitor is JPEG, not aom): registry s10 measured LOSING to
+mozjpeg-class zenjpeg outright (1.05-1.06x bytes at matched ssim2<=60);
+decomposition + rebuilt rows in `docs/S10_PROGRAM.md` +
+`benchmarks/rd_gap_s10_2026-07-05.tsv`. Landed release-gated
+(ravif@adb88ddc `S10_RETIER_LIVE`): s10' = txdr off + CDEF on + SATD-decides
+(−5.7/−6.9/−7.8 BD vs the old rung at 0.95x its time — strictly better and
+faster; 4.3x jpeg-moz at 0.69-0.78x its bytes), s9' = +floor(8,16)+size1
+(−15.1/−18.2/−23.6 vs old s9 at 1.62x). The liveness table above stays
+accurate for REGISTRY builds until the dep-bump flip.

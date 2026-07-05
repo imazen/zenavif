@@ -297,6 +297,29 @@ armed cells aomdec+rav1d-safe clean. **At the zenrav1e dep bump:** flip
 `S6_TX_SIZE_RDO_LIVE` + uncomment its two apply lines (same flip pattern as
 S1_DEEP_ARMS_LIVE), and include both knobs in the encode_plan mirror refresh.
 
+### S10 PROGRAM (2026-07-05): re-tiered s9'/s10' rows — LANDED release-gated (JPEG scoreboard)
+User direction: at the ultra-fast class the competitor is JPEG, not aom.
+Measured (docs/S10_PROGRAM.md + benchmarks/rd_gap_s10_2026-07-05.tsv, train26 +
+doccharts + canonical-mine breadth): **registry s10 LOSES to mozjpeg-class
+JPEG outright** (1.05-1.06x its bytes at matched ssim2<=60; >=1.0 in 7/12
+families; doccharts 1.09-1.22); the ss2 tune alone rescues to 0.79-0.84 at
+4.6x jpeg-moz encode time. Cliff decomposition: tx_domain_rate −7.45% BD at
+1.14x (22/22), (16,16) partition floor −13.5..−20.7 at s9 (23/23), CDEF-on
+−1.70% at 1.04x, size1 −7.8%; fdi/reduced-tx null, (8,32) ruled out.
+**ravif@adb88ddc `S10_RETIER_LIVE=false`**: s10' = txdr off + CDEF on +
+SATD-decides intra (num_modes_rdo_override 1; zenrav1e@071e9844) — **−5.7/
+−6.9/−7.8 BD vs old s10 at 0.95x its time; 315 ms/MP solo = 4.3x jpeg-moz at
+0.69-0.78x its bytes**; s9' = s10' + floor (8,16) + size1 — −15.1/−18.2/
+−23.6 vs old s9 at 1.62x; 663 ms/MP = 9.0x jpeg-moz at 0.54-0.60x bytes
+(s9-preset expression proven byte-identical to the s10-preset form, 0/24).
+Byte-gate 6/6 md5 while false; 0 CELLFAIL/CONFFAIL across ~4,000 PALCONF
+cells (3 chain rounds). Residual: 5000-nps 1.01-1.12 at s10' (the s4-tier
+full-tx class; tune/coeff-program-owned). Harness: jpeg_cell.sh + run_gap
+JPEG_CONFIGS/enc_int_ms (zenavif@ebb98c4d) + zenjpeg@d4f88211 sweep_cell.
+**At the zenrav1e dep bump:** flip `S10_RETIER_LIVE` + uncomment its
+num_modes_rdo apply line (same pattern as S1_DEEP/S6_* flips), alongside the
+tune-default decision the rows were measured with.
+
 ### zenrav1e per-SB delta_q + Variance Boost — SHIPPED upstream 2026-07-02 (later), release-gated
 zenrav1e gained true per-SB delta_q coding (`d125713f`, inert syntax; the
 encoder previously coded none) and `Tune::Ssimulacra2` now drives libaom's

@@ -185,4 +185,86 @@ if [[ " $PHASES " == *" p1doc "* ]]; then
     QGRID_ZR="$QCOARSE" ZENRAV1E_SPEED=8 CAVIF_EXTRA="--threads 1" $TUNE $SIZE1 $SHIP
 fi
 
+
+# ---- ROUND 2 (2026-07-05, after the single-axis verdicts): composed arms ----
+# Single-axis truth: txdr0 -7.45/-5.86/-6.15 med at 1.14x (22/22), cdef-on
+# -1.70/-2.45/-1.89 at 1.04x (22-23/23), size1 -7.82/-13.3/-13.0 at 1.49x,
+# rects -4.27/-5.78/-3.84 at 2.31x, p816 -1.58 at 1.84x; p832 catastrophic
+# (+10/+18, ruled out), fdi/redtx0 null. s9: p816 -13.5/-17.1/-20.7 (23/23)
+# at 1.89x, rects -18.9/-21.9/-24.8 at ~4x — the s10 partition win is
+# txdr-masked, so the composed grid re-tests partitions on top of txdr0.
+TXDR0="ZENRAVIF_TXDR=0"
+CDEF1="ZENRAVIF_CDEF=1"
+P816="ZENRAVIF_PART_MIN=8 ZENRAVIF_PART_MAX=16"
+IM1="ZENRAVIF_INTRA_MODES=1"
+IM2="ZENRAVIF_INTRA_MODES=2"
+
+if [[ " $PHASES " == *" r2comp "* ]]; then
+  say "=== PHASE r2comp: s10/s9 composed arms (train26, 6q) ==="
+  run_one "$OUTDIR/s10_c1_cheap.tsv"   144 "${common[@]}" SAMPLE="$SAMPLE_T26" \
+    QGRID_ZR="$QCOARSE" ZENRAV1E_SPEED=10 CAVIF_EXTRA="--threads 1" $TUNE $TXDR0 $CDEF1
+  run_one "$OUTDIR/s10_c2_p816.tsv"    144 "${common[@]}" SAMPLE="$SAMPLE_T26" \
+    QGRID_ZR="$QCOARSE" ZENRAV1E_SPEED=10 CAVIF_EXTRA="--threads 1" $TUNE $TXDR0 $CDEF1 $P816
+  run_one "$OUTDIR/s10_c3_size1.tsv"   144 "${common[@]}" SAMPLE="$SAMPLE_T26" \
+    QGRID_ZR="$QCOARSE" ZENRAV1E_SPEED=10 CAVIF_EXTRA="--threads 1" $TUNE $TXDR0 $CDEF1 $SIZE1
+  run_one "$OUTDIR/s10_c4_ps.tsv"      144 "${common[@]}" SAMPLE="$SAMPLE_T26" \
+    QGRID_ZR="$QCOARSE" ZENRAV1E_SPEED=10 CAVIF_EXTRA="--threads 1" $TUNE $TXDR0 $CDEF1 $P816 $SIZE1
+  run_one "$OUTDIR/s10_c5_full.tsv"    144 "${common[@]}" SAMPLE="$SAMPLE_T26" \
+    QGRID_ZR="$QCOARSE" ZENRAV1E_SPEED=10 CAVIF_EXTRA="--threads 1" $TUNE $TXDR0 $CDEF1 $P816 $SHIP $SIZE1
+  # SATD-decides (phase-3 candidate measured early: RD only the SATD-best
+  # intra mode; im2 = top-2 hedge). On the base AND on the c4 composition.
+  run_one "$OUTDIR/s10_c6_satd1.tsv"   144 "${common[@]}" SAMPLE="$SAMPLE_T26" \
+    QGRID_ZR="$QCOARSE" ZENRAV1E_SPEED=10 CAVIF_EXTRA="--threads 1" $TUNE $IM1
+  run_one "$OUTDIR/s10_c7_ps_satd1.tsv" 144 "${common[@]}" SAMPLE="$SAMPLE_T26" \
+    QGRID_ZR="$QCOARSE" ZENRAV1E_SPEED=10 CAVIF_EXTRA="--threads 1" $TUNE $TXDR0 $CDEF1 $P816 $SIZE1 $IM1
+  run_one "$OUTDIR/s10_c8_ps_satd2.tsv" 144 "${common[@]}" SAMPLE="$SAMPLE_T26" \
+    QGRID_ZR="$QCOARSE" ZENRAV1E_SPEED=10 CAVIF_EXTRA="--threads 1" $TUNE $TXDR0 $CDEF1 $P816 $SIZE1 $IM2
+  # s9 compositions (txdr already off at s9; cdef is lowq-gated -> force-on axis)
+  run_one "$OUTDIR/s10_c9_s9ps.tsv"    144 "${common[@]}" SAMPLE="$SAMPLE_T26" \
+    QGRID_ZR="$QCOARSE" ZENRAV1E_SPEED=9 CAVIF_EXTRA="--threads 1" $TUNE $P816 $SIZE1
+  run_one "$OUTDIR/s10_c10_s9psc.tsv"  144 "${common[@]}" SAMPLE="$SAMPLE_T26" \
+    QGRID_ZR="$QCOARSE" ZENRAV1E_SPEED=9 CAVIF_EXTRA="--threads 1" $TUNE $P816 $SIZE1 $CDEF1
+fi
+
+if [[ " $PHASES " == *" r2tim "* ]]; then
+  say "=== PHASE r2tim: composed-arm solo walls ==="
+  tcommon=(AOMENC= BUTTER= RD_CACHE=off JOBS=1)
+  run_one "$OUTDIR/s10_tim_c1.tsv" 12 "${tcommon[@]}" SAMPLE="$SAMPLE_TIM" \
+    QGRID_ZR="$QTIM" ZENRAV1E_SPEED=10 CAVIF_EXTRA="--threads 1" $TUNE $TXDR0 $CDEF1
+  run_one "$OUTDIR/s10_tim_c2.tsv" 12 "${tcommon[@]}" SAMPLE="$SAMPLE_TIM" \
+    QGRID_ZR="$QTIM" ZENRAV1E_SPEED=10 CAVIF_EXTRA="--threads 1" $TUNE $TXDR0 $CDEF1 $P816
+  run_one "$OUTDIR/s10_tim_c4.tsv" 12 "${tcommon[@]}" SAMPLE="$SAMPLE_TIM" \
+    QGRID_ZR="$QTIM" ZENRAV1E_SPEED=10 CAVIF_EXTRA="--threads 1" $TUNE $TXDR0 $CDEF1 $P816 $SIZE1
+  run_one "$OUTDIR/s10_tim_c5.tsv" 12 "${tcommon[@]}" SAMPLE="$SAMPLE_TIM" \
+    QGRID_ZR="$QTIM" ZENRAV1E_SPEED=10 CAVIF_EXTRA="--threads 1" $TUNE $TXDR0 $CDEF1 $P816 $SHIP $SIZE1
+  run_one "$OUTDIR/s10_tim_c7.tsv" 12 "${tcommon[@]}" SAMPLE="$SAMPLE_TIM" \
+    QGRID_ZR="$QTIM" ZENRAV1E_SPEED=10 CAVIF_EXTRA="--threads 1" $TUNE $TXDR0 $CDEF1 $P816 $SIZE1 $IM1
+  run_one "$OUTDIR/s10_tim_c9.tsv" 12 "${tcommon[@]}" SAMPLE="$SAMPLE_TIM" \
+    QGRID_ZR="$QTIM" ZENRAV1E_SPEED=9 CAVIF_EXTRA="--threads 1" $TUNE $P816 $SIZE1
+  run_one "$OUTDIR/s10_tim_satd1.tsv" 12 "${tcommon[@]}" SAMPLE="$SAMPLE_TIM" \
+    QGRID_ZR="$QTIM" ZENRAV1E_SPEED=10 CAVIF_EXTRA="--threads 1" $TUNE $IM1
+fi
+
+
+# ---- ROUND 3: the tier-row candidates + class supplement ----
+if [[ " $PHASES " == *" r3rows "* ]]; then
+  say "=== PHASE r3rows: s10'/s9' row candidates ==="
+  # s10' candidate: txdr0+cdef+SATD-decides (target ~old-s10 wall)
+  run_one "$OUTDIR/s10_c11_row10.tsv" 144 "${common[@]}" SAMPLE="$SAMPLE_T26" \
+    QGRID_ZR="$QCOARSE" ZENRAV1E_SPEED=10 CAVIF_EXTRA="--threads 1" $TUNE $TXDR0 $CDEF1 $IM1
+  # s9'-preset expression check: c7 config expressed through the s9 preset
+  # (reduced_tx on there — measured null; everything else identical).
+  run_one "$OUTDIR/s10_c13_row9.tsv" 144 "${common[@]}" SAMPLE="$SAMPLE_T26" \
+    QGRID_ZR="$QCOARSE" ZENRAV1E_SPEED=9 CAVIF_EXTRA="--threads 1" $TUNE $CDEF1 $P816 $SIZE1 $IM1
+  run_one "$OUTDIR/s10_tim_c11.tsv" 12 AOMENC= BUTTER= RD_CACHE=off JOBS=1 SAMPLE="$SAMPLE_TIM" \
+    QGRID_ZR="$QTIM" ZENRAV1E_SPEED=10 CAVIF_EXTRA="--threads 1" $TUNE $TXDR0 $CDEF1 $IM1
+  run_one "$OUTDIR/s10_tim_c13.tsv" 12 AOMENC= BUTTER= RD_CACHE=off JOBS=1 SAMPLE="$SAMPLE_TIM" \
+    QGRID_ZR="$QTIM" ZENRAV1E_SPEED=9 CAVIF_EXTRA="--threads 1" $TUNE $CDEF1 $P816 $SIZE1 $IM1
+  # doccharts class supplement for the two row candidates
+  run_one "$OUTDIR/s10_c11_doc.tsv" 90 "${common[@]}" SAMPLE="$SAMPLE_DOC" \
+    QGRID_ZR="$QCOARSE" ZENRAV1E_SPEED=10 CAVIF_EXTRA="--threads 1" $TUNE $TXDR0 $CDEF1 $IM1
+  run_one "$OUTDIR/s10_c13_doc.tsv" 90 "${common[@]}" SAMPLE="$SAMPLE_DOC" \
+    QGRID_ZR="$QCOARSE" ZENRAV1E_SPEED=9 CAVIF_EXTRA="--threads 1" $TUNE $CDEF1 $P816 $SIZE1 $IM1
+fi
+
 say "CHAIN COMPLETE — outputs in $OUTDIR"
