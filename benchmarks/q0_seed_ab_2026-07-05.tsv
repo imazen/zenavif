@@ -1,0 +1,24 @@
+# q0-seed A/B (real encodes): target_hug_bench, 5 LSD-val origins (full.s1024) x ssim2 targets {60,80}, s6, tol 0.5, max 6, threads 1
+# builds: anchor = --features target-quality (initial_guess seed); q0head = +auto-tune (q0_head seed). zenavif @ working copy of 99e970f6, 2026-07-05
+# summary: mean encodes 4.5 -> 4.0 (sum 45 -> 40), converged 7/10 -> 8/10; wins concentrate at t=80 saturation (8103: 6x->2ok, 6091: 6x->4ok, 9631: 6->4); photo 1055 regressed (t80 1->3: anchor curve is photo-calibrated)
+seed	image	target	achieved	err	encodes	converged	bytes	ms
+anchor	1055_general_bread-and-coffee-table_blue-lagoon-grindavik_s23u_iso50-f2p2_20240429-174632_4000x3000.sdr.full.s1024.png	60	59.990	-0.010	3	true	55564	2822
+anchor	1055_general_bread-and-coffee-table_blue-lagoon-grindavik_s23u_iso50-f2p2_20240429-174632_4000x3000.sdr.full.s1024.png	80	80.067	+0.067	1	true	119121	1155
+anchor	5343_noaa_nhc-al182024-rafael_p19_2550x3300.sdr.full.s1024.png	60	61.090	+1.090	6	false	5459	5109
+anchor	5343_noaa_nhc-al182024-rafael_p19_2550x3300.sdr.full.s1024.png	80	79.713	-0.287	5	true	11358	3122
+anchor	8103_web-screenshots_bls-employment-situation_dpr1_page1_1440x900.sdr.full.s1024.png	60	59.545	-0.455	3	true	3756	1855
+anchor	8103_web-screenshots_bls-employment-situation_dpr1_page1_1440x900.sdr.full.s1024.png	80	81.158	+1.158	6	false	9281	3426
+anchor	9631_gen_products-footwear_buttercup-jelly-sandal_p0393_1024x1536.sdr.full.s1024.png	60	59.517	-0.483	5	true	3777	3788
+anchor	9631_gen_products-footwear_buttercup-jelly-sandal_p0393_1024x1536.sdr.full.s1024.png	80	80.010	+0.010	6	true	9659	3415
+anchor	6091_scans-patents_martha-jones-us77494-1bit_p003_2320x3408.sdr.full.s1024.png	60	60.200	+0.200	4	true	18039	2863
+anchor	6091_scans-patents_martha-jones-us77494-1bit_p003_2320x3408.sdr.full.s1024.png	80	81.512	+1.512	6	false	36836	3772
+q0head	1055_general_bread-and-coffee-table_blue-lagoon-grindavik_s23u_iso50-f2p2_20240429-174632_4000x3000.sdr.full.s1024.png	60	59.598	-0.402	4	true	52614	4300
+q0head	1055_general_bread-and-coffee-table_blue-lagoon-grindavik_s23u_iso50-f2p2_20240429-174632_4000x3000.sdr.full.s1024.png	80	80.229	+0.229	3	true	118521	3504
+q0head	5343_noaa_nhc-al182024-rafael_p19_2550x3300.sdr.full.s1024.png	60	60.944	+0.944	6	false	4959	5707
+q0head	5343_noaa_nhc-al182024-rafael_p19_2550x3300.sdr.full.s1024.png	80	80.372	+0.372	5	true	11564	3589
+q0head	8103_web-screenshots_bls-employment-situation_dpr1_page1_1440x900.sdr.full.s1024.png	60	59.584	-0.416	2	true	3675	1492
+q0head	8103_web-screenshots_bls-employment-situation_dpr1_page1_1440x900.sdr.full.s1024.png	80	80.349	+0.349	2	true	8872	1381
+q0head	9631_gen_products-footwear_buttercup-jelly-sandal_p0393_1024x1536.sdr.full.s1024.png	60	60.556	+0.556	5	false	3500	4218
+q0head	9631_gen_products-footwear_buttercup-jelly-sandal_p0393_1024x1536.sdr.full.s1024.png	80	80.270	+0.270	4	true	9414	2602
+q0head	6091_scans-patents_martha-jones-us77494-1bit_p003_2320x3408.sdr.full.s1024.png	60	59.876	-0.124	5	true	16676	4090
+q0head	6091_scans-patents_martha-jones-us77494-1bit_p003_2320x3408.sdr.full.s1024.png	80	80.279	+0.279	4	true	36759	2536

@@ -7,7 +7,10 @@
 //! zenavif's own decoder) → score against the source → adjust quality →
 //! repeat, using a bracketed secant/bisection search over the monotone
 //! score-vs-quality curve. Typical convergence is 3–5 encodes for a ±0.5
-//! tolerance.
+//! tolerance from the content-blind anchor curve; with the `auto-tune`
+//! feature the RGB8 + ssim2 path seeds the search from the
+//! [`crate::q0_head`] content prediction instead (offline: mean 3.75 →
+//! 2.72 encodes on held-out label-store curves).
 //!
 //! Enabled by the `target-quality` feature (pulls `fast-ssim2` and `zensim`).
 
@@ -94,6 +97,15 @@ pub struct TargetedEncode {
 /// search); every other setting (speed, subsampling, tuning knobs) is
 /// used as-is for every trial encode.
 ///
+/// **q0 seeding (`auto-tune` feature):** for [`TargetMetric::Ssim2`]
+/// targets the search starts from the [`crate::q0_head`] content-aware
+/// prediction instead of the fixed anchor curve (offline: mean encodes
+/// 3.75 → 2.72 on held-out label-store curves — see the module docs).
+/// Prediction failure, zensim targets, or building without `auto-tune`
+/// fall back to the anchor curve unchanged. The search semantics,
+/// selection policy, and convergence contract are identical either way —
+/// only the starting point (and so the iterate count) differs.
+///
 /// # Errors
 ///
 /// Returns the first encode/decode/score error encountered, or
@@ -105,7 +117,26 @@ pub fn encode_rgb8_with_target(
     options: &TargetOptions,
     stop: StopToken,
 ) -> Result<TargetedEncode> {
-    search_target(target, options, &stop, |q, stop| {
+    #[cfg(feature = "auto-tune")]
+    let q_start = match target {
+        TargetMetric::Ssim2(t) => {
+            let rgb = contiguous_rgb8(img);
+            crate::q0_head::predict_q0_for_rgb8(
+                &rgb,
+                img.width() as u32,
+                img.height() as u32,
+                t,
+                config.speed_value(),
+                None,
+            )
+        }
+        // Not fitted for zensim targets — keep the anchor curve.
+        TargetMetric::Zensim(_) => None,
+    };
+    #[cfg(not(feature = "auto-tune"))]
+    let q_start = None;
+
+    search_target(target, options, q_start, &stop, |q, stop| {
         let cfg = config.clone().quality(q);
         let enc = encode_rgb8(img, &cfg, stop.clone())?;
         let s = score_rgb8(target, img, &enc.avif_file, stop)?;
@@ -113,9 +144,26 @@ pub fn encode_rgb8_with_target(
     })
 }
 
+/// Tightly-packed RGB8 bytes for feature extraction. Strided sources get
+/// one row-wise copy (trivial next to a single trial encode); contiguous
+/// buffers copy once end-to-end.
+#[cfg(feature = "auto-tune")]
+fn contiguous_rgb8(img: ImgRef<'_, Rgb<u8>>) -> Vec<u8> {
+    let (w, h) = (img.width(), img.height());
+    let mut out = Vec::with_capacity(w * h * 3);
+    for row in img.rows() {
+        for p in row {
+            out.extend_from_slice(&[p.r, p.g, p.b]);
+        }
+    }
+    out
+}
+
 /// Encode an RGBA8 image to AVIF, converging on a target perceptual score.
 ///
-/// Same search and selection policy as [`encode_rgb8_with_target`].
+/// Same search and selection policy as [`encode_rgb8_with_target`]. The
+/// q0 content seed applies to the RGB8 path only — this variant always
+/// starts from the anchor curve (seeding it is future work).
 /// **Alpha handling in scoring:** [`TargetMetric::Zensim`] scores the RGBA
 /// pixels natively (zensim is alpha-aware, straight-alpha semantics);
 /// [`TargetMetric::Ssim2`] composites both source and decode onto a mid-gray
@@ -134,7 +182,7 @@ pub fn encode_rgba8_with_target(
     options: &TargetOptions,
     stop: StopToken,
 ) -> Result<TargetedEncode> {
-    search_target(target, options, &stop, |q, stop| {
+    search_target(target, options, None, &stop, |q, stop| {
         let cfg = config.clone().quality(q);
         let enc = encode_rgba8(img, &cfg, stop.clone())?;
         let s = score_rgba8(target, img, &enc.avif_file, stop)?;
@@ -162,7 +210,7 @@ pub fn encode_rgb16_with_target(
     options: &TargetOptions,
     stop: StopToken,
 ) -> Result<TargetedEncode> {
-    search_target(target, options, &stop, |q, stop| {
+    search_target(target, options, None, &stop, |q, stop| {
         let cfg = config.clone().quality(q);
         let enc = crate::encoder::encode_rgb16(img, &cfg, stop.clone())?;
         let s = score_rgb16(target, img, &enc.avif_file, stop)?;
@@ -172,9 +220,12 @@ pub fn encode_rgb16_with_target(
 
 /// The bracketed secant/bisection search shared by every input variant.
 /// `encode_and_score(quality, stop)` performs one full trial iteration.
+/// `q_start` overrides the anchor-curve initial guess (the q0 head's
+/// content-aware seed); `None` keeps [`initial_guess`].
 fn search_target(
     target: TargetMetric,
     options: &TargetOptions,
+    q_start: Option<f32>,
     stop: &StopToken,
     mut encode_and_score: impl FnMut(f32, &StopToken) -> Result<(EncodedImage, f64)>,
 ) -> Result<TargetedEncode> {
@@ -200,7 +251,10 @@ fn search_target(
     let mut lo: Option<(f32, f64)> = None;
     let mut hi: Option<(f32, f64)> = None;
 
-    let mut q = initial_guess(t).clamp(min_q, max_q);
+    let mut q = q_start
+        .filter(|q| q.is_finite())
+        .unwrap_or_else(|| initial_guess(t))
+        .clamp(min_q, max_q);
     let mut encodes = 0u8;
 
     while encodes < max_encodes {

@@ -248,3 +248,61 @@ fn rgb16_target_converges() {
     );
     assert!(!out.encoded.avif_file.is_empty());
 }
+
+/// q0-head seeding liveness (auto-tune builds): with `max_encodes = 1` the
+/// result's `quality` IS the search's starting point, so the contract can
+/// observe the seed directly — the ssim2 path must start exactly at
+/// [`zenavif::q0_head::predict_q0_for_rgb8`]'s prediction, and the zensim
+/// path must keep the anchor curve (documented Q60→~70 / Q90→~89 mapping:
+/// t=80 → 60 + 10·30/19).
+#[cfg(feature = "auto-tune")]
+#[test]
+fn q0_seed_is_live_on_ssim2_and_absent_on_zensim() {
+    let img = test_image(160, 128);
+    let cfg = base_config();
+    let opts = TargetOptions {
+        max_encodes: 1,
+        ..Default::default()
+    };
+
+    // Reproduce the wiring's own feature-extraction input.
+    let rgb: Vec<u8> = img
+        .as_ref()
+        .rows()
+        .flat_map(|row| row.iter().flat_map(|p| [p.r, p.g, p.b]))
+        .collect();
+    let expected_q0 = zenavif::q0_head::predict_q0_for_rgb8(
+        &rgb,
+        img.width() as u32,
+        img.height() as u32,
+        78.0,
+        cfg.speed_value(),
+        None,
+    )
+    .expect("q0 head must predict on plain RGB8 content");
+
+    let out = encode_rgb8_with_target(img.as_ref(), &cfg, TargetMetric::Ssim2(78.0), &opts, stop())
+        .expect("single-iterate targeted encode");
+    assert_eq!(out.encodes, 1);
+    assert!(
+        (out.quality - expected_q0).abs() < 1e-3,
+        "seeded start {} != q0 prediction {expected_q0}",
+        out.quality
+    );
+
+    // zensim targets are NOT fitted — the anchor curve must still rule.
+    let out_z = encode_rgb8_with_target(
+        img.as_ref(),
+        &cfg,
+        TargetMetric::Zensim(80.0),
+        &opts,
+        stop(),
+    )
+    .expect("single-iterate zensim encode");
+    let anchor = 60.0 + (80.0_f32 - 70.0) * (30.0 / 19.0);
+    assert!(
+        (out_z.quality - anchor).abs() < 1e-3,
+        "zensim start {} != anchor {anchor}",
+        out_z.quality
+    );
+}

@@ -1,0 +1,104 @@
+# q0 head fit — fit_q0_head.py @ zenavif ec2540b, store=hyperparam-labels-2026-07-03 (cavif_q, zenrav1e)
+# fit arms: speedladder/zr-s2-tune, speedladder/zr-s4-tune, speedladder/zr-s6-tune, speedladder/zr-s8-tune, speedladder/zr-s10-tune, sizedecay/full_s2, sizedecay/full_s2-val, qmdist/ratio-final_s2, qmdist/ratio-final_s1deep, lfsharp/still753-final_s2, lfsharp/still753-final_s1deep, deltaq/str1_s2, coeffrd/base_s2, palette-mech/shipped-auto_s2, wedge/zr-best_s2, p2heads/confirm-s6-ship, p2heads/val-ship, p1part/confirm-s4-r16no4_bkvg2, p1part/confirm-s6-r16no4_bkvg2, p1part/confirm-s8-r16no4_bkvg2, fastwins/confirm-s6-size1, fastwins/confirm-s8-size1
+# off arms (eval-only): speedladder/zr-s2-off, speedladder/zr-s4-off, speedladder/zr-s6-off, speedladder/zr-s8-off, speedladder/zr-s10-off, sdnontune/base_s2, sizedecay/off_s2, sizedecay/off_s2-val
+# targets [40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90], gate val-p90 <= 6.0, chosen M5-l1-q-hinge-h80 feats=['flat_color_block_ratio', 'patch_fraction', 'uniformity', 'high_freq_energy_ratio', 'distinct_color_bins', 'noise_floor_y', 'gradient_fraction', 'gradient_fraction_smooth'] interactions=True space=q loss=l1
+table	key	n	p50	p90
+ladder	M0-initial_guess/train		7.173	22.054
+ladder	M0-initial_guess/val		8.658	29.909
+ladder	M1-target-only/train		6.828	15.046
+ladder	M1-target-only/val		6.469	15.452
+ladder	M2-+speed+logpx/train		6.799	14.933
+ladder	M2-+speed+logpx/val		6.900	14.813
+ladder	M3-l2-q-poly/train		2.240	6.604
+ladder	M3-l2-q-poly/val		2.305	7.787
+ladder	M3-l2-q-poly+cal/train		2.150	6.565
+ladder	M3-l2-q-poly+cal/val		2.452	7.583
+ladder	M3-l1-q-poly/train		2.083	6.626
+ladder	M3-l1-q-poly/val		2.291	7.425
+ladder	M3-l1-q-poly+cal/train		2.058	6.583
+ladder	M3-l1-q-poly+cal/val		2.416	7.614
+ladder	M3-l1-qi-poly/train		1.989	6.707
+ladder	M3-l1-qi-poly/val		2.157	7.370
+ladder	M3-l1-qi-poly+cal/train		1.909	6.406
+ladder	M3-l1-qi-poly+cal/val		2.123	7.459
+ladder	M4-l1-q-hinge/train		2.078	6.836
+ladder	M4-l1-q-hinge/val		2.321	7.776
+ladder	M4-l1-q-hinge+cal/train		2.063	6.649
+ladder	M4-l1-q-hinge+cal/val		2.458	7.645
+ladder	M4-l1-logq-hinge/train		2.098	6.812
+ladder	M4-l1-logq-hinge/val		2.662	9.559
+ladder	M4-l1-logq-hinge+cal/train		1.999	6.851
+ladder	M4-l1-logq-hinge+cal/val		2.606	9.822
+ladder	M5-l1-q-hinge-h80/train		1.825	6.352
+ladder	M5-l1-q-hinge-h80/val		2.151	7.250
+ladder	M5-l1-q-hinge-h80+cal/train		1.798	6.261
+ladder	M5-l1-q-hinge-h80+cal/val		2.159	7.287
+ladder	M5-l1-logq-hinge-h80/train		1.903	6.147
+ladder	M5-l1-logq-hinge-h80/val		2.248	8.216
+ladder	M5-l1-logq-hinge-h80+cal/train		1.767	6.161
+ladder	M5-l1-logq-hinge-h80+cal/val		2.199	8.709
+ladder	M6-mlp-all31/train		0.994	4.079
+ladder	M6-mlp-all31/val		3.232	7.700
+val_family	1000	77	1.609	2.804
+val_family	2000	62	1.370	3.066
+val_family	5300	35	3.064	6.460
+val_family	6000	50	4.103	8.029
+val_family	6600	77	1.359	3.818
+val_family	7000	75	2.139	10.964
+val_family	8000	58	2.014	7.028
+val_family	8100	97	3.163	7.604
+val_family	9000	26	10.663	15.606
+val_family	9094	77	3.266	5.213
+val_family	9226	97	1.361	3.832
+off_arms	all	2077	3.548	9.059
+off_arms	val-origins	276	4.402	9.545
+sim	metric	before	after
+sim	mean_encodes	3.750	2.715
+sim	median_encodes	4.0	3.0
+sim	converged_frac	0.9412	1.0000
+sim	le2_frac	0.1149	0.2681
+sim_target	40	3.179	3.179
+sim_target	45	3.538	2.872
+sim_target	50	3.553	3.149
+sim_target	55	3.481	2.963
+sim_target	60	3.161	2.893
+sim_target	65	3.323	2.923
+sim_target	70	3.447	2.803
+sim_target	75	4.022	2.467
+sim_target	80	4.304	2.685
+sim_target	85	4.272	2.663
+sim_target	90	3.837	2.141
+coef	name	value		
+coef	const	45.274718		
+coef	tn	16.965990		
+coef	h50	1.268446		
+coef	h60	2.254219		
+coef	h70	3.931834		
+coef	h80	-3.764774		
+coef	h85	5.804622		
+coef	speed_n	0.881025		
+coef	logpx_n	2.367783		
+coef	flat_color_block_ratio	-3.530724		
+coef	patch_fraction	-11.460023		
+coef	uniformity	-14.995291		
+coef	high_freq_energy_ratio	5.530201		
+coef	distinct_color_bins	1.207155		
+coef	noise_floor_y	-8.744402		
+coef	gradient_fraction	-16.150450		
+coef	gradient_fraction_smooth	6.266575		
+coef	flat_color_block_ratio*tn	-9.584532		
+coef	patch_fraction*tn	-8.128057		
+coef	uniformity*tn	5.679198		
+coef	high_freq_energy_ratio*tn	-0.871462		
+coef	distinct_color_bins*tn	0.584576		
+coef	noise_floor_y*tn	-4.473643		
+coef	gradient_fraction*tn	4.562962		
+coef	gradient_fraction_smooth*tn	-10.327946		
+coef	flat_color_block_ratio*h80	-1.005466		
+coef	patch_fraction*h80	5.389818		
+coef	uniformity*h80	18.228610		
+coef	high_freq_energy_ratio*h80	-1.888892		
+coef	distinct_color_bins*h80	0.472011		
+coef	noise_floor_y*h80	3.236563		
+coef	gradient_fraction*h80	1.718392		
+coef	gradient_fraction_smooth*h80	-5.155774		

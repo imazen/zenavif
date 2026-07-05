@@ -91,6 +91,10 @@ pub mod expert;
 /// Calibrated encode/decode resource estimation (peak memory + time).
 pub mod heuristics;
 mod image;
+/// q0-prediction head for target-quality mode (starting-quality seed for
+/// the ssim2-targeted search; fitted constants, fast_heads pattern).
+#[cfg(feature = "auto-tune")]
+pub mod q0_head;
 #[cfg(feature = "_dev")]
 pub mod simd;
 #[cfg(not(feature = "_dev"))]

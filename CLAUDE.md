@@ -652,8 +652,36 @@ honest `converged=false` when unreachable. RGBA8 covered
 (`encode_rgba8_with_target`: zensim scores RGBA natively; ssim2 composites
 on mid-gray); RGB16 covered (`encode_rgb16_with_target`, 10-bit AV1: ssim2
 native 16-bit, zensim via identical 8-bit views). Contract tests:
-`tests/target_quality.rs` (6 tests, ~0.6 s). NOT YET COVERED: RGBA16,
+`tests/target_quality.rs` (7 tests, ~0.6 s). NOT YET COVERED: RGBA16,
 animation.
+
+**§q0 seeding (2026-07-05): content-aware starting quality — LANDED,
+`auto-tune` feature.** `src/q0_head.rs` (fitted-constants head, fast_heads
+pattern): predicts q0 from 8 zenanalyze features + (ssim2 target, speed,
+ln px); `encode_rgb8_with_target` seeds the search from it on Ssim2 targets
+(zensim/RGBA/RGB16 keep the anchor curve; prediction failure degrades to
+the anchor curve unchanged — liveness + fallback pinned by
+`tests/target_quality.rs::q0_seed_is_live_on_ssim2_and_absent_on_zensim`).
+Fit: `scripts/hyperparam/fit_q0_head.py` (deterministic; label store
+cavif_q ship-of-era arms, LSD-train fit / LSD-val gate). **Honest verdict:
+the pre-registered |q0−q*| p90 ≤ 6 val gate is NOT met — best simple model
+7.25 (M5-l1-q-hinge-h80), and the sanctioned zenpredict-shape MLP
+escalation measured WORSE on val (7.70 vs 7.25 while fitting train to 4.08
+— origin-level transfer, not capacity, binds; cross-arm label noise floor
+p90 ≈ 2.1).** Shipped anyway on the true objective: offline secant sim
+(731 held-out val curves) mean encodes 3.75 → 2.72, converged 94.1% → 100%,
+≤2-encodes 11.5% → 26.8% (`benchmarks/q0_head_fit_2026-07-05.tsv`);
+real-encode A/B (5 val origins × t{60,80} × s6) mean 4.5 → 4.0, converged
+7/10 → 8/10, t=80 saturation rescues 8103 6✗→2✓ / 6091 6✗→4✓, photo 1055
+regressed 1→3 at t80 (`benchmarks/q0_seed_ab_2026-07-05.tsv`, harness =
+`examples/target_hug_bench.rs` built with vs without `auto-tune`).
+Per-family val p90: photos/people/illustrations 2.8-3.8 (gate met there);
+tails are 9000 (15.6, n=26), 7000 plots (11.0), 6000 scans (8.0) —
+saturating curves where the ssim2→q inversion is ill-conditioned. Tune-off
+(registry-era) arms: p90 9.1 (fitted on tune-on ship arms; re-run
+fit_q0_head.py at the dep bump if the tune default changes). Follow-ups:
+RGBA8/RGB16 seeding, zensim-target fit, Offer pass-through from an
+orchestrator.
 
 ### Encoding Features (`encode-imazen` feature gate)
 All wired through to zenrav1e fork. Benchmarked results (ravif 7265eea):
