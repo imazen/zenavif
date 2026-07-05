@@ -72,6 +72,7 @@ SRC = {
     "fastwins": "/mnt/v/output/zenavif/fastwins-20260704",
     "p1part": "/mnt/v/output/zenavif/p1part-20260704",
     "p2heads": "/mnt/v/output/zenavif/p2heads-20260704",
+    "s4tier": "/mnt/v/output/zenavif/s4tier-20260704",
 }
 # palette-mech A/B val corpus (14 VAL-LSD origins materialized with the wedge
 # conventions; join-verified 108/108) — see its _MANIFEST.json + picks_val14.json
@@ -618,6 +619,76 @@ def sources():
                       corpus=corpus_, sweep_source="p2heads-2026-07-04",
                       arm_id=f"p2heads/{nm}", knob_json=json.dumps(k, sort_keys=True),
                       encoder_rev=p2_rev, q_kind="cavif_q", speed=6, rows=rows_))
+
+    # --- S4TIER 2026-07-04 (chain_s4tier.sh; FAST_TIER_PARITY last column) ---
+    # zenrav1e master 0d392334 (071e9844 num_modes_rdo_override knob + fmt)
+    # via the ravif--s4tier devpatch (p2heads passthroughs + INTRA_MODES=5 +
+    # CDEF/LRF force envs); box cavif sha256/16 26091145a8cdc388. The cont
+    # phase re-encoded the p2heads s6+size1 base and i7 coarse arms under
+    # this chain and both byte-matched 144/144 (knob-off identity) — those
+    # duplicate cells are NOT re-registered here. i5 = ComplexKeyframes +
+    # filter_intra=off + num_modes_rdo_override=5 (the new knob's top-5
+    # midpoint); cdef/lrf arms force the filters on at every q (the stock
+    # table gates both at Q<~50). v3 composed classes = v2 rules with the
+    # tx D bound at 23.69 (fit_s4_tier.py refit); full_* = the 5 oracle-
+    # extra images (no honest gate; upper-bound factoring cells).
+    s4_rev = "zenrav1e@0d392334 via ravif d72304a1+s4tier-devpatch(26091145)"
+    s4d = SRC["s4tier"]
+    s4_tx = dict(p2_tx, full=dict(tx_size_rdo=1, tx_type_rdo=1))
+    for nm, path, spd, rows_, k in [
+        ("s6-i5", "s4_s6_i5.tsv", 6, 144, dict(p2_tx["size1"], intra_modes=5)),
+        ("s6-i5ship", "s4_s6_i5ship.tsv", 6, 144,
+         dict(p2_tx["size1"], intra_modes=5, **p2_part["ship"])),
+        ("s8-i5", "s4_s8_i5.tsv", 8, 144, dict(p2_tx["size1"], intra_modes=5)),
+        ("s6-cdef", "s4_s6_cdef.tsv", 6, 144,
+         dict(p2_tx["size1"], cdef="force-on", **p2_part["ship"])),
+        ("s6-lrf", "s4_s6_lrf.tsv", 6, 144,
+         dict(p2_tx["size1"], lrf="force-on", **p2_part["ship"])),
+    ]:
+        k.update(speed=spd, tune="ssimulacra2", palette="auto", threads=1)
+        s.append(dict(path=f"{s4d}/{path}", kind="rd_tsv",
+                      corpus="train26", sweep_source="s4tier-2026-07-04",
+                      arm_id=f"s4tier/{nm}", knob_json=json.dumps(k, sort_keys=True),
+                      encoder_rev=s4_rev, q_kind="cavif_q", speed=spd, rows=rows_))
+    s4_cls_n = dict(none_ship=2, size1_ship=8, size1_m32=3, min_ship=6, min_m32=5)
+    s4x_cls_n = dict(full_ship=3, full_m32=2)
+    s4v_cls_n = dict(none_ship=1, size1_ship=1, size1_m32=5, min_ship=5, min_m32=2)
+    for im in ("i7", "i5"):
+        for cls, n in s4_cls_n.items():
+            tx, part = cls.rsplit("_", 1)
+            k = dict(s4_tx[tx], speed=6, tune="ssimulacra2", palette="auto",
+                     threads=1, grid="full12q", intra_modes=int(im[1]),
+                     **p2_part[part])
+            s.append(dict(path=f"{s4d}/s4c_{cls}_{im}.tsv", kind="rd_tsv",
+                          corpus="train26", sweep_source="s4tier-2026-07-04",
+                          arm_id=f"s4tier/v3{im}-{cls}",
+                          knob_json=json.dumps(k, sort_keys=True),
+                          encoder_rev=s4_rev, q_kind="cavif_q", speed=6, rows=n * 12))
+        for cls, n in s4v_cls_n.items():
+            tx, part = cls.rsplit("_", 1)
+            k = dict(s4_tx[tx], speed=6, tune="ssimulacra2", palette="auto",
+                     threads=1, grid="full12q", intra_modes=int(im[1]),
+                     **p2_part[part])
+            s.append(dict(path=f"{s4d}/s4v_{cls}_{im}.tsv", kind="rd_tsv",
+                          corpus="mech26", sweep_source="s4tier-2026-07-04",
+                          arm_id=f"s4tier/val-v3{im}-{cls}",
+                          knob_json=json.dumps(k, sort_keys=True),
+                          encoder_rev=s4_rev, q_kind="cavif_q", speed=6, rows=n * 12))
+    for cls, n in s4x_cls_n.items():
+        part = cls.rsplit("_", 1)[1]
+        k = dict(s4_tx["full"], speed=6, tune="ssimulacra2", palette="auto",
+                 threads=1, grid="full12q", intra_modes=7, **p2_part[part])
+        s.append(dict(path=f"{s4d}/s4x_{cls}_i7.tsv", kind="rd_tsv",
+                      corpus="train26", sweep_source="s4tier-2026-07-04",
+                      arm_id=f"s4tier/oraclex-{cls}",
+                      knob_json=json.dumps(k, sort_keys=True),
+                      encoder_rev=s4_rev, q_kind="cavif_q", speed=6, rows=n * 12))
+    k = dict(p2_tx["size1"], speed=6, tune="ssimulacra2", palette="auto",
+             threads=1, grid="full12q")
+    s.append(dict(path=f"{s4d}/s4v_base.tsv", kind="rd_tsv",
+                  corpus="mech26", sweep_source="s4tier-2026-07-04",
+                  arm_id="s4tier/val-base", knob_json=json.dumps(k, sort_keys=True),
+                  encoder_rev=s4_rev, q_kind="cavif_q", speed=6, rows=168))
     return s
 
 
