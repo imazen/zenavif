@@ -32,33 +32,65 @@ JOBS="${JOBS:-6}"
 QGRID_ZR="${QGRID_ZR:-30 40 50 55 60 65 70 75 80 85 90 95}"    # cavif quality (higher = better)
 CQGRID_AOM="${CQGRID_AOM:-8 16 24 32 40 48 56 63}"             # aomenc cq-level (lower = better)
 AOMFMTS="${AOMFMTS:-420 444}"
+# S10 program: optional zenjpeg scoreboard-anchor arms. Space-separated
+# sweep-grammar cell ids (jpeg_cell.sh / zenjpeg sweep_cell example);
+# empty = byte-identical legacy behavior. ZR=off skips the zenrav1e loop
+# for jpeg-only sweeps.
+JPEG_CONFIGS="${JPEG_CONFIGS:-}"
+QGRID_JPEG="${QGRID_JPEG:-5 10 15 20 25 30 35 40 45 50 55 60 65 70 75 80 85 90 95}"
 export COLOR="$HERE/color.py"
 
-echo -e "image\tw\th\tfamily\tencoder\tfmt\tq\tbytes\tbpp\tssim2\tenc_ms\tbutteraugli_3n\tbutteraugli_max" > "$OUT"
+# enc_int_ms: INTERNAL encoder-only ms where the cell can report it (zenjpeg
+# sweep_cell always; cavif via the dev-patch ZR_ENC_MS stderr line; NA
+# elsewhere) — cross-codec ms ratios must exclude harness PNG I/O, which is
+# a third of the wall at s10-class speeds. Cells emitting the legacy 9-field
+# row are padded with NA by pad_row.
+echo -e "image\tw\th\tfamily\tencoder\tfmt\tq\tbytes\tbpp\tssim2\tenc_ms\tbutteraugli_3n\tbutteraugli_max\tenc_int_ms" > "$OUT"
 [ -n "${AOMENC:-}" ] && echo "[rd_gap] both encoders (zenrav1e + libaom)" || echo "[rd_gap] zenrav1e only (AOMENC unset)"
+[ -n "$JPEG_CONFIGS" ] && echo "[rd_gap] zenjpeg anchor arms: $JPEG_CONFIGS"
+
+pad_row() { # normalize a 9-field cell row to 10 fields (enc_int_ms=NA)
+  local r="$1" n
+  n=$(awk -F'\t' '{print NF}' <<< "$r")
+  if [ "$n" -eq 9 ]; then printf '%s\tNA' "$r"; else printf '%s' "$r"; fi
+}
 
 worker() {
   local img="$1" w="$2" h="$3" fam="$4"
   local tmp="$WORK/$(basename "$img" .png)"; mkdir -p "$tmp"
   local part="$tmp/rows.tsv"; : > "$part"
   local bn; bn=$(basename "$img")
-  local q fmt r
+  local q fmt r cfg
   local fails=0
-  for q in $QGRID_ZR; do
-    r=$(bash "$HERE/zenrav1e_cell.sh" "$img" "$w" "$h" "$fam" "$q" "$tmp" 2>>"$tmp/err.log")
-    if [[ "$r" == zenrav1e* ]]; then
-      printf '%s\t%s\t%s\t%s\t%s\n' "$bn" "$w" "$h" "$fam" "$r" >> "$part"
-    else
-      fails=$((fails+1))
-      echo "  [$(date -u +%H:%M:%SZ)] CELL FAILED $bn zenrav1e q$q: ${r:-<no output>}" >&2
-      printf 'CELLFAIL\t%s\tzenrav1e\tq%s\t%s\n' "$bn" "$q" "${r:-none}" >> "$WORK/failures.tsv"
-    fi
-  done
+  if [ "${ZR:-on}" != "off" ]; then
+    for q in $QGRID_ZR; do
+      r=$(bash "$HERE/zenrav1e_cell.sh" "$img" "$w" "$h" "$fam" "$q" "$tmp" 2>>"$tmp/err.log")
+      if [[ "$r" == zenrav1e* ]]; then
+        printf '%s\t%s\t%s\t%s\t%s\n' "$bn" "$w" "$h" "$fam" "$(pad_row "$r")" >> "$part"
+      else
+        fails=$((fails+1))
+        echo "  [$(date -u +%H:%M:%SZ)] CELL FAILED $bn zenrav1e q$q: ${r:-<no output>}" >&2
+        printf 'CELLFAIL\t%s\tzenrav1e\tq%s\t%s\n' "$bn" "$q" "${r:-none}" >> "$WORK/failures.tsv"
+      fi
+    done
+  fi
+  if [ -n "$JPEG_CONFIGS" ]; then
+    for cfg in $JPEG_CONFIGS; do for q in $QGRID_JPEG; do
+      r=$(JPEG_CONFIG="$cfg" bash "$HERE/jpeg_cell.sh" "$img" "$w" "$h" "$fam" "$q" "$tmp" 2>>"$tmp/err.log")
+      if [[ "$r" == zenjpeg* ]]; then
+        printf '%s\t%s\t%s\t%s\t%s\n' "$bn" "$w" "$h" "$fam" "$(pad_row "$r")" >> "$part"
+      else
+        fails=$((fails+1))
+        echo "  [$(date -u +%H:%M:%SZ)] CELL FAILED $bn zenjpeg-$cfg q$q: ${r:-<no output>}" >&2
+        printf 'CELLFAIL\t%s\tzenjpeg-%s\tq%s\t%s\n' "$bn" "$cfg" "$q" "${r:-none}" >> "$WORK/failures.tsv"
+      fi
+    done; done
+  fi
   if [ -n "${AOMENC:-}" ]; then
     for fmt in $AOMFMTS; do for q in $CQGRID_AOM; do
       r=$(bash "$HERE/aom_cell.sh" "$img" "$w" "$h" "$fam" "$fmt" "$q" "$tmp" 2>>"$tmp/err.log")
       if [[ "$r" == libaom* ]]; then
-        printf '%s\t%s\t%s\t%s\t%s\n' "$bn" "$w" "$h" "$fam" "$r" >> "$part"
+        printf '%s\t%s\t%s\t%s\t%s\n' "$bn" "$w" "$h" "$fam" "$(pad_row "$r")" >> "$part"
       else
         fails=$((fails+1))
         echo "  [$(date -u +%H:%M:%SZ)] CELL FAILED $bn libaom-$fmt cq$q: ${r:-<no output>}" >&2

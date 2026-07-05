@@ -28,6 +28,11 @@ t0=$(date +%s.%N)
 rc=$?; t1=$(date +%s.%N)
 enc_ms=$(python3 -c "print(f'{($t1-$t0)*1000:.1f}')")
 { [ $rc -ne 0 ] || [ ! -s "$avif" ]; } && { echo "ENCFAIL zenrav1e Q$Q rc=$rc $(tail -1 "$TMP/${base}.q${Q}.enc.log" 2>/dev/null)"; exit 1; }
+# Internal encode-only ms (dev-patch cavif prints ZR_ENC_MS= on stderr;
+# absent on registry/plain builds -> NA). Excludes cavif's PNG decode
+# (~108 ms/MP), which the cross-codec s10-vs-JPEG ms ratios must not carry.
+enc_int_ms=$(grep -oE 'ZR_ENC_MS=[0-9.]+' "$TMP/${base}.q${Q}.enc.log" 2>/dev/null | tail -1 | cut -d= -f2)
+[ -z "$enc_int_ms" ] && enc_int_ms="NA"
 
 bytes=$(stat -c%s "$avif")
 bpp=$(python3 -c "print(f'{$bytes*8/$PX:.5f}')")
@@ -68,7 +73,7 @@ rd_cache_score_key "$avif" "$IMG" "$SAVE_PNG" "$SCORER" "${BUTTER:-off}"
 if sc=$(rd_cache_score_get); then
   read -r ss b3 bmax <<< "$sc"
   rm -f "$avif"
-  row=$(printf 'zenrav1e\tdefault\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$Q" "$bytes" "$bpp" "$ss" "$enc_ms" "$b3" "$bmax")
+  row=$(printf 'zenrav1e\tdefault\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$Q" "$bytes" "$bpp" "$ss" "$enc_ms" "$b3" "$bmax" "$enc_int_ms")
   rd_cache_row_put "$row"
   printf '%s\n' "$row"
   exit 0
@@ -96,6 +101,6 @@ fi
 
 [ "$ss" != "NA" ] && rd_cache_score_put "$ss" "$b3" "$bmax"
 rm -f "$avif" "$decp"
-row=$(printf 'zenrav1e\tdefault\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$Q" "$bytes" "$bpp" "$ss" "$enc_ms" "$b3" "$bmax")
+row=$(printf 'zenrav1e\tdefault\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$Q" "$bytes" "$bpp" "$ss" "$enc_ms" "$b3" "$bmax" "$enc_int_ms")
 [ "$ss" != "NA" ] && rd_cache_row_put "$row"
 printf '%s\n' "$row"

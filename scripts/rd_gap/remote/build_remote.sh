@@ -54,6 +54,15 @@ phase "cavif (ravif; zenrav1e picked by ravif's [patch.crates-io])"
 grep -A3 '^\[patch.crates-io\]' /home/lilith/work/zen/ravif/Cargo.toml | grep -m1 zenrav1e || echo "(no patch — registry zenrav1e)"
 cbuild cavif_build /home/lilith/work/zen/ravif build --release
 
+# S10 program dev-patch cavif (optional tree): ravif--s10 path-deps
+# zenrav1e--s10 (master + env passthroughs). Registry-leg arms use the
+# primary cavif above; master-leg arms use this one.
+if [ -d /home/lilith/work/zen/ravif--s10 ]; then
+  phase "cavif--s10 (ravif--s10 -> zenrav1e--s10 path dep)"
+  grep -m1 'zenrav1e = { path' /home/lilith/work/zen/ravif--s10/ravif/Cargo.toml || true
+  cbuild cavif_s10_build /home/lilith/work/zen/ravif--s10 build --release
+fi
+
 phase "fast-ssim2-cli"
 # The CLI lives in the ssimulacra2_bin/ member (package name fast-ssim2-cli);
 # the plain workspace-root build is the documented way to get it.

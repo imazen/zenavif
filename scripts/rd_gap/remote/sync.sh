@@ -26,6 +26,7 @@ RSYNC_BASE=(-az --info=stats1 --human-readable
 # Big, build-irrelevant subtrees (anchored at each repo root):
 declare -A EXTRA_EXCLUDES=(
   [zenavif]="--exclude /fuzz/ --exclude /benchmarks/ --exclude /cron-logs/"
+  [zenavif--s10]="--exclude /fuzz/ --exclude /benchmarks/ --exclude /cron-logs/"
   [zenanalyze]="--exclude /benchmarks/"
   [zenpixels]="--exclude /benchmarks/"
   [zencodec]="--exclude /benchmarks/"
@@ -65,6 +66,22 @@ if [ -x "$EXDIR/save_png" ] && [ -x "$EXDIR/extract_av1" ] && [ -x "$EXDIR/decod
     /tmp/decoder_fallback_manifest.txt "root@$BOX_IP:/home/lilith/decoder_fallback/"
 else
   note "WARNING: local decoder examples not all built — no fallback synced (source build must succeed on the box)"
+fi
+
+# zenjpeg sweep_cell (S10 program JPEG scoreboard anchor): shipped as a
+# PREBUILT binary — the zenjpeg dev-dep graph drags in jpegli-internals-sys,
+# whose build.rs hard-requires the 344 MB internal/jpegli-cpp submodule; a
+# source build on the box is not worth that sync. Local glibc (2.35) is older
+# than the box's, so the binary is forward-compatible. Build locally with:
+#   (cd ~/work/zen/zenjpeg && cargo build --release --example sweep_cell \
+#      --features __expert -p zenjpeg)
+JPEG_CELL_BIN="$HOME/work/zen/zenjpeg/target/release/examples/sweep_cell"
+if [ -x "$JPEG_CELL_BIN" ]; then
+  note "sync zenjpeg sweep_cell binary ($(sha256sum "$JPEG_CELL_BIN" | cut -c1-16), built $(date -u -r "$JPEG_CELL_BIN" +%Y-%m-%dT%H:%MZ)) ..."
+  box_ssh "mkdir -p /home/lilith/work/zen/zenjpeg/target/release/examples"
+  box_rsync -az "$JPEG_CELL_BIN" "root@$BOX_IP:/home/lilith/work/zen/zenjpeg/target/release/examples/sweep_cell"
+else
+  note "WARNING: zenjpeg sweep_cell not built locally — JPEG anchor arms unavailable on the box"
 fi
 
 # butteraugli (lives outside ~/work/zen): scorer for the metric-gaming guard
