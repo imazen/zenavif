@@ -37,8 +37,12 @@ critical path to production: ~9 measured wins are release-gated behind car 4.
   ships Tune::Ssimulacra2 + per-SB delta_q/variance boost + QM-dist ratio + LF schedule
   + palette (luma+UV+Auto) + intraBC A/B + topdown_prune + tx/intra knobs + FrameHints
   + all conformance/desync fixes (6 corruption classes, #29 QM, #32/#33, #34/#35).
-- zenravif (cavif-rs fork) FIRST PUBLISH (zenavif's `encode` feature is disabled on
-  registry today because zenravif is unpublished — this car turns encode ON for users).
+- zenravif (cavif-rs fork) 0.2.0 publish. NOT a first publish and encode is NOT off on
+  registry: zenravif 0.1.3 IS published, so `zenavif 0.1.6` + `encode-imazen` already
+  encodes today — but at zenrav1e 0.1.4 with EVERY gated win OFF (no tune, no palette, no
+  s1/s6/s10 arms) AND carrying the 0.1.4 recon-desync bugs (measured: registry s5/s6/s9
+  decode-quality crashes at Q85 — benchmarks/vs_cratesio_per_speed_2026-07-05.tsv). This
+  car publishes 0.2.0 (gray/expert/tune-forwarding) so the flip below turns the WINS on.
 - zenavif: bump deps + execute the CLAUDE.md dep-bump checklist — the flip of the 7
   gated consts (S1_DEEP, SMALL_PX_RDO_TX, S6_TX_SIZE_RDO, S6_PART_PRUNE, S6_INTRA7
   [re-weigh vs top-5 per S4TIER], S10_RETIER, FRAME_HINTS) + 16 uncomment sites +
