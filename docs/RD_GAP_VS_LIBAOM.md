@@ -156,6 +156,18 @@ remain per-family. Usage: `SAMPLE=$HERE/sample_images_train26.tsv ./run_gap.sh` 
 run_remote.sh `SAMPLE=` passthrough); aom baselines for it need one `aom_only.sh` run per
 config.
 
+**EVALUATION POLICY (user directive 2026-07-05): the k-means subset is DIVERSE, not
+REPRESENTATIVE.** Centroid-nearest picks one member per cluster regardless of cluster mass,
+so train26's "ALL median" over-weights rare classes and dilutes photo-dominant effects.
+Verdict discipline for every A/B: **per-family FIRST**; aggregates weight picks by their
+recorded `cluster_size` (in the corpus manifests) when claiming "overall"; and **a lever
+with merit only on photos is a KEEPABLE result** (ship content-gated or as a
+photos-family verdict) — never rejected because subset dilution drowns it. Supplemental
+class samples exist where the subset lacks mass: `sample_doccharts.tsv` (15 stratified
+train-split document/chart origins across 5 imazen-26 classes, renditions at
+`/mnt/v/output/rd-gap-doccharts-2026-07-05/`) — built after the TUNER2 "corpus gap" turned
+out to be a subset artifact (imazen-26 itself has 145 train doc-chart candidates).
+
 **Why:** the legacy 22-image corpus (`sample_images.tsv`, clean-picker-corpus-2026-06-26)
 MIXES splits — o_1029/o_6629/o_8107/o_9067/o_9077 are TEST origins and
 o_1015/o_1023/o_3003/o_9051/o_7001 are VAL under the LSD rule. Every constant landed up to
