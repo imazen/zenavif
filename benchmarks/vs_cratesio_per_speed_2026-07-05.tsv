@@ -1,0 +1,95 @@
+# zenavif "this" (flipped/armed) vs PUBLISHED crates.io — per-speed single-image spot-check
+# Date: 2026-07-05  Host: lilith
+# ILLUSTRATIVE single-image characterization (NOT a corpus calibration — one image, so it
+# informs no source constants; it answers "what do the speeds do, this vs published").
+#
+# Image: 5004_nps_blca-black-canyon-2023 .sdr.s1024.png  (1024x724, detailed nature photo)
+#
+# PUBLISHED crates.io chain (what a user gets today):
+#   zenavif 0.1.6 -> zenravif 0.1.3 -> zenrav1e 0.1.4 ; decode rav1d-safe 0.5.7
+#   (NOTE: encode IS live on registry — zenravif 0.1.3 is published; the release-train doc's
+#    "encode disabled on registry" claim is STALE.)
+# BASELINE arm here = behavioral proxy for that: cavif clone @ ravif adb88dd, all 6 gated
+#   LIVE consts FALSE, zenrav1e 0.1.4 (registry), Tune::Psychovisual (no ss2 tune, no wins).
+# ARMED arm ("this" = STATUS.md ladder) = same clone with the dep-bump FLIP applied:
+#   S1_DEEP/S6_TX_SIZE_RDO/S6_PART_PRUNE/S6_INTRA7/S10_RETIER consts -> true + apply-lines
+#   uncommented + zenrav1e -> MASTER path (bc452b67) + Tune::Ssimulacra2. (palette not
+#   forwarded; photo-inert. FRAME_HINTS off.)
+#
+# Encoder: cavif -f -Q <q> -s <speed> --depth 8 -o out.avif in.png  (4:4:4, 8-bit)
+# Decoder: zenavif save_png (rav1d-safe 0.5.7).  Score: fast-ssim2-cli (SSIMULACRA2 0-100).
+# Decode speed: 38.6ms median (n=15, 1024x724, incl PNG write) — SAME in 0.1.6 (same rav1d-safe).
+#
+# CONFIRMED (independent decoder): the published encoder's LOW ssim2 at s5/s6 (Q85->55) and
+#   s9 (Q85->47, Q50->30) is a genuine ENCODER recon-desync (zenrav1e#32/#33 class), NOT a
+#   decode bug: ffmpeg/libdav1d 0.9.2 agrees with rav1d-safe to <=0.01 ssim2 (s5 55.33/55.33,
+#   s7 85.44/85.42, s9 47.64/47.63). zenrav1e MASTER fixes it -> armed is consistent at every speed.
+# ALIASING (md5): published s5==s6 and s7==s8 are byte-identical; the 1-10 dial has ~6 distinct
+#   operating points. The flip DE-aliases the extremes (s1 via S1_DEEP; s9/s10 via S10_RETIER).
+#
+#   q  sp |        PUBLISHED-0.1.4 |       ARMED-flip(this) |   Δbytes  Δssim2
+# ------------------------------------------------------------------------------
+#  50   1 |    52527B ss2  42.67  2955ms |    43724B ss2  57.73 22166ms |   -16.8%   +15.1
+#  50   2 |    52527B ss2  42.67  3014ms |    43923B ss2  58.77 13850ms |   -16.4%   +16.1
+#  50   3 |    55154B ss2  41.42  2182ms |    43923B ss2  58.77 13671ms |   -20.4%   +17.4
+#  50   4 |    56348B ss2  41.49  1791ms |    44192B ss2  58.23  7828ms |   -21.6%   +16.7
+#  50   5 |    58953B ss2  43.32   394ms |    47161B ss2  58.27  1179ms |   -20.0%   +14.9
+#  50   6 |    58953B ss2  43.32   403ms |    45121B ss2  58.93  2971ms |   -23.5%   +15.6
+#  50   7 |    59020B ss2  44.03   277ms |    45251B ss2  59.14  2161ms |   -23.3%   +15.1
+#  50   8 |    59020B ss2  44.03   261ms |    45251B ss2  59.14  2158ms |   -23.3%   +15.1
+#  50   9 |    64525B ss2  30.75   150ms |    47677B ss2  58.08   303ms |   -26.1%   +27.3
+#  50  10 |    70467B ss2  53.17   131ms |    52122B ss2  55.16   128ms |   -26.0%    +2.0
+# 
+#  85   1 |   178910B ss2  68.85  1246ms |   168442B ss2  86.75 32940ms |    -5.9%   +17.9
+#  85   2 |   178910B ss2  68.85  1200ms |   176668B ss2  86.47  2936ms |    -1.3%   +17.6
+#  85   3 |   184326B ss2  64.78   889ms |   176668B ss2  86.47  3062ms |    -4.2%   +21.7
+#  85   4 |   184267B ss2  66.96   820ms |   177460B ss2  86.42  2494ms |    -3.7%   +19.5
+#  85   5 |   194231B ss2  55.34   580ms |   183614B ss2  86.22  1774ms |    -5.5%   +30.9
+#  85   6 |   194231B ss2  55.34   606ms |   176331B ss2  86.43  5308ms |    -9.2%   +31.1
+#  85   7 |   194920B ss2  85.44   494ms |   176407B ss2  86.54  3694ms |    -9.5%    +1.1
+#  85   8 |   194920B ss2  85.44   447ms |   176407B ss2  86.54  3762ms |    -9.5%    +1.1
+#  85   9 |   220576B ss2  47.64   237ms |   182149B ss2  86.12   453ms |   -17.4%   +38.5
+#  85  10 |   230901B ss2  85.13   185ms |   210237B ss2  85.13   196ms |    -8.9%    +0.0
+# 
+#
+arm	speed	q	bytes	bpp	enc_ms	ssim2
+published-0.1.4	1	50	52527	0.5668	2955	42.66799781
+published-0.1.4	2	50	52527	0.5668	3014	42.66799781
+published-0.1.4	3	50	55154	0.5952	2182	41.41728606
+published-0.1.4	4	50	56348	0.6080	1791	41.48667191
+published-0.1.4	5	50	58953	0.6361	394	43.32171012
+published-0.1.4	6	50	58953	0.6361	403	43.32171012
+published-0.1.4	7	50	59020	0.6369	277	44.02763917
+published-0.1.4	8	50	59020	0.6369	261	44.02763917
+published-0.1.4	9	50	64525	0.6963	150	30.75208847
+published-0.1.4	10	50	70467	0.7604	131	53.16539045
+published-0.1.4	1	85	178910	1.9306	1246	68.85133653
+published-0.1.4	2	85	178910	1.9306	1200	68.85133653
+published-0.1.4	3	85	184326	1.9890	889	64.78142158
+published-0.1.4	4	85	184267	1.9884	820	66.95819897
+published-0.1.4	5	85	194231	2.0959	580	55.33536947
+published-0.1.4	6	85	194231	2.0959	606	55.33536947
+published-0.1.4	7	85	194920	2.1033	494	85.43713939
+published-0.1.4	8	85	194920	2.1033	447	85.43713939
+published-0.1.4	9	85	220576	2.3802	237	47.63574227
+published-0.1.4	10	85	230901	2.4916	185	85.12530412
+armed-flip	1	50	43724	0.4718	22166	57.72638674
+armed-flip	2	50	43923	0.4740	13850	58.76947468
+armed-flip	3	50	43923	0.4740	13671	58.76947468
+armed-flip	4	50	44192	0.4769	7828	58.23020898
+armed-flip	5	50	47161	0.5089	1179	58.26572559
+armed-flip	6	50	45121	0.4869	2971	58.93153350
+armed-flip	7	50	45251	0.4883	2161	59.14448477
+armed-flip	8	50	45251	0.4883	2158	59.14448477
+armed-flip	9	50	47677	0.5145	303	58.07773965
+armed-flip	10	50	52122	0.5624	128	55.15883716
+armed-flip	1	85	168442	1.8176	32940	86.75183659
+armed-flip	2	85	176668	1.9064	2936	86.47369159
+armed-flip	3	85	176668	1.9064	3062	86.47369159
+armed-flip	4	85	177460	1.9149	2494	86.41676768
+armed-flip	5	85	183614	1.9813	1774	86.21538399
+armed-flip	6	85	176331	1.9027	5308	86.43393951
+armed-flip	7	85	176407	1.9036	3694	86.53679091
+armed-flip	8	85	176407	1.9036	3762	86.53679091
+armed-flip	9	85	182149	1.9655	453	86.11548020
+armed-flip	10	85	210237	2.2686	196	85.13336412
