@@ -11,6 +11,26 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 ## [Unreleased]
 
 ### Added
+- S4TIER (FAST_TIER_PARITY_PLAN, the last open fast-tier column): the
+  s4-equivalent-tier operating point + the program's final scoreboard. The
+  fast_heads tx D bound refit per-tier (`dcty<23.69` at requested speed 4..=5,
+  LOOCV 22/24-stable; W + partition gates unchanged; `src/fast_heads.rs`
+  s4-tier gates, release-gated recommend-only) + the NEW zenrav1e intra
+  mode-RDO budget knob (`num_modes_rdo_override`, zenrav1e@071e9844 — the "no
+  top-5 knob exists" gap from the P2 report; default None byte-identical,
+  6/6-cell local md5 + 288/288 box chain byte-continuity). Measured (12q,
+  PALCONF-clean): **v3+top5 = 6.26× plain-s6 solo (0.97× aom cpu2iq-allintra's
+  wall): photos median +2.80 ssim2 / +4.14 ba3n vs cpu2iq-ai — the column
+  closed from +4.40/+4.04; top-5 DOMINATED top-7 at mode level** (7.61× for
+  +2.84/+4.04); cpu4iq deepens to −1.53/−2.62. The residual is measured
+  structural (intraBC screens 8414 +22.5; iq-AQ interiors/illustrations
+  1236/9100/9118; near-lossless rescans 6096/6018; ungated full-tx headroom —
+  oracle extras +2.36/+2.04 at 10.1×). CDEF/LRF hi-q force probes measured
+  null/adverse. Plan verdict: parity ±1% MET at s6+s8, NOT met at the s4 tier
+  (structural, per-family quantified); beat ≥2 tiers MET; quality tip KEPT.
+  Design fully offline (`scripts/hyperparam/fit_s4_tier.py` over the label
+  store); record `benchmarks/rd_gap_s4tier_2026-07-04.tsv` + raw
+  `/mnt/v/output/zenavif/s4tier-20260704/`.
 - P2HEADS (FAST_TIER_PARITY_PLAN Phase P2, "prediction replaces search"): the
   per-image hyperparameter fast mode. Two new deterministic descriptor heads in
   `src/fast_heads.rs` (release-gated recommend-only, the palette-gate pattern;

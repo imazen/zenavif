@@ -412,8 +412,8 @@ band; ship was +2.88/+0.91). The W-gate's conjunctive dcty bound is a VAL
 attribution revision (pf-only withhold convicted by factoring cells: 8103
 (none,ship) +18.1 vs (size1,m32) −1.9). Head-3 verdict: intra top-7
 (ComplexKeyframes + filter_intra=Some(false)) is a GLOBAL arm candidate
-(s6 −0.56/s8 −1.17 med, no per-image structure; no top-5 knob exists —
-`num_modes_rdo` hardcoded 7|3 at rdo.rs:1623). **At the zenrav1e dep bump:**
+(s6 −0.56/s8 −1.17 med, no per-image structure; the top-5 knob has since
+been BUILT — see the s4-tier section below). **At the zenrav1e dep bump:**
 (1) add zenravif expert passthroughs for `rdo_tx_type_override` /
 `reduced_tx_set` / `topdown_prune` / `non_square_partition_max_threshold`
 (additive, sb_q_scale shape); (2) forward `EncoderConfig::fast_tier_budgets`
@@ -421,7 +421,31 @@ in `build_ravif_encoder` (Largest → size override off; Min → +type override
 + reduced set; Max32 → part_max 32 + 4-ways ungated per r16m32_bkvg2);
 (3) flip ravif's `S6_INTRA7_LIVE` + uncomment its apply block (landed
 release-gated ravif@4b98f0f8: `ComplexKeyframes` + `filter_intra=Some(false)`
-at s6-8 — measured −0.56/−1.17 med + composed+i7 val 13/13).
+at s6-8 — measured −0.56/−1.17 med + composed+i7 val 13/13) — **re-weigh
+the flip against top-5 first** (S4TIER: top-5 dominated top-7 at mode
+level); (4) forward `num_modes_rdo_override` through zenravif (additive
+expert passthrough) so the tiers can pick their measured intra arm.
+
+### S4-tier column CLOSED-with-residual — fast-tier parity program measurement COMPLETE (2026-07-04)
+The last open pairing (aom cpu2iq-allintra, +4.40/+4.04 vs composed-v2+i7
+at 1.27× its wall) closed to **+2.80 ssim2 / +4.14 ba3n photos median at
+0.97× cpu2iq's wall** via the v3 heads: the tx D bound refit per-tier
+(8.352 → 23.69, LOOCV 22/24; `src/fast_heads.rs` requested-speed-4..=5
+gates, release-gated recommend-only) + the NEW zenrav1e top-5 intra knob
+(`num_modes_rdo_override`, zenrav1e@071e9844, default-None byte-identical
+6/6 md5 + 288/288 chain continuity) which DOMINATED top-7 at mode level
+(6.26× vs 7.61× plain-s6 for the same column). The residual is measured
+structural per-family: 8414 screens +22.5 (intraBC, P3), 1236/9100/9118
+iq-AQ class (+17.2/+2.5/+7.4 — cpu2def trails cpu2iq by +100-133 BD on
+exactly these; tune-program-owned), 6096/6018 rescans (+15.8/+7.2,
+near-lossless floor), 5000 brochures (full-tx headroom, no stable gate —
+oracle extras reach +2.36/+2.04 at 10.1×). CDEF/LRF hi-q force probes:
+null/adverse (aom-iq's CDEF edge is strength adaptation, not enablement;
+LRF axis clouded by open zenrav1e#32). s4-native ruled out (+4.22 at ~10×).
+**Plan verdict: parity ±1% MET at s6+s8, NOT met at the s4 tier
+(structural); beat-at-≥2-tiers MET; quality-tip KEPT.** Record:
+`benchmarks/rd_gap_s4tier_2026-07-04.tsv` + FAST_TIER_PARITY_PLAN
+§s4-tier + §success-criteria-final.
 
 ### zenrav1e QM encodes diverged from conforming decoders — FIXED upstream, release-gated
 Two composing bugs (zenrav1e#29, both fixed on master 2026-07-02) made

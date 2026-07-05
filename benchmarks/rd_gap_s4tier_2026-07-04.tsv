@@ -1,0 +1,87 @@
+# S4TIER (FAST_TIER_PARITY_PLAN, the last open fast-tier column) -- 2026-07-04 -- s4-tier composed operating point: v3 rules (tx D bound 23.69) + intra top-5/top-7 axis + hi-q CDEF/LRF probe + full-tx oracle extras
+# Box zenavif-sweep-1 (ccx63 48c, FROM_SNAPSHOT=auto); harness scripts/rd_gap/chain_s4tier.sh; analyzer scripts/hyperparam/analyze_s4_tier.py; design scripts/hyperparam/fit_s4_tier.py; samples scripts/hyperparam/emit_s4tier_samples.py
+# Code: zenrav1e master 0d392334 (071e9844 num_modes_rdo_override knob + fmt) via ravif--s4tier devpatch (p2heads passthroughs + ZENRAVIF_INTRA_MODES=5 + ZENRAVIF_CDEF/LRF)
+# v3 rules: tx {pf>0.8505 && dcty>100 -> none | pf<=0.8505 && dcty<23.69 -> min | size1}; partition {gfs<0.4105 -> m32 | ship}; intra arm global (i7 vs the new i5 knob); full-tx = oracle extras only (no honest gate at n=24)
+# All arms tune-ss2 + palette auto, --threads 1, BUTTER on, PALCONF=1; BD per-image monotone-frontier hull (bd_arm.py); vetoadj = max(bd,0) when arm ba3n>+1.0 or bamax>+1.5; parity rows vs CACHED speedladder aom-allintra refs (photos = t26 minus fam-7000)
+section	name	metric	n	median	mean	better	extra
+cont	s6+size1 base	bytes_identical	144	+144.0000	+144.0000	144/144	
+cont	s6+size1+i7	bytes_identical	144	+144.0000	+144.0000	144/144	
+i5axis	s6 i5 vs i3-base	ssim2_vetoadj	24	-0.5046	-0.5614	16/24	vetoed=4
+i5axis	s6 i5 vs i3-base	butteraugli_3n	24	-0.4939	-0.5879	17/24	
+i5axis	s6 i5 vs i3-base	butteraugli_max	24	-0.3840	-1.0331	14/24	
+i5axis	s6 i7 vs i3-base	ssim2_vetoadj	24	-0.5621	-0.7231	17/24	vetoed=3
+i5axis	s6 i7 vs i3-base	butteraugli_3n	24	-0.7505	-0.8544	19/24	
+i5axis	s6 i7 vs i3-base	butteraugli_max	24	-0.9251	-1.3269	16/24	
+i5axis	s8 i5 vs i3-base	ssim2_vetoadj	24	-1.0860	-0.8716	17/24	vetoed=3
+i5axis	s8 i5 vs i3-base	butteraugli_3n	24	-0.9073	-0.8714	20/24	
+i5axis	s8 i5 vs i3-base	butteraugli_max	24	-0.3735	-0.8131	13/24	
+i5axis	s8 i7 vs i3-base (p2heads)	ssim2_vetoadj	24	-1.1699	-1.0255	16/24	vetoed=6
+i5axis	s8 i7 vs i3-base (p2heads)	butteraugli_3n	24	-1.0586	-1.1930	21/24	
+i5axis	s8 i7 vs i3-base (p2heads)	butteraugli_max	24	-0.4409	-1.1112	15/24	
+i5axis	s6 i5+ship vs ship	ssim2_vetoadj	24	-0.5729	-0.5526	16/24	vetoed=2
+i5axis	s6 i5+ship vs ship	butteraugli_3n	24	-0.6500	-0.5946	18/24	
+i5axis	s6 i5+ship vs ship	butteraugli_max	24	-1.4052	-0.4988	13/24	
+i5axis	s6 i7+ship vs ship (p2heads)	ssim2_vetoadj	24	-0.8288	-0.7743	16/24	vetoed=1
+i5axis	s6 i7+ship vs ship (p2heads)	butteraugli_3n	24	-1.1560	-0.8693	18/24	
+i5axis	s6 i7+ship vs ship (p2heads)	butteraugli_max	24	-0.5118	-1.5184	14/24	
+filters	s6 CDEF-on vs ship	ssim2_vetoadj	24	-0.0941	-0.1025	14/24	vetoed=1
+filters	s6 CDEF-on vs ship	butteraugli_3n	24	-0.6423	-0.7157	23/24	
+filters	s6 CDEF-on vs ship	butteraugli_max	24	-0.2488	-0.5245	18/24	
+filters	s6 LRF-on vs ship	ssim2_vetoadj	24	+0.2792	+0.2263	6/24	vetoed=4
+filters	s6 LRF-on vs ship	butteraugli_3n	24	-0.9213	-0.9108	21/24	
+filters	s6 LRF-on vs ship	butteraugli_max	24	+0.1647	+0.0177	10/24	
+composed	v3+i7 vs s6+size1 base	ssim2_vetoadj	24	-5.9636	-7.7221	20/24	vetoed=4
+composed	v3+i7 vs s6+size1 base	butteraugli_3n	24	-4.8544	-6.9417	24/24	
+composed	v3+i7 vs s6+size1 base	butteraugli_max	23	-3.5455	-3.7717	16/23	
+composed	v3+i7 vs global-ship	ssim2_vetoadj	24	-1.1867	-2.9872	15/24	vetoed=6
+composed	v3+i7 vs global-ship	butteraugli_3n	24	-2.1951	-3.3234	22/24	
+composed	v3+i7 vs global-ship	butteraugli_max	23	-0.0837	-1.0677	13/23	
+composed	v3+i5 vs s6+size1 base	ssim2_vetoadj	24	-6.6443	-8.1320	21/24	vetoed=3
+composed	v3+i5 vs s6+size1 base	butteraugli_3n	24	-4.7876	-6.9414	24/24	
+composed	v3+i5 vs s6+size1 base	butteraugli_max	23	-3.5689	-4.1485	17/23	
+composed	v3+i5 vs global-ship	ssim2_vetoadj	24	-0.8997	-3.0787	15/24	vetoed=6
+composed	v3+i5 vs global-ship	butteraugli_3n	24	-1.9480	-3.3223	22/24	
+composed	v3+i5 vs global-ship	butteraugli_max	23	-1.2881	-1.4573	15/23	
+composed	v3+i7+fullx vs s6+size1 base	ssim2_vetoadj	24	-6.3640	-8.2468	20/24	vetoed=4
+composed	v3+i7+fullx vs s6+size1 base	butteraugli_3n	24	-5.3303	-7.5285	24/24	
+composed	v3+i7+fullx vs s6+size1 base	butteraugli_max	23	-3.3400	-4.1794	16/23	
+composed	v3+i7+fullx vs global-ship	ssim2_vetoadj	24	-1.1867	-3.2397	14/24	vetoed=8
+composed	v3+i7+fullx vs global-ship	butteraugli_3n	24	-2.5109	-3.9348	22/24	
+composed	v3+i7+fullx vs global-ship	butteraugli_max	23	-1.1986	-1.5189	14/23	
+parity	v3+i7_vs_aom-cpu2iq-ai	ssim2	20	+2.8386	+3.3080	6/20	
+parity	v3+i7_vs_aom-cpu2iq-ai	butteraugli_3n	20	+4.0406	-0.2465	7/20	
+parity	v3+i7_vs_aom-cpu2def-ai	ssim2	20	-3.4318	+8.3666	12/20	
+parity	v3+i7_vs_aom-cpu2def-ai	butteraugli_3n	20	-3.0937	-6.1430	14/20	
+parity	v3+i7_vs_aom-cpu4iq-ai	ssim2	20	-1.3119	-0.8670	14/20	
+parity	v3+i7_vs_aom-cpu4iq-ai	butteraugli_3n	20	-2.5590	-5.3468	12/20	
+parity	v3+i7_vs_aom-cpu4def-ai	ssim2	20	-7.3565	+2.0001	14/20	
+parity	v3+i7_vs_aom-cpu4def-ai	butteraugli_3n	20	-7.1371	-10.0920	16/20	
+parity	v3+i5_vs_aom-cpu2iq-ai	ssim2	20	+2.7993	+3.4286	6/20	
+parity	v3+i5_vs_aom-cpu2iq-ai	butteraugli_3n	20	+4.1392	-0.4135	8/20	
+parity	v3+i5_vs_aom-cpu2def-ai	ssim2	20	-2.7955	+8.5973	12/20	
+parity	v3+i5_vs_aom-cpu2def-ai	butteraugli_3n	20	-2.9565	-6.2901	13/20	
+parity	v3+i5_vs_aom-cpu4iq-ai	ssim2	20	-1.5275	-0.7496	15/20	
+parity	v3+i5_vs_aom-cpu4iq-ai	butteraugli_3n	20	-2.6176	-5.5180	13/20	
+parity	v3+i5_vs_aom-cpu4def-ai	ssim2	20	-7.6590	+2.2223	14/20	
+parity	v3+i5_vs_aom-cpu4def-ai	butteraugli_3n	20	-7.2312	-10.2419	17/20	
+parity	v3+i7+fullx_vs_aom-cpu2iq-ai	ssim2	20	+2.3587	+2.6771	8/20	
+parity	v3+i7+fullx_vs_aom-cpu2iq-ai	butteraugli_3n	20	+2.0449	-0.7368	8/20	
+parity	v3+i7+fullx_vs_aom-cpu2def-ai	ssim2	20	-5.4301	+7.9957	12/20	
+parity	v3+i7+fullx_vs_aom-cpu2def-ai	butteraugli_3n	20	-5.3324	-6.6526	15/20	
+parity	v3+i7+fullx_vs_aom-cpu4iq-ai	ssim2	20	-2.6402	-1.3796	15/20	
+parity	v3+i7+fullx_vs_aom-cpu4iq-ai	butteraugli_3n	20	-3.5245	-5.8060	13/20	
+parity	v3+i7+fullx_vs_aom-cpu4def-ai	ssim2	20	-9.7372	+1.7744	15/20	
+parity	v3+i7+fullx_vs_aom-cpu4def-ai	butteraugli_3n	20	-8.2551	-10.5564	16/20	
+timing	v3+i7	solo_ratio_vs_plain	24	+7.6064	+7.6064	-	
+timing	v3+i5	solo_ratio_vs_plain	24	+6.2584	+6.2584	-	
+timing	v3+i7+fullx	solo_ratio_vs_plain	24	+10.1243	+10.1243	-	
+timing	cdef_marginal_on_ship	solo_ratio	4	+0.9988	+0.9988	-	
+val	val v3+i7 vs val-base(size1)	ssim2_vetoadj	13	-7.2613	-6.8733	12/13	vetoed=1
+val	val v3+i7 vs val-base(size1)	butteraugli_3n	13	-4.8786	-5.5964	13/13	
+val	val v3+i7 vs val-base(size1)	butteraugli_max	13	-2.8372	-4.0772	12/13	
+val	val v3+i5 vs val-base(size1)	ssim2_vetoadj	13	-3.8921	-5.0849	9/13	vetoed=4
+val	val v3+i5 vs val-base(size1)	butteraugli_3n	13	-4.2617	-5.4150	13/13	
+val	val v3+i5 vs val-base(size1)	butteraugli_max	13	-4.0297	-2.0319	9/13	
+val	val v2+i7 vs val-base (p2heads)	ssim2_vetoadj	13	-5.3178	-6.5954	13/13	vetoed=0
+val	val v2+i7 vs val-base (p2heads)	butteraugli_3n	13	-4.5934	-5.1524	13/13	
+val	val v2+i7 vs val-base (p2heads)	butteraugli_max	13	-2.2037	-3.9707	13/13	

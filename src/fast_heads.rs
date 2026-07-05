@@ -45,9 +45,16 @@
 //! BROAD win (s6 median −0.56%, s8 −1.17%, 17/24 better, composition-stable
 //! on the partition ship point) with a single +1.4 regressor — no honest
 //! per-image structure at n=24. It is a global fast-mode arm candidate
-//! (ravif SpeedTweaks side), not a zenavif head. No top-5 knob exists in
-//! zenrav1e (`num_modes_rdo` is hardcoded 7-or-3 at rdo.rs:1623) — a
-//! mid-point budget would need a new encoder knob.
+//! (ravif SpeedTweaks side), not a zenavif head. The top-5 midpoint knob
+//! the first fit called out now EXISTS upstream
+//! (`PredictionSpeedSettings::num_modes_rdo_override`, zenrav1e@071e9844,
+//! default `None` = byte-identical 7|3): the S4TIER axis measured top-5 ≈
+//! 90% of top-7's median value on the s6 base (i5 −0.51 vs i7 −0.56; s8
+//! −1.09 vs −1.17), and at the s4-tier MODE level top-5 DOMINATES top-7 —
+//! the same parity column (+2.80/+4.14 vs +2.84/+4.04 vs cpu2iq-ai) at
+//! 6.26× vs 7.61× plain-s6 solo (the composed i7 marginal, 1.22×, buys
+//! nothing). The s4-tier intra arm is top-5; top-7 stays the s6/s8
+//! global-arm candidate at its own tiers.
 //!
 //! # Release gating
 //!
@@ -121,6 +128,17 @@ pub const TX_GATE_DCT_RAZOR_MIN: f32 = 100.0;
 /// their measured-best class (VAL factoring cells).
 pub const TX_GATE_DCT_COMPRESSIBILITY_MIN: f32 = 8.352;
 
+/// Head-1 deep threshold at the **s4-equivalent tier** (requested speed
+/// 4..=5): the same rule form refit at the s4-tier time budget (the
+/// cpu2iq-allintra wall = 1.27× the composed s6 mode left ~27% to spend;
+/// fit_s4_tier.py on the fastwins labels, LOOCV 22/24-stable at λ=0.5 and
+/// 0.25). Min fires 11/24 train26 images (was 3 at the s6 bound) — the
+/// mid-α band (products/people/interiors/illustrations at dcty 8.8-22.6)
+/// keeps paying for tx-TYPE RDO when the budget affords its premium. The
+/// razor-edge W guard is UNCHANGED (harm class is budget-independent), as
+/// is the pf cap (8414/8302/8268-class screens measured min-null/harm).
+pub const TX_GATE_DCT_COMPRESSIBILITY_MIN_S4TIER: f32 = 23.69;
+
 /// Head-2 upgrade threshold on zenanalyze `gradient_fraction_smooth`
 /// (id 120). Below it (flat/synthetic, not smooth-gradient photo), the
 /// Max32 partition rung pays (m32 recovery 255% on fam-7000; photos
@@ -134,36 +152,50 @@ pub const TX_HEAD_MAX_SPEED: u8 = 8;
 /// The partition head's measured speed (the Max32 rung was measured at s6
 /// only; s8/s4 per-image selection measured ≈ null over the global rung).
 pub const PART_HEAD_SPEED: u8 = 6;
+/// First requested speed of the **s4-equivalent tier** (the composed fast
+/// mode with the richer budgets; the encoder still runs the speed-6
+/// mechanics — the s4-native preset measured strictly worse at this wall:
+/// s4+prune vs cpu2iq-ai +4.22 ssim2 at ~10× plain-s6 vs the composed
+/// mode's +2.2 at ~6×, fit_s4_tier.py / rd_gap_s4tier record).
+pub const S4_TIER_MIN_SPEED: u8 = 4;
+/// Last requested speed of the s4-equivalent tier.
+pub const S4_TIER_MAX_SPEED: u8 = 5;
 
 /// Head 1: per-image TX budget from two descriptor features (see module
-/// docs). Outside `speed 6..=8`, or on non-finite features, returns the
-/// tier default [`TxBudget::Size1`] — which the speed table already
-/// applies, i.e. "no per-image override".
+/// docs). Requested speed 6..=8 uses the s6-tier deep bound; 4..=5 (the
+/// s4-equivalent tier) the refit
+/// [`TX_GATE_DCT_COMPRESSIBILITY_MIN_S4TIER`] bound. Outside 4..=8, or on
+/// non-finite features, returns the tier default [`TxBudget::Size1`] —
+/// which the speed table already applies, i.e. "no per-image override".
 #[must_use]
 pub fn tx_budget_gate(patch_fraction: f32, dct_compressibility_y: f32, speed: u8) -> TxBudget {
-    if !(TX_HEAD_MIN_SPEED..=TX_HEAD_MAX_SPEED).contains(&speed) {
+    let deep_bound = if (S4_TIER_MIN_SPEED..=S4_TIER_MAX_SPEED).contains(&speed) {
+        TX_GATE_DCT_COMPRESSIBILITY_MIN_S4TIER
+    } else if (TX_HEAD_MIN_SPEED..=TX_HEAD_MAX_SPEED).contains(&speed) {
+        TX_GATE_DCT_COMPRESSIBILITY_MIN
+    } else {
         return TxBudget::Size1;
-    }
+    };
     let pf_high = patch_fraction.is_finite() && patch_fraction > TX_GATE_PATCH_FRACTION_LARGEST;
     let pf_low = patch_fraction.is_finite() && patch_fraction <= TX_GATE_PATCH_FRACTION_LARGEST;
     if pf_high && dct_compressibility_y.is_finite() && dct_compressibility_y > TX_GATE_DCT_RAZOR_MIN
     {
         TxBudget::Largest
-    } else if pf_low
-        && dct_compressibility_y.is_finite()
-        && dct_compressibility_y < TX_GATE_DCT_COMPRESSIBILITY_MIN
-    {
+    } else if pf_low && dct_compressibility_y.is_finite() && dct_compressibility_y < deep_bound {
         TxBudget::Min
     } else {
         TxBudget::Size1
     }
 }
 
-/// Head 2: per-image partition budget (s6 only; see module docs).
-/// Non-finite feature or off-tier speed → [`PartitionBudget::Ship`].
+/// Head 2: per-image partition budget (s6 + the s4-equivalent tier 4..=5;
+/// see module docs — the s4-tier refit kept the s6 rule: the λ=0.25
+/// alternative `gfs@0.6474` was LOOCV-flat and fires Max32 onto measured
+/// m32-harm content). Non-finite feature or off-tier speed →
+/// [`PartitionBudget::Ship`].
 #[must_use]
 pub fn partition_budget_gate(gradient_fraction_smooth: f32, speed: u8) -> PartitionBudget {
-    if speed == PART_HEAD_SPEED
+    if (speed == PART_HEAD_SPEED || (S4_TIER_MIN_SPEED..=S4_TIER_MAX_SPEED).contains(&speed))
         && gradient_fraction_smooth.is_finite()
         && gradient_fraction_smooth < PART_GATE_GRADIENT_SMOOTH_MAX32
     {
@@ -270,9 +302,27 @@ mod tests {
             assert_eq!(tx_budget_gate(0.9, 1.0, s), TxBudget::Size1);
         }
         // Off-tier speeds: no override.
-        for s in [2u8, 4, 5, 9, 10] {
+        for s in [2u8, 3, 9, 10] {
             assert_eq!(tx_budget_gate(0.998, 201.6, s), TxBudget::Size1);
         }
+        // The s4-equivalent tier (requested speed 4..=5): the W guard is
+        // budget-independent (razor-edge harm class), the D bound widens
+        // to 23.69 — the mid-α band that stays Size1 at s6 fires Min here
+        // (1236 dcty 21.5, 5004 22.6, 1614 18.1), while the 6018-class
+        // (dcty 120.2 at pf 0.33: min/full measured harm) and the
+        // 9118-class (dcty 38.5) stay Size1.
+        for s in [4u8, 5] {
+            assert_eq!(tx_budget_gate(0.998, 201.6, s), TxBudget::Largest);
+            assert_eq!(tx_budget_gate(0.000, 21.5, s), TxBudget::Min);
+            assert_eq!(tx_budget_gate(0.066, 22.6, s), TxBudget::Min);
+            assert_eq!(tx_budget_gate(0.006, 18.1, s), TxBudget::Min);
+            assert_eq!(tx_budget_gate(0.329, 120.2, s), TxBudget::Size1);
+            assert_eq!(tx_budget_gate(0.000, 38.5, s), TxBudget::Size1);
+            assert_eq!(tx_budget_gate(0.000, 23.69, s), TxBudget::Size1);
+        }
+        // ... and the same features stay Size1 at the s6-tier bound.
+        assert_eq!(tx_budget_gate(0.000, 21.5, 6), TxBudget::Size1);
+        assert_eq!(tx_budget_gate(0.066, 22.6, 6), TxBudget::Size1);
     }
 
     #[test]
@@ -283,8 +333,12 @@ mod tests {
         assert_eq!(partition_budget_gate(0.4086, 6), PartitionBudget::Max32);
         assert_eq!(partition_budget_gate(0.4105, 6), PartitionBudget::Ship);
         assert_eq!(partition_budget_gate(0.716, 6), PartitionBudget::Ship);
-        // s6-only head.
-        for s in [2u8, 4, 5, 7, 8, 9, 10] {
+        // s6 + the s4-equivalent tier fire; everything else ships.
+        for s in [4u8, 5] {
+            assert_eq!(partition_budget_gate(0.081, s), PartitionBudget::Max32);
+            assert_eq!(partition_budget_gate(0.716, s), PartitionBudget::Ship);
+        }
+        for s in [2u8, 3, 7, 8, 9, 10] {
             assert_eq!(partition_budget_gate(0.081, s), PartitionBudget::Ship);
         }
     }

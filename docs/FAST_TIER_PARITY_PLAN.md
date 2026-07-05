@@ -140,11 +140,79 @@ a free default. Follow-ups in the report §data-gaps (s8 m32 rung unmeasured; pf
 0.85-0.99 band n=5; the remaining cpu2iq-ai +4.4 column is the s4-tier bracket at
 1.27× the composed+i7 wall).
 
+## The s4-equivalent tier — the LAST COLUMN (**CLOSED-with-residual 2026-07-04**; record `benchmarks/rd_gap_s4tier_2026-07-04.tsv`)
+
+The one pairing above the band after P2 was aom cpu2iq-allintra: +4.40/+4.04 vs
+composed-v2+i7 at 1.27× its wall (~27% budget to spend). Designed fully OFFLINE first
+(`scripts/hyperparam/fit_s4_tier.py` over the 60k-row label store — zero fresh encodes
+for the design): the residual map put the gap on 8414 (+22.5, lkml text = the intraBC
+class), 1236/9100/9118 (the aom-iq AQ-machinery class — cpu2def trails cpu2iq by
++100/+133 BD points on exactly these images), 6096/6018 (1-bit rescans; EVERY tx lever
+measured harmful on 6018), 5048/5004/1614; the knapsack over the measured per-image
+surfaces bounded the closable share at ~1.5-2 BD points inside the budget (projected
++2.8 rules / +2.1 oracle) — the ±1% band was NOT projected reachable, and the box
+measurement confirmed the projection almost exactly.
+
+Measured (chain_s4tier.sh; byte-continuity gate 288/288 vs the p2heads chain; every
+cell PALCONF, 0 CELLFAIL/CONFFAIL):
+
+- **v3 rules** = v2 with ONE bound moved: the tx D gate refit at the tier budget
+  (`dcty < 8.352 → 23.69`, LOOCV 22/24-stable at λ=0.5 AND 0.25; Min fires 11/24, was
+  3; W and the partition gate unchanged — the λ=0.25 partition alternative gfs@0.6474
+  is LOOCV-flat and fires m32 onto measured-harm 6018). 12q composed:
+  **v3+i5 = THE OPERATING POINT at 6.26× plain-s6 solo (~6.42 s/MP = 0.97× cpu2iq-ai's
+  wall): +2.80 ssim2 / +4.14 ba3n photos median vs cpu2iq-ai** (v2+i7 was +4.40/+4.04
+  at 5.11×); vs s6+size1 base −6.64 med (v2+i7 −4.77); the cpu4iq column deepens to
+  −1.53/−2.62 and cpu4def to −7.66/−7.23; vs cpu2def-ai −2.80/−2.96 both metrics.
+- **The top-5 intra knob** (zenrav1e@071e9844 `num_modes_rdo_override` — the P2 report's
+  one missing encoder knob, built for this column; default None byte-identical: local
+  6/6 md5 + the 288/288 chain continuity gate): axis value ≈ 78% of top-7's aggregate
+  (s6 −0.51 vs −0.56 med, s8 −1.09 vs −1.17, on-ship −0.57 vs −0.83) — and at MODE
+  level **top-5 dominates top-7**: v3+i7 measured 7.61× plain-s6 (OVER the 6.47×
+  budget) for the same column (+2.84/+4.04). The composed i7 marginal (1.22× over i5)
+  buys ~nothing. The s4-tier intra arm is top-5; the s6/s8 i7 global-arm flip decision
+  at the dep bump should re-weigh against this (a composed-v2+i5 s6-tier mode is the
+  obvious cheaper variant — unmeasured at mode level, data-gap).
+- **Hi-q filter probe** (P1 lever 4 axis, the one unswept surface): CDEF forced-on at
+  every q = global null (−0.09 med; best single image −1.4) — aom-iq's CDEF edge is
+  strength ADAPTATION + AQ, not enablement; LRF-on = adverse (+0.28 med, 6/24; only the
+  gray-scan pair wants it, and that axis is clouded by the OPEN zenrav1e#32 LRF
+  recon-desync). Neither is a tier arm.
+- **full-tx oracle extras** (the labels' clean full winners 8414/6606/5048/9074/9868;
+  NO honest gate at n=24): swapping their cells in reaches +2.36/+2.04 — at 10.12×
+  plain-s6. Real headroom, not affordable and not deployable as a rule.
+- **VAL transfer (13 scoreable of 14 origins, 12q)**: v3+i7 −7.26 med vs val-base
+  (12/13, 1 veto) — BEATS v2+i7's −5.32 (13/13): the refit D bound transfers.
+  v3+i5 −3.89 med with **4 bamax vetoes, all min_ship class** (2021/6621/1055/8363:
+  bamax +3.8..+7.4 while ssim2 AND ba3n are −3.2..−7.3 on every one; the ba3n leg is
+  13/13 better at −4.26 med) — top-5 on min-class content amplifies the type-RDO
+  worst-case signature. Deployment reading: **i5 is the matched-wall operating point;
+  i7 is the val-robust variant at 1.18× the reference wall**; a bamax-safe Min
+  (typred/size2 shape) is the open de-risking arm.
+- **s4-native ruled out**: p1part confirm-s4+prune vs cpu2iq-ai +4.22/+2.90 at ~10×
+  plain-s6 (worse ssim2 than the composed mode at ~1.6× the time); zr-s4-tune
+  +6.40/+6.50. The s6-mechanics composed architecture owns this tier.
+- Honesty notes: six min-class 12q cells bamax-veto vs ship (the P0 type-RDO worst-case
+  signature; ssim2 AND ba3n agree on the wins; 9958's veto pre-exists in v2) — adjusted
+  rows bank 0 per the convention; a bamax-safe Min variant (typred/size2 shapes) is an
+  open arm. Runtime: the v3 D bound ships in `src/fast_heads.rs` as the
+  requested-speed-4..=5 tier (release-gated recommend-only, same as the v2 heads).
+
+**Column verdict: ±1% NOT met — the residual is measured structural, by family:**
+8100-text screens (8414 +22.5) = intraBC absence (P3 chunk B); 1200 interiors (+17.2)
+and 9094 illustrations (+7.4/+2.5) = iq's AQ/deltaq machinery (tune-program-owned, not
+search-budget-owned); 6000 rescans (+15.8/+7.2) = the near-lossless floor (P3); 5000
+brochures (+6.8/+6.2) = partial full-tx headroom with no stable gate.
+
 ## Phase P3 — the remaining structural tools
 - **intraBC chunk B** (hash search): −33% evidence on repeating content (zenrav1e#30);
-  chunk A landed. Matters for screens at every tier.
+  chunk A landed. Matters for screens at every tier — now ALSO the quantified #1 owner
+  of the s4-tier residual (8414 +22.5).
 - **TX_64X16/16X64 validation** (zenrav1e#28) — unlocks the sliver cap.
 - 128×128 SB support (currently hardcoded off) — large-image fast tiers.
+- iq-class AQ/deltaq machinery (the 1236/9100 residual class) — tune-program follow-on
+  to TUNE_SSIMULACRA2 (the dropped aom mechanisms are exactly where cpu2iq's +100-BD
+  per-image edge on interiors lives).
 
 ## Measurement rules for this program
 Time-normalized pareto is the ONLY scoreboard (speed numbers don't compare across
@@ -153,9 +221,19 @@ both metrics with veto; per-family slices; conformance at every armed config (th
 corruption list — fast paths just passed 5,520 cells clean, keep it that way); the tune
 stays on in every zr arm (measured mandatory + nearly-free at fast tiers).
 
-## Success criteria
+## Success criteria — FINAL STATUS (2026-07-04, program measurement complete)
 - **Parity**: zr arm within ±1% BD of the aom-allintra pareto at matched wall-time for the
   s4/s6/s8-equivalent tiers, photos median, both metrics.
+  **s6 CROSSED** (cpu4iq +0.57/−0.94 composed-v2; −0.35/−1.70 with i7); **s8 CROSSED**
+  (cpu6iq −3.6/−5.1); **s4-tier NOT MET** — v3+i5 +2.80/+4.14 vs cpu2iq-ai at 0.97× its
+  wall; the residual is measured structural (intraBC screens / iq-AQ interiors+illustrations
+  / near-lossless rescans — quantified per-family in the s4-tier section; owners are P3 +
+  the tune program, not search budgets).
 - **Beat**: below the curve at ≥2 tiers while keeping the quality-tip crown.
+  **MET** — s6 + s8 below their curves; composed-v2 strictly dominates cpu2def-ai; v3+i5
+  below the cpu4iq/cpu4def/cpu2def curves on both metrics. Quality tip **KEPT** (s1-deep
+  −0.97% vs cpu0-slowest stands, untouched).
 - Every landed lever byte-identical when off; no conformance regressions; honest per-family
   reporting (screens ride palette/intraBC, not the photo levers).
+  **HELD** throughout: every knob None-off byte-identical (md5-gated), 288/288 s4tier
+  continuity, 0 CELLFAIL/CONFFAIL across the program's chains.

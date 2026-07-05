@@ -269,3 +269,10 @@ FEATURE_HINTS "fast mode that needs less brute force" program surface: per-image
    fast tiers and is cheaper at s2) — reinforces the dep-bump decision in CLAUDE.md.
 4. Label store: the 40 RD arms + 6 anchors appended as `speedladder-2026-07-04`
    sources (the fast-tier speed/qm-head labels the drift verdict called for).
+5. **Program outcome (2026-07-04, FAST_TIER_PARITY_PLAN measurement complete):** the
+   gap map's columns were prosecuted to their measured ends — s6 + s8 CROSSED their
+   matched-time aom-allintra references (P1 pruning + P2 per-image heads); the
+   s4-equivalent tier closed +6.4 → +2.8 ssim2 vs cpu2iq-ai at matched wall (the v3
+   heads + the new top-5 intra knob), with the residual measured structural (intraBC /
+   iq-AQ / near-lossless classes; per-family quantification in FAST_TIER_PARITY_PLAN
+   §s4-tier + `benchmarks/rd_gap_s4tier_2026-07-04.tsv`).

@@ -133,9 +133,18 @@ NOT cheap; 1.38× on plain size1). Honest time-normalized readings:
    `SpeedTweaks.intra_top7`, ravif@9e413ac0 message / 4b98f0f8 content —
    the first commit is empty from a recovered jj-abandon slip; byte gate
    9/9 identical off). Flips with the other arms at the dep bump.
-2. **No top-5 intra knob** (zenrav1e `num_modes_rdo` hardcoded 7|3) — the
-   only place P2 found a missing encoder knob; a SATD-margin adaptive budget
-   (P1 lever 3's original shape) remains unbuilt.
+   **S4TIER UPDATE 2026-07-04: re-weigh the flip against top-5** — at the
+   s4-tier MODE level top-5 dominated top-7 (same parity column at 6.26×
+   vs 7.61× plain-s6; `benchmarks/rd_gap_s4tier_2026-07-04.tsv`); a
+   composed+i5 s6-tier mode is the obvious cheaper variant (unmeasured at
+   mode level for v2 classes).
+2. ~~**No top-5 intra knob**~~ **BUILT + MEASURED (S4TIER 2026-07-04)**:
+   `PredictionSpeedSettings::num_modes_rdo_override` (zenrav1e@071e9844,
+   default `None` byte-identical — local 6/6 md5 + 288/288 chain
+   continuity). Top-5 keeps ≈78% of top-7's aggregate value (s6 −0.51 vs
+   −0.56 med; s8 −1.09 vs −1.17; on-ship −0.57 vs −0.83) at a 1.22×-cheaper
+   composed wall — the s4-tier operating point ships it. A SATD-margin
+   adaptive budget (P1 lever 3's original shape) remains unbuilt.
 3. The pf∈(0.85,0.99)+dcty<100 band has n=5 labels — the v2 W bound sits in
    a wide empty band; more razor-edge-adjacent labels would tighten it.
 4. min-class butteraugli fragility: 2021 (val) min fire vetoed (bamax
@@ -147,6 +156,12 @@ NOT cheap; 1.38× on plain size1). Honest time-normalized readings:
 7. 7053 (val razor-edge plot, (none,ship)) has a degenerate BD hull vs ship —
    its per-cell bytes are in the store for byte-level checks; excluded from
    BD means (n=13 vs 14).
+8. **The cpu2iq-ai +4.4 column (the s4-tier bracket): CLOSED-with-residual
+   2026-07-04** — v3 rules (D bound 23.69) + top-5 intra landed the column at
+   **+2.80/+4.14 at 0.97× cpu2iq's wall**; the rest is measured structural
+   (intraBC screens / iq-AQ interiors / near-lossless rescans / gated-less
+   full-tx headroom). Full record: FAST_TIER_PARITY_PLAN §s4-tier +
+   `benchmarks/rd_gap_s4tier_2026-07-04.tsv`.
 
 ## Runtime wiring (landed, release-gated)
 
