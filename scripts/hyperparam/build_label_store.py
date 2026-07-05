@@ -689,6 +689,31 @@ def sources():
                   corpus="mech26", sweep_source="s4tier-2026-07-04",
                   arm_id="s4tier/val-base", knob_json=json.dumps(k, sort_keys=True),
                   encoder_rev=s4_rev, q_kind="cavif_q", speed=6, rows=168))
+
+    # --- intraBC chunk B hash-search A/B (2026-07-04) — P3 item 1
+    # (zenavif benchmarks/ibc_hash_ab_2026-07-04.tsv). Isolated rav1e-CLI
+    # config; every armed cell aomdec-decoded + raw-md5-agreed with
+    # rav1d-safe (640/640). hashoff is byte-identical to chunk A / master
+    # 0d392334 (81/81 gate cells). Mixed corpus (uvpal sample: train26 +
+    # wedge natives + legacy fam-7 trio) for the always-armed AB; pure
+    # train26 for the sc10 residual-column pass (tune-ss2 + palette auto).
+    ibc = "/mnt/v/output/p3bc-ab-2026-07-04"
+    ibc_rev = ("zenrav1e@184eb713 (chunk B; rav1e CLI, isolated: "
+               "still-picture threads=1 lrf=false filter-intra=false)")
+    for fn, tag, pal, tune, rows in [
+        ("ibcA_hashoff.tsv", "chunkA-always", "always", None, 200),
+        ("ibcB_hashon.tsv", "chunkAB-always", "always", None, 200),
+        ("sc10_hashoff.tsv", "chunkA-auto-ss2", "auto", "ssimulacra2", 120),
+        ("sc10_hashon.tsv", "chunkAB-auto-ss2", "auto", "ssimulacra2", 120),
+    ]:
+        s.append(dict(path=f"{ibc}/{fn}", kind="intrabc_ab_tsv", corpus="mixed",
+                      sweep_source="intrabc-hash-2026-07-04", arm_id=f"ibc/{tag}",
+                      knob_json=J(cli="rav1e", still_picture=True, threads=1,
+                                  lrf=False, filter_intra=False, palette=pal,
+                                  tune=tune, intrabc=True,
+                                  intrabc_hash=("chunkAB" in tag)),
+                      encoder_rev=ibc_rev, q_kind="rav1e_quantizer", speed=None,
+                      rows=rows))
     return s
 
 
@@ -897,6 +922,64 @@ def main():
                      sweep_source=src["sweep_source"], source_file=base,
                      encoder_rev=src["encoder_rev"],
                      feature_join=fj, feature_join_exact=True if fj else None,
+                     file_bd_cpu2=None, file_bd_cpu0=None, file_reach_cpu2_bppx=None)
+                n += 1
+            assert n == src["rows"], f"{path}: {n} rows != expected {src['rows']}"
+        elif kind == "intrabc_ab_tsv":
+            # run_palette_iso.sh output over the uvpal mixed corpus (train26 +
+            # wedge natives + legacy fam-7 trio) or pure train26 (sc10).
+            # Per-image corpus resolution: t26 -> wedge -> mech26 -> legacy.
+            n = 0
+            with open(path) as f:
+                lines = [ln for ln in f if not ln.startswith("#")]
+            for r in csv.DictReader(lines, delimiter="\t"):
+                img = r["image"] + ".png"
+                spd = int(r["speed"])
+                m = t26.get(img)
+                corpus = "train26"
+                if m is None:
+                    m = wmap.get(img)
+                    corpus = "wedge26"
+                if m is None:
+                    m = mmap.get(img)
+                    corpus = "mech26"
+                if m is None:
+                    assert img.startswith("o_"), \
+                        f"{path}: image in no corpus map and not legacy: {img}"
+                    corpus = "legacy22"
+                    oid, opath, cclass = lsd_origin_id(img), None, None
+                    crop, sc, fam = "full", "1024", "7000L"
+                    w = h = 1024
+                    fj, fj_exact = None, None
+                else:
+                    oid, opath = m["origin_id"], m["origin_path"]
+                    cclass = m["content_class"]
+                    crop = m.get("crop_label", "full")
+                    sc = m["size_class"]
+                    fam = m.get("family")
+                    if corpus == "train26":
+                        w, h = fidx[(opath, "full", sc)]
+                    else:
+                        w, h = int(m["width"]), int(m["height"])
+                    fj = feature_join_for(opath, crop, sc, w, h)
+                    fj_exact = (corpus != "train26") if fj else None
+                emit(image_id=img, corpus=corpus, origin_id=oid,
+                     origin_path=opath, split=split_of(img),
+                     content_class=cclass, family=fam, crop_label=crop,
+                     size_class=sc, size_slot=size_slot(crop, sc),
+                     w=w, h=h, px=w * h,
+                     encoder="zenrav1e", fmt="420(y4m)", speed=spd,
+                     arm_id=f"{src['arm_id']}_s{spd}",
+                     knob_json=src["knob_json"], q=float(r["q"]),
+                     q_kind=src["q_kind"], bytes=int(r["bytes"]),
+                     bpp=int(r["bytes"]) * 8.0 / (w * h),
+                     ssim2=float(r["ssim2"]),
+                     butteraugli_3n=float(r["butter_p3"]) if r.get("butter_p3") not in (None, "", "NA") else None,
+                     butteraugli_max=float(r["butter_max"]) if r.get("butter_max") not in (None, "", "NA") else None,
+                     enc_ms=float(r["enc_ms"]) if r.get("enc_ms") else None,
+                     sweep_source=src["sweep_source"], source_file=base,
+                     encoder_rev=src["encoder_rev"],
+                     feature_join=fj, feature_join_exact=fj_exact,
                      file_bd_cpu2=None, file_bd_cpu0=None, file_reach_cpu2_bppx=None)
                 n += 1
             assert n == src["rows"], f"{path}: {n} rows != expected {src['rows']}"
