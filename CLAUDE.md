@@ -320,6 +320,30 @@ JPEG_CONFIGS/enc_int_ms (zenavif@ebb98c4d) + zenjpeg@d4f88211 sweep_cell.
 num_modes_rdo apply line (same pattern as S1_DEEP/S6_* flips), alongside the
 tune-default decision the rows were measured with.
 
+### COEFF_RD_STACK (2026-07-05): the coefficient-level wall STUDIED + PORTED + REFUTED — honest negative at every posture; knob landed default-off upstream
+The wall three residual hunts named (s1 8-photo, 6096 no-skip, SSIMRD
+close-out) was attacked per TUNER2's order as ONE composed knob:
+`zenrav1e@3e5ff155`+`@9bc2b71a` `EncoderConfig::coeff_rd_stack`
+(CoeffRdStack: flat rounding [0=fitted-Valin sentinel] + always-on descent
+at λ-scale + aom sharpness guards + per-TU zero-out; default-None
+byte-identical, 36/36 sha gate; rides no tune — pure A/B infra). Study
+docs/COEFF_RD_STACK.md (aom 632172a4): FP-quant↔trellis COUPLING
+(`skip_trellis ? B : FP`), allintra trellis speed-invariant, dropout dead
+code, no cq recode loop (the "rate loop" suspect closes by inspection),
+per-TU zero-out unported, and zenrav1e's Valin eob dead zone == aom's zbin
+(0.656q both) — a mean-field trellis. Measured (chain_coeffrd.sh, sweep-2,
+byte-continuity 288/288, rule pre-registered at bcc02310): **all 7 arms
+lose** — aom-ss2 posture +3.80, aom-default posture +14.02, un-gated
+descent over Valin input +2.33 (λ1.0) / +0.97 (λ0.35) mass-wmed ssim2,
+butteraugli vetoes everywhere, ≤5/144 strict-Pareto cells, doccharts
+replicates, 6096/1236/9094 classes flat-to-harmed. **Verdict: aom's
+coefficient-level edge is its internally-coherent valuation loop, not a
+transplantable piece; zenrav1e's shipped Valin offsets + exact-tell rates
++ psy-pixel dist measured superior to every transplant; the 2026-06-18
+trellis quality gate is vindicated.** No zenavif dep-bump action (knob
+stays default-off infra). Record: RD_GAP "COEFF_RD_STACK" +
+benchmarks/rd_gap_coeffrd_2026-07-05.tsv + DECISION_RULE_COEFFRD.md.
+
 ### zenrav1e per-SB delta_q + Variance Boost — SHIPPED upstream 2026-07-02 (later), release-gated
 zenrav1e gained true per-SB delta_q coding (`d125713f`, inert syntax; the
 encoder previously coded none) and `Tune::Ssimulacra2` now drives libaom's

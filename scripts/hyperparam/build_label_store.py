@@ -807,6 +807,91 @@ def sources():
                   knob_json=J(speed=2, tune="ssimulacra2", palette="auto",
                               threads=1, ssim_rdmult_strength=0.5),
                   encoder_rev=sr_rev, q_kind="cavif_q", speed=2, rows=84))
+
+    # --- COEFF_RD_STACK composed-posture arms (2026-07-05;
+    # chain_coeffrd.sh + docs/COEFF_RD_STACK.md) --- zenrav1e@3e5ff155 +
+    # @9bc2b71a (EncoderConfig::coeff_rd_stack: flat rounding [0 =
+    # fitted-Valin sentinel] + always-on descent at lambda-scale + aom
+    # sharpness guards) via the ravif--coeffrd devpatch (box cavif
+    # f4e17fbb7de6f0c4 for base/A-E arms; sentinel rebuild 92ef3ca3437d90b0
+    # for the G arms + s1deep base — s2-inert, byte-gated). Byte gates:
+    # default-None 36/36 sha vs master rav1e; env-off box rows byte-equal
+    # to ssimrd/base_s2 288/288. Verdict: HONEST NEGATIVE at every posture
+    # (RD_GAP "COEFF_RD_STACK"); knob stays landed default-off as infra.
+    cr = "/mnt/v/output/zenavif/coeffrd-20260705"
+    cr_rev = "zenrav1e@9bc2b71a via ravif--coeffrd devpatch (f4e17fbb/92ef3ca3)"
+    s.append(dict(path=f"{cr}/cr_base_t26.tsv", kind="rd_tsv",
+                  corpus="train26", sweep_source="coeffrd-2026-07-05",
+                  arm_id="coeffrd/base_s2",
+                  knob_json=J(speed=2, tune="ssimulacra2", palette="auto",
+                              threads=1),
+                  encoder_rev=cr_rev, q_kind="cavif_q", speed=2, rows=288))
+    s.append(dict(path=f"{cr}/cr_base_dc.tsv", kind="rd_tsv",
+                  corpus="doccharts15", sweep_source="coeffrd-2026-07-05",
+                  arm_id="coeffrd/base-dc_s2",
+                  knob_json=J(speed=2, tune="ssimulacra2", palette="auto",
+                              threads=1),
+                  encoder_rev=cr_rev, q_kind="cavif_q", speed=2, rows=180))
+    for tag, spec in (("A", "128:0.1328:1:0"), ("B", "128:0.35:1:0"),
+                      ("C", "128:1.0:1:0"), ("D", "128:4.25:1:0"),
+                      ("E", "128:1.0:0:0")):
+        s.append(dict(path=f"{cr}/cr_{tag}_t26.tsv", kind="rd_tsv",
+                      corpus="train26", sweep_source="coeffrd-2026-07-05",
+                      arm_id=f"coeffrd/{tag}_s2",
+                      knob_json=J(speed=2, tune="ssimulacra2", palette="auto",
+                                  threads=1, coeff_rd_stack=spec),
+                      encoder_rev=cr_rev, q_kind="cavif_q", speed=2, rows=144))
+        s.append(dict(path=f"{cr}/cr_{tag}_dc.tsv", kind="rd_tsv",
+                      corpus="doccharts15", sweep_source="coeffrd-2026-07-05",
+                      arm_id=f"coeffrd/{tag}-dc_s2",
+                      knob_json=J(speed=2, tune="ssimulacra2", palette="auto",
+                                  threads=1, coeff_rd_stack=spec),
+                      encoder_rev=cr_rev, q_kind="cavif_q", speed=2, rows=90))
+    for tag, spec in (("G0_1_0_0_0", "0:1.0:0:0"),
+                      ("G0_0_35_0_0", "0:0.35:0:0")):
+        s.append(dict(path=f"{cr}/cr_{tag}_t26.tsv", kind="rd_tsv",
+                      corpus="train26", sweep_source="coeffrd-2026-07-05",
+                      arm_id=f"coeffrd/{tag}_s2",
+                      knob_json=J(speed=2, tune="ssimulacra2", palette="auto",
+                                  threads=1, coeff_rd_stack=spec),
+                      encoder_rev=cr_rev, q_kind="cavif_q", speed=2, rows=144))
+    # Fresh current-binary s1 baselines on the legacy continuity corpus:
+    # plain-s1 (ravif-main state, S1_DEEP_ARMS_LIVE=false binary) AND the
+    # shipped deep mode (devpatch flip) — the drift rule's fresh-baseline
+    # assets for any future s1 program.
+    s.append(dict(path=f"{cr}/cr_s1_base_leg.tsv", kind="rd_tsv",
+                  corpus="legacy22", sweep_source="coeffrd-2026-07-05",
+                  arm_id="coeffrd/base-plain_s1",
+                  knob_json=J(speed=1, tune="ssimulacra2", palette="auto",
+                              threads=1, s1_deep_arms=False),
+                  encoder_rev=cr_rev, q_kind="cavif_q", speed=1, rows=264))
+    s.append(dict(path=f"{cr}/cr_s1deep_base_leg.tsv", kind="rd_tsv",
+                  corpus="legacy22", sweep_source="coeffrd-2026-07-05",
+                  arm_id="coeffrd/base_s1deep",
+                  knob_json=J(speed=1, tune="ssimulacra2", palette="auto",
+                              threads=1, s1_deep_arms=True),
+                  encoder_rev=cr_rev, q_kind="cavif_q", speed=1, rows=264))
+    # Cache-hot aom reference replays fetched with the program (t26 iq+def,
+    # doccharts iq — the first aom rows on the doccharts corpus).
+    aom_rev5 = "aomenc-3.14.1@632172a4 (build_slow)"
+    s.append(dict(path=f"{cr}/aom_t26_cpu2iq.tsv", kind="rd_tsv",
+                  corpus="train26", sweep_source="coeffrd-2026-07-05",
+                  arm_id="coeffrd/ref-aom-cpu2iq-ai_420",
+                  knob_json=J(encoder="aomenc", cpu_used=2, tune="iq",
+                              allintra=True, fmt="420"),
+                  encoder_rev=aom_rev5, q_kind="aom_cq", speed=2, rows=192))
+    s.append(dict(path=f"{cr}/aom_t26_cpu2def.tsv", kind="rd_tsv",
+                  corpus="train26", sweep_source="coeffrd-2026-07-05",
+                  arm_id="coeffrd/ref-aom-cpu2def-ai_420",
+                  knob_json=J(encoder="aomenc", cpu_used=2, tune="default",
+                              allintra=True, fmt="420"),
+                  encoder_rev=aom_rev5, q_kind="aom_cq", speed=2, rows=192))
+    s.append(dict(path=f"{cr}/aom_dc_cpu2iq.tsv", kind="rd_tsv",
+                  corpus="doccharts15", sweep_source="coeffrd-2026-07-05",
+                  arm_id="coeffrd/ref-aom-cpu2iq-ai-dc_420",
+                  knob_json=J(encoder="aomenc", cpu_used=2, tune="iq",
+                              allintra=True, fmt="420"),
+                  encoder_rev=aom_rev5, q_kind="aom_cq", speed=2, rows=120))
     return s
 
 

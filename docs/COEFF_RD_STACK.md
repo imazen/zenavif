@@ -336,3 +336,35 @@ touches it — matters for ultra-flat gradients, o_6629-class); eob-move-with-lo
 (aom's `update_coeff_eob` considers both simultaneously); the per-block MSE/SATD
 trellis bypass for the fast tiers (aom's actual speed lever, §1.4); row-14's
 variance rdmult modifier (λ-side, low prior).
+
+---
+
+## 6. VERDICT (measured 2026-07-05, same day): HONEST NEGATIVE at every posture — the wall is refuted as a transplant
+
+The knob landed (`zenrav1e@3e5ff155` + `@9bc2b71a`, incl. the `rounding_bias = 0`
+fitted-Valin sentinel added mid-program for the un-gate-only decomposition) and the
+full arm ladder ran per DECISION_RULE_COEFFRD.md (pre-registered at zenavif
+`bcc02310` before any arm data; byte-continuity 288/288; PALCONF clean on every
+armed cell). **No arm advanced**: t26 mass-weighted median ssim2 BD +0.97 (G2,
+Valin+λ0.35 descent) … +14.02 (D, aom default-tune posture), butteraugli vetoes
+in every posture arm, strict Pareto wins ≤ 5/144 cells anywhere, doccharts
+in-distribution replication, named residual classes flat-to-harmed (single
+exception 6018, the known val-refutable 1-bit-scan pattern).
+
+The measured close: **row 1 and row 2 of §3 are not "differences to port" — they
+are two encoders' correctly-fitted optima for two different valuation loops.**
+Flat-0.5 rounding is aom-FP-optimal because av1_optimize_txb + LV_MAP table costs
++ tx-domain dist re-price every coefficient after it; zenrav1e's Valin offsets are
+optimal because nothing downstream re-prices (mean-field IS the policer), and its
+psy-pixel/exact-tell RDO already prices whole-block alternatives better than a
+per-coefficient tx-domain pass can (G/G2: the descent has NO beneficial λ over
+Valin input at s2 mid/low q — the 2026-06-18 quality gate is vindicated, not
+timid). Full record: RD_GAP_VS_LIBAOM.md "COEFF_RD_STACK" +
+`benchmarks/rd_gap_coeffrd_2026-07-05.tsv`. The ranked-differences list in §4 is
+therefore closed: #1 measured-and-rejected (this program); #2's premise — that
+the composed stack's RD value exists and only its COST needs decomposing — died
+with #1 (a pure phase-1-only arm was not isolated, but G/G2 ran phase-1-inclusive
+descents at two λ and both lost monotonically; there is no measured RD value left
+to slice for); #3 was already the no-action row.
+Arm F (`tu_zero_out`) was never triggered (no winner) — the field stays landed
+as infrastructure.

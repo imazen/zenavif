@@ -1566,6 +1566,114 @@ a default-off knob ships zero effect at every speed. Record:
 `benchmarks/rd_gap_ssimrd_2026-07-05.tsv` (+ `_val_`, + raw-sweeps pointer);
 raw `/mnt/v/output/zenavif/ssimrd-20260705/` + the box snapshot.
 
+## COEFF_RD_STACK — the composed aom coefficient-valuation stack studied, ported and measured 2026-07-05: HONEST NEGATIVE at every posture, the wall is REFUTED as a transplantable mechanism; the fitted Valin dead zone and the trellis quality gate are both VINDICATED as this encoder's optima
+
+**Program**: the wall three residual hunts converged on (the s1 "8 named photos"
+close-out, the 6096 no-skip diagnosis, the SSIMRD close-out), attacked per TUNER2's
+standing order — "port the valuation STACK (tx-domain QM-PSNR distortion under the
+tune + rounding + trellis posture together), not constants one at a time."
+
+**Phase A study — docs/COEFF_RD_STACK.md** (aom 632172a4 / zenrav1e 57de2815,
+file:line mechanism map + ours/theirs/difference/transplantability table). Structural
+findings: (1) aom **couples** FP round-to-nearest quantization to an always-on
+per-coefficient RD descent (`skip_trellis ? B : FP`, `USE_B_QUANT_NO_TRELLIS=1`) —
+the two prior zenavif probes each measured a forbidden half-stack; (2) zenrav1e's
+Valin offsets are the same design point as aom's no-trellis B path (eob dead zone
+0.656·q == zbin 84/128 — independently fitted to the same value): a **mean-field
+trellis**; (3) the fork trellis was hard-dead below ~Q80 (`ac_quant >= 200`) and
+dampened above — every historical forced-on arm was a no-op exactly where the
+residuals live; (4) aom's allintra trellis is speed-INVARIANT (cpu0-8;
+`NO_ESTIMATE_YRD_TRELLIS_OPT` ≡ full for intra), per-block MSE/SATD-gated;
+(5) `av1_dropout_qcoeff` is dead code at the pin (never called); (6) NO recode loop
+exists in `--end-usage=q` single-pass — the SSIMRD close-out's "cq-mode rate loop"
+suspect closes by inspection (and the TUNER2 "qindex ≤112" rounding-gate note was a
+conflation with the tune-iq LF `picklpf.c` gate); (7) aom also has a per-TU zero-out
+RD test we lack (`tx_search.c:3294-3311`, not sharpness-gated).
+
+**Port — zenrav1e@3e5ff155 + @9bc2b71a** (`EncoderConfig::coeff_rd_stack`,
+`CoeffRdStack { rounding_bias [0 = fitted-Valin sentinel], trellis_lambda_scale,
+preserve_guards, tu_zero_out }`, default `None` byte-identical: 36/36 sha256 vs a
+master-built rav1e across 3 contents × q{60,120,180} × s{2,6} × tune{ss2,psy};
+liveness + rav1d-safe decodability gated in `tests/trellis_roundtrip.rs` including
+the previously-dead coarse-q band; disarmed on explicit-lossless configs).
+
+**Measurement** (chain_coeffrd.sh, zenavif-sweep-2 snapshot restore; ravif--coeffrd
+devpatch = main d72304a + tune/palette/ZENRAVIF_COEFFRD envs; box cavif sha256/16
+`f4e17fbb7de6f0c4`, G arms + s1deep on the sentinel rebuild `92ef3ca3437d90b0`
+[s2-inert, byte-gated]; byte-continuity gate vs the store's ssimrd/base_s2 rows
+**288/288**; decision rule pre-registered on origin/main at `bcc02310` BEFORE any
+arm TSV was read — DECISION_RULE_COEFFRD.md). PALCONF (aomdec + rav1d-safe
+byte-agree) on every armed cell: **0 CONFFAIL / 0 CELLFAIL across all arms**.
+
+**Verdict (t26 6q vs same-binary 12q base, cluster-mass-weighted medians per the
+93b83401 policy; "better" is fire-conservative-vetoed):**
+
+| arm (k/256 : λscale : guards) | ss2 wmed | ba3n wmed | bamax wmed | better | families vetoed |
+|---|--:|--:|--:|--:|--:|
+| A 128:0.133:g — aom tune-ss2 posture verbatim | +3.80 | +4.84 | +1.28 | 0/23 | 6/6 |
+| B 128:0.35:g | +4.36 | +4.54 | +4.69 | 0/23 | 6/6 |
+| C 128:1.0:g | +4.77 | +4.84 | +4.18 | 0/23 | 6/6 |
+| D 128:4.25:g — aom default-tune posture | +14.02 | +20.40 | +26.22 | 0/22 | 6/6 |
+| E 128:1.0:unguarded (control) | +4.12 | +4.47 | +4.02 | 1/23 | 5/6 |
+| G 0(Valin):1.0:unguarded — un-gate-the-descent-only | +2.33 | +1.68 | +2.47 | 2/23 | 3/6 |
+| G2 0(Valin):0.35:unguarded | +0.97 | +0.50 | −0.67 | 1/23 | 2/6 |
+
+**No arm advances** (mass-bar ≤ −0.30 and photos-merit both missed everywhere) — the
+pre-registered termination clause fires; per the rule no full/s6/s1probe/timing
+phases ran, and arm F (`tu_zero_out`) was conditioned on a winner's over-keep that
+never existed. Doccharts supplement (15 doc/chart origins, 6096-class content
+in-distribution; median ssim2 / ba3n / bamax BD, better-of-15): A +3.69/+2.16/+2.60
+(1), B +3.95/+2.70/+2.65 (1), C +4.70/+3.88/+6.10 (0), D +11.08/+15.51/+20.43 (0),
+E +2.23/+2.86/+5.61 (2) — the rejection replicates in-distribution. Matched-q
+quadrant scan: strict Pareto wins ≤5/144 cells at ANY arm (A/B are pure
+operating-point shifts — 133/144 cells "more bytes, more raw ssim2" that the BD
+integral rejects; D manages both-worse on 62 cells) — **no hidden content-gating
+subpopulation exists.**
+
+**Mechanism of the negative — both halves convicted separately AND jointly:**
+1. **Flat 0.5-rounding is the primary poison** (A-E): the kept mass costs more rate
+   than either metric values, with or without policing, at every λ — the
+   flat-rounding-alone rejection (TUNER2 (2)) generalizes to the whole coupled
+   posture. The Valin offsets ARE the fitted optimum for this valuation loop.
+2. **The descent itself has NO beneficial operating point over Valin input at
+   s2 mid/low q** (G/G2 monotone in λ: 0.35 → +0.97, 1.0 → +2.33): per-coefficient
+   tx-domain surgery diverges from the psy/ssim2 judge outside the high-quality
+   band — the 2026-06-18 `ac_quant >= 200` gate + dampening were correct fits, not
+   timidity, now vindicated at 7-arm scale.
+3. Butteraugli-vs-ssim2 divergences recur exactly where TUNER2 saw them (6096 ba3n
+   −2.23 at B; illus9094 bamax −6.5 at G2; scans ba3n −1.7 at G2) but never clear
+   the bar, and the one repeated tri-metric winner — 6018 (G −3.03/−1.11, G2
+   −2.24/−1.68) — is the same single 1-bit-scan origin whose SSIMRD train win was
+   refuted by its val sibling 6091 (the TUNER2-1a pattern): not shippable, not even
+   as a head.
+
+**Named residual classes: none move.** 6096 +1.41..+15.92 across the posture arms
+(its no-skip diagnosis is real but the posture that produces aom's no-skip does not
+transplant); 1236 +2.4..+9.4; 9100/9118 +3.4..+14; 6018 the lone exception above.
+The 8-photo s1 class was never probed (no winner; rule).
+
+**Consequences — the honest close of the coefficient-level program.** With this
+program, every layer of aom's coefficient valuation stack is now measured on this
+encoder: the constants (frame-λ +4.41%, trellis-λ ÷32 +0.01%, flat rounding +2.67%,
+ssim-rdmult curve +2.11..+6.85, literal tx-domain QM-PSNR +4.47%), the composed
+postures (this program: +0.97..+14.02, all vetoed), and the un-gated machinery alone
+(G/G2: +0.97..+2.33). **The wall is refuted as a transplantable mechanism: aom's
+coefficient-level RD edge lives in its internally-coherent valuation loop (FP quant
++ tx-domain dist + per-frame table rates + trellis + per-TU zero-out + q²-rdmult
+co-designed), which cannot be entered piecemeal from a Daala-λ + psy-pixel-distortion
+loop without losing more than it gains.** What zenrav1e already ships at the
+coefficient level — Valin mean-field offsets + exact in-trial tell rates + psy pixel
+distortion × QM-ratio — measured superior to every transplanted alternative. The
+named residuals (6096-class near-lossless, 1236/9094 iq-AQ class, the 8-photo
+s1-vs-cpu0 gap) remain real but their owner is the LOOP, not a porteable piece of
+it; the remaining honest paths are (a) the closed-loop per-SB channel
+(FrameHints/two-pass, already shipped) which sidesteps open-loop valuation entirely,
+(b) per-image heads on existing knobs, and (c) accepting the structural residual.
+The `coeff_rd_stack` knob stays landed default-off as A/B infrastructure (byte-gated;
+`chain_coeffrd.sh` re-runs the ladder in one command). Record:
+`benchmarks/rd_gap_coeffrd_2026-07-05.tsv` + DECISION_RULE_COEFFRD.md +
+raw `/mnt/v/output/zenavif/coeffrd-20260705/` + the box snapshot.
+
 ## Size-decay isolation A/B — MEASURED 2026-07-03: four of five tune mechanisms ACQUITTED for the small-size decay; the QM-dist ratio convicted and its size ramp SHIPPED
 
 **Program**: WEDGE_MAP wedge #3 / HYPERPARAM_FIRST_CUT rule 2's specified follow-up. The wedge

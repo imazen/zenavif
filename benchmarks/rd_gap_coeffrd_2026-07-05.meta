@@ -1,0 +1,45 @@
+# rd_gap_coeffrd_2026-07-05.tsv — COEFF_RD_STACK composed-posture program record
+# (compact per-image BD verdict table: t26 arms A-G2 + doccharts A-E + mass-wmed
+#  summary rows; the full 2,958-row per-cell assembly is
+#  /mnt/v/output/zenavif/coeffrd-20260705/rd_gap_coeffrd_assembled_2026-07-05.tsv)
+# Program: docs/COEFF_RD_STACK.md (Phase A study) + RD_GAP_VS_LIBAOM.md "COEFF_RD_STACK"
+# Rule: scripts/rd_gap/DECISION_RULE_COEFFRD.md — pre-registered on origin/main at
+#   zenavif@bcc02310 BEFORE any arm TSV was read. VERDICT: no arm advances (honest
+#   negative); termination clause fired; no full/s6/s1probe/timing phases.
+# Box: zenavif-sweep-2 (Hetzner ccx63 fsn1, snapshot-restore lineage), chain:
+#   scripts/rd_gap/chain_coeffrd.sh + two manual legs (G arms, s1 bases).
+# Binaries:
+#   base + arms A-E (t26+dc): ravif--coeffrd cavif sha256/16 f4e17fbb7de6f0c4
+#     (ravif main d72304a + tune/palette/ZENRAVIF_COEFFRD env passthroughs,
+#      path-dep zenrav1e--coeffrd @ master 3e5ff155)
+#   G arms + s1 bases: sentinel rebuild sha256/16 92ef3ca3437d90b0
+#     (zenrav1e master 9bc2b71a rounding_bias=0 sentinel + devpatch
+#      S1_DEEP_ARMS_LIVE flip for cr_s1deep_base_leg; s2-inert — smoke sha
+#      0d6a301c... identical pre/post)
+#   aom refs: aomenc 3.14.1 @ 632172a4 build_slow, --allintra 420
+# Gates: knob-off byte-identity 36/36 sha vs master rav1e (local, 3 contents x
+#   q{60,120,180} x s{2,6} x tune{ss2,psy}); box byte-continuity cr_base_t26 vs
+#   label-store ssimrd/base_s2: 288/288; PALCONF (aomdec + rav1d-safe byte-agree)
+#   on every zr cell: 0 CONFFAIL / 0 CELLFAIL / 0 DECFAIL across all logs
+#   (2,454 zr cells).
+# Runs (the `run` column):
+#   cr_base_t26 (288) env-off s2+tune+palette t26 12q — fresh baseline
+#   cr_{A..E}_t26 (144 ea) ZENRAVIF_COEFFRD arms, t26 6q:
+#     A=128:0.1328:1:0 (aom ss2 posture)  B=128:0.35:1:0  C=128:1.0:1:0
+#     D=128:4.25:1:0 (aom default posture)  E=128:1.0:0:0 (unguarded)
+#   cr_G0_1_0_0_0_t26 / cr_G0_0_35_0_0_t26 (144 ea) = 0:1.0:0:0 / 0:0.35:0:0
+#     (fitted-Valin sentinel + un-gated descent — the decomposition arms)
+#   cr_base_dc (180) + cr_{A..E}_dc (90 ea): doccharts15 supplement
+#   cr_s1_base_leg (264): legacy22 12q s1 PLAIN (ravif-main state, pre-flip)
+#   cr_s1deep_base_leg (264): legacy22 12q s1-DEEP (devpatch flip) — fresh
+#     s1 baselines for future programs (report-only corpus; no arm ran: no winner)
+#   aom_t26_cpu2iq / aom_t26_cpu2def (192 ea), aom_dc_cpu2iq (120): reference replays
+# Verdict numbers (t26 6q vs cr_base_t26, cluster-mass-weighted medians,
+#   ssim2/ba3n/bamax, better-vetoed): A +3.80/+4.84/+1.28 0/23;
+#   B +4.36/+4.54/+4.69 0/23; C +4.77/+4.84/+4.18 0/23;
+#   D +14.02/+20.40/+26.22 0/22; E +4.12/+4.47/+4.02 1/23;
+#   G +2.33/+1.68/+2.47 2/23; G2 +0.97/+0.50/-0.67 1/23.
+# Raw: /mnt/v/output/zenavif/coeffrd-20260705/ (+ Tower mirror) + box snapshot.
+# Analysis: scripts/rd_gap/analyze_coeffrd.py (per-family first, mass-weighted).
+# Commit context: zenavif docs+rule at bcc02310/7f862898; zenrav1e knob at
+#   3e5ff155 + 9bc2b71a.
