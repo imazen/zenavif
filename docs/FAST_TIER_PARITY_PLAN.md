@@ -230,6 +230,20 @@ brochures (+6.8/+6.2) = partial full-tx headroom with no stable gate.
   both tunes, us 57.5% skip at baseQ 54; deltaq acquitted — parity maps, and
   boost hurts 6096 at every strength) → the coefficient-level program; first
   probe = the sharpness-rounding/dead-zone A/B (`av1_build_quantizer` 48→64).
+  **PROSECUTED 2026-07-04 (TUNER2, `docs/RD_GAP_VS_LIBAOM.md` "TUNER2"): four
+  honest negatives.** The strength-head refit fails on train-LOOCV, on label
+  drift (the 2026-07-02 strength labels are STALE — qmdist+lfsharp subsumed
+  2-4 BD of the boost's marginal; 6018's deep headroom is now 0.40, not 1.3),
+  and on val transfer (frozen rule regresses val). The deeper-curve ramp
+  never fires on the deep-AQ class (its content is NOT low-8×8-variance).
+  The 6096 dead-zone/rounding probe is rejected at both settings (QROUND=128:
+  med +2.67, 20/23 vetoes; the constant does not transplant without aom's
+  whole valuation stack; zenrav1e#30 item-1 rounding surface closed). Boost
+  default 1.0 STANDS (18/23 train wins on current binary). Remaining owners:
+  the UNPORTED iq machinery — per-16×16 ssim-rdmult curve, CDEF_ADAPTIVE
+  strength schedule — plus the release-gated FrameHints/diffmap closed loop;
+  and a named corpus gap (document-charts absent from train26) blocks the
+  one live derivative (the anti-boost OFF-gate).
 - **TX_64X16/16X64 validation** (zenrav1e#28) — unlocks the sliver cap.
 - 128×128 SB support (currently hardcoded off) — large-image fast tiers.
 - iq-class AQ/deltaq machinery (the 1236/9100 residual class, now + 6018) —

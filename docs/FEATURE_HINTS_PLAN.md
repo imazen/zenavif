@@ -223,6 +223,22 @@ deployable** (LOOCV ≈ global-1.0 at n=24; fam-9226's residual is palette/QM-sh
 not boost-shaped; needs val + dense-strength labels). MLP heads: not warranted on
 any of the three yet — in every case the LABELS underfit before the rule does.
 
+**STATUS 2026-07-04 (TUNER2) — the boost-strength head is CLOSED as a
+triple-verified honest negative** (RD_GAP_VS_LIBAOM.md "TUNER2"): the named
+val gap was filled (valstr arms, 14 held-out origins × str{0,1,2,3,4.5} × 12q),
+and (a) the refit LOOCV still doesn't clear global-1.0, (b) the 2026-07-02
+strength labels DRIFTED stale (qmdist+lfsharp subsumed 2-4 BD points of the
+boost's marginal; 6018's deep headroom 1.3 → 0.4), (c) the frozen rule
+regresses val (vetoadj +0.44 vs −0.03). The deeper-curve variant
+(`variance_boost_deep` low-var ramp) never fires on the deep-AQ class (their
+8×8 variance is above any sane ceiling) and loses on photos. The one live
+derivative — an anti-boost OFF-gate (val document-charts 8103/5343 pay +5.8/
++7.3 at str1) — is blocked by a TRAIN-CORPUS GAP: train26 has no
+document-chart member (best train rule fires 0/14 on val). **Data need for
+any revival: 3-5 document-chart origins in the next train-corpus revision;
+until then the strength dimension carries no head.** Fit scripts:
+`scripts/hyperparam/refit_boost_strength_p3.py` + `fit_boost_gate.py`.
+
 **STATUS 2026-07-04 — heads 2+3 SHIPPED (release-gated) + the intra axis
 measured: FAST_TIER_PARITY P2 complete.** `src/fast_heads.rs` (auto_tune-wired):
 per-image TX budget {Largest|Size1|Min} (razor-edge withhold `pf>0.8505 &&

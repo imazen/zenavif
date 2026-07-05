@@ -757,6 +757,18 @@ def sources():
                                   threads=1, variance_boost_strength=float(sval),
                                   drift_check=True),
                       encoder_rev=t2_rev, q_kind="cavif_q", speed=2, rows=36))
+    # Full-t26 strength-0 arm (current binary): with the store's
+    # speedladder/zr-s2-tune rows (byte-continuity-proven same-binary
+    # str-1.0) this gives CURRENT-binary per-image str1-vs-str0 labels on
+    # all 24 train origins — the anti-boost-gate fit input (the valstr data
+    # showed boost is disastrous on chart-class val content: 8103 +7.3 /
+    # 5343 +5.8 at str1).
+    s.append(dict(path=f"{t2}/t2_t26str0.tsv", kind="rd_tsv",
+                  corpus="train26", sweep_source="tuner2-2026-07-04",
+                  arm_id="tuner2/t26str0_s2",
+                  knob_json=J(speed=2, tune="ssimulacra2", palette="auto",
+                              threads=1, variance_boost_strength=0.0),
+                  encoder_rev=t2_rev, q_kind="cavif_q", speed=2, rows=288))
     return s
 
 

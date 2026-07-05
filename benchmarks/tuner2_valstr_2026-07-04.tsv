@@ -1,0 +1,17 @@
+# TUNER2 valstr: per-image strength BD vs strength-0 (val origins, s2+tune, 12q)
+# same-binary arms (ravif--tuner2 devpatch chain); veto thresholds ba3n>+1.0 bamax>+1.5
+image	oid	s1.0_bd_ssim2	s1.0_bd_ba3n	s1.0_bd_bamax	s2.0_bd_ssim2	s2.0_bd_ba3n	s2.0_bd_bamax	s3.0_bd_ssim2	s3.0_bd_ba3n	s3.0_bd_bamax	s4.5_bd_ssim2	s4.5_bd_ba3n	s4.5_bd_bamax
+1055_general_bread-and-coffee-table_blue-lagoon-grindavik_s23u_iso50-f2p2_20240429-174632_4000x3000.sdr.full.s1024.png	1055	-1.0321	-0.8058	6.0159	-2.7106	0.4059	6.4998	-2.5260	2.4207	14.4211	-1.8751	3.5093	11.7290
+2021_people_by-pete-walls-rac2iyyyy4a-unsplash_2000x3000.sdr.full.s1024.png	2021	-1.6712	-3.1552	-10.0381	-2.8294	-4.5141	-4.7351	-3.1437	-4.9185	-6.5766	-2.7703	-4.1093	-1.4216
+5343_noaa_nhc-al182024-rafael_p19_2550x3300.sdr.full.s1024.png	5343	5.7688	5.5266	7.2650	8.4368	8.0368	11.9198	10.3291	8.4773	7.7699	11.9702	11.8609	13.7274
+6091_scans-patents_martha-jones-us77494-1bit_p003_2320x3408.sdr.full.s1024.png	6091	0.5584	0.4690	1.7619	0.9438	0.2826	2.4724	0.8110	0.6089	3.5553	1.2444	0.8319	2.8366
+6621_scans-illustrations_redoute-rose-pink-cluster_plate0243_2912x4368.sdr.full.s1024.png	6621	0.9196	-0.5791	4.1458	0.5587	-0.6350	3.0634	0.9850	0.7064	12.2929	0.7355	0.8395	10.6320
+7053_plots_line-00252-s1b3f1017_1024x1024.sdr.full.native.png	7053	-15.1639		-14.4354	-15.1639		-14.4354	-15.1639		-14.4354	-15.1639		-14.4354
+7071_plots_line-voronoi-00057-s0433bb30_1024x1024.sdr.full.native.png	7071	-1.4204	-1.4251	-0.1987	-0.4370	-0.7097	0.1177	-0.2811	-0.8915	-2.5305	-0.1592	-0.3646	-0.9585
+8015_mobile-screenshots_zenbench-microbenchmarking_screenshot-20260526-071215-brave_1968x2184.sdr.full.s1024.png	8015	1.6273	0.8193	2.8509	0.9033	2.3591	0.5502	2.0343	3.7732	2.4328	3.1506	5.8918	2.4667
+8103_web-screenshots_bls-employment-situation_dpr1_page1_1440x900.sdr.full.s1024.png	8103	7.2932	5.5938	7.0980	12.5393	8.2815	12.7622	13.3451	8.5843	12.2578	15.8675	10.0193	13.9101
+8363_web-screenshots_noaa-ocean_dpr1_page1_768x1024.sdr.full.native.png	8363	-1.6001	-0.6104	0.9042	-2.3739	-1.2660	1.9866	-2.1986	-0.3056	6.6766	-1.2079	0.8602	15.1721
+9021_gen_clipart_fairy-lights-string_1024x1024.sdr.full.native.png	9021	2.2828	-1.4155	1.3120	4.6205	2.9693	5.6644	7.8624	6.6491	8.3951	12.3590	6.6452	9.1268
+9165_gen_illustrations_manga-heroine-catching-key_1024x1536.sdr.full.s1024.png	9165	1.0508	1.9349	0.6878	0.5768	1.6416	-0.2664	0.4295	1.7523	1.6882	0.6359	2.5625	2.9267
+9631_gen_products-footwear_buttercup-jelly-sandal_p0393_1024x1536.sdr.full.s1024.png	9631	0.6049	-1.0179	1.3331	1.6297	-0.3875	4.2868	1.7339	-0.5238	1.8806	2.7743	-0.8206	2.2081
+9905_gen_products-toys_wooden-train-set-box_p0666_1536x1024.sdr.full.s1024.png	9905	-0.5962	-1.3119	-4.4336	-0.8792	-0.9117	-1.0621	0.1179	0.1971	1.2738	1.7844	1.4634	5.6732

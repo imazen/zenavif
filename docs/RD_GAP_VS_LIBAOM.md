@@ -1369,6 +1369,114 @@ streams at `/tmp`-scratch (reproducible: `scripts/rd_gap/inspect_diff.sh`
 methodology, aom build_slow cq16 {iq,def} vs rav1e_p3bc q70 tune-ss2). The plan's
 P3 bullet and zenrav1e#30 carry the handoff.
 
+## TUNER2 — the two P3 handoffs prosecuted 2026-07-04: FOUR honest negatives, one drift discovery, one corpus gap named
+
+**Program**: the "Near-lossless rescans residual" handoffs above — (1) the iq-AQ
+class (per-image boost-strength head refit + the deeper-boost-curve arm), (2) the
+6096 coefficient-level dead-zone/rounding probe. Instruments: three new zenrav1e
+knobs (`zenrav1e@6435e6f9`, all default-`None` byte-identical — local 36/36 md5
+vs master incl. `Some(1.0)`==`None`, box byte-continuity 96/96 vs the store's
+speedladder/zr-s2-tune rows): `variance_boost_strength` (override of the fitted
+1.0; 0.0 = boost-off with historical str0 semantics), `variance_boost_deep`
+(`(deep_strength, ceil_log2)` low-variance ramp — the aom {36,64}-style spread
+WITHOUT mid-var re-boost), `quant_rounding_bias` (flat k/256 rounding for
+DC/AC/EOB; 128 = aom `sharpness!=0` `av1_build_quantizer` dead-zone-removal
+parity). Chain `scripts/rd_gap/chain_tuner2.sh` on zenavif-sweep-1 (snapshot
+restore), ravif--tuner2 devpatch (cavif 80ff3fe2f8ce1810); every armed cell
+PALCONF (aomdec + rav1d-safe byte-agree): **0 CELLFAIL / 0 CONFFAIL across all
+1,872 cells (1,488 knob-armed)** — the rounding arms exercise the quantizer at every q and
+are conformance-clean. TSVs: `benchmarks/tuner2_valstr_2026-07-04.tsv`,
+`hyperparam_boost_refit_2026-07-04.tsv`, `hyperparam_boost_gate_2026-07-04.tsv`;
+raw: `/mnt/v/output/zenavif/tuner2-20260704/`; store sources
+`valstr-2026-07-04` + `tuner2-2026-07-04` (labels.parquet now 64,338 rows).
+
+**Discovery that reframes both handoffs — the strength response DRIFTED under the
+composed tune.** The 2026-07-02 deltaq strength labels predate the qmdist-ratio +
+lfsharp landings. Re-measured under the current binary (drift phase, str{0,1,4.5}
+× 12q): str1-vs-str0 on 2000 −5.59→−1.45, 9118 −3.86→−0.18, 6018 −2.84→−1.50;
+str4.5-vs-str0 on 6018 −4.13→−1.90 (2000 flipped POSITIVE +2.20). **The boost's
+marginal value collapsed 2-4 BD points — qmdist+lfsharp partially subsume the
+allocation the boost was buying — and 6018's "1.3 points above the shipped
+constant" headroom (the diagnosis's cheap-lever premise) is now 0.40.** Every
+head fit on the 2026-07-02 labels (including the parked first cut) was fitting a
+response surface that no longer exists.
+
+**(1a) Boost-strength head refit — HONEST NEGATIVE, now with val labels.** Refit
+(`scripts/hyperparam/refit_boost_strength_p3.py`): classes {0,1,2,3,4.5},
+fire-conservative per-cell butteraugli veto (deviations may not create new
+damage vs str1), features = first-cut six + AqMap family + WEDGE_MAP correlates
++ def→iq-mined separators. Train (stale-label) LOOCV vetoadj mean −1.44..−1.66
+vs global-1.0 −1.657 — no family clears the −0.5 bar (same as the first cut,
+now robust to the feature set). The named data gap is FILLED: `valstr` arms
+(str{0,1,2,3,4.5} × 14 held-out origins × 12q, current binary). Val says the
+per-image-strength premise itself is dead: **every strength ≥1 is net-harmful
+on the val median (+0.57..+0.99), the deep-AQ transfer probes are FLAT (6091
+1-bit rescan: +0.56..+1.24 at ALL strengths; 9165 illustration +0.43..+1.05;
+both butteraugli-vetoed per-cell at every strength)** — the val-side oracle keeps str0 on 8 of 14 origins,
+including every deep-AQ probe. The frozen train-fit rule evaluated on val
+REGRESSES it (vetoadj mean +0.44 vs global-1.0's −0.03; 9 vetoes vs 7):
+train-LOOCV, label drift, and val transfer all say no head. The def→iq in-band mining (ssim2≥60 ∧
+bpp≥0.05 — aom's cq56-63 blur-tail cells score pathological ssim2 45-60 at
+0.02-0.07 bpp and sign-flip whole-curve BD on exactly 1236/9100; the in-band
+label vindicates the s4-tier attribution) correlates with patch_fraction +0.87 /
+entropy −0.77 / flat_color +0.76 / aq_map_p50 −0.70: iq's edge lives on
+patchy-flat low-noise content, but OUR strength lever no longer reaches it.
+
+**(1b) Deeper-boost-curve arm (the {36,64}-style ramp) — HONEST NEGATIVE with the
+mechanism exposed.** `variance_boost_deep` {3.0:4, 4.5:4} on train26 (6q):
+**the ramp NEVER FIRES on the deep-AQ class — 9100/9118 byte-identical (their
+"smooth" gradients sit above 8×8 var 16), 6018 bytes ±0.5% (1-bit dot grain is
+HIGH-variance at 8×8)**. Where it does fire (true-flat photo/synthetic regions):
+photos median +0.6..+0.8 worse (9074 +3.75, 9228 +2.96 worst). The premise "the
+iq-AQ class is low-variance content wanting deeper flat-SB boost" is wrong at
+the variance level: aom-iq's deeper 6018 spread was STRENGTH-driven mid-var
+boosting — exactly the surface the composed tune has since subsumed (see drift).
+
+**(1c) The one live lead the val data exposed — anti-boost OFF-gate — HONEST
+NEGATIVE with the corpus gap named** (`scripts/hyperparam/fit_boost_gate.py`,
+current-binary labels both sides: store zr-s2-tune (str1) vs fresh
+tuner2/t26str0). Boost still pays on train26: 18/23 better at str1 (7028
+−5.93, 8414 −3.75; worst loss just +1.91) — **the shipped global 1.0 stands** —
+but the val corpus contains a content class with NO train26 analog:
+document-charts (8103 bls-chart +7.29, 5343 hurricane-chart +5.77 ssim2 BD at
+str1 — boost-off wins huge). Best train OFF-rule: LOOCV +0.56 (worse than
+no-gate), frozen rule fires 0/14 on val (misses the charts entirely). **This is
+a train-corpus coverage gap, not a fittable structure: train26 has no
+document-chart member. Data need: 3-5 document-chart origins in the next
+train-corpus revision; refit the OFF-gate then.**
+
+**(2) 6096 dead-zone/rounding probe — HONEST NEGATIVE at both settings, the
+named first probe closed.** `quant_rounding_bias` {118, 128} on train26 (6q,
+BD vs the byte-continuity-proven store base): QROUND=118 med +0.94 (3/17
+better, ba3n med +1.60); QROUND=128 (full aom-parity dead-zone removal) med
+**+2.67, 2/23 better, 20/23 per-image butteraugli vetoes, firing class 0/7**.
+On 6096 itself the matched-q trade is real but only at LOW q (q30: +4.0 ssim2
+for +12% bytes; q85-95: +0.03..+0.27 for +1.6-1.7%) — BD integrates it to a
+loss, and butteraugli (both norms) says the added coefficients are noise
+(ba3n med +4.0 at 128). Config note (local inspect A/B, cavif composed config
+q70/q85): block-skip stays 3.0% under the knob — the 57.5%-skip cell in the
+diagnosis is specific to the isolated rav1e-CLI config; in the composed
+pipeline the mechanism acts as WITHIN-block density (EOB extension), and
+zenrav1e's RDO already prices that trade better than the flat constant.
+**Mechanistic close: aom's near-lossless no-skip works as a STACK (FP-quant
+0.5-rounding + sharpness-neutered trellis + QM-PSNR tx-domain distortion +
+iq rdmult curves); the rounding constant alone does not transplant into
+zenrav1e's pixel-domain-psy + Valin-offset valuation.** The zenrav1e#30 item-1
+"un-A/B'd rounding surface" is now A/B'd: rejected.
+
+**What remains of the iq-AQ / 6096 residuals after this program** (verified in
+source, unmeasured): (a) aom's per-16×16 ssim rdmult curve
+(`av1_set_mb_ssim_rdmult_scaling`, encoder_utils.c:1483 — NOT ported; zenrav1e's
+`ssim_boost` is the same idea, gentler and distortion-side), (b) CDEF_ADAPTIVE
+strength halving/zeroing (enablement measured null in the s4-tier filter probe;
+the ADAPTATION schedule remains unmeasured), (c) the closed-loop per-SB channel
+(`FrameHints::sb_q_scale` + the diffmap two-pass, SHIPPED release-gated —
+DIFFMAP_TWO_PASS.md) which sidesteps global-strength vetoes entirely and is the
+right vehicle for any future deep-AQ allocation, (d) the 6096-class residual is
+coefficient-level but stack-shaped: if it is ever re-attacked, port the
+valuation STACK (tx-domain QM-PSNR distortion under the tune + rounding + trellis
+posture together), not constants one at a time.
+
 ## Size-decay isolation A/B — MEASURED 2026-07-03: four of five tune mechanisms ACQUITTED for the small-size decay; the QM-dist ratio convicted and its size ramp SHIPPED
 
 **Program**: WEDGE_MAP wedge #3 / HYPERPARAM_FIRST_CUT rule 2's specified follow-up. The wedge

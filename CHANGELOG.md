@@ -11,6 +11,29 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 ## [Unreleased]
 
 ### Added
+- TUNER2 (the two P3 "Near-lossless rescans" handoffs prosecuted; record
+  `docs/RD_GAP_VS_LIBAOM.md` "TUNER2"): FOUR measured honest negatives — the
+  per-image boost-strength head (train-LOOCV + label-drift + val-transfer all
+  negative; the 14-origin valstr label set fills the head's named data gap),
+  the deeper-boost-curve ramp (never fires on the deep-AQ class: 1-bit scans /
+  gradient illustrations are not low-8×8-variance), the anti-boost OFF-gate
+  (blocked by a named corpus gap: document-charts absent from train26 while
+  val charts pay +5.8/+7.3 at str1), and the 6096 dead-zone/rounding probe
+  (QROUND=128 aom-parity: med +2.67, 20/23 butteraugli vetoes — the constant
+  does not transplant without aom's whole valuation stack; zenrav1e#30 item-1
+  closed). PLUS the drift discovery: the 2026-07-02 strength labels are STALE
+  under the composed tune (qmdist+lfsharp subsumed 2-4 BD points of the
+  boost's marginal). Boost default 1.0 stands (18/23 current-binary train
+  wins). Infra: `scripts/rd_gap/chain_tuner2.sh` + `fetch_tuner2.sh`,
+  `scripts/hyperparam/{refit_boost_strength_p3,fit_boost_gate,analyze_tuner2}.py`,
+  label store sources `valstr-2026-07-04` + `tuner2-2026-07-04` (64,338 rows);
+  benchmarks `tuner2_valstr_2026-07-04.tsv` +
+  `hyperparam_boost_{refit,gate}_2026-07-04.tsv`. Conformance: 1,872 cells
+  (1,488 knob-armed incl. the quantizer-rounding arms) all PALCONF-clean,
+  0 CELLFAIL/CONFFAIL; byte-continuity 96/96 vs the speedladder store rows.
+  zenrav1e-side knobs (`variance_boost_strength` / `variance_boost_deep` /
+  `quant_rounding_bias`, zenrav1e@6435e6f9) stay default-None byte-identical.
+
 - S4TIER (FAST_TIER_PARITY_PLAN, the last open fast-tier column): the
   s4-equivalent-tier operating point + the program's final scoreboard. The
   fast_heads tx D bound refit per-tier (`dcty<23.69` at requested speed 4..=5,
