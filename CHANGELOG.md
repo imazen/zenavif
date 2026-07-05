@@ -11,6 +11,23 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 ## [Unreleased]
 
 ### Added
+- SSIMRD (the TUNER2 "what remains" item (a) prosecuted; record
+  `docs/RD_GAP_VS_LIBAOM.md` "SSIMRD"): aom's per-16×16 ssim-rdmult λ curve
+  (`av1_set_mb_ssim_rdmult_scaling`, the LAST unported iq/ss2 rdmult
+  mechanism) ported to zenrav1e (`zenrav1e@57de2815`,
+  `EncoderConfig::ssim_rdmult_strength`, default-off byte-identical) and
+  measured as a monotone HONEST NEGATIVE under the composed tune (strength
+  ladder 0.25→2.0: mass-weighted ssim2 BD +2.11→+6.85, butteraugli agreeing
+  from the aom-verbatim point; no photos-merit; the single train winner 6018
+  refuted by its val class-sibling 6091 at +4.77/+2.85/+6.50). The composed
+  tune's own distortion-side masking + variance-boost subsume the curve.
+  1236/9094-class movement vs cpu2iq-ai: flat-to-worse — the iq-AQ residual
+  owner is NOT this curve; the only iq machinery left unported is the
+  CDEF_ADAPTIVE adaptation schedule. First program run under the 93b83401
+  evaluation policy (per-family first, cluster-mass-weighted, pre-registered
+  amended rule). Infra: `scripts/rd_gap/chain_ssimrd.sh` +
+  `scripts/hyperparam/analyze_ssimrd.py`;
+  `benchmarks/rd_gap_ssimrd{,_val}_2026-07-05.tsv` + raw-sweeps pointer.
 - TUNER2 (the two P3 "Near-lossless rescans" handoffs prosecuted; record
   `docs/RD_GAP_VS_LIBAOM.md` "TUNER2"): FOUR measured honest negatives — the
   per-image boost-strength head (train-LOOCV + label-drift + val-transfer all

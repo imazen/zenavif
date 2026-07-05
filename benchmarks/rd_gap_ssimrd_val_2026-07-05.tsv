@@ -1,0 +1,16 @@
+# SSIMRD val transfer probe: strength 0.5 (the 6018 train peak) vs same-binary env-off base -- 14 held-out origins, s2+tune-ss2+palette-auto, 6q arm vs 12q base
+# KEY LINE: 6091 (val 1-bit rescan, 6018's class sibling) +4.77 ssim2 / +2.85 ba3n / +6.50 bamax -- the train-side 6018 tri-metric win does NOT transfer; single-image artifact, not a class property
+image	oid	family	bd_ssim2	bd_ba3n	bd_bamax
+1055_general_bread-and-coffee-table_blue-lagoon-grindavik_s23u_iso50-f2p2_20240429-174632_4000x3000.sdr.full.s1024.png	1055	photos	+1.452	+0.972	+0.359
+2021_people_by-pete-walls-rac2iyyyy4a-unsplash_2000x3000.sdr.full.s1024.png	2021	photos	+3.155	+0.229	+7.965
+5343_noaa_nhc-al182024-rafael_p19_2550x3300.sdr.full.s1024.png	5343	charts	+4.885	+0.325	+2.157
+6091_scans-patents_martha-jones-us77494-1bit_p003_2320x3408.sdr.full.s1024.png	6091	scans	+4.775	+2.854	+6.499
+6621_scans-illustrations_redoute-rose-pink-cluster_plate0243_2912x4368.sdr.full.s1024.png	6621	scans	+3.870	+1.161	+0.715
+7071_plots_line-voronoi-00057-s0433bb30_1024x1024.sdr.full.native.png	7071	plots	+2.069	+0.462	+4.102
+8015_mobile-screenshots_zenbench-microbenchmarking_screenshot-20260526-071215-brave_1968x2184.sdr.full.s1024.png	8015	screenshots	+5.084	+3.082	-1.824
+8103_web-screenshots_bls-employment-situation_dpr1_page1_1440x900.sdr.full.s1024.png	8103	screenshots	+6.051	+1.467	+4.807
+8363_web-screenshots_noaa-ocean_dpr1_page1_768x1024.sdr.full.native.png	8363	screenshots	+3.180	+0.920	+2.683
+9021_gen_clipart_fairy-lights-string_1024x1024.sdr.full.native.png	9021	products-gen	+5.801	+3.895	+5.139
+9165_gen_illustrations_manga-heroine-catching-key_1024x1536.sdr.full.s1024.png	9165	illustrations	+1.615	-1.125	+0.073
+9631_gen_products-footwear_buttercup-jelly-sandal_p0393_1024x1536.sdr.full.s1024.png	9631	products-gen	+3.992	+0.973	+1.267
+9905_gen_products-toys_wooden-train-set-box_p0666_1536x1024.sdr.full.s1024.png	9905	products-gen	+2.232	+1.159	+5.335

@@ -184,6 +184,28 @@ applied per coding block `partition_search.c:626-631` → `encodeframe_utils.c:3
 (range ~[0.207, 4.832]); block rdmult ×= geomean(factors over block). RDCOST =
 `R*rdmult>>9 + D<<4` (`rd.h:32-34`) so high-variance blocks pay more per bit (masking).
 
+**PORTED + MEASURED 2026-07-05 — HONEST NEGATIVE under the composed tune; knob landed
+default-off (`zenrav1e@57de2815`, `EncoderConfig::ssim_rdmult_strength`, exponent blend on
+the normalized factor, 1.0 = this curve verbatim; byte-identity + liveness gated 36/36
+each, store byte-continuity 288/288).** The λ-side port reaches every block-RDO cost site
+(mode/tx/partition/split-trial/NONE-breakout/bottomup/trellis-when-on). Strength ladder
+{0.25, 0.5, 1.0, 2.0} on train26 (6q, per-family + cluster-mass-weighted per the 93b83401
+policy): mass-weighted median ssim2 BD **+2.11 / +2.87 / +4.34 / +6.85** — monotone worse,
+0/6 photos better at every strength (no photos-merit), butteraugli agreeing from 1.0 up
+(ba3n +3.42 / bamax +4.03 at the aom-verbatim point). The geomean normalization self-nulls
+on uniform frames (flat plots byte-identical). Composition overshoot is the mechanism: the
+tune already masks distortion-side (`ssim_boost` activity masking) and boosts flats via
+per-SB delta-q; adding aom's rate-side masking triple-counts. The one train winner — 6018,
+1-bit scan, tri-metric −2.59/−1.68/−3.28 at 0.5, cpu2iq gap 16.0→13.1 — was REFUTED on
+val: its direct class sibling 6091 regresses +4.77/+2.85/+6.50 at the same strength
+(TUNER2-1a pattern: two same-class 1-bit scans responding oppositely = not predictable,
+not even a per-image-head candidate). 1236/9094-family: flat-to-harmed, gap vs cpu2iq
+unchanged/wider — this curve does NOT own the iq-AQ residual. Record:
+`benchmarks/rd_gap_ssimrd_2026-07-05.tsv` + `_val_` + pointer;
+docs/RD_GAP_VS_LIBAOM.md "SSIMRD". Note for note (a1)-vs-(a2) below: the "same idea,
+gentler" claim about our activity masking is VINDICATED — the composed tune's existing
+masking fully subsumes (and at any added strength, overshoots) the aom curve.
+
 ### (a3) Frame rdmult weight
 
 (`rd.c:406-434`): all-intra `weight = clamp((255-qindex)*3/4, 0, 72) + 128;

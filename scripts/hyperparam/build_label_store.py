@@ -769,6 +769,44 @@ def sources():
                   knob_json=J(speed=2, tune="ssimulacra2", palette="auto",
                               threads=1, variance_boost_strength=0.0),
                   encoder_rev=t2_rev, q_kind="cavif_q", speed=2, rows=288))
+
+    # --- SSIMRD per-16x16 ssim-rdmult curve arms (2026-07-05;
+    # chain_ssimrd.sh) --- zenrav1e@57de2815 (ssim_rdmult_strength knob, the
+    # aom av1_set_mb_ssim_rdmult_scaling port) via the ravif--ssimrd devpatch
+    # (box cavif sha256/16 909857ad43f9c227). Byte gates: knob-off +
+    # Some(0.0) 36/36 md5-identical to master cavif; env-off box rows
+    # byte-equal to the store speedladder/zr-s2-tune train26 rows 288/288
+    # (so those rows remain same-binary base curves; the fresh sr_base rows
+    # are registered anyway as the 12q current-binary bases both corpora).
+    # Verdict: monotone honest negative (docs/RD_GAP_VS_LIBAOM.md "SSIMRD");
+    # 6018's train-side tri-metric win refuted by val sibling 6091.
+    sr = "/mnt/v/output/zenavif/ssimrd-20260705"
+    sr_rev = "zenrav1e@57de2815 via ravif--ssimrd devpatch (909857ad43f9c227)"
+    s.append(dict(path=f"{sr}/sr_base_t26.tsv", kind="rd_tsv",
+                  corpus="train26", sweep_source="ssimrd-2026-07-05",
+                  arm_id="ssimrd/base_s2",
+                  knob_json=J(speed=2, tune="ssimulacra2", palette="auto",
+                              threads=1),
+                  encoder_rev=sr_rev, q_kind="cavif_q", speed=2, rows=288))
+    s.append(dict(path=f"{sr}/sr_base_val.tsv", kind="rd_tsv",
+                  corpus="mech26", sweep_source="ssimrd-2026-07-05",
+                  arm_id="ssimrd/base-val_s2",
+                  knob_json=J(speed=2, tune="ssimulacra2", palette="auto",
+                              threads=1),
+                  encoder_rev=sr_rev, q_kind="cavif_q", speed=2, rows=168))
+    for sval in ("0.25", "0.5", "1.0", "2.0"):
+        s.append(dict(path=f"{sr}/sr_str_{sval}.tsv", kind="rd_tsv",
+                      corpus="train26", sweep_source="ssimrd-2026-07-05",
+                      arm_id=f"ssimrd/str{sval}_s2",
+                      knob_json=J(speed=2, tune="ssimulacra2", palette="auto",
+                                  threads=1, ssim_rdmult_strength=float(sval)),
+                      encoder_rev=sr_rev, q_kind="cavif_q", speed=2, rows=144))
+    s.append(dict(path=f"{sr}/sr_val_0.5.tsv", kind="rd_tsv",
+                  corpus="mech26", sweep_source="ssimrd-2026-07-05",
+                  arm_id="ssimrd/val-str0.5_s2",
+                  knob_json=J(speed=2, tune="ssimulacra2", palette="auto",
+                              threads=1, ssim_rdmult_strength=0.5),
+                  encoder_rev=sr_rev, q_kind="cavif_q", speed=2, rows=84))
     return s
 
 

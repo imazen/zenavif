@@ -1478,7 +1478,8 @@ zenrav1e's pixel-domain-psy + Valin-offset valuation.** The zenrav1e#30 item-1
 
 **What remains of the iq-AQ / 6096 residuals after this program** (verified in
 source, unmeasured): (a) aom's per-16×16 ssim rdmult curve
-(`av1_set_mb_ssim_rdmult_scaling`, encoder_utils.c:1483 — NOT ported; zenrav1e's
+(`av1_set_mb_ssim_rdmult_scaling`, encoder_utils.c:1483 — **ported + measured
+2026-07-05, honest negative: see "SSIMRD" below**; zenrav1e's
 `ssim_boost` is the same idea, gentler and distortion-side), (b) CDEF_ADAPTIVE
 strength halving/zeroing (enablement measured null in the s4-tier filter probe;
 the ADAPTATION schedule remains unmeasured), (c) the closed-loop per-SB channel
@@ -1488,6 +1489,82 @@ right vehicle for any future deep-AQ allocation, (d) the 6096-class residual is
 coefficient-level but stack-shaped: if it is ever re-attacked, port the
 valuation STACK (tx-domain QM-PSNR distortion under the tune + rounding + trellis
 posture together), not constants one at a time.
+
+## SSIMRD — the per-16×16 ssim-rdmult curve ported + measured 2026-07-05: HONEST NEGATIVE (monotone, both metrics), the composed tune's own masking subsumes it; the last iq rdmult mechanism is now measured — CDEF_ADAPTIVE adaptation is the only iq machinery left unported
+
+**Program**: the TUNER2 "what remains" item (a) — the LAST verified-unported piece of
+aom's iq/ss2 rdmult machinery (`av1_set_mb_ssim_rdmult_scaling` encoder_utils.c:1483-1551
+→ per-block `av1_set_ssim_rdmult` encodeframe_utils.c:35-70 at the pinned 632172a4;
+TUNE_SSIMULACRA2_PLAN.md §(a2)) and the named owner candidate for the 1236/9094-class
+iq-AQ residual. Port (`zenrav1e@57de2815`, landed default-off): per-16×16 mean per-pixel
+8×8 source variance → `67.035434·(1−exp(−0.0021489·var)) + 17.492222` → frame-geomean
+normalization (≈[0.207, 4.832]) → `factor^strength` (exponent blend keeps geomean exactly
+1 — pure spatial reallocation, structurally incapable of reproducing the +4.41% frame-λ
+failure) → every block-RDO cost site scales its RATE term by the covered-cell geomean
+(`compute_rd_cost_scaled`; mode/tx-type/partition-symbol/split-trial/NONE-breakout/
+bottomup-edge/opt-in-trellis; CDEF/LRF + me_lambda unscaled, aom-parity/v1 scope). Knob
+`EncoderConfig::ssim_rdmult_strength` (None = byte-identical: local 36/36 md5 off +
+Some(0.0) vs master-built cavif, 36/36 armed byte-live; box env-off rows byte-equal to
+the label store's speedladder/zr-s2-tune train26 rows 288/288 — transitively proving
+master 8b312257 ≡ the tuner2 binary RD-wise). Chain `scripts/rd_gap/chain_ssimrd.sh`,
+box zenavif-sweep-1 (snapshot restore), cavif sha256/16 `909857ad43f9c227`; decision
+rule pre-registered and amended pre-arm-data to the 93b83401 evaluation policy
+(per-family first, cluster-mass-weighted aggregates, photos-merit keepable). PALCONF
+on every cell: **0 CONFFAIL / 0 CELLFAIL across all 1,116 zr cells**.
+
+**Verdict (strength ladder {0.25, 0.5, 1.0, 2.0}, t26 6q vs same-binary 12q base,
+BD medians):**
+
+| strength | ss2 mass-wmed | ba3n wmed | bamax wmed | photos med | better |
+|---|--:|--:|--:|--:|--:|
+| 0.25 | +2.11 | +0.48 | +1.17 | +1.67 | 1/23 |
+| 0.5 | +2.87 | +0.66 | +0.79 | +1.91 | 1/23 |
+| **1.0 (aom verbatim)** | **+4.34** | **+3.42** | **+4.03** | +2.62 | 1/23 |
+| 2.0 | +6.85 | +7.57 | +14.74 | +5.01 | 1/23 (vetoed) |
+
+Monotone worse on the judge at every strength; no family wins at any strength (photos
+0/6 everywhere — no photos-merit path); butteraugli agrees with the rejection from 1.0
+up. At low strength butteraugli mildly PREFERS the reallocation on scans/illustrations
+(ba3n −0.8..−1.1) while ssim2 rejects it — but the divergence inverts by the
+aom-verbatim point, so this is not a judge conflict at any shippable setting.
+**Mechanism of the negative: composition overshoot.** The composed tune already carries
+the same masking idea twice — distortion-side (`ssim_boost` activity masking inside
+cdef_dist) and allocation-side (variance-boost per-SB delta-q + its `sb_dist_scales`
+λ-follow) — and the aom curve's rate-side masking triple-counts it. The geomean
+normalization behaves exactly as designed (uniform frames self-null: the two flat plots
+are byte-identical under every arm), and per-cell deltas are tiny (0.25: bytes −0.27%,
+ssim2 −0.145 at matched q) — the loss is a genuine misallocation, not an implementation
+artifact. This also VINDICATES the plan's original "same idea, gentler" note and
+completes the pattern: every aom rdmult-side constant (frame λ weight +4.41%, trellis
+λ, VAQ, literal QM-dist weighting, now the per-16×16 curve) fails to transplant onto
+the Daala-lineage λ + pixel-domain-psy valuation.
+
+**Target classes (the reason this port was prioritized): the iq-AQ residual is NOT
+this curve.** vs aom-cpu2iq-ai (fresh cache-hot refs, same run): 1236 +17.1 base →
++16.8..+17.7 at every strength (flat); 9100 +2.5 → +4.0..+5.3, 9118 +4.3 → +6.0..+10.3
+(WORSE — the curve actively fights the illustrations class); 6096 monotone-harmed
+(consistent with its coefficient-level diagnosis). The one train winner — **6018**
+(1-bit scan): inverted-U peaking at 0.5 with a tri-metric win (ssim2 −2.59 / ba3n −1.68
+/ bamax −3.28; cpu2iq gap 16.0 → 13.1) — **REFUTED on val**: 6091, its direct class
+sibling (same 1-bit patent-rescan class), regresses +4.77 / +2.85 / +6.50 at the same
+strength (worst-quartile val image; val mass-wmed +3.87, 0/13 better). Two same-class
+images responding oppositely means the lever is unpredictable even for the per-image
+FEATURE_HINTS head channel — recorded as dead, the TUNER2-1a val-kill pattern repeating.
+
+**Consequences.** (1) The iq-AQ residual owner for 1236/9094 remains UNFOUND after
+both TUNER2 (boost depth/strength: honest negatives) and this program (rdmult curve:
+honest negative) — the remaining candidates are outside the AQ/λ constants entirely
+(aom's cq-mode rate loop and its RDO-vs-quantizer interaction are the next suspects,
+or the residual is simply aom's better coefficient-level RD in the low-mid band per
+the 6096 stack note). (2) **The honest final map of unported iq machinery: the
+CDEF_ADAPTIVE adaptation schedule (strength halving cq≤220 / SB-zeroing qindex≤140)
+is now the ONLY remaining item** — everything else in the tune study is measured
+(shipped or rejected). (3) The knob stays landed default-off as A/B infrastructure
+(byte-identical; `chain_ssimrd.sh` re-runs the ladder in one command). No full/s6/
+timing phases were run: the pre-registered rule terminates at "no arm advances", and
+a default-off knob ships zero effect at every speed. Record:
+`benchmarks/rd_gap_ssimrd_2026-07-05.tsv` (+ `_val_`, + raw-sweeps pointer);
+raw `/mnt/v/output/zenavif/ssimrd-20260705/` + the box snapshot.
 
 ## Size-decay isolation A/B — MEASURED 2026-07-03: four of five tune mechanisms ACQUITTED for the small-size decay; the QM-dist ratio convicted and its size ramp SHIPPED
 

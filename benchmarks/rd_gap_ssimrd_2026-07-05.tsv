@@ -1,0 +1,28 @@
+# SSIMRD coarse arms: per-image strength BD vs same-binary env-off base (train26, s2+tune-ss2+palette-auto, 6q arms vs 12q base)
+# binary chain: ravif--ssimrd devpatch (box cavif sha256/16 909857ad43f9c227) -> zenrav1e@57de2815 (ssim_rdmult_strength knob)
+# gates: knob-off/Some(0.0) 36/36 byte-identical to master cavif; armed 36/36 byte-live; env-off box rows == label-store speedladder/zr-s2-tune bytes 288/288; PALCONF 0 CONFFAIL/0 CELLFAIL all cells
+# veto thresholds ba3n>+1.0 (fire-conservative); train26 is DIVERSE not representative -- verdicts per-family + cluster-mass-weighted (93b83401 policy)
+image	oid	family	cluster_w	s0.25_bd_ssim2	s0.25_bd_ba3n	s0.25_bd_bamax	s0.5_bd_ssim2	s0.5_bd_ba3n	s0.5_bd_bamax	s1.0_bd_ssim2	s1.0_bd_ba3n	s1.0_bd_bamax	s2.0_bd_ssim2	s2.0_bd_ba3n	s2.0_bd_bamax
+1236_interiors_ornate-arched-interior_casa-vicens-barcelona_zfold7_iso400-f2p2_20260319-165702_4000x3000.sdr.s1024.png	1236	photos	56	+0.900	-0.620	+0.795	+0.647	-0.436	+0.791	+0.154	-0.056	+6.033	+0.652	+2.006	+7.126
+1438_nature_orange-flowers-closeup_kyoto-botanical-garden-kyoto_s23u_iso200-f4p9_20231107-143950_4000x3000.sdr.s1024.png	1438	photos	43	+2.106	-0.303	+4.298	+3.121	+0.292	+4.373	+4.339	+0.500	+2.703	+6.194	+2.980	+11.622
+1614_food_dessert-plate-upside-down_valladolid-mexico_s23u_iso640-f1p7_20230917-213342_4000x3000.sdr.s1024.png	1614	photos	100	+1.334	+0.475	+3.789	+1.220	+0.291	-2.723	+1.595	+1.390	+2.119	+3.163	+7.096	+11.320
+2000_people_by-alexander-aguero-enppvuxbcce-unsplash_4400x6600.sdr.s1024.png	2000	photos	21	+1.981	+0.197	-1.312	+2.175	+0.329	+3.376	+3.394	+2.265	+15.161	+8.287	+13.844	+22.125
+5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	5004	photos	14	+1.353	-0.746	+3.307	+1.642	-0.504	-0.024	+1.850	+0.141	+3.383	+3.820	+4.961	+18.278
+5048_nps_romo-2018-longs-peak-keyhole-route_gray_p01_2550x4200.sdr.s1024.png	5048	photos	45	+2.165	+0.877	+4.749	+3.603	+1.940	+7.643	+6.430	+6.002	+16.879	+8.083	+7.572	+15.194
+6018_scans-patents_lynn-conway-us5046022-1bit_p019_2320x3408.sdr.s1024.png	6018	scans	12	-2.370	-1.917	-2.220	-2.593	-1.685	-3.281	-1.696	-0.625	-0.203	-1.190	+1.047	+5.195
+6096_scans-patents_martha-jones-us77494-rescan-gray_p002_2479x3230.sdr.s1024.png	6096	scans	32	+1.817	-1.087	-1.585	+2.890	-0.202	-4.230	+5.058	+2.269	+2.609	+7.169	+2.954	+1.023
+6606_scans-illustrations_haeckel-red-algae_plate0065_5015x7275.sdr.s1024.png	6606	scans	2	+2.049	+0.062	+2.961	+2.180	+0.114	+2.997	+1.756	+0.415	+2.658	+4.348	+1.736	+2.142
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024.png	7028	plots	25	+5.660	+4.991	-0.053	+6.235	+5.139	-1.125	+8.140	+7.847	+0.974	+9.148	+11.270	+3.631
+7052_plots_line-00222-s2f495179_1024x1024.sdr.s1024.png	7052	plots	1	+0.332	+1.034	+2.313	+0.332	+1.034	+2.313	+0.332	+1.034	+2.313	+0.332	+1.034	+2.313
+7058_plots_line-tiling-00248-s7c5ddcfb_1024x1024.sdr.s1024.png	7058	plots	14	+1.247	-1.930	-1.497	+1.236	-1.957	+0.782	+1.244	-2.367	-2.139	+1.573	-2.684	-3.373
+8196_web-screenshots_nps-grand-canyon_dpr1_page1_1920x1080.sdr.s1024.png	8196	screenshots	78	+1.267	-0.594	-3.318	+1.523	-0.609	-9.703	+2.217	+2.339	+4.027	+4.538	+3.147	+3.201
+8268_web-screenshots_weather-forecast-nyc_dpr2_page1_2880x1800.sdr.s1024.png	8268	screenshots	115	+1.773	+0.723	-1.276	+3.513	+1.648	-0.334	+4.043	+4.087	+8.469	+6.667	+8.155	+15.611
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	8302	screenshots	50	+3.789	+3.694	+7.162	+5.384	+3.405	+5.787	+9.912	+15.486	+18.058	+15.605	+19.011	+22.094
+8414_web-screenshots_lkml-lists-index_dpr1_page1_1280x800.sdr.s1024.png	8414	screenshots	8	+1.376	-0.423	-4.795	+1.199	-0.085	-0.825	+1.912	+1.875	+4.040	+3.758	+4.214	+7.137
+9074_gen_clipart_teapot-classic_1024x1536.sdr.s1024.png	9074	products-gen	50	+3.435	-1.041	-1.730	+5.380	+0.657	-1.092	+8.248	+5.342	+4.028	+13.625	+10.032	+14.743
+9100_gen_illustrations_bath-candles-evening_1024x1536.sdr.s1024.png	9100	illustrations	38	+1.558	-0.692	-4.701	+1.345	-0.616	-5.558	+2.209	+1.833	+2.166	+3.069	+3.453	+2.496
+9118_gen_illustrations_farmers-market-stall_1536x1024.sdr.s1024.png	9118	illustrations	17	+1.629	-0.971	-1.646	+1.765	-1.165	-3.373	+2.835	+4.690	+11.263	+5.268	+6.387	+12.781
+9228_gen_products-accessories_cateye-sunglasses_p0003_3840x2160.sdr.s1024.png	9228	products-gen	50	+2.149	+0.996	+3.007	+4.058	+2.254	+3.663	+5.474	+3.416	+3.013	+8.238	+9.405	+15.705
+9678_gen_products-grocery_cereal-box-coral_p0439_1024x1536.sdr.s1024.png	9678	products-gen	84	+2.738	+0.018	+1.171	+2.561	+0.353	+1.053	+4.681	+0.115	-2.399	+6.847	+2.636	-0.778
+9868_gen_products-sporting-goods_rain-shell-jacket_feature_p0629_1024x1536.sdr.s1024.png	9868	products-gen	109	+2.439	+0.617	+2.471	+3.314	+1.158	+0.869	+6.070	+4.759	+8.689	+11.936	+17.107	+40.995
+9958_gen_products-whitelabeled-beverages_beverage-smoothie-bottle_p0716_1024x1536.sdr.s1024.png	9958	products-gen	117	+2.744	+1.296	+4.719	+2.866	+1.344	+2.041	+4.343	+8.179	+20.631	+7.125	+8.007	+16.788
