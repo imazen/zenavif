@@ -524,7 +524,14 @@ fn run_ladder(pin: bool) {
                 let t0 = Instant::now();
                 let bytes = encode(img.img.as_ref(), &cfg);
                 let ms = t0.elapsed().as_secs_f64() * 1000.0;
-                let dec_cfg = zenavif::DecoderConfig::new().prefer_8bit(true);
+                // threads(1): registry rav1d-safe (< the 49df1fc0 release)
+                // ships the zenavif#30 tile-worker futex wedge — a decode
+                // under load can hang forever. Decode is not the timed leg
+                // (enc_ms above measures encode only), so single-threaded
+                // costs nothing and makes the gate wedge-immune (same
+                // reason examples/ivf_raw.rs pins threads = 1). Revisit at
+                // the rav1d-safe dep bump.
+                let dec_cfg = zenavif::DecoderConfig::new().prefer_8bit(true).threads(1);
                 let decoded = zenavif::decode_with(&bytes, &dec_cfg, &zenavif::Unstoppable)
                     .expect("gate_kit ladder: decode failed");
                 let dec_rgb = decoded
