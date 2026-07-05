@@ -205,14 +205,36 @@ search-budget-owned); 6000 rescans (+15.8/+7.2) = the near-lossless floor (P3); 
 brochures (+6.8/+6.2) = partial full-tx headroom with no stable gate.
 
 ## Phase P3 — the remaining structural tools
-- **intraBC chunk B** (hash search): −33% evidence on repeating content (zenrav1e#30);
-  chunk A landed. Matters for screens at every tier — now ALSO the quantified #1 owner
-  of the s4-tier residual (8414 +22.5).
+- **intraBC chunk B (hash search) — DONE 2026-07-04** (zenrav1e@d655a6ee +
+  @184eb713, release-gated; record `benchmarks/ibc_hash_ab_2026-07-04.tsv` +
+  `docs/RD_GAP_VS_LIBAOM.md` "intraBC chunk B"): libaom `av1_hash_table` port
+  (source-luma CRC-32C pyramid, 8..64 squares, dispersal-capped buckets, ≤64
+  exact-match DVs into chunk A's SAD/RD machinery; `intrabc_hash` knob default
+  true, hash-off byte-identical 81/81). Measured hash-on vs chunk A: **the
+  legacy fam-7 trio where aom's hash took −33% moved −22..−29% ssim2-BD; 7058
+  −36.6/−40.1; 8414 (the s4-tier #1 residual) −4.6/−5.4; photos byte-identical;
+  enc median 1.00×/1.06×; 400/400 armed cells aomdec+rav1d-safe clean, no bamax
+  veto.** Residual columns vs the cached cpu2iq refs (sc10 pass, intraBC-armed
+  isolated config): **the 8414 +22.5 column CROSSES — −8.1/−15.1 (chunk A) →
+  −13.6/−18.2 (A+B)**; 7028 +6.6→+2.2 / +9.3→+3.6; 7050 +40.8→+37.8 (odd-parity
+  + near-lossless-floor remainder); 6018/6096 hash-inert (the rescan residual is
+  not intraBC's). Remaining intraBC headroom: 4:1 slivers, sub-8x8, odd-DV
+  chroma subpel, SB128; composed-column confirm at the dep bump.
+- **Near-lossless rescans (6096/6018 +15.8/+7.2) — DIAGNOSED 2026-07-04,
+  handed off per the fix-or-document rule** (full record `docs/RD_GAP_VS_LIBAOM.md`
+  "Near-lossless rescans residual"): 6018 = the iq-AQ class (composed already
+  beats cpu2def; aom's boost reaches deeper — {36,64} vs our {42,61}; strength
+  ladder −4.14 at str4.5 vs shipped 1.0's −2.84 → tune program + per-image
+  strength hint). 6096 = coefficient-level RD valuation in the 90–93 band
+  (+28–30% bytes; **cpu2def ≈ cpu2iq there**; inspect: aom 0% skip at baseQ 64
+  both tunes, us 57.5% skip at baseQ 54; deltaq acquitted — parity maps, and
+  boost hurts 6096 at every strength) → the coefficient-level program; first
+  probe = the sharpness-rounding/dead-zone A/B (`av1_build_quantizer` 48→64).
 - **TX_64X16/16X64 validation** (zenrav1e#28) — unlocks the sliver cap.
 - 128×128 SB support (currently hardcoded off) — large-image fast tiers.
-- iq-class AQ/deltaq machinery (the 1236/9100 residual class) — tune-program follow-on
-  to TUNE_SSIMULACRA2 (the dropped aom mechanisms are exactly where cpu2iq's +100-BD
-  per-image edge on interiors lives).
+- iq-class AQ/deltaq machinery (the 1236/9100 residual class, now + 6018) —
+  tune-program follow-on to TUNE_SSIMULACRA2 (the dropped aom mechanisms are
+  exactly where cpu2iq's +100-BD per-image edge on interiors lives).
 
 ## Measurement rules for this program
 Time-normalized pareto is the ONLY scoreboard (speed numbers don't compare across

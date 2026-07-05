@@ -55,7 +55,7 @@ only via the tune. `quantizer` thresholds: `low_quality` = qindex>150 (~Q≤50),
 | fine_directional_intra (angle deltas) | yes | yes | yes | **no** | no | ravif:1658 |
 | filter_intra | off everywhere (derived from `Simple`; zenrav1e#5 history) | ← | ← | ← | ← | speedsettings.rs:329 |
 | palette (tune cfg = Auto) | per-frame AA detection, **speed-independent** | ← | ← | ← | ← | zenrav1e api/internal.rs:646 |
-| intraBC | off everywhere (chunk-A default off) | ← | ← | ← | ← | speedsettings.rs:109 |
+| intraBC | off everywhere (default off; chunk A + the chunk-B hash search landed 2026-07-04, `intrabc_hash` default-true sub-knob rides the same gate) | ← | ← | ← | ← | speedsettings.rs:113 |
 | segmentation | Complex | Simple | Simple | Simple | Simple | ravif:1670 |
 | CDEF | Q≲50 only | Q≲50 | Q≲50 | Q≲50 | **off** | ravif:1663 |
 | LRF | Q≲50 only | Q≲50 | Q≲50 | Q≲50 | **off** | ravif:1662 |

@@ -1248,6 +1248,125 @@ rav1d-safe raw-md5 agreement on every palette-armed cell). Full record:
 `benchmarks/hyperparam_palette_mech_ab_2026-07-03.tsv` + raw at
 `/mnt/v/output/rd-gap-palette-ab-2026-07-03/`.
 
+**2026-07-04: intraBC chunk B landed upstream (zenrav1e@d655a6ee infrastructure +
+@184eb713 integration, release-gated) — the hash search, the legacy-plot residual
+owner engaged.** Port of libaom's `av1_hash_table` (hash_motion.c + CRC-32C, pinned
+rev 632172a4), scoped to chunk A's domain: the tile's SOURCE luma block-hashed once
+per tile encode (2x2 identity/xor-fold base layer, hierarchical CRC-32C combine for
+8/16/32/64 squares, 2^16 buckets per size, 256-entry caps filled in libaom's
+hierarchical dispersal order), then square intraBC blocks add up to 64 exact-match
+DV candidates — nearest-first, through chunk A's unchanged validity + recon-SAD
+ranking + top-2 full-rate RD trial machinery. New
+`PredictionSpeedSettings.intrabc_hash` / `--intrabc-hash` (default true, inert
+without `intrabc`); hash-off byte-identical to pre-chunk-B (81/81 gate cells vs
+master 0d392334 — the SAD-0 diamond skip is hash-gated precisely so the off-path
+keeps the diamond's incidental second-candidate updates bit-exact).
+
+Measured (same uvpal 20-file screen corpus + isolated config as the chunk-A table,
+hash-on vs hash-off, `benchmarks/ibc_hash_ab_2026-07-04.tsv`; 200/200 armed cells
+per arm aomdec-clean + rav1d-safe raw-md5 agree, no butteraugli-max veto):
+**the legacy fam-7 trio — where chunk A stayed neutral while aomenc's hash search
+took −33% — moved: o_7000 −26.2/−22.3 ssim2-BD (s2/s6), o_7001 −29.2/−28.4, o_7002
+−26.3/−21.5 (q60 bytes 0.75–0.82×); 7058 line-tiling −36.6/−40.1 (bytes
+0.60/0.56×); 7028 −4.6/−4.7; 8414 lkml screens (the s4-tier residual #1) −4.6/−5.4;
+8302 −2.4/−2.6; 7080 −1.4/−2.4. Photos and the gray rescan are byte-identical
+(ratio 1.000 — natural content produces no exact hash matches), encode wall median
+1.00× (s2) / 1.06× (s6), worst 1.27×.** In-repo, `tests/intrabc_roundtrip.rs`
+gains a long-range-repeat liveness gate (noise field + one distant 64×64 stamp,
+both samplings) and the existing armed roundtrips + tiny-frame gates run the hash
+path by default. Remaining intraBC scope (post-B): extended block sizes (4:1
+slivers, sub-8x8), odd-DV chroma subpel (the 4:2:0 chroma-fullpel restriction
+rejects odd-parity exact matches — visible as 7052's ~0.0 delta here: its chunk-A
+diamond already found the even-parity repeats), 128-px superblocks.
+
+fam-7 legacy continuity (within this A/B's own config + log-interp matched
+top-of-range ssim2 vs the cached aomenc-cpu2 GOOD refs, s2): the trio's median
+matched-quality byte gap falls **+36% (chunk A) → +7% (chunk B)**, with o_7002
+CROSSING to −15%; per-image o_7000 +44%→+17%, o_7001 +36%→+7%. (Not directly
+splice-able into the earlier +169→+57 ladder — that ran the shipped-path config
+and a different match — but the trio's chunk-B share of the legacy residual is
+now measured: most of what aom's hash search was taking on these files, ours
+takes too.)
+
+**s4-tier residual columns (same-day sc10 pass, train26 sc set, tune-ss2 +
+palette auto + intrabc, BD vs the CACHED speedladder cpu2iq-ai rows; TSV
+sections in `benchmarks/ibc_hash_ab_2026-07-04.tsv`): the 8414 column — the
+s4-tier verdict's quantified #1 residual at +22.5 (composed-v3i5, which had NO
+intraBC) — sits at −8.1/−15.1 (chunk A) → −13.6/−18.2 (chunks A+B) vs the same
+reference rows in the intraBC-armed isolated config**: the mechanism owns the
+column, with chunk B adding −5.5/−3.1 on top of chunk A's move (config caveat:
+isolated rav1e-CLI vs the composed cavif cells — the definitive composed-column
+re-measure happens at the dep bump when intraBC is exposed through zenravif).
+7028 +6.6→+2.2 (s2) / +9.3→+3.6 (s6); 7050 +40.8→+37.8 / +26.6→+24.2 (mostly
+NOT intraBC-reachable: odd-parity repeats + the near-lossless floor); 6018/6096
+hash-inert (iso +0.00 EXACT — confirming the rescan diagnosis below: that
+residual is not intraBC's); 8196/8268 ≈0. One adverse pair: 7052-s6 iso +3.65
+ssim2 / bamax +2.32 (a veto by the standing rule) in the sc10 auto-gated config
+while the same image is neutral-to-positive in the always-armed AB grid —
+equal-SAD hash ties displacing diamond picks under the tune; banked as 0 per
+the veto convention and worth a tie-break refinement if it recurs.
+
+## Near-lossless rescans residual (6096/6018, s4-tier +15.8/+7.2) — DIAGNOSED 2026-07-04: two different owners, neither a missing screen tool; documented + handed off per P3
+
+**Program**: FAST_TIER_PARITY_PLAN P3 item 2 — the s4-tier column verdict charged the
+6000-family rescans (+15.8 on 6096, +7.2 on 6018 vs aom-cpu2iq-ai at the composed
+point) to "the near-lossless floor" and asked for diagnose-then-fix-or-document.
+Instruments: the 61,922-row label store (per-arm per-image BD across every measured
+lever), per-q ladders, and aom's own `inspect` bitstream tool (accounting +
+per-4x4-cell decisions) at byte-matched near-lossless cells (aom cq16 tune={iq,def}
+allintra cpu2 vs rav1e s2 tune-ss2 + palette auto at matched bytes).
+
+**6018 (1-bit patent scan): the iq-AQ machinery owns it — handed to the tune
+program.** The composed fast mode ALREADY beats aom-cpu2def-ai on this image
+(+6.93 vs +10.30 BD against the shared cpu2iq reference); the residual vs cpu2iq
+is ~the def→iq delta itself, which sits in the low-mid band (def's ladder is
+dominated there while its top-of-range matches iq). Both encoders palettize it
+(inspect: 20.7% of our cells vs 15.1% of aom's carry palette) and both run per-SB
+deltaq boost (bimodal maps: ours {42,61}, aom-iq {36,64} at cq16) — aom just
+boosts DEEPER, and the in-repo boost-strength ladder responds exactly as that
+predicts: str0→str4.5 = −4.14% BD monotone on 6018 (shipped tune strength 1.0
+= −2.84, so ~1.3 points sit above the shipped constant on this image; strength
+is a global tune fit — per-image boost strength is the FEATURE_HINTS candidate).
+Every tx lever is measured harmful on it (s6-base +19.9 → size1 +15.7 → min
++18.8 → type +22.4), the v3 tx-D withhold is already the right call, and intraBC
+chunk B leaves it byte-identical (1-bit glyphs sit on palette, not exact copies
+at even parity). **Verdict: not search-budget, not a missing tool — the
+tune-program's iq-AQ residual class (same owner as 1236/9100/9118), with the
+boost-depth data attached. Do not force a fix here.**
+
+**6096 (gray rescan): a coefficient-level RD valuation gap in the near-lossless
+band — handed to the coefficient-level program (NOT iq-AQ).** The pain
+concentrates at ssim2 90→93 where we pay +28–30% bytes vs cpu2iq — and
+**cpu2def ≈ cpu2iq in exactly that band** (91.5@1.13 vs 91.4@1.09 bpp; def's
+whole-curve BD vs iq is +5.25 ssim2 / −0.18 ba3n, all of it low-band), so the
+iq-AQ machinery is acquitted for the near-lossless residual. Stream inspection
+at byte-matched cq16/q70 shows the mechanism: **aom codes coefficients on 100%
+of 4x4 cells (0% skip, both def and iq) at baseQ 64 while our encode skips
+57.5% of cells at baseQ 54** — on scan grain, "higher quantizer + residual
+everywhere" beats "lower quantizer + half the plane skipped" on both metrics.
+Deltaq is not the lever (our variance-boost map has the same shape and range as
+aom-iq's on this image; def is FLAT-64 and still never skips); deltaq strength
+sweeps HURT 6096 (+0.35..+1.8 at every strength); every partition/tx lever
+measured leaves ≥ +16 (full-tx +16.7, min +17.4, size1 +21.1, base +61.3);
+even zr-s2-tune (max effort) leaves +8.55 whole-curve and +29% at the top band.
+The candidate aom mechanisms are all coefficient-valuation constants: the
+dead-zone/rounding pair (`av1_build_quantizer`: qzbin/qrounding 48/128, and
+tune-iq's sharpness≠0 path lifting rounding to 64/128 = dead-zone removal at
+qindex ≤112 — the un-A/B'd rounding surface already flagged in zenrav1e#30's
+item-1 verdict), the zbin factor, and the skip-vs-code RD pricing itself. A
+rounding-bias probe is mechanically small in zenrav1e's quantizer but is a
+global coefficient-level constant under the tune — it needs the full
+tune-program A/B discipline (train26 both metrics + veto + conformance), and
+def reaches no-skip WITHOUT the sharpness rounding, so rounding alone cannot be
+the whole mechanism. **Verdict: documented, handed to the coefficient-level RD
+program (the s1/s2 program's own named residual), first probe = the
+sharpness-rounding/dead-zone A/B; not chunk-fixable inside P3 without forcing.**
+
+Record: label-store mining + ladders in this section; inspect JSONs + byte-matched
+streams at `/tmp`-scratch (reproducible: `scripts/rd_gap/inspect_diff.sh`
+methodology, aom build_slow cq16 {iq,def} vs rav1e_p3bc q70 tune-ss2). The plan's
+P3 bullet and zenrav1e#30 carry the handoff.
+
 ## Size-decay isolation A/B — MEASURED 2026-07-03: four of five tune mechanisms ACQUITTED for the small-size decay; the QM-dist ratio convicted and its size ramp SHIPPED
 
 **Program**: WEDGE_MAP wedge #3 / HYPERPARAM_FIRST_CUT rule 2's specified follow-up. The wedge

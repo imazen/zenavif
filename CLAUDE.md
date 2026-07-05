@@ -447,6 +447,24 @@ LRF axis clouded by open zenrav1e#32). s4-native ruled out (+4.22 at ~10×).
 `benchmarks/rd_gap_s4tier_2026-07-04.tsv` + FAST_TIER_PARITY_PLAN
 §s4-tier + §success-criteria-final.
 
+### intraBC (screen content) — chunks A+B SHIPPED upstream, release-gated, default off
+Chunk A (zenrav1e@7a59e569, 2026-07-03): DV coding/validity/copy-MC/diamond
+search behind `SpeedSettings.prediction.intrabc` (default off), detection-
+gated via `PaletteMode::Auto`. Chunk B (zenrav1e@d655a6ee + @184eb713,
+2026-07-04): libaom `av1_hash_table` port — source-luma CRC-32C pyramid,
+exact-match DV candidates for square 8..64 blocks (`intrabc_hash` sub-knob,
+default true, inert without `intrabc`; hash-off byte-identical 81/81 vs
+0d392334). Measured hash-on vs chunk A (`benchmarks/ibc_hash_ab_2026-07-04.tsv`):
+legacy fam-7 trio −22..−29% ssim2-BD (aom's own hash edge there was −33%),
+7058 −36.6/−40.1%, 8414 −4.6/−5.4%, photos byte-identical, enc median
+1.00×/1.06×, 400/400 armed cells aomdec+rav1d-safe clean. Rescan diagnosis
+(P3 item 2) same day: 6018 = iq-AQ class (tune-program handoff), 6096 =
+coefficient-level no-skip valuation (rounding/dead-zone probe named) — see
+RD_GAP "Near-lossless rescans residual". **At the zenrav1e dep bump:**
+expose intrabc(+hash) through zenravif/zenavif config and let the
+palette-gate/auto_tune arm it on screen content; re-run the fam-7 ladder
+(off +169% → … → +intraBC-A +57% → chunk B moves the legacy trio).
+
 ### zenrav1e QM encodes diverged from conforming decoders — FIXED upstream, release-gated
 Two composing bugs (zenrav1e#29, both fixed on master 2026-07-02) made
 `enable_qm=true` encodes decode differently than the encoder's own
