@@ -1,0 +1,33 @@
+# gate_ladder envelope: pinned (bytes, ssim2, enc_ms) per ladder cell.
+# Machine-scoped (enc_ms): pinned on the dev workstation; re-pin with
+# `just gate-ladder-pin` after intentional ladder movement (commit the
+# diff in the same commit). Tolerances at check time: bytes +/-2%,
+# ssim2 +/-0.5, ms +/-25% (min 30 ms slack).
+# platform	cell	bytes	ssim2	enc_ms
+linux-x86_64	s2/photo/q35	754	62.379	832.1
+linux-x86_64	s2/photo/q60	1693	67.097	733.8
+linux-x86_64	s2/photo/q85	27995	84.089	1159.1
+linux-x86_64	s6/photo/q35	1023	60.157	125.5
+linux-x86_64	s6/photo/q60	1961	67.757	110.1
+linux-x86_64	s6/photo/q85	27050	83.262	177.2
+linux-x86_64	s10/photo/q35	1064	57.477	42.4
+linux-x86_64	s10/photo/q60	2130	68.096	49.1
+linux-x86_64	s10/photo/q85	28331	83.451	68.4
+linux-x86_64	s2/screen/q35	7232	44.134	1214.7
+linux-x86_64	s2/screen/q60	10230	55.404	1149.5
+linux-x86_64	s2/screen/q85	14081	58.543	1468.2
+linux-x86_64	s6/screen/q35	10548	40.907	265.8
+linux-x86_64	s6/screen/q60	21607	56.541	196.9
+linux-x86_64	s6/screen/q85	37535	60.191	229.4
+linux-x86_64	s10/screen/q35	13960	37.406	59.8
+linux-x86_64	s10/screen/q60	30625	56.169	63.1
+linux-x86_64	s10/screen/q85	56574	60.133	68.8
+linux-x86_64	s2/mixed/q35	3268	55.060	1072.5
+linux-x86_64	s2/mixed/q60	8232	63.470	1087.8
+linux-x86_64	s2/mixed/q85	31383	84.771	1436.2
+linux-x86_64	s6/mixed/q35	9139	39.966	170.6
+linux-x86_64	s6/mixed/q60	17629	67.227	153.5
+linux-x86_64	s6/mixed/q85	44791	84.119	204.5
+linux-x86_64	s10/mixed/q35	11445	36.093	59.8
+linux-x86_64	s10/mixed/q60	22190	64.133	70.4
+linux-x86_64	s10/mixed/q85	48783	83.985	84.9

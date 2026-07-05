@@ -147,3 +147,17 @@ jobs:
         continue-on-error: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  gate-determinism:
+    name: Gate A3 (thread-count byte determinism)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/clone-siblings
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Reduced cell grid (incl. the 2.30 MP multi-tile cell); encoded bytes
+      # must be identical across thread legs {1,1,8,auto,auto}. The full grid
+      # + the other gates are `just gates` (docs/ENGINEERING_BASELINE.md A).
+      - name: gate-determinism (--ci subset)
+        run: cargo run --release --features encode-imazen,encode-threading --example gate_kit -- determinism --ci

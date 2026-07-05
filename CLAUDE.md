@@ -12,7 +12,20 @@ just clippy       # cargo clippy with warnings as errors
 just fmt          # cargo fmt
 just build-encode # cargo build --features encode
 just test-encode  # cargo test --features encode
+just gates        # executable engineering-baseline gates (see below)
 ```
+
+**Executable gates (docs/ENGINEERING_BASELINE.md section A):** run
+`just gates` (= `gate-determinism` + `gate-conformance` + `gate-ladder`,
+all via `examples/gate_kit.rs` + `scripts/gates/gate_conformance.sh`)
+before AND after every refactor commit. `gate-conformance` needs AOMDEC
+(justfile wires the dev-box default) and optionally the sibling zenrav1e
+CLI for the palette/intraBC-armed leg. `gate-ladder`'s envelope
+(`benchmarks/gate_ladder_envelope.tsv`) is machine-scoped — re-pin with
+`just gate-ladder-pin` only for intentional ladder movement, committing the
+TSV diff in the same commit. zenrav1e's halves (`gate-identity`,
+`gate-recon`) live in ../zenrav1e's justfile. CI runs the fast subsets
+(identity on zenrav1e, determinism here).
 
 ## Architecture
 

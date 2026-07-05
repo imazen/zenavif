@@ -152,6 +152,12 @@ required-features = ["_dev"]
 name = "encode_sweep"
 required-features = ["encode-imazen", "encode-threading"]
 
+# Executable engineering-baseline gates (docs/ENGINEERING_BASELINE.md A):
+# `gate_kit determinism|cells|ladder` — see justfile gate-* targets.
+[[example]]
+name = "gate_kit"
+required-features = ["encode-imazen", "encode-threading"]
+
 [[example]]
 name = "sweep_validate"
 required-features = ["__expert"]

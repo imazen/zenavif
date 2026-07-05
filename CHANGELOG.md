@@ -11,6 +11,14 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 ## [Unreleased]
 
 ### Added
+- Executable engineering-baseline gates (`docs/ENGINEERING_BASELINE.md` A2/A3/A6):
+  `examples/gate_kit.rs` (`determinism`/`cells`/`ladder` subcommands on pinned
+  integer-synthetic content) + `scripts/gates/gate_conformance.sh` (the PALCONF
+  protocol: aomdec-clean + aomdec==rav1d-safe raw md5) + justfile targets
+  `gate-determinism`/`gate-conformance`/`gate-ladder`(-pin)/`gates` + a CI job
+  for the determinism `--ci` subset + the machine-scoped ladder envelope
+  `benchmarks/gate_ladder_envelope.tsv`. zenrav1e's halves (A1 identity, A5
+  recon) landed as `zenrav1e@e0b5b44b`.
 - SSIMRD (the TUNER2 "what remains" item (a) prosecuted; record
   `docs/RD_GAP_VS_LIBAOM.md` "SSIMRD"): aom's per-16×16 ssim-rdmult λ curve
   (`av1_set_mb_ssim_rdmult_scaling`, the LAST unported iq/ss2 rdmult

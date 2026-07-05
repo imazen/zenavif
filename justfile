@@ -58,6 +58,42 @@ feature-check:
 # Full CI check
 ci: fmt-check clippy test feature-check
 
+# --- Executable gates (docs/ENGINEERING_BASELINE.md section A) ---
+# zenrav1e's halves (gate-identity A1, gate-recon A5) live in ../zenrav1e.
+
+# Gate A3: encoded bytes are independent of thread count (and repeatable).
+# Pinned synthetic cells incl. a 2.30 MP multi-tile image; threads
+# {1,1,8,auto,auto} legs must be byte-identical. CI runs the --ci subset.
+gate-determinism:
+    cargo run --release --features encode-imazen,encode-threading --example gate_kit -- determinism
+
+# Gate A2: cross-decoder conformance (the PALCONF protocol) on the pinned
+# cell matrix: aomdec decodes every cell cleanly AND byte-agrees (raw planar
+# md5) with rav1d-safe. Local-only. AOMDEC is REQUIRED — the caller decides
+# the decoder here, never the script silently (dev box canonical:
+# /home/lilith/work/aom/build_slow/aomdec). ZENRAV1E (sibling CLI) drives the
+# palette/intraBC-armed leg; pass ZENRAV1E='' to skip that leg deliberately.
+gate-conformance:
+    AOMDEC="${AOMDEC:-$(command -v aomdec || echo /home/lilith/work/aom/build_slow/aomdec)}" \
+    ZENRAV1E="${ZENRAV1E-{{justfile_directory()}}/../zenrav1e/target/release/rav1e}" \
+    bash scripts/gates/gate_conformance.sh
+
+# Gate A6: coarse perf floors — (bytes, ssim2, enc_ms) per ladder cell
+# (s2/s6/s10 x 3 images x 3 qualities) against the machine-scoped envelope
+# in benchmarks/gate_ladder_envelope.tsv. Local-only (timing). A de-tuning
+# tripwire with generous tolerances, not a benchmark.
+gate-ladder:
+    cargo run --release --features encode-imazen,encode-threading --example gate_kit -- ladder
+
+# Re-pin the ladder envelope after an INTENTIONAL ladder change (commit the
+# TSV diff in the same commit as the change that moved it).
+gate-ladder-pin:
+    cargo run --release --features encode-imazen,encode-threading --example gate_kit -- ladder --pin
+
+# All zenavif-side gates (run before + after every refactor commit, per
+# docs/ENGINEERING_BASELINE.md section E).
+gates: gate-determinism gate-conformance gate-ladder
+
 # Run example decode_avif with test image
 decode-test:
     mkdir -p /mnt/v/output/zenavif/test
