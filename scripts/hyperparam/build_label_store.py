@@ -714,6 +714,49 @@ def sources():
                                   intrabc_hash=("chunkAB" in tag)),
                       encoder_rev=ibc_rev, q_kind="rav1e_quantizer", speed=None,
                       rows=rows))
+
+    # --- TUNER2 P3-residual arms (2026-07-04; chain_tuner2.sh) ---
+    # zenrav1e@6435e6f9 (variance_boost_strength/deep + quant_rounding_bias
+    # knobs) via the ravif--tuner2 devpatch (box cavif sha256/16
+    # 80ff3fe2f8ce1810). Byte-continuity: t2_cont8 96/96 byte-identical to
+    # the store's speedladder/zr-s2-tune rows (env-off identity on the new
+    # binary chain), so those rows are the same-binary base curves for the
+    # deep/dz arms; the cont cells are NOT re-registered. valstr fills the
+    # boost head's named data gap (strength labels on the 14 VAL-LSD
+    # origins); drift re-measures {0,4.5} on 3 train origins to de-confound
+    # binary drift (the 2026-07-02 deltaq labels predate qmdist+lfsharp).
+    t2 = "/mnt/v/output/zenavif/tuner2-20260704"
+    t2_rev = "zenrav1e@6435e6f9 via ravif--tuner2 devpatch (80ff3fe2f8ce1810)"
+    for sval, tag in [("0.0", "str0"), ("1.0", "str1"), ("2.0", "str2"),
+                      ("3.0", "str3"), ("4.5", "str4.5")]:
+        s.append(dict(path=f"{t2}/t2_valstr_{sval}.tsv", kind="rd_tsv",
+                      corpus="mech26", sweep_source="valstr-2026-07-04",
+                      arm_id=f"valstr/{tag}_s2",
+                      knob_json=J(speed=2, tune="ssimulacra2", palette="auto",
+                                  threads=1, variance_boost_strength=float(sval)),
+                      encoder_rev=t2_rev, q_kind="cavif_q", speed=2, rows=168))
+    for d in ("3.0:4", "4.5:4"):
+        s.append(dict(path=f"{t2}/t2_deep_{d.replace(':', '_')}.tsv", kind="rd_tsv",
+                      corpus="train26", sweep_source="tuner2-2026-07-04",
+                      arm_id=f"tuner2/deep{d.split(':')[0]}_s2",
+                      knob_json=J(speed=2, tune="ssimulacra2", palette="auto",
+                                  threads=1, variance_boost_deep=d),
+                      encoder_rev=t2_rev, q_kind="cavif_q", speed=2, rows=144))
+    for kk in ("118", "128"):
+        s.append(dict(path=f"{t2}/t2_dz_{kk}.tsv", kind="rd_tsv",
+                      corpus="train26", sweep_source="tuner2-2026-07-04",
+                      arm_id=f"tuner2/qround{kk}_s2",
+                      knob_json=J(speed=2, tune="ssimulacra2", palette="auto",
+                                  threads=1, quant_rounding_bias=int(kk)),
+                      encoder_rev=t2_rev, q_kind="cavif_q", speed=2, rows=144))
+    for sval in ("0.0", "4.5"):
+        s.append(dict(path=f"{t2}/t2_drift_{sval}.tsv", kind="rd_tsv",
+                      corpus="train26", sweep_source="tuner2-2026-07-04",
+                      arm_id=f"tuner2/drift-str{sval}_s2",
+                      knob_json=J(speed=2, tune="ssimulacra2", palette="auto",
+                                  threads=1, variance_boost_strength=float(sval),
+                                  drift_check=True),
+                      encoder_rev=t2_rev, q_kind="cavif_q", speed=2, rows=36))
     return s
 
 

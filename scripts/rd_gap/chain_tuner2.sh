@@ -106,6 +106,18 @@ if [[ " $PHASES " == *" dz "* ]]; then
   done
 fi
 
+if [[ " $PHASES " == *" drift "* ]]; then
+  say "=== PHASE drift: strength-response stability across binary generations ==="
+  # The 2026-07-02 deltaq train labels predate qmdist+lfsharp landing into the
+  # tune. If BD(str4.5 vs str0) on 6018/2000/9118 under THIS binary matches the
+  # old labels (-4.14/-2.46/-4.10), train-fit rules transfer to the new-binary
+  # val labels without a drift confound. str1 comes from the cont rows.
+  for s in 0.0 4.5; do
+    run_one "$OUTDIR/t2_drift_${s}.tsv" "$(rows "$HERE/sample_tuner2_drift3.tsv" 12)" "${common[@]}" \
+      SAMPLE="$HERE/sample_tuner2_drift3.tsv" QGRID_ZR="$QFULL" ZENRAVIF_VB_STRENGTH="$s"
+  done
+fi
+
 if [[ " $PHASES " == *" deepval "* ]]; then
   say "=== PHASE deepval: deep winner on val (6q) ==="
   run_one "$OUTDIR/t2_deepval_${DEEP_WINNER/:/_}.tsv" "$(rows "$SAMPLE_VAL" 6)" "${common[@]}" \
