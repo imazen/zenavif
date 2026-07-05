@@ -1263,8 +1263,10 @@ master 0d392334 — the SAD-0 diamond skip is hash-gated precisely so the off-pa
 keeps the diamond's incidental second-candidate updates bit-exact).
 
 Measured (same uvpal 20-file screen corpus + isolated config as the chunk-A table,
-hash-on vs hash-off, `benchmarks/ibc_hash_ab_2026-07-04.tsv`; 200/200 armed cells
-per arm aomdec-clean + rav1d-safe raw-md5 agree, no butteraugli-max veto):
+hash-on vs hash-off, `benchmarks/ibc_hash_ab_2026-07-04.tsv`; conformance across
+the day's armed passes: 640/640 cells @420 (AB 400 + sc10 240) plus a separate
+24/24 @444 pass (4 screen files × s{2,6} × q{60,140,220}, hash armed), every cell
+aomdec-clean + rav1d-safe raw-md5 agree; no butteraugli-max veto in the AB):
 **the legacy fam-7 trio — where chunk A stayed neutral while aomenc's hash search
 took −33% — moved: o_7000 −26.2/−22.3 ssim2-BD (s2/s6), o_7001 −29.2/−28.4, o_7002
 −26.3/−21.5 (q60 bytes 0.75–0.82×); 7058 line-tiling −36.6/−40.1 (bytes
