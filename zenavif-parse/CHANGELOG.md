@@ -30,9 +30,13 @@ from commit `c36b822`**, the pre-break release-prep point (CI green there).
   `NoMoov` → `MalformedImage`; `Unsupported` → `UnsupportedImageFeature`;
   `UnexpectedEOF` → `UnexpectedEof`; `Io` → `Io(CodecIoKind::opaque())`;
   `OutOfMemory` → `OutOfMemory`;
-  `ResourceLimitExceeded` → `LimitsExceeded(Pixels)` (the `&'static str` label is
-  a catch-all over peak-memory / megapixels / frame-count / grid-tile caps, so a
-  single representative kind is reported — the precise limit stays in `Display`);
+  `ResourceLimitExceeded` → `LimitsExceeded(_)` with the precise `LimitKind`
+  recovered by matching the variant's `&'static str` label against the fixed
+  set this crate constructs: the reader-side input-byte cap → `InputSize`;
+  the tracked eager-parse peak-allocation cap → `Memory`; the megapixel cap →
+  `TotalPixels`; the animation-frame-count cap → `Frames`; the grid-tile-count
+  cap (no dedicated `LimitKind`) → `Pixels` as the true fallback; any future
+  unrecognized label also falls back to `Pixels`;
   `Stopped(r)` delegates to the zencodec `StopReason` arm (`Cancelled` /
   `TimedOut`). The blanket `impl CategorizedError for At<E>` forwards both axes
   through the crate's `whereat::At<Error>` results. `zencodec` is a hard
@@ -65,6 +69,15 @@ from commit `c36b822`**, the pre-break release-prep point (CI green there).
   helps the owned-copy eager path.)
 
 ### Fixed
+- **`category()` no longer collapses every `ResourceLimitExceeded` into a
+  single `LimitsExceeded(Pixels)`** (4c41181d). The still-unreleased taxonomy
+  impl above originally mapped all 5 resource-cap labels this crate
+  constructs to one representative `LimitKind`; it now matches the label
+  text to recover the precise kind (`InputSize` / `Memory` / `TotalPixels` /
+  `Frames`, with `Pixels` retained as the true fallback for grid-tile-count
+  and any future label). Landed before the taxonomy impl ships in a
+  release, so this is a same-cycle correction, not a behavior change for
+  any published version.
 - **docs(readme): document color/CICP extraction + `primary_data()` OBU contract + error/metadata type names** — found by an insulated external-developer (README-only) usability test. The README now shows how to read CICP/`nclx` (`color_primaries`/`transfer_characteristics`/`matrix_coefficients`/`full_range`) and embedded ICC via `color_info() -> Option<&ColorInformation>` (plus the `mdcv`/`clli`/`cclv`/`amve` HDR accessors), states the precise `primary_data()` byte contract (raw `mdat`/`idat` extent = the full AV1 OBU temporal unit with the sequence header inline, decoder-ready; `av1C` `configOBUs` not prepended; empty for a pure image sequence; grid-header bytes for a grid primary), and names the `Result`/`Error` (`whereat::At<Error>`, both `std::error::Error`) and `AV1Metadata` types. No code change.
 - **`AuxiliaryTypeProperty::type_subtype` is now panic-proof by construction**
   (8a5b1be, parity with upstream avif-parse 3801195). The split-on-NUL used

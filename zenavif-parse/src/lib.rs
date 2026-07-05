@@ -262,12 +262,26 @@ impl zencodec::CategorizedError for Error {
             // Allocation failed (distinct from a configured resource limit).
             Self::OutOfMemory => C::OutOfMemory,
             // A configured parser cap was hit. The variant carries only a
-            // `&'static str` label (not a structured kind) and is a catch-all
-            // across peak-memory / total-megapixels / animation-frame-count /
-            // grid-tile-count limits, so we report a single representative
-            // kind — `Pixels`, the dominant decode-size axis. The precise limit
-            // is in the error's `Display` message.
-            Self::ResourceLimitExceeded(_) => C::LimitsExceeded(L::Pixels),
+            // `&'static str` label (not a structured kind), so recover the
+            // precise `LimitKind` by matching the label text against the
+            // fixed set this crate constructs (see the `ResourceLimitExceeded`
+            // construction sites). Any future/unrecognized label falls back to
+            // `Pixels`, the dominant decode-size axis.
+            Self::ResourceLimitExceeded(label) => match *label {
+                // Reader-side cap on raw bytes read from an untrusted input
+                // stream before any container parsing happens — bounds the
+                // size of the encoded input, not decoded pixel memory.
+                "input exceeds peak_memory_limit" => C::LimitsExceeded(L::InputSize),
+                // Tracked peak allocation during eager box/sample parsing.
+                "peak memory limit exceeded" => C::LimitsExceeded(L::Memory),
+                "total megapixels limit exceeded" => C::LimitsExceeded(L::TotalPixels),
+                "animation frame count limit exceeded" => C::LimitsExceeded(L::Frames),
+                // Grid tile count doesn't have its own `LimitKind`; it bounds
+                // the number of image tiles composited into the final decode,
+                // so `Pixels` (the decode-size axis) is the true fallback.
+                "grid tile count limit exceeded" => C::LimitsExceeded(L::Pixels),
+                _ => C::LimitsExceeded(L::Pixels),
+            },
             // Cooperative cancellation / deadline — delegate to the zencodec
             // `StopReason` arm (`Cancelled` vs `TimedOut`).
             Self::Stopped(reason) => reason.category(),
@@ -329,9 +343,31 @@ mod error_category_tests {
         // Allocation failure.
         assert_eq!(Error::OutOfMemory.category(), C::OutOfMemory);
 
-        // Configured parser cap -> representative LimitKind::Pixels.
+        // Configured parser cap -> precise LimitKind per label text, matching
+        // every `ResourceLimitExceeded` construction site in this crate.
+        assert_eq!(
+            Error::ResourceLimitExceeded("input exceeds peak_memory_limit").category(),
+            C::LimitsExceeded(L::InputSize)
+        );
+        assert_eq!(
+            Error::ResourceLimitExceeded("peak memory limit exceeded").category(),
+            C::LimitsExceeded(L::Memory)
+        );
         assert_eq!(
             Error::ResourceLimitExceeded("total megapixels limit exceeded").category(),
+            C::LimitsExceeded(L::TotalPixels)
+        );
+        assert_eq!(
+            Error::ResourceLimitExceeded("animation frame count limit exceeded").category(),
+            C::LimitsExceeded(L::Frames)
+        );
+        assert_eq!(
+            Error::ResourceLimitExceeded("grid tile count limit exceeded").category(),
+            C::LimitsExceeded(L::Pixels)
+        );
+        // Unrecognized label -> true fallback (Pixels).
+        assert_eq!(
+            Error::ResourceLimitExceeded("some future limit").category(),
             C::LimitsExceeded(L::Pixels)
         );
 
