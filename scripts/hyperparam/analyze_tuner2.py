@@ -131,6 +131,29 @@ def main():
             print("  byte-continuity PASS — store zr-s2-tune rows are "
                   "same-binary base curves")
 
+    # ---- drift (binary-generation stability of the strength response) ----
+    d0 = load("t2_drift_0.0.tsv")
+    d45 = load("t2_drift_4.5.tsv")
+    if d0 is not None and d45 is not None:
+        print("\n=== drift: str4.5-vs-str0 under the NEW binary vs the "
+              "2026-07-02 labels ===")
+        old = {"6018": (-4.135, -2.836), "2000": (-2.465, -5.591),
+               "9118": (-4.096, -3.861)}  # (str4.5, str1) vs str0, old labels
+        t45 = bd_tables(d45, d0)
+        for img in t45.index:
+            oid = t45.loc[img, "oid"]
+            o45, _ = old.get(oid, (np.nan, np.nan))
+            print(f"  {oid}: new str4.5-vs-str0 {t45.loc[img,'bd_ssim2']:+.2f} "
+                  f"(old {o45:+.2f}; drift {t45.loc[img,'bd_ssim2']-o45:+.2f}) "
+                  f"ba3n {t45.loc[img,'bd_ba3n']:+.2f} bamax {t45.loc[img,'bd_bamax']:+.2f}")
+        if cont is not None:
+            t1 = bd_tables(cont[cont["oid"].isin(old)], d0)
+            for img in t1.index:
+                oid = t1.loc[img, "oid"]
+                _, o1 = old.get(oid, (np.nan, np.nan))
+                print(f"  {oid}: new str1-vs-str0 {t1.loc[img,'bd_ssim2']:+.2f} "
+                      f"(old {o1:+.2f}; drift {t1.loc[img,'bd_ssim2']-o1:+.2f})")
+
     # ---- valstr ----
     val = {s: load(f"t2_valstr_{s}.tsv") for s in ("0.0", "1.0", "2.0", "3.0", "4.5")}
     if val["0.0"] is not None:
