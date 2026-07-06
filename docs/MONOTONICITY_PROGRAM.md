@@ -197,19 +197,28 @@ is bundle-*hurts*, but `tx_budget_gate`'s VAL fit puts pf-high/dcty-low content
 (5343/8103 corner) in Size1 as its *measured-best* class — the RD gate and the
 monotonicity concern DISAGREE on the same image.
 
-**Verdict / turnkey recipe for the deferred dense fit:**
-1. Corpus: ≥50 origins/class across plots·screenshots·clipart·products·scans·photos
-   (this dir has 1/origin — pull from a larger source; document TRAIN/VAL/TEST split
-   by origin, no rendition leakage).
-2. Sweep armed s4,s6,s7,s8 @ q{50,80} + FULL features; label bundle-hurts via
-   `scan_pattern2_features.py` (s6/7/8 dominated by s4, meaningful margin).
-3. The features here (single + 2-feature LOOCV) FAIL — try (a) a probe-encode signal
-   (a cheap s9 vs s4 byte/quality ratio predicts the pattern directly), or (b) new
-   descriptors; validate held-out, target precision >0.9 before landing.
-4. Remap on true-fires = s6/7/8→s4 (s4 dominates them by definition, like s5→s9);
-   the risk is precision, so gate conservatively.
-It is RISKY (touches s6/7/8 where the bundle wins on photos+scans). Tool + 39-origin
-labeled baseline committed so the dense fit starts here.
+**RESOLVED by a probe — not a feature gate (`benchmarks/probe_monotone_sim_2026-07-06.tsv`).**
+Pattern-2 doesn't need to be *predicted* from features (which fails); it can be *measured*.
+Simulating a probe over the 24 armed origins (`scripts/rd_gap/sim_probe_monotone.py`): for a
+requested speed, also encode a small anchor set and keep the best RD within the requested speed's
+time budget. **The 2-anchor probe {s4, s9} fixes ALL 24 requested-tier inversions (0 new),
+pattern-2 included**, because on large content the bundle makes s6/7/8 *slower* than s4, so the
+dominator is both better AND cheaper — the probe just looks. The overriding picks are strictly
+good for the user: **+0.401 ssim2 and the winning encode 1120 ms faster** than the requested tier.
+Cost: **2.16× total encode wall** (run requested + 2 anchors, keep the best). probe-s4 alone fixes
+15/24 (misses the s5-valley); probe-full fixes all 24 at 5.78× — {s4,s9} is the sweet spot.
+
+So the two mechanisms are complementary: `monotone_speed_gate` (feature gate) is the **free**
+partial guarantee (s5-valley only, no extra encode); the probe is the **complete** guarantee at
+~2× encode. The probe is the right answer for pattern-2, but it's a new public encode API
+(`encode_rgb8_monotone` / an `AutoTuneOptions::monotone_probe` flag) — **awaiting user sign-off**
+before landing (API-stability rule). The feature-gate recipe below stays as the cheaper-but-partial
+alternative if the probe's 2× cost is unacceptable.
+
+*Feature-gate recipe (the cheaper partial path, if the probe is rejected):* ≥50 origins/class,
+sweep armed s4/6/7/8 @ q{50,80} + full features, label via `scan_pattern2_features.py`, target
+precision >0.9 (the 1-2 feature LOOCV here fails at 6/39); remap true-fires s6/7/8→s4. RISKY
+(touches s6/7/8 where the bundle wins on photos+scans). Tool + 39-origin baseline committed.
 
 ## Progress log
 - 2026-07-06: program started. gate-monotone (chunk 1) committed ad85a8c4, verified.
@@ -218,3 +227,13 @@ labeled baseline committed so the dense fit starts here.
   encoder passthrough), committed 7211deb2, verified on origin.
 - 2026-07-06: pattern-2 residual measured NOT separable on the 24-origin corpus
   (scan_pattern2_features.py) → scoped as a dense-fit chunk, not shipped.
+- 2026-07-06: release-gated `monotone_speed_gate` behind `MONOTONE_GATE_LIVE` after
+  measuring registry-s5 is not a valley (would regress) — 8d2f1cf2.
+- 2026-07-06: ARMED-BUILD validation (user: "flip without a train, it's a hard drive").
+  Pointed zenavif at ../ravif--statusmeasure/ravif + built → gate-monotone has teeth
+  (caught fine_dir s6<s7 on the procedural fixture; shown a fixture artifact vs real
+  corpus). Committed 0342d0f1.
+- 2026-07-06: PROBE simulation over the armed data — probe {s4,s9} is the complete
+  monotonicity guarantee (fixes all 24, pattern-2 included, strictly-good picks, 2.16×
+  wall). Resolves pattern-2 via measurement, not features. Awaiting user sign-off on the
+  opt-in probe API. sim_probe_monotone.py + probe_monotone_sim_2026-07-06.tsv.
