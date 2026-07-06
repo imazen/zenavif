@@ -41,6 +41,12 @@ land.
 7. **Provenance of constants.** Every fitted constant in source carries its
    corpus+date+TSV pointer comment (already the norm — the pass must not strip them,
    and should ADD them where missing).
+8. **RD-vs-time monotonicity.** Spending more encode time never buys a worse RD point:
+   no slower speed tier is Pareto-dominated by a clearly-faster one (per image). Gate:
+   `just gate-monotone` with a machine-scoped known-inversions envelope (empty now on
+   registry fixtures; teeth post-flip when the s6+ bundle creates the armed s5 valley).
+   The content-gate that enforces it (`monotone_speed_gate`, s5→s9 on synthetic) +
+   the program + the pattern-2 residual live in docs/MONOTONICITY_PROGRAM.md.
 
 ## B. The structural target per repo
 
