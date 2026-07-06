@@ -21,6 +21,12 @@ budget points on the new loop.**
   subject to metric floors; ssim2 primary, butteraugli veto as a constraint (not an
   afterthought), zensim-B when profile-B ships; families mass-weighted per the
   representative-not-diverse policy; sizes per the long-edge classes.
+  **LANDED 2026-07-06** — `scripts/rd_gap/objective.py` (`--selftest` + palette-A/B
+  real-data validated) + `docs/COOPT_LOOP_OBJECTIVE.md`. Generalizes `bd_arm.py`
+  with family grouping, the +1.0% butteraugli veto as a hard constraint, and
+  cluster_size mass-weighting; returns the one scalar a joint fit minimizes
+  (incumbent = 0). Remaining: the canonical `family→cluster_size` manifest (equal-
+  weight default until then; per-family table is policy-correct now).
 - **Decision-trace instrumentation** in zenrav1e (feature-gated): per-block log of
   (λ, D terms per candidate, R estimates vs actual tells, chosen vs runner-up, quant
   decisions). This is the dataset generator for every fit below — the census tools
