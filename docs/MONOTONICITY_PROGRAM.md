@@ -33,20 +33,20 @@ on + Tune::Ssimulacra2; 6 diverse images, Q80; analyze with
 
 ## Plan (chunks — land + commit each; re-check the list after every commit)
 
-1. **`gate-monotone` guardrail** — `examples/gate_kit.rs` `monotone [--pin]` subcommand +
-   `benchmarks/gate_monotone_envelope.tsv` (platform-scoped known inversions; fails on any
-   NEW one) + justfile `gate-monotone`/`-pin` + added to `gates`. Runs against the
-   currently-configured encoder (registry now, armed post-flip). **[IN PROGRESS 2026-07-06]**
-2. **Corpus fit** — dense sweep (≥20 imgs/class × low+high-q grid, armed) + zenanalyze
-   features per image; fit the withhold-gate thresholds separating clean (photo) from
-   inverting (synthetic/graphic) content on the fast_heads feature axis
-   (`gradient_fraction_smooth`, `patch_fraction`, `dct_compressibility_y`). Held-out validate.
-3. **Content-gates in `src/fast_heads.rs`** — extend the heads: withhold `fine_dir` + the
-   S6 bundle on synthetic content (fitted thresholds), recommend-only, release-gated like the
-   existing heads. Forward through the zenravif expert passthrough at the dep bump.
-4. **Verify** — re-measure the ladder; `gate-monotone` envelope shrinks toward empty; re-pin
-   the shrink in the same commit.
-5. **SpeedPolicy collapse** (post-flip refactor, docs/ENGINEERING_BASELINE.md) — collapse the
+1. **`gate-monotone` guardrail** — DONE (ad85a8c4). `monotone [--pin]` subcommand +
+   platform-scoped envelope + justfile + added to `gates`. Tests the RAW ladder.
+2. **Corpus fit** — DONE (7211deb2). 24 armed origins + features → the s5-valley finding +
+   the gfs<0.64 gate + the s5→s9 remap (simulation-chosen).
+3. **Content-gate `monotone_speed_gate`** — DONE (7211deb2), **release-gated** (8d2f1cf2,
+   `MONOTONE_GATE_LIVE=false` — registry-safe; flip at the dep bump). The fine_dir framing was
+   REFUTED (fine_dir ≈ neutral once the bundle is present; the missing bundle is the cause) —
+   the fix is a speed remap, not a fine_dir withhold.
+4. **Verify** — DONE. Held-out (e154252, 15 doccharts: 0 new inversions, recall 9/10) +
+   deep-tier s1-s3 exclusion validated (5b9a34ad) + the registry-regression catch (8d2f1cf2).
+5. **Pattern-2 residual** (`s6/7/8<s4`) — SCOPED, not shipped (c574b91/9a5669a/c4d2e36c): not
+   separable at 1 or 2 features on 39 origins (LOOCV 6/39); turnkey dense-fit recipe + the
+   probe-encode direction documented above. RISKY (touches s6/7/8 wins).
+6. **SpeedPolicy collapse** (post-flip refactor, docs/ENGINEERING_BASELINE.md) — collapse the
    table to the ~5-6 monotone content-conditioned tiers this program justifies.
 
 ## Key facts / gotchas
