@@ -24,13 +24,18 @@ Screen content rides palette(+UV) + intraBC A+B (legacy plots −26..−29%; fam
   QM-dist ratio, LF schedule) — gated; tune-default decision at the bump.
 - Palette gate: speed-conditional τ (0.197 / 0.05 at s≥6); heads (tx/partition/intra
   budgets) recommend-only via fast_heads; q₀ seed under `auto-tune`.
+- Monotonicity head: `monotone_speed_gate` remaps the armed s5 RD-vs-time valley →
+  s9 on synthetic content (gfs<0.64), held-out-validated (0 new inversions on 15
+  doccharts origins) — docs/MONOTONICITY_PROGRAM.md.
 - Tiles: ≥1 MP per tile default (bytes core-count-independent) — LIVE on ravif main.
 - Evaluation policy: per-family first, cluster-mass weights, photos-only merit
   keepable (RD_GAP "EVALUATION POLICY").
 
 ## Executable gates (run before/after every refactor commit)
-`just gates` in zenavif (determinism/conformance/ladder, ~34 s) + `gate-identity` /
-`gate-recon` in zenrav1e. CI runs fast subsets. ENGINEERING_BASELINE §A.
+`just gates` in zenavif (determinism/conformance/ladder + **monotone**) +
+`gate-identity` / `gate-recon` in zenrav1e. CI runs fast subsets. ENGINEERING_BASELINE §A.
+`gate-monotone` (~30 s of fixture encodes) = RD improves monotonically with encode time
+(empty envelope now; teeth post-flip when the arms create the valley).
 
 ## Open residuals (all with named owners)
 - s4-tier cpu2iq column +2.8: iq-AQ trio (1236/9100/9118) + 6096 no-skip (coefficient
@@ -40,6 +45,9 @@ Screen content rides palette(+UV) + intraBC A+B (legacy plots −26..−29%; fam
 - Decoder follow-ups: rav1d-safe #423 (flush drops frames), #414 (NEON conformance).
 - Corpus: doc-chart anti-boost gate fittable (sample_doccharts.tsv); zensim-B hints
   await profile-B.
+- Monotonicity pattern-2 (`s6/7/8<s4`, the s6+ bundle hurts on some synthetic): NOT
+  single-feature-separable on 39 origins — needs a dense multi-feature fit, RISKY
+  (touches s6/7/8 wins); scoped in docs/MONOTONICITY_PROGRAM.md.
 
 ## The two structural facts a newcomer needs
 1. aom's GOOD mode is off its own still pareto — the frontier is **allintra**; we sit
