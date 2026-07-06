@@ -1,0 +1,18 @@
+# Thumbnail-probe cross-scale transfer test — does a 384px probe predict the full-res
+# s4-vs-s6 winner? Armed cavif (/tmp/statusmeasure/cavif-armed), 8 origins, Q80. 2026-07-06.
+# VERDICT: NO — 4/8 transfer. Failures are damaging: MISSES marginal inversions (8414/7050
+# s4's small RD edge washes out at 384px -> reads tie -> probe wouldn't remap) and FALSE-FIRES
+# on ties (6096 full-res s6 is +0.6 ssim2 better, thumb says s4 -> remap would lose quality).
+# A cheap downscaled probe cannot be the monotonicity guarantee. Strong inversions (7028 +1.12,
+# 7058 +1.54) DO transfer; only marginal ones fail. Kept as a heuristic reference, not a gate.
+#
+origin   class  | FULL (s4B/ss vs s6B/ss ->win) | THUMB384 (s4B/ss vs s6B/ss ->win) | transfer?
+7028     hurts  |  50824B/89.76 v  53398B/88.64 ->s4  | 14521B/89.04 v 15645B/87.94 ->s4  | YES
+7050     hurts  |   8764B/90.44 v   9281B/90.10 ->s4  | 19270B/83.60 v 19725B/84.10 ->tie | no (s4 vs tie)
+7058     hurts  | 196893B/84.25 v 212878B/82.71 ->s4  | 59623B/82.61 v 63857B/79.04 ->s4  | YES
+8414     hurts  | 108597B/87.67 v 108899B/87.44 ->s4  | 19571B/87.31 v 19751B/87.18 ->tie | no (s4 vs tie)
+6096     helps  | 129582B/90.16 v 131255B/90.76 ->tie | 21618B/90.92 v 21969B/90.66 ->s4  | no (tie vs s4)
+8302     helps  |  21595B/90.80 v  26764B/89.82 ->s4  | 11392B/90.62 v 12364B/90.15 ->s4  | YES
+8268     helps  |  59700B/89.52 v  59990B/89.36 ->tie | 12684B/90.25 v 13555B/89.44 ->s4  | no (tie vs s4)
+6018     helps  | 197588B/89.33 v 199650B/89.55 ->tie | 26531B/88.95 v 26521B/88.57 ->tie | YES
+# thumbnail encode times (ms) shown as tm; full as fm — probe cost ~ (tm4+tm6)/fm6

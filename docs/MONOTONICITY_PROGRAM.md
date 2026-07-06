@@ -208,7 +208,36 @@ good for the user: **+0.401 ssim2 and the winning encode 1120 ms faster** than t
 Cost: **2.16× total encode wall** (run requested + 2 anchors, keep the best). probe-s4 alone fixes
 15/24 (misses the s5-valley); probe-full fixes all 24 at 5.78× — {s4,s9} is the sweet spot.
 
-So the two mechanisms are complementary: `monotone_speed_gate` (feature gate) is the **free**
+### The hunt for a non-2× solution (2026-07-06) — cheap options measured DEAD
+User: "we have to find a solution that isn't 2x." Every cheap/free candidate was measured and
+falsified:
+- **Thumbnail probe (~1.1×) — DOESN'T TRANSFER** (`benchmarks/thumbnail_probe_xscale_2026-07-06.tsv`).
+  Deciding s4-vs-s6 on a 384px downscale matches full-res only 4/8, and the failures are damaging:
+  it MISSES marginal inversions (8414/7050: s4's small RD edge washes out at 384px → reads "tie")
+  and FALSE-FIRES on ties (6096: full-res s6 is +0.6 ssim2 better, thumb says s4 → remap loses
+  real quality). Only the strong inversions (7028 +1.12, 7058 +1.54) survive downscaling.
+- **Encoder early-exit — WRONG PREMISE.** The bundle is NOT wasting time: on 7028, REG-s6 (bundle
+  off) is 74850B/87.35 vs ARMED-s6 53398B/88.64 — the bundle earns its cost (29% smaller, +1.29
+  ssim2). It just can't close the gap to s4's deeper base search. Early-exit would make s6 *worse*.
+- **Global time-cap (keep s6 faster than s4) — sacrifices real wins.** Capping the bundle so s6
+  stays under s4's time would gut its earned gains on bundle-*helps* content (6096, where s6 is a
+  legit better slow-tier), just to fix line-plot content. No free lunch.
+- **Feature gate — not separable** (the §above LOOCV 6/39). Bundle-helps scans (6096) and
+  bundle-hurts line-plots (7028) overlap in feature space.
+
+**Conclusion: pattern-2 is a genuine preset-Pareto fact** (s6's fast-base+bundle is dominated by
+s4's slow-base on line/plot content, AND slower) with no cheap predictor. The honest menu:
+1. **Asymmetric probe (~1.5×, not 2×):** probe only s4 for s6/7/8 requests (s5-valley stays free
+   via the gate). Reliable; the cheapest guaranteed option.
+2. **Parallel probe (1× wall / 2× compute):** encode s4 ∥ requested, keep the best — wall time
+   unchanged (s4 finishes first) when spare cores exist; 2× CPU.
+3. **Accept + document** the ≤6 affected origins (a minority; strong ones are line-plots) and let
+   the picker learn to avoid the dominated tier from armed RD-vs-time labels (free, emergent).
+4. **Deep preset R&D:** re-tune the s6 config so it's Pareto-competitive with s4 on line content
+   (free at runtime, but real encoder work, not guaranteed).
+
+### The 2× symmetric probe (reference)
+The two mechanisms are complementary: `monotone_speed_gate` (feature gate) is the **free**
 partial guarantee (s5-valley only, no extra encode); the probe is the **complete** guarantee at
 ~2× encode. The probe is the right answer for pattern-2, but it's a new public encode API
 (`encode_rgb8_monotone` / an `AutoTuneOptions::monotone_probe` flag) — **awaiting user sign-off**
