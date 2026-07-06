@@ -94,8 +94,28 @@ introduced 6 new s5<s4 (s6 itself dominated by s4 on razor content). s9 costs th
 `fit_content_gates.py benchmarks/mono_fit_labels_2026-07-06.tsv
 benchmarks/mono_fit_features_2026-07-06.tsv 9`.
 
+## Pattern-2 residual (`s6/s7/s8<s4`) — measured NOT separable on this corpus
+
+The second pattern (the s6+ bundle *hurts*, s4 dominates s6/7/8) affects 6/24
+(7028, 7050, 7058, 8414, 9074, 9228). The razor pair (7050/7052) is already
+covered by `tx_budget_gate` (pf>.85 & dcty>100 → Largest). The other 4 do NOT
+separate from the bundle-*helps* content (6096/6018/8268/8302, where s6 is a
+measured better-quality tier): `scan_pattern2_features.py` over the FULL ~100
+zenanalyze features finds **no clean single-feature split** — the best
+(aq_map_p75, laplacian_variance_p90, orientation_energy_ratio) still misclassify
+3/24 and the class ranges overlap almost entirely. With 6 positives on 24
+origins that is overfit noise, not signal.
+
+**Verdict:** a safe pattern-2 gate needs a dense multi-origin sweep (per the
+CLAUDE.md sweep discipline: ~50 imgs/class, held-out validation, likely a
+multi-feature model) — it is RISKY because it touches s6/7/8 where the bundle is
+a measured win on photos + scans. Deferred to a dedicated fit (not a quick
+gate). Tool + labels committed so the dense fit starts from this baseline.
+
 ## Progress log
 - 2026-07-06: program started. gate-monotone (chunk 1) committed ad85a8c4, verified.
 - 2026-07-06: chunk-2 fit complete (findings above). chunk-3 `monotone_speed_gate`
   implemented in fast_heads + wired into auto_tune (armed-build-specific, no
-  encoder passthrough). Residual pattern-2 mid-feature bundle-withhold = next.
+  encoder passthrough), committed 7211deb2, verified on origin.
+- 2026-07-06: pattern-2 residual measured NOT separable on the 24-origin corpus
+  (scan_pattern2_features.py) → scoped as a dense-fit chunk, not shipped.
