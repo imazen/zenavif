@@ -142,16 +142,32 @@ zenanalyze features finds **no clean single-feature split** — the best
 3/24 and the class ranges overlap almost entirely. With 6 positives on 24
 origins that is overfit noise, not signal.
 
-**Confirmed on 39 origins** (train 24 + doccharts 15, 10 bundle-hurts): still no
-clean single-feature split — best is `orientation_energy_ratio` at err=5/39 with
-overlapping ranges (hurt 1.12-1.30 / rest 1.06-1.20). More data made the negative
-*stronger*, not weaker.
+**Confirmed on 39 origins** (train 24 + doccharts 15, 10 bundle-hurts): no clean
+split at 1 OR 2 features. Best single = `orientation_energy_ratio` err=5/39 with
+overlapping ranges (hurt 1.12-1.30 / rest 1.06-1.20); best **LOOCV** 2-feature
+depth-2 tree = `cb_peak_sharpness + flat_color_block_ratio` **err=6/39** (vs 10/39
+trivial base rate — catches ~4 of 10 net). Not usable: a safe pattern-2 gate needs
+HIGH PRECISION (a false-fire on bundle-*helps* content remaps away a real quality
+win), which 6/39 LOO error cannot give.
 
-**Verdict:** a safe pattern-2 gate needs a dense multi-origin sweep (per the
-CLAUDE.md sweep discipline: ~50 imgs/class, held-out validation, likely a
-multi-feature model) — it is RISKY because it touches s6/7/8 where the bundle is
-a measured win on photos + scans. Deferred to a dedicated fit (not a quick
-gate). Tool + labels committed so the dense fit starts from this baseline.
+**Entanglement** with the existing RD fit makes it worse: 7028 (pf 0.901, dcty 12)
+is bundle-*hurts*, but `tx_budget_gate`'s VAL fit puts pf-high/dcty-low content
+(5343/8103 corner) in Size1 as its *measured-best* class — the RD gate and the
+monotonicity concern DISAGREE on the same image.
+
+**Verdict / turnkey recipe for the deferred dense fit:**
+1. Corpus: ≥50 origins/class across plots·screenshots·clipart·products·scans·photos
+   (this dir has 1/origin — pull from a larger source; document TRAIN/VAL/TEST split
+   by origin, no rendition leakage).
+2. Sweep armed s4,s6,s7,s8 @ q{50,80} + FULL features; label bundle-hurts via
+   `scan_pattern2_features.py` (s6/7/8 dominated by s4, meaningful margin).
+3. The features here (single + 2-feature LOOCV) FAIL — try (a) a probe-encode signal
+   (a cheap s9 vs s4 byte/quality ratio predicts the pattern directly), or (b) new
+   descriptors; validate held-out, target precision >0.9 before landing.
+4. Remap on true-fires = s6/7/8→s4 (s4 dominates them by definition, like s5→s9);
+   the risk is precision, so gate conservatively.
+It is RISKY (touches s6/7/8 where the bundle wins on photos+scans). Tool + 39-origin
+labeled baseline committed so the dense fit starts here.
 
 ## Progress log
 - 2026-07-06: program started. gate-monotone (chunk 1) committed ad85a8c4, verified.
