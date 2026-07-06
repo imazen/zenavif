@@ -1,0 +1,6 @@
+# gate_monotone envelope: KNOWN RD-vs-time inversions (a slower tier
+# Pareto-dominated by a clearly-faster one), per (platform, cell, slow, fast).
+# The gate FAILS on any inversion NOT listed here (a NEW one). Machine/encoder-
+# scoped: re-pin with `just gate-monotone-pin` after landing content-gates that
+# REMOVE inversions (the shrinking envelope IS the progress) or at the dep-bump
+# flip. Goal state: zero rows. platform	cell	slow	fast

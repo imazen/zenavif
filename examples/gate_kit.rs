@@ -650,6 +650,172 @@ fn run_ladder(pin: bool) {
 
 // ---------------------------------------------------------------------------
 
+fn monotone_envelope_path() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("benchmarks/gate_monotone_envelope.tsv")
+}
+
+/// Invariant (the user directive): RD must improve monotonically with encode
+/// TIME. For each image+quality, no SLOWER tier may be Pareto-dominated
+/// (<= bytes AND >= ssim2) by a clearly-faster one — spending more time must
+/// never buy a worse RD point. Content-dependent arms (`fine_dir`, the s6-s8
+/// `tx_size_rdo/intra7/part_prune` bundle) violate this off the photo
+/// distribution until the per-image heads gate them (benchmarks/
+/// mono_rd_vs_time_2026-07-05.tsv). The envelope records the KNOWN inversions
+/// (machine/encoder-scoped); the gate FAILS on any NEW one. Goal state: empty.
+fn run_monotone(pin: bool) {
+    let imgs = pinned_images();
+    // Inversion-prone band; deep tiers (1-3) are slow and monotone in practice,
+    // excluded to keep the gate fast (it runs every refactor commit).
+    let speeds: [u8; 7] = [4, 5, 6, 7, 8, 9, 10];
+    let qualities = [40.0f32, 80.0];
+    let plat = format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);
+
+    // (cell, speed, bytes, ssim2, ms)
+    let mut rows: Vec<(String, u8, usize, f64, f64)> = Vec::new();
+    for img in &imgs {
+        let src = to_arr_img(img.img.as_ref());
+        for q in &qualities {
+            for s in &speeds {
+                let cfg = config(
+                    *q,
+                    *s,
+                    EncodeChromaSubsampling::Yuv420,
+                    EncodeBitDepth::Eight,
+                    Some(8),
+                );
+                // bytes+ssim2 are deterministic; ms is not. Take min-of-3 encode
+                // times — min converges to true cost (scheduling jitter only ADDS
+                // time), so the pair-wise "faster" test is stable across runs.
+                let mut bytes = encode(img.img.as_ref(), &cfg);
+                let mut ms = f64::MAX;
+                for _ in 0..3 {
+                    let t0 = Instant::now();
+                    bytes = encode(img.img.as_ref(), &cfg);
+                    ms = ms.min(t0.elapsed().as_secs_f64() * 1000.0);
+                }
+                let dec_cfg = zenavif::DecoderConfig::new().prefer_8bit(true).threads(1);
+                let decoded = zenavif::decode_with(&bytes, &dec_cfg, &zenavif::Unstoppable)
+                    .expect("gate_kit monotone: decode failed");
+                let dec_rgb = decoded
+                    .try_as_imgref::<Rgb<u8>>()
+                    .expect("gate_kit monotone: decoded frame not RGB8");
+                let dec_arr = to_arr_img(dec_rgb);
+                let ssim2 = fast_ssim2::compute_ssimulacra2(src.as_ref(), dec_arr.as_ref())
+                    .expect("gate_kit monotone: ssim2 failed");
+                rows.push((format!("{}/q{}", img.name, *q as u32), *s, bytes.len(), ssim2, ms));
+            }
+        }
+    }
+
+    // Inversion = a tier B for which a clearly-faster tier A also Pareto-dominates
+    // it. "Clearly faster" = A.ms < 0.85*B.ms (absorbs timing noise; real
+    // inversions have >30% time gaps). bytes+ssim2 domination is deterministic.
+    if std::env::var("GATE_MONOTONE_DEBUG").is_ok() {
+        eprintln!("# cell\tspeed\tbytes\tssim2\tms(min3)");
+        for (cell, s, b, q, ms) in &rows {
+            eprintln!("{cell}\ts{s}\t{b}\t{q:.3}\t{ms:.0}");
+        }
+    }
+    use std::collections::BTreeSet;
+    let mut inversions: BTreeSet<(String, u8, u8)> = BTreeSet::new(); // (cell, slow, fast)
+    let cells: BTreeSet<String> = rows.iter().map(|r| r.0.clone()).collect();
+    for cell in &cells {
+        let tiers: Vec<_> = rows.iter().filter(|r| &r.0 == cell).collect();
+        for b in &tiers {
+            for a in &tiers {
+                if a.1 == b.1 {
+                    continue;
+                }
+                // A "clearly faster" than B: A's min-time < 80% of B's (>=25%
+                // faster). Wide margin so near-cost tiers never flap as inversions.
+                let a_faster = a.4 < 0.80 * b.4;
+                let a_dominates = a.2 <= b.2 && a.3 >= b.3 && (a.2 < b.2 || a.3 > b.3);
+                if a_faster && a_dominates {
+                    inversions.insert((cell.clone(), b.1, a.1));
+                }
+            }
+        }
+    }
+
+    let path = monotone_envelope_path();
+    if pin {
+        let mut out = String::new();
+        out.push_str(
+            "# gate_monotone envelope: KNOWN RD-vs-time inversions (a slower tier\n\
+             # Pareto-dominated by a clearly-faster one), per (platform, cell, slow, fast).\n\
+             # The gate FAILS on any inversion NOT listed here (a NEW one). Machine/encoder-\n\
+             # scoped: re-pin with `just gate-monotone-pin` after landing content-gates that\n\
+             # REMOVE inversions (the shrinking envelope IS the progress) or at the dep-bump\n\
+             # flip. Goal state: zero rows. platform\tcell\tslow\tfast\n",
+        );
+        if path.exists() {
+            for line in fs::read_to_string(&path).unwrap().lines() {
+                if line.starts_with('#') || line.trim().is_empty() {
+                    continue;
+                }
+                if !line.starts_with(&plat) {
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+        }
+        for (cell, slow, fast) in &inversions {
+            let _ = writeln!(out, "{plat}\t{cell}\ts{slow}\ts{fast}");
+        }
+        fs::write(&path, out).expect("write monotone envelope");
+        println!(
+            "gate-monotone: pinned {} inversion(s) for {plat} -> {}",
+            inversions.len(),
+            path.display()
+        );
+        return;
+    }
+
+    let mut allowed: BTreeSet<(String, u8, u8)> = BTreeSet::new();
+    if path.exists() {
+        for line in fs::read_to_string(&path).unwrap().lines() {
+            if line.starts_with('#') || line.trim().is_empty() {
+                continue;
+            }
+            let f: Vec<&str> = line.split('\t').collect();
+            if f.len() >= 4 && f[0] == plat {
+                let slow = f[2].trim_start_matches('s').parse::<u8>().unwrap_or(0);
+                let fast = f[3].trim_start_matches('s').parse::<u8>().unwrap_or(0);
+                allowed.insert((f[1].to_string(), slow, fast));
+            }
+        }
+    }
+    let new: Vec<_> = inversions.iter().filter(|i| !allowed.contains(*i)).collect();
+    let fixed = allowed.iter().filter(|i| !inversions.contains(*i)).count();
+    println!(
+        "gate-monotone: {} cells, {} inversion(s) ({} known, {} NEW, {} fixed) on {plat}",
+        cells.len(),
+        inversions.len(),
+        inversions.len() - new.len(),
+        new.len(),
+        fixed
+    );
+    for (cell, slow, fast) in &inversions {
+        let tag = if allowed.contains(&(cell.clone(), *slow, *fast)) {
+            "known"
+        } else {
+            "NEW "
+        };
+        println!("  [{tag}] {cell}: s{slow} dominated by faster s{fast}");
+    }
+    if fixed > 0 {
+        println!("  {fixed} envelope inversion(s) gone — re-pin to shrink the envelope.");
+    }
+    if !new.is_empty() {
+        eprintln!(
+            "gate-monotone: FAIL — {} NEW inversion(s) introduced (see above).",
+            new.len()
+        );
+        std::process::exit(1);
+    }
+    println!("gate-monotone: PASS");
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let ci = args.iter().any(|a| a == "--ci");
@@ -665,9 +831,10 @@ fn main() {
             run_cells(Path::new(dir), ci);
         }
         Some("ladder") => run_ladder(pin),
+        Some("monotone") => run_monotone(pin),
         _ => {
             eprintln!(
-                "usage: gate_kit <determinism [--ci] | cells OUTDIR [--ci] | ladder [--pin]>"
+                "usage: gate_kit <determinism [--ci] | cells OUTDIR [--ci] | ladder [--pin] | monotone [--pin]>"
             );
             std::process::exit(2);
         }

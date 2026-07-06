@@ -90,9 +90,20 @@ gate-ladder:
 gate-ladder-pin:
     cargo run --release --features encode-imazen,encode-threading --example gate_kit -- ladder --pin
 
+# Invariant: RD improves monotonically with encode TIME (no slower tier
+# Pareto-dominated by a faster one). Envelope = benchmarks/gate_monotone_envelope.tsv
+# lists KNOWN inversions; fails on any NEW one. Goal state: empty envelope.
+gate-monotone:
+    cargo run --release --features encode-imazen,encode-threading --example gate_kit -- monotone
+
+# Re-pin after landing a content-gate that REMOVES inversions (the shrinking
+# envelope IS the progress) or at the dep-bump flip. Commit the TSV diff.
+gate-monotone-pin:
+    cargo run --release --features encode-imazen,encode-threading --example gate_kit -- monotone --pin
+
 # All zenavif-side gates (run before + after every refactor commit, per
 # docs/ENGINEERING_BASELINE.md section E).
-gates: gate-determinism gate-conformance gate-ladder
+gates: gate-determinism gate-conformance gate-ladder gate-monotone
 
 # Run example decode_avif with test image
 decode-test:
