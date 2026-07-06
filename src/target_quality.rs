@@ -15,7 +15,7 @@
 //! Enabled by the `target-quality` feature (pulls `fast-ssim2` and `zensim`).
 
 use crate::config::DecoderConfig;
-use crate::encoder::{EncodedImage, EncoderConfig, encode_rgb8, encode_rgba8};
+use crate::encoder::{EncodedImage, EncoderConfig, encode_rgb8_once, encode_rgba8};
 use crate::error::{Error, Result};
 use almost_enough::{Stop, StopToken};
 use imgref::{ImgRef, ImgVec};
@@ -137,8 +137,10 @@ pub fn encode_rgb8_with_target(
     let q_start = None;
 
     search_target(target, options, q_start, &stop, |q, stop| {
+        // The quality search varies q at a fixed speed — use the single-encode
+        // primitive so the monotonicity probe never nests inside the loop.
         let cfg = config.clone().quality(q);
-        let enc = encode_rgb8(img, &cfg, stop.clone())?;
+        let enc = encode_rgb8_once(img, &cfg, stop.clone())?;
         let s = score_rgb8(target, img, &enc.avif_file, stop)?;
         Ok((enc, s))
     })
@@ -210,8 +212,10 @@ fn probe_eligible_speed(speed: u8) -> bool {
 /// The pick is deterministic (bytes + perceptual score, no wall-clock timing).
 /// Release-gated by [`crate::fast_heads::MONOTONE_GATE_LIVE`]: on registry (arms
 /// off) there is no inversion to fix, so it never probes (identical to a plain
-/// [`encode_rgb8`], no wasted encode). Only the eligible bundle tiers (6/7/8) are
-/// probed; other speeds pass straight through.
+/// [`encode_rgb8_once`], and crucially it does NOT even score — one encode, out).
+/// Only the eligible bundle tiers (6/7/8) are probed; other speeds and photo-like
+/// content pass straight through. This is the core of the automatic guarantee in
+/// [`crate::encode_rgb8`]; the pick metric is SSIMULACRA2.
 ///
 /// # Errors
 /// Returns the first encode/decode/score error, or cancellation via `stop`.
@@ -219,37 +223,39 @@ fn probe_eligible_speed(speed: u8) -> bool {
 pub(crate) fn encode_rgb8_monotone(
     img: ImgRef<'_, Rgb<u8>>,
     config: &EncoderConfig,
-    metric: TargetMetric,
     stop: StopToken,
 ) -> Result<MonotoneEncoded> {
     let requested = config.speed_value();
-    let enc_req = encode_rgb8(img, config, stop.clone())?;
-    let score_req = score_rgb8(metric, img, &enc_req.avif_file, &stop)?;
-    let keep_request = |e: EncodedImage, s: f64, probed: bool| MonotoneEncoded {
+    let enc_req = encode_rgb8_once(img, config, stop.clone())?;
+    // `score` is NaN on the no-probe paths — it is never computed there (the whole
+    // point of the near-1× property is that registry/photo encodes pay nothing).
+    let unscored = |e: EncodedImage, probed: bool| MonotoneEncoded {
         encoded: e,
         speed_used: requested,
         probed,
         swapped: false,
-        score: s,
+        score: f64::NAN,
     };
 
-    // Release-gated + tier-gated: nothing to fix on registry, and only the bundle
-    // tiers can invert.
+    // Release-gated + tier-gated: nothing to fix on registry / non-bundle speeds.
     if !crate::fast_heads::MONOTONE_GATE_LIVE || !probe_eligible_speed(requested) {
-        return Ok(keep_request(enc_req, score_req, false));
+        return Ok(unscored(enc_req, false));
     }
     // Selective: photo-like content cannot invert — skip the probe (the near-1×
     // property). Missing/degenerate features degrade to no-probe (safe: the worst
     // case is leaving a rare structured inversion, never a wrong pixel).
     match patch_fraction_rgb8(img) {
         Some(pf) if pf > PROBE_PATCH_FRACTION_MIN => {}
-        _ => return Ok(keep_request(enc_req, score_req, false)),
+        _ => return Ok(unscored(enc_req, false)),
     }
 
-    // Probe the reliable anchor; keep it only if it Pareto-dominates on (bytes,
-    // score). A ~0.05 score band treats near-equal quality as a tie (keep request).
+    // Structured content: score the request and probe the reliable anchor. Keep
+    // the anchor only if it Pareto-dominates on (bytes, score); a ~0.05 score band
+    // treats near-equal quality as a tie (keep the request).
+    let metric = TargetMetric::Ssim2(0.0); // target value unused — only the score matters
+    let score_req = score_rgb8(metric, img, &enc_req.avif_file, &stop)?;
     let anchor_cfg = config.clone().speed(PROBE_ANCHOR_SPEED);
-    let enc_a = encode_rgb8(img, &anchor_cfg, stop.clone())?;
+    let enc_a = encode_rgb8_once(img, &anchor_cfg, stop.clone())?;
     let score_a = score_rgb8(metric, img, &enc_a.avif_file, &stop)?;
     let (ba, br) = (enc_a.avif_file.len(), enc_req.avif_file.len());
     let anchor_not_worse = ba <= br && score_a + 0.05 >= score_req;
@@ -263,8 +269,26 @@ pub(crate) fn encode_rgb8_monotone(
             score: score_a,
         })
     } else {
-        Ok(keep_request(enc_req, score_req, true))
+        Ok(MonotoneEncoded {
+            encoded: enc_req,
+            speed_used: requested,
+            probed: true,
+            swapped: false,
+            score: score_req,
+        })
     }
+}
+
+/// The automatic monotonicity path behind [`crate::encode_rgb8`]: runs
+/// [`encode_rgb8_monotone`] and returns just the chosen encode. Inert (a single
+/// [`encode_rgb8_once`]) on registry, non-bundle speeds, and photo-like content.
+#[cfg(feature = "auto-tune")]
+pub(crate) fn encode_rgb8_auto_monotone(
+    img: ImgRef<'_, Rgb<u8>>,
+    config: &EncoderConfig,
+    stop: StopToken,
+) -> Result<EncodedImage> {
+    encode_rgb8_monotone(img, config, stop).map(|m| m.encoded)
 }
 
 /// Extract `patch_fraction` (zenanalyze id 23) from an RGB8 source, or `None`
@@ -647,13 +671,8 @@ mod monotone_probe_tests {
         // requested speed is kept, and the encode is still valid.
         let img = checkerboard(64, 64);
         let cfg = EncoderConfig::new().speed(6).threads(Some(1));
-        let out = encode_rgb8_monotone(
-            img.as_ref(),
-            &cfg,
-            TargetMetric::Ssim2(80.0),
-            StopToken::new(Unstoppable),
-        )
-        .expect("monotone encode");
+        let out = encode_rgb8_monotone(img.as_ref(), &cfg, StopToken::new(Unstoppable))
+            .expect("monotone encode");
         assert!(!out.encoded.avif_file.is_empty(), "produces a valid AVIF");
         if !crate::fast_heads::MONOTONE_GATE_LIVE {
             assert!(!out.probed, "must not probe on registry (no inversion to fix)");
@@ -668,13 +687,8 @@ mod monotone_probe_tests {
         // is skipped regardless of content or the release flag.
         let img = checkerboard(64, 64);
         let cfg = EncoderConfig::new().speed(4).threads(Some(1));
-        let out = encode_rgb8_monotone(
-            img.as_ref(),
-            &cfg,
-            TargetMetric::Ssim2(80.0),
-            StopToken::new(Unstoppable),
-        )
-        .expect("monotone encode");
+        let out = encode_rgb8_monotone(img.as_ref(), &cfg, StopToken::new(Unstoppable))
+            .expect("monotone encode");
         assert!(!out.probed, "speed 4 is ineligible — never probed");
         assert_eq!(out.speed_used, 4);
     }

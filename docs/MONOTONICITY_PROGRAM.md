@@ -245,14 +245,19 @@ results). Cost model: photo 1×, structured ~1.5×, so **~1.1× on 80%-photo rea
 and the guarantee is complete (the probe is reliable on exactly the content that can invert). This
 is the answer to "find a solution that isn't 2×."
 
-**IMPLEMENTED** (`src/target_quality.rs::encode_rgb8_monotone`, `pub(crate)`, f93eaf69): encode
-requested → release-gate + tier-gate → pf-gate (photo skip) → probe s4 → deterministic Pareto
-pick on (bytes, score). 2 registry unit tests pin the release-gate + ineligible-speed passthrough.
-**Armed end-to-end validated** (temp gate-flip + armed dep, reverted): 7028 plot → `probed=true
-swapped=true speed_used=4` (inverter fixed on a real encode); 5004 photo → `probed=false
-speed_used=6` (photo skips the probe — the near-1× property confirmed live). Remaining: the public
-entry point (a thin `pub fn` wrapper) awaits API sign-off; RGBA8/RGB16 variants; τ validation on a
-larger corpus.
+**IMPLEMENTED — and it is now the DEFAULT `encode_rgb8` path (automatic, per the user directive
+"make it the default path, automatic").** `encode_rgb8` is an auto-monotone *dispatcher*: with
+`target-quality` + `auto-tune` present it runs the selective probe (encode requested → release-gate
++ tier-gate → pf-gate photo-skip → probe s4 → deterministic Pareto pick on (bytes, score)); without
+those features, on non-bundle speeds, on photo-like content, or with the gate off, it is exactly one
+`encode_rgb8_once` (the renamed single-encode primitive) — no decode, no score, no extra encode. The
+codec trait and `encode_with` inherit the guarantee for free; the target-quality search and the
+two-pass path route to `encode_rgb8_once` so their repeated encodes never nest the probe. Signature
+unchanged (no public API break). **Armed end-to-end validated through the default path** (temp
+gate-flip + armed dep, reverted): `encode_rgb8(7028 plot)` = direct-s4 bytes (30161B, swapped);
+`encode_rgb8(5004 photo)` = direct-s6 bytes (130996B, probe skipped). 2 registry unit tests pin the
+release-gate + ineligible-speed passthrough; all 83 lib tests pass. Remaining: RGBA8/RGB16 default
+coverage (both still route through their own single-encode paths); τ validation on a larger corpus.
 
 Remaining alternatives if even ~1.5×-on-structured is too much: parallel probe (1× wall / 2×
 compute), or deep preset R&D to make s6 Pareto-competitive with s4 on line content (free at

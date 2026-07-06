@@ -1063,7 +1063,18 @@ fn build_ravif_encoder(
     Ok(enc)
 }
 
-/// Encode an 8-bit RGB image to AVIF
+/// Encode an 8-bit RGB image to AVIF.
+///
+/// This is the default encode path and carries an **automatic per-image
+/// RD-vs-time monotonicity guarantee**: on structured content encoded at a
+/// bundle speed (6/7/8), it transparently probes the reliable anchor tier and
+/// keeps whichever result Pareto-dominates on (bytes, perceptual score), so a
+/// *faster* speed can never silently beat the one you asked for. The guarantee
+/// needs perceptual scoring (`target-quality`) + content analysis (`auto-tune`);
+/// without those features, on photo-like content or non-bundle speeds (where an
+/// inversion is impossible), or while the release gate is off, this is exactly a
+/// single [`encode_rgb8_once`] — no decode, no score, no extra encode. See
+/// `docs/MONOTONICITY_PROGRAM.md` "SELECTIVE probe".
 ///
 /// # Arguments
 ///
@@ -1071,6 +1082,24 @@ fn build_ravif_encoder(
 /// * `config` - Encoder configuration
 /// * `stop` - Cancellation token (checked pre-encode, forwarded to ravif per-superblock)
 pub fn encode_rgb8(
+    img: ImgRef<'_, Rgb<u8>>,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedImage> {
+    #[cfg(all(feature = "target-quality", feature = "auto-tune"))]
+    {
+        crate::target_quality::encode_rgb8_auto_monotone(img, config, stop)
+    }
+    #[cfg(not(all(feature = "target-quality", feature = "auto-tune")))]
+    {
+        encode_rgb8_once(img, config, stop)
+    }
+}
+
+/// Single-encode primitive with no monotonicity probe — the building block used
+/// by [`encode_rgb8`], the target-quality search, and the two-pass path (each of
+/// which must control its own repeated encodes without nesting the probe).
+pub(crate) fn encode_rgb8_once(
     img: ImgRef<'_, Rgb<u8>>,
     config: &EncoderConfig,
     stop: almost_enough::StopToken,

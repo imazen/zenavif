@@ -27,7 +27,7 @@
 //! for a second pass that cannot steer anything.
 
 use crate::DecoderConfig;
-use crate::encoder::{EncodedImage, EncoderConfig, encode_rgb8};
+use crate::encoder::{EncodedImage, EncoderConfig, encode_rgb8_once};
 use crate::error::{Error, Result};
 use enough::Stop as _;
 use imgref::ImgRef;
@@ -237,9 +237,9 @@ pub fn encode_rgb8_two_pass(
     let pass1 = match options.probe_quality {
         Some(pq) => {
             let probe_cfg = config.clone().quality(pq);
-            encode_rgb8(img, &probe_cfg, stop.clone())?
+            encode_rgb8_once(img, &probe_cfg, stop.clone())?
         }
-        None => encode_rgb8(img, config, stop.clone())?,
+        None => encode_rgb8_once(img, config, stop.clone())?,
     };
 
     // Decode with our own decoder — the pixels a user gets.
@@ -266,7 +266,7 @@ pub fn encode_rgb8_two_pass(
     // machinery.
     let mut cfg2 = config.clone();
     cfg2.sb_q_scale = Some(sb_q_scale.clone());
-    let pass2 = encode_rgb8(img, &cfg2, stop)?;
+    let pass2 = encode_rgb8_once(img, &cfg2, stop)?;
 
     Ok(TwoPassEncode {
         encode: pass2,
