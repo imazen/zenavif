@@ -53,6 +53,13 @@ on + Tune::Ssimulacra2; 6 diverse images, Q80; analyze with
 - "Armed" measurements use the throwaway dev-patch clone `../ravif--statusmeasure` (consts
   flipped + zenrav1e master path + `Tune::Ssimulacra2` + an encode-only `ZR_ENC_MS` timer).
   The arms are **release-gated**; the content-gates ship gated too (flip at the dep bump).
+- **`monotone_speed_gate` is RELEASE-GATED (`MONOTONE_GATE_LIVE = false`).** The valley is
+  armed-only: on registry s5 is NOT dominated — measured, it often *beats* s9 (6096:
+  registry-s5 170337/90.16 vs s9 198950/89.29), so applying the remap pre-flip would REGRESS
+  synthetic content (+17% bytes / −0.87 ssim2). The gate fires on `gfs` regardless of build,
+  so its APPLICATION is held off until the arms flip (dep-bump checklist). Guarded by
+  `monotone_gate_release_held_off_on_registry`. Unlike the budget heads (forwarded by ravif at
+  the bump) this is a zenavif-side speed change, so it needs its OWN live flag.
 - **Two layers — do not conflate them:**
   - `gate-monotone` tests the **RAW ladder** (`encode_rgb8` at *explicit* speeds — it does
     NOT go through `auto_tune`). It documents the encoder's intrinsic RD-vs-time inversions.

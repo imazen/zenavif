@@ -26,7 +26,8 @@ Screen content rides palette(+UV) + intraBC A+B (legacy plots −26..−29%; fam
   budgets) recommend-only via fast_heads; q₀ seed under `auto-tune`.
 - Monotonicity head: `monotone_speed_gate` remaps the armed s5 RD-vs-time valley →
   s9 on synthetic content (gfs<0.64), held-out-validated (0 new inversions on 15
-  doccharts origins) — docs/MONOTONICITY_PROGRAM.md.
+  doccharts origins). Release-gated `MONOTONE_GATE_LIVE=false` (registry s5 is not a
+  valley → applying pre-flip regresses); flip at the dep bump — docs/MONOTONICITY_PROGRAM.md.
 - Tiles: ≥1 MP per tile default (bytes core-count-independent) — LIVE on ravif main.
 - Evaluation policy: per-family first, cluster-mass weights, photos-only merit
   keepable (RD_GAP "EVALUATION POLICY").

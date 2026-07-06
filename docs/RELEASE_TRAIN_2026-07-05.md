@@ -45,7 +45,9 @@ critical path to production: ~9 measured wins are release-gated behind car 4.
   car publishes 0.2.0 (gray/expert/tune-forwarding) so the flip below turns the WINS on.
 - zenavif: bump deps + execute the CLAUDE.md dep-bump checklist — the flip of the 7
   gated consts (S1_DEEP, SMALL_PX_RDO_TX, S6_TX_SIZE_RDO, S6_PART_PRUNE, S6_INTRA7
-  [re-weigh vs top-5 per S4TIER], S10_RETIER, FRAME_HINTS) + 16 uncomment sites +
+  [re-weigh vs top-5 per S4TIER], S10_RETIER, FRAME_HINTS) + the zenavif-side
+  `fast_heads::MONOTONE_GATE_LIVE` (the s5-valley remap is armed-only — see
+  docs/MONOTONICITY_PROGRAM.md; registry-safe today) + 16 uncomment sites +
   encode_plan mirror refresh + palette-gate forward + tune default decision +
   alpha-tune=Psnr guard + identity-test tightening (zenavif#8 closes) + QM re-benchmark.
   The §A gates (gate-identity/conformance/determinism/ladder/recon) verify the flip.

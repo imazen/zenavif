@@ -235,6 +235,17 @@ pub const MONOTONE_VALLEY_SPEED: u8 = 5;
 /// (benchmarks/mono_val_labels_doccharts_2026-07-06.tsv).
 pub const MONOTONE_REMAP_SPEED: u8 = 9;
 
+/// Release gate for [`monotone_speed_gate_for_rgb8`]'s APPLICATION. The s5
+/// valley exists ONLY on the armed build (the s6+ bundle arms create it); on a
+/// registry build s5 is *not* dominated — measured, it often BEATS s9 (6096:
+/// registry-s5 170337/90.16 vs s9 198950/89.29), so remapping there would
+/// REGRESS synthetic content (+17% bytes / -0.87 ssim2). The gate fires on
+/// `gfs` regardless of build, so its application must be held OFF until the
+/// arms go live. Flip to `true` at the zenrav1e dep bump alongside ravif's
+/// S1_DEEP/S6_*/S10_RETIER const flips (dep-bump checklist). Byte-identical
+/// while `false` (the pure [`monotone_speed_gate`] logic stays unit-tested).
+pub const MONOTONE_GATE_LIVE: bool = false;
+
 /// Monotonicity head (the 2026-07-05 user directive: "make sure our image
 /// analysis provides monotonic rd improvement with time"). On synthetic
 /// content (`gradient_fraction_smooth < `[`MONOTONE_GATE_GRADIENT_SMOOTH_MAX`])
@@ -242,10 +253,10 @@ pub const MONOTONE_REMAP_SPEED: u8 = 9;
 /// [`MONOTONE_REMAP_SPEED`] (the measured dominator) so spending s5's time can
 /// never buy a worse RD point than the faster s9. Returns `speed` unchanged off
 /// the gate, on a non-finite feature, or off [`MONOTONE_VALLEY_SPEED`] — a
-/// clean no-op. Pure speed selection (zenavif owns the speed knob), so unlike
-/// the budget heads it needs no encoder passthrough; its EFFECT is
-/// armed-build-specific (the valley is created by the s6+ bundle arms, absent
-/// on registry builds).
+/// clean no-op. This is the PURE remap logic (always active for unit-testing);
+/// its APPLICATION via [`monotone_speed_gate_for_rgb8`] is release-gated by
+/// [`MONOTONE_GATE_LIVE`] because the valley is armed-only — on registry s5 is
+/// not dominated, so applying the remap there would regress synthetic content.
 #[must_use]
 pub fn monotone_speed_gate(gradient_fraction_smooth: f32, speed: u8) -> u8 {
     if speed == MONOTONE_VALLEY_SPEED
@@ -345,6 +356,12 @@ pub fn monotone_speed_gate_for_rgb8(
 ) -> u8 {
     use zenanalyze::feature::{AnalysisFeature, AnalysisQuery, FeatureSet};
 
+    // Release-gated: the s5 valley (hence a correct remap) exists ONLY on the
+    // armed build. On registry s5 is not dominated — applying the remap there
+    // regresses synthetic content, so hold it OFF until the arms flip live.
+    if !MONOTONE_GATE_LIVE {
+        return speed;
+    }
     // Off the valley speed the gate is a no-op regardless of content — skip
     // the analysis entirely (it also can't fire, keeping this cheap).
     if speed != MONOTONE_VALLEY_SPEED {
@@ -409,6 +426,35 @@ mod tests {
         // Non-finite feature degrades to no-op (never a spurious remap).
         assert_eq!(monotone_speed_gate(f32::NAN, 5), 5);
         assert_eq!(monotone_speed_gate(f32::INFINITY, 5), 5);
+    }
+
+    #[test]
+    #[cfg(feature = "auto-tune")]
+    fn monotone_gate_release_held_off_on_registry() {
+        // A checkerboard has low gfs, so the PURE gate would remap s5→s9. But
+        // the valley is armed-only; on registry s5 is not dominated (measured:
+        // it beats s9). MONOTONE_GATE_LIVE holds the APPLICATION off so the
+        // remap can't ship the +17%-bytes registry regression. This asserts the
+        // no-op while the flag is false (the safety-critical state today).
+        if !MONOTONE_GATE_LIVE {
+            let (w, h) = (256u32, 256u32);
+            let screen: Vec<u8> = (0..h)
+                .flat_map(|y| {
+                    (0..w).flat_map(move |x| {
+                        if ((x / 16) + (y / 16)) % 2 == 0 {
+                            [255u8, 255, 255]
+                        } else {
+                            [0u8, 32, 128]
+                        }
+                    })
+                })
+                .collect();
+            assert_eq!(
+                monotone_speed_gate_for_rgb8(&screen, w, h, None, 5),
+                5,
+                "applied gate must be a no-op while MONOTONE_GATE_LIVE is false"
+            );
+        }
     }
 
     #[test]
