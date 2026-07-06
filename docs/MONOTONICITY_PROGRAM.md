@@ -72,6 +72,13 @@ on + Tune::Ssimulacra2; 6 diverse images, Q80; analyze with
     (sweep quality targets → assert the PICKS' (time, RD) are monotone), which needs a baked
     picker (MODEL_BYTES). That check is the natural follow-up; the fit simulation
     (`fit_content_gates.py`) is the current stand-in (0 new inversions, held-out-validated).
+  - **The gate is also LATENT on the current picker.** `monotone_speed_gate` lives in
+    `auto_tune`, which only reaches it after a successful pick — but the baked
+    `rav1e_picker_v0_1_1.bin` LUT has narrow content-specific coverage: measured 2026-07-06,
+    it returns `TargetOutOfRange` for the train26 s1024 renditions at z40-z90 (even z85, its
+    own test target, is OUT on 5004). So the gate rarely fires in practice today; it becomes
+    live once (a) `MONOTONE_GATE_LIVE` flips AND (b) the picker covers the content. Correct +
+    release-gated meanwhile. (Not a regression — auto_tune already errored out-of-range there.)
 - `gate-monotone` runs against zenavif's own encode API → `../ravif` path dep (consts OFF =
   registry now); the pre-flip fixture envelope also would have caught the catastrophic
   registry `fine_dir` recon-desync had the procedural fixtures triggered it (they don't).
