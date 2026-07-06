@@ -32,6 +32,16 @@ budget points on the new loop.**
   decisions). This is the dataset generator for every fit below — the census tools
   from COEFFRD/SSIMRD generalized into one format. Without traces, joint fitting is
   blind; with them, most fits are OFFLINE against cached encodes.
+  **SEEDED 2026-07-06** — zenrav1e `cooptloop_trace` feature (default-off,
+  byte-identical off; `zenrav1e@795dfd37`). Captures the CURRENCY layer: one
+  `(kind, λ, rate_bits, distortion, cost)` record per `compute_rd_cost[_scaled]`
+  call — the single chokepoint every RD decision flows through — dumpable as TSV.
+  `tests/cooptloop_trace.rs` gates liveness + the `cost == distortion + λ·rate_bits`
+  identity + schema. NOT YET captured (the enrichment follow-ups, each a bounded
+  chunk): per-block context (bsize, bo), per-candidate vs chosen-vs-runner-up (needs
+  emit at the decision sites `rdo_mode_decision`/`encode_partition_topdown`, not just
+  the cost chokepoint), the R-estimate-vs-actual-tell delta, and quant decisions.
+  Then the offline analyzer that turns a trace into the Phase-1 D/R/λ regressions.
 - Gates green before and after every phase (ENGINEERING_BASELINE §A); pre-registered
   decision rules per phase (the discipline that kept every verdict honest).
 
