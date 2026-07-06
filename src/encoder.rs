@@ -1149,7 +1149,13 @@ pub fn encode_gray8(
     })
 }
 
-/// Encode an 8-bit RGBA image to AVIF
+/// Encode an 8-bit RGBA image to AVIF.
+///
+/// Like [`encode_rgb8`], this default path carries the automatic RD-vs-time
+/// monotonicity guarantee (selective probe on structured content; `patch_fraction`
+/// is taken over the color channels). Inert (a single [`encode_rgba8_once`])
+/// without `target-quality` + `auto-tune`, on photo-like content, on non-bundle
+/// speeds, or while the release gate is off.
 ///
 /// # Arguments
 ///
@@ -1157,6 +1163,22 @@ pub fn encode_gray8(
 /// * `config` - Encoder configuration
 /// * `stop` - Cancellation token (checked pre-encode, forwarded to ravif per-superblock)
 pub fn encode_rgba8(
+    img: ImgRef<'_, Rgba<u8>>,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedImage> {
+    #[cfg(all(feature = "target-quality", feature = "auto-tune"))]
+    {
+        crate::target_quality::encode_rgba8_auto_monotone(img, config, stop)
+    }
+    #[cfg(not(all(feature = "target-quality", feature = "auto-tune")))]
+    {
+        encode_rgba8_once(img, config, stop)
+    }
+}
+
+/// Single-encode RGBA8 primitive (no monotonicity probe) — see [`encode_rgb8_once`].
+pub(crate) fn encode_rgba8_once(
     img: ImgRef<'_, Rgba<u8>>,
     config: &EncoderConfig,
     stop: almost_enough::StopToken,

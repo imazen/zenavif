@@ -15,7 +15,7 @@
 //! Enabled by the `target-quality` feature (pulls `fast-ssim2` and `zensim`).
 
 use crate::config::DecoderConfig;
-use crate::encoder::{EncodedImage, EncoderConfig, encode_rgb8_once, encode_rgba8};
+use crate::encoder::{EncodedImage, EncoderConfig, encode_rgb8_once, encode_rgba8_once};
 use crate::error::{Error, Result};
 use almost_enough::{Stop, StopToken};
 use imgref::{ImgRef, ImgVec};
@@ -225,10 +225,33 @@ pub(crate) fn encode_rgb8_monotone(
     config: &EncoderConfig,
     stop: StopToken,
 ) -> Result<MonotoneEncoded> {
-    let requested = config.speed_value();
-    let enc_req = encode_rgb8_once(img, config, stop.clone())?;
-    // `score` is NaN on the no-probe paths — it is never computed there (the whole
-    // point of the near-1× property is that registry/photo encodes pay nothing).
+    probe_monotone_core(
+        config.speed_value(),
+        |sp| encode_rgb8_once(img, &config.clone().speed(sp), stop.clone()),
+        || patch_fraction_rgb8(img),
+        |e| score_rgb8(TargetMetric::Ssim2(0.0), img, &e.avif_file, &stop),
+    )
+}
+
+/// The shared selective-probe core used by every pixel type's monotone path.
+///
+/// `encode_at(speed)` produces an encode at that speed (the requested encode is
+/// always run; the anchor is run only when probing). `patch_fraction()` is called
+/// lazily — **never on registry / non-bundle speeds**, so no feature extraction
+/// happens where the probe can't fire. `score(&enc)` gives an encode's perceptual
+/// score (SSIMULACRA2 for the pick). Returns the requested encode unless the
+/// anchor Pareto-dominates it on (bytes, score) with a 0.05 score tie-band. All
+/// deterministic — no wall-clock timing enters the decision.
+#[cfg(feature = "auto-tune")]
+fn probe_monotone_core(
+    requested: u8,
+    encode_at: impl Fn(u8) -> Result<EncodedImage>,
+    patch_fraction: impl FnOnce() -> Option<f32>,
+    score: impl Fn(&EncodedImage) -> Result<f64>,
+) -> Result<MonotoneEncoded> {
+    let enc_req = encode_at(requested)?;
+    // `score` is NaN on the no-probe paths — never computed there (the whole point
+    // of the near-1× property is that registry/photo encodes pay nothing extra).
     let unscored = |e: EncodedImage, probed: bool| MonotoneEncoded {
         encoded: e,
         speed_used: requested,
@@ -244,7 +267,7 @@ pub(crate) fn encode_rgb8_monotone(
     // Selective: photo-like content cannot invert — skip the probe (the near-1×
     // property). Missing/degenerate features degrade to no-probe (safe: the worst
     // case is leaving a rare structured inversion, never a wrong pixel).
-    match patch_fraction_rgb8(img) {
+    match patch_fraction() {
         Some(pf) if pf > PROBE_PATCH_FRACTION_MIN => {}
         _ => return Ok(unscored(enc_req, false)),
     }
@@ -252,11 +275,9 @@ pub(crate) fn encode_rgb8_monotone(
     // Structured content: score the request and probe the reliable anchor. Keep
     // the anchor only if it Pareto-dominates on (bytes, score); a ~0.05 score band
     // treats near-equal quality as a tie (keep the request).
-    let metric = TargetMetric::Ssim2(0.0); // target value unused — only the score matters
-    let score_req = score_rgb8(metric, img, &enc_req.avif_file, &stop)?;
-    let anchor_cfg = config.clone().speed(PROBE_ANCHOR_SPEED);
-    let enc_a = encode_rgb8_once(img, &anchor_cfg, stop.clone())?;
-    let score_a = score_rgb8(metric, img, &enc_a.avif_file, &stop)?;
+    let score_req = score(&enc_req)?;
+    let enc_a = encode_at(PROBE_ANCHOR_SPEED)?;
+    let score_a = score(&enc_a)?;
     let (ba, br) = (enc_a.avif_file.len(), enc_req.avif_file.len());
     let anchor_not_worse = ba <= br && score_a + 0.05 >= score_req;
     let anchor_strictly_better = ba < br || score_a > score_req + 0.05;
@@ -291,6 +312,34 @@ pub(crate) fn encode_rgb8_auto_monotone(
     encode_rgb8_monotone(img, config, stop).map(|m| m.encoded)
 }
 
+/// RGBA8 counterpart of [`encode_rgb8_monotone`] — same selective probe, scoring
+/// via [`score_rgba8`] (ssim2 composites alpha on mid-gray). `patch_fraction` is
+/// taken over the color channels (alpha dropped).
+#[cfg(feature = "auto-tune")]
+pub(crate) fn encode_rgba8_monotone(
+    img: ImgRef<'_, rgb::Rgba<u8>>,
+    config: &EncoderConfig,
+    stop: StopToken,
+) -> Result<MonotoneEncoded> {
+    probe_monotone_core(
+        config.speed_value(),
+        |sp| encode_rgba8_once(img, &config.clone().speed(sp), stop.clone()),
+        || patch_fraction_rgba8(img),
+        |e| score_rgba8(TargetMetric::Ssim2(0.0), img, &e.avif_file, &stop),
+    )
+}
+
+/// The automatic monotonicity path behind [`crate::encode_rgba8`] — returns just
+/// the chosen encode.
+#[cfg(feature = "auto-tune")]
+pub(crate) fn encode_rgba8_auto_monotone(
+    img: ImgRef<'_, rgb::Rgba<u8>>,
+    config: &EncoderConfig,
+    stop: StopToken,
+) -> Result<EncodedImage> {
+    encode_rgba8_monotone(img, config, stop).map(|m| m.encoded)
+}
+
 /// Extract `patch_fraction` (zenanalyze id 23) from an RGB8 source, or `None`
 /// when unavailable (degenerate dims). Mirrors the feature request in
 /// [`crate::fast_heads::monotone_speed_gate_for_rgb8`].
@@ -302,6 +351,26 @@ fn patch_fraction_rgb8(img: ImgRef<'_, Rgb<u8>>) -> Option<f32> {
         return None;
     }
     let rgb = contiguous_rgb8(img);
+    let query = AnalysisQuery::new(FeatureSet::new().with(AnalysisFeature::PatchFraction));
+    let analysis = zenanalyze::analyze_features_rgb8(&rgb, w, h, &query);
+    analysis.get_f32(AnalysisFeature::PatchFraction)
+}
+
+/// `patch_fraction` over an RGBA8 source's COLOR channels (alpha dropped — the
+/// feature is defined on opaque RGB). `None` on degenerate dims.
+#[cfg(feature = "auto-tune")]
+fn patch_fraction_rgba8(img: ImgRef<'_, rgb::Rgba<u8>>) -> Option<f32> {
+    use zenanalyze::feature::{AnalysisFeature, AnalysisQuery, FeatureSet};
+    let (w, h) = (img.width() as u32, img.height() as u32);
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let mut rgb = Vec::with_capacity((w as usize) * (h as usize) * 3);
+    for row in img.rows() {
+        for p in row {
+            rgb.extend_from_slice(&[p.r, p.g, p.b]);
+        }
+    }
     let query = AnalysisQuery::new(FeatureSet::new().with(AnalysisFeature::PatchFraction));
     let analysis = zenanalyze::analyze_features_rgb8(&rgb, w, h, &query);
     analysis.get_f32(AnalysisFeature::PatchFraction)
@@ -331,8 +400,10 @@ pub fn encode_rgba8_with_target(
     stop: StopToken,
 ) -> Result<TargetedEncode> {
     search_target(target, options, None, &stop, |q, stop| {
+        // Fixed-speed quality search — use the primitive so the monotone probe
+        // never nests inside the loop.
         let cfg = config.clone().quality(q);
-        let enc = encode_rgba8(img, &cfg, stop.clone())?;
+        let enc = encode_rgba8_once(img, &cfg, stop.clone())?;
         let s = score_rgba8(target, img, &enc.avif_file, stop)?;
         Ok((enc, s))
     })
@@ -691,5 +762,24 @@ mod monotone_probe_tests {
             .expect("monotone encode");
         assert!(!out.probed, "speed 4 is ineligible — never probed");
         assert_eq!(out.speed_used, 4);
+    }
+
+    #[test]
+    fn monotone_probe_rgba8_release_gated_on_registry() {
+        // The RGBA8 default path shares the generic probe core. Opaque structured
+        // content at an eligible tier is probe-eligible only once the arms are live;
+        // on registry it must pass straight through (valid encode, no probe).
+        let rgb = checkerboard(64, 64);
+        let rgba: Vec<rgb::Rgba<u8>> =
+            rgb.pixels().map(|p| rgb::Rgba::new(p.r, p.g, p.b, 255)).collect();
+        let img = ImgVec::new(rgba, 64, 64);
+        let cfg = EncoderConfig::new().speed(6).threads(Some(1));
+        let out = encode_rgba8_monotone(img.as_ref(), &cfg, StopToken::new(Unstoppable))
+            .expect("rgba8 monotone encode");
+        assert!(!out.encoded.avif_file.is_empty(), "produces a valid AVIF");
+        if !crate::fast_heads::MONOTONE_GATE_LIVE {
+            assert!(!out.probed, "must not probe on registry");
+            assert_eq!(out.speed_used, 6, "requested speed kept");
+        }
     }
 }

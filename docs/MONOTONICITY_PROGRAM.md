@@ -255,9 +255,16 @@ codec trait and `encode_with` inherit the guarantee for free; the target-quality
 two-pass path route to `encode_rgb8_once` so their repeated encodes never nest the probe. Signature
 unchanged (no public API break). **Armed end-to-end validated through the default path** (temp
 gate-flip + armed dep, reverted): `encode_rgb8(7028 plot)` = direct-s4 bytes (30161B, swapped);
-`encode_rgb8(5004 photo)` = direct-s6 bytes (130996B, probe skipped). 2 registry unit tests pin the
-release-gate + ineligible-speed passthrough; all 83 lib tests pass. Remaining: RGBA8/RGB16 default
-coverage (both still route through their own single-encode paths); τ validation on a larger corpus.
+`encode_rgb8(5004 photo)` = direct-s6 bytes (130996B, probe skipped). Registry unit tests pin the
+release-gate + ineligible-speed passthrough (RGB8 + RGBA8).
+
+**RGBA8 covered too** (`encode_rgba8` is the same dispatcher; a shared generic `probe_monotone_core`
+takes per-type encode/patch-fraction/score closures — RGBA8 drops alpha for `patch_fraction` and
+scores via `score_rgba8`, ssim2 compositing alpha on mid-gray). **RGB16/RGBA16 deliberately keep
+their single-encode paths:** pattern-2 was only ever measured on 8-bit *structured* content (line
+plots), and HDR 16-bit content is photo-like (low `patch_fraction`) so the probe would never fire —
+covering them would add code that can't activate. Revisit only if a 16-bit screen-content inversion
+is ever measured. Remaining: τ validation on a larger corpus.
 
 Remaining alternatives if even ~1.5×-on-structured is too much: parallel probe (1× wall / 2×
 compute), or deep preset R&D to make s6 Pareto-competitive with s4 on line content (free at
