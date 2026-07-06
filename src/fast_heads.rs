@@ -229,7 +229,10 @@ pub const MONOTONE_VALLEY_SPEED: u8 = 5;
 /// s6/7/8-dominated-by-s5 orderings and s6 (itself dominated by s4 on razor
 /// plots) introduced 6 new s5<s4. s9 slightly regresses 3 borderline
 /// clean-synthetic misfires (<= 4.4% bytes, still monotone) — no feature in
-/// {gfs, pf, dcty} separates those from true inverters.
+/// {gfs, pf, dcty} separates those from true inverters. **Held-out (15
+/// doccharts origins distinct from train): s5->s9 removes 9 valley inversions
+/// with 0 new; gate recall 9/10** — the safe-remap property generalizes
+/// (benchmarks/mono_val_labels_doccharts_2026-07-06.tsv).
 pub const MONOTONE_REMAP_SPEED: u8 = 9;
 
 /// Monotonicity head (the 2026-07-05 user directive: "make sure our image

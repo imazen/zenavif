@@ -94,6 +94,21 @@ introduced 6 new s5<s4 (s6 itself dominated by s4 on razor content). s9 costs th
 `fit_content_gates.py benchmarks/mono_fit_labels_2026-07-06.tsv
 benchmarks/mono_fit_features_2026-07-06.tsv 9`.
 
+## Held-out validation (2026-07-06, `benchmarks/mono_val_labels_doccharts_2026-07-06.tsv`)
+
+15 **doccharts** origins — distinct from the 24 train origins (5000/5030/6000/6600
+vs train's 5004/5048/6018) — swept armed @ q80, run through the same fit sim:
+- **10/15 invert; the s5-valley pattern generalizes** (nps/noaa reports, patents,
+  scans-text all show s5<s9).
+- **s5→s9 removes 9 valley inversions with 0 NEW inversions** — the critical safety
+  property (remapping never *creates* an inversion) holds on unseen content. Mean
+  remap RD delta 4% (mostly *improvement*: s9 smaller than the s5 valley).
+- **Gate recall 9/10.** The one miss (6600, a smooth scanned illustration) sits at
+  gfs 0.676 with photo-like pf 0.004 — just above the 0.64 threshold, which cannot
+  rise (train clean photo 9100 sits at gfs 0.675). Precision is imperfect (3/5 clean
+  fire), but s5→s9 is *safe* on misfires (bounded RD cost, never a new inversion), so
+  the gate's justification is the safe remap, not a perfect content classifier.
+
 ## Pattern-2 residual (`s6/s7/s8<s4`) — measured NOT separable on this corpus
 
 The second pattern (the s6+ bundle *hurts*, s4 dominates s6/7/8) affects 6/24
