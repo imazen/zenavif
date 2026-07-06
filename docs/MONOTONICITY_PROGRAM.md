@@ -121,6 +121,11 @@ zenanalyze features finds **no clean single-feature split** — the best
 3/24 and the class ranges overlap almost entirely. With 6 positives on 24
 origins that is overfit noise, not signal.
 
+**Confirmed on 39 origins** (train 24 + doccharts 15, 10 bundle-hurts): still no
+clean single-feature split — best is `orientation_energy_ratio` at err=5/39 with
+overlapping ranges (hurt 1.12-1.30 / rest 1.06-1.20). More data made the negative
+*stronger*, not weaker.
+
 **Verdict:** a safe pattern-2 gate needs a dense multi-origin sweep (per the
 CLAUDE.md sweep discipline: ~50 imgs/class, held-out validation, likely a
 multi-feature model) — it is RISKY because it touches s6/7/8 where the bundle is
