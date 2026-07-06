@@ -275,9 +275,19 @@ fn probe_monotone_core(
     // Structured content: score the request and probe the reliable anchor. Keep
     // the anchor only if it Pareto-dominates on (bytes, score); a ~0.05 score band
     // treats near-equal quality as a tie (keep the request).
-    let score_req = score(&enc_req)?;
+    //
+    // Best-effort on scoring: the probe is an optimization, so if a score can't be
+    // computed we keep the already-valid requested encode rather than failing the
+    // user's encode (score_rgba8 handles opaque decodes; this is defensive depth).
+    // The anchor encode propagates errors — a real failure or cancellation there
+    // should surface, not be masked.
+    let Ok(score_req) = score(&enc_req) else {
+        return Ok(unscored(enc_req, true));
+    };
     let enc_a = encode_at(PROBE_ANCHOR_SPEED)?;
-    let score_a = score(&enc_a)?;
+    let Ok(score_a) = score(&enc_a) else {
+        return Ok(unscored(enc_req, true));
+    };
     let (ba, br) = (enc_a.avif_file.len(), enc_req.avif_file.len());
     let anchor_not_worse = ba <= br && score_a + 0.05 >= score_req;
     let anchor_strictly_better = ba < br || score_a > score_req + 0.05;
@@ -603,20 +613,44 @@ fn score_rgba8(
 ) -> Result<f64> {
     let dec_config = DecoderConfig::new().prefer_8bit(true);
     let decoded = crate::decode_with(avif, &dec_config, stop)?;
-    let dec_img: ImgRef<'_, rgb::Rgba<u8>> =
-        decoded.try_as_imgref::<rgb::Rgba<u8>>().ok_or_else(|| {
-            at!(Error::Encode(
-                "target-quality: decoded image not RGBA8-viewable".to_string()
-            ))
-        })?;
-    match target {
-        TargetMetric::Ssim2(_) => {
-            let a = composite_on_gray(source);
-            let b = composite_on_gray(dec_img);
-            ssim2_score(a.as_ref(), b.as_ref())
-        }
-        TargetMetric::Zensim(_) => zensim_score(&source, &dec_img),
+    // With real transparency the decode is RGBA8. But a fully-OPAQUE input lets the
+    // encoder drop the alpha plane entirely, so the decode is RGB8 — score it as
+    // opaque (source alpha was 255, so compositing on gray / re-adding opaque alpha
+    // is exact). Without this fallback, encoding an opaque RGBA8 image would error.
+    if let Some(dec_img) = decoded.try_as_imgref::<rgb::Rgba<u8>>() {
+        return match target {
+            TargetMetric::Ssim2(_) => {
+                let a = composite_on_gray(source);
+                let b = composite_on_gray(dec_img);
+                ssim2_score(a.as_ref(), b.as_ref())
+            }
+            TargetMetric::Zensim(_) => zensim_score(&source, &dec_img),
+        };
     }
+    if let Some(dec_rgb) = decoded.try_as_imgref::<Rgb<u8>>() {
+        return match target {
+            TargetMetric::Ssim2(_) => {
+                let a = composite_on_gray(source);
+                let b = to_triplet_img(dec_rgb);
+                ssim2_score(a.as_ref(), b.as_ref())
+            }
+            TargetMetric::Zensim(_) => {
+                // Re-add opaque alpha so both sides are RGBA for zensim.
+                let opaque: ImgVec<rgb::Rgba<u8>> = ImgVec::new(
+                    dec_rgb
+                        .pixels()
+                        .map(|p| rgb::Rgba::new(p.r, p.g, p.b, 255))
+                        .collect(),
+                    dec_rgb.width(),
+                    dec_rgb.height(),
+                );
+                zensim_score(&source, &opaque.as_ref())
+            }
+        };
+    }
+    Err(at!(Error::Encode(
+        "target-quality: decoded image not RGB(A)8-viewable".to_string()
+    )))
 }
 
 /// Decode `avif` at 16-bit and score against an RGB16 source (see
@@ -781,5 +815,27 @@ mod monotone_probe_tests {
             assert!(!out.probed, "must not probe on registry");
             assert_eq!(out.speed_used, 6, "requested speed kept");
         }
+    }
+
+    #[test]
+    fn score_rgba8_handles_opaque_alpha_dropped_decode() {
+        // A fully-opaque RGBA8 encode drops its alpha plane, so the decode is RGB8.
+        // score_rgba8 must score it as opaque, not error "not RGBA8-viewable" — else
+        // the probe (and encode_rgba8_with_target) would fail on opaque input.
+        let rgb = checkerboard(64, 64);
+        let rgba: Vec<rgb::Rgba<u8>> =
+            rgb.pixels().map(|p| rgb::Rgba::new(p.r, p.g, p.b, 255)).collect();
+        let img = ImgVec::new(rgba, 64, 64);
+        let cfg = EncoderConfig::new().speed(6).threads(Some(1));
+        let enc = encode_rgba8_once(img.as_ref(), &cfg, StopToken::new(Unstoppable))
+            .expect("encode");
+        let score = score_rgba8(
+            TargetMetric::Ssim2(0.0),
+            img.as_ref(),
+            &enc.avif_file,
+            &StopToken::new(Unstoppable),
+        )
+        .expect("opaque RGBA8 must score, not error");
+        assert!((0.0..=100.0).contains(&score), "sane ssim2 score, got {score}");
     }
 }
