@@ -1,0 +1,44 @@
+# Full s1-s10 ladder @ q80 (deep-tier monotonicity check), armed cavif.
+# 3 synthetic inverters (6096/7028/8302) + 1 photo control (5004). host=lilith zenavif=9442ac6 date=2026-07-06.
+# Finding: deep tiers s1-s3 are MONOTONE (s1 slowest+best); only inversion is the s5-valley (fixed).
+img	fam	speed	q	bytes	ssim2	enc_ms
+5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	5004	1	80	140414	84.63852616	29799
+5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	5004	2	80	146322	84.37504057	2722
+5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	5004	3	80	146322	84.37504057	2750
+5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	5004	4	80	146846	84.10702895	2429
+5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	5004	5	80	151724	83.81433123	1612
+5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	5004	6	80	145661	84.02939588	4429
+5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	5004	7	80	145823	84.21828904	3332
+5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	5004	8	80	145823	84.21828904	3430
+5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	5004	9	80	151145	83.84511079	424
+5004_nps_blca-black-canyon-2023_color_p02_7016x4961.sdr.s1024.png	5004	10	80	173207	82.22358462	178
+6096_scans-patents_martha-jones-us77494-rescan-gray_p002_2479x3230.sdr.s1024.png	6096	1	80	110491	91.30042531	25564
+6096_scans-patents_martha-jones-us77494-rescan-gray_p002_2479x3230.sdr.s1024.png	6096	2	80	129355	90.19808284	1929
+6096_scans-patents_martha-jones-us77494-rescan-gray_p002_2479x3230.sdr.s1024.png	6096	3	80	129355	90.19808284	1983
+6096_scans-patents_martha-jones-us77494-rescan-gray_p002_2479x3230.sdr.s1024.png	6096	4	80	129582	90.15890588	1672
+6096_scans-patents_martha-jones-us77494-rescan-gray_p002_2479x3230.sdr.s1024.png	6096	5	80	150483	89.74981007	1049
+6096_scans-patents_martha-jones-us77494-rescan-gray_p002_2479x3230.sdr.s1024.png	6096	6	80	131255	90.75577755	3312
+6096_scans-patents_martha-jones-us77494-rescan-gray_p002_2479x3230.sdr.s1024.png	6096	7	80	131256	90.79892970	2726
+6096_scans-patents_martha-jones-us77494-rescan-gray_p002_2479x3230.sdr.s1024.png	6096	8	80	131256	90.79892970	2721
+6096_scans-patents_martha-jones-us77494-rescan-gray_p002_2479x3230.sdr.s1024.png	6096	9	80	141064	90.08501547	350
+6096_scans-patents_martha-jones-us77494-rescan-gray_p002_2479x3230.sdr.s1024.png	6096	10	80	196634	88.86943454	142
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024.png	7028	1	80	33292	90.31293943	16445
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024.png	7028	2	80	50857	89.87615722	1991
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024.png	7028	3	80	50857	89.87615722	1999
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024.png	7028	4	80	50824	89.76254325	1450
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024.png	7028	5	80	72601	87.63329693	1316
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024.png	7028	6	80	53398	88.64043098	2896
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024.png	7028	7	80	54467	88.49279521	1878
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024.png	7028	8	80	54467	88.49279521	1953
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024.png	7028	9	80	57322	88.53423916	318
+7028_plots_line-00119-s142edf29_1024x1024.sdr.s1024.png	7028	10	80	121241	83.89951314	165
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	8302	1	80	20846	91.02568216	6454
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	8302	2	80	20826	90.85352696	4500
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	8302	3	80	20826	90.85352696	4512
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	8302	4	80	21595	90.80172550	3102
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	8302	5	80	31909	88.80226818	365
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	8302	6	80	26764	89.82279998	1077
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	8302	7	80	26902	89.92041082	798
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	8302	8	80	26902	89.92041082	792
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	8302	9	80	29048	89.69012384	110
+8302_web-screenshots_nih-recipes-keep-the-beat_dpr1_page1_375x667.sdr.s1024.png	8302	10	80	50535	87.20316373	58

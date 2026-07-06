@@ -53,10 +53,21 @@ on + Tune::Ssimulacra2; 6 diverse images, Q80; analyze with
 - "Armed" measurements use the throwaway dev-patch clone `../ravif--statusmeasure` (consts
   flipped + zenrav1e master path + `Tune::Ssimulacra2` + an encode-only `ZR_ENC_MS` timer).
   The arms are **release-gated**; the content-gates ship gated too (flip at the dep bump).
+- **Two layers — do not conflate them:**
+  - `gate-monotone` tests the **RAW ladder** (`encode_rgb8` at *explicit* speeds — it does
+    NOT go through `auto_tune`). It documents the encoder's intrinsic RD-vs-time inversions.
+    Pre-flip (consts OFF) the fixture envelope is empty; **post-flip it will GROW** (the
+    armed raw ladder carries the s5-valley on synthetic fixtures) — re-pin then.
+  - `monotone_speed_gate` fixes the **POLICY layer** (`auto_tune`'s picks avoid the valley).
+    It changes which speed auto_tune *chooses*, not the raw ladder — so it does **not**
+    shrink gate-monotone's envelope. The two are complementary.
+  - Consequence: to verify `monotone_speed_gate`'s *effect* you need an auto_tune-path check
+    (sweep quality targets → assert the PICKS' (time, RD) are monotone), which needs a baked
+    picker (MODEL_BYTES). That check is the natural follow-up; the fit simulation
+    (`fit_content_gates.py`) is the current stand-in (0 new inversions, held-out-validated).
 - `gate-monotone` runs against zenavif's own encode API → `../ravif` path dep (consts OFF =
-  registry now). So the pinned envelope pre-flip captures the *registry* inversions
-  (incl. the catastrophic `fine_dir` recon-desync); post-flip re-pin captures the milder
-  content-inversions the gates then remove.
+  registry now); the pre-flip fixture envelope also would have caught the catastrophic
+  registry `fine_dir` recon-desync had the procedural fixtures triggered it (they don't).
 - Decoder is exonerated (ffmpeg/dav1d agrees with rav1d-safe to 0.01 ssim2); the inversions
   are encoder-side. See benchmarks/vs_cratesio_per_speed_2026-07-05.tsv.
 
@@ -93,6 +104,16 @@ introduced 6 new s5<s4 (s6 itself dominated by s4 on razor content). s9 costs th
 (gfs<0.64 & s5 → s9), `src/fast_heads.rs`. Reproduce:
 `fit_content_gates.py benchmarks/mono_fit_labels_2026-07-06.tsv
 benchmarks/mono_fit_features_2026-07-06.tsv 9`.
+
+## Deep-tier check — the s1-s3 exclusion is validated (`benchmarks/mono_fullladder_2026-07-06.tsv`)
+
+gate-monotone excludes s1-s3 "to keep the gate fast, assumed monotone". Confirmed on the full
+s1-s10 ladder (3 synthetic inverters + 1 photo control, armed @ q80): **the deep tiers are
+monotone.** s1 is the slowest (6-30 s on 1024px, the deep mode) AND the best RD by a clear
+margin (6096: s1 110491/91.30 beats every faster tier); s2==s3 (byte-identical aliasing, per
+the directive OK); none of s1/s2/s3 is Pareto-dominated by a faster tier. The only meaningful
+inversion across the whole ladder is the s5-valley (already fixed) — s10 is the fast-worst end
+(monotone). So excluding s1-s3 from the gate loses nothing, and s1's 30 s cost is why.
 
 ## Held-out validation (2026-07-06, `benchmarks/mono_val_labels_doccharts_2026-07-06.tsv`)
 

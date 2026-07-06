@@ -662,6 +662,12 @@ fn monotone_envelope_path() -> std::path::PathBuf {
 /// distribution until the per-image heads gate them (benchmarks/
 /// mono_rd_vs_time_2026-07-05.tsv). The envelope records the KNOWN inversions
 /// (machine/encoder-scoped); the gate FAILS on any NEW one. Goal state: empty.
+///
+/// Scope: this tests the RAW ladder — `encode()` at EXPLICIT speeds, NOT via
+/// `auto_tune`. So `fast_heads::monotone_speed_gate` (which fixes auto_tune's
+/// PICKS) does not affect this gate's envelope; the two are complementary layers
+/// (see docs/MONOTONICITY_PROGRAM.md "Two layers"). Speeds 4-10 only — the
+/// deep tiers 1-3 are slow and measured monotone (deep-tier check in the doc).
 fn run_monotone(pin: bool) {
     let imgs = pinned_images();
     // Inversion-prone band; deep tiers (1-3) are slow and monotone in practice,
