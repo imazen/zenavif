@@ -226,15 +226,29 @@ falsified:
   bundle-hurts line-plots (7028) overlap in feature space.
 
 **Conclusion: pattern-2 is a genuine preset-Pareto fact** (s6's fast-base+bundle is dominated by
-s4's slow-base on line/plot content, AND slower) with no cheap predictor. The honest menu:
-1. **Asymmetric probe (~1.5×, not 2×):** probe only s4 for s6/7/8 requests (s5-valley stays free
-   via the gate). Reliable; the cheapest guaranteed option.
-2. **Parallel probe (1× wall / 2× compute):** encode s4 ∥ requested, keep the best — wall time
-   unchanged (s4 finishes first) when spare cores exist; 2× CPU.
-3. **Accept + document** the ≤6 affected origins (a minority; strong ones are line-plots) and let
-   the picker learn to avoid the dominated tier from armed RD-vs-time labels (free, emergent).
-4. **Deep preset R&D:** re-tune the s6 config so it's Pareto-competitive with s4 on line content
-   (free at runtime, but real encoder work, not guaranteed).
+s4's slow-base on line/plot content, AND slower) with no cheap *predictor of helps-vs-hurts*.
+
+### THE SOLUTION — a SELECTIVE probe (near-1×, `benchmarks/selective_probe_gate_2026-07-06.tsv`)
+The breakthrough: features can't predict helps-vs-hurts, but they don't need to. **0 photos ever
+invert** — the 4 inverters are plots (7028/7050/7058) + 1 screenshot (8414), and `patch_fraction`
+separates them CLEANLY (photos pf ≤ 0.389, inverters pf ≥ 0.518). So gate on the *safe-to-skip*
+property, not the unpredictable one:
+- `patch_fraction ≤ τ` (τ≈0.45, photo-like) → **no probe, 1× cost** (inversion is impossible here).
+- `patch_fraction > τ` (structured) → **probe s4** alongside the requested s6/7/8, keep the best RD
+  in the time budget (~1.5× on this minority; the probe *measures* domination, so helps-vs-hurts
+  non-separability is moot).
+- s5-valley stays free via `monotone_speed_gate`.
+
+Validated: **100% recall on inverters** (4/4 — a miss would ship an inversion; all pf ≥ 0.518 > τ),
+12/24 correctly skipped, 8 harmless extra-probes (structured non-inverters — cost, not wrong
+results). Cost model: photo 1×, structured ~1.5×, so **~1.1× on 80%-photo real traffic — not 2×**,
+and the guarantee is complete (the probe is reliable on exactly the content that can invert). This
+is the answer to "find a solution that isn't 2×." It still needs the probe encode path (new opt-in
+API), but the cost objection is resolved.
+
+Remaining alternatives if even ~1.5×-on-structured is too much: parallel probe (1× wall / 2×
+compute), or deep preset R&D to make s6 Pareto-competitive with s4 on line content (free at
+runtime, real encoder work, not guaranteed).
 
 ### The 2× symmetric probe (reference)
 The two mechanisms are complementary: `monotone_speed_gate` (feature gate) is the **free**

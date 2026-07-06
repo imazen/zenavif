@@ -1,0 +1,15 @@
+# SELECTIVE PROBE — the non-2x monotonicity solution (2026-07-06).
+# Combines the FREE monotone_speed_gate (s5-valley) with a patch_fraction-GATED s4-probe:
+#   if patch_fraction > 0.45 (structured content) -> probe s4 alongside requested s6/7/8, keep
+#   best RD in the time budget;  else (photo-like) -> no probe, 1x cost.
+# KEY INSIGHT: features can't separate bundle-helps vs bundle-hurts (LOOCV 6/39), but they
+# CLEANLY separate photo (never inverts, pf<=0.39) from structured (might invert, pf>=0.52).
+# So gate on the SAFE-to-skip property (photo), probe only the uncertain minority.
+#
+# Validation over 24 armed origins (recall MUST be 100% — a miss ships an inversion):
+recall_on_inverters	4/4
+correctly_skipped_photos_and_safe	12
+extra_probes_structured_noninverters	8
+corpus_probe_rate	12/24	(structured-heavy corpus; real photo-heavy traffic much lower)
+photo_max_pf	0.389  inverter_min_pf	0.518  tau	0.45	(clean margin)
+cost_model	photo=1.0x (skip)  structured=~1.5x (probe s4)  avg_at_80pct_photos=~1.1x
