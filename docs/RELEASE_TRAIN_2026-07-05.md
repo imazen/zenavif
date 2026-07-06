@@ -46,8 +46,11 @@ critical path to production: ~9 measured wins are release-gated behind car 4.
 - zenavif: bump deps + execute the CLAUDE.md dep-bump checklist — the flip of the 7
   gated consts (S1_DEEP, SMALL_PX_RDO_TX, S6_TX_SIZE_RDO, S6_PART_PRUNE, S6_INTRA7
   [re-weigh vs top-5 per S4TIER], S10_RETIER, FRAME_HINTS) + the zenavif-side
-  `fast_heads::MONOTONE_GATE_LIVE` (the s5-valley remap is armed-only — see
-  docs/MONOTONICITY_PROGRAM.md; registry-safe today) + 16 uncomment sites +
+  `fast_heads::MONOTONE_GATE_LIVE` (arms the AUTOMATIC monotonicity guarantee now on the
+  default `encode_rgb8`/`encode_rgba8` paths: s5-valley remap + the selective pattern-2
+  probe — both armed-only, registry-safe today; see docs/MONOTONICITY_PROGRAM.md. After
+  flipping, run `gate-monotone` — its envelope grows teeth once the arms create the
+  valley) + 16 uncomment sites +
   encode_plan mirror refresh + palette-gate forward + tune default decision +
   alpha-tune=Psnr guard + identity-test tightening (zenavif#8 closes) + QM re-benchmark.
   The §A gates (gate-identity/conformance/determinism/ladder/recon) verify the flip.

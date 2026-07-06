@@ -24,10 +24,14 @@ Screen content rides palette(+UV) + intraBC A+B (legacy plots −26..−29%; fam
   QM-dist ratio, LF schedule) — gated; tune-default decision at the bump.
 - Palette gate: speed-conditional τ (0.197 / 0.05 at s≥6); heads (tx/partition/intra
   budgets) recommend-only via fast_heads; q₀ seed under `auto-tune`.
-- Monotonicity head: `monotone_speed_gate` remaps the armed s5 RD-vs-time valley →
-  s9 on synthetic content (gfs<0.64), held-out-validated (0 new inversions on 15
-  doccharts origins). Release-gated `MONOTONE_GATE_LIVE=false` (registry s5 is not a
-  valley → applying pre-flip regresses); flip at the dep bump — docs/MONOTONICITY_PROGRAM.md.
+- Monotonicity guarantee — now AUTOMATIC on the default `encode_rgb8`/`encode_rgba8`
+  paths (per user directive). Two parts: (a) `monotone_speed_gate` remaps the armed s5
+  RD-vs-time valley → s9 on synthetic (gfs<0.64); (b) a SELECTIVE probe resolves
+  pattern-2 (`s6/7/8<s4`) at near-1× — photo-like content (pf≤0.45) skips it, structured
+  content probes anchor s4 and keeps the Pareto-better. `encode_rgb8_once`/`_rgba8_once`
+  are the non-probing primitives (search + two-pass use them). Release-gated
+  `MONOTONE_GATE_LIVE=false` (inert on registry: one encode, no score); flip at the dep
+  bump — docs/MONOTONICITY_PROGRAM.md. Armed-validated end-to-end (plot→s4, photo→skip).
 - Tiles: ≥1 MP per tile default (bytes core-count-independent) — LIVE on ravif main.
 - Evaluation policy: per-family first, cluster-mass weights, photos-only merit
   keepable (RD_GAP "EVALUATION POLICY").
@@ -46,9 +50,10 @@ Screen content rides palette(+UV) + intraBC A+B (legacy plots −26..−29%; fam
 - Decoder follow-ups: rav1d-safe #423 (flush drops frames), #414 (NEON conformance).
 - Corpus: doc-chart anti-boost gate fittable (sample_doccharts.tsv); zensim-B hints
   await profile-B.
-- Monotonicity pattern-2 (`s6/7/8<s4`, the s6+ bundle hurts on some synthetic): NOT
-  single-feature-separable on 39 origins — needs a dense multi-feature fit, RISKY
-  (touches s6/7/8 wins); scoped in docs/MONOTONICITY_PROGRAM.md.
+- Monotonicity pattern-2 (`s6/7/8<s4`): RESOLVED by the selective probe (above) — not
+  feature-separable, so gate on the safe-to-skip property (photo pf≤0.45) and MEASURE the
+  rest. Now default on encode_rgb8/rgba8, release-gated. Only τ validation on a larger
+  corpus remains. docs/MONOTONICITY_PROGRAM.md.
 
 ## The two structural facts a newcomer needs
 1. aom's GOOD mode is off its own still pareto — the frontier is **allintra**; we sit
