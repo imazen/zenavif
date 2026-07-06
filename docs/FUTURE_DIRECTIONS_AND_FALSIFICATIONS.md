@@ -91,7 +91,12 @@ full-tx (no honest gate exists at n=24 — oracle-only headroom).
    (after the zencodec release).
 10. **Decoder hardening line**: rav1d-safe #423 (flush semantics), #414 (NEON
     conformance completion), #422 (a strictness mode so OUR decoder catches
-    non-conformance without aomdec).
+    non-conformance without aomdec). #424 (2026-07-06): the `differential_dav1d`
+    fuzzer, now extended to 10/12-bit (rav1d-safe@7892c420), found a 10-bit
+    rav1d-vs-dav1d divergence — 3-way-triaged to a NON-conforming stream aomdec
+    rejects (permissive-concealment noise, low sev), which is exactly the
+    motivation for #422's strictness mode. A conformance-gated differential
+    target is the way to turn that noise into valid-stream signal.
 11. **The release cadence itself**: the train (RELEASE_TRAIN_2026-07-05.md), then the
     refactor pass (ENGINEERING_BASELINE.md), then SHORT gated-flip cycles — never again
     ~20 mechanisms deep behind one registry wall.
