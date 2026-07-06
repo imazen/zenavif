@@ -129,6 +129,34 @@ the directive OK); none of s1/s2/s3 is Pareto-dominated by a faster tier. The on
 inversion across the whole ladder is the s5-valley (already fixed) — s10 is the fast-worst end
 (monotone). So excluding s1-s3 from the gate loses nothing, and s1's 30 s cost is why.
 
+## Armed validation — the gate has teeth (`benchmarks/gate_monotone_armed_2026-07-06.tsv`)
+
+The arms are release-gated, but you don't need the release train to *test* them — point zenavif's
+`ravif` dep at the armed dev-clone (`../ravif--statusmeasure/ravif`, all 6 `_LIVE` consts flipped
++ zenrav1e master) and build. Done 2026-07-06: **gate-monotone FAILS on the armed build (2
+inversions) where it's empty on registry** — proving the guardrail bites once the arms are live.
+Caught: `screen/q80 s6 dominated by faster s7 AND s8` (fine_directional_intra ON at s6, OFF at
+s7+, doing 38% more work — 1362 vs 986 ms — for equal-or-worse RD on the procedural screen
+fixture).
+
+Two things this run taught:
+- **The caught inversion is a PROCEDURAL-FIXTURE artifact, not a real-content bug.** Checked
+  against the armed corpus label sweeps at q80: 7028 (real line plot) has s6 with *better* RD
+  than s7 (fine_dir HELPS on real directional content); 8302 is a tradeoff; 6096's s7 edge is
+  under the 20% time margin. And at q40 fine_dir helps everywhere. So fine_dir at s6 is content +
+  q conditional; `gen_screen`'s ultra-regular pattern just over-represents the one useless regime.
+- **gate-monotone's procedural fixtures are a COARSE guardrail.** They exercise the encoder and
+  catch *some* inversions, but they don't cleanly exhibit the corpus s5-valley the fix targets
+  (the fixtures' s5 keeps better quality than s9), and they can flag fixture-specific inversions.
+  The **corpus label sweeps remain the real validation** of the s5-valley fix; the gate is the
+  fast CI tripwire. Corpus-based fixtures (via `codec-corpus`) are the improvement that would let
+  the gate guard the actual s5-valley — tracked, not yet done.
+- **Post-flip envelope:** these 2 known fixture inversions are what to pin (`just gate-monotone-pin`)
+  at the dep bump, replacing today's empty registry envelope.
+
+(This corrects an earlier session claim that the monotonicity residuals were "structurally blocked
+pre-flip" — they're blocked for *registry users*, but fully testable on the local armed build.)
+
 ## Held-out validation (2026-07-06, `benchmarks/mono_val_labels_doccharts_2026-07-06.tsv`)
 
 15 **doccharts** origins — distinct from the 24 train origins (5000/5030/6000/6600

@@ -1,0 +1,66 @@
+# gate-monotone run against the ARMED build (local dev-patch, NOT registry) — validates the
+# guardrail has teeth once the s6+ arms are live. Build: zenavif @ e7f39b6 with ravif dep
+# repointed to ../ravif--statusmeasure/ravif (all 6 _LIVE consts = true) + zenrav1e master
+# bc452b67. host=lilith date=2026-07-06. Cmd: GATE_MONOTONE_DEBUG=1 gate_kit monotone.
+#
+# RESULT: gate-monotone FAILS on the armed build (2 inversions) where it's empty on registry —
+#   proving the teeth. Caught: screen/q80 s6 dominated by faster s7 AND s8.
+#   Mechanism: fine_directional_intra is ON at s6, OFF at s7+. On the procedural screen fixture
+#   it does 38% more work (1362 vs 986 ms) for equal-or-worse RD (s6 59.928 vs s7 60.086) -> s6
+#   is Pareto-dominated. On photo it's only 3% overhead (469 vs 482) -> correctly not flagged.
+#
+# BUT the inversion is a PROCEDURAL-FIXTURE ARTIFACT, not a real-content bug (checked vs the
+# armed corpus label sweeps, benchmarks/mono_fullladder_2026-07-06.tsv, q80):
+#   7028 (real line plot):  s6 53398/88.640 vs s7 54467/88.493 -> s6 has BETTER RD (fine_dir HELPS)
+#   8302 (synthetic):       s6 26764/89.823 vs s7 26902/89.920 -> tradeoff (neither dominates)
+#   6096 (real scan):       s7 weakly better all-axes but only 18% faster (under the 20% margin)
+#   q40 (all fixtures):     fine_dir HELPS (photo/q40 s6 62.732 > s7 62.617)
+# So fine_dir at s6 is CONTENT + Q conditional (helps real line content + low-q; useless only on
+# ultra-regular synthetic at high-q). NOT a broad encoder bug; the gen_screen fixture just
+# over-represents the one useless regime. Lesson: gate-monotone's procedural fixtures are a
+# COARSE CI guardrail — the corpus label sweeps remain the real validation of the s5-valley fix.
+# This is the POST-FLIP envelope to pin at the dep bump (these 2 known fixture inversions).
+#
+cell	speed	bytes	ssim2	ms_min3
+photo/q40	s4	856	60.952	384
+photo/q40	s5	1032	62.896	110
+photo/q40	s6	1027	62.732	244
+photo/q40	s7	1027	62.617	238
+photo/q40	s8	1027	62.617	239
+photo/q40	s9	1259	57.379	99
+photo/q40	s10	1228	56.183	48
+photo/q80	s4	20945	81.548	1109
+photo/q80	s5	20532	80.595	166
+photo/q80	s6	20607	81.098	482
+photo/q80	s7	20597	81.125	469
+photo/q80	s8	20597	81.125	482
+photo/q80	s9	21524	80.993	160
+photo/q80	s10	21360	80.366	78
+screen/q40	s4	7403	40.976	1837
+screen/q40	s5	11806	45.652	468
+screen/q40	s6	11472	45.401	1061
+screen/q40	s7	11490	44.133	836
+screen/q40	s8	11490	44.133	845
+screen/q40	s9	11626	44.034	133
+screen/q40	s10	12710	45.805	70
+screen/q80	s4	12661	58.518	2380
+screen/q80	s5	33448	60.156	521
+screen/q80	s6	31667	59.928	1362
+screen/q80	s7	31656	60.086	986
+screen/q80	s8	31656	60.086	971
+screen/q80	s9	32550	60.129	149
+screen/q80	s10	38919	59.842	78
+mixed/q40	s4	3291	62.177	1429
+mixed/q40	s5	11101	62.787	174
+mixed/q40	s6	3465	59.054	468
+mixed/q40	s7	3465	58.174	461
+mixed/q40	s8	3465	58.174	447
+mixed/q40	s9	3531	56.801	122
+mixed/q40	s10	11716	56.368	61
+mixed/q80	s4	26458	82.127	1480
+mixed/q80	s5	37233	81.407	214
+mixed/q80	s6	24713	81.065	703
+mixed/q80	s7	24713	81.055	686
+mixed/q80	s8	24713	81.055	693
+mixed/q80	s9	25480	81.119	181
+mixed/q80	s10	39296	81.443	88
