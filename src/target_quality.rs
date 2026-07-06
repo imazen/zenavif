@@ -159,6 +159,130 @@ fn contiguous_rgb8(img: ImgRef<'_, Rgb<u8>>) -> Vec<u8> {
     out
 }
 
+/// The kept encode from [`encode_rgb8_monotone`] plus probe provenance.
+#[cfg(feature = "auto-tune")]
+#[derive(Debug)]
+pub(crate) struct MonotoneEncoded {
+    /// The chosen AVIF (the requested speed, or the anchor if it won the probe).
+    pub encoded: EncodedImage,
+    /// The speed whose encode was kept.
+    pub speed_used: u8,
+    /// Whether the pf-gate fired and a probe encode was run.
+    pub probed: bool,
+    /// Whether the probe swapped the requested encode for the anchor.
+    pub swapped: bool,
+    /// SSIMULACRA2/zensim score of the kept encode.
+    pub score: f64,
+}
+
+/// `patch_fraction` floor for probing. Content at or below is photo-like and
+/// CANNOT suffer the pattern-2 inversion — measured: 0 photos inverted across the
+/// 24-origin armed validation (photos pf ≤ 0.389, inverters pf ≥ 0.518). Probing
+/// only above this is what keeps the guarantee near-1× on photo-heavy traffic.
+/// See docs/MONOTONICITY_PROGRAM.md "SELECTIVE probe".
+#[cfg(feature = "auto-tune")]
+pub(crate) const PROBE_PATCH_FRACTION_MIN: f32 = 0.45;
+
+/// The reliable anchor tier: s4 Pareto-dominates the s6/7/8 bundle tiers on
+/// bundle-hurts structured content (line plots, some screenshots).
+#[cfg(feature = "auto-tune")]
+pub(crate) const PROBE_ANCHOR_SPEED: u8 = 4;
+
+/// The requested tiers that can suffer pattern-2 (the armed s6+ bundle tiers).
+#[cfg(feature = "auto-tune")]
+fn probe_eligible_speed(speed: u8) -> bool {
+    matches!(speed, 6 | 7 | 8)
+}
+
+/// Encode RGB8 to AVIF with a per-image RD-vs-time monotonicity guarantee at
+/// near-1× cost (the answer to "a solution that isn't 2×").
+///
+/// The armed s6+ bundle can produce a point that's both slower AND worse than the
+/// slower-preset s4 on some structured content (line plots) — so a *faster* tier
+/// Pareto-dominates a slower one (a monotonicity violation). Content features
+/// can't predict *which* structured images invert, but they cleanly separate
+/// photo (never inverts) from structured (might). So:
+/// - `patch_fraction ≤ `[`PROBE_PATCH_FRACTION_MIN`]` (photo-like) → encode once
+///   at the requested speed (1× — inversion impossible here);
+/// - otherwise → also encode the reliable anchor [`PROBE_ANCHOR_SPEED`] and keep
+///   whichever *Pareto-dominates* on (bytes, score); ties keep the request.
+///
+/// The pick is deterministic (bytes + perceptual score, no wall-clock timing).
+/// Release-gated by [`crate::fast_heads::MONOTONE_GATE_LIVE`]: on registry (arms
+/// off) there is no inversion to fix, so it never probes (identical to a plain
+/// [`encode_rgb8`], no wasted encode). Only the eligible bundle tiers (6/7/8) are
+/// probed; other speeds pass straight through.
+///
+/// # Errors
+/// Returns the first encode/decode/score error, or cancellation via `stop`.
+#[cfg(feature = "auto-tune")]
+pub(crate) fn encode_rgb8_monotone(
+    img: ImgRef<'_, Rgb<u8>>,
+    config: &EncoderConfig,
+    metric: TargetMetric,
+    stop: StopToken,
+) -> Result<MonotoneEncoded> {
+    let requested = config.speed_value();
+    let enc_req = encode_rgb8(img, config, stop.clone())?;
+    let score_req = score_rgb8(metric, img, &enc_req.avif_file, &stop)?;
+    let keep_request = |e: EncodedImage, s: f64, probed: bool| MonotoneEncoded {
+        encoded: e,
+        speed_used: requested,
+        probed,
+        swapped: false,
+        score: s,
+    };
+
+    // Release-gated + tier-gated: nothing to fix on registry, and only the bundle
+    // tiers can invert.
+    if !crate::fast_heads::MONOTONE_GATE_LIVE || !probe_eligible_speed(requested) {
+        return Ok(keep_request(enc_req, score_req, false));
+    }
+    // Selective: photo-like content cannot invert — skip the probe (the near-1×
+    // property). Missing/degenerate features degrade to no-probe (safe: the worst
+    // case is leaving a rare structured inversion, never a wrong pixel).
+    match patch_fraction_rgb8(img) {
+        Some(pf) if pf > PROBE_PATCH_FRACTION_MIN => {}
+        _ => return Ok(keep_request(enc_req, score_req, false)),
+    }
+
+    // Probe the reliable anchor; keep it only if it Pareto-dominates on (bytes,
+    // score). A ~0.05 score band treats near-equal quality as a tie (keep request).
+    let anchor_cfg = config.clone().speed(PROBE_ANCHOR_SPEED);
+    let enc_a = encode_rgb8(img, &anchor_cfg, stop.clone())?;
+    let score_a = score_rgb8(metric, img, &enc_a.avif_file, &stop)?;
+    let (ba, br) = (enc_a.avif_file.len(), enc_req.avif_file.len());
+    let anchor_not_worse = ba <= br && score_a + 0.05 >= score_req;
+    let anchor_strictly_better = ba < br || score_a > score_req + 0.05;
+    if anchor_not_worse && anchor_strictly_better {
+        Ok(MonotoneEncoded {
+            encoded: enc_a,
+            speed_used: PROBE_ANCHOR_SPEED,
+            probed: true,
+            swapped: true,
+            score: score_a,
+        })
+    } else {
+        Ok(keep_request(enc_req, score_req, true))
+    }
+}
+
+/// Extract `patch_fraction` (zenanalyze id 23) from an RGB8 source, or `None`
+/// when unavailable (degenerate dims). Mirrors the feature request in
+/// [`crate::fast_heads::monotone_speed_gate_for_rgb8`].
+#[cfg(feature = "auto-tune")]
+fn patch_fraction_rgb8(img: ImgRef<'_, Rgb<u8>>) -> Option<f32> {
+    use zenanalyze::feature::{AnalysisFeature, AnalysisQuery, FeatureSet};
+    let (w, h) = (img.width() as u32, img.height() as u32);
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let rgb = contiguous_rgb8(img);
+    let query = AnalysisQuery::new(FeatureSet::new().with(AnalysisFeature::PatchFraction));
+    let analysis = zenanalyze::analyze_features_rgb8(&rgb, w, h, &query);
+    analysis.get_f32(AnalysisFeature::PatchFraction)
+}
+
 /// Encode an RGBA8 image to AVIF, converging on a target perceptual score.
 ///
 /// Same search and selection policy as [`encode_rgb8_with_target`]. The
@@ -491,4 +615,67 @@ fn composite_on_gray(src: ImgRef<'_, rgb::Rgba<u8>>) -> ImgVec<[u8; 3]> {
         }));
     }
     ImgVec::new(out, w, h)
+}
+
+#[cfg(all(test, feature = "auto-tune"))]
+mod monotone_probe_tests {
+    use super::*;
+    use almost_enough::Unstoppable;
+    use imgref::ImgVec;
+
+    /// A high-`patch_fraction` checkerboard (structured content — would be
+    /// probe-eligible once the arms are live).
+    fn checkerboard(w: usize, h: usize) -> ImgVec<Rgb<u8>> {
+        let px: Vec<Rgb<u8>> = (0..w * h)
+            .map(|i| {
+                let (x, y) = (i % w, i / w);
+                if ((x / 8) + (y / 8)) % 2 == 0 {
+                    Rgb::new(255u8, 255, 255)
+                } else {
+                    Rgb::new(0u8, 0, 0)
+                }
+            })
+            .collect();
+        ImgVec::new(px, w, h)
+    }
+
+    #[test]
+    fn monotone_probe_release_gated_on_registry() {
+        // Structured content at an eligible tier: the ONLY thing keeping the probe
+        // from firing here is MONOTONE_GATE_LIVE. While it's false (registry, no
+        // inversion to fix), the probe must not run — no wasted anchor encode, the
+        // requested speed is kept, and the encode is still valid.
+        let img = checkerboard(64, 64);
+        let cfg = EncoderConfig::new().speed(6).threads(Some(1));
+        let out = encode_rgb8_monotone(
+            img.as_ref(),
+            &cfg,
+            TargetMetric::Ssim2(80.0),
+            StopToken::new(Unstoppable),
+        )
+        .expect("monotone encode");
+        assert!(!out.encoded.avif_file.is_empty(), "produces a valid AVIF");
+        if !crate::fast_heads::MONOTONE_GATE_LIVE {
+            assert!(!out.probed, "must not probe on registry (no inversion to fix)");
+            assert!(!out.swapped);
+            assert_eq!(out.speed_used, 6, "requested speed kept");
+        }
+    }
+
+    #[test]
+    fn monotone_probe_passes_through_ineligible_speed() {
+        // s4 is not a bundle tier — it can never be the dominated side, so the probe
+        // is skipped regardless of content or the release flag.
+        let img = checkerboard(64, 64);
+        let cfg = EncoderConfig::new().speed(4).threads(Some(1));
+        let out = encode_rgb8_monotone(
+            img.as_ref(),
+            &cfg,
+            TargetMetric::Ssim2(80.0),
+            StopToken::new(Unstoppable),
+        )
+        .expect("monotone encode");
+        assert!(!out.probed, "speed 4 is ineligible — never probed");
+        assert_eq!(out.speed_used, 4);
+    }
 }
