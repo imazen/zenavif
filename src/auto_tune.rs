@@ -496,7 +496,15 @@ impl EncoderConfig {
         }
 
         let cell = best_cell.ok_or(AutoTuneError::NoCellAllowed)?;
-        let speed = (cell + 1) as u8;
+        let picked_speed = (cell + 1) as u8;
+        // 6b. Monotonicity head (2026-07-05 directive): remap the measured armed
+        // speed-5 valley on synthetic content to s9 (the measured dominator) so
+        // spending s5's time never buys a worse RD point (src/fast_heads.rs).
+        // Pure speed selection; degrades to picked_speed on any analysis
+        // failure. q is kept at the picked cell — s9 dominates the s5 valley, so
+        // it reaches the same quality at the same q (no TargetOutOfRange risk).
+        let speed =
+            crate::fast_heads::monotone_speed_gate_for_rgb8(rgb, width, height, offer, picked_speed);
         let q = q_lut
             .median_q
             .get(cell)

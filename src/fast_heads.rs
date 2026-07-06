@@ -205,6 +205,56 @@ pub fn partition_budget_gate(gradient_fraction_smooth: f32, speed: u8) -> Partit
     }
 }
 
+/// Monotonicity head threshold on `gradient_fraction_smooth` (id 120).
+///
+/// Below it (synthetic / graphic / scan content, not smooth-gradient photo)
+/// the armed speed-5 tier is a measured **dominated valley**: it carries
+/// fine_dir's cost yet lacks BOTH the s6-8 bundle (`rdo_tx_size` + intra
+/// top-k + `topdown_prune`, armed s6+) AND s9's `reduced_tx_set` /
+/// `inter_tx_split`, so a faster tier Pareto-dominates it. Measured on 12/24
+/// train26 renditions (inverter gfs 0.08-0.612); clean photos sit at gfs >=
+/// 0.675, so the threshold is placed in the clean gap (max inverter 0.612, min
+/// clean 0.675). Provenance:
+/// `benchmarks/mono_rd_vs_time_2026-07-05.tsv` +
+/// `scripts/rd_gap/fit_content_gates.py` (2026-07-06).
+pub const MONOTONE_GATE_GRADIENT_SMOOTH_MAX: f32 = 0.64;
+
+/// The measured dominated valley speed (see [`monotone_speed_gate`]).
+pub const MONOTONE_VALLEY_SPEED: u8 = 5;
+
+/// Remap target for the valley: the fast tier that Pareto-dominates s5 on the
+/// gated content. Chosen by simulation over {s4, s6, s9}
+/// (`fit_content_gates.py`): **s9 removes all 17 valley inversions with 0 new
+/// inversions** and the lowest RD delta, where s4 (slow) introduced 14 new
+/// s6/7/8-dominated-by-s5 orderings and s6 (itself dominated by s4 on razor
+/// plots) introduced 6 new s5<s4. s9 slightly regresses 3 borderline
+/// clean-synthetic misfires (<= 4.4% bytes, still monotone) — no feature in
+/// {gfs, pf, dcty} separates those from true inverters.
+pub const MONOTONE_REMAP_SPEED: u8 = 9;
+
+/// Monotonicity head (the 2026-07-05 user directive: "make sure our image
+/// analysis provides monotonic rd improvement with time"). On synthetic
+/// content (`gradient_fraction_smooth < `[`MONOTONE_GATE_GRADIENT_SMOOTH_MAX`])
+/// the armed speed-5 tier is a dominated valley; remap it to
+/// [`MONOTONE_REMAP_SPEED`] (the measured dominator) so spending s5's time can
+/// never buy a worse RD point than the faster s9. Returns `speed` unchanged off
+/// the gate, on a non-finite feature, or off [`MONOTONE_VALLEY_SPEED`] — a
+/// clean no-op. Pure speed selection (zenavif owns the speed knob), so unlike
+/// the budget heads it needs no encoder passthrough; its EFFECT is
+/// armed-build-specific (the valley is created by the s6+ bundle arms, absent
+/// on registry builds).
+#[must_use]
+pub fn monotone_speed_gate(gradient_fraction_smooth: f32, speed: u8) -> u8 {
+    if speed == MONOTONE_VALLEY_SPEED
+        && gradient_fraction_smooth.is_finite()
+        && gradient_fraction_smooth < MONOTONE_GATE_GRADIENT_SMOOTH_MAX
+    {
+        MONOTONE_REMAP_SPEED
+    } else {
+        speed
+    }
+}
+
 /// The composed per-image fast-tier recommendation (both heads).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FastTierBudgets {
@@ -276,9 +326,87 @@ pub fn fast_tier_budgets_for_rgb8(
     }
 }
 
+/// Extract `gradient_fraction_smooth` and apply [`monotone_speed_gate`].
+/// Requests the SAME 3-feature set as [`fast_tier_budgets_for_rgb8`] so a
+/// shared [`zenanalyze_api::Offer`] reuses (call this first, then the budgets
+/// on the returned effective speed). Any analysis failure returns `speed`
+/// unchanged — a clean no-op (identical to the gate not firing).
+#[cfg(feature = "auto-tune")]
+#[must_use]
+pub fn monotone_speed_gate_for_rgb8(
+    rgb: &[u8],
+    width: u32,
+    height: u32,
+    offer: Option<&zenanalyze_api::Offer<'_>>,
+    speed: u8,
+) -> u8 {
+    use zenanalyze::feature::{AnalysisFeature, AnalysisQuery, FeatureSet};
+
+    // Off the valley speed the gate is a no-op regardless of content — skip
+    // the analysis entirely (it also can't fire, keeping this cheap).
+    if speed != MONOTONE_VALLEY_SPEED {
+        return speed;
+    }
+    const FEATURES: [AnalysisFeature; 3] = [
+        AnalysisFeature::PatchFraction,
+        AnalysisFeature::DctCompressibilityY,
+        AnalysisFeature::GradientFractionSmooth,
+    ];
+    let names = [FEATURES[0].name(), FEATURES[1].name(), FEATURES[2].name()];
+
+    if let Some(offer) = offer {
+        let request = zenanalyze_api::Request::new(
+            &names,
+            zenanalyze::analyzer_version(),
+            zenanalyze::feature_defs_version(),
+            0,
+        );
+        if let Some(values) = offer.reuse_for(&request)
+            && let [_pf, _dcty, gfs] = values[..]
+        {
+            return monotone_speed_gate(gfs, speed);
+        }
+    }
+
+    if rgb.is_empty() || width == 0 || height == 0 {
+        return speed;
+    }
+    let query = AnalysisQuery::new(
+        FeatureSet::new()
+            .with(FEATURES[0])
+            .with(FEATURES[1])
+            .with(FEATURES[2]),
+    );
+    let analysis = zenanalyze::analyze_features_rgb8(rgb, width, height, &query);
+    match analysis.get_f32(FEATURES[2]) {
+        Some(gfs) => monotone_speed_gate(gfs, speed),
+        None => speed,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn monotone_gate_remaps_only_synthetic_s5() {
+        // Synthetic inverters (gfs < 0.64) at the valley speed remap to s9;
+        // clean photos (gfs >= 0.675) keep s5. Anchors from the fit's 24
+        // train26 renditions (fit_content_gates.py).
+        for gfs in [0.081_f32, 0.280, 0.436, 0.612] {
+            assert_eq!(monotone_speed_gate(gfs, 5), MONOTONE_REMAP_SPEED);
+        }
+        for gfs in [0.675_f32, 0.714, 0.842] {
+            assert_eq!(monotone_speed_gate(gfs, 5), 5);
+        }
+        // Off the valley speed: never remap, any content.
+        for s in [1u8, 2, 4, 6, 7, 8, 9, 10] {
+            assert_eq!(monotone_speed_gate(0.10, s), s);
+        }
+        // Non-finite feature degrades to no-op (never a spurious remap).
+        assert_eq!(monotone_speed_gate(f32::NAN, 5), 5);
+        assert_eq!(monotone_speed_gate(f32::INFINITY, 5), 5);
+    }
 
     #[test]
     fn tx_gate_measured_anchors() {
