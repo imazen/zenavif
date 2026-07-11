@@ -1,0 +1,13 @@
+# The composed-flip A/B: cooptloop branch (armed) vs registry chain, train26 x 6q x s6
+# Date: 2026-07-11  Host: 7950X dev box  Branch: zenavif cooptloop@bef78bb3
+# BASE: cavif @ ../ravif main 680ca56 (consts off) + zenrav1e 0.1.4 (registry) — the pre-flip chain
+# ARM:  cavif @ ../ravif--cooptloop cooptloop ebc015a (all consts + apply sites + tune ss2/alpha-Psnr
+#       + PQ10 8-bit tx-size mask) + zenrav1e master 640ea9fa (path)
+# Cmd: scripts/rd_gap/run_gap.sh SAMPLE=sample_images_train26.tsv ZENRAV1E_SPEED=6
+#      QGRID_ZR="30 50 60 75 85 95" BUTTER=on AOMENC unset; scored via scripts/rd_gap/objective.py
+# VERDICT (objective.py, equal-family weights): mass ssim2 BD -25.73% / ba3n -23.15% / bamax -24.14%
+#   every family negative double-digits; aggregate NOT vetoed.
+#   Per-family veto: 9094 (9100+9118 iq-AQ illustrations) bamax +9.71% while ssim2 -18.3 —
+#   the worst-spot-vs-global-allocation tradeoff ALREADY on Phase 3's acceptance list
+#   (COOPT_LOOP_PLAN: "the iq-AQ trio"). 9118 bamax worse at every q (3.02->5.55 @q60).
+# Wall: armed s6 = median 6.72x (p90 8.74x) registry-s6 — the re-tiering reality, Phase 4 owns.
