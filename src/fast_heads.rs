@@ -244,7 +244,7 @@ pub const MONOTONE_REMAP_SPEED: u8 = 9;
 /// arms go live. Flip to `true` at the zenrav1e dep bump alongside ravif's
 /// S1_DEEP/S6_*/S10_RETIER const flips (dep-bump checklist). Byte-identical
 /// while `false` (the pure [`monotone_speed_gate`] logic stays unit-tested).
-pub const MONOTONE_GATE_LIVE: bool = false;
+pub const MONOTONE_GATE_LIVE: bool = true;
 
 /// Monotonicity head (the 2026-07-05 user directive: "make sure our image
 /// analysis provides monotonic rd improvement with time"). On synthetic

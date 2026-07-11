@@ -1044,19 +1044,15 @@ fn build_ravif_encoder(
         if let Some(t) = config.trellis {
             enc = enc.with_trellis(t);
         }
-        // UNCOMMENT at the zenrav1e dep bump (the palette tool lands
-        // post-0.1.4, zenrav1e@68a8d81f..df27117c; ravif gains the
-        // pass-through builder then — see src/palette_gate.rs + CLAUDE.md
-        // "Known Bugs" dep-bump checklist). Until then the preference is
-        // stored/introspectable but not forwarded:
-        // if let Some(pref) = config.palette_preference {
-        //     enc = enc.with_palette(match pref {
-        //         crate::palette_gate::PalettePreference::Auto => ravif::PaletteMode::Auto,
-        //         crate::palette_gate::PalettePreference::Always => ravif::PaletteMode::Always,
-        //         crate::palette_gate::PalettePreference::Off => ravif::PaletteMode::Off,
-        //     });
-        // }
-        let _ = &config.palette_preference; // release-gated; silence unused-field until the bump
+        // Armed on the cooptloop branch (ravif--cooptloop carries the
+        // with_palette pass-through; zenrav1e path dep supplies the tool):
+        if let Some(pref) = config.palette_preference {
+            enc = enc.with_palette(match pref {
+                crate::palette_gate::PalettePreference::Auto => ravif::PaletteMode::Auto,
+                crate::palette_gate::PalettePreference::Always => ravif::PaletteMode::Always,
+                crate::palette_gate::PalettePreference::Off => ravif::PaletteMode::Off,
+            });
+        }
     }
     // Forward stop token for per-superblock cooperative cancellation.
     enc = enc.with_stop(stop);
