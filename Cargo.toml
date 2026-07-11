@@ -228,7 +228,7 @@ __expert = ["encode-imazen", "ravif/__expert"]
 # Auto-tune via the rav1e knob predictor MLP. Includes a baked ZNPR
 # model + zenanalyze feature extractor; adds ~30 KB to the binary.
 # See docs/RAV1E_PICKER_PLAN.md for the training pipeline.
-auto-tune = ["encode-imazen", "dep:zenpredict", "dep:zenanalyze", "dep:zenanalyze-api", "dep:serde_json"]
+auto-tune = ["encode-imazen", "ravif/__expert", "dep:zenpredict", "dep:zenanalyze", "dep:zenanalyze-api", "dep:serde_json"]
 # Enable zencodec trait integration
 zencodec = ["dep:zencodec", "zenavif-parse/zencodec", "dep:ultrahdr-core"]
 # Enable zennode pipeline node definitions

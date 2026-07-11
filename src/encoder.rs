@@ -1017,15 +1017,19 @@ fn build_ravif_encoder(
             .with_lru_on_skip(config.override_lru_on_skip)
             .with_segmentation_complex(config.override_segmentation_complex)
             .with_encode_bottomup(config.override_encode_bottomup);
-        #[cfg(any(feature = "__expert", feature = "two-pass-butteraugli"))]
+        #[cfg(any(
+            feature = "__expert",
+            feature = "two-pass-butteraugli",
+            feature = "auto-tune"
+        ))]
         {
             // The deepest knobs live behind ravif's `__expert` feature
-            // (which `two-pass-butteraugli` also enables, without exposing
-            // zenavif's own `__expert` surface). Mirror EncoderConfig's
-            // per-field overrides into ravif's InternalParams in one call.
-            // Build via Default + field assignment because
-            // `#[non_exhaustive]` prohibits struct literal construction
-            // outside the defining crate.
+            // (which `two-pass-butteraugli` and `auto-tune` also enable,
+            // without exposing zenavif's own `__expert` surface). Mirror
+            // EncoderConfig's per-field overrides into ravif's
+            // InternalParams in one call. Build via Default + field
+            // assignment because `#[non_exhaustive]` prohibits struct
+            // literal construction outside the defining crate.
             let mut params = ravif::expert::InternalParams::default();
             #[cfg(feature = "__expert")]
             {
@@ -1038,6 +1042,45 @@ fn build_ravif_encoder(
             #[cfg(feature = "two-pass-butteraugli")]
             {
                 params.sb_q_scale = config.sb_q_scale.clone();
+            }
+            // The per-image fast-tier budget heads (fast_heads.rs; set by
+            // auto_tune or explicitly via with_fast_tier_budgets). Mapping
+            // per the measured arms:
+            //   TxBudget::Largest  -> withhold size-RDO (the stock table)
+            //   TxBudget::Size1    -> preset (the landed default) — no-op
+            //   TxBudget::Min      -> + type-RDO over the reduced set
+            //   PartitionBudget::Ship  -> preset — no-op
+            //   PartitionBudget::Max32 -> partition-range max 16→32 with
+            //     4-ways fully live under breakout+vargate (the measured
+            //     r16m32_bkvg2 point: rect threshold UNCHANGED at 16; the
+            //     prune quartet overrides as a unit, clearing the 4-way
+            //     margin gate). An explicit __expert partition_range
+            //     override wins over the head.
+            #[cfg(feature = "auto-tune")]
+            if let Some(budgets) = config.fast_tier_budgets {
+                use crate::fast_heads::{PartitionBudget, TxBudget};
+                match budgets.tx {
+                    TxBudget::Largest => {
+                        params.rdo_tx_size_override = Some(false);
+                    }
+                    TxBudget::Size1 => {}
+                    TxBudget::Min => {
+                        params.rdo_tx_type_override = Some(true);
+                        params.reduced_tx_set = Some(true);
+                    }
+                }
+                match budgets.partition {
+                    PartitionBudget::Ship => {}
+                    PartitionBudget::Max32 => {
+                        if params.partition_range.is_none() {
+                            params.partition_range = Some((8, 32));
+                        }
+                        params.prune_none_breakout = Some(1.0);
+                        params.prune_rect_margin = None;
+                        params.prune_four_way_margin = None;
+                        params.prune_homogeneity_gate = Some(2.0);
+                    }
+                }
             }
             enc = enc.with_internal_params(params);
         }

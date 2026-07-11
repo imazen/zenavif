@@ -780,7 +780,10 @@ mod monotone_probe_tests {
             .expect("monotone encode");
         assert!(!out.encoded.avif_file.is_empty(), "produces a valid AVIF");
         if !crate::fast_heads::MONOTONE_GATE_LIVE {
-            assert!(!out.probed, "must not probe on registry (no inversion to fix)");
+            assert!(
+                !out.probed,
+                "must not probe on registry (no inversion to fix)"
+            );
             assert!(!out.swapped);
             assert_eq!(out.speed_used, 6, "requested speed kept");
         }
@@ -804,8 +807,10 @@ mod monotone_probe_tests {
         // content at an eligible tier is probe-eligible only once the arms are live;
         // on registry it must pass straight through (valid encode, no probe).
         let rgb = checkerboard(64, 64);
-        let rgba: Vec<rgb::Rgba<u8>> =
-            rgb.pixels().map(|p| rgb::Rgba::new(p.r, p.g, p.b, 255)).collect();
+        let rgba: Vec<rgb::Rgba<u8>> = rgb
+            .pixels()
+            .map(|p| rgb::Rgba::new(p.r, p.g, p.b, 255))
+            .collect();
         let img = ImgVec::new(rgba, 64, 64);
         let cfg = EncoderConfig::new().speed(6).threads(Some(1));
         let out = encode_rgba8_monotone(img.as_ref(), &cfg, StopToken::new(Unstoppable))
@@ -823,12 +828,14 @@ mod monotone_probe_tests {
         // score_rgba8 must score it as opaque, not error "not RGBA8-viewable" — else
         // the probe (and encode_rgba8_with_target) would fail on opaque input.
         let rgb = checkerboard(64, 64);
-        let rgba: Vec<rgb::Rgba<u8>> =
-            rgb.pixels().map(|p| rgb::Rgba::new(p.r, p.g, p.b, 255)).collect();
+        let rgba: Vec<rgb::Rgba<u8>> = rgb
+            .pixels()
+            .map(|p| rgb::Rgba::new(p.r, p.g, p.b, 255))
+            .collect();
         let img = ImgVec::new(rgba, 64, 64);
         let cfg = EncoderConfig::new().speed(6).threads(Some(1));
-        let enc = encode_rgba8_once(img.as_ref(), &cfg, StopToken::new(Unstoppable))
-            .expect("encode");
+        let enc =
+            encode_rgba8_once(img.as_ref(), &cfg, StopToken::new(Unstoppable)).expect("encode");
         let score = score_rgba8(
             TargetMetric::Ssim2(0.0),
             img.as_ref(),
@@ -836,6 +843,9 @@ mod monotone_probe_tests {
             &StopToken::new(Unstoppable),
         )
         .expect("opaque RGBA8 must score, not error");
-        assert!((0.0..=100.0).contains(&score), "sane ssim2 score, got {score}");
+        assert!(
+            (0.0..=100.0).contains(&score),
+            "sane ssim2 score, got {score}"
+        );
     }
 }

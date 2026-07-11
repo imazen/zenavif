@@ -458,6 +458,98 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "auto-tune")]
+    fn fast_tier_budgets_forward_is_live() {
+        // The budget forward (build_ravif_encoder -> expert::InternalParams
+        // -> SpeedTweaks) must actually reach the bitstream: each non-default
+        // budget changes the encoded bytes at a bundle speed, and the default
+        // (Size1 + Ship) is byte-identical to no budgets at all. Uses
+        // encode_rgb8_once (the non-probing primitive) so the monotone probe
+        // can't add a second encode to the comparison.
+        use rgb::Rgb;
+
+        let (w, h) = (256usize, 256usize);
+        // Mixed content: a flat left half (where 32-px partitions win — the
+        // Max32 head's measured domain) + structured right half (real tx
+        // decisions for the tx arms).
+        let px: Vec<Rgb<u8>> = (0..h)
+            .flat_map(|y| {
+                (0..w).map(move |x| {
+                    if x < w / 2 {
+                        Rgb {
+                            r: 96,
+                            g: 112,
+                            b: 128,
+                        } // flat region
+                    } else {
+                        let g = ((x * 255 / w + y * 255 / h) / 2) as u8;
+                        let e = if ((x / 8) + (y / 8)) % 2 == 0 { 64 } else { 0 };
+                        Rgb {
+                            r: g.saturating_add(e),
+                            g,
+                            b: g ^ e,
+                        }
+                    }
+                })
+            })
+            .collect();
+        let img = imgref::Img::new(px, w, h);
+
+        let encode = |budgets: Option<FastTierBudgets>| {
+            let cfg = crate::EncoderConfig::new()
+                .quality(35.0)
+                .speed(6)
+                .with_fast_tier_budgets(budgets);
+            crate::encoder::encode_rgb8_once(
+                img.as_ref(),
+                &cfg,
+                almost_enough::StopToken::new(enough::Unstoppable),
+            )
+            .expect("encode")
+            .avif_file
+        };
+
+        let base = encode(None);
+        let default_budgets = encode(Some(FastTierBudgets {
+            tx: TxBudget::Size1,
+            partition: PartitionBudget::Ship,
+        }));
+        assert_eq!(
+            base, default_budgets,
+            "default budgets (Size1+Ship) must be byte-identical to None"
+        );
+        for (name, budgets) in [
+            (
+                "tx=Largest",
+                FastTierBudgets {
+                    tx: TxBudget::Largest,
+                    partition: PartitionBudget::Ship,
+                },
+            ),
+            (
+                "tx=Min",
+                FastTierBudgets {
+                    tx: TxBudget::Min,
+                    partition: PartitionBudget::Ship,
+                },
+            ),
+            (
+                "part=Max32",
+                FastTierBudgets {
+                    tx: TxBudget::Size1,
+                    partition: PartitionBudget::Max32,
+                },
+            ),
+        ] {
+            let armed = encode(Some(budgets));
+            assert_ne!(
+                base, armed,
+                "{name} must change the bitstream (forward liveness)"
+            );
+        }
+    }
+
+    #[test]
     fn tx_gate_measured_anchors() {
         // Anchors from the fit + VAL factoring: the razor-edge pair
         // 7050/7052 (pf>.85 AND dcty>100) withholds; pf-high CHART content
