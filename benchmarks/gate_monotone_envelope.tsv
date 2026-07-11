@@ -4,3 +4,7 @@
 # scoped: re-pin with `just gate-monotone-pin` after landing content-gates that
 # REMOVE inversions (the shrinking envelope IS the progress) or at the dep-bump
 # flip. Goal state: zero rows. platform	cell	slow	fast
+linux-x86_64	photo/q40	s6	s5
+linux-x86_64	photo/q40	s7	s5
+linux-x86_64	photo/q40	s8	s5
+linux-x86_64	screen/q80	s5	s9

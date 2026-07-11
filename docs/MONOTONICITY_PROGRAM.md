@@ -154,6 +154,28 @@ Two things this run taught:
 - **Post-flip envelope:** these 2 known fixture inversions are what to pin (`just gate-monotone-pin`)
   at the dep bump, replacing today's empty registry envelope.
 
+## The cooptloop-branch flip (2026-07-10) — envelope pinned, magnitudes recorded
+
+The flip ran for real on the `cooptloop` branch (ravif--cooptloop armed clone + zenrav1e
+master by path; `MONOTONE_GATE_LIVE=true`). gate-monotone caught 4 inversions; row dump
+(`GATE_MONOTONE_DEBUG=1`) magnitudes:
+
+- **`screen/q80: s5 < s9`** — the corpus s5-valley showing up in the fixture at last
+  (s9: −3.6% bytes, +0.12 ssim2, 3.1× faster). Real, meaningful, and policy-handled:
+  `monotone_speed_gate` remaps s5→s9 on synthetic content in `auto_tune`. Pinned.
+- **`photo/q40: s6/s7/s8 < s5`** — fixture-noise scale: the cells are ~1.2 KB files, the
+  deltas are 13–28 BYTES and ≤0.064 ssim2 (s5 1166 B/66.696 vs s6 1194 B/66.632). They
+  pass the raw Pareto test only because %-of-tiny-file inflates byte deltas (the sweep
+  discipline's fixed-overhead lesson). Sub-margin under the program's meaningful-inversion
+  rule on the score axis, marginal on bytes. Pinned with this note as provenance.
+- **The real signal in photo/q40 is the TIME-ORDER flip:** armed s6-8 cost ~2.2× s5
+  (272 vs 123 ms) on flat content at low-q where the bundle buys nothing. That is a
+  ladder re-tiering input — COOPT_LOOP Phase 4 ("speed = budget on the new loop") owns
+  it. Do NOT patch it per-fixture.
+- Follow-up (needs user sign-off, it's a gate-semantics change): the gate's dominance
+  test could adopt the documented meaningful-RD margin (≥1% bytes OR ≥0.2 ssim2) plus an
+  absolute-bytes floor for tiny cells; today it is pure Pareto + the 25% time margin.
+
 (This corrects an earlier session claim that the monotonicity residuals were "structurally blocked
 pre-flip" — they're blocked for *registry users*, but fully testable on the local armed build.)
 
