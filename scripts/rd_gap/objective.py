@@ -59,38 +59,59 @@ def load_by_family(path, metric, encoder="zenrav1e"):
   image w h family encoder fmt q bytes bpp ssim2 enc_ms butteraugli_3n
   butteraugli_max) but also returns the family map for grouping.
   """
-  pts = collections.defaultdict(list)
+  all_pts, fam = load_all_metrics(path, [metric], encoder)
+  return all_pts[metric], fam
+
+
+def load_all_metrics(path, metrics, encoder="zenrav1e"):
+  """ONE file parse for every metric: metric -> image -> [(quality, bpp)].
+
+  A joint fit calls `score()` per candidate config; parsing the same TSV once
+  per metric per side (6 parses/pair) triples the I/O for nothing — this is
+  the single-pass loader `score()` uses.
+  """
+  all_pts = {m: collections.defaultdict(list) for m in metrics}
   fam = {}
   with open(path) as f:
     for r in csv.DictReader(f, delimiter="\t"):
       if r.get("encoder") != encoder:
         continue
       try:
-        v = float(r[metric])
         bpp = float(r["bpp"])
       except (ValueError, KeyError):
-        continue  # NA cells (butteraugli off, failed decode) — dropped
-      if metric in LOWER_BETTER:
-        if v <= 0:
-          continue
-        v = -math.log(v)  # quality axis: higher = better
-      pts[r["image"]].append((v, bpp))
-      fam[r["image"]] = r.get("family", "?")
-  return pts, fam
+        continue
+      img = r["image"]
+      for m in metrics:
+        try:
+          v = float(r[m])
+        except (ValueError, KeyError):
+          continue  # NA cell (butteraugli off, failed decode) — dropped
+        if m in LOWER_BETTER:
+          if v <= 0:
+            continue
+          v = -math.log(v)  # quality axis: higher = better
+        all_pts[m][img].append((v, bpp))
+        fam[img] = r.get("family", "?")
+  return all_pts, fam
+
+
+def per_image_bd_from_points(base_pts, arm_pts):
+  """image -> BD-rate% (arm vs base). + = arm needs MORE bits (worse)."""
+  out = {}
+  for img in base_pts:
+    if img not in arm_pts:
+      continue
+    bd = bd_rate(frontier(arm_pts[img]), frontier(base_pts[img]))
+    if bd is not None:
+      out[img] = bd
+  return out
 
 
 def per_image_bd(base_path, arm_path, metric, encoder="zenrav1e"):
-  """image -> BD-rate% (arm vs base). + = arm needs MORE bits (worse)."""
+  """Single-metric convenience wrapper (parses both files)."""
   base, fam = load_by_family(base_path, metric, encoder)
   arm, _ = load_by_family(arm_path, metric, encoder)
-  out = {}
-  for img in base:
-    if img not in arm:
-      continue
-    bd = bd_rate(frontier(arm[img]), frontier(base[img]))
-    if bd is not None:
-      out[img] = bd
-  return out, fam
+  return per_image_bd_from_points(base, arm), fam
 
 
 def _weighted(values_by_family, weights):
@@ -108,11 +129,12 @@ def score(base_path, arm_path, weights=None, veto_pct=DEFAULT_VETO_PCT,
   """The canonical objective. Returns a dict; ['objective'] is the scalar."""
   weights = weights or {}
   metrics = ["ssim2", "butteraugli_3n", "butteraugli_max"]
-  bd, fam = {}, {}
-  for m in metrics:
-    bd[m], fmap = per_image_bd(base_path, arm_path, m, encoder)
-    if not fam:
-      fam = fmap
+  # One parse per file for all three metrics (not per-metric re-reads).
+  base_all, fam = load_all_metrics(base_path, metrics, encoder)
+  arm_all, _ = load_all_metrics(arm_path, metrics, encoder)
+  bd = {
+    m: per_image_bd_from_points(base_all[m], arm_all[m]) for m in metrics
+  }
 
   families = sorted(set(fam.get(i, "?") for i in bd.get("ssim2", {})))
   per_family = {}
