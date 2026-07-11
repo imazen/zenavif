@@ -1165,8 +1165,6 @@ dependencies = [
 [[package]]
 name = "rav1d-disjoint-mut"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d5f921332331631dd8716a93d81aef9ac21245da74af62bc14000a4fd7fdbfd"
 dependencies = [
  "aligned",
  "aligned-vec",
@@ -1175,9 +1173,7 @@ dependencies = [
 
 [[package]]
 name = "rav1d-safe"
-version = "0.5.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "717c3ef9a98101f3d2e33c4a8a4d1fd8b4fb0d39fa67a838e3308386ad9e7a1a"
+version = "0.6.0"
 dependencies = [
  "aligned",
  "archmage",
@@ -1186,6 +1182,7 @@ dependencies = [
  "bitflags",
  "cc",
  "cfg-if",
+ "enough",
  "nasm-rs",
  "parking_lot",
  "paste",
@@ -1194,6 +1191,7 @@ dependencies = [
  "safe_unaligned_simd",
  "strum 0.28.0",
  "to_method",
+ "whereat",
  "zerocopy 0.8.52",
 ]
 
@@ -1924,9 +1922,8 @@ dependencies = [
 
 [[package]]
 name = "zenavif-parse"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35ea3a5640719078e3d91e5feab60dd5d7cff3c34bf5c666925044745c58569d"
+version = "0.6.3"
+source = "git+https://github.com/imazen/zenavif-parse?rev=c36b8228e4851a2f6a2e911a064969303c872c8f#c36b8228e4851a2f6a2e911a064969303c872c8f"
 dependencies = [
  "arrayvec",
  "bitreader",
