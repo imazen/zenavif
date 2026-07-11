@@ -32,16 +32,27 @@ budget points on the new loop.**
   decisions). This is the dataset generator for every fit below — the census tools
   from COEFFRD/SSIMRD generalized into one format. Without traces, joint fitting is
   blind; with them, most fits are OFFLINE against cached encodes.
-  **SEEDED 2026-07-06** — zenrav1e `cooptloop_trace` feature (default-off,
-  byte-identical off; `zenrav1e@795dfd37`). Captures the CURRENCY layer: one
-  `(kind, λ, rate_bits, distortion, cost)` record per `compute_rd_cost[_scaled]`
-  call — the single chokepoint every RD decision flows through — dumpable as TSV.
-  `tests/cooptloop_trace.rs` gates liveness + the `cost == distortion + λ·rate_bits`
-  identity + schema. NOT YET captured (the enrichment follow-ups, each a bounded
-  chunk): per-block context (bsize, bo), per-candidate vs chosen-vs-runner-up (needs
-  emit at the decision sites `rdo_mode_decision`/`encode_partition_topdown`, not just
-  the cost chokepoint), the R-estimate-vs-actual-tell delta, and quant decisions.
-  Then the offline analyzer that turns a trace into the Phase-1 D/R/λ regressions.
+  **DONE 2026-07-10** — enriched to a decision trace (`zenrav1e@640ea9fa`):
+  `rdo_mode_decision` opens a thread-local block scope stamping every
+  `compute_rd_cost[_scaled]` currency row with `(block_seq, bo, bsize)`; the scope
+  closes with a decision row (chosen mode/tx/skip + rd_cost) — chosen-vs-evaluated
+  joins reconstruct offline with no per-candidate plumbing. `COOPTLOOP_TRACE_CAP`
+  bounds memory with counted (never silent) drops. Generator:
+  `examples/cooptloop_trace_dump.rs` (PPM/synthetic → TSV); analyzer:
+  `scripts/rd_gap/analyze_cooptloop_trace.py`. First real trace (1236 interior,
+  384×512 s6 q100, 174,564 rows): **p50 runner-up gap 1.29%, 63.5% of block
+  decisions contested within 2%** — the loop is photo-finish dense, so small λ-D-R
+  mis-calibrations flip most decisions: the Phase-1 leverage evidence. Remaining
+  enrichments (bounded, as Phase 1 needs them): the R-estimate-vs-actual-tell
+  delta, quant decisions, partition-level scopes.
+
+**Phases 1-4 run on the `cooptloop` BRANCH (user-directed 2026-07-10):** everything
+release-gated is ARMED there via local-folder deps — zenavif bookmark `cooptloop` →
+`../ravif--cooptloop` (consts flipped, apply sites live, tune default ss2 with alpha
+pinned Psnr, `with_palette` pass-through) → zenrav1e master by path. Zero-downsides
+round 1 done: 26/26 suites + all four §A gates green armed (envelopes re-pinned per
+the at-flip procedure; the PQ10 tx-size-RDO regression caught + domain-restricted to
+8-bit). Fits must target the ARMED loop — never fit against registry configs.
 - Gates green before and after every phase (ENGINEERING_BASELINE §A); pre-registered
   decision rules per phase (the discipline that kept every verdict honest).
 
