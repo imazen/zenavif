@@ -251,6 +251,10 @@ required-features = ["two-pass-butteraugli"]
 name = "butteraugli_sbmap"
 required-features = ["two-pass-butteraugli"]
 
+[[example]]
+name = "butteraugli_blockmap"
+required-features = ["two-pass-butteraugli"]
+
 # zenavif#30 futex-hang repro/stress loop (found the rav1d-safe tile-threading
 # CDEF/loop-filter guard race; kept as the product-path stress harness).
 [[example]]

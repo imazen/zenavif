@@ -20,8 +20,11 @@ def main():
   yuv_path, w, h, out = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
   data = np.fromfile(yuv_path, dtype=np.uint8)
   ysz, csz = w * h, (w // 2) * (h // 2)
-  if data.size < ysz + 2 * csz:
-    sys.exit(f"short yuv: {data.size} < {ysz + 2 * csz}")
+  if data.size != ysz + 2 * csz:
+    # EXACT match required: a LARGER buffer (coded-size padding) would silently
+    # mis-slice chroma; refuse rather than corrupt (guard added 2026-07-12
+    # after a near-miss — the 120-ivf corpus audit measured ALL EXACT).
+    sys.exit(f"yuv size {data.size} != expected {ysz + 2 * csz} for {w}x{h}")
   y = data[:ysz].reshape(h, w).astype(np.float32)
   cb = data[ysz:ysz + csz].reshape(h // 2, w // 2).astype(np.float32)
   cr = data[ysz + csz:ysz + 2 * csz].reshape(h // 2, w // 2).astype(np.float32)
