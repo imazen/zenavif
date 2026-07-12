@@ -207,3 +207,9 @@ test-linku: download-linku
 
 # Full link-u pipeline: download, generate references, compare
 verify-linku: generate-linku-references test-linku
+
+# G7 (GOAL_PARETO_FRONT): the pareto tripwire — a G1/G2 subset with every
+# round-1 hardening encoded (solo walls, sign-safe, 420-pinned, monotone-check,
+# banded verdicts, live-checked reference versions). SUBSET_N env sizes it.
+gate-pareto:
+    bash scripts/gates/gate_pareto.sh
