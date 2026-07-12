@@ -1,0 +1,17 @@
+# COOPT Phase-1 D-diagnostic #3 — pre-registered per-tile verdict (rule DECISION_RULE_DFIT3.md,
+# committed zenavif@64b3b189 BEFORE the sbmap dataset finished). 2026-07-12, 7950X.
+# Data: traces-scored-2026-07-12 (24 img x 5 q x s6; 120/120 sbmaps, 0 NA): per-64px-tile
+#   butteraugli {mean,p3,max} + RGB MSE (butteraugli_sbmap.rs, raw f32 crate diffmap) joined to
+#   tile-aggregated surviving winner-D from the traces.
+# RESULT (mean per-encode |r| vs log tile-butteraugli-p3, across ~192 tiles/encode):
+#   raw tile-D 0.6771 | tile-MSE 0.8355 | DFIT2-weighted D 0.4848 (frame weights do NOT
+#   transfer down). D wins 16/120 encodes; gap -0.158.
+# VERDICT: D-WORSE per-tile -> the kernel fails at its own granularity; the Phase-1 D-refit
+#   requires a NEW KERNEL fit against per-tile metric targets (normalization/weights ruled out
+#   by the registered matrix).
+# TRILOGY SYNTHESIS (DFIT1+2+3): the loop's D is a worse perceptual predictor than plain SSE
+#   cross-image AND per-tile; bsize weights help frame ranking but not local prediction.
+#   NUANCE recorded: traced D includes the psy masking/boost scaling whose PURPOSE is
+#   allocation policy, not measurement — but the coherent-loop thesis is precisely that D
+#   should BE the measurement (predict the metric) with lambda/allocation as the policy; these
+#   diagnostics quantify how far today's D is from that role.

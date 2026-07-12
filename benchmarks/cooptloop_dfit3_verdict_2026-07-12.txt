@@ -1,0 +1,9 @@
+=== DFIT3 RUN ===
+run-heavy: mem-cap=24G (cgroup, hard) jobs=4/28 avail=51577MiB :: python3 scripts/rd_gap/fit_trace_d_sb.py /mnt/v/output/cooptloop/traces-scored-2026-07-12
+# encodes=120  target=log tile-butteraugli-p3  (per-encode |r| means)
+raw tile-D    : 0.6771
+tile-MSE      : 0.8355
+DFIT2-wtd D   : 0.4848   (secondary)
+D wins on 16/120 encodes; gap = -0.1584
+# VERDICT (pre-registered): D-WORSE per-tile -> kernel fails at its own granularity; refit = NEW KERNEL vs tile metrics
+run-heavy: done rc=0 64s | peak-RSS 0.03GiB | min-avail 51539MiB | peak-load 2.74
