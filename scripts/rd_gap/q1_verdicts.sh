@@ -8,14 +8,15 @@ D="${1:-/mnt/v/output/cooptloop/q1-densegrid-2026-07-12}"
 OUT="${2:-$D/q1_banded_meta.tsv}"
 RG="$(cd "$(dirname "$0")" && pwd)"
 relabel() { # $1 src -> $2 dst, force encoder col (5) to zenrav1e
-  awk -F'\t' 'BEGIN{OFS="\t"} NR==1{print;next} {$5="zenrav1e";print}' "$1" > "$2"
+  awk -F'\t' 'BEGIN{OFS="\t"} NR==1{print;next} {$5="zenrav1e";sub(/\.png$/,"",$1);print}' "$1" > "$2"
 }
 printf 'ref\tarm\tmass_ssim2\tmass_ba3n\tband_low\tband_mid\tband_high\tba_bad\tba_mid\tba_good\tveto\n' > "$OUT"
 for ref in aom_cpu6ss2ai aom_cpu4ss2ai aom_cpu2ss2ai aom_cpu0ss2ai svt_p0t4 svt_p2t4 svt_p6t4 svt_p10t4; do
   [ -f "$D/$ref.tsv" ] || { echo "# missing $ref.tsv — skipped" >&2; continue; }
   relabel "$D/$ref.tsv" "/tmp/q1v_$ref.tsv"
   for arm in arm420_s6 arm420_s9 arm420_s10; do
-    python3 - "$RG" "/tmp/q1v_$ref.tsv" "$D/$arm.tsv" "$ref" "$arm" >> "$OUT" <<'PYEOF'
+    awk -F'\t' 'BEGIN{OFS="\t"} NR==1{print;next} {sub(/\.png$/,"",$1);print}' "$D/$arm.tsv" > "/tmp/q1a_$arm.tsv"
+    python3 - "$RG" "/tmp/q1v_$ref.tsv" "/tmp/q1a_$arm.tsv" "$ref" "$arm" >> "$OUT" <<'PYEOF'
 import json, subprocess, sys
 rg, base, arm, rn, an = sys.argv[1:6]
 j = json.loads(subprocess.run(
