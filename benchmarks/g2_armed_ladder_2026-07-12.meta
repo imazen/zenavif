@@ -1,0 +1,14 @@
+# G2 armed-side ladder legs (train26 x 6q, run_gap harness, cavif ravif--cooptloop@146b3ed
+# chain, BUTTER on) + two findings. 2026-07-12, 7950X, --jobs 12 nice-19.
+# Median walls: s6 2932 ms / s7 3682 / s8 3783 / s9 542 / s10 245 per ~0.8 MP image.
+# FINDING 1 — ARMED s7 == s8 BYTE-IDENTICAL (144/144 cells): an aliased tier pair
+#   (the s2==s3 pattern at the fast side).
+# FINDING 2 — THE ALIAS PAIR IS A PURE VALLEY: vs armed s6 it is +3.31% mass ssim2 BD,
+#   butteraugli-VETOED (+3.88/+6.70), AND 1.26x SLOWER. Strict domination at corpus
+#   scale -> G3/Phase-4: remap s7/s8 -> s6 (or delete the rungs) on the armed ladder.
+# METHOD CATCH — SVT walls were MULTI-THREADED: SvtAv1EncApp defaults to all logical
+#   processors; --lp 1 measured 3.4x slower on p2 (920 -> 3140 ms). All matched-time
+#   probes against the first SVT sweep are VOID (its RD columns remain valid — bytes/
+#   quality are thread-independent). svt_cell.sh now defaults --lp 1 (the charter's
+#   solo-wall convention); the solo re-sweep supersedes svt_ref_2026-07-12.tsv for
+#   any time-matched use. (s7/s8 TSVs identical — s8's file omitted, alias documented.)

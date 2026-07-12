@@ -30,8 +30,12 @@ read -r ew eh < <(identify -format "%w %h" "$srcpng")
 
 ivf="$TMP/${base}_p${PRESET}_c${CRF}_t${TUNE}.ivf"
 t0=$(date +%s%N)
+# SOLO WALL by default (GOAL_PARETO scoring convention): SVT defaults to all
+# logical processors, which measured 3.4x faster walls than --lp 1 on p2 —
+# not comparable to the single-threaded cavif cells. LP env overrides.
+LP="${LP:---lp 1}"
 "$SVTENC" -i "$y4m" -b "$ivf" --avif 1 -n 1 --preset "$PRESET" \
-  --crf "$CRF" --tune "$TUNE" --progress 0 >/dev/null 2>&1 || exit 4
+  --crf "$CRF" --tune "$TUNE" $LP --progress 0 >/dev/null 2>&1 || exit 4
 enc_ms=$(( ($(date +%s%N) - t0) / 1000000 ))
 bytes=$(stat -c%s "$ivf")
 

@@ -18,3 +18,6 @@
 # G2's matched-time round still requires: armed s7/s8 sweeps + SVT p0/p1 legs + aom rungs
 # through one grid. Join gotcha recorded: run_gap TSVs carry full image PATHS, svt_cell
 # basenames — normalize before objective.py.
+# SUPERSEDED FOR TIME USE (2026-07-12, same day): these enc_ms are MULTI-THREADED walls
+# (SVT default --lp = all cores; measured 3.4x vs --lp 1 on p2). RD columns remain valid.
+# Solo-convention replacement: the svt-ref-solo sweep / benchmarks entry that follows it.
