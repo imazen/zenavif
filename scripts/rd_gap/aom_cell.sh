@@ -43,7 +43,7 @@ bytes=$(stat -c%s "$obu")
 bpp=$(python3 -c "print(f'{$bytes*8/$PX:.5f}')")
 "$AOMDEC" --output-bit-depth=8 -o "$decy" "$obu" > /dev/null 2>&1
 python3 "$COLOR" from_y4m "$decy" "$FMT" "$IMG" "$decp"
-ss=$("$SCORER" image "$IMG" "$decp" 2>/dev/null | grep -oE '[0-9.]+' | head -1)
+ss=$("$SCORER" image "$IMG" "$decp" 2>/dev/null |  grep -oE '[-0-9.]+' | head -1)
 [ -z "$ss" ] && ss="NA"
 
 # Optional butteraugli columns (see zenrav1e_cell.sh)

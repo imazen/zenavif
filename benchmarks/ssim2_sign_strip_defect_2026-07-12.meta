@@ -1,0 +1,19 @@
+# DATA-INTEGRITY DEFECT found + fixed 2026-07-12 during G2 round 1.
+# aom_cell.sh + zenrav1e_cell.sh parsed fast-ssim2 output with grep -oE '[0-9.]+',
+# which STRIPS THE MINUS SIGN: SSIMULACRA2 goes NEGATIVE at severe degradation, and
+# every such cell was recorded as its ABSOLUTE VALUE. Proof cell: 1236 @ aom cpu6
+# cq63 allintra-ss2 -> true score -46.643, recorded +46.643 — a fake miracle point
+# that poisons the low end of any per-image frontier (bd_arm/objective keep it as the
+# best low-bpp point), which inflated today's first aom-vs-armed probes to +24..+61%.
+# FIXED: both parsers now '[-0-9.]+' (svt_cell + gen_trace_corpus were written
+# minus-safe from the start). All G2 legs re-running with RD_CACHE=off (cached score
+# rows would replay corrupted values).
+# HISTORICAL BLAST RADIUS (flagged for audit, not yet re-scored): every program TSV
+# produced through these two cells can carry sign-flipped ssim2 in cells where true
+# ssim2 < 0 — i.e. the very-low-quality end (q<=30-class cells on hard content, high
+# cq aom cells). Mitigation: most program verdicts compared arms through the SAME
+# pipeline (both sides equally affected at the same cells) and used medians over
+# 6q-grid BDs where the affected region is the curve's bottom cell; DIRECTION of most
+# verdicts is therefore likely preserved, but any conclusion resting specifically on
+# q30-class cells or on aom low-quality reference points deserves re-scoring. The
+# audit belongs to the next measuring round; decoded artifacts are regenerable.

@@ -80,7 +80,7 @@ if sc=$(rd_cache_score_get); then
 fi
 
 "$SAVE_PNG" "$avif" "$decp" > /dev/null 2>&1 || { echo "DECFAIL zenrav1e Q$Q"; exit 1; }
-ss=$("$SCORER" image "$IMG" "$decp" 2>/dev/null | grep -oE '[0-9.]+' | head -1)
+ss=$("$SCORER" image "$IMG" "$decp" 2>/dev/null |  grep -oE '[-0-9.]+' | head -1)
 [ -z "$ss" ] && ss="NA"
 
 # Optional butteraugli scoring (metric-gaming guard for the ss2-tune work):
