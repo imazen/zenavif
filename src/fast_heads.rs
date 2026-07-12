@@ -259,6 +259,16 @@ pub const MONOTONE_GATE_LIVE: bool = true;
 /// not dominated, so applying the remap there would regress synthetic content.
 #[must_use]
 pub fn monotone_speed_gate(gradient_fraction_smooth: f32, speed: u8) -> u8 {
+    // Q3 (G2 round 1, 2026-07-12): on the ARMED ladder s7 and s8 are
+    // byte-identical to each other (144/144 train26 cells) AND strictly
+    // dominated by s6 — +3.31% mass ssim2 BD, butteraugli-vetoed, at 1.26x
+    // s6's wall (benchmarks/g2_armed_ladder_2026-07-12.meta). Unlike the
+    // content-gated s5 valley, the domination is content-INDEPENDENT (the
+    // alias pair is one config losing everywhere at higher cost), so the
+    // remap is unconditional. Same release gate as the s5 remap.
+    if speed == 7 || speed == 8 {
+        return 6;
+    }
     if speed == MONOTONE_VALLEY_SPEED
         && gradient_fraction_smooth.is_finite()
         && gradient_fraction_smooth < MONOTONE_GATE_GRADIENT_SMOOTH_MAX
@@ -419,8 +429,16 @@ mod tests {
         for gfs in [0.675_f32, 0.714, 0.842] {
             assert_eq!(monotone_speed_gate(gfs, 5), 5);
         }
-        // Off the valley speed: never remap, any content.
-        for s in [1u8, 2, 4, 6, 7, 8, 9, 10] {
+        // Q3: the armed s7/s8 alias-valley remaps to s6 UNCONDITIONALLY
+        // (byte-identical pair, strictly dominated by s6 at corpus scale —
+        // g2_armed_ladder_2026-07-12.meta). Content plays no part.
+        for s in [7u8, 8] {
+            for gfs in [0.10f32, 0.90, f32::NAN] {
+                assert_eq!(monotone_speed_gate(gfs, s), 6);
+            }
+        }
+        // Off the valley speeds: never remap, any content.
+        for s in [1u8, 2, 4, 6, 9, 10] {
             assert_eq!(monotone_speed_gate(0.10, s), s);
         }
         // Non-finite feature degrades to no-op (never a spurious remap).
