@@ -1,0 +1,16 @@
+# CORRECTION to g2_round1_final (same day, via the new per-band BD in objective.py).
+# The final meta characterized the aom-ss2 gap as "concentrating in the low-mid band" —
+# that framing was an artifact of comparing SCALARS across differently-anchored grids.
+# The banded decomposition on the MATCHED-420 allintra comparison reads:
+#   armed-420 s6 vs aom cpu2-ss2-allintra:  low(<50) +14.09%  mid(50-75) +31.82%  high(>75) +45.03%
+#   armed-444 s6 vs aom cpu2-ss2-good:      low +3.29%        mid +8.62%          high +19.24%
+# UNIFIED READ: the deficit to aom's ss2 tune RISES MONOTONICALLY WITH QUALITY on both
+# grids; the two scalars (+29 vs +10) differed because each grid samples a different
+# stretch of the same rising curve (and the good comparison carries armed's 444
+# advantage). LOW quality is our CLOSEST band, HIGH quality the furthest — the
+# metric-in-the-loop mechanism pays aom most where ssim2 has the most structure to
+# exploit. Web-focused low-q remains the priority BAND for us but it is where we are
+# LEAST behind; the D-kernel's biggest reference-proven headroom is at mid-high.
+# The butteraugli-divergence note (winning ba while losing ssim2) appeared only in the
+# mixed-format good comparison — treat as format-confounded until re-read banded at
+# matched format with ba-banded decomposition (future objective.py extension).

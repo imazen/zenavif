@@ -95,13 +95,46 @@ def load_all_metrics(path, metrics, encoder="zenrav1e"):
   return all_pts, fam
 
 
-def per_image_bd_from_points(base_pts, arm_pts):
-  """image -> BD-rate% (arm vs base). + = arm needs MORE bits (worse)."""
+def bd_rate_band(test, ref, band):
+  """bd_arm.bd_rate restricted to the quality band [a, b] (ssim2-space).
+
+  Bands exist because one scalar over mismatched grids integrates whatever
+  region happens to overlap (the G2 round-1 +29-vs-+10 'contradiction' was
+  exactly this): a verdict must say WHERE on the quality axis it holds.
+  """
+  import numpy as np
+
+  def prep(f):
+    seen = {}
+    for s, b in f:
+      seen[round(s, 6)] = math.log(b)
+    xs = sorted(seen)
+    return np.array(xs), np.array([seen[x] for x in xs])
+
+  x1, y1 = prep(ref)
+  x2, y2 = prep(test)
+  if len(x1) < 4 or len(x2) < 4:
+    return None
+  lo = max(x1.min(), x2.min(), band[0])
+  hi = min(x1.max(), x2.max(), band[1])
+  if hi <= lo:
+    return None
+  gg = np.linspace(lo, hi, 200)
+  trapz = getattr(np, "trapezoid", None) or np.trapz
+  avg = (trapz(np.interp(gg, x2, y2), gg)
+         - trapz(np.interp(gg, x1, y1), gg)) / (hi - lo)
+  return (math.exp(avg) - 1.0) * 100.0
+
+
+def per_image_bd_from_points(base_pts, arm_pts, band=None):
+  """image -> BD-rate% (arm vs base). + = arm needs MORE bits (worse).
+  With `band` = (lo, hi) in quality space, restrict the integration."""
   out = {}
   for img in base_pts:
     if img not in arm_pts:
       continue
-    bd = bd_rate(frontier(arm_pts[img]), frontier(base_pts[img]))
+    fa, fb = frontier(arm_pts[img]), frontier(base_pts[img])
+    bd = bd_rate_band(fa, fb, band) if band else bd_rate(fa, fb)
     if bd is not None:
       out[img] = bd
   return out
@@ -134,6 +167,16 @@ def score(base_path, arm_path, weights=None, veto_pct=DEFAULT_VETO_PCT,
   arm_all, _ = load_all_metrics(arm_path, metrics, encoder)
   bd = {
     m: per_image_bd_from_points(base_all[m], arm_all[m]) for m in metrics
+  }
+  # Per-quality-band ssim2 BD (first-class since G2 round 1): low < 50,
+  # mid 50-75, high > 75 on the ssim2 axis. A band with no overlap on an
+  # image contributes nothing there; the per-band mass aggregate is reported
+  # alongside the headline scalar so a verdict states WHERE it holds.
+  bands = {"low(<50)": (-1e9, 50.0), "mid(50-75)": (50.0, 75.0),
+           "high(>75)": (75.0, 1e9)}
+  band_bd = {
+    name: per_image_bd_from_points(base_all["ssim2"], arm_all["ssim2"], b)
+    for name, b in bands.items()
   }
 
   families = sorted(set(fam.get(i, "?") for i in bd.get("ssim2", {})))
@@ -168,8 +211,19 @@ def score(base_path, arm_path, weights=None, veto_pct=DEFAULT_VETO_PCT,
   mass_bmax = _weighted(bmax_by_family, weights)
   vetoed = (mass_b3 > veto_pct) or (mass_bmax > veto_pct)
 
+  # band aggregates (equal/mass weights over families, same as the headline)
+  band_mass = {}
+  for name, per_img in band_bd.items():
+    fam_vals = {}
+    for f in families:
+      vals = [per_img[i] for i in per_img if fam.get(i) == f]
+      if vals:
+        fam_vals[f] = float(np.median(vals))
+    band_mass[name] = _weighted(fam_vals, weights) if fam_vals else float("nan")
+
   objective = VETO_PENALTY + max(mass_b3, mass_bmax) if vetoed else mass_ss2
   return {
+    "band_ssim2_bd": band_mass,
     "objective": objective,
     "vetoed": vetoed,
     "mass_ssim2_bd": mass_ss2,
@@ -206,6 +260,11 @@ def _report(res, as_json):
   print(f"# mass ssim2 BD = {res['mass_ssim2_bd']:+.4f}%  "
         f"ba3n = {res['mass_butteraugli_3n_bd']:+.4f}%  "
         f"bamax = {res['mass_butteraugli_max_bd']:+.4f}%")
+  bands = res.get("band_ssim2_bd", {})
+  if bands:
+    print("# per-band ssim2 BD: "
+          + "  ".join(f"{k} = {v:+.3f}%" if not math.isnan(v) else f"{k} = NA"
+                      for k, v in bands.items()))
   if res["vetoed"]:
     print(f"# VETOED (butteraugli constraint) -> objective = {res['objective']:.1f}")
   else:
