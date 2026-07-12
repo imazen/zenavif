@@ -95,6 +95,19 @@ TSV + docs → update this charter's status line. Re-measure G1/G2 fully at each
 boundary. The charter closes when a single round passes G1–G7 together; the closing
 commit links every gate's TSV.
 
+**Status (2026-07-12, sixth update — G2 round 1 FINAL):** the round debugged its own
+instruments (solo threads, sign-strip, format axis — all fixed + committed) and then
+characterized the real position: vs aom v3.14.1 ss2-tune the armed chain is +10.3%
+ssim2 BD at the HIGH-quality band *while winning butteraugli* (their tune optimizes
+ssim2 itself — metric-in-the-loop D, the exact mechanism DFIT1–7 specified as our
+kernel's missing piece), and **+29–34% in the LOW-MID band at matched format — the
+web-focused band this project prioritizes**. vs SVT matched-420: p0t4 near-parity
+(the earlier win withdrawn as format-flattered), mid-band behind. Standing: the
+ladder hole (542→2932 ms), s7==s8 aliased valley, fast-end gap. Round 2: per-band BD
+decomposition first-class, low-q-dense grids, D-kernel (decode-side/transform) aimed
+at the low-mid band — the D arc and the ladder converge on the same ~30%. Prior
+update follows.
+
 **Status (2026-07-12, fifth update — G2 round 1):** first matched-time domination
 sample under the solo-wall convention (method catch: SVT defaults to all-cores; --lp 1
 = 3.4× slower on p2 — first sweep's walls voided, RD columns valid). Results: armed s6
