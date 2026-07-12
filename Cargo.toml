@@ -247,6 +247,10 @@ rustdoc-args = ["--generate-link-to-definition"]
 name = "two_pass_cell"
 required-features = ["two-pass-butteraugli"]
 
+[[example]]
+name = "butteraugli_sbmap"
+required-features = ["two-pass-butteraugli"]
+
 # zenavif#30 futex-hang repro/stress loop (found the rav1d-safe tile-threading
 # CDEF/loop-filter guard race; kept as the product-path stress harness).
 [[example]]

@@ -25,6 +25,9 @@ DUMP="${DUMP:-/home/lilith/work/zen/zenrav1e/target/release/examples/cooptloop_t
 ANALYZE="$HERE/analyze_cooptloop_trace.py"
 AOMDEC="${AOMDEC:-/home/lilith/work/aom/build_butteraugli/aomdec}"
 SCORER="${SCORER:-/home/lilith/work/zen/fast-ssim2/target/release/fast-ssim2-cli}"
+# Per-SB butteraugli pooling dump (Phase-1 per-block metric targets); empty = skip.
+SBMAP="${SBMAP:-/home/lilith/work/zen/zenavif/target/release/examples/butteraugli_sbmap}"
+SBSIZE="${SBSIZE:-64}"
 LIMIT="${LIMIT:-0}"   # 0 = all sample rows
 
 [ -x "$DUMP" ] || { echo "missing $DUMP (cargo build --release --features cooptloop_trace --example cooptloop_trace_dump)" >&2; exit 2; }
@@ -64,6 +67,11 @@ tail -n +2 "$SAMPLE" | while IFS=$'\t' read -r img w h fam; do
       [ -n "$m" ] && mse=$m
       s=$("$SCORER" image "$srcpng" "$dpng" 2>/dev/null | grep -oE '[-0-9.]+' | head -1)
       [ -n "$s" ] && ssim2=$s
+      if [ -n "$SBMAP" ] && [ -x "$SBMAP" ]; then
+        "$SBMAP" "$srcpng" "$dpng" "$SBSIZE" \
+          "$OUTDIR/sbmap_${base}_s${SPEED}_q${q}.tsv" 2>/dev/null \
+          || echo "sbmap failed: $base q$q" >&2
+      fi
     fi
     rm -f "$yuv" "$dpng" "$ivf"
     echo -e "$base\t$fam\t$SPEED\t$q\t$(basename "$trace")\t$rows\t${ebytes:-NA}\t$ssim2\t$mse" >> "$manifest"
