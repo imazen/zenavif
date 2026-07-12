@@ -37,3 +37,20 @@ were not expert-clobbered) and their selection outcome is expected to replicate.
 NOTE: if i7 remains byte-identical to base post-fix, that is a MEASURED
 genuinely-inert verdict at armed s9 (plausible mechanism: num_modes_rdo_override=1
 collapses mode-set expansion), not a harness defect.
+
+## VERDICT (2026-07-12, post-orderfix re-sweep): HONEST NEGATIVE
+
+No graft config wins either SVT cell under the pre-registered rule. Re-swept arms
+(ravif--cooptloop@679feb3, grafts run LAST), coarse 6q, walls 12-job selection medians
+vs SOLO refs (p1t4 1958 ms / p2t4 1355 ms):
+  base  539 ms  +12.62/+9.81 mass (vetoed)      i7     == base byte-identical —
+  txd2  621 ms  +11.28/+8.50 (vetoed)                  MEASURED genuinely inert at
+  prune 883 ms   +9.05/+6.41 (vetoed)                  armed s9 (num_modes_rdo=1
+  txmin 1020 ms  +8.24/+5.61 (vetoed; high-band        collapses mode-set expansion);
+                 -0.29 vs p2t4 only neg cell)          i7prune == prune accordingly.
+prune/txmin replicate sweep-1 exactly (their fields were never clobbered — predicted).
+Grafts move walls INTO the 700-2600 ms hole but leave +5.6-9.1% mass with butteraugli
+vetoes everywhere: s6-bundle members grafted on s9 do not manufacture a competitive
+tier. The hole passes to Phase-4 proper (budget-tier derivation on the coopt loop).
+No dense confirm run (rule: winners only). TSVs: benchmarks/q2_hole_2026-07-12/
+(sweep-1 void-for-cause raws kept at /mnt/v/.../q2-hole-2026-07-12/pre-orderfix/).
