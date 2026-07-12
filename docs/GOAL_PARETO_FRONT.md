@@ -95,6 +95,15 @@ TSV + docs → update this charter's status line. Re-measure G1/G2 fully at each
 boundary. The charter closes when a single round passes G1–G7 together; the closing
 commit links every gate's TSV.
 
+**Status (2026-07-12, seventh update — CORRECTION via the new per-band BD):** the
+sixth update's "gap concentrates in the low-mid band" was a grid-anchoring artifact.
+Banded decomposition at matched 420: the aom-ss2 deficit RISES with quality — low(<50)
++14.1%, mid(50–75) +31.8%, high(>75) +45.0% — low quality is our CLOSEST band. The
+objective now reports bands beside the scalar (a gate-pareto requirement). Strategy
+unchanged (low-q is the product priority and our best band); the D-kernel's
+reference-proven headroom is largest at mid-high quality. Prior update follows,
+superseded on the band claim.
+
 **Status (2026-07-12, sixth update — G2 round 1 FINAL):** the round debugged its own
 instruments (solo threads, sign-strip, format axis — all fixed + committed) and then
 characterized the real position: vs aom v3.14.1 ss2-tune the armed chain is +10.3%
