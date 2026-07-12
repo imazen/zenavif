@@ -75,7 +75,7 @@ tail -n +2 "$SAMPLE" | while IFS=$'\t' read -r img w h fam; do
     fi
     # Keep the IVF (persist-encodes discipline): ~25-450 KB each; feature/metric
     # re-passes decode from it instead of re-encoding the whole corpus.
-    mkdir -p "$OUTDIR/ivf" && mv -f "$ivf" "$OUTDIR/ivf/" 2>/dev/null
+    mkdir -p "$OUTDIR/ivf" && mv -f "$ivf" "$OUTDIR/ivf/${base}_s${SPEED}_q${q}.ivf" 2>/dev/null
     rm -f "$yuv" "$dpng"
     echo -e "$base\t$fam\t$SPEED\t$q\t$(basename "$trace")\t$rows\t${ebytes:-NA}\t$ssim2\t$mse" >> "$manifest"
     # One summary row per encode (flat JSON -> TSV via python).

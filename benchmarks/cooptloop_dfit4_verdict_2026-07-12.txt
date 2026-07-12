@@ -1,0 +1,9 @@
+=== DFIT4 RUN ===
+run-heavy: mem-cap=24G (cgroup, hard) jobs=4/28 avail=52170MiB :: python3 scripts/rd_gap/fit_trace_d_kernel.py /mnt/v/output/cooptloop/traces-scored-2026-07-12
+# tiles=19958 images=24
+# full-fit coefficients: log_mse=+0.4710, log_var=-0.1159, log_grad=-0.2265, luma=+0.0983, intercept=-0.0480
+# full-fit mean per-encode |r| = 0.8426 over 120 encodes
+# mse-alone mean per-encode |r| = 0.8280
+# LOOCV held-out mean per-encode |r| = 0.8388 (folds min 0.4732 max 0.9597)
+# VERDICT (pre-registered): INSUFFICIENT — per-block in-encoder features needed
+run-heavy: done rc=0 0s | peak-RSS 0.04GiB | min-avail 52170MiB | peak-load 1.04

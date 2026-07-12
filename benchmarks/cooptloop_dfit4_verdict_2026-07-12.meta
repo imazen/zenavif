@@ -1,0 +1,14 @@
+# COOPT Phase-1 D-diagnostic #4 — pre-registered verdict (rule DECISION_RULE_DFIT4.md,
+# committed zenavif@70d45b56 before the feature dataset finished). 2026-07-12, 7950X.
+# Data: traces-scored-2026-07-12 (24 img x 5 q x s6; 19,958 tiles; sbmap gains
+#   src_var/src_grad/src_luma; IVFs now persisted under ivf/ — 120 files, 9.8 MB,
+#   feature re-passes are decode-only; gotcha: they landed as .tmp_* DOTFILES the ls
+#   check couldn't see — "0 kept" was a blind check, not a failure; renamed clean).
+# RESULT: full-fit coefficients log_mse +0.471, log_var -0.116, log_grad -0.227,
+#   luma +0.098 (masking signs as predicted) — but LOOCV held-out mean per-encode
+#   |r| = 0.8388 vs mse-alone 0.8280: ~+0.011, folds 0.47-0.96.
+# VERDICT: INSUFFICIENT — 64px-tile source stats do not carry the butteraugli
+#   structure; per-BLOCK features/error needed.
+# ROUTING SHARPENED: per-block error + features are computable OFFLINE — pool the raw
+#   f32 diffmap + MSE + src features over the COMMITTED BLOCKS (commit rows carry
+#   bo+bsize; IVFs kept; no encoder change) => DFIT5 at true block granularity.
