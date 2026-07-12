@@ -95,9 +95,14 @@ TSV + docs → update this charter's status line. Re-measure G1/G2 fully at each
 boundary. The charter closes when a single round passes G1–G7 together; the closing
 commit links every gate's TSV.
 
-**Status (2026-07-12):** COOPT Phase 0 complete; the composed flip measures −25.7%
-mass ssim2 BD vs the registry chain on TRAIN (no aggregate veto; 9094 bamax flag
-open → G4 work); G1 near at the tip vs aom (SVT unmeasured — first G2 prerequisite);
-G2 waits on Phase 4 re-tiering; G6 needs the armed ravif clone pushed as a public
-branch + a clean-clone reproduction run (autonomously reachable — no publish
-dependency).
+**Status (2026-07-12, second update):** Phase 1 OPEN with its first pre-registered
+verdict: the trace's surviving-R leg is frame-level EXACT (Σ winner-R/8 =
+0.98–1.00× real bytes, was 5.9× before partition-outcome marking,
+zenrav1e@8552e2f0), and **D DOES NOT BEAT MSE (0/5 quantizers)** — cross-image the
+psy-D currency correlates with ssim2 at |r| 0.14–0.74 vs raw MSE's 0.74–0.85
+(benchmarks/cooptloop_dfit1_verdict_2026-07-12.*): the D-refit is the top-priority
+Phase-1 lever with quantified headroom. G2: SVT-AV1 live-checked (latest v4.1.0)
+and built clean (~/work/zen/svtav1-v4.1.0); ladder cell wiring is next. G6: the
+armed ravif branch is publicly fetchable (imazen/cavif-rs#cooptloop @146b3ed);
+remaining = pinned-rev chain + clean-clone reproduction. G4: 9094 bamax flag open
+(Phase 3). Flip A/B on TRAIN: −25.7% mass ssim2 BD, no aggregate veto.
