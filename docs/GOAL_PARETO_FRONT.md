@@ -95,6 +95,18 @@ TSV + docs → update this charter's status line. Re-measure G1/G2 fully at each
 boundary. The charter closes when a single round passes G1–G7 together; the closing
 commit links every gate's TSV.
 
+**Status (2026-07-12, third update — the six-diagnostic day):** Phase 1's D-leg is now
+fully mapped by six pre-registered diagnostics (DFIT1–6, every rule committed before its
+data): the R currency is frame-level EXACT once survivor-filtered; the D currency loses
+to raw pixel MSE at every granularity with the gap widening as granularity refines
+(frame −0.13 / tile −0.16 / block −0.23); offline recalibrations top out at LOOCV 0.853
+— but the neighborhood field showed textbook surround-masking structure. **Extracted
+kernel spec: a learned surround-masking sensitivity field from multi-scale source
+features (zenpredict shape), consumed as D = SSE × field(SB) via FrameHints — merging
+the D-refit with Phase 3's allocation model.** Next: DFIT7 (the learned field,
+registration first), then the G2 reference ladder (SVT v4.1.0 built + cell-wired) and
+G6 pinned-rev reproduction. Benchmarks: cooptloop_dfit{1..6}_verdict_2026-07-12.*.
+
 **Status (2026-07-12, second update):** Phase 1 OPEN with its first pre-registered
 verdict: the trace's surviving-R leg is frame-level EXACT (Σ winner-R/8 =
 0.98–1.00× real bytes, was 5.9× before partition-outcome marking,
