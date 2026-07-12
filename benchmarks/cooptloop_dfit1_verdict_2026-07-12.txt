@@ -1,0 +1,12 @@
+=== THE PRE-REGISTERED DIAGNOSTIC ===
+# rows=120 images=24 qs=[40, 60, 100, 160, 220]
+# TEST 1 — cross-image per quantizer (gating: |r_D|>|r_MSE| at >=4/5)
+q	n	r_ssim2_vs_logD	r_ssim2_vs_logMSE	D_wins
+40	24	-0.1416	-0.7421	MSE
+60	24	-0.3658	-0.7585	MSE
+100	24	-0.7423	-0.8466	MSE
+160	24	-0.6854	-0.8401	MSE
+220	24	-0.6961	-0.8473	MSE
+# VERDICT (pre-registered): D DOES NOT BEAT MSE (0/5 quantizers)
+# TEST 2 — within-image across q (reported, not gating)
+mean |r| across-q: logD 0.9706  logMSE 0.9663  (n=24 images)

@@ -31,7 +31,7 @@ LIMIT="${LIMIT:-0}"   # 0 = all sample rows
 mkdir -p "$OUTDIR"
 manifest="$OUTDIR/manifest.tsv"
 summary="$OUTDIR/summary.tsv"
-echo -e "image\tfamily\tspeed\tquantizer\ttrace\trows\tbytes\tssim2" > "$manifest"
+echo -e "image\tfamily\tspeed\tquantizer\ttrace\trows\tbytes\tssim2\tmse" > "$manifest"
 wrote_summary_header=0
 
 n=0
@@ -57,15 +57,16 @@ tail -n +2 "$SAMPLE" | while IFS=$'\t' read -r img w h fam; do
     rows=$(($(wc -l < "$trace") - 1))
     ebytes=$(echo "$log" | grep -oE '\-> [0-9]+ B' | grep -oE '[0-9]+' | head -1)
     # decode + score: aomdec raw I420 -> owned BT.601-full inverse -> ssim2
-    ssim2=NA
+    ssim2=NA; mse=NA
     yuv="$OUTDIR/.tmp_${base}_q${q}.yuv"; dpng="$OUTDIR/.tmp_${base}_q${q}.png"
-    if "$AOMDEC" --rawvideo -o "$yuv" "$ivf" >/dev/null 2>&1 \
-       && python3 "$HERE/yuv_to_png.py" "$yuv" "$ew" "$eh" "$dpng" 2>/dev/null; then
+    if "$AOMDEC" --rawvideo -o "$yuv" "$ivf" >/dev/null 2>&1; then
+      m=$(python3 "$HERE/yuv_to_png.py" "$yuv" "$ew" "$eh" "$dpng" "$srcpng" 2>/dev/null | grep -oE 'mse [0-9.]+' | cut -d' ' -f2)
+      [ -n "$m" ] && mse=$m
       s=$("$SCORER" image "$srcpng" "$dpng" 2>/dev/null | grep -oE '[-0-9.]+' | head -1)
       [ -n "$s" ] && ssim2=$s
     fi
     rm -f "$yuv" "$dpng" "$ivf"
-    echo -e "$base\t$fam\t$SPEED\t$q\t$(basename "$trace")\t$rows\t${ebytes:-NA}\t$ssim2" >> "$manifest"
+    echo -e "$base\t$fam\t$SPEED\t$q\t$(basename "$trace")\t$rows\t${ebytes:-NA}\t$ssim2\t$mse" >> "$manifest"
     # One summary row per encode (flat JSON -> TSV via python).
     python3 - "$ANALYZE" "$trace" "$base" "$fam" "$SPEED" "$q" "$summary" "$wrote_summary_header" <<'EOF'
 import json, subprocess, sys

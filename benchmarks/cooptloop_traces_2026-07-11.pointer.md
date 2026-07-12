@@ -1,5 +1,11 @@
 # COOPT Phase-1 decision-trace corpus — 2026-07-11 (pointer)
 
+**SUPERSEDED 2026-07-12** by `/mnt/v/output/cooptloop/traces-scored-2026-07-12/`
+(adds commit rows = surviving-scope marking, decodable IVF scoring — ssim2+mse
+columns — and a denser 5-quantizer grid). Keep this dir only until the scored
+corpus' verdicts land; it lacks row-3 commits so `fit_trace_d.py`'s surviving
+columns read zero on it. Regenerable either way.
+
 Block-storage payload (traces are 3–45 MB each; never committed):
 
 - **Path:** `/mnt/v/output/cooptloop/traces-2026-07-11/`

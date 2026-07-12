@@ -1,0 +1,15 @@
+# COOPT Phase-1 D-diagnostic #1 — pre-registered verdict (rule: scripts/rd_gap/DECISION_RULE_DFIT1.md,
+# written before the scored corpus finished). Date 2026-07-12, host 7950X.
+# Corpus: train26 24 img x zenrav1e q{40,60,100,160,220} x s6, tune-ss2, threads=1
+#   (traces-scored-2026-07-12; zenrav1e master 8552e2f0, commit-row survivor marking).
+# Scoring: owned BT.601-full inverse (yuv_to_png.py) -> fast-ssim2 + RGB MSE; 120/120 scored.
+# Preconditions verified: surviving-sum(winner R)/8 = 0.98-1.00x real encoded bytes on every
+#   image (R-leg frame-level EXACT); 100% decision->min-eval joins; commits strict subset.
+# VERDICT: D DOES NOT BEAT MSE — 0/5 quantizers. Cross-image |r(ssim2, log MSE)| 0.74-0.85 vs
+#   |r(ssim2, log D_surv/px)| 0.14-0.74 (q40 worst: -0.14 vs -0.74).
+# Pre-registered consequence: the D currency has LARGE headroom — a distortion leg that merely
+#   matched MSE's cross-image ranking would re-rank decisions; the Phase-1 D-refit (fit D so
+#   dD predicts dmetric) is the top-priority lever. Within-image across-q both ~0.97 (reported,
+#   non-gating, as registered).
+# Caveats: 4:2:0 + top-left chroma decimation depresses absolute ssim2 identically for both
+#   correlates; cross-image-at-fixed-q compares different bitrates (same exposure both sides).
