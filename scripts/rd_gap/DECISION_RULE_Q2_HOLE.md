@@ -22,3 +22,18 @@ overlap AND no butteraugli veto (objective.py). Any config winning either cell �
 positive (commit config + verdict). No config winning either → Q2 HONEST NEGATIVE:
 commit the sweep TSVs + the gap sizes; the hole then belongs to Phase-4 proper
 (budget-tier derivation on the new loop) rather than graft shortcuts.
+
+## Incident (2026-07-12, recorded before re-sweep verdicts): first sweep partially void
+
+The first 6-arm sweep produced byte-identical RD for {base, i7, txd2} and for
+{prune, i7prune}. Root cause: the graft match ran BEFORE `speed_settings()`'s
+expert-override block, so the armed s9 tier's own knobs (size1 depth, SATD
+num_modes, prune quartet) clobbered graft fields — txd2's depth-2 was directly
+overwritten by the retier's depth-1; i7prune's prune half survived but its i7 half
+composed with the same clobber question as i7 alone. Fixed at ravif--cooptloop@
+679feb3 (graft match moved to run LAST; unset env still byte-identical). All six
+arms re-swept post-fix. prune/txmin numbers from sweep 1 were real (those fields
+were not expert-clobbered) and their selection outcome is expected to replicate.
+NOTE: if i7 remains byte-identical to base post-fix, that is a MEASURED
+genuinely-inert verdict at armed s9 (plausible mechanism: num_modes_rdo_override=1
+collapses mode-set expansion), not a harness defect.
