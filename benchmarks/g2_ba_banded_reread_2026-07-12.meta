@@ -1,0 +1,10 @@
+# Q5 (queue goal): butteraugli-banded decomposition + round-1 re-read. 2026-07-12.
+# objective.py now reports ba3n bands (bad ba>3 / mid 1-3 / good <1, edges on the -log
+# axis) beside the ssim2 bands. Re-reads:
+#   MATCHED-420, aom cpu2-ss2-allintra vs armed-420 s6:
+#     ssim2 bands +14.09/+31.82/+45.03; ba3n bands +28.45/+39.67/+52.70 — the deficit
+#     RISES WITH QUALITY on BOTH metrics; NO metric divergence at matched format.
+#   Format-confounded (armed-444 vs aom-good-420): ba bands -14.16/+0.20/+21.57 — the
+#     "we win butteraugli" signature lives ONLY in the confounded comparison's bad band
+#     (armed 4:4:4 chroma advantage at low quality). QUESTION CLOSED: there is no
+#     metric-divergent tune effect to exploit; the gap is real on both metrics.

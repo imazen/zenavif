@@ -178,6 +178,17 @@ def score(base_path, arm_path, weights=None, veto_pct=DEFAULT_VETO_PCT,
     name: per_image_bd_from_points(base_all["ssim2"], arm_all["ssim2"], b)
     for name, b in bands.items()
   }
+  # Butteraugli-3n bands (Q5): the ba quality axis is -log(ba) internally, so
+  # band edges at ba {3, 1} map to {-log 3, 0}: bad = ba>3, mid = 1..3,
+  # good = ba<1. Same rising-curve rationale as the ssim2 bands.
+  ba_edges = {"ba_bad(>3)": (-1e9, -math.log(3.0)),
+              "ba_mid(1-3)": (-math.log(3.0), 0.0),
+              "ba_good(<1)": (0.0, 1e9)}
+  ba_band_bd = {
+    name: per_image_bd_from_points(
+      base_all["butteraugli_3n"], arm_all["butteraugli_3n"], b)
+    for name, b in ba_edges.items()
+  }
 
   families = sorted(set(fam.get(i, "?") for i in bd.get("ssim2", {})))
   per_family = {}
@@ -212,18 +223,24 @@ def score(base_path, arm_path, weights=None, veto_pct=DEFAULT_VETO_PCT,
   vetoed = (mass_b3 > veto_pct) or (mass_bmax > veto_pct)
 
   # band aggregates (equal/mass weights over families, same as the headline)
-  band_mass = {}
-  for name, per_img in band_bd.items():
-    fam_vals = {}
-    for f in families:
-      vals = [per_img[i] for i in per_img if fam.get(i) == f]
-      if vals:
-        fam_vals[f] = float(np.median(vals))
-    band_mass[name] = _weighted(fam_vals, weights) if fam_vals else float("nan")
+  def _band_mass(bd_by_name):
+    out = {}
+    for name, per_img in bd_by_name.items():
+      fam_vals = {}
+      for f in families:
+        vals = [per_img[i] for i in per_img if fam.get(i) == f]
+        if vals:
+          fam_vals[f] = float(np.median(vals))
+      out[name] = _weighted(fam_vals, weights) if fam_vals else float("nan")
+    return out
+
+  band_mass = _band_mass(band_bd)
+  ba_band_mass = _band_mass(ba_band_bd)
 
   objective = VETO_PENALTY + max(mass_b3, mass_bmax) if vetoed else mass_ss2
   return {
     "band_ssim2_bd": band_mass,
+    "band_ba3n_bd": ba_band_mass,
     "objective": objective,
     "vetoed": vetoed,
     "mass_ssim2_bd": mass_ss2,
@@ -265,6 +282,11 @@ def _report(res, as_json):
     print("# per-band ssim2 BD: "
           + "  ".join(f"{k} = {v:+.3f}%" if not math.isnan(v) else f"{k} = NA"
                       for k, v in bands.items()))
+  bab = res.get("band_ba3n_bd", {})
+  if bab:
+    print("# per-band ba3n BD:  "
+          + "  ".join(f"{k} = {v:+.3f}%" if not math.isnan(v) else f"{k} = NA"
+                      for k, v in bab.items()))
   if res["vetoed"]:
     print(f"# VETOED (butteraugli constraint) -> objective = {res['objective']:.1f}")
   else:
