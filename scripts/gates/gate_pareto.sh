@@ -72,10 +72,12 @@ for src, dst, enc in (("aom.tsv", "aom_b.tsv", "libaom"), ("svt.tsv", "svt_b.tsv
         for r in rows:
             if r["encoder"] != enc: continue
             r = dict(r); r["encoder"] = "zenrav1e"
+            r["image"] = r["image"].removesuffix(".png")
             f.write("\t".join(r[c] for c in cols) + "\n")
 PYEOF
+awk -F'\t' 'BEGIN{OFS="\t"} NR==1{print;next} {sub(/\.png$/,"",$1);print}' "$OUTD/arm.tsv" > "$OUTD/arm_n.tsv"
 echo "[gate-pareto] vs aom cpu2-ss2-allintra (420):"
-python3 "$RG/objective.py" "$OUTD/aom_b.tsv" "$OUTD/arm.tsv" | tail -4
+python3 "$RG/objective.py" "$OUTD/aom_b.tsv" "$OUTD/arm_n.tsv" | tail -4
 echo "[gate-pareto] vs svt p2t4 (420, solo):"
-python3 "$RG/objective.py" "$OUTD/svt_b.tsv" "$OUTD/arm.tsv" | tail -4
+python3 "$RG/objective.py" "$OUTD/svt_b.tsv" "$OUTD/arm_n.tsv" | tail -4
 echo "gate-pareto: COMPLETE (verdicts above; G1/G2 pass criteria per the charter)"
