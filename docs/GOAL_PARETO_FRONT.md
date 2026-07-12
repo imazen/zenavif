@@ -95,6 +95,17 @@ TSV + docs → update this charter's status line. Re-measure G1/G2 fully at each
 boundary. The charter closes when a single round passes G1–G7 together; the closing
 commit links every gate's TSV.
 
+**Status (2026-07-12, fifth update — G2 round 1):** first matched-time domination
+sample under the solo-wall convention (method catch: SVT defaults to all-cores; --lp 1
+= 3.4× slower on p2 — first sweep's walls voided, RD columns valid). Results: armed s6
+BEATS svt p0t4 while 21% FASTER (−2.90% BD, no veto) — the first G2 cell PASSED;
+p1t4/p2t4 FAIL as LADDER-SHAPE failures (the armed ladder is EMPTY from 542→2932 ms;
+s9 fights 2.4–3.5× above its weight); the ≤137 ms fast end is a genuine gap. Bonus
+findings: armed s7==s8 byte-identical AND a strict valley vs s6 (remap material).
+Phase-4's first concrete target: populate ~700–2600 ms from the REVIVAL §5
+beyond-budget points. Remaining reference legs: aom solo rungs on this grid; then
+held-out + all sizes for the gate proper. Prior update follows.
+
 **Status (2026-07-12, fourth update):** DFIT7 (learned field, tiny MLP, multi-scale)
 returned CAPACITY-IRRELEVANT — even in-sample 0.863 < the 0.90 bar; the source-only
 path for the D kernel is EXHAUSTED (ceiling ≈0.85 across DFIT4/6/7; the features bind,
