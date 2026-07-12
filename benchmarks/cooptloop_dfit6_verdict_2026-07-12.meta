@@ -1,0 +1,22 @@
+# COOPT Phase-1 D-diagnostic #6 — pre-registered verdict (rule DECISION_RULE_DFIT6.md @
+# zenavif@a35cc472, before any neighborhood correlation). 2026-07-12, 7950X.
+# RESULT: the source-only sensitivity field (tile + 3x3-neighborhood + frame features,
+#   linear) adds +0.029 |r| over mse-alone — the LARGEST offline lift of the series
+#   (DFIT4 local features: +0.011) — but LOOCV 0.8530 < the 0.86 PARTIAL floor.
+# THE PHYSICS EMERGED: local var -0.083 vs NEIGHBOR var +0.080 (surround masking: flat
+#   block amid activity = errors MORE visible), local grad -0.171 (edge masking),
+#   frame grad +0.137 (global normalization). Right structure, insufficient capacity.
+# VERDICT: NO FIELD at linear/64px capacity.
+#
+# ===== THE SIX-DIAGNOSTIC SYNTHESIS (all pre-registered, one day) =====
+# R leg: EXACT once survivor-filtered (0.98-1.00x real bytes) — no Phase-1 work needed.
+# D leg: loses to raw MSE at EVERY granularity, monotonically worse as it refines
+#   (frame -0.13 / tile -0.16 / block -0.23); bsize reweighting recovers frame ranking
+#   partially (0.53->0.73, structure in rect/large classes); simple features +0.01;
+#   per-block features degrade (non-locality); neighborhood field +0.03 with correct
+#   masking signs but saturates ~0.85 linear.
+# PHASE-1 KERNEL SPEC (extracted): a surround-masking-aware sensitivity field,
+#   source-computed per frame, consumed as D = SSE x field(SB) through the SAME
+#   FrameHints channel Phase 3 uses. Escalation order: (a) learned field — small MLP,
+#   multi-scale source features, zenpredict bake shape (plan item 7); (b) decode-side
+#   (the two-pass diffmap loop, exists, 2x cost). Fresh registration required for (a).

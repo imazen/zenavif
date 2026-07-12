@@ -1,0 +1,5 @@
+# encodes=120 tiles=19958
+# full-fit: stage1(mse-alone) |r|=0.8280  +field |r|=0.8573  (field delta +0.0294)
+# field coefs: v=-0.0825, g=-0.1713, l=-0.0006, nb_v=+0.0799, nb_g=-0.0826, nb_l=+0.0295, fr_v=-0.1306, fr_g=+0.1369, fr_l=-0.0177, 1=+0.5205
+# LOOCV held-out mean per-encode |r| = 0.8530 (folds 0.4905..0.9613)
+# VERDICT (pre-registered): NO FIELD at this capacity -> learned predictor or decode-side info
