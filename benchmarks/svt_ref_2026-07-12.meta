@@ -1,0 +1,20 @@
+# G2 reference-side: SVT-AV1 v4.1.0 still sweep — 2026-07-12, 7950X (nice-19, --jobs 8).
+# Grid: train26 24 img x {p2,p6,p10}xtune4 + p6xtune1 x crf{15,25,35,45,55,65} = 576/576
+#   cells; --avif 1, single frame; scored through the OWNED color path (png_to_y4m fwd /
+#   yuv_to_png inv) + fast-ssim2 + butteraugli CLI (3n + max). svt_sweep.sh @ branch
+#   cooptloop 7b5899e6; SVT built from the v4.1.0 tag (live-checked latest, 2026-03-23).
+# Config medians: p10t4 38 ms / p6t4 82 / p2t4 512 / p6t1 80 per ~0.8 MP image.
+# Fact: SVT tune 4 ("MS_SSIM and SSIMULACRA2 optimized") beats its tune 1 by ~7 median
+#   ssim2 at equal crf — tune 4 is the real G2 opponent.
+#
+# FIRST CROSS-ENCODER READ (objective.py, armed-s6 [ab_arm_s6, same corpus+scorers] as
+# ARM vs each SVT config as BASE; **TIMES NOT MATCHED — information only**; armed s6
+# wall ~= 3x p2t4):
+#   vs p2t4  (SVT slowest-best sampled): mass ssim2 BD -6.60%  ba3n -7.61%  bamax -17.58%  no veto
+#   vs p6t4  : -26.13% / -26.25% / -35.45%
+#   vs p10t4 : -38.61% / -41.89% / -46.33%
+#   vs p6t1  : -34.77% / -33.00% / -40.82%
+# The armed chain leads every sampled SVT config on RD with butteraugli agreeing.
+# G2's matched-time round still requires: armed s7/s8 sweeps + SVT p0/p1 legs + aom rungs
+# through one grid. Join gotcha recorded: run_gap TSVs carry full image PATHS, svt_cell
+# basenames — normalize before objective.py.
