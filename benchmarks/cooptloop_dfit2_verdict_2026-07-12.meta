@@ -1,0 +1,13 @@
+# COOPT Phase-1 D-diagnostic #2 — pre-registered verdict (rule: DECISION_RULE_DFIT2.md,
+# committed at zenavif@f9b70d1c BEFORE the fit's results were read). 2026-07-12, 7950X.
+# Data: traces-scored-2026-07-12 (24 img x 5 q x s6). Model: one global non-negative
+#   weight per bsize class on surviving-winner D; coordinate ascent on mean cross-image
+#   |r| vs ssim2; LOOCV over origins.
+# RESULT: raw-D 0.526 -> LOOCV 0.734 (folds 0.728-0.734); MSE reference 0.807.
+# VERDICT: PARTIAL — weights help (+0.21 |r|), kernel still binding (-0.07 vs MSE).
+# STRUCTURAL FINDING (the degenerate-selection guard fired): full-fit weights
+#   {7:5, 8:0.2, 9:0.05, 12:2, rest ZERO} — small-square-block D (the numeric bulk) is
+#   cross-image ranking NOISE; specific rect/large classes carry the perceptual signal.
+#   Per-block-class perceptual relevance is precisely what the D kernel fails to encode.
+# Registered routing: KEEP the weights; the D-refit proceeds to per-block metric data
+#   (diffmap pooling — the two_pass.rs butteraugli-per-SB machinery is the reuse path).

@@ -1,0 +1,9 @@
+run-heavy: mem-cap=24G (cgroup, hard) jobs=4/28 avail=52029MiB :: python3 scripts/rd_gap/fit_trace_d_reweight.py /mnt/v/output/cooptloop/traces-scored-2026-07-12 --sample scripts/rd_gap/sample_images_train26.tsv
+# cells=120 images=24 qs=[40, 60, 100, 160, 220] bsizes=[3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+# raw-D mean cross-image |r| = 0.5262  (MSE baseline from DFIT1 ≈ 0.807)
+# full-fit |r| = 0.7343  weights = {3: 0, 4: 0, 5: 0, 6: 0, 7: 5, 8: 0.2, 9: 0.05, 10: 0, 11: 0, 12: 2}
+# LOOCV (weights fit w/o each origin, scored on all) mean |r| = 0.7338
+# spread across folds: min 0.7283 max 0.7343
+# VERDICT (pre-registered): PARTIAL — weights help, kernel still binding (raw 0.526 -> loocv 0.734; MSE 0.807)
+# degenerate-selection guard: full-fit zeroed bsizes [3, 4, 5, 6, 10, 11]
+run-heavy: done rc=0 61s | peak-RSS 0.03GiB | min-avail 51954MiB | peak-load 2.95
