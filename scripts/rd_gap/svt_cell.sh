@@ -13,6 +13,8 @@ IMG="$1"; FAM="$2"; PRESET="$3"; CRF="$4"; TUNE="$5"; TMP="$6"
 SVTENC="${SVTENC:-/home/lilith/work/zen/svtav1-v4.1.0/Bin/Release/SvtAv1EncApp}"
 AOMDEC="${AOMDEC:-/home/lilith/work/aom/build_butteraugli/aomdec}"
 SCORER="${SCORER:-/home/lilith/work/zen/fast-ssim2/target/release/fast-ssim2-cli}"
+# Optional butteraugli CLI (3-norm + max for the objective.py veto columns).
+BUTTER="${BUTTER:-/home/lilith/work/butteraugli/target/release/butteraugli}"
 
 base=$(basename "$IMG" .png)
 y4m="$TMP/${base}.y4m"
@@ -39,5 +41,17 @@ dpng="$TMP/${base}_p${PRESET}_c${CRF}_t${TUNE}.png"
 mse=$(python3 "$HERE/yuv_to_png.py" "$yuv" "$ew" "$eh" "$dpng" "$srcpng" 2>/dev/null \
       | grep -oE 'mse [0-9.]+' | cut -d' ' -f2)
 ssim2=$("$SCORER" image "$srcpng" "$dpng" 2>/dev/null | grep -oE '[-0-9.]+' | head -1)
+ba3=NA; bamax=NA
+if [ -x "$BUTTER" ]; then
+  bj=$("$BUTTER" --json "$srcpng" "$dpng" 2>/dev/null)
+  ba3=$(echo "$bj" | python3 -c 'import json,sys
+d=json.load(sys.stdin); print(d.get("pnorm_3", d.get("3-norm","NA")))' 2>/dev/null)
+  bamax=$(echo "$bj" | python3 -c 'import json,sys
+d=json.load(sys.stdin); print(d.get("score", d.get("max","NA")))' 2>/dev/null)
+fi
 rm -f "$yuv" "$dpng" "$ivf"
-echo -e "$base\t$FAM\tsvt-av1-v4.1.0\tavif-still\t$PRESET\t$CRF\t$TUNE\t$bytes\t${ssim2:-NA}\t${mse:-NA}\t$enc_ms"
+# run_gap schema (objective.py-ready): image w h family encoder fmt q bytes
+# bpp ssim2 enc_ms butteraugli_3n butteraugli_max — q carries "p<preset>c<crf>t<tune>".
+px=$((ew * eh))
+bpp=$(python3 -c "print(f'{$bytes*8/$px:.5f}')")
+echo -e "$base\t$ew\t$eh\t$FAM\tsvt-av1-v4.1.0\tp${PRESET}t${TUNE}\t$CRF\t$bytes\t$bpp\t${ssim2:-NA}\t$enc_ms\t${ba3:-NA}\t${bamax:-NA}"
