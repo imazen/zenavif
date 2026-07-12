@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# One SVT-AV1 reference cell for the G2 ladder (GOAL_PARETO_FRONT): encode a
+# still (--avif 1, single frame) at (preset, crf, tune), decode, score through
+# the OWNED color path (png_to_y4m.py forward / yuv_to_png.py inverse — the
+# same BT.601-full matrix the zenrav1e trace corpus uses), and emit one TSV row:
+#   image family encoder fmt preset crf tune bytes ssim2 mse enc_ms
+#
+# Usage: svt_cell.sh IMG.png FAMILY PRESET CRF TUNE TMPDIR
+# Env: SVTENC (default ~/work/zen/svtav1-v4.1.0), AOMDEC, SCORER.
+set -u
+HERE="$(cd "$(dirname "$0")" && pwd)"
+IMG="$1"; FAM="$2"; PRESET="$3"; CRF="$4"; TUNE="$5"; TMP="$6"
+SVTENC="${SVTENC:-/home/lilith/work/zen/svtav1-v4.1.0/Bin/Release/SvtAv1EncApp}"
+AOMDEC="${AOMDEC:-/home/lilith/work/aom/build_butteraugli/aomdec}"
+SCORER="${SCORER:-/home/lilith/work/zen/fast-ssim2/target/release/fast-ssim2-cli}"
+
+base=$(basename "$IMG" .png)
+y4m="$TMP/${base}.y4m"
+[ -f "$y4m" ] || python3 "$HERE/png_to_y4m.py" "$IMG" "$y4m" || exit 3
+# even-cropped source png for scoring (same crop as the forward)
+srcpng="$TMP/${base}.src.png"
+if [ ! -f "$srcpng" ]; then
+  read -r pw ph < <(identify -format "%w %h" "$IMG")
+  ew=$((pw & ~1)); eh=$((ph & ~1))
+  convert "$IMG" -crop "${ew}x${eh}+0+0" +repage "$srcpng"
+fi
+read -r ew eh < <(identify -format "%w %h" "$srcpng")
+
+ivf="$TMP/${base}_p${PRESET}_c${CRF}_t${TUNE}.ivf"
+t0=$(date +%s%N)
+"$SVTENC" -i "$y4m" -b "$ivf" --avif 1 -n 1 --preset "$PRESET" \
+  --crf "$CRF" --tune "$TUNE" --progress 0 >/dev/null 2>&1 || exit 4
+enc_ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+bytes=$(stat -c%s "$ivf")
+
+yuv="$TMP/${base}_p${PRESET}_c${CRF}_t${TUNE}.yuv"
+dpng="$TMP/${base}_p${PRESET}_c${CRF}_t${TUNE}.png"
+"$AOMDEC" --rawvideo -o "$yuv" "$ivf" >/dev/null 2>&1 || exit 5
+mse=$(python3 "$HERE/yuv_to_png.py" "$yuv" "$ew" "$eh" "$dpng" "$srcpng" 2>/dev/null \
+      | grep -oE 'mse [0-9.]+' | cut -d' ' -f2)
+ssim2=$("$SCORER" image "$srcpng" "$dpng" 2>/dev/null | grep -oE '[-0-9.]+' | head -1)
+rm -f "$yuv" "$dpng" "$ivf"
+echo -e "$base\t$FAM\tsvt-av1-v4.1.0\tavif-still\t$PRESET\t$CRF\t$TUNE\t$bytes\t${ssim2:-NA}\t${mse:-NA}\t$enc_ms"
