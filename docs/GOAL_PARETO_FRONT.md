@@ -1,9 +1,9 @@
 # GOAL: AVIF at the cutting-edge Pareto front — RD and RD-time (charter 2026-07-12)
 
-**Mission, one sentence:** a registry user encoding a still AVIF with zenavif gets a
-(bytes, quality, encode-time) point that no other production AV1 still encoder
-Pareto-dominates — at the quality tip AND at every time budget of the ladder — and the
-claim is proven by the gates below, not asserted.
+**Mission, one sentence:** zenavif encodes a still AVIF to a (bytes, quality,
+encode-time) point that no other production AV1 still encoder Pareto-dominates — at
+the quality tip AND at every time budget of the ladder — and the claim is proven by
+the gates below on a build anyone can reproduce, not asserted.
 
 This is a **completion-gate goal**: it is DONE only when every gate G1–G7 passes in one
 composed measurement round, on held-out data, with the configuration registry users
@@ -59,11 +59,17 @@ finish line it aims at).
   outright or content-gated so the default never loses to the reference on that class
   beyond the +1% band. "Gated off and ignored" only counts if the gate is measured on
   held-out data.
-- **G6 — shipped.** The release train has run: every crate published with the full
-  ceremony (tests, CI green on ALL platforms incl. windows-11-arm / macOS Intel /
-  i686, tag, GitHub release, publish), the dep-bump flip landed on main, and the G1/G2
-  measurements REPRODUCE on a clean registry build (no path deps). Cutting-edge on a
-  branch is not cutting-edge.
+- **G6 — integration-honest reproduction (NOT publish).** The passing G1/G2 round
+  reproduces on a CLEAN build: fresh clone, pushed + pinned revisions only
+  (git/registry deps — every repo in the chain publicly fetchable; the armed ravif
+  clone must exist as a pushed branch, not a machine-local folder), no uncommitted
+  state, the default feature policy, CI-green on the pinned revs. This is the gate
+  that kills lab-config claims (feature-default drift, Cargo resolution surprises —
+  the 0.6.2-lockfile class). **The crates.io release train is deliberately NOT a
+  completion condition:** publishing is a user-gated ceremony on the user's timeline
+  (README sign-off, semver, the full tag/release ritual) and adds no information to
+  the RD/RD-time verdict. This goal hands the train a fully-verified artifact
+  (docs/RELEASE_TRAIN owns the cadence concern); it does not wait on it.
 - **G7 — durable and re-runnable.** One command (`just gate-pareto`, to be built)
   re-runs the G1/G2 sweep against freshly fetched reference encoders and emits the
   verdict; all round results committed under `benchmarks/` with commit hashes,
@@ -92,4 +98,6 @@ commit links every gate's TSV.
 **Status (2026-07-12):** COOPT Phase 0 complete; the composed flip measures −25.7%
 mass ssim2 BD vs the registry chain on TRAIN (no aggregate veto; 9094 bamax flag
 open → G4 work); G1 near at the tip vs aom (SVT unmeasured — first G2 prerequisite);
-G2 blocked on Phase 4 re-tiering; G6 blocked on the release train (user-gated).
+G2 waits on Phase 4 re-tiering; G6 needs the armed ravif clone pushed as a public
+branch + a clean-clone reproduction run (autonomously reachable — no publish
+dependency).
