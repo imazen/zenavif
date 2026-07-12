@@ -26,3 +26,21 @@ mechanism must pay clearly, not marginally, to justify 2x). It is a G2 ladder
 candidate additionally iff ARM A beats svt p0t4/aom-cpu2-ss2ai at its matched band.
 Negative on both = decode-side-at-2x refuted for the still ladder -> DFIT8
 (transform-domain) becomes the sole kernel route; record and proceed.
+
+## VERDICT (2026-07-12): DOUBLE NEGATIVE — decode-side-at-2x refuted
+
+KERNEL-WORTHY leg FAILS: twopass_s6 vs single_s6 mass ssim2 BD = +1.45% (a regression,
+not the required <=-2.0%), positive in ALL three bands (+1.06/+1.21/+2.84),
+butteraugli VETOED (+1.72 ba3n / +3.28 bamax). Ladder leg FAILS: vs svt p0t4 +2.45
+vetoed; vs aom cpu2-ss2ai +30.9. Wall ratio 1.91x (medians 8817/4621 ms; absolute
+walls load-inflated ~8x by a foreign 280-thread sync — the ratio is same-window).
+Per the pre-registered rule: DFIT8 (transform-domain in-encoder features) becomes the
+SOLE kernel route; the two-pass loop is refuted as a ladder mechanism TODAY.
+Honest scope notes: (1) one config tested (shipped driver: butteraugli diffmap,
+aom-formula 12-norm pool, strength 1.0, clamp [0.4,2.5]) — this is the registered
+arm, not the mechanism's tuned ceiling; (2) the armed stack already carries per-SB
+spatial adaptation (Variance Boost delta_q + QM-dist ratio + LF schedule) — the
+diffmap's marginal was plausibly consumed by composition (the tune-marginal-drift
+pattern), consistent with the 2026-07-03 evaluate-first result (-2.4..-3.5% ba3n on
+PLAIN aom tunes) no longer transferring to the composed tune.
+TSVs + verdict: benchmarks/q4_twopass_2026-07-12/.

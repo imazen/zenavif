@@ -1,0 +1,16 @@
+== KERNEL-WORTHY leg: twopass_s6 vs single_s6 (need <=-2.0% in >=2 bands, veto-clean) ==
+# mass ssim2 BD = +1.4476%  ba3n = +1.7151%  bamax = +3.2837%
+# per-band ssim2 BD: low(<50) = +1.056%  mid(50-75) = +1.212%  high(>75) = +2.840%
+# per-band ba3n BD:  ba_bad(>3) = -0.180%  ba_mid(1-3) = +2.871%  ba_good(<1) = +0.923%
+# VETOED (butteraugli constraint) -> objective = 1000003.3
+== ladder leg A: twopass_s6 vs svt p0t4 (solo) ==
+# mass ssim2 BD = +2.4460%  ba3n = +4.4916%  bamax = -1.7054%
+# per-band ssim2 BD: low(<50) = +5.208%  mid(50-75) = +2.987%  high(>75) = -1.084%
+# per-band ba3n BD:  ba_bad(>3) = +2.831%  ba_mid(1-3) = +5.253%  ba_good(<1) = +13.846%
+# VETOED (butteraugli constraint) -> objective = 1000004.5
+== ladder leg B: twopass_s6 vs aom cpu2-ss2-allintra ==
+# mass ssim2 BD = +30.9017%  ba3n = +30.3514%  bamax = +26.1686%
+# per-band ssim2 BD: low(<50) = +14.320%  mid(50-75) = +33.540%  high(>75) = +51.372%
+# per-band ba3n BD:  ba_bad(>3) = +21.702%  ba_mid(1-3) = +42.744%  ba_good(<1) = +58.325%
+# VETOED (butteraugli constraint) -> objective = 1000030.4
+== walls (median enc_ms): single=4621 twopass=8817 ==
