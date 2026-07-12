@@ -1,0 +1,21 @@
+# G2 ROUND 1 v2 INTERIM — clean-data probes + the confounds that BLOCK a verdict. 2026-07-12.
+# Sign-strip-fixed legs (RD_CACHE=off): armed s6/s9/s10 + aom cpu{0,2,4,6} --allintra
+#   --tune=ssimulacra2 (420). Curves monotone-checked (0-2 mild flags/leg, no sign class).
+# CLEAN PROBES (objective.py):
+#   aom cpu0-ss2ai vs armed s6: +25.73% (vetoed)   aom cpu2 vs s6: +21.91% (vetoed)
+#   aom cpu4 vs s9 (hole band): +32.20% (vetoed)   aom cpu6 vs s10: +50.98% (vetoed)
+#   svt p0t4 vs s6: -2.90% NO VETO (win)           svt p2t4 vs s9: +6.63% (vetoed)
+#   svt p6t4 vs s10: +4.58% (vetoed)
+# VERDICT WITHHELD — three named confounds:
+#   (1) FORMAT AXIS UNCONTROLLED: armed cavif = 4:4:4 default; aom+SVT legs = 4:2:0.
+#       Inflates armed bytes at equal chroma fidelity vs 420 refs — the aom losses may
+#       shrink at matched format; the SVT p0t4 win may be format-flattered.
+#   (2) BUILD/TUNE PROVENANCE vs HISTORY: today's aom = build_butteraugli local at
+#       --tune=ssimulacra2; the program's historical "cpu0-ss2tune ~ties s2" used its own
+#       binary/flags — reconcile before claiming a frontier shift.
+#   (3) WALL NOISE under 12-way dispatch (armed s6 measured 2932 vs 4792 ms across runs):
+#       verdict-grade time matching needs JOBS=1 timing legs (the chain_speed_ladder
+#       convention).
+# Resolution legs launched: armed 420 (CAVIF_EXTRA=--yuv 420) s6/s9/s10 + aom 444 legs;
+# JOBS=1 timing to follow. The gate-pareto command (G7) must encode: sign-safe parse,
+# solo threads, format axis pinned, JOBS=1 walls, monotone-check before BD.
