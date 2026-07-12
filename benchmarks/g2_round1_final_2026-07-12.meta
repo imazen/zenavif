@@ -1,0 +1,23 @@
+# G2 ROUND 1 — FINAL (2026-07-12). The round that debugged its own instruments, then
+# found the real frontier. Chain of catches, each committed as it landed:
+#   solo-thread convention (SVT --lp: 3.4x) -> ssim2 sign-strip (|neg| recorded) ->
+#   format axis (armed 444 vs refs 420) -> reference-grid hole (allintra x ss2-tune
+#   never measured; the historical "cpu0-ss2tune" leg was GOOD-mode: aomgood_*).
+# MODE A/B (same day/pipeline, cpu2, 420): allintra-ss2 vs good-ss2 = +0.13% — EVEN.
+#   The mode was innocent; the grids cover DIFFERENT BPP BANDS (good's cq grid sits
+#   ~2.5x higher bpp), so BDs against them integrate different quality regions.
+# THE CHARACTERIZED POSITION vs aom v3.14.1 ss2-tune (matched format where noted):
+#   HIGH-quality band (vs good-ss2 cpu2 grid): armed s6 +10.34% ssim2 BD while WINNING
+#     butteraugli (-0.68/-2.93) — the metric-divergent signature of aom's tune
+#     optimizing ssim2 itself.
+#   LOW-MID band (vs allintra-ss2 grids, 444v444 AND 420v420): +29..+34% — the gap
+#     CONCENTRATES in the web-focused low-q band this project prioritizes.
+#   vs SVT v4.1.0 at matched 420: p0t4 +1.01% (near-parity, ba-vetoed; the earlier
+#     -2.90% "win" was format-flattered and is WITHDRAWN); p2t4 vs s9 +9.81%.
+# STANDING FACTS: the ladder hole (542->2932 ms empty), s7==s8 aliased valley,
+#   fast-end gap. STRATEGIC READ: aom's ss2-allintra edge IS metric-in-the-loop
+#   distortion — the exact mechanism the DFIT1-7 arc specified as the D kernel's
+#   missing piece; the D-kernel arc and the ladder work converge on the same ~30%.
+# NEXT (round 2): per-quality-band BD decomposition as a first-class output (split
+#   by bpp region); low-q-dense grids per the sweep discipline; then the D-kernel
+#   (decode-side/transform-domain) and hole-tier derivation aimed at the low-mid band.
