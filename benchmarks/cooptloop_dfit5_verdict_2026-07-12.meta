@@ -1,0 +1,17 @@
+# COOPT Phase-1 D-diagnostic #5 — pre-registered verdict (rule DECISION_RULE_DFIT5.md @
+# zenavif@365e3ab8, committed before any per-block correlation). 2026-07-12, 7950X.
+# Data: 366,715 committed blocks (120 encodes; blockmap_*.tsv from persisted IVFs —
+#   the full driver pass took 71 s vs ~15 min regens: the persistence payoff, measured).
+# PART 1 (D vs MSE at the currency's NATIVE unit): winner-D |r| 0.4429 vs block-MSE
+#   0.6714; D wins 9/120; gap -0.229. THE GAP WIDENS WITH GRANULARITY:
+#   frame -0.13 (DFIT1) -> 64px tile -0.16 (DFIT3) -> block -0.23 (here).
+# PART 2 (feature model + bsize intercepts): LOOCV 0.7252 (folds 0.58-0.84) — block-level
+#   butteraugli is HARDER to predict than tile-level (0.839): local visible error depends
+#   on NEIGHBORHOOD masking; isolated per-block stats cannot carry it.
+# VERDICT: INSUFFICIENT — the offline per-block-feature path is exhausted.
+# DESIGN FACT EXTRACTED: the kernel is not a per-block feature lookup; it is a
+#   source-computed SENSITIVITY FIELD with neighborhood context. Next registration
+#   (DFIT6): is the per-tile sensitivity ratio (butteraugli vs pixel error) predictable
+#   from multi-scale SOURCE features incl. neighbor aggregates — offline, from the
+#   existing sbmap TSVs. If yes, in-loop D = SSE x field(SB) and the D-refit merges
+#   with Phase 3's FrameHints allocation channel (one fit, two consumers).

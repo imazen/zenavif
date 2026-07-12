@@ -1,0 +1,9 @@
+=== DFIT5 RUN ===
+run-heavy: mem-cap=24G (cgroup, hard) jobs=4/28 avail=50786MiB :: python3 scripts/rd_gap/fit_trace_d_block.py /mnt/v/output/cooptloop/traces-scored-2026-07-12
+# encodes=120 blocks=366715
+# PART 1: winner-D 0.4429 vs block-MSE 0.6714; D wins 9/120; gap -0.2286
+# PART 2 full-fit coefs: mse=+0.3863 var=-0.0377 grad=-0.2276 luma=+0.1047
+# full-fit mean per-encode |r| = 0.7341
+# PART 2 LOOCV held-out mean per-encode |r| = 0.7252 (folds 0.5799..0.8408)
+# VERDICT (pre-registered): INSUFFICIENT — offline-feature path exhausted; in-encoder/learned predictor next
+run-heavy: done rc=0 77s | peak-RSS 0.38GiB | min-avail 50500MiB | peak-load 3.56
