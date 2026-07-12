@@ -23,13 +23,15 @@ SPEED="${SPEED:-6}"
 OUTDIR="${OUTDIR:?set OUTDIR (block storage, e.g. /mnt/v/output/cooptloop/traces-YYYY-MM-DD)}"
 DUMP="${DUMP:-/home/lilith/work/zen/zenrav1e/target/release/examples/cooptloop_trace_dump}"
 ANALYZE="$HERE/analyze_cooptloop_trace.py"
+AOMDEC="${AOMDEC:-/home/lilith/work/aom/build_butteraugli/aomdec}"
+SCORER="${SCORER:-/home/lilith/work/zen/fast-ssim2/target/release/fast-ssim2-cli}"
 LIMIT="${LIMIT:-0}"   # 0 = all sample rows
 
 [ -x "$DUMP" ] || { echo "missing $DUMP (cargo build --release --features cooptloop_trace --example cooptloop_trace_dump)" >&2; exit 2; }
 mkdir -p "$OUTDIR"
 manifest="$OUTDIR/manifest.tsv"
 summary="$OUTDIR/summary.tsv"
-echo -e "image\tfamily\tspeed\tquantizer\ttrace\trows\tbytes" > "$manifest"
+echo -e "image\tfamily\tspeed\tquantizer\ttrace\trows\tbytes\tssim2" > "$manifest"
 wrote_summary_header=0
 
 n=0
@@ -39,13 +41,31 @@ tail -n +2 "$SAMPLE" | while IFS=$'\t' read -r img w h fam; do
   base=$(basename "$img" .png)
   ppm="$OUTDIR/.tmp_$base.ppm"
   convert "$img" "$ppm" || { echo "convert failed: $img" >&2; continue; }
+  # the PPM (even-cropped by the dump) is the scoring source; render it once
+  srcpng="$OUTDIR/.tmp_$base.src.png"
+  convert "$ppm" "$srcpng"
+  read -r pw ph < <(identify -format "%w %h" "$ppm")
+  ew=$((pw & ~1)); eh=$((ph & ~1))
+  if [ "$ew" != "$pw" ] || [ "$eh" != "$ph" ]; then
+    convert "$ppm" -crop "${ew}x${eh}+0+0" +repage "$srcpng"
+  fi
   for q in $QS; do
     trace="$OUTDIR/trace_${base}_s${SPEED}_q${q}.tsv"
-    log=$("$DUMP" "$trace" "$ppm" --speed "$SPEED" --quantizer "$q" 2>&1) || {
+    ivf="$OUTDIR/.tmp_${base}_q${q}.ivf"
+    log=$("$DUMP" "$trace" "$ppm" --speed "$SPEED" --quantizer "$q" --ivf-out "$ivf" 2>&1) || {
       echo "dump failed: $base q$q: $log" >&2; continue; }
     rows=$(($(wc -l < "$trace") - 1))
     ebytes=$(echo "$log" | grep -oE '\-> [0-9]+ B' | grep -oE '[0-9]+' | head -1)
-    echo -e "$base\t$fam\t$SPEED\t$q\t$(basename "$trace")\t$rows\t${ebytes:-NA}" >> "$manifest"
+    # decode + score: aomdec raw I420 -> owned BT.601-full inverse -> ssim2
+    ssim2=NA
+    yuv="$OUTDIR/.tmp_${base}_q${q}.yuv"; dpng="$OUTDIR/.tmp_${base}_q${q}.png"
+    if "$AOMDEC" --rawvideo -o "$yuv" "$ivf" >/dev/null 2>&1 \
+       && python3 "$HERE/yuv_to_png.py" "$yuv" "$ew" "$eh" "$dpng" 2>/dev/null; then
+      s=$("$SCORER" image "$srcpng" "$dpng" 2>/dev/null | grep -oE '[-0-9.]+' | head -1)
+      [ -n "$s" ] && ssim2=$s
+    fi
+    rm -f "$yuv" "$dpng" "$ivf"
+    echo -e "$base\t$fam\t$SPEED\t$q\t$(basename "$trace")\t$rows\t${ebytes:-NA}\t$ssim2" >> "$manifest"
     # One summary row per encode (flat JSON -> TSV via python).
     python3 - "$ANALYZE" "$trace" "$base" "$fam" "$SPEED" "$q" "$summary" "$wrote_summary_header" <<'EOF'
 import json, subprocess, sys
@@ -73,7 +93,7 @@ with open(summary, "a") as f:
     f.write("\t".join(str(v) for v in row.values()) + "\n")
 EOF
   done
-  rm -f "$ppm"
+  rm -f "$ppm" "$srcpng"
   echo "[trace-corpus] $n: $base done ($(date -u +%H:%M:%SZ))"
 done
 echo "[trace-corpus] manifest: $manifest"

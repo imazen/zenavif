@@ -42,6 +42,8 @@ def load(path):
       elif kind == 2:
         rows["decisions"].append(
           (seq, bsize, lam, cost, int(c[9]), int(c[10]), int(c[11])))
+      elif kind == 3:
+        rows.setdefault("commits", []).append((c[1], c[2], c[3]))
       else:
         sys.exit(f"unknown row kind {kind}")
   return rows
@@ -49,7 +51,11 @@ def load(path):
 
 def analyze(rows):
   evals, decisions = rows["evals"], rows["decisions"]
-  out = {"n_evals": len(evals), "n_decisions": len(decisions)}
+  out = {
+    "n_evals": len(evals),
+    "n_decisions": len(decisions),
+    "n_commits": len(rows.get("commits", [])),
+  }
 
   # Currency shape.
   lams = np.array([e[3] for e in evals])
