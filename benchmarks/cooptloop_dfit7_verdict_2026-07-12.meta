@@ -1,0 +1,24 @@
+# COOPT Phase-1 D-diagnostic #7 — pre-registered verdict (rule DECISION_RULE_DFIT7.md @
+# zenavif@fc3e515c, before the multi-scale data existed). 2026-07-12, 7950X.
+# Model: 12-unit tanh MLP on 17 multi-scale surround features (64px + 32/16px sub-tile
+#   mean/max var+grad + 3x3 neighborhood + frame means), stage-2 on the mse-alone residual.
+# RESULT: full-fit (train) 0.8632 — BELOW the 0.90 in-sample bar — LOOCV 0.8487.
+# VERDICT: CAPACITY-IRRELEVANT. The registered TRANSFER-BOUND prediction did NOT fire:
+#   the binder is the FEATURES, not the origins. Source-only signals at any offline
+#   capacity tested cannot carry butteraugli's local structure (ceiling ~0.85).
+#
+# ===== THE SEVEN-DIAGNOSTIC ARC — CLOSED (one day, every rule before its data) =====
+# DFIT1 frame:   D loses to MSE 0/5 quantizers.
+# DFIT2 weights: partial (0.53->0.73); signal concentrated in 16X32/64X64 classes.
+# DFIT3 tile:    D loses; gap -0.16.
+# DFIT4 tile+feat: +0.011 — INSUFFICIENT.
+# DFIT5 block:   D loses -0.23 (gap widens with granularity); block-level harder (non-local).
+# DFIT6 field:   +0.029, textbook surround-masking coefficients; NO FIELD at linear capacity.
+# DFIT7 learned: CAPACITY-IRRELEVANT — the source-only path is EXHAUSTED.
+# KERNEL CONCLUSION: the local-sensitivity information the D currency lacks is not
+#   computable from the source alone at these scales. Two live routes, both registered:
+#   (a) TRANSFORM-DOMAIN in-encoder features (per-candidate coefficient structure at
+#       trial time — trace enrichment inside the tx/quant internals; DFIT8 territory);
+#   (b) DECODE-SIDE: the existing two-pass butteraugli loop (release-gated, ~2x cost,
+#       measured -2.4..-3.5% ba3n in its own eval) is now EVIDENCE-REINFORCED as the
+#       only proven source of the missing local-error structure.

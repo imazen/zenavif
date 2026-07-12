@@ -1,0 +1,6 @@
+=== DFIT7 RUN ===
+run-heavy: mem-cap=24G (cgroup, hard) jobs=4/28 avail=46389MiB :: python3 scripts/rd_gap/fit_sensitivity_field_mlp.py /mnt/v/output/cooptloop/traces-scored-2026-07-12
+# encodes=120 tiles=19958 features=17 hidden=12 l2=0.001
+# full-fit (train) mean per-encode |r| = 0.8632
+# LOOCV held-out mean per-encode |r| = 0.8487 (folds 0.4351..0.9561)
+# VERDICT (pre-registered): CAPACITY-IRRELEVANT -> decode-side or transform-domain features
