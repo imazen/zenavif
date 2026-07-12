@@ -95,6 +95,15 @@ TSV + docs → update this charter's status line. Re-measure G1/G2 fully at each
 boundary. The charter closes when a single round passes G1–G7 together; the closing
 commit links every gate's TSV.
 
+**Status (2026-07-12, fourth update):** DFIT7 (learned field, tiny MLP, multi-scale)
+returned CAPACITY-IRRELEVANT — even in-sample 0.863 < the 0.90 bar; the source-only
+path for the D kernel is EXHAUSTED (ceiling ≈0.85 across DFIT4/6/7; the features bind,
+not the origins). The seven-diagnostic arc is closed and the kernel routing is
+determined: transform-domain in-encoder features (DFIT8, fresh registration) or
+decode-side — the existing two-pass butteraugli loop is now evidence-reinforced as the
+only proven carrier of the missing local-error structure. Next measuring leg: the G2
+reference ladder (components proven). Prior update follows.
+
 **Status (2026-07-12, third update — the six-diagnostic day):** Phase 1's D-leg is now
 fully mapped by six pre-registered diagnostics (DFIT1–6, every rule committed before its
 data): the R currency is frame-level EXACT once survivor-filtered; the D currency loses
