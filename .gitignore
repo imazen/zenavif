@@ -134,3 +134,4 @@ scripts/rd_gap/rd_gap_cflwide_results.tsv
 scripts/rd_gap/rd_gap_txtype_results.tsv
 scripts/rd_gap/merged_*.tsv
 *.profraw
+/bin/

@@ -1,0 +1,15 @@
+Q1 low-q-dense re-grid (GOAL queue item 1) — 2026-07-12
+Host: lilith. Branch: cooptloop@a6ff654.
+Armed chain: zenavif cooptloop -> ../ravif--cooptloop@8ccba4a -> ../zenrav1e@8552e2f0(+310148ec).
+Grid: armed s{6,9,10} 4:2:0 q={5..60 step5, 70,80,90,95} (16 pts, dense low-q per sweep discipline);
+aom v3.14.1 cpu{6,4,2,0} --allintra --tune=ssimulacra2 420 cq={8..63, 10 pts};
+SVT-AV1 v4.1.0 t4 p{0,2,6,10} 420 crf={15..70 step5} --lp 1 (solo).
+All cells sign-safe parses, RD_CACHE=off, train26 corpus (26 origins).
+Verdict tool: scripts/rd_gap/q1_verdicts.sh -> q1_banded_meta.tsv (objective.py banded;
+bands ssim2 low<50/mid50-75/high>75 + ba3n bands; mass = family-median cluster-weighted).
+NOTE: rows are speed-UNMATCHED raw pairings (characterization, not matched-time verdicts).
+Key: s6 veto-clean beats svt p6t4 (-13.4 mass) + p10t4 (-27.4); near-parity p0t4/p2t4 mass
+(+2.6/+0.8, ba3n NEGATIVE -4.2/-4.4) but LOW band +9.9/+9.5 = dense-grid-exposed low-q
+weakness; vs aom-ss2ai deficit rises with ref effort and with band (cpu6: +1.2 low ->
++12.6 high at s6), replicating round-1 shape on the dense grid.
+Raws: /mnt/v/output/cooptloop/q1-densegrid-2026-07-12 (+ split svt_p*.tsv derivable from svt_t4_dense.tsv).
