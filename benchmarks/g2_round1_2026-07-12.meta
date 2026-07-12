@@ -1,0 +1,17 @@
+# G2 ROUND 1 — the first matched-time domination sample (solo convention). 2026-07-12, 7950X.
+# References: SVT-AV1 v4.1.0 --lp 1 (svt_ref_solo TSV, 864/864 cells): medians p0t4 3702 /
+#   p1t4 1916 / p2t4 1323 / p6t4 114 / p6t1 111 / p10t4 36 ms. Armed (train26 6q, run_gap):
+#   s6 2932 / s7=s8 3682 (aliased valley, see g2_armed_ladder meta) / s9 542 / s10 245 ms.
+# Probes (objective.py, matched = armed median <= 1.2x reference median):
+#   p0t4 vs armed s6 (FASTER by 21%):  -2.90% ssim2 BD, ba3n -4.00, bamax -10.42, NO VETO -> WIN
+#   p1t4 vs armed s9 (3.5x faster):    +9.37%, VETOED -> FAIL
+#   p2t4 vs armed s9 (2.4x faster):    +6.63%, VETOED -> FAIL
+#   p6t4: NO armed config <= 137 ms -> GAP (s10 at 245 ms info-probe: +4.23%, vetoed)
+# DECOMPOSITION: the p1/p2 failures are LADDER-SHAPE, not efficiency — the armed ladder has a
+#   HOLE from 542 to 2932 ms exactly where SVT parks p1/p2; s6 beating the slower p0t4 proves
+#   the efficiency exists at ~3 s. Phase-4's first concrete target: populate ~700-2600 ms with
+#   budget tiers (REVIVAL section-5 beyond-budget points — vargate 2.45x / max32+vg2 2.93x of
+#   the s6 step — are the named candidates). The <=250 ms fast end is a genuine speed-
+#   engineering gap vs SVT's fast presets (s10 2.1x over p6t4 AND RD-behind).
+# Grid caveats: train26 (TRAIN split; gates score held-out), 1024-class only, aom rungs not
+#   yet re-measured under the solo convention on this grid.
