@@ -51,7 +51,11 @@ fn main() {
     let mut f = std::io::BufWriter::new(
         std::fs::File::create(&args[3]).expect("out tsv"),
     );
-    writeln!(f, "sb_x\tsb_y\tn_px\tmean\tp3\tmax\tmse").unwrap();
+    writeln!(
+        f,
+        "sb_x\tsb_y\tn_px\tmean\tp3\tmax\tmse\tsrc_var\tsrc_grad\tsrc_luma"
+    )
+    .unwrap();
     let tiles_x = w.div_ceil(sb);
     let tiles_y = h.div_ceil(sb);
     for ty in 0..tiles_y {
@@ -88,11 +92,39 @@ fn main() {
                 }
             }
             let mse = se / (n as f64 * 3.0);
+            // Per-tile SOURCE features — the DFIT4 kernel-ingredient axes:
+            // luma variance (masking), mean |gradient| (edge energy), mean
+            // luma (light adaptation). BT.601 luma from the source pixels.
+            let mut lsum = 0.0f64;
+            let mut lsq = 0.0f64;
+            let mut gsum = 0.0f64;
+            let mut gn = 0usize;
+            let luma_at = |x: usize, y: usize| -> f64 {
+                let p = src.rows().nth(y).unwrap()[x];
+                0.299 * p.r as f64 + 0.587 * p.g as f64 + 0.114 * p.b as f64
+            };
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let l = luma_at(x, y);
+                    lsum += l;
+                    lsq += l * l;
+                    if x + 1 < x1 && y + 1 < y1 {
+                        let gx = luma_at(x + 1, y) - l;
+                        let gy = luma_at(x, y + 1) - l;
+                        gsum += (gx * gx + gy * gy).sqrt();
+                        gn += 1;
+                    }
+                }
+            }
+            let src_luma = lsum / n as f64;
+            let src_var = (lsq / n as f64) - src_luma * src_luma;
+            let src_grad = if gn > 0 { gsum / gn as f64 } else { 0.0 };
             let mean = sum / n as f64;
             let p3 = (sum3 / n as f64).cbrt();
             writeln!(
                 f,
-                "{tx}\t{ty}\t{n}\t{mean:.6}\t{p3:.6}\t{mx:.6}\t{mse:.6}"
+                "{tx}\t{ty}\t{n}\t{mean:.6}\t{p3:.6}\t{mx:.6}\t{mse:.6}\t\
+                 {src_var:.4}\t{src_grad:.4}\t{src_luma:.4}"
             )
             .unwrap();
         }
