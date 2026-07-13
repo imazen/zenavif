@@ -190,6 +190,32 @@ required-features = ["__expert"]
 [[example]]
 name = "heaptrack_decode"
 
+# Uses the zencodec decode traits + gainmap source; without this gate any
+# `cargo test` invocation that builds examples fails to compile when the
+# `zencodec` feature is off (pre-existing since the example landed).
+[[example]]
+name = "gainmap_render_probe"
+required-features = ["zencodec"]
+
+# Encode-API examples from the same batch, equally ungated before this:
+# gainmap_reencode calls encode_rgb8/encode_rgb16; twelvebit_probe drives
+# ravif directly (its own usage line says --features encode).
+[[example]]
+name = "gainmap_reencode"
+required-features = ["encode"]
+
+[[example]]
+name = "twelvebit_probe"
+required-features = ["encode"]
+
+[[example]]
+name = "hdr_encode_cell"
+required-features = ["encode"]
+
+[[example]]
+name = "hdr_fidelity_probe"
+required-features = ["encode"]
+
 [features]
 default = []
 # Decode with hand-written assembly via C FFI (fastest, uses unsafe)
