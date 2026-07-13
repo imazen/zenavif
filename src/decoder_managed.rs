@@ -8,7 +8,7 @@
 use crate::cicp_resolve::{self, ResolvedMatrix};
 use crate::config::DecoderConfig;
 use crate::convert::{add_alpha8, add_alpha16, downscale_to_8bit, scale_pixels_to_u16};
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, error_from_rav1d};
 use crate::image::{
     ChromaSampling, ColorPrimaries, ColorRange, DecodedAnimation, DecodedAnimationInfo,
     DecodedFrame, ImageInfo, MatrixCoefficients, TransferCharacteristics,
@@ -160,12 +160,8 @@ impl ManagedAvifDecoder {
         settings.apply_grain = config.apply_grain;
         settings.frame_size_limit = config.frame_size_limit;
 
-        let decoder = Rav1dDecoder::with_settings(settings).map_err(|_e| {
-            at!(Error::Decode {
-                code: -1,
-                msg: "Failed to create decoder",
-            })
-        })?;
+        let decoder = Rav1dDecoder::with_settings(settings)
+            .map_err(|e| at!(error_from_rav1d(e, "Failed to create decoder")))?;
 
         // Validate dimensions against frame_size_limit before any decode work
         if config.frame_size_limit > 0 {
@@ -209,12 +205,9 @@ impl ManagedAvifDecoder {
             Ok(Some(frame)) => frame,
             Ok(None) => {
                 // Progressive/multi-layer: flush to get the composed frame
-                let frames = decoder.flush().map_err(|_e| {
-                    at!(Error::Decode {
-                        code: -1,
-                        msg: "Failed to flush decoder",
-                    })
-                })?;
+                let frames = decoder
+                    .flush()
+                    .map_err(|e| at!(error_from_rav1d(e, "Failed to flush decoder")))?;
                 frames.into_iter().last().ok_or_else(|| {
                     at!(Error::Decode {
                         code: -1,
@@ -222,11 +215,8 @@ impl ManagedAvifDecoder {
                     })
                 })?
             }
-            Err(_e) => {
-                return Err(at!(Error::Decode {
-                    code: -1,
-                    msg: context,
-                }));
+            Err(e) => {
+                return Err(at!(error_from_rav1d(e, context)));
             }
         };
         // Reset decoder state so the next decode_frame call starts clean
@@ -244,7 +234,10 @@ impl ManagedAvifDecoder {
             return self.decode_grid(stop);
         }
 
-        let primary_data = self.parser.primary_data().map_err(|e| e.map_error(Error::Parse))?;
+        let primary_data = self
+            .parser
+            .primary_data()
+            .map_err(|e| e.map_error(Error::Parse))?;
         let primary_frame = Self::decode_frame(
             &mut self.decoder,
             &primary_data,
@@ -280,7 +273,10 @@ impl ManagedAvifDecoder {
             return Ok((pixels, info));
         }
 
-        let primary_data = self.parser.primary_data().map_err(|e| e.map_error(Error::Parse))?;
+        let primary_data = self
+            .parser
+            .primary_data()
+            .map_err(|e| e.map_error(Error::Parse))?;
         let primary_frame = Self::decode_frame(
             &mut self.decoder,
             &primary_data,
@@ -320,7 +316,10 @@ impl ManagedAvifDecoder {
     ) -> Result<(crate::strip_convert::StripConverter, ImageInfo)> {
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
-        let primary_data = self.parser.primary_data().map_err(|e| e.map_error(Error::Parse))?;
+        let primary_data = self
+            .parser
+            .primary_data()
+            .map_err(|e| e.map_error(Error::Parse))?;
         let primary_frame = Self::decode_frame(
             &mut self.decoder,
             &primary_data,
@@ -536,7 +535,10 @@ impl ManagedAvifDecoder {
         let (width, height) = if let Some(grid) = self.parser.grid_config() {
             (grid.output_width, grid.output_height)
         } else {
-            let meta = self.parser.primary_metadata().map_err(|e| e.map_error(Error::Parse))?;
+            let meta = self
+                .parser
+                .primary_metadata()
+                .map_err(|e| e.map_error(Error::Parse))?;
             (meta.max_frame_width.get(), meta.max_frame_height.get())
         };
 
@@ -654,17 +656,15 @@ impl ManagedAvifDecoder {
         let anim_info = self
             .parser
             .animation_info()
-            .ok_or_else(|| at!(Error::Unsupported("not an animated AVIF")))?;
+            .ok_or_else(|| at!(Error::InvalidParameters("not an animated AVIF".into())))?;
 
         let mut alpha_decoder = if anim_info.has_alpha {
             let mut settings = Settings::default();
             settings.threads = 0;
-            Some(Rav1dDecoder::with_settings(settings).map_err(|_e| {
-                at!(Error::Decode {
-                    code: -1,
-                    msg: "Failed to create alpha decoder",
-                })
-            })?)
+            Some(
+                Rav1dDecoder::with_settings(settings)
+                    .map_err(|e| at!(error_from_rav1d(e, "Failed to create alpha decoder")))?,
+            )
         } else {
             None
         };
@@ -678,7 +678,10 @@ impl ManagedAvifDecoder {
         for i in 0..frame_count {
             stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
-            let frame_ref = self.parser.frame(i).map_err(|e| e.map_error(Error::Parse))?;
+            let frame_ref = self
+                .parser
+                .frame(i)
+                .map_err(|e| e.map_error(Error::Parse))?;
 
             let primary_frame = Self::decode_anim_frame(
                 &mut self.decoder,
@@ -726,26 +729,34 @@ impl ManagedAvifDecoder {
         match decoder.decode(data) {
             Ok(Some(frame)) => return Ok(frame),
             Ok(None) => {}
-            Err(_e) => {
-                return Err(at!(Error::Decode {
-                    code: -1,
-                    msg: context,
-                }));
+            Err(e) => {
+                return Err(at!(error_from_rav1d(e, context)));
             }
         }
 
-        // Frame not returned immediately — drain via get_frame
+        // Frame not returned immediately — drain via get_frame. Capture the
+        // last real error (instead of discarding it, per `error_from_rav1d`)
+        // so a genuine rav1d-safe fault classifies correctly; exhausting all
+        // 10,000 polls without an error or a frame is its own (rare, internal)
+        // condition, distinct from any classified cause.
+        let mut last_err = None;
         for _ in 0..10_000 {
             match decoder.get_frame() {
                 Ok(Some(frame)) => return Ok(frame),
                 Ok(None) => std::thread::yield_now(),
-                Err(_e) => break,
+                Err(e) => {
+                    last_err = Some(e);
+                    break;
+                }
             }
         }
 
-        Err(at!(Error::Decode {
-            code: -1,
-            msg: context,
+        Err(at!(match last_err {
+            Some(e) => error_from_rav1d(e, context),
+            None => Error::Decode {
+                code: -1,
+                msg: context,
+            },
         }))
     }
 
@@ -767,7 +778,10 @@ impl ManagedAvifDecoder {
         for i in 0..self.parser.grid_tile_count() {
             stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
-            let tile_data = self.parser.tile_data(i).map_err(|e| e.map_error(Error::Parse))?;
+            let tile_data = self
+                .parser
+                .tile_data(i)
+                .map_err(|e| e.map_error(Error::Parse))?;
             let frame =
                 Self::decode_frame(&mut self.decoder, &tile_data, "Failed to decode grid tile")?;
 
@@ -788,20 +802,16 @@ impl ManagedAvifDecoder {
         stop: &(impl Stop + ?Sized),
     ) -> Result<PixelBuffer> {
         if tiles.is_empty() {
-            return Err(at!(Error::Decode {
-                code: -1,
-                msg: "No tiles to stitch",
-            }));
+            return Err(at!(Error::Malformed("No tiles to stitch")));
         }
 
         let rows = grid_config.rows as usize;
         let cols = grid_config.columns as usize;
 
         if tiles.len() != rows * cols {
-            return Err(at!(Error::Decode {
-                code: -1,
-                msg: "Tile count doesn't match grid dimensions",
-            }));
+            return Err(at!(Error::Malformed(
+                "Tile count doesn't match grid dimensions"
+            )));
         }
 
         // Get dimensions from first tile (all tiles should be same size)
@@ -993,10 +1003,9 @@ impl ManagedAvifDecoder {
         let mut pixels = match bit_depth {
             8 => self.convert_8bit(primary, alpha, info, resolved, stop),
             10 | 12 => self.convert_16bit(primary, alpha, info, resolved, stop),
-            _ => Err(at!(Error::Decode {
-                code: -1,
-                msg: "Unsupported bit depth",
-            })),
+            _ => Err(at!(Error::Unsupported(
+                "unsupported bit depth (AV1 spec only defines 8/10/12)"
+            ))),
         }?;
 
         if self.prefer_8bit && bit_depth > 8 {
@@ -1237,7 +1246,10 @@ impl ManagedAvifDecoder {
         let mut row_tiles = Vec::with_capacity(cols);
         for col in 0..cols {
             let tile_idx = grid_row * cols + col;
-            let tile_data = self.parser.tile_data(tile_idx).map_err(|e| e.map_error(Error::Parse))?;
+            let tile_data = self
+                .parser
+                .tile_data(tile_idx)
+                .map_err(|e| e.map_error(Error::Parse))?;
             let frame =
                 Self::decode_frame(&mut self.decoder, &tile_data, "Failed to decode grid tile")?;
             let (pixels, _info) = self.convert_to_image(frame, None, stop)?;
@@ -1276,7 +1288,7 @@ impl ManagedAvifDecoder {
         let bpp = desc.bytes_per_pixel();
 
         sink.begin(width, height, desc)
-            .map_err(|e| at!(Error::Encode(e.to_string())))?;
+            .map_err(|e| at!(Error::Io(e.to_string())))?;
 
         // Reusable strip buffer for conversion
         let mut strip_pixels = PixelBuffer::new(width, strip_h as u32, desc);
@@ -1297,7 +1309,7 @@ impl ManagedAvifDecoder {
             // Copy converted rows to sink buffer
             let mut sink_buf = sink
                 .provide_next_buffer(y_offset as u32, h as u32, width, desc)
-                .map_err(|e| at!(Error::Encode(e.to_string())))?;
+                .map_err(|e| at!(Error::Io(e.to_string())))?;
 
             let src = strip_pixels.as_slice();
             let row_bytes = width as usize * bpp;
@@ -1310,8 +1322,7 @@ impl ManagedAvifDecoder {
             y_offset += h;
         }
 
-        sink.finish()
-            .map_err(|e| at!(Error::Encode(e.to_string())))?;
+        sink.finish().map_err(|e| at!(Error::Io(e.to_string())))?;
 
         Ok(info)
     }
@@ -1350,7 +1361,10 @@ impl ManagedAvifDecoder {
             let mut row_tiles: Vec<PixelBuffer> = Vec::with_capacity(cols);
             for col in 0..cols {
                 let tile_idx = grid_row * cols + col;
-                let tile_data = self.parser.tile_data(tile_idx).map_err(|e| e.map_error(Error::Parse))?;
+                let tile_data = self
+                    .parser
+                    .tile_data(tile_idx)
+                    .map_err(|e| e.map_error(Error::Parse))?;
                 let frame = Self::decode_frame(
                     &mut self.decoder,
                     &tile_data,
@@ -1374,14 +1388,14 @@ impl ManagedAvifDecoder {
             // Signal begin on the first strip
             if !began {
                 sink.begin(output_width as u32, output_height as u32, desc)
-                    .map_err(|e| at!(Error::Encode(e.to_string())))?;
+                    .map_err(|e| at!(Error::Io(e.to_string())))?;
                 began = true;
             }
 
             // Provide buffer from sink and stitch tiles into it
             let mut sink_buf = sink
                 .provide_next_buffer(y_offset, strip_h as u32, output_width as u32, desc)
-                .map_err(|e| at!(Error::Encode(e.to_string())))?;
+                .map_err(|e| at!(Error::Io(e.to_string())))?;
             for py in 0..strip_h {
                 let dst_row = sink_buf.row_mut(py as u32);
                 let mut x_offset = 0usize;
@@ -1404,8 +1418,7 @@ impl ManagedAvifDecoder {
         }
 
         if began {
-            sink.finish()
-                .map_err(|e| at!(Error::Encode(e.to_string())))?;
+            sink.finish().map_err(|e| at!(Error::Io(e.to_string())))?;
         }
 
         self.probe_info()
@@ -1450,17 +1463,15 @@ impl AnimationDecoder {
         let anim_info = inner
             .parser
             .animation_info()
-            .ok_or_else(|| at!(Error::Unsupported("not an animated AVIF")))?;
+            .ok_or_else(|| at!(Error::InvalidParameters("not an animated AVIF".into())))?;
 
         let alpha_decoder = if anim_info.has_alpha {
             let mut settings = Settings::default();
             settings.threads = config.threads;
-            Some(Rav1dDecoder::with_settings(settings).map_err(|_e| {
-                at!(Error::Decode {
-                    code: -1,
-                    msg: "Failed to create alpha decoder",
-                })
-            })?)
+            Some(
+                Rav1dDecoder::with_settings(settings)
+                    .map_err(|e| at!(error_from_rav1d(e, "Failed to create alpha decoder")))?,
+            )
         } else {
             None
         };
@@ -1743,18 +1754,12 @@ fn convert_8bit_monochrome(planes: &Planes8<'_>, ctx: ConvertCtx) -> Result<Pixe
 /// with a placeholder A like the planar paths do.
 fn convert_8bit_identity(planes: &Planes8<'_>, ctx: ConvertCtx) -> Result<PixelBuffer> {
     let g_view = planes.y();
-    let b_view = planes.u().ok_or_else(|| {
-        at!(Error::Decode {
-            code: -1,
-            msg: "Identity content missing plane 1 (B)",
-        })
-    })?;
-    let r_view = planes.v().ok_or_else(|| {
-        at!(Error::Decode {
-            code: -1,
-            msg: "Identity content missing plane 2 (R)",
-        })
-    })?;
+    let b_view = planes
+        .u()
+        .ok_or_else(|| at!(Error::Malformed("Identity content missing plane 1 (B)")))?;
+    let r_view = planes
+        .v()
+        .ok_or_else(|| at!(Error::Malformed("Identity content missing plane 2 (R)")))?;
 
     let (w, h) = (ctx.buffer_width, ctx.buffer_height);
     let limited = matches!(ctx.yuv_range, YuvRange::Limited);
@@ -1811,18 +1816,12 @@ fn convert_16bit_identity(
     ctx: ConvertCtx,
 ) -> Result<PixelBuffer> {
     let g_view = planes.y();
-    let b_view = planes.u().ok_or_else(|| {
-        at!(Error::Decode {
-            code: -1,
-            msg: "Identity content missing plane 1 (B)",
-        })
-    })?;
-    let r_view = planes.v().ok_or_else(|| {
-        at!(Error::Decode {
-            code: -1,
-            msg: "Identity content missing plane 2 (R)",
-        })
-    })?;
+    let b_view = planes
+        .u()
+        .ok_or_else(|| at!(Error::Malformed("Identity content missing plane 1 (B)")))?;
+    let r_view = planes
+        .v()
+        .ok_or_else(|| at!(Error::Malformed("Identity content missing plane 2 (R)")))?;
 
     let (w, h) = (ctx.buffer_width, ctx.buffer_height);
     let limited = matches!(ctx.yuv_range, YuvRange::Limited);
@@ -1882,18 +1881,12 @@ fn convert_8bit_planar(
     ctx: ConvertCtx,
 ) -> Result<PixelBuffer> {
     let y_view = planes.y();
-    let u_view = planes.u().ok_or_else(|| {
-        at!(Error::Decode {
-            code: -1,
-            msg: "Missing U plane",
-        })
-    })?;
-    let v_view = planes.v().ok_or_else(|| {
-        at!(Error::Decode {
-            code: -1,
-            msg: "Missing V plane",
-        })
-    })?;
+    let u_view = planes
+        .u()
+        .ok_or_else(|| at!(Error::Malformed("Missing U plane")))?;
+    let v_view = planes
+        .v()
+        .ok_or_else(|| at!(Error::Malformed("Missing V plane")))?;
 
     let (w, h) = ctx.dims();
     let planar = YuvPlanarImage {
@@ -2141,18 +2134,12 @@ fn convert_16bit_planar(
     ctx: ConvertCtx,
 ) -> Result<PixelBuffer> {
     let y_view = planes.y();
-    let u_view = planes.u().ok_or_else(|| {
-        at!(Error::Decode {
-            code: -1,
-            msg: "Missing U plane",
-        })
-    })?;
-    let v_view = planes.v().ok_or_else(|| {
-        at!(Error::Decode {
-            code: -1,
-            msg: "Missing V plane",
-        })
-    })?;
+    let u_view = planes
+        .u()
+        .ok_or_else(|| at!(Error::Malformed("Missing U plane")))?;
+    let v_view = planes
+        .v()
+        .ok_or_else(|| at!(Error::Malformed("Missing V plane")))?;
 
     let (w, h) = ctx.dims();
     let planar = YuvPlanarImage {

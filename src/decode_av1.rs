@@ -7,7 +7,7 @@
 
 #![deny(unsafe_code)]
 
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, error_from_rav1d};
 use rav1d_safe::src::managed::{Decoder as Rav1dDecoder, Frame, PixelLayout, Planes, Settings};
 use rgb::Rgb;
 use whereat::at;
@@ -46,21 +46,14 @@ use yuv::{YuvGrayImage, YuvPlanarImage, YuvRange, YuvStandardMatrix};
 /// ```
 pub fn decode_av1_obu(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u8)> {
     if data.is_empty() {
-        return Err(at!(Error::Decode {
-            code: -1,
-            msg: "empty AV1 OBU data",
-        }));
+        return Err(at!(Error::UnexpectedEof("empty AV1 OBU data")));
     }
 
     let mut settings = Settings::default();
     settings.threads = 1;
 
-    let mut decoder = Rav1dDecoder::with_settings(settings).map_err(|_e| {
-        at!(Error::Decode {
-            code: -1,
-            msg: "failed to create AV1 decoder",
-        })
-    })?;
+    let mut decoder = Rav1dDecoder::with_settings(settings)
+        .map_err(|e| at!(error_from_rav1d(e, "failed to create AV1 decoder")))?;
 
     let frame = decode_single_frame(&mut decoder, data)?;
 
@@ -159,18 +152,12 @@ fn convert_identity_to_rgb(
     macro_rules! reorder {
         ($planes:expr) => {{
             let g = $planes.y();
-            let b = $planes.u().ok_or_else(|| {
-                at!(Error::Decode {
-                    code: -1,
-                    msg: "identity content missing plane 1 (B)",
-                })
-            })?;
-            let r = $planes.v().ok_or_else(|| {
-                at!(Error::Decode {
-                    code: -1,
-                    msg: "identity content missing plane 2 (R)",
-                })
-            })?;
+            let b = $planes
+                .u()
+                .ok_or_else(|| at!(Error::Malformed("identity content missing plane 1 (B)")))?;
+            let r = $planes
+                .v()
+                .ok_or_else(|| at!(Error::Malformed("identity content missing plane 2 (R)")))?;
             for (row_idx, ((g_row, b_row), r_row)) in g
                 .rows()
                 .zip(b.rows())
@@ -205,12 +192,9 @@ fn decode_single_frame(decoder: &mut Rav1dDecoder, data: &[u8]) -> Result<Frame>
         }
         Ok(None) => {
             // Progressive/multi-layer: flush to get the composed frame
-            let frames = decoder.flush().map_err(|_e| {
-                at!(Error::Decode {
-                    code: -1,
-                    msg: "failed to flush AV1 decoder",
-                })
-            })?;
+            let frames = decoder
+                .flush()
+                .map_err(|e| at!(error_from_rav1d(e, "failed to flush AV1 decoder")))?;
             frames.into_iter().last().ok_or_else(|| {
                 at!(Error::Decode {
                     code: -1,
@@ -218,10 +202,7 @@ fn decode_single_frame(decoder: &mut Rav1dDecoder, data: &[u8]) -> Result<Frame>
                 })
             })
         }
-        Err(_e) => Err(at!(Error::Decode {
-            code: -1,
-            msg: "failed to decode AV1 OBU data",
-        })),
+        Err(e) => Err(at!(error_from_rav1d(e, "failed to decode AV1 OBU data"))),
     }
 }
 
@@ -366,18 +347,12 @@ fn convert_to_rgb(
         };
 
         let y_view = planes.y();
-        let u_view = planes.u().ok_or_else(|| {
-            at!(Error::Decode {
-                code: -1,
-                msg: "missing U chroma plane",
-            })
-        })?;
-        let v_view = planes.v().ok_or_else(|| {
-            at!(Error::Decode {
-                code: -1,
-                msg: "missing V chroma plane",
-            })
-        })?;
+        let u_view = planes
+            .u()
+            .ok_or_else(|| at!(Error::Malformed("missing U chroma plane")))?;
+        let v_view = planes
+            .v()
+            .ok_or_else(|| at!(Error::Malformed("missing V chroma plane")))?;
 
         let planar = YuvPlanarImage {
             y_plane: y_view.as_slice(),
@@ -435,18 +410,12 @@ fn convert_to_rgb(
         };
 
         let y_view = planes.y();
-        let u_view = planes.u().ok_or_else(|| {
-            at!(Error::Decode {
-                code: -1,
-                msg: "missing U chroma plane",
-            })
-        })?;
-        let v_view = planes.v().ok_or_else(|| {
-            at!(Error::Decode {
-                code: -1,
-                msg: "missing V chroma plane",
-            })
-        })?;
+        let u_view = planes
+            .u()
+            .ok_or_else(|| at!(Error::Malformed("missing U chroma plane")))?;
+        let v_view = planes
+            .v()
+            .ok_or_else(|| at!(Error::Malformed("missing V chroma plane")))?;
 
         let planar = YuvPlanarImage {
             y_plane: y_view.as_slice(),

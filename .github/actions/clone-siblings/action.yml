@@ -1,19 +1,16 @@
-name: Clone path-dep siblings (zenanalyze, ravif, zencodec, zenavif-parse)
+name: Clone path-dep siblings (zenanalyze, ravif)
 description: |
   zenavif's Cargo.toml has path deps that Cargo resolves at manifest-parse
   time, so the directories must exist even when the owning feature is off:
     - imazen/zenanalyze   → ../zenanalyze (optional `auto-tune` + an example dev-dep)
     - imazen/cavif-rs     → ../ravif      (the `zenravif` 0.2.0 encoder, behind `encode`)
-    - imazen/zencodec     → ../zencodec   ([patch.crates-io] path pin: the
-      CategorizedError taxonomy + zencodec-testkit are post-0.1.25, unpublished)
-    - imazen/zenavif-parse → ../zenavif-parse ([patch.crates-io] path pin:
-      0.7.0 `At<Error>` returns + CategorizedError adoption, unpublished)
 
   The `ravif`/`zenravif` path dep points at 0.2.0, which is unpublished (crates.io
   has only 0.1.3), so the sibling must be cloned. Drop this step + switch
-  Cargo.toml back to a registry dep once zenravif 0.2.0 is published. Same for
-  the zencodec / zenavif-parse patch pins: drop their clones when zencodec
-  0.1.26 and zenavif-parse 0.7.0 are published and the patches are removed.
+  Cargo.toml back to a registry dep once zenravif 0.2.0 is published.
+  (zencodec resolves from the registry at 0.1.26, and zenavif-parse is a
+  hermetic git-rev [patch.crates-io] pin until 0.7.0 ships — neither needs a
+  sibling clone.)
 
 runs:
   using: composite
@@ -31,18 +28,4 @@ runs:
         cd ..
         if [ ! -d ravif ]; then
           git clone --depth 1 https://github.com/imazen/cavif-rs.git ravif
-        fi
-    - name: Clone imazen/zencodec into ../zencodec
-      shell: bash
-      run: |
-        cd ..
-        if [ ! -d zencodec ]; then
-          git clone --depth 1 https://github.com/imazen/zencodec.git
-        fi
-    - name: Clone imazen/zenavif-parse into ../zenavif-parse
-      shell: bash
-      run: |
-        cd ..
-        if [ ! -d zenavif-parse ]; then
-          git clone --depth 1 https://github.com/imazen/zenavif-parse.git
         fi

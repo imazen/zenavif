@@ -61,11 +61,18 @@ fn av1_decode_error_preserves_trace() {
         err.frame_count()
     );
 
-    // It must be the AV1 decode-stage error, confirming we exercised the
-    // decode pipeline (not just a container parse rejection).
+    // It must be an AV1 decode-stage error, confirming we exercised the
+    // decode pipeline (not just a container parse rejection). Since the
+    // ErrorCategory reshape, a corrupted bitstream classifies precisely as
+    // `Malformed` (recovered from rav1d-safe's real cause via
+    // `error_from_rav1d`) rather than the old catch-all `Decode` — accept
+    // any of the decode-stage-originating variants, just not `Parse`.
     assert!(
-        matches!(err.error(), Error::Decode { .. }),
-        "expected AV1 Decode error, got {:?}",
+        matches!(
+            err.error(),
+            Error::Malformed(_) | Error::UnexpectedEof(_) | Error::Decode { .. }
+        ),
+        "expected an AV1 decode-stage error (Malformed/UnexpectedEof/Decode), got {:?}",
         err.error()
     );
 }

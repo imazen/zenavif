@@ -286,7 +286,8 @@ pub fn encode(image: &PixelBuffer) -> Result<EncodedImage> {
 /// Encode a decoded image to AVIF with custom settings and cancellation
 ///
 /// Supports Rgb8, Rgba8, Rgb16, and Rgba16 pixel formats. Returns
-/// [`Error::Unsupported`] for grayscale inputs.
+/// [`Error::UnsupportedOperation`] (with [`zencodec::UnsupportedOperation::PixelFormat`])
+/// for grayscale (and any other unhandled) inputs.
 #[cfg(feature = "encode")]
 pub fn encode_with(
     image: &PixelBuffer,
@@ -309,8 +310,8 @@ pub fn encode_with(
         let img = image.try_as_imgref::<rgb::Rgba<u16>>().unwrap();
         encode_rgba16(img, config, stop)
     } else {
-        Err(at!(Error::Unsupported(
-            "only RGB/RGBA 8/16-bit encoding is supported",
+        Err(at!(Error::UnsupportedOperation(
+            zencodec::UnsupportedOperation::PixelFormat,
         )))
     }
 }

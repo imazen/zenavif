@@ -15,6 +15,31 @@ build:
 test:
     cargo test
 
+# Fast local iteration on a SHARED/loaded box: bounds the test-harness's own
+# thread count. Diagnosed 2026-07-13: plain `cargo test` spawns
+# `--test-threads` = nproc (28 here), and several tests (anything touching
+# ManagedAvifDecoder/AnimationDecoder with the default `DecoderConfig`)
+# additionally let rav1d-safe auto-detect ITS OWN frame-threading pool
+# (`Settings.threads = 0`) independently of the test-harness thread count —
+# that pool is sized off the full system core count via rav1d-safe's own
+# thread spawning, NOT rayon/OpenMP, so it does not respect
+# RAYON_NUM_THREADS/OMP_NUM_THREADS (what `run-heavy`/`--jobs` cap). Under
+# concurrent load from other heavy processes on the same box, the resulting
+# oversubscription can make an individual test (observed:
+# animated_avif_animation_frame_decoder_roundtrip) take 60s+ instead of its
+# normal <10ms, even though nothing is actually hung — confirmed by running
+# it alone (instant) vs. inside the full suite under load (stalls). Bounding
+# `--test-threads` here caps the test-harness side of that oversubscription;
+# it does not change rav1d-safe's own per-decoder thread count (that default
+# is deliberate — see "rav1d-safe Threading Race Condition (RESOLVED)" in
+# CLAUDE.md — so it is not something to change here).
+test-fast:
+    cargo test -- --test-threads=4
+
+# Same as test-fast, with the encode feature (needed for encoder.rs / two_pass.rs / target_quality.rs coverage).
+test-fast-encode:
+    cargo test --features encode -- --test-threads=4
+
 # Run clippy with warnings as errors
 clippy:
     cargo clippy --all-targets --all-features -- -D warnings

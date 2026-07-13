@@ -1924,8 +1924,8 @@ dependencies = [
 
 [[package]]
 name = "zenavif-parse"
-version = "0.6.3"
-source = "git+https://github.com/imazen/zenavif-parse?branch=caterr-categorized-error#2e938c37ef6abcb36788d111027a3edc1fa0986b"
+version = "0.7.0"
+source = "git+https://github.com/imazen/zenavif-parse?rev=79db4b7610af4704120be5d983788094266f7952#79db4b7610af4704120be5d983788094266f7952"
 dependencies = [
  "arrayvec",
  "bitreader",
@@ -1963,8 +1963,9 @@ dependencies = [
 
 [[package]]
 name = "zencodec"
-version = "0.1.25"
-source = "git+https://github.com/imazen/zencodec?branch=cancellation-classification-99#2c7fb39840ed03c02423554f8fe621b07055267f"
+version = "0.1.26"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be4b0d4108a8f062c85090bf8d0e6dd00fea976ffacc0e4f3cb6b03284a75531"
 dependencies = [
  "almost-enough",
  "enough",

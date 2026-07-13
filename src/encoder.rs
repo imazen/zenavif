@@ -12,6 +12,30 @@ use rgb::{RGB8, RGBA8, Rgb, Rgba};
 use rgb::{RGB16, RGBA16};
 use whereat::{ResultAtExt, at};
 
+/// Classify a `ravif` (zenravif) encode failure into the right zenavif
+/// [`Error`], instead of collapsing every case into the opaque `Encode`
+/// bucket the pre-reshape code used uniformly.
+///
+/// `ravif::Error` is `#[non_exhaustive]`; an unrecognized future variant —
+/// and `EncodingError` today, which flattens rav1e's own `InvalidConfig`
+/// (a config fault) vs `EncoderStatus` (a runtime-state fault) into one
+/// string, losing which — falls back to the opaque `Encode` bucket
+/// (`Internal(Dependency)`; see `Error::category`).
+fn error_from_ravif(e: ravif::Error) -> Error {
+    match e {
+        ravif::Error::TooFewPixels => {
+            Error::InvalidBuffer("provided buffer is smaller than width * height".into())
+        }
+        ravif::Error::TooManyPixels { width, height, .. } => Error::ImageTooLarge {
+            width: width as u32,
+            height: height as u32,
+        },
+        ravif::Error::Unsupported(msg) => Error::InvalidParameters(msg.to_string()),
+        ravif::Error::Cancelled => Error::Cancelled(enough::StopReason::Cancelled),
+        other => Error::Encode(other.to_string()),
+    }
+}
+
 /// Pre-encoded gain map data for embedding in an AVIF file.
 ///
 /// Contains a pre-encoded AV1 bitstream of the gain map image plus the
@@ -965,18 +989,18 @@ fn build_ravif_encoder(
         // dimensions/depth against it, instead of writing defaults that can
         // lie about the payload (e.g. a 4:4:4 map muxed as 4:2:0).
         let md = zenavif_parse::AV1Metadata::parse_av1_bitstream(&gm.av1_data).map_err(|e| {
-            at!(Error::Encode(format!(
+            at!(Error::InvalidParameters(format!(
                 "gain map AV1 payload failed to parse: {e}"
             )))
         })?;
         if (md.max_frame_width.get(), md.max_frame_height.get()) != (gm.width, gm.height) {
-            return Err(at!(Error::Encode(format!(
+            return Err(at!(Error::InvalidParameters(format!(
                 "gain map dimensions {}x{} do not match its AV1 payload ({}x{})",
                 gm.width, gm.height, md.max_frame_width, md.max_frame_height
             ))));
         }
         if md.bit_depth != gm.bit_depth {
-            return Err(at!(Error::Encode(format!(
+            return Err(at!(Error::InvalidParameters(format!(
                 "gain map bit depth {} does not match its AV1 payload ({})",
                 gm.bit_depth, md.bit_depth
             ))));
@@ -1109,7 +1133,7 @@ pub(crate) fn encode_rgb8_once(
     let enc = build_ravif_encoder(config, stop, false)?;
     let result = enc
         .encode_rgb(img)
-        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
+        .map_err_at(error_from_ravif)
         .at_crate(crate::at_crate_info())?;
     Ok(EncodedImage {
         avif_file: result.avif_file,
@@ -1140,7 +1164,7 @@ pub fn encode_gray8(
     let enc = build_ravif_encoder(config, stop, false)?;
     let result = enc
         .encode_gray8(img)
-        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
+        .map_err_at(error_from_ravif)
         .at_crate(crate::at_crate_info())?;
     Ok(EncodedImage {
         avif_file: result.avif_file,
@@ -1187,7 +1211,7 @@ pub(crate) fn encode_rgba8_once(
     let enc = build_ravif_encoder(config, stop, false)?;
     let result = enc
         .encode_rgba(img)
-        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
+        .map_err_at(error_from_ravif)
         .at_crate(crate::at_crate_info())?;
     Ok(EncodedImage {
         avif_file: result.avif_file,
@@ -1245,7 +1269,7 @@ pub fn encode_rgb16(
             pixel_range,
             ravif::MatrixCoefficients::Identity,
         )
-        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
+        .map_err_at(error_from_ravif)
         .at_crate(crate::at_crate_info())?;
     Ok(EncodedImage {
         avif_file: result.avif_file,
@@ -1300,7 +1324,7 @@ pub fn encode_rgba16(
             pixel_range,
             ravif::MatrixCoefficients::Identity,
         )
-        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
+        .map_err_at(error_from_ravif)
         .at_crate(crate::at_crate_info())?;
     Ok(EncodedImage {
         avif_file: result.avif_file,
@@ -1366,7 +1390,7 @@ pub fn encode_animation_rgb8(
 
     let result = enc
         .encode_animation_rgb(&ravif_frames)
-        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
+        .map_err_at(error_from_ravif)
         .at_crate(crate::at_crate_info())?;
 
     Ok(EncodedAnimation {
@@ -1404,7 +1428,7 @@ pub fn encode_animation_rgba8(
 
     let result = enc
         .encode_animation_rgba(&ravif_frames)
-        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
+        .map_err_at(error_from_ravif)
         .at_crate(crate::at_crate_info())?;
 
     Ok(EncodedAnimation {
@@ -1481,7 +1505,7 @@ pub fn encode_animation_rgb16(
 
     let result = enc
         .encode_animation_rgb16(&ravif_frames)
-        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
+        .map_err_at(error_from_ravif)
         .at_crate(crate::at_crate_info())?;
 
     Ok(EncodedAnimation {
@@ -1541,7 +1565,7 @@ pub fn encode_animation_rgba16(
 
     let result = enc
         .encode_animation_rgba16(&ravif_frames)
-        .map_err_at(|e: ravif::Error| Error::Encode(e.to_string()))
+        .map_err_at(error_from_ravif)
         .at_crate(crate::at_crate_info())?;
 
     Ok(EncodedAnimation {

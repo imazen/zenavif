@@ -170,18 +170,18 @@ pub fn add_alpha8<'a>(
     premultiplied: bool,
 ) -> Result<()> {
     let mut img = buf.try_as_imgref_mut::<Rgba<u8>>().ok_or_else(|| {
-        at!(Error::Unsupported(
-            "cannot add 8-bit alpha to this image type",
+        at!(Error::InvalidBuffer(
+            "cannot add 8-bit alpha to this image type".into(),
         ))
     })?;
 
     if img.width() != width || img.height() != height {
-        return Err(at!(Error::Unsupported("alpha size mismatch")));
+        return Err(at!(Error::InvalidBuffer("alpha size mismatch".into())));
     }
 
     for (alpha_row, img_row) in alpha_rows.zip(img.rows_mut()) {
         if alpha_row.len() < img_row.len() {
-            return Err(at!(Error::Unsupported("alpha width mismatch")));
+            return Err(at!(Error::InvalidBuffer("alpha width mismatch".into())));
         }
         for (&y, px) in alpha_row.iter().zip(img_row.iter_mut()) {
             px.a = match alpha_range {
@@ -212,18 +212,18 @@ pub fn add_alpha16<'a>(
     premultiplied: bool,
 ) -> Result<()> {
     let mut img = buf.try_as_imgref_mut::<Rgba<u16>>().ok_or_else(|| {
-        at!(Error::Unsupported(
-            "cannot add 16-bit alpha to this image type",
+        at!(Error::InvalidBuffer(
+            "cannot add 16-bit alpha to this image type".into(),
         ))
     })?;
 
     if img.width() != width || img.height() != height {
-        return Err(at!(Error::Unsupported("alpha size mismatch")));
+        return Err(at!(Error::InvalidBuffer("alpha size mismatch".into())));
     }
 
     for (alpha_row, img_row) in alpha_rows.zip(img.rows_mut()) {
         if alpha_row.len() < img_row.len() {
-            return Err(at!(Error::Unsupported("alpha width mismatch")));
+            return Err(at!(Error::InvalidBuffer("alpha width mismatch".into())));
         }
         for (&y, px) in alpha_row.iter().zip(img_row.iter_mut()) {
             let a = match alpha_range {

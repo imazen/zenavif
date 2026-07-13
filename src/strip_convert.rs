@@ -265,23 +265,20 @@ impl StripConverter {
 
         if has_alpha {
             // Convert YUV → RGBA8 (alpha=255), then overwrite alpha channel
-            let mut img = out_buf
-                .try_as_imgref_mut::<Rgba<u8>>()
-                .ok_or_else(|| at!(Error::Unsupported("expected RGBA8 buffer for alpha image")))?;
+            let mut img = out_buf.try_as_imgref_mut::<Rgba<u8>>().ok_or_else(|| {
+                at!(Error::Decode {
+                    code: -1,
+                    msg: "expected RGBA8 buffer for alpha image",
+                })
+            })?;
             let out_rgba = img.buf_mut();
 
-            let u_view = planes.u().ok_or_else(|| {
-                at!(Error::Decode {
-                    code: -1,
-                    msg: "Missing U plane",
-                })
-            })?;
-            let v_view = planes.v().ok_or_else(|| {
-                at!(Error::Decode {
-                    code: -1,
-                    msg: "Missing V plane",
-                })
-            })?;
+            let u_view = planes
+                .u()
+                .ok_or_else(|| at!(Error::Malformed("Missing U plane")))?;
+            let v_view = planes
+                .v()
+                .ok_or_else(|| at!(Error::Malformed("Missing V plane")))?;
 
             match chroma_sampling {
                 ChromaSampling::Cs420 => yuv_convert::yuv420_to_rgba8_strip(
@@ -366,24 +363,19 @@ impl StripConverter {
         } else {
             // Convert YUV → RGB8
             let mut img = out_buf.try_as_imgref_mut::<Rgb<u8>>().ok_or_else(|| {
-                at!(Error::Unsupported(
-                    "expected RGB8 buffer for non-alpha image",
-                ))
+                at!(Error::Decode {
+                    code: -1,
+                    msg: "expected RGB8 buffer for non-alpha image",
+                })
             })?;
             let out_rgb = img.buf_mut();
 
-            let u_view = planes.u().ok_or_else(|| {
-                at!(Error::Decode {
-                    code: -1,
-                    msg: "Missing U plane",
-                })
-            })?;
-            let v_view = planes.v().ok_or_else(|| {
-                at!(Error::Decode {
-                    code: -1,
-                    msg: "Missing V plane",
-                })
-            })?;
+            let u_view = planes
+                .u()
+                .ok_or_else(|| at!(Error::Malformed("Missing U plane")))?;
+            let v_view = planes
+                .v()
+                .ok_or_else(|| at!(Error::Malformed("Missing V plane")))?;
 
             match chroma_sampling {
                 ChromaSampling::Cs420 => yuv_convert::yuv420_to_rgb8_strip(

@@ -505,8 +505,13 @@ impl EncoderConfig {
         // pre-flip would regress synthetic content. Pure speed selection; q is
         // kept at the picked cell — s9 dominates the s5 valley, so it reaches the
         // same quality at the same q (no TargetOutOfRange risk).
-        let speed =
-            crate::fast_heads::monotone_speed_gate_for_rgb8(rgb, width, height, offer, picked_speed);
+        let speed = crate::fast_heads::monotone_speed_gate_for_rgb8(
+            rgb,
+            width,
+            height,
+            offer,
+            picked_speed,
+        );
         let q = q_lut
             .median_q
             .get(cell)

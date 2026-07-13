@@ -206,9 +206,14 @@ fn unsupported_grayscale_input() {
     let result = encode(&pb);
     assert!(result.is_err());
     let err = result.unwrap_err();
+    // `encode_with`'s pixel-format dispatch falls through to the shared
+    // `zencodec::UnsupportedOperation::PixelFormat` cause (same variant the
+    // animation-encode pixel-format-mismatch sites in this file already use),
+    // rather than an ad-hoc string — structured so a consumer can match on it
+    // without naming zenavif's own `Error` type.
     assert!(
-        err.to_string().contains("encoding is supported"),
-        "error should mention grayscale: {err}"
+        err.to_string().contains("pixel_format"),
+        "error should mention the unsupported pixel format: {err}"
     );
 }
 

@@ -10,6 +10,30 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Changed
+- **Reshape `ErrorCategory` onto zencodec's origin-first, two-level taxonomy
+  (zencodec PR #116, `caterr-reshape`), superseding the flat 17-variant shape
+  the PR #103 entry below describes.** New shape: `Image(ImageError) /
+  Request(RequestError) / Resource(ResourceError) / Policy(PolicyKind) /
+  Stopped(enough::StopReason) / Io(CodecIoKind) / Internal(InternalKind)`.
+  `error_from_rav1d` now classifies rav1d-safe's real cause instead of
+  discarding it: `InvalidData` → `Malformed`, `NeedMoreData` → `UnexpectedEof`,
+  `OutOfMemory` → the dedicated `OutOfMemory` variant; only the genuinely
+  opaque `InvalidSettings`/`InitFailed`/`Other` setup faults still construct
+  `Decode` (→ `Internal(Bug)`, not attributable to the input bitstream).
+  `Unsupported(&str)` split by origin across `cicp_resolve.rs` (image-feature),
+  `GainMapRender` mode (request), an internal grid invariant (internal), and
+  alpha-size mismatch (request-buffer) — previously one string conflating four
+  origins. `ErrorCategory::Lifecycle` (the original name in this reshape) was
+  further renamed to `Stopped` for the same `StopReason` payload — naming
+  only, done crate-wide across every zen codec in the same pass.
+  `tests/whereat_trace_preservation.rs`'s `av1_decode_error_preserves_trace`
+  updated to accept `Malformed` (the now-correct classification for a
+  corrupted AV1 payload) alongside `Decode`, preserving its real assertion
+  (non-empty trace across the `decoder_managed` boundary). Additive at the
+  type level (new `#[non_exhaustive]` enum shape); `ErrorCategory` itself is
+  still unreleased, so this is not a break of any published zencodec API.
+
 ### Added
 - **Adopt the `zencodec` `CategorizedError` taxonomy (PR #103, final API).**
   `Error` now `impl zencodec::CategorizedError` with

@@ -971,14 +971,14 @@ impl AvifEncoder {
         let estimated_mem = w as u64 * h as u64 * bpp;
         self.limits
             .check_memory(estimated_mem)
-            .map_err(|e| at!(Error::Encode(format!("{e}"))))?;
+            .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
         Ok(())
     }
 
     fn make_output(&self, data: Vec<u8>) -> Result<EncodeOutput, At<Error>> {
         self.limits
             .check_output_size(data.len() as u64)
-            .map_err(|e| at!(Error::Encode(format!("{e}"))))?;
+            .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
         Ok(EncodeOutput::new(data, ImageFormat::Avif))
     }
 
@@ -1943,7 +1943,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         // once at this boundary.
         if will_auto_orient(self.orientation) {
             return zencodec::helpers::copy_decode_to_sink(self, data, sink, preferred, |e| {
-                Error::Encode(e.to_string()).into()
+                Error::Io(e.to_string()).into()
             });
         }
         self.push_decoder_inner(data, sink)
@@ -2388,27 +2388,24 @@ fn reconstruct_hdr_pixels(
     // contract demands a loud refusal over silent degradation (use
     // Components + apply downstream for those).
     if native_info.has_alpha {
-        return Err(at!(Error::Decode {
-            code: -1,
-            msg: "ReconstructHdr with an alpha channel is unsupported \
+        return Err(at!(Error::Unsupported(
+            "ReconstructHdr with an alpha channel is unsupported \
                   (apply emits opaque); use GainMapRender::Components",
-        }));
+        )));
     }
     match pixels.descriptor().pixel_format() {
         zenpixels::PixelFormat::Rgb8 | zenpixels::PixelFormat::Rgba8 => {}
         _ => {
-            return Err(at!(Error::Decode {
-                code: -1,
-                msg: "ReconstructHdr requires an 8-bit base (10/12-bit not yet \
+            return Err(at!(Error::Unsupported(
+                "ReconstructHdr requires an 8-bit base (10/12-bit not yet \
                       supported); use GainMapRender::Components",
-            }));
+            )));
         }
     }
     let metadata = convert_gain_map_info(gm).ok_or_else(|| {
-        at!(Error::Decode {
-            code: -1,
-            msg: "gain map present but its ISO 21496-1 metadata failed to parse",
-        })
+        at!(Error::Malformed(
+            "gain map present but its ISO 21496-1 metadata failed to parse"
+        ))
     })?;
     let (gpx, gw, gh, gch) = crate::decode_av1_obu(&gm.gain_map_data)?;
     let gainmap = ultrahdr_core::GainMap {
@@ -2433,10 +2430,9 @@ fn reconstruct_hdr_pixels(
         stop,
     )
     .map_err(|_e| {
-        at!(Error::Decode {
-            code: -1,
-            msg: "gain-map apply failed (see ultrahdr-core validation rules)",
-        })
+        at!(Error::Malformed(
+            "gain-map apply failed (see ultrahdr-core validation rules)"
+        ))
     })?;
     // The apply kernels emit constant alpha = 1.0 (structural, not
     // scanned) — tag it Opaque so downstream encoders know the lane is
@@ -3042,7 +3038,7 @@ impl AvifAnimationFrameEncoder {
         // Validate canvas dimensions match
         match (self.canvas_width, self.canvas_height) {
             (Some(cw), Some(ch)) if cw != w || ch != h => {
-                return Err(at!(Error::Encode(format!(
+                return Err(at!(Error::InvalidState(format!(
                     "frame dimensions {}x{} don't match canvas {}x{}",
                     w, h, cw, ch
                 ))));
@@ -3065,20 +3061,20 @@ impl AvifAnimationFrameEncoder {
         })?;
         self.limits
             .check_memory(w as u64 * h as u64 * bpp)
-            .map_err(|e| at!(Error::Encode(format!("{e}"))))?;
+            .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
 
         // Enforce max_frames limit.
         self.frame_count += 1;
         self.limits
             .check_frames(self.frame_count)
-            .map_err(|e| at!(Error::Encode(format!("{e}"))))?;
+            .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
 
         let fmt = desc.pixel_format();
 
         // Validate consistent pixel format across frames
         if let Some(expected) = self.pixel_format {
             if fmt != expected {
-                return Err(at!(Error::Encode(format!(
+                return Err(at!(Error::InvalidState(format!(
                     "pixel format mismatch: first frame was {expected:?}, this frame is {fmt:?}"
                 ))));
             }
@@ -3139,7 +3135,7 @@ impl AvifAnimationFrameEncoder {
         }
 
         if self.frames.is_empty() {
-            return Err(at!(Error::Encode("no frames to encode".into())));
+            return Err(at!(Error::InvalidState("no frames to encode".into())));
         }
 
         let stop_token = self.stop_token();
@@ -3225,7 +3221,7 @@ impl AvifAnimationFrameEncoder {
 
         self.limits
             .check_output_size(avif_file.len() as u64)
-            .map_err(|e| at!(Error::Encode(format!("{e}"))))?;
+            .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
 
         Ok(EncodeOutput::new(avif_file, ImageFormat::Avif))
     }
@@ -3445,9 +3441,12 @@ impl AvifDecodeJob {
         let info = convert_native_info(&native_info);
 
         if decoder.is_grid() {
-            let grid = decoder
-                .grid_config()
-                .ok_or_else(|| at!(Error::Unsupported("grid_config missing after is_grid()")))?;
+            let grid = decoder.grid_config().ok_or_else(|| {
+                at!(Error::Decode {
+                    code: -1,
+                    msg: "grid_config missing after is_grid()",
+                })
+            })?;
             let output_width = grid.output_width;
             let output_height = grid.output_height;
 
@@ -3759,7 +3758,9 @@ impl AvifDecoder<'_> {
             zencodec::GainMapRender::Components
             | zencodec::GainMapRender::ReconstructHdr { .. } => true,
             _ => {
-                return Err(at!(Error::Unsupported("unrecognized GainMapRender mode")));
+                return Err(at!(Error::InvalidParameters(
+                    "unrecognized GainMapRender mode".into()
+                )));
             }
         };
 
@@ -5600,13 +5601,15 @@ mod tests {
         assert!(result.is_err(), "expected error from memory limit");
         let err = result.err().unwrap();
         // Pattern B (envelope): the coarse category is read off `At<CodecError>`
-        // directly (native `Error::ResourceLimit` maps to `LimitsExceeded(Memory)`),
+        // directly (native `Error::ResourceLimit` maps to `Resource(Limits(Memory))`),
         // and the native detail stays reachable via downcast — faithful to the
         // original `matches!(.., Error::ResourceLimit(_))` intent.
         assert_eq!(
             err.error().category(),
-            zencodec::ErrorCategory::LimitsExceeded(zencodec::LimitKind::Memory),
-            "expected a memory LimitsExceeded category, got: {err}"
+            zencodec::ErrorCategory::Resource(zencodec::ResourceError::Limits(
+                zencodec::LimitKind::Memory
+            )),
+            "expected a memory Resource(Limits) category, got: {err}"
         );
         assert!(
             matches!(
@@ -5647,13 +5650,15 @@ mod tests {
         assert!(result.is_err(), "expected error from memory limit");
         let err = result.err().unwrap();
         // Pattern B (envelope): the coarse category is read off `At<CodecError>`
-        // directly (native `Error::ResourceLimit` maps to `LimitsExceeded(Memory)`),
+        // directly (native `Error::ResourceLimit` maps to `Resource(Limits(Memory))`),
         // and the native detail stays reachable via downcast — faithful to the
         // original `matches!(.., Error::ResourceLimit(_))` intent.
         assert_eq!(
             err.error().category(),
-            zencodec::ErrorCategory::LimitsExceeded(zencodec::LimitKind::Memory),
-            "expected a memory LimitsExceeded category, got: {err}"
+            zencodec::ErrorCategory::Resource(zencodec::ResourceError::Limits(
+                zencodec::LimitKind::Memory
+            )),
+            "expected a memory Resource(Limits) category, got: {err}"
         );
         assert!(
             matches!(

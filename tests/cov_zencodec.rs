@@ -340,9 +340,8 @@ fn dyn_dispatch_recovers_category_and_codec_name() {
         .probe(bytes)
         .expect_err("malformed input must fail to probe");
     let expected = typed.error().category();
-    assert_ne!(
-        expected,
-        ErrorCategory::Internal,
+    assert!(
+        !matches!(expected, ErrorCategory::Internal(_)),
         "a malformed container must get a real input classification, not the \
          Internal catch-all (got {expected:?})"
     );

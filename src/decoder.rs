@@ -649,9 +649,12 @@ impl AvifDecoder {
 
         // Convert to RGB using bulk yuv crate functions
         let mut image = if bit_depth == 8 {
-            let planes = color_picture
-                .yuv_planes_u8()
-                .ok_or_else(|| at!(Error::Unsupported("failed to extract YUV planes")))?;
+            let planes = color_picture.yuv_planes_u8().ok_or_else(|| {
+                at!(Error::Decode {
+                    code: -1,
+                    msg: "failed to extract YUV planes",
+                })
+            })?;
 
             match planes.chroma_sampling() {
                 ChromaSampling::Monochrome => {
@@ -669,9 +672,12 @@ impl AvifDecoder {
                 _ => self.convert_yuv8(&planes, yuv_range, matrix, has_alpha)?,
             }
         } else {
-            let planes = color_picture
-                .yuv_planes_u16()
-                .ok_or_else(|| at!(Error::Unsupported("failed to extract YUV planes")))?;
+            let planes = color_picture.yuv_planes_u16().ok_or_else(|| {
+                at!(Error::Decode {
+                    code: -1,
+                    msg: "failed to extract YUV planes",
+                })
+            })?;
 
             match planes.chroma_sampling() {
                 ChromaSampling::Monochrome => {
@@ -710,9 +716,12 @@ impl AvifDecoder {
             let premultiplied = self.parser.premultiplied_alpha();
 
             if alpha_bit_depth == 8 {
-                let (y_data, width, height, _) = alpha_picture
-                    .y_plane_u8()
-                    .ok_or_else(|| at!(Error::Unsupported("failed to extract alpha plane")))?;
+                let (y_data, width, height, _) = alpha_picture.y_plane_u8().ok_or_else(|| {
+                    at!(Error::Decode {
+                        code: -1,
+                        msg: "failed to extract alpha plane",
+                    })
+                })?;
 
                 add_alpha8(
                     &mut image,
@@ -723,9 +732,12 @@ impl AvifDecoder {
                     premultiplied,
                 )?;
             } else {
-                let (y_data, width, height, _) = alpha_picture
-                    .y_plane_u16()
-                    .ok_or_else(|| at!(Error::Unsupported("failed to extract alpha plane")))?;
+                let (y_data, width, height, _) = alpha_picture.y_plane_u16().ok_or_else(|| {
+                    at!(Error::Decode {
+                        code: -1,
+                        msg: "failed to extract alpha plane",
+                    })
+                })?;
 
                 add_alpha16(
                     &mut image,

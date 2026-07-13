@@ -14,6 +14,14 @@ enough = "0.4"
 [dependencies.zenavif]
 path = ".."
 
+[patch.crates-io]
+# Mirror of the root manifest's TEMP pin (fuzz/ is its own workspace root, so
+# the root [patch] does not reach it): zenavif-parse 0.7.0 (breaking At<Error>
+# returns + CategorizedError adoption on released zencodec 0.1.26) is
+# unpublished. Git-rev pin (not a path pin) for hermeticity. Drop together
+# with the root patch once 0.7.0 ships.
+zenavif-parse = { git = "https://github.com/imazen/zenavif-parse", rev = "79db4b7610af4704120be5d983788094266f7952" }
+
 [[bin]]
 name = "fuzz_decode"
 path = "fuzz_targets/fuzz_decode.rs"
