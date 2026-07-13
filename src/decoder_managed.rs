@@ -153,7 +153,7 @@ impl ManagedAvifDecoder {
             &parse_config,
             &enough::Unstoppable,
         )
-        .map_err_at(Error::Parse)?;
+        .map_err(|e| e.map_error(Error::Parse))?;
 
         let mut settings = Settings::default();
         settings.threads = config.threads;
@@ -244,7 +244,7 @@ impl ManagedAvifDecoder {
             return self.decode_grid(stop);
         }
 
-        let primary_data = self.parser.primary_data().map_err_at(Error::Parse)?;
+        let primary_data = self.parser.primary_data().map_err(|e| e.map_error(Error::Parse))?;
         let primary_frame = Self::decode_frame(
             &mut self.decoder,
             &primary_data,
@@ -254,7 +254,7 @@ impl ManagedAvifDecoder {
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         let alpha_frame = if let Some(alpha_result) = self.parser.alpha_data() {
-            let alpha_data = alpha_result.map_err_at(Error::Parse)?;
+            let alpha_data = alpha_result.map_err(|e| e.map_error(Error::Parse))?;
             Some(Self::decode_frame(
                 &mut self.decoder,
                 &alpha_data,
@@ -280,7 +280,7 @@ impl ManagedAvifDecoder {
             return Ok((pixels, info));
         }
 
-        let primary_data = self.parser.primary_data().map_err_at(Error::Parse)?;
+        let primary_data = self.parser.primary_data().map_err(|e| e.map_error(Error::Parse))?;
         let primary_frame = Self::decode_frame(
             &mut self.decoder,
             &primary_data,
@@ -290,7 +290,7 @@ impl ManagedAvifDecoder {
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         let alpha_frame = if let Some(alpha_result) = self.parser.alpha_data() {
-            let alpha_data = alpha_result.map_err_at(Error::Parse)?;
+            let alpha_data = alpha_result.map_err(|e| e.map_error(Error::Parse))?;
             Some(Self::decode_frame(
                 &mut self.decoder,
                 &alpha_data,
@@ -320,7 +320,7 @@ impl ManagedAvifDecoder {
     ) -> Result<(crate::strip_convert::StripConverter, ImageInfo)> {
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
-        let primary_data = self.parser.primary_data().map_err_at(Error::Parse)?;
+        let primary_data = self.parser.primary_data().map_err(|e| e.map_error(Error::Parse))?;
         let primary_frame = Self::decode_frame(
             &mut self.decoder,
             &primary_data,
@@ -330,7 +330,7 @@ impl ManagedAvifDecoder {
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         let alpha_frame = if let Some(alpha_result) = self.parser.alpha_data() {
-            let alpha_data = alpha_result.map_err_at(Error::Parse)?;
+            let alpha_data = alpha_result.map_err(|e| e.map_error(Error::Parse))?;
             Some(Self::decode_frame(
                 &mut self.decoder,
                 &alpha_data,
@@ -536,7 +536,7 @@ impl ManagedAvifDecoder {
         let (width, height) = if let Some(grid) = self.parser.grid_config() {
             (grid.output_width, grid.output_height)
         } else {
-            let meta = self.parser.primary_metadata().map_err_at(Error::Parse)?;
+            let meta = self.parser.primary_metadata().map_err(|e| e.map_error(Error::Parse))?;
             (meta.max_frame_width.get(), meta.max_frame_height.get())
         };
 
@@ -678,7 +678,7 @@ impl ManagedAvifDecoder {
         for i in 0..frame_count {
             stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
-            let frame_ref = self.parser.frame(i).map_err_at(Error::Parse)?;
+            let frame_ref = self.parser.frame(i).map_err(|e| e.map_error(Error::Parse))?;
 
             let primary_frame = Self::decode_anim_frame(
                 &mut self.decoder,
@@ -767,7 +767,7 @@ impl ManagedAvifDecoder {
         for i in 0..self.parser.grid_tile_count() {
             stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
-            let tile_data = self.parser.tile_data(i).map_err_at(Error::Parse)?;
+            let tile_data = self.parser.tile_data(i).map_err(|e| e.map_error(Error::Parse))?;
             let frame =
                 Self::decode_frame(&mut self.decoder, &tile_data, "Failed to decode grid tile")?;
 
@@ -1237,7 +1237,7 @@ impl ManagedAvifDecoder {
         let mut row_tiles = Vec::with_capacity(cols);
         for col in 0..cols {
             let tile_idx = grid_row * cols + col;
-            let tile_data = self.parser.tile_data(tile_idx).map_err_at(Error::Parse)?;
+            let tile_data = self.parser.tile_data(tile_idx).map_err(|e| e.map_error(Error::Parse))?;
             let frame =
                 Self::decode_frame(&mut self.decoder, &tile_data, "Failed to decode grid tile")?;
             let (pixels, _info) = self.convert_to_image(frame, None, stop)?;
@@ -1292,9 +1292,7 @@ impl ManagedAvifDecoder {
                 strip_pixels = PixelBuffer::new(width, h as u32, desc);
             }
 
-            converter
-                .convert_strip(y_offset, h, &mut strip_pixels)
-                .at()?;
+            converter.convert_strip(y_offset, h, &mut strip_pixels)?;
 
             // Copy converted rows to sink buffer
             let mut sink_buf = sink
@@ -1352,7 +1350,7 @@ impl ManagedAvifDecoder {
             let mut row_tiles: Vec<PixelBuffer> = Vec::with_capacity(cols);
             for col in 0..cols {
                 let tile_idx = grid_row * cols + col;
-                let tile_data = self.parser.tile_data(tile_idx).map_err_at(Error::Parse)?;
+                let tile_data = self.parser.tile_data(tile_idx).map_err(|e| e.map_error(Error::Parse))?;
                 let frame = Self::decode_frame(
                     &mut self.decoder,
                     &tile_data,
@@ -1499,7 +1497,7 @@ impl AnimationDecoder {
             .inner
             .parser
             .frame(self.frame_index)
-            .map_err_at(Error::Parse)?;
+            .map_err(|e| e.map_error(Error::Parse))?;
 
         let primary_frame = ManagedAvifDecoder::decode_anim_frame(
             &mut self.inner.decoder,
