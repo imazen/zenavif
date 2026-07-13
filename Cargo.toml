@@ -30,6 +30,16 @@ thiserror = { version = "2.0.18", default-features = false }
 whereat = { version = "0.1.5"}
 log = "0.4.29"
 ravif = { package = "zenravif", version = "0.2.0", path = "../ravif/ravif", default-features = false, optional = true, features = ["stop"] }
+# svtav1-rs experimental AV1 encode backend (`encode-svt-rs` feature).
+# The crate lives in the svtav1-rs/svtav1 subdir of imazen/svtav1; cargo
+# discovers workspace-subdir packages in git deps by package name. Branch
+# pinned to the conformance-verified wave (525/525 mono + 700/700 4:2:0
+# aomdec decode-conformance at the time of wiring).
+svtav1 = { git = "https://github.com/imazen/svtav1", branch = "wave2/entropy-c-parity", optional = true }
+# AVIF container muxer for the svtav1-rs backend (the zenravif backend muxes
+# inside zenravif; this backend muxes in-crate). The 0.2.0 version is
+# supplied by the [patch.crates-io] git pin below until 0.2.0 publishes.
+zenavif-serialize = { version = "0.2.0", optional = true }
 # Optional target-quality deps — encode->decode->score convergence loop
 # (`target-quality` feature). Same versions as the dev-dependency copies.
 fast-ssim2 = { version = "0.8.0", optional = true, features = ["imgref", "rayon"] }
@@ -232,6 +242,14 @@ target-quality = ["encode", "dep:fast-ssim2", "dep:zensim"]
 # `__expert` surface. RELEASE-GATED at runtime behind
 # `zenravif::FRAME_HINTS_LIVE` (fails honestly until the zenrav1e dep bump).
 two-pass-butteraugli = ["encode-imazen", "ravif/__expert", "dep:butteraugli"]
+# EXPERIMENTAL: AVIF encoding via svtav1-rs (pure Rust SVT-AV1 port,
+# imazen/svtav1 branch dep). Adds the working `Av1Backend::SvtRs` variant:
+# 8-bit 4:2:0 stills only, dimensions must be multiples of 64 (the svtav1-rs
+# pipeline codes full 64x64 superblocks; no partial-SB / container-crop path
+# yet). Bitstream identity vs C-SVT is NOT yet asserted — that parity gate
+# lands when svtav1-rs reaches decision-layer bitstream identity. Off by
+# default; requires `encode` (the backend enum and entry points live there).
+encode-svt-rs = ["encode", "dep:svtav1", "dep:zenavif-serialize"]
 # Encoding with hand-written assembly (fastest, uses unsafe)
 encode-asm = ["encode", "ravif/asm"]
 # Encoding with multi-threading

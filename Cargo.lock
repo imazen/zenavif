@@ -1466,6 +1466,68 @@ dependencies = [
 ]
 
 [[package]]
+name = "svtav1"
+version = "0.1.0"
+source = "git+https://github.com/imazen/svtav1?branch=wave2%2Fentropy-c-parity#3cad660b7d7f20a006a60c463bc278cd23b64b97"
+dependencies = [
+ "svtav1-dsp",
+ "svtav1-encoder",
+ "svtav1-entropy",
+ "svtav1-tables",
+ "svtav1-types",
+]
+
+[[package]]
+name = "svtav1-disjoint-mut"
+version = "0.1.0"
+source = "git+https://github.com/imazen/svtav1?branch=wave2%2Fentropy-c-parity#3cad660b7d7f20a006a60c463bc278cd23b64b97"
+
+[[package]]
+name = "svtav1-dsp"
+version = "0.1.0"
+source = "git+https://github.com/imazen/svtav1?branch=wave2%2Fentropy-c-parity#3cad660b7d7f20a006a60c463bc278cd23b64b97"
+dependencies = [
+ "archmage",
+ "magetypes",
+ "svtav1-tables",
+ "svtav1-types",
+]
+
+[[package]]
+name = "svtav1-encoder"
+version = "0.1.0"
+source = "git+https://github.com/imazen/svtav1?branch=wave2%2Fentropy-c-parity#3cad660b7d7f20a006a60c463bc278cd23b64b97"
+dependencies = [
+ "svtav1-disjoint-mut",
+ "svtav1-dsp",
+ "svtav1-entropy",
+ "svtav1-tables",
+ "svtav1-types",
+]
+
+[[package]]
+name = "svtav1-entropy"
+version = "0.1.0"
+source = "git+https://github.com/imazen/svtav1?branch=wave2%2Fentropy-c-parity#3cad660b7d7f20a006a60c463bc278cd23b64b97"
+dependencies = [
+ "svtav1-tables",
+ "svtav1-types",
+]
+
+[[package]]
+name = "svtav1-tables"
+version = "0.1.0"
+source = "git+https://github.com/imazen/svtav1?branch=wave2%2Fentropy-c-parity#3cad660b7d7f20a006a60c463bc278cd23b64b97"
+dependencies = [
+ "svtav1-types",
+]
+
+[[package]]
+name = "svtav1-types"
+version = "0.1.0"
+source = "git+https://github.com/imazen/svtav1?branch=wave2%2Fentropy-c-parity#3cad660b7d7f20a006a60c463bc278cd23b64b97"
+
+[[package]]
 name = "syn"
 version = "2.0.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1904,6 +1966,7 @@ dependencies = [
  "rgb",
  "safe_unaligned_simd",
  "serde_json",
+ "svtav1",
  "thiserror",
  "ultrahdr-core",
  "whereat",
@@ -1911,6 +1974,7 @@ dependencies = [
  "zenanalyze",
  "zenanalyze-api",
  "zenavif-parse",
+ "zenavif-serialize",
  "zenbench",
  "zencodec",
  "zenpixels",

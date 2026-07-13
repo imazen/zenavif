@@ -1222,11 +1222,15 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
     let mut h = Fnv::new();
 
     // Backend. The deprecated Svtav1 variant still hashes distinctly:
-    // conservative (validate() rejects it, so no plan carries it).
+    // conservative (validate() rejects it, so no plan carries it). SvtRs
+    // hashes distinctly too — its bitstreams share nothing with zenravif's
+    // (the sweep planner itself remains zenravif-calibrated; see the
+    // module docs).
     #[allow(deprecated)]
     h.u8(match config.backend {
         crate::Av1Backend::Zenravif => 0,
         crate::Av1Backend::Svtav1 => 1,
+        crate::Av1Backend::SvtRs => 2,
     });
 
     // Resolved quantizers (quality is mediated; lossless pins 0).
