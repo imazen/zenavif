@@ -708,7 +708,13 @@ fn run_monotone(pin: bool) {
                 let dec_arr = to_arr_img(dec_rgb);
                 let ssim2 = fast_ssim2::compute_ssimulacra2(src.as_ref(), dec_arr.as_ref())
                     .expect("gate_kit monotone: ssim2 failed");
-                rows.push((format!("{}/q{}", img.name, *q as u32), *s, bytes.len(), ssim2, ms));
+                rows.push((
+                    format!("{}/q{}", img.name, *q as u32),
+                    *s,
+                    bytes.len(),
+                    ssim2,
+                    ms,
+                ));
             }
         }
     }
@@ -791,7 +797,10 @@ fn run_monotone(pin: bool) {
             }
         }
     }
-    let new: Vec<_> = inversions.iter().filter(|i| !allowed.contains(*i)).collect();
+    let new: Vec<_> = inversions
+        .iter()
+        .filter(|i| !allowed.contains(*i))
+        .collect();
     let fixed = allowed.iter().filter(|i| !inversions.contains(*i)).count();
     println!(
         "gate-monotone: {} cells, {} inversion(s) ({} known, {} NEW, {} fixed) on {plat}",
