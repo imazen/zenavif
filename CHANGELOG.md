@@ -114,6 +114,29 @@ write-path returns + gain-map interop additions, already on main).
   path pins** to the sibling `../zencodec` checkout (the taxonomy is
   post-0.1.25, unreleased) and `../zenavif-parse` (0.7.0, unreleased) until both
   publish. Additive (`#[non_exhaustive]` enum + opt-in trait).
+### QUEUED BREAKING CHANGES
+- `Av1Backend` gained the `SvtRs` variant (the enum is not `#[non_exhaustive]`,
+  so downstream exhaustive matches must add an arm) and `ValidationError`
+  (already `#[non_exhaustive]`) gained `BackendUnsupportedParam` — ship with
+  the next 0.x minor bump (svtav1-rs backend PR)
+
+### Added
+- EXPERIMENTAL svtav1-rs AVIF encode backend: `Av1Backend::SvtRs` behind the
+  new default-off `encode-svt-rs` feature (git-branch dep on imazen/svtav1
+  `wave2/entropy-c-parity`, pinned rev conformance-verified upstream at
+  525/525 mono + 700/700 4:2:0 aomdec cells). 8-bit 4:2:0 stills with
+  64-px-aligned dimensions; BT.601 full-range; muxed in-crate via
+  zenavif-serialize; out-of-scope configs rejected honestly at validate()
+  and encode time. Bitstream identity vs C-SVT is NOT yet asserted — that
+  parity gate lands with svtav1-rs decision-layer bitstream identity.
+  (`src/encoder_svt_rs.rs`, `tests/svt_rs_backend.rs`)
+
+### Fixed
+- `cargo test` / `cargo test --features encode` failed to compile on any
+  feature set that leaves `zencodec` or `encode` off: the
+  `gainmap_render_probe`, `gainmap_reencode`, `twelvebit_probe`,
+  `hdr_encode_cell`, and `hdr_fidelity_probe` examples landed without
+  `required-features` gates (pre-existing; same batch as the red main CI)
 - Executable engineering-baseline gates (`docs/ENGINEERING_BASELINE.md` A2/A3/A6):
   `examples/gate_kit.rs` (`determinism`/`cells`/`ladder` subcommands on pinned
   integer-synthetic content) + `scripts/gates/gate_conformance.sh` (the PALCONF

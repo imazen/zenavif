@@ -110,6 +110,7 @@ TSV diff in the same commit. zenrav1e's halves (`gate-identity`,
 - `(default)` - Pure Rust decode only, safe SIMD via archmage
 - `encode` - AVIF encoding via zenravif
 - `encode-imazen` - Encoding with zenrav1e fork extras (QM, VAQ, still-image, lossless)
+- `encode-svt-rs` - EXPERIMENTAL `Av1Backend::SvtRs` via svtav1-rs (imazen/svtav1 git-branch dep; 8-bit 4:2:0 stills, 64-px-aligned dims only; muxes in-crate via zenavif-serialize; C-parity assertion pending decision-layer bitstream identity upstream)
 - `encode-asm` - Encoding with hand-written assembly (fastest, unsafe)
 - `encode-threading` - Encoding with multi-threading
 - `unsafe-asm` - Decoding with hand-written assembly via C FFI (fastest, unsafe)

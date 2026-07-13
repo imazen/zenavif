@@ -194,6 +194,21 @@ pub enum Av1Backend {
                 backend; EncoderConfig::validate() rejects it"
     )]
     Svtav1,
+    /// svtav1-rs (pure Rust SVT-AV1 port) — EXPERIMENTAL, behind the
+    /// `encode-svt-rs` cargo feature (default off).
+    ///
+    /// This is the working successor the [`Av1Backend::Svtav1`] doc
+    /// promised: the port's streams now pass decode conformance under
+    /// `aomdec` (525/525 mono + 700/700 4:2:0 cells at the pinned
+    /// imazen/svtav1 rev) and the payload is muxed into a real AVIF
+    /// container in-crate. Scope is deliberately narrow for now —
+    /// 8-bit 4:2:0 stills with dimensions that are multiples of 64;
+    /// see `src/encoder_svt_rs.rs` module docs. Bitstream identity vs
+    /// the C SVT-AV1 encoder is not yet asserted (that parity gate
+    /// lands with svtav1-rs decision-layer bitstream identity).
+    /// [`EncoderConfig::validate`] rejects the variant when the feature
+    /// is off, and rejects configs outside the supported scope when on.
+    SvtRs,
 }
 
 #[derive(Debug, Clone)]
@@ -389,7 +404,9 @@ impl EncoderConfig {
 
     /// Select the AV1 encoder backend.
     ///
-    /// Only `Av1Backend::Zenravif` (the default) is available; the
+    /// `Av1Backend::Zenravif` (the default) is always available;
+    /// `Av1Backend::SvtRs` needs the `encode-svt-rs` cargo feature (and
+    /// supports 8-bit 4:2:0 stills only — see the variant docs); the
     /// deprecated `Svtav1` variant is rejected by
     /// [`validate`](Self::validate).
     pub fn backend(mut self, backend: Av1Backend) -> Self {
@@ -533,14 +550,16 @@ impl EncoderConfig {
     ///
     /// Common values: 0 = Identity/RGB, 1 = BT.709, 6 = BT.601, 9 = BT.2020.
     ///
-    /// **Backend note:** the zenravif backend derives the matrix it
-    /// actually signals from [`color_model`](Self::color_model)
-    /// (YCbCr → BT.601, RGB → Identity); no available backend consults
-    /// this field (its only reader was the deprecated svtav1 path). It
-    /// is retained for config coherence — the zencodec layer mirrors
-    /// the source CICP triple onto the config — and for future
-    /// backends. Use [`resolve_plan`](Self::resolve_plan) to see the
-    /// matrix an encode will really carry
+    /// **Backend note:** no available backend consults this field. The
+    /// zenravif backend derives the matrix it actually signals from
+    /// [`color_model`](Self::color_model) (YCbCr → BT.601, RGB →
+    /// Identity); the experimental `SvtRs` backend pins BT.601 (its
+    /// only supported model is 4:2:0 YCbCr); the field's only reader
+    /// was the deprecated svtav1 path. It is retained for config
+    /// coherence — the zencodec layer mirrors the source CICP triple
+    /// onto the config — and for future backends. Use
+    /// [`resolve_plan`](Self::resolve_plan) to see the matrix an
+    /// encode will really carry
     /// ([`EncodePlan::matrix_coefficients_cicp`](crate::EncodePlan::matrix_coefficients_cicp)).
     pub fn matrix_coefficients(mut self, mc: u8) -> Self {
         self.matrix_coefficients = Some(mc);
@@ -898,6 +917,22 @@ pub(crate) fn effective_qm(config: &EncoderConfig) -> bool {
     config.enable_qm && !config.lossless
 }
 
+/// Reject `Av1Backend::SvtRs` on entry points it does not implement.
+///
+/// The svtav1-rs backend covers 8-bit RGB (4:2:0) stills only; every other
+/// entry point fails honestly instead of silently serving the request with
+/// zenravif. (The deprecated `Svtav1` variant keeps its historical
+/// behavior: rejected by `validate()`, silently zenravif-served otherwise.)
+fn reject_svt_rs_backend(config: &EncoderConfig, entry: &'static str) -> Result<()> {
+    if config.backend == Av1Backend::SvtRs {
+        return Err(at!(Error::Encode(format!(
+            "Av1Backend::SvtRs does not support {entry} \
+             (8-bit RGB 4:2:0 still encodes only); use Av1Backend::Zenravif"
+        ))));
+    }
+    Ok(())
+}
+
 fn build_ravif_encoder(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
@@ -1110,6 +1145,12 @@ pub fn encode_rgb8(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
+    // The monotonicity probe's anchor tiers are calibrated for the
+    // zenravif speed ladder; the svtav1-rs backend takes the plain
+    // single-encode path (its own speed↔RD behavior is unmeasured here).
+    if config.backend == Av1Backend::SvtRs {
+        return encode_rgb8_once(img, config, stop);
+    }
     #[cfg(all(feature = "target-quality", feature = "auto-tune"))]
     {
         crate::target_quality::encode_rgb8_auto_monotone(img, config, stop)
@@ -1129,6 +1170,22 @@ pub(crate) fn encode_rgb8_once(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
+
+    // Backend dispatch: the svtav1-rs backend covers exactly this entry
+    // point (8-bit RGB → 4:2:0 still). It must never be served silently
+    // by zenravif — the backend field is a contract, not a hint.
+    if config.backend == Av1Backend::SvtRs {
+        #[cfg(feature = "encode-svt-rs")]
+        {
+            return crate::encoder_svt_rs::encode_rgb8_svt_rs(img, config, stop);
+        }
+        #[cfg(not(feature = "encode-svt-rs"))]
+        {
+            return Err(at!(Error::Unsupported(
+                "Av1Backend::SvtRs requires the `encode-svt-rs` cargo feature"
+            )));
+        }
+    }
 
     let enc = build_ravif_encoder(config, stop, false)?;
     let result = enc
@@ -1160,6 +1217,7 @@ pub fn encode_gray8(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_svt_rs_backend(config, "encode_gray8")?;
 
     let enc = build_ravif_encoder(config, stop, false)?;
     let result = enc
@@ -1191,6 +1249,11 @@ pub fn encode_rgba8(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
+    // Fail fast before the probe machinery: `encode_rgba8_once` rejects
+    // the svtav1-rs backend (RGB8-only for now).
+    if config.backend == Av1Backend::SvtRs {
+        return encode_rgba8_once(img, config, stop);
+    }
     #[cfg(all(feature = "target-quality", feature = "auto-tune"))]
     {
         crate::target_quality::encode_rgba8_auto_monotone(img, config, stop)
@@ -1208,6 +1271,10 @@ pub(crate) fn encode_rgba8_once(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_svt_rs_backend(
+        config,
+        "encode_rgba8 (alpha requires a mono alpha-plane encode, unimplemented)",
+    )?;
     let enc = build_ravif_encoder(config, stop, false)?;
     let result = enc
         .encode_rgba(img)
@@ -1238,6 +1305,7 @@ pub fn encode_rgb16(
 ) -> Result<EncodedImage> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_svt_rs_backend(config, "encode_rgb16 (10-bit)")?;
     let enc = build_ravif_encoder(config, stop, true)?;
     let width = img.width();
     let height = img.height();
@@ -1296,6 +1364,7 @@ pub fn encode_rgba16(
 ) -> Result<EncodedImage> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_svt_rs_backend(config, "encode_rgba16 (10-bit + alpha)")?;
     let enc = build_ravif_encoder(config, stop, true)?;
     let width = img.width();
     let height = img.height();
@@ -1378,6 +1447,7 @@ pub fn encode_animation_rgb8(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_svt_rs_backend(config, "animation encoding")?;
     let enc = build_ravif_encoder(config, stop, false)?;
 
     let ravif_frames: Vec<ravif::AnimFrame<'_>> = frames
@@ -1416,6 +1486,7 @@ pub fn encode_animation_rgba8(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_svt_rs_backend(config, "animation encoding")?;
     let enc = build_ravif_encoder(config, stop, false)?;
 
     let ravif_frames: Vec<ravif::AnimFrameRgba<'_>> = frames
@@ -1474,6 +1545,7 @@ pub fn encode_animation_rgb16(
 ) -> Result<EncodedAnimation> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_svt_rs_backend(config, "animation encoding")?;
     let enc = build_ravif_encoder(config, stop, true)?;
 
     // Scale each frame from 0–65535 to 10-bit (0–1023)
@@ -1533,6 +1605,7 @@ pub fn encode_animation_rgba16(
 ) -> Result<EncodedAnimation> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_svt_rs_backend(config, "animation encoding")?;
     let enc = build_ravif_encoder(config, stop, true)?;
 
     // Scale each frame from 0–65535 to 10-bit (0–1023)

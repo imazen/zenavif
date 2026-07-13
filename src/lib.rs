@@ -73,6 +73,8 @@ pub mod detect;
 mod encode_plan;
 #[cfg(feature = "encode")]
 mod encoder;
+#[cfg(feature = "encode-svt-rs")]
+mod encoder_svt_rs;
 mod error;
 /// Deterministic zenanalyze palette gate (FEATURE_HINTS §E rule 1).
 #[cfg(feature = "encode")]
