@@ -6,26 +6,26 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenavif-parse.txt 222 lines (supported surface) | zenavif-parse.features.txt 61 added (features: c_api,eager,zencodec) | zenavif-parse.internal.txt 31 lines (31 hidden + 0 excluded-feature)
+# files: zenavif-parse.txt 227 lines (supported surface) | zenavif-parse.features.txt 61 added (features: c_api,eager,zencodec) | zenavif-parse.internal.txt 33 lines (33 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 1
-#   pub types (struct/enum/trait/alias)        28
+#   pub types (struct/enum/trait/alias)        29
 #   pub consts/statics                          3
 #   free functions                              1
-#   inherent methods                           50
-#   struct fields                              94
+#   inherent methods                           51
+#   struct fields                              96
 #   enum variants                              10
 #   re-exports                                  3
-#   trait roster entries (type × trait)       114
-#   auto-trait-complete types                  26
+#   trait roster entries (type × trait)       120
+#   auto-trait-complete types                  27
 #   auto-trait exceptions                       1
 #
 # per-module pub lines:
-#   (root)                          190
+#   (root)                          194
 
-## items (190 lines)
+## items (194 lines)
 
 pub mod zenavif_parse
 pub use Stop
@@ -108,8 +108,8 @@ pub fn AvifParser<'data>::from_bytes(&'data [u8]) -> Result<Self>
 pub fn AvifParser<'data>::from_bytes_with_config(&'data [u8], &DecodeConfig, &dyn enough::Stop) -> Result<Self>
 pub fn AvifParser<'data>::from_owned(alloc::vec::Vec<u8>) -> Result<AvifParser<'static>>
 pub fn AvifParser<'data>::from_owned_with_config(alloc::vec::Vec<u8>, &DecodeConfig, &dyn enough::Stop) -> Result<AvifParser<'static>>
-pub fn AvifParser<'data>::from_reader<R: std::io::Read>(&mut R) -> Result<AvifParser<'static>>
-pub fn AvifParser<'data>::from_reader_with_config<R: std::io::Read>(&mut R, &DecodeConfig, &dyn enough::Stop) -> Result<AvifParser<'static>>
+pub fn AvifParser<'data>::from_reader<R: std::io::Read + ?core::marker::Sized>(&mut R) -> Result<AvifParser<'static>>
+pub fn AvifParser<'data>::from_reader_with_config<R: std::io::Read + ?core::marker::Sized>(&mut R, &DecodeConfig, &dyn enough::Stop) -> Result<AvifParser<'static>>
 pub fn AvifParser<'data>::gain_map(&self) -> core::option::Option<Result<AvifGainMap>>
 pub fn AvifParser<'data>::gain_map_color_info(&self) -> core::option::Option<&ColorInformation>
 pub fn AvifParser<'data>::gain_map_data(&self) -> core::option::Option<Result<alloc::borrow::Cow<'_, [u8]>>>
@@ -128,6 +128,7 @@ pub fn AvifParser<'data>::premultiplied_alpha(&self) -> bool
 pub fn AvifParser<'data>::primary_data(&self) -> Result<alloc::borrow::Cow<'_, [u8]>>
 pub fn AvifParser<'data>::primary_metadata(&self) -> Result<AV1Metadata>
 pub fn AvifParser<'data>::rotation(&self) -> core::option::Option<&ImageRotation>
+pub fn AvifParser<'data>::spatial_extents(&self) -> core::option::Option<&ImageSpatialExtents>
 pub fn AvifParser<'data>::tile_data(&self, usize) -> Result<alloc::borrow::Cow<'_, [u8]>>
 pub fn AvifParser<'data>::xmp(&self) -> core::option::Option<Result<alloc::borrow::Cow<'_, [u8]>>>
 pub struct ChromaSubsampling
@@ -202,6 +203,9 @@ pub struct ImageMirror
 pub ImageMirror::axis: u8
 pub struct ImageRotation
 pub ImageRotation::angle: u16
+pub struct ImageSpatialExtents
+pub ImageSpatialExtents::height: u32
+pub ImageSpatialExtents::width: u32
 pub struct LayerSelector
 pub LayerSelector::layer_id: u16
 pub struct MasteringDisplayColourVolume
@@ -218,7 +222,7 @@ pub PixelAspectRatio::h_spacing: u32
 pub PixelAspectRatio::v_spacing: u32
 pub type Result<T, E> = core::result::Result<T, E>
 
-## trait impls (30 types)
+## trait impls (31 types)
 
 (bool, bool): From<ChromaSubsampling>
 AV1Config: Clone, Debug, Eq, PartialEq
@@ -234,7 +238,7 @@ ColorInformation: Clone, Debug, Eq, PartialEq
 ContentColourVolume: Clone, Copy, Debug, Eq, PartialEq
 ContentLightLevel: Clone, Copy, Debug, Eq, PartialEq
 DecodeConfig: Clone, Debug, Default
-Error: Debug, Display, Error, From<alloc::collections::TryReserveError>, From<alloc::string::FromUtf8Error>, From<bitreader::BitReaderError>, From<core::num::error::TryFromIntError>, From<enough::reason::StopReason>, From<std::io::error::Error>
+Error: Debug, Display, Error, From<alloc::collections::TryReserveError>, From<alloc::string::FromUtf8Error>, From<bitreader::BitReaderError>, From<core::num::error::TryFromIntError>, From<enough::reason::StopReason>, From<std::io::error::Error>, zencodec::error::CategorizedError
 FrameIterator<'_>: ExactSizeIterator
 FrameIterator<'a>: Iterator
 GainMapChannel: Clone, Copy, Debug, Eq, From<&zencodec::gainmap::GainMapChannel>, PartialEq
@@ -242,6 +246,7 @@ GainMapMetadata: Clone, Debug, Eq, From<&zencodec::gainmap::GainMapParams>, Part
 GridConfig: Clone, Debug, PartialEq
 ImageMirror: Clone, Copy, Debug, Eq, PartialEq
 ImageRotation: Clone, Copy, Debug, Eq, PartialEq
+ImageSpatialExtents: Clone, Copy, Debug, Eq, PartialEq
 LayerSelector: Clone, Copy, Debug, Eq, PartialEq
 MasteringDisplayColourVolume: Clone, Copy, Debug, Eq, PartialEq
 OperatingPointSelector: Clone, Copy, Debug, Eq, PartialEq
@@ -253,5 +258,5 @@ zencodec::gainmap::GainMapParams: From<&GainMapMetadata>
 
 ## auto traits
 
-26 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+27 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 Error: !RefUnwindSafe !UnwindSafe

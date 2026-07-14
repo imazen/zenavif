@@ -21,6 +21,10 @@ from commit `c36b822`**, the pre-break release-prep point (CI green there).
   behavior are unchanged.
 
 ### Added
+- **Expose primary-item `ispe` dimensions without AV1 fallback.**
+  `AvifParser::spatial_extents()` returns the container-declared width and height
+  as `ImageSpatialExtents`, or `None` when the primary item has no associated
+  `ispe` property. The accessor never parses the AV1 payload.
 - **Adopt the `zencodec` `CategorizedError` taxonomy (PR #103), on the released
   `zencodec 0.1.26`.** `Error` now `impl zencodec::CategorizedError` with
   `codec_name() == Some("zenavif-parse")` (a `&self` method, not an associated

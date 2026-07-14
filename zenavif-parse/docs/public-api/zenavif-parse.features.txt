@@ -78,9 +78,9 @@ pub fn AvifData::primary_item_metadata(&self) -> Result<AV1Metadata>
 pub fn AvifData::depth_map(&self) -> core::option::Option<AvifDepthMap>
 pub fn AvifData::gain_map(&self) -> core::option::Option<AvifGainMap>
 pub fn AvifParser<'data>::to_avif_data(&self) -> Result<AvifData>
-pub fn read_avif<T: std::io::Read>(&mut T) -> Result<AvifData>
-pub fn read_avif_with_config<T: std::io::Read>(&mut T, &DecodeConfig, &dyn enough::Stop) -> Result<AvifData>
-pub fn read_avif_with_options<T: std::io::Read>(&mut T, &ParseOptions) -> Result<AvifData>
+pub fn read_avif<T: std::io::Read + ?core::marker::Sized>(&mut T) -> Result<AvifData>
+pub fn read_avif_with_config<T: std::io::Read + ?core::marker::Sized>(&mut T, &DecodeConfig, &dyn enough::Stop) -> Result<AvifData>
+pub fn read_avif_with_options<T: std::io::Read + ?core::marker::Sized>(&mut T, &ParseOptions) -> Result<AvifData>
 
 ## trait impls (3 types)
 

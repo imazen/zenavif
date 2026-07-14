@@ -9,13 +9,13 @@
 
 ## summary
 #
-#   inherent methods                           16
-#   trait roster entries (type × trait)        15
+#   inherent methods                           17
+#   trait roster entries (type × trait)        16
 #
 # per-module pub lines:
-#   (root)                           16
+#   (root)                           17
 
-## items (16 lines)
+## items (17 lines)
 
 pub fn AV1Config::assert_fields_are_eq(&self)
 pub fn AV1LayeredImageIndexing::assert_fields_are_eq(&self)
@@ -29,12 +29,13 @@ pub fn GainMapChannel::assert_fields_are_eq(&self)
 pub fn GainMapMetadata::assert_fields_are_eq(&self)
 pub fn ImageMirror::assert_fields_are_eq(&self)
 pub fn ImageRotation::assert_fields_are_eq(&self)
+pub fn ImageSpatialExtents::assert_fields_are_eq(&self)
 pub fn LayerSelector::assert_fields_are_eq(&self)
 pub fn MasteringDisplayColourVolume::assert_fields_are_eq(&self)
 pub fn OperatingPointSelector::assert_fields_are_eq(&self)
 pub fn PixelAspectRatio::assert_fields_are_eq(&self)
 
-## trait impls (15 types)
+## trait impls (16 types)
 
 AV1LayeredImageIndexing: TrivialClone
 AmbientViewingEnvironment: TrivialClone
@@ -46,6 +47,7 @@ ContentLightLevel: TrivialClone
 GainMapChannel: TrivialClone
 ImageMirror: TrivialClone
 ImageRotation: TrivialClone
+ImageSpatialExtents: TrivialClone
 LayerSelector: TrivialClone
 MasteringDisplayColourVolume: TrivialClone
 OperatingPointSelector: TrivialClone

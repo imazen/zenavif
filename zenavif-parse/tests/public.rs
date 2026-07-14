@@ -476,6 +476,27 @@ fn parser_metadata() {
 }
 
 #[test]
+fn parser_spatial_extents_come_from_ispe() {
+    let bytes = std::fs::read("tests/ispe-1x1.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+    assert_eq!(
+        parser.spatial_extents(),
+        Some(&zenavif_parse::ImageSpatialExtents {
+            width: 1,
+            height: 1,
+        })
+    );
+}
+
+#[test]
+fn parser_spatial_extents_do_not_fall_back_to_av1() {
+    let bytes = std::fs::read("tests/no-ispe-1x1.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+    assert!(parser.spatial_extents().is_none());
+    assert!(parser.primary_metadata().is_ok(), "AV1 payload should remain valid");
+}
+
+#[test]
 fn parser_av1_config() {
     let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
     let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");

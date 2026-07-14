@@ -486,6 +486,18 @@ pub enum ColorInformation {
     IccProfile(std::vec::Vec<u8>),
 }
 
+/// Image dimensions declared by the container's `ispe` property.
+///
+/// These values come only from the primary item's Image Spatial Extents box;
+/// they are not inferred from the AV1 bitstream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImageSpatialExtents {
+    /// Width in pixels.
+    pub width: u32,
+    /// Height in pixels.
+    pub height: u32,
+}
+
 /// Image rotation from the `irot` property box.
 ///
 /// Specifies a counter-clockwise rotation to apply after decoding.
@@ -1532,6 +1544,7 @@ pub struct AvifParser<'data> {
     tiles: TryVec<ItemExtents>,
     animation_data: Option<AnimationParserData>,
     premultiplied_alpha: bool,
+    spatial_extents: Option<ImageSpatialExtents>,
     av1_config: Option<AV1Config>,
     color_info: Option<ColorInformation>,
     rotation: Option<ImageRotation>,
@@ -1772,6 +1785,7 @@ impl<'data> AvifParser<'data> {
                 tiles: TryVec::new(),
                 animation_data,
                 premultiplied_alpha: false,
+                spatial_extents: None,
                 av1_config: track_config.av1_config,
                 color_info: track_config.color_info,
                 rotation: None,
@@ -2069,6 +2083,7 @@ impl<'data> AvifParser<'data> {
         }
 
         let track_config = animation_data.as_ref().map(|a| &a.codec_config);
+        let spatial_extents = find_prop!(ImageSpatialExtents);
         let av1_config = find_prop!(AV1Config)
             .or_else(|| track_config.and_then(|c| c.av1_config.clone()));
         let color_info = find_prop!(ColorInformation)
@@ -2104,6 +2119,7 @@ impl<'data> AvifParser<'data> {
             tiles,
             animation_data,
             premultiplied_alpha,
+            spatial_extents,
             av1_config,
             color_info,
             rotation,
@@ -2504,6 +2520,15 @@ impl<'data> AvifParser<'data> {
     /// Check if alpha channel uses premultiplied alpha.
     pub fn premultiplied_alpha(&self) -> bool {
         self.premultiplied_alpha
+    }
+
+    /// Get the primary item's dimensions from its `ispe` property, if present.
+    ///
+    /// This accessor reports only the dimensions explicitly declared by the
+    /// container. It does not parse the AV1 bitstream or fall back to dimensions
+    /// found there.
+    pub fn spatial_extents(&self) -> Option<&ImageSpatialExtents> {
+        self.spatial_extents.as_ref()
     }
 
     /// Get the AV1 codec configuration for the primary item, if present.
@@ -4518,13 +4543,6 @@ fn read_iprp<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
         // Unknown non-essential properties are silently skipped (they're optional)
     }
     Ok(associated)
-}
-
-/// Image spatial extents (dimensions)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ImageSpatialExtents {
-    pub(crate) width: u32,
-    pub(crate) height: u32,
 }
 
 #[derive(Debug, PartialEq)]
