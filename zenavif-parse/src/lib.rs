@@ -244,23 +244,30 @@ impl zencodec::CategorizedError for Error {
     }
 
     fn category(&self) -> zencodec::ErrorCategory {
-        use zencodec::ErrorCategory as C;
-        use zencodec::LimitKind as L;
+        // zencodec 0.1.26 shipped `ErrorCategory` as an origin-first, two-level
+        // enum (`Image`/`Request`/`Resource`/`Policy`/`Stopped`/`Io`/`Internal`),
+        // not the flat enum this mapping was originally written against (the
+        // `cancellation-classification-99` git-patch predates a same-day reshape
+        // that landed before the crates.io publish). Every arm below maps to the
+        // same semantic bucket as before, just through the new nesting; the leaf
+        // `From` shortcuts (`ImageError::Malformed.into()`, `L::Pixels.into()`,
+        // etc.) avoid spelling the outer wrapper at every call site.
+        use zencodec::{ErrorCategory, ImageError, LimitKind as L, ResourceError, UnsupportedImageKind as U};
         match self {
             // Corrupt or malformed container/bitstream content.
-            Self::InvalidData(_) => C::MalformedImage,
+            Self::InvalidData(_) => ImageError::Malformed.into(),
             // A missing `moov` box is a structurally incomplete/malformed container.
-            Self::NoMoov => C::MalformedImage,
+            Self::NoMoov => ImageError::Malformed.into(),
             // The container parsed, but uses a feature this demuxer doesn't handle.
-            Self::Unsupported(_) => C::UnsupportedImageFeature,
+            Self::Unsupported(_) => U::Feature.into(),
             // Input ended before a complete structure could be read.
-            Self::UnexpectedEOF => C::UnexpectedEof,
+            Self::UnexpectedEOF => ImageError::UnexpectedEof.into(),
             // An underlying `std::io` failure. The opaque `CodecIoKind` is the
             // portable choice: this crate enables `zencodec` with
             // `default-features = false`, so the std `ErrorKind` payload is absent.
-            Self::Io(_) => C::Io(zencodec::CodecIoKind::opaque()),
+            Self::Io(_) => ErrorCategory::Io(zencodec::CodecIoKind::opaque()),
             // Allocation failed (distinct from a configured resource limit).
-            Self::OutOfMemory => C::OutOfMemory,
+            Self::OutOfMemory => ResourceError::OutOfMemory.into(),
             // A configured parser cap was hit. The variant carries only a
             // `&'static str` label (not a structured kind), so recover the
             // precise `LimitKind` by matching the label text against the
@@ -271,16 +278,16 @@ impl zencodec::CategorizedError for Error {
                 // Reader-side cap on raw bytes read from an untrusted input
                 // stream before any container parsing happens — bounds the
                 // size of the encoded input, not decoded pixel memory.
-                "input exceeds peak_memory_limit" => C::LimitsExceeded(L::InputSize),
+                "input exceeds peak_memory_limit" => L::InputSize.into(),
                 // Tracked peak allocation during eager box/sample parsing.
-                "peak memory limit exceeded" => C::LimitsExceeded(L::Memory),
-                "total megapixels limit exceeded" => C::LimitsExceeded(L::TotalPixels),
-                "animation frame count limit exceeded" => C::LimitsExceeded(L::Frames),
+                "peak memory limit exceeded" => L::Memory.into(),
+                "total megapixels limit exceeded" => L::TotalPixels.into(),
+                "animation frame count limit exceeded" => L::Frames.into(),
                 // Grid tile count doesn't have its own `LimitKind`; it bounds
                 // the number of image tiles composited into the final decode,
                 // so `Pixels` (the decode-size axis) is the true fallback.
-                "grid tile count limit exceeded" => C::LimitsExceeded(L::Pixels),
-                _ => C::LimitsExceeded(L::Pixels),
+                "grid tile count limit exceeded" => L::Pixels.into(),
+                _ => L::Pixels.into(),
             },
             // Cooperative cancellation / deadline — delegate to the zencodec
             // `StopReason` arm (`Cancelled` vs `TimedOut`).
@@ -315,24 +322,26 @@ pub type Result<T, E = whereat::At<Error>> = std::result::Result<T, E>;
 #[cfg(test)]
 mod error_category_tests {
     use super::Error;
-    use zencodec::{CategorizedError, ErrorCategory as C, LimitKind as L};
+    use zencodec::{
+        CategorizedError, ErrorCategory as C, ImageError, LimitKind as L, ResourceError, UnsupportedImageKind as U,
+    };
 
     #[test]
     fn error_category_mapping() {
         assert_eq!(Error::InvalidData("x").codec_name(), Some("zenavif-parse"));
 
         // Malformed / corrupt container content.
-        assert_eq!(Error::InvalidData("bad").category(), C::MalformedImage);
-        assert_eq!(Error::NoMoov.category(), C::MalformedImage);
+        assert_eq!(Error::InvalidData("bad").category(), C::Image(ImageError::Malformed));
+        assert_eq!(Error::NoMoov.category(), C::Image(ImageError::Malformed));
 
         // Parser doesn't handle this container feature.
         assert_eq!(
             Error::Unsupported("construction method").category(),
-            C::UnsupportedImageFeature
+            C::Image(ImageError::Unsupported(U::Feature))
         );
 
         // Truncated input.
-        assert_eq!(Error::UnexpectedEOF.category(), C::UnexpectedEof);
+        assert_eq!(Error::UnexpectedEOF.category(), C::Image(ImageError::UnexpectedEof));
 
         // Underlying I/O.
         assert_eq!(
@@ -341,49 +350,49 @@ mod error_category_tests {
         );
 
         // Allocation failure.
-        assert_eq!(Error::OutOfMemory.category(), C::OutOfMemory);
+        assert_eq!(Error::OutOfMemory.category(), C::Resource(ResourceError::OutOfMemory));
 
         // Configured parser cap -> precise LimitKind per label text, matching
         // every `ResourceLimitExceeded` construction site in this crate.
         assert_eq!(
             Error::ResourceLimitExceeded("input exceeds peak_memory_limit").category(),
-            C::LimitsExceeded(L::InputSize)
+            C::Resource(ResourceError::Limits(L::InputSize))
         );
         assert_eq!(
             Error::ResourceLimitExceeded("peak memory limit exceeded").category(),
-            C::LimitsExceeded(L::Memory)
+            C::Resource(ResourceError::Limits(L::Memory))
         );
         assert_eq!(
             Error::ResourceLimitExceeded("total megapixels limit exceeded").category(),
-            C::LimitsExceeded(L::TotalPixels)
+            C::Resource(ResourceError::Limits(L::TotalPixels))
         );
         assert_eq!(
             Error::ResourceLimitExceeded("animation frame count limit exceeded").category(),
-            C::LimitsExceeded(L::Frames)
+            C::Resource(ResourceError::Limits(L::Frames))
         );
         assert_eq!(
             Error::ResourceLimitExceeded("grid tile count limit exceeded").category(),
-            C::LimitsExceeded(L::Pixels)
+            C::Resource(ResourceError::Limits(L::Pixels))
         );
         // Unrecognized label -> true fallback (Pixels).
         assert_eq!(
             Error::ResourceLimitExceeded("some future limit").category(),
-            C::LimitsExceeded(L::Pixels)
+            C::Resource(ResourceError::Limits(L::Pixels))
         );
 
         // Cooperative cancellation / deadline -> delegated to StopReason.
         assert_eq!(
             Error::Stopped(enough::StopReason::Cancelled).category(),
-            C::Cancelled
+            C::Stopped(enough::StopReason::Cancelled)
         );
         assert_eq!(
             Error::Stopped(enough::StopReason::TimedOut).category(),
-            C::TimedOut
+            C::Stopped(enough::StopReason::TimedOut)
         );
 
         // The blanket `impl CategorizedError for At<E>` forwards both axes.
         let at_err = whereat::At::from(Error::InvalidData("x"));
-        assert_eq!(at_err.category(), C::MalformedImage);
+        assert_eq!(at_err.category(), C::Image(ImageError::Malformed));
         assert_eq!(at_err.codec_name(), Some("zenavif-parse"));
     }
 }

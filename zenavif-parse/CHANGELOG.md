@@ -21,30 +21,33 @@ from commit `c36b822`**, the pre-break release-prep point (CI green there).
   behavior are unchanged.
 
 ### Added
-- **Adopt the `zencodec` `CategorizedError` taxonomy (PR #103).** `Error` now
-  `impl zencodec::CategorizedError` with `codec_name() == Some("zenavif-parse")`
-  (a `&self` method, not an associated const, so the trait stays dyn-compatible)
-  and an exhaustive `category()` mapping every variant to one coarse
-  `zencodec::ErrorCategory`, so consumers route on the category (HTTP status,
-  retry policy, logging) without naming the enum. Mapping: `InvalidData` /
-  `NoMoov` → `MalformedImage`; `Unsupported` → `UnsupportedImageFeature`;
-  `UnexpectedEOF` → `UnexpectedEof`; `Io` → `Io(CodecIoKind::opaque())`;
-  `OutOfMemory` → `OutOfMemory`;
-  `ResourceLimitExceeded` → `LimitsExceeded(_)` with the precise `LimitKind`
-  recovered by matching the variant's `&'static str` label against the fixed
-  set this crate constructs: the reader-side input-byte cap → `InputSize`;
-  the tracked eager-parse peak-allocation cap → `Memory`; the megapixel cap →
+- **Adopt the `zencodec` `CategorizedError` taxonomy (PR #103), on the released
+  `zencodec 0.1.26`.** `Error` now `impl zencodec::CategorizedError` with
+  `codec_name() == Some("zenavif-parse")` (a `&self` method, not an associated
+  const, so the trait stays dyn-compatible) and an exhaustive `category()`
+  mapping every variant to one coarse `zencodec::ErrorCategory`, so consumers
+  route on the category (HTTP status, retry policy, logging) without naming
+  the enum. `zencodec` 0.1.26 ships `ErrorCategory` as an origin-first,
+  two-level enum rather than the flat enum PR #103 first landed against (a
+  same-day reshape landed on `zencodec` main before the crates.io publish —
+  see the Fixed entry below). Mapping: `InvalidData` / `NoMoov` →
+  `Image(ImageError::Malformed)`; `Unsupported` →
+  `Image(ImageError::Unsupported(UnsupportedImageKind::Feature))`;
+  `UnexpectedEOF` → `Image(ImageError::UnexpectedEof)`; `Io` →
+  `Io(CodecIoKind::opaque())`; `OutOfMemory` →
+  `Resource(ResourceError::OutOfMemory)`; `ResourceLimitExceeded` →
+  `Resource(ResourceError::Limits(_))` with the precise `LimitKind` recovered
+  by matching the variant's `&'static str` label against the fixed set this
+  crate constructs: the reader-side input-byte cap → `InputSize`; the tracked
+  eager-parse peak-allocation cap → `Memory`; the megapixel cap →
   `TotalPixels`; the animation-frame-count cap → `Frames`; the grid-tile-count
   cap (no dedicated `LimitKind`) → `Pixels` as the true fallback; any future
-  unrecognized label also falls back to `Pixels`;
-  `Stopped(r)` delegates to the zencodec `StopReason` arm (`Cancelled` /
-  `TimedOut`). The blanket `impl CategorizedError for At<E>` forwards both axes
-  through the crate's `whereat::At<Error>` results. `zencodec` is a hard
-  dependency here (the legacy `zencodec` cargo feature is a deprecated no-op),
-  so the impl is unconditional. Additive (`#[non_exhaustive]` enum + opt-in
-  trait); behind a **temporary `[patch.crates-io]` pin** to the unreleased
-  `cancellation-classification-99` branch — remove the patch and bump the
-  `zencodec` dependency once `zencodec 0.1.26` ships.
+  unrecognized label also falls back to `Pixels`; `Stopped(r)` delegates to the
+  zencodec `StopReason` arm (`Stopped(Cancelled)` / `Stopped(TimedOut)`). The
+  blanket `impl CategorizedError for At<E>` forwards both axes through the
+  crate's `whereat::At<Error>` results. `zencodec` is a hard dependency here
+  (the legacy `zencodec` cargo feature is a deprecated no-op), so the impl is
+  unconditional. Additive (`#[non_exhaustive]` enum + opt-in trait).
 - **Reader entry points accept unsized readers (`&mut dyn Read`)** (c1c95e5,
   parity with upstream avif-parse 8fc5fe0). `AvifParser::from_reader[_with_config]`
   and the deprecated `read_avif[_with_options/_with_config]` now bound on
@@ -69,6 +72,21 @@ from commit `c36b822`**, the pre-break release-prep point (CI green there).
   helps the owned-copy eager path.)
 
 ### Fixed
+- **`category()` mapping ported from the flat `ErrorCategory` PR #103 first
+  landed against to the two-level origin-first shape `zencodec` 0.1.26
+  actually shipped** (`Image`/`Request`/`Resource`/`Policy`/`Stopped`/`Io`/
+  `Internal`, each wrapping its own leaf enum). The temporary
+  `[patch.crates-io]` pin to the `cancellation-classification-99` branch
+  predated a same-day reshape on `zencodec` main, so the flat names this
+  crate's mapping (and tests) originally used — `MalformedImage`,
+  `UnsupportedImageFeature`, `UnexpectedEof`, `LimitsExceeded(_)`,
+  `Cancelled`/`TimedOut` as bare top-level variants — never existed in the
+  released crate and would not have compiled against it. Every arm maps to
+  the same semantic bucket as before, just nested (e.g.
+  `LimitsExceeded(InputSize)` → `Resource(Limits(InputSize))`); no parsing or
+  classification behavior changed. Landed together with the dependency swap
+  from the temporary git-patch to the real `zencodec 0.1.26` release, so this
+  is a same-cycle correction — zenavif-parse has not shipped either shape.
 - **`category()` no longer collapses every `ResourceLimitExceeded` into a
   single `LimitsExceeded(Pixels)`** (4c41181d). The still-unreleased taxonomy
   impl above originally mapped all 5 resource-cap labels this crate

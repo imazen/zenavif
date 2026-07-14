@@ -30,7 +30,7 @@ log = "0.4.20"
 fallible_collections = { version = "0.5.1", default-features = false, features = ["std"] }
 arrayvec = "0.7.6"
 enough = { version = "0.4.3", features = ["std"] }
-zencodec = { version = "0.1.25", default-features = false }
+zencodec = { version = "0.1.26", default-features = false }
 whereat = { version = "0.1.5" }
 
 [dev-dependencies]
@@ -64,9 +64,3 @@ required-features = ["eager"]
 [[example]]
 name = "inspect_animation"
 required-features = ["eager"]
-
-[patch.crates-io]
-# TEMP: until zencodec 0.1.26 ships (PR #103) — provides the unreleased
-# `CategorizedError` taxonomy (trait + `ErrorCategory` + `LimitKind`). Remove
-# this patch and bump the `zencodec` version dependency once 0.1.26 is published.
-zencodec = { git = "https://github.com/imazen/zencodec", branch = "cancellation-classification-99" }
