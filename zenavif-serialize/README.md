@@ -1,8 +1,10 @@
-# zenavif-serialize [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenavif-serialize/ci.yml?style=flat-square&label=CI)](https://github.com/imazen/zenavif-serialize/actions/workflows/ci.yml) [![crates.io](https://img.shields.io/crates/v/zenavif-serialize?style=flat-square)](https://crates.io/crates/zenavif-serialize) [![lib.rs](https://img.shields.io/crates/v/zenavif-serialize?style=flat-square&label=lib.rs&color=blue)](https://lib.rs/crates/zenavif-serialize) [![docs.rs](https://img.shields.io/docsrs/zenavif-serialize?style=flat-square)](https://docs.rs/zenavif-serialize) [![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=flat-square)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field) [![license](https://img.shields.io/crates/l/zenavif-serialize?style=flat-square)](#license)
+# zenavif-serialize [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenavif/ci.yml?style=flat-square&label=CI)](https://github.com/imazen/zenavif/actions/workflows/ci.yml) [![crates.io](https://img.shields.io/crates/v/zenavif-serialize?style=flat-square)](https://crates.io/crates/zenavif-serialize) [![lib.rs](https://img.shields.io/crates/v/zenavif-serialize?style=flat-square&label=lib.rs&color=blue)](https://lib.rs/crates/zenavif-serialize) [![docs.rs](https://img.shields.io/docsrs/zenavif-serialize?style=flat-square)](https://docs.rs/zenavif-serialize) [![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=flat-square)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field) [![license](https://img.shields.io/crates/l/zenavif-serialize?style=flat-square)](#license)
 
 AVIF container serializer (muxer) in pure Rust. It wraps already-compressed AV1 bitstreams into MPEG/HEIF/MIAF/ISO-BMFF boxes for still images, animations, and grid layouts — it does **not** encode pixels itself. `#![forbid(unsafe_code)]`, and depends only on `arrayvec` and `whereat` (uses `std::io` for output).
 
 Pair it with an AV1 encoder such as [zenrav1e](https://lib.rs/zenrav1e) for a pure-Rust AVIF encoding path.
+
+Since 2026-07-16 the crate is developed in the [imazen/zenavif](https://github.com/imazen/zenavif) workspace (directory `zenavif-serialize/`), with its full history and release tags imported under the `zenavif-serialize-v*` prefix.
 
 ## Quick start
 

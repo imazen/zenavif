@@ -2,16 +2,45 @@
 
 Pure Rust AVIF encoder/decoder wrapping rav1d-safe (pure Rust AV1 decoder) and zenavif-parse.
 
+## Workspace (since 2026-07-16)
+
+This repo is a cargo workspace with three published crates: **zenavif**
+(root package), **zenavif-parse/** and **zenavif-serialize/** — the two
+container repos were absorbed with full histories (rewritten under their
+subdirectories) and their tags imported crate-prefixed (`zenavif-parse-v*`,
+`zenavif-serialize-v*`; upstream lineages `avif-parse-v*`, `mp4parse-v*`).
+The old imazen/zenavif-parse and imazen/zenavif-serialize repos are
+superseded — do all work here.
+
+- **Releases are per crate via crate-prefixed tags**: `zenavif-vX.Y.Z`,
+  `zenavif-parse-vX.Y.Z`, `zenavif-serialize-vX.Y.Z`. `release.yml` routes
+  the tag prefix to `cargo publish -p <crate>` + a GitHub release. The full
+  release gate sequence in the global CLAUDE.md applies per crate.
+- **Submodules**: zenavif-parse's corpus tests fail-loud on
+  `zenavif-parse/av1-avif` + `zenavif-parse/link-u-samples` — run
+  `git submodule update --init` once per checkout (CI checks them out on
+  the test/i686/coverage/release jobs only).
+- **`cargo fmt --all` is BANNED here** (reaches the ../ravif and
+  ../zenanalyze sibling path-deps); use `just fmt` / `just fmt-check`
+  (package-scoped `-p` triple).
+- Root `[patch.crates-io]` currently pins: zenavif-serialize → workspace
+  member (until 0.2.0 publishes), rav1d-safe → git rev f6aed27e
+  (zenavif#30 wedge fix, until the release past 0.5.7). fuzz/Cargo.toml
+  mirrors the rav1d-safe pin only.
+
 ## Quick Commands
 
 ```bash
-just check        # cargo check
+just check        # cargo check --workspace --all-targets
 just build        # cargo build --release
-just test         # cargo test
-just clippy       # cargo clippy with warnings as errors
-just fmt          # cargo fmt
+just test         # cargo test --workspace (members included)
+just test-parse   # cargo test -p zenavif-parse --all-features
+just clippy       # cargo clippy with warnings as errors (root pkg)
+just clippy-members # member clippy legs
+just fmt          # scoped cargo fmt + api-doc snapshots (all three crates)
 just build-encode # cargo build --features encode
 just test-encode  # cargo test --features encode
+just publish-dry  # cargo publish --workspace --dry-run
 just gates        # executable engineering-baseline gates (see below)
 ```
 

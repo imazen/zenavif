@@ -23,11 +23,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - fuzz_decode_animation
-          - fuzz_decode_limited
-          - fuzz_decode
-          - fuzz_probe
+        # dir selects the fuzz package (each is its own excluded workspace);
+        # dict is the libFuzzer token dictionary for that format's targets.
+        # The zenavif-parse rows absorb its pre-merge Fuzz workflow (which
+        # never passed its own isobmff.dict — wired up here).
+        include:
+          - { target: fuzz_decode_animation, dir: fuzz,               dict: fuzz/avif.dict }
+          - { target: fuzz_decode_limited,   dir: fuzz,               dict: fuzz/avif.dict }
+          - { target: fuzz_decode,           dir: fuzz,               dict: fuzz/avif.dict }
+          - { target: fuzz_probe,            dir: fuzz,               dict: fuzz/avif.dict }
+          - { target: fuzz_parse,            dir: zenavif-parse/fuzz, dict: zenavif-parse/fuzz/isobmff.dict }
+          - { target: fuzz_parse_limited,    dir: zenavif-parse/fuzz, dict: zenavif-parse/fuzz/isobmff.dict }
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/clone-siblings
@@ -35,7 +41,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: fuzz-${{ matrix.target }}
-          cache-directories: fuzz/target
+          cache-directories: ${{ matrix.dir }}/target
 
       - name: Install cargo-fuzz
         uses: taiki-e/install-action@v2
@@ -55,15 +61,15 @@ jobs:
 
       - name: Seed corpus
         run: |
-          mkdir -p fuzz/corpus/${{ matrix.target }}
-          cp fuzz/regression/* fuzz/corpus/${{ matrix.target }}/ 2>/dev/null || true
-          cp fuzz/seed_corpus/${{ matrix.target }}/* fuzz/corpus/${{ matrix.target }}/ 2>/dev/null || true
+          mkdir -p ${{ matrix.dir }}/corpus/${{ matrix.target }}
+          cp ${{ matrix.dir }}/regression/* ${{ matrix.dir }}/corpus/${{ matrix.target }}/ 2>/dev/null || true
+          cp ${{ matrix.dir }}/seed_corpus/${{ matrix.target }}/* ${{ matrix.dir }}/corpus/${{ matrix.target }}/ 2>/dev/null || true
 
       - name: Fuzz ${{ matrix.target }}
         run: |
-          cargo +nightly fuzz run --target x86_64-unknown-linux-gnu ${{ matrix.target }} \
+          cargo +nightly fuzz run --fuzz-dir ${{ matrix.dir }} --target x86_64-unknown-linux-gnu ${{ matrix.target }} \
             -- -max_total_time=${{ steps.duration.outputs.seconds }} \
-               -dict=fuzz/avif.dict \
+               -dict=${{ matrix.dict }} \
                -rss_limit_mb=2048
 
       - name: Upload crashes
@@ -71,7 +77,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: fuzz-crashes-${{ matrix.target }}
-          path: fuzz/artifacts/
+          path: ${{ matrix.dir }}/artifacts/
           retention-days: 30
 
   regression:
@@ -83,9 +89,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
-        run: cargo build
-      - name: Regression seeds
+        run: cargo build --workspace
+      - name: Regression seeds (zenavif)
         run: |
           if [ -d fuzz/regression ] && [ "$(ls fuzz/regression/ 2>/dev/null | wc -l)" -gt 0 ]; then
-            cargo test --test fuzz_regression 2>/dev/null || echo "No regression test found — seeds exist but no test harness"
+            cargo test -p zenavif --test fuzz_regression
+          fi
+      - name: Regression seeds (zenavif-parse)
+        run: |
+          if [ -d zenavif-parse/fuzz/regression ] && [ "$(ls zenavif-parse/fuzz/regression/ 2>/dev/null | wc -l)" -gt 0 ]; then
+            cargo test -p zenavif-parse --test fuzz_regression
           fi

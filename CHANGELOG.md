@@ -8,10 +8,49 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 [rav1e](https://github.com/xiph/rav1e)), and the
 [zenavif-parse](https://github.com/imazen/zenavif-parse) container parser.
 
+## Workspace
+
+- **2026-07-16 — absorbed the zenavif-parse and zenavif-serialize
+  repositories.** Both crates now live here as workspace members
+  (`zenavif-parse/`, `zenavif-serialize/`) with their complete git
+  histories rewritten under those paths, and all tags imported under
+  lineage prefixes: `zenavif-parse-v*` / `zenavif-serialize-v*` (fork
+  releases), `avif-parse-v*` (kornelski upstream), `mp4parse-v*` (Mozilla
+  lineage). GitHub releases were recreated here from the source repos.
+  Releases are per crate via crate-prefixed tags (release.yml routes on
+  the prefix to `cargo publish -p <crate>`); the sections below remain
+  the zenavif crate's changelog.
+
+## zenavif-parse
+
+History and future entries: [`zenavif-parse/CHANGELOG.md`](zenavif-parse/CHANGELOG.md).
+Queued at absorb time: 0.6.3 must publish from pre-break commit `c36b822`
+(rewritten equivalent in this repo's history); next from head is 0.7.0
+(breaking `At<Error>` returns, already on main).
+
+## zenavif-serialize
+
+History and future entries: [`zenavif-serialize/CHANGELOG.md`](zenavif-serialize/CHANGELOG.md).
+Queued at absorb time: next release is 0.2.0 (breaking `At<SerializeError>`
+write-path returns + gain-map interop additions, already on main).
+
 ## [Unreleased]
 
 ### Fixed
-- **Decode no longer wedges under tile threading**: registry rav1d-safe
+- **Float YUV→RGB output is now byte-identical across arch, SIMD tier, and
+  image width.** The 4:2:0/4:2:2 float kernels computed three subtly
+  different pipelines: fused `mul_add` on x86-64-v3/NEON lanes, unfused
+  mul+add on the scalar tier (what i686 runs — its CI leg had been red on a
+  1-LSB green-channel mismatch since 2026-07-06) and on wasm128 (which has
+  no FMA at all), and division-normalized ties-away rounding in
+  `yuv_to_rgb` (the width-remainder path), so the same image could decode
+  to different bytes per platform or per width%8. All paths now compute
+  one spec — unfused multiply-add, reciprocal-multiply normalization,
+  ties-to-even rounding — which every tier can produce exactly. Rare
+  single-pixel ±1 shifts vs. the previous x86-64 fused output are the
+  cost of cross-platform determinism; the libavif bilinear-parity suites
+  (`test-pixels`, `test-linku`) should be re-run against references as
+  follow-up confirmation.
   0.5.7 carries a tile-worker guard race whose panicked worker parks
   `rav1d_decode_frame`'s completion wait forever (zenavif#30 — on a
   28-thread box the animated codec roundtrip test hung ~3 of 4 runs). A

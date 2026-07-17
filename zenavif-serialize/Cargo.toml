@@ -8,7 +8,7 @@ description = "AVIF container serializer (MPEG/HEIF/MIAF/ISO-BMFF) with animatio
 readme = "README.crates.md"
 categories = ["multimedia::images", "encoding"]
 keywords = ["avif", "heif", "bmff", "av1", "mux"]
-repository = "https://github.com/imazen/zenavif-serialize"
+repository = "https://github.com/imazen/zenavif"
 include = ["src/*.rs", "Cargo.toml", "README.crates.md", "LICENSE"]
 rust-version = "1.93"
 

@@ -1,9 +1,20 @@
 name: Release
 
+# Crate-prefixed tags route the publish to the right workspace member:
+#   zenavif-vX.Y.Z / vX.Y.Z  → zenavif        (repo root)
+#   zenavif-parse-vX.Y.Z     → zenavif-parse/
+#   zenavif-serialize-vX.Y.Z → zenavif-serialize/
+# Historical imported tags (mp4parse-v*, avif-parse-v*, and the pre-merge
+# zenavif-parse-v* / zenavif-serialize-v* releases) never fire this workflow:
+# tag pushes run the workflow file at the tag's commit, and those rewritten
+# trees carry no root .github/.
 on:
   push:
     tags:
       - 'v*'
+      - 'zenavif-v*'
+      - 'zenavif-parse-v*'
+      - 'zenavif-serialize-v*'
 
 jobs:
   publish:
@@ -17,24 +28,47 @@ jobs:
 
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
-      
-    - name: Verify version matches tag
+
+    - name: Route tag to crate
+      id: route
       run: |
-        TAG=${GITHUB_REF#refs/tags/v}
-        VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/.*= "\(.*\)"/\1/')
-        if [ "$TAG" != "$VERSION" ]; then
-          echo "Tag $TAG does not match Cargo.toml version $VERSION"
+        TAG=${GITHUB_REF#refs/tags/}
+        case "$TAG" in
+          zenavif-parse-v*)     CRATE=zenavif-parse;     DIR=zenavif-parse;     VERSION=${TAG#zenavif-parse-v} ;;
+          zenavif-serialize-v*) CRATE=zenavif-serialize; DIR=zenavif-serialize; VERSION=${TAG#zenavif-serialize-v} ;;
+          zenavif-v*)           CRATE=zenavif;           DIR=.;                 VERSION=${TAG#zenavif-v} ;;
+          v*)                   CRATE=zenavif;           DIR=.;                 VERSION=${TAG#v} ;;
+          *) echo "unroutable tag: $TAG"; exit 1 ;;
+        esac
+        {
+          echo "crate=$CRATE"
+          echo "dir=$DIR"
+          echo "version=$VERSION"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Verify version matches tag
+      env:
+        CRATE: ${{ steps.route.outputs.crate }}
+        DIR: ${{ steps.route.outputs.dir }}
+        TAG_VERSION: ${{ steps.route.outputs.version }}
+      run: |
+        VERSION=$(grep '^version = ' "$DIR/Cargo.toml" | head -1 | sed 's/.*= "\(.*\)"/\1/')
+        if [ "$TAG_VERSION" != "$VERSION" ]; then
+          echo "Tag version $TAG_VERSION does not match $CRATE Cargo.toml version $VERSION"
           exit 1
         fi
-        
+
     - name: Run tests
-      run: cargo test --all-features
-      
-    - name: Publish
-      run: cargo publish --token ${CRATES_TOKEN}
       env:
+        CRATE: ${{ steps.route.outputs.crate }}
+      run: cargo test -p "$CRATE" --all-features
+
+    - name: Publish
+      env:
+        CRATE: ${{ steps.route.outputs.crate }}
         CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
-        
+      run: cargo publish -p "$CRATE" --token "$CRATES_TOKEN"
+
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:

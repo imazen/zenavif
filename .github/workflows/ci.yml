@@ -27,6 +27,10 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest, windows-11-arm]
     steps:
       - uses: actions/checkout@v6
+        with:
+          # zenavif-parse's corpus tests read the av1-avif and link-u
+          # submodules fail-loud (same as its pre-absorb CI).
+          submodules: recursive
       - uses: ./.github/actions/clone-siblings
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -44,10 +48,14 @@ jobs:
         run: |
           bash scripts/download-avif-test-vectors.sh
           bash scripts/download-linku-samples.sh
-      - name: Test (default features)
-        run: cargo test
+      - name: Test (workspace, default features)
+        run: cargo test --workspace
       - name: Test (no default features)
         run: cargo test --no-default-features
+      - name: Test zenavif-parse feature permutations
+        run: |
+          cargo test -p zenavif-parse --features eager
+          cargo test -p zenavif-parse --all-features
 
   feature-check:
     name: Feature permutations
@@ -61,12 +69,33 @@ jobs:
         run: cargo check
       - name: Check --no-default-features
         run: cargo check --no-default-features
+      - name: Check zenavif-parse --features c_api
+        run: cargo check -p zenavif-parse --features c_api
+
+  wasm:
+    name: WASM (wasm32-wasip1, members)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm-members
+      # Preserves the absorbed repos' wasm32-wasip1 check legs. The zenavif
+      # root package needs the ../ravif and ../zenanalyze clones to even
+      # parse its manifest, so this stays scoped to the two members.
+      - name: Check members on WASM
+        run: cargo check --target wasm32-wasip1 -p zenavif-parse -p zenavif-serialize
 
   i686:
     name: Test (i686 cross)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: recursive
       - uses: ./.github/actions/clone-siblings
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -98,6 +127,10 @@ jobs:
         env:
           CROSS_CONTAINER_OPTS: "-v ${{ github.workspace }}/..:${{ github.workspace }}/.."
         run: cross test --target i686-unknown-linux-gnu
+      - name: Test members (i686)
+        env:
+          CROSS_CONTAINER_OPTS: "-v ${{ github.workspace }}/..:${{ github.workspace }}/.."
+        run: cross test --target i686-unknown-linux-gnu -p zenavif-parse -p zenavif-serialize --all-features
 
   clippy:
     name: Clippy
@@ -111,6 +144,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Clippy (default)
         run: cargo clippy --lib --tests --examples -- -D warnings
+      - name: Clippy (members)
+        run: |
+          cargo clippy -p zenavif-parse --all-features --all-targets -- -D warnings
+          cargo clippy -p zenavif-serialize --all-targets -- -D warnings
 
   fmt:
     name: Format
@@ -122,9 +159,9 @@ jobs:
         with:
           components: rustfmt
       - name: Format check
-        run: cargo fmt -- --check
+        run: cargo fmt -p zenavif -p zenavif-parse -p zenavif-serialize -- --check
         # `--all` would recurse into the cloned ../zenanalyze path-dep,
-        # which has its own fmt-check pipeline. Stay scoped to zenavif.
+        # which has its own fmt-check pipeline. Stay scoped to the workspace.
 
   msrv:
     name: MSRV
@@ -136,13 +173,15 @@ jobs:
       - uses: taiki-e/install-action@cargo-hack
       - uses: Swatinem/rust-cache@v2
       - name: Check MSRV
-        run: cargo hack check --rust-version
+        run: cargo hack check --rust-version --workspace
 
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: recursive
       - uses: ./.github/actions/clone-siblings
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-llvm-cov
@@ -162,7 +201,7 @@ jobs:
           bash scripts/download-avif-test-vectors.sh
           bash scripts/download-linku-samples.sh
       - name: Generate coverage
-        run: cargo llvm-cov --lcov --output-path lcov.info
+        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
       - name: Upload coverage
         uses: codecov/codecov-action@v5
         with:

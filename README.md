@@ -4,6 +4,21 @@ Pure Rust AVIF image codec. Decodes and encodes AVIF images using
 [rav1d-safe](https://github.com/imazen/rav1d-safe) (AV1 decoder) and
 [zenavif-parse](https://crates.io/crates/zenavif-parse) (AVIF container parser).
 
+This repository is a cargo workspace hosting three published crates (the
+container crates were absorbed with full histories on 2026-07-16):
+
+| Crate | Directory | What it does |
+|---|---|---|
+| [zenavif](https://crates.io/crates/zenavif) | repo root | AVIF codec (decode + encode) |
+| [zenavif-parse](https://crates.io/crates/zenavif-parse) | `zenavif-parse/` | AVIF/ISOBMFF container parser (demuxer) |
+| [zenavif-serialize](https://crates.io/crates/zenavif-serialize) | `zenavif-serialize/` | AVIF container serializer (muxer) |
+
+Release tags are crate-prefixed (`zenavif-vX.Y.Z`, `zenavif-parse-vX.Y.Z`,
+`zenavif-serialize-vX.Y.Z`); historical tags from the absorbed repos carry
+their lineage prefixes (`avif-parse-v*`, `mp4parse-v*`). zenavif-parse's
+corpus tests read two git submodules — run `git submodule update --init`
+once per checkout.
+
 ## What it does
 
 - Decodes 8/10/12-bit AVIF with all chroma subsampling modes (4:2:0, 4:2:2, 4:4:4, monochrome)

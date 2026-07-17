@@ -12,6 +12,15 @@ documentation = "https://docs.rs/zenavif"
 readme = "README.crates.md"
 include = ["/src/**", "/README.crates.md", "/CHANGELOG.md", "/LICENSE*", "/tests/**/*.rs", "/benches/**", "/examples/**"]
 
+# Workspace: zenavif (this root package) + the absorbed container crates.
+# The fuzz packages stay excluded as standalone workspaces (they carry their
+# own [patch.crates-io] mirrors); the apidoc snapshot runners self-exclude
+# via their own [workspace] tables.
+[workspace]
+members = ["zenavif-parse", "zenavif-serialize"]
+exclude = ["fuzz", "zenavif-parse/fuzz"]
+resolver = "3"
+
 [dependencies]
 # rav1d: C FFI-based decoder for asm feature (fastest)
 rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"], optional = true }
@@ -22,8 +31,9 @@ magetypes = { version = "0.9.15"}
 safe_unaligned_simd = "0.2.5"
 # 0.7.0 (breaking): parser entry points return `whereat::At<Error>`, and `Error`
 # impls `zencodec::CategorizedError` (delegated from this crate's `Error::Parse`).
-# Unpublished — supplied by the `[patch.crates-io]` git pin below until it ships.
-zenavif-parse = "0.7.0"
+# Workspace member (absorbed 2026-07-16); the path supplies 0.7.0 until it is
+# published, after which registry consumers resolve it normally.
+zenavif-parse = { version = "0.7.0", path = "zenavif-parse" }
 yuv = "0.8.12"
 imgref = "1.12.0"
 rgb = { version = "0.8.52", default-features = false, features = ["bytemuck"] }
@@ -276,17 +286,10 @@ name = "hang_stress"
 required-features = ["two-pass-butteraugli"]
 
 [patch.crates-io]
-# Committed dev patch (same posture as the ../ravif path dep): zenravif needs
-# zenavif-serialize 0.2.0 (set_gain_map_alt_icc), unpublished — this pin supplies it
-# to the whole graph. Drop at the zenavif-serialize 0.2.0 publish.
-zenavif-serialize = { git = "https://github.com/imazen/zenavif-serialize", rev = "4c90d4dd02ef1684fa2230c6aaa2b5ef51e6a926" }
-# TEMP: until zenavif-parse 0.7.0 ships (breaking `At<Error>` returns +
-# CategorizedError adoption on released zencodec 0.1.26, pre-bumped on its
-# main). Git-rev pin (not a path pin to the sibling checkout) so this build
-# is hermetic against whatever branch/commit a concurrent local session has
-# checked out in ../zenavif-parse. Remove the patch and keep the plain
-# version dep once 0.7.0 is published.
-zenavif-parse = { git = "https://github.com/imazen/zenavif-parse", rev = "79db4b7610af4704120be5d983788094266f7952" }
+# Workspace member supplies zenavif-serialize 0.2.0 (set_gain_map_alt_icc) to
+# the whole graph — zenravif depends on it and 0.2.0 is unpublished. Drop at
+# the zenavif-serialize 0.2.0 publish.
+zenavif-serialize = { path = "zenavif-serialize" }
 # TEMP: registry rav1d-safe 0.5.7 ships the tile-threading CDEF/loop-filter
 # guard race + worker-panic wedge (zenavif#30; on a 28-thread box the
 # animated codec roundtrip test futex-wedges reliably). Pin the last

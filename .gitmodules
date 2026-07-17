@@ -1,0 +1,6 @@
+[submodule "zenavif-parse/av1-avif"]
+	path = zenavif-parse/av1-avif
+	url = https://github.com/AOMediaCodec/av1-avif.git
+[submodule "zenavif-parse/link-u-samples"]
+	path = zenavif-parse/link-u-samples
+	url = https://github.com/link-u/avif-sample-images

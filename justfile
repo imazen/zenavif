@@ -3,17 +3,25 @@
 # Default recipe
 default: check
 
-# Check compilation
+# Check compilation (whole workspace: zenavif + zenavif-parse + zenavif-serialize)
 check:
-    cargo check --all-targets
+    cargo check --workspace --all-targets
 
 # Build release
 build:
     cargo build --release
 
-# Run tests
+# Run tests (whole workspace; zenavif-parse corpus tests need the submodules —
+# `git submodule update --init` once per checkout)
 test:
-    cargo test
+    cargo test --workspace
+
+# Member-only test gates
+test-parse:
+    cargo test -p zenavif-parse --all-features
+
+test-serialize:
+    cargo test -p zenavif-serialize
 
 # Fast local iteration on a SHARED/loaded box: bounds the test-harness's own
 # thread count. Diagnosed 2026-07-13: plain `cargo test` spawns
@@ -33,6 +41,11 @@ test:
 # it does not change rav1d-safe's own per-decoder thread count (that default
 # is deliberate — see "rav1d-safe Threading Race Condition (RESOLVED)" in
 # CLAUDE.md — so it is not something to change here).
+# 2026-07-16 addendum: a second, distinct failure mode looked identical from
+# the outside but WAS a hang — registry rav1d-safe 0.5.7's zenavif#30 tile-
+# worker wedge (0 CPU ticks across all threads, a dead rav1d-worker, futex
+# park forever). That one is fixed by the [patch.crates-io] rav1d-safe pin;
+# telling them apart: oversubscription burns CPU, the wedge burns none.
 test-fast:
     cargo test -- --test-threads=4
 
@@ -45,23 +58,31 @@ clippy:
     cargo clippy --all-targets --all-features -- -D warnings
 
 # Format code + regenerate the public-API surface snapshots (docs/public-api/).
-# The snapshot runner lives in the standalone apidoc/ package, so it is never
-# built or run by plain `cargo test` or any CI job.
+# The snapshot runners live in standalone apidoc/ packages (one per crate), so
+# they are never built or run by plain `cargo test` or any CI job.
+# Package-scoped fmt: `--all` would also reformat the ../ravif and
+# ../zenanalyze path-deps (sibling repos).
 fmt:
-    cargo fmt
+    cargo fmt -p zenavif -p zenavif-parse -p zenavif-serialize
     cargo test --manifest-path apidoc/Cargo.toml
+    cargo test --manifest-path zenavif-parse/apidoc/Cargo.toml
+    cargo test --manifest-path zenavif-serialize/apidoc/Cargo.toml
 
 # Regenerate the public-API surface snapshots only
 api-doc:
     cargo test --manifest-path apidoc/Cargo.toml
+    cargo test --manifest-path zenavif-parse/apidoc/Cargo.toml
+    cargo test --manifest-path zenavif-serialize/apidoc/Cargo.toml
 
 # Verify the committed snapshots are current
 api-doc-check:
     ZEN_API_DOC=check cargo test --manifest-path apidoc/Cargo.toml
+    ZEN_API_DOC=check cargo test --manifest-path zenavif-parse/apidoc/Cargo.toml
+    ZEN_API_DOC=check cargo test --manifest-path zenavif-serialize/apidoc/Cargo.toml
 
-# Format check
+# Format check (same package scoping as fmt)
 fmt-check:
-    cargo fmt --check
+    cargo fmt -p zenavif -p zenavif-parse -p zenavif-serialize --check
 
 # Build with encode feature
 build-encode:
@@ -80,8 +101,34 @@ feature-check:
     cargo test --features encode
     cargo test --features encode-threading
 
+# Clippy for the workspace members
+clippy-members:
+    cargo clippy -p zenavif-parse --all-features --all-targets -- -D warnings
+    cargo clippy -p zenavif-serialize --all-targets -- -D warnings
+
 # Full CI check
-ci: fmt-check clippy test feature-check
+ci: fmt-check clippy clippy-members test feature-check
+
+# --- Publishing (workspace) ---
+# Releases are per crate via crate-prefixed tags (zenavif-vX.Y.Z,
+# zenavif-parse-vX.Y.Z, zenavif-serialize-vX.Y.Z) — release.yml routes the
+# tag to `cargo publish -p <crate>`. These recipes are the local halves.
+# NOTE: publishing zenavif itself is currently blocked on unpublished deps
+# (zenravif 0.2.0, zenanalyze/zenpredict 0.2.0); members publish fine.
+
+# Dry-run the whole workspace publish (dependency-ordered)
+publish-dry:
+    cargo publish --workspace --dry-run
+
+# Publish every workspace crate in dependency order (cargo 1.90+).
+# Run ONLY after: tests green locally, CI green on all platforms, tags +
+# GitHub releases created (see CLAUDE.md release sequence).
+publish-workspace:
+    cargo publish --workspace
+
+# Publish just the container crates
+publish-members:
+    cargo publish -p zenavif-parse -p zenavif-serialize
 
 # --- Executable gates (docs/ENGINEERING_BASELINE.md section A) ---
 # zenrav1e's halves (gate-identity A1, gate-recon A5) live in ../zenrav1e.

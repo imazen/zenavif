@@ -3,8 +3,10 @@
 # Format + regenerate the public-API surface snapshots (docs/public-api/).
 # The snapshot runner lives in the standalone apidoc/ package, so it is
 # never built or run by plain `cargo test` or any CI job.
+# Package-scoped: `--all` from inside the imazen/zenavif workspace would
+# reformat every member AND the ../ravif, ../zenanalyze path-deps.
 fmt:
-    cargo fmt --all
+    cargo fmt -p zenavif-parse
     cargo test --manifest-path apidoc/Cargo.toml
 
 # Regenerate the public-API surface snapshots only
