@@ -77,17 +77,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      # Loading ANY workspace manifest parses the whole workspace, including
+      # zenavif's ../ravif and ../zenanalyze path deps — so the siblings are
+      # needed even for member-scoped checks.
+      - uses: ./.github/actions/clone-siblings
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip1
       - uses: Swatinem/rust-cache@v2
         with:
           key: wasm-members
-      # Preserves the absorbed repos' wasm32-wasip1 check legs. The zenavif
-      # root package needs the ../ravif and ../zenanalyze clones to even
-      # parse its manifest, so this stays scoped to the two members.
+      # Preserves the absorbed repos' wasm32-wasip1 check legs, scoped via
+      # --manifest-path: a bare `-p zenavif-parse` is ambiguous in this
+      # workspace (zenavif-serialize's dev-deps pull registry zenavif-parse
+      # 0.6.x alongside the 0.7.0 member).
       - name: Check members on WASM
-        run: cargo check --target wasm32-wasip1 -p zenavif-parse -p zenavif-serialize
+        run: |
+          cargo check --target wasm32-wasip1 --manifest-path zenavif-parse/Cargo.toml
+          cargo check --target wasm32-wasip1 --manifest-path zenavif-serialize/Cargo.toml
 
   i686:
     name: Test (i686 cross)
@@ -127,10 +134,17 @@ jobs:
         env:
           CROSS_CONTAINER_OPTS: "-v ${{ github.workspace }}/..:${{ github.workspace }}/.."
         run: cross test --target i686-unknown-linux-gnu
-      - name: Test members (i686)
+      # Scoped via --manifest-path: under cross, a bare `-p zenavif-parse`
+      # resolves ambiguously (registry 0.6.x from zenavif-serialize's
+      # dev-deps vs the 0.7.0 member).
+      - name: Test zenavif-parse (i686, all features)
         env:
           CROSS_CONTAINER_OPTS: "-v ${{ github.workspace }}/..:${{ github.workspace }}/.."
-        run: cross test --target i686-unknown-linux-gnu -p zenavif-parse -p zenavif-serialize --all-features
+        run: cross test --target i686-unknown-linux-gnu --manifest-path zenavif-parse/Cargo.toml --all-features
+      - name: Test zenavif-serialize (i686)
+        env:
+          CROSS_CONTAINER_OPTS: "-v ${{ github.workspace }}/..:${{ github.workspace }}/.."
+        run: cross test --target i686-unknown-linux-gnu --manifest-path zenavif-serialize/Cargo.toml
 
   clippy:
     name: Clippy
