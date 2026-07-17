@@ -213,10 +213,15 @@ fn yuv420_to_rgb8_inner(
             let u_norm = (u_vec - uv_cen) * uv_sc;
             let v_norm = (v_vec - uv_cen) * uv_sc;
 
-            // YUV to RGB with FMA
-            let r = v_norm.mul_add(vr_vec, y_norm);
-            let g = v_norm.mul_add(vg_vec, u_norm.mul_add(ug_vec, y_norm));
-            let b = u_norm.mul_add(ub_vec, y_norm);
+            // YUV to RGB. Deliberately UNFUSED mul+add (no mul_add): fused
+            // lanes (v3/neon FMA) vs unfused ones (scalar tier, wasm128)
+            // round differently on rare pixels, so the same image decoded
+            // to different bytes per arch/tier. Plain mul+add is exact
+            // per-op IEEE — identical on every tier — and matches
+            // yuv_to_rgb (the width-remainder + reference path).
+            let r = y_norm + v_norm * vr_vec;
+            let g = y_norm + u_norm * ug_vec + v_norm * vg_vec;
+            let b = y_norm + u_norm * ub_vec;
 
             // Scale, clamp, round
             let r_out = (r * scale_255).max(zero).min(max_val).round();
@@ -344,14 +349,16 @@ fn bilinear_chroma_sample_x8(
     let fy_vec = f32x8::splat(token, fy);
     let fy1_vec = f32x8::splat(token, 1.0 - fy);
 
-    // Bilinear interpolation using FMA
-    let u_top = u01.mul_add(fx, u00 * fx1);
-    let u_bot = u11.mul_add(fx, u10 * fx1);
-    let u_result = u_bot.mul_add(fy_vec, u_top * fy1_vec);
+    // Bilinear interpolation — deliberately UNFUSED (see the kernel note):
+    // identical arithmetic on every tier, and matches the scalar
+    // remainder/reference expression `a * w1 + b * w`.
+    let u_top = u00 * fx1 + u01 * fx;
+    let u_bot = u10 * fx1 + u11 * fx;
+    let u_result = u_top * fy1_vec + u_bot * fy_vec;
 
-    let v_top = v01.mul_add(fx, v00 * fx1);
-    let v_bot = v11.mul_add(fx, v10 * fx1);
-    let v_result = v_bot.mul_add(fy_vec, v_top * fy1_vec);
+    let v_top = v00 * fx1 + v01 * fx;
+    let v_bot = v10 * fx1 + v11 * fx;
+    let v_result = v_top * fy1_vec + v_bot * fy_vec;
 
     (u_result, v_result)
 }
@@ -443,10 +450,11 @@ fn yuv_to_rgb_simd(
     let vg_vec = f32x8::splat(token, vg);
     let ub_vec = f32x8::splat(token, ub);
 
-    let r = v_norm.mul_add(vr_vec, y_norm);
-    let g_temp = u_norm * ug_vec;
-    let g = v_norm.mul_add(vg_vec, g_temp + y_norm);
-    let b = u_norm.mul_add(ub_vec, y_norm);
+    // Deliberately UNFUSED and grouped exactly like yuv_to_rgb / the generic
+    // kernels (see the tier-determinism note there).
+    let r = y_norm + v_norm * vr_vec;
+    let g = y_norm + u_norm * ug_vec + v_norm * vg_vec;
+    let b = y_norm + u_norm * ub_vec;
 
     let scale_255 = f32x8::splat(token, 255.0);
     (r * scale_255, g * scale_255, b * scale_255)
@@ -570,10 +578,15 @@ fn yuv422_to_rgb8_inner(
             let u_norm = (u_vec - uv_cen) * uv_sc;
             let v_norm = (v_vec - uv_cen) * uv_sc;
 
-            // YUV to RGB with FMA
-            let r = v_norm.mul_add(vr_vec, y_norm);
-            let g = v_norm.mul_add(vg_vec, u_norm.mul_add(ug_vec, y_norm));
-            let b = u_norm.mul_add(ub_vec, y_norm);
+            // YUV to RGB. Deliberately UNFUSED mul+add (no mul_add): fused
+            // lanes (v3/neon FMA) vs unfused ones (scalar tier, wasm128)
+            // round differently on rare pixels, so the same image decoded
+            // to different bytes per arch/tier. Plain mul+add is exact
+            // per-op IEEE — identical on every tier — and matches
+            // yuv_to_rgb (the width-remainder + reference path).
+            let r = y_norm + v_norm * vr_vec;
+            let g = y_norm + u_norm * ug_vec + v_norm * vg_vec;
+            let b = y_norm + u_norm * ub_vec;
 
             // Scale, clamp, round
             let r_out = (r * scale_255).max(zero).min(max_val).round();
@@ -670,17 +683,20 @@ pub(crate) fn matrix_coefficients(matrix: YuvMatrix) -> (f32, f32) {
 /// Ub = 2 * (1 - Kb)
 /// ```
 fn yuv_to_rgb(y: f32, u: f32, v: f32, kr: f32, kg: f32, kb: f32, range: YuvRange) -> (u8, u8, u8) {
+    // Reciprocal-multiply normalization (NOT division): bit-identical to the
+    // SIMD kernels' `(v - off) * scale` so the width-remainder pixels this
+    // helper produces match the SIMD-lane pixels byte-for-byte.
     let (y_norm, u_norm, v_norm) = match range {
         YuvRange::Full => {
-            let y = y / 255.0;
-            let u = (u - 128.0) / 255.0;
-            let v = (v - 128.0) / 255.0;
+            let y = (y - 0.0) * (1.0 / 255.0);
+            let u = (u - 128.0) * (1.0 / 255.0);
+            let v = (v - 128.0) * (1.0 / 255.0);
             (y, u, v)
         }
         YuvRange::Limited => {
-            let y = (y - 16.0) / 219.0;
-            let u = (u - 128.0) / 224.0;
-            let v = (v - 128.0) / 224.0;
+            let y = (y - 16.0) * (1.0 / 219.0);
+            let u = (u - 128.0) * (1.0 / 224.0);
+            let v = (v - 128.0) * (1.0 / 224.0);
             (y, u, v)
         }
     };
@@ -694,9 +710,12 @@ fn yuv_to_rgb(y: f32, u: f32, v: f32, kr: f32, kg: f32, kb: f32, range: YuvRange
     let g = y_norm + ug * u_norm + vg * v_norm;
     let b = y_norm + ub * u_norm;
 
-    let r = (r * 255.0).round().clamp(0.0, 255.0) as u8;
-    let g = (g * 255.0).round().clamp(0.0, 255.0) as u8;
-    let b = (b * 255.0).round().clamp(0.0, 255.0) as u8;
+    // Ties-to-even rounding, matching every SIMD tier (x86 roundps / NEON
+    // vrndn / wasm nearest / magetypes scalar roundevenf are all ties-even;
+    // f32::round's ties-away-from-zero was the odd one out).
+    let r = (r * 255.0).round_ties_even().clamp(0.0, 255.0) as u8;
+    let g = (g * 255.0).round_ties_even().clamp(0.0, 255.0) as u8;
+    let b = (b * 255.0).round_ties_even().clamp(0.0, 255.0) as u8;
 
     (r, g, b)
 }
@@ -1591,11 +1610,38 @@ mod tests {
                     let got = yuv422_to_rgb8(&yb, w, &ub, cw, &vb, cw, w, h, range, matrix);
                     let want = ref_yuv422_to_rgb8(&yb, w, &ub, cw, &vb, cw, w, h, range, matrix);
                     let got_vec: Vec<RGB8> = got.into_buf();
-                    assert_eq!(
-                        got_vec.as_slice(),
-                        want.as_slice(),
-                        "mismatch {w}x{h} {range:?} {matrix:?}"
-                    );
+                    // Bounded structured report instead of assert_eq: the
+                    // full-slice dump is unreadable at 64x48 (3072 pixels),
+                    // and the per-pixel inputs are what diagnose a rounding
+                    // divergence (this caught the fused-vs-unfused tier
+                    // split on i686, 2026-07-16).
+                    if got_vec.as_slice() != want.as_slice() {
+                        let mut n = 0;
+                        for (i, (a, b)) in got_vec.iter().zip(want.iter()).enumerate() {
+                            if a != b {
+                                n += 1;
+                                if n <= 24 {
+                                    let (px, py) = (i % w, i / w);
+                                    eprintln!(
+                                        "MISMATCH {w}x{h} {range:?} {matrix:?} @({px},{py}) x%16={} got({},{},{}) want({},{},{}) y={} u0={} u1={} v0={} v1={}",
+                                        px % 16,
+                                        a.r,
+                                        a.g,
+                                        a.b,
+                                        b.r,
+                                        b.g,
+                                        b.b,
+                                        yb[py * w + px],
+                                        ub[py * cw + (px / 2).min(cw - 1)],
+                                        ub[py * cw + (px / 2 + 1).min(cw - 1)],
+                                        vb[py * cw + (px / 2).min(cw - 1)],
+                                        vb[py * cw + (px / 2 + 1).min(cw - 1)],
+                                    );
+                                }
+                            }
+                        }
+                        panic!("mismatch {w}x{h} {range:?} {matrix:?}: {n} pixels differ");
+                    }
                 }
             }
         }

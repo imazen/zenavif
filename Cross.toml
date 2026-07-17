@@ -1,5 +1,9 @@
 [build.env]
-passthrough = ["RUST_BACKTRACE", "RUST_LOG"]
+# ZENAVIF_NO_CODEC_CORPUS must reach the test binaries INSIDE cross's
+# container — CI sets it at the workflow level, and without the passthrough
+# the corpus-gated codec tests fail loud in the i686 job (by design: the
+# skip decision is the caller's, never silent).
+passthrough = ["RUST_BACKTRACE", "RUST_LOG", "ZENAVIF_NO_CODEC_CORPUS"]
 
 [target.aarch64-unknown-linux-gnu]
 volumes = ["/home/lilith/work/zen", "/home/lilith/work/archmage"]
