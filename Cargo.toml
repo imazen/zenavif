@@ -17,6 +17,10 @@ include = ["/src/**", "/README.crates.md", "/CHANGELOG.md", "/LICENSE*", "/tests
 rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"], optional = true }
 # rav1d-safe: 100% safe managed API decoder (no c-ffi feature!)
 rav1d-safe = { version = "0.5.3", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
+# zenav1-aom pure-Rust AV1 KEY-frame decoder — second decode backend (feature
+# `aom-backend`). Git-rev pinned to imazen/zenav1-aom main (crate unpublished;
+# intra decode is conformance-clean vs libaom v3.14.1 at this rev).
+aom-decode = { package = "zenav1-aom-decode", git = "https://github.com/imazen/zenav1-aom", rev = "ed29932f4fcbe021b40eb31bfdcf87474a8c70ee", optional = true }
 archmage = { version = "0.9.15", features = ["macros"] }
 magetypes = { version = "0.9.15"}
 safe_unaligned_simd = "0.2.5"
@@ -197,6 +201,12 @@ required-features = ["__expert"]
 
 # Heaptrack allocation-profiling harness for the decode-from-bytes path.
 # Decode is in the default feature set (pure-Rust rav1d-safe); no extra features.
+# Apples-to-apples aom-rs vs rav1d-safe decode benchmark (interleaved via
+# zenbench, both backends through the zenavif decode seam).
+[[example]]
+name = "decode_4way_bench"
+required-features = ["aom-backend"]
+
 [[example]]
 name = "heaptrack_decode"
 
@@ -228,6 +238,12 @@ required-features = ["encode"]
 
 [features]
 default = []
+# EXPERIMENTAL: zenav1-aom (`aom-decode`) as a second AV1 KEY-frame decode
+# backend behind `decode_av1_obu_yuv(.., Av1Backend::AomRs)`. KEY-frame /
+# intra scope only (an AVIF still is a single KEY frame); byte-identical to
+# libaom on the intra conformance corpus. Off by default; also drives the
+# 4-way decode benchmark example.
+aom-backend = ["dep:aom-decode"]
 # Decode with hand-written assembly via C FFI (fastest, uses unsafe)
 unsafe-asm = ["dep:rav1d", "rav1d/asm"]
 # AVIF encoding via zenravif (pure Rust by default)

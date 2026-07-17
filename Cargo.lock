@@ -1944,6 +1944,23 @@ version = "1.0.0"
 source = "git+https://github.com/imazen/zenanalyze?rev=47b4d0f5f1abfff45a152e9a9f4de82fffd5afa6#47b4d0f5f1abfff45a152e9a9f4de82fffd5afa6"
 
 [[package]]
+name = "zenav1-aom-decode"
+version = "0.0.1"
+source = "git+https://github.com/imazen/zenav1-aom?rev=ed29932f4fcbe021b40eb31bfdcf87474a8c70ee#ed29932f4fcbe021b40eb31bfdcf87474a8c70ee"
+dependencies = [
+ "zenav1-aom-dsp",
+]
+
+[[package]]
+name = "zenav1-aom-dsp"
+version = "0.0.1"
+source = "git+https://github.com/imazen/zenav1-aom?rev=ed29932f4fcbe021b40eb31bfdcf87474a8c70ee#ed29932f4fcbe021b40eb31bfdcf87474a8c70ee"
+dependencies = [
+ "archmage",
+ "magetypes",
+]
+
+[[package]]
 name = "zenavif"
 version = "0.1.7"
 dependencies = [
@@ -1973,6 +1990,7 @@ dependencies = [
  "yuv",
  "zenanalyze",
  "zenanalyze-api",
+ "zenav1-aom-decode",
  "zenavif-parse",
  "zenavif-serialize",
  "zenbench",
@@ -2013,9 +2031,9 @@ dependencies = [
 
 [[package]]
 name = "zenbench"
-version = "0.1.8"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c366bdec099c47b59c77e42aed577071ce7faefb1cf6a6f3abd16beb02b2f7d3"
+checksum = "e4f7f6d55a1c1121b07981a891b2ca311ebec953ccc9be2f87586224fb2eb0e0"
 dependencies = [
  "clap",
  "fs4",

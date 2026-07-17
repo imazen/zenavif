@@ -551,6 +551,187 @@ fn convert_to_rgb(
     }
 }
 
+// ===========================================================================
+// DECODE-BENCH FORK: second decode backend (aom-rs) behind a common YUV seam.
+//
+// Both backends receive the IDENTICAL raw AV1 OBU temporal-unit bytes and
+// return the same `DecodedYuv` shape (tight, unpadded u16 planes) — "one
+// frontend, two backends", so an apples-to-apples decode-speed comparison
+// isolates the decode kernel. The aom-rs backend covers the KEY-frame / intra
+// scope (AVIF stills are single KEY frames) and is byte-identical to libaom on
+// the AV1 conformance corpus.
+// ===========================================================================
+
+/// A decoded AV1 frame as tight (unpadded) YUV planes, `u16` per sample at
+/// every bit depth. The field shape mirrors aom-rs's
+/// `aom_decode::frame::FrameDecode` so the two backends are directly
+/// comparable.
+#[derive(Clone, Debug)]
+pub struct DecodedYuv {
+    /// Cropped luma, tight `width`-strided rows.
+    pub y: Vec<u16>,
+    /// Cropped chroma (empty when monochrome), tight `width_uv`-strided.
+    pub u: Vec<u16>,
+    pub v: Vec<u16>,
+    pub width: usize,
+    pub height: usize,
+    pub width_uv: usize,
+    pub height_uv: usize,
+    pub bit_depth: i32,
+    pub monochrome: bool,
+    pub subsampling_x: usize,
+    pub subsampling_y: usize,
+}
+
+impl DecodedYuv {
+    /// Total decoded luma pixels (the throughput unit for the decode bench).
+    pub fn luma_pixels(&self) -> usize {
+        self.width * self.height
+    }
+}
+
+/// Which AV1 decode kernel to run behind zenavif's raw-OBU decode seam.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Av1Backend {
+    /// The default pure-Rust rav1d-safe managed decoder (full AV1 profile).
+    Rav1dSafe,
+    /// The aom-rs pure-Rust decoder (KEY-frame / intra scope; byte-identical
+    /// to libaom on the AV1 conformance corpus). Requires the `aom-backend`
+    /// feature.
+    #[cfg(feature = "aom-backend")]
+    AomRs,
+}
+
+/// Decode a raw AV1 OBU temporal unit to tight YUV planes via the selected
+/// backend. Both backends receive the IDENTICAL OBU bytes and produce the same
+/// [`DecodedYuv`] shape — this is the "one frontend, two backends" seam the
+/// decode benchmark drives (only the decode kernel differs).
+pub fn decode_av1_obu_yuv(data: &[u8], backend: Av1Backend) -> Result<DecodedYuv> {
+    match backend {
+        Av1Backend::Rav1dSafe => decode_av1_obu_yuv_rav1d(data),
+        #[cfg(feature = "aom-backend")]
+        Av1Backend::AomRs => decode_av1_obu_yuv_aomrs(data),
+    }
+}
+
+/// rav1d-safe backend: managed decode, then copy the decoded planes into tight
+/// (unpadded) `u16` buffers (widening 8-bit samples) so the output matches the
+/// aom-rs backend's shape exactly.
+pub fn decode_av1_obu_yuv_rav1d(data: &[u8]) -> Result<DecodedYuv> {
+    if data.is_empty() {
+        return Err(at!(Error::Decode {
+            code: -1,
+            msg: "empty AV1 OBU data",
+        }));
+    }
+    let mut settings = Settings::default();
+    settings.threads = 1;
+    let mut decoder = Rav1dDecoder::with_settings(settings).map_err(|_e| {
+        at!(Error::Decode {
+            code: -1,
+            msg: "failed to create AV1 decoder",
+        })
+    })?;
+    let frame = decode_single_frame(&mut decoder, data)?;
+
+    let width = frame.width() as usize;
+    let height = frame.height() as usize;
+    let bit_depth = frame.bit_depth() as i32;
+    let layout = frame.pixel_layout();
+    let monochrome = matches!(layout, PixelLayout::I400);
+    let (subsampling_x, subsampling_y) = match layout {
+        PixelLayout::I400 | PixelLayout::I420 => (1, 1),
+        PixelLayout::I422 => (1, 0),
+        PixelLayout::I444 => (0, 0),
+    };
+
+    let (y, u, v, width_uv, height_uv) = match frame.planes() {
+        Planes::Depth8(p) => {
+            let yv = p.y();
+            let mut y = Vec::with_capacity(yv.width() * yv.height());
+            for row in yv.rows() {
+                y.extend(row.iter().map(|&s| s as u16));
+            }
+            match (p.u(), p.v()) {
+                (Some(up), Some(vp)) => {
+                    let (wu, hu) = (up.width(), up.height());
+                    let mut u = Vec::with_capacity(wu * hu);
+                    for row in up.rows() {
+                        u.extend(row.iter().map(|&s| s as u16));
+                    }
+                    let mut v = Vec::with_capacity(vp.width() * vp.height());
+                    for row in vp.rows() {
+                        v.extend(row.iter().map(|&s| s as u16));
+                    }
+                    (y, u, v, wu, hu)
+                }
+                _ => (y, Vec::new(), Vec::new(), 0, 0),
+            }
+        }
+        Planes::Depth16(p) => {
+            let yv = p.y();
+            let mut y = Vec::with_capacity(yv.width() * yv.height());
+            for row in yv.rows() {
+                y.extend_from_slice(row);
+            }
+            match (p.u(), p.v()) {
+                (Some(up), Some(vp)) => {
+                    let (wu, hu) = (up.width(), up.height());
+                    let mut u = Vec::with_capacity(wu * hu);
+                    for row in up.rows() {
+                        u.extend_from_slice(row);
+                    }
+                    let mut v = Vec::with_capacity(vp.width() * vp.height());
+                    for row in vp.rows() {
+                        v.extend_from_slice(row);
+                    }
+                    (y, u, v, wu, hu)
+                }
+                _ => (y, Vec::new(), Vec::new(), 0, 0),
+            }
+        }
+    };
+
+    Ok(DecodedYuv {
+        y,
+        u,
+        v,
+        width,
+        height,
+        width_uv,
+        height_uv,
+        bit_depth,
+        monochrome,
+        subsampling_x,
+        subsampling_y,
+    })
+}
+
+/// aom-rs backend: pure-Rust KEY-frame decode, byte-identical to libaom on the
+/// AV1 conformance corpus. Output is already tight `u16` planes.
+#[cfg(feature = "aom-backend")]
+pub fn decode_av1_obu_yuv_aomrs(data: &[u8]) -> Result<DecodedYuv> {
+    let fd = aom_decode::frame::decode_frame_obus(data).map_err(|_e| {
+        at!(Error::Decode {
+            code: -1,
+            msg: "aom-rs backend rejected the AV1 OBU frame (KEY/intra scope only)",
+        })
+    })?;
+    Ok(DecodedYuv {
+        y: fd.y,
+        u: fd.u,
+        v: fd.v,
+        width: fd.width,
+        height: fd.height,
+        width_uv: fd.width_uv,
+        height_uv: fd.height_uv,
+        bit_depth: fd.bit_depth,
+        monochrome: fd.monochrome,
+        subsampling_x: fd.subsampling_x,
+        subsampling_y: fd.subsampling_y,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
