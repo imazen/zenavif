@@ -155,6 +155,8 @@ pub use codec::{
 pub use codec::{AvifAnimationFrameEncoder, AvifEncodeJob, AvifEncoder, AvifEncoderConfig};
 pub use config::DecoderConfig;
 pub use decode_av1::decode_av1_obu;
+// DECODE-BENCH FORK: raw-OBU decode-to-YUV seam + second backend (aom-rs).
+pub use decode_av1::{decode_av1_obu_yuv, Av1Backend, DecodedYuv};
 #[cfg(feature = "unsafe-asm")]
 pub use decoder::AvifDecoder;
 pub use decoder_managed::{AnimationDecoder, ManagedAvifDecoder};
