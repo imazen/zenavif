@@ -10,6 +10,24 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## [Unreleased]
 
+### Fixed
+- **Decode no longer wedges under tile threading**: registry rav1d-safe
+  0.5.7 carries a tile-worker guard race whose panicked worker parks
+  `rav1d_decode_frame`'s completion wait forever (zenavif#30 — on a
+  28-thread box the animated codec roundtrip test hung ~3 of 4 runs). A
+  TEMP `[patch.crates-io]` git pin at the last 0.5.7-versioned rav1d-safe
+  rev (`f6aed27e`, carrying the upstream fix plus the #14 aarch64 16bpc
+  SGR rounding fix) replaces it; drop at the rav1d-safe release past
+  0.5.7. The pinned rev's managed API attaches `whereat::At` locations and
+  adds cooperative cancellation, so rav1d-safe decode errors now keep
+  their upstream trace frames (`At::map_error` at the boundary instead of
+  rewrapping) and `Error::Cancelled` maps rav1d-safe's own `Cancelled`.
+- **Default-feature `cargo test` compiles again**: four auto-discovered
+  examples that call `encode`-gated APIs (`gainmap_reencode`,
+  `hdr_encode_cell`, `hdr_fidelity_probe`, `twelvebit_probe`) had no
+  `[[example]]` declarations, breaking every platform's CI test job since
+  2026-07-12; they are now declared with `required-features = ["encode"]`.
+
 ### Changed
 - **Reshape `ErrorCategory` onto zencodec's origin-first, two-level taxonomy
   (zencodec PR #116, `caterr-reshape`), superseding the flat 17-variant shape

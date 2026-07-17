@@ -52,8 +52,10 @@ pub fn decode_av1_obu(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u8)> {
     let mut settings = Settings::default();
     settings.threads = 1;
 
-    let mut decoder = Rav1dDecoder::with_settings(settings)
-        .map_err(|e| at!(error_from_rav1d(e, "failed to create AV1 decoder")))?;
+    let mut decoder = Rav1dDecoder::with_settings(settings).map_err(|e| {
+        e.map_error(|re| error_from_rav1d(re, "failed to create AV1 decoder"))
+            .at()
+    })?;
 
     let frame = decode_single_frame(&mut decoder, data)?;
 
@@ -192,9 +194,10 @@ fn decode_single_frame(decoder: &mut Rav1dDecoder, data: &[u8]) -> Result<Frame>
         }
         Ok(None) => {
             // Progressive/multi-layer: flush to get the composed frame
-            let frames = decoder
-                .flush()
-                .map_err(|e| at!(error_from_rav1d(e, "failed to flush AV1 decoder")))?;
+            let frames = decoder.flush().map_err(|e| {
+                e.map_error(|re| error_from_rav1d(re, "failed to flush AV1 decoder"))
+                    .at()
+            })?;
             frames.into_iter().last().ok_or_else(|| {
                 at!(Error::Decode {
                     code: -1,
@@ -202,7 +205,9 @@ fn decode_single_frame(decoder: &mut Rav1dDecoder, data: &[u8]) -> Result<Frame>
                 })
             })
         }
-        Err(e) => Err(at!(error_from_rav1d(e, "failed to decode AV1 OBU data"))),
+        Err(e) => Err(e
+            .map_error(|re| error_from_rav1d(re, "failed to decode AV1 OBU data"))
+            .at()),
     }
 }
 

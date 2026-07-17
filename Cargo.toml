@@ -287,3 +287,11 @@ zenavif-serialize = { git = "https://github.com/imazen/zenavif-serialize", rev =
 # checked out in ../zenavif-parse. Remove the patch and keep the plain
 # version dep once 0.7.0 is published.
 zenavif-parse = { git = "https://github.com/imazen/zenavif-parse", rev = "79db4b7610af4704120be5d983788094266f7952" }
+# TEMP: registry rav1d-safe 0.5.7 ships the tile-threading CDEF/loop-filter
+# guard race + worker-panic wedge (zenavif#30; on a 28-thread box the
+# animated codec roundtrip test futex-wedges reliably). Pin the last
+# 0.5.7-versioned rev on main (a 0.6.0-versioned rev cannot patch a 0.5.x
+# requirement): it carries the upstream wedge fix 49df1fc0 plus the #14
+# aarch64 16bpc SGR rounding fix. Drop at the rav1d-safe release past
+# 0.5.7. Mirrored in fuzz/Cargo.toml.
+rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "f6aed27e81baa5e74a8eba413562efb8813641fd" }

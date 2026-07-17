@@ -10,7 +10,9 @@
 //!    to native Gray8;
 //! 3. the decoded luma matches the input within normal lossy bounds.
 
-#![cfg(all(feature = "encode-mono", feature = "zencodec"))]
+// zencodec integration is always built (the feature gate was removed when
+// zencodec became a hard dep), so encode-mono alone arms this test.
+#![cfg(feature = "encode-mono")]
 
 use std::borrow::Cow;
 use zencodec::decode::{Decode as _, DecodeJob as _, DecodeOutput, DecoderConfig as _};

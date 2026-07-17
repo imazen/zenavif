@@ -21,6 +21,9 @@ path = ".."
 # unpublished. Git-rev pin (not a path pin) for hermeticity. Drop together
 # with the root patch once 0.7.0 ships.
 zenavif-parse = { git = "https://github.com/imazen/zenavif-parse", rev = "79db4b7610af4704120be5d983788094266f7952" }
+# Mirror of the root rav1d-safe pin (zenavif#30 futex wedge in registry
+# 0.5.7). Drop at the rav1d-safe release past 0.5.7.
+rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "f6aed27e81baa5e74a8eba413562efb8813641fd" }
 
 [[bin]]
 name = "fuzz_decode"

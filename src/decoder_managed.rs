@@ -17,10 +17,6 @@ use crate::yuv_convert::{self, YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRang
 use enough::Stop;
 use rgb::{Rgb, Rgba};
 use whereat::at;
-// `.at()` is only called from the `zencodec`-gated strip glue below; an
-// unconditional import trips unused_imports on default-features builds.
-#[cfg(feature = "zencodec")]
-use whereat::ResultAtExt as _;
 use yuv::{YuvGrayImage, YuvPlanarImage, YuvRange, YuvStandardMatrix};
 use zenpixels::{PixelBuffer, PixelDescriptor};
 
@@ -160,8 +156,10 @@ impl ManagedAvifDecoder {
         settings.apply_grain = config.apply_grain;
         settings.frame_size_limit = config.frame_size_limit;
 
-        let decoder = Rav1dDecoder::with_settings(settings)
-            .map_err(|e| at!(error_from_rav1d(e, "Failed to create decoder")))?;
+        let decoder = Rav1dDecoder::with_settings(settings).map_err(|e| {
+            e.map_error(|re| error_from_rav1d(re, "Failed to create decoder"))
+                .at()
+        })?;
 
         // Validate dimensions against frame_size_limit before any decode work
         if config.frame_size_limit > 0 {
@@ -205,9 +203,10 @@ impl ManagedAvifDecoder {
             Ok(Some(frame)) => frame,
             Ok(None) => {
                 // Progressive/multi-layer: flush to get the composed frame
-                let frames = decoder
-                    .flush()
-                    .map_err(|e| at!(error_from_rav1d(e, "Failed to flush decoder")))?;
+                let frames = decoder.flush().map_err(|e| {
+                    e.map_error(|re| error_from_rav1d(re, "Failed to flush decoder"))
+                        .at()
+                })?;
                 frames.into_iter().last().ok_or_else(|| {
                     at!(Error::Decode {
                         code: -1,
@@ -216,7 +215,7 @@ impl ManagedAvifDecoder {
                 })?
             }
             Err(e) => {
-                return Err(at!(error_from_rav1d(e, context)));
+                return Err(e.map_error(|re| error_from_rav1d(re, context)).at());
             }
         };
         // Reset decoder state so the next decode_frame call starts clean
@@ -661,10 +660,10 @@ impl ManagedAvifDecoder {
         let mut alpha_decoder = if anim_info.has_alpha {
             let mut settings = Settings::default();
             settings.threads = 0;
-            Some(
-                Rav1dDecoder::with_settings(settings)
-                    .map_err(|e| at!(error_from_rav1d(e, "Failed to create alpha decoder")))?,
-            )
+            Some(Rav1dDecoder::with_settings(settings).map_err(|e| {
+                e.map_error(|re| error_from_rav1d(re, "Failed to create alpha decoder"))
+                    .at()
+            })?)
         } else {
             None
         };
@@ -730,7 +729,7 @@ impl ManagedAvifDecoder {
             Ok(Some(frame)) => return Ok(frame),
             Ok(None) => {}
             Err(e) => {
-                return Err(at!(error_from_rav1d(e, context)));
+                return Err(e.map_error(|re| error_from_rav1d(re, context)).at());
             }
         }
 
@@ -751,13 +750,13 @@ impl ManagedAvifDecoder {
             }
         }
 
-        Err(at!(match last_err {
-            Some(e) => error_from_rav1d(e, context),
-            None => Error::Decode {
+        Err(match last_err {
+            Some(e) => e.map_error(|re| error_from_rav1d(re, context)).at(),
+            None => at!(Error::Decode {
                 code: -1,
                 msg: context,
-            },
-        }))
+            }),
+        })
     }
 
     /// Decode a grid-based AVIF (tiled image)
@@ -1468,10 +1467,10 @@ impl AnimationDecoder {
         let alpha_decoder = if anim_info.has_alpha {
             let mut settings = Settings::default();
             settings.threads = config.threads;
-            Some(
-                Rav1dDecoder::with_settings(settings)
-                    .map_err(|e| at!(error_from_rav1d(e, "Failed to create alpha decoder")))?,
-            )
+            Some(Rav1dDecoder::with_settings(settings).map_err(|e| {
+                e.map_error(|re| error_from_rav1d(re, "Failed to create alpha decoder"))
+                    .at()
+            })?)
         } else {
             None
         };

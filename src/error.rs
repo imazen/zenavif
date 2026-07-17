@@ -129,17 +129,18 @@ impl From<StopReason> for Error {
 /// `rav1d_safe::src::managed::Error::OutOfMemory` routes to zenavif's own
 /// dedicated [`Error::OutOfMemory`] variant rather than staying
 /// `Decode`-shaped, since `Resource` is a better fit than "the decoder
-/// itself failed". The published `rav1d-safe` (0.5.x on crates.io) has no
-/// cooperative-cancellation variant on this enum — zenavif's own explicit
-/// `stop.check()` calls around each decode step are the cancellation path
-/// today; a future rav1d-safe release adding one should gain its own arm
-/// here routing to `Error::Cancelled`.
+/// itself failed". `Cancelled` (rav1d-safe's own cooperative in-flight
+/// cancellation, #412 — present in the pinned rev, not yet in a crates.io
+/// release) routes to [`Error::Cancelled`]; the enum variant carries no
+/// reason, and `Cancelled` is the accurate `StopReason` at this boundary
+/// (same mapping the encode path uses for `ravif::Error::Cancelled`).
 pub(crate) fn error_from_rav1d(e: rav1d_safe::src::managed::Error, context: &'static str) -> Error {
     use rav1d_safe::src::managed::Error as R;
     match e {
         R::InvalidData => Error::Malformed(context),
         R::NeedMoreData => Error::UnexpectedEof(context),
         R::OutOfMemory => Error::OutOfMemory,
+        R::Cancelled => Error::Cancelled(StopReason::Cancelled),
         // `InvalidSettings`/`InitFailed`/`Other` are opaque rav1d-safe setup
         // faults (the settings here are zenavif's own, not caller-facing) —
         // not attributable to the input bitstream, so they stay the
