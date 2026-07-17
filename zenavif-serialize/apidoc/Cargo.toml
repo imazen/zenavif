@@ -1,0 +1,15 @@
+# CI-free public-API snapshot runner — the only package depending on
+# zenutils-apidoc. Its own [workspace] table keeps it out of the parent
+# package's build graph, so plain `cargo test` and every CI job (including
+# --all-features ones) never compile the apidoc tree or run rustdoc.
+# Regenerate via `just api-doc`.
+[package]
+name = "zenavif-serialize-apidoc"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+zenutils-apidoc = "0.1.0"
+
+[workspace]

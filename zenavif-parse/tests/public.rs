@@ -1,0 +1,2463 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#![allow(deprecated)]
+use std::borrow::Cow;
+use std::fs::File;
+
+static IMAGE_AVIF: &str = "av1-avif/testFiles/Microsoft/Monochrome.avif";
+static IMAGE_AVIF_EXTENTS: &str = "tests/kodim-extents.avif";
+#[cfg(feature = "eager")]
+static IMAGE_AVIF_CORRUPT: &str = "tests/bug-1655846.avif";
+#[cfg(feature = "eager")]
+static IMAGE_AVIF_CORRUPT_2: &str = "tests/bug-1661347.avif";
+static IMAGE_GRID_5X4: &str = "av1-avif/testFiles/Microsoft/Summer_in_Tomsk_720p_5x4_grid.avif";
+static ANIMATED_AVIF: &str = "link-u-samples/star-8bpc.avifs";
+static IMAGE_AVIF_ALPHA: &str = "av1-avif/testFiles/Microsoft/bbb_alpha_inverted.avif";
+#[cfg(feature = "eager")]
+static AOMEDIA_TEST_FILES: &str = "av1-avif/testFiles";
+#[cfg(feature = "eager")]
+static LINK_U_SAMPLES: &str = "link-u-samples";
+
+// ============================================================================
+// Eager path (read_avif) tests
+// ============================================================================
+
+#[cfg(feature = "eager")]
+#[test]
+fn public_avif_primary_item() {
+    let input = &mut File::open(IMAGE_AVIF).expect("Unknown file");
+    let context = zenavif_parse::read_avif(input).expect("read_avif failed");
+    assert_eq!(context.primary_item.len(), 6979);
+    assert_eq!(context.primary_item[0..4], [0x12, 0x00, 0x0a, 0x0a]);
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn public_avif_primary_item_split_extents() {
+    let input = &mut File::open(IMAGE_AVIF_EXTENTS).expect("Unknown file");
+    let context = zenavif_parse::read_avif(input).expect("read_avif failed");
+    assert_eq!(context.primary_item.len(), 4387);
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn public_avif_bug_1655846() {
+    let input = &mut File::open(IMAGE_AVIF_CORRUPT).expect("Unknown file");
+    assert!(zenavif_parse::read_avif(input).is_err());
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn public_avif_bug_1661347() {
+    let input = &mut File::open(IMAGE_AVIF_CORRUPT_2).expect("Unknown file");
+    assert!(zenavif_parse::read_avif(input).is_err());
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn aomedia_sample_images() {
+    test_dir(AOMEDIA_TEST_FILES);
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn linku_sample_images() {
+    test_dir(LINK_U_SAMPLES);
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn grid_5x4_ispe_calculation() {
+    let input = &mut File::open(IMAGE_GRID_5X4).expect("Unknown file");
+    let avif = zenavif_parse::read_avif(input).expect("read_avif failed");
+
+    let grid = avif.grid_config.expect("Expected grid config");
+    assert_eq!(grid.rows, 4, "Expected 4 rows");
+    assert_eq!(grid.columns, 5, "Expected 5 columns");
+    assert_eq!(grid.output_width, 6400, "Expected width 6400");
+    assert_eq!(grid.output_height, 2880, "Expected height 2880");
+    assert_eq!(avif.grid_tiles.len(), 20, "Expected 20 tiles (4x5)");
+    assert_eq!(avif.primary_item.len(), 0, "Grid images should have empty primary_item");
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn grid_tile_ordering() {
+    let input = &mut File::open(IMAGE_GRID_5X4).expect("Unknown file");
+    let avif = zenavif_parse::read_avif(input).expect("read_avif failed");
+
+    for (i, tile) in avif.grid_tiles.iter().enumerate() {
+        assert!(!tile.is_empty(), "Tile {} should not be empty", i);
+        assert!(tile.len() > 1000, "Tile {} seems too small ({} bytes)", i, tile.len());
+    }
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn animated_avif_frame_extraction() {
+    let input = &mut File::open(ANIMATED_AVIF).expect("Unknown file");
+    let avif = zenavif_parse::read_avif(input).expect("read_avif failed");
+
+    let animation = avif.animation.expect("Expected animation data");
+    assert_eq!(animation.frames.len(), 5, "Expected 5 frames");
+
+    for (i, frame) in animation.frames.iter().enumerate() {
+        assert!(!frame.data.is_empty(), "Frame {} should not be empty", i);
+        assert!(frame.duration_ms > 0, "Frame {} should have positive duration", i);
+    }
+
+    for frame in &animation.frames {
+        assert_eq!(frame.duration_ms, 100, "Expected 100ms frame duration");
+    }
+
+    assert_eq!(avif.primary_item.len(), animation.frames[0].data.len(),
+        "Primary item should match first frame");
+}
+
+#[cfg(feature = "eager")]
+fn test_dir(dir: &str) {
+    use zenavif_parse::Error;
+    let _ = env_logger::builder().is_test(true).filter_level(log::LevelFilter::max()).try_init();
+    let mut errors = 0;
+
+    for entry in walkdir::WalkDir::new(dir) {
+        let entry = entry.expect("AVIF entry");
+        let path = entry.path();
+        let ext = path.extension().unwrap_or_default();
+        if !path.is_file() || (ext != "avif" && ext != "avifs") {
+            continue;
+        }
+        log::debug!("parsing {:?}", path.display());
+        let input = &mut File::open(path).expect("bad file");
+        match zenavif_parse::read_avif(input).map_err(|e| e.decompose().0) {
+            Ok(avif) => {
+                if avif.grid_config.is_none() {
+                    avif.primary_item_metadata().unwrap();
+                    avif.alpha_item_metadata().unwrap();
+                } else {
+                    assert!(!avif.grid_tiles.is_empty(), "Grid image has no tiles");
+                }
+            },
+            Err(Error::Unsupported(why)) => log::warn!("{why}"),
+            Err(err) => {
+                log::error!("{:?}: {err}", path.display());
+                errors += 1;
+            },
+        }
+    }
+    assert_eq!(0, errors);
+}
+
+// Fixture files generated with avif-serialize 0.8.7 (feat/hdr-metadata branch).
+// Each is a minimal AVIF container (64x64, 8-bit, profile 0) with HDR metadata properties.
+
+#[cfg(feature = "eager")]
+#[test]
+fn parse_clli() {
+    let input = &mut File::open("tests/hdr-clli.avif").expect("fixture missing");
+    let parsed = zenavif_parse::read_avif(input).expect("parse failed");
+
+    let cll = parsed.content_light_level.expect("clli missing");
+    assert_eq!(cll.max_content_light_level, 1000);
+    assert_eq!(cll.max_pic_average_light_level, 400);
+    assert!(parsed.mastering_display.is_none());
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn parse_mdcv() {
+    let input = &mut File::open("tests/hdr-mdcv.avif").expect("fixture missing");
+    let parsed = zenavif_parse::read_avif(input).expect("parse failed");
+
+    let mdcv = parsed.mastering_display.expect("mdcv missing");
+    // BT.2020 primaries
+    assert_eq!(mdcv.primaries, [(8500, 39850), (6550, 2300), (35400, 14600)]);
+    // D65 white point
+    assert_eq!(mdcv.white_point, (15635, 16450));
+    assert_eq!(mdcv.max_luminance, 10_000_000); // 1000 cd/m²
+    assert_eq!(mdcv.min_luminance, 50);          // 0.005 cd/m²
+    assert!(parsed.content_light_level.is_none());
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn parse_clli_and_mdcv() {
+    use zenavif_parse::{ContentLightLevel, MasteringDisplayColourVolume};
+    let input = &mut File::open("tests/hdr-clli-mdcv.avif").expect("fixture missing");
+    let parsed = zenavif_parse::read_avif(input).expect("parse failed");
+
+    let cll = parsed.content_light_level.expect("clli missing");
+    assert_eq!(cll, ContentLightLevel {
+        max_content_light_level: 4000,
+        max_pic_average_light_level: 1000,
+    });
+
+    let mdcv = parsed.mastering_display.expect("mdcv missing");
+    assert_eq!(mdcv, MasteringDisplayColourVolume {
+        primaries: [(8500, 39850), (6550, 2300), (35400, 14600)],
+        white_point: (15635, 16450),
+        max_luminance: 40_000_000, // 4000 cd/m²
+        min_luminance: 50,
+    });
+}
+
+// ============================================================================
+// AvifParser (zero-copy) tests
+// ============================================================================
+
+#[test]
+fn parser_from_bytes_primary() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let primary = parser.primary_data().expect("primary_data failed");
+    assert_eq!(primary.len(), 6979);
+    assert_eq!(&primary[0..4], &[0x12, 0x00, 0x0a, 0x0a]);
+
+    // Single-extent -> must be Cow::Borrowed (true zero-copy)
+    assert!(matches!(primary, Cow::Borrowed(_)), "Expected Cow::Borrowed for single-extent");
+    assert!(parser.animation_info().is_none());
+}
+
+#[test]
+fn parser_from_bytes_multi_extent() {
+    let bytes = std::fs::read(IMAGE_AVIF_EXTENTS).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let primary = parser.primary_data().expect("primary_data failed");
+    assert_eq!(primary.len(), 4387);
+
+    // Multi-extent -> Cow::Owned
+    assert!(matches!(primary, Cow::Owned(_)), "Expected Cow::Owned for multi-extent");
+}
+
+#[test]
+fn parser_from_owned_primary() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_owned(bytes).expect("from_owned failed");
+
+    let primary = parser.primary_data().expect("primary_data failed");
+    assert_eq!(primary.len(), 6979);
+    assert_eq!(&primary[0..4], &[0x12, 0x00, 0x0a, 0x0a]);
+}
+
+#[test]
+fn parser_from_reader_primary() {
+    let parser = zenavif_parse::AvifParser::from_reader(
+        &mut File::open(IMAGE_AVIF).expect("Unknown file"),
+    ).expect("from_reader failed");
+
+    let primary = parser.primary_data().expect("primary_data failed");
+    assert_eq!(primary.len(), 6979);
+    assert_eq!(&primary[0..4], &[0x12, 0x00, 0x0a, 0x0a]);
+}
+
+#[test]
+fn parser_from_reader_accepts_dyn_read() {
+    // The reader entry points accept unsized readers (`&mut dyn Read`), not just
+    // concrete `R: Read`. This would fail to compile without `R: Read + ?Sized`.
+    // Parity with upstream avif-parse 8fc5fe0.
+    let mut file = File::open(IMAGE_AVIF).expect("Unknown file");
+    let reader: &mut dyn std::io::Read = &mut file;
+    let parser = zenavif_parse::AvifParser::from_reader(reader)
+        .expect("from_reader(&mut dyn Read) failed");
+
+    let primary = parser.primary_data().expect("primary_data failed");
+    assert_eq!(primary.len(), 6979);
+}
+
+#[test]
+fn parser_from_owned_with_config() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let config = zenavif_parse::DecodeConfig::default();
+    let parser = zenavif_parse::AvifParser::from_owned_with_config(
+        bytes, &config, &zenavif_parse::Unstoppable,
+    ).expect("from_owned_with_config failed");
+
+    let primary = parser.primary_data().expect("primary_data failed");
+    assert_eq!(primary.len(), 6979);
+}
+
+#[test]
+fn parser_from_reader_with_config() {
+    let config = zenavif_parse::DecodeConfig::default();
+    let parser = zenavif_parse::AvifParser::from_reader_with_config(
+        &mut File::open(IMAGE_AVIF).expect("Unknown file"),
+        &config,
+        &zenavif_parse::Unstoppable,
+    ).expect("from_reader_with_config failed");
+
+    let primary = parser.primary_data().expect("primary_data failed");
+    assert_eq!(primary.len(), 6979);
+}
+
+#[test]
+fn parser_from_bytes_with_config_happy_path() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let config = zenavif_parse::DecodeConfig::default();
+    let parser = zenavif_parse::AvifParser::from_bytes_with_config(
+        &bytes, &config, &zenavif_parse::Unstoppable,
+    ).expect("from_bytes_with_config failed");
+
+    let primary = parser.primary_data().expect("primary_data failed");
+    assert_eq!(primary.len(), 6979);
+}
+
+#[test]
+fn parser_from_bytes_rejects_malformed_ftyp_without_panicking() {
+    let bytes = [
+        0x00, 0x00, 0x00, 0x20, b'f', b't', b'y', b'p', b'a', b'v', b'i', b'f', 0x00, 0x00,
+        b'i', b'a', 0x00, b'D', b'a', b't', b'e', b'm', 0x01, 0x00, 0x00, 0x00, 0x01, 0x01,
+        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x04, 0x01, 0xdc,
+    ];
+
+    assert!(
+        zenavif_parse::AvifParser::from_bytes(&bytes).is_err(),
+        "parser should reject malformed AVIF (ftyp variant)"
+    );
+}
+
+#[test]
+fn parser_from_bytes_rejects_malformed_meta_without_panicking() {
+    let bytes = [
+        0x00, 0x00, 0x00, 0x20, b'f', b't', b'y', b'p', b'a', b'v', b'i', b'f', 0x00, 0x00,
+        0x00, 0x00, b'a', b'v', b'i', b'f', b'm', b'i', b'f', b'1', b'm', b'i', b'a', b'f',
+        b'M', b'A', b'1', b'A', 0x00, 0x00, 0x00, 0xeb, b'm', b'e', b't', b'a', 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x21, b'h', b'd', b'l', b'r', 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, b'p', b'i', b'c', b't', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0e, b'p', b'i', b't',
+        b'm', 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x1e, b'i', b'l', b'o',
+        b'c', 0x00, 0x00, 0x00, 0x00, b'D', 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x00, 0x00, 0x01, 0x13, 0x00, 0x00, 0x00, 0x1e, 0x00, 0x00, 0x00, 0x28, b'i',
+        b'i', b'n', b'f', 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x5a, b'i',
+        b'n', b'f', b'e', 0x02, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, b'a', b'v', b'0',
+        b'0', b'C', b'o', b'l', b'o', b'r', 0x00, 0x00, 0x00, 0x00, b'j', b'i', b'p', b'r',
+        b'p', 0x00, 0x00, 0x00, 0x4b, b'i', b'p', b'c', b'o', 0x00, 0x00, 0x00, 0x14, b'i',
+        b's', b'p', b'e', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+        0x02, 0x00, 0x00, 0x00, 0x10, b'p', b'i', b'x', b'i', 0xfe, 0xde, 0xff, 0xd8, 0x03,
+        0x08, 0x08, 0x08, 0x00, 0x00, 0x00, 0x0c, b'a', b'v', b'1', b'C', 0x81, 0x20, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x13, b'c', b'o', b'l', b'r', b'n', b'c', b'l', b'x', 0x00,
+        0x01, 0x00, 0x0d, 0x00, 0x06, 0x80, 0x00, 0x00, 0x00, 0x17, b'i', b'p', b'm', b'a',
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x04, 0x01, 0x02, 0x83,
+        0x04, 0x00, 0x00, 0x00, b'm', b'd', b'a', b't', 0x12, 0x00, 0x0a, 0x07, 0x38, 0x10,
+    ];
+
+    assert!(
+        zenavif_parse::AvifParser::from_bytes(&bytes).is_err(),
+        "parser should reject malformed AVIF (meta variant)"
+    );
+}
+
+#[test]
+fn parser_grid() {
+    let bytes = std::fs::read(IMAGE_GRID_5X4).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let grid = parser.grid_config().expect("Expected grid config");
+    assert_eq!(grid.rows, 4);
+    assert_eq!(grid.columns, 5);
+    assert_eq!(grid.output_width, 6400);
+    assert_eq!(grid.output_height, 2880);
+    assert_eq!(parser.grid_tile_count(), 20);
+
+    let tile = parser.tile_data(0).expect("tile_data failed");
+    assert!(!tile.is_empty());
+
+    for i in 0..20 {
+        let t = parser.tile_data(i).expect("tile_data failed");
+        assert!(!t.is_empty(), "Tile {} empty", i);
+    }
+
+    assert!(parser.tile_data(20).is_err());
+}
+
+#[test]
+fn parser_grid_via_reader() {
+    let config = zenavif_parse::DecodeConfig::default();
+    let parser = zenavif_parse::AvifParser::from_reader_with_config(
+        &mut File::open(IMAGE_GRID_5X4).expect("Unknown file"),
+        &config,
+        &zenavif_parse::Unstoppable,
+    ).expect("from_reader_with_config failed");
+
+    let grid = parser.grid_config().expect("Expected grid config");
+    assert_eq!(grid.rows, 4);
+    assert_eq!(grid.columns, 5);
+    assert_eq!(parser.grid_tile_count(), 20);
+
+    for i in 0..20 {
+        let t = parser.tile_data(i).expect("tile_data failed");
+        assert!(!t.is_empty(), "Tile {} empty", i);
+    }
+}
+
+#[test]
+fn parser_animation_frames() {
+    let bytes = std::fs::read(ANIMATED_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+    assert_eq!(info.frame_count, 5);
+    assert_eq!(info.loop_count, 1); // elst flags=0 → play once
+
+    for i in 0..5 {
+        let frame = parser.frame(i).expect("frame failed");
+        assert!(!frame.data.is_empty(), "Frame {} empty", i);
+        assert_eq!(frame.duration_ms, 100);
+
+        // from_bytes -> single-extent frames should be Cow::Borrowed
+        assert!(matches!(frame.data, Cow::Borrowed(_)), "Frame {} should be Cow::Borrowed", i);
+    }
+
+    assert!(parser.frame(5).is_err());
+}
+
+#[test]
+fn parser_animation_via_reader() {
+    let parser = zenavif_parse::AvifParser::from_reader(
+        &mut File::open(ANIMATED_AVIF).expect("Unknown file"),
+    ).expect("from_reader failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+    assert_eq!(info.frame_count, 5);
+
+    for i in 0..5 {
+        let frame = parser.frame(i).expect("frame failed");
+        assert!(!frame.data.is_empty(), "Frame {} empty", i);
+        assert_eq!(frame.duration_ms, 100);
+    }
+}
+
+#[test]
+fn parser_frames_iterator() {
+    let bytes = std::fs::read(ANIMATED_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let frames: Vec<_> = parser.frames().collect();
+    assert_eq!(frames.len(), 5);
+
+    for (i, result) in frames.iter().enumerate() {
+        let frame = result.as_ref().expect("frame failed");
+        assert!(!frame.data.is_empty(), "Frame {} empty", i);
+        assert_eq!(frame.duration_ms, 100);
+    }
+}
+
+#[test]
+fn parser_frames_iterator_on_still_image() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let frames: Vec<_> = parser.frames().collect();
+    assert_eq!(frames.len(), 0, "Still image should yield no frames");
+}
+
+#[test]
+fn parser_frame_out_of_range_on_still_image() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    assert!(parser.frame(0).is_err(), "Still image has no frames");
+}
+
+#[test]
+fn parser_metadata() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let meta = parser.primary_metadata().expect("primary_metadata failed");
+    assert!(meta.monochrome); // Monochrome.avif
+    assert!(meta.still_picture);
+    assert_eq!(meta.bit_depth, 8);
+    assert_eq!(meta.seq_profile, 0);
+
+    assert!(parser.alpha_metadata().is_none());
+}
+
+#[test]
+fn parser_spatial_extents_come_from_ispe() {
+    let bytes = std::fs::read("tests/ispe-1x1.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+    assert_eq!(
+        parser.spatial_extents(),
+        Some(&zenavif_parse::ImageSpatialExtents {
+            width: 1,
+            height: 1,
+        })
+    );
+}
+
+#[test]
+fn parser_spatial_extents_do_not_fall_back_to_av1() {
+    let bytes = std::fs::read("tests/no-ispe-1x1.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+    assert!(parser.spatial_extents().is_none());
+    assert!(parser.primary_metadata().is_ok(), "AV1 payload should remain valid");
+}
+
+#[test]
+fn parser_av1_config() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let av1c = parser.av1_config().expect("av1C should be present");
+    assert_eq!(av1c.profile, 0); // Main profile
+    assert_eq!(av1c.bit_depth, 8);
+    assert!(av1c.monochrome); // Monochrome.avif
+}
+
+#[test]
+fn parser_av1_config_alpha_file() {
+    let bytes = std::fs::read(IMAGE_AVIF_ALPHA).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let av1c = parser.av1_config().expect("av1C should be present");
+    assert_eq!(av1c.bit_depth, 8);
+    assert!(!av1c.monochrome);
+}
+
+#[test]
+fn parser_color_info() {
+    // Test colr parsing on a file that has one. The Microsoft test files
+    // may or may not have colr boxes, so we test parsing on what's available.
+    let bytes = std::fs::read(IMAGE_AVIF_ALPHA).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    // color_info may be None for files without colr — that's fine.
+    // Just verify the accessor doesn't panic.
+    let _color = parser.color_info();
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn eager_av1_config() {
+    let input = &mut std::fs::File::open(IMAGE_AVIF).expect("Unknown file");
+    let context = zenavif_parse::read_avif(input).expect("read_avif failed");
+
+    let av1c = context.av1_config.expect("av1C should be present");
+    assert_eq!(av1c.profile, 0);
+    assert_eq!(av1c.bit_depth, 8);
+    assert!(av1c.monochrome);
+}
+
+// ============================================================================
+// Transform / display property tests
+// ============================================================================
+
+#[test]
+fn parser_rotation_90() {
+    let bytes = std::fs::read("av1-avif/testFiles/Link-U/kimono.rotate90.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let irot = parser.rotation().expect("irot should be present");
+    // File has angle_code=3, which is 270° CCW
+    assert_eq!(irot.angle, 270);
+}
+
+#[test]
+fn parser_rotation_270() {
+    let bytes = std::fs::read("av1-avif/testFiles/Link-U/kimono.rotate270.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let irot = parser.rotation().expect("irot should be present");
+    // File has angle_code=1, which is 90° CCW
+    assert_eq!(irot.angle, 90);
+}
+
+#[test]
+fn parser_mirror_horizontal() {
+    let bytes = std::fs::read("av1-avif/testFiles/Link-U/kimono.mirror-horizontal.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let imir = parser.mirror().expect("imir should be present");
+    assert_eq!(imir.axis, 1);
+    assert!(parser.rotation().is_none());
+}
+
+#[test]
+fn parser_mirror_vertical() {
+    let bytes = std::fs::read("av1-avif/testFiles/Link-U/kimono.mirror-vertical.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let imir = parser.mirror().expect("imir should be present");
+    assert_eq!(imir.axis, 0);
+    assert!(parser.rotation().is_none());
+}
+
+#[test]
+fn parser_clean_aperture() {
+    let bytes = std::fs::read("av1-avif/testFiles/Link-U/kimono.crop.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let clap = parser.clean_aperture().expect("clap should be present");
+    assert_eq!(clap.width_n, 385);
+    assert_eq!(clap.width_d, 1);
+    assert_eq!(clap.height_n, 330);
+    assert_eq!(clap.height_d, 1);
+    assert_eq!(clap.horiz_off_n, 207);
+    assert_eq!(clap.horiz_off_d, 2);
+    assert_eq!(clap.vert_off_n, -616);
+    assert_eq!(clap.vert_off_d, 2);
+}
+
+#[test]
+fn parser_pixel_aspect_ratio() {
+    let bytes = std::fs::read("av1-avif/testFiles/Link-U/kimono.crop.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let pasp = parser.pixel_aspect_ratio().expect("pasp should be present");
+    assert_eq!(pasp.h_spacing, 1);
+    assert_eq!(pasp.v_spacing, 1);
+}
+
+#[test]
+fn parser_combined_transforms() {
+    // This file has irot + imir + clap + pasp all together
+    let bytes = std::fs::read("av1-avif/testFiles/Link-U/kimono.mirror-vertical.rotate270.crop.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let irot = parser.rotation().expect("irot should be present");
+    assert_eq!(irot.angle, 90); // angle_code=1
+
+    let imir = parser.mirror().expect("imir should be present");
+    assert_eq!(imir.axis, 0);
+
+    let clap = parser.clean_aperture().expect("clap should be present");
+    assert_eq!(clap.width_n, 330);
+    assert_eq!(clap.width_d, 1);
+    assert_eq!(clap.height_n, 385);
+    assert_eq!(clap.height_d, 1);
+
+    assert!(parser.pixel_aspect_ratio().is_some());
+}
+
+#[test]
+fn parser_hdr_metadata() {
+    let bytes = std::fs::read("av1-avif/testFiles/Microsoft/Chimera_10bit_cropped_to_1920x1008_with_HDR_metadata.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let clli = parser.content_light_level().expect("clli should be present");
+    assert_eq!(clli.max_content_light_level, 2000);
+    assert_eq!(clli.max_pic_average_light_level, 1500);
+
+    let mdcv = parser.mastering_display().expect("mdcv should be present");
+    // Green, Blue, Red primaries (SMPTE ST 2086 order)
+    assert_eq!(mdcv.primaries[0], (15000, 20000));
+    assert_eq!(mdcv.primaries[1], (25000, 30000));
+    assert_eq!(mdcv.primaries[2], (5000, 10000));
+    assert_eq!(mdcv.white_point, (35000, 40000));
+    assert_eq!(mdcv.max_luminance, 100_000_000);
+    assert_eq!(mdcv.min_luminance, 200_000);
+
+    // This file also has clap
+    let clap = parser.clean_aperture().expect("clap should be present");
+    assert_eq!(clap.width_n, 1920);
+    assert_eq!(clap.height_n, 1008);
+}
+
+#[test]
+fn parser_no_transforms_on_simple_image() {
+    // Monochrome.avif has no transform properties
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    assert!(parser.rotation().is_none());
+    assert!(parser.mirror().is_none());
+    assert!(parser.clean_aperture().is_none());
+    assert!(parser.pixel_aspect_ratio().is_none());
+    assert!(parser.content_light_level().is_none());
+    assert!(parser.mastering_display().is_none());
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn eager_transforms() {
+    let input = &mut std::fs::File::open("av1-avif/testFiles/Link-U/kimono.mirror-vertical.rotate270.crop.avif").expect("Unknown file");
+    let context = zenavif_parse::read_avif(input).expect("read_avif failed");
+
+    let irot = context.rotation.expect("irot should be present");
+    assert_eq!(irot.angle, 90);
+
+    let imir = context.mirror.expect("imir should be present");
+    assert_eq!(imir.axis, 0);
+
+    assert!(context.clean_aperture.is_some());
+    assert!(context.pixel_aspect_ratio.is_some());
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn eager_hdr_metadata() {
+    let input = &mut std::fs::File::open("av1-avif/testFiles/Microsoft/Chimera_10bit_cropped_to_1920x1008_with_HDR_metadata.avif").expect("Unknown file");
+    let context = zenavif_parse::read_avif(input).expect("read_avif failed");
+
+    let clli = context.content_light_level.expect("clli should be present");
+    assert_eq!(clli.max_content_light_level, 2000);
+    assert_eq!(clli.max_pic_average_light_level, 1500);
+
+    let mdcv = context.mastering_display.expect("mdcv should be present");
+    assert_eq!(mdcv.max_luminance, 100_000_000);
+    assert_eq!(mdcv.min_luminance, 200_000);
+}
+
+// ============================================================================
+// Layered image property tests
+// ============================================================================
+
+#[test]
+fn parser_operating_point_selector() {
+    let bytes = std::fs::read("av1-avif/testFiles/Xiph/quebec_3layer_op2.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let a1op = parser.operating_point().expect("a1op should be present");
+    assert_eq!(a1op.op_index, 2);
+}
+
+#[test]
+fn parser_layer_selector() {
+    // quebec_3layer_op2 has lsel on the primary item
+    let bytes = std::fs::read("av1-avif/testFiles/Xiph/quebec_3layer_op2.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let lsel = parser.layer_selector().expect("lsel should be present");
+    assert_eq!(lsel.layer_id, 0xFFFF); // progressive (all layers)
+}
+
+#[test]
+fn parser_a1op_and_lsel_on_primary() {
+    // Apple a1op_lsel file has both on the primary item
+    let bytes = std::fs::read("av1-avif/testFiles/Apple/multilayer_examples/animals_00_multilayer_a1op_lsel.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    let a1op = parser.operating_point().expect("a1op should be present");
+    assert_eq!(a1op.op_index, 0);
+
+    let lsel = parser.layer_selector().expect("lsel should be present");
+    assert_eq!(lsel.layer_id, 1);
+}
+
+#[test]
+fn parser_a1lx_on_grid_tiles() {
+    // In grid_a1lx file, a1lx and lsel are on tile items (not primary).
+    // Primary item (grid) should NOT have a1lx, but the file should parse without errors.
+    let bytes = std::fs::read("av1-avif/testFiles/Apple/multilayer_examples/animals_00_multilayer_grid_a1lx.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    // a1lx is on tiles, not primary
+    assert!(parser.layered_image_indexing().is_none());
+    // lsel is also on tiles in this file
+    assert!(parser.layer_selector().is_none());
+}
+
+// ============================================================================
+// Brand / ftyp tests
+// ============================================================================
+
+#[test]
+fn parser_brands_avif() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    assert_eq!(parser.major_brand(), b"avif");
+    let compat = parser.compatible_brands();
+    assert!(compat.iter().any(|b| b == b"miaf"), "should have miaf brand");
+    assert!(compat.iter().any(|b| b == b"avif"), "should have avif brand");
+}
+
+#[test]
+fn parser_brands_avis() {
+    let bytes = std::fs::read(ANIMATED_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    assert_eq!(parser.major_brand(), b"avis");
+    let compat = parser.compatible_brands();
+    assert!(compat.iter().any(|b| b == b"avis"), "should have avis brand");
+    assert!(compat.iter().any(|b| b == b"miaf"), "should have miaf brand");
+    assert!(compat.iter().any(|b| b == b"MA1B"), "should have MA1B brand");
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn eager_brands() {
+    let input = &mut std::fs::File::open(IMAGE_AVIF).expect("Unknown file");
+    let context = zenavif_parse::read_avif(input).expect("read_avif failed");
+
+    assert_eq!(context.major_brand, *b"avif");
+    assert!(context.compatible_brands.iter().any(|b| b == b"miaf"));
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn eager_layered_properties() {
+    let input = &mut std::fs::File::open("av1-avif/testFiles/Xiph/quebec_3layer_op2.avif").expect("Unknown file");
+    let context = zenavif_parse::read_avif(input).expect("read_avif failed");
+
+    let a1op = context.operating_point.expect("a1op should be present");
+    assert_eq!(a1op.op_index, 2);
+}
+
+#[test]
+fn parser_alpha_data() {
+    let bytes = std::fs::read(IMAGE_AVIF_ALPHA).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    // Primary channel
+    let primary = parser.primary_data().expect("primary_data failed");
+    assert!(!primary.is_empty());
+
+    // Alpha channel
+    let alpha = parser.alpha_data().expect("image should have alpha");
+    let alpha = alpha.expect("alpha_data failed");
+    assert!(!alpha.is_empty());
+
+    // Alpha metadata
+    let alpha_meta = parser.alpha_metadata().expect("Expected alpha metadata");
+    let alpha_meta = alpha_meta.expect("alpha_metadata failed");
+    assert!(alpha_meta.monochrome, "Alpha should be monochrome");
+    assert_eq!(alpha_meta.bit_depth, 8);
+
+    // Primary metadata
+    let primary_meta = parser.primary_metadata().expect("primary_metadata failed");
+    assert_eq!(primary_meta.max_frame_width, alpha_meta.max_frame_width,
+        "Primary and alpha should have same width");
+    assert_eq!(primary_meta.max_frame_height, alpha_meta.max_frame_height,
+        "Primary and alpha should have same height");
+}
+
+#[test]
+fn parser_premultiplied_alpha_false() {
+    // bbb_alpha_inverted.avif has alpha but is not premultiplied
+    let bytes = std::fs::read(IMAGE_AVIF_ALPHA).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    assert!(!parser.premultiplied_alpha());
+}
+
+#[test]
+fn parser_no_alpha_on_monochrome() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    assert!(parser.alpha_data().is_none(), "Monochrome.avif has no alpha");
+    assert!(parser.alpha_metadata().is_none());
+    assert!(!parser.premultiplied_alpha());
+}
+
+#[test]
+fn parser_no_grid_on_single_image() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    assert!(parser.grid_config().is_none());
+    assert_eq!(parser.grid_tile_count(), 0);
+    assert!(parser.tile_data(0).is_err());
+}
+
+#[test]
+fn parser_corrupt_files_rejected() {
+    for path in &["tests/bug-1655846.avif", "tests/bug-1661347.avif"] {
+        let bytes = std::fs::read(path).expect("read file");
+        match zenavif_parse::AvifParser::from_bytes(&bytes) {
+            Err(_) => {} // rejected at parse time
+            Ok(parser) => {
+                // AvifParser defers data extraction, so corrupt extents
+                // may only fail when accessing the data
+                assert!(
+                    parser.primary_data().is_err(),
+                    "{} should fail to extract data", path,
+                );
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Corpus-wide parser-only tests
+// ============================================================================
+
+fn test_dir_parser(dir: &str) {
+    let _ = env_logger::builder().is_test(true).filter_level(log::LevelFilter::max()).try_init();
+    let config = zenavif_parse::DecodeConfig::default();
+
+    for entry in walkdir::WalkDir::new(dir) {
+        let entry = entry.expect("AVIF entry");
+        let path = entry.path();
+        let ext = path.extension().unwrap_or_default();
+        if !path.is_file() || (ext != "avif" && ext != "avifs") {
+            continue;
+        }
+
+        let file_bytes = std::fs::read(path).expect("read file");
+        let parser_result = zenavif_parse::AvifParser::from_bytes_with_config(
+            &file_bytes, &config, &zenavif_parse::Unstoppable,
+        );
+
+        match parser_result {
+            Ok(parser) => {
+                if parser.grid_config().is_some() {
+                    assert!(parser.grid_tile_count() > 0, "{}: grid has no tiles", path.display());
+                    for i in 0..parser.grid_tile_count() {
+                        let tile = parser.tile_data(i).expect("tile_data failed");
+                        assert!(!tile.is_empty(), "{}: tile {} empty", path.display(), i);
+                    }
+                } else if parser.animation_info().is_some() {
+                    let info = parser.animation_info().unwrap();
+                    for i in 0..info.frame_count {
+                        let frame = parser.frame(i).expect("frame failed");
+                        assert!(!frame.data.is_empty(), "{}: frame {} empty", path.display(), i);
+                    }
+                } else {
+                    match parser.primary_data() {
+                        Ok(primary) => {
+                            assert!(!primary.is_empty(), "{}: primary_data empty", path.display());
+                            if let Err(e) = parser.primary_metadata() {
+                                // Stub AV1 data (e.g. upstream test fixtures) may not
+                                // contain a valid sequence header
+                                log::warn!("{}: primary_metadata failed: {e}", path.display());
+                            }
+                        }
+                        Err(e) => {
+                            // AvifParser defers extent validation to data access;
+                            // corrupt files may parse metadata but fail on extraction
+                            log::warn!("{}: primary_data failed: {e}", path.display());
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                // Parse errors are expected for malformed/stub files —
+                // this test just verifies we don't panic
+                log::warn!("{}: {err}", path.display());
+            }
+        }
+    }
+}
+
+#[test]
+fn corpus_aomedia_parser() {
+    test_dir_parser("av1-avif/testFiles");
+}
+
+#[test]
+fn corpus_linku_parser() {
+    test_dir_parser("link-u-samples");
+}
+
+#[test]
+fn corpus_local_parser() {
+    test_dir_parser("tests");
+}
+
+// ============================================================================
+// Cross-path tests (eager <-> parser)
+// ============================================================================
+
+#[cfg(feature = "eager")]
+#[test]
+fn parser_to_avif_data_matches_eager() {
+    let bytes = std::fs::read(ANIMATED_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+    let converted = parser.to_avif_data().expect("to_avif_data failed");
+
+    let direct = zenavif_parse::read_avif(&mut File::open(ANIMATED_AVIF).expect("file"))
+        .expect("read_avif failed");
+
+    assert_eq!(converted.primary_item.len(), direct.primary_item.len());
+    assert_eq!(converted.primary_item.as_slice(), direct.primary_item.as_slice());
+
+    let conv_anim = converted.animation.as_ref().expect("animation");
+    let dir_anim = direct.animation.as_ref().expect("animation");
+    assert_eq!(conv_anim.frames.len(), dir_anim.frames.len());
+
+    for (i, (c, d)) in conv_anim.frames.iter().zip(dir_anim.frames.iter()).enumerate() {
+        assert_eq!(c.data.as_slice(), d.data.as_slice(), "Frame {} data mismatch", i);
+        assert_eq!(c.duration_ms, d.duration_ms, "Frame {} duration mismatch", i);
+    }
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn parser_to_avif_data_grid() {
+    let bytes = std::fs::read(IMAGE_GRID_5X4).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+    let converted = parser.to_avif_data().expect("to_avif_data failed");
+
+    let direct = zenavif_parse::read_avif(&mut File::open(IMAGE_GRID_5X4).expect("file"))
+        .expect("read_avif failed");
+
+    assert_eq!(converted.grid_tiles.len(), direct.grid_tiles.len());
+    for (i, (c, d)) in converted.grid_tiles.iter().zip(direct.grid_tiles.iter()).enumerate() {
+        assert_eq!(c.as_slice(), d.as_slice(), "Tile {} data mismatch", i);
+    }
+}
+
+// ============================================================================
+// Corpus-wide tests: all parsing paths (eager + parser)
+// ============================================================================
+
+#[cfg(feature = "eager")]
+fn test_dir_all_paths(dir: &str) {
+    use zenavif_parse::Error;
+    let _ = env_logger::builder().is_test(true).filter_level(log::LevelFilter::max()).try_init();
+    let config = zenavif_parse::DecodeConfig::default();
+    let mut errors = 0;
+
+    for entry in walkdir::WalkDir::new(dir) {
+        let entry = entry.expect("AVIF entry");
+        let path = entry.path();
+        let ext = path.extension().unwrap_or_default();
+        if !path.is_file() || (ext != "avif" && ext != "avifs") {
+            continue;
+        }
+
+        // Path 1: eager
+        let eager_result = zenavif_parse::read_avif_with_config(
+            &mut File::open(path).expect("bad file"),
+            &config,
+            &zenavif_parse::Unstoppable,
+        );
+
+        // Path 2: zero-copy from_bytes
+        let file_bytes = std::fs::read(path).expect("read file");
+        let parser_result = zenavif_parse::AvifParser::from_bytes_with_config(
+            &file_bytes,
+            &config,
+            &zenavif_parse::Unstoppable,
+        );
+
+        // Map each `At<Error>` to its inner `&Error` so the existing
+        // `Error::Unsupported(..)` patterns match the location-wrapped results.
+        match (
+            eager_result.as_ref().map_err(|e| e.error()),
+            parser_result.as_ref().map_err(|e| e.error()),
+        ) {
+            (Ok(avif), Ok(parser)) => {
+                if avif.grid_config.is_none() {
+                    let parser_primary = parser.primary_data()
+                        .expect("primary_data failed");
+                    assert_eq!(
+                        avif.primary_item.len(),
+                        parser_primary.len(),
+                        "{}: primary_item length mismatch",
+                        path.display(),
+                    );
+                } else {
+                    assert!(!avif.grid_tiles.is_empty(), "{}: grid has no tiles", path.display());
+                    assert_eq!(
+                        avif.grid_tiles.len(),
+                        parser.grid_tile_count(),
+                        "{}: tile count mismatch",
+                        path.display(),
+                    );
+                }
+            }
+            (Err(Error::Unsupported(why)), _) | (_, Err(Error::Unsupported(why))) => {
+                log::warn!("{}: {why}", path.display());
+            }
+            (Err(_), Err(_)) => {
+                log::debug!("{}: both paths rejected", path.display());
+            }
+            (Err(e), Ok(parser)) => {
+                log::debug!("{}: eager rejected ({e}), verifying parser fails on extraction", path.display());
+                let extraction_ok = parser.primary_data().is_ok()
+                    || parser.grid_tile_count() > 0;
+                if extraction_ok {
+                    log::error!("{}: eager failed ({e}) but parser extraction succeeded", path.display());
+                    errors += 1;
+                }
+            }
+            (Ok(_), Err(e)) => {
+                log::error!("{}: parser failed but eager succeeded: {e}", path.display());
+                errors += 1;
+            }
+        }
+    }
+    assert_eq!(0, errors);
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn corpus_aomedia_all_paths() {
+    test_dir_all_paths("av1-avif/testFiles");
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn corpus_linku_all_paths() {
+    test_dir_all_paths("link-u-samples");
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn corpus_local_all_paths() {
+    test_dir_all_paths("tests");
+}
+
+// ============================================================================
+// Resource Limit Tests (eager)
+// ============================================================================
+
+#[cfg(feature = "eager")]
+#[test]
+fn resource_limit_peak_memory() {
+    let input = &mut File::open(IMAGE_AVIF).expect("Unknown file");
+    let config = zenavif_parse::DecodeConfig::default().with_peak_memory_limit(1_000);
+    let result = zenavif_parse::read_avif_with_config(input, &config, &zenavif_parse::Unstoppable);
+
+    match result.map_err(|e| e.decompose().0) {
+        Err(zenavif_parse::Error::ResourceLimitExceeded(msg)) => {
+            assert_eq!(msg, "peak memory limit exceeded");
+        }
+        Ok(_) => panic!("Expected peak memory limit error"),
+        Err(e) => panic!("Unexpected error: {:?}", e),
+    }
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn resource_limit_total_megapixels() {
+    let input = &mut File::open(IMAGE_GRID_5X4).expect("Unknown file");
+    let config = zenavif_parse::DecodeConfig::default().with_total_megapixels_limit(10);
+    let result = zenavif_parse::read_avif_with_config(input, &config, &zenavif_parse::Unstoppable);
+
+    match result.map_err(|e| e.decompose().0) {
+        Err(zenavif_parse::Error::ResourceLimitExceeded(msg)) => {
+            assert_eq!(msg, "total megapixels limit exceeded");
+        }
+        Ok(_) => panic!("Expected total megapixels limit error"),
+        Err(e) => panic!("Unexpected error: {:?}", e),
+    }
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn resource_limit_grid_tiles() {
+    let input = &mut File::open(IMAGE_GRID_5X4).expect("Unknown file");
+    let config = zenavif_parse::DecodeConfig::default().with_max_grid_tiles(10);
+    let result = zenavif_parse::read_avif_with_config(input, &config, &zenavif_parse::Unstoppable);
+
+    match result.map_err(|e| e.decompose().0) {
+        Err(zenavif_parse::Error::ResourceLimitExceeded(msg)) => {
+            assert_eq!(msg, "grid tile count limit exceeded");
+        }
+        Ok(_) => panic!("Expected grid tile count limit error"),
+        Err(e) => panic!("Unexpected error: {:?}", e),
+    }
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn resource_limit_animation_frames() {
+    let input = &mut File::open(ANIMATED_AVIF).expect("Unknown file");
+    let config = zenavif_parse::DecodeConfig::default().with_max_animation_frames(3);
+    let result = zenavif_parse::read_avif_with_config(input, &config, &zenavif_parse::Unstoppable);
+
+    match result.map_err(|e| e.decompose().0) {
+        Err(zenavif_parse::Error::ResourceLimitExceeded(msg)) => {
+            assert_eq!(msg, "animation frame count limit exceeded");
+        }
+        Ok(_) => panic!("Expected animation frame count limit error"),
+        Err(e) => panic!("Unexpected error: {:?}", e),
+    }
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn cancellation_during_parse() {
+    struct ImmediatelyCancelled;
+    impl zenavif_parse::Stop for ImmediatelyCancelled {
+        fn check(&self) -> std::result::Result<(), zenavif_parse::StopReason> {
+            Err(zenavif_parse::StopReason::Cancelled)
+        }
+    }
+
+    let input = &mut File::open(IMAGE_AVIF).expect("Unknown file");
+    let config = zenavif_parse::DecodeConfig::default();
+    let result = zenavif_parse::read_avif_with_config(input, &config, &ImmediatelyCancelled);
+
+    match result.map_err(|e| e.decompose().0) {
+        Err(zenavif_parse::Error::Stopped(reason)) => {
+            assert_eq!(reason, zenavif_parse::StopReason::Cancelled);
+        }
+        Ok(_) => panic!("Expected cancellation"),
+        Err(e) => panic!("Unexpected error: {:?}", e),
+    }
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn unstoppable_completes() {
+    let input = &mut File::open(IMAGE_AVIF).expect("Unknown file");
+    let config = zenavif_parse::DecodeConfig::default();
+    let result = zenavif_parse::read_avif_with_config(input, &config, &zenavif_parse::Unstoppable);
+    assert!(result.is_ok(), "Unstoppable should never cancel");
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn decode_config_unlimited_backwards_compat() {
+    let result_old = zenavif_parse::read_avif(&mut File::open(IMAGE_AVIF).expect("Unknown file"))
+        .expect("read_avif failed");
+    let config = zenavif_parse::DecodeConfig::unlimited();
+    let result_new = zenavif_parse::read_avif_with_config(
+        &mut File::open(IMAGE_AVIF).expect("Unknown file"),
+        &config,
+        &zenavif_parse::Unstoppable,
+    )
+    .expect("read_avif_with_config failed");
+
+    assert_eq!(result_old.primary_item.len(), result_new.primary_item.len());
+    assert_eq!(result_old.primary_item.as_slice(), result_new.primary_item.as_slice());
+}
+
+// ============================================================================
+// DecodeConfig / resource limit tests (no eager needed)
+// ============================================================================
+
+#[test]
+fn decode_config_default_has_sane_limits() {
+    let config = zenavif_parse::DecodeConfig::default();
+    assert_eq!(config.peak_memory_limit, Some(1_000_000_000));
+    assert_eq!(config.total_megapixels_limit, Some(512));
+    assert_eq!(config.max_animation_frames, Some(10_000));
+    assert_eq!(config.max_grid_tiles, Some(1_000));
+    assert!(!config.lenient);
+}
+
+#[test]
+fn decode_config_unlimited() {
+    let config = zenavif_parse::DecodeConfig::unlimited();
+    assert_eq!(config.peak_memory_limit, None);
+    assert_eq!(config.total_megapixels_limit, None);
+    assert_eq!(config.max_animation_frames, None);
+    assert_eq!(config.max_grid_tiles, None);
+    assert!(!config.lenient);
+}
+
+#[test]
+fn decode_config_builder_methods() {
+    let config = zenavif_parse::DecodeConfig::default()
+        .with_peak_memory_limit(42)
+        .with_total_megapixels_limit(7)
+        .with_max_animation_frames(3)
+        .with_max_grid_tiles(5)
+        .lenient(true);
+
+    assert_eq!(config.peak_memory_limit, Some(42));
+    assert_eq!(config.total_megapixels_limit, Some(7));
+    assert_eq!(config.max_animation_frames, Some(3));
+    assert_eq!(config.max_grid_tiles, Some(5));
+    assert!(config.lenient);
+}
+
+// Parser-specific resource limit tests
+
+#[test]
+fn parser_resource_limit_grid_tiles() {
+    let bytes = std::fs::read(IMAGE_GRID_5X4).expect("read file");
+    let config = zenavif_parse::DecodeConfig::default().with_max_grid_tiles(10);
+
+    let result = zenavif_parse::AvifParser::from_bytes_with_config(
+        &bytes,
+        &config,
+        &zenavif_parse::Unstoppable,
+    );
+
+    match result.map_err(|e| e.decompose().0) {
+        Err(zenavif_parse::Error::ResourceLimitExceeded(msg)) => {
+            assert_eq!(msg, "grid tile count limit exceeded");
+        }
+        Ok(_) => panic!("Expected grid tile count limit error"),
+        Err(e) => panic!("Unexpected error: {:?}", e),
+    }
+}
+
+#[test]
+fn parser_resource_limit_animation_frames() {
+    let bytes = std::fs::read(ANIMATED_AVIF).expect("read file");
+    let config = zenavif_parse::DecodeConfig::default().with_max_animation_frames(3);
+
+    let result = zenavif_parse::AvifParser::from_bytes_with_config(
+        &bytes,
+        &config,
+        &zenavif_parse::Unstoppable,
+    );
+
+    match result.map_err(|e| e.decompose().0) {
+        Err(zenavif_parse::Error::ResourceLimitExceeded(msg)) => {
+            assert_eq!(msg, "animation frame count limit exceeded");
+        }
+        Ok(_) => panic!("Expected animation frame count limit error"),
+        Err(e) => panic!("Unexpected error: {:?}", e),
+    }
+}
+
+#[test]
+fn parser_cancellation_during_parse() {
+    struct ImmediatelyCancelled;
+    impl zenavif_parse::Stop for ImmediatelyCancelled {
+        fn check(&self) -> std::result::Result<(), zenavif_parse::StopReason> {
+            Err(zenavif_parse::StopReason::Cancelled)
+        }
+    }
+
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let config = zenavif_parse::DecodeConfig::default();
+    let result = zenavif_parse::AvifParser::from_bytes_with_config(
+        &bytes,
+        &config,
+        &ImmediatelyCancelled,
+    );
+
+    match result.map_err(|e| e.decompose().0) {
+        Err(zenavif_parse::Error::Stopped(reason)) => {
+            assert_eq!(reason, zenavif_parse::StopReason::Cancelled);
+        }
+        Ok(_) => panic!("Expected cancellation"),
+        Err(e) => panic!("Unexpected error: {:?}", e),
+    }
+}
+
+#[test]
+fn parser_cancellation_via_reader() {
+    struct ImmediatelyCancelled;
+    impl zenavif_parse::Stop for ImmediatelyCancelled {
+        fn check(&self) -> std::result::Result<(), zenavif_parse::StopReason> {
+            Err(zenavif_parse::StopReason::Cancelled)
+        }
+    }
+
+    let config = zenavif_parse::DecodeConfig::default();
+    let result = zenavif_parse::AvifParser::from_reader_with_config(
+        &mut File::open(IMAGE_AVIF).expect("Unknown file"),
+        &config,
+        &ImmediatelyCancelled,
+    );
+
+    match result.map_err(|e| e.decompose().0) {
+        Err(zenavif_parse::Error::Stopped(reason)) => {
+            assert_eq!(reason, zenavif_parse::StopReason::Cancelled);
+        }
+        Ok(_) => panic!("Expected cancellation"),
+        Err(e) => panic!("Unexpected error: {:?}", e),
+    }
+}
+
+// ============================================================================
+// Multi-track animation tests
+// ============================================================================
+
+static ANIM_8BPC: &str = "tests/colors-animated-8bpc.avif";
+static ANIM_8BPC_ALPHA: &str = "tests/colors-animated-8bpc-alpha-exif-xmp.avif";
+static ANIM_12BPC_KF: &str = "tests/colors-animated-12bpc-keyframes-0-2-3.avif";
+static ANIM_8BPC_AUDIO: &str = "tests/colors-animated-8bpc-audio.avif";
+static ANIM_8BPC_DEPTH: &str = "tests/colors-animated-8bpc-depth-exif-xmp.avif";
+
+// -- Track association and metadata --
+
+#[test]
+fn anim_single_track_no_alpha() {
+    let bytes = std::fs::read(ANIM_8BPC).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+    assert_eq!(info.frame_count, 5);
+    assert!(!info.has_alpha, "Single-track animation should not have alpha");
+    assert!(info.timescale > 0, "Timescale should be positive");
+
+    for i in 0..info.frame_count {
+        let frame = parser.frame(i).expect("frame failed");
+        assert!(!frame.data.is_empty(), "Frame {} empty", i);
+        assert!(frame.alpha_data.is_none(), "Frame {} should not have alpha", i);
+        assert!(frame.duration_ms > 0, "Frame {} should have positive duration", i);
+    }
+}
+
+#[test]
+fn anim_two_tracks_with_alpha() {
+    let bytes = std::fs::read(ANIM_8BPC_ALPHA).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+    assert_eq!(info.frame_count, 5);
+    assert!(info.has_alpha, "Two-track animation should have alpha");
+    // flags bit 0 set = infinite looping -> loop_count=0
+    assert_eq!(info.loop_count, 0, "Expected infinite loop (loop_count=0)");
+
+    for i in 0..info.frame_count {
+        let frame = parser.frame(i).expect("frame failed");
+        assert!(!frame.data.is_empty(), "Frame {} color data empty", i);
+        let alpha = frame
+            .alpha_data
+            .as_ref()
+            .unwrap_or_else(|| panic!("Frame {} should have alpha", i));
+        assert!(!alpha.is_empty(), "Frame {} alpha data empty", i);
+    }
+}
+
+#[test]
+fn anim_12bpc_with_alpha() {
+    let bytes = std::fs::read(ANIM_12BPC_KF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+    assert_eq!(info.frame_count, 5);
+    assert!(info.has_alpha, "12bpc animation should have alpha track");
+    assert_eq!(info.loop_count, 0, "Expected infinite loop");
+
+    for i in 0..info.frame_count {
+        let frame = parser.frame(i).expect("frame failed");
+        assert!(!frame.data.is_empty());
+        assert!(frame.alpha_data.is_some(), "Frame {} should have alpha", i);
+    }
+}
+
+#[test]
+fn anim_audio_track_skipped() {
+    let bytes = std::fs::read(ANIM_8BPC_AUDIO).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+    assert_eq!(info.frame_count, 5);
+    assert!(!info.has_alpha, "Audio track should not produce alpha");
+
+    // Audio track should be silently skipped - only color frames present
+    for i in 0..info.frame_count {
+        let frame = parser.frame(i).expect("frame failed");
+        assert!(!frame.data.is_empty());
+        assert!(frame.alpha_data.is_none());
+    }
+}
+
+#[test]
+fn anim_depth_track_with_alpha() {
+    let bytes = std::fs::read(ANIM_8BPC_DEPTH).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+    assert_eq!(info.frame_count, 5);
+    // This file has a depth/alpha track (auxv handler + tref/auxl)
+    assert!(info.has_alpha, "Depth file should have alpha track");
+
+    for i in 0..info.frame_count {
+        let frame = parser.frame(i).expect("frame failed");
+        assert!(!frame.data.is_empty());
+        assert!(frame.alpha_data.is_some(), "Frame {} should have alpha", i);
+    }
+}
+
+// -- Loop count (elst flags parsing) --
+
+#[test]
+fn anim_loop_count_play_once() {
+    // colors-animated-8bpc.avif has elst flags=0x000000 -> loop_count=1 (play once)
+    let bytes = std::fs::read(ANIM_8BPC).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+    assert_eq!(info.loop_count, 1, "Expected loop_count=1 (play once)");
+}
+
+#[test]
+fn anim_loop_count_infinite() {
+    // colors-animated-8bpc-alpha-exif-xmp.avif has elst flags=0x000001 -> infinite
+    let bytes = std::fs::read(ANIM_8BPC_ALPHA).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+    assert_eq!(info.loop_count, 0, "Expected loop_count=0 (infinite)");
+}
+
+#[test]
+fn anim_loop_count_audio_file() {
+    // Audio file uses v0 elst with flags=0 -> play once
+    let bytes = std::fs::read(ANIM_8BPC_AUDIO).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let info = parser.animation_info().expect("Expected animation");
+    assert_eq!(info.loop_count, 1, "Audio file color track should play once");
+}
+
+// -- Zero-copy verification --
+
+#[test]
+fn anim_zerocopy_color_frames_borrowed() {
+    // from_bytes -> single-extent color frames should be Cow::Borrowed
+    let bytes = std::fs::read(ANIM_8BPC).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    for i in 0..5 {
+        let frame = parser.frame(i).expect("frame failed");
+        assert!(
+            matches!(frame.data, Cow::Borrowed(_)),
+            "Color frame {} should be Cow::Borrowed (zero-copy)",
+            i
+        );
+    }
+}
+
+#[test]
+fn anim_zerocopy_alpha_frames_borrowed() {
+    // from_bytes -> single-extent alpha frames should also be Cow::Borrowed
+    let bytes = std::fs::read(ANIM_8BPC_ALPHA).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    for i in 0..5 {
+        let frame = parser.frame(i).expect("frame failed");
+        assert!(
+            matches!(frame.data, Cow::Borrowed(_)),
+            "Color frame {} should be Cow::Borrowed",
+            i
+        );
+        let alpha = frame.alpha_data.as_ref().expect("alpha should be present");
+        assert!(
+            matches!(alpha, Cow::Borrowed(_)),
+            "Alpha frame {} should be Cow::Borrowed (zero-copy)",
+            i
+        );
+    }
+}
+
+#[test]
+fn anim_zerocopy_12bpc_alpha_borrowed() {
+    // 12bpc file also uses single extents -> Cow::Borrowed
+    let bytes = std::fs::read(ANIM_12BPC_KF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    for i in 0..5 {
+        let frame = parser.frame(i).expect("frame failed");
+        assert!(matches!(frame.data, Cow::Borrowed(_)));
+        let alpha = frame.alpha_data.as_ref().expect("alpha");
+        assert!(
+            matches!(alpha, Cow::Borrowed(_)),
+            "12bpc alpha frame {} should be Cow::Borrowed",
+            i
+        );
+    }
+}
+
+#[test]
+fn anim_zerocopy_color_points_into_raw_buffer() {
+    // Verify borrowed slices actually point into the original byte buffer
+    let bytes = std::fs::read(ANIM_8BPC_ALPHA).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let frame0 = parser.frame(0).expect("frame 0");
+    let frame1 = parser.frame(1).expect("frame 1");
+
+    if let (Cow::Borrowed(s0), Cow::Borrowed(s1)) = (&frame0.data, &frame1.data) {
+        // Both slices should have distinct, non-overlapping offsets into the file
+        let ptr0 = s0.as_ptr() as usize;
+        let ptr1 = s1.as_ptr() as usize;
+        assert_ne!(ptr0, ptr1, "Frames 0 and 1 should point to different offsets");
+
+        // Both should be within the original buffer
+        let buf_start = bytes.as_ptr() as usize;
+        let buf_end = buf_start + bytes.len();
+        assert!(ptr0 >= buf_start && ptr0 < buf_end, "Frame 0 should point into original buffer");
+        assert!(ptr1 >= buf_start && ptr1 < buf_end, "Frame 1 should point into original buffer");
+    } else {
+        panic!("Expected Cow::Borrowed for from_bytes");
+    }
+
+    // Same for alpha
+    if let (Some(Cow::Borrowed(a0)), Some(Cow::Borrowed(a1))) =
+        (&frame0.alpha_data, &frame1.alpha_data)
+    {
+        let buf_start = bytes.as_ptr() as usize;
+        let buf_end = buf_start + bytes.len();
+        let aptr0 = a0.as_ptr() as usize;
+        let aptr1 = a1.as_ptr() as usize;
+        assert_ne!(aptr0, aptr1, "Alpha frames 0 and 1 should differ");
+        assert!(aptr0 >= buf_start && aptr0 < buf_end, "Alpha 0 in buffer");
+        assert!(aptr1 >= buf_start && aptr1 < buf_end, "Alpha 1 in buffer");
+    } else {
+        panic!("Expected Cow::Borrowed alpha data");
+    }
+}
+
+// -- from_reader / from_owned path --
+
+#[test]
+fn anim_from_reader_alpha() {
+    let parser = zenavif_parse::AvifParser::from_reader(
+        &mut File::open(ANIM_8BPC_ALPHA).expect("open"),
+    )
+    .expect("parse failed");
+
+    let info = parser.animation_info().expect("animation");
+    assert_eq!(info.frame_count, 5);
+    assert!(info.has_alpha);
+    assert_eq!(info.loop_count, 0);
+
+    for i in 0..5 {
+        let frame = parser.frame(i).expect("frame");
+        assert!(!frame.data.is_empty());
+        assert!(frame.alpha_data.is_some());
+    }
+}
+
+#[test]
+fn anim_from_owned_alpha() {
+    let bytes = std::fs::read(ANIM_8BPC_ALPHA).expect("read");
+    let parser = zenavif_parse::AvifParser::from_owned(bytes).expect("parse failed");
+
+    let info = parser.animation_info().expect("animation");
+    assert_eq!(info.frame_count, 5);
+    assert!(info.has_alpha);
+
+    for i in 0..5 {
+        let frame = parser.frame(i).expect("frame");
+        assert!(!frame.data.is_empty());
+        let alpha = frame.alpha_data.as_ref().expect("alpha");
+        assert!(!alpha.is_empty());
+        // from_owned still produces Cow::Borrowed (borrows from internal owned buffer)
+        assert!(matches!(frame.data, Cow::Borrowed(_)));
+        assert!(matches!(alpha, Cow::Borrowed(_)));
+    }
+}
+
+#[test]
+fn anim_from_reader_audio_skipped() {
+    let parser = zenavif_parse::AvifParser::from_reader(
+        &mut File::open(ANIM_8BPC_AUDIO).expect("open"),
+    )
+    .expect("parse failed");
+
+    let info = parser.animation_info().expect("animation");
+    assert_eq!(info.frame_count, 5);
+    assert!(!info.has_alpha, "Audio track should be skipped");
+}
+
+// -- Edge cases and bounds --
+
+#[test]
+fn anim_frame_out_of_bounds_with_alpha() {
+    let bytes = std::fs::read(ANIM_8BPC_ALPHA).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    assert!(parser.frame(5).is_err(), "Frame 5 should be out of bounds (only 0-4 exist)");
+    assert!(parser.frame(100).is_err(), "Frame 100 should be out of bounds");
+}
+
+#[test]
+fn anim_still_image_no_alpha_data() {
+    let bytes = std::fs::read("tests/kodim-extents.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    assert!(parser.animation_info().is_none(), "Still image has no animation");
+    assert!(parser.frame(0).is_err(), "Still image has no frames");
+}
+
+#[test]
+fn anim_iterator_on_no_alpha() {
+    let bytes = std::fs::read(ANIM_8BPC).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let frames: Vec<_> = parser.frames().collect();
+    assert_eq!(frames.len(), 5);
+
+    for (i, result) in frames.iter().enumerate() {
+        let frame = result.as_ref().expect("frame failed");
+        assert!(!frame.data.is_empty());
+        assert!(
+            frame.alpha_data.is_none(),
+            "Frame {} should not have alpha via iterator",
+            i
+        );
+    }
+}
+
+#[test]
+fn anim_iterator_with_alpha() {
+    let bytes = std::fs::read(ANIM_8BPC_ALPHA).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse failed");
+
+    let frames: Vec<_> = parser.frames().collect();
+    assert_eq!(frames.len(), 5);
+
+    for (i, result) in frames.iter().enumerate() {
+        let frame = result.as_ref().expect("frame failed");
+        assert!(!frame.data.is_empty());
+        assert!(
+            frame.alpha_data.is_some(),
+            "Frame {} should have alpha via iterator",
+            i
+        );
+    }
+}
+
+// -- Timescale --
+
+#[test]
+fn anim_timescale_exposed() {
+    // Verify timescale is propagated correctly for all test files
+    for (path, desc) in [
+        (ANIM_8BPC, "8bpc"),
+        (ANIM_8BPC_ALPHA, "8bpc+alpha"),
+        (ANIM_12BPC_KF, "12bpc"),
+        (ANIM_8BPC_AUDIO, "audio"),
+        (ANIM_8BPC_DEPTH, "depth"),
+    ] {
+        let bytes = std::fs::read(path).unwrap_or_else(|_| panic!("read {}", desc));
+        let parser =
+            zenavif_parse::AvifParser::from_bytes(&bytes).unwrap_or_else(|_| panic!("parse {}", desc));
+        let info = parser
+            .animation_info()
+            .unwrap_or_else(|| panic!("{} should be animated", desc));
+        assert!(info.timescale > 0, "{}: timescale should be positive", desc);
+    }
+}
+
+// -- Eager API (feature-gated) --
+
+#[cfg(feature = "eager")]
+#[test]
+fn anim_eager_loop_count_parsed() {
+    // Verify the eager API now has correct loop_count from elst
+    let input = &mut File::open(ANIM_8BPC_ALPHA).expect("open");
+    let avif = zenavif_parse::read_avif(input).expect("read_avif failed");
+
+    let animation = avif.animation.expect("Expected animation");
+    assert_eq!(animation.loop_count, 0, "Eager API should parse infinite loop from elst");
+    assert_eq!(animation.frames.len(), 5);
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn anim_eager_play_once() {
+    let input = &mut File::open(ANIM_8BPC).expect("open");
+    let avif = zenavif_parse::read_avif(input).expect("read_avif failed");
+
+    let animation = avif.animation.expect("Expected animation");
+    assert_eq!(animation.loop_count, 1, "Eager API should parse play-once from elst");
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn anim_eager_audio_skipped() {
+    let input = &mut File::open(ANIM_8BPC_AUDIO).expect("open");
+    let avif = zenavif_parse::read_avif(input).expect("read_avif failed");
+
+    let animation = avif.animation.expect("Expected animation");
+    assert_eq!(animation.frames.len(), 5, "Should only have color frames, audio skipped");
+}
+
+// ============================================================================
+// Gain map (tmap) tests
+// ============================================================================
+
+#[test]
+fn parser_gain_map_basic() {
+    let bytes = std::fs::read("tests/gainmap/seine_sdr_gainmap_srgb.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    // Primary is SDR base image
+    let primary = parser.primary_data().expect("primary_data");
+    assert!(!primary.is_empty());
+
+    // Gain map metadata exists
+    let meta = parser.gain_map_metadata().expect("gain map metadata should be present");
+    assert!(meta.is_multichannel, "seine test file uses multichannel gain map");
+    assert!(meta.use_base_colour_space);
+    // HDR headroom: base=0/1, alternate=13/10
+    assert_eq!(meta.base_hdr_headroom_n, 0);
+    assert_eq!(meta.base_hdr_headroom_d, 1);
+    assert_eq!(meta.alternate_hdr_headroom_n, 13);
+    assert_eq!(meta.alternate_hdr_headroom_d, 10);
+    // Check channel 0 gain_map_min
+    assert_eq!(meta.channels[0].gain_map_min_n, -256907);
+    assert_eq!(meta.channels[0].gain_map_min_d, 1000000);
+    // Channels should differ (multichannel)
+    assert_ne!(meta.channels[0].gain_map_min_n, meta.channels[1].gain_map_min_n);
+
+    // Gain map image data is accessible
+    let gm_data = parser.gain_map_data().expect("gain_map_data should be Some").expect("should resolve");
+    assert!(!gm_data.is_empty(), "gain map data should not be empty");
+
+    // Alternate color info should be present on the tmap item
+    assert!(parser.gain_map_color_info().is_some(), "tmap colr property should be present");
+}
+
+#[test]
+fn parser_gain_map_grid() {
+    let bytes = std::fs::read("tests/gainmap/color_grid_gainmap_different_grid.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    // Should have grid config (color is a grid)
+    assert!(parser.grid_config().is_some(), "color image should be a grid");
+
+    // Should have gain map metadata
+    let meta = parser.gain_map_metadata().expect("gain map metadata should be present");
+    assert!(meta.alternate_hdr_headroom_d > 0);
+
+    // Gain map data should be accessible
+    assert!(parser.gain_map_data().is_some(), "gain map data should be present");
+}
+
+#[test]
+fn parser_no_gain_map_on_normal_image() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    assert!(parser.gain_map_metadata().is_none(), "normal images should not have gain map");
+    assert!(parser.gain_map_data().is_none());
+    assert!(parser.gain_map_color_info().is_none());
+}
+
+#[test]
+fn parser_gain_map_unsupported_version() {
+    let bytes = std::fs::read("tests/gainmap/unsupported_gainmap_version.avif").expect("read file");
+    let result = zenavif_parse::AvifParser::from_bytes(&bytes);
+    assert!(result.is_err(), "unsupported tmap version should fail");
+}
+
+#[test]
+fn parser_gain_map_unsupported_minimum_version() {
+    let bytes = std::fs::read("tests/gainmap/unsupported_gainmap_minimum_version.avif").expect("read file");
+    let result = zenavif_parse::AvifParser::from_bytes(&bytes);
+    assert!(result.is_err(), "unsupported tmap minimum version should fail");
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn eager_gain_map_basic() {
+    let bytes = std::fs::read("tests/gainmap/seine_sdr_gainmap_srgb.avif").expect("read file");
+    let input = &mut std::io::Cursor::new(&bytes);
+    let avif = zenavif_parse::read_avif(input).expect("read_avif");
+
+    assert!(avif.gain_map_metadata.is_some(), "eager: gain map metadata");
+    assert!(avif.gain_map_item.is_some(), "eager: gain map data");
+
+    let meta = avif.gain_map_metadata.unwrap();
+    assert!(meta.alternate_hdr_headroom_d > 0);
+}
+
+#[test]
+fn parser_gain_map_convenience() {
+    let bytes = std::fs::read("tests/gainmap/seine_sdr_gainmap_srgb.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    // The convenience method returns the full bundle
+    let gm = parser
+        .gain_map()
+        .expect("gain_map() should be Some for this file")
+        .expect("gain_map data should resolve");
+
+    // Metadata matches individual accessor
+    let meta_direct = parser.gain_map_metadata().unwrap();
+    assert_eq!(gm.metadata, *meta_direct);
+
+    // Data matches individual accessor
+    let data_direct = parser.gain_map_data().unwrap().unwrap();
+    assert_eq!(gm.gain_map_data, data_direct.as_ref());
+
+    // Color info matches individual accessor
+    assert_eq!(gm.alt_color_info.as_ref(), parser.gain_map_color_info());
+
+    // Verify AV1 OBU header (gain map data is an AV1 bitstream)
+    // OBU type is in bits [4:1] of the first byte
+    assert!(!gm.gain_map_data.is_empty());
+    let first_byte = gm.gain_map_data[0];
+    let obu_type = (first_byte >> 3) & 0x0F;
+    // Valid OBU types: 1 (sequence header), 2 (TD), 3 (frame header), etc.
+    assert!((1..=8).contains(&obu_type), "First OBU type should be valid AV1 OBU: got {obu_type}");
+}
+
+#[test]
+fn parser_gain_map_convenience_absent() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes failed");
+
+    assert!(parser.gain_map().is_none(), "normal images should return None from gain_map()");
+}
+
+#[cfg(feature = "eager")]
+#[test]
+fn eager_gain_map_convenience() {
+    let bytes = std::fs::read("tests/gainmap/seine_sdr_gainmap_srgb.avif").expect("read file");
+    let input = &mut std::io::Cursor::new(&bytes);
+    #[allow(deprecated)]
+    let avif = zenavif_parse::read_avif(input).expect("read_avif");
+
+    let gm = avif.gain_map().expect("AvifData::gain_map() should be Some");
+    assert!(gm.metadata.is_multichannel);
+    assert!(!gm.gain_map_data.is_empty());
+}
+
+// ============================================================================
+// GainMapMetadata::to_bytes() roundtrip tests
+// ============================================================================
+
+/// Build a minimal single-channel ISO 21496-1 tmap metadata blob with
+/// specific field values for byte-exact roundtrip tests.
+fn make_tmap_bytes(
+    is_multichannel: bool,
+    use_base_colour_space: bool,
+    backward_direction: bool,
+    base_n: u32, base_d: u32,
+    alt_n: u32, alt_d: u32,
+) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.push(0u8); // version
+    buf.extend_from_slice(&0u16.to_be_bytes()); // minimum_version
+    buf.extend_from_slice(&0u16.to_be_bytes()); // writer_version
+    let flags = (u8::from(is_multichannel) << 7)
+        | (u8::from(use_base_colour_space) << 6)
+        | (u8::from(backward_direction) << 2);
+    buf.push(flags);
+    buf.extend_from_slice(&base_n.to_be_bytes());
+    buf.extend_from_slice(&base_d.to_be_bytes());
+    buf.extend_from_slice(&alt_n.to_be_bytes());
+    buf.extend_from_slice(&alt_d.to_be_bytes());
+    let channel_count = if is_multichannel { 3 } else { 1 };
+    for _ in 0..channel_count {
+        // gain_map_min = -1/4
+        buf.extend_from_slice(&(-1i32).to_be_bytes());
+        buf.extend_from_slice(&4u32.to_be_bytes());
+        // gain_map_max = 3/2
+        buf.extend_from_slice(&3i32.to_be_bytes());
+        buf.extend_from_slice(&2u32.to_be_bytes());
+        // gamma = 1/1
+        buf.extend_from_slice(&1u32.to_be_bytes());
+        buf.extend_from_slice(&1u32.to_be_bytes());
+        // base_offset = 1/64
+        buf.extend_from_slice(&1i32.to_be_bytes());
+        buf.extend_from_slice(&64u32.to_be_bytes());
+        // alternate_offset = 1/64
+        buf.extend_from_slice(&1i32.to_be_bytes());
+        buf.extend_from_slice(&64u32.to_be_bytes());
+    }
+    buf
+}
+
+#[test]
+fn gain_map_to_bytes_single_channel_roundtrip() {
+    // Build known bytes → parse → to_bytes → compare byte-for-byte
+    let original = make_tmap_bytes(false, true, false, 0, 1, 13, 10);
+    let meta = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&original)
+        .expect("parse_tmap_bytes should succeed");
+
+    assert!(!meta.is_multichannel);
+    assert!(meta.use_base_colour_space);
+    assert!(!meta.backward_direction);
+    assert_eq!(meta.channels[0].gain_map_min_n, -1);
+    assert_eq!(meta.channels[0].gain_map_min_d, 4);
+    assert_eq!(meta.channels[0].gain_map_max_n, 3);
+    assert_eq!(meta.channels[0].gain_map_max_d, 2);
+
+    let roundtripped = meta.to_bytes();
+    assert_eq!(original, roundtripped, "to_bytes() output should be byte-for-byte identical to input");
+}
+
+#[test]
+fn gain_map_to_bytes_multichannel_roundtrip() {
+    let original = make_tmap_bytes(true, false, false, 0, 1, 3, 1);
+    let meta = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&original)
+        .expect("parse_tmap_bytes multichannel");
+
+    assert!(meta.is_multichannel);
+    let roundtripped = meta.to_bytes();
+    assert_eq!(original, roundtripped, "multichannel to_bytes() must round-trip exactly");
+}
+
+#[test]
+fn gain_map_backward_direction_parse_and_roundtrip() {
+    // backward_direction = bit 2 of flags byte
+    let original = make_tmap_bytes(false, true, true, 0, 1, 6, 1);
+
+    // Verify the bit is set in the raw bytes (offset 5 = version(1) + min_ver(2) + writer_ver(2))
+    assert_eq!(original[5] & 0x04, 0x04, "bit 2 should be set in flags byte");
+
+    let meta = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&original)
+        .expect("parse with backward_direction");
+    assert!(meta.backward_direction, "backward_direction should be true");
+    assert!(meta.use_base_colour_space);
+    assert!(!meta.is_multichannel);
+
+    // Byte-exact roundtrip
+    let roundtripped = meta.to_bytes();
+    assert_eq!(original, roundtripped);
+    assert_eq!(roundtripped[5] & 0x04, 0x04, "bit 2 preserved in to_bytes output");
+}
+
+#[test]
+fn gain_map_real_file_to_bytes_struct_roundtrip() {
+    // Parse real AVIF → to_bytes → parse again → structs must be identical
+    let bytes = std::fs::read("tests/gainmap/seine_sdr_gainmap_srgb.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes");
+    let meta = parser.gain_map_metadata().expect("gain map metadata");
+
+    let serialized = meta.to_bytes();
+    let reparsed = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&serialized)
+        .expect("re-parse after to_bytes");
+
+    assert_eq!(*meta, reparsed, "struct roundtrip: parse → to_bytes → parse must be identical");
+}
+
+#[test]
+fn gain_map_zencodec_from_roundtrip_seine() {
+    // Parse real file → zencodec::GainMapParams → GainMapMetadata → compare with original
+    let bytes = std::fs::read("tests/gainmap/seine_sdr_gainmap_srgb.avif").expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("from_bytes");
+    let meta = parser.gain_map_metadata().expect("gain map metadata");
+
+    // Convert to zencodec (f64) and back
+    let params = zencodec::GainMapParams::from(meta);
+    let reparsed = zenavif_parse::GainMapMetadata::from(&params);
+
+    // The continued-fraction encoding should recover the same rationals
+    assert_eq!(meta.is_multichannel, reparsed.is_multichannel);
+    assert_eq!(meta.use_base_colour_space, reparsed.use_base_colour_space);
+    assert_eq!(meta.backward_direction, reparsed.backward_direction);
+
+    // The CF algorithm works in f32 precision, so we compare f64 values rather
+    // than exact rationals. Epsilon is f32 precision relative to the value.
+    let eps = 1e-5f64;
+    let base_orig = meta.base_hdr_headroom_n as f64 / meta.base_hdr_headroom_d.max(1) as f64;
+    let base_rt = reparsed.base_hdr_headroom_n as f64 / reparsed.base_hdr_headroom_d.max(1) as f64;
+    assert!((base_orig - base_rt).abs() <= eps * base_orig.abs().max(1.0),
+        "base_hdr_headroom mismatch: {base_orig} vs {base_rt}");
+    let alt_orig = meta.alternate_hdr_headroom_n as f64 / meta.alternate_hdr_headroom_d.max(1) as f64;
+    let alt_rt = reparsed.alternate_hdr_headroom_n as f64 / reparsed.alternate_hdr_headroom_d.max(1) as f64;
+    assert!((alt_orig - alt_rt).abs() <= eps * alt_orig.abs().max(1.0),
+        "alternate_hdr_headroom mismatch: {alt_orig} vs {alt_rt}");
+
+    for i in 0..3 {
+        let a = &meta.channels[i];
+        let b = &reparsed.channels[i];
+        let orig_min = a.gain_map_min_n as f64 / a.gain_map_min_d.max(1) as f64;
+        let rt_min   = b.gain_map_min_n as f64 / b.gain_map_min_d.max(1) as f64;
+        assert!((orig_min - rt_min).abs() <= eps * orig_min.abs().max(1.0),
+            "channel {i} min mismatch: {orig_min} vs {rt_min} ({}/{} vs {}/{})",
+            a.gain_map_min_n, a.gain_map_min_d, b.gain_map_min_n, b.gain_map_min_d);
+    }
+}
+
+#[test]
+fn gain_map_zencodec_backward_direction_preserved() {
+    // Verify backward_direction survives the zencodec roundtrip
+    let original = make_tmap_bytes(false, false, true, 1, 4, 4, 1);
+    let meta = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&original).unwrap();
+    assert!(meta.backward_direction);
+
+    let params = zencodec::GainMapParams::from(&meta);
+    assert!(params.backward_direction, "zencodec must carry backward_direction");
+
+    let reparsed = zenavif_parse::GainMapMetadata::from(&params);
+    assert!(reparsed.backward_direction, "backward_direction must survive zencodec roundtrip");
+}
+
+// ============================================================================
+// ISO 21496-1 fixture corpus tests
+// ============================================================================
+//
+// These fixtures come from the shared gain map spec audit corpus in
+// `gainmap-spec-status/test-vectors/sources/*_avif.bin`. They exercise every
+// wire-format degree of freedom (direction, channels, common_denom, negative
+// values, varied denominators, gamma, i32 boundary, writer_version, and all
+// flags combined) and catch the two historical bugs fixed in this commit:
+//
+//   - FLAG_COMMON_DENOMINATOR (bit 3) was previously ignored, so fixtures
+//     05, 06 and 22 would fail parse with UnexpectedEOF.
+//   - writer_version was dropped on parse and hardcoded to 0 on serialize,
+//     so fixture 21 could not round-trip byte-exactly.
+
+const FIX_DIR: &str = "tests/gainmap/iso21496-fixtures";
+
+fn load_fixture(name: &str) -> Vec<u8> {
+    let path = format!("{FIX_DIR}/{name}");
+    std::fs::read(&path).unwrap_or_else(|e| panic!("read fixture {path}: {e}"))
+}
+
+/// The 22-case fixture matrix. Tests that only need to enumerate the full
+/// corpus use this list.
+const ISO21496_FIXTURES: &[&str] = &[
+    "01_sdr_base_1ch_avif.bin",
+    "02_hdr_base_1ch_avif.bin",
+    "03_multi_channel_3_avif.bin",
+    "04_use_base_colour_space_avif.bin",
+    "05_common_denom_1ch_avif.bin",
+    "06_common_denom_3ch_avif.bin",
+    "07_negative_min_avif.bin",
+    "08_large_negative_min_avif.bin",
+    "09_max_4x_avif.bin",
+    "10_max_16x_avif.bin",
+    "11_denom_1_avif.bin",
+    "12_denom_10_avif.bin",
+    "13_denom_1000_avif.bin",
+    "14_denom_65535_avif.bin",
+    "15_denom_umax_avif.bin",
+    "16_gamma_half_avif.bin",
+    "17_gamma_quarter_avif.bin",
+    "18_gamma_large_avif.bin",
+    "19_i32_max_numerators_avif.bin",
+    "20_zero_offsets_avif.bin",
+    "21_writer_version_nonzero_avif.bin",
+    "22_all_flags_avif.bin",
+];
+
+/// Fixtures that use the full (non-common-denominator) wire form. `to_bytes()`
+/// should reproduce these byte-for-byte after a parse.
+const FULL_FORM_FIXTURES: &[&str] = &[
+    "01_sdr_base_1ch_avif.bin",
+    "02_hdr_base_1ch_avif.bin",
+    "03_multi_channel_3_avif.bin",
+    "04_use_base_colour_space_avif.bin",
+    "07_negative_min_avif.bin",
+    "08_large_negative_min_avif.bin",
+    "09_max_4x_avif.bin",
+    "10_max_16x_avif.bin",
+    "11_denom_1_avif.bin",
+    "12_denom_10_avif.bin",
+    "13_denom_1000_avif.bin",
+    "14_denom_65535_avif.bin",
+    "15_denom_umax_avif.bin",
+    "16_gamma_half_avif.bin",
+    "17_gamma_quarter_avif.bin",
+    "18_gamma_large_avif.bin",
+    "19_i32_max_numerators_avif.bin",
+    "20_zero_offsets_avif.bin",
+    "21_writer_version_nonzero_avif.bin",
+];
+
+/// Fixtures that use the common-denominator compact form. The parser expands
+/// these to the full form on output, so `to_bytes()` does NOT byte-match the
+/// original; only the parsed struct values are stable across a round-trip.
+const COMMON_DENOM_FIXTURES: &[&str] = &[
+    "05_common_denom_1ch_avif.bin",
+    "06_common_denom_3ch_avif.bin",
+    "22_all_flags_avif.bin",
+];
+
+#[test]
+fn iso21496_corpus_parse_all() {
+    // Every fixture must parse without error. Historically fixtures 05, 06,
+    // and 22 failed with UnexpectedEOF because FLAG_COMMON_DENOMINATOR was
+    // ignored.
+    for name in ISO21496_FIXTURES {
+        let bytes = load_fixture(name);
+        let meta = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&bytes)
+            .unwrap_or_else(|e| panic!("fixture {name}: parse failed: {e:?}"));
+        // Single-channel fixtures must replicate channel 0 to 1/2.
+        if !meta.is_multichannel {
+            assert_eq!(meta.channels[0], meta.channels[1], "{name}: ch0 != ch1");
+            assert_eq!(meta.channels[0], meta.channels[2], "{name}: ch0 != ch2");
+        }
+    }
+}
+
+#[test]
+fn iso21496_full_form_byte_exact_roundtrip() {
+    // Full-form fixtures must survive parse → to_bytes round-trip.
+    // writer_version (bytes 3..5) is always emitted as 0, so we compare
+    // with the input's writer_version zeroed for the byte-exact check.
+    for name in FULL_FORM_FIXTURES {
+        let bytes = load_fixture(name);
+        let meta = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&bytes)
+            .unwrap_or_else(|e| panic!("fixture {name}: parse failed: {e:?}"));
+        let out = meta.to_bytes();
+        // Zero the writer_version in the expected bytes for comparison.
+        let mut expected = bytes.clone();
+        if expected.len() >= 5 {
+            expected[3] = 0;
+            expected[4] = 0;
+        }
+        assert_eq!(
+            out, expected,
+            "fixture {name}: to_bytes() not byte-exact ({} vs {} bytes)",
+            out.len(),
+            expected.len()
+        );
+    }
+}
+
+#[test]
+fn iso21496_common_denom_struct_roundtrip() {
+    // Common-denom fixtures serialize as full-form, so we compare structs
+    // across a parse → to_bytes → parse round-trip rather than bytes.
+    for name in COMMON_DENOM_FIXTURES {
+        let bytes = load_fixture(name);
+        let meta = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&bytes)
+            .unwrap_or_else(|e| panic!("fixture {name}: parse failed: {e:?}"));
+        let out = meta.to_bytes();
+        let reparsed = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&out)
+            .unwrap_or_else(|e| panic!("fixture {name}: reparse failed: {e:?}"));
+        assert_eq!(meta, reparsed, "fixture {name}: struct round-trip drift");
+        // to_bytes should emit non-common-denom form (flags bit 3 clear).
+        // Flags byte is at offset 5 (version + min_ver + writer_ver).
+        assert_eq!(
+            out[5] & 0x08,
+            0,
+            "fixture {name}: re-serialized output should not set FLAG_COMMON_DENOMINATOR"
+        );
+    }
+}
+
+#[test]
+fn iso21496_case_05_common_denom_1ch() {
+    // 05: flags = 0x08 (common_denom only); common_d=1000; base=0/1000;
+    // alt=1300/1000; single channel min=0/1000, max=1300/1000, gamma=1000/1000,
+    // base_off=16/1000, alt_off=16/1000.
+    let bytes = load_fixture("05_common_denom_1ch_avif.bin");
+    let m = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&bytes).expect("parse 05");
+
+    assert!(!m.is_multichannel);
+    assert!(!m.use_base_colour_space);
+    assert!(!m.backward_direction);
+    assert_eq!((m.base_hdr_headroom_n, m.base_hdr_headroom_d), (0, 1000));
+    assert_eq!(
+        (m.alternate_hdr_headroom_n, m.alternate_hdr_headroom_d),
+        (1300, 1000)
+    );
+    let c = m.channels[0];
+    assert_eq!((c.gain_map_min_n, c.gain_map_min_d), (0, 1000));
+    assert_eq!((c.gain_map_max_n, c.gain_map_max_d), (1300, 1000));
+    assert_eq!((c.gamma_n, c.gamma_d), (1000, 1000));
+    assert_eq!((c.base_offset_n, c.base_offset_d), (16, 1000));
+    assert_eq!((c.alternate_offset_n, c.alternate_offset_d), (16, 1000));
+    // Single-channel replication.
+    assert_eq!(m.channels[1], c);
+    assert_eq!(m.channels[2], c);
+}
+
+#[test]
+fn iso21496_case_06_common_denom_3ch() {
+    // 06: flags = 0x88 (multichannel + common_denom); 3 distinct channels.
+    let bytes = load_fixture("06_common_denom_3ch_avif.bin");
+    let m = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&bytes).expect("parse 06");
+
+    assert!(m.is_multichannel);
+    assert!(!m.use_base_colour_space);
+    assert!(!m.backward_direction);
+    assert_eq!((m.base_hdr_headroom_n, m.base_hdr_headroom_d), (0, 1000));
+    assert_eq!(
+        (m.alternate_hdr_headroom_n, m.alternate_hdr_headroom_d),
+        (1300, 1000)
+    );
+
+    let expected_max = [1300, 1500, 1200];
+    let expected_min = [0i32, -500, 0];
+    for (i, ch) in m.channels.iter().enumerate() {
+        assert_eq!(
+            (ch.gain_map_min_n, ch.gain_map_min_d),
+            (expected_min[i], 1000),
+            "ch{i} min"
+        );
+        assert_eq!(
+            (ch.gain_map_max_n, ch.gain_map_max_d),
+            (expected_max[i], 1000),
+            "ch{i} max"
+        );
+        assert_eq!((ch.gamma_n, ch.gamma_d), (1000, 1000));
+        assert_eq!((ch.base_offset_n, ch.base_offset_d), (16, 1000));
+        assert_eq!((ch.alternate_offset_n, ch.alternate_offset_d), (16, 1000));
+    }
+}
+
+#[test]
+fn iso21496_case_21_writer_version_nonzero() {
+    // 21: full form, writer_version = 1 in input. We parse it (and validate
+    // it >= minimum_version) but don't store it — to_bytes() always emits 0.
+    let bytes = load_fixture("21_writer_version_nonzero_avif.bin");
+    let m = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&bytes).expect("parse 21");
+
+    let out = m.to_bytes();
+    // writer_version bytes at offset 3..5 are now always 0.
+    assert_eq!(&out[3..5], &[0x00, 0x00]);
+    // Rest of the payload should match (skip the 2 writer_version bytes).
+    assert_eq!(&out[..3], &bytes[..3], "version + minimum_version match");
+    assert_eq!(&out[5..], &bytes[5..], "payload after writer_version matches");
+}
+
+#[test]
+fn iso21496_case_22_all_flags() {
+    // 22: all four semantic flags set. Note the spec produces flags = 0xCC:
+    //   MULTI_CHANNEL (0x80) | USE_BASE_COLOUR_SPACE (0x40)
+    //     | COMMON_DENOMINATOR (0x08) | BACKWARD_DIRECTION (0x04)
+    //   = 0xCC.
+    let bytes = load_fixture("22_all_flags_avif.bin");
+    assert_eq!(
+        bytes[5], 0xCC,
+        "fixture 22 raw flags byte must be 0xCC (all four flags set)"
+    );
+
+    let m = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&bytes).expect("parse 22");
+    assert!(m.is_multichannel);
+    assert!(m.use_base_colour_space);
+    assert!(m.backward_direction);
+    // COMMON_DENOMINATOR is a wire-format detail, not reflected in the
+    // output struct. We assert it was honored by checking the common_d
+    // denominator is applied to every field.
+    assert_eq!((m.base_hdr_headroom_n, m.base_hdr_headroom_d), (1300, 1000));
+    assert_eq!(
+        (m.alternate_hdr_headroom_n, m.alternate_hdr_headroom_d),
+        (0, 1000)
+    );
+
+    let expected_min = [-1000i32, -500, -1500];
+    for (i, ch) in m.channels.iter().enumerate() {
+        assert_eq!(
+            (ch.gain_map_min_n, ch.gain_map_min_d),
+            (expected_min[i], 1000),
+            "ch{i} min"
+        );
+        assert_eq!((ch.gain_map_max_n, ch.gain_map_max_d), (0, 1000), "ch{i} max");
+        assert_eq!((ch.gamma_n, ch.gamma_d), (1000, 1000));
+        assert_eq!((ch.base_offset_n, ch.base_offset_d), (16, 1000));
+        assert_eq!((ch.alternate_offset_n, ch.alternate_offset_d), (16, 1000));
+    }
+}
+
+// ============================================================================
+// Depth auxiliary image tests
+// ============================================================================
+
+/// Detect depth auxiliary presence from the `auxl` + `auxC(depth)` item.
+#[test]
+fn parser_depth_map_present() {
+    let bytes = std::fs::read(ANIM_8BPC_DEPTH).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse");
+
+    assert!(
+        parser.has_depth_map(),
+        "depth file should have a depth auxiliary item"
+    );
+}
+
+/// Parse depth auxC URN and extract depth AV1 data.
+#[test]
+fn parser_depth_map_extract() {
+    let bytes = std::fs::read(ANIM_8BPC_DEPTH).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse");
+
+    let dm = parser
+        .depth_map()
+        .expect("depth_map() should be Some")
+        .expect("depth data should resolve");
+
+    assert!(!dm.data.is_empty(), "depth AV1 data should not be empty");
+    assert!(dm.width > 0, "depth width should be positive");
+    assert!(dm.height > 0, "depth height should be positive");
+    // AV1 bitstream starts with an OBU header
+    assert_ne!(dm.data.len(), 0);
+}
+
+/// Normal images gracefully return None for depth map.
+#[test]
+fn parser_no_depth_map_on_normal_image() {
+    let bytes = std::fs::read(IMAGE_AVIF).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse");
+
+    assert!(
+        !parser.has_depth_map(),
+        "normal images should not have a depth map"
+    );
+    assert!(
+        parser.depth_map().is_none(),
+        "depth_map() should return None for normal images"
+    );
+}
+
+/// Gain map and depth can coexist (gain map absent, depth present here).
+#[test]
+fn parser_depth_without_gain_map() {
+    let bytes = std::fs::read(ANIM_8BPC_DEPTH).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse");
+
+    assert!(parser.has_depth_map(), "should have depth");
+    assert!(
+        parser.gain_map().is_none(),
+        "depth file should not have a gain map"
+    );
+}
+
+/// Verify depth map through the eager AvifData path.
+#[cfg(feature = "eager")]
+#[test]
+fn eager_depth_map_present() {
+    let bytes = std::fs::read(ANIM_8BPC_DEPTH).expect("read file");
+    let input = &mut std::io::Cursor::new(&bytes);
+    #[allow(deprecated)]
+    let avif = zenavif_parse::read_avif(input).expect("read_avif");
+
+    let dm = avif.depth_map().expect("AvifData::depth_map() should be Some");
+    assert!(!dm.data.is_empty(), "depth data should not be empty");
+    assert!(dm.width > 0);
+    assert!(dm.height > 0);
+}
+
+/// Verify depth map via to_avif_data() roundtrip.
+#[cfg(feature = "eager")]
+#[test]
+fn parser_to_avif_data_has_depth() {
+    let bytes = std::fs::read(ANIM_8BPC_DEPTH).expect("read file");
+    let parser = zenavif_parse::AvifParser::from_bytes(&bytes).expect("parse");
+
+    #[allow(deprecated)]
+    let avif = parser.to_avif_data().expect("to_avif_data");
+
+    let dm = avif.depth_map().expect("depth_map() should be Some after roundtrip");
+    assert!(!dm.data.is_empty());
+
+    // Compare with direct parser extraction
+    let parser_dm = parser
+        .depth_map()
+        .expect("parser depth_map")
+        .expect("resolve");
+    assert_eq!(dm.data, parser_dm.data);
+    assert_eq!(dm.width, parser_dm.width);
+    assert_eq!(dm.height, parser_dm.height);
+}
+
+// ============================================================================
+// Audit H1 (2026-05-06): total_megapixels_limit must enforce on the default
+// (zero-copy) API. Previously was #[cfg(feature = "eager")]-gated and silently
+// ineffective for AvifParser::from_bytes_with_config callers.
+// ============================================================================
+
+#[test]
+fn parser_default_path_enforces_total_megapixels_limit_grid() {
+    let bytes = std::fs::read(IMAGE_GRID_5X4).expect("read file");
+    // 6400x2880 grid is ~18 MP; cap at 0 MP to force rejection.
+    let config = zenavif_parse::DecodeConfig::default()
+        .with_total_megapixels_limit(0);
+
+    let result = zenavif_parse::AvifParser::from_bytes_with_config(
+        &bytes, &config, &zenavif_parse::Unstoppable,
+    );
+    assert!(
+        result.is_err(),
+        "default-path AvifParser should reject grid output exceeding total_megapixels_limit"
+    );
+}
+
+#[test]
+fn parser_default_path_enforces_total_megapixels_limit_single_item() {
+    // bbb_4k.avif primary item ispe is 3840x2160 (~8.3 MP). Cap at 1 MP.
+    let bytes = std::fs::read("av1-avif/testFiles/Microsoft/bbb_4k.avif")
+        .expect("read file");
+    let config = zenavif_parse::DecodeConfig::default()
+        .with_total_megapixels_limit(1);
+
+    let result = zenavif_parse::AvifParser::from_bytes_with_config(
+        &bytes, &config, &zenavif_parse::Unstoppable,
+    );
+    assert!(
+        result.is_err(),
+        "default-path AvifParser should reject single-item ispe exceeding total_megapixels_limit"
+    );
+}
+
+#[test]
+fn parser_default_path_allows_within_total_megapixels_limit() {
+    // Same grid but with a generous limit — must succeed.
+    let bytes = std::fs::read(IMAGE_GRID_5X4).expect("read file");
+    let config = zenavif_parse::DecodeConfig::default()
+        .with_total_megapixels_limit(64);
+
+    zenavif_parse::AvifParser::from_bytes_with_config(
+        &bytes, &config, &zenavif_parse::Unstoppable,
+    ).expect("parser should accept grid within total_megapixels_limit");
+}

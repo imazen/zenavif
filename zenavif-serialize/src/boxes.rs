@@ -1,0 +1,1042 @@
+use crate::constants::{ColorPrimaries, MatrixCoefficients, TransferCharacteristics};
+use crate::writer::{Writer, WriterBackend, IO};
+use arrayvec::ArrayVec;
+use std::io::Write;
+use std::num::NonZeroU32;
+use std::{fmt, io};
+
+pub trait MpegBox {
+    fn len(&self) -> usize;
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error>;
+}
+
+#[derive(Copy, Clone)]
+pub struct FourCC(pub [u8; 4]);
+
+impl fmt::Debug for FourCC {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match std::str::from_utf8(&self.0) {
+            Ok(s) => s.fmt(f),
+            Err(_) => self.0.fmt(f),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AvifFile<'data> {
+    pub ftyp: FtypBox,
+    pub meta: MetaBox<'data>,
+    pub mdat: MdatBox,
+}
+
+impl AvifFile<'_> {
+    /// Where the primary data starts inside the `mdat` box, for `iloc`'s offset
+    fn mdat_payload_start_offset(&self) -> u32 {
+        (self.ftyp.len() + self.meta.len()
+            + BASIC_BOX_SIZE) as u32 // mdat head
+    }
+
+    /// `iloc` is mostly unnecssary, high risk of out-of-buffer accesses in parsers that don't pay attention,
+    /// and also awkward to serialize, because its content depends on its own serialized byte size.
+    fn fix_iloc_positions(&mut self) {
+        let start_offset = self.mdat_payload_start_offset();
+        self.meta.iloc.absolute_offset_start = NonZeroU32::new(start_offset);
+    }
+
+    fn write_header(&mut self, out: &mut Vec<u8>) -> io::Result<()> {
+        if self.meta.iprp.ipco.ispe().is_none_or(|b| b.width == 0 || b.height == 0) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "missing width/height"));
+        }
+
+        // Structural 32-bit ceiling (zenavif-serialize#3): iloc extent
+        // offsets/lengths are serialized as u32 and box sizes use the plain
+        // 32-bit form (no largesize). A file over u32::MAX bytes would
+        // silently truncate `data.len() as u32` and wrap `next_start` in
+        // IlocBox::write — a corrupt file, not an error. Reject it up front;
+        // every write path funnels through here before emitting output.
+        if u32::try_from(self.file_size()).is_err() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "AVIF output would exceed u32::MAX bytes; 32-bit iloc offsets/box sizes cannot represent it",
+            ));
+        }
+
+        self.fix_iloc_positions();
+
+        out.try_reserve_exact(self.ftyp.len() + self.meta.len())?;
+        let mut w = Writer::new(out);
+        self.ftyp.write(&mut w).map_err(|_| io::ErrorKind::OutOfMemory)?;
+        self.meta.write(&mut w).map_err(|_| io::ErrorKind::OutOfMemory)?;
+        Ok(())
+    }
+
+    pub fn file_size(&self) -> usize {
+        self.ftyp.len() + self.meta.len() + self.mdat.len(&self.meta.iloc)
+    }
+
+    pub fn write_to_vec(&mut self, out: &mut Vec<u8>) -> io::Result<()> {
+        let expected_file_size = self.file_size();
+        out.try_reserve_exact(expected_file_size)?;
+        let initial = out.len();
+        self.write_header(out)?;
+
+        // Propagate mdat write failures: swallowing them returned Ok with a
+        // truncated buffer (silent corruption on OOM).
+        self.mdat
+            .write(&mut Writer::new(out), &self.meta.iloc)
+            .map_err(|_| io::ErrorKind::OutOfMemory)?;
+        let written = out.len() - initial;
+        debug_assert_eq!(expected_file_size, written);
+        Ok(())
+    }
+
+    pub fn write<W: Write>(&mut self, mut out: W) -> io::Result<()> {
+        let mut tmp = Vec::new();
+
+        self.write_header(&mut tmp)?;
+        out.write_all(&tmp)?;
+        drop(tmp);
+
+        self.mdat.write(&mut Writer::new(&mut IO(out)), &self.meta.iloc)
+    }
+}
+
+const BASIC_BOX_SIZE: usize = 8;
+const FULL_BOX_SIZE: usize = BASIC_BOX_SIZE + 4;
+
+#[derive(Debug, Clone)]
+pub struct FtypBox {
+    pub major_brand: FourCC,
+    pub minor_version: u32,
+    pub compatible_brands: ArrayVec<FourCC, 3>,
+}
+
+/// File Type box (chunk)
+impl MpegBox for FtypBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE
+        + 4 // brand
+        + 4 // ver
+        + 4 * self.compatible_brands.len()
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"ftyp")?;
+        b.push(&self.major_brand.0)?;
+        b.u32(self.minor_version)?;
+        for cb in &self.compatible_brands {
+            b.push(&cb.0)?;
+        }
+        Ok(())
+    }
+}
+
+/// Metadata box
+#[derive(Debug, Clone)]
+pub struct MetaBox<'data> {
+    pub hdlr: HdlrBox,
+    pub iloc: IlocBox<'data>,
+    pub iinf: IinfBox,
+    pub pitm: PitmBox,
+    pub iprp: IprpBox,
+    pub iref: IrefBox,
+    /// GroupsListBox — written when any entity group exists (e.g. the
+    /// `altr` group marking a `tmap` item as the preferred alternative
+    /// to the primary item, required by gain-map readers).
+    pub grpl: Option<GrplBox>,
+}
+
+/// GroupsListBox (`grpl`) holding `altr` EntityToGroupBoxes
+/// (ISO/IEC 14496-12 § 8.15.3).
+#[derive(Debug, Clone)]
+pub struct GrplBox {
+    /// `altr` groups: (group_id, entity ids in preference order).
+    pub altr: ArrayVec<(u32, ArrayVec<u32, 4>), 2>,
+}
+
+impl MpegBox for GrplBox {
+    #[inline]
+    fn len(&self) -> usize {
+        // grpl is a plain box containing EntityToGroupBoxes; each altr is a
+        // FullBox: header + group_id(4) + num_entities(4) + 4*n entity ids.
+        BASIC_BOX_SIZE
+            + self
+                .altr
+                .iter()
+                .map(|(_, ids)| FULL_BOX_SIZE + 8 + 4 * ids.len())
+                .sum::<usize>()
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"grpl")?;
+        for (group_id, ids) in &self.altr {
+            let mut g = b.full_box(FULL_BOX_SIZE + 8 + 4 * ids.len(), *b"altr", 0)?;
+            g.u32(*group_id)?;
+            g.u32(ids.len() as u32)?;
+            for id in ids {
+                g.u32(*id)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl MpegBox for MetaBox<'_> {
+    #[inline]
+    fn len(&self) -> usize {
+        FULL_BOX_SIZE
+            + self.hdlr.len()
+            + self.pitm.len()
+            + self.iloc.len()
+            + self.iinf.len()
+            + self.iprp.len()
+            + if !self.iref.is_empty() { self.iref.len() } else { 0 }
+            + self.grpl.as_ref().map_or(0, |g| g.len())
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.full_box(self.len(), *b"meta", 0)?;
+        self.hdlr.write(&mut b)?;
+        self.pitm.write(&mut b)?;
+        self.iloc.write(&mut b)?;
+        self.iinf.write(&mut b)?;
+        if !self.iref.is_empty() {
+            self.iref.write(&mut b)?;
+        }
+        self.iprp.write(&mut b)?;
+        if let Some(ref grpl) = self.grpl {
+            grpl.write(&mut b)?;
+        }
+        Ok(())
+    }
+}
+
+/// Item Info box
+#[derive(Debug, Clone)]
+pub struct IinfBox {
+    pub items: ArrayVec<InfeBox, 8>,
+}
+
+impl MpegBox for IinfBox {
+    #[inline]
+    fn len(&self) -> usize {
+        FULL_BOX_SIZE
+        + 2 // num items u16
+        + self.items.iter().map(|item| item.len()).sum::<usize>()
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.full_box(self.len(), *b"iinf", 0)?;
+        b.u16(self.items.len() as _)?;
+        for infe in &self.items {
+            infe.write(&mut b)?;
+        }
+        Ok(())
+    }
+}
+
+/// Item Info Entry box
+#[derive(Debug, Copy, Clone)]
+pub struct InfeBox {
+    pub id: u16,
+    pub typ: FourCC,
+    pub name: &'static str,
+    /// Content type (only for `mime` items, e.g. "application/rdf+xml" for XMP)
+    pub content_type: &'static str,
+}
+
+impl MpegBox for InfeBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        FULL_BOX_SIZE
+        + 2 // id
+        + 2 // item_protection_index
+        + 4 // type
+        + self.name.len() + 1 // nul-terminated
+        + if self.content_type.is_empty() { 0 } else { self.content_type.len() + 1 }
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.full_box(self.len(), *b"infe", 2)?;
+        b.u16(self.id)?;
+        b.u16(0)?;
+        b.push(&self.typ.0)?;
+        b.push(self.name.as_bytes())?;
+        b.u8(0)?;
+        if !self.content_type.is_empty() {
+            b.push(self.content_type.as_bytes())?;
+            b.u8(0)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct HdlrBox {
+}
+
+impl MpegBox for HdlrBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        FULL_BOX_SIZE + 4 + 4 + 13
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        // because an image format needs to be told it's an image format,
+        // and it does it the way classic MacOS used to, because Quicktime.
+        let mut b = w.full_box(self.len(), *b"hdlr", 0)?;
+        b.u32(0)?; // old MacOS file type handler
+        b.push(b"pict")?; // MacOS Quicktime subtype
+        b.u32(0)?; // Firefox 92 wants all 0 here
+        b.u32(0)?; // Reserved
+        b.u32(0)?; // Reserved
+        b.u8(0)?; // Pascal string for component name
+        Ok(())
+    }
+}
+
+/// Item properties + associations
+#[derive(Debug, Clone)]
+pub struct IprpBox {
+    pub ipco: IpcoBox,
+    pub ipma: IpmaBox,
+}
+
+impl MpegBox for IprpBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE
+            + self.ipco.len()
+            + self.ipma.len()
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"iprp")?;
+        self.ipco.write(&mut b)?;
+        self.ipma.write(&mut b)
+    }
+}
+
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum IpcoProp {
+    Av1C(Av1CBox),
+    Pixi(PixiBox),
+    Ispe(IspeBox),
+    AuxC(AuxCBox),
+    Colr(ColrBox),
+    ColrIcc(ColrIccBox),
+    Clli(ClliBox),
+    Mdcv(MdcvBox),
+    Irot(IrotBox),
+    Imir(ImirBox),
+    Clap(ClapBox),
+    Pasp(PaspBox),
+}
+
+impl IpcoProp {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Av1C(p) => p.len(),
+            Self::Pixi(p) => p.len(),
+            Self::Ispe(p) => p.len(),
+            Self::AuxC(p) => p.len(),
+            Self::Colr(p) => p.len(),
+            Self::ColrIcc(p) => p.len(),
+            Self::Clli(p) => p.len(),
+            Self::Mdcv(p) => p.len(),
+            Self::Irot(p) => p.len(),
+            Self::Imir(p) => p.len(),
+            Self::Clap(p) => p.len(),
+            Self::Pasp(p) => p.len(),
+        }
+    }
+
+    pub fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        match self {
+            Self::Av1C(p) => p.write(w),
+            Self::Pixi(p) => p.write(w),
+            Self::Ispe(p) => p.write(w),
+            Self::AuxC(p) => p.write(w),
+            Self::Colr(p) => p.write(w),
+            Self::ColrIcc(p) => p.write(w),
+            Self::Clli(p) => p.write(w),
+            Self::Mdcv(p) => p.write(w),
+            Self::Irot(p) => p.write(w),
+            Self::Imir(p) => p.write(w),
+            Self::Clap(p) => p.write(w),
+            Self::Pasp(p) => p.write(w),
+        }
+    }
+}
+
+/// Item Property Container box
+#[derive(Debug, Clone)]
+pub struct IpcoBox {
+    props: ArrayVec<IpcoProp, 16>,
+}
+
+impl IpcoBox {
+    pub fn new() -> Self {
+        Self { props: ArrayVec::new() }
+    }
+
+    #[must_use]
+    pub fn push(&mut self, prop: IpcoProp) -> Option<u8> {
+        self.props.try_push(prop).ok()?;
+        Some(self.props.len() as u8) // the spec wants them off by one
+    }
+
+    pub(crate) fn ispe(&self) -> Option<&IspeBox> {
+        self.props.iter().find_map(|b| match b {
+            IpcoProp::Ispe(i) => Some(i),
+            _ => None,
+        })
+    }
+}
+
+impl MpegBox for IpcoBox {
+    #[inline]
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE
+            + self.props.iter().map(|a| a.len()).sum::<usize>()
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"ipco")?;
+        for p in &self.props {
+            p.write(&mut b)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct AuxCBox {
+    pub urn: &'static str,
+}
+
+impl AuxCBox {
+    pub fn len(&self) -> usize {
+        FULL_BOX_SIZE + self.urn.len() + 1
+    }
+
+    pub fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.full_box(self.len(), *b"auxC", 0)?;
+        b.push(self.urn.as_bytes())?;
+        b.u8(0)
+    }
+}
+
+/// Pixies, I guess.
+#[derive(Debug, Copy, Clone)]
+pub struct PixiBox {
+    pub depth: u8,
+    pub channels: u8,
+}
+
+impl PixiBox {
+    pub fn len(self) -> usize {
+        FULL_BOX_SIZE
+            + 1 + self.channels as usize
+    }
+
+    pub fn write<B: WriterBackend>(self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.full_box(self.len(), *b"pixi", 0)?;
+        b.u8(self.channels)?;
+        for _ in 0..self.channels {
+            b.u8(self.depth)?;
+        }
+        Ok(())
+    }
+}
+
+/// This is HEVC-specific and not for AVIF, but Chrome wants it :(
+#[derive(Debug, Copy, Clone)]
+pub struct IspeBox {
+    pub width: u32,
+    pub height: u32,
+}
+
+impl MpegBox for IspeBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        FULL_BOX_SIZE + 4 + 4
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.full_box(self.len(), *b"ispe", 0)?;
+        b.u32(self.width)?;
+        b.u32(self.height)
+    }
+}
+
+/// Property→image associations
+#[derive(Debug, Clone)]
+pub struct IpmaEntry {
+    pub item_id: u16,
+    pub prop_ids: ArrayVec<u8, 12>,
+}
+
+#[derive(Debug, Clone)]
+pub struct IpmaBox {
+    pub entries: ArrayVec<IpmaEntry, 4>,
+}
+
+impl MpegBox for IpmaBox {
+    #[inline]
+    fn len(&self) -> usize {
+        FULL_BOX_SIZE + 4 + self.entries.iter().map(|e| 2 + 1 + e.prop_ids.len()).sum::<usize>()
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.full_box(self.len(), *b"ipma", 0)?;
+        b.u32(self.entries.len() as _)?; // entry count
+
+        for e in &self.entries {
+            b.u16(e.item_id)?;
+            b.u8(e.prop_ids.len() as u8)?; // assoc count
+            for &p in &e.prop_ids {
+                b.u8(p)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Single-reference item reference entry (e.g., auxl, prem, cdsc).
+#[derive(Debug, Copy, Clone)]
+pub struct IrefEntryBox {
+    pub from_id: u16,
+    pub to_id: u16,
+    pub typ: FourCC,
+}
+
+impl MpegBox for IrefEntryBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE
+            + 2 // from
+            + 2 // refcount
+            + 2 // to
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), self.typ.0)?;
+        b.u16(self.from_id)?;
+        b.u16(1)?;
+        b.u16(self.to_id)
+    }
+}
+
+/// Multi-reference item reference entry (e.g., dimg from tmap to primary+gain_map).
+///
+/// Writes a single SingleItemTypeReferenceBox with `reference_count` equal to
+/// the number of `to_ids`, preserving the ordering that parsers rely on
+/// (e.g., `dimg` reference index 0 = base image, index 1 = gain map).
+#[derive(Debug, Clone)]
+pub struct IrefMultiEntryBox {
+    pub from_id: u16,
+    pub to_ids: ArrayVec<u16, 4>,
+    pub typ: FourCC,
+}
+
+impl MpegBox for IrefMultiEntryBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE
+            + 2 // from_id
+            + 2 // reference_count
+            + 2 * self.to_ids.len() // to_ids
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), self.typ.0)?;
+        b.u16(self.from_id)?;
+        b.u16(self.to_ids.len() as u16)?;
+        for &to_id in &self.to_ids {
+            b.u16(to_id)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct IrefBox {
+    pub entries: ArrayVec<IrefEntryBox, 6>,
+    pub multi_entries: ArrayVec<IrefMultiEntryBox, 2>,
+}
+
+impl IrefBox {
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty() && self.multi_entries.is_empty()
+    }
+}
+
+impl MpegBox for IrefBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        FULL_BOX_SIZE
+            + self.entries.iter().map(|e| e.len()).sum::<usize>()
+            + self.multi_entries.iter().map(|e| e.len()).sum::<usize>()
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.full_box(self.len(), *b"iref", 0)?;
+        for entry in &self.entries {
+            entry.write(&mut b)?;
+        }
+        for entry in &self.multi_entries {
+            entry.write(&mut b)?;
+        }
+        Ok(())
+    }
+}
+
+/// Auxiliary item (alpha or depth map)
+#[derive(Debug, Copy, Clone)]
+#[allow(unused)]
+pub struct AuxlBox {}
+
+impl MpegBox for AuxlBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        FULL_BOX_SIZE
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        w.full_box(self.len(), *b"auxl", 0)?;
+        Ok(())
+    }
+}
+
+/// ColourInformationBox
+#[derive(Debug, Copy, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct ColrBox {
+    pub color_primaries: ColorPrimaries,
+    pub transfer_characteristics: TransferCharacteristics,
+    pub matrix_coefficients: MatrixCoefficients,
+    pub full_range_flag: bool, // u1 + u7
+}
+
+impl Default for ColrBox {
+    fn default() -> Self {
+        Self {
+            color_primaries: ColorPrimaries::Bt709,
+            transfer_characteristics: TransferCharacteristics::Srgb,
+            matrix_coefficients: MatrixCoefficients::Bt601,
+            full_range_flag: true,
+        }
+    }
+}
+
+impl MpegBox for ColrBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE + 4 + 2 + 2 + 2 + 1
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"colr")?;
+        b.u32(u32::from_be_bytes(*b"nclx"))?;
+        b.u16(self.color_primaries as u16)?;
+        b.u16(self.transfer_characteristics as u16)?;
+        b.u16(self.matrix_coefficients as u16)?;
+        b.u8(if self.full_range_flag { 1 << 7 } else { 0 })
+    }
+}
+
+/// Content Light Level Information box (`clli`), per ISOBMFF § 12.1.5 / CEA-861.3.
+///
+/// Signals the content light level of HDR content to the display.
+/// Both values are in cd/m² (nits).
+#[derive(Debug, Copy, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct ClliBox {
+    /// Maximum light level of any single pixel in the content (MaxCLL).
+    pub max_content_light_level: u16,
+    /// Maximum average light level of any single frame in the content (MaxFALL).
+    pub max_pic_average_light_level: u16,
+}
+
+impl ClliBox {
+    pub fn new(max_content_light_level: u16, max_pic_average_light_level: u16) -> Self {
+        Self { max_content_light_level, max_pic_average_light_level }
+    }
+}
+
+impl MpegBox for ClliBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE + 4
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"clli")?;
+        b.u16(self.max_content_light_level)?;
+        b.u16(self.max_pic_average_light_level)
+    }
+}
+
+/// Mastering Display Colour Volume box (`mdcv`), per ISOBMFF § 12.1.5 / SMPTE ST 2086.
+///
+/// Describes the color volume of the mastering display used to author the content.
+/// This does not describe the content itself — see [`ClliBox`] for that.
+#[derive(Debug, Copy, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct MdcvBox {
+    /// Display primaries in CIE 1931 xy chromaticity, encoded as the value × 50000.
+    /// For example, D65 white (0.3127, 0.3290) encodes as (15635, 16450).
+    /// Order: \[green, blue, red\] per SMPTE ST 2086.
+    pub primaries: [(u16, u16); 3],
+    /// White point in CIE 1931 xy chromaticity, same encoding as `primaries`.
+    pub white_point: (u16, u16),
+    /// Maximum luminance of the mastering display in cd/m² × 10000.
+    /// For example, 1000 cd/m² = 10_000_000.
+    pub max_luminance: u32,
+    /// Minimum luminance of the mastering display in cd/m² × 10000.
+    /// For example, 0.005 cd/m² = 50.
+    pub min_luminance: u32,
+}
+
+impl MdcvBox {
+    pub fn new(primaries: [(u16, u16); 3], white_point: (u16, u16), max_luminance: u32, min_luminance: u32) -> Self {
+        Self { primaries, white_point, max_luminance, min_luminance }
+    }
+}
+
+impl MpegBox for MdcvBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE + 24
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"mdcv")?;
+        for &(x, y) in &self.primaries {
+            b.u16(x)?;
+            b.u16(y)?;
+        }
+        b.u16(self.white_point.0)?;
+        b.u16(self.white_point.1)?;
+        b.u32(self.max_luminance)?;
+        b.u32(self.min_luminance)
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+#[non_exhaustive]
+pub struct Av1CBox {
+    pub seq_profile: u8,
+    pub seq_level_idx_0: u8,
+    pub seq_tier_0: bool,
+    pub high_bitdepth: bool,
+    pub twelve_bit: bool,
+    pub monochrome: bool,
+    pub chroma_subsampling_x: bool,
+    pub chroma_subsampling_y: bool,
+    pub chroma_sample_position: u8,
+}
+
+impl Default for Av1CBox {
+    /// Default: 8-bit 4:2:0, seq_profile=0, level=4
+    fn default() -> Self {
+        Self {
+            seq_profile: 0,
+            seq_level_idx_0: 4,
+            seq_tier_0: false,
+            high_bitdepth: false,
+            twelve_bit: false,
+            monochrome: false,
+            chroma_subsampling_x: true,
+            chroma_subsampling_y: true,
+            chroma_sample_position: 0,
+        }
+    }
+}
+
+impl MpegBox for Av1CBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE + 4
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"av1C")?;
+        let flags1 =
+            u8::from(self.seq_tier_0) << 7 |
+            u8::from(self.high_bitdepth) << 6 |
+            u8::from(self.twelve_bit) << 5 |
+            u8::from(self.monochrome) << 4 |
+            u8::from(self.chroma_subsampling_x) << 3 |
+            u8::from(self.chroma_subsampling_y) << 2 |
+            self.chroma_sample_position;
+
+        b.push(&[
+            0x81, // marker and version
+            (self.seq_profile << 5) | self.seq_level_idx_0, // x2d == 45
+            flags1,
+            0,
+        ])
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct PitmBox(pub u16);
+
+impl MpegBox for PitmBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        FULL_BOX_SIZE + 2
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.full_box(self.len(), *b"pitm", 0)?;
+        b.u16(self.0)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct IlocBox<'data> {
+    /// update before writing
+    pub absolute_offset_start: Option<NonZeroU32>,
+    pub items: ArrayVec<IlocItem<'data>, 8>,
+}
+
+#[derive(Debug, Clone)]
+pub struct IlocItem<'data> {
+    pub id: u16,
+    /// Usually one extent. Raw TIFF Exif uses two: a 4-byte
+    /// `exif_tiff_header_offset` header followed by the TIFF payload.
+    pub extents: ArrayVec<IlocExtent<'data>, 2>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct IlocExtent<'data> {
+    /// offset and len will be calculated when writing
+    pub data: &'data [u8],
+}
+
+impl MpegBox for IlocBox<'_> {
+    #[inline(always)]
+    #[allow(unused_parens, clippy::identity_op)]
+    fn len(&self) -> usize {
+        FULL_BOX_SIZE
+        + 1 // offset_size, length_size
+        + 1 // base_offset_size, reserved
+        + 2 // num items
+        + self.items.iter().map(|i| ( // for each item
+            2 // id
+            + 2 // dat ref idx
+            + 0 // base_offset_size
+            + 2 // extent count
+            + i.extents.len() * ( // for each extent
+               4 // extent_offset
+               + 4 // extent_len
+            )
+        )).sum::<usize>()
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.full_box(self.len(), *b"iloc", 0)?;
+        b.push(&[4 << 4 | 4, 0])?; // offset and length are 4 bytes
+
+        b.u16(self.items.len() as _)?; // num items
+        let mut next_start = if let Some(ok) = self.absolute_offset_start { ok.get() } else {
+            debug_assert!(false);
+            !0
+        };
+        for item in &self.items {
+            b.u16(item.id)?;
+            b.u16(0)?;
+            b.u16(item.extents.len() as _)?; // num extents
+            for ex in &item.extents {
+                // In u32 range by AvifFile::write_header's file-size guard
+                // (a >u32::MAX output is rejected before any write); the
+                // checked ops are a corruption backstop, not a live path.
+                debug_assert!(u32::try_from(ex.data.len()).is_ok());
+                let len = u32::try_from(ex.data.len()).unwrap_or(u32::MAX);
+                b.u32(next_start)?;
+                next_start = next_start.checked_add(len).unwrap_or_else(|| {
+                    debug_assert!(false, "iloc offset overflow prevented by write_header guard");
+                    u32::MAX
+                });
+                b.u32(len)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Image Rotation box (`irot`). NOT a FullBox.
+///
+/// Specifies counter-clockwise rotation. The `angle` field is the
+/// raw 2-bit code: 0 = 0°, 1 = 90°, 2 = 180°, 3 = 270°.
+#[derive(Debug, Copy, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct IrotBox {
+    /// Rotation code (0-3): 0=0°, 1=90° CCW, 2=180°, 3=270° CCW
+    pub angle: u8,
+}
+
+impl IrotBox {
+    pub fn new(angle: u8) -> Self { Self { angle } }
+}
+
+impl MpegBox for IrotBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE + 1
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"irot")?;
+        b.u8(self.angle & 0x03)
+    }
+}
+
+/// Image Mirror box (`imir`). NOT a FullBox.
+///
+/// Specifies a mirror axis to apply after rotation.
+/// `axis` = 0 means vertical axis (left-right flip),
+/// `axis` = 1 means horizontal axis (top-bottom flip).
+#[derive(Debug, Copy, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct ImirBox {
+    /// 0 = vertical axis (left-right flip), 1 = horizontal axis (top-bottom flip)
+    pub axis: u8,
+}
+
+impl ImirBox {
+    pub fn new(axis: u8) -> Self { Self { axis } }
+}
+
+impl MpegBox for ImirBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE + 1
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"imir")?;
+        b.u8(self.axis & 0x01)
+    }
+}
+
+/// Clean Aperture box (`clap`).
+///
+/// Defines a crop rectangle as centered rational values.
+/// 32 bytes payload: 4 pairs of (numerator u32, denominator u32),
+/// except offsets which are signed numerators.
+#[derive(Debug, Copy, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct ClapBox {
+    pub width_n: u32,
+    pub width_d: u32,
+    pub height_n: u32,
+    pub height_d: u32,
+    pub horiz_off_n: i32,
+    pub horiz_off_d: u32,
+    pub vert_off_n: i32,
+    pub vert_off_d: u32,
+}
+
+impl ClapBox {
+    /// Create from width, height, and center offset as rational numbers (n/d pairs).
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(width_n: u32, width_d: u32, height_n: u32, height_d: u32,
+               horiz_off_n: i32, horiz_off_d: u32, vert_off_n: i32, vert_off_d: u32) -> Self {
+        Self { width_n, width_d, height_n, height_d, horiz_off_n, horiz_off_d, vert_off_n, vert_off_d }
+    }
+}
+
+impl MpegBox for ClapBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE + 32
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"clap")?;
+        b.u32(self.width_n)?;
+        b.u32(self.width_d)?;
+        b.u32(self.height_n)?;
+        b.u32(self.height_d)?;
+        b.push(&self.horiz_off_n.to_be_bytes())?;
+        b.u32(self.horiz_off_d)?;
+        b.push(&self.vert_off_n.to_be_bytes())?;
+        b.u32(self.vert_off_d)
+    }
+}
+
+/// Pixel Aspect Ratio box (`pasp`).
+///
+/// 8 bytes payload: h_spacing (u32) + v_spacing (u32).
+#[derive(Debug, Copy, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct PaspBox {
+    pub h_spacing: u32,
+    pub v_spacing: u32,
+}
+
+impl PaspBox {
+    pub fn new(h_spacing: u32, v_spacing: u32) -> Self { Self { h_spacing, v_spacing } }
+}
+
+impl MpegBox for PaspBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE + 8
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"pasp")?;
+        b.u32(self.h_spacing)?;
+        b.u32(self.v_spacing)
+    }
+}
+
+/// ColourInformationBox with ICC profile (colour_type = 'prof' or 'rICC').
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct ColrIccBox {
+    pub icc_data: Vec<u8>,
+}
+
+impl ColrIccBox {
+    pub fn new(icc_data: Vec<u8>) -> Self { Self { icc_data } }
+}
+
+impl MpegBox for ColrIccBox {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE + 4 + self.icc_data.len()
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"colr")?;
+        // 'prof' for restricted ICC profile (sufficient for AVIF)
+        b.u32(u32::from_be_bytes(*b"prof"))?;
+        b.push(&self.icc_data)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MdatBox;
+
+impl MdatBox {
+    #[inline(always)]
+    fn len(&self, chunks: &IlocBox) -> usize {
+        BASIC_BOX_SIZE + chunks.items.iter().flat_map(|c| &c.extents).map(|d| d.data.len()).sum::<usize>()
+    }
+
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>, chunks: &IlocBox) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(chunks), *b"mdat")?;
+        for ch in chunks.items.iter().flat_map(|c| &c.extents) {
+            b.push(ch.data)?;
+        }
+        Ok(())
+    }
+}

@@ -1,0 +1,213 @@
+# zenavif-serialize public API — supported surface (default features)
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+#
+# files: zenavif-serialize.txt 176 lines (supported surface) | zenavif-serialize.features.txt 0 added (features: none) | zenavif-serialize.internal.txt 24 lines (24 hidden + 0 excluded-feature)
+
+## summary
+#
+#   pub modules                                 4
+#   pub types (struct/enum/trait/alias)        19
+#   pub consts/statics                          3
+#   free functions                              4
+#   inherent methods                           57
+#   struct fields                              38
+#   enum variants                              30
+#   trait roster entries (type × trait)        65
+#   auto-trait-complete types                  17
+#   auto-trait exceptions                       1
+#
+# per-module pub lines:
+#   (root)                           99
+#   animated                         18
+#   constants                        30
+#   grid                              8
+
+## items (155 lines)
+
+pub mod zenavif_serialize
+pub mod animated
+#[non_exhaustive] pub struct animated::AnimFrame<'a>
+pub animated::AnimFrame::alpha: core::option::Option<&'a [u8]>
+pub animated::AnimFrame::color: &'a [u8]
+pub animated::AnimFrame::duration: u32
+pub animated::AnimFrame::is_sync: bool
+pub fn animated::AnimFrame<'a>::new(&'a [u8], u32) -> Self
+pub fn animated::AnimFrame<'a>::with_alpha(self, &'a [u8]) -> Self
+pub fn animated::AnimFrame<'a>::with_sync(self, bool) -> Self
+pub struct animated::AnimatedImage
+pub fn animated::AnimatedImage::new() -> Self
+pub fn animated::AnimatedImage::serialize(&self, u32, u32, &[animated::AnimFrame<'_>], &[u8], core::option::Option<&[u8]>) -> alloc::vec::Vec<u8>
+pub fn animated::AnimatedImage::set_alpha_config(&mut self, Av1CBox) -> &mut Self
+pub fn animated::AnimatedImage::set_clli(&mut self, ClliBox) -> &mut Self
+pub fn animated::AnimatedImage::set_color_config(&mut self, Av1CBox) -> &mut Self
+pub fn animated::AnimatedImage::set_colr(&mut self, ColrBox) -> &mut Self
+pub fn animated::AnimatedImage::set_loop_count(&mut self, u32) -> &mut Self
+pub fn animated::AnimatedImage::set_mdcv(&mut self, MdcvBox) -> &mut Self
+pub fn animated::AnimatedImage::set_timescale(&mut self, u32) -> &mut Self
+pub mod constants
+#[non_exhaustive] pub enum constants::ColorPrimaries
+pub constants::ColorPrimaries::Bt2020 = 9
+pub constants::ColorPrimaries::Bt601 = 6
+pub constants::ColorPrimaries::Bt709 = 1
+pub constants::ColorPrimaries::DciP3 = 11
+pub constants::ColorPrimaries::DisplayP3 = 12
+pub constants::ColorPrimaries::Unspecified = 2
+#[non_exhaustive] pub enum constants::MatrixCoefficients
+pub constants::MatrixCoefficients::Bt2020Cl = 10
+pub constants::MatrixCoefficients::Bt2020Ncl = 9
+pub constants::MatrixCoefficients::Bt601 = 6
+pub constants::MatrixCoefficients::Bt709 = 1
+pub constants::MatrixCoefficients::Rgb = 0
+pub constants::MatrixCoefficients::Unspecified = 2
+pub constants::MatrixCoefficients::Ycgco = 8
+#[non_exhaustive] pub enum constants::TransferCharacteristics
+pub constants::TransferCharacteristics::Bt2020_10 = 14
+pub constants::TransferCharacteristics::Bt2020_12 = 15
+pub constants::TransferCharacteristics::Bt601 = 6
+pub constants::TransferCharacteristics::Bt709 = 1
+pub constants::TransferCharacteristics::Hlg = 18
+pub constants::TransferCharacteristics::Iec61966 = 11
+pub constants::TransferCharacteristics::Linear = 8
+pub constants::TransferCharacteristics::Log = 9
+pub constants::TransferCharacteristics::LogSqrt = 10
+pub constants::TransferCharacteristics::Smpte2084 = 16
+pub constants::TransferCharacteristics::Smpte240 = 7
+pub constants::TransferCharacteristics::Smpte428 = 17
+pub constants::TransferCharacteristics::Srgb = 13
+pub constants::TransferCharacteristics::Unspecified = 2
+pub mod grid
+pub struct grid::GridImage
+pub fn grid::GridImage::new() -> Self
+pub fn grid::GridImage::serialize(&self, u8, u8, u32, u32, u32, u32, &[&[u8]], core::option::Option<&[&[u8]]>) -> std::io::error::Result<alloc::vec::Vec<u8>>
+pub fn grid::GridImage::set_alpha_config(&mut self, Av1CBox) -> &mut Self
+pub fn grid::GridImage::set_color_config(&mut self, Av1CBox) -> &mut Self
+pub fn grid::GridImage::set_colr(&mut self, ColrBox) -> &mut Self
+pub fn grid::GridImage::set_depth_bits(&mut self, u8) -> &mut Self
+pub fn grid::GridImage::set_premultiplied_alpha(&mut self, bool) -> &mut Self
+#[non_exhaustive] pub enum SerializeError
+pub SerializeError::InvalidInput(&'static str)
+pub SerializeError::Io(std::io::error::Error)
+pub SerializeError::Oom
+#[non_exhaustive] pub struct Av1CBox
+pub Av1CBox::chroma_sample_position: u8
+pub Av1CBox::chroma_subsampling_x: bool
+pub Av1CBox::chroma_subsampling_y: bool
+pub Av1CBox::high_bitdepth: bool
+pub Av1CBox::monochrome: bool
+pub Av1CBox::seq_level_idx_0: u8
+pub Av1CBox::seq_profile: u8
+pub Av1CBox::seq_tier_0: bool
+pub Av1CBox::twelve_bit: bool
+pub struct Aviffy
+pub fn Aviffy::new() -> Self
+pub fn Aviffy::set_bit_depth(&mut self, u8) -> &mut Self
+pub fn Aviffy::set_chroma_subsampling(&mut self, impl core::convert::Into<ChromaSubsampling>) -> &mut Self
+pub fn Aviffy::set_clean_aperture(&mut self, ClapBox) -> &mut Self
+pub fn Aviffy::set_color_primaries(&mut self, constants::ColorPrimaries) -> &mut Self
+pub fn Aviffy::set_content_light_level(&mut self, u16, u16) -> &mut Self
+pub fn Aviffy::set_exif(&mut self, alloc::vec::Vec<u8>) -> &mut Self
+pub fn Aviffy::set_full_color_range(&mut self, bool) -> &mut Self
+pub fn Aviffy::set_gain_map(&mut self, alloc::vec::Vec<u8>, u32, u32, u8, alloc::vec::Vec<u8>) -> &mut Self
+pub fn Aviffy::set_gain_map_alt_colr(&mut self, ColrBox) -> &mut Self
+pub fn Aviffy::set_gain_map_chroma_subsampling(&mut self, impl core::convert::Into<ChromaSubsampling>) -> &mut Self
+pub fn Aviffy::set_gain_map_monochrome(&mut self, bool) -> &mut Self
+pub fn Aviffy::set_height(&mut self, u32) -> &mut Self
+pub fn Aviffy::set_icc_profile(&mut self, alloc::vec::Vec<u8>) -> &mut Self
+pub fn Aviffy::set_mastering_display(&mut self, [(u16, u16); 3], (u16, u16), u32, u32) -> &mut Self
+pub fn Aviffy::set_matrix_coefficients(&mut self, constants::MatrixCoefficients) -> &mut Self
+pub fn Aviffy::set_max_output_bytes(&mut self, usize) -> &mut Self
+pub fn Aviffy::set_mirror(&mut self, u8) -> &mut Self
+pub fn Aviffy::set_monochrome(&mut self, bool) -> &mut Self
+pub fn Aviffy::set_pixel_aspect_ratio(&mut self, u32, u32) -> &mut Self
+pub fn Aviffy::set_premultiplied_alpha(&mut self, bool) -> &mut Self
+pub fn Aviffy::set_rotation(&mut self, u8) -> &mut Self
+pub fn Aviffy::set_seq_profile(&mut self, u8) -> &mut Self
+pub fn Aviffy::set_transfer_characteristics(&mut self, constants::TransferCharacteristics) -> &mut Self
+pub fn Aviffy::set_width(&mut self, u32) -> &mut Self
+pub fn Aviffy::set_xmp(&mut self, alloc::vec::Vec<u8>) -> &mut Self
+pub fn Aviffy::to_vec(&self, &[u8], core::option::Option<&[u8]>, u32, u32, u8) -> alloc::vec::Vec<u8>
+pub fn Aviffy::try_to_vec(&self, &[u8], core::option::Option<&[u8]>, u32, u32, u8) -> Result<alloc::vec::Vec<u8>>
+pub fn Aviffy::with_max_output_bytes(&mut self, usize) -> &mut Self
+pub fn Aviffy::write<W: std::io::Write>(&self, W, &[u8], core::option::Option<&[u8]>, u32, u32, u8) -> Result<()>
+pub fn Aviffy::write_slice<W: std::io::Write>(&self, W, &[u8], core::option::Option<&[u8]>) -> Result<()>
+pub struct ChromaSubsampling
+pub ChromaSubsampling::horizontal: bool
+pub ChromaSubsampling::vertical: bool
+pub const ChromaSubsampling::NONE: Self
+pub const ChromaSubsampling::YUV420: Self
+pub const ChromaSubsampling::YUV422: Self
+pub fn (bool, bool)::from(ChromaSubsampling) -> Self
+#[non_exhaustive] pub struct ClapBox
+pub ClapBox::height_d: u32
+pub ClapBox::height_n: u32
+pub ClapBox::horiz_off_d: u32
+pub ClapBox::horiz_off_n: i32
+pub ClapBox::vert_off_d: u32
+pub ClapBox::vert_off_n: i32
+pub ClapBox::width_d: u32
+pub ClapBox::width_n: u32
+pub fn ClapBox::new(u32, u32, u32, u32, i32, u32, i32, u32) -> Self
+#[non_exhaustive] pub struct ClliBox
+pub ClliBox::max_content_light_level: u16
+pub ClliBox::max_pic_average_light_level: u16
+pub fn ClliBox::new(u16, u16) -> Self
+#[non_exhaustive] pub struct ColrBox
+pub ColrBox::color_primaries: constants::ColorPrimaries
+pub ColrBox::full_range_flag: bool
+pub ColrBox::matrix_coefficients: constants::MatrixCoefficients
+pub ColrBox::transfer_characteristics: constants::TransferCharacteristics
+#[non_exhaustive] pub struct ColrIccBox
+pub ColrIccBox::icc_data: alloc::vec::Vec<u8>
+pub fn ColrIccBox::new(alloc::vec::Vec<u8>) -> Self
+#[non_exhaustive] pub struct ImirBox
+pub ImirBox::axis: u8
+pub fn ImirBox::new(u8) -> Self
+#[non_exhaustive] pub struct IrotBox
+pub IrotBox::angle: u8
+pub fn IrotBox::new(u8) -> Self
+#[non_exhaustive] pub struct MdcvBox
+pub MdcvBox::max_luminance: u32
+pub MdcvBox::min_luminance: u32
+pub MdcvBox::primaries: [(u16, u16); 3]
+pub MdcvBox::white_point: (u16, u16)
+pub fn MdcvBox::new([(u16, u16); 3], (u16, u16), u32, u32) -> Self
+#[non_exhaustive] pub struct PaspBox
+pub PaspBox::h_spacing: u32
+pub PaspBox::v_spacing: u32
+pub fn PaspBox::new(u32, u32) -> Self
+pub fn serialize<W: std::io::Write>(W, &[u8], core::option::Option<&[u8]>, u32, u32, u8) -> Result<()>
+pub fn serialize_to_vec(&[u8], core::option::Option<&[u8]>, u32, u32, u8) -> alloc::vec::Vec<u8>
+pub fn try_serialize_to_vec(&[u8], core::option::Option<&[u8]>, u32, u32, u8) -> Result<alloc::vec::Vec<u8>>
+pub type Result<T> = core::result::Result<T, whereat::at::At<SerializeError>>
+
+## trait impls (19 types)
+
+(bool, bool): From<ChromaSubsampling>
+Av1CBox: Clone, Copy, Debug, Default
+Aviffy: Default
+ChromaSubsampling: Clone, Copy, Debug, Eq, From<(bool, bool)>, PartialEq
+ClapBox: Clone, Copy, Debug, PartialEq
+ClliBox: Clone, Copy, Debug, PartialEq
+ColrBox: Clone, Copy, Debug, Default, PartialEq
+ColrIccBox: Clone, Debug
+ImirBox: Clone, Copy, Debug, PartialEq
+IrotBox: Clone, Copy, Debug, PartialEq
+MdcvBox: Clone, Copy, Debug, PartialEq
+PaspBox: Clone, Copy, Debug, PartialEq
+SerializeError: Debug, Display, Error, From<std::io::error::Error>
+animated::AnimFrame<'a>: Clone
+animated::AnimatedImage: Default
+constants::ColorPrimaries: Clone, Copy, Debug, Eq, PartialEq
+constants::MatrixCoefficients: Clone, Copy, Debug, Eq, PartialEq
+constants::TransferCharacteristics: Clone, Copy, Debug, Eq, PartialEq
+grid::GridImage: Default
+
+## auto traits
+
+17 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+SerializeError: !RefUnwindSafe !UnwindSafe

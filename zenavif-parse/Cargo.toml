@@ -1,0 +1,66 @@
+[package]
+name = "zenavif-parse"
+version = "0.7.0"
+authors = [
+  "Lilith River <lilith@imazen.io>",
+  "Kornel Lesiński <kornel@geekhood.net>",
+  "Ralph Giles <giles@mozilla.com>",
+  "Matthew Gregan <kinetik@flim.org>",
+  "Alfredo Yang <ayang@mozilla.com>",
+  "Jon Bauman <jbauman@mozilla.com>",
+]
+edition = "2024"
+description = "AVIF container parser with zero-copy AvifParser API, grid images, animation, and resource limits. Fork of avif-parse."
+license = "MPL-2.0"
+categories = ["multimedia::images"]
+repository = "https://github.com/imazen/zenavif-parse"
+readme = "README.crates.md"
+include = ["/README.crates.md", "/CHANGELOG.md", "/Cargo.toml", "/LICENSE", "/src/*.rs", "/examples/*.rs"]
+keywords = ["avif", "image", "parser", "demuxer", "heif"]
+rust-version = "1.93"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+byteorder = "1.5.0"
+bitreader = "0.3.8"
+leb128 = "0.2.5"
+log = "0.4.20"
+fallible_collections = { version = "0.5.1", default-features = false, features = ["std"] }
+arrayvec = "0.7.6"
+enough = { version = "0.4.3", features = ["std"] }
+zencodec = { version = "0.1.26", default-features = false }
+whereat = { version = "0.1.5" }
+
+[dev-dependencies]
+env_logger = { version = "0.11.10", default-features = false }
+walkdir = "2.4.0"
+zenutils-fuzz = "0.1.0"
+
+[features]
+eager = []
+# Deprecated no-op: zencodec is now a hard dependency.
+# Kept so existing Cargo.toml entries with features = ["zencodec"] don't break.
+zencodec = []
+# Export symbols for C
+c_api = ["eager"]
+
+[badges]
+maintenance = { status = "actively-developed" }
+
+[package.metadata.docs.rs]
+all-features = true
+targets = ["x86_64-unknown-linux-gnu"]
+
+[[example]]
+name = "dump_av1"
+required-features = ["eager"]
+
+[[example]]
+name = "inspect_grid"
+required-features = ["eager"]
+
+[[example]]
+name = "inspect_animation"
+required-features = ["eager"]

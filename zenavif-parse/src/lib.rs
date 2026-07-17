@@ -1,0 +1,6034 @@
+#![deny(unsafe_code)]
+#![allow(clippy::missing_safety_doc)]
+//! AVIF container parser (ISOBMFF/MIAF demuxer).
+//!
+//! Extracts AV1 payloads, alpha channels, grid tiles, animation frames,
+//! and container metadata from AVIF files. Written in safe Rust with
+//! fallible allocations throughout.
+//!
+//! The primary API is [`AvifParser`], which performs zero-copy parsing by
+//! recording byte offsets and resolving data on demand.
+//!
+//! A legacy eager API (`read_avif`) is available behind the `eager` feature flag.
+
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use arrayvec::ArrayVec;
+use log::{debug, warn};
+
+use bitreader::BitReader;
+use byteorder::ReadBytesExt;
+use fallible_collections::{TryClone, TryReserveError};
+use std::borrow::Cow;
+use std::convert::{TryFrom, TryInto as _};
+
+use std::io::{Read, Take};
+use std::num::NonZeroU32;
+use std::ops::{Range, RangeFrom};
+
+mod obu;
+
+mod boxes;
+use crate::boxes::{BoxType, FourCC};
+
+/// This crate can be used from C.
+#[cfg(feature = "c_api")]
+pub mod c_api;
+
+pub use enough::{Stop, StopReason, Unstoppable};
+use whereat::{At, at};
+
+// Registers `at_crate_info()` so the `at!()` macro can tag error origins with
+// crate-aware source locations (file:line:col + GitHub links).
+whereat::define_at_crate_info!();
+
+// Arbitrary buffer size limit used for raw read_bufs on a box.
+// const BUF_SIZE_LIMIT: u64 = 10 * 1024 * 1024;
+
+/// A trait to indicate a type can be infallibly converted to `u64`.
+/// This should only be implemented for infallible conversions, so only unsigned types are valid.
+trait ToU64 {
+    fn to_u64(self) -> u64;
+}
+
+/// Infallible: usize always fits in u64.
+impl ToU64 for usize {
+    fn to_u64(self) -> u64 {
+        const _: () = assert!(std::mem::size_of::<usize>() <= std::mem::size_of::<u64>());
+        self as u64
+    }
+}
+
+/// A trait to indicate a type can be infallibly converted to `usize`.
+/// This should only be implemented for infallible conversions, so only unsigned types are valid.
+pub(crate) trait ToUsize {
+    fn to_usize(self) -> usize;
+}
+
+/// Infallible widening cast: `$from_type` always fits in `usize`.
+macro_rules! impl_to_usize_from {
+    ( $from_type:ty ) => {
+        impl ToUsize for $from_type {
+            fn to_usize(self) -> usize {
+                const _: () = assert!(std::mem::size_of::<$from_type>() <= std::mem::size_of::<usize>());
+                self as usize
+            }
+        }
+    };
+}
+
+impl_to_usize_from!(u8);
+impl_to_usize_from!(u16);
+impl_to_usize_from!(u32);
+
+/// Indicate the current offset (i.e., bytes already read) in a reader
+trait Offset {
+    fn offset(&self) -> u64;
+}
+
+/// Wraps a reader to track the current offset
+struct OffsetReader<'a, T: ?Sized> {
+    reader: &'a mut T,
+    offset: u64,
+}
+
+impl<'a, T: ?Sized> OffsetReader<'a, T> {
+    fn new(reader: &'a mut T) -> Self {
+        Self { reader, offset: 0 }
+    }
+}
+
+impl<T: ?Sized> Offset for OffsetReader<'_, T> {
+    fn offset(&self) -> u64 {
+        self.offset
+    }
+}
+
+impl<T: Read + ?Sized> Read for OffsetReader<'_, T> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let bytes_read = self.reader.read(buf)?;
+        self.offset = self
+            .offset
+            .checked_add(bytes_read.to_u64())
+            // This is a `std::io::Read` impl, so the error must be a bare
+            // `Error` (it converts to `std::io::Error` via `From<Error>`); the
+            // `at!()` location wrapper is only for the crate's `At<Error>` results.
+            .ok_or(Error::Unsupported("total bytes read too large for offset type"))?;
+        Ok(bytes_read)
+    }
+}
+
+pub(crate) type TryVec<T> = fallible_collections::TryVec<T>;
+pub(crate) type TryString = fallible_collections::TryVec<u8>;
+
+// To ensure we don't use stdlib allocating types by accident
+#[allow(dead_code)]
+struct Vec;
+#[allow(dead_code)]
+struct Box;
+#[allow(dead_code)]
+struct HashMap;
+#[allow(dead_code)]
+struct String;
+
+/// Describes parser failures.
+///
+/// This enum wraps the standard `io::Error` type, unified with
+/// our own parser error states and those of crates we use.
+#[derive(Debug)]
+pub enum Error {
+    /// Parse error caused by corrupt or malformed data.
+    InvalidData(&'static str),
+    /// Parse error caused by limited parser support rather than invalid data.
+    Unsupported(&'static str),
+    /// Reflect `std::io::ErrorKind::UnexpectedEof` for short data.
+    UnexpectedEOF,
+    /// Propagate underlying errors from `std::io`.
+    Io(std::io::Error),
+    /// `read_mp4` terminated without detecting a moov box.
+    NoMoov,
+    /// Out of memory
+    OutOfMemory,
+    /// Resource limit exceeded during parsing
+    ResourceLimitExceeded(&'static str),
+    /// Operation was stopped/cancelled
+    Stopped(enough::StopReason),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let msg = match self {
+            Self::InvalidData(s) | Self::Unsupported(s) | Self::ResourceLimitExceeded(s) => s,
+            Self::UnexpectedEOF => "EOF",
+            Self::Io(err) => return err.fmt(f),
+            Self::NoMoov => "Missing Moov box",
+            Self::OutOfMemory => "OOM",
+            Self::Stopped(reason) => return write!(f, "Stopped: {}", reason),
+        };
+        f.write_str(msg)
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl From<bitreader::BitReaderError> for Error {
+    #[cold]
+    #[cfg_attr(debug_assertions, track_caller)]
+    fn from(err: bitreader::BitReaderError) -> Self {
+        log::warn!("bitreader: {err}");
+        Self::InvalidData("truncated bits")
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Self {
+        match err.kind() {
+            std::io::ErrorKind::UnexpectedEof => Self::UnexpectedEOF,
+            _ => Self::Io(err),
+        }
+    }
+}
+
+impl From<std::string::FromUtf8Error> for Error {
+    fn from(_: std::string::FromUtf8Error) -> Self {
+        Self::InvalidData("invalid utf8")
+    }
+}
+
+impl From<std::num::TryFromIntError> for Error {
+    fn from(_: std::num::TryFromIntError) -> Self {
+        Self::Unsupported("integer conversion failed")
+    }
+}
+
+impl From<Error> for std::io::Error {
+    fn from(err: Error) -> Self {
+        let kind = match err {
+            Error::InvalidData(_) => std::io::ErrorKind::InvalidData,
+            Error::UnexpectedEOF => std::io::ErrorKind::UnexpectedEof,
+            Error::Io(io_err) => return io_err,
+            _ => std::io::ErrorKind::Other,
+        };
+        Self::new(kind, err)
+    }
+}
+
+impl From<TryReserveError> for Error {
+    fn from(_: TryReserveError) -> Self {
+        Self::OutOfMemory
+    }
+}
+
+impl From<enough::StopReason> for Error {
+    fn from(reason: enough::StopReason) -> Self {
+        Self::Stopped(reason)
+    }
+}
+
+// Codec-agnostic error taxonomy (zencodec PR #103). Maps every [`Error`]
+// variant to exactly one coarse [`zencodec::ErrorCategory`] so a consumer can
+// route on the category (HTTP status, retry policy, logging) without naming
+// this enum. `zencodec` is a *hard* dependency of this crate (the legacy
+// `zencodec` cargo feature is a deprecated no-op), so the impl is unconditional.
+//
+// `codec_name()` is `Some("zenavif-parse")`: this is the container demuxer's own
+// crate, and when the sibling `zenavif` codec wraps a parse error it delegates
+// only the `category()` (its own `CategorizedError` reports
+// `codec_name() == Some("zenavif")`), so this name is what a consumer sees only
+// when using the parser directly.
+impl zencodec::CategorizedError for Error {
+    fn codec_name(&self) -> Option<&'static str> {
+        Some("zenavif-parse")
+    }
+
+    fn category(&self) -> zencodec::ErrorCategory {
+        // zencodec 0.1.26 shipped `ErrorCategory` as an origin-first, two-level
+        // enum (`Image`/`Request`/`Resource`/`Policy`/`Stopped`/`Io`/`Internal`),
+        // not the flat enum this mapping was originally written against (the
+        // `cancellation-classification-99` git-patch predates a same-day reshape
+        // that landed before the crates.io publish). Every arm below maps to the
+        // same semantic bucket as before, just through the new nesting; the leaf
+        // `From` shortcuts (`ImageError::Malformed.into()`, `L::Pixels.into()`,
+        // etc.) avoid spelling the outer wrapper at every call site.
+        use zencodec::{ErrorCategory, ImageError, LimitKind as L, ResourceError, UnsupportedImageKind as U};
+        match self {
+            // Corrupt or malformed container/bitstream content.
+            Self::InvalidData(_) => ImageError::Malformed.into(),
+            // A missing `moov` box is a structurally incomplete/malformed container.
+            Self::NoMoov => ImageError::Malformed.into(),
+            // The container parsed, but uses a feature this demuxer doesn't handle.
+            Self::Unsupported(_) => U::Feature.into(),
+            // Input ended before a complete structure could be read.
+            Self::UnexpectedEOF => ImageError::UnexpectedEof.into(),
+            // An underlying `std::io` failure. The opaque `CodecIoKind` is the
+            // portable choice: this crate enables `zencodec` with
+            // `default-features = false`, so the std `ErrorKind` payload is absent.
+            Self::Io(_) => ErrorCategory::Io(zencodec::CodecIoKind::opaque()),
+            // Allocation failed (distinct from a configured resource limit).
+            Self::OutOfMemory => ResourceError::OutOfMemory.into(),
+            // A configured parser cap was hit. The variant carries only a
+            // `&'static str` label (not a structured kind), so recover the
+            // precise `LimitKind` by matching the label text against the
+            // fixed set this crate constructs (see the `ResourceLimitExceeded`
+            // construction sites). Any future/unrecognized label falls back to
+            // `Pixels`, the dominant decode-size axis.
+            Self::ResourceLimitExceeded(label) => match *label {
+                // Reader-side cap on raw bytes read from an untrusted input
+                // stream before any container parsing happens — bounds the
+                // size of the encoded input, not decoded pixel memory.
+                "input exceeds peak_memory_limit" => L::InputSize.into(),
+                // Tracked peak allocation during eager box/sample parsing.
+                "peak memory limit exceeded" => L::Memory.into(),
+                "total megapixels limit exceeded" => L::TotalPixels.into(),
+                "animation frame count limit exceeded" => L::Frames.into(),
+                // Grid tile count doesn't have its own `LimitKind`; it bounds
+                // the number of image tiles composited into the final decode,
+                // so `Pixels` (the decode-size axis) is the true fallback.
+                "grid tile count limit exceeded" => L::Pixels.into(),
+                _ => L::Pixels.into(),
+            },
+            // Cooperative cancellation / deadline — delegate to the zencodec
+            // `StopReason` arm (`Cancelled` vs `TimedOut`).
+            Self::Stopped(reason) => reason.category(),
+        }
+    }
+}
+
+// NOTE on `?`-propagation of foreign errors:
+//
+// whereat provides a blanket `impl<E> From<E> for At<E>`, which gives us
+// `From<Error> for At<Error>` for free — so a bare `Error` value propagates
+// through `?` into an `At<Error>` result (without an added location frame; the
+// frame is captured at the origin via `at!()`).
+//
+// We CANNOT add `impl From<ForeignError> for At<Error>` for foreign error types
+// (bitreader::BitReaderError, std::io::Error, …): both `At` and those error
+// types are defined outside this crate, so such impls violate the orphan rule.
+// Instead, every site that propagates a foreign error into an `At<Error>`
+// result wraps it explicitly with `.map_err(|e| at!(Error::from(e)))?`, which
+// both converts to `Error` and captures the location. This matches the sibling
+// `zenavif` crate's pattern.
+
+/// Result shorthand using our Error enum, with source-location tracking.
+///
+/// The error type is [`whereat::At<Error>`], which wraps the underlying
+/// [`Error`] together with the source location(s) it propagated through.
+/// Use [`At::error`] (borrow) or [`At::decompose`] (consume) to inspect the
+/// inner [`Error`].
+pub type Result<T, E = whereat::At<Error>> = std::result::Result<T, E>;
+
+#[cfg(test)]
+mod error_category_tests {
+    use super::Error;
+    use zencodec::{
+        CategorizedError, ErrorCategory as C, ImageError, LimitKind as L, ResourceError, UnsupportedImageKind as U,
+    };
+
+    #[test]
+    fn error_category_mapping() {
+        assert_eq!(Error::InvalidData("x").codec_name(), Some("zenavif-parse"));
+
+        // Malformed / corrupt container content.
+        assert_eq!(Error::InvalidData("bad").category(), C::Image(ImageError::Malformed));
+        assert_eq!(Error::NoMoov.category(), C::Image(ImageError::Malformed));
+
+        // Parser doesn't handle this container feature.
+        assert_eq!(
+            Error::Unsupported("construction method").category(),
+            C::Image(ImageError::Unsupported(U::Feature))
+        );
+
+        // Truncated input.
+        assert_eq!(Error::UnexpectedEOF.category(), C::Image(ImageError::UnexpectedEof));
+
+        // Underlying I/O.
+        assert_eq!(
+            Error::Io(std::io::Error::other("disk")).category(),
+            C::Io(zencodec::CodecIoKind::opaque())
+        );
+
+        // Allocation failure.
+        assert_eq!(Error::OutOfMemory.category(), C::Resource(ResourceError::OutOfMemory));
+
+        // Configured parser cap -> precise LimitKind per label text, matching
+        // every `ResourceLimitExceeded` construction site in this crate.
+        assert_eq!(
+            Error::ResourceLimitExceeded("input exceeds peak_memory_limit").category(),
+            C::Resource(ResourceError::Limits(L::InputSize))
+        );
+        assert_eq!(
+            Error::ResourceLimitExceeded("peak memory limit exceeded").category(),
+            C::Resource(ResourceError::Limits(L::Memory))
+        );
+        assert_eq!(
+            Error::ResourceLimitExceeded("total megapixels limit exceeded").category(),
+            C::Resource(ResourceError::Limits(L::TotalPixels))
+        );
+        assert_eq!(
+            Error::ResourceLimitExceeded("animation frame count limit exceeded").category(),
+            C::Resource(ResourceError::Limits(L::Frames))
+        );
+        assert_eq!(
+            Error::ResourceLimitExceeded("grid tile count limit exceeded").category(),
+            C::Resource(ResourceError::Limits(L::Pixels))
+        );
+        // Unrecognized label -> true fallback (Pixels).
+        assert_eq!(
+            Error::ResourceLimitExceeded("some future limit").category(),
+            C::Resource(ResourceError::Limits(L::Pixels))
+        );
+
+        // Cooperative cancellation / deadline -> delegated to StopReason.
+        assert_eq!(
+            Error::Stopped(enough::StopReason::Cancelled).category(),
+            C::Stopped(enough::StopReason::Cancelled)
+        );
+        assert_eq!(
+            Error::Stopped(enough::StopReason::TimedOut).category(),
+            C::Stopped(enough::StopReason::TimedOut)
+        );
+
+        // The blanket `impl CategorizedError for At<E>` forwards both axes.
+        let at_err = whereat::At::from(Error::InvalidData("x"));
+        assert_eq!(at_err.category(), C::Image(ImageError::Malformed));
+        assert_eq!(at_err.codec_name(), Some("zenavif-parse"));
+    }
+}
+
+/// Basic ISO box structure.
+///
+/// mp4 files are a sequence of possibly-nested 'box' structures.  Each box
+/// begins with a header describing the length of the box's data and a
+/// four-byte box type which identifies the type of the box. Together these
+/// are enough to interpret the contents of that section of the file.
+///
+/// See ISO 14496-12:2015 § 4.2
+#[derive(Debug, Clone, Copy)]
+struct BoxHeader {
+    /// Box type.
+    name: BoxType,
+    /// Size of the box in bytes.
+    size: u64,
+    /// Offset to the start of the contained data (or header size).
+    offset: u64,
+    /// Uuid for extended type.
+    #[allow(unused)]
+    uuid: Option<[u8; 16]>,
+}
+
+impl BoxHeader {
+    /// 4-byte size + 4-byte type
+    const MIN_SIZE: u64 = 8;
+    /// 4-byte size + 4-byte type + 16-byte size
+    const MIN_LARGE_SIZE: u64 = 16;
+}
+
+/// File type box 'ftyp'.
+#[derive(Debug)]
+#[allow(unused)]
+struct FileTypeBox {
+    major_brand: FourCC,
+    minor_version: u32,
+    compatible_brands: TryVec<FourCC>,
+}
+
+// Handler reference box 'hdlr'
+#[derive(Debug)]
+#[allow(unused)]
+struct HandlerBox {
+    handler_type: FourCC,
+}
+
+/// AV1 codec configuration from the `av1C` property box.
+///
+/// Contains the AV1 codec parameters as signaled in the container.
+/// See AV1-ISOBMFF § 2.3.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AV1Config {
+    /// AV1 seq_profile (0=Main, 1=High, 2=Professional)
+    pub profile: u8,
+    /// AV1 seq_level_idx for operating point 0
+    pub level: u8,
+    /// AV1 seq_tier for operating point 0
+    pub tier: u8,
+    /// Bit depth (8, 10, or 12)
+    pub bit_depth: u8,
+    /// True if monochrome (no chroma planes)
+    pub monochrome: bool,
+    /// Chroma subsampling X (1 = horizontally subsampled)
+    pub chroma_subsampling_x: u8,
+    /// Chroma subsampling Y (1 = vertically subsampled)
+    pub chroma_subsampling_y: u8,
+    /// Chroma sample position (0=unknown, 1=vertical, 2=colocated)
+    pub chroma_sample_position: u8,
+}
+
+/// Colour information from the `colr` property box.
+///
+/// Can be either CICP-based (`nclx`) or an ICC profile (`rICC`/`prof`).
+/// See ISOBMFF § 12.1.5.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ColorInformation {
+    /// CICP-based color information (colour_type = 'nclx')
+    Nclx {
+        /// Colour primaries (ITU-T H.273 Table 2)
+        color_primaries: u16,
+        /// Transfer characteristics (ITU-T H.273 Table 3)
+        transfer_characteristics: u16,
+        /// Matrix coefficients (ITU-T H.273 Table 4)
+        matrix_coefficients: u16,
+        /// True if full range (0-255 for 8-bit), false if limited/studio range
+        full_range: bool,
+    },
+    /// ICC profile (colour_type = 'rICC' or 'prof')
+    IccProfile(std::vec::Vec<u8>),
+}
+
+/// Image dimensions declared by the container's `ispe` property.
+///
+/// These values come only from the primary item's Image Spatial Extents box;
+/// they are not inferred from the AV1 bitstream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImageSpatialExtents {
+    /// Width in pixels.
+    pub width: u32,
+    /// Height in pixels.
+    pub height: u32,
+}
+
+/// Image rotation from the `irot` property box.
+///
+/// Specifies a counter-clockwise rotation to apply after decoding.
+/// See ISOBMFF § 12.1.4.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImageRotation {
+    /// Rotation angle in degrees counter-clockwise: 0, 90, 180, or 270.
+    pub angle: u16,
+}
+
+/// Image mirror from the `imir` property box.
+///
+/// Specifies a mirror (flip) axis to apply after rotation.
+/// See ISOBMFF § 12.1.4.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImageMirror {
+    /// Mirror axis: 0 = top-to-bottom (vertical axis, left-right flip),
+    /// 1 = left-to-right (horizontal axis, top-bottom flip).
+    pub axis: u8,
+}
+
+/// Clean aperture from the `clap` property box.
+///
+/// Defines a crop rectangle as a centered region. All values are
+/// stored as exact rationals (numerator/denominator).
+/// See ISOBMFF § 12.1.4.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CleanAperture {
+    /// Width of the clean aperture (numerator)
+    pub width_n: u32,
+    /// Width of the clean aperture (denominator)
+    pub width_d: u32,
+    /// Height of the clean aperture (numerator)
+    pub height_n: u32,
+    /// Height of the clean aperture (denominator)
+    pub height_d: u32,
+    /// Horizontal offset of the clean aperture center (numerator, signed)
+    pub horiz_off_n: i32,
+    /// Horizontal offset of the clean aperture center (denominator)
+    pub horiz_off_d: u32,
+    /// Vertical offset of the clean aperture center (numerator, signed)
+    pub vert_off_n: i32,
+    /// Vertical offset of the clean aperture center (denominator)
+    pub vert_off_d: u32,
+}
+
+/// Pixel aspect ratio from the `pasp` property box.
+///
+/// For AVIF, the spec requires this to be 1:1 if present.
+/// See ISOBMFF § 12.1.4.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PixelAspectRatio {
+    /// Horizontal spacing
+    pub h_spacing: u32,
+    /// Vertical spacing
+    pub v_spacing: u32,
+}
+
+/// Content light level info from the `clli` property box.
+///
+/// HDR metadata for display mapping.
+/// See ISOBMFF § 12.1.5 / ITU-T H.274.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContentLightLevel {
+    /// Maximum content light level (cd/m²)
+    pub max_content_light_level: u16,
+    /// Maximum picture average light level (cd/m²)
+    pub max_pic_average_light_level: u16,
+}
+
+/// Mastering display colour volume from the `mdcv` property box.
+///
+/// HDR metadata describing the mastering display's color volume.
+/// See ISOBMFF § 12.1.5 / SMPTE ST 2086.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MasteringDisplayColourVolume {
+    /// Display primaries: [(x, y); 3] in 0.00002 units (CIE 1931)
+    /// Order: green, blue, red (per SMPTE ST 2086)
+    pub primaries: [(u16, u16); 3],
+    /// White point (x, y) in 0.00002 units
+    pub white_point: (u16, u16),
+    /// Maximum display luminance in 0.0001 cd/m² units
+    pub max_luminance: u32,
+    /// Minimum display luminance in 0.0001 cd/m² units
+    pub min_luminance: u32,
+}
+
+/// Content colour volume from the `cclv` property box.
+///
+/// Describes the colour volume of the content. Derived from H.265 D.2.40 /
+/// ITU-T H.274. All fields are optional, controlled by presence flags.
+/// See ISOBMFF § 12.1.5.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContentColourVolume {
+    /// Content colour primaries (x, y) for 3 primaries, as signed i32.
+    /// Present only if `ccv_primaries_present_flag` was set.
+    pub primaries: Option<[(i32, i32); 3]>,
+    /// Minimum luminance value. Present only if flag was set.
+    pub min_luminance: Option<u32>,
+    /// Maximum luminance value. Present only if flag was set.
+    pub max_luminance: Option<u32>,
+    /// Average luminance value. Present only if flag was set.
+    pub avg_luminance: Option<u32>,
+}
+
+/// Ambient viewing environment from the `amve` property box.
+///
+/// Describes the ambient viewing conditions under which the content
+/// was authored. See ISOBMFF § 12.1.5 / H.265 D.2.39.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AmbientViewingEnvironment {
+    /// Ambient illuminance in units of 1/10000 cd/m²
+    pub ambient_illuminance: u32,
+    /// Ambient light x chromaticity (CIE 1931), units of 1/50000
+    pub ambient_light_x: u16,
+    /// Ambient light y chromaticity (CIE 1931), units of 1/50000
+    pub ambient_light_y: u16,
+}
+
+/// Per-channel gain map parameters from ISO 21496-1.
+///
+/// Each field is a rational number (numerator/denominator pair) describing
+/// how to apply the gain map for this channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GainMapChannel {
+    /// Minimum gain map value (numerator).
+    pub gain_map_min_n: i32,
+    /// Minimum gain map value (denominator).
+    pub gain_map_min_d: u32,
+    /// Maximum gain map value (numerator).
+    pub gain_map_max_n: i32,
+    /// Maximum gain map value (denominator).
+    pub gain_map_max_d: u32,
+    /// Gamma curve parameter (numerator).
+    pub gamma_n: u32,
+    /// Gamma curve parameter (denominator).
+    pub gamma_d: u32,
+    /// Base image offset (numerator).
+    pub base_offset_n: i32,
+    /// Base image offset (denominator).
+    pub base_offset_d: u32,
+    /// Alternate image offset (numerator).
+    pub alternate_offset_n: i32,
+    /// Alternate image offset (denominator).
+    pub alternate_offset_d: u32,
+}
+
+/// Gain map metadata from a ToneMapImage (`tmap`) derived image item.
+///
+/// Describes how to apply a gain map to convert between SDR and HDR
+/// renditions. The gain map is a separate AV1-encoded image that, combined
+/// with this metadata, allows reconstructing an HDR image from the SDR base.
+///
+/// See ISO 21496-1:2025 for the full specification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GainMapMetadata {
+    /// If true, each RGB channel has independent gain map parameters.
+    /// If false, `channels[0]` applies to all three channels.
+    pub is_multichannel: bool,
+    /// If true, the gain map is encoded in the base image's colour space.
+    /// If false, it's in the alternate image's colour space.
+    pub use_base_colour_space: bool,
+    /// ISO 21496-1 backward direction flag (bit 2 of flags byte).
+    /// When true, the base image is HDR and the alternate is SDR.
+    /// Default false = base is SDR, alternate is HDR.
+    pub backward_direction: bool,
+    /// Base HDR headroom (numerator).
+    pub base_hdr_headroom_n: u32,
+    /// Base HDR headroom (denominator).
+    pub base_hdr_headroom_d: u32,
+    /// Alternate HDR headroom (numerator).
+    pub alternate_hdr_headroom_n: u32,
+    /// Alternate HDR headroom (denominator).
+    pub alternate_hdr_headroom_d: u32,
+    /// Per-channel parameters. For single-channel mode, only index 0 is
+    /// meaningful (indices 1 and 2 are copies of index 0).
+    pub channels: [GainMapChannel; 3],
+}
+
+impl GainMapMetadata {
+    /// Parse an ISO 21496-1 AVIF `tmap` item payload into a `GainMapMetadata`.
+    ///
+    /// This is the public mirror of the internal parser. Useful for testing
+    /// and for consumers who hold raw tmap payload bytes.
+    pub fn parse_tmap_bytes(data: &[u8]) -> Result<Self> {
+        parse_tone_map_image(data)
+    }
+
+    /// Serialize this metadata to the ISO 21496-1 AVIF `tmap` item payload format.
+    ///
+    /// This is the inverse of the internal `parse_tone_map_image` function and
+    /// produces the exact byte sequence expected in an AVIF `tmap` item. The
+    /// output can be passed to `zenavif_serialize::Aviffy::set_gain_map` or
+    /// used for byte-level roundtrip testing.
+    ///
+    /// Always writes the full (non-common-denominator) wire form: inputs that
+    /// were parsed from the `FLAG_COMMON_DENOMINATOR` compact layout are
+    /// re-expanded to per-field `(numerator, denominator)` pairs and the
+    /// compact form is NOT preserved.
+    // TODO: optional byte-exact preservation of common-denominator inputs
+    // would require storing `was_common_denom: Option<u32>` alongside the
+    // expanded fields and re-emitting the compact layout when set.
+    ///
+    /// `version` and `minimum_version` are always written as 0.
+    /// Writer version is always emitted as `0` (we don't claim any
+    /// extensions beyond the base ISO 21496-1 spec).
+    pub fn to_bytes(&self) -> std::vec::Vec<u8> {
+        let channel_count = if self.is_multichannel { 3usize } else { 1usize };
+        let mut buf = std::vec::Vec::with_capacity(6 + 16 + channel_count * 40);
+        buf.push(0u8); // version
+        buf.extend_from_slice(&0u16.to_be_bytes()); // minimum_version
+        buf.extend_from_slice(&0u16.to_be_bytes()); // writer_version (always 0)
+        let flags = (u8::from(self.is_multichannel) << 7)
+            | (u8::from(self.use_base_colour_space) << 6)
+            | (u8::from(self.backward_direction) << 2);
+        buf.push(flags);
+        buf.extend_from_slice(&self.base_hdr_headroom_n.to_be_bytes());
+        buf.extend_from_slice(&self.base_hdr_headroom_d.to_be_bytes());
+        buf.extend_from_slice(&self.alternate_hdr_headroom_n.to_be_bytes());
+        buf.extend_from_slice(&self.alternate_hdr_headroom_d.to_be_bytes());
+        for ch in self.channels.iter().take(channel_count) {
+            buf.extend_from_slice(&ch.gain_map_min_n.to_be_bytes());
+            buf.extend_from_slice(&ch.gain_map_min_d.to_be_bytes());
+            buf.extend_from_slice(&ch.gain_map_max_n.to_be_bytes());
+            buf.extend_from_slice(&ch.gain_map_max_d.to_be_bytes());
+            buf.extend_from_slice(&ch.gamma_n.to_be_bytes());
+            buf.extend_from_slice(&ch.gamma_d.to_be_bytes());
+            buf.extend_from_slice(&ch.base_offset_n.to_be_bytes());
+            buf.extend_from_slice(&ch.base_offset_d.to_be_bytes());
+            buf.extend_from_slice(&ch.alternate_offset_n.to_be_bytes());
+            buf.extend_from_slice(&ch.alternate_offset_d.to_be_bytes());
+        }
+        buf
+    }
+}
+
+// ─── zencodec conversions ────────────────────────────────────────────
+
+impl From<&GainMapChannel> for zencodec::GainMapChannel {
+    fn from(ch: &GainMapChannel) -> Self {
+        Self {
+            min: ch.gain_map_min_n as f64 / ch.gain_map_min_d.max(1) as f64,
+            max: ch.gain_map_max_n as f64 / ch.gain_map_max_d.max(1) as f64,
+            gamma: ch.gamma_n as f64 / ch.gamma_d.max(1) as f64,
+            base_offset: ch.base_offset_n as f64 / ch.base_offset_d.max(1) as f64,
+            alternate_offset: ch.alternate_offset_n as f64 / ch.alternate_offset_d.max(1) as f64,
+        }
+    }
+}
+
+impl From<&GainMapMetadata> for zencodec::GainMapParams {
+    fn from(md: &GainMapMetadata) -> Self {
+        let mut p = Self::default();
+        p.channels = [
+            zencodec::GainMapChannel::from(&md.channels[0]),
+            zencodec::GainMapChannel::from(&md.channels[1]),
+            zencodec::GainMapChannel::from(&md.channels[2]),
+        ];
+        p.base_hdr_headroom =
+            md.base_hdr_headroom_n as f64 / md.base_hdr_headroom_d.max(1) as f64;
+        p.alternate_hdr_headroom =
+            md.alternate_hdr_headroom_n as f64 / md.alternate_hdr_headroom_d.max(1) as f64;
+        p.use_base_color_space = md.use_base_colour_space;
+        p.backward_direction = md.backward_direction;
+        p
+    }
+}
+
+impl From<&zencodec::GainMapChannel> for GainMapChannel {
+    fn from(ch: &zencodec::GainMapChannel) -> Self {
+        use zencodec::gainmap::{Fraction, UFraction};
+        let min = Fraction::from_f64_cf(ch.min);
+        let max = Fraction::from_f64_cf(ch.max);
+        let gamma = UFraction::from_f64_cf(ch.gamma);
+        let base_off = Fraction::from_f64_cf(ch.base_offset);
+        let alt_off = Fraction::from_f64_cf(ch.alternate_offset);
+        Self {
+            gain_map_min_n: min.numerator,
+            gain_map_min_d: min.denominator,
+            gain_map_max_n: max.numerator,
+            gain_map_max_d: max.denominator,
+            gamma_n: gamma.numerator,
+            gamma_d: gamma.denominator,
+            base_offset_n: base_off.numerator,
+            base_offset_d: base_off.denominator,
+            alternate_offset_n: alt_off.numerator,
+            alternate_offset_d: alt_off.denominator,
+        }
+    }
+}
+
+impl From<&zencodec::GainMapParams> for GainMapMetadata {
+    fn from(p: &zencodec::GainMapParams) -> Self {
+        use zencodec::gainmap::UFraction;
+        let headroom_base = UFraction::from_f64_cf(p.base_hdr_headroom);
+        let headroom_alt = UFraction::from_f64_cf(p.alternate_hdr_headroom);
+        Self {
+            is_multichannel: !p.is_single_channel(),
+            use_base_colour_space: p.use_base_color_space,
+            backward_direction: p.backward_direction,
+            base_hdr_headroom_n: headroom_base.numerator,
+            base_hdr_headroom_d: headroom_base.denominator,
+            alternate_hdr_headroom_n: headroom_alt.numerator,
+            alternate_hdr_headroom_d: headroom_alt.denominator,
+            channels: [
+                GainMapChannel::from(&p.channels[0]),
+                GainMapChannel::from(&p.channels[1]),
+                GainMapChannel::from(&p.channels[2]),
+            ],
+        }
+    }
+}
+
+/// Gain map information extracted from an AVIF container.
+///
+/// Bundles the ISO 21496-1 metadata, the raw AV1-encoded gain map image data,
+/// and the alternate rendition's color information into a single type.
+///
+/// The `gain_map_data` field contains an AV1 bitstream that can be decoded
+/// with any AV1 decoder (e.g., rav1d) to obtain the gain map pixel values.
+///
+/// # Example
+///
+/// ```no_run
+/// let bytes = std::fs::read("hdr.avif").unwrap();
+/// let parser = zenavif_parse::AvifParser::from_bytes(&bytes).unwrap();
+/// if let Some(Ok(gm)) = parser.gain_map() {
+///     println!("Gain map: {} bytes", gm.gain_map_data.len());
+///     println!("Multichannel: {}", gm.metadata.is_multichannel);
+/// }
+/// ```
+#[derive(Debug, Clone)]
+pub struct AvifGainMap {
+    /// ISO 21496-1 gain map metadata (parsed from the `tmap` item payload).
+    pub metadata: GainMapMetadata,
+    /// Raw AV1 bitstream of the gain map image. Decode with an AV1 decoder
+    /// to obtain the gain map pixel values.
+    pub gain_map_data: std::vec::Vec<u8>,
+    /// Color information for the alternate (typically HDR) rendition,
+    /// from the `tmap` item's `colr` property.
+    pub alt_color_info: Option<ColorInformation>,
+}
+
+/// Depth auxiliary image extracted from an AVIF container.
+///
+/// AVIF supports auxiliary images via `auxl` item references with `auxC` type
+/// properties, following the HEIF (ISO 23008-12) auxiliary image mechanism.
+/// Depth maps use the auxiliary type URN
+/// `urn:mpeg:mpegB:cicp:systems:auxiliary:depth` (MPEG-B Part 23) or the
+/// legacy HEVC-style `urn:mpeg:hevc:2015:auxid:2`.
+///
+/// The `data` field contains a raw AV1 bitstream that can be decoded with
+/// any AV1 decoder to obtain the depth image pixel values (typically
+/// monochrome 8-bit or 10-bit).
+///
+/// # Example
+///
+/// ```no_run
+/// let bytes = std::fs::read("portrait.avif").unwrap();
+/// let parser = zenavif_parse::AvifParser::from_bytes(&bytes).unwrap();
+/// if let Some(Ok(dm)) = parser.depth_map() {
+///     println!("Depth map: {}x{}, {} bytes AV1 data", dm.width, dm.height, dm.data.len());
+/// }
+/// ```
+#[derive(Debug, Clone)]
+pub struct AvifDepthMap {
+    /// Raw AV1 bitstream of the depth auxiliary image. Decode with an AV1
+    /// decoder to obtain grayscale depth pixel values.
+    pub data: std::vec::Vec<u8>,
+    /// Width of the depth image in pixels (from `ispe` property).
+    pub width: u32,
+    /// Height of the depth image in pixels (from `ispe` property).
+    pub height: u32,
+    /// AV1 codec configuration for the depth item (from `av1C` property).
+    pub av1_config: Option<AV1Config>,
+    /// Color information for the depth item (from `colr` property), if present.
+    pub color_info: Option<ColorInformation>,
+}
+
+/// Operating point selector from the `a1op` property box.
+///
+/// Selects which AV1 operating point to decode for multi-operating-point images.
+/// See AVIF § 4.3.4.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OperatingPointSelector {
+    /// Operating point index (0..31)
+    pub op_index: u8,
+}
+
+/// Layer selector from the `lsel` property box.
+///
+/// Selects which spatial layer to render for layered/progressive images.
+/// See HEIF (ISO 23008-12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LayerSelector {
+    /// Layer ID to render (0-3), or 0xFFFF for all layers (progressive)
+    pub layer_id: u16,
+}
+
+/// AV1 layered image indexing from the `a1lx` property box.
+///
+/// Provides byte sizes for the first 3 layers so decoders can seek
+/// to a specific layer without parsing the full bitstream.
+/// See AVIF § 4.3.6.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AV1LayeredImageIndexing {
+    /// Byte sizes of layers 0, 1, 2. The last layer's size is implicit
+    /// (total item size minus the sum of these three).
+    pub layer_sizes: [u32; 3],
+}
+
+/// Options for parsing AVIF files
+///
+/// Prefer using [`DecodeConfig::lenient()`] with [`AvifParser`] instead.
+#[derive(Debug, Clone, Copy)]
+#[derive(Default)]
+pub struct ParseOptions {
+    /// Enable lenient parsing mode
+    ///
+    /// When true, non-critical validation errors (like non-zero flags in boxes
+    /// that expect zero flags) will be ignored instead of returning errors.
+    /// This allows parsing of slightly malformed but otherwise valid AVIF files.
+    ///
+    /// Default: false (strict validation)
+    pub lenient: bool,
+}
+
+/// Configuration for parsing AVIF files with resource limits and validation options
+///
+/// Provides fine-grained control over resource consumption during AVIF parsing,
+/// allowing defensive parsing against malicious or malformed files.
+///
+/// Resource limits are checked **before** allocations occur, preventing out-of-memory
+/// conditions from malicious files that claim unrealistic dimensions or counts.
+///
+/// # Examples
+///
+/// ```rust
+/// use zenavif_parse::DecodeConfig;
+///
+/// // Default limits (suitable for most apps)
+/// let config = DecodeConfig::default();
+///
+/// // Strict limits for untrusted input
+/// let config = DecodeConfig::default()
+///     .with_peak_memory_limit(100_000_000)  // 100MB
+///     .with_total_megapixels_limit(64)       // 64MP max
+///     .with_max_animation_frames(100);       // 100 frames
+///
+/// // No limits (backwards compatible with read_avif)
+/// let config = DecodeConfig::unlimited();
+/// ```
+#[derive(Debug, Clone)]
+pub struct DecodeConfig {
+    /// Maximum peak heap memory usage in bytes.
+    /// Default: 1GB (1,000,000,000 bytes)
+    pub peak_memory_limit: Option<u64>,
+
+    /// Maximum total megapixels for grid images.
+    /// Default: 512 megapixels
+    pub total_megapixels_limit: Option<u32>,
+
+    /// Maximum number of animation frames.
+    /// Default: 10,000 frames
+    pub max_animation_frames: Option<u32>,
+
+    /// Maximum number of grid tiles.
+    /// Default: 1,000 tiles
+    pub max_grid_tiles: Option<u32>,
+
+    /// Enable lenient parsing mode.
+    /// Default: false (strict validation)
+    pub lenient: bool,
+}
+
+impl Default for DecodeConfig {
+    fn default() -> Self {
+        Self {
+            peak_memory_limit: Some(1_000_000_000),
+            total_megapixels_limit: Some(512),
+            max_animation_frames: Some(10_000),
+            max_grid_tiles: Some(1_000),
+            lenient: false,
+        }
+    }
+}
+
+impl DecodeConfig {
+    /// Create a configuration with no resource limits.
+    ///
+    /// Equivalent to the behavior of `read_avif()` before resource limits were added.
+    pub fn unlimited() -> Self {
+        Self {
+            peak_memory_limit: None,
+            total_megapixels_limit: None,
+            max_animation_frames: None,
+            max_grid_tiles: None,
+            lenient: false,
+        }
+    }
+
+    /// Set the peak memory limit in bytes
+    pub fn with_peak_memory_limit(mut self, bytes: u64) -> Self {
+        self.peak_memory_limit = Some(bytes);
+        self
+    }
+
+    /// Set the total megapixels limit for grid images
+    pub fn with_total_megapixels_limit(mut self, megapixels: u32) -> Self {
+        self.total_megapixels_limit = Some(megapixels);
+        self
+    }
+
+    /// Set the maximum animation frame count
+    pub fn with_max_animation_frames(mut self, frames: u32) -> Self {
+        self.max_animation_frames = Some(frames);
+        self
+    }
+
+    /// Set the maximum grid tile count
+    pub fn with_max_grid_tiles(mut self, tiles: u32) -> Self {
+        self.max_grid_tiles = Some(tiles);
+        self
+    }
+
+    /// Enable lenient parsing mode
+    pub fn lenient(mut self, lenient: bool) -> Self {
+        self.lenient = lenient;
+        self
+    }
+}
+
+/// Grid configuration for tiled/grid-based AVIF images
+#[derive(Debug, Clone, PartialEq)]
+/// Grid image configuration
+///
+/// For tiled/grid AVIF images, this describes the grid layout.
+/// Grid images are composed of multiple AV1 image items (tiles) arranged in a rectangular grid.
+///
+/// ## Grid Layout Determination
+///
+/// Grid layout can be specified in two ways:
+/// 1. **Explicit ImageGrid property box** - contains rows, columns, and output dimensions
+/// 2. **Calculated from ispe properties** - when no ImageGrid box exists, dimensions are
+///    calculated by dividing the grid item's dimensions by a tile's dimensions
+///
+/// ## Output Dimensions
+///
+/// - `output_width` and `output_height` may be 0, indicating the decoder should calculate
+///   them from the tile dimensions
+/// - When non-zero, they specify the exact output dimensions of the composed image
+pub struct GridConfig {
+    /// Number of tile rows (1-256)
+    pub rows: u8,
+    /// Number of tile columns (1-256)
+    pub columns: u8,
+    /// Output width in pixels (0 = calculate from tiles)
+    pub output_width: u32,
+    /// Output height in pixels (0 = calculate from tiles)
+    pub output_height: u32,
+}
+
+/// Frame information for animated AVIF
+#[cfg(feature = "eager")]
+#[deprecated(since = "1.5.0", note = "Use `AvifParser::frame()` which returns `FrameRef` instead")]
+#[derive(Debug)]
+pub struct AnimationFrame {
+    /// AV1 bitstream data for this frame
+    pub data: TryVec<u8>,
+    /// Duration in milliseconds (0 if unknown)
+    pub duration_ms: u32,
+}
+
+/// Animation configuration for animated AVIF (avis brand)
+#[cfg(feature = "eager")]
+#[deprecated(since = "1.5.0", note = "Use `AvifParser::animation_info()` and `AvifParser::frames()` instead")]
+#[derive(Debug)]
+#[allow(deprecated)]
+pub struct AnimationConfig {
+    /// Number of times to loop (0 = infinite)
+    pub loop_count: u32,
+    /// All frames in the animation
+    pub frames: TryVec<AnimationFrame>,
+}
+
+// Internal structures for animation parsing
+
+#[derive(Debug)]
+struct MovieHeader {
+    _timescale: u32,
+    _duration: u64,
+}
+
+#[derive(Debug)]
+struct MediaHeader {
+    timescale: u32,
+    _duration: u64,
+}
+
+#[derive(Debug)]
+struct TimeToSampleEntry {
+    sample_count: u32,
+    sample_delta: u32,
+}
+
+#[derive(Debug)]
+struct SampleToChunkEntry {
+    first_chunk: u32,
+    samples_per_chunk: u32,
+    _sample_description_index: u32,
+}
+
+/// Per-sample byte sizes from the `stsz` box.
+///
+/// A constant-size table (`sample_size != 0`) stores only `(size, count)`, so
+/// it is represented without materializing `count` copies — a malformed ~12-byte
+/// `stsz` could otherwise declare `count = 64M` and force a 256 MB allocation
+/// from nothing (the box-size cross-check that bounds the variable branch does
+/// not apply to the constant branch). Sizes are synthesized on access instead.
+#[derive(Debug)]
+enum SampleSizes {
+    /// Every sample has the same size.
+    Constant { size: u32, count: usize },
+    /// Explicit per-sample sizes (length-bounded by the box bytes).
+    Variable(TryVec<u32>),
+}
+
+impl SampleSizes {
+    /// Number of samples in the table.
+    fn len(&self) -> usize {
+        match self {
+            SampleSizes::Constant { count, .. } => *count,
+            SampleSizes::Variable(v) => v.len(),
+        }
+    }
+
+    /// Size in bytes of sample `i`, or `None` if `i` is out of range.
+    fn get(&self, i: usize) -> Option<u32> {
+        match self {
+            SampleSizes::Constant { size, count } => (i < *count).then_some(*size),
+            SampleSizes::Variable(v) => v.get(i).copied(),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct SampleTable {
+    time_to_sample: TryVec<TimeToSampleEntry>,
+    sample_sizes: SampleSizes,
+    /// Precomputed byte offset for each sample, derived from
+    /// sample_to_chunk + chunk_offsets + sample_sizes during parsing.
+    sample_offsets: TryVec<u64>,
+}
+
+/// A track reference entry (e.g., auxl, cdsc) parsed from a `tref` sub-box.
+#[derive(Debug)]
+struct TrackReference {
+    reference_type: FourCC,
+    track_ids: TryVec<u32>,
+}
+
+/// Codec properties extracted from a `stsd` VisualSampleEntry.
+#[derive(Debug, Clone, Default)]
+struct TrackCodecConfig {
+    av1_config: Option<AV1Config>,
+    color_info: Option<ColorInformation>,
+}
+
+/// Parsed data from a single track box (`trak`).
+#[derive(Debug)]
+struct ParsedTrack {
+    track_id: u32,
+    handler_type: FourCC,
+    media_timescale: u32,
+    sample_table: SampleTable,
+    references: TryVec<TrackReference>,
+    loop_count: u32,
+    codec_config: TrackCodecConfig,
+}
+
+/// Paired color + optional alpha animation data after track association.
+struct ParsedAnimationData {
+    color_timescale: u32,
+    color_sample_table: SampleTable,
+    alpha_timescale: Option<u32>,
+    alpha_sample_table: Option<SampleTable>,
+    loop_count: u32,
+    color_codec_config: TrackCodecConfig,
+}
+
+#[cfg(feature = "eager")]
+#[deprecated(since = "1.5.0", note = "Use `AvifParser` for zero-copy parsing instead")]
+#[derive(Debug, Default)]
+#[allow(deprecated)]
+pub struct AvifData {
+    /// AV1 data for the color channels.
+    ///
+    /// The collected data indicated by the `pitm` box, See ISO 14496-12:2015 § 8.11.4
+    pub primary_item: TryVec<u8>,
+    /// AV1 data for alpha channel.
+    ///
+    /// Associated alpha channel for the primary item, if any
+    pub alpha_item: Option<TryVec<u8>>,
+    /// If true, divide RGB values by the alpha value.
+    ///
+    /// See `prem` in MIAF § 7.3.5.2
+    pub premultiplied_alpha: bool,
+
+    /// Grid configuration for tiled images.
+    ///
+    /// If present, the image is a grid and `grid_tiles` contains the tile data.
+    /// Grid layout is determined either from an explicit ImageGrid property box or
+    /// calculated from ispe (Image Spatial Extents) properties.
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// #[allow(deprecated)]
+    /// use std::fs::File;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// #[allow(deprecated)]
+    /// let data = zenavif_parse::read_avif(&mut File::open("image.avif")?)?;
+    ///
+    /// if let Some(grid) = data.grid_config {
+    ///     println!("Grid: {}×{} tiles", grid.rows, grid.columns);
+    ///     println!("Output: {}×{}", grid.output_width, grid.output_height);
+    ///     println!("Tile count: {}", data.grid_tiles.len());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub grid_config: Option<GridConfig>,
+
+    /// AV1 payloads for grid image tiles.
+    ///
+    /// Empty for non-grid images. For grid images, contains one entry per tile.
+    ///
+    /// **Tile ordering:** Tiles are guaranteed to be in the correct order for grid assembly,
+    /// sorted by their dimgIdx (reference index). This is row-major order: tiles in the first
+    /// row from left to right, then the second row, etc.
+    pub grid_tiles: TryVec<TryVec<u8>>,
+
+    /// Animation configuration (for animated AVIF with avis brand)
+    ///
+    /// When present, primary_item contains the first frame
+    pub animation: Option<AnimationConfig>,
+
+    /// AV1 codec configuration from the container's `av1C` property.
+    pub av1_config: Option<AV1Config>,
+
+    /// Colour information from the container's `colr` property.
+    pub color_info: Option<ColorInformation>,
+
+    /// Image rotation from the container's `irot` property.
+    pub rotation: Option<ImageRotation>,
+
+    /// Image mirror from the container's `imir` property.
+    pub mirror: Option<ImageMirror>,
+
+    /// Clean aperture (crop) from the container's `clap` property.
+    pub clean_aperture: Option<CleanAperture>,
+
+    /// Pixel aspect ratio from the container's `pasp` property.
+    pub pixel_aspect_ratio: Option<PixelAspectRatio>,
+
+    /// Content light level from the container's `clli` property.
+    pub content_light_level: Option<ContentLightLevel>,
+
+    /// Mastering display colour volume from the container's `mdcv` property.
+    pub mastering_display: Option<MasteringDisplayColourVolume>,
+
+    /// Content colour volume from the container's `cclv` property.
+    pub content_colour_volume: Option<ContentColourVolume>,
+
+    /// Ambient viewing environment from the container's `amve` property.
+    pub ambient_viewing: Option<AmbientViewingEnvironment>,
+
+    /// Operating point selector from the container's `a1op` property.
+    pub operating_point: Option<OperatingPointSelector>,
+
+    /// Layer selector from the container's `lsel` property.
+    pub layer_selector: Option<LayerSelector>,
+
+    /// AV1 layered image indexing from the container's `a1lx` property.
+    pub layered_image_indexing: Option<AV1LayeredImageIndexing>,
+
+    /// EXIF metadata from a `cdsc`-linked `Exif` item.
+    ///
+    /// Raw EXIF data (TIFF header onwards), with the 4-byte AVIF offset prefix stripped.
+    pub exif: Option<TryVec<u8>>,
+
+    /// XMP metadata from a `cdsc`-linked `mime` item.
+    ///
+    /// Raw XMP/XML data as UTF-8.
+    pub xmp: Option<TryVec<u8>>,
+
+    /// Gain map metadata from a `tmap` derived image item.
+    pub gain_map_metadata: Option<GainMapMetadata>,
+
+    /// AV1-encoded gain map image data.
+    pub gain_map_item: Option<TryVec<u8>>,
+
+    /// Color information for the alternate (HDR) rendition from the `tmap` item.
+    pub gain_map_color_info: Option<ColorInformation>,
+
+    /// Depth auxiliary image data, if present.
+    pub depth_item: Option<TryVec<u8>>,
+
+    /// Width of the depth auxiliary image (from `ispe`).
+    pub depth_width: u32,
+
+    /// Height of the depth auxiliary image (from `ispe`).
+    pub depth_height: u32,
+
+    /// AV1 codec configuration for the depth auxiliary item.
+    pub depth_av1_config: Option<AV1Config>,
+
+    /// Color information for the depth auxiliary item.
+    pub depth_color_info: Option<ColorInformation>,
+
+    /// Major brand from the `ftyp` box (e.g., `*b"avif"` or `*b"avis"`).
+    pub major_brand: [u8; 4],
+
+    /// Compatible brands from the `ftyp` box.
+    pub compatible_brands: std::vec::Vec<[u8; 4]>,
+}
+
+#[cfg(feature = "eager")]
+#[allow(deprecated)]
+impl AvifData {
+    /// Get the full gain map bundle, if present.
+    ///
+    /// Consumes the gain map metadata and data from this `AvifData` and returns
+    /// an [`AvifGainMap`]. Returns `None` if no gain map metadata or data is present.
+    pub fn gain_map(&self) -> Option<AvifGainMap> {
+        let metadata = self.gain_map_metadata.as_ref()?.clone();
+        let gain_map_data = self.gain_map_item.as_ref()?.to_vec();
+        Some(AvifGainMap {
+            metadata,
+            gain_map_data,
+            alt_color_info: self.gain_map_color_info.clone(),
+        })
+    }
+
+    /// Get the depth auxiliary image bundle, if present.
+    ///
+    /// Returns [`AvifDepthMap`] with the raw AV1 depth data, dimensions,
+    /// and codec/color info. Returns `None` if no depth auxiliary is present.
+    pub fn depth_map(&self) -> Option<AvifDepthMap> {
+        let data = self.depth_item.as_ref()?.to_vec();
+        Some(AvifDepthMap {
+            data,
+            width: self.depth_width,
+            height: self.depth_height,
+            av1_config: self.depth_av1_config.clone(),
+            color_info: self.depth_color_info.clone(),
+        })
+    }
+}
+
+// # Memory Usage
+//
+// This implementation loads all image data into owned vectors (`TryVec<u8>`), which has
+// memory implications depending on the file type:
+//
+// - **Static images**: Single copy of compressed data (~5-50KB typical)
+//   - `primary_item`: compressed AV1 data
+//   - `alpha_item`: compressed alpha data (if present)
+//
+// - **Grid images**: All tiles loaded (~100KB-2MB for large grids)
+//   - `grid_tiles`: one compressed tile per grid cell
+//
+// - **Animated images**: All frames loaded eagerly (⚠️ HIGH MEMORY)
+//   - Internal mdat boxes: ~500KB for 95-frame video
+//   - Extracted frames: ~500KB duplicated in `animation.frames[].data`
+//   - **Total: ~2× file size in memory**
+//
+// For large animated files, consider using a streaming approach or processing frames
+// individually rather than loading the entire `AvifData` structure.
+
+#[cfg(feature = "eager")]
+#[allow(deprecated)]
+impl AvifData {
+    #[deprecated(since = "1.5.0", note = "Use `AvifParser::from_reader()` instead")]
+    pub fn from_reader<R: Read>(reader: &mut R) -> Result<Self> {
+        read_avif(reader)
+    }
+
+    /// Parses AV1 data to get basic properties of the opaque channel
+    pub fn primary_item_metadata(&self) -> Result<AV1Metadata> {
+        AV1Metadata::parse_av1_bitstream(&self.primary_item)
+    }
+
+    /// Parses AV1 data to get basic properties about the alpha channel, if any
+    pub fn alpha_item_metadata(&self) -> Result<Option<AV1Metadata>> {
+        self.alpha_item.as_deref().map(AV1Metadata::parse_av1_bitstream).transpose()
+    }
+}
+
+/// Chroma subsampling configuration for AV1/AVIF.
+///
+/// `(false, false)` = 4:4:4 (no subsampling).
+/// `(true, true)` = 4:2:0 (both axes subsampled).
+/// `(true, false)` = 4:2:2 (horizontal only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChromaSubsampling {
+    /// Whether the horizontal (X) axis is subsampled.
+    pub horizontal: bool,
+    /// Whether the vertical (Y) axis is subsampled.
+    pub vertical: bool,
+}
+
+impl ChromaSubsampling {
+    /// 4:4:4 — no chroma subsampling.
+    pub const NONE: Self = Self { horizontal: false, vertical: false };
+    /// 4:2:0 — both axes subsampled.
+    pub const YUV420: Self = Self { horizontal: true, vertical: true };
+    /// 4:2:2 — horizontal subsampling only.
+    pub const YUV422: Self = Self { horizontal: true, vertical: false };
+}
+
+impl From<(bool, bool)> for ChromaSubsampling {
+    fn from((h, v): (bool, bool)) -> Self {
+        Self { horizontal: h, vertical: v }
+    }
+}
+
+impl From<ChromaSubsampling> for (bool, bool) {
+    fn from(cs: ChromaSubsampling) -> Self {
+        (cs.horizontal, cs.vertical)
+    }
+}
+
+/// AV1 sequence header metadata parsed from an OBU bitstream.
+///
+/// See [`AvifParser::primary_metadata()`] and [`AV1Metadata::parse_av1_bitstream()`].
+#[non_exhaustive]
+#[derive(Debug, Clone)]
+pub struct AV1Metadata {
+    /// Should be true for non-animated AVIF
+    pub still_picture: bool,
+    pub max_frame_width: NonZeroU32,
+    pub max_frame_height: NonZeroU32,
+    /// 8, 10, or 12
+    pub bit_depth: u8,
+    /// 0, 1 or 2 for the level of complexity
+    pub seq_profile: u8,
+    /// Chroma subsampling. Use named fields (`horizontal`, `vertical`) or
+    /// constants like [`ChromaSubsampling::YUV420`].
+    pub chroma_subsampling: ChromaSubsampling,
+    pub monochrome: bool,
+    /// AV1 base quantizer index (0-255) from the first frame header.
+    /// `None` if the frame header could not be parsed.
+    /// 0 = lossless candidate, 255 = worst quality.
+    pub base_q_idx: Option<u8>,
+    /// Whether the encoding is lossless (all quantization parameters are zero
+    /// and chroma is not subsampled).
+    /// `None` if the frame header could not be parsed.
+    pub lossless: Option<bool>,
+}
+
+impl AV1Metadata {
+    /// Parses raw AV1 bitstream (sequence header + optional frame header).
+    ///
+    /// Extracts sequence-level metadata and attempts to parse the first frame
+    /// header for quantization/lossless detection.
+    ///
+    /// This is for the bare image payload from an encoder, not an AVIF/HEIF file.
+    /// To parse AVIF files, see [`AvifParser::from_reader()`].
+    #[inline(never)]
+    pub fn parse_av1_bitstream(obu_bitstream: &[u8]) -> Result<Self> {
+        let (h, frame_quant) = obu::parse_obu_with_frame_info(obu_bitstream)?;
+        let no_chroma_subsampling = !h.color.chroma_subsampling.horizontal
+            && !h.color.chroma_subsampling.vertical;
+        Ok(Self {
+            still_picture: h.still_picture,
+            max_frame_width: h.max_frame_width,
+            max_frame_height: h.max_frame_height,
+            bit_depth: h.color.bit_depth,
+            seq_profile: h.seq_profile,
+            chroma_subsampling: h.color.chroma_subsampling,
+            monochrome: h.color.monochrome,
+            base_q_idx: frame_quant.map(|fq| fq.base_q_idx),
+            lossless: frame_quant.map(|fq| fq.coded_lossless && no_chroma_subsampling),
+        })
+    }
+}
+
+/// A single frame from an animated AVIF, with zero-copy when possible.
+///
+/// The `data` field is `Cow::Borrowed` when the frame lives in a single
+/// contiguous mdat extent, and `Cow::Owned` when extents must be concatenated.
+pub struct FrameRef<'a> {
+    pub data: Cow<'a, [u8]>,
+    /// Alpha channel data for this frame, if the animation has a separate alpha track.
+    pub alpha_data: Option<Cow<'a, [u8]>>,
+    pub duration_ms: u32,
+}
+
+/// Byte range of a media data box within the file.
+struct MdatBounds {
+    offset: u64,
+    length: u64,
+}
+
+/// Where an item's data lives: construction method + extent ranges.
+struct ItemExtents {
+    construction_method: ConstructionMethod,
+    extents: TryVec<ExtentRange>,
+}
+
+/// Zero-copy AVIF parser backed by a borrowed or owned byte buffer.
+///
+/// `AvifParser` records byte offsets during parsing but does **not** copy
+/// mdat payload data. Data access methods return `Cow<[u8]>` — borrowed
+/// when the item is a single contiguous extent, owned when extents must
+/// be concatenated.
+///
+/// # Constructors
+///
+/// | Method | Lifetime | Zero-copy? |
+/// |--------|----------|------------|
+/// | [`from_bytes`](Self::from_bytes) | `'data` | Yes — borrows the slice |
+/// | [`from_owned`](Self::from_owned) | `'static` | Within the owned buffer |
+/// | [`from_reader`](Self::from_reader) | `'static` | Reads all, then owned |
+///
+/// # Example
+///
+/// ```no_run
+/// use zenavif_parse::AvifParser;
+///
+/// let bytes = std::fs::read("image.avif")?;
+/// let parser = AvifParser::from_bytes(&bytes)?;
+/// let primary = parser.primary_data()?; // Cow::Borrowed for single-extent
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub struct AvifParser<'data> {
+    raw: Cow<'data, [u8]>,
+    mdat_bounds: TryVec<MdatBounds>,
+    idat: Option<TryVec<u8>>,
+    primary: ItemExtents,
+    alpha: Option<ItemExtents>,
+    grid_config: Option<GridConfig>,
+    tiles: TryVec<ItemExtents>,
+    animation_data: Option<AnimationParserData>,
+    premultiplied_alpha: bool,
+    spatial_extents: Option<ImageSpatialExtents>,
+    av1_config: Option<AV1Config>,
+    color_info: Option<ColorInformation>,
+    rotation: Option<ImageRotation>,
+    mirror: Option<ImageMirror>,
+    clean_aperture: Option<CleanAperture>,
+    pixel_aspect_ratio: Option<PixelAspectRatio>,
+    content_light_level: Option<ContentLightLevel>,
+    mastering_display: Option<MasteringDisplayColourVolume>,
+    content_colour_volume: Option<ContentColourVolume>,
+    ambient_viewing: Option<AmbientViewingEnvironment>,
+    operating_point: Option<OperatingPointSelector>,
+    layer_selector: Option<LayerSelector>,
+    layered_image_indexing: Option<AV1LayeredImageIndexing>,
+    exif_item: Option<ItemExtents>,
+    xmp_item: Option<ItemExtents>,
+    gain_map_metadata: Option<GainMapMetadata>,
+    gain_map: Option<ItemExtents>,
+    gain_map_color_info: Option<ColorInformation>,
+    depth_item: Option<ItemExtents>,
+    depth_width: u32,
+    depth_height: u32,
+    depth_av1_config: Option<AV1Config>,
+    depth_color_info: Option<ColorInformation>,
+    major_brand: [u8; 4],
+    compatible_brands: std::vec::Vec<[u8; 4]>,
+}
+
+struct AnimationParserData {
+    media_timescale: u32,
+    sample_table: SampleTable,
+    alpha_media_timescale: Option<u32>,
+    alpha_sample_table: Option<SampleTable>,
+    loop_count: u32,
+    codec_config: TrackCodecConfig,
+}
+
+/// Animation metadata from [`AvifParser`]
+#[derive(Debug, Clone, Copy)]
+pub struct AnimationInfo {
+    pub frame_count: usize,
+    pub loop_count: u32,
+    /// Whether animation has a separate alpha track.
+    pub has_alpha: bool,
+    /// Media timescale (ticks per second) for the color track.
+    pub timescale: u32,
+}
+
+/// Parsed structure from the box-level parse pass (no mdat data).
+struct ParsedStructure {
+    /// `None` for pure AVIF sequences (`avis` brand) that have only `moov`+`mdat`.
+    meta: Option<AvifInternalMeta>,
+    mdat_bounds: TryVec<MdatBounds>,
+    animation_data: Option<ParsedAnimationData>,
+    major_brand: [u8; 4],
+    compatible_brands: std::vec::Vec<[u8; 4]>,
+}
+
+impl<'data> AvifParser<'data> {
+    // ========================================
+    // Constructors
+    // ========================================
+
+    /// Parse AVIF from a borrowed byte slice (true zero-copy).
+    ///
+    /// The returned parser borrows `data` — single-extent items will be
+    /// returned as `Cow::Borrowed` slices into this buffer.
+    pub fn from_bytes(data: &'data [u8]) -> Result<Self> {
+        Self::from_bytes_with_config(data, &DecodeConfig::default(), &Unstoppable)
+    }
+
+    /// Parse AVIF from a borrowed byte slice with resource limits.
+    pub fn from_bytes_with_config(
+        data: &'data [u8],
+        config: &DecodeConfig,
+        stop: &dyn Stop,
+    ) -> Result<Self> {
+        let parsed = Self::parse_raw(data, config, stop)?;
+        Self::build(Cow::Borrowed(data), parsed, config)
+    }
+
+    /// Parse AVIF from an owned buffer.
+    ///
+    /// The returned parser owns the data — single-extent items will still
+    /// be returned as `Cow::Borrowed` slices (borrowing from the internal buffer).
+    pub fn from_owned(data: std::vec::Vec<u8>) -> Result<AvifParser<'static>> {
+        AvifParser::from_owned_with_config(data, &DecodeConfig::default(), &Unstoppable)
+    }
+
+    /// Parse AVIF from an owned buffer with resource limits.
+    pub fn from_owned_with_config(
+        data: std::vec::Vec<u8>,
+        config: &DecodeConfig,
+        stop: &dyn Stop,
+    ) -> Result<AvifParser<'static>> {
+        let parsed = AvifParser::parse_raw(&data, config, stop)?;
+        AvifParser::build(Cow::Owned(data), parsed, config)
+    }
+
+    /// Parse AVIF from a reader (reads all bytes, then parses).
+    pub fn from_reader<R: Read + ?Sized>(reader: &mut R) -> Result<AvifParser<'static>> {
+        AvifParser::from_reader_with_config(reader, &DecodeConfig::default(), &Unstoppable)
+    }
+
+    /// Parse AVIF from a reader with resource limits.
+    ///
+    /// If `config.peak_memory_limit` is set, reading is capped at that many
+    /// bytes to prevent unbounded allocation from an untrusted reader.
+    pub fn from_reader_with_config<R: Read + ?Sized>(
+        reader: &mut R,
+        config: &DecodeConfig,
+        stop: &dyn Stop,
+    ) -> Result<AvifParser<'static>> {
+        let buf = if let Some(limit) = config.peak_memory_limit {
+            let mut limited = reader.take(limit.saturating_add(1));
+            let mut buf = std::vec::Vec::new();
+            limited.read_to_end(&mut buf).map_err(|e| at!(Error::from(e)))?;
+            if buf.len() as u64 > limit {
+                return Err(at!(Error::ResourceLimitExceeded(
+                    "input exceeds peak_memory_limit",
+                )));
+            }
+            buf
+        } else {
+            let mut buf = std::vec::Vec::new();
+            reader.read_to_end(&mut buf).map_err(|e| at!(Error::from(e)))?;
+            buf
+        };
+        AvifParser::from_owned_with_config(buf, config, stop)
+    }
+
+    // ========================================
+    // Internal: parse pass (records offsets, no mdat copy)
+    // ========================================
+
+    /// Parse the AVIF box structure from raw bytes, recording mdat offsets
+    /// without copying mdat content.
+    fn parse_raw(data: &[u8], config: &DecodeConfig, stop: &dyn Stop) -> Result<ParsedStructure> {
+        let parse_opts = ParseOptions { lenient: config.lenient };
+        let mut cursor = std::io::Cursor::new(data);
+        let mut f = OffsetReader::new(&mut cursor);
+        let mut iter = BoxIter::with_max_remaining(&mut f, data.len() as u64);
+
+        // 'ftyp' box must occur first; see ISO 14496-12:2015 § 4.3.1
+        let (major_brand, compatible_brands) = if let Some(mut b) = iter.next_box()? {
+            if b.head.name == BoxType::FileTypeBox {
+                let ftyp = read_ftyp(&mut b)?;
+                if ftyp.major_brand != b"avif" && ftyp.major_brand != b"avis" {
+                    return Err(at!(Error::InvalidData("ftyp must be 'avif' or 'avis'")));
+                }
+                let major = ftyp.major_brand.value;
+                let compat = ftyp.compatible_brands.iter().map(|b| b.value).collect();
+                (major, compat)
+            } else {
+                return Err(at!(Error::InvalidData("'ftyp' box must occur first")));
+            }
+        } else {
+            return Err(at!(Error::InvalidData("'ftyp' box must occur first")));
+        };
+
+        let mut meta = None;
+        let mut mdat_bounds = TryVec::new();
+        let mut animation_data: Option<ParsedAnimationData> = None;
+
+        while let Some(mut b) = iter.next_box()? {
+            stop.check().map_err(|e| at!(Error::from(e)))?;
+
+            match b.head.name {
+                BoxType::MetadataBox => {
+                    if meta.is_some() {
+                        return Err(at!(Error::InvalidData(
+                            "There should be zero or one meta boxes per ISO 14496-12:2015 § 8.11.1.1",
+                        )));
+                    }
+                    meta = Some(read_avif_meta(&mut b, &parse_opts)?);
+                }
+                BoxType::MovieBox => {
+                    let tracks = read_moov(&mut b, stop)?;
+                    if !tracks.is_empty() {
+                        animation_data = Some(associate_tracks(tracks)?);
+                    }
+                }
+                BoxType::MediaDataBox => {
+                    if b.bytes_left() > 0 {
+                        let offset = b.offset();
+                        let length = b.bytes_left();
+                        mdat_bounds.push(MdatBounds { offset, length }).map_err(|e| at!(Error::from(e)))?;
+                    }
+                    // Skip the content — we'll slice into raw later
+                    skip_box_content(&mut b)?;
+                }
+                _ => skip_box_content(&mut b)?,
+            }
+
+            check_parser_state(&b.head, &b.content)?;
+        }
+
+        // meta is required for still images, but pure AVIF sequences (avis brand)
+        // can have only moov+mdat with no meta box.
+        if meta.is_none() && animation_data.is_none() {
+            return Err(at!(Error::InvalidData("missing meta")));
+        }
+
+        Ok(ParsedStructure { meta, mdat_bounds, animation_data, major_brand, compatible_brands })
+    }
+
+    /// Build an AvifParser from raw bytes + parsed structure.
+    fn build(raw: Cow<'data, [u8]>, parsed: ParsedStructure, config: &DecodeConfig) -> Result<Self> {
+        let tracker = ResourceTracker::new(config);
+
+        // Store animation metadata if present
+        let animation_data = if let Some(anim) = parsed.animation_data {
+            tracker.validate_animation_frames(anim.color_sample_table.sample_sizes.len() as u32)?;
+            Some(AnimationParserData {
+                media_timescale: anim.color_timescale,
+                sample_table: anim.color_sample_table,
+                alpha_media_timescale: anim.alpha_timescale,
+                alpha_sample_table: anim.alpha_sample_table,
+                loop_count: anim.loop_count,
+                codec_config: anim.color_codec_config,
+            })
+        } else {
+            None
+        };
+
+        // Pure sequence (no meta box): only animation methods will work.
+        // Use codec config from the color track's stsd if available.
+        let Some(meta) = parsed.meta else {
+            let track_config = animation_data.as_ref()
+                .map(|a| a.codec_config.clone())
+                .unwrap_or_default();
+            return Ok(Self {
+                raw,
+                mdat_bounds: parsed.mdat_bounds,
+                idat: None,
+                primary: ItemExtents { construction_method: ConstructionMethod::File, extents: TryVec::new() },
+                alpha: None,
+                grid_config: None,
+                tiles: TryVec::new(),
+                animation_data,
+                premultiplied_alpha: false,
+                spatial_extents: None,
+                av1_config: track_config.av1_config,
+                color_info: track_config.color_info,
+                rotation: None,
+                mirror: None,
+                clean_aperture: None,
+                pixel_aspect_ratio: None,
+                content_light_level: None,
+                mastering_display: None,
+                content_colour_volume: None,
+                ambient_viewing: None,
+                operating_point: None,
+                layer_selector: None,
+                layered_image_indexing: None,
+                exif_item: None,
+                xmp_item: None,
+                gain_map_metadata: None,
+                gain_map: None,
+                gain_map_color_info: None,
+                depth_item: None,
+                depth_width: 0,
+                depth_height: 0,
+                depth_av1_config: None,
+                depth_color_info: None,
+                major_brand: parsed.major_brand,
+                compatible_brands: parsed.compatible_brands,
+            });
+        };
+
+        // Get primary item extents
+        let primary = Self::get_item_extents(&meta, meta.primary_item_id)?;
+
+        // Find alpha item and get its extents
+        let alpha_item_id = meta
+            .item_references
+            .iter()
+            .filter(|iref| {
+                iref.to_item_id == meta.primary_item_id
+                    && iref.from_item_id != meta.primary_item_id
+                    && iref.item_type == b"auxl"
+            })
+            .map(|iref| iref.from_item_id)
+            .find(|&item_id| {
+                meta.properties.iter().any(|prop| {
+                    prop.item_id == item_id
+                        && match &prop.property {
+                            ItemProperty::AuxiliaryType(urn) => {
+                                urn.type_subtype().0 == b"urn:mpeg:mpegB:cicp:systems:auxiliary:alpha"
+                            }
+                            _ => false,
+                        }
+                })
+            });
+
+        let alpha = alpha_item_id
+            .map(|id| Self::get_item_extents(&meta, id))
+            .transpose()?;
+
+        // Check for premultiplied alpha
+        let premultiplied_alpha = alpha_item_id.is_some_and(|alpha_id| {
+            meta.item_references.iter().any(|iref| {
+                iref.from_item_id == meta.primary_item_id
+                    && iref.to_item_id == alpha_id
+                    && iref.item_type == b"prem"
+            })
+        });
+
+        // Find depth auxiliary item (auxl reference with depth auxC type)
+        let depth_item_id = meta
+            .item_references
+            .iter()
+            .filter(|iref| {
+                iref.to_item_id == meta.primary_item_id
+                    && iref.from_item_id != meta.primary_item_id
+                    && iref.item_type == b"auxl"
+            })
+            .map(|iref| iref.from_item_id)
+            .find(|&item_id| {
+                // Skip the alpha item if we already found one
+                if alpha_item_id == Some(item_id) {
+                    return false;
+                }
+                meta.properties.iter().any(|prop| {
+                    prop.item_id == item_id
+                        && match &prop.property {
+                            ItemProperty::AuxiliaryType(urn) => {
+                                is_depth_auxiliary_urn(urn.type_subtype().0)
+                            }
+                            _ => false,
+                        }
+                })
+            });
+
+        let (depth_item, depth_width, depth_height, depth_av1_config, depth_color_info) =
+            if let Some(depth_id) = depth_item_id {
+                let extents = Self::get_item_extents(&meta, depth_id)?;
+                // Get dimensions from ispe property
+                let dims = meta.properties.iter().find_map(|p| {
+                    if p.item_id == depth_id {
+                        match &p.property {
+                            ItemProperty::ImageSpatialExtents(e) => Some((e.width, e.height)),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                });
+                let (w, h) = dims.unwrap_or((0, 0));
+                // Get av1C property
+                let av1c = meta.properties.iter().find_map(|p| {
+                    if p.item_id == depth_id {
+                        match &p.property {
+                            ItemProperty::AV1Config(c) => Some(c.clone()),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                });
+                // Get colr property
+                let colr = meta.properties.iter().find_map(|p| {
+                    if p.item_id == depth_id {
+                        match &p.property {
+                            ItemProperty::ColorInformation(c) => Some(c.clone()),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                });
+                (Some(extents), w, h, av1c, colr)
+            } else {
+                (None, 0, 0, None, None)
+            };
+
+        // Find EXIF/XMP items linked via cdsc references to the primary item
+        let mut exif_item = None;
+        let mut xmp_item = None;
+        for iref in meta.item_references.iter() {
+            if iref.to_item_id != meta.primary_item_id || iref.item_type != b"cdsc" {
+                continue;
+            }
+            let desc_item_id = iref.from_item_id;
+            let Some(info) = meta.item_infos.iter().find(|i| i.item_id == desc_item_id) else {
+                continue;
+            };
+            if info.item_type == b"Exif" && exif_item.is_none() {
+                exif_item = Some(Self::get_item_extents(&meta, desc_item_id)?);
+            } else if info.item_type == b"mime" && xmp_item.is_none() {
+                xmp_item = Some(Self::get_item_extents(&meta, desc_item_id)?);
+            }
+        }
+
+        // Check if primary item is a grid (tiled image)
+        let is_grid = meta
+            .item_infos
+            .iter()
+            .find(|x| x.item_id == meta.primary_item_id)
+            .is_some_and(|info| info.item_type == b"grid");
+
+        // Extract grid configuration and tile extents if this is a grid
+        let (grid_config, tiles) = if is_grid {
+            let mut tiles_with_index: TryVec<(u32, u16)> = TryVec::new();
+            for iref in meta.item_references.iter() {
+                if iref.from_item_id == meta.primary_item_id && iref.item_type == b"dimg" {
+                    tiles_with_index.push((iref.to_item_id, iref.reference_index)).map_err(|e| at!(Error::from(e)))?;
+                }
+            }
+
+            tracker.validate_grid_tiles(tiles_with_index.len() as u32)?;
+            tiles_with_index.sort_by_key(|&(_, idx)| idx);
+
+            let mut tile_extents = TryVec::new();
+            for (tile_id, _) in tiles_with_index.iter() {
+                tile_extents.push(Self::get_item_extents(&meta, *tile_id)?).map_err(|e| at!(Error::from(e)))?;
+            }
+
+            let mut tile_ids = TryVec::new();
+            for (tile_id, _) in tiles_with_index.iter() {
+                tile_ids.push(*tile_id).map_err(|e| at!(Error::from(e)))?;
+            }
+
+            let grid_config = Self::calculate_grid_config(&meta, &tile_ids)?;
+
+            // Enforce total_megapixels_limit on grid output dimensions on the
+            // default zero-copy path (the eager path also calls this at
+            // calculate_grid_config sites). H1 of the 2026-05-06 audit.
+            tracker.validate_total_megapixels(grid_config.output_width, grid_config.output_height)?;
+
+            // AVIF 1.2: transformative properties SHALL NOT be on grid tile items
+            for (tile_id, _) in tiles_with_index.iter() {
+                for prop in meta.properties.iter() {
+                    if prop.item_id == *tile_id {
+                        match &prop.property {
+                            ItemProperty::Rotation(_)
+                            | ItemProperty::Mirror(_)
+                            | ItemProperty::CleanAperture(_) => {
+                                warn!("grid tile {} has a transformative property (irot/imir/clap), violating AVIF spec", tile_id);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            (Some(grid_config), tile_extents)
+        } else {
+            // Non-grid primary: enforce total_megapixels_limit on the primary
+            // item's ispe dimensions if present. H1 of 2026-05-06 audit.
+            let primary_dims = meta.properties.iter().find_map(|p| {
+                if p.item_id == meta.primary_item_id {
+                    match &p.property {
+                        ItemProperty::ImageSpatialExtents(e) => Some((e.width, e.height)),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            });
+            if let Some((w, h)) = primary_dims {
+                tracker.validate_total_megapixels(w, h)?;
+            }
+            (None, TryVec::new())
+        };
+
+        // Detect gain map (tmap derived image item)
+        let (gain_map_metadata, gain_map, gain_map_color_info) = {
+            let tmap_item = meta.item_infos.iter()
+                .find(|info| info.item_type == b"tmap");
+
+            if let Some(tmap_info) = tmap_item {
+                let tmap_id = tmap_info.item_id;
+
+                // Find dimg references FROM tmap TO its inputs
+                let mut inputs: TryVec<(u32, u16)> = TryVec::new();
+                for iref in meta.item_references.iter() {
+                    if iref.from_item_id == tmap_id && iref.item_type == b"dimg" {
+                        inputs.push((iref.to_item_id, iref.reference_index)).map_err(|e| at!(Error::from(e)))?;
+                    }
+                }
+                inputs.sort_by_key(|&(_, idx)| idx);
+
+                if inputs.len() >= 2 {
+                    let base_item_id = inputs[0].0;
+                    let gmap_item_id = inputs[1].0;
+
+                    if base_item_id == meta.primary_item_id {
+                        // Read tmap item's data payload (ToneMapImage)
+                        let tmap_extents = Self::get_item_extents(&meta, tmap_id)?;
+                        let tmap_data = Self::resolve_extents_from_raw(
+                            raw.as_ref(), &parsed.mdat_bounds, &tmap_extents,
+                        )?;
+                        let metadata = parse_tone_map_image(&tmap_data)?;
+
+                        // Get gain map image extents
+                        let gmap_extents = Self::get_item_extents(&meta, gmap_item_id)?;
+
+                        // Get alternate color info from tmap item's properties
+                        let alt_color = meta.properties.iter().find_map(|p| {
+                            if p.item_id == tmap_id {
+                                match &p.property {
+                                    ItemProperty::ColorInformation(c) => Some(c.clone()),
+                                    _ => None,
+                                }
+                            } else {
+                                None
+                            }
+                        });
+
+                        (Some(metadata), Some(gmap_extents), alt_color)
+                    } else {
+                        (None, None, None)
+                    }
+                } else {
+                    (None, None, None)
+                }
+            } else {
+                (None, None, None)
+            }
+        };
+
+        // Extract properties for the primary item
+        macro_rules! find_prop {
+            ($variant:ident) => {
+                meta.properties.iter().find_map(|p| {
+                    if p.item_id == meta.primary_item_id {
+                        match &p.property {
+                            ItemProperty::$variant(c) => Some(c.clone()),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                })
+            };
+        }
+
+        let track_config = animation_data.as_ref().map(|a| &a.codec_config);
+        let spatial_extents = find_prop!(ImageSpatialExtents);
+        let av1_config = find_prop!(AV1Config)
+            .or_else(|| track_config.and_then(|c| c.av1_config.clone()));
+        let color_info = find_prop!(ColorInformation)
+            .or_else(|| track_config.and_then(|c| c.color_info.clone()));
+        let rotation = find_prop!(Rotation);
+        let mirror = find_prop!(Mirror);
+        let clean_aperture = find_prop!(CleanAperture);
+        let pixel_aspect_ratio = find_prop!(PixelAspectRatio);
+        let content_light_level = find_prop!(ContentLightLevel);
+        let mastering_display = find_prop!(MasteringDisplayColourVolume);
+        let content_colour_volume = find_prop!(ContentColourVolume);
+        let ambient_viewing = find_prop!(AmbientViewingEnvironment);
+        let operating_point = find_prop!(OperatingPointSelector);
+        let layer_selector = find_prop!(LayerSelector);
+        let layered_image_indexing = find_prop!(AV1LayeredImageIndexing);
+
+        // Clone idat
+        let idat = if let Some(ref idat_data) = meta.idat {
+            let mut cloned = TryVec::new();
+            cloned.extend_from_slice(idat_data).map_err(|e| at!(Error::from(e)))?;
+            Some(cloned)
+        } else {
+            None
+        };
+
+        Ok(Self {
+            raw,
+            mdat_bounds: parsed.mdat_bounds,
+            idat,
+            primary,
+            alpha,
+            grid_config,
+            tiles,
+            animation_data,
+            premultiplied_alpha,
+            spatial_extents,
+            av1_config,
+            color_info,
+            rotation,
+            mirror,
+            clean_aperture,
+            pixel_aspect_ratio,
+            content_light_level,
+            mastering_display,
+            content_colour_volume,
+            ambient_viewing,
+            operating_point,
+            layer_selector,
+            layered_image_indexing,
+            exif_item,
+            xmp_item,
+            gain_map_metadata,
+            gain_map,
+            gain_map_color_info,
+            depth_item,
+            depth_width,
+            depth_height,
+            depth_av1_config,
+            depth_color_info,
+            major_brand: parsed.major_brand,
+            compatible_brands: parsed.compatible_brands,
+        })
+    }
+
+    // ========================================
+    // Internal helpers
+    // ========================================
+
+    /// Get item extents (construction method + ranges) from metadata.
+    fn get_item_extents(meta: &AvifInternalMeta, item_id: u32) -> Result<ItemExtents> {
+        let item = meta
+            .iloc_items
+            .iter()
+            .find(|item| item.item_id == item_id)
+            .ok_or_else(|| at!(Error::InvalidData("item not found in iloc")))?;
+
+        let mut extents = TryVec::new();
+        for extent in &item.extents {
+            extents.push(extent.extent_range.clone()).map_err(|e| at!(Error::from(e)))?;
+        }
+        Ok(ItemExtents {
+            construction_method: item.construction_method,
+            extents,
+        })
+    }
+
+    /// Resolve file-based item extents from a raw buffer during `build()`,
+    /// before `self` exists. Returns owned data (small payloads like tmap).
+    fn resolve_extents_from_raw(
+        raw: &[u8],
+        mdat_bounds: &[MdatBounds],
+        item: &ItemExtents,
+    ) -> Result<std::vec::Vec<u8>> {
+        if item.construction_method != ConstructionMethod::File {
+            return Err(at!(Error::Unsupported("tmap item must use file construction method")));
+        }
+        let mut data = std::vec::Vec::new();
+        for extent in &item.extents {
+            let file_offset = extent.start();
+            let start = usize::try_from(file_offset).map_err(|e| at!(Error::from(e)))?;
+            let end = match extent {
+                ExtentRange::WithLength(range) => {
+                    let len = range.end.checked_sub(range.start)
+                        .ok_or_else(|| at!(Error::InvalidData("extent range start > end")))?;
+                    start.checked_add(usize::try_from(len).map_err(|e| at!(Error::from(e)))?)
+                        .ok_or_else(|| at!(Error::InvalidData("extent end overflow")))?
+                }
+                ExtentRange::ToEnd(_) => {
+                    // Find the mdat that contains this offset
+                    let mut found_end = raw.len();
+                    for mdat in mdat_bounds {
+                        if file_offset >= mdat.offset && file_offset < mdat.offset + mdat.length {
+                            found_end = usize::try_from(mdat.offset + mdat.length).map_err(|e| at!(Error::from(e)))?;
+                            break;
+                        }
+                    }
+                    found_end
+                }
+            };
+            let slice = raw.get(start..end)
+                .ok_or_else(|| at!(Error::InvalidData("tmap extent out of bounds")))?;
+            data.extend_from_slice(slice);
+        }
+        Ok(data)
+    }
+
+    /// Resolve an item's data from the raw buffer, returning `Cow::Borrowed`
+    /// for single-extent file items and `Cow::Owned` for multi-extent or idat.
+    fn resolve_item(&self, item: &ItemExtents) -> Result<Cow<'_, [u8]>> {
+        match item.construction_method {
+            ConstructionMethod::Idat => self.resolve_idat_extents(&item.extents),
+            ConstructionMethod::File => self.resolve_file_extents(&item.extents),
+            ConstructionMethod::Item => Err(at!(Error::Unsupported("construction_method 'item' not supported"))),
+        }
+    }
+
+    /// Resolve file-based extents from the raw buffer.
+    fn resolve_file_extents(&self, extents: &[ExtentRange]) -> Result<Cow<'_, [u8]>> {
+        let raw = self.raw.as_ref();
+
+        // Fast path: single extent → borrow directly from raw
+        if extents.len() == 1 {
+            let extent = &extents[0];
+            let (start, end) = self.extent_byte_range(extent)?;
+            let slice = raw.get(start..end).ok_or_else(|| at!(Error::InvalidData("extent out of bounds in raw buffer")))?;
+            return Ok(Cow::Borrowed(slice));
+        }
+
+        // Multi-extent: concatenate into owned buffer
+        let mut data = TryVec::new();
+        for extent in extents {
+            let (start, end) = self.extent_byte_range(extent)?;
+            let slice = raw.get(start..end).ok_or_else(|| at!(Error::InvalidData("extent out of bounds in raw buffer")))?;
+            data.extend_from_slice(slice).map_err(|e| at!(Error::from(e)))?;
+        }
+        Ok(Cow::Owned(data.into_iter().collect()))
+    }
+
+    /// Convert an ExtentRange to a (start, end) byte range within the raw buffer.
+    fn extent_byte_range(&self, extent: &ExtentRange) -> Result<(usize, usize)> {
+        let file_offset = extent.start();
+        let start = usize::try_from(file_offset).map_err(|e| at!(Error::from(e)))?;
+
+        match extent {
+            ExtentRange::WithLength(range) => {
+                let len = range.end.checked_sub(range.start)
+                    .ok_or_else(|| at!(Error::InvalidData("extent range start > end")))?;
+                let end = start.checked_add(usize::try_from(len).map_err(|e| at!(Error::from(e)))?)
+                    .ok_or_else(|| at!(Error::InvalidData("extent end overflow")))?;
+                Ok((start, end))
+            }
+            ExtentRange::ToEnd(_) => {
+                // Find the mdat that contains this offset and use its bounds
+                for mdat in &self.mdat_bounds {
+                    if file_offset >= mdat.offset && file_offset < mdat.offset + mdat.length {
+                        let end = usize::try_from(mdat.offset + mdat.length).map_err(|e| at!(Error::from(e)))?;
+                        return Ok((start, end));
+                    }
+                }
+                // Fall back to end of raw buffer
+                Ok((start, self.raw.len()))
+            }
+        }
+    }
+
+    /// Resolve idat-based extents.
+    fn resolve_idat_extents(&self, extents: &[ExtentRange]) -> Result<Cow<'_, [u8]>> {
+        let idat_data = self.idat.as_ref()
+            .ok_or_else(|| at!(Error::InvalidData("idat box missing but construction_method is Idat")))?;
+
+        if extents.len() == 1 {
+            let extent = &extents[0];
+            let start = usize::try_from(extent.start()).map_err(|e| at!(Error::from(e)))?;
+            let slice = match extent {
+                ExtentRange::WithLength(range) => {
+                    let len = usize::try_from(range.end - range.start).map_err(|e| at!(Error::from(e)))?;
+                    idat_data.get(start..start + len)
+                        .ok_or_else(|| at!(Error::InvalidData("idat extent out of bounds")))?
+                }
+                ExtentRange::ToEnd(_) => {
+                    idat_data.get(start..)
+                        .ok_or_else(|| at!(Error::InvalidData("idat extent out of bounds")))?
+                }
+            };
+            return Ok(Cow::Borrowed(slice));
+        }
+
+        // Multi-extent idat: concatenate
+        let mut data = TryVec::new();
+        for extent in extents {
+            let start = usize::try_from(extent.start()).map_err(|e| at!(Error::from(e)))?;
+            let slice = match extent {
+                ExtentRange::WithLength(range) => {
+                    let len = usize::try_from(range.end - range.start).map_err(|e| at!(Error::from(e)))?;
+                    idat_data.get(start..start + len)
+                        .ok_or_else(|| at!(Error::InvalidData("idat extent out of bounds")))?
+                }
+                ExtentRange::ToEnd(_) => {
+                    idat_data.get(start..)
+                        .ok_or_else(|| at!(Error::InvalidData("idat extent out of bounds")))?
+                }
+            };
+            data.extend_from_slice(slice).map_err(|e| at!(Error::from(e)))?;
+        }
+        Ok(Cow::Owned(data.into_iter().collect()))
+    }
+
+    /// Resolve a single animation frame from the raw buffer.
+    fn resolve_frame(&self, index: usize) -> Result<FrameRef<'_>> {
+        let anim = self.animation_data.as_ref()
+            .ok_or_else(|| at!(Error::InvalidData("not an animated AVIF")))?;
+
+        if index >= anim.sample_table.sample_sizes.len() {
+            return Err(at!(Error::InvalidData("frame index out of bounds")));
+        }
+
+        let duration_ms = self.calculate_frame_duration(&anim.sample_table, anim.media_timescale, index)?;
+        let (offset, size) = self.calculate_sample_location(&anim.sample_table, index)?;
+
+        let start = usize::try_from(offset).map_err(|e| at!(Error::from(e)))?;
+        let end = start.checked_add(size as usize)
+            .ok_or_else(|| at!(Error::InvalidData("frame end overflow")))?;
+
+        let raw = self.raw.as_ref();
+        let slice = raw.get(start..end)
+            .ok_or_else(|| at!(Error::InvalidData("frame not found in raw buffer")))?;
+
+        // Resolve alpha frame if alpha track exists and has this index
+        let alpha_data = if let Some(ref alpha_st) = anim.alpha_sample_table {
+            let alpha_timescale = anim.alpha_media_timescale.unwrap_or(anim.media_timescale);
+            if index < alpha_st.sample_sizes.len() {
+                let (a_offset, a_size) = self.calculate_sample_location(alpha_st, index)?;
+                let a_start = usize::try_from(a_offset).map_err(|e| at!(Error::from(e)))?;
+                let a_end = a_start.checked_add(a_size as usize)
+                    .ok_or_else(|| at!(Error::InvalidData("alpha frame end overflow")))?;
+                let a_slice = raw.get(a_start..a_end)
+                    .ok_or_else(|| at!(Error::InvalidData("alpha frame not found in raw buffer")))?;
+                let _ = alpha_timescale; // timescale used for duration, which comes from color track
+                Some(Cow::Borrowed(a_slice))
+            } else {
+                warn!("alpha track has fewer frames than color track (index {})", index);
+                None
+            }
+        } else {
+            None
+        };
+
+        Ok(FrameRef {
+            data: Cow::Borrowed(slice),
+            alpha_data,
+            duration_ms,
+        })
+    }
+
+    /// Calculate grid configuration from metadata.
+    fn calculate_grid_config(meta: &AvifInternalMeta, tile_ids: &[u32]) -> Result<GridConfig> {
+        // Try explicit grid property first
+        for prop in &meta.properties {
+            if prop.item_id == meta.primary_item_id
+                && let ItemProperty::ImageGrid(grid) = &prop.property {
+                    return Ok(grid.clone());
+                }
+        }
+
+        // Fall back to ispe calculation
+        let grid_dims = meta
+            .properties
+            .iter()
+            .find(|p| p.item_id == meta.primary_item_id)
+            .and_then(|p| match &p.property {
+                ItemProperty::ImageSpatialExtents(e) => Some(e),
+                _ => None,
+            });
+
+        let tile_dims = tile_ids.first().and_then(|&tile_id| {
+            meta.properties
+                .iter()
+                .find(|p| p.item_id == tile_id)
+                .and_then(|p| match &p.property {
+                    ItemProperty::ImageSpatialExtents(e) => Some(e),
+                    _ => None,
+                })
+        });
+
+        if let (Some(grid), Some(tile)) = (grid_dims, tile_dims)
+            && tile.width != 0
+                && tile.height != 0
+                && grid.width % tile.width == 0
+                && grid.height % tile.height == 0
+            {
+                let columns = grid.width / tile.width;
+                let rows = grid.height / tile.height;
+
+                if columns <= 255 && rows <= 255 {
+                    return Ok(GridConfig {
+                        rows: rows as u8,
+                        columns: columns as u8,
+                        output_width: grid.width,
+                        output_height: grid.height,
+                    });
+                }
+            }
+
+        let tile_count = tile_ids.len();
+        Ok(GridConfig {
+            rows: tile_count.min(255) as u8,
+            columns: 1,
+            output_width: 0,
+            output_height: 0,
+        })
+    }
+
+    /// Calculate frame duration from sample table.
+    fn calculate_frame_duration(
+        &self,
+        st: &SampleTable,
+        timescale: u32,
+        index: usize,
+    ) -> Result<u32> {
+        let mut current_sample: usize = 0;
+        for entry in &st.time_to_sample {
+            // `sample_count` is attacker-controlled (stts box). Use saturating
+            // adds so a crafted table whose counts sum past usize::MAX cannot
+            // overflow on 32-bit targets (i686/wasm32). Saturation is correct
+            // here: sample indices are monotonic, so a saturated accumulator is
+            // still `> index` and the comparison stays well-defined.
+            if current_sample.saturating_add(entry.sample_count as usize) > index {
+                let duration_ms = if timescale > 0 {
+                    ((entry.sample_delta as u64) * 1000) / (timescale as u64)
+                } else {
+                    0
+                };
+                return Ok(u32::try_from(duration_ms).unwrap_or(u32::MAX));
+            }
+            current_sample = current_sample.saturating_add(entry.sample_count as usize);
+        }
+        Ok(0)
+    }
+
+    /// Look up precomputed sample location (offset and size) from sample table.
+    fn calculate_sample_location(&self, st: &SampleTable, index: usize) -> Result<(u64, u32)> {
+        let offset = *st
+            .sample_offsets
+            .get(index)
+            .ok_or_else(|| at!(Error::InvalidData("sample index out of bounds")))?;
+        let size = st
+            .sample_sizes
+            .get(index)
+            .ok_or_else(|| at!(Error::InvalidData("sample index out of bounds")))?;
+        Ok((offset, size))
+    }
+
+    // ========================================
+    // Public data access API (one way each)
+    // ========================================
+
+    /// Get primary item data.
+    ///
+    /// Returns `Cow::Borrowed` for single-extent items, `Cow::Owned` for multi-extent.
+    pub fn primary_data(&self) -> Result<Cow<'_, [u8]>> {
+        self.resolve_item(&self.primary)
+    }
+
+    /// Get alpha item data, if present.
+    pub fn alpha_data(&self) -> Option<Result<Cow<'_, [u8]>>> {
+        self.alpha.as_ref().map(|item| self.resolve_item(item))
+    }
+
+    /// Get grid tile data by index.
+    pub fn tile_data(&self, index: usize) -> Result<Cow<'_, [u8]>> {
+        let item = self.tiles.get(index)
+            .ok_or_else(|| at!(Error::InvalidData("tile index out of bounds")))?;
+        self.resolve_item(item)
+    }
+
+    /// Get a single animation frame by index.
+    pub fn frame(&self, index: usize) -> Result<FrameRef<'_>> {
+        self.resolve_frame(index)
+    }
+
+    /// Iterate over all animation frames.
+    pub fn frames(&self) -> FrameIterator<'_> {
+        let count = self
+            .animation_info()
+            .map(|info| info.frame_count)
+            .unwrap_or(0);
+        FrameIterator { parser: self, index: 0, count }
+    }
+
+    // ========================================
+    // Metadata (no data access)
+    // ========================================
+
+    /// Get animation metadata (if animated).
+    pub fn animation_info(&self) -> Option<AnimationInfo> {
+        self.animation_data.as_ref().map(|data| AnimationInfo {
+            frame_count: data.sample_table.sample_sizes.len(),
+            loop_count: data.loop_count,
+            has_alpha: data.alpha_sample_table.is_some(),
+            timescale: data.media_timescale,
+        })
+    }
+
+    /// Get grid configuration (if grid image).
+    pub fn grid_config(&self) -> Option<&GridConfig> {
+        self.grid_config.as_ref()
+    }
+
+    /// Get number of grid tiles.
+    pub fn grid_tile_count(&self) -> usize {
+        self.tiles.len()
+    }
+
+    /// Check if alpha channel uses premultiplied alpha.
+    pub fn premultiplied_alpha(&self) -> bool {
+        self.premultiplied_alpha
+    }
+
+    /// Get the primary item's dimensions from its `ispe` property, if present.
+    ///
+    /// This accessor reports only the dimensions explicitly declared by the
+    /// container. It does not parse the AV1 bitstream or fall back to dimensions
+    /// found there.
+    pub fn spatial_extents(&self) -> Option<&ImageSpatialExtents> {
+        self.spatial_extents.as_ref()
+    }
+
+    /// Get the AV1 codec configuration for the primary item, if present.
+    ///
+    /// This is parsed from the `av1C` property box in the container.
+    pub fn av1_config(&self) -> Option<&AV1Config> {
+        self.av1_config.as_ref()
+    }
+
+    /// Get colour information for the primary item, if present.
+    ///
+    /// This is parsed from the `colr` property box in the container.
+    /// For CICP/nclx values, this is the authoritative source and may
+    /// differ from values in the AV1 bitstream sequence header.
+    pub fn color_info(&self) -> Option<&ColorInformation> {
+        self.color_info.as_ref()
+    }
+
+    /// Get rotation for the primary item, if present.
+    pub fn rotation(&self) -> Option<&ImageRotation> {
+        self.rotation.as_ref()
+    }
+
+    /// Get mirror for the primary item, if present.
+    pub fn mirror(&self) -> Option<&ImageMirror> {
+        self.mirror.as_ref()
+    }
+
+    /// Get clean aperture (crop) for the primary item, if present.
+    pub fn clean_aperture(&self) -> Option<&CleanAperture> {
+        self.clean_aperture.as_ref()
+    }
+
+    /// Get pixel aspect ratio for the primary item, if present.
+    pub fn pixel_aspect_ratio(&self) -> Option<&PixelAspectRatio> {
+        self.pixel_aspect_ratio.as_ref()
+    }
+
+    /// Get content light level info for the primary item, if present.
+    pub fn content_light_level(&self) -> Option<&ContentLightLevel> {
+        self.content_light_level.as_ref()
+    }
+
+    /// Get mastering display colour volume for the primary item, if present.
+    pub fn mastering_display(&self) -> Option<&MasteringDisplayColourVolume> {
+        self.mastering_display.as_ref()
+    }
+
+    /// Get content colour volume for the primary item, if present.
+    pub fn content_colour_volume(&self) -> Option<&ContentColourVolume> {
+        self.content_colour_volume.as_ref()
+    }
+
+    /// Get ambient viewing environment for the primary item, if present.
+    pub fn ambient_viewing(&self) -> Option<&AmbientViewingEnvironment> {
+        self.ambient_viewing.as_ref()
+    }
+
+    /// Get operating point selector for the primary item, if present.
+    pub fn operating_point(&self) -> Option<&OperatingPointSelector> {
+        self.operating_point.as_ref()
+    }
+
+    /// Get layer selector for the primary item, if present.
+    pub fn layer_selector(&self) -> Option<&LayerSelector> {
+        self.layer_selector.as_ref()
+    }
+
+    /// Get AV1 layered image indexing for the primary item, if present.
+    pub fn layered_image_indexing(&self) -> Option<&AV1LayeredImageIndexing> {
+        self.layered_image_indexing.as_ref()
+    }
+
+    /// Get EXIF metadata for the primary item, if present.
+    ///
+    /// Returns raw EXIF data (TIFF header onwards), with the 4-byte AVIF offset prefix stripped.
+    pub fn exif(&self) -> Option<Result<Cow<'_, [u8]>>> {
+        self.exif_item.as_ref().map(|item| {
+            let raw = self.resolve_item(item)?;
+            // AVIF EXIF items start with a 4-byte big-endian offset to the TIFF header
+            if raw.len() <= 4 {
+                return Err(at!(Error::InvalidData("EXIF item too short")));
+            }
+            let offset = u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]) as usize;
+            let start = 4 + offset;
+            if start >= raw.len() {
+                return Err(at!(Error::InvalidData("EXIF offset exceeds item size")));
+            }
+            match raw {
+                Cow::Borrowed(slice) => Ok(Cow::Borrowed(&slice[start..])),
+                Cow::Owned(vec) => Ok(Cow::Owned(vec[start..].to_vec())),
+            }
+        })
+    }
+
+    /// Get XMP metadata for the primary item, if present.
+    ///
+    /// Returns raw XMP/XML data.
+    pub fn xmp(&self) -> Option<Result<Cow<'_, [u8]>>> {
+        self.xmp_item.as_ref().map(|item| self.resolve_item(item))
+    }
+
+    /// Gain map metadata, if a `tmap` derived image item is present.
+    ///
+    /// Describes how to apply a gain map to reconstruct an HDR rendition
+    /// from the SDR base image. See ISO 21496-1.
+    pub fn gain_map_metadata(&self) -> Option<&GainMapMetadata> {
+        self.gain_map_metadata.as_ref()
+    }
+
+    /// Gain map image data (AV1-encoded), if present.
+    pub fn gain_map_data(&self) -> Option<Result<Cow<'_, [u8]>>> {
+        self.gain_map.as_ref().map(|item| self.resolve_item(item))
+    }
+
+    /// Color information for the alternate (typically HDR) rendition.
+    ///
+    /// This comes from the `tmap` item's `colr` property and describes
+    /// the colour space of the tone-mapped output.
+    pub fn gain_map_color_info(&self) -> Option<&ColorInformation> {
+        self.gain_map_color_info.as_ref()
+    }
+
+    /// Get the full gain map bundle, if a `tmap` derived image item is present.
+    ///
+    /// Returns [`AvifGainMap`] containing metadata, raw AV1 gain map data,
+    /// and alternate rendition color info. Returns `None` if no gain map
+    /// is present, or `Some(Err(..))` if the gain map data cannot be resolved.
+    pub fn gain_map(&self) -> Option<Result<AvifGainMap>> {
+        let metadata = self.gain_map_metadata.as_ref()?.clone();
+        let data_extents = self.gain_map.as_ref()?;
+        let alt_color_info = self.gain_map_color_info.clone();
+
+        Some(self.resolve_item(data_extents).map(|data| AvifGainMap {
+            metadata,
+            gain_map_data: data.into_owned(),
+            alt_color_info,
+        }))
+    }
+
+    /// Check if a depth auxiliary image is present.
+    ///
+    /// Returns `true` if the AVIF container has an `auxl`-linked item with
+    /// a depth auxiliary type URN.
+    pub fn has_depth_map(&self) -> bool {
+        self.depth_item.is_some()
+    }
+
+    /// Get the raw AV1 bitstream of the depth auxiliary image, if present.
+    pub fn depth_map_data(&self) -> Option<Result<Cow<'_, [u8]>>> {
+        self.depth_item.as_ref().map(|item| self.resolve_item(item))
+    }
+
+    /// Get the full depth map bundle, if a depth auxiliary image is present.
+    ///
+    /// Returns [`AvifDepthMap`] containing the raw AV1 depth image data,
+    /// dimensions, codec config, and color info. Returns `None` if no depth
+    /// auxiliary is present, or `Some(Err(..))` if the data cannot be resolved.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// let bytes = std::fs::read("portrait.avif").unwrap();
+    /// let parser = zenavif_parse::AvifParser::from_bytes(&bytes).unwrap();
+    /// if let Some(Ok(dm)) = parser.depth_map() {
+    ///     println!("Depth: {}x{}, {} bytes", dm.width, dm.height, dm.data.len());
+    /// }
+    /// ```
+    pub fn depth_map(&self) -> Option<Result<AvifDepthMap>> {
+        let data_extents = self.depth_item.as_ref()?;
+        let av1_config = self.depth_av1_config.clone();
+        let color_info = self.depth_color_info.clone();
+        let width = self.depth_width;
+        let height = self.depth_height;
+
+        Some(self.resolve_item(data_extents).map(|data| AvifDepthMap {
+            data: data.into_owned(),
+            width,
+            height,
+            av1_config,
+            color_info,
+        }))
+    }
+
+    /// Get the major brand from the `ftyp` box (e.g., `*b"avif"` or `*b"avis"`).
+    pub fn major_brand(&self) -> &[u8; 4] {
+        &self.major_brand
+    }
+
+    /// Get the compatible brands from the `ftyp` box.
+    pub fn compatible_brands(&self) -> &[[u8; 4]] {
+        &self.compatible_brands
+    }
+
+    /// Parse AV1 metadata from the primary item.
+    pub fn primary_metadata(&self) -> Result<AV1Metadata> {
+        let data = self.primary_data()?;
+        AV1Metadata::parse_av1_bitstream(&data)
+    }
+
+    /// Parse AV1 metadata from the alpha item, if present.
+    pub fn alpha_metadata(&self) -> Option<Result<AV1Metadata>> {
+        self.alpha.as_ref().map(|item| {
+            let data = self.resolve_item(item)?;
+            AV1Metadata::parse_av1_bitstream(&data)
+        })
+    }
+
+    // ========================================
+    // Conversion
+    // ========================================
+
+    /// Convert to [`AvifData`] (eagerly loads all frames and tiles).
+    ///
+    /// Provided for migration from the eager API. Prefer using `AvifParser`
+    /// methods directly.
+    #[cfg(feature = "eager")]
+    #[deprecated(since = "1.5.0", note = "Use AvifParser methods directly instead of converting to AvifData")]
+    #[allow(deprecated)]
+    pub fn to_avif_data(&self) -> Result<AvifData> {
+        let primary_data = self.primary_data()?;
+        let mut primary_item = TryVec::new();
+        primary_item.extend_from_slice(&primary_data).map_err(|e| at!(Error::from(e)))?;
+
+        let alpha_item = match self.alpha_data() {
+            Some(Ok(data)) => {
+                let mut v = TryVec::new();
+                v.extend_from_slice(&data).map_err(|e| at!(Error::from(e)))?;
+                Some(v)
+            }
+            Some(Err(e)) => return Err(e),
+            None => None,
+        };
+
+        let mut grid_tiles = TryVec::new();
+        for i in 0..self.grid_tile_count() {
+            let data = self.tile_data(i)?;
+            let mut v = TryVec::new();
+            v.extend_from_slice(&data).map_err(|e| at!(Error::from(e)))?;
+            grid_tiles.push(v).map_err(|e| at!(Error::from(e)))?;
+        }
+
+        let animation = if let Some(info) = self.animation_info() {
+            let mut frames = TryVec::new();
+            for i in 0..info.frame_count {
+                let frame_ref = self.frame(i)?;
+                let mut data = TryVec::new();
+                data.extend_from_slice(&frame_ref.data).map_err(|e| at!(Error::from(e)))?;
+                frames.push(AnimationFrame { data, duration_ms: frame_ref.duration_ms }).map_err(|e| at!(Error::from(e)))?;
+            }
+            Some(AnimationConfig {
+                loop_count: info.loop_count,
+                frames,
+            })
+        } else {
+            None
+        };
+
+        Ok(AvifData {
+            primary_item,
+            alpha_item,
+            premultiplied_alpha: self.premultiplied_alpha,
+            grid_config: self.grid_config.clone(),
+            grid_tiles,
+            animation,
+            av1_config: self.av1_config.clone(),
+            color_info: self.color_info.clone(),
+            rotation: self.rotation,
+            mirror: self.mirror,
+            clean_aperture: self.clean_aperture,
+            pixel_aspect_ratio: self.pixel_aspect_ratio,
+            content_light_level: self.content_light_level,
+            mastering_display: self.mastering_display,
+            content_colour_volume: self.content_colour_volume,
+            ambient_viewing: self.ambient_viewing,
+            operating_point: self.operating_point,
+            layer_selector: self.layer_selector,
+            layered_image_indexing: self.layered_image_indexing,
+            exif: self.exif().and_then(|r| r.ok()).map(|c| {
+                let mut v = TryVec::new();
+                let _ = v.extend_from_slice(&c);
+                v
+            }),
+            xmp: self.xmp().and_then(|r| r.ok()).map(|c| {
+                let mut v = TryVec::new();
+                let _ = v.extend_from_slice(&c);
+                v
+            }),
+            gain_map_metadata: self.gain_map_metadata.clone(),
+            gain_map_item: self.gain_map_data().and_then(|r| r.ok()).map(|c| {
+                let mut v = TryVec::new();
+                let _ = v.extend_from_slice(&c);
+                v
+            }),
+            gain_map_color_info: self.gain_map_color_info.clone(),
+            depth_item: self.depth_map_data().and_then(|r| r.ok()).map(|c| {
+                let mut v = TryVec::new();
+                let _ = v.extend_from_slice(&c);
+                v
+            }),
+            depth_width: self.depth_width,
+            depth_height: self.depth_height,
+            depth_av1_config: self.depth_av1_config.clone(),
+            depth_color_info: self.depth_color_info.clone(),
+            major_brand: self.major_brand,
+            compatible_brands: self.compatible_brands.clone(),
+        })
+    }
+}
+
+/// Iterator over animation frames.
+///
+/// Created by [`AvifParser::frames()`]. Yields [`FrameRef`] on demand.
+pub struct FrameIterator<'a> {
+    parser: &'a AvifParser<'a>,
+    index: usize,
+    count: usize,
+}
+
+impl<'a> Iterator for FrameIterator<'a> {
+    type Item = Result<FrameRef<'a>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.count {
+            return None;
+        }
+        let result = self.parser.frame(self.index);
+        self.index += 1;
+        Some(result)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.count.saturating_sub(self.index);
+        (remaining, Some(remaining))
+    }
+}
+
+impl ExactSizeIterator for FrameIterator<'_> {
+    fn len(&self) -> usize {
+        self.count.saturating_sub(self.index)
+    }
+}
+
+struct AvifInternalMeta {
+    item_references: TryVec<SingleItemTypeReferenceBox>,
+    properties: TryVec<AssociatedProperty>,
+    primary_item_id: u32,
+    iloc_items: TryVec<ItemLocationBoxItem>,
+    item_infos: TryVec<ItemInfoEntry>,
+    idat: Option<TryVec<u8>>,
+    #[allow(dead_code)] // Parsed for future altr group support
+    entity_groups: TryVec<EntityGroup>,
+}
+
+/// A Media Data Box
+/// See ISO 14496-12:2015 § 8.1.1
+#[cfg(feature = "eager")]
+struct MediaDataBox {
+    /// Offset of `data` from the beginning of the file. See `ConstructionMethod::File`
+    offset: u64,
+    data: TryVec<u8>,
+}
+
+#[cfg(feature = "eager")]
+impl MediaDataBox {
+    /// Check whether the beginning of `extent` is within the bounds of the `MediaDataBox`.
+    /// We assume extents to not cross box boundaries. If so, this will cause an error
+    /// in `read_extent`.
+    fn contains_extent(&self, extent: &ExtentRange) -> bool {
+        if self.offset <= extent.start() {
+            let start_offset = extent.start() - self.offset;
+            start_offset < self.data.len().to_u64()
+        } else {
+            false
+        }
+    }
+
+    /// Check whether `extent` covers the `MediaDataBox` exactly.
+    fn matches_extent(&self, extent: &ExtentRange) -> bool {
+        if self.offset == extent.start() {
+            match extent {
+                ExtentRange::WithLength(range) => {
+                    if let Some(end) = self.offset.checked_add(self.data.len().to_u64()) {
+                        end == range.end
+                    } else {
+                        false
+                    }
+                },
+                ExtentRange::ToEnd(_) => true,
+            }
+        } else {
+            false
+        }
+    }
+
+    /// Copy the range specified by `extent` to the end of `buf` or return an error if the range
+    /// is not fully contained within `MediaDataBox`.
+    fn read_extent(&self, extent: &ExtentRange, buf: &mut TryVec<u8>) -> Result<()> {
+        let start_offset = extent
+            .start()
+            .checked_sub(self.offset)
+            .ok_or_else(|| at!(Error::InvalidData("mdat does not contain extent")))?;
+        let slice = match extent {
+            ExtentRange::WithLength(range) => {
+                let range_len = range
+                    .end
+                    .checked_sub(range.start)
+                    .ok_or_else(|| at!(Error::InvalidData("range start > end")))?;
+                let end = start_offset
+                    .checked_add(range_len)
+                    .ok_or_else(|| at!(Error::InvalidData("extent end overflow")))?;
+                self.data.get(start_offset.try_into().map_err(|e| at!(Error::from(e)))?..end.try_into().map_err(|e| at!(Error::from(e)))?)
+            },
+            ExtentRange::ToEnd(_) => self.data.get(start_offset.try_into().map_err(|e| at!(Error::from(e)))?..),
+        };
+        let slice = slice.ok_or_else(|| at!(Error::InvalidData("extent crosses box boundary")))?;
+        buf.extend_from_slice(slice).map_err(|e| at!(Error::from(e)))?;
+        Ok(())
+    }
+
+}
+
+/// Used for 'infe' boxes within 'iinf' boxes
+/// See ISO 14496-12:2015 § 8.11.6
+/// Only versions {2, 3} are supported
+#[derive(Debug)]
+struct ItemInfoEntry {
+    item_id: u32,
+    item_type: FourCC,
+}
+
+/// See ISO 14496-12:2015 § 8.11.12
+#[derive(Debug)]
+struct SingleItemTypeReferenceBox {
+    item_type: FourCC,
+    from_item_id: u32,
+    to_item_id: u32,
+    /// Index of this reference within the list of references of the same type from the same item
+    /// (0-based). This is the dimgIdx for grid tiles.
+    reference_index: u16,
+}
+
+/// Potential sizes (in bytes) of variable-sized fields of the 'iloc' box
+/// See ISO 14496-12:2015 § 8.11.3
+#[derive(Debug)]
+enum IlocFieldSize {
+    Zero,
+    Four,
+    Eight,
+}
+
+impl IlocFieldSize {
+    const fn to_bits(&self) -> u8 {
+        match self {
+            Self::Zero => 0,
+            Self::Four => 32,
+            Self::Eight => 64,
+        }
+    }
+}
+
+impl TryFrom<u8> for IlocFieldSize {
+    type Error = At<Error>;
+
+    fn try_from(value: u8) -> Result<Self> {
+        match value {
+            0 => Ok(Self::Zero),
+            4 => Ok(Self::Four),
+            8 => Ok(Self::Eight),
+            _ => Err(at!(Error::InvalidData("value must be in the set {0, 4, 8}"))),
+        }
+    }
+}
+
+#[derive(PartialEq)]
+enum IlocVersion {
+    Zero,
+    One,
+    Two,
+}
+
+impl TryFrom<u8> for IlocVersion {
+    type Error = At<Error>;
+
+    fn try_from(value: u8) -> Result<Self> {
+        match value {
+            0 => Ok(Self::Zero),
+            1 => Ok(Self::One),
+            2 => Ok(Self::Two),
+            _ => Err(at!(Error::Unsupported("unsupported version in 'iloc' box"))),
+        }
+    }
+}
+
+/// Used for 'iloc' boxes
+/// See ISO 14496-12:2015 § 8.11.3
+/// `base_offset` is omitted since it is integrated into the ranges in `extents`
+/// `data_reference_index` is omitted, since only 0 (i.e., this file) is supported
+#[derive(Debug)]
+struct ItemLocationBoxItem {
+    item_id: u32,
+    construction_method: ConstructionMethod,
+    /// Unused for `ConstructionMethod::Idat`
+    extents: TryVec<ItemLocationBoxExtent>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ConstructionMethod {
+    File,
+    Idat,
+    #[allow(dead_code)] // TODO: see https://github.com/mozilla/mp4parse-rust/issues/196
+    Item,
+}
+
+/// `extent_index` is omitted since it's only used for `ConstructionMethod::Item` which
+/// is currently not implemented.
+#[derive(Clone, Debug)]
+struct ItemLocationBoxExtent {
+    extent_range: ExtentRange,
+}
+
+#[derive(Clone, Debug)]
+enum ExtentRange {
+    WithLength(Range<u64>),
+    ToEnd(RangeFrom<u64>),
+}
+
+impl ExtentRange {
+    const fn start(&self) -> u64 {
+        match self {
+            Self::WithLength(r) => r.start,
+            Self::ToEnd(r) => r.start,
+        }
+    }
+}
+
+/// See ISO 14496-12:2015 § 4.2
+struct BMFFBox<'a, T> {
+    head: BoxHeader,
+    content: Take<&'a mut T>,
+}
+
+impl<T: Read> BMFFBox<'_, T> {
+    fn read_into_try_vec(&mut self) -> std::io::Result<TryVec<u8>> {
+        let limit = self.content.limit();
+        // For size=0 boxes, size is set to u64::MAX, but after subtracting offset
+        // (8 or 16 bytes), the limit will be slightly less. Check for values very
+        // close to u64::MAX to detect these cases.
+        // Cap pre-allocation to 256 MB — the actual read_to_end will
+        // grow as needed if the box really is larger, and return early
+        // if the underlying reader has less data than claimed.
+        const MAX_PREALLOC: u64 = 256 * 1024 * 1024;
+        let mut vec = if limit >= u64::MAX - BoxHeader::MIN_LARGE_SIZE {
+            // Unknown size (size=0 box), read without pre-allocation
+            std::vec::Vec::new()
+        } else {
+            let mut v = std::vec::Vec::new();
+            v.try_reserve_exact(limit.min(MAX_PREALLOC) as usize)
+                .map_err(|_| std::io::ErrorKind::OutOfMemory)?;
+            v
+        };
+        self.content.read_to_end(&mut vec)?; // The default impl
+        Ok(vec.into())
+    }
+}
+
+#[test]
+fn box_read_to_end() {
+    let tmp = &mut b"1234567890".as_slice();
+    let mut src = BMFFBox {
+        head: BoxHeader { name: BoxType::FileTypeBox, size: 5, offset: 0, uuid: None },
+        content: <_ as Read>::take(tmp, 5),
+    };
+    let buf = src.read_into_try_vec().unwrap();
+    assert_eq!(buf.len(), 5);
+    assert_eq!(buf, b"12345".as_ref());
+}
+
+#[test]
+fn box_read_to_end_large_claim() {
+    // A box claiming huge size but backed by only 10 bytes should still succeed —
+    // read_to_end returns what's actually available, pre-allocation is capped.
+    let tmp = &mut b"1234567890".as_slice();
+    let mut src = BMFFBox {
+        head: BoxHeader { name: BoxType::FileTypeBox, size: 5, offset: 0, uuid: None },
+        content: <_ as Read>::take(tmp, u64::MAX / 2),
+    };
+    let buf = src.read_into_try_vec().unwrap();
+    assert_eq!(buf.len(), 10);
+}
+
+struct BoxIter<'a, T> {
+    src: &'a mut T,
+    /// Upper bound on bytes remaining in the source.
+    ///
+    /// Used to clamp claimed box sizes so that a malformed header
+    /// (e.g. claiming 4 GB when only 26 bytes remain) does not cause
+    /// multi-gigabyte allocations based on [`BMFFBox::bytes_left`].
+    max_remaining: u64,
+}
+
+impl<T: Read> BoxIter<'_, T> {
+    /// Create a BoxIter without a known data bound (used by streaming readers).
+    #[cfg(feature = "eager")]
+    fn new(src: &mut T) -> BoxIter<'_, T> {
+        BoxIter { src, max_remaining: u64::MAX }
+    }
+
+    fn with_max_remaining(src: &mut T, max_remaining: u64) -> BoxIter<'_, T> {
+        BoxIter { src, max_remaining }
+    }
+
+    fn next_box(&mut self) -> Result<Option<BMFFBox<'_, T>>> {
+        let r = read_box_header(self.src);
+        match r {
+            Ok(h) => {
+                let claimed = h.size - h.offset;
+                // Clamp the Take limit so that allocations based on
+                // bytes_left() cannot exceed the actual data available.
+                // The header bytes were already consumed from the
+                // source, so the budget available for CONTENT is
+                // max_remaining minus the header — without this the
+                // clamp overshoots by the header size and a size=0
+                // (extends-to-EOF) box reports more bytes_left() than
+                // the reader can deliver.
+                let available = self.max_remaining.saturating_sub(h.offset);
+                let clamped = claimed.min(available);
+                // Decrease our remaining budget by the clamped content
+                // size plus the header bytes already consumed.
+                self.max_remaining = self.max_remaining.saturating_sub(clamped.saturating_add(h.offset));
+                Ok(Some(BMFFBox {
+                    head: h,
+                    content: self.src.take(clamped),
+                }))
+            }
+            Err(e) if matches!(e.error(), Error::UnexpectedEOF) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+impl<T: Read> Read for BMFFBox<'_, T> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.content.read(buf)
+    }
+}
+
+impl<T: Offset> Offset for BMFFBox<'_, T> {
+    fn offset(&self) -> u64 {
+        self.content.get_ref().offset()
+    }
+}
+
+impl<T: Read> BMFFBox<'_, T> {
+    fn bytes_left(&self) -> u64 {
+        self.content.limit()
+    }
+
+    const fn get_header(&self) -> &BoxHeader {
+        &self.head
+    }
+
+    fn box_iter(&mut self) -> BoxIter<'_, Self> {
+        BoxIter::with_max_remaining(self, self.bytes_left())
+    }
+}
+
+impl<T> Drop for BMFFBox<'_, T> {
+    fn drop(&mut self) {
+        if self.content.limit() > 0 {
+            let name: FourCC = From::from(self.head.name);
+            debug!("Dropping {} bytes in '{}'", self.content.limit(), name);
+        }
+    }
+}
+
+/// Read and parse a box header.
+///
+/// Call this first to determine the type of a particular mp4 box
+/// and its length. Used internally for dispatching to specific
+/// parsers for the internal content, or to get the length to
+/// skip unknown or uninteresting boxes.
+///
+/// See ISO 14496-12:2015 § 4.2
+fn read_box_header<T: ReadBytesExt>(src: &mut T) -> Result<BoxHeader> {
+    let size32 = be_u32(src)?;
+    let name = BoxType::from(be_u32(src)?);
+    let size = match size32 {
+        // valid only for top-level box and indicates it's the last box in the file.  usually mdat.
+        0 => {
+            // Size=0 means box extends to EOF (ISOBMFF spec allows this for last box)
+            u64::MAX
+        },
+        1 => {
+            let size64 = be_u64(src)?;
+            if size64 < BoxHeader::MIN_LARGE_SIZE {
+                return Err(at!(Error::InvalidData("malformed wide size")));
+            }
+            size64
+        },
+        _ => {
+            if u64::from(size32) < BoxHeader::MIN_SIZE {
+                return Err(at!(Error::InvalidData("malformed size")));
+            }
+            u64::from(size32)
+        },
+    };
+    let mut offset = match size32 {
+        1 => BoxHeader::MIN_LARGE_SIZE,
+        _ => BoxHeader::MIN_SIZE,
+    };
+    let uuid = if name == BoxType::UuidBox {
+        if size >= offset + 16 {
+            let mut buffer = [0u8; 16];
+            let count = src.read(&mut buffer).map_err(|e| at!(Error::from(e)))?;
+            offset += count.to_u64();
+            if count == 16 {
+                Some(buffer)
+            } else {
+                debug!("malformed uuid (short read), skipping");
+                None
+            }
+        } else {
+            debug!("malformed uuid, skipping");
+            None
+        }
+    } else {
+        None
+    };
+    if offset > size {
+        return Err(at!(Error::InvalidData("box header offset exceeds size")));
+    }
+    Ok(BoxHeader { name, size, offset, uuid })
+}
+
+/// Parse the extra header fields for a full box.
+fn read_fullbox_extra<T: ReadBytesExt>(src: &mut T) -> Result<(u8, u32)> {
+    let version = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let flags_a = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let flags_b = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let flags_c = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    Ok((
+        version,
+        u32::from(flags_a) << 16 | u32::from(flags_b) << 8 | u32::from(flags_c),
+    ))
+}
+
+// Parse the extra fields for a full box whose flag fields must be zero.
+fn read_fullbox_version_no_flags<T: ReadBytesExt>(src: &mut T, options: &ParseOptions) -> Result<u8> {
+    let (version, flags) = read_fullbox_extra(src)?;
+
+    if flags != 0 && !options.lenient {
+        return Err(at!(Error::Unsupported("expected flags to be 0")));
+    }
+
+    Ok(version)
+}
+
+/// Skip over the entire contents of a box.
+fn skip_box_content<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<()> {
+    // Skip the contents of unknown chunks.
+    let to_skip = {
+        let header = src.get_header();
+        debug!("{header:?} (skipped)");
+        if header.size == u64::MAX {
+            // ISOBMFF size==0: the box extends to end-of-file (stored
+            // as the u64::MAX sentinel; valid for the last top-level
+            // box, usually `mdat`). `BoxIter::next_box` clamps the
+            // reader to the bytes actually available (the OOM guard),
+            // so the sentinel-derived length must not be compared
+            // against `bytes_left()` — the remaining bytes ARE the
+            // content. Real-world hit: libavif's Apple-style HDR
+            // gain-map vectors all carry a size=0 `mdat`
+            // (imazen/zenavif#16).
+            src.bytes_left()
+        } else {
+            header
+                .size
+                .checked_sub(header.offset)
+                .ok_or_else(|| at!(Error::InvalidData("header offset > size")))?
+        }
+    };
+    if to_skip != src.bytes_left() {
+        return Err(at!(Error::InvalidData("box content size mismatch")));
+    }
+    skip(src, to_skip)
+}
+
+/// Skip over the remain data of a box.
+fn skip_box_remain<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<()> {
+    let remain = {
+        let header = src.get_header();
+        let len = src.bytes_left();
+        debug!("remain {len} (skipped) in {header:?}");
+        len
+    };
+    skip(src, remain)
+}
+
+struct ResourceTracker<'a> {
+    config: &'a DecodeConfig,
+    #[cfg(feature = "eager")]
+    current_memory: u64,
+    #[cfg(feature = "eager")]
+    peak_memory: u64,
+}
+
+impl<'a> ResourceTracker<'a> {
+    fn new(config: &'a DecodeConfig) -> Self {
+        Self {
+            config,
+            #[cfg(feature = "eager")]
+            current_memory: 0,
+            #[cfg(feature = "eager")]
+            peak_memory: 0,
+        }
+    }
+
+    #[cfg(feature = "eager")]
+    fn reserve(&mut self, bytes: u64) -> Result<()> {
+        self.current_memory = self.current_memory.saturating_add(bytes);
+        self.peak_memory = self.peak_memory.max(self.current_memory);
+
+        if let Some(limit) = self.config.peak_memory_limit
+            && self.peak_memory > limit {
+                return Err(at!(Error::ResourceLimitExceeded("peak memory limit exceeded")));
+            }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "eager")]
+    fn release(&mut self, bytes: u64) {
+        self.current_memory = self.current_memory.saturating_sub(bytes);
+    }
+
+    fn validate_total_megapixels(&self, width: u32, height: u32) -> Result<()> {
+        if let Some(limit) = self.config.total_megapixels_limit {
+            let megapixels = (width as u64)
+                .checked_mul(height as u64)
+                .ok_or_else(|| at!(Error::InvalidData("dimension overflow")))?
+                / 1_000_000;
+
+            if megapixels > limit as u64 {
+                return Err(at!(Error::ResourceLimitExceeded("total megapixels limit exceeded")));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_animation_frames(&self, count: u32) -> Result<()> {
+        if let Some(limit) = self.config.max_animation_frames
+            && count > limit {
+                return Err(at!(Error::ResourceLimitExceeded("animation frame count limit exceeded")));
+            }
+
+        Ok(())
+    }
+
+    fn validate_grid_tiles(&self, count: u32) -> Result<()> {
+        if let Some(limit) = self.config.max_grid_tiles
+            && count > limit {
+                return Err(at!(Error::ResourceLimitExceeded("grid tile count limit exceeded")));
+            }
+
+        Ok(())
+    }
+}
+
+/// Read the contents of an AVIF file with resource limits and cancellation support
+///
+/// This is the primary parsing function with full control over resource limits
+/// and cooperative cancellation via the [`Stop`] trait.
+///
+/// # Arguments
+///
+/// * `f` - Reader for the AVIF file
+/// * `config` - Resource limits and parsing options
+/// * `stop` - Cancellation token (use [`Unstoppable`] if not needed)
+#[cfg(feature = "eager")]
+#[deprecated(since = "1.5.0", note = "Use `AvifParser::from_reader_with_config()` instead")]
+#[allow(deprecated)]
+pub fn read_avif_with_config<T: Read + ?Sized>(
+    f: &mut T,
+    config: &DecodeConfig,
+    stop: &dyn Stop,
+) -> Result<AvifData> {
+    let mut tracker = ResourceTracker::new(config);
+    let mut f = OffsetReader::new(f);
+
+    let mut iter = BoxIter::new(&mut f);
+
+    // 'ftyp' box must occur first; see ISO 14496-12:2015 § 4.3.1
+    let (major_brand, compatible_brands) = if let Some(mut b) = iter.next_box()? {
+        if b.head.name == BoxType::FileTypeBox {
+            let ftyp = read_ftyp(&mut b)?;
+            // Accept both 'avif' (single-frame) and 'avis' (animated) brands
+            if ftyp.major_brand != b"avif" && ftyp.major_brand != b"avis" {
+                warn!("major_brand: {}", ftyp.major_brand);
+                return Err(at!(Error::InvalidData("ftyp must be 'avif' or 'avis'")));
+            }
+            let major = ftyp.major_brand.value;
+            let compat = ftyp.compatible_brands.iter().map(|b| b.value).collect();
+            (major, compat)
+        } else {
+            return Err(at!(Error::InvalidData("'ftyp' box must occur first")));
+        }
+    } else {
+        return Err(at!(Error::InvalidData("'ftyp' box must occur first")));
+    };
+
+    let mut meta = None;
+    let mut mdats = TryVec::new();
+    let mut animation_data: Option<ParsedAnimationData> = None;
+
+    let parse_opts = ParseOptions { lenient: config.lenient };
+
+    while let Some(mut b) = iter.next_box()? {
+        stop.check().map_err(|e| at!(Error::from(e)))?;
+
+        match b.head.name {
+            BoxType::MetadataBox => {
+                if meta.is_some() {
+                    return Err(at!(Error::InvalidData("There should be zero or one meta boxes per ISO 14496-12:2015 § 8.11.1.1")));
+                }
+                meta = Some(read_avif_meta(&mut b, &parse_opts)?);
+            },
+            BoxType::MovieBox => {
+                let tracks = read_moov(&mut b, stop)?;
+                if !tracks.is_empty() {
+                    animation_data = Some(associate_tracks(tracks)?);
+                }
+            },
+            BoxType::MediaDataBox => {
+                if b.bytes_left() > 0 {
+                    let offset = b.offset();
+                    let size = b.bytes_left();
+                    tracker.reserve(size)?;
+                    let data = b.read_into_try_vec().map_err(|e| at!(Error::from(e)))?;
+                    tracker.release(size);
+                    mdats.push(MediaDataBox { offset, data }).map_err(|e| at!(Error::from(e)))?;
+                }
+            },
+            _ => skip_box_content(&mut b)?,
+        }
+
+        check_parser_state(&b.head, &b.content)?;
+    }
+
+    // meta is required for still images; pure sequences can have only moov+mdat
+    if meta.is_none() && animation_data.is_none() {
+        return Err(at!(Error::InvalidData("missing meta")));
+    }
+    let Some(meta) = meta else {
+        // Pure sequence: return minimal AvifData with no items
+        return Ok(AvifData {
+            ..Default::default()
+        });
+    };
+
+    // Check if primary item is a grid (tiled image)
+    let is_grid = meta
+        .item_infos
+        .iter()
+        .find(|x| x.item_id == meta.primary_item_id)
+        .is_some_and(|info| {
+            let is_g = info.item_type == b"grid";
+            if is_g {
+                log::debug!("Grid image detected: primary_item_id={}", meta.primary_item_id);
+            }
+            is_g
+        });
+
+    // Extract grid configuration if this is a grid image
+    let mut grid_config = if is_grid {
+        meta.properties
+            .iter()
+            .find(|prop| {
+                prop.item_id == meta.primary_item_id
+                    && matches!(prop.property, ItemProperty::ImageGrid(_))
+            })
+            .and_then(|prop| match &prop.property {
+                ItemProperty::ImageGrid(config) => {
+                    log::debug!("Grid: found explicit ImageGrid property: {:?}", config);
+                    Some(config.clone())
+                },
+                _ => None,
+            })
+    } else {
+        None
+    };
+
+    // Find tile item IDs if this is a grid
+    let tile_item_ids: TryVec<u32> = if is_grid {
+        // Collect tiles with their reference index
+        let mut tiles_with_index: TryVec<(u32, u16)> = TryVec::new();
+        for iref in meta.item_references.iter() {
+            // Grid items reference tiles via "dimg" (derived image) type
+            if iref.from_item_id == meta.primary_item_id && iref.item_type == b"dimg" {
+                tiles_with_index.push((iref.to_item_id, iref.reference_index)).map_err(|e| at!(Error::from(e)))?;
+            }
+        }
+
+        // Validate tile count
+        tracker.validate_grid_tiles(tiles_with_index.len() as u32)?;
+
+        // Sort tiles by reference_index to get correct grid order
+        tiles_with_index.sort_by_key(|&(_, idx)| idx);
+
+        // Extract just the IDs in sorted order
+        let mut ids = TryVec::new();
+        for (tile_id, _) in tiles_with_index.iter() {
+            ids.push(*tile_id).map_err(|e| at!(Error::from(e)))?;
+        }
+
+        // No logging here - too verbose for production
+
+        // If no ImageGrid property found, calculate grid layout from ispe dimensions
+        if grid_config.is_none() && !ids.is_empty() {
+            // Try to calculate grid dimensions from ispe properties
+            let grid_dims = meta.properties.iter()
+                .find(|p| p.item_id == meta.primary_item_id)
+                .and_then(|p| match &p.property {
+                    ItemProperty::ImageSpatialExtents(e) => Some(e),
+                    _ => None,
+                });
+
+            let tile_dims = ids.first().and_then(|&tile_id| {
+                meta.properties.iter()
+                    .find(|p| p.item_id == tile_id)
+                    .and_then(|p| match &p.property {
+                        ItemProperty::ImageSpatialExtents(e) => Some(e),
+                        _ => None,
+                    })
+            });
+
+            if let (Some(grid), Some(tile)) = (grid_dims, tile_dims) {
+                // Validate grid output dimensions
+                tracker.validate_total_megapixels(grid.width, grid.height)?;
+
+                // Validate tile dimensions are non-zero (already validated in read_ispe, but defensive)
+                if tile.width == 0 || tile.height == 0 {
+                    log::warn!("Grid: tile has zero dimensions, using fallback");
+                } else if grid.width % tile.width == 0 && grid.height % tile.height == 0 {
+                    // Calculate grid layout: grid_dims ÷ tile_dims
+                    let columns = grid.width / tile.width;
+                    let rows = grid.height / tile.height;
+
+                    // Validate grid dimensions fit in u8 (max 255×255 grid)
+                    if columns > 255 || rows > 255 {
+                        log::warn!("Grid: calculated dimensions {}×{} exceed 255, using fallback", rows, columns);
+                    } else {
+                        log::debug!("Grid: calculated {}×{} layout from ispe dimensions", rows, columns);
+                        grid_config = Some(GridConfig {
+                            rows: rows as u8,
+                            columns: columns as u8,
+                            output_width: grid.width,
+                            output_height: grid.height,
+                        });
+                    }
+                } else {
+                    log::warn!("Grid: dimension mismatch - grid {}×{} not evenly divisible by tile {}×{}, using fallback",
+                              grid.width, grid.height, tile.width, tile.height);
+                }
+            }
+
+            // Fallback: if calculation failed or ispe not available, use N×1 inference
+            if grid_config.is_none() {
+                log::debug!("Grid: using fallback {}×1 layout inference", ids.len());
+                grid_config = Some(GridConfig {
+                    rows: ids.len() as u8,  // Changed: vertical stack
+                    columns: 1,              // Changed: single column
+                    output_width: 0,  // Will be calculated from tiles
+                    output_height: 0, // Will be calculated from tiles
+                });
+            }
+        }
+
+        ids
+    } else {
+        TryVec::new()
+    };
+
+    let alpha_item_id = meta
+        .item_references
+        .iter()
+        // Auxiliary image for the primary image
+        .filter(|iref| {
+            iref.to_item_id == meta.primary_item_id
+                && iref.from_item_id != meta.primary_item_id
+                && iref.item_type == b"auxl"
+        })
+        .map(|iref| iref.from_item_id)
+        // which has the alpha property
+        .find(|&item_id| {
+            meta.properties.iter().any(|prop| {
+                prop.item_id == item_id
+                    && match &prop.property {
+                        ItemProperty::AuxiliaryType(urn) => {
+                            urn.type_subtype().0 == b"urn:mpeg:mpegB:cicp:systems:auxiliary:alpha"
+                        }
+                        _ => false,
+                    }
+            })
+        });
+
+    // Extract properties for the primary item
+    macro_rules! find_prop {
+        ($variant:ident) => {
+            meta.properties.iter().find_map(|p| {
+                if p.item_id == meta.primary_item_id {
+                    match &p.property {
+                        ItemProperty::$variant(c) => Some(c.clone()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            })
+        };
+    }
+
+    let av1_config = find_prop!(AV1Config);
+    let color_info = find_prop!(ColorInformation);
+    let rotation = find_prop!(Rotation);
+    let mirror = find_prop!(Mirror);
+    let clean_aperture = find_prop!(CleanAperture);
+    let pixel_aspect_ratio = find_prop!(PixelAspectRatio);
+    let content_light_level = find_prop!(ContentLightLevel);
+    let mastering_display = find_prop!(MasteringDisplayColourVolume);
+    let content_colour_volume = find_prop!(ContentColourVolume);
+    let ambient_viewing = find_prop!(AmbientViewingEnvironment);
+    let operating_point = find_prop!(OperatingPointSelector);
+    let layer_selector = find_prop!(LayerSelector);
+    let layered_image_indexing = find_prop!(AV1LayeredImageIndexing);
+
+    let mut context = AvifData {
+        premultiplied_alpha: alpha_item_id.is_some_and(|alpha_item_id| {
+            meta.item_references.iter().any(|iref| {
+                iref.from_item_id == meta.primary_item_id
+                    && iref.to_item_id == alpha_item_id
+                    && iref.item_type == b"prem"
+            })
+        }),
+        av1_config,
+        color_info,
+        rotation,
+        mirror,
+        clean_aperture,
+        pixel_aspect_ratio,
+        content_light_level,
+        mastering_display,
+        content_colour_volume,
+        ambient_viewing,
+        operating_point,
+        layer_selector,
+        layered_image_indexing,
+        major_brand,
+        compatible_brands,
+        ..Default::default()
+    };
+
+    let mut extractor = ItemDataExtractor { mdats: &mut mdats, idat: meta.idat.as_ref() };
+
+    // load data of relevant items
+    // For grid images, we need to load tiles in the order specified by iref
+    if is_grid {
+        for (idx, &tile_id) in tile_item_ids.iter().enumerate() {
+            if idx % 16 == 0 {
+                stop.check().map_err(|e| at!(Error::from(e)))?;
+            }
+
+            let mut tile_data = TryVec::new();
+            let loc = meta
+                .iloc_items
+                .iter()
+                .find(|loc| loc.item_id == tile_id)
+                .ok_or_else(|| at!(Error::InvalidData("grid tile not found in iloc")))?;
+            extractor.extract(loc, &mut tile_data)?;
+            context.grid_tiles.push(tile_data).map_err(|e| at!(Error::from(e)))?;
+        }
+        context.grid_config = grid_config;
+    } else {
+        // Standard single-frame AVIF: load primary_item and optional alpha_item
+        for loc in meta.iloc_items.iter() {
+            let item_data = if loc.item_id == meta.primary_item_id {
+                &mut context.primary_item
+            } else if Some(loc.item_id) == alpha_item_id {
+                context.alpha_item.get_or_insert_with(TryVec::new)
+            } else {
+                continue;
+            };
+            extractor.extract(loc, item_data)?;
+        }
+    }
+
+    extract_metadata_sidecars(&meta, &mut context, &mut extractor)?;
+    extract_gain_map(&meta, &mut context, &mut extractor)?;
+    extract_depth_auxiliary(&meta, alpha_item_id, &mut context, &mut extractor)?;
+
+    if let Some(anim) = animation_data {
+        extract_animation(anim, &mut mdats, &mut tracker, &mut context)?;
+    }
+
+    Ok(context)
+}
+
+/// Closure-state struct for resolving an iloc item's data into a `TryVec<u8>` buffer.
+///
+/// Captures the mutable `mdats` list (we drain from it; mutating in place avoids re-allocation)
+/// and the optional `idat` payload. Held briefly across the post-meta extraction phases so each
+/// phase doesn't have to thread mdats+idat through its signature.
+#[cfg(feature = "eager")]
+struct ItemDataExtractor<'a> {
+    mdats: &'a mut TryVec<MediaDataBox>,
+    idat: Option<&'a TryVec<u8>>,
+}
+
+#[cfg(feature = "eager")]
+impl ItemDataExtractor<'_> {
+    fn extract(&mut self, loc: &ItemLocationBoxItem, buf: &mut TryVec<u8>) -> Result<()> {
+        match loc.construction_method {
+            ConstructionMethod::File => self.extract_from_mdat(loc, buf),
+            ConstructionMethod::Idat => self.extract_from_idat(loc, buf),
+            ConstructionMethod::Item => Err(at!(Error::Unsupported("construction_method 'item' not supported"))),
+        }
+    }
+
+    fn extract_from_mdat(&mut self, loc: &ItemLocationBoxItem, buf: &mut TryVec<u8>) -> Result<()> {
+        for extent in loc.extents.iter() {
+            let mut found = false;
+            for mdat in self.mdats.iter_mut() {
+                if mdat.matches_extent(&extent.extent_range) {
+                    // Single-extent items (the common case) cover a whole mdat
+                    // exactly: move its buffer in instead of allocating + copying.
+                    // Multi-extent items append into an already-filled `buf`.
+                    if buf.is_empty() {
+                        *buf = core::mem::take(&mut mdat.data);
+                    } else {
+                        buf.append(&mut mdat.data).map_err(|e| at!(Error::from(e)))?;
+                    }
+                    found = true;
+                    break;
+                } else if mdat.contains_extent(&extent.extent_range) {
+                    mdat.read_extent(&extent.extent_range, buf)?;
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                return Err(at!(Error::InvalidData("iloc contains an extent that is not in mdat")));
+            }
+        }
+        Ok(())
+    }
+
+    fn extract_from_idat(&self, loc: &ItemLocationBoxItem, buf: &mut TryVec<u8>) -> Result<()> {
+        let idat_data = self.idat.ok_or_else(|| at!(Error::InvalidData("idat box missing but construction_method is Idat")))?;
+        for extent in loc.extents.iter() {
+            match &extent.extent_range {
+                ExtentRange::WithLength(range) => {
+                    let start = usize::try_from(range.start).map_err(|_| at!(Error::InvalidData("extent start too large")))?;
+                    let end = usize::try_from(range.end).map_err(|_| at!(Error::InvalidData("extent end too large")))?;
+                    if end > idat_data.len() {
+                        return Err(at!(Error::InvalidData("extent exceeds idat size")));
+                    }
+                    buf.extend_from_slice(&idat_data[start..end]).map_err(|_| at!(Error::OutOfMemory))?;
+                },
+                ExtentRange::ToEnd(range) => {
+                    let start = usize::try_from(range.start).map_err(|_| at!(Error::InvalidData("extent start too large")))?;
+                    if start >= idat_data.len() {
+                        return Err(at!(Error::InvalidData("extent start exceeds idat size")));
+                    }
+                    buf.extend_from_slice(&idat_data[start..]).map_err(|_| at!(Error::OutOfMemory))?;
+                },
+            }
+        }
+        Ok(())
+    }
+}
+
+/// EXIF and XMP items are sidecars linked to the primary image via a `cdsc` iref.
+/// EXIF items are prefixed by a 4-byte big-endian offset to the TIFF header (AVIF convention).
+#[cfg(feature = "eager")]
+#[allow(deprecated)]
+fn extract_metadata_sidecars(
+    meta: &AvifInternalMeta,
+    context: &mut AvifData,
+    extractor: &mut ItemDataExtractor<'_>,
+) -> Result<()> {
+    for iref in meta.item_references.iter() {
+        if iref.to_item_id != meta.primary_item_id || iref.item_type != b"cdsc" {
+            continue;
+        }
+        let desc_item_id = iref.from_item_id;
+        let Some(info) = meta.item_infos.iter().find(|i| i.item_id == desc_item_id) else {
+            continue;
+        };
+        if info.item_type == b"Exif" {
+            if let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == desc_item_id) {
+                let mut raw = TryVec::new();
+                extractor.extract(loc, &mut raw)?;
+                if raw.len() > 4 {
+                    let offset = u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]) as usize;
+                    let start = 4 + offset;
+                    if start < raw.len() {
+                        let mut exif = TryVec::new();
+                        exif.extend_from_slice(&raw[start..]).map_err(|e| at!(Error::from(e)))?;
+                        context.exif = Some(exif);
+                    }
+                }
+            }
+        } else if info.item_type == b"mime"
+            && let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == desc_item_id)
+        {
+            let mut xmp = TryVec::new();
+            extractor.extract(loc, &mut xmp)?;
+            context.xmp = Some(xmp);
+        }
+    }
+    Ok(())
+}
+
+/// Ultra HDR gain map: a `tmap` derived image item with a multi-entry `dimg` iref pointing at
+/// `[primary, gain_map_av01]` (in that index order). Per ISO 23008-12 + ISO 21496-1.
+#[cfg(feature = "eager")]
+#[allow(deprecated)]
+fn extract_gain_map(
+    meta: &AvifInternalMeta,
+    context: &mut AvifData,
+    extractor: &mut ItemDataExtractor<'_>,
+) -> Result<()> {
+    let Some(tmap_info) = meta.item_infos.iter().find(|info| info.item_type == b"tmap") else {
+        return Ok(());
+    };
+    let tmap_id = tmap_info.item_id;
+
+    let mut inputs: TryVec<(u32, u16)> = TryVec::new();
+    for iref in meta.item_references.iter() {
+        if iref.from_item_id == tmap_id && iref.item_type == b"dimg" {
+            inputs.push((iref.to_item_id, iref.reference_index)).map_err(|e| at!(Error::from(e)))?;
+        }
+    }
+    inputs.sort_by_key(|&(_, idx)| idx);
+
+    if inputs.len() < 2 || inputs[0].0 != meta.primary_item_id {
+        return Ok(());
+    }
+    let gmap_item_id = inputs[1].0;
+
+    if let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == tmap_id) {
+        let mut tmap_data = TryVec::new();
+        extractor.extract(loc, &mut tmap_data)?;
+        if let Ok(metadata) = parse_tone_map_image(&tmap_data) {
+            context.gain_map_metadata = Some(metadata);
+        }
+    }
+
+    if let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == gmap_item_id) {
+        let mut gmap_data = TryVec::new();
+        extractor.extract(loc, &mut gmap_data)?;
+        context.gain_map_item = Some(gmap_data);
+    }
+
+    context.gain_map_color_info = property_for(meta, tmap_id, |p| match p {
+        ItemProperty::ColorInformation(c) => Some(c.clone()),
+        _ => None,
+    });
+    Ok(())
+}
+
+/// Depth auxiliary image: an `auxl`-referenced item with a depth-typed AuxiliaryType URN.
+/// Excludes the alpha auxiliary (which uses a different URN family).
+#[cfg(feature = "eager")]
+#[allow(deprecated)]
+fn extract_depth_auxiliary(
+    meta: &AvifInternalMeta,
+    alpha_item_id: Option<u32>,
+    context: &mut AvifData,
+    extractor: &mut ItemDataExtractor<'_>,
+) -> Result<()> {
+    let Some(depth_id) = find_depth_aux_item(meta, alpha_item_id) else {
+        return Ok(());
+    };
+
+    if let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == depth_id) {
+        let mut depth_data = TryVec::new();
+        extractor.extract(loc, &mut depth_data)?;
+        context.depth_item = Some(depth_data);
+    }
+
+    if let Some((w, h)) = property_for(meta, depth_id, |p| match p {
+        ItemProperty::ImageSpatialExtents(e) => Some((e.width, e.height)),
+        _ => None,
+    }) {
+        context.depth_width = w;
+        context.depth_height = h;
+    }
+    context.depth_av1_config = property_for(meta, depth_id, |p| match p {
+        ItemProperty::AV1Config(c) => Some(c.clone()),
+        _ => None,
+    });
+    context.depth_color_info = property_for(meta, depth_id, |p| match p {
+        ItemProperty::ColorInformation(c) => Some(c.clone()),
+        _ => None,
+    });
+    Ok(())
+}
+#[cfg(feature = "eager")]
+fn find_depth_aux_item(meta: &AvifInternalMeta, alpha_item_id: Option<u32>) -> Option<u32> {
+    meta.item_references
+        .iter()
+        .filter(|iref| {
+            iref.to_item_id == meta.primary_item_id
+                && iref.from_item_id != meta.primary_item_id
+                && iref.item_type == b"auxl"
+        })
+        .map(|iref| iref.from_item_id)
+        .find(|&item_id| {
+            if alpha_item_id == Some(item_id) {
+                return false;
+            }
+            meta.properties.iter().any(|prop| {
+                prop.item_id == item_id
+                    && match &prop.property {
+                        ItemProperty::AuxiliaryType(urn) => {
+                            is_depth_auxiliary_urn(urn.type_subtype().0)
+                        }
+                        _ => false,
+                    }
+            })
+        })
+}
+
+/// Return the first property of the given item that matches `pick`, ignoring properties for
+/// other items.
+#[cfg(feature = "eager")]
+fn property_for<T>(meta: &AvifInternalMeta, item_id: u32, pick: impl Fn(&ItemProperty) -> Option<T>) -> Option<T> {
+    meta.properties
+        .iter()
+        .filter(|p| p.item_id == item_id)
+        .find_map(|p| pick(&p.property))
+}
+
+/// Decode the animation sample table into per-frame buffers + duration. Sample-size count is
+/// validated against the resource budget before extracting; per-frame extraction errors are
+/// logged but do not fail the parse (the still-image branch may still be valid).
+#[cfg(feature = "eager")]
+#[allow(deprecated)]
+fn extract_animation(
+    anim: ParsedAnimationData,
+    mdats: &mut TryVec<MediaDataBox>,
+    tracker: &mut ResourceTracker,
+    context: &mut AvifData,
+) -> Result<()> {
+    let frame_count = anim.color_sample_table.sample_sizes.len() as u32;
+    tracker.validate_animation_frames(frame_count)?;
+
+    log::debug!("Animation: extracting frames (media_timescale={})", anim.color_timescale);
+    match extract_animation_frames(&anim.color_sample_table, anim.color_timescale, mdats) {
+        Ok(frames) => {
+            if !frames.is_empty() {
+                log::debug!("Animation: extracted {} frames", frames.len());
+                context.animation = Some(AnimationConfig {
+                    loop_count: anim.loop_count,
+                    frames,
+                });
+            }
+        }
+        Err(e) => {
+            log::warn!("Animation: failed to extract frames: {}", e);
+        }
+    }
+    Ok(())
+}
+
+/// Read the contents of an AVIF file with custom parsing options
+///
+/// Uses unlimited resource limits for backwards compatibility.
+///
+/// # Arguments
+///
+/// * `f` - Reader for the AVIF file
+/// * `options` - Parsing options (e.g., lenient mode)
+#[cfg(feature = "eager")]
+#[deprecated(since = "1.5.0", note = "Use `AvifParser::from_reader_with_config()` with `DecodeConfig::lenient()` instead")]
+#[allow(deprecated)]
+pub fn read_avif_with_options<T: Read + ?Sized>(f: &mut T, options: &ParseOptions) -> Result<AvifData> {
+    let config = DecodeConfig::unlimited().lenient(options.lenient);
+    read_avif_with_config(f, &config, &Unstoppable)
+}
+
+/// Read the contents of an AVIF file
+///
+/// Metadata is accumulated and returned in [`AvifData`] struct.
+/// Uses strict validation and unlimited resource limits by default.
+///
+/// For resource limits, use [`read_avif_with_config`].
+/// For lenient parsing, use [`read_avif_with_options`].
+#[cfg(feature = "eager")]
+#[deprecated(since = "1.5.0", note = "Use `AvifParser::from_reader()` instead")]
+#[allow(deprecated)]
+pub fn read_avif<T: Read + ?Sized>(f: &mut T) -> Result<AvifData> {
+    read_avif_with_options(f, &ParseOptions::default())
+}
+
+/// An entity group from a GroupsListBox (`grpl`).
+///
+/// See ISO 14496-12:2024 § 8.15.3.
+#[allow(dead_code)] // Parsed for future altr group support
+struct EntityGroup {
+    group_type: FourCC,
+    group_id: u32,
+    entity_ids: TryVec<u32>,
+}
+
+/// Parse a GroupsListBox (`grpl`).
+///
+/// Each child box is an EntityToGroupBox with a grouping type given by its box type.
+/// See ISO 14496-12:2024 § 8.15.3.
+fn read_grpl<T: Read + Offset>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<EntityGroup>> {
+    let mut groups = TryVec::new();
+    let mut iter = src.box_iter();
+    while let Some(mut b) = iter.next_box()? {
+        let group_type = FourCC::from(u32::from(b.head.name));
+        // Read version and flags (not validated per spec flexibility)
+        let _version = b.read_u8().map_err(|e| at!(Error::from(e)))?;
+        let mut flags_buf = [0u8; 3];
+        b.read_exact(&mut flags_buf).map_err(|e| at!(Error::from(e)))?;
+
+        let group_id = be_u32(&mut b)?;
+        let num_entities = be_u32(&mut b)?;
+        // Each entity_id is 4 bytes
+        if (num_entities as u64) * 4 > b.bytes_left() {
+            return Err(at!(Error::InvalidData(
+                "grpl num_entities exceeds remaining box bytes",
+            )));
+        }
+
+        let mut entity_ids = TryVec::new();
+        for _ in 0..num_entities {
+            entity_ids.push(be_u32(&mut b)?).map_err(|e| at!(Error::from(e)))?;
+        }
+
+        groups.push(EntityGroup {
+            group_type,
+            group_id,
+            entity_ids,
+        }).map_err(|e| at!(Error::from(e)))?;
+
+        skip_box_remain(&mut b)?;
+        check_parser_state(&b.head, &b.content)?;
+    }
+    Ok(groups)
+}
+
+/// Parse a ToneMapImage (`tmap`) item payload into gain map metadata.
+///
+/// See ISO 21496-1:2025 for the payload format.
+// ISO 21496-1 flag bits. These values must match the (private) constants
+// in `zencodec::gainmap::FLAG_*`. They are redefined here as local
+// constants to keep the parsing path decoupled from the public
+// `zencodec` constants.
+//
+// If either crate changes a flag value the other must be updated — the
+// shared fixture corpus under `gainmap-spec-status/test-vectors/` is the
+// cross-check that prevents silent drift.
+/// Bit 7 — multichannel gain map (`zencodec::gainmap::FLAG_MULTI_CHANNEL`).
+const TMAP_FLAG_MULTI_CHANNEL: u8 = 0x80;
+/// Bit 6 — gain map uses base image colour space
+/// (`zencodec::gainmap::FLAG_USE_BASE_COLOUR_SPACE`).
+const TMAP_FLAG_USE_BASE_COLOUR_SPACE: u8 = 0x40;
+/// Bit 3 — common-denominator compact encoding
+/// (`zencodec::gainmap::FLAG_COMMON_DENOMINATOR`). When set, a single
+/// shared `u32` denominator precedes all numerators in the payload.
+const TMAP_FLAG_COMMON_DENOMINATOR: u8 = 0x08;
+/// Bit 2 — backward direction: base is HDR, alternate is SDR
+/// (`zencodec::gainmap::FLAG_BACKWARD_DIRECTION`).
+const TMAP_FLAG_BACKWARD_DIRECTION: u8 = 0x04;
+
+fn parse_tone_map_image(data: &[u8]) -> Result<GainMapMetadata> {
+    let mut cursor = std::io::Cursor::new(data);
+
+    // version (u8) — must be 0
+    let version = cursor.read_u8().map_err(|e| at!(Error::from(e)))?;
+    if version != 0 {
+        return Err(at!(Error::Unsupported("tmap version")));
+    }
+
+    // minimum_version (u16 BE) — must be 0
+    let minimum_version = be_u16(&mut cursor)?;
+    if minimum_version > 0 {
+        return Err(at!(Error::Unsupported("tmap minimum version")));
+    }
+
+    // writer_version (u16 BE) — informational, must be >= minimum_version
+    let writer_version = be_u16(&mut cursor)?;
+    if writer_version < minimum_version {
+        return Err(at!(Error::InvalidData("tmap writer_version < minimum_version")));
+    }
+
+    // Flags byte: is_multichannel (bit 7), use_base_colour_space (bit 6),
+    // reserved (bits 5,4), common_denominator (bit 3),
+    // backward_direction (bit 2), reserved (bits 0-1).
+    let flags = cursor.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let is_multichannel = (flags & TMAP_FLAG_MULTI_CHANNEL) != 0;
+    let use_base_colour_space = (flags & TMAP_FLAG_USE_BASE_COLOUR_SPACE) != 0;
+    let backward_direction = (flags & TMAP_FLAG_BACKWARD_DIRECTION) != 0;
+    let common_denominator = (flags & TMAP_FLAG_COMMON_DENOMINATOR) != 0;
+
+    let channel_count = if is_multichannel { 3 } else { 1 };
+    let mut channels = [GainMapChannel {
+        gain_map_min_n: 0, gain_map_min_d: 0,
+        gain_map_max_n: 0, gain_map_max_d: 0,
+        gamma_n: 0, gamma_d: 0,
+        base_offset_n: 0, base_offset_d: 0,
+        alternate_offset_n: 0, alternate_offset_d: 0,
+    }; 3];
+
+    let base_hdr_headroom_n;
+    let base_hdr_headroom_d;
+    let alternate_hdr_headroom_n;
+    let alternate_hdr_headroom_d;
+
+    if common_denominator {
+        // Compact layout used by libultrahdr:
+        //   common_d: u32 BE
+        //   base_hdr_headroom_n:  u32 BE   (uses common_d)
+        //   alt_hdr_headroom_n:   u32 BE   (uses common_d)
+        //   for each channel:
+        //     gain_map_min_n: i32 BE       (uses common_d)
+        //     gain_map_max_n: i32 BE
+        //     gamma_n:        u32 BE
+        //     base_offset_n:  i32 BE
+        //     alt_offset_n:   i32 BE
+        //
+        // We expand each numerator to `(n, common_d)` in the output so
+        // downstream code does not need to know about the compact form.
+        let common_d = be_u32(&mut cursor)?;
+        if common_d == 0 {
+            return Err(at!(Error::InvalidData("tmap common_denominator is zero")));
+        }
+        base_hdr_headroom_n = be_u32(&mut cursor)?;
+        base_hdr_headroom_d = common_d;
+        alternate_hdr_headroom_n = be_u32(&mut cursor)?;
+        alternate_hdr_headroom_d = common_d;
+
+        for ch in channels.iter_mut().take(channel_count) {
+            ch.gain_map_min_n = be_i32(&mut cursor)?;
+            ch.gain_map_min_d = common_d;
+            ch.gain_map_max_n = be_i32(&mut cursor)?;
+            ch.gain_map_max_d = common_d;
+            ch.gamma_n = be_u32(&mut cursor)?;
+            ch.gamma_d = common_d;
+            ch.base_offset_n = be_i32(&mut cursor)?;
+            ch.base_offset_d = common_d;
+            ch.alternate_offset_n = be_i32(&mut cursor)?;
+            ch.alternate_offset_d = common_d;
+        }
+    } else {
+        // Full layout — each fraction has its own denominator.
+        base_hdr_headroom_n = be_u32(&mut cursor)?;
+        base_hdr_headroom_d = be_u32(&mut cursor)?;
+        alternate_hdr_headroom_n = be_u32(&mut cursor)?;
+        alternate_hdr_headroom_d = be_u32(&mut cursor)?;
+
+        for ch in channels.iter_mut().take(channel_count) {
+            ch.gain_map_min_n = be_i32(&mut cursor)?;
+            ch.gain_map_min_d = be_u32(&mut cursor)?;
+            ch.gain_map_max_n = be_i32(&mut cursor)?;
+            ch.gain_map_max_d = be_u32(&mut cursor)?;
+            ch.gamma_n = be_u32(&mut cursor)?;
+            ch.gamma_d = be_u32(&mut cursor)?;
+            ch.base_offset_n = be_i32(&mut cursor)?;
+            ch.base_offset_d = be_u32(&mut cursor)?;
+            ch.alternate_offset_n = be_i32(&mut cursor)?;
+            ch.alternate_offset_d = be_u32(&mut cursor)?;
+        }
+    }
+
+    // Copy channel 0 to channels 1 and 2 if single-channel
+    if !is_multichannel {
+        channels[1] = channels[0];
+        channels[2] = channels[0];
+    }
+
+    // writer_version is parsed and validated (must be >= minimum_version)
+    // but not stored — we always emit 0 on serialize.
+    let _ = writer_version;
+
+    Ok(GainMapMetadata {
+        is_multichannel,
+        use_base_colour_space,
+        backward_direction,
+        base_hdr_headroom_n,
+        base_hdr_headroom_d,
+        alternate_hdr_headroom_n,
+        alternate_hdr_headroom_d,
+        channels,
+    })
+}
+
+/// Parse a metadata box in the context of an AVIF
+/// Currently requires the primary item to be an av01 item type and generates
+/// an error otherwise.
+/// See ISO 14496-12:2015 § 8.11.1
+fn read_avif_meta<T: Read + Offset>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<AvifInternalMeta> {
+    let version = read_fullbox_version_no_flags(src, options)?;
+
+    if version != 0 {
+        return Err(at!(Error::Unsupported("unsupported meta version")));
+    }
+
+    let mut primary_item_id = None;
+    let mut item_infos = None;
+    let mut iloc_items = None;
+    let mut item_references = TryVec::new();
+    let mut properties = TryVec::new();
+    let mut idat = None;
+    let mut entity_groups = TryVec::new();
+
+    let mut iter = src.box_iter();
+    while let Some(mut b) = iter.next_box()? {
+        match b.head.name {
+            BoxType::ItemInfoBox => {
+                if item_infos.is_some() {
+                    return Err(at!(Error::InvalidData("There should be zero or one iinf boxes per ISO 14496-12:2015 § 8.11.6.1")));
+                }
+                item_infos = Some(read_iinf(&mut b, options)?);
+            },
+            BoxType::ItemLocationBox => {
+                if iloc_items.is_some() {
+                    return Err(at!(Error::InvalidData("There should be zero or one iloc boxes per ISO 14496-12:2015 § 8.11.3.1")));
+                }
+                iloc_items = Some(read_iloc(&mut b, options)?);
+            },
+            BoxType::PrimaryItemBox => {
+                if primary_item_id.is_some() {
+                    return Err(at!(Error::InvalidData("There should be zero or one iloc boxes per ISO 14496-12:2015 § 8.11.4.1")));
+                }
+                primary_item_id = Some(read_pitm(&mut b, options)?);
+            },
+            BoxType::ImageReferenceBox => {
+                item_references.append(&mut read_iref(&mut b, options)?).map_err(|e| at!(Error::from(e)))?;
+            },
+            BoxType::ImagePropertiesBox => {
+                properties = read_iprp(&mut b, options)?;
+            },
+            BoxType::ItemDataBox => {
+                if idat.is_some() {
+                    return Err(at!(Error::InvalidData("There should be zero or one idat boxes")));
+                }
+                idat = Some(b.read_into_try_vec().map_err(|e| at!(Error::from(e)))?);
+            },
+            BoxType::GroupsListBox => {
+                entity_groups.append(&mut read_grpl(&mut b)?).map_err(|e| at!(Error::from(e)))?;
+            },
+            BoxType::HandlerBox => {
+                let hdlr = read_hdlr(&mut b)?;
+                if hdlr.handler_type != b"pict" {
+                    warn!("hdlr handler_type: {}", hdlr.handler_type);
+                    return Err(at!(Error::InvalidData("meta handler_type must be 'pict' for AVIF")));
+                }
+            },
+            _ => skip_box_content(&mut b)?,
+        }
+
+        check_parser_state(&b.head, &b.content)?;
+    }
+
+    let primary_item_id = primary_item_id.ok_or_else(|| at!(Error::InvalidData("Required pitm box not present in meta box")))?;
+
+    let item_infos = item_infos.ok_or_else(|| at!(Error::InvalidData("iinf missing")))?;
+
+    if let Some(item_info) = item_infos.iter().find(|x| x.item_id == primary_item_id) {
+        // Allow both "av01" (standard single-frame) and "grid" (tiled) types
+        if item_info.item_type != b"av01" && item_info.item_type != b"grid" {
+            warn!("primary_item_id type: {}", item_info.item_type);
+            return Err(at!(Error::InvalidData("primary_item_id type is not av01 or grid")));
+        }
+    } else {
+        return Err(at!(Error::InvalidData("primary_item_id not present in iinf box")));
+    }
+
+    Ok(AvifInternalMeta {
+        properties,
+        item_references,
+        primary_item_id,
+        iloc_items: iloc_items.ok_or_else(|| at!(Error::InvalidData("iloc missing")))?,
+        item_infos,
+        idat,
+        entity_groups,
+    })
+}
+
+/// Parse a Handler Reference Box
+/// See ISO 14496-12:2015 § 8.4.3
+fn read_hdlr<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<HandlerBox> {
+    let (_version, _flags) = read_fullbox_extra(src)?;
+    // pre_defined (4 bytes)
+    skip(src, 4)?;
+    // handler_type (4 bytes)
+    let handler_type = be_u32(src)?;
+    // reserved (3 × 4 bytes) + name (variable) — skip the rest
+    skip_box_remain(src)?;
+    Ok(HandlerBox {
+        handler_type: FourCC::from(handler_type),
+    })
+}
+
+/// Parse a Primary Item Box
+/// See ISO 14496-12:2015 § 8.11.4
+fn read_pitm<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<u32> {
+    let version = read_fullbox_version_no_flags(src, options)?;
+
+    let item_id = match version {
+        0 => be_u16(src)?.into(),
+        1 => be_u32(src)?,
+        _ => return Err(at!(Error::Unsupported("unsupported pitm version"))),
+    };
+
+    Ok(item_id)
+}
+
+/// Parse an Item Information Box
+/// See ISO 14496-12:2015 § 8.11.6
+fn read_iinf<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<TryVec<ItemInfoEntry>> {
+    let version = read_fullbox_version_no_flags(src, options)?;
+
+    match version {
+        0 | 1 => (),
+        _ => return Err(at!(Error::Unsupported("unsupported iinf version"))),
+    }
+
+    let entry_count = if version == 0 {
+        be_u16(src)?.to_usize()
+    } else {
+        be_u32(src)?.to_usize()
+    };
+    // Cap pre-allocation: entry_count is untrusted, actual items come from box_iter
+    let mut item_infos = TryVec::with_capacity(entry_count.min(4096)).map_err(|e| at!(Error::from(e)))?;
+
+    let mut iter = src.box_iter();
+    while let Some(mut b) = iter.next_box()? {
+        if b.head.name != BoxType::ItemInfoEntry {
+            return Err(at!(Error::InvalidData("iinf box should contain only infe boxes")));
+        }
+
+        item_infos.push(read_infe(&mut b)?).map_err(|e| at!(Error::from(e)))?;
+
+        check_parser_state(&b.head, &b.content)?;
+    }
+
+    Ok(item_infos)
+}
+
+/// Parse an Item Info Entry
+/// See ISO 14496-12:2015 § 8.11.6.2
+fn read_infe<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<ItemInfoEntry> {
+    // According to the standard, it seems the flags field should be 0, but
+    // at least one sample AVIF image has a nonzero value.
+    let (version, _) = read_fullbox_extra(src)?;
+
+    // mif1 brand (see ISO 23008-12:2017 § 10.2.1) only requires v2 and 3
+    let item_id = match version {
+        2 => be_u16(src)?.into(),
+        3 => be_u32(src)?,
+        _ => return Err(at!(Error::Unsupported("unsupported version in 'infe' box"))),
+    };
+
+    let item_protection_index = be_u16(src)?;
+
+    if item_protection_index != 0 {
+        return Err(at!(Error::Unsupported("protected items (infe.item_protection_index != 0) are not supported")));
+    }
+
+    let item_type = FourCC::from(be_u32(src)?);
+    debug!("infe item_id {item_id} item_type: {item_type}");
+
+    // There are some additional fields here, but they're not of interest to us
+    skip_box_remain(src)?;
+
+    Ok(ItemInfoEntry { item_id, item_type })
+}
+
+fn read_iref<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<TryVec<SingleItemTypeReferenceBox>> {
+    let mut item_references = TryVec::new();
+    let version = read_fullbox_version_no_flags(src, options)?;
+    if version > 1 {
+        return Err(at!(Error::Unsupported("iref version")));
+    }
+
+    let mut iter = src.box_iter();
+    while let Some(mut b) = iter.next_box()? {
+        let from_item_id = if version == 0 {
+            be_u16(&mut b)?.into()
+        } else {
+            be_u32(&mut b)?
+        };
+        let reference_count = be_u16(&mut b)?;
+        // Each to_item_id is 2 bytes (version 0) or 4 bytes (version 1)
+        let bytes_per_ref: u64 = if version == 0 { 2 } else { 4 };
+        if (reference_count as u64) * bytes_per_ref > b.bytes_left() {
+            return Err(at!(Error::InvalidData(
+                "iref reference_count exceeds remaining box bytes",
+            )));
+        }
+        for reference_index in 0..reference_count {
+            let to_item_id = if version == 0 {
+                be_u16(&mut b)?.into()
+            } else {
+                be_u32(&mut b)?
+            };
+            if from_item_id == to_item_id {
+                return Err(at!(Error::InvalidData("from_item_id and to_item_id must be different")));
+            }
+            item_references.push(SingleItemTypeReferenceBox {
+                item_type: b.head.name.into(),
+                from_item_id,
+                to_item_id,
+                reference_index,
+            }).map_err(|e| at!(Error::from(e)))?;
+        }
+        check_parser_state(&b.head, &b.content)?;
+    }
+    Ok(item_references)
+}
+
+/// Properties that MUST be marked essential when associated with an item.
+/// See AVIF § 2.3.2.1.1 (a1op), HEIF § 6.5.11.1 (lsel), MIAF § 7.3.9 (clap, irot, imir).
+const MUST_BE_ESSENTIAL: &[&[u8; 4]] = &[b"a1op", b"lsel", b"clap", b"irot", b"imir"];
+
+/// Properties that MUST NOT be marked essential when associated with an item.
+/// See AVIF § 2.3.2.3.2 (a1lx).
+const MUST_NOT_BE_ESSENTIAL: &[&[u8; 4]] = &[b"a1lx"];
+
+fn read_iprp<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<TryVec<AssociatedProperty>> {
+    let mut iter = src.box_iter();
+    let mut properties = TryVec::new();
+    let mut associations = TryVec::new();
+
+    while let Some(mut b) = iter.next_box()? {
+        match b.head.name {
+            BoxType::ItemPropertyContainerBox => {
+                properties = read_ipco(&mut b, options)?;
+            },
+            BoxType::ItemPropertyAssociationBox => {
+                associations = read_ipma(&mut b)?;
+            },
+            _ => return Err(at!(Error::InvalidData("unexpected ipco child"))),
+        }
+    }
+
+    let mut associated = TryVec::new();
+    for a in associations {
+        let index = match a.property_index {
+            0 => {
+                // property_index 0 means no association; essential must also be 0
+                if a.essential {
+                    return Err(at!(Error::InvalidData(
+                        "ipma property_index 0 must not be marked essential",
+                    )));
+                }
+                continue;
+            }
+            x => x as usize - 1,
+        };
+
+        let Some(entry) = properties.get(index) else {
+            continue;
+        };
+
+        let is_supported = entry.property != ItemProperty::Unsupported;
+        let fourcc_bytes = &entry.fourcc.value;
+
+        if is_supported {
+            // Validate essential flag for known property types
+            if a.essential && MUST_NOT_BE_ESSENTIAL.contains(&fourcc_bytes) {
+                warn!("item {} has {} marked essential (spec forbids it)", a.item_id, entry.fourcc);
+                if !options.lenient {
+                    return Err(at!(Error::InvalidData(
+                        "property must not be marked essential",
+                    )));
+                }
+            }
+            if !a.essential && MUST_BE_ESSENTIAL.contains(&fourcc_bytes) {
+                warn!("item {} has {} not marked essential (spec requires it)", a.item_id, entry.fourcc);
+                if !options.lenient {
+                    return Err(at!(Error::InvalidData(
+                        "property must be marked essential",
+                    )));
+                }
+            }
+
+            associated.push(AssociatedProperty {
+                item_id: a.item_id,
+                property: entry.property.try_clone().map_err(|e| at!(Error::from(e)))?,
+            }).map_err(|e| at!(Error::from(e)))?;
+        } else if a.essential {
+            // Unknown property marked essential — this item cannot be correctly processed
+            warn!(
+                "item {} has unsupported property {} marked essential; item will be unusable",
+                a.item_id, entry.fourcc
+            );
+            if !options.lenient {
+                return Err(at!(Error::Unsupported(
+                    "unsupported property marked as essential",
+                )));
+            }
+        }
+        // Unknown non-essential properties are silently skipped (they're optional)
+    }
+    Ok(associated)
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum ItemProperty {
+    Channels(ArrayVec<u8, 16>),
+    AuxiliaryType(AuxiliaryTypeProperty),
+    ImageSpatialExtents(ImageSpatialExtents),
+    ImageGrid(GridConfig),
+    AV1Config(AV1Config),
+    ColorInformation(ColorInformation),
+    Rotation(ImageRotation),
+    Mirror(ImageMirror),
+    CleanAperture(CleanAperture),
+    PixelAspectRatio(PixelAspectRatio),
+    ContentLightLevel(ContentLightLevel),
+    MasteringDisplayColourVolume(MasteringDisplayColourVolume),
+    ContentColourVolume(ContentColourVolume),
+    AmbientViewingEnvironment(AmbientViewingEnvironment),
+    OperatingPointSelector(OperatingPointSelector),
+    LayerSelector(LayerSelector),
+    AV1LayeredImageIndexing(AV1LayeredImageIndexing),
+    Unsupported,
+}
+
+impl TryClone for ItemProperty {
+    fn try_clone(&self) -> Result<Self, TryReserveError> {
+        Ok(match self {
+            Self::Channels(val) => Self::Channels(val.clone()),
+            Self::AuxiliaryType(val) => Self::AuxiliaryType(val.try_clone()?),
+            Self::ImageSpatialExtents(val) => Self::ImageSpatialExtents(*val),
+            Self::ImageGrid(val) => Self::ImageGrid(val.clone()),
+            Self::AV1Config(val) => Self::AV1Config(val.clone()),
+            Self::ColorInformation(val) => Self::ColorInformation(val.clone()),
+            Self::Rotation(val) => Self::Rotation(*val),
+            Self::Mirror(val) => Self::Mirror(*val),
+            Self::CleanAperture(val) => Self::CleanAperture(*val),
+            Self::PixelAspectRatio(val) => Self::PixelAspectRatio(*val),
+            Self::ContentLightLevel(val) => Self::ContentLightLevel(*val),
+            Self::MasteringDisplayColourVolume(val) => Self::MasteringDisplayColourVolume(*val),
+            Self::ContentColourVolume(val) => Self::ContentColourVolume(*val),
+            Self::AmbientViewingEnvironment(val) => Self::AmbientViewingEnvironment(*val),
+            Self::OperatingPointSelector(val) => Self::OperatingPointSelector(*val),
+            Self::LayerSelector(val) => Self::LayerSelector(*val),
+            Self::AV1LayeredImageIndexing(val) => Self::AV1LayeredImageIndexing(*val),
+            Self::Unsupported => Self::Unsupported,
+        })
+    }
+}
+
+struct Association {
+    item_id: u32,
+    essential: bool,
+    property_index: u16,
+}
+
+pub(crate) struct AssociatedProperty {
+    pub item_id: u32,
+    pub property: ItemProperty,
+}
+
+fn read_ipma<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<Association>> {
+    let (version, flags) = read_fullbox_extra(src)?;
+
+    let mut associations = TryVec::new();
+
+    let entry_count = be_u32(src)?;
+    // Each entry has at minimum: item_id (2 or 4 bytes) + association_count (1 byte)
+    let min_bytes_per_entry: u64 = if version == 0 { 3 } else { 5 };
+    if (entry_count as u64) * min_bytes_per_entry > src.bytes_left() {
+        return Err(at!(Error::InvalidData(
+            "ipma entry_count exceeds remaining box bytes",
+        )));
+    }
+    for _ in 0..entry_count {
+        let item_id = if version == 0 {
+            be_u16(src)?.into()
+        } else {
+            be_u32(src)?
+        };
+        let association_count = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+        for _ in 0..association_count {
+            let num_association_bytes = if flags & 1 == 1 { 2 } else { 1 };
+            let association = &mut [0; 2][..num_association_bytes];
+            src.read_exact(association).map_err(|e| at!(Error::from(e)))?;
+            let mut association = BitReader::new(association);
+            let essential = association.read_bool().map_err(|e| at!(Error::from(e)))?;
+            let property_index = association.read_u16(association.remaining().try_into().map_err(|e| at!(Error::from(e)))?).map_err(|e| at!(Error::from(e)))?;
+            associations.push(Association {
+                item_id,
+                essential,
+                property_index,
+            }).map_err(|e| at!(Error::from(e)))?;
+        }
+    }
+    Ok(associations)
+}
+
+/// A parsed property with its box FourCC, for essential flag validation.
+struct IndexedProperty {
+    fourcc: FourCC,
+    property: ItemProperty,
+}
+
+fn read_ipco<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<TryVec<IndexedProperty>> {
+    let mut properties = TryVec::new();
+
+    let mut iter = src.box_iter();
+    while let Some(mut b) = iter.next_box()? {
+        let fourcc: FourCC = b.head.name.into();
+        // Must push for every property to have correct index for them
+        let prop = match b.head.name {
+            BoxType::PixelInformationBox => ItemProperty::Channels(read_pixi(&mut b, options)?),
+            BoxType::AuxiliaryTypeProperty => ItemProperty::AuxiliaryType(read_auxc(&mut b, options)?),
+            BoxType::ImageSpatialExtentsBox => ItemProperty::ImageSpatialExtents(read_ispe(&mut b, options)?),
+            BoxType::ImageGridBox => ItemProperty::ImageGrid(read_grid(&mut b, options)?),
+            BoxType::AV1CodecConfigurationBox => ItemProperty::AV1Config(read_av1c(&mut b)?),
+            BoxType::ColorInformationBox => {
+                match read_colr(&mut b) {
+                    Ok(colr) => ItemProperty::ColorInformation(colr),
+                    Err(_) => ItemProperty::Unsupported,
+                }
+            },
+            BoxType::ImageRotationBox => ItemProperty::Rotation(read_irot(&mut b)?),
+            BoxType::ImageMirrorBox => ItemProperty::Mirror(read_imir(&mut b)?),
+            BoxType::CleanApertureBox => ItemProperty::CleanAperture(read_clap(&mut b)?),
+            BoxType::PixelAspectRatioBox => ItemProperty::PixelAspectRatio(read_pasp(&mut b)?),
+            BoxType::ContentLightLevelBox => ItemProperty::ContentLightLevel(read_clli(&mut b)?),
+            BoxType::MasteringDisplayColourVolumeBox => ItemProperty::MasteringDisplayColourVolume(read_mdcv(&mut b)?),
+            BoxType::ContentColourVolumeBox => ItemProperty::ContentColourVolume(read_cclv(&mut b)?),
+            BoxType::AmbientViewingEnvironmentBox => ItemProperty::AmbientViewingEnvironment(read_amve(&mut b)?),
+            BoxType::OperatingPointSelectorBox => ItemProperty::OperatingPointSelector(read_a1op(&mut b)?),
+            BoxType::LayerSelectorBox => ItemProperty::LayerSelector(read_lsel(&mut b)?),
+            BoxType::AV1LayeredImageIndexingBox => ItemProperty::AV1LayeredImageIndexing(read_a1lx(&mut b)?),
+            _ => {
+                skip_box_remain(&mut b)?;
+                ItemProperty::Unsupported
+            },
+        };
+        properties.push(IndexedProperty { fourcc, property: prop }).map_err(|e| at!(Error::from(e)))?;
+    }
+    Ok(properties)
+}
+
+fn read_pixi<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<ArrayVec<u8, 16>> {
+    let version = read_fullbox_version_no_flags(src, options)?;
+    if version != 0 {
+        return Err(at!(Error::Unsupported("pixi version")));
+    }
+
+    let num_channels = usize::from(src.read_u8().map_err(|e| at!(Error::from(e)))?);
+    let mut channels = ArrayVec::new();
+    let clamped = num_channels.min(channels.capacity());
+    channels.extend((0..clamped).map(|_| 0));
+    src.read_exact(&mut channels).map_err(|_| at!(Error::InvalidData("invalid num_channels")))?;
+
+    // In lenient mode, skip any extra bytes (e.g., extended_pixi.avif has 6 extra bytes)
+    if options.lenient && src.bytes_left() > 0 {
+        skip(src, src.bytes_left())?;
+    }
+
+    check_parser_state(&src.head, &src.content)?;
+    Ok(channels)
+}
+
+#[derive(Debug, PartialEq)]
+struct AuxiliaryTypeProperty {
+    aux_data: TryString,
+}
+
+impl AuxiliaryTypeProperty {
+    #[must_use]
+    fn type_subtype(&self) -> (&[u8], &[u8]) {
+        let split = self.aux_data.iter().position(|&b| b == b'\0')
+            .and_then(|pos| self.aux_data.split_at_checked(pos));
+        if let Some((aux_type, rest)) = split {
+            (aux_type, rest.get(1..).unwrap_or(rest))
+        } else {
+            (&self.aux_data, &[])
+        }
+    }
+}
+
+impl TryClone for AuxiliaryTypeProperty {
+    fn try_clone(&self) -> Result<Self, TryReserveError> {
+        Ok(Self {
+            aux_data: self.aux_data.try_clone()?,
+        })
+    }
+}
+
+fn read_auxc<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<AuxiliaryTypeProperty> {
+    let version = read_fullbox_version_no_flags(src, options)?;
+    if version != 0 {
+        return Err(at!(Error::Unsupported("auxC version")));
+    }
+
+    let aux_data = src.read_into_try_vec().map_err(|e| at!(Error::from(e)))?;
+
+    Ok(AuxiliaryTypeProperty { aux_data })
+}
+
+/// Check if an auxiliary type URN identifies a depth auxiliary image.
+///
+/// Recognizes two standard URNs:
+/// - `urn:mpeg:mpegB:cicp:systems:auxiliary:depth` (MPEG-B Part 23 / ISO 23091-2)
+/// - `urn:mpeg:hevc:2015:auxid:2` (HEVC-style, auxid 2 = depth)
+fn is_depth_auxiliary_urn(urn: &[u8]) -> bool {
+    urn == b"urn:mpeg:mpegB:cicp:systems:auxiliary:depth"
+        || urn == b"urn:mpeg:hevc:2015:auxid:2"
+}
+
+/// Parse an AV1 Codec Configuration property box
+/// See AV1-ISOBMFF § 2.3
+fn read_av1c<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<AV1Config> {
+    // av1C is NOT a FullBox — it has no version/flags
+    let byte0 = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let marker = byte0 >> 7;
+    let version = byte0 & 0x7F;
+
+    if marker != 1 {
+        return Err(at!(Error::InvalidData("av1C marker must be 1")));
+    }
+    if version != 1 {
+        return Err(at!(Error::Unsupported("av1C version must be 1")));
+    }
+
+    let byte1 = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let profile = byte1 >> 5;
+    let level = byte1 & 0x1F;
+
+    let byte2 = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let tier = byte2 >> 7;
+    let high_bitdepth = (byte2 >> 6) & 1;
+    let twelve_bit = (byte2 >> 5) & 1;
+    let monochrome = (byte2 >> 4) & 1 != 0;
+    let chroma_subsampling_x = (byte2 >> 3) & 1;
+    let chroma_subsampling_y = (byte2 >> 2) & 1;
+    let chroma_sample_position = byte2 & 0x03;
+
+    let byte3 = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    // byte3: 3 bits reserved, 1 bit initial_presentation_delay_present, 4 bits delay/reserved
+    // Not needed for image decoding.
+    let _ = byte3;
+
+    let bit_depth = if high_bitdepth != 0 {
+        if twelve_bit != 0 { 12 } else { 10 }
+    } else {
+        8
+    };
+
+    // Skip any configOBUs (remainder of box)
+    skip_box_remain(src)?;
+
+    Ok(AV1Config {
+        profile,
+        level,
+        tier,
+        bit_depth,
+        monochrome,
+        chroma_subsampling_x,
+        chroma_subsampling_y,
+        chroma_sample_position,
+    })
+}
+
+/// Parse a Colour Information property box
+/// See ISOBMFF § 12.1.5
+fn read_colr<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<ColorInformation> {
+    // colr is NOT a FullBox — no version/flags
+    let colour_type = be_u32(src)?;
+
+    match &colour_type.to_be_bytes() {
+        b"nclx" => {
+            let color_primaries = be_u16(src)?;
+            let transfer_characteristics = be_u16(src)?;
+            let matrix_coefficients = be_u16(src)?;
+            let full_range_byte = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+            let full_range = (full_range_byte >> 7) != 0;
+            // Skip any remaining bytes
+            skip_box_remain(src)?;
+            Ok(ColorInformation::Nclx {
+                color_primaries,
+                transfer_characteristics,
+                matrix_coefficients,
+                full_range,
+            })
+        }
+        b"rICC" | b"prof" => {
+            let icc_data = src.read_into_try_vec().map_err(|e| at!(Error::from(e)))?;
+            Ok(ColorInformation::IccProfile(icc_data.to_vec()))
+        }
+        _ => {
+            skip_box_remain(src)?;
+            Err(at!(Error::Unsupported("unsupported colr colour_type")))
+        }
+    }
+}
+
+/// Parse an Image Rotation property box.
+/// See ISOBMFF § 12.1.4. NOT a FullBox.
+fn read_irot<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<ImageRotation> {
+    let byte = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let angle_code = byte & 0x03;
+    let angle = match angle_code {
+        0 => 0,
+        1 => 90,
+        2 => 180,
+        _ => 270, // angle_code & 0x03 can only be 0..=3
+    };
+    skip_box_remain(src)?;
+    Ok(ImageRotation { angle })
+}
+
+/// Parse an Image Mirror property box.
+/// See ISOBMFF § 12.1.4. NOT a FullBox.
+fn read_imir<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<ImageMirror> {
+    let byte = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let axis = byte & 0x01;
+    skip_box_remain(src)?;
+    Ok(ImageMirror { axis })
+}
+
+/// Parse a Clean Aperture property box.
+/// See ISOBMFF § 12.1.4. NOT a FullBox.
+fn read_clap<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<CleanAperture> {
+    let width_n = be_u32(src)?;
+    let width_d = be_u32(src)?;
+    let height_n = be_u32(src)?;
+    let height_d = be_u32(src)?;
+    let horiz_off_n = be_i32(src)?;
+    let horiz_off_d = be_u32(src)?;
+    let vert_off_n = be_i32(src)?;
+    let vert_off_d = be_u32(src)?;
+    // Validate denominators are non-zero
+    if width_d == 0 || height_d == 0 || horiz_off_d == 0 || vert_off_d == 0 {
+        return Err(at!(Error::InvalidData("clap denominator cannot be zero")));
+    }
+    skip_box_remain(src)?;
+    Ok(CleanAperture {
+        width_n, width_d,
+        height_n, height_d,
+        horiz_off_n, horiz_off_d,
+        vert_off_n, vert_off_d,
+    })
+}
+
+/// Parse a Pixel Aspect Ratio property box.
+/// See ISOBMFF § 12.1.4. NOT a FullBox.
+fn read_pasp<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<PixelAspectRatio> {
+    let h_spacing = be_u32(src)?;
+    let v_spacing = be_u32(src)?;
+    skip_box_remain(src)?;
+    Ok(PixelAspectRatio { h_spacing, v_spacing })
+}
+
+/// Parse a Content Light Level Info property box.
+/// See ISOBMFF § 12.1.5 / ITU-T H.274. NOT a FullBox.
+fn read_clli<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<ContentLightLevel> {
+    let max_content_light_level = be_u16(src)?;
+    let max_pic_average_light_level = be_u16(src)?;
+    skip_box_remain(src)?;
+    Ok(ContentLightLevel {
+        max_content_light_level,
+        max_pic_average_light_level,
+    })
+}
+
+/// Parse a Mastering Display Colour Volume property box.
+/// See ISOBMFF § 12.1.5 / SMPTE ST 2086. NOT a FullBox.
+fn read_mdcv<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<MasteringDisplayColourVolume> {
+    // 3 primaries, each (x, y) as u16
+    let primaries = [
+        (be_u16(src)?, be_u16(src)?),
+        (be_u16(src)?, be_u16(src)?),
+        (be_u16(src)?, be_u16(src)?),
+    ];
+    let white_point = (be_u16(src)?, be_u16(src)?);
+    let max_luminance = be_u32(src)?;
+    let min_luminance = be_u32(src)?;
+    skip_box_remain(src)?;
+    Ok(MasteringDisplayColourVolume {
+        primaries,
+        white_point,
+        max_luminance,
+        min_luminance,
+    })
+}
+
+/// Parse a Content Colour Volume property box.
+/// See ISOBMFF § 12.1.5 / H.265 D.2.40. NOT a FullBox.
+fn read_cclv<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<ContentColourVolume> {
+    let flags = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let primaries_present = flags & 0x20 != 0;
+    let min_lum_present = flags & 0x10 != 0;
+    let max_lum_present = flags & 0x08 != 0;
+    let avg_lum_present = flags & 0x04 != 0;
+
+    let primaries = if primaries_present {
+        Some([
+            (be_i32(src)?, be_i32(src)?),
+            (be_i32(src)?, be_i32(src)?),
+            (be_i32(src)?, be_i32(src)?),
+        ])
+    } else {
+        None
+    };
+
+    let min_luminance = if min_lum_present { Some(be_u32(src)?) } else { None };
+    let max_luminance = if max_lum_present { Some(be_u32(src)?) } else { None };
+    let avg_luminance = if avg_lum_present { Some(be_u32(src)?) } else { None };
+
+    skip_box_remain(src)?;
+    Ok(ContentColourVolume {
+        primaries,
+        min_luminance,
+        max_luminance,
+        avg_luminance,
+    })
+}
+
+/// Parse an Ambient Viewing Environment property box.
+/// See ISOBMFF § 12.1.5 / H.265 D.2.39. NOT a FullBox.
+fn read_amve<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<AmbientViewingEnvironment> {
+    let ambient_illuminance = be_u32(src)?;
+    let ambient_light_x = be_u16(src)?;
+    let ambient_light_y = be_u16(src)?;
+    skip_box_remain(src)?;
+    Ok(AmbientViewingEnvironment {
+        ambient_illuminance,
+        ambient_light_x,
+        ambient_light_y,
+    })
+}
+
+/// Parse an Operating Point Selector property box.
+/// See AVIF § 4.3.4. NOT a FullBox.
+fn read_a1op<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<OperatingPointSelector> {
+    let op_index = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    if op_index > 31 {
+        return Err(at!(Error::InvalidData("a1op op_index must be 0..31")));
+    }
+    skip_box_remain(src)?;
+    Ok(OperatingPointSelector { op_index })
+}
+
+/// Parse a Layer Selector property box.
+/// See HEIF (ISO 23008-12). NOT a FullBox.
+fn read_lsel<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<LayerSelector> {
+    let layer_id = be_u16(src)?;
+    skip_box_remain(src)?;
+    Ok(LayerSelector { layer_id })
+}
+
+/// Parse an AV1 Layered Image Indexing property box.
+/// See AVIF § 4.3.6. NOT a FullBox.
+fn read_a1lx<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<AV1LayeredImageIndexing> {
+    let flags = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let large_size = flags & 0x01 != 0;
+    let layer_sizes = if large_size {
+        [be_u32(src)?, be_u32(src)?, be_u32(src)?]
+    } else {
+        [u32::from(be_u16(src)?), u32::from(be_u16(src)?), u32::from(be_u16(src)?)]
+    };
+    skip_box_remain(src)?;
+    Ok(AV1LayeredImageIndexing { layer_sizes })
+}
+
+/// Parse an Image Spatial Extents property box
+/// See ISO/IEC 23008-12:2017 § 6.5.3
+fn read_ispe<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<ImageSpatialExtents> {
+    let _version = read_fullbox_version_no_flags(src, options)?;
+    // Version is always 0 for ispe
+
+    let width = be_u32(src)?;
+    let height = be_u32(src)?;
+
+    // Validate dimensions are non-zero (0×0 images are invalid)
+    if width == 0 || height == 0 {
+        return Err(at!(Error::InvalidData("ispe dimensions cannot be zero")));
+    }
+
+    Ok(ImageSpatialExtents { width, height })
+}
+
+/// Parse a Movie Header box (mvhd)
+/// See ISO/IEC 14496-12:2015 § 8.2.2
+fn read_mvhd<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<MovieHeader> {
+    let version = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let _flags = [src.read_u8().map_err(|e| at!(Error::from(e)))?, src.read_u8().map_err(|e| at!(Error::from(e)))?, src.read_u8().map_err(|e| at!(Error::from(e)))?];
+
+    let (timescale, duration) = if version == 1 {
+        let _creation_time = be_u64(src)?;
+        let _modification_time = be_u64(src)?;
+        let timescale = be_u32(src)?;
+        let duration = be_u64(src)?;
+        (timescale, duration)
+    } else {
+        let _creation_time = be_u32(src)?;
+        let _modification_time = be_u32(src)?;
+        let timescale = be_u32(src)?;
+        let duration = be_u32(src)?;
+        (timescale, duration as u64)
+    };
+
+    // Skip rest of mvhd (rate, volume, matrix, etc.)
+    skip_box_remain(src)?;
+
+    Ok(MovieHeader { _timescale: timescale, _duration: duration })
+}
+
+/// Parse a Media Header box (mdhd)
+/// See ISO/IEC 14496-12:2015 § 8.4.2
+fn read_mdhd<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<MediaHeader> {
+    let version = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let _flags = [src.read_u8().map_err(|e| at!(Error::from(e)))?, src.read_u8().map_err(|e| at!(Error::from(e)))?, src.read_u8().map_err(|e| at!(Error::from(e)))?];
+
+    let (timescale, duration) = if version == 1 {
+        let _creation_time = be_u64(src)?;
+        let _modification_time = be_u64(src)?;
+        let timescale = be_u32(src)?;
+        let duration = be_u64(src)?;
+        (timescale, duration)
+    } else {
+        let _creation_time = be_u32(src)?;
+        let _modification_time = be_u32(src)?;
+        let timescale = be_u32(src)?;
+        let duration = be_u32(src)?;
+        (timescale, duration as u64)
+    };
+
+    // Skip language and pre_defined
+    skip_box_remain(src)?;
+
+    Ok(MediaHeader { timescale, _duration: duration })
+}
+
+/// Parse Time To Sample box (stts)
+/// See ISO/IEC 14496-12:2015 § 8.6.1.2
+fn read_stts<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<TimeToSampleEntry>> {
+    let _version = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let _flags = [src.read_u8().map_err(|e| at!(Error::from(e)))?, src.read_u8().map_err(|e| at!(Error::from(e)))?, src.read_u8().map_err(|e| at!(Error::from(e)))?];
+    let entry_count = be_u32(src)?;
+    // Each entry: sample_count (4) + sample_delta (4) = 8 bytes
+    if (entry_count as u64) * 8 > src.bytes_left() {
+        return Err(at!(Error::InvalidData(
+            "stts entry_count exceeds remaining box bytes",
+        )));
+    }
+
+    let mut entries = TryVec::new();
+    for _ in 0..entry_count {
+        entries.push(TimeToSampleEntry {
+            sample_count: be_u32(src)?,
+            sample_delta: be_u32(src)?,
+        }).map_err(|e| at!(Error::from(e)))?;
+    }
+
+    Ok(entries)
+}
+
+/// Parse Sample To Chunk box (stsc)
+/// See ISO/IEC 14496-12:2015 § 8.7.4
+fn read_stsc<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<SampleToChunkEntry>> {
+    let _version = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let _flags = [src.read_u8().map_err(|e| at!(Error::from(e)))?, src.read_u8().map_err(|e| at!(Error::from(e)))?, src.read_u8().map_err(|e| at!(Error::from(e)))?];
+    let entry_count = be_u32(src)?;
+    // Each entry: first_chunk (4) + samples_per_chunk (4) + sample_desc_index (4) = 12 bytes
+    if (entry_count as u64) * 12 > src.bytes_left() {
+        return Err(at!(Error::InvalidData(
+            "stsc entry_count exceeds remaining box bytes",
+        )));
+    }
+
+    let mut entries = TryVec::new();
+    for _ in 0..entry_count {
+        entries.push(SampleToChunkEntry {
+            first_chunk: be_u32(src)?,
+            samples_per_chunk: be_u32(src)?,
+            _sample_description_index: be_u32(src)?,
+        }).map_err(|e| at!(Error::from(e)))?;
+    }
+
+    Ok(entries)
+}
+
+/// Parse Sample Size box (stsz)
+/// See ISO/IEC 14496-12:2015 § 8.7.3
+fn read_stsz<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<SampleSizes> {
+    let _version = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let _flags = [src.read_u8().map_err(|e| at!(Error::from(e)))?, src.read_u8().map_err(|e| at!(Error::from(e)))?, src.read_u8().map_err(|e| at!(Error::from(e)))?];
+    let sample_size = be_u32(src)?;
+    let sample_count = be_u32(src)?;
+
+    // Cap sample_count to avoid multi-GB allocations from malformed data.
+    // 64M is a generous upper bound for real AVIF files.
+    const MAX_SAMPLE_COUNT: u32 = 64 * 1024 * 1024;
+    if sample_count > MAX_SAMPLE_COUNT {
+        return Err(at!(Error::InvalidData("stsz sample_count exceeds maximum")));
+    }
+
+    if sample_size == 0 {
+        // Variable sizes: each entry is 4 box bytes, so the box size bounds the
+        // count — read each one.
+        if (sample_count as u64) * 4 > src.bytes_left() {
+            return Err(at!(Error::InvalidData(
+                "stsz sample_count exceeds remaining box bytes",
+            )));
+        }
+        let mut sizes = TryVec::new();
+        for _ in 0..sample_count {
+            sizes.push(be_u32(src)?).map_err(|e| at!(Error::from(e)))?;
+        }
+        Ok(SampleSizes::Variable(sizes))
+    } else {
+        // Constant size for all samples: store (size, count) directly instead
+        // of materializing `count` copies, so a tiny box (8 bytes of payload)
+        // cannot amplify into a 256 MB allocation.
+        Ok(SampleSizes::Constant {
+            size: sample_size,
+            count: sample_count as usize,
+        })
+    }
+}
+
+/// Parse Chunk Offset box (stco or co64)
+/// See ISO/IEC 14496-12:2015 § 8.7.5
+fn read_chunk_offsets<T: Read>(src: &mut BMFFBox<'_, T>, is_64bit: bool) -> Result<TryVec<u64>> {
+    let _version = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let _flags = [src.read_u8().map_err(|e| at!(Error::from(e)))?, src.read_u8().map_err(|e| at!(Error::from(e)))?, src.read_u8().map_err(|e| at!(Error::from(e)))?];
+    let entry_count = be_u32(src)?;
+    let bytes_per_entry: u64 = if is_64bit { 8 } else { 4 };
+    if (entry_count as u64) * bytes_per_entry > src.bytes_left() {
+        return Err(at!(Error::InvalidData(
+            "chunk offset entry_count exceeds remaining box bytes",
+        )));
+    }
+
+    let mut offsets = TryVec::new();
+    for _ in 0..entry_count {
+        let offset = if is_64bit {
+            be_u64(src)?
+        } else {
+            be_u32(src)? as u64
+        };
+        offsets.push(offset).map_err(|e| at!(Error::from(e)))?;
+    }
+
+    Ok(offsets)
+}
+
+/// Parse Sample Description box (stsd) to extract codec config from VisualSampleEntry.
+/// See ISO/IEC 14496-12:2015 § 8.5.2
+///
+/// For AVIF sequences, the VisualSampleEntry is `av01` which contains sub-boxes
+/// like `av1C` (codec config) and `colr` (color info), similar to ipco properties.
+fn read_stsd<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TrackCodecConfig> {
+    let _version = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let _flags = [src.read_u8().map_err(|e| at!(Error::from(e)))?, src.read_u8().map_err(|e| at!(Error::from(e)))?, src.read_u8().map_err(|e| at!(Error::from(e)))?];
+    let entry_count = be_u32(src)?;
+
+    let mut config = TrackCodecConfig::default();
+
+    // Parse first entry only (AVIF tracks have one sample description)
+    let mut iter = src.box_iter();
+    for _ in 0..entry_count {
+        let Some(mut entry_box) = iter.next_box()? else {
+            break;
+        };
+
+        // Check if this is an av01 VisualSampleEntry
+        if entry_box.head.name != BoxType::AV1SampleEntry {
+            skip_box_remain(&mut entry_box)?;
+            continue;
+        }
+
+        // Skip VisualSampleEntry fixed fields (78 bytes total):
+        //   reserved[6] + data_ref_index[2] + pre_defined[2] + reserved[2] +
+        //   pre_defined[12] + width[2] + height[2] + horiz_res[4] + vert_res[4] +
+        //   reserved[4] + frame_count[2] + compressorname[32] + depth[2] + pre_defined[2]
+        const VISUAL_SAMPLE_ENTRY_SIZE: u64 = 78;
+        if entry_box.bytes_left() < VISUAL_SAMPLE_ENTRY_SIZE {
+            skip_box_remain(&mut entry_box)?;
+            continue;
+        }
+        skip(&mut entry_box, VISUAL_SAMPLE_ENTRY_SIZE)?;
+
+        // Parse sub-boxes within the VisualSampleEntry for av1C and colr
+        let mut sub_iter = entry_box.box_iter();
+        while let Some(mut sub_box) = sub_iter.next_box()? {
+            match sub_box.head.name {
+                BoxType::AV1CodecConfigurationBox => {
+                    config.av1_config = Some(read_av1c(&mut sub_box)?);
+                }
+                BoxType::ColorInformationBox => {
+                    if let Ok(colr) = read_colr(&mut sub_box) {
+                        config.color_info = Some(colr);
+                    } else {
+                        skip_box_remain(&mut sub_box)?;
+                    }
+                }
+                _ => {
+                    skip_box_remain(&mut sub_box)?;
+                }
+            }
+        }
+
+        // Only need the first av01 entry
+        if config.av1_config.is_some() {
+            break;
+        }
+    }
+
+    Ok(config)
+}
+
+/// Parse Sample Table box (stbl)
+/// See ISO/IEC 14496-12:2015 § 8.5
+fn read_stbl<T: Read>(
+    src: &mut BMFFBox<'_, T>,
+    stop: &dyn Stop,
+) -> Result<(SampleTable, TrackCodecConfig)> {
+    let mut time_to_sample = TryVec::new();
+    let mut sample_to_chunk = TryVec::new();
+    let mut sample_sizes = SampleSizes::Variable(TryVec::new());
+    let mut chunk_offsets = TryVec::new();
+    let mut codec_config = TrackCodecConfig::default();
+
+    let mut iter = src.box_iter();
+    while let Some(mut b) = iter.next_box()? {
+        match b.head.name {
+            BoxType::SampleDescriptionBox => {
+                codec_config = read_stsd(&mut b)?;
+            }
+            BoxType::TimeToSampleBox => {
+                time_to_sample = read_stts(&mut b)?;
+            }
+            BoxType::SampleToChunkBox => {
+                sample_to_chunk = read_stsc(&mut b)?;
+            }
+            BoxType::SampleSizeBox => {
+                sample_sizes = read_stsz(&mut b)?;
+            }
+            BoxType::ChunkOffsetBox => {
+                chunk_offsets = read_chunk_offsets(&mut b, false)?;
+            }
+            BoxType::ChunkLargeOffsetBox => {
+                chunk_offsets = read_chunk_offsets(&mut b, true)?;
+            }
+            _ => {
+                skip_box_remain(&mut b)?;
+            }
+        }
+    }
+
+    // Precompute per-sample byte offsets from sample_to_chunk + chunk_offsets + sample_sizes.
+    // This flattens the ISOBMFF indirection into a simple array for O(1) frame lookup.
+    let sample_offsets =
+        precompute_sample_offsets(&sample_to_chunk, &chunk_offsets, &sample_sizes, stop)?;
+
+    Ok((SampleTable {
+        time_to_sample,
+        sample_sizes,
+        sample_offsets,
+    }, codec_config))
+}
+
+/// Flatten sample_to_chunk + chunk_offsets + sample_sizes into per-sample byte offsets.
+///
+/// Returns `Err(at!(Error::InvalidData))` on offset overflow — a malicious or malformed
+/// `co64` chunk_offset close to `u64::MAX` combined with a non-zero sample_size
+/// would otherwise wrap and reposition AV1 frame starts at attacker-chosen offsets.
+/// (Audit H2, 2026-05-06.)
+fn precompute_sample_offsets(
+    sample_to_chunk: &TryVec<SampleToChunkEntry>,
+    chunk_offsets: &TryVec<u64>,
+    sample_sizes: &SampleSizes,
+    stop: &dyn Stop,
+) -> Result<TryVec<u64>> {
+    let mut sample_offsets = TryVec::new();
+    let mut sample_idx = 0usize;
+    for (i, entry) in sample_to_chunk.iter().enumerate() {
+        let next_first_chunk = sample_to_chunk
+            .get(i + 1)
+            .map(|e| e.first_chunk)
+            .unwrap_or(u32::MAX);
+
+        for chunk_no in entry.first_chunk..next_first_chunk {
+            if chunk_no == 0 {
+                break;
+            }
+            let co_idx = (chunk_no - 1) as usize;
+            let chunk_offset = match chunk_offsets.get(co_idx) {
+                Some(&o) => o,
+                None => break,
+            };
+
+            let mut offset = chunk_offset;
+            for _ in 0..entry.samples_per_chunk {
+                if sample_idx >= sample_sizes.len() {
+                    break;
+                }
+                // Cooperative cancellation: poll every 64k samples. The table is
+                // already bounded by the stsz/stco caps, but this keeps worst-case
+                // cancel latency low under the default limits.
+                if sample_idx.is_multiple_of(1 << 16) {
+                    stop.check().map_err(|e| at!(Error::from(e)))?;
+                }
+                sample_offsets.push(offset).map_err(|e| at!(Error::from(e)))?;
+                let sample_size = sample_sizes.get(sample_idx)
+                    .ok_or_else(|| at!(Error::InvalidData("sample index mismatch")))?;
+                offset = offset.checked_add(sample_size as u64)
+                    .ok_or_else(|| at!(Error::InvalidData("sample offset overflow")))?;
+                sample_idx += 1;
+            }
+        }
+    }
+    Ok(sample_offsets)
+}
+
+/// Parse Track Header box (tkhd)
+/// See ISO/IEC 14496-12:2015 § 8.3.2
+fn read_tkhd<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<u32> {
+    let version = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let _flags = [src.read_u8().map_err(|e| at!(Error::from(e)))?, src.read_u8().map_err(|e| at!(Error::from(e)))?, src.read_u8().map_err(|e| at!(Error::from(e)))?];
+
+    let track_id = if version == 1 {
+        let _creation_time = be_u64(src)?;
+        let _modification_time = be_u64(src)?;
+        let track_id = be_u32(src)?;
+        let _reserved = be_u32(src)?;
+        let _duration = be_u64(src)?;
+        track_id
+    } else {
+        let _creation_time = be_u32(src)?;
+        let _modification_time = be_u32(src)?;
+        let track_id = be_u32(src)?;
+        let _reserved = be_u32(src)?;
+        let _duration = be_u32(src)?;
+        track_id
+    };
+
+    // Skip rest (reserved, layer, alternate_group, volume, matrix, width, height)
+    skip_box_remain(src)?;
+    Ok(track_id)
+}
+
+/// Parse Track Reference box (tref)
+/// See ISO/IEC 14496-12:2015 § 8.3.3
+///
+/// Contains sub-boxes typed by FourCC (e.g., `auxl`, `cdsc`), each with a list of track IDs.
+fn read_tref<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<TrackReference>> {
+    let mut refs = TryVec::new();
+    let mut iter = src.box_iter();
+    while let Some(mut b) = iter.next_box()? {
+        let reference_type = FourCC::from(u32::from(b.head.name));
+        let bytes_left = b.bytes_left();
+        if bytes_left < 4 || bytes_left % 4 != 0 {
+            skip_box_remain(&mut b)?;
+            continue;
+        }
+        let count = bytes_left / 4;
+        let mut track_ids = TryVec::new();
+        for _ in 0..count {
+            track_ids.push(be_u32(&mut b)?).map_err(|e| at!(Error::from(e)))?;
+        }
+        refs.push(TrackReference { reference_type, track_ids }).map_err(|e| at!(Error::from(e)))?;
+    }
+    Ok(refs)
+}
+
+/// Parse Edit List box (elst) to extract loop count from flags.
+/// See ISO/IEC 14496-12:2015 § 8.6.6
+///
+/// Returns the loop count: flags bit 0 set = infinite looping (0), otherwise 1.
+fn read_elst<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<u32> {
+    let (version, flags) = read_fullbox_extra(src)?;
+
+    let entry_count = be_u32(src)?;
+    // Skip all entries
+    let entry_size: u64 = if version == 1 { 20 } else { 12 };
+    skip(src, (entry_count as u64).checked_mul(entry_size)
+        .ok_or_else(|| at!(Error::InvalidData("edit list entry count overflow")))?)?;
+    skip_box_remain(src)?;
+
+    // Bit 0 of flags: repeat (1 = infinite loop → loop_count=0, 0 = play once → loop_count=1)
+    if flags & 1 != 0 {
+        Ok(0) // infinite
+    } else {
+        Ok(1) // play once
+    }
+}
+
+/// Parse animation from moov box.
+/// Returns all parsed tracks.
+fn read_moov<T: Read>(src: &mut BMFFBox<'_, T>, stop: &dyn Stop) -> Result<TryVec<ParsedTrack>> {
+    let mut tracks = TryVec::new();
+
+    let mut iter = src.box_iter();
+    while let Some(mut b) = iter.next_box()? {
+        match b.head.name {
+            BoxType::MovieHeaderBox => {
+                let _mvhd = read_mvhd(&mut b)?;
+            }
+            BoxType::TrackBox => {
+                if let Some(track) = read_trak(&mut b, stop)? {
+                    tracks.push(track).map_err(|e| at!(Error::from(e)))?;
+                }
+            }
+            _ => {
+                skip_box_remain(&mut b)?;
+            }
+        }
+    }
+
+    Ok(tracks)
+}
+
+/// Parse track box (trak).
+/// Returns a ParsedTrack if this track has a valid sample table.
+fn read_trak<T: Read>(src: &mut BMFFBox<'_, T>, stop: &dyn Stop) -> Result<Option<ParsedTrack>> {
+    let mut track_id = 0u32;
+    let mut references = TryVec::new();
+    let mut loop_count = 1u32; // default: play once
+    let mut mdia_result: Option<(FourCC, u32, SampleTable, TrackCodecConfig)> = None;
+
+    let mut iter = src.box_iter();
+    while let Some(mut b) = iter.next_box()? {
+        match b.head.name {
+            BoxType::TrackHeaderBox => {
+                track_id = read_tkhd(&mut b)?;
+            }
+            BoxType::TrackReferenceBox => {
+                references = read_tref(&mut b)?;
+            }
+            BoxType::EditBox => {
+                // Parse edts to find elst
+                let mut edts_iter = b.box_iter();
+                while let Some(mut eb) = edts_iter.next_box()? {
+                    if eb.head.name == BoxType::EditListBox {
+                        loop_count = read_elst(&mut eb)?;
+                    } else {
+                        skip_box_remain(&mut eb)?;
+                    }
+                }
+            }
+            BoxType::MediaBox => {
+                mdia_result = read_mdia(&mut b, stop)?;
+            }
+            _ => {
+                skip_box_remain(&mut b)?;
+            }
+        }
+    }
+
+    if let Some((handler_type, media_timescale, sample_table, codec_config)) = mdia_result {
+        Ok(Some(ParsedTrack {
+            track_id,
+            handler_type,
+            media_timescale,
+            sample_table,
+            references,
+            loop_count,
+            codec_config,
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Parse media box (mdia).
+/// Returns (handler_type, media_timescale, sample_table, codec_config) if valid.
+fn read_mdia<T: Read>(
+    src: &mut BMFFBox<'_, T>,
+    stop: &dyn Stop,
+) -> Result<Option<(FourCC, u32, SampleTable, TrackCodecConfig)>> {
+    let mut media_timescale = 1000; // default
+    let mut handler_type = FourCC::default();
+    let mut stbl_result: Option<(SampleTable, TrackCodecConfig)> = None;
+
+    let mut iter = src.box_iter();
+    while let Some(mut b) = iter.next_box()? {
+        match b.head.name {
+            BoxType::MediaHeaderBox => {
+                let mdhd = read_mdhd(&mut b)?;
+                media_timescale = mdhd.timescale;
+            }
+            BoxType::HandlerBox => {
+                let hdlr = read_hdlr(&mut b)?;
+                handler_type = hdlr.handler_type;
+            }
+            BoxType::MediaInformationBox => {
+                stbl_result = read_minf(&mut b, stop)?;
+            }
+            _ => {
+                skip_box_remain(&mut b)?;
+            }
+        }
+    }
+
+    if let Some((stbl, codec_config)) = stbl_result {
+        Ok(Some((handler_type, media_timescale, stbl, codec_config)))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Associate parsed tracks into color + optional alpha animation data.
+///
+/// - Color track: first with handler `pict` (fallback: first track with a sample table)
+/// - Alpha track: handler `auxv` with `tref/auxl` referencing color's track_id
+/// - Audio tracks (handler `soun`) are skipped
+fn associate_tracks(tracks: TryVec<ParsedTrack>) -> Result<ParsedAnimationData> {
+    // Find color track: first with handler_type == "pict"
+    let color_idx = tracks
+        .iter()
+        .position(|t| t.handler_type == b"pict")
+        .or_else(|| {
+            // Fallback: first track that isn't audio
+            tracks.iter().position(|t| t.handler_type != b"soun")
+        })
+        .ok_or_else(|| at!(Error::InvalidData("no color track found in moov")))?;
+
+    let color_track = tracks.get(color_idx)
+        .ok_or_else(|| at!(Error::InvalidData("color track index out of bounds")))?;
+    let color_track_id = color_track.track_id;
+
+    // Find alpha track: handler_type == "auxv" or "pict" with tref/auxl referencing color track
+    let alpha_idx = tracks.iter().position(|t| {
+        matches!(&t.handler_type.value, b"auxv" | b"pict")
+            && t.references.iter().any(|r| {
+                r.reference_type == b"auxl"
+                    && r.track_ids.iter().any(|&id| id == color_track_id)
+            })
+    });
+
+    if let Some(ai) = alpha_idx {
+        let alpha_track = tracks.get(ai)
+            .ok_or_else(|| at!(Error::InvalidData("alpha track index out of bounds")))?;
+        let color_track = tracks.get(color_idx)
+            .ok_or_else(|| at!(Error::InvalidData("color track index out of bounds")))?;
+        let alpha_frames = alpha_track.sample_table.sample_sizes.len();
+        let color_frames = color_track.sample_table.sample_sizes.len();
+        if alpha_frames != color_frames {
+            warn!(
+                "alpha track has {} frames but color track has {} frames",
+                alpha_frames, color_frames
+            );
+        }
+    }
+
+    // Destructure — we need to consume the vec
+    // Convert to a std vec so we can remove by index
+    let mut tracks_vec: std::vec::Vec<ParsedTrack> = tracks.into_iter().collect();
+
+    // Remove alpha first if it has a higher index to avoid shifting
+    let (color_track, alpha_track) = if let Some(ai) = alpha_idx {
+        if ai > color_idx {
+            let alpha = tracks_vec.remove(ai);
+            let color = tracks_vec.remove(color_idx);
+            (color, Some(alpha))
+        } else {
+            let color = tracks_vec.remove(color_idx);
+            let alpha = tracks_vec.remove(ai);
+            (color, Some(alpha))
+        }
+    } else {
+        let color = tracks_vec.remove(color_idx);
+        (color, None)
+    };
+
+    let (alpha_timescale, alpha_sample_table) = match alpha_track {
+        Some(t) => (Some(t.media_timescale), Some(t.sample_table)),
+        None => (None, None),
+    };
+
+    Ok(ParsedAnimationData {
+        color_timescale: color_track.media_timescale,
+        color_codec_config: color_track.codec_config,
+        color_sample_table: color_track.sample_table,
+        alpha_timescale,
+        alpha_sample_table,
+        loop_count: color_track.loop_count,
+    })
+}
+
+/// Parse media information box (minf)
+fn read_minf<T: Read>(
+    src: &mut BMFFBox<'_, T>,
+    stop: &dyn Stop,
+) -> Result<Option<(SampleTable, TrackCodecConfig)>> {
+    let mut iter = src.box_iter();
+    while let Some(mut b) = iter.next_box()? {
+        if b.head.name == BoxType::SampleTableBox {
+            return Ok(Some(read_stbl(&mut b, stop)?));
+        } else {
+            skip_box_remain(&mut b)?;
+        }
+    }
+    Ok(None)
+}
+
+/// Extract animation frames using sample table
+#[cfg(feature = "eager")]
+#[allow(deprecated)]
+fn extract_animation_frames(
+    sample_table: &SampleTable,
+    media_timescale: u32,
+    mdats: &mut [MediaDataBox],
+) -> Result<TryVec<AnimationFrame>> {
+    let mut frames = TryVec::new();
+
+    // Calculate frame durations from time-to-sample
+    let mut frame_durations = TryVec::new();
+    for entry in &sample_table.time_to_sample {
+        for _ in 0..entry.sample_count {
+            let duration_ms = if media_timescale > 0 {
+                ((entry.sample_delta as u64) * 1000) / (media_timescale as u64)
+            } else {
+                0
+            };
+            frame_durations.push(u32::try_from(duration_ms).unwrap_or(u32::MAX)).map_err(|e| at!(Error::from(e)))?;
+        }
+    }
+
+    // Extract each frame using precomputed sample offsets
+    for i in 0..sample_table.sample_sizes.len() {
+        let sample_offset = *sample_table.sample_offsets.get(i)
+            .ok_or_else(|| at!(Error::InvalidData("sample offset index out of bounds")))?;
+        let sample_size = sample_table.sample_sizes.get(i)
+            .ok_or_else(|| at!(Error::InvalidData("sample size index out of bounds")))?;
+        let duration_ms = frame_durations.get(i).copied().unwrap_or(0);
+
+        let mut frame_data = TryVec::new();
+        let mut found = false;
+
+        let end = sample_offset
+            .checked_add(sample_size as u64)
+            .ok_or_else(|| at!(Error::InvalidData("sample offset overflow")))?;
+
+        for mdat in mdats.iter_mut() {
+            let range = ExtentRange::WithLength(Range {
+                start: sample_offset,
+                end,
+            });
+
+            if mdat.contains_extent(&range) {
+                mdat.read_extent(&range, &mut frame_data)?;
+                found = true;
+                break;
+            }
+        }
+
+        if !found {
+            log::warn!("Animation frame {} not found in mdat", i);
+        }
+
+        frames.push(AnimationFrame {
+            data: frame_data,
+            duration_ms,
+        }).map_err(|e| at!(Error::from(e)))?;
+    }
+
+    Ok(frames)
+}
+
+/// Parse an ImageGrid property box
+/// See ISO/IEC 23008-12:2017 § 6.6.2.3
+fn read_grid<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<GridConfig> {
+    let version = read_fullbox_version_no_flags(src, options)?;
+    if version > 0 {
+        return Err(at!(Error::Unsupported("grid version > 0")));
+    }
+
+    let flags_byte = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let rows = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+    let columns = src.read_u8().map_err(|e| at!(Error::from(e)))?;
+
+    // flags & 1 determines field size: 0 = 16-bit, 1 = 32-bit
+    let (output_width, output_height) = if flags_byte & 1 == 0 {
+        // 16-bit fields
+        (u32::from(be_u16(src)?), u32::from(be_u16(src)?))
+    } else {
+        // 32-bit fields
+        (be_u32(src)?, be_u32(src)?)
+    };
+
+    Ok(GridConfig {
+        rows,
+        columns,
+        output_width,
+        output_height,
+    })
+}
+
+/// Parse an item location box inside a meta box
+/// See ISO 14496-12:2015 § 8.11.3
+fn read_iloc<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<TryVec<ItemLocationBoxItem>> {
+    let version: IlocVersion = read_fullbox_version_no_flags(src, options)?.try_into()?;
+
+    let iloc = src.read_into_try_vec().map_err(|e| at!(Error::from(e)))?;
+    let mut iloc = BitReader::new(&iloc);
+
+    let offset_size: IlocFieldSize = iloc.read_u8(4).map_err(|e| at!(Error::from(e)))?.try_into()?;
+    let length_size: IlocFieldSize = iloc.read_u8(4).map_err(|e| at!(Error::from(e)))?.try_into()?;
+    let base_offset_size: IlocFieldSize = iloc.read_u8(4).map_err(|e| at!(Error::from(e)))?.try_into()?;
+
+    let index_size: Option<IlocFieldSize> = match version {
+        IlocVersion::One | IlocVersion::Two => Some(iloc.read_u8(4).map_err(|e| at!(Error::from(e)))?.try_into()?),
+        IlocVersion::Zero => {
+            let _reserved = iloc.read_u8(4).map_err(|e| at!(Error::from(e)))?;
+            None
+        },
+    };
+
+    let item_count = match version {
+        IlocVersion::Zero | IlocVersion::One => iloc.read_u32(16).map_err(|e| at!(Error::from(e)))?,
+        IlocVersion::Two => iloc.read_u32(32).map_err(|e| at!(Error::from(e)))?,
+    };
+
+    // Cap pre-allocation: item_count is untrusted, actual data is bounded by bitstream
+    let mut items = TryVec::with_capacity(item_count.to_usize().min(4096)).map_err(|e| at!(Error::from(e)))?;
+
+    for _ in 0..item_count {
+        let item_id = match version {
+            IlocVersion::Zero | IlocVersion::One => iloc.read_u32(16).map_err(|e| at!(Error::from(e)))?,
+            IlocVersion::Two => iloc.read_u32(32).map_err(|e| at!(Error::from(e)))?,
+        };
+
+        // The spec isn't entirely clear how an `iloc` should be interpreted for version 0,
+        // which has no `construction_method` field. It does say:
+        // "For maximum compatibility, version 0 of this box should be used in preference to
+        //  version 1 with `construction_method==0`, or version 2 when possible."
+        // We take this to imply version 0 can be interpreted as using file offsets.
+        let construction_method = match version {
+            IlocVersion::Zero => ConstructionMethod::File,
+            IlocVersion::One | IlocVersion::Two => {
+                let _reserved = iloc.read_u16(12).map_err(|e| at!(Error::from(e)))?;
+                match iloc.read_u16(4).map_err(|e| at!(Error::from(e)))? {
+                    0 => ConstructionMethod::File,
+                    1 => ConstructionMethod::Idat,
+                    2 => return Err(at!(Error::Unsupported("construction_method 'item_offset' is not supported"))),
+                    _ => return Err(at!(Error::InvalidData("construction_method is taken from the set 0, 1 or 2 per ISO 14496-12:2015 § 8.11.3.3"))),
+                }
+            },
+        };
+
+        let data_reference_index = iloc.read_u16(16).map_err(|e| at!(Error::from(e)))?;
+
+        if data_reference_index != 0 {
+            return Err(at!(Error::Unsupported("external file references (iloc.data_reference_index != 0) are not supported")));
+        }
+
+        let base_offset = iloc.read_u64(base_offset_size.to_bits()).map_err(|e| at!(Error::from(e)))?;
+        let extent_count = iloc.read_u16(16).map_err(|e| at!(Error::from(e)))?;
+
+        if extent_count < 1 {
+            return Err(at!(Error::InvalidData("extent_count must have a value 1 or greater per ISO 14496-12:2015 § 8.11.3.3")));
+        }
+
+        let mut extents = TryVec::with_capacity(extent_count.to_usize()).map_err(|e| at!(Error::from(e)))?;
+
+        for _ in 0..extent_count {
+            // Parsed but currently ignored, see `ItemLocationBoxExtent`
+            let _extent_index = match &index_size {
+                None | Some(IlocFieldSize::Zero) => None,
+                Some(index_size) => Some(iloc.read_u64(index_size.to_bits()).map_err(|e| at!(Error::from(e)))?),
+            };
+
+            // Per ISO 14496-12:2015 § 8.11.3.1:
+            // "If the offset is not identified (the field has a length of zero), then the
+            //  beginning of the source (offset 0) is implied"
+            // This behavior will follow from BitReader::read_u64(0) -> 0.
+            let extent_offset = iloc.read_u64(offset_size.to_bits()).map_err(|e| at!(Error::from(e)))?;
+            let extent_length = iloc.read_u64(length_size.to_bits()).map_err(|e| at!(Error::from(e)))?;
+
+            // "If the length is not specified, or specified as zero, then the entire length of
+            //  the source is implied" (ibid)
+            let start = base_offset
+                .checked_add(extent_offset)
+                .ok_or_else(|| at!(Error::InvalidData("offset calculation overflow")))?;
+            let extent_range = if extent_length == 0 {
+                ExtentRange::ToEnd(RangeFrom { start })
+            } else {
+                let end = start
+                    .checked_add(extent_length)
+                    .ok_or_else(|| at!(Error::InvalidData("end calculation overflow")))?;
+                ExtentRange::WithLength(Range { start, end })
+            };
+
+            extents.push(ItemLocationBoxExtent { extent_range }).map_err(|e| at!(Error::from(e)))?;
+        }
+
+        items.push(ItemLocationBoxItem { item_id, construction_method, extents }).map_err(|e| at!(Error::from(e)))?;
+    }
+
+    if iloc.remaining() == 0 {
+        Ok(items)
+    } else {
+        Err(at!(Error::InvalidData("invalid iloc size")))
+    }
+}
+
+/// Parse an ftyp box.
+/// See ISO 14496-12:2015 § 4.3
+fn read_ftyp<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<FileTypeBox> {
+    let major = be_u32(src)?;
+    let minor = be_u32(src)?;
+    let bytes_left = src.bytes_left();
+    if !bytes_left.is_multiple_of(4) {
+        return Err(at!(Error::InvalidData("invalid ftyp size")));
+    }
+    // Is a brand_count of zero valid?
+    let brand_count = bytes_left / 4;
+    let mut brands = TryVec::with_capacity(brand_count.try_into().map_err(|e| at!(Error::from(e)))?).map_err(|e| at!(Error::from(e)))?;
+    for _ in 0..brand_count {
+        brands.push(be_u32(src)?.into()).map_err(|e| at!(Error::from(e)))?;
+    }
+    Ok(FileTypeBox {
+        major_brand: From::from(major),
+        minor_version: minor,
+        compatible_brands: brands,
+    })
+}
+
+#[cfg_attr(debug_assertions, track_caller)]
+fn check_parser_state<T>(header: &BoxHeader, left: &Take<T>) -> Result<()> {
+    let limit = left.limit();
+    // Allow fully consumed boxes, or size=0 boxes (where original size was u64::MAX)
+    if limit == 0 || header.size == u64::MAX {
+        Ok(())
+    } else {
+        Err(at!(Error::InvalidData("unread box content or bad parser sync")))
+    }
+}
+
+/// Skip a number of bytes that we don't care to parse.
+fn skip<T: Read>(src: &mut T, bytes: u64) -> Result<()> {
+    std::io::copy(&mut src.take(bytes), &mut std::io::sink()).map_err(|e| at!(Error::from(e)))?;
+    Ok(())
+}
+
+fn be_u16<T: ReadBytesExt>(src: &mut T) -> Result<u16> {
+    src.read_u16::<byteorder::BigEndian>().map_err(|e| at!(Error::from(e)))
+}
+
+fn be_u32<T: ReadBytesExt>(src: &mut T) -> Result<u32> {
+    src.read_u32::<byteorder::BigEndian>().map_err(|e| at!(Error::from(e)))
+}
+
+fn be_i32<T: ReadBytesExt>(src: &mut T) -> Result<i32> {
+    src.read_i32::<byteorder::BigEndian>().map_err(|e| at!(Error::from(e)))
+}
+
+fn be_u64<T: ReadBytesExt>(src: &mut T) -> Result<u64> {
+    src.read_u64::<byteorder::BigEndian>().map_err(|e| at!(Error::from(e)))
+}
+
+#[cfg(test)]
+mod sample_offset_overflow_tests {
+
+    /// ISOBMFF size==0 means "extends to end of file" (valid for the
+    /// last top-level box, usually `mdat`). The OOM clamp in
+    /// `BoxIter::next_box` bounds the reader to the real remaining
+    /// bytes; `skip_box_content` must not compare the u64::MAX
+    /// sentinel against that clamp (imazen/zenavif#16 — all of
+    /// libavif's Apple-style HDR gain-map vectors carry size=0 mdat).
+    #[test]
+    fn skip_box_content_accepts_size_zero_extends_to_eof() {
+        // 'free' box: size=16, 8 payload bytes; then 'mdat' with
+        // size32=0 (extends to EOF) and 5 payload bytes.
+        let mut bytes = std::vec::Vec::new();
+        bytes.extend_from_slice(&16u32.to_be_bytes());
+        bytes.extend_from_slice(b"free");
+        bytes.extend_from_slice(&[0u8; 8]);
+        bytes.extend_from_slice(&0u32.to_be_bytes());
+        bytes.extend_from_slice(b"mdat");
+        bytes.extend_from_slice(&[1, 2, 3, 4, 5]);
+
+        let mut cursor = std::io::Cursor::new(bytes.as_slice());
+        let total = bytes.len() as u64;
+        let mut iter = super::BoxIter::with_max_remaining(&mut cursor, total);
+
+        let mut free = iter.next_box().expect("iter").expect("free box");
+        super::skip_box_content(&mut free).expect("skip sized box");
+        drop(free);
+
+        let mut mdat = iter.next_box().expect("iter").expect("mdat box");
+        assert_eq!(mdat.bytes_left(), 5, "clamped to the real remainder");
+        super::skip_box_content(&mut mdat)
+            .expect("size=0 (extends-to-EOF) box must skip cleanly");
+        assert_eq!(mdat.bytes_left(), 0);
+    }
+
+    use super::*;
+
+    fn s2c(first_chunk: u32, samples_per_chunk: u32) -> SampleToChunkEntry {
+        SampleToChunkEntry {
+            first_chunk,
+            samples_per_chunk,
+            _sample_description_index: 1,
+        }
+    }
+
+    /// Audit H2: a co64 chunk offset near u64::MAX combined with a non-zero
+    /// sample size used to wrap, repositioning subsequent samples at attacker-
+    /// chosen low offsets. We now reject with InvalidData.
+    #[test]
+    fn malicious_co64_offset_plus_size_overflow_is_rejected() {
+        let mut s2c_v = TryVec::new();
+        s2c_v.push(s2c(1, 2)).unwrap(); // 1 chunk, 2 samples per chunk
+        let mut chunk_offsets = TryVec::new();
+        chunk_offsets.push(u64::MAX - 5).unwrap(); // co64 near top
+        let mut sample_sizes = TryVec::new();
+        sample_sizes.push(10u32).unwrap(); // first sample @ MAX-5, MAX-5+10 wraps
+        sample_sizes.push(1u32).unwrap();
+
+        let result =
+            precompute_sample_offsets(&s2c_v, &chunk_offsets, &SampleSizes::Variable(sample_sizes), &Unstoppable);
+        // Unwrap the `At<Error>` location wrapper to match on the inner `Error`.
+        match result.map_err(|e| e.decompose().0) {
+            Err(Error::InvalidData(msg)) => {
+                assert_eq!(msg, "sample offset overflow");
+            }
+            other => panic!("expected InvalidData(sample offset overflow), got {:?}", other),
+        }
+    }
+
+    /// Audit H3: same overflow class in eager `extract_animation_frames`'s
+    /// `sample_offset + sample_size as u64`. We only verify the arithmetic
+    /// behaviour here; the call site is now `checked_add` and exercises the
+    /// same Error::InvalidData path.
+    #[cfg(feature = "eager")]
+    #[test]
+    fn extract_animation_frames_rejects_offset_size_overflow() {
+        let mut sample_offsets = TryVec::new();
+        sample_offsets.push(u64::MAX - 5).unwrap();
+        let mut sample_sizes = TryVec::new();
+        sample_sizes.push(10u32).unwrap(); // MAX-5 + 10 wraps
+        let sample_table = SampleTable {
+            time_to_sample: TryVec::new(),
+            sample_sizes: SampleSizes::Variable(sample_sizes),
+            sample_offsets,
+        };
+        let mut mdats: [MediaDataBox; 0] = [];
+        let result = extract_animation_frames(&sample_table, 1, &mut mdats[..]);
+        // Unwrap the `At<Error>` location wrapper to match on the inner `Error`.
+        match result.map_err(|e| e.decompose().0) {
+            Err(Error::InvalidData(msg)) => assert_eq!(msg, "sample offset overflow"),
+            other => panic!("expected InvalidData(sample offset overflow), got {:?}", other),
+        }
+    }
+
+    /// Sanity: a non-malicious table still computes offsets correctly.
+    #[test]
+    fn benign_offsets_compute_correctly() {
+        let mut s2c_v = TryVec::new();
+        s2c_v.push(s2c(1, 3)).unwrap();
+        let mut chunk_offsets = TryVec::new();
+        chunk_offsets.push(1000u64).unwrap();
+        let mut sample_sizes = TryVec::new();
+        sample_sizes.push(10u32).unwrap();
+        sample_sizes.push(20u32).unwrap();
+        sample_sizes.push(30u32).unwrap();
+
+        let offsets =
+            precompute_sample_offsets(&s2c_v, &chunk_offsets, &SampleSizes::Variable(sample_sizes), &Unstoppable)
+                .unwrap();
+        assert_eq!(offsets.len(), 3);
+        assert_eq!(*offsets.first().unwrap(), 1000);
+        assert_eq!(*offsets.get(1).unwrap(), 1010);
+        assert_eq!(*offsets.get(2).unwrap(), 1030);
+    }
+
+    /// #8: a constant-size stsz declaring a huge sample count must NOT
+    /// materialize one entry per sample (a ~12-byte box could otherwise force a
+    /// 256 MB allocation). The constant variant stores only (size, count) and
+    /// synthesizes sizes on access.
+    #[test]
+    fn constant_sample_sizes_do_not_allocate_per_sample() {
+        let sizes = SampleSizes::Constant {
+            size: 1,
+            count: 64 * 1024 * 1024, // 64M — would be 256 MB if materialized
+        };
+        assert_eq!(sizes.len(), 64 * 1024 * 1024);
+        assert_eq!(sizes.get(0), Some(1));
+        assert_eq!(sizes.get(64 * 1024 * 1024 - 1), Some(1));
+        assert_eq!(sizes.get(64 * 1024 * 1024), None);
+    }
+}

@@ -1,0 +1,31 @@
+[package]
+name = "zenavif-serialize"
+version = "0.2.0"
+authors = ["Kornel Lesiński <kornel@geekhood.net>", "Lilith River <lilith@imazen.io>"]
+edition = "2024"
+license = "BSD-3-Clause"
+description = "AVIF container serializer (MPEG/HEIF/MIAF/ISO-BMFF) with animation and grid support"
+readme = "README.crates.md"
+categories = ["multimedia::images", "encoding"]
+keywords = ["avif", "heif", "bmff", "av1", "mux"]
+repository = "https://github.com/imazen/zenavif-serialize"
+include = ["src/*.rs", "Cargo.toml", "README.crates.md", "LICENSE"]
+rust-version = "1.93"
+
+[dependencies]
+arrayvec = "0.7.6"
+whereat = "0.1.5"
+
+[dev-dependencies]
+avif-parse = "2.0"
+zenrav1e = { version = "0.1.4", default-features = false }
+zenpixels-convert = { version = "0.2.13", default-features = false }
+mp4parse = "0.17"
+zenavif-parse = { version = "0.6.0"}
+
+[badges]
+maintenance = { status = "passively-maintained" }
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+rustdoc-args = ["--generate-link-to-definition"]
