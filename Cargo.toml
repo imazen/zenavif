@@ -13,9 +13,10 @@ readme = "README.crates.md"
 include = ["/src/**", "/README.crates.md", "/CHANGELOG.md", "/LICENSE*", "/tests/**/*.rs", "/benches/**", "/examples/**"]
 
 # Workspace: zenavif (this root package) + the absorbed container crates.
-# The fuzz packages stay excluded as standalone workspaces (they carry their
-# own [patch.crates-io] mirrors); the apidoc snapshot runners self-exclude
-# via their own [workspace] tables.
+# The fuzz packages and apidoc snapshot runners stay out via their own
+# [workspace] tables (self-exclusion is REQUIRED for zenavif-parse/fuzz:
+# root `exclude` does not reach a package nested inside a member directory);
+# the exclude entries below are documentation + glob-safety only.
 [workspace]
 members = ["zenavif-parse", "zenavif-serialize"]
 exclude = ["fuzz", "zenavif-parse/fuzz"]

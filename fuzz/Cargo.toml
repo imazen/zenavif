@@ -7,6 +7,12 @@ edition = "2024"
 [package.metadata]
 cargo-fuzz = true
 
+# Standalone workspace root: keeps this package out of the repo workspace
+# (required for the [patch] mirror below to apply, and — for the
+# zenavif-parse twin — root `workspace.exclude` does not reach a package
+# nested inside a member directory).
+[workspace]
+
 [dependencies]
 libfuzzer-sys = "0.4"
 enough = "0.4"

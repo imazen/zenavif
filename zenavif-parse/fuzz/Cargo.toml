@@ -7,6 +7,11 @@ edition = "2024"
 [package.metadata]
 cargo-fuzz = true
 
+# Standalone workspace root: root `workspace.exclude` does not reach a
+# package nested inside a member directory (zenavif-parse/ is a member),
+# so without this table cargo errors "believes it's in a workspace".
+[workspace]
+
 [dependencies]
 libfuzzer-sys = "0.4"
 enough = "0.4"
