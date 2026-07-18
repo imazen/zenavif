@@ -2755,14 +2755,20 @@ impl AvifStreamingDecoder {
                     let tile_w = tile.width() as usize;
                     let actual_w =
                         tile_w.min((self.output_width as usize).saturating_sub(x_offset));
-                    if actual_w == 0 {
-                        continue;
+                    // Guard the source row by each tile's own height: grid tiles in
+                    // a row may decode to different heights, and `strip_h` is taken
+                    // from the first tile, so a shorter tile would make
+                    // `tile.row(py)` panic. A tile that is off-canvas (actual_w ==
+                    // 0) or too short for this row contributes nothing; still
+                    // advance x_offset so later tiles in the row line up.
+                    if actual_w != 0 && py < tile.height() {
+                        let tile_slice = tile.as_slice();
+                        let src = tile_slice.row(py);
+                        let copy_bytes = actual_w * bpp;
+                        let dst_start = x_offset * bpp;
+                        dst_row[dst_start..dst_start + copy_bytes]
+                            .copy_from_slice(&src[..copy_bytes]);
                     }
-                    let tile_slice = tile.as_slice();
-                    let src = tile_slice.row(py);
-                    let copy_bytes = actual_w * bpp;
-                    let dst_start = x_offset * bpp;
-                    dst_row[dst_start..dst_start + copy_bytes].copy_from_slice(&src[..copy_bytes]);
                     x_offset += tile_w;
                 }
             }

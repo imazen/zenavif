@@ -1401,14 +1401,19 @@ impl ManagedAvifDecoder {
                 for tile in &row_tiles {
                     let tile_w = tile.width() as usize;
                     let actual_w = tile_w.min(output_width.saturating_sub(x_offset));
-                    if actual_w == 0 {
-                        continue;
+                    // Guard the source row by each tile's own height: tiles in a
+                    // grid row may decode to different heights and `strip_h` comes
+                    // from the first tile, so a shorter tile would make
+                    // `tile.row(py)` panic. Off-canvas (actual_w == 0) or too-short
+                    // tiles contribute nothing; still advance x_offset.
+                    if actual_w != 0 && (py as u32) < tile.height() {
+                        let tile_slice = tile.as_slice();
+                        let src = tile_slice.row(py as u32);
+                        let copy_bytes = actual_w * bpp;
+                        let dst_start = x_offset * bpp;
+                        dst_row[dst_start..dst_start + copy_bytes]
+                            .copy_from_slice(&src[..copy_bytes]);
                     }
-                    let tile_slice = tile.as_slice();
-                    let src = tile_slice.row(py as u32);
-                    let copy_bytes = actual_w * bpp;
-                    let dst_start = x_offset * bpp;
-                    dst_row[dst_start..dst_start + copy_bytes].copy_from_slice(&src[..copy_bytes]);
                     x_offset += tile_w;
                 }
             }
