@@ -592,7 +592,7 @@ impl DecodedYuv {
 
 /// Which AV1 decode kernel to run behind zenavif's raw-OBU decode seam.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Av1Backend {
+pub enum DecodeBackend {
     /// The default pure-Rust rav1d-safe managed decoder (full AV1 profile).
     Rav1dSafe,
     /// The aom-rs pure-Rust decoder (KEY-frame / intra scope; byte-identical
@@ -611,13 +611,13 @@ pub enum Av1Backend {
 /// backend. Both backends receive the IDENTICAL OBU bytes and produce the same
 /// [`DecodedYuv`] shape — this is the "one frontend, two backends" seam the
 /// decode benchmark drives (only the decode kernel differs).
-pub fn decode_av1_obu_yuv(data: &[u8], backend: Av1Backend) -> Result<DecodedYuv> {
+pub fn decode_av1_obu_yuv(data: &[u8], backend: DecodeBackend) -> Result<DecodedYuv> {
     match backend {
-        Av1Backend::Rav1dSafe => decode_av1_obu_yuv_rav1d(data),
+        DecodeBackend::Rav1dSafe => decode_av1_obu_yuv_rav1d(data),
         #[cfg(feature = "aom-backend")]
-        Av1Backend::AomRs => decode_av1_obu_yuv_aomrs(data),
+        DecodeBackend::AomRs => decode_av1_obu_yuv_aomrs(data),
         #[cfg(feature = "unsafe-asm")]
-        Av1Backend::Rav1dFfi => crate::decoder::decode_obu_yuv_ffi(data),
+        DecodeBackend::Rav1dFfi => crate::decoder::decode_obu_yuv_ffi(data),
     }
 }
 

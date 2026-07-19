@@ -895,15 +895,17 @@ pub(crate) fn effective_qm(config: &EncoderConfig) -> bool {
 
 /// Reject `Av1Backend::SvtRs` on entry points it does not implement.
 ///
-/// The svtav1-rs backend covers 8-bit RGB (4:2:0) stills only; every other
-/// entry point fails honestly instead of silently serving the request with
-/// zenravif. (The deprecated `Svtav1` variant keeps its historical
-/// behavior: rejected by `validate()`, silently zenravif-served otherwise.)
+/// The svtav1-rs backend covers 8-bit stills only (RGB/RGBA 4:2:0 +
+/// grayscale); every other entry point fails honestly instead of silently
+/// serving the request with zenravif. (The deprecated `Svtav1` variant
+/// keeps its historical behavior: rejected by `validate()`, silently
+/// zenravif-served otherwise.)
 fn reject_svt_rs_backend(config: &EncoderConfig, entry: &'static str) -> Result<()> {
     if config.backend == Av1Backend::SvtRs {
         return Err(at!(Error::Encode(format!(
             "Av1Backend::SvtRs does not support {entry} \
-             (8-bit RGB 4:2:0 still encodes only); use Av1Backend::Zenravif"
+             (8-bit RGB/RGBA 4:2:0 + grayscale still encodes only); \
+             use Av1Backend::Zenravif"
         ))));
     }
     Ok(())
@@ -1193,7 +1195,14 @@ pub fn encode_gray8(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    reject_svt_rs_backend(config, "encode_gray8")?;
+    #[cfg(feature = "encode-svt-rs")]
+    if config.backend == Av1Backend::SvtRs {
+        return crate::encoder_svt_rs::encode_gray8_svt_rs(img, config, stop);
+    }
+    reject_svt_rs_backend(
+        config,
+        "encode_gray8 (requires the `encode-svt-rs` cargo feature)",
+    )?;
 
     let enc = build_ravif_encoder(config, stop, false)?;
     let result = enc
@@ -1225,8 +1234,8 @@ pub fn encode_rgba8(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
-    // Fail fast before the probe machinery: `encode_rgba8_once` rejects
-    // the svtav1-rs backend (RGB8-only for now).
+    // Skip the probe machinery for the svtav1-rs backend: `encode_rgba8_once`
+    // dispatches it directly (no monotonicity-probe support there).
     if config.backend == Av1Backend::SvtRs {
         return encode_rgba8_once(img, config, stop);
     }
@@ -1247,9 +1256,13 @@ pub(crate) fn encode_rgba8_once(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    #[cfg(feature = "encode-svt-rs")]
+    if config.backend == Av1Backend::SvtRs {
+        return crate::encoder_svt_rs::encode_rgba8_svt_rs(img, config, stop);
+    }
     reject_svt_rs_backend(
         config,
-        "encode_rgba8 (alpha requires a mono alpha-plane encode, unimplemented)",
+        "encode_rgba8 (requires the `encode-svt-rs` cargo feature)",
     )?;
     let enc = build_ravif_encoder(config, stop, false)?;
     let result = enc

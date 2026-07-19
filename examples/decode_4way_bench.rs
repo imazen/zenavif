@@ -28,7 +28,7 @@
 
 use std::fs;
 use std::path::PathBuf;
-use zenavif::{decode_av1_obu_yuv, Av1Backend, DecodedYuv};
+use zenavif::{DecodeBackend, DecodedYuv, decode_av1_obu_yuv};
 use zenbench::prelude::*;
 
 /// One benchmark cell: a single KEY-frame AV1 stream.
@@ -178,8 +178,8 @@ fn main() {
         };
 
         // Correctness: decode both backends once, compare.
-        let a = decode_av1_obu_yuv(&obu, Av1Backend::AomRs);
-        let r = decode_av1_obu_yuv(&obu, Av1Backend::Rav1dSafe);
+        let a = decode_av1_obu_yuv(&obu, DecodeBackend::AomRs);
+        let r = decode_av1_obu_yuv(&obu, DecodeBackend::Rav1dSafe);
         #[allow(unused_mut)]
         let mut correctness = match (&a, &r) {
             (Ok(a), Ok(r)) => compare(a, r),
@@ -189,7 +189,7 @@ fn main() {
         // Third arm (rav1d FFI, full asm): must byte-agree with rav1d-safe.
         #[cfg(feature = "unsafe-asm")]
         {
-            let f = decode_av1_obu_yuv(&obu, Av1Backend::Rav1dFfi);
+            let f = decode_av1_obu_yuv(&obu, DecodeBackend::Rav1dFfi);
             correctness = match (&f, &r) {
                 (Ok(f), Ok(r)) if compare(f, r) == "byte-identical(aom==rav1d)" => {
                     format!("{correctness}+ffi-identical")
@@ -228,13 +228,13 @@ fn main() {
                 g.throughput(Throughput::Elements(px));
                 g.bench("aom-rs", move |b| {
                     b.iter(|| {
-                        let d = decode_av1_obu_yuv(&obu_a, Av1Backend::AomRs).unwrap();
+                        let d = decode_av1_obu_yuv(&obu_a, DecodeBackend::AomRs).unwrap();
                         black_box(d.y.len())
                     })
                 });
                 g.bench("rav1d-safe", move |b| {
                     b.iter(|| {
-                        let d = decode_av1_obu_yuv(&obu_r, Av1Backend::Rav1dSafe).unwrap();
+                        let d = decode_av1_obu_yuv(&obu_r, DecodeBackend::Rav1dSafe).unwrap();
                         black_box(d.y.len())
                     })
                 });
@@ -243,7 +243,7 @@ fn main() {
                     let obu_f = obu_f.clone();
                     g.bench("rav1d-ffi-asm", move |b| {
                         b.iter(|| {
-                            let d = decode_av1_obu_yuv(&obu_f, Av1Backend::Rav1dFfi).unwrap();
+                            let d = decode_av1_obu_yuv(&obu_f, DecodeBackend::Rav1dFfi).unwrap();
                             black_box(d.y.len())
                         })
                     });
@@ -333,7 +333,5 @@ fn main() {
 
     fs::write(&out_csv, &csv).expect("write csv");
     eprintln!("\nRust-pair CSV written: {out_csv:?}");
-    eprintln!(
-        "(headline = interleaved aom-rs÷rav1d-safe ratio; C references appended separately)"
-    );
+    eprintln!("(headline = interleaved aom-rs÷rav1d-safe ratio; C references appended separately)");
 }

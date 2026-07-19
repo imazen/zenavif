@@ -17,6 +17,16 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   the next 0.x minor bump (svtav1-rs backend PR)
 
 ### Added
+- SvtRs backend: RGBA8 encode (color 4:2:0 item + straight-alpha Cs400
+  `auxl` auxiliary item honoring the `alpha_quality` fallback contract) and
+  grayscale encode (monochrome Cs400 color item, `encode-mono` feature) —
+  the backend now covers all three 8-bit still input shapes; round-trip +
+  contract tests in `tests/svt_rs_backend.rs`
+- `DecodeBackend` (renamed from the decode-seam `Av1Backend` to avoid
+  colliding with the encoder enum of the same name in `encode` builds)
+  gained `Rav1dFfi` (upstream rav1d 1.1.0 with full asm, `unsafe-asm`
+  feature) as a third raw-OBU decode-seam arm; the 4-way decode benchmark
+  interleaves it when built with `unsafe-asm`
 - EXPERIMENTAL svtav1-rs AVIF encode backend: `Av1Backend::SvtRs` behind the
   new default-off `encode-svt-rs` feature (git-branch dep on imazen/svtav1
   `wave2/entropy-c-parity`, pinned rev conformance-verified upstream at
