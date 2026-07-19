@@ -110,7 +110,8 @@ TSV diff in the same commit. zenrav1e's halves (`gate-identity`,
 - `(default)` - Pure Rust decode only, safe SIMD via archmage
 - `encode` - AVIF encoding via zenravif
 - `encode-imazen` - Encoding with zenrav1e fork extras (QM, VAQ, still-image, lossless)
-- `encode-svt-rs` - EXPERIMENTAL `Av1Backend::SvtRs` via svtav1-rs (imazen/svtav1 git-branch dep; 8-bit 4:2:0 stills, 64-px-aligned dims only; muxes in-crate via zenavif-serialize; C-parity assertion pending decision-layer bitstream identity upstream)
+- `encode-svt-rs` - EXPERIMENTAL `Av1Backend::SvtRs` via svtav1-rs (imazen/svtav1 git-branch dep; 8-bit stills only — RGB/RGBA 4:2:0 + grayscale Cs400, alpha as Cs400 `auxl` aux item, 64-px-aligned dims only; muxes in-crate via zenavif-serialize; C-parity assertion pending decision-layer bitstream identity upstream)
+- `aom-backend` - EXPERIMENTAL `DecodeBackend::AomRs` — zenav1-aom pure-Rust KEY-frame decoder behind the raw-OBU seam `decode_av1_obu_yuv` (git-rev dep on imazen/zenav1-aom; byte-identical to rav1d-safe on the 8-cell decode corpus; drives `examples/decode_4way_bench.rs`)
 - `encode-asm` - Encoding with hand-written assembly (fastest, unsafe)
 - `encode-threading` - Encoding with multi-threading
 - `unsafe-asm` - Decoding with hand-written assembly via C FFI (fastest, unsafe)
@@ -118,6 +119,18 @@ TSV diff in the same commit. zenrav1e's halves (`gate-identity`,
 - `_dev` - Expose internal YUV modules for profiling (not public API)
 
 ## Known Bugs
+
+### yuv crate 4:2:0 bilinear drops the last row pair — FIXED in-repo (d3ece8e), upstream OPEN
+Found 2026-07-19 by the SvtRs RGBA round-trip test: yuvutils-rs 0.8.12–0.8.16
+`yuv420_*_bilinear`/`i0xx_*_bilinear` zip luma row-pairs against overlapping
+chroma `windows(stride*2).step_by(stride)` — one window short on even heights
+with exact-size chroma planes, so the bottom two output rows stay unwritten
+(black/alpha-0). Hit every zenavif 4:2:0+alpha decode, the exotic-matrix RGB
+fallback, raw-OBU gain-map decode, and all legacy `unsafe-asm` 4:2:0 paths.
+In-repo fix: `src/yuv_bilinear_fix.rs` wrapper at all 12 call sites, with a
+canary test that fails when upstream fixes it (then the wrapper retires).
+Upstream issue NOT yet filed (third-party repo — draft awaiting user
+approval in the session scratchpad).
 
 ### zenrav1e lossless ±2 — FIXED upstream, release-gated
 Root cause found and fixed 2026-06-11 (zenrav1e c3567081, zenrav1e#9
