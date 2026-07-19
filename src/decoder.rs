@@ -1028,12 +1028,12 @@ impl AvifDecoder {
             ];
             let rgb_stride = width as u32 * 4;
             match planes.chroma_sampling() {
-                ChromaSampling::Cs420 => yuv::yuv420_to_rgba_bilinear(
+                ChromaSampling::Cs420 => crate::yuv_bilinear_fix::yuv420_bilinear_complete(
                     &planar,
                     rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                     rgb_stride,
-                    yuv_range,
-                    matrix,
+                    4,
+                    |p, o, s| yuv::yuv420_to_rgba_bilinear(p, o, s, yuv_range, matrix),
                 ),
                 ChromaSampling::Cs422 => yuv::yuv422_to_rgba_bilinear(
                     &planar,
@@ -1065,12 +1065,12 @@ impl AvifDecoder {
             let mut out = vec![Rgb { r: 0u8, g: 0, b: 0 }; pixel_count];
             let rgb_stride = width as u32 * 3;
             match planes.chroma_sampling() {
-                ChromaSampling::Cs420 => yuv::yuv420_to_rgb_bilinear(
+                ChromaSampling::Cs420 => crate::yuv_bilinear_fix::yuv420_bilinear_complete(
                     &planar,
                     rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                     rgb_stride,
-                    yuv_range,
-                    matrix,
+                    3,
+                    |p, o, s| yuv::yuv420_to_rgb_bilinear(p, o, s, yuv_range, matrix),
                 ),
                 ChromaSampling::Cs422 => yuv::yuv422_to_rgb_bilinear(
                     &planar,
@@ -1244,26 +1244,26 @@ impl AvifDecoder {
             ];
             let rgb_stride = width as u32 * 4;
             match (planes.chroma_sampling(), bit_depth) {
-                (ChromaSampling::Cs420, 10) => yuv::i010_to_rgba10_bilinear(
+                (ChromaSampling::Cs420, 10) => crate::yuv_bilinear_fix::yuv420_bilinear_complete(
                     &planar,
                     rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                     rgb_stride,
-                    yuv_range,
-                    matrix,
+                    4,
+                    |p, o, s| yuv::i010_to_rgba10_bilinear(p, o, s, yuv_range, matrix),
                 ),
-                (ChromaSampling::Cs420, 12) => yuv::i012_to_rgba12_bilinear(
+                (ChromaSampling::Cs420, 12) => crate::yuv_bilinear_fix::yuv420_bilinear_complete(
                     &planar,
                     rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                     rgb_stride,
-                    yuv_range,
-                    matrix,
+                    4,
+                    |p, o, s| yuv::i012_to_rgba12_bilinear(p, o, s, yuv_range, matrix),
                 ),
-                (ChromaSampling::Cs420, _) => yuv::i016_to_rgba16_bilinear(
+                (ChromaSampling::Cs420, _) => crate::yuv_bilinear_fix::yuv420_bilinear_complete(
                     &planar,
                     rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                     rgb_stride,
-                    yuv_range,
-                    matrix,
+                    4,
+                    |p, o, s| yuv::i016_to_rgba16_bilinear(p, o, s, yuv_range, matrix),
                 ),
                 (ChromaSampling::Cs422, 10) => yuv::i210_to_rgba10(
                     &planar,
@@ -1330,26 +1330,26 @@ impl AvifDecoder {
             ];
             let rgb_stride = width as u32 * 3;
             match (planes.chroma_sampling(), bit_depth) {
-                (ChromaSampling::Cs420, 10) => yuv::i010_to_rgb10_bilinear(
+                (ChromaSampling::Cs420, 10) => crate::yuv_bilinear_fix::yuv420_bilinear_complete(
                     &planar,
                     rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                     rgb_stride,
-                    yuv_range,
-                    matrix,
+                    3,
+                    |p, o, s| yuv::i010_to_rgb10_bilinear(p, o, s, yuv_range, matrix),
                 ),
-                (ChromaSampling::Cs420, 12) => yuv::i012_to_rgb12_bilinear(
+                (ChromaSampling::Cs420, 12) => crate::yuv_bilinear_fix::yuv420_bilinear_complete(
                     &planar,
                     rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                     rgb_stride,
-                    yuv_range,
-                    matrix,
+                    3,
+                    |p, o, s| yuv::i012_to_rgb12_bilinear(p, o, s, yuv_range, matrix),
                 ),
-                (ChromaSampling::Cs420, _) => yuv::i016_to_rgb16_bilinear(
+                (ChromaSampling::Cs420, _) => crate::yuv_bilinear_fix::yuv420_bilinear_complete(
                     &planar,
                     rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                     rgb_stride,
-                    yuv_range,
-                    matrix,
+                    3,
+                    |p, o, s| yuv::i016_to_rgb16_bilinear(p, o, s, yuv_range, matrix),
                 ),
                 (ChromaSampling::Cs422, 10) => yuv::i210_to_rgb10(
                     &planar,

@@ -379,12 +379,12 @@ fn convert_to_rgb(
         let rgb_stride = width * 3;
 
         match layout {
-            PixelLayout::I420 => yuv::yuv420_to_rgb_bilinear(
+            PixelLayout::I420 => crate::yuv_bilinear_fix::yuv420_bilinear_complete(
                 &planar,
                 rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                 rgb_stride,
-                yuv_range,
-                matrix,
+                3,
+                |p, o, s| yuv::yuv420_to_rgb_bilinear(p, o, s, yuv_range, matrix),
             ),
             PixelLayout::I422 => yuv::yuv422_to_rgb_bilinear(
                 &planar,
@@ -442,26 +442,26 @@ fn convert_to_rgb(
         let rgb_stride = width * 3;
 
         match (layout, bit_depth) {
-            (PixelLayout::I420, 10) => yuv::i010_to_rgb10_bilinear(
+            (PixelLayout::I420, 10) => crate::yuv_bilinear_fix::yuv420_bilinear_complete(
                 &planar,
                 rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                 rgb_stride,
-                yuv_range,
-                matrix,
+                3,
+                |p, o, s| yuv::i010_to_rgb10_bilinear(p, o, s, yuv_range, matrix),
             ),
-            (PixelLayout::I420, 12) => yuv::i012_to_rgb12_bilinear(
+            (PixelLayout::I420, 12) => crate::yuv_bilinear_fix::yuv420_bilinear_complete(
                 &planar,
                 rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                 rgb_stride,
-                yuv_range,
-                matrix,
+                3,
+                |p, o, s| yuv::i012_to_rgb12_bilinear(p, o, s, yuv_range, matrix),
             ),
-            (PixelLayout::I420, _) => yuv::i016_to_rgb16_bilinear(
+            (PixelLayout::I420, _) => crate::yuv_bilinear_fix::yuv420_bilinear_complete(
                 &planar,
                 rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
                 rgb_stride,
-                yuv_range,
-                matrix,
+                3,
+                |p, o, s| yuv::i016_to_rgb16_bilinear(p, o, s, yuv_range, matrix),
             ),
             (PixelLayout::I422, 10) => yuv::i210_to_rgb10(
                 &planar,

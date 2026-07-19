@@ -79,6 +79,7 @@ mod error;
 /// Deterministic zenanalyze palette gate (FEATURE_HINTS §E rule 1).
 #[cfg(feature = "encode")]
 pub mod palette_gate;
+mod yuv_bilinear_fix;
 #[cfg(feature = "encode")]
 pub use palette_gate::PalettePreference;
 /// Per-image fast-tier budget heads (FEATURE_HINTS §E heads 2+3 — the
