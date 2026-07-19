@@ -9,16 +9,19 @@
 //!
 //! # Scope (v1, deliberately narrow)
 //!
-//! * 8-bit RGB input → 4:2:0 YCbCr (BT.601, full range) still images only.
+//! * 8-bit still images only: RGB/RGBA → 4:2:0 YCbCr (BT.601, full range),
+//!   plus grayscale → monochrome (Cs400). RGBA's straight alpha plane is a
+//!   separate Cs400 encode muxed as an `auxl` auxiliary item, honoring the
+//!   [`crate::EncoderConfig::alpha_quality`] fallback contract.
 //! * Width and height must be **multiples of 64**: the svtav1-rs pipeline
 //!   codes full 64×64 superblocks and signals the coded dimensions in the
 //!   sequence header (no partial-SB coding yet). Padding here would leak
 //!   padded dimensions into decoded output (zenavif's decoder sizes the
 //!   image from the sequence header, not `ispe`), so unaligned input is
 //!   rejected instead of silently padded.
-//! * No alpha, no 10-bit, no RGB (identity) model, no limited range, no
-//!   lossless, no gain map, no animation. Each is rejected honestly at
-//!   encode time (and by [`crate::EncoderConfig::validate`]).
+//! * No 10-bit, no RGB (identity) model, no limited range, no lossless, no
+//!   gain map, no animation. Each is rejected honestly at encode time (and
+//!   by [`crate::EncoderConfig::validate`]).
 //!
 //! # Payload shape
 //!
@@ -156,6 +159,116 @@ fn cicp_to_serialize_transfer(tc: u8) -> zenavif_serialize::constants::TransferC
     }
 }
 
+/// Reject dimensions the svtav1-rs pipeline cannot code (module docs: full
+/// 64×64 superblocks only, coded dims signaled in the sequence header).
+fn reject_unaligned_dims(width: usize, height: usize) -> Result<()> {
+    if width == 0 || height == 0 {
+        return Err(at!(Error::Encode(format!(
+            "cannot encode empty image ({width}x{height})"
+        ))));
+    }
+    if !width.is_multiple_of(64) || !height.is_multiple_of(64) {
+        return Err(at!(Error::Encode(format!(
+            "Av1Backend::SvtRs requires dimensions that are multiples of 64 \
+             (got {width}x{height}): the svtav1-rs pipeline codes full 64x64 \
+             superblocks and signals coded dimensions in the sequence header. \
+             Pad/crop upstream or use the zenravif backend for arbitrary sizes"
+        ))));
+    }
+    Ok(())
+}
+
+/// Run one still-frame monochrome encode through the svtav1-rs pipeline.
+///
+/// `plane` is `stride`-strided (`stride >= width`), `width`/`height` already
+/// 64-aligned. Returns the TD + sequence header + frame OBU payload. Used for
+/// grayscale color items and alpha auxiliary items (both are Cs400 streams).
+fn encode_mono_plane_svt(
+    plane: &[u8],
+    width: usize,
+    height: usize,
+    stride: usize,
+    preset: u8,
+    qp: u8,
+    color_description: svtav1::entropy::obu::ColorDescription,
+) -> Result<Vec<u8>> {
+    let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
+    let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
+    let rc = svtav1::encoder::rate_control::RcConfig {
+        mode: svtav1::encoder::rate_control::RcMode::Cqp,
+        qp,
+        ..svtav1::encoder::rate_control::RcConfig::default()
+    };
+    let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new(w, h, preset, rc, 0, 1);
+    pipeline.bit_depth = 8;
+    pipeline.color_description = color_description;
+
+    // The pipeline reads a tight `stride`-strided plane; make it tight when
+    // the caller's buffer is padded.
+    let payload = if stride == width {
+        pipeline.encode_frame(plane, width)
+    } else {
+        let mut tight = Vec::with_capacity(width * height);
+        for row in plane.chunks(stride).take(height) {
+            tight.extend_from_slice(&row[..width]);
+        }
+        pipeline.encode_frame(&tight, width)
+    };
+    if payload.is_empty() {
+        return Err(at!(Error::Encode(
+            "svtav1-rs pipeline returned an empty bitstream".into()
+        )));
+    }
+    Ok(payload)
+}
+
+/// Build the AVIF muxer with the config's container-level metadata applied
+/// (EXIF/XMP/ICC, rotation/mirror, HDR metadata, CICP).
+fn build_aviffy(
+    config: &EncoderConfig,
+    color_primaries: u8,
+    transfer_characteristics: u8,
+    matrix_coefficients: zenavif_serialize::constants::MatrixCoefficients,
+    monochrome: bool,
+) -> zenavif_serialize::Aviffy {
+    let mut aviffy = zenavif_serialize::Aviffy::new();
+    aviffy
+        .set_seq_profile(0)
+        .set_chroma_subsampling((true, true))
+        .set_monochrome(monochrome)
+        .set_full_color_range(true)
+        .set_color_primaries(cicp_to_serialize_primaries(color_primaries))
+        .set_transfer_characteristics(cicp_to_serialize_transfer(transfer_characteristics))
+        .set_matrix_coefficients(matrix_coefficients);
+    if let Some(ref exif) = config.exif {
+        aviffy.set_exif(exif.clone());
+    }
+    if let Some(ref xmp) = config.xmp {
+        aviffy.set_xmp(xmp.clone());
+    }
+    if let Some(ref icc) = config.icc_profile {
+        aviffy.set_icc_profile(icc.clone());
+    }
+    if let Some(angle) = config.rotation {
+        aviffy.set_rotation(angle);
+    }
+    if let Some(axis) = config.mirror {
+        aviffy.set_mirror(axis);
+    }
+    if let Some((max_cll, max_fall)) = config.content_light_level {
+        aviffy.set_content_light_level(max_cll, max_fall);
+    }
+    if let Some(md) = config.mastering_display {
+        aviffy.set_mastering_display(
+            md.primaries,
+            md.white_point,
+            md.max_luminance,
+            md.min_luminance,
+        );
+    }
+    aviffy
+}
+
 /// Encode an 8-bit RGB image to AVIF via the svtav1-rs backend.
 ///
 /// See the module docs for scope and constraints. Cancellation is checked
@@ -171,19 +284,7 @@ pub(crate) fn encode_rgb8_svt_rs(
 
     let width = img.width();
     let height = img.height();
-    if width == 0 || height == 0 {
-        return Err(at!(Error::Encode(format!(
-            "cannot encode empty image ({width}x{height})"
-        ))));
-    }
-    if !width.is_multiple_of(64) || !height.is_multiple_of(64) {
-        return Err(at!(Error::Encode(format!(
-            "Av1Backend::SvtRs requires dimensions that are multiples of 64 \
-             (got {width}x{height}): the svtav1-rs pipeline codes full 64x64 \
-             superblocks and signals coded dimensions in the sequence header. \
-             Pad/crop upstream or use the zenravif backend for arbitrary sizes"
-        ))));
-    }
+    reject_unaligned_dims(width, height)?;
     let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
     let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
 
@@ -252,42 +353,198 @@ pub(crate) fn encode_rgb8_svt_rs(
     // The av1C written here must match the payload's sequence header
     // (Chrome cross-validates): profile 0, 8-bit, 4:2:0, full range.
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let mut aviffy = zenavif_serialize::Aviffy::new();
-    aviffy
-        .set_seq_profile(0)
-        .set_chroma_subsampling((true, true))
-        .set_monochrome(false)
-        .set_full_color_range(true)
-        .set_color_primaries(cicp_to_serialize_primaries(color_primaries))
-        .set_transfer_characteristics(cicp_to_serialize_transfer(transfer_characteristics))
-        .set_matrix_coefficients(zenavif_serialize::constants::MatrixCoefficients::Bt601);
-    if let Some(ref exif) = config.exif {
-        aviffy.set_exif(exif.clone());
-    }
-    if let Some(ref xmp) = config.xmp {
-        aviffy.set_xmp(xmp.clone());
-    }
-    if let Some(ref icc) = config.icc_profile {
-        aviffy.set_icc_profile(icc.clone());
-    }
-    if let Some(angle) = config.rotation {
-        aviffy.set_rotation(angle);
-    }
-    if let Some(axis) = config.mirror {
-        aviffy.set_mirror(axis);
-    }
-    if let Some((max_cll, max_fall)) = config.content_light_level {
-        aviffy.set_content_light_level(max_cll, max_fall);
-    }
-    if let Some(md) = config.mastering_display {
-        aviffy.set_mastering_display(
-            md.primaries,
-            md.white_point,
-            md.max_luminance,
-            md.min_luminance,
-        );
+    let aviffy = build_aviffy(
+        config,
+        color_primaries,
+        transfer_characteristics,
+        zenavif_serialize::constants::MatrixCoefficients::Bt601,
+        false,
+    );
+
+    let avif_file = aviffy
+        .try_to_vec(&av1_payload, None, w, h, 8)
+        .map_err(|e| at!(Error::Encode(format!("AVIF serialization failed: {e}"))))?;
+
+    Ok(EncodedImage {
+        color_byte_size: av1_payload.len(),
+        alpha_byte_size: 0,
+        avif_file,
+    })
+}
+
+/// CICP "unspecified" code point — what the alpha auxiliary stream signals
+/// (an alpha plane has no colorimetry; readers ignore its CICP per MIAF).
+const CICP_UNSPECIFIED: u8 = 2;
+
+/// Encode an 8-bit RGBA image to AVIF via the svtav1-rs backend.
+///
+/// Color travels exactly like [`encode_rgb8_svt_rs`] (4:2:0 BT.601 full
+/// range); the straight (non-premultiplied) alpha plane is encoded as a
+/// separate monochrome (Cs400) still and muxed as an `auxl` auxiliary item.
+/// Alpha quality follows the [`crate::EncoderConfig::alpha_quality`]
+/// contract (falls back to the color quality).
+pub(crate) fn encode_rgba8_svt_rs(
+    img: ImgRef<'_, rgb::Rgba<u8>>,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedImage> {
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_unsupported_config(config)?;
+
+    let width = img.width();
+    let height = img.height();
+    reject_unaligned_dims(width, height)?;
+    let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
+    let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
+
+    // ---- RGBA -> YUV 4:2:0 color + tight alpha plane --------------------
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    let mut planar = yuv::YuvPlanarImageMut::<u8>::alloc(w, h, yuv::YuvChromaSubsampling::Yuv420);
+    let rgba_bytes: &[u8] = bytemuck::cast_slice(img.buf());
+    let rgba_stride_components = u32::try_from(img.stride() * 4)
+        .map_err(|_| at!(Error::Encode("row stride exceeds u32".into())))?;
+    yuv::rgba_to_yuv420(
+        &mut planar,
+        rgba_bytes,
+        rgba_stride_components,
+        yuv::YuvRange::Full,
+        yuv::YuvStandardMatrix::Bt601,
+        yuv::YuvConversionMode::Balanced,
+    )
+    .map_err(|e| {
+        at!(Error::Encode(format!(
+            "RGBA->YUV420 conversion failed: {e}"
+        )))
+    })?;
+    let mut alpha_plane = Vec::with_capacity(width * height);
+    for row in img.rows() {
+        alpha_plane.extend(row.iter().map(|px| px.a));
     }
 
+    // ---- svtav1-rs still-frame encodes: color, then alpha ---------------
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    let qp = svtav1::avif::AvifEncoder::quality_to_qp_static(config.quality);
+    let alpha_qp = svtav1::avif::AvifEncoder::quality_to_qp_static(
+        crate::encoder::effective_alpha_quality(config),
+    );
+    let preset = speed_to_svt_preset(config.speed);
+    let color_primaries = config.color_primaries.unwrap_or(DEFAULT_COLOR_PRIMARIES);
+    let transfer_characteristics = config
+        .transfer_characteristics
+        .unwrap_or(DEFAULT_TRANSFER_CHARACTERISTICS);
+
+    let rc = svtav1::encoder::rate_control::RcConfig {
+        mode: svtav1::encoder::rate_control::RcMode::Cqp,
+        qp,
+        ..svtav1::encoder::rate_control::RcConfig::default()
+    };
+    let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new(w, h, preset, rc, 0, 1)
+        .with_chroma_420(true);
+    pipeline.bit_depth = 8;
+    pipeline.color_description = svtav1::entropy::obu::ColorDescription {
+        color_primaries,
+        transfer_characteristics,
+        matrix_coefficients: MATRIX_COEFFICIENTS_BT601,
+        full_range: true,
+    };
+    let color_payload = pipeline.encode_frame_420(
+        planar.y_plane.borrow(),
+        planar.u_plane.borrow(),
+        planar.v_plane.borrow(),
+        width,
+    );
+    if color_payload.is_empty() {
+        return Err(at!(Error::Encode(
+            "svtav1-rs pipeline returned an empty bitstream".into()
+        )));
+    }
+
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    let alpha_payload = encode_mono_plane_svt(
+        &alpha_plane,
+        width,
+        height,
+        width,
+        preset,
+        alpha_qp,
+        svtav1::entropy::obu::ColorDescription {
+            color_primaries: CICP_UNSPECIFIED,
+            transfer_characteristics: CICP_UNSPECIFIED,
+            matrix_coefficients: CICP_UNSPECIFIED,
+            full_range: true,
+        },
+    )?;
+
+    // ---- AVIF container (color item + auxl alpha item) -------------------
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    let aviffy = build_aviffy(
+        config,
+        color_primaries,
+        transfer_characteristics,
+        zenavif_serialize::constants::MatrixCoefficients::Bt601,
+        false,
+    );
+    let avif_file = aviffy
+        .try_to_vec(&color_payload, Some(&alpha_payload), w, h, 8)
+        .map_err(|e| at!(Error::Encode(format!("AVIF serialization failed: {e}"))))?;
+
+    Ok(EncodedImage {
+        color_byte_size: color_payload.len(),
+        alpha_byte_size: alpha_payload.len(),
+        avif_file,
+    })
+}
+
+/// Encode an 8-bit grayscale image to a monochrome (Cs400) AVIF via the
+/// svtav1-rs backend — the same still-frame mono pipeline the alpha plane
+/// uses, muxed as a monochrome color item.
+#[cfg(feature = "encode-mono")]
+pub(crate) fn encode_gray8_svt_rs(
+    img: ImgRef<'_, u8>,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedImage> {
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_unsupported_config(config)?;
+
+    let width = img.width();
+    let height = img.height();
+    reject_unaligned_dims(width, height)?;
+    let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
+    let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
+
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    let qp = svtav1::avif::AvifEncoder::quality_to_qp_static(config.quality);
+    let preset = speed_to_svt_preset(config.speed);
+    let color_primaries = config.color_primaries.unwrap_or(DEFAULT_COLOR_PRIMARIES);
+    let transfer_characteristics = config
+        .transfer_characteristics
+        .unwrap_or(DEFAULT_TRANSFER_CHARACTERISTICS);
+
+    let av1_payload = encode_mono_plane_svt(
+        img.buf(),
+        width,
+        height,
+        img.stride(),
+        preset,
+        qp,
+        svtav1::entropy::obu::ColorDescription {
+            color_primaries,
+            transfer_characteristics,
+            // Monochrome streams carry no chroma; matrix is unspecified.
+            matrix_coefficients: CICP_UNSPECIFIED,
+            full_range: true,
+        },
+    )?;
+
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    let aviffy = build_aviffy(
+        config,
+        color_primaries,
+        transfer_characteristics,
+        zenavif_serialize::constants::MatrixCoefficients::Unspecified,
+        true,
+    );
     let avif_file = aviffy
         .try_to_vec(&av1_payload, None, w, h, 8)
         .map_err(|e| at!(Error::Encode(format!("AVIF serialization failed: {e}"))))?;

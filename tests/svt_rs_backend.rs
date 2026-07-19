@@ -180,30 +180,157 @@ fn svt_rs_rejects_default_yuv444_at_encode_time() {
 }
 
 #[test]
-fn svt_rs_rejects_rgba_and_16bit_entry_points() {
-    let rgba: Img<Vec<rgb::Rgba<u8>>> = Img::new(
-        vec![
-            rgb::Rgba {
-                r: 1,
-                g: 2,
-                b: 3,
-                a: 200
-            };
-            64 * 64
-        ],
-        64,
-        64,
-    );
-    assert!(
-        zenavif::encode_rgba8(rgba.as_ref(), &svt_config(), stop()).is_err(),
-        "RGBA must be rejected (no alpha-plane encode yet)"
-    );
-
+fn svt_rs_rejects_16bit_entry_points() {
     let rgb16: Img<Vec<Rgb<u16>>> = Img::new(vec![Rgb { r: 0, g: 0, b: 0 }; 64 * 64], 64, 64);
     assert!(
         zenavif::encode_rgb16(rgb16.as_ref(), &svt_config(), stop()).is_err(),
         "16-bit must be rejected (8-bit only)"
     );
+}
+
+// --------------------------------------------------------------------
+// RGBA: color 4:2:0 item + Cs400 alpha auxiliary item
+// --------------------------------------------------------------------
+
+/// Gradient RGBA with a smooth alpha ramp (same rationale as
+/// [`gradient_rgb8`]: subsampling-friendly content).
+fn gradient_rgba8(w: usize, h: usize) -> Img<Vec<rgb::Rgba<u8>>> {
+    let mut pixels = Vec::with_capacity(w * h);
+    for y in 0..h {
+        for x in 0..w {
+            pixels.push(rgb::Rgba {
+                r: ((x * 255) / w.max(1)) as u8,
+                g: ((y * 255) / h.max(1)) as u8,
+                b: (((x + y) * 255) / (w + h).max(1)) as u8,
+                a: (64 + (x * 191) / w.max(1)) as u8,
+            });
+        }
+    }
+    Img::new(pixels, w, h)
+}
+
+#[test]
+fn svt_rs_roundtrip_rgba_alpha_plane() {
+    let img = gradient_rgba8(128, 128);
+    let config = svt_config().quality(85.0).speed(6);
+
+    let encoded = zenavif::encode_rgba8(img.as_ref(), &config, stop()).expect("svt-rs RGBA encode");
+    assert!(encoded.color_byte_size > 0);
+    assert!(
+        encoded.alpha_byte_size > 0,
+        "alpha auxiliary item must carry bytes"
+    );
+
+    let decoded = zenavif::decode(&encoded.avif_file).expect("must decode via rav1d-safe");
+    assert_eq!(decoded.width(), 128);
+    assert_eq!(decoded.height(), 128);
+    assert!(
+        decoded.has_alpha(),
+        "alpha plane must survive the container"
+    );
+
+    let out = decoded
+        .try_as_imgref::<rgb::Rgba<u8>>()
+        .expect("alpha decode yields RGBA8");
+    // Color PSNR over RGB channels; alpha checked separately. Row-wise:
+    // the decoded buffer may be stride-padded.
+    let (mut se_rgb, mut se_a) = (0u64, 0u64);
+    for (row_a, row_b) in img.rows().zip(out.rows()) {
+        for (pa, pb) in row_a.iter().zip(row_b.iter()) {
+            for (ca, cb) in [(pa.r, pb.r), (pa.g, pb.g), (pa.b, pb.b)] {
+                let d = i64::from(ca) - i64::from(cb);
+                se_rgb += (d * d) as u64;
+            }
+            let d = i64::from(pa.a) - i64::from(pb.a);
+            se_a += (d * d) as u64;
+        }
+    }
+    let n = (img.width() * img.height()) as f64;
+    let psnr_rgb = 10.0 * (255.0f64 * 255.0 / (se_rgb as f64 / (n * 3.0))).log10();
+    let psnr_a = 10.0 * (255.0f64 * 255.0 / ((se_a as f64 / n).max(1e-9))).log10();
+    eprintln!(
+        "svt_rs q85 RGBA roundtrip: color PSNR {psnr_rgb:.2} dB, alpha PSNR {psnr_a:.2} dB, \
+         color {} B + alpha {} B",
+        encoded.color_byte_size, encoded.alpha_byte_size
+    );
+    // Measured 50.20 dB color / 138.13 dB alpha (color 1509 B + alpha 131 B)
+    // on 2026-07-19 at the pinned svtav1 rev (3cad660b7), x86_64. Floors are
+    // measured-minus-margin. Finding this path 20.10 dB on 2026-07-19 is
+    // what uncovered the yuv-crate dropped-last-row-pair bug
+    // (src/yuv_bilinear_fix.rs).
+    assert!(psnr_rgb > 45.0, "RGBA color PSNR {psnr_rgb:.2} below floor");
+    assert!(psnr_a > 45.0, "alpha-plane PSNR {psnr_a:.2} below floor");
+}
+
+#[test]
+fn svt_rs_alpha_quality_fallback_contract() {
+    // alpha_quality defaults to the color quality; setting it must move
+    // the alpha payload independently of the color payload.
+    let img = gradient_rgba8(128, 128);
+    let hi = zenavif::encode_rgba8(img.as_ref(), &svt_config().quality(85.0).speed(6), stop())
+        .expect("default alpha quality");
+    let lo = zenavif::encode_rgba8(
+        img.as_ref(),
+        &svt_config().quality(85.0).alpha_quality(20.0).speed(6),
+        stop(),
+    )
+    .expect("low alpha quality");
+    assert!(
+        lo.alpha_byte_size < hi.alpha_byte_size,
+        "alpha_quality(20) payload ({}) must under-size the fallback-to-color-quality \
+         payload ({})",
+        lo.alpha_byte_size,
+        hi.alpha_byte_size
+    );
+    assert_eq!(
+        lo.color_byte_size, hi.color_byte_size,
+        "alpha_quality must not perturb the color encode"
+    );
+}
+
+// --------------------------------------------------------------------
+// Grayscale: monochrome (Cs400) color item
+// --------------------------------------------------------------------
+
+#[cfg(feature = "encode-mono")]
+#[test]
+fn svt_rs_roundtrip_gray8_mono() {
+    let w = 128usize;
+    let h = 128usize;
+    let mut pixels = Vec::with_capacity(w * h);
+    for y in 0..h {
+        for x in 0..w {
+            pixels.push((((x + y) * 255) / (w + h)) as u8);
+        }
+    }
+    let img: Img<Vec<u8>> = Img::new(pixels, w, h);
+    let config = svt_config().quality(85.0).speed(6);
+
+    let encoded = zenavif::encode_gray8(img.as_ref(), &config, stop()).expect("svt-rs gray encode");
+    assert!(encoded.color_byte_size > 0);
+    assert_eq!(encoded.alpha_byte_size, 0);
+
+    let decoded = zenavif::decode(&encoded.avif_file).expect("must decode via rav1d-safe");
+    assert_eq!(decoded.width(), 128);
+    assert_eq!(decoded.height(), 128);
+    // zenavif expands mono to RGB on decode; all three channels carry Y.
+    let out = decoded
+        .try_as_imgref::<Rgb<u8>>()
+        .expect("mono decode yields RGB8");
+    let mut se = 0u64;
+    for (ya, pb) in img.buf().iter().zip(out.buf().iter()) {
+        let d = i64::from(*ya) - i64::from(pb.g);
+        se += (d * d) as u64;
+    }
+    let psnr = 10.0 * (255.0f64 * 255.0 / ((se as f64 / img.buf().len() as f64).max(1e-9))).log10();
+    eprintln!(
+        "svt_rs q85 gray roundtrip: PSNR {psnr:.2} dB, {} payload bytes",
+        encoded.color_byte_size
+    );
+    // Measured 138.13 dB (numerically exact luma round-trip on this
+    // gradient) / 214 payload bytes on 2026-07-19 at the pinned svtav1 rev
+    // (3cad660b7). The floor only guards against gross regressions.
+    assert!(psnr > 48.0, "gray roundtrip PSNR {psnr:.2} below floor");
 }
 
 // --------------------------------------------------------------------
