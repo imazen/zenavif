@@ -180,11 +180,25 @@ fn main() {
         // Correctness: decode both backends once, compare.
         let a = decode_av1_obu_yuv(&obu, Av1Backend::AomRs);
         let r = decode_av1_obu_yuv(&obu, Av1Backend::Rav1dSafe);
-        let correctness = match (&a, &r) {
+        #[allow(unused_mut)]
+        let mut correctness = match (&a, &r) {
             (Ok(a), Ok(r)) => compare(a, r),
             (Err(_), _) => "aom-rs REJECTED frame".to_string(),
             (_, Err(_)) => "rav1d-safe REJECTED frame".to_string(),
         };
+        // Third arm (rav1d FFI, full asm): must byte-agree with rav1d-safe.
+        #[cfg(feature = "unsafe-asm")]
+        {
+            let f = decode_av1_obu_yuv(&obu, Av1Backend::Rav1dFfi);
+            correctness = match (&f, &r) {
+                (Ok(f), Ok(r)) if compare(f, r) == "byte-identical(aom==rav1d)" => {
+                    format!("{correctness}+ffi-identical")
+                }
+                (Ok(f), Ok(r)) => format!("{correctness}; ffi: {}", compare(f, r)),
+                (Err(_), _) => format!("{correctness}; rav1d-ffi REJECTED frame"),
+                _ => correctness,
+            };
+        }
         eprintln!("cell {label:28} {w}x{h}  {correctness}");
         cells.push(Cell {
             label: label.to_string(),
@@ -208,6 +222,8 @@ fn main() {
             let label = cell.label.clone();
             let obu_a = cell.obu.clone();
             let obu_r = cell.obu.clone();
+            #[cfg(feature = "unsafe-asm")]
+            let obu_f = cell.obu.clone();
             suite.group(label, move |g| {
                 g.throughput(Throughput::Elements(px));
                 g.bench("aom-rs", move |b| {
@@ -222,6 +238,16 @@ fn main() {
                         black_box(d.y.len())
                     })
                 });
+                #[cfg(feature = "unsafe-asm")]
+                {
+                    let obu_f = obu_f.clone();
+                    g.bench("rav1d-ffi-asm", move |b| {
+                        b.iter(|| {
+                            let d = decode_av1_obu_yuv(&obu_f, Av1Backend::Rav1dFfi).unwrap();
+                            black_box(d.y.len())
+                        })
+                    });
+                }
             });
         }
     });
@@ -242,7 +268,7 @@ fn main() {
             .comparisons
             .iter()
             .find(|c| c.group_name == cell.label);
-        let (mut aom_mean, mut rav_mean) = (f64::NAN, f64::NAN);
+        let (mut aom_mean, mut rav_mean, mut ffi_mean) = (f64::NAN, f64::NAN, f64::NAN);
         if let Some(comp) = comp {
             let px = (cell.w * cell.h) as f64;
             for b in &comp.benchmarks {
@@ -271,6 +297,9 @@ fn main() {
                 if b.name == "rav1d-safe" {
                     rav_mean = mean_ns;
                 }
+                if b.name == "rav1d-ffi-asm" {
+                    ffi_mean = mean_ns;
+                }
             }
         }
         let ratio = aom_mean / rav_mean;
@@ -290,6 +319,16 @@ fn main() {
             rav_mean / 1e6,
             px * 1e3 / rav_mean
         );
+        if ffi_mean.is_finite() {
+            eprintln!(
+                "{:<28} {:>9} {:>12.3} {:>12.2}   safe/asm {:.3}x",
+                "",
+                "ffi-asm",
+                ffi_mean / 1e6,
+                px * 1e3 / ffi_mean,
+                rav_mean / ffi_mean
+            );
+        }
     }
 
     fs::write(&out_csv, &csv).expect("write csv");

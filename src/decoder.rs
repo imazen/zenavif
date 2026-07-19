@@ -496,6 +496,77 @@ fn to_color_range(color_range: u8) -> ColorRange {
     }
 }
 
+/// Decode a raw AV1 OBU temporal unit to tight `u16` YUV planes via the
+/// rav1d FFI decoder (upstream rav1d with its full hand-written asm when the
+/// `unsafe-asm` feature selects the `rav1d` crate).
+///
+/// This is the `Av1Backend::Rav1dFfi` arm of the raw-OBU decode seam in
+/// `decode_av1.rs` — single-threaded (threads=1) to match the seam's other
+/// backends, output shape identical to theirs.
+pub(crate) fn decode_obu_yuv_ffi(data: &[u8]) -> Result<crate::decode_av1::DecodedYuv> {
+    use crate::decode_av1::DecodedYuv;
+
+    if data.is_empty() {
+        return Err(at!(Error::Decode {
+            code: -1,
+            msg: "empty AV1 OBU data",
+        }));
+    }
+    let mut config = DecoderConfig::default();
+    config.threads = 1;
+    let mut decoder = Rav1dDecoder::new(&config)?;
+    let picture = decoder.decode(data)?;
+
+    let (w, h) = picture.dimensions();
+    let bit_depth = picture.bit_depth() as i32;
+    let layout = picture.layout();
+    let monochrome = layout == DAV1D_PIXEL_LAYOUT_I400;
+    let (subsampling_x, subsampling_y) = match layout {
+        DAV1D_PIXEL_LAYOUT_I422 => (1, 0),
+        DAV1D_PIXEL_LAYOUT_I444 => (0, 0),
+        // I420 and I400 both signal 1,1 in the sequence header.
+        _ => (1, 1),
+    };
+
+    let (y, u, v, width_uv, height_uv) = if bit_depth > 8 {
+        let p = picture.yuv_planes_u16().ok_or_else(|| {
+            at!(Error::Decode {
+                code: -1,
+                msg: "rav1d FFI picture had no plane data",
+            })
+        })?;
+        (p.y, p.u, p.v, p.chroma_width, p.chroma_height)
+    } else {
+        let p = picture.yuv_planes_u8().ok_or_else(|| {
+            at!(Error::Decode {
+                code: -1,
+                msg: "rav1d FFI picture had no plane data",
+            })
+        })?;
+        (
+            p.y.iter().map(|&s| s as u16).collect(),
+            p.u.iter().map(|&s| s as u16).collect(),
+            p.v.iter().map(|&s| s as u16).collect(),
+            p.chroma_width,
+            p.chroma_height,
+        )
+    };
+
+    Ok(DecodedYuv {
+        y,
+        u,
+        v,
+        width: w as usize,
+        height: h as usize,
+        width_uv,
+        height_uv,
+        bit_depth,
+        monochrome,
+        subsampling_x,
+        subsampling_y,
+    })
+}
+
 /// AVIF decoder
 pub struct AvifDecoder {
     parser: zenavif_parse::AvifParser<'static>,

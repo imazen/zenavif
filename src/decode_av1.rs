@@ -600,6 +600,11 @@ pub enum Av1Backend {
     /// feature.
     #[cfg(feature = "aom-backend")]
     AomRs,
+    /// The rav1d FFI decoder — upstream rav1d with its full hand-written
+    /// assembly (unsafe). Requires the `unsafe-asm` feature. This is the
+    /// asm-speed reference arm of the decode benchmark.
+    #[cfg(feature = "unsafe-asm")]
+    Rav1dFfi,
 }
 
 /// Decode a raw AV1 OBU temporal unit to tight YUV planes via the selected
@@ -611,6 +616,8 @@ pub fn decode_av1_obu_yuv(data: &[u8], backend: Av1Backend) -> Result<DecodedYuv
         Av1Backend::Rav1dSafe => decode_av1_obu_yuv_rav1d(data),
         #[cfg(feature = "aom-backend")]
         Av1Backend::AomRs => decode_av1_obu_yuv_aomrs(data),
+        #[cfg(feature = "unsafe-asm")]
+        Av1Backend::Rav1dFfi => crate::decoder::decode_obu_yuv_ffi(data),
     }
 }
 
