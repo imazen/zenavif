@@ -91,6 +91,16 @@ fn cell_defs() -> Vec<(&'static str, &'static str, &'static str)> {
             "conformance KEY frame0 (aggressive q; >64-block path)",
         ),
         (
+            "small-640x360-b10-q00",
+            "av1-1-b10-00-quantizer-00.ivf",
+            "conformance 10-bit KEY frame0 (high-bitdepth path)",
+        ),
+        (
+            "small-640x360-b10-q32",
+            "av1-1-b10-00-quantizer-32.ivf",
+            "conformance 10-bit KEY frame0 (high-bitdepth path)",
+        ),
+        (
             "2K-1920x1080-conf-intrabc",
             "av1-1-b8-16-intra_only-intrabc-extreme-dv.ivf",
             "conformance intra KEY frame0 (screen-content/intrabc, real bitstream)",
