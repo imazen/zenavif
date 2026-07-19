@@ -1963,9 +1963,13 @@ fn convert_8bit_planar_rgb_yuvcrate(
     let rgb_stride = w * 3;
     let out_bytes: &mut [u8] = rgb::bytemuck::cast_slice_mut(out.as_mut_slice());
     match sampling {
-        ChromaSampling::Cs420 => {
-            yuv::yuv420_to_rgb_bilinear(planar, out_bytes, rgb_stride, ctx.yuv_range, ctx.matrix)
-        }
+        ChromaSampling::Cs420 => crate::yuv_bilinear_fix::yuv420_bilinear_complete(
+            planar,
+            out_bytes,
+            rgb_stride,
+            3,
+            |p, o, s| yuv::yuv420_to_rgb_bilinear(p, o, s, ctx.yuv_range, ctx.matrix),
+        ),
         ChromaSampling::Cs422 => {
             yuv::yuv422_to_rgb_bilinear(planar, out_bytes, rgb_stride, ctx.yuv_range, ctx.matrix)
         }
@@ -2009,9 +2013,13 @@ fn convert_8bit_planar_rgba(
     let rgb_stride = w * 4;
     let out_bytes = rgb::bytemuck::cast_slice_mut(out.as_mut_slice());
     match sampling {
-        ChromaSampling::Cs420 => {
-            yuv::yuv420_to_rgba_bilinear(planar, out_bytes, rgb_stride, ctx.yuv_range, ctx.matrix)
-        }
+        ChromaSampling::Cs420 => crate::yuv_bilinear_fix::yuv420_bilinear_complete(
+            planar,
+            out_bytes,
+            rgb_stride,
+            4,
+            |p, o, s| yuv::yuv420_to_rgba_bilinear(p, o, s, ctx.yuv_range, ctx.matrix),
+        ),
         ChromaSampling::Cs422 => {
             yuv::yuv422_to_rgba_bilinear(planar, out_bytes, rgb_stride, ctx.yuv_range, ctx.matrix)
         }

@@ -28,6 +28,20 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   (`src/encoder_svt_rs.rs`, `tests/svt_rs_backend.rs`)
 
 ### Fixed
+- **Decode corruption: the bottom two rows of every even-height 4:2:0 decode
+  that routed through the `yuv` crate's bilinear converters came back
+  unwritten (black / alpha-0).** Upstream defect in yuv 0.8.12–0.8.16
+  (`yuv420_*_bilinear` / `i0xx_*_bilinear` pair luma row-pairs with
+  overlapping chroma `windows()`, dropping the final pair on even heights;
+  odd heights and 4:2:2 unaffected). Affected zenavif paths: RGBA composite
+  decode (`decoder_managed`), the exotic-matrix RGB fallback, raw-OBU gain
+  map decode (`decode_av1`), and all 8/10/12/16-bit 4:2:0 paths of the
+  legacy `unsafe-asm` decoder. Fixed by `src/yuv_bilinear_fix.rs`: run the
+  upstream converter, then re-run it on a tight 2-row sub-image with the
+  last chroma row duplicated (the crate's own odd-height clamp semantics) —
+  already-written rows stay byte-identical. Found by the SvtRs RGBA
+  round-trip test (color PSNR 20.10 dB → 50.20 dB); regression-guarded by
+  unit tests including a canary that fails when upstream fixes the bug.
 - `cargo test` / `cargo test --features encode` failed to compile on any
   feature set that leaves `zencodec` or `encode` off: the
   `gainmap_render_probe`, `gainmap_reencode`, `twelvebit_probe`,
