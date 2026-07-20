@@ -682,7 +682,12 @@ instances; 420/q30 hottest). **Until rav1d-safe releases past 0.5.7 and the
 zenavif dep bump**, registry builds ship the panic+wedge behavior — decode
 under heavy parallel tile-threaded load can still rarely hang. At the dep
 bump: raise the rav1d-safe minimum past 0.5.7 and re-run the hang_stress
-verification.
+verification. 2026-07-20: now that `codec-corpus` resolves on the dev-32gb
+box (symlink /root/codec-corpus -> /root/work/codec-corpus), the
+`codec::tests::animated_avif_animation_frame_decoder_roundtrip` test hits
+this wedge REPRODUCIBLY when the full `--features encode,zencodec` suite
+runs in parallel (2 of 3 runs; futex_do_wait, 0 CPU), while passing solo
+in ~3 s — treat a wedged animated test as this bug, not a regression.
 
 ## TODO: Encoding Enhancements
 

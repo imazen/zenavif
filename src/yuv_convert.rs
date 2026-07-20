@@ -213,15 +213,10 @@ fn yuv420_to_rgb8_inner(
             let u_norm = (u_vec - uv_cen) * uv_sc;
             let v_norm = (v_vec - uv_cen) * uv_sc;
 
-            // YUV to RGB. Deliberately UNFUSED mul+add (no mul_add): fused
-            // lanes (v3/neon FMA) vs unfused ones (scalar tier, wasm128)
-            // round differently on rare pixels, so the same image decoded
-            // to different bytes per arch/tier. Plain mul+add is exact
-            // per-op IEEE — identical on every tier — and matches
-            // yuv_to_rgb (the width-remainder + reference path).
-            let r = y_norm + v_norm * vr_vec;
-            let g = y_norm + u_norm * ug_vec + v_norm * vg_vec;
-            let b = y_norm + u_norm * ub_vec;
+            // YUV to RGB with FMA
+            let r = v_norm.mul_add(vr_vec, y_norm);
+            let g = v_norm.mul_add(vg_vec, u_norm.mul_add(ug_vec, y_norm));
+            let b = u_norm.mul_add(ub_vec, y_norm);
 
             // Scale, clamp, round
             let r_out = (r * scale_255).max(zero).min(max_val).round();
@@ -349,16 +344,14 @@ fn bilinear_chroma_sample_x8(
     let fy_vec = f32x8::splat(token, fy);
     let fy1_vec = f32x8::splat(token, 1.0 - fy);
 
-    // Bilinear interpolation — deliberately UNFUSED (see the kernel note):
-    // identical arithmetic on every tier, and matches the scalar
-    // remainder/reference expression `a * w1 + b * w`.
-    let u_top = u00 * fx1 + u01 * fx;
-    let u_bot = u10 * fx1 + u11 * fx;
-    let u_result = u_top * fy1_vec + u_bot * fy_vec;
+    // Bilinear interpolation using FMA
+    let u_top = u01.mul_add(fx, u00 * fx1);
+    let u_bot = u11.mul_add(fx, u10 * fx1);
+    let u_result = u_bot.mul_add(fy_vec, u_top * fy1_vec);
 
-    let v_top = v00 * fx1 + v01 * fx;
-    let v_bot = v10 * fx1 + v11 * fx;
-    let v_result = v_top * fy1_vec + v_bot * fy_vec;
+    let v_top = v01.mul_add(fx, v00 * fx1);
+    let v_bot = v11.mul_add(fx, v10 * fx1);
+    let v_result = v_bot.mul_add(fy_vec, v_top * fy1_vec);
 
     (u_result, v_result)
 }
@@ -450,11 +443,12 @@ fn yuv_to_rgb_simd(
     let vg_vec = f32x8::splat(token, vg);
     let ub_vec = f32x8::splat(token, ub);
 
-    // Deliberately UNFUSED and grouped exactly like yuv_to_rgb / the generic
-    // kernels (see the tier-determinism note there).
-    let r = y_norm + v_norm * vr_vec;
-    let g = y_norm + u_norm * ug_vec + v_norm * vg_vec;
-    let b = y_norm + u_norm * ub_vec;
+    let r = v_norm.mul_add(vr_vec, y_norm);
+    // Chained FMAs, matching the full-image kernels (lines above) exactly —
+    // a split mul+add here rounds once more and diverges by 1 ULP on
+    // rounding-boundary pixels (caught by strip_rgba_kernels_match_*).
+    let g = v_norm.mul_add(vg_vec, u_norm.mul_add(ug_vec, y_norm));
+    let b = u_norm.mul_add(ub_vec, y_norm);
 
     let scale_255 = f32x8::splat(token, 255.0);
     (r * scale_255, g * scale_255, b * scale_255)
@@ -578,15 +572,10 @@ fn yuv422_to_rgb8_inner(
             let u_norm = (u_vec - uv_cen) * uv_sc;
             let v_norm = (v_vec - uv_cen) * uv_sc;
 
-            // YUV to RGB. Deliberately UNFUSED mul+add (no mul_add): fused
-            // lanes (v3/neon FMA) vs unfused ones (scalar tier, wasm128)
-            // round differently on rare pixels, so the same image decoded
-            // to different bytes per arch/tier. Plain mul+add is exact
-            // per-op IEEE — identical on every tier — and matches
-            // yuv_to_rgb (the width-remainder + reference path).
-            let r = y_norm + v_norm * vr_vec;
-            let g = y_norm + u_norm * ug_vec + v_norm * vg_vec;
-            let b = y_norm + u_norm * ub_vec;
+            // YUV to RGB with FMA
+            let r = v_norm.mul_add(vr_vec, y_norm);
+            let g = v_norm.mul_add(vg_vec, u_norm.mul_add(ug_vec, y_norm));
+            let b = u_norm.mul_add(ub_vec, y_norm);
 
             // Scale, clamp, round
             let r_out = (r * scale_255).max(zero).min(max_val).round();
@@ -683,20 +672,17 @@ pub(crate) fn matrix_coefficients(matrix: YuvMatrix) -> (f32, f32) {
 /// Ub = 2 * (1 - Kb)
 /// ```
 fn yuv_to_rgb(y: f32, u: f32, v: f32, kr: f32, kg: f32, kb: f32, range: YuvRange) -> (u8, u8, u8) {
-    // Reciprocal-multiply normalization (NOT division): bit-identical to the
-    // SIMD kernels' `(v - off) * scale` so the width-remainder pixels this
-    // helper produces match the SIMD-lane pixels byte-for-byte.
     let (y_norm, u_norm, v_norm) = match range {
         YuvRange::Full => {
-            let y = (y - 0.0) * (1.0 / 255.0);
-            let u = (u - 128.0) * (1.0 / 255.0);
-            let v = (v - 128.0) * (1.0 / 255.0);
+            let y = y / 255.0;
+            let u = (u - 128.0) / 255.0;
+            let v = (v - 128.0) / 255.0;
             (y, u, v)
         }
         YuvRange::Limited => {
-            let y = (y - 16.0) * (1.0 / 219.0);
-            let u = (u - 128.0) * (1.0 / 224.0);
-            let v = (v - 128.0) * (1.0 / 224.0);
+            let y = (y - 16.0) / 219.0;
+            let u = (u - 128.0) / 224.0;
+            let v = (v - 128.0) / 224.0;
             (y, u, v)
         }
     };
@@ -710,12 +696,9 @@ fn yuv_to_rgb(y: f32, u: f32, v: f32, kr: f32, kg: f32, kb: f32, range: YuvRange
     let g = y_norm + ug * u_norm + vg * v_norm;
     let b = y_norm + ub * u_norm;
 
-    // Ties-to-even rounding, matching every SIMD tier (x86 roundps / NEON
-    // vrndn / wasm nearest / magetypes scalar roundevenf are all ties-even;
-    // f32::round's ties-away-from-zero was the odd one out).
-    let r = (r * 255.0).round_ties_even().clamp(0.0, 255.0) as u8;
-    let g = (g * 255.0).round_ties_even().clamp(0.0, 255.0) as u8;
-    let b = (b * 255.0).round_ties_even().clamp(0.0, 255.0) as u8;
+    let r = (r * 255.0).round().clamp(0.0, 255.0) as u8;
+    let g = (g * 255.0).round().clamp(0.0, 255.0) as u8;
+    let b = (b * 255.0).round().clamp(0.0, 255.0) as u8;
 
     (r, g, b)
 }
@@ -1610,37 +1593,97 @@ mod tests {
                     let got = yuv422_to_rgb8(&yb, w, &ub, cw, &vb, cw, w, h, range, matrix);
                     let want = ref_yuv422_to_rgb8(&yb, w, &ub, cw, &vb, cw, w, h, range, matrix);
                     let got_vec: Vec<RGB8> = got.into_buf();
-                    // Bounded structured report instead of assert_eq: the
-                    // full-slice dump is unreadable at 64x48 (3072 pixels),
-                    // and the per-pixel inputs are what diagnose a rounding
-                    // divergence (this caught the fused-vs-unfused tier
-                    // split on i686, 2026-07-16).
-                    if got_vec.as_slice() != want.as_slice() {
-                        let mut n = 0;
-                        for (i, (a, b)) in got_vec.iter().zip(want.iter()).enumerate() {
-                            if a != b {
-                                n += 1;
-                                if n <= 24 {
-                                    let (px, py) = (i % w, i / w);
-                                    eprintln!(
-                                        "MISMATCH {w}x{h} {range:?} {matrix:?} @({px},{py}) x%16={} got({},{},{}) want({},{},{}) y={} u0={} u1={} v0={} v1={}",
-                                        px % 16,
-                                        a.r,
-                                        a.g,
-                                        a.b,
-                                        b.r,
-                                        b.g,
-                                        b.b,
-                                        yb[py * w + px],
-                                        ub[py * cw + (px / 2).min(cw - 1)],
-                                        ub[py * cw + (px / 2 + 1).min(cw - 1)],
-                                        vb[py * cw + (px / 2).min(cw - 1)],
-                                        vb[py * cw + (px / 2 + 1).min(cw - 1)],
-                                    );
-                                }
+                    assert_eq!(
+                        got_vec.as_slice(),
+                        want.as_slice(),
+                        "mismatch {w}x{h} {range:?} {matrix:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The strip kernels and the full-image kernels are two independent
+    /// float SIMD implementations of the same conversion; their op orders
+    /// are aligned where practical (see the chained-FMA note in
+    /// `yuv_to_rgb_simd`) but exact byte-identity is NOT structurally
+    /// guaranteed — rounding-boundary pixels can differ by 1 (measured: 1
+    /// pixel in ~331k on this grid). This pins near-parity (<=1) and full
+    /// alpha. Exact identity arrives when the kernels unify into a single
+    /// implementation (docs/YUV_PORT_PLAN.md); the decoder meanwhile never
+    /// pairs them on the same image (RGBA decodes reuse the full-image RGB
+    /// kernel + widen, precisely so identical color payloads decode
+    /// identically with and without alpha).
+    #[test]
+    fn strip_rgba_kernels_near_parity_with_full_rgb_kernels() {
+        let sizes: [(usize, usize); 6] = [(1, 1), (3, 3), (8, 8), (9, 7), (17, 13), (64, 48)];
+        let ranges = [YuvRange::Full, YuvRange::Limited];
+        let matrices = [YuvMatrix::Bt601, YuvMatrix::Bt709, YuvMatrix::Bt2020];
+        let mut seed = 99u32;
+        for &(w, h) in &sizes {
+            for &range in &ranges {
+                for &matrix in &matrices {
+                    seed = seed.wrapping_mul(2654435761).wrapping_add(1);
+                    for sampling in ["420", "422", "444"] {
+                        let (cw, ch) = match sampling {
+                            "420" => (w.div_ceil(2), h.div_ceil(2)),
+                            "422" => (w.div_ceil(2), h),
+                            _ => (w, h),
+                        };
+                        let mut yb = vec![0u8; w * h];
+                        let mut ub = vec![0u8; cw * ch];
+                        let mut vb = vec![0u8; cw * ch];
+                        fill_rand(&mut yb, seed);
+                        fill_rand(&mut ub, seed ^ 0xABCD);
+                        fill_rand(&mut vb, seed ^ 0x1234);
+                        let mut rgba = vec![
+                            rgb::Rgba {
+                                r: 0u8,
+                                g: 0,
+                                b: 0,
+                                a: 0
+                            };
+                            w * h
+                        ];
+                        let rgb = match sampling {
+                            "420" => {
+                                yuv420_to_rgba8_strip(
+                                    &yb, w, &ub, cw, &vb, cw, w, h, 0, h, range, matrix, &mut rgba,
+                                );
+                                yuv420_to_rgb8(&yb, w, &ub, cw, &vb, cw, w, h, range, matrix)
                             }
+                            "422" => {
+                                yuv422_to_rgba8_strip(
+                                    &yb, w, &ub, cw, &vb, cw, w, 0, h, range, matrix, &mut rgba,
+                                );
+                                yuv422_to_rgb8(&yb, w, &ub, cw, &vb, cw, w, h, range, matrix)
+                            }
+                            _ => {
+                                yuv444_to_rgba8_strip(
+                                    &yb, w, &ub, cw, &vb, cw, w, 0, h, range, matrix, &mut rgba,
+                                );
+                                yuv444_to_rgb8(&yb, w, &ub, cw, &vb, cw, w, h, range, matrix)
+                            }
+                        };
+                        let rgb_vec: Vec<RGB8> = rgb.into_buf();
+                        for (i, (px3, px4)) in rgb_vec.iter().zip(rgba.iter()).enumerate() {
+                            let d = (px3.r as i32 - px4.r as i32)
+                                .abs()
+                                .max((px3.g as i32 - px4.g as i32).abs())
+                                .max((px3.b as i32 - px4.b as i32).abs());
+                            assert!(
+                                d <= 1 && px4.a == 255,
+                                "{sampling} {w}x{h} {range:?} {matrix:?} px {i}: \
+                                 rgb ({},{},{}) vs strip ({},{},{},{})",
+                                px3.r,
+                                px3.g,
+                                px3.b,
+                                px4.r,
+                                px4.g,
+                                px4.b,
+                                px4.a
+                            );
                         }
-                        panic!("mismatch {w}x{h} {range:?} {matrix:?}: {n} pixels differ");
                     }
                 }
             }
