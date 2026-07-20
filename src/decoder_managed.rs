@@ -1159,7 +1159,9 @@ impl ManagedAvifDecoder {
                      subsampled identity has no defined reconstruction"
                 )));
             }
-            (sampling, _) => convert_16bit_planar(&planes, sampling, info.bit_depth, ctx)?,
+            (sampling, _) => {
+                convert_16bit_planar(&planes, sampling, info.bit_depth, resolved, ctx)?
+            }
         };
 
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
@@ -2234,6 +2236,7 @@ fn convert_16bit_planar(
     planes: &Planes16<'_>,
     sampling: ChromaSampling,
     bit_depth: u8,
+    resolved: ResolvedMatrix,
     ctx: ConvertCtx,
 ) -> Result<PixelBuffer> {
     let y_view = planes.y();
@@ -2256,10 +2259,113 @@ fn convert_16bit_planar(
         height: h,
     };
 
+    // In-house unified kernels for the matrices they cover; the `yuv`
+    // crate remains the exotic-matrix fallback (same split as 8-bit).
+    if let Some(our_matrix) = resolved.to_our() {
+        let our_range = match ctx.yuv_range {
+            YuvRange::Full => OurYuvRange::Full,
+            YuvRange::Limited => OurYuvRange::Limited,
+        };
+        return convert_16bit_planar_inhouse(
+            &planar, sampling, bit_depth, ctx, our_range, our_matrix,
+        );
+    }
     if ctx.has_alpha {
         convert_16bit_planar_rgba(&planar, sampling, bit_depth, ctx)
     } else {
         convert_16bit_planar_rgb(&planar, sampling, bit_depth, ctx)
+    }
+}
+
+/// 16-bit planar → RGB(A)16 via the in-house unified kernels (native-depth
+/// output; RGBA alpha = the native ceiling, exactly like the yuv-crate
+/// path). Same kernels as every other depth/output — byte-identity across
+/// RGB-vs-RGBA and full-vs-strip is structural.
+fn convert_16bit_planar_inhouse(
+    planar: &YuvPlanarImage<'_, u16>,
+    sampling: ChromaSampling,
+    bit_depth: u8,
+    ctx: ConvertCtx,
+    our_range: OurYuvRange,
+    our_matrix: OurYuvMatrix,
+) -> Result<PixelBuffer> {
+    let our_sampling = match sampling {
+        ChromaSampling::Cs420 => crate::yuv_convert::ChromaSubsampling::Cs420,
+        ChromaSampling::Cs422 => crate::yuv_convert::ChromaSubsampling::Cs422,
+        ChromaSampling::Cs444 => crate::yuv_convert::ChromaSubsampling::Cs444,
+        ChromaSampling::Monochrome => {
+            return Err(at!(Error::Decode {
+                code: -1,
+                msg: "Monochrome should not reach chroma conversion",
+            }));
+        }
+    };
+    let (w, h) = ctx.dims();
+    let bw = ctx.buffer_width;
+    let bh = ctx.buffer_height;
+    if ctx.has_alpha {
+        let mut out = crate::alloc_util::alloc_filled(
+            ctx.alloc_pref,
+            true,
+            Rgba {
+                r: 0u16,
+                g: 0,
+                b: 0,
+                a: 0,
+            },
+            ctx.buffer_pixel_count,
+        )?;
+        crate::yuv_convert::yuv16_to_rgbx_strip::<Rgba<u16>>(
+            our_sampling,
+            planar.y_plane,
+            planar.y_stride as usize,
+            planar.u_plane,
+            planar.u_stride as usize,
+            planar.v_plane,
+            planar.v_stride as usize,
+            bw,
+            bh,
+            0,
+            bh,
+            our_range,
+            our_matrix,
+            bit_depth,
+            &mut out,
+        );
+        PixelBuffer::from_pixels(out, w, h)
+            .map(Into::into)
+            .map_err(|_| at!(Error::OutOfMemory))
+    } else {
+        let mut out = crate::alloc_util::alloc_filled(
+            ctx.alloc_pref,
+            true,
+            Rgb {
+                r: 0u16,
+                g: 0,
+                b: 0,
+            },
+            ctx.buffer_pixel_count,
+        )?;
+        crate::yuv_convert::yuv16_to_rgbx_strip::<Rgb<u16>>(
+            our_sampling,
+            planar.y_plane,
+            planar.y_stride as usize,
+            planar.u_plane,
+            planar.u_stride as usize,
+            planar.v_plane,
+            planar.v_stride as usize,
+            bw,
+            bh,
+            0,
+            bh,
+            our_range,
+            our_matrix,
+            bit_depth,
+            &mut out,
+        );
+        PixelBuffer::from_pixels(out, w, h)
+            .map(Into::into)
+            .map_err(|_| at!(Error::OutOfMemory))
     }
 }
 

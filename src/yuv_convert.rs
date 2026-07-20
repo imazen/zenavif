@@ -125,8 +125,9 @@ pub(crate) fn matrix_coefficients(matrix: YuvMatrix) -> (f32, f32) {
 /// ```
 fn yuv_to_rgb(y: f32, u: f32, v: f32, kr: f32, kg: f32, kb: f32, range: YuvRange) -> (u8, u8, u8) {
     let _ = kg; // derived inside RecipeConsts
-    let c = RecipeConsts::new(YuvMatrixKrKb { kr, kb }, range);
-    convert_one(y, u, v, &c)
+    let c = RecipeConsts::new(YuvMatrixKrKb { kr, kb }, range, 8);
+    let (r, g, b) = convert_one(y, u, v, &c);
+    (r as u8, g as u8, b as u8)
 }
 
 /// (Kr, Kb) pair — the only matrix inputs the recipe needs.
@@ -136,7 +137,10 @@ struct YuvMatrixKrKb {
     kb: f32,
 }
 
-/// Hoisted per-conversion constants of the canonical recipe.
+/// Hoisted per-conversion constants of the canonical recipe, parameterized
+/// by bit depth (8/10/12/16): normalization spans scale as `<< (d - 8)`
+/// per BT.601/709/2100 convention, output values are native-depth
+/// (`0..=2^d - 1`).
 #[derive(Clone, Copy)]
 struct RecipeConsts {
     y_off: f32,
@@ -147,15 +151,24 @@ struct RecipeConsts {
     ug: f32,
     vg: f32,
     ub: f32,
+    /// `2^d - 1` — the clamp ceiling and output scale.
+    out_max: f32,
 }
 
 impl RecipeConsts {
-    fn new(m: YuvMatrixKrKb, range: YuvRange) -> Self {
+    fn new(m: YuvMatrixKrKb, range: YuvRange, bit_depth: u8) -> Self {
         let (kr, kb) = (m.kr, m.kb);
         let kg = 1.0 - kr - kb;
+        let shift = u32::from(bit_depth) - 8;
+        let max = ((1u32 << bit_depth) - 1) as f32;
         let (y_off, y_sc, uv_cen, uv_sc) = match range {
-            YuvRange::Full => (0.0f32, 1.0 / 255.0, 128.0f32, 1.0 / 255.0),
-            YuvRange::Limited => (16.0, 1.0 / 219.0, 128.0, 1.0 / 224.0),
+            YuvRange::Full => (0.0f32, 1.0 / max, (128u32 << shift) as f32, 1.0 / max),
+            YuvRange::Limited => (
+                (16u32 << shift) as f32,
+                1.0 / ((219u32 << shift) as f32),
+                (128u32 << shift) as f32,
+                1.0 / ((224u32 << shift) as f32),
+            ),
         };
         Self {
             y_off,
@@ -166,17 +179,20 @@ impl RecipeConsts {
             ug: -2.0 * kb * (1.0 - kb) / kg,
             vg: -2.0 * kr * (1.0 - kr) / kg,
             ub: 2.0 * (1.0 - kb),
+            out_max: max,
         }
     }
 }
 
-/// One sample through the canonical recipe, scalar form. `f32::mul_add`
-/// (single-rounding FMA) and `round_ties_even` (vroundps / NEON vrndn /
-/// wasm nearest semantics) keep this bit-identical to the vector lanes —
-/// and auto-vectorizable: in a plain loop inside a target_feature region,
-/// LLVM lowers it to the same vfmadd/vroundps sequence at full width.
+/// One sample through the canonical recipe, scalar form; returns the three
+/// channels rounded and clamped to `[0, out_max]` (cast at the store).
+/// `f32::mul_add` (single-rounding FMA) and `round_ties_even` (vroundps /
+/// NEON vrndn / wasm nearest semantics) keep this bit-identical to any
+/// vector lowering — and auto-vectorizable: in a plain loop inside a
+/// target_feature region, LLVM lowers it to the same vfmadd/vroundps
+/// sequence at full width.
 #[inline(always)]
-fn convert_one(y: f32, u: f32, v: f32, c: &RecipeConsts) -> (u8, u8, u8) {
+fn convert_one(y: f32, u: f32, v: f32, c: &RecipeConsts) -> (f32, f32, f32) {
     let y_norm = (y - c.y_off) * c.y_sc;
     let u_norm = (u - c.uv_cen) * c.uv_sc;
     let v_norm = (v - c.uv_cen) * c.uv_sc;
@@ -185,28 +201,82 @@ fn convert_one(y: f32, u: f32, v: f32, c: &RecipeConsts) -> (u8, u8, u8) {
     let g = v_norm.mul_add(c.vg, u_norm.mul_add(c.ug, y_norm));
     let b = u_norm.mul_add(c.ub, y_norm);
 
-    let r = (r * 255.0).max(0.0).min(255.0).round_ties_even() as u8;
-    let g = (g * 255.0).max(0.0).min(255.0).round_ties_even() as u8;
-    let b = (b * 255.0).max(0.0).min(255.0).round_ties_even() as u8;
+    let r = (r * c.out_max).max(0.0).min(c.out_max).round_ties_even();
+    let g = (g * c.out_max).max(0.0).min(c.out_max).round_ties_even();
+    let b = (b * c.out_max).max(0.0).min(c.out_max).round_ties_even();
     (r, g, b)
 }
 
-/// Output pixel type for the conversion kernels.
+/// Input sample type the kernels read (u8 for 8-bit planes, u16 for
+/// 10/12/16-bit planes; values are native-depth).
+pub(crate) trait YuvSample: Copy {
+    fn to_f32(self) -> f32;
+}
+
+impl YuvSample for u8 {
+    #[inline(always)]
+    fn to_f32(self) -> f32 {
+        self as f32
+    }
+}
+
+impl YuvSample for u16 {
+    #[inline(always)]
+    fn to_f32(self) -> f32 {
+        self as f32
+    }
+}
+
+/// Output pixel type for the conversion kernels. `from_rgbf` receives
+/// channels already rounded/clamped to `[0, max]` where `max = 2^d - 1`;
+/// alpha (where present) is filled with `max` (native-depth opaque).
 pub(crate) trait StripPixel: Copy + Default {
-    fn from_rgb(r: u8, g: u8, b: u8) -> Self;
+    fn from_rgbf(r: f32, g: f32, b: f32, max: f32) -> Self;
 }
 
 impl StripPixel for RGB8 {
     #[inline(always)]
-    fn from_rgb(r: u8, g: u8, b: u8) -> Self {
-        RGB8 { r, g, b }
+    fn from_rgbf(r: f32, g: f32, b: f32, _max: f32) -> Self {
+        RGB8 {
+            r: r as u8,
+            g: g as u8,
+            b: b as u8,
+        }
     }
 }
 
 impl StripPixel for Rgba<u8> {
     #[inline(always)]
-    fn from_rgb(r: u8, g: u8, b: u8) -> Self {
-        Rgba { r, g, b, a: 255 }
+    fn from_rgbf(r: f32, g: f32, b: f32, _max: f32) -> Self {
+        Rgba {
+            r: r as u8,
+            g: g as u8,
+            b: b as u8,
+            a: 255,
+        }
+    }
+}
+
+impl StripPixel for rgb::Rgb<u16> {
+    #[inline(always)]
+    fn from_rgbf(r: f32, g: f32, b: f32, _max: f32) -> Self {
+        rgb::Rgb {
+            r: r as u16,
+            g: g as u16,
+            b: b as u16,
+        }
+    }
+}
+
+impl StripPixel for Rgba<u16> {
+    #[inline(always)]
+    fn from_rgbf(r: f32, g: f32, b: f32, max: f32) -> Self {
+        Rgba {
+            r: r as u16,
+            g: g as u16,
+            b: b as u16,
+            a: max as u16,
+        }
     }
 }
 
@@ -219,16 +289,18 @@ impl StripPixel for Rgba<u8> {
 // AVX-512 (v4x/v4, needs the archmage `avx512` feature), AVX2/FMA (v3),
 // NEON, wasm SIMD, scalar — one `#[magetypes]` list, no per-arch forks.
 //
-// Structure per kernel: SIMD main loop over 8-pixel blocks (chroma gather
-// is scalar — random access; normalize/matrix/clamp/store are vector) plus
-// a scalar remainder through [`yuv_to_rgb`], which is bit-identical to the
-// lanes (canonical-recipe module docs above).
+// Structure per kernel: separable vectorizable chroma passes feeding a
+// plain per-pixel canonical-recipe loop that LLVM auto-vectorizes at full
+// register width. Kernels are generic over the input sample (u8 | u16
+// native-depth) and the output pixel (RGB/RGBA, 8/16-bit).
 
 /// Interpolate one chroma row horizontally from `cw = ceil(width/2)`
 /// samples to `width` positions (the AVIF/AV1 center-sited bilinear:
 /// even x -> 0.25·c[k-1] + 0.75·c[k], odd x -> 0.75·c[k] + 0.25·c[k+1],
-/// edges clamped). The weights are dyadic and the inputs are u8-valued, so
-/// every product and sum is EXACT in f32 — this separable formulation is
+/// edges clamped). The weights are dyadic and the inputs are native-depth
+/// integers (<= 16 bits), so
+/// every product and sum needs <= 20 mantissa bits and is EXACT in f32 —
+/// this separable formulation is
 /// bit-identical to the direct 4-term bilinear, and each loop is a
 /// contiguous windows(2) shape LLVM vectorizes.
 #[inline(always)]
@@ -253,11 +325,11 @@ fn interp_chroma_row_h(src: &[f32], width: usize, dst: &mut [f32]) {
     }
 }
 
-/// Widen one u8 chroma row to f32.
+/// Widen one chroma row to f32.
 #[inline(always)]
-fn widen_row(src: &[u8], n: usize, dst: &mut [f32]) {
+fn widen_row<S: YuvSample>(src: &[S], n: usize, dst: &mut [f32]) {
     for (d, &v) in dst[..n].iter_mut().zip(&src[..n]) {
-        *d = v as f32;
+        *d = v.to_f32();
     }
 }
 
@@ -269,13 +341,13 @@ fn widen_row(src: &[u8], n: usize, dst: &mut [f32]) {
 /// dyadic-weight interpolation makes this bit-identical to the direct
 /// 4-term bilinear at every pixel.
 #[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
-fn yuv420_strip_kernel<P: StripPixel>(
+fn yuv420_strip_kernel<S: YuvSample, P: StripPixel>(
     token: Token,
-    y_plane: &[u8],
+    y_plane: &[S],
     y_stride: usize,
-    u_plane: &[u8],
+    u_plane: &[S],
     u_stride: usize,
-    v_plane: &[u8],
+    v_plane: &[S],
     v_stride: usize,
     width: usize,
     total_height: usize,
@@ -283,11 +355,12 @@ fn yuv420_strip_kernel<P: StripPixel>(
     strip_height: usize,
     range: YuvRange,
     matrix: YuvMatrix,
+    bit_depth: u8,
     out: &mut [P],
 ) {
     let _ = token;
     let (kr, kb) = matrix_coefficients(matrix);
-    let c = RecipeConsts::new(YuvMatrixKrKb { kr, kb }, range);
+    let c = RecipeConsts::new(YuvMatrixKrKb { kr, kb }, range, bit_depth);
     let chroma_width = width.div_ceil(2);
     let chroma_height = total_height.div_ceil(2);
 
@@ -316,8 +389,8 @@ fn yuv420_strip_kernel<P: StripPixel>(
             let v0 = &v_plane[cy0 * v_stride..][..chroma_width];
             let v1 = &v_plane[cy1 * v_stride..][..chroma_width];
             for k in 0..chroma_width {
-                u_mid[k] = u0[k] as f32 * fy1 + u1[k] as f32 * fy;
-                v_mid[k] = v0[k] as f32 * fy1 + v1[k] as f32 * fy;
+                u_mid[k] = u0[k].to_f32() * fy1 + u1[k].to_f32() * fy;
+                v_mid[k] = v0[k].to_f32() * fy1 + v1[k].to_f32() * fy;
             }
             // Pass 2: horizontal interpolation to full width.
             interp_chroma_row_h(u_mid, width, &mut uf);
@@ -328,8 +401,8 @@ fn yuv420_strip_kernel<P: StripPixel>(
         let y_row = &y_plane[y_pos * y_stride..][..width];
         let out_row = &mut out[row * width..][..width];
         for x in 0..width {
-            let (r, g, b) = convert_one(y_row[x] as f32, uf[x], vf[x], &c);
-            out_row[x] = P::from_rgb(r, g, b);
+            let (r, g, b) = convert_one(y_row[x].to_f32(), uf[x], vf[x], &c);
+            out_row[x] = P::from_rgbf(r, g, b, c.out_max);
         }
     }
 }
@@ -338,24 +411,25 @@ fn yuv420_strip_kernel<P: StripPixel>(
 /// chroma resolution) — widen + horizontal pass + the auto-vectorized
 /// per-pixel loop. See [`yuv420_strip_kernel`] for the exactness argument.
 #[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
-fn yuv422_strip_kernel<P: StripPixel>(
+fn yuv422_strip_kernel<S: YuvSample, P: StripPixel>(
     token: Token,
-    y_plane: &[u8],
+    y_plane: &[S],
     y_stride: usize,
-    u_plane: &[u8],
+    u_plane: &[S],
     u_stride: usize,
-    v_plane: &[u8],
+    v_plane: &[S],
     v_stride: usize,
     width: usize,
     y_start: usize,
     strip_height: usize,
     range: YuvRange,
     matrix: YuvMatrix,
+    bit_depth: u8,
     out: &mut [P],
 ) {
     let _ = token;
     let (kr, kb) = matrix_coefficients(matrix);
-    let c = RecipeConsts::new(YuvMatrixKrKb { kr, kb }, range);
+    let c = RecipeConsts::new(YuvMatrixKrKb { kr, kb }, range, bit_depth);
     let chroma_width = width.div_ceil(2);
 
     let mut uv_mid = vec![0f32; 2 * chroma_width];
@@ -376,8 +450,8 @@ fn yuv422_strip_kernel<P: StripPixel>(
         let y_row = &y_plane[y_pos * y_stride..][..width];
         let out_row = &mut out[row * width..][..width];
         for x in 0..width {
-            let (r, g, b) = convert_one(y_row[x] as f32, uf[x], vf[x], &c);
-            out_row[x] = P::from_rgb(r, g, b);
+            let (r, g, b) = convert_one(y_row[x].to_f32(), uf[x], vf[x], &c);
+            out_row[x] = P::from_rgbf(r, g, b, c.out_max);
         }
     }
 }
@@ -390,24 +464,25 @@ fn yuv422_strip_kernel<P: StripPixel>(
 /// contiguous). Byte-identity with the other kernels is structural: same
 /// elementwise IEEE ops, whatever the vector width.
 #[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
-fn yuv444_strip_kernel<P: StripPixel>(
+fn yuv444_strip_kernel<S: YuvSample, P: StripPixel>(
     token: Token,
-    y_plane: &[u8],
+    y_plane: &[S],
     y_stride: usize,
-    u_plane: &[u8],
+    u_plane: &[S],
     u_stride: usize,
-    v_plane: &[u8],
+    v_plane: &[S],
     v_stride: usize,
     width: usize,
     y_start: usize,
     strip_height: usize,
     range: YuvRange,
     matrix: YuvMatrix,
+    bit_depth: u8,
     out: &mut [P],
 ) {
     let _ = token;
     let (kr, kb) = matrix_coefficients(matrix);
-    let c = RecipeConsts::new(YuvMatrixKrKb { kr, kb }, range);
+    let c = RecipeConsts::new(YuvMatrixKrKb { kr, kb }, range, bit_depth);
 
     for row in 0..strip_height {
         let y_pos = y_start + row;
@@ -419,8 +494,9 @@ fn yuv444_strip_kernel<P: StripPixel>(
         let out_row = &mut out[row * width..][..width];
 
         for x in 0..width {
-            let (r, g, b) = convert_one(y_row[x] as f32, u_row[x] as f32, v_row[x] as f32, &c);
-            out_row[x] = P::from_rgb(r, g, b);
+            let (r, g, b) =
+                convert_one(y_row[x].to_f32(), u_row[x].to_f32(), v_row[x].to_f32(), &c);
+            out_row[x] = P::from_rgbf(r, g, b, c.out_max);
         }
     }
 }
@@ -520,7 +596,7 @@ pub fn yuv420_to_rgb8_strip(
     out: &mut [RGB8],
 ) {
     incant!(
-        yuv420_strip_kernel::<RGB8>(
+        yuv420_strip_kernel::<u8, RGB8>(
             y_plane,
             y_stride,
             u_plane,
@@ -533,6 +609,7 @@ pub fn yuv420_to_rgb8_strip(
             strip_height,
             range,
             matrix,
+            8,
             out
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
@@ -556,7 +633,7 @@ pub fn yuv420_to_rgba8_strip(
     out: &mut [Rgba<u8>],
 ) {
     incant!(
-        yuv420_strip_kernel::<Rgba<u8>>(
+        yuv420_strip_kernel::<u8, Rgba<u8>>(
             y_plane,
             y_stride,
             u_plane,
@@ -569,6 +646,7 @@ pub fn yuv420_to_rgba8_strip(
             strip_height,
             range,
             matrix,
+            8,
             out
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
@@ -591,7 +669,7 @@ pub fn yuv422_to_rgb8_strip(
     out: &mut [RGB8],
 ) {
     incant!(
-        yuv422_strip_kernel::<RGB8>(
+        yuv422_strip_kernel::<u8, RGB8>(
             y_plane,
             y_stride,
             u_plane,
@@ -603,6 +681,7 @@ pub fn yuv422_to_rgb8_strip(
             strip_height,
             range,
             matrix,
+            8,
             out
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
@@ -625,7 +704,7 @@ pub fn yuv422_to_rgba8_strip(
     out: &mut [Rgba<u8>],
 ) {
     incant!(
-        yuv422_strip_kernel::<Rgba<u8>>(
+        yuv422_strip_kernel::<u8, Rgba<u8>>(
             y_plane,
             y_stride,
             u_plane,
@@ -637,6 +716,7 @@ pub fn yuv422_to_rgba8_strip(
             strip_height,
             range,
             matrix,
+            8,
             out
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
@@ -659,7 +739,7 @@ pub fn yuv444_to_rgb8_strip(
     out: &mut [RGB8],
 ) {
     incant!(
-        yuv444_strip_kernel::<RGB8>(
+        yuv444_strip_kernel::<u8, RGB8>(
             y_plane,
             y_stride,
             u_plane,
@@ -671,6 +751,7 @@ pub fn yuv444_to_rgb8_strip(
             strip_height,
             range,
             matrix,
+            8,
             out
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
@@ -693,7 +774,7 @@ pub fn yuv444_to_rgba8_strip(
     out: &mut [Rgba<u8>],
 ) {
     incant!(
-        yuv444_strip_kernel::<Rgba<u8>>(
+        yuv444_strip_kernel::<u8, Rgba<u8>>(
             y_plane,
             y_stride,
             u_plane,
@@ -705,10 +786,317 @@ pub fn yuv444_to_rgba8_strip(
             strip_height,
             range,
             matrix,
+            8,
             out
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     )
+}
+
+// ── 16-bit (10/12/16-bit native-depth) public strip API ─────────────────────
+//
+// Same kernels as the 8-bit API, instantiated at `u16` samples; `bit_depth`
+// selects the normalization spans and the output ceiling (values are
+// native-depth, e.g. 0..=1023 for 10-bit; RGBA alpha = the ceiling).
+
+/// Convert a strip of 4:2:0 rows (u16 native-depth samples) to RGB16.
+pub fn yuv420_to_rgb16_strip(
+    y_plane: &[u16],
+    y_stride: usize,
+    u_plane: &[u16],
+    u_stride: usize,
+    v_plane: &[u16],
+    v_stride: usize,
+    width: usize,
+    total_height: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    bit_depth: u8,
+    out: &mut [rgb::Rgb<u16>],
+) {
+    incant!(
+        yuv420_strip_kernel::<u16, rgb::Rgb<u16>>(
+            y_plane,
+            y_stride,
+            u_plane,
+            u_stride,
+            v_plane,
+            v_stride,
+            width,
+            total_height,
+            y_start,
+            strip_height,
+            range,
+            matrix,
+            bit_depth,
+            out
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
+}
+
+/// Convert a strip of 4:2:0 rows (u16 native-depth samples) to RGBA16.
+pub fn yuv420_to_rgba16_strip(
+    y_plane: &[u16],
+    y_stride: usize,
+    u_plane: &[u16],
+    u_stride: usize,
+    v_plane: &[u16],
+    v_stride: usize,
+    width: usize,
+    total_height: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    bit_depth: u8,
+    out: &mut [Rgba<u16>],
+) {
+    incant!(
+        yuv420_strip_kernel::<u16, Rgba<u16>>(
+            y_plane,
+            y_stride,
+            u_plane,
+            u_stride,
+            v_plane,
+            v_stride,
+            width,
+            total_height,
+            y_start,
+            strip_height,
+            range,
+            matrix,
+            bit_depth,
+            out
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
+}
+
+/// Convert a strip of 4:2:2 rows (u16 native-depth samples) to RGB16.
+pub fn yuv422_to_rgb16_strip(
+    y_plane: &[u16],
+    y_stride: usize,
+    u_plane: &[u16],
+    u_stride: usize,
+    v_plane: &[u16],
+    v_stride: usize,
+    width: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    bit_depth: u8,
+    out: &mut [rgb::Rgb<u16>],
+) {
+    incant!(
+        yuv422_strip_kernel::<u16, rgb::Rgb<u16>>(
+            y_plane,
+            y_stride,
+            u_plane,
+            u_stride,
+            v_plane,
+            v_stride,
+            width,
+            y_start,
+            strip_height,
+            range,
+            matrix,
+            bit_depth,
+            out
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
+}
+
+/// Convert a strip of 4:2:2 rows (u16 native-depth samples) to RGBA16.
+pub fn yuv422_to_rgba16_strip(
+    y_plane: &[u16],
+    y_stride: usize,
+    u_plane: &[u16],
+    u_stride: usize,
+    v_plane: &[u16],
+    v_stride: usize,
+    width: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    bit_depth: u8,
+    out: &mut [Rgba<u16>],
+) {
+    incant!(
+        yuv422_strip_kernel::<u16, Rgba<u16>>(
+            y_plane,
+            y_stride,
+            u_plane,
+            u_stride,
+            v_plane,
+            v_stride,
+            width,
+            y_start,
+            strip_height,
+            range,
+            matrix,
+            bit_depth,
+            out
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
+}
+
+/// Convert a strip of 4:4:4 rows (u16 native-depth samples) to RGB16.
+pub fn yuv444_to_rgb16_strip(
+    y_plane: &[u16],
+    y_stride: usize,
+    u_plane: &[u16],
+    u_stride: usize,
+    v_plane: &[u16],
+    v_stride: usize,
+    width: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    bit_depth: u8,
+    out: &mut [rgb::Rgb<u16>],
+) {
+    incant!(
+        yuv444_strip_kernel::<u16, rgb::Rgb<u16>>(
+            y_plane,
+            y_stride,
+            u_plane,
+            u_stride,
+            v_plane,
+            v_stride,
+            width,
+            y_start,
+            strip_height,
+            range,
+            matrix,
+            bit_depth,
+            out
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
+}
+
+/// Convert a strip of 4:4:4 rows (u16 native-depth samples) to RGBA16.
+pub fn yuv444_to_rgba16_strip(
+    y_plane: &[u16],
+    y_stride: usize,
+    u_plane: &[u16],
+    u_stride: usize,
+    v_plane: &[u16],
+    v_stride: usize,
+    width: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    bit_depth: u8,
+    out: &mut [Rgba<u16>],
+) {
+    incant!(
+        yuv444_strip_kernel::<u16, Rgba<u16>>(
+            y_plane,
+            y_stride,
+            u_plane,
+            u_stride,
+            v_plane,
+            v_stride,
+            width,
+            y_start,
+            strip_height,
+            range,
+            matrix,
+            bit_depth,
+            out
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
+}
+
+/// One 16-bit dispatch over the sampling enum, generic over the output
+/// pixel — the decoder's entry point. `total_height` is used by 4:2:0
+/// (vertical interpolation window) and ignored by 4:2:2 / 4:4:4.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn yuv16_to_rgbx_strip<P: StripPixel>(
+    sampling: ChromaSubsampling,
+    y_plane: &[u16],
+    y_stride: usize,
+    u_plane: &[u16],
+    u_stride: usize,
+    v_plane: &[u16],
+    v_stride: usize,
+    width: usize,
+    total_height: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    bit_depth: u8,
+    out: &mut [P],
+) {
+    match sampling {
+        ChromaSubsampling::Cs420 => incant!(
+            yuv420_strip_kernel::<u16, P>(
+                y_plane,
+                y_stride,
+                u_plane,
+                u_stride,
+                v_plane,
+                v_stride,
+                width,
+                total_height,
+                y_start,
+                strip_height,
+                range,
+                matrix,
+                bit_depth,
+                out
+            ),
+            [v4x, v4, v3, neon, wasm128, scalar]
+        ),
+        ChromaSubsampling::Cs422 => incant!(
+            yuv422_strip_kernel::<u16, P>(
+                y_plane,
+                y_stride,
+                u_plane,
+                u_stride,
+                v_plane,
+                v_stride,
+                width,
+                y_start,
+                strip_height,
+                range,
+                matrix,
+                bit_depth,
+                out
+            ),
+            [v4x, v4, v3, neon, wasm128, scalar]
+        ),
+        ChromaSubsampling::Cs444 => incant!(
+            yuv444_strip_kernel::<u16, P>(
+                y_plane,
+                y_stride,
+                u_plane,
+                u_stride,
+                v_plane,
+                v_stride,
+                width,
+                y_start,
+                strip_height,
+                range,
+                matrix,
+                bit_depth,
+                out
+            ),
+            [v4x, v4, v3, neon, wasm128, scalar]
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -1038,6 +1426,160 @@ mod tests {
                                 (px4.r, px4.g, px4.b, px4.a),
                                 "{sampling} {w}x{h} {range:?} {matrix:?} px {i}"
                             );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// xorshift PRNG for reproducible pseudo-random u16 plane data,
+    /// clamped to the native depth.
+    fn fill_rand16(buf: &mut [u16], seed: u32, bit_depth: u8) {
+        let mask = (1u32 << bit_depth) - 1;
+        let mut s = seed | 1;
+        for b in buf.iter_mut() {
+            s ^= s << 13;
+            s ^= s >> 17;
+            s ^= s << 5;
+            *b = (s & mask) as u16;
+        }
+    }
+
+    /// Independent per-pixel reference for the 16-bit kernels: DIRECT
+    /// 4-term bilinear (not the kernels' separable form) + the canonical
+    /// recipe at depth d. The dispatched strip kernels must be
+    /// byte-identical to this at every depth and sampling.
+    #[allow(clippy::too_many_arguments)]
+    fn ref_yuv16(
+        sampling: &str,
+        y_plane: &[u16],
+        u_plane: &[u16],
+        v_plane: &[u16],
+        width: usize,
+        height: usize,
+        range: YuvRange,
+        matrix: YuvMatrix,
+        bit_depth: u8,
+    ) -> Vec<rgb::Rgb<u16>> {
+        let (kr, kb) = matrix_coefficients(matrix);
+        let c = RecipeConsts::new(YuvMatrixKrKb { kr, kb }, range, bit_depth);
+        let (cw, ch, sub_x, sub_y) = match sampling {
+            "420" => (width.div_ceil(2), height.div_ceil(2), true, true),
+            "422" => (width.div_ceil(2), height, true, false),
+            _ => (width, height, false, false),
+        };
+        let mut out = vec![rgb::Rgb::<u16>::default(); width * height];
+        for y in 0..height {
+            let chroma_y = if sub_y {
+                ((y as f32 + 0.5) * 0.5 - 0.5).max(0.0).min(ch as f32 - 1.0)
+            } else {
+                y as f32
+            };
+            let (cy0, fy) = floor_nonneg_idx(chroma_y);
+            let cy1 = (cy0 + 1).min(ch - 1);
+            let fy1 = 1.0 - fy;
+            for x in 0..width {
+                let chroma_x = if sub_x {
+                    ((x as f32 + 0.5) * 0.5 - 0.5).max(0.0).min(cw as f32 - 1.0)
+                } else {
+                    x as f32
+                };
+                let (cx0, fx) = floor_nonneg_idx(chroma_x);
+                let cx1 = (cx0 + 1).min(cw - 1);
+                let fx1 = 1.0 - fx;
+                let u_val = u_plane[cy0 * cw + cx0] as f32 * fx1 * fy1
+                    + u_plane[cy0 * cw + cx1] as f32 * fx * fy1
+                    + u_plane[cy1 * cw + cx0] as f32 * fx1 * fy
+                    + u_plane[cy1 * cw + cx1] as f32 * fx * fy;
+                let v_val = v_plane[cy0 * cw + cx0] as f32 * fx1 * fy1
+                    + v_plane[cy0 * cw + cx1] as f32 * fx * fy1
+                    + v_plane[cy1 * cw + cx0] as f32 * fx1 * fy
+                    + v_plane[cy1 * cw + cx1] as f32 * fx * fy;
+                let (r, g, b) = convert_one(y_plane[y * width + x] as f32, u_val, v_val, &c);
+                out[y * width + x] = rgb::Rgb {
+                    r: r as u16,
+                    g: g as u16,
+                    b: b as u16,
+                };
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn yuv16_kernels_byte_identical_to_reference_all_depths() {
+        let sizes: [(usize, usize); 4] = [(3, 3), (9, 7), (17, 13), (64, 48)];
+        let ranges = [YuvRange::Full, YuvRange::Limited];
+        let matrices = [YuvMatrix::Bt601, YuvMatrix::Bt709, YuvMatrix::Bt2020];
+        let mut seed = 33u32;
+        for &bit_depth in &[10u8, 12, 16] {
+            for &(w, h) in &sizes {
+                for &range in &ranges {
+                    for &matrix in &matrices {
+                        for sampling in ["420", "422", "444"] {
+                            let (cw, ch) = match sampling {
+                                "420" => (w.div_ceil(2), h.div_ceil(2)),
+                                "422" => (w.div_ceil(2), h),
+                                _ => (w, h),
+                            };
+                            seed = seed.wrapping_mul(2654435761).wrapping_add(1);
+                            let mut yb = vec![0u16; w * h];
+                            let mut ub = vec![0u16; cw * ch];
+                            let mut vb = vec![0u16; cw * ch];
+                            fill_rand16(&mut yb, seed, bit_depth);
+                            fill_rand16(&mut ub, seed ^ 0xABCD, bit_depth);
+                            fill_rand16(&mut vb, seed ^ 0x1234, bit_depth);
+                            let mut got = vec![rgb::Rgb::<u16>::default(); w * h];
+                            let mut got_a = vec![Rgba::<u16>::default(); w * h];
+                            match sampling {
+                                "420" => {
+                                    yuv420_to_rgb16_strip(
+                                        &yb, w, &ub, cw, &vb, cw, w, h, 0, h, range, matrix,
+                                        bit_depth, &mut got,
+                                    );
+                                    yuv420_to_rgba16_strip(
+                                        &yb, w, &ub, cw, &vb, cw, w, h, 0, h, range, matrix,
+                                        bit_depth, &mut got_a,
+                                    );
+                                }
+                                "422" => {
+                                    yuv422_to_rgb16_strip(
+                                        &yb, w, &ub, cw, &vb, cw, w, 0, h, range, matrix,
+                                        bit_depth, &mut got,
+                                    );
+                                    yuv422_to_rgba16_strip(
+                                        &yb, w, &ub, cw, &vb, cw, w, 0, h, range, matrix,
+                                        bit_depth, &mut got_a,
+                                    );
+                                }
+                                _ => {
+                                    yuv444_to_rgb16_strip(
+                                        &yb, w, &ub, cw, &vb, cw, w, 0, h, range, matrix,
+                                        bit_depth, &mut got,
+                                    );
+                                    yuv444_to_rgba16_strip(
+                                        &yb, w, &ub, cw, &vb, cw, w, 0, h, range, matrix,
+                                        bit_depth, &mut got_a,
+                                    );
+                                }
+                            }
+                            let want =
+                                ref_yuv16(sampling, &yb, &ub, &vb, w, h, range, matrix, bit_depth);
+                            let amax = (1u32 << bit_depth) - 1;
+                            for (i, (g, w_)) in got.iter().zip(want.iter()).enumerate() {
+                                assert_eq!(
+                                    g, w_,
+                                    "d{bit_depth} {sampling} {w}x{h} {range:?} {matrix:?} px {i}"
+                                );
+                            }
+                            for (i, (g, w_)) in got_a.iter().zip(want.iter()).enumerate() {
+                                assert_eq!(
+                                    (g.r, g.g, g.b, g.a),
+                                    (w_.r, w_.g, w_.b, amax as u16),
+                                    "rgba d{bit_depth} {sampling} {w}x{h} {range:?} {matrix:?} px {i}"
+                                );
+                            }
                         }
                     }
                 }
