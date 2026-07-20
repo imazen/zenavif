@@ -262,6 +262,49 @@ fn svt_rs_roundtrip_rgba_alpha_plane() {
     assert!(psnr_a > 45.0, "alpha-plane PSNR {psnr_a:.2} below floor");
 }
 
+/// Identical color payloads must decode to identical RGB whether or not an
+/// alpha item is present: the RGBA decode path reuses the no-alpha path's
+/// conversion kernel by construction. SvtRs encodes of the same pixels as
+/// RGB and as RGBA produce byte-identical color OBUs (alpha travels as a
+/// separate aux item), which makes this directly testable end-to-end.
+#[test]
+fn rgb_and_rgba_decodes_of_same_color_payload_agree_exactly() {
+    let rgba = gradient_rgba8(128, 128);
+    let rgb: Img<Vec<Rgb<u8>>> = Img::new(
+        rgba.buf()
+            .iter()
+            .map(|p| Rgb {
+                r: p.r,
+                g: p.g,
+                b: p.b,
+            })
+            .collect(),
+        128,
+        128,
+    );
+    let cfg = svt_config().quality(85.0).speed(6);
+    let enc_rgb = zenavif::encode_rgb8(rgb.as_ref(), &cfg, stop()).expect("rgb encode");
+    let enc_rgba = zenavif::encode_rgba8(rgba.as_ref(), &cfg, stop()).expect("rgba encode");
+    assert_eq!(
+        enc_rgb.color_byte_size, enc_rgba.color_byte_size,
+        "premise: identical color payloads"
+    );
+
+    let dec_rgb = zenavif::decode(&enc_rgb.avif_file).expect("decode rgb file");
+    let dec_rgba = zenavif::decode(&enc_rgba.avif_file).expect("decode rgba file");
+    let out_rgb = dec_rgb.try_as_imgref::<Rgb<u8>>().expect("rgb out");
+    let out_rgba = dec_rgba.try_as_imgref::<rgb::Rgba<u8>>().expect("rgba out");
+    for (y, (row3, row4)) in out_rgb.rows().zip(out_rgba.rows()).enumerate() {
+        for (x, (p3, p4)) in row3.iter().zip(row4.iter()).enumerate() {
+            assert_eq!(
+                (p3.r, p3.g, p3.b),
+                (p4.r, p4.g, p4.b),
+                "RGB-vs-RGBA decode divergence at ({x},{y})"
+            );
+        }
+    }
+}
+
 #[test]
 fn svt_rs_alpha_quality_fallback_contract() {
     // alpha_quality defaults to the color quality; setting it must move

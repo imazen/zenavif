@@ -444,8 +444,10 @@ fn yuv_to_rgb_simd(
     let ub_vec = f32x8::splat(token, ub);
 
     let r = v_norm.mul_add(vr_vec, y_norm);
-    let g_temp = u_norm * ug_vec;
-    let g = v_norm.mul_add(vg_vec, g_temp + y_norm);
+    // Chained FMAs, matching the full-image kernels (lines above) exactly —
+    // a split mul+add here rounds once more and diverges by 1 ULP on
+    // rounding-boundary pixels (caught by strip_rgba_kernels_match_*).
+    let g = v_norm.mul_add(vg_vec, u_norm.mul_add(ug_vec, y_norm));
     let b = u_norm.mul_add(ub_vec, y_norm);
 
     let scale_255 = f32x8::splat(token, 255.0);
@@ -1596,6 +1598,93 @@ mod tests {
                         want.as_slice(),
                         "mismatch {w}x{h} {range:?} {matrix:?}"
                     );
+                }
+            }
+        }
+    }
+
+    /// The strip kernels and the full-image kernels are two independent
+    /// float SIMD implementations of the same conversion; their op orders
+    /// are aligned where practical (see the chained-FMA note in
+    /// `yuv_to_rgb_simd`) but exact byte-identity is NOT structurally
+    /// guaranteed — rounding-boundary pixels can differ by 1 (measured: 1
+    /// pixel in ~331k on this grid). This pins near-parity (<=1) and full
+    /// alpha. Exact identity arrives when the kernels unify into a single
+    /// implementation (docs/YUV_PORT_PLAN.md); the decoder meanwhile never
+    /// pairs them on the same image (RGBA decodes reuse the full-image RGB
+    /// kernel + widen, precisely so identical color payloads decode
+    /// identically with and without alpha).
+    #[test]
+    fn strip_rgba_kernels_near_parity_with_full_rgb_kernels() {
+        let sizes: [(usize, usize); 6] = [(1, 1), (3, 3), (8, 8), (9, 7), (17, 13), (64, 48)];
+        let ranges = [YuvRange::Full, YuvRange::Limited];
+        let matrices = [YuvMatrix::Bt601, YuvMatrix::Bt709, YuvMatrix::Bt2020];
+        let mut seed = 99u32;
+        for &(w, h) in &sizes {
+            for &range in &ranges {
+                for &matrix in &matrices {
+                    seed = seed.wrapping_mul(2654435761).wrapping_add(1);
+                    for sampling in ["420", "422", "444"] {
+                        let (cw, ch) = match sampling {
+                            "420" => (w.div_ceil(2), h.div_ceil(2)),
+                            "422" => (w.div_ceil(2), h),
+                            _ => (w, h),
+                        };
+                        let mut yb = vec![0u8; w * h];
+                        let mut ub = vec![0u8; cw * ch];
+                        let mut vb = vec![0u8; cw * ch];
+                        fill_rand(&mut yb, seed);
+                        fill_rand(&mut ub, seed ^ 0xABCD);
+                        fill_rand(&mut vb, seed ^ 0x1234);
+                        let mut rgba = vec![
+                            rgb::Rgba {
+                                r: 0u8,
+                                g: 0,
+                                b: 0,
+                                a: 0
+                            };
+                            w * h
+                        ];
+                        let rgb = match sampling {
+                            "420" => {
+                                yuv420_to_rgba8_strip(
+                                    &yb, w, &ub, cw, &vb, cw, w, h, 0, h, range, matrix, &mut rgba,
+                                );
+                                yuv420_to_rgb8(&yb, w, &ub, cw, &vb, cw, w, h, range, matrix)
+                            }
+                            "422" => {
+                                yuv422_to_rgba8_strip(
+                                    &yb, w, &ub, cw, &vb, cw, w, 0, h, range, matrix, &mut rgba,
+                                );
+                                yuv422_to_rgb8(&yb, w, &ub, cw, &vb, cw, w, h, range, matrix)
+                            }
+                            _ => {
+                                yuv444_to_rgba8_strip(
+                                    &yb, w, &ub, cw, &vb, cw, w, 0, h, range, matrix, &mut rgba,
+                                );
+                                yuv444_to_rgb8(&yb, w, &ub, cw, &vb, cw, w, h, range, matrix)
+                            }
+                        };
+                        let rgb_vec: Vec<RGB8> = rgb.into_buf();
+                        for (i, (px3, px4)) in rgb_vec.iter().zip(rgba.iter()).enumerate() {
+                            let d = (px3.r as i32 - px4.r as i32)
+                                .abs()
+                                .max((px3.g as i32 - px4.g as i32).abs())
+                                .max((px3.b as i32 - px4.b as i32).abs());
+                            assert!(
+                                d <= 1 && px4.a == 255,
+                                "{sampling} {w}x{h} {range:?} {matrix:?} px {i}: \
+                                 rgb ({},{},{}) vs strip ({},{},{},{})",
+                                px3.r,
+                                px3.g,
+                                px3.b,
+                                px4.r,
+                                px4.g,
+                                px4.b,
+                                px4.a
+                            );
+                        }
+                    }
                 }
             }
         }
