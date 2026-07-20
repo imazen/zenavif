@@ -80,32 +80,44 @@ pub enum ChromaSubsampling {
 
 // ═══════════════════════ One canonical numeric recipe ══════════════════════
 //
-// Every conversion in this module — SIMD lanes, scalar remainders, the
-// scalar fallback tier, and the test references — computes the SAME f32
-// operation sequence:
+// Every DECODE conversion in this module — every tier, depth, sampling and
+// output — computes the SAME fixed-point formula (d = bit depth, max =
+// 2^d − 1; chroma arrives in 1/16 units, "U4", directly from the exact
+// integer bilinear interpolation):
 //
-//   y_n = (Y - y_off) * y_scale            (reciprocal multiply, not divide)
-//   u_n = (U - 128)   * uv_scale
-//   v_n = (V - 128)   * uv_scale
-//   R = fma(v_n, Vr, y_n)
-//   G = fma(v_n, Vg, fma(u_n, Ug, y_n))    (chained fused multiply-adds)
-//   B = fma(u_n, Ub, y_n)
-//   out = round(clamp(C * 255))            (max/min, round TIES-TO-EVEN)
+//   AY   = round(2^16 · max / y_span)
+//   BU_c = round(2^12 · coef_u(c) · max / uv_span)   (2^12 = 2^16 / 16)
+//   BV_c = round(2^12 · coef_v(c) · max / uv_span)
+//   OFF_c = round(2^16 · (−y_off·max/y_span)) − (BU_c + BV_c)·cen·16 + 2^15
+//           (offset built FROM the rounded coefficients, so neutral chroma
+//            cancels exactly: gray in -> R = G = B out, at every depth)
+//   out_c = clamp((AY·Y + BU_c·U4 + BV_c·V4 + OFF_c) >> 16, 0, max)
 //
-// IEEE f32 ops are elementwise, and `f32::mul_add`/vector `mul_add` are
-// both single-rounding FMAs on x86-64 (v3+) and aarch64 — so any two paths
-// produce byte-identical output BY CONSTRUCTION, independent of lane width
-// or where a SIMD/remainder boundary falls. (Divide-by-constant and split
-// mul+add variants of this formula differ from it on ~8 per million input
-// triples at rounding boundaries — measured exhaustively over all integer
-// (Y,U,V) x range x matrix on 2026-07-20: 841 of 100,663,296 differ by ±1.
-// One recipe, used everywhere, is what makes "identical" a structural
-// property instead of a sampled observation.)
+// with coef_(u,v) per channel: R = (0, Vr), G = (Ug, Vg), B = (Ub, 0);
+// Vr = 2(1−Kr), Ug = −2·Kb(1−Kb)/Kg, Vg = −2·Kr(1−Kr)/Kg, Ub = 2(1−Kb).
+// Full range: y_off = 0, y_span = uv_span = max, cen = 128·2^(d−8).
+// Limited: y_off = 16·2^(d−8), y_span = 219·2^(d−8), uv_span = 224·2^(d−8).
 //
-// wasm128 caveat: wasm SIMD has no FMA instruction; if magetypes polyfills
-// `mul_add` unfused there, wasm vector lanes could differ from the fused
-// scalar remainder on rounding-boundary pixels. The byte-identity reference
-// tests run in wasm CI and will surface that; x86-64/aarch64 are fused.
+// Why fixed point is the canonical form (it replaced an f32 FMA chain on
+// 2026-07-20):
+// * SINGLE rounding of a 2^-16-accurate value — closer to the exact
+//   rational conversion than any multi-rounded float chain, and >> means
+//   the result is defined by integer arithmetic alone: byte-identical on
+//   every arch and tier BY CONSTRUCTION (no FMA availability, rounding
+//   mode, or libm variance — wasm included).
+// * i32 lane math vectorizes ~4x denser than f32 (the yuv crate's
+//   fixed-point kernels measured ~6x our f32 chain at 10-bit).
+// * Ties resolve as +2^15 then floor (round-half-up); a tie requires the
+//   16 low accumulator bits to be exactly 0x8000, and the formula IS the
+//   definition, so there is no "reference" to disagree with.
+// Accumulators fit i32 for d ≤ 12 (worst |term| < 2^30; debug-asserted at
+// constant build). AV1 codes 8/10/12-bit only; the 16-bit API entries keep
+// the previous f32 recipe (documented at `convert_one_f32`).
+//
+// Chroma interpolation (the stage before this formula) is EXACT integer
+// arithmetic in 1/16 units: 4:2:0 uses weights {9,3,3,1}/16 via separable
+// {3,1}/4 passes, 4:2:2 {3,1}/4 · 4, 4:4:4 · 16 — all products of u12
+// samples with ≤4-bit weights, no rounding anywhere before the formula.
 
 /// Get matrix coefficients (Kr, Kb) for the specified color space.
 pub(crate) fn matrix_coefficients(matrix: YuvMatrix) -> (f32, f32) {
@@ -221,12 +233,17 @@ fn convert_one(y: f32, u: f32, v: f32, c: &RecipeConsts) -> (f32, f32, f32) {
 /// 10/12/16-bit planes; values are native-depth).
 pub(crate) trait YuvSample: Copy {
     fn to_f32(self) -> f32;
+    fn to_i32(self) -> i32;
 }
 
 impl YuvSample for u8 {
     #[inline(always)]
     fn to_f32(self) -> f32 {
         self as f32
+    }
+    #[inline(always)]
+    fn to_i32(self) -> i32 {
+        self as i32
     }
 }
 
@@ -235,6 +252,10 @@ impl YuvSample for u16 {
     fn to_f32(self) -> f32 {
         self as f32
     }
+    #[inline(always)]
+    fn to_i32(self) -> i32 {
+        self as i32
+    }
 }
 
 /// Output pixel type for the conversion kernels. `from_rgbf` receives
@@ -242,11 +263,21 @@ impl YuvSample for u16 {
 /// alpha (where present) is filled with `max` (native-depth opaque).
 pub(crate) trait StripPixel: Copy + Default {
     fn from_rgbf(r: f32, g: f32, b: f32, max: f32) -> Self;
+    /// Store from the fixed-point formula's clamped u16 channels.
+    fn from_rgb16(r: u16, g: u16, b: u16, max: u16) -> Self;
 }
 
 impl StripPixel for RGB8 {
     #[inline(always)]
     fn from_rgbf(r: f32, g: f32, b: f32, _max: f32) -> Self {
+        RGB8 {
+            r: r as u8,
+            g: g as u8,
+            b: b as u8,
+        }
+    }
+    #[inline(always)]
+    fn from_rgb16(r: u16, g: u16, b: u16, _max: u16) -> Self {
         RGB8 {
             r: r as u8,
             g: g as u8,
@@ -265,11 +296,24 @@ impl StripPixel for Rgba<u8> {
             a: 255,
         }
     }
+    #[inline(always)]
+    fn from_rgb16(r: u16, g: u16, b: u16, _max: u16) -> Self {
+        Rgba {
+            r: r as u8,
+            g: g as u8,
+            b: b as u8,
+            a: 255,
+        }
+    }
 }
 
 impl StripPixel for rgb::Gray<u8> {
     #[inline(always)]
     fn from_rgbf(r: f32, _g: f32, _b: f32, _max: f32) -> Self {
+        rgb::Gray::new(r as u8)
+    }
+    #[inline(always)]
+    fn from_rgb16(r: u16, _g: u16, _b: u16, _max: u16) -> Self {
         rgb::Gray::new(r as u8)
     }
 }
@@ -278,6 +322,10 @@ impl StripPixel for rgb::Gray<u16> {
     #[inline(always)]
     fn from_rgbf(r: f32, _g: f32, _b: f32, _max: f32) -> Self {
         rgb::Gray::new(r as u16)
+    }
+    #[inline(always)]
+    fn from_rgb16(r: u16, _g: u16, _b: u16, _max: u16) -> Self {
+        rgb::Gray::new(r)
     }
 }
 
@@ -290,6 +338,10 @@ impl StripPixel for rgb::Rgb<u16> {
             b: b as u16,
         }
     }
+    #[inline(always)]
+    fn from_rgb16(r: u16, g: u16, b: u16, _max: u16) -> Self {
+        rgb::Rgb { r, g, b }
+    }
 }
 
 impl StripPixel for Rgba<u16> {
@@ -300,6 +352,124 @@ impl StripPixel for Rgba<u16> {
             g: g as u16,
             b: b as u16,
             a: max as u16,
+        }
+    }
+    #[inline(always)]
+    fn from_rgb16(r: u16, g: u16, b: u16, max: u16) -> Self {
+        Rgba { r, g, b, a: max }
+    }
+}
+
+/// Integer constants of the canonical fixed-point recipe (d <= 12; module
+/// docs above). Derived in f64, rounded once; the formula is then pure i32.
+#[derive(Clone, Copy)]
+struct FixedConsts {
+    ay: i32,
+    /// Per channel (R, G, B): U4 and V4 coefficients.
+    bu: [i32; 3],
+    bv: [i32; 3],
+    /// Per channel offset, rounding bias (+2^15) folded in.
+    off: [i32; 3],
+    max: i32,
+    /// Neutral chroma in U4 units (128·2^(d−8)·16) — the mono input.
+    cen16: i32,
+}
+
+impl FixedConsts {
+    fn new(m: YuvMatrixKrKb, range: YuvRange, bit_depth: u8) -> Self {
+        debug_assert!(bit_depth <= 12, "fixed-point recipe is d<=12");
+        let (kr, kb) = (m.kr as f64, m.kb as f64);
+        let kg = 1.0 - kr - kb;
+        let shift = u32::from(bit_depth) - 8;
+        let max = ((1u32 << bit_depth) - 1) as f64;
+        let cen = (128u32 << shift) as f64;
+        let (y_off, y_span, uv_span) = match range {
+            YuvRange::Full => (0.0, max, max),
+            YuvRange::Limited => (
+                (16u32 << shift) as f64,
+                ((219u32 << shift) as f64),
+                ((224u32 << shift) as f64),
+            ),
+        };
+        let vr = 2.0 * (1.0 - kr);
+        let ug = -2.0 * kb * (1.0 - kb) / kg;
+        let vg = -2.0 * kr * (1.0 - kr) / kg;
+        let ub = 2.0 * (1.0 - kb);
+        let coef = [(0.0, vr), (ug, vg), (ub, 0.0)];
+        let ay = (65536.0 * max / y_span).round() as i32;
+        let mut bu = [0i32; 3];
+        let mut bv = [0i32; 3];
+        let mut off = [0i32; 3];
+        // Offsets derive from the ROUNDED chroma coefficients so neutral
+        // chroma (U4 = V4 = cen·16) cancels EXACTLY per channel: gray in,
+        // gray out (R = G = B), and mono == planar-gray identically.
+        let y_term_off = (65536.0 * (-y_off * max / y_span)).round() as i64;
+        let cen16 = cen as i64 * 16;
+        for (c, &(cu, cv)) in coef.iter().enumerate() {
+            bu[c] = (4096.0 * cu * max / uv_span).round() as i32;
+            bv[c] = (4096.0 * cv * max / uv_span).round() as i32;
+            let off64 = y_term_off - bu[c] as i64 * cen16 - bv[c] as i64 * cen16 + (1i64 << 15);
+            debug_assert!(i32::try_from(off64).is_ok());
+            off[c] = off64 as i32;
+            // i32 accumulator headroom proof for this constant set: the
+            // worst |sum| over the whole input domain must clear 2^31.
+            let worst = (ay as i64) * ((max as i64) + 1)
+                + bu[c].unsigned_abs() as i64 * ((max as i64 + 1) * 16)
+                + bv[c].unsigned_abs() as i64 * ((max as i64 + 1) * 16)
+                + off[c].unsigned_abs() as i64;
+            debug_assert!(worst < (1i64 << 31), "i32 overflow risk at d{bit_depth}");
+        }
+        Self {
+            ay,
+            bu,
+            bv,
+            off,
+            max: max as i32,
+            cen16: cen16 as i32,
+        }
+    }
+
+    /// One sample through the canonical formula. `u4`/`v4` are chroma in
+    /// 1/16 units (exact integers from the interpolation stage).
+    #[inline(always)]
+    fn convert(&self, y: i32, u4: i32, v4: i32) -> (u16, u16, u16) {
+        let base = self.ay * y;
+        let r = (base + self.bv[0] * v4 + self.off[0]) >> 16;
+        let g = (base + self.bu[1] * u4 + self.bv[1] * v4 + self.off[1]) >> 16;
+        let b = (base + self.bu[2] * u4 + self.off[2]) >> 16;
+        (
+            r.clamp(0, self.max) as u16,
+            g.clamp(0, self.max) as u16,
+            b.clamp(0, self.max) as u16,
+        )
+    }
+}
+
+/// Horizontally interpolate one chroma row from `cw` samples (in `in_scale`
+/// = 1 or 4 sixteenths-units) to `width` positions in 1/16 units, weights
+/// {3,1}/4 relative — pure integer, exact. `in_scale`: pass 4 for a
+/// vertically pre-lerped /4-unit row (4:2:0) so weights (3,1) land at /16;
+/// pass 1 with weights (12,4) semantics for a raw row (4:2:2) via the
+/// `raw` flag.
+#[inline(always)]
+fn interp_row_h_int(src: &[u16], width: usize, raw: bool, dst: &mut [u16]) {
+    let cw = width.div_ceil(2);
+    let src = &src[..cw];
+    let dst = &mut dst[..width];
+    // Weights per position (module docs): odd x=2k+1 -> (3,1)·(c[k],c[k+1]),
+    // even x=2k (k>=1) -> (1,3)·(c[k-1],c[k]); edges replicate. `raw`
+    // inputs are 1-unit samples so weights scale by 4 to land at /16.
+    let (wa, wb, we) = if raw { (12, 4, 16) } else { (3, 1, 4) };
+    dst[0] = we * src[0];
+    for k in 0..cw.saturating_sub(1) {
+        dst[2 * k + 1] = wa * src[k] + wb * src[k + 1];
+    }
+    if width.is_multiple_of(2) {
+        dst[width - 1] = we * src[cw - 1];
+    }
+    for k in 1..cw {
+        if 2 * k < width {
+            dst[2 * k] = wb * src[k - 1] + wa * src[k];
         }
     }
 }
@@ -384,9 +554,49 @@ fn yuv420_strip_kernel<S: YuvSample, P: StripPixel>(
 ) {
     let _ = token;
     let (kr, kb) = matrix_coefficients(matrix);
-    let c = RecipeConsts::new(YuvMatrixKrKb { kr, kb }, range, bit_depth);
     let chroma_width = width.div_ceil(2);
     let chroma_height = total_height.div_ceil(2);
+
+    if bit_depth <= 12 {
+        // Fixed-point canonical path (module docs).
+        let c = FixedConsts::new(YuvMatrixKrKb { kr, kb }, range, bit_depth);
+        let mut uv_mid = vec![0u16; 2 * chroma_width];
+        let mut uf = vec![0u16; width];
+        let mut vf = vec![0u16; width];
+        for row in 0..strip_height {
+            let y_pos = y_start + row;
+            let chroma_y_raw = (y_pos as f32 + 0.5) * 0.5 - 0.5;
+            let chroma_y = chroma_y_raw.max(0.0).min(chroma_height as f32 - 1.0);
+            let (cy0, fy) = floor_nonneg_idx(chroma_y);
+            let cy1 = (cy0 + 1).min(chroma_height - 1);
+            // fy is exactly 0, 0.25 or 0.75 — dyadic; /4-unit weights.
+            let wy = (fy * 4.0) as u16;
+            let wy1 = 4 - wy;
+            {
+                let (u_mid, v_mid) = uv_mid.split_at_mut(chroma_width);
+                let u0 = &u_plane[cy0 * u_stride..][..chroma_width];
+                let u1 = &u_plane[cy1 * u_stride..][..chroma_width];
+                let v0 = &v_plane[cy0 * v_stride..][..chroma_width];
+                let v1 = &v_plane[cy1 * v_stride..][..chroma_width];
+                for k in 0..chroma_width {
+                    u_mid[k] = wy1 * (u0[k].to_i32() as u16) + wy * (u1[k].to_i32() as u16);
+                    v_mid[k] = wy1 * (v0[k].to_i32() as u16) + wy * (v1[k].to_i32() as u16);
+                }
+                interp_row_h_int(u_mid, width, false, &mut uf);
+                interp_row_h_int(v_mid, width, false, &mut vf);
+            }
+            let y_row = &y_plane[y_pos * y_stride..][..width];
+            let out_row = &mut out[row * width..][..width];
+            for x in 0..width {
+                let (r, g, b) = c.convert(y_row[x].to_i32(), uf[x] as i32, vf[x] as i32);
+                out_row[x] = P::from_rgb16(r, g, b, c.max as u16);
+            }
+        }
+        return;
+    }
+
+    // f32 recipe — the 16-bit API entries only (AV1 codes 8/10/12).
+    let c = RecipeConsts::new(YuvMatrixKrKb { kr, kb }, range, bit_depth);
 
     // Row scratch: two vertically-lerped chroma rows (chroma_width) and two
     // width-interpolated rows.
@@ -453,9 +663,38 @@ fn yuv422_strip_kernel<S: YuvSample, P: StripPixel>(
 ) {
     let _ = token;
     let (kr, kb) = matrix_coefficients(matrix);
-    let c = RecipeConsts::new(YuvMatrixKrKb { kr, kb }, range, bit_depth);
     let chroma_width = width.div_ceil(2);
 
+    if bit_depth <= 12 {
+        // Fixed-point canonical path (module docs).
+        let c = FixedConsts::new(YuvMatrixKrKb { kr, kb }, range, bit_depth);
+        let mut uv_mid = vec![0u16; 2 * chroma_width];
+        let mut uf = vec![0u16; width];
+        let mut vf = vec![0u16; width];
+        for row in 0..strip_height {
+            let y_pos = y_start + row;
+            {
+                let (u_mid, v_mid) = uv_mid.split_at_mut(chroma_width);
+                let u_src = &u_plane[y_pos * u_stride..][..chroma_width];
+                let v_src = &v_plane[y_pos * v_stride..][..chroma_width];
+                for k in 0..chroma_width {
+                    u_mid[k] = u_src[k].to_i32() as u16;
+                    v_mid[k] = v_src[k].to_i32() as u16;
+                }
+                interp_row_h_int(u_mid, width, true, &mut uf);
+                interp_row_h_int(v_mid, width, true, &mut vf);
+            }
+            let y_row = &y_plane[y_pos * y_stride..][..width];
+            let out_row = &mut out[row * width..][..width];
+            for x in 0..width {
+                let (r, g, b) = c.convert(y_row[x].to_i32(), uf[x] as i32, vf[x] as i32);
+                out_row[x] = P::from_rgb16(r, g, b, c.max as u16);
+            }
+        }
+        return;
+    }
+
+    let c = RecipeConsts::new(YuvMatrixKrKb { kr, kb }, range, bit_depth);
     let mut uv_mid = vec![0f32; 2 * chroma_width];
     let mut uf = vec![0f32; width];
     let mut vf = vec![0f32; width];
@@ -506,6 +745,28 @@ fn yuv444_strip_kernel<S: YuvSample, P: StripPixel>(
 ) {
     let _ = token;
     let (kr, kb) = matrix_coefficients(matrix);
+
+    if bit_depth <= 12 {
+        // Fixed-point canonical path: chroma scales straight to 1/16 units.
+        let c = FixedConsts::new(YuvMatrixKrKb { kr, kb }, range, bit_depth);
+        for row in 0..strip_height {
+            let y_pos = y_start + row;
+            let y_row = &y_plane[y_pos * y_stride..][..width];
+            let u_row = &u_plane[y_pos * u_stride..][..width];
+            let v_row = &v_plane[y_pos * v_stride..][..width];
+            let out_row = &mut out[row * width..][..width];
+            for x in 0..width {
+                let (r, g, b) = c.convert(
+                    y_row[x].to_i32(),
+                    u_row[x].to_i32() * 16,
+                    v_row[x].to_i32() * 16,
+                );
+                out_row[x] = P::from_rgb16(r, g, b, c.max as u16);
+            }
+        }
+        return;
+    }
+
     let c = RecipeConsts::new(YuvMatrixKrKb { kr, kb }, range, bit_depth);
 
     for row in 0..strip_height {
@@ -835,6 +1096,29 @@ fn yuv400_strip_kernel<S: YuvSample, P: StripPixel>(
     out: &mut [P],
 ) {
     let _ = token;
+    if bit_depth <= 12 {
+        // Fixed-point canonical path: the formula with neutral chroma
+        // (mono == planar gray, exactly).
+        let c = FixedConsts::new(
+            YuvMatrixKrKb {
+                kr: 0.299,
+                kb: 0.114,
+            },
+            range,
+            bit_depth,
+        );
+        for row in 0..strip_height {
+            let y_pos = y_start + row;
+            let y_row = &y_plane[y_pos * y_stride..][..width];
+            let out_row = &mut out[row * width..][..width];
+            for x in 0..width {
+                let (r, g, b) = c.convert(y_row[x].to_i32(), c.cen16, c.cen16);
+                out_row[x] = P::from_rgb16(r, g, b, c.max as u16);
+            }
+        }
+        return;
+    }
+
     // Any matrix: with zero chroma the coefficients cancel.
     let c = RecipeConsts::new(
         YuvMatrixKrKb {
@@ -1403,6 +1687,45 @@ mod tests {
         }
     }
 
+    /// Independent scalar evaluation of the canonical fixed-point formula
+    /// in i64 (the kernels use i32 — the width difference is part of what
+    /// makes this reference independent; the constants are shared because
+    /// they ARE the recipe).
+    fn ref_convert_fixed(y: i64, u4: i64, v4: i64, c: &FixedConsts) -> (u16, u16, u16) {
+        let ch = |bu: i32, bv: i32, off: i32| -> u16 {
+            let v = (c.ay as i64 * y + bu as i64 * u4 + bv as i64 * v4 + off as i64) >> 16;
+            v.clamp(0, c.max as i64) as u16
+        };
+        (
+            ch(c.bu[0], c.bv[0], c.off[0]),
+            ch(c.bu[1], c.bv[1], c.off[1]),
+            ch(c.bu[2], c.bv[2], c.off[2]),
+        )
+    }
+
+    /// Direct (non-separable) 4-term bilinear chroma in 1/16 units for the
+    /// reference: weights 16·(fx?,fy?) are the exact {9,3,3,1}/{12,4}/{16}
+    /// integer patterns.
+    #[allow(clippy::too_many_arguments)]
+    fn ref_chroma_u4(
+        plane: &[u16],
+        stride: usize,
+        cx0: usize,
+        cx1: usize,
+        cy0: usize,
+        cy1: usize,
+        fx: f32,
+        fy: f32,
+    ) -> i64 {
+        let wx = (fx * 4.0) as i64;
+        let wy = (fy * 4.0) as i64;
+        let (wx1, wy1) = (4 - wx, 4 - wy);
+        wx1 * wy1 * plane[cy0 * stride + cx0] as i64
+            + wx * wy1 * plane[cy0 * stride + cx1] as i64
+            + wx1 * wy * plane[cy1 * stride + cx0] as i64
+            + wx * wy * plane[cy1 * stride + cx1] as i64
+    }
+
     /// Independent per-pixel reference for YUV420 bilinear upsample + convert,
     /// written straight from the spec formula (uses libm `floor`, no shortcuts).
     /// The dispatched `yuv420_to_rgb8` must be byte-identical to this.
@@ -1419,37 +1742,34 @@ mod tests {
         matrix: YuvMatrix,
     ) -> Vec<RGB8> {
         let (kr, kb) = matrix_coefficients(matrix);
-        let kg = 1.0 - kr - kb;
+        let c = FixedConsts::new(YuvMatrixKrKb { kr, kb }, range, 8);
         let chroma_width = width.div_ceil(2);
         let chroma_height = height.div_ceil(2);
+        let u16p: Vec<u16> = u_plane.iter().map(|&v| v as u16).collect();
+        let v16p: Vec<u16> = v_plane.iter().map(|&v| v as u16).collect();
         let mut out = vec![RGB8::default(); width * height];
         for y_pos in 0..height {
-            let chroma_y_raw = (y_pos as f32 + 0.5) * 0.5 - 0.5;
-            let chroma_y = chroma_y_raw.max(0.0).min(chroma_height as f32 - 1.0);
+            let chroma_y = ((y_pos as f32 + 0.5) * 0.5 - 0.5)
+                .max(0.0)
+                .min(chroma_height as f32 - 1.0);
             let cy0 = chroma_y.floor() as usize;
             let cy1 = (cy0 + 1).min(chroma_height - 1);
             let fy = chroma_y - cy0 as f32;
             for x in 0..width {
-                let y_val = y_plane[y_pos * y_stride + x] as f32;
-                let chroma_x_raw = (x as f32 + 0.5) * 0.5 - 0.5;
-                let chroma_x = chroma_x_raw.max(0.0).min(chroma_width as f32 - 1.0);
+                let chroma_x = ((x as f32 + 0.5) * 0.5 - 0.5)
+                    .max(0.0)
+                    .min(chroma_width as f32 - 1.0);
                 let cx0 = chroma_x.floor() as usize;
                 let cx1 = (cx0 + 1).min(chroma_width - 1);
                 let fx = chroma_x - cx0 as f32;
-                let fx1 = 1.0 - fx;
-                let fy1 = 1.0 - fy;
-                let u00 = u_plane[cy0 * u_stride + cx0] as f32;
-                let u01 = u_plane[cy0 * u_stride + cx1] as f32;
-                let u10 = u_plane[cy1 * u_stride + cx0] as f32;
-                let u11 = u_plane[cy1 * u_stride + cx1] as f32;
-                let u_val = u00 * fx1 * fy1 + u01 * fx * fy1 + u10 * fx1 * fy + u11 * fx * fy;
-                let v00 = v_plane[cy0 * v_stride + cx0] as f32;
-                let v01 = v_plane[cy0 * v_stride + cx1] as f32;
-                let v10 = v_plane[cy1 * v_stride + cx0] as f32;
-                let v11 = v_plane[cy1 * v_stride + cx1] as f32;
-                let v_val = v00 * fx1 * fy1 + v01 * fx * fy1 + v10 * fx1 * fy + v11 * fx * fy;
-                let (r, g, b) = yuv_to_rgb(y_val, u_val, v_val, kr, kg, kb, range);
-                out[y_pos * width + x] = RGB8 { r, g, b };
+                let u4 = ref_chroma_u4(&u16p, u_stride, cx0, cx1, cy0, cy1, fx, fy);
+                let v4 = ref_chroma_u4(&v16p, v_stride, cx0, cx1, cy0, cy1, fx, fy);
+                let (r, g, b) = ref_convert_fixed(y_plane[y_pos * y_stride + x] as i64, u4, v4, &c);
+                out[y_pos * width + x] = RGB8 {
+                    r: r as u8,
+                    g: g as u8,
+                    b: b as u8,
+                };
             }
         }
         out
@@ -1503,25 +1823,28 @@ mod tests {
         matrix: YuvMatrix,
     ) -> Vec<RGB8> {
         let (kr, kb) = matrix_coefficients(matrix);
-        let kg = 1.0 - kr - kb;
+        let c = FixedConsts::new(YuvMatrixKrKb { kr, kb }, range, 8);
         let chroma_width = width.div_ceil(2);
+        let u16p: Vec<u16> = u_plane.iter().map(|&v| v as u16).collect();
+        let v16p: Vec<u16> = v_plane.iter().map(|&v| v as u16).collect();
         let mut out = vec![RGB8::default(); width * height];
         for y_pos in 0..height {
             for x in 0..width {
-                let y_val = y_plane[y_pos * y_stride + x] as f32;
-                let chroma_x_raw = (x as f32 + 0.5) * 0.5 - 0.5;
-                let chroma_x = chroma_x_raw.max(0.0).min(chroma_width as f32 - 1.0);
+                let chroma_x = ((x as f32 + 0.5) * 0.5 - 0.5)
+                    .max(0.0)
+                    .min(chroma_width as f32 - 1.0);
                 let cx0 = chroma_x.floor() as usize;
                 let cx1 = (cx0 + 1).min(chroma_width - 1);
                 let fx = chroma_x - cx0 as f32;
-                let fx1 = 1.0 - fx;
-                // 4:2:2: chroma row index == luma row index (no vertical interp).
-                let u_val = u_plane[y_pos * u_stride + cx0] as f32 * fx1
-                    + u_plane[y_pos * u_stride + cx1] as f32 * fx;
-                let v_val = v_plane[y_pos * v_stride + cx0] as f32 * fx1
-                    + v_plane[y_pos * v_stride + cx1] as f32 * fx;
-                let (r, g, b) = yuv_to_rgb(y_val, u_val, v_val, kr, kg, kb, range);
-                out[y_pos * width + x] = RGB8 { r, g, b };
+                // 4:2:2: chroma row == luma row (fy = 0).
+                let u4 = ref_chroma_u4(&u16p, u_stride, cx0, cx1, y_pos, y_pos, fx, 0.0);
+                let v4 = ref_chroma_u4(&v16p, v_stride, cx0, cx1, y_pos, y_pos, fx, 0.0);
+                let (r, g, b) = ref_convert_fixed(y_plane[y_pos * y_stride + x] as i64, u4, v4, &c);
+                out[y_pos * width + x] = RGB8 {
+                    r: r as u8,
+                    g: g as u8,
+                    b: b as u8,
+                };
             }
         }
         out
@@ -1585,20 +1908,21 @@ mod tests {
         matrix: YuvMatrix,
     ) -> Vec<RGB8> {
         let (kr, kb) = matrix_coefficients(matrix);
-        let kg = 1.0 - kr - kb;
+        let c = FixedConsts::new(YuvMatrixKrKb { kr, kb }, range, 8);
         let mut out = vec![RGB8::default(); width * height];
         for y in 0..height {
             for x in 0..width {
-                let (r, g, b) = yuv_to_rgb(
-                    y_plane[y * y_stride + x] as f32,
-                    u_plane[y * u_stride + x] as f32,
-                    v_plane[y * v_stride + x] as f32,
-                    kr,
-                    kg,
-                    kb,
-                    range,
+                let (r, g, b) = ref_convert_fixed(
+                    y_plane[y * y_stride + x] as i64,
+                    u_plane[y * u_stride + x] as i64 * 16,
+                    v_plane[y * v_stride + x] as i64 * 16,
+                    &c,
                 );
-                out[y * width + x] = RGB8 { r, g, b };
+                out[y * width + x] = RGB8 {
+                    r: r as u8,
+                    g: g as u8,
+                    b: b as u8,
+                };
             }
         }
         out
@@ -1744,6 +2068,8 @@ mod tests {
     ) -> Vec<rgb::Rgb<u16>> {
         let (kr, kb) = matrix_coefficients(matrix);
         let c = RecipeConsts::new(YuvMatrixKrKb { kr, kb }, range, bit_depth);
+        let cf =
+            (bit_depth <= 12).then(|| FixedConsts::new(YuvMatrixKrKb { kr, kb }, range, bit_depth));
         let (cw, ch, sub_x, sub_y) = match sampling {
             "420" => (width.div_ceil(2), height.div_ceil(2), true, true),
             "422" => (width.div_ceil(2), height, true, false),
@@ -1776,11 +2102,18 @@ mod tests {
                     + v_plane[cy0 * cw + cx1] as f32 * fx * fy1
                     + v_plane[cy1 * cw + cx0] as f32 * fx1 * fy
                     + v_plane[cy1 * cw + cx1] as f32 * fx * fy;
-                let (r, g, b) = convert_one(y_plane[y * width + x] as f32, u_val, v_val, &c);
-                out[y * width + x] = rgb::Rgb {
-                    r: r as u16,
-                    g: g as u16,
-                    b: b as u16,
+                out[y * width + x] = if let Some(cf) = &cf {
+                    let u4 = ref_chroma_u4(u_plane, cw, cx0, cx1, cy0, cy1, fx, fy);
+                    let v4 = ref_chroma_u4(v_plane, cw, cx0, cx1, cy0, cy1, fx, fy);
+                    let (r, g, b) = ref_convert_fixed(y_plane[y * width + x] as i64, u4, v4, cf);
+                    rgb::Rgb { r, g, b }
+                } else {
+                    let (r, g, b) = convert_one(y_plane[y * width + x] as f32, u_val, v_val, &c);
+                    rgb::Rgb {
+                        r: r as u16,
+                        g: g as u16,
+                        b: b as u16,
+                    }
                 };
             }
         }
@@ -1885,6 +2218,24 @@ mod tests {
                     range,
                     bit_depth,
                 );
+                let cf = (bit_depth <= 12).then(|| {
+                    FixedConsts::new(
+                        YuvMatrixKrKb {
+                            kr: 0.299,
+                            kb: 0.114,
+                        },
+                        range,
+                        bit_depth,
+                    )
+                });
+                let expect = |yv: f32| -> (u16, u16, u16) {
+                    if let Some(cf) = &cf {
+                        ref_convert_fixed(yv as i64, cf.cen16 as i64, cf.cen16 as i64, cf)
+                    } else {
+                        let (r, g, b) = convert_one(yv, c.uv_cen, c.uv_cen, &c);
+                        (r as u16, g as u16, b as u16)
+                    }
+                };
                 if is16 {
                     let mut y = vec![0u16; w * h];
                     for (i, v) in y.iter_mut().enumerate() {
@@ -1895,10 +2246,10 @@ mod tests {
                         &y, w, w, 0, h, range, bit_depth, &mut out,
                     );
                     for (i, (&yv, px)) in y.iter().zip(out.iter()).enumerate() {
-                        let (r, g, b) = convert_one(yv as f32, c.uv_cen, c.uv_cen, &c);
+                        let (r, g, b) = expect(yv as f32);
                         assert_eq!(
                             (px.r, px.g, px.b, px.a),
-                            (r as u16, g as u16, b as u16, max as u16),
+                            (r, g, b, max as u16),
                             "d{bit_depth} {range:?} px {i} (y={yv})"
                         );
                     }
@@ -1908,10 +2259,10 @@ mod tests {
                     let mut out = vec![Rgba::<u8>::default(); w * h];
                     yuv400_to_rgbx_strip::<u8, Rgba<u8>>(&y, w, w, 0, h, range, 8, &mut out);
                     for (i, (&yv, px)) in y.iter().zip(out.iter()).enumerate() {
-                        let (r, g, b) = convert_one(yv as f32, c.uv_cen, c.uv_cen, &c);
+                        let (r, g, b) = expect(yv as f32);
                         assert_eq!(
-                            (px.r, px.g, px.b, px.a),
-                            (r as u8, g as u8, b as u8, 255),
+                            (px.r as u16, px.g as u16, px.b as u16, px.a),
+                            (r, g, b, 255),
                             "d8 {range:?} px {i} (y={yv})"
                         );
                     }
@@ -2031,6 +2382,87 @@ mod tests {
             up.iter().chain(vp.iter()).all(|&v| v == 128),
             "gray chroma neutral"
         );
+    }
+
+    /// The fixed-point formula must stay within ±1 of exact rational
+    /// conversion (f64 single rounding) everywhere — the 2^-16 constant
+    /// quantization can shift a rounding boundary but never move a value.
+    #[test]
+    fn fixed_formula_within_one_of_exact() {
+        for &bit_depth in &[8u8, 10, 12] {
+            let max = ((1u32 << bit_depth) - 1) as i64;
+            let shift = u32::from(bit_depth) - 8;
+            for &range in &[YuvRange::Full, YuvRange::Limited] {
+                for &(kr, kb) in &[(0.299f64, 0.114f64), (0.2126, 0.0722), (0.2627, 0.0593)] {
+                    let c = FixedConsts::new(
+                        YuvMatrixKrKb {
+                            kr: kr as f32,
+                            kb: kb as f32,
+                        },
+                        range,
+                        bit_depth,
+                    );
+                    let kg = 1.0 - kr - kb;
+                    let cen = f64::from(128u32 << shift);
+                    let (y_off, y_span, uv_span) = match range {
+                        YuvRange::Full => (0.0, max as f64, max as f64),
+                        YuvRange::Limited => (
+                            f64::from(16u32 << shift),
+                            f64::from(219u32 << shift),
+                            f64::from(224u32 << shift),
+                        ),
+                    };
+                    let coef = [
+                        (0.0, 2.0 * (1.0 - kr)),
+                        (-2.0 * kb * (1.0 - kb) / kg, -2.0 * kr * (1.0 - kr) / kg),
+                        (2.0 * (1.0 - kb), 0.0),
+                    ];
+                    // Deterministic sample sweep incl. domain corners.
+                    let mut s = 0x2545F491u32;
+                    for i in 0..40_000 {
+                        let (y, u4, v4) = if i < 8 {
+                            let m16 = max * 16;
+                            [
+                                (0, 0, 0),
+                                (max, m16, m16),
+                                (0, m16, 0),
+                                (max, 0, m16),
+                                (max / 2, m16 / 2, m16 / 2),
+                                (0, m16, m16),
+                                (max, 0, 0),
+                                (max / 2, 0, m16),
+                            ][i]
+                        } else {
+                            s ^= s << 13;
+                            s ^= s >> 17;
+                            s ^= s << 5;
+                            let y = (s as i64) % (max + 1);
+                            s ^= s << 13;
+                            s ^= s >> 17;
+                            s ^= s << 5;
+                            let u4 = (s as i64) % (max * 16 + 1);
+                            s ^= s << 13;
+                            s ^= s >> 17;
+                            s ^= s << 5;
+                            (y, u4, (s as i64) % (max * 16 + 1))
+                        };
+                        let got = ref_convert_fixed(y, u4, v4, &c);
+                        for (ci, &(cu, cv)) in coef.iter().enumerate() {
+                            let exact = (y as f64 - y_off) * (max as f64) / y_span
+                                + (u4 as f64 / 16.0 - cen) * cu * (max as f64) / uv_span
+                                + (v4 as f64 / 16.0 - cen) * cv * (max as f64) / uv_span;
+                            let exact = exact.round().clamp(0.0, max as f64) as i64;
+                            let g = [got.0, got.1, got.2][ci] as i64;
+                            assert!(
+                                (g - exact).abs() <= 1,
+                                "d{bit_depth} {range:?} kr{kr} ch{ci} y{y} u{u4} v{v4}: \
+                                 formula {g} vs exact {exact}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

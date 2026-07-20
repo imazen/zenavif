@@ -125,6 +125,14 @@ write-path returns + gain-map interop additions, already on main).
   the next 0.x minor bump (svtav1-rs backend PR)
 
 ### Added
+- The canonical YUV numeric recipe is now a documented FIXED-POINT formula
+  (P8): single rounding of a 2^-16-accurate value, pure-integer arithmetic
+  (platform-exact on every arch incl. wasm — no FMA/rounding-mode variance),
+  offsets derived from the rounded coefficients so gray decodes to exactly
+  R=G=B at every depth. d<=12 decode paths (all real AV1) run it; measured
+  2-10x over the f32 kernels (benchmarks/yuv_fixedpoint_2026-07-20.csv:
+  8-bit 420 490 Mpx/s, 444-rgba 3.4 Gpx/s, 10-bit 420 484 Mpx/s). Accuracy
+  pinned within ±1 of exact rational conversion by test.
 - One unified in-house YUV kernel family (`src/yuv_convert.rs`): strip-first,
   generic over sample depth (8/10/12/16-bit) and output pixel
   (RGB/RGBA/Gray x u8/u16), separable auto-vectorized chroma passes, one
