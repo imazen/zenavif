@@ -16,7 +16,11 @@ include = ["/src/**", "/README.crates.md", "/CHANGELOG.md", "/LICENSE*", "/tests
 # rav1d: C FFI-based decoder for asm feature (fastest)
 rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"], optional = true }
 # rav1d-safe: 100% safe managed API decoder (no c-ffi feature!)
-rav1d-safe = { version = "0.5.3", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
+# Git-rev pinned to imazen/rav1d-safe main (0.6.0 staged): carries the
+# tile-threading CDEF/loop-filter race + panic-wedge fix (zenavif#30,
+# rav1d-safe@49df1fc0) and the current safe-SIMD state. Return to a
+# registry dep at the 0.6.0 release.
+rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "398b0bfa40ebf3dec1973d7a0c66336b649ead4d", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
 # zenav1-aom pure-Rust AV1 KEY-frame decoder — second decode backend (feature
 # `aom-backend`). Git-rev pinned to imazen/zenav1-aom main (crate unpublished;
 # intra decode is conformance-clean vs libaom v3.14.1 at this rev).

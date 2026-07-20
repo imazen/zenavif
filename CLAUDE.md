@@ -655,10 +655,12 @@ under heavy parallel tile-threaded load can still rarely hang. At the dep
 bump: raise the rav1d-safe minimum past 0.5.7 and re-run the hang_stress
 verification. 2026-07-20: now that `codec-corpus` resolves on the dev-32gb
 box (symlink /root/codec-corpus -> /root/work/codec-corpus), the
-`codec::tests::animated_avif_animation_frame_decoder_roundtrip` test hits
-this wedge REPRODUCIBLY when the full `--features encode,zencodec` suite
-runs in parallel (2 of 3 runs; futex_do_wait, 0 CPU), while passing solo
-in ~3 s — treat a wedged animated test as this bug, not a regression.
+`codec::tests::animated_avif_animation_frame_decoder_roundtrip` test hit
+this wedge REPRODUCIBLY on registry 0.5.3 under parallel suite load
+(2 of 3 runs; futex_do_wait, 0 CPU) while passing solo — and the bump to
+the imazen/rav1d-safe git rev 398b0bfa (0.6.0 staged, carries 49df1fc0)
+cleared it: full suite green under the same parallel load. Return to a
+registry dep at the 0.6.0 release.
 
 ## TODO: Encoding Enhancements
 
