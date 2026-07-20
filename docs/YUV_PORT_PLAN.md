@@ -1,11 +1,17 @@
 # YUV conversion: port the remaining `yuv`-crate surface in-house, unify the kernels
 
-Status: EXECUTED through P6 (2026-07-20). P1-P6 shipped; P7 (dep removal)
-is blocked only on the queued `Error::ColorConversion` breaking change and
-the legacy `unsafe-asm` decoder swap. Remaining perf item: P8 — an i16
-fixed-point kernel proven equal to the canonical recipe (the f32 kernels
-measure ~250-330 Mpx/s vs the yuv crate's fixed-point ~1435 Mpx/s at
-10-bit; asm-verified the f32 loops are already full-width zmm).
+Status: EXECUTED through P8 (2026-07-20). P1-P6 + P8 shipped; P7 (dep
+removal) is blocked only on the queued `Error::ColorConversion` breaking
+change and the legacy `unsafe-asm` decoder swap. P8 outcome: the canonical
+recipe is now the documented FIXED-POINT formula (single rounding,
+platform-exact integer arithmetic) for d<=12; the f32 recipe survives only
+for the 16-bit API entries (AV1 codes 8/10/12). Measured vs the f32
+kernels: 8-bit 420/422 ~2.0-2.6x (490-637 Mpx/s), 444 4.3-10x (1373-3400),
+10-bit 420 2.1x (484). The yuv crate's 10-bit kernel still leads 3x via
+vpmaddwd i16-pair lane density — closing that needs hand-shaped madd
+accumulators and is deliberately NOT taken (the plain auto-vectorized
+loop is the maintainability point; conversion is now ~10%% of 10-bit
+decode wall).
 Companion facts: the yuv-crate bottom-row bug record (`src/yuv_bilinear_fix.rs`,
 upstream awxkee/yuvutils-rs#129/#130) is what motivated auditing this seam.
 
