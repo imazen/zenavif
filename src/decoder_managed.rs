@@ -1997,11 +1997,10 @@ fn convert_8bit_planar_rgb_yuvcrate(
 }
 
 /// Decode 8-bit YUV planar to RGBA via the in-house SIMD kernels — the
-/// EXACT same full-image kernels the no-alpha RGB path uses, widened to
-/// RGBA (alpha 255; the caller's `add_alpha8` overwrites it). Routing both
-/// paths through one kernel guarantees identical color payloads decode
-/// identically with and without an alpha item — byte-for-byte, by
-/// construction, not by float-op-order luck.
+/// SAME unified kernels the no-alpha RGB path uses, with an RGBA store
+/// (alpha 255; the caller's `add_alpha8` overwrites it). One kernel for
+/// both paths guarantees identical color payloads decode identically with
+/// and without an alpha item — byte-for-byte, by construction.
 fn convert_8bit_planar_rgba_inhouse(
     y_view: &rav1d_safe::src::managed::PlaneView8<'_>,
     u_view: &rav1d_safe::src::managed::PlaneView8<'_>,
@@ -2013,53 +2012,6 @@ fn convert_8bit_planar_rgba_inhouse(
 ) -> Result<PixelBuffer> {
     let buffer_width = ctx.buffer_width;
     let buffer_height = ctx.buffer_height;
-    let rgb = match sampling {
-        ChromaSampling::Cs420 => yuv_convert::yuv420_to_rgb8(
-            y_view.as_slice(),
-            y_view.stride(),
-            u_view.as_slice(),
-            u_view.stride(),
-            v_view.as_slice(),
-            v_view.stride(),
-            buffer_width,
-            buffer_height,
-            our_range,
-            our_matrix,
-        ),
-        ChromaSampling::Cs422 => yuv_convert::yuv422_to_rgb8(
-            y_view.as_slice(),
-            y_view.stride(),
-            u_view.as_slice(),
-            u_view.stride(),
-            v_view.as_slice(),
-            v_view.stride(),
-            buffer_width,
-            buffer_height,
-            our_range,
-            our_matrix,
-        ),
-        ChromaSampling::Cs444 => yuv_convert::yuv444_to_rgb8(
-            y_view.as_slice(),
-            y_view.stride(),
-            u_view.as_slice(),
-            u_view.stride(),
-            v_view.as_slice(),
-            v_view.stride(),
-            buffer_width,
-            buffer_height,
-            our_range,
-            our_matrix,
-        ),
-        ChromaSampling::Monochrome => {
-            return Err(at!(Error::Decode {
-                code: -1,
-                msg: "Monochrome should not reach chroma conversion",
-            }));
-        }
-    };
-
-    // Widen RGB -> RGBA (fixed-size array pattern; LLVM lowers this to
-    // vector shuffles). Alpha 255 until add_alpha8 attaches the real plane.
     let mut out = crate::alloc_util::alloc_filled(
         ctx.alloc_pref,
         true,
@@ -2071,15 +2023,58 @@ fn convert_8bit_planar_rgba_inhouse(
         },
         ctx.buffer_pixel_count,
     )?;
-    let (w, h) = ctx.dims();
-    for (dst, src) in out.iter_mut().zip(rgb.buf().iter()) {
-        *dst = Rgba {
-            r: src.r,
-            g: src.g,
-            b: src.b,
-            a: 255,
-        };
+    match sampling {
+        ChromaSampling::Cs420 => yuv_convert::yuv420_to_rgba8_strip(
+            y_view.as_slice(),
+            y_view.stride(),
+            u_view.as_slice(),
+            u_view.stride(),
+            v_view.as_slice(),
+            v_view.stride(),
+            buffer_width,
+            buffer_height,
+            0,
+            buffer_height,
+            our_range,
+            our_matrix,
+            &mut out,
+        ),
+        ChromaSampling::Cs422 => yuv_convert::yuv422_to_rgba8_strip(
+            y_view.as_slice(),
+            y_view.stride(),
+            u_view.as_slice(),
+            u_view.stride(),
+            v_view.as_slice(),
+            v_view.stride(),
+            buffer_width,
+            0,
+            buffer_height,
+            our_range,
+            our_matrix,
+            &mut out,
+        ),
+        ChromaSampling::Cs444 => yuv_convert::yuv444_to_rgba8_strip(
+            y_view.as_slice(),
+            y_view.stride(),
+            u_view.as_slice(),
+            u_view.stride(),
+            v_view.as_slice(),
+            v_view.stride(),
+            buffer_width,
+            0,
+            buffer_height,
+            our_range,
+            our_matrix,
+            &mut out,
+        ),
+        ChromaSampling::Monochrome => {
+            return Err(at!(Error::Decode {
+                code: -1,
+                msg: "Monochrome should not reach chroma conversion",
+            }));
+        }
     }
+    let (w, h) = ctx.dims();
     PixelBuffer::from_pixels(out, w, h)
         .map(Into::into)
         .map_err(|_| at!(Error::OutOfMemory))

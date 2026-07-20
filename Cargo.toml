@@ -25,7 +25,7 @@ rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "398b0bfa40eb
 # `aom-backend`). Git-rev pinned to imazen/zenav1-aom main (crate unpublished;
 # intra decode is conformance-clean vs libaom v3.14.1 at this rev).
 aom-decode = { package = "zenav1-aom-decode", git = "https://github.com/imazen/zenav1-aom", rev = "ed29932f4fcbe021b40eb31bfdcf87474a8c70ee", optional = true }
-archmage = { version = "0.9.15", features = ["macros"] }
+archmage = { version = "0.9.15", features = ["macros", "avx512"] }
 magetypes = { version = "0.9.15"}
 safe_unaligned_simd = "0.2.5"
 zenavif-parse = "0.6.0"
@@ -322,3 +322,7 @@ required-features = ["two-pass-butteraugli"]
 # zenavif-serialize 0.2.0 (set_gain_map_alt_icc), unpublished — this pin supplies it
 # to the whole graph. Drop at the zenavif-serialize 0.2.0 publish.
 zenavif-serialize = { git = "https://github.com/imazen/zenavif-serialize", rev = "4c90d4dd02ef1684fa2230c6aaa2b5ef51e6a926" }
+
+[[example]]
+name = "yuv_kernel_bench"
+required-features = ["_dev"]
