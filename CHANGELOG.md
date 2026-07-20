@@ -115,12 +115,29 @@ write-path returns + gain-map interop additions, already on main).
   post-0.1.25, unreleased) and `../zenavif-parse` (0.7.0, unreleased) until both
   publish. Additive (`#[non_exhaustive]` enum + opt-in trait).
 ### QUEUED BREAKING CHANGES
+- Remove `Error::ColorConversion(yuv::YuvError)` — the last public-API tie to
+  the `yuv` crate. In-house kernels no longer construct it (they are
+  infallible); the legacy `unsafe-asm` decoder still does. Removing the
+  variant + the dep ships with the next 0.x minor bump.
 - `Av1Backend` gained the `SvtRs` variant (the enum is not `#[non_exhaustive]`,
   so downstream exhaustive matches must add an arm) and `ValidationError`
   (already `#[non_exhaustive]`) gained `BackendUnsupportedParam` — ship with
   the next 0.x minor bump (svtav1-rs backend PR)
 
 ### Added
+- One unified in-house YUV kernel family (`src/yuv_convert.rs`): strip-first,
+  generic over sample depth (8/10/12/16-bit) and output pixel
+  (RGB/RGBA/Gray x u8/u16), separable auto-vectorized chroma passes, one
+  canonical f32 numeric recipe (reciprocal-mul normalize, chained FMA,
+  round-ties-even), AVX-512/AVX2/NEON/wasm/scalar tiers. Replaces four
+  independent kernel implementations; the managed decoder now converts every
+  planar/mono path in-house (BT.601/709/2020 + FCC/SMPTE-240M/derived via
+  explicit Kr,Kb), and the SvtRs encode path uses the in-house forward
+  RGB(A)->YUV420 kernel (box-averaged f32 chroma; measured +1.2 dB on the
+  q85 gradient round-trip). 8-bit decode conversion measured 2-6x faster
+  (benchmarks/yuv_kernel_unify_2026-07-20.csv); new default-on `avx512`
+  feature. The `yuv` crate remains only in the legacy `unsafe-asm` decoder
+  and the public error type (queued above).
 - SvtRs backend: RGBA8 encode (color 4:2:0 item + straight-alpha Cs400
   `auxl` auxiliary item honoring the `alpha_quality` fallback contract) and
   grayscale encode (monochrome Cs400 color item, `encode-mono` feature) —

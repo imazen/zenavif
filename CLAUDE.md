@@ -68,12 +68,11 @@ TSV diff in the same commit. zenrav1e's halves (`gate-identity`,
 - `src/convert.rs` - Alpha channel handling, unpremultiply
 
 ### YUV Conversion
-- `src/yuv_convert.rs` - Float SIMD path (AVX2/FMA via archmage)
+- `src/yuv_convert.rs` - THE unified kernel family (2026-07-20): strip-first, depth-generic (8/10/12/16), RGB/RGBA/Gray outputs, one canonical f32 recipe, forward RGB->YUV420, AVX-512/AVX2/NEON/wasm/scalar tiers
 - `src/yuv_convert_libyuv.rs` - Exact libyuv integer math (BT.709, BT.601)
 - `src/yuv_convert_libyuv_simd.rs` - AVX2 SIMD libyuv path
 - `src/yuv_convert_libyuv_autovec.rs` - Auto-vectorized libyuv variant
 - `src/yuv_convert_fast.rs` - Fast fixed-point integer path
-- `src/chroma.rs` - YUV chroma upsampling iterators
 
 ### Encoding
 - `src/encoder.rs` - AVIF encoding via zenravif (behind `encode` feature; local path dep on zenravif 0.2.0. Registry builds resolve PUBLISHED zenravif 0.1.3 — encode works on crates.io today, at zenrav1e 0.1.4 with the gated wins OFF)

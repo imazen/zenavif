@@ -291,22 +291,26 @@ pub(crate) fn encode_rgb8_svt_rs(
     // ---- RGB -> YUV 4:2:0, BT.601 full range ----------------------------
     // Full range matches what the svtav1-rs sequence header signals
     // (color_range is pinned to 1) and zenravif's full-range default;
-    // BT.601 matches the zenavif YCbCr convention. The `yuv` crate is the
-    // same engine the decode path uses in the other direction.
+    // BT.601 matches the zenavif YCbCr convention. The in-house forward
+    // kernel is the exact inverse of the decode recipe (per-pixel f32
+    // chroma, box-averaged before quantization).
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let mut planar = yuv::YuvPlanarImageMut::<u8>::alloc(w, h, yuv::YuvChromaSubsampling::Yuv420);
-    let rgb_bytes: &[u8] = bytemuck::cast_slice(img.buf());
-    let rgb_stride_components = u32::try_from(img.stride() * 3)
-        .map_err(|_| at!(Error::Encode("row stride exceeds u32".into())))?;
-    yuv::rgb_to_yuv420(
-        &mut planar,
-        rgb_bytes,
-        rgb_stride_components,
-        yuv::YuvRange::Full,
-        yuv::YuvStandardMatrix::Bt601,
-        yuv::YuvConversionMode::Balanced,
-    )
-    .map_err(|e| at!(Error::Encode(format!("RGB->YUV420 conversion failed: {e}"))))?;
+    let cw = width.div_ceil(2);
+    let ch = height.div_ceil(2);
+    let mut y_plane = vec![0u8; width * height];
+    let mut u_plane = vec![0u8; cw * ch];
+    let mut v_plane = vec![0u8; cw * ch];
+    crate::yuv_convert::rgb8_to_yuv420(
+        img.buf(),
+        img.stride(),
+        width,
+        height,
+        crate::yuv_convert::YuvRange::Full,
+        crate::yuv_convert::YuvMatrix::Bt601,
+        &mut y_plane,
+        &mut u_plane,
+        &mut v_plane,
+    );
 
     // ---- svtav1-rs still-frame encode -----------------------------------
     stop.check().map_err(|e| at!(Error::from(e)))?;
@@ -337,12 +341,7 @@ pub(crate) fn encode_rgb8_svt_rs(
     };
 
     // TD + sequence header + frame OBUs, muxed verbatim (module docs).
-    let av1_payload = pipeline.encode_frame_420(
-        planar.y_plane.borrow(),
-        planar.u_plane.borrow(),
-        planar.v_plane.borrow(),
-        width,
-    );
+    let av1_payload = pipeline.encode_frame_420(&y_plane, &u_plane, &v_plane, width);
     if av1_payload.is_empty() {
         return Err(at!(Error::Encode(
             "svtav1-rs pipeline returned an empty bitstream".into()
@@ -398,24 +397,26 @@ pub(crate) fn encode_rgba8_svt_rs(
     let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
 
     // ---- RGBA -> YUV 4:2:0 color + tight alpha plane --------------------
+    // Same forward kernel as the RGB path (alpha ignored here — it rides
+    // as its own Cs400 stream below), so RGB and RGBA encodes of the same
+    // pixels produce byte-identical color payloads by construction.
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let mut planar = yuv::YuvPlanarImageMut::<u8>::alloc(w, h, yuv::YuvChromaSubsampling::Yuv420);
-    let rgba_bytes: &[u8] = bytemuck::cast_slice(img.buf());
-    let rgba_stride_components = u32::try_from(img.stride() * 4)
-        .map_err(|_| at!(Error::Encode("row stride exceeds u32".into())))?;
-    yuv::rgba_to_yuv420(
-        &mut planar,
-        rgba_bytes,
-        rgba_stride_components,
-        yuv::YuvRange::Full,
-        yuv::YuvStandardMatrix::Bt601,
-        yuv::YuvConversionMode::Balanced,
-    )
-    .map_err(|e| {
-        at!(Error::Encode(format!(
-            "RGBA->YUV420 conversion failed: {e}"
-        )))
-    })?;
+    let cw = width.div_ceil(2);
+    let ch = height.div_ceil(2);
+    let mut y_plane = vec![0u8; width * height];
+    let mut u_plane = vec![0u8; cw * ch];
+    let mut v_plane = vec![0u8; cw * ch];
+    crate::yuv_convert::rgba8_to_yuv420(
+        img.buf(),
+        img.stride(),
+        width,
+        height,
+        crate::yuv_convert::YuvRange::Full,
+        crate::yuv_convert::YuvMatrix::Bt601,
+        &mut y_plane,
+        &mut u_plane,
+        &mut v_plane,
+    );
     let mut alpha_plane = Vec::with_capacity(width * height);
     for row in img.rows() {
         alpha_plane.extend(row.iter().map(|px| px.a));
@@ -447,12 +448,7 @@ pub(crate) fn encode_rgba8_svt_rs(
         matrix_coefficients: MATRIX_COEFFICIENTS_BT601,
         full_range: true,
     };
-    let color_payload = pipeline.encode_frame_420(
-        planar.y_plane.borrow(),
-        planar.u_plane.borrow(),
-        planar.v_plane.borrow(),
-        width,
-    );
+    let color_payload = pipeline.encode_frame_420(&y_plane, &u_plane, &v_plane, width);
     if color_payload.is_empty() {
         return Err(at!(Error::Encode(
             "svtav1-rs pipeline returned an empty bitstream".into()
