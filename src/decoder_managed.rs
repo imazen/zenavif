@@ -17,7 +17,11 @@ use crate::yuv_convert::{self, YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRang
 use enough::Stop;
 use rgb::{Rgb, Rgba};
 use whereat::at;
-use yuv::{YuvGrayImage, YuvPlanarImage, YuvRange, YuvStandardMatrix};
+// `.at()` is only called from the `zencodec`-gated strip glue below; an
+// unconditional import trips unused_imports on default-features builds.
+#[cfg(feature = "zencodec")]
+use whereat::ResultAtExt as _;
+use yuv::{YuvPlanarImage, YuvRange};
 use zenpixels::{PixelBuffer, PixelDescriptor};
 
 // Import managed API from rav1d-safe
@@ -1041,7 +1045,6 @@ impl ManagedAvifDecoder {
         let yuv_range = to_yuv_range(info.color_range);
         // Placeholder on the identity path: the identity converter never
         // reads `ctx.matrix` (the branch below routes around it).
-        let matrix = resolved.to_yuv_std().unwrap_or(YuvStandardMatrix::Bt601);
         let buffer_pixel_count = buffer_width
             .checked_mul(buffer_height)
             .ok_or_else(|| at!(Error::OutOfMemory))?;
@@ -1052,7 +1055,6 @@ impl ManagedAvifDecoder {
             buffer_pixel_count,
             has_alpha,
             yuv_range,
-            matrix,
             alloc_pref: self.alloc_pref,
         };
         let mut image = match (info.chroma_sampling, resolved) {
@@ -1128,8 +1130,6 @@ impl ManagedAvifDecoder {
         let needs_crop = buffer_width != display_width || buffer_height != display_height;
         let has_alpha = alpha.is_some();
         let yuv_range = to_yuv_range(info.color_range);
-        // Placeholder on the identity path (never read there).
-        let matrix = resolved.to_yuv_std().unwrap_or(YuvStandardMatrix::Bt601);
         let buffer_pixel_count = buffer_width
             .checked_mul(buffer_height)
             .ok_or_else(|| at!(Error::OutOfMemory))?;
@@ -1140,7 +1140,6 @@ impl ManagedAvifDecoder {
             buffer_pixel_count,
             has_alpha,
             yuv_range,
-            matrix,
             alloc_pref: self.alloc_pref,
         };
         let mut image = match (info.chroma_sampling, resolved) {
@@ -1579,13 +1578,19 @@ struct ConvertCtx {
     has_alpha: bool,
     /// `yuv` crate's color range (Tv/Pc).
     yuv_range: YuvRange,
-    /// `yuv` crate's standard color matrix (BT.601/BT.709/BT.2020).
-    matrix: YuvStandardMatrix,
     /// Allocation-fallibility preference for the output buffers allocated by
     /// the YUV→RGB(A) helpers. The full-image `out` buffers are sized from the
     /// (untrusted) AV1 frame dimensions, so they default to fallible; the
     /// per-row `rgb_row` scratch is width-bounded and defaults to infallible.
     alloc_pref: crate::alloc_util::AllocPref,
+}
+
+/// Map the ctx's yuv-crate range to the in-house kernel range.
+fn ctx_our_range(ctx: &ConvertCtx) -> OurYuvRange {
+    match ctx.yuv_range {
+        YuvRange::Full => OurYuvRange::Full,
+        YuvRange::Limited => OurYuvRange::Limited,
+    }
 }
 
 impl ConvertCtx {
@@ -1602,44 +1607,29 @@ impl ConvertCtx {
 fn convert_8bit_monochrome_gray(planes: &Planes8<'_>, ctx: ConvertCtx) -> Result<PixelBuffer> {
     let y_view = planes.y();
     let (w, h) = ctx.dims();
-    let (wu, hu) = (w as usize, h as usize);
+    let hu = h as usize;
     let mut out = crate::alloc_util::alloc_filled(
         ctx.alloc_pref,
         true,
         rgb::Gray::<u8>::new(0),
         ctx.buffer_pixel_count,
     )?;
-    let mut rgb_row =
-        crate::alloc_util::alloc_filled(ctx.alloc_pref, false, Rgb { r: 0u8, g: 0, b: 0 }, wu)?;
-    let y_slice = y_view.as_slice();
-    let y_stride = y_view.stride();
-    for (row_idx, orow) in out.chunks_exact_mut(wu).enumerate().take(hu) {
-        let yrow = &y_slice[row_idx * y_stride..][..wu];
-        let gray = YuvGrayImage {
-            y_plane: yrow,
-            y_stride: w,
-            width: w,
-            height: 1,
-        };
-        yuv::yuv400_to_rgb(
-            &gray,
-            rgb::bytemuck::cast_slice_mut(rgb_row.as_mut_slice()),
-            w * 3,
-            ctx.yuv_range,
-            ctx.matrix,
-        )
-        .map_err(|e| at!(Error::ColorConversion(e)))?;
-        for (o, p) in orow.iter_mut().zip(&rgb_row) {
-            *o = rgb::Gray::new(p.r);
-        }
-    }
+    crate::yuv_convert::yuv400_to_rgbx_strip::<u8, rgb::Gray<u8>>(
+        y_view.as_slice(),
+        y_view.stride(),
+        w as usize,
+        0,
+        hu,
+        ctx_our_range(&ctx),
+        8,
+        &mut out,
+    );
     PixelBuffer::from_pixels(out, w, h)
         .map(Into::into)
         .map_err(|_| at!(Error::OutOfMemory))
 }
 
-/// Native Gray16 output for alpha-free 10/12-bit monochrome — same
-/// per-row shared-kernel scheme as [`convert_8bit_monochrome_gray`].
+/// Native Gray16 output for alpha-free 10/12-bit monochrome.
 /// Values are native-depth; the caller's `scale_pixels_to_u16` expands.
 fn convert_16bit_monochrome_gray(
     planes: &Planes16<'_>,
@@ -1648,44 +1638,22 @@ fn convert_16bit_monochrome_gray(
 ) -> Result<PixelBuffer> {
     let y_view = planes.y();
     let (w, h) = ctx.dims();
-    let (wu, hu) = (w as usize, h as usize);
     let mut out = crate::alloc_util::alloc_filled(
         ctx.alloc_pref,
         true,
         rgb::Gray::<u16>::new(0),
         ctx.buffer_pixel_count,
     )?;
-    let mut rgb_row = crate::alloc_util::alloc_filled(
-        ctx.alloc_pref,
-        false,
-        Rgb {
-            r: 0u16,
-            g: 0,
-            b: 0,
-        },
-        wu,
-    )?;
-    let y_slice = y_view.as_slice();
-    let y_stride = y_view.stride();
-    for (row_idx, orow) in out.chunks_exact_mut(wu).enumerate().take(hu) {
-        let yrow = &y_slice[row_idx * y_stride..][..wu];
-        let gray = YuvGrayImage {
-            y_plane: yrow,
-            y_stride: w,
-            width: w,
-            height: 1,
-        };
-        let out_bytes = rgb::bytemuck::cast_slice_mut(rgb_row.as_mut_slice());
-        match bit_depth {
-            10 => yuv::y010_to_rgb10(&gray, out_bytes, w * 3, ctx.yuv_range, ctx.matrix),
-            12 => yuv::y012_to_rgb12(&gray, out_bytes, w * 3, ctx.yuv_range, ctx.matrix),
-            _ => yuv::y016_to_rgb16(&gray, out_bytes, w * 3, ctx.yuv_range, ctx.matrix),
-        }
-        .map_err(|e| at!(Error::ColorConversion(e)))?;
-        for (o, p) in orow.iter_mut().zip(&rgb_row) {
-            *o = rgb::Gray::new(p.r);
-        }
-    }
+    crate::yuv_convert::yuv400_to_rgbx_strip::<u16, rgb::Gray<u16>>(
+        y_view.as_slice(),
+        y_view.stride(),
+        w as usize,
+        0,
+        h as usize,
+        ctx_our_range(&ctx),
+        bit_depth,
+        &mut out,
+    );
     PixelBuffer::from_pixels(out, w, h)
         .map(Into::into)
         .map_err(|_| at!(Error::OutOfMemory))
@@ -1694,13 +1662,7 @@ fn convert_16bit_monochrome_gray(
 fn convert_8bit_monochrome(planes: &Planes8<'_>, ctx: ConvertCtx) -> Result<PixelBuffer> {
     let y_view = planes.y();
     let (w, h) = ctx.dims();
-    let gray = YuvGrayImage {
-        y_plane: y_view.as_slice(),
-        y_stride: y_view.stride() as u32,
-        width: w,
-        height: h,
-    };
-
+    let our_range = ctx_our_range(&ctx);
     if ctx.has_alpha {
         let mut out = crate::alloc_util::alloc_filled(
             ctx.alloc_pref,
@@ -1713,15 +1675,16 @@ fn convert_8bit_monochrome(planes: &Planes8<'_>, ctx: ConvertCtx) -> Result<Pixe
             },
             ctx.buffer_pixel_count,
         )?;
-        let rgb_stride = w * 4;
-        yuv::yuv400_to_rgba(
-            &gray,
-            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
-            rgb_stride,
-            ctx.yuv_range,
-            ctx.matrix,
-        )
-        .map_err(|e| at!(Error::ColorConversion(e)))?;
+        crate::yuv_convert::yuv400_to_rgbx_strip::<u8, Rgba<u8>>(
+            y_view.as_slice(),
+            y_view.stride(),
+            w as usize,
+            0,
+            h as usize,
+            our_range,
+            8,
+            &mut out,
+        );
         PixelBuffer::from_pixels(out, w, h)
             .map(Into::into)
             .map_err(|_| at!(Error::OutOfMemory))
@@ -1732,15 +1695,16 @@ fn convert_8bit_monochrome(planes: &Planes8<'_>, ctx: ConvertCtx) -> Result<Pixe
             Rgb { r: 0u8, g: 0, b: 0 },
             ctx.buffer_pixel_count,
         )?;
-        let rgb_stride = w * 3;
-        yuv::yuv400_to_rgb(
-            &gray,
-            rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
-            rgb_stride,
-            ctx.yuv_range,
-            ctx.matrix,
-        )
-        .map_err(|e| at!(Error::ColorConversion(e)))?;
+        crate::yuv_convert::yuv400_to_rgbx_strip::<u8, Rgb<u8>>(
+            y_view.as_slice(),
+            y_view.stride(),
+            w as usize,
+            0,
+            h as usize,
+            our_range,
+            8,
+            &mut out,
+        );
         PixelBuffer::from_pixels(out, w, h)
             .map(Into::into)
             .map_err(|_| at!(Error::OutOfMemory))
@@ -1894,82 +1858,21 @@ fn convert_8bit_planar(
         .v()
         .ok_or_else(|| at!(Error::Malformed("Missing V plane")))?;
 
-    let (w, h) = ctx.dims();
-    let planar = YuvPlanarImage {
-        y_plane: y_view.as_slice(),
-        y_stride: y_view.stride() as u32,
-        u_plane: u_view.as_slice(),
-        u_stride: u_view.stride() as u32,
-        v_plane: v_view.as_slice(),
-        v_stride: v_view.stride() as u32,
-        width: w,
-        height: h,
-    };
-
+    // Every real matrix maps in-house now (FCC/SMPTE-240M/derived via
+    // explicit Kr,Kb); identity never reaches here (guarded upstream).
+    let our_matrix = resolved
+        .to_our()
+        .expect("identity guarded before planar conversion");
+    let our_range = to_our_yuv_range(info.color_range);
     if ctx.has_alpha {
-        if let Some(our_matrix) = resolved.to_our() {
-            let our_range = to_our_yuv_range(info.color_range);
-            convert_8bit_planar_rgba_inhouse(
-                &y_view, &u_view, &v_view, sampling, ctx, our_range, our_matrix,
-            )
-        } else {
-            convert_8bit_planar_rgba(&planar, sampling, ctx)
-        }
-    } else if let Some(our_matrix) = resolved.to_our() {
-        let our_range = to_our_yuv_range(info.color_range);
-        convert_8bit_planar_rgb(
+        convert_8bit_planar_rgba_inhouse(
             &y_view, &u_view, &v_view, sampling, ctx, our_range, our_matrix,
         )
     } else {
-        // Matrices outside the in-house tables (SMPTE-240M, FCC,
-        // chromaticity-derived custom KR/KB) decode exactly through the
-        // `yuv` crate. Identity never reaches here (guarded upstream).
-        convert_8bit_planar_rgb_yuvcrate(&planar, sampling, ctx)
+        convert_8bit_planar_rgb(
+            &y_view, &u_view, &v_view, sampling, ctx, our_range, our_matrix,
+        )
     }
-}
-
-/// 8-bit planar YUV → RGB via the `yuv` crate — the fallback for
-/// matrices the in-house SIMD tables don't cover. Mirrors the RGBA
-/// arm's kernel choices (bilinear chroma for 4:2:0/4:2:2).
-fn convert_8bit_planar_rgb_yuvcrate(
-    planar: &YuvPlanarImage<'_, u8>,
-    sampling: ChromaSampling,
-    ctx: ConvertCtx,
-) -> Result<PixelBuffer> {
-    let (w, h) = ctx.dims();
-    let mut out = crate::alloc_util::alloc_filled(
-        ctx.alloc_pref,
-        true,
-        Rgb { r: 0u8, g: 0, b: 0 },
-        ctx.buffer_pixel_count,
-    )?;
-    let rgb_stride = w * 3;
-    let out_bytes: &mut [u8] = rgb::bytemuck::cast_slice_mut(out.as_mut_slice());
-    match sampling {
-        ChromaSampling::Cs420 => crate::yuv_bilinear_fix::yuv420_bilinear_complete(
-            planar,
-            out_bytes,
-            rgb_stride,
-            3,
-            |p, o, s| yuv::yuv420_to_rgb_bilinear(p, o, s, ctx.yuv_range, ctx.matrix),
-        ),
-        ChromaSampling::Cs422 => {
-            yuv::yuv422_to_rgb_bilinear(planar, out_bytes, rgb_stride, ctx.yuv_range, ctx.matrix)
-        }
-        ChromaSampling::Cs444 => {
-            yuv::yuv444_to_rgb(planar, out_bytes, rgb_stride, ctx.yuv_range, ctx.matrix)
-        }
-        ChromaSampling::Monochrome => {
-            return Err(at!(Error::Decode {
-                code: -1,
-                msg: "Monochrome should not reach chroma conversion",
-            }));
-        }
-    }
-    .map_err(|e| at!(Error::ColorConversion(e)))?;
-    PixelBuffer::from_pixels(out, w, h)
-        .map(Into::into)
-        .map_err(|_| at!(Error::OutOfMemory))
 }
 
 /// Decode 8-bit YUV planar to RGBA via the in-house SIMD kernels — the
@@ -2056,57 +1959,6 @@ fn convert_8bit_planar_rgba_inhouse(
         .map_err(|_| at!(Error::OutOfMemory))
 }
 
-/// Decode 8-bit YUV planar to RGBA via the `yuv` crate — the fallback for
-/// matrices the in-house SIMD tables don't cover (SMPTE-240M, FCC,
-/// chromaticity-derived KR/KB). Mirrors `convert_8bit_planar_rgb_yuvcrate`'s
-/// kernel choices (bilinear chroma for 4:2:0 / 4:2:2).
-fn convert_8bit_planar_rgba(
-    planar: &YuvPlanarImage<'_, u8>,
-    sampling: ChromaSampling,
-    ctx: ConvertCtx,
-) -> Result<PixelBuffer> {
-    let (w, h) = ctx.dims();
-    let mut out = crate::alloc_util::alloc_filled(
-        ctx.alloc_pref,
-        true,
-        Rgba {
-            r: 0u8,
-            g: 0,
-            b: 0,
-            a: 255,
-        },
-        ctx.buffer_pixel_count,
-    )?;
-    let rgb_stride = w * 4;
-    let out_bytes = rgb::bytemuck::cast_slice_mut(out.as_mut_slice());
-    match sampling {
-        ChromaSampling::Cs420 => crate::yuv_bilinear_fix::yuv420_bilinear_complete(
-            planar,
-            out_bytes,
-            rgb_stride,
-            4,
-            |p, o, s| yuv::yuv420_to_rgba_bilinear(p, o, s, ctx.yuv_range, ctx.matrix),
-        ),
-        ChromaSampling::Cs422 => {
-            yuv::yuv422_to_rgba_bilinear(planar, out_bytes, rgb_stride, ctx.yuv_range, ctx.matrix)
-        }
-        ChromaSampling::Cs444 => {
-            yuv::yuv444_to_rgba(planar, out_bytes, rgb_stride, ctx.yuv_range, ctx.matrix)
-        }
-        ChromaSampling::Monochrome => {
-            return Err(at!(Error::Decode {
-                code: -1,
-                msg: "Monochrome should not reach chroma conversion",
-            }));
-        }
-    }
-    .map_err(|e| at!(Error::ColorConversion(e)))?;
-
-    PixelBuffer::from_pixels(out, w, h)
-        .map(Into::into)
-        .map_err(|_| at!(Error::OutOfMemory))
-}
-
 /// Decode 8-bit YUV planar to RGB via our `yuv_convert` SIMD path.
 fn convert_8bit_planar_rgb(
     y_view: &rav1d_safe::src::managed::PlaneView8<'_>,
@@ -2176,13 +2028,7 @@ fn convert_16bit_monochrome(
 ) -> Result<PixelBuffer> {
     let y_view = planes.y();
     let (w, h) = ctx.dims();
-    let gray = YuvGrayImage {
-        y_plane: y_view.as_slice(),
-        y_stride: y_view.stride() as u32,
-        width: w,
-        height: h,
-    };
-
+    let our_range = ctx_our_range(&ctx);
     if ctx.has_alpha {
         let mut out = crate::alloc_util::alloc_filled(
             ctx.alloc_pref,
@@ -2191,18 +2037,20 @@ fn convert_16bit_monochrome(
                 r: 0u16,
                 g: 0,
                 b: 0,
-                a: 0xFFFF,
+                a: 0,
             },
             ctx.buffer_pixel_count,
         )?;
-        let rgb_stride = w * 4;
-        let out_bytes = rgb::bytemuck::cast_slice_mut(out.as_mut_slice());
-        match bit_depth {
-            10 => yuv::y010_to_rgba10(&gray, out_bytes, rgb_stride, ctx.yuv_range, ctx.matrix),
-            12 => yuv::y012_to_rgba12(&gray, out_bytes, rgb_stride, ctx.yuv_range, ctx.matrix),
-            _ => yuv::y016_to_rgba16(&gray, out_bytes, rgb_stride, ctx.yuv_range, ctx.matrix),
-        }
-        .map_err(|e| at!(Error::ColorConversion(e)))?;
+        crate::yuv_convert::yuv400_to_rgbx_strip::<u16, Rgba<u16>>(
+            y_view.as_slice(),
+            y_view.stride(),
+            w as usize,
+            0,
+            h as usize,
+            our_range,
+            bit_depth,
+            &mut out,
+        );
         PixelBuffer::from_pixels(out, w, h)
             .map(Into::into)
             .map_err(|_| at!(Error::OutOfMemory))
@@ -2217,14 +2065,16 @@ fn convert_16bit_monochrome(
             },
             ctx.buffer_pixel_count,
         )?;
-        let rgb_stride = w * 3;
-        let out_bytes = rgb::bytemuck::cast_slice_mut(out.as_mut_slice());
-        match bit_depth {
-            10 => yuv::y010_to_rgb10(&gray, out_bytes, rgb_stride, ctx.yuv_range, ctx.matrix),
-            12 => yuv::y012_to_rgb12(&gray, out_bytes, rgb_stride, ctx.yuv_range, ctx.matrix),
-            _ => yuv::y016_to_rgb16(&gray, out_bytes, rgb_stride, ctx.yuv_range, ctx.matrix),
-        }
-        .map_err(|e| at!(Error::ColorConversion(e)))?;
+        crate::yuv_convert::yuv400_to_rgbx_strip::<u16, Rgb<u16>>(
+            y_view.as_slice(),
+            y_view.stride(),
+            w as usize,
+            0,
+            h as usize,
+            our_range,
+            bit_depth,
+            &mut out,
+        );
         PixelBuffer::from_pixels(out, w, h)
             .map(Into::into)
             .map_err(|_| at!(Error::OutOfMemory))
@@ -2259,22 +2109,13 @@ fn convert_16bit_planar(
         height: h,
     };
 
-    // In-house unified kernels for the matrices they cover; the `yuv`
-    // crate remains the exotic-matrix fallback (same split as 8-bit).
-    if let Some(our_matrix) = resolved.to_our() {
-        let our_range = match ctx.yuv_range {
-            YuvRange::Full => OurYuvRange::Full,
-            YuvRange::Limited => OurYuvRange::Limited,
-        };
-        return convert_16bit_planar_inhouse(
-            &planar, sampling, bit_depth, ctx, our_range, our_matrix,
-        );
-    }
-    if ctx.has_alpha {
-        convert_16bit_planar_rgba(&planar, sampling, bit_depth, ctx)
-    } else {
-        convert_16bit_planar_rgb(&planar, sampling, bit_depth, ctx)
-    }
+    // Every real matrix maps in-house (FCC/SMPTE-240M/derived via
+    // explicit Kr,Kb); identity never reaches here (guarded upstream).
+    let our_matrix = resolved
+        .to_our()
+        .expect("identity guarded before planar conversion");
+    let our_range = ctx_our_range(&ctx);
+    convert_16bit_planar_inhouse(&planar, sampling, bit_depth, ctx, our_range, our_matrix)
 }
 
 /// 16-bit planar → RGB(A)16 via the in-house unified kernels (native-depth
@@ -2367,136 +2208,6 @@ fn convert_16bit_planar_inhouse(
             .map(Into::into)
             .map_err(|_| at!(Error::OutOfMemory))
     }
-}
-
-/// 16-bit planar → RGBA dispatch table: `(bit_depth, sampling)`.
-///
-/// Falls back to the `i016_*` (16-bit native) conversions for any
-/// `bit_depth` other than 10 or 12.
-fn convert_16bit_planar_rgba(
-    planar: &YuvPlanarImage<'_, u16>,
-    sampling: ChromaSampling,
-    bit_depth: u8,
-    ctx: ConvertCtx,
-) -> Result<PixelBuffer> {
-    let (w, h) = ctx.dims();
-    let mut out = crate::alloc_util::alloc_filled(
-        ctx.alloc_pref,
-        true,
-        Rgba {
-            r: 0u16,
-            g: 0,
-            b: 0,
-            a: 0xFFFF,
-        },
-        ctx.buffer_pixel_count,
-    )?;
-    let rgb_stride = w * 4;
-    let out_bytes = rgb::bytemuck::cast_slice_mut(out.as_mut_slice());
-    let yuv_range = ctx.yuv_range;
-    let matrix = ctx.matrix;
-    match (bit_depth, sampling) {
-        (10, ChromaSampling::Cs420) => {
-            yuv::i010_to_rgba10(planar, out_bytes, rgb_stride, yuv_range, matrix)
-        }
-        (10, ChromaSampling::Cs422) => {
-            yuv::i210_to_rgba10(planar, out_bytes, rgb_stride, yuv_range, matrix)
-        }
-        (10, ChromaSampling::Cs444) => {
-            yuv::i410_to_rgba10(planar, out_bytes, rgb_stride, yuv_range, matrix)
-        }
-        (12, ChromaSampling::Cs420) => {
-            yuv::i012_to_rgba12(planar, out_bytes, rgb_stride, yuv_range, matrix)
-        }
-        (12, ChromaSampling::Cs422) => {
-            yuv::i212_to_rgba12(planar, out_bytes, rgb_stride, yuv_range, matrix)
-        }
-        (12, ChromaSampling::Cs444) => {
-            yuv::i412_to_rgba12(planar, out_bytes, rgb_stride, yuv_range, matrix)
-        }
-        (_, ChromaSampling::Cs420) => {
-            yuv::i016_to_rgba16(planar, out_bytes, rgb_stride, yuv_range, matrix)
-        }
-        (_, ChromaSampling::Cs422) => {
-            yuv::i216_to_rgba16(planar, out_bytes, rgb_stride, yuv_range, matrix)
-        }
-        (_, ChromaSampling::Cs444) => {
-            yuv::i416_to_rgba16(planar, out_bytes, rgb_stride, yuv_range, matrix)
-        }
-        (_, ChromaSampling::Monochrome) => {
-            return Err(at!(Error::Decode {
-                code: -1,
-                msg: "Monochrome should not reach chroma conversion",
-            }));
-        }
-    }
-    .map_err(|e| at!(Error::ColorConversion(e)))?;
-    PixelBuffer::from_pixels(out, w, h)
-        .map(Into::into)
-        .map_err(|_| at!(Error::OutOfMemory))
-}
-
-/// 16-bit planar → RGB dispatch table: `(bit_depth, sampling)`.
-fn convert_16bit_planar_rgb(
-    planar: &YuvPlanarImage<'_, u16>,
-    sampling: ChromaSampling,
-    bit_depth: u8,
-    ctx: ConvertCtx,
-) -> Result<PixelBuffer> {
-    let (w, h) = ctx.dims();
-    let mut out = crate::alloc_util::alloc_filled(
-        ctx.alloc_pref,
-        true,
-        Rgb {
-            r: 0u16,
-            g: 0,
-            b: 0,
-        },
-        ctx.buffer_pixel_count,
-    )?;
-    let rgb_stride = w * 3;
-    let out_bytes = rgb::bytemuck::cast_slice_mut(out.as_mut_slice());
-    let yuv_range = ctx.yuv_range;
-    let matrix = ctx.matrix;
-    match (bit_depth, sampling) {
-        (10, ChromaSampling::Cs420) => {
-            yuv::i010_to_rgb10(planar, out_bytes, rgb_stride, yuv_range, matrix)
-        }
-        (10, ChromaSampling::Cs422) => {
-            yuv::i210_to_rgb10(planar, out_bytes, rgb_stride, yuv_range, matrix)
-        }
-        (10, ChromaSampling::Cs444) => {
-            yuv::i410_to_rgb10(planar, out_bytes, rgb_stride, yuv_range, matrix)
-        }
-        (12, ChromaSampling::Cs420) => {
-            yuv::i012_to_rgb12(planar, out_bytes, rgb_stride, yuv_range, matrix)
-        }
-        (12, ChromaSampling::Cs422) => {
-            yuv::i212_to_rgb12(planar, out_bytes, rgb_stride, yuv_range, matrix)
-        }
-        (12, ChromaSampling::Cs444) => {
-            yuv::i412_to_rgb12(planar, out_bytes, rgb_stride, yuv_range, matrix)
-        }
-        (_, ChromaSampling::Cs420) => {
-            yuv::i016_to_rgb16(planar, out_bytes, rgb_stride, yuv_range, matrix)
-        }
-        (_, ChromaSampling::Cs422) => {
-            yuv::i216_to_rgb16(planar, out_bytes, rgb_stride, yuv_range, matrix)
-        }
-        (_, ChromaSampling::Cs444) => {
-            yuv::i416_to_rgb16(planar, out_bytes, rgb_stride, yuv_range, matrix)
-        }
-        (_, ChromaSampling::Monochrome) => {
-            return Err(at!(Error::Decode {
-                code: -1,
-                msg: "Monochrome should not reach chroma conversion",
-            }));
-        }
-    }
-    .map_err(|e| at!(Error::ColorConversion(e)))?;
-    PixelBuffer::from_pixels(out, w, h)
-        .map(Into::into)
-        .map_err(|_| at!(Error::OutOfMemory))
 }
 
 fn stitch_tile_into_buffer(
