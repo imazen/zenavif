@@ -117,6 +117,75 @@ TSV diff in the same commit. zenrav1e's halves (`gate-identity`,
 - `zencodec` - zencodec trait integration
 - `_dev` - Expose internal YUV modules for profiling (not public API)
 
+## Backend seam: zen cross-cutting compliance — SPEC (2026-07-20)
+
+The two experimental AV1 backends are codec-only crates that do NOT yet meet the
+zen cross-cutting contracts (limits / estimation / whereat / zencodec
+`CategorizedError` granularity / panic-freedom+fallible-alloc / stop tokens).
+Full per-repo specs live in each backend's CLAUDE.md:
+`/root/aom-rs/CLAUDE.md` (zenav1-aom decode — untrusted-input, high bar) and
+`/root/svtav1/rust/CLAUDE.md` (zenav1-svt encode — trusted-input, lower bar).
+This section pins the **seam** obligations on the zenavif side.
+
+**Status of the contracts on zenavif itself:** `main` already implements
+`zencodec::CategorizedError for Error` (`src/error.rs`, two-level
+`zencodec 0.1.26` `ErrorCategory`, `At<CodecError>` envelope, zencodec
+required). The `svtav1-rs-backend` branch is behind `main` and inherits this on
+rebase/merge — do NOT re-add CategorizedError here; rebase instead. (PR #27
+`caterr-categorized-error` was the stale original adoption, closed 2026-07-20 as
+superseded.) Stop tokens, fallible-alloc (`src/alloc_util.rs` `AllocPref`),
+whereat (`at!`), limits (`DecoderConfig` caps + `zencodec::ResourceLimits`
+mapping in `src/codec.rs`), and estimation (`src/heuristics.rs`) are all present
+for the native rav1d-safe / zenravif paths.
+
+**Seam obligations — enforce these when wiring a backend, and re-check at each
+backend capability landing:**
+
+1. **Preserve error granularity — do not flatten.** `decode_av1_obu_yuv_aomrs`
+   (`src/decode_av1.rs`) currently maps zenav1-aom's 21 distinct `String`
+   reasons to one generic `Error::Decode { code: -1 }`, so every aom failure
+   lands in the coarsest `CategorizedError` bucket. When the backend gains a
+   structured `DecodeError` (its spec §4), map each variant to the matching
+   zenavif `Error` variant (`Parse`/`Decode`→`Image`, unsupported-feature→
+   `Unsupported`, limit→`ResourceLimit`/`ImageTooLarge`, cancel→`Cancelled`) so
+   the category survives to `error_category()`. Same for the svt seam
+   (`src/encoder_svt_rs.rs`): once the pipeline returns a real `Result`, map its
+   `EncodeError` variants instead of treating `is_empty()` as the only failure
+   signal.
+
+2. **Isolate panics at the seam until the backend is panic-free.** Both
+   backends can `panic!`/`abort` on crafted decode input (aom) or a
+   contract-violating encode config (svt); the seam's `map_err` only catches the
+   `Err` branch, so a backend panic crosses into zenavif as a process crash.
+   The aom decode path is on the UNTRUSTED input surface — until zenav1-aom is
+   fuzz-clean and returns `Err` for malformed streams, treat `aom-backend` as
+   NOT fuzz-safe and keep it non-default/experimental (it already is). Do not
+   route untrusted decode through it in production, and do not add it to the
+   default decode path, until its spec §5 lands.
+
+3. **Plumb limits and stop through — a capability the seam drops is not
+   "done".** When a backend accepts a `DecodeLimits`/`EncodeConfig`, a stop
+   token, or an `AllocMode`, thread zenavif's existing `DecoderConfig` caps /
+   `stop` token / `alloc_pref` into it in the SAME change. The decode seam
+   currently supplies none because the aom API accepts none; that is the
+   backend's gap to close first, then the seam's to consume.
+
+4. **No silent corruption at the mux boundary.** The svt seam muxes any
+   non-empty `Vec<u8>` the pipeline returns; per the backend's STATUS, un-gated
+   configs emit decodable-but-wrong bitstreams. Until the encoder refuses
+   out-of-envelope configs with `EncodeError::UnsupportedConfig` (its spec §5),
+   the zenavif `encode-svt-rs` path must stay experimental/off-by-default and
+   its scope docs must name the verified envelope — never present a possibly-
+   corrupt encode as a supported path. (Global rule: ZERO TOLERANCE for
+   corruption applies at integration boundaries, not just within a single
+   crate.)
+
+5. **Alloc mode is a configurable perf/safety trade (both directions).** The
+   decoder default is Fallible (untrusted → OOM-safe); the encoder default is
+   Infallible (trusted → single-`calloc` fast). Expose the choice via the
+   backend config and map it from `zencodec::AllocPreference` /
+   `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
+
 ## Known Bugs
 
 ### yuv crate 4:2:0 bilinear drops the last row pair — FIXED in-repo (d3ece8e), upstream OPEN
