@@ -35,7 +35,7 @@ rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "398b0bfa40eb
 # `aom-backend`). Git-rev pinned to imazen/zenav1-aom main (crate unpublished;
 # intra decode is conformance-clean vs libaom v3.14.1 at this rev).
 aom-decode = { package = "zenav1-aom-decode", git = "https://github.com/imazen/zenav1-aom", rev = "ed29932f4fcbe021b40eb31bfdcf87474a8c70ee", optional = true }
-archmage = { version = "0.9.15", features = ["macros"] }
+archmage = { version = "0.9.15", features = ["macros", "avx512"] }
 magetypes = { version = "0.9.15"}
 safe_unaligned_simd = "0.2.5"
 # 0.7.0 (breaking): parser entry points return `whereat::At<Error>`, and `Error`
@@ -361,3 +361,7 @@ zenavif-serialize = { path = "zenavif-serialize" }
 # which a crates-io patch could not supply because 0.6.0 cannot patch a
 # 0.5.x requirement. Return to a registry dep at the 0.6.0 release;
 # fuzz/Cargo.toml mirrors the same pin.)
+
+[[example]]
+name = "yuv_kernel_bench"
+required-features = ["_dev"]
