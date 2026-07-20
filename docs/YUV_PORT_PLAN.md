@@ -1,6 +1,11 @@
 # YUV conversion: port the remaining `yuv`-crate surface in-house, unify the kernels
 
-Status: PLAN (2026-07-20). Phase 1 shipped; everything else is scoped work.
+Status: EXECUTED through P6 (2026-07-20). P1-P6 shipped; P7 (dep removal)
+is blocked only on the queued `Error::ColorConversion` breaking change and
+the legacy `unsafe-asm` decoder swap. Remaining perf item: P8 — an i16
+fixed-point kernel proven equal to the canonical recipe (the f32 kernels
+measure ~250-330 Mpx/s vs the yuv crate's fixed-point ~1435 Mpx/s at
+10-bit; asm-verified the f32 loops are already full-width zmm).
 Companion facts: the yuv-crate bottom-row bug record (`src/yuv_bilinear_fix.rs`,
 upstream awxkee/yuvutils-rs#129/#130) is what motivated auditing this seam.
 

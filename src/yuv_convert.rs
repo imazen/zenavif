@@ -1194,6 +1194,181 @@ pub(crate) fn yuv16_to_rgbx_strip<P: StripPixel>(
     }
 }
 
+// ═══════════════════════ Forward (encode-side) conversion ══════════════════
+//
+// RGB(A)8 -> YUV 4:2:0, the inverse of the canonical decode recipe:
+// per-pixel chroma is computed in f32 at full resolution, box-averaged 2x2
+// (the dyadic 0.25 weights keep the average EXACT in f32), then quantized —
+// averaging BEFORE quantization, so chroma sites carry the true mean.
+// Odd dimensions edge-replicate (clamp), matching the decode-side clamp.
+
+/// Input pixel for the forward kernel: yields (r, g, b) as f32.
+pub(crate) trait ForwardPixel: Copy {
+    fn rgb_f32(self) -> (f32, f32, f32);
+}
+
+impl ForwardPixel for RGB8 {
+    #[inline(always)]
+    fn rgb_f32(self) -> (f32, f32, f32) {
+        (self.r as f32, self.g as f32, self.b as f32)
+    }
+}
+
+impl ForwardPixel for Rgba<u8> {
+    #[inline(always)]
+    fn rgb_f32(self) -> (f32, f32, f32) {
+        (self.r as f32, self.g as f32, self.b as f32)
+    }
+}
+
+/// Forward-recipe constants (8-bit).
+#[derive(Clone, Copy)]
+struct FwdConsts {
+    kr: f32,
+    kg: f32,
+    kb: f32,
+    /// 1 / (2 * (1 - kb)) — chroma-U projection.
+    inv_ub: f32,
+    /// 1 / (2 * (1 - kr)) — chroma-V projection.
+    inv_vr: f32,
+    y_off: f32,
+    y_span: f32,
+    uv_span: f32,
+}
+
+impl FwdConsts {
+    fn new(matrix: YuvMatrix, range: YuvRange) -> Self {
+        let (kr, kb) = matrix_coefficients(matrix);
+        let kg = 1.0 - kr - kb;
+        let (y_off, y_span, uv_span) = match range {
+            YuvRange::Full => (0.0f32, 255.0, 255.0),
+            YuvRange::Limited => (16.0, 219.0, 224.0),
+        };
+        Self {
+            kr,
+            kg,
+            kb,
+            inv_ub: 1.0 / (2.0 * (1.0 - kb)),
+            inv_vr: 1.0 / (2.0 * (1.0 - kr)),
+            y_off,
+            y_span,
+            uv_span,
+        }
+    }
+}
+
+/// Convert RGB(A)8 rows to YUV 4:2:0 planes (8-bit). `rgb` is
+/// `rgb_stride`-strided in pixels; planes are tight (`width` /
+/// `ceil(width/2)` strides). The luma pass is a plain auto-vectorized
+/// loop; chroma is projected per-pixel in f32, box-averaged 2x2, then
+/// quantized.
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+fn rgbx_to_yuv420_kernel<P: ForwardPixel>(
+    token: Token,
+    rgb: &[P],
+    rgb_stride: usize,
+    width: usize,
+    height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    y_plane: &mut [u8],
+    u_plane: &mut [u8],
+    v_plane: &mut [u8],
+) {
+    let _ = token;
+    let c = FwdConsts::new(matrix, range);
+    let cw = width.div_ceil(2);
+    let inv255 = 1.0 / 255.0;
+
+    // Per-pixel chroma rows for the current luma row pair (f32, pre-average).
+    let mut u_rows = vec![0f32; 2 * width];
+    let mut v_rows = vec![0f32; 2 * width];
+
+    for cy in 0..height.div_ceil(2) {
+        let y0 = 2 * cy;
+        let y1 = (y0 + 1).min(height - 1); // edge-replicate on odd heights
+        for (ri, y_pos) in [y0, y1].into_iter().enumerate() {
+            let src = &rgb[y_pos * rgb_stride..][..width];
+            let y_out = &mut y_plane[y_pos.min(height - 1) * width..][..width];
+            let u_row = &mut u_rows[ri * width..][..width];
+            let v_row = &mut v_rows[ri * width..][..width];
+            for x in 0..width {
+                let (r, g, b) = src[x].rgb_f32();
+                let rn = r * inv255;
+                let gn = g * inv255;
+                let bn = b * inv255;
+                let yl = c.kb.mul_add(bn, c.kr.mul_add(rn, c.kg * gn));
+                y_out[x] = yl
+                    .mul_add(c.y_span, c.y_off)
+                    .max(0.0)
+                    .min(255.0)
+                    .round_ties_even() as u8;
+                u_row[x] = (bn - yl) * c.inv_ub;
+                v_row[x] = (rn - yl) * c.inv_vr;
+            }
+        }
+        // 2x2 box average (0.25 weights are exact) -> quantize.
+        let u_out = &mut u_plane[cy * cw..][..cw];
+        let v_out = &mut v_plane[cy * cw..][..cw];
+        for k in 0..cw {
+            let x0 = 2 * k;
+            let x1 = (x0 + 1).min(width - 1); // edge-replicate on odd widths
+            let ua = 0.25 * (u_rows[x0] + u_rows[x1] + u_rows[width + x0] + u_rows[width + x1]);
+            let va = 0.25 * (v_rows[x0] + v_rows[x1] + v_rows[width + x0] + v_rows[width + x1]);
+            u_out[k] = ua
+                .mul_add(c.uv_span, 128.0)
+                .max(0.0)
+                .min(255.0)
+                .round_ties_even() as u8;
+            v_out[k] = va
+                .mul_add(c.uv_span, 128.0)
+                .max(0.0)
+                .min(255.0)
+                .round_ties_even() as u8;
+        }
+    }
+}
+
+/// RGB8 -> YUV 4:2:0 (tight planes; see the kernel docs).
+pub(crate) fn rgb8_to_yuv420(
+    rgb: &[RGB8],
+    rgb_stride: usize,
+    width: usize,
+    height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    y_plane: &mut [u8],
+    u_plane: &mut [u8],
+    v_plane: &mut [u8],
+) {
+    incant!(
+        rgbx_to_yuv420_kernel::<RGB8>(
+            rgb, rgb_stride, width, height, range, matrix, y_plane, u_plane, v_plane
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
+}
+
+/// RGBA8 -> YUV 4:2:0 (alpha ignored; encode it as its own Cs400 plane).
+pub(crate) fn rgba8_to_yuv420(
+    rgb: &[Rgba<u8>],
+    rgb_stride: usize,
+    width: usize,
+    height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    y_plane: &mut [u8],
+    u_plane: &mut [u8],
+    v_plane: &mut [u8],
+) {
+    incant!(
+        rgbx_to_yuv420_kernel::<Rgba<u8>>(
+            rgb, rgb_stride, width, height, range, matrix, y_plane, u_plane, v_plane
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1743,6 +1918,119 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Forward kernel vs a direct per-pixel/per-site reference (same
+    /// recipe, no strip structure): byte-identical, plus gray maps to
+    /// exactly neutral chroma and a decode round-trip stays within
+    /// subsampling-quantization error on smooth content.
+    #[test]
+    fn rgb_to_yuv420_reference_gray_and_roundtrip() {
+        let (w, h) = (34usize, 18usize);
+        let mut img = vec![RGB8::default(); w * h];
+        for y in 0..h {
+            for x in 0..w {
+                img[y * w + x] = RGB8 {
+                    r: ((x * 255) / w) as u8,
+                    g: ((y * 255) / h) as u8,
+                    b: (((x + y) * 255) / (w + h)) as u8,
+                };
+            }
+        }
+        let cw = w.div_ceil(2);
+        let ch = h.div_ceil(2);
+        for &range in &[YuvRange::Full, YuvRange::Limited] {
+            let matrix = YuvMatrix::Bt601;
+            let mut yp = vec![0u8; w * h];
+            let mut up = vec![0u8; cw * ch];
+            let mut vp = vec![0u8; cw * ch];
+            rgb8_to_yuv420(&img, w, w, h, range, matrix, &mut yp, &mut up, &mut vp);
+
+            // Reference: same recipe, straight-line.
+            let c = FwdConsts::new(matrix, range);
+            for cy in 0..ch {
+                for k in 0..cw {
+                    let mut us = [0f32; 4];
+                    let mut vs = [0f32; 4];
+                    let mut yls = [[0f32; 2]; 2];
+                    for (j, yy) in [2 * cy, (2 * cy + 1).min(h - 1)].into_iter().enumerate() {
+                        for (i, xx) in [2 * k, (2 * k + 1).min(w - 1)].into_iter().enumerate() {
+                            let p = img[yy * w + xx];
+                            let rn = p.r as f32 / 255.0;
+                            let gn = p.g as f32 / 255.0;
+                            let bn = p.b as f32 / 255.0;
+                            let yl = c.kb.mul_add(bn, c.kr.mul_add(rn, c.kg * gn));
+                            yls[j][i] = yl;
+                            us[j * 2 + i] = (bn - yl) * c.inv_ub;
+                            vs[j * 2 + i] = (rn - yl) * c.inv_vr;
+                        }
+                    }
+                    let ua = 0.25 * (us[0] + us[1] + us[2] + us[3]);
+                    let va = 0.25 * (vs[0] + vs[1] + vs[2] + vs[3]);
+                    let uref = ua
+                        .mul_add(c.uv_span, 128.0)
+                        .max(0.0)
+                        .min(255.0)
+                        .round_ties_even() as u8;
+                    let vref = va
+                        .mul_add(c.uv_span, 128.0)
+                        .max(0.0)
+                        .min(255.0)
+                        .round_ties_even() as u8;
+                    assert_eq!(up[cy * cw + k], uref, "{range:?} U site ({k},{cy})");
+                    assert_eq!(vp[cy * cw + k], vref, "{range:?} V site ({k},{cy})");
+                }
+            }
+
+            // Round-trip through the decode kernel: smooth gradient stays
+            // close (subsampling + quantization bound the error).
+            let mut back = vec![RGB8::default(); w * h];
+            yuv420_to_rgb8_strip(
+                &yp, w, &up, cw, &vp, cw, w, h, 0, h, range, matrix, &mut back,
+            );
+            let mut se = 0u64;
+            for (a, b) in img.iter().zip(back.iter()) {
+                for (x, y) in [(a.r, b.r), (a.g, b.g), (a.b, b.b)] {
+                    let d = i64::from(x) - i64::from(y);
+                    se += (d * d) as u64;
+                }
+            }
+            let mse = se as f64 / (w * h * 3) as f64;
+            let psnr = 10.0 * (255.0f64 * 255.0 / mse.max(1e-9)).log10();
+            assert!(
+                psnr > 40.0,
+                "{range:?} roundtrip PSNR {psnr:.2} dB below sanity floor"
+            );
+        }
+
+        // Gray input -> exactly neutral chroma (full range).
+        let gray = vec![
+            RGB8 {
+                r: 77,
+                g: 77,
+                b: 77
+            };
+            w * h
+        ];
+        let mut yp = vec![0u8; w * h];
+        let mut up = vec![0u8; cw * ch];
+        let mut vp = vec![0u8; cw * ch];
+        rgb8_to_yuv420(
+            &gray,
+            w,
+            w,
+            h,
+            YuvRange::Full,
+            YuvMatrix::Bt601,
+            &mut yp,
+            &mut up,
+            &mut vp,
+        );
+        assert!(yp.iter().all(|&v| v == 77), "gray luma passthrough");
+        assert!(
+            up.iter().chain(vp.iter()).all(|&v| v == 128),
+            "gray chroma neutral"
+        );
     }
 
     #[test]

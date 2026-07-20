@@ -11,7 +11,6 @@ use crate::error::{Error, Result};
 use rav1d_safe::src::managed::{Decoder as Rav1dDecoder, Frame, PixelLayout, Planes, Settings};
 use rgb::Rgb;
 use whereat::at;
-use yuv::{YuvGrayImage, YuvPlanarImage, YuvRange, YuvStandardMatrix};
 
 // The former blind `to_yuv_matrix` (`_ => Bt601`) is replaced by
 // `crate::cicp_resolve::resolve` — raw OBU streams carry no container,
@@ -72,9 +71,9 @@ pub fn decode_av1_obu(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u8)> {
         color_info.color_range,
         rav1d_safe::src::managed::ColorRange::Full
     ) {
-        YuvRange::Full
+        crate::yuv_convert::YuvRange::Full
     } else {
-        YuvRange::Limited
+        crate::yuv_convert::YuvRange::Limited
     };
     let mc = color_info.matrix_coefficients as u8;
     let cp = color_info.primaries as u8;
@@ -84,9 +83,8 @@ pub fn decode_av1_obu(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u8)> {
     let hint = Some(crate::cicp_resolve::AVIF_DEFAULT_MC);
     match layout {
         PixelLayout::I400 => {
-            // Monochrome has no chroma to matrix; any signaled MC is
-            // irrelevant to the gray plane. Use a placeholder.
-            convert_monochrome(&frame, bit_depth, yuv_range, YuvStandardMatrix::Bt601)
+            // Monochrome has no chroma to matrix; no matrix input needed.
+            convert_monochrome(&frame, bit_depth, yuv_range)
         }
         PixelLayout::I444
             if matches!(
@@ -98,7 +96,7 @@ pub fn decode_av1_obu(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u8)> {
         }
         _ => {
             let resolved = crate::cicp_resolve::resolve(mc, cp, hint)?;
-            let matrix = resolved.to_yuv_std().ok_or_else(|| {
+            let matrix = resolved.to_our().ok_or_else(|| {
                 at!(Error::Unsupported(
                     "identity (MC=0) requires 4:4:4 chroma; subsampled identity has no \
                      defined reconstruction"
@@ -127,14 +125,14 @@ fn rgb_byte_len(pixel_count: usize) -> Result<usize> {
 fn convert_identity_to_rgb(
     frame: &Frame,
     bit_depth: u8,
-    yuv_range: YuvRange,
+    yuv_range: crate::yuv_convert::YuvRange,
 ) -> Result<(Vec<u8>, u32, u32, u8)> {
     let width = frame.width();
     let height = frame.height();
     let pixel_count = (width as usize)
         .checked_mul(height as usize)
         .ok_or_else(|| at!(Error::OutOfMemory))?;
-    let limited = matches!(yuv_range, YuvRange::Limited);
+    let limited = matches!(yuv_range, crate::yuv_convert::YuvRange::Limited);
     // Full-image output buffer sized from the (untrusted) decoded frame
     // dimensions → fallible by default (zenavif#21).
     let mut out = crate::alloc_util::alloc_filled(
@@ -225,12 +223,12 @@ fn decode_single_frame(decoder: &mut Rav1dDecoder, data: &[u8]) -> Result<Frame>
     }
 }
 
-/// Convert a monochrome (I400) frame to grayscale u8 pixels.
+/// Convert a monochrome (I400) frame to grayscale u8 pixels via the
+/// in-house mono kernel (16-bit output is scaled down to 8-bit).
 fn convert_monochrome(
     frame: &Frame,
     bit_depth: u8,
-    yuv_range: YuvRange,
-    matrix: YuvStandardMatrix,
+    yuv_range: crate::yuv_convert::YuvRange,
 ) -> Result<(Vec<u8>, u32, u32, u8)> {
     let width = frame.width();
     let height = frame.height();
@@ -245,42 +243,24 @@ fn convert_monochrome(
                 msg: "expected 8-bit planes for 8-bit frame",
             }));
         };
-
         let y_view = planes.y();
-
-        // For monochrome, we need Y-to-gray conversion respecting range
-        // Use yuv crate's yuv400_to_rgb which produces R=G=B=luma, then
-        // extract just one channel.
-        let mut rgb_out = crate::alloc_util::alloc_filled(
+        let mut gray = crate::alloc_util::alloc_filled(
             crate::alloc_util::AllocPref::CodecDefault,
             true,
-            Rgb { r: 0u8, g: 0, b: 0 },
+            rgb::Gray::<u8>::new(0),
             pixel_count,
         )?;
-        let rgb_stride = width * 3;
-        let gray = YuvGrayImage {
-            y_plane: y_view.as_slice(),
-            y_stride: y_view.stride() as u32,
-            width,
-            height,
-        };
-        yuv::yuv400_to_rgb(
-            &gray,
-            rgb::bytemuck::cast_slice_mut(rgb_out.as_mut_slice()),
-            rgb_stride,
+        crate::yuv_convert::yuv400_to_rgbx_strip::<u8, rgb::Gray<u8>>(
+            y_view.as_slice(),
+            y_view.stride(),
+            width as usize,
+            0,
+            height as usize,
             yuv_range,
-            matrix,
-        )
-        .map_err(|e| at!(Error::ColorConversion(e)))?;
-
-        // Extract just the R channel (R=G=B for monochrome)
-        let mut gray_pixels: Vec<u8> = crate::alloc_util::vec_with_capacity(
-            crate::alloc_util::AllocPref::CodecDefault,
-            true,
-            pixel_count,
-        )?;
-        gray_pixels.extend(rgb_out.iter().map(|px| px.r));
-        Ok((gray_pixels, width, height, 1))
+            8,
+            &mut gray,
+        );
+        Ok((rgb::bytemuck::cast_vec(gray), width, height, 1))
     } else {
         let Planes::Depth16(planes) = frame.planes() else {
             return Err(at!(Error::Decode {
@@ -288,74 +268,58 @@ fn convert_monochrome(
                 msg: "expected 16-bit planes for high-bit-depth frame",
             }));
         };
-
         let y_view = planes.y();
-
-        // Convert 10/12-bit Y plane through yuv crate, then scale to 8-bit
-        let mut rgb16_out = crate::alloc_util::alloc_filled(
+        let mut gray = crate::alloc_util::alloc_filled(
             crate::alloc_util::AllocPref::CodecDefault,
             true,
-            Rgb::<u16> { r: 0, g: 0, b: 0 },
+            rgb::Gray::<u16>::new(0),
             pixel_count,
         )?;
-        let rgb_stride = width * 3;
-        let gray = YuvGrayImage {
-            y_plane: y_view.as_slice(),
-            y_stride: y_view.stride() as u32,
-            width,
-            height,
-        };
-
-        match bit_depth {
-            10 => yuv::y010_to_rgb10(
-                &gray,
-                rgb::bytemuck::cast_slice_mut(rgb16_out.as_mut_slice()),
-                rgb_stride,
-                yuv_range,
-                matrix,
-            ),
-            12 => yuv::y012_to_rgb12(
-                &gray,
-                rgb::bytemuck::cast_slice_mut(rgb16_out.as_mut_slice()),
-                rgb_stride,
-                yuv_range,
-                matrix,
-            ),
-            _ => yuv::y016_to_rgb16(
-                &gray,
-                rgb::bytemuck::cast_slice_mut(rgb16_out.as_mut_slice()),
-                rgb_stride,
-                yuv_range,
-                matrix,
-            ),
-        }
-        .map_err(|e| at!(Error::ColorConversion(e)))?;
-
-        // Scale 10/12/16-bit down to 8-bit, extracting just the R channel
+        crate::yuv_convert::yuv400_to_rgbx_strip::<u16, rgb::Gray<u16>>(
+            y_view.as_slice(),
+            y_view.stride(),
+            width as usize,
+            0,
+            height as usize,
+            yuv_range,
+            bit_depth,
+            &mut gray,
+        );
+        // Scale 10/12/16-bit down to 8-bit.
         let shift = bit_depth.saturating_sub(8);
         let mut gray_pixels: Vec<u8> = crate::alloc_util::vec_with_capacity(
             crate::alloc_util::AllocPref::CodecDefault,
             true,
             pixel_count,
         )?;
-        gray_pixels.extend(rgb16_out.iter().map(|px| (px.r >> shift).min(255) as u8));
+        gray_pixels.extend(gray.iter().map(|px| (px.value() >> shift).min(255) as u8));
         Ok((gray_pixels, width, height, 1))
     }
 }
 
-/// Convert a YUV frame (I420/I422/I444) to RGB u8 pixels.
+/// Convert a YUV frame (I420/I422/I444) to RGB u8 pixels via the in-house
+/// unified kernels (16-bit output is scaled down to 8-bit — this function
+/// family's output contract).
 fn convert_to_rgb(
     frame: &Frame,
     bit_depth: u8,
-    yuv_range: YuvRange,
-    matrix: YuvStandardMatrix,
+    yuv_range: crate::yuv_convert::YuvRange,
+    matrix: crate::yuv_convert::YuvMatrix,
 ) -> Result<(Vec<u8>, u32, u32, u8)> {
+    use crate::yuv_convert::ChromaSubsampling as Cs;
     let width = frame.width();
     let height = frame.height();
     let layout = frame.pixel_layout();
     let pixel_count = (width as usize)
         .checked_mul(height as usize)
         .ok_or_else(|| at!(Error::OutOfMemory))?;
+    let sampling = match layout {
+        PixelLayout::I420 => Cs::Cs420,
+        PixelLayout::I422 => Cs::Cs422,
+        PixelLayout::I444 => Cs::Cs444,
+        PixelLayout::I400 => unreachable!("monochrome handled separately"),
+    };
+    let (w, h) = (width as usize, height as usize);
 
     if bit_depth == 8 {
         let Planes::Depth8(planes) = frame.planes() else {
@@ -364,7 +328,6 @@ fn convert_to_rgb(
                 msg: "expected 8-bit planes for 8-bit frame",
             }));
         };
-
         let y_view = planes.y();
         let u_view = planes.u().ok_or_else(|| {
             at!(Error::Decode {
@@ -378,52 +341,57 @@ fn convert_to_rgb(
                 msg: "missing V chroma plane",
             })
         })?;
-
-        let planar = YuvPlanarImage {
-            y_plane: y_view.as_slice(),
-            y_stride: y_view.stride() as u32,
-            u_plane: u_view.as_slice(),
-            u_stride: u_view.stride() as u32,
-            v_plane: v_view.as_slice(),
-            v_stride: v_view.stride() as u32,
-            width,
-            height,
-        };
-
         let mut out = crate::alloc_util::alloc_filled(
             crate::alloc_util::AllocPref::CodecDefault,
             true,
             Rgb { r: 0u8, g: 0, b: 0 },
             pixel_count,
         )?;
-        let rgb_stride = width * 3;
-
-        match layout {
-            PixelLayout::I420 => crate::yuv_bilinear_fix::yuv420_bilinear_complete(
-                &planar,
-                rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
-                rgb_stride,
-                3,
-                |p, o, s| yuv::yuv420_to_rgb_bilinear(p, o, s, yuv_range, matrix),
-            ),
-            PixelLayout::I422 => yuv::yuv422_to_rgb_bilinear(
-                &planar,
-                rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
-                rgb_stride,
+        match sampling {
+            Cs::Cs420 => crate::yuv_convert::yuv420_to_rgb8_strip(
+                y_view.as_slice(),
+                y_view.stride(),
+                u_view.as_slice(),
+                u_view.stride(),
+                v_view.as_slice(),
+                v_view.stride(),
+                w,
+                h,
+                0,
+                h,
                 yuv_range,
                 matrix,
+                &mut out,
             ),
-            PixelLayout::I444 => yuv::yuv444_to_rgb(
-                &planar,
-                rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
-                rgb_stride,
+            Cs::Cs422 => crate::yuv_convert::yuv422_to_rgb8_strip(
+                y_view.as_slice(),
+                y_view.stride(),
+                u_view.as_slice(),
+                u_view.stride(),
+                v_view.as_slice(),
+                v_view.stride(),
+                w,
+                0,
+                h,
                 yuv_range,
                 matrix,
+                &mut out,
             ),
-            PixelLayout::I400 => unreachable!("monochrome handled separately"),
+            Cs::Cs444 => crate::yuv_convert::yuv444_to_rgb8_strip(
+                y_view.as_slice(),
+                y_view.stride(),
+                u_view.as_slice(),
+                u_view.stride(),
+                v_view.as_slice(),
+                v_view.stride(),
+                w,
+                0,
+                h,
+                yuv_range,
+                matrix,
+                &mut out,
+            ),
         }
-        .map_err(|e| at!(Error::ColorConversion(e)))?;
-
         let bytes: Vec<u8> = rgb::bytemuck::cast_vec(out);
         Ok((bytes, width, height, 3))
     } else {
@@ -433,7 +401,6 @@ fn convert_to_rgb(
                 msg: "expected 16-bit planes for high-bit-depth frame",
             }));
         };
-
         let y_view = planes.y();
         let u_view = planes.u().ok_or_else(|| {
             at!(Error::Decode {
@@ -447,93 +414,29 @@ fn convert_to_rgb(
                 msg: "missing V chroma plane",
             })
         })?;
-
-        let planar = YuvPlanarImage {
-            y_plane: y_view.as_slice(),
-            y_stride: y_view.stride() as u32,
-            u_plane: u_view.as_slice(),
-            u_stride: u_view.stride() as u32,
-            v_plane: v_view.as_slice(),
-            v_stride: v_view.stride() as u32,
-            width,
-            height,
-        };
-
         let mut out = crate::alloc_util::alloc_filled(
             crate::alloc_util::AllocPref::CodecDefault,
             true,
             Rgb::<u16> { r: 0, g: 0, b: 0 },
             pixel_count,
         )?;
-        let rgb_stride = width * 3;
-
-        match (layout, bit_depth) {
-            (PixelLayout::I420, 10) => crate::yuv_bilinear_fix::yuv420_bilinear_complete(
-                &planar,
-                rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
-                rgb_stride,
-                3,
-                |p, o, s| yuv::i010_to_rgb10_bilinear(p, o, s, yuv_range, matrix),
-            ),
-            (PixelLayout::I420, 12) => crate::yuv_bilinear_fix::yuv420_bilinear_complete(
-                &planar,
-                rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
-                rgb_stride,
-                3,
-                |p, o, s| yuv::i012_to_rgb12_bilinear(p, o, s, yuv_range, matrix),
-            ),
-            (PixelLayout::I420, _) => crate::yuv_bilinear_fix::yuv420_bilinear_complete(
-                &planar,
-                rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
-                rgb_stride,
-                3,
-                |p, o, s| yuv::i016_to_rgb16_bilinear(p, o, s, yuv_range, matrix),
-            ),
-            (PixelLayout::I422, 10) => yuv::i210_to_rgb10(
-                &planar,
-                rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
-                rgb_stride,
-                yuv_range,
-                matrix,
-            ),
-            (PixelLayout::I422, 12) => yuv::i212_to_rgb12(
-                &planar,
-                rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
-                rgb_stride,
-                yuv_range,
-                matrix,
-            ),
-            (PixelLayout::I422, _) => yuv::i216_to_rgb16(
-                &planar,
-                rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
-                rgb_stride,
-                yuv_range,
-                matrix,
-            ),
-            (PixelLayout::I444, 10) => yuv::i410_to_rgb10(
-                &planar,
-                rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
-                rgb_stride,
-                yuv_range,
-                matrix,
-            ),
-            (PixelLayout::I444, 12) => yuv::i412_to_rgb12(
-                &planar,
-                rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
-                rgb_stride,
-                yuv_range,
-                matrix,
-            ),
-            (PixelLayout::I444, _) => yuv::i416_to_rgb16(
-                &planar,
-                rgb::bytemuck::cast_slice_mut(out.as_mut_slice()),
-                rgb_stride,
-                yuv_range,
-                matrix,
-            ),
-            (PixelLayout::I400, _) => unreachable!("monochrome handled separately"),
-        }
-        .map_err(|e| at!(Error::ColorConversion(e)))?;
+        crate::yuv_convert::yuv16_to_rgbx_strip::<Rgb<u16>>(
+            sampling,
+            y_view.as_slice(),
+            y_view.stride(),
+            u_view.as_slice(),
+            u_view.stride(),
+            v_view.as_slice(),
+            v_view.stride(),
+            w,
+            h,
+            0,
+            h,
+            yuv_range,
+            matrix,
+            bit_depth,
+            &mut out,
+        );
 
         // Scale 10/12/16-bit RGB down to 8-bit
         let shift = bit_depth.saturating_sub(8);

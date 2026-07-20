@@ -110,14 +110,15 @@ fn svt_rs_roundtrip_gradient_128() {
         "svt_rs q85 4:2:0 roundtrip: PSNR {p:.2} dB, {} payload bytes",
         encoded.color_byte_size
     );
-    // Measured 51.67 dB / 1509 payload bytes on 2026-07-13 at the pinned
-    // svtav1 rev (3cad660b7), x86_64 (deterministic encoder; decoder is
-    // conformance-exact). Floor is measured-minus-margin — the margin
-    // absorbs only the yuv crate's per-arch RGB↔YUV rounding differences.
+    // Measured 52.83 dB / 1591 payload bytes on 2026-07-20 at the pinned
+    // svtav1 rev (3cad660b7), x86_64, with the in-house forward RGB->YUV
+    // kernel (was 51.67 dB / 1509 B via the yuv crate's converter — the
+    // f32 box-average-before-quantize chroma gains ~1.2 dB here). Floor is
+    // measured-minus-margin, absorbing per-arch rounding differences only.
     assert!(
         p > 45.0,
         "q85 4:2:0 svt-rs roundtrip PSNR {p:.2} dB below floor \
-         (measured 51.67 dB at the pinned rev)"
+         (measured 52.83 dB at the pinned rev)"
     );
 }
 
@@ -253,8 +254,9 @@ fn svt_rs_roundtrip_rgba_alpha_plane() {
          color {} B + alpha {} B",
         encoded.color_byte_size, encoded.alpha_byte_size
     );
-    // Measured 50.20 dB color / 138.13 dB alpha (color 1509 B + alpha 131 B)
-    // on 2026-07-19 at the pinned svtav1 rev (3cad660b7), x86_64. Floors are
+    // Measured 52.83 dB color / 138.13 dB alpha (color 1591 B + alpha 131 B)
+    // on 2026-07-20 (in-house forward kernel; RGB and RGBA color payloads
+    // are byte-identical by construction now). Floors are
     // measured-minus-margin. Finding this path 20.10 dB on 2026-07-19 is
     // what uncovered the yuv-crate dropped-last-row-pair bug
     // (src/yuv_bilinear_fix.rs).
