@@ -241,7 +241,11 @@ name = "hdr_fidelity_probe"
 required-features = ["encode"]
 
 [features]
-default = []
+default = ["avx512"]
+# AVX-512 kernel tiers (v4x/v4) for the in-house YUV converters — safe,
+# runtime-dispatched (used only when the CPU reports support). Default-on;
+# opt out with default-features = false for minimal builds.
+avx512 = ["archmage/avx512"]
 # EXPERIMENTAL: zenav1-aom (`aom-decode`) as a second AV1 KEY-frame decode
 # backend behind `decode_av1_obu_yuv(.., Av1Backend::AomRs)`. KEY-frame /
 # intra scope only (an AVIF still is a single KEY frame); byte-identical to
