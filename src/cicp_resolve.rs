@@ -84,9 +84,10 @@ impl ResolvedMatrix {
         }
     }
 
-    /// Map to the in-house strip/SIMD matrix. `None` = identity or a
-    /// matrix the in-house tables don't cover (240M / FCC / derived) —
-    /// callers route those through the `yuv`-crate paths.
+    /// Map to the in-house kernel matrix. `None` = identity only (which
+    /// has no matrix math); every real matrix — including FCC, SMPTE 240M
+    /// and chromaticity-derived — maps, via explicit (Kr, Kb) where no
+    /// named variant exists (H.273 table 4 values).
     pub(crate) fn to_our(self) -> Option<crate::yuv_convert::YuvMatrix> {
         use crate::yuv_convert::YuvMatrix as M;
         match self {
@@ -94,7 +95,12 @@ impl ResolvedMatrix {
             Self::Bt709 => Some(M::Bt709),
             Self::Bt601 => Some(M::Bt601),
             Self::Bt2020Ncl => Some(M::Bt2020),
-            Self::Fcc | Self::Smpte240 | Self::Derived { .. } => None,
+            Self::Fcc => Some(M::Custom { kr: 0.30, kb: 0.11 }),
+            Self::Smpte240 => Some(M::Custom {
+                kr: 0.212,
+                kb: 0.087,
+            }),
+            Self::Derived { kr, kb } => Some(M::Custom { kr, kb }),
         }
     }
 }

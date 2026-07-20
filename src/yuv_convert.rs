@@ -48,7 +48,7 @@ pub enum YuvRange {
 }
 
 /// YUV matrix coefficients (color space)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum YuvMatrix {
     /// ITU-R BT.601 (SD video, NTSC/PAL)
     Bt601,
@@ -56,6 +56,15 @@ pub enum YuvMatrix {
     Bt709,
     /// ITU-R BT.2020 (UHD video, HDR)
     Bt2020,
+    /// Explicit (Kr, Kb) — FCC (0.30, 0.11), SMPTE 240M (0.212, 0.087),
+    /// and chromaticity-derived matrices (H.273 MC=12/13). The canonical
+    /// recipe needs nothing else from a matrix.
+    Custom {
+        /// Red luminance weight.
+        kr: f32,
+        /// Blue luminance weight.
+        kb: f32,
+    },
 }
 
 /// Chroma subsampling format
@@ -104,6 +113,7 @@ pub(crate) fn matrix_coefficients(matrix: YuvMatrix) -> (f32, f32) {
         YuvMatrix::Bt601 => (0.299, 0.114),
         YuvMatrix::Bt709 => (0.2126, 0.0722),
         YuvMatrix::Bt2020 => (0.2627, 0.0593),
+        YuvMatrix::Custom { kr, kb } => (kr, kb),
     }
 }
 
@@ -254,6 +264,20 @@ impl StripPixel for Rgba<u8> {
             b: b as u8,
             a: 255,
         }
+    }
+}
+
+impl StripPixel for rgb::Gray<u8> {
+    #[inline(always)]
+    fn from_rgbf(r: f32, _g: f32, _b: f32, _max: f32) -> Self {
+        rgb::Gray::new(r as u8)
+    }
+}
+
+impl StripPixel for rgb::Gray<u16> {
+    #[inline(always)]
+    fn from_rgbf(r: f32, _g: f32, _b: f32, _max: f32) -> Self {
+        rgb::Gray::new(r as u16)
     }
 }
 
@@ -787,6 +811,77 @@ pub fn yuv444_to_rgba8_strip(
             range,
             matrix,
             8,
+            out
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
+}
+
+/// Monochrome (Cs400): luma-only — replicate normalized luma to R=G=B.
+/// This is exactly the planar recipe with chroma at center (the chroma
+/// terms are fma(0, k, y_n) = y_n), so mono output is byte-identical to a
+/// 4:4:4 decode of the same luma with flat-center chroma. No matrix input:
+/// gray has no chroma to weigh.
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+fn yuv400_strip_kernel<S: YuvSample, P: StripPixel>(
+    token: Token,
+    y_plane: &[S],
+    y_stride: usize,
+    width: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    bit_depth: u8,
+    out: &mut [P],
+) {
+    let _ = token;
+    // Any matrix: with zero chroma the coefficients cancel.
+    let c = RecipeConsts::new(
+        YuvMatrixKrKb {
+            kr: 0.299,
+            kb: 0.114,
+        },
+        range,
+        bit_depth,
+    );
+
+    for row in 0..strip_height {
+        let y_pos = y_start + row;
+        let y_row = &y_plane[y_pos * y_stride..][..width];
+        let out_row = &mut out[row * width..][..width];
+        for x in 0..width {
+            let y_norm = (y_row[x].to_f32() - c.y_off) * c.y_sc;
+            let g = (y_norm * c.out_max)
+                .max(0.0)
+                .min(c.out_max)
+                .round_ties_even();
+            out_row[x] = P::from_rgbf(g, g, g, c.out_max);
+        }
+    }
+}
+
+/// Convert a strip of monochrome (Cs400) rows to RGB/RGBA at any depth —
+/// generic entry point (u8 planes with `bit_depth` 8, u16 planes with
+/// 10/12/16).
+pub(crate) fn yuv400_to_rgbx_strip<S: YuvSample, P: StripPixel>(
+    y_plane: &[S],
+    y_stride: usize,
+    width: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    bit_depth: u8,
+    out: &mut [P],
+) {
+    incant!(
+        yuv400_strip_kernel::<S, P>(
+            y_plane,
+            y_stride,
+            width,
+            y_start,
+            strip_height,
+            range,
+            bit_depth,
             out
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
@@ -1338,7 +1433,17 @@ mod tests {
     fn yuv444_to_rgb8_byte_identical_to_reference() {
         let sizes: [(usize, usize); 6] = [(1, 1), (3, 3), (8, 8), (9, 7), (17, 13), (64, 48)];
         let ranges = [YuvRange::Full, YuvRange::Limited];
-        let matrices = [YuvMatrix::Bt601, YuvMatrix::Bt709, YuvMatrix::Bt2020];
+        let matrices = [
+            YuvMatrix::Bt601,
+            YuvMatrix::Bt709,
+            YuvMatrix::Bt2020,
+            // FCC + SMPTE-240M as explicit (Kr, Kb) — the exotic-matrix path.
+            YuvMatrix::Custom { kr: 0.30, kb: 0.11 },
+            YuvMatrix::Custom {
+                kr: 0.212,
+                kb: 0.087,
+            },
+        ];
         let mut seed = 21u32;
         for &(w, h) in &sizes {
             let mut yb = vec![0u8; w * h];
@@ -1581,6 +1686,59 @@ mod tests {
                                 );
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Monochrome kernel: R=G=B must equal the recipe's luma channel at
+    /// every depth/range (== a 4:4:4 decode with flat-center chroma), and
+    /// RGBA alpha must be the native ceiling.
+    #[test]
+    fn yuv400_matches_recipe_all_depths() {
+        for &(bit_depth, is16) in &[(8u8, false), (10, true), (12, true), (16, true)] {
+            for &range in &[YuvRange::Full, YuvRange::Limited] {
+                let w = 33usize;
+                let h = 9usize;
+                let max = (1u64 << bit_depth) - 1;
+                let c = RecipeConsts::new(
+                    YuvMatrixKrKb {
+                        kr: 0.299,
+                        kb: 0.114,
+                    },
+                    range,
+                    bit_depth,
+                );
+                if is16 {
+                    let mut y = vec![0u16; w * h];
+                    for (i, v) in y.iter_mut().enumerate() {
+                        *v = ((i as u64 * 31) % (max + 1)) as u16;
+                    }
+                    let mut out = vec![Rgba::<u16>::default(); w * h];
+                    yuv400_to_rgbx_strip::<u16, Rgba<u16>>(
+                        &y, w, w, 0, h, range, bit_depth, &mut out,
+                    );
+                    for (i, (&yv, px)) in y.iter().zip(out.iter()).enumerate() {
+                        let (r, g, b) = convert_one(yv as f32, c.uv_cen, c.uv_cen, &c);
+                        assert_eq!(
+                            (px.r, px.g, px.b, px.a),
+                            (r as u16, g as u16, b as u16, max as u16),
+                            "d{bit_depth} {range:?} px {i} (y={yv})"
+                        );
+                    }
+                } else {
+                    let mut y = vec![0u8; w * h];
+                    fill_rand(&mut y, 77);
+                    let mut out = vec![Rgba::<u8>::default(); w * h];
+                    yuv400_to_rgbx_strip::<u8, Rgba<u8>>(&y, w, w, 0, h, range, 8, &mut out);
+                    for (i, (&yv, px)) in y.iter().zip(out.iter()).enumerate() {
+                        let (r, g, b) = convert_one(yv as f32, c.uv_cen, c.uv_cen, &c);
+                        assert_eq!(
+                            (px.r, px.g, px.b, px.a),
+                            (r as u8, g as u8, b as u8, 255),
+                            "d8 {range:?} px {i} (y={yv})"
+                        );
                     }
                 }
             }
