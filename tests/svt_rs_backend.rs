@@ -416,3 +416,72 @@ fn svt_rs_validate_scope() {
         Err(ValidationError::BackendUnsupportedParam { .. })
     ));
 }
+
+/// The unified perceptual-quality mechanism across backends: the
+/// encode->decode->score secant search (`encode_rgb8_with_target`) dispatches
+/// through `config.backend`, so a SvtRs config must converge on a requested
+/// SSIMULACRA2 score exactly like the zenravif backend does. This is the
+/// "approximate a unified ssim2 target across backends" contract: the same
+/// TargetMetric lands in the same band regardless of which AV1 encoder runs.
+#[cfg(feature = "target-quality")]
+#[test]
+fn svt_rs_target_quality_search_converges_on_ssim2() {
+    use zenavif::{TargetMetric, TargetOptions, encode_rgb8_with_target};
+
+    // Noisy gradient (192x128, 64-aligned): quantization has real work at
+    // every tier, so the score-vs-quality curve brackets a mid-range target.
+    // The noise is LUMA-correlated (same delta on all three channels) — pure
+    // chroma noise would be destroyed by 4:2:0 subsampling regardless of
+    // quality, capping the reachable ssim2 below any useful target.
+    let mut state = 0x2545F491u32;
+    let mut lcg = move || {
+        state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+        (state >> 24) as u8
+    };
+    let (w, h) = (192usize, 128usize);
+    let mut buf = Vec::with_capacity(w * h);
+    for y in 0..h {
+        for x in 0..w {
+            let g = ((x * 255) / w) as u8;
+            let b = ((y * 255) / h) as u8;
+            let n = lcg() / 6;
+            buf.push(Rgb {
+                r: g.saturating_add(n),
+                g: b.saturating_add(n),
+                b: (((g as u16 + b as u16) / 2) as u8).saturating_add(n),
+            });
+        }
+    }
+    let img = Img::new(buf, w, h);
+
+    let target = 70.0;
+    let options = TargetOptions {
+        tolerance: 3.0,
+        max_encodes: 8,
+        ..TargetOptions::default()
+    };
+    let result = encode_rgb8_with_target(
+        img.as_ref(),
+        &svt_config().speed(6),
+        TargetMetric::Ssim2(target),
+        &options,
+        stop(),
+    )
+    .expect("target search over SvtRs");
+
+    assert!(
+        result.converged,
+        "SvtRs target search did not converge: score {:.2} after {} encodes",
+        result.score, result.encodes
+    );
+    assert!(
+        (result.score - target).abs() <= options.tolerance + 1e-6,
+        "converged score {:.2} outside the {target}±{} band",
+        result.score,
+        options.tolerance
+    );
+    // The result must be a decodable SvtRs AVIF.
+    let decoded = zenavif::decode(&result.encoded.avif_file).expect("decode targeted encode");
+    assert_eq!(decoded.width(), w as u32);
+    assert_eq!(decoded.height(), h as u32);
+}

@@ -336,3 +336,7 @@ zenavif-serialize = { git = "https://github.com/imazen/zenavif-serialize", rev =
 [[example]]
 name = "yuv_kernel_bench"
 required-features = ["_dev"]
+
+[[example]]
+name = "encode_backend_sweep"
+required-features = ["encode"]
