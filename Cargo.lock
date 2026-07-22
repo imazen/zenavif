@@ -1466,68 +1466,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "svtav1"
-version = "0.1.0"
-source = "git+https://github.com/imazen/svtav1?branch=wave2%2Fentropy-c-parity#3cad660b7d7f20a006a60c463bc278cd23b64b97"
-dependencies = [
- "svtav1-dsp",
- "svtav1-encoder",
- "svtav1-entropy",
- "svtav1-tables",
- "svtav1-types",
-]
-
-[[package]]
-name = "svtav1-disjoint-mut"
-version = "0.1.0"
-source = "git+https://github.com/imazen/svtav1?branch=wave2%2Fentropy-c-parity#3cad660b7d7f20a006a60c463bc278cd23b64b97"
-
-[[package]]
-name = "svtav1-dsp"
-version = "0.1.0"
-source = "git+https://github.com/imazen/svtav1?branch=wave2%2Fentropy-c-parity#3cad660b7d7f20a006a60c463bc278cd23b64b97"
-dependencies = [
- "archmage",
- "magetypes",
- "svtav1-tables",
- "svtav1-types",
-]
-
-[[package]]
-name = "svtav1-encoder"
-version = "0.1.0"
-source = "git+https://github.com/imazen/svtav1?branch=wave2%2Fentropy-c-parity#3cad660b7d7f20a006a60c463bc278cd23b64b97"
-dependencies = [
- "svtav1-disjoint-mut",
- "svtav1-dsp",
- "svtav1-entropy",
- "svtav1-tables",
- "svtav1-types",
-]
-
-[[package]]
-name = "svtav1-entropy"
-version = "0.1.0"
-source = "git+https://github.com/imazen/svtav1?branch=wave2%2Fentropy-c-parity#3cad660b7d7f20a006a60c463bc278cd23b64b97"
-dependencies = [
- "svtav1-tables",
- "svtav1-types",
-]
-
-[[package]]
-name = "svtav1-tables"
-version = "0.1.0"
-source = "git+https://github.com/imazen/svtav1?branch=wave2%2Fentropy-c-parity#3cad660b7d7f20a006a60c463bc278cd23b64b97"
-dependencies = [
- "svtav1-types",
-]
-
-[[package]]
-name = "svtav1-types"
-version = "0.1.0"
-source = "git+https://github.com/imazen/svtav1?branch=wave2%2Fentropy-c-parity#3cad660b7d7f20a006a60c463bc278cd23b64b97"
-
-[[package]]
 name = "syn"
 version = "2.0.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1946,18 +1884,84 @@ source = "git+https://github.com/imazen/zenanalyze?rev=47b4d0f5f1abfff45a152e9a9
 [[package]]
 name = "zenav1-aom-decode"
 version = "0.0.1"
-source = "git+https://github.com/imazen/zenav1-aom?rev=ed29932f4fcbe021b40eb31bfdcf87474a8c70ee#ed29932f4fcbe021b40eb31bfdcf87474a8c70ee"
+source = "git+https://github.com/imazen/zenav1-aom?rev=7b972e509cb60fd53fd53cced38e91c1c493c714#7b972e509cb60fd53fd53cced38e91c1c493c714"
 dependencies = [
+ "enough",
  "zenav1-aom-dsp",
 ]
 
 [[package]]
 name = "zenav1-aom-dsp"
 version = "0.0.1"
-source = "git+https://github.com/imazen/zenav1-aom?rev=ed29932f4fcbe021b40eb31bfdcf87474a8c70ee#ed29932f4fcbe021b40eb31bfdcf87474a8c70ee"
+source = "git+https://github.com/imazen/zenav1-aom?rev=7b972e509cb60fd53fd53cced38e91c1c493c714#7b972e509cb60fd53fd53cced38e91c1c493c714"
 dependencies = [
  "archmage",
  "magetypes",
+]
+
+[[package]]
+name = "zenav1-svt"
+version = "0.1.0"
+source = "git+https://github.com/imazen/svtav1?rev=3e25f52b59ae2a4606048470697e2084c3d82bc8#3e25f52b59ae2a4606048470697e2084c3d82bc8"
+dependencies = [
+ "zenav1-svt-dsp",
+ "zenav1-svt-encoder",
+ "zenav1-svt-entropy",
+ "zenav1-svt-tables",
+ "zenav1-svt-types",
+]
+
+[[package]]
+name = "zenav1-svt-dsp"
+version = "0.1.0"
+source = "git+https://github.com/imazen/svtav1?rev=3e25f52b59ae2a4606048470697e2084c3d82bc8#3e25f52b59ae2a4606048470697e2084c3d82bc8"
+dependencies = [
+ "archmage",
+ "magetypes",
+ "zenav1-svt-tables",
+ "zenav1-svt-types",
+]
+
+[[package]]
+name = "zenav1-svt-encoder"
+version = "0.1.0"
+source = "git+https://github.com/imazen/svtav1?rev=3e25f52b59ae2a4606048470697e2084c3d82bc8#3e25f52b59ae2a4606048470697e2084c3d82bc8"
+dependencies = [
+ "almost-enough",
+ "enough",
+ "whereat",
+ "zenav1-svt-dsp",
+ "zenav1-svt-entropy",
+ "zenav1-svt-tables",
+ "zenav1-svt-types",
+]
+
+[[package]]
+name = "zenav1-svt-entropy"
+version = "0.1.0"
+source = "git+https://github.com/imazen/svtav1?rev=3e25f52b59ae2a4606048470697e2084c3d82bc8#3e25f52b59ae2a4606048470697e2084c3d82bc8"
+dependencies = [
+ "archmage",
+ "magetypes",
+ "zenav1-svt-tables",
+ "zenav1-svt-types",
+]
+
+[[package]]
+name = "zenav1-svt-tables"
+version = "0.1.0"
+source = "git+https://github.com/imazen/svtav1?rev=3e25f52b59ae2a4606048470697e2084c3d82bc8#3e25f52b59ae2a4606048470697e2084c3d82bc8"
+dependencies = [
+ "zenav1-svt-types",
+]
+
+[[package]]
+name = "zenav1-svt-types"
+version = "0.1.0"
+source = "git+https://github.com/imazen/svtav1?rev=3e25f52b59ae2a4606048470697e2084c3d82bc8#3e25f52b59ae2a4606048470697e2084c3d82bc8"
+dependencies = [
+ "enough",
+ "whereat",
 ]
 
 [[package]]
@@ -1983,7 +1987,6 @@ dependencies = [
  "rgb",
  "safe_unaligned_simd",
  "serde_json",
- "svtav1",
  "thiserror",
  "ultrahdr-core",
  "whereat",
@@ -1991,6 +1994,7 @@ dependencies = [
  "zenanalyze",
  "zenanalyze-api",
  "zenav1-aom-decode",
+ "zenav1-svt",
  "zenavif-parse",
  "zenavif-serialize",
  "zenbench",

@@ -619,13 +619,43 @@ pub fn decode_av1_obu_yuv_rav1d(data: &[u8]) -> Result<DecodedYuv> {
 
 /// aom-rs backend: pure-Rust KEY-frame decode, byte-identical to libaom on the
 /// AV1 conformance corpus. Output is already tight `u16` planes.
+///
+/// Every `aom_decode::DecodeError` variant maps onto the matching zenavif
+/// [`Error`] variant so the failure category survives to
+/// `CategorizedError::category()` (backend-seam obligation 1 — no flattening
+/// to one opaque code).
 #[cfg(feature = "aom-backend")]
 pub fn decode_av1_obu_yuv_aomrs(data: &[u8]) -> Result<DecodedYuv> {
-    let fd = aom_decode::frame::decode_frame_obus(data).map_err(|_e| {
-        at!(Error::Decode {
+    use aom_decode::DecodeError as AomError;
+    let fd = aom_decode::frame::decode_frame_obus(data).map_err(|e| match e {
+        AomError::Truncated(_) => at!(Error::Decode {
+            code: -2,
+            msg: "aom-rs: truncated AV1 OBU stream",
+        }),
+        AomError::Malformed(_) => at!(Error::Decode {
+            code: -3,
+            msg: "aom-rs: malformed AV1 bitstream",
+        }),
+        AomError::UnsupportedType(_) => at!(Error::Unsupported(
+            "aom-rs: AV1 stream type outside this backend's envelope"
+        )),
+        AomError::UnsupportedFeature(m) => at!(Error::Unsupported(m)),
+        AomError::LimitExceeded { kind, actual, max } => at!(Error::ResourceLimit(format!(
+            "aom-rs decode limit: {} = {actual} > {max}",
+            kind.as_str()
+        ))),
+        AomError::AllocFailed { .. } => at!(Error::OutOfMemory),
+        AomError::Cancelled(reason) => at!(Error::Cancelled(reason)),
+        AomError::Internal(_) => at!(Error::Decode {
+            code: -4,
+            msg: "aom-rs: internal decoder invariant failure",
+        }),
+        // `DecodeError` is #[non_exhaustive]; future variants degrade to the
+        // generic decode bucket rather than failing the build.
+        _ => at!(Error::Decode {
             code: -1,
-            msg: "aom-rs backend rejected the AV1 OBU frame (KEY/intra scope only)",
-        })
+            msg: "aom-rs: decode failed",
+        }),
     })?;
     Ok(DecodedYuv {
         y: fd.y,

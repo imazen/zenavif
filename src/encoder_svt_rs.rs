@@ -71,6 +71,31 @@ const DEFAULT_TRANSFER_CHARACTERISTICS: u8 = 13; // sRGB
 /// available backend — see that method's docs).
 const MATRIX_COEFFICIENTS_BT601: u8 = 6;
 
+/// Map a fallible svtav1-rs pipeline failure onto the matching zenavif
+/// [`Error`] variant so the failure category survives to
+/// `CategorizedError::category()` (backend-seam obligation 1). This replaces
+/// the old `is_empty()` heuristic on the infallible `encode_frame*` calls
+/// (obligation 4: an out-of-envelope config now surfaces as a structured
+/// refusal instead of a possibly-corrupt bitstream or a panic).
+fn map_svt_encode_error(e: whereat::At<svtav1::types::EncodeError>) -> whereat::At<Error> {
+    use svtav1::types::EncodeError as SvtError;
+    match e.into_inner() {
+        SvtError::Cancelled(reason) => at!(Error::Cancelled(reason)),
+        SvtError::AllocFailed { .. } => at!(Error::OutOfMemory),
+        SvtError::InvalidDimensions {
+            width,
+            height,
+            reason,
+        } => at!(Error::Encode(format!(
+            "svtav1-rs rejected dimensions {width}x{height}: {reason}"
+        ))),
+        SvtError::UnsupportedConfig(what) => at!(Error::Unsupported(what)),
+        // `EncodeError` is #[non_exhaustive]; future variants degrade to the
+        // generic encode bucket rather than failing the build.
+        other => at!(Error::Encode(format!("svtav1-rs encode failed: {other}"))),
+    }
+}
+
 /// Map speed 1..=10 to an SVT-AV1 preset 0..=13.
 ///
 /// Provenance: mirrors the private `AvifEncoder::speed_to_preset` in
@@ -191,6 +216,7 @@ fn encode_mono_plane_svt(
     preset: u8,
     qp: u8,
     color_description: svtav1::entropy::obu::ColorDescription,
+    stop: &almost_enough::StopToken,
 ) -> Result<Vec<u8>> {
     let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
     let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
@@ -202,23 +228,23 @@ fn encode_mono_plane_svt(
     let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new(w, h, preset, rc, 0, 1);
     pipeline.bit_depth = 8;
     pipeline.color_description = color_description;
+    // Cooperative cancellation inside the pipeline (SB-cadence polling) —
+    // backend-seam obligation 3: a capability the backend accepts must be
+    // threaded through in the same change.
+    pipeline.stop = stop.clone();
 
     // The pipeline reads a tight `stride`-strided plane; make it tight when
     // the caller's buffer is padded.
     let payload = if stride == width {
-        pipeline.encode_frame(plane, width)
+        pipeline.try_encode_frame(plane, width)
     } else {
         let mut tight = Vec::with_capacity(width * height);
         for row in plane.chunks(stride).take(height) {
             tight.extend_from_slice(&row[..width]);
         }
-        pipeline.encode_frame(&tight, width)
-    };
-    if payload.is_empty() {
-        return Err(at!(Error::Encode(
-            "svtav1-rs pipeline returned an empty bitstream".into()
-        )));
+        pipeline.try_encode_frame(&tight, width)
     }
+    .map_err(map_svt_encode_error)?;
     Ok(payload)
 }
 
@@ -339,14 +365,12 @@ pub(crate) fn encode_rgb8_svt_rs(
         // (full) regardless of this flag; kept coherent anyway.
         full_range: true,
     };
+    pipeline.stop = stop.clone();
 
     // TD + sequence header + frame OBUs, muxed verbatim (module docs).
-    let av1_payload = pipeline.encode_frame_420(&y_plane, &u_plane, &v_plane, width);
-    if av1_payload.is_empty() {
-        return Err(at!(Error::Encode(
-            "svtav1-rs pipeline returned an empty bitstream".into()
-        )));
-    }
+    let av1_payload = pipeline
+        .try_encode_frame_420(&y_plane, &u_plane, &v_plane, width)
+        .map_err(map_svt_encode_error)?;
 
     // ---- AVIF container --------------------------------------------------
     // The av1C written here must match the payload's sequence header
@@ -448,12 +472,10 @@ pub(crate) fn encode_rgba8_svt_rs(
         matrix_coefficients: MATRIX_COEFFICIENTS_BT601,
         full_range: true,
     };
-    let color_payload = pipeline.encode_frame_420(&y_plane, &u_plane, &v_plane, width);
-    if color_payload.is_empty() {
-        return Err(at!(Error::Encode(
-            "svtav1-rs pipeline returned an empty bitstream".into()
-        )));
-    }
+    pipeline.stop = stop.clone();
+    let color_payload = pipeline
+        .try_encode_frame_420(&y_plane, &u_plane, &v_plane, width)
+        .map_err(map_svt_encode_error)?;
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
     let alpha_payload = encode_mono_plane_svt(
@@ -469,6 +491,7 @@ pub(crate) fn encode_rgba8_svt_rs(
             matrix_coefficients: CICP_UNSPECIFIED,
             full_range: true,
         },
+        &stop,
     )?;
 
     // ---- AVIF container (color item + auxl alpha item) -------------------
@@ -531,6 +554,7 @@ pub(crate) fn encode_gray8_svt_rs(
             matrix_coefficients: CICP_UNSPECIFIED,
             full_range: true,
         },
+        &stop,
     )?;
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
