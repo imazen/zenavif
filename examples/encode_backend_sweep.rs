@@ -77,7 +77,11 @@ fn parse_qualities(s: &str) -> Result<Vec<f32>, String> {
         Ok((a..=b).step_by(step as usize).map(|q| q as f32).collect())
     } else {
         s.split(',')
-            .map(|q| q.trim().parse::<f32>().map_err(|_| "bad quality".to_string()))
+            .map(|q| {
+                q.trim()
+                    .parse::<f32>()
+                    .map_err(|_| "bad quality".to_string())
+            })
             .collect()
     }
 }
@@ -181,11 +185,14 @@ fn ssim2(a: ImgRef<'_, Rgb<u8>>, b: ImgRef<'_, Rgb<u8>>) -> Result<f64, String> 
 fn aom_cross_gate(avif: &[u8]) -> String {
     use zenavif::{DecodeBackend, decode_av1_obu_yuv};
     let cfg = zenavif_parse::DecodeConfig::default().lenient(true);
-    let parser =
-        match zenavif_parse::AvifParser::from_owned_with_config(avif.to_vec(), &cfg, &Unstoppable) {
-            Ok(p) => p,
-            Err(e) => return format!("container-parse-error:{e}"),
-        };
+    let parser = match zenavif_parse::AvifParser::from_owned_with_config(
+        avif.to_vec(),
+        &cfg,
+        &Unstoppable,
+    ) {
+        Ok(p) => p,
+        Err(e) => return format!("container-parse-error:{e}"),
+    };
     let payload = match parser.primary_data() {
         Ok(p) => p.as_ref().to_vec(),
         Err(e) => return format!("no-primary-item:{e}"),
@@ -405,10 +412,7 @@ fn main() {
                     Ok(row) => rows.push(row),
                     Err(e) => eprintln!(
                         "CELLFAIL {} {} {} q{}: {e}",
-                        cell.image,
-                        cell.size_label,
-                        arm.label,
-                        cell.quality
+                        cell.image, cell.size_label, arm.label, cell.quality
                     ),
                 }
             }
@@ -426,19 +430,14 @@ fn main() {
                 .flat_map(|(reference, cell)| {
                     backends
                         .iter()
-                        .filter_map(|&arm| {
-                            match run_cell(reference.as_ref(), cell, arm, 1) {
-                                Ok(row) => Some(row),
-                                Err(e) => {
-                                    eprintln!(
-                                        "CELLFAIL {} {} {} q{}: {e}",
-                                        cell.image,
-                                        cell.size_label,
-                                        arm.label,
-                                        cell.quality
-                                    );
-                                    None
-                                }
+                        .filter_map(|&arm| match run_cell(reference.as_ref(), cell, arm, 1) {
+                            Ok(row) => Some(row),
+                            Err(e) => {
+                                eprintln!(
+                                    "CELLFAIL {} {} {} q{}: {e}",
+                                    cell.image, cell.size_label, arm.label, cell.quality
+                                );
+                                None
                             }
                         })
                         .collect::<Vec<_>>()
