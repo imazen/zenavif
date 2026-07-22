@@ -485,3 +485,38 @@ fn svt_rs_target_quality_search_converges_on_ssim2() {
     assert_eq!(decoded.width(), w as u32);
     assert_eq!(decoded.height(), h as u32);
 }
+
+/// QP-0 corruption gate (2026-07-22): on the pinned svtav1-rs rev, QP 0
+/// (quality >= ~99.3) emits a syntactically-valid bitstream that decodes to
+/// garbage pixels (measured ssim2 ~= -700 on every q100 sweep cell, both
+/// decode backends byte-agreeing on the garbage — encoder-side corruption).
+/// The seam clamps QP to >= 1, so quality 100 must round-trip with HIGHER
+/// fidelity than quality 90, not collapse.
+#[cfg(feature = "target-quality")]
+#[test]
+fn svt_rs_quality_100_does_not_corrupt() {
+    use fast_ssim2::compute_ssimulacra2;
+    use imgref::ImgRef;
+
+    let img = gradient_rgb8(128, 128);
+    let score = |quality: f32| -> f64 {
+        let enc = zenavif::encode_rgb8(img.as_ref(), &svt_config().quality(quality), stop())
+            .expect("svt encode");
+        let decoded = zenavif::decode(&enc.avif_file).expect("decode");
+        let dec: ImgRef<'_, Rgb<u8>> = decoded.try_as_imgref().expect("rgb8 view");
+        let tri = |src: ImgRef<'_, Rgb<u8>>| {
+            let mut out = Vec::with_capacity(src.width() * src.height());
+            for row in src.rows() {
+                out.extend(row.iter().map(|p| [p.r, p.g, p.b]));
+            }
+            Img::new(out, src.width(), src.height())
+        };
+        compute_ssimulacra2(tri(img.as_ref()).as_ref(), tri(dec).as_ref()).expect("ssim2")
+    };
+    let s90 = score(90.0);
+    let s100 = score(100.0);
+    assert!(
+        s100 >= s90 - 1.0 && s100 > 60.0,
+        "quality 100 must not corrupt: ssim2(q100)={s100:.2} vs ssim2(q90)={s90:.2}"
+    );
+}
