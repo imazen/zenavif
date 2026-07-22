@@ -46,9 +46,14 @@ fn test_image(w: usize, h: usize) -> ImgVec<Rgb<u8>> {
 /// Extract the primary item's AV1 payload from an encoded AVIF container.
 fn primary_payload(avif: &[u8]) -> Vec<u8> {
     let cfg = zenavif_parse::DecodeConfig::default().lenient(true);
-    let parser = zenavif_parse::AvifParser::from_owned_with_config(avif.to_vec(), &cfg, &Unstoppable)
-        .expect("container parse");
-    parser.primary_data().expect("primary item").as_ref().to_vec()
+    let parser =
+        zenavif_parse::AvifParser::from_owned_with_config(avif.to_vec(), &cfg, &Unstoppable)
+            .expect("container parse");
+    parser
+        .primary_data()
+        .expect("primary item")
+        .as_ref()
+        .to_vec()
 }
 
 /// Decode with aom-rs, tolerating a missing temporal-delimiter OBU (AVIF item
@@ -66,8 +71,20 @@ fn assert_backends_agree(avif: &[u8], label: &str) {
     let rav = decode_av1_obu_yuv(&payload, DecodeBackend::Rav1dSafe).expect("rav1d-safe decode");
     let aom = decode_aom(&payload);
     assert_eq!(
-        (rav.width, rav.height, rav.width_uv, rav.height_uv, rav.bit_depth),
-        (aom.width, aom.height, aom.width_uv, aom.height_uv, aom.bit_depth),
+        (
+            rav.width,
+            rav.height,
+            rav.width_uv,
+            rav.height_uv,
+            rav.bit_depth
+        ),
+        (
+            aom.width,
+            aom.height,
+            aom.width_uv,
+            aom.height_uv,
+            aom.bit_depth
+        ),
         "{label}: geometry mismatch between rav1d-safe and aom-rs"
     );
     assert_eq!(rav.y, aom.y, "{label}: luma plane diverges");

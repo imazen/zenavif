@@ -379,3 +379,7 @@ required-features = ["_dev"]
 [[example]]
 name = "encode_backend_sweep"
 required-features = ["encode"]
+
+[[example]]
+name = "decode_backend_bench"
+required-features = ["encode", "aom-backend"]
