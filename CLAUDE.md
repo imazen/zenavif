@@ -188,6 +188,28 @@ backend capability landing:**
 
 ## Known Bugs
 
+### svtav1-rs QP 0 corrupts (imazen/zenav1-svt#5) — seam-gated 2026-07-22, upstream OPEN
+Every CQP QP-0 still encode on the pinned rev (3e25f52b) emits a valid-syntax
+bitstream decoding to garbage pixels (ssim2 ~ -700; rav1d-safe and zenav1-aom
+byte-agree on the garbage => encoder-side; 115/115 sweep cells, boundary
+clean at QP 1), plus one 64x64 stream rav1d rejects. The seam clamps QP >= 1
+(`quality_to_qp_gated` in `src/encoder_svt_rs.rs`; regression test
+`svt_rs_quality_100_does_not_corrupt`). Remove the clamp only when upstream
+fixes or gates QP 0. Record: `benchmarks/backend_sweep_2026-07-22.{tsv,meta}`.
+
+### Cross-backend status (2026-07-22 session)
+Pins bumped: zenav1-aom `7b972e50` (structured DecodeError/DecodeConfig +
+bd8 lowbd perf), zenav1-svt `3e25f52b` (renamed from `svtav1`; bd10 palette
+panic gate, palette parity #71, SB128 #91) — both seams now variant-map
+errors, svt seam is on `try_encode_frame*` + threads the stop token.
+Cross-decoder gate: 7018/7018 sweep cells + `tests/cross_backend_decode.rs`
+(incl. 10-bit) byte-identical rav1d-safe vs aom-rs on OUR encoders' output.
+Unified ssim2 targeting: `encode_rgb8_with_target` converges over SvtRs
+(test pinned). RD (backend_sweep_2026-07-22): svt 0.93x bytes at matched
+ssim2 at s2, 1.02-1.07x at s6, worse below q30; wall ~6x faster at s6 /
+4.4x at s9 / slower at s2 (linear speed->preset ladders misaligned —
+re-fit deliberately NOT shipped, user decision).
+
 ### yuv crate 4:2:0 bilinear drops the last row pair — FIXED in-repo (d3ece8e), upstream OPEN
 Found 2026-07-19 by the SvtRs RGBA round-trip test: yuvutils-rs 0.8.12–0.8.16
 `yuv420_*_bilinear`/`i0xx_*_bilinear` zip luma row-pairs against overlapping

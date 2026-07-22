@@ -125,6 +125,16 @@ write-path returns + gain-map interop additions, already on main).
   the next 0.x minor bump (svtav1-rs backend PR)
 
 ### Added
+- Cross-backend validation + calibration (2026-07-22): every encode-backend
+  bitstream is now cross-decoded on rav1d-safe AND zenav1-aom with plane
+  byte-compare (`tests/cross_backend_decode.rs`, incl. 10-bit; 7018/7018
+  sweep cells identical — first conformance coverage of OUR encoders'
+  output), the ssim2 target search is pinned to converge over
+  `Av1Backend::SvtRs` (the unified cross-backend quality mechanism), and
+  the RD/speed calibration sweep is committed
+  (`benchmarks/backend_sweep_2026-07-22.{tsv,meta}`, harness
+  `examples/encode_backend_sweep.rs` + `examples/decode_backend_bench.rs`).
+
 - The canonical YUV numeric recipe is now a documented FIXED-POINT formula
   (P8): single rounding of a 2^-16-accurate value, pure-integer arithmetic
   (platform-exact on every arch incl. wasm — no FMA/rounding-mode variance),
@@ -166,7 +176,21 @@ write-path returns + gain-map interop additions, already on main).
   parity gate lands with svtav1-rs decision-layer bitstream identity.
   (`src/encoder_svt_rs.rs`, `tests/svt_rs_backend.rs`)
 
+### Changed
+- Backend pins: zenav1-aom ed29932f -> 7b972e50 (structured `DecodeError`
+  + `DecodeConfig`, bd8 lowbd perf pipeline), svtav1 wave2/entropy-c-parity
+  -> master 3e25f52b as `zenav1-svt` (bd10 palette panic gate, palette
+  byte-parity #71, SB128 fix #91). Both seams now map every backend error
+  variant onto the matching zenavif `Error` variant, the svt seam uses the
+  fallible `try_encode_frame*` entries (no more `is_empty()` heuristic),
+  and the caller's stop token is threaded into the svt pipelines.
+
 ### Fixed
+- svtav1-rs QP-0 corruption gate: quality >= ~99.3 mapped to QP 0, which
+  emits valid-syntax bitstreams decoding to garbage pixels on the pinned
+  rev (imazen/zenav1-svt#5). The seam clamps QP to >= 1
+  (`quality_to_qp_gated`), so quality 100 now encodes at the best verified
+  tier instead of corrupting.
 - **Decode corruption: the bottom two rows of every even-height 4:2:0 decode
   that routed through the `yuv` crate's bilinear converters came back
   unwritten (black / alpha-0).** Upstream defect in yuv 0.8.12–0.8.16
