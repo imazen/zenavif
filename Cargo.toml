@@ -375,3 +375,7 @@ zenavif-serialize = { path = "zenavif-serialize" }
 [[example]]
 name = "yuv_kernel_bench"
 required-features = ["_dev"]
+
+[[example]]
+name = "encode_backend_sweep"
+required-features = ["encode"]
