@@ -33,8 +33,10 @@ rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8",
 rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "398b0bfa40ebf3dec1973d7a0c66336b649ead4d", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
 # zenav1-aom pure-Rust AV1 KEY-frame decoder — second decode backend (feature
 # `aom-backend`). Git-rev pinned to imazen/zenav1-aom main (crate unpublished;
-# intra decode is conformance-clean vs libaom v3.14.1 at this rev).
-aom-decode = { package = "zenav1-aom-decode", git = "https://github.com/imazen/zenav1-aom", rev = "ed29932f4fcbe021b40eb31bfdcf87474a8c70ee", optional = true }
+# intra decode is conformance-clean vs libaom v3.14.1 at this rev). This rev
+# carries the structured `DecodeError` + `DecodeConfig` (limits/stop/alloc)
+# API and the bd8 lowbd perf pipeline (4K vs C 1.45x -> 1.286x upstream).
+aom-decode = { package = "zenav1-aom-decode", git = "https://github.com/imazen/zenav1-aom", rev = "7b972e509cb60fd53fd53cced38e91c1c493c714", optional = true }
 archmage = { version = "0.9.15", features = ["macros", "avx512"] }
 magetypes = { version = "0.9.15"}
 safe_unaligned_simd = "0.2.5"
@@ -54,10 +56,14 @@ log = "0.4.29"
 ravif = { package = "zenravif", version = "0.2.0", path = "../ravif/ravif", default-features = false, optional = true, features = ["stop"] }
 # svtav1-rs experimental AV1 encode backend (`encode-svt-rs` feature).
 # The crate lives in the svtav1-rs/svtav1 subdir of imazen/svtav1; cargo
-# discovers workspace-subdir packages in git deps by package name. Branch
-# pinned to the conformance-verified wave (525/525 mono + 700/700 4:2:0
-# aomdec decode-conformance at the time of wiring).
-svtav1 = { git = "https://github.com/imazen/svtav1", branch = "wave2/entropy-c-parity", optional = true }
+# discovers workspace-subdir packages in git deps by package name. Rev-pinned
+# to master past the frozen wave2/entropy-c-parity baseline: adds the bd10
+# screen-content palette panic gate, luma-palette byte-parity (#71), the
+# SB128 PD0 depth-refinement fix (#91), and the fallible
+# `try_encode_frame*` -> EncodeResult entry points the seam now uses.
+# (The facade crate was renamed `svtav1` -> `zenav1-svt` upstream; the
+# `svtav1` alias keeps the seam's paths stable.)
+svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/svtav1", rev = "3e25f52b59ae2a4606048470697e2084c3d82bc8", optional = true }
 # AVIF container muxer for the svtav1-rs backend (the zenravif backend muxes
 # inside zenravif; this backend muxes in-crate). The 0.2.0 version is
 # supplied by the [patch.crates-io] git pin below until 0.2.0 publishes.
