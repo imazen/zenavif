@@ -39,7 +39,9 @@
 //! only):
 //!
 //! * quality 1..=100 → QP 63..=0, linear
-//!   ([`svtav1::avif::AvifEncoder::quality_to_qp_static`]).
+//!   ([`svtav1::avif::AvifEncoder::quality_to_qp_static`]), except QP is
+//!   clamped to ≥ 1: QP 0 corrupts on the pinned rev (see
+//!   [`quality_to_qp_gated`]).
 //! * speed 1..=10 → SVT preset 0..=13, linear
 //!   (same formula as `svtav1::avif::AvifEncoder`'s internal
 //!   `speed_to_preset`; that helper is private upstream, so the formula is
@@ -94,6 +96,21 @@ fn map_svt_encode_error(e: whereat::At<svtav1::types::EncodeError>) -> whereat::
         // generic encode bucket rather than failing the build.
         other => at!(Error::Encode(format!("svtav1-rs encode failed: {other}"))),
     }
+}
+
+/// Map zenavif quality 1..=100 to an svtav1-rs QP, clamped away from QP 0.
+///
+/// QP 0 is OUTSIDE svtav1-rs's verified envelope: measured 2026-07-22
+/// (benchmarks/backend_sweep_2026-07-22.tsv), every QP-0 encode (quality
+/// >= ~99.3) produced a syntactically-valid bitstream that decodes to
+/// garbage pixels (ssim2 ~= -700; rav1d-safe and aom-rs byte-agree on the
+/// garbage, so the corruption is encoder-side), and one 64x64 cell rav1d
+/// rejected outright. QP 1 (quality <= 99) is clean. Until upstream fixes
+/// or gates QP 0 itself, quality 100 encodes at QP 1 — the best verified
+/// tier — instead of corrupting (zero-tolerance rule: never emit wrong
+/// pixels).
+fn quality_to_qp_gated(quality: f32) -> u8 {
+    svtav1::avif::AvifEncoder::quality_to_qp_static(quality).max(1)
 }
 
 /// Map speed 1..=10 to an SVT-AV1 preset 0..=13.
@@ -340,7 +357,7 @@ pub(crate) fn encode_rgb8_svt_rs(
 
     // ---- svtav1-rs still-frame encode -----------------------------------
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let qp = svtav1::avif::AvifEncoder::quality_to_qp_static(config.quality);
+    let qp = quality_to_qp_gated(config.quality);
     let preset = speed_to_svt_preset(config.speed);
     let color_primaries = config.color_primaries.unwrap_or(DEFAULT_COLOR_PRIMARIES);
     let transfer_characteristics = config
@@ -448,8 +465,8 @@ pub(crate) fn encode_rgba8_svt_rs(
 
     // ---- svtav1-rs still-frame encodes: color, then alpha ---------------
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let qp = svtav1::avif::AvifEncoder::quality_to_qp_static(config.quality);
-    let alpha_qp = svtav1::avif::AvifEncoder::quality_to_qp_static(
+    let qp = quality_to_qp_gated(config.quality);
+    let alpha_qp = quality_to_qp_gated(
         crate::encoder::effective_alpha_quality(config),
     );
     let preset = speed_to_svt_preset(config.speed);
@@ -533,7 +550,7 @@ pub(crate) fn encode_gray8_svt_rs(
     let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let qp = svtav1::avif::AvifEncoder::quality_to_qp_static(config.quality);
+    let qp = quality_to_qp_gated(config.quality);
     let preset = speed_to_svt_preset(config.speed);
     let color_primaries = config.color_primaries.unwrap_or(DEFAULT_COLOR_PRIMARIES);
     let transfer_characteristics = config
