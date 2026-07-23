@@ -45,9 +45,12 @@ never silent degradation. Sources: `src/encoder.rs`, `src/encoder_svt_rs.rs`,
 
 ## Decode backends (`decode_av1_obu_yuv(.., DecodeBackend::..)`)
 
-The public container decode (`zenavif::decode*`) always uses Rav1dSafe; the
-seam below is the raw-OBU comparison/benchmark surface (`aom-backend` /
-`unsafe-asm` features).
+The public container decode (`zenavif::decode*`) uses Rav1dSafe by default;
+`DecoderConfig::decode_backend(AomRs)` routes NON-GRID STILL decodes
+(primary/alpha/gain-map items, all depths/subsamplings, CICP/ICC/HDR
+passthrough) through aom-rs, byte-identical output
+(`tests/product_aom_backend.rs`). Grid/animation/streaming on aom return
+honest Unsupported. `Rav1dFfi` remains raw-OBU benchmark only.
 
 | Axis | Rav1dSafe (default) | AomRs (`aom-backend`) | Rav1dFfi (`unsafe-asm`) |
 |---|---|---|---|

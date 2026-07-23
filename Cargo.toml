@@ -38,7 +38,7 @@ rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "f9458f43bb73
 # intra decode is conformance-clean vs libaom v3.14.1 at this rev). This rev
 # carries the structured `DecodeError` + `DecodeConfig` (limits/stop/alloc)
 # API and the bd8 lowbd perf pipeline (4K vs C 1.45x -> 1.286x upstream).
-aom-decode = { package = "zenav1-aom-decode", git = "https://github.com/imazen/zenav1-aom", rev = "7b972e509cb60fd53fd53cced38e91c1c493c714", optional = true }
+aom-decode = { package = "zenav1-aom-decode", git = "https://github.com/imazen/zenav1-aom", rev = "81a36ba463db9471fb39d01b1244db9047836c6e", optional = true }
 archmage = { version = "0.9.15", features = ["macros", "avx512"] }
 magetypes = { version = "0.9.15"}
 safe_unaligned_simd = "0.2.5"

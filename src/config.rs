@@ -28,6 +28,10 @@ pub struct DecoderConfig {
     /// Most AVIF encoders (including zenravif) default to 10-bit encoding
     /// even for 8-bit input. This option returns 8-bit output for those files.
     pub(crate) prefer_8bit: bool,
+    /// Which AV1 decode kernel serves the container decode paths
+    /// (primary/alpha/gain-map items). Default [`crate::DecodeBackend::Rav1dSafe`].
+    /// See [`DecoderConfig::decode_backend`] for the aom-rs scope caveats.
+    pub(crate) decode_backend: crate::DecodeBackend,
     /// Allocation-fallibility preference for zenavif's *own* decode buffers
     /// (the full-image RGB(A) output, the grid-stitch canvas, the crop
     /// destination, and the per-row YUV→RGB scratch). `CodecDefault` keeps each
@@ -62,6 +66,7 @@ impl Default for DecoderConfig {
             parser_total_megapixels_limit: None,
             parser_max_animation_frames: None,
             prefer_8bit: false,
+            decode_backend: crate::DecodeBackend::Rav1dSafe,
             alloc_pref: crate::alloc_util::AllocPref::CodecDefault,
         }
     }
@@ -132,6 +137,27 @@ impl DecoderConfig {
     /// 8-bit sources and you want 8-bit output without an external conversion.
     pub fn prefer_8bit(mut self, prefer: bool) -> Self {
         self.prefer_8bit = prefer;
+        self
+    }
+
+    /// Select the AV1 decode kernel for the container decode paths
+    /// (primary + alpha + gain-map items). Default
+    /// [`crate::DecodeBackend::Rav1dSafe`].
+    ///
+    /// [`crate::DecodeBackend::AomRs`] (feature `aom-backend`, EXPERIMENTAL)
+    /// routes item decodes through the zenav1-aom pure-Rust decoder —
+    /// byte-identical to rav1d-safe on every still tested (8/10/12-bit,
+    /// mono, 4:2:0/4:2:2/4:4:4, film grain, all conformance + sweep cells).
+    /// Scope caveats: still images only (animation decode returns
+    /// [`Error::Unsupported`](crate::Error::Unsupported) — its inter-frame
+    /// envelope is in progress), single-threaded, and ~1.4x slower than
+    /// rav1d-safe at 8-bit. Not yet recommended for untrusted input in
+    /// production (fuzz hardening in progress upstream).
+    ///
+    /// [`crate::DecodeBackend::Rav1dFfi`] (feature `unsafe-asm`) is NOT
+    /// accepted here — it remains a raw-OBU benchmark arm only.
+    pub fn decode_backend(mut self, backend: crate::DecodeBackend) -> Self {
+        self.decode_backend = backend;
         self
     }
 }

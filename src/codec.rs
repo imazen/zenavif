@@ -2376,6 +2376,7 @@ fn reconstruct_hdr_pixels(
     pixels: zenpixels::PixelBuffer,
     native_info: &crate::image::ImageInfo,
     target_headroom: Option<f32>,
+    decode_config: &crate::DecoderConfig,
     stop: &dyn Stop,
 ) -> Result<(zenpixels::PixelBuffer, (u16, u16)), At<Error>> {
     let gm = native_info
@@ -2407,7 +2408,8 @@ fn reconstruct_hdr_pixels(
             "gain map present but its ISO 21496-1 metadata failed to parse"
         ))
     })?;
-    let (gpx, gw, gh, gch) = crate::decode_av1_obu(&gm.gain_map_data)?;
+    let (gpx, gw, gh, gch) =
+        crate::decode_av1::decode_av1_obu_with_config(&gm.gain_map_data, decode_config)?;
     let gainmap = ultrahdr_core::GainMap {
         width: gw,
         height: gh,
@@ -3365,8 +3367,13 @@ impl AvifDecodeJob {
             let (pixels, native_info) = decoder.decode_full(&stop_token)?;
             let pixels = set_cicp_on_pixels(pixels, &native_info);
             let pixels = attach_source_color_context(pixels, &native_info);
-            let (hdr, (max_cll, max_fall)) =
-                reconstruct_hdr_pixels(pixels, &native_info, target_headroom, &stop_token)?;
+            let (hdr, (max_cll, max_fall)) = reconstruct_hdr_pixels(
+                pixels,
+                &native_info,
+                target_headroom,
+                self.config.inner(),
+                &stop_token,
+            )?;
             let (baked, _orientation, w, h) = bake_orientation(hdr, &native_info, self.orientation);
             let strip_descriptor = baked.descriptor();
             let mut info = apply_reported_orientation(
@@ -3716,7 +3723,8 @@ impl AvifDecoder<'_> {
             _ => None,
         };
         let pixels = if let Some(target_headroom) = reconstruct_target {
-            let (hdr, cll) = reconstruct_hdr_pixels(pixels, &native_info, target_headroom, stop)?;
+            let (hdr, cll) =
+                reconstruct_hdr_pixels(pixels, &native_info, target_headroom, &self.config, stop)?;
             reconstructed_cll = Some(cll);
             hdr
         } else {
@@ -3780,7 +3788,8 @@ impl AvifDecoder<'_> {
             // Components: decode the AV1-coded gain-map image into pixels.
             // Errors only when a present gain map is malformed.
             if surface_components {
-                let (px, gw, gh, channels) = crate::decode_av1_obu(&gm.gain_map_data)?;
+                let (px, gw, gh, channels) =
+                    crate::decode_av1::decode_av1_obu_with_config(&gm.gain_map_data, &self.config)?;
                 let desc = if channels == 1 {
                     PixelDescriptor::GRAY8_SRGB
                 } else {

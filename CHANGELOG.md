@@ -47,6 +47,18 @@ write-path returns + gain-map interop additions, already on main).
   the next 0.x minor bump (svtav1-rs backend PR)
 
 ### Added
+- `DecoderConfig::decode_backend` — the aom-rs decoder is now a selectable
+  PRODUCT decode backend (feature `aom-backend`, experimental): non-grid
+  stills decode through zenav1-aom across the full still surface — 8/10/12
+  bit, 4:2:0/4:2:2/4:4:4 + mono, RGBA alpha items, identity (MC=0),
+  exotic matrices, ICC/CICP/HDR-metadata passthrough (upstream
+  `FrameDecode` gained the sequence CICP fields), gain-map item decode
+  (`decode_av1_obu_with_config`, both zencodec gain-map sites routed), and
+  the prefer_8bit downscale — byte-identical to the rav1d-safe path by
+  construction (both run the same canonical in-house kernel recipe; pinned
+  across the whole grid by `tests/product_aom_backend.rs`). Grid images,
+  animation, and row-sink streaming return honest `Unsupported` until the
+  aom grid/inter envelopes land (inter decode is in progress upstream).
 - `decode_av1_obu_yuv_with` — the raw-OBU decode seam gains a config-carrying
   twin threading `DecoderConfig` + a stop token into the backends
   (seam obligation 3): `frame_size_limit` reaches rav1d-safe's managed

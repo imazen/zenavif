@@ -44,6 +44,21 @@ use whereat::at;
 /// }
 /// ```
 pub fn decode_av1_obu(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u8)> {
+    decode_av1_obu_with_config(data, &crate::DecoderConfig::default())
+}
+
+/// [`decode_av1_obu`] with the decode backend + caps taken from a
+/// [`crate::DecoderConfig`] — the gain-map decode path honors
+/// `decode_backend` like the primary/alpha item decodes do.
+pub(crate) fn decode_av1_obu_with_config(
+    data: &[u8],
+    #[cfg_attr(not(feature = "aom-backend"), allow(unused_variables))]
+    config: &crate::DecoderConfig,
+) -> Result<(Vec<u8>, u32, u32, u8)> {
+    #[cfg(feature = "aom-backend")]
+    if config.decode_backend == crate::DecodeBackend::AomRs {
+        return decode_av1_obu_aom_8bit(data, config);
+    }
     if data.is_empty() {
         return Err(at!(Error::UnexpectedEof("empty AV1 OBU data")));
     }
@@ -635,31 +650,118 @@ fn decode_av1_obu_yuv_rav1d_with(data: &[u8], config: &crate::DecoderConfig) -> 
 /// [`Error`] variant so the failure category survives to
 /// `CategorizedError::category()` (backend-seam obligation 1 — no flattening
 /// to one opaque code).
+/// aom-backed raw-OBU decode to the [`decode_av1_obu`] 8-bit output contract
+/// (`(pixels, w, h, channels)`; 10/12-bit scaled down to 8-bit). Serves the
+/// gain-map decode path when `decode_backend == AomRs`. Same CICP handling
+/// as the rav1d arm: raw OBUs carry no container, so an unspecified MC
+/// disambiguates via the AVIF default.
 #[cfg(feature = "aom-backend")]
-#[cfg(feature = "aom-backend")]
-fn decode_av1_obu_yuv_aomrs_with(
+fn decode_av1_obu_aom_8bit(
     data: &[u8],
     config: &crate::DecoderConfig,
-    stop: &(impl enough::Stop + ?Sized),
-) -> Result<DecodedYuv> {
-    use aom_decode::DecodeError as AomError;
-    // Map zenavif's decode caps onto the upstream DecodeConfig: the pixel cap
-    // (0 = opt-out -> None = upstream's own 2^28 default), in-loop stop
-    // polling, and the allocation mode (CodecDefault/Fallible -> fallible
-    // pre-flight, the untrusted-input default; Infallible -> fast path).
-    let mut limits = aom_decode::DecodeLimits::new();
-    limits.max_pixels = (config.frame_size_limit > 0).then_some(u64::from(config.frame_size_limit));
-    let alloc = match config.alloc_pref {
-        crate::alloc_util::AllocPref::Infallible => aom_decode::AllocMode::Infallible,
-        _ => aom_decode::AllocMode::Fallible,
+) -> Result<(Vec<u8>, u32, u32, u8)> {
+    use crate::yuv_convert as yc;
+    let aom_config = aom_config_from(config);
+    let fd = aom_decode::frame::decode_frame_obus_with(data, &aom_config).map_err(map_aom_error)?;
+    let (w, h) = (fd.width, fd.height);
+    let bd = fd.bit_depth as u8;
+    let shift = bd.saturating_sub(8);
+    let px = w.checked_mul(h).ok_or_else(|| at!(Error::OutOfMemory))?;
+    let range = if fd.full_range {
+        yc::YuvRange::Full
+    } else {
+        yc::YuvRange::Limited
     };
-    // `&stop` (not `stop`): `&S: Stop` for any `S: Stop + ?Sized`, and the
-    // sized reference coerces to the config's `&dyn Stop`.
-    let aom_config = aom_decode::DecodeConfig::new()
-        .with_limits(limits)
-        .with_stop(&stop)
-        .with_alloc(alloc);
-    let fd = aom_decode::frame::decode_frame_obus_with(data, &aom_config).map_err(|e| match e {
+    if fd.monochrome {
+        let mut gray = vec![rgb::Gray::<u16>::new(0); px];
+        yc::yuv400_to_rgbx_strip::<u16, rgb::Gray<u16>>(&fd.y, w, w, 0, h, range, bd, &mut gray);
+        let out: Vec<u8> = gray.iter().map(|g| (g.value() >> shift) as u8).collect();
+        return Ok((out, w as u32, h as u32, 1));
+    }
+    let hint = Some(crate::cicp_resolve::AVIF_DEFAULT_MC);
+    let resolved =
+        crate::cicp_resolve::resolve(fd.matrix_coefficients as u8, fd.color_primaries as u8, hint)?;
+    if matches!(resolved, crate::cicp_resolve::ResolvedMatrix::Identity) {
+        if (fd.subsampling_x, fd.subsampling_y) != (0, 0) {
+            return Err(at!(Error::Unsupported(
+                "identity (MC=0) requires 4:4:4 chroma; subsampled identity has no \
+                 defined reconstruction"
+            )));
+        }
+        // Planes are (G,B,R); expand limited range then scale to 8-bit.
+        let limited = !fd.full_range;
+        let max = (1u32 << bd) - 1;
+        let smin = 16u32 << shift;
+        let span = 219u32 << shift;
+        let to8 = |v: u16| -> u8 {
+            if limited {
+                let c = (v as u32).saturating_sub(smin).min(span);
+                ((c * 255 + span / 2) / span) as u8
+            } else {
+                (((v as u32) * 255 + max / 2) / max) as u8
+            }
+        };
+        let mut out = crate::alloc_util::alloc_filled(
+            config.alloc_pref,
+            true,
+            0u8,
+            px.checked_mul(3).ok_or_else(|| at!(Error::OutOfMemory))?,
+        )?;
+        for i in 0..px {
+            out[i * 3] = to8(fd.v[i]);
+            out[i * 3 + 1] = to8(fd.y[i]);
+            out[i * 3 + 2] = to8(fd.u[i]);
+        }
+        return Ok((out, w as u32, h as u32, 3));
+    }
+    let matrix = resolved
+        .to_our()
+        .expect("identity handled above; every real matrix maps in-house");
+    let sampling = match (fd.subsampling_x, fd.subsampling_y) {
+        (0, 0) => yc::ChromaSubsampling::Cs444,
+        (1, 0) => yc::ChromaSubsampling::Cs422,
+        _ => yc::ChromaSubsampling::Cs420,
+    };
+    let mut wide = vec![rgb::Rgb::<u16> { r: 0, g: 0, b: 0 }; px];
+    yc::yuv16_to_rgbx_strip::<rgb::Rgb<u16>>(
+        sampling,
+        &fd.y,
+        w,
+        &fd.u,
+        fd.width_uv,
+        &fd.v,
+        fd.width_uv,
+        w,
+        h,
+        0,
+        h,
+        range,
+        matrix,
+        bd,
+        &mut wide,
+    );
+    let mut out = crate::alloc_util::alloc_filled(
+        config.alloc_pref,
+        true,
+        0u8,
+        px.checked_mul(3).ok_or_else(|| at!(Error::OutOfMemory))?,
+    )?;
+    for (i, p) in wide.iter().enumerate() {
+        out[i * 3] = (p.r >> shift) as u8;
+        out[i * 3 + 1] = (p.g >> shift) as u8;
+        out[i * 3 + 2] = (p.b >> shift) as u8;
+    }
+    Ok((out, w as u32, h as u32, 3))
+}
+
+/// Map every `aom_decode::DecodeError` variant onto the matching zenavif
+/// [`Error`] variant (backend-seam obligation 1 — the failure category
+/// survives to `CategorizedError::category()`). Shared by the raw-OBU seam
+/// and the aom-backed product decode path.
+#[cfg(feature = "aom-backend")]
+pub(crate) fn map_aom_error(e: aom_decode::DecodeError) -> whereat::At<Error> {
+    use aom_decode::DecodeError as AomError;
+    match e {
         AomError::Truncated(_) => at!(Error::Decode {
             code: -2,
             msg: "aom-rs: truncated AV1 OBU stream",
@@ -688,7 +790,37 @@ fn decode_av1_obu_yuv_aomrs_with(
             code: -1,
             msg: "aom-rs: decode failed",
         }),
-    })?;
+    }
+}
+
+/// Build the upstream `DecodeConfig` from zenavif's decode caps: the pixel
+/// cap (0 = opt-out -> None = upstream's own 2^28 default) and the
+/// allocation mode (CodecDefault/Fallible -> fallible pre-flight, the
+/// untrusted-input default; Infallible -> fast path). The stop token is
+/// attached at the call site (lifetime-bound).
+#[cfg(feature = "aom-backend")]
+pub(crate) fn aom_config_from<'a>(config: &crate::DecoderConfig) -> aom_decode::DecodeConfig<'a> {
+    let mut limits = aom_decode::DecodeLimits::new();
+    limits.max_pixels = (config.frame_size_limit > 0).then_some(u64::from(config.frame_size_limit));
+    let alloc = match config.alloc_pref {
+        crate::alloc_util::AllocPref::Infallible => aom_decode::AllocMode::Infallible,
+        _ => aom_decode::AllocMode::Fallible,
+    };
+    aom_decode::DecodeConfig::new()
+        .with_limits(limits)
+        .with_alloc(alloc)
+}
+
+#[cfg(feature = "aom-backend")]
+fn decode_av1_obu_yuv_aomrs_with(
+    data: &[u8],
+    config: &crate::DecoderConfig,
+    stop: &(impl enough::Stop + ?Sized),
+) -> Result<DecodedYuv> {
+    // `&stop` (not `stop`): `&S: Stop` for any `S: Stop + ?Sized`, and the
+    // sized reference coerces to the config's `&dyn Stop`.
+    let aom_config = aom_config_from(config).with_stop(&stop);
+    let fd = aom_decode::frame::decode_frame_obus_with(data, &aom_config).map_err(map_aom_error)?;
     Ok(DecodedYuv {
         y: fd.y,
         u: fd.u,

@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenavif.txt 334 lines (supported surface) | zenavif.features.txt 358 added (features: aom-backend,auto-tune,avx512,encode,encode-asm,encode-imazen,encode-mono,encode-svt-rs,encode-threading,target-quality,two-pass-butteraugli,unsafe-asm) | zenavif.internal.txt 216 lines (59 hidden + 271 excluded-feature)
+# files: zenavif.txt 335 lines (supported surface) | zenavif.features.txt 358 added (features: aom-backend,auto-tune,avx512,encode,encode-asm,encode-imazen,encode-mono,encode-svt-rs,encode-threading,target-quality,two-pass-butteraugli,unsafe-asm) | zenavif.internal.txt 216 lines (59 hidden + 271 excluded-feature)
 
 ## summary
 #
@@ -14,7 +14,7 @@
 #   pub types (struct/enum/trait/alias)        32
 #   pub consts/statics                         43
 #   free functions                             13
-#   inherent methods                           40
+#   inherent methods                           41
 #   struct fields                             104
 #   enum variants                              51
 #   re-exports                                 12
@@ -23,11 +23,11 @@
 #   auto-trait exceptions                       6
 #
 # per-module pub lines:
-#   (root)                          234
+#   (root)                          235
 #   detect                           42
 #   heuristics                       22
 
-## items (297 lines)
+## items (298 lines)
 
 pub mod zenavif
 pub use CleanAperture
@@ -250,6 +250,7 @@ pub fn DecodedYuv::luma_pixels(&self) -> usize
 pub struct DecoderConfig
 pub fn DecoderConfig::apply_grain(self, bool) -> Self
 pub fn DecoderConfig::cpu_flags_mask(self, u32) -> Self
+pub fn DecoderConfig::decode_backend(self, DecodeBackend) -> Self
 pub fn DecoderConfig::frame_size_limit(self, u32) -> Self
 pub fn DecoderConfig::new() -> Self
 pub fn DecoderConfig::prefer_8bit(self, bool) -> Self
