@@ -125,10 +125,22 @@ at 1, so every lossless encode was qi=1 lossy. The same fix resolves
 the zenavif#8 size-vs-speed inversion (validated bit-exact + monotonic
 via path-patch; `benchmarks/lossless_speed_sweep_fixed_2026-06-11.tsv`).
 **Until zenrav1e 0.1.5 releases and the zenravif → zenavif dep chain
-bumps**, registry builds still ship the broken behavior: the identity
-roundtrip tests keep their documented ≤2 tolerance and zenavif#8 stays
-open. At the dep bump: tighten `tests/identity_roundtrip.rs` to exact,
-re-run `examples/lossless_speed_sweep.rs`, close #8.
+bumps**, builds still ship the qi=1-lossy behavior: the identity
+roundtrip tests keep their documented ≤2 tolerance.
+**2026-07-23: the #8 size-vs-speed inversion is MITIGATED zenavif-side
+and #8 is closed** (zenavif@7198953): lossless encodes clamp their
+running speed preset into the empirically size-optimal [6, 8] band
+(`LOSSLESS_REGISTRY_SPEED_BAND` in `src/encode_plan.rs`, applied in
+`build_ravif_encoder` / `resolve_plan` / the sweep fingerprint; lossy
+untouched). Measured: requested s1 −5.0..−15.2% bytes at 3.2-3.8×
+faster, requested s10 −6.9..−31.9% bytes on 4/5 sources; residual
+in-band s6-vs-s8 inversion ≤ ~1.1%
+(`benchmarks/lossless_speed_clamp_2026-07-23.tsv`). At the dep bump:
+set `LOSSLESS_REGISTRY_SPEED_BAND` to `None` + delete its
+`lossless_clamps_speed_into_registry_band` test (the fixed encoder is
+byte-monotonic — slower = smaller), tighten
+`tests/identity_roundtrip.rs` to exact, re-run
+`examples/lossless_speed_sweep.rs`.
 
 
 ### zenrav1e topdown partition search missing HORZ/VERT — FIXED upstream, release-gated
