@@ -26,7 +26,7 @@ path = ".."
 # workspace (zenavif-parse/), which resolves transitively from here.
 # Mirror of the root rav1d-safe git pin (0.6.0-staged; zenavif#30 wedge
 # fix). Drop at the rav1d-safe 0.6.0 release.
-rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "398b0bfa40ebf3dec1973d7a0c66336b649ead4d" }
+rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "f9458f43bb73be4a784059a4ed83cb4914050aa6" }
 
 [[bin]]
 name = "fuzz_decode"
