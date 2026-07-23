@@ -414,6 +414,14 @@ impl EncoderConfig {
     }
 
     /// Set encoding speed (1 = slowest/best, 10 = fastest/worst)
+    ///
+    /// Lossless encodes currently clamp the running preset into the
+    /// [6, 8] band: on the zenrav1e release the dep chain resolves
+    /// today, speeds 1-4 measurably produce *larger* lossless files at
+    /// 4.6-11x the encode time and speed 10 larger still (imazen/
+    /// zenavif#8; the clamp is removed when the fixed zenrav1e — where
+    /// slower is monotonically smaller — is released and adopted).
+    /// Lossy encodes always run the configured speed.
     pub fn speed(mut self, speed: u8) -> Self {
         self.speed = speed;
         self
@@ -655,6 +663,13 @@ impl EncoderConfig {
     /// Enable/disable mathematically lossless encoding (imazen/rav1e fork).
     ///
     /// Sets quantizer to 0. Default: disabled.
+    ///
+    /// Note: the zenrav1e release the dep chain currently resolves does
+    /// not reach qindex 0 (zenrav1e#9 — output is near-lossless, |delta|
+    /// ≤ 2 scatter), and its slow lossless speeds produce larger files;
+    /// lossless encodes therefore clamp their speed preset into the
+    /// [6, 8] band until the fixed zenrav1e releases (imazen/zenavif#8;
+    /// see [`EncoderConfig::speed`]).
     #[cfg(feature = "encode-imazen")]
     pub fn with_lossless(mut self, lossless: bool) -> Self {
         self.lossless = lossless;
@@ -905,7 +920,9 @@ fn build_ravif_encoder(
 ) -> Result<ravif::Encoder<'_>> {
     let mut enc = ravif::Encoder::new()
         .with_quality(config.quality)
-        .with_speed(config.speed)
+        // `speed_effective`, not `speed`: lossless clamps into the
+        // registry-era band (imazen/zenavif#8; see encode_plan.rs).
+        .with_speed(config.speed_effective())
         .with_bit_depth(resolve_bit_depth(config.bit_depth, input_is_16bit))
         .with_internal_color_model(match config.color_model {
             EncodeColorModel::YCbCr => ravif::ColorModel::YCbCr,

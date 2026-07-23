@@ -37,6 +37,23 @@ write-path returns + gain-map interop additions, already on main).
 ## [Unreleased]
 
 ### Fixed
+- **Lossless no longer pessimizes at slow speeds (issue #8).** On the
+  zenrav1e release the dep chain currently resolves (0.1.4, whose
+  "lossless" is qi=1 lossy — zenrav1e#9), speeds 1-4 measurably produce
+  +5..+19% larger lossless files than speed 8 at 4.6-11x the wall time,
+  and speed 10 is larger still on most content (up to +42%): the slow
+  tier's RDO optimizes against phantom distortion the fixed encoder
+  wouldn't emit. Lossless encodes now clamp their running speed preset
+  into the empirically size-optimal [6, 8] band
+  (`LOSSLESS_REGISTRY_SPEED_BAND`); lossy encodes are untouched, the
+  encode plan and sweep fingerprint mirror the clamp, and the residual
+  in-band s6-vs-s8 inversion is ≤ ~1.1%. Measured before/after:
+  `benchmarks/lossless_speed_clamp_2026-07-23.tsv` (requested s1: −5.0
+  to −15.2% bytes at 3.2-3.8x faster; worst-case pixel delta at s1-2 on
+  paris drops 8 → 2). REMOVE the band (set the const to `None`) at the
+  zenrav1e >0.1.4 dep bump — the fixed encoder is bit-exact and
+  byte-monotonic (slower = smaller), see the dep-bump checklist in
+  CLAUDE.md and `EncoderConfig::speed_effective`.
 - **Float YUV→RGB output is now byte-identical across arch, SIMD tier, and
   image width.** The 4:2:0/4:2:2 float kernels computed three subtly
   different pipelines: fused `mul_add` on x86-64-v3/NEON lanes, unfused

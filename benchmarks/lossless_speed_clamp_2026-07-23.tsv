@@ -1,0 +1,66 @@
+# lossless speed sweep — imazen/zenavif#8 registry-era clamp: BEFORE (unclamped, re-verified) vs AFTER (LOSSLESS_REGISTRY_SPEED_BAND [6,8])
+# date: 2026-07-23 host: dev-32gb zenavif base commit: fc34099 cmd: cargo run --release --features encode-imazen --example lossless_speed_sweep (1 thread, EncodeColorModel::Rgb identity)
+# deps: path zenravif 0.2.0 (../ravif @ 680ca56) -> registry zenrav1e 0.1.4 (the zenrav1e#9 qi-floor era)
+# BEFORE reproduces benchmarks/lossless_speed_sweep_2026-06-11.tsv byte-identically (e.g. kodim23 s1 = 327489 both runs)
+# phase = before|after; 'speed' is the REQUESTED preset (after-clamp effective: <6 -> 6, >8 -> 8 under lossless)
+phase	source	class	width	height	speed	bytes	ms	mismatched_px	mismatched_pct	max_delta
+before	tests/vectors/libavif/kodim23_yuv420_8bpc.avif	photo-natural	768	512	1	327489	5395	45035	11.45	2
+before	tests/vectors/libavif/kodim23_yuv420_8bpc.avif	photo-natural	768	512	2	327489	5577	45035	11.45	2
+before	tests/vectors/libavif/kodim23_yuv420_8bpc.avif	photo-natural	768	512	4	327880	5126	45260	11.51	2
+before	tests/vectors/libavif/kodim23_yuv420_8bpc.avif	photo-natural	768	512	6	292424	1732	84851	21.58	2
+before	tests/vectors/libavif/kodim23_yuv420_8bpc.avif	photo-natural	768	512	8	289794	1122	88621	22.54	2
+before	tests/vectors/libavif/kodim23_yuv420_8bpc.avif	photo-natural	768	512	10	337214	468	106982	27.21	2
+before	tests/vectors/libavif/kodim03_yuv420_8bpc.avif	photo	768	512	1	280292	5239	30131	7.66	2
+before	tests/vectors/libavif/kodim03_yuv420_8bpc.avif	photo	768	512	2	280292	5350	30131	7.66	2
+before	tests/vectors/libavif/kodim03_yuv420_8bpc.avif	photo	768	512	4	280941	4852	30011	7.63	2
+before	tests/vectors/libavif/kodim03_yuv420_8bpc.avif	photo	768	512	6	266203	1667	68434	17.40	2
+before	tests/vectors/libavif/kodim03_yuv420_8bpc.avif	photo	768	512	8	264691	1114	72662	18.48	2
+before	tests/vectors/libavif/kodim03_yuv420_8bpc.avif	photo	768	512	10	377224	429	95401	24.26	2
+before	tests/vectors/libavif/paris_icc_exif_xmp.avif	photo-detailed	403	302	1	141899	2467	16115	13.24	8
+before	tests/vectors/libavif/paris_icc_exif_xmp.avif	photo-detailed	403	302	2	141899	2403	16115	13.24	8
+before	tests/vectors/libavif/paris_icc_exif_xmp.avif	photo-detailed	403	302	4	141920	1857	16168	13.28	3
+before	tests/vectors/libavif/paris_icc_exif_xmp.avif	photo-detailed	403	302	6	120360	665	29320	24.09	2
+before	tests/vectors/libavif/paris_icc_exif_xmp.avif	photo-detailed	403	302	8	119258	498	30218	24.83	2
+before	tests/vectors/libavif/paris_icc_exif_xmp.avif	photo-detailed	403	302	10	175073	204	37938	31.17	2
+before	tests/vectors/libavif/colors_text_sdr_srgb.avif	screen-text	200	200	1	28539	545	4362	10.90	2
+before	tests/vectors/libavif/colors_text_sdr_srgb.avif	screen-text	200	200	2	28539	582	4362	10.90	2
+before	tests/vectors/libavif/colors_text_sdr_srgb.avif	screen-text	200	200	4	28619	509	4290	10.72	2
+before	tests/vectors/libavif/colors_text_sdr_srgb.avif	screen-text	200	200	6	28260	183	8405	21.01	2
+before	tests/vectors/libavif/colors_text_sdr_srgb.avif	screen-text	200	200	8	28135	113	8748	21.87	2
+before	tests/vectors/libavif/colors_text_sdr_srgb.avif	screen-text	200	200	10	30212	50	10467	26.17	2
+before	tests/vectors/libavif/colors_sdr_srgb.avif	synthetic-flat	200	200	1	24329	541	4296	10.74	2
+before	tests/vectors/libavif/colors_sdr_srgb.avif	synthetic-flat	200	200	2	24329	536	4296	10.74	2
+before	tests/vectors/libavif/colors_sdr_srgb.avif	synthetic-flat	200	200	4	24514	487	4188	10.47	2
+before	tests/vectors/libavif/colors_sdr_srgb.avif	synthetic-flat	200	200	6	22707	161	8346	20.87	2
+before	tests/vectors/libavif/colors_sdr_srgb.avif	synthetic-flat	200	200	8	22468	131	8782	21.95	2
+before	tests/vectors/libavif/colors_sdr_srgb.avif	synthetic-flat	200	200	10	21831	48	10420	26.05	2
+after	tests/vectors/libavif/kodim23_yuv420_8bpc.avif	photo-natural	768	512	1	292424	1634	84851	21.58	2
+after	tests/vectors/libavif/kodim23_yuv420_8bpc.avif	photo-natural	768	512	2	292424	1628	84851	21.58	2
+after	tests/vectors/libavif/kodim23_yuv420_8bpc.avif	photo-natural	768	512	4	292424	1676	84851	21.58	2
+after	tests/vectors/libavif/kodim23_yuv420_8bpc.avif	photo-natural	768	512	6	292424	1576	84851	21.58	2
+after	tests/vectors/libavif/kodim23_yuv420_8bpc.avif	photo-natural	768	512	8	289794	1070	88621	22.54	2
+after	tests/vectors/libavif/kodim23_yuv420_8bpc.avif	photo-natural	768	512	10	289794	1079	88621	22.54	2
+after	tests/vectors/libavif/kodim03_yuv420_8bpc.avif	photo	768	512	1	266203	1645	68434	17.40	2
+after	tests/vectors/libavif/kodim03_yuv420_8bpc.avif	photo	768	512	2	266203	1642	68434	17.40	2
+after	tests/vectors/libavif/kodim03_yuv420_8bpc.avif	photo	768	512	4	266203	1625	68434	17.40	2
+after	tests/vectors/libavif/kodim03_yuv420_8bpc.avif	photo	768	512	6	266203	1953	68434	17.40	2
+after	tests/vectors/libavif/kodim03_yuv420_8bpc.avif	photo	768	512	8	264691	1089	72662	18.48	2
+after	tests/vectors/libavif/kodim03_yuv420_8bpc.avif	photo	768	512	10	264691	1115	72662	18.48	2
+after	tests/vectors/libavif/paris_icc_exif_xmp.avif	photo-detailed	403	302	1	120360	652	29320	24.09	2
+after	tests/vectors/libavif/paris_icc_exif_xmp.avif	photo-detailed	403	302	2	120360	679	29320	24.09	2
+after	tests/vectors/libavif/paris_icc_exif_xmp.avif	photo-detailed	403	302	4	120360	708	29320	24.09	2
+after	tests/vectors/libavif/paris_icc_exif_xmp.avif	photo-detailed	403	302	6	120360	657	29320	24.09	2
+after	tests/vectors/libavif/paris_icc_exif_xmp.avif	photo-detailed	403	302	8	119258	540	30218	24.83	2
+after	tests/vectors/libavif/paris_icc_exif_xmp.avif	photo-detailed	403	302	10	119258	495	30218	24.83	2
+after	tests/vectors/libavif/colors_text_sdr_srgb.avif	screen-text	200	200	1	28260	176	8405	21.01	2
+after	tests/vectors/libavif/colors_text_sdr_srgb.avif	screen-text	200	200	2	28260	168	8405	21.01	2
+after	tests/vectors/libavif/colors_text_sdr_srgb.avif	screen-text	200	200	4	28260	178	8405	21.01	2
+after	tests/vectors/libavif/colors_text_sdr_srgb.avif	screen-text	200	200	6	28260	174	8405	21.01	2
+after	tests/vectors/libavif/colors_text_sdr_srgb.avif	screen-text	200	200	8	28135	135	8748	21.87	2
+after	tests/vectors/libavif/colors_text_sdr_srgb.avif	screen-text	200	200	10	28135	141	8748	21.87	2
+after	tests/vectors/libavif/colors_sdr_srgb.avif	synthetic-flat	200	200	1	22707	163	8346	20.87	2
+after	tests/vectors/libavif/colors_sdr_srgb.avif	synthetic-flat	200	200	2	22707	167	8346	20.87	2
+after	tests/vectors/libavif/colors_sdr_srgb.avif	synthetic-flat	200	200	4	22707	178	8346	20.87	2
+after	tests/vectors/libavif/colors_sdr_srgb.avif	synthetic-flat	200	200	6	22707	161	8346	20.87	2
+after	tests/vectors/libavif/colors_sdr_srgb.avif	synthetic-flat	200	200	8	22468	119	8782	21.95	2
+after	tests/vectors/libavif/colors_sdr_srgb.avif	synthetic-flat	200	200	10	22468	129	8782	21.95	2

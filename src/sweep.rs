@@ -1293,8 +1293,13 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
     // override-equals-preset aliases. The preset number itself is also
     // hashed: settings zenravif leaves to the zenrav1e preset
     // (tx_domain_distortion, motion config) are functions of it.
-    h.u8(config.speed);
-    for &(s, q) in &[(config.speed, quantizer), (config.speed, alpha_quantizer)] {
+    // Effective speed (== configured speed except under the registry-era
+    // lossless clamp, imazen/zenavif#8): the fingerprint must track the
+    // preset the encoder actually runs, or lossless cells that encode
+    // byte-identically (e.g. requested s1 vs s6) would fingerprint apart.
+    let speed = config.speed_effective();
+    h.u8(speed);
+    for &(s, q) in &[(speed, quantizer), (speed, alpha_quantizer)] {
         let mut d = speed_derived(s, q);
         apply_overrides(&mut d, config);
         h.u8(d.partition_range.0);

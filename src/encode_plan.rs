@@ -254,6 +254,14 @@ pub(crate) fn quality_to_quantizer(quality: f32) -> u8 {
     (x.min(1.0) * 255.).round() as u8
 }
 
+/// Registry-era lossless speed band (imazen/zenavif#8): while the dep
+/// chain resolves zenrav1e 0.1.4 (whose lossless is qi=1 lossy,
+/// zenrav1e#9), lossless encodes clamp their speed preset into this
+/// inclusive band. `None` disables the clamp. Full rationale +
+/// measurements + the dep-bump removal instruction:
+/// [`EncoderConfig::speed_effective`].
+pub(crate) const LOSSLESS_REGISTRY_SPEED_BAND: Option<(u8, u8)> = Some((6, 8));
+
 /// Mirror of zenravif's per-speed search-setting derivation.
 ///
 /// Provenance: zenravif 0.1.3 `av1encoder.rs:1454`
@@ -415,10 +423,14 @@ impl EncoderConfig {
             }
         });
 
-        let mut speed = speed_derived(self.speed, quantizer);
+        // The effective preset: identical to `self.speed` except under
+        // the registry-era lossless clamp (imazen/zenavif#8, see
+        // `speed_effective`) — the plan mirrors what the encoder runs.
+        let speed_preset = self.speed_effective();
+        let mut speed = speed_derived(speed_preset, quantizer);
         apply_overrides(&mut speed, self);
         let alpha_speed = alpha_quantizer.map(|aq| {
-            let mut s = speed_derived(self.speed, aq);
+            let mut s = speed_derived(speed_preset, aq);
             apply_overrides(&mut s, self);
             s
         });
@@ -459,7 +471,7 @@ impl EncoderConfig {
             lossless: self.lossless_effective(),
             seg_boost: self.seg_boost_effective(),
             trellis: self.trellis_effective(),
-            speed_preset: self.speed,
+            speed_preset,
             tiles: tiles_for(self.threads, input.width, input.height, speed.min_tile_size),
             speed,
             alpha_speed,
@@ -534,6 +546,40 @@ impl EncoderConfig {
         #[cfg(not(feature = "encode-imazen"))]
         {
             false
+        }
+    }
+
+    /// The speed preset the encode will actually run: the configured
+    /// speed, clamped into [`LOSSLESS_REGISTRY_SPEED_BAND`] when lossless
+    /// is effective (imazen/zenavif#8).
+    ///
+    /// Registry zenrav1e 0.1.4's lossless path floors qindex at 1
+    /// (zenrav1e#9 — every "lossless" encode is actually qi=1 lossy;
+    /// fixed on zenrav1e master `c3567081`, unreleased), so the slow
+    /// tier's RDO spends its time optimizing against phantom distortion.
+    /// Measured on that path (`examples/lossless_speed_sweep.rs`;
+    /// `benchmarks/lossless_speed_sweep_2026-06-11.tsv`, re-verified
+    /// byte-identical 2026-07-23): speeds 1-4 produce +5..+19% LARGER
+    /// files than speed 8 at 4.6-11x the wall time on every measured
+    /// source class, speed 10 is the largest of all on 4/5 sources
+    /// (up to +42%), and the slow tier's worst-case pixel error is no
+    /// better (paris max_delta 8 at s1-2 vs 2 at s6+). The [6, 8] band
+    /// is the empirically size-optimal region; within it the residual
+    /// s6-vs-s8 size inversion is ≤ ~1.1%, and effort keeps its time
+    /// semantics (s6 ≈ 1.5x s8).
+    ///
+    /// AT THE zenrav1e (>0.1.4) DEP BUMP: set
+    /// `LOSSLESS_REGISTRY_SPEED_BAND` to `None` — the fixed encoder is
+    /// bit-exact and byte-monotonic (slower = smaller;
+    /// `benchmarks/lossless_speed_sweep_fixed_2026-06-11.tsv`), so the
+    /// full 1..=10 range becomes meaningful again. Then re-run
+    /// `examples/lossless_speed_sweep.rs`, tighten
+    /// `tests/identity_roundtrip.rs` to exact, and close zenavif#8 if
+    /// still open (CLAUDE.md dep-bump checklist).
+    pub(crate) fn speed_effective(&self) -> u8 {
+        match (self.lossless_effective(), LOSSLESS_REGISTRY_SPEED_BAND) {
+            (true, Some((lo, hi))) => self.speed.clamp(lo, hi),
+            _ => self.speed,
         }
     }
 
@@ -674,6 +720,48 @@ mod tests {
         assert_eq!(plan.quantizer, 0);
         assert!(!plan.qm, "lossless forces QM off");
         assert!(plan.lossless);
+    }
+
+    /// imazen/zenavif#8: while the dep chain resolves the zenrav1e
+    /// release whose lossless is qi=1 lossy, lossless encodes clamp
+    /// their speed preset into `LOSSLESS_REGISTRY_SPEED_BAND` (both
+    /// ends), lossy encodes never do, and the plan mirrors the clamp.
+    /// DELETE this test together with the band const at the zenrav1e
+    /// (>0.1.4) dep bump.
+    #[cfg(feature = "encode-imazen")]
+    #[test]
+    fn lossless_clamps_speed_into_registry_band() {
+        let (lo, hi) = LOSSLESS_REGISTRY_SPEED_BAND.expect(
+            "band const gone: this test should have been deleted with it (dep-bump checklist)",
+        );
+        let input = PlanInput::rgb8(256, 256);
+
+        // Below the band → floor.
+        let slow = EncoderConfig::new().speed(1).with_lossless(true);
+        assert_eq!(slow.resolve_plan(input).speed_preset, lo);
+        // Above the band → ceiling.
+        let fast = EncoderConfig::new().speed(10).with_lossless(true);
+        assert_eq!(fast.resolve_plan(input).speed_preset, hi);
+        // Interior of the band → untouched.
+        let mid = EncoderConfig::new().speed(hi).with_lossless(true);
+        assert_eq!(mid.resolve_plan(input).speed_preset, hi);
+
+        // Lossy encodes never clamp.
+        let lossy = EncoderConfig::new().speed(1).quality(80.0);
+        assert_eq!(lossy.resolve_plan(input).speed_preset, 1);
+
+        // The derived search settings follow the effective preset, not
+        // the requested one (speed 1's bottom-up search must not leak
+        // into a clamped lossless plan).
+        assert_eq!(
+            slow.resolve_plan(input).speed.encode_bottomup,
+            EncoderConfig::new()
+                .speed(lo)
+                .with_lossless(true)
+                .resolve_plan(input)
+                .speed
+                .encode_bottomup
+        );
     }
 
     #[cfg(feature = "encode-imazen")]
