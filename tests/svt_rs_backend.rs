@@ -1,13 +1,14 @@
 //! svtav1-rs backend (`encode-svt-rs`) — encode/decode round-trip and
 //! scope-rejection coverage.
 //!
-//! Everything here must pass TODAY on the pinned imazen/svtav1 rev. The
-//! bitstream-identity-vs-C-SVT parity assertion is deliberately absent:
-//! it lands when svtav1-rs reaches decision-layer bitstream identity
-//! (asserting it earlier would be a test designed to fail or a fake).
-//! Upstream decode conformance (aomdec 525/525 mono + 700/700 4:2:0)
-//! is svtav1-rs's own gate; what zenavif pins here is the container +
-//! round-trip contract through its own decoder (rav1d-safe).
+//! Everything here must pass TODAY on the pinned imazen/svtav1 rev.
+//! Bitstream identity vs C SVT-AV1 is asserted UPSTREAM (the pinned rev's
+//! own byte-identity battery, `rust/STATUS.md`) — duplicating those gates
+//! here would pin zenavif to upstream's release cadence for no coverage
+//! gain. Upstream decode conformance (aomdec, 2100 conformance cells at
+//! the pin) is likewise svtav1-rs's own gate; what zenavif pins here is
+//! the container + round-trip contract through its own decoder
+//! (rav1d-safe) plus the seam's error/clamp composition.
 
 #![cfg(feature = "encode-svt-rs")]
 
@@ -518,5 +519,38 @@ fn svt_rs_quality_100_does_not_corrupt() {
     assert!(
         s100 >= s90 - 1.0 && s100 > 60.0,
         "quality 100 must not corrupt: ssim2(q100)={s100:.2} vs ssim2(q90)={s90:.2}"
+    );
+}
+
+/// Upstream-gate side of the QP-0 composition (imazen/zenav1-svt#5): a
+/// DIRECT qp=0 request to the pipeline must surface as a typed
+/// `EncodeError::UnsupportedConfig` — not a panic, not a garbage stream.
+/// The zenavif quality path can no longer reach QP 0 at all
+/// (`quality_to_qp_gated` clamps to >= 1; the clamp side is covered by
+/// `svt_rs_quality_100_does_not_corrupt` above), so this drives the
+/// pinned pipeline directly, exactly as the seam would if the clamp were
+/// ever lost — proving the failure mode is a clean typed error.
+#[test]
+fn svt_rs_direct_qp0_rejected_typed() {
+    use svtav1::types::EncodeError;
+
+    let rc = svtav1::encoder::rate_control::RcConfig {
+        mode: svtav1::encoder::rate_control::RcMode::Cqp,
+        qp: 0,
+        ..svtav1::encoder::rate_control::RcConfig::default()
+    };
+    let mut pipeline =
+        svtav1::encoder::pipeline::EncodePipeline::new(64, 64, 6, rc, 0, 1).with_chroma_420(true);
+    pipeline.bit_depth = 8;
+    let y = vec![128u8; 64 * 64];
+    let u = vec![128u8; 32 * 32];
+    let v = vec![128u8; 32 * 32];
+    let err = pipeline
+        .try_encode_frame_420(&y, &u, &v, 64)
+        .expect_err("QP 0 (coded-lossless) must be rejected upstream (imazen/zenav1-svt#5)");
+    let (err, _trace) = err.decompose();
+    assert!(
+        matches!(err, EncodeError::UnsupportedConfig(_)),
+        "expected EncodeError::UnsupportedConfig for QP 0, got: {err:?}"
     );
 }

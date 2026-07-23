@@ -13,24 +13,27 @@
 //!   plus grayscale → monochrome (Cs400). RGBA's straight alpha plane is a
 //!   separate Cs400 encode muxed as an `auxl` auxiliary item, honoring the
 //!   [`crate::EncoderConfig::alpha_quality`] fallback contract.
-//! * Width and height must be **multiples of 64**: the svtav1-rs pipeline
-//!   codes full 64×64 superblocks and signals the coded dimensions in the
-//!   sequence header (no partial-SB coding yet). Padding here would leak
-//!   padded dimensions into decoded output (zenavif's decoder sizes the
-//!   image from the sequence header, not `ispe`), so unaligned input is
-//!   rejected instead of silently padded.
+//! * Width and height must be **multiples of 64** — a zenavif-side
+//!   verified-envelope restriction, no longer an upstream limit. At the
+//!   pinned rev the pipeline pads TRUE→ALIGNED internally, signals the
+//!   TRUE dimensions in the sequence header, and codes partial
+//!   superblocks (byte-matching C at presets ≥ 6; panic-free +
+//!   aomdec-decodable at presets 0–5 — upstream task #95). zenavif keeps
+//!   the 64-multiple gate until its own cross-backend decode validation
+//!   covers non-64-aligned cells; the alpha/gray (mono) path upstream
+//!   also still requires 8-aligned dims and 64-aligned below preset 6.
 //! * No 10-bit, no RGB (identity) model, no limited range, no lossless, no
 //!   gain map, no animation. Each is rejected honestly at encode time (and
 //!   by [`crate::EncoderConfig::validate`]).
 //!
 //! # Payload shape
 //!
-//! `EncodePipeline::encode_frame_420` returns a temporal-delimiter +
+//! `EncodePipeline::try_encode_frame_420` returns a temporal-delimiter +
 //! sequence-header + frame OBU sequence. It is muxed **verbatim**: the
 //! leading TD matches the zenravif payload convention (zenrav1e packet data
 //! also begins with a TD OBU) and is byte-identical to the streams the
-//! svtav1-rs decode-conformance suite validates under `aomdec` (525/525
-//! mono + 700/700 4:2:0 cells at the pinned rev).
+//! svtav1-rs decode-conformance suite validates under `aomdec` (525 mono +
+//! 1575 4:2:0 cells, `tools/decode_conformance.sh` at the pinned rev).
 //!
 //! # Quality / speed mapping
 //!
@@ -49,10 +52,17 @@
 //!
 //! # C parity
 //!
-//! Bitstream identity vs the C SVT-AV1 encoder is NOT yet asserted — the
-//! gate's parity test lands when svtav1-rs reaches decision-layer bitstream
-//! identity. What is verified today is decode conformance (aomdec, upstream)
-//! plus the zenavif round-trip tests in `tests/svt_rs_backend.rs`.
+//! At the pinned rev, svtav1-rs emits **byte-identical bitstreams to the C
+//! SVT-AV1 encoder (v4.2.0 baseline)** across its verified battery
+//! (upstream `rust/STATUS.md`): the full-SB identity matrix (54/54, all
+//! presets, bd8 synthetic), bd10 (matrix 36/36 + non-flat 309/309),
+//! real-photo p0 bd8 (135/135) and bd10 p0–p3 (187/187), partial SBs at
+//! presets ≥ 6 incl. odd dims (101/101), SB128, and multi-tile (29/29).
+//! Not byte-exact everywhere yet: screen-content low presets carry pinned
+//! RD near-ties, bd10 photo p4 is 13/15, and QP 0 / lossless is rejected
+//! upstream (typed `UnsupportedConfig`, issue #5). The zenavif round-trip
+//! and cross-backend decode tests (`tests/svt_rs_backend.rs`,
+//! `tests/cross_backend_decode.rs`) verify the seam end-to-end.
 
 use crate::Result;
 use crate::encoder::{EncodeBitDepth, EncodeChromaSubsampling, EncodeColorModel, EncodePixelRange};
@@ -101,15 +111,17 @@ fn map_svt_encode_error(e: whereat::At<svtav1::types::EncodeError>) -> whereat::
 
 /// Map zenavif quality 1..=100 to an svtav1-rs QP, clamped away from QP 0.
 ///
-/// QP 0 is OUTSIDE svtav1-rs's verified envelope: measured 2026-07-22
-/// (benchmarks/backend_sweep_2026-07-22.tsv), every QP-0 encode (quality
-/// of ~99.3 and up) produced a syntactically-valid bitstream that decodes
-/// to garbage pixels (ssim2 ~= -700; rav1d-safe and aom-rs byte-agree on
-/// the garbage, so the corruption is encoder-side), and one 64x64 cell
-/// rav1d rejected outright. QP 1 (quality <= 99) is clean. Until upstream
-/// fixes or gates QP 0 itself, quality 100 encodes at QP 1 — the best
-/// verified tier — instead of corrupting (zero-tolerance rule: never emit
-/// wrong pixels).
+/// QP 0 (base_qindex 0 = coded-lossless) is unimplemented upstream. It
+/// used to CORRUPT (measured 2026-07-22, benchmarks/backend_sweep_2026-07-22
+/// .tsv: syntactically-valid bitstreams decoding to garbage, ssim2 ~= -700);
+/// since upstream `f0f0a70ca` (issue #5) `try_encode_frame*` REJECTS it with
+/// a typed `EncodeError::UnsupportedConfig` instead. The clamp stays for a
+/// different reason now: quality 100 maps to QP 0 linearly, and it must
+/// ENCODE (at QP 1, the verified floor), not fail. Composition is covered by
+/// `svt_rs_quality_100_does_not_corrupt` (clamp side) and
+/// `svt_rs_direct_qp0_rejected_typed` (upstream-gate side) in
+/// `tests/svt_rs_backend.rs`. Remove the clamp only if the quality→QP
+/// mapping stops touching 0 or upstream implements coded-lossless.
 fn quality_to_qp_gated(quality: f32) -> u8 {
     svtav1::avif::AvifEncoder::quality_to_qp_static(quality).max(1)
 }
@@ -202,8 +214,11 @@ fn cicp_to_serialize_transfer(tc: u8) -> zenavif_serialize::constants::TransferC
     }
 }
 
-/// Reject dimensions the svtav1-rs pipeline cannot code (module docs: full
-/// 64×64 superblocks only, coded dims signaled in the sequence header).
+/// Reject dimensions outside this backend's verified envelope (module docs:
+/// 64-multiples only — a zenavif-side restriction; upstream pads and codes
+/// partial SBs, but zenavif's cross-backend validation does not cover
+/// non-64-aligned cells yet, and the mono alpha/gray path upstream is
+/// stricter than the 4:2:0 path).
 fn reject_unaligned_dims(width: usize, height: usize) -> Result<()> {
     if width == 0 || height == 0 {
         return Err(at!(Error::Encode(format!(
@@ -212,10 +227,10 @@ fn reject_unaligned_dims(width: usize, height: usize) -> Result<()> {
     }
     if !width.is_multiple_of(64) || !height.is_multiple_of(64) {
         return Err(at!(Error::Encode(format!(
-            "Av1Backend::SvtRs requires dimensions that are multiples of 64 \
-             (got {width}x{height}): the svtav1-rs pipeline codes full 64x64 \
-             superblocks and signals coded dimensions in the sequence header. \
-             Pad/crop upstream or use the zenravif backend for arbitrary sizes"
+            "Av1Backend::SvtRs currently accepts dimensions that are \
+             multiples of 64 only (got {width}x{height}) — the envelope \
+             zenavif has cross-validated. Pad/crop upstream or use the \
+             zenravif backend for arbitrary sizes"
         ))));
     }
     Ok(())
@@ -234,6 +249,7 @@ fn encode_mono_plane_svt(
     stride: usize,
     preset: u8,
     qp: u8,
+    threads: usize,
     color_description: svtav1::entropy::obu::ColorDescription,
     stop: &almost_enough::StopToken,
 ) -> Result<Vec<u8>> {
@@ -251,6 +267,10 @@ fn encode_mono_plane_svt(
     // backend-seam obligation 3: a capability the backend accepts must be
     // threaded through in the same change.
     pipeline.stop = stop.clone();
+    // Bounded tile-parallel threading (byte-inert — tiles reassemble in
+    // order; inert on today's single-tile frames but wired so a future
+    // tile knob inherits the caller's thread budget). 0 = auto.
+    pipeline.thread_count = threads;
 
     // The pipeline reads a tight `stride`-strided plane; make it tight when
     // the caller's buffer is padded.
@@ -317,8 +337,9 @@ fn build_aviffy(
 /// Encode an 8-bit RGB image to AVIF via the svtav1-rs backend.
 ///
 /// See the module docs for scope and constraints. Cancellation is checked
-/// at phase boundaries (pre-conversion, pre-encode, pre-mux) — the
-/// svtav1-rs pipeline has no per-superblock stop hook yet.
+/// at the seam's phase boundaries (pre-conversion, pre-encode, pre-mux)
+/// AND inside the pipeline itself: the token handed to `pipeline.stop` is
+/// polled at superblock cadence by the encode loops at the pinned rev.
 pub(crate) fn encode_rgb8_svt_rs(
     img: ImgRef<'_, Rgb<u8>>,
     config: &EncoderConfig,
@@ -385,6 +406,8 @@ pub(crate) fn encode_rgb8_svt_rs(
         full_range: true,
     };
     pipeline.stop = stop.clone();
+    // Caller's thread budget (see encode_mono_plane_svt for semantics).
+    pipeline.thread_count = config.threads.unwrap_or(0);
 
     // TD + sequence header + frame OBUs, muxed verbatim (module docs).
     let av1_payload = pipeline
@@ -490,6 +513,8 @@ pub(crate) fn encode_rgba8_svt_rs(
         full_range: true,
     };
     pipeline.stop = stop.clone();
+    // Caller's thread budget (see encode_mono_plane_svt for semantics).
+    pipeline.thread_count = config.threads.unwrap_or(0);
     let color_payload = pipeline
         .try_encode_frame_420(&y_plane, &u_plane, &v_plane, width)
         .map_err(map_svt_encode_error)?;
@@ -502,6 +527,7 @@ pub(crate) fn encode_rgba8_svt_rs(
         width,
         preset,
         alpha_qp,
+        config.threads.unwrap_or(0),
         svtav1::entropy::obu::ColorDescription {
             color_primaries: CICP_UNSPECIFIED,
             transfer_characteristics: CICP_UNSPECIFIED,
@@ -564,6 +590,7 @@ pub(crate) fn encode_gray8_svt_rs(
         img.stride(),
         preset,
         qp,
+        config.threads.unwrap_or(0),
         svtav1::entropy::obu::ColorDescription {
             color_primaries,
             transfer_characteristics,

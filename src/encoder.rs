@@ -181,31 +181,35 @@ pub enum Av1Backend {
     /// zenrav1e (rav1e fork) — default, production-proven.
     #[default]
     Zenravif,
-    /// svtav1-rs — pure Rust SVT-AV1 port experiment.
+    /// svtav1-rs — the retired first draft of the pure-Rust SVT-AV1 port
+    /// integration.
     ///
     /// No build can use this: the `encode-svtav1` feature was never
-    /// shipped (svtav1-rs produces non-conformant bitstreams in most
-    /// configurations, and the draft path returned raw AV1 OBUs instead
-    /// of an AVIF file). [`EncoderConfig::validate`] rejects it. The
-    /// variant is retained only for enum compatibility; a future
-    /// svtav1 backend would arrive as a new, working variant.
+    /// shipped (at draft time the port was early — its streams did not
+    /// yet pass decode conformance — and the draft path returned raw AV1
+    /// OBUs instead of an AVIF file). [`EncoderConfig::validate`] rejects
+    /// it. The variant is retained only for enum compatibility; the
+    /// working integration is [`Av1Backend::SvtRs`].
     #[deprecated(
         note = "the encode-svtav1 feature was never shipped and no build can encode with this \
-                backend; EncoderConfig::validate() rejects it"
+                backend; EncoderConfig::validate() rejects it — use Av1Backend::SvtRs"
     )]
     Svtav1,
     /// svtav1-rs (pure Rust SVT-AV1 port) — EXPERIMENTAL, behind the
     /// `encode-svt-rs` cargo feature (default off).
     ///
     /// This is the working successor the [`Av1Backend::Svtav1`] doc
-    /// promised: the port's streams now pass decode conformance under
-    /// `aomdec` (525/525 mono + 700/700 4:2:0 cells at the pinned
-    /// imazen/svtav1 rev) and the payload is muxed into a real AVIF
-    /// container in-crate. Scope is deliberately narrow for now —
-    /// 8-bit 4:2:0 stills with dimensions that are multiples of 64;
-    /// see `src/encoder_svt_rs.rs` module docs. Bitstream identity vs
-    /// the C SVT-AV1 encoder is not yet asserted (that parity gate
-    /// lands with svtav1-rs decision-layer bitstream identity).
+    /// promised. At the pinned imazen/svtav1 rev the port emits
+    /// bitstreams **byte-identical to the C SVT-AV1 encoder (v4.2.0)**
+    /// across its verified battery — all-preset synthetic bd8, bd10,
+    /// real-photo low-preset gates at both depths, partial SBs, SB128
+    /// and multi-tile (upstream `rust/STATUS.md`); screen-content low
+    /// presets still carry pinned RD near-ties and QP 0 / lossless is
+    /// rejected upstream. Streams pass decode conformance under `aomdec`
+    /// (2100 conformance cells at the pin) and the payload is muxed into
+    /// a real AVIF container in-crate. The zenavif seam's scope stays
+    /// deliberately narrow — 8-bit 4:2:0 stills with dimensions that are
+    /// multiples of 64; see `src/encoder_svt_rs.rs` module docs.
     /// [`EncoderConfig::validate`] rejects the variant when the feature
     /// is off, and rejects configs outside the supported scope when on.
     SvtRs,

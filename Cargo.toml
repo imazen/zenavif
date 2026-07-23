@@ -57,15 +57,17 @@ whereat = { version = "0.1.5"}
 log = "0.4.29"
 ravif = { package = "zenravif", version = "0.2.0", path = "../ravif/ravif", default-features = false, optional = true, features = ["stop"] }
 # svtav1-rs experimental AV1 encode backend (`encode-svt-rs` feature).
-# The crate lives in the svtav1-rs/svtav1 subdir of imazen/svtav1; cargo
+# The crate lives in the rust/svtav1 subdir of imazen/svtav1; cargo
 # discovers workspace-subdir packages in git deps by package name. Rev-pinned
-# to master past the frozen wave2/entropy-c-parity baseline: adds the bd10
-# screen-content palette panic gate, luma-palette byte-parity (#71), the
-# SB128 PD0 depth-refinement fix (#91), and the fallible
-# `try_encode_frame*` -> EncodeResult entry points the seam now uses.
+# to master 2026-07-23: past the 3e25f52b baseline this adds the typed QP-0
+# rejection (upstream #5 — `try_encode_frame*` now returns
+# `UnsupportedConfig` for QP 0 instead of emitting garbage; the seam's
+# quality->QP clamp keeps quality 100 on QP 1 and never trips it), the IBC
+# screen-content vertical, the bd8/bd10 real-photo p0-p3 exchange-sort
+# parity closures, and the nz-map SIMD port.
 # (The facade crate was renamed `svtav1` -> `zenav1-svt` upstream; the
 # `svtav1` alias keeps the seam's paths stable.)
-svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/svtav1", rev = "3e25f52b59ae2a4606048470697e2084c3d82bc8", optional = true }
+svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/svtav1", rev = "bcd182ec3e6c44cfdefeb95c942c886960a9c0bc", optional = true }
 # AVIF container muxer for the svtav1-rs backend (the zenravif backend muxes
 # inside zenravif; this backend muxes in-crate). The 0.2.0 version is
 # supplied by the [patch.crates-io] git pin below until 0.2.0 publishes.

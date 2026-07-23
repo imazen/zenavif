@@ -46,6 +46,22 @@ write-path returns + gain-map interop additions, already on main).
   (already `#[non_exhaustive]`) gained `BackendUnsupportedParam` — ship with
   the next 0.x minor bump (svtav1-rs backend PR)
 
+### Changed
+- zenav1-svt pin bumped `3e25f52b` → `bcd182ec3` (upstream master
+  2026-07-23; zero seam API breaks). Brings the typed QP-0 rejection
+  (upstream #5: `try_encode_frame*` now returns `UnsupportedConfig` for
+  base_qindex 0 instead of emitting garbage — the seam's quality→QP clamp
+  keeps quality 100 encoding at QP 1 and is now composition-tested from
+  both sides), the IBC screen-content vertical, the bd8/bd10 real-photo
+  p0–p3 exchange-sort parity closures (photo p0 bd8 135/135, bd10 p0–p3
+  187/187 upstream), and the nz-map SIMD port. Seam drift fixed in the
+  same change: stale "no C bitstream identity yet" / "non-conformant"
+  claims rewritten to the verified envelope, the 64-multiple dimension
+  gate re-documented as a zenavif-side envelope choice (upstream pads +
+  codes partial SBs since task #95), and `EncoderConfig::threads` is now
+  threaded into the pipeline (`thread_count`; byte-inert, single-tile
+  today).
+
 ### Added
 - `DecoderConfig::decode_backend` — the aom-rs decoder is now a selectable
   PRODUCT decode backend (feature `aom-backend`, experimental): non-grid
