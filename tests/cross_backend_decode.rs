@@ -154,3 +154,79 @@ fn zenravif_10bit_output_decodes_identically_on_both_backends() {
     assert_eq!(rav.bit_depth, 10, "expected a 10-bit AV1 stream");
     assert_backends_agree(&enc.avif_file, "zenravif 10-bit q80");
 }
+
+/// Backend-seam obligation 3 liveness: the config-carrying seam must actually
+/// deliver limits and cancellation to the backends — a seam that accepts a
+/// config and drops it would pass every other test here.
+mod config_threading {
+    use super::*;
+    use zenavif::DecoderConfig;
+
+    fn small_payload() -> Vec<u8> {
+        let img = test_image(128, 96);
+        let config = EncoderConfig::new().quality(60.0).speed(8);
+        let enc = zenavif::encode_rgb8(img.as_ref(), &config, stop()).expect("encode");
+        let mut payload = primary_payload(&enc.avif_file);
+        // aom-rs wants a leading temporal delimiter.
+        if payload.first().map(|b| b >> 3 & 0xf) != Some(2) {
+            let mut td = vec![0x12, 0x00];
+            td.append(&mut payload);
+            payload = td;
+        }
+        payload
+    }
+
+    #[test]
+    fn frame_size_limit_rejects_on_both_backends() {
+        let payload = small_payload();
+        // 128x96 = 12,288 px; a 10,000-px cap must reject on BOTH backends
+        // before any frame allocation.
+        // The tiny-cap-fails + roomy-cap-succeeds PAIRING is the liveness
+        // proof (the cap is the only difference). Message wording is only
+        // asserted on AomRs, where this seam owns the error mapping —
+        // rav1d-safe enforces its cap internally and surfaces a generic
+        // decode error.
+        let tiny = DecoderConfig::new().frame_size_limit(10_000);
+        for backend in [DecodeBackend::Rav1dSafe, DecodeBackend::AomRs] {
+            let err = zenavif::decode_av1_obu_yuv_with(&payload, backend, &tiny, &Unstoppable)
+                .expect_err("a 10k-px cap must reject a 12k-px frame");
+            if backend == DecodeBackend::AomRs {
+                let msg = err.to_string().to_lowercase();
+                assert!(
+                    msg.contains("limit"),
+                    "AomRs limit rejection should say so: {msg}"
+                );
+            }
+        }
+        // And the same config decodes fine with an adequate cap.
+        let roomy = DecoderConfig::new().frame_size_limit(1_000_000);
+        for backend in [DecodeBackend::Rav1dSafe, DecodeBackend::AomRs] {
+            zenavif::decode_av1_obu_yuv_with(&payload, backend, &roomy, &Unstoppable)
+                .unwrap_or_else(|e| panic!("{backend:?} under a roomy cap: {e}"));
+        }
+    }
+
+    #[test]
+    fn pre_fired_stop_cancels_on_every_backend() {
+        struct AlwaysStop;
+        impl enough::Stop for AlwaysStop {
+            fn check(&self) -> Result<(), enough::StopReason> {
+                Err(enough::StopReason::Cancelled)
+            }
+        }
+        let payload = small_payload();
+        for backend in [DecodeBackend::Rav1dSafe, DecodeBackend::AomRs] {
+            let err = zenavif::decode_av1_obu_yuv_with(
+                &payload,
+                backend,
+                &DecoderConfig::default(),
+                &AlwaysStop,
+            )
+            .expect_err("a pre-fired stop token must cancel the decode");
+            assert!(
+                err.to_string().to_lowercase().contains("cancel"),
+                "{backend:?}: expected a cancellation error, got: {err}"
+            );
+        }
+    }
+}

@@ -6,14 +6,14 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenavif.txt 333 lines (supported surface) | zenavif.features.txt 358 added (features: aom-backend,auto-tune,avx512,encode,encode-asm,encode-imazen,encode-mono,encode-svt-rs,encode-threading,target-quality,two-pass-butteraugli,unsafe-asm) | zenavif.internal.txt 216 lines (59 hidden + 271 excluded-feature)
+# files: zenavif.txt 334 lines (supported surface) | zenavif.features.txt 358 added (features: aom-backend,auto-tune,avx512,encode,encode-asm,encode-imazen,encode-mono,encode-svt-rs,encode-threading,target-quality,two-pass-butteraugli,unsafe-asm) | zenavif.internal.txt 216 lines (59 hidden + 271 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 3
 #   pub types (struct/enum/trait/alias)        32
 #   pub consts/statics                         43
-#   free functions                             12
+#   free functions                             13
 #   inherent methods                           40
 #   struct fields                             104
 #   enum variants                              51
@@ -23,11 +23,11 @@
 #   auto-trait exceptions                       6
 #
 # per-module pub lines:
-#   (root)                          233
+#   (root)                          234
 #   detect                           42
 #   heuristics                       22
 
-## items (296 lines)
+## items (297 lines)
 
 pub mod zenavif
 pub use CleanAperture
@@ -323,6 +323,7 @@ pub fn decode_animation(&[u8]) -> Result<DecodedAnimation>
 pub fn decode_animation_with(&[u8], &DecoderConfig, &impl enough::Stop + ?core::marker::Sized) -> Result<DecodedAnimation>
 pub fn decode_av1_obu(&[u8]) -> Result<(alloc::vec::Vec<u8>, u32, u32, u8)>
 pub fn decode_av1_obu_yuv(&[u8], DecodeBackend) -> Result<DecodedYuv>
+pub fn decode_av1_obu_yuv_with(&[u8], DecodeBackend, &DecoderConfig, &impl enough::Stop + ?core::marker::Sized) -> Result<DecodedYuv>
 pub fn decode_with(&[u8], &DecoderConfig, &impl enough::Stop + ?core::marker::Sized) -> Result<zenpixels::buffer::PixelBuffer>
 pub type Result<T, E> = core::result::Result<T, E>
 

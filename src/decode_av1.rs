@@ -488,11 +488,45 @@ pub enum DecodeBackend {
 /// backend. Both backends receive the IDENTICAL OBU bytes and produce the same
 /// [`DecodedYuv`] shape — this is the "one frontend, two backends" seam the
 /// decode benchmark drives (only the decode kernel differs).
+///
+/// Uses default limits and no cancellation; the config-carrying twin is
+/// [`decode_av1_obu_yuv_with`].
 pub fn decode_av1_obu_yuv(data: &[u8], backend: DecodeBackend) -> Result<DecodedYuv> {
+    decode_av1_obu_yuv_with(
+        data,
+        backend,
+        &crate::DecoderConfig::default(),
+        &enough::Unstoppable,
+    )
+}
+
+/// [`decode_av1_obu_yuv`] with resource limits and cancellation threaded
+/// through to the backend (backend-seam obligation 3: a capability the
+/// backend accepts must be consumed, not dropped at the seam).
+///
+/// What each backend receives:
+/// * **Rav1dSafe** — `config.frame_size_limit` via the managed
+///   `Settings::frame_size_limit` (header-rejected before frame allocation);
+///   `stop` is polled at the phase boundary (the managed single-frame call
+///   has no in-loop hook on this seam).
+/// * **AomRs** — the full upstream `DecodeConfig`: `frame_size_limit` as
+///   `DecodeLimits::max_pixels`, `stop` polled in-loop at SB-row/tile/frame
+///   cadence, and `config.alloc_pref` as the `AllocMode`
+///   (`CodecDefault`/`Fallible` → fallible pre-flight — untrusted-input
+///   default — `Infallible` → single fast allocation).
+/// * **Rav1dFfi** — nothing (legacy C seam accepts no config); `stop` is
+///   polled once before the call.
+pub fn decode_av1_obu_yuv_with(
+    data: &[u8],
+    backend: DecodeBackend,
+    config: &crate::DecoderConfig,
+    stop: &(impl enough::Stop + ?Sized),
+) -> Result<DecodedYuv> {
+    stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
     match backend {
-        DecodeBackend::Rav1dSafe => decode_av1_obu_yuv_rav1d(data),
+        DecodeBackend::Rav1dSafe => decode_av1_obu_yuv_rav1d_with(data, config),
         #[cfg(feature = "aom-backend")]
-        DecodeBackend::AomRs => decode_av1_obu_yuv_aomrs(data),
+        DecodeBackend::AomRs => decode_av1_obu_yuv_aomrs_with(data, config, stop),
         #[cfg(feature = "unsafe-asm")]
         DecodeBackend::Rav1dFfi => crate::decoder::decode_obu_yuv_ffi(data),
     }
@@ -501,7 +535,7 @@ pub fn decode_av1_obu_yuv(data: &[u8], backend: DecodeBackend) -> Result<Decoded
 /// rav1d-safe backend: managed decode, then copy the decoded planes into tight
 /// (unpadded) `u16` buffers (widening 8-bit samples) so the output matches the
 /// aom-rs backend's shape exactly.
-pub fn decode_av1_obu_yuv_rav1d(data: &[u8]) -> Result<DecodedYuv> {
+fn decode_av1_obu_yuv_rav1d_with(data: &[u8], config: &crate::DecoderConfig) -> Result<DecodedYuv> {
     if data.is_empty() {
         return Err(at!(Error::Decode {
             code: -1,
@@ -510,6 +544,9 @@ pub fn decode_av1_obu_yuv_rav1d(data: &[u8]) -> Result<DecodedYuv> {
     }
     let mut settings = Settings::default();
     settings.threads = 1;
+    // Same pre-allocation pixel cap the container decode path enforces
+    // (`DecoderConfig::frame_size_limit`; 0 = opt-out).
+    settings.frame_size_limit = config.frame_size_limit;
     let mut decoder = Rav1dDecoder::with_settings(settings).map_err(|_e| {
         at!(Error::Decode {
             code: -1,
@@ -599,9 +636,30 @@ pub fn decode_av1_obu_yuv_rav1d(data: &[u8]) -> Result<DecodedYuv> {
 /// `CategorizedError::category()` (backend-seam obligation 1 — no flattening
 /// to one opaque code).
 #[cfg(feature = "aom-backend")]
-pub fn decode_av1_obu_yuv_aomrs(data: &[u8]) -> Result<DecodedYuv> {
+#[cfg(feature = "aom-backend")]
+fn decode_av1_obu_yuv_aomrs_with(
+    data: &[u8],
+    config: &crate::DecoderConfig,
+    stop: &(impl enough::Stop + ?Sized),
+) -> Result<DecodedYuv> {
     use aom_decode::DecodeError as AomError;
-    let fd = aom_decode::frame::decode_frame_obus(data).map_err(|e| match e {
+    // Map zenavif's decode caps onto the upstream DecodeConfig: the pixel cap
+    // (0 = opt-out -> None = upstream's own 2^28 default), in-loop stop
+    // polling, and the allocation mode (CodecDefault/Fallible -> fallible
+    // pre-flight, the untrusted-input default; Infallible -> fast path).
+    let mut limits = aom_decode::DecodeLimits::new();
+    limits.max_pixels = (config.frame_size_limit > 0).then_some(u64::from(config.frame_size_limit));
+    let alloc = match config.alloc_pref {
+        crate::alloc_util::AllocPref::Infallible => aom_decode::AllocMode::Infallible,
+        _ => aom_decode::AllocMode::Fallible,
+    };
+    // `&stop` (not `stop`): `&S: Stop` for any `S: Stop + ?Sized`, and the
+    // sized reference coerces to the config's `&dyn Stop`.
+    let aom_config = aom_decode::DecodeConfig::new()
+        .with_limits(limits)
+        .with_stop(&stop)
+        .with_alloc(alloc);
+    let fd = aom_decode::frame::decode_frame_obus_with(data, &aom_config).map_err(|e| match e {
         AomError::Truncated(_) => at!(Error::Decode {
             code: -2,
             msg: "aom-rs: truncated AV1 OBU stream",

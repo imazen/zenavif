@@ -47,6 +47,13 @@ write-path returns + gain-map interop additions, already on main).
   the next 0.x minor bump (svtav1-rs backend PR)
 
 ### Added
+- `decode_av1_obu_yuv_with` — the raw-OBU decode seam gains a config-carrying
+  twin threading `DecoderConfig` + a stop token into the backends
+  (seam obligation 3): `frame_size_limit` reaches rav1d-safe's managed
+  `Settings` and aom-rs's `DecodeLimits::max_pixels`, the stop token is
+  polled in-loop by aom-rs (SB-row/tile/frame cadence), and `alloc_pref`
+  maps onto aom-rs's `AllocMode` (fallible pre-flight by default).
+  Liveness pinned by `tests/cross_backend_decode.rs::config_threading`.
 - Cross-backend validation + calibration (2026-07-22): every encode-backend
   bitstream is now cross-decoded on rav1d-safe AND zenav1-aom with plane
   byte-compare (`tests/cross_backend_decode.rs`, incl. 10-bit; 7018/7018

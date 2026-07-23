@@ -65,7 +65,7 @@ seam below is the raw-OBU comparison/benchmark surface (`aom-backend` /
 | Tiling | yes (multi tile-group) | multi-tile, but ONE tile-group OBU per frame | yes |
 | Threading | tile-parallel (frame delay pinned to 1) | single-threaded | full dav1d threading |
 | Annex-B / IVF framing | OBU TU (zenavif demuxes) | OBU TU only (TD tolerated/prepended at the seam) | OBU TU |
-| Limits / stop / alloc-mode | `DecoderConfig` caps; fallible alloc default | upstream `DecodeConfig` (limits/stop/`AllocMode`) exists — **seam does not thread it yet** (spec obligation 3) | none (legacy) |
+| Limits / stop / alloc-mode | `DecoderConfig` caps; fallible alloc default | threaded via `decode_av1_obu_yuv_with` (limits + in-loop stop + `AllocMode`) | none (legacy; stop polled pre-call only) |
 | Structured error mapping | yes (two-level `ErrorCategory`) | yes (variant-mapped at seam) | coarse |
 | Fuzz posture | fuzzed upstream (open recurred crashes 2026-07) | cargo-fuzz harness + 1<<28 px DoS bound upstream; NOT default-path trusted | not fuzz-safe (asm) |
 | Relative speed (this repo's cells) | 1× baseline | ~1.4× slower 8-bit, ~1.13× 10-bit | ~0.45–0.55× (i.e. ~2× faster) |
