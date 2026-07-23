@@ -336,29 +336,23 @@ rustdoc-args = ["--generate-link-to-definition"]
 name = "two_pass_cell"
 required-features = ["two-pass-butteraugli"]
 
-# Gain-map / HDR re-encode harnesses (auto-discovered before this entry
-# existed, which broke default-feature `cargo test` — they call encode APIs).
-[[example]]
-name = "gainmap_reencode"
-required-features = ["encode"]
-
-[[example]]
-name = "hdr_encode_cell"
-required-features = ["encode"]
-
-[[example]]
-name = "hdr_fidelity_probe"
-required-features = ["encode"]
-
-[[example]]
-name = "twelvebit_probe"
-required-features = ["encode"]
-
 # zenavif#30 futex-hang repro/stress loop (found the rav1d-safe tile-threading
 # CDEF/loop-filter guard race; kept as the product-path stress harness).
 [[example]]
 name = "hang_stress"
 required-features = ["two-pass-butteraugli"]
+
+[[example]]
+name = "yuv_kernel_bench"
+required-features = ["_dev"]
+
+[[example]]
+name = "encode_backend_sweep"
+required-features = ["encode"]
+
+[[example]]
+name = "decode_backend_bench"
+required-features = ["encode", "aom-backend"]
 
 [patch.crates-io]
 # Workspace member supplies zenavif-serialize 0.2.0 (set_gain_map_alt_icc) to
@@ -372,14 +366,3 @@ zenavif-serialize = { path = "zenavif-serialize" }
 # 0.5.x requirement. Return to a registry dep at the 0.6.0 release;
 # fuzz/Cargo.toml mirrors the same pin.)
 
-[[example]]
-name = "yuv_kernel_bench"
-required-features = ["_dev"]
-
-[[example]]
-name = "encode_backend_sweep"
-required-features = ["encode"]
-
-[[example]]
-name = "decode_backend_bench"
-required-features = ["encode", "aom-backend"]

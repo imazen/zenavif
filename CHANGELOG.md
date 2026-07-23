@@ -36,84 +36,6 @@ write-path returns + gain-map interop additions, already on main).
 
 ## [Unreleased]
 
-### Fixed
-- **Float YUV→RGB output is now byte-identical across arch, SIMD tier, and
-  image width.** The 4:2:0/4:2:2 float kernels computed three subtly
-  different pipelines: fused `mul_add` on x86-64-v3/NEON lanes, unfused
-  mul+add on the scalar tier (what i686 runs — its CI leg had been red on a
-  1-LSB green-channel mismatch since 2026-07-06) and on wasm128 (which has
-  no FMA at all), and division-normalized ties-away rounding in
-  `yuv_to_rgb` (the width-remainder path), so the same image could decode
-  to different bytes per platform or per width%8. All paths now compute
-  one spec — unfused multiply-add, reciprocal-multiply normalization,
-  ties-to-even rounding — which every tier can produce exactly. Rare
-  single-pixel ±1 shifts vs. the previous x86-64 fused output are the
-  cost of cross-platform determinism; the libavif bilinear-parity suites
-  (`test-pixels`, `test-linku`) should be re-run against references as
-  follow-up confirmation.
-  0.5.7 carries a tile-worker guard race whose panicked worker parks
-  `rav1d_decode_frame`'s completion wait forever (zenavif#30 — on a
-  28-thread box the animated codec roundtrip test hung ~3 of 4 runs). A
-  TEMP `[patch.crates-io]` git pin at the last 0.5.7-versioned rav1d-safe
-  rev (`f6aed27e`, carrying the upstream fix plus the #14 aarch64 16bpc
-  SGR rounding fix) replaces it; drop at the rav1d-safe release past
-  0.5.7. The pinned rev's managed API attaches `whereat::At` locations and
-  adds cooperative cancellation, so rav1d-safe decode errors now keep
-  their upstream trace frames (`At::map_error` at the boundary instead of
-  rewrapping) and `Error::Cancelled` maps rav1d-safe's own `Cancelled`.
-- **Default-feature `cargo test` compiles again**: four auto-discovered
-  examples that call `encode`-gated APIs (`gainmap_reencode`,
-  `hdr_encode_cell`, `hdr_fidelity_probe`, `twelvebit_probe`) had no
-  `[[example]]` declarations, breaking every platform's CI test job since
-  2026-07-12; they are now declared with `required-features = ["encode"]`.
-
-### Changed
-- **Reshape `ErrorCategory` onto zencodec's origin-first, two-level taxonomy
-  (zencodec PR #116, `caterr-reshape`), superseding the flat 17-variant shape
-  the PR #103 entry below describes.** New shape: `Image(ImageError) /
-  Request(RequestError) / Resource(ResourceError) / Policy(PolicyKind) /
-  Stopped(enough::StopReason) / Io(CodecIoKind) / Internal(InternalKind)`.
-  `error_from_rav1d` now classifies rav1d-safe's real cause instead of
-  discarding it: `InvalidData` → `Malformed`, `NeedMoreData` → `UnexpectedEof`,
-  `OutOfMemory` → the dedicated `OutOfMemory` variant; only the genuinely
-  opaque `InvalidSettings`/`InitFailed`/`Other` setup faults still construct
-  `Decode` (→ `Internal(Bug)`, not attributable to the input bitstream).
-  `Unsupported(&str)` split by origin across `cicp_resolve.rs` (image-feature),
-  `GainMapRender` mode (request), an internal grid invariant (internal), and
-  alpha-size mismatch (request-buffer) — previously one string conflating four
-  origins. `ErrorCategory::Lifecycle` (the original name in this reshape) was
-  further renamed to `Stopped` for the same `StopReason` payload — naming
-  only, done crate-wide across every zen codec in the same pass.
-  `tests/whereat_trace_preservation.rs`'s `av1_decode_error_preserves_trace`
-  updated to accept `Malformed` (the now-correct classification for a
-  corrupted AV1 payload) alongside `Decode`, preserving its real assertion
-  (non-empty trace across the `decoder_managed` boundary). Additive at the
-  type level (new `#[non_exhaustive]` enum shape); `ErrorCategory` itself is
-  still unreleased, so this is not a break of any published zencodec API.
-
-### Added
-- **Adopt the `zencodec` `CategorizedError` taxonomy (PR #103, final API).**
-  `Error` now `impl zencodec::CategorizedError` with
-  `codec_name() == Some("zenavif")` — a `&self` method (not an associated const,
-  so the trait stays dyn-compatible) — and an exhaustive `category()` mapping
-  every variant to one coarse `zencodec::ErrorCategory`, so consumers route on
-  the category (HTTP status, retry policy, logging) without naming the enum. The
-  `Parse` arm **delegates** to `zenavif_parse::Error`'s own `CategorizedError`
-  (zenavif-parse PR #17): a malformed container stays `MalformedImage`, a
-  truncated one `UnexpectedEof`, a parser cap `LimitsExceeded`. Other arms:
-  `Unsupported` → `UnsupportedImageFeature`; `ImageTooLarge` →
-  `LimitsExceeded(Pixels)`; `ResourceLimit` → `LimitsExceeded(Memory)` (the
-  `String` variant is a catch-all, so a representative kind is reported, with
-  the precise limit in `Display`); `OutOfMemory` → `OutOfMemory`;
-  `Cancelled(r)` → `r.category()`; `UnsupportedOperation(op)` → `op.category()`;
-  `Decode` / `ColorConversion` (foreign `yuv`) / `Encode` → `Internal`. `Decode`
-  is a grab-bag the decode pipeline reuses for decoder setup/flush faults and
-  internal invariant checks (e.g. "expected 8-bit planes") as well as some
-  malformed-input cases; with no structural signal to split it, the conservative
-  `Internal` is its best single category. Behind **temporary `[patch.crates-io]`
-  path pins** to the sibling `../zencodec` checkout (the taxonomy is
-  post-0.1.25, unreleased) and `../zenavif-parse` (0.7.0, unreleased) until both
-  publish. Additive (`#[non_exhaustive]` enum + opt-in trait).
 ### QUEUED BREAKING CHANGES
 - Remove `Error::ColorConversion(yuv::YuvError)` — the last public-API tie to
   the `yuv` crate. In-house kernels no longer construct it (they are
@@ -176,6 +98,29 @@ write-path returns + gain-map interop additions, already on main).
   parity gate lands with svtav1-rs decision-layer bitstream identity.
   (`src/encoder_svt_rs.rs`, `tests/svt_rs_backend.rs`)
 
+- **Adopt the `zencodec` `CategorizedError` taxonomy (PR #103, final API).**
+  `Error` now `impl zencodec::CategorizedError` with
+  `codec_name() == Some("zenavif")` — a `&self` method (not an associated const,
+  so the trait stays dyn-compatible) — and an exhaustive `category()` mapping
+  every variant to one coarse `zencodec::ErrorCategory`, so consumers route on
+  the category (HTTP status, retry policy, logging) without naming the enum. The
+  `Parse` arm **delegates** to `zenavif_parse::Error`'s own `CategorizedError`
+  (zenavif-parse PR #17): a malformed container stays `MalformedImage`, a
+  truncated one `UnexpectedEof`, a parser cap `LimitsExceeded`. Other arms:
+  `Unsupported` → `UnsupportedImageFeature`; `ImageTooLarge` →
+  `LimitsExceeded(Pixels)`; `ResourceLimit` → `LimitsExceeded(Memory)` (the
+  `String` variant is a catch-all, so a representative kind is reported, with
+  the precise limit in `Display`); `OutOfMemory` → `OutOfMemory`;
+  `Cancelled(r)` → `r.category()`; `UnsupportedOperation(op)` → `op.category()`;
+  `Decode` / `ColorConversion` (foreign `yuv`) / `Encode` → `Internal`. `Decode`
+  is a grab-bag the decode pipeline reuses for decoder setup/flush faults and
+  internal invariant checks (e.g. "expected 8-bit planes") as well as some
+  malformed-input cases; with no structural signal to split it, the conservative
+  `Internal` is its best single category. Behind **temporary `[patch.crates-io]`
+  path pins** to the sibling `../zencodec` checkout (the taxonomy is
+  post-0.1.25, unreleased) and `../zenavif-parse` (0.7.0, unreleased) until both
+  publish. Additive (`#[non_exhaustive]` enum + opt-in trait).
+
 ### Changed
 - Backend pins: zenav1-aom ed29932f -> 7b972e50 (structured `DecodeError`
   + `DecodeConfig`, bd8 lowbd perf pipeline), svtav1 wave2/entropy-c-parity
@@ -184,6 +129,29 @@ write-path returns + gain-map interop additions, already on main).
   variant onto the matching zenavif `Error` variant, the svt seam uses the
   fallible `try_encode_frame*` entries (no more `is_empty()` heuristic),
   and the caller's stop token is threaded into the svt pipelines.
+
+- **Reshape `ErrorCategory` onto zencodec's origin-first, two-level taxonomy
+  (zencodec PR #116, `caterr-reshape`), superseding the flat 17-variant shape
+  the PR #103 entry below describes.** New shape: `Image(ImageError) /
+  Request(RequestError) / Resource(ResourceError) / Policy(PolicyKind) /
+  Stopped(enough::StopReason) / Io(CodecIoKind) / Internal(InternalKind)`.
+  `error_from_rav1d` now classifies rav1d-safe's real cause instead of
+  discarding it: `InvalidData` → `Malformed`, `NeedMoreData` → `UnexpectedEof`,
+  `OutOfMemory` → the dedicated `OutOfMemory` variant; only the genuinely
+  opaque `InvalidSettings`/`InitFailed`/`Other` setup faults still construct
+  `Decode` (→ `Internal(Bug)`, not attributable to the input bitstream).
+  `Unsupported(&str)` split by origin across `cicp_resolve.rs` (image-feature),
+  `GainMapRender` mode (request), an internal grid invariant (internal), and
+  alpha-size mismatch (request-buffer) — previously one string conflating four
+  origins. `ErrorCategory::Lifecycle` (the original name in this reshape) was
+  further renamed to `Stopped` for the same `StopReason` payload — naming
+  only, done crate-wide across every zen codec in the same pass.
+  `tests/whereat_trace_preservation.rs`'s `av1_decode_error_preserves_trace`
+  updated to accept `Malformed` (the now-correct classification for a
+  corrupted AV1 payload) alongside `Decode`, preserving its real assertion
+  (non-empty trace across the `decoder_managed` boundary). Additive at the
+  type level (new `#[non_exhaustive]` enum shape); `ErrorCategory` itself is
+  still unreleased, so this is not a break of any published zencodec API.
 
 ### Fixed
 - svtav1-rs QP-0 corruption gate: quality >= ~99.3 mapped to QP 0, which
@@ -376,7 +344,41 @@ write-path returns + gain-map interop additions, already on main).
   fixes and zenravif GainMapData carriers, all landed on their mains)
   (302be267).
 
-### Fixed
+- **Float YUV→RGB output is now byte-identical across arch, SIMD tier, and
+  image width.** The 4:2:0/4:2:2 float kernels computed three subtly
+  different pipelines: fused `mul_add` on x86-64-v3/NEON lanes, unfused
+  mul+add on the scalar tier (what i686 runs — its CI leg had been red on a
+  1-LSB green-channel mismatch since 2026-07-06) and on wasm128 (which has
+  no FMA at all), and division-normalized ties-away rounding in
+  `yuv_to_rgb` (the width-remainder path), so the same image could decode
+  to different bytes per platform or per width%8. All paths now compute
+  one spec — unfused multiply-add, reciprocal-multiply normalization,
+  ties-to-even rounding — which every tier can produce exactly. Rare
+  single-pixel ±1 shifts vs. the previous x86-64 fused output are the
+  cost of cross-platform determinism; the libavif bilinear-parity suites
+  (`test-pixels`, `test-linku`) should be re-run against references as
+  follow-up confirmation. (Superseded for d<=12 decode by the fixed-point
+  recipe below — all real AV1 depths now use platform-exact integer
+  kernels; the one-spec f32 path survives only for 16-bit API entries,
+  as scalar `f32::mul_add`, which is correctly-rounded on every target.)
+- **rav1d-safe pinned to a git rev (now 398b0bfa, 0.6.0-staged) — registry
+  0.5.7 wedge.** Registry 0.5.7 carries a tile-worker guard race whose panicked worker parks
+  `rav1d_decode_frame`'s completion wait forever (zenavif#30 — on a
+  28-thread box the animated codec roundtrip test hung ~3 of 4 runs). The
+  dependency is now a direct git dep at `398b0bfa` (0.6.0-staged: the
+  wedge fix 49df1fc0, the #14 aarch64 16bpc SGR rounding fix, and the
+  current safe-SIMD state; the earlier f6aed27e `[patch.crates-io]` pin is
+  gone — a 0.6.0-versioned rev cannot patch a 0.5.x requirement). Return
+  to a registry dep at the 0.6.0 release. The pinned rev's managed API attaches `whereat::At` locations and
+  adds cooperative cancellation, so rav1d-safe decode errors now keep
+  their upstream trace frames (`At::map_error` at the boundary instead of
+  rewrapping) and `Error::Cancelled` maps rav1d-safe's own `Cancelled`.
+- **Default-feature `cargo test` compiles again**: four auto-discovered
+  examples that call `encode`-gated APIs (`gainmap_reencode`,
+  `hdr_encode_cell`, `hdr_fidelity_probe`, `twelvebit_probe`) had no
+  `[[example]]` declarations, breaking every platform's CI test job since
+  2026-07-12; they are now declared with `required-features = ["encode"]`.
+
 - **Vector/corpus tests no longer silently skip** (no-graceful-skips
   policy, c1533f48): libavif-vector loaders fail loud (CI provisions the
   vectors; locally `just download-vectors`), and the codec-corpus animation
