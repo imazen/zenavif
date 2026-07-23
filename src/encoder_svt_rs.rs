@@ -81,7 +81,8 @@ const MATRIX_COEFFICIENTS_BT601: u8 = 6;
 /// refusal instead of a possibly-corrupt bitstream or a panic).
 fn map_svt_encode_error(e: whereat::At<svtav1::types::EncodeError>) -> whereat::At<Error> {
     use svtav1::types::EncodeError as SvtError;
-    match e.into_inner() {
+    let (err, _trace) = e.decompose();
+    match err {
         SvtError::Cancelled(reason) => at!(Error::Cancelled(reason)),
         SvtError::AllocFailed { .. } => at!(Error::OutOfMemory),
         SvtError::InvalidDimensions {
@@ -102,13 +103,13 @@ fn map_svt_encode_error(e: whereat::At<svtav1::types::EncodeError>) -> whereat::
 ///
 /// QP 0 is OUTSIDE svtav1-rs's verified envelope: measured 2026-07-22
 /// (benchmarks/backend_sweep_2026-07-22.tsv), every QP-0 encode (quality
-/// >= ~99.3) produced a syntactically-valid bitstream that decodes to
-/// garbage pixels (ssim2 ~= -700; rav1d-safe and aom-rs byte-agree on the
-/// garbage, so the corruption is encoder-side), and one 64x64 cell rav1d
-/// rejected outright. QP 1 (quality <= 99) is clean. Until upstream fixes
-/// or gates QP 0 itself, quality 100 encodes at QP 1 — the best verified
-/// tier — instead of corrupting (zero-tolerance rule: never emit wrong
-/// pixels).
+/// of ~99.3 and up) produced a syntactically-valid bitstream that decodes
+/// to garbage pixels (ssim2 ~= -700; rav1d-safe and aom-rs byte-agree on
+/// the garbage, so the corruption is encoder-side), and one 64x64 cell
+/// rav1d rejected outright. QP 1 (quality <= 99) is clean. Until upstream
+/// fixes or gates QP 0 itself, quality 100 encodes at QP 1 — the best
+/// verified tier — instead of corrupting (zero-tolerance rule: never emit
+/// wrong pixels).
 fn quality_to_qp_gated(quality: f32) -> u8 {
     svtav1::avif::AvifEncoder::quality_to_qp_static(quality).max(1)
 }
@@ -225,6 +226,7 @@ fn reject_unaligned_dims(width: usize, height: usize) -> Result<()> {
 /// `plane` is `stride`-strided (`stride >= width`), `width`/`height` already
 /// 64-aligned. Returns the TD + sequence header + frame OBU payload. Used for
 /// grayscale color items and alpha auxiliary items (both are Cs400 streams).
+#[expect(clippy::too_many_arguments, reason = "internal plane-encode helper")]
 fn encode_mono_plane_svt(
     plane: &[u8],
     width: usize,
@@ -466,9 +468,7 @@ pub(crate) fn encode_rgba8_svt_rs(
     // ---- svtav1-rs still-frame encodes: color, then alpha ---------------
     stop.check().map_err(|e| at!(Error::from(e)))?;
     let qp = quality_to_qp_gated(config.quality);
-    let alpha_qp = quality_to_qp_gated(
-        crate::encoder::effective_alpha_quality(config),
-    );
+    let alpha_qp = quality_to_qp_gated(crate::encoder::effective_alpha_quality(config));
     let preset = speed_to_svt_preset(config.speed);
     let color_primaries = config.color_primaries.unwrap_or(DEFAULT_COLOR_PRIMARIES);
     let transfer_characteristics = config

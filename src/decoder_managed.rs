@@ -17,10 +17,6 @@ use crate::yuv_convert::{self, YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRang
 use enough::Stop;
 use rgb::{Rgb, Rgba};
 use whereat::at;
-// `.at()` is only called from the `zencodec`-gated strip glue below; an
-// unconditional import trips unused_imports on default-features builds.
-#[cfg(feature = "zencodec")]
-use whereat::ResultAtExt as _;
 use yuv::{YuvPlanarImage, YuvRange};
 use zenpixels::{PixelBuffer, PixelDescriptor};
 

@@ -192,8 +192,7 @@ fn roundtrip_vector(name: &str, base_16bit: bool) {
     );
 
     // (5) The re-encoded file decodes through zenavif with the map intact.
-    let mut dec2 =
-        ManagedAvifDecoder::new(&encoded.avif_file, &dcfg).expect("re-encoded file opens");
+    let dec2 = ManagedAvifDecoder::new(&encoded.avif_file, &dcfg).expect("re-encoded file opens");
     let info2 = dec2.probe_info().expect("re-encoded file probes");
     let gm2 = info2.gain_map.as_ref().expect("gain map after full cycle");
     assert_eq!(gm2.gain_map_data, gm.gain_map_data);

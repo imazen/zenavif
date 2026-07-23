@@ -270,8 +270,8 @@ fn main() {
     );
     // Human summary to stderr.
     eprintln!(
-        "\n{:<28} {:>9} {:>12} {:>12}   {}",
-        "cell", "decoder", "mean ms/fr", "Mpx/s(mean)", "aom÷rav1d"
+        "\n{:<28} {:>9} {:>12} {:>12}   aom/rav1d",
+        "cell", "decoder", "mean ms/fr", "Mpx/s(mean)"
     );
     for cell in &cells {
         let comp = result

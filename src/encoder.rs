@@ -289,15 +289,19 @@ pub struct EncoderConfig {
     pub(crate) override_encode_bottomup: Option<bool>,
     /// Override partition block-size range (min, max) in pixels
     #[cfg(feature = "encode-imazen")]
+    #[allow(dead_code)] // release-gated zenravif expert passthrough mirror (dep-bump wiring)
     pub(crate) override_partition_range: Option<(u8, u8)>,
     /// Override prediction modes (true = ComplexAll, false = Simple)
     #[cfg(feature = "encode-imazen")]
+    #[allow(dead_code)] // release-gated zenravif expert passthrough mirror (dep-bump wiring)
     pub(crate) override_complex_prediction_modes: Option<bool>,
     /// Override loop restoration filter on/off
     #[cfg(feature = "encode-imazen")]
+    #[allow(dead_code)] // release-gated zenravif expert passthrough mirror (dep-bump wiring)
     pub(crate) override_lrf: Option<bool>,
     /// Override fast vs full deblock filter search
     #[cfg(feature = "encode-imazen")]
+    #[allow(dead_code)] // release-gated zenravif expert passthrough mirror (dep-bump wiring)
     pub(crate) override_fast_deblock: Option<bool>,
     /// Override trellis quantization (Viterbi DP)
     #[cfg(feature = "encode-imazen")]

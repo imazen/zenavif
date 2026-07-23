@@ -6,28 +6,28 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenavif.txt 263 lines (supported surface) | zenavif.features.txt 259 added (features: auto-tune,encode,encode-asm,encode-imazen,encode-threading,unsafe-asm,zencodec) | zenavif.internal.txt 193 lines (45 hidden + 263 excluded-feature)
+# files: zenavif.txt 333 lines (supported surface) | zenavif.features.txt 358 added (features: aom-backend,auto-tune,avx512,encode,encode-asm,encode-imazen,encode-mono,encode-svt-rs,encode-threading,target-quality,two-pass-butteraugli,unsafe-asm) | zenavif.internal.txt 216 lines (59 hidden + 271 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 3
-#   pub types (struct/enum/trait/alias)        25
+#   pub types (struct/enum/trait/alias)        32
 #   pub consts/statics                         43
-#   free functions                              8
-#   inherent methods                           19
-#   struct fields                              86
-#   enum variants                              42
+#   free functions                             12
+#   inherent methods                           40
+#   struct fields                             104
+#   enum variants                              51
 #   re-exports                                 12
-#   trait roster entries (type × trait)        83
-#   auto-trait-complete types                  21
-#   auto-trait exceptions                       3
+#   trait roster entries (type × trait)       104
+#   auto-trait-complete types                  25
+#   auto-trait exceptions                       6
 #
 # per-module pub lines:
-#   (root)                          184
+#   (root)                          233
 #   detect                           42
-#   heuristics                       12
+#   heuristics                       22
 
-## items (237 lines)
+## items (296 lines)
 
 pub mod zenavif
 pub use CleanAperture
@@ -95,8 +95,18 @@ pub heuristics::EncodeEstimate::peak_memory_bytes: u64
 pub heuristics::EncodeEstimate::peak_memory_bytes_max: u64
 pub heuristics::EncodeEstimate::peak_memory_bytes_min: u64
 pub heuristics::EncodeEstimate::time_ms: f32
+#[non_exhaustive] pub struct heuristics::ThreadingInfo
+pub heuristics::ThreadingInfo::max_useful_threads: u32
+pub heuristics::ThreadingInfo::mem_bytes_per_thread: u64
+pub heuristics::ThreadingInfo::parallel: bool
+pub heuristics::ThreadingInfo::parallel_fraction: f32
+pub fn heuristics::ThreadingInfo::effective_threads(&self, usize) -> u64
+pub fn heuristics::ThreadingInfo::speedup(&self, usize) -> f32
+pub fn heuristics::decode_threading_info(u64) -> heuristics::ThreadingInfo
+pub fn heuristics::encode_threading_info(u64) -> heuristics::ThreadingInfo
 pub fn heuristics::estimate_decode(u32, u32, u8) -> core::option::Option<heuristics::DecodeEstimate>
 pub fn heuristics::estimate_encode(u32, u32, u8, u8) -> core::option::Option<heuristics::EncodeEstimate>
+pub fn heuristics::estimate_encode_threaded(u32, u32, u8, u8, usize) -> core::option::Option<heuristics::EncodeEstimate>
 pub enum ChromaSampling [also: detect]
 pub ChromaSampling::Cs420
 pub ChromaSampling::Cs422
@@ -105,6 +115,8 @@ pub ChromaSampling::Monochrome
 pub enum ColorRange
 pub ColorRange::Full
 pub ColorRange::Limited
+pub enum DecodeBackend
+pub DecodeBackend::Rav1dSafe
 #[non_exhaustive] pub enum Error
 pub Error::Cancelled(enough::reason::StopReason)
 pub Error::ColorConversion(yuv::yuv_error::YuvError)
@@ -115,10 +127,17 @@ pub Error::Encode(alloc::string::String)
 pub Error::ImageTooLarge
 pub Error::ImageTooLarge::height: u32
 pub Error::ImageTooLarge::width: u32
+pub Error::InvalidBuffer(alloc::string::String)
+pub Error::InvalidParameters(alloc::string::String)
+pub Error::InvalidState(alloc::string::String)
+pub Error::Io(alloc::string::String)
+pub Error::Malformed(&'static str)
 pub Error::OutOfMemory
 pub Error::Parse(zenavif_parse::Error)
 pub Error::ResourceLimit(alloc::string::String)
+pub Error::UnexpectedEof(&'static str)
 pub Error::Unsupported(&'static str)
+pub Error::UnsupportedOperation(zencodec::capabilities::UnsupportedOperation)
 #[non_exhaustive] pub enum ValidationError
 pub ValidationError::AlphaQualityOutOfRange
 pub ValidationError::AlphaQualityOutOfRange::valid: core::ops::range::RangeInclusive<f32>
@@ -126,6 +145,10 @@ pub ValidationError::AlphaQualityOutOfRange::value: f32
 pub ValidationError::BackendUnavailable
 pub ValidationError::BackendUnavailable::backend: &'static str
 pub ValidationError::BackendUnavailable::feature: &'static str
+pub ValidationError::BackendUnsupportedParam
+pub ValidationError::BackendUnsupportedParam::backend: &'static str
+pub ValidationError::BackendUnsupportedParam::detail: &'static str
+pub ValidationError::BackendUnsupportedParam::param: &'static str
 pub ValidationError::CicpReserved
 pub ValidationError::CicpReserved::field: &'static str
 pub ValidationError::CicpReserved::value: u8
@@ -160,12 +183,33 @@ pub fn AnimationDecoder::info(&self) -> &DecodedAnimationInfo
 pub fn AnimationDecoder::new(&[u8], &DecoderConfig) -> Result<Self>
 pub fn AnimationDecoder::next_frame(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<core::option::Option<DecodedFrame>>
 pub fn AnimationDecoder::remaining_frames(&self) -> usize
+pub struct AvifAnimationFrameDecoder
+pub struct AvifDecodeJob
+pub fn AvifDecodeJob::with_extract_gain_map(self, bool) -> Self
+pub struct AvifDecoderConfig
+pub fn AvifDecoderConfig::decode(&self, &[u8]) -> core::result::Result<zencodec::output::DecodeOutput, whereat::at::At<zencodec::error::CodecError>>
+pub fn AvifDecoderConfig::decode_into_gray_f32(&self, &[u8], imgref::ImgRefMut<'_, rgb::formats::gray::Gray_v08<f32>>) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<zencodec::error::CodecError>>
+pub fn AvifDecoderConfig::decode_into_rgb8(&self, &[u8], imgref::ImgRefMut<'_, rgb::formats::rgb::Rgb<u8>>) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<zencodec::error::CodecError>>
+pub fn AvifDecoderConfig::decode_into_rgb_f32(&self, &[u8], imgref::ImgRefMut<'_, rgb::formats::rgb::Rgb<f32>>) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<zencodec::error::CodecError>>
+pub fn AvifDecoderConfig::decode_into_rgba8(&self, &[u8], imgref::ImgRefMut<'_, rgb::formats::rgba::Rgba<u8>>) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<zencodec::error::CodecError>>
+pub fn AvifDecoderConfig::decode_into_rgba_f32(&self, &[u8], imgref::ImgRefMut<'_, rgb::formats::rgba::Rgba<f32>>) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<zencodec::error::CodecError>>
+pub fn AvifDecoderConfig::inner(&self) -> &DecoderConfig
+pub fn AvifDecoderConfig::inner_mut(&mut self) -> &mut DecoderConfig
+pub fn AvifDecoderConfig::new() -> Self
+pub fn AvifDecoderConfig::probe_full(&self, &[u8]) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<zencodec::error::CodecError>>
+pub fn AvifDecoderConfig::probe_header(&self, &[u8]) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<zencodec::error::CodecError>>
+pub fn AvifDecoderConfig::with_extract_gain_map(self, bool) -> Self
+pub fn AvifDecoderConfig::with_film_grain(self, bool) -> Self
+pub fn AvifDecoderConfig::with_limits(self, zencodec::limits::ResourceLimits) -> Self
+pub fn AvifDecoderConfig::with_orientation(self, zencodec::orientation::OrientationHint) -> Self
+pub fn AvifDecoderConfig::with_threads(self, u32) -> Self
 pub struct AvifDepthMap
 pub AvifDepthMap::data: alloc::vec::Vec<u8>
 pub struct AvifGainMap
 pub AvifGainMap::alt_color_info: core::option::Option<zenavif_parse::ColorInformation>
 pub AvifGainMap::gain_map_data: alloc::vec::Vec<u8>
 pub AvifGainMap::metadata: zenavif_parse::GainMapMetadata
+pub struct AvifZenDecoder<'a>
 pub struct ColorPrimaries(pub u8)
 pub const ColorPrimaries::BT2020: Self
 pub const ColorPrimaries::BT470BG: Self
@@ -190,6 +234,19 @@ pub DecodedAnimationInfo::timescale: u32
 pub struct DecodedFrame
 pub DecodedFrame::duration_ms: u32
 pub DecodedFrame::pixels: zenpixels::buffer::PixelBuffer
+pub struct DecodedYuv
+pub DecodedYuv::bit_depth: i32
+pub DecodedYuv::height: usize
+pub DecodedYuv::height_uv: usize
+pub DecodedYuv::monochrome: bool
+pub DecodedYuv::subsampling_x: usize
+pub DecodedYuv::subsampling_y: usize
+pub DecodedYuv::u: alloc::vec::Vec<u16>
+pub DecodedYuv::v: alloc::vec::Vec<u16>
+pub DecodedYuv::width: usize
+pub DecodedYuv::width_uv: usize
+pub DecodedYuv::y: alloc::vec::Vec<u16>
+pub fn DecodedYuv::luma_pixels(&self) -> usize
 pub struct DecoderConfig
 pub fn DecoderConfig::apply_grain(self, bool) -> Self
 pub fn DecoderConfig::cpu_flags_mask(self, u32) -> Self
@@ -225,6 +282,7 @@ pub struct ManagedAvifDecoder
 pub fn ManagedAvifDecoder::decode(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<zenpixels::buffer::PixelBuffer>
 pub fn ManagedAvifDecoder::decode_animation(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<DecodedAnimation>
 pub fn ManagedAvifDecoder::decode_full(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<(zenpixels::buffer::PixelBuffer, ImageInfo)>
+pub fn ManagedAvifDecoder::decode_to_sink(&mut self, &impl enough::Stop + ?core::marker::Sized, &mut dyn zencodec::sink::DecodeRowSink) -> Result<ImageInfo>
 pub fn ManagedAvifDecoder::new(&[u8], &DecoderConfig) -> Result<Self>
 pub fn ManagedAvifDecoder::probe_info(&self) -> Result<ImageInfo>
 pub struct MatrixCoefficients(pub u8)
@@ -264,26 +322,33 @@ pub fn decode(&[u8]) -> Result<zenpixels::buffer::PixelBuffer>
 pub fn decode_animation(&[u8]) -> Result<DecodedAnimation>
 pub fn decode_animation_with(&[u8], &DecoderConfig, &impl enough::Stop + ?core::marker::Sized) -> Result<DecodedAnimation>
 pub fn decode_av1_obu(&[u8]) -> Result<(alloc::vec::Vec<u8>, u32, u32, u8)>
+pub fn decode_av1_obu_yuv(&[u8], DecodeBackend) -> Result<DecodedYuv>
 pub fn decode_with(&[u8], &DecoderConfig, &impl enough::Stop + ?core::marker::Sized) -> Result<zenpixels::buffer::PixelBuffer>
 pub type Result<T, E> = core::result::Result<T, E>
 
-## trait impls (22 types)
+## trait impls (30 types)
 
+AvifAnimationFrameDecoder: zencodec::traits::decoder::AnimationFrameDecoder
+AvifDecodeJob: zencodec::traits::decoding::DecodeJob<'a>
+AvifDecoderConfig: Clone, Debug, Default, zencodec::traits::decoding::DecoderConfig
 AvifDepthMap: Clone, Debug
 AvifGainMap: Clone, Debug
+AvifZenDecoder<'_>: zencodec::traits::decoder::Decode
 ChromaSampling: Clone, Copy, Debug, Eq, PartialEq
 ColorPrimaries: Clone, Copy, Debug, Default, Eq, PartialEq
 ColorRange: Clone, Copy, Debug, Default, Eq, PartialEq
+DecodeBackend: Clone, Copy, Debug, Eq, PartialEq
 DecodedAnimation: Debug
 DecodedAnimationInfo: Clone, Debug
 DecodedFrame: Debug
+DecodedYuv: Clone, Debug
 DecoderConfig: Clone, Debug, Default
-Error: Debug, Display, Error, From<enough::reason::StopReason>, From<yuv::yuv_error::YuvError>, From<zenavif_parse::Error>
+Error: Debug, Display, Error, From<enough::reason::StopReason>, From<yuv::yuv_error::YuvError>, From<zenavif_parse::Error>, From<zencodec::capabilities::UnsupportedOperation>, zencodec::error::CategorizedError
 ImageInfo: Clone, Debug, Default
 MatrixCoefficients: Clone, Copy, Debug, Default, Eq, PartialEq
 TransferCharacteristics: Clone, Copy, Debug, Default, Eq, PartialEq
 ValidationError: Clone, Debug, Display, Error
-detect::AvifProbe: Clone, Debug
+detect::AvifProbe: Clone, Debug, zencodec::detect::SourceEncodingDetails
 detect::ChromaSampling: Clone, Copy, Debug, Eq, PartialEq
 detect::Confidence: Clone, Copy, Debug, Eq, PartialEq
 detect::ProbeError: Clone, Debug, Display, Eq, Error, PartialEq
@@ -291,10 +356,15 @@ detect::QualityEstimate: Clone, Debug
 detect::Recommendation: Clone, Debug, Eq, PartialEq
 heuristics::DecodeEstimate: Clone, Copy, Debug
 heuristics::EncodeEstimate: Clone, Copy, Debug
+heuristics::ThreadingInfo: Clone, Copy, Debug
+whereat::at::At<zencodec::error::CodecError>: From<Error>
 
 ## auto traits
 
-21 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+25 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 AnimationDecoder: !RefUnwindSafe !UnwindSafe
+AvifAnimationFrameDecoder: !RefUnwindSafe !UnwindSafe
+AvifDecodeJob: !RefUnwindSafe !UnwindSafe
+AvifZenDecoder<'a>: !RefUnwindSafe !UnwindSafe
 Error: !RefUnwindSafe !UnwindSafe
 ManagedAvifDecoder: !RefUnwindSafe !UnwindSafe

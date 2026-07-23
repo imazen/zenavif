@@ -11,26 +11,29 @@
 #
 #   pub modules                                 8
 #   pub types (struct/enum/trait/alias)        11
-#   free functions                             22
-#   inherent methods                           65
-#   struct fields                              28
-#   enum variants                              27
-#   trait roster entries (type × trait)        58
+#   free functions                             28
+#   inherent methods                           70
+#   struct fields                              30
+#   enum variants                              28
+#   trait roster entries (type × trait)        66
 #   auto-trait-complete types                  11
 #
 # per-module pub lines:
-#   (root)                           23
+#   (root)                           24
 #   detect                            4
 #   expert                            9
+#   fast_heads                        3
+#   palette_gate                      1
 #   simd                              3
 #   sweep                            84
-#   yuv_convert                      32
+#   two_pass                          1
+#   yuv_convert                      40
 #   yuv_convert_fast                  1
 #   yuv_convert_libyuv                3
 #   yuv_convert_libyuv_autovec        1
 #   yuv_convert_libyuv_simd           1
 
-## items (161 lines)
+## items (175 lines)
 
 #[non_exhaustive] pub enum sweep::KnobProbe
 #[non_exhaustive] pub struct expert::InternalParams
@@ -42,6 +45,7 @@ pub fn Av1Backend::assert_fields_are_eq(&self)
 pub fn ChromaSampling::assert_fields_are_eq(&self)
 pub fn ColorPrimaries::assert_fields_are_eq(&self)
 pub fn ColorRange::assert_fields_are_eq(&self)
+pub fn DecodeBackend::assert_fields_are_eq(&self)
 pub fn EncodeAlphaMode::assert_fields_are_eq(&self)
 pub fn EncodeBitDepth::assert_fields_are_eq(&self)
 pub fn EncodeChromaSubsampling::assert_fields_are_eq(&self)
@@ -61,6 +65,10 @@ pub fn expert::InternalParams::clone(&self) -> expert::InternalParams
 pub fn expert::InternalParams::default() -> expert::InternalParams
 pub fn expert::InternalParams::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn expert::InternalParams::validate(&self) -> core::result::Result<(), ValidationError>
+pub fn fast_heads::FastTierBudgets::assert_fields_are_eq(&self)
+pub fn fast_heads::PartitionBudget::assert_fields_are_eq(&self)
+pub fn fast_heads::TxBudget::assert_fields_are_eq(&self)
+pub fn palette_gate::PalettePreference::assert_fields_are_eq(&self)
 pub fn simd::avg_8bpc(&mut [u8], usize, &[i16], &[i16], usize, usize)
 pub fn simd::avg_8bpc_avx2(archmage::tokens::generated::x86::Desktop64, &mut [u8], usize, &[i16], &[i16], usize, usize)
 pub fn simd::avg_8bpc_scalar(&mut [u8], usize, &[i16], &[i16], usize, usize)
@@ -98,11 +106,11 @@ pub fn sweep::compute_tier(&EncoderConfig) -> u8
 pub fn sweep::config_from_cell_id(&str, f32) -> core::result::Result<EncoderConfig, alloc::string::String>
 pub fn sweep::feature_columns() -> &'static [&'static str]
 pub fn sweep::fingerprint(&EncoderConfig) -> u64
+pub fn two_pass::TwoPassMetric::assert_fields_are_eq(&self)
 pub fn yuv_convert::ChromaSubsampling::assert_fields_are_eq(&self)
 pub fn yuv_convert::ChromaSubsampling::clone(&self) -> yuv_convert::ChromaSubsampling
 pub fn yuv_convert::ChromaSubsampling::eq(&self, &yuv_convert::ChromaSubsampling) -> bool
 pub fn yuv_convert::ChromaSubsampling::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub fn yuv_convert::YuvMatrix::assert_fields_are_eq(&self)
 pub fn yuv_convert::YuvMatrix::clone(&self) -> yuv_convert::YuvMatrix
 pub fn yuv_convert::YuvMatrix::eq(&self, &yuv_convert::YuvMatrix) -> bool
 pub fn yuv_convert::YuvMatrix::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -110,14 +118,20 @@ pub fn yuv_convert::YuvRange::assert_fields_are_eq(&self)
 pub fn yuv_convert::YuvRange::clone(&self) -> yuv_convert::YuvRange
 pub fn yuv_convert::YuvRange::eq(&self, &yuv_convert::YuvRange) -> bool
 pub fn yuv_convert::YuvRange::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn yuv_convert::yuv420_to_rgb16_strip(&[u16], usize, &[u16], usize, &[u16], usize, usize, usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix, u8, &mut [rgb::formats::rgb::Rgb<u16>])
 pub fn yuv_convert::yuv420_to_rgb8(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix) -> imgref::ImgVec<rgb::RGB8>
 pub fn yuv_convert::yuv420_to_rgb8_strip(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix, &mut [rgb::RGB8])
+pub fn yuv_convert::yuv420_to_rgba16_strip(&[u16], usize, &[u16], usize, &[u16], usize, usize, usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix, u8, &mut [rgb::formats::rgba::Rgba<u16>])
 pub fn yuv_convert::yuv420_to_rgba8_strip(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix, &mut [rgb::formats::rgba::Rgba<u8>])
+pub fn yuv_convert::yuv422_to_rgb16_strip(&[u16], usize, &[u16], usize, &[u16], usize, usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix, u8, &mut [rgb::formats::rgb::Rgb<u16>])
 pub fn yuv_convert::yuv422_to_rgb8(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix) -> imgref::ImgVec<rgb::RGB8>
 pub fn yuv_convert::yuv422_to_rgb8_strip(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix, &mut [rgb::RGB8])
+pub fn yuv_convert::yuv422_to_rgba16_strip(&[u16], usize, &[u16], usize, &[u16], usize, usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix, u8, &mut [rgb::formats::rgba::Rgba<u16>])
 pub fn yuv_convert::yuv422_to_rgba8_strip(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix, &mut [rgb::formats::rgba::Rgba<u8>])
+pub fn yuv_convert::yuv444_to_rgb16_strip(&[u16], usize, &[u16], usize, &[u16], usize, usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix, u8, &mut [rgb::formats::rgb::Rgb<u16>])
 pub fn yuv_convert::yuv444_to_rgb8(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix) -> imgref::ImgVec<rgb::RGB8>
 pub fn yuv_convert::yuv444_to_rgb8_strip(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix, &mut [rgb::RGB8])
+pub fn yuv_convert::yuv444_to_rgba16_strip(&[u16], usize, &[u16], usize, &[u16], usize, usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix, u8, &mut [rgb::formats::rgba::Rgba<u16>])
 pub fn yuv_convert::yuv444_to_rgba8_strip(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix, &mut [rgb::formats::rgba::Rgba<u8>])
 pub fn yuv_convert_fast::yuv420_to_rgb8_fast(archmage::tokens::generated::x86::Desktop64, &[u8], usize, &[u8], usize, &[u8], usize, usize, usize) -> imgref::ImgVec<rgb::RGB8>
 pub fn yuv_convert_libyuv::yuv420_to_rgb8(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix) -> core::option::Option<imgref::ImgVec<rgb::RGB8>>
@@ -191,15 +205,19 @@ pub yuv_convert::ChromaSubsampling::Cs444
 pub yuv_convert::YuvMatrix::Bt2020
 pub yuv_convert::YuvMatrix::Bt601
 pub yuv_convert::YuvMatrix::Bt709
+pub yuv_convert::YuvMatrix::Custom
+pub yuv_convert::YuvMatrix::Custom::kb: f32
+pub yuv_convert::YuvMatrix::Custom::kr: f32
 pub yuv_convert::YuvRange::Full
 pub yuv_convert::YuvRange::Limited
 
-## trait impls (31 types)
+## trait impls (40 types)
 
 Av1Backend: TrivialClone
 ChromaSampling: TrivialClone
 ColorPrimaries: TrivialClone
 ColorRange: TrivialClone
+DecodeBackend: TrivialClone
 EncodeAlphaMode: TrivialClone
 EncodeBitDepth: TrivialClone
 EncodeChromaSubsampling: TrivialClone
@@ -210,13 +228,20 @@ MatrixCoefficients: TrivialClone
 PlanInput: TrivialClone
 QualityTarget: TrivialClone
 SpeedDerived: TrivialClone
+TargetMetric: TrivialClone
+TargetOptions: TrivialClone
 TilesResolution: TrivialClone
 TransferCharacteristics: TrivialClone
 detect::ChromaSampling: TrivialClone
 detect::Confidence: TrivialClone
 expert::InternalParams: Clone, Debug, Default
+fast_heads::FastTierBudgets: TrivialClone
+fast_heads::PartitionBudget: TrivialClone
+fast_heads::TxBudget: TrivialClone
 heuristics::DecodeEstimate: TrivialClone
 heuristics::EncodeEstimate: TrivialClone
+heuristics::ThreadingInfo: TrivialClone
+palette_gate::PalettePreference: TrivialClone
 sweep::DroppedAxis: Clone, Debug
 sweep::KnobProbe: Clone, Copy, Debug, PartialEq, TrivialClone
 sweep::QualityGrid: Clone, Debug
@@ -224,8 +249,9 @@ sweep::SweepAxes: Clone, Debug
 sweep::SweepBuilder: Clone, Debug
 sweep::SweepCell: Clone, Debug
 sweep::SweepPlan: Clone, Debug
+two_pass::TwoPassMetric: TrivialClone
 yuv_convert::ChromaSubsampling: Clone, Copy, Debug, Eq, PartialEq, TrivialClone
-yuv_convert::YuvMatrix: Clone, Copy, Debug, Eq, PartialEq, TrivialClone
+yuv_convert::YuvMatrix: Clone, Copy, Debug, PartialEq, TrivialClone
 yuv_convert::YuvRange: Clone, Copy, Debug, Eq, PartialEq, TrivialClone
 
 ## auto traits

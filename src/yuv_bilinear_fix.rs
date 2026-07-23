@@ -28,6 +28,7 @@ use yuv::{YuvError, YuvPlanarImage};
 /// * `channels` — output components per pixel (3 for RGB, 4 for RGBA).
 /// * `f` — the underlying converter, e.g.
 ///   `|p, o, s| yuv::yuv420_to_rgba_bilinear(p, o, s, range, matrix)`.
+#[cfg_attr(not(feature = "unsafe-asm"), allow(dead_code))]
 pub(crate) fn yuv420_bilinear_complete<T: Copy + Default + core::fmt::Debug>(
     planar: &YuvPlanarImage<'_, T>,
     out: &mut [T],

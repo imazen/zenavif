@@ -1584,8 +1584,7 @@ fn rgbx_to_yuv420_kernel<P: ForwardPixel>(
                 let yl = c.kb.mul_add(bn, c.kr.mul_add(rn, c.kg * gn));
                 y_out[x] = yl
                     .mul_add(c.y_span, c.y_off)
-                    .max(0.0)
-                    .min(255.0)
+                    .clamp(0.0, 255.0)
                     .round_ties_even() as u8;
                 u_row[x] = (bn - yl) * c.inv_ub;
                 v_row[x] = (rn - yl) * c.inv_vr;
@@ -1601,13 +1600,11 @@ fn rgbx_to_yuv420_kernel<P: ForwardPixel>(
             let va = 0.25 * (v_rows[x0] + v_rows[x1] + v_rows[width + x0] + v_rows[width + x1]);
             u_out[k] = ua
                 .mul_add(c.uv_span, 128.0)
-                .max(0.0)
-                .min(255.0)
+                .clamp(0.0, 255.0)
                 .round_ties_even() as u8;
             v_out[k] = va
                 .mul_add(c.uv_span, 128.0)
-                .max(0.0)
-                .min(255.0)
+                .clamp(0.0, 255.0)
                 .round_ties_even() as u8;
         }
     }
@@ -2320,13 +2317,11 @@ mod tests {
                     let va = 0.25 * (vs[0] + vs[1] + vs[2] + vs[3]);
                     let uref = ua
                         .mul_add(c.uv_span, 128.0)
-                        .max(0.0)
-                        .min(255.0)
+                        .clamp(0.0, 255.0)
                         .round_ties_even() as u8;
                     let vref = va
                         .mul_add(c.uv_span, 128.0)
-                        .max(0.0)
-                        .min(255.0)
+                        .clamp(0.0, 255.0)
                         .round_ties_even() as u8;
                     assert_eq!(up[cy * cw + k], uref, "{range:?} U site ({k},{cy})");
                     assert_eq!(vp[cy * cw + k], vref, "{range:?} V site ({k},{cy})");

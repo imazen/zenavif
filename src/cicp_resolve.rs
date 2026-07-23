@@ -69,21 +69,6 @@ pub(crate) enum ResolvedMatrix {
 }
 
 impl ResolvedMatrix {
-    /// Map to the `yuv` crate's matrix (16-bit / fallback paths).
-    /// `None` = identity (caller takes the reorder path).
-    pub(crate) fn to_yuv_std(self) -> Option<yuv::YuvStandardMatrix> {
-        use yuv::YuvStandardMatrix as M;
-        match self {
-            Self::Identity => None,
-            Self::Bt709 => Some(M::Bt709),
-            Self::Bt601 => Some(M::Bt601),
-            Self::Fcc => Some(M::Fcc),
-            Self::Bt2020Ncl => Some(M::Bt2020),
-            Self::Smpte240 => Some(M::Smpte240),
-            Self::Derived { kr, kb } => Some(M::Custom(kr, kb)),
-        }
-    }
-
     /// Map to the in-house kernel matrix. `None` = identity only (which
     /// has no matrix math); every real matrix — including FCC, SMPTE 240M
     /// and chromaticity-derived — maps, via explicit (Kr, Kb) where no
