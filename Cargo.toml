@@ -65,7 +65,7 @@ ravif = { package = "zenravif", version = "0.2.0", path = "../ravif/ravif", defa
 # `try_encode_frame*` -> EncodeResult entry points the seam now uses.
 # (The facade crate was renamed `svtav1` -> `zenav1-svt` upstream; the
 # `svtav1` alias keeps the seam's paths stable.)
-svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/svtav1", rev = "3e25f52b59ae2a4606048470697e2084c3d82bc8", optional = true }
+svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "06d8ee5953adb760fce90ebbd6d67444cd28ef11", optional = true }
 # AVIF container muxer for the svtav1-rs backend (the zenravif backend muxes
 # inside zenravif; this backend muxes in-crate). The 0.2.0 version is
 # supplied by the [patch.crates-io] git pin below until 0.2.0 publishes.
