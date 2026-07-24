@@ -1982,7 +1982,7 @@ source = "git+https://github.com/imazen/zenanalyze?rev=47b4d0f5f1abfff45a152e9a9
 [[package]]
 name = "zenav1-aom-decode"
 version = "0.0.1"
-source = "git+https://github.com/imazen/zenav1-aom?rev=a06bce15d52afe5e054c6bbcd0bf116a37c92748#a06bce15d52afe5e054c6bbcd0bf116a37c92748"
+source = "git+https://github.com/imazen/zenav1-aom?rev=743bb5f430cbb933effcff7e14afb8386f9f6b2f#743bb5f430cbb933effcff7e14afb8386f9f6b2f"
 dependencies = [
  "enough",
  "zenav1-aom-dsp",
@@ -1991,7 +1991,7 @@ dependencies = [
 [[package]]
 name = "zenav1-aom-dsp"
 version = "0.0.1"
-source = "git+https://github.com/imazen/zenav1-aom?rev=a06bce15d52afe5e054c6bbcd0bf116a37c92748#a06bce15d52afe5e054c6bbcd0bf116a37c92748"
+source = "git+https://github.com/imazen/zenav1-aom?rev=743bb5f430cbb933effcff7e14afb8386f9f6b2f#743bb5f430cbb933effcff7e14afb8386f9f6b2f"
 dependencies = [
  "archmage",
  "magetypes",
