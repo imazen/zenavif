@@ -193,7 +193,7 @@ History: every CQP QP-0 still encode on rev 3e25f52b emitted a valid-syntax
 bitstream decoding to garbage pixels (ssim2 ~ -700; rav1d-safe and zenav1-aom
 byte-agreed on the garbage => encoder-side; 115/115 sweep cells, boundary
 clean at QP 1), plus one 64x64 stream rav1d rejected. Upstream `f0f0a70ca`
-(in the current pin bcd182ec3) now REJECTS base_qindex 0 with a typed
+(carried into the current pin 2d585bb2b) now REJECTS base_qindex 0 with a typed
 `EncodeError::UnsupportedConfig` from `try_encode_frame*` — corruption is no
 longer reachable. The seam KEEPS the QP >= 1 clamp (`quality_to_qp_gated` in
 `src/encoder_svt_rs.rs`) for a different reason: quality 100 maps linearly to
@@ -202,12 +202,13 @@ QP 0 and must ENCODE (at QP 1), not error. Tests:
 `svt_rs_direct_qp0_rejected_typed` (upstream-gate side, drives the pipeline
 directly). Record: `benchmarks/backend_sweep_2026-07-22.{tsv,meta}`.
 
-### Cross-backend status (2026-07-22 session; svt pin re-bumped 2026-07-23)
+### Cross-backend status (2026-07-22 session; svt pin re-bumped 2026-07-24)
 Pins bumped: zenav1-aom `7b972e50` (structured DecodeError/DecodeConfig +
-bd8 lowbd perf), zenav1-svt `bcd182ec3` (2026-07-23, was `3e25f52b`; adds
+bd8 lowbd perf), zenav1-svt `2d585bb2b` (2026-07-24, was `3e25f52b`; adds
 the typed QP-0 rejection #5, the IBC screen-content vertical, bd8/bd10
-real-photo p0-p3 exchange-sort parity, nz-map SIMD — zero seam API breaks)
-— both seams variant-map errors, svt seam is on `try_encode_frame*` +
+real-photo p0-p3 exchange-sort parity, nz-map SIMD, and the pure-Rust-crate
+repo restructure that moved the C reference to a submodule — zero seam API
+breaks) — both seams variant-map errors, svt seam is on `try_encode_frame*` +
 threads the stop token and the config's thread budget.
 Cross-decoder gate: 7018/7018 sweep cells + `tests/cross_backend_decode.rs`
 (incl. 10-bit) byte-identical rav1d-safe vs aom-rs on OUR encoders' output.

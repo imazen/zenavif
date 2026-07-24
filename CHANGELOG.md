@@ -47,8 +47,11 @@ write-path returns + gain-map interop additions, already on main).
   the next 0.x minor bump (svtav1-rs backend PR)
 
 ### Changed
-- zenav1-svt pin bumped `3e25f52b` → `bcd182ec3` (upstream master
-  2026-07-23; zero seam API breaks). Brings the typed QP-0 rejection
+- zenav1-svt pin bumped `3e25f52b` → `2d585bb2b` (upstream master
+  2026-07-24; zero seam API breaks). The pin is past the upstream repo
+  restructure that moved the C reference into a git submodule — the
+  `zenav1-svt*` crates are pure Rust and unaffected (crate names + pub API
+  unchanged). Brings the typed QP-0 rejection
   (upstream #5: `try_encode_frame*` now returns `UnsupportedConfig` for
   base_qindex 0 instead of emitting garbage — the seam's quality→QP clamp
   keeps quality 100 encoding at QP 1 and is now composition-tested from

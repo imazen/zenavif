@@ -2000,7 +2000,7 @@ dependencies = [
 [[package]]
 name = "zenav1-svt"
 version = "0.1.0"
-source = "git+https://github.com/imazen/svtav1?rev=bcd182ec3e6c44cfdefeb95c942c886960a9c0bc#bcd182ec3e6c44cfdefeb95c942c886960a9c0bc"
+source = "git+https://github.com/imazen/svtav1?rev=2d585bb2b3a43d51ce3b88af9bcff4aad8ec94e7#2d585bb2b3a43d51ce3b88af9bcff4aad8ec94e7"
 dependencies = [
  "zenav1-svt-dsp",
  "zenav1-svt-encoder",
@@ -2012,7 +2012,7 @@ dependencies = [
 [[package]]
 name = "zenav1-svt-dsp"
 version = "0.1.0"
-source = "git+https://github.com/imazen/svtav1?rev=bcd182ec3e6c44cfdefeb95c942c886960a9c0bc#bcd182ec3e6c44cfdefeb95c942c886960a9c0bc"
+source = "git+https://github.com/imazen/svtav1?rev=2d585bb2b3a43d51ce3b88af9bcff4aad8ec94e7#2d585bb2b3a43d51ce3b88af9bcff4aad8ec94e7"
 dependencies = [
  "archmage",
  "magetypes",
@@ -2023,7 +2023,7 @@ dependencies = [
 [[package]]
 name = "zenav1-svt-encoder"
 version = "0.1.0"
-source = "git+https://github.com/imazen/svtav1?rev=bcd182ec3e6c44cfdefeb95c942c886960a9c0bc#bcd182ec3e6c44cfdefeb95c942c886960a9c0bc"
+source = "git+https://github.com/imazen/svtav1?rev=2d585bb2b3a43d51ce3b88af9bcff4aad8ec94e7#2d585bb2b3a43d51ce3b88af9bcff4aad8ec94e7"
 dependencies = [
  "almost-enough",
  "enough",
@@ -2037,7 +2037,7 @@ dependencies = [
 [[package]]
 name = "zenav1-svt-entropy"
 version = "0.1.0"
-source = "git+https://github.com/imazen/svtav1?rev=bcd182ec3e6c44cfdefeb95c942c886960a9c0bc#bcd182ec3e6c44cfdefeb95c942c886960a9c0bc"
+source = "git+https://github.com/imazen/svtav1?rev=2d585bb2b3a43d51ce3b88af9bcff4aad8ec94e7#2d585bb2b3a43d51ce3b88af9bcff4aad8ec94e7"
 dependencies = [
  "archmage",
  "magetypes",
@@ -2048,7 +2048,7 @@ dependencies = [
 [[package]]
 name = "zenav1-svt-tables"
 version = "0.1.0"
-source = "git+https://github.com/imazen/svtav1?rev=bcd182ec3e6c44cfdefeb95c942c886960a9c0bc#bcd182ec3e6c44cfdefeb95c942c886960a9c0bc"
+source = "git+https://github.com/imazen/svtav1?rev=2d585bb2b3a43d51ce3b88af9bcff4aad8ec94e7#2d585bb2b3a43d51ce3b88af9bcff4aad8ec94e7"
 dependencies = [
  "zenav1-svt-types",
 ]
@@ -2056,7 +2056,7 @@ dependencies = [
 [[package]]
 name = "zenav1-svt-types"
 version = "0.1.0"
-source = "git+https://github.com/imazen/svtav1?rev=bcd182ec3e6c44cfdefeb95c942c886960a9c0bc#bcd182ec3e6c44cfdefeb95c942c886960a9c0bc"
+source = "git+https://github.com/imazen/svtav1?rev=2d585bb2b3a43d51ce3b88af9bcff4aad8ec94e7#2d585bb2b3a43d51ce3b88af9bcff4aad8ec94e7"
 dependencies = [
  "enough",
  "whereat",

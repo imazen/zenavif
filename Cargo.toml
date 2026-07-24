@@ -59,15 +59,19 @@ ravif = { package = "zenravif", version = "0.2.0", path = "../ravif/ravif", defa
 # svtav1-rs experimental AV1 encode backend (`encode-svt-rs` feature).
 # The crate lives in the rust/svtav1 subdir of imazen/svtav1; cargo
 # discovers workspace-subdir packages in git deps by package name. Rev-pinned
-# to master 2026-07-23: past the 3e25f52b baseline this adds the typed QP-0
-# rejection (upstream #5 — `try_encode_frame*` now returns
-# `UnsupportedConfig` for QP 0 instead of emitting garbage; the seam's
-# quality->QP clamp keeps quality 100 on QP 1 and never trips it), the IBC
-# screen-content vertical, the bd8/bd10 real-photo p0-p3 exchange-sort
-# parity closures, and the nz-map SIMD port.
+# to master 2026-07-24 (rev 2d585bb2b). This is past the repo restructure
+# that moved the C reference into a git submodule — the `zenav1-svt*` crates
+# are pure Rust and unaffected (crate names + pub API unchanged). Relative to
+# the 3e25f52b baseline the pinned tree provides the fallible entry points
+# the seam now uses — `try_encode_frame*` -> `EncodeResult<Vec<u8>>` with a
+# typed `EncodeError` (Cancelled / AllocFailed / InvalidDimensions /
+# UnsupportedConfig), `with_stop` / `with_thread_count`, and a `fallible-alloc`
+# feature — plus the typed QP-0 rejection (upstream #5: QP 0 returns
+# `UnsupportedConfig` instead of emitting garbage; the seam's quality->QP
+# clamp keeps quality 100 on QP 1 and never trips it).
 # (The facade crate was renamed `svtav1` -> `zenav1-svt` upstream; the
 # `svtav1` alias keeps the seam's paths stable.)
-svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/svtav1", rev = "bcd182ec3e6c44cfdefeb95c942c886960a9c0bc", optional = true }
+svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/svtav1", rev = "2d585bb2b3a43d51ce3b88af9bcff4aad8ec94e7", optional = true }
 # AVIF container muxer for the svtav1-rs backend (the zenravif backend muxes
 # inside zenravif; this backend muxes in-crate). The 0.2.0 version is
 # supplied by the [patch.crates-io] git pin below until 0.2.0 publishes.
