@@ -154,30 +154,51 @@ fn monochrome_decodes_identically_across_backends() {
     assert_product_identical(&enc.avif_file, "mono-q80");
 }
 
+/// Animations decode identically through both backends: every frame's
+/// pixels AND duration must byte-agree (the aom path eagerly decodes the
+/// whole track through `decode_frames` — DPB/CDF state spans samples).
+/// Vectors are the libavif animated set CI provisions (fail-loud loader,
+/// no-graceful-skips policy).
 #[test]
-fn animation_is_rejected_honestly_on_aom() {
-    // Any bytes: the backend gate fires before parsing in AnimationDecoder::new.
-    let img = test_image(64, 64);
-    let enc = zenavif::encode_rgb8(
-        img.as_ref(),
-        &EncoderConfig::new()
-            .quality(60.0)
-            .speed(10)
-            .chroma_subsampling(EncodeChromaSubsampling::Yuv420),
-        stop(),
-    )
-    .expect("encode");
-    let err = match zenavif::AnimationDecoder::new(
-        &enc.avif_file,
-        &DecoderConfig::new().decode_backend(DecodeBackend::AomRs),
-    ) {
-        Ok(_) => panic!("animation via aom must be rejected"),
-        Err(e) => e,
-    };
-    assert!(
-        err.to_string().contains("AomRs"),
-        "rejection must name the backend: {err}"
-    );
+fn animations_decode_identically_across_backends() {
+    for name in [
+        "colors-animated-8bpc.avif",
+        "colors-animated-8bpc-alpha-exif-xmp.avif",
+        "colors-animated-8bpc-depth-exif-xmp.avif",
+        "colors-animated-8bpc-audio.avif",
+        "colors-animated-12bpc-keyframes-0-2-3.avif",
+    ] {
+        let path = format!("tests/vectors/libavif/{name}");
+        let data = std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("read {path}: {e} (run: just download-vectors)"));
+        let mut rav = zenavif::AnimationDecoder::new(&data, &DecoderConfig::new())
+            .unwrap_or_else(|e| panic!("{name}: rav1d open: {e}"));
+        let mut aom = zenavif::AnimationDecoder::new(
+            &data,
+            &DecoderConfig::new().decode_backend(DecodeBackend::AomRs),
+        )
+        .unwrap_or_else(|e| panic!("{name}: aom open: {e}"));
+        assert_eq!(rav.info().frame_count, aom.info().frame_count, "{name}");
+        let mut n = 0usize;
+        loop {
+            let rf = rav.next_frame(&Unstoppable).expect("rav1d frame");
+            let af = aom.next_frame(&Unstoppable).expect("aom frame");
+            match (rf, af) {
+                (None, None) => break,
+                (Some(rf), Some(af)) => {
+                    assert_eq!(rf.duration_ms, af.duration_ms, "{name} frame {n} duration");
+                    assert_eq!(
+                        rf.pixels.as_slice().contiguous_bytes(),
+                        af.pixels.as_slice().contiguous_bytes(),
+                        "{name} frame {n} pixels diverge between backends"
+                    );
+                    n += 1;
+                }
+                _ => panic!("{name}: backends returned different frame counts at {n}"),
+            }
+        }
+        assert!(n > 1, "{name}: expected multiple frames, got {n}");
+    }
 }
 
 /// The decode caps must be live on the aom product path too.

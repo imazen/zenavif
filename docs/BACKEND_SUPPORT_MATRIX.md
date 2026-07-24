@@ -46,16 +46,18 @@ never silent degradation. Sources: `src/encoder.rs`, `src/encoder_svt_rs.rs`,
 ## Decode backends (`decode_av1_obu_yuv(.., DecodeBackend::..)`)
 
 The public container decode (`zenavif::decode*`) uses Rav1dSafe by default;
-`DecoderConfig::decode_backend(AomRs)` routes NON-GRID STILL decodes
+`DecoderConfig::decode_backend(AomRs)` routes NON-GRID decodes — stills
 (primary/alpha/gain-map items, all depths/subsamplings, CICP/ICC/HDR
-passthrough) through aom-rs, byte-identical output
-(`tests/product_aom_backend.rs`). Grid/animation/streaming on aom return
-honest Unsupported. `Rav1dFfi` remains raw-OBU benchmark only.
+passthrough) AND animations (eager whole-track `decode_frames`; the
+animated-AVIF inter envelope is byte-exact vs aomdec upstream) — through
+aom-rs with byte-identical output (`tests/product_aom_backend.rs`).
+Grid images and row-sink streaming on aom return honest Unsupported.
+`Rav1dFfi` remains raw-OBU benchmark only.
 
 | Axis | Rav1dSafe (default) | AomRs (`aom-backend`) | Rav1dFfi (`unsafe-asm`) |
 |---|---|---|---|
 | Safety | 100% safe Rust | 100% safe Rust | C FFI + hand-written asm |
-| Frame types | full AV1 (KEY/INTER/INTRA_ONLY/SWITCH, show_existing) | KEY only (+ minimal single-ref INTER skeleton; AVIF stills are KEY) | full AV1 |
+| Frame types | full AV1 (KEY/INTER/INTRA_ONLY/SWITCH, show_existing) | KEY + the animated-AVIF inter envelope (zero-MV NEARESTMV/DC, 8-slot DPB, show_existing, CDF inheritance, temporal MVs; compound/sub-pel MC fail loud) | full AV1 |
 | Bit depths | 8/10/12 | 8/10/12 | 8/10/12 |
 | Monochrome (Cs400) | yes | yes | yes |
 | 4:2:0 / 4:2:2 / 4:4:4 | yes | yes | yes |

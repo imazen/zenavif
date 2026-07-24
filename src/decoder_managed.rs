@@ -1636,6 +1636,13 @@ impl ManagedAvifDecoder {
         };
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
+        // Scale native-depth values (0..2^bd-1) to full u16 — same order as
+        // the rav1d path: before alpha attachment so unpremultiply runs on
+        // the correct 16-bit range.
+        if wide_out {
+            scale_pixels_to_u16(&mut image, bit_depth);
+        }
+
         if let Some(af) = fd_alpha {
             if af.width != width || af.height != height {
                 return Err(at!(Error::Unsupported(
@@ -1741,18 +1748,14 @@ fn aom_identity_to_buffer(
         }
     };
     if wide_out {
-        let shift = 16 - bit_depth;
+        // Native-depth output (range-expanded within 0..2^bd-1) — the caller's
+        // scale_pixels_to_u16 widens, exactly like the rav1d identity path.
         let mut out = vec![rgb::Rgb::<u16> { r: 0, g: 0, b: 0 }; px];
-        // Widen to the full u16 scale like the rav1d identity path.
-        let scale = |v: u16| -> u16 {
-            let e = expand(v) as u32;
-            ((e << shift) | (e >> (2 * bit_depth as u32 - 16).min(15))) as u16
-        };
         for (i, o) in out.iter_mut().enumerate() {
             *o = rgb::Rgb {
-                r: scale(fd.v[i]),
-                g: scale(fd.y[i]),
-                b: scale(fd.u[i]),
+                r: expand(fd.v[i]),
+                g: expand(fd.y[i]),
+                b: expand(fd.u[i]),
             };
         }
         PixelBuffer::from_pixels(out, w as u32, h as u32)
@@ -1844,6 +1847,14 @@ fn aom_planar_to_buffer(
 ///     println!("frame {}x{}, {}ms", frame.pixels.width(), frame.pixels.height(), frame.duration_ms);
 /// }
 /// ```
+/// One eagerly decoded aom animation frame: (color, optional alpha),
+/// consumed exactly once in display order.
+#[cfg(feature = "aom-backend")]
+type AomAnimFrame = (
+    aom_decode::frame::FrameDecode,
+    Option<aom_decode::frame::FrameDecode>,
+);
+
 pub struct AnimationDecoder {
     /// Underlying decoder (owns parser + color decoder)
     inner: ManagedAvifDecoder,
@@ -1853,6 +1864,11 @@ pub struct AnimationDecoder {
     info: DecodedAnimationInfo,
     /// Index of the next frame to decode
     frame_index: usize,
+    /// Eagerly decoded frames for the aom backend (`decode_frames` needs the
+    /// whole temporal-unit stream for DPB/CDF state; per-sample incremental
+    /// decode is a future upstream API). `None` on the rav1d path.
+    #[cfg(feature = "aom-backend")]
+    aom_frames: Option<Vec<Option<AomAnimFrame>>>,
 }
 
 impl AnimationDecoder {
@@ -1860,13 +1876,6 @@ impl AnimationDecoder {
     ///
     /// Returns [`Error::Unsupported`] if the file is not animated.
     pub fn new(data: &[u8], config: &DecoderConfig) -> Result<Self> {
-        #[cfg(feature = "aom-backend")]
-        if config.decode_backend == crate::DecodeBackend::AomRs {
-            return Err(at!(Error::Unsupported(
-                "DecodeBackend::AomRs does not decode animations yet (its \
-                 inter-frame envelope is in progress); use Rav1dSafe"
-            )));
-        }
         let inner = ManagedAvifDecoder::new(data, config)?;
 
         let anim_info = inner
@@ -1892,12 +1901,85 @@ impl AnimationDecoder {
             timescale: anim_info.timescale,
         };
 
+        #[cfg(feature = "aom-backend")]
+        let aom_frames = if config.decode_backend == crate::DecodeBackend::AomRs {
+            Some(Self::decode_all_frames_aom(&inner, &info)?)
+        } else {
+            None
+        };
+
         Ok(Self {
             inner,
             alpha_decoder,
             info,
             frame_index: 0,
+            #[cfg(feature = "aom-backend")]
+            aom_frames,
         })
+    }
+
+    /// Eagerly decode the whole animation through zenav1-aom: the color (and
+    /// alpha) tracks' temporal units are concatenated per track and decoded
+    /// in one `decode_frames` pass, because inter frames carry DPB/CDF state
+    /// across samples. Memory is `frame_count` decoded frames up front —
+    /// bounded by the parser's animation caps; the rav1d path remains the
+    /// streaming choice.
+    #[cfg(feature = "aom-backend")]
+    fn decode_all_frames_aom(
+        inner: &ManagedAvifDecoder,
+        info: &DecodedAnimationInfo,
+    ) -> Result<Vec<Option<AomAnimFrame>>> {
+        let config = crate::DecoderConfig {
+            frame_size_limit: inner.frame_size_limit,
+            alloc_pref: inner.alloc_pref,
+            ..crate::DecoderConfig::default()
+        };
+        let aom_config = crate::decode_av1::aom_config_from(&config);
+        let mut color_stream = Vec::new();
+        let mut alpha_stream: Option<Vec<u8>> = info.has_alpha.then(Vec::new);
+        for i in 0..info.frame_count {
+            let fr = inner
+                .parser
+                .frame(i)
+                .map_err(|e| e.map_error(Error::Parse))?;
+            color_stream.extend_from_slice(&fr.data);
+            if let (Some(buf), Some(ad)) = (alpha_stream.as_mut(), fr.alpha_data.as_ref()) {
+                buf.extend_from_slice(ad);
+            }
+        }
+        let color = aom_decode::frame::decode_frames_with(&color_stream, &aom_config)
+            .map_err(crate::decode_av1::map_aom_error)?;
+        if color.len() != info.frame_count {
+            return Err(at!(Error::Unsupported(
+                "aom-rs decoded a different frame count than the container declares \
+                 (unshown-frame packing outside the current envelope)"
+            )));
+        }
+        let alpha = match alpha_stream {
+            Some(stream) => {
+                let a = aom_decode::frame::decode_frames_with(&stream, &aom_config)
+                    .map_err(crate::decode_av1::map_aom_error)?;
+                if a.len() != info.frame_count {
+                    return Err(at!(Error::Unsupported(
+                        "aom-rs alpha track frame count does not match the container"
+                    )));
+                }
+                Some(a)
+            }
+            None => None,
+        };
+        let mut alpha_iter = alpha.map(|v| v.into_iter());
+        Ok(color
+            .into_iter()
+            .map(|c| {
+                Some((
+                    c,
+                    alpha_iter
+                        .as_mut()
+                        .map(|it| it.next().expect("len checked")),
+                ))
+            })
+            .collect())
     }
 
     /// Animation metadata (frame count, loop count, etc.).
@@ -1912,6 +1994,25 @@ impl AnimationDecoder {
         }
 
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
+
+        #[cfg(feature = "aom-backend")]
+        if let Some(frames) = self.aom_frames.as_mut() {
+            let (fd, fd_alpha) = frames[self.frame_index]
+                .take()
+                .expect("animation frames are consumed exactly once in order");
+            let duration_ms = self
+                .inner
+                .parser
+                .frame(self.frame_index)
+                .map_err(|e| e.map_error(Error::Parse))?
+                .duration_ms;
+            let (pixels, _info) = self.inner.convert_aom_to_image(fd, fd_alpha, stop)?;
+            self.frame_index += 1;
+            return Ok(Some(DecodedFrame {
+                pixels,
+                duration_ms,
+            }));
+        }
 
         let frame_ref = self
             .inner

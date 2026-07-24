@@ -56,9 +56,14 @@ write-path returns + gain-map interop additions, already on main).
   (`decode_av1_obu_with_config`, both zencodec gain-map sites routed), and
   the prefer_8bit downscale — byte-identical to the rav1d-safe path by
   construction (both run the same canonical in-house kernel recipe; pinned
-  across the whole grid by `tests/product_aom_backend.rs`). Grid images,
-  animation, and row-sink streaming return honest `Unsupported` until the
-  aom grid/inter envelopes land (inter decode is in progress upstream).
+  across the whole grid by `tests/product_aom_backend.rs`). ANIMATION now
+  decodes too: zenav1-aom landed the animated-AVIF inter envelope (8/8
+  tracks / 40/40 frames byte-exact vs aomdec upstream, pin a06bce15) and
+  `AnimationDecoder` on AomRs eagerly decodes each track in one
+  `decode_frames` pass (DPB/CDF state spans samples) — all 5 libavif
+  animated vectors byte-identical to the rav1d path, frame-by-frame
+  (pixels + durations). Grid images and row-sink streaming still return
+  honest `Unsupported`.
 - `decode_av1_obu_yuv_with` — the raw-OBU decode seam gains a config-carrying
   twin threading `DecoderConfig` + a stop token into the backends
   (seam obligation 3): `frame_size_limit` reaches rav1d-safe's managed
