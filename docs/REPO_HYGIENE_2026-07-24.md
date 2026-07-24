@@ -115,3 +115,8 @@ the graft) and only do Phase 0.3's pin-audit discipline going forward.
 Phase 2 at the PR #31 merge point → Phase 3 only if svt clone times
 actually hurt (it is a one-time 85 MB; the upstream-submodule shallowing
 in zenav1-aom saves more local disk than any origin rewrite).
+## Merged-branch deletions 2026-07-24 (recovery shas)
+Re-create any with: git push origin <sha>:refs/heads/<name>
+zenavif origin/docs/error-location-and-decode-token 60c38cd1bbe310e691818be8543ed68b28b0e145
+zenavif origin/hdr-mdcv-st2086-fix b0c753d62ae11eae8ea177b3a323d93c68ed40b8
+svtav1 origin/wave2/entropy-c-parity 853c9cf48c0791a0e1a907e09d0143c6ce7cfc2c
