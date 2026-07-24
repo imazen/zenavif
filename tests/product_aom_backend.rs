@@ -201,6 +201,24 @@ fn animations_decode_identically_across_backends() {
     }
 }
 
+/// Grid (container-tiled) AVIFs decode identically through both backends —
+/// each grid cell is an independent AV1 still; the stitch is shared.
+/// (AV1 bitstream tiles inside a single frame are separate and were always
+/// in the aom envelope.) Vectors CI provisions; fail-loud loader.
+#[test]
+fn grids_decode_identically_across_backends() {
+    for name in [
+        "sofa_grid1x5_420.avif",
+        "sofa_grid1x5_420_dimg_repeat.avif",
+        "color_grid_alpha_nogrid.avif",
+    ] {
+        let path = format!("tests/vectors/libavif/{name}");
+        let data = std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("read {path}: {e} (run: just download-vectors)"));
+        assert_product_identical(&data, name);
+    }
+}
+
 /// The decode caps must be live on the aom product path too.
 #[test]
 fn frame_size_limit_fires_on_aom_product_path() {

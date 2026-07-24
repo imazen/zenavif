@@ -858,8 +858,18 @@ impl ManagedAvifDecoder {
         }
 
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
+        self.stitch_tile_images(tile_images, cols, output_width, output_height)
+    }
 
-        // Stitch tiles using byte-level row access (format-agnostic)
+    /// Byte-stitch converted tile images into the grid canvas
+    /// (format-agnostic; shared by the rav1d and aom grid paths).
+    fn stitch_tile_images(
+        &self,
+        tile_images: Vec<PixelBuffer>,
+        cols: usize,
+        output_width: usize,
+        output_height: usize,
+    ) -> Result<PixelBuffer> {
         let descriptor = tile_images[0].descriptor();
         let bpp = descriptor.bytes_per_pixel();
         let alloc_size = output_width
@@ -1480,10 +1490,9 @@ impl ManagedAvifDecoder {
 
     fn decode_full_aom(&mut self, stop: &(impl Stop + ?Sized)) -> Result<(PixelBuffer, ImageInfo)> {
         if self.parser.grid_config().is_some() {
-            return Err(at!(Error::Unsupported(
-                "DecodeBackend::AomRs does not decode grid images yet; use the \
-                 default Rav1dSafe backend for grid AVIFs"
-            )));
+            let pixels = self.decode_grid_aom(stop)?;
+            let info = self.probe_info()?;
+            return Ok((pixels, info));
         }
         let primary_data = self
             .parser
@@ -1499,6 +1508,63 @@ impl ManagedAvifDecoder {
         };
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
         self.convert_aom_to_image(fd, fd_alpha, stop)
+    }
+
+    /// Grid (tiled) AVIF via the aom backend: every grid cell is an
+    /// independently-coded AV1 still — decode each item with zenav1-aom,
+    /// convert with the shared aom conversion path, and byte-stitch into
+    /// the grid canvas exactly like the rav1d grid path (same
+    /// `stitch_tile_images` helper). (Container `grid` items are unrelated
+    /// to AV1 bitstream tiles, which the decoder handles internally.)
+    fn decode_grid_aom(&mut self, stop: &(impl Stop + ?Sized)) -> Result<PixelBuffer> {
+        let grid_config = self
+            .parser
+            .grid_config()
+            .ok_or_else(|| {
+                at!(Error::Decode {
+                    code: -1,
+                    msg: "Expected grid config but found none",
+                })
+            })?
+            .clone();
+        let rows = grid_config.rows as usize;
+        let cols = grid_config.columns as usize;
+        let tile_count = self.parser.grid_tile_count();
+        if tile_count != rows * cols {
+            return Err(at!(Error::Malformed(
+                "Tile count doesn't match grid dimensions"
+            )));
+        }
+        if tile_count == 0 {
+            return Err(at!(Error::Malformed("No tiles to stitch")));
+        }
+        let mut tile_images = Vec::new();
+        let mut tile_dims = (0usize, 0usize);
+        for i in 0..tile_count {
+            stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
+            let tile_data = self
+                .parser
+                .tile_data(i)
+                .map_err(|e| e.map_error(Error::Parse))?;
+            let fd = self.decode_item_aom(&tile_data, stop)?;
+            if i == 0 {
+                tile_dims = (fd.width, fd.height);
+            }
+            let (img, _info) = self.convert_aom_to_image(fd, None, stop)?;
+            tile_images.push(img);
+        }
+        let output_width = if grid_config.output_width > 0 {
+            grid_config.output_width as usize
+        } else {
+            tile_dims.0 * cols
+        };
+        let output_height = if grid_config.output_height > 0 {
+            grid_config.output_height as usize
+        } else {
+            tile_dims.1 * rows
+        };
+        stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
+        self.stitch_tile_images(tile_images, cols, output_width, output_height)
     }
 
     /// Mirror of `convert_to_image` over an aom `FrameDecode`: identical CICP

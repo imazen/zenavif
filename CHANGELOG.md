@@ -62,8 +62,10 @@ write-path returns + gain-map interop additions, already on main).
   `AnimationDecoder` on AomRs eagerly decodes each track in one
   `decode_frames` pass (DPB/CDF state spans samples) — all 5 libavif
   animated vectors byte-identical to the rav1d path, frame-by-frame
-  (pixels + durations). Grid images and row-sink streaming still return
-  honest `Unsupported`.
+  (pixels + durations). Grid AVIFs decode too (each grid cell is an
+  independent AV1 still; the byte-stitch is shared with the rav1d path) —
+  identity pinned on the sofa/mixed-alpha grid vectors. Only row-sink
+  streaming still returns honest `Unsupported` on AomRs.
 - `decode_av1_obu_yuv_with` — the raw-OBU decode seam gains a config-carrying
   twin threading `DecoderConfig` + a stop token into the backends
   (seam obligation 3): `frame_size_limit` reaches rav1d-safe's managed

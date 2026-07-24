@@ -48,10 +48,11 @@ never silent degradation. Sources: `src/encoder.rs`, `src/encoder_svt_rs.rs`,
 The public container decode (`zenavif::decode*`) uses Rav1dSafe by default;
 `DecoderConfig::decode_backend(AomRs)` routes NON-GRID decodes — stills
 (primary/alpha/gain-map items, all depths/subsamplings, CICP/ICC/HDR
-passthrough) AND animations (eager whole-track `decode_frames`; the
-animated-AVIF inter envelope is byte-exact vs aomdec upstream) — through
-aom-rs with byte-identical output (`tests/product_aom_backend.rs`).
-Grid images and row-sink streaming on aom return honest Unsupported.
+passthrough) animations (eager whole-track `decode_frames`; the
+animated-AVIF inter envelope is byte-exact vs aomdec upstream), AND grid
+AVIFs (per-cell aom decode + the shared byte-stitch) — through aom-rs
+with byte-identical output (`tests/product_aom_backend.rs`). Only
+row-sink streaming on aom returns honest Unsupported.
 `Rav1dFfi` remains raw-OBU benchmark only.
 
 | Axis | Rav1dSafe (default) | AomRs (`aom-backend`) | Rav1dFfi (`unsafe-asm`) |
