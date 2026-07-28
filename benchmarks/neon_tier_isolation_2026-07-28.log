@@ -1,0 +1,221 @@
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling unicode-ident v1.0.24
+   Compiling libm v0.2.16
+   Compiling autocfg v1.5.1
+   Compiling libc v0.2.186
+   Compiling cfg-if v1.0.4
+   Compiling crossbeam-utils v0.8.21
+   Compiling bitflags v2.13.0
+   Compiling thiserror v2.0.18
+   Compiling num-traits v0.2.19
+   Compiling imgref v1.12.2
+   Compiling safe_unaligned_simd v0.2.5
+   Compiling log v0.4.32
+   Compiling rayon-core v1.13.0
+   Compiling rustversion v1.0.22
+   Compiling zerocopy v0.8.52
+   Compiling memchr v2.8.2
+   Compiling paste v1.0.15
+   Compiling crossbeam-epoch v0.9.18
+   Compiling crossbeam-deque v0.8.6
+   Compiling syn v2.0.117
+   Compiling whereat v0.1.5
+   Compiling stable_deref_trait v1.2.1
+   Compiling as-slice v0.2.1
+   Compiling simd-adler32 v0.3.9
+   Compiling arrayvec v0.7.6
+   Compiling num-integer v0.1.46
+   Compiling either v1.16.0
+   Compiling aligned v0.4.3
+   Compiling anyhow v1.0.102
+   Compiling adler2 v2.0.1
+   Compiling heck v0.5.0
+   Compiling smallvec v1.15.2
+   Compiling num-bigint v0.4.6
+   Compiling crc32fast v1.5.0
+   Compiling miniz_oxide v0.8.9
+   Compiling enough v0.4.4
+   Compiling av-scenechange v0.14.1
+   Compiling built v0.8.1
+   Compiling rayon v1.12.0
+   Compiling num-rational v0.4.2
+   Compiling rav1e v0.8.1
+   Compiling jobserver v0.1.34
+   Compiling no_std_io2 v0.9.4
+   Compiling nom v8.0.0
+   Compiling serde_core v1.0.228
+   Compiling shlex v2.0.1
+   Compiling bytemuck_derive v1.10.2
+   Compiling thiserror-impl v2.0.18
+   Compiling equator-macro v0.4.2
+   Compiling archmage-macros v0.9.27
+   Compiling zerocopy-derive v0.8.52
+   Compiling equator v0.4.2
+   Compiling bytemuck v1.25.0
+   Compiling num-derive v0.4.2
+   Compiling aligned-vec v0.6.4
+   Compiling v_frame v0.3.9
+   Compiling archmage v0.9.27
+   Compiling profiling-procmacros v1.0.18
+   Compiling rgb v0.8.53
+   Compiling wide v1.5.0
+   Compiling arg_enum_proc_macro v0.3.4
+   Compiling rustix v1.1.4
+   Compiling zenpixels v0.2.14
+   Compiling pastey v0.1.1
+   Compiling find-msvc-tools v0.1.9
+   Compiling quick-error v2.0.1
+   Compiling y4m v0.8.0
+   Compiling utf8parse v0.2.2
+   Compiling magetypes v0.9.27
+   Compiling parking_lot_core v0.9.12
+   Compiling nasm-rs v0.3.2
+   Compiling anstyle-parse v1.0.0
+   Compiling av1-grain v0.2.5
+   Compiling cc v1.2.64
+   Compiling profiling v1.0.18
+   Compiling maybe-rayon v0.1.1
+   Compiling bitstream-io v4.10.0
+   Compiling flate2 v1.1.9
+   Compiling almost-enough v0.4.4
+   Compiling itertools v0.14.0
+   Compiling errno v0.3.14
+   Compiling simd_helpers v0.1.0
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling weezl v0.1.12
+   Compiling colorchoice v1.0.5
+   Compiling zmij v1.0.21
+   Compiling linear-srgb v0.6.12
+   Compiling anstyle v1.0.14
+   Compiling scopeguard v1.2.0
+   Compiling anstyle-query v1.1.5
+   Compiling zune-core v0.5.1
+   Compiling new_debug_unreachable v1.0.6
+   Compiling noop_proc_macro v0.3.0
+   Compiling anstream v1.0.0
+   Compiling half v2.7.1
+   Compiling zune-jpeg v0.5.15
+   Compiling lock_api v0.4.14
+   Compiling zencodec v0.1.26
+   Compiling rav1d-safe v0.5.7 (https://github.com/imazen/rav1d-safe?rev=f6aed27e81baa5e74a8eba413562efb8813641fd#f6aed27e)
+   Compiling garb v0.2.8
+   Compiling atomig-macro v0.4.0
+   Compiling strum_macros v0.28.0
+   Compiling avif-serialize v0.8.9
+   Compiling zune-inflate v0.2.54
+   Compiling fdeflate v0.3.7
+   Compiling loop9 v0.1.5
+   Compiling objc2-core-foundation v0.3.2
+   Compiling pxfm v0.1.29
+   Compiling byte-slice-cast v1.2.3
+   Compiling clap_lex v1.1.0
+   Compiling serde v1.0.228
+   Compiling color_quant v1.1.0
+   Compiling byteorder-lite v0.1.0
+   Compiling bytes v1.11.1
+   Compiling fax v0.2.7
+   Compiling strsim v0.11.1
+   Compiling once_cell v1.21.4
+   Compiling bit_field v0.10.3
+   Compiling yuvxyb-math v0.1.1
+   Compiling lebe v0.5.3
+   Compiling serde_json v1.0.150
+   Compiling fast-ssim2 v0.8.2
+   Compiling exr v1.74.0
+   Compiling av-data v0.4.4
+   Compiling zenpixels-convert v0.2.14
+   Compiling tiff v0.11.3
+   Compiling clap_builder v4.6.0
+   Compiling image-webp v0.2.4
+   Compiling moxcms v0.8.1
+   Compiling ravif v0.13.0
+   Compiling objc2-io-kit v0.3.2
+   Compiling gif v0.14.2
+   Compiling strum v0.28.0
+   Compiling png v0.18.1
+   Compiling atomig v0.4.3
+   Compiling parking_lot v0.12.5
+   Compiling rav1d-disjoint-mut v0.3.1 (https://github.com/imazen/rav1d-safe?rev=f6aed27e81baa5e74a8eba413562efb8813641fd#f6aed27e)
+   Compiling v_frame v0.5.2
+   Compiling qoi v0.4.1
+   Compiling serde_derive v1.0.228
+   Compiling clap_derive v4.6.1
+   Compiling raw-cpuid v11.6.0
+   Compiling bitreader v0.3.11
+   Compiling byteorder v1.5.0
+   Compiling fallible_collections v0.5.2
+   Compiling assert_matches v1.5.0
+   Compiling to_method v1.1.0
+   Compiling leb128 v0.2.6
+   Compiling itoa v1.0.18
+   Compiling zenavif-parse v0.7.0 (/Users/lilith/work/zen/zenavif/zenavif-parse)
+   Compiling clap v4.6.1
+   Compiling image v0.25.10
+   Compiling yuvxyb v0.5.0
+   Compiling sysinfo v0.36.1
+   Compiling terminal_size v0.4.4
+   Compiling fs4 v1.1.0
+   Compiling ultrahdr-core v0.5.0
+   Compiling zensim v0.2.7
+   Compiling yuv v0.8.15
+   Compiling fs2 v0.4.3
+   Compiling env_filter v1.0.1
+   Compiling base64 v0.22.1
+   Compiling seahash v4.1.0
+   Compiling zensim-regress v0.3.1
+   Compiling env_logger v0.11.10
+   Compiling zenbench v0.1.8
+   Compiling zenavif v0.1.7 (/Users/lilith/work/zen/zenavif)
+   Compiling zenanalyze v0.2.0 (/Users/lilith/work/zen/zenanalyze)
+warning: unused import: `archmage::arcane`
+  --> /Users/lilith/work/zen/zenanalyze/src/tier1.rs:44:9
+   |
+44 |     use archmage::arcane;
+   |         ^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling zenutils-fuzz v0.1.0
+warning: `zenanalyze` (lib) generated 1 warning (run `cargo fix --lib -p zenanalyze` to apply 1 suggestion)
+warning: unused import: `archmage::SimdToken`
+  --> benches/tier_isolation.rs:36:9
+   |
+36 |     use archmage::SimdToken;
+   |         ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `zenavif` (bench "tier_isolation") generated 1 warning (run `cargo fix --bench "tier_isolation" -p zenavif` to apply 1 suggestion)
+    Finished `bench` profile [optimized] target(s) in 30.05s
+     Running benches/tier_isolation.rs (target/release/deps/tier_isolation-78be19ca4e0ab8e7)
+[tier_isolation] comparing neon vs forced scalar
+
+  yuv420_to_rgb8/512x256  0 rounds ⚠ only 0 rounds
+                 mean ±mad µs  95% CI vs base    
+  ├─ neon     833.1 ±158.6µs  [772.8–896.4]µs    [1]
+  ╰─ scalar    1274.5 ±6.5µs                    
+
+  neon    ███████████████████████████████████████ 833.07µs
+  scalar  ████████████████████████████████████████████████████████████ 1.27ms
+  [1] CV=38%
+
+  yuv420_to_rgb8/1920x1080  0 rounds ⚠ only 0 rounds
+             mean ±mad ms  95% CI vs base
+  ├─ neon      9.2 ±0.0ms  [9.2–9.2]ms  
+  ╰─ scalar   22.4 ±0.1ms               
+
+  neon    ██████████████████████████ 9.24ms
+  scalar  ██████████████████████████████████████████████████████████████ 22.36ms
+[zenbench] calibration: int=0.30ns/iter mem_bw=105.6GiB/s mem_lat=8.1ns
+[zenbench] timer resolution: 41ns, loop overhead: 0.24ns/iter, TSC: 1.000 ticks/ns (invariant)
+[zenbench] results → /var/folders/sc/m9jbk0qj0jz4w09h7gg8v3p80000gn/T/zenbench/zenbench-1785246504-7bf1.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1785246504-7bf1
+  git: e90baa6abc1fd6197620531999df3b6c147c1a6f
+═══════════════════════════════════════════════════════════════
+
+  total: 0.0s
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json

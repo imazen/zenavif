@@ -1,0 +1,39 @@
+# zenavif NEON vs forced-scalar (YUV->RGB) — first real tier comparison
+date:    2026-07-28
+host:    Apple M4 Pro (12 core), macOS, aarch64
+command: cargo bench --bench tier_isolation --features _dev
+build:   release, NO -C target-cpu=native
+
+## Result
+
+| size      | NEON     | scalar    | speedup |
+|-----------|----------|-----------|---------|
+| 1920x1080 |  9.24ms  |  22.36ms  |  2.42x  |
+| 512x256   | 833.07us |  1274.5us | (1.53x, see caveat) |
+
+Quote the 1080p number. The 512x256 NEON arm reports CV=38% — at ~800us the
+measurement is noisy enough that 1.53x is not a number to rely on. The 1080p
+rows are clean.
+
+## Why this bench had to be added
+
+`benches/yuv_conversion_benchmark.rs` is titled "SIMD vs scalar" but never runs
+a scalar arm. It probes `Desktop64::summon()` — an x86 alias — and prints
+whether AVX2 is present, then benchmarks one unlabelled configuration. On
+aarch64 that probe ALWAYS fails, so the bench prints
+
+  "AVX2/FMA not available - using scalar fallback"
+
+while NEON is in fact running, and reports the NEON time as if it were scalar.
+Anyone reading that output on ARM would conclude this crate has no working SIMD
+and that its conversion is slow, when it is 2.4x faster than scalar.
+
+That bench is left in place (it is a valid throughput bench); this one adds the
+comparison it claims to make.
+
+## Input note
+
+The existing bench fills every plane with `vec![128u8; ..]` — a constant image.
+This one uses varied planes: a branch-free kernel will not care much, but a
+constant input exercises none of the value-dependent behaviour and makes the
+result easier to over-trust.
