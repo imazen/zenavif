@@ -8,3 +8,9 @@
 mod avg;
 
 pub use avg::*;
+
+mod unpremul;
+#[cfg(feature = "_dev")]
+pub use unpremul::unpremultiply8_dispatch;
+#[cfg(not(feature = "_dev"))]
+pub(crate) use unpremul::unpremultiply8_dispatch;

@@ -304,3 +304,8 @@ zenavif-serialize = { path = "zenavif-serialize" }
 # aarch64 16bpc SGR rounding fix. Drop at the rav1d-safe release past
 # 0.5.7. Mirrored in fuzz/Cargo.toml.
 rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "f6aed27e81baa5e74a8eba413562efb8813641fd" }
+
+[[bench]]
+name = "unpremul_tiers"
+harness = false
+required-features = ["_dev"]

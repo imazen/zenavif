@@ -244,13 +244,12 @@ pub fn add_alpha16<'a>(
 /// Convert premultiplied alpha to straight alpha for 8-bit RGBA
 #[inline(never)]
 pub fn unpremultiply8(img_row: &mut [Rgba<u8>]) {
-    for px in img_row.iter_mut() {
-        if px.a != 255 && px.a != 0 {
-            *px.rgb_mut() = px
-                .rgb()
-                .map(|c| ((c as u16 * 255 + px.a as u16 / 2) / px.a as u16).min(255) as u8);
-        }
-    }
+    // Divides by the pixel's own alpha, so no integer-SIMD form exists and the
+    // scalar loop cannot vectorize. On aarch64 this dispatches to a `vld4q_u8`
+    // kernel that deinterleaves RGBA into planes; bit-identical, proven over
+    // the complete (channel, alpha) domain by tests/unpremul8_exhaustive.rs.
+    // Elsewhere it is exactly the loop that used to live here.
+    crate::simd::unpremultiply8_dispatch(img_row)
 }
 
 /// Convert premultiplied alpha to straight alpha for 16-bit RGBA
