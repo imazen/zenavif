@@ -328,6 +328,131 @@ pub fn estimate_encode_threaded(
     Some(e)
 }
 
+// ── Memory-adaptive encode concurrency (crate-private) ──────────────────────
+//
+// Helpers for fitting the encoder thread count to a memory budget so an
+// encode reduces its own parallelism instead of blowing past
+// `ResourceLimits::max_memory_bytes` (or the machine's available RAM). Used
+// by the zencodec adapter pre-flight in `src/codec.rs`; gated so decode-only
+// builds don't carry dead code.
+
+/// The thread count the encoder would use absent an explicit request:
+/// `std::thread::available_parallelism()` (1 when unknown). An explicit
+/// `Some(n > 0)` request wins; `Some(0)` means "auto" (matches the native
+/// `EncoderConfig::threads` semantics where `None` = default pool).
+#[cfg(any(test, feature = "encode"))]
+pub(crate) fn requested_or_default_threads(requested: Option<usize>) -> usize {
+    match requested {
+        Some(n) if n > 0 => n,
+        _ => std::thread::available_parallelism()
+            .map(std::num::NonZeroUsize::get)
+            .unwrap_or(1),
+    }
+}
+
+/// Implicit memory budget when the caller set no `max_memory_bytes`:
+/// detected available RAM × 0.8 (Linux `/proc/meminfo` `MemAvailable`).
+/// `None` on other platforms or when detection fails — no implicit cap
+/// there. The 20 % headroom leaves room for the caller's own buffers and
+/// the rest of the process.
+#[cfg(any(test, feature = "encode"))]
+pub(crate) fn implicit_memory_budget() -> Option<u64> {
+    detected_available_ram().map(|bytes| (bytes as f64 * 0.8) as u64)
+}
+
+/// Available RAM in bytes: Linux `MemAvailable` (kernel's estimate of memory
+/// usable without swapping). `None` elsewhere — macOS/Windows have no
+/// equally cheap equivalent, and a wrong guess is worse than no cap.
+#[cfg(any(test, feature = "encode"))]
+fn detected_available_ram() -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
+        for line in meminfo.lines() {
+            if let Some(rest) = line.strip_prefix("MemAvailable:") {
+                let kib: u64 = rest.trim().trim_end_matches("kB").trim().parse().ok()?;
+                return Some(kib.saturating_mul(1024));
+            }
+        }
+        None
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+/// Fit the encoder thread count to a memory budget: the largest count whose
+/// thread-aware conservative peak ([`EncodeEstimate::peak_memory_bytes_max`]
+/// via [`estimate_encode_threaded`]) fits `budget`, floored at 1.
+///
+/// * `requested` — explicit thread request already on the config
+///   (`Some(n > 0)`); `None`/`Some(0)` start from
+///   [`requested_or_default_threads`] (the machine parallelism the encoder
+///   would otherwise use).
+/// * `budget` — memory budget in bytes (explicit `max_memory_bytes` or the
+///   implicit available-RAM budget). `None` = unlimited: no fit, no pin.
+///
+/// Returns `(pin, note)`:
+/// * `pin = Some(n)` — pin the encoder to `n` threads; returned only when
+///   the budget requires fewer threads than would otherwise run. At the
+///   floor (`n == 1`) the budget may STILL be exceeded — the caller must
+///   re-check the estimate at the pinned count and raise its memory-limit
+///   error there (thread reduction cannot shrink the single-thread peak).
+/// * `pin = None` — no reduction needed (or no budget); leave the codec
+///   default.
+/// * `note` — human-readable record of any reduction (reductions are never
+///   silent).
+#[cfg(any(test, feature = "encode"))]
+pub(crate) fn fit_threads_to_budget(
+    width: u32,
+    height: u32,
+    input_bpp: u8,
+    speed: u8,
+    requested: Option<usize>,
+    budget: Option<u64>,
+) -> (Option<usize>, Option<String>) {
+    let Some(budget) = budget else {
+        return (None, None);
+    };
+    let start = requested_or_default_threads(requested);
+    // `effective_threads` clamps to the tile count, so estimates are flat
+    // above it — the walk from `start` terminates against the same values
+    // and only begins moving once `n` drops below the tile bound.
+    let mut n = start;
+    loop {
+        match estimate_encode_threaded(width, height, input_bpp, speed, n) {
+            // Dimension overflow: nothing to fit (the caller's own estimate
+            // check sees the same `None` and skips; dimension caps handle it).
+            None => return (None, None),
+            Some(e) if e.peak_memory_bytes_max <= budget => break,
+            Some(_) => {}
+        }
+        if n == 1 {
+            break;
+        }
+        n -= 1;
+    }
+    if n == start {
+        return (None, None);
+    }
+    let over = estimate_encode_threaded(width, height, input_bpp, speed, n)
+        .is_some_and(|e| e.peak_memory_bytes_max > budget);
+    let note = if over {
+        format!(
+            "AVIF encode threads reduced {start} -> {n} (floor) for the \
+             {budget}-byte memory budget, which the single-threaded \
+             conservative peak estimate still exceeds"
+        )
+    } else {
+        format!(
+            "AVIF encode threads reduced {start} -> {n} to fit the \
+             {budget}-byte memory budget (conservative peak estimate)"
+        )
+    };
+    (Some(n), Some(note))
+}
+
 /// Estimate peak memory / time for an AVIF decode.
 ///
 /// * `width`, `height` — image dimensions in pixels.
@@ -427,5 +552,146 @@ mod tests {
     fn overflow_returns_none() {
         assert!(estimate_encode(u32::MAX, u32::MAX, 8, 6).is_none());
         assert!(estimate_decode(u32::MAX, u32::MAX, 8).is_none());
+    }
+
+    // ── fit_threads_to_budget (memory-adaptive encode concurrency) ──────
+
+    /// 2048² has 64 tiles (clamped to 32), so every thread count 1..=32 is
+    /// effective and each added thread costs exactly `mem_bytes_per_thread`
+    /// on the peak tiers — the walk-down is fully deterministic when the
+    /// start is an explicit request (no machine parallelism involved).
+    #[test]
+    fn fit_walks_down_to_largest_fitting_count() {
+        let (w, h) = (2048, 2048);
+        let e1 = estimate_encode_threaded(w, h, 3, 6, 1).unwrap();
+        let e3 = estimate_encode_threaded(w, h, 3, 6, 3).unwrap();
+        let e4 = estimate_encode_threaded(w, h, 3, 6, 4).unwrap();
+        // Sanity: the per-thread term is strictly monotone in this range.
+        assert!(e3.peak_memory_bytes_max > e1.peak_memory_bytes_max);
+        assert!(e4.peak_memory_bytes_max > e3.peak_memory_bytes_max);
+        // Budget admits exactly 3 threads: e3 fits, e4 does not.
+        let budget = e3.peak_memory_bytes_max;
+        let (pin, note) = fit_threads_to_budget(w, h, 3, 6, Some(32), Some(budget));
+        assert_eq!(pin, Some(3), "expected walk-down 32 -> 3");
+        let note = note.expect("reduction must be recorded, never silent");
+        assert!(
+            note.contains("32") && note.contains("3"),
+            "note should record the reduction: {note}"
+        );
+    }
+
+    /// A budget that only the single-threaded estimate fits floors at 1.
+    #[test]
+    fn fit_floors_at_one_thread() {
+        let (w, h) = (2048, 2048);
+        let e1 = estimate_encode_threaded(w, h, 3, 6, 1).unwrap();
+        let (pin, note) =
+            fit_threads_to_budget(w, h, 3, 6, Some(32), Some(e1.peak_memory_bytes_max));
+        assert_eq!(pin, Some(1));
+        assert!(note.is_some());
+    }
+
+    /// When even threads=1 exceeds the budget, the fit still returns the
+    /// floor (best effort) and the note says so — the CALLER holds the
+    /// error path (checked against the estimate at the pinned count).
+    #[test]
+    fn fit_at_floor_still_over_budget_reports_floor() {
+        let (w, h) = (2048, 2048);
+        let e1 = estimate_encode_threaded(w, h, 3, 6, 1).unwrap();
+        let (pin, note) =
+            fit_threads_to_budget(w, h, 3, 6, Some(32), Some(e1.peak_memory_bytes_max - 1));
+        assert_eq!(pin, Some(1));
+        assert!(
+            note.unwrap().contains("floor"),
+            "floor-exceeded note must be explicit"
+        );
+        // The caller's re-check at the pinned count must then fail:
+        assert!(e1.peak_memory_bytes_max > e1.peak_memory_bytes_max - 1);
+    }
+
+    /// No budget → no fit, no pin, no note.
+    #[test]
+    fn fit_without_budget_is_inert() {
+        assert_eq!(
+            fit_threads_to_budget(2048, 2048, 3, 6, Some(32), None),
+            (None, None)
+        );
+    }
+
+    /// A budget the requested count already fits → no pin (leave the codec
+    /// default / explicit request in place).
+    #[test]
+    fn fit_no_reduction_when_request_fits() {
+        let (w, h) = (2048, 2048);
+        let e4 = estimate_encode_threaded(w, h, 3, 6, 4).unwrap();
+        assert_eq!(
+            fit_threads_to_budget(w, h, 3, 6, Some(4), Some(e4.peak_memory_bytes_max)),
+            (None, None)
+        );
+    }
+
+    /// Explicit request wins over machine parallelism; 0 means "auto".
+    #[test]
+    fn requested_or_default_semantics() {
+        assert_eq!(requested_or_default_threads(Some(7)), 7);
+        let auto = requested_or_default_threads(None);
+        assert!(auto >= 1);
+        assert_eq!(requested_or_default_threads(Some(0)), auto);
+    }
+
+    /// The plan-of-record worked example (CODEC-MEMORY-PLAN wave 2): 20 MP
+    /// RGB8 at speed 6 under a 2 GiB budget. The AV1 tile bound (32) caps
+    /// the per-thread term, so even the 32-thread conservative peak
+    /// (1,428,767,168 B ≈ 1.33 GiB) fits 2 GiB with ~0.7 GiB headroom — no
+    /// reduction. The walk engages only when the budget squeezes into the
+    /// [peak_max(1), peak_max(32)] band, and floors at 1 below it. Exact
+    /// byte values track the 2026-06-23 memory calibration — update them
+    /// alongside the constants if recalibrated.
+    #[test]
+    fn fit_twenty_megapixel_two_gib_example() {
+        let (w, h) = (5000, 4000); // 20 MP
+        let e1 = estimate_encode_threaded(w, h, 3, 6, 1).unwrap();
+        let e32 = estimate_encode_threaded(w, h, 3, 6, 32).unwrap();
+        assert_eq!(e1.peak_memory_bytes_max, 1_397_767_168);
+        assert_eq!(e32.peak_memory_bytes_max, 1_428_767_168);
+
+        // 2 GiB budget: fits at every thread count — no pin, no note.
+        let two_gib = 2u64 << 30;
+        assert!(e32.peak_memory_bytes_max < two_gib);
+        assert_eq!(
+            fit_threads_to_budget(w, h, 3, 6, Some(32), Some(two_gib)),
+            (None, None)
+        );
+
+        // Squeezed budget (peak_max(1) + 5 per-thread increments): admits
+        // exactly 6 threads.
+        let (pin, note) = fit_threads_to_budget(
+            w,
+            h,
+            3,
+            6,
+            Some(32),
+            Some(e1.peak_memory_bytes_max + 5_000_000),
+        );
+        assert_eq!(pin, Some(6));
+        assert!(note.is_some());
+
+        // Below the single-thread peak: floors at 1 and says so — the codec
+        // pre-flight then raises the memory-limit error.
+        let (pin, note) =
+            fit_threads_to_budget(w, h, 3, 6, Some(32), Some(e1.peak_memory_bytes_max - 1));
+        assert_eq!(pin, Some(1));
+        assert!(note.unwrap().contains("floor"));
+    }
+
+    /// On Linux the implicit budget is detected and sane (nonzero, below
+    /// the raw MemAvailable it derives from).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn implicit_budget_detects_on_linux() {
+        let raw = detected_available_ram().expect("/proc/meminfo MemAvailable");
+        let budget = implicit_memory_budget().expect("implicit budget");
+        assert!(budget > 0);
+        assert!(budget < raw, "80% headroom must reduce the raw figure");
     }
 }

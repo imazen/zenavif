@@ -36,6 +36,30 @@ write-path returns + gain-map interop additions, already on main).
 
 ## [Unreleased]
 
+### Added
+- **Memory-adaptive encode concurrency: encodes fit their thread count to
+  the memory budget instead of blowing past it.** The zencodec encode
+  pre-flight (still + animation paths) now checks the CALIBRATED
+  thread-aware peak estimate (`heuristics::estimate_encode_threaded`) —
+  not just the raw input-buffer size — against an explicit
+  `ResourceLimits::max_memory_bytes`, or, absent one, against an implicit
+  budget of 80% of detected available RAM (Linux `/proc/meminfo`
+  `MemAvailable`; no implicit cap elsewhere). When the budget requires it,
+  the encoder walks its thread count down (floor 1) and pins the reduced
+  count on the native config — including under `ThreadingPolicy::Parallel`,
+  which previously always kept the machine-wide default — and records the
+  reduction on the `EncodeOutput` as a `String` extra
+  (`output.extras::<String>()`); reductions are never silent. Only when
+  even the single-threaded estimate exceeds the budget does the encode
+  error (the memory-limit error; the implicit-budget message says to set
+  `max_memory_bytes` to override — a clean error beats the kernel OOM
+  kill measured on 32 GB boxes). `estimate_encode_resources` now returns
+  thread-aware figures too: peaks carry the measured per-thread
+  working-set term and wall time is divided by the fitted Amdahl speedup
+  (with `cpu_ms` carrying the single-thread work). All helpers are
+  crate-private — no new public API. (zensysbench CODEC-MEMORY-PLAN
+  wave 2.)
+
 ### Fixed
 - **Lossless no longer pessimizes at slow speeds (issue #8).** On the
   zenrav1e release the dep chain currently resolves (0.1.4, whose

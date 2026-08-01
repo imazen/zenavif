@@ -55,6 +55,75 @@ fn policy_to_threads(policy: zencodec::ThreadingPolicy) -> u32 {
     }
 }
 
+/// Memory-adaptive concurrency pre-flight shared by the still and animation
+/// encode paths: fit the encoder thread count to the memory budget, verify
+/// the calibrated thread-aware estimate at the chosen count, and return the
+/// thread pin (`Some(n)` only when a reduction is needed) plus the reduction
+/// note (never silent).
+///
+/// Budget semantics (see `crate::heuristics::fit_threads_to_budget`):
+/// * explicit `ResourceLimits::max_memory_bytes` is a hard budget — when even
+///   the single-threaded conservative peak
+///   (`EncodeEstimate::peak_memory_bytes_max`) exceeds it, this errors with
+///   the memory-limit error (thread reduction cannot shrink a single-thread
+///   peak);
+/// * with no explicit limit, 80 % of detected available RAM (Linux
+///   `MemAvailable`; no implicit cap elsewhere) bounds the thread choice, and
+///   an encode that cannot fit even single-threaded errors with a hint to set
+///   `max_memory_bytes` — a clean error beats the kernel OOM-killing the
+///   process (measured on 32 GB boxes).
+///
+/// `bpp` is the caller's input-buffer bytes-per-pixel, which is also the
+/// calibrated estimate stratum (3/4/6/8). The f32 paths pass 12/16, which the
+/// model treats as ≥ 6 (10-bit stratum) — an over-estimate of their actual
+/// 8-bit re-encode, i.e. conservative in the safe direction. The gray path
+/// passes 1, a slight under-estimate of its RGB expansion (working-set term
+/// dominates; the 2 B/px difference is ~5 %).
+#[cfg(feature = "encode")]
+fn fit_encode_threads_to_memory(
+    limits: &ResourceLimits,
+    config: &crate::EncoderConfig,
+    w: u32,
+    h: u32,
+    bpp: u8,
+) -> Result<(Option<usize>, Option<String>), At<Error>> {
+    use crate::heuristics as hx;
+    let speed = config.speed_value();
+    let requested = config.threads;
+    let explicit = limits.max_memory_bytes;
+    let budget = explicit.or_else(hx::implicit_memory_budget);
+    let (pin, note) = hx::fit_threads_to_budget(w, h, bpp, speed, requested, budget);
+    let chosen = pin.unwrap_or_else(|| hx::requested_or_default_threads(requested));
+    if let (Some(budget_bytes), Some(est)) = (
+        budget,
+        hx::estimate_encode_threaded(w, h, bpp, speed, chosen),
+    ) && est.peak_memory_bytes_max > budget_bytes
+    {
+        // The fit already walked to the floor: `chosen` is 1 (or the
+        // caller explicitly requested 1), so this encode does not fit
+        // the budget at ANY thread count.
+        return Err(match limits.check_memory(est.peak_memory_bytes_max) {
+            // Explicit limit: the standard `LimitExceeded::Memory`
+            // actual/max figures, with context appended.
+            Err(e) => at!(Error::ResourceLimit(format!(
+                "{e} (calibrated AVIF encode peak estimate: exceeds \
+                 max_memory_bytes even single-threaded; reduce dimensions \
+                 or raise the limit)"
+            ))),
+            // No explicit limit (check_memory passes vacuously): the
+            // implicit available-RAM budget, with the override hint.
+            Ok(()) => at!(Error::ResourceLimit(format!(
+                "calibrated AVIF encode peak estimate {est_max} B exceeds the \
+                 implicit memory budget {budget_bytes} B (80% of detected \
+                 available RAM) even single-threaded; set \
+                 ResourceLimits::max_memory_bytes to choose the budget explicitly",
+                est_max = est.peak_memory_bytes_max,
+            ))),
+        });
+    }
+    Ok((pin, note))
+}
+
 // ── Encoding ────────────────────────────────────────────────────────────────
 
 /// AVIF encoder configuration implementing [`zencodec::encode::EncoderConfig`].
@@ -514,10 +583,16 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
 
     /// Core-adjusted resource estimate via zencodec's unified `estimate` API.
     ///
-    /// Delegates to the crate's calibrated [`crate::heuristics::estimate_encode`]
-    /// (memory / time / output, keyed on the AV1 `speed` preset and the input
-    /// bytes-per-pixel stratum) and maps the local
-    /// [`crate::heuristics::ThreadingInfo`] onto the shared
+    /// Delegates to the crate's calibrated
+    /// [`crate::heuristics::estimate_encode_threaded`] (memory / time /
+    /// output, keyed on the AV1 `speed` preset and the input bytes-per-pixel
+    /// stratum, adjusted for `compute.cores()`): wall time is divided by the
+    /// measured Amdahl speedup — better than the linear `at_cores` division,
+    /// which is therefore NOT applied on top (it would divide a second time)
+    /// — and the peak tiers carry the measured per-thread working-set term
+    /// (`ThreadingInfo::mem_bytes_per_thread`), so a many-core environment
+    /// sees the higher parallel peak, not the single-thread one. The local
+    /// [`crate::heuristics::ThreadingInfo`] maps onto the shared
     /// [`zencodec::estimate::ThreadingInformation`] only here at the boundary —
     /// the codec's local heuristics stay decoupled from the optional `zencodec`
     /// dependency, so a decode-only build still compiles.
@@ -539,12 +614,21 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
         } else {
             ThreadingInformation::SERIAL
         };
-        match crate::heuristics::estimate_encode(image.width(), image.height(), bpp, speed) {
-            Some(e) => ResourceEstimate::new(e.peak_memory_bytes, e.time_ms as u64)
-                .with_peak_max(e.peak_memory_bytes_max)
-                .with_threading(ti)
-                .at_cores(compute.cores()),
-            None => ResourceEstimate::conservative(image).at_cores(compute.cores()),
+        let cores = compute.cores();
+        let (w, h) = (image.width(), image.height());
+        match (
+            crate::heuristics::estimate_encode(w, h, bpp, speed),
+            crate::heuristics::estimate_encode_threaded(w, h, bpp, speed, cores),
+        ) {
+            (Some(single), Some(threaded)) => {
+                // wall = Amdahl-adjusted; cpu = total work ≈ the calibrated
+                // single-thread time (threads=1 calibration, wall ≈ user).
+                ResourceEstimate::new(threaded.peak_memory_bytes, threaded.time_ms as u64)
+                    .with_peak_max(threaded.peak_memory_bytes_max)
+                    .with_cpu_ms(single.time_ms as u64)
+                    .with_threading(ti)
+            }
+            _ => ResourceEstimate::conservative(image).at_cores(cores),
         }
     }
 
@@ -708,7 +792,11 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         }
         // Apply threading policy from ResourceLimits.
         // Skip Parallel — it means "use the ambient pool", so keep the codec's
-        // own default rather than pinning a thread count.
+        // own default rather than pinning a thread count. Dimensions are not
+        // known yet here, so this only lowers the POLICY; the memory-budget
+        // thread fit runs at encode time (`checked_config`), where it may pin
+        // a lower count — including under Parallel — when the calibrated
+        // estimate would exceed `max_memory_bytes` (or available RAM).
         if !matches!(self.limits.threading(), zencodec::ThreadingPolicy::Parallel) {
             let threads = policy_to_threads(self.limits.threading());
             if threads > 0 {
@@ -740,6 +828,7 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
             xmp,
             limits: self.limits,
             caller_cicp: plan_cicp,
+            threads_note: None,
         })
     }
 
@@ -800,7 +889,9 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         if let Some(mir) = self.mirror {
             config = config.mirror(mir);
         }
-        // Apply threading policy
+        // Apply threading policy (canvas dimensions are not known yet here;
+        // the memory-budget thread fit runs in `finish_inner`, where it may
+        // pin a lower count — including under Parallel).
         if !matches!(self.limits.threading(), zencodec::ThreadingPolicy::Parallel) {
             let threads = policy_to_threads(self.limits.threading());
             if threads > 0 {
@@ -941,6 +1032,10 @@ pub struct AvifEncoder {
     /// pixel-descriptor color in `apply_descriptor_color` only fills axes this
     /// leaves *unspecified*, so a caller's CICP is never clobbered.
     caller_cicp: Option<zencodec::Cicp>,
+    /// Record of a memory-budget thread reduction made by `checked_config`
+    /// (reductions are never silent). Attached to the [`EncodeOutput`] as a
+    /// `String` extra in `make_output`.
+    threads_note: Option<String>,
 }
 
 #[cfg(feature = "encode")]
@@ -959,7 +1054,23 @@ impl AvifEncoder {
         cfg
     }
 
-    fn check_limits(&self, w: usize, h: usize, bpp: u64) -> Result<(), At<Error>> {
+    /// Pre-flight resource checks + memory-adaptive thread fit, returning the
+    /// final native config for this encode (any budget-driven thread pin
+    /// applied on top of [`build_config`](Self::build_config)).
+    ///
+    /// Checks, in order: dimension caps; the raw input-buffer size against
+    /// `max_memory_bytes` (cheap floor, kept from the pre-calibrated era);
+    /// then the CALIBRATED thread-aware peak estimate at the fitted thread
+    /// count via [`fit_encode_threads_to_memory`] — which reduces the thread
+    /// count to fit the budget and errors only when even the single-threaded
+    /// estimate does not fit. Any reduction is recorded in
+    /// [`threads_note`](Self::threads_note) (surfaced by `make_output`).
+    fn checked_config(
+        &mut self,
+        w: usize,
+        h: usize,
+        bpp: u64,
+    ) -> Result<crate::EncoderConfig, At<Error>> {
         self.limits
             .check_dimensions(w as u32, h as u32)
             .map_err(|_| {
@@ -972,14 +1083,33 @@ impl AvifEncoder {
         self.limits
             .check_memory(estimated_mem)
             .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
-        Ok(())
+        let (pin, note) = fit_encode_threads_to_memory(
+            &self.limits,
+            &self.config,
+            w as u32,
+            h as u32,
+            bpp as u8,
+        )?;
+        self.threads_note = note;
+        let mut cfg = self.build_config();
+        if let Some(n) = pin {
+            cfg = cfg.threads(Some(n));
+        }
+        Ok(cfg)
     }
 
     fn make_output(&self, data: Vec<u8>) -> Result<EncodeOutput, At<Error>> {
         self.limits
             .check_output_size(data.len() as u64)
             .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
-        Ok(EncodeOutput::new(data, ImageFormat::Avif))
+        let mut out = EncodeOutput::new(data, ImageFormat::Avif);
+        if let Some(ref note) = self.threads_note {
+            // Reductions are never silent: readable by the caller via
+            // `output.extras::<String>()` (no zenavif-specific type — this
+            // crate adds no public API for it).
+            out = out.with_extras(note.clone());
+        }
+        Ok(out)
     }
 
     fn stop_token(&self) -> almost_enough::StopToken {
@@ -1071,11 +1201,10 @@ impl AvifEncoder {
 
     /// Convert f32 RGB pixels to u16 and encode via the 16-bit path.
     /// Used for HDR (PQ/HLG) f32 data that would be corrupted by linear_to_srgb_u8().
-    fn encode_f32_as_u16_rgb(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+    fn encode_f32_as_u16_rgb(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
         let h = pixels.rows() as usize;
-        self.check_limits(w, h, 6)?; // 6 bytes per u16 RGB pixel
-        let cfg = self.build_config();
+        let cfg = self.checked_config(w, h, 6)?; // 6 bytes per u16 RGB pixel
         let stop = self.stop_token();
         let raw = pixels.contiguous_bytes();
         let rgb: Vec<Rgb<u16>> = raw
@@ -1098,11 +1227,10 @@ impl AvifEncoder {
 
     /// Convert f32 RGBA pixels to u16 and encode via the 16-bit path.
     /// Used for HDR (PQ/HLG) f32 data that would be corrupted by linear_to_srgb_u8().
-    fn encode_f32_as_u16_rgba(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+    fn encode_f32_as_u16_rgba(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
         let h = pixels.rows() as usize;
-        self.check_limits(w, h, 8)?; // 8 bytes per u16 RGBA pixel
-        let cfg = self.build_config();
+        let cfg = self.checked_config(w, h, 8)?; // 8 bytes per u16 RGBA pixel
         let stop = self.stop_token();
         let raw = pixels.contiguous_bytes();
         let rgba: Vec<Rgba<u16>> = raw
@@ -1127,11 +1255,10 @@ impl AvifEncoder {
 
     // ── Per-format encode helpers ──────────────────────────────────────
 
-    fn do_encode_rgb8(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+    fn do_encode_rgb8(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
         let h = pixels.rows() as usize;
-        self.check_limits(w, h, 3)?;
-        let cfg = self.build_config();
+        let cfg = self.checked_config(w, h, 3)?;
         let stop = self.stop_token();
         let raw = pixels.contiguous_bytes();
         let rgb: &[Rgb<u8>] = bytemuck::cast_slice(&raw);
@@ -1140,11 +1267,10 @@ impl AvifEncoder {
         self.make_output(result.avif_file)
     }
 
-    fn do_encode_rgba8(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+    fn do_encode_rgba8(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
         let h = pixels.rows() as usize;
-        self.check_limits(w, h, 4)?;
-        let cfg = self.build_config();
+        let cfg = self.checked_config(w, h, 4)?;
         let stop = self.stop_token();
         let raw = pixels.contiguous_bytes();
         let rgba: &[Rgba<u8>] = bytemuck::cast_slice(&raw);
@@ -1153,11 +1279,10 @@ impl AvifEncoder {
         self.make_output(result.avif_file)
     }
 
-    fn do_encode_gray8(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+    fn do_encode_gray8(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
         let h = pixels.rows() as usize;
-        self.check_limits(w, h, 1)?;
-        let cfg = self.build_config();
+        let cfg = self.checked_config(w, h, 1)?;
         let stop = self.stop_token();
         let raw = pixels.contiguous_bytes();
         #[cfg(feature = "encode-mono")]
@@ -1182,12 +1307,11 @@ impl AvifEncoder {
         }
     }
 
-    fn do_encode_rgb_f32(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+    fn do_encode_rgb_f32(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
         use linear_srgb::default::linear_to_srgb_u8;
         let w = pixels.width() as usize;
         let h = pixels.rows() as usize;
-        self.check_limits(w, h, 12)?;
-        let cfg = self.build_config();
+        let cfg = self.checked_config(w, h, 12)?;
         let stop = self.stop_token();
         let raw = pixels.contiguous_bytes();
         let rgb: Vec<Rgb<u8>> = raw
@@ -1208,12 +1332,11 @@ impl AvifEncoder {
         self.make_output(result.avif_file)
     }
 
-    fn do_encode_rgba_f32(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+    fn do_encode_rgba_f32(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
         use linear_srgb::default::linear_to_srgb_u8;
         let w = pixels.width() as usize;
         let h = pixels.rows() as usize;
-        self.check_limits(w, h, 16)?;
-        let cfg = self.build_config();
+        let cfg = self.checked_config(w, h, 16)?;
         let stop = self.stop_token();
         let raw = pixels.contiguous_bytes();
         let rgba: Vec<Rgba<u8>> = raw
@@ -1236,12 +1359,11 @@ impl AvifEncoder {
         self.make_output(result.avif_file)
     }
 
-    fn do_encode_gray_f32(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+    fn do_encode_gray_f32(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
         use linear_srgb::default::linear_to_srgb_u8;
         let w = pixels.width() as usize;
         let h = pixels.rows() as usize;
-        self.check_limits(w, h, 4)?;
-        let cfg = self.build_config();
+        let cfg = self.checked_config(w, h, 4)?;
         let stop = self.stop_token();
         let raw = pixels.contiguous_bytes();
         let rgb: Vec<Rgb<u8>> = raw
@@ -1257,11 +1379,10 @@ impl AvifEncoder {
         self.make_output(result.avif_file)
     }
 
-    fn do_encode_rgb16(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+    fn do_encode_rgb16(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
         let h = pixels.rows() as usize;
-        self.check_limits(w, h, 6)?;
-        let cfg = self.build_config();
+        let cfg = self.checked_config(w, h, 6)?;
         let stop = self.stop_token();
         let raw = pixels.contiguous_bytes();
         let rgb: &[Rgb<u16>] = bytemuck::cast_slice(&raw);
@@ -1270,11 +1391,10 @@ impl AvifEncoder {
         self.make_output(result.avif_file)
     }
 
-    fn do_encode_rgba16(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+    fn do_encode_rgba16(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
         let h = pixels.rows() as usize;
-        self.check_limits(w, h, 8)?;
-        let cfg = self.build_config();
+        let cfg = self.checked_config(w, h, 8)?;
         let stop = self.stop_token();
         let raw = pixels.contiguous_bytes();
         let rgba: &[Rgba<u16>] = bytemuck::cast_slice(&raw);
@@ -2869,7 +2989,7 @@ impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
 #[cfg(feature = "encode")]
 impl AvifEncoder {
     fn encode_srgba8_inner(
-        self,
+        mut self,
         data: &mut [u8],
         make_opaque: bool,
         width: u32,
@@ -2879,8 +2999,7 @@ impl AvifEncoder {
         let w = width as usize;
         let h = height as usize;
         let stride = stride_pixels as usize;
-        self.check_limits(w, h, 4)?;
-        let cfg = self.build_config();
+        let cfg = self.checked_config(w, h, 4)?;
         let stop = self.stop_token();
 
         if make_opaque {
@@ -2959,8 +3078,7 @@ impl AvifEncoder {
                 let raw = pixels.contiguous_bytes();
                 let w = pixels.width() as usize;
                 let h = pixels.rows() as usize;
-                self.check_limits(w, h, 4)?;
-                let cfg = self.build_config();
+                let cfg = self.checked_config(w, h, 4)?;
                 let stop = self.stop_token();
                 let rgba: Vec<Rgba<u8>> = raw
                     .chunks_exact(4)
@@ -2980,8 +3098,7 @@ impl AvifEncoder {
                 let raw = pixels.contiguous_bytes();
                 let w = pixels.width() as usize;
                 let h = pixels.rows() as usize;
-                self.check_limits(w, h, 3)?;
-                let cfg = self.build_config();
+                let cfg = self.checked_config(w, h, 3)?;
                 let stop = self.stop_token();
                 let rgb: Vec<Rgb<u8>> = raw
                     .chunks_exact(4)
@@ -3000,8 +3117,7 @@ impl AvifEncoder {
                 let raw = pixels.contiguous_bytes();
                 let w = pixels.width() as usize;
                 let h = pixels.rows() as usize;
-                self.check_limits(w, h, 3)?;
-                let cfg = self.build_config();
+                let cfg = self.checked_config(w, h, 3)?;
                 let stop = self.stop_token();
                 let rgb: Vec<Rgb<u8>> = raw
                     .chunks_exact(4)
@@ -3132,7 +3248,7 @@ impl AvifAnimationFrameEncoder {
         Ok(())
     }
 
-    fn finish_inner(self, stop: Option<&dyn Stop>) -> Result<EncodeOutput, At<Error>> {
+    fn finish_inner(mut self, stop: Option<&dyn Stop>) -> Result<EncodeOutput, At<Error>> {
         if let Some(s) = stop {
             s.check().map_err(|e| at!(Error::from(e)))?;
         }
@@ -3142,6 +3258,31 @@ impl AvifAnimationFrameEncoder {
 
         if self.frames.is_empty() {
             return Err(at!(Error::InvalidState("no frames to encode".into())));
+        }
+
+        // Memory-adaptive concurrency: canvas dimensions and pixel format are
+        // known once frames exist, so fit the encoder thread count to the
+        // memory budget here (the animation-job counterpart of the still
+        // path's `checked_config`). The estimate covers the per-frame AV1
+        // encoder working set — the dominant cost; the buffered input frames
+        // were checked per push against the raw-size limit above. Errors when
+        // even the single-threaded estimate does not fit the budget.
+        let mut threads_note = None;
+        if let (Some(w), Some(h), Some(fmt)) =
+            (self.canvas_width, self.canvas_height, self.pixel_format)
+        {
+            let bpp: u8 = match fmt {
+                zenpixels::PixelFormat::Rgb8 => 3,
+                zenpixels::PixelFormat::Rgba8 => 4,
+                zenpixels::PixelFormat::Rgb16 => 6,
+                // Rgba16 (push_frame_inner rejects everything else).
+                _ => 8,
+            };
+            let (pin, note) = fit_encode_threads_to_memory(&self.limits, &self.config, w, h, bpp)?;
+            if let Some(n) = pin {
+                self.config = self.config.clone().threads(Some(n));
+            }
+            threads_note = note;
         }
 
         let stop_token = self.stop_token();
@@ -3229,7 +3370,12 @@ impl AvifAnimationFrameEncoder {
             .check_output_size(avif_file.len() as u64)
             .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
 
-        Ok(EncodeOutput::new(avif_file, ImageFormat::Avif))
+        let mut out = EncodeOutput::new(avif_file, ImageFormat::Avif);
+        if let Some(note) = threads_note {
+            // Reductions are never silent: readable via `extras::<String>()`.
+            out = out.with_extras(note);
+        }
+        Ok(out)
     }
 }
 
@@ -5848,4 +5994,186 @@ mod tests {
     // Gain map zencodec extras tests are in tests/gainmap_decode.rs
     // (integration test) to avoid pre-existing compile errors in this
     // module when `encode` feature is not enabled.
+
+    // ── Memory-adaptive encode concurrency (max_memory_bytes on ENCODE) ──
+
+    /// A tight explicit cap must reject the encode via the CALIBRATED
+    /// thread-aware estimate — even though the raw input-buffer size
+    /// (`w*h*bpp`, the pre-2026-08 check) fits comfortably. 512×512 RGB8:
+    /// raw input = 768 KiB, calibrated single-thread conservative peak
+    /// ≈ 24 MB; a 4 MB cap passes the former and must fail the latter,
+    /// BEFORE any encoding work happens (the test is instant).
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encode_max_memory_calibrated_rejects() {
+        use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
+
+        let (w, h) = (512usize, 512usize);
+        let cap = 4u64 * 1024 * 1024;
+        assert!(
+            (w * h * 3) as u64 <= cap,
+            "precondition: the raw input buffer must fit the cap, so only \
+             the calibrated estimate can reject"
+        );
+        let est1 = crate::heuristics::estimate_encode_threaded(w as u32, h as u32, 3, 4, 1)
+            .unwrap()
+            .peak_memory_bytes_max;
+        assert!(
+            est1 > cap,
+            "precondition: the single-thread calibrated peak ({est1}) must exceed the cap"
+        );
+
+        let pixels: Vec<Rgb<u8>> = vec![
+            Rgb {
+                r: 90,
+                g: 120,
+                b: 40,
+            };
+            w * h
+        ];
+        let img = imgref::ImgVec::new(pixels, w, h);
+        let result = AvifEncoderConfig::new()
+            .job()
+            .with_limits(ResourceLimits::none().with_max_memory(cap))
+            .encoder()
+            .unwrap()
+            .encode(PixelSlice::from(img.as_ref()).erase());
+        let err = result.expect_err("tight max_memory must reject the encode pre-flight");
+        let msg = format!("{err}").to_lowercase();
+        assert!(
+            msg.contains("mem"),
+            "error should be the memory-limit error, got: {msg}"
+        );
+    }
+
+    /// A moderate explicit cap — above the calibrated worst-case peak at
+    /// every thread count (the tile bound caps the per-thread term) — must
+    /// let the encode run, with no thread pin and no reduction note.
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encode_moderate_max_memory_succeeds() {
+        use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
+
+        let (w, h) = (512usize, 512usize);
+        // 512² has 4 tiles, so ≥ 4 threads all estimate alike; est at 4 is
+        // the machine-independent worst case.
+        let worst = crate::heuristics::estimate_encode_threaded(w as u32, h as u32, 3, 10, 4)
+            .unwrap()
+            .peak_memory_bytes_max;
+        let cap = 64u64 * 1024 * 1024;
+        assert!(
+            worst < cap,
+            "precondition: worst-case estimate fits the cap"
+        );
+
+        let pixels: Vec<Rgb<u8>> = vec![
+            Rgb {
+                r: 10,
+                g: 200,
+                b: 130,
+            };
+            w * h
+        ];
+        let img = imgref::ImgVec::new(pixels, w, h);
+        let output = AvifEncoderConfig::new()
+            .with_effort_u32(10) // speed 10 — fastest; memory model is speed-invariant
+            .job()
+            .with_limits(ResourceLimits::none().with_max_memory(cap))
+            .encoder()
+            .unwrap()
+            .encode(PixelSlice::from(img.as_ref()).erase())
+            .expect("encode under a moderate max_memory must succeed");
+        assert!(!output.is_empty());
+        assert!(
+            output.extras::<String>().is_none(),
+            "no thread reduction happened, so no note should be attached"
+        );
+    }
+
+    /// A cap between the 1-thread and 2-thread conservative peaks forces the
+    /// fit to walk the (explicitly requested) 8 threads down to 2 — the
+    /// encode succeeds AND the reduction is recorded on the output
+    /// (reductions are never silent). Deterministic on any machine: the
+    /// start is the explicit request, and 512²'s tile bound (4) caps the
+    /// per-thread term independent of core count.
+    #[cfg(feature = "encode")]
+    #[test]
+    fn encode_thread_reduction_is_recorded() {
+        use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
+
+        let (w, h) = (512usize, 512usize);
+        let est = |threads: usize| {
+            crate::heuristics::estimate_encode_threaded(w as u32, h as u32, 3, 10, threads)
+                .unwrap()
+                .peak_memory_bytes_max
+        };
+        // Admits 2 threads, not 3 (each extra thread costs the calibrated
+        // per-thread term).
+        let cap = est(2);
+        assert!(
+            est(3) > cap && est(1) < cap,
+            "precondition: cap isolates 2 threads"
+        );
+
+        let mut config = AvifEncoderConfig::new().with_effort_u32(10);
+        let inner = config.inner().clone().threads(Some(8));
+        *config.inner_mut() = inner;
+
+        let pixels: Vec<Rgb<u8>> = vec![
+            Rgb {
+                r: 200,
+                g: 60,
+                b: 60,
+            };
+            w * h
+        ];
+        let img = imgref::ImgVec::new(pixels, w, h);
+        let output = config
+            .job()
+            .with_limits(ResourceLimits::none().with_max_memory(cap))
+            .encoder()
+            .unwrap()
+            .encode(PixelSlice::from(img.as_ref()).erase())
+            .expect("encode must succeed at the fitted thread count");
+        let note = output
+            .extras::<String>()
+            .expect("thread reduction must be recorded on the output");
+        assert!(
+            note.contains("8") && note.contains("2"),
+            "note should record 8 -> 2, got: {note}"
+        );
+    }
+
+    /// `estimate_encode_resources` must be thread-aware: more cores → higher
+    /// peak (per-thread working-set term) and lower wall time (Amdahl), with
+    /// cpu_ms carrying the single-thread work.
+    #[cfg(feature = "encode")]
+    #[test]
+    fn estimate_encode_resources_is_thread_aware() {
+        use zencodec::encode::EncoderConfig as _;
+        use zencodec::estimate::{ComputeEnvironment, ImageCharacteristics};
+        use zenpixels::PixelDescriptor;
+
+        let config = AvifEncoderConfig::new();
+        let image = ImageCharacteristics::new(2048, 2048, PixelDescriptor::RGB8_SRGB);
+        let e1 = config.estimate_encode_resources(&image, &ComputeEnvironment::new());
+        let e8 = config.estimate_encode_resources(&image, &ComputeEnvironment::new().with_cores(8));
+        assert!(
+            e8.peak_memory_bytes_est().unwrap() > e1.peak_memory_bytes_est().unwrap(),
+            "peaks must carry the per-thread term"
+        );
+        assert!(
+            e8.peak_memory_bytes_max().unwrap() > e1.peak_memory_bytes_max().unwrap(),
+            "max peak must carry the per-thread term"
+        );
+        assert!(
+            e8.wall_ms().unwrap() < e1.wall_ms().unwrap(),
+            "wall time must shrink with cores"
+        );
+        assert_eq!(
+            e1.cpu_ms().unwrap(),
+            e8.cpu_ms().unwrap(),
+            "total CPU work is core-invariant"
+        );
+    }
 }
