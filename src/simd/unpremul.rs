@@ -221,8 +221,18 @@ mod tests {
     #[test]
     fn edge_alpha_semantics() {
         let row = vec![
-            Rgba { r: 10, g: 20, b: 30, a: 0 },
-            Rgba { r: 40, g: 50, b: 60, a: 255 },
+            Rgba {
+                r: 10,
+                g: 20,
+                b: 30,
+                a: 0,
+            },
+            Rgba {
+                r: 40,
+                g: 50,
+                b: 60,
+                a: 255,
+            },
         ];
         let mut got = row.clone();
         unpremultiply8_dispatch(&mut got);

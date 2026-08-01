@@ -16,7 +16,11 @@ type TierToken = archmage::NeonToken;
 type TierToken = archmage::X64V3Token;
 
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
-const TIER_NAME: &str = if cfg!(target_arch = "aarch64") { "neon" } else { "v3(avx2)" };
+const TIER_NAME: &str = if cfg!(target_arch = "aarch64") {
+    "neon"
+} else {
+    "v3(avx2)"
+};
 
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 fn set_simd(on: bool) -> bool {
@@ -24,7 +28,9 @@ fn set_simd(on: bool) -> bool {
     TierToken::dangerously_disable_token_process_wide(!on).is_ok()
 }
 #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-fn set_simd(_on: bool) -> bool { false }
+fn set_simd(_on: bool) -> bool {
+    false
+}
 
 fn bench(suite: &mut Suite) {
     if !set_simd(true) || !set_simd(false) {
@@ -50,8 +56,14 @@ fn bench(suite: &mut Suite) {
             for (arm, simd) in [(TIER_NAME, true), ("scalar", false)] {
                 g.bench(arm, move |b| {
                     // Buffer built in with_input so the clone is not timed.
-                    b.with_input(move || { set_simd(simd); row.to_vec() })
-                        .run(move |mut r| { zenavif::simd::unpremultiply8_dispatch(&mut r); r })
+                    b.with_input(move || {
+                        set_simd(simd);
+                        row.to_vec()
+                    })
+                    .run(move |mut r| {
+                        zenavif::simd::unpremultiply8_dispatch(&mut r);
+                        r
+                    })
                 });
             }
         });
