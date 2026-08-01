@@ -162,6 +162,9 @@ fn contiguous_rgb8(img: ImgRef<'_, Rgb<u8>>) -> Vec<u8> {
 }
 
 /// The kept encode from [`encode_rgb8_monotone`] plus probe provenance.
+// Provenance fields are asserted by the monotone tests and kept for
+// diagnostics; the shipping path consumes only `encoded` today.
+#[allow(dead_code)]
 #[cfg(feature = "auto-tune")]
 #[derive(Debug)]
 pub(crate) struct MonotoneEncoded {
@@ -193,7 +196,7 @@ pub(crate) const PROBE_ANCHOR_SPEED: u8 = 4;
 /// The requested tiers that can suffer pattern-2 (the armed s6+ bundle tiers).
 #[cfg(feature = "auto-tune")]
 fn probe_eligible_speed(speed: u8) -> bool {
-    matches!(speed, 6 | 7 | 8)
+    matches!(speed, 6..=8)
 }
 
 /// Encode RGB8 to AVIF with a per-image RD-vs-time monotonicity guarantee at
