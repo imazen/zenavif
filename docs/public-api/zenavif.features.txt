@@ -1,5 +1,5 @@
 # zenavif public API — additions from non-default features
-# features: auto-tune,encode,encode-asm,encode-imazen,encode-threading,unsafe-asm,zencodec
+# features: auto-tune,encode,encode-asm,encode-imazen,encode-mono,encode-threading,target-quality,two-pass-butteraugli,unsafe-asm
 # (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
 # Encodings: crate-name prefix stripped; auto traits collapse to a
 # count + exceptions; trait impls collapse to one roster line per
@@ -9,20 +9,87 @@
 
 ## summary
 #
-#   pub types (struct/enum/trait/alias)        31
-#   free functions                             10
-#   inherent methods                           83
-#   struct fields                              71
-#   enum variants                              25
-#   trait roster entries (type × trait)        95
-#   auto-trait-complete types                  25
-#   auto-trait exceptions                       6
+#   pub modules                                 4
+#   pub types (struct/enum/trait/alias)        44
+#   pub consts/statics                         18
+#   free functions                             26
+#   inherent methods                           75
+#   struct fields                             110
+#   enum variants                              44
+#   re-exports                                  2
+#   trait roster entries (type × trait)       129
+#   auto-trait-complete types                  34
+#   auto-trait exceptions                       3
 #
 # per-module pub lines:
-#   (root)                          220
+#   (root)                          258
+#   fast_heads                       29
+#   palette_gate                     10
+#   q0_head                           3
+#   two_pass                         23
 
-## items (220 lines)
+## items (315 lines)
 
+pub use FRAME_HINTS_LIVE
+pub mod fast_heads
+pub fast_heads::PartitionBudget::Max32
+pub fast_heads::PartitionBudget::Ship
+pub fast_heads::TxBudget::Largest
+pub fast_heads::TxBudget::Min
+pub fast_heads::TxBudget::Size1
+pub fast_heads::FastTierBudgets::partition: fast_heads::PartitionBudget
+pub fast_heads::FastTierBudgets::tx: fast_heads::TxBudget
+pub const fast_heads::MONOTONE_GATE_GRADIENT_SMOOTH_MAX: f32
+pub const fast_heads::MONOTONE_GATE_LIVE: bool
+pub const fast_heads::MONOTONE_REMAP_SPEED: u8
+pub const fast_heads::MONOTONE_VALLEY_SPEED: u8
+pub const fast_heads::PART_GATE_GRADIENT_SMOOTH_MAX32: f32
+pub const fast_heads::PART_HEAD_SPEED: u8
+pub const fast_heads::S4_TIER_MAX_SPEED: u8
+pub const fast_heads::S4_TIER_MIN_SPEED: u8
+pub const fast_heads::TX_GATE_DCT_COMPRESSIBILITY_MIN: f32
+pub const fast_heads::TX_GATE_DCT_COMPRESSIBILITY_MIN_S4TIER: f32
+pub const fast_heads::TX_GATE_DCT_RAZOR_MIN: f32
+pub const fast_heads::TX_GATE_PATCH_FRACTION_LARGEST: f32
+pub const fast_heads::TX_HEAD_MAX_SPEED: u8
+pub const fast_heads::TX_HEAD_MIN_SPEED: u8
+pub fn fast_heads::fast_tier_budgets_for_rgb8(&[u8], u32, u32, core::option::Option<&zenanalyze_api::Offer<'_>>, u8) -> fast_heads::FastTierBudgets
+pub fn fast_heads::monotone_speed_gate(f32, u8) -> u8
+pub fn fast_heads::monotone_speed_gate_for_rgb8(&[u8], u32, u32, core::option::Option<&zenanalyze_api::Offer<'_>>, u8) -> u8
+pub fn fast_heads::partition_budget_gate(f32, u8) -> fast_heads::PartitionBudget
+pub fn fast_heads::tx_budget_gate(f32, f32, u8) -> fast_heads::TxBudget
+pub mod palette_gate
+pub palette_gate::PalettePreference::Always
+pub palette_gate::PalettePreference::Auto
+pub palette_gate::PalettePreference::Off
+pub const palette_gate::PALETTE_GATE_FAST_TIER_MIN_SPEED: u8
+pub const palette_gate::PALETTE_GATE_PATCH_FRACTION: f32
+pub const palette_gate::PALETTE_GATE_PATCH_FRACTION_FAST: f32
+pub fn palette_gate::palette_gate(f32, u8) -> palette_gate::PalettePreference
+pub fn palette_gate::palette_gate_for_rgb8(&[u8], u32, u32, core::option::Option<&zenanalyze_api::Offer<'_>>, u8) -> palette_gate::PalettePreference
+pub fn palette_gate::palette_gate_threshold(u8) -> f32
+pub mod q0_head
+pub const q0_head::Q0_FEATURES: [zenanalyze::feature::AnalysisFeature; 8]
+pub fn q0_head::predict_q0_for_rgb8(&[u8], u32, u32, f64, u8, core::option::Option<&zenanalyze_api::Offer<'_>>) -> core::option::Option<f32>
+pub fn q0_head::predict_q0_from_features(&[f32; 8], f32, u8, u64) -> core::option::Option<f32>
+pub mod two_pass
+pub use two_pass::FRAME_HINTS_LIVE
+pub two_pass::TwoPassMetric::Butteraugli
+pub fn two_pass::TwoPassMetric::from_name(&str) -> core::option::Option<Self>
+pub fn two_pass::TwoPassMetric::name(self) -> &'static str
+pub two_pass::TwoPassEncode::encode: EncodedImage
+pub two_pass::TwoPassEncode::pass1_butteraugli_3n: f64
+pub two_pass::TwoPassEncode::pass1_butteraugli_max: f64
+pub two_pass::TwoPassEncode::pass1_bytes: usize
+pub two_pass::TwoPassEncode::sb_q_scale: alloc::boxed::Box<[f32]>
+pub two_pass::TwoPassOptions::hf_asymmetry: f32
+pub two_pass::TwoPassOptions::intensity_target: f32
+pub two_pass::TwoPassOptions::k: f64
+pub two_pass::TwoPassOptions::metric: two_pass::TwoPassMetric
+pub two_pass::TwoPassOptions::pool_exponent: f64
+pub two_pass::TwoPassOptions::probe_quality: core::option::Option<f32>
+pub two_pass::TwoPassOptions::strength: f64
+pub two_pass::TwoPassOptions::weight_clamp: (f64, f64)
 pub enum AutoTuneError
 pub AutoTuneError::FeatureExtraction(alloc::string::String)
 pub AutoTuneError::Inference(alloc::string::String)
@@ -51,13 +118,30 @@ pub EncodeColorModel::YCbCr
 pub enum EncodePixelRange
 pub EncodePixelRange::Full
 pub EncodePixelRange::Limited
-pub Error::UnsupportedOperation(zencodec::capabilities::UnsupportedOperation)
+pub enum PalettePreference [also: palette_gate]
+pub PalettePreference::Always
+pub PalettePreference::Auto
+pub PalettePreference::Off
+pub enum PartitionBudget [also: fast_heads]
+pub PartitionBudget::Max32
+pub PartitionBudget::Ship
 pub enum QualityTarget
 pub QualityTarget::Zensim(f32)
+pub enum TargetMetric
+pub TargetMetric::Ssim2(f64)
+pub TargetMetric::Zensim(f64)
 pub enum TilesResolution
 pub TilesResolution::Fixed(usize)
 pub TilesResolution::MachineDependent
 pub TilesResolution::MachineDependent::cap: usize
+#[non_exhaustive] pub enum TwoPassMetric [also: two_pass]
+pub TwoPassMetric::Butteraugli
+pub fn two_pass::TwoPassMetric::from_name(&str) -> core::option::Option<Self>
+pub fn two_pass::TwoPassMetric::name(self) -> &'static str
+pub enum TxBudget [also: fast_heads]
+pub TxBudget::Largest
+pub TxBudget::Min
+pub TxBudget::Size1
 pub struct AnimationFrame
 pub AnimationFrame::duration_ms: u32
 pub AnimationFrame::pixels: imgref::ImgVec<rgb::RGB8>
@@ -78,41 +162,21 @@ pub fn AutoTuneOptions::new() -> Self
 pub fn AutoTuneOptions::with_pareto_weight(self, f32) -> Self
 pub fn AutoTuneOptions::with_speed_range(self, core::ops::range::RangeInclusive<u8>) -> Self
 pub fn AutoTuneOptions::with_time_budget(self, core::time::Duration) -> Self
-pub struct AvifAnimationFrameDecoder
 pub struct AvifAnimationFrameEncoder
-pub struct AvifDecodeJob
-pub fn AvifDecodeJob::with_extract_gain_map(self, bool) -> Self
 pub struct AvifDecoder
 pub fn AvifDecoder::decode(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<zenpixels::buffer::PixelBuffer>
 pub fn AvifDecoder::info(&self) -> &ImageInfo
 pub fn AvifDecoder::new(&[u8], &DecoderConfig) -> Result<Self>
-pub struct AvifDecoderConfig
-pub fn AvifDecoderConfig::decode(&self, &[u8]) -> core::result::Result<zencodec::output::DecodeOutput, whereat::at::At<Error>>
-pub fn AvifDecoderConfig::decode_into_gray_f32(&self, &[u8], imgref::ImgRefMut<'_, rgb::formats::gray::Gray_v08<f32>>) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<Error>>
-pub fn AvifDecoderConfig::decode_into_rgb8(&self, &[u8], imgref::ImgRefMut<'_, rgb::formats::rgb::Rgb<u8>>) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<Error>>
-pub fn AvifDecoderConfig::decode_into_rgb_f32(&self, &[u8], imgref::ImgRefMut<'_, rgb::formats::rgb::Rgb<f32>>) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<Error>>
-pub fn AvifDecoderConfig::decode_into_rgba8(&self, &[u8], imgref::ImgRefMut<'_, rgb::formats::rgba::Rgba<u8>>) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<Error>>
-pub fn AvifDecoderConfig::decode_into_rgba_f32(&self, &[u8], imgref::ImgRefMut<'_, rgb::formats::rgba::Rgba<f32>>) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<Error>>
-pub fn AvifDecoderConfig::inner(&self) -> &DecoderConfig
-pub fn AvifDecoderConfig::inner_mut(&mut self) -> &mut DecoderConfig
-pub fn AvifDecoderConfig::new() -> Self
-pub fn AvifDecoderConfig::probe_full(&self, &[u8]) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<Error>>
-pub fn AvifDecoderConfig::probe_header(&self, &[u8]) -> core::result::Result<zencodec::info::ImageInfo, whereat::at::At<Error>>
-pub fn AvifDecoderConfig::with_extract_gain_map(self, bool) -> Self
-pub fn AvifDecoderConfig::with_film_grain(self, bool) -> Self
-pub fn AvifDecoderConfig::with_limits(self, zencodec::limits::ResourceLimits) -> Self
-pub fn AvifDecoderConfig::with_orientation(self, zencodec::orientation::OrientationHint) -> Self
-pub fn AvifDecoderConfig::with_threads(self, u32) -> Self
 pub struct AvifEncodeJob
 pub fn AvifEncodeJob::with_exif(self, impl core::convert::Into<alloc::sync::Arc<[u8]>>) -> Self
 pub struct AvifEncoder
 pub struct AvifEncoderConfig
-pub fn AvifEncoderConfig::encode_gray8(&self, imgref::ImgRef<'_, rgb::formats::gray::Gray_v08<u8>>) -> core::result::Result<zencodec::output::EncodeOutput, whereat::at::At<Error>>
-pub fn AvifEncoderConfig::encode_gray_f32(&self, imgref::ImgRef<'_, rgb::formats::gray::Gray_v08<f32>>) -> core::result::Result<zencodec::output::EncodeOutput, whereat::at::At<Error>>
-pub fn AvifEncoderConfig::encode_rgb8(&self, imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u8>>) -> core::result::Result<zencodec::output::EncodeOutput, whereat::at::At<Error>>
-pub fn AvifEncoderConfig::encode_rgb_f32(&self, imgref::ImgRef<'_, rgb::formats::rgb::Rgb<f32>>) -> core::result::Result<zencodec::output::EncodeOutput, whereat::at::At<Error>>
-pub fn AvifEncoderConfig::encode_rgba8(&self, imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u8>>) -> core::result::Result<zencodec::output::EncodeOutput, whereat::at::At<Error>>
-pub fn AvifEncoderConfig::encode_rgba_f32(&self, imgref::ImgRef<'_, rgb::formats::rgba::Rgba<f32>>) -> core::result::Result<zencodec::output::EncodeOutput, whereat::at::At<Error>>
+pub fn AvifEncoderConfig::encode_gray8(&self, imgref::ImgRef<'_, rgb::formats::gray::Gray_v08<u8>>) -> core::result::Result<zencodec::output::EncodeOutput, whereat::at::At<zencodec::error::CodecError>>
+pub fn AvifEncoderConfig::encode_gray_f32(&self, imgref::ImgRef<'_, rgb::formats::gray::Gray_v08<f32>>) -> core::result::Result<zencodec::output::EncodeOutput, whereat::at::At<zencodec::error::CodecError>>
+pub fn AvifEncoderConfig::encode_rgb8(&self, imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u8>>) -> core::result::Result<zencodec::output::EncodeOutput, whereat::at::At<zencodec::error::CodecError>>
+pub fn AvifEncoderConfig::encode_rgb_f32(&self, imgref::ImgRef<'_, rgb::formats::rgb::Rgb<f32>>) -> core::result::Result<zencodec::output::EncodeOutput, whereat::at::At<zencodec::error::CodecError>>
+pub fn AvifEncoderConfig::encode_rgba8(&self, imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u8>>) -> core::result::Result<zencodec::output::EncodeOutput, whereat::at::At<zencodec::error::CodecError>>
+pub fn AvifEncoderConfig::encode_rgba_f32(&self, imgref::ImgRef<'_, rgb::formats::rgba::Rgba<f32>>) -> core::result::Result<zencodec::output::EncodeOutput, whereat::at::At<zencodec::error::CodecError>>
 pub fn AvifEncoderConfig::inner(&self) -> &EncoderConfig
 pub fn AvifEncoderConfig::inner_mut(&mut self) -> &mut EncoderConfig
 pub fn AvifEncoderConfig::new() -> Self
@@ -121,7 +185,6 @@ pub fn AvifEncoderConfig::with_effort_u32(self, u32) -> Self
 pub fn AvifEncoderConfig::with_gain_map(self, alloc::vec::Vec<u8>, u32, u32, u8, alloc::vec::Vec<u8>) -> Self
 pub fn AvifEncoderConfig::with_lossless_mode(self, bool) -> Self
 pub fn AvifEncoderConfig::with_quality(self, f32) -> Self
-pub struct AvifZenDecoder<'a>
 #[non_exhaustive] pub struct EncodePlan
 pub EncodePlan::alpha_color_mode: EncodeAlphaMode
 pub EncodePlan::alpha_quantizer: core::option::Option<u8>
@@ -165,11 +228,13 @@ pub fn EncoderConfig::color_model(self, EncodeColorModel) -> Self
 pub fn EncoderConfig::color_primaries(self, u8) -> Self
 pub fn EncoderConfig::content_light_level(self, u16, u16) -> Self
 pub fn EncoderConfig::exif(self, alloc::vec::Vec<u8>) -> Self
+pub fn EncoderConfig::fast_tier_budgets_value(&self) -> core::option::Option<fast_heads::FastTierBudgets>
 pub fn EncoderConfig::icc_profile(self, alloc::vec::Vec<u8>) -> Self
 pub fn EncoderConfig::mastering_display(self, MasteringDisplayConfig) -> Self
 pub fn EncoderConfig::matrix_coefficients(self, u8) -> Self
 pub fn EncoderConfig::mirror(self, u8) -> Self
 pub fn EncoderConfig::new() -> Self
+pub fn EncoderConfig::palette_preference_value(&self) -> core::option::Option<palette_gate::PalettePreference>
 pub fn EncoderConfig::pixel_range(self, EncodePixelRange) -> Self
 pub fn EncoderConfig::quality(self, f32) -> Self
 pub fn EncoderConfig::quality_value(&self) -> f32
@@ -181,9 +246,13 @@ pub fn EncoderConfig::threads(self, core::option::Option<usize>) -> Self
 pub fn EncoderConfig::transfer_characteristics(self, u8) -> Self
 pub fn EncoderConfig::with_cdef(self, core::option::Option<bool>) -> Self
 pub fn EncoderConfig::with_encode_bottomup(self, core::option::Option<bool>) -> Self
+pub fn EncoderConfig::with_fast_tier_budgets(self, core::option::Option<fast_heads::FastTierBudgets>) -> Self
 pub fn EncoderConfig::with_gain_map(self, alloc::vec::Vec<u8>, u32, u32, u8, alloc::vec::Vec<u8>) -> Self
+pub fn EncoderConfig::with_gain_map_alt_color(self, u8, u8, u8, bool) -> Self
+pub fn EncoderConfig::with_gain_map_alt_icc(self, alloc::vec::Vec<u8>) -> Self
 pub fn EncoderConfig::with_lossless(self, bool) -> Self
 pub fn EncoderConfig::with_lru_on_skip(self, core::option::Option<bool>) -> Self
+pub fn EncoderConfig::with_palette_preference(self, core::option::Option<palette_gate::PalettePreference>) -> Self
 pub fn EncoderConfig::with_qm(self, bool) -> Self
 pub fn EncoderConfig::with_rdo_tx_decision(self, core::option::Option<bool>) -> Self
 pub fn EncoderConfig::with_seg_boost(self, core::option::Option<f64>) -> Self
@@ -193,17 +262,19 @@ pub fn EncoderConfig::with_still_image_tuning(self, bool) -> Self
 pub fn EncoderConfig::with_trellis(self, core::option::Option<bool>) -> Self
 pub fn EncoderConfig::with_vaq(self, bool, f64) -> Self
 pub fn EncoderConfig::xmp(self, alloc::vec::Vec<u8>) -> Self
-pub fn EncoderConfig::auto_tune(self, &[u8], u32, u32, QualityTarget, AutoTuneOptions) -> core::result::Result<Self, AutoTuneError>
+pub fn EncoderConfig::auto_tune(self, &[u8], u32, u32, QualityTarget, AutoTuneOptions, core::option::Option<&zenanalyze_api::Offer<'_>>) -> core::result::Result<Self, AutoTuneError>
 pub fn EncoderConfig::resolve_plan(&self, PlanInput) -> EncodePlan
 pub fn EncoderConfig::validate(&self) -> core::result::Result<(), ValidationError>
 pub fn EncoderConfig::validate_for_input(&self, PlanInput) -> core::result::Result<(), ValidationError>
+pub struct FastTierBudgets [also: fast_heads]
+pub FastTierBudgets::partition: fast_heads::PartitionBudget
+pub FastTierBudgets::tx: fast_heads::TxBudget
 pub struct GainMapConfig
 pub GainMapConfig::av1_data: alloc::vec::Vec<u8>
 pub GainMapConfig::bit_depth: u8
 pub GainMapConfig::height: u32
 pub GainMapConfig::metadata: alloc::vec::Vec<u8>
 pub GainMapConfig::width: u32
-pub fn ManagedAvifDecoder::decode_to_sink(&mut self, &impl enough::Stop + ?core::marker::Sized, &mut dyn zencodec::sink::DecodeRowSink) -> Result<ImageInfo>
 pub struct MasteringDisplayConfig
 pub MasteringDisplayConfig::max_luminance: u32
 pub MasteringDisplayConfig::min_luminance: u32
@@ -233,18 +304,49 @@ pub SpeedDerived::reduced_tx_set: bool
 pub SpeedDerived::segmentation_complex: bool
 pub SpeedDerived::sgr_complexity_full: bool
 pub SpeedDerived::tx_domain_rate: bool
+pub struct TargetOptions
+pub TargetOptions::max_encodes: u8
+pub TargetOptions::max_quality: f32
+pub TargetOptions::min_quality: f32
+pub TargetOptions::tolerance: f64
+pub struct TargetedEncode
+pub TargetedEncode::converged: bool
+pub TargetedEncode::encoded: EncodedImage
+pub TargetedEncode::encodes: u8
+pub TargetedEncode::quality: f32
+pub TargetedEncode::score: f64
+pub struct TwoPassEncode [also: two_pass]
+pub TwoPassEncode::encode: EncodedImage
+pub TwoPassEncode::pass1_butteraugli_3n: f64
+pub TwoPassEncode::pass1_butteraugli_max: f64
+pub TwoPassEncode::pass1_bytes: usize
+pub TwoPassEncode::sb_q_scale: alloc::boxed::Box<[f32]>
+pub struct TwoPassOptions [also: two_pass]
+pub TwoPassOptions::hf_asymmetry: f32
+pub TwoPassOptions::intensity_target: f32
+pub TwoPassOptions::k: f64
+pub TwoPassOptions::metric: two_pass::TwoPassMetric
+pub TwoPassOptions::pool_exponent: f64
+pub TwoPassOptions::probe_quality: core::option::Option<f32>
+pub TwoPassOptions::strength: f64
+pub TwoPassOptions::weight_clamp: (f64, f64)
 pub fn encode(&zenpixels::buffer::PixelBuffer) -> Result<EncodedImage>
 pub fn encode_animation_rgb16(&[AnimationFrame16], &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
 pub fn encode_animation_rgb8(&[AnimationFrame], &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
 pub fn encode_animation_rgba16(&[AnimationFrameRgba16], &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
 pub fn encode_animation_rgba8(&[AnimationFrameRgba], &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
+pub fn encode_gray8(imgref::ImgRef<'_, u8>, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
 pub fn encode_rgb16(imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u16>>, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
+pub fn encode_rgb16_with_target(imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u16>>, &EncoderConfig, TargetMetric, &TargetOptions, almost_enough::stop_token::StopToken) -> Result<TargetedEncode>
 pub fn encode_rgb8(imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u8>>, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
+pub fn encode_rgb8_two_pass(imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u8>>, &EncoderConfig, &two_pass::TwoPassOptions, almost_enough::stop_token::StopToken) -> Result<two_pass::TwoPassEncode> [also: two_pass]
+pub fn encode_rgb8_with_target(imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u8>>, &EncoderConfig, TargetMetric, &TargetOptions, almost_enough::stop_token::StopToken) -> Result<TargetedEncode>
 pub fn encode_rgba16(imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u16>>, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
 pub fn encode_rgba8(imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u8>>, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
+pub fn encode_rgba8_with_target(imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u8>>, &EncoderConfig, TargetMetric, &TargetOptions, almost_enough::stop_token::StopToken) -> Result<TargetedEncode>
 pub fn encode_with(&zenpixels::buffer::PixelBuffer, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
 
-## trait impls (32 types)
+## trait impls (36 types)
 
 AnimationFrame: Clone
 AnimationFrame16: Clone
@@ -253,14 +355,10 @@ AnimationFrameRgba16: Clone
 AutoTuneError: Debug, Display, Error
 AutoTuneOptions: Clone, Debug, Default
 Av1Backend: Clone, Copy, Debug, Default, Eq, PartialEq
-AvifAnimationFrameDecoder: zencodec::traits::decoder::AnimationFrameDecoder
 AvifAnimationFrameEncoder: zencodec::traits::encoder::AnimationFrameEncoder
-AvifDecodeJob: zencodec::traits::decoding::DecodeJob<'a>
-AvifDecoderConfig: Clone, Debug, Default, zencodec::traits::decoding::DecoderConfig
 AvifEncodeJob: zencodec::traits::encoding::EncodeJob
 AvifEncoder: zencodec::traits::encoder::Encoder
 AvifEncoderConfig: Clone, Debug, Default, zencodec::traits::encoding::EncoderConfig
-AvifZenDecoder<'_>: zencodec::traits::decoder::Decode
 EncodeAlphaMode: Clone, Copy, Debug, Default, Eq, PartialEq
 EncodeBitDepth: Clone, Copy, Debug, Default, Eq, PartialEq
 EncodeChromaSubsampling: Clone, Copy, Debug, Default, Eq, PartialEq
@@ -270,21 +368,26 @@ EncodePlan: Clone, Debug, PartialEq
 EncodedAnimation: Clone
 EncodedImage: Clone, Debug
 EncoderConfig: Clone, Debug, Default
-Error: From<zencodec::capabilities::UnsupportedOperation>
 GainMapConfig: Clone, Debug
 MasteringDisplayConfig: Clone, Copy, Debug
 PlanInput: Clone, Copy, Debug, Eq, PartialEq
 QualityTarget: Clone, Copy, Debug, PartialEq
 SpeedDerived: Clone, Copy, Debug, Eq, PartialEq
+TargetMetric: Clone, Copy, Debug, PartialEq
+TargetOptions: Clone, Copy, Debug, Default
+TargetedEncode: Debug
 TilesResolution: Clone, Copy, Debug, Eq, PartialEq
-detect::AvifProbe: zencodec::detect::SourceEncodingDetails
+fast_heads::FastTierBudgets: Clone, Copy, Debug, Default, Eq, PartialEq
+fast_heads::PartitionBudget: Clone, Copy, Debug, Default, Eq, PartialEq
+fast_heads::TxBudget: Clone, Copy, Debug, Default, Eq, PartialEq
+palette_gate::PalettePreference: Clone, Copy, Debug, Default, Eq, PartialEq
+two_pass::TwoPassEncode: Debug
+two_pass::TwoPassMetric: Clone, Copy, Debug, Default, Eq, PartialEq
+two_pass::TwoPassOptions: Clone, Debug, Default
 
 ## auto traits
 
-25 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
-AvifAnimationFrameDecoder: !RefUnwindSafe !UnwindSafe
+34 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 AvifAnimationFrameEncoder: !RefUnwindSafe !UnwindSafe
-AvifDecodeJob: !RefUnwindSafe !UnwindSafe
 AvifEncodeJob: !RefUnwindSafe !UnwindSafe
 AvifEncoder: !RefUnwindSafe !UnwindSafe
-AvifZenDecoder<'a>: !RefUnwindSafe !UnwindSafe
