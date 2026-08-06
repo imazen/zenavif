@@ -246,10 +246,17 @@ pub struct ZensimLoopResult {
     /// copy of [`SPATIAL_HINTS_LIVE`]. `false` means the spatial term was
     /// computed and discarded and the run was a pure global search.
     pub spatial_applied: bool,
-    /// The last per-superblock AC quantizer scale map the loop computed
-    /// (frame superblock raster order, `1.0` = neutral). `None` when the
-    /// loop finished in one pass or [`ZensimLoopOptions::spatial_strength`]
-    /// is zero.
+    /// The per-superblock AC quantizer scale map that the **returned**
+    /// encode was produced with (frame superblock raster order, `1.0` =
+    /// neutral) — not merely the last map computed, so it stays meaningful
+    /// under the "smallest file in band" selection policy, which can return
+    /// an earlier pass than the final one.
+    ///
+    /// `None` when the returned encode was pass 1 (nothing had been
+    /// measured yet to build a map from) or when
+    /// [`ZensimLoopOptions::spatial_strength`] is zero. Note that
+    /// `Some(map)` still does not mean the map reached the encoder — see
+    /// [`Self::spatial_applied`].
     pub sb_q_scale: Option<Box<[f32]>>,
     /// Score of the FIRST pass — how close the seed alone landed, i.e. what
     /// a one-encode open-loop prediction would have delivered.
@@ -371,11 +378,15 @@ pub fn encode_rgb8_zensim_loop(
     // Same selection policy as the secant search: the smallest file that
     // reached the band (monotonicity ⇒ the lowest such quality), else the
     // iterate closest to the target.
-    let mut best_reaching: Option<(f32, f64, EncodedImage)> = None;
-    let mut best_any: Option<(f32, f64, EncodedImage)> = None;
+    // Each candidate carries the spatial map its encode was made WITH, so
+    // the reported map always describes the returned bytes.
+    type Candidate = (f32, f64, EncodedImage, Option<Box<[f32]>>);
+    let mut best_reaching: Option<Candidate> = None;
+    let mut best_any: Option<Candidate> = None;
     let mut lo: Option<(f32, f64)> = None;
     let mut hi: Option<(f32, f64)> = None;
 
+    // The map the CURRENT pass encodes with (built from the previous pass).
     let mut sb_q_scale: Option<Box<[f32]>> = None;
     let mut encodes = 0u8;
 
@@ -410,12 +421,12 @@ pub fn encode_rgb8_zensim_loop(
 
         if best_any
             .as_ref()
-            .is_none_or(|(_, bs, _)| (s - target).abs() < (bs - target).abs())
+            .is_none_or(|(_, bs, _, _)| (s - target).abs() < (bs - target).abs())
         {
-            best_any = Some((q, s, enc.clone()));
+            best_any = Some((q, s, enc.clone(), sb_q_scale.clone()));
         }
-        if s >= target - tol && best_reaching.as_ref().is_none_or(|(bq, _, _)| q < *bq) {
-            best_reaching = Some((q, s, enc));
+        if s >= target - tol && best_reaching.as_ref().is_none_or(|(bq, _, _, _)| q < *bq) {
+            best_reaching = Some((q, s, enc, sb_q_scale.clone()));
         }
         if (s - target).abs() <= tol {
             break;
@@ -437,7 +448,7 @@ pub fn encode_rgb8_zensim_loop(
         q = next;
     }
 
-    let (quality, score, encoded) = best_reaching
+    let (quality, score, encoded, applied_map) = best_reaching
         .or(best_any)
         .expect("max_encodes >= 1 guarantees at least one iterate");
     Ok(ZensimLoopResult {
@@ -447,7 +458,7 @@ pub fn encode_rgb8_zensim_loop(
         encodes,
         converged: (score - target).abs() <= tol,
         spatial_applied: SPATIAL_HINTS_LIVE,
-        sb_q_scale,
+        sb_q_scale: applied_map,
         pass1_score,
         pass1_quality,
     })

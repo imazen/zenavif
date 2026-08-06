@@ -1,0 +1,4 @@
+/Users/lilith/work/zen/codec-corpus/clic2025/final-test/d0208a1e9b4fde642b9752da2907d82d5b530a6e2e6e18ef71d5524a92d1cf9a.png
+/Users/lilith/work/zen/codec-corpus/clic2025/final-test/c9510efb03d1852c29ecad84cc0558768728681a3b9b04eae0dbbd9be142dd95.png
+/Users/lilith/work/zen/codec-corpus/gb82-sc/imessage.png
+/Users/lilith/work/zen/codec-corpus/gb82-sc/imac_g3.png

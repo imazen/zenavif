@@ -190,7 +190,11 @@ fn spatial_map_is_computed_and_shaped_like_the_superblock_grid() {
     let out = encode_rgb8_zensim_loop(img.as_ref(), &base_config(), 85.0, &opts, stop())
         .expect("zensim loop");
     assert!(out.encodes >= 2, "seed 20 -> target 85 must need >1 pass");
-    let map = out.sb_q_scale.expect("a spatial map must be computed");
+    // The reported map must describe the RETURNED encode, so a run whose
+    // selected encode is a later pass has to carry one.
+    let map = out
+        .sb_q_scale
+        .expect("the returned encode was not pass 1, so it carries a map");
     assert_eq!(map.len(), w.div_ceil(64) * h.div_ceil(64), "3x2 SB grid");
     assert!(
         map.iter().all(|s| s.is_finite() && *s > 0.0),
@@ -237,6 +241,11 @@ fn seed_quality_override_is_the_first_pass() {
     assert_eq!(out.encodes, 1);
     assert_eq!(out.pass1_quality, 42.0);
     assert_eq!(out.quality, 42.0);
+    assert!(
+        out.sb_q_scale.is_none(),
+        "pass 1 encodes with no map (nothing had been measured yet), so the \
+         reported map -- which describes the RETURNED encode -- must be None"
+    );
 }
 
 #[test]
