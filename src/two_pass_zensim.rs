@@ -798,6 +798,25 @@ pub fn anchor_zensim_for_quantizer(qi: f64) -> f64 {
 /// step the predicted score almost never lands on a lattice point, so
 /// *something* has to break the tie, and the three answers serve genuinely
 /// different callers.
+///
+/// # It biases; it does not guarantee
+///
+/// **Read this before relying on [`Self::AtLeast`] as a quality floor.**
+/// The policy chooses between the two lattice points that straddle the
+/// *predicted* score, so its whole authority is one quantizer step — and
+/// the prediction error is several times that. Measured on held-out
+/// sources, switching from `Nearest` to `AtLeast` moved the fraction of
+/// encodes landing at or above target only from **54.3% to 60.7%**, with
+/// the median signed error going +0.07 → +0.32 zensim.
+///
+/// That is the arithmetic of the error decomposition, not a defect in the
+/// policy: the median distance to the nearest achievable score is ~0.15
+/// zensim while the median placement error is ~0.78, so rounding decides
+/// ~15% of the outcome and the prediction decides the rest. A caller who
+/// genuinely must not undershoot needs a **margin** — ask for
+/// `target + δ` — not a rounding rule. The policy is worth setting anyway
+/// (it is free, and it moves the bias the right way), but it is a tilt,
+/// not a contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum LatticePolicy {

@@ -542,12 +542,10 @@ fn main() {
                         // The diffmap-derived map, for the RD question.
                         for &strength in &[0.5f64, 1.0, 2.0] {
                             if let Some(map) = diffmap_sb_map(img.as_ref(), speed, qi, strength, nsb)
-                            {
-                                if let Some(c) =
+                                && let Some(c) =
                                     encode_and_score_map(img.as_ref(), speed, qi, Some(map))
-                                {
-                                    emit(qi, "diffmap", strength as f32, 0, &c);
-                                }
+                            {
+                                emit(qi, "diffmap", strength as f32, 0, &c);
                             }
                         }
                     }
