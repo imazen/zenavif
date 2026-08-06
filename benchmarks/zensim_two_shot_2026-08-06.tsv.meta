@@ -64,6 +64,12 @@
 # FILES
 # ---------------------------------------------------------------------------
 # zensim_two_shot_lattice_{train,val}_2026-08-06.tsv.zst
+#     NOT COMMITTED — see zensim_two_shot_lattice_2026-08-06.pointer.md for
+#     the path, sha256s and the one-command regeneration. At 112/108 KB
+#     zstd they exceed the repo's 30 KB rule and do not compress under it
+#     (54 KB even stripped to bare columns), and they are deterministically
+#     regenerable, so a pointer is the honest form.
+#
 #     Dense ACHIEVABLE-SCORE lattice: the measured score at EVERY reachable
 #     AV1 quantizer index in the band covering zensim 12..96, per cell.
 #     Columns: image size w h q qindex bytes zensim dm_mean enc_ms
@@ -100,7 +106,10 @@
 # corpus       TRAIN benchmarks/zensim_loop_manifest_2026-08-06.txt
 #              VAL   benchmarks/zensim_lattice_manifest_val_2026-08-06.txt
 #              Disjoint by SOURCE, not by cell — the same photo at two sizes
-#              is not two independent samples. TRAIN is the corpus the
+#              is not two independent samples. 69 of 72 planned cells: three
+#              were dropped when box contention pushed per-cell time from
+#              ~90 s past 15 minutes. Cells are written whole, so no partial
+#              cell is present (0 malformed rows, validated). TRAIN is the corpus the
 #              existing anchor constants were fitted on, so it cannot be
 #              used to judge them.
 #
