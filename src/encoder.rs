@@ -451,9 +451,24 @@ impl EncoderConfig {
     /// * An all-`1.0` map is **inert**: it does not switch on delta-q
     ///   coding, so it is byte-identical to passing no map.
     /// * Any non-neutral entry switches delta-q coding on for the whole
-    ///   frame, which has a fixed syntax cost and changes RDO distortion
-    ///   weighting. The channel is therefore not a free perturbation, and
-    ///   a very sparse map is not a very small one.
+    ///   frame — which also **disables segmentation**. That is not a small
+    ///   perturbation: measured over 54 cells
+    ///   (`benchmarks/zensim_hint_probe_2026-08-06`), merely activating the
+    ///   channel with every superblock's delta quantizing to zero moves the
+    ///   zensim score by a median **+1.10** (p90 |Δ| 4.49) and bytes by
+    ///   +2.9% median / +21% max, at an unchanged quantizer. A very sparse
+    ///   map is not a very small one.
+    /// * **Per-superblock deltas are coded at a RESOLUTION of 1/2/4/8
+    ///   quantizer indices**, chosen from the frame's base quantizer
+    ///   (zenrav1e `variance_boost_delta_q_res_log2`: res 1 below 80, 2 to
+    ///   119, 4 to 159, 8 above). A scale whose implied move is smaller
+    ///   than that resolution **quantizes to zero** — the map still
+    ///   activates delta-q, but nothing moves, so the encode is identical
+    ///   for every such map and reads exactly like the content being
+    ///   ignored. A 1.5% scale is below the resolution at ~76% of
+    ///   quantizer indices. Size the scale against the resolution, and
+    ///   confirm bytes actually changed before believing any null from
+    ///   this channel.
     ///
     /// [`crate::two_pass_zensim::sb_q_scale_from_diffmap`] builds a
     /// correctly shaped map from a zensim diffmap.

@@ -634,13 +634,31 @@ fn main() {
             }
         }
         "ab2" => {
-            // Fixed budget of TWO encodes; the question is only how close
-            // each rule lands, not how many encodes it wants.
+            // A FIXED budget of two encodes on every arm. The question is
+            // only how close each lands, never how many encodes it wants,
+            // so `encodes` is reported but is not the metric.
+            //
+            // Arms, and why each is here:
+            //   twoshot          the shipped rule (quantizer-space
+            //                    translate, nearest lattice point)
+            //   twoshot_atleast  same, but never knowingly undershoot --
+            //                    the overshoot policy, measured not assumed
+            //   twoshot_spatial  same, plus the per-SB map at the strength
+            //                    that measured best on RD (0.5). Says what
+            //                    the now-live spatial half costs or buys
+            //                    for PRECISION, separately from RD.
+            //   loop2            the existing closed loop capped at 2. Its
+            //                    spatial_strength defaults to 1.0 and that
+            //                    is now LIVE, so this arm carries the map.
+            //   loop2_nospatial  the same loop with the map suppressed --
+            //                    isolates what the newly live default is
+            //                    doing to the loop that did not ask for it.
+            //   secant2          the baseline.
             let targets: Vec<f64> = parse_list(args.get(5).expect("targets arg"));
             let tolerance: f64 = args.get(6).map_or(0.5, |t| t.parse().unwrap());
             writeln!(
                 out,
-                "arm\timage\tsize\tw\th\ttarget\tachieved\terr\tencodes\tbytes\tms\tspatial\tpass1_q\tpass1_score\tpredicted"
+                "arm\timage\tsize\tw\th\ttarget\tachieved\terr\tencodes\tqi\tbytes\tms\tspatial\tpass1_qi\tpass1_score\tpredicted"
             )
             .unwrap();
             for path in &images {
@@ -655,81 +673,112 @@ fn main() {
                         let mut row = |arm: &str,
                                        achieved: f64,
                                        encodes: u8,
+                                       qi: i32,
                                        bytes: usize,
                                        ms: u128,
                                        spatial: &str,
-                                       p1q: f32,
+                                       p1qi: i32,
                                        p1s: f64,
                                        pred: f64| {
                             writeln!(
                                 out,
-                                "{arm}\t{}\t{sz}\t{w}\t{h}\t{target}\t{achieved:.4}\t{:+.4}\t{encodes}\t{bytes}\t{ms}\t{spatial}\t{p1q:.3}\t{p1s:.4}\t{pred:.4}",
+                                "{arm}\t{}\t{sz}\t{w}\t{h}\t{target}\t{achieved:.4}\t{:+.4}\t{encodes}\t{qi}\t{bytes}\t{ms}\t{spatial}\t{p1qi}\t{p1s:.4}\t{pred:.4}",
                                 base(path),
                                 achieved - target
                             )
                             .unwrap();
                         };
 
-                        // Arm 1: the two-shot lattice-aware rule.
-                        let t0 = std::time::Instant::now();
-                        let r = zenavif::encode_rgb8_zensim_two_shot(
-                            img.as_ref(),
-                            &cfg,
-                            target,
-                            &zenavif::TwoShotOptions {
-                                tolerance,
-                                ..Default::default()
-                            },
-                            StopToken::new(Unstoppable),
-                        );
-                        let ms = t0.elapsed().as_millis();
-                        match r {
-                            Ok(o) => row(
+                        let two_shot_arms: [(&str, zenavif::TwoShotOptions); 3] = [
+                            (
                                 "twoshot",
-                                o.score,
-                                o.encodes,
-                                o.encoded.avif_file.len(),
-                                ms,
-                                if o.spatial_applied { "true" } else { "false" },
-                                o.pass1_quality,
-                                o.pass1_score,
-                                o.predicted_score,
+                                zenavif::TwoShotOptions {
+                                    tolerance,
+                                    ..Default::default()
+                                },
                             ),
-                            Err(e) => eprintln!("FAIL twoshot {path} {sz} {target}: {e:?}"),
+                            (
+                                "twoshot_atleast",
+                                zenavif::TwoShotOptions {
+                                    tolerance,
+                                    policy: zenavif::LatticePolicy::AtLeast,
+                                    ..Default::default()
+                                },
+                            ),
+                            (
+                                "twoshot_spatial",
+                                zenavif::TwoShotOptions {
+                                    tolerance,
+                                    spatial_strength: 0.5,
+                                    ..Default::default()
+                                },
+                            ),
+                        ];
+                        for (arm, opts) in two_shot_arms {
+                            let t0 = std::time::Instant::now();
+                            match zenavif::encode_rgb8_zensim_two_shot(
+                                img.as_ref(),
+                                &cfg,
+                                target,
+                                &opts,
+                                StopToken::new(Unstoppable),
+                            ) {
+                                Ok(o) => row(
+                                    arm,
+                                    o.score,
+                                    o.encodes,
+                                    i32::from(o.quantizer),
+                                    o.encoded.avif_file.len(),
+                                    t0.elapsed().as_millis(),
+                                    if o.spatial_applied && opts.spatial_strength != 0.0 {
+                                        "applied"
+                                    } else {
+                                        "none"
+                                    },
+                                    i32::from(o.pass1_quantizer),
+                                    o.pass1_score,
+                                    o.predicted_score,
+                                ),
+                                Err(e) => eprintln!("FAIL {arm} {path} {sz} {target}: {e:?}"),
+                            }
                         }
 
-                        // Arm 2: the existing closed loop, capped at 2.
-                        let t0 = std::time::Instant::now();
-                        let r = encode_rgb8_zensim_loop(
-                            img.as_ref(),
-                            &cfg,
-                            target,
-                            &ZensimLoopOptions {
-                                tolerance,
-                                max_encodes: 2,
-                                ..Default::default()
-                            },
-                            StopToken::new(Unstoppable),
-                        );
-                        let ms = t0.elapsed().as_millis();
-                        match r {
-                            Ok(o) => row(
-                                "loop2",
-                                o.score,
-                                o.encodes,
-                                o.encoded.avif_file.len(),
-                                ms,
-                                if o.spatial_applied { "true" } else { "false" },
-                                o.pass1_quality,
-                                o.pass1_score,
-                                f64::NAN,
-                            ),
-                            Err(e) => eprintln!("FAIL loop2 {path} {sz} {target}: {e:?}"),
+                        for (arm, strength) in [("loop2", 1.0f64), ("loop2_nospatial", 0.0)] {
+                            let t0 = std::time::Instant::now();
+                            match encode_rgb8_zensim_loop(
+                                img.as_ref(),
+                                &cfg,
+                                target,
+                                &ZensimLoopOptions {
+                                    tolerance,
+                                    max_encodes: 2,
+                                    spatial_strength: strength,
+                                    ..Default::default()
+                                },
+                                StopToken::new(Unstoppable),
+                            ) {
+                                Ok(o) => row(
+                                    arm,
+                                    o.score,
+                                    o.encodes,
+                                    -1,
+                                    o.encoded.avif_file.len(),
+                                    t0.elapsed().as_millis(),
+                                    if o.spatial_applied && strength != 0.0 {
+                                        "applied"
+                                    } else {
+                                        "none"
+                                    },
+                                    -1,
+                                    o.pass1_score,
+                                    f64::NAN,
+                                ),
+                                Err(e) => eprintln!("FAIL {arm} {path} {sz} {target}: {e:?}"),
+                            }
                         }
 
-                        // Arm 3: the secant baseline, capped at 2.
                         let t0 = std::time::Instant::now();
-                        let r = encode_rgb8_with_target(
+                        match encode_rgb8_with_target(
                             img.as_ref(),
                             &cfg,
                             TargetMetric::Zensim(target),
@@ -739,17 +788,16 @@ fn main() {
                                 ..Default::default()
                             },
                             StopToken::new(Unstoppable),
-                        );
-                        let ms = t0.elapsed().as_millis();
-                        match r {
+                        ) {
                             Ok(o) => row(
                                 "secant2",
                                 o.score,
                                 o.encodes,
+                                -1,
                                 o.encoded.avif_file.len(),
-                                ms,
-                                "NA",
-                                f32::NAN,
+                                t0.elapsed().as_millis(),
+                                "none",
+                                -1,
                                 f64::NAN,
                                 f64::NAN,
                             ),

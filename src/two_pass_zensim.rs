@@ -241,7 +241,27 @@ pub struct ZensimLoopOptions {
     pub seed_quality: Option<f32>,
     /// Spatial correction strength — the `1/γ` exponent derived in the
     /// [module docs](self). `0.0` disables the spatial term exactly (the
-    /// loop becomes a pure global search). Default 1.0.
+    /// loop becomes a pure global search).
+    ///
+    /// **Default 0.0 since 2026-08-06, changed from 1.0 when the channel
+    /// went live.** While `zenravif::FRAME_HINTS_LIVE` was false the map
+    /// could not reach the encoder, so a nonzero default was inert and
+    /// nobody ever exercised it; the dep bump switched it on silently.
+    /// Defaulting it off is therefore the *conservative* choice — it
+    /// restores the behaviour every prior measurement of this loop was
+    /// actually taken under. Measured at matched bytes against the
+    /// un-hinted curve (`benchmarks/zensim_hint_probe_2026-08-06`):
+    /// strength 0.5 gives median **+0.48** zensim (wins 8/12), 1.0 gives
+    /// **−0.28** (4/11), 2.0 gives **−3.72** (0/7) — so the old default
+    /// was on the wrong side of neutral. Worse for a *convergence* loop:
+    /// switching the channel on at all moves the score by median +1.10
+    /// zensim (p90 |Δ| 4.49) at an unchanged quantizer, which is a
+    /// content-dependent disturbance the loop then has to spend iterations
+    /// chasing.
+    ///
+    /// The knob stays: 0.5 looks like a real RD win and turning it back on
+    /// by default only needs a wider sweep behind it than the n=12 that is
+    /// there now.
     pub spatial_strength: f64,
     /// Clamp applied to the relative per-superblock error `r_b` before it
     /// is exponentiated. Default `(0.4, 2.5)`.
@@ -270,7 +290,7 @@ impl Default for ZensimLoopOptions {
             min_quality: 1.0,
             max_quality: 100.0,
             seed_quality: None,
-            spatial_strength: 1.0,
+            spatial_strength: 0.0,
             weight_clamp: (0.4, 2.5),
             pool_exponent: 12.0,
             map_eps: 1e-4,
@@ -917,8 +937,13 @@ pub struct TwoShotResult {
 ///
 /// # The rule
 ///
-/// 1. **Pass 1** encodes at the [`anchor_quality_for_zensim`] seed and
-///    measures the score `s1` at quantizer `qi1`.
+/// 1. **Pass 1** encodes at the [`anchor_quantizer_for_zensim`] seed and
+///    measures the score `s1` at quantizer `qi1`. The seed is taken from
+///    the quantizer-space anchor rather than
+///    [`anchor_quality_for_zensim`] so that the two-shot path owns one
+///    fitted object end to end: re-fitting it cannot perturb
+///    [`encode_rgb8_zensim_loop`], which keeps using the quality-space
+///    table.
 /// 2. **Pass 2** assumes this image's score-vs-quantizer curve is a
 ///    translate of the population curve — the same assumption the loop's
 ///    global step makes, but taken in *quantizer* space, where the codec's
@@ -972,12 +997,11 @@ pub fn encode_rgb8_zensim_two_shot(
     };
 
     // ---- pass 1 -----------------------------------------------------------
-    let seed_q = options
-        .seed_quality
-        .filter(|q| q.is_finite())
-        .unwrap_or_else(|| anchor_quality_for_zensim(target))
-        .clamp(min_q, max_q);
-    let qi1 = crate::encode_plan::quality_to_quantizer(seed_q).clamp(qi_min, qi_max);
+    let qi1 = match options.seed_quality.filter(|q| q.is_finite()) {
+        Some(q) => crate::encode_plan::quality_to_quantizer(q.clamp(min_q, max_q)),
+        None => anchor_quantizer_for_zensim(target).round() as u8,
+    }
+    .clamp(qi_min, qi_max);
     let q1 = addressing_quality(qi1, min_q, max_q);
 
     let mut cfg1 = config.clone().quality(q1);

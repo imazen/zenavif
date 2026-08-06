@@ -185,6 +185,10 @@ fn spatial_map_is_computed_and_shaped_like_the_superblock_grid() {
         tolerance: 0.25,
         max_encodes: 4,
         seed_quality: Some(20.0),
+        // Explicit since 2026-08-06: the default is 0.0 now that the
+        // channel is live and measured (see ZensimLoopOptions docs), so a
+        // test about the map's SHAPE has to ask for a map.
+        spatial_strength: 1.0,
         ..Default::default()
     };
     let out = encode_rgb8_zensim_loop(img.as_ref(), &base_config(), 85.0, &opts, stop())
