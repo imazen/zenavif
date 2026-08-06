@@ -390,3 +390,7 @@ zenavif-serialize = { path = "zenavif-serialize" }
 name = "unpremul_tiers"
 harness = false
 required-features = ["_dev"]
+
+[[example]]
+name = "cancel_latency"
+required-features = ["encode"]

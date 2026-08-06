@@ -6,9 +6,25 @@ use zenavif::yuv_convert::{YuvMatrix, YuvRange};
 use zenavif::yuv_convert_libyuv;
 use zenavif::yuv_convert_libyuv_simd;
 
+// Per-ISA kernel + token, aliased so the benchmark body is arch-agnostic.
+// See examples/accuracy_check.rs for the same pattern and why it exists.
+#[cfg(target_arch = "x86_64")]
+use zenavif::yuv_convert_libyuv_simd::yuv420_to_rgb8_simd as yuv420_to_rgb8_tier;
+#[cfg(target_arch = "x86_64")]
+type TierToken = Desktop64;
+#[cfg(target_arch = "aarch64")]
+use zenavif::yuv_convert_libyuv_simd::yuv420_to_rgb8_simd_neon as yuv420_to_rgb8_tier;
+#[cfg(target_arch = "aarch64")]
+type TierToken = NeonToken;
+
 fn main() {
-    let Some(token) = Desktop64::summon() else {
-        println!("AVX2 not available");
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        println!("benchmark_simd: no per-ISA SIMD tier for this target");
+        return;
+    }
+    let Some(token) = TierToken::summon() else {
+        println!("benchmark_simd: host has no SIMD tier for this kernel");
         return;
     };
 
@@ -47,7 +63,7 @@ fn main() {
         YuvMatrix::Bt709,
     )
     .unwrap();
-    let _ = yuv_convert_libyuv_simd::yuv420_to_rgb8_simd(
+    let _ = yuv420_to_rgb8_tier(
         token,
         &y_plane,
         width,
@@ -86,7 +102,7 @@ fn main() {
     // Benchmark SIMD
     let start = Instant::now();
     for _ in 0..iterations {
-        let _ = yuv_convert_libyuv_simd::yuv420_to_rgb8_simd(
+        let _ = yuv420_to_rgb8_tier(
             token,
             &y_plane,
             width,
@@ -131,7 +147,7 @@ fn main() {
         YuvMatrix::Bt709,
     )
     .unwrap();
-    let simd_result = yuv_convert_libyuv_simd::yuv420_to_rgb8_simd(
+    let simd_result = yuv420_to_rgb8_tier(
         token,
         &y_plane,
         width,

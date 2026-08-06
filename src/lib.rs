@@ -53,6 +53,7 @@
 whereat::define_at_crate_info!();
 
 mod alloc_util;
+mod cancel;
 
 #[cfg(feature = "auto-tune")]
 mod auto_tune;
@@ -302,18 +303,36 @@ pub fn encode_with(
     use zenpixels::PixelDescriptor;
 
     let desc = image.descriptor();
+
+    // `layout_compatible` is necessary but NOT sufficient for a typed view:
+    // `PixelBuffer::try_as_imgref` additionally requires the row stride to be
+    // a whole number of pixels. A caller-supplied buffer whose stride is not
+    // divisible by the pixel size (externally allocated frames, sub-region
+    // views onto an odd-stride parent) passes the first check and fails the
+    // second — so this is a caller-fixable input error, not an invariant.
+    macro_rules! view_as {
+        ($t:ty) => {
+            image.try_as_imgref::<$t>().ok_or_else(|| {
+                at!(Error::InvalidBuffer(format!(
+                    "pixel buffer row stride is {} bytes, which is not a whole number of \
+                     {}-byte {} pixels; re-pack the buffer with a stride divisible by the \
+                     pixel size before encoding",
+                    image.stride(),
+                    core::mem::size_of::<$t>(),
+                    stringify!($t),
+                )))
+            })?
+        };
+    }
+
     if desc.layout_compatible(PixelDescriptor::RGB8) {
-        let img = image.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
-        encode_rgb8(img, config, stop)
+        encode_rgb8(view_as!(rgb::Rgb<u8>), config, stop)
     } else if desc.layout_compatible(PixelDescriptor::RGBA8) {
-        let img = image.try_as_imgref::<rgb::Rgba<u8>>().unwrap();
-        encode_rgba8(img, config, stop)
+        encode_rgba8(view_as!(rgb::Rgba<u8>), config, stop)
     } else if desc.layout_compatible(PixelDescriptor::RGB16) {
-        let img = image.try_as_imgref::<rgb::Rgb<u16>>().unwrap();
-        encode_rgb16(img, config, stop)
+        encode_rgb16(view_as!(rgb::Rgb<u16>), config, stop)
     } else if desc.layout_compatible(PixelDescriptor::RGBA16) {
-        let img = image.try_as_imgref::<rgb::Rgba<u16>>().unwrap();
-        encode_rgba16(img, config, stop)
+        encode_rgba16(view_as!(rgb::Rgba<u16>), config, stop)
     } else {
         Err(at!(Error::UnsupportedOperation(
             zencodec::UnsupportedOperation::PixelFormat,

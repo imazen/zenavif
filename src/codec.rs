@@ -1739,10 +1739,15 @@ fn map_rgb8_rows<D>(
     mut f: impl FnMut(&[Rgb<u8>], &mut [D]),
 ) {
     let converted;
-    let src = if buffer.descriptor() == PixelDescriptor::RGB8_SRGB {
-        buffer
-            .try_as_imgref::<Rgb<u8>>()
-            .expect("RGB8_SRGB buffer views as Rgb<u8>")
+    // The borrow-free fast path needs BOTH an exact descriptor match and a
+    // stride that is a whole number of pixels (`try_as_imgref`'s second
+    // condition). An odd-stride RGB8 buffer satisfies the first and not the
+    // second, so fall back to the owning conversion instead of panicking.
+    let src = if let Some(view) = buffer
+        .try_as_imgref::<Rgb<u8>>()
+        .filter(|_| buffer.descriptor() == PixelDescriptor::RGB8_SRGB)
+    {
+        view
     } else {
         converted = buffer.to_rgb8();
         converted.as_imgref()
@@ -1761,10 +1766,12 @@ fn map_rgba8_rows<D>(
     mut f: impl FnMut(&[Rgba<u8>], &mut [D]),
 ) {
     let converted;
-    let src = if buffer.descriptor() == PixelDescriptor::RGBA8_SRGB {
-        buffer
-            .try_as_imgref::<Rgba<u8>>()
-            .expect("RGBA8_SRGB buffer views as Rgba<u8>")
+    // Same fast-path/fallback split as `map_rgb8_rows` — see the note there.
+    let src = if let Some(view) = buffer
+        .try_as_imgref::<Rgba<u8>>()
+        .filter(|_| buffer.descriptor() == PixelDescriptor::RGBA8_SRGB)
+    {
+        view
     } else {
         converted = buffer.to_rgba8();
         converted.as_imgref()

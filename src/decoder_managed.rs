@@ -204,7 +204,35 @@ impl ManagedAvifDecoder {
     ///
     /// Takes `decoder` explicitly to avoid borrowing `self` (which would conflict
     /// with borrows of `self.parser` for data access).
+    ///
+    /// This is the one place that installs the caller's cancellation token on
+    /// the rav1d-safe decoder, so every caller gets in-flight cancellation from
+    /// passing `stop` — see [`crate::cancel`] for why a borrowed token needs
+    /// relaying and what it costs (nothing, for an `Unstoppable` caller). The
+    /// token is uninstalled again before returning: the relay stops tracking
+    /// the caller the moment this call ends, so leaving it attached would give
+    /// the decoder a token frozen at whatever it last read.
     fn decode_frame(
+        decoder: &mut Rav1dDecoder,
+        data: &[u8],
+        context: &'static str,
+        stop: &(impl Stop + ?Sized),
+    ) -> Result<Frame> {
+        crate::cancel::with_relayed_stop(stop, |token| {
+            let relayed = token.is_some();
+            if relayed {
+                decoder.set_stop(token);
+            }
+            let out = Self::decode_frame_inner(decoder, data, context);
+            if relayed {
+                decoder.set_stop(None);
+            }
+            out
+        })
+    }
+
+    /// The decode itself, with no cancellation plumbing — see [`Self::decode_frame`].
+    fn decode_frame_inner(
         decoder: &mut Rav1dDecoder,
         data: &[u8],
         context: &'static str,
@@ -257,6 +285,7 @@ impl ManagedAvifDecoder {
             &mut self.decoder,
             &primary_data,
             "Failed to decode primary frame",
+            stop,
         )?;
 
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
@@ -267,6 +296,7 @@ impl ManagedAvifDecoder {
                 &mut self.decoder,
                 &alpha_data,
                 "Failed to decode alpha frame",
+                stop,
             )?)
         } else {
             None
@@ -301,6 +331,7 @@ impl ManagedAvifDecoder {
             &mut self.decoder,
             &primary_data,
             "Failed to decode primary frame",
+            stop,
         )?;
 
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
@@ -311,6 +342,7 @@ impl ManagedAvifDecoder {
                 &mut self.decoder,
                 &alpha_data,
                 "Failed to decode alpha frame",
+                stop,
             )?)
         } else {
             None
@@ -344,6 +376,7 @@ impl ManagedAvifDecoder {
             &mut self.decoder,
             &primary_data,
             "Failed to decode primary frame",
+            stop,
         )?;
 
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
@@ -354,6 +387,7 @@ impl ManagedAvifDecoder {
                 &mut self.decoder,
                 &alpha_data,
                 "Failed to decode alpha frame",
+                stop,
             )?)
         } else {
             None
@@ -803,7 +837,7 @@ impl ManagedAvifDecoder {
                 .tile_data(i)
                 .map_err(|e| e.map_error(Error::Parse))?;
             let frame =
-                Self::decode_frame(&mut self.decoder, &tile_data, "Failed to decode grid tile")?;
+                Self::decode_frame(&mut self.decoder, &tile_data, "Failed to decode grid tile", stop)?;
 
             tile_frames.push(frame);
         }
@@ -1278,7 +1312,7 @@ impl ManagedAvifDecoder {
                 .tile_data(tile_idx)
                 .map_err(|e| e.map_error(Error::Parse))?;
             let frame =
-                Self::decode_frame(&mut self.decoder, &tile_data, "Failed to decode grid tile")?;
+                Self::decode_frame(&mut self.decoder, &tile_data, "Failed to decode grid tile", stop)?;
             let (pixels, _info) = self.convert_to_image(frame, None, stop)?;
             row_tiles.push(pixels);
         }
@@ -1403,6 +1437,7 @@ impl ManagedAvifDecoder {
                     &mut self.decoder,
                     &tile_data,
                     "Failed to decode grid tile",
+                    stop,
                 )?;
                 let (pixels, _info) = self.convert_to_image(frame, None, stop)?;
                 row_tiles.push(pixels);

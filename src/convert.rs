@@ -7,6 +7,25 @@ use rgb::{Rgb, Rgba};
 use whereat::at;
 use zenpixels::{PixelBuffer, PixelDescriptor};
 
+/// Why the typed-view `expect`s in this module cannot fire.
+///
+/// `PixelBuffer::try_as_imgref` needs two things: a layout-compatible
+/// descriptor (each call site checks that immediately above) AND a row stride
+/// that is a whole number of pixels. Every buffer reaching this module is one
+/// **zenavif itself allocated** on the decode path — `PixelBuffer::from_pixels`
+/// and the decoder's own strip/frame allocations are all tightly packed, so
+/// `stride == width * size_of::<P>()` by construction. This module is
+/// crate-private (`mod convert;` in `lib.rs`), so no caller-supplied,
+/// arbitrarily-strided buffer can reach it.
+///
+/// The public entry points that DO accept caller buffers (`lib.rs`
+/// `encode_with`, `codec.rs` `map_rgb8_rows`/`map_rgba8_rows`) handle the
+/// odd-stride case explicitly instead — with a typed error and an owning
+/// fallback respectively.
+const TIGHTLY_PACKED_INVARIANT: &str =
+    "decode-path buffers are allocated tightly packed, so a layout-compatible \
+     descriptor always yields a typed view";
+
 /// Scale a limited-range Y value to full range (8-bit)
 #[inline]
 fn limited_to_full_8(y: u8) -> u8 {
@@ -59,7 +78,7 @@ pub fn downscale_to_8bit(image: PixelBuffer) -> PixelBuffer {
         None => buf,
     };
     if desc.layout_compatible(PixelDescriptor::RGB16) {
-        let src = image.try_as_imgref::<Rgb<u16>>().unwrap();
+        let src = image.try_as_imgref::<Rgb<u16>>().expect(TIGHTLY_PACKED_INVARIANT);
         let out: Vec<Rgb<u8>> = src
             .pixels()
             .map(|px| Rgb {
@@ -74,7 +93,7 @@ pub fn downscale_to_8bit(image: PixelBuffer) -> PixelBuffer {
                 .into(),
         )
     } else if desc.layout_compatible(PixelDescriptor::RGBA16) {
-        let src = image.try_as_imgref::<Rgba<u16>>().unwrap();
+        let src = image.try_as_imgref::<Rgba<u16>>().expect(TIGHTLY_PACKED_INVARIANT);
         let out: Vec<Rgba<u8>> = src
             .pixels()
             .map(|px| Rgba {
@@ -90,7 +109,7 @@ pub fn downscale_to_8bit(image: PixelBuffer) -> PixelBuffer {
                 .into(),
         )
     } else if desc.layout_compatible(PixelDescriptor::GRAY16) {
-        let src = image.try_as_imgref::<rgb::Gray<u16>>().unwrap();
+        let src = image.try_as_imgref::<rgb::Gray<u16>>().expect(TIGHTLY_PACKED_INVARIANT);
         let out: Vec<rgb::Gray<u8>> = src
             .pixels()
             .map(|px| rgb::Gray::new((px.value() >> 8) as u8))
@@ -115,7 +134,7 @@ pub fn scale_pixels_to_u16(image: &mut PixelBuffer, bit_depth: u8) {
     }
     let desc = image.descriptor();
     if desc.layout_compatible(PixelDescriptor::RGB16) {
-        let mut img = image.try_as_imgref_mut::<Rgb<u16>>().unwrap();
+        let mut img = image.try_as_imgref_mut::<Rgb<u16>>().expect(TIGHTLY_PACKED_INVARIANT);
         for px in img.buf_mut().iter_mut() {
             *px = Rgb {
                 r: scale_to_u16(px.r, bit_depth),
@@ -124,7 +143,7 @@ pub fn scale_pixels_to_u16(image: &mut PixelBuffer, bit_depth: u8) {
             };
         }
     } else if desc.layout_compatible(PixelDescriptor::RGBA16) {
-        let mut img = image.try_as_imgref_mut::<Rgba<u16>>().unwrap();
+        let mut img = image.try_as_imgref_mut::<Rgba<u16>>().expect(TIGHTLY_PACKED_INVARIANT);
         for px in img.buf_mut().iter_mut() {
             *px = Rgba {
                 r: scale_to_u16(px.r, bit_depth),
@@ -134,7 +153,7 @@ pub fn scale_pixels_to_u16(image: &mut PixelBuffer, bit_depth: u8) {
             };
         }
     } else if desc.layout_compatible(PixelDescriptor::GRAY16) {
-        let mut img = image.try_as_imgref_mut::<rgb::Gray<u16>>().unwrap();
+        let mut img = image.try_as_imgref_mut::<rgb::Gray<u16>>().expect(TIGHTLY_PACKED_INVARIANT);
         for px in img.buf_mut().iter_mut() {
             *px = rgb::Gray::new(scale_to_u16(px.value(), bit_depth));
         }

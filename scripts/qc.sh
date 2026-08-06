@@ -41,8 +41,8 @@ dur=$(( $(date +%s) - start ))
 echo "== qc:$TAG rc=$rc ${dur}s =="
 
 # Compiler diagnostics: unique headlines only, capped.
-nerr=$(grep -c '^error' "$LOG" 2>/dev/null || echo 0)
-nwarn=$(grep -c '^warning' "$LOG" 2>/dev/null || echo 0)
+nerr=$(grep -c "^error" "$LOG" 2>/dev/null | head -1)
+nwarn=$(grep -c '^warning' "$LOG" 2>/dev/null | head -1); nwarn=${nwarn:-0}
 [ "$nerr" -gt 0 ] || [ "$nwarn" -gt 0 ] && echo "diagnostics: $nerr error / $nwarn warning"
 if [ "$nerr" -gt 0 ]; then
   echo "--- errors (unique, first 25) ---"

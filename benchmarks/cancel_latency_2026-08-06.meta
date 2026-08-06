@@ -1,0 +1,38 @@
+harness:   examples/cancel_latency.rs (this repo)
+command:   ZENAVIF_DECODE_THREADS=1 ./target/release/examples/cancel_latency
+           ZENAVIF_DECODE_THREADS=1 ZENAVIF_CANCEL_RELAY=0 ./target/release/examples/cancel_latency
+commit:    2b4a3c6
+date:      2026-08-06T02:26:44Z
+host:      Darwin arm64, 12 cores, 24 GiB
+rustc:     rustc 1.97.1 (8bab26f4f 2026-07-14)
+build:     --release --features encode (no -C target-cpu=native, per repo policy)
+
+WHAT IS MEASURED
+  Wall time from StopSource::cancel() to zenavif::decode_with() returning.
+  40 trials per cell, cancel point swept across the decode (frac = (i+0.5)/40
+  * 0.9 of the control decode time) so the sample covers early/middle/late
+  cancellation. Trials where the decode finished before the cancel landed are
+  discarded (that is the n column; n < 40 means the decode outran late cancel
+  points). Source images are high-frequency synthetic patterns encoded at
+  speed 10 -- NOT smooth gradients, which compress to nothing and decode too
+  fast to interrupt.
+
+  relay=off reproduces the PRE-CHANGE behavior exactly: the caller's token is
+  never handed to rav1d-safe, so it is polled only at zenavif's phase
+  boundaries and an in-flight frame decode runs to completion.
+  relay=on is the shipped behavior: src/cancel.rs relays the borrowed token
+  into rav1d-safe's Decoder::set_stop, which polls at superblock-row
+  boundaries.
+
+THREADS=1 IS NOT A CHOICE -- IT IS THE ONLY CELL THAT DECODES ON THIS HOST
+  With threads=2/4/auto, decoding these 4K images FAILS on this machine:
+  rav1d-safe tile workers panic with "overlapping DisjointMut" and the decode
+  returns Err. Reproduced with the relay both ON and OFF, so it is NOT caused
+  by the cancellation work -- it is the zenavif#30 race class, still live at
+  the rav1d-safe rev this branch pins (f9458f43). See CHANGELOG.
+
+  Consequence for the 5 ms goal: cancellation latency is floored by ONE
+  superblock row of decode work, whose WALL time falls roughly linearly with
+  thread count. The 4K numbers below are therefore the single-threaded worst
+  case, not what a healthy multi-threaded decode would show. No multi-threaded
+  number is reported because none could be measured here -- not extrapolated.

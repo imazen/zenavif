@@ -48,7 +48,10 @@ COMBOS=(
 
 case "$SUB" in
   clippy)  ARGS=(clippy --workspace --all-targets); TAIL=(-- -D warnings) ;;
-  nextest) ARGS=(nextest run --workspace); TAIL=() ;;
+  # --no-fail-fast: a single early failure otherwise cancels the run and hides
+  # every later test, which turns one broken thing into several slow rounds of
+  # "fix, rerun, discover the next one".
+  nextest) ARGS=(nextest run --workspace --no-fail-fast); TAIL=() ;;
   build)   ARGS=(build --workspace --all-targets); TAIL=() ;;
   *)       ARGS=(check --workspace --all-targets); TAIL=() ;;
 esac
@@ -67,7 +70,7 @@ for c in "${COMBOS[@]}"; do
   nice -n 19 cargo "${ARGS[@]}" "${fargs[@]}" -j "$JOBS" "${TAIL[@]}" >"$LOG" 2>&1
   rc=$?
   dur=$(( $(date +%s) - start ))
-  nerr=$(grep -c '^error' "$LOG" 2>/dev/null || echo 0)
+  nerr=$(grep -c '^error' "$LOG" 2>/dev/null | head -1); nerr=${nerr:-0}
   extra=""
   if [ "$SUB" = nextest ]; then
     extra=$(grep -E '^ *Summary' "$LOG" | tail -1 | sed 's/^ *//')
