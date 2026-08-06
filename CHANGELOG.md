@@ -107,10 +107,30 @@ write-path returns + gain-map interop additions, already on main).
     `strength = 1/γ` under `e ∝ step^γ`, default 1.0. DERIVED, NOT FITTED,
     and not honestly fittable until the gate opens (an applied map has no
     bitstream effect today).
-  - Measured against the existing secant baseline on the same images and
-    targets: `benchmarks/zensim_loop_ab_2026-08-06.tsv`. Anchor-curve fit
-    and its 1,008-encode sweep: `benchmarks/zensim_anchor_2026-08-06.tsv`
-    (+ `scripts/hyperparam/fit_zensim_anchor.py`, deterministic).
+  - **Measured against the existing secant baseline**, same images, same
+    targets, same options on both arms (12 sources x long edges
+    {64, 256, 1024} x zensim targets 20-90 step 5, plus a 4-source x 2048
+    leg on a step-10 grid; `benchmarks/zensim_loop_ab_2026-08-06.tsv` and
+    `..._tol1_...`, summaries alongside):
+
+    | tolerance | arm | n | mean encodes | converged | 1 encode | <=2 encodes |
+    |---|---|---|---|---|---|---|
+    | 0.5 | secant | 572 | 4.14 | 66.3% | 8.0% | 14.7% |
+    | 0.5 | loop | 572 | **3.75** | 64.9% | **12.9%** | **29.4%** |
+    | 1.0 | secant | 360 | 3.35 | 82.2% | 17.8% | 31.7% |
+    | 1.0 | loop | 360 | **2.90** | **82.8%** | **23.3%** | **51.4%** |
+
+    Paired per-cell at tolerance 0.5: -0.39 encodes on average (fewer on
+    43.4% of cells, more on 23.3%), achieved-vs-target error a wash (closer
+    26.9%, further 26.9%, median delta 0), identical file sizes. The gain
+    holds at every size and target band. At tolerance 0.5 the loop trades
+    marginally lower convergence (64.9% vs 66.3%) for the encode saving --
+    a tight early bracket runs out of lattice resolution where the
+    baseline's coarse extrapolation gets more chances to land on a lattice
+    point; at tolerance 1.0 that trade disappears.
+  - Anchor-curve fit and its 1,008-encode sweep:
+    `benchmarks/zensim_anchor_2026-08-06.tsv` (+
+    `scripts/hyperparam/fit_zensim_anchor.py`, deterministic).
   - New public API: `two_pass_zensim` module, `ZensimLoopOptions`,
     `ZensimLoopResult`, `encode_rgb8_zensim_loop`,
     `anchor_quality_for_zensim`, `SPATIAL_HINTS_LIVE`.

@@ -16,12 +16,28 @@
 # command
 #   cargo build --release --features two-pass-zensim,auto-tune \
 #       --example zensim_loop_bench
+#   # leg 1 -- the 64/256/1024 ladder, all 12 sources, 15 targets
 #   ./target/release/examples/zensim_loop_bench ab \
 #       benchmarks/zensim_loop_manifest_2026-08-06.txt 6 \
-#       64,256,1024,2048 \
+#       64,256,1024 \
 #       20,25,30,35,40,45,50,55,60,65,70,75,80,85,90 \
 #       0.5 6
+#   # leg 2 -- the 2048 tier. A 2048 cell costs ~15-20 s per encode, so this
+#   # leg is a 4-source subset (2 photos + 2 screenshots) on a step-10 target
+#   # grid. The grid is still UNIFORM across 20..90, so the low band keeps the
+#   # same density as the high band -- only the count is reduced, not the
+#   # coverage shape.
+#   ./target/release/examples/zensim_loop_bench ab \
+#       benchmarks/zensim_loop_manifest_large_2026-08-06.txt 6 \
+#       2048 20,30,40,50,60,70,80,90 0.5 6
+#
 #   (tolerance 0.5, max 6 encodes -- identical options on both arms)
+#
+#   A companion file, benchmarks/zensim_loop_ab_tol1_2026-08-06.tsv, repeats
+#   leg 1's 64/256 tiers at tolerance 1.0. That is the tolerance the score
+#   lattice can actually deliver (see
+#   benchmarks/zensim_score_lattice_2026-08-06.tsv), so it is where the
+#   "converges in 2 encodes" question gets a meaningful answer.
 #
 # arms          secant = zenavif::encode_rgb8_with_target(TargetMetric::Zensim)
 #               zloop  = zenavif::encode_rgb8_zensim_loop

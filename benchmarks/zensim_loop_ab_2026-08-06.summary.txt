@@ -1,0 +1,49 @@
+# rows 1144  arms ['secant', 'zloop']  sizes [64, 256, 1024, 2048]
+# zloop spatial_applied values seen: ['false']
+# (spatial_applied=false means the per-superblock hints were computed
+#  and discarded -- zenravif's FrameHints passthrough is release-gated,
+#  so this A/B measures the GLOBAL half of the loop only.)
+
+# --- overall ---
+group	n	mean_enc	med_enc	converged	1_encode	<=2_encodes	med_|err|	p90_|err|	med_|err|_conv	med_ms
+secant	572	4.138	4.0	66.3%	8.0%	14.7%	0.376	1.914	0.255	284
+zloop	572	3.747	4.0	64.9%	12.9%	29.4%	0.382	2.119	0.243	247
+
+# --- by size (long edge) ---
+group	n	mean_enc	med_enc	converged	1_encode	<=2_encodes	med_|err|	p90_|err|	med_|err|_conv	med_ms
+secant@64	180	4.339	5.0	61.1%	8.9%	17.2%	0.421	3.395	0.295	26
+zloop@64	180	4.017	4.0	57.8%	10.0%	27.8%	0.425	3.409	0.244	22
+secant@256	180	4.094	4.0	66.1%	6.7%	13.9%	0.338	1.655	0.220	260
+zloop@256	180	3.583	3.0	65.6%	15.0%	31.7%	0.373	1.664	0.208	222
+secant@1024	180	3.944	4.0	72.8%	8.9%	13.9%	0.336	1.282	0.240	2725
+zloop@1024	180	3.606	3.0	70.0%	13.9%	30.0%	0.352	1.561	0.264	2536
+secant@2048	32	4.344	4.5	59.4%	6.2%	9.4%	0.413	1.439	0.276	11894
+zloop@2048	32	3.938	4.0	71.9%	12.5%	21.9%	0.346	1.007	0.264	10542
+
+# --- by target band (equal density low and high) ---
+group	n	mean_enc	med_enc	converged	1_encode	<=2_encodes	med_|err|	p90_|err|	med_|err|_conv	med_ms
+secant@t[0,40)	152	4.605	5.0	55.9%	4.6%	9.2%	0.456	3.294	0.226	376
+zloop@t[0,40)	152	4.263	5.0	52.0%	7.2%	19.7%	0.477	3.387	0.248	310
+secant@t[40,60)	152	4.750	5.0	48.0%	3.3%	4.6%	0.575	2.468	0.275	351
+zloop@t[40,60)	152	4.375	5.0	46.1%	8.6%	17.8%	0.598	2.736	0.289	350
+secant@t[60,80)	152	3.829	4.0	77.0%	9.2%	18.4%	0.324	1.074	0.244	234
+zloop@t[60,80)	152	3.428	3.0	77.0%	13.8%	34.9%	0.309	1.033	0.243	185
+secant@t[80,101)	116	3.129	3.0	89.7%	17.2%	30.2%	0.279	0.489	0.259	246
+zloop@t[80,101)	116	2.664	2.5	90.5%	25.0%	50.0%	0.243	0.492	0.212	176
+
+# --- paired per-cell deltas (zloop - secant), n=572 ---
+# encodes:   mean -0.392  median +0.0  fewer 43.4%  same 33.4%  more 23.3%
+# |err|:     mean +0.0190  median +0.0000  closer 26.9%  equal 46.2%  further 26.9%
+# bytes:     median +0  (both arms use the same 'smallest file in band' selection policy)
+# converged: zloop-only 39   secant-only 47   (of 572 cells)
+
+# --- pass-1 (open-loop seed) |score - target|, n=572 ---
+# p50 3.32  p90 13.51  max 26.47 zensim points
+#   within +-0.5: 12.9%   <- the 1-encode rate at that tolerance
+#   within +-1.0: 23.1%   <- the 1-encode rate at that tolerance
+#   within +-2.0: 36.5%   <- the 1-encode rate at that tolerance
+#   within +-3.0: 48.4%   <- the 1-encode rate at that tolerance
+#   within +-5.0: 60.5%   <- the 1-encode rate at that tolerance
+# q0-head content offset vs the bare anchor: nonzero on 0.0% of cells, median +0.00, max |offset| 0.00 quality points
+# 1-encode:  zloop 12.9%  secant 8.0%
+# <=2-encode: zloop 29.4%  secant 14.7%

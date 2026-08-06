@@ -100,6 +100,41 @@
 //! containing the principled g = 1 (pure translate), so no fitted gain
 //! constant ships.
 //!
+//! # Measured against the secant baseline
+//!
+//! Real encodes, same images, same targets, same options on both arms
+//! (`benchmarks/zensim_loop_ab_2026-08-06.tsv` at tolerance 0.5 and
+//! `..._tol1_...` at tolerance 1.0; summaries alongside). 12 sources ×
+//! long edges {64, 256, 1024} × zensim targets 20..90 step 5, plus a
+//! 4-source × 2048 leg on a step-10 grid. `spatial_applied` was `false`
+//! throughout, so this measures the GLOBAL half only.
+//!
+//! | tolerance | arm | n | mean encodes | converged | 1 encode | ≤2 encodes |
+//! |---|---|---|---|---|---|---|
+//! | 0.5 | secant | 572 | 4.14 | 66.3% | 8.0% | 14.7% |
+//! | 0.5 | **loop** | 572 | **3.75** | 64.9% | **12.9%** | **29.4%** |
+//! | 1.0 | secant | 360 | 3.35 | 82.2% | 17.8% | 31.7% |
+//! | 1.0 | **loop** | 360 | **2.90** | **82.8%** | **23.3%** | **51.4%** |
+//!
+//! Paired per-cell (the only comparison not confounded by cell mix), at
+//! tolerance 0.5: **−0.39 encodes on average**, fewer on 43.4% of cells and
+//! more on 23.3%; achieved-vs-target error is a wash (closer 26.9%, further
+//! 26.9%, median Δ exactly 0). Same file sizes — both arms share the
+//! selection policy. The gain holds at every size (largest at 2048:
+//! 4.34 → 3.94 encodes with converged 59.4% → 71.9%) and in every target
+//! band, and is biggest at high targets (t ≥ 80, tolerance 0.5: ≤2 encodes
+//! 30.2% → 50.0%).
+//!
+//! **Honest reading.** At tolerance 0.5 the loop trades slightly *lower*
+//! convergence (64.9% vs 66.3%; 39 cells converge only for the loop, 47
+//! only for the secant) for materially fewer encodes — a better seed
+//! brackets the target tightly and then runs out of lattice resolution,
+//! where the baseline's deliberately coarse ±4-quality extrapolation
+//! wanders into a wide bracket and gets more chances to land on a lattice
+//! point by luck. At tolerance 1.0, which is the tightest band the lattice
+//! generally admits, that trade disappears: the loop is ahead on encodes
+//! *and* convergence.
+//!
 //! # Deriving the diffmap → quantizer-scale mapping
 //!
 //! zensim's diffmap is **unitless SSIM error**, not a butteraugli distance,

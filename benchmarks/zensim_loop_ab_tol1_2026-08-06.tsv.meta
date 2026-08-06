@@ -1,0 +1,30 @@
+# Real-encode A/B at tolerance 1.0: secant baseline vs the zensim closed loop
+#
+# Companion to benchmarks/zensim_loop_ab_2026-08-06.tsv (same harness, same
+# corpus, same arms, same everything except the tolerance and the size list).
+# Read that file's .meta for host / commit / dependency / corpus provenance.
+#
+# why a second tolerance
+#   quality resolves to an INTEGER AV1 quantizer index, so the achievable
+#   zensim scores are a discrete lattice. Measured in
+#   benchmarks/zensim_score_lattice_2026-08-06.tsv: adjacent achievable
+#   scores are 0.82-1.05 apart at the median and ~50% of gaps exceed 1.0, so
+#   a +-0.5 band often contains no achievable score at all. Tolerance 1.0 is
+#   the tightest band the codec can generally hit, which makes it the honest
+#   place to ask "how few encodes does convergence take".
+#
+# command
+#   ./target/release/examples/zensim_loop_bench ab \
+#       benchmarks/zensim_loop_manifest_2026-08-06.txt 6 \
+#       64,256 \
+#       20,25,30,35,40,45,50,55,60,65,70,75,80,85,90 \
+#       1.0 6
+#
+# grid   12 sources x {64, 256} long edge x 15 targets x 2 arms = 720 rows
+#
+# scheduling  run under `nice -n 5`, NOT `nice -n 19` -- see the sibling
+#             .meta files for the measured macOS background-QoS throttle.
+#
+# analysis
+#   python3 scripts/hyperparam/analyze_zensim_loop_ab.py \
+#       benchmarks/zensim_loop_ab_tol1_2026-08-06.tsv
