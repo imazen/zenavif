@@ -380,11 +380,13 @@ fn two_shot_spends_at_most_two_encodes_and_returns_the_last_one() {
             "reported quality and quantizer must describe the same encode"
         );
         if out.encodes == 2 {
+            assert!(!out.kept_pass1, "keep_closer is off by default");
             assert_ne!(
                 out.quantizer, out.pass1_quantizer,
                 "a second encode at the same quantizer would be a duplicate"
             );
         } else {
+            assert!(out.kept_pass1);
             assert_eq!(out.quantizer, out.pass1_quantizer);
             assert_eq!(out.score, out.pass1_score);
         }
@@ -554,5 +556,47 @@ fn two_shot_addresses_the_full_quantizer_lattice() {
     for t in [25.0f64, 45.0, 65.0, 85.0] {
         let qi = anchor_quantizer_for_zensim(t);
         assert!((anchor_zensim_for_quantizer(qi) - t).abs() < 0.05);
+    }
+}
+
+#[test]
+fn two_shot_keep_closer_never_ships_the_worse_of_the_two() {
+    // Both encodes are already paid for, so `keep_closer` is a free
+    // selection between them -- but it must actually select, and it must
+    // still cost exactly two encodes.
+    let img = test_image(192, 192);
+    for target in [30.0f64, 55.0, 78.0] {
+        let strict = encode_rgb8_zensim_two_shot(
+            img.as_ref(),
+            &base_config(),
+            target,
+            &TwoShotOptions::default(),
+            stop(),
+        )
+        .expect("strict");
+        let closer = encode_rgb8_zensim_two_shot(
+            img.as_ref(),
+            &base_config(),
+            target,
+            &TwoShotOptions {
+                keep_closer: true,
+                ..Default::default()
+            },
+            stop(),
+        )
+        .expect("keep_closer");
+        assert_eq!(strict.encodes, closer.encodes, "same budget either way");
+        assert_eq!(strict.pass1_score, closer.pass1_score, "same pass 1");
+        assert!(
+            (closer.score - target).abs() <= (strict.score - target).abs() + 1e-9,
+            "keep_closer must never be further from {target}: {} vs {}",
+            closer.score,
+            strict.score
+        );
+        // And it never lies about which pass it returned.
+        if closer.kept_pass1 && closer.encodes == 2 {
+            assert_eq!(closer.score, closer.pass1_score);
+            assert_eq!(closer.quantizer, closer.pass1_quantizer);
+        }
     }
 }

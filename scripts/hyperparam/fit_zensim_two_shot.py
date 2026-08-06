@@ -264,8 +264,17 @@ DERIVED_QKNOTS = [quality_to_quantizer_f(q) for q in ANCHOR_QUALITY]
 # ---------------------------------------------------------------------------
 
 
-def seed_qi(cell, target):
-    return quality_to_quantizer(anchor_quality(target))
+def seed_qi(cell, target, ctx=None):
+    """Pass-1 quantizer.
+
+    Matches the shipped `encode_rgb8_zensim_two_shot`, which seeds from the
+    QUANTIZER anchor (`anchor_quantizer_for_zensim`), not from the quality
+    anchor. Replaying a different seed than the code uses would make every
+    downstream number describe a rule nobody ships.
+    """
+    if ctx is None:
+        return quality_to_quantizer(anchor_quality(target))
+    return int(round(ctx["a_qi"](target)))
 
 
 def rule_quality_translate(cell, target, qi1, s1, ctx):
@@ -331,7 +340,7 @@ def fit_lm(cells, targets, a_qi):
     rows, ys = [], []
     for c in cells:
         for t in targets:
-            qi1 = seed_qi(c, t)
+            qi1 = seed_qi(c, t, {"a_qi": a_qi})
             if not c.has(qi1):
                 continue
             s1 = c.score[qi1]
@@ -472,7 +481,7 @@ def replay(cells, targets, rule, ctx, policy="nearest"):
     out = []
     for c in cells:
         for t in targets:
-            qi1 = seed_qi(c, t)
+            qi1 = seed_qi(c, t, ctx)
             if not c.has(qi1):
                 continue  # seed outside the measured band -> cannot replay
             s1 = c.score[qi1]
@@ -510,18 +519,19 @@ def summarise(recs, label, out, ceiling=True):
     hit = sum(r["qi2"] == r["best_qi"] for r in recs) / len(recs)
     within1 = sum(r["qi2"] in (r["best_qi"] - 1, r["best_qi"], r["best_qi"] + 1) for r in recs) / len(recs)
     ceil_med = statistics.median([r["ceiling"] for r in recs])
+    pred_med = statistics.median([max(0.0, r["err"] - r["ceiling"]) for r in recs])
     enc = statistics.mean([r["encodes"] for r in recs])
     over = sum(r["signed"] > 0 for r in recs) / len(recs)
     print(
         f"{label}\t{len(recs)}\t{statistics.median(e):.4f}\t{pct(e, 90):.4f}\t"
         f"{pct(e, 99):.4f}\t{max(e):.4f}\t{hit:.1%}\t{within1:.1%}\t"
-        f"{ceil_med:.4f}\t{statistics.median(b):.4f}\t{enc:.3f}\t{over:.1%}",
+        f"{ceil_med:.4f}\t{pred_med:.4f}\t{statistics.median(b):.4f}\t{enc:.3f}\t{over:.1%}",
         file=out,
     )
 
 
 HDR = ("rule\tn\tmed_err\tp90_err\tp99_err\tmax_err\tnearest_hit\twithin1_lat\t"
-       "med_ceiling\tmed_err_best2\tmean_enc\tfrac_over")
+       "med_LATTICE\tmed_PREDICTION\tmed_err_best2\tmean_enc\tfrac_over")
 
 
 # ---------------------------------------------------------------------------

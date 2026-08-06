@@ -829,6 +829,20 @@ pub struct TwoShotOptions {
     /// and nothing else. **It cannot buy a second correction**: the budget
     /// is two encodes whatever this says. Default 0.5.
     pub tolerance: f64,
+    /// Return whichever of the two encodes actually landed closer, instead
+    /// of always returning pass 2. Default `false`.
+    ///
+    /// Both encodes have been paid for by the time this is decided, so
+    /// keeping the closer one is free — it is not a third encode and it
+    /// does not weaken the two-encode budget. It is off by default anyway,
+    /// because the honest default for a "two-shot" contract is that the
+    /// LAST encode is the shipped one: a best-of-N selection quietly makes
+    /// `encodes` flatter than the work done, and that is exactly the
+    /// bookkeeping this API exists to avoid. Turn it on if you want the
+    /// smaller error and do not care which pass produced it.
+    ///
+    /// [`TwoShotResult::kept_pass1`] always says which one came back.
+    pub keep_closer: bool,
     /// Override the pass-1 quality. `None` (default) seeds from
     /// [`anchor_quality_for_zensim`].
     pub seed_quality: Option<f32>,
@@ -866,6 +880,7 @@ impl Default for TwoShotOptions {
         Self {
             policy: LatticePolicy::Nearest,
             tolerance: 0.5,
+            keep_closer: false,
             seed_quality: None,
             min_quality: 1.0,
             max_quality: 100.0,
@@ -921,6 +936,11 @@ pub struct TwoShotResult {
     /// Pass-1 measured score — what a one-encode open-loop prediction
     /// would have delivered.
     pub pass1_score: f64,
+    /// Whether the returned encode is pass 1's. True either because pass 2
+    /// was skipped (pass 1 already sat on the predicted-best lattice point,
+    /// so [`Self::encodes`] is 1) or because
+    /// [`TwoShotOptions::keep_closer`] was set and pass 1 landed closer.
+    pub kept_pass1: bool,
 }
 
 /// Encode an RGB8 image to AVIF with a **fixed budget of two encodes**,
@@ -1045,6 +1065,7 @@ pub fn encode_rgb8_zensim_two_shot(
             pass1_quality: q1,
             pass1_quantizer: qi1,
             pass1_score: s1,
+            kept_pass1: true,
         });
     }
 
@@ -1070,19 +1091,28 @@ pub fn encode_rgb8_zensim_two_shot(
     let dr2 = score_encode(&z, &pre, &enc2, dm_opts, &stop)?;
     let s2 = dr2.score();
 
+    // Both encodes are paid for; `keep_closer` only decides which of the
+    // two already-produced bitstreams is handed back.
+    let keep1 = options.keep_closer && (s1 - target).abs() < (s2 - target).abs();
+    let (encoded, quality, quantizer, score, map) = if keep1 {
+        (enc1, q1, qi1, s1, None)
+    } else {
+        (enc2, q2, qi2, s2, sb_q_scale)
+    };
     Ok(TwoShotResult {
-        encoded: enc2,
-        quality: q2,
-        quantizer: qi2,
-        score: s2,
+        encoded,
+        quality,
+        quantizer,
+        score,
         predicted_score: predicted,
         encodes: 2,
-        within_tolerance: (s2 - target).abs() <= options.tolerance,
+        within_tolerance: (score - target).abs() <= options.tolerance,
         spatial_applied: SPATIAL_HINTS_LIVE,
-        sb_q_scale,
+        sb_q_scale: map,
         pass1_quality: q1,
         pass1_quantizer: qi1,
         pass1_score: s1,
+        kept_pass1: keep1,
     })
 }
 
@@ -1331,7 +1361,13 @@ mod tests {
                 dm[y * w + x] = 1.0;
             }
         }
-        let opts = ZensimLoopOptions::default();
+        // Explicit strength: the default is 0.0 since the channel went
+        // live (see ZensimLoopOptions docs). This test is about the
+        // pooling MATH, not about what is enabled by default.
+        let opts = ZensimLoopOptions {
+            spatial_strength: 1.0,
+            ..Default::default()
+        };
         let map = pool_sb_q_scale(&dm, w, h, &opts);
         assert_eq!(map.len(), 6);
         assert!(
@@ -1359,7 +1395,10 @@ mod tests {
             }
         }
         let scaled: Vec<f32> = dm.iter().map(|v| v * 1000.0).collect();
-        let opts = ZensimLoopOptions::default();
+        let opts = ZensimLoopOptions {
+            spatial_strength: 1.0,
+            ..Default::default()
+        };
         let a = pool_sb_q_scale(&dm, w, h, &opts);
         let b = pool_sb_q_scale(&scaled, w, h, &opts);
         for (x, y) in a.iter().zip(b.iter()) {
@@ -1384,7 +1423,15 @@ mod tests {
         assert!(off.iter().all(|&s| (s - 1.0).abs() < 1e-6));
         // An all-zero map (identical images) has no signal anywhere.
         let zero = vec![0.0f32; w * h];
-        let none = pool_sb_q_scale(&zero, w, h, &ZensimLoopOptions::default());
+        let none = pool_sb_q_scale(
+            &zero,
+            w,
+            h,
+            &ZensimLoopOptions {
+                spatial_strength: 1.0,
+                ..Default::default()
+            },
+        );
         assert!(none.iter().all(|&s| s == 1.0));
     }
 
