@@ -176,7 +176,8 @@ impl ManagedAvifDecoder {
         let Planes::Depth8(planes) = primary.planes() else {
             return Err(at!(Error::Decode {
                 code: -1,
-                msg: "Expected 8-bit planes",
+                msg: "frame reports 8-bit depth but the decoder produced 16-bit planes; \
+                       bit depth is inconsistent between the sequence header and the frame",
             }));
         };
 
