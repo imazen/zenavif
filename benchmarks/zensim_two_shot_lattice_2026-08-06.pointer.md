@@ -1,3 +1,9 @@
+> **UPDATE 2026-08-06:** the two `.tsv.zst` files are now COMMITTED beside
+> this pointer (110 KB / 106 KB), on the user's call — they exceed the 30 KB
+> rule even compressed, and that waiver was theirs to give, not mine. Read
+> them with `zstd -dc <file>.tsv.zst`. The block-storage copy and its
+> sha256s below remain valid as a second location.
+
 # Dense achievable-score lattice, 2026-08-06 — NOT committed (pointer)
 
 The two raw lattice TSVs are **not in git**: at 112 KB and 108 KB
