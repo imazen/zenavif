@@ -307,13 +307,153 @@ def rule_dm_power(cell, target, qi1, s1, ctx):
     return qi1 * (want / dm1) ** (1.0 / gamma)
 
 
+def lm_features(target, qi1, s1, dm1, a_qi):
+    """Features for the fitted residual model.
+
+    The translate rule predicts `qi1 + step`.  It is exact when this
+    image's score-vs-quantizer curve is a pure horizontal translate of the
+    population's; the residual is whatever SHAPE difference is left, so the
+    features are the two things that can carry shape information out of a
+    single measurement:
+
+      step  -- how far pass 2 has to move (a slope error scales with it)
+      off   -- how far this image sits from the population at pass 1
+               (a proxy for "harder/easier than typical"), and its
+               interaction with step, which is what a slope error IS.
+    """
+    step = a_qi(target) - a_qi(s1)
+    off = qi1 - a_qi(s1)
+    return [1.0, step, off, step * off, abs(step)]
+
+
+def fit_lm(cells, targets, a_qi):
+    """OLS of the oracle quantizer's residual on lm_features (TRAIN only)."""
+    rows, ys = [], []
+    for c in cells:
+        for t in targets:
+            qi1 = seed_qi(c, t)
+            if not c.has(qi1):
+                continue
+            s1 = c.score[qi1]
+            x = lm_features(t, qi1, s1, c.dm[qi1], a_qi)
+            # target: the residual the plain translate leaves
+            rows.append(x)
+            ys.append(c.best_qi(t) - (qi1 + x[1]))
+    return ols(rows, ys)
+
+
+def ols(rows, ys):
+    """Normal-equation least squares, no numpy. Returns coefficient list."""
+    k = len(rows[0])
+    ata = [[0.0] * k for _ in range(k)]
+    atb = [0.0] * k
+    for x, y in zip(rows, ys):
+        for i in range(k):
+            atb[i] += x[i] * y
+            for j in range(k):
+                ata[i][j] += x[i] * x[j]
+    # tiny ridge so a degenerate column cannot blow the solve up
+    for i in range(k):
+        ata[i][i] += 1e-6
+    # Gaussian elimination with partial pivoting
+    m = [row[:] + [atb[i]] for i, row in enumerate(ata)]
+    for col in range(k):
+        p = max(range(col, k), key=lambda r: abs(m[r][col]))
+        m[col], m[p] = m[p], m[col]
+        if abs(m[col][col]) < 1e-12:
+            continue
+        for r in range(k):
+            if r == col:
+                continue
+            f = m[r][col] / m[col][col]
+            for cc in range(col, k + 1):
+                m[r][cc] -= f * m[col][cc]
+    return [m[i][k] / m[i][i] if abs(m[i][i]) > 1e-12 else 0.0 for i in range(k)]
+
+
+def rule_qi_ratio_hi(cell, target, qi1, s1, ctx):
+    """Stretch anchored at the COARSE end of the quantizer range.
+
+    `qi_ratio` anchors the one-parameter stretch at quantizer 0 (the
+    near-lossless end, where every image's score converges near 100);
+    this one anchors it at 255 instead.  Whichever anchor is closer to
+    where the image's curve is actually pinned wins, so both are worth
+    measuring rather than assumed.
+    """
+    a = ctx["a_qi"]
+    den = 255.0 - a(s1)
+    if den <= 1e-9:
+        return rule_qi_translate(cell, target, qi1, s1, ctx)
+    return 255.0 - (255.0 - qi1) * (255.0 - a(target)) / den
+
+
+def rule_blend(cell, target, qi1, s1, ctx):
+    """Mean of the translate and the two stretches."""
+    return (
+        rule_qi_translate(cell, target, qi1, s1, ctx)
+        + rule_qi_ratio(cell, target, qi1, s1, ctx)
+        + rule_qi_ratio_hi(cell, target, qi1, s1, ctx)
+    ) / 3.0
+
+
+def rule_qi_translate_lm(cell, target, qi1, s1, ctx):
+    a, coef = ctx["a_qi"], ctx["lm"]
+    x = lm_features(target, qi1, s1, cell.dm[qi1], a)
+    return qi1 + x[1] + sum(c * v for c, v in zip(coef, x))
+
+
 RULES = {
     "quality_translate": rule_quality_translate,
     "qi_translate": rule_qi_translate,
     "qi_ratio": rule_qi_ratio,
     "qi_translate_gain": rule_qi_translate_gain,
     "dm_power": rule_dm_power,
+    "qi_translate_lm": rule_qi_translate_lm,
+    "qi_ratio_hi": rule_qi_ratio_hi,
+    "blend": rule_blend,
 }
+
+
+def translate_family_ceiling(cells, targets, a_qi, out):
+    """How good can ANY pure-translate rule be, with a perfect offset?
+
+    For each cell, choose the single quantizer offset that minimises the
+    median |score error| the translate rule would leave across all
+    targets, and report what is left.  That residual is the *shape*
+    difference between the image's score-vs-quantizer curve and the
+    population's -- the part no one-measurement translate model can
+    remove, however well its population curve or its gain is fitted.
+
+    Comparing the achieved error against this, rather than against the
+    lattice ceiling, is what says whether more modelling effort is worth
+    anything.
+    """
+    per_cell = []
+    for c in cells:
+        best = None
+        for off in range(-40, 41):
+            errs = []
+            for t in targets:
+                qi = c.clamp(int(round(a_qi(t) + off)))
+                if c.has(qi):
+                    errs.append(abs(c.score[qi] - t))
+            if errs:
+                m = statistics.median(errs)
+                if best is None or m < best[0]:
+                    best = (m, off, errs)
+        if best:
+            per_cell.append(best)
+    if not per_cell:
+        return
+    meds = [b[0] for b in per_cell]
+    allerr = [e for b in per_cell for e in b[2]]
+    print("# --- the translate family's own ceiling (perfect per-image offset) ---", file=out)
+    print(f"#   per-cell median |err|: median {statistics.median(meds):.4f}  "
+          f"p90 {pct(meds, 90):.4f}  max {max(meds):.4f}", file=out)
+    print(f"#   pooled |err|: median {statistics.median(allerr):.4f}  "
+          f"p90 {pct(allerr, 90):.4f}  p99 {pct(allerr, 99):.4f}", file=out)
+    print("#   (a two-shot rule cannot beat this without modelling curve SHAPE,", file=out)
+    print("#    not just offset -- and one measurement carries no shape information)", file=out)
 
 
 def round_policy(x, policy):
@@ -505,6 +645,12 @@ def main():
     base = {"qual_of": qual_of, "g_inv": g_inv, "gamma": gamma, "gain": 1.0}
     ctx_derived = dict(base, a_qi=derived_qi, a_score=derived_sc)
     ctx_refit = dict(base, a_qi=refit_qi, a_score=refit_sc)
+    lm = fit_lm(tr, targets, refit_qi)
+    ctx_refit["lm"] = lm
+    ctx_derived["lm"] = lm
+    print("# fitted residual model (TRAIN), coefficients on "
+          "[1, step, off, step*off, |step|]:", file=out)
+    print("#   " + ", ".join(f"{c:+.4f}" for c in lm), file=out)
 
     # --- gain sweep on TRAIN ----------------------------------------------
     print("# --- pass-2 gain sweep (qi_translate_gain), TRAIN ---", file=out)
@@ -538,6 +684,8 @@ def main():
                          dict(ctx_refit, gain=best_gain)),
                   f"qi_translate_gain(g={best_gain:.2f},refit)", out)
         summarise(replay(cellset, targets, "dm_power", ctx_refit), "dm_power", out)
+        summarise(replay(cellset, targets, "qi_translate_lm", ctx_refit),
+                  "qi_translate_lm(TRAIN-fitted residual)", out)
         # pass-1-only reference: the 1-encode open loop
         recs = replay(cellset, targets, "qi_translate", ctx_refit)
         p1 = [dict(r, err=abs(r["s1"] - r["target"]), qi2=r["qi1"], encodes=1,

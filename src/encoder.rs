@@ -433,6 +433,37 @@ impl EncoderConfig {
         self.quality
     }
 
+    /// Set the per-64×64-superblock AC quantizer scale map for the color
+    /// encode (`1.0` = neutral, frame superblock raster order, exactly
+    /// `ceil(width/64) * ceil(height/64)` entries).
+    ///
+    /// Each superblock's quantizer is scaled by its entry and re-quantized
+    /// to the next AV1 quantizer index at or above the result, so entries
+    /// below 1.0 spend more bits there and entries above 1.0 spend fewer.
+    /// The encoder clamps each entry to `[0.25, 4.0]`.
+    ///
+    /// Three behaviours worth knowing before relying on this, all of them
+    /// the encoder's and none of them reported back through this API:
+    ///
+    /// * A map whose length does not match the superblock grid is
+    ///   **silently ignored**, not partially applied — so a wrong grid
+    ///   looks exactly like the map having no effect.
+    /// * An all-`1.0` map is **inert**: it does not switch on delta-q
+    ///   coding, so it is byte-identical to passing no map.
+    /// * Any non-neutral entry switches delta-q coding on for the whole
+    ///   frame, which has a fixed syntax cost and changes RDO distortion
+    ///   weighting. The channel is therefore not a free perturbation, and
+    ///   a very sparse map is not a very small one.
+    ///
+    /// [`crate::two_pass_zensim::sb_q_scale_from_diffmap`] builds a
+    /// correctly shaped map from a zensim diffmap.
+    #[cfg(any(feature = "two-pass-butteraugli", feature = "two-pass-zensim"))]
+    #[must_use]
+    pub fn with_sb_q_scale(mut self, map: Option<Box<[f32]>>) -> Self {
+        self.sb_q_scale = map;
+        self
+    }
+
     /// Read the currently configured speed (1..=10).
     pub fn speed_value(&self) -> u8 {
         self.speed

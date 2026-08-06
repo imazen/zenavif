@@ -337,3 +337,218 @@ fn the_anchor_curve_seeds_pass_one_in_the_right_direction() {
         prev = q;
     }
 }
+
+// ===========================================================================
+// Two-shot: precision at a FIXED budget of two encodes.
+// ===========================================================================
+
+use zenavif::{
+    LatticePolicy, TwoShotOptions, anchor_quantizer_for_zensim, anchor_zensim_for_quantizer,
+    encode_rgb8_zensim_two_shot, quality_for_quantizer,
+};
+
+#[test]
+fn two_shot_spends_at_most_two_encodes_and_returns_the_last_one() {
+    let img = test_image(192, 192);
+    for target in [35.0f64, 60.0, 80.0] {
+        let out = encode_rgb8_zensim_two_shot(
+            img.as_ref(),
+            &base_config(),
+            target,
+            &TwoShotOptions::default(),
+            stop(),
+        )
+        .expect("two-shot");
+        assert!(
+            out.encodes <= 2,
+            "budget is two encodes, spent {} at target {target}",
+            out.encodes
+        );
+        assert!(!out.encoded.avif_file.is_empty());
+        // The returned encode is the LAST one: its quality and quantizer
+        // agree, and when two encodes ran it is not pass 1's.
+        assert_eq!(
+            zenavif::EncoderConfig::new()
+                .quality(out.quality)
+                .resolve_plan(zenavif::PlanInput::rgb8(192, 192))
+                .quantizer,
+            out.quantizer,
+            "reported quality and quantizer must describe the same encode"
+        );
+        if out.encodes == 2 {
+            assert_ne!(
+                out.quantizer, out.pass1_quantizer,
+                "a second encode at the same quantizer would be a duplicate"
+            );
+        } else {
+            assert_eq!(out.quantizer, out.pass1_quantizer);
+            assert_eq!(out.score, out.pass1_score);
+        }
+    }
+}
+
+#[test]
+fn two_shot_lands_closer_than_its_own_seed() {
+    // The whole point of pass 2: on content whose curve is offset from the
+    // population's, the correction must actually help. Averaged over a
+    // spread of targets, two-shot error must beat the open-loop seed.
+    let img = test_image(192, 192);
+    let (mut seed_err, mut final_err) = (0.0f64, 0.0f64);
+    let targets = [30.0f64, 40.0, 50.0, 60.0, 70.0, 80.0, 88.0];
+    for &t in &targets {
+        let out = encode_rgb8_zensim_two_shot(
+            img.as_ref(),
+            &base_config(),
+            t,
+            &TwoShotOptions::default(),
+            stop(),
+        )
+        .expect("two-shot");
+        seed_err += (out.pass1_score - t).abs();
+        final_err += (out.score - t).abs();
+    }
+    let n = targets.len() as f64;
+    assert!(
+        final_err < seed_err,
+        "pass 2 must improve on the seed: mean |err| {:.3} -> {:.3}",
+        seed_err / n,
+        final_err / n
+    );
+}
+
+#[test]
+fn two_shot_lattice_policy_picks_the_requested_side() {
+    // AtLeast must never choose a coarser quantizer than Nearest, and
+    // AtMost never a finer one — that is what "prefer the side above /
+    // below the target" means once quantizer order is accounted for.
+    let img = test_image(192, 192);
+    let mk = |policy| TwoShotOptions {
+        policy,
+        ..Default::default()
+    };
+    for target in [45.0f64, 65.0, 82.0] {
+        let n = encode_rgb8_zensim_two_shot(
+            img.as_ref(),
+            &base_config(),
+            target,
+            &mk(LatticePolicy::Nearest),
+            stop(),
+        )
+        .expect("nearest");
+        let a = encode_rgb8_zensim_two_shot(
+            img.as_ref(),
+            &base_config(),
+            target,
+            &mk(LatticePolicy::AtLeast),
+            stop(),
+        )
+        .expect("at least");
+        let b = encode_rgb8_zensim_two_shot(
+            img.as_ref(),
+            &base_config(),
+            target,
+            &mk(LatticePolicy::AtMost),
+            stop(),
+        )
+        .expect("at most");
+        assert!(
+            a.quantizer <= n.quantizer && n.quantizer <= b.quantizer,
+            "target {target}: at_least {} nearest {} at_most {}",
+            a.quantizer,
+            n.quantizer,
+            b.quantizer
+        );
+        // A finer quantizer is never a smaller file.
+        assert!(a.encoded.avif_file.len() >= b.encoded.avif_file.len());
+    }
+}
+
+#[test]
+fn two_shot_never_claims_spatial_hints_it_did_not_apply() {
+    let img = test_image(192, 192);
+    let out = encode_rgb8_zensim_two_shot(
+        img.as_ref(),
+        &base_config(),
+        70.0,
+        &TwoShotOptions {
+            spatial_strength: 1.0,
+            ..Default::default()
+        },
+        stop(),
+    )
+    .expect("two-shot");
+    assert_eq!(
+        out.spatial_applied, SPATIAL_HINTS_LIVE,
+        "spatial_applied must mirror the release gate, never the intent"
+    );
+    if out.encodes == 2 {
+        let map = out.sb_q_scale.expect("a nonzero strength computes a map");
+        assert!(map.iter().all(|v| v.is_finite() && *v > 0.0));
+    }
+    // The default must not compute or claim a map at all.
+    let plain = encode_rgb8_zensim_two_shot(
+        img.as_ref(),
+        &base_config(),
+        70.0,
+        &TwoShotOptions::default(),
+        stop(),
+    )
+    .expect("two-shot");
+    assert!(plain.sb_q_scale.is_none());
+}
+
+#[test]
+fn two_shot_respects_the_quality_range_and_rejects_an_empty_one() {
+    let img = test_image(128, 128);
+    let out = encode_rgb8_zensim_two_shot(
+        img.as_ref(),
+        &base_config(),
+        97.0,
+        &TwoShotOptions {
+            min_quality: 1.0,
+            max_quality: 20.0,
+            ..Default::default()
+        },
+        stop(),
+    )
+    .expect("two-shot");
+    assert!(out.quality <= 20.0, "quality {} escaped the range", out.quality);
+    assert!(!out.within_tolerance, "zensim 97 is unreachable at q<=20");
+    assert!(!out.encoded.avif_file.is_empty());
+
+    let err = encode_rgb8_zensim_two_shot(
+        img.as_ref(),
+        &base_config(),
+        70.0,
+        &TwoShotOptions {
+            min_quality: 80.0,
+            max_quality: 80.0,
+            ..Default::default()
+        },
+        stop(),
+    )
+    .expect_err("an empty range must be an error");
+    assert!(format!("{err:?}").contains("range"));
+}
+
+#[test]
+fn two_shot_addresses_the_full_quantizer_lattice() {
+    // Pass 2 picks a QUANTIZER, so every integer quantizer it can pick has
+    // to be addressable through the quality knob. This is the property the
+    // whole precision argument rests on.
+    for qi in [0u8, 1, 26, 71, 107, 150, 206, 254, 255] {
+        let q = quality_for_quantizer(qi);
+        assert_eq!(
+            zenavif::EncoderConfig::new()
+                .quality(q)
+                .resolve_plan(zenavif::PlanInput::rgb8(64, 64))
+                .quantizer,
+            qi
+        );
+    }
+    // And the anchor pair used to place pass 2 is a consistent bijection.
+    for t in [25.0f64, 45.0, 65.0, 85.0] {
+        let qi = anchor_quantizer_for_zensim(t);
+        assert!((anchor_zensim_for_quantizer(qi) - t).abs() < 0.05);
+    }
+}

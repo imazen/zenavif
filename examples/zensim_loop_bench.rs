@@ -161,13 +161,67 @@ fn encode_and_score_qi(img: ImgRef<'_, Rgb<u8>>, speed: u8, qi: u8) -> Option<Ce
     Some(c)
 }
 
+/// Encode at one quantizer with an optional per-superblock quantizer-scale
+/// map, then decode and score.
+fn encode_and_score_map(
+    img: ImgRef<'_, Rgb<u8>>,
+    speed: u8,
+    qi: u8,
+    map: Option<Box<[f32]>>,
+) -> Option<Cell> {
+    let cfg = EncoderConfig::new()
+        .speed(speed)
+        .quality(zenavif::quality_for_quantizer(qi))
+        .threads(Some(1))
+        .with_sb_q_scale(map);
+    encode_and_score_cfg(img, &cfg)
+}
+
+/// The per-superblock map the two-shot's spatial term would build from an
+/// un-hinted encode at `qi` — one extra encode+decode+diffmap.
+fn diffmap_sb_map(
+    img: ImgRef<'_, Rgb<u8>>,
+    speed: u8,
+    qi: u8,
+    strength: f64,
+    expect_sbs: usize,
+) -> Option<Box<[f32]>> {
+    let cfg = EncoderConfig::new()
+        .speed(speed)
+        .quality(zenavif::quality_for_quantizer(qi))
+        .threads(Some(1));
+    let enc = zenavif::encode_rgb8(img, &cfg, StopToken::new(Unstoppable)).ok()?;
+    let dec = zenavif::decode_with(
+        &enc.avif_file,
+        &zenavif::DecoderConfig::new().prefer_8bit(true).threads(1),
+        &StopToken::new(Unstoppable),
+    )
+    .ok()?;
+    let dec_img: ImgRef<'_, Rgb<u8>> = dec.try_as_imgref::<Rgb<u8>>()?;
+    let z = zensim::Zensim::new(zensim::ZensimProfile::codec_target());
+    let dr = z
+        .compute_with_diffmap(&img, &dec_img, zensim::DiffmapOptions::default())
+        .ok()?;
+    let map = zenavif::two_pass_zensim::sb_q_scale_from_diffmap(
+        dr.diffmap(),
+        dr.width(),
+        dr.height(),
+        &zenavif::TwoShotOptions {
+            spatial_strength: strength,
+            ..Default::default()
+        },
+    );
+    (map.len() == expect_sbs).then_some(map)
+}
+
 /// Encode at one quality, then decode and score with the same zensim
 /// profile the loop and the target search use.
 fn encode_and_score(img: ImgRef<'_, Rgb<u8>>, speed: u8, quality: f32) -> Option<Cell> {
-    let cfg = EncoderConfig::new()
-        .speed(speed)
-        .quality(quality)
-        .threads(Some(1));
+    encode_and_score_cfg(img, &EncoderConfig::new().speed(speed).quality(quality).threads(Some(1)))
+}
+
+/// Encode with a fully built config, then decode and score it.
+fn encode_and_score_cfg(img: ImgRef<'_, Rgb<u8>>, cfg: &EncoderConfig) -> Option<Cell> {
     let qindex = cfg
         .resolve_plan(zenavif::PlanInput::rgb8(
             img.width() as u32,
@@ -175,7 +229,7 @@ fn encode_and_score(img: ImgRef<'_, Rgb<u8>>, speed: u8, quality: f32) -> Option
         ))
         .quantizer;
     let t0 = std::time::Instant::now();
-    let enc = zenavif::encode_rgb8(img, &cfg, StopToken::new(Unstoppable)).ok()?;
+    let enc = zenavif::encode_rgb8(img, cfg, StopToken::new(Unstoppable)).ok()?;
     let enc_ms = t0.elapsed().as_millis();
     let dec = zenavif::decode_with(
         &enc.avif_file,
@@ -273,6 +327,229 @@ fn main() {
                     }
                     out.flush().unwrap();
                     eprintln!("[sweep] {} @ {sz} done", base(path));
+                }
+            }
+        }
+        "hintdiag" => {
+            // Does the per-SB map's CONTENT matter, or only whether it is
+            // non-neutral? The hintprobe sweep came back invariant in the
+            // dithered fraction, which is only consistent with the channel
+            // acting as a switch. These probes separate the two: if D/E/F
+            // (one / half / all superblocks at 0.5) are byte-identical to
+            // each other, the content is being discarded.
+            let qis: Vec<u8> = parse_list(args.get(5).expect("qindex list"));
+            writeln!(out, "image\tsize\tw\th\tqi\tprobe\tsbs\tbytes\tzensim").unwrap();
+            for path in &images {
+                let src = load_rgb8(path);
+                for &sz in &sizes {
+                    let Some(img) = downscale(&src, sz) else {
+                        continue;
+                    };
+                    let (w, h) = (img.width(), img.height());
+                    let n = w.div_ceil(64) * h.div_ceil(64);
+                    for &qi in &qis {
+                        let probes: Vec<(&str, Option<Box<[f32]>>)> = vec![
+                            ("none", None),
+                            ("all_1.0", Some(vec![1.0f32; n].into_boxed_slice())),
+                            (
+                                "one_0.999",
+                                Some(
+                                    (0..n)
+                                        .map(|i| if i == 0 { 0.999 } else { 1.0 })
+                                        .collect::<Vec<f32>>()
+                                        .into_boxed_slice(),
+                                ),
+                            ),
+                            (
+                                "one_0.5",
+                                Some(
+                                    (0..n)
+                                        .map(|i| if i == 0 { 0.5 } else { 1.0 })
+                                        .collect::<Vec<f32>>()
+                                        .into_boxed_slice(),
+                                ),
+                            ),
+                            (
+                                "half_0.5",
+                                Some(
+                                    (0..n)
+                                        .map(|i| if i * 2 < n { 0.5 } else { 1.0 })
+                                        .collect::<Vec<f32>>()
+                                        .into_boxed_slice(),
+                                ),
+                            ),
+                            ("all_0.5", Some(vec![0.5f32; n].into_boxed_slice())),
+                            ("all_2.0", Some(vec![2.0f32; n].into_boxed_slice())),
+                            (
+                                "alt_0.5_2.0",
+                                Some(
+                                    (0..n)
+                                        .map(|i| if i % 2 == 0 { 0.5 } else { 2.0 })
+                                        .collect::<Vec<f32>>()
+                                        .into_boxed_slice(),
+                                ),
+                            ),
+                            // Wrong length: must be IGNORED, i.e. identical
+                            // to "none". This is the control that proves a
+                            // null is a real null and not a silent drop.
+                            ("wrong_len", Some(vec![0.5f32; n + 1].into_boxed_slice())),
+                        ];
+                        for (tag, map) in probes {
+                            if let Some(c) = encode_and_score_map(img.as_ref(), speed, qi, map) {
+                                writeln!(
+                                    out,
+                                    "{}\t{sz}\t{w}\t{h}\t{qi}\t{tag}\t{n}\t{}\t{:.4}",
+                                    base(path),
+                                    c.bytes,
+                                    c.score
+                                )
+                                .unwrap();
+                            }
+                        }
+                    }
+                    out.flush().unwrap();
+                    eprintln!("[hintdiag] {} @ {sz} done ({n} SBs)", base(path));
+                }
+            }
+        }
+        "hintprobe" => {
+            // Can a MIXED per-superblock map place the frame score BETWEEN
+            // two adjacent achievable lattice points? If so the quantizer
+            // lattice stops being the precision floor.
+            //
+            // Two things the first version of this probe got wrong, both
+            // now designed around:
+            //  * AV1 codes per-SB delta_q at a RESOLUTION of 1/2/4/8
+            //    quantizer indices (`variance_boost_delta_q_res_log2`,
+            //    keyed on the frame's base quantizer). A nudge smaller than
+            //    that resolution quantizes to zero, so the map collapses to
+            //    "activated, all deltas zero" and the sweep comes back
+            //    invariant in f. The scales here are large enough to
+            //    survive; the f=0 arm is the activated-but-flat control
+            //    that the invariant result actually was.
+            //  * Activating delta-q is NOT a small perturbation: it also
+            //    disables segmentation, so there is a content-dependent
+            //    step between the un-hinted encode and the activated one.
+            //    That step is measured separately (`activated_base`) so it
+            //    is never mistaken for interpolation.
+            //
+            // Fractions are exact k/N over the frame's superblock count, so
+            // f really is "this many superblocks", not a rounded request.
+            let qis: Vec<u8> = parse_list(args.get(5).expect("qindex list"));
+            let scales: Vec<f32> = parse_list(
+                args.get(6).map(String::as_str).unwrap_or("0.97,0.94,0.88"),
+            );
+            writeln!(
+                out,
+                "image\tsize\tw\th\tbase_qi\tvariant\tscale\tk\tsbs\tbytes\tzensim\tenc_ms"
+            )
+            .unwrap();
+            for path in &images {
+                let src = load_rgb8(path);
+                for &sz in &sizes {
+                    let Some(img) = downscale(&src, sz) else {
+                        continue;
+                    };
+                    let (w, h) = (img.width(), img.height());
+                    let nsb = w.div_ceil(64) * h.div_ceil(64);
+                    let mut emit = |base_qi: u8, variant: &str, scale: f32, k: usize, c: &Cell| {
+                        writeln!(
+                            out,
+                            "{}\t{sz}\t{w}\t{h}\t{base_qi}\t{variant}\t{scale}\t{k}\t{nsb}\t{}\t{:.4}\t{}",
+                            base(path),
+                            c.bytes,
+                            c.score,
+                            c.enc_ms
+                        )
+                        .unwrap();
+                    };
+                    for &qi in &qis {
+                        // The un-hinted neighbourhood: the interval any
+                        // sub-lattice claim has to be judged against.
+                        for d in -2i32..=6 {
+                            let q = (i32::from(qi) + d).clamp(0, 255) as u8;
+                            if let Some(c) = encode_and_score_qi(img.as_ref(), speed, q) {
+                                emit(qi, "lattice", 1.0, 0, &c);
+                                // reuse the k column for the quantizer
+                                let _ = q;
+                            }
+                        }
+                        for &scale in &scales {
+                            // k superblocks nudged, chosen by van der Corput
+                            // ordering so the subset is scattered rather
+                            // than a contiguous stripe, and nested in k.
+                            // Stride k so a 176-superblock cell does not
+                            // cost 177 encodes per scale; k=0,1,2 are kept
+                            // exactly because the activation step and the
+                            // first real superblock move are the two points
+                            // the whole question turns on.
+                            let ks: Vec<usize> = {
+                                let mut v = vec![0usize, 1, 2];
+                                for i in 1..=10 {
+                                    v.push(nsb * i / 10);
+                                }
+                                v.push(nsb);
+                                v.retain(|&k| k <= nsb);
+                                v.sort_unstable();
+                                v.dedup();
+                                v
+                            };
+                            for k in ks {
+                                let mut order: Vec<(f64, usize)> = (0..nsb)
+                                    .map(|i| {
+                                        let (mut n, mut d, mut b) = (i + 1, 0.5f64, 0.0f64);
+                                        while n > 0 {
+                                            b += d * f64::from((n & 1) as u32);
+                                            n >>= 1;
+                                            d *= 0.5;
+                                        }
+                                        (b, i)
+                                    })
+                                    .collect();
+                                order.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+                                let chosen: std::collections::HashSet<usize> =
+                                    order.iter().take(k).map(|&(_, i)| i).collect();
+                                // k == 0 still has to ACTIVATE delta-q, or
+                                // it is a different regime from k >= 1 and
+                                // the sweep is not an interpolation at all.
+                                // 0.999 is below every delta_q resolution,
+                                // so it activates without moving anything.
+                                let map: Vec<f32> = (0..nsb)
+                                    .map(|i| {
+                                        if chosen.contains(&i) {
+                                            scale
+                                        } else if i == 0 {
+                                            0.999
+                                        } else {
+                                            1.0
+                                        }
+                                    })
+                                    .collect();
+                                let tag = if k == 0 { "activated_base" } else { "dither" };
+                                if let Some(c) = encode_and_score_map(
+                                    img.as_ref(),
+                                    speed,
+                                    qi,
+                                    Some(map.into_boxed_slice()),
+                                ) {
+                                    emit(qi, tag, scale, k, &c);
+                                }
+                            }
+                        }
+                        // The diffmap-derived map, for the RD question.
+                        for &strength in &[0.5f64, 1.0, 2.0] {
+                            if let Some(map) = diffmap_sb_map(img.as_ref(), speed, qi, strength, nsb)
+                            {
+                                if let Some(c) =
+                                    encode_and_score_map(img.as_ref(), speed, qi, Some(map))
+                                {
+                                    emit(qi, "diffmap", strength as f32, 0, &c);
+                                }
+                            }
+                        }
+                    }
+                    out.flush().unwrap();
+                    eprintln!("[hintprobe] {} @ {sz} done ({nsb} SBs)", base(path));
                 }
             }
         }

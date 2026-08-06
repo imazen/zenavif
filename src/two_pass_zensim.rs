@@ -891,7 +891,7 @@ pub fn encode_rgb8_zensim_two_shot(
         .unwrap_or_else(|| anchor_quality_for_zensim(target))
         .clamp(min_q, max_q);
     let qi1 = crate::encode_plan::quality_to_quantizer(seed_q).clamp(qi_min, qi_max);
-    let q1 = crate::encode_plan::quality_for_quantizer(qi1);
+    let q1 = addressing_quality(qi1, min_q, max_q);
 
     let mut cfg1 = config.clone().quality(q1);
     cfg1.sb_q_scale = None;
@@ -952,7 +952,7 @@ pub fn encode_rgb8_zensim_two_shot(
             },
         )
     });
-    let q2 = crate::encode_plan::quality_for_quantizer(qi2);
+    let q2 = addressing_quality(qi2, min_q, max_q);
     let mut cfg2 = config.clone().quality(q2);
     cfg2.sb_q_scale = sb_q_scale.clone();
     let enc2 = encode_rgb8_once(img, &cfg2, stop.clone())?;
@@ -973,6 +973,61 @@ pub fn encode_rgb8_zensim_two_shot(
         pass1_quantizer: qi1,
         pass1_score: s1,
     })
+}
+
+/// Pool a zensim diffmap into the per-superblock AC quantizer scale map
+/// the spatial correction applies (the derivation is in the
+/// [module docs](self)).
+///
+/// Exposed so a caller that already has a diffmap — or a measurement
+/// harness comparing the spatial channel against alternatives — can build
+/// exactly the map the closed loops use, instead of reimplementing the
+/// pooling and drifting from it.
+///
+/// `diffmap` is `width * height` per-pixel error values in row-major
+/// order. The returned map is in frame superblock raster order
+/// (`ceil(width/64) * ceil(height/64)` entries, `1.0` = neutral), which is
+/// the length the encoder requires — a map of any other length is silently
+/// ignored by the encoder rather than partially applied.
+#[must_use]
+pub fn sb_q_scale_from_diffmap(
+    diffmap: &[f32],
+    width: usize,
+    height: usize,
+    options: &TwoShotOptions,
+) -> Box<[f32]> {
+    pool_sb_q_scale(
+        diffmap,
+        width,
+        height,
+        &ZensimLoopOptions {
+            spatial_strength: options.spatial_strength,
+            weight_clamp: options.weight_clamp,
+            pool_exponent: options.pool_exponent,
+            map_eps: options.map_eps,
+            ..Default::default()
+        },
+    )
+}
+
+/// A `quality` that addresses quantizer `qi` and still reads inside the
+/// caller's `[min_q, max_q]` range.
+///
+/// Many qualities resolve to the same quantizer, and
+/// [`crate::quality_for_quantizer`] returns the boundary one, which can sit
+/// a fraction of a point outside a range whose own endpoint resolves to
+/// that same quantizer (`max_quality = 20.0` and `20.219` are both
+/// quantizer 215). Clamping picks the in-range member of the alias group;
+/// the encode is byte-identical either way, and the reported quality no
+/// longer contradicts the range the caller asked for.
+fn addressing_quality(qi: u8, min_q: f32, max_q: f32) -> f32 {
+    let q = crate::encode_plan::quality_for_quantizer(qi).clamp(min_q, max_q);
+    debug_assert_eq!(
+        crate::encode_plan::quality_to_quantizer(q),
+        qi,
+        "clamping into [{min_q}, {max_q}] crossed a quantizer boundary"
+    );
+    q
 }
 
 /// Decode `enc` with this crate's own decoder and score it against the
@@ -1002,6 +1057,8 @@ fn score_encode(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use almost_enough::Unstoppable;
+    use imgref::ImgVec;
 
     #[test]
     fn quantizer_anchor_is_monotone_and_inverts() {
@@ -1062,17 +1119,65 @@ mod tests {
     }
 
     #[test]
-    fn two_shot_defaults_do_not_pretend_to_apply_spatial_hints() {
+    fn two_shot_defaults_are_the_measured_ones() {
         let o = TwoShotOptions::default();
-        assert_eq!(o.spatial_strength, 0.0);
         assert_eq!(o.policy, LatticePolicy::Nearest);
-        // If the hints ever go live, this test is the tripwire that says
-        // "revalidate the pass-2 prediction with the map applied before
-        // changing the default".
-        assert!(
-            !SPATIAL_HINTS_LIVE,
-            "FrameHints went live: re-validate the two-shot prediction with \
-             a live per-SB map before enabling spatial_strength by default"
+        assert_eq!(o.spatial_strength, 0.0);
+    }
+
+    #[test]
+    fn spatial_hints_live_matches_observed_encoder_behaviour() {
+        // `SPATIAL_HINTS_LIVE` is a re-export of a constant in another
+        // crate, so asserting a fixed value here goes stale the moment
+        // that crate flips it (it did, 2026-08-06). Assert the constant
+        // against what the encoder DOES instead — that stays correct
+        // through a flip in either direction, which is the point.
+        let (w, h) = (192usize, 128usize);
+        let img: ImgVec<Rgb<u8>> = ImgVec::new(
+            (0..w * h)
+                .map(|i| {
+                    let v = ((i * 37) % 251) as u8;
+                    Rgb::new(v, v.wrapping_add(80), 255 - v)
+                })
+                .collect(),
+            w,
+            h,
+        );
+        let cfg = EncoderConfig::new().speed(8).quality(60.0).threads(Some(1));
+        let plain = encode_rgb8_once(img.as_ref(), &cfg, StopToken::new(Unstoppable))
+            .expect("plain encode");
+
+        let (sbx, sby) = crate::sb_pool::sb_grid(w, h);
+        // A correctly sized, decidedly non-neutral map. Size matters: a
+        // wrongly sized map is IGNORED, which would look exactly like the
+        // gate being shut.
+        let mut hinted_cfg = cfg.clone();
+        hinted_cfg.sb_q_scale = Some(
+            (0..sbx * sby)
+                .map(|i| if i % 2 == 0 { 0.5f32 } else { 2.0 })
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        );
+        let hinted = encode_rgb8_once(img.as_ref(), &hinted_cfg, StopToken::new(Unstoppable))
+            .expect("hinted encode");
+
+        let changed = hinted.avif_file != plain.avif_file;
+        assert_eq!(
+            SPATIAL_HINTS_LIVE, changed,
+            "SPATIAL_HINTS_LIVE says {SPATIAL_HINTS_LIVE} but a non-neutral \
+             per-SB map {} the bitstream",
+            if changed { "CHANGED" } else { "did not change" }
+        );
+
+        // Whatever the gate says, a neutral map must never change bytes —
+        // it is the identity of this channel.
+        let mut neutral_cfg = cfg;
+        neutral_cfg.sb_q_scale = Some(vec![1.0f32; sbx * sby].into_boxed_slice());
+        let neutral = encode_rgb8_once(img.as_ref(), &neutral_cfg, StopToken::new(Unstoppable))
+            .expect("neutral encode");
+        assert_eq!(
+            neutral.avif_file, plain.avif_file,
+            "an all-neutral map must be inert"
         );
     }
 
