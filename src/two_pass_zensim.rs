@@ -96,6 +96,18 @@
 //! exponent (12) and the clamp shape are carried over from the butteraugli
 //! driver as *mechanism*, which is how aom constants have transferred
 //! throughout this program.
+//!
+//! What the 2026-08-06 sweep DOES say about the power law
+//! (`benchmarks/zensim_anchor_2026-08-06.tsv`, 48 cells): the mean diffmap
+//! error really does grow as a power of the quantizer, with
+//! `d ln(error) / d ln(qindex)` = 1.79 median (p25 1.56, p75 2.10). That
+//! supports the functional form. It does **not** pin `strength`, because
+//! the exponent the derivation needs is against the dequant *step*, not
+//! the qindex, and AV1's `ac_qlookup` between them is nonlinear. If that
+//! elasticity is above ~1.8 then γ > 1 and the shipped `strength = 1.0`
+//! steers harder than equal-error allocation wants. Do not "correct" it by
+//! guessing the lookup's slope — measure `strength` end-to-end once the
+//! hints are live.
 
 use crate::DecoderConfig;
 use crate::encoder::{EncodedImage, EncoderConfig, encode_rgb8_once};
@@ -220,10 +232,19 @@ pub struct ZensimLoopResult {
 const ANCHOR_SCORE: [f32; 15] = [
     20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0, 65.0, 70.0, 75.0, 80.0, 85.0, 90.0,
 ];
-/// Quality knots paired with [`ANCHOR_SCORE`]. Placeholder identity ramp
-/// until the sweep lands — see [`anchor_quality_for_zensim`].
+/// Quality knots paired with [`ANCHOR_SCORE`], from the fit described
+/// there (`scripts/hyperparam/fit_zensim_anchor.py`, 48 cells x 21
+/// qualities = 1,008 measured encodes).
+///
+/// Shape worth knowing: the curve is NOT the identity. Reaching zensim 90
+/// costs quality 92.6 while zensim 50 costs only 42.5 — a straight line
+/// over the 40-90 band fits at intercept -11.50, slope 1.0817 quality per
+/// score point (R2 0.966) but leaves up to 6.78 quality points of
+/// curvature, which is exactly the error a constant-slope Newton step
+/// would carry and the piecewise table does not.
 const ANCHOR_QUALITY: [f32; 15] = [
-    20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0, 65.0, 70.0, 75.0, 80.0, 85.0, 90.0,
+    24.546, 27.502, 30.540, 33.217, 35.999, 40.040, 42.495, 45.937, 50.294, 56.654, 61.060, 66.338,
+    74.021, 81.451, 92.628,
 ];
 
 /// The fitted zensim-B score → AVIF quality anchor curve: what quality a

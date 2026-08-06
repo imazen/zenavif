@@ -1,0 +1,45 @@
+# zensim-B score -> AVIF quality anchor sweep (fit input for
+# src/two_pass_zensim.rs ANCHOR_SCORE / ANCHOR_QUALITY)
+#
+# date          2026-08-06
+# host          Darwin 26.5.2 (macOS), Apple aarch64, 12 cores, 24 GiB RAM
+# rustc         rustc 1.97.1 (8bab26f4f 2026-07-14)
+# zenavif       e1313f16 "feat(two-pass-zensim): zensim-diffmap closed loop"
+#               (the sweep is the FIT INPUT for the anchor constants that
+#               land in the commit after it, so it necessarily predates them)
+# zensim        git https://github.com/imazen/zensim branch main @ e4b875b5 (0.3.0)
+#               profile: ZensimProfile::codec_target() == B
+# encoder       zenravif (ravif) path dep ../ravif/ravif, speed 6, threads=1,
+#               default subsampling/tuning; FRAME_HINTS_LIVE = false
+# NOT built with -C target-cpu=native
+#
+# command
+#   cargo build --release --features two-pass-zensim,auto-tune \
+#       --example zensim_loop_bench
+#   ./target/release/examples/zensim_loop_bench sweep \
+#       benchmarks/zensim_loop_manifest_2026-08-06.txt 6 \
+#       64,256,1024,2048 \
+#       1,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,98
+#
+# grid          12 sources x 4 long-edge sizes x 21 qualities = 1,008 encodes
+#               (each encode + decode + one zensim diffmap scoring)
+# corpus        benchmarks/zensim_loop_manifest_2026-08-06.txt
+#               8 clic2025 photos + 4 gb82-sc screen-content, every source
+#               with a long edge >= 2048 so the ladder never upscales.
+#               Lanczos3 downscale only.
+# sizes         64 (tiny) / 256 (small) / 1024 (medium) / 2048 (large).
+#               2048 is the largest available in-corpus: clic2025 tops out at
+#               a 2048 long edge and upscaling is banned, so there is NO
+#               4096 tier here -- that is a corpus limit, not a measurement.
+# quality grid  step 5 across the WHOLE range; the low band is sampled at the
+#               same density as the high band.
+#
+# columns       image size w h q qindex bytes zensim dm_mean enc_ms
+#               qindex  = EncoderConfig::resolve_plan(..).quantizer
+#               zensim  = ZensimProfile::codec_target() score of the decode
+#               dm_mean = mean of the zensim per-pixel diffmap
+#               enc_ms  = encode only (decode + scoring excluded)
+#
+# fit           python3 scripts/hyperparam/fit_zensim_anchor.py \
+#                   benchmarks/zensim_anchor_2026-08-06.tsv --emit-rust
+#               (deterministic; reproduces the shipped constants exactly)

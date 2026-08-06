@@ -242,7 +242,7 @@ fn main() {
             let max_encodes: u8 = args.get(7).map_or(6, |t| t.parse().unwrap());
             writeln!(
                 out,
-                "arm\timage\tsize\tw\th\ttarget\tachieved\terr\tencodes\tconverged\tbytes\tms\tspatial"
+                "arm\timage\tsize\tw\th\ttarget\tachieved\terr\tencodes\tconverged\tbytes\tms\tspatial\tseed_q\tseed_score\tanchor_q"
             )
             .unwrap();
             for path in &images {
@@ -273,7 +273,7 @@ fn main() {
                         match r {
                             Ok(o) => writeln!(
                                 out,
-                                "secant\t{}\t{sz}\t{w}\t{h}\t{target}\t{:.4}\t{:+.4}\t{}\t{}\t{}\t{ms}\tNA",
+                                "secant\t{}\t{sz}\t{w}\t{h}\t{target}\t{:.4}\t{:+.4}\t{}\t{}\t{}\t{ms}\tNA\tNA\tNA\tNA",
                                 base(path),
                                 o.score,
                                 o.score - target,
@@ -303,14 +303,17 @@ fn main() {
                         match r {
                             Ok(o) => writeln!(
                                 out,
-                                "zloop\t{}\t{sz}\t{w}\t{h}\t{target}\t{:.4}\t{:+.4}\t{}\t{}\t{}\t{ms}\t{}",
+                                "zloop\t{}\t{sz}\t{w}\t{h}\t{target}\t{:.4}\t{:+.4}\t{}\t{}\t{}\t{ms}\t{}\t{:.3}\t{:.4}\t{:.3}",
                                 base(path),
                                 o.score,
                                 o.score - target,
                                 o.encodes,
                                 o.converged,
                                 o.encoded.avif_file.len(),
-                                o.spatial_applied
+                                o.spatial_applied,
+                                o.pass1_quality,
+                                o.pass1_score,
+                                zenavif::anchor_quality_for_zensim(target)
                             )
                             .unwrap(),
                             Err(e) => eprintln!("FAIL zloop {path} {sz} {target}: {e:?}"),
