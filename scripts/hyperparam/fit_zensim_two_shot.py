@@ -708,6 +708,46 @@ def main():
         summarise(ceil, "ORACLE (nearest lattice point)", out)
         print(file=out)
 
+    # --- paired rule comparison: is the gap real, or is it noise? ---------
+    # Two medians differing by 0.09 on 433 combinations says nothing on its
+    # own. Pairing on identical (cell, target) removes the cell mix, and the
+    # sign test says whether the direction is consistent -- which is what
+    # decides between shipping the simpler rule and the marginally better one.
+    print("# --- paired rule comparisons on VAL (identical cell+target) ---", file=out)
+    print("a_vs_b\tn\tmean_d\tmed_d\ta_better\ttie\tb_better\tsign_test_p", file=out)
+
+    def paired(rule_a, ctx_a, rule_b, ctx_b, label):
+        ra = {(r["cell"], r["target"]): r["err"] for r in replay(va, targets, rule_a, ctx_a)}
+        rb = {(r["cell"], r["target"]): r["err"] for r in replay(va, targets, rule_b, ctx_b)}
+        keys = sorted(set(ra) & set(rb), key=lambda k: (k[0], k[1]))
+        if not keys:
+            return
+        d = [ra[k] - rb[k] for k in keys]
+        wins = sum(x < -1e-9 for x in d)
+        loss = sum(x > 1e-9 for x in d)
+        # two-sided sign test over the non-tied pairs
+        n = wins + loss
+        if n:
+            k = min(wins, loss)
+            p = min(1.0, 2.0 * sum(math.comb(n, i) for i in range(k + 1)) / (2.0 ** n))
+        else:
+            p = 1.0
+        print(f"{label}\t{len(keys)}\t{statistics.mean(d):+.4f}\t{statistics.median(d):+.4f}\t"
+              f"{wins / len(keys):.1%}\t{(len(keys) - n) / len(keys):.1%}\t"
+              f"{loss / len(keys):.1%}\t{p:.4f}", file=out)
+
+    paired("qi_translate", ctx_refit, "quality_translate", ctx_derived,
+           "qi_translate_vs_quality_translate")
+    paired("qi_ratio", ctx_refit, "qi_translate", ctx_refit, "qi_ratio_vs_qi_translate")
+    paired("qi_translate_gain", dict(ctx_refit, gain=best_gain), "qi_translate", ctx_refit,
+           f"gain{best_gain:.2f}_vs_qi_translate")
+    paired("qi_translate", ctx_refit, "qi_translate", ctx_derived,
+           "refit_knots_vs_derived_knots")
+    print("#   negative mean_d = the FIRST rule is closer to target", file=out)
+    print("#   sign_test_p is two-sided over non-tied pairs; treat p > 0.05 as", file=out)
+    print("#   'not distinguishable here' and prefer the simpler rule.", file=out)
+    print(file=out)
+
     # --- policy comparison on the chosen rule ------------------------------
     print("# --- lattice policy, VAL, qi_translate(refit) ---", file=out)
     print(HDR, file=out)

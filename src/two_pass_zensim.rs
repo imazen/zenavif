@@ -812,11 +812,16 @@ pub fn anchor_zensim_for_quantizer(qi: f64) -> f64 {
 /// That is the arithmetic of the error decomposition, not a defect in the
 /// policy: the median distance to the nearest achievable score is ~0.15
 /// zensim while the median placement error is ~0.78, so rounding decides
-/// ~15% of the outcome and the prediction decides the rest. A caller who
-/// genuinely must not undershoot needs a **margin** — ask for
-/// `target + δ` — not a rounding rule. The policy is worth setting anyway
-/// (it is free, and it moves the bias the right way), but it is a tilt,
-/// not a contract.
+/// ~15% of the outcome and the prediction decides the rest.
+///
+/// **If you must not undershoot, ask for `target + δ` and size δ against
+/// the PLACEMENT error, not the lattice step.** Roughly: δ ≈ 0.8 zensim
+/// buys about a coin-flip-beating majority, and δ ≈ 4 (the p90 placement
+/// error) buys most of the distribution — pick from
+/// [`TwoShotResult::pass1_score`] and the p90 figures in the module docs
+/// rather than from this policy, whose whole lever is one quantizer step.
+/// Set the policy too (it is free and tilts the right way); just do not
+/// mistake the name for a contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum LatticePolicy {
