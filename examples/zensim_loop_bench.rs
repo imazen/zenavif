@@ -217,7 +217,13 @@ fn diffmap_sb_map(
 /// Encode at one quality, then decode and score with the same zensim
 /// profile the loop and the target search use.
 fn encode_and_score(img: ImgRef<'_, Rgb<u8>>, speed: u8, quality: f32) -> Option<Cell> {
-    encode_and_score_cfg(img, &EncoderConfig::new().speed(speed).quality(quality).threads(Some(1)))
+    encode_and_score_cfg(
+        img,
+        &EncoderConfig::new()
+            .speed(speed)
+            .quality(quality)
+            .threads(Some(1)),
+    )
 }
 
 /// Encode with a fully built config, then decode and score it.
@@ -436,9 +442,8 @@ fn main() {
             // Fractions are exact k/N over the frame's superblock count, so
             // f really is "this many superblocks", not a rounded request.
             let qis: Vec<u8> = parse_list(args.get(5).expect("qindex list"));
-            let scales: Vec<f32> = parse_list(
-                args.get(6).map(String::as_str).unwrap_or("0.97,0.94,0.88"),
-            );
+            let scales: Vec<f32> =
+                parse_list(args.get(6).map(String::as_str).unwrap_or("0.97,0.94,0.88"));
             writeln!(
                 out,
                 "image\tsize\tw\th\tbase_qi\tvariant\tscale\tk\tsbs\tbytes\tzensim\tenc_ms"
@@ -541,7 +546,8 @@ fn main() {
                         }
                         // The diffmap-derived map, for the RD question.
                         for &strength in &[0.5f64, 1.0, 2.0] {
-                            if let Some(map) = diffmap_sb_map(img.as_ref(), speed, qi, strength, nsb)
+                            if let Some(map) =
+                                diffmap_sb_map(img.as_ref(), speed, qi, strength, nsb)
                                 && let Some(c) =
                                     encode_and_score_map(img.as_ref(), speed, qi, Some(map))
                             {
@@ -580,7 +586,9 @@ fn main() {
                         if let Some(c) = encode_and_score_qi(img.as_ref(), speed, qi) {
                             measured.insert(qi, c);
                         }
-                        let Some(next) = qi.checked_add(16) else { break };
+                        let Some(next) = qi.checked_add(16) else {
+                            break;
+                        };
                         qi = next;
                     }
                     // Widest band that still contains the requested score

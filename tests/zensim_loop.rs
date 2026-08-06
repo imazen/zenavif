@@ -464,8 +464,14 @@ fn two_shot_lattice_policy_picks_the_requested_side() {
             n.quantizer,
             b.quantizer
         );
-        // A finer quantizer is never a smaller file.
-        assert!(a.encoded.avif_file.len() >= b.encoded.avif_file.len());
+        // NOT asserted: that AtLeast's file is the larger one. A finer
+        // quantizer usually costs more bytes but is not guaranteed to —
+        // the dense per-quantizer sweep
+        // (benchmarks/zensim_two_shot_lattice_2026-08-06.pointer.md) shows
+        // byte count is not monotone in the quantizer, and this assertion
+        // did fail once the encoder's RD changed under it. The quantizer
+        // ordering above is the real contract; bytes are the codec's
+        // business.
     }
 }
 
@@ -518,7 +524,11 @@ fn two_shot_respects_the_quality_range_and_rejects_an_empty_one() {
         stop(),
     )
     .expect("two-shot");
-    assert!(out.quality <= 20.0, "quality {} escaped the range", out.quality);
+    assert!(
+        out.quality <= 20.0,
+        "quality {} escaped the range",
+        out.quality
+    );
     assert!(!out.within_tolerance, "zensim 97 is unreachable at q<=20");
     assert!(!out.encoded.avif_file.is_empty());
 

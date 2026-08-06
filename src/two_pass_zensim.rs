@@ -1461,7 +1461,8 @@ mod tests {
 
         let changed = hinted.avif_file != plain.avif_file;
         assert_eq!(
-            SPATIAL_HINTS_LIVE, changed,
+            SPATIAL_HINTS_LIVE,
+            changed,
             "SPATIAL_HINTS_LIVE says {SPATIAL_HINTS_LIVE} but a non-neutral \
              per-SB map {} the bitstream",
             if changed { "CHANGED" } else { "did not change" }

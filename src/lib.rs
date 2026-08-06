@@ -176,7 +176,9 @@ pub use decode_av1::{DecodeBackend, DecodedYuv, decode_av1_obu_yuv, decode_av1_o
 pub use decoder::AvifDecoder;
 pub use decoder_managed::{AnimationDecoder, ManagedAvifDecoder};
 #[cfg(feature = "encode")]
-pub use encode_plan::{EncodePlan, PlanInput, SpeedDerived, TilesResolution, quality_for_quantizer};
+pub use encode_plan::{
+    EncodePlan, PlanInput, SpeedDerived, TilesResolution, quality_for_quantizer,
+};
 #[cfg(feature = "encode-mono")]
 pub use encoder::encode_gray8;
 #[cfg(feature = "encode")]
