@@ -1,0 +1,16 @@
+# HELD-OUT validation sources for the two-shot lattice work (2026-08-06).
+# Disjoint from benchmarks/zensim_loop_manifest_2026-08-06.txt, which is
+# the TRAIN split (the existing anchor constants were fitted on it).
+# random.Random(20260806).sample over codec-corpus sources with long edge >= 2048.
+/Users/lilith/work/zen/codec-corpus/clic2025/final-test/f67f11de4ca9ebda3db52c41fd3d26c3105687b2d37571e54631a1e4486d0b30.png
+/Users/lilith/work/zen/codec-corpus/clic2025/final-test/a365e6541bab5c0f4e01bf43a0c3a655d88292a8ac45403a889c308d11854555.png
+/Users/lilith/work/zen/codec-corpus/clic2025/training/0c49a5cce349020bbba2f97ae41e90ba.png
+/Users/lilith/work/zen/codec-corpus/clic2025/final-test/eda6d42794b0d0140628fa90fc0c14a7ba88159b8474d0077027c32ee2ddf6f0.png
+/Users/lilith/work/zen/codec-corpus/clic2025/final-test/07b9f93f170a0381836bdf301280a5b80b2c4be6e66f793a3c335dc200fb4e5b.png
+/Users/lilith/work/zen/codec-corpus/clic2025/training/60430844748882ff66b9a5598ef06dd6.png
+/Users/lilith/work/zen/codec-corpus/clic2025/training/aed95e005df28e790519eefb6eb1e565.png
+/Users/lilith/work/zen/codec-corpus/clic2025/training/870516c65d81fb9267de6865964083a9.png
+/Users/lilith/work/zen/codec-corpus/gb82-sc/imac_dark.png
+/Users/lilith/work/zen/codec-corpus/gb82-sc/windows.png
+/Users/lilith/work/zen/codec-corpus/qoi-benchmark/screenshot_web/imdb.com.png
+/Users/lilith/work/zen/codec-corpus/clic2025/final-test/4ebc0e6c463bcf8ada38673c268aae56d44864347fd74b81a9fb5659bf96a010.png

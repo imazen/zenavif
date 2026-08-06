@@ -2175,7 +2175,7 @@ dependencies = [
  "whereat",
  "zenavif-parse 0.6.2",
  "zenpixels-convert",
- "zenrav1e",
+ "zenrav1e 0.1.4",
 ]
 
 [[package]]
@@ -2310,6 +2310,35 @@ dependencies = [
  "arbitrary",
  "arg_enum_proc_macro",
  "arrayvec",
+ "av1-grain",
+ "bitstream-io",
+ "built",
+ "cfg-if",
+ "interpolate_name",
+ "itertools",
+ "libfuzzer-sys",
+ "log",
+ "maybe-rayon",
+ "noop_proc_macro",
+ "num-derive",
+ "num-traits",
+ "pastey",
+ "profiling",
+ "rand",
+ "rand_chacha",
+ "simd_helpers",
+ "thiserror",
+ "v_frame 0.3.9",
+]
+
+[[package]]
+name = "zenrav1e"
+version = "0.2.0"
+dependencies = [
+ "aligned-vec",
+ "arbitrary",
+ "arg_enum_proc_macro",
+ "arrayvec",
  "av-scenechange",
  "av1-grain",
  "bitstream-io",
@@ -2337,6 +2366,7 @@ dependencies = [
  "thiserror",
  "v_frame 0.3.9",
  "wasm-bindgen",
+ "whereat",
 ]
 
 [[package]]
@@ -2351,7 +2381,7 @@ dependencies = [
  "rgb",
  "whereat",
  "zenavif-serialize",
- "zenrav1e",
+ "zenrav1e 0.2.0",
 ]
 
 [[package]]

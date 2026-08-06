@@ -595,9 +595,486 @@ fn pool_sb_q_scale(diffmap: &[f32], w: usize, h: usize, options: &ZensimLoopOpti
     crate::sb_pool::normalize_and_power(&raw, options.weight_clamp, -options.spatial_strength)
 }
 
+// ============================================================================
+// Two-shot: maximise precision at a FIXED budget of two encodes.
+// ============================================================================
+
+/// Continuous quantizer-index knots paired with [`ANCHOR_SCORE`] — the
+/// population score→quantizer curve the two-shot pass-2 step translates
+/// along.
+///
+/// **Provenance:** refit directly in quantizer space from the dense
+/// achievable-lattice sweep (`benchmarks/zensim_lattice_2026-08-06.tsv.zst`,
+/// TRAIN sources only — see [`anchor_quantizer_for_zensim`]).
+///
+/// Why a separate table instead of composing [`ANCHOR_QUALITY`] with the
+/// quality→quantizer curve: that curve has a **slope break at quality 70**
+/// (3.57 quantizer steps per quality point above it, 2.17 below), so a
+/// translate that is uniform in quality is *not* uniform in quantizer. The
+/// physics the translate assumes — error growing as a power of the
+/// dequantizer step — lives in quantizer space, and crossing quality 70
+/// between pass 1 and pass 2 is common at mid targets. Measured on the
+/// lattice replay, moving the translate into quantizer space is worth
+/// roughly a third of the pass-2 error (see `docs/DIFFMAP_TWO_PASS.md`).
+///
+/// Descending (a higher score needs a finer, i.e. lower, quantizer).
+const ANCHOR_QUANTIZER: [f32; 15] = [
+    205.622, 199.214, 192.630, 186.827, 180.797, 172.038, 166.717, 159.257, 149.813, 136.027,
+    126.477, 115.037, 92.745, 66.220, 26.318,
+];
+
+/// The fitted zensim-B score → AV1 **quantizer index** anchor curve: the
+/// quantizer a typical image needs to reach `target`.
+///
+/// The quantizer-space twin of [`anchor_quality_for_zensim`]. Returned as
+/// `f64` and deliberately *not* rounded — the two-shot step needs the
+/// difference of two of these, and rounding both first throws away up to a
+/// whole lattice point of resolution.
+///
+/// Monotone non-increasing in `target`; linearly extrapolated outside the
+/// knot range and clamped to `[0, 255]`.
+#[must_use]
+pub fn anchor_quantizer_for_zensim(target: f64) -> f64 {
+    let t = target as f32;
+    let n = ANCHOR_SCORE.len();
+    let qi = if t <= ANCHOR_SCORE[0] {
+        let slope =
+            (ANCHOR_QUANTIZER[1] - ANCHOR_QUANTIZER[0]) / (ANCHOR_SCORE[1] - ANCHOR_SCORE[0]);
+        ANCHOR_QUANTIZER[0] + (t - ANCHOR_SCORE[0]) * slope
+    } else if t >= ANCHOR_SCORE[n - 1] {
+        let slope = (ANCHOR_QUANTIZER[n - 1] - ANCHOR_QUANTIZER[n - 2])
+            / (ANCHOR_SCORE[n - 1] - ANCHOR_SCORE[n - 2]);
+        ANCHOR_QUANTIZER[n - 1] + (t - ANCHOR_SCORE[n - 1]) * slope
+    } else {
+        let i = ANCHOR_SCORE.partition_point(|&s| s <= t).max(1) - 1;
+        let (s0, s1) = (ANCHOR_SCORE[i], ANCHOR_SCORE[i + 1]);
+        let (q0, q1) = (ANCHOR_QUANTIZER[i], ANCHOR_QUANTIZER[i + 1]);
+        q0 + (t - s0) / (s1 - s0) * (q1 - q0)
+    };
+    f64::from(qi).clamp(0.0, 255.0)
+}
+
+/// Inverse of [`anchor_quantizer_for_zensim`]: the score a typical image
+/// reaches at quantizer index `qi`. Used to report
+/// [`TwoShotResult::predicted_score`] and to choose between the two lattice
+/// points that straddle a target.
+#[must_use]
+pub fn anchor_zensim_for_quantizer(qi: f64) -> f64 {
+    // ANCHOR_QUANTIZER descends, so scan from the fine (high-score) end.
+    let n = ANCHOR_QUANTIZER.len();
+    let x = qi as f32;
+    if x <= ANCHOR_QUANTIZER[n - 1] {
+        let slope = (ANCHOR_SCORE[n - 1] - ANCHOR_SCORE[n - 2])
+            / (ANCHOR_QUANTIZER[n - 1] - ANCHOR_QUANTIZER[n - 2]);
+        return f64::from(ANCHOR_SCORE[n - 1] + (x - ANCHOR_QUANTIZER[n - 1]) * slope);
+    }
+    if x >= ANCHOR_QUANTIZER[0] {
+        let slope =
+            (ANCHOR_SCORE[1] - ANCHOR_SCORE[0]) / (ANCHOR_QUANTIZER[1] - ANCHOR_QUANTIZER[0]);
+        return f64::from(ANCHOR_SCORE[0] + (x - ANCHOR_QUANTIZER[0]) * slope);
+    }
+    for i in 0..n - 1 {
+        let (a, b) = (ANCHOR_QUANTIZER[i], ANCHOR_QUANTIZER[i + 1]);
+        if x <= a && x >= b {
+            let f = (x - a) / (b - a);
+            return f64::from(ANCHOR_SCORE[i] + f * (ANCHOR_SCORE[i + 1] - ANCHOR_SCORE[i]));
+        }
+    }
+    f64::from(ANCHOR_SCORE[n - 1])
+}
+
+/// Which side of the target to prefer when the achievable lattice straddles
+/// it — the choice [`encode_rgb8_zensim_two_shot`] makes on the caller's
+/// behalf when no reachable encode sits exactly on the target.
+///
+/// This is a real decision, not an implementation detail: at the pass-2
+/// step the predicted score almost never lands on a lattice point, so
+/// *something* has to break the tie, and the three answers serve genuinely
+/// different callers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum LatticePolicy {
+    /// Minimise `|achieved − target|` — round the predicted quantizer to
+    /// the nearest integer. The default: it is the policy that makes the
+    /// reported error distribution as small as the lattice allows, and it
+    /// is what a caller who said "score ≈ 70" means.
+    #[default]
+    Nearest,
+    /// Prefer the nearest predicted score **at or above** the target (round
+    /// the predicted quantizer *down*, i.e. finer). For a caller whose
+    /// contract is "quality no worse than X" — a quality floor — where
+    /// undershooting is a contract violation and overshooting only costs
+    /// bytes.
+    AtLeast,
+    /// Prefer the nearest predicted score **at or below** the target (round
+    /// the predicted quantizer *up*, i.e. coarser). For a caller minimising
+    /// bytes against a quality budget.
+    AtMost,
+}
+
+/// Options for [`encode_rgb8_zensim_two_shot`].
+#[derive(Debug, Clone)]
+pub struct TwoShotOptions {
+    /// Which side of the target to prefer when the lattice straddles it.
+    /// Default [`LatticePolicy::Nearest`].
+    pub policy: LatticePolicy,
+    /// Reporting band only — it sets [`TwoShotResult::within_tolerance`]
+    /// and nothing else. **It cannot buy a second correction**: the budget
+    /// is two encodes whatever this says. Default 0.5.
+    pub tolerance: f64,
+    /// Override the pass-1 quality. `None` (default) seeds from
+    /// [`anchor_quality_for_zensim`].
+    pub seed_quality: Option<f32>,
+    /// Lower bound of the search range. Default 1.0.
+    pub min_quality: f32,
+    /// Upper bound of the search range. Default 100.0.
+    pub max_quality: f32,
+    /// Spatial correction strength, as in [`ZensimLoopOptions`].
+    ///
+    /// **Defaults to `0.0` (off) here, unlike the loop.** Two reasons, both
+    /// about not lying: (1) with
+    /// [`SPATIAL_HINTS_LIVE`] `== false` an applied map has no effect on
+    /// the bitstream at all, so a nonzero default would only pretend to do
+    /// something; (2) when the hints do go live, applying a map to pass 2
+    /// changes the very thing pass 2's quantizer prediction assumes is the
+    /// only change (the quantizer), so the prediction has to be
+    /// re-validated with the map live before it can be turned on by
+    /// default. Setting it nonzero computes the map from pass 1's diffmap
+    /// and applies it to pass 2's encode.
+    pub spatial_strength: f64,
+    /// As [`ZensimLoopOptions::weight_clamp`].
+    pub weight_clamp: (f64, f64),
+    /// As [`ZensimLoopOptions::pool_exponent`].
+    pub pool_exponent: f64,
+    /// As [`ZensimLoopOptions::map_eps`].
+    pub map_eps: f64,
+    /// As [`ZensimLoopOptions::masking_strength`].
+    pub masking_strength: Option<f32>,
+    /// As [`ZensimLoopOptions::include_edge_mse`].
+    pub include_edge_mse: bool,
+}
+
+impl Default for TwoShotOptions {
+    fn default() -> Self {
+        Self {
+            policy: LatticePolicy::Nearest,
+            tolerance: 0.5,
+            seed_quality: None,
+            min_quality: 1.0,
+            max_quality: 100.0,
+            spatial_strength: 0.0,
+            weight_clamp: (0.4, 2.5),
+            pool_exponent: 12.0,
+            map_eps: 1e-4,
+            masking_strength: None,
+            include_edge_mse: false,
+        }
+    }
+}
+
+/// Outcome of [`encode_rgb8_zensim_two_shot`].
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct TwoShotResult {
+    /// The **final** encode — pass 2's, or pass 1's when pass 2 was skipped
+    /// because pass 1 already sat on the predicted-best lattice point.
+    /// There is no best-of-two selection: what is returned is what the
+    /// last encode produced, so [`Self::encodes`] is never flattered by
+    /// silently shipping an earlier pass.
+    pub encoded: EncodedImage,
+    /// Quality that produced [`Self::encoded`].
+    pub quality: f32,
+    /// Quantizer index that produced [`Self::encoded`] — the lattice point
+    /// landed on.
+    pub quantizer: u8,
+    /// Measured zensim score of [`Self::encoded`].
+    pub score: f64,
+    /// What the pass-2 step *predicted* the score at [`Self::quantizer`]
+    /// would be, before encoding it. `predicted − score` is the residual
+    /// prediction error, which is the whole of the two-shot error budget
+    /// that is not lattice-imposed.
+    pub predicted_score: f64,
+    /// Encodes actually spent: 2, or 1 when pass 2 was skipped.
+    pub encodes: u8,
+    /// Whether `|score − target| <= tolerance` (reporting only).
+    pub within_tolerance: bool,
+    /// Whether the per-superblock scales reached the encoder — a copy of
+    /// [`SPATIAL_HINTS_LIVE`]. Always meaningful, and always `false` on
+    /// registry builds.
+    pub spatial_applied: bool,
+    /// The per-superblock AC quantizer scale map [`Self::encoded`] was
+    /// produced with, or `None` when [`TwoShotOptions::spatial_strength`]
+    /// was zero or pass 2 was skipped. `Some` does not imply the map
+    /// reached the encoder — see [`Self::spatial_applied`].
+    pub sb_q_scale: Option<Box<[f32]>>,
+    /// Pass-1 quality (the seed).
+    pub pass1_quality: f32,
+    /// Pass-1 quantizer index.
+    pub pass1_quantizer: u8,
+    /// Pass-1 measured score — what a one-encode open-loop prediction
+    /// would have delivered.
+    pub pass1_score: f64,
+}
+
+/// Encode an RGB8 image to AVIF with a **fixed budget of two encodes**,
+/// placing the second one as close to `target` as the codec's achievable
+/// score lattice allows.
+///
+/// # Why this exists next to [`encode_rgb8_zensim_loop`]
+///
+/// The loop answers "how few encodes to get inside a tolerance band". This
+/// answers the other question: "given two encodes, how close can you get".
+/// They are different objectives and they want different endgames — the
+/// loop's bracketed secant is built to shrink a bracket over many steps,
+/// which is exactly the wrong thing to do when there is only ever one step.
+///
+/// # The rule
+///
+/// 1. **Pass 1** encodes at the [`anchor_quality_for_zensim`] seed and
+///    measures the score `s1` at quantizer `qi1`.
+/// 2. **Pass 2** assumes this image's score-vs-quantizer curve is a
+///    translate of the population curve — the same assumption the loop's
+///    global step makes, but taken in *quantizer* space, where the codec's
+///    lattice and the underlying rate-distortion physics both live:
+///
+///    ```text
+///    qi2 = qi1 + (A(target) − A(s1))          A = anchor_quantizer_for_zensim
+///    ```
+///
+/// 3. That `qi2` is real-valued and the lattice is integer, so
+///    [`TwoShotOptions::policy`] rounds it — to nearest, or deliberately to
+///    the side of the target the caller cares about.
+/// 4. If the rounded `qi2` equals `qi1`, pass 1 already sits on the
+///    predicted-best lattice point and pass 2 is skipped
+///    ([`TwoShotResult::encodes`] `== 1`). Otherwise pass 2 encodes there
+///    and **that** encode is returned.
+///
+/// # Errors
+///
+/// Returns the first encode, decode, or zensim error encountered, or
+/// cancellation via `stop`.
+pub fn encode_rgb8_zensim_two_shot(
+    img: ImgRef<'_, Rgb<u8>>,
+    config: &EncoderConfig,
+    target: f64,
+    options: &TwoShotOptions,
+    stop: StopToken,
+) -> Result<TwoShotResult> {
+    let (min_q, max_q) = (
+        options.min_quality.clamp(1.0, 100.0),
+        options.max_quality.clamp(1.0, 100.0),
+    );
+    if min_q >= max_q {
+        return Err(at!(Error::InvalidParameters(format!(
+            "two-shot: empty search range [{min_q}, {max_q}]"
+        ))));
+    }
+    // Quantizer descends with quality, so the quality range maps to a
+    // quantizer range with the ends swapped.
+    let qi_min = crate::encode_plan::quality_to_quantizer(max_q);
+    let qi_max = crate::encode_plan::quality_to_quantizer(min_q);
+
+    let z = zensim::Zensim::new(zensim::ZensimProfile::codec_target()).with_stop(stop.clone());
+    let pre = z
+        .precompute_reference(&img)
+        .map_err(|e| at!(Error::Encode(format!("two-shot: zensim reference: {e}"))))?;
+    let dm_opts = zensim::DiffmapOptions {
+        masking_strength: options.masking_strength,
+        include_edge_mse: options.include_edge_mse,
+        ..Default::default()
+    };
+
+    // ---- pass 1 -----------------------------------------------------------
+    let seed_q = options
+        .seed_quality
+        .filter(|q| q.is_finite())
+        .unwrap_or_else(|| anchor_quality_for_zensim(target))
+        .clamp(min_q, max_q);
+    let qi1 = crate::encode_plan::quality_to_quantizer(seed_q).clamp(qi_min, qi_max);
+    let q1 = crate::encode_plan::quality_for_quantizer(qi1);
+
+    let mut cfg1 = config.clone().quality(q1);
+    cfg1.sb_q_scale = None;
+    let enc1 = encode_rgb8_once(img, &cfg1, stop.clone())?;
+    let dr1 = score_encode(&z, &pre, &enc1, dm_opts, &stop)?;
+    let s1 = dr1.score();
+
+    // ---- pass-2 placement -------------------------------------------------
+    let shift = anchor_quantizer_for_zensim(target) - anchor_quantizer_for_zensim(s1);
+    let qi2_real = (f64::from(qi1) + shift).clamp(f64::from(qi_min), f64::from(qi_max));
+    // A LOWER quantizer is a HIGHER score, so "at least the target" rounds
+    // the quantizer DOWN and "at most" rounds it UP.
+    let qi2 = match options.policy {
+        LatticePolicy::Nearest => qi2_real.round(),
+        LatticePolicy::AtLeast => qi2_real.floor(),
+        LatticePolicy::AtMost => qi2_real.ceil(),
+    }
+    .clamp(f64::from(qi_min), f64::from(qi_max)) as u8;
+
+    // The translate model's own prediction for the point it picked: shift
+    // the measured pass-1 score along the population curve by the same
+    // quantizer delta that was just applied.
+    let predicted = anchor_zensim_for_quantizer(
+        anchor_quantizer_for_zensim(s1) + f64::from(qi2) - f64::from(qi1),
+    );
+
+    if qi2 == qi1 {
+        // Pass 1 is already the predicted-best lattice point; a second
+        // encode there would be a byte-identical duplicate.
+        return Ok(TwoShotResult {
+            encoded: enc1,
+            quality: q1,
+            quantizer: qi1,
+            score: s1,
+            predicted_score: predicted,
+            encodes: 1,
+            within_tolerance: (s1 - target).abs() <= options.tolerance,
+            spatial_applied: SPATIAL_HINTS_LIVE,
+            sb_q_scale: None,
+            pass1_quality: q1,
+            pass1_quantizer: qi1,
+            pass1_score: s1,
+        });
+    }
+
+    // ---- pass 2 -----------------------------------------------------------
+    let sb_q_scale = (options.spatial_strength != 0.0).then(|| {
+        pool_sb_q_scale(
+            dr1.diffmap(),
+            dr1.width(),
+            dr1.height(),
+            &ZensimLoopOptions {
+                spatial_strength: options.spatial_strength,
+                weight_clamp: options.weight_clamp,
+                pool_exponent: options.pool_exponent,
+                map_eps: options.map_eps,
+                ..Default::default()
+            },
+        )
+    });
+    let q2 = crate::encode_plan::quality_for_quantizer(qi2);
+    let mut cfg2 = config.clone().quality(q2);
+    cfg2.sb_q_scale = sb_q_scale.clone();
+    let enc2 = encode_rgb8_once(img, &cfg2, stop.clone())?;
+    let dr2 = score_encode(&z, &pre, &enc2, dm_opts, &stop)?;
+    let s2 = dr2.score();
+
+    Ok(TwoShotResult {
+        encoded: enc2,
+        quality: q2,
+        quantizer: qi2,
+        score: s2,
+        predicted_score: predicted,
+        encodes: 2,
+        within_tolerance: (s2 - target).abs() <= options.tolerance,
+        spatial_applied: SPATIAL_HINTS_LIVE,
+        sb_q_scale,
+        pass1_quality: q1,
+        pass1_quantizer: qi1,
+        pass1_score: s1,
+    })
+}
+
+/// Decode `enc` with this crate's own decoder and score it against the
+/// precomputed reference, returning zensim's score **and** diffmap from a
+/// single call.
+fn score_encode(
+    z: &zensim::Zensim,
+    pre: &zensim::PrecomputedReference,
+    enc: &EncodedImage,
+    dm_opts: zensim::DiffmapOptions,
+    stop: &StopToken,
+) -> Result<zensim::DiffmapResult> {
+    let decoded = crate::decode_with(
+        &enc.avif_file,
+        &DecoderConfig::new().prefer_8bit(true),
+        stop,
+    )?;
+    let dec_img: ImgRef<'_, Rgb<u8>> = decoded.try_as_imgref::<Rgb<u8>>().ok_or_else(|| {
+        at!(Error::Encode(
+            "two-shot: decoded image not RGB8-viewable".to_string()
+        ))
+    })?;
+    z.compute_with_ref_and_diffmap(pre, &dec_img, dm_opts)
+        .map_err(|e| at!(Error::Encode(format!("two-shot: zensim: {e}"))))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quantizer_anchor_is_monotone_and_inverts() {
+        let mut prev = f64::INFINITY;
+        let mut t = 0.0f64;
+        while t <= 100.0 {
+            let qi = anchor_quantizer_for_zensim(t);
+            assert!((0.0..=255.0).contains(&qi), "qi {qi} out of range at t {t}");
+            assert!(qi <= prev + 1e-6, "not monotone at t {t}: {prev} -> {qi}");
+            prev = qi;
+            t += 0.5;
+        }
+        // Round trip through the inverse, inside the knot range.
+        for t in [20.0, 33.3, 50.0, 67.5, 80.0, 90.0] {
+            let back = anchor_zensim_for_quantizer(anchor_quantizer_for_zensim(t));
+            assert!((back - t).abs() < 1e-2, "t {t} -> {back}");
+        }
+        // And the other way, at knot quantizers.
+        for &qi in &ANCHOR_QUANTIZER {
+            let back = anchor_quantizer_for_zensim(anchor_zensim_for_quantizer(f64::from(qi)));
+            assert!((back - f64::from(qi)).abs() < 1e-2, "qi {qi} -> {back}");
+        }
+    }
+
+    #[test]
+    fn quantizer_anchor_knots_match_the_quality_anchor() {
+        // The two anchors describe the same population curve in two
+        // coordinate systems; at the knots they must agree after the
+        // quality->quantizer map. (Within one quantizer step: the quality
+        // knots are rounded to 3 decimals in source.)
+        for (i, &s) in ANCHOR_SCORE.iter().enumerate() {
+            let via_quality = crate::encode_plan::quality_to_quantizer(ANCHOR_QUALITY[i]);
+            let direct = anchor_quantizer_for_zensim(f64::from(s));
+            assert!(
+                (f64::from(via_quality) - direct).abs() <= 1.0,
+                "knot {s}: quality path {via_quality} vs quantizer path {direct}"
+            );
+        }
+    }
+
+    #[test]
+    fn lattice_policy_rounds_to_the_requested_side() {
+        // The policy only ever moves the chosen quantizer by less than one
+        // step, and always to the correct side: a LOWER quantizer is a
+        // HIGHER score, so AtLeast floors and AtMost ceils.
+        for real in [10.2f64, 10.5, 10.8, 200.4, 200.6] {
+            let nearest = real.round();
+            let at_least = real.floor();
+            let at_most = real.ceil();
+            assert!(at_least <= nearest && nearest <= at_most, "{real}");
+            assert!(at_most - at_least <= 1.0);
+            // Score ordering follows from quantizer ordering.
+            assert!(
+                anchor_zensim_for_quantizer(at_least) >= anchor_zensim_for_quantizer(at_most),
+                "{real}"
+            );
+        }
+    }
+
+    #[test]
+    fn two_shot_defaults_do_not_pretend_to_apply_spatial_hints() {
+        let o = TwoShotOptions::default();
+        assert_eq!(o.spatial_strength, 0.0);
+        assert_eq!(o.policy, LatticePolicy::Nearest);
+        // If the hints ever go live, this test is the tripwire that says
+        // "revalidate the pass-2 prediction with the map applied before
+        // changing the default".
+        assert!(
+            !SPATIAL_HINTS_LIVE,
+            "FrameHints went live: re-validate the two-shot prediction with \
+             a live per-SB map before enabling spatial_strength by default"
+        );
+    }
 
     #[test]
     fn anchor_curve_is_monotone_and_bounded() {

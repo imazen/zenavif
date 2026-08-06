@@ -1,0 +1,8 @@
+# 4096-long-edge tier. The ONLY in-corpus sources with a long edge >= 4096
+# are qoi-benchmark tall web screenshots (1313 x N), so this tier is
+# screen-content only -- a corpus limit, stated rather than papered over.
+# Upscaling is banned, so there is no photographic 4096 cell available.
+/Users/lilith/work/zen/codec-corpus/qoi-benchmark/screenshot_web/amazon.com.png
+/Users/lilith/work/zen/codec-corpus/qoi-benchmark/screenshot_web/apple.com.png
+/Users/lilith/work/zen/codec-corpus/qoi-benchmark/screenshot_web/cnn.com.png
+/Users/lilith/work/zen/codec-corpus/qoi-benchmark/screenshot_web/creativecommons.org.png

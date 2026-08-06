@@ -130,8 +130,9 @@ pub use two_pass::{
 pub mod two_pass_zensim;
 #[cfg(feature = "two-pass-zensim")]
 pub use two_pass_zensim::{
-    SPATIAL_HINTS_LIVE, ZensimLoopOptions, ZensimLoopResult, anchor_quality_for_zensim,
-    encode_rgb8_zensim_loop,
+    LatticePolicy, SPATIAL_HINTS_LIVE, TwoShotOptions, TwoShotResult, ZensimLoopOptions,
+    ZensimLoopResult, anchor_quality_for_zensim, anchor_quantizer_for_zensim,
+    anchor_zensim_for_quantizer, encode_rgb8_zensim_loop, encode_rgb8_zensim_two_shot,
 };
 mod validation;
 #[cfg(feature = "_dev")]
@@ -175,7 +176,7 @@ pub use decode_av1::{DecodeBackend, DecodedYuv, decode_av1_obu_yuv, decode_av1_o
 pub use decoder::AvifDecoder;
 pub use decoder_managed::{AnimationDecoder, ManagedAvifDecoder};
 #[cfg(feature = "encode")]
-pub use encode_plan::{EncodePlan, PlanInput, SpeedDerived, TilesResolution};
+pub use encode_plan::{EncodePlan, PlanInput, SpeedDerived, TilesResolution, quality_for_quantizer};
 #[cfg(feature = "encode-mono")]
 pub use encoder::encode_gray8;
 #[cfg(feature = "encode")]

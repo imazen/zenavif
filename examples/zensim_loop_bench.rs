@@ -17,7 +17,29 @@
 //! # 3. Per-cell cost probe (one encode+decode+score at one quality).
 //! cargo run --release --features two-pass-zensim --example zensim_loop_bench -- \
 //!     probe <manifest.txt> <speed> <sizes-comma> <quality>
+//!
+//! # 4. Dense ACHIEVABLE-LATTICE sweep: every reachable quantizer index in
+//! #    the band covering [score_lo, score_hi]. This is the exact set of
+//! #    encodes any targeting search can land on, so it doubles as the
+//! #    ground truth for offline replay of 2-shot rules.
+//! cargo run --release --features two-pass-zensim --example zensim_loop_bench -- \
+//!     lattice <manifest.txt> <speed> <sizes-comma> [score_lo] [score_hi]
+//!
+//! # 5. Real-encode 2-shot A/B: two-shot vs the loop vs the secant, all
+//! #    capped at a budget of 2 encodes.
+//! cargo run --release --features two-pass-zensim --example zensim_loop_bench -- \
+//!     ab2 <manifest.txt> <speed> <sizes-comma> <targets-comma> [tolerance]
 //! ```
+//!
+//! ## Why `lattice` sweeps quantizers, not qualities
+//!
+//! Encoded output depends on `quality` only through the **integer quantizer
+//! index** it resolves to, and all 256 quantizers are addressable via
+//! [`zenavif::quality_for_quantizer`] — 2.56× more distinct encodes than the
+//! 100 that integer qualities reach. A quality-grid sweep therefore measures
+//! a 2.56×-too-coarse caricature of the real achievable-score lattice, and
+//! any "the lattice is too coarse to hit this tolerance" conclusion drawn
+//! from one is correspondingly too pessimistic.
 //!
 //! `manifest.txt` is one source image path per line (`#` comments skipped).
 //! Sizes are LONG-EDGE targets; a size larger than the source's long edge is
@@ -128,6 +150,15 @@ struct Cell {
     /// zenravif's quality->quantizer curve).
     qindex: u8,
     enc_ms: u128,
+}
+
+/// Encode at one **quantizer index**, then decode and score. The quantizer
+/// is what the encode actually depends on, so this addresses one achievable
+/// lattice point exactly.
+fn encode_and_score_qi(img: ImgRef<'_, Rgb<u8>>, speed: u8, qi: u8) -> Option<Cell> {
+    let c = encode_and_score(img, speed, zenavif::quality_for_quantizer(qi))?;
+    debug_assert_eq!(c.qindex, qi);
+    Some(c)
 }
 
 /// Encode at one quality, then decode and score with the same zensim
@@ -242,6 +273,211 @@ fn main() {
                     }
                     out.flush().unwrap();
                     eprintln!("[sweep] {} @ {sz} done", base(path));
+                }
+            }
+        }
+        "lattice" => {
+            let score_lo: f64 = args.get(5).map_or(15.0, |v| v.parse().unwrap());
+            let score_hi: f64 = args.get(6).map_or(95.0, |v| v.parse().unwrap());
+            writeln!(
+                out,
+                "image\tsize\tw\th\tq\tqindex\tbytes\tzensim\tdm_mean\tenc_ms"
+            )
+            .unwrap();
+            for path in &images {
+                let src = load_rgb8(path);
+                for &sz in &sizes {
+                    let Some(img) = downscale(&src, sz) else {
+                        continue;
+                    };
+                    let t_cell = std::time::Instant::now();
+                    // Coarse probe first: locate the quantizer band whose
+                    // scores straddle [score_lo, score_hi] without paying
+                    // for the (very expensive) near-lossless end of the
+                    // range on every cell.
+                    let mut measured: std::collections::BTreeMap<u8, Cell> =
+                        std::collections::BTreeMap::new();
+                    let mut qi = 8u8;
+                    loop {
+                        if let Some(c) = encode_and_score_qi(img.as_ref(), speed, qi) {
+                            measured.insert(qi, c);
+                        }
+                        let Some(next) = qi.checked_add(16) else { break };
+                        qi = next;
+                    }
+                    // Widest band that still contains the requested score
+                    // window (probes are only approximately monotone, so
+                    // take extremes rather than a bisection).
+                    let lo_qi = measured
+                        .iter()
+                        .filter(|(_, c)| c.score >= score_hi)
+                        .map(|(&k, _)| k)
+                        .next_back()
+                        .unwrap_or(8);
+                    let hi_qi = measured
+                        .iter()
+                        .filter(|(_, c)| c.score <= score_lo)
+                        .map(|(&k, _)| k)
+                        .next()
+                        .unwrap_or(248);
+                    for qi in lo_qi..=hi_qi {
+                        if measured.contains_key(&qi) {
+                            continue;
+                        }
+                        if let Some(c) = encode_and_score_qi(img.as_ref(), speed, qi) {
+                            measured.insert(qi, c);
+                        }
+                    }
+                    for (&qi, c) in &measured {
+                        writeln!(
+                            out,
+                            "{}\t{sz}\t{}\t{}\t{}\t{qi}\t{}\t{:.4}\t{:.6e}\t{}",
+                            base(path),
+                            img.width(),
+                            img.height(),
+                            zenavif::quality_for_quantizer(qi),
+                            c.bytes,
+                            c.score,
+                            c.dm_mean,
+                            c.enc_ms
+                        )
+                        .unwrap();
+                    }
+                    out.flush().unwrap();
+                    eprintln!(
+                        "[lattice] {} @ {sz}: qi {lo_qi}..={hi_qi}, {} points, {:.1}s",
+                        base(path),
+                        measured.len(),
+                        t_cell.elapsed().as_secs_f64()
+                    );
+                }
+            }
+        }
+        "ab2" => {
+            // Fixed budget of TWO encodes; the question is only how close
+            // each rule lands, not how many encodes it wants.
+            let targets: Vec<f64> = parse_list(args.get(5).expect("targets arg"));
+            let tolerance: f64 = args.get(6).map_or(0.5, |t| t.parse().unwrap());
+            writeln!(
+                out,
+                "arm\timage\tsize\tw\th\ttarget\tachieved\terr\tencodes\tbytes\tms\tspatial\tpass1_q\tpass1_score\tpredicted"
+            )
+            .unwrap();
+            for path in &images {
+                let src = load_rgb8(path);
+                for &sz in &sizes {
+                    let Some(img) = downscale(&src, sz) else {
+                        continue;
+                    };
+                    let (w, h) = (img.width(), img.height());
+                    for &target in &targets {
+                        let cfg = EncoderConfig::new().speed(speed).threads(Some(1));
+                        let mut row = |arm: &str,
+                                       achieved: f64,
+                                       encodes: u8,
+                                       bytes: usize,
+                                       ms: u128,
+                                       spatial: &str,
+                                       p1q: f32,
+                                       p1s: f64,
+                                       pred: f64| {
+                            writeln!(
+                                out,
+                                "{arm}\t{}\t{sz}\t{w}\t{h}\t{target}\t{achieved:.4}\t{:+.4}\t{encodes}\t{bytes}\t{ms}\t{spatial}\t{p1q:.3}\t{p1s:.4}\t{pred:.4}",
+                                base(path),
+                                achieved - target
+                            )
+                            .unwrap();
+                        };
+
+                        // Arm 1: the two-shot lattice-aware rule.
+                        let t0 = std::time::Instant::now();
+                        let r = zenavif::encode_rgb8_zensim_two_shot(
+                            img.as_ref(),
+                            &cfg,
+                            target,
+                            &zenavif::TwoShotOptions {
+                                tolerance,
+                                ..Default::default()
+                            },
+                            StopToken::new(Unstoppable),
+                        );
+                        let ms = t0.elapsed().as_millis();
+                        match r {
+                            Ok(o) => row(
+                                "twoshot",
+                                o.score,
+                                o.encodes,
+                                o.encoded.avif_file.len(),
+                                ms,
+                                if o.spatial_applied { "true" } else { "false" },
+                                o.pass1_quality,
+                                o.pass1_score,
+                                o.predicted_score,
+                            ),
+                            Err(e) => eprintln!("FAIL twoshot {path} {sz} {target}: {e:?}"),
+                        }
+
+                        // Arm 2: the existing closed loop, capped at 2.
+                        let t0 = std::time::Instant::now();
+                        let r = encode_rgb8_zensim_loop(
+                            img.as_ref(),
+                            &cfg,
+                            target,
+                            &ZensimLoopOptions {
+                                tolerance,
+                                max_encodes: 2,
+                                ..Default::default()
+                            },
+                            StopToken::new(Unstoppable),
+                        );
+                        let ms = t0.elapsed().as_millis();
+                        match r {
+                            Ok(o) => row(
+                                "loop2",
+                                o.score,
+                                o.encodes,
+                                o.encoded.avif_file.len(),
+                                ms,
+                                if o.spatial_applied { "true" } else { "false" },
+                                o.pass1_quality,
+                                o.pass1_score,
+                                f64::NAN,
+                            ),
+                            Err(e) => eprintln!("FAIL loop2 {path} {sz} {target}: {e:?}"),
+                        }
+
+                        // Arm 3: the secant baseline, capped at 2.
+                        let t0 = std::time::Instant::now();
+                        let r = encode_rgb8_with_target(
+                            img.as_ref(),
+                            &cfg,
+                            TargetMetric::Zensim(target),
+                            &TargetOptions {
+                                tolerance,
+                                max_encodes: 2,
+                                ..Default::default()
+                            },
+                            StopToken::new(Unstoppable),
+                        );
+                        let ms = t0.elapsed().as_millis();
+                        match r {
+                            Ok(o) => row(
+                                "secant2",
+                                o.score,
+                                o.encodes,
+                                o.encoded.avif_file.len(),
+                                ms,
+                                "NA",
+                                f32::NAN,
+                                f64::NAN,
+                                f64::NAN,
+                            ),
+                            Err(e) => eprintln!("FAIL secant2 {path} {sz} {target}: {e:?}"),
+                        }
+                    }
+                    out.flush().unwrap();
+                    eprintln!("[ab2] {} @ {sz} done", base(path));
                 }
             }
         }
