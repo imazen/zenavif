@@ -2025,6 +2025,7 @@ name = "zenav1-aom-dsp"
 version = "0.0.1"
 dependencies = [
  "archmage",
+ "enough",
  "magetypes",
 ]
 
@@ -2405,7 +2406,7 @@ dependencies = [
 [[package]]
 name = "zensim"
 version = "0.3.0"
-source = "git+https://github.com/imazen/zensim?branch=main#e4b875b58fe00dc6aae21a7025bd03609a762d8c"
+source = "git+https://github.com/imazen/zensim?branch=main#e5627b56cd6e454f9908d080cad75546b0b13659"
 dependencies = [
  "archmage",
  "bytemuck",
@@ -2423,7 +2424,7 @@ dependencies = [
 [[package]]
 name = "zensim-regress"
 version = "0.4.0"
-source = "git+https://github.com/imazen/zensim?branch=main#e4b875b58fe00dc6aae21a7025bd03609a762d8c"
+source = "git+https://github.com/imazen/zensim?branch=main#e5627b56cd6e454f9908d080cad75546b0b13659"
 dependencies = [
  "base64",
  "bytemuck",

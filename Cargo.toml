@@ -106,7 +106,15 @@ fast-ssim2 = { version = "0.8.0", optional = true, features = ["imgref", "rayon"
 # bump over the registry's 0.2.4, so the pin covers the whole graph (the
 # dev-dependency copy below matches). Return to a registry version at the
 # zensim 0.3.0 publish.
-zensim = { git = "https://github.com/imazen/zensim", branch = "main", optional = true, features = ["imgref", "zenpixels"] }
+#
+# `feature-regime-v2` + `custom-profiles` carry the generation-C surface
+# (`src/zensim_c.rs`): the folded-944 extraction `C` actually consumes
+# (`compute_folded720_features_streaming`, feature-regime-v2) and the
+# attribution-density steering map + `Fused944Session`, whose module is
+# gated on `custom-profiles` and whose fused entry needs BOTH. Neither
+# feature changes the v1 372-feature extraction that profile `B` scores
+# through, so `TargetMetric::Zensim` is byte-unaffected.
+zensim = { git = "https://github.com/imazen/zensim", branch = "main", optional = true, features = ["imgref", "zenpixels", "feature-regime-v2", "custom-profiles"] }
 # Optional two-pass diffmap dep — butteraugli per-pixel error map drives the
 # per-SB quantizer-scale second pass (`two-pass-butteraugli` feature).
 butteraugli = { version = "0.9.3", optional = true }
@@ -144,7 +152,7 @@ png = "0.18.0"
 image = "0.25.10"
 zenbench = { version = "0.1.2", features = ["criterion-compat"] }
 fast-ssim2 = { version = "0.8.0", features = ["imgref"] }
-zensim = { git = "https://github.com/imazen/zensim", branch = "main", features = ["imgref", "zenpixels"] }
+zensim = { git = "https://github.com/imazen/zensim", branch = "main", features = ["imgref", "zenpixels", "feature-regime-v2", "custom-profiles"] }
 # zensim-regress must track the SAME zensim as the dependency above, or the
 # `Zensim` / `ImageSource` types in tests/linku_corpus.rs come from two
 # different zensim crates and don't unify. Registry 0.3.1 depends on zensim
