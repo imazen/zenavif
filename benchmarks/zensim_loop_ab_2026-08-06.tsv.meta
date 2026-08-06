@@ -69,3 +69,13 @@
 #               efficiency cores: measured 2026-08-06 on an idle box, the same
 #               workload got ~17% of one core at nice 19 vs ~145% at nice 5
 #               (~40x wall clock). nice 5 still yields to interactive work.
+
+STORAGE: the raw TSV is committed zstd-compressed (.tsv.zst) because it
+exceeded the repo's 30 KB commit rule uncompressed (126 / 85 / 77 KB -> 17.8 /
+16.1 / 11.3 KB). Read it with:
+
+    zstd -dc <file>.tsv.zst | less        # or: zstdcat <file>.tsv.zst
+
+Nothing about the data changed — the .zst decompresses to the exact bytes the
+harness wrote. The .summary.txt beside it carries the aggregates without
+needing to decompress anything.

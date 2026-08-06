@@ -28,3 +28,13 @@
 # analysis
 #   python3 scripts/hyperparam/analyze_zensim_loop_ab.py \
 #       benchmarks/zensim_loop_ab_tol1_2026-08-06.tsv
+
+STORAGE: the raw TSV is committed zstd-compressed (.tsv.zst) because it
+exceeded the repo's 30 KB commit rule uncompressed (126 / 85 / 77 KB -> 17.8 /
+16.1 / 11.3 KB). Read it with:
+
+    zstd -dc <file>.tsv.zst | less        # or: zstdcat <file>.tsv.zst
+
+Nothing about the data changed — the .zst decompresses to the exact bytes the
+harness wrote. The .summary.txt beside it carries the aggregates without
+needing to decompress anything.
