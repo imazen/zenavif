@@ -710,9 +710,20 @@ fn pool_sb_q_scale(diffmap: &[f32], w: usize, h: usize, options: &ZensimLoopOpti
 /// population score→quantizer curve the two-shot pass-2 step translates
 /// along.
 ///
-/// **Provenance:** refit directly in quantizer space from the dense
-/// achievable-lattice sweep (`benchmarks/zensim_lattice_2026-08-06.tsv.zst`,
-/// TRAIN sources only — see [`anchor_quantizer_for_zensim`]).
+/// **Provenance — read this before assuming these were fitted here.** They
+/// are [`ANCHOR_QUALITY`] pushed through the quality→quantizer curve
+/// (unrounded), *not* an independent fit. That is a deliberate choice, not
+/// a shortcut waiting to be done properly: an independent refit in
+/// quantizer space from the dense per-quantizer lattice was measured
+/// against these on held-out sources and came out **statistically
+/// indistinguishable** (paired on identical cell+target: mean +0.107
+/// zensim in the refit's favour... against it, actually; 37.6% better vs
+/// 42.3% worse, two-sided sign test p = 0.17). What buys the accuracy is
+/// the **coordinate system**, not the fit: the same knots used as a
+/// translate in quantizer space instead of quality space are worth mean
+/// −0.73 zensim at p < 0.0001 on the same pairs. So these stay derived,
+/// and the module keeps one fitted object instead of two that can drift
+/// apart.
 ///
 /// Why a separate table instead of composing [`ANCHOR_QUALITY`] with the
 /// quality→quantizer curve: that curve has a **slope break at quality 70**
