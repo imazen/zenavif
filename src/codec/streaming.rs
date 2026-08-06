@@ -13,6 +13,19 @@ use zenpixels::{PixelBuffer, PixelDescriptor, PixelSlice};
 
 use crate::error::Error;
 
+/// Why the two `expect`s below cannot fire.
+///
+/// `strip_buffer` is populated by `get_or_insert_with` immediately above each
+/// use, and `decoder` is checked with `is_some()` immediately above its use.
+/// Both are re-looked-up rather than held because the first borrow must end
+/// before `self.y_offset` / `self.stitch_tiles` can be touched — the
+/// re-lookup is a borrow-checker accommodation, not a state check, so there
+/// is no reachable `None` to turn into an error.
+const STRIP_BUFFER_JUST_SET: &str =
+    "strip_buffer was populated by get_or_insert_with immediately above";
+const GRID_DECODER_JUST_CHECKED: &str =
+    "grid decoder presence was checked by is_some() immediately above";
+
 /// Streaming AVIF decoder with real tile-row streaming for grid images.
 ///
 /// For grid (tiled) images, each [`next_batch`](zencodec::decode::StreamingDecode::next_batch)
@@ -140,7 +153,7 @@ impl AvifStreamingDecoder {
             }
             let y = self.y_offset;
             self.y_offset += h;
-            let slice = self.strip_buffer.as_ref().unwrap().as_slice().erase();
+            let slice = self.strip_buffer.as_ref().expect(STRIP_BUFFER_JUST_SET).as_slice().erase();
             let slice = match &self.strip_color_context {
                 Some(ctx) => slice.with_color_context(Arc::clone(ctx)),
                 None => slice,
@@ -154,7 +167,7 @@ impl AvifStreamingDecoder {
                 return Ok(None);
             }
 
-            let tiles = self.decoder.as_mut().unwrap().decode_tile_row(
+            let tiles = self.decoder.as_mut().expect(GRID_DECODER_JUST_CHECKED).decode_tile_row(
                 self.current_grid_row as usize,
                 self.grid_cols as usize,
                 &self.stop,
@@ -175,7 +188,7 @@ impl AvifStreamingDecoder {
 
             let y = self.y_offset;
             self.y_offset += strip_h;
-            let slice = self.strip_buffer.as_ref().unwrap().as_slice().erase();
+            let slice = self.strip_buffer.as_ref().expect(STRIP_BUFFER_JUST_SET).as_slice().erase();
             let slice = match &self.strip_color_context {
                 Some(ctx) => slice.with_color_context(Arc::clone(ctx)),
                 None => slice,
@@ -209,7 +222,7 @@ impl AvifStreamingDecoder {
 
             let y = self.y_offset;
             self.y_offset += h;
-            let slice = self.strip_buffer.as_ref().unwrap().as_slice().erase();
+            let slice = self.strip_buffer.as_ref().expect(STRIP_BUFFER_JUST_SET).as_slice().erase();
             let slice = match &self.strip_color_context {
                 Some(ctx) => slice.with_color_context(Arc::clone(ctx)),
                 None => slice,
