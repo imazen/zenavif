@@ -159,7 +159,7 @@ pub fn encode_rgb8_with_target(
 /// one row-wise copy (trivial next to a single trial encode); contiguous
 /// buffers copy once end-to-end.
 #[cfg(feature = "auto-tune")]
-pub(crate) fn contiguous_rgb8(img: ImgRef<'_, Rgb<u8>>) -> Vec<u8> {
+fn contiguous_rgb8(img: ImgRef<'_, Rgb<u8>>) -> Vec<u8> {
     let (w, h) = (img.width(), img.height());
     let mut out = Vec::with_capacity(w * h * 3);
     for row in img.rows() {
@@ -590,25 +590,6 @@ pub(crate) fn initial_guess(t: f64) -> f32 {
     }
 }
 
-/// Exact inverse of [`initial_guess`]: which SSIMULACRA2 target the
-/// content-blind anchor curve answers with quality `q`.
-///
-/// Used by [`crate::two_pass_zensim`] to ask the q0 head for a *content
-/// offset* at the same point on the quality axis its zensim anchor lands
-/// on — the head is fitted for ssim2 targets, so it has to be queried in
-/// ssim2 units, and the two anchors have to be evaluated at the same
-/// quality for their difference to be pure content.
-#[cfg(any(feature = "auto-tune", test))]
-pub(crate) fn anchor_score_for_quality(q: f32) -> f32 {
-    if q <= 30.0 {
-        q.max(1.0)
-    } else if q <= 60.0 {
-        30.0 + (q - 30.0) * (40.0 / 30.0)
-    } else {
-        70.0 + (q - 60.0) * (19.0 / 30.0)
-    }
-}
-
 /// Decode `avif` with zenavif's own decoder and score it against an RGB8 source.
 fn score_rgb8(
     target: TargetMetric,
@@ -775,40 +756,6 @@ fn composite_on_gray(src: ImgRef<'_, rgb::Rgba<u8>>) -> ImgVec<[u8; 3]> {
         }));
     }
     ImgVec::new(out, w, h)
-}
-
-#[cfg(test)]
-mod anchor_tests {
-    use super::{anchor_score_for_quality, initial_guess};
-
-    #[test]
-    fn anchor_score_for_quality_inverts_initial_guess() {
-        // The pair has to round-trip exactly, or the zensim loop's content
-        // offset (head(t) - blind(t) evaluated at the SAME quality point) is
-        // comparing two different places on the curve.
-        let mut t = 1.0f64;
-        while t <= 100.0 {
-            let q = initial_guess(t);
-            let back = f64::from(anchor_score_for_quality(q));
-            assert!(
-                (back - t).abs() < 1e-3,
-                "t {t} -> q {q} -> {back} (round-trip broken)"
-            );
-            t += 0.5;
-        }
-    }
-
-    #[test]
-    fn anchor_score_for_quality_is_monotone() {
-        let mut prev = f32::NEG_INFINITY;
-        let mut q = 1.0f32;
-        while q <= 100.0 {
-            let s = anchor_score_for_quality(q);
-            assert!(s >= prev - 1e-4, "not monotone at q {q}: {prev} -> {s}");
-            prev = s;
-            q += 0.5;
-        }
-    }
 }
 
 #[cfg(all(test, feature = "auto-tune"))]

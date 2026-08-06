@@ -35,8 +35,9 @@ COMBOS=(
   "expert:__expert"
   "autotune:auto-tune"
   "twopass:two-pass-butteraugli,encode-imazen"
+  "zloop:two-pass-zensim"
   # Everything that is pure Rust: the real "all features" gate for this crate.
-  "allsafe:aom-backend,encode,encode-imazen,encode-mono,encode-threading,encode-svt-rs,target-quality,two-pass-butteraugli,__expert,auto-tune,_dev"
+  "allsafe:aom-backend,encode,encode-imazen,encode-mono,encode-threading,encode-svt-rs,target-quality,two-pass-butteraugli,two-pass-zensim,__expert,auto-tune,_dev"
   # Literal --all-features. This additionally pulls `unsafe-asm`, i.e. the
   # legacy rav1d C-FFI decoder, whose aarch64 `.S` sources Apple `cc` refuses
   # to assemble (`-march=armv8.6-a`) — so this combo is EXPECTED to fail on

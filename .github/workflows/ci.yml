@@ -68,6 +68,12 @@ jobs:
       # Their green results were local-only claims. This runs them.
       - name: Test (AV1 backend seams — aom decode + svt-rs encode)
         run: cargo test --features aom-backend,encode,encode-imazen,encode-svt-rs,target-quality
+      # The diffmap closed loops were in the same position the backend seams
+      # used to be: neither `two-pass-butteraugli` nor `two-pass-zensim`
+      # appeared anywhere in this workflow, so tests/two_pass.rs and
+      # tests/zensim_loop.rs never ran on any platform. This runs them.
+      - name: Test (diffmap closed loops — butteraugli + zensim)
+        run: cargo test --features two-pass-butteraugli,two-pass-zensim,auto-tune
 
   feature-check:
     name: Feature permutations

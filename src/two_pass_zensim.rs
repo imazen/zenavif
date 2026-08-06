@@ -138,9 +138,9 @@ pub struct ZensimLoopOptions {
     pub min_quality: f32,
     /// Upper bound of the quality search range. Default 100.0.
     pub max_quality: f32,
-    /// Override the pass-1 quality. `None` (default) seeds from
-    /// [`anchor_quality_for_zensim`], refined by the [`crate::q0_head`]
-    /// content prediction when the `auto-tune` feature is on.
+    /// Override the pass-1 quality. `None` (default) seeds from the fitted
+    /// [`anchor_quality_for_zensim`] curve (see [`seed_quality`] for the
+    /// content-aware seed that was tried and measured as harmful).
     pub seed_quality: Option<f32>,
     /// Spatial correction strength — the `1/γ` exponent derived in the
     /// [module docs](self). `0.0` disables the spatial term exactly (the
@@ -322,7 +322,7 @@ pub fn encode_rgb8_zensim_loop(
         ..Default::default()
     };
 
-    let mut q = seed_quality(img, config, target, options).clamp(min_q, max_q);
+    let mut q = seed_quality(target, options).clamp(min_q, max_q);
     let (mut pass1_score, mut pass1_quality) = (f64::NAN, q);
 
     // Same selection policy as the secant search: the smallest file that
@@ -410,57 +410,37 @@ pub fn encode_rgb8_zensim_loop(
     })
 }
 
-/// Pass-1 quality: the caller's override, else the `auto-tune` q0 head's
-/// content prediction, else the fitted anchor curve.
+/// Pass-1 quality: the caller's override, else the fitted anchor curve.
 ///
-/// The q0 head is fitted for SSIMULACRA2 targets, so it cannot be asked for
-/// a zensim target directly. It is used as a *content offset*: the head's
-/// prediction is compared against its own content-blind counterpart
-/// ([`crate::target_quality::initial_guess`]) at the same ssim2 target, and
-/// that difference — "this image needs N quality points more/less than a
-/// typical image to hit a given perceptual score" — is added to the zensim
-/// anchor. Both metrics are 0–100 perceptual scales over the same encoder,
-/// so the content offset transfers even though the absolute levels do not.
-fn seed_quality(
-    img: ImgRef<'_, Rgb<u8>>,
-    config: &EncoderConfig,
-    target: f64,
-    options: &ZensimLoopOptions,
-) -> f32 {
-    if let Some(q) = options.seed_quality.filter(|q| q.is_finite()) {
-        return q;
-    }
-    let anchor = anchor_quality_for_zensim(target);
-    #[cfg(feature = "auto-tune")]
-    {
-        // Ask the head at the ssim2 target whose ANCHOR quality equals the
-        // zensim anchor, so the two sides are compared at the same point on
-        // the quality axis and the difference is purely the content term.
-        let ssim2_equivalent = crate::target_quality::anchor_score_for_quality(anchor);
-        let rgb = crate::target_quality::contiguous_rgb8(img);
-        if let Some(head) = crate::q0_head::predict_q0_for_rgb8(
-            &rgb,
-            img.width() as u32,
-            img.height() as u32,
-            f64::from(ssim2_equivalent),
-            config.speed_value(),
-            None,
-        ) {
-            let blind = crate::target_quality::initial_guess(f64::from(ssim2_equivalent));
-            if head.is_finite() && blind.is_finite() {
-                // Bound the transferred offset: the head's own val p90 is
-                // ~7 quality points, so a larger implied offset is noise,
-                // not content.
-                let offset = (head - blind).clamp(-12.0, 12.0);
-                return (anchor + offset).clamp(1.0, 100.0);
-            }
-        }
-    }
-    #[cfg(not(feature = "auto-tune"))]
-    {
-        let _ = (img, config);
-    }
-    anchor
+/// **A content-aware seed was tried here and MEASURED AS HARMFUL — do not
+/// re-add it without re-measuring.** The [`crate::q0_head`] head predicts a
+/// starting quality from zenanalyze content features, but it is fitted for
+/// SSIMULACRA2 targets, so it cannot be asked for a zensim target directly.
+/// The attempt was to use it as a pure *content offset*: query the head at
+/// the ssim2 target whose content-blind anchor quality equals this zensim
+/// anchor, subtract that same content-blind curve, and add the difference
+/// to the zensim anchor.
+///
+/// It does not work, for a reason that is obvious in hindsight: `head(t)`
+/// and [`crate::target_quality::initial_guess`]`(t)` do not share a
+/// population level, so their difference carries the systematic gap
+/// between the head's fitted mean and the cruder anchor's, not just the
+/// per-image content term. Measured on the 2026-08-06 A/B corpus (360
+/// real encodes at long edges 64 and 256, targets 20..90 step 5): the
+/// implied "content offset" had median −9.72 quality points and saturated
+/// its own ±12 bound, and the pass-1 seed error went from **p50 4.14 /
+/// p90 14.59** (bare anchor) to **p50 10.67 / p90 20.58** zensim points,
+/// dropping the 1-encode rate at ±0.5 from 11.9% to 1.1%. The bare
+/// measured anchor ships.
+///
+/// Making the head genuinely usable here needs a zensim-target fit of its
+/// own (`scripts/hyperparam/fit_q0_head.py` re-run against zensim labels),
+/// not a cross-metric transfer.
+fn seed_quality(target: f64, options: &ZensimLoopOptions) -> f32 {
+    options
+        .seed_quality
+        .filter(|q| q.is_finite())
+        .unwrap_or_else(|| anchor_quality_for_zensim(target))
 }
 
 /// The next quality to try. `None` means "the search cannot usefully move"
