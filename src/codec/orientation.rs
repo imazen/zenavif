@@ -146,8 +146,8 @@ pub(super) fn orientation_to_avif(orientation: zencodec::Orientation) -> (Option
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zencodec::{Orientation, OrientationHint};
     use zenavif_parse::{ImageMirror, ImageRotation};
+    use zencodec::{Orientation, OrientationHint};
 
     /// Every EXIF orientation AVIF can express, so the round-trip below is
     /// exhaustive rather than a spot check. Gated with its only user: the
@@ -233,7 +233,10 @@ mod tests {
                 "out-of-spec angle {angle} must not be interpreted"
             );
             assert_eq!(
-                avif_to_orientation(Some(&ImageRotation { angle }), Some(&ImageMirror { axis: 0 })),
+                avif_to_orientation(
+                    Some(&ImageRotation { angle }),
+                    Some(&ImageMirror { axis: 0 })
+                ),
                 Orientation::Identity,
             );
         }

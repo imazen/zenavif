@@ -153,7 +153,12 @@ impl AvifStreamingDecoder {
             }
             let y = self.y_offset;
             self.y_offset += h;
-            let slice = self.strip_buffer.as_ref().expect(STRIP_BUFFER_JUST_SET).as_slice().erase();
+            let slice = self
+                .strip_buffer
+                .as_ref()
+                .expect(STRIP_BUFFER_JUST_SET)
+                .as_slice()
+                .erase();
             let slice = match &self.strip_color_context {
                 Some(ctx) => slice.with_color_context(Arc::clone(ctx)),
                 None => slice,
@@ -167,11 +172,15 @@ impl AvifStreamingDecoder {
                 return Ok(None);
             }
 
-            let tiles = self.decoder.as_mut().expect(GRID_DECODER_JUST_CHECKED).decode_tile_row(
-                self.current_grid_row as usize,
-                self.grid_cols as usize,
-                &self.stop,
-            )?;
+            let tiles = self
+                .decoder
+                .as_mut()
+                .expect(GRID_DECODER_JUST_CHECKED)
+                .decode_tile_row(
+                    self.current_grid_row as usize,
+                    self.grid_cols as usize,
+                    &self.stop,
+                )?;
 
             if tiles.is_empty() {
                 return Ok(None);
@@ -188,7 +197,12 @@ impl AvifStreamingDecoder {
 
             let y = self.y_offset;
             self.y_offset += strip_h;
-            let slice = self.strip_buffer.as_ref().expect(STRIP_BUFFER_JUST_SET).as_slice().erase();
+            let slice = self
+                .strip_buffer
+                .as_ref()
+                .expect(STRIP_BUFFER_JUST_SET)
+                .as_slice()
+                .erase();
             let slice = match &self.strip_color_context {
                 Some(ctx) => slice.with_color_context(Arc::clone(ctx)),
                 None => slice,
@@ -222,7 +236,12 @@ impl AvifStreamingDecoder {
 
             let y = self.y_offset;
             self.y_offset += h;
-            let slice = self.strip_buffer.as_ref().expect(STRIP_BUFFER_JUST_SET).as_slice().erase();
+            let slice = self
+                .strip_buffer
+                .as_ref()
+                .expect(STRIP_BUFFER_JUST_SET)
+                .as_slice()
+                .erase();
             let slice = match &self.strip_color_context {
                 Some(ctx) => slice.with_color_context(Arc::clone(ctx)),
                 None => slice,

@@ -312,18 +312,18 @@ pub(super) fn convert_8bit_planar(
     ctx: ConvertCtx,
 ) -> Result<PixelBuffer> {
     let y_view = planes.y();
-    let u_view = planes
-        .u()
-        .ok_or_else(|| at!(Error::Malformed(
+    let u_view = planes.u().ok_or_else(|| {
+        at!(Error::Malformed(
             "decoded frame declares chroma subsampling but the decoder returned no U plane; \
              the bitstream's sequence header and its coded planes disagree",
-        )))?;
-    let v_view = planes
-        .v()
-        .ok_or_else(|| at!(Error::Malformed(
+        ))
+    })?;
+    let v_view = planes.v().ok_or_else(|| {
+        at!(Error::Malformed(
             "decoded frame declares chroma subsampling but the decoder returned no V plane; \
              the bitstream's sequence header and its coded planes disagree",
-        )))?;
+        ))
+    })?;
 
     // Every real matrix maps in-house now (FCC/SMPTE-240M/derived via
     // explicit Kr,Kb); identity never reaches here (guarded upstream).
@@ -557,18 +557,18 @@ pub(super) fn convert_16bit_planar(
     ctx: ConvertCtx,
 ) -> Result<PixelBuffer> {
     let y_view = planes.y();
-    let u_view = planes
-        .u()
-        .ok_or_else(|| at!(Error::Malformed(
+    let u_view = planes.u().ok_or_else(|| {
+        at!(Error::Malformed(
             "decoded frame declares chroma subsampling but the decoder returned no U plane; \
              the bitstream's sequence header and its coded planes disagree",
-        )))?;
-    let v_view = planes
-        .v()
-        .ok_or_else(|| at!(Error::Malformed(
+        ))
+    })?;
+    let v_view = planes.v().ok_or_else(|| {
+        at!(Error::Malformed(
             "decoded frame declares chroma subsampling but the decoder returned no V plane; \
              the bitstream's sequence header and its coded planes disagree",
-        )))?;
+        ))
+    })?;
 
     let (w, h) = ctx.dims();
     let planar = YuvPlanarImage {
