@@ -469,9 +469,12 @@ fn main() {
                         for d in -2i32..=6 {
                             let q = (i32::from(qi) + d).clamp(0, 255) as u8;
                             if let Some(c) = encode_and_score_qi(img.as_ref(), speed, q) {
-                                emit(qi, "lattice", 1.0, 0, &c);
-                                // reuse the k column for the quantizer
-                                let _ = q;
+                                // The k column carries the ACTUAL quantizer
+                                // for lattice rows, so the analysis can find
+                                // the un-hinted point at `base_qi` exactly
+                                // instead of inferring it from byte order
+                                // (bytes are not reliably monotone in qi).
+                                emit(qi, "lattice", 1.0, usize::from(q), &c);
                             }
                         }
                         for &scale in &scales {

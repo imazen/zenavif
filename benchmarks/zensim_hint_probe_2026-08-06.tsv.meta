@@ -1,0 +1,111 @@
+# What is the LIVE per-superblock quantizer-hint channel worth?
+#
+# Three questions, deliberately kept separate because a map can win one and
+# lose another:
+#   1. ACTIVATION STEP  - how far does merely switching delta-q on move the
+#                         score, at an unchanged quantizer?
+#   2. INTERPOLATION    - can a MIXED map place the score BETWEEN two
+#                         adjacent achievable lattice points, finely AND
+#                         monotonically enough for a search to aim with?
+#   3. RD               - does the diffmap-derived map buy a better score at
+#                         MATCHED BYTES?
+#
+# date          2026-08-06
+# host          Darwin 26.5.2 (macOS), Apple aarch64, 12 cores, 24 GiB RAM
+# rustc         rustc 1.97.1 (8bab26f4f 2026-07-14)
+#
+# ENCODER PROVENANCE (this is the whole point of this block -- the encoder
+# was moving under this work and every cell here is from ONE build)
+#   zenavif       b19bc3c2 "feat(two-shot): quantizer-space lattice
+#                 targeting at a fixed 2-encode budget" + the harness commit
+#                 on top of it
+#   ravif         path dep ../ravif/ravif @ 619d81adcaa5dd5546d55bf669560e9eeb74d080
+#                 branch feat/zenrav1e-master-bump, working tree CLEAN
+#                 ravif/src content sha256
+#                 ddf30aee574e292699636a687e4888f4ac38c4a696430eeb118602f07fef4a8c
+#   zenrav1e      sibling master @ 4d1ed620703d7eb94bb24467b44c5b498896af62, clean
+#                 src content sha256
+#                 face801cf28fbafcbdf2f68f5d299f9d6699af363ddd2e2523ce7bd2ebc52d2b
+#   harness bin   sha256 71ffc7915ef3ffc57d2d16b8dfc3a0087ff9e4f2b924cb5100a864d1f44ed3b1
+#   zensim        git imazen/zensim main @ e4b875b5 (0.3.0), ZensimProfile::codec_target() == B
+#   FRAME_HINTS_LIVE = TRUE (this is what made the measurement possible at all)
+#   NOT built with -C target-cpu=native
+#
+#   Every cell ran on that single statically linked binary, so the five
+#   release-gated speed-tier arms (S1_DEEP, S6_TX_SIZE_RDO, S6_PART_PRUNE,
+#   S6_INTRA7, S10_RETIER) are OFF here -- they were flipped in ravif's
+#   working tree at 08:10, after this binary was built and while this sweep
+#   was already running. The sweep therefore does NOT span that change.
+#   The structural conclusions (activation step exists and is large;
+#   dithering is fine-grained but non-monotone) are properties of AV1's
+#   per-SB delta-q coding, not of those arms.
+#
+# command
+#   cargo build --release --features two-pass-zensim,auto-tune \
+#       --example zensim_loop_bench
+#   RAYON_NUM_THREADS=1 nice -n 5 ./target/release/examples/zensim_loop_bench \
+#       hintprobe <6-source manifest> 6 64,256,1024 90,120,160 0.94,0.88
+#
+# analysis
+#   python3 scripts/hyperparam/analyze_zensim_hintprobe.py \
+#       <(zstd -dc benchmarks/zensim_hint_probe_2026-08-06.tsv.zst)
+#   (deterministic; reproduces benchmarks/zensim_hint_probe_2026-08-06.summary.txt)
+#
+# grid          6 sources (4 clic2025 photos + gb82-sc imessage + codec_wiki)
+#               x long edges {64, 256, 1024}
+#               x base quantizers {90, 120, 160}  -- chosen to straddle the
+#                 three delta_q resolution bands (res 2 / 4 / 8, keyed on the
+#                 base quantizer by zenrav1e variance_boost_delta_q_res_log2)
+#               = 54 cells, 1,578 encode+decode+score cells
+#
+# variants per (cell, base quantizer)
+#   lattice         un-hinted encodes at quantizer base-2 ..= base+6. These
+#                   are the achievable points any interpolation claim must be
+#                   judged against. NOTE: in this run the `k` column is 0 for
+#                   lattice rows; they are emitted in that fixed quantizer
+#                   order, and the analyser recovers the quantizer from row
+#                   position (later runs write it into `k` directly).
+#   activated_base  delta-q switched on with every superblock's delta
+#                   quantizing to zero (one entry at 0.999, below every
+#                   delta_q resolution). Isolates the ACTIVATION step from
+#                   any actual per-superblock movement.
+#   dither          k of N superblocks scaled finer, k strided over 0..N,
+#                   subset chosen by van der Corput ordering so it is
+#                   scattered and nested in k rather than a contiguous stripe.
+#   diffmap         the map two_pass_zensim::sb_q_scale_from_diffmap builds
+#                   from an un-hinted encode at the same quantizer, at
+#                   strengths {0.5, 1.0, 2.0}.
+#
+# THE TRAP THIS PROBE FELL INTO FIRST, recorded so nobody repeats it
+#   AV1 codes per-superblock delta_q at a RESOLUTION of 1/2/4/8 quantizer
+#   indices. The first version used a 1.5% scale (0.985), which is below that
+#   resolution at ~76% of quantizer indices, so every superblock's delta
+#   quantized to zero and the sweep came back IDENTICAL for every dithered
+#   fraction. That reads exactly like "the encoder ignores the map's content"
+#   and it is wrong: a `hintdiag` control with one / half / all superblocks
+#   at scale 0.5 gives +536 / +2,991 / +5,750 bytes on the same cell. The
+#   scales here (0.94, 0.88) are sized to survive the resolution.
+#
+#   Second trap: a map whose length does not match the superblock grid is
+#   SILENTLY IGNORED, so a wrong grid is indistinguishable from a real null.
+#   The `wrong_len` control in `hintdiag` pins this, and the harness asserts
+#   the grid it builds. Verify bytes actually changed before believing any
+#   null from this channel.
+#
+# columns       image size w h base_qi variant scale k sbs bytes zensim enc_ms
+#               k       = superblocks dithered (0 for non-dither variants)
+#               sbs     = ceil(w/64) * ceil(h/64), the map length the encoder
+#                         requires
+#               enc_ms  = encode only; NOT comparable across rows here, the
+#                         box was shared. Use it for nothing.
+#
+# scheduling    nice -n 5, NOT nice -n 19. macOS maps high nice values onto
+#               the background QoS class (efficiency cores only): ~40x
+#               wall-clock difference measured 2026-08-06 on this box.
+#
+# STORAGE: committed zstd-compressed (146 KB -> 12.6 KB) per the repo's 30 KB
+# rule. Read it with:
+#
+#     zstd -dc benchmarks/zensim_hint_probe_2026-08-06.tsv.zst | less
+#
+# The .summary.txt beside it carries the aggregates without decompressing.

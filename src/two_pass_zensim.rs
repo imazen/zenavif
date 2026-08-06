@@ -57,25 +57,43 @@
 //! is live, so it runs and converges regardless; only the spatial term is
 //! withheld.
 //!
+//! # STALENESS WARNING (2026-08-06, ravif 619d81a)
+//!
+//! Every measured number in the two sections below — the A/B against the
+//! secant, the anchor fit, and the lattice spacing — was taken against
+//! **zenrav1e 0.1.4 with the `FrameHints` passthrough dead**. ravif has
+//! since moved to zenrav1e master (default-on partition and split-cost RD
+//! fixes, so encoded bytes moved everywhere) and
+//! [`SPATIAL_HINTS_LIVE`] is now `true`. Treat those tables as history,
+//! not as the current encoder's behaviour. The two-shot sections are the
+//! post-bump ones.
+//!
 //! # What "converged" can mean at all: the achievable-score lattice
 //!
 //! [`ZensimLoopOptions::tolerance`] is not a free parameter. `quality`
 //! resolves to an **integer** AV1 quantizer index, so for a given image the
 //! reachable zensim scores form a discrete lattice, and no search — this
-//! one, the secant, or a perfect oracle — can land between its points.
-//! Measured (`benchmarks/zensim_score_lattice_2026-08-06.tsv`: every
-//! integer quality in 50..=80, one photo and one screenshot at 256px, all
-//! 31 qualities resolving to 31 distinct quantizer indices): adjacent
-//! achievable scores are **1.05 / 0.82 apart at the median** and
-//! **53% / 47% of the gaps exceed 1.0**. So a ±0.5 band contains no
-//! achievable score at all roughly half the time.
+//! one, the secant, or a perfect oracle — can land between its points
+//! (short of the per-superblock channel, which the two-shot section below
+//! measures and rejects for this purpose).
 //!
-//! Read convergence numbers accordingly: at `tolerance = 0.5` a large
-//! share of the misses are the lattice, not the search. Comparing two
-//! searches on the same images and targets — which is what
-//! `scripts/hyperparam/analyze_zensim_loop_ab.py` reports as paired
-//! per-cell deltas — is unaffected, because both arms face the same
-//! lattice.
+//! **The lattice is 2.56× finer than it was first reported.** The original
+//! measurement (`benchmarks/zensim_score_lattice_2026-08-06.tsv`) swept
+//! every integer *quality* in 50..=80 and found adjacent achievable scores
+//! 1.05 / 0.82 apart at the median, concluding a ±0.5 band was usually
+//! unreachable. But integer qualities address only **100 of the 256
+//! quantizers**: over that same band, quality 50..80 spans quantizers
+//! 150..71, i.e. **80 achievable encodes, not 31**. Fractional qualities
+//! reach all of them — see [`crate::quality_for_quantizer`], which
+//! round-trips for every quantizer in `0..=255`. Swept properly, per
+//! quantizer (`benchmarks/zensim_hint_probe_2026-08-06.tsv.zst`, the
+//! `lattice` rows), the median adjacent gap is ~**0.7**, and the median
+//! distance from an arbitrary target to the nearest achievable score —
+//! the actual precision ceiling — is a small fraction of a point.
+//!
+//! So the lattice is **not** what stops a search from hitting ±0.5. The
+//! prediction is. A targeting search should work in quantizer space for
+//! the same reason: it is the coordinate the codec actually quantizes in.
 //!
 //! # How few encodes is possible
 //!
@@ -598,6 +616,75 @@ fn pool_sb_q_scale(diffmap: &[f32], w: usize, h: usize, options: &ZensimLoopOpti
 // ============================================================================
 // Two-shot: maximise precision at a FIXED budget of two encodes.
 // ============================================================================
+
+// # What the live per-superblock channel is worth — MEASURED 2026-08-06
+//
+// `zenravif::FRAME_HINTS_LIVE` went true (ravif 619d81a), so for the first
+// time a per-superblock quantizer-scale map genuinely changes the
+// bitstream. It was characterised before being used or dismissed:
+// `benchmarks/zensim_hint_probe_2026-08-06.tsv.zst` (54 cells = 6 sources ×
+// long edges {64, 256, 1024} × base quantizers {90, 120, 160}, 1,578
+// encodes), summary alongside, analysis
+// `scripts/hyperparam/analyze_zensim_hintprobe.py`.
+//
+// **How the channel actually works** (zenrav1e `apply_sb_q_scale_hints` +
+// `variance_boost_delta_q_res_log2`): each superblock's quantizer is scaled
+// and re-quantized *independently*, so a MIXED map can in principle place
+// the frame score between two adjacent achievable lattice points. But the
+// per-SB delta is coded at a **resolution of 1/2/4/8 quantizer indices**,
+// keyed on the frame's base quantizer. A nudge smaller than that resolution
+// quantizes to zero. (The first version of this probe used a 1.5% scale,
+// which is below the resolution nearly everywhere, and came back invariant
+// in the dithered fraction — reading exactly like "the channel ignores map
+// content". It does not: one / half / all superblocks at scale 0.5 give
+// +536 / +2,991 / +5,750 bytes on the same cell.)
+//
+// **1. Turning the channel on is not a small perturbation.** Activating
+// delta-q also disables segmentation, so there is a step between the
+// un-hinted encode at a quantizer and an activated-but-flat encode at the
+// *same* quantizer: median **+1.10** zensim (|Δ| median 1.48, p90 4.49,
+// range −2.34..+7.76), bytes +2.9% median and up to +21.3%. That step
+// **exceeds the median un-hinted lattice gap (0.72) on 68.5% of cells**.
+//
+// **2. The dither interpolates in trend, but is not aimable.** Dithering
+// k of N superblocks finer does move the score smoothly *on average*, and
+// its granularity is genuinely sub-lattice — median step 0.19 zensim at
+// 256 px (12 SBs) and 0.012 at 1024 px (176 SBs), against lattice gaps of
+// 0.72 and 0.65. Granularity is not the problem. **Monotonicity is:** only
+// 67–75% of adjacent-k steps move in the span's own direction, with
+// reversals up to **0.40–0.78** zensim — larger than the lattice gap
+// the dither exists to refine. A one-step placement cannot aim with a knob
+// whose local response reverses by more than its own target precision.
+//
+// **Verdict for two-shot precision: do not use it.** Pass 1 is un-hinted,
+// so entering the activated regime at pass 2 costs an unmeasured
+// content-dependent step (1) larger than a lattice gap, to buy resolution
+// (2) that cannot be aimed — and the lattice was never the binding
+// constraint anyway (see the lattice section: the prediction error is
+// roughly an order of magnitude above the lattice ceiling). Optimising a
+// non-binding term by paying a larger unpredictable one is a losing trade
+// in every direction, which is why [`TwoShotOptions::spatial_strength`]
+// defaults to `0.0`.
+//
+// **3. RD is a different question, and the answer is strength-dependent.**
+// Scored at *matched bytes* against the un-hinted bytes-vs-score curve
+// (comparing at different byte counts would not be an RD comparison), the
+// diffmap-derived map gives median **+0.48** zensim at strength 0.5
+// (wins 8/12), **−0.28** at strength 1.0 (wins 4/11), and **−3.72** at
+// strength 2.0 (wins 0/7). So the derived `strength = 1.0` — chosen when
+// the map was inert and could not be fitted — is **measurably too strong**,
+// and 0.5 looks like a real if small-n win. n is small and 78 further rows
+// fell outside the measured byte window and were honestly not judged; a
+// proper RD sweep with a wider window is the follow-up before any default
+// changes.
+//
+// **Consequence for the closed loop, flagged not fixed.**
+// [`ZensimLoopOptions::spatial_strength`] still defaults to `1.0`, chosen
+// when the map could not reach the encoder. It now can. On this evidence
+// that default is RD-neutral-to-negative *and* injects the activation step
+// into a convergence loop, which costs iterations. Changing it is a
+// behaviour change on the loop's contract and wants the wider RD sweep
+// behind it first.
 
 /// Continuous quantizer-index knots paired with [`ANCHOR_SCORE`] — the
 /// population score→quantizer curve the two-shot pass-2 step translates
