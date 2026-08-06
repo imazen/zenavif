@@ -47,3 +47,9 @@
 #
 # analysis      python3 scripts/hyperparam/analyze_zensim_loop_ab.py \
 #                   benchmarks/zensim_loop_ab_2026-08-06.tsv
+#
+# scheduling    Run under `nice -n 5`, NOT `nice -n 19`. macOS maps high nice
+#               values onto the background QoS class, confining the process to
+#               efficiency cores: measured 2026-08-06 on an idle box, the same
+#               workload got ~17% of one core at nice 19 vs ~145% at nice 5
+#               (~40x wall clock). nice 5 still yields to interactive work.

@@ -27,6 +27,15 @@
 //!
 //! Encodes are pinned to one thread so bytes are deterministic and the
 //! reported per-cell wall time is comparable across cells.
+//!
+//! **macOS scheduling gotcha, measured 2026-08-06:** do NOT run this under
+//! `nice -n 19` on macOS. Darwin maps high nice values onto the background
+//! QoS class, which confines the process to efficiency cores and throttles
+//! it hard — the same `ab` workload ran at ~17% of one core under
+//! `nice -n 19` and ~145% (multi-core, decode threads live) under
+//! `nice -n 5`, a ~40x wall-clock difference on an otherwise idle box.
+//! `nice -n 5` still yields to interactive work; `nice -n 19` turns an hour
+//! of measurement into a day of it.
 
 use std::io::{BufRead, Write};
 

@@ -182,8 +182,9 @@ pub struct ZensimLoopOptions {
     /// Upper bound of the quality search range. Default 100.0.
     pub max_quality: f32,
     /// Override the pass-1 quality. `None` (default) seeds from the fitted
-    /// [`anchor_quality_for_zensim`] curve (see [`seed_quality`] for the
-    /// content-aware seed that was tried and measured as harmful).
+    /// [`anchor_quality_for_zensim`] curve. (A content-aware seed was tried
+    /// on top of it and measured as harmful — see the `seed_quality` source
+    /// comment for the numbers and why it is not coming back.)
     pub seed_quality: Option<f32>,
     /// Spatial correction strength — the `1/γ` exponent derived in the
     /// [module docs](self). `0.0` disables the spatial term exactly (the
@@ -302,7 +303,9 @@ const ANCHOR_QUALITY: [f32; 15] = [
 ///
 /// Used twice by [`encode_rgb8_zensim_loop`] — to seed pass 1, and (as a
 /// difference, `Q(target) − Q(score)`) to take each un-bracketed correction
-/// step. See [`ANCHOR_SCORE`] for fit provenance.
+/// step. Fit provenance is on the `ANCHOR_SCORE` constant: 1,008 measured
+/// encodes over 12 sources x 4 sizes x 21 qualities, recorded in
+/// `benchmarks/zensim_anchor_2026-08-06.tsv`.
 ///
 /// Monotone non-decreasing in `target`; linearly extrapolated outside the
 /// knot range and clamped to `[1, 100]`.
