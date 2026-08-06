@@ -85,7 +85,12 @@ TSV diff in the same commit. zenrav1e's halves (`gate-identity`,
 - `src/decode_av1.rs` - AV1 bitstream decoding entry points
 - `src/strip_convert.rs` - Strip-based pixel conversion utilities
 - `src/detect.rs` - AVIF file detection / sniffing
-- `src/codec.rs` - zencodec trait implementations
+- `src/codec/` - zencodec trait implementations, one submodule per adapter type
+  (`encode_config`/`encode_job`/`encoder`/`anim_encoder`,
+  `decode_config`/`decode_job`/`decoder`/`streaming`/`anim_decoder`) plus the
+  shared decode helpers (`orientation`, `color`, `info`, `gain_map`,
+  `negotiate`) and the thread-count policy (`threads`). `mod.rs` only declares
+  and re-exports.
 - `src/zennode_defs.rs` - zennode pipeline node definitions (behind `zennode` feature)
 - `src/simd/` - SIMD acceleration modules
 
@@ -135,7 +140,7 @@ rebase/merge — do NOT re-add CategorizedError here; rebase instead. (PR #27
 `caterr-categorized-error` was the stale original adoption, closed 2026-07-20 as
 superseded.) Stop tokens, fallible-alloc (`src/alloc_util.rs` `AllocPref`),
 whereat (`at!`), limits (`DecoderConfig` caps + `zencodec::ResourceLimits`
-mapping in `src/codec.rs`), and estimation (`src/heuristics.rs`) are all present
+mapping in `src/codec/`), and estimation (`src/heuristics.rs`) are all present
 for the native rav1d-safe / zenravif paths.
 
 **Seam obligations — enforce these when wiring a backend, and re-check at each
