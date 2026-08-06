@@ -142,3 +142,124 @@ pub(super) fn orientation_to_avif(orientation: zencodec::Orientation) -> (Option
         _ => (None, None),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zencodec::{Orientation, OrientationHint};
+    use zenavif_parse::{ImageMirror, ImageRotation};
+
+    /// Every EXIF orientation AVIF can express, so the round-trip below is
+    /// exhaustive rather than a spot check.
+    const ALL: [Orientation; 8] = [
+        Orientation::Identity,
+        Orientation::FlipH,
+        Orientation::FlipV,
+        Orientation::Rotate90,
+        Orientation::Rotate180,
+        Orientation::Rotate270,
+        Orientation::Transpose,
+        Orientation::Transverse,
+    ];
+
+    fn rot(code: u8) -> ImageRotation {
+        // `orientation_to_avif` returns the raw irot CODE (0..=3); the parser
+        // hands `avif_to_orientation` the angle in DEGREES. Bridging the two
+        // here is the point of the test — a code/degree mix-up between these
+        // functions is exactly the bug this catches.
+        ImageRotation {
+            angle: u16::from(code) * 90,
+        }
+    }
+
+    /// `orientation_to_avif` documents itself as the inverse of
+    /// `avif_to_orientation`. Nothing checked that, and a container writing
+    /// the wrong irot/imir pair silently ships rotated pixels — the failure is
+    /// invisible until a human looks at the image.
+    #[cfg(feature = "encode")]
+    #[test]
+    fn orientation_survives_a_round_trip_through_the_avif_boxes() {
+        for want in ALL {
+            let (rotation, mirror) = orientation_to_avif(want);
+            let got = avif_to_orientation(
+                rotation.map(rot).as_ref(),
+                mirror.map(|axis| ImageMirror { axis }).as_ref(),
+            );
+            assert_eq!(
+                got, want,
+                "round trip lost {want:?}: encoded as irot={rotation:?} imir={mirror:?}, \
+                 which decodes back as {got:?}"
+            );
+        }
+    }
+
+    /// The two mirror axes are NOT interchangeable: axis 0 flips left-right,
+    /// axis 1 flips top-bottom, so at every rotation they must disagree.
+    /// A swapped axis is a silent vertical/horizontal flip.
+    #[test]
+    fn the_two_mirror_axes_never_decode_to_the_same_orientation() {
+        for angle in [0u16, 90, 180, 270] {
+            let r = ImageRotation { angle };
+            let h = avif_to_orientation(Some(&r), Some(&ImageMirror { axis: 0 }));
+            let v = avif_to_orientation(Some(&r), Some(&ImageMirror { axis: 1 }));
+            assert_ne!(h, v, "mirror axes 0 and 1 collapsed at {angle} degrees");
+        }
+    }
+
+    /// Unmirrored rotations must map onto four distinct orientations — if two
+    /// collapsed, one quarter turn would be silently dropped.
+    #[test]
+    fn the_four_rotations_are_distinct() {
+        let mut seen = Vec::new();
+        for angle in [0u16, 90, 180, 270] {
+            let o = avif_to_orientation(Some(&ImageRotation { angle }), None);
+            assert!(!seen.contains(&o), "angle {angle} duplicates {o:?}");
+            seen.push(o);
+        }
+    }
+
+    /// An out-of-spec irot angle must degrade to Identity, not to whatever the
+    /// last match arm happened to be: a malformed container should show
+    /// upright pixels, never wrongly-rotated ones.
+    #[test]
+    fn a_malformed_rotation_angle_degrades_to_identity() {
+        for angle in [45u16, 1, 359, 3600] {
+            assert_eq!(
+                avif_to_orientation(Some(&ImageRotation { angle }), None),
+                Orientation::Identity,
+                "out-of-spec angle {angle} must not be interpreted"
+            );
+            assert_eq!(
+                avif_to_orientation(Some(&ImageRotation { angle }), Some(&ImageMirror { axis: 0 })),
+                Orientation::Identity,
+            );
+        }
+    }
+
+    /// An out-of-spec imir axis likewise degrades rather than being guessed.
+    #[test]
+    fn a_malformed_mirror_axis_degrades_to_identity() {
+        for axis in [2u8, 7, 255] {
+            assert_eq!(
+                avif_to_orientation(None, Some(&ImageMirror { axis })),
+                Orientation::Identity,
+                "out-of-spec mirror axis {axis} must not be interpreted"
+            );
+        }
+    }
+
+    /// Only the two "correct it" hints bake pixels. Getting this wrong either
+    /// double-applies a rotation or ignores a requested one, and the default
+    /// (Preserve) must never bake.
+    #[test]
+    fn only_the_correcting_hints_bake_orientation() {
+        assert!(will_auto_orient(OrientationHint::Correct));
+        assert!(will_auto_orient(OrientationHint::CorrectAndTransform(
+            Orientation::Rotate90,
+        )));
+        assert!(!will_auto_orient(OrientationHint::Preserve));
+        assert!(!will_auto_orient(OrientationHint::ExactTransform(
+            Orientation::Rotate90,
+        )));
+    }
+}
