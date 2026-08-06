@@ -150,7 +150,9 @@ mod tests {
     use zenavif_parse::{ImageMirror, ImageRotation};
 
     /// Every EXIF orientation AVIF can express, so the round-trip below is
-    /// exhaustive rather than a spot check.
+    /// exhaustive rather than a spot check. Gated with its only user: the
+    /// round-trip needs `orientation_to_avif`, which is `encode`-only.
+    #[cfg(feature = "encode")]
     const ALL: [Orientation; 8] = [
         Orientation::Identity,
         Orientation::FlipH,
@@ -162,6 +164,7 @@ mod tests {
         Orientation::Transverse,
     ];
 
+    #[cfg(feature = "encode")]
     fn rot(code: u8) -> ImageRotation {
         // `orientation_to_avif` returns the raw irot CODE (0..=3); the parser
         // hands `avif_to_orientation` the angle in DEGREES. Bridging the two
