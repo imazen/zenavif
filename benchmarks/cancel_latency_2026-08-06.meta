@@ -24,15 +24,23 @@ WHAT IS MEASURED
   into rav1d-safe's Decoder::set_stop, which polls at superblock-row
   boundaries.
 
-THREADS=1 IS NOT A CHOICE -- IT IS THE ONLY CELL THAT DECODES ON THIS HOST
-  With threads=2/4/auto, decoding these 4K images FAILS on this machine:
-  rav1d-safe tile workers panic with "overlapping DisjointMut" and the decode
-  returns Err. Reproduced with the relay both ON and OFF, so it is NOT caused
-  by the cancellation work -- it is the zenavif#30 race class, still live at
-  the rav1d-safe rev this branch pins (f9458f43). See CHANGELOG.
+MULTITHREADED CELLS REQUIRE imazen/rav1d-safe#445
+  The first version of this sweep could only report threads=1: with
+  threads>=2 the 4K decodes FAILED outright, rav1d-safe tile workers panicking
+  with "overlapping DisjointMut". That was the strided block guard reserving
+  inter-row gaps that neighbouring tiles legitimately write (rav1d-safe#445,
+  the zenavif#30 defect class). These threads=4/8 rows were measured with that
+  fix applied via the temporary ../rav1d-safe path dep.
 
-  Consequence for the 5 ms goal: cancellation latency is floored by ONE
-  superblock row of decode work, whose WALL time falls roughly linearly with
-  thread count. The 4K numbers below are therefore the single-threaded worst
-  case, not what a healthy multi-threaded decode would show. No multi-threaded
-  number is reported because none could be measured here -- not extrapolated.
+VERDICT ON THE ~5 ms GOAL (p50 and p99, relay on)
+  met      64x64, 256x256, 1024x1024, 2048x2048  -- at every thread count
+           measured (2048x2048 p99 is 8.69 ms at threads=1 and 5.16 ms at
+           threads=4, so the p99 claim at that size needs threads>=4)
+  NOT met  3840x2160 -- p50 6.4-7.0 ms, p99 11.9-14.6 ms
+
+  The 4K residual is NOT this crate's poll interval (1 ms). It is rav1d-safe's
+  own check spacing of one superblock row. Threading does not remove it: the
+  control decode only falls 476 -> 348 ms from 1 to 8 threads because the test
+  bitstream carries few tiles, so there is little tile parallelism to exploit,
+  and zenavif pins max_frame_delay=1 (no frame threading). Getting 4K under
+  5 ms needs a finer check inside rav1d-safe, or a tiled bitstream.

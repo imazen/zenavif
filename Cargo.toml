@@ -32,7 +32,12 @@ rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8",
 # (rav1d-safe@f9458f43 — false DisjointMut overlap panic under tile
 # threading, i686-reproducible), and the current safe-SIMD state. Return
 # to a registry dep at the 0.6.0 release.
-rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "f9458f43bb73be4a784059a4ed83cb4914050aa6", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
+# 2026-08-06 TEMP: sibling path dep while imazen/rav1d-safe#445 is in review.
+# The pinned rev CANNOT decode 4K with threads>=2 on aarch64 (tile workers
+# panic with "overlapping DisjointMut" — the strided block guard reserves
+# inter-row gaps that neighbouring tiles legitimately write). Restore the
+# git-rev pin once #445 lands.
+rav1d-safe = { path = "../rav1d-safe", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
 # zenav1-aom pure-Rust AV1 KEY-frame decoder — second decode backend (feature
 # `aom-backend`). Git-rev pinned to imazen/zenav1-aom main (crate unpublished;
 # intra decode is conformance-clean vs libaom v3.14.1 at this rev). This rev

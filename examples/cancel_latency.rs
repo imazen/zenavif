@@ -46,6 +46,25 @@ use zenavif::{DecoderConfig, EncoderConfig};
 const TRIALS: usize = 40;
 
 fn main() {
+    // Side door: emit one encoded source and exit. Other repos' harnesses need
+    // a large AVIF to decode and have no encoder of their own (rav1d-safe's
+    // mt_stress 4K gate, for one, has been unrunnable for want of this file).
+    if let Ok(path) = std::env::var("ZENAVIF_EMIT_AVIF") {
+        let w: u32 = std::env::var("ZENAVIF_EMIT_W").ok().and_then(|v| v.parse().ok()).unwrap_or(3840);
+        let h: u32 = std::env::var("ZENAVIF_EMIT_H").ok().and_then(|v| v.parse().ok()).unwrap_or(2160);
+        match build_source(w, h) {
+            Ok(bytes) => {
+                std::fs::write(&path, &bytes).expect("write emitted AVIF");
+                println!("wrote {path} ({w}x{h}, {} KiB)", bytes.len() / 1024);
+            }
+            Err(e) => {
+                eprintln!("emit failed: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
     // Sweep sizes: cancellation latency is floored by the decoder's own check
     // spacing (one superblock row), and an sbrow's WALL time scales with width
     // and thread count — so a single size cannot answer "is it under 5 ms?".
