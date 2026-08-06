@@ -101,9 +101,8 @@ impl Stop for RelayStop {
 fn relay_disabled() -> bool {
     use std::sync::OnceLock;
     static DISABLED: OnceLock<bool> = OnceLock::new();
-    *DISABLED.get_or_init(|| {
-        std::env::var("ZENAVIF_CANCEL_RELAY").is_ok_and(|v| v == "0" || v == "off")
-    })
+    *DISABLED
+        .get_or_init(|| std::env::var("ZENAVIF_CANCEL_RELAY").is_ok_and(|v| v == "0" || v == "off"))
 }
 
 /// Parking spot for the watcher: lets the closure wake it immediately on

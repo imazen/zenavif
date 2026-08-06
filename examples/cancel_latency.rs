@@ -50,8 +50,14 @@ fn main() {
     // a large AVIF to decode and have no encoder of their own (rav1d-safe's
     // mt_stress 4K gate, for one, has been unrunnable for want of this file).
     if let Ok(path) = std::env::var("ZENAVIF_EMIT_AVIF") {
-        let w: u32 = std::env::var("ZENAVIF_EMIT_W").ok().and_then(|v| v.parse().ok()).unwrap_or(3840);
-        let h: u32 = std::env::var("ZENAVIF_EMIT_H").ok().and_then(|v| v.parse().ok()).unwrap_or(2160);
+        let w: u32 = std::env::var("ZENAVIF_EMIT_W")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(3840);
+        let h: u32 = std::env::var("ZENAVIF_EMIT_H")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2160);
         match build_source(w, h) {
             Ok(bytes) => {
                 std::fs::write(&path, &bytes).expect("write emitted AVIF");
@@ -69,7 +75,13 @@ fn main() {
     // spacing (one superblock row), and an sbrow's WALL time scales with width
     // and thread count — so a single size cannot answer "is it under 5 ms?".
     // Sizes follow the repo's sweep discipline: tiny, small, medium, large.
-    let sizes: Vec<(u32, u32)> = vec![(64, 64), (256, 256), (1024, 1024), (2048, 2048), (3840, 2160)];
+    let sizes: Vec<(u32, u32)> = vec![
+        (64, 64),
+        (256, 256),
+        (1024, 1024),
+        (2048, 2048),
+        (3840, 2160),
+    ];
     let relay_on = !matches!(
         std::env::var("ZENAVIF_CANCEL_RELAY").as_deref(),
         Ok("0") | Ok("off")
@@ -82,7 +94,9 @@ fn main() {
         threads,
         TRIALS
     );
-    println!("width\theight\trelay\tthreads\tcontrol_ms\tn\tmin_ms\tp50_ms\tp90_ms\tp99_ms\tmax_ms");
+    println!(
+        "width\theight\trelay\tthreads\tcontrol_ms\tn\tmin_ms\tp50_ms\tp90_ms\tp99_ms\tmax_ms"
+    );
 
     for (w, h) in sizes {
         let avif = match build_source(w, h) {
@@ -138,9 +152,13 @@ fn build_source(w: u32, h: u32) -> Result<Vec<u8>, String> {
     }
     let img = imgref::Img::new(px, w as usize, h as usize);
     let cfg = EncoderConfig::default().speed(10);
-    zenavif::encode_rgb8(img.as_ref(), &cfg, almost_enough::StopToken::new(enough::Unstoppable))
-        .map(|e| e.avif_file)
-        .map_err(|e| e.to_string())
+    zenavif::encode_rgb8(
+        img.as_ref(),
+        &cfg,
+        almost_enough::StopToken::new(enough::Unstoppable),
+    )
+    .map(|e| e.avif_file)
+    .map_err(|e| e.to_string())
 }
 
 fn control_decode(avif: &[u8]) -> Option<Duration> {

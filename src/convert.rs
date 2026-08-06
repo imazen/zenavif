@@ -22,8 +22,7 @@ use zenpixels::{PixelBuffer, PixelDescriptor};
 /// `encode_with`, `codec.rs` `map_rgb8_rows`/`map_rgba8_rows`) handle the
 /// odd-stride case explicitly instead — with a typed error and an owning
 /// fallback respectively.
-const TIGHTLY_PACKED_INVARIANT: &str =
-    "decode-path buffers are allocated tightly packed, so a layout-compatible \
+const TIGHTLY_PACKED_INVARIANT: &str = "decode-path buffers are allocated tightly packed, so a layout-compatible \
      descriptor always yields a typed view";
 
 /// Scale a limited-range Y value to full range (8-bit)
@@ -78,7 +77,9 @@ pub fn downscale_to_8bit(image: PixelBuffer) -> PixelBuffer {
         None => buf,
     };
     if desc.layout_compatible(PixelDescriptor::RGB16) {
-        let src = image.try_as_imgref::<Rgb<u16>>().expect(TIGHTLY_PACKED_INVARIANT);
+        let src = image
+            .try_as_imgref::<Rgb<u16>>()
+            .expect(TIGHTLY_PACKED_INVARIANT);
         let out: Vec<Rgb<u8>> = src
             .pixels()
             .map(|px| Rgb {
@@ -93,7 +94,9 @@ pub fn downscale_to_8bit(image: PixelBuffer) -> PixelBuffer {
                 .into(),
         )
     } else if desc.layout_compatible(PixelDescriptor::RGBA16) {
-        let src = image.try_as_imgref::<Rgba<u16>>().expect(TIGHTLY_PACKED_INVARIANT);
+        let src = image
+            .try_as_imgref::<Rgba<u16>>()
+            .expect(TIGHTLY_PACKED_INVARIANT);
         let out: Vec<Rgba<u8>> = src
             .pixels()
             .map(|px| Rgba {
@@ -109,7 +112,9 @@ pub fn downscale_to_8bit(image: PixelBuffer) -> PixelBuffer {
                 .into(),
         )
     } else if desc.layout_compatible(PixelDescriptor::GRAY16) {
-        let src = image.try_as_imgref::<rgb::Gray<u16>>().expect(TIGHTLY_PACKED_INVARIANT);
+        let src = image
+            .try_as_imgref::<rgb::Gray<u16>>()
+            .expect(TIGHTLY_PACKED_INVARIANT);
         let out: Vec<rgb::Gray<u8>> = src
             .pixels()
             .map(|px| rgb::Gray::new((px.value() >> 8) as u8))
@@ -134,7 +139,9 @@ pub fn scale_pixels_to_u16(image: &mut PixelBuffer, bit_depth: u8) {
     }
     let desc = image.descriptor();
     if desc.layout_compatible(PixelDescriptor::RGB16) {
-        let mut img = image.try_as_imgref_mut::<Rgb<u16>>().expect(TIGHTLY_PACKED_INVARIANT);
+        let mut img = image
+            .try_as_imgref_mut::<Rgb<u16>>()
+            .expect(TIGHTLY_PACKED_INVARIANT);
         for px in img.buf_mut().iter_mut() {
             *px = Rgb {
                 r: scale_to_u16(px.r, bit_depth),
@@ -143,7 +150,9 @@ pub fn scale_pixels_to_u16(image: &mut PixelBuffer, bit_depth: u8) {
             };
         }
     } else if desc.layout_compatible(PixelDescriptor::RGBA16) {
-        let mut img = image.try_as_imgref_mut::<Rgba<u16>>().expect(TIGHTLY_PACKED_INVARIANT);
+        let mut img = image
+            .try_as_imgref_mut::<Rgba<u16>>()
+            .expect(TIGHTLY_PACKED_INVARIANT);
         for px in img.buf_mut().iter_mut() {
             *px = Rgba {
                 r: scale_to_u16(px.r, bit_depth),
@@ -153,7 +162,9 @@ pub fn scale_pixels_to_u16(image: &mut PixelBuffer, bit_depth: u8) {
             };
         }
     } else if desc.layout_compatible(PixelDescriptor::GRAY16) {
-        let mut img = image.try_as_imgref_mut::<rgb::Gray<u16>>().expect(TIGHTLY_PACKED_INVARIANT);
+        let mut img = image
+            .try_as_imgref_mut::<rgb::Gray<u16>>()
+            .expect(TIGHTLY_PACKED_INVARIANT);
         for px in img.buf_mut().iter_mut() {
             *px = rgb::Gray::new(scale_to_u16(px.value(), bit_depth));
         }
