@@ -324,11 +324,11 @@ pub struct EncoderConfig {
     #[cfg(feature = "encode-imazen")]
     pub(crate) fast_tier_budgets: Option<crate::fast_heads::FastTierBudgets>,
     /// Per-64×64-superblock AC quantizer scale map for the color encode
-    /// (the butteraugli-diffmap-guided second pass sets this internally —
-    /// see [`crate::two_pass`]). Forwarded through zenravif's expert
-    /// `sb_q_scale` passthrough; release-gated there behind
-    /// `zenravif::FRAME_HINTS_LIVE`.
-    #[cfg(feature = "two-pass-butteraugli")]
+    /// (the diffmap-guided second passes set this internally — see
+    /// [`crate::two_pass`] and [`crate::two_pass_zensim`]). Forwarded
+    /// through zenravif's expert `sb_q_scale` passthrough; release-gated
+    /// there behind `zenravif::FRAME_HINTS_LIVE`.
+    #[cfg(any(feature = "two-pass-butteraugli", feature = "two-pass-zensim"))]
     pub(crate) sb_q_scale: Option<Box<[f32]>>,
 }
 
@@ -396,7 +396,7 @@ impl Default for EncoderConfig {
             palette_preference: None,
             #[cfg(feature = "encode-imazen")]
             fast_tier_budgets: None,
-            #[cfg(feature = "two-pass-butteraugli")]
+            #[cfg(any(feature = "two-pass-butteraugli", feature = "two-pass-zensim"))]
             sb_q_scale: None,
         }
     }
@@ -1103,10 +1103,14 @@ fn build_ravif_encoder(
             .with_lru_on_skip(config.override_lru_on_skip)
             .with_segmentation_complex(config.override_segmentation_complex)
             .with_encode_bottomup(config.override_encode_bottomup);
-        #[cfg(any(feature = "__expert", feature = "two-pass-butteraugli"))]
+        #[cfg(any(
+            feature = "__expert",
+            feature = "two-pass-butteraugli",
+            feature = "two-pass-zensim"
+        ))]
         {
             // The deepest knobs live behind ravif's `__expert` feature
-            // (which `two-pass-butteraugli` also enables, without exposing
+            // (which both two-pass features also enable, without exposing
             // zenavif's own `__expert` surface). Mirror EncoderConfig's
             // per-field overrides into ravif's InternalParams in one call.
             // Build via Default + field assignment because
@@ -1120,8 +1124,8 @@ fn build_ravif_encoder(
                 params.lrf = config.override_lrf;
                 params.fast_deblock = config.override_fast_deblock;
             }
-            // Closed-loop per-SB quantizer scale map (two-pass driver).
-            #[cfg(feature = "two-pass-butteraugli")]
+            // Closed-loop per-SB quantizer scale map (two-pass drivers).
+            #[cfg(any(feature = "two-pass-butteraugli", feature = "two-pass-zensim"))]
             {
                 params.sb_q_scale = config.sb_q_scale.clone();
             }

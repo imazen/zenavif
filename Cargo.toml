@@ -324,6 +324,16 @@ target-quality = ["encode", "dep:fast-ssim2", "dep:zensim"]
 # `__expert` surface. RELEASE-GATED at runtime behind
 # `zenravif::FRAME_HINTS_LIVE` (fails honestly until the zenrav1e dep bump).
 two-pass-butteraugli = ["encode-imazen", "ravif/__expert", "dep:butteraugli"]
+# zensim-diffmap-driven closed loop (encode_rgb8_zensim_loop): encode ->
+# decode -> Zensim::compute_with_ref_and_diffmap -> global quality correction
+# from the score AND per-64x64-superblock quantizer scales from the diffmap
+# -> re-encode. Unlike `two-pass-butteraugli` (purely spatial, and so
+# refused outright while zenravif's FrameHints passthrough is release-gated),
+# this loop's GLOBAL half is live today; the spatial half is applied only
+# when `zenravif::FRAME_HINTS_LIVE`, reported per call as
+# `ZensimLoopResult::spatial_applied`. Builds on `target-quality` (shares
+# the search, the q0 seed, and the zensim dep).
+two-pass-zensim = ["target-quality", "encode-imazen", "ravif/__expert"]
 # EXPERIMENTAL: AVIF encoding via svtav1-rs (pure Rust SVT-AV1 port,
 # imazen/svtav1 branch dep). Adds the working `Av1Backend::SvtRs` variant:
 # 8-bit 4:2:0 stills only, dimensions must be multiples of 64 (the svtav1-rs
@@ -370,6 +380,12 @@ rustdoc-args = ["--generate-link-to-definition"]
 [[example]]
 name = "two_pass_cell"
 required-features = ["two-pass-butteraugli"]
+
+# Measurement harness for the zensim closed loop: dense quality sweeps (the
+# anchor-curve fit input) + the real-encode secant-vs-loop A/B.
+[[example]]
+name = "zensim_loop_bench"
+required-features = ["two-pass-zensim"]
 
 # zenavif#30 futex-hang repro/stress loop (found the rav1d-safe tile-threading
 # CDEF/loop-filter guard race; kept as the product-path stress harness).

@@ -114,12 +114,24 @@ pub use target_quality::{
     TargetMetric, TargetOptions, TargetedEncode, encode_rgb8_with_target, encode_rgb16_with_target,
     encode_rgba8_with_target,
 };
+/// Superblock pooling primitives shared by the diffmap-guided closed loops.
+#[cfg(any(feature = "two-pass-butteraugli", feature = "two-pass-zensim"))]
+mod sb_pool;
 /// Butteraugli-diffmap-guided two-pass encoding (spatial closed loop).
 #[cfg(feature = "two-pass-butteraugli")]
 pub mod two_pass;
 #[cfg(feature = "two-pass-butteraugli")]
 pub use two_pass::{
     FRAME_HINTS_LIVE, TwoPassEncode, TwoPassMetric, TwoPassOptions, encode_rgb8_two_pass,
+};
+/// zensim-diffmap-driven closed loop (global score correction + spatial
+/// per-superblock quantizer scaling from one metric call per pass).
+#[cfg(feature = "two-pass-zensim")]
+pub mod two_pass_zensim;
+#[cfg(feature = "two-pass-zensim")]
+pub use two_pass_zensim::{
+    SPATIAL_HINTS_LIVE, ZensimLoopOptions, ZensimLoopResult, anchor_quality_for_zensim,
+    encode_rgb8_zensim_loop,
 };
 mod validation;
 #[cfg(feature = "_dev")]
