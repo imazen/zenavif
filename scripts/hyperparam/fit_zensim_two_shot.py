@@ -743,6 +743,8 @@ def main():
            f"gain{best_gain:.2f}_vs_qi_translate")
     paired("qi_translate", ctx_refit, "qi_translate", ctx_derived,
            "refit_knots_vs_derived_knots")
+    paired("qi_translate_lm", ctx_refit, "qi_translate", ctx_refit,
+           "fitted_residual_vs_qi_translate")
     print("#   negative mean_d = the FIRST rule is closer to target", file=out)
     print("#   sign_test_p is two-sided over non-tied pairs; treat p > 0.05 as", file=out)
     print("#   'not distinguishable here' and prefer the simpler rule.", file=out)

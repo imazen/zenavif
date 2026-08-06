@@ -1,0 +1,127 @@
+# Two-shot zensim targeting: how close can EXACTLY TWO encodes land?
+#
+# The objective here is NOT "what fraction converge inside a tolerance
+# band in N encodes" -- that was the previous question and it turned out to
+# be the wrong one, for a reason recorded below. It is:
+#
+#     given exactly two encodes, minimise |achieved - target|
+#
+# Tolerance is a reporting parameter in these files, never a stopping rule:
+# every arm spends its two encodes regardless.
+#
+# date          2026-08-06
+# host          Darwin 26.5.2 (macOS), Apple aarch64, 12 cores, 24 GiB RAM
+# rustc         rustc 1.97.1 (8bab26f4f 2026-07-14)
+#
+# ENCODER PROVENANCE — pinned, because the encoder moved twice during this
+# work and an unlabelled number is worthless
+#   ravif       619d81adcaa5dd5546d55bf669560e9eeb74d080 ("zenrav1e 0.1.4 ->
+#               sibling master; per-SB quantizer hints are LIVE"), extracted
+#               READ-ONLY with `git archive` into a sibling directory and
+#               depended on by path. The ravif repo's own working tree and
+#               index were never touched (verified `git status --porcelain`
+#               empty against it before and after), because a concurrent
+#               agent was editing it.
+#               ravif/src content sha256
+#               361e222c74eb655a6bfb2d907e46222fab80c3947874b73a75b7203d452926b1
+#   zenrav1e    4d1ed620703d7eb94bb24467b44c5b498896af62, clean
+#               src content sha256
+#               aa81fbf7210246d162d3b8952ba93393cba07dbef9448f6c7527ff3edc488bc7
+#   zenavif     97871e47 + the two-shot commits on top
+#   binary      sha256 b030f1ba07cd8a4f3a0b804d55452aa80bebfa678aa0cb9c2f660667f47a5687
+#   zensim      git imazen/zensim main @ e4b875b5 (0.3.0),
+#               ZensimProfile::codec_target() == B
+#   FRAME_HINTS_LIVE = true
+#   NOT built with -C target-cpu=native
+#
+#   Build-once discipline: every cell of every arm ran on that one
+#   statically linked binary, so edits landing in sibling crates mid-run
+#   could not move the target.
+#
+#   WHAT THIS STATE IS NOT: ravif's five release-gated speed-tier arms
+#   (S1_DEEP, S6_TX_SIZE_RDO, S6_PART_PRUNE, S6_INTRA7, S10_RETIER) are all
+#   OFF at 619d81a. Four of them were armed in c69050a shortly after this
+#   run started. These numbers therefore describe the pre-arm encoder.
+#
+# IS THAT STALE? Measured rather than assumed, with
+# scripts/hyperparam/compare_lattice_encoders.py against the pre-bump
+# (zenrav1e 0.1.4) anchor sweep, joined on identical (image, size,
+# QUANTIZER) triples:
+#   168 comparable cells: 72 byte-identical; zensim delta median +0.0000,
+#   |d| median 0.073, |d| p90 0.99, max 2.80; bytes |d| p90 0.311%.
+#   On the narrower slice overlapping benchmarks/zensim_score_lattice_
+#   2026-08-06.tsv (2 sources @256, quantizers 71..150): 31/31 identical in
+#   BOTH bytes and score.
+# SCOPE: that is "no material change AT THESE CONFIGS ON THESE CELLS". It
+# does NOT license "the bump was small" generally — encoder changes are
+# speed-preset and content dependent, and the deep tiers the arms turn on
+# are exactly where the partition/split-cost work bites.
+#
+# command      scripts/hyperparam/run_zensim_two_shot.sh <outdir>
+#              (build once + provenance + lattice + fit + ab2 + summary)
+#
+# ---------------------------------------------------------------------------
+# FILES
+# ---------------------------------------------------------------------------
+# zensim_two_shot_lattice_{train,val}_2026-08-06.tsv.zst
+#     Dense ACHIEVABLE-SCORE lattice: the measured score at EVERY reachable
+#     AV1 quantizer index in the band covering zensim 12..96, per cell.
+#     Columns: image size w h q qindex bytes zensim dm_mean enc_ms
+#
+#     WHY PER QUANTIZER AND NOT PER QUALITY. Encoded output depends on
+#     `quality` only through the integer quantizer it resolves to, and all
+#     256 quantizers are addressable (zenavif::quality_for_quantizer, which
+#     round-trips for every one of them). Integer qualities reach only 100
+#     of the 256 — over quality 50..80 there are 80 achievable encodes, not
+#     31. The earlier conclusion that "a +-0.5 band contains no achievable
+#     score about half the time" came from an integer-quality sweep and is
+#     therefore ~2.56x too pessimistic: it measured the sweep grid, not the
+#     codec.
+#
+#     Because this table is the COMPLETE outcome set for a cell, offline
+#     replay of a placement rule against it is EXACT — every pass-1 and
+#     pass-2 encode a rule asks for is looked up, never modelled.
+#
+# zensim_two_shot_fit_2026-08-06.txt
+#     Lattice geometry, rule comparison on TRAIN and on held-out VAL, paired
+#     rule tests with a two-sided sign test, the overshoot-policy table.
+#
+# zensim_two_shot_ab2_2026-08-06.tsv.zst + .summary.txt
+#     REAL encodes, six arms, every one capped at two encodes, on the
+#     held-out VAL sources only:
+#       twoshot           the shipped rule (quantizer-space translate,
+#                         nearest lattice point)
+#       twoshot_atleast   same, biased to not undershoot
+#       twoshot_spatial   same + the now-live per-SB map at strength 0.5
+#       loop2             the existing closed loop capped at 2
+#       loop2_nospatial   the same with the map suppressed
+#       secant2           the baseline
+#
+# corpus       TRAIN benchmarks/zensim_loop_manifest_2026-08-06.txt
+#              VAL   benchmarks/zensim_lattice_manifest_val_2026-08-06.txt
+#              Disjoint by SOURCE, not by cell — the same photo at two sizes
+#              is not two independent samples. TRAIN is the corpus the
+#              existing anchor constants were fitted on, so it cannot be
+#              used to judge them.
+#
+# sizes        long edges 64 (tiny) / 256 / 1024 for the lattice; 64 / 256
+#              for ab2. There is no 4096 photographic tier: clic2025 tops
+#              out at a 2048 long edge and upscaling is banned, so a 4096
+#              cell would be a synthetic upscale. The only in-corpus
+#              >=4096 sources are tall web screenshots (1313 x N) — a
+#              corpus limit, stated rather than papered over.
+#
+# targets      zensim 20..90 step 5, i.e. the LOW range sampled at the same
+#              density as the high one. A grid that thins out below 60
+#              hides the regime where the score-vs-quantizer curve is
+#              flattest and placement is hardest.
+#
+# scheduling   nice -n 5, NOT nice -n 19: macOS maps high nice values onto
+#              the background QoS class (efficiency cores only), ~40x
+#              wall-clock. The box was shared with a concurrent heavy job
+#              throughout, so enc_ms and the ab2 `ms` column are NOT
+#              comparable across rows and should be used for nothing.
+#
+# STORAGE      TSVs over 30 KB are committed zstd-compressed per the repo
+#              rule. Read with:  zstd -dc <file>.tsv.zst | less
+#              The .txt/.summary.txt files carry the aggregates already.

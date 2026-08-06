@@ -637,6 +637,103 @@ fn pool_sb_q_scale(diffmap: &[f32], w: usize, h: usize, options: &ZensimLoopOpti
 // Two-shot: maximise precision at a FIXED budget of two encodes.
 // ============================================================================
 
+// # THE HEADLINE: two-shot precision, measured 2026-08-06
+//
+// The objective is not "what fraction converge inside a tolerance band" —
+// that was the previous question and it was the wrong one. It is: **given
+// exactly two encodes, how close to the target can you land.**
+//
+// Real encodes, held-out sources only, every arm capped at two encodes,
+// 360 (cell × target) combinations each — 12 VAL sources × long edges
+// {64, 256} × zensim targets 20..90 step 5, i.e. the low range sampled as
+// densely as the high one (`benchmarks/zensim_two_shot_ab2_2026-08-06`):
+//
+// | arm | med \|err\| | p90 | p99 | max | ≥target |
+// |---|---|---|---|---|---|
+// | secant baseline | 2.486 | 10.81 | 22.91 | 29.26 | 88.6% |
+// | closed loop (spatial on — the pre-2026-08-06 default) | 1.638 | 7.88 | 12.19 | 13.91 | 68.6% |
+// | closed loop (spatial off) | 1.255 | 5.56 | 20.65 | 25.15 | 67.8% |
+// | **two-shot** | **1.229** | **4.19** | **8.02** | **10.76** | 46.7% |
+// | two-shot, `AtLeast` | 1.072 | 4.54 | 9.16 | 11.32 | 57.2% |
+// | two-shot + spatial map | 1.758 | 6.73 | 10.28 | 11.51 | 62.8% |
+//
+// Paired against the secant on identical (image, size, target) — the only
+// comparison not confounded by cell mix — two-shot is **mean −2.50 /
+// median −1.09 zensim closer**, closer on 70.6% of cells and further on
+// 26.4%, and its files are 77 bytes *smaller* at the median. The tail is
+// where it separates most: p99 8.02 vs 22.91.
+//
+// # Where the error actually comes from
+//
+// Split every error into the two terms, which behave completely
+// differently (exact offline replay against the dense per-quantizer
+// lattice, 980 held-out cell×target combinations,
+// `benchmarks/zensim_two_shot_fit_2026-08-06.txt`):
+//
+// ```text
+// |achieved − target|  =  LATTICE  +  PREDICTION
+// ```
+//
+// | rule | med \|err\| | LATTICE | PREDICTION |
+// |---|---|---|---|
+// | translate in QUALITY space (the loop's step) | 1.659 | 0.157 | 1.397 |
+// | translate in QUANTIZER space (shipped) | 1.175 | 0.157 | 0.855 |
+// | pass 1 alone (one encode, open loop) | 3.395 | 0.157 | 3.044 |
+// | ORACLE — the nearest achievable score | 0.157 | 0.157 | 0.000 |
+//
+// **The lattice is ~15% of the error and the prediction is ~85%.** The
+// oracle row is the hard floor (0.157 median): no search, however good,
+// lands between two encodes the codec can produce. The pass-1 row is what
+// the second encode is worth — 3.395 → 1.175, which is the honest answer
+// to "why two shots at all".
+//
+// This corrects the earlier reading of this module, which had it backwards.
+// The claim that "a ±0.5 band contains no achievable score about half the
+// time" came from a sweep over integer *qualities*, which address only 100
+// of the codec's 256 quantizers; the real lattice is 2.56× finer. Chasing
+// sub-lattice precision would have optimised a term that is already an
+// order of magnitude below the binding one.
+//
+// # What was tried, and what survived a paired test
+//
+// Medians on 980 held-out combinations mean little unpaired, so each
+// candidate was paired against the shipped rule on identical (cell,
+// target) with a two-sided sign test:
+//
+// | change | paired mean | better / worse | p |
+// |---|---|---|---|
+// | quantizer space instead of quality space | **−0.737** | 54.0% / 30.9% | **<0.0001** |
+// | multiplicative instead of additive translate | −0.038 | 22.2% / 20.7% | 0.50 |
+// | fitted gain g = 0.85 on the step | −0.065 | 38.4% / 37.1% | 0.69 |
+// | re-fitting the knots in quantizer space | −0.107 | 41.0% / 36.3% | 0.10 |
+// | fitted 5-term residual model | −0.141 | 28.3% / 23.4% | 0.04 |
+//
+// Only the first is unambiguous, and it is five times the size of anything
+// else. Everything below it ships as-is (the simpler option) rather than
+// on a point estimate. The residual model reaches p = 0.04, but its sign
+// *flipped* between a partial run and the full one — it was worse on VAL
+// at half the data and better at full — which is the signature of a
+// 5-parameter fit chasing noise, not a mechanism. It is not shipped.
+//
+// **Rejected outright: predicting from the diffmap's magnitude.** Using
+// the measured `d ln(diffmap) / d ln(quantizer)` power law (γ ≈ 2.0) to
+// place pass 2 gives median 7.50 zensim — six times worse than the
+// anchor translate. The reason is visible in the fit: the score↔diffmap
+// relation has a median absolute deviation of 2.78 zensim within a
+// diffmap bin, so the frame-mean diffmap simply does not determine the
+// score. The power law is real; it is just not a targeting signal.
+//
+// # How good is the forecast the rule makes about itself
+//
+// `TwoShotResult::predicted_score` vs what pass 2 actually scored: median
+// |error| **1.20**, p90 4.23, median signed bias **+0.045**. Essentially
+// unbiased and wide — which says the residual is the translate
+// assumption's own (this image's score-vs-quantizer curve is not exactly a
+// horizontal shift of the population's), not a miscalibrated anchor. A
+// biased forecast would be fixable by re-fitting; this one is not. Closing
+// it needs a second *measurement*, not a better constant — and a second
+// measurement is a third encode, which is outside this budget.
+//
 // # What the live per-superblock channel is worth — MEASURED 2026-08-06
 //
 // `zenravif::FRAME_HINTS_LIVE` went true (ravif 619d81a), so for the first
@@ -676,15 +773,19 @@ fn pool_sb_q_scale(diffmap: &[f32], w: usize, h: usize, options: &ZensimLoopOpti
 // the dither exists to refine. A one-step placement cannot aim with a knob
 // whose local response reverses by more than its own target precision.
 //
-// **Verdict for two-shot precision: do not use it.** Pass 1 is un-hinted,
-// so entering the activated regime at pass 2 costs an unmeasured
-// content-dependent step (1) larger than a lattice gap, to buy resolution
-// (2) that cannot be aimed — and the lattice was never the binding
-// constraint anyway (see the lattice section: the prediction error is
-// roughly an order of magnitude above the lattice ceiling). Optimising a
-// non-binding term by paying a larger unpredictable one is a losing trade
-// in every direction, which is why [`TwoShotOptions::spatial_strength`]
-// defaults to `0.0`.
+// **Verdict for two-shot precision: do not use it — and this was then
+// confirmed end to end.** Pass 1 is un-hinted, so entering the activated
+// regime at pass 2 costs an unmeasured content-dependent step (1) larger
+// than a lattice gap, to buy resolution (2) that cannot be aimed, in
+// service of a term that is only ~15% of the error. Measured on real
+// encodes at a two-encode budget, applying the map costs median |err|
+// **1.229 → 1.758** (+43%) and turns the pass-2 forecast from essentially
+// unbiased (+0.045) into biased by **−0.775** — the map moves the score
+// away from exactly what pass 2 predicted, which is the mechanism stated
+// as a prediction above and then observed. The same comparison on the
+// closed loop: **1.255 → 1.638** (+31%) with the map on. Hence
+// [`TwoShotOptions::spatial_strength`] defaults to `0.0`, and the loop's
+// default was changed to match.
 //
 // **3. RD is a different question, and the answer is strength-dependent.**
 // Scored at *matched bytes* against the un-hinted bytes-vs-score curve
@@ -710,30 +811,31 @@ fn pool_sb_q_scale(diffmap: &[f32], w: usize, h: usize, options: &ZensimLoopOpti
 /// population score→quantizer curve the two-shot pass-2 step translates
 /// along.
 ///
-/// **Provenance — read this before assuming these were fitted here.** They
-/// are [`ANCHOR_QUALITY`] pushed through the quality→quantizer curve
-/// (unrounded), *not* an independent fit. That is a deliberate choice, not
-/// a shortcut waiting to be done properly: an independent refit in
-/// quantizer space from the dense per-quantizer lattice was measured
-/// against these on held-out sources and came out **statistically
-/// indistinguishable** (paired on identical cell+target: mean +0.107
-/// zensim in the refit's favour... against it, actually; 37.6% better vs
-/// 42.3% worse, two-sided sign test p = 0.17). What buys the accuracy is
-/// the **coordinate system**, not the fit: the same knots used as a
-/// translate in quantizer space instead of quality space are worth mean
-/// −0.73 zensim at p < 0.0001 on the same pairs. So these stay derived,
-/// and the module keeps one fitted object instead of two that can drift
-/// apart.
+/// **Provenance:** [`ANCHOR_QUALITY`] pushed through the quality→quantizer
+/// curve (unrounded) — *derived*, not independently fitted, and
+/// deliberately so.
 ///
-/// Why a separate table instead of composing [`ANCHOR_QUALITY`] with the
-/// quality→quantizer curve: that curve has a **slope break at quality 70**
-/// (3.57 quantizer steps per quality point above it, 2.17 below), so a
-/// translate that is uniform in quality is *not* uniform in quantizer. The
-/// physics the translate assumes — error growing as a power of the
-/// dequantizer step — lives in quantizer space, and crossing quality 70
-/// between pass 1 and pass 2 is common at mid targets. Measured on the
-/// lattice replay, moving the translate into quantizer space is worth
-/// roughly a third of the pass-2 error (see `docs/DIFFMAP_TWO_PASS.md`).
+/// An independent refit in quantizer space from the dense per-quantizer
+/// lattice (`scripts/hyperparam/fit_zensim_two_shot.py --emit-rust`, TRAIN
+/// sources only) was measured against these on 980 held-out cell×target
+/// combinations. It is nominally better — marginal median 0.98 vs 1.18
+/// zensim, paired mean −0.107 — but the paired two-sided sign test does
+/// **not** clear 0.05 (41.0% better vs 36.3% worse, p = 0.10). Two
+/// indistinguishable options, so the tie-break is maintenance: a second
+/// fitted table can silently drift out of agreement with the first, and
+/// then the two-shot's seed and the loop's seed disagree about what a
+/// target means. One fitted object ships.
+///
+/// **The fit was never where the accuracy came from.** Taking the same
+/// translate in quantizer space rather than quality space is worth mean
+/// **−0.74** zensim at **p < 0.0001** on those same pairs — five times the
+/// refit's effect, and unambiguous. The mechanism is concrete: the
+/// quality→quantizer curve has a **slope break at quality 70** (3.57
+/// quantizer steps per quality point above it, 2.17 below), so a step
+/// uniform in quality is not uniform in quantizer, and mid-range targets
+/// routinely cross that break between pass 1 and pass 2. Re-derive these
+/// whenever [`ANCHOR_QUALITY`] is re-fitted; do not fit them separately
+/// without re-running that comparison.
 ///
 /// Descending (a higher score needs a finer, i.e. lower, quantizer).
 const ANCHOR_QUANTIZER: [f32; 15] = [
@@ -1260,18 +1362,38 @@ mod tests {
     }
 
     #[test]
-    fn quantizer_anchor_knots_match_the_quality_anchor() {
-        // The two anchors describe the same population curve in two
-        // coordinate systems; at the knots they must agree after the
-        // quality->quantizer map. (Within one quantizer step: the quality
-        // knots are rounded to 3 decimals in source.)
-        for (i, &s) in ANCHOR_SCORE.iter().enumerate() {
-            let via_quality = crate::encode_plan::quality_to_quantizer(ANCHOR_QUALITY[i]);
-            let direct = anchor_quantizer_for_zensim(f64::from(s));
+    fn the_two_anchors_describe_the_same_curve() {
+        // ANCHOR_QUANTIZER is ANCHOR_QUALITY pushed through the
+        // quality->quantizer curve, so at the knots they must agree to
+        // within rounding. This is the tripwire for the failure mode that
+        // makes the module incoherent: if someone re-fits one table and not
+        // the other, the two-shot's seed (quantizer anchor) and the loop's
+        // seed (quality anchor) start disagreeing about what a target
+        // means, and nothing else would catch it.
+        for (i, &sc) in ANCHOR_SCORE.iter().enumerate() {
+            let via_quality =
+                f64::from(crate::encode_plan::quality_to_quantizer(ANCHOR_QUALITY[i]));
+            let direct = anchor_quantizer_for_zensim(f64::from(sc));
             assert!(
-                (f64::from(via_quality) - direct).abs() <= 1.0,
-                "knot {s}: quality path {via_quality} vs quantizer path {direct}"
+                (via_quality - direct).abs() <= 1.0,
+                "knot {sc}: quality anchor says quantizer {via_quality}, quantizer \
+                 anchor says {direct} — the two tables have been re-fitted apart"
             );
+        }
+        // Both must also stay monotone everywhere between the knots, not
+        // just at them: a search that steps along a non-monotone curve can
+        // move away from its target while believing it moved toward it.
+        let mut t = 20.0f64;
+        while t <= 90.0 {
+            assert!(
+                anchor_quantizer_for_zensim(t + 1.0) <= anchor_quantizer_for_zensim(t) + 1e-6,
+                "quantizer anchor not monotone at {t}"
+            );
+            assert!(
+                anchor_quality_for_zensim(t + 1.0) >= anchor_quality_for_zensim(t) - 1e-4,
+                "quality anchor not monotone at {t}"
+            );
+            t += 1.0;
         }
     }
 
