@@ -2095,9 +2095,9 @@ dependencies = [
 
 [[package]]
 name = "zenpixels"
-version = "0.2.14"
+version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "515b2d87c361de4a3c1e4131a1de03d9cceab59cf599ac48235d46e60ef1768d"
+checksum = "5851fd39b312749a3c367a0cd3522bd95d43276cfa613e9c18df748447cef3a8"
 dependencies = [
  "bytemuck",
  "imgref",
@@ -2107,13 +2107,14 @@ dependencies = [
 
 [[package]]
 name = "zenpixels-convert"
-version = "0.2.14"
+version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c49c5c25ca3577cef11f12f594a9966297d949c1a801f3a79ca9f5df74a09fa2"
+checksum = "cf516a64a98f08fa2aa19e86f1389e49894f750441044d65369687cf88a1b8dd"
 dependencies = [
  "archmage",
  "bytemuck",
  "garb",
+ "libm",
  "linear-srgb",
  "magetypes",
  "once_cell",
@@ -2127,6 +2128,7 @@ dependencies = [
 name = "zenpredict"
 version = "0.2.0"
 dependencies = [
+ "archmage",
  "bytemuck",
  "libm",
  "lz4_flex",

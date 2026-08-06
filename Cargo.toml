@@ -72,8 +72,8 @@ zencodec = { version = "0.1.26" }
 # (now always-built) `codec` module, so it is a hard dep too.
 ultrahdr-core = { version = "0.5.0", default-features = false }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
-zenpixels = { version = "0.2.11", default-features = false, features = ["imgref", "rgb"] }
-zenpixels-convert = { version = "0.2.13", default-features = false, features = ["rgb"] }
+zenpixels = { version = "0.2.16", default-features = false, features = ["imgref", "rgb"] }
+zenpixels-convert = { version = "0.2.16", default-features = false, features = ["rgb", "hdr-experimental"] }
 linear-srgb = { version = "0.6.7"}
 
 [dev-dependencies]

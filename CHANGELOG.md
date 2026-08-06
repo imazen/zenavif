@@ -10,6 +10,18 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## Workspace
 
+- **2026-08-07 — `hdr_encode_cell` example stamps MEASURED clli (zensim
+  campaign appendix AA).** The example previously wrote a hardcoded
+  `content_light_level(1000, 250)` on every file regardless of content;
+  it now measures MaxCLL/MaxFALL from the decoded PQ pixels via the
+  zenpixels owner (`zenpixels_convert::CllMeasure::measure_max`, MaxRGB
+  per CTA-861.3, ST-2084 EOTF → cd/m²), writes no clli for non-PQ inputs
+  rather than a guessed one, and its self-check asserts the container
+  echoes the measured values. The mdcv stand-in stays declared (ST 2086
+  describes the mastering display — not measurable from pixels). The
+  library's clli/mdcv setters remain caller-supplied passthroughs
+  (declared-by-necessity; nothing is invented when absent).
+  zenpixels/zenpixels-convert min 0.2.16 (+`hdr-experimental`).
 - **2026-07-16 — absorbed the zenavif-parse and zenavif-serialize
   repositories.** Both crates now live here as workspace members
   (`zenavif-parse/`, `zenavif-serialize/`) with their complete git
