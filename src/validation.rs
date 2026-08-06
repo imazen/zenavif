@@ -127,6 +127,21 @@ pub enum ValidationError {
         feature: &'static str,
     },
 
+    /// The selected encoder backend is compiled in, but does not
+    /// support a configured parameter value (e.g. the experimental
+    /// svtav1-rs backend is 8-bit 4:2:0 only). The encode entry points
+    /// reject the same combinations at encode time; this surfaces them
+    /// at validation time for fail-fast callers.
+    #[error("backend {backend} does not support {param}: {detail}")]
+    BackendUnsupportedParam {
+        /// The requested backend.
+        backend: &'static str,
+        /// The unsupported parameter (name or name=value).
+        param: &'static str,
+        /// Why / what to use instead.
+        detail: &'static str,
+    },
+
     // --- DecoderConfig ---
     /// Decoder `frame_size_limit` cannot use a sentinel reserved by
     /// the validator. The current decoder treats `0` as "no limit"
@@ -226,6 +241,24 @@ impl crate::EncoderConfig {
                 b: "16-bit input (identity-RGB encode path)",
             });
         }
+        // The svtav1-rs backend codes full 64×64 superblocks only (the
+        // coded dimensions are signaled verbatim in the sequence header);
+        // the encode path rejects unaligned input with the same rule.
+        #[cfg(feature = "encode-svt-rs")]
+        if self.backend == crate::Av1Backend::SvtRs
+            && (!input.width.is_multiple_of(64)
+                || !input.height.is_multiple_of(64)
+                || input.width == 0
+                || input.height == 0)
+        {
+            return Err(ValidationError::BackendUnsupportedParam {
+                backend: "Av1Backend::SvtRs",
+                param: "input dimensions",
+                detail: "width and height must be non-zero multiples of 64 \
+                         (no partial-superblock coding yet); pad/crop upstream \
+                         or use Av1Backend::Zenravif",
+            });
+        }
         Ok(())
     }
 
@@ -241,6 +274,19 @@ impl crate::EncoderConfig {
                 feature: "encode-svtav1",
             });
         }
+        // The experimental svtav1-rs backend: unavailable without its
+        // feature; inside the feature, only the 8-bit 4:2:0 YCbCr slice
+        // it implements is accepted (the encode path rejects the same
+        // combinations — see `src/encoder_svt_rs.rs`).
+        if self.backend == crate::Av1Backend::SvtRs {
+            #[cfg(not(feature = "encode-svt-rs"))]
+            return Err(ValidationError::BackendUnavailable {
+                backend: "Av1Backend::SvtRs",
+                feature: "encode-svt-rs",
+            });
+            #[cfg(feature = "encode-svt-rs")]
+            self.validate_svt_rs_scope()?;
+        }
         // 4:2:0 has no defined meaning for the identity (RGB) matrix;
         // zenravif rejects the pair at encode time
         // (encode_raw_planes_internal: Error::Unsupported). Mirror of
@@ -251,6 +297,62 @@ impl crate::EncoderConfig {
             return Err(ValidationError::MutuallyExclusive {
                 a: "chroma_subsampling=Yuv420",
                 b: "color_model=Rgb",
+            });
+        }
+        Ok(())
+    }
+
+    /// The configuration slice the experimental svtav1-rs backend
+    /// implements: 8-bit 4:2:0 YCbCr full-range stills, no gain map, no
+    /// lossless. Dimension alignment (multiples of 64) is a config×input
+    /// concern checked by [`Self::validate_for_input`] and at encode time.
+    #[cfg(feature = "encode-svt-rs")]
+    fn validate_svt_rs_scope(&self) -> Result<(), ValidationError> {
+        const BACKEND: &str = "Av1Backend::SvtRs";
+        if self.chroma_subsampling != crate::EncodeChromaSubsampling::Yuv420 {
+            return Err(ValidationError::BackendUnsupportedParam {
+                backend: BACKEND,
+                param: "chroma_subsampling=Yuv444",
+                detail: "only Yuv420 is implemented (svtav1-rs 4:2:0 still pipeline); \
+                         set .chroma_subsampling(EncodeChromaSubsampling::Yuv420)",
+            });
+        }
+        if self.color_model != crate::EncodeColorModel::YCbCr {
+            return Err(ValidationError::BackendUnsupportedParam {
+                backend: BACKEND,
+                param: "color_model=Rgb",
+                detail: "only the YCbCr model is implemented (identity/RGB has no \
+                         defined 4:2:0 subsampling)",
+            });
+        }
+        if self.bit_depth == crate::EncodeBitDepth::Ten {
+            return Err(ValidationError::BackendUnsupportedParam {
+                backend: BACKEND,
+                param: "bit_depth=Ten",
+                detail: "8-bit only for now",
+            });
+        }
+        if self.pixel_range == Some(crate::EncodePixelRange::Limited) {
+            return Err(ValidationError::BackendUnsupportedParam {
+                backend: BACKEND,
+                param: "pixel_range=Limited",
+                detail: "the svtav1-rs sequence header signals full range only",
+            });
+        }
+        if self.gain_map.is_some() {
+            return Err(ValidationError::BackendUnsupportedParam {
+                backend: BACKEND,
+                param: "gain_map",
+                detail: "gain-map muxing is zenravif-only for now",
+            });
+        }
+        #[cfg(feature = "encode-imazen")]
+        if self.lossless {
+            return Err(ValidationError::BackendUnsupportedParam {
+                backend: BACKEND,
+                param: "lossless",
+                detail: "svtav1-rs has no lossless mode (QP 0 is not \
+                         mathematically lossless)",
             });
         }
         Ok(())

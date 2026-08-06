@@ -29,3 +29,22 @@ runs:
         if [ ! -d ravif ]; then
           git clone --depth 1 https://github.com/imazen/cavif-rs.git ravif
         fi
+    - name: Clone imazen/zenav1-svt into ../zenav1-svt
+      shell: bash
+      run: |
+        cd ..
+        if [ ! -d zenav1-svt ]; then
+          # NO --recurse-submodules on purpose: the repo's reference/svt-av1
+          # submodule is the C differential oracle, a dev-only dependency of
+          # that repo's own harnesses. The pure-Rust `zenav1-svt*` crates this
+          # crate depends on never reference it, and cloning it would pull
+          # the whole SVT-AV1 C tree onto every CI job.
+          git clone --depth 1 https://github.com/imazen/zenav1-svt.git
+        fi
+    - name: Clone imazen/zenav1-aom into ../zenav1-aom
+      shell: bash
+      run: |
+        cd ..
+        if [ ! -d zenav1-aom ]; then
+          git clone --depth 1 https://github.com/imazen/zenav1-aom.git
+        fi

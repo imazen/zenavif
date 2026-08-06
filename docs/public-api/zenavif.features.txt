@@ -1,5 +1,5 @@
 # zenavif public API — additions from non-default features
-# features: auto-tune,encode,encode-asm,encode-imazen,encode-mono,encode-threading,target-quality,two-pass-butteraugli,unsafe-asm
+# features: aom-backend,auto-tune,avx512,encode,encode-asm,encode-imazen,encode-mono,encode-svt-rs,encode-threading,target-quality,two-pass-butteraugli,unsafe-asm
 # (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
 # Encodings: crate-name prefix stripped; auto traits collapse to a
 # count + exceptions; trait impls collapse to one roster line per
@@ -15,20 +15,20 @@
 #   free functions                             26
 #   inherent methods                           75
 #   struct fields                             110
-#   enum variants                              44
+#   enum variants                              47
 #   re-exports                                  2
 #   trait roster entries (type × trait)       129
 #   auto-trait-complete types                  34
 #   auto-trait exceptions                       3
 #
 # per-module pub lines:
-#   (root)                          258
+#   (root)                          261
 #   fast_heads                       29
 #   palette_gate                     10
 #   q0_head                           3
 #   two_pass                         23
 
-## items (315 lines)
+## items (318 lines)
 
 pub use FRAME_HINTS_LIVE
 pub mod fast_heads
@@ -99,8 +99,11 @@ pub AutoTuneError::ModelNotBaked
 pub AutoTuneError::NoCellAllowed
 pub AutoTuneError::TargetOutOfRange(f32)
 pub enum Av1Backend
+pub Av1Backend::SvtRs
 pub Av1Backend::Svtav1
 pub Av1Backend::Zenravif
+pub DecodeBackend::AomRs
+pub DecodeBackend::Rav1dFfi
 pub enum EncodeAlphaMode
 pub EncodeAlphaMode::Premultiplied
 pub EncodeAlphaMode::UnassociatedClean

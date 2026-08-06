@@ -152,8 +152,12 @@ pub struct SpeedDerived {
 /// overrides, as the encoder will actually run it.
 ///
 /// Produced by [`EncoderConfig::resolve_plan`]. Fields describe the
-/// zenravif backend — the only available one (the deprecated svtav1
-/// variant is rejected by [`EncoderConfig::validate`]).
+/// **zenravif backend** (the deprecated svtav1 variant is rejected by
+/// [`EncoderConfig::validate`]). For the experimental `Av1Backend::SvtRs`
+/// backend the zenravif-derived mirrors do NOT apply: it maps quality
+/// linearly to AV1 QP 63..=0 and speed linearly to SVT presets 0..=13
+/// (see `src/encoder_svt_rs.rs` module docs) — only the `backend`,
+/// `chroma_subsampling`, and CICP fields remain meaningful there.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct EncodePlan {

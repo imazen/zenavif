@@ -73,10 +73,13 @@ pub mod detect;
 mod encode_plan;
 #[cfg(feature = "encode")]
 mod encoder;
+#[cfg(feature = "encode-svt-rs")]
+mod encoder_svt_rs;
 mod error;
 /// Deterministic zenanalyze palette gate (FEATURE_HINTS §E rule 1).
 #[cfg(feature = "encode")]
 pub mod palette_gate;
+mod yuv_bilinear_fix;
 #[cfg(feature = "encode")]
 pub use palette_gate::PalettePreference;
 /// Per-image fast-tier budget heads (FEATURE_HINTS §E heads 2+3 — the
@@ -153,6 +156,8 @@ pub use codec::{
 pub use codec::{AvifAnimationFrameEncoder, AvifEncodeJob, AvifEncoder, AvifEncoderConfig};
 pub use config::DecoderConfig;
 pub use decode_av1::decode_av1_obu;
+// DECODE-BENCH FORK: raw-OBU decode-to-YUV seam + second backend (aom-rs).
+pub use decode_av1::{DecodeBackend, DecodedYuv, decode_av1_obu_yuv, decode_av1_obu_yuv_with};
 #[cfg(feature = "unsafe-asm")]
 pub use decoder::AvifDecoder;
 pub use decoder_managed::{AnimationDecoder, ManagedAvifDecoder};

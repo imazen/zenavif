@@ -1,0 +1,97 @@
+# decode_backends_2026-07-19 — AV1 KEY-frame decode: safe Rust vs asm, 6 decoders
+
+Companion to `decode_backends_2026-07-19.csv`. Extends the 2026-07-17 4-way
+benchmark (zenav1-aom `benchmarks/decode_4way_2026-07-17.*`) with the asm
+axis the user asked for: **zenav1-aom vs rav1d-safe (safe / partial_asm /
+full asm) vs upstream rav1d (full asm) vs C aomdec/dav1d**.
+
+## Setup
+
+- Box: `dev-32gb` cloud dev box, 16 cores, 30 GB (NOT the 7950X workstation —
+  numbers are not comparable across boxes). Load ≤ ~4.5 throughout; every
+  interleaved run's shared aom-rs arm agreed within ~1–7% across runs (worst:
+  4K-cq20 313–335 ms), bounding cross-run drift.
+- zenavif commit: the `svtav1-rs-backend` branch at the commit adding this
+  file (bench example `examples/decode_4way_bench.rs`, seam
+  `decode_av1_obu_yuv`).
+- Decoders:
+  - **zenav1-aom** (`aom-decode` git rev `ed29932f`) — pure-Rust scalar
+    bit-exactness-first port, KEY/intra scope.
+  - **rav1d-safe 0.5.3** (crates.io, default safe build) — the shipped dep.
+  - **rav1d-safe 0.6.0** (local `/root/work/rav1d-safe` @ 7892c42) in three
+    flavors: default safe, `partial_asm` (msac + loopfilter asm), full `asm`.
+  - **rav1d 1.1.0** (crates.io, `asm` feature = full dav1d asm) — in-process
+    via zenavif's `unsafe-asm` FFI seam arm ("rav1d-ffi-asm").
+  - **C aomdec** (libaom v3.14.1 build) and **C dav1d 1.5.1** — process-wall
+    via `scripts/decode_4way_c_refs.sh`; **upstream rav1d CLI** (its `dav1d`
+    binary) measured with the identical process-wall protocol.
+- Scope: frame 0 (first KEY frame), single-threaded arms, identical OBU bytes
+  per cell. zenbench interleaved round-robin within each binary; the flavor
+  binaries are separate processes bridged by the shared aom-rs arm.
+- Corpus: 8 cells (3× 352×288 8-bit conformance, 1920×1080 intrabc, 2K/4K
+  photo mosaics cq20/cq40) + 2× 640×360 10-bit conformance cells added
+  2026-07-19.
+
+## Correctness (all runs)
+
+Every cell in every run: **aom-rs == rav1d-safe byte-identical**, and where
+present **rav1d-ffi-asm identical** too — including the asm- and
+partial_asm-flavored rav1d-safe builds and both 10-bit cells. C side: aomdec
+== dav1d == rav1d-CLI raw md5 on all 8 original cells. Six independent
+decoder builds agree bit-exactly on this corpus.
+
+## Headline table (min ms/frame, in-process interleaved arms)
+
+| cell            | aom-rs | safe 0.5.3 | safe 0.6.0 | partial 0.6.0 | asm 0.6.0 | rav1d 1.1.0 asm |
+|-----------------|-------:|-----------:|-----------:|--------------:|----------:|----------------:|
+| 2K photo cq20   |   57.6 |       38.6 |       38.5 |          31.5 |      21.3 |            16.2 |
+| 2K photo cq40   |   37.0 |       26.3 |       26.6 |          21.4 |      13.0 |             9.0 |
+| 4K photo cq20   |  314.3 |      197.5 |      196.5 |         181.9 |     115.2 |            91.1 |
+| 4K photo cq40   |  193.6 |      128.5 |      131.8 |         105.0 |      65.2 |            47.4 |
+| 2K intrabc      |   53.6 |       35.8 |       35.9 |          30.9 |      24.3 |            18.5 |
+
+(aom-rs column = 0.5.3-run values; its spread across the five runs is the
+cross-run drift bound. Full per-cell data incl. the small and 10-bit cells
+in the CSV.)
+
+## Ratios that answer the questions asked
+
+- **zenav1-aom vs rav1d-safe (safe)**: 1.41–1.59× slower on 2K/4K photo
+  stills (same-binary interleaved; trustworthy). Small q63 and b10-q32 cells
+  are ~parity (0.95×) — the scalar port keeps up where entropy decode
+  dominates over filters/prediction SIMD.
+- **rav1d-safe safe vs upstream rav1d full-asm** (same binary, interleaved):
+  **2.06–2.95× slower on photo cells** (2K cq20 2.4×, 4K cq20 2.2×, cq40
+  2.8–2.9×); entropy-light small q63 is 5.4× (msac asm dominates there).
+- **rav1d-safe 0.6.0 full-asm vs upstream rav1d 1.1.0 full-asm**
+  (cross-binary, aom-rs bridge): fork-asm is **~1.27–1.45× slower** than
+  upstream asm (4K cq20 115.2 vs ~89.6; cq40 65.2 vs ~47.4). The fork's asm
+  feature routes the DSP dispatch but the surrounding managed/DisjointMut
+  core differs from upstream's — worth profiling if the asm flavor matters.
+- **partial_asm (msac+loopfilter only)**: recovers ~30–45% of the
+  safe→full-asm gap on photo cq40 cells (128.5→105.0 vs 65.2 full), less at
+  cq20 (197→182 vs 115).
+- **safe 0.6.0 vs safe 0.5.3**: within noise on this box for these cells
+  (the 0.6.0 README's 1.25–1.56×-vs-asm numbers were measured on other
+  hardware; here safe-vs-upstream-asm is 2.1–2.9×).
+- **C refs (process-wall, directional)**: dav1d C 4K cq20 144.8 ms wall vs
+  rav1d CLI 163.1 ms wall vs aomdec 250.6 ms wall (aomdec internal 214.2 ms).
+  Process startup (~15–30 ms) pollutes small cells; the in-process ffi arm is
+  the trustworthy rav1d number.
+
+## 10-bit
+
+Both `av1-1-b10-00-quantizer-{00,32}` (640×360) decode byte-identically on
+all three seam backends. Timing (mean ms): b10-q00 aom 33.2 / safe 24.4 /
+ffi-asm 16.5; b10-q32 aom 10.2 / safe 10.7 / ffi-asm 2.6.
+
+## Reproduce
+
+```
+cargo build --release --example decode_4way_bench --features aom-backend,unsafe-asm
+./target/release/examples/decode_4way_bench /root/aom-rs/conformance/data out.csv
+bash scripts/decode_4way_c_refs.sh /root/aom-rs/conformance/data c.csv 30
+# flavor binaries: repoint rav1d-safe dep at the local checkout with
+# features ["bitdepth_8","bitdepth_16"(,"asm"|"partial_asm")], rebuild the
+# example, save the binary, restore Cargo.toml+lock.
+```
