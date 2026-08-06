@@ -47,6 +47,18 @@ write-path returns + gain-map interop additions, already on main).
   the next 0.x minor bump (svtav1-rs backend PR)
 
 ### Changed
+- **`zensim` re-pinned from registry 0.2.4 to git `main` (0.3.0)** for the
+  diffmap API the closed loop needs (`compute_with_ref_and_diffmap`,
+  `PrecomputedReference` reuse, `Zensim::with_stop`). Consequences:
+  `zensim-regress` is pinned to the same git branch (registry 0.3.1 depends
+  on zensim 0.2.x, which put two incompatible `Zensim`/`ImageSource` types
+  in the graph and broke `tests/linku_corpus.rs`), and all six
+  `ZensimProfile::latest()` call sites moved to
+  `ZensimProfile::codec_target()` — `latest()` is deprecated in 0.3.0.
+  **`TargetMetric::Zensim` scores on a different profile than before**:
+  `latest()` was `PreviewV0_2` at 0.2.x and is `B` at 0.3.0, so a given
+  target lands on a different quality. Unpin both at the zensim 0.3.0
+  publish.
 - zenav1-svt pin bumped `3e25f52b` → `2d585bb2b` (upstream master
   2026-07-24; zero seam API breaks). The pin is past the upstream repo
   restructure that moved the C reference into a git submodule — the
@@ -66,6 +78,55 @@ write-path returns + gain-map interop additions, already on main).
   today).
 
 ### Added
+- **`two-pass-zensim`: a zensim-diffmap-driven closed loop
+  (`encode_rgb8_zensim_loop`).** Encode → decode → ONE
+  `Zensim::compute_with_ref_and_diffmap` per pass → correct the quality
+  **globally** from the score and the per-64×64-superblock quantizer
+  **spatially** from the diffmap → re-encode. The reference pyramid is
+  precomputed once (`precompute_reference`) and reused by every pass, and
+  the caller's stop token is threaded into zensim itself
+  (`Zensim::with_stop`), so a long scoring pass is interruptible.
+  - **Global half is live.** It steps along the fitted population curve,
+    `q_next = q + (Q(target) − Q(score))`, rather than a constant-slope
+    Newton step — the score-vs-quality curve saturates, so the same score
+    error needs a very different quality move at 40 than at 90. Once the
+    target is bracketed it hands off to the same clamped secant
+    `encode_rgb8_with_target` uses.
+  - **Spatial half is release-gated** behind `zenravif::FRAME_HINTS_LIVE`
+    (re-exported as `SPATIAL_HINTS_LIVE`) and reported per call as
+    `ZensimLoopResult::spatial_applied`, so a computed map can never be
+    mistaken for an applied one. Unlike `two-pass-butteraugli` — purely
+    spatial, so it refuses to run at all while the gate is shut — this loop
+    runs and converges regardless.
+  - **The diffmap → quantizer-scale mapping is derived, not transplanted.**
+    libaom's `tune=butteraugli` valuation `min(mse/distance, 5) + K` cannot
+    take a zensim diffmap: the map is unitless SSIM error, so typical photo
+    blocks land at ratios of 10²–10³ and the clip saturates on every block.
+    Derived instead from scale-invariance + equal-error allocation:
+    `q_scale_b = clamp(e_b / geomean(e_b), 0.4, 2.5)^(−strength)`,
+    `strength = 1/γ` under `e ∝ step^γ`, default 1.0. DERIVED, NOT FITTED,
+    and not honestly fittable until the gate opens (an applied map has no
+    bitstream effect today).
+  - Measured against the existing secant baseline on the same images and
+    targets: `benchmarks/zensim_loop_ab_2026-08-06.tsv`. Anchor-curve fit
+    and its 1,008-encode sweep: `benchmarks/zensim_anchor_2026-08-06.tsv`
+    (+ `scripts/hyperparam/fit_zensim_anchor.py`, deterministic).
+  - New public API: `two_pass_zensim` module, `ZensimLoopOptions`,
+    `ZensimLoopResult`, `encode_rgb8_zensim_loop`,
+    `anchor_quality_for_zensim`, `SPATIAL_HINTS_LIVE`.
+- **The achievable-score lattice is now a measured, documented limit**
+  (`benchmarks/zensim_score_lattice_2026-08-06.tsv`). `quality` resolves to
+  an integer AV1 quantizer index, so the reachable zensim scores form a
+  discrete lattice no search can land between: adjacent achievable scores
+  are 0.82–1.05 apart at the median and ~50% of gaps exceed 1.0 over
+  quality 50–80. A ±0.5 `tolerance` is therefore unreachable about half the
+  time for reasons unrelated to the search — relevant to
+  `TargetOptions::tolerance` as much as to the new loop.
+- **CI now builds and tests the diffmap closed loops.** Neither
+  `two-pass-butteraugli` nor `two-pass-zensim` appeared anywhere in
+  `ci.yml`, so `tests/two_pass.rs` ran on no platform at all; a new test leg
+  covers both. `scripts/gauntlet.sh` gains a `zloop` combo and adds
+  `two-pass-zensim` to `allsafe`.
 - **Memory-adaptive encode concurrency: encodes fit their thread count to
   the memory budget instead of blowing past it.** The zencodec encode
   pre-flight (still + animation paths) now checks the CALIBRATED

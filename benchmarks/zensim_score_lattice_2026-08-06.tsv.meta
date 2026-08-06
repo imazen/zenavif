@@ -1,0 +1,33 @@
+# Achievable-score lattice: how finely can ANY zensim-targeting method land?
+#
+# date          2026-08-06
+# host          Darwin 26.5.2 (macOS), Apple aarch64, 12 cores, 24 GiB RAM
+# rustc         rustc 1.97.1 (8bab26f4f 2026-07-14)
+# zenavif       9a1c7626 fix(two-pass-zensim): drop the cross-metric content seed
+# zensim        git imazen/zensim main @ e4b875b5 (0.3.0), profile codec_target() == B
+# encoder       zenravif path dep ../ravif/ravif, speed 6, threads=1
+# NOT built with -C target-cpu=native
+#
+# command
+#   ./target/release/examples/zensim_loop_bench sweep <2-image manifest> 6 256 \
+#       50,51,52,...,80          (every INTEGER quality in 50..80)
+#   manifest: clic2025/final-test/937476dd... (photo) + gb82-sc/imessage (screen)
+#
+# why           zenavif's `quality` resolves to an INTEGER AV1 quantizer index,
+#               so the set of achievable zensim scores for a given image is a
+#               discrete lattice. Any targeting loop -- secant, closed loop, or
+#               a perfect oracle -- can only land ON that lattice. This file
+#               measures its spacing so convergence tolerances can be set to
+#               something the codec can actually deliver.
+#
+# result        Over quality 50..80 all 31 integer qualities resolve to 31
+#               DISTINCT quantizer indices (the mapping is 1:1 in this band),
+#               and the zensim gap between adjacent achievable scores is:
+#                 photo  (937476dd): min 0.100  median 1.052  max 2.668
+#                 screen (imessage): min 0.016  median 0.816  max 4.155
+#               53% / 47% of adjacent gaps EXCEED 1.0, so a +-0.5 tolerance
+#               band contains no achievable score at all about half the time.
+#               A +-0.5 target is therefore unreachable ~50% of the time for
+#               reasons that have nothing to do with the search.
+#
+# columns       image size w h q qindex bytes zensim dm_mean enc_ms

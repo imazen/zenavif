@@ -57,6 +57,49 @@
 //! is live, so it runs and converges regardless; only the spatial term is
 //! withheld.
 //!
+//! # What "converged" can mean at all: the achievable-score lattice
+//!
+//! [`ZensimLoopOptions::tolerance`] is not a free parameter. `quality`
+//! resolves to an **integer** AV1 quantizer index, so for a given image the
+//! reachable zensim scores form a discrete lattice, and no search — this
+//! one, the secant, or a perfect oracle — can land between its points.
+//! Measured (`benchmarks/zensim_score_lattice_2026-08-06.tsv`: every
+//! integer quality in 50..=80, one photo and one screenshot at 256px, all
+//! 31 qualities resolving to 31 distinct quantizer indices): adjacent
+//! achievable scores are **1.05 / 0.82 apart at the median** and
+//! **53% / 47% of the gaps exceed 1.0**. So a ±0.5 band contains no
+//! achievable score at all roughly half the time.
+//!
+//! Read convergence numbers accordingly: at `tolerance = 0.5` a large
+//! share of the misses are the lattice, not the search. Comparing two
+//! searches on the same images and targets — which is what
+//! `scripts/hyperparam/analyze_zensim_loop_ab.py` reports as paired
+//! per-cell deltas — is unaffected, because both arms face the same
+//! lattice.
+//!
+//! # How few encodes is possible
+//!
+//! Measured offline over the 720 (cell × target) combinations of the
+//! anchor sweep, replaying this loop's own rules against the isotonized
+//! per-cell curves (`benchmarks/zensim_anchor_2026-08-06.tsv`):
+//!
+//! | after | p50 \|err\| | p90 \|err\| | within ±0.5 | within ±2.0 |
+//! |---|---|---|---|---|
+//! | pass 1 (seed alone, open loop) | 4.14 | 14.59 | 11.9% | 30.4% |
+//! | pass 2 (one anchor-translate correction) | 0.80 | 4.68 | 40.6% | 73.5% |
+//!
+//! Those are **ceilings**, and in-sample ones (the anchor was fitted on
+//! the same corpus): they say a 1-encode answer is right about 1 time in 8
+//! at ±0.5, and a 2-encode answer about 2 times in 5. A 1-encode mode
+//! would therefore be an unverified open-loop *prediction*, not a
+//! convergence, which is why this crate does not offer one — pass 1's
+//! honest output is [`ZensimLoopResult::pass1_score`], already measured.
+//!
+//! The correction gain was swept on the same replay (`q_next = q + g·(Q(t)
+//! − Q(s))`, g ∈ 0.6..1.4): the optimum is a flat plateau over 0.8–1.1
+//! containing the principled g = 1 (pure translate), so no fitted gain
+//! constant ships.
+//!
 //! # Deriving the diffmap → quantizer-scale mapping
 //!
 //! zensim's diffmap is **unitless SSIM error**, not a butteraugli distance,

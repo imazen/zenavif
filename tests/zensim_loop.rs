@@ -92,14 +92,15 @@ fn converges_on_a_zensim_target() {
 fn low_target_lands_no_worse_than_the_secant_baseline() {
     // The LOW-target band is the hard one, and not only because the
     // score-vs-quality curve is steepest there: quality maps to an INTEGER
-    // AV1 quantizer index, so the achievable scores are discrete, and in
-    // the steep band one qindex step can move zensim by more than a 1.0
-    // tolerance (measured on the 2026-08-06 sweep: up to ~2.7 score units
-    // per quality point around q 40–55). Asserting unconditional
-    // convergence there would be asserting something the codec cannot
-    // deliver — so the contract is comparative instead, which is also the
-    // actual claim of this loop: it must get at least as close as the
-    // existing search, from the same input, with the same budget.
+    // AV1 quantizer index, so the achievable scores are a discrete lattice
+    // and one step can move zensim by more than a 1.0 tolerance — measured
+    // in `benchmarks/zensim_score_lattice_2026-08-06.tsv`: adjacent
+    // achievable scores are 0.82–1.05 apart at the median and ~50% of the
+    // gaps exceed 1.0. Asserting unconditional convergence there would be
+    // asserting something the codec cannot deliver — so the contract is
+    // comparative instead, which is also the actual claim of this loop: it
+    // must get at least as close as the existing search, from the same
+    // input, with the same budget.
     use zenavif::{TargetMetric, TargetOptions, encode_rgb8_with_target};
     let img = test_image(192, 192);
     let target = 35.0;
