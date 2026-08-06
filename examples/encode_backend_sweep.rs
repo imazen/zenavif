@@ -372,6 +372,9 @@ fn main() {
     }
 
     let backends: Vec<Arm> = {
+        // `mut` only when a cfg-gated arm below pushes onto it; without those
+        // features the vec is complete as written and clippy rejects the mut.
+        #[allow(unused_mut)]
         let mut b = vec![
             Arm {
                 label: "zenravif-420",
