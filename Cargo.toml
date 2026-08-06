@@ -98,7 +98,13 @@ zenavif-serialize = { version = "0.2.0", optional = true }
 # Optional target-quality deps — encode->decode->score convergence loop
 # (`target-quality` feature). Same versions as the dev-dependency copies.
 fast-ssim2 = { version = "0.8.0", optional = true, features = ["imgref", "rayon"] }
-zensim = { version = "0.2.4", optional = true, features = ["imgref", "zenpixels"] }
+# zensim: git-pinned to `main` (0.3.0, unpublished) for the diffmap API the
+# `two-pass-zensim` closed loop needs — `Zensim::compute_with_ref_and_diffmap`
+# + `PrecomputedReference` reuse + `Zensim::with_stop`. 0.3.0 is a breaking 0.x
+# bump over the registry's 0.2.4, so the pin covers the whole graph (the
+# dev-dependency copy below matches). Return to a registry version at the
+# zensim 0.3.0 publish.
+zensim = { git = "https://github.com/imazen/zensim", branch = "main", optional = true, features = ["imgref", "zenpixels"] }
 # Optional two-pass diffmap dep — butteraugli per-pixel error map drives the
 # per-SB quantizer-scale second pass (`two-pass-butteraugli` feature).
 butteraugli = { version = "0.9.3", optional = true }
@@ -136,8 +142,12 @@ png = "0.18.0"
 image = "0.25.10"
 zenbench = { version = "0.1.2", features = ["criterion-compat"] }
 fast-ssim2 = { version = "0.8.0", features = ["imgref"] }
-zensim = { version = "0.2.4", features = ["imgref", "zenpixels"] }
-zensim-regress = { version = "0.3.0"}
+zensim = { git = "https://github.com/imazen/zensim", branch = "main", features = ["imgref", "zenpixels"] }
+# zensim-regress must track the SAME zensim as the dependency above, or the
+# `Zensim` / `ImageSource` types in tests/linku_corpus.rs come from two
+# different zensim crates and don't unify. Registry 0.3.1 depends on zensim
+# 0.2.x; git `main` (0.4.0) depends on 0.3.0. Unpin together at the publish.
+zensim-regress = { git = "https://github.com/imazen/zensim", branch = "main" }
 rayon = "1.11.0"
 # Feature extraction for the rav1e knob predictor MLP training.
 # Path-pinned to the sibling checkout (see the [dependencies] note above);

@@ -28,8 +28,17 @@ pub enum TargetMetric {
     /// SSIMULACRA2 score (via `fast-ssim2`). Web-typical range 55–95;
     /// ~70 = "medium", ~80 = "high", ~90 = "visually near-lossless".
     Ssim2(f64),
-    /// zensim similarity score (via `zensim`, latest profile), 0–100 scale
-    /// calibrated similarly to SSIMULACRA2.
+    /// zensim similarity score (via `zensim`,
+    /// [`ZensimProfile::codec_target`](zensim::ZensimProfile::codec_target) —
+    /// the stable cross-codec contract profile), 0–100 scale calibrated
+    /// similarly to SSIMULACRA2.
+    ///
+    /// **Score-scale note (zensim 0.3.0 re-pin, 2026-08-06):** this used to
+    /// score with `ZensimProfile::latest()`, which was `PreviewV0_2` at
+    /// zensim 0.2.x and became `B` (and deprecated) at 0.3.0. All zensim
+    /// scoring in this crate now names `codec_target()` (= `B`) explicitly.
+    /// A given `Zensim(t)` target therefore lands on a different quality
+    /// than it did against 0.2.x.
     Zensim(f64),
 }
 
@@ -716,7 +725,7 @@ fn ssim2_score(a: ImgRef<'_, [u8; 3]>, b: ImgRef<'_, [u8; 3]>) -> Result<f64> {
 }
 
 fn zensim_score(a: &impl zensim::ImageSource, b: &impl zensim::ImageSource) -> Result<f64> {
-    let z = zensim::Zensim::new(zensim::ZensimProfile::latest());
+    let z = zensim::Zensim::new(zensim::ZensimProfile::codec_target());
     z.compute(a, b)
         .map(|r| r.score())
         .map_err(|e| at!(Error::Encode(format!("target-quality zensim: {e}"))))

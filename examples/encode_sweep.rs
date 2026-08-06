@@ -309,7 +309,7 @@ fn main() -> ExitCode {
         fs::create_dir_all(parent).ok();
     }
 
-    let zensim = Zensim::new(ZensimProfile::latest());
+    let zensim = Zensim::new(ZensimProfile::codec_target());
     let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
 
     let qm_vals = args.qm.values();
