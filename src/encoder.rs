@@ -177,6 +177,12 @@ pub struct MasteringDisplayConfig {
 /// ```
 /// AV1 encoder backend selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// `#[non_exhaustive]`: this enum gains a variant every time a backend is
+/// added — `SvtRs` is the most recent — so downstream exhaustive matches need
+/// a `_` arm. Marking it now means the NEXT backend is additive instead of
+/// another break; the CHANGELOG already queued this break for the `SvtRs`
+/// addition, so taking it in the same release costs nothing extra.
+#[non_exhaustive]
 pub enum Av1Backend {
     /// zenrav1e (rav1e fork) — default, production-proven.
     #[default]

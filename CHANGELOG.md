@@ -41,10 +41,13 @@ write-path returns + gain-map interop additions, already on main).
   the `yuv` crate. In-house kernels no longer construct it (they are
   infallible); the legacy `unsafe-asm` decoder still does. Removing the
   variant + the dep ships with the next 0.x minor bump.
-- `Av1Backend` gained the `SvtRs` variant (the enum is not `#[non_exhaustive]`,
-  so downstream exhaustive matches must add an arm) and `ValidationError`
-  (already `#[non_exhaustive]`) gained `BackendUnsupportedParam` — ship with
-  the next 0.x minor bump (svtav1-rs backend PR)
+- `Av1Backend`, `DecodeBackend` and `TargetMetric` are now
+  `#[non_exhaustive]`. Downstream exhaustive matches need a `_` arm. Taken in
+  the SAME release as the variant additions that already broke them
+  (`Av1Backend::SvtRs`, `TargetMetric::ZensimC`) so consumers absorb one break
+  rather than two: every future backend or metric is additive from here.
+  `ValidationError` (already `#[non_exhaustive]`) gained
+  `BackendUnsupportedParam` — ship with the next 0.x minor bump.
 - `TargetMetric` gained the `ZensimC(f64)` variant. The enum is not
   `#[non_exhaustive]`, so downstream exhaustive matches must add an arm —
   ship with the next 0.x minor bump. No existing variant changed meaning.

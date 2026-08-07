@@ -484,6 +484,10 @@ impl DecodedYuv {
 
 /// Which AV1 decode kernel to run behind zenavif's raw-OBU decode seam.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// `#[non_exhaustive]`: same reasoning as [`crate::Av1Backend`] — this enum
+/// already went `Rav1dSafe` -> `+AomRs` -> `+Rav1dFfi` and will keep growing,
+/// so a new decode backend should not break every downstream match.
+#[non_exhaustive]
 pub enum DecodeBackend {
     /// The default pure-Rust rav1d-safe managed decoder (full AV1 profile).
     Rav1dSafe,

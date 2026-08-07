@@ -44,6 +44,24 @@ just publish-dry  # cargo publish --workspace --dry-run
 just gates        # executable engineering-baseline gates (see below)
 ```
 
+**`just fmt` cannot finish on macOS aarch64** — its third step (`just
+api-doc`, the `apidoc/` snapshot runners) builds rustdoc JSON over *all*
+manifest features, which includes `unsafe-asm`, whose rav1d `.S` sources
+Apple `cc` refuses to assemble. `cargo fmt` (step 1) still runs and
+applies. Consequence: **`docs/public-api/zenavif.features.txt` can only be
+regenerated on Linux** and is already stale on `main` (its header feature
+list predates `two-pass-zensim`). No CI job runs `api-doc`, so nothing
+gates on it. Do NOT hand-edit the snapshots — they say
+`DO NOT EDIT BY HAND` for good reason.
+
+**Pre-existing gauntlet failures on this box** (verified 2026-08-07, not
+caused by whatever you just changed): `clippy allsafe` fails on an unused
+import in `examples/benchmark_simd.rs` (a `_dev` example); `clippy all` /
+`nextest all` fail on the documented `unsafe-asm` Apple-`cc` assembler
+problem; `nextest backends`/`allsafe` fail only
+`product_aom_backend animations_decode_identically_across_backends`
+(rav1d-safe#448/#449).
+
 **Executable gates (docs/ENGINEERING_BASELINE.md section A):** run
 `just gates` (= `gate-determinism` + `gate-conformance` + `gate-ladder`,
 all via `examples/gate_kit.rs` + `scripts/gates/gate_conformance.sh`)
@@ -847,6 +865,46 @@ saturating curves where the ssim2→q inversion is ill-conditioned. Tune-off
 fit_q0_head.py at the dep bump if the tune default changes). Follow-ups:
 RGBA8/RGB16 seeding, zensim-target fit, Offer pass-through from an
 orchestrator.
+
+### zensim generation-C (`ZensimProfile::C`) — WIRED 2026-08-07, `src/zensim_c.rs`
+
+`C` is **not** a drop-in for `B` and the failure mode is quiet. Read
+`src/zensim_c.rs`'s module docs before touching any zensim scoring here.
+The four facts that cost the most time to establish:
+
+1. **`Zensim::compute` is the wrong front end for C.** C consumes the
+   folded-944 regime (`compute_folded720_features_streaming` with the
+   append+append2 toggles, then `score_features_with_profile(C, …)`).
+   `compute` returns `ModelForwardFailed` on a real pair — but
+   byte-identical pairs short-circuit to 100 *before* the forward pass, so
+   a naive smoke test passes and proves nothing.
+2. **C HAS a per-pixel map, and it is not a diffmap.** `AttributionResult`
+   is row-major `w × h` f32 + a SAT. It is **signed**, its unit is **score
+   points**, and it is absolutely normalized — so the B pooling rule
+   `clamp(e_b / geomean(e_b), 0.4, 2.5)^(−strength)` does not transfer
+   (its premise is that SSIM error has no absolute unit, and geomean is
+   undefined over sign-mixed data).
+3. **There is a silent-wrong-number HDR path.** zensim's folded-944
+   extractor does not error on an HDR-flagged `LinearF32Rgba`+opaque pair
+   — it auto-routes to the PU/HDR front end and returns HDR-domain
+   features, which C's SDR bake scores without complaint.
+   `ZensimC::features` refuses `is_hdr()` before extraction; `sdr_guard`
+   refuses CICP transfer 16/18. Do not remove either.
+4. **The spatial arm does not steer, measured.** 0 of 48 matched-quantizer
+   cells gained score without spending bytes; at |Δbytes| ≤ 2.5 % the
+   median Δscore is −0.646. Default stays off. Record:
+   `benchmarks/zensim_c_2026-08-07.meta`.
+
+Anchors are refit for C (`ANCHOR_QUANTIZER_C`); B's table is wrong for C by
+~30 quantizer steps at the coarse end. C's two-shot precision is **worse**
+than B's at a matched size mix (median |err| 1.579 vs 1.032) even though
+C's achievable lattice is finer — it is harder to predict, and the
+prediction term is 92 % of the error (vs 85 % for B).
+
+**Not wired:** `encode_rgb8_zensim_two_shot` / `encode_rgb8_zensim_loop`
+still score with `B` only. `TargetMetric::ZensimC` covers the plain
+`encode_*_with_target` search. A real-encode two-shot A/B under C has not
+been run (only the offline lattice replay).
 
 ### Encoding Features (`encode-imazen` feature gate)
 All wired through to zenrav1e fork. Benchmarked results (ravif 7265eea):

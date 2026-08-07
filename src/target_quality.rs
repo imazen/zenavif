@@ -23,7 +23,16 @@ use rgb::Rgb;
 use whereat::at;
 
 /// Which perceptual metric to converge on, and the target score.
+///
+/// `#[non_exhaustive]`: metric variants are expected to keep arriving — this
+/// enum has already gained `ZensimC`, and zensim's own profile generations
+/// (`A`, `B`, `C`, `BHdr`, …) advance independently of this crate. Downstream
+/// exhaustive matches must carry a `_` arm so a new metric is an ADDITIVE
+/// change here instead of a breaking one for every consumer.
+///
+/// Matching within this crate is unaffected.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub enum TargetMetric {
     /// SSIMULACRA2 score (via `fast-ssim2`). Web-typical range 55–95;
     /// ~70 = "medium", ~80 = "high", ~90 = "visually near-lossless".
