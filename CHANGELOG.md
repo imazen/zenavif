@@ -10,6 +10,25 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## Workspace
 
+- **2026-08-07 — zensim CQ target-hitting loop harness + ADDITIVE per-SB
+  hint hook (zensim campaign appendix AC.4).** New example
+  `zensim_cq_rd` (features `encode-imazen,two-pass-butteraugli`):
+  seed-CQ encode → decode → folded-944 zensim scoring → the jxl-adopted
+  proportional controller (exp 1.0 / per-step clamp 2.0), arms baseline /
+  h3-mag (per-64px-superblock attribution steering) / outer CQ-bisection
+  comparator; pre-registered study
+  `benchmarks/zensim_avif_loop_2026-08-07.md` (G-AV2 smoke MEASURED and
+  committed; the G-AV3 matrix runs when the wave-12 candidate bake
+  lands, shipped C as control) + runner
+  `scripts/zensim-loop/run_avif_loop.sh`. New public API:
+  `EncoderConfig::with_sb_q_scale` / `sb_q_scale_value`
+  (`two-pass-butteraugli`) — external access to the per-superblock AC
+  quantizer scale map the butteraugli two-pass driver already forwards;
+  release-gated inert until zenravif `FRAME_HINTS_LIVE` (the zenrav1e
+  >0.1.4 dep bump), gated by `tests/sb_q_scale_hint.rs` which asserts
+  the real behavior of BOTH gate states. Dev-deps: renamed `zensim03`
+  path dep on sibling zensim 0.3.0 (registry 0.2.4 deps untouched); CI
+  `clone-siblings` now also clones imazen/zensim.
 - **2026-08-07 — `hdr_encode_cell` example stamps MEASURED clli (zensim
   campaign appendix AA).** The example previously wrote a hardcoded
   `content_light_level(1000, 250)` on every file regardless of content;

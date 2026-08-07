@@ -1,13 +1,17 @@
-name: Clone path-dep siblings (zenanalyze, ravif)
+name: Clone path-dep siblings (zenanalyze, ravif, zensim)
 description: |
   zenavif's Cargo.toml has path deps that Cargo resolves at manifest-parse
   time, so the directories must exist even when the owning feature is off:
     - imazen/zenanalyze   → ../zenanalyze (optional `auto-tune` + an example dev-dep)
     - imazen/cavif-rs     → ../ravif      (the `zenravif` 0.2.0 encoder, behind `encode`)
+    - imazen/zensim       → ../zensim     (dev-dep for the zensim_cq_rd loop
+                                           harness; needs the unpublished 0.3.0
+                                           surface — profile C + folded-944)
 
   The `ravif`/`zenravif` path dep points at 0.2.0, which is unpublished (crates.io
   has only 0.1.3), so the sibling must be cloned. Drop this step + switch
-  Cargo.toml back to a registry dep once zenravif 0.2.0 is published.
+  Cargo.toml back to a registry dep once zenravif 0.2.0 is published; same for
+  the zensim dev-dep once zensim 0.3.0 ships.
   (zencodec resolves from the registry at 0.1.26, and zenavif-parse is a
   hermetic git-rev [patch.crates-io] pin until 0.7.0 ships — neither needs a
   sibling clone.)
@@ -28,4 +32,11 @@ runs:
         cd ..
         if [ ! -d ravif ]; then
           git clone --depth 1 https://github.com/imazen/cavif-rs.git ravif
+        fi
+    - name: Clone imazen/zensim into ../zensim
+      shell: bash
+      run: |
+        cd ..
+        if [ ! -d zensim ]; then
+          git clone --depth 1 https://github.com/imazen/zensim.git
         fi

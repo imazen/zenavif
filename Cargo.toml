@@ -86,6 +86,13 @@ image = "0.25.10"
 zenbench = { version = "0.1.2", features = ["criterion-compat"] }
 fast-ssim2 = { version = "0.8.0", features = ["imgref"] }
 zensim = { version = "0.2.4", features = ["imgref", "zenpixels"] }
+# The unpublished zensim 0.3.0 sibling surface the zensim_cq_rd loop
+# harness needs (ZensimProfile::C, folded-944 extraction + fused
+# attribution, custom profiles), as a RENAMED dev-dep so it coexists with
+# the registry 0.2.4 above (same extern name would E0464 the lib-test
+# target when `target-quality` is on). Path-only (CI clones ../zensim);
+# collapse into the plain `zensim` dep once 0.3.0 publishes (zensim#46).
+zensim03 = { package = "zensim", path = "../zensim/zensim", features = ["imgref", "zenpixels", "custom-profiles", "feature-regime-v2"] }
 zensim-regress = { version = "0.3.0"}
 rayon = "1.11.0"
 # Feature extraction for the rav1e knob predictor MLP training.
@@ -206,6 +213,14 @@ required-features = ["auto-tune"]
 [[example]]
 name = "drift_reencode"
 required-features = ["__expert"]
+
+# Zensim target-hitting CQ loop harness (benchmarks/zensim_avif_loop_2026-08-07.md;
+# the AVIF analogue of jxl-encoder's zensim_diffmap_rd beats-butter series).
+# `two-pass-butteraugli` is required for the per-SB quantizer hint hook
+# (EncoderConfig::sb_q_scale), not for butteraugli itself.
+[[example]]
+name = "zensim_cq_rd"
+required-features = ["encode-imazen", "two-pass-butteraugli"]
 
 # Heaptrack allocation-profiling harness for the decode-from-bytes path.
 # Decode is in the default feature set (pure-Rust rav1d-safe); no extra features.

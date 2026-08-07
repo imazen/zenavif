@@ -111,9 +111,9 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
 name = "archmage"
-version = "0.9.27"
+version = "0.9.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddf7537a9d3cb715fedef7cacfef7735d7005704301dd3d4cade35fb06fc37bc"
+checksum = "802588500749f8792342d51afe283f42a7ab6baeb3c5334b62c3c48855a2ec20"
 dependencies = [
  "archmage-macros",
  "safe_unaligned_simd",
@@ -122,9 +122,9 @@ dependencies = [
 
 [[package]]
 name = "archmage-macros"
-version = "0.9.27"
+version = "0.9.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "562827c72b3c65ebc7beabc710ffae5b991c0e9e60f7f71374c219107d22f335"
+checksum = "f6e6c957fc425c4e22da4abc86b3341df09672079df466de138b6b0608a6cfd2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -860,9 +860,9 @@ checksum = "373f5eceeeab7925e0c1098212f2fbc4d416adec9d35051a6ab251e824c1854a"
 
 [[package]]
 name = "magetypes"
-version = "0.9.27"
+version = "0.9.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "485f61f9642a1445f4fc561a1462c003574b6cdcbfef62c3ebc6b24be568b103"
+checksum = "0b3e01b6a29880b694607d95eb01da6bf71a291c545a560c5255c26e02a35413"
 dependencies = [
  "archmage",
  "rustversion",
@@ -2013,9 +2013,10 @@ dependencies = [
  "zencodec",
  "zenpixels",
  "zenpixels-convert",
- "zenpredict",
+ "zenpredict 0.2.0",
  "zenravif",
- "zensim",
+ "zensim 0.2.7",
+ "zensim 0.3.0",
  "zensim-regress",
  "zenutils-fuzz",
 ]
@@ -2135,6 +2136,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "zenpredict"
+version = "0.2.0"
+source = "git+https://github.com/imazen/zenanalyze?rev=05de3cbc44b19d8769077d99710b0146c761d6df#05de3cbc44b19d8769077d99710b0146c761d6df"
+dependencies = [
+ "archmage",
+ "bytemuck",
+ "libm",
+ "lz4_flex",
+]
+
+[[package]]
 name = "zenrav1e"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2206,6 +2218,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "zensim"
+version = "0.3.0"
+dependencies = [
+ "archmage",
+ "bytemuck",
+ "enough",
+ "imgref",
+ "linear-srgb",
+ "magetypes",
+ "rayon",
+ "rgb",
+ "thiserror",
+ "zenpixels",
+ "zenpredict 0.2.0 (git+https://github.com/imazen/zenanalyze?rev=05de3cbc44b19d8769077d99710b0146c761d6df)",
+]
+
+[[package]]
 name = "zensim-regress"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2216,7 +2245,7 @@ dependencies = [
  "image",
  "seahash",
  "thiserror",
- "zensim",
+ "zensim 0.2.7",
 ]
 
 [[package]]
