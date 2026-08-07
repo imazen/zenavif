@@ -110,7 +110,10 @@ fn main() {
     );
     if let (Some(echoed), Some(measured)) = (di.content_light_level, measured_cll) {
         assert_eq!(
-            (echoed.max_content_light_level, echoed.max_pic_average_light_level),
+            (
+                echoed.max_content_light_level,
+                echoed.max_pic_average_light_level
+            ),
             (
                 measured.max_content_light_level,
                 measured.max_frame_average_light_level
