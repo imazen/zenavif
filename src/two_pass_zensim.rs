@@ -193,6 +193,14 @@
 //! driver as *mechanism*, which is how aom constants have transferred
 //! throughout this program.
 //!
+//! **This whole derivation is profile-`B` reasoning and does not carry to
+//! generation `C`.** `C` has a per-pixel map too, but it is an *attribution
+//! density*: signed, in score points, absolutely normalized — not a
+//! unitless error intensity. Step 1 above (only ratios are meaningful) is
+//! precisely the premise that fails, and a geometric mean is not defined
+//! over a sign-mixed quantity in any case. See [`crate::zensim_c`] for the
+//! C-side derivation and the measured cost/quality numbers.
+//!
 //! What the 2026-08-06 sweep DOES say about the power law
 //! (`benchmarks/zensim_anchor_2026-08-06.tsv`, 48 cells): the mean diffmap
 //! error really does grow as a power of the quantizer, with

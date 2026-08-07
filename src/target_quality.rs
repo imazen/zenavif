@@ -40,12 +40,38 @@ pub enum TargetMetric {
     /// A given `Zensim(t)` target therefore lands on a different quality
     /// than it did against 0.2.x.
     Zensim(f64),
+    /// zensim **generation-C** score
+    /// ([`ZensimProfile::C`](zensim::ZensimProfile::C)), 0–100.
+    ///
+    /// A different bake over a different feature regime, not a tweak of
+    /// [`Self::Zensim`]: C is a 944-input MLP over the
+    /// folded-720/append/append2 layout, where `B` is a 35-weight linear
+    /// core over the v1 372. Both dials are calibrated to a 0–100 shape
+    /// but **a given number does not mean the same encode** — see
+    /// [`crate::zensim_c`] for the mechanics and
+    /// `benchmarks/zensim_c_*` for the measured curves. Ask for `C`
+    /// deliberately; `codec_target()` is still `B`, so
+    /// [`Self::Zensim`]'s meaning is unchanged.
+    ///
+    /// **SDR only.** C's HDR feature slots are pruned from the bake, so
+    /// HDR content is out of domain. Scoring an HDR-flagged pair is
+    /// refused with a typed error rather than answered with a number —
+    /// see [`crate::zensim_c::sdr_guard`]. There is no C-generation HDR
+    /// profile to fall back to; zensim routes HDR to `BHdr`, which needs
+    /// an absolute-luminance front end this crate does not have.
+    ///
+    /// **Cost.** Measurably slower than [`Self::Zensim`] — zensim's own
+    /// numbers put the folded-944 score at roughly 1.6–2.5× the
+    /// 372-feature score, and the 944 extraction has no
+    /// `PrecomputedReference` reuse, so the source side is re-walked every
+    /// iteration.
+    ZensimC(f64),
 }
 
 impl TargetMetric {
     fn value(self) -> f64 {
         match self {
-            TargetMetric::Ssim2(v) | TargetMetric::Zensim(v) => v,
+            TargetMetric::Ssim2(v) | TargetMetric::Zensim(v) | TargetMetric::ZensimC(v) => v,
         }
     }
 }
@@ -140,7 +166,7 @@ pub fn encode_rgb8_with_target(
             )
         }
         // Not fitted for zensim targets — keep the anchor curve.
-        TargetMetric::Zensim(_) => None,
+        TargetMetric::Zensim(_) | TargetMetric::ZensimC(_) => None,
     };
     #[cfg(not(feature = "auto-tune"))]
     let q_start = None;
@@ -611,6 +637,7 @@ fn score_rgb8(
             ssim2_score(a.as_ref(), b.as_ref())
         }
         TargetMetric::Zensim(_) => zensim_score(&source, &dec_img),
+        TargetMetric::ZensimC(_) => zensim_c_score(&source, &dec_img),
     }
 }
 
@@ -637,6 +664,7 @@ fn score_rgba8(
                 ssim2_score(a.as_ref(), b.as_ref())
             }
             TargetMetric::Zensim(_) => zensim_score(&source, &dec_img),
+            TargetMetric::ZensimC(_) => zensim_c_score(&source, &dec_img),
         };
     }
     if let Some(dec_rgb) = decoded.try_as_imgref::<Rgb<u8>>() {
@@ -646,7 +674,7 @@ fn score_rgba8(
                 let b = to_triplet_img(dec_rgb);
                 ssim2_score(a.as_ref(), b.as_ref())
             }
-            TargetMetric::Zensim(_) => {
+            TargetMetric::Zensim(_) | TargetMetric::ZensimC(_) => {
                 // Re-add opaque alpha so both sides are RGBA for zensim.
                 let opaque: ImgVec<rgb::Rgba<u8>> = ImgVec::new(
                     dec_rgb
@@ -656,7 +684,11 @@ fn score_rgba8(
                     dec_rgb.width(),
                     dec_rgb.height(),
                 );
-                zensim_score(&source, &opaque.as_ref())
+                if matches!(target, TargetMetric::ZensimC(_)) {
+                    zensim_c_score(&source, &opaque.as_ref())
+                } else {
+                    zensim_score(&source, &opaque.as_ref())
+                }
             }
         };
     }
@@ -691,6 +723,11 @@ fn score_rgb16(
             let a = downconvert8(source);
             let b = downconvert8(dec_img);
             zensim_score(&a.as_ref(), &b.as_ref())
+        }
+        TargetMetric::ZensimC(_) => {
+            let a = downconvert8(source);
+            let b = downconvert8(dec_img);
+            zensim_c_score(&a.as_ref(), &b.as_ref())
         }
     }
 }
@@ -729,6 +766,14 @@ fn zensim_score(a: &impl zensim::ImageSource, b: &impl zensim::ImageSource) -> R
     z.compute(a, b)
         .map(|r| r.score())
         .map_err(|e| at!(Error::Encode(format!("target-quality zensim: {e}"))))
+}
+
+/// Generation-C score. A fresh [`crate::zensim_c::ZensimC`] per call — the
+/// scorer's only reusable state is the extraction scratch, and threading it
+/// through the search's closure would buy one allocation per iteration
+/// against an encode+decode. Measure before optimising that.
+fn zensim_c_score(a: &impl zensim::ImageSource, b: &impl zensim::ImageSource) -> Result<f64> {
+    crate::zensim_c::ZensimC::new().score(a, b)
 }
 
 /// fast-ssim2 wants `ImgRef<[u8; 3]>`; zenavif buffers are `Rgb<u8>`.

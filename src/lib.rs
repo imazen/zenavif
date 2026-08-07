@@ -115,11 +115,15 @@ pub use target_quality::{
     encode_rgba8_with_target,
 };
 /// Superblock pooling primitives shared by the diffmap-guided closed loops.
-#[cfg(any(feature = "two-pass-butteraugli", feature = "two-pass-zensim"))]
+#[cfg(any(feature = "two-pass-butteraugli", feature = "target-quality"))]
 mod sb_pool;
 /// Butteraugli-diffmap-guided two-pass encoding (spatial closed loop).
 #[cfg(feature = "two-pass-butteraugli")]
 pub mod two_pass;
+/// Generation-C zensim scoring (`ZensimProfile::C`) and its attribution
+/// steering map — the 944-feature regime `Zensim::compute` cannot produce.
+#[cfg(feature = "target-quality")]
+pub mod zensim_c;
 #[cfg(feature = "two-pass-butteraugli")]
 pub use two_pass::{
     FRAME_HINTS_LIVE, TwoPassEncode, TwoPassMetric, TwoPassOptions, encode_rgb8_two_pass,

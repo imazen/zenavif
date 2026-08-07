@@ -49,6 +49,10 @@ pub(crate) fn sb_grid(w: usize, h: usize) -> (usize, usize) {
 /// extra since the row slicing is identical.
 ///
 /// Returns `sb_cols * sb_rows` values in frame superblock raster order.
+#[cfg_attr(
+    not(any(feature = "two-pass-butteraugli", feature = "two-pass-zensim")),
+    allow(dead_code)
+)]
 pub(crate) fn pool_pnorm(diffmap: &[f32], w: usize, h: usize, stride: usize, exp: f64) -> Vec<f64> {
     debug_assert!(stride >= w);
     debug_assert!(diffmap.len() >= stride * h.saturating_sub(1) + w);
@@ -129,6 +133,10 @@ pub(crate) fn pool_mse(
 /// error, exponent `−strength`). `exponent == 0` is exactly neutral.
 ///
 /// Returns `1.0` everywhere when nothing was valid.
+#[cfg_attr(
+    not(any(feature = "two-pass-butteraugli", feature = "two-pass-zensim")),
+    allow(dead_code)
+)]
 pub(crate) fn normalize_and_power(
     raw: &[Option<f64>],
     clamp: (f64, f64),

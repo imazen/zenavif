@@ -45,6 +45,9 @@ write-path returns + gain-map interop additions, already on main).
   so downstream exhaustive matches must add an arm) and `ValidationError`
   (already `#[non_exhaustive]`) gained `BackendUnsupportedParam` — ship with
   the next 0.x minor bump (svtav1-rs backend PR)
+- `TargetMetric` gained the `ZensimC(f64)` variant. The enum is not
+  `#[non_exhaustive]`, so downstream exhaustive matches must add an arm —
+  ship with the next 0.x minor bump. No existing variant changed meaning.
 
 ### Changed
 - **`zensim` re-pinned from registry 0.2.4 to git `main` (0.3.0)** for the
@@ -78,6 +81,45 @@ write-path returns + gain-map interop additions, already on main).
   today).
 
 ### Added
+- **`zensim_c`: scoring and steering on zensim generation-C
+  (`ZensimProfile::C`), plus the additive `TargetMetric::ZensimC`.**
+  `C` is a 944-input MLP over the folded-720+append+append2 regime, which
+  the standard 372-feature `Zensim::compute` pipeline does not produce, so
+  it needs its own front end: `compute_folded720_features_streaming` +
+  `score_features_with_profile(C, …)`. Feeding `C` through `compute` fails
+  with `ModelForwardFailed` — except on a byte-identical pair, which
+  short-circuits to 100 before the forward pass, so a naive smoke test
+  passes and proves nothing. `c_via_compute_fails` pins both halves.
+  - **`C` has a per-pixel steering map, and it is NOT a diffmap.**
+    `AttributionResult` is a real row-major `w × h` f32 plane (trimmed to
+    the logical image, no SIMD padding) plus a summed-area table for O(1)
+    rectangle queries. Its semantics differ from `DiffmapResult` in every
+    way that matters to pooling: it is **signed**, its unit is **score
+    points**, and it is absolutely normalized and mass-conserving —
+    `query_rect(B)` is the linearized score gain from re-encoding block
+    `B` at reference quality. The B rule
+    `clamp(e_b / geomean(e_b), 0.4, 2.5)^(−strength)` therefore does not
+    transfer: its whole justification is that SSIM error has no absolute
+    unit, and a geometric mean is undefined over a sign-mixed quantity.
+    `sb_q_scale_from_attribution` re-derives on the area-weighted
+    arithmetic mean (the quantity is additive) with non-positive blocks
+    pinned neutral. DERIVED, NOT FITTED; nothing enables it by default.
+  - **HDR is refused twice, because one silent-wrong-number path is real.**
+    `sdr_guard` rejects CICP transfer 16 (PQ) / 18 (HLG) with a typed
+    `Error::Unsupported`, and `ZensimC::features` rejects
+    `ImageSource::is_hdr()` before extraction — zensim's folded-944
+    extractor does not error on an HDR-flagged `LinearF32Rgba` + opaque
+    pair, it silently auto-routes to the PU/HDR front end and returns
+    944 HDR-domain features, which `score_features_with_profile` has no
+    domain guard against. `profile_for_transfer` names `BHdr` for HDR and
+    says plainly that this crate cannot drive it (no absolute-luminance
+    PU-linear front end).
+  - **Honest costs.** No `PrecomputedReference` for the 944 extraction
+    (zensim removed the prepared-reference forms; only `V2Scratch`
+    allocation is reused), `Zensim::with_stop` is not checked by the v2
+    extraction walks, and `steer()` is a second full walk plus two bake
+    forwards per live column — not the one-call score+map the B loop gets.
+    Measured numbers: `benchmarks/zensim_c_*_2026-08-07.*`.
 - **`two-pass-zensim`: a zensim-diffmap-driven closed loop
   (`encode_rgb8_zensim_loop`).** Encode → decode → ONE
   `Zensim::compute_with_ref_and_diffmap` per pass → correct the quality
