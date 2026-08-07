@@ -1,0 +1,244 @@
+# zensim generation-C (ZensimProfile::C) in zenavif — 2026-08-07
+#
+# Four measurements, one file of provenance. Files produced:
+#
+#   zensim_c_two_shot_fit_2026-08-07.txt          the C lattice + rule fit
+#   zensim_b_two_shot_fit_size6425_2026-08-07.txt the SAME fit on B, size-matched
+#   zensim_c_steer_ab_2026-08-07.tsv              spatial on/off A/B under C
+#   zensim_pool_subsample_2026-08-07.tsv          diffmap-pooling subsample study
+#   zensim_c_lattice_{train,val}_2026-08-07.tsv.zst   raw lattice — POINTERED, see below
+#
+# ---------------------------------------------------------------------------
+# PROVENANCE
+# ---------------------------------------------------------------------------
+# date         2026-08-07 (UTC 2026-08-07T01:32Z .. 02:00Z)
+# host         Darwin 25.5.0 arm64 (aarch64-apple-darwin)
+# zenavif      commit 87b82fe4863c (+ the working change adding src/zensim_c.rs)
+# zensim       git main @ e5627b56cd6e454f9908d080cad75546b0b13659
+#              features imgref,zenpixels,feature-regime-v2,custom-profiles
+# ravif        local sibling path dep; zenravif::FRAME_HINTS_LIVE == true
+# harness      examples/zensim_loop_bench, built --release
+#              --features two-pass-zensim,auto-tune
+#              ZENSIM_BENCH_PROFILE=c selects the C dial (new in this change)
+# NOT built with -C target-cpu=native.
+# scheduling   nice -n 5, RAYON_NUM_THREADS=1. NOT nice -n 19: on macOS a high
+#              nice value lands the process in the background QoS class
+#              (efficiency cores), ~40x wall-clock. Builds only for -n 19.
+#
+# ---------------------------------------------------------------------------
+# 1. THE C LATTICE AND THE REFITTED ANCHORS
+# ---------------------------------------------------------------------------
+# corpus       TRAIN benchmarks/zensim_loop_manifest_2026-08-06.txt (12 sources)
+#              VAL   benchmarks/zensim_lattice_manifest_val_2026-08-06.txt (12)
+#              Disjoint by SOURCE (the fitter re-asserts overlap == 0).
+#              These are the same splits the B constants were fitted on, so
+#              the two fits are comparable corpus-for-corpus.
+# sizes        long edges 64 and 256. **NO 1024 TIER** — a deliberate budget
+#              truncation, not an oversight. The committed B fit covers
+#              {64, 256, 1024}, so the headline aggregates are NOT directly
+#              comparable to it; the size-matched B refit below exists
+#              precisely so the comparison is like-for-like.
+# cells        24 per split (12 sources x 2 sizes), 0 dropped, 0 malformed
+#              rows. 5,575 measured encodes TRAIN + 5,695 VAL = 11,270.
+# sweep        every quantizer index the coarse probe brackets. Under C the
+#              probe never found a qi scoring >= 96 or <= 12 on most cells,
+#              so nearly every cell swept the FULL qi 8..248 — i.e. the C
+#              lattice here is complete, not banded. That is itself a
+#              finding: C's reachable dial on this corpus is narrower than
+#              B's at both ends (median cell max ~93, median cell min ~14).
+# fitter       scripts/hyperparam/fit_zensim_two_shot.py (unchanged), which
+#              replays each placement rule offline against the measured
+#              per-quantizer curves and splits the error into LATTICE (how
+#              far the nearest achievable score is) and PREDICTION.
+#
+# REFITTED CONSTANT (now in src/zensim_c.rs as ANCHOR_QUANTIZER_C):
+#   235.500, 228.000, 222.500, 213.000, 201.500, 192.000, 179.000, 162.000,
+#   155.000, 148.500, 127.500, 116.000,  98.500,  70.000,  33.500
+# Shipped B table for contrast (src/two_pass_zensim.rs ANCHOR_QUANTIZER):
+#   205.622, 199.214, 192.630, 186.827, 180.797, 172.038, 166.717, 159.257,
+#   149.813, 136.027, 126.477, 115.037,  92.745,  66.220,  26.318
+# The two differ by ~30 quantizer steps at the coarse end and converge near
+# the fine end. Reusing B's table for C is a measurable error, not a nuance:
+# VAL median |err| 2.616 (B knots) vs 1.579 (C knots), mean -0.576 paired,
+# better on 54.5% of 684 pairs, sign-test p = 0.0002.
+#
+# NOT SHIPPED: the pass-2 gain sweep picked g = 0.85 on TRAIN (median 1.170
+# vs 1.449 at g = 1.0) but the same arm is NOT distinguishable on VAL
+# (mean -0.173, p = 0.0877). Same outcome the B fit reached; the principled
+# g = 1 pure translate stays.
+#
+# ---------------------------------------------------------------------------
+# 2. TWO-SHOT ERROR DECOMPOSITION: C vs B, SIZE-MATCHED
+# ---------------------------------------------------------------------------
+# Both columns are the same fitter, same corpus, same rule, same {64,256}
+# size mix, VAL split only. The B column was produced by re-running the
+# fitter on the committed 2026-08-06 B lattice filtered to sizes 64 and 256
+# (awk on the decompressed TSV) — that is what makes it comparable; the
+# numbers in src/two_pass_zensim.rs's module docs include a 1024 tier and
+# are therefore NOT the right baseline for this table.
+#
+#   VAL, policy=nearest, rule = qi_translate on that profile's REFIT knots
+#
+#   metric                       B (n=666)     C (n=684)
+#   ORACLE / LATTICE median         0.156         0.126
+#   pass 1 alone (open loop)        2.891         4.537
+#   two-shot median |err|           1.032         1.579
+#   two-shot p90                    4.248         8.027
+#   two-shot p99                   10.461        16.745
+#   PREDICTION median               0.783         1.366
+#   LATTICE share of the error      15.2%          8.0%
+#   PREDICTION share                84.8%         92.0%
+#
+# READING IT HONESTLY. C's achievable-score lattice is FINER than B's
+# (0.126 vs 0.156 median distance to the nearest reachable score), so the
+# ceiling on precision is slightly better. But C is HARDER TO PLACE: the
+# open-loop pass-1 error is +57% and the two-shot placement error +75%, and
+# the net two-shot precision is worse — 1.032 -> 1.579 median, with a much
+# heavier tail (p90 4.25 -> 8.03). The B finding that the prediction term
+# dominates is not just preserved under C, it is stronger: 92% vs 85%.
+#
+# Where C's extra error lives (VAL, C, by size and target band):
+#   size=64   median 3.637   p90 11.851     size=256  median 0.791  p90 3.778
+#   t[20,40)  2.710     t[40,60) 1.566     t[60,80) 1.724   t[80,91) 0.510
+# So it is concentrated at TINY sizes and LOW targets. C's adjacent-quantizer
+# gap in the [10,30) score band has median 1.985 and p90 9.397 — the dial is
+# very coarse down there, which both inflates placement error and makes the
+# anchor's low-score knots the least trustworthy part of the refit.
+#
+# ---------------------------------------------------------------------------
+# 3. SPATIAL (steering) ARM UNDER C — MEASURED, AND IT DOES NOT STEER
+# ---------------------------------------------------------------------------
+# zensim_c_steer_ab_2026-08-07.tsv. Matched-QUANTIZER A/B: encode plain,
+# build the per-SB map from C's OWN attribution density via
+# zensim_c::sb_q_scale_from_attribution, re-encode at the SAME quantizer
+# with the map, rescore with C. 4 held-out sources x long edges {256, 1024}
+# x quantizers {60, 100, 140} x strengths {0.5, 1.0} = 48 cells. The map was
+# live: zenravif::FRAME_HINTS_LIVE == true, per-SB scales spanned the full
+# clamp domain (min 0.400, max 2.500 at strength 1.0), and the FD gradient
+# was non-degenerate on every cell (654-666 of 944 columns non-zero — the
+# rest are the bake's pruned dead columns, exactly as expected).
+#
+#   strength 0.5   d_bytes median +2.67%  (-8.40 .. +26.60)
+#                  d_C     median +0.051  (-2.014 .. +2.310)  13/24 improved
+#   strength 1.0   d_bytes median +4.46%  (-16.94 .. +77.71)
+#                  d_C     median -1.299  (-5.994 .. +3.537)   6/24 improved
+#
+# THE MAP IS NOT RATE-NEUTRAL, which is the first thing that breaks. The B
+# derivation's rate-neutrality argument rests on the scales having geometric
+# mean 1; the attribution policy normalizes on the ARITHMETIC mean of the
+# positive part, so it does not inherit that property — and empirically the
+# same quantizer with the map on moves the file by -17% to +78%.
+#
+# SO READ THE TWO DELTAS TOGETHER, NEVER d_C ALONE:
+#   cells that gained score WITHOUT spending bytes:            0 of 48
+#   near-rate-matched cells (|d_bytes| <= 2.5%):               n = 13
+#       d_C median -0.646, improved 2/13, best +0.42, worst -4.45
+#
+# VERDICT: at matched rate, C's attribution map steered through this policy
+# does not help. Zero cells out of 48 bought score for free. The apparent
+# +0.05 median at strength 0.5 is bytes, not steering. The default stays 0.0
+# (off) and there is now a measurement behind that default rather than an
+# inherited assumption.
+#
+# WHAT THIS DOES AND DOES NOT CONVICT. It convicts THIS POLICY (arithmetic-
+# mean ratio, clamp [0.4, 2.5], power -strength) on THIS channel (per-SB
+# delta-q). It does not convict the map: the same directional result has now
+# been reached three times through per-SB delta-q — B's diffmap here, the
+# attribution map here, and zensim's own probe below — which points at the
+# channel. Two known channel-level confounds, both shared by any map source:
+# sb_q_scale hints make zenrav1e disable its own segmentation (so the hinted
+# arm loses the encoder's k-means ALT_Q adaptation), and per-SB delta_q
+# costs syntax bits and taxes spatial prediction. zensim's registered next
+# lever is the lambda side instead (zenrav1e's per-16x16 ssim_rdmult, no
+# syntax cost, composes with segmentation) — untried here.
+#
+# Caveats: n=4 sources, matched-quantizer not matched-rate (no per-arm rate
+# ladder), one policy family, two strengths, speed 6 only.
+#
+# The corroborating external data point, from zensim's own AVIF probe
+# (benchmarks/avif_sb_probe_2026-08-06.meta in imazen/zensim, campaign
+# appendix Y.R3): the geomean-ratio policy applied to the ATTRIBUTION map
+# and fed to zenrav1e's per-SB delta-q lost at matched rate on 9/9 cells
+# (Delta ssim2 -0.51..-4.07). Two named confounds: sb_q_scale hints disable
+# zenrav1e's own segmentation, and delta_q syntax costs bits. n=3 images,
+# one policy, 576^2 only. It is a reason to keep the arm off by default, not
+# a verdict on the map.
+#
+# ---------------------------------------------------------------------------
+# 4. 2x2 / 4x4 SUBSAMPLED POOLING — MEASURED, NOT WORTH IT
+# ---------------------------------------------------------------------------
+# zensim_pool_subsample_2026-08-07.tsv. 4 held-out sources x long edges
+# {256, 1024}, qi 80, 7 reps, arms INTERLEAVED within each rep (never
+# all-A-then-all-B) so thermal drift cannot fake a delta; medians reported.
+# A 4096 tier was requested and is absent for a corpus reason: clic2025 tops
+# out at a 2048 long edge and upscaling is banned, so the harness skips it.
+#
+# Medians over the 4 sources:
+#
+#   long edge 256                 1024
+#   B score-only        2.172 ms       33.736 ms
+#   B score+diffmap     2.266 ms       35.041 ms   (map marginal 0.095 / 1.305)
+#   pool full-res       0.259 ms        4.378 ms
+#   pool 2x2            0.065 ms        1.057 ms   (3.97x / 4.14x faster)
+#   pool 4x4            0.017 ms        0.268 ms   (15.6x / 16.4x faster)
+#   C score-only        3.902 ms       75.324 ms   (1.80x / 2.23x the B score)
+#   C score+attribution 112.4 ms       381.6 ms    (28.8x / 5.1x the C score)
+#   C sb_means (SAT)    0.0005 ms       0.0013 ms
+#
+# WHICH HALF COSTS. For B the pooling is NOT negligible against the metric
+# call — 4.38 ms is 12.5% of the whole score+map call at 1024, and 3.4x the
+# diffmap's own marginal production cost (1.3 ms). Subsampling attacks the
+# larger of the two halves, which is the right half.
+#
+# BUT AGAINST AN ENCODE IT IS NOISE. Same box, same config, single-threaded
+# encode at 1024 / speed 6 / q77: 1,666 / 5,082 / 3,779 / 5,263 ms on these
+# four sources. Pooling full-res is ~0.1% of one encode; 2x2 saves ~3.3 ms,
+# i.e. ~0.08%. A two-shot spends two encodes. THE ANSWER IS NO: subsampling
+# saves a tenth of a percent of a two-shot and is not worth the complexity.
+#
+# NATIVE REDUCED RESOLUTION IS NOT AVAILABLE. zensim's DiffmapOptions has no
+# resolution or stride knob (weighting / masking_strength / sqrt /
+# include_edge_mse / include_hf / guided_coarse_redistribution), and
+# AttributionResult has none either. So the production half cannot be asked
+# for a cheaper map; post-hoc subsampling of the pooling is the only lever,
+# and it is the smaller prize by ~40x against an encode.
+#
+# FOR C THE QUESTION IS MOOT ON THE POOLING SIDE. AttributionResult carries a
+# summed-area table, so per-superblock reduction is O(1) per block:
+# sb_means costs 1.3 MICROseconds at 1024. Every cost is in producing the
+# map (5.1x the C score at 1024, 28.8x at 256 — the FD gradient's 2 forwards
+# per live bake column is a fixed cost that does not shrink with the image).
+# There is nothing for subsampling to save.
+#
+# ACCURACY, since speed alone is not the answer. Per-superblock |delta| in
+# the resulting q_scale map (clamped domain [0.4, 2.5]), full-res vs
+# subsampled, over the same 8 cells:
+#   2x2   median-of-medians 0.0071 (256) / 0.0061 (1024);  worst cell max 0.526
+#   4x4   median-of-medians 0.0286 (256) / 0.0200 (1024);  worst cell max 1.475
+# So 2x2 is near-identical for the typical superblock but can move a single
+# block by half the useful range, and 4x4 by more than the whole of it. That
+# is what a 12-norm pool does: it is nearly a max, and a max over 1 pixel in
+# 4 misses spikes. Even if the time mattered, 4x4 would be a trade, not free.
+#
+# ---------------------------------------------------------------------------
+# STORAGE
+# ---------------------------------------------------------------------------
+# The two raw lattice TSVs are NOT in git (78 KB / 80 KB zstd, over the
+# 30 KB rule even compressed, and that rule is not mine to waive — the
+# 2026-08-06 waiver was for those specific files). They live at
+#
+#   /Users/lilith/work/zen/_bench-data/zenavif-zensim-c-2026-08-07/
+#       zensim_c_lattice_train_2026-08-07.tsv.zst
+#       zensim_c_lattice_val_2026-08-07.tsv.zst
+#       sha256.txt
+#
+# sha256:
+#   21d381586e0047471cb538696f1aa3983a451bf2163c3baa9902bc29f21c1db6  train
+#   56a78ead3ad52f24ba0d58971397474fca94ec3b2aadb2cafcf7bbc53a28b9c1  val
+#
+# They are deterministically regenerable:
+#   cargo build --release --features two-pass-zensim,auto-tune \
+#       --example zensim_loop_bench
+#   RAYON_NUM_THREADS=1 ZENSIM_BENCH_PROFILE=c nice -n 5 \
+#       ./target/release/examples/zensim_loop_bench lattice <manifest> 6 64,256 12 96
+# Every conclusion above is in the committed .txt/.tsv files.

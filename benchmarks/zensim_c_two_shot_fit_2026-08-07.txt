@@ -1,0 +1,108 @@
+# train cells 24  val cells 24  targets 29 (20.0..90.0 step 2.5)
+# source overlap train/val: 0 (must be 0)
+
+# --- achievable-score lattice geometry ---
+# Adjacent-quantizer score gaps. The quantizer lattice is the REAL
+# one: quality only reaches 100 of the 256 quantizers, so an
+# integer-quality sweep over-states the gap by ~2.6x.
+group	n_cells	n_gaps	med_gap	p90_gap	frac_gap>1.0	med_ceiling@nearest
+ALL	48	11200	0.574	3.840	35.8%	0.1208
+size=64	24	5440	1.101	6.170	52.3%	0.1340
+size=256	24	5760	0.336	1.639	20.2%	0.1085
+# gaps by score band (the lattice is coarsest at LOW scores):
+band	n_gaps	med_gap	p90_gap	frac_gap>1.0	frac_gap>0.5
+[10,30)	1124	1.985	9.397	68.2%	80.5%
+[30,50)	2250	1.405	5.769	61.1%	79.3%
+[50,70)	2493	0.747	4.034	41.6%	61.8%
+[70,85)	2518	0.464	1.869	25.4%	48.3%
+[85,100)	2770	0.218	0.771	6.2%	19.4%
+
+# fitted gamma (d ln dm / d ln qi, TRAIN median): 2.0011
+# score-from-ln(dm) bin spread (median abs dev, TRAIN): 3.268 zensim points
+# derived qknots (from the shipped quality anchor):
+#   205.622, 199.214, 192.630, 186.827, 180.797, 172.038, 166.717, 159.257, 149.813, 136.027, 126.477, 115.037, 92.745, 66.220, 26.318
+# refit  qknots (from the TRAIN lattice, quantizer space):
+#   235.500, 228.000, 222.500, 213.000, 201.500, 192.000, 179.000, 162.000, 155.000, 148.500, 127.500, 116.000, 98.500, 70.000, 33.500
+
+# fitted residual model (TRAIN), coefficients on [1, step, off, step*off, |step|]:
+#   -0.2092, +1.7082, -1.9099, -0.0026, +0.0730
+# --- pass-2 gain sweep (qi_translate_gain), TRAIN ---
+gain	med_err	p90_err	nearest_hit
+0.60	1.6555	8.7192	10.6%
+0.65	1.5141	7.9787	11.2%
+0.70	1.5039	7.9273	10.8%
+0.75	1.3804	7.5615	10.6%
+0.80	1.2993	7.0787	13.1%
+0.85	1.1698	7.3073	11.8%
+0.90	1.2651	7.5240	10.9%
+0.95	1.3687	7.9946	12.0%
+1.00	1.4489	8.0949	12.4%
+1.05	1.4801	7.5714	11.8%
+1.10	1.5858	8.4931	11.7%
+1.15	1.7943	8.7063	11.8%
+1.20	1.8479	8.8662	10.9%
+1.25	1.9412	9.1862	10.3%
+1.30	2.0333	10.1658	10.0%
+1.35	2.1686	10.4791	8.2%
+1.40	2.5827	11.1806	8.0%
+# best TRAIN gain 0.85 (median |err| 1.1698)
+
+# --- 2-encode error distribution, TRAIN (policy=nearest) ---
+rule	n	med_err	p90_err	p99_err	max_err	nearest_hit	within1_lat	med_LATTICE	med_PREDICTION	med_err_best2	mean_enc	frac_over
+quality_translate(shipped loop step)	682	3.2238	9.7308	18.1346	29.0495	2.9%	12.0%	0.1419	2.8650	2.7087	2.000	63.3%
+qi_translate(derived knots)	682	2.8226	9.1126	18.1346	29.0495	4.5%	16.6%	0.1419	2.4030	2.5095	1.979	59.8%
+qi_translate(refit knots)	660	1.4489	8.0949	17.1214	29.0495	12.4%	30.3%	0.1375	1.0833	1.1757	1.965	54.4%
+qi_ratio(refit)	660	1.3176	7.8434	18.4036	29.0495	12.1%	28.3%	0.1375	1.0093	1.1105	1.965	43.3%
+qi_translate_gain(g=0.85,refit)	659	1.1698	7.3073	16.1691	29.0495	11.8%	27.9%	0.1374	0.8357	1.0066	1.959	53.6%
+dm_power	654	6.3511	23.0946	35.3570	42.5428	2.6%	5.8%	0.1369	5.6769	2.4597	1.982	50.6%
+qi_translate_lm(TRAIN-fitted residual)	658	1.4436	7.5183	16.9224	29.0495	9.3%	26.7%	0.1375	1.1075	1.1973	1.948	55.6%
+pass1 only (1 encode)	660	3.5556	17.4739	32.0456	35.3246	3.5%	12.4%	0.1375	3.3332	3.5556	1.000	46.7%
+ORACLE (nearest lattice point)	660	0.1375	0.7270	13.9145	27.7508	100.0%	100.0%	0.1375	0.0000	0.1375	1.965	0.0%
+
+# --- 2-encode error distribution, VAL (policy=nearest) ---
+rule	n	med_err	p90_err	p99_err	max_err	nearest_hit	within1_lat	med_LATTICE	med_PREDICTION	med_err_best2	mean_enc	frac_over
+quality_translate(shipped loop step)	696	3.1770	10.0422	17.1442	19.9390	2.9%	9.2%	0.1258	2.9342	2.6011	2.000	65.5%
+qi_translate(derived knots)	696	2.6164	9.4530	17.0283	19.9390	5.7%	16.4%	0.1258	2.3124	2.2599	1.973	62.5%
+qi_translate(refit knots)	684	1.5786	8.0270	16.7454	22.3316	9.2%	25.4%	0.1256	1.3656	1.4218	1.981	51.3%
+qi_ratio(refit)	684	1.6106	8.0482	21.1419	30.7978	8.8%	25.3%	0.1256	1.3274	1.4405	1.981	39.3%
+qi_translate_gain(g=0.85,refit)	684	1.4787	7.9324	19.2792	28.9690	11.5%	25.6%	0.1256	1.2450	1.3401	1.978	46.3%
+dm_power	681	6.0460	19.4403	28.7416	32.0481	1.9%	3.7%	0.1255	5.7947	3.1112	1.984	49.6%
+qi_translate_lm(TRAIN-fitted residual)	684	1.6066	8.5303	16.6574	25.8217	8.9%	24.4%	0.1256	1.3218	1.4489	1.977	44.4%
+pass1 only (1 encode)	684	4.5373	17.7246	31.7762	40.9420	1.9%	6.4%	0.1256	4.2325	4.5373	1.000	34.2%
+ORACLE (nearest lattice point)	684	0.1256	0.5980	2.3724	11.6644	100.0%	100.0%	0.1256	0.0000	0.1256	1.981	0.0%
+
+# --- paired rule comparisons on VAL (identical cell+target) ---
+a_vs_b	n	mean_d	med_d	a_better	tie	b_better	sign_test_p
+qi_translate_vs_quality_translate	684	-1.1146	-0.9417	64.3%	4.7%	31.0%	0.0000
+qi_ratio_vs_qi_translate	684	+0.0613	+0.0000	27.0%	43.3%	29.7%	0.3881
+gain0.85_vs_qi_translate	684	-0.1734	+0.0000	43.1%	19.7%	37.1%	0.0877
+refit_knots_vs_derived_knots	684	-0.5755	-0.2180	54.5%	5.1%	40.4%	0.0002
+fitted_residual_vs_qi_translate	684	-0.0250	+0.0000	43.4%	14.8%	41.8%	0.6788
+#   negative mean_d = the FIRST rule is closer to target
+#   sign_test_p is two-sided over non-tied pairs; treat p > 0.05 as
+#   'not distinguishable here' and prefer the simpler rule.
+
+# --- lattice policy, VAL, qi_translate(refit) ---
+rule	n	med_err	p90_err	p99_err	max_err	nearest_hit	within1_lat	med_LATTICE	med_PREDICTION	med_err_best2	mean_enc	frac_over
+policy=nearest	684	1.5786	8.0270	16.7454	22.3316	9.2%	25.4%	0.1256	1.3656	1.4218	1.981	51.3%
+#   nearest: undershoot 48.7%  median signed +0.0594  median bytes 1230
+policy=at_least	684	1.6109	8.0175	16.1780	22.3316	8.9%	24.9%	0.1256	1.3677	1.4847	1.978	56.7%
+#   at_least: undershoot 43.3%  median signed +0.2235  median bytes 1236
+policy=at_most	684	1.5875	8.2261	17.4227	24.9279	7.6%	24.4%	0.1256	1.3306	1.4457	1.981	45.2%
+#   at_most: undershoot 54.8%  median signed -0.1704  median bytes 1220
+
+# --- chosen rule on VAL, by size ---
+rule	n	med_err	p90_err	p99_err	max_err	nearest_hit	within1_lat	med_LATTICE	med_PREDICTION	med_err_best2	mean_enc	frac_over
+size=64	336	3.6367	11.8513	19.3031	22.3316	3.6%	11.3%	0.1318	3.4004	2.9811	1.988	50.3%
+size=256	348	0.7909	3.7776	7.9945	13.0591	14.7%	39.1%	0.1227	0.6218	0.7450	1.974	52.3%
+# --- chosen rule on VAL, by target band (equal density low/high) ---
+rule	n	med_err	p90_err	p99_err	max_err	nearest_hit	within1_lat	med_LATTICE	med_PREDICTION	med_err_best2	mean_enc	frac_over
+t[20,40)	180	2.7104	11.9386	20.4196	22.3316	10.0%	23.3%	0.1888	2.1530	2.2760	1.983	52.2%
+t[40,60)	192	1.5663	9.1755	16.2919	19.4694	8.9%	23.4%	0.1211	1.3331	1.3504	1.974	35.9%
+t[60,80)	192	1.7240	6.8911	14.6069	16.6662	9.4%	28.6%	0.1586	1.4865	1.5716	1.990	58.3%
+t[80,91)	120	0.5095	3.9127	7.6480	10.8728	8.3%	26.7%	0.0531	0.4283	0.4830	1.975	63.3%
+
+// paste into src/two_pass_zensim.rs
+const ANCHOR_QUANTIZER: [f32; 15] = [
+    235.500, 228.000, 222.500, 213.000, 201.500, 192.000, 179.000, 162.000, 155.000, 148.500, 127.500, 116.000, 98.500, 70.000, 33.500,
+];

@@ -226,6 +226,25 @@ fn encode_and_score(img: ImgRef<'_, Rgb<u8>>, speed: u8, quality: f32) -> Option
     )
 }
 
+/// Which zensim generation the harness scores with, from
+/// `ZENSIM_BENCH_PROFILE` (`b`, the default, or `c`).
+///
+/// One switch instead of a parallel set of modes: every mode below reports
+/// whatever `encode_and_score_cfg` measures, so the anchor fit, the lattice
+/// geometry and the ab2 arms all follow the profile without duplicating a
+/// line of sweep logic. Read once — an env lookup per cell would be free
+/// next to an encode, but a mid-run change would silently mix two dials
+/// into one TSV.
+fn scoring_profile_is_c() -> bool {
+    static IS_C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *IS_C.get_or_init(|| {
+        matches!(
+            std::env::var("ZENSIM_BENCH_PROFILE").as_deref(),
+            Ok("c") | Ok("C")
+        )
+    })
+}
+
 /// Encode with a fully built config, then decode and score it.
 fn encode_and_score_cfg(img: ImgRef<'_, Rgb<u8>>, cfg: &EncoderConfig) -> Option<Cell> {
     let qindex = cfg
@@ -249,14 +268,110 @@ fn encode_and_score_cfg(img: ImgRef<'_, Rgb<u8>>, cfg: &EncoderConfig) -> Option
         .compute_with_diffmap(&img, &dec_img, zensim::DiffmapOptions::default())
         .ok()?;
     let dm = dr.diffmap();
+    // `dm_mean` stays the B diffmap's mean under BOTH profiles, on purpose.
+    // It is the spatial signal's magnitude (the fitter's error-vs-quantizer
+    // elasticity diagnostic), not the dial, and C's own spatial signal is
+    // the attribution density — a different quantity in different units,
+    // ~4x the cost of a score, that would make the column mean two things
+    // across two files. The `zensim` column is the one that follows the
+    // profile.
     let dm_mean = dm.iter().map(|&v| f64::from(v)).sum::<f64>() / dm.len().max(1) as f64;
+    let score = if scoring_profile_is_c() {
+        zenavif::zensim_c::ZensimC::new()
+            .score(&img, &dec_img)
+            .ok()?
+    } else {
+        dr.score()
+    };
     Some(Cell {
         bytes: enc.avif_file.len(),
-        score: dr.score(),
+        score,
         dm_mean,
         qindex,
         enc_ms,
     })
+}
+
+// ---------------------------------------------------------------------------
+// poolbench: where does the spatial channel's time actually go?
+// ---------------------------------------------------------------------------
+
+/// A stride-`step` p-norm pool of a full-resolution error map onto the
+/// 64x64 superblock grid — the post-hoc subsampling arm.
+///
+/// Identical to `sb_pool::pool_pnorm` at `step == 1`; at `step == 2` it
+/// visits one pixel in four, at 4 one in sixteen. The normalizer is the
+/// SAMPLED count, so a uniform map still pools to exactly its own value at
+/// every step and the arms stay directly comparable. There is no copy and
+/// no allocation — the whole prize is `powf` calls not made.
+fn pool_pnorm_strided(map: &[f32], w: usize, h: usize, exp: f64, step: usize) -> Vec<f64> {
+    const SB: usize = 64;
+    let (cols, rows) = (w.div_ceil(SB), h.div_ceil(SB));
+    let mut out = Vec::with_capacity(cols * rows);
+    for by in 0..rows {
+        let y0 = by * SB;
+        let y1 = (y0 + SB).min(h);
+        for bx in 0..cols {
+            let x0 = bx * SB;
+            let x1 = (x0 + SB).min(w);
+            let mut acc = 0.0f64;
+            let mut n = 0usize;
+            let mut y = y0;
+            while y < y1 {
+                let row = &map[y * w + x0..y * w + x1];
+                let mut x = 0usize;
+                while x < row.len() {
+                    acc += f64::from(row[x]).max(0.0).powf(exp);
+                    n += 1;
+                    x += step;
+                }
+                y += step;
+            }
+            out.push(if n == 0 {
+                0.0
+            } else {
+                (acc / n as f64).powf(1.0 / exp)
+            });
+        }
+    }
+    out
+}
+
+/// `pool_pnorm_strided` -> the same geomean-normalized, clamped,
+/// exponentiated quantizer scales `sb_q_scale_from_diffmap` produces, so
+/// the arms can be compared as MAPS and not just as timings.
+fn q_scale_from_pooled(pooled: &[f64], clamp: (f64, f64), strength: f64) -> Vec<f32> {
+    let (lo, hi) = clamp;
+    let (mut log_sum, mut n) = (0.0f64, 0u32);
+    for &e in pooled {
+        if e > 1e-4 && e.is_finite() {
+            log_sum += e.ln();
+            n += 1;
+        }
+    }
+    if n == 0 {
+        return vec![1.0f32; pooled.len()];
+    }
+    let gm = (log_sum / f64::from(n)).exp();
+    pooled
+        .iter()
+        .map(|&e| {
+            if e > 1e-4 && e.is_finite() {
+                ((e / gm).clamp(lo, hi)).powf(-strength) as f32
+            } else {
+                1.0f32
+            }
+        })
+        .collect()
+}
+
+fn median(v: &mut [f64]) -> f64 {
+    v.sort_by(f64::total_cmp);
+    if v.is_empty() {
+        f64::NAN
+    } else {
+        v[v.len() / 2]
+    }
 }
 
 fn main() {
@@ -900,6 +1015,275 @@ fn main() {
                     }
                     out.flush().unwrap();
                     eprintln!("[ab] {} @ {sz} done", base(path));
+                }
+            }
+        }
+        // Where the spatial channel's time goes, and whether pooling a
+        // SUBSAMPLED map is worth anything. Arms are interleaved within
+        // each rep (never all-A-then-all-B) so thermal drift cannot fake a
+        // delta; medians over `reps`.
+        "poolbench" => {
+            let qi: u8 = args.get(5).map_or(80, |v| v.parse().unwrap());
+            let reps: usize = args.get(6).map_or(7, |v| v.parse().unwrap());
+            writeln!(
+                out,
+                "image\tsize\tw\th\tqi\tsbs\tb_score_ms\tb_score_map_ms\tb_pool1_ms\tb_pool2_ms\tb_pool4_ms\t\
+                 c_score_ms\tc_steer_ms\tc_sbmeans_ms\td2_max\td2_med\td4_max\td4_med"
+            )
+            .unwrap();
+            for path in &images {
+                let src = load_rgb8(path);
+                for &sz in &sizes {
+                    let Some(img) = downscale(&src, sz) else {
+                        continue;
+                    };
+                    let cfg = EncoderConfig::new()
+                        .speed(speed)
+                        .quality(zenavif::quality_for_quantizer(qi))
+                        .threads(Some(1));
+                    let Ok(enc) =
+                        zenavif::encode_rgb8(img.as_ref(), &cfg, StopToken::new(Unstoppable))
+                    else {
+                        continue;
+                    };
+                    let Ok(dec) = zenavif::decode_with(
+                        &enc.avif_file,
+                        &zenavif::DecoderConfig::new().prefer_8bit(true).threads(1),
+                        &StopToken::new(Unstoppable),
+                    ) else {
+                        continue;
+                    };
+                    let Some(dec_img) = dec.try_as_imgref::<Rgb<u8>>() else {
+                        continue;
+                    };
+                    let z = zensim::Zensim::new(zensim::ZensimProfile::codec_target())
+                        .with_parallel(false);
+                    let Ok(pre) = z.precompute_reference(&img.as_ref()) else {
+                        continue;
+                    };
+                    let dm_opts = zensim::DiffmapOptions::default();
+                    // One map up front for the accuracy comparison.
+                    let Ok(dr) = z.compute_with_ref_and_diffmap(&pre, &dec_img, dm_opts) else {
+                        continue;
+                    };
+                    let (mw, mh) = (dr.width(), dr.height());
+                    let opts = zenavif::TwoShotOptions {
+                        spatial_strength: 1.0,
+                        ..Default::default()
+                    };
+                    let m1 = zenavif::two_pass_zensim::sb_q_scale_from_diffmap(
+                        dr.diffmap(),
+                        mw,
+                        mh,
+                        &opts,
+                    );
+                    let m2 = q_scale_from_pooled(
+                        &pool_pnorm_strided(dr.diffmap(), mw, mh, opts.pool_exponent, 2),
+                        opts.weight_clamp,
+                        opts.spatial_strength,
+                    );
+                    let m4 = q_scale_from_pooled(
+                        &pool_pnorm_strided(dr.diffmap(), mw, mh, opts.pool_exponent, 4),
+                        opts.weight_clamp,
+                        opts.spatial_strength,
+                    );
+                    let delta = |a: &[f32], b: &[f32]| -> (f64, f64) {
+                        let mut d: Vec<f64> = a
+                            .iter()
+                            .zip(b.iter())
+                            .map(|(x, y)| f64::from(x - y).abs())
+                            .collect();
+                        let mx = d.iter().cloned().fold(0.0f64, f64::max);
+                        (mx, median(&mut d))
+                    };
+                    let (d2_max, d2_med) = delta(&m1, &m2);
+                    let (d4_max, d4_med) = delta(&m1, &m4);
+
+                    let mut t_bs = Vec::new();
+                    let mut t_bsm = Vec::new();
+                    let mut t_p1 = Vec::new();
+                    let mut t_p2 = Vec::new();
+                    let mut t_p4 = Vec::new();
+                    let mut t_cs = Vec::new();
+                    let mut t_cst = Vec::new();
+                    let mut t_csb = Vec::new();
+                    let ms = |t: std::time::Instant| t.elapsed().as_secs_f64() * 1e3;
+                    for _ in 0..reps {
+                        let t = std::time::Instant::now();
+                        std::hint::black_box(z.compute_with_ref(&pre, &dec_img).ok());
+                        t_bs.push(ms(t));
+
+                        let t = std::time::Instant::now();
+                        let r = z.compute_with_ref_and_diffmap(&pre, &dec_img, dm_opts).ok();
+                        t_bsm.push(ms(t));
+                        std::hint::black_box(&r);
+
+                        let t = std::time::Instant::now();
+                        std::hint::black_box(zenavif::two_pass_zensim::sb_q_scale_from_diffmap(
+                            dr.diffmap(),
+                            mw,
+                            mh,
+                            &opts,
+                        ));
+                        t_p1.push(ms(t));
+
+                        let t = std::time::Instant::now();
+                        std::hint::black_box(pool_pnorm_strided(
+                            dr.diffmap(),
+                            mw,
+                            mh,
+                            opts.pool_exponent,
+                            2,
+                        ));
+                        t_p2.push(ms(t));
+
+                        let t = std::time::Instant::now();
+                        std::hint::black_box(pool_pnorm_strided(
+                            dr.diffmap(),
+                            mw,
+                            mh,
+                            opts.pool_exponent,
+                            4,
+                        ));
+                        t_p4.push(ms(t));
+
+                        let mut zc = zenavif::zensim_c::ZensimC::new().with_parallel(false);
+                        let t = std::time::Instant::now();
+                        std::hint::black_box(zc.score(&img.as_ref(), &dec_img).ok());
+                        t_cs.push(ms(t));
+
+                        let t = std::time::Instant::now();
+                        let st = zc.steer(&img.as_ref(), &dec_img).ok();
+                        t_cst.push(ms(t));
+
+                        if let Some(st) = st.as_ref() {
+                            let t = std::time::Instant::now();
+                            std::hint::black_box(st.sb_means());
+                            t_csb.push(ms(t));
+                        }
+                    }
+                    writeln!(
+                        out,
+                        "{}\t{sz}\t{mw}\t{mh}\t{qi}\t{}\t{:.3}\t{:.3}\t{:.4}\t{:.4}\t{:.4}\t\
+                         {:.3}\t{:.3}\t{:.4}\t{d2_max:.5}\t{d2_med:.5}\t{d4_max:.5}\t{d4_med:.5}",
+                        base(path),
+                        m1.len(),
+                        median(&mut t_bs),
+                        median(&mut t_bsm),
+                        median(&mut t_p1),
+                        median(&mut t_p2),
+                        median(&mut t_p4),
+                        median(&mut t_cs),
+                        median(&mut t_cst),
+                        median(&mut t_csb),
+                    )
+                    .unwrap();
+                    out.flush().unwrap();
+                    eprintln!("[poolbench] {} @ {sz} done", base(path));
+                }
+            }
+        }
+        // Does C's attribution map STEER? Matched-QUANTIZER A/B: encode
+        // plain, build the per-SB map from C's own attribution density,
+        // re-encode at the SAME quantizer with the map, compare bytes and
+        // C score. NOT rate-matched — a map that buys score by spending
+        // bytes is not a win, so both deltas are reported and neither is
+        // read alone.
+        "steerbench" => {
+            let qis: Vec<u8> = parse_list(args.get(5).map_or("60,100,140", |v| v.as_str()));
+            let strengths: Vec<f64> = parse_list(args.get(6).map_or("0.5,1.0", |v| v.as_str()));
+            writeln!(
+                out,
+                "image\tsize\tw\th\tqi\tstrength\tsbs\tbase_bytes\tbase_c\tmap_bytes\tmap_c\t\
+                 d_bytes_pct\td_c\tmap_min\tmap_max\tgrad_nz"
+            )
+            .unwrap();
+            for path in &images {
+                let src = load_rgb8(path);
+                for &sz in &sizes {
+                    let Some(img) = downscale(&src, sz) else {
+                        continue;
+                    };
+                    for &qi in &qis {
+                        let q = zenavif::quality_for_quantizer(qi);
+                        let base_cfg = EncoderConfig::new()
+                            .speed(speed)
+                            .quality(q)
+                            .threads(Some(1));
+                        let Ok(base_enc) = zenavif::encode_rgb8(
+                            img.as_ref(),
+                            &base_cfg,
+                            StopToken::new(Unstoppable),
+                        ) else {
+                            continue;
+                        };
+                        let Ok(dec) = zenavif::decode_with(
+                            &base_enc.avif_file,
+                            &zenavif::DecoderConfig::new().prefer_8bit(true).threads(1),
+                            &StopToken::new(Unstoppable),
+                        ) else {
+                            continue;
+                        };
+                        let Some(dec_img) = dec.try_as_imgref::<Rgb<u8>>() else {
+                            continue;
+                        };
+                        let mut zc = zenavif::zensim_c::ZensimC::new().with_parallel(false);
+                        let Ok(steer) = zc.steer(&img.as_ref(), &dec_img) else {
+                            continue;
+                        };
+                        let means = steer.sb_means();
+                        let grad_nz = steer.gradient_nonzero();
+                        let base_c = steer.score();
+                        for &st in &strengths {
+                            let map = zenavif::zensim_c::sb_q_scale_from_attribution(
+                                &means,
+                                (0.4, 2.5),
+                                st,
+                            );
+                            let (mn, mx) = map
+                                .iter()
+                                .fold((f32::MAX, f32::MIN), |(a, b), &v| (a.min(v), b.max(v)));
+                            let cfg = base_cfg.clone().with_sb_q_scale(Some(map.clone()));
+                            let Ok(enc) = zenavif::encode_rgb8(
+                                img.as_ref(),
+                                &cfg,
+                                StopToken::new(Unstoppable),
+                            ) else {
+                                continue;
+                            };
+                            let Ok(d2) = zenavif::decode_with(
+                                &enc.avif_file,
+                                &zenavif::DecoderConfig::new().prefer_8bit(true).threads(1),
+                                &StopToken::new(Unstoppable),
+                            ) else {
+                                continue;
+                            };
+                            let Some(d2img) = d2.try_as_imgref::<Rgb<u8>>() else {
+                                continue;
+                            };
+                            let Ok(map_c) = zc.score(&img.as_ref(), &d2img) else {
+                                continue;
+                            };
+                            let bb = base_enc.avif_file.len() as f64;
+                            let mb = enc.avif_file.len() as f64;
+                            writeln!(
+                                out,
+                                "{}\t{sz}\t{}\t{}\t{qi}\t{st}\t{}\t{}\t{base_c:.4}\t{}\t{map_c:.4}\t\
+                                 {:.3}\t{:+.4}\t{mn:.4}\t{mx:.4}\t{grad_nz}",
+                                base(path),
+                                img.width(),
+                                img.height(),
+                                map.len(),
+                                base_enc.avif_file.len(),
+                                enc.avif_file.len(),
+                                100.0 * (mb - bb) / bb,
+                                map_c - base_c,
+                            )
+                            .unwrap();
+                            out.flush().unwrap();
+                        }
+                    }
+                    eprintln!("[steerbench] {} @ {sz} done", base(path));
                 }
             }
         }
