@@ -337,15 +337,20 @@ def main() -> int:
 
     # ---------------------------------------------------------- F3 ----------
     print("\n=== F3. one-line summary per (class, size, time): the ranking ===")
+    print("    COMMON SUPPORT ONLY — the ranking is computed on the (image, quality)")
+    print("    points where EVERY listed arm reaches the budget. Averaging each arm")
+    print("    over its own reachable set instead would flatter whichever arm only")
+    print("    manages the easy cells, which is the opposite of what is wanted.")
+    print("    Arms that reach too few common points to rank are named as excluded.")
     for s in szs:
         for c in sorted({cls.get((i, s2), "?") for (i, s2) in cells if s2 == s}):
             for t in size_times[s]:
-                tot = defaultdict(list)
+                # reach[(img,q)][arm] = bytes
+                reach = defaultdict(dict)
                 for (img, s2) in cells:
                     if s2 != s or cls.get((img, s2), "?") != c:
                         continue
                     for q in qgrid:
-                        cand = {}
                         for a in arms:
                             if (img, s2, a) not in fr:
                                 continue
@@ -353,19 +358,40 @@ def main() -> int:
                             if f:
                                 bb = interp_bytes_at_time(f, t)
                                 if bb:
-                                    cand[a] = bb
-                        if len(cand) >= 2:
-                            best = min(cand.values())
-                            for a, bb in cand.items():
-                                tot[a].append(bb / best)
-                if not tot:
+                                    reach[(img, q)][a] = bb
+                if not reach:
                     continue
-                rank = sorted(((math.exp(sum(math.log(x) for x in v) / len(v)), a, len(v))
-                               for a, v in tot.items()))
-                print(f"    {c:<9} @{s:<5} t={t:>8.1f}ms : "
-                      + "  ".join(f"{a} {g:.3f}(n={n})" for g, a, n in rank))
-    print("\n    ratio is to the per-point best arm; 1.000 = on the frontier everywhere.")
-    print("    n differs per arm because an arm only votes where its ladder reaches t.")
+                # Largest arm subset whose common support is still worth ranking:
+                # drop the arm with the fewest reachable points until the shared
+                # support stops growing meaningfully.
+                present = sorted({a for v in reach.values() for a in v})
+                keep = list(present)
+                dropped = []
+                while len(keep) > 2:
+                    common = [v for v in reach.values() if all(a in v for a in keep)]
+                    if len(common) >= 5:
+                        break
+                    worst = min(keep, key=lambda a: sum(1 for v in reach.values() if a in v))
+                    keep.remove(worst)
+                    dropped.append(worst)
+                common = [v for v in reach.values() if all(a in v for a in keep)]
+                if len(common) < 2 or len(keep) < 2:
+                    print(f"    {c:<9} @{s:<5} t={t:>8.1f}ms : no common support "
+                          f"(arms reach disjoint (image,quality) sets)")
+                    continue
+                tot = defaultdict(list)
+                for v in common:
+                    best = min(v[a] for a in keep)
+                    for a in keep:
+                        tot[a].append(v[a] / best)
+                rank = sorted((math.exp(sum(math.log(x) for x in v) / len(v)), a)
+                              for a, v in tot.items())
+                note = f"   [excluded: {','.join(dropped)}]" if dropped else ""
+                print(f"    {c:<9} @{s:<5} t={t:>8.1f}ms n={len(common):<3}: "
+                      + "  ".join(f"{a} {g:.3f}" for g, a in rank) + note)
+    print("\n    ratio is to the per-point best arm; 1.000 = on the frontier at every")
+    print("    common point. n is the shared (image, quality) support, identical for")
+    print("    every arm in the row.")
     return 0
 
 
