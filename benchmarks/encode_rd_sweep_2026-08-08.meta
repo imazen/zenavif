@@ -337,3 +337,73 @@ For a thumbnail the container costs roughly 3.5x what the codec's headers do.**
 ## Results — 256 px tier
 
 NOT LANDED at the time of writing — see the not-covered list.
+
+---
+
+# THE DECISION: at matched encode time, which encoder should zenavif use?
+
+## Short answer
+
+**Nothing measured here beats SVT-AV1. zenavif's current default, zenrav1e, is
+last of the four at every size, every content class and every quality band
+tested — by 25-50 % in bytes at matched wall clock, and by 12-21x in
+per-megapixel speed. The pure-Rust SVT port (zenav1-svt) is the strongest
+pure-Rust option measured and beats zenrav1e by 20-40 % BD-rate at matched
+time.**
+
+Two facts make that a real recommendation rather than a benchmark curiosity:
+
+1. **zenrav1e's ladder cannot reach the fast end at all.** At 1024 px it bottoms
+   out near 80 ms while svtc reaches 8 ms — a 10x floor gap. For a web pipeline
+   the fast end is where the traffic is, and zenrav1e simply does not have a
+   setting there.
+2. **The gap is not a tuning artifact of one rung.** The ladder was eliminated,
+   not matched: each arm's whole speed ladder was swept, Pareto-filtered, and
+   compared only where the measured time ranges overlap.
+
+## The decision rule, by content and quality band
+
+At 1024 px the ordering (svtc < aom < svtrs < zenrav1e) **does not change** with
+content class or quality band. So the rule is not content-conditional at that
+size:
+
+| pixel budget | quality band | use | second choice |
+|---|---|---|---|
+| any, 1024 px+ | any (q20-88) | SVT-AV1 | libaom |
+| 256 px and below | photo | SVT-AV1 | libaom (within noise) |
+| 256 px and below | line-art / plots | libaom | SVT-AV1 |
+| 256 px and below | screen / text | libaom ~= SVT-AV1 | either |
+
+The only place the ranking is content-conditional is the small-image tier, and
+**there it is also the least trustworthy** — see the caveat below.
+
+## What this does NOT license
+
+- **It is not a measurement of zenavif's encoder.** The `zenrav1e` arm is the
+  rav1e CLI. zenavif encodes through zenravif's `SpeedTweaks`, which pin
+  `complex_prediction_modes` and `encode_bottomup` off, cap
+  `non_square_partition_max` at 8 for speed>=4, collapse `partition_range` to
+  (16,16) at speed>=9, gate CDEF/LRF on the quantizer, and use their own
+  quality->quantizer curve. Percent-level differences are expected; a 25-50 %
+  gap is not plausibly closed by them, but that is an inference, not a
+  measurement. **Wiring plane 2 (PNG -> AVIF through zenavif's own path) is the
+  single highest-value next step.**
+- **It says nothing about switching cost.** svtc is a C dependency; zenav1-svt
+  is the pure-Rust route and is 4.7-6.0x the C reference's per-megapixel cost,
+  so "use SVT" means choosing between a C dependency and a 5-6x slope penalty.
+- **The 64 px ranking is weak evidence.** 46-90 % of the wall clock there is
+  process spawn and the timing spread is p90 12.7 %, so differences under ~13 %
+  at that size are unmeasurable. The 1024 tier is where the numbers are clean
+  (spread p90 5.3 %, overhead 0.2-1.9 %).
+- **n is small.** 1024 px is n=2 photo / 1 screen / 1 line-art. The consistency
+  of the ordering across 4 sizes, 3 content classes, 2 metrics and ~9 budgets is
+  what carries it, not the per-cell sample size.
+
+## The other actionable finding
+
+The 4:2:0 floor, not the encoder, is the binding constraint on small screen
+content: `codec_wiki` at 64 px tops out at ssim2 26.9 before any encoder runs,
+and at 1024 px it is still only 78.5. Nothing here tests 4:4:4 — every arm is
+pinned to 4:2:0 — so this is a measurement pointing at a follow-up, not a
+recommendation. But if zenavif ships 4:2:0 for screenshots it is giving away
+more than any encoder choice can recover.
