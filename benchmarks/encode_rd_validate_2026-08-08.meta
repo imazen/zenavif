@@ -1,0 +1,113 @@
+# encode_rd — matched-wall-clock encode RD harness, instrument validation
+harness: scripts/encode_rd/{run_grid.py,analyze_matched.py,reproducibility.py}
+         + examples/rd_tool.rs   (methodology: scripts/encode_rd/README.md)
+commit: b6824e3aef45 (zenavif worktree)
+date: 2026-08-08
+host: Apple M4 Pro, 8 performance + 4 efficiency cores, 24 GB, macOS 26.5.2 (Darwin-25.5.0)
+box_idle: NO — shared with other agents. 80 s of the 1037 s run was spent waiting
+          for the free-core gate; 0 timing samples were finally dropped.
+
+## What this run is
+Instrument validation, NOT a codec result. The grid is deliberately small; the
+point is to show the harness reproduces, that bytes are deterministic, and to
+measure per-cell cost so the full sweep can be sized before it is launched.
+
+## Encoder versions
+zenrav1e 4d1ed620 (rav1e CLI, --features binaries)
+zenav1-svt 1e0e3ef9c (rust examples/identity_run)
+SVT-AV1 C reference: SVT-AV1-HDR 3115c0c (prebuilt zenav1-svt/Bin/Release/SvtAv1EncApp)
+libaom: aomenc, homebrew aom 3.14.1
+decoder (all arms): rav1d-safe via zenavif, 1 thread
+scorer: zenmetrics 8dba5d1d, --no-default-features --features png,cpu-metrics
+
+## Grid
+images:  clic2025/training/097cb426910ba8ce2525dd8bb7fb1777.png (photo)
+         gb82-sc/codec_wiki.png (screen/text)
+         gb82-sc/graph.png (line-art)
+sizes:   64, 256, 1024 long-edge cap (never upscaled — graph.png tops out at 796)
+arms:    aom, svtc, zenrav1e, svtrs
+ladder:  4, 6, 8 on each arm's own knob (cpu-used / preset / speed / preset)
+rates:   8 points per arm from its own quality-spread grid (rate-stride 3)
+reps:    5, interleaved and rotation-ordered, median of kept samples
+config:  8-bit 4:2:0, one key frame, still-picture, 1 thread, 1 tile, CQP
+cells:   864 | encodes: 4320 | 0 failed | 1037 s wall
+second run (repro): same grid restricted to 256 px — 288 cells, 1440 encodes, 127 s
+
+## Measurement definitions
+time  = FULL PROCESS wall clock (spawn + init + input parse + encode + write),
+        median of >=5 reps, never niced. Section C of the analysis decomposes it.
+bytes = bytes_av1, the AV1 payload with the container stripped (IVF costs 44 B for
+        a still; two arms write IVF and one writes a bare OBU, so file size would
+        hand the OBU arm 44 free bytes — ~5% at 64x64).
+score = zenmetrics ssim2 + butteraugli (max and pnorm3) + zensim, against BOTH
+        ref.png (product-honest, includes the fixed 4:2:0 cost) and floor.png
+        (encoder-isolated, ceiling 100). Analysis defaults to *_floor.
+
+## Validation results
+byte determinism : 864/864 cells byte-identical across all 5 repeats (4320 encodes)
+byte reproducib. : 288/288 cells byte-identical across two INDEPENDENT runs
+timing spread    : within-run median 1.2-3.7%, p90 5.8-9.4%; only 8/864 cells
+                   exceed 20%, 7 of those at 64 px where the median is under 10 ms
+timing run-to-run: geometric mean 0.988-0.997; |ln ratio| p90 0.75-2.90%,
+                   max 1.57-5.80%. INSTRUMENT RESOLUTION IS ~1-3%: an A/B
+                   difference smaller than that is not measurable here.
+input symmetry   : 9/9 prep inputs — zenav1-svt identity_run's independent
+                   BT.601 RGB->I420 is sha256-identical to rd_tool's.
+
+## The 4:2:0 floor (encode_rd_validate_floor_2026-08-08.tsv) — read this first
+ssim2 of the unencoded source round-tripped through the harness colour pair:
+  photo   64/256/1024 -> 64.5 / 91.9 / 91.2
+  screen  64/256/1024 -> 26.9 / 74.6 / 78.5
+  lineart 64/256/796  -> 71.2 / 89.7 / 88.3
+On screen content 4:2:0 chroma alone costs more than the encoder does, and at
+64 px the ceiling (26.9) sits below most useful quality targets. Absolute scores
+from this harness are NOT comparable to another harness's.
+
+## Per-cell cost, and what the full sweep would cost
+One cell = 5 reps. Measured s/cell (analysis section G), summed over all 4 arms
+and the 3 MEASURED ladder rungs, per image per rate point:
+    64 px   0.50 s      256 px   4.06 s      1024 px  40.29 s
+The 1024 px tier is 89% of the cost, and zenrav1e is 78% of it (its s4 alone
+costs 26.9 s/cell at 1024 — 18x its own s8).
+
+Projected single-box wall, 3 sizes x 3 rungs x 4 arms x 5 reps:
+    20 images x 20 rates ->  5.0 h
+    50 images x 20 rates -> 12.5 h
+    20 images x 30 rates ->  7.5 h
+
+SCALING TO THE FULL LADDER IS NOT PROJECTED HERE. The arms have 10-14 rungs
+against the 3 measured, which is x3.3-x4.7 on rung COUNT alone, and rungs 0-3
+are the expensive end — extrapolating a rung cost is exactly the kind of guess
+this harness exists to avoid. Bound the slow end with a probe (1 image, 2 sizes,
+rungs 0-3, 3 rates, 3 reps) before committing to a full-ladder grid.
+Also unmeasured: the 4096 px tier the sweep discipline asks for.
+
+Implication: a full sweep is a fleet job, not a laptop job. Alternatively subset
+the ladder per arm to the rungs that actually populate the overlap region, which
+is what the matched-time reduction needs anyway.
+
+## Files
+encode_rd_validate_2026-08-08.tsv.zst  864-cell grid, one row per cell
+encode_rd_repro_2026-08-08.tsv.zst     288-cell independent second run
+encode_rd_validate_floor_2026-08-08.tsv  the 4:2:0 ceiling per input
+encode_rd_analysis_2026-08-08.txt.zst  full analyze_matched.py output
+encode_rd_repro_2026-08-08.txt         reproducibility.py output
+Encoded bitstreams: content-addressed as <enc_sha256>.{ivf,obu}, 864 files /
+7.5 MB, in ~/tmp/encrd/artifacts (NOT committed). Every row carries its
+enc_sha256 so scalar scores can be rejoined to the exact bitstream.
+
+## Reproduce
+cd scripts/encode_rd && python3 run_grid.py \
+  --images clic2025/training/097cb426910ba8ce2525dd8bb7fb1777.png,gb82-sc/codec_wiki.png,gb82-sc/graph.png \
+  --sizes 64,256,1024 --arms aom,svtc,zenrav1e,svtrs \
+  --ladder 4,6,8 --rate-stride 3 --reps 5 --verify-yuv --out cells.tsv
+python3 analyze_matched.py cells.tsv --metric ssim2_floor --targets 30,45,60,75,88
+
+## Known gaps
+- Plane 2 (PNG -> AVIF via cavif / zenavif / avifenc) is NOT wired. payload_bytes()
+  returns -1 for an ftyp file; AVIF container accounting is unimplemented.
+- Ladder rungs 0-3 and 9+ are unmeasured; the slow end is where cost explodes, so
+  the cost projection in analysis section G must not be extrapolated onto them.
+- One image per content class. Enough to validate the instrument, nowhere near
+  enough for a codec claim.
+- 8-bit only. No 10-bit, no alpha, no animation, no multi-thread axis.
