@@ -34,7 +34,8 @@ merge () {                    # merge <dest> <src...>
 }
 
 merge "$RD"  "$OUT/cells_t64.tsv" "$OUT/cells_t256.tsv" \
-             "$OUT/cells_t1024a.tsv" "$OUT/cells_t1024b.tsv"
+             "$OUT/cells_t1024a.tsv" "$OUT/cells_t1024b.tsv" \
+             "$OUT/cells_tu1024a.tsv" "$OUT/cells_tu1024b.tsv"
 merge "$FIT" "$OUT/cells_fit_photo.tsv" "$OUT/cells_fit_screen.tsv"
 
 # Quality targets: even density low and high. ssim2_floor is the encoder-only
