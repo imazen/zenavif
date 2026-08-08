@@ -101,6 +101,41 @@ encode_rd_probe_ladder_2026-08-08.tsv     the full-ladder sizing probe
 Encoded bitstreams: content-addressed <sha256>.{ivf,obu}. Every row carries its
 enc_sha256, so a scalar score can be rejoined to the exact bitstream forever.
 
+## The caveat that scopes every matched-time number below
+
+At small sizes the wall clock is mostly NOT encoding. Three arms report their
+own encode time, so this is measured directly rather than fitted
+(`scripts/encode_rd/overhead_share.py`); on the committed validation grid:
+
+    (wall - self)/wall              64px    256px    796px   1024px
+      aom      cpu8                90.3%    62.7%    25.1%    17.9%
+      aom      cpu4                46.2%     6.8%     1.8%     3.0%
+      svtc     p8                  68.1%    73.9%    27.4%    26.2%
+      svtc     p4                  53.0%    21.7%     4.0%     2.5%
+      zenrav1e s8                  60.1%    10.3%     2.6%     1.2%
+      zenrav1e s4                   9.3%     1.1%     0.2%     0.0%
+
+So: **at 64 px a matched-wall-clock ranking of the fast arms is a comparison of
+process spawn, not of compression.** The useful reading at 64 px is the RD curve
+and the bpp intercept. At 1024 px the clock is 0-3% overhead on the slow rungs
+and up to 26% on svtc's fastest, so the ranking there is a real encoder ranking.
+(SvtAv1EncApp reports integer milliseconds, so its share is quantised below
+~10 ms.)
+
+This is also the honest frame for the whole harness: process wall is what an
+image pipeline pays per image, which is why it is the clock — but an in-process
+encoder API would rank the fast arms differently at thumbnail sizes.
+
+## How to re-run
+
+    bash scripts/encode_rd/run_full_sweep.sh        # ~5.5 h on this host
+    bash scripts/encode_rd/run_topup_1024.sh        # ~35 min, slow-rung frontier
+    bash scripts/encode_rd/merge_and_analyze.sh     # merge tiers + every reduction
+
+Progress streams continuously to `$OUT/prog_<tier>.tsv` (one flushed line per
+timed encode) and the clocks are checkpointed to `prog_<tier>.ckpt.json` after
+every rep, so an interrupted multi-hour tier is not a total loss.
+
 ## Results
 
 FILLED IN AFTER THE RUN — see the sections below.
