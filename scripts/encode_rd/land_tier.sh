@@ -17,9 +17,14 @@ B="$REPO/benchmarks"
 for tier in "$@"; do
   src="$OUT/cells_$tier.tsv"
   while [ ! -s "$src" ]; do
-    # give up if the driver is gone and the file never appeared
-    if ! pgrep -f 'run_full_sweep.sh|run_topup_1024.sh' >/dev/null 2>&1; then
-      [ -s "$src" ] || { echo "land_tier: $tier never produced a TSV; driver gone"; break; }
+    # Give up only if NOTHING is producing tiers any more. The pattern must cover
+    # every driver AND run_grid.py itself: an earlier version listed only
+    # run_full_sweep.sh, so when the sweep was relaunched as run_remaining2.sh the
+    # lander declared "driver gone" and exited for all six tiers while the 1024
+    # tier was still being scored.
+    if ! pgrep -f 'run_full_sweep|run_remaining|run_topup_1024|cut_and_finish|run_grid.py' \
+         >/dev/null 2>&1; then
+      [ -s "$src" ] || { echo "land_tier: $tier never produced a TSV; nothing is running"; break; }
     fi
     sleep 20
   done
