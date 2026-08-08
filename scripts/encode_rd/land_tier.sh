@@ -34,6 +34,11 @@ for tier in "$@"; do
   [ -s "$OUT/cells_${tier}_floor.tsv" ] && \
     cp "$OUT/cells_${tier}_floor.tsv" "$B/encode_rd_sweep_${tier}_floor_2026-08-08.tsv"
   cd "$REPO" || exit 1
+  # Start a FRESH change first. Without this, if @ happens to be an
+  # already-pushed commit (because a human/agent described and pushed it
+  # directly rather than leaving an empty working copy), `jj describe` would
+  # rewrite that commit's message and diverge it from origin.
+  jj new >/dev/null 2>&1
   jj describe -m "bench(encode-rd): tier $tier of the full sweep — $rows cells
 
 Committed as it landed rather than at the end of the grid: the 1024 tiers are
