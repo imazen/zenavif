@@ -268,6 +268,72 @@ change with content or quality band at this size.
 by 2-7 %; at 1024 px svtc beats aom on photo by 6-16 %. A single-size benchmark
 would have got this backwards.
 
-## Results — 256, 2048 and 4096 px tiers
+## Results — the size model, 64 to 4096 px (600 cells)
+
+2 full-page web screenshots (the only local sources over 2940 px) at five sizes,
+rungs {9,8,6}, 4 rates, 5 reps. Reduced rate/rung density on purpose: this grid
+exists for the size model, so what it needs is pixel SPAN, not RD resolution.
+
+CAVEAT: prep caps the LONG edge and these sources are 1313x6097 / 1551x4354, so
+the small rows are extreme slivers (10x64, 22x64 at the 64 tier; 42x256, 90x256
+at 256). The 1024/2048/4096 rows (168x1024 to 1458x4096) are reasonable shapes.
+
+### ms/MP is not remotely constant — up to a 290x swing for one arm
+
+    arm/rung        64px   256px  1024px  2048px  4096px   swing
+    svtc     p9     2336     158      19      11       8    290x
+    svtc     p6     2577     310      70      80      64     40x
+    aom      cpu6   3288     464     194     214     141     23x
+    svtrs    p6     2750     856     420     393     340      8x
+    zenrav1e s6     4608    1791    1315    1009     816      6x
+
+**Any single ms/MP figure is wrong at every size but one.** This is the whole
+reason the discipline demands the intercept.
+
+### t = alpha + beta*MP, fitted per image across all five sizes
+
+r2 0.991-0.999, zero negative alphas, exponent 0.35-0.82 — every arm strongly
+sub-linear, so alpha here absorbs small-size inefficiency and C3's local alpha is
+the usable fixed-cost estimate.
+
+    arm/rung      alpha_ms   beta_ms/MP   exponent   local_alpha_ms
+    svtc     p9       4.81         10.5      0.352        3.25
+    svtc     p6      15.32         94.6      0.606        3.39
+    aom      cpu6    41.05        188.2      0.672        4.36
+    svtrs    p6      47.96        443.0      0.771        3.12
+    zenrav1e s6     211.90       1167.2      0.821        5.25
+
+**beta is the speed story.** At rung 6 the per-megapixel cost is svtc 94.6, aom
+188.2 (2.0x), svtrs 443.0 (**4.7x**), zenrav1e 1167.2 (**12.3x**). The
+svtrs/svtc slope ratio of 4.7x independently reproduces zenav1-svt's own
+3.5-4.9x figure, on real content and through a different harness.
+
+**svtrs's local alpha is the LOWEST of the four** (3.12 ms) despite paying a PNG
+decode inside its timed region that the y4m arms do not. So the process-wall
+clock is not quietly taxing that arm — its cost is all slope, which is the
+honest direction for the comparison.
+
+### The byte axis, and why its straight-line intercept is a trap
+
+At fixed quantizer, bytes are sub-linear too (exponent 0.733-0.779). A single
+line over three decades of pixels cannot fit, so least squares dumps the
+curvature into the intercept: the naive fit reports alpha = 3.7-5.8 kB, which is
+nonsense for an AV1 still and is nearly identical across all four arms — the tell
+that it is a curve-shape artifact, not an encoder property. Honest numbers:
+
+    arm/rung        local_alpha_B   min_payload_B
+    svtc     p6           147.6            68
+    svtrs    p6           147.6            68
+    aom      cpu6         158.7            67
+    zenrav1e s6           171.9            77
+
+The minimum observed payload is assumption-free: a whole still bitstream, headers
+included, fits in 62-79 bytes, so the AV1 fixed part cannot exceed that.
+
+**Which makes the shipped-file arithmetic surprising: the AV1 bitstream's own
+fixed cost is under ~70 bytes, while zenavif's ISOBMFF container is a flat 242.
+For a thumbnail the container costs roughly 3.5x what the codec's headers do.**
+
+## Results — 256 px tier
 
 NOT LANDED at the time of writing — see the not-covered list.
