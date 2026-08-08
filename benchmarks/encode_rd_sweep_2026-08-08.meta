@@ -334,9 +334,45 @@ included, fits in 62-79 bytes, so the AV1 fixed part cannot exceed that.
 fixed cost is under ~70 bytes, while zenavif's ISOBMFF container is a flat 242.
 For a thumbnail the container costs roughly 3.5x what the codec's headers do.**
 
-## Results — 256 px tier
+## Results — 256 px tier (7,920 cells, 0 failed, all 5 reps kept)
 
-NOT LANDED at the time of writing — see the not-covered list.
+All 12 images. Spread median 2.28 %, p90 6.51 %. Four-way overlap 15.5-117.5 ms.
+This tier has by far the best evidence per cell: common support n=78-165 against
+the 1024 tier's n=5-61.
+
+    line-art  15.5 ms n=78   svtc 1.000  aom 1.174  svtrs 1.362  zenrav1e 2.257
+    line-art  59.8 ms n=90   svtc 1.002  aom 1.101  svtrs 1.172  zenrav1e 1.541
+    photo     15.5 ms n=105  svtc 1.004  aom 1.091  svtrs 1.130  zenrav1e 1.344
+    photo    117.5 ms n=130  svtc 1.010  aom 1.024  svtrs 1.048  zenrav1e 1.148
+    screen    15.5 ms n=106  svtc 1.009  aom 1.056  svtrs 1.156  zenrav1e 1.613
+    screen   117.5 ms n=89   aom 1.020  svtc 1.020  svtrs 1.122  zenrav1e 1.287
+
+BD-rate at matched time (median over images):
+
+    A vs B             budget    line-art     photo     screen
+    aom vs svtc        30.4 ms    +12.82      +4.19      +5.71
+    aom vs svtc       117.5 ms     +6.85      +3.12      +1.08
+    aom vs svtrs       30.4 ms    -10.43      -3.23      -4.30
+    aom vs zenrav1e    30.4 ms    -38.74     -11.66     -19.19
+    svtc vs svtrs      30.4 ms    -16.33      -7.85      -8.67
+    svtc vs zenrav1e   30.4 ms    -40.24        —          —
+
+**This CORRECTS the tentative reading from the 64 px tier**, where aom took
+line-art and the rule looked content-conditional below 1024. It is not: at 256
+svtc leads line-art by the widest margin of any class. The content-conditional
+behaviour is confined to 64 px — which is also the one tier where the instrument
+is weakest.
+
+### Cross-metric check: the conclusion is not an ssim2 artifact
+
+Re-running the whole 256 reduction on `zensim_floor` instead of `ssim2_floor`
+gives the same ordering and near-identical magnitudes:
+
+    line-art  ~28 ms   svtc 1.000  aom 1.164  svtrs 1.328  zenrav1e 1.823
+    photo     ~28 ms   svtc 1.009  aom 1.051  svtrs 1.118  zenrav1e 1.260
+    screen    ~28 ms   svtc 1.014  aom 1.052  svtrs 1.157  zenrav1e 1.487
+
+Two independent perceptual metrics, same answer.
 
 ---
 
@@ -369,13 +405,20 @@ size:
 
 | pixel budget | quality band | use | second choice |
 |---|---|---|---|
-| any, 1024 px+ | any (q20-88) | SVT-AV1 | libaom |
-| 256 px and below | photo | SVT-AV1 | libaom (within noise) |
-| 256 px and below | line-art / plots | libaom | SVT-AV1 |
-| 256 px and below | screen / text | libaom ~= SVT-AV1 | either |
+| 256 px and up | any (q20-88), any content | SVT-AV1 | libaom |
+| 64 px, photo / screen | any | SVT-AV1 ~= libaom (inside noise) | either |
+| 64 px, line-art / plots | any | libaom | SVT-AV1 |
 
-The only place the ranking is content-conditional is the small-image tier, and
-**there it is also the least trustworthy** — see the caveat below.
+**There is essentially no content or quality conditioning to exploit.** At 256
+and 1024 px, svtc is first in every class at every budget — including line-art,
+where at 256 px it leads by the widest margin of any class (1.000 vs aom 1.174).
+The one content-conditional row is 64 px line-art, and 64 px is the tier where
+46-90 % of the clock is process spawn and the spread is p90 12.7 %, i.e. where
+the instrument is weakest and a 1.03-vs-1.05 difference is not measurable.
+
+An earlier reading of the 64 px tier alone suggested the rule WAS
+content-conditional below 1024. The 256 tier, with 20x the common support,
+refuted it. That is the argument for sweeping sizes rather than picking one.
 
 ## What this does NOT license
 
