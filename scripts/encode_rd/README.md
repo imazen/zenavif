@@ -353,6 +353,76 @@ Two things fell out of the validation that are findings in their own right:
   accounting in `payload_bytes()` and a `cavif`/`avifenc` arm. `rd_tool decode`
   already handles AVIF, so the decode side is ready.
 
+**One piece of plane 2 is measured even so**, because the byte-axis intercept
+needs it: `zenavif-serialize/examples/container_cost.rs` muxes an *already
+encoded* AV1 payload with the muxer zenavif ships, so it costs no encoding and
+runs over artifacts a sweep already persisted. Measured on 12 payloads at two
+resolutions: **a flat 242 bytes** — no ICC, EXIF, XMP, alpha or gain map —
+independent of payload size and of resolution, as an ISOBMFF still should be.
+In bitrate that is **0.0402 bpp at 188×256 and 0.0025 bpp at 754×1024**: the
+same 242 bytes, 16× the cost. Add the AV1 bitstream's own fixed cost (α =
+308–435 B, `bytes_model.py` on the validation grid) and a shipped still AVIF
+carries roughly **550–680 bytes that do not scale with area**.
+
+---
+
+## 8. The full sweep: sizing it, and why the ladder set moves
+
+`run_full_sweep.sh` is the launchable grid; `run_topup_1024.sh` extends the
+frontier at the slow end. Both carry their reasoning in the file header. The
+short version:
+
+**The rung set has to move with image size, and with the arm.** Measured on the
+sizing probe (`benchmarks/encode_rd_probe_ladder_2026-08-08.tsv`, every rung of
+every arm at 256 and 1024):
+
+| | four-way time overlap |
+|---|---|
+| 256 px | 11.8 – 136 ms |
+| 1024 px | 103 – 1252 ms |
+
+At 1024 `zenrav1e` **cannot** go faster than 103 ms (its s10) while `svtc`
+reaches 7.8 ms, and `svtc` cannot go slower than 1252 ms (its p0) while
+`zenrav1e` reaches 37.9 s. A single `--ladder` list cannot express that — hence
+`--ladder-map`. Running one process per arm instead would break the arm
+interleaving the timing discipline depends on, so the map lives inside one run.
+
+**Two ladder facts fell out of the probe, both verified at two sizes with
+≤3.7 % spread:**
+
+- **`zenrav1e` s4 and s5 are strictly dominated by s3** — slower *and* larger
+  (1024: s3 6796 ms / 61009 B, s4 10637 ms / 62000 B, s5 10566 ms / 61963 B).
+  The speed ladder is non-monotone in both time and size across s3–s5.
+- **`svtc` / `svtrs` presets 10–13 are byte-identical to preset 9** and take the
+  same time. The SVT still-picture ladder has **10** distinct rungs, not 14.
+
+Also: `aom --cpu-used` 5→6 is a **4.5× time cliff** at 1024 (358 → 80 ms).
+
+## 9. Identity is a hash, not a byte count
+
+Section A1 of `analyze_matched.py` compares `bytes_av1`, a *count*. Count
+agreement is suggestive, not identity — and on the probe it was actively
+misleading: `svtc` and `svtrs` matched on count at 1024 rung 4 (6179 B both),
+rung 5 (6386 B both) and rung 8 (7294 B both) while the payloads differed in
+thousands of bytes. `payload_identity.py` hashes instead, and reports the offset
+of the first differing byte so a header-only difference is distinguishable from
+a coefficient one.
+
+On the probe: **13/13 identical at 256 px, 0/13 identical at 1024 px**, headers
+matching and divergence beginning in tile data (first differing byte 112 and
+4473 on two of them). The divergence is size-dependent, which is a sharper
+statement than a pooled ratio can make.
+
+## 10. The other tools
+
+| tool | question it answers |
+|---|---|
+| `analyze_matched.py` | at time T, how do two arms compare at ONE quality target (plus the time-axis α+β fit, spans, spread, cost) |
+| `bdrate_matched.py` | BD-rate at matched time — the *integral* over a quality range, plus the who-wins-where decision table. Time budgets default to per-size `auto`: a fixed ms budget is unreachable at 64 px and trivial at 1024, so a fixed grid reads `n/a` nearly everywhere |
+| `bytes_model.py` | the byte-axis α+β fit, which the discipline asks for alongside the time one and which `analyze_matched.py` does not do |
+| `payload_identity.py` | cross-arm identity by hash |
+| `merge_and_analyze.sh` | concatenate the per-tier TSVs and run all of the above |
+
 ---
 
 ## Prerequisites
