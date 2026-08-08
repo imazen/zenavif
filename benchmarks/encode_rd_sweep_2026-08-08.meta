@@ -1,0 +1,106 @@
+# encode_rd — the full matched-wall-clock encode RD sweep
+
+harness: scripts/encode_rd/{run_grid.py, run_full_sweep.sh, analyze_matched.py,
+         bdrate_matched.py, bytes_model.py, payload_identity.py,
+         merge_and_analyze.sh} + examples/rd_tool.rs
+         + zenavif-serialize/examples/container_cost.rs
+methodology: scripts/encode_rd/README.md — read it before quoting a number
+commit: SEE THE TSV HEADER (each tier records its own)
+date: 2026-08-08
+
+## READ THIS FIRST — what is NOT covered
+
+1. **4096 px is not covered for photo or line-art, and 2048 px is not in the RD
+   grid at all.** No local photo source exceeds 2048 px (clic2025 is natively
+   2048) and no local line-art source exceeds 796 px (`gb82-sc/graph.png`; the
+   CID22 charts are 512). `rd_tool prep` refuses to upscale — fabricated
+   high-frequency detail is not something an encoder should be judged on — so
+   the tier simply does not exist on this box. The RD grid is 64 / 256 / 1024.
+   The size model reaches 2048 (photo + screen) and 4096 (screen only, from
+   `qoi-benchmark/screenshot_web`, the only local sources over 2940 px), on a
+   reduced rate grid.
+2. **The `zenrav1e` arm is the rav1e CLI, NOT zenavif's encode path.** Same
+   encoder core, different search configuration: zenavif goes through
+   zenravif's `SpeedTweaks`, which pins `complex_prediction_modes=false` and
+   `encode_bottomup=false`, caps `non_square_partition_max` at 8 for speed>=4,
+   collapses `partition_range` to (16,16) at speed>=9, gates CDEF/LRF on the
+   quantizer, and maps quality->quantizer through its own curve
+   (`src/encode_plan.rs`). Percent-level RD differences are expected. Plane 2
+   (PNG -> AVIF through zenavif / cavif / avifenc) is still not wired.
+3. **12 images: 5 photo, 4 screen, 3 line-art.** That is n=5/4/3 per class in
+   every aggregate. The sweep discipline asks for 50 per class for percentile
+   fits; that is a fleet job, not a laptop job. Image count was the axis cut,
+   per the instruction to reduce images before reducing q or size resolution —
+   the 20-point rate grid and the size tiers are intact.
+4. **zenrav1e speeds 0-5 are not in the RD grid at 1024**, and 0-2 not at 256.
+   s3 costs 6.8 s per encode at 1024, i.e. 2.1 h per image at full rate
+   density. Consequence: at 1024 the zenrav1e frontier ends at ~1.1 s and the
+   analysis correctly refuses to compare it above that. The full ladder IS
+   measured in `encode_rd_probe_ladder_2026-08-08.tsv` at 2 reps.
+5. **8-bit, 4:2:0, 1 thread, 1 tile, CQP only.** No 10-bit, no alpha, no
+   animation, no thread-count axis, no tiling axis. Tiling changes the
+   bitstream, so folding threads into the time axis would trade RD for speed
+   silently.
+6. **Not niced, but the box was not empty.** Median 0.37 of 12 cores busy with
+   foreign work during timed samples (p90 0.65, p99 1.46, max 4.33); the
+   free-core gate never had to wait. Two builds ran on the box: `rd_tool`
+   before the sweep started, and a 7-second `container_cost` build during rep 2
+   of the 64 px tier. Both niced. Five rotated reps and a median absorb it, but
+   it is on the record rather than claimed away.
+
+## Host and configuration
+
+host: Apple M4 Pro, 8 performance + 4 efficiency cores, 24 GB, macOS 26.5.2
+scheduling gate: every tier verified NOT to be in the darwin background QoS
+    class before measuring (calibration loop 5.7-6.0x slower when explicitly
+    backgrounded). See scripts/encode_rd/README.md section 3 — on macOS `nice`
+    costs 4% and background QoS costs 5.9x, and they are different mechanisms.
+time  = full process wall clock, never niced, median of 5 rotated reps.
+bytes = bytes_av1, the AV1 payload with the IVF container stripped (44 B for a
+        still). Two arms write IVF and one writes bare OBU, so comparing file
+        size would hand the OBU arm 44 free bytes.
+config: 8-bit 4:2:0, one key frame, still-picture, 1 thread, 1 tile, CQP,
+        every adaptive-QP / psychovisual layer at each encoder's own default.
+
+## Grid
+
+sizes:  64, 256, 1024 long-edge cap (RD grid); + 2048, 4096 (size model only)
+rates:  each arm's own 20-point quantizer grid, spaced for even ACHIEVED
+        QUALITY (~7 ssim2 steps from ~92 down to ~15), NOT even knob spacing
+reps:   5, interleaved, visit order rotated per rep
+images: photo    clic2025/training/{4cd6910a, 7e499613, ddcd24d9, 14ab4af2,
+                 1e2f9d41} — picked at evenly spaced quantiles of PNG
+                 bytes/pixel (0.189 to 2.363) so the five are not one texture
+        screen   gb82-sc/{codec_wiki, gui, terminal},
+                 qoi-benchmark/screenshot_web/en.wikipedia.org
+        line-art gb82-sc/graph, CID22/{Boxplot, newplot}
+
+ladders — DIFFERENT PER SIZE AND PER ARM, which is the whole point:
+
+    64    zenrav1e 10,9,8,7,6,3,2,1,0   aom 9..0   svtc 9..0   svtrs 9..0
+    256   zenrav1e 10,9,8,7,6,3         aom 9,8,7,6,5,4,3,2,0  (svtc, svtrs same)
+    1024  zenrav1e 10,9,8,7,6           aom 9,8,6,5,4,2
+          svtc 9,8,7,6,5,4,3,2,0        svtrs 9,8,7,6,5,4,3
+
+Justification, all measured on the sizing probe:
+  * four-way time overlap is 11.8-136 ms at 256 and 103-1252 ms at 1024, so the
+    rung set has to move with size or the comparison has nothing to stand on.
+  * zenrav1e s4/s5 are STRICTLY DOMINATED by s3 (slower AND larger at both
+    sizes) — a dominated rung is never the right choice, so paying full rate
+    density for it buys nothing. Kept in the probe as the evidence.
+  * svtc/svtrs presets 10-13 are byte-identical to preset 9 and cost the same.
+    The SVT still-picture ladder has 10 distinct rungs, not 14.
+
+## Files
+
+encode_rd_sweep_2026-08-08.tsv.zst        the RD grid (64/256/1024)
+encode_rd_sweep_fit_2026-08-08.tsv.zst    the size model grid (adds 2048/4096)
+encode_rd_sweep_floor_2026-08-08.tsv      the 4:2:0 round-trip ceiling per input
+encode_rd_sweep_analysis_2026-08-08.txt.zst   analyze_matched + bdrate + bytes
+encode_rd_probe_ladder_2026-08-08.tsv     the full-ladder sizing probe
+Encoded bitstreams: content-addressed <sha256>.{ivf,obu}. Every row carries its
+enc_sha256, so a scalar score can be rejoined to the exact bitstream forever.
+
+## Results
+
+FILLED IN AFTER THE RUN — see the sections below.
