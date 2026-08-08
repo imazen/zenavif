@@ -207,27 +207,37 @@ That constant is not hand-waved away. It is **measured**, via the size sweep the
 project's sweep discipline mandates anyway. But the measurement produced a
 result worth stating up front:
 
-> **`t = α + β·pixels` does not hold across a 256× pixel range.** Per-pixel
-> encode cost *falls sharply* with image size — measured on the probe, `svtc`
-> preset 8 costs **843 ms/MP at 64×64 and 35 ms/MP at 576×576**, a 24× swing
-> for one arm at one ladder rung; `aom` cpu-used 4 swings 2921 → 2177 ms/MP.
-> The log-log exponent is 0.27–0.92 (all sub-linear). For `aom` cpu-used 4 the
-> curvature is strong enough that the least-squares intercept comes out
-> **negative** (−14.75 ms), which is not an overhead but proof the straight
-> line is the wrong shape — despite r² = 0.997, because with three points
-> spanning 256× the largest point dominates the fit and a high r² proves
-> nothing.
+> **Per-pixel encode cost is not constant — it falls sharply with image size.**
+> On the committed validation grid, `svtc` preset 8 costs **1066 ms/MP at
+> 64 px and 14 ms/MP at 1024 px**, a 76× swing for one arm at one ladder rung.
+> `aom` cpu-used 4 swings 2540 → 679 ms/MP. Every log-log exponent is
+> sub-linear (**0.20–0.86**). So a `ms/MP` figure quoted from one size is wrong
+> at every other size, by up to two orders of magnitude.
 
 So section C reports three things, in this order:
 
 - **C1 — the per-size table.** Median ms and ms/MP at each size. This is the
   honest primary: any single ms/MP figure is wrong at every size but one.
-- **C2 — the `α + β·MP` fit**, with r², the log-log exponent, and α as a
-  percentage of a 1 MP encode. It flags `alpha<0: LINEAR MODEL REJECTED`.
-- **C3 — a local α from the two smallest sizes only**, where the curve really
-  is near-linear. This is the usable estimate of genuine fixed cost: it lands
-  at **3.0–5.7 ms for every arm** (spawn + init + parse + write), except
-  zenrav1e at its slowest rung.
+- **C2 — the `α + β·MP` fit**, one fit **per image**, then aggregated. Per
+  image is not a nicety: two different images at the same `size_tag` have
+  slightly different pixel counts (graph@64 = 2432 px, codec_wiki@64 =
+  2560 px), so pooling them puts two near-identical x values with different
+  content into one regression and the slope explodes. Pooled, this table
+  produced a **negative** α — an impossible "overhead" — at r² = 0.99. Per
+  image, all 36 fits land at r² 0.994–0.999 with **zero** negative α.
+- **C3 — a local α from each image's two smallest sizes**, where the curve
+  really is near-linear, median over images. This is the usable estimate of
+  genuine fixed cost: **2.85–4.54 ms for every arm** (spawn + init + parse +
+  write), the lone exception being zenrav1e's slowest rung at 9.74 ms.
+
+Note what C3 settles: `svtrs`'s α is **not** higher than the y4m arms' despite
+its PNG decode, so the process-wall definition is not quietly taxing it. The
+PNG cost scales with pixels and therefore lands in β, where it is bounded by a
+direct measurement of the same work: `rd_tool prep` (PNG decode + RGB→I420 +
+writes, strictly more than `identity_run` does) takes **2.08 ms at 64 px and
+11.52 ms at 1024 px**. Subtracting it makes the Rust port look *worse*, not
+better, because removing a fixed cost from both sides amplifies the ratio —
+which is the honest direction and is why it is stated rather than buried.
 
 Two cross-checks on α, both recorded per cell:
 
