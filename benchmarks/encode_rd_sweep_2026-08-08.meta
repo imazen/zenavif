@@ -136,6 +136,57 @@ Progress streams continuously to `$OUT/prog_<tier>.tsv` (one flushed line per
 timed encode) and the clocks are checkpointed to `prog_<tier>.ckpt.json` after
 every rep, so an interrupted multi-hour tier is not a total loss.
 
-## Results
+## Results — 64 px tier (9,360 cells, 46,800 encodes, 1,978 s, 0 failed)
 
-FILLED IN AFTER THE RUN — see the sections below.
+Every cell kept all 5 reps; 0 samples dropped for foreign CPU; **0 samples ever
+waited** for the free-core gate. (The run summary's "869 s waiting" is the cost
+of the `ps -Ao pid,%cpu,comm -r` poll taken before every sample — 18.6 ms x
+46,800 — not contention. It sits outside the timed region so it cannot
+contaminate a measurement, but it inflates sweep wall cost by ~44% at 64 px,
+where the poll costs about what the encode does.)
+
+Timing spread at 64 px: **median 5.36 %, p90 12.67 %, max 226 %** — far worse
+than the 1.2-3.7 % the validation grid saw at larger sizes, because jitter is
+roughly constant in milliseconds and these encodes are 1-5 ms. **Treat any 64 px
+difference under ~13 % as unmeasurable.**
+
+### Ranking at matched wall clock, 64 px
+
+Four-way time overlap 5.3-12.7 ms. Ratio of bytes to the per-point best arm,
+geometric mean over the COMMON support (the (image, quality) points where every
+arm reaches the budget); 1.000 = on the frontier everywhere.
+
+    line-art  5.3 ms  n=24  aom 1.026  svtc 1.070  svtrs 1.190  zenrav1e 1.423
+    line-art 12.7 ms  n=25  aom 1.050  svtc 1.213  svtrs 1.291  zenrav1e 1.409
+    photo     5.3 ms  n=30  svtc 1.038  aom 1.087  svtrs 1.135  zenrav1e 1.229
+    photo    12.7 ms  n=51  svtc 1.008  aom 1.045  svtrs 1.086  zenrav1e 1.261
+    screen    5.3 ms  n=22  svtc 1.058  aom 1.078  svtrs 1.164  zenrav1e 1.501
+    screen   12.7 ms  n=25  aom 1.006  svtc 1.081  svtrs 1.126  zenrav1e 1.467
+
+**zenrav1e is last in every class at every budget, by 23-50 %** (and 89 % in the
+worst screen row) — an order of magnitude outside the 13 % noise floor. svtrs
+(pure-Rust SVT) beats it by a wide margin everywhere. aom and svtc trade first
+place and their gap is often inside the noise floor.
+
+Read this with the overhead table above: at 64 px roughly half to nine tenths of
+the budget is process spawn, so what the ranking really says is "given ~2-9 ms
+of actual encoding, who spends it best".
+
+### The 4:2:0 floor at 64 px is the dominant cost for some content
+
+ssim2 of the unencoded source through the harness colour pair (ceiling for the
+product, and why the analysis defaults to `*_floor`):
+
+    codec_wiki   26.9      ddcd24d9 (photo)  27.5      7e499613 (photo)  52.5
+    gui          54.9      terminal          57.0      graph (line-art)  71.2
+    Boxplot      74.6      newplot           84.9      1e2f9d41 (photo)  89.4
+    4cd6910a     90.1      en.wikipedia.org  91.8
+
+On the worst two, **4:2:0 chroma alone costs more quality than any encoder
+choice does**. Nothing in this sweep tests 4:4:4 — every arm is pinned to 4:2:0 —
+so this is a measurement, not a recommendation, but it is the strongest
+follow-up the grid points at.
+
+## Results — 256 and 1024 px tiers
+
+FILLED IN AS THE TIERS LAND.
