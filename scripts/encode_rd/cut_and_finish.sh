@@ -16,17 +16,26 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OUT="${OUT:-$HOME/tmp/encrd2}"
 export OUT RD_TOOL="${RD_TOOL:-$REPO/target/release/examples/rd_tool}"
-SKIP_TOPUP=0; SKIP_FIT=0
+SKIP_TOPUP=0; SKIP_FIT=0; KILL_INFLIGHT=0
 for a in "$@"; do
   [ "$a" = "--skip-topup" ] && SKIP_TOPUP=1
   [ "$a" = "--skip-fit" ] && SKIP_FIT=1
+  # Only correct when the in-flight tier has just STARTED — then the encodes
+  # discarded are seconds, not hours. Never use it mid-tier.
+  [ "$a" = "--kill-inflight" ] && KILL_INFLIGHT=1
 done
 
 echo "=== $(date -u +%H:%M:%SZ) CUT: stopping the driver loop" | tee -a "$OUT/sweep.log"
 pkill -f run_full_sweep.sh 2>/dev/null
-# Let the in-flight run_grid.py finish and write its tier; killing it would
-# throw away every encode it has already paid for.
-if pgrep -f 'run_grid.py' >/dev/null 2>&1; then
+if [ $KILL_INFLIGHT -eq 1 ]; then
+  if pgrep -f 'run_grid.py' >/dev/null 2>&1; then
+    echo "    --kill-inflight: dropping the tier that just started" | tee -a "$OUT/sweep.log"
+    pkill -f 'run_grid.py' 2>/dev/null
+    sleep 3
+  fi
+elif pgrep -f 'run_grid.py' >/dev/null 2>&1; then
+  # Let the in-flight run_grid.py finish and write its tier; killing it would
+  # throw away every encode it has already paid for.
   echo "    waiting for the in-flight tier to write its TSV (not killing it)" \
     | tee -a "$OUT/sweep.log"
   while pgrep -f 'run_grid.py' >/dev/null 2>&1; do sleep 20; done
