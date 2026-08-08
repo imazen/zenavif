@@ -200,6 +200,45 @@ def main() -> int:
             px = med([float(r["px"]) for r in ok if r["size_tag"] == s])
             row.append(f"{al * 8 / px:>13.4f}")
         print(f"    {a:<10}{al:>10.1f}" + "".join(row))
+    # ------------------------------------------------------------ B5 --------
+    # B2's alpha is NOT a header cost when the size span is wide. At fixed
+    # quantizer, bytes are strongly sub-linear in pixels (exponent ~0.73-0.78
+    # measured), so a single straight line over three decades of pixel count
+    # cannot fit, and least squares dumps the curvature into the intercept —
+    # producing a "fixed cost" of several kilobytes, which is nonsense for an
+    # AV1 still and is nearly identical across all four arms precisely because
+    # it is an artifact of the shared curve shape rather than an encoder
+    # property. analyze_matched.py C2/C3 flag the same trap on the time axis;
+    # this is its byte-axis counterpart.
+    print("\n=== B5. the fixed cost done HONESTLY: a local fit over the two smallest")
+    print("    sizes, and a hard empirical bound. Prefer these to B2's intercept")
+    print("    whenever the exponent above is far from 1.0. ===")
+    print(f"    {'arm':<10}{'rung':>5}{'local_alpha_B':>15}{'min_payload_B':>15}"
+          f"{'  (min = smallest bytes_av1 anywhere in the grid)':<0}")
+    for a in arms:
+        for lad in sorted({int(r["ladder"]) for r in ok if r["arm"] == a}):
+            loc = []
+            for img in sorted({r["image"] for r in ok}):
+                for rate in sorted({int(r["rate"]) for r in ok if r["arm"] == a}):
+                    pts = {}
+                    for r in ok:
+                        if (r["arm"] == a and int(r["ladder"]) == lad
+                                and r["image"] == img and int(r["rate"]) == rate):
+                            pts[float(r["px"]) / 1e6] = float(r[args.bytes_col])
+                    if len(pts) < 2:
+                        continue
+                    xs = sorted(pts)[:2]
+                    al, _, _ = linfit(xs, [pts[x] for x in xs])
+                    if al is not None:
+                        loc.append(al)
+            mn = min((float(r[args.bytes_col]) for r in ok
+                      if r["arm"] == a and int(r["ladder"]) == lad), default=None)
+            if loc and mn is not None:
+                print(f"    {a:<10}{lad:>5}{med(loc):>15.1f}{mn:>15.0f}")
+    print("\n    The minimum observed payload is the only assumption-free statement")
+    print("    available here: a whole still bitstream, headers included, fits in")
+    print("    that many bytes, so the fixed part cannot exceed it.")
+
     print("\n    Container bytes are NOT in any of this: every figure is bytes_av1,")
     print("    the AV1 payload with the IVF wrapper stripped. An AVIF file adds its")
     print("    own ISOBMFF boxes on top — measured separately in the meta.")
