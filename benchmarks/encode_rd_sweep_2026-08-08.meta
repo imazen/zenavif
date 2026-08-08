@@ -187,6 +187,24 @@ choice does**. Nothing in this sweep tests 4:4:4 — every arm is pinned to 4:2:
 so this is a measurement, not a recommendation, but it is the strongest
 follow-up the grid points at.
 
-## Results — 256 and 1024 px tiers
+### BD-rate at matched wall clock, 64 px
+
+Integral over the quality range, not a single slice. Negative = A needs fewer
+bytes at equal quality AND equal measured encode time. Median over images.
+
+    A vs B            budget   line-art        photo         screen
+    aom vs zenrav1e    5.3 ms  -20.67 (n=3)  -11.58 (n=4)  -21.46 (n=4)
+    aom vs zenrav1e    9.5 ms  -39.25 (n=3)  -21.23 (n=5)  -24.72 (n=4)
+    aom vs svtrs       5.3 ms  -12.07 (n=3)   -6.24 (n=5)   -7.69 (n=4)
+    aom vs svtrs       9.5 ms  -20.54 (n=3)   -3.39 (n=5)   -9.24 (n=4)
+    aom vs svtc        5.3 ms   -5.07 (n=3)   +2.43 (n=5)   +3.06 (n=4)
+    aom vs svtc        9.5 ms   -9.55 (n=3)   +6.82 (n=4)   -6.15 (n=4)
+
+The ordering is stable and large where it matters: **zenrav1e needs 12-39 % more
+bytes than aom for the same quality at the same spend**, and svtrs sits between
+them. aom vs svtc is the only pair that changes sign with content — svtc wins on
+photo by 2-7 %, aom wins on line-art by 5-10 %.
+
+## Results — 256, 1024, 2048 and 4096 px tiers
 
 FILLED IN AS THE TIERS LAND.
