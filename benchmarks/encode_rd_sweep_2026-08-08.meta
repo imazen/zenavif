@@ -205,6 +205,69 @@ bytes than aom for the same quality at the same spend**, and svtrs sits between
 them. aom vs svtc is the only pair that changes sign with content — svtc wins on
 photo by 2-7 %, aom wins on line-art by 5-10 %.
 
-## Results — 256, 1024, 2048 and 4096 px tiers
+## Results — 1024 px tier (2,160 cells, 0 failed, all 5 reps kept)
 
-FILLED IN AS THE TIERS LAND.
+4 images: 4cd6910a + ddcd24d9 (photo), codec_wiki (screen), graph (line-art, its
+source caps at 796 px so it is tagged 796). n=2 photo / 1 screen / 1 line-art —
+the cut recorded above.
+
+**This is the tier the decision rests on, and the instrument is at its best
+here:**
+
+    timing spread   median 1.96 %, p90 5.34 %      (64 px: 5.36 % / 12.67 %)
+    overhead share  0.2-1.9 % on the slow rungs    (64 px: 46-90 %)
+                    12-36 % only on the fastest rungs
+    4-arm overlap   79.8-704.8 ms @1024, 41.1-412.8 ms @796 — a 9x window
+
+### Reach is itself a result
+
+Quality-grid points (of 35) each arm can reach at each budget, median over
+images. An arm missing from a budget is not losing — it *cannot spend that long,
+or go that fast*:
+
+    @1024        79.8ms  164.9ms  341.0ms  704.8ms
+      svtc           35       35       35       33
+      svtrs          35       35       35       27
+      aom            29       28       28       23
+      zenrav1e        6       35       34       15
+
+**zenrav1e is the only arm that cannot populate either end.** Its ladder bottoms
+out near 80 ms and its useful top is ~700 ms; svtc spans 8 ms to 2.1 s.
+
+### Ranking at matched wall clock, 1024 px
+
+Bytes relative to the per-point best arm, geometric mean over common support:
+
+    line-art @796   41.1 ms  n=29  svtc 1.000  aom 1.167  svtrs 1.327  [zenrav1e n/r]
+    line-art @796   88.7 ms  n=29  svtc 1.000  aom 1.133  svtrs 1.244  zenrav1e 2.342
+    photo    @1024 164.9 ms  n=58  svtc 1.005  aom 1.102  svtrs 1.139  zenrav1e 1.460
+    photo    @1024 341.0 ms  n=61  svtc 1.005  aom 1.073  svtrs 1.097  zenrav1e 1.282
+    photo    @1024 704.8 ms  n=23  svtc 1.018  aom 1.041  svtrs 1.081  zenrav1e 1.252
+    screen   @1024  79.8 ms   n=6  svtc 1.000  aom 1.087  svtrs 1.161  zenrav1e 2.913
+    screen   @1024 341.0 ms  n=17  svtc 1.001  aom 1.065  svtrs 1.117  zenrav1e 1.457
+
+**svtc is on the frontier at essentially every point (1.000-1.018) in every
+class at every budget.** Order is svtc < aom < svtrs < zenrav1e, and it does not
+change with content or quality band at this size.
+
+### BD-rate at matched wall clock, 1024 px
+
+    A vs B             budget    line-art@796   photo@1024   screen@1024
+    aom vs svtc         ~80 ms      +16.47        +15.60        +9.71
+    aom vs svtc        ~340 ms      +11.09         +6.71        +7.44
+    aom vs svtc        ~705 ms       +5.76         +6.65        +5.50
+    svtc vs svtrs       ~80 ms      -23.95        -13.22       -17.42
+    svtc vs svtrs      ~705 ms       -9.42         -6.32       -11.30
+    aom vs svtrs        ~80 ms      -12.17         -5.12       -10.72
+    aom vs svtrs       ~705 ms       -8.03         -0.74        -2.74
+    svtc vs zenrav1e    ~80 ms      -52.72        -37.04       -55.69
+    svtc vs zenrav1e   ~340 ms      -37.85        -11.28       -26.22
+    aom vs zenrav1e    ~340 ms      -34.32         -5.34       -26.59
+
+**The sign of aom-vs-svtc flips between sizes.** At 64 px aom beat svtc on photo
+by 2-7 %; at 1024 px svtc beats aom on photo by 6-16 %. A single-size benchmark
+would have got this backwards.
+
+## Results — 256, 2048 and 4096 px tiers
+
+NOT LANDED at the time of writing — see the not-covered list.
