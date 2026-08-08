@@ -284,6 +284,10 @@ CONTENT = {
     "clic2025": "photo",
     "CID22": "photo",
     "gb82-sc": "screen",
+    # Full-page web screenshots (qoi-benchmark). Same class as gb82-sc, but
+    # these are the only local sources whose long edge exceeds 2940 px, so they
+    # are what carries the top size tier.
+    "screenshot_web": "screen",
 }
 
 
@@ -513,6 +517,14 @@ def main() -> int:
                     help="seconds to wait per sample for the box to go idle before giving up")
     ap.add_argument("--verify-yuv", action="store_true",
                     help="assert identity_run's I420 == rd_tool's, byte for byte")
+    ap.add_argument("--ladder-map", default="",
+                    help="per-arm ladders: 'aom:2,4,6;svtc:0,4,8;...'. Overrides --ladder. "
+                         "Every selected arm must be listed. A matched-TIME sweep needs "
+                         "different rungs per arm — they are the ones that populate the "
+                         "shared time overlap — and one --ladder list cannot express that.")
+    ap.add_argument("--progress", default="",
+                    help="append one line per timed encode here, flushed. A multi-hour run "
+                         "with output only at the end is a run whose stall you find at hour 6.")
     args = ap.parse_args()
 
     rd = require("RD_TOOL")
@@ -533,6 +545,31 @@ def main() -> int:
             a.rates = sorted(set(g[::args.rate_stride] + [g[0], g[-1]]))
         if args.ladder:
             a.ladder = [int(x) for x in args.ladder.split(",")]
+
+    # Per-arm ladder override. One shared --ladder list is wrong for a
+    # matched-TIME sweep: the arms' rungs are not comparable, so the rungs that
+    # populate the shared time overlap are a DIFFERENT set on each arm (and
+    # `--ladder 10` is not even legal on aom, whose ladder stops at 9). Running
+    # one process per arm instead would break the interleaving the timing
+    # discipline depends on, so the map lives inside one run.
+    if args.ladder_map:
+        seen = set()
+        for spec in args.ladder_map.split(";"):
+            spec = spec.strip()
+            if not spec:
+                continue
+            nm, _, rungs = spec.partition(":")
+            nm = nm.strip()
+            if nm not in all_arms:
+                sys.exit(f"--ladder-map: unknown arm {nm!r}")
+            seen.add(nm)
+            for a in arms:
+                if a.name == nm:
+                    a.ladder = [int(x) for x in rungs.split(",") if x.strip()]
+        missing = [a.name for a in arms if a.name not in seen]
+        if missing:
+            sys.exit(f"--ladder-map given but says nothing about {','.join(missing)}; "
+                     "list every selected arm so no rung set is silently a default")
 
     workdir, artdir = Path(args.workdir), Path(args.artifacts)
     workdir.mkdir(parents=True, exist_ok=True)
@@ -623,7 +660,17 @@ def main() -> int:
     t_start = time.time()
     stats = {"enc": 0, "dropped": 0, "waited": 0.0}
 
-    def take_sample(idx: int) -> None:
+    # Continuous progress. One flushed line per timed encode, so `tail -f`
+    # shows a stall within a cell's own duration rather than at the end of the
+    # run. Cheap: a few hundred bytes per encode.
+    prog = open(args.progress, "a", buffering=1) if args.progress else None
+    if prog:
+        prog.write(f"# encode_rd progress {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} "
+                   f"cells={len(cells)} reps={args.reps}\n")
+        prog.write("elapsed_s\tphase\tdone\ttotal\tcell\timage\tsize\tarm\tladder\trate\t"
+                   "ms\tbytes_av1\twaited_s\tfcores\n")
+
+    def take_sample(idx: int, phase: str = "rep") -> None:
         c = cells[idx]
         if c["fail"]:
             return
@@ -636,6 +683,11 @@ def main() -> int:
                 a.argv(a.binpath, p, c["rate"], c["lad"], out), out)
         except RuntimeError as e:
             c["fail"] = str(e)[:200]
+            if prog:
+                prog.write(f"{time.time()-t_start:.1f}\t{phase}\t{stats['enc']}\t"
+                           f"{len(cells)*args.reps}\t{idx}\t{p.src.name}\t{p.size_tag}\t"
+                           f"{a.name}\t{c['lad']}\t{c['rate']}\tFAIL\t\t"
+                           f"{waited:.0f}\t{fcores:.2f}\n")
             return
         stats["enc"] += 1
         c["foreign"] = max(c["foreign"], fpct)
@@ -657,6 +709,11 @@ def main() -> int:
             # threaded encoders; a finding, not something to average away.
             c["fail"] = f"nondeterministic bytes {c['bytes']} vs {nbytes}"
             return
+        if prog:
+            prog.write(f"{time.time()-t_start:.1f}\t{phase}\t{stats['enc']}\t"
+                       f"{len(cells)*args.reps}\t{idx}\t{p.src.name}\t{p.size_tag}\t"
+                       f"{a.name}\t{c['lad']}\t{c['rate']}\t{ms:.3f}\t{c.get('av1','')}\t"
+                       f"{waited:.0f}\t{fcores:.2f}\n")
         if fcores > free_core_limit:
             # Not enough free cores even after waiting out the budget. Drop the
             # clock (the bytes above are still kept — a neighbour cannot change
@@ -671,9 +728,24 @@ def main() -> int:
         off = (rep * stride) % max(1, len(cells))
         order = order[off:] + order[:off]
         for idx in order:
-            take_sample(idx)
+            take_sample(idx, f"rep{rep+1}")
         print(f"  rep {rep+1}/{args.reps} done ({stats['enc']} encodes, "
               f"{time.time()-t_start:.0f}s)", file=sys.stderr)
+        # Checkpoint the raw clocks after every rep. A grid that takes hours
+        # and only materialises at the end is a grid you lose entirely to one
+        # interruption; the encodes themselves are already safe (artifacts are
+        # content-addressed as they land), but the CLOCKS live only in memory.
+        if args.progress:
+            ck = Path(args.progress).with_suffix(".ckpt.json")
+            try:
+                ck.write_text(json.dumps([
+                    {"i": i, "image": c["prep"].src.name, "size": c["prep"].size_tag,
+                     "arm": c["arm"].name, "lad": c["lad"], "rate": c["rate"],
+                     "sha": c.get("sha", ""), "av1": c.get("av1", ""),
+                     "walls": c["walls"], "fail": c["fail"]}
+                    for i, c in enumerate(cells)]))
+            except Exception as e:      # a checkpoint must never kill the run
+                print(f"  checkpoint failed (continuing): {e}", file=sys.stderr)
 
     # Top-up: a cell whose clock was contaminated is SHORT of reps, and a
     # median over 2 kept samples is not the median the rules asked for. Re-take
@@ -685,7 +757,7 @@ def main() -> int:
             break
         print(f"  top-up {attempt+1}: {len(short)} short cells", file=sys.stderr)
         for idx in short:
-            take_sample(idx)
+            take_sample(idx, f"topup{attempt+1}")
     still_short = sum(1 for c in cells if not c["fail"] and len(c["walls"]) < args.reps)
     print(f"  {stats['dropped']} samples dropped for foreign CPU >25%; "
           f"{still_short} cells still short of {args.reps} reps", file=sys.stderr)
@@ -778,7 +850,8 @@ def main() -> int:
         fh.write(f"# versions: {json.dumps(versions)}\n")
         fh.write(f"# grid: images={args.images} sizes={args.sizes} arms={args.arms} "
                  f"reps={args.reps} threads={args.threads} "
-                 f"ladder={args.ladder or 'per-arm-full'} rates={args.rates or 'per-arm-default'}\n")
+                 f"ladder={args.ladder_map or args.ladder or 'per-arm-full'} "
+                 f"rates={args.rates or 'per-arm-default'}\n")
         fh.write(f"# scheduling: calib {calib_ms:.0f} ms plain / {bg_ms:.0f} ms backgrounded "
                  f"(ratio {bg_ms/calib_ms:.1f}x); harness nice={os.nice(0)}\n")
         fh.write("# time = full process wall clock, NOT niced, median of kept reps. "
