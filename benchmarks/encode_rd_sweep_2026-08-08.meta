@@ -91,13 +91,23 @@ Justification, all measured on the sizing probe:
   * svtc/svtrs presets 10-13 are byte-identical to preset 9 and cost the same.
     The SVT still-picture ladder has 10 distinct rungs, not 14.
 
-## Files
+## Files and totals
 
-encode_rd_sweep_2026-08-08.tsv.zst        the RD grid (64/256/1024)
-encode_rd_sweep_fit_2026-08-08.tsv.zst    the size model grid (adds 2048/4096)
-encode_rd_sweep_floor_2026-08-08.tsv      the 4:2:0 round-trip ceiling per input
-encode_rd_sweep_analysis_2026-08-08.txt.zst   analyze_matched + bdrate + bytes
-encode_rd_probe_ladder_2026-08-08.tsv     the full-ladder sizing probe
+    tier          cells   encodes  failed  spread_med%  spread_p90%
+    t64            9360     46800       0         5.36        12.67
+    t256           7920     39600       0         2.28         6.51
+    t1024a         2160     10800       0         1.96         5.34
+    fit_screen      600      3000       0         2.09         8.51
+    fit_photo       480      2400       0         2.06         9.08
+    TOTAL         20520    102600       0
+
+Every cell kept all 5 reps; 0 failed anywhere; 0 timing samples dropped for
+foreign CPU across the whole sweep.
+
+encode_rd_sweep_t{64,256,1024a}_2026-08-08.tsv.zst    the RD grid
+encode_rd_sweep_fit_{screen,photo}_2026-08-08.tsv.zst the size model (2048/4096)
+encode_rd_sweep_*_floor_2026-08-08.tsv                4:2:0 ceiling per input
+encode_rd_probe_ladder_2026-08-08.tsv                 the full-ladder sizing probe
 Encoded bitstreams: content-addressed <sha256>.{ivf,obu}. Every row carries its
 enc_sha256, so a scalar score can be rejoined to the exact bitstream forever.
 
