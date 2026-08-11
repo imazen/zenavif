@@ -79,6 +79,11 @@ than the exit code.
 
 ## 4. Per-combo totals (isolated, 2026-08-11, at `8795864`)
 
+The eleven-combo table is from `8795864`; the two headline combos were
+re-measured at `87c2331` (the last test commit): `default` 81.3 % lines /
+79.6 % regions (20708/26014), `allsafe` 84.5 % lines / 83.1 % regions
+(32522/39113).
+
 Whole workspace, i.e. `zenavif` + `zenavif-parse` + `zenavif-serialize`.
 
 | combo | features | lines | regions | functions | tests |
@@ -114,10 +119,10 @@ count.
 | # | Region | Coverage (`allsafe`) | Why it matters |
 |---|---|---|---|
 | R1 | `src/decoder.rs` (legacy FFI decoder, `unsafe-asm`) | **unmeasured on this box** | A whole decode implementation with no number at all. Needs a Linux/x86-64 coverage run. |
-| R2 | `src/decoder_managed/plane_convert.rs` | 73.6 % (507/689) | Depth-generic (8/10/12/16) × alpha × gray output plumbing — wrong-pixel surface. Cold: `:203-212`, `:388-395`, `:454-464`. Untouched by this work. |
+| R2 | `src/decoder_managed/plane_convert.rs` — the **alpha** arms | 75.6 % (521/689) | Depth-generic (8/10/12/16) × alpha × gray plumbing — wrong-pixel surface. The 4:2:2 RGB arm is now hot (`:456` count 4, see §5.2); still cold are **4:2:2 *with alpha*** (`:388-395`) and **identity(GBR) with alpha** (`:203-212`, verified line-by-line 2026-08-11). Both need a fixture the in-repo encoder cannot make (4:2:2 is not in `EncodeChromaSubsampling`; identity+alpha needs an alpha aux item on an MC=0 image) — the link-u corpus has 4:2:2-with-alpha candidates. |
 | R3 | `src/decoder_managed/grid.rs` + the grid arms of `codec/decode_job.rs` (`:490-518`) | 79.4 % / 77.8 % | Grid (tiled) stitching, incl. the **streaming grid** path. No committed grid fixture — needs one before it can be tested honestly. |
 | R4 | `src/codec/streaming.rs` | 53.6 % (128/239) | The strip/streaming decoder's own error + geometry arms (`:82-89`, `:96-104`). Partially covered by the orientation/mono/gainmap streaming tests. |
-| R5 | `src/decode_av1.rs` aom seam | 66.2 % (787/1189) | `decode_av1_obu_aom_8bit`'s mono (`:679-692`) and identity (`:696-739`) arms are still cold — the aom twins of the two rav1d arms this work covered. Needs `aom-backend` + a raw-OBU driver. Also `map_aom_error`'s per-variant mapping (CLAUDE.md seam obligation #1). |
+| R5 | `src/decode_av1.rs` aom seam | 68.9 % (867/1259) | `decode_av1_obu_aom_8bit`'s mono (`:679-692`) and identity (`:696-739`) arms are still cold — the aom twins of the two rav1d arms this work covered. Needs `aom-backend` + a raw-OBU driver. Also `map_aom_error`'s per-variant mapping (CLAUDE.md seam obligation #1). |
 | R6 | `src/codec/encode_job.rs` / `codec/anim_encoder.rs` | 57.4 % / 57.9 % | Encode-adapter limit/threading/animation arms (`encode_job.rs:121-144`, `:223-244`). Cost is a refused or mis-limited encode, not wrong pixels. |
 | R7 | `src/encoder_svt_rs.rs` | 72.0 % (449/624) | Experimental backend; its own docs say the envelope is narrow. Low priority *because* it is off by default. |
 | R8 | `src/target_quality.rs` | 72.4 % (666/920) | Convergence/bracket-failure arms (`:338-347`, `:406-414`, `:421-428`, `:755-763`). Honest-`converged=false` reporting is the risk, not pixels. |
@@ -138,11 +143,20 @@ to FAIL with the quoted message, and the mutation reverted.
 | `c68b669` | `codec/threads.rs::policy_to_threads` — **0 of 6 regions in every combo** (`ResourceLimits::default()` is `Parallel`, which `effective_config` skips by design). | `policy_lowering_is_exact` (unit: the mapping, incl. all five deprecated variants) + `decode_is_byte_identical_under_every_threading_policy` (integration: a thread-dependent-output tripwire). Honest split — a wrong thread count still yields identical pixels, so the mapping *cannot* be pinned at decode level. | `Sequential => 0` → "Sequential must mean one thread, not auto" |
 | `af4f408` | `AvifDecoderConfig::with_limits` (`decode_config.rs:60-73`) — the **config-level** ResourceLimits lowering. Every existing limit test goes through the job-level `with_limits` or the native `frame_size_limit`, so the path a zencodec consumer actually reaches was cold. A silent no-op here is a decode fail-open on untrusted input (the zenavif#22 class). | `config_level_limits_bound_an_untrusted_decode` (over-limit refused, generous cap still decodes) | dropped the `max_pixels` lowering → "max_pixels = 1 must refuse a 15 px image" |
 | `f4e3299` | `decoder_managed/sink.rs` at 27.4 % — the row-sink decode path, the streaming counterpart of the buffered decode. | `row_sink_decode_is_byte_identical_to_buffered_decode` (colour 4:2:0, strict byte identity, **plus** an assertion that >1 strip was delivered so it cannot pass by measuring a whole-image conversion) and `row_sink_mono_content_matches_the_gray_path_despite_the_format_gap` | off-by-one source row in the sink's strip copy → both tests failed ("disagree on pixels at byte 145164"; "channel 0 at (0,63) is [16] but the gray path says [20]") |
+| `87c2331` | **4:2:2 had no product-level coverage at all**: the in-repo encoder emits only 4:4:4 and 4:2:0, so nothing ever decoded a 4:2:2 AVIF — the 4:2:2 dispatch arms of `plane_convert.rs` (`:454-464`) and `decode_av1::convert_to_rgb` were cold. 4:2:2 is horizontal-only chroma upsampling: its own kernel, its own edge clamp. | `raw_obu_422_matches_the_container_path` — four link-u 8-bit 4:2:2 fixtures (incl. odd-width and odd-width+odd-height, the clamp edges) decoded through BOTH plumbings (raw-OBU strip entry vs the managed decoder's plane views), exact per-pixel agreement. 8-bit deliberately: at 10 bits the two paths narrow with different rounding. | plane_convert's `Cs422` arm switched to `yuv444_to_rgb8` → "4:2:2 raw-OBU vs container decode disagree at (1,0)" |
 
-Net effect on the `default` combo: regions 75.0 % → 79.5 %, functions 62.6 % →
-64.4 %; `src/yuv_convert.rs` 74.7 % → 98.4 %, `src/codec/threads.rs` 0 % →
-100 %, `src/convert.rs` 73.2 % → 89.8 %, `src/decoder_managed/sink.rs` 27.6 % →
-48.2 %, `src/decode_av1.rs` 35.1 % → 48.8 %.
+Net effect on the `default` combo: regions 75.0 % → **79.6 %**, lines 77.0 % →
+81.3 %, functions 62.6 % → 64.2 %; `src/yuv_convert.rs` 74.7 % → 98.4 %,
+`src/codec/threads.rs` 0 % → 100 %, `src/convert.rs` 73.2 % → 89.8 %,
+`src/decoder_managed/sink.rs` 27.6 % → 48.2 %, `src/decode_av1.rs` 35.1 % →
+53.8 %. `allsafe`: 83.1 % regions (32522/39113), `plane_convert.rs` 73.6 % →
+75.6 %, `decode_av1.rs` 66.2 % → 68.9 %.
+
+Counting the top tier honestly: **8 of the 8 cold regions I could reach without
+a new committed fixture are now covered** (scalar SIMD tiers, u16-carried-8-bit
+kernels, raw-OBU mono, raw-OBU identity, RGBA16/GRAY16 narrowing, thread-policy
+lowering, config-level limits, row-sink single-image, 4:2:2 RGB). The ones I
+could NOT reach are R1-R10 above, and each names its blocker.
 
 ## 6. Not worth covering, and why
 
