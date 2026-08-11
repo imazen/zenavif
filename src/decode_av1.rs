@@ -868,6 +868,158 @@ mod tests {
         assert_eq!(rgb_byte_len(4).unwrap(), 12);
     }
 
+    /// The raw-OBU MONOCHROME arm (`convert_monochrome`) must produce the
+    /// same gray values as the container decode path.
+    ///
+    /// Two implementations of one conversion: `decode_av1_obu` reorders and
+    /// range-expands the I400 plane itself, while the product path goes
+    /// through `decoder_managed`. `convert_monochrome` measured **0
+    /// executions** across the whole feature matrix (cargo-llvm-cov,
+    /// 2026-08-11; docs/TEST_COVERAGE.md) — the mono tests all enter through
+    /// the container. Fail-loud on the fixture: it is committed under
+    /// tests/vectors/zenavif/ (no graceful skips).
+    #[test]
+    fn raw_obu_mono_matches_the_container_path() {
+        for (name, depth) in [
+            ("mono_gradient_8b_full.avif", 8u8),
+            ("mono_gradient_8b_limited.avif", 8),
+            ("mono_gradient_10b_full.avif", 10),
+            ("mono_5x3_8b_full.avif", 8),
+        ] {
+            let path = format!(
+                "{}/tests/vectors/zenavif/{name}",
+                env!("CARGO_MANIFEST_DIR")
+            );
+            let file = std::fs::read(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
+            let parser = zenavif_parse::AvifParser::from_bytes(&file)
+                .unwrap_or_else(|e| panic!("parse {name}: {e:?}"));
+            let payload = parser
+                .primary_data()
+                .unwrap_or_else(|e| panic!("primary item of {name}: {e:?}"));
+
+            // Raw-OBU arm: 1 channel out for monochrome content.
+            let (raw, w, h, channels) = decode_av1_obu(&payload)
+                .unwrap_or_else(|e| panic!("raw OBU decode of {name}: {e:?}"));
+            assert_eq!(channels, 1, "{name}: mono content must decode to 1 channel");
+            assert_eq!(
+                raw.len(),
+                w as usize * h as usize,
+                "{name}: gray plane size"
+            );
+
+            // Product path, forced to 8-bit so both sides are u8 gray.
+            let cfg = crate::config::DecoderConfig::new().prefer_8bit(true);
+            let buf = crate::decode_with(&file, &cfg, &enough::Unstoppable)
+                .unwrap_or_else(|e| panic!("container decode of {name}: {e:?}"));
+            // Native Gray8 by default; the Rgb8 arm keeps the test valid if
+            // the default output preference ever changes.
+            let container: Vec<u8> = if let Some(g) = buf.try_as_imgref::<rgb::Gray<u8>>() {
+                assert_eq!((g.width(), g.height()), (w as usize, h as usize));
+                (0..h as usize)
+                    .flat_map(|y| {
+                        let row = &g.buf()[y * g.stride()..][..w as usize];
+                        row.iter().map(|p| p.value()).collect::<Vec<_>>()
+                    })
+                    .collect()
+            } else {
+                let c = buf
+                    .try_as_imgref::<rgb::Rgb<u8>>()
+                    .unwrap_or_else(|| panic!("{name}: neither Gray8 nor Rgb8 output"));
+                assert_eq!((c.width(), c.height()), (w as usize, h as usize));
+                (0..h as usize)
+                    .flat_map(|y| {
+                        let row = &c.buf()[y * c.stride()..][..w as usize];
+                        row.iter().map(|p| p.r).collect::<Vec<_>>()
+                    })
+                    .collect()
+            };
+            for (i, (&cv, &rv)) in container.iter().zip(raw.iter()).enumerate() {
+                assert_eq!(
+                    cv,
+                    rv,
+                    "{name} (depth {depth}): raw-OBU gray {rv} != container gray {cv} at \
+                     ({x},{y}) — the two mono paths disagree",
+                    x = i % w as usize,
+                    y = i / w as usize
+                );
+            }
+        }
+    }
+
+    /// The raw-OBU IDENTITY (MC=0 / GBR) arm must put the planes back in RGB
+    /// order.
+    ///
+    /// `convert_identity_to_rgb` measured **0 executions** across the whole
+    /// feature matrix: tests/identity_roundtrip.rs covers the container path
+    /// only, so nothing checked the raw-OBU plane reorder — a rotation there
+    /// silently swaps channels. Tolerance is the same ±2 as
+    /// tests/identity_roundtrip.rs (zenrav1e#9: `with_lossless` is not yet
+    /// bit-exact); the paired swap assertion below proves that tolerance
+    /// cannot absorb a channel rotation.
+    #[cfg(feature = "encode-imazen")]
+    #[test]
+    fn raw_obu_identity_reorders_gbr_planes_to_rgb() {
+        let (w, h) = (32usize, 32usize);
+        let px: Vec<rgb::Rgb<u8>> = (0..h)
+            .flat_map(|y| {
+                (0..w).map(move |x| {
+                    let mix = |salt: u32| -> u8 {
+                        let mut v = (x as u32)
+                            .wrapping_mul(0x9E37_79B9)
+                            .wrapping_add((y as u32).wrapping_mul(0x85EB_CA6B))
+                            ^ salt;
+                        v ^= v >> 13;
+                        (v.wrapping_mul(0xC2B2_AE35) >> 16) as u8
+                    };
+                    rgb::Rgb {
+                        r: mix(1),
+                        g: mix(2),
+                        b: mix(3),
+                    }
+                })
+            })
+            .collect();
+        let img = imgref::ImgVec::new(px.clone(), w, h);
+        let cfg = crate::EncoderConfig::new()
+            .speed(6)
+            .threads(Some(1))
+            .color_model(crate::EncodeColorModel::Rgb)
+            .with_lossless(true);
+        let enc = crate::encode_rgb8(
+            img.as_ref(),
+            &cfg,
+            almost_enough::StopToken::new(almost_enough::Unstoppable),
+        )
+        .expect("identity lossless encode");
+        let parser = zenavif_parse::AvifParser::from_bytes(&enc.avif_file).expect("parse");
+        let payload = parser.primary_data().expect("primary item");
+
+        let (raw, gw, gh, channels) = decode_av1_obu(&payload).expect("raw OBU identity decode");
+        assert_eq!((gw as usize, gh as usize), (w, h));
+        assert_eq!(channels, 3, "identity content decodes to RGB");
+
+        let mut worst = 0i32;
+        let mut worst_swapped = 0i32;
+        for i in 0..w * h {
+            let (e, g) = (px[i], &raw[i * 3..i * 3 + 3]);
+            let d = |a: u8, b: u8| (i32::from(a) - i32::from(b)).abs();
+            worst = worst.max(d(e.r, g[0]).max(d(e.g, g[1])).max(d(e.b, g[2])));
+            // Same comparison with R and B swapped: what a plane rotation
+            // would look like. Keeps the ±2 tolerance honest.
+            worst_swapped = worst_swapped.max(d(e.b, g[0]).max(d(e.r, g[2])));
+        }
+        assert!(
+            worst <= 2,
+            "raw-OBU identity decode is off by {worst} (zenrav1e#9 allows 2) — plane \
+             reorder or a YCbCr matrix applied to GBR planes"
+        );
+        assert!(
+            worst_swapped > 8,
+            "the R/B-swapped comparison is only off by {worst_swapped}, so this test \
+             could not tell a channel rotation from a correct decode"
+        );
+    }
+
     #[test]
     fn invalid_data_returns_error() {
         let result = decode_av1_obu(&[0x00, 0x01, 0x02, 0x03]);
