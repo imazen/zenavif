@@ -446,4 +446,63 @@ mod tests {
             );
         }
     }
+
+    /// `AvifDecoderConfig::with_limits` must lower a caller's pixel /
+    /// dimension caps into the native `frame_size_limit` so an untrusted
+    /// decode is bounded at the CONFIG level, not just per job.
+    ///
+    /// Measured cold in every feature combo (src/codec/decode_config.rs:60-73,
+    /// 14 lines; cargo-llvm-cov 2026-08-11, docs/TEST_COVERAGE.md): the
+    /// existing limit tests all go through the job-level `with_limits`
+    /// (`decode_job.rs`) or the native `DecoderConfig::frame_size_limit`, so
+    /// this adapter-level lowering — the one a zencodec caller reaches through
+    /// `DecoderConfig::with_limits` — was never exercised. A silent no-op here
+    /// is a decode fail-open on untrusted input (the imazen/zenavif#22 class).
+    mod config_limits {
+        use super::super::AvifDecoderConfig;
+        use alloc::borrow::Cow;
+        use zencodec::ResourceLimits;
+        use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
+
+        extern crate alloc;
+
+        /// 5x3 monochrome AVIF (15 px) — the smallest committed fixture, so a
+        /// cap of 1 px is over-limit without allocating anything large.
+        const MONO_5X3: &[u8] = include_bytes!("../../tests/vectors/zenavif/mono_5x3_8b_full.avif");
+
+        fn decodes_under(limits: ResourceLimits) -> bool {
+            AvifDecoderConfig::new()
+                .with_limits(limits)
+                .job()
+                .decoder(Cow::Borrowed(MONO_5X3), &[])
+                .and_then(|d| d.decode())
+                .is_ok()
+        }
+
+        #[test]
+        fn config_level_limits_bound_an_untrusted_decode() {
+            // Baseline: no caps -> decodes.
+            assert!(
+                decodes_under(ResourceLimits::none()),
+                "the 5x3 fixture must decode with no limits set"
+            );
+            // max_pixels below the fixture -> refused.
+            assert!(
+                !decodes_under(ResourceLimits::none().with_max_pixels(1)),
+                "max_pixels = 1 must refuse a 15 px image (config-level cap ignored)"
+            );
+            // max_width x max_height below the fixture -> refused. Both must
+            // be present for the pair to lower (the `&&` in with_limits).
+            assert!(
+                !decodes_under(ResourceLimits::none().with_max_width(1).with_max_height(1)),
+                "max_width x max_height = 1x1 must refuse a 5x3 image"
+            );
+            // A generous cap must NOT refuse — otherwise the assertions above
+            // could pass with a config that rejects everything.
+            assert!(
+                decodes_under(ResourceLimits::none().with_max_pixels(1_000_000)),
+                "a 1 MP cap must still allow the 5x3 fixture"
+            );
+        }
+    }
 }
