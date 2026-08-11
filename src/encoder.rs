@@ -478,6 +478,16 @@ impl EncoderConfig {
     ///
     /// [`crate::two_pass_zensim::sb_q_scale_from_diffmap`] builds a
     /// correctly shaped map from a zensim diffmap.
+    ///
+    /// **RELEASE-GATED downstream**: forwarded through zenravif's expert
+    /// `sb_q_scale` passthrough, which is inert while
+    /// [`crate::FRAME_HINTS_LIVE`]` == false` (registry `zenrav1e` 0.1.4
+    /// has no `FrameHints`; the input lands on zenrav1e master past
+    /// 0.1.4). While the gate is off, supplied maps are accepted but not
+    /// applied — encodes stay byte-identical — so closed-loop callers
+    /// MUST check [`crate::FRAME_HINTS_LIVE`] or probe engagement
+    /// (encode with two different maps, assert the bitstreams differ)
+    /// and fail honestly instead of silently steering nothing.
     #[cfg(any(feature = "two-pass-butteraugli", feature = "two-pass-zensim"))]
     #[must_use]
     pub fn with_sb_q_scale(mut self, map: Option<Box<[f32]>>) -> Self {
@@ -906,29 +916,6 @@ impl EncoderConfig {
     #[cfg(feature = "encode-imazen")]
     pub fn fast_tier_budgets_value(&self) -> Option<crate::fast_heads::FastTierBudgets> {
         self.fast_tier_budgets
-    }
-
-    /// Per-64×64-superblock AC quantizer scale map for the color encode
-    /// (`ceil(w/64) × ceil(h/64)` factors in frame superblock raster order;
-    /// `1.0` = neutral, `< 1.0` = finer quantizer / more bits). The same
-    /// map the butteraugli two-pass driver sets internally (see
-    /// [`crate::two_pass`]); this hook lets external closed-loop callers
-    /// (e.g. the `zensim_cq_rd` target-hitting harness) supply their own
-    /// map. `None` = no map.
-    ///
-    /// **RELEASE-GATED downstream**: forwarded through zenravif's expert
-    /// `sb_q_scale` passthrough, which is inert while
-    /// [`crate::FRAME_HINTS_LIVE`]` == false` (registry `zenrav1e` 0.1.4
-    /// has no `FrameHints`; the input lands on zenrav1e master past
-    /// 0.1.4). While the gate is off, supplied maps are accepted but not
-    /// applied — encodes stay byte-identical — so closed-loop callers
-    /// MUST check [`crate::FRAME_HINTS_LIVE`] or probe engagement
-    /// (encode with two different maps, assert the bitstreams differ)
-    /// and fail honestly instead of silently steering nothing.
-    #[cfg(feature = "two-pass-butteraugli")]
-    pub fn with_sb_q_scale(mut self, map: Option<Box<[f32]>>) -> Self {
-        self.sb_q_scale = map;
-        self
     }
 
     /// The stored per-superblock quantizer scale map (see
