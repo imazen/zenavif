@@ -265,18 +265,61 @@ mod tests {
     #[test]
     fn work_that_finishes_first_tears_the_watcher_down_promptly() {
         // Regression guard for the "watcher sleeps out a full interval on every
-        // decode" shape: teardown is condvar-driven, so a no-op body must not
-        // cost anything like POLL_INTERVAL.
+        // decode" shape (the pre-condvar design: sleep POLL_INTERVAL, *then*
+        // look at `done`). Teardown here is condvar-driven — `finish()` sets
+        // `done` under the lock and notifies, and `wait_or_timeout()` re-checks
+        // `done` under the same lock before parking, so the wakeup cannot be
+        // lost — and a no-op body must therefore not cost anything like
+        // POLL_INTERVAL.
+        //
+        // What this must NOT charge us for is creating and joining the watcher
+        // thread, which is the platform's cost and not the relay's. The
+        // previous form of this test — `20 relayed no-op calls <
+        // 20 * POLL_INTERVAL` — did exactly that and failed the
+        // windows-latest leg at 27.93 ms for 20 calls (CI run 31520483088),
+        // i.e. ~1.4 ms per scope+spawn+join round trip, while *reporting* it as
+        // "teardown is waiting out the poll interval". That diagnosis was not
+        // something the measurement could support.
+        //
+        // So: measure against a control that spawns and joins a scoped thread
+        // doing nothing else, interleaved rep for rep, and compare the two
+        // MINIMA. A watcher that sleeps out the interval pays POLL_INTERVAL on
+        // *every* iteration, so it lifts the floor by a full interval —
+        // something scheduling noise on a loaded shared runner cannot do, and
+        // something a slow thread-create cannot hide, because the control pays
+        // that too. The failure message prints both numbers so a red CI run
+        // says which term grew.
         let source = StopSource::new();
-        let start = Instant::now();
-        for _ in 0..20 {
-            with_relayed_stop(&source, |_| ());
+        let reps = 20;
+        let mut relay_min = Duration::MAX;
+        let mut control_min = Duration::MAX;
+        for _ in 0..reps {
+            let t = Instant::now();
+            with_relayed_stop(&source, |token| {
+                // Anti-vacuity: a `None` here would mean we timed the
+                // no-thread fast path and proved nothing about teardown.
+                assert!(
+                    token.is_some(),
+                    "a live StopSource must be relayed — otherwise this test \
+                     measures the unstoppable fast path"
+                );
+            });
+            relay_min = relay_min.min(t.elapsed());
+
+            let t = Instant::now();
+            std::thread::scope(|scope| {
+                scope.spawn(|| {});
+            });
+            control_min = control_min.min(t.elapsed());
         }
-        let elapsed = start.elapsed();
+        let overhead = relay_min.saturating_sub(control_min);
         assert!(
-            elapsed < 20 * POLL_INTERVAL,
-            "20 relayed no-op calls took {elapsed:?}; teardown is waiting out \
-             the poll interval instead of being signalled"
+            relay_min < control_min + POLL_INTERVAL / 2,
+            "fastest of {reps} relayed no-op calls was {relay_min:?} vs \
+             {control_min:?} for a bare scoped spawn+join — the relay adds \
+             {overhead:?} on top of the platform's thread cost, and \
+             POLL_INTERVAL is {POLL_INTERVAL:?}. Teardown is waiting out the \
+             poll interval instead of being signalled."
         );
     }
 }
