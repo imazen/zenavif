@@ -677,6 +677,41 @@ mod tests {
     /// The extraction the module drives must agree with the one C's own
     /// rustdoc names. If zensim ever makes these differ, this fails rather
     /// than silently scoring a different vector.
+    ///
+    /// # Why every pairing here is an invariant zensim promises
+    ///
+    /// Both sides reach ONE zensim function with identical arguments (traced
+    /// at the pinned rev `a390a182`):
+    /// `Zensim::compute_folded720_features_streaming` forwards straight to
+    /// `feature_v2::compute_folded720_streaming_impl(src, dst, self.max_pixels,
+    /// self.parallel, toggles, scratch)` (metric.rs:1760-1775), and
+    /// `Zensim::compute_folded720_append2_features` reaches the *same* function
+    /// via `compute_folded720_append2_impl` — which forces exactly the two
+    /// toggles `toggles_944()` sets (feature_v2.rs:5671-5683) — then
+    /// `compute_folded720_impl_with_toggles`, which is nothing but
+    /// `let mut scratch = V2Scratch::new();` plus that same call
+    /// (feature_v2.rs:4993-5009). The materialized walk these wrappers used to
+    /// run was deleted at zensim's C5 switchover; the pair entries route to the
+    /// streaming walk now.
+    ///
+    /// So the ONLY thing that differs between these calls is which `V2Scratch`
+    /// instance they were handed — and zensim's rustdoc calls the output
+    /// "bit-for-bit" / "BITWISE equal", gated upstream by
+    /// `streamed_foldapp_bitwise_vs_materialized` (which compares `to_bits()`,
+    /// but only for the 720 and 924 layouts — the 944/append2 toggle set this
+    /// module drives has no upstream bitwise gate).
+    ///
+    /// The four pairings are therefore all promises, checked at one tolerance
+    /// and reported TOGETHER rather than short-circuiting on the first, so a
+    /// single failing run says which promise broke: determinism under scratch
+    /// reuse, independence from the scratch instance, streaming-vs-wrapper, and
+    /// determinism of the wrapper. **This is a known-red leg on
+    /// aarch64-unknown-linux-gnu**: CI run 31520483088 (ubuntu-24.04-arm)
+    /// reported `feature 0 differs: streaming 0.07713405512428531 vs direct
+    /// 0.07713198829312912` (2.7e-5 relative) while x86_64-linux,
+    /// aarch64/x86_64-darwin and aarch64-windows all passed, and macOS aarch64
+    /// reproduces none of it in 60/60 runs. Reported upstream; the tolerance
+    /// here is deliberately NOT widened to hide it.
     #[test]
     fn streaming_and_direct_folded944_agree() {
         let (w, h) = (96usize, 96usize);
@@ -689,20 +724,75 @@ mod tests {
         let streamed = z
             .compute_folded720_features_streaming(&ss, &ds, toggles_944(), &mut scratch)
             .unwrap();
+        // Same scratch, second call: pins that the walk resets what it reuses.
+        let reused_scratch = z
+            .compute_folded720_features_streaming(&ss, &ds, toggles_944(), &mut scratch)
+            .unwrap();
+        // A different fresh scratch: pins independence from the instance, which
+        // is the only argument that differs from the wrapper call below.
+        let mut scratch_b = zensim::feature_v2::V2Scratch::new();
+        let fresh_scratch = z
+            .compute_folded720_features_streaming(&ss, &ds, toggles_944(), &mut scratch_b)
+            .unwrap();
         let direct = z.compute_folded720_append2_features(&ss, &ds).unwrap();
-        assert_eq!(streamed.features().len(), FOLDED_944);
-        assert_eq!(direct.features().len(), FOLDED_944);
-        for (i, (a, b)) in streamed
-            .features()
-            .iter()
-            .zip(direct.features().iter())
-            .enumerate()
-        {
-            assert!(
-                (a - b).abs() <= 1e-12 * a.abs().max(1.0),
-                "feature {i} differs: streaming {a} vs direct {b}"
+        let direct_again = z.compute_folded720_append2_features(&ss, &ds).unwrap();
+
+        for (what, r) in [
+            ("streamed", &streamed),
+            ("reused_scratch", &reused_scratch),
+            ("fresh_scratch", &fresh_scratch),
+            ("direct", &direct),
+            ("direct_again", &direct_again),
+        ] {
+            assert_eq!(
+                r.features().len(),
+                FOLDED_944,
+                "{what} is not the 944 regime"
             );
         }
+        assert_eq!(
+            streamed.regime(),
+            direct.regime(),
+            "the streaming call and the wrapper report different extraction \
+             regimes — the toggle sets have diverged, which is a different \
+             vector and not a rounding question"
+        );
+
+        let mut report = String::new();
+        for (what, other) in [
+            ("streamed vs same-scratch second call", &reused_scratch),
+            ("streamed vs a second fresh scratch", &fresh_scratch),
+            ("streamed vs the append2 wrapper", &direct),
+            ("streamed vs the append2 wrapper, twice", &direct_again),
+        ] {
+            let mut worst: Option<(usize, f64, f64)> = None;
+            for (i, (a, b)) in streamed
+                .features()
+                .iter()
+                .zip(other.features().iter())
+                .enumerate()
+            {
+                if (a - b).abs() > 1e-12 * a.abs().max(1.0) {
+                    let rel = (a - b).abs() / a.abs().max(1e-12);
+                    if worst.is_none_or(|(_, wa, wb)| rel > (wa - wb).abs() / wa.abs().max(1e-12)) {
+                        worst = Some((i, *a, *b));
+                    }
+                }
+            }
+            if let Some((i, a, b)) = worst {
+                let rel = (a - b).abs() / a.abs().max(1e-12);
+                report.push_str(&format!(
+                    "\n  {what}: worst at feature {i}: {a} vs {b} (rel {rel:.3e})"
+                ));
+            }
+        }
+        assert!(
+            report.is_empty(),
+            "zensim's folded-944 extraction is not reproducing itself. All of \
+             these calls are the SAME zensim function with the SAME arguments, \
+             differing only in the V2Scratch instance, and zensim documents the \
+             output as bitwise equal:{report}"
+        );
     }
 
     #[test]
