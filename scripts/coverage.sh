@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# coverage — per-feature-combo llvm-cov line/region/function coverage, one JSON
+# per combo, plus a per-file / per-function summary. Mirrors the combo list in
+# scripts/gauntlet.sh EXACTLY so a coverage row and a clippy/nextest row talk
+# about the same build.
+#
+#   scripts/coverage.sh              # every combo
+#   scripts/coverage.sh backends     # only combos whose name contains "backends"
+#
+# Why per combo and not one blended number: most of this crate does not COMPILE
+# without its feature, so a single figure silently reports 100% of whatever
+# happened to be enabled. A file that is absent from a combo's JSON was not
+# measured at 0% — it was not built. The summarizer prints that distinction.
+#
+# `all` (literal --all-features) is SKIPPED by default: it pulls `unsafe-asm`,
+# whose rav1d `.S` sources Apple `cc` refuses to assemble on aarch64 (documented
+# in CLAUDE.md). COV_ALL=1 attempts it anyway so the failure stays attributable.
+#
+# Outputs (JSON is the artifact the summarizer reads; logs hold the test run):
+#   $HOME/tmp/zenavif-cov/<combo>.json
+#   $HOME/tmp/zenavif-cov/<combo>.log
+set -uo pipefail
+
+FILTER="${1:-}"
+OUTDIR="${COV_OUTDIR:-$HOME/tmp/zenavif-cov}"; mkdir -p "$OUTDIR"
+JOBS="${COV_JOBS:-8}"
+
+COMBOS=(
+  "default:-"
+  "encode:encode,encode-imazen"
+  "aom:aom-backend"
+  "svt:encode-svt-rs"
+  "tq:target-quality"
+  "backends:encode-imazen,encode-svt-rs,aom-backend,target-quality"
+  "expert:__expert"
+  "autotune:auto-tune"
+  "twopass:two-pass-butteraugli,encode-imazen"
+  "zloop:two-pass-zensim"
+  "allsafe:aom-backend,encode,encode-imazen,encode-mono,encode-threading,encode-svt-rs,target-quality,two-pass-butteraugli,two-pass-zensim,__expert,auto-tune,_dev"
+  "all:ALLFEATURES"
+)
+
+fail=0
+for c in "${COMBOS[@]}"; do
+  name="${c%%:*}"; feats="${c#*:}"
+  [ -n "$FILTER" ] && [[ "$name" != *"$FILTER"* ]] && continue
+  if [ "$name" = all ] && [ "${COV_ALL:-0}" != 1 ]; then
+    printf '%-9s %-9s   (unsafe-asm: Apple cc refuses rav1d .S on aarch64; COV_ALL=1 to try)\n' "$name" "SKIP"
+    continue
+  fi
+  case "$feats" in
+    -)           fargs=() ;;
+    ALLFEATURES) fargs=(--all-features) ;;
+    *)           fargs=(--features "$feats") ;;
+  esac
+  LOG="$OUTDIR/$name.log"; JSON="$OUTDIR/$name.json"
+  start=$(date +%s)
+  # --release: the encode combos are unusable at opt-level 0 (a full rav1e
+  # encode per test). --no-clean keeps the instrumented deps across combos.
+  # nextest --no-fail-fast: one broken test must not hide the rest of the map.
+  nice -n 19 cargo llvm-cov nextest --release --workspace --no-fail-fast --no-clean \
+      "${fargs[@]}" -j "$JOBS" --json --output-path "$JSON" >"$LOG" 2>&1
+  rc=$?
+  dur=$(( $(date +%s) - start ))
+  summary=$(grep -E '^ *Summary' "$LOG" | tail -1 | sed 's/^ *//')
+  [ -z "$summary" ] && summary=$(grep -m1 -E '^error' "$LOG")
+  status=$([ $rc -eq 0 ] && echo PASS || echo "FAIL($rc)")
+  [ $rc -eq 0 ] || fail=1
+  printf '%-9s %-9s %4ss %s\n' "$name" "$status" "$dur" "$summary"
+done
+echo "json: $OUTDIR/*.json   summarize: python3 scripts/cov_summarize.py $OUTDIR/*.json"
+exit $fail
