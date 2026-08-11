@@ -2486,4 +2486,300 @@ mod tests {
         assert_eq!(g, 255);
         assert_eq!(b, 255);
     }
+
+    // ═══════════════════ cross-tier (SIMD-tier) byte identity ═════════════
+    //
+    // Every test above runs at exactly ONE tier: the best one `incant!`
+    // dispatches to on the host (NEON on aarch64, AVX2/AVX-512 on x86-64).
+    // The `_scalar` copies of all five kernels — the code that runs on every
+    // target without a SIMD tier, and the fallback the module docs promise is
+    // byte-identical — measured **0 executions** across the whole feature
+    // matrix (cargo-llvm-cov, 2026-08-11; docs/TEST_COVERAGE.md). The module
+    // header claims "every tier, lane width, and window produces
+    // byte-identical output"; nothing checked it.
+    //
+    // These tests re-run the whole conversion battery once per token
+    // permutation (archmage disables tokens process-wide) and require every
+    // tier to agree BYTE-FOR-BYTE with the host's best tier.
+
+    /// One battery of conversions -> a flat byte vector, so any tier
+    /// difference anywhere shows up as a single comparison failure. Covers
+    /// all three chroma samplings x {RGB, RGBA} x {8-bit, 10/12/16-bit},
+    /// monochrome at every depth incl. native Gray output, and the forward
+    /// (encode-side) RGB8/RGBA8 -> YUV420 kernel.
+    fn tier_battery() -> Vec<u8> {
+        fn push16(v: &[u16], sink: &mut Vec<u8>) {
+            for &x in v {
+                sink.extend_from_slice(&x.to_le_bytes());
+            }
+        }
+        /// Deterministic u16 plane, masked to the depth (`max + 1` overflows
+        /// u16 at depth 16, so mask instead of modulo).
+        fn rand16(seed: u32, n: usize, bit_depth: u8) -> Vec<u16> {
+            let mask = ((1u32 << bit_depth) - 1) as u16;
+            let mut s = seed | 1;
+            (0..n)
+                .map(|_| {
+                    s ^= s << 13;
+                    s ^= s >> 17;
+                    s ^= s << 5;
+                    (s as u16) & mask
+                })
+                .collect()
+        }
+
+        let mut sink: Vec<u8> = Vec::new();
+        // Odd + even dims, sub-lane and multi-lane widths, plus a strip
+        // window that does not start at row 0 (the 4:2:0 vertical
+        // interpolation window differs there).
+        let cases: [(usize, usize, usize, usize); 5] = [
+            (1, 1, 0, 1),
+            (3, 3, 0, 3),
+            (9, 7, 0, 7),
+            (17, 13, 4, 5),
+            (32, 16, 0, 16),
+        ];
+        for &(w, h, y_start, sh) in &cases {
+            let cw = w.div_ceil(2);
+            let ch = h.div_ceil(2);
+            let mut y8 = vec![0u8; w * h];
+            fill_rand(&mut y8, 0x2468 + w as u32);
+            // Chroma planes sized per sampling: 4:2:0 is (cw x ch), 4:2:2 is
+            // (cw x h), 4:4:4 is (w x h).
+            let mut u420 = vec![0u8; cw * ch];
+            let mut v420 = vec![0u8; cw * ch];
+            let mut u422 = vec![0u8; cw * h];
+            let mut v422 = vec![0u8; cw * h];
+            let mut u444 = vec![0u8; w * h];
+            let mut v444 = vec![0u8; w * h];
+            fill_rand(&mut u420, 0x1357 + h as u32);
+            fill_rand(&mut v420, 0xBEEF + h as u32);
+            fill_rand(&mut u422, 0x2468 + h as u32);
+            fill_rand(&mut v422, 0x1BAD + h as u32);
+            fill_rand(&mut u444, 0x0F0F + h as u32);
+            fill_rand(&mut v444, 0x7070 + h as u32);
+            for &range in &[YuvRange::Limited, YuvRange::Full] {
+                for &matrix in &[YuvMatrix::Bt601, YuvMatrix::Bt709, YuvMatrix::Bt2020] {
+                    let mut o = vec![RGB8::default(); w * sh];
+                    let mut oa = vec![Rgba::<u8>::default(); w * sh];
+                    yuv420_to_rgb8_strip(
+                        &y8, w, &u420, cw, &v420, cw, w, h, y_start, sh, range, matrix, &mut o,
+                    );
+                    sink.extend(o.iter().flat_map(|p| [p.r, p.g, p.b]));
+                    yuv420_to_rgba8_strip(
+                        &y8, w, &u420, cw, &v420, cw, w, h, y_start, sh, range, matrix, &mut oa,
+                    );
+                    sink.extend(oa.iter().flat_map(|p| [p.r, p.g, p.b, p.a]));
+                    yuv422_to_rgb8_strip(
+                        &y8, w, &u422, cw, &v422, cw, w, y_start, sh, range, matrix, &mut o,
+                    );
+                    sink.extend(o.iter().flat_map(|p| [p.r, p.g, p.b]));
+                    yuv422_to_rgba8_strip(
+                        &y8, w, &u422, cw, &v422, cw, w, y_start, sh, range, matrix, &mut oa,
+                    );
+                    sink.extend(oa.iter().flat_map(|p| [p.r, p.g, p.b, p.a]));
+                    yuv444_to_rgb8_strip(
+                        &y8, w, &u444, w, &v444, w, w, y_start, sh, range, matrix, &mut o,
+                    );
+                    sink.extend(o.iter().flat_map(|p| [p.r, p.g, p.b]));
+                    yuv444_to_rgba8_strip(
+                        &y8, w, &u444, w, &v444, w, w, y_start, sh, range, matrix, &mut oa,
+                    );
+                    sink.extend(oa.iter().flat_map(|p| [p.r, p.g, p.b, p.a]));
+                    // 16-bit native depth: every AV1 depth above 8 plus the
+                    // 16-bit arm (which takes the f32 recipe, not the
+                    // fixed-point one), all three samplings, both pixel shapes.
+                    for &bit_depth in &[10u8, 12, 16] {
+                        let y16 = rand16(0x9E37 + u32::from(bit_depth), w * h, bit_depth);
+                        for sampling in [
+                            ChromaSubsampling::Cs420,
+                            ChromaSubsampling::Cs422,
+                            ChromaSubsampling::Cs444,
+                        ] {
+                            let (cstride, crows) = match sampling {
+                                ChromaSubsampling::Cs420 => (cw, ch),
+                                ChromaSubsampling::Cs422 => (cw, h),
+                                ChromaSubsampling::Cs444 => (w, h),
+                            };
+                            let u16p =
+                                rand16(0x85EB + u32::from(bit_depth), cstride * crows, bit_depth);
+                            let v16p =
+                                rand16(0xC2B2 + u32::from(bit_depth), cstride * crows, bit_depth);
+                            let mut o16 = vec![rgb::Rgb::<u16>::default(); w * sh];
+                            yuv16_to_rgbx_strip::<rgb::Rgb<u16>>(
+                                sampling, &y16, w, &u16p, cstride, &v16p, cstride, w, h, y_start,
+                                sh, range, matrix, bit_depth, &mut o16,
+                            );
+                            push16(
+                                &o16.iter().flat_map(|p| [p.r, p.g, p.b]).collect::<Vec<_>>(),
+                                &mut sink,
+                            );
+                            let mut oa16 = vec![Rgba::<u16>::default(); w * sh];
+                            yuv16_to_rgbx_strip::<Rgba<u16>>(
+                                sampling, &y16, w, &u16p, cstride, &v16p, cstride, w, h, y_start,
+                                sh, range, matrix, bit_depth, &mut oa16,
+                            );
+                            push16(
+                                &oa16
+                                    .iter()
+                                    .flat_map(|p| [p.r, p.g, p.b, p.a])
+                                    .collect::<Vec<_>>(),
+                                &mut sink,
+                            );
+                        }
+                    }
+                }
+                // Monochrome: u8 at depth 8 and u16 at 10/12/16, into RGB,
+                // RGBA and the native Gray outputs the decoder uses.
+                let mut g8 = vec![rgb::Gray::<u8>::new(0); w * sh];
+                yuv400_to_rgbx_strip::<u8, rgb::Gray<u8>>(
+                    &y8, w, w, y_start, sh, range, 8, &mut g8,
+                );
+                sink.extend(g8.iter().map(|p| p.value()));
+                let mut m8 = vec![Rgba::<u8>::default(); w * sh];
+                yuv400_to_rgbx_strip::<u8, Rgba<u8>>(&y8, w, w, y_start, sh, range, 8, &mut m8);
+                sink.extend(m8.iter().flat_map(|p| [p.r, p.g, p.b, p.a]));
+                let mut m8rgb = vec![RGB8::default(); w * sh];
+                yuv400_to_rgbx_strip::<u8, RGB8>(&y8, w, w, y_start, sh, range, 8, &mut m8rgb);
+                sink.extend(m8rgb.iter().flat_map(|p| [p.r, p.g, p.b]));
+                for &bit_depth in &[10u8, 12, 16] {
+                    let y16 = rand16(0x1234 + u32::from(bit_depth), w * h, bit_depth);
+                    let mut g16 = vec![rgb::Gray::<u16>::new(0); w * sh];
+                    yuv400_to_rgbx_strip::<u16, rgb::Gray<u16>>(
+                        &y16, w, w, y_start, sh, range, bit_depth, &mut g16,
+                    );
+                    push16(
+                        &g16.iter().map(|p| p.value()).collect::<Vec<_>>(),
+                        &mut sink,
+                    );
+                    let mut m16 = vec![Rgba::<u16>::default(); w * sh];
+                    yuv400_to_rgbx_strip::<u16, Rgba<u16>>(
+                        &y16, w, w, y_start, sh, range, bit_depth, &mut m16,
+                    );
+                    push16(
+                        &m16.iter()
+                            .flat_map(|p| [p.r, p.g, p.b, p.a])
+                            .collect::<Vec<_>>(),
+                        &mut sink,
+                    );
+                    let mut m16rgb = vec![rgb::Rgb::<u16>::default(); w * sh];
+                    yuv400_to_rgbx_strip::<u16, rgb::Rgb<u16>>(
+                        &y16,
+                        w,
+                        w,
+                        y_start,
+                        sh,
+                        range,
+                        bit_depth,
+                        &mut m16rgb,
+                    );
+                    push16(
+                        &m16rgb
+                            .iter()
+                            .flat_map(|p| [p.r, p.g, p.b])
+                            .collect::<Vec<_>>(),
+                        &mut sink,
+                    );
+                }
+                // Forward (encode-side) kernel, both input pixel shapes.
+                let img: Vec<RGB8> = (0..w * h)
+                    .map(|i| RGB8 {
+                        r: y8[i],
+                        g: u444[i],
+                        b: v444[i],
+                    })
+                    .collect();
+                let (mut yp, mut up, mut vp) =
+                    (vec![0u8; w * h], vec![0u8; cw * ch], vec![0u8; cw * ch]);
+                rgb8_to_yuv420(
+                    &img,
+                    w,
+                    w,
+                    h,
+                    range,
+                    YuvMatrix::Bt709,
+                    &mut yp,
+                    &mut up,
+                    &mut vp,
+                );
+                sink.extend_from_slice(&yp);
+                sink.extend_from_slice(&up);
+                sink.extend_from_slice(&vp);
+                let imga: Vec<Rgba<u8>> = img
+                    .iter()
+                    .map(|p| Rgba {
+                        r: p.r,
+                        g: p.g,
+                        b: p.b,
+                        a: 255,
+                    })
+                    .collect();
+                rgba8_to_yuv420(
+                    &imga,
+                    w,
+                    w,
+                    h,
+                    range,
+                    YuvMatrix::Bt709,
+                    &mut yp,
+                    &mut up,
+                    &mut vp,
+                );
+                sink.extend_from_slice(&yp);
+                sink.extend_from_slice(&up);
+                sink.extend_from_slice(&vp);
+            }
+        }
+        sink
+    }
+
+    /// Every SIMD tier — including the scalar fallback that no other test in
+    /// this crate reaches — must produce byte-identical output to the host's
+    /// best tier, for every sampling, depth, pixel shape and strip window.
+    ///
+    /// `CompileTimePolicy::Fail` is the liveness assert: it panics if a token
+    /// the host has cannot be disabled (i.e. the archmage `testable_dispatch`
+    /// dev-dependency feature went missing, or RUSTFLAGS pinned
+    /// `-Ctarget-cpu`), which is exactly the condition under which this test
+    /// would otherwise run the same tier N times and pass vacuously.
+    #[test]
+    fn every_simd_tier_is_byte_identical() {
+        let baseline = tier_battery();
+        assert!(
+            baseline.len() > 100_000,
+            "battery produced only {} bytes — the case list stopped covering anything",
+            baseline.len()
+        );
+        let report = archmage::testing::for_each_token_permutation(
+            archmage::testing::CompileTimePolicy::Fail,
+            |perm| {
+                let got = tier_battery();
+                assert_eq!(
+                    got.len(),
+                    baseline.len(),
+                    "battery length changed at tier permutation [{perm}]"
+                );
+                if got != baseline {
+                    let at = got
+                        .iter()
+                        .zip(baseline.iter())
+                        .position(|(a, b)| a != b)
+                        .unwrap_or(0);
+                    panic!(
+                        "SIMD tier divergence at permutation [{perm}]: first mismatch at battery \
+                         byte {at} (got {}, best-tier {}) — two implementations of the same \
+                         conversion disagree",
+                        got[at], baseline[at]
+                    );
+                }
+            },
+        );
+        // At least one permutation must have actually disabled something,
+        // otherwise the loop above only re-ran the host's best tier.
+        assert!(
+            report.permutations_run >= 2,
+            "only {} tier permutation(s) run ({report}) — no fallback tier was exercised",
+            report.permutations_run
+        );
+    }
 }

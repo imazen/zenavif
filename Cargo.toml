@@ -146,7 +146,14 @@ linear-srgb = { version = "0.6.7"}
 [dev-dependencies]
 almost-enough = { version = "0.4.3", features = ["alloc"] }
 zenutils-fuzz = "0.1.0"
-archmage = { version = "0.9.15", features = ["std"] }
+# `testable_dispatch` is what lets a test disable a token that the target
+# baseline guarantees at COMPILE time (NEON on aarch64, SSE2 on x86-64):
+# without it `incant!` can never fall below the host's best tier and the
+# scalar/lower-tier kernel copies are unreachable from any test. The
+# cross-tier parity test in src/yuv_convert.rs asserts the disable actually
+# took effect (CompileTimePolicy::Fail), so removing this feature fails the
+# test loudly instead of silently testing one tier twice.
+archmage = { version = "0.9.15", features = ["std", "testable_dispatch"] }
 env_logger = { version = "0.11.10", default-features = false }
 png = "0.18.0"
 image = "0.25.10"
