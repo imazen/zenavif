@@ -946,6 +946,71 @@ mod tests {
         }
     }
 
+    /// 4:2:2 decode, both plumbings, exact agreement.
+    ///
+    /// Nothing in the suite decodes a 4:2:2 AVIF: the in-repo encoder can only
+    /// emit 4:4:4 and 4:2:0 (`EncodeChromaSubsampling`), so the 4:2:2 dispatch
+    /// arms of `decoder_managed/plane_convert.rs` (`:388-395`, `:454-464`) and
+    /// of `convert_to_rgb` here measured cold in every feature combo
+    /// (cargo-llvm-cov, 2026-08-11; docs/TEST_COVERAGE.md). 4:2:2 is
+    /// horizontal-only chroma upsampling — its own kernel, its own edge clamp.
+    ///
+    /// The two paths reach the same kernel family through different plumbing
+    /// (raw-OBU strip entry + own buffer vs. the managed decoder's plane views
+    /// and full-image entry), so byte identity is the invariant: a divergence
+    /// is a bug in one of them. Uses 8-bit fixtures deliberately — at 10 bits
+    /// the two paths narrow to 8 with different rounding, which is a separate
+    /// question from the chroma math.
+    ///
+    /// Fixtures are the link-u corpus (`just download-linku`; CI provisions
+    /// them). Fail-loud, no graceful skip.
+    #[test]
+    fn raw_obu_422_matches_the_container_path() {
+        for name in [
+            "fox.profile2.8bpc.yuv422.avif",
+            "fox.profile2.8bpc.yuv422.odd-width.avif",
+            "fox.profile2.8bpc.yuv422.odd-width.odd-height.avif",
+            "hato.profile2.8bpc.yuv422.avif",
+        ] {
+            let path = format!("{}/tests/vectors/link-u/{name}", env!("CARGO_MANIFEST_DIR"));
+            let file = std::fs::read(&path)
+                .unwrap_or_else(|e| panic!("read {path}: {e} (run: just download-linku)"));
+            let parser = zenavif_parse::AvifParser::from_bytes(&file)
+                .unwrap_or_else(|e| panic!("parse {name}: {e:?}"));
+            let payload = parser
+                .primary_data()
+                .unwrap_or_else(|e| panic!("primary item of {name}: {e:?}"));
+
+            let (raw, w, h, channels) = decode_av1_obu(&payload)
+                .unwrap_or_else(|e| panic!("raw OBU decode of {name}: {e:?}"));
+            assert_eq!(channels, 3, "{name}: 4:2:2 colour content decodes to RGB");
+
+            let cfg = crate::config::DecoderConfig::new().prefer_8bit(true);
+            let buf = crate::decode_with(&file, &cfg, &enough::Unstoppable)
+                .unwrap_or_else(|e| panic!("container decode of {name}: {e:?}"));
+            let img = buf
+                .try_as_imgref::<rgb::Rgb<u8>>()
+                .unwrap_or_else(|| panic!("{name}: expected Rgb8 output"));
+            assert_eq!(
+                (img.width(), img.height()),
+                (w as usize, h as usize),
+                "{name}: dimensions differ between the two paths"
+            );
+            for y in 0..h as usize {
+                let row = &img.buf()[y * img.stride()..][..w as usize];
+                for (x, px) in row.iter().enumerate() {
+                    let i = (y * w as usize + x) * 3;
+                    assert_eq!(
+                        (px.r, px.g, px.b),
+                        (raw[i], raw[i + 1], raw[i + 2]),
+                        "{name}: 4:2:2 raw-OBU vs container decode disagree at ({x},{y}) \
+                         — the two 4:2:2 plumbings produce different pixels"
+                    );
+                }
+            }
+        }
+    }
+
     /// The raw-OBU IDENTITY (MC=0 / GBR) arm must put the planes back in RGB
     /// order.
     ///
