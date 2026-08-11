@@ -2915,6 +2915,26 @@ mod tests {
     /// dev-dependency feature went missing, or RUSTFLAGS pinned
     /// `-Ctarget-cpu`), which is exactly the condition under which this test
     /// would otherwise run the same tier N times and pass vacuously.
+    ///
+    /// # Why the arch gate
+    ///
+    /// Only `x86_64` and `aarch64` have more than one tier to compare.
+    /// archmage's permutation table is built by `build_token_slots()`
+    /// (archmage 0.9.15 `src/testing.rs:206-246`), which pushes token slots
+    /// under `cfg(target_arch = "x86_64")` and `cfg(target_arch = "aarch64")`
+    /// and nothing else; every other target compiles the generated
+    /// `*_stubs.rs` token set whose `summon()` returns `None` unconditionally.
+    /// So on **i686** — `target_arch = "x86"`, where the x86-64-v1..v4x tokens
+    /// are stubs even though the CPU has SSE2 — the slot list is empty, the
+    /// permutation count is exactly 1, and
+    /// `incant!(…, [v4x, v4, v3, neon, wasm128, scalar])` has exactly one
+    /// reachable arm: `scalar`. There is no second implementation on that
+    /// target to cross-compare against, so the anti-vacuity assert below
+    /// (correctly) refuses to report green. Those targets run
+    /// [`single_tier_targets_dispatch_to_the_scalar_kernels`] instead, which
+    /// pins the premise that makes the rest of this module's tests scalar-tier
+    /// coverage there.
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     #[test]
     fn every_simd_tier_is_byte_identical() {
         let baseline = tier_battery();
@@ -2953,6 +2973,73 @@ mod tests {
             report.permutations_run >= 2,
             "only {} tier permutation(s) run ({report}) — no fallback tier was exercised",
             report.permutations_run
+        );
+    }
+
+    /// The other half of the tier story, for targets whose archmage
+    /// permutation table is empty (i686, wasm, riscv, ppc, …). There is no
+    /// second tier there to cross-compare, so this asserts the *premise* that
+    /// makes every other test in this module scalar-tier coverage on those
+    /// targets: no SIMD token is reachable at all, therefore
+    /// `incant!(…, [v4x, v4, v3, neon, wasm128, scalar])` can only select
+    /// `scalar`, and the battery really does run through the scalar kernels.
+    ///
+    /// This is deliberately NOT a skip: it fails if the premise breaks. If a
+    /// future archmage grows real 32-bit-x86 (or wasm, or riscv) token slots,
+    /// `permutations_run` becomes ≥ 2 here and this test fails, which is the
+    /// signal to widen [`every_simd_tier_is_byte_identical`]'s `cfg` to
+    /// include the new architecture rather than leave it uncompared.
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    #[test]
+    fn single_tier_targets_dispatch_to_the_scalar_kernels() {
+        use archmage::SimdToken as _;
+
+        // Every tier named in the module's `incant!` lists, other than
+        // `scalar`, must be unreachable — these are archmage's `*_stubs`
+        // tokens on this architecture, whose `summon()` is `None` by
+        // construction.
+        for (name, available) in [
+            ("v3", archmage::X64V3Token::summon().is_some()),
+            ("v4", archmage::X64V4Token::summon().is_some()),
+            ("v4x", archmage::X64V4xToken::summon().is_some()),
+            ("neon", archmage::NeonToken::summon().is_some()),
+            ("wasm128", archmage::Wasm128Token::summon().is_some()),
+        ] {
+            assert!(
+                !available,
+                "tier `{name}` summons on this target, so `incant!` does not \
+                 fall through to `scalar` — this target now has more than one \
+                 reachable tier and belongs in \
+                 `every_simd_tier_is_byte_identical`'s cfg, cross-compared \
+                 rather than assumed"
+            );
+        }
+
+        // archmage agrees there is nothing to permute (see that test's docs
+        // for why: its slot table is x86_64/aarch64 only).
+        let report = archmage::testing::for_each_token_permutation(
+            archmage::testing::CompileTimePolicy::Fail,
+            |_| {},
+        );
+        assert_eq!(
+            report.permutations_run, 1,
+            "expected exactly one (empty) permutation on a single-tier target, \
+             got {report}"
+        );
+
+        // And the scalar kernels genuinely execute here, on this target's own
+        // pointer width, producing real output rather than a zero buffer.
+        let battery = tier_battery();
+        assert!(
+            battery.len() > 100_000,
+            "battery produced only {} bytes — the case list stopped covering \
+             anything",
+            battery.len()
+        );
+        assert!(
+            battery.iter().any(|&b| b != 0),
+            "the whole conversion battery came back all-zero from the scalar \
+             kernels"
         );
     }
 }
