@@ -69,10 +69,12 @@ the max count).
 Pre-existing failures, unchanged by this work: `backends` and `allsafe` fail
 `product_aom_backend::animations_decode_identically_across_backends`
 (rav1d-safe#448/#449), exactly as CLAUDE.md records; `gauntlet.sh clippy`'s
-`allsafe` leg fails on two `_dev` example warnings (an unused import in
-`examples/benchmark_simd.rs` — the one CLAUDE.md names — plus a needless `mut`
-at `examples/yuv_kernel_bench.rs:153`, which CLAUDE.md does not name but which
-is equally pre-existing: `git diff 77dc2d0 -- examples/` is empty). `--ignore-run-fail` keeps
+`allsafe` leg fails on `_dev` example warnings — clippy stops at the first
+failing example, so WHICH one it reports varies between runs. Three exist, all
+pre-existing (`git diff 77dc2d0 -- examples/` is empty): unused
+`zenavif::yuv_convert_libyuv_simd` import in `examples/benchmark_simd.rs` (the
+one CLAUDE.md names) and in `examples/benchmark_autovec.rs:8`, plus a needless
+`mut` at `examples/yuv_kernel_bench.rs:153`. `--ignore-run-fail` keeps
 those combos in the map instead of dropping their reports entirely; the
 per-combo status line says `TESTS-FAIL`, derived from nextest's summary rather
 than the exit code.
