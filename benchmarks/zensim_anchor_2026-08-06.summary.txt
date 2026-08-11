@@ -1,0 +1,64 @@
+# rows 1008  cells 48
+# sizes [64, 256, 1024, 2048]
+# images 12
+
+# --- anchor knots (median leftmost quality reaching each score) ---
+score	q_median	q_p25	q_p75	n_cells	n_unreached
+20.0	24.546	17.266	27.592	48	0
+25.0	27.502	21.172	30.622	48	0
+30.0	30.540	25.063	34.600	48	0
+35.0	33.217	27.915	37.910	48	0
+40.0	35.999	30.855	41.426	48	0
+45.0	40.040	34.434	44.464	48	0
+50.0	42.495	39.640	47.029	48	0
+55.0	45.937	42.402	49.326	48	0
+60.0	50.294	46.233	53.976	48	0
+65.0	56.654	51.252	59.035	48	0
+70.0	61.060	54.278	64.370	48	0
+75.0	66.338	59.586	70.369	48	0
+80.0	74.021	68.555	77.050	48	0
+85.0	81.451	76.904	84.110	48	0
+90.0	92.628	88.721	93.524	47	1
+
+# --- per-size medians (is one curve enough, or does size shift it?) ---
+score	q@64	q@256	q@1024	q@2048
+20.0	25.39	27.35	23.11	20.41
+25.0	27.91	29.60	26.98	23.69
+30.0	30.46	34.23	29.94	27.32
+35.0	33.86	37.08	32.26	30.85
+40.0	35.71	39.45	34.67	35.46
+45.0	40.36	43.01	38.69	38.30
+50.0	42.71	45.80	41.83	40.94
+55.0	45.86	48.24	44.78	43.52
+60.0	52.06	51.64	49.71	47.03
+65.0	57.58	57.14	55.15	51.46
+70.0	62.92	61.37	60.76	56.13
+75.0	69.85	66.47	65.95	62.23
+80.0	75.71	73.17	72.93	69.17
+85.0	82.05	80.73	78.46	77.76
+90.0	93.73	92.49	91.43	91.28
+
+# --- linear fit q = a + b*score over score in (40.0, 90.0) ---
+# intercept a = -11.5009   slope b = 1.0817 quality/score   R2 = 0.9660   n = 11
+# max |residual| vs the piecewise table = 6.775 quality points
+
+# --- |per-cell leftmost-q - shipped anchor| ---
+# p50 3.85  p90 11.82  max 26.50 quality points  (n=719)
+# This is the residual the loop's pass-2 correction has to remove;
+# it is what makes a 1-encode open-loop answer a prediction, not a
+# convergence.
+
+# --- d ln(diffmap mean) / d ln(qindex), per cell ---
+# median 1.786  p25 1.564  p75 2.096  n=48
+# INDICATIVE ONLY: qindex is not the dequant step, so this is not a
+# fit of the loop's spatial `strength` (= 1/gamma). It says the error
+# signal really does grow as a power of the quantizer, which is the
+# assumption the derivation rests on.
+
+// --- paste into src/two_pass_zensim.rs ---
+const ANCHOR_SCORE: [f32; 15] = [
+    20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0, 65.0, 70.0, 75.0, 80.0, 85.0, 90.0,
+];
+const ANCHOR_QUALITY: [f32; 15] = [
+    24.546, 27.502, 30.540, 33.217, 35.999, 40.040, 42.495, 45.937, 50.294, 56.654, 61.060, 66.338, 74.021, 81.451, 92.628,
+];

@@ -292,77 +292,31 @@ fn pool_sb_q_scale(
     map_eps: f64,
     options: &TwoPassOptions,
 ) -> Box<[f32]> {
-    const SB: usize = 64;
-    let w = src.width();
-    let h = src.height();
+    let (w, h) = (src.width(), src.height());
     debug_assert_eq!((diffmap.width(), diffmap.height()), (w, h));
     debug_assert_eq!((dec.width(), dec.height()), (w, h));
-    let sb_cols = w.div_ceil(SB);
-    let sb_rows = h.div_ceil(SB);
-    let (lo, hi) = options.weight_clamp;
-    let exp = options.pool_exponent;
 
-    // Raw rdmult-domain weights; f64::NAN marks "no reliable signal".
-    let mut weights = vec![f64::NAN; sb_cols * sb_rows];
-    let mut log_sum = 0.0f64;
-    let mut n_valid = 0u32;
+    // Mechanics (grid walk, p-norm pool, MSE pool, geomean-normalize +
+    // clamp + power) come from `crate::sb_pool`; only the *valuation* below
+    // is butteraugli-specific.
+    let derror =
+        crate::sb_pool::pool_pnorm(diffmap.buf(), w, h, diffmap.stride(), options.pool_exponent);
+    let dmse = crate::sb_pool::pool_mse(src, dec);
 
-    for sby in 0..sb_rows {
-        for sbx in 0..sb_cols {
-            let x0 = sbx * SB;
-            let y0 = sby * SB;
-            let x1 = (x0 + SB).min(w);
-            let y1 = (y0 + SB).min(h);
+    // libaom's `set_mb_butteraugli_rdmult_scaling` valuation: how much more
+    // visible the error is than the raw pixel difference implies. The eps
+    // guard means "no reliable signal here" -> the block stays neutral; the
+    // map side uses the backend-scaled eps, the MSE side keeps libaom's 0.01
+    // (8-bit pixel-difference domain).
+    let raw: Vec<Option<f64>> = derror
+        .iter()
+        .zip(dmse.iter())
+        .map(|(&e, &m)| (e >= map_eps && m >= 0.01).then(|| (m / e).min(5.0) + options.k))
+        .collect();
 
-            let mut pool = 0.0f64;
-            let mut sse = 0.0f64;
-            for y in y0..y1 {
-                let dm_row = &diffmap[y];
-                let src_row = &src[y];
-                let dec_row = &dec[y];
-                for x in x0..x1 {
-                    pool += f64::from(dm_row[x]).max(0.0).powf(exp);
-                    let s = src_row[x];
-                    let d = dec_row[x];
-                    let dr = f64::from(s.r) - f64::from(d.r);
-                    let dg = f64::from(s.g) - f64::from(d.g);
-                    let db = f64::from(s.b) - f64::from(d.b);
-                    sse += dr * dr + dg * dg + db * db;
-                }
-            }
-            let px = ((x1 - x0) * (y1 - y0)) as f64;
-            let derror = pool.powf(1.0 / exp);
-            let dmse = sse / (px * 3.0);
-
-            // libaom's eps guard: no reliable signal -> neutral. The map
-            // side uses the backend-scaled eps; the MSE side keeps
-            // libaom's 0.01 (8-bit pixel-difference domain).
-            if derror >= map_eps && dmse >= 0.01 {
-                let w_raw = (dmse / derror).min(5.0) + options.k;
-                weights[sby * sb_cols + sbx] = w_raw;
-                log_sum += w_raw.ln();
-                n_valid += 1;
-            }
-        }
-    }
-
-    if n_valid == 0 {
-        return vec![1.0f32; sb_cols * sb_rows].into_boxed_slice();
-    }
-    let geo_mean = (log_sum / f64::from(n_valid)).exp();
-
-    weights
-        .into_iter()
-        .map(|w_raw| {
-            if w_raw.is_nan() {
-                1.0
-            } else {
-                let w_norm = (w_raw / geo_mean).clamp(lo, hi);
-                // rdmult (λ) domain -> quantizer domain: λ ∝ q².
-                w_norm.powf(options.strength / 2.0) as f32
-            }
-        })
-        .collect()
+    // rdmult (λ) domain -> quantizer domain: λ ∝ q², so the exponent is
+    // `+strength/2` (a LARGER weight means a coarser quantizer here).
+    crate::sb_pool::normalize_and_power(&raw, options.weight_clamp, options.strength / 2.0)
 }
 
 #[cfg(test)]

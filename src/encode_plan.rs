@@ -152,8 +152,12 @@ pub struct SpeedDerived {
 /// overrides, as the encoder will actually run it.
 ///
 /// Produced by [`EncoderConfig::resolve_plan`]. Fields describe the
-/// zenravif backend — the only available one (the deprecated svtav1
-/// variant is rejected by [`EncoderConfig::validate`]).
+/// **zenravif backend** (the deprecated svtav1 variant is rejected by
+/// [`EncoderConfig::validate`]). For the experimental `Av1Backend::SvtRs`
+/// backend the zenravif-derived mirrors do NOT apply: it maps quality
+/// linearly to AV1 QP 63..=0 and speed linearly to SVT presets 0..=13
+/// (see `src/encoder_svt_rs.rs` module docs) — only the `backend`,
+/// `chroma_subsampling`, and CICP fields remain meaningful there.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct EncodePlan {
@@ -252,6 +256,46 @@ pub(crate) fn quality_to_quantizer(quality: f32) -> u8 {
         0.93 + (0.10 - q) * 0.78 // Q1-10 → qindex 237-255
     };
     (x.min(1.0) * 255.).round() as u8
+}
+
+/// The lowest `quality` that resolves to `quantizer` — the inverse of
+/// zenavif's mirror of zenravif's quality→quantizer curve.
+///
+/// Encoded output depends on `quality` **only** through the resolved
+/// integer quantizer index (that is what `sweep_validate` pins: q 80.0 and
+/// q 80.2 both resolve to quantizer 71 and produce byte-identical files).
+/// The set of encodes a targeting search can actually reach is therefore
+/// indexed by the quantizer, not by `quality`, and this function is how a
+/// caller addresses one directly:
+///
+/// ```
+/// # use zenavif::{EncoderConfig, PlanInput, quality_for_quantizer};
+/// let q = quality_for_quantizer(96);
+/// let plan = EncoderConfig::new().quality(q).resolve_plan(PlanInput::rgb8(64, 64));
+/// assert_eq!(plan.quantizer, 96);
+/// ```
+///
+/// Round-trips exactly for every `quantizer` in `0..=255`
+/// (`quantizer_inverse_round_trips`), so all 256 quantizers are reachable —
+/// **2.56× more distinct encodes than the 100 that integer qualities
+/// reach**, which is the resolution any score-targeting search has to work
+/// in to land as close to a target as the codec permits.
+///
+/// The returned quality is clamped to `[1, 100]`; quantizers below the one
+/// `quality = 100` resolves to (0) and above the one `quality = 1` resolves
+/// to (255) do not exist.
+#[must_use]
+pub fn quality_for_quantizer(quantizer: u8) -> f32 {
+    // Inverse of `quality_to_quantizer`'s three bands, in the same order.
+    let x = f32::from(quantizer) / 255.;
+    let q = if x <= 0.42 {
+        1. - x / 1.4
+    } else if x <= 0.93 {
+        0.70 - (x - 0.42) / 0.85
+    } else {
+        0.10 - (x - 0.93) / 0.78
+    };
+    (q * 100.).clamp(1., 100.)
 }
 
 /// Registry-era lossless speed band (imazen/zenavif#8): while the dep
@@ -635,6 +679,45 @@ mod tests {
         // Out-of-range clamps like zenravif's.
         assert_eq!(quality_to_quantizer(0.0), 255);
         assert_eq!(quality_to_quantizer(150.0), 0);
+    }
+
+    #[test]
+    fn quantizer_inverse_round_trips() {
+        // Every one of the 256 quantizers is addressable: the inverse
+        // returns a quality that resolves back to exactly that quantizer.
+        for qi in 0..=255u8 {
+            let q = quality_for_quantizer(qi);
+            assert!((1.0..=100.0).contains(&q), "q{q} out of range for qi{qi}");
+            assert_eq!(quality_to_quantizer(q), qi, "round trip failed at qi{qi}");
+        }
+        // Monotone: a coarser quantizer means a lower quality.
+        for qi in 1..=255u8 {
+            assert!(
+                quality_for_quantizer(qi) <= quality_for_quantizer(qi - 1),
+                "not monotone at qi{qi}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_reachable_lattice_is_finer_than_integer_qualities() {
+        // The claim the two-shot search rests on: working in quantizer
+        // space addresses 2.56x more distinct encodes than working in
+        // integer-quality space. Over the band the zensim targets 20..90
+        // live in (quality ~24.5..92.6) the ratio is what decides how
+        // close any search can land.
+        let from_int_quality: std::collections::BTreeSet<u8> =
+            (1..=100).map(|q| quality_to_quantizer(q as f32)).collect();
+        assert_eq!(from_int_quality.len(), 100);
+        let all: std::collections::BTreeSet<u8> = (0..=255u8)
+            .map(|qi| quality_to_quantizer(quality_for_quantizer(qi)))
+            .collect();
+        assert_eq!(all.len(), 256);
+        // Inside the measured lattice band (quality 50..80).
+        let lo = quality_to_quantizer(80.0);
+        let hi = quality_to_quantizer(50.0);
+        assert_eq!((lo, hi), (71, 150));
+        assert_eq!(usize::from(hi - lo) + 1, 80, "80 quantizers over q50..80");
     }
 
     #[test]

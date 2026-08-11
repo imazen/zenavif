@@ -373,6 +373,31 @@ fn encoder_config_forwards_partition_validation() {
 }
 
 // --------------------------------------------------------------------
+// Av1Backend::SvtRs availability gating
+// --------------------------------------------------------------------
+
+/// Without the `encode-svt-rs` feature the SvtRs variant exists but no
+/// build can serve it — validate() must say so (mirror of the deprecated
+/// Svtav1 rejection; the encode entry points error honestly too).
+#[cfg(all(feature = "encode", not(feature = "encode-svt-rs")))]
+#[test]
+fn svt_rs_backend_unavailable_without_feature() {
+    use zenavif::Av1Backend;
+    let cfg = EncoderConfig::new()
+        .backend(Av1Backend::SvtRs)
+        .chroma_subsampling(zenavif::EncodeChromaSubsampling::Yuv420);
+    match cfg.validate() {
+        Err(ValidationError::BackendUnavailable { backend, feature }) => {
+            assert_eq!(backend, "Av1Backend::SvtRs");
+            assert_eq!(feature, "encode-svt-rs");
+        }
+        other => panic!("expected BackendUnavailable, got {other:?}"),
+    }
+}
+
+// (The feature-ON scope checks live in tests/svt_rs_backend.rs.)
+
+// --------------------------------------------------------------------
 // DecoderConfig: currently no failing variants. Reserved.
 // --------------------------------------------------------------------
 

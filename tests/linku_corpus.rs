@@ -452,7 +452,7 @@ fn linku_pixel_parity() {
     }
 
     let config = DecoderConfig::new().threads(1);
-    let zensim = Zensim::new(ZensimProfile::latest());
+    let zensim = Zensim::new(ZensimProfile::codec_target());
 
     let mut matched = 0usize;
     let mut mismatched = 0usize;

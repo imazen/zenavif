@@ -355,7 +355,11 @@ pub(crate) fn requested_or_default_threads(requested: Option<usize>) -> usize {
 /// `None` on other platforms or when detection fails — no implicit cap
 /// there. The 20 % headroom leaves room for the caller's own buffers and
 /// the rest of the process.
-#[cfg(any(test, feature = "encode"))]
+// `test` alone over-includes: the only test caller is Linux-gated (it reads
+// /proc/meminfo), so on macOS/Windows a `cargo clippy` lib-test build compiled
+// these and then failed `-D dead_code` on them. Gate on the conditions that
+// actually have a caller.
+#[cfg(any(feature = "encode", all(test, target_os = "linux")))]
 pub(crate) fn implicit_memory_budget() -> Option<u64> {
     detected_available_ram().map(|bytes| (bytes as f64 * 0.8) as u64)
 }
@@ -363,7 +367,7 @@ pub(crate) fn implicit_memory_budget() -> Option<u64> {
 /// Available RAM in bytes: Linux `MemAvailable` (kernel's estimate of memory
 /// usable without swapping). `None` elsewhere — macOS/Windows have no
 /// equally cheap equivalent, and a wrong guess is worse than no cap.
-#[cfg(any(test, feature = "encode"))]
+#[cfg(any(feature = "encode", all(test, target_os = "linux")))]
 fn detected_available_ram() -> Option<u64> {
     #[cfg(target_os = "linux")]
     {

@@ -67,7 +67,162 @@ write-path returns + gain-map interop additions, already on main).
 
 ## [Unreleased]
 
+### QUEUED BREAKING CHANGES
+- Remove `Error::ColorConversion(yuv::YuvError)` — the last public-API tie to
+  the `yuv` crate. In-house kernels no longer construct it (they are
+  infallible); the legacy `unsafe-asm` decoder still does. Removing the
+  variant + the dep ships with the next 0.x minor bump.
+- `Av1Backend`, `DecodeBackend` and `TargetMetric` are now
+  `#[non_exhaustive]`. Downstream exhaustive matches need a `_` arm. Taken in
+  the SAME release as the variant additions that already broke them
+  (`Av1Backend::SvtRs`, `TargetMetric::ZensimC`) so consumers absorb one break
+  rather than two: every future backend or metric is additive from here.
+  `ValidationError` (already `#[non_exhaustive]`) gained
+  `BackendUnsupportedParam` — ship with the next 0.x minor bump.
+- `TargetMetric` gained the `ZensimC(f64)` variant. The enum is not
+  `#[non_exhaustive]`, so downstream exhaustive matches must add an arm —
+  ship with the next 0.x minor bump. No existing variant changed meaning.
+
+### Changed
+- **`zensim` re-pinned from registry 0.2.4 to git `main` (0.3.0)** for the
+  diffmap API the closed loop needs (`compute_with_ref_and_diffmap`,
+  `PrecomputedReference` reuse, `Zensim::with_stop`). Consequences:
+  `zensim-regress` is pinned to the same git branch (registry 0.3.1 depends
+  on zensim 0.2.x, which put two incompatible `Zensim`/`ImageSource` types
+  in the graph and broke `tests/linku_corpus.rs`), and all six
+  `ZensimProfile::latest()` call sites moved to
+  `ZensimProfile::codec_target()` — `latest()` is deprecated in 0.3.0.
+  **`TargetMetric::Zensim` scores on a different profile than before**:
+  `latest()` was `PreviewV0_2` at 0.2.x and is `B` at 0.3.0, so a given
+  target lands on a different quality. Unpin both at the zensim 0.3.0
+  publish.
+- zenav1-svt pin bumped `3e25f52b` → `2d585bb2b` (upstream master
+  2026-07-24; zero seam API breaks). The pin is past the upstream repo
+  restructure that moved the C reference into a git submodule — the
+  `zenav1-svt*` crates are pure Rust and unaffected (crate names + pub API
+  unchanged). Brings the typed QP-0 rejection
+  (upstream #5: `try_encode_frame*` now returns `UnsupportedConfig` for
+  base_qindex 0 instead of emitting garbage — the seam's quality→QP clamp
+  keeps quality 100 encoding at QP 1 and is now composition-tested from
+  both sides), the IBC screen-content vertical, the bd8/bd10 real-photo
+  p0–p3 exchange-sort parity closures (photo p0 bd8 135/135, bd10 p0–p3
+  187/187 upstream), and the nz-map SIMD port. Seam drift fixed in the
+  same change: stale "no C bitstream identity yet" / "non-conformant"
+  claims rewritten to the verified envelope, the 64-multiple dimension
+  gate re-documented as a zenavif-side envelope choice (upstream pads +
+  codes partial SBs since task #95), and `EncoderConfig::threads` is now
+  threaded into the pipeline (`thread_count`; byte-inert, single-tile
+  today).
+
 ### Added
+- **`zensim_c`: scoring and steering on zensim generation-C
+  (`ZensimProfile::C`), plus the additive `TargetMetric::ZensimC`.**
+  `C` is a 944-input MLP over the folded-720+append+append2 regime, which
+  the standard 372-feature `Zensim::compute` pipeline does not produce, so
+  it needs its own front end: `compute_folded720_features_streaming` +
+  `score_features_with_profile(C, …)`. Feeding `C` through `compute` fails
+  with `ModelForwardFailed` — except on a byte-identical pair, which
+  short-circuits to 100 before the forward pass, so a naive smoke test
+  passes and proves nothing. `c_via_compute_fails` pins both halves.
+  - **`C` has a per-pixel steering map, and it is NOT a diffmap.**
+    `AttributionResult` is a real row-major `w × h` f32 plane (trimmed to
+    the logical image, no SIMD padding) plus a summed-area table for O(1)
+    rectangle queries. Its semantics differ from `DiffmapResult` in every
+    way that matters to pooling: it is **signed**, its unit is **score
+    points**, and it is absolutely normalized and mass-conserving —
+    `query_rect(B)` is the linearized score gain from re-encoding block
+    `B` at reference quality. The B rule
+    `clamp(e_b / geomean(e_b), 0.4, 2.5)^(−strength)` therefore does not
+    transfer: its whole justification is that SSIM error has no absolute
+    unit, and a geometric mean is undefined over a sign-mixed quantity.
+    `sb_q_scale_from_attribution` re-derives on the area-weighted
+    arithmetic mean (the quantity is additive) with non-positive blocks
+    pinned neutral. DERIVED, NOT FITTED; nothing enables it by default.
+  - **HDR is refused twice, because one silent-wrong-number path is real.**
+    `sdr_guard` rejects CICP transfer 16 (PQ) / 18 (HLG) with a typed
+    `Error::Unsupported`, and `ZensimC::features` rejects
+    `ImageSource::is_hdr()` before extraction — zensim's folded-944
+    extractor does not error on an HDR-flagged `LinearF32Rgba` + opaque
+    pair, it silently auto-routes to the PU/HDR front end and returns
+    944 HDR-domain features, which `score_features_with_profile` has no
+    domain guard against. `profile_for_transfer` names `BHdr` for HDR and
+    says plainly that this crate cannot drive it (no absolute-luminance
+    PU-linear front end).
+  - **Honest costs.** No `PrecomputedReference` for the 944 extraction
+    (zensim removed the prepared-reference forms; only `V2Scratch`
+    allocation is reused), `Zensim::with_stop` is not checked by the v2
+    extraction walks, and `steer()` is a second full walk plus two bake
+    forwards per live column — not the one-call score+map the B loop gets.
+    Measured numbers: `benchmarks/zensim_c_*_2026-08-07.*`.
+- **`two-pass-zensim`: a zensim-diffmap-driven closed loop
+  (`encode_rgb8_zensim_loop`).** Encode → decode → ONE
+  `Zensim::compute_with_ref_and_diffmap` per pass → correct the quality
+  **globally** from the score and the per-64×64-superblock quantizer
+  **spatially** from the diffmap → re-encode. The reference pyramid is
+  precomputed once (`precompute_reference`) and reused by every pass, and
+  the caller's stop token is threaded into zensim itself
+  (`Zensim::with_stop`), so a long scoring pass is interruptible.
+  - **Global half is live.** It steps along the fitted population curve,
+    `q_next = q + (Q(target) − Q(score))`, rather than a constant-slope
+    Newton step — the score-vs-quality curve saturates, so the same score
+    error needs a very different quality move at 40 than at 90. Once the
+    target is bracketed it hands off to the same clamped secant
+    `encode_rgb8_with_target` uses.
+  - **Spatial half is release-gated** behind `zenravif::FRAME_HINTS_LIVE`
+    (re-exported as `SPATIAL_HINTS_LIVE`) and reported per call as
+    `ZensimLoopResult::spatial_applied`, so a computed map can never be
+    mistaken for an applied one. Unlike `two-pass-butteraugli` — purely
+    spatial, so it refuses to run at all while the gate is shut — this loop
+    runs and converges regardless.
+  - **The diffmap → quantizer-scale mapping is derived, not transplanted.**
+    libaom's `tune=butteraugli` valuation `min(mse/distance, 5) + K` cannot
+    take a zensim diffmap: the map is unitless SSIM error, so typical photo
+    blocks land at ratios of 10²–10³ and the clip saturates on every block.
+    Derived instead from scale-invariance + equal-error allocation:
+    `q_scale_b = clamp(e_b / geomean(e_b), 0.4, 2.5)^(−strength)`,
+    `strength = 1/γ` under `e ∝ step^γ`, default 1.0. DERIVED, NOT FITTED,
+    and not honestly fittable until the gate opens (an applied map has no
+    bitstream effect today).
+  - **Measured against the existing secant baseline**, same images, same
+    targets, same options on both arms (12 sources x long edges
+    {64, 256, 1024} x zensim targets 20-90 step 5, plus a 4-source x 2048
+    leg on a step-10 grid; `benchmarks/zensim_loop_ab_2026-08-06.tsv` and
+    `..._tol1_...`, summaries alongside):
+
+    | tolerance | arm | n | mean encodes | converged | 1 encode | <=2 encodes |
+    |---|---|---|---|---|---|---|
+    | 0.5 | secant | 572 | 4.14 | 66.3% | 8.0% | 14.7% |
+    | 0.5 | loop | 572 | **3.75** | 64.9% | **12.9%** | **29.4%** |
+    | 1.0 | secant | 360 | 3.35 | 82.2% | 17.8% | 31.7% |
+    | 1.0 | loop | 360 | **2.90** | **82.8%** | **23.3%** | **51.4%** |
+
+    Paired per-cell at tolerance 0.5: -0.39 encodes on average (fewer on
+    43.4% of cells, more on 23.3%), achieved-vs-target error a wash (closer
+    26.9%, further 26.9%, median delta 0), identical file sizes. The gain
+    holds at every size and target band. At tolerance 0.5 the loop trades
+    marginally lower convergence (64.9% vs 66.3%) for the encode saving --
+    a tight early bracket runs out of lattice resolution where the
+    baseline's coarse extrapolation gets more chances to land on a lattice
+    point; at tolerance 1.0 that trade disappears.
+  - Anchor-curve fit and its 1,008-encode sweep:
+    `benchmarks/zensim_anchor_2026-08-06.tsv` (+
+    `scripts/hyperparam/fit_zensim_anchor.py`, deterministic).
+  - New public API: `two_pass_zensim` module, `ZensimLoopOptions`,
+    `ZensimLoopResult`, `encode_rgb8_zensim_loop`,
+    `anchor_quality_for_zensim`, `SPATIAL_HINTS_LIVE`.
+- **The achievable-score lattice is now a measured, documented limit**
+  (`benchmarks/zensim_score_lattice_2026-08-06.tsv`). `quality` resolves to
+  an integer AV1 quantizer index, so the reachable zensim scores form a
+  discrete lattice no search can land between: adjacent achievable scores
+  are 0.82–1.05 apart at the median and ~50% of gaps exceed 1.0 over
+  quality 50–80. A ±0.5 `tolerance` is therefore unreachable about half the
+  time for reasons unrelated to the search — relevant to
+  `TargetOptions::tolerance` as much as to the new loop.
+- **CI now builds and tests the diffmap closed loops.** Neither
+  `two-pass-butteraugli` nor `two-pass-zensim` appeared anywhere in
+  `ci.yml`, so `tests/two_pass.rs` ran on no platform at all; a new test leg
+  covers both. `scripts/gauntlet.sh` gains a `zloop` combo and adds
+  `two-pass-zensim` to `allsafe`.
 - **Memory-adaptive encode concurrency: encodes fit their thread count to
   the memory budget instead of blowing past it.** The zencodec encode
   pre-flight (still + animation paths) now checks the CALIBRATED
@@ -90,56 +245,115 @@ write-path returns + gain-map interop additions, already on main).
   (with `cpu_ms` carrying the single-thread work). All helpers are
   crate-private — no new public API. (zensysbench CODEC-MEMORY-PLAN
   wave 2.)
+- `DecoderConfig::decode_backend` — the aom-rs decoder is now a selectable
+  PRODUCT decode backend (feature `aom-backend`, experimental): non-grid
+  stills decode through zenav1-aom across the full still surface — 8/10/12
+  bit, 4:2:0/4:2:2/4:4:4 + mono, RGBA alpha items, identity (MC=0),
+  exotic matrices, ICC/CICP/HDR-metadata passthrough (upstream
+  `FrameDecode` gained the sequence CICP fields), gain-map item decode
+  (`decode_av1_obu_with_config`, both zencodec gain-map sites routed), and
+  the prefer_8bit downscale — byte-identical to the rav1d-safe path by
+  construction (both run the same canonical in-house kernel recipe; pinned
+  across the whole grid by `tests/product_aom_backend.rs`). ANIMATION now
+  decodes too: zenav1-aom landed the animated-AVIF inter envelope (8/8
+  tracks / 40/40 frames byte-exact vs aomdec upstream, pin a06bce15) and
+  `AnimationDecoder` on AomRs eagerly decodes each track in one
+  `decode_frames` pass (DPB/CDF state spans samples) — all 5 libavif
+  animated vectors byte-identical to the rav1d path, frame-by-frame
+  (pixels + durations). Grid AVIFs decode too (each grid cell is an
+  independent AV1 still; the byte-stitch is shared with the rav1d path) —
+  identity pinned on the sofa/mixed-alpha grid vectors. Only row-sink
+  streaming still returns honest `Unsupported` on AomRs.
+- `decode_av1_obu_yuv_with` — the raw-OBU decode seam gains a config-carrying
+  twin threading `DecoderConfig` + a stop token into the backends
+  (seam obligation 3): `frame_size_limit` reaches rav1d-safe's managed
+  `Settings` and aom-rs's `DecodeLimits::max_pixels`, the stop token is
+  polled in-loop by aom-rs (SB-row/tile/frame cadence), and `alloc_pref`
+  maps onto aom-rs's `AllocMode` (fallible pre-flight by default).
+  Liveness pinned by `tests/cross_backend_decode.rs::config_threading`.
+- Cross-backend validation + calibration (2026-07-22): every encode-backend
+  bitstream is now cross-decoded on rav1d-safe AND zenav1-aom with plane
+  byte-compare (`tests/cross_backend_decode.rs`, incl. 10-bit; 7018/7018
+  sweep cells identical — first conformance coverage of OUR encoders'
+  output), the ssim2 target search is pinned to converge over
+  `Av1Backend::SvtRs` (the unified cross-backend quality mechanism), and
+  the RD/speed calibration sweep is committed
+  (`benchmarks/backend_sweep_2026-07-22.{tsv,meta}`, harness
+  `examples/encode_backend_sweep.rs` + `examples/decode_backend_bench.rs`).
 
-### Fixed
-- **Lossless no longer pessimizes at slow speeds (issue #8).** On the
-  zenrav1e release the dep chain currently resolves (0.1.4, whose
-  "lossless" is qi=1 lossy — zenrav1e#9), speeds 1-4 measurably produce
-  +5..+19% larger lossless files than speed 8 at 4.6-11x the wall time,
-  and speed 10 is larger still on most content (up to +42%): the slow
-  tier's RDO optimizes against phantom distortion the fixed encoder
-  wouldn't emit. Lossless encodes now clamp their running speed preset
-  into the empirically size-optimal [6, 8] band
-  (`LOSSLESS_REGISTRY_SPEED_BAND`); lossy encodes are untouched, the
-  encode plan and sweep fingerprint mirror the clamp, and the residual
-  in-band s6-vs-s8 inversion is ≤ ~1.1%. Measured before/after:
-  `benchmarks/lossless_speed_clamp_2026-07-23.tsv` (requested s1: −5.0
-  to −15.2% bytes at 3.2-3.8x faster; worst-case pixel delta at s1-2 on
-  paris drops 8 → 2). REMOVE the band (set the const to `None`) at the
-  zenrav1e >0.1.4 dep bump — the fixed encoder is bit-exact and
-  byte-monotonic (slower = smaller), see the dep-bump checklist in
-  CLAUDE.md and `EncoderConfig::speed_effective`.
-- **Float YUV→RGB output is now byte-identical across arch, SIMD tier, and
-  image width.** The 4:2:0/4:2:2 float kernels computed three subtly
-  different pipelines: fused `mul_add` on x86-64-v3/NEON lanes, unfused
-  mul+add on the scalar tier (what i686 runs — its CI leg had been red on a
-  1-LSB green-channel mismatch since 2026-07-06) and on wasm128 (which has
-  no FMA at all), and division-normalized ties-away rounding in
-  `yuv_to_rgb` (the width-remainder path), so the same image could decode
-  to different bytes per platform or per width%8. All paths now compute
-  one spec — unfused multiply-add, reciprocal-multiply normalization,
-  ties-to-even rounding — which every tier can produce exactly. Rare
-  single-pixel ±1 shifts vs. the previous x86-64 fused output are the
-  cost of cross-platform determinism; the libavif bilinear-parity suites
-  (`test-pixels`, `test-linku`) should be re-run against references as
-  follow-up confirmation.
-  0.5.7 carries a tile-worker guard race whose panicked worker parks
-  `rav1d_decode_frame`'s completion wait forever (zenavif#30 — on a
-  28-thread box the animated codec roundtrip test hung ~3 of 4 runs). A
-  TEMP `[patch.crates-io]` git pin at the last 0.5.7-versioned rav1d-safe
-  rev (`f6aed27e`, carrying the upstream fix plus the #14 aarch64 16bpc
-  SGR rounding fix) replaces it; drop at the rav1d-safe release past
-  0.5.7. The pinned rev's managed API attaches `whereat::At` locations and
-  adds cooperative cancellation, so rav1d-safe decode errors now keep
-  their upstream trace frames (`At::map_error` at the boundary instead of
-  rewrapping) and `Error::Cancelled` maps rav1d-safe's own `Cancelled`.
-- **Default-feature `cargo test` compiles again**: four auto-discovered
-  examples that call `encode`-gated APIs (`gainmap_reencode`,
-  `hdr_encode_cell`, `hdr_fidelity_probe`, `twelvebit_probe`) had no
-  `[[example]]` declarations, breaking every platform's CI test job since
-  2026-07-12; they are now declared with `required-features = ["encode"]`.
+- The canonical YUV numeric recipe is now a documented FIXED-POINT formula
+  (P8): single rounding of a 2^-16-accurate value, pure-integer arithmetic
+  (platform-exact on every arch incl. wasm — no FMA/rounding-mode variance),
+  offsets derived from the rounded coefficients so gray decodes to exactly
+  R=G=B at every depth. d<=12 decode paths (all real AV1) run it; measured
+  2-10x over the f32 kernels (benchmarks/yuv_fixedpoint_2026-07-20.csv:
+  8-bit 420 490 Mpx/s, 444-rgba 3.4 Gpx/s, 10-bit 420 484 Mpx/s). Accuracy
+  pinned within ±1 of exact rational conversion by test.
+- One unified in-house YUV kernel family (`src/yuv_convert.rs`): strip-first,
+  generic over sample depth (8/10/12/16-bit) and output pixel
+  (RGB/RGBA/Gray x u8/u16), separable auto-vectorized chroma passes, one
+  canonical f32 numeric recipe (reciprocal-mul normalize, chained FMA,
+  round-ties-even), AVX-512/AVX2/NEON/wasm/scalar tiers. Replaces four
+  independent kernel implementations; the managed decoder now converts every
+  planar/mono path in-house (BT.601/709/2020 + FCC/SMPTE-240M/derived via
+  explicit Kr,Kb), and the SvtRs encode path uses the in-house forward
+  RGB(A)->YUV420 kernel (box-averaged f32 chroma; measured +1.2 dB on the
+  q85 gradient round-trip). 8-bit decode conversion measured 2-6x faster
+  (benchmarks/yuv_kernel_unify_2026-07-20.csv); new default-on `avx512`
+  feature. The `yuv` crate remains only in the legacy `unsafe-asm` decoder
+  and the public error type (queued above).
+- SvtRs backend: RGBA8 encode (color 4:2:0 item + straight-alpha Cs400
+  `auxl` auxiliary item honoring the `alpha_quality` fallback contract) and
+  grayscale encode (monochrome Cs400 color item, `encode-mono` feature) —
+  the backend now covers all three 8-bit still input shapes; round-trip +
+  contract tests in `tests/svt_rs_backend.rs`
+- `DecodeBackend` (renamed from the decode-seam `Av1Backend` to avoid
+  colliding with the encoder enum of the same name in `encode` builds)
+  gained `Rav1dFfi` (upstream rav1d 1.1.0 with full asm, `unsafe-asm`
+  feature) as a third raw-OBU decode-seam arm; the 4-way decode benchmark
+  interleaves it when built with `unsafe-asm`
+- EXPERIMENTAL svtav1-rs AVIF encode backend: `Av1Backend::SvtRs` behind the
+  new default-off `encode-svt-rs` feature (git-branch dep on imazen/svtav1
+  `wave2/entropy-c-parity`, pinned rev conformance-verified upstream at
+  525/525 mono + 700/700 4:2:0 aomdec cells). 8-bit 4:2:0 stills with
+  64-px-aligned dimensions; BT.601 full-range; muxed in-crate via
+  zenavif-serialize; out-of-scope configs rejected honestly at validate()
+  and encode time. Bitstream identity vs C-SVT is NOT yet asserted — that
+  parity gate lands with svtav1-rs decision-layer bitstream identity.
+  (`src/encoder_svt_rs.rs`, `tests/svt_rs_backend.rs`)
+
+- **Adopt the `zencodec` `CategorizedError` taxonomy (PR #103, final API).**
+  `Error` now `impl zencodec::CategorizedError` with
+  `codec_name() == Some("zenavif")` — a `&self` method (not an associated const,
+  so the trait stays dyn-compatible) — and an exhaustive `category()` mapping
+  every variant to one coarse `zencodec::ErrorCategory`, so consumers route on
+  the category (HTTP status, retry policy, logging) without naming the enum. The
+  `Parse` arm **delegates** to `zenavif_parse::Error`'s own `CategorizedError`
+  (zenavif-parse PR #17): a malformed container stays `MalformedImage`, a
+  truncated one `UnexpectedEof`, a parser cap `LimitsExceeded`. Other arms:
+  `Unsupported` → `UnsupportedImageFeature`; `ImageTooLarge` →
+  `LimitsExceeded(Pixels)`; `ResourceLimit` → `LimitsExceeded(Memory)` (the
+  `String` variant is a catch-all, so a representative kind is reported, with
+  the precise limit in `Display`); `OutOfMemory` → `OutOfMemory`;
+  `Cancelled(r)` → `r.category()`; `UnsupportedOperation(op)` → `op.category()`;
+  `Decode` / `ColorConversion` (foreign `yuv`) / `Encode` → `Internal`. `Decode`
+  is a grab-bag the decode pipeline reuses for decoder setup/flush faults and
+  internal invariant checks (e.g. "expected 8-bit planes") as well as some
+  malformed-input cases; with no structural signal to split it, the conservative
+  `Internal` is its best single category. Behind **temporary `[patch.crates-io]`
+  path pins** to the sibling `../zencodec` checkout (the taxonomy is
+  post-0.1.25, unreleased) and `../zenavif-parse` (0.7.0, unreleased) until both
+  publish. Additive (`#[non_exhaustive]` enum + opt-in trait).
 
 ### Changed
+- Backend pins: zenav1-aom ed29932f -> 7b972e50 (structured `DecodeError`
+  + `DecodeConfig`, bd8 lowbd perf pipeline), svtav1 wave2/entropy-c-parity
+  -> master 3e25f52b as `zenav1-svt` (bd10 palette panic gate, palette
+  byte-parity #71, SB128 fix #91). Both seams now map every backend error
+  variant onto the matching zenavif `Error` variant, the svt seam uses the
+  fallible `try_encode_frame*` entries (no more `is_empty()` heuristic),
+  and the caller's stop token is threaded into the svt pipelines.
+
 - **Reshape `ErrorCategory` onto zencodec's origin-first, two-level taxonomy
   (zencodec PR #116, `caterr-reshape`), superseding the flat 17-variant shape
   the PR #103 entry below describes.** New shape: `Image(ImageError) /
@@ -163,29 +377,48 @@ write-path returns + gain-map interop additions, already on main).
   type level (new `#[non_exhaustive]` enum shape); `ErrorCategory` itself is
   still unreleased, so this is not a break of any published zencodec API.
 
-### Added
-- **Adopt the `zencodec` `CategorizedError` taxonomy (PR #103, final API).**
-  `Error` now `impl zencodec::CategorizedError` with
-  `codec_name() == Some("zenavif")` — a `&self` method (not an associated const,
-  so the trait stays dyn-compatible) — and an exhaustive `category()` mapping
-  every variant to one coarse `zencodec::ErrorCategory`, so consumers route on
-  the category (HTTP status, retry policy, logging) without naming the enum. The
-  `Parse` arm **delegates** to `zenavif_parse::Error`'s own `CategorizedError`
-  (zenavif-parse PR #17): a malformed container stays `MalformedImage`, a
-  truncated one `UnexpectedEof`, a parser cap `LimitsExceeded`. Other arms:
-  `Unsupported` → `UnsupportedImageFeature`; `ImageTooLarge` →
-  `LimitsExceeded(Pixels)`; `ResourceLimit` → `LimitsExceeded(Memory)` (the
-  `String` variant is a catch-all, so a representative kind is reported, with
-  the precise limit in `Display`); `OutOfMemory` → `OutOfMemory`;
-  `Cancelled(r)` → `r.category()`; `UnsupportedOperation(op)` → `op.category()`;
-  `Decode` / `ColorConversion` (foreign `yuv`) / `Encode` → `Internal`. `Decode`
-  is a grab-bag the decode pipeline reuses for decoder setup/flush faults and
-  internal invariant checks (e.g. "expected 8-bit planes") as well as some
-  malformed-input cases; with no structural signal to split it, the conservative
-  `Internal` is its best single category. Behind **temporary `[patch.crates-io]`
-  path pins** to the sibling `../zencodec` checkout (the taxonomy is
-  post-0.1.25, unreleased) and `../zenavif-parse` (0.7.0, unreleased) until both
-  publish. Additive (`#[non_exhaustive]` enum + opt-in trait).
+### Fixed
+- **Lossless no longer pessimizes at slow speeds (issue #8).** On the
+  zenrav1e release the dep chain currently resolves (0.1.4, whose
+  "lossless" is qi=1 lossy — zenrav1e#9), speeds 1-4 measurably produce
+  +5..+19% larger lossless files than speed 8 at 4.6-11x the wall time,
+  and speed 10 is larger still on most content (up to +42%): the slow
+  tier's RDO optimizes against phantom distortion the fixed encoder
+  wouldn't emit. Lossless encodes now clamp their running speed preset
+  into the empirically size-optimal [6, 8] band
+  (`LOSSLESS_REGISTRY_SPEED_BAND`); lossy encodes are untouched, the
+  encode plan and sweep fingerprint mirror the clamp, and the residual
+  in-band s6-vs-s8 inversion is ≤ ~1.1%. Measured before/after:
+  `benchmarks/lossless_speed_clamp_2026-07-23.tsv` (requested s1: −5.0
+  to −15.2% bytes at 3.2-3.8x faster; worst-case pixel delta at s1-2 on
+  paris drops 8 → 2). REMOVE the band (set the const to `None`) at the
+  zenrav1e >0.1.4 dep bump — the fixed encoder is bit-exact and
+  byte-monotonic (slower = smaller), see the dep-bump checklist in
+  CLAUDE.md and `EncoderConfig::speed_effective`.
+- svtav1-rs QP-0 corruption gate: quality >= ~99.3 mapped to QP 0, which
+  emits valid-syntax bitstreams decoding to garbage pixels on the pinned
+  rev (imazen/zenav1-svt#5). The seam clamps QP to >= 1
+  (`quality_to_qp_gated`), so quality 100 now encodes at the best verified
+  tier instead of corrupting.
+- **Decode corruption: the bottom two rows of every even-height 4:2:0 decode
+  that routed through the `yuv` crate's bilinear converters came back
+  unwritten (black / alpha-0).** Upstream defect in yuv 0.8.12–0.8.16
+  (`yuv420_*_bilinear` / `i0xx_*_bilinear` pair luma row-pairs with
+  overlapping chroma `windows()`, dropping the final pair on even heights;
+  odd heights and 4:2:2 unaffected). Affected zenavif paths: RGBA composite
+  decode (`decoder_managed`), the exotic-matrix RGB fallback, raw-OBU gain
+  map decode (`decode_av1`), and all 8/10/12/16-bit 4:2:0 paths of the
+  legacy `unsafe-asm` decoder. Fixed by `src/yuv_bilinear_fix.rs`: run the
+  upstream converter, then re-run it on a tight 2-row sub-image with the
+  last chroma row duplicated (the crate's own odd-height clamp semantics) —
+  already-written rows stay byte-identical. Found by the SvtRs RGBA
+  round-trip test (color PSNR 20.10 dB → 50.20 dB); regression-guarded by
+  unit tests including a canary that fails when upstream fixes the bug.
+- `cargo test` / `cargo test --features encode` failed to compile on any
+  feature set that leaves `zencodec` or `encode` off: the
+  `gainmap_render_probe`, `gainmap_reencode`, `twelvebit_probe`,
+  `hdr_encode_cell`, and `hdr_fidelity_probe` examples landed without
+  `required-features` gates (pre-existing; same batch as the red main CI)
 - Executable engineering-baseline gates (`docs/ENGINEERING_BASELINE.md` A2/A3/A6):
   `examples/gate_kit.rs` (`determinism`/`cells`/`ladder` subcommands on pinned
   integer-synthetic content) + `scripts/gates/gate_conformance.sh` (the PALCONF
@@ -352,7 +585,41 @@ write-path returns + gain-map interop additions, already on main).
   fixes and zenravif GainMapData carriers, all landed on their mains)
   (302be267).
 
-### Fixed
+- **Float YUV→RGB output is now byte-identical across arch, SIMD tier, and
+  image width.** The 4:2:0/4:2:2 float kernels computed three subtly
+  different pipelines: fused `mul_add` on x86-64-v3/NEON lanes, unfused
+  mul+add on the scalar tier (what i686 runs — its CI leg had been red on a
+  1-LSB green-channel mismatch since 2026-07-06) and on wasm128 (which has
+  no FMA at all), and division-normalized ties-away rounding in
+  `yuv_to_rgb` (the width-remainder path), so the same image could decode
+  to different bytes per platform or per width%8. All paths now compute
+  one spec — unfused multiply-add, reciprocal-multiply normalization,
+  ties-to-even rounding — which every tier can produce exactly. Rare
+  single-pixel ±1 shifts vs. the previous x86-64 fused output are the
+  cost of cross-platform determinism; the libavif bilinear-parity suites
+  (`test-pixels`, `test-linku`) should be re-run against references as
+  follow-up confirmation. (Superseded for d<=12 decode by the fixed-point
+  recipe below — all real AV1 depths now use platform-exact integer
+  kernels; the one-spec f32 path survives only for 16-bit API entries,
+  as scalar `f32::mul_add`, which is correctly-rounded on every target.)
+- **rav1d-safe pinned to a git rev (now 398b0bfa, 0.6.0-staged) — registry
+  0.5.7 wedge.** Registry 0.5.7 carries a tile-worker guard race whose panicked worker parks
+  `rav1d_decode_frame`'s completion wait forever (zenavif#30 — on a
+  28-thread box the animated codec roundtrip test hung ~3 of 4 runs). The
+  dependency is now a direct git dep at `398b0bfa` (0.6.0-staged: the
+  wedge fix 49df1fc0, the #14 aarch64 16bpc SGR rounding fix, and the
+  current safe-SIMD state; the earlier f6aed27e `[patch.crates-io]` pin is
+  gone — a 0.6.0-versioned rev cannot patch a 0.5.x requirement). Return
+  to a registry dep at the 0.6.0 release. The pinned rev's managed API attaches `whereat::At` locations and
+  adds cooperative cancellation, so rav1d-safe decode errors now keep
+  their upstream trace frames (`At::map_error` at the boundary instead of
+  rewrapping) and `Error::Cancelled` maps rav1d-safe's own `Cancelled`.
+- **Default-feature `cargo test` compiles again**: four auto-discovered
+  examples that call `encode`-gated APIs (`gainmap_reencode`,
+  `hdr_encode_cell`, `hdr_fidelity_probe`, `twelvebit_probe`) had no
+  `[[example]]` declarations, breaking every platform's CI test job since
+  2026-07-12; they are now declared with `required-features = ["encode"]`.
+
 - **Vector/corpus tests no longer silently skip** (no-graceful-skips
   policy, c1533f48): libavif-vector loaders fail loud (CI provisions the
   vectors; locally `just download-vectors`), and the codec-corpus animation

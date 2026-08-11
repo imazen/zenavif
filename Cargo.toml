@@ -26,8 +26,41 @@ resolver = "3"
 # rav1d: C FFI-based decoder for asm feature (fastest)
 rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"], optional = true }
 # rav1d-safe: 100% safe managed API decoder (no c-ffi feature!)
-rav1d-safe = { version = "0.5.3", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
-archmage = { version = "0.9.15", features = ["macros"] }
+# Git-rev pinned to imazen/rav1d-safe main (0.6.0 staged). Return to a
+# registry dep at the 0.6.0 release.
+#
+# Carries, in the order they were found:
+#  * #445 — strided block guards reserved inter-row gaps that neighbouring
+#    tiles legitimately write, so a 4K decode at threads>=2 failed outright
+#    and in-flight cancellation could not be exercised multi-threaded.
+#  * rav1d-safe@49df1fc0 — the tile-threading CDEF/loop-filter race and the
+#    panic-wedge behind it (zenavif#30): a dead tile worker used to wedge
+#    `rav1d_decode_frame`'s completion wait forever.
+#  * rav1d-safe@f9458f43 — exact-window cdef padding guards, NON-SIMD paths.
+#  * rav1d-safe@fdd6a35 — the same fix for the SIMD kernels, which f9458f43
+#    did NOT cover. This is why the bump past a6a7e232 matters on aarch64:
+#    the old rev over-reserved the unread `0..x_start` prefix of each cdef
+#    padding row, and under load that produced a FALSE DisjointMut overlap
+#    (`& _[5150..5162]` vs `&mut _[4896..5152]`, 2 bytes, both inside the
+#    over-reserved prefix) in `safe_simd/cdef_arm.rs`. The wedge fix above
+#    turned it into a fast error rather than a hang, but the decode still
+#    FAILED: intermittent `Decode { code: -1 }` on ~2 of 15 full-suite runs
+#    (rav1d-safe#449). Narrowing a read reservation to what is actually read
+#    cannot mask a real overlap, so this removes false positives only.
+#  * the tile-threading correctness + granularity campaign (rav1d-safe#455):
+#    the 766-vector corpus now passes at t=1 AND t=8 with nothing skipped.
+rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "140f91450c3551c25a5699d12ded6d629ecf6d97", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
+# zenav1-aom pure-Rust AV1 KEY-frame decoder — second decode backend (feature
+# `aom-backend`). Git-rev pinned to imazen/zenav1-aom main (crate unpublished;
+# intra decode is conformance-clean vs libaom v3.14.1 at this rev). This rev
+# carries the structured `DecodeError` + `DecodeConfig` (limits/stop/alloc)
+# API and the bd8 lowbd perf pipeline (4K vs C 1.45x -> 1.286x upstream).
+# 2026-08-06: sibling path dep for the same reason as `svtav1` below — the
+# decode-backend work and the in-repo zenav1-aom work land together, so a
+# publish/rev round-trip between them would serialize the whole program.
+# Return to a git-rev pin on `imazen/zenav1-aom` before this branch lands.
+aom-decode = { package = "zenav1-aom-decode", path = "../zenav1-aom/crates/aom-decode", optional = true }
+archmage = { version = "0.9.15", features = ["macros", "avx512"] }
 magetypes = { version = "0.9.15"}
 safe_unaligned_simd = "0.2.5"
 # 0.7.0 (breaking): parser entry points return `whereat::At<Error>`, and `Error`
@@ -44,10 +77,54 @@ thiserror = { version = "2.0.18", default-features = false }
 whereat = { version = "0.1.5"}
 log = "0.4.29"
 ravif = { package = "zenravif", version = "0.2.0", path = "../ravif/ravif", default-features = false, optional = true, features = ["stop"] }
+# svtav1-rs experimental AV1 encode backend (`encode-svt-rs` feature).
+# The crate lives in the rust/svtav1 subdir of imazen/svtav1; cargo
+# discovers workspace-subdir packages in git deps by package name. Rev-pinned
+# to master 2026-07-24 (rev 2d585bb2b). This is past the repo restructure
+# that moved the C reference into a git submodule — the `zenav1-svt*` crates
+# are pure Rust and unaffected (crate names + pub API unchanged). Relative to
+# the 3e25f52b baseline the pinned tree provides the fallible entry points
+# the seam now uses — `try_encode_frame*` -> `EncodeResult<Vec<u8>>` with a
+# typed `EncodeError` (Cancelled / AllocFailed / InvalidDimensions /
+# UnsupportedConfig), `with_stop` / `with_thread_count`, and a `fallible-alloc`
+# feature — plus the typed QP-0 rejection (upstream #5: QP 0 returns
+# `UnsupportedConfig` instead of emitting garbage; the seam's quality->QP
+# clamp keeps quality 100 on QP 1 and never trips it).
+# (The facade crate was renamed `svtav1` -> `zenav1-svt` upstream; the
+# `svtav1` alias keeps the seam's paths stable.)
+#
+# 2026-08-06: switched from the git-rev pin to the sibling path dep. The old
+# pin (`github.com/imazen/svtav1` @ 2d585bb2b) is UNFETCHABLE: the repo was
+# renamed to `imazen/zenav1-svt` and its `reference/svt-av1` submodule URL
+# moved to `imazen/zenav1-svt-c`, so cargo's submodule update 404s on the old
+# `imazen/svt-av1-ref` and the whole dependency resolution fails — for every
+# feature combination, not just `encode-svt-rs`. A path dep also composes the
+# in-flight zenav1-svt work (cancellation, panic audit) with this crate's
+# without a publish round-trip, per the CLAUDE.md unpublished-dependency rule.
+# Return to a git-rev pin on `imazen/zenav1-svt` before this branch lands.
+svtav1 = { package = "zenav1-svt", path = "../zenav1-svt/rust/svtav1", optional = true }
+# AVIF container muxer for the svtav1-rs backend (the zenravif backend muxes
+# inside zenravif; this backend muxes in-crate). The 0.2.0 version is
+# supplied by the [patch.crates-io] git pin below until 0.2.0 publishes.
+zenavif-serialize = { version = "0.2.0", optional = true }
 # Optional target-quality deps — encode->decode->score convergence loop
 # (`target-quality` feature). Same versions as the dev-dependency copies.
 fast-ssim2 = { version = "0.8.0", optional = true, features = ["imgref", "rayon"] }
-zensim = { version = "0.2.4", optional = true, features = ["imgref", "zenpixels"] }
+# zensim: git-pinned to `main` (0.3.0, unpublished) for the diffmap API the
+# `two-pass-zensim` closed loop needs — `Zensim::compute_with_ref_and_diffmap`
+# + `PrecomputedReference` reuse + `Zensim::with_stop`. 0.3.0 is a breaking 0.x
+# bump over the registry's 0.2.4, so the pin covers the whole graph (the
+# dev-dependency copy below matches). Return to a registry version at the
+# zensim 0.3.0 publish.
+#
+# `feature-regime-v2` + `custom-profiles` carry the generation-C surface
+# (`src/zensim_c.rs`): the folded-944 extraction `C` actually consumes
+# (`compute_folded720_features_streaming`, feature-regime-v2) and the
+# attribution-density steering map + `Fused944Session`, whose module is
+# gated on `custom-profiles` and whose fused entry needs BOTH. Neither
+# feature changes the v1 372-feature extraction that profile `B` scores
+# through, so `TargetMetric::Zensim` is byte-unaffected.
+zensim = { git = "https://github.com/imazen/zensim", branch = "main", optional = true, features = ["imgref", "zenpixels", "feature-regime-v2", "custom-profiles"] }
 # Optional two-pass diffmap dep — butteraugli per-pixel error map drives the
 # per-SB quantizer-scale second pass (`two-pass-butteraugli` feature).
 butteraugli = { version = "0.9.3", optional = true }
@@ -79,21 +156,33 @@ linear-srgb = { version = "0.6.7"}
 [dev-dependencies]
 almost-enough = { version = "0.4.3", features = ["alloc"] }
 zenutils-fuzz = "0.1.0"
-archmage = { version = "0.9.15", features = ["std"] }
+# `testable_dispatch` is what lets a test disable a token that the target
+# baseline guarantees at COMPILE time (NEON on aarch64, SSE2 on x86-64):
+# without it `incant!` can never fall below the host's best tier and the
+# scalar/lower-tier kernel copies are unreachable from any test. The
+# cross-tier parity test in src/yuv_convert.rs asserts the disable actually
+# took effect (CompileTimePolicy::Fail), so removing this feature fails the
+# test loudly instead of silently testing one tier twice.
+archmage = { version = "0.9.15", features = ["std", "testable_dispatch"] }
 env_logger = { version = "0.11.10", default-features = false }
 png = "0.18.0"
 image = "0.25.10"
 zenbench = { version = "0.1.2", features = ["criterion-compat"] }
 fast-ssim2 = { version = "0.8.0", features = ["imgref"] }
-zensim = { version = "0.2.4", features = ["imgref", "zenpixels"] }
-# The unpublished zensim 0.3.0 sibling surface the zensim_cq_rd loop
-# harness needs (ZensimProfile::C, folded-944 extraction + fused
-# attribution, custom profiles), as a RENAMED dev-dep so it coexists with
-# the registry 0.2.4 above (same extern name would E0464 the lib-test
-# target when `target-quality` is on). Path-only (CI clones ../zensim);
-# collapse into the plain `zensim` dep once 0.3.0 publishes (zensim#46).
-zensim03 = { package = "zensim", path = "../zensim/zensim", features = ["imgref", "zenpixels", "custom-profiles", "feature-regime-v2"] }
-zensim-regress = { version = "0.3.0"}
+zensim = { git = "https://github.com/imazen/zensim", branch = "main", features = ["imgref", "zenpixels", "feature-regime-v2", "custom-profiles"] }
+# zensim-regress must track the SAME zensim as the dependency above, or the
+# `Zensim` / `ImageSource` types in tests/linku_corpus.rs come from two
+# different zensim crates and don't unify. Registry 0.3.1 depends on zensim
+# 0.2.x; git `main` (0.4.0) depends on 0.3.0. Unpin together at the publish.
+zensim-regress = { git = "https://github.com/imazen/zensim", branch = "main" }
+# NOTE (merge of origin/main, 2026-08-11): main carried a second, RENAMED
+# `zensim03` path dep so the `zensim_cq_rd` harness could reach 0.3.0's
+# `ZensimProfile::C` while the main dep stayed pinned to registry 0.2.4.
+# This branch's `zensim` is git `main` and already enables the two features
+# that alias existed for (`custom-profiles`, `feature-regime-v2`), so the
+# alias is redundant here and was dropped — which is exactly the collapse
+# main's own comment asked for (zensim#46). `zensim_cq_rd.rs` now uses the
+# plain `zensim` crate. Both deps must keep tracking the SAME zensim.
 rayon = "1.11.0"
 # Feature extraction for the rav1e knob predictor MLP training.
 # Path-pinned to the sibling checkout (see the [dependencies] note above);
@@ -224,11 +313,46 @@ required-features = ["encode-imazen", "two-pass-butteraugli"]
 
 # Heaptrack allocation-profiling harness for the decode-from-bytes path.
 # Decode is in the default feature set (pure-Rust rav1d-safe); no extra features.
+# Apples-to-apples aom-rs vs rav1d-safe decode benchmark (interleaved via
+# zenbench, both backends through the zenavif decode seam).
+[[example]]
+name = "decode_4way_bench"
+required-features = ["aom-backend"]
+
 [[example]]
 name = "heaptrack_decode"
 
+# Encode-API examples from the same batch, equally ungated before this:
+# gainmap_reencode calls encode_rgb8/encode_rgb16; twelvebit_probe drives
+# ravif directly (its own usage line says --features encode).
+[[example]]
+name = "gainmap_reencode"
+required-features = ["encode"]
+
+[[example]]
+name = "twelvebit_probe"
+required-features = ["encode"]
+
+[[example]]
+name = "hdr_encode_cell"
+required-features = ["encode"]
+
+[[example]]
+name = "hdr_fidelity_probe"
+required-features = ["encode"]
+
 [features]
-default = []
+default = ["avx512"]
+# AVX-512 kernel tiers (v4x/v4) for the in-house YUV converters — safe,
+# runtime-dispatched (used only when the CPU reports support). Default-on;
+# opt out with default-features = false for minimal builds.
+avx512 = ["archmage/avx512"]
+# EXPERIMENTAL: zenav1-aom (`aom-decode`) as a second AV1 KEY-frame decode
+# backend behind `decode_av1_obu_yuv(.., Av1Backend::AomRs)`. KEY-frame /
+# intra scope only (an AVIF still is a single KEY frame); byte-identical to
+# libaom on the intra conformance corpus. Off by default; also drives the
+# 4-way decode benchmark example.
+aom-backend = ["dep:aom-decode"]
 # Decode with hand-written assembly via C FFI (fastest, uses unsafe)
 unsafe-asm = ["dep:rav1d", "rav1d/asm"]
 # AVIF encoding via zenravif (pure Rust by default)
@@ -243,6 +367,24 @@ target-quality = ["encode", "dep:fast-ssim2", "dep:zensim"]
 # `__expert` surface. RELEASE-GATED at runtime behind
 # `zenravif::FRAME_HINTS_LIVE` (fails honestly until the zenrav1e dep bump).
 two-pass-butteraugli = ["encode-imazen", "ravif/__expert", "dep:butteraugli"]
+# zensim-diffmap-driven closed loop (encode_rgb8_zensim_loop): encode ->
+# decode -> Zensim::compute_with_ref_and_diffmap -> global quality correction
+# from the score AND per-64x64-superblock quantizer scales from the diffmap
+# -> re-encode. Unlike `two-pass-butteraugli` (purely spatial, and so
+# refused outright while zenravif's FrameHints passthrough is release-gated),
+# this loop's GLOBAL half is live today; the spatial half is applied only
+# when `zenravif::FRAME_HINTS_LIVE`, reported per call as
+# `ZensimLoopResult::spatial_applied`. Builds on `target-quality` (shares
+# the search, the q0 seed, and the zensim dep).
+two-pass-zensim = ["target-quality", "encode-imazen", "ravif/__expert"]
+# EXPERIMENTAL: AVIF encoding via svtav1-rs (pure Rust SVT-AV1 port,
+# imazen/svtav1 branch dep). Adds the working `Av1Backend::SvtRs` variant:
+# 8-bit 4:2:0 stills only, dimensions must be multiples of 64 (the svtav1-rs
+# pipeline codes full 64x64 superblocks; no partial-SB / container-crop path
+# yet). Bitstream identity vs C-SVT is NOT yet asserted — that parity gate
+# lands when svtav1-rs reaches decision-layer bitstream identity. Off by
+# default; requires `encode` (the backend enum and entry points live there).
+encode-svt-rs = ["encode", "dep:svtav1", "dep:zenavif-serialize"]
 # Encoding with hand-written assembly (fastest, uses unsafe)
 encode-asm = ["encode", "ravif/asm"]
 # Encoding with multi-threading
@@ -282,23 +424,11 @@ rustdoc-args = ["--generate-link-to-definition"]
 name = "two_pass_cell"
 required-features = ["two-pass-butteraugli"]
 
-# Gain-map / HDR re-encode harnesses (auto-discovered before this entry
-# existed, which broke default-feature `cargo test` — they call encode APIs).
+# Measurement harness for the zensim closed loop: dense quality sweeps (the
+# anchor-curve fit input) + the real-encode secant-vs-loop A/B.
 [[example]]
-name = "gainmap_reencode"
-required-features = ["encode"]
-
-[[example]]
-name = "hdr_encode_cell"
-required-features = ["encode"]
-
-[[example]]
-name = "hdr_fidelity_probe"
-required-features = ["encode"]
-
-[[example]]
-name = "twelvebit_probe"
-required-features = ["encode"]
+name = "zensim_loop_bench"
+required-features = ["two-pass-zensim"]
 
 # zenavif#30 futex-hang repro/stress loop (found the rav1d-safe tile-threading
 # CDEF/loop-filter guard race; kept as the product-path stress harness).
@@ -306,21 +436,35 @@ required-features = ["encode"]
 name = "hang_stress"
 required-features = ["two-pass-butteraugli"]
 
+[[example]]
+name = "yuv_kernel_bench"
+required-features = ["_dev"]
+
+[[example]]
+name = "encode_backend_sweep"
+required-features = ["encode"]
+
+[[example]]
+name = "decode_backend_bench"
+required-features = ["encode", "aom-backend"]
+
 [patch.crates-io]
 # Workspace member supplies zenavif-serialize 0.2.0 (set_gain_map_alt_icc) to
 # the whole graph — zenravif depends on it and 0.2.0 is unpublished. Drop at
 # the zenavif-serialize 0.2.0 publish.
 zenavif-serialize = { path = "zenavif-serialize" }
-# TEMP: registry rav1d-safe 0.5.7 ships the tile-threading CDEF/loop-filter
-# guard race + worker-panic wedge (zenavif#30; on a 28-thread box the
-# animated codec roundtrip test futex-wedges reliably). Pin the last
-# 0.5.7-versioned rev on main (a 0.6.0-versioned rev cannot patch a 0.5.x
-# requirement): it carries the upstream wedge fix 49df1fc0 plus the #14
-# aarch64 16bpc SGR rounding fix. Drop at the rav1d-safe release past
-# 0.5.7. Mirrored in fuzz/Cargo.toml.
-rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "f6aed27e81baa5e74a8eba413562efb8813641fd" }
+# (The former TEMP rav1d-safe [patch.crates-io] pin at f6aed27e is gone:
+# the dependency itself is now a git dep at 398b0bfa — a 0.6.0-staged rev
+# that carries the zenavif#30 wedge fix and the #14 aarch64 SGR fix, and
+# which a crates-io patch could not supply because 0.6.0 cannot patch a
+# 0.5.x requirement. Return to a registry dep at the 0.6.0 release;
+# fuzz/Cargo.toml mirrors the same pin.)
 
 [[bench]]
 name = "unpremul_tiers"
 harness = false
 required-features = ["_dev"]
+
+[[example]]
+name = "cancel_latency"
+required-features = ["encode"]

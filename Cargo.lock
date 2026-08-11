@@ -669,6 +669,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "grid"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b40ca9252762c466af32d0b1002e91e4e1bc5398f77455e55474deb466355ff5"
+
+[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -857,6 +863,12 @@ name = "lz4_flex"
 version = "0.11.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "373f5eceeeab7925e0c1098212f2fbc4d416adec9d35051a6ab251e824c1854a"
+
+[[package]]
+name = "lz4_flex"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ef0d4ed8669f8f8826eb00dc878084aa8f253506c4fd5e8f58f5bce72ddb97e"
 
 [[package]]
 name = "magetypes"
@@ -1223,7 +1235,7 @@ dependencies = [
 [[package]]
 name = "rav1d-disjoint-mut"
 version = "0.3.1"
-source = "git+https://github.com/imazen/rav1d-safe?rev=f6aed27e81baa5e74a8eba413562efb8813641fd#f6aed27e81baa5e74a8eba413562efb8813641fd"
+source = "git+https://github.com/imazen/rav1d-safe?rev=140f91450c3551c25a5699d12ded6d629ecf6d97#140f91450c3551c25a5699d12ded6d629ecf6d97"
 dependencies = [
  "aligned",
  "aligned-vec",
@@ -1232,8 +1244,8 @@ dependencies = [
 
 [[package]]
 name = "rav1d-safe"
-version = "0.5.7"
-source = "git+https://github.com/imazen/rav1d-safe?rev=f6aed27e81baa5e74a8eba413562efb8813641fd#f6aed27e81baa5e74a8eba413562efb8813641fd"
+version = "0.6.0"
+source = "git+https://github.com/imazen/rav1d-safe?rev=140f91450c3551c25a5699d12ded6d629ecf6d97#140f91450c3551c25a5699d12ded6d629ecf6d97"
 dependencies = [
  "aligned",
  "archmage",
@@ -1472,6 +1484,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "slotmap"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdd58c3c93c3d278ca835519292445cb4b0d4dc59ccfdf7ceadaab3f8aeb4038"
+dependencies = [
+ "version_check",
+]
+
+[[package]]
 name = "smallvec"
 version = "1.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1561,6 +1582,18 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-io-kit",
  "windows",
+]
+
+[[package]]
+name = "taffy"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "340a09581f29809fc0df82a3955501dc7f2a21f887e5d1c13dbe288fe1c0bef4"
+dependencies = [
+ "arrayvec",
+ "grid",
+ "serde",
+ "slotmap",
 ]
 
 [[package]]
@@ -1980,6 +2013,82 @@ version = "1.0.0"
 source = "git+https://github.com/imazen/zenanalyze?rev=47b4d0f5f1abfff45a152e9a9f4de82fffd5afa6#47b4d0f5f1abfff45a152e9a9f4de82fffd5afa6"
 
 [[package]]
+name = "zenav1-aom-decode"
+version = "0.0.1"
+dependencies = [
+ "enough",
+ "zenav1-aom-dsp",
+]
+
+[[package]]
+name = "zenav1-aom-dsp"
+version = "0.0.1"
+dependencies = [
+ "archmage",
+ "enough",
+ "magetypes",
+]
+
+[[package]]
+name = "zenav1-svt"
+version = "0.1.0"
+dependencies = [
+ "zenav1-svt-dsp",
+ "zenav1-svt-encoder",
+ "zenav1-svt-entropy",
+ "zenav1-svt-tables",
+ "zenav1-svt-types",
+]
+
+[[package]]
+name = "zenav1-svt-dsp"
+version = "0.1.0"
+dependencies = [
+ "archmage",
+ "magetypes",
+ "zenav1-svt-tables",
+ "zenav1-svt-types",
+]
+
+[[package]]
+name = "zenav1-svt-encoder"
+version = "0.1.0"
+dependencies = [
+ "almost-enough",
+ "enough",
+ "whereat",
+ "zenav1-svt-dsp",
+ "zenav1-svt-entropy",
+ "zenav1-svt-tables",
+ "zenav1-svt-types",
+]
+
+[[package]]
+name = "zenav1-svt-entropy"
+version = "0.1.0"
+dependencies = [
+ "archmage",
+ "magetypes",
+ "zenav1-svt-tables",
+ "zenav1-svt-types",
+]
+
+[[package]]
+name = "zenav1-svt-tables"
+version = "0.1.0"
+dependencies = [
+ "zenav1-svt-types",
+]
+
+[[package]]
+name = "zenav1-svt-types"
+version = "0.1.0"
+dependencies = [
+ "enough",
+ "whereat",
+]
+
+[[package]]
 name = "zenavif"
 version = "0.1.7"
 dependencies = [
@@ -2008,15 +2117,17 @@ dependencies = [
  "yuv",
  "zenanalyze",
  "zenanalyze-api",
+ "zenav1-aom-decode",
+ "zenav1-svt",
  "zenavif-parse 0.7.0",
+ "zenavif-serialize",
  "zenbench",
  "zencodec",
  "zenpixels",
  "zenpixels-convert",
  "zenpredict 0.2.0",
  "zenravif",
- "zensim 0.2.7",
- "zensim 0.3.0",
+ "zensim",
  "zensim-regress",
  "zenutils-fuzz",
 ]
@@ -2065,7 +2176,7 @@ dependencies = [
  "whereat",
  "zenavif-parse 0.6.2",
  "zenpixels-convert",
- "zenrav1e",
+ "zenrav1e 0.1.4",
 ]
 
 [[package]]
@@ -2083,6 +2194,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "zenblend"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d66daf1f95f9f3a3c7c4529ea1f993069e2691cc89a4f8b0f4002ced96179f68"
+dependencies = [
+ "archmage",
+ "magetypes",
+ "safe_unaligned_simd",
+]
+
+[[package]]
 name = "zencodec"
 version = "0.1.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2092,6 +2214,17 @@ dependencies = [
  "enough",
  "whereat",
  "zenpixels",
+]
+
+[[package]]
+name = "zenflate"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8409543ad469f954834da58409f0d9c463156f01cfaf8a8a03fe277c73b1e0f5"
+dependencies = [
+ "archmage",
+ "enough",
+ "libm",
 ]
 
 [[package]]
@@ -2117,6 +2250,7 @@ dependencies = [
  "garb",
  "libm",
  "linear-srgb",
+ "lz4_flex 0.13.1",
  "magetypes",
  "once_cell",
  "paste",
@@ -2126,13 +2260,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "zenpng"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34ef0ff0cfac28ce74a9241dbe8ba3abe60f385819d55675c4daced1ac8ac4bd"
+dependencies = [
+ "almost-enough",
+ "archmage",
+ "bytemuck",
+ "enough",
+ "imgref",
+ "linear-srgb",
+ "memchr",
+ "rgb",
+ "safe_unaligned_simd",
+ "thiserror",
+ "whereat",
+ "zencodec",
+ "zenflate",
+ "zenpixels",
+ "zenpixels-convert",
+]
+
+[[package]]
 name = "zenpredict"
 version = "0.2.0"
 dependencies = [
- "archmage",
  "bytemuck",
  "libm",
- "lz4_flex",
+ "lz4_flex 0.11.6",
 ]
 
 [[package]]
@@ -2143,7 +2299,7 @@ dependencies = [
  "archmage",
  "bytemuck",
  "libm",
- "lz4_flex",
+ "lz4_flex 0.11.6",
 ]
 
 [[package]]
@@ -2151,6 +2307,35 @@ name = "zenrav1e"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c2f798defdace5a2d991e4f679697768cf256a3cef130bfa2d84702cebf3a76"
+dependencies = [
+ "aligned-vec",
+ "arbitrary",
+ "arg_enum_proc_macro",
+ "arrayvec",
+ "av1-grain",
+ "bitstream-io",
+ "built",
+ "cfg-if",
+ "interpolate_name",
+ "itertools",
+ "libfuzzer-sys",
+ "log",
+ "maybe-rayon",
+ "noop_proc_macro",
+ "num-derive",
+ "num-traits",
+ "pastey",
+ "profiling",
+ "rand",
+ "rand_chacha",
+ "simd_helpers",
+ "thiserror",
+ "v_frame 0.3.9",
+]
+
+[[package]]
+name = "zenrav1e"
+version = "0.2.0"
 dependencies = [
  "aligned-vec",
  "arbitrary",
@@ -2183,6 +2368,7 @@ dependencies = [
  "thiserror",
  "v_frame 0.3.9",
  "wasm-bindgen",
+ "whereat",
 ]
 
 [[package]]
@@ -2197,29 +2383,31 @@ dependencies = [
  "rgb",
  "whereat",
  "zenavif-serialize",
- "zenrav1e",
+ "zenrav1e 0.2.0",
 ]
 
 [[package]]
-name = "zensim"
-version = "0.2.7"
+name = "zenresize"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f46ead96f329b3f706ce66c8f36bf5b5bc1bb1fc5135c467079728379560b93c"
+checksum = "0703679da7af627f10429532d0633b3d32fa0fd10d2b48ca94b5fcd0dbfd6e5a"
 dependencies = [
  "archmage",
- "bytemuck",
  "imgref",
+ "libm",
  "linear-srgb",
  "magetypes",
- "rayon",
  "rgb",
- "thiserror",
+ "safe_unaligned_simd",
+ "whereat",
+ "zenblend",
  "zenpixels",
 ]
 
 [[package]]
 name = "zensim"
 version = "0.3.0"
+source = "git+https://github.com/imazen/zensim?branch=main#a390a1822301b628fd42e86153b0a5812be11af5"
 dependencies = [
  "archmage",
  "bytemuck",
@@ -2236,16 +2424,24 @@ dependencies = [
 
 [[package]]
 name = "zensim-regress"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81760b7396cfc229282b77dc5ea504b1dfa2e3c1c54b18d01bd8fb8c8ed00832"
+version = "0.4.0"
+source = "git+https://github.com/imazen/zensim?branch=main#a390a1822301b628fd42e86153b0a5812be11af5"
 dependencies = [
  "base64",
+ "bytemuck",
+ "enough",
  "fs2",
- "image",
+ "imgref",
+ "linear-srgb",
+ "rgb",
  "seahash",
+ "taffy",
  "thiserror",
- "zensim 0.2.7",
+ "zenblend",
+ "zenpixels",
+ "zenpng",
+ "zenresize",
+ "zensim",
 ]
 
 [[package]]

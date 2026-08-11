@@ -1,0 +1,39 @@
+# backend_timing_2026-07-22 — serial interleaved encode wall + decode bench (new pins)
+
+Same commit/pins as backend_sweep_2026-07-22.meta. Box dev-32gb, load ~4-7
+(concurrent sessions; interleaved min-of-3 within one process bounds the
+skew — treat ratios as reliable, absolutes as +-10-20%).
+
+## Encode (backend_timing_2026-07-22.tsv)
+examples/encode_backend_sweep.rs --threads 1 --reps 3 (per-cell interleaved
+zenravif-420/zenravif-444/svt-rs-420, min-of-3), 6 CID22-512 images x sizes
+{512,1024-mosaic} x q{30,60,85} x speeds {2,6,9}. Median min-wall:
+
+speed size | zenravif-420  zenravif-444  svt-rs-420 | zr420/svt
+s2    512  |     2998 ms      3304 ms      2965 ms  | 1.01x
+s2   1024  |    10357 ms     12637 ms     15558 ms  | 0.67x
+s6    512  |      439 ms       657 ms        62 ms  | 7.10x
+s6   1024  |     1882 ms      2810 ms       303 ms  | 6.22x
+s9    512  |      147 ms       225 ms        32 ms  | 4.56x
+s9   1024  |      649 ms      1038 ms       151 ms  | 4.29x
+
+The linear speed->preset ladders are misaligned: at matched speed number,
+svt-rs is ~6x faster at s6 (preset 7) but slightly slower at s2-1024
+(preset 1). Combined with the sweep's matched-ssim2 byte ratios (svt 0.93x
+at s2, 1.02-1.07x at s6), svt's mid-preset points are strong wall/RD
+tradeoffs; a wall-aligned speed remap was deliberately NOT shipped.
+
+## Decode (decode_backends_2026-07-22.csv)
+examples/decode_backend_bench.rs reps=7, cells encoded by the zenravif
+backend (s6) from CID22-512 mosaics; correctness gate: all 9 cells
+byte-identical rav1d-safe vs zenav1-aom. Min ms (rav1d-safe / aom-rs,
+ratio): 1Mpx-420 q30 33.3/48.1 1.45x, q60 25.5/35.3 1.38x, q85 35.8/51.4
+1.43x; 1Mpx-444 q85 47.6/67.2 1.41x; 4Mpx-420 q30 122/183 1.50x, q60
+95/135 1.42x, q85 137/196 1.43x; 4Mpx-444 q85 176/249 1.41x;
+1Mpx-b10-444 q60 49.8/56.4 1.13x.
+
+vs the 2026-07-19 six-decoder matrix (old aom rev ed29932f: 1.41-1.59x on
+photo stills): the bd8 lowbd upstream program narrowed the 8-bit gap to
+~1.4x and 10-bit is near-parity (1.13x). rav1d-safe remains the faster
+safe decoder; upstream rav1d full-asm (2026-07-19 data) remains ~2.1-2.9x
+faster than rav1d-safe safe mode.

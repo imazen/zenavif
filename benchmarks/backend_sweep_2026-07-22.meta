@@ -1,0 +1,31 @@
+# backend_sweep_2026-07-22 — zenravif (zenrav1e) vs svtav1-rs: RD + cross-decoder gate
+
+Harness: examples/encode_backend_sweep.rs at zenavif branch svtav1-rs-backend
+(commit after 2ae4d74; pins zenav1-aom 7b972e50, zenav1-svt 3e25f52b,
+rav1d-safe 398b0bfa). Box: dev-32gb cloud (16 cores/30GB), load ~3, 8-thread
+rayon — encode_ms/decode_ms columns are LOAD-POLLUTED (parallel run), use
+only directionally; the committed timing headline runs are separate
+(backend_timing_2026-07-22.*).
+
+Grid: 12 CID22-512 validation images x sizes {64,256,512 center-crop/native,
+1024 2x2-mosaic (3 mosaics)} x quality 5..=100 step 5 x speeds {2,6,9} x
+arms {zenravif-420, zenravif-444 (shipped default), svt-rs-420}. 7018 rows.
+
+Cross-decoder gate: every encoded cell's AV1 payload decoded with BOTH
+rav1d-safe and zenav1-aom, planes byte-compared: 7018/7018 identical.
+
+Headline findings:
+- svt-rs QP 0 (quality>=~99.3) CORRUPT on every cell (115/115 ssim2 ~ -700,
+  both decoders byte-agree on the garbage => encoder-side; boundary probed
+  clean at QP 1 / q<=99). Seam now clamps QP>=1 (quality_to_qp_gated) with
+  regression test svt_rs_quality_100_does_not_corrupt.
+- One additional svt 64x64 q100 cell produced a stream rav1d-safe REJECTED
+  ("Failed to decode primary frame"): image 1475938, speeds 2 of 3.
+- Matched-ssim2 byte ratio svt-rs vs zenravif-420 (BD-lite, ssim2 30..90,
+  log-bytes interp): s2 0.93-0.99x (svt BETTER), s6 0.98-1.07x,
+  s9 1.00-1.08x (svt slightly worse, worst at 1024px).
+- Parallel-run wall medians (directional): svt ~6x faster at s6, ~4.4x at
+  s9, ~0.6-0.86x (slower) at s2 — the linear speed->preset maps do not
+  align the two ladders' wall-time.
+- Quality->median-ssim2 curves align within ~+-5 ssim2 for q>=35 across
+  backends; svt is materially worse below q30 at s6/s9.

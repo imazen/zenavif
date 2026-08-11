@@ -1,0 +1,11 @@
+# nextest profiles for zenavif.
+#
+# `coverage` exists because `cargo llvm-cov nextest` refuses `--no-fail-fast`
+# together with `--ignore-run-fail`, and a coverage run needs both: without
+# --ignore-run-fail llvm-cov writes NO report when any test fails (so a feature
+# combo with one known-failing test contributes nothing to the map), and
+# without no-fail-fast the run stops at the first failure and measures a
+# truncated suite. Used by scripts/coverage.sh only; `[profile.default]` is
+# deliberately left alone.
+[profile.coverage]
+fail-fast = false

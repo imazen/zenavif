@@ -1,0 +1,81 @@
+# Real-encode A/B: bracketed secant baseline vs the zensim closed loop
+#
+# date          2026-08-06
+# host          Darwin 26.5.2 (macOS), Apple aarch64, 12 cores, 24 GiB RAM
+# rustc         rustc 1.97.1 (8bab26f4f 2026-07-14)
+# zenavif       9a1c7626f962 fix(two-pass-zensim): drop the cross-metric content seed — measured harmful; CI + gauntlet coverage
+# zensim        git https://github.com/imazen/zensim branch main @ e4b875b5 (0.3.0)
+#               profile: ZensimProfile::codec_target() == B
+# encoder       zenravif (ravif) path dep ../ravif/ravif, speed 6, threads=1
+#               zenravif::FRAME_HINTS_LIVE = false, so the loop's per-superblock
+#               hints were COMPUTED AND DISCARDED. This measures the GLOBAL half
+#               of the loop only; the `spatial` column records false on every
+#               row so the file can never be misread as a spatial result.
+# NOT built with -C target-cpu=native
+#
+# command
+#   cargo build --release --features two-pass-zensim,auto-tune \
+#       --example zensim_loop_bench
+#   # leg 1 -- the 64/256/1024 ladder, all 12 sources, 15 targets
+#   ./target/release/examples/zensim_loop_bench ab \
+#       benchmarks/zensim_loop_manifest_2026-08-06.txt 6 \
+#       64,256,1024 \
+#       20,25,30,35,40,45,50,55,60,65,70,75,80,85,90 \
+#       0.5 6
+#   # leg 2 -- the 2048 tier. A 2048 cell costs ~15-20 s per encode, so this
+#   # leg is a 4-source subset (2 photos + 2 screenshots) on a step-10 target
+#   # grid. The grid is still UNIFORM across 20..90, so the low band keeps the
+#   # same density as the high band -- only the count is reduced, not the
+#   # coverage shape.
+#   ./target/release/examples/zensim_loop_bench ab \
+#       benchmarks/zensim_loop_manifest_large_2026-08-06.txt 6 \
+#       2048 20,30,40,50,60,70,80,90 0.5 6
+#
+#   (tolerance 0.5, max 6 encodes -- identical options on both arms)
+#
+#   A companion file, benchmarks/zensim_loop_ab_tol1_2026-08-06.tsv, repeats
+#   leg 1's 64/256 tiers at tolerance 1.0. That is the tolerance the score
+#   lattice can actually deliver (see
+#   benchmarks/zensim_score_lattice_2026-08-06.tsv), so it is where the
+#   "converges in 2 encodes" question gets a meaningful answer.
+#
+# arms          secant = zenavif::encode_rgb8_with_target(TargetMetric::Zensim)
+#               zloop  = zenavif::encode_rgb8_zensim_loop
+#               Both share the selection policy (smallest file in the target
+#               band), the encoder config, and the scoring profile; they differ
+#               only in the seed and the un-bracketed step.
+#
+# corpus        benchmarks/zensim_loop_manifest_2026-08-06.txt -- the SAME 12
+#               sources the anchor was fitted on, so the A/B numbers are
+#               IN-SAMPLE for the anchor curve and are an upper bound on what
+#               a held-out corpus would show. Stated rather than hidden; a
+#               held-out re-run is the obvious follow-up.
+# sizes         64 / 256 / 1024 / 2048 long edge (Lanczos3 downscale only).
+#               No 4096 tier: no in-corpus source is that large and upscaling
+#               is banned.
+# targets       zensim 20..90 step 5 -- the low band at the same density as
+#               the high band.
+#
+# columns       arm image size w h target achieved err encodes converged bytes
+#               ms spatial seed_q seed_score anchor_q
+#               seed_* / anchor_q are zloop-only (NA on secant rows) and record
+#               what the OPEN-LOOP seed alone achieved before any correction.
+#
+# analysis      python3 scripts/hyperparam/analyze_zensim_loop_ab.py \
+#                   benchmarks/zensim_loop_ab_2026-08-06.tsv
+#
+# scheduling    Run under `nice -n 5`, NOT `nice -n 19`. macOS maps high nice
+#               values onto the background QoS class, confining the process to
+#               efficiency cores: measured 2026-08-06 on an idle box, the same
+#               workload got ~17% of one core at nice 19 vs ~145% at nice 5
+#               (~40x wall clock). nice 5 still yields to interactive work.
+
+STORAGE: the raw TSV is committed zstd-compressed (.tsv.zst) because it
+exceeded the repo's 30 KB commit rule uncompressed (126 / 85 / 77 KB -> 17.8 /
+16.1 / 11.3 KB). Read it with:
+
+    zstd -dc <file>.tsv.zst | less        # or: zstdcat <file>.tsv.zst
+
+Nothing about the data changed — the .zst decompresses to the exact bytes the
+harness wrote. The .summary.txt beside it carries the aggregates without
+needing to decompress anything.

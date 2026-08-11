@@ -180,6 +180,40 @@ fn pq10_pixel_fidelity_within_bounds() {
     // (q80→3075, q90→1665, q95→607, q99→221). Bounds = measured + ~50%
     // headroom; real pipeline bugs are orders of magnitude past them
     // (channel swap ≈ 56000, plane rotation ≈ full-scale).
+    //
+    // RE-CALIBRATED 2026-08-06 for the zenrav1e dep bump + the armed speed
+    // rows (cavif-rs#6). q95/s8 max |Δ| moved 607 → 1281, attributed by
+    // isolation to `S6_TX_SIZE_RDO_LIVE` (`S6_PART_PRUNE_LIVE` alone reaches
+    // 960); mean IMPROVED 50 → 47.
+    //
+    // This is a rate shift, not a fidelity regression, and the distinction is
+    // the whole reason the number moves rather than the arms coming out:
+    //
+    //   * At MATCHED BYTES the armed encoder wins the tail too —
+    //     baseline q90 = 1125 B / max 1665 / mean 85, versus
+    //     armed    q95 = 1127 B / max 1281 / mean 47.
+    //     The old 900 budget was calibrated against a 1407-byte q95 output;
+    //     the arms now hit that quality setting in 1127 bytes, so asserting
+    //     at a fixed QUALITY silently compares two different rate points.
+    //   * Exactly one cell of 9,216 crosses the old budget: a single
+    //     max-white specular impulse, 65535 → 64254 on one channel
+    //     (1023 → 1003 in ten-bit). Second worst is 772.
+    //   * Ramp and colour-patch region maxima are UNCHANGED (461/420 both
+    //     sides). Only the dark+specular tail moved, and that region's mean
+    //     improved 95 → 87.
+    //   * Mean |Δ| improves at every quality (q70..q99: 204/132/109/85/50/30
+    //     → 151/95/93/72/47/29) while bytes drop 18-25%, and max is not
+    //     monotonically worse — the armed encoder WINS at q90 (1537 vs 1665).
+    //
+    // New bound = 1281 measured + ~48% headroom, matching the original
+    // methodology. The mean bound is untouched: mean fidelity improved, so
+    // 90 still holds and still has teeth.
+    //
+    // Honest limits on that evidence: n=1 synthetic fixture, no perceptual
+    // metric on the 10-bit path, and every one of these arms was fitted on
+    // 8-bit YCbCr — this is their first 10-bit identity-matrix data point.
+    // If a second 10-bit fixture ever exceeds this bound, re-open the
+    // question rather than widening again.
     let mut max_diff = 0u32;
     let mut sum_diff = 0u64;
     for (a, b) in img.pixels().zip(out.pixels()) {
@@ -193,7 +227,7 @@ fn pq10_pixel_fidelity_within_bounds() {
     let mean_diff = sum_diff / n;
     eprintln!("pq10 fidelity: max |Δ| = {max_diff}, mean |Δ| = {mean_diff} (16-bit units)");
     assert!(
-        max_diff <= 900,
+        max_diff <= 1900,
         "PQ10 roundtrip max |Δ| {max_diff} exceeds budget (mean {mean_diff})"
     );
     assert!(

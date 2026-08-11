@@ -3,9 +3,31 @@
 use archmage::prelude::*;
 use yuv::{YuvPlanarImage, YuvRange as YuvCrateRange, YuvStandardMatrix, yuv420_to_rgb};
 use zenavif::yuv_convert::{YuvMatrix, YuvRange, yuv420_to_rgb8};
+// The fast integer kernel is written per-ISA — AVX2 on x86-64, NEON on
+// aarch64 — with identical signatures apart from the capability token. Alias
+// both so the comparison body below is one piece of code, not two. Without
+// this the example only built on x86-64, which is why it silently rotted.
+#[cfg(target_arch = "x86_64")]
 use zenavif::yuv_convert_fast::yuv420_to_rgb8_fast;
+#[cfg(target_arch = "x86_64")]
+type FastToken = Desktop64;
+#[cfg(target_arch = "aarch64")]
+use zenavif::yuv_convert_fast::yuv420_to_rgb8_fast_neon as yuv420_to_rgb8_fast;
+#[cfg(target_arch = "aarch64")]
+type FastToken = NeonToken;
 
 fn main() {
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        println!("accuracy_check: no per-ISA fast YUV kernel on this target");
+        return;
+    }
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    compare();
+}
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn compare() {
     let width = 256;
     let height = 256;
 
@@ -43,7 +65,7 @@ fn main() {
     );
 
     // Convert with our fast integer SIMD
-    let fast_result = if let Some(token) = Desktop64::summon() {
+    let fast_result = if let Some(token) = FastToken::summon() {
         yuv420_to_rgb8_fast(
             token,
             &y_plane,
@@ -56,7 +78,9 @@ fn main() {
             height,
         )
     } else {
-        panic!("AVX2 not available");
+        // Not a failure: the host simply has no SIMD tier for this kernel.
+        println!("accuracy_check: host has no SIMD tier for the fast kernel");
+        return;
     };
 
     // Convert with yuv crate

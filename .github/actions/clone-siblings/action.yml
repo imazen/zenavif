@@ -26,31 +26,71 @@ description: |
 runs:
   using: composite
   steps:
+    # Every clone below goes through `clone_retry`, defined here once and
+    # re-sourced per step (composite steps do not share a shell). GitHub's
+    # runners intermittently fail these with TLS errors — observed 2026-08-11
+    # on macos-latest ("SSL certificate problem: self signed certificate",
+    # run 31526664042) and on the i686 job ("server certificate verification
+    # failed. CAfile: none", run 31533672988), both while cloning a sibling
+    # that had cloned fine minutes earlier. A single failure here kills the
+    # whole job before any test runs, so it is worth three tries.
+    - name: Define the retrying clone helper
+      shell: bash
+      run: |
+        cat > "${RUNNER_TEMP}/clone_retry.sh" <<'HELPER'
+        clone_retry() {
+          url="$1"; dest="$2"
+          [ -d "$dest" ] && return 0
+          for attempt in 1 2 3; do
+            if git clone --depth 1 "$url" "$dest"; then
+              return 0
+            fi
+            echo "clone of $url failed (attempt $attempt/3); retrying in $((attempt * 5))s" >&2
+            rm -rf "$dest"
+            sleep $((attempt * 5))
+          done
+          echo "clone of $url failed after 3 attempts" >&2
+          return 1
+        }
+        HELPER
     - name: Clone imazen/zenanalyze into ../zenanalyze
       shell: bash
       run: |
         cd ..
-        if [ ! -d zenanalyze ]; then
-          git clone --depth 1 https://github.com/imazen/zenanalyze.git
-        fi
+        . "${RUNNER_TEMP}/clone_retry.sh"
+        clone_retry https://github.com/imazen/zenanalyze.git zenanalyze
     - name: Clone imazen/cavif-rs into ../ravif
       shell: bash
       run: |
         cd ..
-        if [ ! -d ravif ]; then
-          git clone --depth 1 https://github.com/imazen/cavif-rs.git ravif
-        fi
+        . "${RUNNER_TEMP}/clone_retry.sh"
+        clone_retry https://github.com/imazen/cavif-rs.git ravif
+    - name: Clone imazen/zenav1-svt into ../zenav1-svt
+      shell: bash
+      run: |
+        cd ..
+        . "${RUNNER_TEMP}/clone_retry.sh"
+        # NO --recurse-submodules on purpose (clone_retry does not pass it):
+        # the repo's reference/svt-av1 submodule is the C differential oracle,
+        # a dev-only dependency of that repo's own harnesses. The pure-Rust
+        # `zenav1-svt*` crates this crate depends on never reference it, and
+        # cloning it would pull the whole SVT-AV1 C tree onto every CI job.
+        clone_retry https://github.com/imazen/zenav1-svt.git zenav1-svt
+    - name: Clone imazen/zenav1-aom into ../zenav1-aom
+      shell: bash
+      run: |
+        cd ..
+        . "${RUNNER_TEMP}/clone_retry.sh"
+        clone_retry https://github.com/imazen/zenav1-aom.git zenav1-aom
     - name: Clone imazen/zenrav1e into ../zenrav1e
       shell: bash
       run: |
         cd ..
-        if [ ! -d zenrav1e ]; then
-          git clone --depth 1 https://github.com/imazen/zenrav1e.git
-        fi
+        . "${RUNNER_TEMP}/clone_retry.sh"
+        clone_retry https://github.com/imazen/zenrav1e.git zenrav1e
     - name: Clone imazen/zensim into ../zensim
       shell: bash
       run: |
         cd ..
-        if [ ! -d zensim ]; then
-          git clone --depth 1 https://github.com/imazen/zensim.git
-        fi
+        . "${RUNNER_TEMP}/clone_retry.sh"
+        clone_retry https://github.com/imazen/zensim.git zensim

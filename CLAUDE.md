@@ -44,6 +44,24 @@ just publish-dry  # cargo publish --workspace --dry-run
 just gates        # executable engineering-baseline gates (see below)
 ```
 
+**`just fmt` cannot finish on macOS aarch64** — its third step (`just
+api-doc`, the `apidoc/` snapshot runners) builds rustdoc JSON over *all*
+manifest features, which includes `unsafe-asm`, whose rav1d `.S` sources
+Apple `cc` refuses to assemble. `cargo fmt` (step 1) still runs and
+applies. Consequence: **`docs/public-api/zenavif.features.txt` can only be
+regenerated on Linux** and is already stale on `main` (its header feature
+list predates `two-pass-zensim`). No CI job runs `api-doc`, so nothing
+gates on it. Do NOT hand-edit the snapshots — they say
+`DO NOT EDIT BY HAND` for good reason.
+
+**Pre-existing gauntlet failures on this box** (verified 2026-08-07, not
+caused by whatever you just changed): `clippy allsafe` fails on an unused
+import in `examples/benchmark_simd.rs` (a `_dev` example); `clippy all` /
+`nextest all` fail on the documented `unsafe-asm` Apple-`cc` assembler
+problem; `nextest backends`/`allsafe` fail only
+`product_aom_backend animations_decode_identically_across_backends`
+(rav1d-safe#448/#449).
+
 **Executable gates (docs/ENGINEERING_BASELINE.md section A):** run
 `just gates` (= `gate-determinism` + `gate-conformance` + `gate-ladder`,
 all via `examples/gate_kit.rs` + `scripts/gates/gate_conformance.sh`)
@@ -68,12 +86,11 @@ TSV diff in the same commit. zenrav1e's halves (`gate-identity`,
 - `src/convert.rs` - Alpha channel handling, unpremultiply
 
 ### YUV Conversion
-- `src/yuv_convert.rs` - Float SIMD path (AVX2/FMA via archmage)
+- `src/yuv_convert.rs` - THE unified kernel family (2026-07-20): strip-first, depth-generic (8/10/12/16), RGB/RGBA/Gray outputs, one canonical f32 recipe, forward RGB->YUV420, AVX-512/AVX2/NEON/wasm/scalar tiers
 - `src/yuv_convert_libyuv.rs` - Exact libyuv integer math (BT.709, BT.601)
 - `src/yuv_convert_libyuv_simd.rs` - AVX2 SIMD libyuv path
 - `src/yuv_convert_libyuv_autovec.rs` - Auto-vectorized libyuv variant
 - `src/yuv_convert_fast.rs` - Fast fixed-point integer path
-- `src/chroma.rs` - YUV chroma upsampling iterators
 
 ### Encoding
 - `src/encoder.rs` - AVIF encoding via zenravif (behind `encode` feature; local path dep on zenravif 0.2.0. Registry builds resolve PUBLISHED zenravif 0.1.3 — encode works on crates.io today, at zenrav1e 0.1.4 with the gated wins OFF)
@@ -86,7 +103,12 @@ TSV diff in the same commit. zenrav1e's halves (`gate-identity`,
 - `src/decode_av1.rs` - AV1 bitstream decoding entry points
 - `src/strip_convert.rs` - Strip-based pixel conversion utilities
 - `src/detect.rs` - AVIF file detection / sniffing
-- `src/codec.rs` - zencodec trait implementations
+- `src/codec/` - zencodec trait implementations, one submodule per adapter type
+  (`encode_config`/`encode_job`/`encoder`/`anim_encoder`,
+  `decode_config`/`decode_job`/`decoder`/`streaming`/`anim_decoder`) plus the
+  shared decode helpers (`orientation`, `color`, `info`, `gain_map`,
+  `negotiate`) and the thread-count policy (`threads`). `mod.rs` only declares
+  and re-exports.
 - `src/zennode_defs.rs` - zennode pipeline node definitions (behind `zennode` feature)
 - `src/simd/` - SIMD acceleration modules
 
@@ -110,13 +132,126 @@ TSV diff in the same commit. zenrav1e's halves (`gate-identity`,
 - `(default)` - Pure Rust decode only, safe SIMD via archmage
 - `encode` - AVIF encoding via zenravif
 - `encode-imazen` - Encoding with zenrav1e fork extras (QM, VAQ, still-image, lossless)
+- `encode-svt-rs` - EXPERIMENTAL `Av1Backend::SvtRs` via svtav1-rs (imazen/svtav1 git-branch dep; 8-bit stills only — RGB/RGBA 4:2:0 + grayscale Cs400, alpha as Cs400 `auxl` aux item, 64-px-aligned dims only; muxes in-crate via zenavif-serialize; C-parity assertion pending decision-layer bitstream identity upstream)
+- `aom-backend` - EXPERIMENTAL `DecodeBackend::AomRs` — zenav1-aom pure-Rust KEY-frame decoder behind the raw-OBU seam `decode_av1_obu_yuv` (git-rev dep on imazen/zenav1-aom; byte-identical to rav1d-safe on the 8-cell decode corpus; drives `examples/decode_4way_bench.rs`)
 - `encode-asm` - Encoding with hand-written assembly (fastest, unsafe)
 - `encode-threading` - Encoding with multi-threading
 - `unsafe-asm` - Decoding with hand-written assembly via C FFI (fastest, unsafe)
 - `zencodec` - zencodec trait integration
 - `_dev` - Expose internal YUV modules for profiling (not public API)
 
+## Backend seam: zen cross-cutting compliance — SPEC (2026-07-20)
+
+The two experimental AV1 backends are codec-only crates that do NOT yet meet the
+zen cross-cutting contracts (limits / estimation / whereat / zencodec
+`CategorizedError` granularity / panic-freedom+fallible-alloc / stop tokens).
+Full per-repo specs live in each backend's CLAUDE.md:
+`/root/aom-rs/CLAUDE.md` (zenav1-aom decode — untrusted-input, high bar) and
+`/root/svtav1/rust/CLAUDE.md` (zenav1-svt encode — trusted-input, lower bar).
+This section pins the **seam** obligations on the zenavif side.
+
+**Status of the contracts on zenavif itself:** `main` already implements
+`zencodec::CategorizedError for Error` (`src/error.rs`, two-level
+`zencodec 0.1.26` `ErrorCategory`, `At<CodecError>` envelope, zencodec
+required). The `svtav1-rs-backend` branch is behind `main` and inherits this on
+rebase/merge — do NOT re-add CategorizedError here; rebase instead. (PR #27
+`caterr-categorized-error` was the stale original adoption, closed 2026-07-20 as
+superseded.) Stop tokens, fallible-alloc (`src/alloc_util.rs` `AllocPref`),
+whereat (`at!`), limits (`DecoderConfig` caps + `zencodec::ResourceLimits`
+mapping in `src/codec/`), and estimation (`src/heuristics.rs`) are all present
+for the native rav1d-safe / zenravif paths.
+
+**Seam obligations — enforce these when wiring a backend, and re-check at each
+backend capability landing:**
+
+1. **Preserve error granularity — do not flatten.** `decode_av1_obu_yuv_aomrs`
+   (`src/decode_av1.rs`) currently maps zenav1-aom's 21 distinct `String`
+   reasons to one generic `Error::Decode { code: -1 }`, so every aom failure
+   lands in the coarsest `CategorizedError` bucket. When the backend gains a
+   structured `DecodeError` (its spec §4), map each variant to the matching
+   zenavif `Error` variant (`Parse`/`Decode`→`Image`, unsupported-feature→
+   `Unsupported`, limit→`ResourceLimit`/`ImageTooLarge`, cancel→`Cancelled`) so
+   the category survives to `error_category()`. Same for the svt seam
+   (`src/encoder_svt_rs.rs`): once the pipeline returns a real `Result`, map its
+   `EncodeError` variants instead of treating `is_empty()` as the only failure
+   signal.
+
+2. **Isolate panics at the seam until the backend is panic-free.** Both
+   backends can `panic!`/`abort` on crafted decode input (aom) or a
+   contract-violating encode config (svt); the seam's `map_err` only catches the
+   `Err` branch, so a backend panic crosses into zenavif as a process crash.
+   The aom decode path is on the UNTRUSTED input surface — until zenav1-aom is
+   fuzz-clean and returns `Err` for malformed streams, treat `aom-backend` as
+   NOT fuzz-safe and keep it non-default/experimental (it already is). Do not
+   route untrusted decode through it in production, and do not add it to the
+   default decode path, until its spec §5 lands.
+
+3. **Plumb limits and stop through — a capability the seam drops is not
+   "done".** When a backend accepts a `DecodeLimits`/`EncodeConfig`, a stop
+   token, or an `AllocMode`, thread zenavif's existing `DecoderConfig` caps /
+   `stop` token / `alloc_pref` into it in the SAME change. The decode seam
+   currently supplies none because the aom API accepts none; that is the
+   backend's gap to close first, then the seam's to consume.
+
+4. **No silent corruption at the mux boundary.** The svt seam muxes any
+   non-empty `Vec<u8>` the pipeline returns; per the backend's STATUS, un-gated
+   configs emit decodable-but-wrong bitstreams. Until the encoder refuses
+   out-of-envelope configs with `EncodeError::UnsupportedConfig` (its spec §5),
+   the zenavif `encode-svt-rs` path must stay experimental/off-by-default and
+   its scope docs must name the verified envelope — never present a possibly-
+   corrupt encode as a supported path. (Global rule: ZERO TOLERANCE for
+   corruption applies at integration boundaries, not just within a single
+   crate.)
+
+5. **Alloc mode is a configurable perf/safety trade (both directions).** The
+   decoder default is Fallible (untrusted → OOM-safe); the encoder default is
+   Infallible (trusted → single-`calloc` fast). Expose the choice via the
+   backend config and map it from `zencodec::AllocPreference` /
+   `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
+
 ## Known Bugs
+
+### svtav1-rs QP 0 (imazen/zenav1-svt#5) — RESOLVED upstream 2026-07-22 (typed rejection); seam clamp RETAINED
+History: every CQP QP-0 still encode on rev 3e25f52b emitted a valid-syntax
+bitstream decoding to garbage pixels (ssim2 ~ -700; rav1d-safe and zenav1-aom
+byte-agreed on the garbage => encoder-side; 115/115 sweep cells, boundary
+clean at QP 1), plus one 64x64 stream rav1d rejected. Upstream `f0f0a70ca`
+(carried into the current pin 2d585bb2b) now REJECTS base_qindex 0 with a typed
+`EncodeError::UnsupportedConfig` from `try_encode_frame*` — corruption is no
+longer reachable. The seam KEEPS the QP >= 1 clamp (`quality_to_qp_gated` in
+`src/encoder_svt_rs.rs`) for a different reason: quality 100 maps linearly to
+QP 0 and must ENCODE (at QP 1), not error. Tests:
+`svt_rs_quality_100_does_not_corrupt` (clamp side) +
+`svt_rs_direct_qp0_rejected_typed` (upstream-gate side, drives the pipeline
+directly). Record: `benchmarks/backend_sweep_2026-07-22.{tsv,meta}`.
+
+### Cross-backend status (2026-07-22 session; svt pin re-bumped 2026-07-24)
+Pins bumped: zenav1-aom `7b972e50` (structured DecodeError/DecodeConfig +
+bd8 lowbd perf), zenav1-svt `2d585bb2b` (2026-07-24, was `3e25f52b`; adds
+the typed QP-0 rejection #5, the IBC screen-content vertical, bd8/bd10
+real-photo p0-p3 exchange-sort parity, nz-map SIMD, and the pure-Rust-crate
+repo restructure that moved the C reference to a submodule — zero seam API
+breaks) — both seams variant-map errors, svt seam is on `try_encode_frame*` +
+threads the stop token and the config's thread budget.
+Cross-decoder gate: 7018/7018 sweep cells + `tests/cross_backend_decode.rs`
+(incl. 10-bit) byte-identical rav1d-safe vs aom-rs on OUR encoders' output.
+Unified ssim2 targeting: `encode_rgb8_with_target` converges over SvtRs
+(test pinned). RD (backend_sweep_2026-07-22): svt 0.93x bytes at matched
+ssim2 at s2, 1.02-1.07x at s6, worse below q30; wall ~6x faster at s6 /
+4.4x at s9 / slower at s2 (linear speed->preset ladders misaligned —
+re-fit deliberately NOT shipped, user decision).
+
+### yuv crate 4:2:0 bilinear drops the last row pair — FIXED in-repo (d3ece8e), upstream OPEN
+Found 2026-07-19 by the SvtRs RGBA round-trip test: yuvutils-rs 0.8.12–0.8.16
+`yuv420_*_bilinear`/`i0xx_*_bilinear` zip luma row-pairs against overlapping
+chroma `windows(stride*2).step_by(stride)` — one window short on even heights
+with exact-size chroma planes, so the bottom two output rows stay unwritten
+(black/alpha-0). Hit every zenavif 4:2:0+alpha decode, the exotic-matrix RGB
+fallback, raw-OBU gain-map decode, and all legacy `unsafe-asm` 4:2:0 paths.
+In-repo fix: `src/yuv_bilinear_fix.rs` wrapper at all 12 call sites, with a
+canary test that fails when upstream fixes it (then the wrapper retires).
+Upstream issue NOT yet filed (third-party repo — draft awaiting user
+approval in the session scratchpad).
 
 ### zenrav1e lossless ±2 — FIXED upstream, release-gated
 Root cause found and fixed 2026-06-11 (zenrav1e c3567081, zenrav1e#9
@@ -680,7 +815,14 @@ instances; 420/q30 hottest). **Until rav1d-safe releases past 0.5.7 and the
 zenavif dep bump**, registry builds ship the panic+wedge behavior — decode
 under heavy parallel tile-threaded load can still rarely hang. At the dep
 bump: raise the rav1d-safe minimum past 0.5.7 and re-run the hang_stress
-verification.
+verification. 2026-07-20: now that `codec-corpus` resolves on the dev-32gb
+box (symlink /root/codec-corpus -> /root/work/codec-corpus), the
+`codec::tests::animated_avif_animation_frame_decoder_roundtrip` test hit
+this wedge REPRODUCIBLY on registry 0.5.3 under parallel suite load
+(2 of 3 runs; futex_do_wait, 0 CPU) while passing solo — and the bump to
+the imazen/rav1d-safe git rev 398b0bfa (0.6.0 staged, carries 49df1fc0)
+cleared it: full suite green under the same parallel load. Return to a
+registry dep at the 0.6.0 release.
 
 ## TODO: Encoding Enhancements
 
@@ -723,6 +865,46 @@ saturating curves where the ssim2→q inversion is ill-conditioned. Tune-off
 fit_q0_head.py at the dep bump if the tune default changes). Follow-ups:
 RGBA8/RGB16 seeding, zensim-target fit, Offer pass-through from an
 orchestrator.
+
+### zensim generation-C (`ZensimProfile::C`) — WIRED 2026-08-07, `src/zensim_c.rs`
+
+`C` is **not** a drop-in for `B` and the failure mode is quiet. Read
+`src/zensim_c.rs`'s module docs before touching any zensim scoring here.
+The four facts that cost the most time to establish:
+
+1. **`Zensim::compute` is the wrong front end for C.** C consumes the
+   folded-944 regime (`compute_folded720_features_streaming` with the
+   append+append2 toggles, then `score_features_with_profile(C, …)`).
+   `compute` returns `ModelForwardFailed` on a real pair — but
+   byte-identical pairs short-circuit to 100 *before* the forward pass, so
+   a naive smoke test passes and proves nothing.
+2. **C HAS a per-pixel map, and it is not a diffmap.** `AttributionResult`
+   is row-major `w × h` f32 + a SAT. It is **signed**, its unit is **score
+   points**, and it is absolutely normalized — so the B pooling rule
+   `clamp(e_b / geomean(e_b), 0.4, 2.5)^(−strength)` does not transfer
+   (its premise is that SSIM error has no absolute unit, and geomean is
+   undefined over sign-mixed data).
+3. **There is a silent-wrong-number HDR path.** zensim's folded-944
+   extractor does not error on an HDR-flagged `LinearF32Rgba`+opaque pair
+   — it auto-routes to the PU/HDR front end and returns HDR-domain
+   features, which C's SDR bake scores without complaint.
+   `ZensimC::features` refuses `is_hdr()` before extraction; `sdr_guard`
+   refuses CICP transfer 16/18. Do not remove either.
+4. **The spatial arm does not steer, measured.** 0 of 48 matched-quantizer
+   cells gained score without spending bytes; at |Δbytes| ≤ 2.5 % the
+   median Δscore is −0.646. Default stays off. Record:
+   `benchmarks/zensim_c_2026-08-07.meta`.
+
+Anchors are refit for C (`ANCHOR_QUANTIZER_C`); B's table is wrong for C by
+~30 quantizer steps at the coarse end. C's two-shot precision is **worse**
+than B's at a matched size mix (median |err| 1.579 vs 1.032) even though
+C's achievable lattice is finer — it is harder to predict, and the
+prediction term is 92 % of the error (vs 85 % for B).
+
+**Not wired:** `encode_rgb8_zensim_two_shot` / `encode_rgb8_zensim_loop`
+still score with `B` only. `TargetMetric::ZensimC` covers the plain
+`encode_*_with_target` search. A real-encode two-shot A/B under C has not
+been run (only the offline lattice replay).
 
 ### Encoding Features (`encode-imazen` feature gate)
 All wired through to zenrav1e fork. Benchmarked results (ravif 7265eea):

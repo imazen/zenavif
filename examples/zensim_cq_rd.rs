@@ -29,10 +29,11 @@ use std::time::Instant;
 use almost_enough::{StopToken, Unstoppable};
 use rgb::Rgb;
 use zenavif::{DecoderConfig, EncoderConfig, FRAME_HINTS_LIVE, decode_with, encode_rgb8};
-// zensim 0.3.0 rides the renamed `zensim03` dev-dep (see Cargo.toml);
-// the alias collapses trivially at the 0.3.0 publish.
+// `ZensimProfile::C` and the folded-944 surface come from the plain `zensim`
+// dep, which on this branch is git `main` with `custom-profiles` +
+// `feature-regime-v2` enabled. The renamed `zensim03` alias this file used to
+// need existed only while the main dep was pinned to registry 0.2.4.
 use zensim::{PrecomputedReference, RgbSlice, Zensim, ZensimProfile};
-use zensim03 as zensim;
 
 const SB: usize = 64;
 const CQ_MIN: f64 = 1.0;

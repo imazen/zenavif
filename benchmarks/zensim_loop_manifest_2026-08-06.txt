@@ -1,0 +1,16 @@
+# zensim closed-loop measurement corpus (2026-08-06)
+# 8 clic2025 photos + 4 gb82-sc screen-content sources, all with a
+# long edge >= 2048 so the 64/256/1024/2048 size ladder never upscales.
+# Selected with random.seed(20260806) from codec-corpus.
+/Users/lilith/work/zen/codec-corpus/clic2025/final-test/d0208a1e9b4fde642b9752da2907d82d5b530a6e2e6e18ef71d5524a92d1cf9a.png
+/Users/lilith/work/zen/codec-corpus/clic2025/final-test/937476dd72f98638f34299dda5e9c252621b5e809c364692fc2934e000583286.png
+/Users/lilith/work/zen/codec-corpus/clic2025/final-test/ebfd571f1c6824316047a29cb5f376eec15f56dd51821119c1842be068a8b950.png
+/Users/lilith/work/zen/codec-corpus/clic2025/final-test/c9510efb03d1852c29ecad84cc0558768728681a3b9b04eae0dbbd9be142dd95.png
+/Users/lilith/work/zen/codec-corpus/clic2025/final-test/0369d229ba4c9965d5caeb38c359a027a810968eee930b81520b604e76b4df14.png
+/Users/lilith/work/zen/codec-corpus/clic2025/training/28d24b9c83de066597ff96a68769884f.png
+/Users/lilith/work/zen/codec-corpus/clic2025/training/5e5ce43575fa67fdc0dd37146d7f479e.png
+/Users/lilith/work/zen/codec-corpus/clic2025/training/2c1f84548ef99faec2b4f9bf12227c83.png
+/Users/lilith/work/zen/codec-corpus/gb82-sc/imessage.png
+/Users/lilith/work/zen/codec-corpus/gb82-sc/codec_wiki.png
+/Users/lilith/work/zen/codec-corpus/gb82-sc/imac_g3.png
+/Users/lilith/work/zen/codec-corpus/gb82-sc/gmessages.png

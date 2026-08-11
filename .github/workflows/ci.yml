@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Manual trigger — used when GitHub's pull_request event delivery stalls
+  # (observed 2026-07-23: two pushes to an open PR produced no runs; only
+  # dispatch fired).
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -56,6 +60,20 @@ jobs:
         run: |
           cargo test -p zenavif-parse --features eager
           cargo test -p zenavif-parse --all-features
+      # The AV1 backend seams were previously built by NOTHING in CI: neither
+      # `aom-backend` nor `encode-svt-rs` appeared anywhere in this workflow, so
+      # tests/product_aom_backend.rs, tests/cross_backend_decode.rs and
+      # tests/svt_rs_backend.rs — the cross-backend byte-identity gates, which
+      # are the whole point of having two backends — never ran on any platform.
+      # Their green results were local-only claims. This runs them.
+      - name: Test (AV1 backend seams — aom decode + svt-rs encode)
+        run: cargo test --features aom-backend,encode,encode-imazen,encode-svt-rs,target-quality
+      # The diffmap closed loops were in the same position the backend seams
+      # used to be: neither `two-pass-butteraugli` nor `two-pass-zensim`
+      # appeared anywhere in this workflow, so tests/two_pass.rs and
+      # tests/zensim_loop.rs never ran on any platform. This runs them.
+      - name: Test (diffmap closed loops — butteraugli + zensim)
+        run: cargo test --features two-pass-butteraugli,two-pass-zensim,auto-tune
 
   feature-check:
     name: Feature permutations

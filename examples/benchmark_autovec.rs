@@ -7,7 +7,23 @@ use zenavif::yuv_convert_libyuv;
 use zenavif::yuv_convert_libyuv_autovec;
 use zenavif::yuv_convert_libyuv_simd;
 
+// Per-ISA kernel + token alias — see examples/accuracy_check.rs.
+#[cfg(target_arch = "x86_64")]
+use zenavif::yuv_convert_libyuv_simd::yuv420_to_rgb8_simd as yuv420_to_rgb8_tier;
+#[cfg(target_arch = "x86_64")]
+type TierToken = Desktop64;
+#[cfg(target_arch = "aarch64")]
+use zenavif::yuv_convert_libyuv_simd::yuv420_to_rgb8_simd_neon as yuv420_to_rgb8_tier;
+#[cfg(target_arch = "aarch64")]
+type TierToken = NeonToken;
+
 fn main() {
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        println!("no per-ISA SIMD tier for this target");
+        return;
+    }
+
     let width = 1920;
     let height = 1080;
 
@@ -56,8 +72,8 @@ fn main() {
         YuvMatrix::Bt709,
     );
 
-    if let Some(token) = Desktop64::summon() {
-        let _ = yuv_convert_libyuv_simd::yuv420_to_rgb8_simd(
+    if let Some(token) = TierToken::summon() {
+        let _ = yuv420_to_rgb8_tier(
             token,
             &y_plane,
             width,
@@ -112,10 +128,10 @@ fn main() {
     let autovec_ms = start.elapsed().as_secs_f64() * 1000.0 / iterations as f64;
 
     // Manual SIMD
-    let simd_ms = if let Some(token) = Desktop64::summon() {
+    let simd_ms = if let Some(token) = TierToken::summon() {
         let start = Instant::now();
         for _ in 0..iterations {
-            let _ = yuv_convert_libyuv_simd::yuv420_to_rgb8_simd(
+            let _ = yuv420_to_rgb8_tier(
                 token,
                 &y_plane,
                 width,

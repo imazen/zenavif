@@ -1,0 +1,74 @@
+# rows 2160  arms ['loop2', 'loop2_nospatial', 'secant2', 'twoshot', 'twoshot_atleast', 'twoshot_spatial']  sizes [64, 256]  cells 24
+# lattice tables loaded for 34 cells (decomposition available)
+# spatial column values seen: ['applied', 'none']
+
+# --- error distribution at a FIXED budget of 2 encodes, overall ---
+arm	n	med|err|	p90	p99	max	mean_enc	nearest_hit	within1	med_lattice	med_pred	over%	med_bytes	med_ms
+loop2	360	1.6382	7.8762	12.1852	13.9136	1.867	n/a	n/a	0.1420	1.3661	68.6%	1408	58
+loop2_nospatial	360	1.2546	5.5591	20.6481	25.1490	1.867	n/a	n/a	0.1420	0.9516	67.8%	1364	56
+secant2	360	2.4860	10.8085	22.9123	29.2558	1.875	n/a	n/a	0.1420	2.2042	88.6%	1450	48
+twoshot	360	1.2286	4.1853	8.0229	10.7571	1.953	12.8%	34.2%	0.1420	0.9663	46.7%	1253	58
+twoshot_atleast	360	1.0720	4.5422	9.1567	11.3198	1.961	13.0%	35.7%	0.1420	0.8602	57.2%	1271	56
+twoshot_spatial	360	1.7576	6.7285	10.2775	11.5060	1.953	12.8%	34.2%	0.1420	1.4510	62.8%	1302	63
+#   med_lattice = irreducible: target to nearest ACHIEVABLE score
+#   med_pred    = the rest, i.e. the part modelling can remove
+#   nearest_hit = landed exactly on the nearest achievable point
+#   (blank where the arm does not report which quantizer it chose)
+
+# --- by size ---
+arm	n	med|err|	p90	p99	max	mean_enc	nearest_hit	within1	med_lattice	med_pred	over%	med_bytes	med_ms
+loop2@64	180	1.4836	6.0015	13.5368	13.9136	1.889	n/a	n/a	0.1405	1.2281	69.4%	608	15
+loop2_nospatial@64	180	1.4836	6.0015	13.5368	13.9136	1.889	n/a	n/a	0.1405	1.2281	69.4%	608	15
+secant2@64	180	2.4089	10.5472	15.1040	17.0046	1.889	n/a	n/a	0.1405	2.1549	87.2%	671	15
+twoshot@64	180	1.4015	4.8853	8.4556	10.7571	1.961	5.6%	22.8%	0.1405	1.1657	46.1%	604	16
+twoshot_atleast@64	180	1.2440	5.0351	10.3914	11.3198	1.978	8.3%	23.9%	0.1405	1.0700	56.1%	605	16
+twoshot_spatial@64	180	1.4015	4.8853	8.4556	10.7571	1.961	5.6%	22.8%	0.1405	1.1657	46.1%	604	16
+loop2@256	180	1.8010	8.2543	11.7939	12.6613	1.844	n/a	n/a	0.1519	1.5094	67.8%	4004	148
+loop2_nospatial@256	180	0.9727	4.3083	23.1770	25.1490	1.844	n/a	n/a	0.1519	0.5788	66.1%	3407	147
+secant2@256	180	2.6538	12.3254	23.8861	29.2558	1.861	n/a	n/a	0.1519	2.2462	90.0%	3876	150
+twoshot@256	180	1.0152	3.3549	6.7924	9.1703	1.944	20.6%	46.7%	0.1519	0.7382	47.2%	3368	154
+twoshot_atleast@256	180	0.9315	3.2934	8.1735	10.9617	1.944	18.2%	48.5%	0.1519	0.5622	58.3%	3407	156
+twoshot_spatial@256	180	2.2536	7.3183	10.2895	11.5060	1.944	20.6%	46.7%	0.1519	1.8497	79.4%	3692	156
+
+# --- by target band ---
+arm	n	med|err|	p90	p99	max	mean_enc	nearest_hit	within1	med_lattice	med_pred	over%	med_bytes	med_ms
+loop2@20	96	2.9704	9.8410	13.5622	13.9136	1.958	n/a	n/a	0.2223	2.5769	70.8%	700	38
+loop2_nospatial@20	96	2.1616	6.9668	24.5399	25.1490	1.958	n/a	n/a	0.2223	1.6330	64.6%	677	44
+secant2@20	96	5.4966	15.0313	26.3633	29.2558	1.948	n/a	n/a	0.2223	4.8030	91.7%	718	40
+twoshot@20	96	2.1304	5.2169	10.3173	10.7571	1.958	13.0%	33.7%	0.2223	1.6348	46.9%	663	38
+twoshot_atleast@20	96	2.0436	5.6608	10.3173	10.7571	1.979	10.9%	33.7%	0.2223	1.6330	50.0%	664	40
+twoshot_spatial@20	96	2.9981	8.1621	10.7945	11.5060	1.958	13.0%	33.7%	0.2223	2.3596	70.8%	671	40
+loop2@40	96	3.1468	8.4187	11.8657	13.5350	1.990	n/a	n/a	0.2836	2.9171	81.2%	1023	62
+loop2_nospatial@40	96	2.3128	8.2741	20.4289	21.0073	1.990	n/a	n/a	0.2836	1.7835	79.2%	932	58
+secant2@40	96	5.0015	13.9207	21.2640	22.2698	1.948	n/a	n/a	0.2836	4.2110	93.8%	936	58
+twoshot@40	96	2.0251	4.6932	8.1569	9.1703	1.990	10.9%	35.9%	0.2836	1.5603	55.2%	869	60
+twoshot_atleast@40	96	1.8028	5.8296	10.9796	11.3198	1.979	10.9%	33.7%	0.2836	1.4709	65.6%	885	52
+twoshot_spatial@40	96	3.0465	7.1903	10.1248	10.2659	1.990	10.9%	35.9%	0.2836	2.5280	69.8%	944	63
+loop2@60	96	1.2626	5.5009	8.1742	8.5342	1.844	n/a	n/a	0.1197	0.8828	63.5%	1707	48
+loop2_nospatial@60	96	0.9283	3.5516	6.0265	7.1938	1.844	n/a	n/a	0.1197	0.6151	63.5%	1548	52
+secant2@60	96	1.8327	4.8549	8.7095	9.6006	1.833	n/a	n/a	0.1197	1.5229	85.4%	1681	53
+twoshot@60	96	0.9520	2.9116	5.2597	6.3550	1.906	17.4%	39.1%	0.1197	0.6686	40.6%	1548	56
+twoshot_atleast@60	96	0.9154	2.8694	4.9740	5.2021	1.938	18.5%	44.6%	0.1197	0.6783	55.2%	1566	54
+twoshot_spatial@60	96	1.5494	4.8551	7.2511	7.3145	1.906	17.4%	39.1%	0.1197	1.1043	52.1%	1648	60
+loop2@80	72	0.4836	2.1419	2.9657	3.3864	1.611	n/a	n/a	0.0388	0.4306	55.6%	3910	64
+loop2_nospatial@80	72	0.3891	1.5968	2.7583	3.3864	1.611	n/a	n/a	0.0388	0.3134	62.5%	3652	64
+secant2@80	72	0.7504	1.9116	2.8242	3.0477	1.736	n/a	n/a	0.0388	0.6728	81.9%	3896	44
+twoshot@80	72	0.5819	1.4627	4.2985	5.3240	1.958	8.7%	26.1%	0.0388	0.5064	43.1%	3602	72
+twoshot_atleast@80	72	0.5167	1.4412	3.2464	4.4168	1.944	11.6%	29.0%	0.0388	0.4508	58.3%	3655	58
+twoshot_spatial@80	72	0.8644	2.1385	4.9248	5.3240	1.958	8.7%	26.1%	0.0388	0.7552	56.9%	3903	77
+
+# --- paired vs secant2 on identical (image, size, target) ---
+arm	n	mean_d|err|	med_d|err|	closer	equal	further	med_dbytes	med_dms
+loop2	360	-1.4566	-0.3627	58.1%	0.6%	41.4%	-18	+0
+loop2_nospatial	360	-1.9502	-0.8159	67.5%	2.2%	30.3%	-46	+0
+twoshot	360	-2.5043	-1.0890	70.6%	3.1%	26.4%	-77	+0
+twoshot_atleast	360	-2.5099	-1.0741	70.0%	5.6%	24.4%	-69	+0
+twoshot_spatial	360	-1.6962	-0.5534	59.2%	1.1%	39.7%	-38	+0
+
+# --- pass-2 forecast quality (predicted vs achieved score) ---
+arm	n	med|pred-achieved|	p90	bias(med signed)
+twoshot	360	1.2008	4.2260	+0.0453
+twoshot_atleast	360	1.0449	4.3681	+0.0000
+twoshot_spatial	360	1.8585	6.5831	-0.7749
+#   A biased forecast is fixable (re-fit the anchor); a wide but
+#   unbiased one is the translate assumption's own residual.

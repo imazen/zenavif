@@ -364,7 +364,7 @@ fn main() {
         images.len()
     );
 
-    let zensim = Zensim::new(ZensimProfile::latest());
+    let zensim = Zensim::new(ZensimProfile::codec_target());
 
     // 32 MB worker stacks: each encode→decode→score task peaks at
     // ~0.5 MB of stack — dominated by rav1d-safe's `rav1d_open`

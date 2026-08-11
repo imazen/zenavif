@@ -4,9 +4,27 @@ use archmage::prelude::*;
 use std::time::Instant;
 use yuv::{YuvPlanarImage, YuvRange, YuvStandardMatrix, yuv420_to_rgb};
 use zenavif::yuv_convert::{YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRange, yuv420_to_rgb8};
+// Per-ISA kernel + capability token, aliased so the body below is one piece of
+// arch-agnostic code. Same pattern (and same reason) as
+// examples/accuracy_check.rs: these kernels exist as an AVX2 fn on x86-64 and
+// a NEON twin on aarch64 with identical signatures, and every example here had
+// hard-coded only the x86-64 half — so they stopped compiling on aarch64.
+#[cfg(target_arch = "x86_64")]
 use zenavif::yuv_convert_fast::yuv420_to_rgb8_fast;
+#[cfg(target_arch = "x86_64")]
+type FastToken = Desktop64;
+#[cfg(target_arch = "aarch64")]
+use zenavif::yuv_convert_fast::yuv420_to_rgb8_fast_neon as yuv420_to_rgb8_fast;
+#[cfg(target_arch = "aarch64")]
+type FastToken = NeonToken;
 
 fn main() {
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        println!("no per-ISA fast YUV kernel on this target");
+        return;
+    }
+
     let width = 1920;
     let height = 1080;
     let iterations = 100;
@@ -56,7 +74,7 @@ fn main() {
     let our_avg = our_time.as_micros() as f64 / iterations as f64 / 1000.0;
 
     // Warmup fast version
-    if let Some(token) = Desktop64::summon() {
+    if let Some(token) = FastToken::summon() {
         for _ in 0..10 {
             let _ = yuv420_to_rgb8_fast(
                 token,

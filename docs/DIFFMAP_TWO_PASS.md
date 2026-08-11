@@ -243,11 +243,63 @@ Timing note: enc_ms/time_ratio for gap-filled arms mixes fresh and
 re-encoded cells (same binary, same box, no row-cache replays) — ratios
 remain paired and honest.
 
-## Dep-bump checklist additions (zenrav1e > 0.1.4)
+## THE DEP BUMP HAPPENED — 2026-08-06, ravif 619d81a
 
-1. ravif: flip `FRAME_HINTS_LIVE` to `true`, swap the plain send for the
-   commented hinted send in `encode_to_av1`, bump the zenrav1e dep. (The
-   THROWAWAY dev-patch in `ravif--diffmap` is the exact shape.)
+Items 1 and 2 below are **done**: ravif moved its zenrav1e dep to sibling
+master and `FRAME_HINTS_LIVE` is `true`, so `zenavif::SPATIAL_HINTS_LIVE`
+flipped with no zenavif edit and a supplied per-superblock map genuinely
+changes the bitstream. Item 4 (choose a default strength) was then answered
+by measurement, and the answer was **not the shipped default**.
+
+**Read `src/two_pass_zensim.rs`'s two-shot section and
+`benchmarks/zensim_hint_probe_2026-08-06.{tsv.zst,summary.txt,meta}` before
+touching this channel.** 54 cells / 1,578 encodes on one pinned build.
+Headlines:
+
+* **Activating delta-q is not a small perturbation.** It also disables
+  segmentation. At an *unchanged* quantizer, merely switching the channel on
+  (every superblock's delta quantizing to zero) moves zensim by a median
+  **+1.10** (p90 |Δ| 4.49, range −2.34..+7.76) and bytes by +2.9% median /
+  +21% max. That exceeds the median achievable-score gap (0.72) on **68.5%**
+  of cells.
+* **Per-superblock deltas are coded at a RESOLUTION of 1/2/4/8 quantizer
+  indices**, keyed on the frame base quantizer (zenrav1e
+  `variance_boost_delta_q_res_log2`). A scale implying a smaller move
+  quantizes to zero: the map still activates delta-q but nothing moves, so
+  every such map produces an identical encode and the channel reads as if it
+  ignores map content. A 1.5% scale is below the resolution at ~76% of
+  indices. **This cost a whole sweep.** Size scales against the resolution,
+  and since a wrong-length map is *silently ignored*, always confirm bytes
+  actually changed before believing a null here.
+* **RD at matched bytes**, diffmap-derived map vs the un-hinted curve:
+  strength 0.5 → **+0.48** zensim median (wins 8/12), 1.0 → **−0.28**
+  (4/11), 2.0 → **−3.72** (0/7). The derived `strength = 1.0`, chosen while
+  the map was inert and unfittable, is measurably too strong.
+* Consequently `ZensimLoopOptions::spatial_strength` now defaults to **0.0**
+  (zenavif `fix(loop)`, 2026-08-06). That restores the behaviour every prior
+  measurement of that loop was actually taken under — the map was inert when
+  they were taken. It also fixed a red in-tree test
+  (`low_target_lands_no_worse_than_the_secant_baseline`), which the live map
+  had been failing by 24 zensim points.
+* **Rejected for two-shot precision.** A mixed map *can* place the score
+  between two achievable points and its granularity is genuinely
+  sub-lattice (median step 0.19 zensim at 256 px, 0.012 at 1024 px vs gaps
+  0.72 / 0.65) — but only 67–75% of adjacent-k steps move in the sweep's own
+  direction, with reversals up to 0.40–0.78 zensim. Interpolation is
+  possible; it is not *aimable*. And the lattice was never the binding term
+  anyway (see `src/two_pass_zensim.rs`: the earlier "±0.5 is unreachable
+  half the time" was measured on an integer-quality grid addressing only 100
+  of the codec's 256 quantizers).
+
+Remaining from the original checklist: item 3 (re-run the butteraugli A/B on
+the bumped chain) and a wider RD sweep with a byte window broad enough to
+judge the 78 rows this probe honestly could not.
+
+## Dep-bump checklist additions (zenrav1e > 0.1.4) — HISTORICAL
+
+1. ~~ravif: flip `FRAME_HINTS_LIVE` to `true`, swap the plain send for the
+   commented hinted send in `encode_to_av1`, bump the zenrav1e dep.~~ DONE
+   2026-08-06 (ravif 619d81a).
 2. zenavif: `two-pass-butteraugli` becomes functional automatically (the
    driver checks the const); `tests/two_pass.rs` flips to the live branch on
    its own. Re-run it.

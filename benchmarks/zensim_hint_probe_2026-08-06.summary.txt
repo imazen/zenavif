@@ -1,0 +1,30 @@
+# hintprobe cells: 54  rows: 1578
+# NOTE: 'lattice' rows are UN-HINTED encodes at neighbouring quantizers.
+
+# --- 1. ACTIVATION STEP (un-hinted -> activated-but-flat, same quantizer) ---
+#   score delta : median +1.0989  p10 -0.8134  p90 +4.4910  min -2.3363  max +7.7628
+#   |score delta|: median 1.4758  p90 4.4910
+#   bytes delta : median +2.92%  p90 +14.26%  max +21.31%
+#   local un-hinted lattice gap for comparison: median 0.7168  p90 2.1828
+#   activation step exceeds the median lattice gap on 68.5% of cells
+
+# --- 2. SUB-LATTICE INTERPOLATION (dither k of N superblocks) ---
+# cells with a single superblock are excluded: nothing to dither.
+size	scale	n	span_med	step_med	mono_frac	max_reversal	lat_gap_med	step<gap
+256	0.88	18	+2.2577	0.1881	75.0%	0.4011	0.7153	YES
+256	0.94	18	+1.1199	0.0933	70.0%	0.4428	0.7153	YES
+1024	0.88	18	+2.1170	0.0117	66.7%	0.7771	0.6464	YES
+1024	0.94	18	+1.0675	0.0055	66.7%	0.7067	0.6464	YES
+#   span      = score(k=N) - score(activated, k=0)
+#   step      = |span| / N, the granularity a dither search could aim with
+#   mono_frac = fraction of adjacent-k steps going the span's own direction
+#   max_rev   = largest step AGAINST the span direction (the aiming noise)
+
+# --- 3. RD: diffmap-derived map vs the un-hinted bytes/score curve ---
+strength	n	med_dscore_at_matched_bytes	p10	p90	win_frac
+0.5	12	+0.4787	-0.6038	+1.5358	66.7%
+1.0	11	-0.2811	-1.8351	+0.3966	36.4%
+2.0	7	-3.7222	-7.7590	-0.6273	0.0%
+#   54 diffmap rows were on single-superblock frames (map is inert there) and were excluded
+#   78 diffmap rows fell outside the measured byte range and were NOT judged
+#   (a score compared at a different byte count is not an RD comparison)

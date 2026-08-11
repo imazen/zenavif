@@ -53,6 +53,7 @@
 whereat::define_at_crate_info!();
 
 mod alloc_util;
+mod cancel;
 
 #[cfg(feature = "auto-tune")]
 mod auto_tune;
@@ -73,10 +74,13 @@ pub mod detect;
 mod encode_plan;
 #[cfg(feature = "encode")]
 mod encoder;
+#[cfg(feature = "encode-svt-rs")]
+mod encoder_svt_rs;
 mod error;
 /// Deterministic zenanalyze palette gate (FEATURE_HINTS §E rule 1).
 #[cfg(feature = "encode")]
 pub mod palette_gate;
+mod yuv_bilinear_fix;
 #[cfg(feature = "encode")]
 pub use palette_gate::PalettePreference;
 /// Per-image fast-tier budget heads (FEATURE_HINTS §E heads 2+3 — the
@@ -110,12 +114,29 @@ pub use target_quality::{
     TargetMetric, TargetOptions, TargetedEncode, encode_rgb8_with_target, encode_rgb16_with_target,
     encode_rgba8_with_target,
 };
+/// Superblock pooling primitives shared by the diffmap-guided closed loops.
+#[cfg(any(feature = "two-pass-butteraugli", feature = "target-quality"))]
+mod sb_pool;
 /// Butteraugli-diffmap-guided two-pass encoding (spatial closed loop).
 #[cfg(feature = "two-pass-butteraugli")]
 pub mod two_pass;
+/// Generation-C zensim scoring (`ZensimProfile::C`) and its attribution
+/// steering map — the 944-feature regime `Zensim::compute` cannot produce.
+#[cfg(feature = "target-quality")]
+pub mod zensim_c;
 #[cfg(feature = "two-pass-butteraugli")]
 pub use two_pass::{
     FRAME_HINTS_LIVE, TwoPassEncode, TwoPassMetric, TwoPassOptions, encode_rgb8_two_pass,
+};
+/// zensim-diffmap-driven closed loop (global score correction + spatial
+/// per-superblock quantizer scaling from one metric call per pass).
+#[cfg(feature = "two-pass-zensim")]
+pub mod two_pass_zensim;
+#[cfg(feature = "two-pass-zensim")]
+pub use two_pass_zensim::{
+    LatticePolicy, SPATIAL_HINTS_LIVE, TwoShotOptions, TwoShotResult, ZensimLoopOptions,
+    ZensimLoopResult, anchor_quality_for_zensim, anchor_quantizer_for_zensim,
+    anchor_zensim_for_quantizer, encode_rgb8_zensim_loop, encode_rgb8_zensim_two_shot,
 };
 mod validation;
 #[cfg(feature = "_dev")]
@@ -153,11 +174,15 @@ pub use codec::{
 pub use codec::{AvifAnimationFrameEncoder, AvifEncodeJob, AvifEncoder, AvifEncoderConfig};
 pub use config::DecoderConfig;
 pub use decode_av1::decode_av1_obu;
+// DECODE-BENCH FORK: raw-OBU decode-to-YUV seam + second backend (aom-rs).
+pub use decode_av1::{DecodeBackend, DecodedYuv, decode_av1_obu_yuv, decode_av1_obu_yuv_with};
 #[cfg(feature = "unsafe-asm")]
 pub use decoder::AvifDecoder;
 pub use decoder_managed::{AnimationDecoder, ManagedAvifDecoder};
 #[cfg(feature = "encode")]
-pub use encode_plan::{EncodePlan, PlanInput, SpeedDerived, TilesResolution};
+pub use encode_plan::{
+    EncodePlan, PlanInput, SpeedDerived, TilesResolution, quality_for_quantizer,
+};
 #[cfg(feature = "encode-mono")]
 pub use encoder::encode_gray8;
 #[cfg(feature = "encode")]
@@ -297,18 +322,36 @@ pub fn encode_with(
     use zenpixels::PixelDescriptor;
 
     let desc = image.descriptor();
+
+    // `layout_compatible` is necessary but NOT sufficient for a typed view:
+    // `PixelBuffer::try_as_imgref` additionally requires the row stride to be
+    // a whole number of pixels. A caller-supplied buffer whose stride is not
+    // divisible by the pixel size (externally allocated frames, sub-region
+    // views onto an odd-stride parent) passes the first check and fails the
+    // second — so this is a caller-fixable input error, not an invariant.
+    macro_rules! view_as {
+        ($t:ty) => {
+            image.try_as_imgref::<$t>().ok_or_else(|| {
+                at!(Error::InvalidBuffer(format!(
+                    "pixel buffer row stride is {} bytes, which is not a whole number of \
+                     {}-byte {} pixels; re-pack the buffer with a stride divisible by the \
+                     pixel size before encoding",
+                    image.stride(),
+                    core::mem::size_of::<$t>(),
+                    stringify!($t),
+                )))
+            })?
+        };
+    }
+
     if desc.layout_compatible(PixelDescriptor::RGB8) {
-        let img = image.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
-        encode_rgb8(img, config, stop)
+        encode_rgb8(view_as!(rgb::Rgb<u8>), config, stop)
     } else if desc.layout_compatible(PixelDescriptor::RGBA8) {
-        let img = image.try_as_imgref::<rgb::Rgba<u8>>().unwrap();
-        encode_rgba8(img, config, stop)
+        encode_rgba8(view_as!(rgb::Rgba<u8>), config, stop)
     } else if desc.layout_compatible(PixelDescriptor::RGB16) {
-        let img = image.try_as_imgref::<rgb::Rgb<u16>>().unwrap();
-        encode_rgb16(img, config, stop)
+        encode_rgb16(view_as!(rgb::Rgb<u16>), config, stop)
     } else if desc.layout_compatible(PixelDescriptor::RGBA16) {
-        let img = image.try_as_imgref::<rgb::Rgba<u16>>().unwrap();
-        encode_rgba16(img, config, stop)
+        encode_rgba16(view_as!(rgb::Rgba<u16>), config, stop)
     } else {
         Err(at!(Error::UnsupportedOperation(
             zencodec::UnsupportedOperation::PixelFormat,

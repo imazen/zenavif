@@ -177,23 +177,48 @@ pub struct MasteringDisplayConfig {
 /// ```
 /// AV1 encoder backend selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// `#[non_exhaustive]`: this enum gains a variant every time a backend is
+/// added — `SvtRs` is the most recent — so downstream exhaustive matches need
+/// a `_` arm. Marking it now means the NEXT backend is additive instead of
+/// another break; the CHANGELOG already queued this break for the `SvtRs`
+/// addition, so taking it in the same release costs nothing extra.
+#[non_exhaustive]
 pub enum Av1Backend {
     /// zenrav1e (rav1e fork) — default, production-proven.
     #[default]
     Zenravif,
-    /// svtav1-rs — pure Rust SVT-AV1 port experiment.
+    /// svtav1-rs — the retired first draft of the pure-Rust SVT-AV1 port
+    /// integration.
     ///
     /// No build can use this: the `encode-svtav1` feature was never
-    /// shipped (svtav1-rs produces non-conformant bitstreams in most
-    /// configurations, and the draft path returned raw AV1 OBUs instead
-    /// of an AVIF file). [`EncoderConfig::validate`] rejects it. The
-    /// variant is retained only for enum compatibility; a future
-    /// svtav1 backend would arrive as a new, working variant.
+    /// shipped (at draft time the port was early — its streams did not
+    /// yet pass decode conformance — and the draft path returned raw AV1
+    /// OBUs instead of an AVIF file). [`EncoderConfig::validate`] rejects
+    /// it. The variant is retained only for enum compatibility; the
+    /// working integration is [`Av1Backend::SvtRs`].
     #[deprecated(
         note = "the encode-svtav1 feature was never shipped and no build can encode with this \
-                backend; EncoderConfig::validate() rejects it"
+                backend; EncoderConfig::validate() rejects it — use Av1Backend::SvtRs"
     )]
     Svtav1,
+    /// svtav1-rs (pure Rust SVT-AV1 port) — EXPERIMENTAL, behind the
+    /// `encode-svt-rs` cargo feature (default off).
+    ///
+    /// This is the working successor the [`Av1Backend::Svtav1`] doc
+    /// promised. At the pinned imazen/svtav1 rev the port emits
+    /// bitstreams **byte-identical to the C SVT-AV1 encoder (v4.2.0)**
+    /// across its verified battery — all-preset synthetic bd8, bd10,
+    /// real-photo low-preset gates at both depths, partial SBs, SB128
+    /// and multi-tile (upstream `rust/STATUS.md`); screen-content low
+    /// presets still carry pinned RD near-ties and QP 0 / lossless is
+    /// rejected upstream. Streams pass decode conformance under `aomdec`
+    /// (2100 conformance cells at the pin) and the payload is muxed into
+    /// a real AVIF container in-crate. The zenavif seam's scope stays
+    /// deliberately narrow — 8-bit 4:2:0 stills with dimensions that are
+    /// multiples of 64; see `src/encoder_svt_rs.rs` module docs.
+    /// [`EncoderConfig::validate`] rejects the variant when the feature
+    /// is off, and rejects configs outside the supported scope when on.
+    SvtRs,
 }
 
 #[derive(Debug, Clone)]
@@ -274,15 +299,19 @@ pub struct EncoderConfig {
     pub(crate) override_encode_bottomup: Option<bool>,
     /// Override partition block-size range (min, max) in pixels
     #[cfg(feature = "encode-imazen")]
+    #[allow(dead_code)] // release-gated zenravif expert passthrough mirror (dep-bump wiring)
     pub(crate) override_partition_range: Option<(u8, u8)>,
     /// Override prediction modes (true = ComplexAll, false = Simple)
     #[cfg(feature = "encode-imazen")]
+    #[allow(dead_code)] // release-gated zenravif expert passthrough mirror (dep-bump wiring)
     pub(crate) override_complex_prediction_modes: Option<bool>,
     /// Override loop restoration filter on/off
     #[cfg(feature = "encode-imazen")]
+    #[allow(dead_code)] // release-gated zenravif expert passthrough mirror (dep-bump wiring)
     pub(crate) override_lrf: Option<bool>,
     /// Override fast vs full deblock filter search
     #[cfg(feature = "encode-imazen")]
+    #[allow(dead_code)] // release-gated zenravif expert passthrough mirror (dep-bump wiring)
     pub(crate) override_fast_deblock: Option<bool>,
     /// Override trellis quantization (Viterbi DP)
     #[cfg(feature = "encode-imazen")]
@@ -301,11 +330,11 @@ pub struct EncoderConfig {
     #[cfg(feature = "encode-imazen")]
     pub(crate) fast_tier_budgets: Option<crate::fast_heads::FastTierBudgets>,
     /// Per-64×64-superblock AC quantizer scale map for the color encode
-    /// (the butteraugli-diffmap-guided second pass sets this internally —
-    /// see [`crate::two_pass`]). Forwarded through zenravif's expert
-    /// `sb_q_scale` passthrough; release-gated there behind
-    /// `zenravif::FRAME_HINTS_LIVE`.
-    #[cfg(feature = "two-pass-butteraugli")]
+    /// (the diffmap-guided second passes set this internally — see
+    /// [`crate::two_pass`] and [`crate::two_pass_zensim`]). Forwarded
+    /// through zenravif's expert `sb_q_scale` passthrough; release-gated
+    /// there behind `zenravif::FRAME_HINTS_LIVE`.
+    #[cfg(any(feature = "two-pass-butteraugli", feature = "two-pass-zensim"))]
     pub(crate) sb_q_scale: Option<Box<[f32]>>,
 }
 
@@ -373,7 +402,7 @@ impl Default for EncoderConfig {
             palette_preference: None,
             #[cfg(feature = "encode-imazen")]
             fast_tier_budgets: None,
-            #[cfg(feature = "two-pass-butteraugli")]
+            #[cfg(any(feature = "two-pass-butteraugli", feature = "two-pass-zensim"))]
             sb_q_scale: None,
         }
     }
@@ -389,7 +418,9 @@ impl EncoderConfig {
 
     /// Select the AV1 encoder backend.
     ///
-    /// Only `Av1Backend::Zenravif` (the default) is available; the
+    /// `Av1Backend::Zenravif` (the default) is always available;
+    /// `Av1Backend::SvtRs` needs the `encode-svt-rs` cargo feature (and
+    /// supports 8-bit 4:2:0 stills only — see the variant docs); the
     /// deprecated `Svtav1` variant is rejected by
     /// [`validate`](Self::validate).
     pub fn backend(mut self, backend: Av1Backend) -> Self {
@@ -406,6 +437,62 @@ impl EncoderConfig {
     /// Read the currently configured quality.
     pub fn quality_value(&self) -> f32 {
         self.quality
+    }
+
+    /// Set the per-64×64-superblock AC quantizer scale map for the color
+    /// encode (`1.0` = neutral, frame superblock raster order, exactly
+    /// `ceil(width/64) * ceil(height/64)` entries).
+    ///
+    /// Each superblock's quantizer is scaled by its entry and re-quantized
+    /// to the next AV1 quantizer index at or above the result, so entries
+    /// below 1.0 spend more bits there and entries above 1.0 spend fewer.
+    /// The encoder clamps each entry to `[0.25, 4.0]`.
+    ///
+    /// Three behaviours worth knowing before relying on this, all of them
+    /// the encoder's and none of them reported back through this API:
+    ///
+    /// * A map whose length does not match the superblock grid is
+    ///   **silently ignored**, not partially applied — so a wrong grid
+    ///   looks exactly like the map having no effect.
+    /// * An all-`1.0` map is **inert**: it does not switch on delta-q
+    ///   coding, so it is byte-identical to passing no map.
+    /// * Any non-neutral entry switches delta-q coding on for the whole
+    ///   frame — which also **disables segmentation**. That is not a small
+    ///   perturbation: measured over 54 cells
+    ///   (`benchmarks/zensim_hint_probe_2026-08-06`), merely activating the
+    ///   channel with every superblock's delta quantizing to zero moves the
+    ///   zensim score by a median **+1.10** (p90 |Δ| 4.49) and bytes by
+    ///   +2.9% median / +21% max, at an unchanged quantizer. A very sparse
+    ///   map is not a very small one.
+    /// * **Per-superblock deltas are coded at a RESOLUTION of 1/2/4/8
+    ///   quantizer indices**, chosen from the frame's base quantizer
+    ///   (zenrav1e `variance_boost_delta_q_res_log2`: res 1 below 80, 2 to
+    ///   119, 4 to 159, 8 above). A scale whose implied move is smaller
+    ///   than that resolution **quantizes to zero** — the map still
+    ///   activates delta-q, but nothing moves, so the encode is identical
+    ///   for every such map and reads exactly like the content being
+    ///   ignored. A 1.5% scale is below the resolution at ~76% of
+    ///   quantizer indices. Size the scale against the resolution, and
+    ///   confirm bytes actually changed before believing any null from
+    ///   this channel.
+    ///
+    /// [`crate::two_pass_zensim::sb_q_scale_from_diffmap`] builds a
+    /// correctly shaped map from a zensim diffmap.
+    ///
+    /// **RELEASE-GATED downstream**: forwarded through zenravif's expert
+    /// `sb_q_scale` passthrough, which is inert while
+    /// [`crate::FRAME_HINTS_LIVE`]` == false` (registry `zenrav1e` 0.1.4
+    /// has no `FrameHints`; the input lands on zenrav1e master past
+    /// 0.1.4). While the gate is off, supplied maps are accepted but not
+    /// applied — encodes stay byte-identical — so closed-loop callers
+    /// MUST check [`crate::FRAME_HINTS_LIVE`] or probe engagement
+    /// (encode with two different maps, assert the bitstreams differ)
+    /// and fail honestly instead of silently steering nothing.
+    #[cfg(any(feature = "two-pass-butteraugli", feature = "two-pass-zensim"))]
+    #[must_use]
+    pub fn with_sb_q_scale(mut self, map: Option<Box<[f32]>>) -> Self {
+        self.sb_q_scale = map;
+        self
     }
 
     /// Read the currently configured speed (1..=10).
@@ -541,14 +628,16 @@ impl EncoderConfig {
     ///
     /// Common values: 0 = Identity/RGB, 1 = BT.709, 6 = BT.601, 9 = BT.2020.
     ///
-    /// **Backend note:** the zenravif backend derives the matrix it
-    /// actually signals from [`color_model`](Self::color_model)
-    /// (YCbCr → BT.601, RGB → Identity); no available backend consults
-    /// this field (its only reader was the deprecated svtav1 path). It
-    /// is retained for config coherence — the zencodec layer mirrors
-    /// the source CICP triple onto the config — and for future
-    /// backends. Use [`resolve_plan`](Self::resolve_plan) to see the
-    /// matrix an encode will really carry
+    /// **Backend note:** no available backend consults this field. The
+    /// zenravif backend derives the matrix it actually signals from
+    /// [`color_model`](Self::color_model) (YCbCr → BT.601, RGB →
+    /// Identity); the experimental `SvtRs` backend pins BT.601 (its
+    /// only supported model is 4:2:0 YCbCr); the field's only reader
+    /// was the deprecated svtav1 path. It is retained for config
+    /// coherence — the zencodec layer mirrors the source CICP triple
+    /// onto the config — and for future backends. Use
+    /// [`resolve_plan`](Self::resolve_plan) to see the matrix an
+    /// encode will really carry
     /// ([`EncodePlan::matrix_coefficients_cicp`](crate::EncodePlan::matrix_coefficients_cicp)).
     pub fn matrix_coefficients(mut self, mc: u8) -> Self {
         self.matrix_coefficients = Some(mc);
@@ -829,29 +918,6 @@ impl EncoderConfig {
         self.fast_tier_budgets
     }
 
-    /// Per-64×64-superblock AC quantizer scale map for the color encode
-    /// (`ceil(w/64) × ceil(h/64)` factors in frame superblock raster order;
-    /// `1.0` = neutral, `< 1.0` = finer quantizer / more bits). The same
-    /// map the butteraugli two-pass driver sets internally (see
-    /// [`crate::two_pass`]); this hook lets external closed-loop callers
-    /// (e.g. the `zensim_cq_rd` target-hitting harness) supply their own
-    /// map. `None` = no map.
-    ///
-    /// **RELEASE-GATED downstream**: forwarded through zenravif's expert
-    /// `sb_q_scale` passthrough, which is inert while
-    /// [`crate::FRAME_HINTS_LIVE`]` == false` (registry `zenrav1e` 0.1.4
-    /// has no `FrameHints`; the input lands on zenrav1e master past
-    /// 0.1.4). While the gate is off, supplied maps are accepted but not
-    /// applied — encodes stay byte-identical — so closed-loop callers
-    /// MUST check [`crate::FRAME_HINTS_LIVE`] or probe engagement
-    /// (encode with two different maps, assert the bitstreams differ)
-    /// and fail honestly instead of silently steering nothing.
-    #[cfg(feature = "two-pass-butteraugli")]
-    pub fn with_sb_q_scale(mut self, map: Option<Box<[f32]>>) -> Self {
-        self.sb_q_scale = map;
-        self
-    }
-
     /// The stored per-superblock quantizer scale map (see
     /// [`Self::with_sb_q_scale`]).
     #[cfg(feature = "two-pass-butteraugli")]
@@ -941,6 +1007,24 @@ pub(crate) fn effective_alpha_quality(config: &EncoderConfig) -> f32 {
 #[cfg(feature = "encode-imazen")]
 pub(crate) fn effective_qm(config: &EncoderConfig) -> bool {
     config.enable_qm && !config.lossless
+}
+
+/// Reject `Av1Backend::SvtRs` on entry points it does not implement.
+///
+/// The svtav1-rs backend covers 8-bit stills only (RGB/RGBA 4:2:0 +
+/// grayscale); every other entry point fails honestly instead of silently
+/// serving the request with zenravif. (The deprecated `Svtav1` variant
+/// keeps its historical behavior: rejected by `validate()`, silently
+/// zenravif-served otherwise.)
+fn reject_svt_rs_backend(config: &EncoderConfig, entry: &'static str) -> Result<()> {
+    if config.backend == Av1Backend::SvtRs {
+        return Err(at!(Error::Encode(format!(
+            "Av1Backend::SvtRs does not support {entry} \
+             (8-bit RGB/RGBA 4:2:0 + grayscale still encodes only); \
+             use Av1Backend::Zenravif"
+        ))));
+    }
+    Ok(())
 }
 
 fn build_ravif_encoder(
@@ -1088,10 +1172,14 @@ fn build_ravif_encoder(
             .with_lru_on_skip(config.override_lru_on_skip)
             .with_segmentation_complex(config.override_segmentation_complex)
             .with_encode_bottomup(config.override_encode_bottomup);
-        #[cfg(any(feature = "__expert", feature = "two-pass-butteraugli"))]
+        #[cfg(any(
+            feature = "__expert",
+            feature = "two-pass-butteraugli",
+            feature = "two-pass-zensim"
+        ))]
         {
             // The deepest knobs live behind ravif's `__expert` feature
-            // (which `two-pass-butteraugli` also enables, without exposing
+            // (which both two-pass features also enable, without exposing
             // zenavif's own `__expert` surface). Mirror EncoderConfig's
             // per-field overrides into ravif's InternalParams in one call.
             // Build via Default + field assignment because
@@ -1105,8 +1193,8 @@ fn build_ravif_encoder(
                 params.lrf = config.override_lrf;
                 params.fast_deblock = config.override_fast_deblock;
             }
-            // Closed-loop per-SB quantizer scale map (two-pass driver).
-            #[cfg(feature = "two-pass-butteraugli")]
+            // Closed-loop per-SB quantizer scale map (two-pass drivers).
+            #[cfg(any(feature = "two-pass-butteraugli", feature = "two-pass-zensim"))]
             {
                 params.sb_q_scale = config.sb_q_scale.clone();
             }
@@ -1157,6 +1245,12 @@ pub fn encode_rgb8(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
+    // The monotonicity probe's anchor tiers are calibrated for the
+    // zenravif speed ladder; the svtav1-rs backend takes the plain
+    // single-encode path (its own speed↔RD behavior is unmeasured here).
+    if config.backend == Av1Backend::SvtRs {
+        return encode_rgb8_once(img, config, stop);
+    }
     #[cfg(all(feature = "target-quality", feature = "auto-tune"))]
     {
         crate::target_quality::encode_rgb8_auto_monotone(img, config, stop)
@@ -1176,6 +1270,22 @@ pub(crate) fn encode_rgb8_once(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
+
+    // Backend dispatch: the svtav1-rs backend covers exactly this entry
+    // point (8-bit RGB → 4:2:0 still). It must never be served silently
+    // by zenravif — the backend field is a contract, not a hint.
+    if config.backend == Av1Backend::SvtRs {
+        #[cfg(feature = "encode-svt-rs")]
+        {
+            return crate::encoder_svt_rs::encode_rgb8_svt_rs(img, config, stop);
+        }
+        #[cfg(not(feature = "encode-svt-rs"))]
+        {
+            return Err(at!(Error::Unsupported(
+                "Av1Backend::SvtRs requires the `encode-svt-rs` cargo feature"
+            )));
+        }
+    }
 
     let enc = build_ravif_encoder(config, stop, false)?;
     let result = enc
@@ -1207,6 +1317,14 @@ pub fn encode_gray8(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    #[cfg(feature = "encode-svt-rs")]
+    if config.backend == Av1Backend::SvtRs {
+        return crate::encoder_svt_rs::encode_gray8_svt_rs(img, config, stop);
+    }
+    reject_svt_rs_backend(
+        config,
+        "encode_gray8 (requires the `encode-svt-rs` cargo feature)",
+    )?;
 
     let enc = build_ravif_encoder(config, stop, false)?;
     let result = enc
@@ -1238,6 +1356,11 @@ pub fn encode_rgba8(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
+    // Skip the probe machinery for the svtav1-rs backend: `encode_rgba8_once`
+    // dispatches it directly (no monotonicity-probe support there).
+    if config.backend == Av1Backend::SvtRs {
+        return encode_rgba8_once(img, config, stop);
+    }
     #[cfg(all(feature = "target-quality", feature = "auto-tune"))]
     {
         crate::target_quality::encode_rgba8_auto_monotone(img, config, stop)
@@ -1255,6 +1378,14 @@ pub(crate) fn encode_rgba8_once(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    #[cfg(feature = "encode-svt-rs")]
+    if config.backend == Av1Backend::SvtRs {
+        return crate::encoder_svt_rs::encode_rgba8_svt_rs(img, config, stop);
+    }
+    reject_svt_rs_backend(
+        config,
+        "encode_rgba8 (requires the `encode-svt-rs` cargo feature)",
+    )?;
     let enc = build_ravif_encoder(config, stop, false)?;
     let result = enc
         .encode_rgba(img)
@@ -1285,6 +1416,7 @@ pub fn encode_rgb16(
 ) -> Result<EncodedImage> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_svt_rs_backend(config, "encode_rgb16 (10-bit)")?;
     let enc = build_ravif_encoder(config, stop, true)?;
     let width = img.width();
     let height = img.height();
@@ -1343,6 +1475,7 @@ pub fn encode_rgba16(
 ) -> Result<EncodedImage> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_svt_rs_backend(config, "encode_rgba16 (10-bit + alpha)")?;
     let enc = build_ravif_encoder(config, stop, true)?;
     let width = img.width();
     let height = img.height();
@@ -1425,6 +1558,7 @@ pub fn encode_animation_rgb8(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_svt_rs_backend(config, "animation encoding")?;
     let enc = build_ravif_encoder(config, stop, false)?;
 
     let ravif_frames: Vec<ravif::AnimFrame<'_>> = frames
@@ -1463,6 +1597,7 @@ pub fn encode_animation_rgba8(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_svt_rs_backend(config, "animation encoding")?;
     let enc = build_ravif_encoder(config, stop, false)?;
 
     let ravif_frames: Vec<ravif::AnimFrameRgba<'_>> = frames
@@ -1521,6 +1656,7 @@ pub fn encode_animation_rgb16(
 ) -> Result<EncodedAnimation> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_svt_rs_backend(config, "animation encoding")?;
     let enc = build_ravif_encoder(config, stop, true)?;
 
     // Scale each frame from 0–65535 to 10-bit (0–1023)
@@ -1580,6 +1716,7 @@ pub fn encode_animation_rgba16(
 ) -> Result<EncodedAnimation> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_svt_rs_backend(config, "animation encoding")?;
     let enc = build_ravif_encoder(config, stop, true)?;
 
     // Scale each frame from 0–65535 to 10-bit (0–1023)

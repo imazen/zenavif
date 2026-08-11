@@ -512,7 +512,7 @@ fn main() -> ExitCode {
         .build()
         .expect("rayon pool");
 
-    let zensim = Zensim::new(ZensimProfile::latest());
+    let zensim = Zensim::new(ZensimProfile::codec_target());
     let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
 
     let total_attempts = std::sync::atomic::AtomicUsize::new(0);
