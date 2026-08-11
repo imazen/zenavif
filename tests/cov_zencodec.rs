@@ -611,7 +611,7 @@ fn row_sink_decode_is_byte_identical_to_buffered_decode() {
 }
 
 /// Monochrome: the row-sink path emits RGB where the buffered and streaming
-/// paths emit native Gray. That is a real divergence (imazen/zenavif#38), NOT
+/// paths emit native Gray. That is a real divergence (imazen/zenavif#35), NOT
 /// something this test blesses — `push_decoder_inner` picks its descriptor
 /// from bit depth + alpha alone and never consults `preferred` or calls
 /// `set_native_gray`, so a caller who asks for Gray8 through `push_decoder`
@@ -682,7 +682,7 @@ fn row_sink_mono_content_matches_the_gray_path_despite_the_format_gap() {
                     assert_eq!(
                         ch, g,
                         "{path}: row-sink channel {c} at ({x},{y}) is {ch:?} but the gray \
-                         path says {g:?} — the mono format gap (zenavif#38) has become a \
+                         path says {g:?} — the mono format gap (zenavif#35) has become a \
                          wrong-pixel bug"
                     );
                 }
