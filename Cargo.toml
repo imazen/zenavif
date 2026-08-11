@@ -26,20 +26,30 @@ resolver = "3"
 # rav1d: C FFI-based decoder for asm feature (fastest)
 rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"], optional = true }
 # rav1d-safe: 100% safe managed API decoder (no c-ffi feature!)
-# Git-rev pinned to imazen/rav1d-safe main (0.6.0 staged): carries the
-# tile-threading CDEF/loop-filter race + panic-wedge fix (zenavif#30,
-# rav1d-safe@49df1fc0), the cdef padding exact-window guard fix
-# (rav1d-safe@f9458f43 — false DisjointMut overlap panic under tile
-# threading, i686-reproducible), and the current safe-SIMD state. Return
-# to a registry dep at the 0.6.0 release.
-# rav1d-safe: 100% safe managed API decoder (no c-ffi feature!)
-# Git-rev pinned to imazen/rav1d-safe main at the merge of #445, which fixes
-# the tile-threading DisjointMut false positive: the strided block guard used
-# to reserve inter-row gaps that neighbouring tiles legitimately write, so a
-# 4K decode with threads>=2 failed outright and this crate's in-flight
-# cancellation could not be exercised multi-threaded at all. Return to a
+# Git-rev pinned to imazen/rav1d-safe main (0.6.0 staged). Return to a
 # registry dep at the 0.6.0 release.
-rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "a6a7e232f9cdbf9c4baed393738fde7fb683afc8", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
+#
+# Carries, in the order they were found:
+#  * #445 — strided block guards reserved inter-row gaps that neighbouring
+#    tiles legitimately write, so a 4K decode at threads>=2 failed outright
+#    and in-flight cancellation could not be exercised multi-threaded.
+#  * rav1d-safe@49df1fc0 — the tile-threading CDEF/loop-filter race and the
+#    panic-wedge behind it (zenavif#30): a dead tile worker used to wedge
+#    `rav1d_decode_frame`'s completion wait forever.
+#  * rav1d-safe@f9458f43 — exact-window cdef padding guards, NON-SIMD paths.
+#  * rav1d-safe@fdd6a35 — the same fix for the SIMD kernels, which f9458f43
+#    did NOT cover. This is why the bump past a6a7e232 matters on aarch64:
+#    the old rev over-reserved the unread `0..x_start` prefix of each cdef
+#    padding row, and under load that produced a FALSE DisjointMut overlap
+#    (`& _[5150..5162]` vs `&mut _[4896..5152]`, 2 bytes, both inside the
+#    over-reserved prefix) in `safe_simd/cdef_arm.rs`. The wedge fix above
+#    turned it into a fast error rather than a hang, but the decode still
+#    FAILED: intermittent `Decode { code: -1 }` on ~2 of 15 full-suite runs
+#    (rav1d-safe#449). Narrowing a read reservation to what is actually read
+#    cannot mask a real overlap, so this removes false positives only.
+#  * the tile-threading correctness + granularity campaign (rav1d-safe#455):
+#    the 766-vector corpus now passes at t=1 AND t=8 with nothing skipped.
+rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "140f91450c3551c25a5699d12ded6d629ecf6d97", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
 # zenav1-aom pure-Rust AV1 KEY-frame decoder — second decode backend (feature
 # `aom-backend`). Git-rev pinned to imazen/zenav1-aom main (crate unpublished;
 # intra decode is conformance-clean vs libaom v3.14.1 at this rev). This rev
