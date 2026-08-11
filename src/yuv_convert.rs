@@ -2628,6 +2628,39 @@ mod tests {
                             );
                         }
                     }
+                    // 8-bit samples carried in u16 planes with NARROW (8-bit)
+                    // output: the aom-backend shape (`aom-decode` hands back
+                    // u16 planes at every depth, and `wide_out = bit_depth > 8`
+                    // keeps the output 8-bit at depth 8 —
+                    // src/decoder_managed/aom.rs). Same pixels as the u8
+                    // kernels by construction; asserted directly in
+                    // `u16_planes_of_8bit_samples_match_the_u8_kernels`.
+                    let y16_8: Vec<u16> = y8.iter().map(|&v| u16::from(v)).collect();
+                    for sampling in [
+                        ChromaSubsampling::Cs420,
+                        ChromaSubsampling::Cs422,
+                        ChromaSubsampling::Cs444,
+                    ] {
+                        let (src, cstride) = match sampling {
+                            ChromaSubsampling::Cs420 => ((&u420, &v420), cw),
+                            ChromaSubsampling::Cs422 => ((&u422, &v422), cw),
+                            ChromaSubsampling::Cs444 => ((&u444, &v444), w),
+                        };
+                        let u16p: Vec<u16> = src.0.iter().map(|&v| u16::from(v)).collect();
+                        let v16p: Vec<u16> = src.1.iter().map(|&v| u16::from(v)).collect();
+                        let mut n8 = vec![RGB8::default(); w * sh];
+                        yuv16_to_rgbx_strip::<RGB8>(
+                            sampling, &y16_8, w, &u16p, cstride, &v16p, cstride, w, h, y_start, sh,
+                            range, matrix, 8, &mut n8,
+                        );
+                        sink.extend(n8.iter().flat_map(|p| [p.r, p.g, p.b]));
+                        let mut n8a = vec![Rgba::<u8>::default(); w * sh];
+                        yuv16_to_rgbx_strip::<Rgba<u8>>(
+                            sampling, &y16_8, w, &u16p, cstride, &v16p, cstride, w, h, y_start, sh,
+                            range, matrix, 8, &mut n8a,
+                        );
+                        sink.extend(n8a.iter().flat_map(|p| [p.r, p.g, p.b, p.a]));
+                    }
                 }
                 // Monochrome: u8 at depth 8 and u16 at 10/12/16, into RGB,
                 // RGBA and the native Gray outputs the decoder uses.
@@ -2642,6 +2675,22 @@ mod tests {
                 let mut m8rgb = vec![RGB8::default(); w * sh];
                 yuv400_to_rgbx_strip::<u8, RGB8>(&y8, w, w, y_start, sh, range, 8, &mut m8rgb);
                 sink.extend(m8rgb.iter().flat_map(|p| [p.r, p.g, p.b]));
+                // Monochrome, 8-bit samples in u16 planes + narrow output
+                // (the aom-backend `mono!` shapes, aom.rs:337).
+                let y16_8: Vec<u16> = y8.iter().map(|&v| u16::from(v)).collect();
+                let mut ng = vec![rgb::Gray::<u8>::new(0); w * sh];
+                yuv400_to_rgbx_strip::<u16, rgb::Gray<u8>>(
+                    &y16_8, w, w, y_start, sh, range, 8, &mut ng,
+                );
+                sink.extend(ng.iter().map(|p| p.value()));
+                let mut nga = vec![Rgba::<u8>::default(); w * sh];
+                yuv400_to_rgbx_strip::<u16, Rgba<u8>>(
+                    &y16_8, w, w, y_start, sh, range, 8, &mut nga,
+                );
+                sink.extend(nga.iter().flat_map(|p| [p.r, p.g, p.b, p.a]));
+                let mut ngr = vec![RGB8::default(); w * sh];
+                yuv400_to_rgbx_strip::<u16, RGB8>(&y16_8, w, w, y_start, sh, range, 8, &mut ngr);
+                sink.extend(ngr.iter().flat_map(|p| [p.r, p.g, p.b]));
                 for &bit_depth in &[10u8, 12, 16] {
                     let y16 = rand16(0x1234 + u32::from(bit_depth), w * h, bit_depth);
                     let mut g16 = vec![rgb::Gray::<u16>::new(0); w * sh];
@@ -2731,6 +2780,130 @@ mod tests {
             }
         }
         sink
+    }
+
+    /// 8-bit samples carried in u16 planes must convert to EXACTLY the same
+    /// pixels as the u8 planes.
+    ///
+    /// This is not a hypothetical: `aom-decode` returns u16 planes at every
+    /// bit depth, so the `aom-backend` decode path feeds the `S = u16`
+    /// kernel instantiations with 8-bit values and asks for 8-bit output
+    /// (`wide_out = bit_depth > 8`, src/decoder_managed/aom.rs:222), while
+    /// rav1d-safe's 8-bit path feeds the `S = u8` ones. Two implementations
+    /// of one conversion — and the backends are required to agree
+    /// byte-for-byte (tests/cross_backend_decode.rs asserts that on corpus
+    /// files; this asserts it on the kernels directly, where a divergence is
+    /// attributable).
+    #[test]
+    fn u16_planes_of_8bit_samples_match_the_u8_kernels() {
+        for &(w, h) in &[(1usize, 1usize), (3, 3), (9, 7), (16, 8), (17, 13)] {
+            let cw = w.div_ceil(2);
+            let ch = h.div_ceil(2);
+            let mut y8 = vec![0u8; w * h];
+            let mut u8p = vec![0u8; w * h];
+            let mut v8p = vec![0u8; w * h];
+            fill_rand(&mut y8, 0x51A7 + w as u32);
+            fill_rand(&mut u8p, 0x2C9F + h as u32);
+            fill_rand(&mut v8p, 0x77E1 + (w * h) as u32);
+            let y16: Vec<u16> = y8.iter().map(|&v| u16::from(v)).collect();
+            let u16p: Vec<u16> = u8p.iter().map(|&v| u16::from(v)).collect();
+            let v16p: Vec<u16> = v8p.iter().map(|&v| u16::from(v)).collect();
+            for &range in &[YuvRange::Limited, YuvRange::Full] {
+                for &matrix in &[YuvMatrix::Bt601, YuvMatrix::Bt709, YuvMatrix::Bt2020] {
+                    for sampling in [
+                        ChromaSubsampling::Cs420,
+                        ChromaSubsampling::Cs422,
+                        ChromaSubsampling::Cs444,
+                    ] {
+                        // Chroma extent per sampling; the planes above are
+                        // allocated at full size so every case fits.
+                        let cstride = match sampling {
+                            ChromaSubsampling::Cs444 => w,
+                            _ => cw,
+                        };
+                        let mut narrow = vec![RGB8::default(); w * h];
+                        let mut wide_src = vec![RGB8::default(); w * h];
+                        match sampling {
+                            ChromaSubsampling::Cs420 => yuv420_to_rgb8_strip(
+                                &y8,
+                                w,
+                                &u8p,
+                                cstride,
+                                &v8p,
+                                cstride,
+                                w,
+                                h,
+                                0,
+                                h,
+                                range,
+                                matrix,
+                                &mut narrow,
+                            ),
+                            ChromaSubsampling::Cs422 => yuv422_to_rgb8_strip(
+                                &y8,
+                                w,
+                                &u8p,
+                                cstride,
+                                &v8p,
+                                cstride,
+                                w,
+                                0,
+                                h,
+                                range,
+                                matrix,
+                                &mut narrow,
+                            ),
+                            ChromaSubsampling::Cs444 => yuv444_to_rgb8_strip(
+                                &y8,
+                                w,
+                                &u8p,
+                                cstride,
+                                &v8p,
+                                cstride,
+                                w,
+                                0,
+                                h,
+                                range,
+                                matrix,
+                                &mut narrow,
+                            ),
+                        }
+                        yuv16_to_rgbx_strip::<RGB8>(
+                            sampling,
+                            &y16,
+                            w,
+                            &u16p,
+                            cstride,
+                            &v16p,
+                            cstride,
+                            w,
+                            h,
+                            0,
+                            h,
+                            range,
+                            matrix,
+                            8,
+                            &mut wide_src,
+                        );
+                        assert_eq!(
+                            narrow, wide_src,
+                            "u8 vs u16-carried-8bit planes disagree: {w}x{h} {sampling:?} \
+                             {range:?} {matrix:?}"
+                        );
+                    }
+                    // Monochrome, both plane widths, into RGB8.
+                    let mut m8 = vec![RGB8::default(); w * h];
+                    let mut m16 = vec![RGB8::default(); w * h];
+                    yuv400_to_rgbx_strip::<u8, RGB8>(&y8, w, w, 0, h, range, 8, &mut m8);
+                    yuv400_to_rgbx_strip::<u16, RGB8>(&y16, w, w, 0, h, range, 8, &mut m16);
+                    assert_eq!(
+                        m8, m16,
+                        "mono u8 vs u16-carried-8bit disagree: {w}x{h} {range:?}"
+                    );
+                    let _ = ch;
+                }
+            }
+        }
     }
 
     /// Every SIMD tier — including the scalar fallback that no other test in
