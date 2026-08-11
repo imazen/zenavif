@@ -57,16 +57,33 @@ for c in "${COMBOS[@]}"; do
   start=$(date +%s)
   # --release: the encode combos are unusable at opt-level 0 (a full rav1e
   # encode per test). --no-clean keeps the instrumented deps across combos.
-  # nextest --no-fail-fast: one broken test must not hide the rest of the map.
-  nice -n 19 cargo llvm-cov nextest --release --workspace --no-fail-fast --no-clean \
+  # fail-fast off (nextest `coverage` profile): one broken test must not hide
+  # the rest of the map.
+  # --ignore-run-fail: without it cargo-llvm-cov writes NO report when any test
+  # fails, so a combo with one known-failing test (see CLAUDE.md's pre-existing
+  # gauntlet failures) contributes nothing to the map at all. The run's PASS/FAIL
+  # is still reported per combo from the nextest summary below.
+  # `--profile coverage` carries fail-fast = false (.config/nextest.toml) —
+  # cargo-llvm-cov rejects the --no-fail-fast flag next to --ignore-run-fail.
+  nice -n 19 cargo llvm-cov nextest --release --workspace --no-clean \
+      --ignore-run-fail --profile coverage \
       "${fargs[@]}" -j "$JOBS" --json --output-path "$JSON" >"$LOG" 2>&1
   rc=$?
   dur=$(( $(date +%s) - start ))
-  summary=$(grep -E '^ *Summary' "$LOG" | tail -1 | sed 's/^ *//')
-  [ -z "$summary" ] && summary=$(grep -m1 -E '^error' "$LOG")
-  status=$([ $rc -eq 0 ] && echo PASS || echo "FAIL($rc)")
-  [ $rc -eq 0 ] || fail=1
-  printf '%-9s %-9s %4ss %s\n' "$name" "$status" "$dur" "$summary"
+  # With --ignore-run-fail the exit status is 0 even when tests failed, so the
+  # per-combo status comes from nextest's own summary line (colour codes
+  # stripped) — never from $rc alone, or a combo with failing tests would print
+  # PASS.
+  summary=$(grep -aE 'tests run:' "$LOG" | tail -1 | sed 's/\x1b\[[0-9;]*m//g; s/^ *//')
+  [ -z "$summary" ] && summary=$(grep -am1 -E '^error' "$LOG")
+  if [ $rc -ne 0 ]; then
+    status="BUILD-FAIL($rc)"; fail=1
+  elif printf '%s' "$summary" | grep -q 'failed'; then
+    status="TESTS-FAIL"; fail=1
+  else
+    status=PASS
+  fi
+  printf '%-9s %-12s %4ss %s\n' "$name" "$status" "$dur" "$summary"
 done
 echo "json: $OUTDIR/*.json   summarize: python3 scripts/cov_summarize.py $OUTDIR/*.json"
 exit $fail
