@@ -365,3 +365,66 @@ fn dyn_dispatch_recovers_category_and_codec_name() {
         "codec name must survive Box<dyn Error> erasure"
     );
 }
+
+// ── Threading policy (src/codec/threads.rs) ─────────────────────────────────
+//
+// `policy_to_threads` measured 0 of 6 regions covered in EVERY feature combo
+// (cargo-llvm-cov 0.8.7, 2026-08-11; docs/TEST_COVERAGE.md): the default
+// `ResourceLimits` threading is `Parallel`, which `effective_config` skips on
+// purpose, so no test ever lowered a policy to a concrete thread count. The
+// contract that matters to a caller is that asking for `Sequential` changes
+// how the work is scheduled and NOT what comes out.
+
+/// Decoded pixels must be byte-identical under every threading policy, and a
+/// `Sequential` request must be honoured rather than rejected.
+///
+/// Fixture: the committed `kodim03_yuv420_8bpc.avif` (768×512 4:2:0 8-bit) —
+/// large enough for rav1d-safe to use more than one tile worker at the
+/// `Parallel` (auto) default, so the two arms really are different schedules.
+#[test]
+fn decode_is_byte_identical_under_every_threading_policy() {
+    const KODIM: &str = "tests/vectors/libavif/kodim03_yuv420_8bpc.avif";
+    let bytes = read(KODIM);
+
+    let decode_under = |policy: zencodec::ThreadingPolicy| -> Vec<u8> {
+        let limits = zencodec::ResourceLimits::default().with_threading(policy);
+        let out = AvifDecoderConfig::new()
+            .job()
+            .with_limits(limits)
+            .decoder(Cow::Borrowed(&bytes), &[PixelDescriptor::RGB8_SRGB])
+            .expect("decoder")
+            .decode()
+            .unwrap_or_else(|e| panic!("decode under {policy:?}: {e:?}"));
+        let p = out.pixels();
+        let (w, h, stride) = (p.width() as usize, p.rows() as usize, p.stride());
+        let b = p.as_strided_bytes();
+        (0..h)
+            .flat_map(|y| b[y * stride..][..w * 3].to_vec())
+            .collect()
+    };
+
+    let parallel = decode_under(zencodec::ThreadingPolicy::Parallel);
+    assert!(!parallel.is_empty(), "decode produced no pixels");
+    let sequential = decode_under(zencodec::ThreadingPolicy::Sequential);
+    assert_eq!(
+        sequential.len(),
+        parallel.len(),
+        "Sequential and Parallel produced different buffer sizes"
+    );
+    assert!(
+        sequential == parallel,
+        "Sequential decode differs from Parallel at byte {} — thread count must \
+         never change pixels",
+        sequential
+            .iter()
+            .zip(parallel.iter())
+            .position(|(a, b)| a != b)
+            .unwrap_or(0)
+    );
+
+    // The deprecated legacy variants must still decode (they lower to "auto",
+    // and the deprecation warning belongs at the construction site, not here).
+    #[allow(deprecated)]
+    let legacy = decode_under(zencodec::ThreadingPolicy::Balanced);
+    assert_eq!(legacy, parallel, "a legacy policy must not change pixels");
+}

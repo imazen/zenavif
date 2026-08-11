@@ -29,6 +29,52 @@ pub(super) fn policy_to_threads(policy: zencodec::ThreadingPolicy) -> u32 {
     }
 }
 
+#[cfg(test)]
+mod policy_tests {
+    use super::policy_to_threads;
+
+    /// The policy → thread-count lowering, asserted on the mapping itself.
+    ///
+    /// It measured 0 of 6 regions in every feature combo (cargo-llvm-cov,
+    /// 2026-08-11): `effective_config` only calls it for a non-`Parallel`
+    /// policy and `ResourceLimits::default()` is `Parallel`, so nothing
+    /// exercised the lowering. A decode-level test cannot pin this — the
+    /// thread count is deliberately invisible in the output pixels
+    /// (tests/cov_zencodec.rs asserts that invariance separately), so the
+    /// mapping has to be asserted here or not at all.
+    #[test]
+    fn policy_lowering_is_exact() {
+        assert_eq!(
+            policy_to_threads(zencodec::ThreadingPolicy::Sequential),
+            1,
+            "Sequential must mean one thread, not auto"
+        );
+        assert_eq!(
+            policy_to_threads(zencodec::ThreadingPolicy::Parallel),
+            0,
+            "Parallel must mean auto (0), letting the decoder pick"
+        );
+        // Deprecated legacy variants lower to auto; the deprecation warning
+        // belongs at the caller's construction site.
+        #[allow(deprecated)]
+        for legacy in [
+            zencodec::ThreadingPolicy::SingleThread,
+            zencodec::ThreadingPolicy::Balanced,
+            zencodec::ThreadingPolicy::Unlimited,
+            zencodec::ThreadingPolicy::LimitOrSingle { max_threads: 4 },
+            zencodec::ThreadingPolicy::LimitOrAny {
+                preferred_max_threads: 4,
+            },
+        ] {
+            assert_eq!(
+                policy_to_threads(legacy),
+                0,
+                "legacy policy {legacy:?} must lower to auto"
+            );
+        }
+    }
+}
+
 /// Memory-adaptive concurrency pre-flight shared by the still and animation
 /// encode paths: fit the encoder thread count to the memory budget, verify
 /// the calibrated thread-aware estimate at the chosen count, and return the
