@@ -204,6 +204,75 @@ Evidence posted to rav1d-safe#449. **This is distinct from the documented
 `animations_decode_identically_across_backends` failure** — do not conflate a
 flaky CDEF panic with that deterministic one.
 
+**imazen/zensim#60 (upstream, sibling repo — reported, not fixed): the
+folded-944 extraction is not reproducible within one process on
+`aarch64-unknown-linux-gnu`.** Found 2026-08-11 when PR #31's CI ran for the
+first time in weeks. `zensim_c::tests::streaming_and_direct_folded944_agree`
+fails only on `ubuntu-24.04-arm`:
+
+```
+feature 0 differs: streaming 0.07713405512428531 vs direct 0.07713198829312912
+```
+
+2.7e-5 relative, on `f0` (the shared v1-basic block, not append2). Both sides
+reach ONE zensim function with identical arguments — traced at the pinned rev
+`a390a182`: `compute_folded720_features_streaming` →
+`feature_v2::compute_folded720_streaming_impl(…)` (metric.rs:1760-1775), and
+`compute_folded720_append2_features` → `compute_folded720_append2_impl` (forces
+exactly the two toggles `toggles_944()` sets, feature_v2.rs:5671-5683) →
+`compute_folded720_impl_with_toggles`, which is `V2Scratch::new()` plus that same
+call (feature_v2.rs:4993-5009). **The only difference is which `V2Scratch`
+instance is passed**, and zensim's rustdoc calls the output "bit-for-bit" /
+"BITWISE equal". So this is upstream's, not ours; nothing here feeds the two
+paths different inputs, strides, toggles or front end.
+
+**It is nondeterministic, and not one platform.** With the 4-pairing form (run
+31527165388) `aarch64-unknown-linux-gnu` AND `aarch64-pc-windows-msvc` both
+diverge, where the old 2-way form had `windows-11-arm` green — that leg was
+passing by luck, not by agreement. The discriminating output:
+
+```
+ubuntu-24.04-arm:
+  streamed vs the append2 wrapper:        worst at feature 143: 0.014371928241517808 vs 0.014379217392868465 (rel 5.072e-4)
+  streamed vs the append2 wrapper, twice: worst at feature 864: 0.020007017572121793 vs 0.020041461660614206 (rel 1.722e-3)
+windows-11-arm:
+  streamed vs the append2 wrapper:        worst at feature 143: 0.014371928241517808 vs 0.014379325012365976 (rel 5.147e-4)
+```
+
+Read that carefully, it says a lot: (1) the two **streaming** pairings are absent
+from both reports, so `compute_folded720_features_streaming` reproduces itself
+exactly — same scratch reused, and a second fresh scratch. (2) the **wrapper**
+does not, and on ubuntu-24.04-arm its two calls report their worst deviation at
+*different* features, so the two wrapper results differ from each other; on
+windows-11-arm the second wrapper call agreed. Run-to-run nondeterminism, up to
+**1.7e-3 relative** — 60× the 2.7e-5 first seen. (3) the streaming `f143` value is
+byte-identical on both platforms; only the wrapper wanders. Caveat: the 4-pairing
+form issues five zensim calls where the old one issued two, so it may have raised
+the hit rate rather than found a new platform — but the 2-call sequence already
+diverged on arm-linux (run 31520483088), so the bug does not need the extra calls.
+
+Passing with the 4-pairing form: `x86_64-linux`, `x86_64-apple-darwin`,
+`x86_64-pc-windows-msvc`. Ruled out on darwin aarch64 locally: 60/60 identical
+runs; 0.000e0 worst deviation across scratch reuse, a second fresh scratch and
+repeated wrapper calls at four geometries (96×96, 150×170, 127×93, 96×257); the
+wrapper called 9× at 96×96 and 512×384 with `parallel = false` **and**
+`parallel = true` (0.000e0 in all four cells); all four aarch64 tokens (`Neon`,
+`NeonAes`, `Arm64V2`, `Arm64V3`) summon here, so it is not a tier that exists only
+on Linux. Mechanism undetermined without one of the affected targets. Related fact
+worth knowing: **zensim's `parallel` defaults to `true`** (`metric.rs:1235`) and
+`ZensimC::new()` does not override it, so the product path runs the parallel walk;
+all the divergence above was measured with `parallel = false`, so rayon is not the
+cause, but the default is the more exposed path if it ever turns out to be
+reduction order. Likely-related upstream gap: zensim's own
+`streamed_foldapp_bitwise_vs_materialized` (feature_v2.rs:10991) compares
+`to_bits()` and *does* run on `ubuntu-24.04-arm`, but only for the 720 and 924
+layouts — the 944/append2 toggle set has no bitwise gate upstream.
+
+The zenavif test was strengthened rather than relaxed (`f247183`): it now pins
+four self-reproduction invariants at the same 1e-12 tolerance and reports all of
+them together, so the red leg carries the diagnosis. **Widening the tolerance
+would need the user's sign-off** — it would hide an upstream contract violation.
+
 **zenavif#35 (this repo — reported, deliberately not fixed): the row-sink
 decode path ignores `preferred` and can never emit native Gray.** Probed
 2026-08-11 on the committed mono fixtures:
@@ -230,6 +299,31 @@ public output format is not something to change unilaterally.
   compile-time guaranteed there, so token disabling fails without it).
   Removing it makes `every_simd_tier_is_byte_identical` fail loudly rather than
   silently re-run one tier.
+* **archmage has exactly ONE tier on i686, and it is `scalar`.** Its permutation
+  table comes from `build_token_slots()` (archmage 0.9.15 `src/testing.rs:206-246`),
+  which pushes slots only under `cfg(target_arch = "x86_64")` and
+  `cfg(target_arch = "aarch64")`; every other target compiles the generated
+  `*_stubs.rs` token set (`src/tokens/generated/mod.rs`) whose `summon()` is
+  `None` unconditionally. So on `target_arch = "x86"` the x86-64-v1..v4x tokens
+  are stubs *even though the CPU has SSE2*, `permutations_run == 1`, and
+  `incant!(…, [v4x, v4, v3, neon, wasm128, scalar])` has one live arm. That is
+  why `every_simd_tier_is_byte_identical` is `cfg`-gated to x86_64/aarch64 and
+  i686 runs `single_tier_targets_dispatch_to_the_scalar_kernels` instead — which
+  asserts the premise (no SIMD token summons) rather than skipping, and fails if
+  a future archmage grows 32-bit-x86 slots. Corollary for the coverage map: the
+  scalar kernels *are* exercised on the i686 leg, by every absolute-reference
+  test in the module plus `u16_planes_of_8bit_samples_match_the_u8_kernels`.
+* **Never time a scoped-thread round trip and attribute the excess to your own
+  code.** `cancel::tests::work_that_finishes_first_tears_the_watcher_down_promptly`
+  did (20 `with_relayed_stop` calls < `20 * POLL_INTERVAL`) and failed
+  `windows-latest` at 27.93 ms / 20 = 1.40 ms per call while reporting it as
+  "teardown is waiting out the poll interval" — a diagnosis the measurement could
+  not support. A bare `std::thread::scope` + spawn + join measures **14.1 µs** on
+  macOS aarch64 and evidently ~100× that on a shared Windows runner. The test now
+  interleaves a bare-spawn control and compares minima, budgeting
+  `POLL_INTERVAL/2` of relay-attributable overhead; the mutation that proves it
+  (`std::thread::sleep(POLL_INTERVAL)` in `Shutdown::wait_or_timeout`) shows
+  1.36 ms vs 14.1 µs.
 * `.config/nextest.toml` carries a `coverage` profile (`fail-fast = false`) only
   because `cargo llvm-cov` rejects `--no-fail-fast` next to
   `--ignore-run-fail`, and a coverage run needs both. `[profile.default]` is

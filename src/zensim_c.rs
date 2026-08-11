@@ -705,13 +705,20 @@ mod tests {
     /// and reported TOGETHER rather than short-circuiting on the first, so a
     /// single failing run says which promise broke: determinism under scratch
     /// reuse, independence from the scratch instance, streaming-vs-wrapper, and
-    /// determinism of the wrapper. **This is a known-red leg on
-    /// aarch64-unknown-linux-gnu**: CI run 31520483088 (ubuntu-24.04-arm)
-    /// reported `feature 0 differs: streaming 0.07713405512428531 vs direct
-    /// 0.07713198829312912` (2.7e-5 relative) while x86_64-linux,
-    /// aarch64/x86_64-darwin and aarch64-windows all passed, and macOS aarch64
-    /// reproduces none of it in 60/60 runs. Reported upstream; the tolerance
-    /// here is deliberately NOT widened to hide it.
+    /// determinism of the wrapper.
+    ///
+    /// **Known red on `aarch64-unknown-linux-gnu` and
+    /// `aarch64-pc-windows-msvc`, upstream as imazen/zensim#60.** Measured (run
+    /// 31527165388): the two *streaming* pairings agree exactly on both, so the
+    /// streaming entry reproduces itself; the *wrapper* does not, at up to
+    /// 1.7e-3 relative, and on arm-linux its two calls disagree with each other
+    /// (worst at f143 then f864) while on arm-windows the second call agreed —
+    /// i.e. run-to-run nondeterminism, which is why the earlier 2-way form of
+    /// this test found only `f0` at 2.7e-5 on arm-linux (run 31520483088) and
+    /// passed on arm-windows. `x86_64` linux/darwin/windows and darwin aarch64
+    /// pass; darwin aarch64 reproduces nothing in 60/60 runs, at four
+    /// geometries, or with `parallel` either way. The tolerance here is
+    /// deliberately NOT widened to hide it — see docs/TEST_COVERAGE.md §7.
     #[test]
     fn streaming_and_direct_folded944_agree() {
         let (w, h) = (96usize, 96usize);
