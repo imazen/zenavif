@@ -205,7 +205,7 @@ Evidence posted to rav1d-safe#449. **This is distinct from the documented
 flaky CDEF panic with that deterministic one.
 
 **This crate's own test suite was disabling SIMD tokens process-wide and
-corrupting other tests' numbers — root-caused and fixed 2026-08-11 (`b2f04c5`).**
+corrupting other tests' numbers — root-caused and fixed 2026-08-11 (`894c245`).**
 It cost most of a session and read as three different platform bugs, so it is
 written down in full.
 
