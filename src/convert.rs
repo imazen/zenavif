@@ -335,6 +335,93 @@ mod tests {
         assert_eq!(limited_to_full_16(3760, 12), 4095); // 235<<4 = 3760
     }
 
+    /// `downscale_to_8bit` over all four layouts it claims to handle.
+    ///
+    /// Measured cold in every feature combo: only the RGB16 arm ran, so the
+    /// RGBA16 / GRAY16 / GRAYA16 arms — each its own hand-written `>> 8` per
+    /// channel — were unmeasured (cargo-llvm-cov, 2026-08-11;
+    /// docs/TEST_COVERAGE.md). A dropped or duplicated channel there is a
+    /// wrong-pixel bug on the `prefer_8bit` decode path for 10/12-bit files.
+    #[test]
+    fn downscale_to_8bit_keeps_every_channel_in_place() {
+        // Distinct per-channel values so a swap or a duplicate shows up.
+        let rgba: Vec<Rgba<u16>> = (0..6u16)
+            .map(|i| Rgba {
+                r: 0x1100 * (i + 1),
+                g: 0x0700 * (i + 1) + 3,
+                b: 0x0300 * (i + 1) + 7,
+                a: 0xFF00 - 0x0100 * i,
+            })
+            .collect();
+        let buf: PixelBuffer = PixelBuffer::from_pixels(rgba.clone(), 3, 2)
+            .expect("rgba16 buffer")
+            .into();
+        assert!(
+            buf.descriptor().layout_compatible(PixelDescriptor::RGBA16),
+            "fixture must be RGBA16 or this test measures the wrong arm"
+        );
+        let out = downscale_to_8bit(buf);
+        let got = out
+            .try_as_imgref::<Rgba<u8>>()
+            .expect("RGBA16 must downscale to RGBA8");
+        for (i, (src, dst)) in rgba.iter().zip(got.pixels()).enumerate() {
+            assert_eq!(
+                (dst.r, dst.g, dst.b, dst.a),
+                (
+                    (src.r >> 8) as u8,
+                    (src.g >> 8) as u8,
+                    (src.b >> 8) as u8,
+                    (src.a >> 8) as u8
+                ),
+                "RGBA16 -> RGBA8 channel mismatch at pixel {i} ({src:?})"
+            );
+        }
+
+        // RGB16 arm (the one that was already covered) — kept here so the
+        // four arms are asserted by one test.
+        let rgb: Vec<Rgb<u16>> = rgba
+            .iter()
+            .map(|p| Rgb {
+                r: p.r,
+                g: p.g,
+                b: p.b,
+            })
+            .collect();
+        let buf: PixelBuffer = PixelBuffer::from_pixels(rgb.clone(), 3, 2)
+            .expect("rgb16 buffer")
+            .into();
+        let out = downscale_to_8bit(buf);
+        let got = out
+            .try_as_imgref::<Rgb<u8>>()
+            .expect("RGB16 must downscale to RGB8");
+        for (src, dst) in rgb.iter().zip(got.pixels()) {
+            assert_eq!(
+                (dst.r, dst.g, dst.b),
+                ((src.r >> 8) as u8, (src.g >> 8) as u8, (src.b >> 8) as u8),
+                "RGB16 -> RGB8 channel mismatch"
+            );
+        }
+
+        // GRAY16 arm.
+        let gray: Vec<rgb::Gray<u16>> = (0..6u16)
+            .map(|i| rgb::Gray::new(0x2300 * (i + 1) + 9))
+            .collect();
+        let buf: PixelBuffer = PixelBuffer::from_pixels(gray.clone(), 3, 2)
+            .expect("gray16 buffer")
+            .into();
+        let out = downscale_to_8bit(buf);
+        let got = out
+            .try_as_imgref::<rgb::Gray<u8>>()
+            .expect("GRAY16 must downscale to GRAY8");
+        for (src, dst) in gray.iter().zip(got.pixels()) {
+            assert_eq!(
+                dst.value(),
+                (src.value() >> 8) as u8,
+                "GRAY16 -> GRAY8 mismatch"
+            );
+        }
+    }
+
     #[test]
     fn scale_to_u16_endpoints() {
         // 10-bit
