@@ -1,13 +1,24 @@
-name: Clone path-dep siblings (zenanalyze, ravif)
+name: Clone path-dep siblings (zenanalyze, ravif, zenrav1e, zensim)
 description: |
   zenavif's Cargo.toml has path deps that Cargo resolves at manifest-parse
   time, so the directories must exist even when the owning feature is off:
     - imazen/zenanalyze   → ../zenanalyze (optional `auto-tune` + an example dev-dep)
     - imazen/cavif-rs     → ../ravif      (the `zenravif` 0.2.0 encoder, behind `encode`)
+    - imazen/zenrav1e     → ../zenrav1e   (TRANSITIVE: cavif-rs master's zenravif
+                                           now path-deps `../../zenrav1e` — resolving
+                                           to this checkout's sibling — instead of the
+                                           registry 0.1.4; without the clone every job
+                                           dies at manifest parse, which is exactly how
+                                           CI has been red since that cavif-rs push)
+    - imazen/zensim       → ../zensim     (dev-dep for the zensim_cq_rd loop
+                                           harness; needs the unpublished 0.3.0
+                                           surface — profile C + folded-944)
 
   The `ravif`/`zenravif` path dep points at 0.2.0, which is unpublished (crates.io
   has only 0.1.3), so the sibling must be cloned. Drop this step + switch
-  Cargo.toml back to a registry dep once zenravif 0.2.0 is published.
+  Cargo.toml back to a registry dep once zenravif 0.2.0 is published; same for
+  the zensim dev-dep once zensim 0.3.0 ships, and for zenrav1e once cavif-rs
+  master returns to a registry dep (the post-0.1.4 publish).
   (zencodec resolves from the registry at 0.1.26, and zenavif-parse is a
   hermetic git-rev [patch.crates-io] pin until 0.7.0 ships — neither needs a
   sibling clone.)
@@ -47,4 +58,18 @@ runs:
         cd ..
         if [ ! -d zenav1-aom ]; then
           git clone --depth 1 https://github.com/imazen/zenav1-aom.git
+        fi
+    - name: Clone imazen/zenrav1e into ../zenrav1e
+      shell: bash
+      run: |
+        cd ..
+        if [ ! -d zenrav1e ]; then
+          git clone --depth 1 https://github.com/imazen/zenrav1e.git
+        fi
+    - name: Clone imazen/zensim into ../zensim
+      shell: bash
+      run: |
+        cd ..
+        if [ ! -d zensim ]; then
+          git clone --depth 1 https://github.com/imazen/zensim.git
         fi

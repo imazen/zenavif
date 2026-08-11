@@ -139,8 +139,8 @@ zencodec = { version = "0.1.26" }
 # (now always-built) `codec` module, so it is a hard dep too.
 ultrahdr-core = { version = "0.5.0", default-features = false }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
-zenpixels = { version = "0.2.11", default-features = false, features = ["imgref", "rgb"] }
-zenpixels-convert = { version = "0.2.13", default-features = false, features = ["rgb"] }
+zenpixels = { version = "0.2.16", default-features = false, features = ["imgref", "rgb"] }
+zenpixels-convert = { version = "0.2.16", default-features = false, features = ["rgb", "hdr-experimental"] }
 linear-srgb = { version = "0.6.7"}
 
 [dev-dependencies]
@@ -165,6 +165,14 @@ zensim = { git = "https://github.com/imazen/zensim", branch = "main", features =
 # different zensim crates and don't unify. Registry 0.3.1 depends on zensim
 # 0.2.x; git `main` (0.4.0) depends on 0.3.0. Unpin together at the publish.
 zensim-regress = { git = "https://github.com/imazen/zensim", branch = "main" }
+# NOTE (merge of origin/main, 2026-08-11): main carried a second, RENAMED
+# `zensim03` path dep so the `zensim_cq_rd` harness could reach 0.3.0's
+# `ZensimProfile::C` while the main dep stayed pinned to registry 0.2.4.
+# This branch's `zensim` is git `main` and already enables the two features
+# that alias existed for (`custom-profiles`, `feature-regime-v2`), so the
+# alias is redundant here and was dropped — which is exactly the collapse
+# main's own comment asked for (zensim#46). `zensim_cq_rd.rs` now uses the
+# plain `zensim` crate. Both deps must keep tracking the SAME zensim.
 rayon = "1.11.0"
 # Feature extraction for the rav1e knob predictor MLP training.
 # Path-pinned to the sibling checkout (see the [dependencies] note above);
@@ -284,6 +292,14 @@ required-features = ["auto-tune"]
 [[example]]
 name = "drift_reencode"
 required-features = ["__expert"]
+
+# Zensim target-hitting CQ loop harness (benchmarks/zensim_avif_loop_2026-08-07.md;
+# the AVIF analogue of jxl-encoder's zensim_diffmap_rd beats-butter series).
+# `two-pass-butteraugli` is required for the per-SB quantizer hint hook
+# (EncoderConfig::sb_q_scale), not for butteraugli itself.
+[[example]]
+name = "zensim_cq_rd"
+required-features = ["encode-imazen", "two-pass-butteraugli"]
 
 # Heaptrack allocation-profiling harness for the decode-from-bytes path.
 # Decode is in the default feature set (pure-Rust rav1d-safe); no extra features.

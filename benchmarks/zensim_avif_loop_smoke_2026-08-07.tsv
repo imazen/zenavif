@@ -1,0 +1,4 @@
+image	class	target	arm	bake	seed_cq	achieved_inloop	iters_used	achieved_decoded	abs_err	bytes	encode_ms	loop_ms	ms_per_compare
+city	photo	80	baseline	/mnt/v/output/zensim/bakes/sota944/bakes/W10L9_s4003_packed.bin	90	80.009	4	80.009	0.009	67086	2355.5	273.7	68.4
+city	photo	80	outer	/mnt/v/output/zensim/bakes/sota944/bakes/W10L9_s4003_packed.bin	90	80.009	4	80.009	0.009	67086	2209.7	322.3	80.6
+city	photo	70	baseline	/mnt/v/output/zensim/bakes/sota944/bakes/W10L9_s4003_packed.bin	60	71.673	4	71.673	1.673	46429	2314.4	266.9	66.7

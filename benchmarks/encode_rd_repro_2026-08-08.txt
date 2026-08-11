@@ -1,0 +1,22 @@
+run A: 864 cells | run B: 288 cells | shared: 288
+
+byte identity across runs: 288/288 cells equal
+
+timing ratio B/A per arm (gm = geometric mean; dev% = |ln ratio| x100)
+arm           n      gm   median  dev_med%  dev_p90%  dev_max%
+aom          72   0.988    0.990      1.01      2.55      5.47
+svtc         72   0.988    0.989      1.15      2.90      5.80
+svtrs        72   0.994    0.995      0.60      1.55      3.92
+zenrav1e     72   0.997    0.998      0.24      0.75      1.57
+
+same, split by size — small cells are dominated by fixed jitter:
+arm          size    n      gm  dev_med%  dev_p90%
+aom           256   72   0.988      1.01      2.55
+svtc          256   72   0.988      1.15      2.90
+svtrs         256   72   0.994      0.60      1.55
+zenrav1e      256   72   0.997      0.24      0.75
+
+How to read this: a gm far from 1.000 means the whole run shifted (thermal,
+neighbours, page cache) — a systematic offset that a within-run spread number
+cannot see. dev_p90 is the honest resolution of the instrument: an A/B
+difference smaller than that is not measurable on this box in one sitting.

@@ -1,0 +1,462 @@
+# encode_rd — the full matched-wall-clock encode RD sweep
+
+harness: scripts/encode_rd/{run_grid.py, run_full_sweep.sh, analyze_matched.py,
+         bdrate_matched.py, bytes_model.py, payload_identity.py,
+         merge_and_analyze.sh} + examples/rd_tool.rs
+         + zenavif-serialize/examples/container_cost.rs
+methodology: scripts/encode_rd/README.md — read it before quoting a number
+commit: SEE THE TSV HEADER (each tier records its own)
+date: 2026-08-08
+
+## READ THIS FIRST — what is NOT covered
+
+1. **4096 px is not covered for photo or line-art, and 2048 px is not in the RD
+   grid at all.** No local photo source exceeds 2048 px (clic2025 is natively
+   2048) and no local line-art source exceeds 796 px (`gb82-sc/graph.png`; the
+   CID22 charts are 512). `rd_tool prep` refuses to upscale — fabricated
+   high-frequency detail is not something an encoder should be judged on — so
+   the tier simply does not exist on this box. The RD grid is 64 / 256 / 1024.
+   The size model reaches 2048 (photo + screen) and 4096 (screen only, from
+   `qoi-benchmark/screenshot_web`, the only local sources over 2940 px), on a
+   reduced rate grid.
+2. **The `zenrav1e` arm is the rav1e CLI, NOT zenavif's encode path.** Same
+   encoder core, different search configuration: zenavif goes through
+   zenravif's `SpeedTweaks`, which pins `complex_prediction_modes=false` and
+   `encode_bottomup=false`, caps `non_square_partition_max` at 8 for speed>=4,
+   collapses `partition_range` to (16,16) at speed>=9, gates CDEF/LRF on the
+   quantizer, and maps quality->quantizer through its own curve
+   (`src/encode_plan.rs`). Percent-level RD differences are expected. Plane 2
+   (PNG -> AVIF through zenavif / cavif / avifenc) is still not wired.
+3. **12 images: 5 photo, 4 screen, 3 line-art.** That is n=5/4/3 per class in
+   every aggregate. The sweep discipline asks for 50 per class for percentile
+   fits; that is a fleet job, not a laptop job. Image count was the axis cut,
+   per the instruction to reduce images before reducing q or size resolution —
+   the 20-point rate grid and the size tiers are intact.
+4. **zenrav1e speeds 0-5 are not in the RD grid at 1024**, and 0-2 not at 256.
+   s3 costs 6.8 s per encode at 1024, i.e. 2.1 h per image at full rate
+   density. Consequence: at 1024 the zenrav1e frontier ends at ~1.1 s and the
+   analysis correctly refuses to compare it above that. The full ladder IS
+   measured in `encode_rd_probe_ladder_2026-08-08.tsv` at 2 reps.
+5. **8-bit, 4:2:0, 1 thread, 1 tile, CQP only.** No 10-bit, no alpha, no
+   animation, no thread-count axis, no tiling axis. Tiling changes the
+   bitstream, so folding threads into the time axis would trade RD for speed
+   silently.
+6. **Not niced, but the box was not empty.** Median 0.37 of 12 cores busy with
+   foreign work during timed samples (p90 0.65, p99 1.46, max 4.33); the
+   free-core gate never had to wait. Two builds ran on the box: `rd_tool`
+   before the sweep started, and a 7-second `container_cost` build during rep 2
+   of the 64 px tier. Both niced. Five rotated reps and a median absorb it, but
+   it is on the record rather than claimed away.
+
+## Host and configuration
+
+host: Apple M4 Pro, 8 performance + 4 efficiency cores, 24 GB, macOS 26.5.2
+scheduling gate: every tier verified NOT to be in the darwin background QoS
+    class before measuring (calibration loop 5.7-6.0x slower when explicitly
+    backgrounded). See scripts/encode_rd/README.md section 3 — on macOS `nice`
+    costs 4% and background QoS costs 5.9x, and they are different mechanisms.
+time  = full process wall clock, never niced, median of 5 rotated reps.
+bytes = bytes_av1, the AV1 payload with the IVF container stripped (44 B for a
+        still). Two arms write IVF and one writes bare OBU, so comparing file
+        size would hand the OBU arm 44 free bytes.
+config: 8-bit 4:2:0, one key frame, still-picture, 1 thread, 1 tile, CQP,
+        every adaptive-QP / psychovisual layer at each encoder's own default.
+
+## Grid
+
+sizes:  64, 256, 1024 long-edge cap (RD grid); + 2048, 4096 (size model only)
+rates:  each arm's own 20-point quantizer grid, spaced for even ACHIEVED
+        QUALITY (~7 ssim2 steps from ~92 down to ~15), NOT even knob spacing
+reps:   5, interleaved, visit order rotated per rep
+images: photo    clic2025/training/{4cd6910a, 7e499613, ddcd24d9, 14ab4af2,
+                 1e2f9d41} — picked at evenly spaced quantiles of PNG
+                 bytes/pixel (0.189 to 2.363) so the five are not one texture
+        screen   gb82-sc/{codec_wiki, gui, terminal},
+                 qoi-benchmark/screenshot_web/en.wikipedia.org
+        line-art gb82-sc/graph, CID22/{Boxplot, newplot}
+
+ladders — DIFFERENT PER SIZE AND PER ARM, which is the whole point:
+
+    64    zenrav1e 10,9,8,7,6,3,2,1,0   aom 9..0   svtc 9..0   svtrs 9..0
+    256   zenrav1e 10,9,8,7,6,3         aom 9,8,7,6,5,4,3,2,0  (svtc, svtrs same)
+    1024  zenrav1e 10,9,8,7,6           aom 9,8,6,5,4,2
+          svtc 9,8,7,6,5,4,3,2,0        svtrs 9,8,7,6,5,4,3
+
+Justification, all measured on the sizing probe:
+  * four-way time overlap is 11.8-136 ms at 256 and 103-1252 ms at 1024, so the
+    rung set has to move with size or the comparison has nothing to stand on.
+  * zenrav1e s4/s5 are STRICTLY DOMINATED by s3 (slower AND larger at both
+    sizes) — a dominated rung is never the right choice, so paying full rate
+    density for it buys nothing. Kept in the probe as the evidence.
+  * svtc/svtrs presets 10-13 are byte-identical to preset 9 and cost the same.
+    The SVT still-picture ladder has 10 distinct rungs, not 14.
+
+## Files and totals
+
+    tier          cells   encodes  failed  spread_med%  spread_p90%
+    t64            9360     46800       0         5.36        12.67
+    t256           7920     39600       0         2.28         6.51
+    t1024a         2160     10800       0         1.96         5.34
+    fit_screen      600      3000       0         2.09         8.51
+    fit_photo       480      2400       0         2.06         9.08
+    TOTAL         20520    102600       0
+
+Every cell kept all 5 reps; 0 failed anywhere; 0 timing samples dropped for
+foreign CPU across the whole sweep.
+
+encode_rd_sweep_t{64,256,1024a}_2026-08-08.tsv.zst    the RD grid
+encode_rd_sweep_fit_{screen,photo}_2026-08-08.tsv.zst the size model (2048/4096)
+encode_rd_sweep_*_floor_2026-08-08.tsv                4:2:0 ceiling per input
+encode_rd_probe_ladder_2026-08-08.tsv                 the full-ladder sizing probe
+Encoded bitstreams: content-addressed <sha256>.{ivf,obu}. Every row carries its
+enc_sha256, so a scalar score can be rejoined to the exact bitstream forever.
+
+## The caveat that scopes every matched-time number below
+
+At small sizes the wall clock is mostly NOT encoding. Three arms report their
+own encode time, so this is measured directly rather than fitted
+(`scripts/encode_rd/overhead_share.py`); on the committed validation grid:
+
+    (wall - self)/wall              64px    256px    796px   1024px
+      aom      cpu8                90.3%    62.7%    25.1%    17.9%
+      aom      cpu4                46.2%     6.8%     1.8%     3.0%
+      svtc     p8                  68.1%    73.9%    27.4%    26.2%
+      svtc     p4                  53.0%    21.7%     4.0%     2.5%
+      zenrav1e s8                  60.1%    10.3%     2.6%     1.2%
+      zenrav1e s4                   9.3%     1.1%     0.2%     0.0%
+
+So: **at 64 px a matched-wall-clock ranking of the fast arms is a comparison of
+process spawn, not of compression.** The useful reading at 64 px is the RD curve
+and the bpp intercept. At 1024 px the clock is 0-3% overhead on the slow rungs
+and up to 26% on svtc's fastest, so the ranking there is a real encoder ranking.
+(SvtAv1EncApp reports integer milliseconds, so its share is quantised below
+~10 ms.)
+
+This is also the honest frame for the whole harness: process wall is what an
+image pipeline pays per image, which is why it is the clock — but an in-process
+encoder API would rank the fast arms differently at thumbnail sizes.
+
+## How to re-run
+
+    bash scripts/encode_rd/run_full_sweep.sh        # ~5.5 h on this host
+    bash scripts/encode_rd/run_topup_1024.sh        # ~35 min, slow-rung frontier
+    bash scripts/encode_rd/merge_and_analyze.sh     # merge tiers + every reduction
+
+Progress streams continuously to `$OUT/prog_<tier>.tsv` (one flushed line per
+timed encode) and the clocks are checkpointed to `prog_<tier>.ckpt.json` after
+every rep, so an interrupted multi-hour tier is not a total loss.
+
+## Results — 64 px tier (9,360 cells, 46,800 encodes, 1,978 s, 0 failed)
+
+Every cell kept all 5 reps; 0 samples dropped for foreign CPU; **0 samples ever
+waited** for the free-core gate. (The run summary's "869 s waiting" is the cost
+of the `ps -Ao pid,%cpu,comm -r` poll taken before every sample — 18.6 ms x
+46,800 — not contention. It sits outside the timed region so it cannot
+contaminate a measurement, but it inflates sweep wall cost by ~44% at 64 px,
+where the poll costs about what the encode does.)
+
+Timing spread at 64 px: **median 5.36 %, p90 12.67 %, max 226 %** — far worse
+than the 1.2-3.7 % the validation grid saw at larger sizes, because jitter is
+roughly constant in milliseconds and these encodes are 1-5 ms. **Treat any 64 px
+difference under ~13 % as unmeasurable.**
+
+### Ranking at matched wall clock, 64 px
+
+Four-way time overlap 5.3-12.7 ms. Ratio of bytes to the per-point best arm,
+geometric mean over the COMMON support (the (image, quality) points where every
+arm reaches the budget); 1.000 = on the frontier everywhere.
+
+    line-art  5.3 ms  n=24  aom 1.026  svtc 1.070  svtrs 1.190  zenrav1e 1.423
+    line-art 12.7 ms  n=25  aom 1.050  svtc 1.213  svtrs 1.291  zenrav1e 1.409
+    photo     5.3 ms  n=30  svtc 1.038  aom 1.087  svtrs 1.135  zenrav1e 1.229
+    photo    12.7 ms  n=51  svtc 1.008  aom 1.045  svtrs 1.086  zenrav1e 1.261
+    screen    5.3 ms  n=22  svtc 1.058  aom 1.078  svtrs 1.164  zenrav1e 1.501
+    screen   12.7 ms  n=25  aom 1.006  svtc 1.081  svtrs 1.126  zenrav1e 1.467
+
+**zenrav1e is last in every class at every budget, by 23-50 %** (and 89 % in the
+worst screen row) — an order of magnitude outside the 13 % noise floor. svtrs
+(pure-Rust SVT) beats it by a wide margin everywhere. aom and svtc trade first
+place and their gap is often inside the noise floor.
+
+Read this with the overhead table above: at 64 px roughly half to nine tenths of
+the budget is process spawn, so what the ranking really says is "given ~2-9 ms
+of actual encoding, who spends it best".
+
+### The 4:2:0 floor at 64 px is the dominant cost for some content
+
+ssim2 of the unencoded source through the harness colour pair (ceiling for the
+product, and why the analysis defaults to `*_floor`):
+
+    codec_wiki   26.9      ddcd24d9 (photo)  27.5      7e499613 (photo)  52.5
+    gui          54.9      terminal          57.0      graph (line-art)  71.2
+    Boxplot      74.6      newplot           84.9      1e2f9d41 (photo)  89.4
+    4cd6910a     90.1      en.wikipedia.org  91.8
+
+On the worst two, **4:2:0 chroma alone costs more quality than any encoder
+choice does**. Nothing in this sweep tests 4:4:4 — every arm is pinned to 4:2:0 —
+so this is a measurement, not a recommendation, but it is the strongest
+follow-up the grid points at.
+
+### BD-rate at matched wall clock, 64 px
+
+Integral over the quality range, not a single slice. Negative = A needs fewer
+bytes at equal quality AND equal measured encode time. Median over images.
+
+    A vs B            budget   line-art        photo         screen
+    aom vs zenrav1e    5.3 ms  -20.67 (n=3)  -11.58 (n=4)  -21.46 (n=4)
+    aom vs zenrav1e    9.5 ms  -39.25 (n=3)  -21.23 (n=5)  -24.72 (n=4)
+    aom vs svtrs       5.3 ms  -12.07 (n=3)   -6.24 (n=5)   -7.69 (n=4)
+    aom vs svtrs       9.5 ms  -20.54 (n=3)   -3.39 (n=5)   -9.24 (n=4)
+    aom vs svtc        5.3 ms   -5.07 (n=3)   +2.43 (n=5)   +3.06 (n=4)
+    aom vs svtc        9.5 ms   -9.55 (n=3)   +6.82 (n=4)   -6.15 (n=4)
+
+The ordering is stable and large where it matters: **zenrav1e needs 12-39 % more
+bytes than aom for the same quality at the same spend**, and svtrs sits between
+them. aom vs svtc is the only pair that changes sign with content — svtc wins on
+photo by 2-7 %, aom wins on line-art by 5-10 %.
+
+## Results — 1024 px tier (2,160 cells, 0 failed, all 5 reps kept)
+
+4 images: 4cd6910a + ddcd24d9 (photo), codec_wiki (screen), graph (line-art, its
+source caps at 796 px so it is tagged 796). n=2 photo / 1 screen / 1 line-art —
+the cut recorded above.
+
+**This is the tier the decision rests on, and the instrument is at its best
+here:**
+
+    timing spread   median 1.96 %, p90 5.34 %      (64 px: 5.36 % / 12.67 %)
+    overhead share  0.2-1.9 % on the slow rungs    (64 px: 46-90 %)
+                    12-36 % only on the fastest rungs
+    4-arm overlap   79.8-704.8 ms @1024, 41.1-412.8 ms @796 — a 9x window
+
+### Reach is itself a result
+
+Quality-grid points (of 35) each arm can reach at each budget, median over
+images. An arm missing from a budget is not losing — it *cannot spend that long,
+or go that fast*:
+
+    @1024        79.8ms  164.9ms  341.0ms  704.8ms
+      svtc           35       35       35       33
+      svtrs          35       35       35       27
+      aom            29       28       28       23
+      zenrav1e        6       35       34       15
+
+**zenrav1e is the only arm that cannot populate either end.** Its ladder bottoms
+out near 80 ms and its useful top is ~700 ms; svtc spans 8 ms to 2.1 s.
+
+### Ranking at matched wall clock, 1024 px
+
+Bytes relative to the per-point best arm, geometric mean over common support:
+
+    line-art @796   41.1 ms  n=29  svtc 1.000  aom 1.167  svtrs 1.327  [zenrav1e n/r]
+    line-art @796   88.7 ms  n=29  svtc 1.000  aom 1.133  svtrs 1.244  zenrav1e 2.342
+    photo    @1024 164.9 ms  n=58  svtc 1.005  aom 1.102  svtrs 1.139  zenrav1e 1.460
+    photo    @1024 341.0 ms  n=61  svtc 1.005  aom 1.073  svtrs 1.097  zenrav1e 1.282
+    photo    @1024 704.8 ms  n=23  svtc 1.018  aom 1.041  svtrs 1.081  zenrav1e 1.252
+    screen   @1024  79.8 ms   n=6  svtc 1.000  aom 1.087  svtrs 1.161  zenrav1e 2.913
+    screen   @1024 341.0 ms  n=17  svtc 1.001  aom 1.065  svtrs 1.117  zenrav1e 1.457
+
+**svtc is on the frontier at essentially every point (1.000-1.018) in every
+class at every budget.** Order is svtc < aom < svtrs < zenrav1e, and it does not
+change with content or quality band at this size.
+
+### BD-rate at matched wall clock, 1024 px
+
+    A vs B             budget    line-art@796   photo@1024   screen@1024
+    aom vs svtc         ~80 ms      +16.47        +15.60        +9.71
+    aom vs svtc        ~340 ms      +11.09         +6.71        +7.44
+    aom vs svtc        ~705 ms       +5.76         +6.65        +5.50
+    svtc vs svtrs       ~80 ms      -23.95        -13.22       -17.42
+    svtc vs svtrs      ~705 ms       -9.42         -6.32       -11.30
+    aom vs svtrs        ~80 ms      -12.17         -5.12       -10.72
+    aom vs svtrs       ~705 ms       -8.03         -0.74        -2.74
+    svtc vs zenrav1e    ~80 ms      -52.72        -37.04       -55.69
+    svtc vs zenrav1e   ~340 ms      -37.85        -11.28       -26.22
+    aom vs zenrav1e    ~340 ms      -34.32         -5.34       -26.59
+
+**The sign of aom-vs-svtc flips between sizes.** At 64 px aom beat svtc on photo
+by 2-7 %; at 1024 px svtc beats aom on photo by 6-16 %. A single-size benchmark
+would have got this backwards.
+
+## Results — the size model, 64 to 4096 px (600 cells)
+
+2 full-page web screenshots (the only local sources over 2940 px) at five sizes,
+rungs {9,8,6}, 4 rates, 5 reps. Reduced rate/rung density on purpose: this grid
+exists for the size model, so what it needs is pixel SPAN, not RD resolution.
+
+CAVEAT: prep caps the LONG edge and these sources are 1313x6097 / 1551x4354, so
+the small rows are extreme slivers (10x64, 22x64 at the 64 tier; 42x256, 90x256
+at 256). The 1024/2048/4096 rows (168x1024 to 1458x4096) are reasonable shapes.
+
+### ms/MP is not remotely constant — up to a 290x swing for one arm
+
+    arm/rung        64px   256px  1024px  2048px  4096px   swing
+    svtc     p9     2336     158      19      11       8    290x
+    svtc     p6     2577     310      70      80      64     40x
+    aom      cpu6   3288     464     194     214     141     23x
+    svtrs    p6     2750     856     420     393     340      8x
+    zenrav1e s6     4608    1791    1315    1009     816      6x
+
+**Any single ms/MP figure is wrong at every size but one.** This is the whole
+reason the discipline demands the intercept.
+
+### t = alpha + beta*MP, fitted per image across all five sizes
+
+r2 0.991-0.999, zero negative alphas, exponent 0.35-0.82 — every arm strongly
+sub-linear, so alpha here absorbs small-size inefficiency and C3's local alpha is
+the usable fixed-cost estimate.
+
+    arm/rung      alpha_ms   beta_ms/MP   exponent   local_alpha_ms
+    svtc     p9       4.81         10.5      0.352        3.25
+    svtc     p6      15.32         94.6      0.606        3.39
+    aom      cpu6    41.05        188.2      0.672        4.36
+    svtrs    p6      47.96        443.0      0.771        3.12
+    zenrav1e s6     211.90       1167.2      0.821        5.25
+
+**beta is the speed story.** At rung 6 the per-megapixel cost is svtc 94.6, aom
+188.2 (2.0x), svtrs 443.0 (**4.7x**), zenrav1e 1167.2 (**12.3x**). The
+svtrs/svtc slope ratio of 4.7x independently reproduces zenav1-svt's own
+3.5-4.9x figure, on real content and through a different harness.
+
+**svtrs's local alpha is the LOWEST of the four** (3.12 ms) despite paying a PNG
+decode inside its timed region that the y4m arms do not. So the process-wall
+clock is not quietly taxing that arm — its cost is all slope, which is the
+honest direction for the comparison.
+
+### The byte axis, and why its straight-line intercept is a trap
+
+At fixed quantizer, bytes are sub-linear too (exponent 0.733-0.779). A single
+line over three decades of pixels cannot fit, so least squares dumps the
+curvature into the intercept: the naive fit reports alpha = 3.7-5.8 kB, which is
+nonsense for an AV1 still and is nearly identical across all four arms — the tell
+that it is a curve-shape artifact, not an encoder property. Honest numbers:
+
+    arm/rung        local_alpha_B   min_payload_B
+    svtc     p6           147.6            68
+    svtrs    p6           147.6            68
+    aom      cpu6         158.7            67
+    zenrav1e s6           171.9            77
+
+The minimum observed payload is assumption-free: a whole still bitstream, headers
+included, fits in 62-79 bytes, so the AV1 fixed part cannot exceed that.
+
+**Which makes the shipped-file arithmetic surprising: the AV1 bitstream's own
+fixed cost is under ~70 bytes, while zenavif's ISOBMFF container is a flat 242.
+For a thumbnail the container costs roughly 3.5x what the codec's headers do.**
+
+## Results — 256 px tier (7,920 cells, 0 failed, all 5 reps kept)
+
+All 12 images. Spread median 2.28 %, p90 6.51 %. Four-way overlap 15.5-117.5 ms.
+This tier has by far the best evidence per cell: common support n=78-165 against
+the 1024 tier's n=5-61.
+
+    line-art  15.5 ms n=78   svtc 1.000  aom 1.174  svtrs 1.362  zenrav1e 2.257
+    line-art  59.8 ms n=90   svtc 1.002  aom 1.101  svtrs 1.172  zenrav1e 1.541
+    photo     15.5 ms n=105  svtc 1.004  aom 1.091  svtrs 1.130  zenrav1e 1.344
+    photo    117.5 ms n=130  svtc 1.010  aom 1.024  svtrs 1.048  zenrav1e 1.148
+    screen    15.5 ms n=106  svtc 1.009  aom 1.056  svtrs 1.156  zenrav1e 1.613
+    screen   117.5 ms n=89   aom 1.020  svtc 1.020  svtrs 1.122  zenrav1e 1.287
+
+BD-rate at matched time (median over images):
+
+    A vs B             budget    line-art     photo     screen
+    aom vs svtc        30.4 ms    +12.82      +4.19      +5.71
+    aom vs svtc       117.5 ms     +6.85      +3.12      +1.08
+    aom vs svtrs       30.4 ms    -10.43      -3.23      -4.30
+    aom vs zenrav1e    30.4 ms    -38.74     -11.66     -19.19
+    svtc vs svtrs      30.4 ms    -16.33      -7.85      -8.67
+    svtc vs zenrav1e   30.4 ms    -40.24        —          —
+
+**This CORRECTS the tentative reading from the 64 px tier**, where aom took
+line-art and the rule looked content-conditional below 1024. It is not: at 256
+svtc leads line-art by the widest margin of any class. The content-conditional
+behaviour is confined to 64 px — which is also the one tier where the instrument
+is weakest.
+
+### Cross-metric check: the conclusion is not an ssim2 artifact
+
+Re-running the whole 256 reduction on `zensim_floor` instead of `ssim2_floor`
+gives the same ordering and near-identical magnitudes:
+
+    line-art  ~28 ms   svtc 1.000  aom 1.164  svtrs 1.328  zenrav1e 1.823
+    photo     ~28 ms   svtc 1.009  aom 1.051  svtrs 1.118  zenrav1e 1.260
+    screen    ~28 ms   svtc 1.014  aom 1.052  svtrs 1.157  zenrav1e 1.487
+
+Two independent perceptual metrics, same answer.
+
+---
+
+# THE DECISION: at matched encode time, which encoder should zenavif use?
+
+## Short answer
+
+**Nothing measured here beats SVT-AV1. zenavif's current default, zenrav1e, is
+last of the four at every size, every content class and every quality band
+tested — by 25-50 % in bytes at matched wall clock, and by 12-21x in
+per-megapixel speed. The pure-Rust SVT port (zenav1-svt) is the strongest
+pure-Rust option measured and beats zenrav1e by 20-40 % BD-rate at matched
+time.**
+
+Two facts make that a real recommendation rather than a benchmark curiosity:
+
+1. **zenrav1e's ladder cannot reach the fast end at all.** At 1024 px it bottoms
+   out near 80 ms while svtc reaches 8 ms — a 10x floor gap. For a web pipeline
+   the fast end is where the traffic is, and zenrav1e simply does not have a
+   setting there.
+2. **The gap is not a tuning artifact of one rung.** The ladder was eliminated,
+   not matched: each arm's whole speed ladder was swept, Pareto-filtered, and
+   compared only where the measured time ranges overlap.
+
+## The decision rule, by content and quality band
+
+At 1024 px the ordering (svtc < aom < svtrs < zenrav1e) **does not change** with
+content class or quality band. So the rule is not content-conditional at that
+size:
+
+| pixel budget | quality band | use | second choice |
+|---|---|---|---|
+| 256 px and up | any (q20-88), any content | SVT-AV1 | libaom |
+| 64 px, photo / screen | any | SVT-AV1 ~= libaom (inside noise) | either |
+| 64 px, line-art / plots | any | libaom | SVT-AV1 |
+
+**There is essentially no content or quality conditioning to exploit.** At 256
+and 1024 px, svtc is first in every class at every budget — including line-art,
+where at 256 px it leads by the widest margin of any class (1.000 vs aom 1.174).
+The one content-conditional row is 64 px line-art, and 64 px is the tier where
+46-90 % of the clock is process spawn and the spread is p90 12.7 %, i.e. where
+the instrument is weakest and a 1.03-vs-1.05 difference is not measurable.
+
+An earlier reading of the 64 px tier alone suggested the rule WAS
+content-conditional below 1024. The 256 tier, with 20x the common support,
+refuted it. That is the argument for sweeping sizes rather than picking one.
+
+## What this does NOT license
+
+- **It is not a measurement of zenavif's encoder.** The `zenrav1e` arm is the
+  rav1e CLI. zenavif encodes through zenravif's `SpeedTweaks`, which pin
+  `complex_prediction_modes` and `encode_bottomup` off, cap
+  `non_square_partition_max` at 8 for speed>=4, collapse `partition_range` to
+  (16,16) at speed>=9, gate CDEF/LRF on the quantizer, and use their own
+  quality->quantizer curve. Percent-level differences are expected; a 25-50 %
+  gap is not plausibly closed by them, but that is an inference, not a
+  measurement. **Wiring plane 2 (PNG -> AVIF through zenavif's own path) is the
+  single highest-value next step.**
+- **It says nothing about switching cost.** svtc is a C dependency; zenav1-svt
+  is the pure-Rust route and is 4.7-6.0x the C reference's per-megapixel cost,
+  so "use SVT" means choosing between a C dependency and a 5-6x slope penalty.
+- **The 64 px ranking is weak evidence.** 46-90 % of the wall clock there is
+  process spawn and the timing spread is p90 12.7 %, so differences under ~13 %
+  at that size are unmeasurable. The 1024 tier is where the numbers are clean
+  (spread p90 5.3 %, overhead 0.2-1.9 %).
+- **n is small.** 1024 px is n=2 photo / 1 screen / 1 line-art. The consistency
+  of the ordering across 4 sizes, 3 content classes, 2 metrics and ~9 budgets is
+  what carries it, not the per-cell sample size.
+
+## The other actionable finding
+
+The 4:2:0 floor, not the encoder, is the binding constraint on small screen
+content: `codec_wiki` at 64 px tops out at ssim2 26.9 before any encoder runs,
+and at 1024 px it is still only 78.5. Nothing here tests 4:4:4 — every arm is
+pinned to 4:2:0 — so this is a measurement pointing at a follow-up, not a
+recommendation. But if zenavif ships 4:2:0 for screenshots it is giving away
+more than any encoder choice can recover.
