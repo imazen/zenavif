@@ -417,6 +417,20 @@ mod tests {
     #[cfg(target_arch = "aarch64")]
     #[test]
     fn test_avg_neon_direct_matches_scalar() {
+        // `yuv_convert::tests::every_simd_tier_is_byte_identical` disables
+        // archmage tokens **process-wide**, and libtest runs unit tests
+        // concurrently in ONE process — so without this lock a concurrent
+        // permutation run makes `summon()` return `None` right here and this
+        // test fails with its own "NEON must be available on aarch64" message.
+        // Observed on macos-latest in CI run 31530942816, and it is a race, not
+        // a platform fact: the same job passed on the previous run.
+        //
+        // `lock_token_testing()` is archmage's documented answer for exactly
+        // this ("when you need to observe stable `summon()` results alongside
+        // parallel permutation tests" — archmage 0.9.15 src/testing.rs:53-57);
+        // it takes the same process-wide mutex `for_each_token_permutation`
+        // holds, so the two serialize instead of racing.
+        let _tokens = archmage::testing::lock_token_testing();
         let token = NeonToken::summon().expect("NEON must be available on aarch64");
         let w = 48; // 3x16 SIMD iterations + no tail, plus a 7-px-tail case below
         let h = 3;

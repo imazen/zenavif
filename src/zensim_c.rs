@@ -707,20 +707,41 @@ mod tests {
     /// reuse, independence from the scratch instance, streaming-vs-wrapper, and
     /// determinism of the wrapper.
     ///
-    /// **Known red on `aarch64-unknown-linux-gnu` and
-    /// `aarch64-pc-windows-msvc`, upstream as imazen/zensim#60.** Measured (run
-    /// 31527165388): the two *streaming* pairings agree exactly on both, so the
-    /// streaming entry reproduces itself; the *wrapper* does not, at up to
-    /// 1.7e-3 relative, and on arm-linux its two calls disagree with each other
-    /// (worst at f143 then f864) while on arm-windows the second call agreed —
-    /// i.e. run-to-run nondeterminism, which is why the earlier 2-way form of
-    /// this test found only `f0` at 2.7e-5 on arm-linux (run 31520483088) and
-    /// passed on arm-windows. `x86_64` linux/darwin/windows and darwin aarch64
-    /// pass; darwin aarch64 reproduces nothing in 60/60 runs, at four
-    /// geometries, or with `parallel` either way. The tolerance here is
-    /// deliberately NOT widened to hide it — see docs/TEST_COVERAGE.md §7.
+    /// # Why the token lock, and why this looked like an upstream bug
+    ///
+    /// This test was red on `ubuntu-24.04-arm`, then on `windows-11-arm`, then
+    /// on `macos-latest`, with a *different* worst feature and magnitude each
+    /// run (f0 @ 2.7e-5, f143 @ 5.1e-4, f417 @ 4.6e-5, f864 @ 1.7e-3) — and
+    /// never once locally, in 60/60 runs, at four geometries, or with `parallel`
+    /// either way. It is not zensim's nondeterminism. It is this crate's own
+    /// test suite:
+    ///
+    /// `yuv_convert::tests::every_simd_tier_is_byte_identical` disables archmage
+    /// tokens **process-wide**, libtest runs unit tests concurrently in ONE
+    /// process, and **zensim dispatches on archmage too** (`zensim/Cargo.toml`
+    /// depends on `archmage` + `magetypes`). zensim's kernels make no
+    /// cross-tier bit-identity promise — unlike this crate's YUV kernels, which
+    /// that very test exists to pin — so a permutation run overlapping this test
+    /// silently moves zensim's SIMD tier between two of the five calls below,
+    /// and the pairing that straddles the change "diverges".
+    ///
+    /// Proven, not inferred: with `lock_token_testing()` held, disabling
+    /// `NeonToken` process-wide and re-extracting the SAME pair moves f864 from
+    /// `0.020007017572121793` to `0.020032447419402563` (rel 1.271e-3), and
+    /// re-enabling it returns to the base value exactly (0.000e0). Those are the
+    /// same feature and the same base value CI reported. The same mechanism made
+    /// `simd::avg::tests::test_avg_neon_direct_matches_scalar` fail with "NEON
+    /// must be available on aarch64" on macos-latest in run 31530942816.
+    ///
+    /// So the lock below is the fix, not a workaround: it takes the same mutex
+    /// `for_each_token_permutation` holds, which is archmage's documented way to
+    /// "observe stable `summon()` results alongside parallel permutation tests"
+    /// (archmage 0.9.15 src/testing.rs:53-57). Any future test in this crate
+    /// that compares third-party SIMD numerics across calls needs it too.
+    /// imazen/zensim#60 was filed against zensim for this and is retracted.
     #[test]
     fn streaming_and_direct_folded944_agree() {
+        let _tokens = archmage::testing::lock_token_testing();
         let (w, h) = (96usize, 96usize);
         let s = source(w, h);
         let d = damaged(&s, w, h);
@@ -798,7 +819,10 @@ mod tests {
             "zensim's folded-944 extraction is not reproducing itself. All of \
              these calls are the SAME zensim function with the SAME arguments, \
              differing only in the V2Scratch instance, and zensim documents the \
-             output as bitwise equal:{report}"
+             output as bitwise equal. If this fires, check FIRST that no test in \
+             this crate is disabling archmage tokens process-wide without \
+             `lock_token_testing()` — that, not zensim, is what produced every \
+             previous failure here (see this test's docs):{report}"
         );
     }
 

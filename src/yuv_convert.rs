@@ -2916,6 +2916,26 @@ mod tests {
     /// `-Ctarget-cpu`), which is exactly the condition under which this test
     /// would otherwise run the same tier N times and pass vacuously.
     ///
+    /// # !! This test disables SIMD tokens PROCESS-WIDE !!
+    ///
+    /// `for_each_token_permutation` flips global disable flags, and libtest runs
+    /// unit tests concurrently in ONE process. **So any other test in this crate
+    /// that observes tier state must hold
+    /// `archmage::testing::lock_token_testing()`** — the same mutex this call
+    /// takes — or it will see tokens vanish mid-test. Two kinds qualify:
+    ///
+    /// 1. tests asserting a token is available
+    ///    (`simd::avg::tests::test_avg_neon_direct_matches_scalar`);
+    /// 2. tests comparing **third-party** SIMD numerics across calls
+    ///    (`zensim_c::tests::streaming_and_direct_folded944_agree` — zensim
+    ///    dispatches on archmage too, and promises no cross-tier bit identity).
+    ///
+    /// This crate's *own* kernels are exempt, because byte identity across tiers
+    /// is precisely what this test pins. Both cases above were real CI failures
+    /// (runs 31520483088 / 31527165388 / 31530942816) that read as platform bugs
+    /// for a while; measured locally, 6 of 40 iterations diverge under
+    /// concurrent permutation churn without the lock and 0 of 40 with it.
+    ///
     /// # Why the arch gate
     ///
     /// Only `x86_64` and `aarch64` have more than one tier to compare.
@@ -2993,6 +3013,12 @@ mod tests {
     #[test]
     fn single_tier_targets_dispatch_to_the_scalar_kernels() {
         use archmage::SimdToken as _;
+
+        // This test observes token state, so it takes the same lock the
+        // permutation runs use — see the note on
+        // `every_simd_tier_is_byte_identical`. Nothing on a single-tier target
+        // disables tokens today, but the rule is the rule.
+        let _tokens = archmage::testing::lock_token_testing();
 
         // Every tier named in the module's `incant!` lists, other than
         // `scalar`, must be unreachable — these are archmage's `*_stubs`
