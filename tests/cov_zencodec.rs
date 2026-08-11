@@ -428,3 +428,265 @@ fn decode_is_byte_identical_under_every_threading_policy() {
     let legacy = decode_under(zencodec::ThreadingPolicy::Balanced);
     assert_eq!(legacy, parallel, "a legacy policy must not change pixels");
 }
+
+// ── Row-sink decode (src/decoder_managed/sink.rs) ───────────────────────────
+//
+// `decode_to_sink` is the streaming counterpart of the buffered decode: it
+// converts strip by strip so nothing holds a full RGB image. It measured
+// 114/416 regions (27.4%) in the broadest feature combo (cargo-llvm-cov
+// 0.8.7, 2026-08-11; docs/TEST_COVERAGE.md) — every test took the buffered
+// path. Two code paths for one operation, so the invariant to pin is that they
+// produce the SAME pixels (CLAUDE.md: "if two code paths for the same
+// operation produce different output, that is a bug in one of them").
+
+/// A sink that reassembles the strips into one contiguous image, checking the
+/// protocol as it goes (one `begin`, sequential strips, one `finish`).
+struct CollectSink {
+    desc: Option<PixelDescriptor>,
+    total: (u32, u32),
+    /// Reassembled tightly-packed image.
+    image: Vec<u8>,
+    /// Buffer handed to the codec for the current strip.
+    strip: Vec<u8>,
+    /// Geometry of the strip the codec currently owns.
+    pending: Option<(u32, u32, u32, usize)>,
+    strips: usize,
+    began: bool,
+    finished: bool,
+}
+
+impl CollectSink {
+    fn new() -> Self {
+        Self {
+            desc: None,
+            total: (0, 0),
+            image: Vec::new(),
+            strip: Vec::new(),
+            pending: None,
+            strips: 0,
+            began: false,
+            finished: false,
+        }
+    }
+
+    /// Copy the strip the codec just filled into the reassembled image.
+    fn flush_pending(&mut self) {
+        if let Some((y, h, w, stride)) = self.pending.take() {
+            let bpp = self.desc.expect("descriptor from begin").bytes_per_pixel();
+            let row_bytes = w as usize * bpp;
+            for r in 0..h as usize {
+                let src = &self.strip[r * stride..][..row_bytes];
+                let off = (y as usize + r) * row_bytes;
+                self.image[off..off + row_bytes].copy_from_slice(src);
+            }
+        }
+    }
+
+    fn bpp(&self) -> usize {
+        self.desc.expect("descriptor").bytes_per_pixel()
+    }
+}
+
+impl zencodec::decode::DecodeRowSink for CollectSink {
+    fn begin(
+        &mut self,
+        width: u32,
+        height: u32,
+        descriptor: PixelDescriptor,
+    ) -> Result<(), zencodec::decode::SinkError> {
+        assert!(!self.began, "begin called twice");
+        self.began = true;
+        self.total = (width, height);
+        self.desc = Some(descriptor);
+        self.image = vec![0u8; width as usize * height as usize * descriptor.bytes_per_pixel()];
+        Ok(())
+    }
+
+    fn provide_next_buffer(
+        &mut self,
+        y: u32,
+        height: u32,
+        width: u32,
+        descriptor: PixelDescriptor,
+    ) -> Result<zenpixels::PixelSliceMut<'_>, zencodec::decode::SinkError> {
+        assert!(self.began, "provide_next_buffer before begin");
+        self.flush_pending();
+        assert_eq!(
+            width, self.total.0,
+            "strip width must match the width announced to begin()"
+        );
+        assert!(
+            y + height <= self.total.1,
+            "strip {y}..{} runs past the {} announced rows",
+            y + height,
+            self.total.1
+        );
+        let stride = width as usize * descriptor.bytes_per_pixel();
+        self.strip.clear();
+        self.strip.resize(height as usize * stride, 0);
+        self.pending = Some((y, height, width, stride));
+        self.strips += 1;
+        Ok(
+            zenpixels::PixelSliceMut::new(&mut self.strip, width, height, stride, descriptor)
+                .expect("strip buffer sized from the codec's own geometry"),
+        )
+    }
+
+    fn finish(&mut self) -> Result<(), zencodec::decode::SinkError> {
+        assert!(!self.finished, "finish called twice");
+        self.flush_pending();
+        self.finished = true;
+        Ok(())
+    }
+}
+
+/// Tightly-packed copy of a decoded buffer's bytes.
+fn packed_bytes(out: &zencodec::decode::DecodeOutput) -> (Vec<u8>, usize, usize, usize) {
+    let p = out.pixels();
+    let (w, h, stride) = (p.width() as usize, p.rows() as usize, p.stride());
+    let bpp = p.descriptor().bytes_per_pixel();
+    let b = p.as_strided_bytes();
+    let packed = (0..h)
+        .flat_map(|y| b[y * stride..][..w * bpp].to_vec())
+        .collect();
+    (packed, w, h, bpp)
+}
+
+/// Row-sink decode must reassemble to byte-identical pixels vs the buffered
+/// decode on a colour 4:2:0 photo — the case where the sink really does
+/// convert strip-by-strip (8 strips for this 768x512 fixture).
+#[test]
+fn row_sink_decode_is_byte_identical_to_buffered_decode() {
+    const KODIM: &str = "tests/vectors/libavif/kodim03_yuv420_8bpc.avif";
+    let bytes = read(KODIM);
+
+    let buffered = AvifDecoderConfig::new()
+        .job()
+        .decoder(Cow::Borrowed(&bytes), &[])
+        .expect("decoder")
+        .decode()
+        .expect("buffered decode");
+    let (reference, bw, bh, bpp) = packed_bytes(&buffered);
+
+    let mut sink = CollectSink::new();
+    let info = AvifDecoderConfig::new()
+        .job()
+        .push_decoder(Cow::Borrowed(&bytes), &mut sink, &[])
+        .expect("row-sink decode");
+    assert!(sink.began && sink.finished, "sink protocol incomplete");
+    assert_eq!(
+        (info.width as usize, info.height as usize),
+        (bw, bh),
+        "row-sink OutputInfo dims differ from the buffered decode"
+    );
+    assert_eq!(
+        sink.bpp(),
+        bpp,
+        "row-sink pixel format differs from the buffered decode"
+    );
+    assert_eq!(
+        sink.image.len(),
+        reference.len(),
+        "reassembled size differs"
+    );
+    if sink.image != reference {
+        let at = sink
+            .image
+            .iter()
+            .zip(reference.iter())
+            .position(|(a, b)| a != b)
+            .unwrap_or(0);
+        panic!(
+            "row-sink decode differs from buffered decode at byte {at} (sink {}, buffered \
+             {}) — the strip path and the whole-image path disagree on pixels",
+            sink.image[at], reference[at]
+        );
+    }
+    assert!(
+        sink.strips > 1,
+        "the 8-bit colour sink path delivered {} strip(s) — it is supposed to convert \
+         strip-wise, so this test would not be measuring the strip path at all",
+        sink.strips
+    );
+}
+
+/// Monochrome: the row-sink path emits RGB where the buffered and streaming
+/// paths emit native Gray. That is a real divergence (imazen/zenavif#38), NOT
+/// something this test blesses — `push_decoder_inner` picks its descriptor
+/// from bit depth + alpha alone and never consults `preferred` or calls
+/// `set_native_gray`, so a caller who asks for Gray8 through `push_decoder`
+/// gets 3x the bytes in a different layout while `DecodeCapabilities`
+/// advertises `native_gray`.
+///
+/// What this pins is that the gap stays a FORMAT gap and never silently
+/// becomes a wrong-pixel gap: every emitted triple must be neutral and equal
+/// to the gray sample the buffered path produces. When #38 is fixed the
+/// descriptors converge and the byte-identity branch below takes over
+/// automatically — no edit needed here.
+///
+/// Measured 2026-08-11 (probe recorded in docs/TEST_COVERAGE.md): for
+/// mono_gradient_8b_full.avif, buffered = Gray8 and streaming = Gray8 at
+/// `preferred = []` and at `preferred = [Gray8]`, while the row sink returns
+/// Rgb8 in both cases.
+#[test]
+fn row_sink_mono_content_matches_the_gray_path_despite_the_format_gap() {
+    for path in [
+        "tests/vectors/zenavif/mono_gradient_8b_full.avif",
+        "tests/vectors/zenavif/mono_gradient_8b_limited.avif",
+        "tests/vectors/zenavif/mono_gradient_10b_full.avif",
+    ] {
+        let bytes = read(path);
+        // Ask for gray explicitly: the buffered path honours this, and it is
+        // exactly the request the sink path currently drops.
+        let pref = [PixelDescriptor::GRAY8_SRGB, PixelDescriptor::GRAY16_SRGB];
+        let buffered = AvifDecoderConfig::new()
+            .job()
+            .decoder(Cow::Borrowed(&bytes), &pref)
+            .expect("decoder")
+            .decode()
+            .unwrap_or_else(|e| panic!("buffered decode of {path}: {e:?}"));
+        let (gray, bw, bh, g_bpp) = packed_bytes(&buffered);
+
+        let mut sink = CollectSink::new();
+        AvifDecoderConfig::new()
+            .job()
+            .push_decoder(Cow::Borrowed(&bytes), &mut sink, &pref)
+            .unwrap_or_else(|e| panic!("row-sink decode of {path}: {e:?}"));
+        let s_bpp = sink.bpp();
+
+        if s_bpp == g_bpp {
+            assert_eq!(
+                sink.image, gray,
+                "{path}: the formats agree, so the row-sink pixels must be byte-identical"
+            );
+            continue;
+        }
+
+        assert_eq!(
+            s_bpp % g_bpp,
+            0,
+            "{path}: sink bpp {s_bpp} is not a whole number of {g_bpp}-byte samples"
+        );
+        assert!(
+            s_bpp / g_bpp >= 3,
+            "{path}: unexpected sink format {:?} against buffered {:?}",
+            sink.desc.expect("descriptor").pixel_format(),
+            buffered.pixels().descriptor().pixel_format()
+        );
+        for y in 0..bh {
+            for x in 0..bw {
+                let g = &gray[(y * bw + x) * g_bpp..][..g_bpp];
+                let px = &sink.image[(y * bw + x) * s_bpp..][..s_bpp];
+                for c in 0..3 {
+                    let ch = &px[c * g_bpp..][..g_bpp];
+                    assert_eq!(
+                        ch, g,
+                        "{path}: row-sink channel {c} at ({x},{y}) is {ch:?} but the gray \
+                         path says {g:?} — the mono format gap (zenavif#38) has become a \
+                         wrong-pixel bug"
+                    );
+                }
+            }
+        }
+    }
+}

@@ -56,7 +56,18 @@ for c in "${COMBOS[@]}"; do
   LOG="$OUTDIR/$name.log"; JSON="$OUTDIR/$name.json"
   start=$(date +%s)
   # --release: the encode combos are unusable at opt-level 0 (a full rav1e
-  # encode per test). --no-clean keeps the instrumented deps across combos.
+  # encode per test).
+  #
+  # NOTE: no `--no-clean`. It looks like a free speedup (keep the instrumented
+  # deps across combos) and it silently DESTROYS per-combo isolation: the
+  # previous combos' binaries and .profraw files stay in the coverage target
+  # dir, cargo-llvm-cov globs them all, and every combo's report then merges
+  # every other combo's execution data. Measured 2026-08-11: with --no-clean
+  # the `default` report listed src/encoder.rs and src/two_pass_zensim.rs (66
+  # files, 22.8k lines) — code that combo does not even compile — and all
+  # eleven combos came out within 0.1% of each other. A blended number wearing
+  # a per-combo label is worse than no number. The price is a rebuild per
+  # combo; sccache absorbs most of it.
   # fail-fast off (nextest `coverage` profile): one broken test must not hide
   # the rest of the map.
   # --ignore-run-fail: without it cargo-llvm-cov writes NO report when any test
@@ -65,7 +76,7 @@ for c in "${COMBOS[@]}"; do
   # is still reported per combo from the nextest summary below.
   # `--profile coverage` carries fail-fast = false (.config/nextest.toml) —
   # cargo-llvm-cov rejects the --no-fail-fast flag next to --ignore-run-fail.
-  nice -n 19 cargo llvm-cov nextest --release --workspace --no-clean \
+  nice -n 19 cargo llvm-cov nextest --release --workspace \
       --ignore-run-fail --profile coverage \
       "${fargs[@]}" -j "$JOBS" --json --output-path "$JSON" >"$LOG" 2>&1
   rc=$?
