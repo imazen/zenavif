@@ -610,83 +610,112 @@ fn row_sink_decode_is_byte_identical_to_buffered_decode() {
     );
 }
 
-/// Monochrome: the row-sink path emits RGB where the buffered and streaming
-/// paths emit native Gray. That is a real divergence (imazen/zenavif#35), NOT
-/// something this test blesses — `push_decoder_inner` picks its descriptor
-/// from bit depth + alpha alone and never consults `preferred` or calls
-/// `set_native_gray`, so a caller who asks for Gray8 through `push_decoder`
-/// gets 3x the bytes in a different layout while `DecodeCapabilities`
-/// advertises `native_gray`.
+/// Monochrome: all three decode entry points of the same adapter — buffered
+/// `decode()`, `streaming_decoder()` and the `push_decoder()` row sink — must
+/// emit the SAME pixel format and the SAME bytes for the same input and the
+/// same `preferred`.
 ///
-/// What this pins is that the gap stays a FORMAT gap and never silently
-/// becomes a wrong-pixel gap: every emitted triple must be neutral and equal
-/// to the gray sample the buffered path produces. When #38 is fixed the
-/// descriptors converge and the byte-identity branch below takes over
-/// automatically — no edit needed here.
+/// This was imazen/zenavif#35: the row sink derived its descriptor from bit
+/// depth + alpha alone, never consulted `preferred` and never called
+/// `set_native_gray`, so a caller asking for Gray8 got Rgb8 — 3x the bytes in
+/// a layout no other path emitted, while `DecodeCapabilities` advertises
+/// `native_gray`. It was a format gap rather than a wrong-pixel gap (the
+/// triples were neutral), so this test used to pin content parity and flip
+/// itself to byte identity once the descriptors converged. They have
+/// converged, so the weaker property is gone: this now asserts strict format
+/// equality plus byte identity, three ways, and cannot pass on neutral-RGB
+/// output any more.
 ///
-/// Measured 2026-08-11 (probe recorded in docs/TEST_COVERAGE.md): for
-/// mono_gradient_8b_full.avif, buffered = Gray8 and streaming = Gray8 at
-/// `preferred = []` and at `preferred = [Gray8]`, while the row sink returns
-/// Rgb8 in both cases.
+/// MEASURED after the fix (6 mono fixtures x 4 `preferred` lists): the row
+/// sink matches streaming in 24/24 cells and buffered in 22/24. The 2 misses
+/// are a different, pre-existing bug — on the 10-bit fixture at
+/// `preferred = [Gray8]` or `[Rgb8]`, buffered downconverts to 8-bit per
+/// `negotiate_format` while BOTH streaming and the row sink stay 16-bit — so
+/// the `preferred` list here deliberately admits either depth
+/// (`[Gray8, Gray16]`), which all three paths agree on.
 #[test]
-fn row_sink_mono_content_matches_the_gray_path_despite_the_format_gap() {
+fn row_sink_mono_matches_buffered_and_streaming_byte_for_byte() {
     for path in [
         "tests/vectors/zenavif/mono_gradient_8b_full.avif",
         "tests/vectors/zenavif/mono_gradient_8b_limited.avif",
         "tests/vectors/zenavif/mono_gradient_10b_full.avif",
+        // Gray-class ICC: the collapse is allowed, so this must be Gray too.
+        "tests/vectors/zenavif/mono_gradient_8b_grayicc.avif",
+        // RGB-class ICC that cannot describe a Gray layout: all three paths
+        // must agree on suppressing the collapse and staying RGB.
+        "tests/vectors/zenavif/mono_gradient_8b_rgbicc.avif",
     ] {
         let bytes = read(path);
-        // Ask for gray explicitly: the buffered path honours this, and it is
-        // exactly the request the sink path currently drops.
+        // Ask for gray explicitly — exactly the request the sink path dropped.
         let pref = [PixelDescriptor::GRAY8_SRGB, PixelDescriptor::GRAY16_SRGB];
+
         let buffered = AvifDecoderConfig::new()
             .job()
             .decoder(Cow::Borrowed(&bytes), &pref)
             .expect("decoder")
             .decode()
             .unwrap_or_else(|e| panic!("buffered decode of {path}: {e:?}"));
-        let (gray, bw, bh, g_bpp) = packed_bytes(&buffered);
+        let (reference, _bw, _bh, _bpp) = packed_bytes(&buffered);
+        let ref_desc = buffered.pixels().descriptor();
 
         let mut sink = CollectSink::new();
-        AvifDecoderConfig::new()
+        let reported = AvifDecoderConfig::new()
             .job()
             .push_decoder(Cow::Borrowed(&bytes), &mut sink, &pref)
             .unwrap_or_else(|e| panic!("row-sink decode of {path}: {e:?}"));
-        let s_bpp = sink.bpp();
-
-        if s_bpp == g_bpp {
-            assert_eq!(
-                sink.image, gray,
-                "{path}: the formats agree, so the row-sink pixels must be byte-identical"
-            );
-            continue;
-        }
+        let sink_desc = sink.desc.expect("sink descriptor");
 
         assert_eq!(
-            s_bpp % g_bpp,
-            0,
-            "{path}: sink bpp {s_bpp} is not a whole number of {g_bpp}-byte samples"
+            sink_desc.pixel_format(),
+            ref_desc.pixel_format(),
+            "{path}: row-sink format {:?} != buffered {:?} — zenavif#35 has regressed; the \
+             sink is ignoring `preferred` again",
+            sink_desc.pixel_format(),
+            ref_desc.pixel_format()
         );
-        assert!(
-            s_bpp / g_bpp >= 3,
-            "{path}: unexpected sink format {:?} against buffered {:?}",
-            sink.desc.expect("descriptor").pixel_format(),
-            buffered.pixels().descriptor().pixel_format()
+        assert_eq!(
+            sink.image, reference,
+            "{path}: formats agree but the row-sink pixels differ from the buffered pixels"
         );
-        for y in 0..bh {
-            for x in 0..bw {
-                let g = &gray[(y * bw + x) * g_bpp..][..g_bpp];
-                let px = &sink.image[(y * bw + x) * s_bpp..][..s_bpp];
-                for c in 0..3 {
-                    let ch = &px[c * g_bpp..][..g_bpp];
-                    assert_eq!(
-                        ch, g,
-                        "{path}: row-sink channel {c} at ({x},{y}) is {ch:?} but the gray \
-                         path says {g:?} — the mono format gap (zenavif#35) has become a \
-                         wrong-pixel bug"
-                    );
-                }
+
+        // The returned OutputInfo must describe what the sink was actually
+        // handed — the second half of #35 was a re-derived descriptor that
+        // could silently disagree with the pixels.
+        assert_eq!(
+            reported.native_format.pixel_format(),
+            sink_desc.pixel_format(),
+            "{path}: push_decoder reported {:?} but handed the sink {:?}",
+            reported.native_format.pixel_format(),
+            sink_desc.pixel_format()
+        );
+
+        // Third path: streaming must agree with both.
+        let mut stream = AvifDecoderConfig::new()
+            .job()
+            .streaming_decoder(Cow::Borrowed(&bytes), &pref)
+            .unwrap_or_else(|e| panic!("streaming decode of {path}: {e:?}"));
+        let mut streamed: Vec<u8> = Vec::new();
+        let mut stream_desc = None;
+        while let Some((_y, strip)) = stream.next_batch().expect("next_batch") {
+            let strip: PixelSlice<'_> = strip;
+            let d = strip.descriptor();
+            stream_desc = Some(d);
+            let row_bytes = strip.width() as usize * d.bytes_per_pixel();
+            for row in 0..strip.rows() {
+                streamed.extend_from_slice(&strip.row(row)[..row_bytes]);
             }
         }
+        let stream_desc = stream_desc.expect("streaming emitted no strips");
+        assert_eq!(
+            stream_desc.pixel_format(),
+            sink_desc.pixel_format(),
+            "{path}: streaming format {:?} != row-sink {:?}",
+            stream_desc.pixel_format(),
+            sink_desc.pixel_format()
+        );
+        assert_eq!(
+            streamed, sink.image,
+            "{path}: streaming pixels differ from the row-sink pixels"
+        );
     }
 }
