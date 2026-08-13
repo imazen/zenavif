@@ -489,6 +489,12 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
         use zencodec::estimate::{ResourceEstimate, ThreadingInformation};
         let speed = self.inner.speed_value();
         let bpp = image.descriptor().bytes_per_pixel() as u8;
+        // Estimate for the arm THIS config will actually encode on. The model
+        // used to serve one number for every backend, which under-predicted
+        // Av1Backend::SvtRs by 1.34x at 4K — a cap sized from that is the
+        // unsafe direction. Measured arm ratios:
+        // benchmarks/avif_backend_calib_2026-08-13.tsv.
+        let arm = crate::heuristics::EstimateArm::for_config(&self.inner);
         let lti = crate::heuristics::encode_threading_info(image.pixels());
         let ti = if lti.parallel {
             // The AV1 encode saturates at `max_useful_threads` (the tile count,
@@ -502,8 +508,8 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
         let cores = compute.cores();
         let (w, h) = (image.width(), image.height());
         match (
-            crate::heuristics::estimate_encode(w, h, bpp, speed),
-            crate::heuristics::estimate_encode_threaded(w, h, bpp, speed, cores),
+            crate::heuristics::estimate_encode_for(w, h, bpp, speed, arm),
+            crate::heuristics::estimate_encode_threaded_for(w, h, bpp, speed, cores, arm),
         ) {
             (Some(single), Some(threaded)) => {
                 // wall = Amdahl-adjusted; cpu = total work ≈ the calibrated

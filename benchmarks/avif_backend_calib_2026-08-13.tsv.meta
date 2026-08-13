@@ -1,0 +1,58 @@
+# Per-backend AVIF encode peak-RSS calibration (size sweep) — 2026-08-13
+#
+# Purpose: make heuristics::estimate_encode BACKEND- and SUBSAMPLING-aware. The
+# shipped model was calibrated on ONE configuration (zenravif at its default
+# 4:4:4) and carried no notion of either axis, so it mis-sized every other arm:
+# measured at 4K it UNDER-predicted Av1Backend::SvtRs by 1.34x (the unsafe
+# direction — a cap sized from it rejects or OOMs a job that would have fit)
+# while over-predicting zenravif 4:2:0 by 1.48x.
+#
+# Host: macOS 26.5.2, Apple M4 Pro, 24 GiB. zenavif @ 98748a4f + this change.
+# Peak RSS = /usr/bin/time -l "maximum resident set size" (BYTES on macOS),
+# one encode per process, RGB8 input, threads=1.
+#
+# SIZE SWEEP (per the never-extrapolate-memory rule — alpha + beta*px is FIT,
+# not projected from one point): 256x256, 512x512, 1024x1024, 2048x1024,
+# 3840x2176 = 0.066 / 0.262 / 1.049 / 2.097 / 8.356 MP. Every size is a
+# multiple of 64 so Av1Backend::SvtRs can encode all of them. 96 cells:
+# arms x sizes x quality {50,85} x speed {6,10} x 2 reps, 0 failures.
+# Content is a native-scale mosaic of real CLIC2025 photos (no upscaling).
+#
+# ===================== LEAST-SQUARES FITS (worst case per size) =============
+#   arm              fit                      R^2      B/px at 8.36 MP
+#   zenravif 4:4:4   8.88 MiB + 29.3 B/px     0.9977   30.1
+#   zenravif 4:2:0   7.58 MiB + 22.3 B/px     0.9982   23.1
+#   SvtRs    4:2:0   3.58 MiB + 52.7 B/px     1.0000   53.1
+#
+# Per-size measured worst-case peak RSS (MB):
+#   MP      zenravif444   zenravif420   svtrs420
+#   0.066       7.4           6.4          6.6
+#   0.262      13.6          11.1         16.0
+#   1.049      38.1          30.7         56.5
+#   2.097      75.3          57.2        110.3
+#   8.356     240.2         184.0        423.5
+#
+# Findings:
+#   * SvtRs costs ~2.4x zenravif at EQUAL subsampling (52.7 vs 22.3 B/px) and
+#     has the SMALLEST intercept (3.58 MiB) with the LARGEST slope — it is the
+#     cheapest arm at 256x256 and by far the most expensive at 4K. Its peak is
+#     flat across speed, quality and thread count, i.e. it allocates its frame
+#     working set up front rather than scaling with the search. That is the
+#     shape to attack if SvtRs is to meet the C-parity memory goal (it is
+#     currently 1.94x libavif at 4K).
+#   * 4:2:0 is 0.76x of 4:4:4 — a real axis the old model ignored entirely.
+#   * Every arm is strongly linear (R^2 >= 0.9977), so a single alpha + beta*px
+#     per arm is the right model shape; no quadratic term is needed.
+#
+# WHAT SHIPPED: ratios, not absolute re-fits. The shipped constants were
+# calibrated on a different platform AND a different basis (WSL2 x86-64,
+# VmHWM MARGINAL delta) while this sweep measures total peak RSS on macOS
+# arm64. Slope ratios transfer; the absolute intercept does not, so
+# ENCODE_FIXED_OVERHEAD / ENCODE_BPP are untouched and a per-arm multiplier
+# (1.00 / 0.76 / 1.80) is applied on top. Gate: heuristics::tests::
+# estimate_typical_covers_measured_peak_on_every_arm pins TYP >= the measured
+# worst case on all three arms, and ..._arms_ordered_as_measured pins the
+# ordering so a refactor cannot silently collapse the arms back to one number.
+#
+# Columns: backend subsampling w h pixels speed quality threads rep out_bytes
+#          peak_rss_bytes wall_s

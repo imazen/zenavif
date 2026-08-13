@@ -130,6 +130,64 @@ const ENCODE_FIXED_OVERHEAD: u64 = (5.5 * (1 << 20) as f64) as u64;
 /// fixed term, keeps the TYP ≥ the measured worst case + 10 % across 256–2048 px
 /// (the old 40 over-predicted by up to 2.0× at small sizes).
 const ENCODE_BPP: f64 = 37.0;
+
+/// Per-pixel working-set multiplier for the (backend, subsampling) arm,
+/// relative to the zenravif 4:4:4 arm [`ENCODE_BPP`] was calibrated on.
+///
+/// Measured slope ratios from `benchmarks/avif_backend_calib_2026-08-13.tsv`
+/// (five sizes 0.066-8.356 MP, worst case over quality x speed x reps):
+///   zenravif 4:4:4  29.3 B/px  -> 1.00 (the calibration arm)
+///   zenravif 4:2:0  22.3 B/px  -> 0.76  (quarter-resolution chroma planes)
+///   SvtRs    4:2:0  52.7 B/px  -> 1.80  (relative to 4:4:4)
+///
+/// SvtRs costs ~2.4x zenravif at EQUAL subsampling, and its peak is flat
+/// across speed, quality and thread count — the pipeline allocates its frame
+/// working set up front rather than scaling with the search. Rounded UP to the
+/// nearest 0.01 so the estimate never lands under the measurement.
+fn backend_subsampling_mem_factor(arm: EstimateArm) -> f64 {
+    match arm {
+        EstimateArm::Zenravif444 => 1.00,
+        EstimateArm::Zenravif420 => 0.76,
+        EstimateArm::SvtRs420 => 1.80,
+    }
+}
+
+impl EstimateArm {
+    /// Pick the arm an [`crate::EncoderConfig`] will actually encode on.
+    ///
+    /// Encode-gated because `Av1Backend` / `EncodeChromaSubsampling` are — a
+    /// decode-only build still gets the rest of this module.
+    #[cfg(feature = "encode")]
+    pub fn for_config(config: &crate::EncoderConfig) -> Self {
+        #[cfg(feature = "encode-svt-rs")]
+        if config.backend == crate::Av1Backend::SvtRs {
+            // SvtRs is 4:2:0-only; validate() rejects anything else.
+            return EstimateArm::SvtRs420;
+        }
+        match config.chroma_subsampling {
+            crate::EncodeChromaSubsampling::Yuv444 => EstimateArm::Zenravif444,
+            crate::EncodeChromaSubsampling::Yuv420 => EstimateArm::Zenravif420,
+        }
+    }
+}
+
+/// The measured (backend x subsampling) arms of the encode memory model.
+///
+/// Deliberately NOT `Av1Backend` + `EncodeChromaSubsampling`: those live behind
+/// the `encode` feature, while `heuristics` is always built (a caller sizing a
+/// job queue should not have to compile the encoder). The arms here are exactly
+/// the combinations that were measured; `SvtRs` encodes 4:2:0 only, so there is
+/// no 4:4:4 variant of it to name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EstimateArm {
+    /// zenrav1e backend at the shipped default 4:4:4 — the calibration arm.
+    #[default]
+    Zenravif444,
+    /// zenrav1e backend at 4:2:0 (quarter-resolution chroma).
+    Zenravif420,
+    /// `Av1Backend::SvtRs`, which is 4:2:0-only.
+    SvtRs420,
+}
 /// Extra working set for an alpha plane (encoded as a second AV1 image).
 const ENCODE_ALPHA_BPP: f64 = 7.0;
 /// 10-bit (16-bit input) inflates the encoder working set ~×1.55.
@@ -185,12 +243,47 @@ pub fn estimate_encode(
     input_bpp: u8,
     speed: u8,
 ) -> Option<EncodeEstimate> {
+    estimate_encode_for(width, height, input_bpp, speed, EstimateArm::Zenravif444)
+}
+
+/// Backend- and subsampling-aware peak-memory / time estimate.
+///
+/// [`estimate_encode`] was calibrated on ONE configuration — the zenravif
+/// backend at its default 4:4:4 — and had no notion of either axis, so it
+/// mis-sized every other arm. Measured at 4K, its typical tier under-predicted
+/// `Av1Backend::SvtRs` by 1.34x (a cap sized from it would be too small, the
+/// unsafe direction) while over-predicting zenravif 4:2:0 by 1.48x.
+///
+/// The multipliers below are measured SLOPE RATIOS from a five-size sweep
+/// (0.066 / 0.262 / 1.049 / 2.097 / 8.356 MP, all multiples of 64 so SvtRs can
+/// encode every cell; worst case over quality {50,85} x speed {6,10} x 2 reps;
+/// `benchmarks/avif_backend_calib_2026-08-13.tsv`). Least-squares
+/// `alpha + beta*px` fits of total peak RSS:
+///
+/// | arm              | fit                     | R^2    |
+/// |------------------|-------------------------|--------|
+/// | zenravif 4:4:4   | 8.88 MiB + 29.3 B/px    | 0.9977 |
+/// | zenravif 4:2:0   | 7.58 MiB + 22.3 B/px    | 0.9982 |
+/// | SvtRs   4:2:0    | 3.58 MiB + 52.7 B/px    | 1.0000 |
+///
+/// Ratios are applied rather than the absolute fits because the shipped
+/// constants were calibrated on a different platform and on the MARGINAL
+/// working set (WSL2 x86-64, `VmHWM` delta) while this sweep measured total
+/// peak RSS on macOS arm64. Slope ratios are the part that transfers; the
+/// absolute intercept is not re-fit here.
+pub fn estimate_encode_for(
+    width: u32,
+    height: u32,
+    input_bpp: u8,
+    speed: u8,
+    arm: EstimateArm,
+) -> Option<EncodeEstimate> {
     let pixels = (width as u64).checked_mul(height as u64)?;
     let input = pixels.checked_mul(input_bpp as u64)?;
     let has_alpha = input_bpp == 4 || input_bpp == 8;
     let high_depth = input_bpp >= 6;
 
-    let mut bpp = ENCODE_BPP;
+    let mut bpp = ENCODE_BPP * backend_subsampling_mem_factor(arm);
     if high_depth {
         bpp *= ENCODE_DEPTH10_MEM_FACTOR;
     }
@@ -315,7 +408,28 @@ pub fn estimate_encode_threaded(
     speed: u8,
     cores: usize,
 ) -> Option<EncodeEstimate> {
-    let mut e = estimate_encode(width, height, input_bpp, speed)?;
+    estimate_encode_threaded_for(
+        width,
+        height,
+        input_bpp,
+        speed,
+        cores,
+        EstimateArm::default(),
+    )
+}
+
+/// Arm-aware [`estimate_encode_threaded`]. See [`estimate_encode_for`] for why
+/// the arm matters: one estimate for every backend under-predicted SvtRs by
+/// 1.34x, and a cap sized from an under-prediction is the unsafe direction.
+pub fn estimate_encode_threaded_for(
+    width: u32,
+    height: u32,
+    input_bpp: u8,
+    speed: u8,
+    cores: usize,
+    arm: EstimateArm,
+) -> Option<EncodeEstimate> {
+    let mut e = estimate_encode_for(width, height, input_bpp, speed, arm)?;
     let pixels = (width as u64).saturating_mul(height as u64);
     let ti = encode_threading_info(pixels);
     e.time_ms = (e.time_ms as f64 / ti.speedup(cores) as f64) as f32;
@@ -489,6 +603,65 @@ pub fn estimate_decode(width: u32, height: u32, output_bpp: u8) -> Option<Decode
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The typical tier must NEVER land under a measured peak — a cap sized
+    /// from an under-prediction is the unsafe direction (it rejects or OOMs a
+    /// job that would have fit).
+    ///
+    /// Cells are the worst measured total peak RSS per arm from
+    /// `benchmarks/avif_backend_calib_2026-08-13.tsv` (macOS arm64, RGB8,
+    /// threads=1, worst case over quality {50,85} x speed {6,10} x 2 reps).
+    /// This is the regression gate for the 2026-08-13 backend-awareness fix:
+    /// before it, one estimate served every arm and under-predicted SvtRs by
+    /// 1.34x.
+    #[test]
+    fn estimate_typical_covers_measured_peak_on_every_arm() {
+        // (arm, w, h, measured worst-case peak RSS in bytes)
+        let cells: &[(EstimateArm, u32, u32, u64)] = &[
+            (EstimateArm::Zenravif444, 1024, 1024, 39_949_000),
+            (EstimateArm::Zenravif444, 3840, 2176, 251_900_000),
+            (EstimateArm::Zenravif420, 1024, 1024, 32_190_000),
+            (EstimateArm::Zenravif420, 3840, 2176, 192_900_000),
+            (EstimateArm::SvtRs420, 1024, 1024, 59_240_000),
+            (EstimateArm::SvtRs420, 3840, 2176, 444_100_000),
+        ];
+        for &(arm, w, h, measured) in cells {
+            let est = estimate_encode_for(w, h, 3, 10, arm).expect("estimate");
+            assert!(
+                est.peak_memory_bytes >= measured,
+                "{arm:?} {w}x{h}: typical {} < measured {measured}",
+                est.peak_memory_bytes,
+            );
+            assert!(
+                est.peak_memory_bytes_max >= est.peak_memory_bytes,
+                "{arm:?}: max tier below typical",
+            );
+        }
+    }
+
+    /// The arms must stay ORDERED the way they measure: at equal size, SvtRs
+    /// is the heaviest and zenravif 4:2:0 the lightest. A refactor that
+    /// collapsed the arms back to one number would pass the coverage test
+    /// above (it is one-sided) but fail this one.
+    #[test]
+    fn estimate_arms_ordered_as_measured() {
+        let (w, h) = (3840, 2176);
+        let p = |arm| {
+            estimate_encode_for(w, h, 3, 10, arm)
+                .unwrap()
+                .peak_memory_bytes
+        };
+        let (svt, y444, y420) = (
+            p(EstimateArm::SvtRs420),
+            p(EstimateArm::Zenravif444),
+            p(EstimateArm::Zenravif420),
+        );
+        assert!(
+            svt > y444,
+            "SvtRs {svt} should exceed zenravif 4:4:4 {y444}"
+        );
+        assert!(y444 > y420, "4:4:4 {y444} should exceed 4:2:0 {y420}");
+    }
 
     /// Encode time must follow the measured speed curve: slower preset →
     /// strictly more time, with the big speed-4 vs speed-10 gap (~14×).
