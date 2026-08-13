@@ -261,24 +261,91 @@ in the `V2Scratch` instance — metric.rs:1760-1775, feature_v2.rs:5671-5683 and
 runs the parallel walk. imazen/zensim#60 was filed against zensim for this and
 has been retracted.
 
-**zenavif#35 (this repo — reported, deliberately not fixed): the row-sink
-decode path ignores `preferred` and can never emit native Gray.** Probed
-2026-08-11 on the committed mono fixtures:
+**zenavif#35 (this repo — FIXED 2026-08-13): the row-sink decode path ignored
+`preferred` and could never emit native Gray.** `push_decoder` received
+`preferred` and dropped it; `push_decoder_inner` derived its descriptor from
+bit depth + alpha alone, never called `set_native_gray`, and re-derived a
+descriptor rather than reporting the one handed to the sink — while
+`DecodeCapabilities` advertises `native_gray`. Fixed by applying the buffered/
+streaming gray gate and recording the sink's actual descriptor.
+
+MEASURED before/after over 6 mono fixtures x 4 `preferred` lists (24 cells),
+comparing descriptors and packed bytes across all three entry points:
+
+| | row sink == buffered | row sink == streaming |
+|---|---|---|
+| before | 8/24 | 8/24 |
+| after | 22/24 | **24/24** |
+
+The gate is now `row_sink_mono_matches_buffered_and_streaming_byte_for_byte`:
+strict format equality + byte identity + `OutputInfo.native_format` equality,
+three ways, over 5 fixtures including the gray-class and RGB-class ICC cases.
+The old content-parity fallback is deleted — it was a weaker property a
+regression could have landed on silently.
+
+### The residual: `negotiate_format` never runs on the streaming-family paths
+
+The 2 remaining cells are **not** #35. Buffered decode runs `negotiate_format`
+after `set_native_gray`; the streaming decoder and the row sink run only the
+gray gate. So both streaming-family paths honour a Gray *layout* preference
+(now) but ignore every other reduction `preferred` can ask for. Measured
+2026-08-13:
 
 | input | `preferred` | buffered | streaming | row sink |
 |---|---|---|---|---|
-| `mono_gradient_8b_full.avif` | `[]` | Gray8 | Gray8 | **Rgb8** |
-| `mono_gradient_8b_full.avif` | `[Gray8]` | Gray8 | Gray8 | **Rgb8** |
-| `kodim03_yuv420_8bpc.avif` | any | Rgb8 | Rgb8 | Rgb8 |
+| `mono_gradient_10b_full.avif` | `[Gray8]` | Gray8 | **Gray16** | **Gray16** |
+| `mono_gradient_10b_full.avif` | `[Rgb8]` | Rgb8 | **Rgb16** | **Rgb16** |
+| `alpha_noispe.avif` | `[Rgb8]` | Rgb8 | **Rgba8** | **Rgba8** |
 
-`push_decoder_inner` derives its descriptor from bit depth + alpha alone: it
-never consults `preferred` and never calls `set_native_gray`, while
-`DecodeCapabilities` advertises `native_gray`. Not corruption — the triples are
-neutral and equal the gray samples — so it is a dropped-capability gap, and
-`row_sink_mono_content_matches_the_gray_path_despite_the_format_gap` pins
-exactly that: content parity per sample today, automatic strict byte identity
-once the descriptors converge. Behaviour was left alone because the adapter's
-public output format is not something to change unilaterally.
+Depth reduction (16→8) and layout reduction (RGBA→RGB) are both dropped. This
+predates #35 and is unaffected by its fix; it is a public-behaviour change to
+the streaming path, so it was reported rather than decided unilaterally
+(zenavif#36).
+
+### CICP transfer is lost from the streaming-family descriptors
+
+Same shape, `with_cicp(true)` axis. Buffered calls `set_cicp_on_pixels`; the
+non-bake streaming and row-sink paths do not. Measured on
+`colors_hdr_p3.avif`, `preferred = []`: pixels are byte-identical across all
+three paths, but the descriptor differs —
+
+| path | descriptor |
+|---|---|
+| buffered | `Rgb16` / transfer **`Pq`** |
+| streaming | `Rgb16` / transfer **`Unknown`** |
+| row sink | `Rgb16` / transfer **`Unknown`** |
+
+A caller streaming HDR PQ content therefore gets correct pixels tagged with an
+unknown transfer function, which is a colour-management hazard rather than a
+cosmetic one (zenavif#37).
+
+### `GainMapRender::ReconstructHdr` is silently ignored by the row sink
+
+`push_decoder_inner` has no gain-map arm at all. On the two 10-bit-base
+gain-map fixtures, buffered and streaming both **refuse** with
+`Unsupported("ReconstructHdr requires an 8-bit base …")` (gain_map.rs:70),
+while the row sink returns `Ok(Rgb16)` — the SDR base rendition, with no
+error and no signal that the requested reconstruction did not happen
+(zenavif#38).
+
+### Buffered decode panics on `preferred = [Rgba8]` over HDR PQ input
+
+Not a row-sink issue, found while auditing. `negotiate_format`'s
+`pixels.to_rgba8()` reaches a `RowConverter: no conversion path` **panic**
+(zenpixels-convert ext.rs:477, `HdrSourceRequiresPeak` Rgb16/Pq → Rgba8/Srgb)
+instead of returning an error. Decode input is untrusted and the CICP that
+selects this path comes from the file, so this is a panic-on-input defect on a
+public API (zenavif#39).
+
+### Capabilities audited and found correct on the row-sink path
+
+`native_alpha` (Rgba8 emitted natively, byte-identical to buffered),
+`native_16bit` (Rgb16 emitted), `stop` (an already-cancelled token aborts with
+`Stopped(Cancelled)` at sink.rs:148), `enforces_max_pixels` /
+`enforces_max_memory` / `enforces_max_input_bytes` (`check_input_size` +
+`check_decode_limits` both run before decode), and orientation (the
+`will_auto_orient` arm routes through `copy_decode_to_sink`, which *does*
+forward `preferred`).
 
 ## 8. Coverage-adjacent facts worth not re-deriving
 
