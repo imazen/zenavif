@@ -18,6 +18,13 @@
 //!   cargo build -p zenavif --release --example heaptrack_decode
 //!   heaptrack ./target/release/examples/heaptrack_decode                 # default fixture
 //!   heaptrack ./target/release/examples/heaptrack_decode <file.avif> [iters]
+//!   ./target/release/examples/heaptrack_decode <file.avif> 1 --backend aom-rs
+//!
+//! `--backend rav1d-safe|aom-rs` picks the AV1 engine (aom-rs needs the
+//! `aom-backend` feature). On a host without heaptrack — macOS, say — wrap the
+//! binary in `/usr/bin/time -l` and read "maximum resident set size" (BYTES)
+//! for the whole-process peak, and pass `1` for iters so the high-water mark
+//! is a single decode's.
 //!
 //! Then inspect:
 //!   heaptrack_print heaptrack.heaptrack_decode.*.zst | less
@@ -30,6 +37,8 @@
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
 
+use almost_enough::Unstoppable;
+
 /// Resolve the default bundled fixture relative to the crate manifest so the
 /// example runs from any working directory.
 fn default_fixture() -> PathBuf {
@@ -37,7 +46,23 @@ fn default_fixture() -> PathBuf {
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
+    let mut args: Vec<String> = std::env::args().collect();
+
+    // `--backend rav1d-safe|aom-rs` selects the AV1 decode engine. Pulled out
+    // before the positionals so the `<file> [iters]` shape is unchanged.
+    // aom-rs needs the `aom-backend` feature; it is KEY-frame/intra scope,
+    // which is exactly what an AVIF still is.
+    let mut backend = zenavif::DecodeBackend::Rav1dSafe;
+    if let Some(i) = args.iter().position(|a| a == "--backend") {
+        backend = match args[i + 1].as_str() {
+            "rav1d-safe" => zenavif::DecodeBackend::Rav1dSafe,
+            #[cfg(feature = "aom-backend")]
+            "aom-rs" => zenavif::DecodeBackend::AomRs,
+            other => panic!("--backend must be rav1d-safe|aom-rs, got {other}"),
+        };
+        args.drain(i..i + 2);
+    }
+    let config = zenavif::DecoderConfig::new().decode_backend(backend);
 
     let path: PathBuf = match args.get(1) {
         Some(p) => PathBuf::from(p),
@@ -54,7 +79,7 @@ fn main() {
 
     // Decode once up front to report the dimensions the alloc count is relative to.
     {
-        let probe = zenavif::decode(&data).unwrap_or_else(|e| {
+        let probe = zenavif::decode_with(&data, &config, &Unstoppable).unwrap_or_else(|e| {
             eprintln!("probe decode failed for {}: {e}", path.display());
             std::process::exit(1);
         });
@@ -68,11 +93,11 @@ fn main() {
         );
     }
 
-    eprintln!("decoding {iters}x via zenavif::decode(..) ...");
+    eprintln!("decoding {iters}x via zenavif::decode_with(.., {backend:?}) ...");
 
     let mut total_pixels: u64 = 0;
     for i in 0..iters {
-        let buf = zenavif::decode(&data).unwrap_or_else(|e| {
+        let buf = zenavif::decode_with(&data, &config, &Unstoppable).unwrap_or_else(|e| {
             eprintln!("decode iteration {i} failed: {e}");
             std::process::exit(1);
         });
