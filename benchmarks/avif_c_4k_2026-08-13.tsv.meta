@@ -1,0 +1,49 @@
+# libavif (avifenc 1.4.2 / aom 3.14.1) 4K encode peak-RSS baseline — 2026-08-13
+#
+# The C reference for the zenavif encode arms, so the standing encode-memory
+# goal ("do not exceed peak C-equivalent memory") has a number to be measured
+# against. Companion to zenavif_encode_mem_4k_2026-08-13.tsv (our side).
+#
+# Host: macOS 26.5.2, Apple M4 Pro (12 cores / 8 performance), 24 GiB RAM.
+# Peak RSS = /usr/bin/time -l "maximum resident set size" (BYTES on macOS).
+#
+# AXIS MATCHING: avifenc's -s (speed 0..10) and -q (quality 0..100) are the
+# SAME scales zenavif's EncoderConfig uses, and -y selects the same chroma
+# subsampling, so the arms line up directly. Input is the same 3840x2160
+# real-corpus mosaic (PNG here; our probe reads the raw RGB8 of the same
+# image). 64 cells: content {photo,screen} x threads {1,8} x subsampling
+# {444,420} x speed {10,6} x quality {50,85} x 2 reps, 0 failures.
+#
+# ==================== RESULT: THE DEFAULT BACKEND IS AT GOAL ====================
+# Max peak RSS over content x quality x reps, libavif vs zenavif/zenravif:
+#
+#   arm                  libavif   zenavif   ratio   verdict
+#   444 speed 6  t1        275 MB    207 MB   0.75   WE WIN
+#   444 speed 6  t8        283 MB    222 MB   0.78   WE WIN
+#   444 speed 10 t1        235 MB    231 MB   0.98   parity
+#   444 speed 10 t8        244 MB    270 MB   1.11   slightly over
+#   420 speed 6  t1        217 MB    173 MB   0.80   WE WIN
+#   420 speed 6  t8        224 MB    189 MB   0.84   WE WIN
+#   420 speed 10 t1        153 MB    186 MB   1.22   over
+#   420 speed 10 t8        160 MB    212 MB   1.32   over
+#
+#   SvtRs 420 (worst)      224 MB    434 MB   1.94   over  <-- the failing arm
+#
+# So zenavif's shipped zenrav1e backend already MEETS the memory goal at
+# speed 6 (16-25% under libavif) and is at parity-to-1.3x at speed 10. The
+# AVIF memory work is therefore NOT a general encoder problem — it is two
+# specific items:
+#   1. Av1Backend::SvtRs at 1.94x. Its peak is FLAT across speed, quality and
+#      thread count (394-434 MB in every cell), i.e. the pipeline allocates a
+#      full frame working set up front rather than scaling with the search.
+#   2. The zenravif speed-10 arms (1.11-1.32x). Speed 10 holds MORE memory
+#      than speed 6 for us (the fast modes buffer more where low-speed RDO
+#      searches depth-first) while libavif's speed 10 drops to its cheapest
+#      cell, so the curves cross.
+#
+# NOT a memory finding but recorded to avoid a false read of the table: at
+# equal settings libavif is much faster here (speed 6 t1: 2.6 s vs our 16.9 s).
+# These are peak-memory cells, not an RD or speed comparison.
+#
+# Columns: encoder content w h pixels subsampling speed quality threads rep
+#          out_bytes peak_rss_bytes wall_s
