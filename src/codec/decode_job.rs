@@ -213,7 +213,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
                 Error::Io(e.to_string()).into()
             });
         }
-        self.push_decoder_inner(data, sink)
+        self.push_decoder_inner(data, sink, preferred)
             .map_err(zencodec::CodecError::of)
     }
 
@@ -626,6 +626,7 @@ impl AvifDecodeJob {
         self,
         data: Cow<'_, [u8]>,
         sink: &mut dyn zencodec::decode::DecodeRowSink,
+        preferred: &[PixelDescriptor],
     ) -> Result<zencodec::decode::OutputInfo, At<Error>> {
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
@@ -636,9 +637,45 @@ impl AvifDecodeJob {
         let mut decoder = crate::ManagedAvifDecoder::new(&data, &cfg)?;
         let probe_info = decoder.probe_info()?;
         self.check_decode_limits(&probe_info)?;
-        let native_info = decoder.decode_to_sink(stop, sink)?;
 
-        let desc = if native_info.bit_depth > 8 {
+        // Native grayscale opt-in (zenavif#5, gap closed in zenavif#35) —
+        // the SAME gate as the buffered (`AvifDecoder::decode`) and streaming
+        // (`streaming_decoder_inner`) paths, so all three honour a Gray
+        // preference identically: alpha-free monochrome, not reconstructing,
+        // not a grid (the grid sink stitches RGB tiles), ICC-compatible.
+        // Without this the row sink dropped `preferred` on the floor and
+        // always expanded mono to RGB, at 3x the bytes and a descriptor no
+        // other path emitted.
+        let mono_source = probe_info.monochrome && !probe_info.has_alpha;
+        let reconstructing = matches!(
+            self.gain_map_render,
+            zencodec::GainMapRender::ReconstructHdr { .. }
+        ) && probe_info.gain_map.is_some();
+        if mono_source
+            && !reconstructing
+            && !decoder.is_grid()
+            && icc_allows_native_gray(&probe_info)
+            && wants_gray_output(preferred)
+        {
+            decoder.set_native_gray(true);
+        }
+
+        // Report the descriptor the sink was ACTUALLY handed rather than
+        // re-deriving one from bit depth + alpha. The re-derived guess was the
+        // second half of zenavif#35: it could not describe a gray output, and
+        // any future format decision inside `decode_to_sink` would silently
+        // desync `OutputInfo` from the pixels again. Recording makes the two
+        // incapable of disagreeing.
+        let mut recorder = DescriptorRecordingSink {
+            inner: sink,
+            descriptor: None,
+        };
+        let native_info = decoder.decode_to_sink(stop, &mut recorder)?;
+        let recorded = recorder.descriptor;
+
+        // Fallback only for a decode that emitted no strips at all (so the
+        // sink was never told a format): keep the historical derivation.
+        let desc = recorded.unwrap_or(if native_info.bit_depth > 8 {
             if native_info.has_alpha {
                 PixelDescriptor::RGBA16_SRGB
             } else {
@@ -648,12 +685,49 @@ impl AvifDecodeJob {
             PixelDescriptor::RGBA8_SRGB
         } else {
             PixelDescriptor::RGB8_SRGB
-        };
+        });
         Ok(zencodec::decode::OutputInfo::full_decode(
             native_info.width,
             native_info.height,
             desc,
         ))
+    }
+}
+
+/// Pass-through [`DecodeRowSink`](zencodec::decode::DecodeRowSink) that records
+/// the pixel format the codec announced, so `push_decoder` can report exactly
+/// what it wrote instead of guessing (zenavif#35).
+struct DescriptorRecordingSink<'s> {
+    inner: &'s mut dyn zencodec::decode::DecodeRowSink,
+    descriptor: Option<PixelDescriptor>,
+}
+
+impl zencodec::decode::DecodeRowSink for DescriptorRecordingSink<'_> {
+    fn begin(
+        &mut self,
+        width: u32,
+        height: u32,
+        descriptor: PixelDescriptor,
+    ) -> Result<(), zencodec::decode::SinkError> {
+        self.descriptor = Some(descriptor);
+        self.inner.begin(width, height, descriptor)
+    }
+
+    fn provide_next_buffer(
+        &mut self,
+        y: u32,
+        height: u32,
+        width: u32,
+        descriptor: PixelDescriptor,
+    ) -> Result<zenpixels::PixelSliceMut<'_>, zencodec::decode::SinkError> {
+        // `begin` is skipped when a decode produces no strips, and the grid
+        // sink calls it lazily; take the format from whichever arrives first.
+        self.descriptor.get_or_insert(descriptor);
+        self.inner.provide_next_buffer(y, height, width, descriptor)
+    }
+
+    fn finish(&mut self) -> Result<(), zencodec::decode::SinkError> {
+        self.inner.finish()
     }
 }
 
