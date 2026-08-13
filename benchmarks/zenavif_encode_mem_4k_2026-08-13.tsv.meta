@@ -1,0 +1,94 @@
+# zenavif 4K ENCODE peak-RSS measurement — 2026-08-13 (macOS arm64)
+#
+# Purpose: answer "how much RAM does a system need to encode a 4K AVIF?" at
+# real 4K, on both usable AV1 encode backends. The prior calibration
+# (benchmarks/zenavif_encode_mem_2026-06-23.tsv) topped out at 2048^2 = 4.19 MP
+# and covered only the zenravif backend at its default 4:4:4; 8.3 MP and the
+# SvtRs backend are measured here rather than extrapolated (CLAUDE.md
+# never-extrapolate-memory).
+#
+# Commits under test:
+#   zenavif      a311b42 (0.1.7)
+#   ravif/zenravif cb06487   zenav1-svt 841c583bf
+#   rustc 1.97.1 (8bab26f4f 2026-07-14), release profile
+# Host: macOS 26.5.2, Apple M4 Pro (12 cores / 8 performance), 24 GiB RAM.
+#   NOTE: the 2026-06-23 calibration ran on WSL2 x86-64 / glibc. This is a
+#   DIFFERENT platform (arm64, macOS libmalloc), so absolute peaks are not
+#   directly comparable to that file — they are a second data point, not a
+#   re-fit of the shipped constants. No constant in src/heuristics.rs was
+#   changed on the strength of this run.
+#
+# Harness: examples/mem_probe_encode.rs, one encode per process.
+#   This run added the `--backend`, `--subsampling` and `--threads` axis flags
+#   to that example (previously it hard-pinned zenravif / default 4:4:4 /
+#   threads=1), so all three arms go through one harness.
+#
+# MEASUREMENT: peak RSS is `/usr/bin/time -l` "maximum resident set size",
+#   which on macOS is reported in BYTES. The probe's own pre_rss_kb/vmhwm_kb
+#   columns read /proc/self/status and are therefore 0 here — use
+#   peak_rss_bytes. That number is the WHOLE-PROCESS high-water mark:
+#   binary floor + the 24.9 MB raw input buffer + the packed Vec<Rgb<u8>>
+#   copy + the encoder working set. It is the "will it fit in the box"
+#   figure, NOT the marginal working set the heuristics constants model.
+#
+# Content: real corpus images MOSAICKED at native scale (no upscaling — an
+#   upscale smooths high-frequency detail and would under-state coefficient
+#   density, hence memory). photo = 6 CLIC2025 training photos; screen =
+#   gb82-sc/imac_g3 + imageflow whitespace-issue + a wikimedia screenshot.
+#
+# Grid (160 cells, all measured, 0 failures):
+#   canvas:      3840x2176 (8.36 MP) for the 3-arm comparison — SvtRs requires
+#                both dimensions to be a multiple of 64 and 2160 is not;
+#                3840x2160 (8.29 MP, true UHD) for the zenravif arms.
+#   arms:        zenravif 4:4:4 (shipped default), zenravif 4:2:0, svtrs 4:2:0
+#   speed:       6, 10   quality: 50, 85   threads: 1, 8
+#   content:     photo, screen            reps: 2
+#
+# RESULTS — max peak RSS over content x quality x reps, 3840x2176:
+#   arm                 speed  thr    max MB   med MB   max wall s
+#   zenravif 4:2:0        6     1      173      166       16.9
+#   zenravif 4:2:0        6     8      189      175        4.6
+#   zenravif 4:2:0       10     1      186      183        1.5
+#   zenravif 4:2:0       10     8      212      210        0.4
+#   zenravif 4:4:4        6     1      207      200       22.2
+#   zenravif 4:4:4        6     8      222      205        5.6
+#   zenravif 4:4:4       10     1      231      225        2.3
+#   zenravif 4:4:4       10     8      270      267        0.7
+#   svtrs    4:2:0        6     1      434      426        0.7
+#   svtrs    4:2:0       10     8      429      421        0.3
+#   True UHD 3840x2160 matches within noise: zenravif 4:4:4 max 274 MB,
+#   4:2:0 max 218 MB.
+#
+# Findings:
+#   * Whole-arm envelope at 4K: zenravif <= 274 MB, SvtRs <= 434 MB.
+#   * SvtRs costs ~2x the memory of zenravif at equal 4:2:0 subsampling
+#     (434 vs 218 MB) and is ~20-50x faster in wall time (0.3-0.7 s vs
+#     1.5-22 s). Its peak is nearly FLAT across speed, quality and threads —
+#     the pipeline allocates its full frame working set up front.
+#   * Chroma subsampling is a real memory axis: 4:4:4 costs ~25-30% more
+#     than 4:2:0 (274 vs 218 MB at UHD).
+#   * threads 1->8 adds ~15-20% to zenravif's peak (AV1 tile/row contexts)
+#     and ~0% to SvtRs's.
+#   * Speed 10 holds MORE memory than speed 6 (231 vs 207 MB, 4:4:4 t1),
+#     consistent with the 2026-06-23 finding that the fast modes buffer more
+#     while low-speed RDO searches depth-first.
+#   * Content spread (photo vs screen) is <= 3% at 4K — much flatter than the
+#     1.26x seen at <= 2048^2.
+#
+# MODEL CHECK vs src/heuristics.rs estimate_encode (RGB8, 3840x2160, speed 10):
+#   model min/typ/max = 263.4 / 321.9 / 556.0 MB at 3840x2160
+#                       265.3 / 324.2 / 560.1 MB at 3840x2176
+#   zenravif 4:4:4 measured max 274.3 MB -> TYP over-predicts 1.17x  (safe)
+#   zenravif 4:2:0 measured max 217.7 MB -> TYP over-predicts 1.48x  (safe)
+#   svtrs    4:2:0 measured max 433.9 MB -> TYP UNDER-predicts (measured is
+#     1.34x TYP); MAX still covers it with a 1.29x margin.
+#   => estimate_encode is calibrated for zenravif only. It is NOT
+#      backend-aware, and its TYP tier under-reports SvtRs. Callers sizing a
+#      cap for an SvtRs encode must use peak_memory_bytes_max, not the
+#      typical. Making the estimate backend-aware is untracked work as of
+#      this file.
+#
+# Columns: codec backend subsampling content w h pixels mode effort quality
+#          threads rep out_bytes encode_ms peak_rss_bytes wall_s
+#   encode_ms is empty for AVIF (the probe reports it for JXL only); use
+#   wall_s, which includes process start + the 24.9 MB file read.

@@ -19,7 +19,24 @@
 //! decode (whose own peak would pollute VmHWM above the encode peak).
 //!
 //! TSV row:
-//!   w  h  pixels  mode  speed  quality  out_bytes  pre_rss_kb  vmhwm_kb  marginal_kb
+//!   w h pixels mode speed quality out_bytes pre_rss_kb vmhwm_kb marginal_kb
+//!   backend threads subsampling
+//!
+//! `pre_rss_kb` / `vmhwm_kb` read `/proc/self/status` and are therefore **0 on
+//! non-Linux hosts**. On macOS wrap the probe in `/usr/bin/time -l` and read
+//! "maximum resident set size" (bytes) instead — that is the whole-process
+//! high-water mark, i.e. the binary floor + input buffer + encoder working set.
+//!
+//! Axis flags (anywhere in argv, consumed before the positionals):
+//!   `--backend zenravif|svtrs`   AV1 encode backend. `svtrs` needs the
+//!                                `encode-svt-rs` feature, and encodes 8-bit
+//!                                4:2:0 only with both dimensions a multiple
+//!                                of 64 (so 3840x2160 must become 3840x2176).
+//!   `--subsampling 444|420`      zenavif defaults to 4:4:4; pass 420 for an
+//!                                apples-to-apples comparison against SvtRs.
+//!   `--threads N`                encoder threads (default 1). AV1 tile/row
+//!                                threading adds per-thread contexts, so this
+//!                                is a real memory axis, not just a time one.
 //!
 //! `est` mode (7th arg `est`): prints the codec's CURRENT model prediction for
 //! this cell from `zenavif::heuristics::estimate_encode` (no encode), so model
@@ -46,7 +63,7 @@ use std::hint::black_box;
 use almost_enough::{StopToken, Unstoppable};
 use imgref::Img;
 use rgb::Rgb;
-use zenavif::EncoderConfig;
+use zenavif::{Av1Backend, EncodeChromaSubsampling, EncoderConfig};
 
 /// A `/proc/self/status` field in KiB (e.g. `VmRSS:`, `VmHWM:`).
 fn status_kb(field: &str) -> u64 {
@@ -62,10 +79,45 @@ fn status_kb(field: &str) -> u64 {
 }
 
 fn main() {
-    let a: Vec<String> = std::env::args().collect();
+    // Optional flags are pulled out first so the positional shape (and the
+    // `est` marker's slot) stays exactly as the 2026-06-23 calibration used it.
+    let mut a: Vec<String> = std::env::args().collect();
+    let mut threads: usize = 1;
+    let mut backend = Av1Backend::Zenravif;
+    let mut subsampling = EncodeChromaSubsampling::default();
+    let mut i = 1;
+    while i < a.len() {
+        match a[i].as_str() {
+            "--threads" => {
+                threads = a[i + 1].parse().expect("--threads N");
+                a.drain(i..i + 2);
+            }
+            "--backend" => {
+                backend = match a[i + 1].as_str() {
+                    "zenravif" => Av1Backend::Zenravif,
+                    #[cfg(feature = "encode-svt-rs")]
+                    "svtrs" => Av1Backend::SvtRs,
+                    other => panic!("--backend must be zenravif|svtrs, got {other}"),
+                };
+                a.drain(i..i + 2);
+            }
+            // 4:4:4 is zenavif's shipped default; SvtRs encodes 4:2:0 only, so
+            // an apples-to-apples backend comparison needs this axis explicit.
+            "--subsampling" => {
+                subsampling = match a[i + 1].as_str() {
+                    "444" => EncodeChromaSubsampling::Yuv444,
+                    "420" => EncodeChromaSubsampling::Yuv420,
+                    other => panic!("--subsampling must be 444|420, got {other}"),
+                };
+                a.drain(i..i + 2);
+            }
+            _ => i += 1,
+        }
+    }
     if a.len() < 7 {
         eprintln!(
-            "usage: mem_probe_encode <rgb8.bin> <w> <h> <avif> <speed 0..10> <quality> [est]"
+            "usage: mem_probe_encode <rgb8.bin> <w> <h> <avif> <speed 0..10> <quality> [est] \
+             [--threads N] [--backend zenravif|svtrs]"
         );
         std::process::exit(2);
     }
@@ -123,7 +175,9 @@ fn main() {
     let config = EncoderConfig::new()
         .quality(quality)
         .speed(speed)
-        .threads(Some(1));
+        .backend(backend)
+        .chroma_subsampling(subsampling)
+        .threads(Some(threads));
 
     // Pack the raw RGB8 bytes into the `Rgb<u8>` buffer the encoder takes.
     // VERIFY: this allocation (w*h*3 B) lands AFTER `pre` below, so it is part
@@ -151,8 +205,18 @@ fn main() {
     let peak = status_kb("VmHWM:");
 
     let pixels = (w as u64) * (h as u64);
+    let backend_tag = match backend {
+        Av1Backend::Zenravif => "zenravif",
+        #[cfg(feature = "encode-svt-rs")]
+        Av1Backend::SvtRs => "svtrs",
+        _ => "other",
+    };
+    let ss_tag = match subsampling {
+        EncodeChromaSubsampling::Yuv444 => "444",
+        EncodeChromaSubsampling::Yuv420 => "420",
+    };
     println!(
-        "{w}\t{h}\t{pixels}\t{mode}\t{speed}\t{quality}\t{}\t{pre}\t{peak}\t{}",
+        "{w}\t{h}\t{pixels}\t{mode}\t{speed}\t{quality}\t{}\t{pre}\t{peak}\t{}\t{backend_tag}\t{threads}\t{ss_tag}",
         out.avif_file.len(),
         peak.saturating_sub(pre)
     );
