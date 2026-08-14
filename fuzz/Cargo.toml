@@ -16,6 +16,10 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 enough = "0.4"
+# The negotiation fuzzer drives the zencodec adapter (the other targets use
+# the native `decode_with` entry point, which never reaches negotiation).
+zencodec = "0.1.26"
+zenpixels = "0.2.16"
 
 [dependencies.zenavif]
 path = ".."
@@ -52,6 +56,13 @@ bench = false
 [[bin]]
 name = "fuzz_decode_limited"
 path = "fuzz_targets/fuzz_decode_limited.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_decode_negotiate"
+path = "fuzz_targets/fuzz_decode_negotiate.rs"
 test = false
 doc = false
 bench = false

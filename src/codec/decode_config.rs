@@ -9,7 +9,7 @@ use whereat::At;
 use zencodec::decode::DecodeOutput;
 use zencodec::{CodecError, ImageFormat, ImageInfo, ResourceLimits};
 use zenpixels::{PixelBuffer, PixelDescriptor};
-use zenpixels_convert::PixelBufferConvertTypedExt as _;
+use zenpixels_convert::PixelBufferConvertExt as _;
 
 use super::decode_job::AvifDecodeJob;
 
@@ -147,7 +147,8 @@ impl AvifDecoderConfig {
         let info = output.info().clone();
         map_rgb8_rows(&output.into_buffer(), &mut dst, |s, d| {
             d.copy_from_slice(s);
-        });
+        })
+        .map_err(zencodec::CodecError::of)?;
         Ok(info)
     }
 
@@ -161,7 +162,8 @@ impl AvifDecoderConfig {
         let info = output.info().clone();
         map_rgba8_rows(&output.into_buffer(), &mut dst, |s, d| {
             d.copy_from_slice(s);
-        });
+        })
+        .map_err(zencodec::CodecError::of)?;
         Ok(info)
     }
 
@@ -182,7 +184,8 @@ impl AvifDecoderConfig {
                     b: srgb_u8_to_linear(px.b),
                 };
             }
-        });
+        })
+        .map_err(zencodec::CodecError::of)?;
         Ok(info)
     }
 
@@ -204,7 +207,8 @@ impl AvifDecoderConfig {
                     a: px.a as f32 / 255.0,
                 };
             }
-        });
+        })
+        .map_err(zencodec::CodecError::of)?;
         Ok(info)
     }
 
@@ -228,10 +232,27 @@ impl AvifDecoderConfig {
                 let b = srgb_u8_to_linear(px.b);
                 *out = rgb::Gray(kr * r + kg * g + kb * b);
             }
-        });
+        })
+        .map_err(zencodec::CodecError::of)?;
         Ok(info)
     }
 }
+
+/// The typed refusal the `decode_into_*` walkers return when the conversion
+/// library has no plan from the decoded buffer to the caller's 8-bit target.
+///
+/// zenavif#39, second surface: these walkers used the infallible
+/// `to_rgb8()` / `to_rgba8()`, which `expect` on
+/// `RowConverter::new(..)`. The descriptor they convert *from* is derived from
+/// the file's CICP, so an HDR (PQ/HLG) AVIF made every one of the five
+/// `decode_into_*` entry points unwind the caller's thread — with no
+/// `preferred` list involved, so unlike the negotiation path there was no way
+/// for a caller to steer around it. Unlike negotiation there is also no
+/// fallthrough available here: the destination buffer is concretely
+/// `Rgb<u8>` / `Rgba<u8>`, so the honest answer is a typed error.
+const NO_SDR_PLAN: &str = "cannot convert this image's colour encoding to 8-bit sRGB without a \
+                           tone-mapping decision (HDR source); decode to the native format and \
+                           tone-map with a CMS instead";
 
 /// Borrow a decoded buffer as `ImgRef<Rgb<u8>>`, converting only when it isn't
 /// already RGB8 sRGB — this skips the redundant identity convert + full-image
@@ -242,7 +263,7 @@ fn map_rgb8_rows<D>(
     buffer: &PixelBuffer,
     dst: &mut imgref::ImgRefMut<'_, D>,
     mut f: impl FnMut(&[Rgb<u8>], &mut [D]),
-) {
+) -> Result<(), At<crate::Error>> {
     let converted;
     // The borrow-free fast path needs BOTH an exact descriptor match and a
     // stride that is a whole number of pixels (`try_as_imgref`'s second
@@ -254,7 +275,11 @@ fn map_rgb8_rows<D>(
     {
         view
     } else {
-        converted = buffer.to_rgb8();
+        converted = buffer
+            .convert_to(PixelDescriptor::RGB8_SRGB)
+            .map_err(|_| whereat::at!(crate::Error::Unsupported(NO_SDR_PLAN)))?
+            .try_typed::<Rgb<u8>>()
+            .ok_or_else(|| whereat::at!(crate::Error::Unsupported(NO_SDR_PLAN)))?;
         converted.as_imgref()
     };
     let w = dst.width().min(src.width());
@@ -262,6 +287,7 @@ fn map_rgb8_rows<D>(
     for (src_row, dst_row) in src.rows().zip(dst.rows_mut()).take(h) {
         f(&src_row[..w], &mut dst_row[..w]);
     }
+    Ok(())
 }
 
 /// Like [`map_rgb8_rows`] but views the buffer as RGBA8 (preserving alpha).
@@ -269,7 +295,7 @@ fn map_rgba8_rows<D>(
     buffer: &PixelBuffer,
     dst: &mut imgref::ImgRefMut<'_, D>,
     mut f: impl FnMut(&[Rgba<u8>], &mut [D]),
-) {
+) -> Result<(), At<crate::Error>> {
     let converted;
     // Same fast-path/fallback split as `map_rgb8_rows` — see the note there.
     let src = if let Some(view) = buffer
@@ -278,7 +304,11 @@ fn map_rgba8_rows<D>(
     {
         view
     } else {
-        converted = buffer.to_rgba8();
+        converted = buffer
+            .convert_to(PixelDescriptor::RGBA8_SRGB)
+            .map_err(|_| whereat::at!(crate::Error::Unsupported(NO_SDR_PLAN)))?
+            .try_typed::<Rgba<u8>>()
+            .ok_or_else(|| whereat::at!(crate::Error::Unsupported(NO_SDR_PLAN)))?;
         converted.as_imgref()
     };
     let w = dst.width().min(src.width());
@@ -286,6 +316,7 @@ fn map_rgba8_rows<D>(
     for (src_row, dst_row) in src.rows().zip(dst.rows_mut()).take(h) {
         f(&src_row[..w], &mut dst_row[..w]);
     }
+    Ok(())
 }
 
 impl Default for AvifDecoderConfig {

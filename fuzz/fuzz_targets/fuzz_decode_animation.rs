@@ -6,8 +6,7 @@ use libfuzzer_sys::fuzz_target;
 /// Tests frame iteration, timing, and compositing.
 /// Uses frame_size_limit to prevent OOM on crafted large-dimension inputs.
 fuzz_target!(|data: &[u8]| {
-    let config = zenavif::DecoderConfig::new()
-        .frame_size_limit(4 * 1024 * 1024); // 4 megapixels
+    let config = zenavif::DecoderConfig::new().frame_size_limit(4 * 1024 * 1024); // 4 megapixels
 
     // Try full animation decode with limits
     let _ = zenavif::decode_animation_with(data, &config, &enough::Unstoppable);

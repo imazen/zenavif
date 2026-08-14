@@ -2,7 +2,7 @@
 //! byte-verified, ICC-signalling-aware gray collapse.
 
 use zenpixels::{ChannelType, PixelBuffer, PixelDescriptor};
-use zenpixels_convert::PixelBufferConvertTypedExt as _;
+use zenpixels_convert::PixelBufferConvertExt as _;
 
 // The `negotiate_gray` tests below reach these colour helpers through `super`.
 #[cfg(test)]
@@ -33,6 +33,90 @@ pub(super) fn wants_gray_output(preferred: &[PixelDescriptor]) -> bool {
         None => true,
         Some(p) => p.layout() == zenpixels::ChannelLayout::Gray,
     }
+}
+
+/// The descriptor negotiation converts *to*: the caller's preference,
+/// verbatim.
+///
+/// **Why not the native colour description with only the layout/depth
+/// swapped?** That reading is what the module header implies ("negotiation
+/// only considers channel type and alpha"), it is semantically tidier, and it
+/// would let an HDR PQ source satisfy an `[Rgb8]` ask as a plain depth narrow
+/// instead of declining it. It was implemented and MEASURED, and rejected on
+/// two counts (2026-08-13, `weld_sato_12B_8B_q0.avif`, 1024x684):
+///
+/// 1. **It loses a bit of precision.** With target and source transfer equal,
+///    zenpixels-convert 0.2.16 takes an integer U16→U8 path that *truncates*
+///    `v * 255 / 65535`; with the transfer differing it goes through f32 and
+///    *rounds*. Measured 407 of 2,101,248 bytes differing by exactly 1, every
+///    one of them a value landing on a `.5019` tie (native 39193 → exact
+///    152.5019 → rounds to 153, truncates to 152). Rounding is the correct
+///    answer, so preserving the native transfer would have introduced a
+///    1-LSB regression on every 10/12-bit narrow.
+/// 2. **8-bit PQ is not a rendition worth producing.** PQ needs 10 bits to
+///    avoid visible banding; handing a caller a banded 8-bit PQ buffer and
+///    calling it success is a worse answer than declining, which is what
+///    [`zencodec::decode::DecodeJob::decoder`] specifies anyway — "the decoder
+///    picks the first it can produce **without lossy conversion**".
+///
+/// Do not "simplify" this back to a native-preserving target without
+/// re-measuring both; the tie-rounding difference is invisible in a spot check
+/// (a flat row compares equal) and only shows up over a whole image.
+fn target_descriptor(pref: PixelDescriptor) -> PixelDescriptor {
+    pref
+}
+
+/// Whether negotiation is willing to produce `pref` from `native`, judged on
+/// layout and depth alone. Content-dependent decisions (the gray collapse)
+/// are the caller's, and are handled before this is reached.
+///
+/// Kept as a predicate separate from the conversion so the strip-based decode
+/// paths can make the same decision from a descriptor, before any pixels
+/// exist (zenavif#36).
+pub(super) fn reduction_is_offered(native: PixelDescriptor, pref: PixelDescriptor) -> bool {
+    // Can't upscale bit depth losslessly.
+    if pref.channel_type().byte_size() > native.channel_type().byte_size() {
+        return false;
+    }
+    // Grayscale output is content-verified elsewhere, never here.
+    if pref.layout() == zenpixels::ChannelLayout::Gray {
+        return false;
+    }
+    // Gray native, color preference at the same depth: expand.
+    if native.layout() == zenpixels::ChannelLayout::Gray
+        && pref.channel_type() == native.channel_type()
+        && native.channel_type() == ChannelType::U8
+    {
+        return true;
+    }
+    // Caller wants 8-bit and we have 16-bit: downconvert.
+    if pref.channel_type() == ChannelType::U8 && native.channel_type() == ChannelType::U16 {
+        return true;
+    }
+    // Same bit depth, different layout (e.g. RGB vs RGBA). Only at 8-bit —
+    // the 16-bit layout changes have never been offered and adding them is a
+    // separate, unmeasured widening of the contract.
+    pref.channel_type() == native.channel_type()
+        && native.channel_type() == ChannelType::U8
+        && pref.layout().has_alpha() != native.layout().has_alpha()
+}
+
+/// Perform an offered reduction, or decline it.
+///
+/// `None` means the conversion library has no plan for this pair — the only
+/// observed case is HDR (PQ/HLG) to a materially different colour description
+/// without a peak luminance, which is a tone-mapping decision the negotiation
+/// layer is not entitled to make up. Declining lets the next preference try,
+/// and ultimately returns the native buffer, which is what
+/// [`zencodec::decode::DecodeJob::decoder`] documents `preferred` to mean:
+/// "the decoder picks the first it can produce **without lossy conversion**".
+///
+/// zenavif#39: this used to be an infallible `to_rgb8()` / `to_rgba8()`, whose
+/// `RowConverter::new(..).expect("RowConverter: no conversion path")` unwound
+/// the caller's thread. The descriptor that selects the arm is read out of the
+/// decoded file, so the panic was reachable from untrusted input.
+fn try_reduce(pixels: &PixelBuffer, target: PixelDescriptor) -> Option<PixelBuffer> {
+    pixels.convert_to(target).ok()
 }
 
 /// `source_is_gray`: the *coded* image is alpha-free monochrome, so a
@@ -91,39 +175,18 @@ pub(super) fn negotiate_format(
             continue;
         }
 
-        // Gray native, color preference at the same depth: expand.
-        if native.layout() == zenpixels::ChannelLayout::Gray
-            && pref.channel_type() == native.channel_type()
-            && native.channel_type() == ChannelType::U8
-        {
-            if pref.layout().has_alpha() {
-                return pixels.to_rgba8().into();
-            }
-            return pixels.to_rgb8().into();
+        // Everything else negotiation offers — gray-native expansion to
+        // colour, the 16→8 depth narrow, and the 8-bit add/drop-alpha layout
+        // change — is one fallible conversion to the preferred layout and
+        // depth, carrying the native colour description across.
+        if !reduction_is_offered(native, *pref) {
+            continue;
         }
-
-        // If caller wants 8-bit and we have 16-bit, downconvert.
-        if pref.channel_type() == ChannelType::U8 && native.channel_type() == ChannelType::U16 {
-            if pref.layout().has_alpha() {
-                return pixels.to_rgba8().into();
-            }
-            return pixels.to_rgb8().into();
-        }
-
-        // Same bit depth but different layout (e.g., RGB vs RGBA).
-        if pref.channel_type() == native.channel_type() {
-            if pref.layout().has_alpha() && !native.layout().has_alpha() {
-                if native.channel_type() == ChannelType::U8 {
-                    return pixels.to_rgba8().into();
-                }
-                continue;
-            }
-            if !pref.layout().has_alpha() && native.layout().has_alpha() {
-                if native.channel_type() == ChannelType::U8 {
-                    return pixels.to_rgb8().into();
-                }
-                continue;
-            }
+        match try_reduce(&pixels, target_descriptor(*pref)) {
+            Some(converted) => return converted,
+            // No conversion plan for this pair: decline and let the next
+            // preference have its shot (zenavif#39 — never unwind).
+            None => continue,
         }
     }
 

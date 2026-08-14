@@ -495,11 +495,7 @@ mod alloc_sites {
         // inline-expanded symbols dodge the prefix list (thread-local
         // closures, RawVec internals) — without these the full-stack dump's
         // frame budget is spent before any encoder frame appears.
-        const NOISE_FILE: &[&str] = &[
-            "/rustlib/",
-            "backtrace-0.",
-            "examples/mem_probe_encode",
-        ];
+        const NOISE_FILE: &[&str] = &["/rustlib/", "backtrace-0.", "examples/mem_probe_encode"];
         let s = fr.sym.trim_start_matches('<');
         s.is_empty()
             || NOISE_PREFIX.iter().any(|n| s.starts_with(n))
@@ -561,8 +557,8 @@ mod alloc_sites {
 
         // by-line aggregation of the snapshot (live at peak) and of totals.
         let line_of = |key: &SiteKey,
-                           cache: &mut HashMap<usize, Vec<RFrame>>,
-                           resolved: &mut HashMap<SiteKey, Vec<RFrame>>| {
+                       cache: &mut HashMap<usize, Vec<RFrame>>,
+                       resolved: &mut HashMap<SiteKey, Vec<RFrame>>| {
             let frames = resolved
                 .entry(*key)
                 .or_insert_with(|| resolve_key(key, cache))
@@ -595,7 +591,11 @@ mod alloc_sites {
             let mut ss = snap_sites.clone();
             ss.sort_by_key(|(_, l)| -*l);
             for (key, live) in ss.iter().take(3) {
-                eprintln!("[sites-debug] site live={:.1} MiB len={} frames:", mb(*live), key.len);
+                eprintln!(
+                    "[sites-debug] site live={:.1} MiB len={} frames:",
+                    mb(*live),
+                    key.len
+                );
                 for &ip in &key.frames[..key.len as usize] {
                     let fr = resolve_ip(&mut cache, ip);
                     if fr.is_empty() {
@@ -625,7 +625,13 @@ mod alloc_sites {
         peak_rows.sort_by_key(|(_, (l, _))| -*l);
         eprintln!("[sites] live at peak snapshot, by attributed line:");
         for (i, (line, (live, n))) in peak_rows.iter().take(30).enumerate() {
-            eprintln!("  {:>2}  {:>9.1} MiB  n={:<5} {}", i + 1, mb(*live), n, line);
+            eprintln!(
+                "  {:>2}  {:>9.1} MiB  n={:<5} {}",
+                i + 1,
+                mb(*live),
+                n,
+                line
+            );
         }
 
         let mut churn_rows: Vec<(&String, &(u64, u64))> = churn.iter().collect();
@@ -692,7 +698,6 @@ mod alloc_sites {
 
 #[global_allocator]
 static ALLOC: counting_alloc::Counting = counting_alloc::Counting;
-
 
 /// A `/proc/self/status` field in KiB (e.g. `VmRSS:`, `VmHWM:`).
 fn status_kb(field: &str) -> u64 {
