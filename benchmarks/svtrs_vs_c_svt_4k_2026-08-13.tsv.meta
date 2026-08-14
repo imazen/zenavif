@@ -1,0 +1,27 @@
+date: 2026-08-13
+host: macOS aarch64 (M-series), darwin 25.5.0
+zenavif commit: a3ebe999 + probe-profiler working copy; zenav1-svt sibling path dep
+C encoder: SvtAv1EncApp / SVT-AV1 v4.2.0 (homebrew) - the version svtav1-rs
+  is byte-identical to across its verified battery (upstream rust/STATUS.md)
+input: photo_3840x2176 (64-aligned 4K photo); C fed I420 converted with
+  BT.601 full-range (~/tmp/4kmem/inputs/photo_3840x2176.yuv); ours fed rgb8
+  and converts in-process (so our RSS carries the RGB input + conversion).
+
+FINDING - the earlier "SvtRs 1.94x over C" figure was WRONG: it compared our
+RSS against avifenc+AOM (a different encoder). Against the true C
+equivalent at the same preset/QP:
+  - requested-live high-water: ours 165 MB vs C ~1124 MiB (C allocates
+    lazily-paged buffers it mostly never touches; malloc_history counts
+    requested bytes, RSS counts touched pages) - 6.8x UNDER.
+  - RSS at lp/threads=1: ours 394 MiB vs C 277 - 1.43x over, entirely an
+    allocator/page-touching artifact (our live is 165 MB; macOS libmalloc
+    retains churned pages).
+  - RSS at C's DEFAULT parallelism: C 1377 MiB vs ours 394 (thread-flat
+    measured to t=8) - 3.5x UNDER.
+Preset 7: ours 395 RSS vs C 365 (lp=1) - 1.08x even on the RSS axis.
+
+reproduce: SvtAv1EncApp -i photo_3840x2176.yuv -w 3840 -h 2176 --fps-num 1
+  --fps-denom 1 -n 1 --preset {13|7} --qp {10|32|40} [--lp 1] -b /dev/null
+  under /usr/bin/time -l; ours via examples/mem_probe_encode
+  --backend svtrs --subsampling 420 --threads 1 (JXL_ALLOC_SITES=1 for
+  peak_live; profiler ported from zenjxl in this commit).

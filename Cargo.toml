@@ -154,6 +154,9 @@ zenpixels-convert = { version = "0.2.16", default-features = false, features = [
 linear-srgb = { version = "0.6.7"}
 
 [dev-dependencies]
+# Raw-frame capture + lazy symbolization for the per-site allocation profiler
+# in examples/mem_probe_encode.rs (JXL_ALLOC_SITES=1; ported from zenjxl).
+backtrace = "0.3.76"
 almost-enough = { version = "0.4.3", features = ["alloc"] }
 zenutils-fuzz = "0.1.0"
 # `testable_dispatch` is what lets a test disable a token that the target
@@ -468,3 +471,8 @@ required-features = ["_dev"]
 [[example]]
 name = "cancel_latency"
 required-features = ["encode"]
+
+# line-tables-only: file:line resolution for the per-site allocation profiler
+# (examples/mem_probe_encode.rs, JXL_ALLOC_SITES=1).
+[profile.release]
+debug = "line-tables-only"

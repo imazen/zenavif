@@ -1,0 +1,11 @@
+encoder	preset	qp	lp_or_threads	metric	bytes	notes
+SvtAv1EncApp-4.2.0	13	32	lp=1	peak_rss	290701312	brew arm64, single frame 3840x2176 I420
+SvtAv1EncApp-4.2.0	13	40	lp=1	peak_rss	288374784	
+SvtAv1EncApp-4.2.0	13	10	lp=1	peak_rss	294141952	
+SvtAv1EncApp-4.2.0	7	32	lp=1	peak_rss	382746624	
+SvtAv1EncApp-4.2.0	7	40	lp=1	peak_rss	381779968	
+SvtAv1EncApp-4.2.0	13	32	lp=default	peak_rss	1443774464	production default parallelism
+SvtAv1EncApp-4.2.0	13	32	lp=1	live_near_peak	1178500000	malloc_history -allBySize at RSS>=260MB; requested-live, mostly never-touched pages
+zenavif-SvtRs	speed10(p13)	q50(qp~32)	threads=1	peak_rss	413483008	rgb8 input + RGB->YUV conversion in-process
+zenavif-SvtRs	speed10(p13)	q50	threads=1	peak_live	169447424	counting-allocator high-water of live bytes
+zenavif-SvtRs	speed6(p7)	q50	threads=1	peak_rss	413990912	
