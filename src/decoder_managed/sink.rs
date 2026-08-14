@@ -87,11 +87,20 @@ impl ManagedAvifDecoder {
                 .map(|f| convert_color_range(f.color_info().color_range))
                 .unwrap_or(ColorRange::Full);
 
-            let descriptor = if alpha_frame.is_some() {
-                PixelDescriptor::RGBA8_SRGB
-            } else {
-                PixelDescriptor::RGB8_SRGB
-            };
+            // Describe the strips with the container's CICP. These two
+            // constants are the *only* place a strip descriptor is minted for
+            // the 8-bit path, so stamping here is what makes the streaming and
+            // row-sink outputs colour-describe their pixels the same way the
+            // buffered decode does (zenavif#37) — the adapter above is too
+            // late, it only sees whatever this announced.
+            let descriptor = crate::convert::descriptor_with_cicp(
+                if alpha_frame.is_some() {
+                    PixelDescriptor::RGBA8_SRGB
+                } else {
+                    PixelDescriptor::RGB8_SRGB
+                },
+                &info,
+            );
 
             match crate::strip_convert::StripConverter::try_new(
                 primary_frame,
@@ -120,9 +129,13 @@ impl ManagedAvifDecoder {
             (Some(converter), _) => converter,
             (None, Some((primary_frame, alpha_frame))) => {
                 // Fallback: full conversion for 16-bit, monochrome, or
-                // cropped images.
+                // cropped images. This arm mints its descriptor separately
+                // from the 8-bit one above, so it needs the same CICP stamp —
+                // it is the arm every 10/12-bit HDR file takes, i.e. exactly
+                // the one zenavif#37 was reported against.
                 let (pixels, _) = self.convert_to_image(primary_frame, alpha_frame, stop)?;
-                crate::strip_convert::StripConverter::new_from_pixels(pixels)
+                let desc = crate::convert::descriptor_with_cicp(pixels.descriptor(), &info);
+                crate::strip_convert::StripConverter::new_from_pixels(pixels.with_descriptor(desc))
             }
             (None, None) => unreachable!("frames either converted or handed back"),
         };
@@ -223,6 +236,7 @@ impl ManagedAvifDecoder {
             })?
             .clone();
 
+        let grid_info = self.probe_info()?;
         let grid_rows = grid_config.rows as usize;
         let cols = grid_config.columns as usize;
         let output_width = grid_config.output_width as usize;
@@ -254,8 +268,10 @@ impl ManagedAvifDecoder {
                 row_tiles.push(pixels);
             }
 
-            // Get descriptor and tile height from the first tile
-            let desc = row_tiles[0].descriptor();
+            // Get descriptor and tile height from the first tile, described
+            // with the container's CICP (zenavif#37) — the streaming grid path
+            // does the same to its stitched strips.
+            let desc = crate::convert::descriptor_with_cicp(row_tiles[0].descriptor(), &grid_info);
             let bpp = desc.bytes_per_pixel();
             let tile_h = row_tiles[0].height() as usize;
 

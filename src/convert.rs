@@ -25,6 +25,43 @@ use zenpixels::{PixelBuffer, PixelDescriptor};
 const TIGHTLY_PACKED_INVARIANT: &str = "decode-path buffers are allocated tightly packed, so a layout-compatible \
      descriptor always yields a typed view";
 
+/// Describe a decoded buffer with the container's CICP.
+///
+/// The **single** place the decode paths turn `transfer_characteristics` /
+/// `color_primaries` into a [`PixelDescriptor`]. It lives here rather than in
+/// the zencodec adapter because the strip converter and the grid sink both
+/// mint descriptors of their own, and the adapter is too late to be the
+/// authority — that split is what produced zenavif#37 (streaming and the row
+/// sink handing PQ pixels to the caller labelled `transfer: Unknown`).
+///
+/// Note the asymmetry between the two fields, which is deliberate and
+/// mirrors what the buffered path has always produced:
+///
+/// * **transfer** is set unconditionally, falling back to
+///   [`TransferFunction::Unknown`] when the container says "unspecified"
+///   (CICP 2) or names a curve zenpixels has no variant for. The strip
+///   converter's own base descriptors are the hardcoded `RGB8_SRGB` /
+///   `RGBA8_SRGB`, so *leaving* the field alone would assert sRGB about a
+///   file that never claimed it. `Unknown` is the honest answer and it is
+///   what the buffered path reports, since its buffers come from
+///   `PixelBuffer::from_pixels`, whose default transfer is `Unknown`.
+/// * **primaries** are only overwritten when the container names a set
+///   zenpixels knows, leaving the `Bt709` default in place otherwise —
+///   again matching the buffered path.
+pub(crate) fn descriptor_with_cicp(
+    mut desc: PixelDescriptor,
+    info: &crate::image::ImageInfo,
+) -> PixelDescriptor {
+    desc = desc.with_transfer(
+        zenpixels::TransferFunction::from_cicp(info.transfer_characteristics.0)
+            .unwrap_or(zenpixels::TransferFunction::Unknown),
+    );
+    if let Some(p) = zenpixels::ColorPrimaries::from_cicp(info.color_primaries.0) {
+        desc = desc.with_primaries(p);
+    }
+    desc
+}
+
 /// Scale a limited-range Y value to full range (8-bit)
 #[inline]
 fn limited_to_full_8(y: u8) -> u8 {

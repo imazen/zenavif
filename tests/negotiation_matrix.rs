@@ -478,6 +478,297 @@ fn matrix_axes_are_actually_covered() {
     assert!(mono > 0, "no monochrome-native fixture in the matrix");
 }
 
+// ── #36: the three paths must agree on what `preferred` means ───────────────
+
+/// Buffered, streaming and row-sink decode of the same bytes with the same
+/// `preferred` must report the SAME pixel format.
+///
+/// zenavif#36: `streaming_decoder_inner` and `push_decoder_inner` ran only the
+/// native-gray gate, never `negotiate_format`, so every non-gray reduction
+/// `preferred` can express (16->8 depth, RGBA->RGB layout) was dropped on both
+/// streaming-family paths. A caller who asks for `Rgb8` and sizes its buffers
+/// accordingly got `Rgb16` or `Rgba8` — 2x or 1.33x the bytes per pixel, in a
+/// different layout, with no error.
+#[test]
+fn all_paths_agree_on_the_negotiated_pixel_format() {
+    let prefs = preferences();
+    let mut mismatches: Vec<String> = Vec::new();
+    let mut compared = 0usize;
+
+    for (fixture, label) in FIXTURES {
+        let bytes = read(fixture);
+        for (pref_label, pref) in &prefs {
+            let Outcome::Ok(reference) = probe(Path::Buffered, &bytes, pref) else {
+                continue;
+            };
+            for &path in &[Path::Streaming, Path::RowSink] {
+                let Outcome::Ok(cell) = probe(path, &bytes, pref) else {
+                    continue;
+                };
+                compared += 1;
+                if cell.desc.pixel_format() != reference.desc.pixel_format() {
+                    mismatches.push(format!(
+                        "  {label:<14} {pref_label:<15} {:<10} {:?} != buffered {:?}",
+                        path.label(),
+                        cell.desc.pixel_format(),
+                        reference.desc.pixel_format()
+                    ));
+                }
+            }
+        }
+    }
+
+    assert!(compared > 300, "only {compared} comparisons ran");
+    assert!(
+        mismatches.is_empty(),
+        "{} of {compared} (path, preferred) cells disagree with the buffered decode on \
+         pixel format — `preferred` must mean the same thing on every entry point:\n{}",
+        mismatches.len(),
+        mismatches.join("\n")
+    );
+}
+
+/// Format agreement is worthless if the pixels differ. Same sweep, byte
+/// identity — with the buffered decode as the reference on every path that
+/// produced the same format.
+#[test]
+fn all_paths_agree_on_pixels_byte_for_byte() {
+    let prefs = preferences();
+    let mut diffs: Vec<String> = Vec::new();
+    let mut compared = 0usize;
+
+    for (fixture, label) in FIXTURES {
+        let bytes = read(fixture);
+        for (pref_label, pref) in &prefs {
+            let Outcome::Ok(reference) = probe(Path::Buffered, &bytes, pref) else {
+                continue;
+            };
+            for &path in &[Path::Streaming, Path::RowSink] {
+                let Outcome::Ok(cell) = probe(path, &bytes, pref) else {
+                    continue;
+                };
+                if cell.desc.pixel_format() != reference.desc.pixel_format() {
+                    continue; // reported by the format test
+                }
+                compared += 1;
+                if cell.dims != reference.dims {
+                    diffs.push(format!(
+                        "  {label:<14} {pref_label:<15} {:<10} dims {:?} != {:?}",
+                        path.label(),
+                        cell.dims,
+                        reference.dims
+                    ));
+                } else if cell.bytes != reference.bytes {
+                    let at = cell
+                        .bytes
+                        .iter()
+                        .zip(reference.bytes.iter())
+                        .position(|(a, b)| a != b)
+                        .unwrap_or(0);
+                    diffs.push(format!(
+                        "  {label:<14} {pref_label:<15} {:<10} first differing byte {at}",
+                        path.label()
+                    ));
+                }
+            }
+        }
+    }
+
+    assert!(compared > 300, "only {compared} comparisons ran");
+    assert!(
+        diffs.is_empty(),
+        "{} of {compared} cells produced different pixels than the buffered decode:\n{}",
+        diffs.len(),
+        diffs.join("\n")
+    );
+}
+
+// ── #37: the CICP tag must survive on every path ────────────────────────────
+
+/// Every path must describe the pixels it emits with the container's CICP
+/// transfer and primaries, not just the buffered one.
+///
+/// zenavif#37: the buffered path called `set_cicp_on_pixels`; the plain
+/// streaming and row-sink paths did not, so PQ-encoded samples were handed to
+/// the caller tagged `transfer: Unknown`. The pixels were right and the label
+/// was wrong, which is the worse failure — a caller that trusts the descriptor
+/// (the entire point of self-describing pixels) mis-converts HDR content with
+/// no error to catch.
+#[test]
+fn all_paths_report_the_container_cicp() {
+    let mut mismatches: Vec<String> = Vec::new();
+    let mut compared = 0usize;
+
+    for (fixture, label) in FIXTURES {
+        let bytes = read(fixture);
+        // `preferred = []` isolates the tag: no conversion runs, so any
+        // difference is the tag being dropped rather than a format change.
+        let Outcome::Ok(reference) = probe(Path::Buffered, &bytes, &[]) else {
+            continue;
+        };
+        for &path in &[Path::Streaming, Path::RowSink] {
+            let Outcome::Ok(cell) = probe(path, &bytes, &[]) else {
+                continue;
+            };
+            compared += 1;
+            if cell.desc.transfer != reference.desc.transfer
+                || cell.desc.primaries != reference.desc.primaries
+            {
+                mismatches.push(format!(
+                    "  {label:<14} {:<10} transfer {:?}/primaries {:?} != buffered {:?}/{:?}",
+                    path.label(),
+                    cell.desc.transfer,
+                    cell.desc.primaries,
+                    reference.desc.transfer,
+                    reference.desc.primaries
+                ));
+            }
+        }
+    }
+
+    assert!(compared > 20, "only {compared} comparisons ran");
+    assert!(
+        mismatches.is_empty(),
+        "{} of {compared} cells lost the container's colour signalling:\n{}",
+        mismatches.len(),
+        mismatches.join("\n")
+    );
+}
+
+/// The tag has to be *right*, not merely consistent: an HDR PQ file must be
+/// described as PQ on all three paths. Consistency alone would be satisfied by
+/// all three reporting `Unknown`.
+#[test]
+fn hdr_pq_fixtures_are_tagged_pq_on_every_path() {
+    use zenpixels::TransferFunction as T;
+    const PQ_FIXTURES: &[&str] = &[
+        "tests/vectors/libavif/colors_hdr_p3.avif",
+        "tests/vectors/libavif/colors_hdr_rec2020.avif",
+        "tests/vectors/libavif/cosmos1650_yuv444_10bpc_p3pq.avif",
+    ];
+    for fixture in PQ_FIXTURES {
+        let bytes = read(fixture);
+        for &path in PATHS {
+            let Outcome::Ok(cell) = probe(path, &bytes, &[]) else {
+                panic!("{fixture} on {} did not decode", path.label());
+            };
+            assert_eq!(
+                cell.desc.transfer,
+                T::Pq,
+                "{fixture} on {}: PQ-encoded samples described as {:?}",
+                path.label(),
+                cell.desc.transfer
+            );
+        }
+    }
+}
+
+// ── #38: `ReconstructHdr` must never be silently ignored ────────────────────
+
+/// A rendition the decoder cannot produce must be refused on every path.
+///
+/// zenavif#38: `push_decoder_inner` had no gain-map arm at all, so a caller
+/// asking for `GainMapRender::ReconstructHdr` on a 10-bit-base gain-map file
+/// got `Ok` plus the **SDR base rendition** — where buffered and streaming
+/// both return `Unsupported`. An error is recoverable; a wrong rendition
+/// presented as success is not detectable by the caller at all.
+#[test]
+fn reconstruct_hdr_is_refused_identically_on_all_three_paths() {
+    const GAINMAP_10BIT_BASE: &[&str] = &[
+        "tests/vectors/libavif/seine_hdr_gainmap_small_srgb.avif",
+        "tests/vectors/libavif/seine_hdr_gainmap_srgb.avif",
+    ];
+    let render = zencodec::GainMapRender::ReconstructHdr {
+        target_headroom: None,
+    };
+
+    for fixture in GAINMAP_10BIT_BASE {
+        let bytes = read(fixture);
+
+        let buffered = AvifDecoderConfig::new()
+            .job()
+            .with_gain_map_render(render)
+            .decoder(Cow::Borrowed(&bytes), &[])
+            .and_then(|d| d.decode());
+        assert!(
+            buffered.is_err(),
+            "{fixture}: buffered ReconstructHdr unexpectedly succeeded — this fixture is \
+             supposed to have a 10-bit base that reconstruction refuses, so the test is \
+             no longer measuring the refusal"
+        );
+
+        let streaming = AvifDecoderConfig::new()
+            .job()
+            .with_gain_map_render(render)
+            .streaming_decoder(Cow::Borrowed(&bytes), &[]);
+        assert!(
+            streaming.is_err(),
+            "{fixture}: streaming ReconstructHdr unexpectedly succeeded"
+        );
+
+        let mut sink = CollectSink::new();
+        let row_sink = AvifDecoderConfig::new()
+            .job()
+            .with_gain_map_render(render)
+            .push_decoder(Cow::Borrowed(&bytes), &mut sink, &[]);
+        assert!(
+            row_sink.is_err(),
+            "{fixture}: the row sink returned Ok for a rendition it cannot produce — it \
+             handed the caller the SDR base while buffered and streaming both refuse. A \
+             wrong rendition reported as success is undetectable downstream (zenavif#38)"
+        );
+    }
+}
+
+/// The refusal must be the *same* refusal — same error category — so a caller
+/// can branch on it uniformly rather than string-matching per path.
+#[test]
+fn reconstruct_hdr_refusal_has_the_same_category_on_all_three_paths() {
+    let fixture = "tests/vectors/libavif/seine_hdr_gainmap_srgb.avif";
+    let bytes = read(fixture);
+    let render = zencodec::GainMapRender::ReconstructHdr {
+        target_headroom: None,
+    };
+
+    let buffered = AvifDecoderConfig::new()
+        .job()
+        .with_gain_map_render(render)
+        .decoder(Cow::Borrowed(&bytes), &[])
+        .and_then(|d| d.decode());
+    let Err(buffered) = buffered else {
+        panic!("buffered ReconstructHdr must refuse this 10-bit-base fixture");
+    };
+    let buffered = buffered.error().category();
+
+    let streaming = AvifDecoderConfig::new()
+        .job()
+        .with_gain_map_render(render)
+        .streaming_decoder(Cow::Borrowed(&bytes), &[]);
+    let Err(streaming) = streaming else {
+        panic!("streaming ReconstructHdr must refuse this 10-bit-base fixture");
+    };
+    let streaming = streaming.error().category();
+
+    let mut sink = CollectSink::new();
+    let row_sink = AvifDecoderConfig::new()
+        .job()
+        .with_gain_map_render(render)
+        .push_decoder(Cow::Borrowed(&bytes), &mut sink, &[]);
+    let Err(row_sink) = row_sink else {
+        panic!("the row sink returned Ok for a rendition it cannot produce (zenavif#38)");
+    };
+    let row_sink = row_sink.error().category();
+
+    assert_eq!(
+        streaming, buffered,
+        "streaming refuses ReconstructHdr with a different category than buffered"
+    );
+    assert_eq!(
+        row_sink, buffered,
+        "the row sink refuses ReconstructHdr with a different category than buffered"
+    );
+}
+
 // ── #39, second surface: the `decode_into_*` convenience methods ────────────
 //
 // These take no `preferred` list at all — they decode natively and then

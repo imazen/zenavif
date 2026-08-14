@@ -10,6 +10,26 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## Workspace
 
+- **2026-08-14 — decode negotiation converged across all five entry points
+  (zenavif#39, #38, #37, #36).** `preferred = [Rgb8]` over an HDR file no
+  longer panics: `negotiate_format` reduced formats through
+  `PixelBuffer::to_rgb8()` / `to_rgba8()`, which `expect` on
+  `RowConverter::new`, and the arm was selected by the CICP read out of the
+  file — untrusted input, reachable from an ordinary caller preference. 72 of
+  990 (fixture x `preferred` x entry point) cells panicked; now 0, with all
+  918 previously-working cells byte-identical. The same defect on a second
+  surface: the five `decode_into_*` convenience methods, which take no
+  `preferred` list at all, panicked on 18 of 90 (fixture x method) calls and
+  now return `Error::Unsupported`. The streaming decoder and the row sink now
+  run the `preferred` reduction per strip (40 of 374 format disagreements with
+  the buffered decode -> 0), describe their pixels with the container's CICP
+  (15 of 34 lost tags -> 0; an HDR PQ image was handed over labelled
+  `transfer: Unknown`), and refuse `GainMapRender::ReconstructHdr` instead of
+  silently returning the SDR base as `Ok`. New gate
+  `tests/negotiation_matrix.rs` (10 tests) sweeps the whole product; new fuzz
+  target `fuzz_decode_negotiate` reaches the negotiation layer, which no
+  existing target did.
+
 - **2026-08-07 — zensim CQ target-hitting loop harness + ADDITIVE per-SB
   hint hook (zensim campaign appendix AC.4).** New example
   `zensim_cq_rd` (features `encode-imazen,two-pass-butteraugli`):

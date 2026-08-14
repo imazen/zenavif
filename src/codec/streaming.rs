@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use whereat::{At, ResultAtExt as _};
+use whereat::{At, ResultAtExt as _, at};
 use zencodec::{CodecError, ImageInfo};
 use zenpixels::{PixelBuffer, PixelDescriptor, PixelSlice};
 
@@ -71,6 +71,21 @@ pub struct AvifStreamingDecoder {
     /// fixed-height strips. `None` on the preserve path (the default), where the
     /// grid / strip-converter fields drive low-memory streaming unchanged.
     pub(super) baked: Option<PixelBuffer>,
+    /// The reduction `preferred` asked for, when it differs from
+    /// `strip_descriptor` (zenavif#36). `None` means the native strip is what
+    /// the caller wanted (or nothing they asked for could be produced), and
+    /// strips are emitted with no conversion at all — the pre-#36 behaviour,
+    /// unchanged.
+    ///
+    /// Chosen once at construction by
+    /// [`negotiate_strip_descriptor`](super::negotiate::negotiate_strip_descriptor)
+    /// so that the format announced to the caller and the format every strip
+    /// is actually written in cannot drift apart.
+    pub(super) output_descriptor: Option<PixelDescriptor>,
+    /// Destination for the converted strip when `output_descriptor` is set.
+    /// Separate from `strip_buffer` because the converter still writes the
+    /// native format into that one.
+    pub(super) output_buffer: Option<PixelBuffer>,
 }
 
 impl AvifStreamingDecoder {
@@ -106,6 +121,53 @@ impl AvifStreamingDecoder {
             }
         }
         self.strip_buffer = Some(strip);
+    }
+
+    /// Hand out the strip sitting in `strip_buffer`, applying the negotiated
+    /// reduction and re-attaching the colour context.
+    ///
+    /// All three strip sources (bake, grid tile-row, on-demand YUV) funnel
+    /// through here so a format decision cannot be applied to two of them and
+    /// forgotten on the third — which is exactly the shape of zenavif#35/#36.
+    fn emit(&mut self, y: u32) -> Result<Option<(u32, PixelSlice<'_>)>, At<Error>> {
+        if let Some(target) = self.output_descriptor {
+            let native = self.strip_buffer.take().expect(STRIP_BUFFER_JUST_SET);
+            // Keep the native scratch for the next strip; only its contents
+            // are consumed by the conversion.
+            let dims = (native.width(), native.height());
+            let native_desc = native.descriptor();
+            let converted =
+                super::negotiate::apply_strip_reduction(native, target).ok_or_else(|| {
+                    at!(Error::Decode {
+                        code: -1,
+                        msg: "negotiated strip conversion failed after its plan was probed",
+                    })
+                })?;
+            self.strip_buffer = Some(PixelBuffer::new(dims.0, dims.1, native_desc));
+            self.output_buffer = Some(converted);
+            let slice = self
+                .output_buffer
+                .as_ref()
+                .expect("output_buffer was just set")
+                .as_slice()
+                .erase();
+            let slice = match &self.strip_color_context {
+                Some(ctx) => slice.with_color_context(Arc::clone(ctx)),
+                None => slice,
+            };
+            return Ok(Some((y, slice)));
+        }
+        let slice = self
+            .strip_buffer
+            .as_ref()
+            .expect(STRIP_BUFFER_JUST_SET)
+            .as_slice()
+            .erase();
+        let slice = match &self.strip_color_context {
+            Some(ctx) => slice.with_color_context(Arc::clone(ctx)),
+            None => slice,
+        };
+        Ok(Some((y, slice)))
     }
 }
 
@@ -153,17 +215,7 @@ impl AvifStreamingDecoder {
             }
             let y = self.y_offset;
             self.y_offset += h;
-            let slice = self
-                .strip_buffer
-                .as_ref()
-                .expect(STRIP_BUFFER_JUST_SET)
-                .as_slice()
-                .erase();
-            let slice = match &self.strip_color_context {
-                Some(ctx) => slice.with_color_context(Arc::clone(ctx)),
-                None => slice,
-            };
-            return Ok(Some((y, slice)));
+            return self.emit(y);
         }
 
         if self.decoder.is_some() {
@@ -197,17 +249,7 @@ impl AvifStreamingDecoder {
 
             let y = self.y_offset;
             self.y_offset += strip_h;
-            let slice = self
-                .strip_buffer
-                .as_ref()
-                .expect(STRIP_BUFFER_JUST_SET)
-                .as_slice()
-                .erase();
-            let slice = match &self.strip_color_context {
-                Some(ctx) => slice.with_color_context(Arc::clone(ctx)),
-                None => slice,
-            };
-            return Ok(Some((y, slice)));
+            return self.emit(y);
         }
 
         // Non-grid: convert strip from decoded YUV frames on demand.
@@ -236,17 +278,7 @@ impl AvifStreamingDecoder {
 
             let y = self.y_offset;
             self.y_offset += h;
-            let slice = self
-                .strip_buffer
-                .as_ref()
-                .expect(STRIP_BUFFER_JUST_SET)
-                .as_slice()
-                .erase();
-            let slice = match &self.strip_color_context {
-                Some(ctx) => slice.with_color_context(Arc::clone(ctx)),
-                None => slice,
-            };
-            return Ok(Some((y, slice)));
+            return self.emit(y);
         }
 
         Ok(None)

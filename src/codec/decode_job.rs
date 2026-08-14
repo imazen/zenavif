@@ -20,7 +20,9 @@ use super::decode_config::AvifDecoderConfig;
 use super::decoder::AvifDecoder;
 use super::gain_map::reconstruct_hdr_pixels;
 use super::info::{apply_decode_policy, convert_native_info};
-use super::negotiate::{negotiate_format, wants_gray_output};
+use super::negotiate::{
+    apply_strip_reduction, negotiate_format, negotiate_strip_descriptor, wants_gray_output,
+};
 use super::orientation::{
     apply_reported_orientation, bake_orientation, intrinsic_orientation,
     reported_dims_and_orientation, will_auto_orient,
@@ -208,7 +210,25 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         // native `Error` into the envelope via `.into()`. The non-bake path keeps
         // its verbatim `At<Error>` body in `push_decoder_inner` and is re-wrapped
         // once at this boundary.
-        if will_auto_orient(self.orientation) {
+        //
+        // `ReconstructHdr` takes the same route, for the same reason: applying
+        // a gain map is whole-image (the map is sampled at an image-to-map
+        // scale ratio), so it is not strip-local either. Routing it through
+        // the buffered decode makes the row sink agree with the other two
+        // paths *by construction* — including the refusal, since
+        // `reconstruct_hdr_pixels` rejects 10/12-bit and alpha-carrying bases.
+        //
+        // zenavif#38: `push_decoder_inner` had no gain-map arm at all. It
+        // neither reconstructed nor refused — it returned `Ok` with the SDR
+        // base while buffered and streaming both returned `Unsupported`. An
+        // error is recoverable; a wrong rendition reported as success is not
+        // detectable by the caller at all.
+        if will_auto_orient(self.orientation)
+            || matches!(
+                self.gain_map_render,
+                zencodec::GainMapRender::ReconstructHdr { .. }
+            )
+        {
             return zencodec::helpers::copy_decode_to_sink(self, data, sink, preferred, |e| {
                 Error::Io(e.to_string()).into()
             });
@@ -413,6 +433,12 @@ impl AvifDecodeJob {
                 strip_height,
                 strip_color_context: baked.color_context().cloned(),
                 baked: Some(baked),
+                // The bake paths materialise the whole image and have already
+                // run `negotiate_format` (HDR reconstruct) or produce a
+                // rendition negotiation does not apply to; their strips are
+                // slices of a finished buffer.
+                output_descriptor: None,
+                output_buffer: None,
             });
         }
 
@@ -458,6 +484,12 @@ impl AvifDecodeJob {
                 strip_height,
                 strip_color_context: baked.color_context().cloned(),
                 baked: Some(baked),
+                // The bake paths materialise the whole image and have already
+                // run `negotiate_format` (HDR reconstruct) or produce a
+                // rendition negotiation does not apply to; their strips are
+                // slices of a finished buffer.
+                output_descriptor: None,
+                output_buffer: None,
             });
         }
 
@@ -516,6 +548,11 @@ impl AvifDecodeJob {
                     strip_descriptor.layout(),
                 ),
                 baked: None,
+                // The grid path stitches native-format tiles; the reduction
+                // `preferred` asked for is applied to each stitched strip
+                // (zenavif#36 — it used to be dropped entirely here).
+                output_descriptor: negotiate_strip_descriptor(strip_descriptor, preferred),
+                output_buffer: None,
             });
         }
 
@@ -524,6 +561,10 @@ impl AvifDecodeJob {
         // one): the buffered path attaches its context from decode_full's
         // info, and strips must describe pixels identically.
         let (converter, frame_native) = decoder.decode_to_strip_converter(&stop_token)?;
+        // Already carries the container's CICP: `decode_to_strip_converter`
+        // stamps the descriptor it mints (zenavif#37). Re-deriving it here
+        // from probe-era info would be wrong — the comment below on
+        // `frame_native` is the same trap.
         let desc = converter.descriptor();
         let w = converter.display_width() as u32;
         let h = converter.display_height() as u32;
@@ -548,6 +589,8 @@ impl AvifDecodeJob {
                 desc.layout(),
             ),
             baked: None,
+            output_descriptor: negotiate_strip_descriptor(desc, preferred),
+            output_buffer: None,
         })
     }
 
@@ -666,12 +709,22 @@ impl AvifDecodeJob {
         // any future format decision inside `decode_to_sink` would silently
         // desync `OutputInfo` from the pixels again. Recording makes the two
         // incapable of disagreeing.
-        let mut recorder = DescriptorRecordingSink {
+        //
+        // The same wrapper now also carries the CICP stamp (#37) and the
+        // `preferred` reduction (#36) — deliberately in one place, because
+        // the descriptor it announces to the caller's sink and the descriptor
+        // it reports in `OutputInfo` are then literally the same value.
+        let mut recorder = NegotiatingSink {
             inner: sink,
-            descriptor: None,
+            preferred,
+            resolved: None,
+            scratch: None,
+            pending: None,
         };
         let native_info = decoder.decode_to_sink(stop, &mut recorder)?;
-        let recorded = recorder.descriptor;
+        let recorded = recorder
+            .resolved
+            .map(|(native, target)| target.unwrap_or(native));
 
         // Fallback only for a decode that emitted no strips at all (so the
         // sink was never told a format): keep the historical derivation.
@@ -694,23 +747,92 @@ impl AvifDecodeJob {
     }
 }
 
-/// Pass-through [`DecodeRowSink`](zencodec::decode::DecodeRowSink) that records
-/// the pixel format the codec announced, so `push_decoder` can report exactly
-/// what it wrote instead of guessing (zenavif#35).
-struct DescriptorRecordingSink<'s> {
+/// Wrapping [`DecodeRowSink`](zencodec::decode::DecodeRowSink) that makes the
+/// row-sink path describe and negotiate its output like the other two.
+///
+/// It does three things the bare sink could not, all of which have to happen
+/// together or the descriptor and the pixels drift apart:
+///
+/// * **records** the format actually handed downstream, so `push_decoder`
+///   reports it instead of re-deriving a guess (zenavif#35);
+/// * **stamps** the container's CICP onto that format, so PQ pixels are not
+///   handed over labelled `transfer: Unknown` (zenavif#37);
+/// * **applies** the `preferred` reduction per strip, so a caller asking for
+///   `Rgb8` is not silently handed `Rgb16` or `Rgba8` (zenavif#36).
+///
+/// When no reduction is negotiated the codec still writes *directly* into the
+/// caller's buffer — the stamp changes only the description, never the bytes
+/// per pixel — so the low-memory, zero-copy property of the sink path is
+/// preserved for the common case. A strip is only staged through `scratch`
+/// when a real conversion was asked for and is available.
+struct NegotiatingSink<'s> {
     inner: &'s mut dyn zencodec::decode::DecodeRowSink,
-    descriptor: Option<PixelDescriptor>,
+    preferred: &'s [PixelDescriptor],
+    /// `(stamped native, negotiated target)`, decided from the first
+    /// descriptor the codec announces. `None` until then.
+    resolved: Option<(PixelDescriptor, Option<PixelDescriptor>)>,
+    /// Native-format staging buffer, only allocated on the converting path.
+    scratch: Option<zenpixels::PixelBuffer>,
+    /// Geometry of the strip currently staged in `scratch`, awaiting
+    /// conversion into the caller's sink.
+    pending: Option<(u32, u32, u32)>,
 }
 
-impl zencodec::decode::DecodeRowSink for DescriptorRecordingSink<'_> {
+impl NegotiatingSink<'_> {
+    /// Decide the output format once, from the codec's native descriptor
+    /// (which already carries the container's CICP — `decode_to_sink` stamps
+    /// every descriptor it announces).
+    fn resolve(&mut self, native: PixelDescriptor) -> (PixelDescriptor, Option<PixelDescriptor>) {
+        if let Some(r) = self.resolved {
+            return r;
+        }
+        let target = negotiate_strip_descriptor(native, self.preferred);
+        let r = (native, target);
+        self.resolved = Some(r);
+        r
+    }
+
+    /// The format the caller's sink sees.
+    fn out_descriptor(&mut self, native: PixelDescriptor) -> PixelDescriptor {
+        let (stamped, target) = self.resolve(native);
+        target.unwrap_or(stamped)
+    }
+
+    /// Convert the staged strip and hand it to the caller's sink.
+    fn flush_pending(&mut self) -> Result<(), zencodec::decode::SinkError> {
+        let Some((y, h, w)) = self.pending.take() else {
+            return Ok(());
+        };
+        let Some(staged) = self.scratch.take() else {
+            return Ok(());
+        };
+        let Some((_stamped, Some(target))) = self.resolved else {
+            return Ok(());
+        };
+        let converted = apply_strip_reduction(staged, target).ok_or_else(|| {
+            zencodec::decode::SinkError::from(
+                "negotiated strip conversion failed after its plan was probed",
+            )
+        })?;
+        let mut dst = self.inner.provide_next_buffer(y, h, w, target)?;
+        let src = converted.as_slice();
+        let row_bytes = w as usize * target.bytes_per_pixel();
+        for row in 0..h {
+            dst.row_mut(row)[..row_bytes].copy_from_slice(&src.row(row)[..row_bytes]);
+        }
+        Ok(())
+    }
+}
+
+impl zencodec::decode::DecodeRowSink for NegotiatingSink<'_> {
     fn begin(
         &mut self,
         width: u32,
         height: u32,
         descriptor: PixelDescriptor,
     ) -> Result<(), zencodec::decode::SinkError> {
-        self.descriptor = Some(descriptor);
-        self.inner.begin(width, height, descriptor)
+        let out = self.out_descriptor(descriptor);
+        self.inner.begin(width, height, out)
     }
 
     fn provide_next_buffer(
@@ -721,12 +843,31 @@ impl zencodec::decode::DecodeRowSink for DescriptorRecordingSink<'_> {
         descriptor: PixelDescriptor,
     ) -> Result<zenpixels::PixelSliceMut<'_>, zencodec::decode::SinkError> {
         // `begin` is skipped when a decode produces no strips, and the grid
-        // sink calls it lazily; take the format from whichever arrives first.
-        self.descriptor.get_or_insert(descriptor);
-        self.inner.provide_next_buffer(y, height, width, descriptor)
+        // sink calls it lazily; resolve from whichever arrives first.
+        let (stamped, target) = self.resolve(descriptor);
+        self.flush_pending()?;
+        match target {
+            // No reduction: the codec writes straight into the caller's
+            // buffer, exactly as before — only the announced descriptor
+            // gained its CICP.
+            None => self.inner.provide_next_buffer(y, height, width, stamped),
+            // Reduction: stage the strip in the native format, convert on the
+            // next call (or at `finish`).
+            Some(_) => {
+                self.pending = Some((y, height, width));
+                self.scratch = Some(zenpixels::PixelBuffer::new(width, height, stamped));
+                Ok(self
+                    .scratch
+                    .as_mut()
+                    .expect("scratch was just set")
+                    .as_slice_mut()
+                    .erase())
+            }
+        }
     }
 
     fn finish(&mut self) -> Result<(), zencodec::decode::SinkError> {
+        self.flush_pending()?;
         self.inner.finish()
     }
 }

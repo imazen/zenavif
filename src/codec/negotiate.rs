@@ -67,8 +67,8 @@ fn target_descriptor(pref: PixelDescriptor) -> PixelDescriptor {
 }
 
 /// Whether negotiation is willing to produce `pref` from `native`, judged on
-/// layout and depth alone. Content-dependent decisions (the gray collapse)
-/// are the caller's, and are handled before this is reached.
+/// layout and depth alone. Content-dependent decisions (the RGB→gray
+/// collapse) are the caller's, and are handled before this is reached.
 ///
 /// Kept as a predicate separate from the conversion so the strip-based decode
 /// paths can make the same decision from a descriptor, before any pixels
@@ -78,9 +78,18 @@ pub(super) fn reduction_is_offered(native: PixelDescriptor, pref: PixelDescripto
     if pref.channel_type().byte_size() > native.channel_type().byte_size() {
         return false;
     }
-    // Grayscale output is content-verified elsewhere, never here.
     if pref.layout() == zenpixels::ChannelLayout::Gray {
-        return false;
+        // Collapsing *colour* to gray is content-verified (R==G==B at the
+        // byte level) and therefore never decided from a descriptor. Gray to
+        // gray is a plain depth narrow with no such question, and is offered
+        // — that is the `mono10 + [Gray8]` cell the strip paths used to miss.
+        //
+        // In `negotiate_format` this branch is unreachable: its own gray arm
+        // intercepts every Gray preference first (and runs the collapse).
+        // Only the strip paths, which have no collapse, get here.
+        return native.layout() == zenpixels::ChannelLayout::Gray
+            && pref.channel_type() == ChannelType::U8
+            && native.channel_type() == ChannelType::U16;
     }
     // Gray native, color preference at the same depth: expand.
     if native.layout() == zenpixels::ChannelLayout::Gray
@@ -117,6 +126,64 @@ pub(super) fn reduction_is_offered(native: PixelDescriptor, pref: PixelDescripto
 /// decoded file, so the panic was reachable from untrusted input.
 fn try_reduce(pixels: &PixelBuffer, target: PixelDescriptor) -> Option<PixelBuffer> {
     pixels.convert_to(target).ok()
+}
+
+/// The descriptor a strip-based decode should emit, or `None` to emit
+/// `native` unchanged.
+///
+/// This is [`negotiate_format`]'s decision without its pixels: the strip
+/// paths must choose an output format once, up front, because they announce
+/// it to the caller (`OutputInfo` / `begin()`) before the first strip exists.
+/// The plan is probed on a 1x1 buffer so a pair the conversion library cannot
+/// handle is declined here rather than failing halfway through a stream —
+/// same outcome as the buffered path's decline, just decided earlier.
+///
+/// zenavif#36: neither strip path ran any of this. They honoured a Gray
+/// *layout* preference (via `set_native_gray`, since #35) and dropped every
+/// other reduction `preferred` can express, so a caller asking for `Rgb8` got
+/// `Rgb16` or `Rgba8` — 2x or 1.33x the bytes per pixel, in a different
+/// layout, with no error.
+pub(super) fn negotiate_strip_descriptor(
+    native: PixelDescriptor,
+    preferred: &[PixelDescriptor],
+) -> Option<PixelDescriptor> {
+    if preferred.is_empty() || preferred.iter().any(|p| format_matches(*p, native)) {
+        return None;
+    }
+    preferred
+        .iter()
+        .filter(|pref| reduction_is_offered(native, **pref))
+        .map(|pref| target_descriptor(*pref))
+        .find(|target| {
+            // Probe the plan on one pixel. Cheap, and it means the descriptor
+            // we announce is always one we can actually deliver.
+            apply_strip_reduction(PixelBuffer::new(1, 1, native), *target).is_some()
+        })
+}
+
+/// Convert one strip to the descriptor [`negotiate_strip_descriptor`] chose.
+///
+/// The Gray16→Gray8 special case is not an optimisation — it is what keeps
+/// the strip paths byte-identical to the buffered path. `negotiate_format`'s
+/// gray arm narrows depth with [`crate::convert::downscale_to_8bit`], which
+/// truncates (`>> 8`), while `convert_to` rounds in f32. Routing gray through
+/// `convert_to` here would make streaming and buffered disagree by 1 LSB on
+/// every 10/12-bit mono image — a difference `tests/negotiation_matrix.rs`
+/// catches, and the reason this function exists instead of a bare
+/// `convert_to` at each call site.
+pub(super) fn apply_strip_reduction(
+    pixels: PixelBuffer,
+    target: PixelDescriptor,
+) -> Option<PixelBuffer> {
+    let native = pixels.descriptor();
+    if native.layout() == zenpixels::ChannelLayout::Gray
+        && target.layout() == zenpixels::ChannelLayout::Gray
+        && native.channel_type() == ChannelType::U16
+        && target.channel_type() == ChannelType::U8
+    {
+        return Some(crate::convert::downscale_to_8bit(pixels));
+    }
+    try_reduce(&pixels, target)
 }
 
 /// `source_is_gray`: the *coded* image is alpha-free monochrome, so a

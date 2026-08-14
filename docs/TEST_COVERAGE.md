@@ -302,6 +302,19 @@ predates #35 and is unaffected by its fix; it is a public-behaviour change to
 the streaming path, so it was reported rather than decided unilaterally
 (zenavif#36).
 
+**FIXED 2026-08-14.** `preferred` now means the same thing on all five entry
+points. `negotiate_strip_descriptor` makes `negotiate_format`'s decision from
+descriptors alone (the strip paths must announce a format before the first
+strip exists), probing the conversion plan on a 1x1 buffer so the format
+announced is always one that can be delivered; `apply_strip_reduction` runs it
+per strip. The measured disagreement went 40 of 374 (path, `preferred`) cells
+to 0. One trap is load-bearing and is commented at the call site: the buffered
+gray arm narrows Gray16→Gray8 with `downscale_to_8bit`, which truncates
+(`>> 8`), while `convert_to` rounds in f32 — routing gray through `convert_to`
+here makes streaming disagree with buffered by 1 LSB on every 10/12-bit mono
+image. Gate: `all_paths_agree_on_the_negotiated_pixel_format` +
+`all_paths_agree_on_pixels_byte_for_byte` in `tests/negotiation_matrix.rs`.
+
 ### CICP transfer is lost from the streaming-family descriptors
 
 Same shape, `with_cicp(true)` axis. Buffered calls `set_cicp_on_pixels`; the
@@ -319,6 +332,24 @@ A caller streaming HDR PQ content therefore gets correct pixels tagged with an
 unknown transfer function, which is a colour-management hazard rather than a
 cosmetic one (zenavif#37).
 
+**FIXED 2026-08-14, and it was NOT the same fix as #36.** #36 could not have
+closed it: negotiation cannot add a tag its input never carried. The stamp now
+happens where the descriptors are *minted* — `decode_to_strip_converter` (both
+arms: the hardcoded `RGB8_SRGB`/`RGBA8_SRGB` 8-bit path, and the
+full-conversion fallback that every 10/12-bit HDR file takes) and
+`decode_grid_to_sink` — via one `crate::convert::descriptor_with_cicp`. Doing
+it in the adapter instead looks equivalent and is not: the adapter only has
+probe-era `ImageInfo`, and probe-era and frame-era CICP disagree on the mono
+fixtures (the existing `frame_native` comment in `streaming_decoder_inner`
+warns about exactly this). Measured 15 of 34 cells losing the signalling → 0.
+Note the deliberate asymmetry inside the helper: transfer is set
+unconditionally and falls back to `Unknown` for CICP 2, because the strip
+converter's base descriptors *assert* sRGB about files that never claimed it;
+primaries keep their `Bt709` default. Both match what buffered has always
+reported. Gates: `all_paths_report_the_container_cicp` (consistency) +
+`hdr_pq_fixtures_are_tagged_pq_on_every_path` (correctness — consistency alone
+is satisfied by all three reporting `Unknown`).
+
 ### `GainMapRender::ReconstructHdr` is silently ignored by the row sink
 
 `push_decoder_inner` has no gain-map arm at all. On the two 10-bit-base
@@ -328,6 +359,17 @@ while the row sink returns `Ok(Rgb16)` — the SDR base rendition, with no
 error and no signal that the requested reconstruction did not happen
 (zenavif#38).
 
+**FIXED 2026-08-14.** Also independent of #36. `push_decoder` now routes
+`ReconstructHdr` through `copy_decode_to_sink`, the same escape hatch the
+orientation-bake arm already used, and for the same reason: applying a gain
+map is whole-image (the map is sampled at an image-to-map scale ratio), so it
+is not strip-local. That makes the row sink agree with the buffered path *by
+construction* rather than by a parallel implementation — including the
+refusal, and including reconstruction succeeding on an 8-bit base, which no
+committed fixture covers. Gates:
+`reconstruct_hdr_is_refused_identically_on_all_three_paths` and
+`reconstruct_hdr_refusal_has_the_same_category_on_all_three_paths`.
+
 ### Buffered decode panics on `preferred = [Rgba8]` over HDR PQ input
 
 Not a row-sink issue, found while auditing. `negotiate_format`'s
@@ -336,6 +378,32 @@ Not a row-sink issue, found while auditing. `negotiate_format`'s
 instead of returning an error. Decode input is untrusted and the CICP that
 selects this path comes from the file, so this is a panic-on-input defect on a
 public API (zenavif#39).
+
+**FIXED 2026-08-14, and the reported cell was 1 of 72.** Sweeping the product
+(18 fixtures x 11 `preferred` lists x 5 entry points = 990 cells) found **72**
+panicking cells: 6 HDR fixtures x 4 preference lists x 3 entry points. The
+reductions now go through the fallible `convert_to`; a pair with no plan is
+declined so the next preference gets its shot, which is what
+`DecodeJob::decoder` documents `preferred` to mean ("the first it can produce
+**without lossy conversion**") — an HDR→SDR tone map needs a peak luminance
+the API cannot supply. 0 of the 918 previously-working cells changed a byte.
+
+A **second surface** the audit had missed, found by sweeping the layer rather
+than the report: the five `decode_into_*` convenience methods shared the
+defect through the same two helpers in `map_rgb8_rows` / `map_rgba8_rows`.
+They take no `preferred` list, so a caller could not steer around it — 18 of
+90 (fixture x method) calls panicked. They now return `Error::Unsupported`.
+
+A **coverage gap** in the same class: all four existing fuzz targets go
+through `zenavif::decode_with`, the native entry point, which takes no
+`preferred` list and never reaches `src/codec/negotiate.rs`. The entire
+negotiation layer was unfuzzed, which is how this survived.
+`fuzz/fuzz_targets/fuzz_decode_negotiate.rs` drives the zencodec adapter with
+the preference list and the entry point steered from two in-band bytes.
+
+Gates: `no_preferred_cicp_depth_alpha_combination_panics`,
+`decode_into_convenience_methods_never_panic_on_any_fixture`,
+`decode_into_refuses_hdr_with_an_unsupported_error`.
 
 ### Capabilities audited and found correct on the row-sink path
 
