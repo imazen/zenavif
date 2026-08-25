@@ -37,6 +37,9 @@ use rgb::prelude::*;
 #[cfg(target_arch = "aarch64")]
 use archmage::prelude::*;
 
+#[cfg(target_arch = "x86_64")]
+use archmage::prelude::*;
+
 /// Widen a `u8x16` into four `u32x4` groups (lossless).
 #[cfg(target_arch = "aarch64")]
 #[archmage::rite]
@@ -106,6 +109,61 @@ pub(crate) fn unpremultiply8_neon(token: NeonToken, row: &mut [Rgba<u8>]) {
     }
 }
 
+/// AVX2 row kernel: 2 pixels (8 bytes) per iteration, scalar remainder.
+///
+/// x86 has no `vld4q_u8` deinterleave, so instead of transposing to planes we
+/// widen 8 consecutive bytes (2 RGBA pixels) straight to `i32x8`
+/// `[R0,G0,B0,A0,R1,G1,B1,A1]` (`_mm256_cvtepu8_epi32`) and broadcast each
+/// pixel's alpha across its 128-bit lane (`_mm256_shuffle_epi32::<0xFF>`). The
+/// per-channel math is identical to the NEON path and to the scalar oracle:
+/// `min(255, (c*255 + a/2) / a)` computed in `f32` (exact: `num <= 65152` and
+/// `a <= 255` are exact in f32 and `_mm256_div_ps` is correctly rounded, so
+/// truncation equals integer floor — see the module exactness note). `a == 0`
+/// lanes are selected back to the original channel, and the two alpha lanes are
+/// always restored (the alpha channel is never modified), matching the scalar
+/// loop bit-for-bit. Verified over the complete `(channel, alpha)` domain by
+/// the tests below, which run through `unpremultiply8_dispatch`.
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+pub(crate) fn unpremultiply8_avx2(_token: Desktop64, row: &mut [Rgba<u8>]) {
+    use safe_unaligned_simd::x86_64::{_mm256_storeu_si256, _mm_loadl_epi64};
+    const PX: usize = 2; // 2 pixels = 8 bytes per iteration
+    let bytes: &mut [u8] = bytemuck::cast_slice_mut(row);
+    let full = bytes.len() / (PX * 4) * (PX * 4);
+    let (body, tail) = bytes.split_at_mut(full);
+
+    let c255 = _mm256_set1_epi32(255);
+    let zero = _mm256_setzero_si256();
+
+    for chunk in body.chunks_exact_mut(PX * 4) {
+        let mut padded = [0u8; 16];
+        padded[..8].copy_from_slice(chunk);
+        // [R0,G0,B0,A0,R1,G1,B1,A1] as i32x8
+        let v = _mm256_cvtepu8_epi32(_mm_loadl_epi64(&padded));
+        // per-128-lane broadcast of lane 3 → [A0,A0,A0,A0,A1,A1,A1,A1]
+        let a = _mm256_shuffle_epi32::<0xFF>(v);
+        let num = _mm256_add_epi32(_mm256_mullo_epi32(v, c255), _mm256_srli_epi32::<1>(a));
+        let q = _mm256_cvttps_epi32(_mm256_div_ps(
+            _mm256_cvtepi32_ps(num),
+            _mm256_cvtepi32_ps(a),
+        ));
+        let r = _mm256_min_epu32(q, c255);
+        // a == 0: leave the channel untouched (this crate does not zero RGB).
+        let sel = _mm256_blendv_epi8(r, v, _mm256_cmpeq_epi32(a, zero));
+        // Alpha (lanes 3,7) is never modified — restore it from the source.
+        let out = _mm256_blend_epi32::<0b1000_1000>(sel, v);
+        let mut arr = [0i32; 8];
+        _mm256_storeu_si256(&mut arr, out);
+        for i in 0..8 {
+            chunk[i] = arr[i] as u8;
+        }
+    }
+
+    if !tail.is_empty() {
+        unpremultiply8_scalar(bytemuck::cast_slice_mut(tail));
+    }
+}
+
 /// The original scalar loop. Kept as the reference and the non-aarch64 path.
 pub(crate) fn unpremultiply8_scalar(img_row: &mut [Rgba<u8>]) {
     for px in img_row.iter_mut() {
@@ -125,6 +183,14 @@ pub fn unpremultiply8_dispatch(img_row: &mut [Rgba<u8>]) {
         use archmage::SimdToken;
         if let Some(t) = NeonToken::summon() {
             unpremultiply8_neon(t, img_row);
+            return;
+        }
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        use archmage::SimdToken;
+        if let Some(t) = Desktop64::summon() {
+            unpremultiply8_avx2(t, img_row);
             return;
         }
     }
