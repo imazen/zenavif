@@ -1,4 +1,4 @@
-//! NEON unpremultiply for 8-bit RGBA rows.
+//! SIMD unpremultiply for 8-bit RGBA rows (NEON + AVX2, scalar fallback).
 //!
 //! `convert::unpremultiply8` divides by the pixel's own alpha — a runtime
 //! value — and there is no SIMD integer divide, so the scalar loop cannot
@@ -6,10 +6,21 @@
 //! alpha-bearing AVIF, in both the buffered (`convert.rs`) and streaming
 //! (`strip_convert.rs`) paths.
 //!
-//! `vld4q_u8` is what makes a vector version possible: it deinterleaves RGBA
-//! into four planes in one instruction, so the alpha for a whole 16-pixel group
-//! is already a vector and no per-pixel shuffling is needed. The same kernel
-//! shape measured 2.7x in zenresize.
+//! A vector version is still possible because the per-channel math is
+//! `min(255, (c*255 + a/2) / a)` in `f32` (the reciprocal replaces the missing
+//! integer divide) — only the RGBA deinterleave differs per arch:
+//! * **aarch64/NEON** ([`unpremultiply8_neon`]): `vld4q_u8` deinterleaves RGBA
+//!   into four planes in one instruction, so a whole 16-pixel group's alpha is
+//!   already a vector and no per-pixel shuffling is needed. The same kernel
+//!   shape measured 2.7x in zenresize.
+//! * **x86_64/AVX2** ([`unpremultiply8_avx2`]): no `vld4` — it widens 2 pixels
+//!   (8 bytes) straight to `i32x8` and broadcasts each pixel's alpha across its
+//!   128-bit lane; the math body is identical to NEON and to the scalar oracle.
+//!
+//! [`unpremultiply8_dispatch`] summons the best available tier
+//! (`NeonToken` / `Desktop64`), else the scalar loop. All tiers are proven
+//! bit-identical to the scalar reference over the complete `(channel, alpha)`
+//! domain by the tests below.
 //!
 //! # Exactness
 //!
