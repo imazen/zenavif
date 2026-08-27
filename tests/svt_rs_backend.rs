@@ -157,19 +157,237 @@ fn svt_rs_quality_moves_bytes() {
 // Honest scope rejection — encode time
 // --------------------------------------------------------------------
 
+/// Issue #32: non-64-multiple dimensions are accepted only where the port
+/// codes partial superblocks C-identically (SVT preset >= 6 = speed >= 5).
+/// Below that the seam keeps refusing rather than emitting a stream whose
+/// partition search is known to diverge from C.
 #[test]
-fn svt_rs_rejects_unaligned_dims() {
+fn svt_rs_rejects_partial_sb_dims_below_preset_6() {
     let img = gradient_rgb8(96, 96); // not a multiple of 64
-    let err = zenavif::encode_rgb8(img.as_ref(), &svt_config(), stop())
-        .expect_err("96x96 must be rejected, not padded");
-    let msg = err.to_string();
-    assert!(msg.contains("64"), "error must explain the 64 rule: {msg}");
+    for speed in [1u8, 4] {
+        // speed 4 maps to preset 4 (the default speed); speed 1 to preset 0.
+        let Err(err) = zenavif::encode_rgb8(img.as_ref(), &svt_config().speed(speed), stop())
+        else {
+            panic!("96x96 at speed {speed} must be rejected, not padded");
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("64"), "error must explain the 64 rule: {msg}");
+        assert!(
+            msg.contains("speed >= 5"),
+            "error must name the speed that lifts the rule: {msg}"
+        );
 
-    // Same rule at validate_for_input time.
+        // Same rule at validate_for_input time.
+        assert!(matches!(
+            svt_config()
+                .speed(speed)
+                .validate_for_input(PlanInput::rgb8(96, 96)),
+            Err(ValidationError::BackendUnsupportedParam { .. })
+        ));
+    }
+    // 64-multiples stay accepted at every speed.
+    svt_config()
+        .speed(1)
+        .validate_for_input(PlanInput::rgb8(128, 64))
+        .expect("64-multiples validate at speed 1");
+    // Empty images are refused at every speed.
     assert!(matches!(
-        svt_config().validate_for_input(PlanInput::rgb8(96, 96)),
+        svt_config()
+            .speed(10)
+            .validate_for_input(PlanInput::rgb8(0, 64)),
         Err(ValidationError::BackendUnsupportedParam { .. })
     ));
+}
+
+/// Issue #32: at speed >= 5 the 4:2:0 colour path takes arbitrary
+/// dimensions — partial superblocks, odd sizes, both axes partial — and
+/// the container + rav1d-safe decode round-trip at the TRUE size.
+#[test]
+fn svt_rs_partial_sb_roundtrip_at_preset_ge_6() {
+    // (96,80): one partial SB on each axis, 8-aligned.
+    // (65,65): odd on both axes (upstream partial_sb_gate cell).
+    // (65,72): odd width, 8-aligned height.
+    // (100,37): neither axis 8-aligned, odd height.
+    for (w, h) in [(96usize, 80usize), (65, 65), (65, 72), (100, 37)] {
+        let img = gradient_rgb8(w, h);
+        for speed in [5u8, 10] {
+            let config = svt_config().quality(85.0).speed(speed);
+            config
+                .validate_for_input(PlanInput::rgb8(w as u32, h as u32))
+                .unwrap_or_else(|e| panic!("{w}x{h} at speed {speed} must validate: {e}"));
+            let encoded = zenavif::encode_rgb8(img.as_ref(), &config, stop())
+                .unwrap_or_else(|e| panic!("{w}x{h} at speed {speed} must encode: {e}"));
+            assert!(encoded.color_byte_size > 0);
+
+            let decoded = zenavif::decode(&encoded.avif_file)
+                .unwrap_or_else(|e| panic!("{w}x{h} at speed {speed} must decode: {e}"));
+            assert_eq!(decoded.width() as usize, w, "true width must be signalled");
+            assert_eq!(
+                decoded.height() as usize,
+                h,
+                "true height must be signalled"
+            );
+            let out = decoded
+                .try_as_imgref::<Rgb<u8>>()
+                .expect("no-alpha decode yields RGB8");
+            // Row-wise: the decoded buffer may be stride-padded.
+            let mut se: u64 = 0;
+            for (row_a, row_b) in img.rows().zip(out.rows()) {
+                for (pa, pb) in row_a.iter().zip(row_b.iter()) {
+                    for (ca, cb) in [(pa.r, pb.r), (pa.g, pb.g), (pa.b, pb.b)] {
+                        let d = i64::from(ca) - i64::from(cb);
+                        se += (d * d) as u64;
+                    }
+                }
+            }
+            let mse = se as f64 / (w * h * 3) as f64;
+            let p = 10.0 * (255.0f64 * 255.0 / mse.max(1e-9)).log10();
+            eprintln!(
+                "svt_rs partial-SB {w}x{h} speed {speed} q85: PSNR {p:.2} dB, {} payload bytes",
+                encoded.color_byte_size
+            );
+            // Measured 2026-08-27 at the pinned rev (aarch64), q85: 47.8–50.7
+            // dB across these cells at speeds 5–10 (lowest 100x37 @ speed
+            // 7+), rav1d-safe and aom-rs byte-agreeing on every cell. Floor
+            // is measured-minus-margin: a mis-signalled size, a stride wrap
+            // or a mis-coded edge SB drops this to single digits (the mono
+            // path at preset 6 measured 12–26 dB — see the canary below).
+            assert!(
+                p > 38.0,
+                "{w}x{h} speed {speed}: partial-SB roundtrip PSNR {p:.2} dB below floor"
+            );
+        }
+    }
+}
+
+/// Issue #32: the Cs400 alpha stream rides the port's monochrome path,
+/// which mis-codes partial SBs at preset 6 and pads no partial 8x8 block —
+/// so RGBA takes multiples of 8 at speed >= 6 only; speed 5 keeps the 64
+/// rule and odd dimensions are refused with a reason.
+#[test]
+fn svt_rs_rgba_partial_sb_needs_8_aligned_dims_at_speed_6() {
+    // 96x80 at speed 5 (preset 6): the colour path would take it, the
+    // alpha stream must not (measured 18 dB garbage upstream).
+    let img = gradient_rgba8(96, 80);
+    let err = zenavif::encode_rgba8(img.as_ref(), &svt_config().speed(5), stop())
+        .expect_err("96x80 RGBA at speed 5 must be refused (mono partial SBs need preset 7)");
+    let msg = err.to_string();
+    assert!(msg.contains("64"), "error must explain the 64 rule: {msg}");
+    assert!(
+        msg.contains("speed >= 6"),
+        "error must name the speed that lifts the rule for alpha: {msg}"
+    );
+    assert!(matches!(
+        svt_config()
+            .speed(5)
+            .validate_for_input(PlanInput::rgba8(96, 80)),
+        Err(ValidationError::BackendUnsupportedParam { .. })
+    ));
+    // ...while the same size without alpha validates at speed 5.
+    svt_config()
+        .speed(5)
+        .validate_for_input(PlanInput::rgb8(96, 80))
+        .expect("96x80 RGB validates at speed 5");
+
+    // 96x80 at speed 6 (preset 7): partial SBs, 8-aligned — encodes with a
+    // live alpha item.
+    let config = svt_config().quality(85.0).speed(6);
+    config
+        .validate_for_input(PlanInput::rgba8(96, 80))
+        .expect("8-aligned RGBA validates at speed 6");
+    let encoded = zenavif::encode_rgba8(img.as_ref(), &config, stop()).expect("96x80 RGBA encode");
+    assert!(encoded.alpha_byte_size > 0, "alpha item must carry bytes");
+    let decoded = zenavif::decode(&encoded.avif_file).expect("decode");
+    assert_eq!((decoded.width(), decoded.height()), (96, 80));
+    assert!(
+        decoded.has_alpha(),
+        "alpha plane must survive the container"
+    );
+    let out = decoded
+        .try_as_imgref::<rgb::Rgba<u8>>()
+        .expect("alpha decode yields RGBA8");
+    let mut se_a = 0u64;
+    for (row_a, row_b) in img.rows().zip(out.rows()) {
+        for (pa, pb) in row_a.iter().zip(row_b.iter()) {
+            let d = i64::from(pa.a) - i64::from(pb.a);
+            se_a += (d * d) as u64;
+        }
+    }
+    let psnr_a = 10.0 * (255.0f64 * 255.0 / ((se_a as f64 / (96.0 * 80.0)).max(1e-9))).log10();
+    eprintln!("svt_rs 96x80 RGBA speed 6: alpha PSNR {psnr_a:.2} dB");
+    // Measured 2026-08-27 (pinned rev, aarch64): mono 8-aligned partial-SB
+    // cells 51–55 dB at speeds 6–10. Floor is measured-minus-margin.
+    assert!(psnr_a > 38.0, "alpha PSNR {psnr_a:.2} dB below floor");
+
+    // 65x65 at speed 6: the colour path would take it, the alpha stream
+    // cannot (no partial 8x8 padding on the mono path).
+    let odd = gradient_rgba8(65, 65);
+    let err = zenavif::encode_rgba8(odd.as_ref(), &config, stop())
+        .expect_err("65x65 RGBA at speed 6 must be refused (mono path needs multiples of 8)");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("multiples of 8"),
+        "error must explain the 8-multiple alpha rule: {msg}"
+    );
+    assert!(matches!(
+        config.validate_for_input(PlanInput::rgba8(65, 65)),
+        Err(ValidationError::BackendUnsupportedParam { .. })
+    ));
+    // ...while the same size without alpha validates.
+    config
+        .validate_for_input(PlanInput::rgb8(65, 65))
+        .expect("65x65 RGB validates at speed 6");
+}
+
+/// Upstream-gate canary for [`MONO_PARTIAL_SB_MIN_PRESET`]: the pinned
+/// port asserts monochrome partial-SB support from preset 6, but at
+/// preset 6 a 96x80 mono encode decodes to garbage (18 dB, rav1d-safe and
+/// aom-rs byte-agreeing) and 128x80 / 96x64 / 200x136 are undecodable —
+/// which is why the seam gates mono partial SBs at preset >= 7. This
+/// drives the pipeline directly, exactly as the seam would if the gate
+/// were 6. It FAILS the day upstream fixes the mono path: lower
+/// `MONO_PARTIAL_SB_MIN_PRESET` to 6 and delete this test then.
+#[test]
+fn svt_rs_direct_mono_partial_sb_preset6_still_broken() {
+    use zenavif::{DecodeBackend, decode_av1_obu_yuv};
+
+    let (w, h) = (96usize, 80usize);
+    let plane: Vec<u8> = (0..h)
+        .flat_map(|y| (0..w).map(move |x| (((x + y) * 255) / (w + h)) as u8))
+        .collect();
+    let rc = svtav1::encoder::rate_control::RcConfig {
+        mode: svtav1::encoder::rate_control::RcMode::Cqp,
+        qp: 10,
+        ..svtav1::encoder::rate_control::RcConfig::default()
+    };
+    let mut pipeline =
+        svtav1::encoder::pipeline::EncodePipeline::new(w as u32, h as u32, 6, rc, 0, 1);
+    pipeline.bit_depth = 8;
+    let payload = pipeline
+        .try_encode_frame(&plane, w)
+        .expect("upstream accepts mono 96x80 at preset 6");
+    let still_broken = match decode_av1_obu_yuv(&payload, DecodeBackend::Rav1dSafe) {
+        Err(_) => true,
+        Ok(dec) => {
+            let mut se = 0u64;
+            for y in 0..h {
+                for x in 0..w {
+                    let d = i64::from(plane[y * w + x]) - i64::from(dec.y[y * dec.width + x]);
+                    se += (d * d) as u64;
+                }
+            }
+            let psnr = 10.0 * (255.0f64 * 255.0 / ((se as f64 / (w * h) as f64).max(1e-9))).log10();
+            eprintln!(
+                "direct mono 96x80 preset 6 qp10: PSNR {psnr:.2} dB (measured 18.4 dB at q85)"
+            );
+            psnr < 40.0
+        }
+    };
+    assert!(
+        still_broken,
+        "upstream mono partial-SB coding at preset 6 now round-trips: lower \
+         MONO_PARTIAL_SB_MIN_PRESET to 6 in src/encoder_svt_rs.rs and remove this canary"
+    );
 }
 
 #[test]
@@ -337,6 +555,58 @@ fn svt_rs_alpha_quality_fallback_contract() {
 // --------------------------------------------------------------------
 // Grayscale: monochrome (Cs400) color item
 // --------------------------------------------------------------------
+
+/// Issue #32, grayscale half of the mono rule: 8-aligned partial-SB dims
+/// encode as Cs400 at speed >= 6; odd dims are refused; below speed 6 the
+/// 64 rule holds (preset 6 mis-codes mono partial SBs upstream).
+#[cfg(feature = "encode-mono")]
+#[test]
+fn svt_rs_gray8_partial_sb_needs_8_aligned_dims_at_speed_6() {
+    let gray = |w: usize, h: usize| -> Img<Vec<u8>> {
+        let mut pixels = Vec::with_capacity(w * h);
+        for y in 0..h {
+            for x in 0..w {
+                pixels.push((((x + y) * 255) / (w + h)) as u8);
+            }
+        }
+        Img::new(pixels, w, h)
+    };
+    let config = svt_config().quality(85.0).speed(6);
+    let img = gray(96, 80);
+    let encoded = zenavif::encode_gray8(img.as_ref(), &config, stop()).expect("96x80 gray encode");
+    let decoded = zenavif::decode(&encoded.avif_file).expect("decode");
+    assert_eq!((decoded.width(), decoded.height()), (96, 80));
+    let out = decoded
+        .try_as_imgref::<Rgb<u8>>()
+        .expect("mono decode yields RGB8");
+    let mut se = 0u64;
+    for (row_a, row_b) in img.rows().zip(out.rows()) {
+        for (ya, pb) in row_a.iter().zip(row_b.iter()) {
+            let d = i64::from(*ya) - i64::from(pb.g);
+            se += (d * d) as u64;
+        }
+    }
+    let psnr = 10.0 * (255.0f64 * 255.0 / ((se as f64 / (96.0 * 80.0)).max(1e-9))).log10();
+    eprintln!("svt_rs 96x80 gray speed 6: PSNR {psnr:.2} dB");
+    // Measured 55.2 dB on 2026-08-27 (pinned rev, aarch64); floor is
+    // measured-minus-margin.
+    assert!(psnr > 38.0, "gray PSNR {psnr:.2} dB below floor");
+
+    let odd = gray(65, 72);
+    let err = zenavif::encode_gray8(odd.as_ref(), &config, stop())
+        .expect_err("65x72 gray at speed 6 must be refused (mono path needs multiples of 8)");
+    assert!(err.to_string().contains("multiples of 8"), "got: {err}");
+    let err = zenavif::encode_gray8(img.as_ref(), &config.clone().speed(5), stop())
+        .expect_err("96x80 gray at speed 5 must be refused (mono partial SBs need preset 7)");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("64") && msg.contains("speed >= 6"),
+        "got: {msg}"
+    );
+    let err = zenavif::encode_gray8(img.as_ref(), &config.clone().speed(4), stop())
+        .expect_err("96x80 gray at speed 4 must be refused (64 rule below preset 6)");
+    assert!(err.to_string().contains("64"), "got: {err}");
+}
 
 #[cfg(feature = "encode-mono")]
 #[test]

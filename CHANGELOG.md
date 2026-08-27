@@ -135,6 +135,24 @@ write-path returns + gain-map interop additions, already on main).
   today).
 
 ### Added
+- **`Av1Backend::SvtRs` accepts non-64-multiple dimensions at speed ≥ 5
+  (#32).** The seam's blanket 64-multiple gate is now one predicate
+  (`encoder_svt_rs::svt_rs_dims_error`, shared with
+  `EncoderConfig::validate_for_input`): multiples of 64 at any speed;
+  arbitrary dimensions — odd, partial on both axes — at SVT preset ≥ 6
+  (speed ≥ 5) on the 4:2:0 colour path, where the port codes partial
+  superblocks C-identically and signals the true size; with an alpha or
+  grayscale Cs400 stream, multiples of 8 at speed ≥ 6 only. Presets 0–5
+  keep the 64 rule (the port's partition search is not C-identical on a
+  partial SB there). Measured on the pinned rev: every 4:2:0 partial-SB cell
+  at speeds 5–10 round-trips at 47.8–50.8 dB with rav1d-safe and aom-rs
+  byte-agreeing; the mono path at preset 6 is mis-coded upstream (12–26 dB
+  or undecodable — CLAUDE.md Known Bugs), hence the stricter alpha/gray
+  gate and the canary `svt_rs_direct_mono_partial_sb_preset6_still_broken`.
+  Tests: `svt_rs_partial_sb_roundtrip_at_preset_ge_6`,
+  `svt_rs_rgba_partial_sb_needs_8_aligned_dims_at_speed_6`,
+  `svt_rs_gray8_partial_sb_needs_8_aligned_dims_at_speed_6`,
+  `svt_rs_partial_sb_output_decodes_identically_on_both_backends`.
 - **`zensim_c`: scoring and steering on zensim generation-C
   (`ZensimProfile::C`), plus the additive `TargetMetric::ZensimC`.**
   `C` is a 944-input MLP over the folded-720+append+append2 regime, which

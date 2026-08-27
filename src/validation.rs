@@ -241,22 +241,24 @@ impl crate::EncoderConfig {
                 b: "16-bit input (identity-RGB encode path)",
             });
         }
-        // The svtav1-rs backend codes full 64×64 superblocks only (the
-        // coded dimensions are signaled verbatim in the sequence header);
-        // the encode path rejects unaligned input with the same rule.
+        // The svtav1-rs dimension envelope (issue #32): multiples of 64 at
+        // any speed; arbitrary at SVT preset >= 6 (speed >= 5) for the
+        // 4:2:0 colour path; multiples of 8 at preset >= 7 (speed >= 6)
+        // when a Cs400 alpha stream is emitted. One predicate serves this
+        // check and the encode path (`encoder_svt_rs::svt_rs_dims_error`).
         #[cfg(feature = "encode-svt-rs")]
         if self.backend == crate::Av1Backend::SvtRs
-            && (!input.width.is_multiple_of(64)
-                || !input.height.is_multiple_of(64)
-                || input.width == 0
-                || input.height == 0)
+            && let Some(detail) = crate::encoder_svt_rs::svt_rs_dims_error(
+                input.width as usize,
+                input.height as usize,
+                self.speed,
+                input.input_has_alpha,
+            )
         {
             return Err(ValidationError::BackendUnsupportedParam {
                 backend: "Av1Backend::SvtRs",
                 param: "input dimensions",
-                detail: "width and height must be non-zero multiples of 64 \
-                         (no partial-superblock coding yet); pad/crop upstream \
-                         or use Av1Backend::Zenravif",
+                detail,
             });
         }
         Ok(())
@@ -304,8 +306,10 @@ impl crate::EncoderConfig {
 
     /// The configuration slice the experimental svtav1-rs backend
     /// implements: 8-bit 4:2:0 YCbCr full-range stills, no gain map, no
-    /// lossless. Dimension alignment (multiples of 64) is a config×input
-    /// concern checked by [`Self::validate_for_input`] and at encode time.
+    /// lossless. The dimension envelope (multiples of 64; arbitrary at
+    /// speed >= 5; multiples of 8 at speed >= 6 with alpha) is a
+    /// config×input concern checked by [`Self::validate_for_input`] and at
+    /// encode time.
     #[cfg(feature = "encode-svt-rs")]
     fn validate_svt_rs_scope(&self) -> Result<(), ValidationError> {
         const BACKEND: &str = "Av1Backend::SvtRs";

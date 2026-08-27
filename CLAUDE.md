@@ -132,7 +132,7 @@ TSV diff in the same commit. zenrav1e's halves (`gate-identity`,
 - `(default)` - Pure Rust decode only, safe SIMD via archmage
 - `encode` - AVIF encoding via zenravif
 - `encode-imazen` - Encoding with zenrav1e fork extras (QM, VAQ, still-image, lossless)
-- `encode-svt-rs` - EXPERIMENTAL `Av1Backend::SvtRs` via svtav1-rs (imazen/svtav1 git-branch dep; 8-bit stills only — RGB/RGBA 4:2:0 + grayscale Cs400, alpha as Cs400 `auxl` aux item, 64-px-aligned dims only; muxes in-crate via zenavif-serialize; C-parity assertion pending decision-layer bitstream identity upstream)
+- `encode-svt-rs` - EXPERIMENTAL `Av1Backend::SvtRs` via svtav1-rs (imazen/svtav1 git-branch dep; 8-bit stills only — RGB/RGBA 4:2:0 + grayscale Cs400, alpha as Cs400 `auxl` aux item; dims: multiples of 64 at any speed, arbitrary at speed ≥ 5 (SVT preset ≥ 6), multiples of 8 at speed ≥ 6 when a Cs400 alpha/gray stream is emitted — `svt_rs_dims_error` in `src/encoder_svt_rs.rs` is the single gate (#32); muxes in-crate via zenavif-serialize; C-parity assertion pending decision-layer bitstream identity upstream)
 - `aom-backend` - EXPERIMENTAL `DecodeBackend::AomRs` — zenav1-aom pure-Rust KEY-frame decoder behind the raw-OBU seam `decode_av1_obu_yuv` (git-rev dep on imazen/zenav1-aom; byte-identical to rav1d-safe on the 8-cell decode corpus; drives `examples/decode_4way_bench.rs`)
 - `encode-asm` - Encoding with hand-written assembly (fastest, unsafe)
 - `encode-threading` - Encoding with multi-threading
@@ -227,6 +227,24 @@ only for the primary grid), stitch with the same validated-uniform-tile
 placement as the colour grid, then hand the stitched alpha plane to
 `convert_to_image`; for the per-tile-`auxl` shape, pair each colour tile with
 its own alpha tile before stitching. Regression: `tests/sweep_40_geometry.rs`.
+
+### svtav1-rs MONOCHROME partial superblocks are mis-coded at SVT preset 6 (found 2026-08-27 while landing zenavif#32) — seam gates mono at preset >= 7
+The port's `try_encode_frame` (mono) asserts partial-SB support from
+preset 6 (`pipeline.rs` "monochrome encode supports partial SBs only on
+the PD0 path (preset >= 6)"), but measured at the pinned rev
+(`../zenav1-svt` @ 45aae91b5, aarch64) every 8-aligned non-64-multiple
+mono cell at preset 6 is wrong: 96x80 decodes to 18 dB garbage (the
+partial-SB column/row blocks at 10–18 dB, the full SB at 56 dB; rav1d-safe
+and aom-rs byte-agree, so encoder-side), 64x72 / 72x64 26 dB, 16x72 12 dB,
+and 128x80 / 96x64 / 200x136 are undecodable (rav1d-safe `Malformed`).
+Presets 7–13 are clean on every cell (51–55 dB); the 4:2:0 colour path is
+clean on every cell at presets 6–13 including odd dims. zenavif therefore
+accepts partial SBs at speed ≥ 5 (preset ≥ 6) for RGB but only at
+speed ≥ 6 (preset ≥ 7) + multiples of 8 for RGBA/gray
+(`MONO_PARTIAL_SB_MIN_PRESET`, `src/encoder_svt_rs.rs`). Canary
+`svt_rs_direct_mono_partial_sb_preset6_still_broken` fails when upstream
+fixes it — lower the constant to 6 then. Upstream issue NOT yet filed
+(sibling repo, needs the user's go-ahead).
 
 ### svtav1-rs QP 0 (imazen/zenav1-svt#5) — RESOLVED upstream 2026-07-22 (typed rejection); seam clamp RETAINED
 History: every CQP QP-0 still encode on rev 3e25f52b emitted a valid-syntax

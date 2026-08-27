@@ -128,6 +128,35 @@ fn svt_rs_output_decodes_identically_on_both_backends() {
     }
 }
 
+/// Issue #32: partial-superblock SvtRs output (non-64-multiple, odd, and
+/// both-axes-partial dims at SVT preset >= 6) must decode identically on
+/// rav1d-safe and aom-rs, at the TRUE signalled size.
+#[cfg(feature = "encode-svt-rs")]
+#[test]
+fn svt_rs_partial_sb_output_decodes_identically_on_both_backends() {
+    for (w, h) in [(96usize, 80usize), (65, 65), (100, 37)] {
+        let img = test_image(w, h);
+        for speed in [5u8, 10] {
+            let config = EncoderConfig::new()
+                .quality(60.0)
+                .speed(speed)
+                .chroma_subsampling(zenavif::EncodeChromaSubsampling::Yuv420)
+                .backend(Av1Backend::SvtRs);
+            let enc = zenavif::encode_rgb8(img.as_ref(), &config, stop())
+                .unwrap_or_else(|e| panic!("svt-rs {w}x{h} speed {speed} encode: {e}"));
+            let payload = primary_payload(&enc.avif_file);
+            let rav =
+                decode_av1_obu_yuv(&payload, DecodeBackend::Rav1dSafe).expect("rav1d-safe decode");
+            assert_eq!(
+                (rav.width, rav.height),
+                (w, h),
+                "svt-rs {w}x{h} speed {speed}: sequence header must signal the true size"
+            );
+            assert_backends_agree(&enc.avif_file, &format!("svt-rs {w}x{h} speed {speed}"));
+        }
+    }
+}
+
 /// 10-bit AV1 from the zenravif backend: both decode backends must agree on
 /// the high-bit-depth path too (aom-rs decodes 8/10/12-bit; rav1d-safe
 /// likewise). Encodes RGB16 -> 10-bit AV1.

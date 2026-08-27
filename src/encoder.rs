@@ -214,8 +214,10 @@ pub enum Av1Backend {
     /// rejected upstream. Streams pass decode conformance under `aomdec`
     /// (2100 conformance cells at the pin) and the payload is muxed into
     /// a real AVIF container in-crate. The zenavif seam's scope stays
-    /// deliberately narrow — 8-bit 4:2:0 stills with dimensions that are
-    /// multiples of 64; see `src/encoder_svt_rs.rs` module docs.
+    /// deliberately narrow — 8-bit 4:2:0 stills; dimensions are multiples
+    /// of 64 at every speed, arbitrary at speed >= 5 (SVT preset >= 6;
+    /// with alpha or grayscale: multiples of 8 at speed >= 6); see
+    /// `src/encoder_svt_rs.rs` module docs.
     /// [`EncoderConfig::validate`] rejects the variant when the feature
     /// is off, and rejects configs outside the supported scope when on.
     SvtRs,

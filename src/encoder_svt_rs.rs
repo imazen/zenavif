@@ -13,15 +13,22 @@
 //!   plus grayscale → monochrome (Cs400). RGBA's straight alpha plane is a
 //!   separate Cs400 encode muxed as an `auxl` auxiliary item, honoring the
 //!   [`crate::EncoderConfig::alpha_quality`] fallback contract.
-//! * Width and height must be **multiples of 64** — a zenavif-side
-//!   verified-envelope restriction, no longer an upstream limit. At the
-//!   pinned rev the pipeline pads TRUE→ALIGNED internally, signals the
-//!   TRUE dimensions in the sequence header, and codes partial
-//!   superblocks (byte-matching C at presets ≥ 6; panic-free +
-//!   aomdec-decodable at presets 0–5 — upstream task #95). zenavif keeps
-//!   the 64-multiple gate until its own cross-backend decode validation
-//!   covers non-64-aligned cells; the alpha/gray (mono) path upstream
-//!   also still requires 8-aligned dims and 64-aligned below preset 6.
+//! * Dimensions (issue #32): **multiples of 64 at every speed**; at SVT
+//!   preset ≥ 6 (zenavif speed ≥ 5) the 4:2:0 colour path takes
+//!   **arbitrary** dimensions — the pinned rev pads TRUE→ALIGNED
+//!   internally, signals the TRUE dimensions in the sequence header, and
+//!   codes partial superblocks byte-identically to C on the PD0 path
+//!   (upstream `partial_sb_gate` 101/101 incl. odd dims). Presets 0–5 keep
+//!   the 64-multiple gate: their partition search is still not
+//!   C-identical on a partial SB (upstream STATUS.md, 2026-08-04). The
+//!   alpha/gray **monochrome** streams are stricter: partial superblocks
+//!   only at preset ≥ 7 (speed ≥ 6 — at preset 6 the port's mono path
+//!   mis-codes them, see [`MONO_PARTIAL_SB_MIN_PRESET`]) and only at
+//!   multiples of 8 (the mono path does no TRUE→ALIGNED padding yet); the
+//!   alpha item must match the colour item's dimensions, so an RGBA
+//!   encode inherits that rule. [`svt_rs_dims_error`] is the single gate
+//!   both the encode path and [`crate::EncoderConfig::validate_for_input`]
+//!   apply.
 //! * No 10-bit, no RGB (identity) model, no limited range, no lossless, no
 //!   gain map, no animation. Each is rejected honestly at encode time (and
 //!   by [`crate::EncoderConfig::validate`]).
@@ -131,9 +138,87 @@ fn quality_to_qp_gated(quality: f32) -> u8 {
 /// Provenance: mirrors the private `AvifEncoder::speed_to_preset` in
 /// imazen/svtav1 `svtav1-rs/svtav1/src/avif.rs` (speed 1 → preset 0
 /// slowest/best, speed 10 → preset 13 fastest; linear with rounding).
-fn speed_to_svt_preset(speed: u8) -> u8 {
+pub(crate) fn speed_to_svt_preset(speed: u8) -> u8 {
     let clamped = speed.clamp(1, 10) as u32;
     (((clamped - 1) * 13 + 4) / 9) as u8
+}
+
+/// Lowest SVT preset whose partition search codes a partial superblock
+/// byte-identically to C (the PD0 fixed-tree path; upstream
+/// `partial_sb_gate` 101/101). Below it the port roots the search at the
+/// clamped extent and upstream STATUS.md still lists partial-SB
+/// divergences, so those presets stay 64-multiple-only here.
+pub(crate) const PARTIAL_SB_MIN_PRESET: u8 = 6;
+
+/// Lowest SVT preset at which the port's **monochrome** path (alpha
+/// auxiliary items, grayscale colour items) codes a partial superblock
+/// correctly. Upstream asserts support from preset 6, but at preset 6 the
+/// mono path emits wrong pixels or an undecodable stream on every
+/// partial-SB cell measured (2026-08-27, pinned rev, aarch64: 96x80 18 dB
+/// with both decoders byte-agreeing on the garbage, 64x72 / 72x64 26 dB,
+/// 16x72 12 dB, 128x80 / 96x64 / 200x136 rav1d-safe `Malformed`), while
+/// every cell is clean at preset >= 7 (51–55 dB, 8-aligned dims). The
+/// canary `svt_rs_direct_mono_partial_sb_preset6_still_broken` in
+/// `tests/svt_rs_backend.rs` fails the day upstream fixes it — lower this
+/// to 6 then.
+pub(crate) const MONO_PARTIAL_SB_MIN_PRESET: u8 = 7;
+
+/// The dimension envelope this backend accepts, as one predicate shared by
+/// the encode path and [`crate::EncoderConfig::validate_for_input`] (issue
+/// #32). Returns the reason a `width`x`height` image is refused at zenavif
+/// `speed`, or `None` when it encodes.
+///
+/// * Any speed: multiples of 64 always encode.
+/// * SVT preset ≥ [`PARTIAL_SB_MIN_PRESET`] (speed ≥ 5): the 4:2:0 colour
+///   path codes arbitrary dimensions (partial superblocks, upstream pads
+///   TRUE→ALIGNED and signals the true size).
+/// * `mono_plane` streams — the Cs400 alpha auxiliary item and grayscale
+///   colour items — need SVT preset ≥ [`MONO_PARTIAL_SB_MIN_PRESET`]
+///   (speed ≥ 6) AND multiples of 8, because the port's monochrome path
+///   does no TRUE→ALIGNED padding (`try_encode_frame` rejects
+///   `aligned != true`) and mis-codes partial SBs at preset 6.
+/// * Below those presets: 64-multiples only.
+pub(crate) fn svt_rs_dims_error(
+    width: usize,
+    height: usize,
+    speed: u8,
+    mono_plane: bool,
+) -> Option<&'static str> {
+    if width == 0 || height == 0 {
+        return Some("cannot encode an empty image");
+    }
+    if width.is_multiple_of(64) && height.is_multiple_of(64) {
+        return None;
+    }
+    let preset = speed_to_svt_preset(speed);
+    if preset < PARTIAL_SB_MIN_PRESET {
+        return Some(
+            "Av1Backend::SvtRs codes dimensions that are not multiples of 64 only at \
+             SVT preset >= 6 (speed >= 5): below that the svtav1-rs partition search is \
+             not C-identical on a partial superblock. Use speed >= 5, pad/crop to \
+             multiples of 64, or use the zenravif backend",
+        );
+    }
+    if mono_plane {
+        if preset < MONO_PARTIAL_SB_MIN_PRESET {
+            return Some(
+                "Av1Backend::SvtRs alpha and grayscale (Cs400) streams code dimensions \
+                 that are not multiples of 64 only at SVT preset >= 7 (speed >= 6): at \
+                 preset 6 the svtav1-rs monochrome path mis-codes partial superblocks. \
+                 Use speed >= 6, RGB input, pad/crop to multiples of 64, or use the \
+                 zenravif backend",
+            );
+        }
+        if !width.is_multiple_of(8) || !height.is_multiple_of(8) {
+            return Some(
+                "Av1Backend::SvtRs alpha and grayscale (Cs400) streams need dimensions \
+                 that are multiples of 8 (the svtav1-rs monochrome path pads no partial \
+                 8x8 block yet), and the alpha item must match the colour item's size. \
+                 Use RGB input, pad/crop to multiples of 8, or use the zenravif backend",
+            );
+        }
+    }
+    None
 }
 
 /// Reject configuration the svtav1-rs backend cannot honor.
@@ -214,33 +299,32 @@ fn cicp_to_serialize_transfer(tc: u8) -> zenavif_serialize::constants::TransferC
     }
 }
 
-/// Reject dimensions outside this backend's verified envelope (module docs:
-/// 64-multiples only — a zenavif-side restriction; upstream pads and codes
-/// partial SBs, but zenavif's cross-backend validation does not cover
-/// non-64-aligned cells yet, and the mono alpha/gray path upstream is
-/// stricter than the 4:2:0 path).
-fn reject_unaligned_dims(width: usize, height: usize) -> Result<()> {
-    if width == 0 || height == 0 {
-        return Err(at!(Error::Encode(format!(
-            "cannot encode empty image ({width}x{height})"
-        ))));
+/// Reject dimensions outside this backend's envelope — the encode-time
+/// twin of the `validate_for_input` check, both driven by
+/// [`svt_rs_dims_error`]. `mono_plane` is true when the encode emits a
+/// Cs400 stream (alpha auxiliary item or grayscale colour item).
+fn reject_out_of_envelope_dims(
+    width: usize,
+    height: usize,
+    config: &EncoderConfig,
+    mono_plane: bool,
+) -> Result<()> {
+    match svt_rs_dims_error(width, height, config.speed, mono_plane) {
+        None => Ok(()),
+        Some(reason) => Err(at!(Error::Encode(format!(
+            "{reason} (got {width}x{height} at speed {} = SVT preset {})",
+            config.speed,
+            speed_to_svt_preset(config.speed)
+        )))),
     }
-    if !width.is_multiple_of(64) || !height.is_multiple_of(64) {
-        return Err(at!(Error::Encode(format!(
-            "Av1Backend::SvtRs currently accepts dimensions that are \
-             multiples of 64 only (got {width}x{height}) — the envelope \
-             zenavif has cross-validated. Pad/crop upstream or use the \
-             zenravif backend for arbitrary sizes"
-        ))));
-    }
-    Ok(())
 }
 
 /// Run one still-frame monochrome encode through the svtav1-rs pipeline.
 ///
 /// `plane` is `stride`-strided (`stride >= width`), `width`/`height` already
-/// 64-aligned. Returns the TD + sequence header + frame OBU payload. Used for
-/// grayscale color items and alpha auxiliary items (both are Cs400 streams).
+/// inside the mono envelope of [`svt_rs_dims_error`]. Returns the TD +
+/// sequence header + frame OBU payload. Used for grayscale color items and
+/// alpha auxiliary items (both are Cs400 streams).
 #[expect(clippy::too_many_arguments, reason = "internal plane-encode helper")]
 fn encode_mono_plane_svt(
     plane: &[u8],
@@ -350,7 +434,7 @@ pub(crate) fn encode_rgb8_svt_rs(
 
     let width = img.width();
     let height = img.height();
-    reject_unaligned_dims(width, height)?;
+    reject_out_of_envelope_dims(width, height, config, false)?;
     let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
     let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
 
@@ -458,7 +542,8 @@ pub(crate) fn encode_rgba8_svt_rs(
 
     let width = img.width();
     let height = img.height();
-    reject_unaligned_dims(width, height)?;
+    // The alpha plane is a Cs400 stream: the stricter mono envelope applies.
+    reject_out_of_envelope_dims(width, height, config, true)?;
     let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
     let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
 
@@ -571,7 +656,8 @@ pub(crate) fn encode_gray8_svt_rs(
 
     let width = img.width();
     let height = img.height();
-    reject_unaligned_dims(width, height)?;
+    // Grayscale is a Cs400 stream: the stricter mono envelope applies.
+    reject_out_of_envelope_dims(width, height, config, true)?;
     let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
     let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
 
