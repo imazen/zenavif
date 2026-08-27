@@ -306,9 +306,10 @@ mod alloc_sites {
             g.set(true);
             with_prof(|p| {
                 if let Some((key, sz)) = p.ptrs.remove(&(ptr as usize))
-                    && let Some(s) = p.sites.get_mut(&key) {
-                        s.live -= sz as i64;
-                    }
+                    && let Some(s) = p.sites.get_mut(&key)
+                {
+                    s.live -= sz as i64;
+                }
             });
             g.set(false);
         });
@@ -333,9 +334,10 @@ mod alloc_sites {
             with_prof(|p| {
                 if old_size >= min
                     && let Some((k, sz)) = p.ptrs.remove(&(old_ptr as usize))
-                        && let Some(s) = p.sites.get_mut(&k) {
-                            s.live -= sz as i64;
-                        }
+                    && let Some(s) = p.sites.get_mut(&k)
+                {
+                    s.live -= sz as i64;
+                }
                 if let Some(key) = key {
                     let s = p.sites.entry(key).or_default();
                     s.total += new_size as u64;
@@ -420,22 +422,23 @@ mod alloc_sites {
         let mut i = 0;
         while i < b.len() {
             if b[i] == b'['
-                && let Some(j) = s[i + 1..].find(']') {
-                    let inner = &s[i + 1..i + 1 + j];
-                    if (8..=17).contains(&inner.len())
-                        && inner.chars().all(|c| c.is_ascii_hexdigit())
-                    {
-                        i += j + 2;
-                        continue;
-                    }
+                && let Some(j) = s[i + 1..].find(']')
+            {
+                let inner = &s[i + 1..i + 1 + j];
+                if (8..=17).contains(&inner.len()) && inner.chars().all(|c| c.is_ascii_hexdigit()) {
+                    i += j + 2;
+                    continue;
                 }
+            }
             out.push(b[i] as char);
             i += 1;
         }
         if let Some(i) = out.rfind("::h")
-            && out.len() - i == 19 && out[i + 3..].chars().all(|c| c.is_ascii_hexdigit()) {
-                out.truncate(i);
-            }
+            && out.len() - i == 19
+            && out[i + 3..].chars().all(|c| c.is_ascii_hexdigit())
+        {
+            out.truncate(i);
+        }
         out
     }
 
@@ -817,7 +820,9 @@ fn main() {
     let pre = status_kb("VmRSS:");
 
     let px: Vec<Rgb<u8>> = data
-        .as_chunks::<3>().0.iter()
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|c| Rgb {
             r: c[0],
             g: c[1],
@@ -829,9 +834,10 @@ fn main() {
     {
         use core::sync::atomic::Ordering;
         if let Ok(v) = std::env::var("JXL_PEAK_TRACE_AT")
-            && let Ok(n) = v.parse::<usize>() {
-                counting_alloc::TRACE_AT.store(n, Ordering::Relaxed);
-            }
+            && let Ok(n) = v.parse::<usize>()
+        {
+            counting_alloc::TRACE_AT.store(n, Ordering::Relaxed);
+        }
         if std::env::var("JXL_ALLOC_SITES").is_ok_and(|v| v == "1") {
             if let Some(n) = std::env::var("JXL_ALLOC_SITE_MIN")
                 .ok()

@@ -23,7 +23,9 @@ fn main() {
     let (w, h) = (info.width as usize, info.height as usize);
     // PNG 16-bit is big-endian
     let pixels: Vec<Rgb<u16>> = buf[..w * h * 6]
-        .as_chunks::<6>().0.iter()
+        .as_chunks::<6>()
+        .0
+        .iter()
         .map(|c| Rgb {
             r: u16::from_be_bytes([c[0], c[1]]),
             g: u16::from_be_bytes([c[2], c[3]]),

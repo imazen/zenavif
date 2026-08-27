@@ -76,7 +76,9 @@ fn load_rgb8(path: &str) -> ImgVec<Rgb<u8>> {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let pixels: Vec<Rgb<u8>> = img
         .as_raw()
-        .as_chunks::<3>().0.iter()
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|c| Rgb::new(c[0], c[1], c[2]))
         .collect();
     ImgVec::new(pixels, w, h)
@@ -108,7 +110,9 @@ fn downscale(src: &ImgVec<Rgb<u8>>, long_edge: u32) -> Option<ImgVec<Rgb<u8>>> {
     let out = image::imageops::resize(&buf, nw, nh, image::imageops::FilterType::Lanczos3);
     let pixels: Vec<Rgb<u8>> = out
         .as_raw()
-        .as_chunks::<3>().0.iter()
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|c| Rgb::new(c[0], c[1], c[2]))
         .collect();
     Some(ImgVec::new(pixels, nw as usize, nh as usize))
