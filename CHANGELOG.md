@@ -10,6 +10,18 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## Workspace
 
+- **2026-08-27 — `zenravif` is a git-rev dep, so the `encode` chain resolves
+  for git consumers.** `ravif` (package `zenravif` 0.2.0, unpublished) was the
+  sibling path `../ravif/ravif`, which escapes this repo and made any
+  `zenavif = { git = … }` consumer fail at resolution (zencodecs / zenpipe CI
+  had been red at `cargo test`'s resolve step since 2026-08-01). Now pinned to
+  imazen/cavif-rs `09a0dba3`, the rev where zenravif's own zenrav1e dep became
+  a git-rev pin (it was path-only). Manifest + lockfile only; the compiled
+  sources are the same shas the sibling checkouts were at. Consumers taking
+  zenavif from git must still supply zenavif-serialize 0.2.0 (zenravif's
+  registry requirement; crates.io has 0.1.4) via their own `[patch.crates-io]`
+  — e.g. `zenavif-serialize = { git = "https://github.com/imazen/zenavif" }`.
+
 - **2026-08-14 — decode negotiation converged across all five entry points
   (zenavif#39, #38, #37, #36).** `preferred = [Rgb8]` over an HDR file no
   longer panics: `negotiate_format` reduced formats through

@@ -76,7 +76,19 @@ bytemuck = { version = "1.25.0", default-features = false, features = ["derive"]
 thiserror = { version = "2.0.18", default-features = false }
 whereat = { version = "0.1.5"}
 log = "0.4.29"
-ravif = { package = "zenravif", version = "0.2.0", path = "../ravif/ravif", default-features = false, optional = true, features = ["stop"] }
+# zenravif 0.2.0 is unpublished (crates.io tops out at 0.1.3), so it is a
+# git-rev pin on imazen/cavif-rs main. It WAS the sibling path `../ravif/ravif`
+# until 2026-08-27; a path that escapes this repo is unresolvable for anyone
+# taking zenavif from git (zencodecs / zenpipe patch `zenavif = { git = … }`,
+# and their CI had failed at resolution since 2026-08-01). This rev is the one
+# where zenravif's own zenrav1e dep became a git-rev pin too (it was path-only),
+# so the whole `encode` chain resolves from bare checkouts. Bump `rev` when a
+# newer zenravif is needed; for sibling-lockstep work add an uncommitted
+# `[patch."https://github.com/imazen/cavif-rs"] zenravif = { path = "../ravif/ravif" }`.
+# Git consumers must mirror the zenavif-serialize 0.2.0 supply (zenravif needs
+# it from the registry, where only 0.1.4 exists) — this workspace's member
+# does it via the [patch.crates-io] below.
+ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/imazen/cavif-rs", rev = "09a0dba3bbfad6dee3109c1ac8ccc33bb57968a3", default-features = false, optional = true, features = ["stop"] }
 # svtav1-rs experimental AV1 encode backend (`encode-svt-rs` feature).
 # The crate lives in the rust/svtav1 subdir of imazen/svtav1; cargo
 # discovers workspace-subdir packages in git deps by package name. Rev-pinned
