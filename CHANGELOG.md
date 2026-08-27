@@ -10,6 +10,29 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## Workspace
 
+- **2026-08-27 — svt-rs: alpha/grayscale (Cs400) streams take partial
+  superblocks at speed ≥ 5 (SVT preset 6), same as the colour path.** The
+  seam had held mono at preset ≥ 7 because the port's mono path mis-coded
+  partial SBs at preset 6 (`encode_fixed_tree` coded a one-false edge leaf
+  as a PARTITION_NONE square; 96x80 18 dB garbage, 128x80 / 200x136
+  undecodable). zenav1-svt `b6a1737a` fixes the mono arm, and `1ed7db46` the
+  second defect that exposed (the now-rect edge block straddled a thin right
+  edge and its recon store wrapped into the next row — 200x136 decoded at
+  27.9 dB with the first SB row clean and every later row wrong from column
+  0; aomdec still decoded it), so
+  `MONO_PARTIAL_SB_MIN_PRESET` is gone and `svt_rs_dims_error` applies one
+  preset rule (multiples of 8 still required for mono — no TRUE→ALIGNED
+  padding there). The canary
+  `svt_rs_direct_mono_partial_sb_preset6_still_broken` — which had panicked
+  in the "AV1 backend seams" CI step on every platform since it landed,
+  because the pack's `debug_assert` fires in the dev profile where the
+  release measurement had shown garbage — is now the round-trip gate
+  `svt_rs_direct_mono_partial_sb_preset6_roundtrips` (7 geometries,
+  rav1d-safe + aom-rs byte-agreeing, 96x80 56.18 dB at qp 10). Tests
+  `svt_rs_rgba_partial_sb_needs_8_aligned_dims_at_speed_5` /
+  `svt_rs_gray8_partial_sb_needs_8_aligned_dims_at_speed_5` now encode
+  96x80 at speed 5 and keep the speed-4 refusal.
+
 - **2026-08-27 — `zenravif` is a git-rev dep, so the `encode` chain resolves
   for git consumers.** `ravif` (package `zenravif` 0.2.0, unpublished) was the
   sibling path `../ravif/ravif`, which escapes this repo and made any

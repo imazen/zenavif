@@ -291,7 +291,7 @@ let image = decode_with(&avif_data, &config, &Unstoppable).unwrap();
 | `encode-asm` | Encoding with hand-written assembly (fastest, uses unsafe) |
 | `encode-threading` | Multi-threaded encoding |
 | `encode-imazen` | Encoding with zenrav1e fork extras (QM, lossless) |
-| `encode-svt-rs` | EXPERIMENTAL encoding via svtav1-rs (pure Rust SVT-AV1 port; 8- and 10-bit 4:2:0 stills incl. HDR CICP + clli/mdcv; dims multiples of 64 at any speed, arbitrary at speed ≥ 5, multiples of 8 at speed ≥ 6 with alpha/gray; 10-bit alpha/gray at speed ≥ 7; git dep) |
+| `encode-svt-rs` | EXPERIMENTAL encoding via svtav1-rs (pure Rust SVT-AV1 port; 8- and 10-bit 4:2:0 stills incl. HDR CICP + clli/mdcv; dims multiples of 64 at any speed, arbitrary at speed ≥ 5, multiples of 8 at speed ≥ 5 with alpha/gray; 10-bit alpha/gray at speed ≥ 7; git dep) |
 | `unsafe-asm` | Decoding with hand-written assembly via C FFI (fastest, uses unsafe) |
 | `zencodec` | Integration with [zencodec](https://crates.io/crates/zencodec) trait hierarchy |
 

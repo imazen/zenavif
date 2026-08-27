@@ -27,7 +27,7 @@ never silent degradation. Sources: `src/encoder.rs`, `src/encoder_svt_rs.rs`,
 | Pixel range Full | yes (default) | yes (pinned) |
 | Pixel range Limited | yes | rejected (SH writer pins color_range=1) |
 | CICP primaries/transfer signaling | yes (config → SH + container `colr`) | yes (SH + container; matrix pinned BT.601) |
-| Dimensions | arbitrary | multiples of 64 at any speed; arbitrary at speed ≥ 5 (SVT preset ≥ 6, partial SBs on the 4:2:0 path); with alpha or grayscale (Cs400 stream): multiples of 8 at speed ≥ 6 only — the port's mono path mis-codes partial SBs at preset 6 and pads no partial 8x8 block (#32; `svt_rs_dims_error`) |
+| Dimensions | arbitrary | multiples of 64 at any speed; arbitrary at speed ≥ 5 (SVT preset ≥ 6, partial SBs on the 4:2:0 path); with alpha or grayscale (Cs400 stream): multiples of 8 at speed ≥ 5 — the port's mono path pads no partial 8x8 block (#32; `svt_rs_dims_error`; the preset-6 mono mis-coding was fixed in zenav1-svt `b6a1737a` + `1ed7db46`) |
 | Quality dial semantics | fitted quality→qindex curve (0–255; `encode_plan.rs`) | linear quality→QP (63..1; **QP 0 clamped out** — corrupts upstream, zenav1-svt#5) |
 | Speed dial | 1–10 → zenravif speed ladder | 1–10 → SVT preset 0–13 linear (wall-time NOT aligned with zenravif's ladder: ~6× faster at s6, slower at s2) |
 | Lossless | yes (`encode-imazen`, release-gated exactness) | rejected (QP 0 ≠ lossless, and corrupt anyway) |

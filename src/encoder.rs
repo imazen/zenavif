@@ -217,7 +217,7 @@ pub enum Av1Backend {
     /// deliberately narrow — 8- and 10-bit 4:2:0 stills (10-bit alpha or
     /// grayscale at speed >= 7 only); dimensions are multiples of 64 at
     /// every speed, arbitrary at speed >= 5 (SVT preset >= 6; with alpha
-    /// or grayscale: multiples of 8 at speed >= 6); see
+    /// or grayscale: multiples of 8 at that speed); see
     /// `src/encoder_svt_rs.rs` module docs.
     /// [`EncoderConfig::validate`] rejects the variant when the feature
     /// is off, and rejects configs outside the supported scope when on.

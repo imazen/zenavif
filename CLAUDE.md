@@ -132,7 +132,7 @@ TSV diff in the same commit. zenrav1e's halves (`gate-identity`,
 - `(default)` - Pure Rust decode only, safe SIMD via archmage
 - `encode` - AVIF encoding via zenravif
 - `encode-imazen` - Encoding with zenrav1e fork extras (QM, VAQ, still-image, lossless)
-- `encode-svt-rs` - EXPERIMENTAL `Av1Backend::SvtRs` via svtav1-rs (imazen/svtav1 git-branch dep; stills only — RGB/RGBA 4:2:0 + grayscale Cs400 at 8 or 10 bits (#33: 16-bit input / `EncodeBitDepth::Ten` → native u16 `try_encode_frame_420_hbd`, 10-bit alpha/gray only at speed ≥ 7 = SVT preset ≥ 9 per `svt_rs_depth_error`; HDR clli/mdcv container-side), alpha as Cs400 `auxl` aux item; dims: multiples of 64 at any speed, arbitrary at speed ≥ 5 (SVT preset ≥ 6), multiples of 8 at speed ≥ 6 when a Cs400 alpha/gray stream is emitted — `svt_rs_dims_error` in `src/encoder_svt_rs.rs` is the single gate (#32); muxes in-crate via zenavif-serialize; C-parity assertion pending decision-layer bitstream identity upstream)
+- `encode-svt-rs` - EXPERIMENTAL `Av1Backend::SvtRs` via svtav1-rs (imazen/svtav1 git-branch dep; stills only — RGB/RGBA 4:2:0 + grayscale Cs400 at 8 or 10 bits (#33: 16-bit input / `EncodeBitDepth::Ten` → native u16 `try_encode_frame_420_hbd`, 10-bit alpha/gray only at speed ≥ 7 = SVT preset ≥ 9 per `svt_rs_depth_error`; HDR clli/mdcv container-side), alpha as Cs400 `auxl` aux item; dims: multiples of 64 at any speed, arbitrary at speed ≥ 5 (SVT preset ≥ 6), multiples of 8 at speed ≥ 5 when a Cs400 alpha/gray stream is emitted (mono partial SBs at preset 6 since zenav1-svt `b6a1737a` + `1ed7db46`) — `svt_rs_dims_error` in `src/encoder_svt_rs.rs` is the single gate (#32); muxes in-crate via zenavif-serialize; C-parity assertion pending decision-layer bitstream identity upstream)
 - `aom-backend` - EXPERIMENTAL `DecodeBackend::AomRs` — zenav1-aom pure-Rust KEY-frame decoder behind the raw-OBU seam `decode_av1_obu_yuv` (git-rev dep on imazen/zenav1-aom; byte-identical to rav1d-safe on the 8-cell decode corpus; drives `examples/decode_4way_bench.rs`)
 - `encode-asm` - Encoding with hand-written assembly (fastest, unsafe)
 - `encode-threading` - Encoding with multi-threading
@@ -228,23 +228,41 @@ placement as the colour grid, then hand the stitched alpha plane to
 `convert_to_image`; for the per-tile-`auxl` shape, pair each colour tile with
 its own alpha tile before stitching. Regression: `tests/sweep_40_geometry.rs`.
 
-### svtav1-rs MONOCHROME partial superblocks are mis-coded at SVT preset 6 (found 2026-08-27 while landing zenavif#32) — seam gates mono at preset >= 7
-The port's `try_encode_frame` (mono) asserts partial-SB support from
-preset 6 (`pipeline.rs` "monochrome encode supports partial SBs only on
-the PD0 path (preset >= 6)"), but measured at the pinned rev
-(`../zenav1-svt` @ 45aae91b5, aarch64) every 8-aligned non-64-multiple
-mono cell at preset 6 is wrong: 96x80 decodes to 18 dB garbage (the
-partial-SB column/row blocks at 10–18 dB, the full SB at 56 dB; rav1d-safe
-and aom-rs byte-agree, so encoder-side), 64x72 / 72x64 26 dB, 16x72 12 dB,
-and 128x80 / 96x64 / 200x136 are undecodable (rav1d-safe `Malformed`).
-Presets 7–13 are clean on every cell (51–55 dB); the 4:2:0 colour path is
-clean on every cell at presets 6–13 including odd dims. zenavif therefore
-accepts partial SBs at speed ≥ 5 (preset ≥ 6) for RGB but only at
-speed ≥ 6 (preset ≥ 7) + multiples of 8 for RGBA/gray
-(`MONO_PARTIAL_SB_MIN_PRESET`, `src/encoder_svt_rs.rs`). Canary
-`svt_rs_direct_mono_partial_sb_preset6_still_broken` fails when upstream
-fixes it — lower the constant to 6 then. Upstream issue NOT yet filed
-(sibling repo, needs the user's go-ahead).
+### svtav1-rs MONOCHROME partial superblocks were mis-coded at SVT preset 6 (found 2026-08-27 while landing zenavif#32) — FIXED upstream `b6a1737a` + `1ed7db46` the same day; seam gate lowered to preset 6
+History: the port's `try_encode_frame` (mono) asserted partial-SB support
+from preset 6, but measured at `../zenav1-svt` @ 45aae91b5 (aarch64) every
+8-aligned non-64-multiple mono cell at preset 6 was wrong: 96x80 decoded
+to 18 dB garbage (rav1d-safe and aom-rs byte-agreeing, so encoder-side),
+64x72 / 72x64 26 dB, 16x72 12 dB, 128x80 / 96x64 / 200x136 undecodable.
+Presets 7–13 were clean on every cell; the 4:2:0 colour path was clean at
+presets 6–13 including odd dims. The seam gated mono at preset ≥ 7 with
+the canary `svt_rs_direct_mono_partial_sb_preset6_still_broken`.
+**Root (upstream, `partition.rs::encode_fixed_tree`):** the spec-5.11.4
+single-edge rule (a one-false PD0 leaf codes as the single legal HORZ/VERT
+rect, never a NONE square) lived only in the funnel arm (4:2:0); the mono
+arm fell through to a full-size PARTITION_NONE. Preset-6-specific because
+the M6 PD0 keeps NSQ geometry on and TESTS one-false nodes; ≥ 7 force-splits
+them. The pack's `debug_assert` names it, which is why the canary PANICKED
+(not "still broken") the first time CI ran `cargo test` (dev profile —
+`--release` compiles the assert out and produces the 18 dB garbage
+instead). Fixed in zenav1-svt `b6a1737a` (regression test + spotcheck
+decode cells). Fixing it exposed a SECOND mono defect, `1ed7db46`: with the
+edge leaf coded as a rect, a thin right edge (aligned width ≡ 8 mod 64,
+e.g. 200x136) makes the rect straddle the aligned width and the mono leaf
+coder stored its full width at the aligned stride — wrapping into the next
+row's columns 0..24 and corrupting the encoder's above reference for the
+following SB row (rav1d-safe 27.9 dB at 200x136, first SB row clean, every
+later row wrong from column 0 outward; aomdec still DECODED it, so a
+decodability gate cannot see this class). Fixed with the same store clip
+the funnel path already had; upstream gate = a recon-vs-aomdec spotcheck
+cell on the `(x+y)` ramp. Seam: the mono preset gate is gone (mono shares
+`PARTIAL_SB_MIN_PRESET = 6`; the multiples-of-8 rule stays), and the canary
+became the positive gate `svt_rs_direct_mono_partial_sb_preset6_roundtrips`
+(7 geometries through rav1d-safe, aom-rs byte-agreeing; 96x80 56.18 dB at
+qp 10). Lesson for the seam: a `still_broken` canary that drives the
+backend directly must expect BOTH failure shapes of the bug it pins — a
+typed/garbage result AND a debug-build assert — or it reads as a new
+regression the day CI builds it unoptimised.
 
 ### svtav1-rs QP 0 (imazen/zenav1-svt#5) — RESOLVED upstream 2026-07-22 (typed rejection); seam clamp RETAINED
 History: every CQP QP-0 still encode on rev 3e25f52b emitted a valid-syntax

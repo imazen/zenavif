@@ -38,11 +38,11 @@
 //!   (upstream `partial_sb_gate` 101/101 incl. odd dims). Presets 0–5 keep
 //!   the 64-multiple gate: their partition search is still not
 //!   C-identical on a partial SB (upstream STATUS.md, 2026-08-04). The
-//!   alpha/gray **monochrome** streams are stricter: partial superblocks
-//!   only at preset ≥ 7 (speed ≥ 6 — at preset 6 the port's mono path
-//!   mis-codes them, see [`MONO_PARTIAL_SB_MIN_PRESET`]) and only at
-//!   multiples of 8 (the mono path does no TRUE→ALIGNED padding yet); the
-//!   alpha item must match the colour item's dimensions, so an RGBA
+//!   alpha/gray **monochrome** streams take partial superblocks at the
+//!   same preset ≥ 6 (upstream `b6a1737a` + `1ed7db46` fixed the mono edge-leaf coding
+//!   that mis-coded them at preset 6 — see CLAUDE.md Known Bugs) but only
+//!   at multiples of 8 (the mono path does no TRUE→ALIGNED padding yet);
+//!   the alpha item must match the colour item's dimensions, so an RGBA
 //!   encode inherits that rule. [`svt_rs_dims_error`] is the single gate
 //!   both the encode path and [`crate::EncoderConfig::validate_for_input`]
 //!   apply.
@@ -167,19 +167,6 @@ pub(crate) fn speed_to_svt_preset(speed: u8) -> u8 {
 /// divergences, so those presets stay 64-multiple-only here.
 pub(crate) const PARTIAL_SB_MIN_PRESET: u8 = 6;
 
-/// Lowest SVT preset at which the port's **monochrome** path (alpha
-/// auxiliary items, grayscale colour items) codes a partial superblock
-/// correctly. Upstream asserts support from preset 6, but at preset 6 the
-/// mono path emits wrong pixels or an undecodable stream on every
-/// partial-SB cell measured (2026-08-27, pinned rev, aarch64: 96x80 18 dB
-/// with both decoders byte-agreeing on the garbage, 64x72 / 72x64 26 dB,
-/// 16x72 12 dB, 128x80 / 96x64 / 200x136 rav1d-safe `Malformed`), while
-/// every cell is clean at preset >= 7 (51–55 dB, 8-aligned dims). The
-/// canary `svt_rs_direct_mono_partial_sb_preset6_still_broken` in
-/// `tests/svt_rs_backend.rs` fails the day upstream fixes it — lower this
-/// to 6 then.
-pub(crate) const MONO_PARTIAL_SB_MIN_PRESET: u8 = 7;
-
 /// The dimension envelope this backend accepts, as one predicate shared by
 /// the encode path and [`crate::EncoderConfig::validate_for_input`] (issue
 /// #32). Returns the reason a `width`x`height` image is refused at zenavif
@@ -190,11 +177,14 @@ pub(crate) const MONO_PARTIAL_SB_MIN_PRESET: u8 = 7;
 ///   path codes arbitrary dimensions (partial superblocks, upstream pads
 ///   TRUE→ALIGNED and signals the true size).
 /// * `mono_plane` streams — the Cs400 alpha auxiliary item and grayscale
-///   colour items — need SVT preset ≥ [`MONO_PARTIAL_SB_MIN_PRESET`]
-///   (speed ≥ 6) AND multiples of 8, because the port's monochrome path
-///   does no TRUE→ALIGNED padding (`try_encode_frame` rejects
-///   `aligned != true`) and mis-codes partial SBs at preset 6.
-/// * Below those presets: 64-multiples only.
+///   colour items — take partial superblocks at the same preset but need
+///   multiples of 8, because the port's monochrome path does no
+///   TRUE→ALIGNED padding (`try_encode_frame` rejects `aligned != true`).
+///   (Until zenav1-svt `b6a1737a` + `1ed7db46` the mono path also mis-coded partial SBs
+///   at preset 6 and this gate held mono at preset ≥ 7; the round-trip gate
+///   `svt_rs_direct_mono_partial_sb_preset6_roundtrips` in
+///   `tests/svt_rs_backend.rs` keeps that fixed.)
+/// * Below that preset: 64-multiples only.
 pub(crate) fn svt_rs_dims_error(
     width: usize,
     height: usize,
@@ -216,24 +206,13 @@ pub(crate) fn svt_rs_dims_error(
              multiples of 64, or use the zenravif backend",
         );
     }
-    if mono_plane {
-        if preset < MONO_PARTIAL_SB_MIN_PRESET {
-            return Some(
-                "Av1Backend::SvtRs alpha and grayscale (Cs400) streams code dimensions \
-                 that are not multiples of 64 only at SVT preset >= 7 (speed >= 6): at \
-                 preset 6 the svtav1-rs monochrome path mis-codes partial superblocks. \
-                 Use speed >= 6, RGB input, pad/crop to multiples of 64, or use the \
-                 zenravif backend",
-            );
-        }
-        if !width.is_multiple_of(8) || !height.is_multiple_of(8) {
-            return Some(
-                "Av1Backend::SvtRs alpha and grayscale (Cs400) streams need dimensions \
-                 that are multiples of 8 (the svtav1-rs monochrome path pads no partial \
-                 8x8 block yet), and the alpha item must match the colour item's size. \
-                 Use RGB input, pad/crop to multiples of 8, or use the zenravif backend",
-            );
-        }
+    if mono_plane && (!width.is_multiple_of(8) || !height.is_multiple_of(8)) {
+        return Some(
+            "Av1Backend::SvtRs alpha and grayscale (Cs400) streams need dimensions \
+             that are multiples of 8 (the svtav1-rs monochrome path pads no partial \
+             8x8 block yet), and the alpha item must match the colour item's size. \
+             Use RGB input, pad/crop to multiples of 8, or use the zenravif backend",
+        );
     }
     None
 }

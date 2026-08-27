@@ -276,8 +276,8 @@ impl crate::EncoderConfig {
         }
         // The svtav1-rs dimension envelope (issue #32): multiples of 64 at
         // any speed; arbitrary at SVT preset >= 6 (speed >= 5) for the
-        // 4:2:0 colour path; multiples of 8 at preset >= 7 (speed >= 6)
-        // when a Cs400 alpha stream is emitted. One predicate serves this
+        // 4:2:0 colour path; at that preset multiples of 8 when a Cs400
+        // alpha stream is emitted. One predicate serves this
         // check and the encode path (`encoder_svt_rs::svt_rs_dims_error`).
         #[cfg(feature = "encode-svt-rs")]
         if self.backend == crate::Av1Backend::SvtRs
@@ -340,7 +340,7 @@ impl crate::EncoderConfig {
     /// The configuration slice the experimental svtav1-rs backend
     /// implements: 8/10-bit 4:2:0 YCbCr full-range stills, no gain map, no
     /// lossless. The dimension envelope (multiples of 64; arbitrary at
-    /// speed >= 5; multiples of 8 at speed >= 6 with alpha) is a
+    /// speed >= 5; multiples of 8 at speed >= 5 with alpha) is a
     /// config×input concern checked by [`Self::validate_for_input`] and at
     /// encode time.
     #[cfg(feature = "encode-svt-rs")]
