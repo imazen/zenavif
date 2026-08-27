@@ -399,13 +399,362 @@ fn svt_rs_rejects_default_yuv444_at_encode_time() {
     assert!(err.to_string().contains("4:2:0"), "got: {err}");
 }
 
+// --------------------------------------------------------------------
+// 10-bit (issue #33): 16-bit input and EncodeBitDepth::Ten
+// --------------------------------------------------------------------
+
+/// HDR-shaped 16-bit gradient (smooth, so 4:2:0 loss stays small and the
+/// PSNR floor speaks about the 10-bit codec path).
+fn gradient_rgb16(w: usize, h: usize) -> Img<Vec<Rgb<u16>>> {
+    let mut pixels = Vec::with_capacity(w * h);
+    for y in 0..h {
+        for x in 0..w {
+            pixels.push(Rgb {
+                r: ((x * 65535) / w.max(1)) as u16,
+                g: ((y * 65535) / h.max(1)) as u16,
+                b: (((x + y) * 65535) / (w + h).max(1)) as u16,
+            });
+        }
+    }
+    Img::new(pixels, w, h)
+}
+
+/// PSNR in the native 10-bit domain between a 16-bit source and a 16-bit
+/// decode (both `>> 6`; the decoder expands 10-bit by LSB replication, so
+/// the shift inverts it exactly).
+fn psnr_10bit<P: Copy>(
+    src: &Img<Vec<P>>,
+    out: imgref::ImgRef<'_, P>,
+    channels: impl Fn(P) -> [u16; 3],
+) -> f64 {
+    let mut se = 0u64;
+    let mut n = 0u64;
+    for (row_a, row_b) in src.rows().zip(out.rows()) {
+        for (pa, pb) in row_a.iter().zip(row_b.iter()) {
+            for (a, b) in channels(*pa).into_iter().zip(channels(*pb)) {
+                let d = i64::from(a >> 6) - i64::from(b >> 6);
+                se += (d * d) as u64;
+                n += 1;
+            }
+        }
+    }
+    10.0 * (1023.0f64 * 1023.0 / ((se as f64 / n as f64).max(1e-9))).log10()
+}
+
+fn decode_16bit(avif: &[u8]) -> zenavif::PixelBuffer {
+    zenavif::decode_with(
+        avif,
+        &zenavif::DecoderConfig::new().prefer_8bit(false),
+        &Unstoppable,
+    )
+    .expect("must decode via rav1d-safe")
+}
+
+/// Issue #33: 16-bit RGB codes a 10-bit profile-0 4:2:0 stream, with
+/// BT.2020/PQ CICP + clli + mdcv carried by the container, on a
+/// partial-SB geometry (96x80, speed 5) — the product HDR shape.
 #[test]
-fn svt_rs_rejects_16bit_entry_points() {
-    let rgb16: Img<Vec<Rgb<u16>>> = Img::new(vec![Rgb { r: 0, g: 0, b: 0 }; 64 * 64], 64, 64);
+fn svt_rs_rgb16_roundtrip_10bit_pq_with_hdr_metadata() {
+    let (w, h) = (96usize, 80usize);
+    let img = gradient_rgb16(w, h);
+    let config = svt_config()
+        .quality(85.0)
+        .speed(5)
+        .color_primaries(9) // BT.2020
+        .transfer_characteristics(16) // PQ
+        .content_light_level(4000, 400)
+        .mastering_display(zenavif::MasteringDisplayConfig {
+            primaries: [(8500, 39850), (6550, 2300), (35400, 14600)],
+            white_point: (15635, 16450),
+            max_luminance: 1000 * 10000,
+            min_luminance: 50,
+        });
+    config
+        .validate_for_input(PlanInput {
+            width: w as u32,
+            height: h as u32,
+            input_is_16bit: true,
+            input_has_alpha: false,
+        })
+        .expect("16-bit RGB over SvtRs must validate");
+
+    let encoded =
+        zenavif::encode_rgb16(img.as_ref(), &config, stop()).expect("svt-rs RGB16 encode");
+    assert!(encoded.color_byte_size > 0);
+    assert_eq!(encoded.alpha_byte_size, 0);
+
+    let decoder =
+        zenavif::ManagedAvifDecoder::new(&encoded.avif_file, &zenavif::DecoderConfig::default())
+            .expect("parse");
+    let info = decoder.probe_info().expect("probe");
+    assert_eq!((info.width, info.height), (w as u32, h as u32));
+    assert_eq!(info.bit_depth, 10, "16-bit input must produce 10-bit AV1");
+    assert!(!info.monochrome);
+    assert_eq!(info.color_primaries.0, 9);
+    assert_eq!(info.transfer_characteristics.0, 16);
+    assert_eq!(info.matrix_coefficients.0, 6, "must signal BT.601");
+    assert_eq!(info.color_range, zenavif::ColorRange::Full);
+    let cll = info.content_light_level.expect("clli must survive");
+    assert_eq!(cll.max_content_light_level, 4000);
+    assert_eq!(cll.max_pic_average_light_level, 400);
+    let md = info.mastering_display.expect("mdcv must survive");
+    assert_eq!(md.primaries, [(8500, 39850), (6550, 2300), (35400, 14600)]);
+    assert_eq!(md.white_point, (15635, 16450));
+    assert_eq!(md.max_luminance, 1000 * 10000);
+    assert_eq!(md.min_luminance, 50);
+
+    let pixels = decode_16bit(&encoded.avif_file);
+    let out = pixels
+        .try_as_imgref::<Rgb<u16>>()
+        .expect("10-bit decode must expose an Rgb16 view");
+    assert_eq!((out.width(), out.height()), (w, h));
+    let p = psnr_10bit(&img, out, |p| [p.r, p.g, p.b]);
+    eprintln!("svt_rs RGB16 -> 10-bit 96x80 speed 5 q85: PSNR(10-bit) {p:.2} dB");
+    // Measured 54.87 dB on 2026-08-27 (pinned rev, aarch64). Floor is
+    // measured-minus-margin; a mis-signalled geometry or a truncated
+    // conversion lands far below it (the low-bit proof is
+    // `svt_rs_10bit_path_keeps_low_bits_vs_8bit_at_qp_floor`).
     assert!(
-        zenavif::encode_rgb16(rgb16.as_ref(), &svt_config(), stop()).is_err(),
-        "16-bit must be rejected (8-bit only)"
+        p > 40.0,
+        "RGB16 10-bit roundtrip PSNR {p:.2} dB below floor"
     );
+}
+
+/// Issue #33 precision proof: at the QP floor the 10-bit path must
+/// reconstruct a 16-bit gradient with far less 10-bit-domain error than
+/// the 8-bit path from the same source. An encode that quantized at 8 bits
+/// under a 10-bit sequence header (the failure the port's
+/// `bit_depth_config_error` exists to refuse) would land at the 8-bit
+/// figure, not below it.
+#[test]
+fn svt_rs_10bit_path_keeps_low_bits_vs_8bit_at_qp_floor() {
+    let (w, h) = (128usize, 64usize);
+    let img = gradient_rgb16(w, h);
+    let rms = |depth: EncodeBitDepth| -> f64 {
+        let config = svt_config().quality(100.0).speed(6).bit_depth(depth);
+        let encoded = zenavif::encode_rgb16(img.as_ref(), &config, stop()).expect("encode");
+        let pixels = decode_16bit(&encoded.avif_file);
+        // Decoded samples on the 10-bit grid: a 10-bit stream decodes to
+        // Rgb16 by LSB replication (>> 6 inverts it exactly); an 8-bit
+        // stream decodes to Rgb8, mapped by the exact inverse of the
+        // widening (round(v * 1023 / 255)).
+        let decoded10: Vec<[u16; 3]> = if let Some(out) = pixels.try_as_imgref::<Rgb<u16>>() {
+            out.rows()
+                .flat_map(|r| r.iter().map(|p| [p.r >> 6, p.g >> 6, p.b >> 6]))
+                .collect()
+        } else {
+            let out = pixels.try_as_imgref::<Rgb<u8>>().expect("Rgb8 view");
+            let up = |v: u8| ((u32::from(v) * 1023 + 127) / 255) as u16;
+            out.rows()
+                .flat_map(|r| r.iter().map(|p| [up(p.r), up(p.g), up(p.b)]))
+                .collect()
+        };
+        let mut se = 0f64;
+        let mut n = 0f64;
+        for (pa, pb) in img.buf().iter().zip(decoded10.iter()) {
+            for (a, b) in [pa.r, pa.g, pa.b].into_iter().zip(*pb) {
+                let d = f64::from(a >> 6) - f64::from(b);
+                se += d * d;
+                n += 1.0;
+            }
+        }
+        (se / n).sqrt()
+    };
+    let rms8 = rms(EncodeBitDepth::Eight);
+    let rms10 = rms(EncodeBitDepth::Ten);
+    eprintln!(
+        "svt_rs RGB16 128x64 speed 6 q100: 10-bit-domain RMS error 8-bit {rms8:.3} vs 10-bit {rms10:.3}"
+    );
+    // Measured 2026-08-27 (pinned rev, aarch64): 8-bit 2.328 vs 10-bit
+    // 1.066 (ratio 2.18; the 8-bit quantization floor alone is ~1.15 RMS
+    // on this gradient, so the 10-bit figure can only be reached with the
+    // low bits coded). Gate at 1.5x = measured-minus-margin; an 8-bit-
+    // quantized stream under a 10-bit header sits at ratio ~1.0.
+    assert!(
+        rms10 * 1.5 < rms8,
+        "10-bit path must beat the 8-bit path by 1.5x in 10-bit-domain RMS at the QP floor: \
+         8-bit {rms8:.3}, 10-bit {rms10:.3}"
+    );
+}
+
+/// Issue #33: `EncodeBitDepth::Ten` on 8-bit input codes a 10-bit stream
+/// (RGB -> YCbCr at 10-bit precision) that round-trips the 8-bit source.
+#[test]
+fn svt_rs_rgb8_bit_depth_ten_codes_10bit_stream() {
+    let (w, h) = (128usize, 64usize);
+    let img = gradient_rgb8(w, h);
+    let config = svt_config()
+        .quality(85.0)
+        .speed(6)
+        .bit_depth(EncodeBitDepth::Ten);
+    config.validate().expect("Ten validates over SvtRs");
+    config
+        .validate_for_input(PlanInput::rgb8(w as u32, h as u32))
+        .expect("RGB8 + Ten validates");
+    let encoded = zenavif::encode_rgb8(img.as_ref(), &config, stop()).expect("RGB8 + Ten encode");
+
+    let decoder =
+        zenavif::ManagedAvifDecoder::new(&encoded.avif_file, &zenavif::DecoderConfig::default())
+            .expect("parse");
+    assert_eq!(decoder.probe_info().expect("probe").bit_depth, 10);
+
+    let pixels = decode_16bit(&encoded.avif_file);
+    let out = pixels
+        .try_as_imgref::<Rgb<u16>>()
+        .expect("10-bit decode yields Rgb16");
+    // Compare in the 8-bit domain of the source: decoded 16-bit >> 8.
+    let mut se = 0u64;
+    for (row_a, row_b) in img.rows().zip(out.rows()) {
+        for (pa, pb) in row_a.iter().zip(row_b.iter()) {
+            for (a, b) in [(pa.r, pb.r), (pa.g, pb.g), (pa.b, pb.b)] {
+                let d = i64::from(a) - i64::from(b >> 8);
+                se += (d * d) as u64;
+            }
+        }
+    }
+    let p = 10.0 * (255.0f64 * 255.0 / ((se as f64 / (w * h * 3) as f64).max(1e-9))).log10();
+    eprintln!("svt_rs RGB8 + Ten 128x64 speed 6 q85: PSNR {p:.2} dB");
+    // Measured 54.13 dB on 2026-08-27 (pinned rev, aarch64).
+    assert!(p > 40.0, "RGB8 + Ten roundtrip PSNR {p:.2} dB below floor");
+}
+
+/// Issue #33: a 10-bit alpha item rides the port's bd10 monochrome level
+/// pass, which exists at SVT preset >= 9 (speed >= 7) only — RGBA16 and
+/// RGBA8 + Ten are refused below that with a reason, and round-trip
+/// (colour + alpha, 10-bit) at speed 7.
+#[test]
+fn svt_rs_10bit_alpha_needs_speed_7() {
+    let (w, h) = (96usize, 80usize);
+    let mut pixels = Vec::with_capacity(w * h);
+    for y in 0..h {
+        for x in 0..w {
+            pixels.push(rgb::Rgba {
+                r: ((x * 65535) / w) as u16,
+                g: ((y * 65535) / h) as u16,
+                b: (((x + y) * 65535) / (w + h)) as u16,
+                a: (16384 + (x * 49151) / w) as u16,
+            });
+        }
+    }
+    let img: Img<Vec<rgb::Rgba<u16>>> = Img::new(pixels, w, h);
+    let plan = PlanInput {
+        width: w as u32,
+        height: h as u32,
+        input_is_16bit: true,
+        input_has_alpha: true,
+    };
+
+    // speed 6 = preset 7: refused.
+    let cfg6 = svt_config().quality(85.0).speed(6);
+    let err = zenavif::encode_rgba16(img.as_ref(), &cfg6, stop())
+        .expect_err("RGBA16 at speed 6 must be refused (10-bit mono needs preset 9)");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("speed >= 7"),
+        "must name the speed that lifts the rule: {msg}"
+    );
+    assert!(matches!(
+        cfg6.validate_for_input(plan),
+        Err(ValidationError::BackendUnsupportedParam { .. })
+    ));
+    // Same rule for 8-bit RGBA asked to code 10-bit.
+    let rgba8 = gradient_rgba8(w, h);
+    let cfg6_ten = cfg6.clone().bit_depth(EncodeBitDepth::Ten);
+    assert!(
+        zenavif::encode_rgba8(rgba8.as_ref(), &cfg6_ten, stop()).is_err(),
+        "RGBA8 + Ten at speed 6 must be refused"
+    );
+    assert!(matches!(
+        cfg6_ten.validate_for_input(PlanInput::rgba8(w as u32, h as u32)),
+        Err(ValidationError::BackendUnsupportedParam { .. })
+    ));
+    // ...while 8-bit RGBA at speed 6 and 16-bit RGB at speed 6 both validate.
+    cfg6.validate_for_input(PlanInput::rgba8(w as u32, h as u32))
+        .expect("RGBA8 at speed 6 validates");
+    cfg6.validate_for_input(PlanInput {
+        input_has_alpha: false,
+        ..plan
+    })
+    .expect("RGB16 at speed 6 validates");
+
+    // speed 7 = preset 9: colour + 10-bit alpha round-trip.
+    let cfg7 = svt_config().quality(85.0).speed(7);
+    cfg7.validate_for_input(plan)
+        .expect("RGBA16 at speed 7 validates");
+    let encoded = zenavif::encode_rgba16(img.as_ref(), &cfg7, stop()).expect("RGBA16 encode");
+    assert!(encoded.alpha_byte_size > 0, "alpha item must carry bytes");
+    let decoder =
+        zenavif::ManagedAvifDecoder::new(&encoded.avif_file, &zenavif::DecoderConfig::default())
+            .expect("parse");
+    let info = decoder.probe_info().expect("probe");
+    assert_eq!(info.bit_depth, 10);
+    assert!(info.has_alpha);
+    let pixels = decode_16bit(&encoded.avif_file);
+    let out = pixels
+        .try_as_imgref::<rgb::Rgba<u16>>()
+        .expect("10-bit alpha decode yields Rgba16");
+    assert_eq!((out.width(), out.height()), (w, h));
+    let p_rgb = psnr_10bit(&img, out, |p| [p.r, p.g, p.b]);
+    let p_a = psnr_10bit(&img, out, |p| [p.a, p.a, p.a]);
+    eprintln!(
+        "svt_rs RGBA16 -> 10-bit 96x80 speed 7 q85: PSNR(10-bit) rgb {p_rgb:.2} dB, alpha {p_a:.2} dB"
+    );
+    // Measured 54.68 / 62.93 dB on 2026-08-27 (pinned rev, aarch64).
+    assert!(p_rgb > 40.0, "RGBA16 colour PSNR {p_rgb:.2} dB below floor");
+    assert!(p_a > 40.0, "RGBA16 alpha PSNR {p_a:.2} dB below floor");
+
+    // RGBA8 + Ten at speed 7 also encodes 10-bit with alpha.
+    let cfg7_ten = cfg7.clone().bit_depth(EncodeBitDepth::Ten);
+    let encoded = zenavif::encode_rgba8(rgba8.as_ref(), &cfg7_ten, stop()).expect("RGBA8 + Ten");
+    let decoder =
+        zenavif::ManagedAvifDecoder::new(&encoded.avif_file, &zenavif::DecoderConfig::default())
+            .expect("parse");
+    let info = decoder.probe_info().expect("probe");
+    assert_eq!(info.bit_depth, 10);
+    assert!(info.has_alpha);
+}
+
+/// Issue #33, grayscale: `EncodeBitDepth::Ten` widens to a 10-bit Cs400
+/// stream at speed >= 7 and is refused below.
+#[cfg(feature = "encode-mono")]
+#[test]
+fn svt_rs_gray8_bit_depth_ten_needs_speed_7() {
+    let (w, h) = (128usize, 64usize);
+    let pixels: Vec<u8> = (0..h)
+        .flat_map(|y| (0..w).map(move |x| (((x + y) * 255) / (w + h)) as u8))
+        .collect();
+    let img: Img<Vec<u8>> = Img::new(pixels, w, h);
+    let cfg6 = svt_config()
+        .quality(85.0)
+        .speed(6)
+        .bit_depth(EncodeBitDepth::Ten);
+    let err = zenavif::encode_gray8(img.as_ref(), &cfg6, stop())
+        .expect_err("gray + Ten at speed 6 must be refused");
+    assert!(err.to_string().contains("speed >= 7"), "got: {err}");
+
+    let cfg7 = cfg6.clone().speed(7);
+    let encoded = zenavif::encode_gray8(img.as_ref(), &cfg7, stop()).expect("gray + Ten encode");
+    let decoder =
+        zenavif::ManagedAvifDecoder::new(&encoded.avif_file, &zenavif::DecoderConfig::default())
+            .expect("parse");
+    let info = decoder.probe_info().expect("probe");
+    assert_eq!(info.bit_depth, 10);
+    assert!(info.monochrome);
+    let pixels = decode_16bit(&encoded.avif_file);
+    let out = pixels
+        .try_as_imgref::<Rgb<u16>>()
+        .expect("10-bit mono decode yields Rgb16");
+    let mut se = 0u64;
+    for (row_a, row_b) in img.rows().zip(out.rows()) {
+        for (ya, pb) in row_a.iter().zip(row_b.iter()) {
+            let d = i64::from(*ya) - i64::from(pb.g >> 8);
+            se += (d * d) as u64;
+        }
+    }
+    let p = 10.0 * (255.0f64 * 255.0 / ((se as f64 / (w * h) as f64).max(1e-9))).log10();
+    eprintln!("svt_rs gray8 + Ten 128x64 speed 7 q85: PSNR {p:.2} dB");
+    // Measured 54.67 dB on 2026-08-27 (pinned rev, aarch64).
+    assert!(p > 40.0, "gray + Ten PSNR {p:.2} dB below floor");
 }
 
 // --------------------------------------------------------------------
@@ -665,12 +1014,12 @@ fn svt_rs_validate_scope() {
         Err(ValidationError::BackendUnsupportedParam { .. })
     ));
 
-    // 10-bit rejected.
-    let cfg = svt_config().bit_depth(EncodeBitDepth::Ten);
-    assert!(matches!(
-        cfg.validate(),
-        Err(ValidationError::BackendUnsupportedParam { .. })
-    ));
+    // 10-bit validates (issue #33); the alpha/gray speed rule is a
+    // config x input concern (validate_for_input).
+    svt_config()
+        .bit_depth(EncodeBitDepth::Ten)
+        .validate()
+        .expect("Ten validates over SvtRs");
 
     // RGB color model rejected (Rgb+420 is globally invalid; the
     // backend check must fire before/alongside it, so use its own path:

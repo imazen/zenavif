@@ -1488,10 +1488,14 @@ pub(crate) fn yuv16_to_rgbx_strip<P: StripPixel>(
 
 /// Input pixel for the forward kernel: yields (r, g, b) as f32.
 pub(crate) trait ForwardPixel: Copy {
+    /// Full-scale sample value of the source type (255 or 65535); the
+    /// recipe normalizes by it before projecting to the output depth.
+    const MAX: f32;
     fn rgb_f32(self) -> (f32, f32, f32);
 }
 
 impl ForwardPixel for RGB8 {
+    const MAX: f32 = 255.0;
     #[inline(always)]
     fn rgb_f32(self) -> (f32, f32, f32) {
         (self.r as f32, self.g as f32, self.b as f32)
@@ -1499,6 +1503,23 @@ impl ForwardPixel for RGB8 {
 }
 
 impl ForwardPixel for Rgba<u8> {
+    const MAX: f32 = 255.0;
+    #[inline(always)]
+    fn rgb_f32(self) -> (f32, f32, f32) {
+        (self.r as f32, self.g as f32, self.b as f32)
+    }
+}
+
+impl ForwardPixel for rgb::Rgb<u16> {
+    const MAX: f32 = 65535.0;
+    #[inline(always)]
+    fn rgb_f32(self) -> (f32, f32, f32) {
+        (self.r as f32, self.g as f32, self.b as f32)
+    }
+}
+
+impl ForwardPixel for Rgba<u16> {
+    const MAX: f32 = 65535.0;
     #[inline(always)]
     fn rgb_f32(self) -> (f32, f32, f32) {
         (self.r as f32, self.g as f32, self.b as f32)
@@ -1522,11 +1543,23 @@ struct FwdConsts {
 
 impl FwdConsts {
     fn new(matrix: YuvMatrix, range: YuvRange) -> Self {
+        Self::for_depth(matrix, range, 8)
+    }
+
+    /// The same recipe at an arbitrary output depth: full range spans
+    /// `0..=(2^depth - 1)`, limited range is the 8-bit studio swing
+    /// (16/219/224) shifted up by `depth - 8` — the H.273 convention.
+    fn for_depth(matrix: YuvMatrix, range: YuvRange, depth: u8) -> Self {
         let (kr, kb) = matrix_coefficients(matrix);
         let kg = 1.0 - kr - kb;
+        let scale = (1u32 << (depth - 8)) as f32;
         let (y_off, y_span, uv_span) = match range {
-            YuvRange::Full => (0.0f32, 255.0, 255.0),
-            YuvRange::Limited => (16.0, 219.0, 224.0),
+            YuvRange::Full => (
+                0.0f32,
+                ((1u32 << depth) - 1) as f32,
+                ((1u32 << depth) - 1) as f32,
+            ),
+            YuvRange::Limited => (16.0 * scale, 219.0 * scale, 224.0 * scale),
         };
         Self {
             kr,
@@ -1608,6 +1641,102 @@ fn rgbx_to_yuv420_kernel<P: ForwardPixel>(
                 .round_ties_even() as u8;
         }
     }
+}
+
+/// Convert RGB(A) rows of any [`ForwardPixel`] type to high-bit-depth
+/// YUV 4:2:0 planes (`u16`, `out_depth` bits: 10 or 12). Same recipe as
+/// [`rgbx_to_yuv420_kernel`] — source normalized to 0..1 by the pixel
+/// type's full scale, per-pixel f32 chroma, 2x2 box average, then
+/// quantized at the OUTPUT depth. Feeding an 8-bit source at `out_depth`
+/// 10 therefore keeps the chroma-average fraction bits an 8-bit
+/// quantize-then-widen would drop. Layout as the 8-bit kernel: `rgb` is
+/// `rgb_stride`-strided in pixels; planes are tight.
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+fn rgbx_to_yuv420_u16_kernel<P: ForwardPixel>(
+    token: Token,
+    rgb: &[P],
+    rgb_stride: usize,
+    width: usize,
+    height: usize,
+    out_depth: u8,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    y_plane: &mut [u16],
+    u_plane: &mut [u16],
+    v_plane: &mut [u16],
+) {
+    let _ = token;
+    let c = FwdConsts::for_depth(matrix, range, out_depth);
+    let cw = width.div_ceil(2);
+    let inv_max = 1.0 / P::MAX;
+    let out_max = ((1u32 << out_depth) - 1) as f32;
+    let uv_center = (1u32 << (out_depth - 1)) as f32;
+
+    let mut u_rows = vec![0f32; 2 * width];
+    let mut v_rows = vec![0f32; 2 * width];
+
+    for cy in 0..height.div_ceil(2) {
+        let y0 = 2 * cy;
+        let y1 = (y0 + 1).min(height - 1);
+        for (ri, y_pos) in [y0, y1].into_iter().enumerate() {
+            let src = &rgb[y_pos * rgb_stride..][..width];
+            let y_out = &mut y_plane[y_pos.min(height - 1) * width..][..width];
+            let u_row = &mut u_rows[ri * width..][..width];
+            let v_row = &mut v_rows[ri * width..][..width];
+            for x in 0..width {
+                let (r, g, b) = src[x].rgb_f32();
+                let rn = r * inv_max;
+                let gn = g * inv_max;
+                let bn = b * inv_max;
+                let yl = c.kb.mul_add(bn, c.kr.mul_add(rn, c.kg * gn));
+                y_out[x] = yl
+                    .mul_add(c.y_span, c.y_off)
+                    .clamp(0.0, out_max)
+                    .round_ties_even() as u16;
+                u_row[x] = (bn - yl) * c.inv_ub;
+                v_row[x] = (rn - yl) * c.inv_vr;
+            }
+        }
+        let u_out = &mut u_plane[cy * cw..][..cw];
+        let v_out = &mut v_plane[cy * cw..][..cw];
+        for k in 0..cw {
+            let x0 = 2 * k;
+            let x1 = (x0 + 1).min(width - 1);
+            let ua = 0.25 * (u_rows[x0] + u_rows[x1] + u_rows[width + x0] + u_rows[width + x1]);
+            let va = 0.25 * (v_rows[x0] + v_rows[x1] + v_rows[width + x0] + v_rows[width + x1]);
+            u_out[k] = ua
+                .mul_add(c.uv_span, uv_center)
+                .clamp(0.0, out_max)
+                .round_ties_even() as u16;
+            v_out[k] = va
+                .mul_add(c.uv_span, uv_center)
+                .clamp(0.0, out_max)
+                .round_ties_even() as u16;
+        }
+    }
+}
+
+/// RGB(A) of any source depth -> YUV 4:2:0 at `out_depth` bits (`u16`
+/// tight planes; see [`rgbx_to_yuv420_u16_kernel`]).
+#[expect(clippy::too_many_arguments, reason = "plane-conversion entry point")]
+pub(crate) fn rgbx_to_yuv420_u16<P: ForwardPixel>(
+    rgb: &[P],
+    rgb_stride: usize,
+    width: usize,
+    height: usize,
+    out_depth: u8,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    y_plane: &mut [u16],
+    u_plane: &mut [u16],
+    v_plane: &mut [u16],
+) {
+    incant!(
+        rgbx_to_yuv420_u16_kernel::<P>(
+            rgb, rgb_stride, width, height, out_depth, range, matrix, y_plane, u_plane, v_plane
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
 }
 
 /// RGB8 -> YUV 4:2:0 (tight planes; see the kernel docs).
@@ -3067,5 +3196,112 @@ mod tests {
             "the whole conversion battery came back all-zero from the scalar \
              kernels"
         );
+    }
+    /// The high-bit-depth forward kernel is the SAME recipe as the 8-bit
+    /// one, quantized at the output depth: (1) neutral input lands on the
+    /// exact chroma centre with luma = round(v / 65535 * 1023); (2) an
+    /// 8-bit source projected to 10 bits, shifted back down, agrees with
+    /// the 8-bit kernel to within the one-step rounding ambiguity; (3)
+    /// LSB-replicated 16-bit input agrees with the 8-bit source it was
+    /// widened from (65535 = 255 * 257, so the normalized values coincide
+    /// up to f32 rounding).
+    #[test]
+    fn forward_u16_kernel_matches_8bit_recipe_at_depth_10() {
+        let (w, h) = (37usize, 23usize);
+        let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+
+        // (1) neutral ramp
+        let gray16: Vec<rgb::Rgb<u16>> = (0..w * h)
+            .map(|i| {
+                let v = ((i * 65535) / (w * h - 1)) as u16;
+                rgb::Rgb { r: v, g: v, b: v }
+            })
+            .collect();
+        let (mut y, mut u, mut v) = (vec![0u16; w * h], vec![0u16; cw * ch], vec![0u16; cw * ch]);
+        rgbx_to_yuv420_u16(
+            &gray16,
+            w,
+            w,
+            h,
+            10,
+            YuvRange::Full,
+            YuvMatrix::Bt601,
+            &mut y,
+            &mut u,
+            &mut v,
+        );
+        for i in 0..w * h {
+            let expect = (gray16[i].r as f32 / 65535.0 * 1023.0).round_ties_even() as u16;
+            assert!(
+                (i32::from(y[i]) - i32::from(expect)).abs() <= 1,
+                "gray luma at {i}: {} vs {expect}",
+                y[i]
+            );
+        }
+        assert!(
+            u.iter().chain(v.iter()).all(|&c| c == 512),
+            "neutral chroma must sit at 512"
+        );
+
+        // (2) + (3): 8-bit source vs its 10-bit projections
+        let mut img8 = vec![RGB8 { r: 0, g: 0, b: 0 }; w * h];
+        let mut s = 0x9E37_79B9u32;
+        for p in img8.iter_mut() {
+            s ^= s << 13;
+            s ^= s >> 17;
+            s ^= s << 5;
+            *p = RGB8 {
+                r: (s & 0xFF) as u8,
+                g: ((s >> 8) & 0xFF) as u8,
+                b: ((s >> 16) & 0xFF) as u8,
+            };
+        }
+        let img16: Vec<rgb::Rgb<u16>> = img8
+            .iter()
+            .map(|p| rgb::Rgb {
+                r: u16::from(p.r) * 257,
+                g: u16::from(p.g) * 257,
+                b: u16::from(p.b) * 257,
+            })
+            .collect();
+        for &range in &[YuvRange::Full, YuvRange::Limited] {
+            let matrix = YuvMatrix::Bt709;
+            let (mut y8, mut u8p, mut v8p) =
+                (vec![0u8; w * h], vec![0u8; cw * ch], vec![0u8; cw * ch]);
+            rgb8_to_yuv420(&img8, w, w, h, range, matrix, &mut y8, &mut u8p, &mut v8p);
+            let (mut ya, mut ua, mut va) =
+                (vec![0u16; w * h], vec![0u16; cw * ch], vec![0u16; cw * ch]);
+            rgbx_to_yuv420_u16(&img8, w, w, h, 10, range, matrix, &mut ya, &mut ua, &mut va);
+            let (mut yb, mut ub, mut vb) =
+                (vec![0u16; w * h], vec![0u16; cw * ch], vec![0u16; cw * ch]);
+            rgbx_to_yuv420_u16(
+                &img16, w, w, h, 10, range, matrix, &mut yb, &mut ub, &mut vb,
+            );
+            let check = |name: &str, p8: &[u8], pa: &[u16], pb: &[u16]| {
+                for i in 0..p8.len() {
+                    let d = (i32::from(pa[i] >> 2) - i32::from(p8[i])).abs();
+                    assert!(
+                        d <= 1,
+                        "{name} {range:?} at {i}: 10-bit {} >> 2 vs 8-bit {}",
+                        pa[i],
+                        p8[i]
+                    );
+                    let d16 = (i32::from(pa[i]) - i32::from(pb[i])).abs();
+                    assert!(
+                        d16 <= 1,
+                        "{name} {range:?} at {i}: u8 source {} vs u16 source {}",
+                        pa[i],
+                        pb[i]
+                    );
+                    assert!(
+                        pa[i] <= 1023 && pb[i] <= 1023,
+                        "{name}: sample above 10 bits"
+                    );
+                }
+            };
+            check("Y", &y8, &ya, &yb);
+            check("U", &u8p, &ua, &ub);
+            check("V", &v8p, &va, &vb);
+        }
     }
 }

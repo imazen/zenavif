@@ -15,9 +15,9 @@ never silent degradation. Sources: `src/encoder.rs`, `src/encoder_svt_rs.rs`,
 | Input: RGB8 | yes | yes |
 | Input: RGBA8 (alpha item) | yes | yes (alpha as Cs400 `auxl` item, `alpha_quality` fallback honored) |
 | Input: Gray8 → Cs400 mono | yes (`encode-mono` gate) | yes (`encode-mono` gate) |
-| Input: RGB16/RGBA16 → 10-bit AV1 | yes (`encode_rgb16`/`encode_rgba16`) | rejected (8-bit only) |
+| Input: RGB16/RGBA16 → 10-bit AV1 | yes (`encode_rgb16`/`encode_rgba16`, identity-RGB 4:4:4) | yes (#33; YCbCr 4:2:0 at 10-bit precision via the port's native u16 `try_encode_frame_420_hbd`; RGBA16 needs speed ≥ 7 for its 10-bit Cs400 alpha item) |
 | Bit depth 8 | yes | yes |
-| Bit depth 10 | yes (`EncodeBitDepth::Ten`/`Auto`) | rejected (library has a narrow bd10 envelope; seam pins 8) |
+| Bit depth 10 | yes (`EncodeBitDepth::Ten`/`Auto`) | yes (#33; `Ten` on 8-bit input converts at 10-bit precision; 10-bit alpha/gray streams need speed ≥ 7 = SVT preset ≥ 9, the port's only bd10 mono level producer; post-filter searches upstream still decide on MSB-truncated planes — hbd chunk 2) |
 | Bit depth 12 | no (no enum variant; AV1 profile 2) | no (`unimplemented!()` upstream) |
 | Subsampling 4:4:4 | yes (default) | rejected |
 | Subsampling 4:2:0 | yes | yes (the only mode) |
@@ -35,7 +35,7 @@ never silent degradation. Sources: `src/encoder.rs`, `src/encoder_svt_rs.rs`,
 | HDR metadata boxes (CLL/mastering) | yes | yes (container-level) |
 | EXIF/XMP/ICC, rotation/mirror | yes | yes (container-level, muxed in-crate) |
 | Animation (`encode_animation_*`) | yes | rejected (stills only) |
-| Target quality (`encode_*_with_target`, ssim2/zensim) | yes (RGB8/RGBA8/RGB16; q0 head seeds ssim2) | yes for RGB8/RGBA8 (search is backend-generic; anchor-curve seeding); RGB16 rejected |
+| Target quality (`encode_*_with_target`, ssim2/zensim) | yes (RGB8/RGBA8/RGB16; q0 head seeds ssim2) | yes for RGB8/RGBA8 (search is backend-generic; anchor-curve seeding; convergence pinned by `svt_rs_target_quality_search_converges_on_ssim2`); RGB16 reaches the backend since #33 but its convergence is not pinned by a test |
 | Two-pass butteraugli | yes (release-gated `FRAME_HINTS_LIVE`) | no |
 | Auto-tune picker | yes (`auto-tune`) | no (calibrated for zenravif knobs) |
 | Stop token | yes (per-superblock via zenravif) | yes (threaded into pipeline, SB cadence) |

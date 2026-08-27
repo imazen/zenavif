@@ -9,10 +9,27 @@
 //!
 //! # Scope (v1, deliberately narrow)
 //!
-//! * 8-bit still images only: RGB/RGBA → 4:2:0 YCbCr (BT.601, full range),
+//! * Still images only: RGB/RGBA → 4:2:0 YCbCr (BT.601, full range),
 //!   plus grayscale → monochrome (Cs400). RGBA's straight alpha plane is a
 //!   separate Cs400 encode muxed as an `auxl` auxiliary item, honoring the
 //!   [`crate::EncoderConfig::alpha_quality`] fallback contract.
+//! * 8-bit and 10-bit (issue #33). 16-bit input (`encode_rgb16` /
+//!   `encode_rgba16`) or [`crate::EncodeBitDepth::Ten`] codes a 10-bit
+//!   profile-0 stream: RGB → YCbCr runs at 10-bit precision (the in-house
+//!   f32 recipe quantized at the output depth, so an 8-bit source keeps
+//!   its chroma-average fraction bits) and the u16 planes go through the
+//!   port's native `try_encode_frame_420_hbd`. At the pinned rev the low
+//!   two bits reach the mode decision and the coded levels; the post-filter
+//!   searches (deblock / CDEF / Wiener) still decide on MSB-truncated
+//!   planes (upstream hbd chunk 2) — the stream is a valid 10-bit stream
+//!   either way. 10-bit **monochrome** (alpha, gray) has a native level
+//!   producer at SVT preset ≥ 9 (speed ≥ 7) only, and an AVIF alpha item
+//!   must match the colour item's depth, so 10-bit RGBA / gray encodes
+//!   need speed ≥ 7 ([`svt_rs_depth_error`]). HDR static metadata (`clli`,
+//!   `mdcv`) is written container-side by zenavif-serialize from
+//!   [`crate::EncoderConfig::content_light_level`] /
+//!   [`crate::EncoderConfig::mastering_display`]; BT.2020 / PQ / HLG CICP
+//!   is signalled in both the sequence header and `colr`.
 //! * Dimensions (issue #32): **multiples of 64 at every speed**; at SVT
 //!   preset ≥ 6 (zenavif speed ≥ 5) the 4:2:0 colour path takes
 //!   **arbitrary** dimensions — the pinned rev pads TRUE→ALIGNED
@@ -29,7 +46,7 @@
 //!   encode inherits that rule. [`svt_rs_dims_error`] is the single gate
 //!   both the encode path and [`crate::EncoderConfig::validate_for_input`]
 //!   apply.
-//! * No 10-bit, no RGB (identity) model, no limited range, no lossless, no
+//! * No 12-bit, no RGB (identity) model, no limited range, no lossless, no
 //!   gain map, no animation. Each is rejected honestly at encode time (and
 //!   by [`crate::EncoderConfig::validate`]).
 //!
@@ -241,11 +258,6 @@ fn reject_unsupported_config(config: &EncoderConfig) -> Result<()> {
              (identity/RGB has no defined 4:2:0 subsampling)"
         )));
     }
-    if config.bit_depth == EncodeBitDepth::Ten {
-        return Err(at!(Error::Unsupported(
-            "Av1Backend::SvtRs is 8-bit only for now (bit_depth Ten is zenravif-only)"
-        )));
-    }
     if config.pixel_range == Some(EncodePixelRange::Limited) {
         return Err(at!(Error::Unsupported(
             "Av1Backend::SvtRs signals full pixel range only \
@@ -319,15 +331,81 @@ fn reject_out_of_envelope_dims(
     }
 }
 
+/// Bit depth this backend codes for a request — the same
+/// [`EncodeBitDepth`] resolution the zenravif path applies
+/// (`encoder::resolve_bit_depth`), minus its ravif type.
+fn effective_bit_depth(config: &EncoderConfig, input_is_16bit: bool) -> u8 {
+    match config.bit_depth {
+        EncodeBitDepth::Eight => 8,
+        EncodeBitDepth::Ten => 10,
+        EncodeBitDepth::Auto => {
+            if input_is_16bit {
+                10
+            } else {
+                8
+            }
+        }
+    }
+}
+
+/// Lowest SVT preset with a native-10-bit **monochrome** level producer.
+/// The port's `bd10_levels_native` (pipeline.rs) approves mono only where
+/// the level re-encode post-pass runs — the eff-M9 band — because the
+/// full-RD bd10 funnel requires 4:2:0; `try_encode_frame_hbd` refuses
+/// anything else rather than emit 8-bit-quantized levels under a 10-bit
+/// sequence header. Colour (4:2:0) has a bd10 producer at every preset.
+pub(crate) const MONO_HBD_MIN_PRESET: u8 = 9;
+
+/// The bit-depth envelope this backend accepts, shared by the encode path
+/// and [`crate::EncoderConfig::validate_for_input`] (issue #33). Returns
+/// the reason a `bit_depth`-bit encode at zenavif `speed` is refused, or
+/// `None` when it encodes. `mono_plane` is true when a Cs400 stream is
+/// emitted (alpha auxiliary item, grayscale colour item).
+pub(crate) fn svt_rs_depth_error(
+    bit_depth: u8,
+    speed: u8,
+    mono_plane: bool,
+) -> Option<&'static str> {
+    if bit_depth == 10 && mono_plane && speed_to_svt_preset(speed) < MONO_HBD_MIN_PRESET {
+        return Some(
+            "Av1Backend::SvtRs codes 10-bit alpha and grayscale (Cs400) streams at SVT \
+             preset >= 9 (speed >= 7) only: the svtav1-rs bd10 monochrome level pass runs \
+             there and nowhere else, and an AVIF alpha item must match the colour item's \
+             depth. Use speed >= 7, RGB input, 8-bit, or the zenravif backend",
+        );
+    }
+    None
+}
+
+/// Encode-time twin of the `validate_for_input` depth check, both driven
+/// by [`svt_rs_depth_error`].
+fn reject_out_of_envelope_depth(
+    bit_depth: u8,
+    config: &EncoderConfig,
+    mono_plane: bool,
+) -> Result<()> {
+    match svt_rs_depth_error(bit_depth, config.speed, mono_plane) {
+        None => Ok(()),
+        Some(reason) => Err(at!(Error::Unsupported(reason))),
+    }
+}
+
+/// One monochrome plane at the depth the stream is coded at.
+enum MonoPlane<'a> {
+    Eight(&'a [u8]),
+    Ten(&'a [u16]),
+}
+
 /// Run one still-frame monochrome encode through the svtav1-rs pipeline.
 ///
 /// `plane` is `stride`-strided (`stride >= width`), `width`/`height` already
-/// inside the mono envelope of [`svt_rs_dims_error`]. Returns the TD +
-/// sequence header + frame OBU payload. Used for grayscale color items and
-/// alpha auxiliary items (both are Cs400 streams).
+/// inside the mono envelope of [`svt_rs_dims_error`] and the depth inside
+/// [`svt_rs_depth_error`]. Returns the TD + sequence header + frame OBU
+/// payload. Used for grayscale color items and alpha auxiliary items (both
+/// are Cs400 streams).
 #[expect(clippy::too_many_arguments, reason = "internal plane-encode helper")]
 fn encode_mono_plane_svt(
-    plane: &[u8],
+    plane: MonoPlane<'_>,
     width: usize,
     height: usize,
     stride: usize,
@@ -345,7 +423,10 @@ fn encode_mono_plane_svt(
         ..svtav1::encoder::rate_control::RcConfig::default()
     };
     let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new(w, h, preset, rc, 0, 1);
-    pipeline.bit_depth = 8;
+    pipeline.bit_depth = match plane {
+        MonoPlane::Eight(_) => 8,
+        MonoPlane::Ten(_) => 10,
+    };
     pipeline.color_description = color_description;
     // Cooperative cancellation inside the pipeline (SB-cadence polling) —
     // backend-seam obligation 3: a capability the backend accepts must be
@@ -356,19 +437,137 @@ fn encode_mono_plane_svt(
     // tile knob inherits the caller's thread budget). 0 = auto.
     pipeline.thread_count = threads;
 
-    // The pipeline reads a tight `stride`-strided plane; make it tight when
-    // the caller's buffer is padded.
-    let payload = if stride == width {
-        pipeline.try_encode_frame(plane, width)
-    } else {
-        let mut tight = Vec::with_capacity(width * height);
-        for row in plane.chunks(stride).take(height) {
-            tight.extend_from_slice(&row[..width]);
+    let payload = match plane {
+        // The u8 pipeline reads a tight `stride`-strided plane; make it
+        // tight when the caller's buffer is padded.
+        MonoPlane::Eight(plane) => {
+            if stride == width {
+                pipeline.try_encode_frame(plane, width)
+            } else {
+                let mut tight = Vec::with_capacity(width * height);
+                for row in plane.chunks(stride).take(height) {
+                    tight.extend_from_slice(&row[..width]);
+                }
+                pipeline.try_encode_frame(&tight, width)
+            }
         }
-        pipeline.try_encode_frame(&tight, width)
+        // The hbd entry point takes the stride itself.
+        MonoPlane::Ten(plane) => pipeline.try_encode_frame_hbd(plane, stride),
     }
     .map_err(map_svt_encode_error)?;
     Ok(payload)
+}
+
+/// Tight 4:2:0 planes at the depth the colour stream is coded at.
+enum Yuv420Planes {
+    Eight {
+        y: Vec<u8>,
+        u: Vec<u8>,
+        v: Vec<u8>,
+    },
+    Ten {
+        y: Vec<u16>,
+        u: Vec<u16>,
+        v: Vec<u16>,
+    },
+}
+
+impl Yuv420Planes {
+    fn bit_depth(&self) -> u8 {
+        match self {
+            Yuv420Planes::Eight { .. } => 8,
+            Yuv420Planes::Ten { .. } => 10,
+        }
+    }
+
+    /// RGB(A) of any source depth -> 4:2:0 at `bit_depth` (8 or 10)
+    /// through the depth-generic f32 recipe (BT.601 full range — the
+    /// matrix/range this backend signals). At 8 bits from an 8-bit
+    /// source the entry points use the dedicated `rgb8_to_yuv420` /
+    /// `rgba8_to_yuv420` kernels instead (byte-identical output to the
+    /// 8-bit-only seam); this path serves 10-bit output and 16-bit input.
+    fn convert<P: crate::yuv_convert::ForwardPixel>(
+        rgb: &[P],
+        stride: usize,
+        width: usize,
+        height: usize,
+        bit_depth: u8,
+    ) -> Self {
+        let cw = width.div_ceil(2);
+        let ch = height.div_ceil(2);
+        let mut y = vec![0u16; width * height];
+        let mut u = vec![0u16; cw * ch];
+        let mut v = vec![0u16; cw * ch];
+        crate::yuv_convert::rgbx_to_yuv420_u16(
+            rgb,
+            stride,
+            width,
+            height,
+            bit_depth,
+            crate::yuv_convert::YuvRange::Full,
+            crate::yuv_convert::YuvMatrix::Bt601,
+            &mut y,
+            &mut u,
+            &mut v,
+        );
+        if bit_depth == 8 {
+            // Quantized at 8 bits by the kernel; narrow the container.
+            let narrow = |p: Vec<u16>| p.into_iter().map(|s| s as u8).collect();
+            Yuv420Planes::Eight {
+                y: narrow(y),
+                u: narrow(u),
+                v: narrow(v),
+            }
+        } else {
+            Yuv420Planes::Ten { y, u, v }
+        }
+    }
+}
+
+/// Run one still-frame 4:2:0 colour encode through the svtav1-rs pipeline
+/// at the planes' depth. Returns the TD + sequence header + frame OBU
+/// payload.
+fn encode_color_420_svt(
+    planes: &Yuv420Planes,
+    width: usize,
+    height: usize,
+    config: &EncoderConfig,
+    color_primaries: u8,
+    transfer_characteristics: u8,
+    stop: &almost_enough::StopToken,
+) -> Result<Vec<u8>> {
+    let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
+    let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
+    let qp = quality_to_qp_gated(config.quality);
+    let preset = speed_to_svt_preset(config.speed);
+    let rc = svtav1::encoder::rate_control::RcConfig {
+        mode: svtav1::encoder::rate_control::RcMode::Cqp,
+        qp,
+        ..svtav1::encoder::rate_control::RcConfig::default()
+    };
+    // hierarchical_levels 0 + intra_period 1: single still key frame with a
+    // reduced still-picture sequence header (the AvifEncoder pattern).
+    let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new(w, h, preset, rc, 0, 1)
+        .with_chroma_420(true);
+    pipeline.bit_depth = planes.bit_depth();
+    pipeline.color_description = svtav1::entropy::obu::ColorDescription {
+        color_primaries,
+        transfer_characteristics,
+        matrix_coefficients: MATRIX_COEFFICIENTS_BT601,
+        // Note: the svtav1-rs sequence-header writer pins color_range=1
+        // (full) regardless of this flag; kept coherent anyway.
+        full_range: true,
+    };
+    pipeline.stop = stop.clone();
+    // Caller's thread budget (see encode_mono_plane_svt for semantics).
+    pipeline.thread_count = config.threads.unwrap_or(0);
+
+    // TD + sequence header + frame OBUs, muxed verbatim (module docs).
+    match planes {
+        Yuv420Planes::Eight { y, u, v } => pipeline.try_encode_frame_420(y, u, v, width),
+        Yuv420Planes::Ten { y, u, v } => pipeline.try_encode_frame_420_hbd(y, u, v, width),
+    }
+    .map_err(map_svt_encode_error)
 }
 
 /// Build the AVIF muxer with the config's container-level metadata applied
@@ -418,6 +617,53 @@ fn build_aviffy(
     aviffy
 }
 
+/// Mux a colour payload (and optional alpha payload) into an AVIF file
+/// with the config's container-level metadata.
+#[expect(clippy::too_many_arguments, reason = "internal mux helper")]
+fn mux_svt(
+    config: &EncoderConfig,
+    color_payload: Vec<u8>,
+    alpha_payload: Option<Vec<u8>>,
+    width: usize,
+    height: usize,
+    bit_depth: u8,
+    color_primaries: u8,
+    transfer_characteristics: u8,
+    monochrome: bool,
+) -> Result<EncodedImage> {
+    let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
+    let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
+    // The av1C written here must match the payload's sequence header
+    // (Chrome cross-validates): profile 0, 8- or 10-bit, 4:2:0 (or mono),
+    // full range.
+    let aviffy = build_aviffy(
+        config,
+        color_primaries,
+        transfer_characteristics,
+        if monochrome {
+            zenavif_serialize::constants::MatrixCoefficients::Unspecified
+        } else {
+            zenavif_serialize::constants::MatrixCoefficients::Bt601
+        },
+        monochrome,
+    );
+    let avif_file = aviffy
+        .try_to_vec(&color_payload, alpha_payload.as_deref(), w, h, bit_depth)
+        .map_err(|e| at!(Error::Encode(format!("AVIF serialization failed: {e}"))))?;
+    Ok(EncodedImage {
+        color_byte_size: color_payload.len(),
+        alpha_byte_size: alpha_payload.map_or(0, |a| a.len()),
+        avif_file,
+    })
+}
+
+/// Exact 8 -> 10 bit sample scaling (`round(v * 1023 / 255)`) for alpha
+/// and gray planes widened to a 10-bit Cs400 stream.
+#[inline]
+fn widen_8_to_10(v: u8) -> u16 {
+    ((u32::from(v) * 1023 + 127) / 255) as u16
+}
+
 /// Encode an 8-bit RGB image to AVIF via the svtav1-rs backend.
 ///
 /// See the module docs for scope and constraints. Cancellation is checked
@@ -435,8 +681,8 @@ pub(crate) fn encode_rgb8_svt_rs(
     let width = img.width();
     let height = img.height();
     reject_out_of_envelope_dims(width, height, config, false)?;
-    let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
-    let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
+    let bit_depth = effective_bit_depth(config, false);
+    reject_out_of_envelope_depth(bit_depth, config, false)?;
 
     // ---- RGB -> YUV 4:2:0, BT.601 full range ----------------------------
     // Full range matches what the svtav1-rs sequence header signals
@@ -445,85 +691,128 @@ pub(crate) fn encode_rgb8_svt_rs(
     // kernel is the exact inverse of the decode recipe (per-pixel f32
     // chroma, box-averaged before quantization).
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let cw = width.div_ceil(2);
-    let ch = height.div_ceil(2);
-    let mut y_plane = vec![0u8; width * height];
-    let mut u_plane = vec![0u8; cw * ch];
-    let mut v_plane = vec![0u8; cw * ch];
-    crate::yuv_convert::rgb8_to_yuv420(
-        img.buf(),
-        img.stride(),
-        width,
-        height,
-        crate::yuv_convert::YuvRange::Full,
-        crate::yuv_convert::YuvMatrix::Bt601,
-        &mut y_plane,
-        &mut u_plane,
-        &mut v_plane,
-    );
+    let planes = if bit_depth == 8 {
+        let cw = width.div_ceil(2);
+        let ch = height.div_ceil(2);
+        let mut y = vec![0u8; width * height];
+        let mut u = vec![0u8; cw * ch];
+        let mut v = vec![0u8; cw * ch];
+        crate::yuv_convert::rgb8_to_yuv420(
+            img.buf(),
+            img.stride(),
+            width,
+            height,
+            crate::yuv_convert::YuvRange::Full,
+            crate::yuv_convert::YuvMatrix::Bt601,
+            &mut y,
+            &mut u,
+            &mut v,
+        );
+        Yuv420Planes::Eight { y, u, v }
+    } else {
+        Yuv420Planes::convert(img.buf(), img.stride(), width, height, bit_depth)
+    };
 
     // ---- svtav1-rs still-frame encode -----------------------------------
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let qp = quality_to_qp_gated(config.quality);
-    let preset = speed_to_svt_preset(config.speed);
     let color_primaries = config.color_primaries.unwrap_or(DEFAULT_COLOR_PRIMARIES);
     let transfer_characteristics = config
         .transfer_characteristics
         .unwrap_or(DEFAULT_TRANSFER_CHARACTERISTICS);
-
-    let rc = svtav1::encoder::rate_control::RcConfig {
-        mode: svtav1::encoder::rate_control::RcMode::Cqp,
-        qp,
-        ..svtav1::encoder::rate_control::RcConfig::default()
-    };
-    // hierarchical_levels 0 + intra_period 1: single still key frame with a
-    // reduced still-picture sequence header (the AvifEncoder pattern).
-    let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new(w, h, preset, rc, 0, 1)
-        .with_chroma_420(true);
-    pipeline.bit_depth = 8;
-    pipeline.color_description = svtav1::entropy::obu::ColorDescription {
-        color_primaries,
-        transfer_characteristics,
-        matrix_coefficients: MATRIX_COEFFICIENTS_BT601,
-        // Note: the svtav1-rs sequence-header writer pins color_range=1
-        // (full) regardless of this flag; kept coherent anyway.
-        full_range: true,
-    };
-    pipeline.stop = stop.clone();
-    // Caller's thread budget (see encode_mono_plane_svt for semantics).
-    pipeline.thread_count = config.threads.unwrap_or(0);
-
-    // TD + sequence header + frame OBUs, muxed verbatim (module docs).
-    let av1_payload = pipeline
-        .try_encode_frame_420(&y_plane, &u_plane, &v_plane, width)
-        .map_err(map_svt_encode_error)?;
-
-    // ---- AVIF container --------------------------------------------------
-    // The av1C written here must match the payload's sequence header
-    // (Chrome cross-validates): profile 0, 8-bit, 4:2:0, full range.
-    stop.check().map_err(|e| at!(Error::from(e)))?;
-    let aviffy = build_aviffy(
+    let av1_payload = encode_color_420_svt(
+        &planes,
+        width,
+        height,
         config,
         color_primaries,
         transfer_characteristics,
-        zenavif_serialize::constants::MatrixCoefficients::Bt601,
+        &stop,
+    )?;
+
+    // ---- AVIF container --------------------------------------------------
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    mux_svt(
+        config,
+        av1_payload,
+        None,
+        width,
+        height,
+        bit_depth,
+        color_primaries,
+        transfer_characteristics,
         false,
-    );
-
-    let avif_file = aviffy
-        .try_to_vec(&av1_payload, None, w, h, 8)
-        .map_err(|e| at!(Error::Encode(format!("AVIF serialization failed: {e}"))))?;
-
-    Ok(EncodedImage {
-        color_byte_size: av1_payload.len(),
-        alpha_byte_size: 0,
-        avif_file,
-    })
+    )
 }
 
 /// CICP "unspecified" code point — what the alpha auxiliary stream signals
 /// (an alpha plane has no colorimetry; readers ignore its CICP per MIAF).
 const CICP_UNSPECIFIED: u8 = 2;
+
+/// Colour description for a Cs400 alpha stream (no colorimetry).
+fn alpha_color_description() -> svtav1::entropy::obu::ColorDescription {
+    svtav1::entropy::obu::ColorDescription {
+        color_primaries: CICP_UNSPECIFIED,
+        transfer_characteristics: CICP_UNSPECIFIED,
+        matrix_coefficients: CICP_UNSPECIFIED,
+        full_range: true,
+    }
+}
+
+/// Encode a colour 4:2:0 item plus a Cs400 alpha item and mux both — the
+/// shared tail of the RGBA entry points. `alpha` is a tight plane at
+/// `bit_depth` (8 or 10).
+fn encode_rgba_planes_svt(
+    planes: &Yuv420Planes,
+    alpha: MonoPlane<'_>,
+    width: usize,
+    height: usize,
+    config: &EncoderConfig,
+    stop: &almost_enough::StopToken,
+) -> Result<EncodedImage> {
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    let alpha_qp = quality_to_qp_gated(crate::encoder::effective_alpha_quality(config));
+    let preset = speed_to_svt_preset(config.speed);
+    let color_primaries = config.color_primaries.unwrap_or(DEFAULT_COLOR_PRIMARIES);
+    let transfer_characteristics = config
+        .transfer_characteristics
+        .unwrap_or(DEFAULT_TRANSFER_CHARACTERISTICS);
+    let color_payload = encode_color_420_svt(
+        planes,
+        width,
+        height,
+        config,
+        color_primaries,
+        transfer_characteristics,
+        stop,
+    )?;
+
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    let alpha_payload = encode_mono_plane_svt(
+        alpha,
+        width,
+        height,
+        width,
+        preset,
+        alpha_qp,
+        config.threads.unwrap_or(0),
+        alpha_color_description(),
+        stop,
+    )?;
+
+    // ---- AVIF container (color item + auxl alpha item) -------------------
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    mux_svt(
+        config,
+        color_payload,
+        Some(alpha_payload),
+        width,
+        height,
+        planes.bit_depth(),
+        color_primaries,
+        transfer_characteristics,
+        false,
+    )
+}
 
 /// Encode an 8-bit RGBA image to AVIF via the svtav1-rs backend.
 ///
@@ -544,107 +833,175 @@ pub(crate) fn encode_rgba8_svt_rs(
     let height = img.height();
     // The alpha plane is a Cs400 stream: the stricter mono envelope applies.
     reject_out_of_envelope_dims(width, height, config, true)?;
-    let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
-    let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
+    let bit_depth = effective_bit_depth(config, false);
+    reject_out_of_envelope_depth(bit_depth, config, true)?;
 
     // ---- RGBA -> YUV 4:2:0 color + tight alpha plane --------------------
     // Same forward kernel as the RGB path (alpha ignored here — it rides
     // as its own Cs400 stream below), so RGB and RGBA encodes of the same
     // pixels produce byte-identical color payloads by construction.
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let cw = width.div_ceil(2);
-    let ch = height.div_ceil(2);
-    let mut y_plane = vec![0u8; width * height];
-    let mut u_plane = vec![0u8; cw * ch];
-    let mut v_plane = vec![0u8; cw * ch];
-    crate::yuv_convert::rgba8_to_yuv420(
-        img.buf(),
-        img.stride(),
-        width,
-        height,
-        crate::yuv_convert::YuvRange::Full,
-        crate::yuv_convert::YuvMatrix::Bt601,
-        &mut y_plane,
-        &mut u_plane,
-        &mut v_plane,
-    );
-    let mut alpha_plane = Vec::with_capacity(width * height);
-    for row in img.rows() {
-        alpha_plane.extend(row.iter().map(|px| px.a));
+    let planes = if bit_depth == 8 {
+        let cw = width.div_ceil(2);
+        let ch = height.div_ceil(2);
+        let mut y = vec![0u8; width * height];
+        let mut u = vec![0u8; cw * ch];
+        let mut v = vec![0u8; cw * ch];
+        crate::yuv_convert::rgba8_to_yuv420(
+            img.buf(),
+            img.stride(),
+            width,
+            height,
+            crate::yuv_convert::YuvRange::Full,
+            crate::yuv_convert::YuvMatrix::Bt601,
+            &mut y,
+            &mut u,
+            &mut v,
+        );
+        Yuv420Planes::Eight { y, u, v }
+    } else {
+        Yuv420Planes::convert(img.buf(), img.stride(), width, height, bit_depth)
+    };
+    if bit_depth == 8 {
+        let mut alpha = Vec::with_capacity(width * height);
+        for row in img.rows() {
+            alpha.extend(row.iter().map(|px| px.a));
+        }
+        encode_rgba_planes_svt(
+            &planes,
+            MonoPlane::Eight(&alpha),
+            width,
+            height,
+            config,
+            &stop,
+        )
+    } else {
+        let mut alpha = Vec::with_capacity(width * height);
+        for row in img.rows() {
+            alpha.extend(row.iter().map(|px| widen_8_to_10(px.a)));
+        }
+        encode_rgba_planes_svt(
+            &planes,
+            MonoPlane::Ten(&alpha),
+            width,
+            height,
+            config,
+            &stop,
+        )
     }
+}
 
-    // ---- svtav1-rs still-frame encodes: color, then alpha ---------------
+/// Encode a 16-bit RGB image to a 10-bit (profile 0, 4:2:0) AVIF via the
+/// svtav1-rs backend (issue #33).
+///
+/// Input values are full u16 range (0–65535) in the image's own transfer
+/// function; the RGB → YCbCr conversion runs at 10-bit precision from the
+/// 16-bit source and the u16 planes are handed to the port's native
+/// `try_encode_frame_420_hbd`. [`crate::EncodeBitDepth::Eight`] codes an
+/// 8-bit stream from the same conversion.
+pub(crate) fn encode_rgb16_svt_rs(
+    img: ImgRef<'_, Rgb<u16>>,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedImage> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let qp = quality_to_qp_gated(config.quality);
-    let alpha_qp = quality_to_qp_gated(crate::encoder::effective_alpha_quality(config));
-    let preset = speed_to_svt_preset(config.speed);
+    reject_unsupported_config(config)?;
+
+    let width = img.width();
+    let height = img.height();
+    reject_out_of_envelope_dims(width, height, config, false)?;
+    let bit_depth = effective_bit_depth(config, true);
+    reject_out_of_envelope_depth(bit_depth, config, false)?;
+
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    let planes = Yuv420Planes::convert(img.buf(), img.stride(), width, height, bit_depth);
+
+    stop.check().map_err(|e| at!(Error::from(e)))?;
     let color_primaries = config.color_primaries.unwrap_or(DEFAULT_COLOR_PRIMARIES);
     let transfer_characteristics = config
         .transfer_characteristics
         .unwrap_or(DEFAULT_TRANSFER_CHARACTERISTICS);
-
-    let rc = svtav1::encoder::rate_control::RcConfig {
-        mode: svtav1::encoder::rate_control::RcMode::Cqp,
-        qp,
-        ..svtav1::encoder::rate_control::RcConfig::default()
-    };
-    let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new(w, h, preset, rc, 0, 1)
-        .with_chroma_420(true);
-    pipeline.bit_depth = 8;
-    pipeline.color_description = svtav1::entropy::obu::ColorDescription {
-        color_primaries,
-        transfer_characteristics,
-        matrix_coefficients: MATRIX_COEFFICIENTS_BT601,
-        full_range: true,
-    };
-    pipeline.stop = stop.clone();
-    // Caller's thread budget (see encode_mono_plane_svt for semantics).
-    pipeline.thread_count = config.threads.unwrap_or(0);
-    let color_payload = pipeline
-        .try_encode_frame_420(&y_plane, &u_plane, &v_plane, width)
-        .map_err(map_svt_encode_error)?;
-
-    stop.check().map_err(|e| at!(Error::from(e)))?;
-    let alpha_payload = encode_mono_plane_svt(
-        &alpha_plane,
+    let av1_payload = encode_color_420_svt(
+        &planes,
         width,
         height,
-        width,
-        preset,
-        alpha_qp,
-        config.threads.unwrap_or(0),
-        svtav1::entropy::obu::ColorDescription {
-            color_primaries: CICP_UNSPECIFIED,
-            transfer_characteristics: CICP_UNSPECIFIED,
-            matrix_coefficients: CICP_UNSPECIFIED,
-            full_range: true,
-        },
-        &stop,
-    )?;
-
-    // ---- AVIF container (color item + auxl alpha item) -------------------
-    stop.check().map_err(|e| at!(Error::from(e)))?;
-    let aviffy = build_aviffy(
         config,
         color_primaries,
         transfer_characteristics,
-        zenavif_serialize::constants::MatrixCoefficients::Bt601,
-        false,
-    );
-    let avif_file = aviffy
-        .try_to_vec(&color_payload, Some(&alpha_payload), w, h, 8)
-        .map_err(|e| at!(Error::Encode(format!("AVIF serialization failed: {e}"))))?;
+        &stop,
+    )?;
 
-    Ok(EncodedImage {
-        color_byte_size: color_payload.len(),
-        alpha_byte_size: alpha_payload.len(),
-        avif_file,
-    })
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    mux_svt(
+        config,
+        av1_payload,
+        None,
+        width,
+        height,
+        bit_depth,
+        color_primaries,
+        transfer_characteristics,
+        false,
+    )
+}
+
+/// Encode a 16-bit RGBA image to a 10-bit AVIF via the svtav1-rs backend
+/// (issue #33): colour as [`encode_rgb16_svt_rs`], the alpha plane scaled
+/// to 10 bits (`scale_from_u16`) as a Cs400 `auxl` item — which needs
+/// speed ≥ 7 (see [`svt_rs_depth_error`]).
+pub(crate) fn encode_rgba16_svt_rs(
+    img: ImgRef<'_, rgb::Rgba<u16>>,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedImage> {
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_unsupported_config(config)?;
+
+    let width = img.width();
+    let height = img.height();
+    reject_out_of_envelope_dims(width, height, config, true)?;
+    let bit_depth = effective_bit_depth(config, true);
+    reject_out_of_envelope_depth(bit_depth, config, true)?;
+
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    let planes = Yuv420Planes::convert(img.buf(), img.stride(), width, height, bit_depth);
+    if bit_depth == 8 {
+        let mut alpha = Vec::with_capacity(width * height);
+        for row in img.rows() {
+            alpha.extend(row.iter().map(|px| (px.a >> 8) as u8));
+        }
+        encode_rgba_planes_svt(
+            &planes,
+            MonoPlane::Eight(&alpha),
+            width,
+            height,
+            config,
+            &stop,
+        )
+    } else {
+        let mut alpha = Vec::with_capacity(width * height);
+        for row in img.rows() {
+            alpha.extend(
+                row.iter()
+                    .map(|px| crate::convert::scale_from_u16(px.a, 10)),
+            );
+        }
+        encode_rgba_planes_svt(
+            &planes,
+            MonoPlane::Ten(&alpha),
+            width,
+            height,
+            config,
+            &stop,
+        )
+    }
 }
 
 /// Encode an 8-bit grayscale image to a monochrome (Cs400) AVIF via the
 /// svtav1-rs backend — the same still-frame mono pipeline the alpha plane
-/// uses, muxed as a monochrome color item.
+/// uses, muxed as a monochrome color item. [`crate::EncodeBitDepth::Ten`]
+/// widens to a 10-bit Cs400 stream (speed ≥ 7 only, see
+/// [`svt_rs_depth_error`]).
 #[cfg(feature = "encode-mono")]
 pub(crate) fn encode_gray8_svt_rs(
     img: ImgRef<'_, u8>,
@@ -658,8 +1015,8 @@ pub(crate) fn encode_gray8_svt_rs(
     let height = img.height();
     // Grayscale is a Cs400 stream: the stricter mono envelope applies.
     reject_out_of_envelope_dims(width, height, config, true)?;
-    let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
-    let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
+    let bit_depth = effective_bit_depth(config, false);
+    reject_out_of_envelope_depth(bit_depth, config, true)?;
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
     let qp = quality_to_qp_gated(config.quality);
@@ -668,42 +1025,56 @@ pub(crate) fn encode_gray8_svt_rs(
     let transfer_characteristics = config
         .transfer_characteristics
         .unwrap_or(DEFAULT_TRANSFER_CHARACTERISTICS);
-
-    let av1_payload = encode_mono_plane_svt(
-        img.buf(),
-        width,
-        height,
-        img.stride(),
-        preset,
-        qp,
-        config.threads.unwrap_or(0),
-        svtav1::entropy::obu::ColorDescription {
-            color_primaries,
-            transfer_characteristics,
-            // Monochrome streams carry no chroma; matrix is unspecified.
-            matrix_coefficients: CICP_UNSPECIFIED,
-            full_range: true,
-        },
-        &stop,
-    )?;
-
-    stop.check().map_err(|e| at!(Error::from(e)))?;
-    let aviffy = build_aviffy(
-        config,
+    let color_description = svtav1::entropy::obu::ColorDescription {
         color_primaries,
         transfer_characteristics,
-        zenavif_serialize::constants::MatrixCoefficients::Unspecified,
-        true,
-    );
-    let avif_file = aviffy
-        .try_to_vec(&av1_payload, None, w, h, 8)
-        .map_err(|e| at!(Error::Encode(format!("AVIF serialization failed: {e}"))))?;
+        // Monochrome streams carry no chroma; matrix is unspecified.
+        matrix_coefficients: CICP_UNSPECIFIED,
+        full_range: true,
+    };
 
-    Ok(EncodedImage {
-        color_byte_size: av1_payload.len(),
-        alpha_byte_size: 0,
-        avif_file,
-    })
+    let av1_payload = if bit_depth == 8 {
+        encode_mono_plane_svt(
+            MonoPlane::Eight(img.buf()),
+            width,
+            height,
+            img.stride(),
+            preset,
+            qp,
+            config.threads.unwrap_or(0),
+            color_description,
+            &stop,
+        )?
+    } else {
+        let mut wide = Vec::with_capacity(width * height);
+        for row in img.rows() {
+            wide.extend(row.iter().map(|&v| widen_8_to_10(v)));
+        }
+        encode_mono_plane_svt(
+            MonoPlane::Ten(&wide),
+            width,
+            height,
+            width,
+            preset,
+            qp,
+            config.threads.unwrap_or(0),
+            color_description,
+            &stop,
+        )?
+    };
+
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    mux_svt(
+        config,
+        av1_payload,
+        None,
+        width,
+        height,
+        bit_depth,
+        color_primaries,
+        transfer_characteristics,
+        true,
+    )
 }
 
 #[cfg(test)]

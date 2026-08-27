@@ -214,9 +214,10 @@ pub enum Av1Backend {
     /// rejected upstream. Streams pass decode conformance under `aomdec`
     /// (2100 conformance cells at the pin) and the payload is muxed into
     /// a real AVIF container in-crate. The zenavif seam's scope stays
-    /// deliberately narrow — 8-bit 4:2:0 stills; dimensions are multiples
-    /// of 64 at every speed, arbitrary at speed >= 5 (SVT preset >= 6;
-    /// with alpha or grayscale: multiples of 8 at speed >= 6); see
+    /// deliberately narrow — 8- and 10-bit 4:2:0 stills (10-bit alpha or
+    /// grayscale at speed >= 7 only); dimensions are multiples of 64 at
+    /// every speed, arbitrary at speed >= 5 (SVT preset >= 6; with alpha
+    /// or grayscale: multiples of 8 at speed >= 6); see
     /// `src/encoder_svt_rs.rs` module docs.
     /// [`EncoderConfig::validate`] rejects the variant when the feature
     /// is off, and rejects configs outside the supported scope when on.
@@ -1013,16 +1014,17 @@ pub(crate) fn effective_qm(config: &EncoderConfig) -> bool {
 
 /// Reject `Av1Backend::SvtRs` on entry points it does not implement.
 ///
-/// The svtav1-rs backend covers 8-bit stills only (RGB/RGBA 4:2:0 +
-/// grayscale); every other entry point fails honestly instead of silently
-/// serving the request with zenravif. (The deprecated `Svtav1` variant
-/// keeps its historical behavior: rejected by `validate()`, silently
-/// zenravif-served otherwise.)
+/// The svtav1-rs backend covers still encodes only (RGB/RGBA 8- and
+/// 16-bit → 4:2:0 at 8 or 10 bits, plus grayscale); every other entry
+/// point — and every entry point when the feature is off — fails honestly
+/// instead of silently serving the request with zenravif. (The deprecated
+/// `Svtav1` variant keeps its historical behavior: rejected by
+/// `validate()`, silently zenravif-served otherwise.)
 fn reject_svt_rs_backend(config: &EncoderConfig, entry: &'static str) -> Result<()> {
     if config.backend == Av1Backend::SvtRs {
         return Err(at!(Error::Encode(format!(
             "Av1Backend::SvtRs does not support {entry} \
-             (8-bit RGB/RGBA 4:2:0 + grayscale still encodes only); \
+             (RGB/RGBA/grayscale still encodes only); \
              use Av1Backend::Zenravif"
         ))));
     }
@@ -1418,7 +1420,14 @@ pub fn encode_rgb16(
 ) -> Result<EncodedImage> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    reject_svt_rs_backend(config, "encode_rgb16 (10-bit)")?;
+    #[cfg(feature = "encode-svt-rs")]
+    if config.backend == Av1Backend::SvtRs {
+        return crate::encoder_svt_rs::encode_rgb16_svt_rs(img, config, stop);
+    }
+    reject_svt_rs_backend(
+        config,
+        "encode_rgb16 (requires the `encode-svt-rs` cargo feature)",
+    )?;
     let enc = build_ravif_encoder(config, stop, true)?;
     let width = img.width();
     let height = img.height();
@@ -1477,7 +1486,14 @@ pub fn encode_rgba16(
 ) -> Result<EncodedImage> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    reject_svt_rs_backend(config, "encode_rgba16 (10-bit + alpha)")?;
+    #[cfg(feature = "encode-svt-rs")]
+    if config.backend == Av1Backend::SvtRs {
+        return crate::encoder_svt_rs::encode_rgba16_svt_rs(img, config, stop);
+    }
+    reject_svt_rs_backend(
+        config,
+        "encode_rgba16 (requires the `encode-svt-rs` cargo feature)",
+    )?;
     let enc = build_ravif_encoder(config, stop, true)?;
     let width = img.width();
     let height = img.height();

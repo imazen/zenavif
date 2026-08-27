@@ -235,11 +235,14 @@ fn grid_alpha_refused_on_both_backends() {
         let data = std::fs::read(&path)
             .unwrap_or_else(|e| panic!("read {path}: {e} (run: just download-vectors)"));
         for backend in [DecodeBackend::Rav1dSafe, DecodeBackend::AomRs] {
-            let err =
-                zenavif::decode_with(&data, &DecoderConfig::new().decode_backend(backend), &stop())
-                    .expect_err(&format!(
-                        "{name} via {backend:?}: grid+alpha must be refused, not decoded opaquely"
-                    ));
+            let err = zenavif::decode_with(
+                &data,
+                &DecoderConfig::new().decode_backend(backend),
+                &stop(),
+            )
+            .expect_err(&format!(
+                "{name} via {backend:?}: grid+alpha must be refused, not decoded opaquely"
+            ));
             let msg = err.to_string();
             assert!(
                 msg.contains("alpha"),

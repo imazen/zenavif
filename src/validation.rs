@@ -234,12 +234,45 @@ impl crate::EncoderConfig {
         input: crate::encode_plan::PlanInput,
     ) -> Result<(), ValidationError> {
         self.validate()?;
-        if input.input_is_16bit && self.chroma_subsampling == crate::EncodeChromaSubsampling::Yuv420
+        // zenravif's 16-bit path is the identity-RGB (GBR) encode, which
+        // has no 4:2:0. The svtav1-rs backend converts 16-bit input to
+        // 10-bit YCbCr 4:2:0 instead, so the pair is exactly its shape.
+        if input.input_is_16bit
+            && self.chroma_subsampling == crate::EncodeChromaSubsampling::Yuv420
+            && self.backend != crate::Av1Backend::SvtRs
         {
             return Err(ValidationError::MutuallyExclusive {
                 a: "chroma_subsampling=Yuv420",
                 b: "16-bit input (identity-RGB encode path)",
             });
+        }
+        // The svtav1-rs bit-depth envelope (issue #33): 10-bit Cs400
+        // alpha/gray streams need SVT preset >= 9 (speed >= 7). Same
+        // predicate as the encode path (`encoder_svt_rs::svt_rs_depth_error`).
+        #[cfg(feature = "encode-svt-rs")]
+        if self.backend == crate::Av1Backend::SvtRs {
+            let bit_depth = match self.bit_depth {
+                crate::EncodeBitDepth::Eight => 8,
+                crate::EncodeBitDepth::Ten => 10,
+                crate::EncodeBitDepth::Auto => {
+                    if input.input_is_16bit {
+                        10
+                    } else {
+                        8
+                    }
+                }
+            };
+            if let Some(detail) = crate::encoder_svt_rs::svt_rs_depth_error(
+                bit_depth,
+                self.speed,
+                input.input_has_alpha,
+            ) {
+                return Err(ValidationError::BackendUnsupportedParam {
+                    backend: "Av1Backend::SvtRs",
+                    param: "bit_depth=Ten with alpha",
+                    detail,
+                });
+            }
         }
         // The svtav1-rs dimension envelope (issue #32): multiples of 64 at
         // any speed; arbitrary at SVT preset >= 6 (speed >= 5) for the
@@ -305,7 +338,7 @@ impl crate::EncoderConfig {
     }
 
     /// The configuration slice the experimental svtav1-rs backend
-    /// implements: 8-bit 4:2:0 YCbCr full-range stills, no gain map, no
+    /// implements: 8/10-bit 4:2:0 YCbCr full-range stills, no gain map, no
     /// lossless. The dimension envelope (multiples of 64; arbitrary at
     /// speed >= 5; multiples of 8 at speed >= 6 with alpha) is a
     /// config×input concern checked by [`Self::validate_for_input`] and at
@@ -327,13 +360,6 @@ impl crate::EncoderConfig {
                 param: "color_model=Rgb",
                 detail: "only the YCbCr model is implemented (identity/RGB has no \
                          defined 4:2:0 subsampling)",
-            });
-        }
-        if self.bit_depth == crate::EncodeBitDepth::Ten {
-            return Err(ValidationError::BackendUnsupportedParam {
-                backend: BACKEND,
-                param: "bit_depth=Ten",
-                detail: "8-bit only for now",
             });
         }
         if self.pixel_range == Some(crate::EncodePixelRange::Limited) {

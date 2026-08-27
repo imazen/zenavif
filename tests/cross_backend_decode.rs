@@ -157,6 +157,51 @@ fn svt_rs_partial_sb_output_decodes_identically_on_both_backends() {
     }
 }
 
+/// Issue #33: 10-bit SvtRs output (RGB16 -> native u16 4:2:0 encode) at
+/// 64-aligned and partial-SB geometries must be a 10-bit stream that both
+/// decode backends agree on byte-for-byte.
+#[cfg(feature = "encode-svt-rs")]
+#[test]
+fn svt_rs_10bit_output_decodes_identically_on_both_backends() {
+    for (w, h, speed) in [
+        (128usize, 64usize, 6u8),
+        (96, 80, 5),
+        (65, 65, 10),
+        (128, 64, 1),
+    ] {
+        let img8 = test_image(w, h);
+        let buf16: Vec<rgb::Rgb<u16>> = img8
+            .buf()
+            .iter()
+            .map(|p| rgb::Rgb {
+                r: u16::from(p.r) * 257,
+                g: u16::from(p.g) * 257,
+                b: u16::from(p.b) * 257,
+            })
+            .collect();
+        let img16 = Img::new(buf16, w, h);
+        let config = EncoderConfig::new()
+            .quality(70.0)
+            .speed(speed)
+            .chroma_subsampling(zenavif::EncodeChromaSubsampling::Yuv420)
+            .backend(Av1Backend::SvtRs);
+        let enc = zenavif::encode_rgb16(img16.as_ref(), &config, stop())
+            .unwrap_or_else(|e| panic!("svt-rs 10-bit {w}x{h} speed {speed} encode: {e}"));
+        let payload = primary_payload(&enc.avif_file);
+        let rav =
+            decode_av1_obu_yuv(&payload, DecodeBackend::Rav1dSafe).expect("rav1d-safe decode");
+        assert_eq!(
+            rav.bit_depth, 10,
+            "svt-rs {w}x{h} speed {speed}: expected a 10-bit stream"
+        );
+        assert_eq!((rav.width, rav.height), (w, h));
+        assert_backends_agree(
+            &enc.avif_file,
+            &format!("svt-rs 10-bit {w}x{h} speed {speed}"),
+        );
+    }
+}
+
 /// 10-bit AV1 from the zenravif backend: both decode backends must agree on
 /// the high-bit-depth path too (aom-rs decodes 8/10/12-bit; rav1d-safe
 /// likewise). Encodes RGB16 -> 10-bit AV1.

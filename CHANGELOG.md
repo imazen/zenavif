@@ -135,6 +135,40 @@ write-path returns + gain-map interop additions, already on main).
   today).
 
 ### Added
+- **`Av1Backend::SvtRs` encodes 10-bit (#33).** `encode_rgb16` /
+  `encode_rgba16` and `EncodeBitDepth::Ten` on 8-bit input now route to
+  the svtav1-rs backend instead of being refused: RGB → YCbCr (BT.601 full
+  range, 4:2:0) runs at 10-bit precision through a new depth-generic
+  forward kernel (`yuv_convert::rgbx_to_yuv420_u16`, the same f32 recipe
+  quantized at the output depth — an 8-bit source keeps its chroma-average
+  fraction bits), and the u16 planes go through the port's native
+  `EncodePipeline::try_encode_frame_420_hbd` (imazen/zenav1-svt#6, landed
+  upstream 2026-08-04). The container carries profile 0 / 10-bit av1C,
+  BT.2020/PQ/HLG CICP, and `clli` / `mdcv` from
+  `EncoderConfig::content_light_level` / `mastering_display` (HDR static
+  metadata is box-level; the port emits no metadata OBUs). Envelope:
+  10-bit **alpha and grayscale** Cs400 streams need speed ≥ 7 (SVT preset
+  ≥ 9, the port's only bd10 monochrome level producer;
+  `encoder_svt_rs::svt_rs_depth_error`, shared with `validate_for_input`,
+  which also stops applying the zenravif identity-path "16-bit + 4:2:0"
+  exclusion to this backend). Measured on the pinned rev (aarch64, q85):
+  RGB16 → 10-bit 96x80 54.9 dB (10-bit domain), RGBA16 at speed 7 54.7 /
+  62.9 dB colour / alpha, RGB8 + Ten 54.1 dB; at the QP floor the 10-bit
+  path's 10-bit-domain RMS error is 1.07 vs 2.33 for the 8-bit path from
+  the same 16-bit source (the low bits are coded, not truncated); 4 cells
+  (64-aligned, partial-SB, odd, preset 0) decode byte-identically on
+  rav1d-safe and aom-rs as 10-bit streams. Known band limit (upstream hbd
+  chunk 2): the deblock / CDEF / Wiener searches still decide on
+  MSB-truncated planes. Not measured: the encode memory model
+  (`heuristics::EstimateArm::SvtRs420`) was fit on 8-bit cells and is
+  reused for 10-bit as-is. Tests:
+  `svt_rs_rgb16_roundtrip_10bit_pq_with_hdr_metadata`,
+  `svt_rs_rgb8_bit_depth_ten_codes_10bit_stream`,
+  `svt_rs_10bit_path_keeps_low_bits_vs_8bit_at_qp_floor`,
+  `svt_rs_10bit_alpha_needs_speed_7`,
+  `svt_rs_gray8_bit_depth_ten_needs_speed_7`,
+  `svt_rs_10bit_output_decodes_identically_on_both_backends`,
+  `yuv_convert::tests::forward_u16_kernel_matches_8bit_recipe_at_depth_10`.
 - **`Av1Backend::SvtRs` accepts non-64-multiple dimensions at speed ≥ 5
   (#32).** The seam's blanket 64-multiple gate is now one predicate
   (`encoder_svt_rs::svt_rs_dims_error`, shared with
