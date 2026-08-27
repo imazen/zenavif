@@ -238,3 +238,37 @@ Best target-hitter of the three censused encoders (jxl k2 ctrl 0.832,
 zenwebp k2 1.859 — different judges, stated for scale not ranking). Smoke
 row: city t80 k3 |err| 0.010. TSVs alongside; cells at
 `/mnt/v/output/zenavif/instrument-census-2026-08-27/`.
+
+## MATRIX RESULTS (2026-08-29) — the registered G-AV3 run; candidate = north-anchor
+
+The wave-12 candidate landed (`W10L9PH_s4004_packed`, the frozen SDR
+candidate-of-record "north-anchor"); the registered matrix ran on the
+frozen 9-ref × t{70,80,88} corpus, control = shipped C bytes
+(`W10L9_s4003_packed`, "gray-tower"). Cells:
+`benchmarks/avifloop-matrix-2026-08-29/` (registered constants; speed 6,
+4:4:4, emit-best).
+
+| arm | med \|err\| | ±2 | total bytes |
+|---|---|---|---|
+| **cand (north-anchor) k3** | **0.180** | **24/27** | 826,038 |
+| ctrl (gray-tower) k3 | 0.336 | 23/27 | 824,575 |
+| cand k2 | 0.387 | 19/27 | 835,280 |
+| ctrl k2 | 0.756 | 23/27 | 832,762 |
+| outer j3 (bisection comparator) | 1.120 | 21/27 | 803,050 |
+| outer j2 | 2.450 | 13/27 | 907,527 |
+
+**Readings:** (1) the proportional inner controller dominates outer
+bisection at equal per-step cost (0.18-0.34 vs 1.12 at 3 steps) — the
+jxl-proven update rule transfers to the CQ domain; (2) **north-anchor
+halves the control's k2 error and beats it at k3 on both stats** — its
+finer top-zone dial structure (the G-GRAN-audited calibration) pays
+directly in target-hitting on AVIF, the priority codec; (3) byte
+totals are arm-comparable (±1%).
+
+**h3-mag arms: REFUSED as registered** — `FRAME_HINTS_LIVE == false` in
+the shipped zenravif build (per-SB q-scale maps accepted but not applied
+below the zenrav1e 0.2.0 FrameHints input, master `c4047cec`). The
+refusal fired loudly and instantly, exactly per the harness contract.
+The unblock (zenravif dep bump + const flip + hinted send) is in flight
+in the ravif repo; the h3-mag arms re-run when it compiles + its
+determinism/differing-bitstream probe passes.
