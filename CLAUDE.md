@@ -211,6 +211,23 @@ backend capability landing:**
 
 ## Known Bugs
 
+### Grid AVIF + alpha is REFUSED, not decoded (zenavif#40, 2026-08-26) — alpha-grid stitching still unimplemented
+Every grid decode path (buffered, `decode_full`, streaming sink, aom backend)
+used to decode the colour tiles only and return OPAQUE pixels with `Ok` for
+files carrying transparency — both the per-tile-`auxl` shape
+(`tests/vectors/libavif/color_grid_alpha_nogrid.avif`) and the alpha-grid
+shape (`color_grid_alpha_grid_gainmap_nogrid.avif`, whose `alpha_metadata()`
+is `Some(Err)` because the alpha item's payload is an 8-byte grid descriptor,
+not AV1). Now `reject_grid_alpha()` (`src/decoder_managed/grid.rs`) returns
+`Error::Unsupported` whenever `AvifParser::has_alpha_aux_items()` is true
+(container-wide `auxC` alpha scan; `alpha_data()` only sees a primary-item
+`auxl`). **Follow-up to actually support it:** decode the alpha grid's own
+`dimg` tiles (zenavif-parse must expose them — it currently extracts tiles
+only for the primary grid), stitch with the same validated-uniform-tile
+placement as the colour grid, then hand the stitched alpha plane to
+`convert_to_image`; for the per-tile-`auxl` shape, pair each colour tile with
+its own alpha tile before stitching. Regression: `tests/sweep_40_geometry.rs`.
+
 ### svtav1-rs QP 0 (imazen/zenav1-svt#5) — RESOLVED upstream 2026-07-22 (typed rejection); seam clamp RETAINED
 History: every CQP QP-0 still encode on rev 3e25f52b emitted a valid-syntax
 bitstream decoding to garbage pixels (ssim2 ~ -700; rav1d-safe and zenav1-aom
