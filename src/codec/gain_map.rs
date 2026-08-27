@@ -138,7 +138,7 @@ fn measure_cll_linear(pixels: &zenpixels::PixelBuffer) -> (u16, u16) {
     for y in 0..h {
         let row = &bytes[y * stride..][..w * 16];
         let row_f32: &[f32] = rgb::bytemuck::cast_slice(row);
-        for px in row_f32.chunks_exact(4) {
+        for px in row_f32.as_chunks::<4>().0.iter() {
             let m = px[0].max(px[1]).max(px[2]).max(0.0);
             peak = peak.max(m);
             sum += f64::from(m);

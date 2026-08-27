@@ -236,6 +236,8 @@ impl ManagedAvifDecoder {
             })?
             .clone();
 
+        self.reject_grid_alpha()?;
+
         let grid_info = self.probe_info()?;
         let grid_rows = grid_config.rows as usize;
         let cols = grid_config.columns as usize;
@@ -244,6 +246,10 @@ impl ManagedAvifDecoder {
 
         let mut y_offset = 0u32;
         let mut began = false;
+        // HEIF/MIAF grids require uniform input-image sizes; the first decoded
+        // tile pins the expected dims and every later tile must match, so a
+        // crafted grid can't silently misalign the strip stitch below.
+        let mut expected_tile: Option<(u32, u32)> = None;
 
         for grid_row in 0..grid_rows {
             stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
@@ -265,6 +271,16 @@ impl ManagedAvifDecoder {
                     stop,
                 )?;
                 let (pixels, _info) = self.convert_to_image(frame, None, stop)?;
+                match expected_tile {
+                    None => expected_tile = Some((pixels.width(), pixels.height())),
+                    Some(dims) => {
+                        if (pixels.width(), pixels.height()) != dims {
+                            return Err(at!(Error::Malformed(
+                                "grid tiles decoded to non-uniform dimensions"
+                            )));
+                        }
+                    }
+                }
                 row_tiles.push(pixels);
             }
 

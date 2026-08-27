@@ -24,7 +24,7 @@ fn load_png_rgb8(path: &str) -> ImgVec<Rgb<u8>> {
     let (w, h) = (info.width as usize, info.height as usize);
     let pixels: Vec<Rgb<u8>> = match info.color_type {
         png::ColorType::Rgb => buf[..w * h * 3]
-            .chunks_exact(3)
+            .as_chunks::<3>().0.iter()
             .map(|c| Rgb {
                 r: c[0],
                 g: c[1],
@@ -32,7 +32,7 @@ fn load_png_rgb8(path: &str) -> ImgVec<Rgb<u8>> {
             })
             .collect(),
         png::ColorType::Rgba => buf[..w * h * 4]
-            .chunks_exact(4)
+            .as_chunks::<4>().0.iter()
             .map(|c| Rgb {
                 r: c[0],
                 g: c[1],

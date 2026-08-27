@@ -1540,6 +1540,7 @@ pub struct AvifParser<'data> {
     idat: Option<TryVec<u8>>,
     primary: ItemExtents,
     alpha: Option<ItemExtents>,
+    alpha_aux_present: bool,
     grid_config: Option<GridConfig>,
     tiles: TryVec<ItemExtents>,
     animation_data: Option<AnimationParserData>,
@@ -1781,6 +1782,7 @@ impl<'data> AvifParser<'data> {
                 idat: None,
                 primary: ItemExtents { construction_method: ConstructionMethod::File, extents: TryVec::new() },
                 alpha: None,
+                alpha_aux_present: false,
                 grid_config: None,
                 tiles: TryVec::new(),
                 animation_data,
@@ -2109,12 +2111,22 @@ impl<'data> AvifParser<'data> {
             None
         };
 
+        // Any item carrying the alpha auxiliary-type property — a wider net
+        // than `alpha` above, which only sees an auxl reference TO the primary
+        // item. Grid AVIFs put alpha on per-tile items or on an alpha grid
+        // item, which the primary-only filter misses entirely.
+        let alpha_aux_present = meta.properties.iter().any(|prop| {
+            matches!(&prop.property, ItemProperty::AuxiliaryType(urn)
+                if urn.type_subtype().0 == b"urn:mpeg:mpegB:cicp:systems:auxiliary:alpha")
+        });
+
         Ok(Self {
             raw,
             mdat_bounds: parsed.mdat_bounds,
             idat,
             primary,
             alpha,
+            alpha_aux_present,
             grid_config,
             tiles,
             animation_data,
@@ -2470,6 +2482,15 @@ impl<'data> AvifParser<'data> {
     /// Get alpha item data, if present.
     pub fn alpha_data(&self) -> Option<Result<Cow<'_, [u8]>>> {
         self.alpha.as_ref().map(|item| self.resolve_item(item))
+    }
+
+    /// True if ANY item in the container carries an alpha auxiliary-type
+    /// property (`auxC` with the CICP alpha URN) — including per-tile alpha
+    /// items and alpha grid items that [`Self::alpha_data`] (which resolves
+    /// only an `auxl` reference to the primary item) cannot see. Grid decode
+    /// paths use this to refuse files whose transparency they cannot honor.
+    pub fn has_alpha_aux_items(&self) -> bool {
+        self.alpha_aux_present
     }
 
     /// Get grid tile data by index.

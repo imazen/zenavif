@@ -398,6 +398,27 @@ write-path returns + gain-map interop additions, already on main).
   still unreleased, so this is not a break of any published zencodec API.
 
 ### Fixed
+- **Three silent-corruption decode paths from the 2026-08-26 ultracode sweep
+  (issue #40).** (1) Grid AVIFs carrying alpha auxiliary items — per-tile
+  `auxl` alpha or an alpha grid item — decoded the colour grid only and
+  returned OPAQUE pixels with `Ok` on every backend and entry point (buffered,
+  `decode_full`, streaming sink, aom). Alpha-grid stitching is not implemented,
+  so these files are now refused with `Error::Unsupported` naming alpha; the
+  detection is container-wide (`AvifParser::has_alpha_aux_items`) because the
+  primary-only `alpha_data()` filter cannot see either shape. (2) The grid
+  stitch placed every tile by its OWN decoded dims while sizing the canvas
+  from tile 0, so a crafted grid with one differently-sized tile silently
+  scrambled/zero-filled the canvas; tiles are now validated uniform (dims +
+  descriptor) and must cover the declared output, and placement comes from
+  the single validated tile size — in the buffered stitch and the streaming
+  sink. (3) An alpha item coded with the same width but fewer rows than the
+  primary left the bottom rows at the converter's opaque default (`zip`
+  stopped at the shorter plane) — the default rav1d-safe path now requires
+  alpha dims == primary display dims, matching the aom backend's existing
+  check. Regressions: `tests/sweep_40_geometry.rs` (real libavif grid+alpha
+  vectors; a crafted 1204x800/1204x799 container muxed with zenavif-serialize
+  from the link-u fox vectors; each mutation-verified) +
+  `decoder_managed::grid::stitch_tests` uniformity cases.
 - **Lossless no longer pessimizes at slow speeds (issue #8).** On the
   zenrav1e release the dep chain currently resolves (0.1.4, whose
   "lossless" is qi=1 lossy — zenrav1e#9), speeds 1-4 measurably produce

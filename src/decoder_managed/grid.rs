@@ -26,6 +26,8 @@ impl ManagedAvifDecoder {
             })?
             .clone();
 
+        self.reject_grid_alpha()?;
+
         // Decode all tiles
         let mut tile_frames = Vec::new();
         for i in 0..self.parser.grid_tile_count() {
@@ -49,6 +51,20 @@ impl ManagedAvifDecoder {
 
         // Stitch tiles together
         self.stitch_tiles(tile_frames, &grid_config, stop)
+    }
+
+    /// Grid alpha (per-tile `auxl` alpha items or an alpha grid item) is not
+    /// stitched yet. Decoding the color grid alone would silently return
+    /// opaque pixels for a file that carries transparency — refuse instead.
+    pub(super) fn reject_grid_alpha(&self) -> Result<()> {
+        if self.parser.alpha_data().is_some() || self.parser.has_alpha_aux_items() {
+            return Err(at!(Error::Unsupported(
+                "grid AVIF with alpha auxiliary items: alpha-grid stitching is \
+                 not implemented, and decoding only the color grid would \
+                 silently drop transparency"
+            )));
+        }
+        Ok(())
     }
 
     /// Stitch decoded tile frames into a single image
@@ -109,6 +125,8 @@ impl ManagedAvifDecoder {
     ) -> Result<PixelBuffer> {
         let descriptor = tile_images[0].descriptor();
         let bpp = descriptor.bytes_per_pixel();
+        let (tile_w, tile_h) =
+            validate_tile_uniformity(&tile_images, cols, output_width, output_height)?;
         let alloc_size = output_width
             .checked_mul(output_height)
             .and_then(|n| n.checked_mul(bpp))
@@ -128,8 +146,8 @@ impl ManagedAvifDecoder {
         for (tile_idx, tile) in tile_images.iter().enumerate() {
             let row = tile_idx / cols;
             let col = tile_idx % cols;
-            let dst_x = col * tile.width() as usize;
-            let dst_y = row * tile.height() as usize;
+            let dst_x = col * tile_w;
+            let dst_y = row * tile_h;
             stitch_tile_into_buffer(
                 tile,
                 &mut output,
@@ -173,6 +191,43 @@ impl ManagedAvifDecoder {
         }
         Ok(row_tiles)
     }
+}
+
+/// Validate a decoded tile set against the declared grid geometry and return
+/// the single authoritative tile size.
+///
+/// HEIF/MIAF grids require uniform input-image sizes; placement is computed
+/// from the validated tile-0 size, never from each tile's own decoded dims —
+/// a crafted grid with one differently-sized tile would otherwise be silently
+/// misplaced over earlier tiles or leave zero-filled holes (sweep issue #40).
+/// Tiles must also cover the declared output canvas; larger coverage is the
+/// spec-legal right/bottom-edge crop, clipped per row by the caller.
+fn validate_tile_uniformity(
+    tile_images: &[PixelBuffer],
+    cols: usize,
+    output_width: usize,
+    output_height: usize,
+) -> Result<(usize, usize)> {
+    let descriptor = tile_images[0].descriptor();
+    let tile_w = tile_images[0].width() as usize;
+    let tile_h = tile_images[0].height() as usize;
+    for tile in tile_images {
+        if tile.width() as usize != tile_w
+            || tile.height() as usize != tile_h
+            || tile.descriptor() != descriptor
+        {
+            return Err(at!(Error::Malformed(
+                "grid tiles decoded to non-uniform dimensions or formats"
+            )));
+        }
+    }
+    let rows = tile_images.len() / cols;
+    if tile_w.saturating_mul(cols) < output_width || tile_h.saturating_mul(rows) < output_height {
+        return Err(at!(Error::Malformed(
+            "grid tiles do not cover the declared output dimensions"
+        )));
+    }
+    Ok((tile_w, tile_h))
 }
 
 /// Copy one tile's pixels into the stitched grid output buffer.
@@ -261,6 +316,44 @@ mod stitch_tests {
         stitch_tile_into_buffer(&tile, &mut output, 32, 0, 32, 32, 4);
         stitch_tile_into_buffer(&tile, &mut output, 0, 32, 32, 32, 4);
         assert_eq!(output.as_slice().row(0)[0], 0);
+    }
+
+    /// A tile set with one differently-sized tile must be rejected — placing
+    /// it by its own dims (the pre-#40 behavior) silently scrambled the
+    /// canvas.
+    #[test]
+    fn uniformity_rejects_mismatched_tile() {
+        let tiles = vec![
+            make_buffer(64, 64, 1),
+            make_buffer(64, 64, 2),
+            make_buffer(32, 32, 3),
+            make_buffer(64, 64, 4),
+        ];
+        assert!(validate_tile_uniformity(&tiles, 2, 128, 128).is_err());
+    }
+
+    /// Tiles smaller than the declared canvas coverage must be rejected —
+    /// zero-filled holes are not a decode result.
+    #[test]
+    fn uniformity_rejects_undersized_coverage() {
+        let tiles = vec![make_buffer(32, 32, 1), make_buffer(32, 32, 2)];
+        // 2 cols x 1 row of 32px tiles cannot cover a declared 128x32 canvas.
+        assert!(validate_tile_uniformity(&tiles, 2, 128, 32).is_err());
+    }
+
+    /// The spec-legal shape passes: uniform tiles whose coverage equals or
+    /// exceeds the output (right/bottom crop).
+    #[test]
+    fn uniformity_accepts_uniform_tiles_with_edge_crop() {
+        let tiles = vec![
+            make_buffer(64, 64, 1),
+            make_buffer(64, 64, 2),
+            make_buffer(64, 64, 3),
+            make_buffer(64, 64, 4),
+        ];
+        // Declared output 100x100 < 128x128 coverage: legal edge crop.
+        let (w, h) = validate_tile_uniformity(&tiles, 2, 100, 100).expect("legal grid");
+        assert_eq!((w, h), (64, 64));
     }
 
     /// Sanity check: a normally-placed tile still gets copied.

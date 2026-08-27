@@ -101,7 +101,7 @@ fn main() {
         let mut data = Vec::with_capacity((width * height * 2) as usize);
         for y in 0..height {
             let row = slice.row(y);
-            for chunk in row.chunks_exact(2) {
+            for chunk in row.as_chunks::<2>().0.iter() {
                 let v = u16::from_ne_bytes([chunk[0], chunk[1]]);
                 data.extend_from_slice(&v.to_be_bytes());
             }

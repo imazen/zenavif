@@ -210,12 +210,42 @@ fn grids_decode_identically_across_backends() {
     for name in [
         "sofa_grid1x5_420.avif",
         "sofa_grid1x5_420_dimg_repeat.avif",
-        "color_grid_alpha_nogrid.avif",
+        // color_grid_alpha_nogrid.avif moved to grid_alpha_refused_on_both_backends:
+        // grid AVIFs with alpha aux items are now refused, not decoded opaquely.
     ] {
         let path = format!("tests/vectors/libavif/{name}");
         let data = std::fs::read(&path)
             .unwrap_or_else(|e| panic!("read {path}: {e} (run: just download-vectors)"));
         assert_product_identical(&data, name);
+    }
+}
+
+/// Grid AVIFs carrying alpha auxiliary items are REFUSED on both backends —
+/// decoding only the color grid would silently ship opaque pixels for a file
+/// that carries transparency (sweep issue #40). Both the per-tile-auxl shape
+/// (color_grid_alpha_nogrid) and the alpha-grid shape
+/// (color_grid_alpha_grid_gainmap_nogrid) must error, identically per backend.
+#[test]
+fn grid_alpha_refused_on_both_backends() {
+    for name in [
+        "color_grid_alpha_nogrid.avif",
+        "color_grid_alpha_grid_gainmap_nogrid.avif",
+    ] {
+        let path = format!("tests/vectors/libavif/{name}");
+        let data = std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("read {path}: {e} (run: just download-vectors)"));
+        for backend in [DecodeBackend::Rav1dSafe, DecodeBackend::AomRs] {
+            let err =
+                zenavif::decode_with(&data, &DecoderConfig::new().decode_backend(backend), stop())
+                    .expect_err(&format!(
+                        "{name} via {backend:?}: grid+alpha must be refused, not decoded opaquely"
+                    ));
+            let msg = err.to_string();
+            assert!(
+                msg.contains("alpha"),
+                "{name} via {backend:?}: error should name alpha, got: {msg}"
+            );
+        }
     }
 }
 

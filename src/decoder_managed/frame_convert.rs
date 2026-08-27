@@ -230,6 +230,12 @@ impl ManagedAvifDecoder {
 
         // Handle alpha channel if present
         if let Some(alpha_frame) = alpha {
+            // The alpha item is its own coded AV1 frame with attacker-controlled
+            // dims; a shorter frame would leave the remaining rows at the
+            // converter-initialized opaque value (the zip below stops at the
+            // shorter iterator). Match the aom backend: dims must equal the
+            // primary's display dims.
+            Self::check_alpha_dims(&alpha_frame, display_width, display_height)?;
             let Planes::Depth8(alpha_planes) = alpha_frame.planes() else {
                 return Err(at!(Error::Decode {
                     code: -1,
@@ -250,6 +256,24 @@ impl ManagedAvifDecoder {
         }
 
         Ok(image)
+    }
+
+    /// Reject an alpha frame whose coded dims differ from the primary's
+    /// display dims (either direction — a shorter alpha would silently leave
+    /// bottom rows opaque, a taller one hides coded data).
+    fn check_alpha_dims(
+        alpha_frame: &Frame,
+        display_width: usize,
+        display_height: usize,
+    ) -> Result<()> {
+        if alpha_frame.width() as usize != display_width
+            || alpha_frame.height() as usize != display_height
+        {
+            return Err(at!(Error::Malformed(
+                "alpha item dimensions do not match the primary item"
+            )));
+        }
+        Ok(())
     }
 
     /// Convert 10/12-bit frame to RGB using yuv crate bulk conversion (zero-copy)
@@ -323,6 +347,8 @@ impl ManagedAvifDecoder {
 
         // Handle alpha channel if present
         if let Some(alpha_frame) = alpha {
+            // Same dims cross-check as the 8-bit path (see above).
+            Self::check_alpha_dims(&alpha_frame, display_width, display_height)?;
             let Planes::Depth16(alpha_planes) = alpha_frame.planes() else {
                 return Err(at!(Error::Decode {
                     code: -1,

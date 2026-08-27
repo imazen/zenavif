@@ -71,10 +71,10 @@ pub fn yuv420_to_rgb8_autovec(
             let out_row = &mut out[row * width..][..width];
 
             // Process 8 pixels at a time with chunks_exact
-            let chunks = y_row.chunks_exact(8);
-            let u_chunks = u_row.chunks_exact(4);
-            let v_chunks = v_row.chunks_exact(4);
-            let out_chunks = out_row.chunks_exact_mut(8);
+            let chunks = y_row.as_chunks::<8>().0.iter();
+            let u_chunks = u_row.as_chunks::<4>().0.iter();
+            let v_chunks = v_row.as_chunks::<4>().0.iter();
+            let out_chunks = out_row.as_chunks_mut::<8>().0.iter_mut();
 
             for (((y_chunk, u_chunk), v_chunk), out_chunk) in
                 chunks.zip(u_chunks).zip(v_chunks).zip(out_chunks)

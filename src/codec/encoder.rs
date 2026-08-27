@@ -207,7 +207,7 @@ impl AvifEncoder {
         let stop = self.stop_token();
         let raw = pixels.contiguous_bytes();
         let rgb: Vec<Rgb<u16>> = raw
-            .chunks_exact(12)
+            .as_chunks::<12>().0.iter()
             .map(|c| {
                 let r = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
                 let g = f32::from_le_bytes([c[4], c[5], c[6], c[7]]);
@@ -233,7 +233,7 @@ impl AvifEncoder {
         let stop = self.stop_token();
         let raw = pixels.contiguous_bytes();
         let rgba: Vec<Rgba<u16>> = raw
-            .chunks_exact(16)
+            .as_chunks::<16>().0.iter()
             .map(|c| {
                 let r = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
                 let g = f32::from_le_bytes([c[4], c[5], c[6], c[7]]);
@@ -314,7 +314,7 @@ impl AvifEncoder {
         let stop = self.stop_token();
         let raw = pixels.contiguous_bytes();
         let rgb: Vec<Rgb<u8>> = raw
-            .chunks_exact(12)
+            .as_chunks::<12>().0.iter()
             .map(|c| {
                 let r = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
                 let g = f32::from_le_bytes([c[4], c[5], c[6], c[7]]);
@@ -339,7 +339,7 @@ impl AvifEncoder {
         let stop = self.stop_token();
         let raw = pixels.contiguous_bytes();
         let rgba: Vec<Rgba<u8>> = raw
-            .chunks_exact(16)
+            .as_chunks::<16>().0.iter()
             .map(|c| {
                 let r = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
                 let g = f32::from_le_bytes([c[4], c[5], c[6], c[7]]);
@@ -366,7 +366,7 @@ impl AvifEncoder {
         let stop = self.stop_token();
         let raw = pixels.contiguous_bytes();
         let rgb: Vec<Rgb<u8>> = raw
-            .chunks_exact(4)
+            .as_chunks::<4>().0.iter()
             .map(|c| {
                 let v = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
                 let s = linear_to_srgb_u8(v.clamp(0.0, 1.0));
@@ -452,7 +452,7 @@ impl AvifEncoder {
             for y in 0..h {
                 let row_start = y * stride * 4;
                 let row = &data[row_start..row_start + w * 4];
-                for px in row.chunks_exact(4) {
+                for px in row.as_chunks::<4>().0.iter() {
                     rgb.push(Rgb {
                         r: px[0],
                         g: px[1],
@@ -525,7 +525,7 @@ impl AvifEncoder {
                 let cfg = self.checked_config(w, h, 4)?;
                 let stop = self.stop_token();
                 let rgba: Vec<Rgba<u8>> = raw
-                    .chunks_exact(4)
+                    .as_chunks::<4>().0.iter()
                     .map(|c| Rgba {
                         r: c[2],
                         g: c[1],
@@ -545,7 +545,7 @@ impl AvifEncoder {
                 let cfg = self.checked_config(w, h, 3)?;
                 let stop = self.stop_token();
                 let rgb: Vec<Rgb<u8>> = raw
-                    .chunks_exact(4)
+                    .as_chunks::<4>().0.iter()
                     .map(|c| Rgb {
                         r: c[0],
                         g: c[1],
@@ -564,7 +564,7 @@ impl AvifEncoder {
                 let cfg = self.checked_config(w, h, 3)?;
                 let stop = self.stop_token();
                 let rgb: Vec<Rgb<u8>> = raw
-                    .chunks_exact(4)
+                    .as_chunks::<4>().0.iter()
                     .map(|c| Rgb {
                         r: c[2],
                         g: c[1],

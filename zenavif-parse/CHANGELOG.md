@@ -8,6 +8,12 @@ on main; the manifest is pre-bumped so a publish from head cannot ship them as
 a 0.6.x patch. **0.6.3 (the size=0-box fix, imazen/zenavif#16) must be published
 from commit `c36b822`**, the pre-break release-prep point (CI green there).
 
+### Added
+- `AvifParser::has_alpha_aux_items()` — true when ANY item carries the CICP
+  alpha `auxC` property, including per-tile alpha items and alpha grid items
+  that `alpha_data()` (primary-item `auxl` only) cannot see. Lets grid decode
+  paths refuse files whose transparency they cannot honor (imazen/zenavif#40).
+
 ### Changed (BREAKING)
 - **Error results now carry a `whereat` source location.** The public
   `Result<T, E = Error>` alias is now `Result<T, E = whereat::At<Error>>`, so

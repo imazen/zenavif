@@ -193,6 +193,10 @@ rayon = "1.11.0"
 zenanalyze = { version = "0.2.0", path = "../zenanalyze", features = ["experimental"] }
 # Parses `cargo metadata` in tests/public_api_doc.rs (feature-list discovery).
 serde_json = "1.0.150"
+# Crafted-container regressions (tests/sweep_40_geometry.rs) mux mismatched
+# AV1 payloads that no encoder would produce. Must match the optional normal
+# dep's source exactly (cargo requires one canonical path per dep name).
+zenavif-serialize = { version = "0.2.0" }
 
 [[bench]]
 name = "tier_isolation"

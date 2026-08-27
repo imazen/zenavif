@@ -72,12 +72,11 @@ const FIXTURES: &[(&str, &str)] = &[
         "tests/vectors/zenavif/mono_gradient_8b_grayicc.avif",
         "mono8_grayicc",
     ),
-    // Grid (the strip paths take a different branch entirely).
+    // Grid (the strip paths take a different branch entirely). Grid AVIFs
+    // carrying alpha auxiliary items are refused outright (alpha-grid
+    // stitching is unimplemented; see tests/grid_alpha_rejection.rs), so no
+    // grid+alpha fixture belongs in this success-oriented matrix.
     ("tests/vectors/libavif/sofa_grid1x5_420.avif", "grid"),
-    (
-        "tests/vectors/libavif/color_grid_alpha_nogrid.avif",
-        "grid_alpha",
-    ),
     // Degenerate size.
     ("tests/vectors/libavif/white_1x1.avif", "px1"),
     // ICC-carrying colour image.

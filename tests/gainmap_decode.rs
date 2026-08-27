@@ -423,7 +423,7 @@ fn peak_linear(pixels: &zenpixels::PixelSlice<'_>) -> f32 {
     let mut peak = f32::MIN;
     for y in 0..h {
         let row: &[f32] = rgb::bytemuck::cast_slice(&bytes[y * stride..][..w * 16]);
-        for px in row.chunks_exact(4) {
+        for px in row.as_chunks::<4>().0.iter() {
             assert!(
                 px.iter().all(|v| v.is_finite()),
                 "reconstructed pixels must be finite"

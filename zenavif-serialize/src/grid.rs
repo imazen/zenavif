@@ -611,9 +611,10 @@ fn write_meta_grid(
         // ipco — serialize using the MpegBox trait
         {
             let mut tmp = Vec::new();
-            let mut w = crate::writer::Writer::new(&mut tmp);
-            let _ = ipco.write(&mut w);
-            drop(w);
+            {
+                let mut w = crate::writer::Writer::new(&mut tmp);
+                let _ = ipco.write(&mut w);
+            }
             out.extend_from_slice(&tmp);
         }
 

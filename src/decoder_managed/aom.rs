@@ -83,6 +83,7 @@ impl ManagedAvifDecoder {
                 })
             })?
             .clone();
+        self.reject_grid_alpha()?;
         let rows = grid_config.rows as usize;
         let cols = grid_config.columns as usize;
         let tile_count = self.parser.grid_tile_count();

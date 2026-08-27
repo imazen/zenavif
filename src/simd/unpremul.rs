@@ -94,8 +94,7 @@ pub(crate) fn unpremultiply8_neon(token: NeonToken, row: &mut [Rgba<u8>]) {
     let full = bytes.len() / (PX * 4) * (PX * 4);
     let (body, tail) = bytes.split_at_mut(full);
 
-    for chunk in body.chunks_exact_mut(PX * 4) {
-        let block: &mut [u8; PX * 4] = chunk.try_into().unwrap();
+    for block in body.as_chunks_mut::<{ PX * 4 }>().0.iter_mut() {
         let p = vld4q_u8(block);
         let a_groups = widen_u8x16(token, p.3);
 
@@ -137,7 +136,7 @@ pub(crate) fn unpremultiply8_neon(token: NeonToken, row: &mut [Rgba<u8>]) {
 #[cfg(target_arch = "x86_64")]
 #[arcane]
 pub(crate) fn unpremultiply8_avx2(_token: Desktop64, row: &mut [Rgba<u8>]) {
-    use safe_unaligned_simd::x86_64::{_mm256_storeu_si256, _mm_loadl_epi64};
+    use safe_unaligned_simd::x86_64::{_mm_loadl_epi64, _mm256_storeu_si256};
     const PX: usize = 2; // 2 pixels = 8 bytes per iteration
     let bytes: &mut [u8] = bytemuck::cast_slice_mut(row);
     let full = bytes.len() / (PX * 4) * (PX * 4);
@@ -146,9 +145,9 @@ pub(crate) fn unpremultiply8_avx2(_token: Desktop64, row: &mut [Rgba<u8>]) {
     let c255 = _mm256_set1_epi32(255);
     let zero = _mm256_setzero_si256();
 
-    for chunk in body.chunks_exact_mut(PX * 4) {
+    for chunk in body.as_chunks_mut::<{ PX * 4 }>().0.iter_mut() {
         let mut padded = [0u8; 16];
-        padded[..8].copy_from_slice(chunk);
+        padded[..8].copy_from_slice(&chunk[..]);
         // [R0,G0,B0,A0,R1,G1,B1,A1] as i32x8
         let v = _mm256_cvtepu8_epi32(_mm_loadl_epi64(&padded));
         // per-128-lane broadcast of lane 3 → [A0,A0,A0,A0,A1,A1,A1,A1]
