@@ -220,3 +220,21 @@ maps today; they are accepted-but-inert until the gate flips).
   registry 0.2.4 dev/product deps are untouched (same-name coexistence
   would E0464 the lib-test target); collapse at the zensim 0.3.0 publish.
 - CI `clone-siblings` now also clones `imazen/zensim`.
+
+## CONTROL CENSUS RUN (2026-08-27) — the AC.4 control-baseline subset
+
+The candidate/h3-mag arms stay gated (wave-12 bake never landed;
+FRAME_HINTS_LIVE still false — smoke re-confirmed the loud refusal today).
+The CONTROL-baseline subset is the GOAL criterion-4 instrument census and
+ran today on the registered corpus9 × t{70,80,88}, control bake
+(`W10L9_s4003_packed`), emit-best:
+
+| k | median \|err\| (decoded) | ±2 hits | photo | nonphoto | med iters |
+|---|---|---|---|---|---|
+| 2 | **0.756** | 23/27 | 0.425 | 1.965 | 3.0 |
+| 3 | **0.336** | 23/27 | 0.190 | 0.514 | 4.0 |
+
+Best target-hitter of the three censused encoders (jxl k2 ctrl 0.832,
+zenwebp k2 1.859 — different judges, stated for scale not ranking). Smoke
+row: city t80 k3 |err| 0.010. TSVs alongside; cells at
+`/mnt/v/output/zenavif/instrument-census-2026-08-27/`.
