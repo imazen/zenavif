@@ -15,12 +15,16 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   sibling path `../ravif/ravif`, which escapes this repo and made any
   `zenavif = { git = … }` consumer fail at resolution (zencodecs / zenpipe CI
   had been red at `cargo test`'s resolve step since 2026-08-01). Now pinned to
-  imazen/cavif-rs `09a0dba3`, the rev where zenravif's own zenrav1e dep became
-  a git-rev pin (it was path-only). Manifest + lockfile only; the compiled
-  sources are the same shas the sibling checkouts were at. Consumers taking
-  zenavif from git must still supply zenavif-serialize 0.2.0 (zenravif's
-  registry requirement; crates.io has 0.1.4) via their own `[patch.crates-io]`
-  — e.g. `zenavif-serialize = { git = "https://github.com/imazen/zenavif" }`.
+  imazen/cavif-rs `f6c883b6`, where zenravif's own unpublished deps are
+  git-rev pins as well — zenrav1e 0.2.0 (was path-only, `09a0dba3`) and
+  zenavif-serialize 0.2.0 (was a root `[patch]` no consumer inherited,
+  `f6c883b6`; same archived-repo rev `990bd6d` it already built against) —
+  so git consumers need no patch of their own. Manifest + lockfile only; the
+  compiled sources are the same shas the sibling checkouts were at. A new
+  `[patch."https://github.com/imazen/zenavif-serialize"]` folds zenravif's
+  copy onto the workspace member (one zenavif-serialize in `encode` + test /
+  `encode-svt-rs` builds; cargo reports the entry unused, as a warning, in
+  builds without `encode`).
 
 - **2026-08-14 — decode negotiation converged across all five entry points
   (zenavif#39, #38, #37, #36).** `preferred = [Rgb8]` over an HDR file no
