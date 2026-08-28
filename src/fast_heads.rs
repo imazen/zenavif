@@ -306,18 +306,14 @@ pub fn fast_tier_budgets_for_rgb8(
         partition: partition_budget_gate(gfs, speed),
     };
 
-    if let Some(offer) = offer {
-        let request = zenanalyze_api::Request::new(
-            &names,
-            zenanalyze::analyzer_version(),
-            zenanalyze::feature_defs_version(),
-            0,
-        );
-        if let Some(values) = offer.reuse_for(&request)
-            && let [pf, dcty, gfs] = values[..]
-        {
-            return mk(pf, dcty, gfs);
-        }
+    // Version-pinned reuse: a feature whose definition drifted since these
+    // budgets were fit misses, and we run our own pass instead of feeding the
+    // gate values it wasn't calibrated against.
+    if let Some(offer) = offer
+        && let Some(values) = crate::auto_tune::reuse_pinned(offer, &names)
+        && let [pf, dcty, gfs] = values[..]
+    {
+        return mk(pf, dcty, gfs);
     }
 
     if rgb.is_empty() || width == 0 || height == 0 {
@@ -374,18 +370,13 @@ pub fn monotone_speed_gate_for_rgb8(
     ];
     let names = [FEATURES[0].name(), FEATURES[1].name(), FEATURES[2].name()];
 
-    if let Some(offer) = offer {
-        let request = zenanalyze_api::Request::new(
-            &names,
-            zenanalyze::analyzer_version(),
-            zenanalyze::feature_defs_version(),
-            0,
-        );
-        if let Some(values) = offer.reuse_for(&request)
-            && let [_pf, _dcty, gfs] = values[..]
-        {
-            return monotone_speed_gate(gfs, speed);
-        }
+    // Same version-pinned reuse as `fast_tier_budgets_for_rgb8`, over the SAME
+    // 3-feature ask so one shared offer serves both.
+    if let Some(offer) = offer
+        && let Some(values) = crate::auto_tune::reuse_pinned(offer, &names)
+        && let [_pf, _dcty, gfs] = values[..]
+    {
+        return monotone_speed_gate(gfs, speed);
     }
 
     if rgb.is_empty() || width == 0 || height == 0 {
@@ -599,19 +590,21 @@ mod tests {
     #[test]
     fn offer_reuse_short_circuits() {
         use zenanalyze::feature::AnalysisFeature;
-        let names = [
-            AnalysisFeature::PatchFraction.name(),
-            AnalysisFeature::DctCompressibilityY.name(),
-            AnalysisFeature::GradientFractionSmooth.name(),
-        ];
-        let values = [0.95f32, 150.0, 0.1];
-        let offer = zenanalyze_api::Offer::new(
-            &names,
-            &values,
+        let owned = crate::auto_tune::test_offer(
+            &[
+                (AnalysisFeature::PatchFraction.name(), 0.95f32),
+                (AnalysisFeature::DctCompressibilityY.name(), 150.0),
+                (AnalysisFeature::GradientFractionSmooth.name(), 0.1),
+            ],
             zenanalyze::analyzer_version(),
-            zenanalyze::feature_defs_version(),
             0,
         );
+        let cells: Vec<_> = owned
+            .features()
+            .iter()
+            .map(zenanalyze_api::OwnedFeatureResult::as_ref)
+            .collect();
+        let offer = zenanalyze_api::Offer::new(&cells, owned.provenance());
         let b = fast_tier_budgets_for_rgb8(&[], 0, 0, Some(&offer), 6);
         assert_eq!(b.tx, TxBudget::Largest);
         assert_eq!(b.partition, PartitionBudget::Max32);

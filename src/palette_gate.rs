@@ -156,20 +156,16 @@ pub fn palette_gate_for_rgb8(
     let names = [FEATURE.name()];
 
     // Offer reuse: valid iff produced by the same feature definitions this
-    // gate's threshold was fit against (stamped by the live zenanalyze).
-    if let Some(offer) = offer {
-        let request = zenanalyze_api::Request::new(
-            &names,
-            zenanalyze::analyzer_version(),
-            zenanalyze::feature_defs_version(),
-            0, // canonical default analysis config
-        );
-        if let Some(values) = offer.reuse_for(&request)
-            && let Some(&pf) = values.first()
-            && pf.is_finite()
-        {
-            return palette_gate(pf, speed);
-        }
+    // gate's threshold was fit against. `reuse_pinned` builds the wanted
+    // identity from THIS build's code version for the feature, so a drifted
+    // definition misses and we fall through to our own pass — a finer gate than
+    // the whole-build `feature_defs_version` stamp it replaces.
+    if let Some(offer) = offer
+        && let Some(values) = crate::auto_tune::reuse_pinned(offer, &names)
+        && let Some(&pf) = values.first()
+        && pf.is_finite()
+    {
+        return palette_gate(pf, speed);
     }
 
     // Own-pass: a single Tier-1 feature (≤ ~14 ms at 4 MP per the P0 cost
@@ -329,15 +325,17 @@ mod tests {
     #[test]
     fn offer_reuse_short_circuits_analysis() {
         use zenanalyze::feature::AnalysisFeature;
-        let names = [AnalysisFeature::PatchFraction.name()];
-        let values = [0.9f32];
-        let offer = zenanalyze_api::Offer::new(
-            &names,
-            &values,
+        let owned = crate::auto_tune::test_offer(
+            &[(AnalysisFeature::PatchFraction.name(), 0.9f32)],
             zenanalyze::analyzer_version(),
-            zenanalyze::feature_defs_version(),
             0,
         );
+        let cells: Vec<_> = owned
+            .features()
+            .iter()
+            .map(zenanalyze_api::OwnedFeatureResult::as_ref)
+            .collect();
+        let offer = zenanalyze_api::Offer::new(&cells, owned.provenance());
         // Pixels say "photo" (flat gray = zero repetition? flat IS repetitive —
         // use empty pixels: with a valid offer the pixels are never touched).
         assert_eq!(

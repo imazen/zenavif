@@ -2054,8 +2054,8 @@ dependencies = [
 
 [[package]]
 name = "zenanalyze-api"
-version = "1.0.0"
-source = "git+https://github.com/imazen/zenanalyze?rev=47b4d0f5f1abfff45a152e9a9f4de82fffd5afa6#47b4d0f5f1abfff45a152e9a9f4de82fffd5afa6"
+version = "0.1.1"
+source = "git+https://github.com/imazen/zenanalyze#47c3c69e383220618166d5bc1e34b25fa6fb8559"
 
 [[package]]
 name = "zenav1-aom-decode"
@@ -2080,8 +2080,6 @@ version = "0.1.0"
 dependencies = [
  "zenav1-svt-dsp",
  "zenav1-svt-encoder",
- "zenav1-svt-entropy",
- "zenav1-svt-tables",
  "zenav1-svt-types",
 ]
 
@@ -2091,7 +2089,6 @@ version = "0.1.0"
 dependencies = [
  "archmage",
  "magetypes",
- "zenav1-svt-tables",
  "zenav1-svt-types",
 ]
 
@@ -2100,28 +2097,11 @@ name = "zenav1-svt-encoder"
 version = "0.1.0"
 dependencies = [
  "almost-enough",
+ "archmage",
  "enough",
+ "magetypes",
  "whereat",
  "zenav1-svt-dsp",
- "zenav1-svt-entropy",
- "zenav1-svt-tables",
- "zenav1-svt-types",
-]
-
-[[package]]
-name = "zenav1-svt-entropy"
-version = "0.1.0"
-dependencies = [
- "archmage",
- "magetypes",
- "zenav1-svt-tables",
- "zenav1-svt-types",
-]
-
-[[package]]
-name = "zenav1-svt-tables"
-version = "0.1.0"
-dependencies = [
  "zenav1-svt-types",
 ]
 

@@ -10,6 +10,48 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## Workspace
 
+- **2026-08-28 — `zenanalyze-api` unified to a crates.io version + one
+  `[patch.crates-io]`; the shared-Offer reuse paths are now version-pinned per
+  feature.** Owner directive: "zenanalyze-api should be the sole contract and
+  intermediary so different zenanalyze versions can compile together"
+  (`docs/sole-contract.md` in imazen/zenanalyze).
+
+  The dep was a **git-rev pin** (`47b4d0f5`) on the theory that pinning every
+  codec to the same rev keeps the contract type unified. It doesn't: zenjpeg
+  carried that rev, zensquoosh a different one (`7b84d53c`), and
+  zenpipe/zencodecs the registry+patch form — three Cargo sources for one crate,
+  so a graph combining them got three incompatible `Offer` types (zenpipe hit
+  exactly this and recorded the E0308). Worse, the pinned rev was old enough
+  that zenavif was compiling against a **superseded contract API**
+  (`Request::new(names, analyzer_version, defs_version, config_hash)`), which
+  simply does not exist in the published crate — so this crate could not build
+  in the same graph as any correctly-pinned consumer. Now
+  `zenanalyze-api = "0.1.0"` plus one workspace-root patch, which rewrites every
+  edge (including zenpicker's and zenpredict's) to a single source.
+
+  Migrating to the current contract changed the reuse gate for the better. The
+  old one was global — analyzer version + `feature_defs_version` + config hash,
+  all-or-nothing. The new one is **per feature**: `reuse_pinned` (`auto_tune.rs`)
+  builds each want's qualified `name@hex8` from THIS build's
+  `feature_version_hash_by_name`, so a single re-defined column misses and the
+  caller runs its own pass, instead of one upstream bump invalidating every
+  offer. Applied to `auto_tune::reuse_from_offer`, `palette_gate_for_rgb8`,
+  `fast_heads::{fast_tier_budgets_for_rgb8, monotone_speed_gate_for_rgb8}`, and
+  `q0_head::predict_q0_for_rgb8`. `reuse_from_offer` additionally keeps the
+  model's own `analyzer_version` / `config_hash` stamps as a pre-gate.
+
+  One asymmetry is now explicit in code: a shipped bake can name a feature that
+  was culled upstream (the rav1e picker names `text_likelihood`), and the
+  own-pass path fills those with 0.0. Reuse now does the same — pinned for every
+  column the build still defines, 0.0 for the ones it doesn't — so offer-reuse
+  and own-pass stay identical, which is what
+  `auto_tune_offer_reuse_matches_own_pass` gates. No behaviour change for any
+  column the build defines.
+
+  Verified: `cargo test --features auto-tune --lib` (199 pass) and
+  `cargo clippy --features auto-tune --all-targets -D warnings` clean.
+
+
 - **2026-08-27 — svt-rs: alpha/grayscale (Cs400) streams take partial
   superblocks at speed ≥ 5 (SVT preset 6), same as the colour path.** The
   seam had held mono at preset ≥ 7 because the port's mono path mis-coded

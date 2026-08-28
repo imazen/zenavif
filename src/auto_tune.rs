@@ -261,12 +261,91 @@ fn nearest_target_zq_idx(target_zqs: &[u32], target: f32) -> Option<usize> {
     Some(best)
 }
 
+/// Reuse `names` from a shared [`zenanalyze_api::Offer`], **version-pinned to
+/// this build's feature code versions**.
+///
+/// The contract keys reuse on each feature's qualified `name@hex8`, where the
+/// hex is that feature's *code* version. Building the wanted identities from
+/// THIS build's `feature_version_hash_by_name` means an offer produced by a
+/// zenanalyze whose definition of any wanted feature has drifted MISSES, and the
+/// caller runs its own pass — which is what a fitted threshold or model needs.
+/// The version-agnostic alternative (`Select::Names`) would silently substitute
+/// drifted values into coefficients fit against the old ones; see
+/// `docs/sole-contract.md` in imazen/zenanalyze.
+///
+/// `None` ⇒ no reuse (a wanted name is unversioned in this build, or the offer
+/// doesn't carry every want at the wanted version).
+#[cfg(feature = "auto-tune")]
+pub(crate) fn reuse_pinned(offer: &zenanalyze_api::Offer<'_>, names: &[&str]) -> Option<Vec<f32>> {
+    let qualified: Vec<String> = names
+        .iter()
+        .map(|n| {
+            let full = zenanalyze::versioning::feature_version_hash_by_name(n)?;
+            Some(zenanalyze_api::NamedFeature::qualified_for(
+                n,
+                zenanalyze_api::NamedFeature::fold_hash(full),
+            ))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let wants: Vec<zenanalyze_api::NamedFeature<'_>> = qualified
+        .iter()
+        .map(|q| zenanalyze_api::NamedFeature::from_qualified(q))
+        .collect();
+    offer.reuse_for(&zenanalyze_api::Request::new(
+        zenanalyze_api::Select::Features(&wants),
+    ))
+}
+
+/// Build the [`zenanalyze_api::OwnedOffer`] an orchestrator running THIS build
+/// would hand out, from `(bare_name, value)` pairs.
+///
+/// Each name is qualified with this build's feature code version — the same fold
+/// [`reuse_pinned`] asks for — so the offer is reusable. Test support only; a
+/// real producer calls `zenanalyze::extract_offer` (or `zenanalyze::Analyzer`)
+/// rather than hand-assembling cells.
+///
+/// Lend a borrowed `Offer` from the result with:
+/// ```ignore
+/// let cells: Vec<_> = owned.features().iter().map(OwnedFeatureResult::as_ref).collect();
+/// let offer = Offer::new(&cells, owned.provenance());
+/// ```
+#[cfg(all(test, feature = "auto-tune"))]
+pub(crate) fn test_offer(
+    pairs: &[(&str, f32)],
+    analyzer_version: &str,
+    config_hash: u64,
+) -> zenanalyze_api::OwnedOffer {
+    let cells: Vec<zenanalyze_api::OwnedFeatureResult> = pairs
+        .iter()
+        .filter_map(|(name, value)| {
+            let full = zenanalyze::versioning::feature_version_hash_by_name(name)?;
+            let qualified = zenanalyze_api::NamedFeature::qualified_for(
+                name,
+                zenanalyze_api::NamedFeature::fold_hash(full),
+            );
+            Some(zenanalyze_api::OwnedFeatureResult::new(&qualified, *value))
+        })
+        // A name this build no longer defines can't be offered at all — drop it,
+        // mirroring what a real producer does (`extract_offer` omits features
+        // with no golden version row).
+        .collect();
+    zenanalyze_api::OwnedOffer::new(
+        cells,
+        zenanalyze_api::Provenance::new(analyzer_version).with_config(config_hash),
+    )
+}
+
 /// Reuse a shared [`zenanalyze_api::Offer`]'s feature values for `feature_cols`
-/// (in the bake's column order) iff the offer's reuse key matches `model`'s
-/// stamps — same analyzer `major.minor`, `feature_defs_version`, and analysis
-/// `config_hash`. `None` → the caller runs its own analysis pass. The bake's
-/// columns carry a `feat_` prefix; the contract keys by the bare
+/// (in the bake's column order). `None` → the caller runs its own analysis pass.
+/// The bake's columns carry a `feat_` prefix; the contract keys by the bare
 /// `AnalysisFeature::name`, so strip it to line the two conventions up.
+///
+/// Two gates, both required. The model's own stamps must accept the offer
+/// (`analyzer_version`, analysis `config_hash`) — the pre-contract check, kept
+/// here now that the contract itself no longer carries a global reuse key.
+/// Then [`reuse_pinned`] gates per feature on its code version, which subsumes
+/// the old `feature_defs_version` stamp at a finer grain: one re-defined column
+/// misses instead of invalidating every offer from that build.
 #[cfg(feature = "auto-tune")]
 fn reuse_from_offer(
     offer: Option<&zenanalyze_api::Offer<'_>>,
@@ -274,17 +353,54 @@ fn reuse_from_offer(
     feature_cols: &[&str],
 ) -> Option<Vec<f32>> {
     let offer = offer?;
-    let names: Vec<&str> = feature_cols
+    let provenance = offer.provenance();
+    // Exact string equality where the pre-contract key compared `major.minor`.
+    // Stricter, so it can only cause an extra own-pass, never a wrong reuse.
+    let want_version = model.analyzer_version().unwrap_or("");
+    if !want_version.is_empty() && provenance.analyzer_version() != want_version {
+        return None;
+    }
+    let want_config = model.feature_config_hash().unwrap_or(0);
+    if want_config != 0 && provenance.config_hash() != want_config {
+        return None;
+    }
+    // Columns this build still defines are requested version-pinned; columns it
+    // no longer defines are filled with 0.0. A shipped bake can name a feature
+    // that was culled upstream — the rav1e picker's `text_likelihood` is one —
+    // and the own-pass path above fills exactly those with 0.0 (`lookup(c)`
+    // returns `None`). Reuse must do the same or the two paths would disagree,
+    // which is what `auto_tune_offer_reuse_matches_own_pass` gates. A column the
+    // build DOES define is never substituted: it either matches this build's
+    // code version or the whole reuse misses.
+    let qualified: Vec<Option<String>> = feature_cols
         .iter()
-        .map(|c| c.strip_prefix("feat_").unwrap_or(c))
+        .map(|c| {
+            let name = c.strip_prefix("feat_").unwrap_or(c);
+            let full = zenanalyze::versioning::feature_version_hash_by_name(name)?;
+            Some(zenanalyze_api::NamedFeature::qualified_for(
+                name,
+                zenanalyze_api::NamedFeature::fold_hash(full),
+            ))
+        })
         .collect();
-    let request = zenanalyze_api::Request::new(
-        &names,
-        model.analyzer_version().unwrap_or(""),
-        model.feature_defs_version().unwrap_or(0),
-        model.feature_config_hash().unwrap_or(0),
-    );
-    offer.reuse_for(&request)
+    let wants: Vec<zenanalyze_api::NamedFeature<'_>> = qualified
+        .iter()
+        .flatten()
+        .map(|q| zenanalyze_api::NamedFeature::from_qualified(q))
+        .collect();
+    let offered = offer.reuse_for(&zenanalyze_api::Request::new(
+        zenanalyze_api::Select::Features(&wants),
+    ))?;
+    let mut offered = offered.into_iter();
+    Some(
+        qualified
+            .iter()
+            .map(|q| match q {
+                Some(_) => offered.next().unwrap_or(0.0),
+                None => 0.0,
+            })
+            .collect(),
+    )
 }
 
 #[cfg(feature = "auto-tune")]
@@ -609,13 +725,18 @@ mod tests {
             .iter()
             .map(|n| lookup(n).and_then(|f| analysis.get_f32(f)).unwrap_or(0.0))
             .collect();
-        let offer = zenanalyze_api::Offer::new(
-            &bare,
-            &values,
+        let pairs: Vec<(&str, f32)> = bare.iter().copied().zip(values.iter().copied()).collect();
+        let owned = test_offer(
+            &pairs,
             model.analyzer_version().unwrap_or(""),
-            model.feature_defs_version().unwrap_or(0),
             model.feature_config_hash().unwrap_or(0),
         );
+        let cells: Vec<_> = owned
+            .features()
+            .iter()
+            .map(zenanalyze_api::OwnedFeatureResult::as_ref)
+            .collect();
+        let offer = zenanalyze_api::Offer::new(&cells, owned.provenance());
 
         // The offer is reuse-key-compatible and carries every feature → the
         // reuse helper returns exactly the offered values, in column order.

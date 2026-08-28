@@ -188,18 +188,14 @@ pub fn predict_q0_for_rgb8(
     let pixels = u64::from(width) * u64::from(height);
     let names: [&str; 8] = core::array::from_fn(|i| Q0_FEATURES[i].name());
 
-    if let Some(offer) = offer {
-        let request = zenanalyze_api::Request::new(
-            &names,
-            zenanalyze::analyzer_version(),
-            zenanalyze::feature_defs_version(),
-            0,
-        );
-        if let Some(values) = offer.reuse_for(&request)
-            && let Ok(arr) = <[f32; 8]>::try_from(values.as_slice())
-        {
-            return predict_q0_from_features(&arr, target_ssim2 as f32, speed, pixels);
-        }
+    // Version-pinned reuse: the head's coefficients were fit against specific
+    // feature definitions, so a code drift in any of the 8 columns must MISS
+    // and fall through to our own pass rather than silently feed drifted values.
+    if let Some(offer) = offer
+        && let Some(values) = crate::auto_tune::reuse_pinned(offer, &names)
+        && let Ok(arr) = <[f32; 8]>::try_from(values.as_slice())
+    {
+        return predict_q0_from_features(&arr, target_ssim2 as f32, speed, pixels);
     }
 
     if rgb.is_empty() || width == 0 || height == 0 {
@@ -293,18 +289,17 @@ mod tests {
             set = set.with(f);
         }
         let analysis = zenanalyze::analyze_features_rgb8(&rgb, w, h, &AnalysisQuery::new(set));
-        let names: Vec<&str> = Q0_FEATURES.iter().map(|f| f.name()).collect();
-        let values: Vec<f32> = Q0_FEATURES
+        let pairs: Vec<(&str, f32)> = Q0_FEATURES
             .iter()
-            .map(|f| analysis.get_f32(*f).unwrap())
+            .map(|f| (f.name(), analysis.get_f32(*f).unwrap()))
             .collect();
-        let offer = zenanalyze_api::Offer::new(
-            &names,
-            &values,
-            zenanalyze::analyzer_version(),
-            zenanalyze::feature_defs_version(),
-            0,
-        );
+        let owned = crate::auto_tune::test_offer(&pairs, zenanalyze::analyzer_version(), 0);
+        let cells: Vec<_> = owned
+            .features()
+            .iter()
+            .map(zenanalyze_api::OwnedFeatureResult::as_ref)
+            .collect();
+        let offer = zenanalyze_api::Offer::new(&cells, owned.provenance());
         assert_eq!(
             predict_q0_for_rgb8(&rgb, w, h, 78.0, 6, Some(&offer)),
             own,
