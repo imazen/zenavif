@@ -353,15 +353,17 @@ fn reuse_from_offer(
     feature_cols: &[&str],
 ) -> Option<Vec<f32>> {
     let offer = offer?;
+    // Compared unconditionally, exactly as the old reuse key did: a bake that
+    // records no stamp wants `""` / `0`, which no real offer carries, so an
+    // unstamped model declines reuse and runs its own pass. That conservative
+    // default is deliberate — an unstamped bake cannot verify what produced the
+    // offer, so it must not trust it. (Exact string equality where the old key
+    // compared `major.minor`: stricter, so it can only cost an extra own-pass.)
     let provenance = offer.provenance();
-    // Exact string equality where the pre-contract key compared `major.minor`.
-    // Stricter, so it can only cause an extra own-pass, never a wrong reuse.
-    let want_version = model.analyzer_version().unwrap_or("");
-    if !want_version.is_empty() && provenance.analyzer_version() != want_version {
+    if provenance.analyzer_version() != model.analyzer_version().unwrap_or("") {
         return None;
     }
-    let want_config = model.feature_config_hash().unwrap_or(0);
-    if want_config != 0 && provenance.config_hash() != want_config {
+    if provenance.config_hash() != model.feature_config_hash().unwrap_or(0) {
         return None;
     }
     // Columns this build still defines are requested version-pinned; columns it
