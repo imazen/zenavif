@@ -272,3 +272,27 @@ refusal fired loudly and instantly, exactly per the harness contract.
 The unblock (zenravif dep bump + const flip + hinted send) is in flight
 in the ravif repo; the h3-mag arms re-run when it compiles + its
 determinism/differing-bitstream probe passes.
+
+## h3-mag ARMS — first avif diffmap results, PARTIAL (2026-08-29 ~04:3xZ)
+
+FRAME_HINTS went LIVE upstream (zenravif git f6c883b6 against zenrav1e
+0.2.0 e4883037 — the dep bump had landed concurrently; the local ravif
+staging was redundant and reverted). Candidate own-map arms completed;
+the control h3 arms were stopped mid-run (task killed — lane HELD):
+
+| arm | med \|err\| | ±2 | dBytes vs own baseline |
+|---|---|---|---|
+| cand (north-anchor) h3 k3 | 0.291 | 18/27 | **−5.40%** |
+| cand h3 k2 | 0.668 | 18/27 | −2.57% |
+| (scalar baselines) | 0.180 / 0.387 | 24 / 19 | — |
+
+**Reading: own-map h3 steering DEGRADES avif target-hitting for the
+scorer** (error up, hit-rate down) while saving bytes — the map
+under-allocates. Same signature as jxl's "A + own map makes A worse"
+(0.343→0.404), stronger here. The pair pattern (A scores + river-lantern
+steers) is exactly the untested cell: split-role support
+(`AVIF_ZENSIM_MAP_BAKE`, the jxl fd2f4351 mirror) is STAGED in
+`examples/zensim_cq_rd.rs` (uncommitted-pending-build; inert without the
+env). Protocol note for the rerun: the staged change requires a rebuild,
+so an R0-identity re-run of one own-map arm gates arm-comparability
+before any split cell is read.

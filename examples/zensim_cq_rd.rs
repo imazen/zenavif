@@ -153,6 +153,38 @@ fn score_profile(bake_arg: &str) -> (ZensimProfile, usize) {
     })
 }
 
+/// Split-role STEERING-MAP bake (jxl `JXL_ZENSIM_MAP_BAKE` mirror, 2026-08-29):
+/// `AVIF_ZENSIM_MAP_BAKE=<path>` mounts a SECOND bake whose FD gradient drives
+/// the h3-mag attribution walk while `--bake` keeps scoring. Unset = the
+/// scorer's own gradient (structurally identical path). Same width contract
+/// as the scorer (folded-944 class, loud refusal below 720).
+static MAP_BAKE_BYTES: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+static MAP_BAKE_PROFILE: std::sync::OnceLock<Option<(ZensimProfile, usize)>> =
+    std::sync::OnceLock::new();
+fn map_bake_profile() -> Option<(ZensimProfile, usize)> {
+    *MAP_BAKE_PROFILE.get_or_init(|| {
+        let path = std::env::var("AVIF_ZENSIM_MAP_BAKE").ok()?;
+        let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("map bake {path}: {e}"));
+        MAP_BAKE_BYTES.set(bytes).expect("map bake set once");
+        let params = zensim::profile::ProfileParams::builder()
+            .mlp(MAP_BAKE_BYTES.get().expect("map bake bytes").as_slice())
+            .skip_score_mapping(true)
+            .extrapolate_score(true)
+            .extended_features(true)
+            .compute_iw_features(true)
+            .build();
+        let params: &'static zensim::profile::ProfileParams = Box::leak(Box::new(params));
+        let profile = ZensimProfile::Custom { params, name: "avif-cq-rd-map-bake" };
+        let n_in = probe_caller_width(profile);
+        assert!(
+            n_in >= 720,
+            "map bake {path}: caller width {n_in} < 720 — folded-944 class required              (same contract as the scorer)"
+        );
+        eprintln!("[zensim_cq_rd] SPLIT-ROLE: steering map from {path} (caller width {n_in})");
+        Some((profile, n_in))
+    })
+}
+
 /// Map-side profile for extraction + the fused attribution walk (the jxl
 /// `rd_attr_map_profile` shape: no MLP, all basic features, default walk).
 static MAP_PROFILE: std::sync::OnceLock<ZensimProfile> = std::sync::OnceLock::new();
@@ -500,8 +532,11 @@ fn run_inner_cell(
         } else {
             let (sc, feats) = folded_score(z, profile, n_in, &ref_slice, &dec_slice, w, h);
             if steer && grad.is_none() {
+                // Split-role: the STEERING gradient comes from the map bake
+                // when mounted; the scorer keeps judging (jxl fd2f4351 mirror).
+                let (gprofile, _gn) = map_bake_profile().unwrap_or((profile, n_in));
                 let s = zensim::score_features_fd_gradient_with_profile(
-                    profile, &feats, w as u32, h as u32,
+                    gprofile, &feats, w as u32, h as u32,
                 )
                 .expect("FD gradient failed");
                 let nonzero = s.iter().filter(|&&g| g != 0.0).count();
