@@ -307,9 +307,11 @@ it to QP 0 would silently switch coding modes (WHT/TX_4X4, no in-loop filters)
 and multiply file size; the RGB -> 4:2:0 conversion means a coded-lossless AV1
 frame is still not a lossless IMAGE round-trip; and `EncoderConfig` has no
 lossless request for this backend to hang the choice off. Clamp side stays
-covered by `svt_rs_quality_100_does_not_corrupt`. **Open decision for the
-owner:** whether to add a lossless request to `EncoderConfig` for this backend
-and let quality 100 (or an explicit flag) reach QP 0. Record:
+covered by `svt_rs_quality_100_does_not_corrupt`. **Open decision for the owner,
+tracked as zenavif#42:** whether to add a lossless request to `EncoderConfig`
+for this backend and let quality 100 (or an explicit flag) reach QP 0 — note an
+RGBA encode emits a Cs400 alpha item, which upstream still refuses at QP 0, so
+"lossless RGBA" needs an answer either way. Record:
 `benchmarks/backend_sweep_2026-07-22.{tsv,meta}`.
 
 ### svtav1-rs partial superblocks below SVT preset 6 — seam floor REMOVED for the colour path 2026-08-29 (upstream premise retired)

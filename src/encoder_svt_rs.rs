@@ -183,7 +183,8 @@ fn map_svt_encode_error(e: whereat::At<svtav1::types::EncodeError>) -> whereat::
 /// `svt_rs_direct_qp0_typed_refusal_outside_420_8bit` (upstream-behaviour
 /// side, driving the pipeline directly) in `tests/svt_rs_backend.rs`.
 /// Removing the clamp is a deliberate product decision that needs a
-/// lossless request on `EncoderConfig` to hang off, not a doc fix.
+/// lossless request on `EncoderConfig` to hang off, not a doc fix — tracked
+/// as zenavif#42.
 fn quality_to_qp_gated(quality: f32) -> u8 {
     svtav1::avif::AvifEncoder::quality_to_qp_static(quality).max(1)
 }
