@@ -471,6 +471,8 @@ fn run_inner_cell(
     let attr_bin = env_f64("ZENSIM_ATTR_BIN", 8.0).max(1.0) as usize;
     let h3_gain = env_f64("AVIF_ZENSIM_H3_GAIN", 10.0) as f32;
     let factor_max = env_f64("AVIF_ZENSIM_FACTOR_MAX", 1.15) as f32;
+    // AVIF_ZENSIM_H3_RULE=zerosum selects the redistribution-only steering rule.
+    let h3_rule_zerosum = std::env::var("AVIF_ZENSIM_H3_RULE").as_deref() == Ok("zerosum");
 
     let ref_slice = RgbSlice::new(px, w, h);
     let sb_cols = w.div_ceil(SB);
@@ -593,14 +595,33 @@ fn run_inner_cell(
         // inverted), accumulated, then mean-renormalized to the
         // controller's base CQ.
         if let Some(q) = &tile_q {
-            for (scale, &tq) in sb_scale.iter_mut().zip(q.iter()) {
-                let factor = (1.0 + h3_gain * tq as f32).clamp(1.0 / factor_max, factor_max);
-                *scale = (*scale / factor).clamp(SB_SCALE_MIN, SB_SCALE_MAX);
-            }
-            let mean = sb_scale.iter().map(|&v| v as f64).sum::<f64>() / n_sb as f64;
-            if mean > 1e-6 {
-                for v in sb_scale.iter_mut() {
-                    *v = (*v as f64 / mean) as f32;
+            if h3_rule_zerosum {
+                // ZEROSUM rule (bug-fix candidate, 2026-08-29): the legacy rule's
+                // arithmetic-mean renorm AFTER clamping, accumulated across
+                // iterations, systematically COARSENS the neutral majority when
+                // attribution is concentrated (screen content: a few clamped-fine
+                // tiles drag the mean below 1, dividing everyone else above 1,
+                // compounding per iteration — measured: sc_gui@t80 −28% bytes,
+                // −11 score; photo median exactly 0.0). This rule is log-domain
+                // ZERO-SUM redistribution, recomputed FRESH each iteration:
+                //   s_i = exp(−g·(tq_i − mean(tq))), then clamp. Mean-rate stays
+                // the controller's job; the map only redistributes.
+                let mtq = q.iter().sum::<f64>() / q.len() as f64;
+                for (scale, &tq) in sb_scale.iter_mut().zip(q.iter()) {
+                    let step = (-(h3_gain as f64) * (tq - mtq)).exp() as f32;
+                    let step = step.clamp(1.0 / factor_max, factor_max);
+                    *scale = step.clamp(SB_SCALE_MIN, SB_SCALE_MAX);
+                }
+            } else {
+                for (scale, &tq) in sb_scale.iter_mut().zip(q.iter()) {
+                    let factor = (1.0 + h3_gain * tq as f32).clamp(1.0 / factor_max, factor_max);
+                    *scale = (*scale / factor).clamp(SB_SCALE_MIN, SB_SCALE_MAX);
+                }
+                let mean = sb_scale.iter().map(|&v| v as f64).sum::<f64>() / n_sb as f64;
+                if mean > 1e-6 {
+                    for v in sb_scale.iter_mut() {
+                        *v = (*v as f64 / mean) as f32;
+                    }
                 }
             }
         }

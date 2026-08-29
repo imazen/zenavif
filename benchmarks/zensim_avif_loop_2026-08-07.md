@@ -351,3 +351,25 @@ efficiency. avif maps lose on BOTH objectives; **avif ships the scalar
 Profile-C loop + S1 seeds**. (jxl contrast, same analysis: the pair is
 −0.41% at parity AND better-targeting — anchor-lantern remains a
 jxl-only companion win.)
+
+## STEERING-RULE BUG HUNT — mechanism found, fix FALSIFIED (2026-08-29 ~06:2xZ)
+
+Empirical: steering damage concentrates ENTIRELY on screen content (photo
+median d|err| exactly 0.000; sc_gui@t80 −11 score at −28% bytes). Code
+audit found a real mechanism: the legacy rule renormalizes by the
+ARITHMETIC mean AFTER clamping and ACCUMULATES across iterations — with
+concentrated attribution (screen), the few clamped-fine tiles drag the
+mean under 1 and every neutral tile drifts coarser each iteration. The
+staged fix (log-domain zero-sum redistribution, fresh each iteration,
+env `AVIF_ZENSIM_H3_RULE=zerosum`): **FALSIFIED — 0.491/17 vs legacy
+0.291/18 vs scalar 0.392/19** (sc_gui@t80 got WORSE, 30.7). Reading:
+mean-centered redistribution TAKES bits from below-mean tiles while the
+controller is trying to raise quality globally — on screen content any
+per-SB redistribution fights the controller. Conclusion sharpened: the
+avif map problem is the MAP (trained-map lane, gradient-supervised
+loss — registered owner work), not the application rule; avif ships
+scalar + seeds. **SEPARATE BUG NOTE for zenavif owners: scalar t70 is
+UNREACHABLE on the screen crops on the current substrate** (sc_gui 32.5,
+sc_wiki 20.2, sc_imessage 12.7 err at k3 — achieved floors ~50; either a
+genuine nonphoto low-end reach limit or the substrate regression's other
+face; predates steering).
