@@ -1,0 +1,8 @@
+# avif per-target S1 seed CQs (fitted 2026-08-29 from tri_scalar_k3 traces,
+# median best-cq per target over 9 corpus9 refs; harness env AVIF_ZENSIM_SEED_CQ).
+# Measured: k1 (2-encode) seeded 0.656 med / 19-27 vs blind 0.881 / 17-27.
+# Wiring any default is USER-GATED (the svt S1 precedent).
+target	seed_cq
+70	129
+80	106
+88	46

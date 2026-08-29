@@ -334,3 +334,20 @@ scalar baseline 0.180 → 0.392 across binaries (cross-binary comparisons
 invalid; the original 0.180-vs-0.336 candidate-vs-control read was
 within-binary and stands). A single same-binary {scalar, own-map, pair}
 k3 batch is queued to settle arm ordering on the current substrate.
+
+## S1 SEEDS + the 2-encode frontier + bytes-at-parity (2026-08-29 ~05:1xZ)
+
+**Fitted per-target seeds** (median best-cq from the tri_scalar_k3 traces;
+`benchmarks/zq_seed_s1_avif_2026-08-29.tsv`: t70→129, t80→106, t88→46):
+**k1 (2 encodes) seeded 0.656 (19/27) vs blind 0.881 (17/27)** — +26%
+median at the tightest budget, ≈ blind k2 (0.514/19). The family
+seed pattern (svt: blind 17.6→3.3) reproduces on avif with Profile C.
+Default wiring = USER-GATED as always.
+
+**Bytes-at-quality parity (the re-gated steering objective, self-judged
+pilot):** at |Δachieved| ≤ 0.5 vs scalar, own-map costs **+2.16%** bytes
+and the pair **+3.06%** — the "−5.4% savings" was under-shooting, not
+efficiency. avif maps lose on BOTH objectives; **avif ships the scalar
+Profile-C loop + S1 seeds**. (jxl contrast, same analysis: the pair is
+−0.41% at parity AND better-targeting — anchor-lantern remains a
+jxl-only companion win.)
