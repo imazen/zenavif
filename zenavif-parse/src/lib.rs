@@ -4737,8 +4737,9 @@ const PIXI_FLAG_EXTENDED: u32 = 1;
 /// # Why this tolerance exists — do not delete the reason and keep the behaviour
 ///
 /// Both production decoders in the parent `zenavif` crate used to hand this
-/// parser `DecodeConfig::lenient(true)`, and the only thing in the whole
-/// 227-file test corpus that actually needed leniency from them was this box.
+/// parser `DecodeConfig::lenient(true)`. Across the whole 227-file test corpus
+/// only two files actually needed anything from that flag, and this box is one
+/// of them (the other is the mislabelled-essential case above).
 /// The comment that recorded that (`"Use lenient parsing to handle files with
 /// non-critical validation issues"`) was replaced by an unrelated comment about
 /// zero-copy parsing in commit `0a6606a` while the `.lenient(true)` call itself
