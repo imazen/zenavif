@@ -471,7 +471,9 @@ write-path returns + gain-map interop additions, already on main).
   The six `examples/` that still parse leniently now say why in place
   (diagnostic tools and sweep harnesses want malformed files to load);
   `tests/cross_backend_decode.rs` was switched to strict, since every container
-  it parses was produced by our own encoder moments earlier.
+  it parses was produced by our own encoder moments earlier. (`e63fbcd`,
+  rationale wording corrected in `fca0a31`; the lost justification was dropped
+  in `0a6606a`.)
 - **`zencodec` / `zenpixels` / `zenpixels-convert` requirements now span the
   published minor and the next one**, across all four workspace manifests:
   root `zencodec >=0.1.26, <0.3.0`, `zenpixels >=0.2.16, <0.4.0`,

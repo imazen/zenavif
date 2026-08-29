@@ -41,7 +41,8 @@ from commit `c36b822`**, the pre-break release-prep point (CI green there).
   Lenient mode is unchanged in both cases. Strict mode is otherwise untouched:
   non-zero reserved flags outside `pixi`, `a1lx` marked essential, and unknown
   properties marked essential are all still hard errors. Pinned by
-  `tests/parser_leniency_scope.rs` in the root package.
+  `tests/parser_leniency_scope.rs` in the root package. (`e63fbcd`, rationale
+  wording corrected in `fca0a31`.)
 - **`tests/fuzz_regression.rs` was replaying zero seeds and reporting success**
   (`tests/fuzz_regression.rs`, `fuzz/regression/README.md`, `Cargo.toml`). It
   calls `zenutils_fuzz::RegressionSuite`, whose published `0.1.0` `run()`
