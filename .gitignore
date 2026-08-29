@@ -7,14 +7,22 @@ tests/vectors/*
 *.obu
 # But keep the download script
 !scripts/download-avif-test-vectors.sh
-# Committed CI fixtures (~28 KB total): the tiny generated mono vectors plus
-# the one libavif vector the fail-loud tests read. Everything else under
+# Committed CI fixtures (~29 KB total): the tiny generated mono vectors plus
+# the libavif vectors the fail-loud tests read. Everything else under
 # tests/vectors/ stays download-only.
+#
+# extended_pixi.avif (330 B) and clap_irot_imir_non_essential.avif (653 B) are
+# the two files in the whole corpus whose container the parser must tolerate a
+# documented deviation for, and tests/parser_leniency_scope.rs pins both by
+# decoded-pixel fingerprint. That gate must not depend on a --depth=1 clone of
+# a third-party moving branch, which is all download-avif-test-vectors.sh is.
 !tests/vectors/zenavif/
 !tests/vectors/zenavif/*.avif
 !tests/vectors/libavif/
 tests/vectors/libavif/*
 !tests/vectors/libavif/kodim03_yuv420_8bpc.avif
+!tests/vectors/libavif/extended_pixi.avif
+!tests/vectors/libavif/clap_irot_imir_non_essential.avif
 tests/zenavif-references/
 tests/linku-references/
 
