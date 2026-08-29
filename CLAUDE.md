@@ -211,6 +211,35 @@ backend capability landing:**
 
 ## Known Bugs
 
+### FLAKY CI: `row_sink_decode_is_byte_identical_to_buffered_decode` — a rav1d-safe threaded-loopfilter DisjointMut overlap, NOT a zenavif bug (rav1d-safe#524, seen 2026-08-29)
+If `tests/cov_zencodec.rs::row_sink_decode_is_byte_identical_to_buffered_decode`
+fails in CI with `Decode { code: -1, "Failed to decode primary frame" }`, read the
+worker-thread panic above it before assuming a zenavif regression. Observed once on
+`ubuntu-latest` (run 33238501769) at rav1d-safe rev `140f914`:
+
+```
+thread 'rav1d-worker-2' panicked at src/safe_simd/loopfilter.rs:5177:44:
+  overlapping DisjointMut:
+   current: &     _[73721..73729] at src/safe_simd/loopfilter.rs:5177:44
+  existing: &mut  _[73728..74112] at src/owned_recon.rs:937:42
+```
+
+The two ranges share exactly ONE index (73728). Line 5177 is the loop-filter's
+compacted read reservation (`compact_read_per_row::<BitDepth8>`), whose own comment
+says the filter reads 7 taps — and `73721 + 7 == 73728`, so the 8th byte of the
+reserved window is one past what is read and laps into the next recon row, where
+`owned_recon.rs:937` legitimately holds `&mut` over one full 384-column row. That is
+the same over-reserved-SIMD-window shape as the CDEF false positive fixed in
+rav1d-safe `fdd6a35`, in the loopfilter path that fix did not cover. Intermittent:
+the identical tree passed on the immediately preceding run and on every other
+platform in the same run (the earlier `#449` instance of this class ran ~2 failures
+in 15 full-suite runs).
+
+**Do not "fix" this in zenavif and do not touch the rav1d-safe checkout** — it is a
+sibling dependency. Re-run the job; track the real fix in rav1d-safe#524 and bump
+the pin when it lands (the pin's history comment in `Cargo.toml` tracks this class:
+`49df1fc0`, `f9458f43`, `fdd6a35`, `#449`, `#455`).
+
 ### Grid AVIF + alpha is REFUSED, not decoded (zenavif#40, 2026-08-26) — alpha-grid stitching still unimplemented
 Every grid decode path (buffered, `decode_full`, streaming sink, aom backend)
 used to decode the colour tiles only and return OPAQUE pixels with `Ok` for

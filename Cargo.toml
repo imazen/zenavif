@@ -49,6 +49,16 @@ rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8",
 #    cannot mask a real overlap, so this removes false positives only.
 #  * the tile-threading correctness + granularity campaign (rav1d-safe#455):
 #    the 766-vector corpus now passes at t=1 AND t=8 with nothing skipped.
+#
+# STILL OPEN at this rev — rav1d-safe#524 (filed 2026-08-29): the same
+# over-reserved-SIMD-read shape as fdd6a35, but in `safe_simd/loopfilter.rs`
+# rather than cdef. `compact_read_per_row` reserves an 8-byte window where the
+# filter reads 7 taps, so the last byte laps ONE index into the next recon row
+# and collides with `owned_recon.rs`'s legitimate `&mut` over that row
+# (`& _[73721..73729]` vs `&mut _[73728..74112]`). Intermittent — it takes down
+# `cov_zencodec::row_sink_decode_is_byte_identical_to_buffered_decode` with a
+# `Decode { code: -1 }` maybe 1 run in 4 on ubuntu-latest. Bump this pin when
+# #524 lands. See CLAUDE.md -> Known Bugs before blaming a zenavif change.
 rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "140f91450c3551c25a5699d12ded6d629ecf6d97", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
 # zenav1-aom pure-Rust AV1 KEY-frame decoder — second decode backend (feature
 # `aom-backend`). Git-rev pinned to imazen/zenav1-aom main (crate unpublished;
