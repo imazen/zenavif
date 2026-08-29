@@ -192,6 +192,9 @@ fn read_y4m(path: &str) -> (Vec<u8>, Vec<u8>, Vec<u8>, usize, usize) {
 fn decode_bitstream(data: &[u8]) -> Result<Frame, String> {
     // AVIF? `ftyp` box at offset 4.
     let payload: Vec<u8> = if data.len() > 12 && &data[4..8] == b"ftyp" {
+        // Lenient on purpose: a corpus file with a container quirk should still
+        // yield a measurement cell rather than dropping out of the sweep. Production
+        // decode is strict -- see tests/parser_leniency_scope.rs.
         let cfg = zenavif_parse::DecodeConfig::default().lenient(true);
         let parser =
             zenavif_parse::AvifParser::from_owned_with_config(data.to_vec(), &cfg, &Unstoppable)

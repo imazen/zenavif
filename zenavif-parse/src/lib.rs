@@ -4536,13 +4536,30 @@ fn read_iprp<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
                     )));
                 }
             }
+            // A *mislabelled* essential flag on a property we understand — do not
+            // delete this reason and keep the behaviour.
+            //
+            // This arm is inside `is_supported`, so the property is one this
+            // parser models and the caller will apply it either way. The
+            // `essential` flag exists to stop a reader from rendering an item
+            // whose properties it cannot honour; when we *can* honour the
+            // property, enforcing the label buys no safety, and rejecting the
+            // file costs a real image. The case where the flag genuinely
+            // protects us is the unsupported-property arm below, which is
+            // enforced unconditionally.
+            //
+            // Warned rather than rejected because
+            // `tests/vectors/libavif/clap_irot_imir_non_essential.avif` (a
+            // libavif vector that marks `clap`/`irot`/`imir` non-essential,
+            // which MIAF forbids) decodes today and must keep decoding
+            // byte-identically. It, and `extended_pixi.avif` above, were the
+            // *only* two files out of 227 in this repo's corpus that the parent
+            // `zenavif` decoders' blanket `DecodeConfig::lenient(true)` was
+            // actually buying anything for — so pinning these two narrowly is
+            // what let those decoders go strict. Pinned by
+            // `tests/parser_leniency_scope.rs`.
             if !a.essential && MUST_BE_ESSENTIAL.contains(&fourcc_bytes) {
                 warn!("item {} has {} not marked essential (spec requires it)", a.item_id, entry.fourcc);
-                if !options.lenient {
-                    return Err(at!(Error::InvalidData(
-                        "property must be marked essential",
-                    )));
-                }
             }
 
             associated.push(AssociatedProperty {
@@ -4707,8 +4724,42 @@ fn read_ipco<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
     Ok(properties)
 }
 
+/// The only `flags` value a `pixi` box may carry besides zero: bit 0 marks the
+/// *extended* `pixi` form, which appends a payload after the per-channel depths.
+const PIXI_FLAG_EXTENDED: u32 = 1;
+
+/// `pixi` — pixel information (per-channel bit depths).
+///
+/// This box is read directly instead of through [`read_fullbox_version_no_flags`]
+/// because the extended `pixi` form signals its extra payload *in the flags
+/// field*, which that helper rejects outright.
+///
+/// # Why this tolerance exists — do not delete the reason and keep the behaviour
+///
+/// Both production decoders in the parent `zenavif` crate used to hand this
+/// parser `DecodeConfig::lenient(true)`, and the only thing in the whole
+/// 227-file test corpus that actually needed leniency from them was this box.
+/// The comment that recorded that (`"Use lenient parsing to handle files with
+/// non-critical validation issues"`) was replaced by an unrelated comment about
+/// zero-copy parsing in commit `0a6606a` while the `.lenient(true)` call itself
+/// survived — so for months the decoders opted out of strict validation with no
+/// surviving statement of why. That blanket flag also downgraded three unrelated
+/// `essential`-flag rules to warnings, including "unknown property marked
+/// essential", where the parser's own warning says the item "will be unusable".
+///
+/// Handling the extended form here, precisely, is what lets those decoders run
+/// strict. Keep this narrow: only the exact extension marker is accepted, and
+/// trailing bytes are skipped only when that marker is present.
+///
+/// Required by `tests/vectors/libavif/extended_pixi.avif` (flags `0x000001`,
+/// `num_channels` 3, depths 8/8/8, then 6 bytes of extension payload).
+/// Both halves are pinned by `tests/parser_leniency_scope.rs`.
 fn read_pixi<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<ArrayVec<u8, 16>> {
-    let version = read_fullbox_version_no_flags(src, options)?;
+    let (version, flags) = read_fullbox_extra(src)?;
+    let extended = flags == PIXI_FLAG_EXTENDED;
+    if flags != 0 && !extended && !options.lenient {
+        return Err(at!(Error::Unsupported("expected flags to be 0")));
+    }
     if version != 0 {
         return Err(at!(Error::Unsupported("pixi version")));
     }
@@ -4719,8 +4770,10 @@ fn read_pixi<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
     channels.extend((0..clamped).map(|_| 0));
     src.read_exact(&mut channels).map_err(|_| at!(Error::InvalidData("invalid num_channels")))?;
 
-    // In lenient mode, skip any extra bytes (e.g., extended_pixi.avif has 6 extra bytes)
-    if options.lenient && src.bytes_left() > 0 {
+    // The extension payload is not modelled; skipping it is what "tolerate the
+    // extended form" means. Lenient mode additionally skips trailing bytes that
+    // arrive without the marker, exactly as it did before.
+    if (extended || options.lenient) && src.bytes_left() > 0 {
         skip(src, src.bytes_left())?;
     }
 

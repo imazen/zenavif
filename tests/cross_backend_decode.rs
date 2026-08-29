@@ -44,8 +44,14 @@ fn test_image(w: usize, h: usize) -> ImgVec<Rgb<u8>> {
 }
 
 /// Extract the primary item's AV1 payload from an encoded AVIF container.
+///
+/// Strict parsing (the `DecodeConfig` default): every container here was just
+/// produced by our own encoder, so a container this test cannot parse strictly
+/// is a muxer bug worth failing on. It used to pass `.lenient(true)` with no
+/// stated reason — see `tests/parser_leniency_scope.rs` for why that pattern
+/// was cleared out of this repo.
 fn primary_payload(avif: &[u8]) -> Vec<u8> {
-    let cfg = zenavif_parse::DecodeConfig::default().lenient(true);
+    let cfg = zenavif_parse::DecodeConfig::default();
     let parser =
         zenavif_parse::AvifParser::from_owned_with_config(avif.to_vec(), &cfg, &Unstoppable)
             .expect("container parse");

@@ -7,6 +7,9 @@ fn main() {
     let data = fs::read(&path).unwrap();
 
     // Parse AVIF container
+    // Lenient on purpose: this is a diagnostic tool, and the files most worth
+    // inspecting are exactly the ones strict validation would refuse. Production
+    // decode is strict -- see tests/parser_leniency_scope.rs.
     let parse_config = zenavif_parse::DecodeConfig::default().lenient(true);
     let parser = zenavif_parse::AvifParser::from_owned_with_config(
         data.clone(),

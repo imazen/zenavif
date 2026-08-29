@@ -424,6 +424,54 @@ write-path returns + gain-map interop additions, already on main).
   ship with the next 0.x minor bump. No existing variant changed meaning.
 
 ### Changed
+- **The decoders no longer opt out of strict container validation, and a file
+  carrying an unknown property marked `essential` is now refused instead of
+  decoded with a log line.** `AvifDecoder::new` (`src/decoder.rs`) and
+  `ManagedAvifDecoder::new` (`src/decoder_managed/decoder.rs`) both passed
+  `zenavif_parse::DecodeConfig::default().lenient(true)`, overriding a parser
+  default that is documented as *"Default: false (strict validation)"*. This
+  reached shipped code: imageflow's `create_avif`
+  (`imageflow_core/src/codecs/zen_decoder.rs:295`) builds
+  `zenavif::AvifDecoderConfig::new()`, which routes through
+  `src/codec/decoder.rs` into `ManagedAvifDecoder::new`.
+
+  **How the reason got lost, recorded here so it is not lost twice.** The
+  `.lenient(true)` was originally justified in place by the comment *"Use
+  lenient parsing to handle files with non-critical validation issues"*.
+  Commit `0a6606a` ("switch to zenavif-parse with zero-copy AvifParser")
+  replaced that comment with an unrelated note about zero-copy borrowing
+  **while keeping the `.lenient(true)` itself**. The behaviour outlived its
+  justification, and every later reader saw an unexplained opt-out. What it
+  silently bought was four downgraded conformance checks: non-zero reserved
+  flags in boxes required to have none, and three `essential`-flag rules —
+  including *unknown property marked essential*, where zenavif-parse's own
+  warning says the item "will be unusable".
+
+  **What was actually load-bearing, measured rather than assumed.** Parsing all
+  227 AVIF files in this repo's corpus under both settings, leniency changed the
+  outcome for exactly **two**, and not for the reasons folklore recorded:
+  `tests/vectors/libavif/extended_pixi.avif` failed strict on the *flags* check
+  (`expected flags to be 0`) — its `pixi` box carries `flags = 0x000001` plus 6
+  bytes of extension payload, so the trailing-bytes tolerance was never the
+  first blocker — and `tests/vectors/libavif/clap_irot_imir_non_essential.avif`
+  failed on `property must be marked essential`. A blanket restore of all four
+  checks would therefore have regressed the second file; that outcome is
+  mutation-verified.
+
+  Both deviations are now handled narrowly inside `zenavif-parse` (see its
+  changelog), so leniency is load-bearing for **zero** of the 227 files and the
+  decoders run strict. Decoded output is unchanged: all 214 decodable corpus
+  vectors produce byte-identical pixels (208 decode OK with identical
+  fingerprints, the same 6 refusals with the same messages). New gate:
+  `tests/parser_leniency_scope.rs` (5 tests, each mutation-verified) pins both
+  halves — the two files still decode byte-identically, and the silenced checks
+  are enforced again. Re-adding `.lenient(true)` to either decoder fails three
+  of them.
+
+  The six `examples/` that still parse leniently now say why in place
+  (diagnostic tools and sweep harnesses want malformed files to load);
+  `tests/cross_backend_decode.rs` was switched to strict, since every container
+  it parses was produced by our own encoder moments earlier.
 - **`zencodec` / `zenpixels` / `zenpixels-convert` requirements now span the
   published minor and the next one**, across all four workspace manifests:
   root `zencodec >=0.1.26, <0.3.0`, `zenpixels >=0.2.16, <0.4.0`,

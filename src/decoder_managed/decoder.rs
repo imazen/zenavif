@@ -52,8 +52,30 @@ pub struct ManagedAvifDecoder {
 impl ManagedAvifDecoder {
     /// Create new decoder with AVIF data and configuration
     pub fn new(data: &[u8], config: &DecoderConfig) -> Result<Self> {
-        // Use zero-copy AvifParser — primary/alpha data returned as Cow::Borrowed
-        let mut parse_config = zenavif_parse::DecodeConfig::default().lenient(true);
+        // Zero-copy AvifParser — primary/alpha data returned as Cow::Borrowed.
+        //
+        // STRICT container validation, deliberately. `DecodeConfig::default()`
+        // is strict; this call site must not re-enable `lenient(true)`. This is
+        // the decoder `imageflow`'s `create_avif` reaches through
+        // `AvifDecoderConfig::new()`, so the strictness is user-visible.
+        //
+        // History, so it is not re-broken: this line used to read
+        // `DecodeConfig::default().lenient(true)`, justified by the comment
+        // "Use lenient parsing to handle files with non-critical validation
+        // issues". Commit 0a6606a replaced that comment with a note about
+        // zero-copy parsing but kept the `.lenient(true)`, so the reason was
+        // gone while the behaviour stayed. What it silently bought was four
+        // downgraded container conformance checks — non-zero reserved flags,
+        // and three `essential`-flag rules, the worst of which lets an item
+        // carrying an *unknown property marked essential* decode with nothing
+        // but a log line, even though such an item is by definition unusable.
+        //
+        // Measured before removing it: of the 227 AVIF files in this repo's
+        // corpus, exactly two needed anything from leniency, and both are now
+        // handled precisely inside zenavif-parse (`read_pixi` for the extended
+        // `pixi` form, and the mislabelled-essential warning for a supported
+        // property). See `tests/parser_leniency_scope.rs`.
+        let mut parse_config = zenavif_parse::DecodeConfig::default();
         // Forward resource limits to the parser when configured.
         if let Some(mem) = config.parser_peak_memory_limit {
             parse_config = parse_config.with_peak_memory_limit(mem);

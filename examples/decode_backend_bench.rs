@@ -62,6 +62,9 @@ fn mosaic(tiles: &[ImgVec<Rgb<u8>>], nx: usize, ny: usize) -> ImgVec<Rgb<u8>> {
 }
 
 fn primary_payload(avif: &[u8]) -> Vec<u8> {
+    // Lenient on purpose: a corpus file with a container quirk should still
+    // yield a measurement cell rather than dropping out of the sweep. Production
+    // decode is strict -- see tests/parser_leniency_scope.rs.
     let cfg = zenavif_parse::DecodeConfig::default().lenient(true);
     let parser =
         zenavif_parse::AvifParser::from_owned_with_config(avif.to_vec(), &cfg, &Unstoppable)

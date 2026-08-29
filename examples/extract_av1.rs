@@ -33,6 +33,9 @@ fn main() {
         let stem = path.file_stem().unwrap().to_string_lossy();
         let data = fs::read(path).expect("Failed to read file");
 
+        // Lenient on purpose: this is a diagnostic tool, and the files most worth
+        // inspecting are exactly the ones strict validation would refuse. Production
+        // decode is strict -- see tests/parser_leniency_scope.rs.
         let config = zenavif_parse::DecodeConfig::default().lenient(true);
         let parser =
             match zenavif_parse::AvifParser::from_owned_with_config(data, &config, &Unstoppable) {

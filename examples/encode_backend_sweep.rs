@@ -184,6 +184,9 @@ fn ssim2(a: ImgRef<'_, Rgb<u8>>, b: ImgRef<'_, Rgb<u8>>) -> Result<f64, String> 
 #[cfg(feature = "aom-backend")]
 fn aom_cross_gate(avif: &[u8]) -> String {
     use zenavif::{DecodeBackend, decode_av1_obu_yuv};
+    // Lenient on purpose: a corpus file with a container quirk should still
+    // yield a measurement cell rather than dropping out of the sweep. Production
+    // decode is strict -- see tests/parser_leniency_scope.rs.
     let cfg = zenavif_parse::DecodeConfig::default().lenient(true);
     let parser = match zenavif_parse::AvifParser::from_owned_with_config(
         avif.to_vec(),

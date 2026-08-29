@@ -9,6 +9,39 @@ a 0.6.x patch. **0.6.3 (the size=0-box fix, imazen/zenavif#16) must be published
 from commit `c36b822`**, the pre-break release-prep point (CI green there).
 
 ### Fixed
+- **The extended `pixi` form parses under strict validation, and a mislabelled
+  `essential` flag on a *supported* property no longer rejects the file.** Two
+  narrow changes, both made so the parent `zenavif` crate's decoders could stop
+  passing `DecodeConfig::lenient(true)` (see the root changelog for how that
+  opt-out lost its justification in a refactor and survived for months).
+
+  Measured across the 227 AVIF files in the repo's corpus, leniency changed the
+  parse outcome for exactly two, and these are their two causes:
+
+  - `read_pixi` now reads its own full-box header instead of going through
+    `read_fullbox_version_no_flags`, and accepts `flags == 1` — the extended
+    `pixi` marker — skipping the extension payload that follows the per-channel
+    depths. Any *other* non-zero flags value is still rejected in strict mode,
+    so this is not "pixi may carry whatever flags it likes". Required by
+    `tests/vectors/libavif/extended_pixi.avif`, whose `pixi` carries
+    `flags = 0x000001`, `num_channels = 3`, depths 8/8/8 and 6 trailing bytes.
+    Note this corrects a long-standing comment in this file: the trailing-bytes
+    tolerance was *not* what that fixture tripped first — the flags check was.
+    Both halves are mutation-verified as load-bearing (removing the flags
+    acceptance fails with `expected flags to be 0`; removing the payload skip
+    fails with `unread box content or bad parser sync`).
+  - A property in `MUST_BE_ESSENTIAL` that is present but *not* marked
+    essential is now warned about rather than rejected. That arm sits inside
+    `is_supported`, so it fires only for properties this parser models and the
+    caller applies either way; the `essential` flag exists to stop a reader
+    rendering an item whose properties it cannot honour, which is the
+    *unsupported*-property arm — and that one is enforced unconditionally.
+    Required by `tests/vectors/libavif/clap_irot_imir_non_essential.avif`.
+
+  Lenient mode is unchanged in both cases. Strict mode is otherwise untouched:
+  non-zero reserved flags outside `pixi`, `a1lx` marked essential, and unknown
+  properties marked essential are all still hard errors. Pinned by
+  `tests/parser_leniency_scope.rs` in the root package.
 - **`tests/fuzz_regression.rs` was replaying zero seeds and reporting success**
   (`tests/fuzz_regression.rs`, `fuzz/regression/README.md`, `Cargo.toml`). It
   calls `zenutils_fuzz::RegressionSuite`, whose published `0.1.0` `run()`
