@@ -50,16 +50,49 @@ rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8",
 #  * the tile-threading correctness + granularity campaign (rav1d-safe#455):
 #    the 766-vector corpus now passes at t=1 AND t=8 with nothing skipped.
 #
-# STILL OPEN at this rev — rav1d-safe#524 (filed 2026-08-29): the same
-# over-reserved-SIMD-read shape as fdd6a35, but in `safe_simd/loopfilter.rs`
-# rather than cdef. `compact_read_per_row` reserves an 8-byte window where the
-# filter reads 7 taps, so the last byte laps ONE index into the next recon row
-# and collides with `owned_recon.rs`'s legitimate `&mut` over that row
-# (`& _[73721..73729]` vs `&mut _[73728..74112]`). Intermittent — it takes down
-# `cov_zencodec::row_sink_decode_is_byte_identical_to_buffered_decode` with a
-# `Decode { code: -1 }` maybe 1 run in 4 on ubuntu-latest. Bump this pin when
-# #524 lands. See CLAUDE.md -> Known Bugs before blaming a zenavif change.
-rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "140f91450c3551c25a5699d12ded6d629ecf6d97", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
+#  * rav1d-safe@3426ebf7 — rav1d-safe#524, the intermittent
+#    `cov_zencodec::row_sink_decode_is_byte_identical_to_buffered_decode`
+#    failure on ubuntu-latest (`& _[73721..73729]` vs
+#    `&mut _[73728..74112]`). **This entry's earlier text was a WRONG
+#    diagnosis** — it read the panic as another fdd6a35-shaped false positive
+#    ("reserves an 8-byte window where the filter reads 7 taps"). It was not.
+#    The guard was HONEST: the 8bpc x86_64 H kernels genuinely load all 8
+#    bytes. `loop_filter_4_8bpc_wd6_simd_h`'s `load_row_hi` pulls a 4-byte
+#    chunk at `+1` and `..._wd16_simd_h`'s `load_chunk(_, 5)` pulls one at
+#    `+5`, but only lanes 0/1 of each survive `transpose4` (`hi[2..4]`,
+#    `c3[2..4]` are never bound) — so the trailing lanes were read and thrown
+#    away, and narrowing the guard alone would have made it lie. A second
+#    defect compounded it: the H window was sized from the PLANE's worst case
+#    ((3,5) chroma / (7,9) luma) instead of from the run's mask
+#    (`lf_run_reach`). `default_picture_alloc` pads a stride only when it is a
+#    multiple of 1024, so a 768-wide 4:2:0 frame's chroma plane (stride 384 =
+#    its width) gets no padding at all, and at the last 4-column group
+#    `edge + 5` is the FIRST PIXEL OF THE NEXT PICTURE ROW — which
+#    `owned_recon::stitch_sbrow` legitimately holds `&mut` over while
+#    reconstructing the next superblock row. Hence one shared index at t > 1.
+#    Fix: both kernels now load only the bytes they consume (dead lanes
+#    zero-filled, bit-identical by construction because `transpose4`'s outputs
+#    0 and 1 depend only on input lanes 0 and 1), and both dispatchers size the
+#    H window from `lf_run_reach` through one `lf_compact_window`. The
+#    SIMD-vs-scalar fallback predicate deliberately keeps its old 9/5 values,
+#    so the SIMD/scalar decision — and therefore every output byte — is
+#    unchanged by the fix.
+#
+# Also new in this bump (140f9145 -> 66f58fa6, ~96 commits), both of which
+# zenavif's decode paths sit on top of:
+#  * rav1d-safe@2e0f7e8 — `Settings::strictness`, defaulting to
+#    `Strictness::Strict`. `Settings::default()` (which is what every zenavif
+#    decode path uses) now REJECTS what libaom rejects — dav1d's
+#    strict_std_compliance checks plus the AV1 6.10.8 segment_id bound — as
+#    `Error::InvalidData` instead of concealing it. `strict_std_compliance` is
+#    deprecated but still honoured (the stricter of the two wins), and zenavif
+#    never sets it. Upstream surveyed 315 AVIFs/OBUs from codec-corpus +
+#    zenavif/tests: identical verdicts except a deliberately corrupted vector.
+#  * rav1d-safe@59eb17b — `Decoder::flush()` now DRAINS the frames it still
+#    owes before it resets, instead of resetting first and discarding them
+#    (rav1d-safe#423). zenavif calls `flush()` at end of input in
+#    `decode_av1.rs` and `decoder_managed/decoder.rs`.
+rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "66f58fa6a64c689998721cc5cdb16a4698e26eec", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
 # zenav1-aom pure-Rust AV1 KEY-frame decoder — second decode backend (feature
 # `aom-backend`). Git-rev pinned to imazen/zenav1-aom main (crate unpublished;
 # intra decode is conformance-clean vs libaom v3.14.1 at this rev). This rev

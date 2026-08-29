@@ -23,10 +23,12 @@ superseded — do all work here.
 - **`cargo fmt --all` is BANNED here** (reaches the ../ravif and
   ../zenanalyze sibling path-deps); use `just fmt` / `just fmt-check`
   (package-scoped `-p` triple).
-- Root `[patch.crates-io]` currently pins: zenavif-serialize → workspace
-  member (until 0.2.0 publishes), rav1d-safe → git rev f6aed27e
-  (zenavif#30 wedge fix, until the release past 0.5.7). fuzz/Cargo.toml
-  mirrors the rav1d-safe pin only.
+- Root `[patch.crates-io]` currently pins: zenanalyze-api → git `main`
+  (until 0.1.1 publishes) and zenavif-serialize → workspace member (until
+  0.2.0 publishes). **rav1d-safe is NOT patched** — it is a direct git-rev
+  dependency in `[dependencies]` (a crates-io patch cannot supply 0.6.0
+  against a 0.5.x requirement); `fuzz/Cargo.toml` mirrors that `rev` and
+  must be bumped in lockstep with the root manifest.
 
 ## Quick Commands
 
@@ -211,11 +213,11 @@ backend capability landing:**
 
 ## Known Bugs
 
-### FLAKY CI: `row_sink_decode_is_byte_identical_to_buffered_decode` — a rav1d-safe threaded-loopfilter DisjointMut overlap, NOT a zenavif bug (rav1d-safe#524, seen 2026-08-29)
-If `tests/cov_zencodec.rs::row_sink_decode_is_byte_identical_to_buffered_decode`
-fails in CI with `Decode { code: -1, "Failed to decode primary frame" }`, read the
-worker-thread panic above it before assuming a zenavif regression. Observed once on
-`ubuntu-latest` (run 33238501769) at rav1d-safe rev `140f914`:
+### `row_sink_decode_is_byte_identical_to_buffered_decode` CI flake — FIXED upstream (rav1d-safe#524 / `3426ebf7`), pin bumped 2026-08-29
+Seen once on `ubuntu-latest` (run 33238501769) at rav1d-safe rev `140f914`:
+`tests/cov_zencodec.rs::row_sink_decode_is_byte_identical_to_buffered_decode`
+failed with `Decode { code: -1, "Failed to decode primary frame" }`, above which a
+rav1d worker had panicked:
 
 ```
 thread 'rav1d-worker-2' panicked at src/safe_simd/loopfilter.rs:5177:44:
@@ -224,21 +226,37 @@ thread 'rav1d-worker-2' panicked at src/safe_simd/loopfilter.rs:5177:44:
   existing: &mut  _[73728..74112] at src/owned_recon.rs:937:42
 ```
 
-The two ranges share exactly ONE index (73728). Line 5177 is the loop-filter's
-compacted read reservation (`compact_read_per_row::<BitDepth8>`), whose own comment
-says the filter reads 7 taps — and `73721 + 7 == 73728`, so the 8th byte of the
-reserved window is one past what is read and laps into the next recon row, where
-`owned_recon.rs:937` legitimately holds `&mut` over one full 384-column row. That is
-the same over-reserved-SIMD-window shape as the CDEF false positive fixed in
-rav1d-safe `fdd6a35`, in the loopfilter path that fix did not cover. Intermittent:
-the identical tree passed on the immediately preceding run and on every other
-platform in the same run (the earlier `#449` instance of this class ran ~2 failures
-in 15 full-suite runs).
+**The first diagnosis written here was WRONG, and it is worth knowing why.** It
+read the one shared index (73728) as another `fdd6a35`-shaped false positive — "the
+window reserves 8 bytes where the filter reads 7 taps, so the last byte is one past
+what is read". The guard was in fact HONEST: the 8bpc x86_64 H kernels really do
+load all 8 bytes. `loop_filter_4_8bpc_wd6_simd_h`'s `load_row_hi` pulls a 4-byte
+chunk at `+1` and `..._wd16_simd_h`'s `load_chunk(_, 5)` pulls one at `+5`, but only
+lanes 0/1 of each survive `transpose4` (`hi[2]`/`hi[3]` and `c3[2]`/`c3[3]` are
+never bound), so the trailing lanes were loaded and discarded — narrowing the guard
+would have made it lie about a read that genuinely happens.
 
-**Do not "fix" this in zenavif and do not touch the rav1d-safe checkout** — it is a
-sibling dependency. Re-run the job; track the real fix in rav1d-safe#524 and bump
-the pin when it lands (the pin's history comment in `Cargo.toml` tracks this class:
-`49df1fc0`, `f9458f43`, `fdd6a35`, `#449`, `#455`).
+The second, compounding defect is the one the panic geometry actually points at: the
+H window was sized from the **plane's worst case** ((3,5) chroma / (7,9) luma)
+rather than from the run's mask (`lf_run_reach`). `default_picture_alloc` pads a
+stride only when it is a multiple of 1024, so a 768-wide 4:2:0 frame's chroma plane
+(stride 384 = its width) gets no right-hand padding, and at the last 4-column group
+`edge + 5` is the **first pixel of the next picture row** — which
+`owned_recon::stitch_sbrow` legitimately holds `&mut` over while reconstructing the
+next superblock row. Intermittent because it needs `t > 1` and that scheduling.
+
+Fixed upstream in `3426ebf7`: both kernels load only the bytes they consume (dead
+lanes zero-filled — bit-identical by construction, since `transpose4`'s outputs 0
+and 1 depend only on input lanes 0 and 1), and both dispatchers size the H window
+from `lf_run_reach` through one shared `lf_compact_window`. The SIMD-vs-scalar
+fallback predicate deliberately keeps its old 9/5 values so the SIMD/scalar decision
+— and therefore every output byte — is unchanged. `zenavif`'s pin moved
+`140f9145` -> `66f58fa6` on 2026-08-29 to pick it up.
+
+**Lesson to carry:** "the guard is wider than the taps" is not by itself evidence of
+an over-reservation. Check what the kernel LOADS, not what the filter's tap ladder
+reaches — a chunked SIMD load can read past the last tap and still be a real read.
+And an H window has a picture ROW to stay inside, not just a superblock row.
 
 ### Grid AVIF + alpha is REFUSED, not decoded (zenavif#40, 2026-08-26) — alpha-grid stitching still unimplemented
 Every grid decode path (buffered, `decode_full`, streaming sink, aom backend)

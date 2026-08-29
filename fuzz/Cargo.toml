@@ -28,9 +28,11 @@ path = ".."
 # fuzz/ is its own workspace root, so the root [patch] does not reach it.
 # zenavif-parse needs no mirror: zenavif's dep on it is a path dep into the
 # workspace (zenavif-parse/), which resolves transitively from here.
-# Mirror of the root rav1d-safe git pin (0.6.0-staged; zenavif#30 wedge
-# fix). Drop at the rav1d-safe 0.6.0 release.
-rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "140f91450c3551c25a5699d12ded6d629ecf6d97" }
+# Mirror of the root rav1d-safe git pin (0.6.0-staged; zenavif#30 wedge fix +
+# the #524 loop-filter H-window fix). Keep it in lockstep with the root
+# manifest's `rev` — the reasoning for the current one lives there. Drop at
+# the rav1d-safe 0.6.0 release.
+rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "66f58fa6a64c689998721cc5cdb16a4698e26eec" }
 
 [[bin]]
 name = "fuzz_decode"

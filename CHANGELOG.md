@@ -10,6 +10,75 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## Workspace
 
+- **2026-08-29 — rav1d-safe pin `140f9145` -> `66f58fa6`; the
+  `row_sink_decode_is_byte_identical_to_buffered_decode` CI flake is fixed at
+  the source (rav1d-safe#524 / `3426ebf7`), and this repo's diagnosis of it was
+  wrong.** The note in `Cargo.toml` and the Known Bugs entry in `CLAUDE.md`
+  both read the panic (`& _[73721..73729]` vs `&mut _[73728..74112]`, one
+  shared index) as another `fdd6a35`-shaped over-reservation — "an 8-byte
+  window where the filter reads 7 taps". It was not a false positive. The
+  guard was HONEST: the 8bpc x86_64 H kernels load all 8 bytes.
+  `loop_filter_4_8bpc_wd6_simd_h`'s `load_row_hi` pulls a 4-byte chunk at `+1`
+  and `..._wd16_simd_h`'s `load_chunk(_, 5)` pulls one at `+5`, and only lanes
+  0/1 of each survive `transpose4` (`hi[2]`/`hi[3]`, `c3[2]`/`c3[3]` are never
+  bound) — the trailing lanes were genuinely read and discarded, so narrowing
+  the guard would have made it lie. The defect the geometry actually points at
+  is a second, compounding one: the H window was sized from the **plane's**
+  worst case ((3,5) chroma / (7,9) luma) rather than from the run's mask
+  (`lf_run_reach`). `default_picture_alloc` pads a stride only when it is a
+  multiple of 1024, so a 768-wide 4:2:0 frame's chroma plane (stride 384 = its
+  width) gets none — and `tests/vectors/libavif/kodim03_yuv420_8bpc.avif`, the
+  fixture this test decodes, is exactly 768x512 4:2:0. At the last 4-column
+  group `edge + 5` is the first pixel of the NEXT picture row, which
+  `owned_recon::stitch_sbrow` legitimately holds `&mut` over for the next
+  superblock row. Upstream fixed both halves: the kernels now load only what
+  they consume (dead lanes zero-filled — bit-identical by construction, since
+  `transpose4`'s outputs 0 and 1 depend only on input lanes 0 and 1), and both
+  dispatchers size the H window from `lf_run_reach` through one shared
+  `lf_compact_window`. The SIMD-vs-scalar fallback predicate deliberately keeps
+  its old 9/5 values so the SIMD/scalar decision — and therefore every output
+  byte — is unchanged. The affected module is `cfg(x86_64|wasm32)`; aarch64
+  routes through `loopfilter_arm`, which was never exposed. Notes corrected in
+  `Cargo.toml`, `CLAUDE.md` (which also had a stale claim that rav1d-safe is
+  supplied via `[patch.crates-io]` — it is a direct git-rev dependency), and
+  `fuzz/Cargo.toml`'s mirrored pin.
+
+  The bump spans ~96 upstream commits; two of them change behaviour zenavif
+  sits on top of, and neither moved any gate here:
+
+  - **`Settings::strictness` now defaults to `Strictness::Strict`**
+    (rav1d-safe `2e0f7e8`). Every zenavif decode path builds
+    `Settings::default()`, so non-conforming streams — dav1d's
+    `strict_std_compliance` checks plus the AV1 6.10.8 `segment_id` bound —
+    are now `Error::InvalidData` instead of concealed garbage pixels. The
+    deprecated `strict_std_compliance` flag still works (stricter of the two
+    wins) and zenavif never set it. Upstream surveyed 315 AVIFs/OBUs from
+    codec-corpus + this repo's `tests/`: identical verdicts except a
+    deliberately corrupted vector, which Strict correctly rejects.
+  - **`Decoder::flush()` drains before it resets** (rav1d-safe `59eb17b`,
+    rav1d-safe#423) instead of resetting first and dropping frames it still
+    owed. zenavif calls `flush()` at end of input in `src/decode_av1.rs` and
+    `src/decoder_managed/decoder.rs`.
+
+  Everything else in the range is docs, benchmark records, guard/tracker
+  bookkeeping, or SIMD load-narrowing that is bit-identical by construction
+  (`ee07356` x86 16bpc MC, `6f6081f` aarch64 16bpc bilinear MC, `08245d9`
+  negative-stride block guards, `d973628` `owned_recon` band width). No
+  committed decode MD5 reference value changed anywhere in the range — the
+  only edits to `tests/decode_md5_committed.rs` are additions plus
+  `Strictness::Lenient` pins on the cross-arch parity references.
+
+  Verified locally on aarch64 at the new pin, every CI feature set green:
+  `cargo test --workspace` 390 passed / 0 failed; `--no-default-features` 206;
+  `-p zenavif-parse --features eager` and `--all-features` 151 each;
+  `--features aom-backend,encode,encode-imazen,encode-svt-rs,target-quality`
+  416; `--features two-pass-butteraugli,two-pass-zensim,auto-tune` 434; clippy
+  (root + both members) and `cargo fmt --check` clean. The flaking test itself
+  passed 50/50 consecutive runs — but note that is a **regression gate for
+  this platform, not proof of the fix**: `safe_simd::loopfilter` is
+  `cfg(x86_64|wasm32)`, so the repaired kernels cannot execute on aarch64 at
+  all. The fix's runtime proof is CI's x86_64 legs.
+
 - **2026-08-29 — `encode-svt-rs` seam adapts to three retired/changed upstream
   shapes; CI red -> green (was run 33226351115).** All three are the seam
   catching up to `imazen/zenav1-svt` movement on 2026-08-28/29, and none of
