@@ -159,6 +159,9 @@ fn score_profile(bake_arg: &str) -> (ZensimProfile, usize) {
 /// scorer's own gradient (structurally identical path). Same width contract
 /// as the scorer (folded-944 class, loud refusal below 720).
 static MAP_BAKE_BYTES: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+fn map_bake_bytes() -> &'static [u8] {
+    MAP_BAKE_BYTES.get().expect("map bake bytes loaded").as_slice()
+}
 static MAP_BAKE_PROFILE: std::sync::OnceLock<Option<(ZensimProfile, usize)>> =
     std::sync::OnceLock::new();
 fn map_bake_profile() -> Option<(ZensimProfile, usize)> {
@@ -167,7 +170,7 @@ fn map_bake_profile() -> Option<(ZensimProfile, usize)> {
         let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("map bake {path}: {e}"));
         MAP_BAKE_BYTES.set(bytes).expect("map bake set once");
         let params = zensim::profile::ProfileParams::builder()
-            .mlp(MAP_BAKE_BYTES.get().expect("map bake bytes").as_slice())
+            .mlp(map_bake_bytes)
             .skip_score_mapping(true)
             .extrapolate_score(true)
             .extended_features(true)
@@ -540,11 +543,23 @@ fn run_inner_cell(
                 )
                 .expect("FD gradient failed");
                 let nonzero = s.iter().filter(|&&g| g != 0.0).count();
-                assert!(
-                    nonzero > 0,
-                    "h3-mag gradient identically zero — steering could never engage"
-                );
-                grad = Some(s);
+                if nonzero == 0 {
+                    if map_bake_profile().is_some() {
+                        // Split-role amendment (2026-08-29): a mounted MAP bake can
+                        // plateau to a zero FD gradient on flat/screen content (f16
+                        // quantization). Product-realistic fallback: this cell runs
+                        // UNSTEERED (scalar controller only), logged loudly. The
+                        // own-map path keeps the panic — zero gradient there is a
+                        // mount bug, not a content property.
+                        eprintln!(
+                            "[zensim_cq_rd] MAP-BAKE gradient identically zero — cell falls back to UNSTEERED"
+                        );
+                    } else {
+                        panic!("h3-mag gradient identically zero — steering could never engage");
+                    }
+                } else {
+                    grad = Some(s);
+                }
             }
             sc
         };

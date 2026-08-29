@@ -296,3 +296,28 @@ steers) is exactly the untested cell: split-role support
 env). Protocol note for the rerun: the staged change requires a rebuild,
 so an R0-identity re-run of one own-map arm gates arm-comparability
 before any split cell is read.
+
+## h3-mag COMPLETE ARMS + split-role amendment (2026-08-29 ~04:4xZ)
+
+Control own-map arms (new-substrate binary; note the R0 rerun's cells are
+byte-level different from the pre-split-role binary but STATISTICALLY
+IDENTICAL — cand h3 k3 0.291/18 on both — so the split-role code is
+inert-in-stats as designed; within-binary discipline kept anyway):
+
+| arm | med \|err\| | ±2 | vs own scalar |
+|---|---|---|---|
+| ctrl (gray-tower) h3 k3 | 0.495 | 19/27 | scalar 0.336 / 23 — DEGRADES |
+| ctrl h3 k2 | 0.867 | 17/27 | scalar 0.756 / 23 — DEGRADES |
+| cand (north-anchor) h3 k3 (r0) | 0.291 | 18/27 | scalar 0.180 / 24 — DEGRADES |
+
+**Own-map h3 steering degrades target-hitting for BOTH bakes on avif** —
+the map under-allocates and costs hits; the jxl own-map signature is
+codec-general. First anchor-lantern attempt PANICKED mid-corpus:
+**river-lantern's FD gradient is identically zero on screen-content
+cells** (f16 forward plateaus on flat content), and where it engaged on
+sc_gui it steered badly (t70 → achieved 37.6). **Harness amendment
+(registered here before the rerun):** with a mounted MAP bake, a zero
+gradient now falls back to UNSTEERED for that cell (logged loudly) — the
+product-realistic semantics; the own-map zero-gradient panic is kept (a
+mount bug, not a content property). Pair arms re-running under the
+amended contract; fresh same-binary scalar baselines queued.
