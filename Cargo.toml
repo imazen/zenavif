@@ -91,30 +91,44 @@ log = "0.4.29"
 # workspace's member.
 ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/imazen/cavif-rs", rev = "f6c883b6e7395fad67c87ddab676c4df59575a41", default-features = false, optional = true, features = ["stop"] }
 # svtav1-rs experimental AV1 encode backend (`encode-svt-rs` feature).
-# The crate lives in the rust/svtav1 subdir of imazen/svtav1; cargo
-# discovers workspace-subdir packages in git deps by package name. Rev-pinned
-# to master 2026-07-24 (rev 2d585bb2b). This is past the repo restructure
-# that moved the C reference into a git submodule — the `zenav1-svt*` crates
-# are pure Rust and unaffected (crate names + pub API unchanged). Relative to
-# the 3e25f52b baseline the pinned tree provides the fallible entry points
-# the seam now uses — `try_encode_frame*` -> `EncodeResult<Vec<u8>>` with a
-# typed `EncodeError` (Cancelled / AllocFailed / InvalidDimensions /
-# UnsupportedConfig), `with_stop` / `with_thread_count`, and a `fallible-alloc`
-# feature — plus the typed QP-0 rejection (upstream #5: QP 0 returns
-# `UnsupportedConfig` instead of emitting garbage; the seam's quality->QP
-# clamp keeps quality 100 on QP 1 and never trips it).
-# (The facade crate was renamed `svtav1` -> `zenav1-svt` upstream; the
-# `svtav1` alias keeps the seam's paths stable.)
+# The facade crate lives in the rust/svtav1 subdir of imazen/zenav1-svt and is
+# PACKAGED as `zenav1-svt`; the `svtav1` alias keeps the seam's `use` paths
+# stable (it was named `svtav1` upstream once).
 #
-# 2026-08-06: switched from the git-rev pin to the sibling path dep. The old
-# pin (`github.com/imazen/svtav1` @ 2d585bb2b) is UNFETCHABLE: the repo was
-# renamed to `imazen/zenav1-svt` and its `reference/svt-av1` submodule URL
-# moved to `imazen/zenav1-svt-c`, so cargo's submodule update 404s on the old
+# 2026-08-06: switched from a git-rev pin to the sibling path dep. The old pin
+# (`github.com/imazen/svtav1` @ 2d585bb2b) is UNFETCHABLE: the repo was renamed
+# to `imazen/zenav1-svt` and its `reference/svt-av1` submodule URL moved to
+# `imazen/zenav1-svt-c`, so cargo's submodule update 404s on the old
 # `imazen/svt-av1-ref` and the whole dependency resolution fails — for every
 # feature combination, not just `encode-svt-rs`. A path dep also composes the
-# in-flight zenav1-svt work (cancellation, panic audit) with this crate's
-# without a publish round-trip, per the CLAUDE.md unpublished-dependency rule.
-# Return to a git-rev pin on `imazen/zenav1-svt` before this branch lands.
+# in-flight zenav1-svt work with this crate's without a publish round-trip, per
+# the CLAUDE.md unpublished-dependency rule. CI clones the sibling from
+# `origin/main` (`.github/actions/clone-siblings`), so the seam always builds
+# against pushed upstream `main` — there is no rev to bump, and upstream
+# movement reaches CI the moment it is pushed. Return to a git-rev pin on
+# `imazen/zenav1-svt` before this branch lands.
+#
+# What the seam consumes from that tree:
+#   * the fallible entry points — `try_encode_frame*` -> `EncodeResult<Vec<u8>>`
+#     with a typed `EncodeError` (Cancelled / AllocFailed / InvalidDimensions /
+#     UnsupportedConfig), `with_stop` / `with_thread_count`, `fallible-alloc`;
+#   * native 10-bit `try_encode_frame_420_hbd`, with hbd chunks 1+2
+#     (`35743ebd5`, `f319ec298`) so the post-filter searches read real u16;
+#   * partial superblocks at EVERY preset on the 4:2:0 colour path
+#     (`partial_sb_gate` gained a presets-0-5 block 2026-08-04).
+#
+# 2026-08-29 — TWO UPSTREAM SHAPES CHANGED HERE, both handled in-tree:
+#   1. Crate consolidation 6 -> 4 (`bfae1b690`, fixes zenav1-svt#3):
+#      `zenav1-svt-tables` folded into `zenav1-svt-types` as
+#      `svtav1_types::tables`, `zenav1-svt-entropy` into `zenav1-svt-encoder`
+#      as `svtav1_encoder::entropy`. The facade keeps `svtav1::tables` /
+#      `svtav1::entropy` as re-exports, so THIS crate needed no `use` path
+#      changes — only the lockfile collapsed. Verified by building the full
+#      `aom-backend,encode,encode-imazen,encode-svt-rs,target-quality` set.
+#   2. QP 0 / coded-lossless is IMPLEMENTED, not refused (`75cf7b0f7` +
+#      `129d45494`, zenav1-svt#5/#9). The seam's quality->QP clamp stays (see
+#      `quality_to_qp_gated`), but the gate that asserted the refusal was
+#      replaced with a lossless round-trip gate — see CLAUDE.md Known Bugs.
 svtav1 = { package = "zenav1-svt", path = "../zenav1-svt/rust/svtav1", optional = true }
 # AVIF container muxer for the svtav1-rs backend (the zenravif backend muxes
 # inside zenravif; this backend muxes in-crate). The 0.2.0 version is

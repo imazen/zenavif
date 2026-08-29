@@ -132,7 +132,7 @@ TSV diff in the same commit. zenrav1e's halves (`gate-identity`,
 - `(default)` - Pure Rust decode only, safe SIMD via archmage
 - `encode` - AVIF encoding via zenravif
 - `encode-imazen` - Encoding with zenrav1e fork extras (QM, VAQ, still-image, lossless)
-- `encode-svt-rs` - EXPERIMENTAL `Av1Backend::SvtRs` via svtav1-rs (imazen/svtav1 git-branch dep; stills only — RGB/RGBA 4:2:0 + grayscale Cs400 at 8 or 10 bits (#33: 16-bit input / `EncodeBitDepth::Ten` → native u16 `try_encode_frame_420_hbd`, 10-bit alpha/gray only at speed ≥ 7 = SVT preset ≥ 9 per `svt_rs_depth_error`; HDR clli/mdcv container-side), alpha as Cs400 `auxl` aux item; dims: multiples of 64 at any speed, arbitrary at speed ≥ 5 (SVT preset ≥ 6), multiples of 8 at speed ≥ 5 when a Cs400 alpha/gray stream is emitted (mono partial SBs at preset 6 since zenav1-svt `b6a1737a` + `1ed7db46`) — `svt_rs_dims_error` in `src/encoder_svt_rs.rs` is the single gate (#32); muxes in-crate via zenavif-serialize; C-parity assertion pending decision-layer bitstream identity upstream)
+- `encode-svt-rs` - EXPERIMENTAL `Av1Backend::SvtRs` via svtav1-rs (imazen/zenav1-svt sibling path dep; stills only — RGB/RGBA 4:2:0 + grayscale Cs400 at 8 or 10 bits (#33: 16-bit input / `EncodeBitDepth::Ten` → native u16 `try_encode_frame_420_hbd` — since upstream hbd chunk 2 (`f319ec298`) the deblock/CDEF/Wiener post-filter searches read those native u16 planes too, nothing truncates; 10-bit alpha/gray only at speed ≥ 7 = SVT preset ≥ 9 per `svt_rs_depth_error`; HDR clli/mdcv container-side), alpha as Cs400 `auxl` aux item; dims: the 4:2:0 colour path takes ARBITRARY dimensions at ANY speed (the preset ≥ 6 floor was removed 2026-08-29 — see Known Bugs), a Cs400 alpha/gray stream needs speed ≥ 5 (SVT preset ≥ 6) AND multiples of 8, else multiples of 64 — `svt_rs_dims_error` in `src/encoder_svt_rs.rs` is the single gate (#32); coded-lossless (QP 0) is implemented upstream on 8-bit 4:2:0 but the seam's quality→QP mapping deliberately clamps to QP ≥ 1; muxes in-crate via zenavif-serialize)
 - `aom-backend` - EXPERIMENTAL `DecodeBackend::AomRs` — zenav1-aom pure-Rust KEY-frame decoder behind the raw-OBU seam `decode_av1_obu_yuv` (git-rev dep on imazen/zenav1-aom; byte-identical to rav1d-safe on the 8-cell decode corpus; drives `examples/decode_4way_bench.rs`)
 - `encode-asm` - Encoding with hand-written assembly (fastest, unsafe)
 - `encode-threading` - Encoding with multi-threading
@@ -255,8 +255,10 @@ following SB row (rav1d-safe 27.9 dB at 200x136, first SB row clean, every
 later row wrong from column 0 outward; aomdec still DECODED it, so a
 decodability gate cannot see this class). Fixed with the same store clip
 the funnel path already had; upstream gate = a recon-vs-aomdec spotcheck
-cell on the `(x+y)` ramp. Seam: the mono preset gate is gone (mono shares
-`PARTIAL_SB_MIN_PRESET = 6`; the multiples-of-8 rule stays), and the canary
+cell on the `(x+y)` ramp. Seam: the mono preset gate dropped from 7 to 6
+(`MONO_PARTIAL_SB_MIN_PRESET = 6` — since 2026-08-29 this floor is
+mono-ONLY; the 4:2:0 colour path has no preset floor at all, see the
+partial-SB entry below; the multiples-of-8 rule stays), and the canary
 became the positive gate `svt_rs_direct_mono_partial_sb_preset6_roundtrips`
 (7 geometries through rav1d-safe, aom-rs byte-agreeing; 96x80 56.18 dB at
 qp 10). Lesson for the seam: a `still_broken` canary that drives the
@@ -264,19 +266,92 @@ backend directly must expect BOTH failure shapes of the bug it pins — a
 typed/garbage result AND a debug-build assert — or it reads as a new
 regression the day CI builds it unoptimised.
 
-### svtav1-rs QP 0 (imazen/zenav1-svt#5) — RESOLVED upstream 2026-07-22 (typed rejection); seam clamp RETAINED
-History: every CQP QP-0 still encode on rev 3e25f52b emitted a valid-syntax
-bitstream decoding to garbage pixels (ssim2 ~ -700; rav1d-safe and zenav1-aom
-byte-agreed on the garbage => encoder-side; 115/115 sweep cells, boundary
-clean at QP 1), plus one 64x64 stream rav1d rejected. Upstream `f0f0a70ca`
-(carried into the current pin 2d585bb2b) now REJECTS base_qindex 0 with a typed
-`EncodeError::UnsupportedConfig` from `try_encode_frame*` — corruption is no
-longer reachable. The seam KEEPS the QP >= 1 clamp (`quality_to_qp_gated` in
-`src/encoder_svt_rs.rs`) for a different reason: quality 100 maps linearly to
-QP 0 and must ENCODE (at QP 1), not error. Tests:
-`svt_rs_quality_100_does_not_corrupt` (clamp side) +
-`svt_rs_direct_qp0_rejected_typed` (upstream-gate side, drives the pipeline
-directly). Record: `benchmarks/backend_sweep_2026-07-22.{tsv,meta}`.
+### svtav1-rs QP 0 (imazen/zenav1-svt#5, #9) — IMPLEMENTED upstream 2026-08-28 (was: corrupt, then refused); seam clamp RETAINED as a product choice
+History runs corrupt -> refused -> implemented, and the seam gate followed it
+each time:
+1. rev 3e25f52b: every CQP QP-0 still encode emitted a valid-syntax bitstream
+   decoding to garbage pixels (ssim2 ~ -700; rav1d-safe and zenav1-aom
+   byte-agreed on the garbage => encoder-side; 115/115 sweep cells, boundary
+   clean at QP 1), plus one 64x64 stream rav1d rejected.
+2. `f0f0a70ca` (2026-07-22): base_qindex 0 became a typed
+   `EncodeError::UnsupportedConfig` from `try_encode_frame*` — corruption no
+   longer reachable. The seam test asserted THAT refusal.
+3. `aeb619cd8` (frame header) + `75cf7b0f7` (tile half, fixes #5) +
+   `129d45494` (`encode_yuv420` emits a real AV1 bitstream; `with_lossless`
+   honoured on 4:2:0 — issue #9 items 6-7), 2026-08-28: **coded-lossless
+   ENCODES** on the 8-bit 4:2:0 still path. This is the first CAPABILITY
+   refusal that port has ever RETIRED (its inventory went 15 -> 14). Upstream
+   gate `tools/lossless_gate.sh`: 112/144 byte-identical to C (presets 4-13
+   all 96/96, incl. partial superblocks) + 32 self-promoting pinned cells,
+   **144/144 decode to the source**. Still typed-refused at QP 0: monochrome,
+   10-bit, HDR-fork mode, screen-content tools, superres, inter frames
+   (`EncodePipeline::lossless_config_error`).
+
+**This is why zenavif CI went red on run 33226351115** (2026-08-29): the seam's
+`svt_rs_direct_qp0_rejected_typed` asserted a refusal that no longer exists, so
+it failed on every platform. It was REPLACED (not deleted, not loosened) by the
+stronger property the refusal was standing in for:
+`svt_rs_direct_qp0_codes_lossless_420` — qp0 through the pipeline must produce a
+stream our OWN decoders reconstruct EXACTLY (rav1d-safe recon == source on all
+three planes at 64x64 + 128x64 x presets {6,7,9}, aom-rs byte-agreeing).
+Mutation-verified 2026-08-29: re-running that body at qp 1 fails at the first
+luma pixel, so the equality assertions are load-bearing. The surviving refusals
+keep typed assertions in
+`svt_rs_direct_qp0_typed_refusal_outside_420_8bit` (mono + 10-bit, each pinned
+to its specific `lossless_config_error` arm by message).
+
+The seam KEEPS the QP >= 1 clamp (`quality_to_qp_gated` in
+`src/encoder_svt_rs.rs`), now as a deliberate **product** choice rather than a
+corruption guard or a refusal workaround: quality 100 must ENCODE, and mapping
+it to QP 0 would silently switch coding modes (WHT/TX_4X4, no in-loop filters)
+and multiply file size; the RGB -> 4:2:0 conversion means a coded-lossless AV1
+frame is still not a lossless IMAGE round-trip; and `EncoderConfig` has no
+lossless request for this backend to hang the choice off. Clamp side stays
+covered by `svt_rs_quality_100_does_not_corrupt`. **Open decision for the
+owner:** whether to add a lossless request to `EncoderConfig` for this backend
+and let quality 100 (or an explicit flag) reach QP 0. Record:
+`benchmarks/backend_sweep_2026-07-22.{tsv,meta}`.
+
+### svtav1-rs partial superblocks below SVT preset 6 — seam floor REMOVED for the colour path 2026-08-29 (upstream premise retired)
+The seam refused non-64-multiple dimensions below SVT preset 6 (zenavif speed
+5) on the premise that "the svtav1-rs partition search is not C-identical on a
+partial superblock" at presets 0-5. That premise is retired. Until 2026-08-04
+upstream gated its C-faithful PD1 refinement walk on a COMPLETE superblock
+(`refined = matches!(preset, 0..=5) && use_funnel && full_sb`), so a partial SB
+at those presets fell back to a plain PD0 fixed tree — a search C never runs.
+The `full_sb` gate is gone (the walk is edge-aware), and
+`tools/partial_sb_gate.sh` grew a 23-cell presets-0-5 block, every cell
+byte-identical to real SvtAv1EncApp v4.2.0. Gate total **146/146 on aarch64 /
+145/145 on the x86-64 CI runner** — the one-cell difference is an ISA-scoped
+C-side divergence (upstream `SUSPECTED-C-BUGS.md` #9; the port is proven to
+emit one bitstream on any ISA by its own `tier_invariance` test), not a port
+variable. Anti-vacuity measured adversarially: restoring `&& full_sb` drops the
+gate to 118/141 with all 23 failures inside that block.
+
+**The residual is NOT dimension-conditioned, which is why a dimension gate was
+the wrong tool.** Measured over 36 cells per preset (9 non-64-aligned
+geometries x {gradient, screen} x {q20, q48}): every `gradient` cell
+byte-matches at p0..p3 and p5; the misses are `screen` content at p0/p1/p2 (+4
+cells at p4) — upstream issue #71, the palette/IntraBC over-picking RD class,
+which fires on **64-ALIGNED** 256/384/512 screen frames too. Those aligned
+frames this seam has always accepted at every speed, so the 64-multiple rule
+never protected anyone from that class; it only refused correct encodes. And
+the residual is an RD divergence (different partition choices, different
+bytes), not corruption: `tools/arbitrary_size_robustness.sh` is 128/128
+panic-free-and-decodable with 0 refused across every preset.
+
+Seam: `PARTIAL_SB_MIN_PRESET` is renamed `MONO_PARTIAL_SB_MIN_PRESET` and now
+gates **only** the Cs400 mono path (alpha aux item, grayscale colour item),
+because nothing upstream measures mono partial superblocks below preset 6 —
+`partial_sb_gate` is bd8 4:2:0 by its own scope line, and the mono evidence is
+the preset-6 edge-leaf fix (`b6a1737a` + `1ed7db46`). A floor with no
+measurement under it stays where the measurement stops. Tests: the refusal test
+`svt_rs_rejects_partial_sb_dims_below_preset_6` was REPLACED by
+`svt_rs_partial_sb_roundtrip_at_low_presets` (96x96 / 65x72 / 100x37 x speeds
+1-4 = SVT presets 0/1/3/4, decode at the TRUE size, measured 49.3-50.9 dB vs a
+38 dB floor), and the mono floor keeps a refusal gate in
+`svt_rs_mono_partial_sb_still_refused_below_preset_6` (which also asserts the
+SAME geometry now validates without alpha).
 
 ### Cross-backend status (2026-07-22 session; svt pin re-bumped 2026-07-24)
 Pins bumped: zenav1-aom `7b972e50` (structured DecodeError/DecodeConfig +

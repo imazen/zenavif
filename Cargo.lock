@@ -2070,6 +2070,7 @@ name = "zenav1-aom-dsp"
 version = "0.0.1"
 dependencies = [
  "archmage",
+ "enough",
  "magetypes",
 ]
 
@@ -2079,8 +2080,6 @@ version = "0.1.0"
 dependencies = [
  "zenav1-svt-dsp",
  "zenav1-svt-encoder",
- "zenav1-svt-entropy",
- "zenav1-svt-tables",
  "zenav1-svt-types",
 ]
 
@@ -2090,7 +2089,6 @@ version = "0.1.0"
 dependencies = [
  "archmage",
  "magetypes",
- "zenav1-svt-tables",
  "zenav1-svt-types",
 ]
 
@@ -2099,28 +2097,11 @@ name = "zenav1-svt-encoder"
 version = "0.1.0"
 dependencies = [
  "almost-enough",
+ "archmage",
  "enough",
+ "magetypes",
  "whereat",
  "zenav1-svt-dsp",
- "zenav1-svt-entropy",
- "zenav1-svt-tables",
- "zenav1-svt-types",
-]
-
-[[package]]
-name = "zenav1-svt-entropy"
-version = "0.1.0"
-dependencies = [
- "archmage",
- "magetypes",
- "zenav1-svt-tables",
- "zenav1-svt-types",
-]
-
-[[package]]
-name = "zenav1-svt-tables"
-version = "0.1.0"
-dependencies = [
  "zenav1-svt-types",
 ]
 

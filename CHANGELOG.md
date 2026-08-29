@@ -10,6 +10,59 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## Workspace
 
+- **2026-08-29 — `encode-svt-rs` seam adapts to three retired/changed upstream
+  shapes; CI red -> green (was run 33226351115).** All three are the seam
+  catching up to `imazen/zenav1-svt` movement on 2026-08-28/29, and none of
+  them relaxes a gate:
+
+  - **QP 0 is IMPLEMENTED upstream, not refused** (`aeb619cd8` + `75cf7b0f7`,
+    zenav1-svt#5 chunk 2; `129d45494`, issue #9 items 6-7 — `encode_yuv420`
+    emits a real AV1 bitstream and `with_lossless` is honoured on 4:2:0). This
+    is the first CAPABILITY refusal that port has RETIRED (inventory 15 -> 14),
+    and it is what turned zenavif CI red on every platform:
+    `svt_rs_direct_qp0_rejected_typed` asserted a refusal that no longer
+    exists. REPLACED — not deleted, not loosened — by
+    `svt_rs_direct_qp0_codes_lossless_420`, which demands the STRONGER
+    property the refusal stood in for: a qp0 stream must decode under our own
+    decoders with recon == source EXACTLY, on all three planes, at 64x64 +
+    128x64 x SVT presets {6,7,9}, with aom-rs byte-agreeing with rav1d-safe.
+    Mutation-verified (re-run at qp 1, it fails at the first luma pixel). The
+    arms upstream still refuses keep typed assertions in
+    `svt_rs_direct_qp0_typed_refusal_outside_420_8bit` (monochrome + 10-bit,
+    each pinned to its own `lossless_config_error` arm by message). The seam's
+    QP >= 1 clamp is RETAINED, now documented as a product choice rather than a
+    corruption guard — quality 100 must encode, and RGB -> 4:2:0 means
+    coded-lossless AV1 is still not a lossless image round-trip.
+  - **The partial-superblock preset floor is removed for the 4:2:0 colour
+    path.** It rested on "presets 0-5 are not C-identical on a partial SB",
+    which upstream retired on 2026-08-04 by making the PD1 refinement walk
+    edge-aware and dropping its `full_sb` gate; `partial_sb_gate.sh` gained a
+    23-cell presets-0-5 block, all byte-identical to real SvtAv1EncApp v4.2.0
+    (146/146 aarch64, 145/145 x86-64 CI — the delta is an ISA-scoped C-side
+    divergence, upstream SUSPECTED-C-BUGS #9). The residual upstream names is
+    `screen` content at p0/p1/p2 (+4 at p4), issue #71's palette/IntraBC RD
+    class, which also fires on 64-ALIGNED frames this seam always accepted —
+    so it is not dimension-conditioned and a dimension gate never addressed
+    it. `PARTIAL_SB_MIN_PRESET` -> `MONO_PARTIAL_SB_MIN_PRESET`, gating only
+    the Cs400 mono path (nothing upstream measures mono partial SBs below
+    preset 6). New gate `svt_rs_partial_sb_roundtrip_at_low_presets` (96x96 /
+    65x72 / 100x37 x speeds 1-4 = presets 0/1/3/4; measured 49.3-50.9 dB vs a
+    38 dB floor); the mono floor keeps a refusal gate in
+    `svt_rs_mono_partial_sb_still_refused_below_preset_6`.
+  - **10-bit post-filter doc corrected.** `src/encoder_svt_rs.rs` claimed the
+    deblock / CDEF / Wiener searches "still decide on MSB-truncated planes".
+    Stale: upstream hbd chunk 2 (`f319ec298`, on chunk 1 `35743ebd5`) threads
+    the caller's native u16 into all three, and an unconsumed native source is
+    now a typed refusal rather than a silent truncation
+    (`bd10_hbd_src_gate.sh` 100/100 byte-identical to C).
+
+  Also: the sibling path dep needed no `use` path changes for the 6 -> 4 crate
+  consolidation (`bfae1b690`, zenav1-svt#3) — the facade re-exports
+  `svtav1::tables` / `svtav1::entropy` — verified by building the full
+  `aom-backend,encode,encode-imazen,encode-svt-rs,target-quality` set. The
+  Cargo.toml dep comment is rewritten to match (there is no rev to bump: CI
+  clones the sibling from `origin/main`).
+
 - **2026-08-28 — lockfile `zenav1-svt` entries: restored, then un-restored.**
   Retraction. Re-resolving for the zenanalyze-api change also collapsed
   `zenav1-svt-entropy` / `-tables` into their parents, and I read that as a

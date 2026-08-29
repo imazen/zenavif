@@ -157,18 +157,119 @@ fn svt_rs_quality_moves_bytes() {
 // Honest scope rejection — encode time
 // --------------------------------------------------------------------
 
-/// Issue #32: non-64-multiple dimensions are accepted only where the port
-/// codes partial superblocks C-identically (SVT preset >= 6 = speed >= 5).
-/// Below that the seam keeps refusing rather than emitting a stream whose
-/// partition search is known to diverge from C.
+/// Issue #32: the 4:2:0 colour path now takes non-64-multiple dimensions at
+/// **every** speed, including the low presets that used to be refused, and
+/// the result decodes correctly at the TRUE size under both decoders.
+///
+/// History, so the direction of this gate is unambiguous: this test used to
+/// be `svt_rs_rejects_partial_sb_dims_below_preset_6`, asserting a REFUSAL
+/// at speeds 1 and 4. The premise of that refusal was that upstream gated
+/// its C-faithful PD1 refinement walk on a complete superblock, so presets
+/// 0–5 ran a search C never runs on a partial SB. Upstream removed that
+/// `full_sb` gate on 2026-08-04 and `tools/partial_sb_gate.sh` gained a
+/// 23-cell presets-0–5 block, every cell byte-identical to real
+/// SvtAv1EncApp v4.2.0 (146/146 aarch64 / 145/145 x86-64 CI), with the
+/// anti-vacuity control measured (restoring `&& full_sb` drops it to
+/// 118/141, all 23 failures inside that block). The refusal is retired, so
+/// the test is REPLACED by the behaviour it was standing in for.
+///
+/// The residual upstream still names is `screen`-content at p0/p1/p2 (+4
+/// cells at p4) — issue #71's palette/IntraBC over-picking RD class, which
+/// also fires on **64-ALIGNED** 256/384/512 screen frames that this seam
+/// has always accepted at every speed. It is an RD divergence, not
+/// corruption (`arbitrary_size_robustness.sh` 128/128, 0 refused), so it is
+/// not a dimension question and a dimension gate never addressed it. See
+/// `svt_rs_dims_error`'s docs for the full argument.
+///
+/// Speeds 1..4 map to SVT presets 0, 1, 3, 4 — exactly the low band that
+/// was refused before.
 #[test]
-fn svt_rs_rejects_partial_sb_dims_below_preset_6() {
-    let img = gradient_rgb8(96, 96); // not a multiple of 64
+fn svt_rs_partial_sb_roundtrip_at_low_presets() {
+    // (96,96) is the geometry the old refusal test used; (65,72) is odd on
+    // one axis and 8-aligned on the other; (100,37) is neither axis
+    // 8-aligned with an odd height.
+    for (w, h) in [(96usize, 96usize), (65, 72), (100, 37)] {
+        let img = gradient_rgb8(w, h);
+        for speed in [1u8, 2, 3, 4] {
+            let config = svt_config().quality(85.0).speed(speed);
+            config
+                .validate_for_input(PlanInput::rgb8(w as u32, h as u32))
+                .unwrap_or_else(|e| {
+                    panic!("{w}x{h} at speed {speed} must validate (the preset floor is gone): {e}")
+                });
+            let encoded = zenavif::encode_rgb8(img.as_ref(), &config, stop())
+                .unwrap_or_else(|e| panic!("{w}x{h} at speed {speed} must encode: {e}"));
+            assert!(encoded.color_byte_size > 0);
+
+            let decoded = zenavif::decode(&encoded.avif_file)
+                .unwrap_or_else(|e| panic!("{w}x{h} at speed {speed} must decode: {e}"));
+            assert_eq!(decoded.width() as usize, w, "true width must be signalled");
+            assert_eq!(
+                decoded.height() as usize,
+                h,
+                "true height must be signalled"
+            );
+            let out = decoded
+                .try_as_imgref::<Rgb<u8>>()
+                .expect("no-alpha decode yields RGB8");
+            let mut se: u64 = 0;
+            for (row_a, row_b) in img.rows().zip(out.rows()) {
+                for (pa, pb) in row_a.iter().zip(row_b.iter()) {
+                    for (ca, cb) in [(pa.r, pb.r), (pa.g, pb.g), (pa.b, pb.b)] {
+                        let d = i64::from(ca) - i64::from(cb);
+                        se += (d * d) as u64;
+                    }
+                }
+            }
+            let mse = se as f64 / (w * h * 3) as f64;
+            let p = 10.0 * (255.0f64 * 255.0 / mse.max(1e-9)).log10();
+            // Mirror of `encoder_svt_rs::speed_to_svt_preset` (crate-private).
+            let preset = ((u32::from(speed).clamp(1, 10) - 1) * 13 + 4) / 9;
+            eprintln!(
+                "svt_rs low-preset partial-SB {w}x{h} speed {speed} (SVT preset {preset}) q85: \
+                 PSNR {p:.2} dB, {} payload bytes",
+                encoded.color_byte_size
+            );
+            // Same floor and rationale as `svt_rs_partial_sb_roundtrip_at_preset_ge_6`:
+            // a mis-signalled size, a stride wrap or a mis-coded edge SB
+            // drops this to single digits (the mono path measured 12-26 dB
+            // when it was actually broken).
+            assert!(
+                p > 38.0,
+                "{w}x{h} speed {speed}: low-preset partial-SB roundtrip PSNR {p:.2} dB below floor"
+            );
+        }
+    }
+
+    // 64-multiples stay accepted at every speed.
+    svt_config()
+        .speed(1)
+        .validate_for_input(PlanInput::rgb8(128, 64))
+        .expect("64-multiples validate at speed 1");
+    // Empty images are still refused at every speed.
+    assert!(matches!(
+        svt_config()
+            .speed(10)
+            .validate_for_input(PlanInput::rgb8(0, 64)),
+        Err(ValidationError::BackendUnsupportedParam { .. })
+    ));
+}
+
+/// The MONO half of the dimension envelope keeps its preset floor, and it
+/// must keep refusing below it: nothing upstream measures a monochrome
+/// partial superblock below SVT preset 6 (`partial_sb_gate` is bd8 4:2:0 by
+/// its own scope line; the mono evidence is the preset-6 edge-leaf fix
+/// `b6a1737a` + `1ed7db46`). A grayscale or alpha-carrying encode at
+/// non-64-multiple dims below speed 5 is therefore still a typed refusal,
+/// even though the colour path at the same speed now encodes.
+#[test]
+fn svt_rs_mono_partial_sb_still_refused_below_preset_6() {
     for speed in [1u8, 4] {
-        // speed 4 maps to preset 4 (the default speed); speed 1 to preset 0.
-        let Err(err) = zenavif::encode_rgb8(img.as_ref(), &svt_config().speed(speed), stop())
+        // RGBA: the alpha auxiliary item is the Cs400 stream.
+        let img = gradient_rgba8(96, 96);
+        let Err(err) = zenavif::encode_rgba8(img.as_ref(), &svt_config().speed(speed), stop())
         else {
-            panic!("96x96 at speed {speed} must be rejected, not padded");
+            panic!("RGBA 96x96 at speed {speed} must be refused (mono preset floor)");
         };
         let msg = err.to_string();
         assert!(msg.contains("64"), "error must explain the 64 rule: {msg}");
@@ -176,27 +277,24 @@ fn svt_rs_rejects_partial_sb_dims_below_preset_6() {
             msg.contains("speed >= 5"),
             "error must name the speed that lifts the rule: {msg}"
         );
+        assert!(
+            msg.contains("grayscale") || msg.contains("alpha"),
+            "the refusal must name the Cs400 path it is about: {msg}"
+        );
 
         // Same rule at validate_for_input time.
         assert!(matches!(
             svt_config()
                 .speed(speed)
-                .validate_for_input(PlanInput::rgb8(96, 96)),
+                .validate_for_input(PlanInput::rgba8(96, 96)),
             Err(ValidationError::BackendUnsupportedParam { .. })
         ));
-    }
-    // 64-multiples stay accepted at every speed.
-    svt_config()
-        .speed(1)
-        .validate_for_input(PlanInput::rgb8(128, 64))
-        .expect("64-multiples validate at speed 1");
-    // Empty images are refused at every speed.
-    assert!(matches!(
+        // ...while the SAME geometry without alpha now validates.
         svt_config()
-            .speed(10)
-            .validate_for_input(PlanInput::rgb8(0, 64)),
-        Err(ValidationError::BackendUnsupportedParam { .. })
-    ));
+            .speed(speed)
+            .validate_for_input(PlanInput::rgb8(96, 96))
+            .unwrap_or_else(|e| panic!("RGB 96x96 at speed {speed} must validate: {e}"));
+    }
 }
 
 /// Issue #32: at speed >= 5 the 4:2:0 colour path takes arbitrary
@@ -263,14 +361,17 @@ fn svt_rs_partial_sb_roundtrip_at_preset_ge_6() {
 
 /// Issue #32: the Cs400 alpha stream rides the port's monochrome path,
 /// which pads no partial 8x8 block — so RGBA takes multiples of 8 from
-/// speed 5 (SVT preset 6, the same preset the colour path opens at);
-/// below that the 64 rule holds and odd dimensions are refused with a
-/// reason. (Until zenav1-svt `b6a1737a` + `1ed7db46` the mono path also mis-coded
-/// partial SBs at preset 6 and this test pinned speed 5 as REFUSED for
-/// RGBA; see `svt_rs_direct_mono_partial_sb_preset6_roundtrips`.)
+/// speed 5 (SVT preset 6); below that the 64 rule holds for the alpha
+/// stream and odd dimensions are refused with a reason. (Until zenav1-svt
+/// `b6a1737a` + `1ed7db46` the mono path also mis-coded partial SBs at
+/// preset 6 and this test pinned speed 5 as REFUSED for RGBA; see
+/// `svt_rs_direct_mono_partial_sb_preset6_roundtrips`.)
 #[test]
 fn svt_rs_rgba_partial_sb_needs_8_aligned_dims_at_speed_5() {
-    // 96x80 at speed 4 (preset 5): the 64 rule, colour and alpha alike.
+    // 96x80 at speed 4 (preset 4): the 64 rule, ALPHA ONLY — the 4:2:0
+    // colour path takes this geometry at every speed now, so what refuses
+    // here is the Cs400 alpha item (see
+    // `svt_rs_mono_partial_sb_still_refused_below_preset_6`).
     let img = gradient_rgba8(96, 80);
     let err = zenavif::encode_rgba8(img.as_ref(), &svt_config().speed(4), stop())
         .expect_err("96x80 RGBA at speed 4 must be refused (64 rule below preset 6)");
@@ -1178,35 +1279,219 @@ fn svt_rs_quality_100_does_not_corrupt() {
     );
 }
 
-/// Upstream-gate side of the QP-0 composition (imazen/zenav1-svt#5): a
-/// DIRECT qp=0 request to the pipeline must surface as a typed
-/// `EncodeError::UnsupportedConfig` — not a panic, not a garbage stream.
-/// The zenavif quality path can no longer reach QP 0 at all
-/// (`quality_to_qp_gated` clamps to >= 1; the clamp side is covered by
-/// `svt_rs_quality_100_does_not_corrupt` above), so this drives the
-/// pinned pipeline directly, exactly as the seam would if the clamp were
-/// ever lost — proving the failure mode is a clean typed error.
+/// A 4:2:0 8-bit source whose luma AND chroma planes both carry structure,
+/// so a lossless claim has to hold on all three planes (upstream's own
+/// `lossless_fh_c_capture` gate uses flat 128 chroma; flat chroma is
+/// trivially reconstructable and would not catch a broken chroma WHT arm).
+fn yuv420_structured(w: usize, h: usize) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    let (cw, ch) = (w / 2, h / 2);
+    let y = (0..h)
+        .flat_map(|r| (0..w).map(move |c| (((r * 255) / h) as u8) ^ (((c * 3) & 0x3f) as u8)))
+        .collect();
+    let u = (0..ch)
+        .flat_map(|r| (0..cw).map(move |c| (((c * 251) / cw.max(1)) as u8).wrapping_add(r as u8)))
+        .collect();
+    let v = (0..ch)
+        .flat_map(|r| (0..cw).map(move |c| (255u8 - (((r * 199) / ch.max(1)) as u8)) ^ (c as u8)))
+        .collect();
+    (y, u, v)
+}
+
+/// QP-0 BEHAVIOR gate (imazen/zenav1-svt#5, issue #9): a DIRECT qp=0
+/// request on the 8-bit 4:2:0 key-frame path must now produce a real,
+/// **coded-lossless** AV1 stream — an independent decoder must reconstruct
+/// the source planes EXACTLY.
+///
+/// History, so the direction of this gate is unambiguous:
+/// * rev 3e25f52b: qp0 emitted syntactically-valid streams that decoded to
+///   garbage (ssim2 ~= −700, `benchmarks/backend_sweep_2026-07-22.tsv`).
+/// * upstream `f0f0a70ca` (issue #5): qp0 became a typed
+///   `EncodeError::UnsupportedConfig` — corruption no longer reachable, and
+///   this test asserted THAT refusal (`svt_rs_direct_qp0_rejected_typed`).
+/// * upstream issue #9 (2026-08-28/29): coded-lossless is IMPLEMENTED and
+///   byte-verified against the C v4.2.0 oracle on the 4:2:0 8-bit key-frame
+///   envelope (`lossless_config_error`'s complement; upstream's own gate is
+///   `qp0_coded_lossless_stream_matches_c_capture`, encoder-recon + C
+///   byte-identity). The capability refusal this test used to pin is
+///   RETIRED, so the test is REPLACED by the stronger property the retired
+///   refusal was standing in for — not deleted, not loosened.
+///
+/// Complementary to upstream's gate by construction: upstream compares the
+/// ENCODER's own recon and its bytes to a C capture; this decodes the
+/// muxable payload with zenavif's own independent decoders (rav1d-safe,
+/// plus aom-rs byte-agreement) and demands recon == source. A stream that
+/// is C-byte-identical but that our decoders reconstruct differently, or a
+/// lossless claim that quietly quantizes, fails here.
+///
+/// MUTATION-VERIFIED 2026-08-29 (aarch64): re-running this body at qp 1
+/// instead of 0 fails every plane equality (luma first mismatch within the
+/// first row), so the equality assertions are load-bearing rather than
+/// vacuously true. The seam's own quality path still cannot reach QP 0
+/// (`quality_to_qp_gated` clamps to >= 1 so quality 100 ENCODES rather than
+/// switching coding mode); this drives the pipeline directly, exactly as
+/// the seam would if that clamp were ever lifted.
 #[test]
-fn svt_rs_direct_qp0_rejected_typed() {
+fn svt_rs_direct_qp0_codes_lossless_420() {
+    use zenavif::{DecodeBackend, decode_av1_obu_yuv};
+
+    // 64x64 = one full SB; 128x64 = two, so the SB-to-SB carry (above
+    // reference, CDF state) is exercised, not just a single-block frame.
+    for (w, h) in [(64usize, 64usize), (128, 64)] {
+        // Preset 6 is the seam's mono partial-SB floor, 7 is the preset
+        // upstream's C capture was taken at, 9 is the fast tier (a
+        // different PD0 arm). Lossless must hold on all three. These sit
+        // inside upstream's byte-identical lossless band (presets 4-13 are
+        // 96/96 in `lossless_gate.sh`); presets 0-3 are lossless but only
+        // self-promotingly pinned there, so they are not asserted here.
+        for preset in [6u8, 7, 9] {
+            let (y, u, v) = yuv420_structured(w, h);
+            let rc = svtav1::encoder::rate_control::RcConfig {
+                mode: svtav1::encoder::rate_control::RcMode::Cqp,
+                qp: 0,
+                ..svtav1::encoder::rate_control::RcConfig::default()
+            };
+            let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new(
+                w as u32, h as u32, preset, rc, 0, 1,
+            )
+            .with_chroma_420(true);
+            pipeline.bit_depth = 8;
+            let payload = pipeline
+                .try_encode_frame_420(&y, &u, &v, w)
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "qp0 coded-lossless {w}x{h} preset {preset} must ENCODE (upstream #9 \
+                         retired the refusal): {e}"
+                    )
+                });
+            assert!(
+                !payload.is_empty(),
+                "qp0 {w}x{h} preset {preset}: empty payload"
+            );
+
+            let dec = decode_av1_obu_yuv(&payload, DecodeBackend::Rav1dSafe).unwrap_or_else(|e| {
+                panic!("qp0 {w}x{h} preset {preset} must decode under rav1d-safe: {e}")
+            });
+            assert_eq!(
+                (dec.width, dec.height),
+                (w, h),
+                "qp0 {w}x{h} preset {preset}: signalled size"
+            );
+            assert!(
+                !dec.monochrome,
+                "qp0 {w}x{h} preset {preset}: must be a 4:2:0 stream"
+            );
+            assert_eq!(
+                (dec.subsampling_x, dec.subsampling_y),
+                (1, 1),
+                "qp0 {w}x{h} preset {preset}: 4:2:0 subsampling"
+            );
+
+            // THE property: coded-lossless means the decoder reconstructs
+            // the source exactly, on every plane.
+            let mismatch = |name: &str, src: &[u8], out: &[u16], sw: usize, sh: usize| {
+                for r in 0..sh {
+                    for c in 0..sw {
+                        let (a, b) = (u16::from(src[r * sw + c]), out[r * sw + c]);
+                        assert_eq!(
+                            a, b,
+                            "qp0 {w}x{h} preset {preset}: {name} plane is NOT lossless at \
+                             ({c},{r}): source {a}, decoded {b} — coded-lossless (base_qindex 0) \
+                             must reconstruct the source exactly (zenav1-svt #5/#9)"
+                        );
+                    }
+                }
+            };
+            mismatch("luma", &y, &dec.y, w, h);
+            mismatch("Cb", &u, &dec.u, dec.width_uv, dec.height_uv);
+            mismatch("Cr", &v, &dec.v, dec.width_uv, dec.height_uv);
+
+            // Cross-decoder byte agreement: a stream one decoder happens to
+            // reconstruct exactly must not pass on that decoder's leniency.
+            #[cfg(feature = "aom-backend")]
+            {
+                let aom = decode_av1_obu_yuv(&payload, DecodeBackend::AomRs).unwrap_or_else(|_| {
+                    let mut with_td = vec![0x12, 0x00];
+                    with_td.extend_from_slice(&payload);
+                    decode_av1_obu_yuv(&with_td, DecodeBackend::AomRs).unwrap_or_else(|e| {
+                        panic!("qp0 {w}x{h} preset {preset} must decode under aom-rs: {e}")
+                    })
+                });
+                assert_eq!(
+                    (aom.y, aom.u, aom.v),
+                    (dec.y.clone(), dec.u.clone(), dec.v.clone()),
+                    "qp0 {w}x{h} preset {preset}: rav1d-safe and aom-rs must byte-agree"
+                );
+            }
+            eprintln!(
+                "svt_rs qp0 lossless {w}x{h} preset {preset}: exact recon, {} payload bytes",
+                payload.len()
+            );
+        }
+    }
+}
+
+/// The arms of the QP-0 envelope that upstream still REFUSES must keep
+/// refusing with a typed `EncodeError::UnsupportedConfig` — never a panic,
+/// never a silently-lossy "lossless" stream. This is the surviving half of
+/// the retired blanket refusal (upstream `lossless_config_error`, the
+/// complement of the byte-verified envelope): monochrome (the mono leaf
+/// coder has no WHT / TX_4X4 arm and C v4.2.0 cannot produce a mono oracle)
+/// and 10-bit (neither bd10 level producer has a WHT / TX_4X4 arm).
+///
+/// If either arm gains coded-lossless upstream, this test must be REPLACED
+/// with a lossless round-trip for it — the same way
+/// `svt_rs_direct_qp0_codes_lossless_420` replaced the 4:2:0 refusal — not
+/// deleted.
+#[test]
+fn svt_rs_direct_qp0_typed_refusal_outside_420_8bit() {
     use svtav1::types::EncodeError;
 
-    let rc = svtav1::encoder::rate_control::RcConfig {
+    let rc = || svtav1::encoder::rate_control::RcConfig {
         mode: svtav1::encoder::rate_control::RcMode::Cqp,
         qp: 0,
         ..svtav1::encoder::rate_control::RcConfig::default()
     };
-    let mut pipeline =
-        svtav1::encoder::pipeline::EncodePipeline::new(64, 64, 6, rc, 0, 1).with_chroma_420(true);
-    pipeline.bit_depth = 8;
-    let y = vec![128u8; 64 * 64];
-    let u = vec![128u8; 32 * 32];
-    let v = vec![128u8; 32 * 32];
-    let err = pipeline
-        .try_encode_frame_420(&y, &u, &v, 64)
-        .expect_err("QP 0 (coded-lossless) must be rejected upstream (imazen/zenav1-svt#5)");
-    let (err, _trace) = err.decompose();
+    let unsupported = |e: whereat::At<EncodeError>, what: &str| -> String {
+        let (err, _trace) = e.decompose();
+        let EncodeError::UnsupportedConfig(why) = err else {
+            panic!("expected EncodeError::UnsupportedConfig for qp0 {what}, got: {err:?}");
+        };
+        why.to_string()
+    };
+
+    // (a) MONOCHROME (the Cs400 alpha / grayscale path) at qp0.
+    let mut mono = svtav1::encoder::pipeline::EncodePipeline::new(64, 64, 7, rc(), 0, 1);
+    mono.bit_depth = 8;
+    let plane = vec![0u8; 64 * 64];
+    let why = unsupported(
+        mono.try_encode_frame(&plane, 64)
+            .expect_err("qp0 on the monochrome path is still refused upstream"),
+        "monochrome",
+    );
     assert!(
-        matches!(err, EncodeError::UnsupportedConfig(_)),
-        "expected EncodeError::UnsupportedConfig for QP 0, got: {err:?}"
+        why.contains("monochrome"),
+        "the mono qp0 refusal must name the monochrome path, got: {why}"
+    );
+
+    // (b) 10-BIT 4:2:0 at qp0. 64-aligned dims + preset 9 clear the
+    // `hbd_source_consumed` gate, so the refusal that fires is the
+    // coded-lossless one and not the native-bd10-consumer one.
+    let mut hbd =
+        svtav1::encoder::pipeline::EncodePipeline::new(64, 64, 9, rc(), 0, 1).with_chroma_420(true);
+    hbd.bit_depth = 10;
+    let (y10, u10, v10) = (
+        vec![512u16; 64 * 64],
+        vec![512u16; 32 * 32],
+        vec![512u16; 32 * 32],
+    );
+    let why = unsupported(
+        hbd.try_encode_frame_420_hbd(&y10, &u10, &v10, 64)
+            .expect_err("qp0 at 10-bit is still refused upstream"),
+        "10-bit",
+    );
+    assert!(
+        why.contains("8-bit only"),
+        "the bd10 qp0 refusal must name the 8-bit-only coded-lossless envelope (not the \
+         unrelated bd10-consumer gate), got: {why}"
     );
 }
