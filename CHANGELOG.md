@@ -10,13 +10,18 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## Workspace
 
-- **2026-08-28 — lockfile: restored the `zenav1-svt` entries.** Re-resolving for
-  the zenanalyze-api change above also rewrote five `zenav1-svt*` packages,
-  collapsing `zenav1-svt-entropy` / `-tables` into their parents. Those are a
-  **sibling path dep**, and the sibling was mid-refactor in another working
-  copy at the time, so the churn captured someone else's in-flight state rather
-  than anything about this change. `Cargo.lock` now differs from its parent by
-  the `zenanalyze-api` package and nothing else.
+- **2026-08-28 — lockfile `zenav1-svt` entries: restored, then un-restored.**
+  Retraction. Re-resolving for the zenanalyze-api change also collapsed
+  `zenav1-svt-entropy` / `-tables` into their parents, and I read that as a
+  sibling path dep capturing another session's uncommitted refactor, then
+  "restored" the old shape. Wrong on both counts: the fold is
+  `zenav1-svt@bfae1b69` and it is **on that repo's `origin/main`**, so the
+  collapsed lock was the correct resolution and the restore pinned a stale
+  pre-fold shape. Reverted; the lock again matches the pushed sibling.
+
+  The hypothesis was tested and disproved rather than assumed: the restore
+  shipped, CI ran (33224361675), and `svt_rs_direct_qp0_rejected_typed` failed
+  exactly as before.
 
 - **2026-08-28 — `zenanalyze-api` unified to a crates.io version + one
   `[patch.crates-io]`; the shared-Offer reuse paths are now version-pinned per
