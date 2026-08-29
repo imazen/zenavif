@@ -350,6 +350,21 @@ write-path returns + gain-map interop additions, already on main).
   ship with the next 0.x minor bump. No existing variant changed meaning.
 
 ### Changed
+- **`zencodec` / `zenpixels` / `zenpixels-convert` requirements now span the
+  published minor and the next one**, across all four workspace manifests:
+  root `zencodec >=0.1.26, <0.3.0`, `zenpixels >=0.2.16, <0.4.0`,
+  `zenpixels-convert >=0.2.16, <0.4.0`; `fuzz/` the same for its two;
+  `zenavif-parse` `zencodec >=0.1.26, <0.3.0`; `zenavif-serialize`
+  `zenpixels-convert >=0.2.13, <0.4.0`. For a `0.x` crate Cargo treats the minor
+  as the major, so the plain `"0.1.26"` meant `^0.1.26` = `>=0.1.26, <0.2.0` and
+  a `zencodec 0.2.0` release would have been invisible until every one of those
+  manifests was hand-edited — the coordinated wave the 0.1.26 rollout already
+  cost. Floors are unchanged and nothing newer is published, so resolution is
+  identical today (`cargo metadata --all-features`: one `zencodec 0.1.26`, one
+  `zenpixels 0.2.16`, one `zenpixels-convert 0.2.16`). The standing
+  current-plus-next rule is documented in the zencodec repo's `CLAUDE.md`.
+  `[patch.crates-io]` is untouched — a patch replaces the source regardless of
+  the requirement.
 - **`zensim` re-pinned from registry 0.2.4 to git `main` (0.3.0)** for the
   diffmap API the closed loop needs (`compute_with_ref_and_diffmap`,
   `PrecomputedReference` reuse, `Zensim::with_stop`). Consequences:

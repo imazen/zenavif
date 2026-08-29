@@ -227,14 +227,14 @@ serde_json = { version = "1.0", default-features = false, features = ["std"], op
 almost-enough = { version = "0.4.3", default-features = false }
 # zencodec trait integration is always built (the `codec` module implementing
 # Encoder/Decoder + the `CategorizedError` taxonomy), so this is a hard dep.
-zencodec = { version = "0.1.26" }
+zencodec = { version = ">=0.1.26, <0.3.0" }
 # Gain-map application math for GainMapRender::ReconstructHdr (decode-side
 # HDR reconstruction). Pure math, no codec engines. Used unconditionally by the
 # (now always-built) `codec` module, so it is a hard dep too.
 ultrahdr-core = { version = "0.5.0", default-features = false }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
-zenpixels = { version = "0.2.16", default-features = false, features = ["imgref", "rgb"] }
-zenpixels-convert = { version = "0.2.16", default-features = false, features = ["rgb", "hdr-experimental"] }
+zenpixels = { version = ">=0.2.16, <0.4.0", default-features = false, features = ["imgref", "rgb"] }
+zenpixels-convert = { version = ">=0.2.16, <0.4.0", default-features = false, features = ["rgb", "hdr-experimental"] }
 linear-srgb = { version = "0.6.7"}
 
 [dev-dependencies]
