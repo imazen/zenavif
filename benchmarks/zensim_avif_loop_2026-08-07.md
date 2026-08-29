@@ -321,3 +321,16 @@ gradient now falls back to UNSTEERED for that cell (logged loudly) — the
 product-realistic semantics; the own-map zero-gradient panic is kept (a
 mount bug, not a content property). Pair arms re-running under the
 amended contract; fresh same-binary scalar baselines queued.
+
+## PAIR ARMS UNDER THE AMENDED CONTRACT + substrate caveat (2026-08-29 ~04:5xZ)
+
+pair (north-anchor scores + river-lantern maps): k3 0.409 (18/27), k2
+0.655 (19/27). Same-window scalar v2 baseline: k3 0.392 (19/27), k2
+0.514 (19/27). **On avif the pair does NOT beat the scalar loop** —
+every map arm (own or companion) ties or degrades. PRELIMINARY verdict
+pending the tri-arm clean batch, because a SUBSTRATE SHIFT intervened:
+the concurrent-session encoder changes pulled by the rebase moved the
+scalar baseline 0.180 → 0.392 across binaries (cross-binary comparisons
+invalid; the original 0.180-vs-0.336 candidate-vs-control read was
+within-binary and stands). A single same-binary {scalar, own-map, pair}
+k3 batch is queued to settle arm ordering on the current substrate.
