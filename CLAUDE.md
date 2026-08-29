@@ -66,6 +66,19 @@ problem; `nextest backends`/`allsafe` fail only
 `66f58fa6` with codec-corpus present, but no A/B was run, so treat it as
 observed-passing rather than fixed.
 
+**`unsafe-asm` is compiled by NOTHING — not CI, not this box** (established
+2026-08-29). `grep unsafe-asm .github/workflows/*.yml` is empty, and the only
+`--all-features` run of the ROOT package is `release.yml:64`, a workflow that
+has never succeeded (see the Workspace changelog entry: the crate is not in a
+publishable state). Locally it cannot build either, per the Apple-`cc`
+assembler problem above. So `src/decoder.rs` — the whole legacy FFI decoder
+behind that gate — is edited blind by default. To type-check it without
+assembling anything, temporarily drop the assembler half of the feature
+(`unsafe-asm = ["dep:rav1d"]`, i.e. remove `"rav1d/asm"`), run
+`cargo check --features unsafe-asm --lib`, then restore `Cargo.toml`. rav1d
+builds clean on aarch64 macOS without its `asm` feature, so this is a real
+type-check of that file — do it for any edit to `src/decoder.rs`.
+
 **`linku_pixel_parity` cannot pass on a macOS/homebrew box, and the failure
 is NOT yours** (established by A/B on 2026-08-29). `just`-less invocation is
 `cargo test --test linku_corpus -- --ignored --nocapture linku_pixel_parity`,
