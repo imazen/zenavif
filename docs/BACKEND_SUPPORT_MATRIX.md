@@ -27,10 +27,10 @@ never silent degradation. Sources: `src/encoder.rs`, `src/encoder_svt_rs.rs`,
 | Pixel range Full | yes (default) | yes (pinned) |
 | Pixel range Limited | yes | rejected (SH writer pins color_range=1) |
 | CICP primaries/transfer signaling | yes (config → SH + container `colr`) | yes (SH + container; matrix pinned BT.601) |
-| Dimensions | arbitrary | multiples of 64 at any speed; arbitrary at speed ≥ 5 (SVT preset ≥ 6, partial SBs on the 4:2:0 path); with alpha or grayscale (Cs400 stream): multiples of 8 at speed ≥ 5 — the port's mono path pads no partial 8x8 block (#32; `svt_rs_dims_error`; the preset-6 mono mis-coding was fixed in zenav1-svt `b6a1737a` + `1ed7db46`) |
-| Quality dial semantics | fitted quality→qindex curve (0–255; `encode_plan.rs`) | linear quality→QP (63..1; **QP 0 clamped out** — corrupts upstream, zenav1-svt#5) |
+| Dimensions | arbitrary | 4:2:0 colour path: **arbitrary at any speed** (the preset ≥ 6 floor was removed 2026-08-29 — upstream `partial_sb_gate` gained a byte-identical presets-0–5 block and the residual it still names is a `screen`-content RD class that also fires on 64-aligned frames); with alpha or grayscale (Cs400 stream): multiples of 64 below speed 5, else multiples of 8 — the port's mono path pads no partial 8x8 block and nothing upstream measures mono partial SBs below SVT preset 6 (#32; `svt_rs_dims_error`; the preset-6 mono mis-coding was fixed in zenav1-svt `b6a1737a` + `1ed7db46`) |
+| Quality dial semantics | fitted quality→qindex curve (0–255; `encode_plan.rs`) | linear quality→QP (63..1; **QP 0 clamped out** — a product choice since zenav1-svt#5/#9 implemented coded-lossless: quality 100 must encode, not switch coding mode, and RGB→4:2:0 means QP 0 is not a lossless *image* round-trip anyway) |
 | Speed dial | 1–10 → zenravif speed ladder | 1–10 → SVT preset 0–13 linear (wall-time NOT aligned with zenravif's ladder: ~6× faster at s6, slower at s2) |
-| Lossless | yes (`encode-imazen`, release-gated exactness) | rejected (QP 0 ≠ lossless, and corrupt anyway) |
+| Lossless | yes (`encode-imazen`, release-gated exactness) | not exposed — upstream implements coded-lossless (QP 0) on the 8-bit 4:2:0 key-frame path (zenav1-svt#5/#9, gated by `svt_rs_direct_qp0_codes_lossless_420` here), but this backend's quality dial deliberately clamps to QP ≥ 1 and `EncoderConfig` has no lossless request to route to it; still typed-refused upstream on mono, 10-bit, HDR-fork, screen-content tools, superres and inter frames |
 | Gain map / Ultra HDR (`with_gain_map`) | yes | rejected |
 | HDR metadata boxes (CLL/mastering) | yes | yes (container-level) |
 | EXIF/XMP/ICC, rotation/mirror | yes | yes (container-level, muxed in-crate) |
@@ -80,4 +80,5 @@ row-sink streaming on aom returns honest Unsupported.
 Cross-backend invariants pinned by tests: `tests/cross_backend_decode.rs`
 (both decoders byte-agree on both encoders' output, incl. 10-bit),
 `tests/svt_rs_backend.rs` (scope rejections + ssim2 target convergence +
-QP-0 non-corruption).
+QP-0 coded-lossless recon-equals-source, plus the typed refusals that survive
+outside its 8-bit 4:2:0 envelope).
