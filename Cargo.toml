@@ -242,6 +242,12 @@ linear-srgb = { version = "0.6.7"}
 # in examples/mem_probe_encode.rs (JXL_ALLOC_SITES=1; ported from zenjxl).
 backtrace = "0.3.76"
 almost-enough = { version = "0.4.3", features = ["alloc"] }
+# Retained for the pending migration of `tests/fuzz_regression.rs`. The
+# published 0.1.0 `RegressionSuite::run()` treats a missing or empty seed
+# directory as a silent no-op, so the harness carries a local stand-in with the
+# `min_seeds` / `RegressionReport` seed-expectation API instead. When that API
+# publishes, delete the harness's `regress` module and restore the import — the
+# builder chain is already written in its shape.
 zenutils-fuzz = "0.1.0"
 # `testable_dispatch` is what lets a test disable a token that the target
 # baseline guarantees at COMPILE time (NEON on aarch64, SSE2 on x86-64):

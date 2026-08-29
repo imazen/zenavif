@@ -684,6 +684,44 @@ write-path returns + gain-map interop additions, already on main).
   still unreleased, so this is not a break of any published zencodec API.
 
 ### Fixed
+- **Both fuzz-regression harnesses could pass while replaying nothing**
+  (`tests/fuzz_regression.rs`, `zenavif-parse/tests/fuzz_regression.rs`,
+  `Cargo.toml`, `zenavif-parse/Cargo.toml`). Both call
+  `zenutils_fuzz::RegressionSuite`, whose published `0.1.0` `run()` treats a
+  missing *or empty* seed directory as a silent no-op and returns `()`, so
+  neither harness had a guard of any kind. Concretely: the root suite replays
+  one seed (`fuzz/regression/fuzz_decode_animation/crash-cdef-tile-overlap.avif`,
+  the rav1d-safe CDEF tile race) through five entry points — delete that single
+  file and the test stayed green while replaying nothing; and
+  `zenavif-parse`'s corpus holds only its `README.md`, so that suite was
+  **already replaying zero seeds and reporting success**, indistinguishable in
+  the log from a corpus that ran clean. Both now declare a seed expectation up
+  front and print a `RegressionReport`: a missing or unreadable seed directory
+  is a hard failure naming which it was, and the count is pinned exactly —
+  `1` for the root crate, and a deliberate, documented `0` for `zenavif-parse`
+  (`min_seeds(0)`, which still requires the directory to exist, so "no seeds
+  yet" cannot silently become "the seeds were deleted"; the corpus README now
+  records that adding the first seed must bump the constant in the same
+  commit). `zenavif-parse`'s empty corpus is the honest state, not an
+  oversight: its harness and README were added together as a template ported
+  from zenwebp *before* any crash existed, `zenavif-parse/fuzz/artifacts/` does
+  not exist, and no fuzz-found fix appears in its changelog. The guards mirror
+  the `min_seeds` / `RegressionReport` API landing in `zenutils-fuzz` but are
+  kept in-file, because that API is **not published** — crates.io still has
+  `0.1.0`; the dev-dependency is retained (with a comment at each site) so
+  migration is deleting the local module and restoring the import, with the
+  builder chain unchanged. Mutation-verified, each failing only as intended and
+  each restored: renaming either `fuzz/regression/` now fails with "does not
+  exist" where both previously passed; deleting the root crate's one seed fails
+  with "1 seed(s) went missing"; and dropping a file into `zenavif-parse`'s
+  empty corpus fails with `left: 1, right: 0` — which also demonstrates that
+  the two parse entry points really are wired up and would replay a seed the
+  moment one exists. Note for whoever adds the next seed: `fuzz/artifacts/`
+  still tracks six raw crash/OOM files that predate the `fuzz/artifacts/`
+  `.gitignore` entry; they are unminimized fuzzer output, not minimized
+  fixed-bug seeds, so the gate deliberately does not replay them — promoting
+  one means `cargo +nightly fuzz tmin` first, then moving it under
+  `fuzz/regression/` and bumping the pin.
 - **Three silent-corruption decode paths from the 2026-08-26 ultracode sweep
   (issue #40).** (1) Grid AVIFs carrying alpha auxiliary items — per-tile
   `auxl` alpha or an alpha grid item — decoded the colour grid only and

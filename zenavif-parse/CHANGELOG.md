@@ -8,6 +8,33 @@ on main; the manifest is pre-bumped so a publish from head cannot ship them as
 a 0.6.x patch. **0.6.3 (the size=0-box fix, imazen/zenavif#16) must be published
 from commit `c36b822`**, the pre-break release-prep point (CI green there).
 
+### Fixed
+- **`tests/fuzz_regression.rs` was replaying zero seeds and reporting success**
+  (`tests/fuzz_regression.rs`, `fuzz/regression/README.md`, `Cargo.toml`). It
+  calls `zenutils_fuzz::RegressionSuite`, whose published `0.1.0` `run()`
+  treats a missing *or empty* seed directory as a silent no-op — and this
+  corpus holds only its `README.md`. So the suite ran nothing, passed green,
+  and its output was indistinguishable from a corpus that ran clean; deleting
+  the directory outright would not have changed that. The empty corpus is the
+  honest state, not an oversight: this harness and its README were added
+  together as a template ported from zenwebp *before* any crash existed to put
+  in it, `fuzz/artifacts/` does not exist, and no fuzz-found fix appears in
+  this changelog. What was missing was making that a *checked* fact. The suite
+  now declares `.min_seeds(0)` and prints a `RegressionReport`: zero seeds is
+  accepted, but the seed directory must exist and be readable, so "no seeds
+  yet" cannot silently become "the seeds were deleted" or "the directory was
+  renamed"; the count is asserted exactly, so adding a seed without bumping
+  `TRACKED_SEEDS` fails (the corpus README now documents that as a step). The
+  guard mirrors the `min_seeds` / `RegressionReport` API landing in
+  `zenutils-fuzz` but is kept in-file, because that API is **not published** —
+  crates.io still has `0.1.0`; the dev-dependency is retained with a comment so
+  migration is deleting the local module and restoring the import, builder
+  chain unchanged. Mutation-verified: renaming `fuzz/regression/` now fails
+  (it previously passed), and dropping a file into the empty corpus fails with
+  `left: 1, right: 0` — which also demonstrates that both `parse` and
+  `parse_limited` entry points are wired up and would replay a seed the moment
+  one exists.
+
 ### Added
 - `AvifParser::has_alpha_aux_items()` — true when ANY item carries the CICP
   alpha `auxC` property, including per-tile alpha items and alpha grid items
