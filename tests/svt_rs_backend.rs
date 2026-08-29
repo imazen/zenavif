@@ -241,6 +241,86 @@ fn svt_rs_partial_sb_roundtrip_at_low_presets() {
         }
     }
 
+    // CROSS-DECODER BYTE AGREEMENT on the raw payload, driving the pipeline
+    // directly at the low presets. A PSNR floor through one decoder cannot
+    // tell "the encoder coded this edge SB correctly" from "this decoder
+    // tolerated a mis-coded one" — that distinction is exactly what caught
+    // the mono edge-leaf bug (`svt_rs_direct_mono_partial_sb_preset6_
+    // roundtrips`: aomdec decoded a stream rav1d-safe scored at 27.89 dB).
+    // The colour path gets the same oracle here.
+    {
+        use zenavif::{DecodeBackend, decode_av1_obu_yuv};
+
+        for (w, h) in [(96usize, 96usize), (65, 72), (100, 37)] {
+            for preset in [0u8, 1, 3, 4] {
+                let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+                let y: Vec<u8> = (0..h)
+                    .flat_map(|r| (0..w).map(move |c| (((r + c) * 255) / (w + h)) as u8))
+                    .collect();
+                let u: Vec<u8> = (0..ch)
+                    .flat_map(|r| (0..cw).map(move |c| (128 + ((r + c) % 64) as u8) & 0xf0))
+                    .collect();
+                let v: Vec<u8> = (0..ch)
+                    .flat_map(|r| (0..cw).map(move |c| (128 - ((r * 3 + c) % 48) as u8) | 0x03))
+                    .collect();
+                let rc = svtav1::encoder::rate_control::RcConfig {
+                    mode: svtav1::encoder::rate_control::RcMode::Cqp,
+                    qp: 20,
+                    ..svtav1::encoder::rate_control::RcConfig::default()
+                };
+                let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new(
+                    w as u32, h as u32, preset, rc, 0, 1,
+                )
+                .with_chroma_420(true);
+                pipeline.bit_depth = 8;
+                let payload = pipeline
+                    .try_encode_frame_420(&y, &u, &v, w)
+                    .unwrap_or_else(|e| {
+                        panic!("upstream must accept 4:2:0 {w}x{h} at preset {preset}: {e}")
+                    });
+
+                let dec =
+                    decode_av1_obu_yuv(&payload, DecodeBackend::Rav1dSafe).unwrap_or_else(|e| {
+                        panic!("{w}x{h} preset {preset} must decode under rav1d-safe: {e}")
+                    });
+                assert_eq!((dec.width, dec.height), (w, h), "signalled size {w}x{h}");
+                assert!(!dec.monochrome, "{w}x{h} preset {preset}: 4:2:0 stream");
+                let mut se = 0u64;
+                for r in 0..h {
+                    for c in 0..w {
+                        let d = i64::from(y[r * w + c]) - i64::from(dec.y[r * dec.width + c]);
+                        se += (d * d) as u64;
+                    }
+                }
+                let psnr =
+                    10.0 * (255.0f64 * 255.0 / ((se as f64 / (w * h) as f64).max(1e-9))).log10();
+                eprintln!("direct 4:2:0 {w}x{h} preset {preset} qp20: luma PSNR {psnr:.2} dB");
+                assert!(
+                    psnr > 45.0,
+                    "4:2:0 {w}x{h} preset {preset} luma PSNR {psnr:.2} dB below floor — the \
+                     partial-SB edge coding on the colour path has regressed"
+                );
+
+                #[cfg(feature = "aom-backend")]
+                {
+                    let aom =
+                        decode_av1_obu_yuv(&payload, DecodeBackend::AomRs).unwrap_or_else(|_| {
+                            let mut with_td = vec![0x12, 0x00];
+                            with_td.extend_from_slice(&payload);
+                            decode_av1_obu_yuv(&with_td, DecodeBackend::AomRs).unwrap_or_else(|e| {
+                                panic!("{w}x{h} preset {preset} must decode under aom-rs: {e}")
+                            })
+                        });
+                    assert_eq!(
+                        (aom.y, aom.u, aom.v),
+                        (dec.y.clone(), dec.u.clone(), dec.v.clone()),
+                        "rav1d-safe and aom-rs must byte-agree on 4:2:0 {w}x{h} preset {preset}"
+                    );
+                }
+            }
+        }
+    }
+
     // 64-multiples stay accepted at every speed.
     svt_config()
         .speed(1)
