@@ -160,7 +160,10 @@ fn score_profile(bake_arg: &str) -> (ZensimProfile, usize) {
 /// as the scorer (folded-944 class, loud refusal below 720).
 static MAP_BAKE_BYTES: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
 fn map_bake_bytes() -> &'static [u8] {
-    MAP_BAKE_BYTES.get().expect("map bake bytes loaded").as_slice()
+    MAP_BAKE_BYTES
+        .get()
+        .expect("map bake bytes loaded")
+        .as_slice()
 }
 static MAP_BAKE_PROFILE: std::sync::OnceLock<Option<(ZensimProfile, usize)>> =
     std::sync::OnceLock::new();
