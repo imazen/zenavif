@@ -47,8 +47,14 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
     the Cs400 mono path (nothing upstream measures mono partial SBs below
     preset 6). New gate `svt_rs_partial_sb_roundtrip_at_low_presets` (96x96 /
     65x72 / 100x37 x speeds 1-4 = presets 0/1/3/4; measured 49.3-50.9 dB vs a
-    38 dB floor); the mono floor keeps a refusal gate in
-    `svt_rs_mono_partial_sb_still_refused_below_preset_6`.
+    38 dB floor) — extended in `20e158e6` with a direct-pipeline arm where
+    rav1d-safe and aom-rs must BYTE-AGREE on all three planes (53.1-55.2 dB
+    luma across the same 12 cells), because a single-decoder PSNR floor cannot
+    tell a correctly-coded edge superblock from one that decoder merely
+    tolerated — the distinction that caught the mono edge-leaf bug. The mono
+    floor keeps a refusal gate in
+    `svt_rs_mono_partial_sb_still_refused_below_preset_6`, which also asserts
+    the same geometry validates without alpha.
   - **10-bit post-filter doc corrected.** `src/encoder_svt_rs.rs` claimed the
     deblock / CDEF / Wiener searches "still decide on MSB-truncated planes".
     Stale: upstream hbd chunk 2 (`f319ec298`, on chunk 1 `35743ebd5`) threads
@@ -62,6 +68,12 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   `aom-backend,encode,encode-imazen,encode-svt-rs,target-quality` set. The
   Cargo.toml dep comment is rewritten to match (there is no rev to bump: CI
   clones the sibling from `origin/main`).
+
+  Commits: `4560ceaf` (the seam + gates, closes #41), `6e8694a1` (a `style:
+  cargo fmt` of `examples/zensim_cq_rd.rs` — the Format job had been red on
+  main since `e50a983` independently of this work, and was blocking every
+  push), `e421d5c2` (BACKEND_SUPPORT_MATRIX + README sync), `20e158e6` (the
+  cross-decoder arm above).
 
 - **2026-08-28 — lockfile `zenav1-svt` entries: restored, then un-restored.**
   Retraction. Re-resolving for the zenanalyze-api change also collapsed
