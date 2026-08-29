@@ -62,7 +62,34 @@ import in `examples/benchmark_simd.rs` (a `_dev` example); `clippy all` /
 `nextest all` fail on the documented `unsafe-asm` Apple-`cc` assembler
 problem; `nextest backends`/`allsafe` fail only
 `product_aom_backend animations_decode_identically_across_backends`
-(rav1d-safe#448/#449).
+(rav1d-safe#448/#449) — that one PASSED on 2026-08-29 at rav1d-safe
+`66f58fa6` with codec-corpus present, but no A/B was run, so treat it as
+observed-passing rather than fixed.
+
+**`linku_pixel_parity` cannot pass on a macOS/homebrew box, and the failure
+is NOT yours** (established by A/B on 2026-08-29). `just`-less invocation is
+`cargo test --test linku_corpus -- --ignored --nocapture linku_pixel_parity`,
+and it compares zenavif against PNGs that `scripts/generate-linku-references.sh`
+produces with whatever `avifdec` is on PATH. CI installs Ubuntu's
+`libavif-bin`; homebrew ships libavif 1.4.2, and the two disagree in three
+ways that have nothing to do with zenavif:
+
+- 69 of 156 references never generate at all (homebrew `avifdec` fails on the
+  `alpha-full`/`alpha-limited` plum-blossom set and the `*-with-alpha.avifs`
+  animations), so those cells report `No ref`.
+- 12 monochrome cells fail with a uniform `max delta 20` / similarity ~73 —
+  a limited-vs-full-range difference in how the two `avifdec` versions write
+  monochrome PNGs.
+- 3 cells (`kimono.rotate90`, `kimono.rotate270`,
+  `kimono.mirror-vertical.rotate270`) report `CMPERR size: 1024x722 vs
+  722x1024` — the reference PNG has the `irot` transform applied where ours
+  does not. These 3 are what trip the test's `Errored == 0` assertion.
+
+Measured A/B at the rav1d-safe pin bump: **identical tallies at both revs**
+(`140f9145` and `66f58fa6`) — Passed 72 / Failed 12 / No ref 69 / Errored 3,
+same three CMPERR files. So this suite is useless as a local regression gate
+on macOS; run `linku_decode_all` instead (156/156, no `avifdec` involved) and
+let CI's `link-u corpus` workflow own the parity half.
 
 **Executable gates (docs/ENGINEERING_BASELINE.md section A):** run
 `just gates` (= `gate-determinism` + `gate-conformance` + `gate-ladder`,

@@ -73,7 +73,13 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   `-p zenavif-parse --features eager` and `--all-features` 151 each;
   `--features aom-backend,encode,encode-imazen,encode-svt-rs,target-quality`
   416; `--features two-pass-butteraugli,two-pass-zensim,auto-tune` 434; clippy
-  (root + both members) and `cargo fmt --check` clean. The flaking test itself
+  (root + both members) and `cargo fmt --check` clean; `gate_kit determinism
+  --ci` PASS (3 cells x 5 thread legs, 0 failures); and `linku_decode_all`
+  156/156 — the corpus most exposed to the new `Strictness::Strict` default,
+  with zero newly-rejected samples. (`linku_pixel_parity` reports 12 pixel
+  failures + 3 `irot` size errors on this box, but an A/B at both revs gives
+  identical tallies — it is a homebrew-vs-Ubuntu `avifdec` difference, now
+  documented in `CLAUDE.md`.) The flaking test itself
   passed 50/50 consecutive runs — but note that is a **regression gate for
   this platform, not proof of the fix**: `safe_simd::loopfilter` is
   `cfg(x86_64|wasm32)`, so the repaired kernels cannot execute on aarch64 at
