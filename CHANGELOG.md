@@ -10,6 +10,14 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## Workspace
 
+- **2026-08-28 — lockfile: restored the `zenav1-svt` entries.** Re-resolving for
+  the zenanalyze-api change above also rewrote five `zenav1-svt*` packages,
+  collapsing `zenav1-svt-entropy` / `-tables` into their parents. Those are a
+  **sibling path dep**, and the sibling was mid-refactor in another working
+  copy at the time, so the churn captured someone else's in-flight state rather
+  than anything about this change. `Cargo.lock` now differs from its parent by
+  the `zenanalyze-api` package and nothing else.
+
 - **2026-08-28 — `zenanalyze-api` unified to a crates.io version + one
   `[patch.crates-io]`; the shared-Offer reuse paths are now version-pinned per
   feature.** Owner directive: "zenanalyze-api should be the sole contract and
