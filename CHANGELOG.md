@@ -10,6 +10,80 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## Workspace
 
+- **2026-08-29 — Known issue: this repository cannot be resolved by anything that
+  clones only this repository. That breaks `Dependabot Updates`, and it blocks
+  `cargo publish`.** Investigated as part of a workspace-wide sweep of six repos
+  showing a red `Dependabot Updates`. Both symptoms have the same single cause, and
+  both were reproduced rather than inferred.
+
+  **Cause.** `Cargo.toml:105` declares
+  `aom-decode = { package = "zenav1-aom-decode", path = "../zenav1-aom/crates/aom-decode", optional = true }`
+  — a path that escapes the repository root. `cargo` must load a path dependency's
+  manifest during resolution even when the dependency is optional and its feature
+  (`aom-backend`) is off, so in a fresh standalone clone of `main` **every** cargo
+  command fails before it starts:
+
+  ```
+  error: failed to load manifest for dependency `zenav1-aom-decode`
+  Caused by: failed to read `.../zenav1-aom/crates/aom-decode/Cargo.toml`
+  Caused by: No such file or directory (os error 2)
+  ```
+
+  Verified with `cargo metadata`, `cargo metadata --no-deps` and
+  `cargo generate-lockfile`, all exit 101 in a clean clone.
+
+  **Why CI is green anyway.** Every job in `ci.yml`, `fuzz.yml`, `linku-corpus.yml`
+  and `release.yml` runs `./.github/actions/clone-siblings` immediately after
+  checkout, which clones `imazen/zenav1-aom` (and `zenanalyze`, `cavif-rs`,
+  `zenav1-svt`, `zenrav1e`, `zensim`) into `../`. Dependabot is a GitHub-managed
+  job with no checkout step of ours, so it has no equivalent and cannot be given
+  one. That asymmetry — green CI, red Dependabot — is the whole story.
+
+  **This also blocks publishing, which is why `Release` has never succeeded.**
+  `cargo publish --dry-run --no-verify -p zenavif` fails at manifest verification:
+
+  ```
+  error: failed to verify manifest at `.../Cargo.toml`
+  Caused by: all dependencies must have a version requirement specified when
+    publishing. dependency `zenav1-aom-decode` does not specify a version
+  ```
+
+  `zenav1-aom-decode` is unpublished on crates.io, so it cannot be given a version
+  requirement without publishing it first. It is not the only blocker: `Cargo.toml`
+  carries **six** `git = "https://…"` dependencies (including `rav1d-safe`), none
+  with a `version` key, and `cargo publish` rejects those for the same reason. The
+  `Release` workflow does run `clone-siblings`, so its failure is **not** a
+  checkout problem — the crate is simply not in a publishable state, and no CI
+  change can make it one.
+
+  **Note for whoever picks this up:** the `aom-decode` path dep was intended to be
+  temporary. Its own comment (`Cargo.toml:104`) reads *"Return to a git-rev pin on
+  `imazen/zenav1-aom` before this branch lands"* — it landed on `main` on 2026-08-06
+  without that revert. Restoring the git-rev pin would make the repo resolvable
+  standalone again (git dependencies resolve fine in a lone checkout) and would
+  remove one of the two publish blockers. It is **deliberately not done here**: it
+  reverses a stated intent to let the decode-backend work and the in-repo
+  zenav1-aom work land together without a publish round-trip, which is a call for
+  the owner, not a drive-by edit.
+
+  **Decision on Dependabot: not "fixed", and not silently tolerated.** Making it
+  work means giving up the sibling-path arrangement, which is not worth an
+  automated PR bot. Two things make that acceptable: this repo has **zero open
+  Dependabot alerts**, and — the correction that matters — **alerts are unaffected
+  by the updater failing.** Alerts come from GitHub's dependency graph, which
+  parses committed lockfiles and never runs cargo, so advisories are still
+  reported here; only the automatic pull request is lost.
+
+  **Owner action, if the red mark should stop:** Dependabot **security** updates
+  cannot be disabled by any file in the repository — `.github/dependabot.yml`
+  configures *version* updates only. The switch is Settings → Code security →
+  "Dependabot security updates" (currently `{"enabled": true, "paused": false}`).
+  Turning it off ends the red mark and does **not** stop the alerts.
+
+  (The April 2026 failures predate the `aom-decode` path dep and their logs are
+  past 90-day retention, so that specific cause is unrecoverable; the advisory
+  behind them, GHSA-cq8v-f236-94qc on `rand`, reached `state: fixed` on 2026-05-08.)
+
 - **2026-08-29 — CI: pushes to `main` now cancel their superseded runs.**
   `ci.yml` and `linku-corpus.yml` keyed their concurrency group on
   `${{ github.head_ref || github.run_id }}`. `github.head_ref` is populated only
