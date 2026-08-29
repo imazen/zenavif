@@ -148,8 +148,14 @@ butteraugli = { version = "0.9.3", optional = true }
 zenpredict = { version = "0.2.0", path = "../zenanalyze/zenpredict", optional = true }
 zenanalyze = { version = "0.2.0", path = "../zenanalyze", optional = true, features = ["experimental"] }
 # zenanalyze-api: the zero-dep, version-unifying feature contract (Request /
-# Offer / FeatureProvider) the auto-tuner negotiates a shared feature pass with.
-# See `docs/sole-contract.md` in imazen/zenanalyze.
+# Offer / FeatureProvider) the auto-tuner negotiates a shared feature pass with,
+# and this crate's INTERCHANGE BOUNDARY — so a host on any zenanalyze version can
+# hand us an Offer. The `zenanalyze` dep above sits alongside it deliberately and
+# is explicitly PERMITTED (owner, 2026-08-28: "a direct dep is okay though, a
+# reanalysis might be needed anyway if the upstream provided features are
+# insufficient") — auto_tune, palette_gate, fast_heads and q0_head all fall back
+# to their own pass when the offer misses. See `docs/sole-contract.md` in
+# imazen/zenanalyze.
 #
 # Declared as a crates.io VERSION. It used to be a git-rev pin, on the theory
 # that pinning every codec to the SAME rev keeps the type unified — but that is
