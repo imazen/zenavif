@@ -424,6 +424,36 @@ write-path returns + gain-map interop additions, already on main).
   ship with the next 0.x minor bump. No existing variant changed meaning.
 
 ### Changed
+- **Third-party lockfile refreshed within the existing requirements** (`ac849ce`).
+  `Cargo.lock` only — no manifest requirement moved. 55 third-party packages
+  advanced, notably `libc` 0.2.186 → 0.2.189, `cc` 1.2.64 → 1.4.4, `zerocopy`
+  0.8.52 → 0.8.56, `thiserror` 2.0.18 → 2.0.20, `bytemuck` 1.25.0 → 1.25.2,
+  `imgref` 1.12.2 → 1.12.3, `wide` 1.5.0 → 1.7.0 and `exr` 1.74.0 → 1.74.2;
+  nine transitive crates joined the graph (`pulp`, `reborrow`, `regex`,
+  `zlib-rs`, `num-complex` and friends), none left it. Every git-sourced and
+  zen-family package was held byte-identical — `rav1d-safe` stays at rev
+  `66f58fa6`, `zensim` / `zensim-regress` at `a390a182`, `zenanalyze-api` at
+  `47c3c69e`, `zenbench` at 0.1.8 — so this does not move the zen-family graph.
+
+  **`yuv` was deliberately held at 0.8.15.** 0.8.17 (2026-08-08) *fixes* the
+  upstream even-height 4:2:0 bilinear defect that `src/yuv_bilinear_fix.rs`
+  exists to repair, which trips that module's reverse tripwire
+  (`upstream_drops_last_row_pair_on_even_height`, whose failure message reads
+  "upstream yuv fixed the dropped-last-pair bug — this wrapper (and its call
+  sites) can be retired"). Retiring the wrapper is a change to eight live 4:2:0
+  chroma-upsampling call sites in `src/decoder.rs`, so it wants its own commit
+  with a byte-identity check against the wrapper's current output — not a
+  dependency refresh. Left for that follow-up; see the tripwire's doc comment,
+  which currently records the defect as "verified against yuv 0.8.12 and 0.8.16".
+
+  Verified on aarch64-apple-darwin at 0.8.15: `cargo test --workspace` and
+  `--no-default-features` green; clippy (default + both member legs) clean;
+  `cargo fmt` (package-scoped) clean; `cargo hack check --rust-version
+  --workspace` clean at 1.93; **`gate-determinism` PASS** (5 cells × 5 thread
+  legs, 0 failures) and **`gate-conformance` PASS** (56 AVIF cells byte-agreeing
+  with `aomdec`, 0 failures; the `ZENRAV1E` armed leg was skipped deliberately —
+  that CLI is not built here). `gate-ladder` / `gate-monotone` were not run: they
+  are timing envelopes and the box was at load ~30 under concurrent agents.
 - **The decoders no longer opt out of strict container validation, and a file
   carrying an unknown property marked `essential` is now refused instead of
   decoded with a log line.** `AvifDecoder::new` (`src/decoder.rs`) and
