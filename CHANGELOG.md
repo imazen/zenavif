@@ -10,6 +10,18 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## Workspace
 
+- **2026-08-29 — CI: pushes to `main` now cancel their superseded runs.**
+  `ci.yml` and `linku-corpus.yml` keyed their concurrency group on
+  `${{ github.head_ref || github.run_id }}`. `github.head_ref` is populated only
+  for `pull_request` events, so on a push it was empty and the group fell through
+  to `github.run_id` — unique per run, so no two pushes ever shared a group and
+  `cancel-in-progress` could never fire. Both matrices carry `macos-latest` plus
+  `macos-26-intel`, so the wasted runs landed on the scarcest runner pool. Both
+  now key on `${{ github.ref }}`, which is set for both event types
+  (`refs/heads/main` on push, `refs/pull/N/merge` on a PR): PR cancellation is
+  unchanged and consecutive pushes supersede each other. `linku-corpus.yml` keeps
+  its distinct `linku-` group prefix so the corpus run and `ci.yml` still never
+  cancel one another.
 - **2026-08-29 — rav1d-safe pin `140f9145` -> `66f58fa6`; the
   `row_sink_decode_is_byte_identical_to_buffered_decode` CI flake is fixed at
   the source (rav1d-safe#524 / `3426ebf7`), and this repo's diagnosis of it was
