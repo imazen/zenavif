@@ -228,6 +228,16 @@ impl KnobProbe {
 /// tail, so put the value you'd keep under any budget at index 0.
 #[derive(Clone, Debug)]
 pub struct SweepAxes {
+    /// AV1 encoder backends. Index 0 is the default stratum, so a
+    /// single-element `vec![Av1Backend::Zenravif]` (what every
+    /// zenravif-era preset carries) leaves cell ids, fingerprints and
+    /// deviation counts byte-identical to the pre-backend-axis planner.
+    ///
+    /// [`Av1Backend::SvtRs`] requires the `encode-svt-rs` feature; in a
+    /// build without it `EncoderConfig::validate` rejects the backend, so
+    /// every SvtRs stratum lands in [`SweepPlan::invalid_skipped`] and is
+    /// reported rather than silently dropped.
+    pub backends: Vec<crate::Av1Backend>,
     /// Speed presets (1–10).
     pub speeds: Vec<u8>,
     /// Quantization matrices on/off.
@@ -258,6 +268,7 @@ impl SweepAxes {
     #[must_use]
     pub fn rd_core() -> Self {
         Self {
+            backends: vec![crate::Av1Backend::Zenravif],
             speeds: vec![4, 6, 2],
             qm: vec![true, false],
             subsampling: vec![
@@ -458,6 +469,7 @@ impl SweepAxes {
         ];
 
         Self {
+            backends: vec![crate::Av1Backend::Zenravif],
             speeds,
             qm: vec![true],
             subsampling: vec![EncodeChromaSubsampling::Yuv444],
@@ -466,6 +478,36 @@ impl SweepAxes {
             vaq,
             trellis: vec![false],
             probes,
+        }
+    }
+
+    /// The svt-rs compute/RD ladder: every value of zenavif's speed dial
+    /// on the pure-Rust SVT-AV1 backend, everything else pinned to the
+    /// backend's only legal envelope (4:2:0, 8-bit-auto, YCbCr, no
+    /// zenravif-only knobs — QM/VAQ/trellis/probes are zenrav1e concepts
+    /// the svt-rs path does not read).
+    ///
+    /// Requires the `encode-svt-rs` feature; without it every cell is
+    /// reported in [`SweepPlan::invalid_skipped`].
+    ///
+    /// The whole point of routing this shape through the planner is that
+    /// the speed dial is NOT injective: speeds 7, 8, 9 and 10 all resolve
+    /// to SVT preset 9, so the planner merges them into one cell with
+    /// three `aliases` instead of encoding the same bytes four times.
+    #[must_use]
+    pub fn svt_speed_dense() -> Self {
+        Self {
+            backends: vec![crate::Av1Backend::SvtRs],
+            // Default 4 first (the index-0 stratum), then the rest of the
+            // dial — the budget ladder sheds from the tail.
+            speeds: vec![4, 1, 2, 3, 5, 6, 7, 8, 9, 10],
+            qm: vec![true],
+            subsampling: vec![EncodeChromaSubsampling::Yuv420],
+            bit_depths: vec![EncodeBitDepth::Auto],
+            color_models: vec![EncodeColorModel::YCbCr],
+            vaq: vec![None],
+            trellis: vec![false],
+            probes: vec![KnobProbe::None],
         }
     }
 }
@@ -990,6 +1032,7 @@ fn coarsen_keep_endpoints(points: &[f32]) -> Vec<f32> {
 /// One point in the categorical cross product.
 #[derive(Clone, Copy)]
 struct Stratum {
+    backend: crate::Av1Backend,
     speed: u8,
     qm: bool,
     subsampling: EncodeChromaSubsampling,
@@ -1004,6 +1047,7 @@ impl Stratum {
     fn build_config(&self, q: f32) -> EncoderConfig {
         let cfg = EncoderConfig::new()
             .quality(q)
+            .backend(self.backend)
             .speed(self.speed)
             .bit_depth(self.bit_depth)
             .color_model(self.color_model)
@@ -1024,6 +1068,16 @@ impl Stratum {
 
     fn id(&self) -> String {
         let mut s = format!("s{}", self.speed);
+        // Backend token. Zenravif (the default) emits nothing, so every
+        // cell id minted before the backend axis existed is unchanged.
+        #[allow(deprecated)]
+        match self.backend {
+            crate::Av1Backend::Zenravif => {}
+            crate::Av1Backend::SvtRs => s.push_str("-svt"),
+            // validate() rejects this backend in every build, so no plan
+            // can carry it; the token exists for id totality.
+            crate::Av1Backend::Svtav1 => s.push_str("-svtav1"),
+        }
         if !self.qm {
             s.push_str("-noqm");
         }
@@ -1063,36 +1117,40 @@ fn cross(axes: &SweepAxes, q_points: &[f32]) -> (Vec<SweepCell>, Vec<String>, us
     let mut invalid = Vec::new();
     let mut seq = 0usize;
 
-    for (si, &speed) in axes.speeds.iter().enumerate() {
-        for (qi, &qm) in axes.qm.iter().enumerate() {
-            for (ci, &subsampling) in axes.subsampling.iter().enumerate() {
-                for (bi, &bit_depth) in axes.bit_depths.iter().enumerate() {
-                    for (mi, &color_model) in axes.color_models.iter().enumerate() {
-                        for (vi, &vaq) in axes.vaq.iter().enumerate() {
-                            for (ti, &trellis) in axes.trellis.iter().enumerate() {
-                                for (pi, &probe) in axes.probes.iter().enumerate() {
-                                    let idxs = [si, qi, ci, bi, mi, vi, ti, pi];
-                                    let stratum = Stratum {
-                                        speed,
-                                        qm,
-                                        subsampling,
-                                        bit_depth,
-                                        color_model,
-                                        vaq,
-                                        trellis,
-                                        probe,
-                                    };
-                                    if stratum.build_config(75.0).validate().is_err() {
-                                        invalid.push(stratum.id());
-                                        continue;
+    for (ki, &backend) in axes.backends.iter().enumerate() {
+        for (si, &speed) in axes.speeds.iter().enumerate() {
+            for (qi, &qm) in axes.qm.iter().enumerate() {
+                for (ci, &subsampling) in axes.subsampling.iter().enumerate() {
+                    for (bi, &bit_depth) in axes.bit_depths.iter().enumerate() {
+                        for (mi, &color_model) in axes.color_models.iter().enumerate() {
+                            for (vi, &vaq) in axes.vaq.iter().enumerate() {
+                                for (ti, &trellis) in axes.trellis.iter().enumerate() {
+                                    for (pi, &probe) in axes.probes.iter().enumerate() {
+                                        let idxs = [ki, si, qi, ci, bi, mi, vi, ti, pi];
+                                        let stratum = Stratum {
+                                            backend,
+                                            speed,
+                                            qm,
+                                            subsampling,
+                                            bit_depth,
+                                            color_model,
+                                            vaq,
+                                            trellis,
+                                            probe,
+                                        };
+                                        if stratum.build_config(75.0).validate().is_err() {
+                                            invalid.push(stratum.id());
+                                            continue;
+                                        }
+                                        entries.push(Entry {
+                                            stratum,
+                                            deviations: idxs.iter().filter(|&&x| x != 0).count()
+                                                as u8,
+                                            idx_sum: idxs.iter().sum(),
+                                            seq,
+                                        });
+                                        seq += 1;
                                     }
-                                    entries.push(Entry {
-                                        stratum,
-                                        deviations: idxs.iter().filter(|&&x| x != 0).count() as u8,
-                                        idx_sum: idxs.iter().sum(),
-                                        seq,
-                                    });
-                                    seq += 1;
                                 }
                             }
                         }
@@ -1233,6 +1291,11 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
         crate::Av1Backend::SvtRs => 2,
     });
 
+    // Whether the zenravif mediators (quantizer curve + speed_derived
+    // search table) are the ones this backend actually reads. svt-rs
+    // reads NEITHER — see the svt-rs block below.
+    let zenravif_mediated = config.backend != crate::Av1Backend::SvtRs;
+
     // Resolved quantizers (quality is mediated; lossless pins 0).
     let lossless = config.lossless_effective();
     let quantizer = if lossless {
@@ -1245,9 +1308,34 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
     } else {
         quality_to_quantizer(crate::encoder::effective_alpha_quality(config))
     };
-    h.u8(quantizer);
-    h.u8(alpha_quantizer);
+    if zenravif_mediated {
+        h.u8(quantizer);
+        h.u8(alpha_quantizer);
+    }
     h.u8(u8::from(lossless));
+
+    // svt-rs resolved state. The backend resolves quality through
+    // `quality_to_qp_gated` (a 1..=100 -> QP 63..=1 line, clamped away
+    // from the lossless QP 0) and speed through `speed_to_svt_preset`
+    // (1..=10 -> preset 0..=9 after C's all-intra M9 clamp), so those —
+    // not zenravif's quantizer/speed_derived — are its byte identity.
+    // Two alias classes fall out and are MEASURED, not asserted
+    // (zenmetrics `benchmarks/avif_sweep_permutation_retrofit_2026-09-01.md`):
+    //   * speeds 7, 8, 9, 10 all resolve to preset 9 -> ONE encode;
+    //   * quality 98 and 100 both resolve to QP 1 -> ONE encode.
+    #[cfg(feature = "encode-svt-rs")]
+    if !zenravif_mediated {
+        let (preset, qp, alpha_qp) = crate::encoder_svt_rs::svt_resolved_identity(config);
+        h.u8(preset);
+        h.u8(qp);
+        h.u8(alpha_qp);
+    }
+    // Without the feature there is no svt-rs encode to be identical TO:
+    // `EncoderConfig::validate` rejects the backend, so `cross` files every
+    // such stratum under `invalid_skipped` and no plan can carry one. The
+    // backend byte above already keeps it apart from a zenravif cell.
+    #[cfg(not(feature = "encode-svt-rs"))]
+    let _ = zenravif_mediated;
 
     // Pixel-path knobs.
     h.u8(match config.bit_depth {
@@ -1302,8 +1390,13 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
     // preset the encoder actually runs, or lossless cells that encode
     // byte-identically (e.g. requested s1 vs s6) would fingerprint apart.
     let speed = config.speed_effective();
-    h.u8(speed);
+    if zenravif_mediated {
+        h.u8(speed);
+    }
     for &(s, q) in &[(speed, quantizer), (speed, alpha_quantizer)] {
+        if !zenravif_mediated {
+            break;
+        }
         let mut d = speed_derived(s, q);
         apply_overrides(&mut d, config);
         h.u8(d.partition_range.0);
@@ -1395,6 +1488,7 @@ impl SweepAxes {
             "modes_full" => Some(Self::modes_full()),
             "modes_full_alpha" => Some(Self::modes_full_alpha()),
             "scalar_dense" => Some(Self::scalar_dense()),
+            "svt_speed_dense" => Some(Self::svt_speed_dense()),
             _ => None,
         }
     }
@@ -1412,7 +1506,7 @@ impl SweepAxes {
 /// parser mirrors token for token):
 ///
 /// ```text
-/// s<speed>[-noqm][-420][-bd8|-bd10][-rgb][-vaq<f>][-trel][<probe>]
+/// s<speed>[-svt][-noqm][-420][-bd8|-bd10][-rgb][-vaq<f>][-trel][<probe>]
 /// probe := -cdef<0|1> | -rdotx<0|1> | -sgr<0|1> | -lru<0|1>
 ///        | -segcx<0|1> | -bup<0|1> | -still | -sb<f> | -vaqs<f>
 ///        | -part<u8>.<u8> | -cpred<0|1> | -lrf<0|1> | -fdb<0|1>
@@ -1441,6 +1535,7 @@ pub fn config_from_cell_id(base_id: &str, quality: f32) -> Result<EncoderConfig,
     let mut cur = &rest[digits.len()..];
 
     let mut stratum = Stratum {
+        backend: crate::Av1Backend::Zenravif,
         speed,
         qm: true,
         subsampling: EncodeChromaSubsampling::Yuv444,
@@ -1500,7 +1595,17 @@ pub fn config_from_cell_id(base_id: &str, quality: f32) -> Result<EncoderConfig,
                 "expected '-' before token at '…{cur}' in '{base_id}'"
             ));
         };
-        cur = if let Some(t) = tok.strip_prefix("noqm") {
+        cur = if let Some(t) = tok.strip_prefix("svtav1") {
+            // Longest-prefix-first: "svtav1" before "svt".
+            #[allow(deprecated)]
+            {
+                stratum.backend = crate::Av1Backend::Svtav1;
+            }
+            t
+        } else if let Some(t) = tok.strip_prefix("svt") {
+            stratum.backend = crate::Av1Backend::SvtRs;
+            t
+        } else if let Some(t) = tok.strip_prefix("noqm") {
             stratum.qm = false;
             t
         } else if let Some(t) = tok.strip_prefix("420") {
@@ -1611,8 +1716,159 @@ pub fn config_from_cell_id(base_id: &str, quality: f32) -> Result<EncoderConfig,
 mod tests {
     use super::*;
 
+    // ========================================================================
+    // Backend axis (2026-09-01). The invariant that makes it safe to add:
+    // a zenravif cell's id and fingerprint must not move.
+    // ========================================================================
+
+    /// GOLDEN: `(cell, q, fp)` triples minted by the PRE-backend-axis
+    /// planner and shipped in the canonical picker training data
+    /// (`/mnt/v/output/canonical-picker-2026-06-27/zenavif_lossy/`,
+    /// sweep run `mandfix4-zenavif-1782593621`, plan `modes_full`).
+    ///
+    /// They are the wire contract: `zenmetrics jobexec` re-resolves a
+    /// stored cell id and hard-fails on a fingerprint mismatch, so any
+    /// change that moves one of these silently invalidates every archived
+    /// zenavif sweep row. Adding the backend axis must be inert here —
+    /// and is, because `Av1Backend::Zenravif` renders no id token and
+    /// takes the same fingerprint branch it always did.
+    const GOLDEN_ZENRAVIF_CELLS: &[(&str, f32, &str)] = &[
+        ("s2", 5.0, "da3283310b32ad30"),
+        ("s2", 15.0, "be3a64f006cd07aa"),
+        ("s2", 30.0, "52f1df4a97307b6a"),
+        ("s2", 50.0, "5d111e4b7af2f456"),
+        ("s2", 70.0, "c4ec826d2fb656fc"),
+        ("s2", 85.0, "72062b4cc0db101e"),
+        ("s8-rgb", 15.0, "bf5ae0edaf9ffc0b"),
+        ("s8-rgb", 30.0, "2c91521424e848cb"),
+        ("s8-rgb", 50.0, "86c5bcbd0df405e3"),
+        ("s8-rgb", 70.0, "0306f7e6049ba49d"),
+        ("s8-rgb", 85.0, "2e59b843964795b3"),
+        ("s8-rgb", 95.0, "08ac11ff9232ce3b"),
+    ];
+
+    #[test]
+    fn backend_axis_does_not_move_archived_zenravif_fingerprints() {
+        for &(cell, q, fp_hex) in GOLDEN_ZENRAVIF_CELLS {
+            let cfg = config_from_cell_id(cell, q)
+                .unwrap_or_else(|e| panic!("golden cell {cell:?} no longer parses: {e}"));
+            assert_eq!(
+                format!("{:016x}", fingerprint(&cfg)),
+                fp_hex,
+                "fingerprint moved for archived cell {cell:?} q{q}"
+            );
+        }
+    }
+
+    #[test]
+    fn zenravif_cell_ids_carry_no_backend_token() {
+        for axes in [SweepAxes::rd_core(), SweepAxes::modes_full()] {
+            assert_eq!(axes.backends, vec![crate::Av1Backend::Zenravif]);
+            let plan = SweepBuilder::new(axes, QualityGrid::Explicit(vec![50.0])).plan();
+            for c in &plan.cells {
+                assert!(
+                    !c.id.contains("-svt"),
+                    "zenravif plan minted a backend token: {}",
+                    c.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn svt_cell_ids_roundtrip_to_their_configs() {
+        for id in ["s4-svt", "s1-svt", "s10-svt", "s7-svt-420"] {
+            let cfg = config_from_cell_id(id, 72.0).unwrap();
+            assert_eq!(cfg.backend, crate::Av1Backend::SvtRs, "id {id}");
+        }
+    }
+
+    /// The svt-rs speed dial is NOT injective. `speed_to_svt_preset`
+    /// maps 1..=10 onto presets {0,1,3,4,6,7,9} — speeds 7, 8, 9 and 10
+    /// all land on preset 9 (C remaps all-intra presets above M9 down to
+    /// M9). MEASURED byte-identical, not merely asserted: zenmetrics
+    /// `benchmarks/avif_sweep_permutation_retrofit_2026-09-01.md` §3.
+    #[cfg(feature = "encode-svt-rs")]
+    #[test]
+    fn svt_speed_dial_merges_the_m9_class() {
+        let plan = SweepBuilder::new(
+            SweepAxes::svt_speed_dense(),
+            QualityGrid::Explicit(vec![50.0]),
+        )
+        .plan();
+        assert!(
+            plan.invalid_skipped.is_empty(),
+            "svt strata rejected: {:?}",
+            plan.invalid_skipped
+        );
+        // 10 speed spellings -> 7 distinct presets -> 7 cells, 3 merges.
+        assert_eq!(
+            plan.cells.len(),
+            7,
+            "cells: {:?}",
+            plan.cells.iter().map(|c| &c.id).collect::<Vec<_>>()
+        );
+        assert_eq!(plan.duplicates_merged, 3);
+        let m9 = plan
+            .cells
+            .iter()
+            .find(|c| !c.aliases.is_empty())
+            .expect("the M9 class must merge");
+        assert_eq!(
+            m9.id, "s7-svt-420_q50",
+            "keep-first must retain the fastest spelling of the M9 class"
+        );
+        assert_eq!(m9.aliases.len(), 3, "aliases: {:?}", m9.aliases);
+    }
+
+    /// quality 98 and 100 both resolve to svt QP 1 (the gate that keeps
+    /// the lossy dial away from QP 0 / lossless), so they are ONE encode.
+    /// MEASURED in the live sweep ledger: 28 identical-`output_sha`
+    /// groups, every one of them exactly {98, 100} at a fixed speed.
+    #[cfg(feature = "encode-svt-rs")]
+    #[test]
+    fn svt_quality_98_and_100_are_one_cell() {
+        let mut axes = SweepAxes::svt_speed_dense();
+        axes.speeds = vec![4];
+        let plan = SweepBuilder::new(axes, QualityGrid::Explicit(vec![98.0, 100.0])).plan();
+        assert_eq!(
+            plan.cells.len(),
+            1,
+            "cells: {:?}",
+            plan.cells.iter().map(|c| &c.id).collect::<Vec<_>>()
+        );
+        assert_eq!(plan.duplicates_merged, 1);
+        assert_eq!(plan.cells[0].aliases, vec!["s4-svt-420_q100".to_string()]);
+    }
+
+    /// A zenravif cell and an svt-rs cell at the same (speed, q) must
+    /// NEVER merge: their bitstreams share nothing.
+    #[cfg(feature = "encode-svt-rs")]
+    #[test]
+    fn svt_and_zenravif_never_merge() {
+        let a = config_from_cell_id("s4-420", 50.0).unwrap();
+        let b = config_from_cell_id("s4-svt", 50.0).unwrap();
+        assert_ne!(fingerprint(&a), fingerprint(&b));
+    }
+
+    /// Without the feature there is no svt-rs encode, so the planner must
+    /// REPORT every svt stratum as invalid rather than emit a cell that
+    /// cannot be executed.
+    #[cfg(not(feature = "encode-svt-rs"))]
+    #[test]
+    fn svt_strata_are_reported_invalid_without_the_feature() {
+        let plan = SweepBuilder::new(
+            SweepAxes::svt_speed_dense(),
+            QualityGrid::Explicit(vec![50.0]),
+        )
+        .plan();
+        assert!(plan.cells.is_empty());
+        assert_eq!(plan.invalid_skipped.len(), 10);
+    }
+
     fn tiny_axes() -> SweepAxes {
         SweepAxes {
+            backends: vec![crate::Av1Backend::Zenravif],
             speeds: vec![4],
             qm: vec![true],
             subsampling: vec![EncodeChromaSubsampling::Yuv444],
@@ -1716,6 +1972,7 @@ mod tests {
     #[test]
     fn vaq_strength_inert_when_vaq_off() {
         let base = Stratum {
+            backend: crate::Av1Backend::Zenravif,
             speed: 4,
             qm: true,
             subsampling: EncodeChromaSubsampling::Yuv444,
@@ -1790,6 +2047,7 @@ mod tests {
         }
 
         let base = Stratum {
+            backend: crate::Av1Backend::Zenravif,
             speed: 4,
             qm: true,
             subsampling: EncodeChromaSubsampling::Yuv444,
@@ -1913,6 +2171,7 @@ mod tests {
     #[test]
     fn alpha_delta_zero_aliases_follow_color() {
         let base = Stratum {
+            backend: crate::Av1Backend::Zenravif,
             speed: 4,
             qm: true,
             subsampling: EncodeChromaSubsampling::Yuv444,
@@ -1988,6 +2247,7 @@ mod tests {
 
         // A probe flips exactly its resolved column.
         let base = Stratum {
+            backend: crate::Av1Backend::Zenravif,
             speed: 6,
             qm: true,
             subsampling: EncodeChromaSubsampling::Yuv444,

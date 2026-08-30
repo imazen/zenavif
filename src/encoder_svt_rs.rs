@@ -185,18 +185,59 @@ fn map_svt_encode_error(e: whereat::At<svtav1::types::EncodeError>) -> whereat::
 /// Removing the clamp is a deliberate product decision that needs a
 /// lossless request on `EncoderConfig` to hang off, not a doc fix — tracked
 /// as zenavif#42.
-fn quality_to_qp_gated(quality: f32) -> u8 {
+pub(crate) fn quality_to_qp_gated(quality: f32) -> u8 {
     svtav1::avif::AvifEncoder::quality_to_qp_static(quality).max(1)
 }
 
-/// Map speed 1..=10 to an SVT-AV1 preset 0..=13.
+/// Map speed 1..=10 to an SVT-AV1 preset 0..=9.
 ///
 /// Provenance: mirrors the private `AvifEncoder::speed_to_preset` in
 /// imazen/svtav1 `svtav1-rs/svtav1/src/avif.rs` (speed 1 → preset 0
-/// slowest/best, speed 10 → preset 13 fastest; linear with rounding).
+/// slowest/best, speed 10 → preset 9 fastest; linear with rounding into
+/// 0..=13, then clamped to M9).
+///
+/// # The M9 clamp (mirror repair, 2026-09-01)
+///
+/// This helper used to return the un-clamped `0..=13` value while
+/// upstream's `speed_to_preset` clamps with `.min(9)`, because **C
+/// remaps every all-intra preset above M9 down to M9**
+/// (`enc_handle.c:4416-4419`) — a still encoded at "preset 13" IS an M9
+/// encode. The drift was byte-neutral (upstream's
+/// `speed_to_preset_boundaries` records presets 9, 10 and 13 as each
+/// byte-identical to C's M9 output, hence to each other) but it made the
+/// dial advertise a distinction the encoder does not have: zenavif
+/// speeds 7, 8, 9 and 10 all encode identically. MEASURED 2026-09-01 on
+/// the live AVIF subsample sweep (`zenmetrics
+/// benchmarks/avif_sweep_permutation_retrofit_2026-09-01.md` §3): speeds
+/// 7/8/9/10 produce identical encoded_bytes AND identical SSIMULACRA2 to
+/// six decimals on 2 images × 4 quality points, while speed 6 (preset 7)
+/// differs on every cell — the discriminating control.
+///
+/// Both preset floors this module gates on are unaffected: speeds 1..=6
+/// map to 0/1/3/4/6/7 either way, and speeds 7..=10 clear
+/// [`MONO_HBD_MIN_PRESET`] (9) both before and after the clamp.
 pub(crate) fn speed_to_svt_preset(speed: u8) -> u8 {
     let clamped = speed.clamp(1, 10) as u32;
-    (((clamped - 1) * 13 + 4) / 9) as u8
+    ((((clamped - 1) * 13 + 4) / 9) as u8).min(9)
+}
+
+/// The RESOLVED encoder state an svt-rs cell actually encodes with:
+/// `(preset, qp, alpha_qp)`.
+///
+/// This is the svt-rs half of the sweep planner's byte-identity
+/// contract ([`crate::sweep::fingerprint`]). The planner's default
+/// mediators are zenravif's (`quality_to_quantizer` + the
+/// `speed_derived` search table) and the svt-rs backend reads NEITHER —
+/// it resolves quality through [`quality_to_qp_gated`] and speed through
+/// [`speed_to_svt_preset`]. Fingerprinting an svt-rs config with
+/// zenravif's mediators would therefore both miss real aliases and risk
+/// merging cells that differ, so the fingerprint routes here instead.
+pub(crate) fn svt_resolved_identity(config: &crate::EncoderConfig) -> (u8, u8, u8) {
+    (
+        speed_to_svt_preset(config.speed_effective()),
+        quality_to_qp_gated(config.quality),
+        quality_to_qp_gated(crate::encoder::effective_alpha_quality(config)),
+    )
 }
 
 /// Lowest SVT preset at which the **monochrome** (Cs400) path is verified
@@ -1142,7 +1183,17 @@ mod tests {
     #[test]
     fn speed_to_preset_matches_upstream_boundaries() {
         assert_eq!(speed_to_svt_preset(1), 0);
-        assert_eq!(speed_to_svt_preset(10), 13);
+        // 9, NOT 13: C remaps every all-intra preset above M9 down to M9
+        // (enc_handle.c:4416-4419), so upstream's own
+        // `speed_to_preset_boundaries` asserts 9 here. This assertion read
+        // 13 until 2026-09-01 — a drifted mirror, byte-neutral but it made
+        // speeds 7..=10 look distinct when they encode identically.
+        assert_eq!(speed_to_svt_preset(10), 9);
+        assert_eq!(speed_to_svt_preset(5), 6);
+        // The whole M9 class, spelled out: these four speeds are ONE encode.
+        for s in [7u8, 8, 9, 10] {
+            assert_eq!(speed_to_svt_preset(s), 9, "speed {s} must resolve to M9");
+        }
         // Monotonic across the whole range.
         let mut prev = 0u8;
         for s in 1..=10u8 {
