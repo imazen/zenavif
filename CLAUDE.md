@@ -458,7 +458,25 @@ ssim2 at s2, 1.02-1.07x at s6, worse below q30; wall ~6x faster at s6 /
 4.4x at s9 / slower at s2 (linear speed->preset ladders misaligned —
 re-fit deliberately NOT shipped, user decision).
 
-### yuv crate 4:2:0 bilinear drops the last row pair — FIXED in-repo (d3ece8e), upstream OPEN
+### yuv crate 4:2:0 bilinear drops the last row pair — FIXED UPSTREAM in 0.8.17; the in-repo wrapper is RETIRED (2026-08-29)
+**Resolved. Read this before re-deriving anything below.** `yuv` 0.8.17 fixes the
+defect; `yuv` moved 0.8.12 → 0.8.17, `src/yuv_bilinear_fix.rs` and all eight of
+its call sites in `src/decoder.rs` are deleted, and the reverse tripwire is
+replaced by the positive `tests/yuv_upstream_bilinear.rs` (mutation-verified: it
+fails against `=0.8.15`). Byte-identity gate before the deletion — 2,304 cells,
+all eight converter variants × 16 geometries × 2 ranges × 3 matrices × 3 content
+classes — **2,304/2,304 byte-identical** between wrapper-on-0.8.15 and
+direct-on-0.8.17, against a control that differs in 1,836. Harness
+`dev/yuv-bilinear-retirement/`, results
+`benchmarks/yuv_bilinear_retirement_2026-08-29.{tsv,meta}`.
+**Scope fact worth keeping:** every one of those call sites was in
+`src/decoder.rs`, i.e. behind `unsafe-asm`, which nothing compiles — so the
+wrapper had been dead code in every buildable configuration, and the historical
+claim below that the bug hit "every zenavif 4:2:0+alpha decode" overstates the
+live blast radius as the code stands today. The gate proves the retirement is
+safe even if `unsafe-asm` is revived. Historical record follows.
+
+### (historical) yuv crate 4:2:0 bilinear drops the last row pair — was FIXED in-repo (d3ece8e), upstream then OPEN
 Found 2026-07-19 by the SvtRs RGBA round-trip test: yuvutils-rs 0.8.12–0.8.16
 `yuv420_*_bilinear`/`i0xx_*_bilinear` zip luma row-pairs against overlapping
 chroma `windows(stride*2).step_by(stride)` — one window short on even heights

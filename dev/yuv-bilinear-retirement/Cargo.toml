@@ -1,0 +1,25 @@
+# Retirement gate for the (now-deleted) src/yuv_bilinear_fix.rs.
+#
+# Standalone with its OWN [workspace] table so it never joins the parent
+# workspace: it deliberately pins an EXACT, OLD `yuv` for one of its rounds,
+# and a member pinning `=0.8.15` would fight the root's `0.8.17` requirement.
+#
+# Usage — three rounds, diff the TSVs:
+#   yuv = "=0.8.15" ; MODE=wrapper cargo run --release > A.tsv   # shipped behaviour
+#   yuv = "=0.8.15" ; MODE=direct  cargo run --release > ctl.tsv # the raw bug
+#   yuv = "=0.8.17" ; MODE=direct  cargo run --release > B.tsv   # the candidate
+# A must equal B (retirement is byte-safe) and must DIFFER from ctl (the gate
+# is not vacuous). Results: ../../benchmarks/yuv_bilinear_retirement_2026-08-29.{tsv,meta}
+[package]
+name = "yuv-bilinear-retirement"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+yuv = "=0.8.17"
+
+[workspace]
+
+[profile.release]
+opt-level = 2

@@ -424,6 +424,40 @@ write-path returns + gain-map interop additions, already on main).
   ship with the next 0.x minor bump. No existing variant changed meaning.
 
 ### Changed
+- **`src/yuv_bilinear_fix.rs` retired; `yuv` moved 0.8.12 → 0.8.17.** Upstream
+  0.8.17 fixes the even-height 4:2:0 bilinear row-pair defect the wrapper
+  existed to repair, so the wrapper, its module declaration and all eight of its
+  call sites in `src/decoder.rs` are gone, replaced by direct converter calls
+  shaped exactly like the sibling `Cs422` arms already there.
+
+  **Byte-identity gate, run before the deletion** (`benchmarks/yuv_bilinear_retirement_2026-08-29.{tsv,meta}`;
+  harness `dev/yuv-bilinear-retirement/`): 2,304 cells — all eight converter
+  variants the decoder uses × 16 geometries (2×2 … 2048×2048, both height
+  parities, odd widths) × 2 ranges × 3 matrices × 3 content classes.
+  **Wrapper-on-0.8.15 and direct-on-0.8.17 were byte-identical in 2,304 of
+  2,304 cells**, so the retirement moves no output byte. The gate is not
+  vacuous: the same harness run direct-on-0.8.15 differs in **1,836** cells,
+  and writes the final row in **0** of 1,872 even-height cells versus 1,836 for
+  the other two rounds — the defect's exact signature.
+
+  **Scope correction to the 2026-08-29 note below, which said this touched
+  "eight live 4:2:0 chroma-upsampling call sites".** They are not live: every
+  one is in `src/decoder.rs`, which is `#[cfg(feature = "unsafe-asm")]`, and
+  per this repo's CLAUDE.md that feature is compiled by nothing — not CI, not
+  the dev box. The wrapper was dead code in every configuration anyone builds.
+  The gate above proves the stronger property anyway (the output would have
+  been identical had it been live), which is what makes the deletion safe if
+  `unsafe-asm` is ever revived. `src/decoder.rs` was type-checked for this
+  change using the documented technique — temporarily dropping `"rav1d/asm"`
+  from the feature so Apple `cc` need not assemble rav1d's `.S` sources.
+
+  **The retired reverse tripwire is replaced, not merely deleted.**
+  `tests/yuv_upstream_bilinear.rs` now pins the positive property — upstream
+  must write every row on even-height 4:2:0 bilinear input — so a regression
+  upstream is caught rather than silently reintroducing the original defect.
+  It is mutation-verified: against `=0.8.15` it fails naming the exact row,
+  while its odd-height companion still passes (odd heights were never
+  affected). It runs unconditionally, unlike the code it guards.
 - **Third-party lockfile refreshed within the existing requirements** (`ac849ce`).
   `Cargo.lock` only — no manifest requirement moved. 55 third-party packages
   advanced, notably `libc` 0.2.186 → 0.2.189, `cc` 1.2.64 → 1.4.4, `zerocopy`

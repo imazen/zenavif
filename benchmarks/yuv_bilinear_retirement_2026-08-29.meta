@@ -1,0 +1,45 @@
+# Retirement gate for src/yuv_bilinear_fix.rs
+#
+# host:    aarch64-apple-darwin (Darwin 25.5.0), 12 cores
+# date:    2026-08-29
+# repo:    imazen/zenavif @ f6b49a4c (pre-retirement)
+# harness: ~/tmp/yuvfix-parity (standalone; wrapper logic copied verbatim
+#          from src/yuv_bilinear_fix.rs so round A reproduces shipped behaviour)
+#
+# Grid: 8 converters (every variant used at the 8 call sites in src/decoder.rs)
+#       x 16 geometries (2x2 .. 2048x2048, both height parities, odd widths)
+#       x 2 ranges (Full, Limited)
+#       x 3 matrices (Bt601, Bt709, Bt2020)
+#       x 3 content classes (gradient, PRNG noise, sharp chroma edges)
+#       = 2304 cells per round. Fingerprint = fnv1a64 over the whole output.
+#
+# Rounds:
+#   A       wrapper + yuv =0.8.15   today's shipped behaviour
+#   control direct  + yuv =0.8.15   the unrepaired upstream bug
+#   B       direct  + yuv =0.8.17   the retirement candidate
+#
+# RESULTS
+#   Anti-vacuity (A vs control):   1836 / 2304 cells DIFFER.
+#     The harness demonstrably detects what the wrapper fixes; a pass in the
+#     gate below is therefore not vacuous.
+#   Gate (A vs B):                 2304 / 2304 cells BYTE-IDENTICAL.
+#     Retiring the wrapper against yuv 0.8.17 moves no output byte.
+#
+#   Mechanism, even-height cells with a written final row (of 1872):
+#     control (direct, 0.8.15)      0     <- the bug
+#     A       (wrapper, 0.8.15)  1836
+#     B       (direct, 0.8.17)   1836     <- upstream now does what the wrapper did
+#
+#   The 468 cells the wrapper never changed are heights 65 and 257 (odd —
+#   upstream has always been complete there, the wrapper passes through by
+#   design) plus the h=2 cells, whose final row is legitimately all-zero for
+#   the RGB outputs at that content. Identical in A and B either way.
+#
+# SCOPE NOTE, important for anyone reading this later:
+#   All 8 call sites live in src/decoder.rs, which is `#[cfg(feature =
+#   "unsafe-asm")]`. Per this repo's CLAUDE.md that feature is compiled by
+#   NOTHING - not CI, not the dev box. So the wrapper was dead code in every
+#   configuration anyone builds, and this retirement moves no SHIPPED byte
+#   regardless. The gate above proves the stronger property - that the code
+#   would have been byte-identical had it been live - which is what makes the
+#   deletion safe if `unsafe-asm` is ever revived.

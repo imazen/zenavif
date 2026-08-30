@@ -111,7 +111,7 @@ safe_unaligned_simd = "0.2.5"
 # Workspace member (absorbed 2026-07-16); the path supplies 0.7.0 until it is
 # published, after which registry consumers resolve it normally.
 zenavif-parse = { version = "0.7.0", path = "zenavif-parse" }
-yuv = "0.8.12"
+yuv = "0.8.17"
 imgref = "1.12.0"
 rgb = { version = "0.8.52", default-features = false, features = ["bytemuck"] }
 enough = "0.4.3"
