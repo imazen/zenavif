@@ -2174,7 +2174,7 @@ dependencies = [
 [[package]]
 name = "zenanalyze-api"
 version = "0.1.1"
-source = "git+https://github.com/imazen/zenanalyze#47c3c69e383220618166d5bc1e34b25fa6fb8559"
+source = "git+https://github.com/imazen/zenanalyze#e676651eb1f3628a7f2854ce812d2cd10ed0d8fd"
 
 [[package]]
 name = "zenav1-aom-decode"
