@@ -50,6 +50,23 @@ The precise commit for each run is recorded in its `.meta`.
 | `lossless_speed_sweep_fixed_2026-06-11.tsv` | lossless size/speed monotonicity (path-patched fix) | lossless, speed sweep | — |
 | `sweep_validate_2026-06-12.tsv` | sweep-axis liveness / fingerprint validation | encoder knob axes | — |
 
+### AV1 backend datasets
+
+| File | Measures | Grid | Commit |
+|------|----------|------|--------|
+| `backend_sweep_2026-07-22.tsv` | zenravif vs svt-rs RD + cross-decoder byte gate | 12 CID22 images × {64,256,512,1024} × q5–100 step 5 × speeds {2,6,9}; 7018 rows, 7018/7018 decoder-identical | after `2ae4d74` |
+| `backend_timing_2026-07-22.tsv` | serial (interleaved) encode timing, both backends | same arms, `--reps` mode, 1 thread | after `2ae4d74` |
+| `decode_backends_2026-07-19.csv`, `decode_backends_2026-07-22.csv` | rav1d-safe vs aom-rs KEY-frame decode, interleaved | AV1 conformance vectors | after `2ae4d74` |
+| `backend_sweep_2026-09-02.tsv` | zenravif vs svt-rs RD + cross-decoder byte gate, at the git-rev pins | 8 CID22 images × {64,128,256,512} × q5–100 step 5 × speed 6; 1920 rows, 1920/1920 decoder-identical | `912e5f0` |
+| `backend_sweep_partialsb_2026-09-02.tsv` | same, at **non-multiple-of-64** sizes — the partial-superblock envelope | 6 CID22 images × {65,100,200,333,500} × q5–100 step 5 × speed 6; 1800 rows | `912e5f0` |
+| `av1_backends_spike_2026-05-23.md` + `backends_{linux,windows,windows_v2}_2026-05-23.tsv` | hardware vs software AV1 **decode** (ffmpeg hwaccel shellout) | 150 link-u vectors × 4–5 backends, Linux + Windows 11 | `669de3c` (salvaged in `41f3f28`) |
+
+The 2026-09-02 pair is the first backend sweep taken against **git-rev pinned**
+siblings rather than sibling working copies. Everything before it was measured
+against whatever was checked out in `../zenav1-svt` at the time, which on
+2026-09-02 included 71 uncommitted lines in the encoder crate — treat
+cross-dataset deltas older than that pin as un-attributable.
+
 The thread-scaling and memory-calibration `.meta` files also record their findings
 inline: AV1 tile parallelism scales near-linearly with image size, while encode
 peak RSS is roughly thread-invariant (tiles are views into one shared frame, so

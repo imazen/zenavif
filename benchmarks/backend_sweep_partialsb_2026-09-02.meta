@@ -1,0 +1,82 @@
+# backend_sweep_partialsb_2026-09-02 — the svt-rs PARTIAL-SUPERBLOCK envelope,
+# measured because the docs describing it were backwards
+
+Harness, pins, box and columns: identical to
+`backend_sweep_2026-09-02.meta` — read that file first. Only the size axis
+differs.
+
+## What this dataset is for
+
+`Av1Backend::SvtRs`'s rustdoc and the `encode-svt-rs` feature comment both
+said dimensions must be multiples of 64 except at speed >= 5. The gate they
+describe, `svt_rs_dims_error` (`src/encoder_svt_rs.rs:265`), says the
+opposite for the colour path: a 4:2:0 colour image of ANY size is accepted at
+EVERY speed, and only an alpha/grayscale Cs400 item at a non-multiple-of-64
+size additionally needs speed >= 5 and multiples of 8. The prose was corrected
+in `c284f99`; this dataset is the measurement behind that correction, so the
+claim rests on encoded bitstreams rather than on a reading of the source.
+
+## Grid
+
+6 CID22-512 validation images x sizes {65, 100, 200, 333, 500} — **none a
+multiple of 64, and 65 / 333 not multiples of 8 either** — x quality 5..=100
+step 5 x speed 6 x arms {zenravif-420, zenravif-444, svt-rs-420}.
+600 cells x 3 = 1800 rows.
+
+## Result
+
+    svt-rs-420 cells attempted:  600
+    svt-rs-420 cells encoded:    600   (no dimension refusal, no failure)
+    cross-decoder byte gate:    1800 / 1800 identical
+
+So the colour path does code partial superblocks at every one of these
+geometries, and both AV1 decoders agree bit-for-bit on the result.
+
+Scope limit, stated rather than glossed: speed 6 maps to SVT preset 7
+(`speed_to_svt_preset`), so this dataset alone does NOT exercise the claim
+below preset 6 — the half that the 2026-08-29 floor removal was actually
+about. That half is pinned by `svt_rs_partial_sb_roundtrip_at_low_presets`
+(96x96 / 65x72 / 100x37 at speeds 1-4 = presets 0/1/3/4, decoded at the true
+size), and the mono refusal that survives is pinned by
+`svt_rs_mono_partial_sb_still_refused_below_preset_6`. A zenravif arm at
+speed 1 over this grid would cost hours, which is why the low-preset evidence
+stays in the test suite where it is cheap.
+
+## RD and speed at these geometries
+
+Bytes at matched ssim2 (log-interpolated per image, median across images),
+svt-rs-420 / zenravif-420:
+
+     size   ssim2 50   60      70      80      90
+       65      1.035  0.936   1.069   0.929   0.851
+      100      1.015  1.063   1.159   1.037   0.845
+      200      1.061  1.083   1.104   1.120   1.053
+      333      1.113  1.168   1.179   1.126   1.063
+      500      1.135  1.173   1.183   1.127   1.040
+
+Median encode wall time, and the speed ratio zenravif-420 / svt-rs-420:
+
+     size   svt-rs   zenravif   ratio
+       65   0.63 ms   13.81 ms   21.9x
+      100   1.25 ms   34.13 ms   27.4x
+      200   3.96 ms  112.85 ms   28.5x
+      333  10.94 ms  330.65 ms   30.2x
+      500  22.48 ms  739.17 ms   32.9x
+
+The shape matches the aligned dataset: parity-to-slightly-worse bytes at the
+small end, 3-18% more bytes from 200 up, and a 20-33x encode-time advantage.
+There is no partial-superblock penalty visible in either axis — the odd-size
+ratios sit inside the aligned dataset's range.
+
+209 of 1800 rows have ssim2 < 20; all are quality 5 or 10 and they appear on
+all three arms, i.e. that is the quality dial bottoming out, not corruption.
+The corruption canary this repo cares about (ssim2 ~ -700 on QP 0, the
+2026-07-22 finding) does not appear at all.
+
+## Repro
+
+    nice -n 19 ./target/release/examples/encode_backend_sweep \
+      --corpus <codec-corpus>/CID22/CID22-512/validation \
+      --images 6 --sizes 65,100,200,333,500 --qualities 5..=100:5 \
+      --speeds 6 --threads 4 \
+      --out benchmarks/backend_sweep_partialsb_2026-09-02.tsv

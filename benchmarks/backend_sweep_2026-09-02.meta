@@ -1,0 +1,89 @@
+# backend_sweep_2026-09-02 — zenravif (zenrav1e) vs svtav1-rs: RD + cross-decoder gate,
+# first run taken against GIT-REV PINNED siblings
+
+Harness: examples/encode_backend_sweep.rs at zenavif `912e5f0` (main).
+Pins: zenav1-svt ef0b122b, zenav1-aom 14124356, rav1d-safe 66f58fa6,
+zenravif f6c883b6. rustc 1.98.0.
+
+Box: Apple M4 Pro, 12 cores, macOS (Darwin 25.5.0 arm64), `nice -n 19`,
+`--threads 4`, `--reps 1`. Built with a plain `cargo build --release` — NO
+`-C target-cpu=native`, per the repo integrity rules.
+
+## Why this dataset exists separately from backend_sweep_2026-07-22
+
+Every earlier backend dataset was measured against sibling **working copies**
+(`svtav1 = { path = "../zenav1-svt/rust/svtav1" }`). On 2026-09-02 that
+checkout carried 71 uncommitted lines in `svtav1-encoder`
+(`inter_md_arm.rs`, `pipeline.rs`) — so those numbers describe an encoder that
+existed on one disk. Both backend deps are git-rev pins as of `85af725`, and
+this is the first sweep where the encoder under test is identified by a commit.
+Do not diff this against 2026-07-22 and attribute the delta: the pins, the
+box (M4 Pro vs a 16-core cloud VM), the speed set and the image count all
+differ.
+
+## Grid
+
+8 CID22-512 validation images x sizes {64, 128, 256, 512} x quality 5..=100
+step 5 (20 points, low-q covered at the same density as high-q) x speed 6 x
+arms {zenravif-420, zenravif-444, svt-rs-420}. 640 cells x 3 = 1920 rows.
+
+Sizes are all multiples of 64 here on purpose; the partial-superblock envelope
+is the companion dataset `backend_sweep_partialsb_2026-09-02.*`.
+
+## Columns
+
+image, size (requested square), width, height (actual), backend, speed,
+quality, bytes (encoded AVIF file size), encode_ms, decode_ms, ssim2
+(SSIMULACRA2 of the decoded AVIF vs the source), aom_gate.
+
+encode_ms / decode_ms come from a 4-thread parallel run and are therefore
+LOAD-POLLUTED in absolute terms. The RATIO between arms is still usable
+because the arms are interleaved within the same run under the same load; a
+serial `--reps` run is the way to get absolute timings.
+
+## Cross-decoder gate
+
+Every encoded cell's AV1 payload was decoded with BOTH `DecodeBackend::Rav1dSafe`
+and `DecodeBackend::AomRs` and the planes byte-compared:
+
+    1920 / 1920 identical
+
+That is the aom decode backend's headline result on this box: zero divergence
+on 1920 bitstreams produced by two different encoders across the full quality
+range at four sizes.
+
+## Findings
+
+Bytes at MATCHED ssim2 (log-interpolated per image, median across images),
+svt-rs-420 / zenravif-420 — below 1.0 means svt-rs is smaller:
+
+     size   ssim2 50   60      70      80      90
+       64      1.012  0.954   1.054   0.957   0.936
+      128      0.978  1.054   1.049   1.106   1.041
+      256      1.087  1.107   1.107   1.126   1.038
+      512      1.146  1.156   1.146   1.126   1.028
+
+svt-rs is at rough parity at 64-128 and costs 3-16% more bytes at 256-512,
+with the gap closing again at ssim2 90. Median-bytes-vs-median-ssim2 across a
+quality sweep is NOT a valid RD comparison and is deliberately not quoted here.
+
+Median encode wall time, and the speed ratio zenravif-420 / svt-rs-420:
+
+     size   svt-rs   zenravif   ratio
+       64   0.47 ms    8.11 ms   17.3x
+      128   1.64 ms   38.71 ms   23.6x
+      256   6.87 ms  184.22 ms   26.8x
+      512  24.50 ms  690.59 ms   28.2x
+
+Both at zenavif speed 6 (SVT preset 7). The two backends do not mean the same
+thing by "speed 6" — this is a product-level comparison of the two arms as a
+caller would select them, not an iso-effort one.
+
+## Repro
+
+    cargo build --release --example encode_backend_sweep \
+      --features encode,encode-imazen,encode-svt-rs,aom-backend,target-quality
+    nice -n 19 ./target/release/examples/encode_backend_sweep \
+      --corpus <codec-corpus>/CID22/CID22-512/validation \
+      --images 8 --sizes 64,128,256,512 --qualities 5..=100:5 \
+      --speeds 6 --threads 4 --out benchmarks/backend_sweep_2026-09-02.tsv
