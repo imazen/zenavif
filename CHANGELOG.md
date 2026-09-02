@@ -464,6 +464,18 @@ write-path returns + gain-map interop additions, already on main).
   byte-identical 448-test set, and the tests gated on the *new* feature names
   are present in the *old*-spelling build. (`144bda27`)
 
+- **Retired the dead `svtav1-rs` / `aom-rs` crate names from current-state
+  docs** — 124 lines of rustdoc, doc files, `Cargo.toml` comments, example
+  prose and *runtime error strings* still called the backends by the names
+  their crates had before the repos became `imazen/zenav1-svt` and
+  `imazen/zenav1-aom`. This includes user-visible text such as
+  `Error::Encode("svtav1-rs encode failed: ...")` and the aom decode-error
+  messages, which now name the crate that produced them; no error variant or
+  structure changed, and no test asserted on those strings. `CHANGELOG.md`,
+  `benchmarks/` (records of what shipped and what was measured under the old
+  names), the generated `docs/public-api/`, and the two rustdoc lines that
+  explain the rename itself were deliberately left as written. (`97c94947`)
+
 - Not renamed, deliberately: `Av1Backend::Svtav1` (a retired draft that no
   build can select and `EncoderConfig::validate` already rejects — already
   `#[deprecated]`), and `DecodeBackend::Rav1dSafe` / `Rav1dFfi`, which match
