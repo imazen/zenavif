@@ -215,10 +215,15 @@ pub enum Av1Backend {
     /// (2100 conformance cells at the pin) and the payload is muxed into
     /// a real AVIF container in-crate. The zenavif seam's scope stays
     /// deliberately narrow — 8- and 10-bit 4:2:0 stills (10-bit alpha or
-    /// grayscale at speed >= 7 only); dimensions are multiples of 64 at
-    /// every speed, arbitrary at speed >= 5 (SVT preset >= 6; with alpha
-    /// or grayscale: multiples of 8 at that speed); see
-    /// `src/encoder_svt_rs.rs` module docs.
+    /// grayscale at speed >= 7 only).
+    ///
+    /// Dimensions, per `svt_rs_dims_error` in `src/encoder_svt_rs.rs`
+    /// (which is the gate, and which this paragraph contradicted until
+    /// 2026-09-02): multiples of 64 are always accepted; **any other size
+    /// is accepted on the colour 4:2:0 path at every speed** — the
+    /// partial-superblock floor was removed 2026-08-29; an alpha or
+    /// grayscale (Cs400) item at a non-multiple-of-64 size additionally
+    /// needs speed >= 5 (SVT preset >= 6) and multiples of 8.
     /// [`EncoderConfig::validate`] rejects the variant when the feature
     /// is off, and rejects configs outside the supported scope when on.
     SvtRs,
