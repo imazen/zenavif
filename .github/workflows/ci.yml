@@ -96,12 +96,16 @@ jobs:
     # zenpredict also stop being path deps, delete the clone step below and this
     # job becomes the full standalone-resolution gate.
     #
-    # Proved able to FAIL as well as pass, 2026-09-02: run against the previous
-    # manifest with the same siblings present, `cargo metadata --no-deps` exits
-    # non-zero with
-    #   error: failed to load manifest for dependency `zenav1-aom-decode`
-    #   Caused by: No such file or directory (os error 2)
-    # and against the current manifest it exits 0.
+    # Proved able to FAIL as well as pass, 2026-09-02, both steps:
+    #  * the metadata step — run against the PREVIOUS manifest with the same
+    #    siblings absent, `cargo metadata --no-deps` exits non-zero with
+    #      error: failed to load manifest for dependency `zenav1-aom-decode`
+    #      Caused by: No such file or directory (os error 2)
+    #    and against the current manifest it exits 0;
+    #  * the absence assertion below — exercised with and without a
+    #    `../zenav1-aom` directory present, exiting 1 with the `::error::` line
+    #    in the first case and 0 in the second. Checked on bash 3.2, where
+    #    `set -euo pipefail` has bitten this program before.
     name: Resolves without the AV1 backend siblings
     runs-on: ubuntu-latest
     steps:
