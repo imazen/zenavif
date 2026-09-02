@@ -407,7 +407,61 @@ write-path returns + gain-map interop additions, already on main).
 
 ## [Unreleased]
 
+### Fixed (silent depth coercion on the 16-bit encode entry points)
+
+- **`encode_rgb16` / `encode_rgba16` now honour `config.bit_depth`.** Both
+  scaled every sample with `scale_from_u16(.., 10)` and called
+  `encode_raw_planes_10_bit` unconditionally, reading `config.bit_depth` *not at
+  all* — so `EncoderConfig { bit_depth: Eight, .. }` plus a 16-bit buffer
+  produced a **10-bit file with no error and no warning**, reachable from the
+  generic zencodec route for any `Rgb16` / `Rgba16` input
+  (`src/codec/encoder.rs:225`, `:255`, `:399`, `:411`). The mechanism:
+  `encode_raw_planes_*` takes the coded depth as an argument, which overrides
+  the encoder's own `with_bit_depth` — so `build_ravif_encoder`'s already-correct
+  `resolve_bit_depth` result was discarded one line later.
+
+  `EncodeBitDepth::Eight` now takes a narrowing route (16-bit buffer → 8-bit
+  coded stream) rather than being refused, because narrowing is a real
+  capability the generic codec path exists to serve. `Ten` and `Auto` are
+  unchanged — `Auto` keeps its documented "16-bit input → 10-bit AV1" contract,
+  and the produced files are **byte-identical** pre/post fix (measured: rgb16
+  and rgba16, both `Auto` and `Ten`, four files, sha256 unchanged).
+
+  Narrowing uses the crate's existing owner, `convert::scale_from_u16(v, 8)`,
+  wrapped as `convert::narrow_to_u8` for the `[u8; 3]` plane API. That rule is
+  the exact inverse of the widening rule (`scale_to_u16`, LSB replication), so
+  8-bit content promoted to 16 bits round-trips to the original bytes, and it
+  matches the decode side's `downscale_to_8bit` ("high byte of each channel").
+  Half-up rounding was rejected on measurement, not preference: it leaves the u8
+  domain at `0xFFFF` (→ 256) and corrupts the 8→16→8 round-trip for **128 of 256
+  bytes**. Both facts are pinned as tests rather than left as claims.
+
+  The svt-rs backend already honoured the request
+  (`encoder_svt_rs::effective_bit_depth`); this brings the zenrav1e path level
+  with it. No public API change (verified: `cargo public-api` diff is empty
+  across 1,834 items). Registered as a defect in zenmetrics
+  `benchmarks/bitdepth_capability_matrix_2026-09-02.md` §2.
+
+  Gates: `tests/bit_depth_request.rs` (5 tests — depth read back from the
+  **bitstream** via `zenavif::detect::probe`, never from the request; 3 of the 5
+  fail before the fix with `left: 10, right: 8`) and
+  `convert::narrow_16_to_8` (3 unit tests, one exhaustive over the whole u16
+  domain).
+
+  Not done, and why: `EncodeBitDepth::Twelve` stays unimplemented. The enum is
+  not `#[non_exhaustive]`, so adding a variant breaks every downstream
+  exhaustive match — a 0.1.7 → 0.2.0 bump that the workspace rules require to be
+  real, unavoidable and user-approved. It is queued below instead.
+
 ### QUEUED BREAKING CHANGES
+- Add `EncodeBitDepth::Twelve` **together with `#[non_exhaustive]` on the enum**
+  in one break. zenrav1e supports 12-bit end to end
+  (`ravif/src/av1encoder.rs:79`, `:1105-1111`, `:1445`); zenav1-svt refuses any
+  depth but 8/10 at encoder init, matching C v4.2.0's own check, so
+  `encoder_svt_rs::reject_out_of_envelope_depth` must refuse it early with the
+  C-envelope reason. The 16-bit-entry-point blocker for this is now cleared (see
+  Fixed above). Change set + upstream facts: zenmetrics
+  `benchmarks/bitdepth_capability_matrix_2026-09-02.md` §3.
 - Remove `Error::ColorConversion(yuv::YuvError)` — the last public-API tie to
   the `yuv` crate. In-house kernels no longer construct it (they are
   infallible); the legacy `unsafe-asm` decoder still does. Removing the

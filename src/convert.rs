@@ -227,6 +227,24 @@ pub fn scale_from_u16(v: u16, bit_depth: u8) -> u16 {
     v >> shift
 }
 
+/// Narrow a full-range u16 sample to the u8 domain, for the 8-bit
+/// raw-plane encode APIs.
+///
+/// This is [`scale_from_u16`] at depth 8 — the crate's narrowing owner —
+/// with the type change the `[u8; 3]` plane APIs need. It is deliberately
+/// NOT half-up rounding: truncation is the exact inverse of the widening
+/// rule (`scale_to_u16`, LSB replication), so 8-bit content promoted to
+/// 16 bits narrows back to the original byte, and it matches the decode
+/// side's `downscale_to_8bit` ("the high byte of each channel"). Pinned
+/// by the `narrow_16_to_8` tests.
+#[cfg(feature = "encode")]
+#[inline]
+pub fn narrow_to_u8(v: u16) -> u8 {
+    // `scale_from_u16(v, 8)` is `v >> 8`, so the value is always <= 255
+    // and the mask is a no-op that keeps the cast provably lossless.
+    (scale_from_u16(v, 8) & 0xFF) as u8
+}
+
 /// Add 8-bit alpha channel to an image from Y plane data
 pub fn add_alpha8<'a>(
     buf: &mut PixelBuffer,
@@ -469,5 +487,84 @@ mod tests {
         assert_eq!(scale_to_u16(4095, 12), 65535);
         // 16-bit no-op
         assert_eq!(scale_to_u16(12345, 16), 12345);
+    }
+}
+
+/// The 16→8 narrowing rule used by `encode_rgb16`/`encode_rgba16` when a
+/// caller asks for [`crate::EncodeBitDepth::Eight`], pinned against the
+/// two properties that make it the right rule for this crate.
+///
+/// The narrowing owner is `scale_from_u16(v, 8)` — the same function the
+/// 10-bit branch of those encoders already uses, and the same rule the
+/// decode side applies in `downscale_to_8bit` ("high byte of each
+/// channel"). It is NOT half-up rounding; these tests record why.
+#[cfg(all(test, feature = "encode"))]
+mod narrow_16_to_8 {
+    use super::*;
+
+    /// `scale_from_u16(v, 8)` is the exact inverse of the widening rule
+    /// (`scale_to_u16`, LSB replication) for every 8-bit value.
+    ///
+    /// This is the property that matters on the generic zencodec route,
+    /// which reaches `encode_rgb16` with 8-bit content promoted to 16
+    /// bits by bit replication. Under this rule that promotion is
+    /// perfectly reversible: the coded 8-bit sample is the original byte.
+    #[test]
+    fn narrowing_inverts_bit_replication_exhaustively() {
+        for v8 in 0u16..=255 {
+            let widened = scale_to_u16(v8, 8);
+            assert_eq!(
+                widened,
+                v8 * 257,
+                "scale_to_u16 at depth 8 must be bit replication (v*257)"
+            );
+            assert_eq!(
+                scale_from_u16(widened, 8),
+                v8,
+                "8 -> 16 -> 8 must be lossless for every byte (v8={v8})"
+            );
+        }
+    }
+
+    /// It agrees with the decode-side narrowing (`downscale_to_8bit`,
+    /// documented as "the high byte of each channel") on the whole u16
+    /// domain, so an encode-at-8 / decode-with-prefer_8bit pair cannot
+    /// disagree about which byte a sample is.
+    #[test]
+    fn narrowing_matches_the_decode_side_high_byte_rule() {
+        for v in 0u32..=u32::from(u16::MAX) {
+            let v = v as u16;
+            assert_eq!(scale_from_u16(v, 8), v >> 8, "diverged at v={v}");
+        }
+    }
+
+    /// Half-up rounding — `(v + 128) >> 8` — is NOT usable here, measured
+    /// two ways rather than argued:
+    ///
+    /// 1. it leaves the u8 domain at the top of the range (65535 maps to
+    ///    256, which is not representable in the `[u8; 3]` planes
+    ///    `encode_raw_planes_8_bit` takes), and
+    /// 2. it breaks the 8 -> 16 -> 8 roundtrip above for most bytes.
+    ///
+    /// Kept as a test so the tradeoff is a fact in the tree, not a claim
+    /// in a commit message.
+    #[test]
+    fn half_up_rounding_would_overflow_and_break_the_roundtrip() {
+        // (1) overflow: white saturates past u8::MAX.
+        let white = u32::from(u16::MAX);
+        assert_eq!((white + 128) >> 8, 256, "half-up leaves the u8 domain");
+        assert_eq!(scale_from_u16(u16::MAX, 8), 255, "the shipped rule does not");
+
+        // (2) roundtrip breakage: count the bytes half-up would corrupt.
+        let broken = (0u16..=255)
+            .filter(|&v8| {
+                let widened = u32::from(scale_to_u16(v8, 8));
+                ((widened + 128) >> 8) != u32::from(v8)
+            })
+            .count();
+        assert_eq!(
+            broken, 128,
+            "half-up rounding corrupts the 8 -> 16 -> 8 roundtrip for 128 of 256 bytes"
+        );
     }
 }

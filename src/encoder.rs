@@ -1435,11 +1435,16 @@ pub(crate) fn encode_rgba8_once(
     })
 }
 
-/// Encode a 16-bit RGB image to AVIF (10-bit AV1)
+/// Encode a 16-bit RGB image to AVIF (10-bit AV1 by default)
 ///
 /// Input values should be in full u16 range (0–65535), in the image's native
-/// transfer function (typically sRGB gamma). Values are scaled to 10-bit
-/// internally before encoding.
+/// transfer function (typically sRGB gamma).
+///
+/// The coded depth follows [`EncoderConfig::bit_depth`]: [`EncodeBitDepth::Auto`]
+/// (the default) and [`EncodeBitDepth::Ten`] code 10 bits, while
+/// [`EncodeBitDepth::Eight`] narrows to an 8-bit stream. Narrowing uses the
+/// crate's `scale_from_u16` rule, the exact inverse of LSB replication, so
+/// 8-bit content that was promoted to 16 bits round-trips to the same bytes.
 ///
 /// # Arguments
 ///
@@ -1451,7 +1456,7 @@ pub fn encode_rgb16(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
-    use crate::convert::scale_from_u16;
+    use crate::convert::{narrow_to_u8, scale_from_u16};
     stop.check().map_err(|e| at!(Error::from(e)))?;
     #[cfg(feature = "encode-svt-rs")]
     if config.backend == Av1Backend::SvtRs {
@@ -1469,31 +1474,58 @@ pub fn encode_rgb16(
     // the same order via `rgb_to_10_bit_gbr`). Feeding [r,g,b] here was
     // issue #14: every 16-bit encode channel-rotated for conforming
     // decoders. Pinned by tests/identity_roundtrip.rs.
-    let pixels: Vec<[u16; 3]> = img
-        .pixels()
-        .map(|p| {
-            [
-                scale_from_u16(p.g, 10),
-                scale_from_u16(p.b, 10),
-                scale_from_u16(p.r, 10),
-            ]
-        })
-        .collect();
     let pixel_range = match config.pixel_range {
         Some(EncodePixelRange::Limited) => ravif::PixelRange::Limited,
         _ => ravif::PixelRange::Full,
     };
-    let result = enc
-        .encode_raw_planes_10_bit(
-            width,
-            height,
-            pixels,
-            None::<std::iter::Empty<u16>>,
-            pixel_range,
-            ravif::MatrixCoefficients::Identity,
-        )
-        .map_err_at(error_from_ravif)
-        .at_crate(crate::at_crate_info())?;
+    // `config.bit_depth` is HONOURED here, not assumed. An explicit
+    // `EncodeBitDepth::Eight` narrows this 16-bit buffer to an 8-bit coded
+    // stream; before this branch existed the request was silently coded at
+    // 10 bits, because `encode_raw_planes_*` takes the coded depth as an
+    // argument and overrides the encoder's own `with_bit_depth`. Registered
+    // as a defect in zenmetrics `bitdepth_capability_matrix_2026-09-02` §2;
+    // gated by tests/bit_depth_request.rs.
+    //
+    // `Auto` keeps its documented contract (16-bit input -> 10-bit AV1), so
+    // the default path through here is byte-for-byte what it always was.
+    let result = match resolve_bit_depth(config.bit_depth, true) {
+        ravif::BitDepth::Eight => {
+            let pixels: Vec<[u8; 3]> = img
+                .pixels()
+                .map(|p| [narrow_to_u8(p.g), narrow_to_u8(p.b), narrow_to_u8(p.r)])
+                .collect();
+            enc.encode_raw_planes_8_bit(
+                width,
+                height,
+                pixels,
+                None::<std::iter::Empty<u8>>,
+                pixel_range,
+                ravif::MatrixCoefficients::Identity,
+            )
+        }
+        _ => {
+            let pixels: Vec<[u16; 3]> = img
+                .pixels()
+                .map(|p| {
+                    [
+                        scale_from_u16(p.g, 10),
+                        scale_from_u16(p.b, 10),
+                        scale_from_u16(p.r, 10),
+                    ]
+                })
+                .collect();
+            enc.encode_raw_planes_10_bit(
+                width,
+                height,
+                pixels,
+                None::<std::iter::Empty<u16>>,
+                pixel_range,
+                ravif::MatrixCoefficients::Identity,
+            )
+        }
+    }
+    .map_err_at(error_from_ravif)
+    .at_crate(crate::at_crate_info())?;
     Ok(EncodedImage {
         avif_file: result.avif_file,
         color_byte_size: result.color_byte_size,
@@ -1501,11 +1533,13 @@ pub fn encode_rgb16(
     })
 }
 
-/// Encode a 16-bit RGBA image to AVIF (10-bit AV1)
+/// Encode a 16-bit RGBA image to AVIF (10-bit AV1 by default)
 ///
 /// Input values should be in full u16 range (0–65535), in the image's native
-/// transfer function (typically sRGB gamma). Values are scaled to 10-bit
-/// internally before encoding.
+/// transfer function (typically sRGB gamma).
+///
+/// The coded depth follows [`EncoderConfig::bit_depth`] exactly as in
+/// [`encode_rgb16`]; colour and alpha are narrowed together.
 ///
 /// # Arguments
 ///
@@ -1517,7 +1551,7 @@ pub fn encode_rgba16(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
-    use crate::convert::scale_from_u16;
+    use crate::convert::{narrow_to_u8, scale_from_u16};
     stop.check().map_err(|e| at!(Error::from(e)))?;
     #[cfg(feature = "encode-svt-rs")]
     if config.backend == Av1Backend::SvtRs {
@@ -1531,32 +1565,51 @@ pub fn encode_rgba16(
     let width = img.width();
     let height = img.height();
     // GBR plane order under identity signaling — see encode_rgb16.
-    let pixels: Vec<[u16; 3]> = img
-        .pixels()
-        .map(|p| {
-            [
-                scale_from_u16(p.g, 10),
-                scale_from_u16(p.b, 10),
-                scale_from_u16(p.r, 10),
-            ]
-        })
-        .collect();
-    let alpha: Vec<u16> = img.pixels().map(|p| scale_from_u16(p.a, 10)).collect();
     let pixel_range = match config.pixel_range {
         Some(EncodePixelRange::Limited) => ravif::PixelRange::Limited,
         _ => ravif::PixelRange::Full,
     };
-    let result = enc
-        .encode_raw_planes_10_bit(
-            width,
-            height,
-            pixels,
-            Some(alpha),
-            pixel_range,
-            ravif::MatrixCoefficients::Identity,
-        )
-        .map_err_at(error_from_ravif)
-        .at_crate(crate::at_crate_info())?;
+    // Honours `config.bit_depth` for colour AND alpha — see encode_rgb16.
+    let result = match resolve_bit_depth(config.bit_depth, true) {
+        ravif::BitDepth::Eight => {
+            let pixels: Vec<[u8; 3]> = img
+                .pixels()
+                .map(|p| [narrow_to_u8(p.g), narrow_to_u8(p.b), narrow_to_u8(p.r)])
+                .collect();
+            let alpha: Vec<u8> = img.pixels().map(|p| narrow_to_u8(p.a)).collect();
+            enc.encode_raw_planes_8_bit(
+                width,
+                height,
+                pixels,
+                Some(alpha),
+                pixel_range,
+                ravif::MatrixCoefficients::Identity,
+            )
+        }
+        _ => {
+            let pixels: Vec<[u16; 3]> = img
+                .pixels()
+                .map(|p| {
+                    [
+                        scale_from_u16(p.g, 10),
+                        scale_from_u16(p.b, 10),
+                        scale_from_u16(p.r, 10),
+                    ]
+                })
+                .collect();
+            let alpha: Vec<u16> = img.pixels().map(|p| scale_from_u16(p.a, 10)).collect();
+            enc.encode_raw_planes_10_bit(
+                width,
+                height,
+                pixels,
+                Some(alpha),
+                pixel_range,
+                ravif::MatrixCoefficients::Identity,
+            )
+        }
+    }
+    .map_err_at(error_from_ravif)
+    .at_crate(crate::at_crate_info())?;
     Ok(EncodedImage {
         avif_file: result.avif_file,
         color_byte_size: result.color_byte_size,
