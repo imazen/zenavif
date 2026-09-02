@@ -2091,7 +2091,10 @@ static PLANS: &[(&str, fn() -> SweepAxes)] = &[
     ("svt_doe_b6", SweepAxes::svt_doe_b6),
     ("svt_doe_t1_bd10_ladder", SweepAxes::svt_doe_t1_bd10_ladder),
     ("svt_doe_t1_bd10_knobs", SweepAxes::svt_doe_t1_bd10_knobs),
-    ("svt_doe_t1_bd10_transfer", SweepAxes::svt_doe_t1_bd10_transfer),
+    (
+        "svt_doe_t1_bd10_transfer",
+        SweepAxes::svt_doe_t1_bd10_transfer,
+    ),
 ];
 
 impl SweepAxes {
@@ -3532,8 +3535,15 @@ mod tests {
     fn svt_doe_t1_ladder_is_the_whole_preset_dial_at_one_arm() {
         let axes = SweepAxes::svt_doe_t1_bd10_ladder();
         assert_eq!(axes.speeds, vec![4, 6, 7, 2, 5, 3, 1]);
-        assert_eq!(axes.speeds[0], 4, "index 0 is the default stratum by contract");
-        assert_eq!(axes.svt_knobs.len(), 1, "the ladder varies speed, not knobs");
+        assert_eq!(
+            axes.speeds[0], 4,
+            "index 0 is the default stratum by contract"
+        );
+        assert_eq!(
+            axes.svt_knobs.len(),
+            1,
+            "the ladder varies speed, not knobs"
+        );
         assert!(axes.svt_knobs[0].is_default());
 
         // 7 speeds x 1 knob arm, and NOTHING beyond one deviation.
@@ -3543,8 +3553,16 @@ mod tests {
         assert_eq!(plan.cells.len(), 7, "one cell per speed at one q point");
         for c in &plan.cells {
             assert_eq!(c.config.bit_depth, EncodeBitDepth::Ten);
-            assert!(c.id.contains("-bd10"), "cell id must carry the depth: {}", c.id);
-            assert!(c.config.svt_params().is_default(), "{:?}", c.config.svt_params());
+            assert!(
+                c.id.contains("-bd10"),
+                "cell id must carry the depth: {}",
+                c.id
+            );
+            assert!(
+                c.config.svt_params().is_default(),
+                "{:?}",
+                c.config.svt_params()
+            );
         }
     }
 
@@ -3557,13 +3575,20 @@ mod tests {
         let axes = SweepAxes::svt_doe_t1_bd10_knobs();
         let d = SvtParams::default();
 
-        assert_eq!(axes.speeds, vec![6], "one preset — the speeds axis must not deviate");
+        assert_eq!(
+            axes.speeds,
+            vec![6],
+            "one preset — the speeds axis must not deviate"
+        );
         assert_eq!(
             axes.svt_knobs.len(),
             15,
             "17 main-effect sets minus the 2 Stage-A byte-inert arms"
         );
-        assert!(axes.svt_knobs[0].is_default(), "index 0 must stay the default");
+        assert!(
+            axes.svt_knobs[0].is_default(),
+            "index 0 must stay the default"
+        );
 
         for p in &axes.svt_knobs[1..] {
             assert_eq!(p.deviations(), 1, "main effects only: {p:?}");
@@ -3577,7 +3602,11 @@ mod tests {
                 "scm=3 is byte-inert: {p:?}"
             );
             let _ = d;
-            assert_eq!(*p, p.clamped(), "level is out of the port's legal range: {p:?}");
+            assert_eq!(
+                *p,
+                p.clamped(),
+                "level is out of the port's legal range: {p:?}"
+            );
         }
 
         // 15 strata at one deviation, and not one more.
@@ -3588,7 +3617,11 @@ mod tests {
         for c in &plan.cells {
             assert_eq!(c.config.bit_depth, EncodeBitDepth::Ten);
             assert_eq!(c.config.speed, 6);
-            assert!(c.id.starts_with("s6-"), "cell id must carry the preset: {}", c.id);
+            assert!(
+                c.id.starts_with("s6-"),
+                "cell id must carry the preset: {}",
+                c.id
+            );
         }
     }
 
@@ -3674,11 +3707,14 @@ mod tests {
             .map(|c| (c.id.clone(), c.fingerprint))
             .collect();
 
-        assert_eq!(main_bd10_s4.len(), 1, "A1 has exactly one bd10 s4 default arm");
+        assert_eq!(
+            main_bd10_s4.len(),
+            1,
+            "A1 has exactly one bd10 s4 default arm"
+        );
         assert_eq!(
             main_bd10_s4, t1_bd10_s4,
             "T1's s4 leg must reproduce A1's cell id, not open a new identity space"
         );
     }
-
 }
