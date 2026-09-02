@@ -104,6 +104,21 @@
 //! this backend promises to zenavif callers in the first place; it is cited
 //! because it is the evidence that the derived headers are right.
 //!
+//! # A third-party reader accepts the output (measured 2026-09-02)
+//!
+//! `tests/aom_encode_backend.rs` decodes with rav1d-safe, which is
+//! independent of the aom port but still in-tree. Outside it entirely: a
+//! 192x128 gradient encoded at quality 88 / speed 5 through this backend is
+//! reported by `file(1)` as "ISO Media, AVIF Image", and macOS `sips` —
+//! Apple's own AVIF decoder, sharing no code with this workspace — reads it
+//! as 192x128 and transcodes it to PNG whose pixels match the source to
+//! **mean 0.57 / max 3** per channel over 4608 sampled values.
+//!
+//! That number also confirms the range signalling from outside: the
+//! top-left source pixel is (0, 0, 0), it codes to studio luma 16, and
+//! Apple's decoder returns (1, 1, 1) — not (16, 16, 16), which is what a
+//! decoder ignoring `color_range = 0` would give.
+//!
 //! **Encode speed is unmeasured from this seam.** No number is quoted here
 //! because none has been run.
 

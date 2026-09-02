@@ -515,6 +515,21 @@ write-path returns + gain-map interop additions, already on main).
   `SvtRs`, `AomRs`, `SvtRs420`) are untouched and
   `tests/deprecated_backend_aliases.rs` still compiles.
 
+### Measured — a third-party reader accepts the aom backend's output
+
+- The in-repo gate decodes with rav1d-safe, which is a different port from the
+  encoder but still in this workspace. Outside it entirely: a 192x128 gradient
+  encoded at quality 88 / speed 5 through `Av1Backend::Zenav1Aom` is reported
+  by `file(1)` as "ISO Media, AVIF Image", and macOS `sips` — Apple's own AVIF
+  decoder, sharing no code with anything here — reads it as 192x128 and
+  transcodes it to a PNG whose pixels match the source to **mean 0.57 / max 3**
+  per channel over 4608 sampled values.
+
+- That also confirms the studio-range signalling from outside the workspace:
+  the top-left source pixel is (0, 0, 0), it codes to studio luma 16, and
+  Apple's decoder returns (1, 1, 1) — not the (16, 16, 16) a decoder ignoring
+  `color_range = 0` would give.
+
 ### Fixed — an aom-backend refusal named the `zenav1-svt` feature
 
 - `reject_svt_rs_backend` delegates to `reject_aom_backend` with the same
