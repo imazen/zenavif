@@ -476,6 +476,25 @@ write-path returns + gain-map interop additions, already on main).
   names), the generated `docs/public-api/`, and the two rustdoc lines that
   explain the rename itself were deliberately left as written. (`97c94947`)
 
+- **Corrected six over-replacements from that sweep** (`3c5a47b9`). Replacing
+  `svtav1-rs` / `aom-rs` everywhere also hit places where those strings named
+  something other than a crate: the **real** origin branch `svtav1-rs-backend`
+  (cited by `CLAUDE.md`, `docs/BACKEND_SUPPORT_MATRIX.md` and
+  `docs/TEST_COVERAGE.md`), a `CLAUDE.md` line whose whole point was to record
+  the *old* `/root/aom-rs/...` paths, the reference-box path defaults in
+  `scripts/decode_4way_c_refs.sh` and `examples/decode_4way_bench.rs`, a path
+  inside the upstream repo, and the dated `docs/REPO_HYGIENE_2026-07-24.md`
+  (restored wholesale — a historical snapshot, like `CHANGELOG.md` and
+  `benchmarks/`). The unverifiable `/root/...` defaults were restored rather
+  than guessed at.
+
+  One genuine fix was kept: `src/encoder_svt_rs.rs` pointed at
+  `https://github.com/imazen/svtav1` with an `svtav1-rs/` subdir. Per
+  `Cargo.toml:151-158` and the git dep at `:211` — which call that the "dead
+  `imazen/svtav1` URL" — the repo is `imazen/zenav1-svt` and the facade crate
+  lives in `rust/svtav1`. That line was wrong before this work and now names
+  both correctly.
+
 - Not renamed, deliberately: `Av1Backend::Svtav1` (a retired draft that no
   build can select and `EncoderConfig::validate` already rejects — already
   `#[deprecated]`), and `DecodeBackend::Rav1dSafe` / `Rav1dFfi`, which match
