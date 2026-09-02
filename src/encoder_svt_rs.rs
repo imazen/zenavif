@@ -232,6 +232,8 @@ pub(crate) fn speed_to_svt_preset(speed: u8) -> u8 {
 /// [`speed_to_svt_preset`]. Fingerprinting an svt-rs config with
 /// zenravif's mediators would therefore both miss real aliases and risk
 /// merging cells that differ, so the fingerprint routes here instead.
+// Only `src/sweep.rs` (behind `__expert`) calls this.
+#[cfg_attr(not(feature = "__expert"), allow(dead_code))]
 pub(crate) fn svt_resolved_identity(config: &crate::EncoderConfig) -> (u8, u8, u8) {
     (
         speed_to_svt_preset(config.speed_effective()),
@@ -240,7 +242,7 @@ pub(crate) fn svt_resolved_identity(config: &crate::EncoderConfig) -> (u8, u8, u
     )
 }
 
-/// Push [`crate::expert::SvtParams`] onto a colour `EncodePipeline`.
+/// Push `expert::SvtParams` onto a colour `EncodePipeline`.
 ///
 /// The seam's historical behaviour is `SvtParams::default()`, which is
 /// SVT-AV1 v4.2.0's **mainline** default set (tune 1 = PSNR, QM off,
@@ -249,7 +251,7 @@ pub(crate) fn svt_resolved_identity(config: &crate::EncoderConfig) -> (u8, u8, u
 /// `with_svt_params` gets byte-identical output to before this function
 /// existed. Gated by `svt_params_default_leaves_the_pipeline_at_mainline`.
 ///
-/// Values are [`crate::expert::SvtParams::clamped`] first: the port guards
+/// Values are `SvtParams::clamped` first: the port guards
 /// `variance_boost_strength` and `variance_octile` with `debug_assert` only
 /// (`var_boost.rs` indexes a `[f64; 5]` and computes
 /// `octile * SUBBLOCKS_IN_OCTILE - 1`), and every fleet worker is a release
@@ -265,7 +267,7 @@ fn apply_svt_params(
     pipeline: &mut svtav1::encoder::pipeline::EncodePipeline,
     config: &crate::EncoderConfig,
 ) {
-    let p = config.svt_params();
+    let p = config.svt_params_resolved();
     pipeline.hdr.tune = p.tune;
     pipeline.hdr.enable_variance_boost = p.enable_variance_boost;
     pipeline.hdr.variance_boost_strength = p.variance_boost_strength;
@@ -1247,7 +1249,7 @@ mod tests {
         }
     }
 
-    /// [`crate::expert::SvtParams::resolved`] transcribes the port's
+    /// `SvtParams::resolved` transcribes the port's
     /// `HdrForkConfig::apply_tune_overrides`. The sweep planner uses the
     /// transcription (so a cell resolves without an encode), so the two
     /// must not drift: drive the REAL port config through the REAL
@@ -1260,7 +1262,7 @@ mod tests {
     fn resolved_matches_the_port_tune_overrides() {
         for tune in [0u8, 1, 2, 3, 4] {
             for qp in [10u8, 45, 46, 63] {
-                let mut ours = crate::expert::SvtParams::default();
+                let mut ours = crate::svt_params::SvtParams::default();
                 ours.tune = tune;
                 let ours = ours.resolved(qp);
 

@@ -340,13 +340,14 @@ pub struct EncoderConfig {
     #[cfg(any(feature = "two-pass-butteraugli", feature = "two-pass-zensim"))]
     pub(crate) sb_q_scale: Option<Box<[f32]>>,
     /// Still-image knobs for the [`Av1Backend::SvtRs`] backend
-    /// ([`crate::expert::SvtParams`]). The [`Default`] is exactly what the
+    /// (`expert::SvtParams`). The [`Default`] is exactly what the
     /// svt-rs seam configures with no params set, so the field is inert
-    /// unless a caller opts in via
-    /// [`EncoderConfig::with_svt_params`]. Ignored by every other backend
-    /// (and by the sweep fingerprint on those backends, so an inert
-    /// spelling cannot mint a duplicate cell).
-    pub(crate) svt: crate::expert::SvtParams,
+    /// unless a caller opts in via `EncoderConfig::with_svt_params`
+    /// (`__expert` only). Ignored by every other backend (and by the sweep
+    /// fingerprint on those backends, so an inert spelling cannot mint a
+    /// duplicate cell).
+    #[cfg(any(feature = "encode-svt-rs", feature = "__expert"))]
+    pub(crate) svt: crate::svt_params::SvtParams,
 }
 
 impl Default for EncoderConfig {
@@ -415,7 +416,8 @@ impl Default for EncoderConfig {
             fast_tier_budgets: None,
             #[cfg(any(feature = "two-pass-butteraugli", feature = "two-pass-zensim"))]
             sb_q_scale: None,
-            svt: crate::expert::SvtParams::default(),
+            #[cfg(any(feature = "encode-svt-rs", feature = "__expert"))]
+            svt: crate::svt_params::SvtParams::default(),
         }
     }
 }
@@ -864,10 +866,10 @@ impl EncoderConfig {
     /// preset's value untouched. Calling this multiple times overwrites
     /// previously-set fields wholesale (the struct is the unit of
     /// configuration, not the individual fields).
-    /// Apply the expert-only [`crate::expert::SvtParams`] still-image knobs
+    /// Apply the expert-only `expert::SvtParams` still-image knobs
     /// for the [`Av1Backend::SvtRs`] backend.
     ///
-    /// **Unstable surface** — see [`crate::expert`]. The struct is the unit
+    /// **Unstable surface** — see `crate::expert`. The struct is the unit
     /// of configuration: calling this replaces every field wholesale. The
     /// [`Default`] value is what the seam configures anyway, so passing it
     /// is a no-op.
@@ -875,6 +877,7 @@ impl EncoderConfig {
     /// Other backends ignore these knobs entirely; the sweep planner's
     /// fingerprint ignores them too on those backends, so an inert spelling
     /// cannot mint a duplicate cell.
+    #[cfg(feature = "__expert")]
     #[must_use]
     pub fn with_svt_params(mut self, params: crate::expert::SvtParams) -> Self {
         self.svt = params;
@@ -882,9 +885,20 @@ impl EncoderConfig {
     }
 
     /// The still-image knobs the [`Av1Backend::SvtRs`] encode will run,
-    /// after [`crate::expert::SvtParams::clamped`].
+    /// after `SvtParams::clamped`.
+    #[cfg(feature = "__expert")]
     #[must_use]
     pub fn svt_params(&self) -> crate::expert::SvtParams {
+        self.svt_params_resolved()
+    }
+
+    /// The clamped still-image knobs the svt-rs seam actually applies.
+    ///
+    /// Always compiled: `apply_svt_params` in `src/encoder_svt_rs.rs` runs on
+    /// the plain `encode-svt-rs` path, where `__expert` (and therefore the
+    /// public `svt_params()` above) is off.
+    #[cfg(any(feature = "encode-svt-rs", feature = "__expert"))]
+    pub(crate) fn svt_params_resolved(&self) -> crate::svt_params::SvtParams {
         self.svt.clamped()
     }
 
