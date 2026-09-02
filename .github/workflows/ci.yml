@@ -81,6 +81,53 @@ jobs:
       - name: Test (diffmap closed loops — butteraugli + zensim)
         run: cargo test --features two-pass-butteraugli,two-pass-zensim,auto-tune
 
+  resolve-standalone:
+    # GATE: zenavif must resolve for someone who does NOT run clone-siblings.
+    #
+    # Every path dependency that escapes this repository's root has to have its
+    # manifest loaded during resolution — even when its feature is off — so one
+    # such dep makes EVERY cargo command fail in a plain clone. That is what
+    # kept `Dependabot Updates` red and what stops zencodecs / zenpipe taking
+    # zenavif as a git dependency. The two AV1 backends were the offenders and
+    # are now git-rev pins; this job keeps them that way.
+    #
+    # It clones ONLY ../zenanalyze — the one escaping path dep that is left, and
+    # the residual reason a bare clone still cannot resolve. When zenanalyze /
+    # zenpredict also stop being path deps, delete the clone step below and this
+    # job becomes the full standalone-resolution gate.
+    #
+    # Proved able to FAIL as well as pass, 2026-09-02: run against the previous
+    # manifest with the same siblings present, `cargo metadata --no-deps` exits
+    # non-zero with
+    #   error: failed to load manifest for dependency `zenav1-aom-decode`
+    #   Caused by: No such file or directory (os error 2)
+    # and against the current manifest it exits 0.
+    name: Resolves without the AV1 backend siblings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Clone ONLY imazen/zenanalyze into ../zenanalyze
+        shell: bash
+        run: |
+          cd ..
+          git clone --depth 1 https://github.com/imazen/zenanalyze.git zenanalyze
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Assert the AV1 backend siblings are absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          for d in ../zenav1-aom ../zenav1-svt; do
+            if [ -e "$d" ]; then
+              echo "::error::$d exists; this job must run without it or it proves nothing"
+              exit 1
+            fi
+          done
+          echo "confirmed absent: ../zenav1-aom ../zenav1-svt"
+      - name: cargo metadata --no-deps must succeed
+        run: cargo metadata --no-deps --format-version 1 > /dev/null
+      - name: cargo metadata (full resolve) must succeed
+        run: cargo metadata --format-version 1 > /dev/null
+
   feature-check:
     name: Feature permutations
     runs-on: ubuntu-latest

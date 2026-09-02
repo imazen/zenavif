@@ -2179,6 +2179,7 @@ source = "git+https://github.com/imazen/zenanalyze#e676651eb1f3628a7f2854ce812d2
 [[package]]
 name = "zenav1-aom-decode"
 version = "0.0.1"
+source = "git+https://github.com/imazen/zenav1-aom?rev=14124356c46f813ac7656b8e7b6631f466b666b0#14124356c46f813ac7656b8e7b6631f466b666b0"
 dependencies = [
  "enough",
  "zenav1-aom-dsp",
@@ -2187,6 +2188,7 @@ dependencies = [
 [[package]]
 name = "zenav1-aom-dsp"
 version = "0.0.1"
+source = "git+https://github.com/imazen/zenav1-aom?rev=14124356c46f813ac7656b8e7b6631f466b666b0#14124356c46f813ac7656b8e7b6631f466b666b0"
 dependencies = [
  "archmage",
  "magetypes",
@@ -2195,6 +2197,7 @@ dependencies = [
 [[package]]
 name = "zenav1-svt"
 version = "0.1.0"
+source = "git+https://github.com/imazen/zenav1-svt?rev=ef0b122bd26999a8eb8c2ff0442244465425e686#ef0b122bd26999a8eb8c2ff0442244465425e686"
 dependencies = [
  "zenav1-svt-dsp",
  "zenav1-svt-encoder",
@@ -2204,6 +2207,7 @@ dependencies = [
 [[package]]
 name = "zenav1-svt-dsp"
 version = "0.1.0"
+source = "git+https://github.com/imazen/zenav1-svt?rev=ef0b122bd26999a8eb8c2ff0442244465425e686#ef0b122bd26999a8eb8c2ff0442244465425e686"
 dependencies = [
  "archmage",
  "magetypes",
@@ -2213,6 +2217,7 @@ dependencies = [
 [[package]]
 name = "zenav1-svt-encoder"
 version = "0.1.0"
+source = "git+https://github.com/imazen/zenav1-svt?rev=ef0b122bd26999a8eb8c2ff0442244465425e686#ef0b122bd26999a8eb8c2ff0442244465425e686"
 dependencies = [
  "almost-enough",
  "archmage",
@@ -2226,6 +2231,7 @@ dependencies = [
 [[package]]
 name = "zenav1-svt-types"
 version = "0.1.0"
+source = "git+https://github.com/imazen/zenav1-svt?rev=ef0b122bd26999a8eb8c2ff0442244465425e686#ef0b122bd26999a8eb8c2ff0442244465425e686"
 dependencies = [
  "enough",
  "whereat",

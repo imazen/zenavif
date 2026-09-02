@@ -98,11 +98,26 @@ rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "66f58fa6a64c
 # intra decode is conformance-clean vs libaom v3.14.1 at this rev). This rev
 # carries the structured `DecodeError` + `DecodeConfig` (limits/stop/alloc)
 # API and the bd8 lowbd perf pipeline (4K vs C 1.45x -> 1.286x upstream).
-# 2026-08-06: sibling path dep for the same reason as `svtav1` below — the
-# decode-backend work and the in-repo zenav1-aom work land together, so a
-# publish/rev round-trip between them would serialize the whole program.
-# Return to a git-rev pin on `imazen/zenav1-aom` before this branch lands.
-aom-decode = { package = "zenav1-aom-decode", path = "../zenav1-aom/crates/aom-decode", optional = true }
+# 2026-09-02: BACK to a git-rev pin, as the 2026-08-06 note below always
+# intended. The sibling path dep escaped the repository root, and cargo loads a
+# path dependency's manifest during resolution even when its feature is off, so
+# a standalone clone of this repo could not run ANY cargo command — which is
+# what broke `Dependabot Updates` (no checkout step of ours, so no
+# clone-siblings) and what makes zenavif unusable as a git dependency for
+# zencodecs / zenpipe. See the 2026-08-29 Workspace entry in CHANGELOG.md for
+# the reproduction.
+#
+# The pin is fetchable: `cargo metadata` on a scratch crate depending on this
+# exact rev resolves clean, submodule (`imazen/libaom-mirror`) included.
+# To compose in-flight zenav1-aom work again, add to THIS file:
+#   [patch."https://github.com/imazen/zenav1-aom"]
+#   zenav1-aom-decode = { path = "../zenav1-aom/crates/aom-decode" }
+# and revert it before landing — same dev-only pattern as zenravif above.
+#
+# (2026-08-06, retained for history: the path dep was taken so the
+# decode-backend work and the in-repo zenav1-aom work could land together
+# without a publish/rev round-trip.)
+aom-decode = { package = "zenav1-aom-decode", git = "https://github.com/imazen/zenav1-aom", rev = "14124356c46f813ac7656b8e7b6631f466b666b0", optional = true }
 archmage = { version = "0.9.15", features = ["macros", "avx512"] }
 magetypes = { version = "0.9.15"}
 safe_unaligned_simd = "0.2.5"
@@ -138,18 +153,39 @@ ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/ima
 # PACKAGED as `zenav1-svt`; the `svtav1` alias keeps the seam's `use` paths
 # stable (it was named `svtav1` upstream once).
 #
-# 2026-08-06: switched from a git-rev pin to the sibling path dep. The old pin
-# (`github.com/imazen/svtav1` @ 2d585bb2b) is UNFETCHABLE: the repo was renamed
-# to `imazen/zenav1-svt` and its `reference/svt-av1` submodule URL moved to
-# `imazen/zenav1-svt-c`, so cargo's submodule update 404s on the old
-# `imazen/svt-av1-ref` and the whole dependency resolution fails — for every
-# feature combination, not just `encode-svt-rs`. A path dep also composes the
-# in-flight zenav1-svt work with this crate's without a publish round-trip, per
-# the CLAUDE.md unpublished-dependency rule. CI clones the sibling from
-# `origin/main` (`.github/actions/clone-siblings`), so the seam always builds
-# against pushed upstream `main` — there is no rev to bump, and upstream
-# movement reaches CI the moment it is pushed. Return to a git-rev pin on
-# `imazen/zenav1-svt` before this branch lands.
+# 2026-09-02: BACK to a git-rev pin, as the 2026-08-06 note below always
+# intended, on `imazen/zenav1-svt` (the CURRENT name) rather than the dead
+# `imazen/svtav1` URL.
+#
+# The UNFETCHABLE premise recorded below is now STALE and was re-measured
+# rather than inherited: `imazen/zenav1-svt`, its `reference/svt-av1` submodule
+# `imazen/zenav1-svt-c`, and `imazen/zenav1-aom`'s `imazen/libaom-mirror` are
+# all public, and `cargo metadata` on a scratch crate git-depending on this
+# exact rev resolves clean, submodules and all. What was unfetchable was the
+# OLD `github.com/imazen/svtav1` @ 2d585bb2b URL, not a git dep on this repo.
+#
+# Two reasons to move off the path dep, both measured:
+#  1. It escaped the repository root, so a standalone clone of zenavif could
+#     not run any cargo command — the `Dependabot Updates` / git-consumer
+#     breakage documented in the 2026-08-29 Workspace CHANGELOG entry.
+#  2. It silently built against a DIRTY sibling working copy. On 2026-09-02
+#     `git -C ../zenav1-svt diff --stat origin/main` showed 71 uncommitted
+#     lines in `svtav1-encoder` (`inter_md_arm.rs`, `pipeline.rs`) — the exact
+#     crate this seam links. Every local `encode-svt-rs` test result was
+#     therefore measured against code that existed on one developer's disk and
+#     nowhere else, and could not agree with CI by construction. A rev pin
+#     makes the local build and CI measure the same encoder.
+#
+# To compose in-flight zenav1-svt work again, add to THIS file:
+#   [patch."https://github.com/imazen/zenav1-svt"]
+#   zenav1-svt = { path = "../zenav1-svt/rust/svtav1" }
+# and revert it before landing — same dev-only pattern as zenravif above.
+# Bump the `rev` to pick up pushed upstream movement.
+#
+# (2026-08-06, retained for history: the path dep was taken because the old
+# `imazen/svtav1` rev 404'd on its renamed submodule and broke resolution for
+# every feature combination, and because a path dep composes in-flight sibling
+# work without a publish round-trip.)
 #
 # What the seam consumes from that tree:
 #   * the fallible entry points — `try_encode_frame*` -> `EncodeResult<Vec<u8>>`
@@ -172,7 +208,7 @@ ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/ima
 #      `129d45494`, zenav1-svt#5/#9). The seam's quality->QP clamp stays (see
 #      `quality_to_qp_gated`), but the gate that asserted the refusal was
 #      replaced with a lossless round-trip gate — see CLAUDE.md Known Bugs.
-svtav1 = { package = "zenav1-svt", path = "../zenav1-svt/rust/svtav1", optional = true }
+svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "ef0b122bd26999a8eb8c2ff0442244465425e686", optional = true }
 # AVIF container muxer for the svtav1-rs backend (the zenravif backend muxes
 # inside zenravif; this backend muxes in-crate). The 0.2.0 version is
 # supplied by the [patch.crates-io] git pin below until 0.2.0 publishes.
@@ -474,13 +510,23 @@ two-pass-butteraugli = ["encode-imazen", "ravif/__expert", "dep:butteraugli"]
 # `ZensimLoopResult::spatial_applied`. Builds on `target-quality` (shares
 # the search, the q0 seed, and the zensim dep).
 two-pass-zensim = ["target-quality", "encode-imazen", "ravif/__expert"]
-# EXPERIMENTAL: AVIF encoding via svtav1-rs (pure Rust SVT-AV1 port,
-# imazen/svtav1 branch dep). Adds the working `Av1Backend::SvtRs` variant:
-# 8-bit 4:2:0 stills only, dimensions must be multiples of 64 (the svtav1-rs
-# pipeline codes full 64x64 superblocks; no partial-SB / container-crop path
-# yet). Bitstream identity vs C-SVT is NOT yet asserted — that parity gate
-# lands when svtav1-rs reaches decision-layer bitstream identity. Off by
-# default; requires `encode` (the backend enum and entry points live there).
+# EXPERIMENTAL: AVIF encoding via svtav1-rs (the pure-Rust SVT-AV1 port,
+# git-rev pinned to imazen/zenav1-svt above). Adds the working
+# `Av1Backend::SvtRs` variant. Off by default; requires `encode` (the backend
+# enum and entry points live there).
+#
+# SCOPE — `svt_rs_dims_error` + `reject_unsupported_config` in
+# `src/encoder_svt_rs.rs` are the single source of truth; this comment was
+# three claims out of date until 2026-09-02, so check the code, not this text:
+#   * 4:2:0 stills at 8 AND 10 bits (10-bit alpha/gray needs speed >= 7).
+#   * COLOUR 4:2:0 takes ARBITRARY dimensions at ANY speed. The old
+#     multiple-of-64 rule is gone; the partial-superblock floor was removed
+#     2026-08-29 once upstream measured partial SBs at every preset.
+#   * Alpha / grayscale (Cs400) items still need speed >= 5 (SVT preset >= 6)
+#     AND multiples of 8; anything at multiples of 64 is accepted regardless.
+#   * Bitstream identity vs C SVT-AV1 v4.2.0 IS asserted upstream now (see the
+#     dep comment above and upstream `rust/STATUS.md`) — the "NOT yet
+#     asserted" note this replaces predated that work.
 encode-svt-rs = ["encode", "dep:svtav1", "dep:zenavif-serialize"]
 # Encoding with hand-written assembly (fastest, uses unsafe)
 encode-asm = ["encode", "ravif/asm"]

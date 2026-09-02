@@ -14,6 +14,17 @@ description: |
                                            harness; needs the unpublished 0.3.0
                                            surface — profile C + folded-944)
 
+  NOT cloned any more (2026-09-02): `imazen/zenav1-aom` and `imazen/zenav1-svt`.
+  Both AV1 backends moved from sibling path deps to git-rev pins in Cargo.toml,
+  so cargo fetches them itself and a clone here would be dead weight. Cargo does
+  recurse their submodules where this action deliberately did not, which costs
+  roughly 250 MB (libaom-mirror) + 85 MB (zenav1-svt-c) of git db plus ~420 MB of
+  checkouts on a COLD `Swatinem/rust-cache` — measured 2026-09-02, and in the
+  same order as the `rav1d-safe` (396 MB) and `aom` (403 MB) git deps this graph
+  already carries. It buys back standalone resolution (see the
+  `resolve-standalone` job in ci.yml) and stops the seam building against a
+  dirty sibling working copy.
+
   The `ravif`/`zenravif` path dep points at 0.2.0, which is unpublished (crates.io
   has only 0.1.3), so the sibling must be cloned. Drop this step + switch
   Cargo.toml back to a registry dep once zenravif 0.2.0 is published; same for
@@ -65,23 +76,6 @@ runs:
         cd ..
         . "${RUNNER_TEMP}/clone_retry.sh"
         clone_retry https://github.com/imazen/cavif-rs.git ravif
-    - name: Clone imazen/zenav1-svt into ../zenav1-svt
-      shell: bash
-      run: |
-        cd ..
-        . "${RUNNER_TEMP}/clone_retry.sh"
-        # NO --recurse-submodules on purpose (clone_retry does not pass it):
-        # the repo's reference/svt-av1 submodule is the C differential oracle,
-        # a dev-only dependency of that repo's own harnesses. The pure-Rust
-        # `zenav1-svt*` crates this crate depends on never reference it, and
-        # cloning it would pull the whole SVT-AV1 C tree onto every CI job.
-        clone_retry https://github.com/imazen/zenav1-svt.git zenav1-svt
-    - name: Clone imazen/zenav1-aom into ../zenav1-aom
-      shell: bash
-      run: |
-        cd ..
-        . "${RUNNER_TEMP}/clone_retry.sh"
-        clone_retry https://github.com/imazen/zenav1-aom.git zenav1-aom
     - name: Clone imazen/zenrav1e into ../zenrav1e
       shell: bash
       run: |
