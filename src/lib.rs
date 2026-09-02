@@ -74,7 +74,7 @@ pub mod detect;
 mod encode_plan;
 #[cfg(feature = "encode")]
 mod encoder;
-#[cfg(feature = "encode-svt-rs")]
+#[cfg(feature = "zenav1-svt")]
 mod encoder_svt_rs;
 mod error;
 /// Deterministic zenanalyze palette gate (FEATURE_HINTS §E rule 1).
@@ -106,7 +106,7 @@ mod strip_convert;
 /// re-exported as `expert::SvtParams` behind `__expert`. Gated on
 /// the two features that consume it: the svt-rs encode seam and the
 /// `__expert` sweep planner. Both imply `encode`.
-#[cfg(any(feature = "encode-svt-rs", feature = "__expert"))]
+#[cfg(any(feature = "zenav1-svt", feature = "__expert"))]
 mod svt_params;
 /// Budgeted sweep-plan construction over the encoder knob space
 /// (calibration tooling; unstable like everything behind `__expert`).

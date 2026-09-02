@@ -178,9 +178,9 @@ pub struct MasteringDisplayConfig {
 /// AV1 encoder backend selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 /// `#[non_exhaustive]`: this enum gains a variant every time a backend is
-/// added — `SvtRs` is the most recent — so downstream exhaustive matches need
+/// added — `Zenav1Svt` is the most recent — so downstream exhaustive matches need
 /// a `_` arm. Marking it now means the NEXT backend is additive instead of
-/// another break; the CHANGELOG already queued this break for the `SvtRs`
+/// another break; the CHANGELOG already queued this break for the `Zenav1Svt`
 /// addition, so taking it in the same release costs nothing extra.
 #[non_exhaustive]
 pub enum Av1Backend {
@@ -195,14 +195,14 @@ pub enum Av1Backend {
     /// yet pass decode conformance — and the draft path returned raw AV1
     /// OBUs instead of an AVIF file). [`EncoderConfig::validate`] rejects
     /// it. The variant is retained only for enum compatibility; the
-    /// working integration is [`Av1Backend::SvtRs`].
+    /// working integration is [`Av1Backend::Zenav1Svt`].
     #[deprecated(
         note = "the encode-svtav1 feature was never shipped and no build can encode with this \
-                backend; EncoderConfig::validate() rejects it — use Av1Backend::SvtRs"
+                backend; EncoderConfig::validate() rejects it — use Av1Backend::Zenav1Svt"
     )]
     Svtav1,
     /// svtav1-rs (pure Rust SVT-AV1 port) — EXPERIMENTAL, behind the
-    /// `encode-svt-rs` cargo feature (default off).
+    /// `zenav1-svt` cargo feature (default off).
     ///
     /// This is the working successor the [`Av1Backend::Svtav1`] doc
     /// promised. At the pinned imazen/svtav1 rev the port emits
@@ -226,7 +226,25 @@ pub enum Av1Backend {
     /// needs speed >= 5 (SVT preset >= 6) and multiples of 8.
     /// [`EncoderConfig::validate`] rejects the variant when the feature
     /// is off, and rejects configs outside the supported scope when on.
-    SvtRs,
+    Zenav1Svt,
+}
+
+impl Av1Backend {
+    /// Deprecated spelling of [`Av1Backend::Zenav1Svt`].
+    ///
+    /// The backend crate was renamed `svtav1-rs` -> `zenav1-svt`, so this
+    /// variant name no longer matches anything that exists. Kept as an
+    /// associated constant so existing consumers keep compiling in both
+    /// expression and pattern position (the enum derives `PartialEq` /
+    /// `Eq`, so the constant is structural-match and is usable in a
+    /// `match` arm).
+    #[deprecated(
+        since = "0.1.8",
+        note = "renamed to `Av1Backend::Zenav1Svt` to match the zenav1-svt crate; \
+                the alias is removed in 0.2"
+    )]
+    #[allow(non_upper_case_globals)]
+    pub const SvtRs: Self = Self::Zenav1Svt;
 }
 
 #[derive(Debug, Clone)]
@@ -344,14 +362,14 @@ pub struct EncoderConfig {
     /// there behind `zenravif::FRAME_HINTS_LIVE`.
     #[cfg(any(feature = "two-pass-butteraugli", feature = "two-pass-zensim"))]
     pub(crate) sb_q_scale: Option<Box<[f32]>>,
-    /// Still-image knobs for the [`Av1Backend::SvtRs`] backend
+    /// Still-image knobs for the [`Av1Backend::Zenav1Svt`] backend
     /// (`expert::SvtParams`). The [`Default`] is exactly what the
     /// svt-rs seam configures with no params set, so the field is inert
     /// unless a caller opts in via `EncoderConfig::with_svt_params`
     /// (`__expert` only). Ignored by every other backend (and by the sweep
     /// fingerprint on those backends, so an inert spelling cannot mint a
     /// duplicate cell).
-    #[cfg(any(feature = "encode-svt-rs", feature = "__expert"))]
+    #[cfg(any(feature = "zenav1-svt", feature = "__expert"))]
     pub(crate) svt: crate::svt_params::SvtParams,
 }
 
@@ -421,7 +439,7 @@ impl Default for EncoderConfig {
             fast_tier_budgets: None,
             #[cfg(any(feature = "two-pass-butteraugli", feature = "two-pass-zensim"))]
             sb_q_scale: None,
-            #[cfg(any(feature = "encode-svt-rs", feature = "__expert"))]
+            #[cfg(any(feature = "zenav1-svt", feature = "__expert"))]
             svt: crate::svt_params::SvtParams::default(),
         }
     }
@@ -438,7 +456,7 @@ impl EncoderConfig {
     /// Select the AV1 encoder backend.
     ///
     /// `Av1Backend::Zenravif` (the default) is always available;
-    /// `Av1Backend::SvtRs` needs the `encode-svt-rs` cargo feature (and
+    /// `Av1Backend::Zenav1Svt` needs the `zenav1-svt` cargo feature (and
     /// supports 8-bit 4:2:0 stills only — see the variant docs); the
     /// deprecated `Svtav1` variant is rejected by
     /// [`validate`](Self::validate).
@@ -650,7 +668,7 @@ impl EncoderConfig {
     /// **Backend note:** no available backend consults this field. The
     /// zenravif backend derives the matrix it actually signals from
     /// [`color_model`](Self::color_model) (YCbCr → BT.601, RGB →
-    /// Identity); the experimental `SvtRs` backend pins BT.601 (its
+    /// Identity); the experimental `Zenav1Svt` backend pins BT.601 (its
     /// only supported model is 4:2:0 YCbCr); the field's only reader
     /// was the deprecated svtav1 path. It is retained for config
     /// coherence — the zencodec layer mirrors the source CICP triple
@@ -872,7 +890,7 @@ impl EncoderConfig {
     /// previously-set fields wholesale (the struct is the unit of
     /// configuration, not the individual fields).
     /// Apply the expert-only `expert::SvtParams` still-image knobs
-    /// for the [`Av1Backend::SvtRs`] backend.
+    /// for the [`Av1Backend::Zenav1Svt`] backend.
     ///
     /// **Unstable surface** — see `crate::expert`. The struct is the unit
     /// of configuration: calling this replaces every field wholesale. The
@@ -889,7 +907,7 @@ impl EncoderConfig {
         self
     }
 
-    /// The still-image knobs the [`Av1Backend::SvtRs`] encode will run,
+    /// The still-image knobs the [`Av1Backend::Zenav1Svt`] encode will run,
     /// after `SvtParams::clamped`.
     #[cfg(feature = "__expert")]
     #[must_use]
@@ -900,9 +918,9 @@ impl EncoderConfig {
     /// The clamped still-image knobs the svt-rs seam actually applies.
     ///
     /// Always compiled: `apply_svt_params` in `src/encoder_svt_rs.rs` runs on
-    /// the plain `encode-svt-rs` path, where `__expert` (and therefore the
+    /// the plain `zenav1-svt` path, where `__expert` (and therefore the
     /// public `svt_params()` above) is off.
-    #[cfg(any(feature = "encode-svt-rs", feature = "__expert"))]
+    #[cfg(any(feature = "zenav1-svt", feature = "__expert"))]
     pub(crate) fn svt_params_resolved(&self) -> crate::svt_params::SvtParams {
         self.svt.clamped()
     }
@@ -1064,7 +1082,7 @@ pub(crate) fn effective_qm(config: &EncoderConfig) -> bool {
     config.enable_qm && !config.lossless
 }
 
-/// Reject `Av1Backend::SvtRs` on entry points it does not implement.
+/// Reject `Av1Backend::Zenav1Svt` on entry points it does not implement.
 ///
 /// The svtav1-rs backend covers still encodes only (RGB/RGBA 8- and
 /// 16-bit → 4:2:0 at 8 or 10 bits, plus grayscale); every other entry
@@ -1073,9 +1091,9 @@ pub(crate) fn effective_qm(config: &EncoderConfig) -> bool {
 /// `Svtav1` variant keeps its historical behavior: rejected by
 /// `validate()`, silently zenravif-served otherwise.)
 fn reject_svt_rs_backend(config: &EncoderConfig, entry: &'static str) -> Result<()> {
-    if config.backend == Av1Backend::SvtRs {
+    if config.backend == Av1Backend::Zenav1Svt {
         return Err(at!(Error::Encode(format!(
-            "Av1Backend::SvtRs does not support {entry} \
+            "Av1Backend::Zenav1Svt does not support {entry} \
              (RGB/RGBA/grayscale still encodes only); \
              use Av1Backend::Zenravif"
         ))));
@@ -1304,7 +1322,7 @@ pub fn encode_rgb8(
     // The monotonicity probe's anchor tiers are calibrated for the
     // zenravif speed ladder; the svtav1-rs backend takes the plain
     // single-encode path (its own speed↔RD behavior is unmeasured here).
-    if config.backend == Av1Backend::SvtRs {
+    if config.backend == Av1Backend::Zenav1Svt {
         return encode_rgb8_once(img, config, stop);
     }
     #[cfg(all(feature = "target-quality", feature = "auto-tune"))]
@@ -1330,15 +1348,15 @@ pub(crate) fn encode_rgb8_once(
     // Backend dispatch: the svtav1-rs backend covers exactly this entry
     // point (8-bit RGB → 4:2:0 still). It must never be served silently
     // by zenravif — the backend field is a contract, not a hint.
-    if config.backend == Av1Backend::SvtRs {
-        #[cfg(feature = "encode-svt-rs")]
+    if config.backend == Av1Backend::Zenav1Svt {
+        #[cfg(feature = "zenav1-svt")]
         {
             return crate::encoder_svt_rs::encode_rgb8_svt_rs(img, config, stop);
         }
-        #[cfg(not(feature = "encode-svt-rs"))]
+        #[cfg(not(feature = "zenav1-svt"))]
         {
             return Err(at!(Error::Unsupported(
-                "Av1Backend::SvtRs requires the `encode-svt-rs` cargo feature"
+                "Av1Backend::Zenav1Svt requires the `zenav1-svt` cargo feature"
             )));
         }
     }
@@ -1373,13 +1391,13 @@ pub fn encode_gray8(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    #[cfg(feature = "encode-svt-rs")]
-    if config.backend == Av1Backend::SvtRs {
+    #[cfg(feature = "zenav1-svt")]
+    if config.backend == Av1Backend::Zenav1Svt {
         return crate::encoder_svt_rs::encode_gray8_svt_rs(img, config, stop);
     }
     reject_svt_rs_backend(
         config,
-        "encode_gray8 (requires the `encode-svt-rs` cargo feature)",
+        "encode_gray8 (requires the `zenav1-svt` cargo feature)",
     )?;
 
     let enc = build_ravif_encoder(config, stop, false)?;
@@ -1414,7 +1432,7 @@ pub fn encode_rgba8(
 ) -> Result<EncodedImage> {
     // Skip the probe machinery for the svtav1-rs backend: `encode_rgba8_once`
     // dispatches it directly (no monotonicity-probe support there).
-    if config.backend == Av1Backend::SvtRs {
+    if config.backend == Av1Backend::Zenav1Svt {
         return encode_rgba8_once(img, config, stop);
     }
     #[cfg(all(feature = "target-quality", feature = "auto-tune"))]
@@ -1434,13 +1452,13 @@ pub(crate) fn encode_rgba8_once(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    #[cfg(feature = "encode-svt-rs")]
-    if config.backend == Av1Backend::SvtRs {
+    #[cfg(feature = "zenav1-svt")]
+    if config.backend == Av1Backend::Zenav1Svt {
         return crate::encoder_svt_rs::encode_rgba8_svt_rs(img, config, stop);
     }
     reject_svt_rs_backend(
         config,
-        "encode_rgba8 (requires the `encode-svt-rs` cargo feature)",
+        "encode_rgba8 (requires the `zenav1-svt` cargo feature)",
     )?;
     let enc = build_ravif_encoder(config, stop, false)?;
     let result = enc
@@ -1477,13 +1495,13 @@ pub fn encode_rgb16(
 ) -> Result<EncodedImage> {
     use crate::convert::{narrow_to_u8, scale_from_u16};
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    #[cfg(feature = "encode-svt-rs")]
-    if config.backend == Av1Backend::SvtRs {
+    #[cfg(feature = "zenav1-svt")]
+    if config.backend == Av1Backend::Zenav1Svt {
         return crate::encoder_svt_rs::encode_rgb16_svt_rs(img, config, stop);
     }
     reject_svt_rs_backend(
         config,
-        "encode_rgb16 (requires the `encode-svt-rs` cargo feature)",
+        "encode_rgb16 (requires the `zenav1-svt` cargo feature)",
     )?;
     let enc = build_ravif_encoder(config, stop, true)?;
     let width = img.width();
@@ -1572,13 +1590,13 @@ pub fn encode_rgba16(
 ) -> Result<EncodedImage> {
     use crate::convert::{narrow_to_u8, scale_from_u16};
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    #[cfg(feature = "encode-svt-rs")]
-    if config.backend == Av1Backend::SvtRs {
+    #[cfg(feature = "zenav1-svt")]
+    if config.backend == Av1Backend::Zenav1Svt {
         return crate::encoder_svt_rs::encode_rgba16_svt_rs(img, config, stop);
     }
     reject_svt_rs_backend(
         config,
-        "encode_rgba16 (requires the `encode-svt-rs` cargo feature)",
+        "encode_rgba16 (requires the `zenav1-svt` cargo feature)",
     )?;
     let enc = build_ravif_encoder(config, stop, true)?;
     let width = img.width();

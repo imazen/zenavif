@@ -144,7 +144,7 @@ impl DecoderConfig {
     /// (primary + alpha + gain-map items). Default
     /// [`crate::DecodeBackend::Rav1dSafe`].
     ///
-    /// [`crate::DecodeBackend::AomRs`] (feature `aom-backend`, EXPERIMENTAL)
+    /// [`crate::DecodeBackend::Zenav1Aom`] (feature `zenav1-aom`, EXPERIMENTAL)
     /// routes item decodes through the zenav1-aom pure-Rust decoder —
     /// byte-identical to rav1d-safe on every still tested (8/10/12-bit,
     /// mono, 4:2:0/4:2:2/4:4:4, film grain, all conformance + sweep cells).

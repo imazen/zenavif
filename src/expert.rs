@@ -230,11 +230,11 @@ pub struct InternalParams {
 }
 
 // ============================================================================
-// SVT-AV1 still-image knobs (`Av1Backend::SvtRs`)
+// SVT-AV1 still-image knobs (`Av1Backend::Zenav1Svt`)
 // ============================================================================
 
 // `SvtParams` is DEFINED in the private, always-compiled `crate::svt_params`
-// module and re-exported here, because the `encode-svt-rs` seam needs the type
+// module and re-exported here, because the `zenav1-svt` seam needs the type
 // with `__expert` off. Publicly it is only ever reachable as
 // `zenavif::expert::SvtParams`, so this re-export is the whole public surface.
 pub use crate::svt_params::SvtParams;

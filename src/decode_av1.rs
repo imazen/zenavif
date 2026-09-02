@@ -52,11 +52,10 @@ pub fn decode_av1_obu(data: &[u8]) -> Result<(Vec<u8>, u32, u32, u8)> {
 /// `decode_backend` like the primary/alpha item decodes do.
 pub(crate) fn decode_av1_obu_with_config(
     data: &[u8],
-    #[cfg_attr(not(feature = "aom-backend"), allow(unused_variables))]
-    config: &crate::DecoderConfig,
+    #[cfg_attr(not(feature = "zenav1-aom"), allow(unused_variables))] config: &crate::DecoderConfig,
 ) -> Result<(Vec<u8>, u32, u32, u8)> {
-    #[cfg(feature = "aom-backend")]
-    if config.decode_backend == crate::DecodeBackend::AomRs {
+    #[cfg(feature = "zenav1-aom")]
+    if config.decode_backend == crate::DecodeBackend::Zenav1Aom {
         return decode_av1_obu_aom_8bit(data, config);
     }
     if data.is_empty() {
@@ -485,22 +484,41 @@ impl DecodedYuv {
 /// Which AV1 decode kernel to run behind zenavif's raw-OBU decode seam.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// `#[non_exhaustive]`: same reasoning as [`crate::Av1Backend`] — this enum
-/// already went `Rav1dSafe` -> `+AomRs` -> `+Rav1dFfi` and will keep growing,
+/// already went `Rav1dSafe` -> `+Zenav1Aom` -> `+Rav1dFfi` and will keep growing,
 /// so a new decode backend should not break every downstream match.
 #[non_exhaustive]
 pub enum DecodeBackend {
     /// The default pure-Rust rav1d-safe managed decoder (full AV1 profile).
     Rav1dSafe,
     /// The aom-rs pure-Rust decoder (KEY-frame / intra scope; byte-identical
-    /// to libaom on the AV1 conformance corpus). Requires the `aom-backend`
+    /// to libaom on the AV1 conformance corpus). Requires the `zenav1-aom`
     /// feature.
-    #[cfg(feature = "aom-backend")]
-    AomRs,
+    #[cfg(feature = "zenav1-aom")]
+    Zenav1Aom,
     /// The rav1d FFI decoder — upstream rav1d with its full hand-written
     /// assembly (unsafe). Requires the `unsafe-asm` feature. This is the
     /// asm-speed reference arm of the decode benchmark.
     #[cfg(feature = "unsafe-asm")]
     Rav1dFfi,
+}
+
+impl DecodeBackend {
+    /// Deprecated spelling of [`DecodeBackend::Zenav1Aom`].
+    ///
+    /// The backend crate was renamed `aom-rs` -> `zenav1-aom`, so this
+    /// variant name no longer matches anything that exists. Kept as an
+    /// associated constant so existing consumers keep compiling in both
+    /// expression and pattern position (the enum derives `PartialEq` /
+    /// `Eq`, so the constant is structural-match and is usable in a
+    /// `match` arm).
+    #[cfg(feature = "zenav1-aom")]
+    #[deprecated(
+        since = "0.1.8",
+        note = "renamed to `DecodeBackend::Zenav1Aom` to match the zenav1-aom crate; \
+                the alias is removed in 0.2"
+    )]
+    #[allow(non_upper_case_globals)]
+    pub const AomRs: Self = Self::Zenav1Aom;
 }
 
 /// Decode a raw AV1 OBU temporal unit to tight YUV planes via the selected
@@ -528,7 +546,7 @@ pub fn decode_av1_obu_yuv(data: &[u8], backend: DecodeBackend) -> Result<Decoded
 ///   `Settings::frame_size_limit` (header-rejected before frame allocation);
 ///   `stop` is polled at the phase boundary (the managed single-frame call
 ///   has no in-loop hook on this seam).
-/// * **AomRs** — the full upstream `DecodeConfig`: `frame_size_limit` as
+/// * **Zenav1Aom** — the full upstream `DecodeConfig`: `frame_size_limit` as
 ///   `DecodeLimits::max_pixels`, `stop` polled in-loop at SB-row/tile/frame
 ///   cadence, and `config.alloc_pref` as the `AllocMode`
 ///   (`CodecDefault`/`Fallible` → fallible pre-flight — untrusted-input
@@ -544,8 +562,8 @@ pub fn decode_av1_obu_yuv_with(
     stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
     match backend {
         DecodeBackend::Rav1dSafe => decode_av1_obu_yuv_rav1d_with(data, config),
-        #[cfg(feature = "aom-backend")]
-        DecodeBackend::AomRs => decode_av1_obu_yuv_aomrs_with(data, config, stop),
+        #[cfg(feature = "zenav1-aom")]
+        DecodeBackend::Zenav1Aom => decode_av1_obu_yuv_aomrs_with(data, config, stop),
         #[cfg(feature = "unsafe-asm")]
         DecodeBackend::Rav1dFfi => crate::decoder::decode_obu_yuv_ffi(data),
     }
@@ -656,10 +674,10 @@ fn decode_av1_obu_yuv_rav1d_with(data: &[u8], config: &crate::DecoderConfig) -> 
 /// to one opaque code).
 /// aom-backed raw-OBU decode to the [`decode_av1_obu`] 8-bit output contract
 /// (`(pixels, w, h, channels)`; 10/12-bit scaled down to 8-bit). Serves the
-/// gain-map decode path when `decode_backend == AomRs`. Same CICP handling
+/// gain-map decode path when `decode_backend == Zenav1Aom`. Same CICP handling
 /// as the rav1d arm: raw OBUs carry no container, so an unspecified MC
 /// disambiguates via the AVIF default.
-#[cfg(feature = "aom-backend")]
+#[cfg(feature = "zenav1-aom")]
 fn decode_av1_obu_aom_8bit(
     data: &[u8],
     config: &crate::DecoderConfig,
@@ -762,7 +780,7 @@ fn decode_av1_obu_aom_8bit(
 /// [`Error`] variant (backend-seam obligation 1 — the failure category
 /// survives to `CategorizedError::category()`). Shared by the raw-OBU seam
 /// and the aom-backed product decode path.
-#[cfg(feature = "aom-backend")]
+#[cfg(feature = "zenav1-aom")]
 pub(crate) fn map_aom_error(e: aom_decode::DecodeError) -> whereat::At<Error> {
     use aom_decode::DecodeError as AomError;
     match e {
@@ -802,7 +820,7 @@ pub(crate) fn map_aom_error(e: aom_decode::DecodeError) -> whereat::At<Error> {
 /// allocation mode (CodecDefault/Fallible -> fallible pre-flight, the
 /// untrusted-input default; Infallible -> fast path). The stop token is
 /// attached at the call site (lifetime-bound).
-#[cfg(feature = "aom-backend")]
+#[cfg(feature = "zenav1-aom")]
 pub(crate) fn aom_config_from<'a>(config: &crate::DecoderConfig) -> aom_decode::DecodeConfig<'a> {
     let mut limits = aom_decode::DecodeLimits::new();
     limits.max_pixels = (config.frame_size_limit > 0).then_some(u64::from(config.frame_size_limit));
@@ -815,7 +833,7 @@ pub(crate) fn aom_config_from<'a>(config: &crate::DecoderConfig) -> aom_decode::
         .with_alloc(alloc)
 }
 
-#[cfg(feature = "aom-backend")]
+#[cfg(feature = "zenav1-aom")]
 fn decode_av1_obu_yuv_aomrs_with(
     data: &[u8],
     config: &crate::DecoderConfig,

@@ -7,8 +7,8 @@
 //!     the decode seam already uses);
 //!  2. decodes the AVIF back with zenavif's rav1d-safe decoder and scores
 //!     SSIMULACRA2 against the source;
-//!  3. (feature `aom-backend`) extracts the AV1 OBU payload and decodes it
-//!     with BOTH `DecodeBackend::Rav1dSafe` and `DecodeBackend::AomRs`,
+//!  3. (feature `zenav1-aom`) extracts the AV1 OBU payload and decodes it
+//!     with BOTH `DecodeBackend::Rav1dSafe` and `DecodeBackend::Zenav1Aom`,
 //!     byte-comparing the planes — every encoded cell doubles as a
 //!     cross-decoder conformance cell on bitstreams *our* encoders produced
 //!     (the conformance corpus only ever covered aomenc output);
@@ -23,7 +23,7 @@
 //! Usage:
 //! ```text
 //! cargo run --release --example encode_backend_sweep \
-//!   --features encode,encode-svt-rs,aom-backend -- \
+//!   --features encode,zenav1-svt,zenav1-aom -- \
 //!   --corpus /root/codec-corpus/CID22/CID22-512/validation \
 //!   --images 8 --sizes 256,512,1024 --qualities 5..=100:5 \
 //!   --speeds 6 --threads 8 --out /tmp/backend_sweep.tsv
@@ -42,7 +42,7 @@ use zenavif::EncodeChromaSubsampling;
 use zenavif::{Av1Backend, EncoderConfig};
 
 /// One comparison arm: a backend at a fixed chroma subsampling. Both
-/// backends run 4:2:0 for the apples-to-apples RD comparison (SvtRs encodes
+/// backends run 4:2:0 for the apples-to-apples RD comparison (Zenav1Svt encodes
 /// 4:2:0 only); the zenravif 4:4:4 arm is its shipped default, kept as a
 /// reference curve.
 #[derive(Clone, Copy)]
@@ -181,7 +181,7 @@ fn ssim2(a: ImgRef<'_, Rgb<u8>>, b: ImgRef<'_, Rgb<u8>>) -> Result<f64, String> 
 /// Cross-decoder gate: decode the AV1 payload with rav1d-safe and aom-rs
 /// through the seam and byte-compare the planes. Returns a status string for
 /// the TSV (`identical`, `aom-unsupported:<..>`, or a divergence label).
-#[cfg(feature = "aom-backend")]
+#[cfg(feature = "zenav1-aom")]
 fn aom_cross_gate(avif: &[u8]) -> String {
     use zenavif::{DecodeBackend, decode_av1_obu_yuv};
     // Lenient on purpose: a corpus file with a container quirk should still
@@ -206,12 +206,12 @@ fn aom_cross_gate(avif: &[u8]) -> String {
     };
     // aom-decode wants a full temporal unit; AVIF item payloads may omit the
     // temporal delimiter OBU — retry with one prepended before failing.
-    let aom = match decode_av1_obu_yuv(&payload, DecodeBackend::AomRs) {
+    let aom = match decode_av1_obu_yuv(&payload, DecodeBackend::Zenav1Aom) {
         Ok(d) => d,
         Err(_) => {
             let mut with_td = vec![0x12, 0x00];
             with_td.extend_from_slice(&payload);
-            match decode_av1_obu_yuv(&with_td, DecodeBackend::AomRs) {
+            match decode_av1_obu_yuv(&with_td, DecodeBackend::Zenav1Aom) {
                 Ok(d) => d,
                 Err(e) => return format!("aom-error:{e}"),
             }
@@ -231,9 +231,9 @@ fn aom_cross_gate(avif: &[u8]) -> String {
     "identical".to_string()
 }
 
-#[cfg(not(feature = "aom-backend"))]
+#[cfg(not(feature = "zenav1-aom"))]
 fn aom_cross_gate(_avif: &[u8]) -> String {
-    "aom-backend-off".to_string()
+    "zenav1-aom-off".to_string()
 }
 
 struct Cell {
@@ -390,10 +390,10 @@ fn main() {
                 subsampling: EncodeChromaSubsampling::Yuv444,
             },
         ];
-        #[cfg(feature = "encode-svt-rs")]
+        #[cfg(feature = "zenav1-svt")]
         b.push(Arm {
             label: "svt-rs-420",
-            backend: Av1Backend::SvtRs,
+            backend: Av1Backend::Zenav1Svt,
             subsampling: EncodeChromaSubsampling::Yuv420,
         });
         b

@@ -233,9 +233,9 @@ pub struct SweepAxes {
     /// zenravif-era preset carries) leaves cell ids, fingerprints and
     /// deviation counts byte-identical to the pre-backend-axis planner.
     ///
-    /// [`Av1Backend::SvtRs`] requires the `encode-svt-rs` feature; in a
+    /// [`Av1Backend::Zenav1Svt`] requires the `zenav1-svt` feature; in a
     /// build without it `EncoderConfig::validate` rejects the backend, so
-    /// every SvtRs stratum lands in [`SweepPlan::invalid_skipped`] and is
+    /// every Zenav1Svt stratum lands in [`SweepPlan::invalid_skipped`] and is
     /// reported rather than silently dropped.
     pub backends: Vec<crate::Av1Backend>,
     /// Speed presets (1–10).
@@ -512,7 +512,7 @@ impl SweepAxes {
     /// zenravif-only knobs — QM/VAQ/trellis/probes are zenrav1e concepts
     /// the svt-rs path does not read).
     ///
-    /// Requires the `encode-svt-rs` feature; without it every cell is
+    /// Requires the `zenav1-svt` feature; without it every cell is
     /// reported in [`SweepPlan::invalid_skipped`].
     ///
     /// The whole point of routing this shape through the planner is that
@@ -522,7 +522,7 @@ impl SweepAxes {
     #[must_use]
     pub fn svt_speed_dense() -> Self {
         Self {
-            backends: vec![crate::Av1Backend::SvtRs],
+            backends: vec![crate::Av1Backend::Zenav1Svt],
             // Default 4 first (the index-0 stratum), then the rest of the
             // dial — the budget ladder sheds from the tail.
             speeds: vec![4, 1, 2, 3, 5, 6, 7, 8, 9, 10],
@@ -1562,7 +1562,7 @@ impl Stratum {
         #[allow(deprecated)]
         match self.backend {
             crate::Av1Backend::Zenravif => {}
-            crate::Av1Backend::SvtRs => s.push_str("-svt"),
+            crate::Av1Backend::Zenav1Svt => s.push_str("-svt"),
             // validate() rejects this backend in every build, so no plan
             // can carry it; the token exists for id totality.
             crate::Av1Backend::Svtav1 => s.push_str("-svtav1"),
@@ -1838,7 +1838,7 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
     let mut h = Fnv::new();
 
     // Backend. The deprecated Svtav1 variant still hashes distinctly:
-    // conservative (validate() rejects it, so no plan carries it). SvtRs
+    // conservative (validate() rejects it, so no plan carries it). Zenav1Svt
     // hashes distinctly too — its bitstreams share nothing with zenravif's
     // (the sweep planner itself remains zenravif-calibrated; see the
     // module docs).
@@ -1846,13 +1846,13 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
     h.u8(match config.backend {
         crate::Av1Backend::Zenravif => 0,
         crate::Av1Backend::Svtav1 => 1,
-        crate::Av1Backend::SvtRs => 2,
+        crate::Av1Backend::Zenav1Svt => 2,
     });
 
     // Whether the zenravif mediators (quantizer curve + speed_derived
     // search table) are the ones this backend actually reads. svt-rs
     // reads NEITHER — see the svt-rs block below.
-    let zenravif_mediated = config.backend != crate::Av1Backend::SvtRs;
+    let zenravif_mediated = config.backend != crate::Av1Backend::Zenav1Svt;
 
     // Resolved quantizers (quality is mediated; lossless pins 0).
     let lossless = config.lossless_effective();
@@ -1881,7 +1881,7 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
     // (zenmetrics `benchmarks/avif_sweep_permutation_retrofit_2026-09-01.md`):
     //   * speeds 7, 8, 9, 10 all resolve to preset 9 -> ONE encode;
     //   * quality 98 and 100 both resolve to QP 1 -> ONE encode.
-    #[cfg(feature = "encode-svt-rs")]
+    #[cfg(feature = "zenav1-svt")]
     if !zenravif_mediated {
         let (preset, qp, alpha_qp) = crate::encoder_svt_rs::svt_resolved_identity(config);
         h.u8(preset);
@@ -1927,7 +1927,7 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
     // `EncoderConfig::validate` rejects the backend, so `cross` files every
     // such stratum under `invalid_skipped` and no plan can carry one. The
     // backend byte above already keeps it apart from a zenravif cell.
-    #[cfg(not(feature = "encode-svt-rs"))]
+    #[cfg(not(feature = "zenav1-svt"))]
     let _ = zenravif_mediated;
 
     // Pixel-path knobs.
@@ -2243,7 +2243,7 @@ pub fn config_from_cell_id(base_id: &str, quality: f32) -> Result<EncoderConfig,
             }
             t
         } else if let Some(t) = tok.strip_prefix("svt") {
-            stratum.backend = crate::Av1Backend::SvtRs;
+            stratum.backend = crate::Av1Backend::Zenav1Svt;
             t
         } else if let Some(t) = tok.strip_prefix("noqm") {
             stratum.qm = false;
@@ -2497,7 +2497,7 @@ mod tests {
     fn svt_cell_ids_roundtrip_to_their_configs() {
         for id in ["s4-svt", "s1-svt", "s10-svt", "s7-svt-420"] {
             let cfg = config_from_cell_id(id, 72.0).unwrap();
-            assert_eq!(cfg.backend, crate::Av1Backend::SvtRs, "id {id}");
+            assert_eq!(cfg.backend, crate::Av1Backend::Zenav1Svt, "id {id}");
         }
     }
 
@@ -2506,7 +2506,7 @@ mod tests {
     /// all land on preset 9 (C remaps all-intra presets above M9 down to
     /// M9). MEASURED byte-identical, not merely asserted: zenmetrics
     /// `benchmarks/avif_sweep_permutation_retrofit_2026-09-01.md` §3.
-    #[cfg(feature = "encode-svt-rs")]
+    #[cfg(feature = "zenav1-svt")]
     #[test]
     fn svt_speed_dial_merges_the_m9_class() {
         let plan = SweepBuilder::new(
@@ -2543,7 +2543,7 @@ mod tests {
     /// the lossy dial away from QP 0 / lossless), so they are ONE encode.
     /// MEASURED in the live sweep ledger: 28 identical-`output_sha`
     /// groups, every one of them exactly {98, 100} at a fixed speed.
-    #[cfg(feature = "encode-svt-rs")]
+    #[cfg(feature = "zenav1-svt")]
     #[test]
     fn svt_quality_98_and_100_are_one_cell() {
         let mut axes = SweepAxes::svt_speed_dense();
@@ -2561,7 +2561,7 @@ mod tests {
 
     /// A zenravif cell and an svt-rs cell at the same (speed, q) must
     /// NEVER merge: their bitstreams share nothing.
-    #[cfg(feature = "encode-svt-rs")]
+    #[cfg(feature = "zenav1-svt")]
     #[test]
     fn svt_and_zenravif_never_merge() {
         let a = config_from_cell_id("s4-420", 50.0).unwrap();
@@ -2572,7 +2572,7 @@ mod tests {
     /// Without the feature there is no svt-rs encode, so the planner must
     /// REPORT every svt stratum as invalid rather than emit a cell that
     /// cannot be executed.
-    #[cfg(not(feature = "encode-svt-rs"))]
+    #[cfg(not(feature = "zenav1-svt"))]
     #[test]
     fn svt_strata_are_reported_invalid_without_the_feature() {
         let plan = SweepBuilder::new(
@@ -2594,7 +2594,7 @@ mod tests {
     /// The default knob set must be inert: an svt-rs cell that carries it
     /// fingerprints exactly as it did before the axis existed, because the
     /// fingerprint hashes the knobs only when they deviate.
-    #[cfg(feature = "encode-svt-rs")]
+    #[cfg(feature = "zenav1-svt")]
     #[test]
     fn default_svt_knobs_do_not_move_svt_fingerprints() {
         let plain = config_from_cell_id("s4-svt-420", 50.0).unwrap();
@@ -2628,7 +2628,7 @@ mod tests {
     // `SvtParams` is #[non_exhaustive], so Default + field assignment is the
     // only spelling available — same reason `KnobProbe::apply` carries this.
     #[allow(clippy::field_reassign_with_default)]
-    #[cfg(feature = "encode-svt-rs")]
+    #[cfg(feature = "zenav1-svt")]
     #[test]
     fn tune_iq_absorbs_the_knobs_it_forces() {
         let mut iq = crate::expert::SvtParams::default();
@@ -2659,7 +2659,7 @@ mod tests {
     // `SvtParams` is #[non_exhaustive], so Default + field assignment is the
     // only spelling available — same reason `KnobProbe::apply` carries this.
     #[allow(clippy::field_reassign_with_default)]
-    #[cfg(feature = "encode-svt-rs")]
+    #[cfg(feature = "zenav1-svt")]
     #[test]
     fn variance_boost_strength_saturates_and_clamps() {
         let base = config_from_cell_id("s4-svt-420", 50.0).unwrap();
@@ -2730,7 +2730,7 @@ mod tests {
     /// Every DOE cell id must round-trip through the parser to the same
     /// resolved config — the grammar contract `zenmetrics jobexec` relies
     /// on when it re-resolves a stored cell and re-checks its fingerprint.
-    #[cfg(feature = "encode-svt-rs")]
+    #[cfg(feature = "zenav1-svt")]
     #[test]
     fn svt_doe_cell_ids_roundtrip() {
         let plan = SweepBuilder::new(
@@ -2758,7 +2758,7 @@ mod tests {
     /// The main-effects plan at `max_deviations = 1` must contain exactly
     /// the default cell plus one cell per knob arm per speed — no
     /// interactions leak in.
-    #[cfg(feature = "encode-svt-rs")]
+    #[cfg(feature = "zenav1-svt")]
     #[test]
     fn svt_doe_main_at_one_deviation_is_isolated_main_effects() {
         let plan = SweepBuilder::new(SweepAxes::svt_doe_main(), QualityGrid::Explicit(vec![45.0]))
@@ -2776,7 +2776,7 @@ mod tests {
     /// B-6 is the two FAIL-T1 knobs at native, as two 5-level grids that
     /// share one control — and it must stay main-effects-only even though
     /// it runs at `max_deviations = 2`.
-    #[cfg(feature = "encode-svt-rs")]
+    #[cfg(feature = "zenav1-svt")]
     #[test]
     fn svt_doe_b6_is_two_dense_grids_sharing_one_control() {
         use crate::expert::SvtParams;

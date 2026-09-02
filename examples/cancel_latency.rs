@@ -14,7 +14,7 @@
 //!
 //! ```text
 //! cargo run --release --example cancel_latency --features encode
-//! cargo run --release --example cancel_latency --features encode,aom-backend
+//! cargo run --release --example cancel_latency --features encode,zenav1-aom
 //! ```
 //!
 //! Reported per leg: n, min / p50 / p90 / p99 / max cancellation latency, plus

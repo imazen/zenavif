@@ -159,10 +159,10 @@ impl ManagedAvifDecoder {
         sink: &mut dyn zencodec::decode::DecodeRowSink,
     ) -> Result<ImageInfo> {
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
-        #[cfg(feature = "aom-backend")]
-        if self.decode_backend == crate::DecodeBackend::AomRs {
+        #[cfg(feature = "zenav1-aom")]
+        if self.decode_backend == crate::DecodeBackend::Zenav1Aom {
             return Err(at!(Error::Unsupported(
-                "DecodeBackend::AomRs does not stream to a row sink yet; use \
+                "DecodeBackend::Zenav1Aom does not stream to a row sink yet; use \
                  Rav1dSafe or the whole-image decode entry points"
             )));
         }

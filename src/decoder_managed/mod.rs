@@ -19,12 +19,12 @@
 //! | `sink` | row-streaming output (`decode_to_sink`) |
 //! | `animation` | `decode_animation` and [`AnimationDecoder`] |
 //! | `cicp_map` | rav1d ↔ zenavif ↔ `yuv` crate enum translation |
-//! | `aom` | the `aom-backend`-gated still/grid decode path |
+//! | `aom` | the `zenav1-aom`-gated still/grid decode path |
 
 #![deny(unsafe_code)]
 
 mod animation;
-#[cfg(feature = "aom-backend")]
+#[cfg(feature = "zenav1-aom")]
 mod aom;
 mod cicp_map;
 mod decoder;

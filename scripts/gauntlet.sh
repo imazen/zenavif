@@ -28,16 +28,16 @@ fi
 COMBOS=(
   "default:-"
   "encode:encode,encode-imazen"
-  "aom:aom-backend"
-  "svt:encode-svt-rs"
+  "aom:zenav1-aom"
+  "svt:zenav1-svt"
   "tq:target-quality"
-  "backends:encode-imazen,encode-svt-rs,aom-backend,target-quality"
+  "backends:encode-imazen,zenav1-svt,zenav1-aom,target-quality"
   "expert:__expert"
   "autotune:auto-tune"
   "twopass:two-pass-butteraugli,encode-imazen"
   "zloop:two-pass-zensim"
   # Everything that is pure Rust: the real "all features" gate for this crate.
-  "allsafe:aom-backend,encode,encode-imazen,encode-mono,encode-threading,encode-svt-rs,target-quality,two-pass-butteraugli,two-pass-zensim,__expert,auto-tune,_dev"
+  "allsafe:zenav1-aom,encode,encode-imazen,encode-mono,encode-threading,zenav1-svt,target-quality,two-pass-butteraugli,two-pass-zensim,__expert,auto-tune,_dev"
   # Literal --all-features. This additionally pulls `unsafe-asm`, i.e. the
   # legacy rav1d C-FFI decoder, whose aarch64 `.S` sources Apple `cc` refuses
   # to assemble (`-march=armv8.6-a`) — so this combo is EXPECTED to fail on

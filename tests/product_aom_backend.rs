@@ -1,9 +1,9 @@
-//! Product-path aom backend (`DecoderConfig::decode_backend(AomRs)`):
+//! Product-path aom backend (`DecoderConfig::decode_backend(Zenav1Aom)`):
 //! decoding a real AVIF container through the PUBLIC API with the aom
 //! backend must produce byte-identical `PixelBuffer`s to the default
 //! rav1d-safe backend, across bit depths, subsamplings, alpha, and mono —
 //! and reject the not-yet-supported shapes honestly.
-#![cfg(all(feature = "aom-backend", feature = "encode"))]
+#![cfg(all(feature = "zenav1-aom", feature = "encode"))]
 
 use almost_enough::{StopToken, Unstoppable};
 use imgref::{Img, ImgVec};
@@ -43,7 +43,7 @@ fn assert_product_identical(avif: &[u8], label: &str) {
         .unwrap_or_else(|e| panic!("{label}: rav1d-safe decode: {e}"));
     let aom = zenavif::decode_with(
         avif,
-        &DecoderConfig::new().decode_backend(DecodeBackend::AomRs),
+        &DecoderConfig::new().decode_backend(DecodeBackend::Zenav1Aom),
         &Unstoppable,
     )
     .unwrap_or_else(|e| panic!("{label}: aom decode: {e}"));
@@ -132,7 +132,7 @@ fn ten_bit_decodes_identically_across_backends() {
         &enc.avif_file,
         &DecoderConfig::new()
             .prefer_8bit(true)
-            .decode_backend(DecodeBackend::AomRs),
+            .decode_backend(DecodeBackend::Zenav1Aom),
         &Unstoppable,
     )
     .expect("aom prefer_8bit");
@@ -175,7 +175,7 @@ fn animations_decode_identically_across_backends() {
             .unwrap_or_else(|e| panic!("{name}: rav1d open: {e}"));
         let mut aom = zenavif::AnimationDecoder::new(
             &data,
-            &DecoderConfig::new().decode_backend(DecodeBackend::AomRs),
+            &DecoderConfig::new().decode_backend(DecodeBackend::Zenav1Aom),
         )
         .unwrap_or_else(|e| panic!("{name}: aom open: {e}"));
         assert_eq!(rav.info().frame_count, aom.info().frame_count, "{name}");
@@ -234,7 +234,7 @@ fn grid_alpha_refused_on_both_backends() {
         let path = format!("tests/vectors/libavif/{name}");
         let data = std::fs::read(&path)
             .unwrap_or_else(|e| panic!("read {path}: {e} (run: just download-vectors)"));
-        for backend in [DecodeBackend::Rav1dSafe, DecodeBackend::AomRs] {
+        for backend in [DecodeBackend::Rav1dSafe, DecodeBackend::Zenav1Aom] {
             let err = zenavif::decode_with(
                 &data,
                 &DecoderConfig::new().decode_backend(backend),
@@ -268,7 +268,7 @@ fn frame_size_limit_fires_on_aom_product_path() {
     let err = zenavif::decode_with(
         &enc.avif_file,
         &DecoderConfig::new()
-            .decode_backend(DecodeBackend::AomRs)
+            .decode_backend(DecodeBackend::Zenav1Aom)
             .frame_size_limit(10_000),
         &Unstoppable,
     )

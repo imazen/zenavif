@@ -40,12 +40,12 @@ pub struct ManagedAvifDecoder {
     pub(super) alloc_pref: crate::alloc_util::AllocPref,
     /// Which AV1 kernel serves item decodes ([`DecoderConfig::decode_backend`]).
     /// Full decode caps (limits/stop/alloc) are re-threaded per item decode.
-    /// (Only read by the `aom-backend` routing; the rav1d path bakes its caps
+    /// (Only read by the `zenav1-aom` routing; the rav1d path bakes its caps
     /// into `Settings` at construction.)
-    #[cfg_attr(not(feature = "aom-backend"), allow(dead_code))]
+    #[cfg_attr(not(feature = "zenav1-aom"), allow(dead_code))]
     pub(super) decode_backend: crate::DecodeBackend,
     /// Retained caps for the aom-backed item decodes.
-    #[cfg_attr(not(feature = "aom-backend"), allow(dead_code))]
+    #[cfg_attr(not(feature = "zenav1-aom"), allow(dead_code))]
     pub(super) frame_size_limit: u32,
 }
 
@@ -200,8 +200,8 @@ impl ManagedAvifDecoder {
     pub fn decode(&mut self, stop: &(impl Stop + ?Sized)) -> Result<PixelBuffer> {
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
-        #[cfg(feature = "aom-backend")]
-        if self.decode_backend == crate::DecodeBackend::AomRs {
+        #[cfg(feature = "zenav1-aom")]
+        if self.decode_backend == crate::DecodeBackend::Zenav1Aom {
             return self.decode_full_aom(stop).map(|(pixels, _info)| pixels);
         }
 
@@ -245,8 +245,8 @@ impl ManagedAvifDecoder {
     pub fn decode_full(&mut self, stop: &(impl Stop + ?Sized)) -> Result<(PixelBuffer, ImageInfo)> {
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
-        #[cfg(feature = "aom-backend")]
-        if self.decode_backend == crate::DecodeBackend::AomRs {
+        #[cfg(feature = "zenav1-aom")]
+        if self.decode_backend == crate::DecodeBackend::Zenav1Aom {
             return self.decode_full_aom(stop);
         }
 

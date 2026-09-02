@@ -1,4 +1,4 @@
-//! svtav1-rs backend (`encode-svt-rs`) — encode/decode round-trip and
+//! svtav1-rs backend (`zenav1-svt`) — encode/decode round-trip and
 //! scope-rejection coverage.
 //!
 //! Everything here must pass TODAY on the pinned imazen/svtav1 rev.
@@ -10,7 +10,7 @@
 //! the container + round-trip contract through its own decoder
 //! (rav1d-safe) plus the seam's error/clamp composition.
 
-#![cfg(feature = "encode-svt-rs")]
+#![cfg(feature = "zenav1-svt")]
 
 use almost_enough::{StopToken, Unstoppable};
 use imgref::Img;
@@ -28,7 +28,7 @@ fn stop() -> StopToken {
 /// implements (zenavif's default is 4:4:4, which it rejects honestly).
 fn svt_config() -> EncoderConfig {
     EncoderConfig::new()
-        .backend(Av1Backend::SvtRs)
+        .backend(Av1Backend::Zenav1Svt)
         .chroma_subsampling(EncodeChromaSubsampling::Yuv420)
 }
 
@@ -301,15 +301,15 @@ fn svt_rs_partial_sb_roundtrip_at_low_presets() {
                      partial-SB edge coding on the colour path has regressed"
                 );
 
-                #[cfg(feature = "aom-backend")]
+                #[cfg(feature = "zenav1-aom")]
                 {
-                    let aom =
-                        decode_av1_obu_yuv(&payload, DecodeBackend::AomRs).unwrap_or_else(|_| {
+                    let aom = decode_av1_obu_yuv(&payload, DecodeBackend::Zenav1Aom)
+                        .unwrap_or_else(|_| {
                             let mut with_td = vec![0x12, 0x00];
                             with_td.extend_from_slice(&payload);
-                            decode_av1_obu_yuv(&with_td, DecodeBackend::AomRs).unwrap_or_else(|e| {
-                                panic!("{w}x{h} preset {preset} must decode under aom-rs: {e}")
-                            })
+                            decode_av1_obu_yuv(&with_td, DecodeBackend::Zenav1Aom).unwrap_or_else(
+                                |e| panic!("{w}x{h} preset {preset} must decode under aom-rs: {e}"),
+                            )
                         });
                     assert_eq!(
                         (aom.y, aom.u, aom.v),
@@ -592,12 +592,12 @@ fn svt_rs_direct_mono_partial_sb_preset6_roundtrips() {
         );
         // Cross-decoder byte agreement: a mis-coded edge SB that one decoder
         // happens to tolerate must not pass on that decoder's leniency.
-        #[cfg(feature = "aom-backend")]
+        #[cfg(feature = "zenav1-aom")]
         {
-            let aom = decode_av1_obu_yuv(&payload, DecodeBackend::AomRs).unwrap_or_else(|_| {
+            let aom = decode_av1_obu_yuv(&payload, DecodeBackend::Zenav1Aom).unwrap_or_else(|_| {
                 let mut with_td = vec![0x12, 0x00];
                 with_td.extend_from_slice(&payload);
-                decode_av1_obu_yuv(&with_td, DecodeBackend::AomRs).unwrap_or_else(|e| {
+                decode_av1_obu_yuv(&with_td, DecodeBackend::Zenav1Aom).unwrap_or_else(|e| {
                     panic!("mono {w}x{h} preset 6 must decode under aom-rs: {e}")
                 })
             });
@@ -612,7 +612,7 @@ fn svt_rs_direct_mono_partial_sb_preset6_roundtrips() {
 #[test]
 fn svt_rs_rejects_default_yuv444_at_encode_time() {
     let img = gradient_rgb8(64, 64);
-    let config = EncoderConfig::new().backend(Av1Backend::SvtRs); // 4:4:4 default
+    let config = EncoderConfig::new().backend(Av1Backend::Zenav1Svt); // 4:4:4 default
     let err = zenavif::encode_rgb8(img.as_ref(), &config, stop())
         .expect_err("4:4:4 must be rejected, not silently downsampled");
     assert!(err.to_string().contains("4:2:0"), "got: {err}");
@@ -695,7 +695,7 @@ fn svt_rs_rgb16_roundtrip_10bit_pq_with_hdr_metadata() {
             input_is_16bit: true,
             input_has_alpha: false,
         })
-        .expect("16-bit RGB over SvtRs must validate");
+        .expect("16-bit RGB over Zenav1Svt must validate");
 
     let encoded =
         zenavif::encode_rgb16(img.as_ref(), &config, stop()).expect("svt-rs RGB16 encode");
@@ -806,7 +806,7 @@ fn svt_rs_rgb8_bit_depth_ten_codes_10bit_stream() {
         .quality(85.0)
         .speed(6)
         .bit_depth(EncodeBitDepth::Ten);
-    config.validate().expect("Ten validates over SvtRs");
+    config.validate().expect("Ten validates over Zenav1Svt");
     config
         .validate_for_input(PlanInput::rgb8(w as u32, h as u32))
         .expect("RGB8 + Ten validates");
@@ -1053,7 +1053,7 @@ fn svt_rs_roundtrip_rgba_alpha_plane() {
 
 /// Identical color payloads must decode to identical RGB whether or not an
 /// alpha item is present: the RGBA decode path reuses the no-alpha path's
-/// conversion kernel by construction. SvtRs encodes of the same pixels as
+/// conversion kernel by construction. Zenav1Svt encodes of the same pixels as
 /// RGB and as RGBA produce byte-identical color OBUs (alpha travels as a
 /// separate aux item), which makes this directly testable end-to-end.
 #[test]
@@ -1226,7 +1226,7 @@ fn svt_rs_validate_scope() {
     svt_config().validate().expect("Yuv420 svt-rs validates");
 
     // Default 4:4:4 rejected.
-    let cfg = EncoderConfig::new().backend(Av1Backend::SvtRs);
+    let cfg = EncoderConfig::new().backend(Av1Backend::Zenav1Svt);
     assert!(matches!(
         cfg.validate(),
         Err(ValidationError::BackendUnsupportedParam { .. })
@@ -1237,13 +1237,13 @@ fn svt_rs_validate_scope() {
     svt_config()
         .bit_depth(EncodeBitDepth::Ten)
         .validate()
-        .expect("Ten validates over SvtRs");
+        .expect("Ten validates over Zenav1Svt");
 
     // RGB color model rejected (Rgb+420 is globally invalid; the
     // backend check must fire before/alongside it, so use its own path:
     // Rgb+444 → still rejected for this backend).
     let cfg = EncoderConfig::new()
-        .backend(Av1Backend::SvtRs)
+        .backend(Av1Backend::Zenav1Svt)
         .color_model(EncodeColorModel::Rgb);
     assert!(cfg.validate().is_err());
 
@@ -1257,7 +1257,7 @@ fn svt_rs_validate_scope() {
 
 /// The unified perceptual-quality mechanism across backends: the
 /// encode->decode->score secant search (`encode_rgb8_with_target`) dispatches
-/// through `config.backend`, so a SvtRs config must converge on a requested
+/// through `config.backend`, so a Zenav1Svt config must converge on a requested
 /// SSIMULACRA2 score exactly like the zenravif backend does. This is the
 /// "approximate a unified ssim2 target across backends" contract: the same
 /// TargetMetric lands in the same band regardless of which AV1 encoder runs.
@@ -1305,11 +1305,11 @@ fn svt_rs_target_quality_search_converges_on_ssim2() {
         &options,
         stop(),
     )
-    .expect("target search over SvtRs");
+    .expect("target search over Zenav1Svt");
 
     assert!(
         result.converged,
-        "SvtRs target search did not converge: score {:.2} after {} encodes",
+        "Zenav1Svt target search did not converge: score {:.2} after {} encodes",
         result.score, result.encodes
     );
     assert!(
@@ -1318,7 +1318,7 @@ fn svt_rs_target_quality_search_converges_on_ssim2() {
         result.score,
         options.tolerance
     );
-    // The result must be a decodable SvtRs AVIF.
+    // The result must be a decodable Zenav1Svt AVIF.
     let decoded = zenavif::decode(&result.encoded.avif_file).expect("decode targeted encode");
     assert_eq!(decoded.width(), w as u32);
     assert_eq!(decoded.height(), h as u32);
@@ -1487,15 +1487,16 @@ fn svt_rs_direct_qp0_codes_lossless_420() {
 
             // Cross-decoder byte agreement: a stream one decoder happens to
             // reconstruct exactly must not pass on that decoder's leniency.
-            #[cfg(feature = "aom-backend")]
+            #[cfg(feature = "zenav1-aom")]
             {
-                let aom = decode_av1_obu_yuv(&payload, DecodeBackend::AomRs).unwrap_or_else(|_| {
-                    let mut with_td = vec![0x12, 0x00];
-                    with_td.extend_from_slice(&payload);
-                    decode_av1_obu_yuv(&with_td, DecodeBackend::AomRs).unwrap_or_else(|e| {
-                        panic!("qp0 {w}x{h} preset {preset} must decode under aom-rs: {e}")
-                    })
-                });
+                let aom =
+                    decode_av1_obu_yuv(&payload, DecodeBackend::Zenav1Aom).unwrap_or_else(|_| {
+                        let mut with_td = vec![0x12, 0x00];
+                        with_td.extend_from_slice(&payload);
+                        decode_av1_obu_yuv(&with_td, DecodeBackend::Zenav1Aom).unwrap_or_else(|e| {
+                            panic!("qp0 {w}x{h} preset {preset} must decode under aom-rs: {e}")
+                        })
+                    });
                 assert_eq!(
                     (aom.y, aom.u, aom.v),
                     (dec.y.clone(), dec.u.clone(), dec.v.clone()),

@@ -11,7 +11,7 @@
 //! Usage:
 //! ```text
 //! cargo run --release --example decode_backend_bench \
-//!   --features encode,aom-backend -- \
+//!   --features encode,zenav1-aom -- \
 //!   [corpus_dir] [out_csv] [reps]
 //! ```
 
@@ -217,13 +217,13 @@ fn main() {
 
     let backends: &[(&str, DecodeBackend)] = &[
         ("rav1d-safe", DecodeBackend::Rav1dSafe),
-        ("aom-rs", DecodeBackend::AomRs),
+        ("aom-rs", DecodeBackend::Zenav1Aom),
     ];
 
     // Correctness gate before timing.
     for cell in &cells {
         let rav = decode_av1_obu_yuv(&cell.payload, DecodeBackend::Rav1dSafe).expect("rav1d");
-        let aom = decode_av1_obu_yuv(&cell.payload, DecodeBackend::AomRs).expect("aom");
+        let aom = decode_av1_obu_yuv(&cell.payload, DecodeBackend::Zenav1Aom).expect("aom");
         assert_eq!(rav.y, aom.y, "{}: luma diverges", cell.name);
         assert_eq!(
             (rav.u == aom.u, rav.v == aom.v),

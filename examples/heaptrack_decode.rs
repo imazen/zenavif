@@ -21,7 +21,7 @@
 //!   ./target/release/examples/heaptrack_decode <file.avif> 1 --backend aom-rs
 //!
 //! `--backend rav1d-safe|aom-rs` picks the AV1 engine (aom-rs needs the
-//! `aom-backend` feature). On a host without heaptrack — macOS, say — wrap the
+//! `zenav1-aom` feature). On a host without heaptrack — macOS, say — wrap the
 //! binary in `/usr/bin/time -l` and read "maximum resident set size" (BYTES)
 //! for the whole-process peak, and pass `1` for iters so the high-water mark
 //! is a single decode's.
@@ -50,14 +50,14 @@ fn main() {
 
     // `--backend rav1d-safe|aom-rs` selects the AV1 decode engine. Pulled out
     // before the positionals so the `<file> [iters]` shape is unchanged.
-    // aom-rs needs the `aom-backend` feature; it is KEY-frame/intra scope,
+    // aom-rs needs the `zenav1-aom` feature; it is KEY-frame/intra scope,
     // which is exactly what an AVIF still is.
     let mut backend = zenavif::DecodeBackend::Rav1dSafe;
     if let Some(i) = args.iter().position(|a| a == "--backend") {
         backend = match args[i + 1].as_str() {
             "rav1d-safe" => zenavif::DecodeBackend::Rav1dSafe,
-            #[cfg(feature = "aom-backend")]
-            "aom-rs" => zenavif::DecodeBackend::AomRs,
+            #[cfg(feature = "zenav1-aom")]
+            "aom-rs" => zenavif::DecodeBackend::Zenav1Aom,
             other => panic!("--backend must be rav1d-safe|aom-rs, got {other}"),
         };
         args.drain(i..i + 2);

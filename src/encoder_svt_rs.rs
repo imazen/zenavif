@@ -1,8 +1,8 @@
-//! svtav1-rs AVIF encode backend (`encode-svt-rs` feature, EXPERIMENTAL).
+//! svtav1-rs AVIF encode backend (`zenav1-svt` feature, EXPERIMENTAL).
 //!
 //! Routes [`crate::encoder::encode_rgb8`] through the pure-Rust SVT-AV1 port
 //! ([imazen/svtav1](https://github.com/imazen/svtav1), `svtav1-rs/`) when
-//! [`crate::Av1Backend::SvtRs`] is selected. Unlike the zenravif backend —
+//! [`crate::Av1Backend::Zenav1Svt`] is selected. Unlike the zenravif backend —
 //! where zenravif itself muxes the AVIF container — this backend drives the
 //! `svtav1_encoder::pipeline::EncodePipeline` directly and muxes in-crate via
 //! `zenavif-serialize`.
@@ -363,7 +363,7 @@ pub(crate) fn svt_rs_dims_error(
     let preset = speed_to_svt_preset(speed);
     if mono_plane && preset < MONO_PARTIAL_SB_MIN_PRESET {
         return Some(
-            "Av1Backend::SvtRs codes alpha and grayscale (Cs400) dimensions that are not \
+            "Av1Backend::Zenav1Svt codes alpha and grayscale (Cs400) dimensions that are not \
              multiples of 64 only at SVT preset >= 6 (speed >= 5): the svtav1-rs monochrome \
              partial-superblock edge coding is measured only from that preset. Use speed >= 5, \
              pad/crop to multiples of 64, use RGB input, or use the zenravif backend",
@@ -371,7 +371,7 @@ pub(crate) fn svt_rs_dims_error(
     }
     if mono_plane && (!width.is_multiple_of(8) || !height.is_multiple_of(8)) {
         return Some(
-            "Av1Backend::SvtRs alpha and grayscale (Cs400) streams need dimensions \
+            "Av1Backend::Zenav1Svt alpha and grayscale (Cs400) streams need dimensions \
              that are multiples of 8 (the svtav1-rs monochrome path pads no partial \
              8x8 block yet), and the alpha item must match the colour item's size. \
              Use RGB input, pad/crop to multiples of 8, or use the zenravif backend",
@@ -389,33 +389,33 @@ pub(crate) fn svt_rs_dims_error(
 fn reject_unsupported_config(config: &EncoderConfig) -> Result<()> {
     if config.chroma_subsampling != EncodeChromaSubsampling::Yuv420 {
         return Err(at!(Error::Unsupported(
-            "Av1Backend::SvtRs encodes 4:2:0 only: set \
+            "Av1Backend::Zenav1Svt encodes 4:2:0 only: set \
              .chroma_subsampling(EncodeChromaSubsampling::Yuv420) \
              (the 4:4:4 default is zenravif-only for now)"
         )));
     }
     if config.color_model != EncodeColorModel::YCbCr {
         return Err(at!(Error::Unsupported(
-            "Av1Backend::SvtRs supports the YCbCr color model only \
+            "Av1Backend::Zenav1Svt supports the YCbCr color model only \
              (identity/RGB has no defined 4:2:0 subsampling)"
         )));
     }
     if config.pixel_range == Some(EncodePixelRange::Limited) {
         return Err(at!(Error::Unsupported(
-            "Av1Backend::SvtRs signals full pixel range only \
+            "Av1Backend::Zenav1Svt signals full pixel range only \
              (the svtav1-rs sequence header pins color_range=1)"
         )));
     }
     if config.gain_map.is_some() {
         return Err(at!(Error::Unsupported(
-            "Av1Backend::SvtRs does not support gain maps yet \
+            "Av1Backend::Zenav1Svt does not support gain maps yet \
              (use the zenravif backend)"
         )));
     }
     #[cfg(feature = "encode-imazen")]
     if config.lossless {
         return Err(at!(Error::Unsupported(
-            "Av1Backend::SvtRs has no lossless mode (QP 0 is not mathematically \
+            "Av1Backend::Zenav1Svt has no lossless mode (QP 0 is not mathematically \
              lossless); use the zenravif backend for lossless"
         )));
     }
@@ -510,7 +510,7 @@ pub(crate) fn svt_rs_depth_error(
 ) -> Option<&'static str> {
     if bit_depth == 10 && mono_plane && speed_to_svt_preset(speed) < MONO_HBD_MIN_PRESET {
         return Some(
-            "Av1Backend::SvtRs codes 10-bit alpha and grayscale (Cs400) streams at SVT \
+            "Av1Backend::Zenav1Svt codes 10-bit alpha and grayscale (Cs400) streams at SVT \
              preset >= 9 (speed >= 7) only: the svtav1-rs bd10 monochrome level pass runs \
              there and nowhere else, and an AVIF alpha item must match the colour item's \
              depth. Use speed >= 7, RGB input, 8-bit, or the zenravif backend",

@@ -29,11 +29,11 @@
 //!
 //! Axis flags (anywhere in argv, consumed before the positionals):
 //!   `--backend zenravif|svtrs`   AV1 encode backend. `svtrs` needs the
-//!                                `encode-svt-rs` feature, and encodes 8-bit
+//!                                `zenav1-svt` feature, and encodes 8-bit
 //!                                4:2:0 only with both dimensions a multiple
 //!                                of 64 (so 3840x2160 must become 3840x2176).
 //!   `--subsampling 444|420`      zenavif defaults to 4:4:4; pass 420 for an
-//!                                apples-to-apples comparison against SvtRs.
+//!                                apples-to-apples comparison against Zenav1Svt.
 //!   `--threads N`                encoder threads (default 1). AV1 tile/row
 //!                                threading adds per-thread contexts, so this
 //!                                is a real memory axis, not just a time one.
@@ -727,13 +727,13 @@ fn main() {
             "--backend" => {
                 backend = match a[i + 1].as_str() {
                     "zenravif" => Av1Backend::Zenravif,
-                    #[cfg(feature = "encode-svt-rs")]
-                    "svtrs" => Av1Backend::SvtRs,
+                    #[cfg(feature = "zenav1-svt")]
+                    "svtrs" => Av1Backend::Zenav1Svt,
                     other => panic!("--backend must be zenravif|svtrs, got {other}"),
                 };
                 a.drain(i..i + 2);
             }
-            // 4:4:4 is zenavif's shipped default; SvtRs encodes 4:2:0 only, so
+            // 4:4:4 is zenavif's shipped default; Zenav1Svt encodes 4:2:0 only, so
             // an apples-to-apples backend comparison needs this axis explicit.
             "--subsampling" => {
                 subsampling = match a[i + 1].as_str() {
@@ -864,8 +864,8 @@ fn main() {
     let pixels = (w as u64) * (h as u64);
     let backend_tag = match backend {
         Av1Backend::Zenravif => "zenravif",
-        #[cfg(feature = "encode-svt-rs")]
-        Av1Backend::SvtRs => "svtrs",
+        #[cfg(feature = "zenav1-svt")]
+        Av1Backend::Zenav1Svt => "svtrs",
         _ => "other",
     };
     let ss_tag = match subsampling {

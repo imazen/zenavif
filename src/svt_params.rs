@@ -1,4 +1,4 @@
-//! SVT-AV1 still-image encoder knobs for [`crate::Av1Backend::SvtRs`].
+//! SVT-AV1 still-image encoder knobs for [`crate::Av1Backend::Zenav1Svt`].
 //!
 //! This module is **private and always compiled**. [`SvtParams`] is reachable
 //! from outside the crate only as `zenavif::expert::SvtParams`, which
@@ -6,7 +6,7 @@
 //! is unstable expert surface exactly like the rest of that module.
 //!
 //! It lives here rather than in `expert.rs` because the svt-rs encode seam
-//! (`src/encoder_svt_rs.rs`) needs the type on the ordinary `encode-svt-rs`
+//! (`src/encoder_svt_rs.rs`) needs the type on the ordinary `zenav1-svt`
 //! path, where `__expert` is off. Defining it inside the `__expert`-gated
 //! module broke every `--features encode` build: `EncoderConfig` names the
 //! type in a field, so `cargo check --lib --features encode` failed with
@@ -15,10 +15,10 @@
 //! re-export there.
 
 // ============================================================================
-// SVT-AV1 still-image knobs (`Av1Backend::SvtRs`)
+// SVT-AV1 still-image knobs (`Av1Backend::Zenav1Svt`)
 // ============================================================================
 
-/// Still-image encoder knobs for the [`crate::Av1Backend::SvtRs`] backend.
+/// Still-image encoder knobs for the [`crate::Av1Backend::Zenav1Svt`] backend.
 ///
 /// **Unstable surface** — same contract as `expert::InternalParams`: that surface is
 /// explicitly not part of the public API and exists so a sweep / picker /
@@ -193,7 +193,7 @@ impl SvtParams {
     /// This is a **transcription** of `HdrForkConfig::apply_tune_overrides`
     /// (zenav1-svt `hdr_mode.rs`), restricted to the fields this struct
     /// carries. It is kept here rather than called through the port so the
-    /// sweep planner can resolve a cell without an `encode-svt-rs` build; the
+    /// sweep planner can resolve a cell without an `zenav1-svt` build; the
     /// test `resolved_matches_the_port_tune_overrides` (behind that feature)
     /// pins the two together.
     #[must_use]

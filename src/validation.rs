@@ -239,7 +239,7 @@ impl crate::EncoderConfig {
         // 10-bit YCbCr 4:2:0 instead, so the pair is exactly its shape.
         if input.input_is_16bit
             && self.chroma_subsampling == crate::EncodeChromaSubsampling::Yuv420
-            && self.backend != crate::Av1Backend::SvtRs
+            && self.backend != crate::Av1Backend::Zenav1Svt
         {
             return Err(ValidationError::MutuallyExclusive {
                 a: "chroma_subsampling=Yuv420",
@@ -249,8 +249,8 @@ impl crate::EncoderConfig {
         // The svtav1-rs bit-depth envelope (issue #33): 10-bit Cs400
         // alpha/gray streams need SVT preset >= 9 (speed >= 7). Same
         // predicate as the encode path (`encoder_svt_rs::svt_rs_depth_error`).
-        #[cfg(feature = "encode-svt-rs")]
-        if self.backend == crate::Av1Backend::SvtRs {
+        #[cfg(feature = "zenav1-svt")]
+        if self.backend == crate::Av1Backend::Zenav1Svt {
             let bit_depth = match self.bit_depth {
                 crate::EncodeBitDepth::Eight => 8,
                 crate::EncodeBitDepth::Ten => 10,
@@ -268,7 +268,7 @@ impl crate::EncoderConfig {
                 input.input_has_alpha,
             ) {
                 return Err(ValidationError::BackendUnsupportedParam {
-                    backend: "Av1Backend::SvtRs",
+                    backend: "Av1Backend::Zenav1Svt",
                     param: "bit_depth=Ten with alpha",
                     detail,
                 });
@@ -279,8 +279,8 @@ impl crate::EncoderConfig {
         // grayscale stream needs SVT preset >= 6 (speed >= 5) AND multiples
         // of 8, else multiples of 64. One predicate serves this check and
         // the encode path (`encoder_svt_rs::svt_rs_dims_error`).
-        #[cfg(feature = "encode-svt-rs")]
-        if self.backend == crate::Av1Backend::SvtRs
+        #[cfg(feature = "zenav1-svt")]
+        if self.backend == crate::Av1Backend::Zenav1Svt
             && let Some(detail) = crate::encoder_svt_rs::svt_rs_dims_error(
                 input.width as usize,
                 input.height as usize,
@@ -289,7 +289,7 @@ impl crate::EncoderConfig {
             )
         {
             return Err(ValidationError::BackendUnsupportedParam {
-                backend: "Av1Backend::SvtRs",
+                backend: "Av1Backend::Zenav1Svt",
                 param: "input dimensions",
                 detail,
             });
@@ -313,13 +313,13 @@ impl crate::EncoderConfig {
         // feature; inside the feature, only the 8-bit 4:2:0 YCbCr slice
         // it implements is accepted (the encode path rejects the same
         // combinations — see `src/encoder_svt_rs.rs`).
-        if self.backend == crate::Av1Backend::SvtRs {
-            #[cfg(not(feature = "encode-svt-rs"))]
+        if self.backend == crate::Av1Backend::Zenav1Svt {
+            #[cfg(not(feature = "zenav1-svt"))]
             return Err(ValidationError::BackendUnavailable {
-                backend: "Av1Backend::SvtRs",
-                feature: "encode-svt-rs",
+                backend: "Av1Backend::Zenav1Svt",
+                feature: "zenav1-svt",
             });
-            #[cfg(feature = "encode-svt-rs")]
+            #[cfg(feature = "zenav1-svt")]
             self.validate_svt_rs_scope()?;
         }
         // 4:2:0 has no defined meaning for the identity (RGB) matrix;
@@ -343,9 +343,9 @@ impl crate::EncoderConfig {
     /// speed >= 5; multiples of 8 at speed >= 5 with alpha) is a
     /// config×input concern checked by [`Self::validate_for_input`] and at
     /// encode time.
-    #[cfg(feature = "encode-svt-rs")]
+    #[cfg(feature = "zenav1-svt")]
     fn validate_svt_rs_scope(&self) -> Result<(), ValidationError> {
-        const BACKEND: &str = "Av1Backend::SvtRs";
+        const BACKEND: &str = "Av1Backend::Zenav1Svt";
         if self.chroma_subsampling != crate::EncodeChromaSubsampling::Yuv420 {
             return Err(ValidationError::BackendUnsupportedParam {
                 backend: BACKEND,

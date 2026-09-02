@@ -1,6 +1,6 @@
-//! The `aom-backend`-gated still/grid decode path.
+//! The `zenav1-aom`-gated still/grid decode path.
 //!
-//! Everything in this file is behind `#[cfg(feature = "aom-backend")]` via
+//! Everything in this file is behind `#[cfg(feature = "zenav1-aom")]` via
 //! the `mod aom;` declaration in [`super`], so the items themselves carry no
 //! feature gates.
 
@@ -19,7 +19,7 @@ use whereat::at;
 use zenpixels::PixelBuffer;
 
 /// The aom-backed still decode path (`DecoderConfig::decode_backend =
-/// AomRs`). Item payloads decode through `zenav1-aom` instead of rav1d-safe;
+/// Zenav1Aom`). Item payloads decode through `zenav1-aom` instead of rav1d-safe;
 /// conversion runs the SAME in-house `yuv_convert` kernel family the rav1d
 /// path uses (one canonical recipe → byte-identical output by construction,
 /// pinned by `tests/product_aom_backend.rs`). Scope: non-grid stills;

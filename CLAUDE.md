@@ -174,8 +174,8 @@ TSV diff in the same commit. zenrav1e's halves (`gate-identity`,
 - `(default)` - Pure Rust decode only, safe SIMD via archmage
 - `encode` - AVIF encoding via zenravif
 - `encode-imazen` - Encoding with zenrav1e fork extras (QM, VAQ, still-image, lossless)
-- `encode-svt-rs` - EXPERIMENTAL `Av1Backend::SvtRs` via svtav1-rs (imazen/zenav1-svt sibling path dep; stills only — RGB/RGBA 4:2:0 + grayscale Cs400 at 8 or 10 bits (#33: 16-bit input / `EncodeBitDepth::Ten` → native u16 `try_encode_frame_420_hbd` — since upstream hbd chunk 2 (`f319ec298`) the deblock/CDEF/Wiener post-filter searches read those native u16 planes too, nothing truncates; 10-bit alpha/gray only at speed ≥ 7 = SVT preset ≥ 9 per `svt_rs_depth_error`; HDR clli/mdcv container-side), alpha as Cs400 `auxl` aux item; dims: the 4:2:0 colour path takes ARBITRARY dimensions at ANY speed (the preset ≥ 6 floor was removed 2026-08-29 — see Known Bugs), a Cs400 alpha/gray stream needs speed ≥ 5 (SVT preset ≥ 6) AND multiples of 8, else multiples of 64 — `svt_rs_dims_error` in `src/encoder_svt_rs.rs` is the single gate (#32); coded-lossless (QP 0) is implemented upstream on 8-bit 4:2:0 but the seam's quality→QP mapping deliberately clamps to QP ≥ 1; muxes in-crate via zenavif-serialize)
-- `aom-backend` - EXPERIMENTAL `DecodeBackend::AomRs` — zenav1-aom pure-Rust KEY-frame decoder behind the raw-OBU seam `decode_av1_obu_yuv` (git-rev dep on imazen/zenav1-aom; byte-identical to rav1d-safe on the 8-cell decode corpus; drives `examples/decode_4way_bench.rs`)
+- `zenav1-svt` - EXPERIMENTAL `Av1Backend::Zenav1Svt` via svtav1-rs (imazen/zenav1-svt sibling path dep; stills only — RGB/RGBA 4:2:0 + grayscale Cs400 at 8 or 10 bits (#33: 16-bit input / `EncodeBitDepth::Ten` → native u16 `try_encode_frame_420_hbd` — since upstream hbd chunk 2 (`f319ec298`) the deblock/CDEF/Wiener post-filter searches read those native u16 planes too, nothing truncates; 10-bit alpha/gray only at speed ≥ 7 = SVT preset ≥ 9 per `svt_rs_depth_error`; HDR clli/mdcv container-side), alpha as Cs400 `auxl` aux item; dims: the 4:2:0 colour path takes ARBITRARY dimensions at ANY speed (the preset ≥ 6 floor was removed 2026-08-29 — see Known Bugs), a Cs400 alpha/gray stream needs speed ≥ 5 (SVT preset ≥ 6) AND multiples of 8, else multiples of 64 — `svt_rs_dims_error` in `src/encoder_svt_rs.rs` is the single gate (#32); coded-lossless (QP 0) is implemented upstream on 8-bit 4:2:0 but the seam's quality→QP mapping deliberately clamps to QP ≥ 1; muxes in-crate via zenavif-serialize)
+- `zenav1-aom` - EXPERIMENTAL `DecodeBackend::Zenav1Aom` — zenav1-aom pure-Rust KEY-frame decoder behind the raw-OBU seam `decode_av1_obu_yuv` (git-rev dep on imazen/zenav1-aom; byte-identical to rav1d-safe on the 8-cell decode corpus; drives `examples/decode_4way_bench.rs`)
 - `encode-asm` - Encoding with hand-written assembly (fastest, unsafe)
 - `encode-threading` - Encoding with multi-threading
 - `unsafe-asm` - Decoding with hand-written assembly via C FFI (fastest, unsafe)
@@ -247,7 +247,7 @@ backend capability landing:**
    contract-violating encode config (svt); the seam's `map_err` only catches the
    `Err` branch, so a backend panic crosses into zenavif as a process crash.
    The aom decode path is on the UNTRUSTED input surface — until zenav1-aom is
-   fuzz-clean and returns `Err` for malformed streams, treat `aom-backend` as
+   fuzz-clean and returns `Err` for malformed streams, treat `zenav1-aom` as
    NOT fuzz-safe and keep it non-default/experimental (it already is). Do not
    route untrusted decode through it in production, and do not add it to the
    default decode path, until its spec §5 lands.
@@ -264,7 +264,7 @@ backend capability landing:**
    non-empty `Vec<u8>` the pipeline returns; per the backend's STATUS, un-gated
    configs emit decodable-but-wrong bitstreams. Until the encoder refuses
    out-of-envelope configs with `EncodeError::UnsupportedConfig` (its spec §5),
-   the zenavif `encode-svt-rs` path must stay experimental/off-by-default and
+   the zenavif `zenav1-svt` path must stay experimental/off-by-default and
    its scope docs must name the verified envelope — never present a possibly-
    corrupt encode as a supported path. (Global rule: ZERO TOLERANCE for
    corruption applies at integration boundaries, not just within a single
@@ -509,7 +509,7 @@ breaks) — both seams variant-map errors, svt seam is on `try_encode_frame*` +
 threads the stop token and the config's thread budget.
 Cross-decoder gate: 7018/7018 sweep cells + `tests/cross_backend_decode.rs`
 (incl. 10-bit) byte-identical rav1d-safe vs aom-rs on OUR encoders' output.
-Unified ssim2 targeting: `encode_rgb8_with_target` converges over SvtRs
+Unified ssim2 targeting: `encode_rgb8_with_target` converges over Zenav1Svt
 (test pinned). RD (backend_sweep_2026-07-22): svt 0.93x bytes at matched
 ssim2 at s2, 1.02-1.07x at s6, worse below q30; wall ~6x faster at s6 /
 4.4x at s9 / slower at s2 (linear speed->preset ladders misaligned —
@@ -534,7 +534,7 @@ live blast radius as the code stands today. The gate proves the retirement is
 safe even if `unsafe-asm` is revived. Historical record follows.
 
 ### (historical) yuv crate 4:2:0 bilinear drops the last row pair — was FIXED in-repo (d3ece8e), upstream then OPEN
-Found 2026-07-19 by the SvtRs RGBA round-trip test: yuvutils-rs 0.8.12–0.8.16
+Found 2026-07-19 by the Zenav1Svt RGBA round-trip test: yuvutils-rs 0.8.12–0.8.16
 `yuv420_*_bilinear`/`i0xx_*_bilinear` zip luma row-pairs against overlapping
 chroma `windows(stride*2).step_by(stride)` — one window short on even heights
 with exact-size chroma planes, so the bottom two output rows stay unwritten

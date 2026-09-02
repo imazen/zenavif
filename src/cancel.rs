@@ -8,7 +8,7 @@
 //!
 //! | backend | how it takes a token | cancellation granularity |
 //! |---|---|---|
-//! | zenav1-aom (`AomRs`) | borrowed `&dyn Stop` | SB-row / tile / frame, in-flight |
+//! | zenav1-aom (`Zenav1Aom`) | borrowed `&dyn Stop` | SB-row / tile / frame, in-flight |
 //! | rav1d-safe (`Rav1dSafe`) | **owned `Arc<dyn Stop>`** via `Decoder::set_stop` | superblock-row, in-flight |
 //! | rav1d C FFI (`Rav1dFfi`) | takes none | none |
 //!

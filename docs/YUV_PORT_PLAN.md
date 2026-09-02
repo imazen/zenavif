@@ -32,7 +32,7 @@ upstream awxkee/yuvutils-rs#129/#130) is what motivated auditing this seam.
 2. 8-bit RGB exotic-matrix fallback (same matrices).
 3. **All high-bit-depth decode** — `i010/i012/i016` (+420 bilinear), `i210/i212/i216`, `i410/i412/i416` × rgb/rgba: ~20 functions. The largest surface.
 4. **All monochrome decode** — `yuv400_to_rgb(a)`, `y010/y012/y016_to_*`: 12 functions.
-5. Encode-side `rgb_to_yuv420` / `rgba_to_yuv420` (SvtRs backend).
+5. Encode-side `rgb_to_yuv420` / `rgba_to_yuv420` (Zenav1Svt backend).
 6. The legacy `unsafe-asm` decoder duplicates 1–4.
 
 ## 2. The structural problem (why "port" must mean "unify")
@@ -120,9 +120,9 @@ Validation: SMPTE-240/FCC vectors differential vs yuv crate + reference.
 Small.
 
 **P6 — encode-side RGB(A)→YUV420.** Forward matrix + 2×2 chroma
-downsample for the SvtRs backend. Decision to make consciously: the
+downsample for the Zenav1Svt backend. Decision to make consciously: the
 downsample filter (yuv crate "Balanced" = box average; keep box for
-parity, note it). Validation: SvtRs roundtrip PSNRs must not regress;
+parity, note it). Validation: Zenav1Svt roundtrip PSNRs must not regress;
 differential vs yuv crate within ±1. Estimate: half a session.
 
 **P7 — retire.** Legacy `unsafe-asm` decoder swaps to the same kernels

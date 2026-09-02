@@ -1,6 +1,6 @@
 [package]
 name = "zenavif"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 rust-version = "1.93"
 license = "AGPL-3.0-only OR LicenseRef-Imazen-Commercial"
@@ -94,7 +94,7 @@ rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8",
 #    `decode_av1.rs` and `decoder_managed/decoder.rs`.
 rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "66f58fa6a64c689998721cc5cdb16a4698e26eec", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
 # zenav1-aom pure-Rust AV1 KEY-frame decoder — second decode backend (feature
-# `aom-backend`). Git-rev pinned to imazen/zenav1-aom main (crate unpublished;
+# `zenav1-aom`). Git-rev pinned to imazen/zenav1-aom main (crate unpublished;
 # intra decode is conformance-clean vs libaom v3.14.1 at this rev). This rev
 # carries the structured `DecodeError` + `DecodeConfig` (limits/stop/alloc)
 # API and the bd8 lowbd perf pipeline (4K vs C 1.45x -> 1.286x upstream).
@@ -148,7 +148,7 @@ log = "0.4.29"
 # The [patch."…/zenavif-serialize"] below folds zenravif's copy onto this
 # workspace's member.
 ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/imazen/cavif-rs", rev = "f6c883b6e7395fad67c87ddab676c4df59575a41", default-features = false, optional = true, features = ["stop"] }
-# svtav1-rs experimental AV1 encode backend (`encode-svt-rs` feature).
+# svtav1-rs experimental AV1 encode backend (`zenav1-svt` feature).
 # The facade crate lives in the rust/svtav1 subdir of imazen/zenav1-svt and is
 # PACKAGED as `zenav1-svt`; the `svtav1` alias keeps the seam's `use` paths
 # stable (it was named `svtav1` upstream once).
@@ -171,7 +171,7 @@ ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/ima
 #  2. It silently built against a DIRTY sibling working copy. On 2026-09-02
 #     `git -C ../zenav1-svt diff --stat origin/main` showed 71 uncommitted
 #     lines in `svtav1-encoder` (`inter_md_arm.rs`, `pipeline.rs`) — the exact
-#     crate this seam links. Every local `encode-svt-rs` test result was
+#     crate this seam links. Every local `zenav1-svt` test result was
 #     therefore measured against code that existed on one developer's disk and
 #     nowhere else, and could not agree with CI by construction. A rev pin
 #     makes the local build and CI measure the same encoder.
@@ -203,7 +203,7 @@ ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/ima
 #      as `svtav1_encoder::entropy`. The facade keeps `svtav1::tables` /
 #      `svtav1::entropy` as re-exports, so THIS crate needed no `use` path
 #      changes — only the lockfile collapsed. Verified by building the full
-#      `aom-backend,encode,encode-imazen,encode-svt-rs,target-quality` set.
+#      `zenav1-aom,encode,encode-imazen,zenav1-svt,target-quality` set.
 #   2. QP 0 / coded-lossless is IMPLEMENTED, not refused (`75cf7b0f7` +
 #      `129d45494`, zenav1-svt#5/#9). The seam's quality->QP clamp stays (see
 #      `quality_to_qp_gated`), but the gate that asserted the refusal was
@@ -450,7 +450,7 @@ required-features = ["encode-imazen", "two-pass-butteraugli"]
 # zenbench, both backends through the zenavif decode seam).
 [[example]]
 name = "decode_4way_bench"
-required-features = ["aom-backend"]
+required-features = ["zenav1-aom"]
 
 [[example]]
 name = "heaptrack_decode"
@@ -481,11 +481,15 @@ default = ["avx512"]
 # opt out with default-features = false for minimal builds.
 avx512 = ["archmage/avx512"]
 # EXPERIMENTAL: zenav1-aom (`aom-decode`) as a second AV1 KEY-frame decode
-# backend behind `decode_av1_obu_yuv(.., Av1Backend::AomRs)`. KEY-frame /
+# backend behind `decode_av1_obu_yuv(.., Av1Backend::Zenav1Aom)`. KEY-frame /
 # intra scope only (an AVIF still is a single KEY frame); byte-identical to
 # libaom on the intra conformance corpus. Off by default; also drives the
 # 4-way decode benchmark example.
-aom-backend = ["dep:aom-decode"]
+zenav1-aom = ["dep:aom-decode"]
+# DEPRECATED alias for `zenav1-aom`, kept so existing consumers keep building.
+# Cargo has no `#[deprecated]` for features; this comment and the 0.1.8
+# CHANGELOG entry are the deprecation notice. Removed in 0.2.
+aom-backend = ["zenav1-aom"]
 # Decode with hand-written assembly via C FFI (fastest, uses unsafe)
 unsafe-asm = ["dep:rav1d", "rav1d/asm"]
 # AVIF encoding via zenravif (pure Rust by default)
@@ -512,7 +516,7 @@ two-pass-butteraugli = ["encode-imazen", "ravif/__expert", "dep:butteraugli"]
 two-pass-zensim = ["target-quality", "encode-imazen", "ravif/__expert"]
 # EXPERIMENTAL: AVIF encoding via svtav1-rs (the pure-Rust SVT-AV1 port,
 # git-rev pinned to imazen/zenav1-svt above). Adds the working
-# `Av1Backend::SvtRs` variant. Off by default; requires `encode` (the backend
+# `Av1Backend::Zenav1Svt` variant. Off by default; requires `encode` (the backend
 # enum and entry points live there).
 #
 # SCOPE — `svt_rs_dims_error` + `reject_unsupported_config` in
@@ -527,7 +531,11 @@ two-pass-zensim = ["target-quality", "encode-imazen", "ravif/__expert"]
 #   * Bitstream identity vs C SVT-AV1 v4.2.0 IS asserted upstream now (see the
 #     dep comment above and upstream `rust/STATUS.md`) — the "NOT yet
 #     asserted" note this replaces predated that work.
-encode-svt-rs = ["encode", "dep:svtav1", "dep:zenavif-serialize"]
+zenav1-svt = ["encode", "dep:svtav1", "dep:zenavif-serialize"]
+# DEPRECATED alias for `zenav1-svt`, kept so existing consumers keep building.
+# Cargo has no `#[deprecated]` for features; this comment and the 0.1.8
+# CHANGELOG entry are the deprecation notice. Removed in 0.2.
+encode-svt-rs = ["zenav1-svt"]
 # Encoding with hand-written assembly (fastest, uses unsafe)
 encode-asm = ["encode", "ravif/asm"]
 # Encoding with multi-threading
@@ -589,7 +597,7 @@ required-features = ["encode"]
 
 [[example]]
 name = "decode_backend_bench"
-required-features = ["encode", "aom-backend"]
+required-features = ["encode", "zenav1-aom"]
 
 [patch.crates-io]
 # The zenanalyze-api additions this crate's graph needs (FeatureProvider,
@@ -601,7 +609,7 @@ required-features = ["encode", "aom-backend"]
 # at the zenanalyze-api 0.1.1 publish.
 zenanalyze-api = { git = "https://github.com/imazen/zenanalyze" }
 # Workspace member supplies zenavif-serialize 0.2.0 (set_gain_map_alt_icc) to
-# this crate's own registry requirements (the optional `encode-svt-rs` dep and
+# this crate's own registry requirements (the optional `zenav1-svt` dep and
 # the dev-dep) — 0.2.0 is unpublished. Drop at the zenavif-serialize 0.2.0
 # publish.
 zenavif-serialize = { path = "zenavif-serialize" }
@@ -609,7 +617,7 @@ zenavif-serialize = { path = "zenavif-serialize" }
 # zenravif (git-rev dep above) takes zenavif-serialize 0.2.0 from the archived
 # standalone repo as a git dep of its own (since cavif-rs 2026-08-27, so that
 # its git consumers need no patch). Unify that source to the same workspace
-# member, or `encode` + tests/`encode-svt-rs` builds would carry two
+# member, or `encode` + tests/`zenav1-svt` builds would carry two
 # zenavif-serialize 0.2.0 packages. Cargo reports this entry unused (a
 # warning, not an error) in builds without `encode`. Drop at the publish.
 [patch."https://github.com/imazen/zenavif-serialize"]

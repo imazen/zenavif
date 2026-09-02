@@ -4,11 +4,11 @@
 //! The decode-conformance story so far only covered aomenc-produced streams
 //! (the AV1 conformance corpus). These tests close the loop on OUR encoders:
 //! zenravif (zenrav1e) and svtav1-rs output is decoded through the raw-OBU
-//! seam with both `DecodeBackend::Rav1dSafe` and `DecodeBackend::AomRs` and
+//! seam with both `DecodeBackend::Rav1dSafe` and `DecodeBackend::Zenav1Aom` and
 //! the YUV planes are byte-compared. Two independent decoder ports agreeing
 //! bit-exactly is the strongest conformance signal available without a C
 //! reference in-tree.
-#![cfg(all(feature = "aom-backend", feature = "encode"))]
+#![cfg(all(feature = "zenav1-aom", feature = "encode"))]
 
 use almost_enough::{StopToken, Unstoppable};
 use imgref::{Img, ImgVec};
@@ -65,10 +65,10 @@ fn primary_payload(avif: &[u8]) -> Vec<u8> {
 /// Decode with aom-rs, tolerating a missing temporal-delimiter OBU (AVIF item
 /// payloads may start directly at the sequence header).
 fn decode_aom(payload: &[u8]) -> DecodedYuv {
-    decode_av1_obu_yuv(payload, DecodeBackend::AomRs).unwrap_or_else(|_| {
+    decode_av1_obu_yuv(payload, DecodeBackend::Zenav1Aom).unwrap_or_else(|_| {
         let mut with_td = vec![0x12, 0x00];
         with_td.extend_from_slice(payload);
-        decode_av1_obu_yuv(&with_td, DecodeBackend::AomRs).expect("aom-rs decode")
+        decode_av1_obu_yuv(&with_td, DecodeBackend::Zenav1Aom).expect("aom-rs decode")
     })
 }
 
@@ -118,26 +118,26 @@ fn zenravif_output_decodes_identically_on_both_backends() {
     }
 }
 
-#[cfg(feature = "encode-svt-rs")]
+#[cfg(feature = "zenav1-svt")]
 #[test]
 fn svt_rs_output_decodes_identically_on_both_backends() {
-    // SvtRs scope: 8-bit 4:2:0, dims multiple of 64.
+    // Zenav1Svt scope: 8-bit 4:2:0, dims multiple of 64.
     let img = test_image(192, 128);
     for quality in [30.0, 85.0] {
         let config = EncoderConfig::new()
             .quality(quality)
             .speed(6)
             .chroma_subsampling(zenavif::EncodeChromaSubsampling::Yuv420)
-            .backend(Av1Backend::SvtRs);
+            .backend(Av1Backend::Zenav1Svt);
         let enc = zenavif::encode_rgb8(img.as_ref(), &config, stop()).expect("svt-rs encode");
         assert_backends_agree(&enc.avif_file, &format!("svt-rs q{quality}"));
     }
 }
 
-/// Issue #32: partial-superblock SvtRs output (non-64-multiple, odd, and
+/// Issue #32: partial-superblock Zenav1Svt output (non-64-multiple, odd, and
 /// both-axes-partial dims at SVT preset >= 6) must decode identically on
 /// rav1d-safe and aom-rs, at the TRUE signalled size.
-#[cfg(feature = "encode-svt-rs")]
+#[cfg(feature = "zenav1-svt")]
 #[test]
 fn svt_rs_partial_sb_output_decodes_identically_on_both_backends() {
     for (w, h) in [(96usize, 80usize), (65, 65), (100, 37)] {
@@ -147,7 +147,7 @@ fn svt_rs_partial_sb_output_decodes_identically_on_both_backends() {
                 .quality(60.0)
                 .speed(speed)
                 .chroma_subsampling(zenavif::EncodeChromaSubsampling::Yuv420)
-                .backend(Av1Backend::SvtRs);
+                .backend(Av1Backend::Zenav1Svt);
             let enc = zenavif::encode_rgb8(img.as_ref(), &config, stop())
                 .unwrap_or_else(|e| panic!("svt-rs {w}x{h} speed {speed} encode: {e}"));
             let payload = primary_payload(&enc.avif_file);
@@ -163,10 +163,10 @@ fn svt_rs_partial_sb_output_decodes_identically_on_both_backends() {
     }
 }
 
-/// Issue #33: 10-bit SvtRs output (RGB16 -> native u16 4:2:0 encode) at
+/// Issue #33: 10-bit Zenav1Svt output (RGB16 -> native u16 4:2:0 encode) at
 /// 64-aligned and partial-SB geometries must be a 10-bit stream that both
 /// decode backends agree on byte-for-byte.
-#[cfg(feature = "encode-svt-rs")]
+#[cfg(feature = "zenav1-svt")]
 #[test]
 fn svt_rs_10bit_output_decodes_identically_on_both_backends() {
     for (w, h, speed) in [
@@ -190,7 +190,7 @@ fn svt_rs_10bit_output_decodes_identically_on_both_backends() {
             .quality(70.0)
             .speed(speed)
             .chroma_subsampling(zenavif::EncodeChromaSubsampling::Yuv420)
-            .backend(Av1Backend::SvtRs);
+            .backend(Av1Backend::Zenav1Svt);
         let enc = zenavif::encode_rgb16(img16.as_ref(), &config, stop())
             .unwrap_or_else(|e| panic!("svt-rs 10-bit {w}x{h} speed {speed} encode: {e}"));
         let payload = primary_payload(&enc.avif_file);
@@ -263,24 +263,24 @@ mod config_threading {
         // before any frame allocation.
         // The tiny-cap-fails + roomy-cap-succeeds PAIRING is the liveness
         // proof (the cap is the only difference). Message wording is only
-        // asserted on AomRs, where this seam owns the error mapping —
+        // asserted on Zenav1Aom, where this seam owns the error mapping —
         // rav1d-safe enforces its cap internally and surfaces a generic
         // decode error.
         let tiny = DecoderConfig::new().frame_size_limit(10_000);
-        for backend in [DecodeBackend::Rav1dSafe, DecodeBackend::AomRs] {
+        for backend in [DecodeBackend::Rav1dSafe, DecodeBackend::Zenav1Aom] {
             let err = zenavif::decode_av1_obu_yuv_with(&payload, backend, &tiny, &Unstoppable)
                 .expect_err("a 10k-px cap must reject a 12k-px frame");
-            if backend == DecodeBackend::AomRs {
+            if backend == DecodeBackend::Zenav1Aom {
                 let msg = err.to_string().to_lowercase();
                 assert!(
                     msg.contains("limit"),
-                    "AomRs limit rejection should say so: {msg}"
+                    "Zenav1Aom limit rejection should say so: {msg}"
                 );
             }
         }
         // And the same config decodes fine with an adequate cap.
         let roomy = DecoderConfig::new().frame_size_limit(1_000_000);
-        for backend in [DecodeBackend::Rav1dSafe, DecodeBackend::AomRs] {
+        for backend in [DecodeBackend::Rav1dSafe, DecodeBackend::Zenav1Aom] {
             zenavif::decode_av1_obu_yuv_with(&payload, backend, &roomy, &Unstoppable)
                 .unwrap_or_else(|e| panic!("{backend:?} under a roomy cap: {e}"));
         }
@@ -295,7 +295,7 @@ mod config_threading {
             }
         }
         let payload = small_payload();
-        for backend in [DecodeBackend::Rav1dSafe, DecodeBackend::AomRs] {
+        for backend in [DecodeBackend::Rav1dSafe, DecodeBackend::Zenav1Aom] {
             let err = zenavif::decode_av1_obu_yuv_with(
                 &payload,
                 backend,

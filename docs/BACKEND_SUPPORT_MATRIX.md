@@ -10,7 +10,7 @@ never silent degradation. Sources: `src/encoder.rs`, `src/encoder_svt_rs.rs`,
 
 ## Encode backends (`EncoderConfig::backend`)
 
-| Axis | Zenravif (default, `encode`) | SvtRs (`encode-svt-rs`, experimental) |
+| Axis | Zenravif (default, `encode`) | Zenav1Svt (`zenav1-svt`, experimental) |
 |---|---|---|
 | Input: RGB8 | yes | yes |
 | Input: RGBA8 (alpha item) | yes | yes (alpha as Cs400 `auxl` item, `alpha_quality` fallback honored) |
@@ -46,7 +46,7 @@ never silent degradation. Sources: `src/encoder.rs`, `src/encoder_svt_rs.rs`,
 ## Decode backends (`decode_av1_obu_yuv(.., DecodeBackend::..)`)
 
 The public container decode (`zenavif::decode*`) uses Rav1dSafe by default;
-`DecoderConfig::decode_backend(AomRs)` routes NON-GRID decodes — stills
+`DecoderConfig::decode_backend(Zenav1Aom)` routes NON-GRID decodes — stills
 (primary/alpha/gain-map items, all depths/subsamplings, CICP/ICC/HDR
 passthrough) animations (eager whole-track `decode_frames`; the
 animated-AVIF inter envelope is byte-exact vs aomdec upstream), AND grid
@@ -55,7 +55,7 @@ with byte-identical output (`tests/product_aom_backend.rs`). Only
 row-sink streaming on aom returns honest Unsupported.
 `Rav1dFfi` remains raw-OBU benchmark only.
 
-| Axis | Rav1dSafe (default) | AomRs (`aom-backend`) | Rav1dFfi (`unsafe-asm`) |
+| Axis | Rav1dSafe (default) | Zenav1Aom (`zenav1-aom`) | Rav1dFfi (`unsafe-asm`) |
 |---|---|---|---|
 | Safety | 100% safe Rust | 100% safe Rust | C FFI + hand-written asm |
 | Frame types | full AV1 (KEY/INTER/INTRA_ONLY/SWITCH, show_existing) | KEY + the animated-AVIF inter envelope (zero-MV NEARESTMV/DC, 8-slot DPB, show_existing, CDF inheritance, temporal MVs; compound/sub-pel MC fail loud) | full AV1 |

@@ -156,7 +156,7 @@ impl ManagedAvifDecoder {
 /// ```
 /// One eagerly decoded aom animation frame: (color, optional alpha),
 /// consumed exactly once in display order.
-#[cfg(feature = "aom-backend")]
+#[cfg(feature = "zenav1-aom")]
 type AomAnimFrame = (
     aom_decode::frame::FrameDecode,
     Option<aom_decode::frame::FrameDecode>,
@@ -174,7 +174,7 @@ pub struct AnimationDecoder {
     /// Eagerly decoded frames for the aom backend (`decode_frames` needs the
     /// whole temporal-unit stream for DPB/CDF state; per-sample incremental
     /// decode is a future upstream API). `None` on the rav1d path.
-    #[cfg(feature = "aom-backend")]
+    #[cfg(feature = "zenav1-aom")]
     aom_frames: Option<Vec<Option<AomAnimFrame>>>,
 }
 
@@ -208,8 +208,8 @@ impl AnimationDecoder {
             timescale: anim_info.timescale,
         };
 
-        #[cfg(feature = "aom-backend")]
-        let aom_frames = if config.decode_backend == crate::DecodeBackend::AomRs {
+        #[cfg(feature = "zenav1-aom")]
+        let aom_frames = if config.decode_backend == crate::DecodeBackend::Zenav1Aom {
             Some(Self::decode_all_frames_aom(&inner, &info)?)
         } else {
             None
@@ -220,7 +220,7 @@ impl AnimationDecoder {
             alpha_decoder,
             info,
             frame_index: 0,
-            #[cfg(feature = "aom-backend")]
+            #[cfg(feature = "zenav1-aom")]
             aom_frames,
         })
     }
@@ -231,7 +231,7 @@ impl AnimationDecoder {
     /// across samples. Memory is `frame_count` decoded frames up front —
     /// bounded by the parser's animation caps; the rav1d path remains the
     /// streaming choice.
-    #[cfg(feature = "aom-backend")]
+    #[cfg(feature = "zenav1-aom")]
     fn decode_all_frames_aom(
         inner: &ManagedAvifDecoder,
         info: &DecodedAnimationInfo,
@@ -302,7 +302,7 @@ impl AnimationDecoder {
 
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
-        #[cfg(feature = "aom-backend")]
+        #[cfg(feature = "zenav1-aom")]
         if let Some(frames) = self.aom_frames.as_mut() {
             let (fd, fd_alpha) = frames[self.frame_index]
                 .take()

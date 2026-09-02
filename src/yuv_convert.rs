@@ -2758,7 +2758,7 @@ mod tests {
                         }
                     }
                     // 8-bit samples carried in u16 planes with NARROW (8-bit)
-                    // output: the aom-backend shape (`aom-decode` hands back
+                    // output: the zenav1-aom shape (`aom-decode` hands back
                     // u16 planes at every depth, and `wide_out = bit_depth > 8`
                     // keeps the output 8-bit at depth 8 —
                     // src/decoder_managed/aom.rs). Same pixels as the u8
@@ -2805,7 +2805,7 @@ mod tests {
                 yuv400_to_rgbx_strip::<u8, RGB8>(&y8, w, w, y_start, sh, range, 8, &mut m8rgb);
                 sink.extend(m8rgb.iter().flat_map(|p| [p.r, p.g, p.b]));
                 // Monochrome, 8-bit samples in u16 planes + narrow output
-                // (the aom-backend `mono!` shapes, aom.rs:337).
+                // (the zenav1-aom `mono!` shapes, aom.rs:337).
                 let y16_8: Vec<u16> = y8.iter().map(|&v| u16::from(v)).collect();
                 let mut ng = vec![rgb::Gray::<u8>::new(0); w * sh];
                 yuv400_to_rgbx_strip::<u16, rgb::Gray<u8>>(
@@ -2915,7 +2915,7 @@ mod tests {
     /// pixels as the u8 planes.
     ///
     /// This is not a hypothetical: `aom-decode` returns u16 planes at every
-    /// bit depth, so the `aom-backend` decode path feeds the `S = u16`
+    /// bit depth, so the `zenav1-aom` decode path feeds the `S = u16`
     /// kernel instantiations with 8-bit values and asks for 8-bit output
     /// (`wide_out = bit_depth > 8`, src/decoder_managed/aom.rs:222), while
     /// rav1d-safe's 8-bit path feeds the `S = u8` ones. Two implementations

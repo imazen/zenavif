@@ -188,7 +188,7 @@ fn main() {
         };
 
         // Correctness: decode both backends once, compare.
-        let a = decode_av1_obu_yuv(&obu, DecodeBackend::AomRs);
+        let a = decode_av1_obu_yuv(&obu, DecodeBackend::Zenav1Aom);
         let r = decode_av1_obu_yuv(&obu, DecodeBackend::Rav1dSafe);
         #[allow(unused_mut)]
         let mut correctness = match (&a, &r) {
@@ -238,7 +238,7 @@ fn main() {
                 g.throughput(Throughput::Elements(px));
                 g.bench("aom-rs", move |b| {
                     b.iter(|| {
-                        let d = decode_av1_obu_yuv(&obu_a, DecodeBackend::AomRs).unwrap();
+                        let d = decode_av1_obu_yuv(&obu_a, DecodeBackend::Zenav1Aom).unwrap();
                         black_box(d.y.len())
                     })
                 });
