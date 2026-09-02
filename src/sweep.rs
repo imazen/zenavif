@@ -697,6 +697,99 @@ impl SweepAxes {
         axes
     }
 
+    /// DOE block **B-6**: the native-size dense grids for the two knobs the
+    /// cross-size transfer gate proved are *not* screenable at the pixel
+    /// budget.
+    ///
+    /// Stage A's gate certified only `mtx32` and `qml1.8.15` for reduced-size
+    /// screening. `acb3` and `shp3` **failed T1** — their direction at 1024²
+    /// does not carry to native — which fires trigger **B-6**
+    /// (`zenmetrics/benchmarks/avif_doe_plan_2026-09-01.md` §7.2): *that
+    /// knob's Stage-B grid runs at native size, and its A1/A2 numbers stay
+    /// annotated as size-conditional*. Evidence:
+    /// `zenmetrics/benchmarks/avif_doe_stageA_2026-09-02.md` §8.1.
+    ///
+    /// The grid is B-1's registered follow-up shape — 5 levels × the full
+    /// 29-q ladder × 32 images × speeds {4, 6, 7} — run on the **NATIVE**
+    /// corpus rather than the 1024² budget corpus every other knob block
+    /// uses. Both knobs share the single default level, so the two 5-level
+    /// grids are declared as 9 levels, not 10 (see
+    /// [`svt_doe_b6_knob_sets`]).
+    ///
+    /// Pair with [`SweepBuilder::with_max_deviations`]`(2)`, **not** 1: the
+    /// speeds axis is itself an axis, so a knob level at a non-default speed
+    /// spends two deviations and `1` would silently emit only the speed-4
+    /// leg. Two cannot leak interactions here — `svt_knobs` is ONE axis, so
+    /// no cell can spell two knobs at once, which is what makes this block
+    /// main-effects-only despite the looser bound.
+    ///
+    /// [`svt_doe_b6_knob_sets`]: Self::svt_doe_b6_knob_sets
+    #[must_use]
+    pub fn svt_doe_b6() -> Self {
+        let mut axes = Self::svt_doe_main();
+        // Presets 4, 7 and 9 — B-1's registered speed set. Speed 4 leads
+        // because index 0 is the default stratum by contract.
+        axes.speeds = vec![4, 6, 7];
+        // Bit depth pinned to the default: 10-bit is its own A1 arm and
+        // crossing it here would ask a different question at 2x the cost.
+        axes.bit_depths = vec![EncodeBitDepth::Auto];
+        axes.svt_knobs = Self::svt_doe_b6_knob_sets();
+        axes
+    }
+
+    /// The two B-6 dense level sets — `ac_bias` and `sharpness` — sharing
+    /// one default stratum.
+    ///
+    /// Each knob gets **5 levels** spanning its whole legal range
+    /// (`ac_bias` 0.0..=8.0, `sharpness` 0..=7), and each **retains every
+    /// level A1 already measured** (`acb` 1.0 / 3.0, `shp` 3 / 7) so every
+    /// budget-size point has a native partner to difference against — which
+    /// is the entire purpose of the trigger. The added levels are the range
+    /// A1 never reached: `ac_bias` above 3.0 (the documented upper half was
+    /// untouched — the dossier's "3.0 probes the upper half" is generous,
+    /// 3.0 is 37.5% of the range) and the odd `sharpness` steps between the
+    /// tested ones.
+    ///
+    /// `sharpness` remains **CATEGORICAL** (H-14, and libaom's quantizer
+    /// plateaus): five levels here is a *level set* to be fitted as factors,
+    /// never an ordinal trend. Five `ac_bias` levels are ordinal and may be
+    /// fitted as one.
+    ///
+    /// The two knobs Stage A found **byte-inert** — `tune = 0` and
+    /// `screen_content_mode = Some(3)`, which between them consumed 8,972
+    /// Stage-A cells while producing bitstreams identical to the default
+    /// (imazen/zenav1-svt#17) — are absent here by construction, and the
+    /// test below pins that.
+    #[must_use]
+    pub fn svt_doe_b6_knob_sets() -> Vec<crate::expert::SvtParams> {
+        use crate::expert::SvtParams;
+        let d = SvtParams::default();
+        let with = |f: &dyn Fn(&mut SvtParams)| {
+            let mut p = d;
+            f(&mut p);
+            p
+        };
+        vec![
+            // index 0 — the shared default stratum (deviations = 0). It is
+            // BOTH knobs' own level 0 (`ac_bias` 0.0 and `sharpness` 0 are
+            // the default spelling), so the two 5-level grids overlap in
+            // exactly one configuration and it is declared ONCE. That is
+            // the whole of the 27,840-vs-25,056 difference between the
+            // trigger list's per-knob sum and this plan.
+            d,
+            // ac_bias — 0.0..=8.0, default 0.0. 1.0 and 3.0 are A1's.
+            with(&|p| p.ac_bias = 1.0),
+            with(&|p| p.ac_bias = 3.0),
+            with(&|p| p.ac_bias = 5.0),
+            with(&|p| p.ac_bias = 8.0),
+            // sharpness — 0..=7, default 0. 3 and 7 are A1's.
+            with(&|p| p.sharpness = 1),
+            with(&|p| p.sharpness = 3),
+            with(&|p| p.sharpness = 5),
+            with(&|p| p.sharpness = 7),
+        ]
+    }
+
     /// Every unordered pair of two distinct [`svt_doe_knob_sets`] levels,
     /// composed field-wise, default first.
     ///
@@ -1850,6 +1943,7 @@ impl SweepAxes {
             "svt_doe_main" => Some(Self::svt_doe_main()),
             "svt_doe_pairwise" => Some(Self::svt_doe_pairwise()),
             "svt_doe_transfer" => Some(Self::svt_doe_transfer()),
+            "svt_doe_b6" => Some(Self::svt_doe_b6()),
             _ => None,
         }
     }
@@ -2504,6 +2598,115 @@ mod tests {
         // speed 4 and bit-depth Auto are index 0, so: 1 default + 16
         // knob arms + 6 speeds + 1 bit-depth = 24 strata at one q.
         assert_eq!(plan.cells.len(), 24, "{:?}", plan.cells.len());
+    }
+
+    /// B-6 is the two FAIL-T1 knobs at native, as two 5-level grids that
+    /// share one control — and it must stay main-effects-only even though
+    /// it runs at `max_deviations = 2`.
+    #[cfg(feature = "encode-svt-rs")]
+    #[test]
+    fn svt_doe_b6_is_two_dense_grids_sharing_one_control() {
+        use crate::expert::SvtParams;
+        let axes = SweepAxes::svt_doe_b6();
+        let d = SvtParams::default();
+
+        // 9 levels = 1 shared default + 4 ac_bias + 4 sharpness. Ten would
+        // mean the shared control got declared twice.
+        assert_eq!(axes.svt_knobs.len(), 9, "{:?}", axes.svt_knobs.len());
+        assert!(
+            axes.svt_knobs[0].is_default(),
+            "index 0 must be the default"
+        );
+        assert_eq!(axes.speeds, vec![4, 6, 7], "B-1's registered speed set");
+
+        let mut acb = 0;
+        let mut shp = 0;
+        for p in &axes.svt_knobs[1..] {
+            // One knob per level: this block measures main effects only.
+            assert_eq!(p.deviations(), 1, "{p:?}");
+            // ...and only the two knobs the transfer gate failed.
+            if p.ac_bias != d.ac_bias {
+                acb += 1;
+            } else if p.sharpness != d.sharpness {
+                shp += 1;
+            } else {
+                panic!("B-6 level deviates in neither ac_bias nor sharpness: {p:?}");
+            }
+            // The two Stage-A byte-inert knobs must never reappear here.
+            assert_eq!(p.tune, d.tune, "tune=0 is byte-inert (zenav1-svt#17)");
+            assert_eq!(
+                p.force_screen_content_mode, d.force_screen_content_mode,
+                "scm=3 is byte-inert (zenav1-svt#17)"
+            );
+            // Every level must survive the port's own clamp unchanged,
+            // otherwise two grid points would collapse to one encode.
+            assert_eq!(
+                *p,
+                p.clamped(),
+                "level is out of the port's legal range: {p:?}"
+            );
+        }
+        assert_eq!((acb, shp), (4, 4));
+
+        // A1's measured levels are retained so each native point has a
+        // budget-size partner to difference against.
+        for (a, s) in [(1.0, 0), (3.0, 0), (0.0, 3), (0.0, 7)] {
+            assert!(
+                axes.svt_knobs
+                    .iter()
+                    .any(|p| p.ac_bias == a && p.sharpness == s),
+                "A1 level acb{a} shp{s} missing from the B-6 grid"
+            );
+        }
+
+        let plan = SweepBuilder::new(axes, QualityGrid::Explicit(vec![45.0]))
+            .with_max_deviations(2)
+            .plan();
+        // 9 knob levels x 3 speeds, every one reachable at <= 2 deviations.
+        assert_eq!(plan.cells.len(), 27, "{:?}", plan.cells.len());
+        assert!(plan.cells.iter().all(|c| c.deviations <= 2));
+        assert_eq!(plan.cells[0].deviations, 0, "control leads");
+        // No collision is EXPRESSIBLE on one knob axis, so 0 merges here is
+        // structurally correct rather than the red flag it is on a pairwise
+        // plan (declare-script G-DEDUP note).
+        assert_eq!(plan.duplicates_merged, 0);
+        assert!(plan.invalid_skipped.is_empty());
+        // Every cell id must be distinct: two grid points that stringify the
+        // same would silently become one encode.
+        let mut ids: Vec<_> = plan.cells.iter().map(|c| c.id.clone()).collect();
+        ids.sort();
+        let n = ids.len();
+        ids.dedup();
+        assert_eq!(ids.len(), n, "duplicate cell ids in the B-6 plan");
+
+        // ...and every one must parse BACK to the same resolved config.
+        // `svt_doe_cell_ids_roundtrip` only walks the pairwise plan, whose
+        // levels come from `svt_doe_knob_sets`, so `acb5` / `acb8` / `shp1`
+        // / `shp5` have no round-trip coverage anywhere else — and the
+        // ledger stores the base id, so a token that emits but does not
+        // parse would strand every cell it names.
+        for cell in &plan.cells {
+            let base = cell
+                .id
+                .rsplit_once("_q")
+                .expect("cell id has a _q suffix")
+                .0;
+            let parsed = config_from_cell_id(base, cell.quality)
+                .unwrap_or_else(|e| panic!("parse '{base}': {e}"));
+            assert_eq!(
+                fingerprint(&parsed),
+                cell.fingerprint,
+                "id '{base}' did not round-trip"
+            );
+        }
+
+        // At max_deviations 1 the block would silently lose both non-default
+        // presets' knob legs — 9 + 2 strata instead of 27. This is the trap
+        // the plan doc's `--max-deviations 2` exists to avoid.
+        let narrow = SweepBuilder::new(SweepAxes::svt_doe_b6(), QualityGrid::Explicit(vec![45.0]))
+            .with_max_deviations(1)
+            .plan();
+        assert_eq!(narrow.cells.len(), 11, "{:?}", narrow.cells.len());
     }
 
     fn tiny_axes() -> SweepAxes {
