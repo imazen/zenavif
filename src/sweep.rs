@@ -259,6 +259,29 @@ pub struct SweepAxes {
     pub trellis: Vec<bool>,
     /// Deep-knob single-deviation probes.
     pub probes: Vec<KnobProbe>,
+    /// SVT-AV1 still-image knob sets ([`crate::expert::SvtParams`]) — the
+    /// axis the AVIF design-of-experiments drives
+    /// (`zenmetrics/benchmarks/avif_doe_plan_2026-09-01.md`). Index 0 is
+    /// the default stratum, so a single-element
+    /// `vec![SvtParams::default()]` (what every pre-DOE preset carries)
+    /// leaves cell ids, fingerprints and deviation counts byte-identical
+    /// to the pre-axis planner.
+    ///
+    /// It is ONE axis carrying a compound value rather than nine axes,
+    /// for two reasons. (a) The knobs are not independent: tune 3/4
+    /// **rewrite** the QM, sharpness and variance-boost fields at encode
+    /// time (dossier hazard H-4), so a nine-axis cross would mostly
+    /// enumerate spellings of the same encode. (b) `deviations` stays
+    /// exact anyway — [`crate::expert::SvtParams::deviations`] counts a
+    /// set's own distance from the default, and `cross` adds that instead
+    /// of counting the axis as one, so
+    /// [`SweepBuilder::with_max_deviations`] means the same thing it
+    /// always did: 1 = isolated main effects, 2 = main effects plus
+    /// pairwise interactions.
+    ///
+    /// Inert on every non-svt-rs backend, and the fingerprint ignores it
+    /// there, so an inert spelling cannot mint a duplicate cell.
+    pub svt_knobs: Vec<crate::expert::SvtParams>,
 }
 
 impl SweepAxes {
@@ -280,6 +303,7 @@ impl SweepAxes {
             vaq: vec![None],
             trellis: vec![false],
             probes: vec![KnobProbe::None],
+            svt_knobs: vec![crate::expert::SvtParams::default()],
         }
     }
 
@@ -478,6 +502,7 @@ impl SweepAxes {
             vaq,
             trellis: vec![false],
             probes,
+            svt_knobs: vec![crate::expert::SvtParams::default()],
         }
     }
 
@@ -508,8 +533,231 @@ impl SweepAxes {
             vaq: vec![None],
             trellis: vec![false],
             probes: vec![KnobProbe::None],
+            svt_knobs: vec![crate::expert::SvtParams::default()],
         }
     }
+
+    /// The 17 single-deviation SVT still-image knob sets the design of
+    /// experiments measures main effects on
+    /// (`zenmetrics/benchmarks/avif_doe_plan_2026-09-01.md` §3.2), default
+    /// first. Every level cites the dossier
+    /// (`benchmarks/avif_knob_dossier_2026-09-01.md` §8.1) that ranked it.
+    ///
+    /// Exclusions are as load-bearing as inclusions and each has a hazard
+    /// behind it: variance-boost strength **4 is absent** because it
+    /// saturates to strength 3's plan; `tune` 5 is absent because slot 5
+    /// is `TUNE_FILM_GRAIN` in this port's fork enum, not mainline's VMAF
+    /// (contradiction C-1); `tune` 4 is absent because it forces the same
+    /// block as 3 minus the IQ-only bits and would largely merge; and
+    /// `sb_size_override` is absent because SB128 is signalled but its RD
+    /// search is unported (H-11), so a byte delta there measures
+    /// signalling, not partition quality.
+    #[must_use]
+    pub fn svt_doe_knob_sets() -> Vec<crate::expert::SvtParams> {
+        use crate::expert::SvtParams;
+        let d = SvtParams::default();
+        let with = |f: &dyn Fn(&mut SvtParams)| {
+            let mut p = d;
+            f(&mut p);
+            p
+        };
+        vec![
+            // index 0 — the default stratum (deviations = 0).
+            d,
+            // tune (super-factor; H-4). 3 = IQ is the only still-image-only mode.
+            with(&|p| p.tune = 0),
+            with(&|p| p.tune = 3),
+            // variance boost — upstream: strength 3 best for stills, octile 4-7.
+            with(&|p| {
+                p.enable_variance_boost = true;
+                p.variance_boost_strength = 2;
+                p.variance_octile = 5;
+            }),
+            with(&|p| {
+                p.enable_variance_boost = true;
+                p.variance_boost_strength = 3;
+                p.variance_octile = 5;
+            }),
+            with(&|p| {
+                p.enable_variance_boost = true;
+                p.variance_boost_strength = 3;
+                p.variance_octile = 7;
+            }),
+            // QM windows — libaom's all-intra (4/10), its image tune (2/10),
+            // and SVT's own default window (8/15). Three upstream opinions.
+            with(&|p| {
+                p.enable_qm = true;
+                p.min_qm_level = 4;
+                p.max_qm_level = 10;
+            }),
+            with(&|p| {
+                p.enable_qm = true;
+                p.min_qm_level = 2;
+                p.max_qm_level = 10;
+            }),
+            with(&|p| {
+                p.enable_qm = true;
+                p.min_qm_level = 8;
+                p.max_qm_level = 15;
+            }),
+            // sharpness — CATEGORICAL, never fitted as an ordinal trend.
+            with(&|p| p.sharpness = 3),
+            with(&|p| p.sharpness = 7),
+            // forced screen-content detection (H-6).
+            with(&|p| p.force_screen_content_mode = Some(3)),
+            // ac_bias — 1.0 is the fork's own default; 3.0 probes the upper half.
+            with(&|p| p.ac_bias = 1.0),
+            with(&|p| p.ac_bias = 3.0),
+            // max_tx_size — tune IQ picks it BY qp, so its effect is
+            // quality-dependent and the q ladder resolves it directly.
+            with(&|p| p.max_tx_size = 32),
+            // tiles — parallelism at an efficiency cost; unlike threads it
+            // moves bytes, so it is a modelled axis.
+            with(&|p| p.tile_cols_log2 = 1),
+            with(&|p| {
+                p.tile_cols_log2 = 1;
+                p.tile_rows_log2 = 1;
+            }),
+        ]
+    }
+
+    /// DOE block A1/A1b: SVT still-image knob **main effects**, one
+    /// deviation at a time, at the presets the design measures them on.
+    ///
+    /// Pair with [`SweepBuilder::with_max_deviations`]`(1)` — the speeds
+    /// axis is itself an axis, so without the bound the cross would also
+    /// emit `(non-default speed × non-default knob)` cells, which is block
+    /// A2's job, not this one.
+    #[must_use]
+    pub fn svt_doe_main() -> Self {
+        let mut axes = Self::svt_speed_dense();
+        // The WHOLE effective preset ladder — speeds 1..=7 map to presets
+        // 0,1,3,4,6,7,9, which is every preset the dial can reach. Speeds
+        // 8/9/10 are dropped: they all resolve to preset 9 (H-2) and the
+        // planner would merge them into speed 7 anyway, so declaring them
+        // only inflates the alias list.
+        //
+        // Ordered by value-per-CPU-second, not numerically: speed 4 is the
+        // default (index 0, so it must lead), then the cheap end, and
+        // speed 1 LAST because it alone is 43.5% of this arm's encode cost.
+        // `collapse_one_axis` sheds from the tail, so a budget bite takes
+        // preset 0 before it takes anything else.
+        axes.speeds = vec![4, 6, 7, 2, 5, 3, 1];
+        // 10-bit is the 17th main-effect arm and it is NOT an `SvtParams`
+        // knob — it is the pre-existing `bit_depths` axis, which the
+        // encoder resolves through its own path. At
+        // `with_max_deviations(1)` it is one more isolated arm; the
+        // fingerprint keeps `Auto` and `Ten` apart even where they
+        // coincide (a config-only hash cannot see the input's bitness).
+        axes.bit_depths = vec![EncodeBitDepth::Auto, EncodeBitDepth::Ten];
+        axes.svt_knobs = Self::svt_doe_knob_sets();
+        axes
+    }
+
+    /// DOE block AG: the **cross-size transfer gate** — the same 17
+    /// main-effect arms at two presets, run on the NATIVE-size corpus so a
+    /// knob's effect at the screening pixel budget can be checked against
+    /// its effect at full size before any budget-size conclusion is
+    /// published.
+    ///
+    /// Pair with [`SweepBuilder::with_max_deviations`]`(1)` and the 3-point
+    /// probe ladder. Speeds 4 and 6 (presets 4 and 7) are the two cheapest
+    /// points that still bracket the production ladder: at native size the
+    /// whole gate costs ~1.5 CPU-h, which is why it can afford all 32
+    /// images.
+    #[must_use]
+    pub fn svt_doe_transfer() -> Self {
+        let mut axes = Self::svt_doe_main();
+        axes.speeds = vec![4, 6];
+        axes.bit_depths = vec![EncodeBitDepth::Auto];
+        axes
+    }
+
+    /// DOE block A2: SVT still-image knob **pairwise interactions** at one
+    /// preset.
+    ///
+    /// Pair with [`SweepBuilder::with_max_deviations`]`(2)`. Combinations
+    /// that a tune override collapses — `(tune 3, qm 4/10)` resolves to
+    /// exactly `tune 3` — merge by fingerprint and are reported in
+    /// [`SweepPlan::duplicates_merged`], which is H-4 neutralised by
+    /// construction rather than by a hand-maintained exclusion list.
+    #[must_use]
+    pub fn svt_doe_pairwise() -> Self {
+        let mut axes = Self::svt_doe_main();
+        // One preset: speed 6 = SVT preset 7, the neighbourhood of
+        // libavif's own default speed, and 0.85% of the arm's encode cost.
+        axes.speeds = vec![6];
+        // Bit depth is pinned back to the default here: this block's
+        // subject is the pairwise structure OVER the knob set, and
+        // crossing it with 10-bit would add 16 strata of a different
+        // question (does the quantizer domain change a knob's effect?),
+        // which is a Stage-B follow-up if A1 shows 10-bit matters at all.
+        axes.bit_depths = vec![EncodeBitDepth::Auto];
+        axes.svt_knobs = Self::svt_doe_pairwise_sets();
+        axes
+    }
+
+    /// Every unordered pair of two distinct [`svt_doe_knob_sets`] levels,
+    /// composed field-wise, default first.
+    ///
+    /// Composition is *field-wise union against the default*, so a pair of
+    /// two levels of the SAME knob (e.g. two QM windows) composes to a
+    /// single-knob set that already exists and merges away by
+    /// fingerprint — the planner does the exclusion, not this function.
+    ///
+    /// [`svt_doe_knob_sets`]: Self::svt_doe_knob_sets
+    #[must_use]
+    pub fn svt_doe_pairwise_sets() -> Vec<crate::expert::SvtParams> {
+        let singles = Self::svt_doe_knob_sets();
+        let d = crate::expert::SvtParams::default();
+        let mut out = singles.clone();
+        for i in 1..singles.len() {
+            for j in (i + 1)..singles.len() {
+                out.push(compose_svt(d, singles[i], singles[j]));
+            }
+        }
+        out
+    }
+}
+
+/// Field-wise composition of two single-deviation knob sets against the
+/// default: each field takes `a`'s value where it deviates, else `b`'s,
+/// else the default's. Order-independent for disjoint knobs (which every
+/// pair of distinct single-deviation sets is, except two levels of the
+/// same knob — where `a` wins and the result merges into an existing
+/// single-deviation cell).
+// `ac_bias` is an f64, but every value it takes here is a literal grid point
+// copied byte-for-byte from the axis definition — never a computed result — so
+// exact comparison is asking the right question: "is this field still the
+// default spelling?"
+#[allow(clippy::float_cmp)]
+fn compose_svt(
+    d: crate::expert::SvtParams,
+    a: crate::expert::SvtParams,
+    b: crate::expert::SvtParams,
+) -> crate::expert::SvtParams {
+    let mut r = d;
+    macro_rules! take {
+        ($($f:ident),+ $(,)?) => {$(
+            r.$f = if a.$f != d.$f { a.$f } else { b.$f };
+        )+};
+    }
+    take!(
+        tune,
+        enable_variance_boost,
+        variance_boost_strength,
+        variance_octile,
+        enable_qm,
+        min_qm_level,
+        max_qm_level,
+        sharpness,
+        force_screen_content_mode,
+        ac_bias,
+        max_tx_size,
+        tile_cols_log2,
+        tile_rows_log2,
+    );
+    r
 }
 
 // ============================================================================
@@ -1011,7 +1259,11 @@ fn collapse_one_axis(axes: &mut SweepAxes) -> Option<DroppedAxis> {
     // content). Color mode is mandatory per the zenmetrics
     // docs/MANDATORY_SWEEP_AXES.md contract. speeds keeps at least two points
     // so RD-vs-cost stays measurable.
-    collapse("probes", &mut axes.probes, 1)
+    // svt_knobs sheds FIRST: it is the largest axis on a DOE plan (up to
+    // 137 sets) and the one whose tail is least informative (the pairwise
+    // block), so a budget bite there costs the least science per cell.
+    collapse("svt_knobs", &mut axes.svt_knobs, 1)
+        .or_else(|| collapse("probes", &mut axes.probes, 1))
         .or_else(|| collapse("vaq", &mut axes.vaq, 1))
         .or_else(|| collapse("trellis", &mut axes.trellis, 1))
         .or_else(|| collapse("bit_depths", &mut axes.bit_depths, 1))
@@ -1041,6 +1293,7 @@ struct Stratum {
     vaq: Option<f64>,
     trellis: bool,
     probe: KnobProbe,
+    svt: crate::expert::SvtParams,
 }
 
 impl Stratum {
@@ -1057,6 +1310,7 @@ impl Stratum {
             // bytes depend on the host's core count.
             .threads(Some(1))
             .with_qm(self.qm)
+            .with_svt_params(self.svt)
             .with_vaq(self.vaq.is_some(), self.vaq.unwrap_or(1.0));
         let cfg = if self.trellis {
             cfg.with_trellis(Some(true))
@@ -1099,8 +1353,67 @@ impl Stratum {
             s.push_str("-trel");
         }
         s.push_str(&self.probe.label());
+        s.push_str(&svt_knob_label(self.svt));
         s
     }
+}
+
+/// Render the deviations of an [`crate::expert::SvtParams`] from its
+/// default as cell-id tokens, in a fixed field order.
+///
+/// The default set renders the **empty string**, so every cell id minted
+/// before this axis existed is unchanged — the same additive-grammar rule
+/// the backend token follows.
+// See `SvtParams::deviations` — `ac_bias`'s values are literal grid points.
+#[allow(clippy::float_cmp)]
+fn svt_knob_label(p: crate::expert::SvtParams) -> String {
+    let d = crate::expert::SvtParams::default();
+    let mut s = String::new();
+    if p.tune != d.tune {
+        s.push_str(&format!("-tn{}", p.tune));
+    }
+    if p.enable_variance_boost != d.enable_variance_boost
+        || p.variance_boost_strength != d.variance_boost_strength
+        || p.variance_octile != d.variance_octile
+    {
+        s.push_str(&format!(
+            "-vbst{}.{}.{}",
+            u8::from(p.enable_variance_boost),
+            p.variance_boost_strength,
+            p.variance_octile
+        ));
+    }
+    if p.enable_qm != d.enable_qm
+        || p.min_qm_level != d.min_qm_level
+        || p.max_qm_level != d.max_qm_level
+    {
+        s.push_str(&format!(
+            "-qml{}.{}.{}",
+            u8::from(p.enable_qm),
+            p.min_qm_level,
+            p.max_qm_level
+        ));
+    }
+    if p.sharpness != d.sharpness {
+        s.push_str(&format!("-shp{}", p.sharpness));
+    }
+    if p.force_screen_content_mode != d.force_screen_content_mode {
+        // Only `Some(_)` deviates from the default `None`, so the value is
+        // always present; `None` is the absence of the token.
+        if let Some(m) = p.force_screen_content_mode {
+            s.push_str(&format!("-scm{m}"));
+        }
+    }
+    if p.ac_bias != d.ac_bias {
+        s.push_str(&format!("-acb{}", p.ac_bias));
+    }
+    if p.max_tx_size != d.max_tx_size {
+        s.push_str(&format!("-mtx{}", p.max_tx_size));
+    }
+    if p.tile_cols_log2 != d.tile_cols_log2 || p.tile_rows_log2 != d.tile_rows_log2 {
+        s.push_str(&format!("-tl{}.{}", p.tile_cols_log2, p.tile_rows_log2));
+    }
+    s
 }
 
 /// Cross axes × quality points into deduplicated, priority-ordered cells.
@@ -1126,30 +1439,40 @@ fn cross(axes: &SweepAxes, q_points: &[f32]) -> (Vec<SweepCell>, Vec<String>, us
                             for (vi, &vaq) in axes.vaq.iter().enumerate() {
                                 for (ti, &trellis) in axes.trellis.iter().enumerate() {
                                     for (pi, &probe) in axes.probes.iter().enumerate() {
-                                        let idxs = [ki, si, qi, ci, bi, mi, vi, ti, pi];
-                                        let stratum = Stratum {
-                                            backend,
-                                            speed,
-                                            qm,
-                                            subsampling,
-                                            bit_depth,
-                                            color_model,
-                                            vaq,
-                                            trellis,
-                                            probe,
-                                        };
-                                        if stratum.build_config(75.0).validate().is_err() {
-                                            invalid.push(stratum.id());
-                                            continue;
+                                        for (xi, &svt) in axes.svt_knobs.iter().enumerate() {
+                                            let idxs = [ki, si, qi, ci, bi, mi, vi, ti, pi];
+                                            let stratum = Stratum {
+                                                backend,
+                                                speed,
+                                                qm,
+                                                subsampling,
+                                                bit_depth,
+                                                color_model,
+                                                vaq,
+                                                trellis,
+                                                probe,
+                                                svt,
+                                            };
+                                            if stratum.build_config(75.0).validate().is_err() {
+                                                invalid.push(stratum.id());
+                                                continue;
+                                            }
+                                            entries.push(Entry {
+                                                stratum,
+                                                // The svt axis carries a COMPOUND value, so it
+                                                // contributes its own distance from the default
+                                                // rather than a flat 1 — that is what keeps
+                                                // `with_max_deviations(1)` meaning "isolated main
+                                                // effects" and `(2)` meaning "plus pairwise" when
+                                                // the knob sets themselves encode pairs.
+                                                deviations: idxs.iter().filter(|&&x| x != 0).count()
+                                                    as u8
+                                                    + svt.deviations(),
+                                                idx_sum: idxs.iter().sum::<usize>() + xi,
+                                                seq,
+                                            });
+                                            seq += 1;
                                         }
-                                        entries.push(Entry {
-                                            stratum,
-                                            deviations: idxs.iter().filter(|&&x| x != 0).count()
-                                                as u8,
-                                            idx_sum: idxs.iter().sum(),
-                                            seq,
-                                        });
-                                        seq += 1;
                                     }
                                 }
                             }
@@ -1329,6 +1652,41 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
         h.u8(preset);
         h.u8(qp);
         h.u8(alpha_qp);
+        // Still-image knobs, hashed in their RESOLVED form — after the
+        // port's own tune overrides for this cell's qp. `tune = 3` forces
+        // QM 4/10, sharpness 7 and the variance-boost trio, so
+        // `(tune 3, qm off)` and `(tune 3, qm 4/10)` are ONE encode; that
+        // is the dossier's hazard H-4 (a `tune` that silently rewrites
+        // nine other knobs) removed by resolved-state identity rather
+        // than by a hand-written exclusion table.
+        //
+        // Hashed ONLY when the knobs deviate from the default, so a
+        // default svt-rs cell's fingerprint is byte-identical to the
+        // value this function returned before the axis existed — gated by
+        // `default_svt_knobs_do_not_move_svt_fingerprints`.
+        let svt = config.svt_params();
+        if !svt.is_default() {
+            let r = svt.resolved(qp);
+            h.u8(r.tune);
+            h.u8(u8::from(r.enable_variance_boost));
+            if r.enable_variance_boost {
+                // Strengths 3 and 4 saturate to the same plan
+                // (`avif.rs:806`), so they must not fingerprint apart.
+                h.u8(r.variance_boost_strength.min(3));
+                h.u8(r.variance_octile);
+            }
+            h.u8(u8::from(r.enable_qm));
+            if r.enable_qm {
+                h.u8(r.min_qm_level);
+                h.u8(r.max_qm_level);
+            }
+            h.u8(r.sharpness as u8);
+            h.u8(r.force_screen_content_mode.unwrap_or(0));
+            h.f64(r.ac_bias);
+            h.u8(r.max_tx_size);
+            h.u8(r.tile_cols_log2);
+            h.u8(r.tile_rows_log2);
+        }
     }
     // Without the feature there is no svt-rs encode to be identical TO:
     // `EncoderConfig::validate` rejects the backend, so `cross` files every
@@ -1489,6 +1847,9 @@ impl SweepAxes {
             "modes_full_alpha" => Some(Self::modes_full_alpha()),
             "scalar_dense" => Some(Self::scalar_dense()),
             "svt_speed_dense" => Some(Self::svt_speed_dense()),
+            "svt_doe_main" => Some(Self::svt_doe_main()),
+            "svt_doe_pairwise" => Some(Self::svt_doe_pairwise()),
+            "svt_doe_transfer" => Some(Self::svt_doe_transfer()),
             _ => None,
         }
     }
@@ -1506,11 +1867,20 @@ impl SweepAxes {
 /// parser mirrors token for token):
 ///
 /// ```text
-/// s<speed>[-svt][-noqm][-420][-bd8|-bd10][-rgb][-vaq<f>][-trel][<probe>]
+/// s<speed>[-svt][-noqm][-420][-bd8|-bd10][-rgb][-vaq<f>][-trel][<probe>][<svt-knobs>]
 /// probe := -cdef<0|1> | -rdotx<0|1> | -sgr<0|1> | -lru<0|1>
 ///        | -segcx<0|1> | -bup<0|1> | -still | -sb<f> | -vaqs<f>
 ///        | -part<u8>.<u8> | -cpred<0|1> | -lrf<0|1> | -fdb<0|1>
 ///        | -aqd<signed f> | -adirty | -aprem
+/// svt-knobs := each token at most once, in this order; absence = default
+///        -tn<u8>                       tune
+///        -vbst<0|1>.<u8>.<u8>          variance boost: on . strength . octile
+///        -qml<0|1>.<u8>.<u8>           quantization matrices: on . min . max
+///        -shp<i8>                      sharpness
+///        -scm<u8>                      forced screen-content mode
+///        -acb<f>                       ac_bias
+///        -mtx<u8>                      max_tx_size (32 | 64)
+///        -tl<u8>.<u8>                  tiles: cols_log2 . rows_log2
 /// ```
 ///
 /// Numbers render with shortest-roundtrip `Display`, so parsing is
@@ -1533,6 +1903,8 @@ pub fn config_from_cell_id(base_id: &str, quality: f32) -> Result<EncoderConfig,
         .parse()
         .map_err(|e| format!("bad speed in '{base_id}': {e}"))?;
     let mut cur = &rest[digits.len()..];
+    // One slot per svt-knob token, in `svt_knob_label`'s field order.
+    let mut svt_seen = [false; 8];
 
     let mut stratum = Stratum {
         backend: crate::Av1Backend::Zenravif,
@@ -1544,6 +1916,7 @@ pub fn config_from_cell_id(base_id: &str, quality: f32) -> Result<EncoderConfig,
         vaq: None,
         trellis: false,
         probe: KnobProbe::None,
+        svt: crate::expert::SvtParams::default(),
     };
 
     // Scan a (possibly signed) decimal number off the front of `s`.
@@ -1704,12 +2077,90 @@ pub fn config_from_cell_id(base_id: &str, quality: f32) -> Result<EncoderConfig,
                 base_id,
             )?;
             t
+        }
+        // ---- SVT still-image knob tokens (see `svt_knob_label`) --------
+        // Placed after the probe tokens; none of them shares a prefix with
+        // an earlier token (checked by `cell_ids_roundtrip_to_their_configs`
+        // over every DOE knob set).
+        else if let Some(t) = tok.strip_prefix("vbst") {
+            let (on, t) = bool01(t, base_id, "vbst-on")?;
+            let t = dot(t, base_id, "vbst")?;
+            let (strength, t) = integer(t, base_id, "vbst-strength")?;
+            let t = dot(t, base_id, "vbst")?;
+            let (octile, t) = integer(t, base_id, "vbst-octile")?;
+            svt_once(&mut svt_seen, 1, base_id)?;
+            stratum.svt.enable_variance_boost = on;
+            stratum.svt.variance_boost_strength = strength;
+            stratum.svt.variance_octile = octile;
+            t
+        } else if let Some(t) = tok.strip_prefix("qml") {
+            let (on, t) = bool01(t, base_id, "qml-on")?;
+            let t = dot(t, base_id, "qml")?;
+            let (min, t) = integer(t, base_id, "qml-min")?;
+            let t = dot(t, base_id, "qml")?;
+            let (max, t) = integer(t, base_id, "qml-max")?;
+            svt_once(&mut svt_seen, 2, base_id)?;
+            stratum.svt.enable_qm = on;
+            stratum.svt.min_qm_level = min;
+            stratum.svt.max_qm_level = max;
+            t
+        } else if let Some(t) = tok.strip_prefix("shp") {
+            let (v, t) = number(t, base_id, "shp")?;
+            svt_once(&mut svt_seen, 3, base_id)?;
+            stratum.svt.sharpness = v as i8;
+            t
+        } else if let Some(t) = tok.strip_prefix("scm") {
+            let (v, t) = integer(t, base_id, "scm")?;
+            svt_once(&mut svt_seen, 4, base_id)?;
+            stratum.svt.force_screen_content_mode = Some(v);
+            t
+        } else if let Some(t) = tok.strip_prefix("acb") {
+            let (v, t) = number(t, base_id, "acb")?;
+            svt_once(&mut svt_seen, 5, base_id)?;
+            stratum.svt.ac_bias = v;
+            t
+        } else if let Some(t) = tok.strip_prefix("mtx") {
+            let (v, t) = integer(t, base_id, "mtx")?;
+            svt_once(&mut svt_seen, 6, base_id)?;
+            stratum.svt.max_tx_size = v;
+            t
+        } else if let Some(t) = tok.strip_prefix("tn") {
+            let (v, t) = integer(t, base_id, "tn")?;
+            svt_once(&mut svt_seen, 0, base_id)?;
+            stratum.svt.tune = v;
+            t
+        } else if let Some(t) = tok.strip_prefix("tl") {
+            let (cols, t) = integer(t, base_id, "tl-cols")?;
+            let t = dot(t, base_id, "tl")?;
+            let (rows, t) = integer(t, base_id, "tl-rows")?;
+            svt_once(&mut svt_seen, 7, base_id)?;
+            stratum.svt.tile_cols_log2 = cols;
+            stratum.svt.tile_rows_log2 = rows;
+            t
         } else {
             return Err(format!("unknown token '-{tok}' in cell id '{base_id}'"));
         };
     }
 
     Ok(stratum.build_config(quality))
+}
+
+/// Consume the `.` separating the fields of a compound svt-knob token.
+fn dot<'a>(s: &'a str, id: &str, what: &str) -> Result<&'a str, String> {
+    s.strip_prefix('.')
+        .ok_or_else(|| format!("expected '.' in {what} token of '{id}'"))
+}
+
+/// Reject a repeated svt-knob token — the grammar renders each at most
+/// once, so a duplicate is a malformed id, not a last-wins override.
+fn svt_once(seen: &mut [bool; 8], slot: usize, id: &str) -> Result<(), String> {
+    if seen[slot] {
+        return Err(format!(
+            "duplicate svt-knob token in '{id}': each knob renders at most once"
+        ));
+    }
+    seen[slot] = true;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1866,6 +2317,195 @@ mod tests {
         assert_eq!(plan.invalid_skipped.len(), 10);
     }
 
+    // ========================================================================
+    // SVT still-image knob axis (the AVIF design of experiments, 2026-09-01;
+    // zenmetrics/benchmarks/avif_doe_plan_2026-09-01.md). Same invariant as
+    // the backend axis: adding it must not move any pre-existing id or
+    // fingerprint.
+    // ========================================================================
+
+    /// The default knob set must be inert: an svt-rs cell that carries it
+    /// fingerprints exactly as it did before the axis existed, because the
+    /// fingerprint hashes the knobs only when they deviate.
+    #[cfg(feature = "encode-svt-rs")]
+    #[test]
+    fn default_svt_knobs_do_not_move_svt_fingerprints() {
+        let plain = config_from_cell_id("s4-svt-420", 50.0).unwrap();
+        let explicit = plain
+            .clone()
+            .with_svt_params(crate::expert::SvtParams::default());
+        assert_eq!(fingerprint(&plain), fingerprint(&explicit));
+        assert_eq!(svt_knob_label(crate::expert::SvtParams::default()), "");
+    }
+
+    /// The knobs are inert on every non-svt-rs backend, so setting them on
+    /// a zenravif cell must NOT mint a second cell for the same bytes.
+    // `SvtParams` is #[non_exhaustive], so Default + field assignment is the
+    // only spelling available — same reason `KnobProbe::apply` carries this.
+    #[allow(clippy::field_reassign_with_default)]
+    #[test]
+    fn svt_knobs_are_inert_on_zenravif() {
+        let plain = config_from_cell_id("s4-420", 50.0).unwrap();
+        let mut p = crate::expert::SvtParams::default();
+        p.tune = 3;
+        p.sharpness = 7;
+        assert_eq!(
+            fingerprint(&plain),
+            fingerprint(&plain.clone().with_svt_params(p))
+        );
+    }
+
+    /// HAZARD H-4, neutralised by resolved-state identity: `tune = 3` (IQ)
+    /// forces QM 4/10, sharpness 7 and the variance-boost trio, so a cell
+    /// that ALSO spells those out is the same encode and must merge.
+    // `SvtParams` is #[non_exhaustive], so Default + field assignment is the
+    // only spelling available — same reason `KnobProbe::apply` carries this.
+    #[allow(clippy::field_reassign_with_default)]
+    #[cfg(feature = "encode-svt-rs")]
+    #[test]
+    fn tune_iq_absorbs_the_knobs_it_forces() {
+        let mut iq = crate::expert::SvtParams::default();
+        iq.tune = 3;
+        let mut spelled = iq;
+        spelled.enable_qm = true;
+        spelled.min_qm_level = 4;
+        spelled.max_qm_level = 10;
+        spelled.sharpness = 7;
+        spelled.enable_variance_boost = true;
+        spelled.variance_boost_strength = 3;
+
+        let base = config_from_cell_id("s4-svt-420", 50.0).unwrap();
+        assert_eq!(
+            fingerprint(&base.clone().with_svt_params(iq)),
+            fingerprint(&base.clone().with_svt_params(spelled)),
+            "tune IQ forces these knobs; spelling them out is the same encode"
+        );
+        // ...and it is genuinely different from the default cell, so the
+        // merge above is not a fingerprint that ignores the axis.
+        assert_ne!(fingerprint(&base), fingerprint(&base.with_svt_params(iq)));
+    }
+
+    /// Variance-boost strengths 3 and 4 saturate to the same plan
+    /// (`zenav1-svt avif.rs:806`), so they must be ONE cell — and the
+    /// clamp must keep an out-of-range value from reaching the encoder,
+    /// where the port's guard is `debug_assert` only (HAZARD H-10).
+    // `SvtParams` is #[non_exhaustive], so Default + field assignment is the
+    // only spelling available — same reason `KnobProbe::apply` carries this.
+    #[allow(clippy::field_reassign_with_default)]
+    #[cfg(feature = "encode-svt-rs")]
+    #[test]
+    fn variance_boost_strength_saturates_and_clamps() {
+        let base = config_from_cell_id("s4-svt-420", 50.0).unwrap();
+        let vb = |s: u8| {
+            let mut p = crate::expert::SvtParams::default();
+            p.enable_variance_boost = true;
+            p.variance_boost_strength = s;
+            p
+        };
+        assert_eq!(
+            fingerprint(&base.clone().with_svt_params(vb(3))),
+            fingerprint(&base.clone().with_svt_params(vb(4))),
+        );
+        // Out of range in both directions clamps into 1..=4 rather than
+        // reaching `STRENGTHS[strength as usize]` on a `[f64; 5]`.
+        assert_eq!(vb(0).clamped().variance_boost_strength, 1);
+        assert_eq!(vb(200).clamped().variance_boost_strength, 4);
+        let mut oct = crate::expert::SvtParams::default();
+        oct.variance_octile = 0;
+        assert_eq!(oct.clamped().variance_octile, 1);
+        oct.variance_octile = 99;
+        assert_eq!(oct.clamped().variance_octile, 8);
+    }
+
+    /// `max_tx_size` under tune IQ is chosen BY qp (32 at qp <= 45), so
+    /// the same knob set is a different encode at different quality —
+    /// which is why the design runs a q ladder rather than one anchor.
+    // `SvtParams` is #[non_exhaustive], so Default + field assignment is the
+    // only spelling available — same reason `KnobProbe::apply` carries this.
+    #[allow(clippy::field_reassign_with_default)]
+    #[test]
+    fn tune_iq_max_tx_size_is_quality_dependent() {
+        let mut iq = crate::expert::SvtParams::default();
+        iq.tune = 3;
+        assert_eq!(iq.resolved(40).max_tx_size, 32);
+        assert_eq!(iq.resolved(50).max_tx_size, 64);
+        // Non-IQ tunes are untouched by the override block.
+        let d = crate::expert::SvtParams::default();
+        assert_eq!(d.resolved(40), d);
+        assert_eq!(d.resolved(60), d);
+    }
+
+    /// Deviation counting is what makes `with_max_deviations` mean
+    /// "main effects" / "plus pairwise" on a compound axis.
+    #[test]
+    fn svt_knob_sets_carry_their_own_deviation_counts() {
+        let singles = SweepAxes::svt_doe_knob_sets();
+        // 16 knob deviations; the 17th main-effect arm (10-bit) rides the
+        // pre-existing `bit_depths` axis, not this one.
+        assert_eq!(singles.len(), 17, "1 default + 16 deviations");
+        assert_eq!(singles[0].deviations(), 0);
+        for (i, s) in singles.iter().enumerate().skip(1) {
+            assert_eq!(
+                s.deviations(),
+                1,
+                "set {i} must be a single deviation: {s:?}"
+            );
+        }
+        let pairs = SweepAxes::svt_doe_pairwise_sets();
+        // 17 singles + C(16,2) composed pairs.
+        assert_eq!(pairs.len(), 17 + 120);
+        assert!(
+            pairs[17..].iter().all(|p| p.deviations() <= 2),
+            "composed sets are at most two deviations"
+        );
+    }
+
+    /// Every DOE cell id must round-trip through the parser to the same
+    /// resolved config — the grammar contract `zenmetrics jobexec` relies
+    /// on when it re-resolves a stored cell and re-checks its fingerprint.
+    #[cfg(feature = "encode-svt-rs")]
+    #[test]
+    fn svt_doe_cell_ids_roundtrip() {
+        let plan = SweepBuilder::new(
+            SweepAxes::svt_doe_pairwise(),
+            QualityGrid::Explicit(vec![45.0]),
+        )
+        .plan();
+        assert!(plan.cells.len() > 50, "cells: {}", plan.cells.len());
+        for cell in &plan.cells {
+            let base = cell
+                .id
+                .rsplit_once("_q")
+                .expect("cell id has a _q suffix")
+                .0;
+            let parsed = config_from_cell_id(base, cell.quality)
+                .unwrap_or_else(|e| panic!("parse '{base}': {e}"));
+            assert_eq!(
+                fingerprint(&parsed),
+                cell.fingerprint,
+                "id '{base}' did not round-trip"
+            );
+        }
+    }
+
+    /// The main-effects plan at `max_deviations = 1` must contain exactly
+    /// the default cell plus one cell per knob arm per speed — no
+    /// interactions leak in.
+    #[cfg(feature = "encode-svt-rs")]
+    #[test]
+    fn svt_doe_main_at_one_deviation_is_isolated_main_effects() {
+        let plan = SweepBuilder::new(SweepAxes::svt_doe_main(), QualityGrid::Explicit(vec![45.0]))
+            .with_max_deviations(1)
+            .plan();
+        assert!(
+            plan.cells.iter().all(|c| c.deviations <= 1),
+            "a cell with 2+ deviations leaked into the main-effects plan"
+        );
+        // speed 4 and bit-depth Auto are index 0, so: 1 default + 16
+        // knob arms + 6 speeds + 1 bit-depth = 24 strata at one q.
+        assert_eq!(plan.cells.len(), 24, "{:?}", plan.cells.len());
+    }
+
     fn tiny_axes() -> SweepAxes {
         SweepAxes {
             backends: vec![crate::Av1Backend::Zenravif],
@@ -1877,6 +2517,7 @@ mod tests {
             vaq: vec![None],
             trellis: vec![false],
             probes: vec![KnobProbe::None],
+            svt_knobs: vec![crate::expert::SvtParams::default()],
         }
     }
 
@@ -1981,6 +2622,7 @@ mod tests {
             vaq: None,
             trellis: false,
             probe: KnobProbe::None,
+            svt: crate::expert::SvtParams::default(),
         };
         let a = base.build_config(50.0).with_vaq(false, 1.0);
         let b = base.build_config(50.0).with_vaq(false, 3.0);
@@ -2056,6 +2698,7 @@ mod tests {
             vaq: None,
             trellis: false,
             probe: KnobProbe::None,
+            svt: crate::expert::SvtParams::default(),
         };
         let mut fps = std::collections::BTreeMap::new();
         fps.insert(fingerprint(&base.build_config(50.0)), "default".to_string());
@@ -2180,6 +2823,7 @@ mod tests {
             vaq: None,
             trellis: false,
             probe: KnobProbe::None,
+            svt: crate::expert::SvtParams::default(),
         };
         let none = base.build_config(60.0);
         let delta0 = Stratum {
@@ -2256,6 +2900,7 @@ mod tests {
             vaq: None,
             trellis: false,
             probe: KnobProbe::None,
+            svt: crate::expert::SvtParams::default(),
         };
         let mk_cell = |probe: KnobProbe, q: f32| SweepCell {
             id: "t".into(),

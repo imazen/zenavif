@@ -339,6 +339,14 @@ pub struct EncoderConfig {
     /// there behind `zenravif::FRAME_HINTS_LIVE`.
     #[cfg(any(feature = "two-pass-butteraugli", feature = "two-pass-zensim"))]
     pub(crate) sb_q_scale: Option<Box<[f32]>>,
+    /// Still-image knobs for the [`Av1Backend::SvtRs`] backend
+    /// ([`crate::expert::SvtParams`]). The [`Default`] is exactly what the
+    /// svt-rs seam configures with no params set, so the field is inert
+    /// unless a caller opts in via
+    /// [`EncoderConfig::with_svt_params`]. Ignored by every other backend
+    /// (and by the sweep fingerprint on those backends, so an inert
+    /// spelling cannot mint a duplicate cell).
+    pub(crate) svt: crate::expert::SvtParams,
 }
 
 impl Default for EncoderConfig {
@@ -407,6 +415,7 @@ impl Default for EncoderConfig {
             fast_tier_budgets: None,
             #[cfg(any(feature = "two-pass-butteraugli", feature = "two-pass-zensim"))]
             sb_q_scale: None,
+            svt: crate::expert::SvtParams::default(),
         }
     }
 }
@@ -855,6 +864,30 @@ impl EncoderConfig {
     /// preset's value untouched. Calling this multiple times overwrites
     /// previously-set fields wholesale (the struct is the unit of
     /// configuration, not the individual fields).
+    /// Apply the expert-only [`crate::expert::SvtParams`] still-image knobs
+    /// for the [`Av1Backend::SvtRs`] backend.
+    ///
+    /// **Unstable surface** — see [`crate::expert`]. The struct is the unit
+    /// of configuration: calling this replaces every field wholesale. The
+    /// [`Default`] value is what the seam configures anyway, so passing it
+    /// is a no-op.
+    ///
+    /// Other backends ignore these knobs entirely; the sweep planner's
+    /// fingerprint ignores them too on those backends, so an inert spelling
+    /// cannot mint a duplicate cell.
+    #[must_use]
+    pub fn with_svt_params(mut self, params: crate::expert::SvtParams) -> Self {
+        self.svt = params;
+        self
+    }
+
+    /// The still-image knobs the [`Av1Backend::SvtRs`] encode will run,
+    /// after [`crate::expert::SvtParams::clamped`].
+    #[must_use]
+    pub fn svt_params(&self) -> crate::expert::SvtParams {
+        self.svt.clamped()
+    }
+
     #[cfg(feature = "__expert")]
     pub fn with_internal_params(mut self, params: crate::expert::InternalParams) -> Self {
         self.override_partition_range = params.partition_range;

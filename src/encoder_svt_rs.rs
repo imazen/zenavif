@@ -240,6 +240,49 @@ pub(crate) fn svt_resolved_identity(config: &crate::EncoderConfig) -> (u8, u8, u
     )
 }
 
+/// Push [`crate::expert::SvtParams`] onto a colour `EncodePipeline`.
+///
+/// The seam's historical behaviour is `SvtParams::default()`, which is
+/// SVT-AV1 v4.2.0's **mainline** default set (tune 1 = PSNR, QM off,
+/// variance boost off, sharpness 0, `max_tx_size` 64, preset-derived
+/// screen-content mode, no tiles) — so a caller that never touches
+/// `with_svt_params` gets byte-identical output to before this function
+/// existed. Gated by `svt_params_default_leaves_the_pipeline_at_mainline`.
+///
+/// Values are [`crate::expert::SvtParams::clamped`] first: the port guards
+/// `variance_boost_strength` and `variance_octile` with `debug_assert` only
+/// (`var_boost.rs` indexes a `[f64; 5]` and computes
+/// `octile * SUBBLOCKS_IN_OCTILE - 1`), and every fleet worker is a release
+/// build — an unclamped sweep value is a worker crash, not a measurement.
+///
+/// Chroma QM levels are set to the same window as luma, mirroring what the
+/// port's own `apply_tune_overrides` does for tune IQ/MS-SSIM.
+///
+/// Not applied to the monochrome path ([`encode_mono_plane_svt`]): alpha and
+/// grayscale items stay at the mainline defaults, which is also what libavif
+/// does (it drives alpha with `tune=psnr`).
+fn apply_svt_params(
+    pipeline: &mut svtav1::encoder::pipeline::EncodePipeline,
+    config: &crate::EncoderConfig,
+) {
+    let p = config.svt_params();
+    pipeline.hdr.tune = p.tune;
+    pipeline.hdr.enable_variance_boost = p.enable_variance_boost;
+    pipeline.hdr.variance_boost_strength = p.variance_boost_strength;
+    pipeline.hdr.variance_octile = p.variance_octile;
+    pipeline.hdr.enable_qm = p.enable_qm;
+    pipeline.hdr.min_qm_level = p.min_qm_level;
+    pipeline.hdr.max_qm_level = p.max_qm_level;
+    pipeline.hdr.min_chroma_qm_level = p.min_qm_level;
+    pipeline.hdr.max_chroma_qm_level = p.max_qm_level;
+    pipeline.hdr.sharpness = p.sharpness;
+    pipeline.hdr.screen_content_mode = p.force_screen_content_mode;
+    pipeline.hdr.ac_bias = p.ac_bias;
+    pipeline.hdr.max_tx_size = p.max_tx_size;
+    pipeline.tile_cols_log2 = p.tile_cols_log2;
+    pipeline.tile_rows_log2 = p.tile_rows_log2;
+}
+
 /// Lowest SVT preset at which the **monochrome** (Cs400) path is verified
 /// to code a partial superblock correctly — the alpha auxiliary item and
 /// grayscale colour items.
@@ -646,6 +689,7 @@ fn encode_color_420_svt(
     // reduced still-picture sequence header (the AvifEncoder pattern).
     let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new(w, h, preset, rc, 0, 1)
         .with_chroma_420(true);
+    apply_svt_params(&mut pipeline, config);
     pipeline.bit_depth = planes.bit_depth();
     pipeline.color_description = svtav1::entropy::obu::ColorDescription {
         color_primaries,
@@ -1201,5 +1245,86 @@ mod tests {
             assert!(p >= prev, "not monotonic at speed {s}");
             prev = p;
         }
+    }
+
+    /// [`crate::expert::SvtParams::resolved`] transcribes the port's
+    /// `HdrForkConfig::apply_tune_overrides`. The sweep planner uses the
+    /// transcription (so a cell resolves without an encode), so the two
+    /// must not drift: drive the REAL port config through the REAL
+    /// override and compare field by field, at a qp on each side of the
+    /// tune-IQ `max_tx_size` switch.
+    // `SvtParams` is #[non_exhaustive], so Default + field assignment is the
+    // only spelling available — same reason `KnobProbe::apply` carries this.
+    #[allow(clippy::field_reassign_with_default)]
+    #[test]
+    fn resolved_matches_the_port_tune_overrides() {
+        for tune in [0u8, 1, 2, 3, 4] {
+            for qp in [10u8, 45, 46, 63] {
+                let mut ours = crate::expert::SvtParams::default();
+                ours.tune = tune;
+                let ours = ours.resolved(qp);
+
+                let mut theirs = svtav1::encoder::hdr_mode::HdrForkConfig::mainline();
+                theirs.tune = tune;
+                theirs.apply_tune_overrides(qp);
+
+                assert_eq!(
+                    ours.enable_qm, theirs.enable_qm,
+                    "tune {tune} qp {qp}: enable_qm"
+                );
+                assert_eq!(
+                    ours.min_qm_level, theirs.min_qm_level,
+                    "tune {tune} qp {qp}: qm_min"
+                );
+                assert_eq!(
+                    ours.max_qm_level, theirs.max_qm_level,
+                    "tune {tune} qp {qp}: qm_max"
+                );
+                assert_eq!(
+                    ours.sharpness, theirs.sharpness,
+                    "tune {tune} qp {qp}: sharpness"
+                );
+                assert_eq!(
+                    ours.enable_variance_boost, theirs.enable_variance_boost,
+                    "tune {tune} qp {qp}: variance boost"
+                );
+                assert_eq!(
+                    ours.variance_boost_strength, theirs.variance_boost_strength,
+                    "tune {tune} qp {qp}: vb strength"
+                );
+                assert_eq!(
+                    ours.max_tx_size, theirs.max_tx_size,
+                    "tune {tune} qp {qp}: max_tx_size"
+                );
+                assert_eq!(
+                    ours.force_screen_content_mode, theirs.screen_content_mode,
+                    "tune {tune} qp {qp}: screen_content_mode"
+                );
+            }
+        }
+    }
+
+    /// The seam's historical behaviour IS `SvtParams::default()`: applying
+    /// the default set must leave the pipeline's `hdr` at the port's own
+    /// mainline default and its tiles at 0/0, so a caller that never
+    /// touches `with_svt_params` encodes byte-identically to before the
+    /// knob axis existed.
+    #[test]
+    fn svt_params_default_leaves_the_pipeline_at_mainline() {
+        let rc = svtav1::encoder::rate_control::RcConfig {
+            mode: svtav1::encoder::rate_control::RcMode::Cqp,
+            qp: 35,
+            ..svtav1::encoder::rate_control::RcConfig::default()
+        };
+        let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new(64, 64, 6, rc, 0, 1)
+            .with_chroma_420(true);
+        let before = pipeline.hdr.clone();
+        super::apply_svt_params(&mut pipeline, &crate::EncoderConfig::new());
+        assert_eq!(pipeline.hdr, before, "default SvtParams must be inert");
+        assert_eq!(
+            pipeline.hdr,
+            svtav1::encoder::hdr_mode::HdrForkConfig::mainline()
+        );
+        assert_eq!((pipeline.tile_cols_log2, pipeline.tile_rows_log2), (0, 0));
     }
 }
