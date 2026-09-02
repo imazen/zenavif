@@ -524,6 +524,39 @@ write-path returns + gain-map interop additions, already on main).
   `svt_rs_partial_sb_roundtrip_at_low_presets` and
   `svt_rs_mono_partial_sb_still_refused_below_preset_6`; only the prose drifted.
 
+### Measured (both backends run, not just built)
+
+- **`benchmarks/backend_sweep_2026-09-02.{tsv,meta}`** — 8 CID22-512 images x
+  sizes {64, 128, 256, 512} x quality 5..=100 step 5 x speed 6 x
+  {zenravif-420, zenravif-444, svt-rs-420}, 1920 rows. The **cross-decoder gate
+  is 1920/1920 byte-identical**: every AV1 payload either encoder produced
+  decodes to identical planes under `DecodeBackend::Rav1dSafe` and
+  `DecodeBackend::AomRs`. Bytes at *matched* ssim2 (log-interpolated per image,
+  median across images) put svt-rs at 0.94-1.05x zenravif at 64-128 and
+  1.03-1.16x at 256-512; encode wall time runs 17.3x / 23.6x / 26.8x / 28.2x in
+  svt-rs's favour by size. Median bytes against median ssim2 over a quality
+  sweep is not an RD comparison and is deliberately not quoted.
+
+- **`benchmarks/backend_sweep_partialsb_2026-09-02.{tsv,meta}`** — the same
+  harness at sizes {65, 100, 200, 333, 500}, none a multiple of 64 and two not
+  multiples of 8. **600/600 svt-rs cells encoded with no dimension refusal**,
+  1800/1800 decoder-identical, RD and speed ratios inside the aligned dataset's
+  range. This is the evidence behind the dimension-envelope correction below —
+  the claim now rests on encoded bitstreams, not on a reading of the gate.
+
+  Limits stated in the `.meta` files: the `encode_ms` columns come from a
+  4-thread run and are load-polluted in absolute terms (the arm *ratio* is
+  not); speed 6 is SVT preset 7, so this grid does not exercise the
+  below-preset-6 half of the 2026-08-29 floor removal, which stays pinned by
+  `svt_rs_partial_sb_roundtrip_at_low_presets`; and `backend_sweep_2026-07-22`
+  is **not** comparable (different pins, box, speed set, image count).
+
+- These are the first backend measurements in this repo whose encoder is
+  identified by a commit rather than by whatever was checked out in
+  `../zenav1-svt` — see the dep change above. `benchmarks/README.md` gains an
+  "AV1 backend datasets" table, which it did not have for any backend dataset.
+  (`e088692`)
+
 ### Added (backend spike measurements rescued from a stale branch)
 
 - **`benchmarks/av1_backends_spike_2026-05-23.md` + the three
