@@ -9,7 +9,7 @@ differs.
 
 `Av1Backend::SvtRs`'s rustdoc and the `encode-svt-rs` feature comment both
 said dimensions must be multiples of 64 except at speed >= 5. The gate they
-describe, `svt_rs_dims_error` (`src/encoder_svt_rs.rs:265`), says the
+describe, `svt_rs_dims_error` (`src/encoder_svt_rs.rs:351`), says the
 opposite for the colour path: a 4:2:0 colour image of ANY size is accepted at
 EVERY speed, and only an alpha/grayscale Cs400 item at a non-multiple-of-64
 size additionally needs speed >= 5 and multiples of 8. The prose was corrected

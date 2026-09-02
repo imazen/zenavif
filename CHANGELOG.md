@@ -513,7 +513,7 @@ write-path returns + gain-map interop additions, already on main).
 - **`Av1Backend::SvtRs`'s rustdoc and the `encode-svt-rs` feature comment both
   contradicted the gate they describe.** Both said dimensions must be multiples
   of 64 except at speed >= 5. `svt_rs_dims_error`
-  (`src/encoder_svt_rs.rs:265`) says the opposite for the colour path: multiples
+  (`src/encoder_svt_rs.rs:351`) says the opposite for the colour path: multiples
   of 64 are always accepted, **any other size is accepted on 4:2:0 colour at
   every speed** (the partial-superblock floor was removed 2026-08-29), and only
   an alpha/grayscale Cs400 item at a non-multiple-of-64 size additionally needs
