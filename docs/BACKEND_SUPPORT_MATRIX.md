@@ -1,47 +1,50 @@
 # Backend support matrix
 
-What each AV1 backend supports through zenavif's seams, as of 2026-07-23
-(branch `svtav1-rs-backend`; pins: zenravif 0.2.0 path dep, zenav1-svt
-`3e25f52b`, rav1d-safe `f9458f43`, zenav1-aom `7b972e50`, rav1d 1.1.0).
+What each AV1 backend supports through zenavif's seams, as of 2026-07-23 for
+the first two encode columns and **2026-09-02** for the Zenav1Aom encode
+column (branch `svtav1-rs-backend`; pins: zenravif 0.2.0 path dep, zenav1-svt
+`3e25f52b`, rav1d-safe `f9458f43`, zenav1-aom decode `7b972e50`, zenav1-aom
+encode `c3e1b4ab`, rav1d 1.1.0). Where a row's Zenav1Svt cell cites an older
+pin than `Cargo.toml`, that cell is as-of its own date, not re-verified.
 "Rejected" always means an honest structured error at validate/encode time,
 never silent degradation. Sources: `src/encoder.rs`, `src/encoder_svt_rs.rs`,
-`src/decode_av1.rs`, the per-backend audits, and
+`src/encoder_aom.rs`, `src/decode_av1.rs`, the per-backend audits, and
 `benchmarks/backend_sweep_2026-07-22.*`.
 
 ## Encode backends (`EncoderConfig::backend`)
 
-| Axis | Zenravif (default, `encode`) | Zenav1Svt (`zenav1-svt`, experimental) |
-|---|---|---|
-| Input: RGB8 | yes | yes |
-| Input: RGBA8 (alpha item) | yes | yes (alpha as Cs400 `auxl` item, `alpha_quality` fallback honored) |
-| Input: Gray8 → Cs400 mono | yes (`encode-mono` gate) | yes (`encode-mono` gate) |
-| Input: RGB16/RGBA16 → 10-bit AV1 | yes (`encode_rgb16`/`encode_rgba16`, identity-RGB 4:4:4) | yes (#33; YCbCr 4:2:0 at 10-bit precision via the port's native u16 `try_encode_frame_420_hbd`; RGBA16 needs speed ≥ 7 for its 10-bit Cs400 alpha item) |
-| Bit depth 8 | yes | yes |
-| Bit depth 10 | yes (`EncodeBitDepth::Ten`/`Auto`) | yes (#33; `Ten` on 8-bit input converts at 10-bit precision; 10-bit alpha/gray streams need speed ≥ 7 = SVT preset ≥ 9, the port's only bd10 mono level producer; post-filter searches upstream still decide on MSB-truncated planes — hbd chunk 2) |
-| Bit depth 12 | no (no enum variant; AV1 profile 2) | no (`unimplemented!()` upstream) |
-| Subsampling 4:4:4 | yes (default) | rejected |
-| Subsampling 4:2:0 | yes | yes (the only mode) |
-| Subsampling 4:2:2 | no (no enum variant) | no |
-| Color model YCbCr (BT.601) | yes | yes (BT.601 full-range pinned) |
-| Color model RGB (identity, MC=0) | yes (4:4:4 only) | rejected |
-| Pixel range Full | yes (default) | yes (pinned) |
-| Pixel range Limited | yes | rejected (SH writer pins color_range=1) |
-| CICP primaries/transfer signaling | yes (config → SH + container `colr`) | yes (SH + container; matrix pinned BT.601) |
-| Dimensions | arbitrary | 4:2:0 colour path: **arbitrary at any speed** (the preset ≥ 6 floor was removed 2026-08-29 — upstream `partial_sb_gate` gained a byte-identical presets-0–5 block and the residual it still names is a `screen`-content RD class that also fires on 64-aligned frames); with alpha or grayscale (Cs400 stream): multiples of 64 below speed 5, else multiples of 8 — the port's mono path pads no partial 8x8 block and nothing upstream measures mono partial SBs below SVT preset 6 (#32; `svt_rs_dims_error`; the preset-6 mono mis-coding was fixed in zenav1-svt `b6a1737a` + `1ed7db46`) |
-| Quality dial semantics | fitted quality→qindex curve (0–255; `encode_plan.rs`) | linear quality→QP (63..1; **QP 0 clamped out** — a product choice since zenav1-svt#5/#9 implemented coded-lossless: quality 100 must encode, not switch coding mode, and RGB→4:2:0 means QP 0 is not a lossless *image* round-trip anyway) |
-| Speed dial | 1–10 → zenravif speed ladder | 1–10 → SVT preset 0–13 linear (wall-time NOT aligned with zenravif's ladder: ~6× faster at s6, slower at s2) |
-| Lossless | yes (`encode-imazen`, release-gated exactness) | not exposed — upstream implements coded-lossless (QP 0) on the 8-bit 4:2:0 key-frame path (zenav1-svt#5/#9, gated by `svt_rs_direct_qp0_codes_lossless_420` here), but this backend's quality dial deliberately clamps to QP ≥ 1 and `EncoderConfig` has no lossless request to route to it (open decision: zenavif#42); still typed-refused upstream on mono, 10-bit, HDR-fork, screen-content tools, superres and inter frames |
-| Gain map / Ultra HDR (`with_gain_map`) | yes | rejected |
-| HDR metadata boxes (CLL/mastering) | yes | yes (container-level) |
-| EXIF/XMP/ICC, rotation/mirror | yes | yes (container-level, muxed in-crate) |
-| Animation (`encode_animation_*`) | yes | rejected (stills only) |
-| Target quality (`encode_*_with_target`, ssim2/zensim) | yes (RGB8/RGBA8/RGB16; q0 head seeds ssim2) | yes for RGB8/RGBA8 (search is backend-generic; anchor-curve seeding; convergence pinned by `svt_rs_target_quality_search_converges_on_ssim2`); RGB16 reaches the backend since #33 but its convergence is not pinned by a test |
-| Two-pass butteraugli | yes (release-gated `FRAME_HINTS_LIVE`) | no |
-| Auto-tune picker | yes (`auto-tune`) | no (calibrated for zenravif knobs) |
-| Stop token | yes (per-superblock via zenravif) | yes (threaded into pipeline, SB cadence) |
-| Structured errors at the seam | yes | yes (`try_encode_frame*` → variant-mapped; no `is_empty()` heuristic) |
-| C-parity claim | n/a (rav1e lineage) | byte-identical to C-SVT on the verified envelope upstream; NOT asserted at the zenavif seam yet |
-| Screen content (palette/intraBC) | palette + intraBC via zenravif gates (release-gated arms) | palette ported upstream (RD over-picks, decodable); intraBC unwired; nothing exposed at the seam |
+| Axis | Zenravif (default, `encode`) | Zenav1Svt (`zenav1-svt`, experimental) | Zenav1Aom (`zenav1-aom-encode`, experimental) |
+|---|---|---|---|
+| Input: RGB8 | yes | yes | yes |
+| Input: RGBA8 (alpha item) | yes | yes (alpha as Cs400 `auxl` item, `alpha_quality` fallback honored) | rejected — the Cs400 mono encode an `auxl` alpha item needs exists here, the item itself is not wired |
+| Input: Gray8 → Cs400 mono | yes (`encode-mono` gate) | yes (`encode-mono` gate) | yes (`encode-mono` gate) |
+| Input: RGB16/RGBA16 → 10-bit AV1 | yes (`encode_rgb16`/`encode_rgba16`, identity-RGB 4:4:4) | yes (#33; YCbCr 4:2:0 at 10-bit precision via the port's native u16 `try_encode_frame_420_hbd`; RGBA16 needs speed ≥ 7 for its 10-bit Cs400 alpha item) | rejected (the encoder byte-gates bd 8/10/12; the u16 forward RGB→YUV path is not wired at this seam) |
+| Bit depth 8 | yes | yes | yes (the only depth) |
+| Bit depth 10 | yes (`EncodeBitDepth::Ten`/`Auto`) | yes (#33; `Ten` on 8-bit input converts at 10-bit precision; 10-bit alpha/gray streams need speed ≥ 7 = SVT preset ≥ 9, the port's only bd10 mono level producer; post-filter searches upstream still decide on MSB-truncated planes — hbd chunk 2) | rejected at the seam; byte-gated upstream (186/186 includes bd10) |
+| Bit depth 12 | no (no enum variant; AV1 profile 2) | no (`unimplemented!()` upstream) | rejected at the seam; byte-gated upstream (186/186 includes bd12) |
+| Subsampling 4:4:4 | yes (default) | rejected | rejected at the seam (no forward RGB→YUV 4:4:4 kernel in `src/yuv_convert.rs`); byte-gated upstream |
+| Subsampling 4:2:0 | yes | yes (the only mode) | yes (the only mode) |
+| Subsampling 4:2:2 | no (no enum variant) | no | rejected at the seam (no `EncodeChromaSubsampling` variant); byte-gated upstream |
+| Color model YCbCr (BT.601) | yes | yes (BT.601 full-range pinned) | yes (BT.601 **limited**-range — the SH pins `color_range=0`) |
+| Color model RGB (identity, MC=0) | yes (4:4:4 only) | rejected | rejected |
+| Pixel range Full | yes (default) | yes (pinned) | rejected (SH writer pins `color_range=0`) |
+| Pixel range Limited | yes | rejected (SH writer pins color_range=1) | yes (pinned; the mirror image of Zenav1Svt) |
+| CICP primaries/transfer signaling | yes (config → SH + container `colr`) | yes (SH + container; matrix pinned BT.601) | container `colr` only — the SH pins CICP 2/2/2 (unspecified); `zenavif::decode` reads range+matrix from the **SH**, not `colr` (measured 2026-09-02), and the SH's unspecified matrix falls back to BT.601, which is what this seam converts with |
+| Dimensions | arbitrary | 4:2:0 colour path: **arbitrary at any speed** (the preset ≥ 6 floor was removed 2026-08-29 — upstream `partial_sb_gate` gained a byte-identical presets-0–5 block and the residual it still names is a `screen`-content RD class that also fires on 64-aligned frames); with alpha or grayscale (Cs400 stream): multiples of 64 below speed 5, else multiples of 8 — the port's mono path pads no partial 8x8 block and nothing upstream measures mono partial SBs below SVT preset 6 (#32; `svt_rs_dims_error`; the preset-6 mono mis-coding was fixed in zenav1-svt `b6a1737a` + `1ed7db46`) | arbitrary (upstream byte-gates 16×16–512×512 plus 20 crops incl. 1×1; the seam refuses only zero) |
+| Quality dial semantics | fitted quality→qindex curve (0–255; `encode_plan.rs`) | linear quality→QP (63..1; **QP 0 clamped out** — a product choice since zenav1-svt#5/#9 implemented coded-lossless: quality 100 must encode, not switch coding mode, and RGB→4:2:0 means QP 0 is not a lossless *image* round-trip anyway) | linear quality 1..100 → `--cq-level` 63..0, **no clamp** (cq 0 and cq 63 are both byte-gated upstream) |
+| Speed dial | 1–10 → zenravif speed ladder | 1–10 → SVT preset 0–13 linear (wall-time NOT aligned with zenravif's ladder: ~6× faster at s6, slower at s2) | 1–10 → `--cpu-used` 0–9, one-to-one (whole range byte-gated; **wall time unmeasured from this seam**) |
+| Lossless | yes (`encode-imazen`, release-gated exactness) | not exposed — upstream implements coded-lossless (QP 0) on the 8-bit 4:2:0 key-frame path (zenav1-svt#5/#9, gated by `svt_rs_direct_qp0_codes_lossless_420` here), but this backend's quality dial deliberately clamps to QP ≥ 1 and `EncoderConfig` has no lossless request to route to it (open decision: zenavif#42); still typed-refused upstream on mono, 10-bit, HDR-fork, screen-content tools, superres and inter frames | not exposed (cq 0 is not a lossless *image* round-trip through 4:2:0 anyway) |
+| Gain map / Ultra HDR (`with_gain_map`) | yes | rejected | rejected |
+| HDR metadata boxes (CLL/mastering) | yes | yes (container-level) | yes (container-level) |
+| EXIF/XMP/ICC, rotation/mirror | yes | yes (container-level, muxed in-crate) | yes (container-level, muxed in-crate) |
+| Animation (`encode_animation_*`) | yes | rejected (stills only) | rejected — `encode_key_frame` is a ONE-KEY-FRAME entry point; there is no inter path to wire |
+| Target quality (`encode_*_with_target`, ssim2/zensim) | yes (RGB8/RGBA8/RGB16; q0 head seeds ssim2) | yes for RGB8/RGBA8 (search is backend-generic; anchor-curve seeding; convergence pinned by `svt_rs_target_quality_search_converges_on_ssim2`); RGB16 reaches the backend since #33 but its convergence is not pinned by a test | untested at this seam (the search is backend-generic and reaches it; no convergence gate) |
+| Two-pass butteraugli | yes (release-gated `FRAME_HINTS_LIVE`) | no | no |
+| Auto-tune picker | yes (`auto-tune`) | no (calibrated for zenravif knobs) | no (calibrated for zenravif knobs) |
+| Stop token | yes (per-superblock via zenravif) | yes (threaded into pipeline, SB cadence) | checked at the seam's phase boundaries only — `encode_key_frame` takes no token, so one frame is not interruptible once entered |
+| Structured errors at the seam | yes | yes (`try_encode_frame*` → variant-mapped; no `is_empty()` heuristic) | yes (`KeyFrameError` → `Error::Encode`; never a silent fallback) |
+| C-parity claim | n/a (rav1e lineage) | byte-identical to C-SVT on the verified envelope upstream; NOT asserted at the zenavif seam yet | **186/186 cells byte-identical to real aomenc** upstream at `c3e1b4ab` (mono/4:2:0/4:2:2/4:4:4, bd 8/10/12, 16×16–512×512, 20 crops, all four CDEF×LR combos, `--cpu-used` 0..=9, multi-tile); NOT asserted at the zenavif seam, which gates decodability instead |
+| Screen content (palette/intraBC) | palette + intraBC via zenravif gates (release-gated arms) | palette ported upstream (RD over-picks, decodable); intraBC unwired; nothing exposed at the seam | detector ported (`screen_detect`); palette + IntraBC search are off in the gated envelope |
 
 ## Decode backends (`decode_av1_obu_yuv(.., DecodeBackend::..)`)
 

@@ -422,6 +422,147 @@ write-path returns + gain-map interop additions, already on main).
 
 ## [Unreleased]
 
+### Added — a third AV1 encode backend: `Av1Backend::Zenav1Aom` (`zenav1-aom-encode`)
+
+- **The one function the "there is still no aom ENCODE backend" entry below
+  named as the concrete ask now exists, so the seam is wired.** That entry
+  (`Investigated (there is still no aom ENCODE backend, and why)`, audited at
+  `14124356`) ended: *"The concrete ask for zenavif to gain an `encode-aom-rs`
+  backend is one function — something on the shape of `encode_key_frame(planes,
+  cfg) -> Vec<u8>` that authors its own sequence + frame headers and wraps a
+  temporal unit."* `aom_encode::key_frame::encode_key_frame` is exactly that,
+  and it lands the two things that entry called missing: the port authors its
+  own sequence header (no C bytes copied) and emits its own
+  `OBU_TEMPORAL_DELIMITER`. That entry is **superseded**, not deleted.
+
+  Verified here rather than taken on report: the sibling gate
+  `crates/aom-encode/tests/self_contained_key_frame.rs` was re-run 2026-09-02
+  at `c3e1b4ab` — 6/6 tests, **186/186 cells byte-identical to real aomenc**
+  (mono / 4:2:0 / 4:2:2 / 4:4:4, bit depths 8/10/12, 16x16-512x512, 20 crops
+  incl. 1x1, all four CDEF x loop-restoration combinations, `--cpu-used`
+  0..=9, multi-tile), 20 decode cells under both real libaom and the in-repo
+  decoder.
+
+- **Scope: KEY FRAME / STILL ONLY, and it says so.** `encode_key_frame`
+  encodes one AV1 KEY frame; there is no inter prediction, no reference
+  management and no multi-frame state in it. So animation is not "unwired at
+  the seam", it is absent from the encoder, and `reject_aom_backend` refuses
+  it by name. Wired: 8-bit RGB -> YCbCr 4:2:0 BT.601, and 8-bit grayscale ->
+  monochrome Cs400 (`encode-mono`). Refused with a message naming what is
+  unimplemented: animation, alpha (`encode_rgba8`/`encode_rgba16`), 16-bit
+  input, 10/12-bit output, 4:4:4 and 4:2:2, the identity/RGB colour model,
+  full pixel range, gain maps, lossless. Nothing falls back to zenravif.
+
+- **Feature-name collision, resolved deliberately.** `zenav1-aom` was already
+  taken by the DECODE backend because it names the *repository* — unambiguous
+  while that repository supplied one backend crate. It now supplies two
+  (`zenav1-aom-decode`, `zenav1-aom-encode`), so the encode feature takes the
+  *crate* name `zenav1-aom-encode`, and an additive synonym
+  `zenav1-aom-decode = ["zenav1-aom"]` lets the decode side be spelled by
+  crate name too. `zenav1-aom` is **not** deprecated and stays canonical for
+  decode (every existing consumer, benchmark, doc and CI line uses it);
+  nothing is overloaded to mean two things.
+
+- **Dependency shape: a git-rev pin, not a sibling path dep.** `aom-encode =
+  { package = "zenav1-aom-encode", git = ".../zenav1-aom", rev = "c3e1b4ab" }`.
+  A path dep escaping the repo root makes every cargo command fail in a
+  standalone clone — the failure the `resolve-standalone` job exists to gate,
+  and the one that kept zencodecs / zenpipe from taking zenavif as a git
+  dependency for most of August. The only escaping path deps in `Cargo.toml`
+  remain the pre-existing `../zenanalyze` pair that job already clones;
+  `cargo metadata` (full resolve) exits 0 with the new dep in place.
+
+  The encode rev is **newer** than the decode pin (`14124356`) because
+  `encode_key_frame` landed after it. Cargo resolves the two revs as two
+  sources, so the decode backend keeps the rev it was gated at. The cost is
+  one extra `zenav1-aom-dsp` compilation, not a correctness risk: the seam
+  passes only `&[u16]` planes and `usize` across it, sharing no types. Unify
+  the two the next time someone re-gates decode.
+
+- **Colour signalling: the mirror image of the zenav1-svt seam, and MEASURED.**
+  The port pins the AV1 sequence header to `color_range = 0`
+  (`AOM_CR_STUDIO_RANGE`, real aomenc's default) where zenav1-svt pins
+  `color_range = 1`. So this backend converts **limited** range and muxes
+  `full_color_range = false`, and requesting `EncodePixelRange::Full` is
+  refused rather than mis-signalled.
+
+  Measured 2026-09-02, and it corrects the obvious assumption: `zenavif::decode`
+  takes range **and** matrix from the **sequence header**, not from the
+  container `colr` — `src/decoder.rs` reads `seq_hdr.color_range` /
+  `seq_hdr.mtrx`, and flipping the `colr` nclx `full_range` bit in an encoded
+  file leaves the decoded pixels bit-identical to six decimals. The sequence
+  header's `matrix_coefficients` is 2 (unspecified), whose `to_yuv_matrix`
+  fallback is BT.601 — what the seam converts with, so they agree. `colr` is
+  written to agree with the bitstream, not to override it.
+
+- **It produces an AVIF file, not raw OBUs.** The retired `Av1Backend::Svtav1`
+  draft is rejected by `EncoderConfig::validate` precisely because it returned
+  raw OBUs; this backend muxes through `zenavif-serialize`, and
+  `assert_is_avif_container` in the new gate asserts the `ftyp` box, a primary
+  item, and a payload starting at `OBU_TEMPORAL_DELIMITER`.
+
+- **Dials.** quality 1..=100 -> `--cq-level` 63..=0 linear with **no clamp**
+  (both endpoints are byte-gated upstream, unlike the zenav1-svt seam which
+  must avoid QP 0); speed 1..=10 -> `--cpu-used` 0..=9 one-to-one (the whole
+  range is byte-gated, so the dial advertises no distinction the encoder does
+  not have). `--enable-cdef=0` / `--enable-restoration=1`, real aomenc's
+  ALLINTRA defaults. **Encode wall time is unmeasured from this seam and no
+  number is quoted.**
+
+- Additive only: a new variant on an already-`#[non_exhaustive]` enum, a new
+  feature, a new module, a new test. No existing variant, feature or signature
+  changed; the 0.1.8 deprecated aliases (`encode-svt-rs`, `aom-backend`,
+  `SvtRs`, `AomRs`, `SvtRs420`) are untouched and
+  `tests/deprecated_backend_aliases.rs` still compiles.
+
+### Added — `tests/aom_encode_backend.rs`, a decode gate proved able to fail
+
+- 12 tests (11 without `encode-mono`). The claim is **not** "encode returned
+  `Ok`": every gate decodes the produced AVIF with an **independent decoder**
+  — rav1d-safe, a different port from the one that encoded it — and compares
+  pixels. RGB round trip through `zenavif::decode` on four sizes including a
+  partial superblock and odd dimensions (33x47) and across all ten speeds;
+  flat content decodes **exactly** (no tolerance) at the plane level on
+  rav1d-safe and to within 1 at the RGB level; rav1d-safe and the zenav1-aom
+  decode backend agree bit-exactly on the aom encoder's own output when both
+  features are on.
+
+- **The mutation proofs are `#[test]`s, not a one-off.**
+  `gate_can_fail_on_wrong_content` and `gate_can_fail_on_a_corrupted_payload`
+  run the SAME assertion helpers against deliberately broken input under
+  `catch_unwind` and REQUIRE them to panic, so a later edit that makes an
+  assertion vacuous turns them red in CI.
+  `limited_range_signalling_is_load_bearing` asserts the studio swing codes
+  235 as 218, that the decoder returns 235, that 218 is far enough away for
+  the tolerance to distinguish them, and that the assertion fails when handed
+  the full-range misreading.
+
+  Additionally proved able to fail by mutating the **production source** three
+  ways and watching it go red (source restored and verified byte-identical
+  afterwards): `YuvRange::Limited` -> `Full` in the conversion reddens 6/12;
+  `mux_aom` returning the raw payload instead of the AVIF reddens 9/12;
+  `cq_level`/`cpu_used` pinned to constants reddens 6/12.
+
+- **Threshold provenance.** Every PSNR bound was measured on this content
+  before being written, with roughly 5 dB of headroom over the worst measured
+  cell: q90 across four sizes measured 43.3-45.3 dB, bound 38; q80 across four
+  sizes x ten speeds measured 37.9-41.0 dB, bound 33. A broken decode is
+  nowhere near either: wrong content measures 6.4 dB, and a two-byte payload
+  corruption fails to decode at all.
+  `aom_backend_tracks_the_production_backend` adds the bound an absolute floor
+  cannot give — at q90 the aom backend measures 1.6 dB behind zenravif to
+  0.2 dB ahead of it, and the gate allows 5 dB.
+
+- **A correction to how the test content was first written.** The initial
+  generator added independent per-channel noise, which made 4:2:0 subsampling
+  — not the encoder — the dominant error term: measured, that variant scores
+  22.4 dB for the aom backend and 22.4 dB for zenravif on the same image, i.e.
+  it cannot tell the two apart and would have been graded as a backend defect.
+  The committed generator adds the noise equally to all three channels so it
+  lives in luma. This is recorded because the first reading of the low number
+  looked like a bug in the new backend and was not.
+
+
 ### Changed — backend names now match the crates they name (`0.1.7` -> `0.1.8`)
 
 - **`Av1Backend::SvtRs` -> `Av1Backend::Zenav1Svt`, `DecodeBackend::AomRs` ->
@@ -654,6 +795,11 @@ write-path returns + gain-map interop additions, already on main).
   where to read them.
 
 ### Investigated (there is still no aom ENCODE backend, and why)
+
+> **SUPERSEDED 2026-09-02.** `encode_key_frame` — the one function this entry
+> named as the concrete ask — now exists, and `Av1Backend::Zenav1Aom` is wired.
+> See the `Av1Backend::Zenav1Aom` entry at the top of `[Unreleased]`. Kept as
+> written: it is the audit that specified the ask.
 
 - **`zenav1-aom-encode` cannot back a frame-level encode today.** Audited at
   `14124356` because the wiring is asymmetric — aom gives zenavif *decode*
