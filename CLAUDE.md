@@ -182,23 +182,46 @@ TSV diff in the same commit. zenrav1e's halves (`gate-identity`,
 - `zencodec` - zencodec trait integration
 - `_dev` - Expose internal YUV modules for profiling (not public API)
 
-## Backend seam: zen cross-cutting compliance — SPEC (2026-07-20)
+## Backend seam: zen cross-cutting compliance — SPEC (2026-07-20, re-audited 2026-09-02)
+
+**Re-audit 2026-09-02 — obligations 1, 3 and 5 are DONE; the text below them
+was written before the backends grew the APIs it was waiting on and is kept
+only for the reasoning.** Read the code, not the obligation text:
+`map_aom_error` (`src/decode_av1.rs:766`) maps every `aom_decode::DecodeError`
+variant onto a distinct zenavif `Error` — Truncated/Malformed/Internal to
+`Decode` with separate codes, `UnsupportedType`/`UnsupportedFeature` to
+`Unsupported`, `LimitExceeded` to `ResourceLimit`, `AllocFailed` to
+`OutOfMemory`, `Cancelled` to `Cancelled`, with a `#[non_exhaustive]` fallback
+— so nothing flattens to `code: -1` any more (obligation 1, decode half).
+`map_svt_encode_error` (`src/encoder_svt_rs.rs:133`) does the same for
+`svtav1::types::EncodeError` (obligation 1, encode half). `aom_config_from`
+(`:806`) threads `DecoderConfig.frame_size_limit` into `DecodeLimits.max_pixels`
+and `alloc_pref` into `AllocMode`, and `decode_av1_obu_yuv_aomrs_with` (`:819`)
+attaches the stop token (obligations 3 and 5).
+
+Obligations 2 (panic isolation) and 4 (no silent corruption at the mux
+boundary) are the ones still live. 4 is materially narrower than it reads
+below: `reject_unsupported_config` and `svt_rs_dims_error` now refuse
+out-of-envelope configs before muxing, and upstream returns a typed
+`UnsupportedConfig`.
 
 The two experimental AV1 backends are codec-only crates that do NOT yet meet the
 zen cross-cutting contracts (limits / estimation / whereat / zencodec
 `CategorizedError` granularity / panic-freedom+fallible-alloc / stop tokens).
 Full per-repo specs live in each backend's CLAUDE.md:
-`/root/aom-rs/CLAUDE.md` (zenav1-aom decode — untrusted-input, high bar) and
-`/root/svtav1/rust/CLAUDE.md` (zenav1-svt encode — trusted-input, lower bar).
+`../zenav1-aom/CLAUDE.md` (zenav1-aom decode — untrusted-input, high bar) and
+`../zenav1-svt/rust/CLAUDE.md` (zenav1-svt encode — trusted-input, lower bar).
+(Those were `/root/aom-rs/...` and `/root/svtav1/...` here until 2026-09-02;
+both repos were renamed and neither path exists.)
 This section pins the **seam** obligations on the zenavif side.
 
 **Status of the contracts on zenavif itself:** `main` already implements
 `zencodec::CategorizedError for Error` (`src/error.rs`, two-level
 `zencodec 0.1.26` `ErrorCategory`, `At<CodecError>` envelope, zencodec
-required). The `svtav1-rs-backend` branch is behind `main` and inherits this on
-rebase/merge — do NOT re-add CategorizedError here; rebase instead. (PR #27
-`caterr-categorized-error` was the stale original adoption, closed 2026-07-20 as
-superseded.) Stop tokens, fallible-alloc (`src/alloc_util.rs` `AllocPref`),
+required). (`svtav1-rs-backend` was merged and is now a literal ancestor of `main` — 0
+commits ahead as of the 2026-09-02 branch audit — so the "rebase, do not
+re-add" advice that stood here is spent. PR #27 `caterr-categorized-error` was
+the stale original adoption, closed 2026-07-20 as superseded.) Stop tokens, fallible-alloc (`src/alloc_util.rs` `AllocPref`),
 whereat (`at!`), limits (`DecoderConfig` caps + `zencodec::ResourceLimits`
 mapping in `src/codec/`), and estimation (`src/heuristics.rs`) are all present
 for the native rav1d-safe / zenravif paths.
@@ -206,7 +229,8 @@ for the native rav1d-safe / zenravif paths.
 **Seam obligations — enforce these when wiring a backend, and re-check at each
 backend capability landing:**
 
-1. **Preserve error granularity — do not flatten.** `decode_av1_obu_yuv_aomrs`
+1. **[DONE 2026-09-02 — see the re-audit note at the top of this section.]
+   Preserve error granularity — do not flatten.** `decode_av1_obu_yuv_aomrs`
    (`src/decode_av1.rs`) currently maps zenav1-aom's 21 distinct `String`
    reasons to one generic `Error::Decode { code: -1 }`, so every aom failure
    lands in the coarsest `CategorizedError` bucket. When the backend gains a
@@ -228,7 +252,8 @@ backend capability landing:**
    route untrusted decode through it in production, and do not add it to the
    default decode path, until its spec §5 lands.
 
-3. **Plumb limits and stop through — a capability the seam drops is not
+3. **[DONE 2026-09-02 — see the re-audit note at the top of this section.]
+   Plumb limits and stop through — a capability the seam drops is not
    "done".** When a backend accepts a `DecodeLimits`/`EncodeConfig`, a stop
    token, or an `AllocMode`, thread zenavif's existing `DecoderConfig` caps /
    `stop` token / `alloc_pref` into it in the SAME change. The decode seam
@@ -245,7 +270,9 @@ backend capability landing:**
    corruption applies at integration boundaries, not just within a single
    crate.)
 
-5. **Alloc mode is a configurable perf/safety trade (both directions).** The
+5. **[DONE 2026-09-02 for the aom decode seam — see the re-audit note at the
+   top of this section.] Alloc mode is a configurable perf/safety trade (both
+   directions).** The
    decoder default is Fallible (untrusted → OOM-safe); the encoder default is
    Infallible (trusted → single-`calloc` fast). Expose the choice via the
    backend config and map it from `zencodec::AllocPreference` /
@@ -442,7 +469,37 @@ measurement under it stays where the measurement stops. Tests: the refusal test
 `svt_rs_mono_partial_sb_still_refused_below_preset_6` (which also asserts the
 SAME geometry now validates without alpha).
 
-### Cross-backend status (2026-07-22 session; svt pin re-bumped 2026-07-24)
+### Cross-backend status — CURRENT (2026-09-02)
+Both backend deps are **git-rev pins** again, not sibling path deps:
+zenav1-aom `14124356`, zenav1-svt `ef0b122b` (`85af725`). The path deps had
+two costs — a plain clone of this repo could not run any cargo command (the
+Dependabot / git-consumer breakage in the CHANGELOG Workspace section), and the
+svt seam was building against a **dirty** sibling working copy (71 uncommitted
+lines in `svtav1-encoder` on 2026-09-02), so no local svt measurement was
+reproducible or comparable with CI. The CI job `resolve-standalone` keeps them
+pinned; it clones only `../zenanalyze`, asserts the AV1 siblings are absent and
+requires `cargo metadata` to pass. `zenanalyze` / `zenpredict` are still
+escaping path deps and are the remaining reason a bare clone cannot resolve.
+The old "`imazen/svtav1` is UNFETCHABLE" premise was re-measured and is STALE —
+that was the renamed URL, not a git dep on `imazen/zenav1-svt`, which resolves
+clean with submodules.
+
+Measured at those pins (`benchmarks/backend_sweep_2026-09-02.*` +
+`..._partialsb_...`, 3720 rows total, M4 Pro, speed 6): cross-decoder gate
+**3720/3720 byte-identical** rav1d-safe vs aom-rs; svt-rs bytes at matched
+ssim2 0.94-1.05x zenravif at 64-128 and 1.03-1.18x at 200-512; encode wall
+time 17-33x faster. Partial superblocks: 600/600 svt-rs cells encoded at sizes
+{65,100,200,333,500} with no dimension refusal. Do NOT diff these against the
+2026-07-22 numbers below — different pins, box, speed set and image count.
+
+There is still **no aom ENCODE backend**, and the reason is in the CHANGELOG
+`[Unreleased]` "Investigated" entry with file:line evidence: `aom-encode`'s
+surface is block-level (highest driver `pack::pack_tile`), the port never
+authors a sequence header, and its `avif_parity.rs` bootstraps headers verbatim
+out of a real C-libaom encode. One function — a key-frame encode that authors
+its own headers and wraps a temporal unit — is what would change that.
+
+### Cross-backend status (2026-07-22 session; svt pin re-bumped 2026-07-24) — SUPERSEDED by the section above
 Pins bumped: zenav1-aom `7b972e50` (structured DecodeError/DecodeConfig +
 bd8 lowbd perf), zenav1-svt `2d585bb2b` (2026-07-24, was `3e25f52b`; adds
 the typed QP-0 rejection #5, the IBC screen-content vertical, bd8/bd10
