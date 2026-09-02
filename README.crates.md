@@ -272,7 +272,9 @@ let image = decode_with(&avif_data, &config, &Unstoppable).unwrap();
 | `encode-asm` | Encoding with hand-written assembly (fastest, uses unsafe) |
 | `encode-threading` | Multi-threaded encoding |
 | `encode-imazen` | Encoding with zenrav1e fork extras (QM, lossless) |
-| `zenav1-svt` | EXPERIMENTAL encoding via zenav1-svt (pure Rust SVT-AV1 port; 8- and 10-bit 4:2:0 stills incl. HDR CICP + clli/mdcv; dims arbitrary at any speed on the colour path, and with alpha/gray multiples of 64 below speed 5 else multiples of 8; 10-bit alpha/gray at speed ≥ 7; sibling path dep) |
+| `zenav1-svt` | EXPERIMENTAL encoding via zenav1-svt (pure Rust SVT-AV1 port; 8- and 10-bit 4:2:0 stills incl. HDR CICP + clli/mdcv; dims arbitrary at any speed on the colour path, and with alpha/gray multiples of 64 below speed 5 else multiples of 8; 10-bit alpha/gray at speed ≥ 7; git-rev pinned) |
+| `zenav1-aom` | EXPERIMENTAL second AV1 KEY-frame **decode** backend via zenav1-aom (`DecodeBackend::Zenav1Aom`; git-rev pinned). `zenav1-aom-decode` is an additive synonym. |
+| `zenav1-aom-encode` | EXPERIMENTAL **encode** backend via zenav1-aom (`Av1Backend::Zenav1Aom`; git-rev pinned). KEY-frame / still scope only: 8-bit RGB → 4:2:0 BT.601 limited range, and 8-bit grayscale → monochrome. Animation, alpha, 16-bit input, 10/12-bit output, 4:4:4 and gain maps are each refused by name. |
 | `unsafe-asm` | Decoding with hand-written assembly via C FFI (fastest, uses unsafe) |
 | `zencodec` | Integration with [zencodec](https://crates.io/crates/zencodec) trait hierarchy |
 
