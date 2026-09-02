@@ -1928,24 +1928,49 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
 // Cell-id grammar: parse ids back to configs (the ledger contract)
 // ============================================================================
 
+/// Every named plan, in declaration order — the ONE table
+/// [`SweepAxes::by_name`] and [`SweepAxes::names`] both read.
+///
+/// A hand-maintained second copy of this list drifts the moment a plan is
+/// added, and it did: zenmetrics' "unknown zenavif plan" message carried
+/// its own prose mirror and silently stopped naming `svt_doe_b6` the
+/// moment that plan landed — so the diagnostic that is supposed to tell
+/// you which plans exist would have told a future reader this one does
+/// not. Callers render their message FROM `names()` instead.
+static PLANS: &[(&str, fn() -> SweepAxes)] = &[
+    ("rd_core", SweepAxes::rd_core),
+    ("modes_full", SweepAxes::modes_full),
+    ("modes_full_alpha", SweepAxes::modes_full_alpha),
+    ("scalar_dense", SweepAxes::scalar_dense),
+    ("svt_speed_dense", SweepAxes::svt_speed_dense),
+    ("svt_doe_main", SweepAxes::svt_doe_main),
+    ("svt_doe_pairwise", SweepAxes::svt_doe_pairwise),
+    ("svt_doe_transfer", SweepAxes::svt_doe_transfer),
+    ("svt_doe_b6", SweepAxes::svt_doe_b6),
+];
+
 impl SweepAxes {
     /// Resolve a named plan's axes — the executor-facing entry point
     /// (`--plan name` in zenmetrics chunk mode resolves through this).
     /// Names are a wire contract: additive-only, never renamed.
     #[must_use]
     pub fn by_name(name: &str) -> Option<Self> {
-        match name {
-            "rd_core" => Some(Self::rd_core()),
-            "modes_full" => Some(Self::modes_full()),
-            "modes_full_alpha" => Some(Self::modes_full_alpha()),
-            "scalar_dense" => Some(Self::scalar_dense()),
-            "svt_speed_dense" => Some(Self::svt_speed_dense()),
-            "svt_doe_main" => Some(Self::svt_doe_main()),
-            "svt_doe_pairwise" => Some(Self::svt_doe_pairwise()),
-            "svt_doe_transfer" => Some(Self::svt_doe_transfer()),
-            "svt_doe_b6" => Some(Self::svt_doe_b6()),
-            _ => None,
-        }
+        PLANS.iter().find(|(n, _)| *n == name).map(|(_, f)| f())
+    }
+
+    /// Every name [`by_name`] accepts, in declaration order.
+    ///
+    /// Use this to render an "unknown plan" diagnostic; never re-type the
+    /// list. Same table, so the two cannot disagree.
+    ///
+    /// [`by_name`]: Self::by_name
+    #[must_use]
+    pub fn names() -> &'static [&'static str] {
+        // A `&[(&str, fn)]` cannot be mapped to a `&[&str]` in const
+        // context, so this walks the same table each call. It is called
+        // once, on an error path.
+        static NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+        NAMES.get_or_init(|| PLANS.iter().map(|(n, _)| *n).collect())
     }
 }
 
@@ -2707,6 +2732,40 @@ mod tests {
             .with_max_deviations(1)
             .plan();
         assert_eq!(narrow.cells.len(), 11, "{:?}", narrow.cells.len());
+    }
+
+    /// `names()` and `by_name()` read ONE table, so every advertised name
+    /// must resolve and the count must match. This is the gate on the
+    /// drift that made zenmetrics' error message omit `svt_doe_b6`.
+    #[test]
+    fn every_advertised_plan_name_resolves() {
+        let names = SweepAxes::names();
+        assert_eq!(names.len(), PLANS.len());
+        for n in names {
+            assert!(
+                SweepAxes::by_name(n).is_some(),
+                "advertised plan {n} does not resolve"
+            );
+        }
+        assert!(SweepAxes::by_name("svt_doe_NOPE").is_none());
+        // Names are a wire contract: additive-only, never renamed. Pin the
+        // ones already in ledgers so a rename fails here, not in the fleet.
+        for n in [
+            "rd_core",
+            "modes_full",
+            "modes_full_alpha",
+            "scalar_dense",
+            "svt_speed_dense",
+            "svt_doe_main",
+            "svt_doe_pairwise",
+            "svt_doe_transfer",
+            "svt_doe_b6",
+        ] {
+            assert!(
+                names.contains(&n),
+                "wire-contract plan name {n} disappeared"
+            );
+        }
     }
 
     fn tiny_axes() -> SweepAxes {
