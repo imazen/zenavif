@@ -17,6 +17,26 @@ version is pre-bumped to prevent an accidental semver-violating 0.1.5.
   and the per-byte `WriterBackend` write path stays bare (no per-write `At<>`
   allocation — the crate deliberately avoids that overhead).
 
+### Fixed
+- **The primary item's `av1C` now restates the payload's own `seq_profile` and
+  chroma format instead of the caller's settings** (`ae9a354f`). `Aviffy::new()`
+  defaults to `min_seq_profile = 1` and `chroma_subsampling = NONE` (4:4:4), so a
+  caller that set only the colour/CICP knobs muxed a genuinely 4:2:0 profile-0
+  payload with an `av1C` claiming `seq_profile = 1` / `ssx = ssy = 0` — an illegal
+  pair that the sequence header contradicts. Found on real fleet artifacts by the
+  zenmetrics HBD executor (its HDR mux is exactly that shape;
+  `zenmetrics/benchmarks/avif_hdr_arm_plan_2026-09-02.md` §10.4c). `av1C` profile
+  now comes from the first `OBU_SEQUENCE_HEADER` in the payload, and AV1 5.5.2
+  determines chroma from it for profiles 0 and 1; profile 2 (ambiguous — 4:2:2 or
+  12-bit anything) still takes the caller's subsampling, as does a payload with no
+  readable sequence header. Depth signalling is unchanged. MEASURED: six
+  representative SDR muxes (explicit-profile call-site shape, full container
+  metadata, monochrome, alpha, 4:4:4, and the no-sequence-header fixtures) are
+  **byte-identical** across the fix, sha256 `1bb2ffef…`; the colour-knobs-only
+  10-bit 4:2:0 shape moves from `av1C` 4:4:4 to 4:2:0 with `seq_profile` 0 on both
+  sides. No public API change (`cargo public-api`: 0 of 418 items differ);
+  `set_seq_profile` is now the profile-2 hint and the no-sequence-header fallback.
+
 ### Added
 - **Gain-mapped files are now discoverable by libavif**: `set_gain_map`
   output gains the `tmap` compatible brand (ISO 23008-12:2024/AMD1 §10.2.6)
