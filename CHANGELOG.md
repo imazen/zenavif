@@ -66,9 +66,24 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   zenav1-aom work land together without a publish round-trip, which is a call for
   the owner, not a drive-by edit.
 
-  **Decision on Dependabot: not "fixed", and not silently tolerated.** Making it
-  work means giving up the sibling-path arrangement, which is not worth an
-  automated PR bot. Two things make that acceptable: this repo has **zero open
+  **UPDATE 2026-09-02 — the AV1 half of this is now done** (`85af725`). Both
+  backend deps are git-rev pins again, so `../zenav1-aom` and `../zenav1-svt`
+  are no longer needed to resolve this repo, and the new CI job
+  `resolve-standalone` keeps them that way (it clones only `../zenanalyze`,
+  asserts the two AV1 siblings are absent, and requires `cargo metadata` to
+  succeed; proved able to fail on the previous manifest). The judgement below
+  was reversed by a second measurement the original entry did not have: the
+  path dep was also making the svt seam build against a **dirty** sibling
+  working copy — 71 uncommitted lines in `svtav1-encoder` on 2026-09-02 — so it
+  was not only costing Dependabot, it was making local results
+  non-reproducible. `zenanalyze` / `zenpredict` remain escaping path deps and
+  are now the sole residual cause of standalone-resolution failure; that is a
+  separate decision. The publish blockers are unchanged (six `git =` deps with
+  no `version` key).
+
+  **Decision on Dependabot (2026-08-29, superseded above): not "fixed", and not
+  silently tolerated.** Making it work means giving up the sibling-path
+  arrangement, which is not worth an automated PR bot. Two things make that acceptable: this repo has **zero open
   Dependabot alerts**, and — the correction that matters — **alerts are unaffected
   by the updater failing.** Alerts come from GitHub's dependency graph, which
   parses committed lockfiles and never runs cargo, so advisories are still
@@ -406,6 +421,193 @@ Queued at absorb time: next release is 0.2.0 (breaking `At<SerializeError>`
 write-path returns + gain-map interop additions, already on main).
 
 ## [Unreleased]
+
+### Fixed (main did not compile with `encode` on any platform)
+
+- **`EncoderConfig.svt` named a type that only exists behind `__expert`.**
+  `dd61d45` added the field plus `with_svt_params` / `svt_params`, all spelled
+  `crate::expert::SvtParams`, but `pub mod expert` is
+  `#[cfg(feature = "__expert")]` and **nothing in CI enables `__expert`**. Every
+  build that compiles `mod encoder` — that is, every `--features encode*`,
+  `target-quality`, and both diffmap loops, plus the CI backend-seam
+  combination — died with four `error[E0433]: cannot find `expert` in `crate``.
+  Only the default and `--no-default-features` builds survived, because they do
+  not compile the encoder at all. CI run `33657668239` is red on
+  ubuntu-latest, macos-latest, windows-latest and the Gate A3 determinism job
+  with exactly these errors.
+
+  The fix could not be "gate the four items too": `apply_svt_params`
+  (`src/encoder_svt_rs.rs:264`) runs on the ordinary `encode-svt-rs` path and
+  needs the type where `__expert` is off. So `SvtParams` moved to
+  `src/svt_params.rs`, a private module gated on
+  `any(encode-svt-rs, __expert)` — precisely the features that consume it —
+  and `src/expert.rs` re-exports it, leaving `zenavif::expert::SvtParams` the
+  only public spelling. The two accessors gained `#[cfg(feature = "__expert")]`,
+  matching `with_internal_params` immediately below them and the "expert-only"
+  wording already in their own docs; neither existed in any *building*
+  non-`__expert` configuration, so nothing that worked was removed. No public
+  API added. `apply_svt_params` and the sweep planner now share a `pub(crate)`
+  `EncoderConfig::svt_params_resolved()`. (`2a1f24f`)
+
+- **`cargo fmt` on `src/sweep.rs`**, which had left the `Format` job red since
+  `bcd7978`. Verified formatting-only before committing: the two revisions are
+  identical once whitespace is stripped and rustfmt's added trailing commas are
+  normalised away. (`30c8ca1`)
+
+### Changed (both AV1 backends: sibling path deps → git-rev pins)
+
+- **`aom-decode` and `svtav1` are git-rev pins again**, on
+  `imazen/zenav1-aom` @ `14124356` and `imazen/zenav1-svt` @ `ef0b122b` — the
+  return each dep's own comment had been asking for since 2026-08-06. Two
+  measured reasons, not one:
+
+  1. *Resolution.* A path dep that escapes the repository root must have its
+     manifest loaded during resolution even when its feature is off, so one such
+     dep makes **every** cargo command fail in a plain clone — the
+     `Dependabot Updates` failure and the git-consumer breakage recorded in the
+     Workspace section above.
+  2. *The svt seam was building against a dirty working copy.*
+     `git -C ../zenav1-svt diff --stat origin/main` on 2026-09-02 showed **71
+     uncommitted lines** in `svtav1-encoder` (`inter_md_arm.rs`,
+     `pipeline.rs`) — the exact crate the seam links. Every local
+     `encode-svt-rs` result was therefore measured against code that existed on
+     one developer's disk and nowhere else, and could not agree with CI by
+     construction. A rev pin makes the two measure the same encoder.
+
+  **The "UNFETCHABLE" premise in the old `svtav1` comment was stale and was
+  re-measured rather than inherited.** What 404'd was the *renamed*
+  `github.com/imazen/svtav1` URL, not a git dep on this repo:
+  `imazen/zenav1-svt`, its `reference/svt-av1` submodule
+  (`imazen/zenav1-svt-c`) and `imazen/zenav1-aom`'s `imazen/libaom-mirror` are
+  all public, and `cargo metadata` on a scratch crate git-depending on these
+  exact revs resolves clean, submodules included.
+
+  **Measured cost, stated rather than waved at.** Cargo recurses those
+  submodules where `clone-siblings` deliberately did not: about 250 MB
+  (libaom-mirror) + 85 MB (zenav1-svt-c) of git db and ~420 MB of checkouts on a
+  cold `Swatinem/rust-cache`. That is the same order as the `rav1d-safe`
+  (396 MB) and `aom` (403 MB) git deps this graph already carries, and it is
+  cached; the two now-redundant clone steps come back off the other side.
+
+- **`clone-siblings` no longer clones `zenav1-aom` or `zenav1-svt`** — cargo
+  fetches them itself now. It still clones `zenanalyze`, `ravif`, `zenrav1e` and
+  `zensim`.
+
+- **New CI gate `resolve-standalone`** clones *only* `../zenanalyze`, asserts
+  `../zenav1-aom` and `../zenav1-svt` are absent, and requires both
+  `cargo metadata --no-deps` and a full `cargo metadata` to succeed. Proved able
+  to fail as well as pass on 2026-09-02: with the same siblings absent, the
+  *previous* manifest exits non-zero with
+  ``error: failed to load manifest for dependency `zenav1-aom-decode` ``, and
+  the current one exits 0.
+
+  **This does not yet make a bare clone resolve.** `zenanalyze` and
+  `zenpredict` (`Cargo.toml:205-206`, and the `zenanalyze` dev-dep) are still
+  escaping path deps and are the whole residual cause; they are outside the AV1
+  backend scope and need their own decision. When they go, delete the clone step
+  inside that job and it becomes the full standalone-resolution gate. `cargo
+  publish` stays blocked regardless — six `git =` deps carry no `version` key.
+
+### Documentation (the svt-rs dimension envelope was documented backwards)
+
+- **`Av1Backend::SvtRs`'s rustdoc and the `encode-svt-rs` feature comment both
+  contradicted the gate they describe.** Both said dimensions must be multiples
+  of 64 except at speed >= 5. `svt_rs_dims_error`
+  (`src/encoder_svt_rs.rs:265`) says the opposite for the colour path: multiples
+  of 64 are always accepted, **any other size is accepted on 4:2:0 colour at
+  every speed** (the partial-superblock floor was removed 2026-08-29), and only
+  an alpha/grayscale Cs400 item at a non-multiple-of-64 size additionally needs
+  speed >= 5 and multiples of 8. The feature comment was also still claiming
+  8-bit only and "bitstream identity vs C-SVT is NOT yet asserted", both long
+  since false. Corrected against the code, with the gate named as the source of
+  truth. (`c284f99`) The *behaviour* was never wrong and stays pinned by
+  `svt_rs_partial_sb_roundtrip_at_low_presets` and
+  `svt_rs_mono_partial_sb_still_refused_below_preset_6`; only the prose drifted.
+
+### Added (backend spike measurements rescued from a stale branch)
+
+- **`benchmarks/av1_backends_spike_2026-05-23.md` + the three
+  `backends_*_2026-05-23.tsv` matrices**, lifted from
+  `origin/abandoned/spike-av1-backends-2026-05-23` (`669de3c`) (`41f3f28`), the one branch
+  in the repo carrying measurements that exist nowhere on `main`: 150 vectors x
+  4-5 decode backends on Linux (ffmpeg 4.4 / libdav1d 0.9.2) and Windows 11
+  (ffmpeg 7.1.1), with the finding that hardware AV1 decoders land within ±20%
+  on internal time but 4-7x slower wall once GPU init and sysmem readback are
+  paid, and reject mono / 4:4:4 / 4:2:2 / 12-bit outright. The harness
+  (`examples/bench_backends.rs`) and the superseded backend-trait design it
+  needs were deliberately NOT brought over — they cannot compile against the
+  current `DecodeBackend` seam — and the salvaged `.md` carries a header saying
+  where to read them.
+
+### Investigated (there is still no aom ENCODE backend, and why)
+
+- **`zenav1-aom-encode` cannot back a frame-level encode today.** Audited at
+  `14124356` because the wiring is asymmetric — aom gives zenavif *decode*
+  (`aom-backend`), SVT gives it *encode* (`encode-svt-rs`) — and the obvious
+  question is whether the fourth quadrant is reachable. It is not, and no
+  backend was faked around it:
+
+  - The crate's public surface is block-level. `crates/aom-encode/src/lib.rs`
+    re-exports nothing; its root items are `xform_quant*`,
+    `encode_block_coeffs` (`:818`), `encode_block_coeffs_full` (`:865`),
+    `encode_coding_block_plane` (`:931`), distortion and RD-cost helpers. There
+    is no `Encoder`, `Sequence` or `Frame` type anywhere in `src/`, and no
+    function returns a bitstream. The highest driver is `pack::pack_tile`
+    (`src/pack.rs:1588`), tile-level.
+  - **The port never authors a sequence header** — the upstream repo's own
+    words (`docs/CONFIG_AXIS_INVENTORY_2026-07-30.md:477`, carried into its
+    `CLAUDE.md:25`), and there is no OBU_TEMPORAL_DELIMITER writer at all.
+  - `crates/aom-encode/tests/avif_parity.rs` looks like an end-to-end AVIF gate
+    and is not one. It calls real C libaom first (`:211`), parses that stream's
+    sequence (`:226`) and frame (`:291`) headers, has the port derive only the
+    tile payload (`:481`) and the loop-filter level (`:513`), then **copies C's
+    sequence header verbatim** into the shipped stream (`:528`). What it proves
+    is real — the coded payload is byte-exact vs aomenc (`:611`) and the muxed
+    file decodes pixel-identically (`:648`) — but it proves nothing about
+    authoring headers. Its envelope is also non-default
+    (`enable_cdef=false, enable_restoration=false`). The only full-frame entry
+    in the whole repo, `crates/aom-bench/src/lib.rs:1150`, takes a `bootstrap:
+    &[u8]` argument and lives in a `publish = false` crate.
+  - Missing, per that repo's own gap table (`coverage-audit/COVERAGE.md`):
+    `av1_get_seq_level_idx` (libaom `level.c`) is the one genuinely absent
+    *algorithm* (`:143`); the rest is wiring already-byte-exact writers —
+    base_qindex composition, tile-count choice, CICP echo, temporal-unit /
+    TD-OBU assembly (`:142`), plus the sequence-header authoring chain
+    (`init_seq_coding_tools`, `set_sb_size`, profile derivation,
+    `set_bitstream_level_tier`) and a `write_uncompressed_header_obu`
+    field-*setting* side. Separately, loop restoration is on by default in
+    `--allintra` but the (byte-exact) LR search is wired only behind
+    `--enable-restoration=1`, so even a bootstrap-fed encode does not match a
+    stock `aomenc --allintra` stream (`:53-56`, `:140`).
+
+  This is a shell-shaped gap, not an empty crate: the RDO search,
+  transform/quant, entropy coding, tile packing and the CDEF / loop-filter /
+  loop-restoration searches are all byte-exact against C. **The concrete ask
+  for zenavif to gain an `encode-aom-rs` backend is one function** —
+  something on the shape of `encode_key_frame(planes, cfg) -> Vec<u8>` that
+  authors its own sequence + frame headers and wraps a temporal unit. Until
+  that exists there is nothing for a seam to call, and `Av1Backend` gains no
+  variant.
+
+### Branch and PR inventory (2026-09-02 audit)
+
+- `svtav1-rs-backend` and `svtav1` are literal ancestors of `main` — 0 commits
+  ahead. `backup/svtav1-rs-backend-pre-rebase-2026-07-23` is 24 ahead but 100%
+  superseded: 16 of 24 are exact patch-id matches upstream, the other 8 differ
+  only by dropped `Cargo.lock` hunks or rebase line-offsets, and **all nine of
+  its benchmark files are byte-identical blobs on `main`** — including
+  `backend_sweep_2026-07-22.tsv`, so no bench record is at risk.
+  `preserve/2026-07-25-svtav1-rs-backend` re-pins svtav1 to a rev that this
+  change supersedes. All four are recommended for deletion by the repo owner;
+  none were deleted here.
+  `abandoned/spike-av1-backends-2026-05-23` is the one branch that must NOT be
+  deleted casually — its measurements are now on `main` (above) but its harness
+  is not.
+- **PRs #11 and #10** (`feat(picker)`, both from 2026-05-04) are fully
+  superseded: `git cherry` marks every commit already upstream and all 10 blobs
+  are byte-identical to `main`, which took them as `b2a0c48` and `f9fd1a3`.
+  Their green checks are 1584 commits stale. Recommended for closing as merged;
+  left open here.
 
 ### Fixed (silent depth coercion on the 16-bit encode entry points)
 
