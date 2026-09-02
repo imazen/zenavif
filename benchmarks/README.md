@@ -103,6 +103,9 @@ git checkout <commit-from-meta>      # pin the commit the numbers came from
 | `examples/lossless_speed_sweep.rs` | `--features encode-imazen` | lossless size/speed sweep |
 | `examples/sweep_validate.rs` | `--features __expert` | encoder-axis liveness validation |
 | `benches/decode_benchmark.rs` | default (zenbench) | decode throughput |
+| `examples/encode_backend_sweep.rs` | `--features encode,encode-imazen,encode-svt-rs,aom-backend,target-quality` | zenravif vs svt-rs RD + speed, with a per-cell rav1d-safe/aom-rs byte gate |
+| `examples/decode_4way_bench.rs` | `--features aom-backend` | rav1d-safe vs aom-rs KEY-frame decode, interleaved via zenbench |
+| `examples/decode_backend_bench.rs` | `--features aom-backend` | decode-backend timing over a vector corpus |
 
 Heavy jobs run under `scripts/run-heavy` (cgroup memory cap + idle CPU/IO
 priority) exactly as the `.meta` `reproducer:` blocks show. For the precise
