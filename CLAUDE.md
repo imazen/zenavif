@@ -174,8 +174,10 @@ TSV diff in the same commit. zenrav1e's halves (`gate-identity`,
 - `(default)` - Pure Rust decode only, safe SIMD via archmage
 - `encode` - AVIF encoding via zenravif
 - `encode-imazen` - Encoding with zenrav1e fork extras (QM, VAQ, still-image, lossless)
-- `zenav1-svt` - EXPERIMENTAL `Av1Backend::Zenav1Svt` via zenav1-svt (imazen/zenav1-svt sibling path dep; stills only — RGB/RGBA 4:2:0 + grayscale Cs400 at 8 or 10 bits (#33: 16-bit input / `EncodeBitDepth::Ten` → native u16 `try_encode_frame_420_hbd` — since upstream hbd chunk 2 (`f319ec298`) the deblock/CDEF/Wiener post-filter searches read those native u16 planes too, nothing truncates; 10-bit alpha/gray only at speed ≥ 7 = SVT preset ≥ 9 per `svt_rs_depth_error`; HDR clli/mdcv container-side), alpha as Cs400 `auxl` aux item; dims: the 4:2:0 colour path takes ARBITRARY dimensions at ANY speed (the preset ≥ 6 floor was removed 2026-08-29 — see Known Bugs), a Cs400 alpha/gray stream needs speed ≥ 5 (SVT preset ≥ 6) AND multiples of 8, else multiples of 64 — `svt_rs_dims_error` in `src/encoder_svt_rs.rs` is the single gate (#32); coded-lossless (QP 0) is implemented upstream on 8-bit 4:2:0 but the seam's quality→QP mapping deliberately clamps to QP ≥ 1; muxes in-crate via zenavif-serialize)
+- `zenav1-svt` - EXPERIMENTAL `Av1Backend::Zenav1Svt` via zenav1-svt (git-rev dep on imazen/zenav1-svt — NOT a sibling path dep since 2026-09-02, and `resolve-standalone` in ci.yml gates it that way; stills only — RGB/RGBA 4:2:0 + grayscale Cs400 at 8 or 10 bits (#33: 16-bit input / `EncodeBitDepth::Ten` → native u16 `try_encode_frame_420_hbd` — since upstream hbd chunk 2 (`f319ec298`) the deblock/CDEF/Wiener post-filter searches read those native u16 planes too, nothing truncates; 10-bit alpha/gray only at speed ≥ 7 = SVT preset ≥ 9 per `svt_rs_depth_error`; HDR clli/mdcv container-side), alpha as Cs400 `auxl` aux item; dims: the 4:2:0 colour path takes ARBITRARY dimensions at ANY speed (the preset ≥ 6 floor was removed 2026-08-29 — see Known Bugs), a Cs400 alpha/gray stream needs speed ≥ 5 (SVT preset ≥ 6) AND multiples of 8, else multiples of 64 — `svt_rs_dims_error` in `src/encoder_svt_rs.rs` is the single gate (#32); coded-lossless (QP 0) is implemented upstream on 8-bit 4:2:0 but the seam's quality→QP mapping deliberately clamps to QP ≥ 1; muxes in-crate via zenavif-serialize)
 - `zenav1-aom` - EXPERIMENTAL `DecodeBackend::Zenav1Aom` — zenav1-aom pure-Rust KEY-frame decoder behind the raw-OBU seam `decode_av1_obu_yuv` (git-rev dep on imazen/zenav1-aom; byte-identical to rav1d-safe on the 8-cell decode corpus; drives `examples/decode_4way_bench.rs`)
+- `zenav1-aom-decode` - additive SYNONYM for `zenav1-aom`, spelled with the crate name. Neither is deprecated; `zenav1-aom` stays canonical.
+- `zenav1-aom-encode` - EXPERIMENTAL `Av1Backend::Zenav1Aom` — zenav1-aom pure-Rust ENCODE backend via `aom_encode::key_frame::encode_key_frame` (git-rev dep on imazen/zenav1-aom at `c3e1b4ab`, a NEWER rev than the decode pin because `encode_key_frame` landed after it; cargo resolves the two as two sources). **KEY-frame / still scope only** — that entry point encodes one frame and has no inter path, so animation is absent from the ENCODER, not merely unwired. Wired: 8-bit RGB → 4:2:0 BT.601 **limited** range (the port pins `color_range=0`, the OPPOSITE of the svt seam) and 8-bit grayscale → Cs400. Refused by name: animation, alpha, 16-bit input, 10/12-bit output, 4:4:4, 4:2:2, identity/RGB, full range, gain maps, lossless. Muxes in-crate via zenavif-serialize. Gate: `tests/aom_encode_backend.rs` (12 tests, mutation proofs are `#[test]`s). See `src/encoder_aom.rs`.
 - `encode-asm` - Encoding with hand-written assembly (fastest, unsafe)
 - `encode-threading` - Encoding with multi-threading
 - `unsafe-asm` - Decoding with hand-written assembly via C FFI (fastest, unsafe)
@@ -492,12 +494,22 @@ time 17-33x faster. Partial superblocks: 600/600 svt-rs cells encoded at sizes
 {65,100,200,333,500} with no dimension refusal. Do NOT diff these against the
 2026-07-22 numbers below — different pins, box, speed set and image count.
 
-There is still **no aom ENCODE backend**, and the reason is in the CHANGELOG
-`[Unreleased]` "Investigated" entry with file:line evidence: `aom-encode`'s
-surface is block-level (highest driver `pack::pack_tile`), the port never
-authors a sequence header, and its `avif_parity.rs` bootstraps headers verbatim
-out of a real C-libaom encode. One function — a key-frame encode that authors
-its own headers and wraps a temporal unit — is what would change that.
+There **is** an aom ENCODE backend as of 2026-09-02 — `Av1Backend::Zenav1Aom`
+behind the `zenav1-aom-encode` feature. The 2026-07 audit that said there was
+not (CHANGELOG `[Unreleased]` "Investigated" entry, kept as written and marked
+SUPERSEDED) ended by naming the one thing missing: *a key-frame encode that
+authors its own headers and wraps a temporal unit*. That is now
+`aom_encode::key_frame::encode_key_frame`, and both gaps the audit named are
+closed — the port authors its own sequence header with no C bytes copied, and
+emits its own `OBU_TEMPORAL_DELIMITER`.
+
+Verified here, not taken on report: the sibling gate
+`crates/aom-encode/tests/self_contained_key_frame.rs` re-run 2026-09-02 at
+`c3e1b4ab` is 6/6 tests, **186/186 cells byte-identical to real aomenc**, 20
+decode cells under both real libaom and the in-repo decoder. The zenavif seam
+does NOT claim byte parity with aomenc; it gates decodability
+(`tests/aom_encode_backend.rs`). Scope is KEY-frame / still only — see the
+`zenav1-aom-encode` feature bullet above for what is refused and why.
 
 ### Cross-backend status (2026-07-22 session; svt pin re-bumped 2026-07-24) — SUPERSEDED by the section above
 Pins bumped: zenav1-aom `7b972e50` (structured DecodeError/DecodeConfig +
