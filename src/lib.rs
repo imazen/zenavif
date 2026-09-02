@@ -74,6 +74,8 @@ pub mod detect;
 mod encode_plan;
 #[cfg(feature = "encode")]
 mod encoder;
+#[cfg(feature = "zenav1-aom-encode")]
+mod encoder_aom;
 #[cfg(feature = "zenav1-svt")]
 mod encoder_svt_rs;
 mod error;

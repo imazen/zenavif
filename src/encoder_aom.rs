@@ -1,0 +1,488 @@
+//! zenav1-aom AVIF encode backend (`zenav1-aom-encode` feature, EXPERIMENTAL).
+//!
+//! Routes [`crate::encoder::encode_rgb8`] and [`crate::encoder::encode_gray8`]
+//! through the pure-Rust libaom port
+//! ([imazen/zenav1-aom](https://github.com/imazen/zenav1-aom), the
+//! `crates/aom-encode` crate) when [`crate::Av1Backend::Zenav1Aom`] is
+//! selected. Like the [`crate::encoder_svt_rs`] backend — and unlike the
+//! zenravif backend, where zenravif itself muxes — this seam gets raw AV1 OBUs
+//! back and muxes the AVIF container in-crate via `zenavif-serialize`.
+//!
+//! # Scope: KEY FRAME / STILL ONLY
+//!
+//! `aom_encode::key_frame::encode_key_frame` encodes **one** AV1 KEY frame and
+//! returns one temporal unit. There is no inter prediction, no reference
+//! management and no multi-frame state in that entry point, so this backend
+//! implements stills and **refuses animation by name** — see
+//! [`reject_aom_backend`](crate::encoder::reject_aom_backend). Nothing here
+//! falls back to zenravif: the `backend` field is a contract, not a hint.
+//!
+//! Within stills, this seam is deliberately narrower than the encoder it
+//! drives. Wired:
+//!
+//! * 8-bit RGB -> YCbCr **4:2:0**, BT.601, **limited (studio) range** — see
+//!   "Colour signalling" below for why the range is not full.
+//! * 8-bit grayscale -> true monochrome (Cs400).
+//!
+//! Refused by name, each with the reason (`reject_unsupported_config`,
+//! [`reject_out_of_envelope_depth`]):
+//!
+//! * 4:4:4 and the identity/RGB colour model — the *encoder* gates 4:2:0,
+//!   4:2:2 and 4:4:4 (186/186 cells), but this seam has no forward RGB->YUV
+//!   4:4:4 kernel: `src/yuv_convert.rs` ships `rgb8_to_yuv420` and no 4:4:4
+//!   counterpart. Same refusal, and the same reason, as the zenav1-svt seam.
+//! * 10- and 12-bit, and the 16-bit entry points — again an encoder capability
+//!   (bd 8/10/12 are all byte-gated) this seam has not wired: it would need
+//!   the u16 forward path plus profile-2 `av1C` signalling.
+//! * Alpha (`encode_rgba8` / `encode_rgba16`) — the auxiliary Cs400 item is
+//!   not wired yet; the mono encode it needs already exists here.
+//! * Full pixel range, gain maps, animation.
+//!
+//! # Colour signalling (read this before comparing against the zenav1-svt seam)
+//!
+//! The port's `derive_sequence_header` pins the AV1 `color_config` to real
+//! aomenc's defaults: CICP 2/2/2 (`color_description_present_flag = 0`) and
+//! **`color_range = 0`, i.e. STUDIO/LIMITED range** (`AOM_CR_STUDIO_RANGE`;
+//! `crates/aom-encode/src/key_frame.rs`, the `ColorConfigParams` literal).
+//! That is the opposite of the zenav1-svt seam, whose sequence header pins
+//! `color_range = 1`.
+//!
+//! So this backend converts with [`crate::yuv_convert::YuvRange::Limited`] and
+//! muxes `colr` with `full_color_range = false`. Converting full-range samples
+//! into a stream that declares limited range would decode to stretched
+//! contrast, so the two have to agree.
+//!
+//! **Which of the two a decoder actually obeys, MEASURED (2026-09-02):**
+//! `zenavif::decode` takes both the range and the matrix from the **AV1
+//! sequence header**, not from the container `colr` — `src/decoder.rs`
+//! reads `seq_hdr.color_range` / `seq_hdr.mtrx`, and flipping the `colr`
+//! nclx `full_range` bit in an encoded file changes the decoded pixels not at
+//! all (PSNR identical to six decimals). The `colr` value is therefore
+//! written to agree, not to be the source of truth. The bitstream's
+//! `matrix_coefficients` is 2 (unspecified), and `to_yuv_matrix`'s fallback
+//! for that is BT.601 — which is what this seam converts with, so they agree
+//! there too.
+//!
+//! The load-bearing gate is `tests/aom_encode_backend.rs`'s flat-content
+//! round trip: a flat 235 source codes to luma 218 under the studio swing, so
+//! a decoder that read the range wrongly would return 218 instead of 235. It
+//! returns 235 exactly.
+//!
+//! The `colr` box still carries the colorimetry the bitstream declines to:
+//! BT.709 primaries + sRGB transfer by default (override with
+//! [`crate::EncoderConfig::color_primaries`] /
+//! [`crate::EncoderConfig::transfer_characteristics`]) and BT.601 matrix.
+//!
+//! # Quality / speed mapping
+//!
+//! aomenc's own dials, not zenravif's fitted quality->quantizer curve:
+//!
+//! * quality 1..=100 -> `--cq-level` 63..=0, linear ([`quality_to_cq_level`]).
+//!   Both ends are byte-gated upstream (`cq0` and `cq63` are sweep cells), so
+//!   unlike the zenav1-svt seam there is no clamp away from the endpoint.
+//! * speed 1..=10 -> `--cpu-used` 0..=9, linear ([`speed_to_cpu_used`]).
+//!   The whole range is byte-gated.
+//! * `--enable-cdef=0`, `--enable-restoration=1`: real aomenc's ALLINTRA
+//!   defaults (`av1_cx_iface.c:3067`). All four combinations are gated
+//!   upstream; this seam takes the defaults and does not expose the knobs.
+//!
+//! # Upstream parity, and where it stops
+//!
+//! At the pinned rev `encode_key_frame` is **186/186 cells byte-identical to
+//! real aomenc** — mono / 4:2:0 / 4:2:2 / 4:4:4, bit depths 8/10/12,
+//! 16x16..512x512, 20 crops including 1x1, all four CDEF x loop-restoration
+//! combinations, `--cpu-used` 0..=9, and multi-tile up to four tiles — and its
+//! streams decode to the same pixels under both real libaom and the in-repo
+//! decoder (`crates/aom-encode/tests/self_contained_key_frame.rs`; re-run
+//! 2026-09-02 here: 6/6 tests, 186/186 byte-exact, 20 decode cells).
+//!
+//! Three regions are pinned-divergent upstream rather than refused — the
+//! streams are valid and decode, they just are not aomenc's bytes:
+//! `--cpu-used >= 7` above roughly 3x3 superblocks, `--enable-cdef=1` at
+//! `--cpu-used >= 4` (which this seam never selects), and a two-tile
+//! 4160x64 cell at speeds >= 7. Byte-identity with aomenc is not something
+//! this backend promises to zenavif callers in the first place; it is cited
+//! because it is the evidence that the derived headers are right.
+//!
+//! **Encode speed is unmeasured from this seam.** No number is quoted here
+//! because none has been run.
+
+use crate::Result;
+use crate::encoder::{EncodeBitDepth, EncodeChromaSubsampling, EncodeColorModel, EncodePixelRange};
+use crate::encoder::{EncodedImage, EncoderConfig};
+use crate::error::Error;
+use imgref::ImgRef;
+use rgb::Rgb;
+use whereat::at;
+
+/// CICP defaults when the config sets none — the same defaults the zenravif
+/// and zenav1-svt backends use (BT.709 primaries + sRGB transfer).
+const DEFAULT_COLOR_PRIMARIES: u8 = 1;
+/// See [`DEFAULT_COLOR_PRIMARIES`].
+const DEFAULT_TRANSFER_CHARACTERISTICS: u8 = 13;
+
+/// `AOM_USAGE_ALL_INTRA` — the only usage `encode_key_frame` gates.
+const AOM_USAGE_ALL_INTRA: u32 = 2;
+
+/// Map zenavif quality 1..=100 to aomenc `--cq-level` 63..=0.
+///
+/// Linear and endpoint-exact: quality 100 -> cq 0, quality 1 -> cq 63. Both
+/// endpoints are byte-gated upstream (`cq0` / `cq63` sweep cells), so there is
+/// no clamp away from either end (contrast [`crate::encoder_svt_rs::
+/// quality_to_qp_gated`], which must avoid QP 0).
+pub(crate) fn quality_to_cq_level(quality: f32) -> i32 {
+    let q = quality.clamp(1.0, 100.0);
+    // round((100 - q) * 63 / 99), so q=100 -> 0 and q=1 -> 63.
+    let cq = ((100.0 - q) * 63.0 / 99.0).round() as i32;
+    cq.clamp(0, 63)
+}
+
+/// Map zenavif speed 1..=10 to aomenc `--cpu-used` 0..=9.
+///
+/// One-to-one: speed 1 (slowest/best) -> `--cpu-used 0`, speed 10 -> 9. The
+/// whole range is byte-gated upstream, so unlike the zenav1-svt preset mapping
+/// there is no remap or clamp hiding a distinction the encoder does not have.
+pub(crate) fn speed_to_cpu_used(speed: u8) -> i32 {
+    i32::from(speed.clamp(1, 10)) - 1
+}
+
+/// The configuration slice this seam implements. Everything else is refused by
+/// name rather than silently served by zenravif or silently mis-encoded.
+fn reject_unsupported_config(config: &EncoderConfig) -> Result<()> {
+    if config.chroma_subsampling != EncodeChromaSubsampling::Yuv420 {
+        return Err(at!(Error::Unsupported(
+            "Av1Backend::Zenav1Aom encodes 4:2:0 only: set \
+             .chroma_subsampling(EncodeChromaSubsampling::Yuv420). \
+             The encoder itself gates 4:2:0, 4:2:2 and 4:4:4; this seam has no \
+             forward RGB->YUV 4:4:4 kernel (src/yuv_convert.rs ships \
+             rgb8_to_yuv420 and no 4:4:4 counterpart)"
+        )));
+    }
+    if config.color_model != EncodeColorModel::YCbCr {
+        return Err(at!(Error::Unsupported(
+            "Av1Backend::Zenav1Aom supports the YCbCr color model only \
+             (identity/RGB has no defined 4:2:0 subsampling)"
+        )));
+    }
+    if config.pixel_range == Some(EncodePixelRange::Full) {
+        return Err(at!(Error::Unsupported(
+            "Av1Backend::Zenav1Aom signals LIMITED pixel range only \
+             (the zenav1-aom sequence header pins color_range=0, \
+             AOM_CR_STUDIO_RANGE); requesting full range would mis-signal the \
+             stream"
+        )));
+    }
+    if config.gain_map.is_some() {
+        return Err(at!(Error::Unsupported(
+            "Av1Backend::Zenav1Aom does not support gain maps \
+             (use the zenravif backend)"
+        )));
+    }
+    #[cfg(feature = "encode-imazen")]
+    if config.lossless {
+        return Err(at!(Error::Unsupported(
+            "Av1Backend::Zenav1Aom has no lossless mode wired \
+             (use the zenravif backend for lossless)"
+        )));
+    }
+    Ok(())
+}
+
+/// The bit depth this seam will encode at, or a typed refusal naming what is
+/// unimplemented.
+///
+/// The encoder byte-gates 8, 10 and 12 bits; this seam wires 8 only (a u16
+/// forward RGB->YUV path and profile-2 `av1C` signalling are what 10/12 would
+/// additionally need).
+pub(crate) fn reject_out_of_envelope_depth(
+    config: &EncoderConfig,
+    input_is_16bit: bool,
+) -> Result<()> {
+    let requested = match config.bit_depth {
+        EncodeBitDepth::Eight => 8u8,
+        EncodeBitDepth::Ten => 10,
+        EncodeBitDepth::Auto => {
+            if input_is_16bit {
+                10
+            } else {
+                8
+            }
+        }
+    };
+    if requested != 8 {
+        return Err(at!(Error::Unsupported(
+            "Av1Backend::Zenav1Aom encodes 8-bit only in this seam \
+             (aom_encode::key_frame byte-gates 8, 10 and 12 bits; the 10/12-bit \
+             forward RGB->YUV path and the profile-2 av1C signalling are not \
+             wired here)"
+        )));
+    }
+    Ok(())
+}
+
+/// Map a raw CICP colour-primaries code point to the muxer's enum. Unmapped
+/// code points degrade to `Unspecified`, exactly as the zenav1-svt seam does.
+fn cicp_to_serialize_primaries(cp: u8) -> zenavif_serialize::constants::ColorPrimaries {
+    use zenavif_serialize::constants::ColorPrimaries as CP;
+    match cp {
+        1 => CP::Bt709,
+        6 => CP::Bt601,
+        9 => CP::Bt2020,
+        11 => CP::DciP3,
+        12 => CP::DisplayP3,
+        _ => CP::Unspecified,
+    }
+}
+
+/// See [`cicp_to_serialize_primaries`].
+fn cicp_to_serialize_transfer(tc: u8) -> zenavif_serialize::constants::TransferCharacteristics {
+    use zenavif_serialize::constants::TransferCharacteristics as TC;
+    match tc {
+        1 => TC::Bt709,
+        6 => TC::Bt601,
+        8 => TC::Linear,
+        13 => TC::Srgb,
+        14 => TC::Bt2020_10,
+        16 => TC::Smpte2084,
+        18 => TC::Hlg,
+        _ => TC::Unspecified,
+    }
+}
+
+/// Build the `aom_encode` config for one still.
+fn key_frame_config(
+    config: &EncoderConfig,
+    width: usize,
+    height: usize,
+    monochrome: bool,
+) -> aom_encode::key_frame::KeyFrameConfig {
+    aom_encode::key_frame::KeyFrameConfig {
+        width,
+        height,
+        bit_depth: 8,
+        monochrome,
+        // Monochrome carries (1, 1) — the AOM_IMG_FMT_I420 a mono image
+        // allocates; `encode_key_frame` rejects any other ss for mono.
+        ss_x: 1,
+        ss_y: 1,
+        cq_level: quality_to_cq_level(config.quality),
+        cpu_used: speed_to_cpu_used(config.speed),
+        usage: AOM_USAGE_ALL_INTRA,
+        // Real aomenc's ALLINTRA defaults (`av1_cx_iface.c:3067`): CDEF off
+        // ("CDEF has been found to blur images"), loop restoration on. Both
+        // are byte-gated upstream at every speed in this combination.
+        enable_cdef: false,
+        enable_restoration: true,
+    }
+}
+
+/// Run one `encode_key_frame` and translate its refusals into `Error`.
+fn encode_key_frame_checked(
+    planes: aom_encode::key_frame::KeyFramePlanes<'_>,
+    cfg: &aom_encode::key_frame::KeyFrameConfig,
+) -> Result<Vec<u8>> {
+    aom_encode::key_frame::encode_key_frame(planes, cfg)
+        .map_err(|e| at!(Error::Encode(format!("zenav1-aom key-frame encode: {e}"))))
+}
+
+/// Mux a colour (or monochrome) payload into an AVIF file with the config's
+/// container-level metadata.
+#[expect(clippy::too_many_arguments, reason = "internal mux helper")]
+fn mux_aom(
+    config: &EncoderConfig,
+    payload: Vec<u8>,
+    width: usize,
+    height: usize,
+    seq_profile: u8,
+    color_primaries: u8,
+    transfer_characteristics: u8,
+    monochrome: bool,
+) -> Result<EncodedImage> {
+    let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
+    let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
+    let mut aviffy = zenavif_serialize::Aviffy::new();
+    aviffy
+        .set_seq_profile(seq_profile)
+        .set_chroma_subsampling((true, true))
+        .set_monochrome(monochrome)
+        // MUST match the sequence header's `color_range = 0`. See the module
+        // docs: the port pins AOM_CR_STUDIO_RANGE.
+        .set_full_color_range(false)
+        .set_color_primaries(cicp_to_serialize_primaries(color_primaries))
+        .set_transfer_characteristics(cicp_to_serialize_transfer(transfer_characteristics))
+        .set_matrix_coefficients(if monochrome {
+            zenavif_serialize::constants::MatrixCoefficients::Unspecified
+        } else {
+            zenavif_serialize::constants::MatrixCoefficients::Bt601
+        });
+    if let Some(ref exif) = config.exif {
+        aviffy.set_exif(exif.clone());
+    }
+    if let Some(ref xmp) = config.xmp {
+        aviffy.set_xmp(xmp.clone());
+    }
+    if let Some(ref icc) = config.icc_profile {
+        aviffy.set_icc_profile(icc.clone());
+    }
+    if let Some(angle) = config.rotation {
+        aviffy.set_rotation(angle);
+    }
+    if let Some(axis) = config.mirror {
+        aviffy.set_mirror(axis);
+    }
+    if let Some((max_cll, max_fall)) = config.content_light_level {
+        aviffy.set_content_light_level(max_cll, max_fall);
+    }
+    if let Some(md) = config.mastering_display {
+        aviffy.set_mastering_display(
+            md.primaries,
+            md.white_point,
+            md.max_luminance,
+            md.min_luminance,
+        );
+    }
+    let color_byte_size = payload.len();
+    let avif_file = aviffy
+        .try_to_vec(&payload, None, w, h, 8)
+        .map_err(|e| at!(Error::Encode(format!("AVIF serialization failed: {e}"))))?;
+    Ok(EncodedImage {
+        avif_file,
+        color_byte_size,
+        alpha_byte_size: 0,
+    })
+}
+
+/// Encode an 8-bit RGB image to AVIF via the zenav1-aom backend.
+///
+/// **KEY-frame / still scope only** — see the module docs. Cancellation is
+/// checked at the seam's phase boundaries (pre-conversion, pre-encode,
+/// pre-mux); `encode_key_frame` takes no stop token, so a single frame's
+/// encode is not interruptible once entered.
+pub(crate) fn encode_rgb8_aom(
+    img: ImgRef<'_, Rgb<u8>>,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedImage> {
+    use almost_enough::Stop;
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_unsupported_config(config)?;
+    reject_out_of_envelope_depth(config, false)?;
+
+    let width = img.width();
+    let height = img.height();
+    if width == 0 || height == 0 {
+        return Err(at!(Error::Encode(
+            "Av1Backend::Zenav1Aom: width and height must be non-zero".into()
+        )));
+    }
+
+    // ---- RGB -> YUV 4:2:0, BT.601, LIMITED range ------------------------
+    // Limited, not full: the port's sequence header pins color_range = 0.
+    // See the module docs.
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    let cw = width.div_ceil(2);
+    let ch = height.div_ceil(2);
+    let mut y8 = vec![0u8; width * height];
+    let mut u8p = vec![0u8; cw * ch];
+    let mut v8p = vec![0u8; cw * ch];
+    crate::yuv_convert::rgb8_to_yuv420(
+        img.buf(),
+        img.stride(),
+        width,
+        height,
+        crate::yuv_convert::YuvRange::Limited,
+        crate::yuv_convert::YuvMatrix::Bt601,
+        &mut y8,
+        &mut u8p,
+        &mut v8p,
+    );
+    // `encode_key_frame` takes u16 samples in the bit_depth-bit range; an
+    // 8-bit source carries 8-bit values, so this is a widen, not a scale.
+    let y: Vec<u16> = y8.iter().map(|&s| u16::from(s)).collect();
+    let u: Vec<u16> = u8p.iter().map(|&s| u16::from(s)).collect();
+    let v: Vec<u16> = v8p.iter().map(|&s| u16::from(s)).collect();
+
+    // ---- zenav1-aom key-frame encode ------------------------------------
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    let cfg = key_frame_config(config, width, height, false);
+    let payload = encode_key_frame_checked(
+        aom_encode::key_frame::KeyFramePlanes {
+            y: &y,
+            u: &u,
+            v: &v,
+        },
+        &cfg,
+    )?;
+
+    // ---- AVIF container --------------------------------------------------
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    mux_aom(
+        config,
+        payload,
+        width,
+        height,
+        u8::try_from(cfg.profile()).unwrap_or(0),
+        config.color_primaries.unwrap_or(DEFAULT_COLOR_PRIMARIES),
+        config
+            .transfer_characteristics
+            .unwrap_or(DEFAULT_TRANSFER_CHARACTERISTICS),
+        false,
+    )
+}
+
+/// Encode an 8-bit grayscale image to AVIF as true monochrome (Cs400) via the
+/// zenav1-aom backend.
+///
+/// **KEY-frame / still scope only** — see the module docs. The luma plane is
+/// passed through unchanged: a Cs400 stream carries the samples the caller
+/// handed in, and the sequence header's `color_range = 0` is signalled in the
+/// container as `full_color_range = false`.
+#[cfg(feature = "encode-mono")]
+pub(crate) fn encode_gray8_aom(
+    img: ImgRef<'_, u8>,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedImage> {
+    use almost_enough::Stop;
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_unsupported_config(config)?;
+    reject_out_of_envelope_depth(config, false)?;
+
+    let width = img.width();
+    let height = img.height();
+    if width == 0 || height == 0 {
+        return Err(at!(Error::Encode(
+            "Av1Backend::Zenav1Aom: width and height must be non-zero".into()
+        )));
+    }
+
+    let mut y = Vec::with_capacity(width * height);
+    for row in img.rows() {
+        y.extend(row.iter().map(|&s| u16::from(s)));
+    }
+
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    let cfg = key_frame_config(config, width, height, true);
+    let payload = encode_key_frame_checked(
+        aom_encode::key_frame::KeyFramePlanes {
+            y: &y,
+            u: &[],
+            v: &[],
+        },
+        &cfg,
+    )?;
+
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    mux_aom(
+        config,
+        payload,
+        width,
+        height,
+        u8::try_from(cfg.profile()).unwrap_or(0),
+        config.color_primaries.unwrap_or(DEFAULT_COLOR_PRIMARIES),
+        config
+            .transfer_characteristics
+            .unwrap_or(DEFAULT_TRANSFER_CHARACTERISTICS),
+        true,
+    )
+}

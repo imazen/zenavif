@@ -322,6 +322,19 @@ impl crate::EncoderConfig {
             #[cfg(feature = "zenav1-svt")]
             self.validate_svt_rs_scope()?;
         }
+        // The experimental zenav1-aom encode backend: unavailable without its
+        // feature; inside the feature, only the 8-bit 4:2:0 / monochrome
+        // KEY-frame slice it implements is accepted (the encode path rejects
+        // the same combinations — see `src/encoder_aom.rs`).
+        if self.backend == crate::Av1Backend::Zenav1Aom {
+            #[cfg(not(feature = "zenav1-aom-encode"))]
+            return Err(ValidationError::BackendUnavailable {
+                backend: "Av1Backend::Zenav1Aom",
+                feature: "zenav1-aom-encode",
+            });
+            #[cfg(feature = "zenav1-aom-encode")]
+            self.validate_aom_scope()?;
+        }
         // 4:2:0 has no defined meaning for the identity (RGB) matrix;
         // zenravif rejects the pair at encode time
         // (encode_raw_planes_internal: Error::Unsupported). Mirror of
@@ -332,6 +345,60 @@ impl crate::EncoderConfig {
             return Err(ValidationError::MutuallyExclusive {
                 a: "chroma_subsampling=Yuv420",
                 b: "color_model=Rgb",
+            });
+        }
+        Ok(())
+    }
+
+    /// The configuration slice the experimental zenav1-aom encode backend
+    /// implements — the config-only half; the config×input half (nothing
+    /// yet: `encode_key_frame` takes arbitrary dimensions, gated from 1×1
+    /// to 512×512) lives in `validate_for_input`.
+    ///
+    /// Same predicates as the encode path (`src/encoder_aom.rs`
+    /// `reject_unsupported_config` / `reject_out_of_envelope_depth`), so a
+    /// config that validates encodes and a config that encodes validates.
+    #[cfg(feature = "zenav1-aom-encode")]
+    fn validate_aom_scope(&self) -> Result<(), ValidationError> {
+        const BACKEND: &str = "Av1Backend::Zenav1Aom";
+        if self.chroma_subsampling != crate::EncodeChromaSubsampling::Yuv420 {
+            return Err(ValidationError::BackendUnsupportedParam {
+                backend: BACKEND,
+                param: "chroma_subsampling",
+                detail: "encodes 4:2:0 only; this seam has no forward RGB->YUV \
+                         4:4:4 kernel (the encoder itself gates 4:2:0, 4:2:2 and 4:4:4)",
+            });
+        }
+        if self.color_model != crate::EncodeColorModel::YCbCr {
+            return Err(ValidationError::BackendUnsupportedParam {
+                backend: BACKEND,
+                param: "color_model",
+                detail: "supports the YCbCr color model only \
+                         (identity/RGB has no defined 4:2:0 subsampling)",
+            });
+        }
+        if self.pixel_range == Some(crate::EncodePixelRange::Full) {
+            return Err(ValidationError::BackendUnsupportedParam {
+                backend: BACKEND,
+                param: "pixel_range",
+                detail: "signals LIMITED pixel range only (the zenav1-aom sequence \
+                         header pins color_range=0, AOM_CR_STUDIO_RANGE)",
+            });
+        }
+        if self.bit_depth == crate::EncodeBitDepth::Ten {
+            return Err(ValidationError::BackendUnsupportedParam {
+                backend: BACKEND,
+                param: "bit_depth",
+                detail: "encodes 8-bit only in this seam (the encoder byte-gates \
+                         8, 10 and 12; the u16 forward path and profile-2 av1C \
+                         signalling are not wired here)",
+            });
+        }
+        if self.gain_map.is_some() {
+            return Err(ValidationError::BackendUnsupportedParam {
+                backend: BACKEND,
+                param: "gain_map",
+                detail: "does not support gain maps (use Av1Backend::Zenravif)",
             });
         }
         Ok(())

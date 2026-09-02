@@ -118,6 +118,34 @@ rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "66f58fa6a64c
 # decode-backend work and the in-repo zenav1-aom work could land together
 # without a publish/rev round-trip.)
 aom-decode = { package = "zenav1-aom-decode", git = "https://github.com/imazen/zenav1-aom", rev = "14124356c46f813ac7656b8e7b6631f466b666b0", optional = true }
+# zenav1-aom pure-Rust AV1 KEY-frame ENCODER -- third encode backend (feature
+# `zenav1-aom-encode`). Same repository as `aom-decode` above, DIFFERENT crate
+# (`zenav1-aom-encode`, lib name `aom_encode`) and a NEWER rev: `encode_key_frame`
+# -- the whole-temporal-unit entry point this backend needs -- landed in
+# `790f3f9` and the multi-tile / speed 0..9 envelope in `ee4c3ef`, both after
+# the decode pin above. Cargo resolves the two revs as two sources, so the
+# decode backend keeps the rev it was gated at; unify them the next time
+# someone re-gates decode (the cost of not unifying is one extra
+# `zenav1-aom-dsp` compilation, not a correctness risk -- the two crates share
+# no types across this seam, which passes only `&[u16]` planes and `usize`).
+#
+# Git-rev pinned, NOT a sibling path dep, for exactly the reason the block
+# above records: a path dep escaping the repo root makes every cargo command
+# fail in a standalone clone. The `resolve-standalone` CI job gates it.
+#
+# At this rev `aom_encode::key_frame::encode_key_frame` is 186/186 cells
+# byte-identical to real aomenc (mono/4:2:0/4:2:2/4:4:4, bd 8/10/12,
+# 16x16..512x512, 20 crops incl. 1x1, all four CDEF x loop-restoration
+# combinations, --cpu-used 0..=9, up to four tiles), and its output decodes to
+# the same pixels under both real libaom and the in-repo decoder
+# (`crates/aom-encode/tests/self_contained_key_frame.rs`; re-run here
+# 2026-09-02, 6/6 tests, 186/186 byte-exact, 20 decode cells).
+#
+# To compose in-flight zenav1-aom encode work, add to THIS file:
+#   [patch."https://github.com/imazen/zenav1-aom"]
+#   zenav1-aom-encode = { path = "../zenav1-aom/crates/aom-encode" }
+# and revert it before landing.
+aom-encode = { package = "zenav1-aom-encode", git = "https://github.com/imazen/zenav1-aom", rev = "c3e1b4ab6dd7115ecee6c659f0e603aff2f9629e", optional = true }
 archmage = { version = "0.9.15", features = ["macros", "avx512"] }
 magetypes = { version = "0.9.15"}
 safe_unaligned_simd = "0.2.5"
@@ -505,6 +533,25 @@ zenav1-aom = ["dep:aom-decode"]
 # Cargo has no `#[deprecated]` for features; this comment and the 0.1.8
 # CHANGELOG entry are the deprecation notice. Removed in 0.2.
 aom-backend = ["zenav1-aom"]
+# Additive SYNONYM for `zenav1-aom`, spelled with the crate name the feature
+# actually turns on (`zenav1-aom-decode`). `zenav1-aom` names the REPOSITORY,
+# which was unambiguous while that repository supplied exactly one backend
+# crate; as of 0.1.8 it supplies two (`zenav1-aom-decode` and
+# `zenav1-aom-encode`), so the encode feature below had to take a name and the
+# repo-shaped one was already taken. Rather than overload `zenav1-aom` to mean
+# two things, the encode side is spelled `zenav1-aom-encode` (its crate name)
+# and this synonym lets the decode side be spelled by crate name too. Neither
+# spelling is deprecated: `zenav1-aom` stays canonical (it is what every
+# existing consumer, benchmark, doc and CI line uses).
+zenav1-aom-decode = ["zenav1-aom"]
+# EXPERIMENTAL: zenav1-aom (`aom-encode`) as a third AV1 encode backend behind
+# `Av1Backend::Zenav1Aom`. KEY-frame / still scope ONLY -- `encode_key_frame`
+# is a single-frame entry point, so there is no inter, no animation and no
+# multi-frame anything; `src/encoder_aom.rs` refuses each by name. Off by
+# default. Pulls in `zenavif-serialize` because, unlike the zenravif backend
+# (where zenravif muxes), this backend gets raw AV1 OBUs back and must mux the
+# AVIF container itself -- the same shape as `zenav1-svt`.
+zenav1-aom-encode = ["encode", "dep:aom-encode", "dep:zenavif-serialize"]
 # Decode with hand-written assembly via C FFI (fastest, uses unsafe)
 unsafe-asm = ["dep:rav1d", "rav1d/asm"]
 # AVIF encoding via zenravif (pure Rust by default)

@@ -227,6 +227,43 @@ pub enum Av1Backend {
     /// [`EncoderConfig::validate`] rejects the variant when the feature
     /// is off, and rejects configs outside the supported scope when on.
     Zenav1Svt,
+    /// zenav1-aom (pure Rust libaom port) — EXPERIMENTAL, behind the
+    /// `zenav1-aom-encode` cargo feature (default off).
+    ///
+    /// **KEY-frame / still scope only.** The backing entry point,
+    /// `aom_encode::key_frame::encode_key_frame`, encodes exactly one AV1
+    /// KEY frame and returns one temporal unit — there is no inter
+    /// prediction and no multi-frame state in it — so
+    /// [`encode_animation_rgb8`] and the other animation entry points
+    /// refuse this backend by name, as do the 16-bit and alpha entry
+    /// points. Within stills this seam wires **8-bit RGB → 4:2:0 BT.601
+    /// limited range** and **8-bit grayscale → monochrome (Cs400)**; 4:4:4,
+    /// 4:2:2, 10/12-bit, alpha, full pixel range and gain maps are each
+    /// refused with a message naming what is unimplemented (see
+    /// `src/encoder_aom.rs`).
+    ///
+    /// Unlike [`Av1Backend::Zenravif`] (where zenravif muxes), this backend
+    /// gets raw AV1 OBUs back and muxes the AVIF container in-crate with
+    /// `zenavif-serialize` — the same shape as [`Av1Backend::Zenav1Svt`],
+    /// and the reason the retired [`Av1Backend::Svtav1`] draft (which
+    /// returned raw OBUs) is rejected.
+    ///
+    /// Note the colour-range asymmetry with the zenav1-svt backend: the
+    /// zenav1-aom sequence header pins `color_range = 0`
+    /// (`AOM_CR_STUDIO_RANGE`, real aomenc's default), so this backend
+    /// converts to **limited** range and signals `full_color_range = false`
+    /// in `colr`; zenav1-svt pins full range. Requesting
+    /// [`EncodePixelRange::Full`] is refused rather than mis-signalled.
+    ///
+    /// At the pinned rev the encoder is 186/186 cells byte-identical to real
+    /// aomenc across mono/4:2:0/4:2:2/4:4:4, bit depths 8/10/12,
+    /// 16×16–512×512, 20 crops including 1×1, all four CDEF ×
+    /// loop-restoration combinations, `--cpu-used` 0..=9 and multi-tile, and
+    /// its streams decode to the same pixels under both real libaom and the
+    /// in-repo decoder. [`EncoderConfig::validate`] rejects the variant when
+    /// the feature is off, and rejects configs outside the supported scope
+    /// when on.
+    Zenav1Aom,
 }
 
 impl Av1Backend {
@@ -1082,20 +1119,43 @@ pub(crate) fn effective_qm(config: &EncoderConfig) -> bool {
     config.enable_qm && !config.lossless
 }
 
-/// Reject `Av1Backend::Zenav1Svt` on entry points it does not implement.
+/// Reject the experimental in-crate-muxing backends on entry points they do
+/// not implement.
 ///
 /// The zenav1-svt backend covers still encodes only (RGB/RGBA 8- and
-/// 16-bit → 4:2:0 at 8 or 10 bits, plus grayscale); every other entry
-/// point — and every entry point when the feature is off — fails honestly
-/// instead of silently serving the request with zenravif. (The deprecated
-/// `Svtav1` variant keeps its historical behavior: rejected by
-/// `validate()`, silently zenravif-served otherwise.)
+/// 16-bit → 4:2:0 at 8 or 10 bits, plus grayscale); the zenav1-aom backend
+/// covers a narrower still slice still (8-bit RGB → 4:2:0 and 8-bit
+/// grayscale). Every other entry point — and every entry point when the
+/// respective feature is off — fails honestly instead of silently serving
+/// the request with zenravif. (The deprecated `Svtav1` variant keeps its
+/// historical behavior: rejected by `validate()`, silently zenravif-served
+/// otherwise.)
 fn reject_svt_rs_backend(config: &EncoderConfig, entry: &'static str) -> Result<()> {
     if config.backend == Av1Backend::Zenav1Svt {
         return Err(at!(Error::Encode(format!(
             "Av1Backend::Zenav1Svt does not support {entry} \
              (RGB/RGBA/grayscale still encodes only); \
              use Av1Backend::Zenravif"
+        ))));
+    }
+    reject_aom_backend(config, entry)
+}
+
+/// Reject `Av1Backend::Zenav1Aom` on entry points it does not implement.
+///
+/// `aom_encode::key_frame::encode_key_frame` is a ONE-KEY-FRAME entry point:
+/// no inter prediction, no reference management, no multi-frame state. So
+/// animation is not "not wired yet at this seam", it is absent from the
+/// encoder — and alpha, 16-bit input and 10/12-bit output are the
+/// seam-level gaps. Each is named in the message rather than silently
+/// served by zenravif.
+pub(crate) fn reject_aom_backend(config: &EncoderConfig, entry: &'static str) -> Result<()> {
+    if config.backend == Av1Backend::Zenav1Aom {
+        return Err(at!(Error::Encode(format!(
+            "Av1Backend::Zenav1Aom does not support {entry}: it encodes ONE AV1 \
+             KEY frame (8-bit RGB → 4:2:0 and 8-bit grayscale stills only — no \
+             animation, no alpha auxiliary item, no 16-bit input, no 10/12-bit \
+             output); use Av1Backend::Zenravif"
         ))));
     }
     Ok(())
@@ -1322,7 +1382,7 @@ pub fn encode_rgb8(
     // The monotonicity probe's anchor tiers are calibrated for the
     // zenravif speed ladder; the zenav1-svt backend takes the plain
     // single-encode path (its own speed↔RD behavior is unmeasured here).
-    if config.backend == Av1Backend::Zenav1Svt {
+    if config.backend == Av1Backend::Zenav1Svt || config.backend == Av1Backend::Zenav1Aom {
         return encode_rgb8_once(img, config, stop);
     }
     #[cfg(all(feature = "target-quality", feature = "auto-tune"))]
@@ -1360,6 +1420,20 @@ pub(crate) fn encode_rgb8_once(
             )));
         }
     }
+    // Same contract for the zenav1-aom backend: 8-bit RGB → 4:2:0 still is
+    // exactly the slice it implements (`src/encoder_aom.rs`).
+    if config.backend == Av1Backend::Zenav1Aom {
+        #[cfg(feature = "zenav1-aom-encode")]
+        {
+            return crate::encoder_aom::encode_rgb8_aom(img, config, stop);
+        }
+        #[cfg(not(feature = "zenav1-aom-encode"))]
+        {
+            return Err(at!(Error::Unsupported(
+                "Av1Backend::Zenav1Aom requires the `zenav1-aom-encode` cargo feature"
+            )));
+        }
+    }
 
     let enc = build_ravif_encoder(config, stop, false)?;
     let result = enc
@@ -1394,6 +1468,10 @@ pub fn encode_gray8(
     #[cfg(feature = "zenav1-svt")]
     if config.backend == Av1Backend::Zenav1Svt {
         return crate::encoder_svt_rs::encode_gray8_svt_rs(img, config, stop);
+    }
+    #[cfg(feature = "zenav1-aom-encode")]
+    if config.backend == Av1Backend::Zenav1Aom {
+        return crate::encoder_aom::encode_gray8_aom(img, config, stop);
     }
     reject_svt_rs_backend(
         config,
