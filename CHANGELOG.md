@@ -515,6 +515,30 @@ write-path returns + gain-map interop additions, already on main).
   `SvtRs`, `AomRs`, `SvtRs420`) are untouched and
   `tests/deprecated_backend_aliases.rs` still compiles.
 
+### Fixed — an aom-backend refusal named the `zenav1-svt` feature
+
+- `reject_svt_rs_backend` delegates to `reject_aom_backend` with the same
+  `entry` string, and four call sites had the svt-specific hint baked into
+  that string. So an aom refusal read *"Av1Backend::Zenav1Aom does not support
+  encode_rgb16 (requires the `zenav1-svt` cargo feature)"* — naming a feature
+  unrelated to this backend and pointing the caller at the wrong fix. The call
+  sites now pass the bare entry name and each rejector adds its own hint.
+
+- **Found by compiling a real downstream consumer, not by a same-crate test.**
+  A scratch crate that path-deps zenavif (carrying the two `[patch]` entries a
+  path dep does not inherit), exhaustively matches `Av1Backend` with a `_`
+  arm, uses the deprecated `SvtRs` alias in expression *and* pattern position,
+  and encodes then decodes a 64x64 image through the new backend — 290-byte
+  AVIF, decoded 64x64. That crate is the substitute for `cargo semver-checks`,
+  which still cannot run here (packaging drops the in-repo patch supplying
+  unpublished `zenavif-serialize` 0.2.0; it aborts at `cargo update`,
+  unchanged and pre-existing).
+
+- Gated: `aom_backend_refuses_what_it_does_not_implement` now asserts no aom
+  refusal contains `zenav1-svt`, and that the 16-bit refusal names the
+  limitation rather than only the backend. Proved able to fail — re-adding the
+  hint to the `encode_rgb16` call site reddens it (11 passed, 1 failed).
+
 ### Added — `tests/aom_encode_backend.rs`, a decode gate proved able to fail
 
 - 12 tests (11 without `encode-mono`). The claim is **not** "encode returned

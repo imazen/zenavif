@@ -1132,8 +1132,19 @@ pub(crate) fn effective_qm(config: &EncoderConfig) -> bool {
 /// otherwise.)
 fn reject_svt_rs_backend(config: &EncoderConfig, entry: &'static str) -> Result<()> {
     if config.backend == Av1Backend::Zenav1Svt {
+        // The `zenav1-svt`-feature hint used to be baked into each call site's
+        // `entry` string. It moved here on 2026-09-02 because `entry` is now
+        // shared with `reject_aom_backend`, and an aom refusal that read
+        // "does not support encode_rgb16 (requires the `zenav1-svt` cargo
+        // feature)" named the wrong feature entirely. Caught by compiling a
+        // real downstream consumer, not by a same-crate test.
+        let hint = if entry == "animation encoding" {
+            ""
+        } else {
+            " (requires the `zenav1-svt` cargo feature)"
+        };
         return Err(at!(Error::Encode(format!(
-            "Av1Backend::Zenav1Svt does not support {entry} \
+            "Av1Backend::Zenav1Svt does not support {entry}{hint} \
              (RGB/RGBA/grayscale still encodes only); \
              use Av1Backend::Zenravif"
         ))));
@@ -1473,10 +1484,7 @@ pub fn encode_gray8(
     if config.backend == Av1Backend::Zenav1Aom {
         return crate::encoder_aom::encode_gray8_aom(img, config, stop);
     }
-    reject_svt_rs_backend(
-        config,
-        "encode_gray8 (requires the `zenav1-svt` cargo feature)",
-    )?;
+    reject_svt_rs_backend(config, "encode_gray8")?;
 
     let enc = build_ravif_encoder(config, stop, false)?;
     let result = enc
@@ -1534,10 +1542,7 @@ pub(crate) fn encode_rgba8_once(
     if config.backend == Av1Backend::Zenav1Svt {
         return crate::encoder_svt_rs::encode_rgba8_svt_rs(img, config, stop);
     }
-    reject_svt_rs_backend(
-        config,
-        "encode_rgba8 (requires the `zenav1-svt` cargo feature)",
-    )?;
+    reject_svt_rs_backend(config, "encode_rgba8")?;
     let enc = build_ravif_encoder(config, stop, false)?;
     let result = enc
         .encode_rgba(img)
@@ -1577,10 +1582,7 @@ pub fn encode_rgb16(
     if config.backend == Av1Backend::Zenav1Svt {
         return crate::encoder_svt_rs::encode_rgb16_svt_rs(img, config, stop);
     }
-    reject_svt_rs_backend(
-        config,
-        "encode_rgb16 (requires the `zenav1-svt` cargo feature)",
-    )?;
+    reject_svt_rs_backend(config, "encode_rgb16")?;
     let enc = build_ravif_encoder(config, stop, true)?;
     let width = img.width();
     let height = img.height();
@@ -1672,10 +1674,7 @@ pub fn encode_rgba16(
     if config.backend == Av1Backend::Zenav1Svt {
         return crate::encoder_svt_rs::encode_rgba16_svt_rs(img, config, stop);
     }
-    reject_svt_rs_backend(
-        config,
-        "encode_rgba16 (requires the `zenav1-svt` cargo feature)",
-    )?;
+    reject_svt_rs_backend(config, "encode_rgba16")?;
     let enc = build_ravif_encoder(config, stop, true)?;
     let width = img.width();
     let height = img.height();

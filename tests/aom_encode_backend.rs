@@ -430,6 +430,20 @@ fn aom_backend_refuses_what_it_does_not_implement() {
         "alpha refusal must name the backend, got: {e}"
     );
 
+    // A refusal must name the AOM backend's own limitation, never another
+    // backend's feature. `reject_svt_rs_backend` and `reject_aom_backend`
+    // share their `entry` string, and the svt-specific hint used to be baked
+    // into it — so the aom refusal for `encode_rgb16` read "requires the
+    // `zenav1-svt` cargo feature", naming a feature that has nothing to do
+    // with this backend. Caught 2026-09-02 by compiling a real downstream
+    // consumer, and gated here so it cannot come back.
+    let e = zenavif::encode_rgba8(rgba.as_ref(), &aom_config(), stop())
+        .expect_err("alpha must be refused");
+    assert!(
+        !format!("{e}").contains("zenav1-svt"),
+        "an Av1Backend::Zenav1Aom refusal must not name the zenav1-svt feature, got: {e}"
+    );
+
     // 16-bit input.
     let img16: ImgVec<Rgb<u16>> = Img::new(
         img.buf()
@@ -445,9 +459,14 @@ fn aom_backend_refuses_what_it_does_not_implement() {
     );
     let e = zenavif::encode_rgb16(img16.as_ref(), &aom_config(), stop())
         .expect_err("16-bit must be refused");
+    let msg = format!("{e}");
     assert!(
-        format!("{e}").contains("Zenav1Aom"),
-        "16-bit refusal must name the backend, got: {e}"
+        msg.contains("Zenav1Aom") && msg.contains("no 16-bit input"),
+        "16-bit refusal must name the backend and the limitation, got: {msg}"
+    );
+    assert!(
+        !msg.contains("zenav1-svt"),
+        "an Av1Backend::Zenav1Aom refusal must not name the zenav1-svt feature, got: {msg}"
     );
 
     // 10-bit output.
