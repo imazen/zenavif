@@ -18,9 +18,9 @@
 //!   cargo build -p zenavif --release --example heaptrack_decode
 //!   heaptrack ./target/release/examples/heaptrack_decode                 # default fixture
 //!   heaptrack ./target/release/examples/heaptrack_decode <file.avif> [iters]
-//!   ./target/release/examples/heaptrack_decode <file.avif> 1 --backend aom-rs
+//!   ./target/release/examples/heaptrack_decode <file.avif> 1 --backend zenav1-aom
 //!
-//! `--backend rav1d-safe|aom-rs` picks the AV1 engine (aom-rs needs the
+//! `--backend rav1d-safe|zenav1-aom` picks the AV1 engine (zenav1-aom needs the
 //! `zenav1-aom` feature). On a host without heaptrack — macOS, say — wrap the
 //! binary in `/usr/bin/time -l` and read "maximum resident set size" (BYTES)
 //! for the whole-process peak, and pass `1` for iters so the high-water mark
@@ -48,17 +48,17 @@ fn default_fixture() -> PathBuf {
 fn main() {
     let mut args: Vec<String> = std::env::args().collect();
 
-    // `--backend rav1d-safe|aom-rs` selects the AV1 decode engine. Pulled out
+    // `--backend rav1d-safe|zenav1-aom` selects the AV1 decode engine. Pulled out
     // before the positionals so the `<file> [iters]` shape is unchanged.
-    // aom-rs needs the `zenav1-aom` feature; it is KEY-frame/intra scope,
+    // zenav1-aom needs the `zenav1-aom` feature; it is KEY-frame/intra scope,
     // which is exactly what an AVIF still is.
     let mut backend = zenavif::DecodeBackend::Rav1dSafe;
     if let Some(i) = args.iter().position(|a| a == "--backend") {
         backend = match args[i + 1].as_str() {
             "rav1d-safe" => zenavif::DecodeBackend::Rav1dSafe,
             #[cfg(feature = "zenav1-aom")]
-            "aom-rs" => zenavif::DecodeBackend::Zenav1Aom,
-            other => panic!("--backend must be rav1d-safe|aom-rs, got {other}"),
+            "zenav1-aom" => zenavif::DecodeBackend::Zenav1Aom,
+            other => panic!("--backend must be rav1d-safe|zenav1-aom, got {other}"),
         };
         args.drain(i..i + 2);
     }

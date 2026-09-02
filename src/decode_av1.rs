@@ -443,18 +443,18 @@ fn convert_to_rgb(
 }
 
 // ===========================================================================
-// DECODE-BENCH FORK: second decode backend (aom-rs) behind a common YUV seam.
+// DECODE-BENCH FORK: second decode backend (zenav1-aom) behind a common YUV seam.
 //
 // Both backends receive the IDENTICAL raw AV1 OBU temporal-unit bytes and
 // return the same `DecodedYuv` shape (tight, unpadded u16 planes) — "one
 // frontend, two backends", so an apples-to-apples decode-speed comparison
-// isolates the decode kernel. The aom-rs backend covers the KEY-frame / intra
+// isolates the decode kernel. The zenav1-aom backend covers the KEY-frame / intra
 // scope (AVIF stills are single KEY frames) and is byte-identical to libaom on
 // the AV1 conformance corpus.
 // ===========================================================================
 
 /// A decoded AV1 frame as tight (unpadded) YUV planes, `u16` per sample at
-/// every bit depth. The field shape mirrors aom-rs's
+/// every bit depth. The field shape mirrors zenav1-aom's
 /// `aom_decode::frame::FrameDecode` so the two backends are directly
 /// comparable.
 #[derive(Clone, Debug)]
@@ -490,7 +490,7 @@ impl DecodedYuv {
 pub enum DecodeBackend {
     /// The default pure-Rust rav1d-safe managed decoder (full AV1 profile).
     Rav1dSafe,
-    /// The aom-rs pure-Rust decoder (KEY-frame / intra scope; byte-identical
+    /// The zenav1-aom pure-Rust decoder (KEY-frame / intra scope; byte-identical
     /// to libaom on the AV1 conformance corpus). Requires the `zenav1-aom`
     /// feature.
     #[cfg(feature = "zenav1-aom")]
@@ -571,7 +571,7 @@ pub fn decode_av1_obu_yuv_with(
 
 /// rav1d-safe backend: managed decode, then copy the decoded planes into tight
 /// (unpadded) `u16` buffers (widening 8-bit samples) so the output matches the
-/// aom-rs backend's shape exactly.
+/// zenav1-aom backend's shape exactly.
 fn decode_av1_obu_yuv_rav1d_with(data: &[u8], config: &crate::DecoderConfig) -> Result<DecodedYuv> {
     if data.is_empty() {
         return Err(at!(Error::Decode {
@@ -665,7 +665,7 @@ fn decode_av1_obu_yuv_rav1d_with(data: &[u8], config: &crate::DecoderConfig) -> 
     })
 }
 
-/// aom-rs backend: pure-Rust KEY-frame decode, byte-identical to libaom on the
+/// zenav1-aom backend: pure-Rust KEY-frame decode, byte-identical to libaom on the
 /// AV1 conformance corpus. Output is already tight `u16` planes.
 ///
 /// Every `aom_decode::DecodeError` variant maps onto the matching zenavif
@@ -786,31 +786,31 @@ pub(crate) fn map_aom_error(e: aom_decode::DecodeError) -> whereat::At<Error> {
     match e {
         AomError::Truncated(_) => at!(Error::Decode {
             code: -2,
-            msg: "aom-rs: truncated AV1 OBU stream",
+            msg: "zenav1-aom: truncated AV1 OBU stream",
         }),
         AomError::Malformed(_) => at!(Error::Decode {
             code: -3,
-            msg: "aom-rs: malformed AV1 bitstream",
+            msg: "zenav1-aom: malformed AV1 bitstream",
         }),
         AomError::UnsupportedType(_) => at!(Error::Unsupported(
-            "aom-rs: AV1 stream type outside this backend's envelope"
+            "zenav1-aom: AV1 stream type outside this backend's envelope"
         )),
         AomError::UnsupportedFeature(m) => at!(Error::Unsupported(m)),
         AomError::LimitExceeded { kind, actual, max } => at!(Error::ResourceLimit(format!(
-            "aom-rs decode limit: {} = {actual} > {max}",
+            "zenav1-aom decode limit: {} = {actual} > {max}",
             kind.as_str()
         ))),
         AomError::AllocFailed { .. } => at!(Error::OutOfMemory),
         AomError::Cancelled(reason) => at!(Error::Cancelled(reason)),
         AomError::Internal(_) => at!(Error::Decode {
             code: -4,
-            msg: "aom-rs: internal decoder invariant failure",
+            msg: "zenav1-aom: internal decoder invariant failure",
         }),
         // `DecodeError` is #[non_exhaustive]; future variants degrade to the
         // generic decode bucket rather than failing the build.
         _ => at!(Error::Decode {
             code: -1,
-            msg: "aom-rs: decode failed",
+            msg: "zenav1-aom: decode failed",
         }),
     }
 }

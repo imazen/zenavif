@@ -1,4 +1,4 @@
-//! Apples-to-apples AV1 KEY-frame decode benchmark: **aom-rs vs rav1d-safe**,
+//! Apples-to-apples AV1 KEY-frame decode benchmark: **zenav1-aom vs rav1d-safe**,
 //! both driven through zenavif's raw-OBU decode seam
 //! ([`zenavif::decode_av1_obu_yuv`]) so only the decode kernel differs.
 //!
@@ -7,7 +7,7 @@
 //! Both decoders receive the **identical** raw AV1 OBU bytes of **frame 0 (the
 //! first, KEY frame)** of each vector, demuxed once by the shared IVF reader
 //! here, and produce the same tight-YUV [`zenavif::DecodedYuv`] output. First-
-//! KEY-frame-for-both is the only honest common scope because the aom-rs
+//! KEY-frame-for-both is the only honest common scope because the zenav1-aom
 //! decoder is KEY-frame / intra-only (an AVIF still IS a single KEY frame).
 //!
 //! The two Rust decoders are measured **interleaved** (round-robin) by zenbench
@@ -24,7 +24,7 @@
 //!
 //! Usage:
 //!   decode_4way_bench <corpus_dir> <out_csv>
-//! (defaults: /root/aom-rs/conformance/data  /tmp/decode_rust.csv)
+//! (defaults: /root/zenav1-aom/conformance/data  /tmp/decode_rust.csv)
 
 use std::fs;
 use std::path::PathBuf;
@@ -159,7 +159,7 @@ fn main() {
     let dir = PathBuf::from(
         args.get(1)
             .cloned()
-            .unwrap_or_else(|| "/root/aom-rs/conformance/data".to_string()),
+            .unwrap_or_else(|| "/root/zenav1-aom/conformance/data".to_string()),
     );
     let out_csv = PathBuf::from(
         args.get(2)
@@ -193,7 +193,7 @@ fn main() {
         #[allow(unused_mut)]
         let mut correctness = match (&a, &r) {
             (Ok(a), Ok(r)) => compare(a, r),
-            (Err(_), _) => "aom-rs REJECTED frame".to_string(),
+            (Err(_), _) => "zenav1-aom REJECTED frame".to_string(),
             (_, Err(_)) => "rav1d-safe REJECTED frame".to_string(),
         };
         // Third arm (rav1d FFI, full asm): must byte-agree with rav1d-safe.
@@ -236,7 +236,7 @@ fn main() {
             let obu_f = cell.obu.clone();
             suite.group(label, move |g| {
                 g.throughput(Throughput::Elements(px));
-                g.bench("aom-rs", move |b| {
+                g.bench("zenav1-aom", move |b| {
                     b.iter(|| {
                         let d = decode_av1_obu_yuv(&obu_a, DecodeBackend::Zenav1Aom).unwrap();
                         black_box(d.y.len())
@@ -301,7 +301,7 @@ fn main() {
                     cell.correctness,
                     cell.note,
                 ));
-                if b.name == "aom-rs" {
+                if b.name == "zenav1-aom" {
                     aom_mean = mean_ns;
                 }
                 if b.name == "rav1d-safe" {
@@ -317,7 +317,7 @@ fn main() {
         eprintln!(
             "{:<28} {:>9} {:>12.3} {:>12.2}   {:.3}x",
             cell.label,
-            "aom-rs",
+            "zenav1-aom",
             aom_mean / 1e6,
             px * 1e3 / aom_mean,
             ratio
@@ -343,5 +343,7 @@ fn main() {
 
     fs::write(&out_csv, &csv).expect("write csv");
     eprintln!("\nRust-pair CSV written: {out_csv:?}");
-    eprintln!("(headline = interleaved aom-rs÷rav1d-safe ratio; C references appended separately)");
+    eprintln!(
+        "(headline = interleaved zenav1-aom÷rav1d-safe ratio; C references appended separately)"
+    );
 }

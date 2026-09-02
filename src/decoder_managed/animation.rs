@@ -258,7 +258,7 @@ impl AnimationDecoder {
             .map_err(crate::decode_av1::map_aom_error)?;
         if color.len() != info.frame_count {
             return Err(at!(Error::Unsupported(
-                "aom-rs decoded a different frame count than the container declares \
+                "zenav1-aom decoded a different frame count than the container declares \
                  (unshown-frame packing outside the current envelope)"
             )));
         }
@@ -268,7 +268,7 @@ impl AnimationDecoder {
                     .map_err(crate::decode_av1::map_aom_error)?;
                 if a.len() != info.frame_count {
                     return Err(at!(Error::Unsupported(
-                        "aom-rs alpha track frame count does not match the container"
+                        "zenav1-aom alpha track frame count does not match the container"
                     )));
                 }
                 Some(a)

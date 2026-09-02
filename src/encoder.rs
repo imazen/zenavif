@@ -187,7 +187,7 @@ pub enum Av1Backend {
     /// zenrav1e (rav1e fork) — default, production-proven.
     #[default]
     Zenravif,
-    /// svtav1-rs — the retired first draft of the pure-Rust SVT-AV1 port
+    /// zenav1-svt — the retired first draft of the pure-Rust SVT-AV1 port
     /// integration.
     ///
     /// No build can use this: the `encode-svtav1` feature was never
@@ -201,7 +201,7 @@ pub enum Av1Backend {
                 backend; EncoderConfig::validate() rejects it — use Av1Backend::Zenav1Svt"
     )]
     Svtav1,
-    /// svtav1-rs (pure Rust SVT-AV1 port) — EXPERIMENTAL, behind the
+    /// zenav1-svt (pure Rust SVT-AV1 port) — EXPERIMENTAL, behind the
     /// `zenav1-svt` cargo feature (default off).
     ///
     /// This is the working successor the [`Av1Backend::Svtav1`] doc
@@ -1084,7 +1084,7 @@ pub(crate) fn effective_qm(config: &EncoderConfig) -> bool {
 
 /// Reject `Av1Backend::Zenav1Svt` on entry points it does not implement.
 ///
-/// The svtav1-rs backend covers still encodes only (RGB/RGBA 8- and
+/// The zenav1-svt backend covers still encodes only (RGB/RGBA 8- and
 /// 16-bit → 4:2:0 at 8 or 10 bits, plus grayscale); every other entry
 /// point — and every entry point when the feature is off — fails honestly
 /// instead of silently serving the request with zenravif. (The deprecated
@@ -1320,7 +1320,7 @@ pub fn encode_rgb8(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
     // The monotonicity probe's anchor tiers are calibrated for the
-    // zenravif speed ladder; the svtav1-rs backend takes the plain
+    // zenravif speed ladder; the zenav1-svt backend takes the plain
     // single-encode path (its own speed↔RD behavior is unmeasured here).
     if config.backend == Av1Backend::Zenav1Svt {
         return encode_rgb8_once(img, config, stop);
@@ -1345,7 +1345,7 @@ pub(crate) fn encode_rgb8_once(
 ) -> Result<EncodedImage> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
 
-    // Backend dispatch: the svtav1-rs backend covers exactly this entry
+    // Backend dispatch: the zenav1-svt backend covers exactly this entry
     // point (8-bit RGB → 4:2:0 still). It must never be served silently
     // by zenravif — the backend field is a contract, not a hint.
     if config.backend == Av1Backend::Zenav1Svt {
@@ -1430,7 +1430,7 @@ pub fn encode_rgba8(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
-    // Skip the probe machinery for the svtav1-rs backend: `encode_rgba8_once`
+    // Skip the probe machinery for the zenav1-svt backend: `encode_rgba8_once`
     // dispatches it directly (no monotonicity-probe support there).
     if config.backend == Av1Backend::Zenav1Svt {
         return encode_rgba8_once(img, config, stop);

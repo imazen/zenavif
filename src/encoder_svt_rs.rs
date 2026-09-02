@@ -1,7 +1,7 @@
-//! svtav1-rs AVIF encode backend (`zenav1-svt` feature, EXPERIMENTAL).
+//! zenav1-svt AVIF encode backend (`zenav1-svt` feature, EXPERIMENTAL).
 //!
 //! Routes [`crate::encoder::encode_rgb8`] through the pure-Rust SVT-AV1 port
-//! ([imazen/svtav1](https://github.com/imazen/svtav1), `svtav1-rs/`) when
+//! ([imazen/svtav1](https://github.com/imazen/svtav1), `zenav1-svt/`) when
 //! [`crate::Av1Backend::Zenav1Svt`] is selected. Unlike the zenravif backend —
 //! where zenravif itself muxes the AVIF container — this backend drives the
 //! `svtav1_encoder::pipeline::EncodePipeline` directly and muxes in-crate via
@@ -66,12 +66,12 @@
 //! sequence-header + frame OBU sequence. It is muxed **verbatim**: the
 //! leading TD matches the zenravif payload convention (zenrav1e packet data
 //! also begins with a TD OBU) and is byte-identical to the streams the
-//! svtav1-rs decode-conformance suite validates under `aomdec` (525 mono +
+//! zenav1-svt decode-conformance suite validates under `aomdec` (525 mono +
 //! 1575 4:2:0 cells, `tools/decode_conformance.sh` at the pinned rev).
 //!
 //! # Quality / speed mapping
 //!
-//! Deliberately svtav1-rs's own documented mappings, NOT zenravif's fitted
+//! Deliberately zenav1-svt's own documented mappings, NOT zenravif's fitted
 //! quality→quantizer curve (`src/encode_plan.rs` mirrors describe zenravif
 //! only):
 //!
@@ -86,7 +86,7 @@
 //!
 //! # C parity
 //!
-//! At the pinned tree, svtav1-rs emits **byte-identical bitstreams to the C
+//! At the pinned tree, zenav1-svt emits **byte-identical bitstreams to the C
 //! SVT-AV1 encoder (v4.2.0 baseline)** across its verified battery
 //! (upstream `rust/README.md` gate table + `rust/STATUS.md`): the full-SB
 //! identity matrix (`identity_full_8bit` 280/280, every preset 0–13, bd8
@@ -124,7 +124,7 @@ const DEFAULT_TRANSFER_CHARACTERISTICS: u8 = 13; // sRGB
 /// available backend — see that method's docs).
 const MATRIX_COEFFICIENTS_BT601: u8 = 6;
 
-/// Map a fallible svtav1-rs pipeline failure onto the matching zenavif
+/// Map a fallible zenav1-svt pipeline failure onto the matching zenavif
 /// [`Error`] variant so the failure category survives to
 /// `CategorizedError::category()` (backend-seam obligation 1). This replaces
 /// the old `is_empty()` heuristic on the infallible `encode_frame*` calls
@@ -141,16 +141,16 @@ fn map_svt_encode_error(e: whereat::At<svtav1::types::EncodeError>) -> whereat::
             height,
             reason,
         } => at!(Error::Encode(format!(
-            "svtav1-rs rejected dimensions {width}x{height}: {reason}"
+            "zenav1-svt rejected dimensions {width}x{height}: {reason}"
         ))),
         SvtError::UnsupportedConfig(what) => at!(Error::Unsupported(what)),
         // `EncodeError` is #[non_exhaustive]; future variants degrade to the
         // generic encode bucket rather than failing the build.
-        other => at!(Error::Encode(format!("svtav1-rs encode failed: {other}"))),
+        other => at!(Error::Encode(format!("zenav1-svt encode failed: {other}"))),
     }
 }
 
-/// Map zenavif quality 1..=100 to an svtav1-rs QP, clamped away from QP 0.
+/// Map zenavif quality 1..=100 to an zenav1-svt QP, clamped away from QP 0.
 ///
 /// QP 0 is `base_qindex` 0 = **coded-lossless**, and its history upstream
 /// runs corrupt → refused → implemented:
@@ -192,7 +192,7 @@ pub(crate) fn quality_to_qp_gated(quality: f32) -> u8 {
 /// Map speed 1..=10 to an SVT-AV1 preset 0..=9.
 ///
 /// Provenance: mirrors the private `AvifEncoder::speed_to_preset` in
-/// imazen/svtav1 `svtav1-rs/svtav1/src/avif.rs` (speed 1 → preset 0
+/// imazen/svtav1 `zenav1-svt/svtav1/src/avif.rs` (speed 1 → preset 0
 /// slowest/best, speed 10 → preset 9 fastest; linear with rounding into
 /// 0..=13, then clamped to M9).
 ///
@@ -364,7 +364,7 @@ pub(crate) fn svt_rs_dims_error(
     if mono_plane && preset < MONO_PARTIAL_SB_MIN_PRESET {
         return Some(
             "Av1Backend::Zenav1Svt codes alpha and grayscale (Cs400) dimensions that are not \
-             multiples of 64 only at SVT preset >= 6 (speed >= 5): the svtav1-rs monochrome \
+             multiples of 64 only at SVT preset >= 6 (speed >= 5): the zenav1-svt monochrome \
              partial-superblock edge coding is measured only from that preset. Use speed >= 5, \
              pad/crop to multiples of 64, use RGB input, or use the zenravif backend",
         );
@@ -372,7 +372,7 @@ pub(crate) fn svt_rs_dims_error(
     if mono_plane && (!width.is_multiple_of(8) || !height.is_multiple_of(8)) {
         return Some(
             "Av1Backend::Zenav1Svt alpha and grayscale (Cs400) streams need dimensions \
-             that are multiples of 8 (the svtav1-rs monochrome path pads no partial \
+             that are multiples of 8 (the zenav1-svt monochrome path pads no partial \
              8x8 block yet), and the alpha item must match the colour item's size. \
              Use RGB input, pad/crop to multiples of 8, or use the zenravif backend",
         );
@@ -380,7 +380,7 @@ pub(crate) fn svt_rs_dims_error(
     None
 }
 
-/// Reject configuration the svtav1-rs backend cannot honor.
+/// Reject configuration the zenav1-svt backend cannot honor.
 ///
 /// Encode entry points clamp/reject independently of the opt-in
 /// [`crate::EncoderConfig::validate`], so these checks run on the encode
@@ -403,7 +403,7 @@ fn reject_unsupported_config(config: &EncoderConfig) -> Result<()> {
     if config.pixel_range == Some(EncodePixelRange::Limited) {
         return Err(at!(Error::Unsupported(
             "Av1Backend::Zenav1Svt signals full pixel range only \
-             (the svtav1-rs sequence header pins color_range=1)"
+             (the zenav1-svt sequence header pins color_range=1)"
         )));
     }
     if config.gain_map.is_some() {
@@ -511,7 +511,7 @@ pub(crate) fn svt_rs_depth_error(
     if bit_depth == 10 && mono_plane && speed_to_svt_preset(speed) < MONO_HBD_MIN_PRESET {
         return Some(
             "Av1Backend::Zenav1Svt codes 10-bit alpha and grayscale (Cs400) streams at SVT \
-             preset >= 9 (speed >= 7) only: the svtav1-rs bd10 monochrome level pass runs \
+             preset >= 9 (speed >= 7) only: the zenav1-svt bd10 monochrome level pass runs \
              there and nowhere else, and an AVIF alpha item must match the colour item's \
              depth. Use speed >= 7, RGB input, 8-bit, or the zenravif backend",
         );
@@ -538,7 +538,7 @@ enum MonoPlane<'a> {
     Ten(&'a [u16]),
 }
 
-/// Run one still-frame monochrome encode through the svtav1-rs pipeline.
+/// Run one still-frame monochrome encode through the zenav1-svt pipeline.
 ///
 /// `plane` is `stride`-strided (`stride >= width`), `width`/`height` already
 /// inside the mono envelope of [`svt_rs_dims_error`] and the depth inside
@@ -666,7 +666,7 @@ impl Yuv420Planes {
     }
 }
 
-/// Run one still-frame 4:2:0 colour encode through the svtav1-rs pipeline
+/// Run one still-frame 4:2:0 colour encode through the zenav1-svt pipeline
 /// at the planes' depth. Returns the TD + sequence header + frame OBU
 /// payload.
 fn encode_color_420_svt(
@@ -697,7 +697,7 @@ fn encode_color_420_svt(
         color_primaries,
         transfer_characteristics,
         matrix_coefficients: MATRIX_COEFFICIENTS_BT601,
-        // Note: the svtav1-rs sequence-header writer pins color_range=1
+        // Note: the zenav1-svt sequence-header writer pins color_range=1
         // (full) regardless of this flag; kept coherent anyway.
         full_range: true,
     };
@@ -807,7 +807,7 @@ fn widen_8_to_10(v: u8) -> u16 {
     ((u32::from(v) * 1023 + 127) / 255) as u16
 }
 
-/// Encode an 8-bit RGB image to AVIF via the svtav1-rs backend.
+/// Encode an 8-bit RGB image to AVIF via the zenav1-svt backend.
 ///
 /// See the module docs for scope and constraints. Cancellation is checked
 /// at the seam's phase boundaries (pre-conversion, pre-encode, pre-mux)
@@ -828,7 +828,7 @@ pub(crate) fn encode_rgb8_svt_rs(
     reject_out_of_envelope_depth(bit_depth, config, false)?;
 
     // ---- RGB -> YUV 4:2:0, BT.601 full range ----------------------------
-    // Full range matches what the svtav1-rs sequence header signals
+    // Full range matches what the zenav1-svt sequence header signals
     // (color_range is pinned to 1) and zenravif's full-range default;
     // BT.601 matches the zenavif YCbCr convention. The in-house forward
     // kernel is the exact inverse of the decode recipe (per-pixel f32
@@ -856,7 +856,7 @@ pub(crate) fn encode_rgb8_svt_rs(
         Yuv420Planes::convert(img.buf(), img.stride(), width, height, bit_depth)
     };
 
-    // ---- svtav1-rs still-frame encode -----------------------------------
+    // ---- zenav1-svt still-frame encode -----------------------------------
     stop.check().map_err(|e| at!(Error::from(e)))?;
     let color_primaries = config.color_primaries.unwrap_or(DEFAULT_COLOR_PRIMARIES);
     let transfer_characteristics = config
@@ -957,7 +957,7 @@ fn encode_rgba_planes_svt(
     )
 }
 
-/// Encode an 8-bit RGBA image to AVIF via the svtav1-rs backend.
+/// Encode an 8-bit RGBA image to AVIF via the zenav1-svt backend.
 ///
 /// Color travels exactly like [`encode_rgb8_svt_rs`] (4:2:0 BT.601 full
 /// range); the straight (non-premultiplied) alpha plane is encoded as a
@@ -1035,7 +1035,7 @@ pub(crate) fn encode_rgba8_svt_rs(
 }
 
 /// Encode a 16-bit RGB image to a 10-bit (profile 0, 4:2:0) AVIF via the
-/// svtav1-rs backend (issue #33).
+/// zenav1-svt backend (issue #33).
 ///
 /// Input values are full u16 range (0–65535) in the image's own transfer
 /// function; the RGB → YCbCr conversion runs at 10-bit precision from the
@@ -1088,7 +1088,7 @@ pub(crate) fn encode_rgb16_svt_rs(
     )
 }
 
-/// Encode a 16-bit RGBA image to a 10-bit AVIF via the svtav1-rs backend
+/// Encode a 16-bit RGBA image to a 10-bit AVIF via the zenav1-svt backend
 /// (issue #33): colour as [`encode_rgb16_svt_rs`], the alpha plane scaled
 /// to 10 bits (`scale_from_u16`) as a Cs400 `auxl` item — which needs
 /// speed ≥ 7 (see [`svt_rs_depth_error`]).
@@ -1141,7 +1141,7 @@ pub(crate) fn encode_rgba16_svt_rs(
 }
 
 /// Encode an 8-bit grayscale image to a monochrome (Cs400) AVIF via the
-/// svtav1-rs backend — the same still-frame mono pipeline the alpha plane
+/// zenav1-svt backend — the same still-frame mono pipeline the alpha plane
 /// uses, muxed as a monochrome color item. [`crate::EncodeBitDepth::Ten`]
 /// widens to a 10-bit Cs400 stream (speed ≥ 7 only, see
 /// [`svt_rs_depth_error`]).

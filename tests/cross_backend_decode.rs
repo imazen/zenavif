@@ -3,7 +3,7 @@
 //!
 //! The decode-conformance story so far only covered aomenc-produced streams
 //! (the AV1 conformance corpus). These tests close the loop on OUR encoders:
-//! zenravif (zenrav1e) and svtav1-rs output is decoded through the raw-OBU
+//! zenravif (zenrav1e) and zenav1-svt output is decoded through the raw-OBU
 //! seam with both `DecodeBackend::Rav1dSafe` and `DecodeBackend::Zenav1Aom` and
 //! the YUV planes are byte-compared. Two independent decoder ports agreeing
 //! bit-exactly is the strongest conformance signal available without a C
@@ -62,13 +62,13 @@ fn primary_payload(avif: &[u8]) -> Vec<u8> {
         .to_vec()
 }
 
-/// Decode with aom-rs, tolerating a missing temporal-delimiter OBU (AVIF item
+/// Decode with zenav1-aom, tolerating a missing temporal-delimiter OBU (AVIF item
 /// payloads may start directly at the sequence header).
 fn decode_aom(payload: &[u8]) -> DecodedYuv {
     decode_av1_obu_yuv(payload, DecodeBackend::Zenav1Aom).unwrap_or_else(|_| {
         let mut with_td = vec![0x12, 0x00];
         with_td.extend_from_slice(payload);
-        decode_av1_obu_yuv(&with_td, DecodeBackend::Zenav1Aom).expect("aom-rs decode")
+        decode_av1_obu_yuv(&with_td, DecodeBackend::Zenav1Aom).expect("zenav1-aom decode")
     })
 }
 
@@ -91,7 +91,7 @@ fn assert_backends_agree(avif: &[u8], label: &str) {
             aom.height_uv,
             aom.bit_depth
         ),
-        "{label}: geometry mismatch between rav1d-safe and aom-rs"
+        "{label}: geometry mismatch between rav1d-safe and zenav1-aom"
     );
     assert_eq!(rav.y, aom.y, "{label}: luma plane diverges");
     assert_eq!(rav.u, aom.u, "{label}: U plane diverges");
@@ -136,7 +136,7 @@ fn svt_rs_output_decodes_identically_on_both_backends() {
 
 /// Issue #32: partial-superblock Zenav1Svt output (non-64-multiple, odd, and
 /// both-axes-partial dims at SVT preset >= 6) must decode identically on
-/// rav1d-safe and aom-rs, at the TRUE signalled size.
+/// rav1d-safe and zenav1-aom, at the TRUE signalled size.
 #[cfg(feature = "zenav1-svt")]
 #[test]
 fn svt_rs_partial_sb_output_decodes_identically_on_both_backends() {
@@ -209,7 +209,7 @@ fn svt_rs_10bit_output_decodes_identically_on_both_backends() {
 }
 
 /// 10-bit AV1 from the zenravif backend: both decode backends must agree on
-/// the high-bit-depth path too (aom-rs decodes 8/10/12-bit; rav1d-safe
+/// the high-bit-depth path too (zenav1-aom decodes 8/10/12-bit; rav1d-safe
 /// likewise). Encodes RGB16 -> 10-bit AV1.
 #[test]
 fn zenravif_10bit_output_decodes_identically_on_both_backends() {
@@ -247,7 +247,7 @@ mod config_threading {
         let config = EncoderConfig::new().quality(60.0).speed(8);
         let enc = zenavif::encode_rgb8(img.as_ref(), &config, stop()).expect("encode");
         let mut payload = primary_payload(&enc.avif_file);
-        // aom-rs wants a leading temporal delimiter.
+        // zenav1-aom wants a leading temporal delimiter.
         if payload.first().map(|b| b >> 3 & 0xf) != Some(2) {
             let mut td = vec![0x12, 0x00];
             td.append(&mut payload);

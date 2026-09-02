@@ -1,4 +1,4 @@
-//! svtav1-rs backend (`zenav1-svt`) — encode/decode round-trip and
+//! zenav1-svt backend (`zenav1-svt`) — encode/decode round-trip and
 //! scope-rejection coverage.
 //!
 //! Everything here must pass TODAY on the pinned imazen/svtav1 rev.
@@ -6,7 +6,7 @@
 //! own byte-identity battery, `rust/STATUS.md`) — duplicating those gates
 //! here would pin zenavif to upstream's release cadence for no coverage
 //! gain. Upstream decode conformance (aomdec, 2100 conformance cells at
-//! the pin) is likewise svtav1-rs's own gate; what zenavif pins here is
+//! the pin) is likewise zenav1-svt's own gate; what zenavif pins here is
 //! the container + round-trip contract through its own decoder
 //! (rav1d-safe) plus the seam's error/clamp composition.
 
@@ -24,7 +24,7 @@ fn stop() -> StopToken {
     StopToken::new(Unstoppable)
 }
 
-/// A svtav1-rs-shaped config: 4:2:0 is the only subsampling the backend
+/// A zenav1-svt-shaped config: 4:2:0 is the only subsampling the backend
 /// implements (zenavif's default is 4:4:4, which it rejects honestly).
 fn svt_config() -> EncoderConfig {
     EncoderConfig::new()
@@ -308,13 +308,17 @@ fn svt_rs_partial_sb_roundtrip_at_low_presets() {
                             let mut with_td = vec![0x12, 0x00];
                             with_td.extend_from_slice(&payload);
                             decode_av1_obu_yuv(&with_td, DecodeBackend::Zenav1Aom).unwrap_or_else(
-                                |e| panic!("{w}x{h} preset {preset} must decode under aom-rs: {e}"),
+                                |e| {
+                                    panic!(
+                                        "{w}x{h} preset {preset} must decode under zenav1-aom: {e}"
+                                    )
+                                },
                             )
                         });
                     assert_eq!(
                         (aom.y, aom.u, aom.v),
                         (dec.y.clone(), dec.u.clone(), dec.v.clone()),
-                        "rav1d-safe and aom-rs must byte-agree on 4:2:0 {w}x{h} preset {preset}"
+                        "rav1d-safe and zenav1-aom must byte-agree on 4:2:0 {w}x{h} preset {preset}"
                     );
                 }
             }
@@ -426,7 +430,7 @@ fn svt_rs_partial_sb_roundtrip_at_preset_ge_6() {
             );
             // Measured 2026-08-27 at the pinned rev (aarch64), q85: 47.8–50.7
             // dB across these cells at speeds 5–10 (lowest 100x37 @ speed
-            // 7+), rav1d-safe and aom-rs byte-agreeing on every cell. Floor
+            // 7+), rav1d-safe and zenav1-aom byte-agreeing on every cell. Floor
             // is measured-minus-margin: a mis-signalled size, a stride wrap
             // or a mis-coded edge SB drops this to single digits (the mono
             // path at preset 6 measured 12–26 dB before zenav1-svt
@@ -524,7 +528,7 @@ fn svt_rs_rgba_partial_sb_needs_8_aligned_dims_at_speed_5() {
 /// preset 6 (zenavif speed 5), driving the pipeline directly as the seam
 /// does. History: on the 2026-08-27 tree every 8-aligned non-64-multiple
 /// mono cell at preset 6 was mis-coded — 96x80 18 dB garbage (rav1d-safe
-/// and aom-rs byte-agreeing), 64x72 / 72x64 26 dB, 16x72 12 dB, 128x80 /
+/// and zenav1-aom byte-agreeing), 64x72 / 72x64 26 dB, 16x72 12 dB, 128x80 /
 /// 96x64 / 200x136 undecodable — because `encode_fixed_tree`'s mono arm
 /// coded a one-false edge leaf as a PARTITION_NONE square (its pack
 /// `debug_assert` is what made the old `still_broken` canary PANIC in the
@@ -598,12 +602,12 @@ fn svt_rs_direct_mono_partial_sb_preset6_roundtrips() {
                 let mut with_td = vec![0x12, 0x00];
                 with_td.extend_from_slice(&payload);
                 decode_av1_obu_yuv(&with_td, DecodeBackend::Zenav1Aom).unwrap_or_else(|e| {
-                    panic!("mono {w}x{h} preset 6 must decode under aom-rs: {e}")
+                    panic!("mono {w}x{h} preset 6 must decode under zenav1-aom: {e}")
                 })
             });
             assert_eq!(
                 aom.y, dec.y,
-                "rav1d-safe and aom-rs must byte-agree on mono {w}x{h} preset 6"
+                "rav1d-safe and zenav1-aom must byte-agree on mono {w}x{h} preset 6"
             );
         }
     }
@@ -1324,7 +1328,7 @@ fn svt_rs_target_quality_search_converges_on_ssim2() {
     assert_eq!(decoded.height(), h as u32);
 }
 
-/// QP-0 corruption gate (2026-07-22): on the pinned svtav1-rs rev, QP 0
+/// QP-0 corruption gate (2026-07-22): on the pinned zenav1-svt rev, QP 0
 /// (quality >= ~99.3) emits a syntactically-valid bitstream that decodes to
 /// garbage pixels (measured ssim2 ~= -700 on every q100 sweep cell, both
 /// decode backends byte-agreeing on the garbage — encoder-side corruption).
@@ -1399,7 +1403,7 @@ fn yuv420_structured(w: usize, h: usize) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
 /// Complementary to upstream's gate by construction: upstream compares the
 /// ENCODER's own recon and its bytes to a C capture; this decodes the
 /// muxable payload with zenavif's own independent decoders (rav1d-safe,
-/// plus aom-rs byte-agreement) and demands recon == source. A stream that
+/// plus zenav1-aom byte-agreement) and demands recon == source. A stream that
 /// is C-byte-identical but that our decoders reconstruct differently, or a
 /// lossless claim that quietly quantizes, fails here.
 ///
@@ -1494,13 +1498,13 @@ fn svt_rs_direct_qp0_codes_lossless_420() {
                         let mut with_td = vec![0x12, 0x00];
                         with_td.extend_from_slice(&payload);
                         decode_av1_obu_yuv(&with_td, DecodeBackend::Zenav1Aom).unwrap_or_else(|e| {
-                            panic!("qp0 {w}x{h} preset {preset} must decode under aom-rs: {e}")
+                            panic!("qp0 {w}x{h} preset {preset} must decode under zenav1-aom: {e}")
                         })
                     });
                 assert_eq!(
                     (aom.y, aom.u, aom.v),
                     (dec.y.clone(), dec.u.clone(), dec.v.clone()),
-                    "qp0 {w}x{h} preset {preset}: rav1d-safe and aom-rs must byte-agree"
+                    "qp0 {w}x{h} preset {preset}: rav1d-safe and zenav1-aom must byte-agree"
                 );
             }
             eprintln!(

@@ -148,7 +148,7 @@ log = "0.4.29"
 # The [patch."…/zenavif-serialize"] below folds zenravif's copy onto this
 # workspace's member.
 ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/imazen/cavif-rs", rev = "f6c883b6e7395fad67c87ddab676c4df59575a41", default-features = false, optional = true, features = ["stop"] }
-# svtav1-rs experimental AV1 encode backend (`zenav1-svt` feature).
+# zenav1-svt experimental AV1 encode backend (`zenav1-svt` feature).
 # The facade crate lives in the rust/svtav1 subdir of imazen/zenav1-svt and is
 # PACKAGED as `zenav1-svt`; the `svtav1` alias keeps the seam's `use` paths
 # stable (it was named `svtav1` upstream once).
@@ -209,7 +209,7 @@ ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/ima
 #      `quality_to_qp_gated`), but the gate that asserted the refusal was
 #      replaced with a lossless round-trip gate — see CLAUDE.md Known Bugs.
 svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "ef0b122bd26999a8eb8c2ff0442244465425e686", optional = true }
-# AVIF container muxer for the svtav1-rs backend (the zenravif backend muxes
+# AVIF container muxer for the zenav1-svt backend (the zenravif backend muxes
 # inside zenravif; this backend muxes in-crate). The 0.2.0 version is
 # supplied by the [patch.crates-io] git pin below until 0.2.0 publishes.
 zenavif-serialize = { version = "0.2.0", optional = true }
@@ -446,7 +446,7 @@ required-features = ["encode-imazen", "two-pass-butteraugli"]
 
 # Heaptrack allocation-profiling harness for the decode-from-bytes path.
 # Decode is in the default feature set (pure-Rust rav1d-safe); no extra features.
-# Apples-to-apples aom-rs vs rav1d-safe decode benchmark (interleaved via
+# Apples-to-apples zenav1-aom vs rav1d-safe decode benchmark (interleaved via
 # zenbench, both backends through the zenavif decode seam).
 [[example]]
 name = "decode_4way_bench"
@@ -514,7 +514,7 @@ two-pass-butteraugli = ["encode-imazen", "ravif/__expert", "dep:butteraugli"]
 # `ZensimLoopResult::spatial_applied`. Builds on `target-quality` (shares
 # the search, the q0 seed, and the zensim dep).
 two-pass-zensim = ["target-quality", "encode-imazen", "ravif/__expert"]
-# EXPERIMENTAL: AVIF encoding via svtav1-rs (the pure-Rust SVT-AV1 port,
+# EXPERIMENTAL: AVIF encoding via zenav1-svt (the pure-Rust SVT-AV1 port,
 # git-rev pinned to imazen/zenav1-svt above). Adds the working
 # `Av1Backend::Zenav1Svt` variant. Off by default; requires `encode` (the backend
 # enum and entry points live there).

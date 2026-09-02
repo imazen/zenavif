@@ -129,7 +129,7 @@ pub enum ValidationError {
 
     /// The selected encoder backend is compiled in, but does not
     /// support a configured parameter value (e.g. the experimental
-    /// svtav1-rs backend is 8-bit 4:2:0 only). The encode entry points
+    /// zenav1-svt backend is 8-bit 4:2:0 only). The encode entry points
     /// reject the same combinations at encode time; this surfaces them
     /// at validation time for fail-fast callers.
     #[error("backend {backend} does not support {param}: {detail}")]
@@ -235,7 +235,7 @@ impl crate::EncoderConfig {
     ) -> Result<(), ValidationError> {
         self.validate()?;
         // zenravif's 16-bit path is the identity-RGB (GBR) encode, which
-        // has no 4:2:0. The svtav1-rs backend converts 16-bit input to
+        // has no 4:2:0. The zenav1-svt backend converts 16-bit input to
         // 10-bit YCbCr 4:2:0 instead, so the pair is exactly its shape.
         if input.input_is_16bit
             && self.chroma_subsampling == crate::EncodeChromaSubsampling::Yuv420
@@ -246,7 +246,7 @@ impl crate::EncoderConfig {
                 b: "16-bit input (identity-RGB encode path)",
             });
         }
-        // The svtav1-rs bit-depth envelope (issue #33): 10-bit Cs400
+        // The zenav1-svt bit-depth envelope (issue #33): 10-bit Cs400
         // alpha/gray streams need SVT preset >= 9 (speed >= 7). Same
         // predicate as the encode path (`encoder_svt_rs::svt_rs_depth_error`).
         #[cfg(feature = "zenav1-svt")]
@@ -274,7 +274,7 @@ impl crate::EncoderConfig {
                 });
             }
         }
-        // The svtav1-rs dimension envelope (issue #32): the 4:2:0 colour
+        // The zenav1-svt dimension envelope (issue #32): the 4:2:0 colour
         // path takes arbitrary dimensions at any speed; a Cs400 alpha or
         // grayscale stream needs SVT preset >= 6 (speed >= 5) AND multiples
         // of 8, else multiples of 64. One predicate serves this check and
@@ -309,7 +309,7 @@ impl crate::EncoderConfig {
                 feature: "encode-svtav1",
             });
         }
-        // The experimental svtav1-rs backend: unavailable without its
+        // The experimental zenav1-svt backend: unavailable without its
         // feature; inside the feature, only the 8-bit 4:2:0 YCbCr slice
         // it implements is accepted (the encode path rejects the same
         // combinations — see `src/encoder_svt_rs.rs`).
@@ -337,7 +337,7 @@ impl crate::EncoderConfig {
         Ok(())
     }
 
-    /// The configuration slice the experimental svtav1-rs backend
+    /// The configuration slice the experimental zenav1-svt backend
     /// implements: 8/10-bit 4:2:0 YCbCr full-range stills, no gain map, no
     /// lossless. The dimension envelope (multiples of 64; arbitrary at
     /// speed >= 5; multiples of 8 at speed >= 5 with alpha) is a
@@ -350,7 +350,7 @@ impl crate::EncoderConfig {
             return Err(ValidationError::BackendUnsupportedParam {
                 backend: BACKEND,
                 param: "chroma_subsampling=Yuv444",
-                detail: "only Yuv420 is implemented (svtav1-rs 4:2:0 still pipeline); \
+                detail: "only Yuv420 is implemented (zenav1-svt 4:2:0 still pipeline); \
                          set .chroma_subsampling(EncodeChromaSubsampling::Yuv420)",
             });
         }
@@ -366,7 +366,7 @@ impl crate::EncoderConfig {
             return Err(ValidationError::BackendUnsupportedParam {
                 backend: BACKEND,
                 param: "pixel_range=Limited",
-                detail: "the svtav1-rs sequence header signals full range only",
+                detail: "the zenav1-svt sequence header signals full range only",
             });
         }
         if self.gain_map.is_some() {
@@ -381,7 +381,7 @@ impl crate::EncoderConfig {
             return Err(ValidationError::BackendUnsupportedParam {
                 backend: BACKEND,
                 param: "lossless",
-                detail: "svtav1-rs has no lossless mode (QP 0 is not \
+                detail: "zenav1-svt has no lossless mode (QP 0 is not \
                          mathematically lossless)",
             });
         }

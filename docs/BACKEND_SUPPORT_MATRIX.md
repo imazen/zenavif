@@ -1,7 +1,7 @@
 # Backend support matrix
 
 What each AV1 backend supports through zenavif's seams, as of 2026-07-23
-(branch `svtav1-rs-backend`; pins: zenravif 0.2.0 path dep, zenav1-svt
+(branch `zenav1-svt-backend`; pins: zenravif 0.2.0 path dep, zenav1-svt
 `3e25f52b`, rav1d-safe `f9458f43`, zenav1-aom `7b972e50`, rav1d 1.1.0).
 "Rejected" always means an honest structured error at validate/encode time,
 never silent degradation. Sources: `src/encoder.rs`, `src/encoder_svt_rs.rs`,
@@ -50,7 +50,7 @@ The public container decode (`zenavif::decode*`) uses Rav1dSafe by default;
 (primary/alpha/gain-map items, all depths/subsamplings, CICP/ICC/HDR
 passthrough) animations (eager whole-track `decode_frames`; the
 animated-AVIF inter envelope is byte-exact vs aomdec upstream), AND grid
-AVIFs (per-cell aom decode + the shared byte-stitch) — through aom-rs
+AVIFs (per-cell aom decode + the shared byte-stitch) — through zenav1-aom
 with byte-identical output (`tests/product_aom_backend.rs`). Only
 row-sink streaming on aom returns honest Unsupported.
 `Rav1dFfi` remains raw-OBU benchmark only.

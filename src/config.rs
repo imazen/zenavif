@@ -30,7 +30,7 @@ pub struct DecoderConfig {
     pub(crate) prefer_8bit: bool,
     /// Which AV1 decode kernel serves the container decode paths
     /// (primary/alpha/gain-map items). Default [`crate::DecodeBackend::Rav1dSafe`].
-    /// See [`DecoderConfig::decode_backend`] for the aom-rs scope caveats.
+    /// See [`DecoderConfig::decode_backend`] for the zenav1-aom scope caveats.
     pub(crate) decode_backend: crate::DecodeBackend,
     /// Allocation-fallibility preference for zenavif's *own* decode buffers
     /// (the full-image RGB(A) output, the grid-stitch canvas, the crop

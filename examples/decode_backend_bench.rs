@@ -1,4 +1,4 @@
-//! Decode-backend speed: rav1d-safe vs aom-rs on zenavif-encoded bitstreams.
+//! Decode-backend speed: rav1d-safe vs zenav1-aom on zenavif-encoded bitstreams.
 //!
 //! Unlike `decode_4way_bench` (which reads the aomenc conformance corpus
 //! from disk), this bench is self-contained: it encodes its own cells with
@@ -74,7 +74,7 @@ fn primary_payload(avif: &[u8]) -> Vec<u8> {
         .expect("primary item")
         .as_ref()
         .to_vec();
-    // aom-rs wants a full temporal unit; prepend a TD OBU if absent.
+    // zenav1-aom wants a full temporal unit; prepend a TD OBU if absent.
     if payload.first().map(|b| b >> 3 & 0xf) != Some(2) {
         let mut with_td = vec![0x12, 0x00];
         with_td.append(&mut payload);
@@ -217,7 +217,7 @@ fn main() {
 
     let backends: &[(&str, DecodeBackend)] = &[
         ("rav1d-safe", DecodeBackend::Rav1dSafe),
-        ("aom-rs", DecodeBackend::Zenav1Aom),
+        ("zenav1-aom", DecodeBackend::Zenav1Aom),
     ];
 
     // Correctness gate before timing.

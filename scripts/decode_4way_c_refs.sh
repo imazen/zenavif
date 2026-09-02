@@ -10,10 +10,10 @@
 #
 # Usage: decode_4way_c_refs.sh <corpus_dir> <out_csv_append> [reps]
 set -u
-DIR="${1:-/root/aom-rs/conformance/data}"
+DIR="${1:-/root/zenav1-aom/conformance/data}"
 OUT="${2:-/tmp/decode_c.csv}"
 REPS="${3:-30}"
-AOMDEC=/root/aom-rs/reference/libaom/build/aomdec
+AOMDEC=/root/zenav1-aom/reference/libaom/build/aomdec
 DAV1D=/root/dav1d-src/build/tools/dav1d
 
 # cell: label|filename|width|height

@@ -1,4 +1,4 @@
-//! Cross-backend encode sweep: zenravif (zenrav1e) vs svtav1-rs, RD + speed.
+//! Cross-backend encode sweep: zenravif (zenrav1e) vs zenav1-svt, RD + speed.
 //!
 //! For every (image, size, speed, quality, backend) cell this harness:
 //!  1. encodes RGB8 -> AVIF through `zenavif::EncoderConfig` with the
@@ -178,7 +178,7 @@ fn ssim2(a: ImgRef<'_, Rgb<u8>>, b: ImgRef<'_, Rgb<u8>>) -> Result<f64, String> 
     fast_ssim2::compute_ssimulacra2(ta.as_ref(), tb.as_ref()).map_err(|e| e.to_string())
 }
 
-/// Cross-decoder gate: decode the AV1 payload with rav1d-safe and aom-rs
+/// Cross-decoder gate: decode the AV1 payload with rav1d-safe and zenav1-aom
 /// through the seam and byte-compare the planes. Returns a status string for
 /// the TSV (`identical`, `aom-unsupported:<..>`, or a divergence label).
 #[cfg(feature = "zenav1-aom")]

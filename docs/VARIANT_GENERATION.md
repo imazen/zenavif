@@ -224,7 +224,7 @@ class, caught before any ledger row existed).
   alpha RD sweep (modes_full_alpha over an RGBA corpus with per-cell
   alpha-aware metrics) belongs to the real sweep infrastructure.
 - The svtav1 backend is **deprecated** (2026-06-10): the
-  `encode-svtav1` feature was never shipped (svtav1-rs produces
+  `encode-svtav1` feature was never shipped (zenav1-svt produces
   non-conformant bitstreams; the draft path returned raw OBUs as
   `avif_file`), so the cfg'd encode path and its three differential
   test files were removed — git history (pre-deprecation) has them if

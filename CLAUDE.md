@@ -174,7 +174,7 @@ TSV diff in the same commit. zenrav1e's halves (`gate-identity`,
 - `(default)` - Pure Rust decode only, safe SIMD via archmage
 - `encode` - AVIF encoding via zenravif
 - `encode-imazen` - Encoding with zenrav1e fork extras (QM, VAQ, still-image, lossless)
-- `zenav1-svt` - EXPERIMENTAL `Av1Backend::Zenav1Svt` via svtav1-rs (imazen/zenav1-svt sibling path dep; stills only — RGB/RGBA 4:2:0 + grayscale Cs400 at 8 or 10 bits (#33: 16-bit input / `EncodeBitDepth::Ten` → native u16 `try_encode_frame_420_hbd` — since upstream hbd chunk 2 (`f319ec298`) the deblock/CDEF/Wiener post-filter searches read those native u16 planes too, nothing truncates; 10-bit alpha/gray only at speed ≥ 7 = SVT preset ≥ 9 per `svt_rs_depth_error`; HDR clli/mdcv container-side), alpha as Cs400 `auxl` aux item; dims: the 4:2:0 colour path takes ARBITRARY dimensions at ANY speed (the preset ≥ 6 floor was removed 2026-08-29 — see Known Bugs), a Cs400 alpha/gray stream needs speed ≥ 5 (SVT preset ≥ 6) AND multiples of 8, else multiples of 64 — `svt_rs_dims_error` in `src/encoder_svt_rs.rs` is the single gate (#32); coded-lossless (QP 0) is implemented upstream on 8-bit 4:2:0 but the seam's quality→QP mapping deliberately clamps to QP ≥ 1; muxes in-crate via zenavif-serialize)
+- `zenav1-svt` - EXPERIMENTAL `Av1Backend::Zenav1Svt` via zenav1-svt (imazen/zenav1-svt sibling path dep; stills only — RGB/RGBA 4:2:0 + grayscale Cs400 at 8 or 10 bits (#33: 16-bit input / `EncodeBitDepth::Ten` → native u16 `try_encode_frame_420_hbd` — since upstream hbd chunk 2 (`f319ec298`) the deblock/CDEF/Wiener post-filter searches read those native u16 planes too, nothing truncates; 10-bit alpha/gray only at speed ≥ 7 = SVT preset ≥ 9 per `svt_rs_depth_error`; HDR clli/mdcv container-side), alpha as Cs400 `auxl` aux item; dims: the 4:2:0 colour path takes ARBITRARY dimensions at ANY speed (the preset ≥ 6 floor was removed 2026-08-29 — see Known Bugs), a Cs400 alpha/gray stream needs speed ≥ 5 (SVT preset ≥ 6) AND multiples of 8, else multiples of 64 — `svt_rs_dims_error` in `src/encoder_svt_rs.rs` is the single gate (#32); coded-lossless (QP 0) is implemented upstream on 8-bit 4:2:0 but the seam's quality→QP mapping deliberately clamps to QP ≥ 1; muxes in-crate via zenavif-serialize)
 - `zenav1-aom` - EXPERIMENTAL `DecodeBackend::Zenav1Aom` — zenav1-aom pure-Rust KEY-frame decoder behind the raw-OBU seam `decode_av1_obu_yuv` (git-rev dep on imazen/zenav1-aom; byte-identical to rav1d-safe on the 8-cell decode corpus; drives `examples/decode_4way_bench.rs`)
 - `encode-asm` - Encoding with hand-written assembly (fastest, unsafe)
 - `encode-threading` - Encoding with multi-threading
@@ -211,14 +211,14 @@ zen cross-cutting contracts (limits / estimation / whereat / zencodec
 Full per-repo specs live in each backend's CLAUDE.md:
 `../zenav1-aom/CLAUDE.md` (zenav1-aom decode — untrusted-input, high bar) and
 `../zenav1-svt/rust/CLAUDE.md` (zenav1-svt encode — trusted-input, lower bar).
-(Those were `/root/aom-rs/...` and `/root/svtav1/...` here until 2026-09-02;
+(Those were `/root/zenav1-aom/...` and `/root/svtav1/...` here until 2026-09-02;
 both repos were renamed and neither path exists.)
 This section pins the **seam** obligations on the zenavif side.
 
 **Status of the contracts on zenavif itself:** `main` already implements
 `zencodec::CategorizedError for Error` (`src/error.rs`, two-level
 `zencodec 0.1.26` `ErrorCategory`, `At<CodecError>` envelope, zencodec
-required). (`svtav1-rs-backend` was merged and is now a literal ancestor of `main` — 0
+required). (`zenav1-svt-backend` was merged and is now a literal ancestor of `main` — 0
 commits ahead as of the 2026-09-02 branch audit — so the "rebase, do not
 re-add" advice that stood here is spent. PR #27 `caterr-categorized-error` was
 the stale original adoption, closed 2026-07-20 as superseded.) Stop tokens, fallible-alloc (`src/alloc_util.rs` `AllocPref`),
@@ -342,11 +342,11 @@ placement as the colour grid, then hand the stitched alpha plane to
 `convert_to_image`; for the per-tile-`auxl` shape, pair each colour tile with
 its own alpha tile before stitching. Regression: `tests/sweep_40_geometry.rs`.
 
-### svtav1-rs MONOCHROME partial superblocks were mis-coded at SVT preset 6 (found 2026-08-27 while landing zenavif#32) — FIXED upstream `b6a1737a` + `1ed7db46` the same day; seam gate lowered to preset 6
+### zenav1-svt MONOCHROME partial superblocks were mis-coded at SVT preset 6 (found 2026-08-27 while landing zenavif#32) — FIXED upstream `b6a1737a` + `1ed7db46` the same day; seam gate lowered to preset 6
 History: the port's `try_encode_frame` (mono) asserted partial-SB support
 from preset 6, but measured at `../zenav1-svt` @ 45aae91b5 (aarch64) every
 8-aligned non-64-multiple mono cell at preset 6 was wrong: 96x80 decoded
-to 18 dB garbage (rav1d-safe and aom-rs byte-agreeing, so encoder-side),
+to 18 dB garbage (rav1d-safe and zenav1-aom byte-agreeing, so encoder-side),
 64x72 / 72x64 26 dB, 16x72 12 dB, 128x80 / 96x64 / 200x136 undecodable.
 Presets 7–13 were clean on every cell; the 4:2:0 colour path was clean at
 presets 6–13 including odd dims. The seam gated mono at preset ≥ 7 with
@@ -374,13 +374,13 @@ cell on the `(x+y)` ramp. Seam: the mono preset gate dropped from 7 to 6
 mono-ONLY; the 4:2:0 colour path has no preset floor at all, see the
 partial-SB entry below; the multiples-of-8 rule stays), and the canary
 became the positive gate `svt_rs_direct_mono_partial_sb_preset6_roundtrips`
-(7 geometries through rav1d-safe, aom-rs byte-agreeing; 96x80 56.18 dB at
+(7 geometries through rav1d-safe, zenav1-aom byte-agreeing; 96x80 56.18 dB at
 qp 10). Lesson for the seam: a `still_broken` canary that drives the
 backend directly must expect BOTH failure shapes of the bug it pins — a
 typed/garbage result AND a debug-build assert — or it reads as a new
 regression the day CI builds it unoptimised.
 
-### svtav1-rs QP 0 (imazen/zenav1-svt#5, #9) — IMPLEMENTED upstream 2026-08-28 (was: corrupt, then refused); seam clamp RETAINED as a product choice
+### zenav1-svt QP 0 (imazen/zenav1-svt#5, #9) — IMPLEMENTED upstream 2026-08-28 (was: corrupt, then refused); seam clamp RETAINED as a product choice
 History runs corrupt -> refused -> implemented, and the seam gate followed it
 each time:
 1. rev 3e25f52b: every CQP QP-0 still encode emitted a valid-syntax bitstream
@@ -407,7 +407,7 @@ it failed on every platform. It was REPLACED (not deleted, not loosened) by the
 stronger property the refusal was standing in for:
 `svt_rs_direct_qp0_codes_lossless_420` — qp0 through the pipeline must produce a
 stream our OWN decoders reconstruct EXACTLY (rav1d-safe recon == source on all
-three planes at 64x64 + 128x64 x presets {6,7,9}, aom-rs byte-agreeing).
+three planes at 64x64 + 128x64 x presets {6,7,9}, zenav1-aom byte-agreeing).
 Mutation-verified 2026-08-29: re-running that body at qp 1 fails at the first
 luma pixel, so the equality assertions are load-bearing. The surviving refusals
 keep typed assertions in
@@ -428,9 +428,9 @@ RGBA encode emits a Cs400 alpha item, which upstream still refuses at QP 0, so
 "lossless RGBA" needs an answer either way. Record:
 `benchmarks/backend_sweep_2026-07-22.{tsv,meta}`.
 
-### svtav1-rs partial superblocks below SVT preset 6 — seam floor REMOVED for the colour path 2026-08-29 (upstream premise retired)
+### zenav1-svt partial superblocks below SVT preset 6 — seam floor REMOVED for the colour path 2026-08-29 (upstream premise retired)
 The seam refused non-64-multiple dimensions below SVT preset 6 (zenavif speed
-5) on the premise that "the svtav1-rs partition search is not C-identical on a
+5) on the premise that "the zenav1-svt partition search is not C-identical on a
 partial superblock" at presets 0-5. That premise is retired. Until 2026-08-04
 upstream gated its C-faithful PD1 refinement walk on a COMPLETE superblock
 (`refined = matches!(preset, 0..=5) && use_funnel && full_sb`), so a partial SB
@@ -486,7 +486,7 @@ clean with submodules.
 
 Measured at those pins (`benchmarks/backend_sweep_2026-09-02.*` +
 `..._partialsb_...`, 3720 rows total, M4 Pro, speed 6): cross-decoder gate
-**3720/3720 byte-identical** rav1d-safe vs aom-rs; svt-rs bytes at matched
+**3720/3720 byte-identical** rav1d-safe vs zenav1-aom; svt-rs bytes at matched
 ssim2 0.94-1.05x zenravif at 64-128 and 1.03-1.18x at 200-512; encode wall
 time 17-33x faster. Partial superblocks: 600/600 svt-rs cells encoded at sizes
 {65,100,200,333,500} with no dimension refusal. Do NOT diff these against the
@@ -508,7 +508,7 @@ repo restructure that moved the C reference to a submodule — zero seam API
 breaks) — both seams variant-map errors, svt seam is on `try_encode_frame*` +
 threads the stop token and the config's thread budget.
 Cross-decoder gate: 7018/7018 sweep cells + `tests/cross_backend_decode.rs`
-(incl. 10-bit) byte-identical rav1d-safe vs aom-rs on OUR encoders' output.
+(incl. 10-bit) byte-identical rav1d-safe vs zenav1-aom on OUR encoders' output.
 Unified ssim2 targeting: `encode_rgb8_with_target` converges over Zenav1Svt
 (test pinned). RD (backend_sweep_2026-07-22): svt 0.93x bytes at matched
 ssim2 at s2, 1.02-1.07x at s6, worse below q30; wall ~6x faster at s6 /

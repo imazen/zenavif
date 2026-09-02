@@ -26,7 +26,7 @@ fork — not refs on imazen/svtav1.)
 Active:
 | branch | vs main | note |
 |---|---|---|
-| `svtav1-rs-backend` | ahead, current | PR #31, CI green — the live branch |
+| `zenav1-svt-backend` | ahead, current | PR #31, CI green — the live branch |
 | `cooptloop` | +42 (2026-07-12) | recent bench program (two-pass A/B verdict); results appear recorded in main's docs — confirm then archive |
 
 Superseded by main (content landed via other commits or explicitly closed;
@@ -36,7 +36,7 @@ propose: tag `archive/<name>` at tip, then delete branch):
 - `hdr-mdcv-st2086-fix` (+461) — #45 fix; verify the ST-2086 scale fix is on main before archiving
 - `feat/gainmap-decode` (+234, 2026-03) — gain-map decode long since landed
 - `rename-animation-frame` (+251, 2026-03) — rename landed
-- `svtav1` (+289, 2026-03) — pre-svtav1-rs spike, superseded by this PR
+- `svtav1` (+289, 2026-03) — pre-zenav1-svt spike, superseded by this PR
 - `abandoned/spike-av1-backends-2026-05-23` (+411) — self-labeled abandoned
 
 Data/archive branches (hold bench/training artifacts; these carry most of
@@ -71,7 +71,7 @@ Details:
   C files revised 100–600× each (`EbProductCodingLoop.c` 158 MB cumulative,
   `enc_handle.c` 127 MB, `EbEncHandle.c` 116 MB, ...). `Source/` = 3.2 GB
   of the 3.4 GB all-refs uncompressed volume; the Rust port (`rust/` +
-  `svtav1-rs/`) is only ~90 MB.
+  `zenav1-svt/`) is only ~90 MB.
 
 ## 3. Filtering plan (proposed, NOT executed)
 
@@ -103,7 +103,7 @@ must be force-pushed. Only worth doing bundled with Phase 1's GC.
 **Phase 3 — svtav1 C-history flattening (the big win, optional):**
 Replace the C history with its tip: filter `Source/ Docs/ test/
 third_party/` to HEAD-only content (filter-repo path-rename/prune of
-pre-tip blobs), keeping full history for `rust/` + `svtav1-rs/` + build
+pre-tip blobs), keeping full history for `rust/` + `zenav1-svt/` + build
 glue. Est. 85 → ~15 MB pack. Preconditions beyond Phase 0: the byte-parity
 program only needs the C reference AT the pinned tip (history archaeology
 uses the upstream remotes, which remain available); confirm with the
