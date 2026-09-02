@@ -422,6 +422,56 @@ write-path returns + gain-map interop additions, already on main).
 
 ## [Unreleased]
 
+### Changed — backend names now match the crates they name (`0.1.7` -> `0.1.8`)
+
+- **`Av1Backend::SvtRs` -> `Av1Backend::Zenav1Svt`, `DecodeBackend::AomRs` ->
+  `DecodeBackend::Zenav1Aom`, `heuristics::EstimateArm::SvtRs420` ->
+  `EstimateArm::Zenav1Svt420`.** The variants carried pre-rename names from
+  when the sibling crates were `svtav1-rs` and `aom-rs`; those repos are now
+  `imazen/zenav1-svt` and `imazen/zenav1-aom`, so the `-rs` spellings named
+  nothing that exists. `Av1Backend::Zenravif` — the PascalCase of crate
+  `zenravif` — was already the convention in the same enum; these follow it.
+
+  `EstimateArm::SvtRs420` was renamed with them because it is public API
+  (`pub mod heuristics`) named after the variant being renamed: leaving it
+  would have kept a live, non-deprecated `SvtRs` spelling exported after the
+  variant it names was deprecated.
+
+  **This is ADDITIVE, not a break — hence 0.1.8 and not 0.2.0.** Each old
+  spelling survives as a `#[deprecated(since = "0.1.8")]` associated
+  constant (`pub const SvtRs: Self = Self::Zenav1Svt`). An associated
+  constant is usable in a *pattern* only when its type is structural-match;
+  all three enums derive `PartialEq` + `Eq` rather than hand-implementing
+  them, so **both expression and pattern position keep working**.
+  `tests/deprecated_backend_aliases.rs` exercises every alias in both
+  positions and fails to COMPILE if either regresses — the compatibility
+  claim is proved by the build, not asserted. A scratch downstream consumer
+  built against this tree with the old spellings compiles, emits one
+  deprecation warning per alias, and round-trips to the same values.
+  (`144bda27`)
+
+- **Features `encode-svt-rs` -> `zenav1-svt` and `aom-backend` ->
+  `zenav1-aom`**, same reasoning. Cargo has no `#[deprecated]` for features,
+  so the old names are kept as **alias features that enable the new ones**
+  (`encode-svt-rs = ["zenav1-svt"]`, `aom-backend = ["zenav1-aom"]`); this
+  entry and the `Cargo.toml` comments beside them are the deprecation
+  notice. **Both alias features are removed in 0.2.**
+
+  That the aliases *gate* the same code, rather than merely resolving, was
+  measured rather than assumed: `cargo test -- --list` under
+  `zenav1-aom,encode,encode-imazen,zenav1-svt,target-quality` and under
+  `aom-backend,encode,encode-imazen,encode-svt-rs,target-quality` enumerate a
+  byte-identical 448-test set, and the tests gated on the *new* feature names
+  are present in the *old*-spelling build. (`144bda27`)
+
+- Not renamed, deliberately: `Av1Backend::Svtav1` (a retired draft that no
+  build can select and `EncoderConfig::validate` already rejects — already
+  `#[deprecated]`), and `DecodeBackend::Rav1dSafe` / `Rav1dFfi`, which match
+  their crates. The `svtav1` dependency alias and the `src/encoder_svt_rs.rs`
+  / `tests/svt_rs_backend.rs` file names are internal and unchanged.
+  (`144bda27`)
+
+
 ### Fixed (main did not compile with `encode` on any platform)
 
 - **`EncoderConfig.svt` named a type that only exists behind `__expert`.**
