@@ -208,7 +208,22 @@ ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/ima
 #      `129d45494`, zenav1-svt#5/#9). The seam's quality->QP clamp stays (see
 #      `quality_to_qp_gated`), but the gate that asserted the refusal was
 #      replaced with a lossless round-trip gate — see CLAUDE.md Known Bugs.
-svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "ef0b122bd26999a8eb8c2ff0442244465425e686", optional = true }
+# 2026-09-02 (bump #2): rev moved ef0b122bd -> 2ca060f42 to pick up BOTH halves
+# of imazen/zenav1-svt#18, a bd10 correctness defect that produced structurally
+# wrong pixels whenever AV1's forced tile grid kicked in (a (0,0) tile request
+# is CLAMPED UP past width > 4096 or sb-aligned area > 4096*2304, so every such
+# encode was multi-tile):
+#   * 3121b6a8 — intra prediction crossed tile boundaries (non-directional).
+#   * 2ca060f4 — `dr_predict_hbd` took a tile and ignored it: the DIRECTIONAL
+#     HBD path derived all four availability predicates from the FRAME while
+#     its u8 twin was tile-scoped. Directional modes only enter the candidate
+#     set at presets 0-5, so the first fix left every low-preset cell broken.
+# Measured on the AVIF high-bit-depth arm at the old pin: a 12 MP bd10 cell
+# scored ssim2 -57.05 against an 86.57 8-bit control; after 3121b6a8 alone it
+# was still -10.61. Do NOT compose this with a [patch] on a consumer's master —
+# that silently redirects every other build to a local working copy, which is
+# the hazard this pin exists to prevent.
+svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "2ca060f421760cff4b278fb4baf47ba86afcb5f2", optional = true }
 # AVIF container muxer for the zenav1-svt backend (the zenravif backend muxes
 # inside zenravif; this backend muxes in-crate). The 0.2.0 version is
 # supplied by the [patch.crates-io] git pin below until 0.2.0 publishes.
