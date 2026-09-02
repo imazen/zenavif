@@ -211,14 +211,14 @@ zen cross-cutting contracts (limits / estimation / whereat / zencodec
 Full per-repo specs live in each backend's CLAUDE.md:
 `../zenav1-aom/CLAUDE.md` (zenav1-aom decode — untrusted-input, high bar) and
 `../zenav1-svt/rust/CLAUDE.md` (zenav1-svt encode — trusted-input, lower bar).
-(Those were `/root/zenav1-aom/...` and `/root/svtav1/...` here until 2026-09-02;
+(Those were `/root/aom-rs/...` and `/root/svtav1/...` here until 2026-09-02;
 both repos were renamed and neither path exists.)
 This section pins the **seam** obligations on the zenavif side.
 
 **Status of the contracts on zenavif itself:** `main` already implements
 `zencodec::CategorizedError for Error` (`src/error.rs`, two-level
 `zencodec 0.1.26` `ErrorCategory`, `At<CodecError>` envelope, zencodec
-required). (`zenav1-svt-backend` was merged and is now a literal ancestor of `main` — 0
+required). (`svtav1-rs-backend` was merged and is now a literal ancestor of `main` — 0
 commits ahead as of the 2026-09-02 branch audit — so the "rebase, do not
 re-add" advice that stood here is spent. PR #27 `caterr-categorized-error` was
 the stale original adoption, closed 2026-07-20 as superseded.) Stop tokens, fallible-alloc (`src/alloc_util.rs` `AllocPref`),

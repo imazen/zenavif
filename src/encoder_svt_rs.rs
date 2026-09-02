@@ -1,7 +1,8 @@
 //! zenav1-svt AVIF encode backend (`zenav1-svt` feature, EXPERIMENTAL).
 //!
 //! Routes [`crate::encoder::encode_rgb8`] through the pure-Rust SVT-AV1 port
-//! ([imazen/svtav1](https://github.com/imazen/svtav1), `zenav1-svt/`) when
+//! ([imazen/zenav1-svt](https://github.com/imazen/zenav1-svt), the
+//! `rust/svtav1/` subdir) when
 //! [`crate::Av1Backend::Zenav1Svt`] is selected. Unlike the zenravif backend —
 //! where zenravif itself muxes the AVIF container — this backend drives the
 //! `svtav1_encoder::pipeline::EncodePipeline` directly and muxes in-crate via
@@ -192,7 +193,7 @@ pub(crate) fn quality_to_qp_gated(quality: f32) -> u8 {
 /// Map speed 1..=10 to an SVT-AV1 preset 0..=9.
 ///
 /// Provenance: mirrors the private `AvifEncoder::speed_to_preset` in
-/// imazen/svtav1 `zenav1-svt/svtav1/src/avif.rs` (speed 1 → preset 0
+/// imazen/svtav1 `svtav1-rs/svtav1/src/avif.rs` (speed 1 → preset 0
 /// slowest/best, speed 10 → preset 9 fastest; linear with rounding into
 /// 0..=13, then clamped to M9).
 ///

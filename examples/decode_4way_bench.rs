@@ -24,7 +24,7 @@
 //!
 //! Usage:
 //!   decode_4way_bench <corpus_dir> <out_csv>
-//! (defaults: /root/zenav1-aom/conformance/data  /tmp/decode_rust.csv)
+//! (defaults: /root/aom-rs/conformance/data  /tmp/decode_rust.csv)
 
 use std::fs;
 use std::path::PathBuf;
@@ -159,7 +159,7 @@ fn main() {
     let dir = PathBuf::from(
         args.get(1)
             .cloned()
-            .unwrap_or_else(|| "/root/zenav1-aom/conformance/data".to_string()),
+            .unwrap_or_else(|| "/root/aom-rs/conformance/data".to_string()),
     );
     let out_csv = PathBuf::from(
         args.get(2)

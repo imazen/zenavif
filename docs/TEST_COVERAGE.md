@@ -1,6 +1,6 @@
 # Test coverage map
 
-Measured 2026-08-11 on `zenav1-svt-backend` (base `77dc2d0`, final numbers at
+Measured 2026-08-11 on `svtav1-rs-backend` (base `77dc2d0`, final numbers at
 `8795864`), Apple M4 Pro / macOS 26.5.2 / 12 cores, `cargo-llvm-cov 0.8.7`,
 `cargo-nextest 0.9.140`, rustc 1.97.1.
 
