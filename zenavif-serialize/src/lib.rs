@@ -1011,9 +1011,15 @@ impl Aviffy {
         self
     }
 
-    /// Sets minimum required
+    /// Fallback AV1 `seq_profile` for the `av1C` box, used only when the
+    /// colour payload carries no readable `OBU_SEQUENCE_HEADER`.
     ///
-    /// Higher bit depth may increase this
+    /// Since 2026-09-02 the muxed `av1C` profile is read out of the
+    /// payload's own sequence header (strict consumers cross-validate the
+    /// two, so restating a caller-chosen value could produce an illegal
+    /// pair). When a header IS readable this setting is ignored; when none
+    /// is (pre-split OBUs, fixtures) this value stands in, and a 12-bit
+    /// colour depth still raises the emitted profile to 2 regardless.
     #[inline]
     pub fn set_seq_profile(&mut self, seq_profile: u8) -> &mut Self {
         self.min_seq_profile = seq_profile;
