@@ -208,6 +208,64 @@ impl From<ChromaSubsampling> for (bool, bool) {
     }
 }
 
+/// Read `seq_profile` out of the first `OBU_SEQUENCE_HEADER` in an AV1
+/// temporal unit, so `av1C` can restate what the bitstream actually says
+/// instead of what the caller remembered to configure.
+///
+/// Only the OBU framing and the header's first three bits are read — the
+/// profile is the first syntax element of `sequence_header_obu()` (AV1 spec
+/// 5.5.1), so nothing downstream of it has to be parsed. Returns `None` when
+/// the payload carries no sequence header or is truncated; the caller then
+/// keeps its own settings rather than failing a mux.
+fn stream_seq_profile(av1_data: &[u8]) -> Option<u8> {
+    const OBU_SEQUENCE_HEADER: u8 = 1;
+    let mut rest = av1_data;
+    while let Some((&header, after_header)) = rest.split_first() {
+        // obu_forbidden_bit(1) obu_type(4) obu_extension_flag(1)
+        // obu_has_size_field(1) obu_reserved_1bit(1)
+        if header & 0x80 != 0 {
+            return None; // forbidden bit set: not an OBU stream
+        }
+        let obu_type = (header >> 3) & 0x0f;
+        let has_size_field = header & 0x02 != 0;
+        let mut body = after_header;
+        if header & 0x04 != 0 {
+            // obu_extension_flag: one more header byte
+            body = body.get(1..)?;
+        }
+        let payload = if has_size_field {
+            let (size, size_len) = read_leb128(body)?;
+            let start = size_len;
+            let end = start.checked_add(usize::try_from(size).ok()?)?;
+            let p = body.get(start..end)?;
+            rest = &body[end..];
+            p
+        } else {
+            // No size field: this OBU runs to the end of the temporal unit.
+            rest = &[];
+            body
+        };
+        if obu_type == OBU_SEQUENCE_HEADER {
+            // seq_profile is f(3), the first element of the header payload.
+            return payload.first().map(|b| b >> 5);
+        }
+    }
+    None
+}
+
+/// Minimal leb128 reader for OBU sizes: returns `(value, bytes_consumed)`.
+/// AV1 caps `leb128()` at 8 bytes (spec 4.10.5).
+fn read_leb128(data: &[u8]) -> Option<(u64, usize)> {
+    let mut value: u64 = 0;
+    for (i, &byte) in data.iter().take(8).enumerate() {
+        value |= u64::from(byte & 0x7f) << (i * 7);
+        if byte & 0x80 == 0 {
+            return Some((value, i + 1));
+        }
+    }
+    None
+}
+
 /// Config for the serialization (allows setting advanced image properties).
 ///
 /// See [`Aviffy::new`].
@@ -661,7 +719,7 @@ impl Aviffy {
         let ispe_prop = push_prop(&mut ipco, IpcoProp::Ispe(IspeBox { width, height }))
             .map_err(|e| at!(SerializeError::from(e)))?;
         ipma_entries.push(
-            self.build_color_ipma(&mut ipco, ispe_prop, color_image_id, depth_bits)
+            self.build_color_ipma(&mut ipco, ispe_prop, color_image_id, depth_bits, color_av1_data)
                 .map_err(|e| at!(SerializeError::from(e)))?,
         );
 
@@ -753,24 +811,40 @@ impl Aviffy {
         ispe_prop: u8,
         color_image_id: u16,
         color_depth_bits: u8,
+        color_av1_data: &[u8],
     ) -> io::Result<IpmaEntry> {
         // Av1C is redundant with the AV1 sequence header, but Chrome requires it
-        // and validates that it matches.
-        // Monochrome constraints (AV1 spec): mono_chrome=1 requires
-        // chroma_subsampling_x = chroma_subsampling_y = 1, and is only
-        // valid in seq_profile 0 (8/10-bit) or 2 (12-bit) — profile 1 is
-        // 4:4:4-only. Chrome validates av1C against the sequence header,
-        // so derive these here instead of trusting the caller's
-        // subsampling/min-profile settings.
-        let seq_profile = if self.monochrome {
-            if color_depth_bits >= 12 { 2 } else { 0 }
-        } else {
-            self.min_seq_profile.max(if color_depth_bits >= 12 { 2 } else { 0 })
-        };
-        let (sub_x, sub_y) = if self.monochrome {
-            (true, true)
-        } else {
-            (self.chroma_subsampling.horizontal, self.chroma_subsampling.vertical)
+        // and validates that it matches — so the profile written here is READ
+        // OUT of the payload's own sequence header, not taken from the caller.
+        // `Aviffy`'s defaults (`min_seq_profile` 1, `chroma_subsampling` NONE)
+        // describe a 4:4:4 stream, so a caller that sets only the colour knobs
+        // used to mux a 4:2:0 profile-0 payload with an av1C claiming profile 1
+        // / 4:4:4 — an illegal pair that our own decoder ignores (it reads the
+        // sequence header) but a strict consumer rejects. See the appended
+        // `av1c_*` tests and `zenmetrics/benchmarks/avif_hdr_arm_plan_2026-09-02.md` §10.4c.
+        //
+        // AV1 spec 5.5.2 ties chroma to profile for the two profiles that admit
+        // exactly one chroma format, which is what makes this derivable from the
+        // profile alone rather than merely checkable:
+        //   profile 0 (Main):         4:2:0 or monochrome -> ssx = ssy = 1
+        //   profile 1 (High):         4:4:4, never mono    -> ssx = ssy = 0
+        //   profile 2 (Professional): 4:2:2, or any 12-bit -> ambiguous, so the
+        //                                                     caller's subsampling stands
+        // A payload with no readable sequence header (pre-split OBUs, fixtures)
+        // falls back to the caller's settings — the pre-2026-09-02 behaviour.
+        let stated_profile = stream_seq_profile(color_av1_data);
+        let fallback_profile = if self.monochrome { 0 } else { self.min_seq_profile };
+        // 12-bit is profile 2 only, so a depth/profile contradiction can never
+        // emit `twelve_bit` under profile 0 or 1.
+        let seq_profile = stated_profile
+            .unwrap_or(fallback_profile)
+            .max(if color_depth_bits >= 12 { 2 } else { 0 });
+        let monochrome = self.monochrome && seq_profile != 1;
+        let (sub_x, sub_y) = match seq_profile {
+            0 => (true, true),
+            1 => (false, false),
+            _ if monochrome => (true, true),
+            _ => (self.chroma_subsampling.horizontal, self.chroma_subsampling.vertical),
         };
         let av1c_color_prop = push_prop(ipco, IpcoProp::Av1C(Av1CBox {
             seq_profile,
@@ -778,7 +852,7 @@ impl Aviffy {
             seq_tier_0: false,
             high_bitdepth: color_depth_bits >= 10,
             twelve_bit: color_depth_bits >= 12,
-            monochrome: self.monochrome,
+            monochrome,
             chroma_subsampling_x: sub_x,
             chroma_subsampling_y: sub_y,
             chroma_sample_position: 0,
@@ -786,7 +860,7 @@ impl Aviffy {
         // MIAF: pixi channel count reflects the coded image — 1 for
         // monochrome, 3 for color.
         let pixi_color = push_prop(ipco, IpcoProp::Pixi(PixiBox {
-            channels: if self.monochrome { 1 } else { 3 },
+            channels: if monochrome { 1 } else { 3 },
             depth: color_depth_bits,
         }))?;
 
@@ -2212,4 +2286,225 @@ fn gain_map_multichannel_metadata_bytes_roundtrip() {
     let roundtripped = parsed.to_bytes();
     assert_eq!(original_meta, roundtripped,
         "multichannel tmap payload bytes must survive roundtrip");
+}
+
+// ─── av1C ↔ sequence-header agreement ───────────────────────────────────
+//
+// The `av1C` box restates facts the AV1 sequence header already carries, and
+// strict consumers (Chrome among them) cross-validate the two. A file whose
+// `av1C` claims a different profile or chroma format than its own bitstream is
+// illegal regardless of which side is "right", so the muxer reads the profile
+// out of the payload instead of trusting a caller that may never have set it.
+//
+// Registered defect (2026-09-02): the zenmetrics HDR mux built an `Aviffy` and
+// set only the colour/CICP knobs, so a genuinely 4:2:0 10-bit profile-0 stream
+// was muxed with `av1C` claiming `seq_profile = 1` / `ssx = ssy = 0` (4:4:4) —
+// `Aviffy::new()`'s `min_seq_profile` default is 1 and its `chroma_subsampling`
+// default is `NONE`. Recorded in `zenmetrics/benchmarks/avif_hdr_arm_plan_2026-09-02.md` §10.4c.
+
+/// Minimal MSB-first bit writer, test-only, for hand-building sequence headers.
+#[cfg(test)]
+struct TestBitWriter {
+    bytes: Vec<u8>,
+    bit: u8,
+}
+
+#[cfg(test)]
+impl TestBitWriter {
+    fn new() -> Self {
+        Self { bytes: Vec::new(), bit: 0 }
+    }
+
+    fn put(&mut self, value: u32, bits: u8) {
+        for i in (0..bits).rev() {
+            if self.bit == 0 {
+                self.bytes.push(0);
+            }
+            if (value >> i) & 1 == 1 {
+                let last = self.bytes.len() - 1;
+                self.bytes[last] |= 0x80 >> self.bit;
+            }
+            self.bit = (self.bit + 1) & 7;
+        }
+    }
+
+    fn finish(mut self) -> Vec<u8> {
+        // trailing_one_bit + zero padding to the byte boundary (AV1 5.3.4)
+        self.put(1, 1);
+        while self.bit != 0 {
+            self.put(0, 1);
+        }
+        self.bytes
+    }
+}
+
+/// Build a spec-valid `OBU_SEQUENCE_HEADER` temporal unit for the given
+/// profile/depth, using the `reduced_still_picture_header` shape every AVIF
+/// still encoder emits. `cp`/`tc`/`mc` are signalled so the parser takes the
+/// explicit-chroma branch rather than the sRGB shortcut.
+#[cfg(test)]
+fn test_seq_header_obu(seq_profile: u8, high_bitdepth: bool, twelve_bit: bool, monochrome: bool) -> Vec<u8> {
+    let mut w = TestBitWriter::new();
+    w.put(u32::from(seq_profile), 3);
+    w.put(1, 1); // still_picture
+    w.put(1, 1); // reduced_still_picture_header
+    w.put(0, 5); // seq_level_idx[0]
+    w.put(15, 4); // frame_width_bits_minus_1  -> 16
+    w.put(15, 4); // frame_height_bits_minus_1 -> 16
+    w.put(63, 16); // max_frame_width_minus_1  -> 64
+    w.put(63, 16); // max_frame_height_minus_1 -> 64
+    w.put(0, 1); // use_128x128_superblock
+    w.put(0, 1); // enable_filter_intra
+    w.put(0, 1); // enable_intra_edge_filter
+    w.put(0, 1); // enable_superres
+    w.put(0, 1); // enable_cdef
+    w.put(0, 1); // enable_restoration
+    // ── color_config (AV1 5.5.2) ──
+    w.put(u32::from(high_bitdepth), 1);
+    if seq_profile == 2 && high_bitdepth {
+        w.put(u32::from(twelve_bit), 1);
+    }
+    let mono = if seq_profile == 1 {
+        false // profile 1 is 4:4:4 colour only; mono_chrome is not coded
+    } else {
+        w.put(u32::from(monochrome), 1);
+        monochrome
+    };
+    w.put(1, 1); // color_description_present_flag
+    w.put(9, 8); // color_primaries      = BT.2020
+    w.put(16, 8); // transfer_characteristics = SMPTE 2084 (PQ)
+    w.put(9, 8); // matrix_coefficients  = BT.2020 NCL
+    w.put(0, 1); // color_range (limited)
+    if !mono {
+        let (ssx, ssy) = match seq_profile {
+            0 => (true, true),
+            1 => (false, false),
+            _ => {
+                if twelve_bit {
+                    w.put(1, 1); // subsampling_x
+                    w.put(1, 1); // subsampling_y
+                    (true, true)
+                } else {
+                    (true, false) // profile 2, non-12-bit is 4:2:2
+                }
+            }
+        };
+        if ssx && ssy {
+            w.put(0, 2); // chroma_sample_position = UNKNOWN
+        }
+        w.put(0, 1); // separate_uv_delta_q
+    }
+    w.put(0, 1); // film_grain_params_present
+    let payload = w.finish();
+
+    // OBU header: forbidden=0, type=1 (sequence header), extension=0,
+    // has_size_field=1, reserved=0. Then a leb128 size, then the payload.
+    // forbidden 0 | type 0001 | ext 0 | has_size 1 | reserved 0
+    let mut obu = vec![0b0000_1010u8];
+    let mut n = payload.len();
+    loop {
+        let byte = (n & 0x7f) as u8;
+        n >>= 7;
+        obu.push(if n == 0 { byte } else { byte | 0x80 });
+        if n == 0 {
+            break;
+        }
+    }
+    obu.extend_from_slice(&payload);
+    obu
+}
+
+/// The `av1C` fields a strict consumer keys on, read back off a muxed file:
+/// `(seq_profile, ssx, ssy, monochrome, bit_depth)`.
+#[cfg(test)]
+fn muxed_av1c(avif: &[u8]) -> (u8, bool, bool, bool, u8) {
+    let parser = zenavif_parse::AvifParser::from_bytes(avif).expect("parse muxed AVIF");
+    let c = parser.av1_config().expect("av1C present on the primary item");
+    (
+        c.profile,
+        c.chroma_subsampling_x == 1,
+        c.chroma_subsampling_y == 1,
+        c.monochrome,
+        c.bit_depth,
+    )
+}
+
+/// **The HDR-mux defect.** A caller that sets only the colour knobs — exactly
+/// `zenmetrics` `sweep/hdr.rs`'s `Aviffy::new()` shape — must still get an
+/// `av1C` that agrees with the 10-bit 4:2:0 profile-0 payload it handed over.
+#[test]
+fn av1c_profile_and_chroma_follow_the_sequence_header_hdr_420_10bit() {
+    let obu = test_seq_header_obu(0, true, false, false);
+    let avif = Aviffy::new()
+        .set_color_primaries(constants::ColorPrimaries::Bt2020)
+        .set_transfer_characteristics(constants::TransferCharacteristics::Smpte2084)
+        .set_matrix_coefficients(constants::MatrixCoefficients::Bt2020Ncl)
+        .set_full_color_range(false)
+        .to_vec(&obu, None, 64, 64, 10);
+
+    let (profile, ssx, ssy, mono, depth) = muxed_av1c(&avif);
+    assert_eq!(profile, 0, "av1C must restate the sequence header's seq_profile");
+    assert!(ssx && ssy, "profile 0 is 4:2:0/mono only — av1C must not claim 4:4:4");
+    assert!(!mono);
+    assert_eq!(depth, 10, "10-bit payload");
+}
+
+/// The converse, so the fix cannot be "always write profile 0": a genuine
+/// profile-1 4:4:4 payload must still mux as profile 1 with no subsampling.
+#[test]
+fn av1c_profile_and_chroma_follow_the_sequence_header_444_8bit() {
+    let obu = test_seq_header_obu(1, false, false, false);
+    let avif = Aviffy::new().to_vec(&obu, None, 64, 64, 8);
+
+    let (profile, ssx, ssy, mono, depth) = muxed_av1c(&avif);
+    assert_eq!(profile, 1, "4:4:4 payload is profile 1 (High)");
+    assert!(!ssx && !ssy, "profile 1 is 4:4:4 — no subsampling");
+    assert!(!mono, "profile 1 never codes monochrome");
+    assert_eq!(depth, 8);
+}
+
+/// **The SDR control.** `zenavif`'s own `encoder_svt_rs::build_aviffy` states
+/// profile 0 + 4:2:0 explicitly and muxes correctly today; the derivation must
+/// leave that path exactly where it was.
+#[test]
+fn av1c_sdr_420_callsite_shape_is_unchanged() {
+    let obu = test_seq_header_obu(0, false, false, false);
+    let avif = Aviffy::new()
+        .set_seq_profile(0)
+        .set_chroma_subsampling((true, true))
+        .set_monochrome(false)
+        .set_full_color_range(true)
+        .to_vec(&obu, None, 64, 64, 8);
+
+    let (profile, ssx, ssy, mono, depth) = muxed_av1c(&avif);
+    assert_eq!(profile, 0);
+    assert!(ssx && ssy);
+    assert!(!mono);
+    assert_eq!(depth, 8);
+}
+
+/// A monochrome profile-0 payload keeps `mono_chrome = 1` with `ssx = ssy = 1`
+/// (AV1 spec: mono forces both subsampling flags).
+#[test]
+fn av1c_monochrome_profile0_keeps_mono_flag() {
+    let obu = test_seq_header_obu(0, false, false, true);
+    let avif = Aviffy::new().set_monochrome(true).to_vec(&obu, None, 64, 64, 8);
+
+    let (profile, ssx, ssy, mono, _) = muxed_av1c(&avif);
+    assert_eq!(profile, 0);
+    assert!(ssx && ssy);
+    assert!(mono);
+}
+
+/// A payload with no readable sequence header (a caller muxing pre-split OBUs,
+/// or a fixture) must keep the pre-derivation behaviour rather than fail.
+#[test]
+fn av1c_falls_back_to_caller_settings_without_a_sequence_header() {
+    let avif = Aviffy::new()
+        .set_seq_profile(0)
+        .set_chroma_subsampling((true, true))
+        .to_vec(&[1, 2, 3, 4, 5, 6], None, 10, 20, 8);
+    let (profile, ssx, ssy, ..) = muxed_av1c(&avif);
+    assert_eq!(profile, 0);
+    assert!(ssx && ssy);
 }
