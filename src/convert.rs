@@ -553,7 +553,11 @@ mod narrow_16_to_8 {
         // (1) overflow: white saturates past u8::MAX.
         let white = u32::from(u16::MAX);
         assert_eq!((white + 128) >> 8, 256, "half-up leaves the u8 domain");
-        assert_eq!(scale_from_u16(u16::MAX, 8), 255, "the shipped rule does not");
+        assert_eq!(
+            scale_from_u16(u16::MAX, 8),
+            255,
+            "the shipped rule does not"
+        );
 
         // (2) roundtrip breakage: count the bytes half-up would corrupt.
         let broken = (0u16..=255)
