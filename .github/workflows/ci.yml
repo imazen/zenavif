@@ -72,8 +72,37 @@ jobs:
       # tests/svt_rs_backend.rs — the cross-backend byte-identity gates, which
       # are the whole point of having two backends — never ran on any platform.
       # Their green results were local-only claims. This runs them.
-      - name: Test (AV1 backend seams — aom decode + svt-rs encode)
-        run: cargo test --features zenav1-aom,encode,encode-imazen,zenav1-svt,target-quality
+      #
+      # `zenav1-aom-encode` joined the list on 2026-09-02 with the aom encode
+      # backend. It is what runs tests/aom_encode_backend.rs, whose mutation
+      # proofs (`gate_can_fail_*`) are `#[test]`s and therefore also run here —
+      # so CI checks the gate can still FAIL, not just that it passes. Verify
+      # the step actually ran by looking for `aom_encode_backend` in this
+      # step's log; a feature that silently stops selecting the test would
+      # otherwise look identical to a green run.
+      #
+      # `encode-mono` also joined on 2026-09-02, and it appeared NOWHERE in this
+      # workflow before: `encode_gray8` — the true Cs400 monochrome encode path
+      # for BOTH the zenravif and zenav1-svt backends, not just the new one —
+      # had never been built by any CI job. Adding it here runs 455 tests
+      # (up from 448) with no new failures.
+      - name: Test (AV1 backend seams — aom decode + svt-rs encode + aom encode)
+        run: cargo test --features zenav1-aom,zenav1-aom-encode,encode,encode-imazen,zenav1-svt,target-quality,encode-mono
+      - name: Assert the aom encode gate actually ran
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Re-run ONLY that test binary and require a non-zero test count.
+          # `cargo test --test <name>` fails outright when the target is not
+          # selected, and `--format json` would need nightly, so parse the
+          # human summary: "test result: ok. N passed" with N > 0.
+          out=$(cargo test --features zenav1-aom,zenav1-aom-encode,encode,encode-imazen,zenav1-svt,target-quality,encode-mono --test aom_encode_backend 2>&1 | tee /dev/stderr)
+          n=$(printf '%s\n' "$out" | sed -n 's/^test result: ok\. \([0-9][0-9]*\) passed.*/\1/p' | head -1)
+          if [ -z "${n:-}" ] || [ "$n" -lt 12 ]; then
+            echo "::error::aom_encode_backend reported '${n:-<none>}' passing tests; expected at least 12"
+            exit 1
+          fi
+          echo "aom_encode_backend ran: $n tests passed"
       # The diffmap closed loops were in the same position the backend seams
       # used to be: neither `two-pass-butteraugli` nor `two-pass-zensim`
       # appeared anywhere in this workflow, so tests/two_pass.rs and
