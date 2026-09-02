@@ -790,6 +790,148 @@ impl SweepAxes {
         ]
     }
 
+    /// The **15 live** single-deviation arms: [`svt_doe_knob_sets`] minus the
+    /// two Stage A proved carry **no effect at all**.
+    ///
+    /// `tune = 0` (`tn0`) and `force_screen_content_mode = Some(3)` (`scm3`)
+    /// produce bitstreams **byte-identical to the default arm on 288/288
+    /// cells each**, at both presets measured — they are not weak effects,
+    /// they are inert (`zenmetrics/benchmarks/avif_doe_stageA_2026-09-02.md`
+    /// §3.3; imazen/zenav1-svt#17). Between them they consumed 8,972 Stage-A
+    /// cells to produce structural zeros, and crossing them with 10-bit would
+    /// buy 576 more of the same. [`svt_doe_b6_knob_sets`] excludes them by
+    /// re-listing; this one **filters the owner** instead, so a level added to
+    /// [`svt_doe_knob_sets`] arrives here automatically and the two lists
+    /// cannot drift apart.
+    ///
+    /// Index 0 stays the default stratum — the filter cannot remove it, since
+    /// neither excluded config is the default — so `deviations = 0` still
+    /// selects it and [`SweepBuilder::with_max_deviations`]`(1)` still means
+    /// "isolated main effects".
+    ///
+    /// [`svt_doe_knob_sets`]: Self::svt_doe_knob_sets
+    /// [`svt_doe_b6_knob_sets`]: Self::svt_doe_b6_knob_sets
+    #[must_use]
+    pub fn svt_doe_t1_live_knob_sets() -> Vec<crate::expert::SvtParams> {
+        use crate::expert::SvtParams;
+        let d = SvtParams::default();
+        let tn0 = {
+            let mut p = d;
+            p.tune = 0;
+            p
+        };
+        let scm3 = {
+            let mut p = d;
+            p.force_screen_content_mode = Some(3);
+            p
+        };
+        Self::svt_doe_knob_sets()
+            .into_iter()
+            .filter(|p| *p != tn0 && *p != scm3)
+            .collect()
+    }
+
+    /// DOE block **T1-a + T1-c**: the `bd10` **preset ladder** — 10-bit at
+    /// every speed the dial reaches, one knob-default arm per speed.
+    ///
+    /// Closes the worst-covered gap in the wave. A1 measured `bd10` at speed
+    /// 4 only and won there (BD-rate **−1.02 %**, CI [−1.23, −0.36], 23/31
+    /// images), but the arm has "no s6 main effect, no interaction coverage
+    /// and no transfer evidence" (`avif_doe_stageA_2026-09-02.md` §11.8) —
+    /// which fires trigger **B-3**. This plan is that discharge.
+    ///
+    /// **Why 10-bit is PINNED rather than crossed.** `svt_doe_main` carries
+    /// `bit_depths = [Auto, Ten]`, so at `with_max_deviations(1)` a 10-bit
+    /// cell already spends its one deviation on depth and can only be emitted
+    /// at the default speed — which is exactly why `bd10` exists solely at s4
+    /// today. Pinning the axis to a single value makes `Ten` **index 0**, so
+    /// it costs **zero** deviations (`cross`: `idxs` contains the bit-depth
+    /// index) and the speed becomes the isolated deviation. The control this
+    /// block differences against is **A0R**, not an in-plan `Auto` arm, so
+    /// nothing is lost by dropping `Auto` here — and the fingerprint keeps
+    /// `Auto` and `Ten` apart even where they coincide, so a cell declared
+    /// from this plan carries the same `CellId` as the same cell declared
+    /// from `svt_doe_main`.
+    ///
+    /// Speed 4 is retained at the head (index 0 is the default stratum by
+    /// contract) even though A1 already ran it: re-declaring is idempotent on
+    /// a content-addressed `CellId`, costs nothing, and makes the **s4 leg a
+    /// built-in identity check** that this plan reproduces A1's cells rather
+    /// than a parallel identity space.
+    ///
+    /// Pair with [`SweepBuilder::with_max_deviations`]`(1)` and the 9-point
+    /// knob ladder on the **budget** corpus. Report per **H-BD-1**: speeds
+    /// 1–6 resolve to presets ≤ 8 (the full-RD funnel) and speed 7 to preset
+    /// 9 (the level-only post-pass), so the ladder crosses a **producer
+    /// boundary** — gate **G4** forbids fitting a BD-rate-vs-speed slope
+    /// across that seam.
+    #[must_use]
+    pub fn svt_doe_t1_bd10_ladder() -> Self {
+        let mut axes = Self::svt_doe_main();
+        // The whole effective preset ladder, default-first, in
+        // `svt_doe_main`'s value-per-CPU-second order so a budget bite sheds
+        // preset 0 first.
+        axes.speeds = vec![4, 6, 7, 2, 5, 3, 1];
+        axes.bit_depths = vec![EncodeBitDepth::Ten];
+        axes.svt_knobs = vec![crate::expert::SvtParams::default()];
+        axes
+    }
+
+    /// DOE block **T1-b**: `bd10` × the **live single-deviation arms** at one
+    /// preset — the block this arm exists to buy.
+    ///
+    /// `svt_doe_pairwise` pinned bit depth back to `Auto` and said why:
+    /// crossing it with 10-bit "would add 16 strata of a different question
+    /// (does the quantizer domain change a knob's effect?), **which is a
+    /// Stage-B follow-up if A1 shows 10-bit matters at all**". A1 showed it
+    /// does — one of only two arms whose CI excludes zero on the winning
+    /// side — so this is that follow-up, asked at the registered shape.
+    ///
+    /// The question is **substitution vs addition**: 10-bit and the QM /
+    /// variance-boost arms all act on the quantizer, and the wave measured
+    /// them only in isolation from depth. If they substitute rather than add,
+    /// a model treating `bit_depth` as independent **over-credits it**.
+    ///
+    /// Speed 6 (preset 7) is the single preset, matching `svt_doe_pairwise` —
+    /// the neighbourhood of libavif's own default speed, and cheap. With one
+    /// speed the speeds axis contributes no deviation, so
+    /// [`SweepBuilder::with_max_deviations`]`(1)` selects exactly the default
+    /// stratum plus each isolated live knob: **15 strata**, no interactions.
+    #[must_use]
+    pub fn svt_doe_t1_bd10_knobs() -> Self {
+        let mut axes = Self::svt_doe_main();
+        axes.speeds = vec![6];
+        axes.bit_depths = vec![EncodeBitDepth::Ten];
+        axes.svt_knobs = Self::svt_doe_t1_live_knob_sets();
+        axes
+    }
+
+    /// DOE block **T1-d**: the `bd10` **cross-size transfer gate** — does
+    /// −1.02 % survive native resolution, or is it a 1 MP crop artifact?
+    ///
+    /// The cheapest high-value block in the arm, and the risk is demonstrated
+    /// rather than hypothetical: Stage A's own transfer gate found a knob
+    /// whose effect **flips sign** off the budget corpus (`tl1.0`: +0.65 % at
+    /// 1024² → −0.12 % native) and another that shrinks 8.6× (`tl1.1`) —
+    /// which is what put `acb3`/`shp3` into B-6. `bd10` has **no transfer
+    /// evidence at all**.
+    ///
+    /// Speed 4 alone: it is the preset A1 measured the −1.02 % at, so this is
+    /// the matched native partner of that exact number and nothing else.
+    /// Pair with [`SweepBuilder::with_max_deviations`]`(1)`, the 3-point probe
+    /// ladder, and the **NATIVE** corpus — the two corpora share filenames by
+    /// construction, so pointing this at the budget corpus would silently
+    /// encode the wrong pixels; the declared `source_sha` is what keeps the
+    /// two disjoint at `CellId` level.
+    #[must_use]
+    pub fn svt_doe_t1_bd10_transfer() -> Self {
+        let mut axes = Self::svt_doe_main();
+        axes.speeds = vec![4];
+        axes.bit_depths = vec![EncodeBitDepth::Ten];
+        axes.svt_knobs = vec![crate::expert::SvtParams::default()];
+        axes
+    }
+
     /// Every unordered pair of two distinct [`svt_doe_knob_sets`] levels,
     /// composed field-wise, default first.
     ///
@@ -1947,6 +2089,9 @@ static PLANS: &[(&str, fn() -> SweepAxes)] = &[
     ("svt_doe_pairwise", SweepAxes::svt_doe_pairwise),
     ("svt_doe_transfer", SweepAxes::svt_doe_transfer),
     ("svt_doe_b6", SweepAxes::svt_doe_b6),
+    ("svt_doe_t1_bd10_ladder", SweepAxes::svt_doe_t1_bd10_ladder),
+    ("svt_doe_t1_bd10_knobs", SweepAxes::svt_doe_t1_bd10_knobs),
+    ("svt_doe_t1_bd10_transfer", SweepAxes::svt_doe_t1_bd10_transfer),
 ];
 
 impl SweepAxes {
@@ -2760,6 +2905,9 @@ mod tests {
             "svt_doe_pairwise",
             "svt_doe_transfer",
             "svt_doe_b6",
+            "svt_doe_t1_bd10_ladder",
+            "svt_doe_t1_bd10_knobs",
+            "svt_doe_t1_bd10_transfer",
         ] {
             assert!(
                 names.contains(&n),
@@ -3356,4 +3504,181 @@ mod tests {
             "dropped cells must be reported, never silently capped"
         );
     }
+
+    /// The T1 blocks pin 10-bit as **index 0** of the bit-depth axis, which
+    /// is the whole mechanism that lets the speed (or the knob) be the
+    /// isolated deviation. If someone ever restores `Auto` to the head of
+    /// that axis, every T1 block silently collapses to its default-speed leg
+    /// — exactly the gap this arm exists to close.
+    #[test]
+    fn svt_doe_t1_blocks_pin_ten_bit_as_the_zero_deviation_stratum() {
+        for (name, axes) in [
+            ("ladder", SweepAxes::svt_doe_t1_bd10_ladder()),
+            ("knobs", SweepAxes::svt_doe_t1_bd10_knobs()),
+            ("transfer", SweepAxes::svt_doe_t1_bd10_transfer()),
+        ] {
+            assert_eq!(
+                axes.bit_depths,
+                vec![EncodeBitDepth::Ten],
+                "{name}: 10-bit must be the ONLY bit depth, so its axis index is 0"
+            );
+        }
+    }
+
+    /// T1-a/T1-c: one knob-default arm at every speed the dial reaches, and
+    /// speed 4 retained at the head so the block reproduces A1's cells rather
+    /// than opening a parallel identity space.
+    #[test]
+    fn svt_doe_t1_ladder_is_the_whole_preset_dial_at_one_arm() {
+        let axes = SweepAxes::svt_doe_t1_bd10_ladder();
+        assert_eq!(axes.speeds, vec![4, 6, 7, 2, 5, 3, 1]);
+        assert_eq!(axes.speeds[0], 4, "index 0 is the default stratum by contract");
+        assert_eq!(axes.svt_knobs.len(), 1, "the ladder varies speed, not knobs");
+        assert!(axes.svt_knobs[0].is_default());
+
+        // 7 speeds x 1 knob arm, and NOTHING beyond one deviation.
+        let plan = SweepBuilder::new(axes, QualityGrid::Explicit(vec![45.0]))
+            .with_max_deviations(1)
+            .plan();
+        assert_eq!(plan.cells.len(), 7, "one cell per speed at one q point");
+        for c in &plan.cells {
+            assert_eq!(c.config.bit_depth, EncodeBitDepth::Ten);
+            assert!(c.id.contains("-bd10"), "cell id must carry the depth: {}", c.id);
+            assert!(c.config.svt_params().is_default(), "{:?}", c.config.svt_params());
+        }
+    }
+
+    /// T1-b: exactly the 15 live arms — the default plus every
+    /// single-deviation knob Stage A did NOT prove byte-inert — at one
+    /// preset, with no interaction leaking in.
+    #[test]
+    fn svt_doe_t1_knobs_is_fifteen_live_isolated_arms_at_one_preset() {
+        use crate::expert::SvtParams;
+        let axes = SweepAxes::svt_doe_t1_bd10_knobs();
+        let d = SvtParams::default();
+
+        assert_eq!(axes.speeds, vec![6], "one preset — the speeds axis must not deviate");
+        assert_eq!(
+            axes.svt_knobs.len(),
+            15,
+            "17 main-effect sets minus the 2 Stage-A byte-inert arms"
+        );
+        assert!(axes.svt_knobs[0].is_default(), "index 0 must stay the default");
+
+        for p in &axes.svt_knobs[1..] {
+            assert_eq!(p.deviations(), 1, "main effects only: {p:?}");
+            // The two byte-inert CONFIGS must never reappear (zenav1-svt#17).
+            // Note this is narrower than B-6's check: `tune = 3` (IQ) is a
+            // LIVE arm and is deliberately kept — only `tune = 0` was inert.
+            assert_ne!(p.tune, 0, "tune=0 (tn0) is byte-inert: {p:?}");
+            assert_ne!(
+                p.force_screen_content_mode,
+                Some(3),
+                "scm=3 is byte-inert: {p:?}"
+            );
+            let _ = d;
+            assert_eq!(*p, p.clamped(), "level is out of the port's legal range: {p:?}");
+        }
+
+        // 15 strata at one deviation, and not one more.
+        let plan = SweepBuilder::new(axes, QualityGrid::Explicit(vec![45.0]))
+            .with_max_deviations(1)
+            .plan();
+        assert_eq!(plan.cells.len(), 15);
+        for c in &plan.cells {
+            assert_eq!(c.config.bit_depth, EncodeBitDepth::Ten);
+            assert_eq!(c.config.speed, 6);
+            assert!(c.id.starts_with("s6-"), "cell id must carry the preset: {}", c.id);
+        }
+    }
+
+    /// The live set is a FILTER over the owner, so a level added to
+    /// `svt_doe_knob_sets` arrives automatically — and the only two things it
+    /// removes are the two inert ones.
+    #[test]
+    fn svt_doe_t1_live_knob_sets_removes_exactly_the_two_inert_arms() {
+        use crate::expert::SvtParams;
+        let all = SweepAxes::svt_doe_knob_sets();
+        let live = SweepAxes::svt_doe_t1_live_knob_sets();
+        assert_eq!(all.len(), 17);
+        assert_eq!(live.len(), 15);
+
+        let d = SvtParams::default();
+        let tn0 = {
+            let mut p = d;
+            p.tune = 0;
+            p
+        };
+        let scm3 = {
+            let mut p = d;
+            p.force_screen_content_mode = Some(3);
+            p
+        };
+        // Both were present in the owner...
+        assert!(all.contains(&tn0), "tn0 must exist in the owner set");
+        assert!(all.contains(&scm3), "scm3 must exist in the owner set");
+        // ...and the removed set is EXACTLY those two, order otherwise kept.
+        let removed: Vec<_> = all.iter().filter(|p| !live.contains(p)).copied().collect();
+        assert_eq!(removed, vec![tn0, scm3]);
+        let kept: Vec<_> = all
+            .into_iter()
+            .filter(|p| *p != tn0 && *p != scm3)
+            .collect();
+        assert_eq!(kept, live, "filtering must preserve the owner's order");
+    }
+
+    /// T1-d differences against A1's speed-4 number, so it must be that one
+    /// preset and nothing else.
+    #[test]
+    fn svt_doe_t1_transfer_is_speed_four_only() {
+        let axes = SweepAxes::svt_doe_t1_bd10_transfer();
+        assert_eq!(axes.speeds, vec![4], "the preset A1 measured -1.02% at");
+        assert_eq!(axes.svt_knobs.len(), 1);
+        assert!(axes.svt_knobs[0].is_default());
+        let plan = SweepBuilder::new(axes, QualityGrid::Explicit(vec![15.0, 45.0, 90.0]))
+            .with_max_deviations(1)
+            .plan();
+        assert_eq!(plan.cells.len(), 3, "1 stratum x the 3-point probe ladder");
+    }
+
+    /// A 10-bit cell declared from a T1 plan must carry the SAME cell id as
+    /// the same cell declared from `svt_doe_main` — otherwise T1 opens a
+    /// parallel identity space and its s4 leg silently re-encodes A1's work
+    /// instead of joining it.
+    #[test]
+    fn svt_doe_t1_ladder_s4_cell_ids_match_svt_doe_main() {
+        let main = SweepBuilder::new(SweepAxes::svt_doe_main(), QualityGrid::Explicit(vec![45.0]))
+            .with_max_deviations(1)
+            .plan();
+        let t1 = SweepBuilder::new(
+            SweepAxes::svt_doe_t1_bd10_ladder(),
+            QualityGrid::Explicit(vec![45.0]),
+        )
+        .with_max_deviations(1)
+        .plan();
+
+        let main_bd10_s4: Vec<_> = main
+            .cells
+            .iter()
+            .filter(|c| {
+                c.config.bit_depth == EncodeBitDepth::Ten
+                    && c.config.speed == 4
+                    && c.config.svt_params().is_default()
+            })
+            .map(|c| (c.id.clone(), c.fingerprint))
+            .collect();
+        let t1_bd10_s4: Vec<_> = t1
+            .cells
+            .iter()
+            .filter(|c| c.config.speed == 4)
+            .map(|c| (c.id.clone(), c.fingerprint))
+            .collect();
+
+        assert_eq!(main_bd10_s4.len(), 1, "A1 has exactly one bd10 s4 default arm");
+        assert_eq!(
+            main_bd10_s4, t1_bd10_s4,
+            "T1's s4 leg must reproduce A1's cell id, not open a new identity space"
+        );
+    }
+
 }
