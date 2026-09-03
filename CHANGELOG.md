@@ -422,6 +422,19 @@ write-path returns + gain-map interop additions, already on main).
 
 ## [Unreleased]
 
+### Fixed — the aom scope's `validate()` accepted a lossless config the encode path refuses
+
+- `validate_aom_scope` documents itself as carrying the same predicates as the
+  encode path, but the `encode-imazen`-gated lossless refusal
+  (`src/encoder_aom.rs` `reject_unsupported_config`) had no `validate()` twin —
+  the zenav1-svt scope has always had one. So with `encode-imazen` +
+  `zenav1-aom-encode`, `.backend(Zenav1Aom).with_lossless(true)` returned
+  `Ok(())` from `validate()` and then failed at `encode_rgb8`. Proved from a
+  real downstream consumer during adversarial review, fixed with the mirror
+  `BackendUnsupportedParam { param: "lossless" }` check, and gated in
+  `validate_agrees_with_the_encode_path` (proved able to fail: reverting the
+  validation hunk reds it). (8395e86)
+
 ### Added — a third AV1 encode backend: `Av1Backend::Zenav1Aom` (`zenav1-aom-encode`)
 
 - **The one function the "there is still no aom ENCODE backend" entry below
