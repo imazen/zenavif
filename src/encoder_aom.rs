@@ -119,8 +119,28 @@
 //! Apple's decoder returns (1, 1, 1) — not (16, 16, 16), which is what a
 //! decoder ignoring `color_range = 0` would give.
 //!
-//! **Encode speed is unmeasured from this seam.** No number is quoted here
-//! because none has been run.
+//! # Encode speed (MEASURED 2026-09-02 — `benchmarks/aom_backend_2026-09-02.*`)
+//!
+//! Against the zenravif backend on the same buffer, 4:2:0 8-bit, medians over
+//! six qualities (Apple M4 Pro; harness `examples/aom_backend_bench.rs`):
+//!
+//! | size | aom s1 | zenravif s1 | aom s5 | zenravif s5 | aom s9 | zenravif s9 |
+//! |---|---|---|---|---|---|---|
+//! | 64² | 84 ms | 284 ms | 11 ms | 3.5 ms | 0.6 ms | 2.2 ms |
+//! | 256² | 681 ms | 2425 ms | 102 ms | 36 ms | 3.9 ms | 29 ms |
+//! | 512² | 2301 ms | 5847 ms | 256 ms | 119 ms | 13 ms | 109 ms |
+//! | 1024² | 7855 ms | 24047 ms | 897 ms | 432 ms | 49 ms | 393 ms |
+//!
+//! **The speed ladders are misaligned** — the same shape of finding the
+//! zenav1-svt seam records. aom is 2.5–3.2× faster at speed 1 and 3.9–8.0×
+//! faster at speed 9, but 2.0–3.2× *slower* at speed 5. zenavif speed N does
+//! not mean comparable work across backends.
+//!
+//! Per-pixel cost is **not** constant (ms/MP falls 7–25× from 64² to 1024²
+//! for both backends), so no single ms/MP number is quoted and the
+//! `alpha + beta·MP` fit is deliberately omitted — it is badly conditioned on
+//! that grid. See the `.meta` for the per-size table and for why the
+//! byte/quality columns are NOT an RD comparison.
 
 use crate::Result;
 use crate::encoder::{EncodeBitDepth, EncodeChromaSubsampling, EncodeColorModel, EncodePixelRange};

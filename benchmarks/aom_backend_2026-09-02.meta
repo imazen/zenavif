@@ -1,0 +1,81 @@
+# aom_backend_2026-09-02.tsv — zenav1-aom encode backend vs zenravif
+
+Harness   examples/aom_backend_bench.rs (committed; `cargo run --release
+          --example aom_backend_bench --features zenav1-aom-encode,encode`)
+Commit    8e41a93 (zenavif), zenav1-aom pin c3e1b4ab, zenravif f6c883b6
+Host      mac, Apple M4 Pro, 12 cores, macOS (darwin 25.5.0)
+Toolchain rustc 1.98.0 (88d9e12ae 2026-08-18), --release, run under `nice -n 19`
+Date      2026-09-02
+Grid      4 sizes {64,256,512,1024}^2 x 6 qualities {10,25,40,60,80,95}
+          x 3 speeds {1,5,9} x 2 backends = 144 cells, 4:2:0, 8-bit.
+          Both backends encode the SAME buffer in one process, alternating.
+Content   ONE synthetic image: smooth 2-axis gradient plus LCG noise added
+          EQUALLY to all three channels (noise in luma, chroma smooth). Per-
+          channel noise instead would grade 4:2:0 subsampling rather than the
+          encoder — measured, that variant scores 22.4 dB for BOTH backends.
+Metric    PSNR of the full encode->`zenavif::decode`->RGB round trip.
+
+## What this is NOT
+
+* NOT an RD comparison. Only 6 of the 24 speed-5 cells land within 0.15 dB of
+  each other, and PSNR is not a perceptual metric. Read the matched-quality
+  rows below as six data points on one synthetic image, not a curve.
+* NOT a regression gate. One encode per cell, no repetition, no interleaved
+  statistics. Use zenbench for anything that must detect a small change.
+* NOT dense enough to inform a constant. Nothing here is baked into source.
+
+## Wall time (median over the 6 qualities)
+
+    size     aom s1     zrv s1  |  aom s5    zrv s5  |  aom s9   zrv s9
+    64^2      83.9 ms   283.9   |   10.8 ms    3.5   |   0.6 ms   2.2
+    256^2    680.7 ms  2424.9   |  102.0 ms   35.5   |   3.9 ms  29.2
+    512^2   2300.6 ms  5847.0   |  256.1 ms  119.2   |  13.4 ms 108.7
+    1024^2  7854.8 ms 24046.5   |  897.0 ms  431.8   |  49.4 ms 393.4
+
+The speed ladders are MISALIGNED, the same shape of finding the zenav1-svt
+seam records: aom is 2.5-3.2x FASTER at speed 1 and 3.9-8.0x faster at speed
+9, but 2.0-3.2x SLOWER at speed 5. zenavif speed N does not mean comparable
+work across backends; `--cpu-used` 0..9 and the zenravif ladder are different
+dials that happen to share a 1..10 range.
+
+## Per-pixel cost is NOT constant, so no single ms/MP figure is given
+
+    ms per megapixel, median over qualities:
+    size      aom s1  aom s5  aom s9 | zrv s1  zrv s5  zrv s9
+    64^2       20483    2649     159 |  69312     867     549
+    256^2      10386    1556      60 |  37000     542     446
+    512^2       8776     977      51 |  22305     455     414
+    1024^2      7491     855      47 |  22932     412     375
+
+ms/MP falls by 7-25x from 64^2 to 1024^2 for BOTH backends. A two-parameter
+`alpha + beta*MP` fit is badly conditioned on this grid — it predicts a 555 ms
+intercept at speed 1 where 83.9 ms was measured at 64^2 — so the fit is
+deliberately NOT quoted. Report the per-size row that matches your size.
+
+## Fixed container overhead: 242 or 262 bytes
+
+`file_bytes - payload_bytes` takes exactly two values across all 144 cells:
+262 for zenav1-aom, 242 for zenravif (the aom seam writes an `nclx` colr the
+zenravif path spells differently). At 64^2 q10 that overhead is 89% of the
+file. Any bitrate model over these backends needs `header_bytes +
+content_bpp * pixels`, not a bpp alone.
+
+## The six matched-quality cells (|dPSNR| <= 0.15 dB, speed 5)
+
+    256^2  q25   aom   133 B / 33.96 dB   zrv   296 B / 34.11 dB   0.45x
+    256^2  q40   aom   189 B / 34.59 dB   zrv   574 B / 34.61 dB   0.33x
+    512^2  q10   aom   139 B / 33.52 dB   zrv   435 B / 33.57 dB   0.32x
+    512^2  q25   aom   192 B / 34.41 dB   zrv   421 B / 34.27 dB   0.46x
+    512^2  q40   aom   326 B / 34.53 dB   zrv   887 B / 34.66 dB   0.37x
+    1024^2 q40   aom   574 B / 34.69 dB   zrv  1615 B / 34.68 dB   0.36x
+
+All six are in the low-quality band and all six favour the aom backend by
+0.32-0.46x the payload bytes at equal PSNR. That is an observation on one
+synthetic image at one metric, not a claim about the codecs; a real RD
+comparison needs a corpus, a perceptual metric, and matched-quality
+interpolation rather than whichever grid points happened to coincide.
+
+At q80 and q95 nothing matched: at the same REQUESTED quality the aom backend
+lands at 0.74-0.86x the bytes and 1.3-1.75 dB lower PSNR, i.e. the two quality
+dials are calibrated to different operating points. That is a dial-mapping
+difference, not evidence about either encoder.

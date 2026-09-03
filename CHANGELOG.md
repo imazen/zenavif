@@ -515,6 +515,34 @@ write-path returns + gain-map interop additions, already on main).
   `SvtRs`, `AomRs`, `SvtRs420`) are untouched and
   `tests/deprecated_backend_aliases.rs` still compiles.
 
+### Measured — encode wall time, replacing the "unmeasured" note
+
+- `src/encoder_aom.rs` shipped saying encode speed was unmeasured rather than
+  quoting a number nobody had run. `examples/aom_backend_bench.rs` (committed)
+  now runs it: 144 cells, 4 sizes x 6 qualities x 3 speeds x 2 backends,
+  results in `benchmarks/aom_backend_2026-09-02.{tsv,meta}`.
+
+- **The speed ladders are misaligned**, the same shape of finding the
+  zenav1-svt seam records: the aom backend is 2.5-3.2x faster than zenravif at
+  speed 1 and 3.9-8.0x faster at speed 9, but 2.0-3.2x **slower** at speed 5.
+  zenavif speed N does not mean comparable work across backends.
+
+- **Per-pixel cost is not constant** — ms/MP falls 7-25x from 64² to 1024² for
+  both backends — so no single ms/MP figure is quoted, and the
+  `alpha + beta*MP` fit is deliberately omitted rather than reported: it is
+  badly conditioned on this grid (it predicts a 555 ms intercept at speed 1
+  where 84 ms was measured at 64²). The `.meta` carries the per-size table.
+
+- **Fixed container overhead is 262 bytes** for this seam (242 for zenravif),
+  constant across all 144 cells — 89% of a 64² q10 file. A bitrate model over
+  these backends needs `header_bytes + content_bpp * pixels`, not a bpp alone.
+
+- The byte/quality columns are explicitly **not** an RD comparison and the
+  `.meta` says so: only 6 of 24 speed-5 cells land within 0.15 dB, PSNR is not
+  a perceptual metric, and it is one synthetic image. Those six all favour the
+  aom backend at 0.32-0.46x the payload bytes at equal PSNR, which is recorded
+  as six data points, not a claim about the codecs.
+
 ### Fixed — the new variant broke the `__expert` build, and no CI job would have said so
 
 - `src/sweep.rs` carries two **exhaustive** `match config.backend` arms (the
