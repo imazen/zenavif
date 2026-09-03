@@ -1580,3 +1580,58 @@ fn svt_rs_direct_qp0_typed_refusal_outside_420_8bit() {
          unrelated bd10-consumer gate), got: {why}"
     );
 }
+
+/// `EncodeBitDepth::Twelve` (new in 0.2.0) is refused by NAME, at both
+/// `validate_for_input` and encode, rather than silently coded at 10.
+///
+/// This port has no 12-bit encode — its own encoder-init check is 8/10 only,
+/// matching C SVT-AV1 v4.2.0. The refusal lives in `svt_rs_depth_error`, the
+/// same predicate `validate_for_input` reads, so the two cannot diverge.
+/// Without it, `effective_bit_depth` would hand `pipeline.bit_depth = 12` to a
+/// pipeline with no 12-bit path.
+#[test]
+fn svt_rs_refuses_12_bit_by_name() {
+    let img = Img::new(
+        vec![
+            Rgb {
+                r: 40u8,
+                g: 90,
+                b: 160
+            };
+            64 * 64
+        ],
+        64,
+        64,
+    );
+    let cfg = svt_config().bit_depth(EncodeBitDepth::Twelve).speed(8);
+
+    let e = zenavif::encode_rgb8(img.as_ref(), &cfg, stop()).expect_err("12-bit must be refused");
+    let msg = format!("{e}");
+    assert!(
+        msg.contains("8- and 10-bit only") && msg.contains("Zenav1Aom"),
+        "the 12-bit refusal must name the limit and the backend that has it, got: {msg}"
+    );
+
+    // validate_for_input must agree with the encode path.
+    match cfg.validate_for_input(PlanInput::rgb8(64, 64)) {
+        Err(ValidationError::BackendUnsupportedParam {
+            backend, detail, ..
+        }) => {
+            assert_eq!(backend, "Av1Backend::Zenav1Svt");
+            assert!(
+                detail.contains("no 12-bit"),
+                "validate detail must name the limitation, got: {detail}"
+            );
+        }
+        other => panic!("12-bit must fail validate_for_input, got {other:?}"),
+    }
+
+    // The SAME config at 10 bits encodes, so the refusal is scoped to the
+    // depth and is not "this config never works".
+    zenavif::encode_rgb8(
+        img.as_ref(),
+        &svt_config().bit_depth(EncodeBitDepth::Ten).speed(8),
+        stop(),
+    )
+    .expect("10-bit must still encode on this backend");
+}
