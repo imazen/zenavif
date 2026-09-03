@@ -517,6 +517,17 @@ fn validate_agrees_with_the_encode_path() {
         cfg.validate()
             .expect_err(&format!("{what} must fail validate()"));
     }
+    // Lossless: the encode path has refused it since the seam landed
+    // (`reject_unsupported_config`), but `validate_aom_scope` was missing the
+    // twin check, so `.with_lossless(true)` VALIDATED and then failed at
+    // encode — measured 2026-09-02 from a downstream consumer. Gated like the
+    // builder itself; the CI seam run enables `encode-imazen`, so this runs
+    // there.
+    #[cfg(feature = "encode-imazen")]
+    aom_config()
+        .with_lossless(true)
+        .validate()
+        .expect_err("lossless must fail validate(), as it fails encode");
 }
 
 // ---------------------------------------------------------------------------

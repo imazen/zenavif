@@ -401,6 +401,21 @@ impl crate::EncoderConfig {
                 detail: "does not support gain maps (use Av1Backend::Zenravif)",
             });
         }
+        // Mirror of the encode path's `encode-imazen`-gated lossless refusal
+        // (`src/encoder_aom.rs` `reject_unsupported_config`): without this,
+        // `.with_lossless(true)` VALIDATED and then failed at encode — the
+        // exact validate/encode divergence this method documents itself as
+        // preventing. The zenav1-svt scope below has always had the twin
+        // check; this one was simply missing.
+        #[cfg(feature = "encode-imazen")]
+        if self.lossless {
+            return Err(ValidationError::BackendUnsupportedParam {
+                backend: BACKEND,
+                param: "lossless",
+                detail: "has no lossless mode wired (use Av1Backend::Zenravif \
+                         for lossless)",
+            });
+        }
         Ok(())
     }
 
