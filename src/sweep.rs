@@ -1563,6 +1563,7 @@ impl Stratum {
         match self.backend {
             crate::Av1Backend::Zenravif => {}
             crate::Av1Backend::Zenav1Svt => s.push_str("-svt"),
+            crate::Av1Backend::Zenav1Aom => s.push_str("-aom"),
             // validate() rejects this backend in every build, so no plan
             // can carry it; the token exists for id totality.
             crate::Av1Backend::Svtav1 => s.push_str("-svtav1"),
@@ -1847,12 +1848,16 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
         crate::Av1Backend::Zenravif => 0,
         crate::Av1Backend::Svtav1 => 1,
         crate::Av1Backend::Zenav1Svt => 2,
+        crate::Av1Backend::Zenav1Aom => 3,
     });
 
     // Whether the zenravif mediators (quantizer curve + speed_derived
-    // search table) are the ones this backend actually reads. svt-rs
-    // reads NEITHER — see the svt-rs block below.
-    let zenravif_mediated = config.backend != crate::Av1Backend::Zenav1Svt;
+    // search table) are the ones this backend actually reads. svt-rs and
+    // zenav1-aom read NEITHER — see their blocks below.
+    let zenravif_mediated = !matches!(
+        config.backend,
+        crate::Av1Backend::Zenav1Svt | crate::Av1Backend::Zenav1Aom
+    );
 
     // Resolved quantizers (quality is mediated; lossless pins 0).
     let lossless = config.lossless_effective();
@@ -1881,8 +1886,11 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
     // (zenmetrics `benchmarks/avif_sweep_permutation_retrofit_2026-09-01.md`):
     //   * speeds 7, 8, 9, 10 all resolve to preset 9 -> ONE encode;
     //   * quality 98 and 100 both resolve to QP 1 -> ONE encode.
+    // `!zenravif_mediated` is no longer a synonym for "is svt-rs" — the
+    // zenav1-aom backend joined it 2026-09-02 — so this guard names the
+    // backend explicitly. Behaviour for svt-rs configs is unchanged.
     #[cfg(feature = "zenav1-svt")]
-    if !zenravif_mediated {
+    if config.backend == crate::Av1Backend::Zenav1Svt {
         let (preset, qp, alpha_qp) = crate::encoder_svt_rs::svt_resolved_identity(config);
         h.u8(preset);
         h.u8(qp);
@@ -1929,6 +1937,26 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
     // backend byte above already keeps it apart from a zenravif cell.
     #[cfg(not(feature = "zenav1-svt"))]
     let _ = zenravif_mediated;
+
+    // zenav1-aom resolved state. Same contract as the svt-rs block above:
+    // this backend resolves quality through `quality_to_cq_level`
+    // (1..=100 -> `--cq-level` 63..=0, no clamp — both endpoints are
+    // byte-gated upstream) and speed through `speed_to_cpu_used`
+    // (1..=10 -> `--cpu-used` 0..=9, one-to-one), so those and not
+    // zenravif's quantizer/speed_derived are its byte identity. Without
+    // this the `zenravif_mediated == false` branch would hash NOTHING for
+    // an aom cell and every aom quality would fingerprint alike — the
+    // planner would merge cells that encode differently.
+    //
+    // The quality->cq line steps by 0.636 per quality point, so adjacent
+    // qualities genuinely alias (e.g. 99 and 100 both resolve to cq 0).
+    // Resolved-state identity is what makes that ONE encode instead of two.
+    #[cfg(feature = "zenav1-aom-encode")]
+    if config.backend == crate::Av1Backend::Zenav1Aom {
+        let (cpu_used, cq_level) = crate::encoder_aom::aom_resolved_identity(config);
+        h.u8(cpu_used);
+        h.u8(cq_level);
+    }
 
     // Pixel-path knobs.
     h.u8(match config.bit_depth {
@@ -2603,6 +2631,88 @@ mod tests {
             .with_svt_params(crate::expert::SvtParams::default());
         assert_eq!(fingerprint(&plain), fingerprint(&explicit));
         assert_eq!(svt_knob_label(crate::expert::SvtParams::default()), "");
+    }
+
+    /// The zenav1-aom backend reads NEITHER zenravif mediator, so
+    /// `zenravif_mediated` is false for it and the quantizer/alpha-quantizer
+    /// bytes are not hashed. Without the aom resolved-state block that would
+    /// make EVERY aom quality fingerprint alike, and the planner would merge
+    /// cells that encode differently — a silent RD-data corruption, not a
+    /// missing feature. This asserts the opposite in both directions:
+    /// qualities that resolve to DIFFERENT `--cq-level` must fingerprint
+    /// apart, and qualities that resolve to the SAME one must merge.
+    ///
+    /// Nearly shipped 2026-09-02: `sweep.rs` is behind `__expert`, which
+    /// appears in no CI job, so the two exhaustive `match config.backend`
+    /// arms this file carries did not even COMPILE against the new variant
+    /// and nothing would have said so.
+    #[cfg(feature = "zenav1-aom-encode")]
+    #[test]
+    fn aom_quality_resolves_into_the_fingerprint() {
+        let at = |q: f32| {
+            let mut c = crate::EncoderConfig::new()
+                .backend(crate::Av1Backend::Zenav1Aom)
+                .chroma_subsampling(EncodeChromaSubsampling::Yuv420)
+                .speed(6);
+            c = c.quality(q);
+            c
+        };
+        // cq(90) = 6, cq(50) = 32, cq(10) = 57 — three distinct encodes.
+        let (a, b, c) = (
+            fingerprint(&at(90.0)),
+            fingerprint(&at(50.0)),
+            fingerprint(&at(10.0)),
+        );
+        assert_ne!(a, b, "q90 and q50 resolve to different --cq-level");
+        assert_ne!(b, c, "q50 and q10 resolve to different --cq-level");
+        assert_ne!(a, c, "q90 and q10 resolve to different --cq-level");
+        // The quality->cq line steps by 0.636 per point, so 36 of the 99
+        // adjacent quality pairs resolve to the same `--cq-level` — ONE
+        // encode, which resolved-state identity merges. 98/99 (both cq 1) is
+        // the highest-quality such pair; 99/100 is NOT one (cq 1 vs 0), which
+        // this premise assertion is here to keep honest — it caught exactly
+        // that wrong guess when this test was written.
+        assert_eq!(
+            crate::encoder_aom::quality_to_cq_level(98.0),
+            crate::encoder_aom::quality_to_cq_level(99.0),
+            "the premise of the merge assertion below: q98 and q99 are both cq 1"
+        );
+        assert_ne!(
+            crate::encoder_aom::quality_to_cq_level(99.0),
+            crate::encoder_aom::quality_to_cq_level(100.0),
+            "q99 (cq 1) and q100 (cq 0) are DIFFERENT encodes"
+        );
+        assert_eq!(
+            fingerprint(&at(98.0)),
+            fingerprint(&at(99.0)),
+            "qualities resolving to the same --cq-level are ONE encode"
+        );
+        assert_ne!(
+            fingerprint(&at(99.0)),
+            fingerprint(&at(100.0)),
+            "qualities resolving to different --cq-level are TWO encodes"
+        );
+        // Speed is one-to-one onto --cpu-used, so no two speeds may merge.
+        let s = |sp: u8| {
+            fingerprint(
+                &crate::EncoderConfig::new()
+                    .backend(crate::Av1Backend::Zenav1Aom)
+                    .chroma_subsampling(EncodeChromaSubsampling::Yuv420)
+                    .quality(80.0)
+                    .speed(sp),
+            )
+        };
+        let mut seen = std::collections::BTreeSet::new();
+        for sp in 1..=10u8 {
+            assert!(seen.insert(s(sp)), "speed {sp} collided with another speed");
+        }
+        // And an aom cell must never share a fingerprint with the zenravif
+        // or svt-rs cell at the same dials.
+        let zenravif = crate::EncoderConfig::new()
+            .chroma_subsampling(EncodeChromaSubsampling::Yuv420)
+            .quality(90.0)
+            .speed(6);
+        assert_ne!(fingerprint(&at(90.0)), fingerprint(&zenravif));
     }
 
     /// The knobs are inert on every non-svt-rs backend, so setting them on

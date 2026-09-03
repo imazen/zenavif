@@ -161,6 +161,30 @@ pub(crate) fn speed_to_cpu_used(speed: u8) -> i32 {
     i32::from(speed.clamp(1, 10)) - 1
 }
 
+/// The RESOLVED encoder state an aom cell actually encodes with:
+/// `(cpu_used, cq_level)`.
+///
+/// The aom half of the sweep planner's byte-identity contract
+/// ([`crate::sweep::fingerprint`]). The planner's default mediators are
+/// zenravif's (`quality_to_quantizer` + the `speed_derived` search table) and
+/// this backend reads NEITHER — it resolves quality through
+/// [`quality_to_cq_level`] and speed through [`speed_to_cpu_used`]. Hashing an
+/// aom config with zenravif's mediators would both miss real aliases and risk
+/// merging cells that differ, so the fingerprint routes here instead.
+///
+/// Both mappings are injective over their input ranges (speed 1..=10 is
+/// one-to-one onto `--cpu-used` 0..=9; quality 1..=100 maps onto cq 63..=0 by
+/// rounding, so adjacent qualities can alias — `(100 - q) * 63 / 99` steps by
+/// 0.636 per quality point). Those aliases are exactly what a resolved-state
+/// fingerprint is for.
+#[cfg(feature = "__expert")]
+pub(crate) fn aom_resolved_identity(config: &EncoderConfig) -> (u8, u8) {
+    (
+        speed_to_cpu_used(config.speed) as u8,
+        quality_to_cq_level(config.quality) as u8,
+    )
+}
+
 /// The configuration slice this seam implements. Everything else is refused by
 /// name rather than silently served by zenravif or silently mis-encoded.
 fn reject_unsupported_config(config: &EncoderConfig) -> Result<()> {

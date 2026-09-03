@@ -515,6 +515,45 @@ write-path returns + gain-map interop additions, already on main).
   `SvtRs`, `AomRs`, `SvtRs420`) are untouched and
   `tests/deprecated_backend_aliases.rs` still compiles.
 
+### Fixed — the new variant broke the `__expert` build, and no CI job would have said so
+
+- `src/sweep.rs` carries two **exhaustive** `match config.backend` arms (the
+  cell-id token and the `fingerprint` backend byte). `#[non_exhaustive]` does
+  not apply inside the crate, so adding `Av1Backend::Zenav1Aom` broke that
+  build with two E0004s. Measured, not hypothetical: `cargo check --features
+  __expert,encode` failed while every other build and the whole test suite
+  passed.
+
+- **`__expert` appeared in NO CI job**, so the break would have shipped green.
+  `feature-check` now checks it in three combinations (alone, with the encode
+  backends, with the expert knobs) and runs the `--lib` tests that gate the
+  sweep fingerprint.
+
+- A second, quieter bug in the same place: `zenravif_mediated` decides whether
+  the zenravif quantizer/speed mediators are hashed into the fingerprint, and
+  the aom backend reads neither — so with only the `match` arms fixed, an aom
+  cell would have hashed **nothing** quality- or speed-dependent and every aom
+  quality would have fingerprinted alike. The sweep planner would then merge
+  cells that encode differently, which is silent RD-data corruption rather
+  than a missing feature. `encoder_aom::aom_resolved_identity` supplies the
+  resolved `(cpu_used, cq_level)` and the fingerprint hashes it, mirroring
+  `svt_resolved_identity`. The svt block's guard also changed from
+  `!zenravif_mediated` to an explicit `== Zenav1Svt`, because that expression
+  is no longer a synonym for "is svt-rs"; svt behaviour is unchanged.
+
+- Gated by `aom_quality_resolves_into_the_fingerprint`: qualities resolving to
+  different `--cq-level` must fingerprint apart, qualities resolving to the
+  same one must merge, no two speeds may collide, and an aom cell must never
+  share a fingerprint with the zenravif cell at the same dials. Proved able to
+  fail — dropping the two `h.u8` calls reddens it.
+
+  Its merge case was written on a guess (99 and 100 both resolve to cq 0) that
+  the test's own premise assertion rejected: `cq(q) = round((100-q)*63/99)`
+  gives cq 1 for q99 and cq 0 for q100. 36 of the 99 adjacent quality pairs do
+  alias; 98/99 (both cq 1) is the highest-quality one, and that is what the
+  test now uses. Recorded because the premise assertion is the reason a wrong
+  constant did not land.
+
 ### Measured — a third-party reader accepts the aom backend's output
 
 - The in-repo gate decodes with rav1d-safe, which is a different port from the

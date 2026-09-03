@@ -175,6 +175,20 @@ jobs:
         run: cargo check --no-default-features
       - name: Check zenavif-parse --features c_api
         run: cargo check -p zenavif-parse --features c_api
+      # `__expert` appeared in NO job before 2026-09-02, and it gates
+      # `src/sweep.rs`, which carries two EXHAUSTIVE `match config.backend`
+      # arms. Adding a variant to `Av1Backend` therefore broke the build for
+      # every `__expert` consumer while CI stayed green — measured, not
+      # hypothetical: `cargo check --features __expert,encode` failed with two
+      # E0004s that no CI job would have reported. These three combinations
+      # cover it alone, with the encode backends, and with the expert knobs.
+      - name: Check --features __expert (gates src/sweep.rs; was in no job)
+        run: |
+          cargo check --features __expert,encode
+          cargo check --features __expert,encode,zenav1-aom-encode
+          cargo check --features __expert,encode,encode-imazen,zenav1-svt,zenav1-aom,zenav1-aom-encode
+      - name: Test --features __expert (the sweep fingerprint gates)
+        run: cargo test --features __expert,encode,encode-imazen,zenav1-svt,zenav1-aom,zenav1-aom-encode --lib
 
   wasm:
     name: WASM (wasm32-wasip1, members)
