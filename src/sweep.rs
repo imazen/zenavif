@@ -932,6 +932,93 @@ impl SweepAxes {
         axes
     }
 
+    /// DOE **era-delta stability check** (`zenmetrics/benchmarks/
+    /// avif_newera_sweep_2026-09-03.md` arm-set B), registered against the
+    /// `zenav1-svt` `ef0b122b` → `2ca060f4` pin bump (issue #18, both
+    /// rounds).
+    ///
+    /// A1 crossed every knob only with the default speed (4); A2 crossed
+    /// them only with speed 6, and never with 7; the bare speed-7 stratum
+    /// has only ever been a control cell. This plan crosses this era-delta
+    /// audit's priority knob list with **speeds {4, 6, 7}** — same shape as
+    /// [`svt_doe_b6`] (a restricted `svt_knobs` list × an explicit `speeds`
+    /// list, full cross, every cell ≤2 deviations at
+    /// [`SweepBuilder::with_max_deviations`]`(2)`) rather than inventing
+    /// per-knob speed restriction the builder doesn't otherwise support.
+    ///
+    /// Two things make this list "priority", not arbitrary:
+    ///
+    /// - `tn3` (tune=3, the largest Stage-A win and the least reliable one —
+    ///   median −6.03%/−4.23% at s4/s6, CI crossing zero at s4) forces
+    ///   `force_screen_content_mode = Some(3)` as one of its 9 aliased
+    ///   fields (dossier H-4). That field is measured **live** at speed 7 —
+    ///   dead everywhere else tested — for the first time in this era-delta
+    ///   audit (`avif_newera_delta_2026-09-03.md` §4.1), via the port-level
+    ///   `knob_byte_identity` probe, not through this sweep interface. `tn3`
+    ///   has never been measured at speed 7. This plan is that measurement.
+    /// - `shp7`/`shp3` (largest, most consistent cost — both backends' image
+    ///   tunes force sharpness 7), the three `vbst*` arms (large tails, IQR
+    ///   up to 12), and `qml1.2.10`/`qml1.4.10` (sign-flip between presets)
+    ///   round out the delta audit's risk list (§5) — knobs worth confirming
+    ///   are still measured the same at the new pin, at the two presets
+    ///   (7 and 9) never previously crossed with any knob.
+    ///
+    /// `scm3` rides along at every speed in this plan (rather than being
+    /// hand-restricted to speed 7 alone) for the same "uniform cross is less
+    /// error-prone than an asymmetric one" reason `svt_doe_b6` already
+    /// settled — its speed-4/speed-6 legs are known zeros (dead, measured
+    /// both in Stage A and in this era-delta audit's own probe) and cost
+    /// nothing extra under content-addressed dedup.
+    ///
+    /// [`svt_doe_b6`]: Self::svt_doe_b6
+    #[must_use]
+    pub fn svt_doe_era_delta_r1() -> Self {
+        let mut axes = Self::svt_doe_main();
+        axes.speeds = vec![4, 6, 7];
+        axes.bit_depths = vec![EncodeBitDepth::Auto];
+        axes.svt_knobs = Self::svt_doe_era_delta_r1_knob_sets();
+        axes
+    }
+
+    /// The priority-list knob set for [`svt_doe_era_delta_r1`] — every value
+    /// pulled from [`svt_doe_knob_sets`] rather than re-derived, so this
+    /// cannot drift from what A1/A2 already measured. `scm3` is included
+    /// even though [`svt_doe_t1_live_knob_sets`] excludes it as inert: this
+    /// plan exists specifically to re-test that exclusion at speeds A1/A2
+    /// never crossed it with.
+    ///
+    /// [`svt_doe_knob_sets`]: Self::svt_doe_knob_sets
+    /// [`svt_doe_t1_live_knob_sets`]: Self::svt_doe_t1_live_knob_sets
+    /// [`svt_doe_era_delta_r1`]: Self::svt_doe_era_delta_r1
+    #[must_use]
+    pub fn svt_doe_era_delta_r1_knob_sets() -> Vec<crate::expert::SvtParams> {
+        use crate::expert::SvtParams;
+        let all = Self::svt_doe_knob_sets();
+        let want = |pred: &dyn Fn(&SvtParams) -> bool| -> SvtParams {
+            *all.iter()
+                .find(|p| pred(p))
+                .expect("expected knob level missing from svt_doe_knob_sets")
+        };
+        vec![
+            SvtParams::default(), // index 0 — the shared default stratum
+            want(&|p| p.tune == 3),
+            want(&|p| p.sharpness == 7),
+            want(&|p| p.sharpness == 3),
+            want(&|p| {
+                p.enable_variance_boost && p.variance_boost_strength == 2 && p.variance_octile == 5
+            }),
+            want(&|p| {
+                p.enable_variance_boost && p.variance_boost_strength == 3 && p.variance_octile == 5
+            }),
+            want(&|p| {
+                p.enable_variance_boost && p.variance_boost_strength == 3 && p.variance_octile == 7
+            }),
+            want(&|p| p.enable_qm && p.min_qm_level == 2 && p.max_qm_level == 10),
+            want(&|p| p.enable_qm && p.min_qm_level == 4 && p.max_qm_level == 10),
+            want(&|p| p.force_screen_content_mode == Some(3)),
+        ]
+    }
+
     /// Every unordered pair of two distinct [`svt_doe_knob_sets`] levels,
     /// composed field-wise, default first.
     ///
@@ -2131,6 +2218,7 @@ static PLANS: &[(&str, fn() -> SweepAxes)] = &[
         "svt_doe_t1_bd10_transfer",
         SweepAxes::svt_doe_t1_bd10_transfer,
     ),
+    ("svt_doe_era_delta_r1", SweepAxes::svt_doe_era_delta_r1),
 ];
 
 impl SweepAxes {
@@ -3031,6 +3119,82 @@ mod tests {
         assert_eq!(narrow.cells.len(), 11, "{:?}", narrow.cells.len());
     }
 
+    /// `svt_doe_era_delta_r1`: 10 knob levels × 3 speeds, every cell reached
+    /// at ≤2 deviations — the same arithmetic shape as `svt_doe_b6`'s own
+    /// 9×3=27, and the knob values must be pulled from `svt_doe_knob_sets`
+    /// verbatim (byte-for-byte `SvtParams` equality), never re-derived.
+    #[cfg(feature = "zenav1-svt")]
+    #[test]
+    fn svt_doe_era_delta_r1_is_ten_knobs_by_three_speeds_from_the_owner_values() {
+        use crate::expert::SvtParams;
+        let axes = SweepAxes::svt_doe_era_delta_r1();
+        assert_eq!(axes.speeds, vec![4, 6, 7]);
+
+        let knobs = &axes.svt_knobs;
+        assert_eq!(knobs.len(), 10, "1 default + 9 priority-list levels");
+        assert_eq!(
+            knobs[0],
+            SvtParams::default(),
+            "index 0 is the default stratum"
+        );
+
+        // Every non-default level must equal one from svt_doe_knob_sets
+        // exactly — this plan is a filter over the owner, not a
+        // re-derivation, so it cannot drift from what A1/A2 measured.
+        let owner = SweepAxes::svt_doe_knob_sets();
+        for k in &knobs[1..] {
+            assert!(
+                owner.contains(k),
+                "level {k:?} is not byte-identical to any svt_doe_knob_sets entry"
+            );
+        }
+        // scm3 (force_screen_content_mode = Some(3)) must be present: this
+        // plan exists specifically to re-test it at speeds A1/A2 never
+        // crossed it with.
+        assert!(
+            knobs.iter().any(|k| k.force_screen_content_mode == Some(3)),
+            "scm3 missing from the era-delta priority list"
+        );
+        // tn3 (tune=3) must be present: the top risk-list priority.
+        assert!(
+            knobs.iter().any(|k| k.tune == 3),
+            "tn3 missing from the era-delta priority list"
+        );
+
+        let plan = SweepBuilder::new(axes, QualityGrid::Explicit(vec![45.0]))
+            .with_max_deviations(2)
+            .plan();
+        assert_eq!(plan.cells.len(), 30, "{:?}", plan.cells.len());
+        assert!(plan.cells.iter().all(|c| c.deviations <= 2));
+        assert_eq!(plan.cells[0].deviations, 0, "control leads");
+        assert_eq!(
+            plan.duplicates_merged, 0,
+            "one knob axis, no collision expressible"
+        );
+        assert!(plan.invalid_skipped.is_empty());
+
+        let mut ids: Vec<_> = plan.cells.iter().map(|c| c.id.clone()).collect();
+        ids.sort();
+        let n = ids.len();
+        ids.dedup();
+        assert_eq!(ids.len(), n, "duplicate cell ids in the era-delta plan");
+
+        for cell in &plan.cells {
+            let base = cell
+                .id
+                .rsplit_once("_q")
+                .expect("cell id has a _q suffix")
+                .0;
+            let parsed = config_from_cell_id(base, cell.quality)
+                .unwrap_or_else(|e| panic!("parse '{base}': {e}"));
+            assert_eq!(
+                fingerprint(&parsed),
+                cell.fingerprint,
+                "id '{base}' did not round-trip"
+            );
+        }
+    }
+
     /// `names()` and `by_name()` read ONE table, so every advertised name
     /// must resolve and the count must match. This is the gate on the
     /// drift that made zenmetrics' error message omit `svt_doe_b6`.
@@ -3060,6 +3224,7 @@ mod tests {
             "svt_doe_t1_bd10_ladder",
             "svt_doe_t1_bd10_knobs",
             "svt_doe_t1_bd10_transfer",
+            "svt_doe_era_delta_r1",
         ] {
             assert!(
                 names.contains(&n),
