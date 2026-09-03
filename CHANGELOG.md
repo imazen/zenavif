@@ -561,6 +561,7 @@ to a 10/12-bit swing would need a value-scaling rule nothing here measures.
 | bd12 coded luma, 3 sizes, q90 s6 | 50.24-50.57 dB | 40 dB |
 | bd10 flat luma vs longhand H.273, q99 | worst **0** code values | 0 |
 | bd12 flat luma vs longhand H.273, q99 | worst **1** code value | 1 |
+| bd10/bd12 container RGB round trip, 3 sizes x q80/q90 | 43.56-48.12 dB | 38 dB |
 
 Every cell decodes with **rav1d-safe** — a different port from the one that
 encoded it — which reports the requested coded depth and whose luma plane is
@@ -570,6 +571,15 @@ compared against an H.273 expectation written longhand in the test, not against
 studio/full range mix-up moves these by hundreds to thousands of code values.
 `aom_backend_12_bit_signals_profile_2` reads `seq_profile` / `high_bitdepth` /
 `twelve_bit` back out of the `av1C` box.
+
+`aom_hbd_decodes_correctly_through_the_container` closes the other half:
+`zenavif::decode` — the path a caller actually uses, which applies `colr`,
+undoes the studio swing and converts back to RGB — recovers the source across
+3 sizes x 2 depths x 2 qualities. That is a different code path from the
+raw-OBU comparison, so a mux-level colour error that a coded-luma check cannot
+see would land here. It also pins the OUTPUT PIXEL TYPE, which follows the
+coded depth: `Rgb<u16>` at 10 and 12 bits, `Rgb<u8>` at 8, and a caller that
+assumed otherwise gets `None`.
 
 Mutation proofs are `#[test]`s using `catch_unwind`, matching the pattern the
 8-bit gate set: `hbd_gate_can_fail_on_wrong_content_and_wrong_depth` (wrong

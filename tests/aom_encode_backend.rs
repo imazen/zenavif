@@ -47,6 +47,7 @@
 //! | bd12 coded luma, 3 sizes, q90 s6 | 50.24-50.57 dB | 40 dB |
 //! | bd10 flat luma vs longhand H.273, q99 | worst 0 code values | 0 |
 //! | bd12 flat luma vs longhand H.273, q99 | worst 1 code value | 1 |
+//! | bd10/bd12 container RGB round trip, 3 sizes x q80/q90 | 43.56-48.12 dB | 38 dB |
 //!
 //! A broken decode lands far below any of them: wrong content measures 6.4 dB
 //! and a two-byte payload corruption fails to decode at all. The
@@ -81,6 +82,17 @@ fn aom_config() -> EncoderConfig {
     EncoderConfig::new()
         .backend(Av1Backend::Zenav1Aom)
         .chroma_subsampling(EncodeChromaSubsampling::Yuv420)
+}
+
+/// [`aom_config`] at a coded depth of `depth` bits. One place spells the
+/// depth, so a test cannot ask for 12 and assert about 10.
+fn hbd_config(depth: u8) -> EncoderConfig {
+    aom_config().bit_depth(match depth {
+        8 => zenavif::EncodeBitDepth::Eight,
+        10 => zenavif::EncodeBitDepth::Ten,
+        12 => zenavif::EncodeBitDepth::Twelve,
+        other => panic!("hbd_config: {other} is not a depth this seam codes"),
+    })
 }
 
 /// Uniform mid-gray. The most mutation-sensitive content there is: any
@@ -764,13 +776,8 @@ fn hbd_luma_psnr(avif: &[u8], src: ImgRef<'_, Rgb<u16>>, depth: u8, label: &str)
 /// H.273 expectation.
 #[test]
 fn aom_backend_encodes_10_and_12_bit_that_decode() {
-    for (depth, cfg) in [
-        (10u8, aom_config().bit_depth(zenavif::EncodeBitDepth::Ten)),
-        (
-            12u8,
-            aom_config().bit_depth(zenavif::EncodeBitDepth::Twelve),
-        ),
-    ] {
+    for depth in [10u8, 12] {
+        let cfg = hbd_config(depth);
         for &(w, h) in &[(64usize, 64usize), (65, 33), (192, 128)] {
             let src = gradient_rgb16(w, h);
             let cfg = cfg.clone().quality(90.0).speed(6);
@@ -799,15 +806,9 @@ fn aom_backend_encodes_10_and_12_bit_that_decode() {
 fn aom_backend_hbd_flat_content_decodes_exactly() {
     for depth in [10u8, 12] {
         let src = flat_rgb16(64, 64, 60293);
-        let cfg = if depth == 10 {
-            aom_config().bit_depth(zenavif::EncodeBitDepth::Ten)
-        } else {
-            aom_config().bit_depth(zenavif::EncodeBitDepth::Twelve)
-        }
         // quality 99, not 100: `--cq-level 0` PANICS upstream on flat content
         // at every depth (`aom_cq0_still_panics_on_flat_content` pins it).
-        .quality(99.0)
-        .speed(6);
+        let cfg = hbd_config(depth).quality(99.0).speed(6);
         let enc = zenavif::encode_rgb16(src.as_ref(), &cfg, stop())
             .unwrap_or_else(|e| panic!("bd{depth} flat: encode must succeed: {e}"));
         // MEASURED bounds, per depth — see `assert_hbd_flat_luma_within`.
@@ -834,13 +835,7 @@ fn aom_backend_hbd_flat_content_decodes_exactly() {
 fn aom_backend_codes_hbd_from_8_bit_input() {
     let src = gradient_rgb8(96, 64);
     for depth in [10u8, 12] {
-        let cfg = if depth == 10 {
-            aom_config().bit_depth(zenavif::EncodeBitDepth::Ten)
-        } else {
-            aom_config().bit_depth(zenavif::EncodeBitDepth::Twelve)
-        }
-        .quality(90.0)
-        .speed(6);
+        let cfg = hbd_config(depth).quality(90.0).speed(6);
         let enc = encode(src.as_ref(), &cfg);
         let label = format!("rgb8 -> bd{depth}");
         assert_is_avif_container(&enc.avif_file, &label);
@@ -972,6 +967,77 @@ fn other_backends_refuse_12_bit_rather_than_coding_10() {
     );
 }
 
+/// A high-bit-depth AVIF also decodes correctly **through the container** —
+/// `zenavif::decode`, the way a caller actually consumes one — and not only
+/// through the raw-OBU seam the other high-bit-depth gates use.
+///
+/// This is a different path from `hbd_planes`: it applies the container's
+/// `colr`, undoes the studio swing and converts YUV back to RGB, so it is what
+/// catches a mux-level colour error that a coded-luma comparison would not.
+/// It also pins the OUTPUT PIXEL TYPE, which changes with the coded depth:
+/// `Rgb<u16>` at 10 and 12 bits, `Rgb<u8>` at 8.
+///
+/// MEASURED over 3 sizes x 2 depths x 2 qualities before the bound was
+/// written: **43.56–48.12 dB**, worst cell 192x128 bd12 q80. Bound 38 dB,
+/// ~5.5 dB of headroom, matching the 8-bit gates' convention.
+#[test]
+fn aom_hbd_decodes_correctly_through_the_container() {
+    let mut worst = f64::INFINITY;
+    for &(w, h) in &[(64usize, 64usize), (65, 33), (192, 128)] {
+        let src = gradient_rgb16(w, h);
+        for depth in [10u8, 12] {
+            for q in [80.0f32, 90.0] {
+                let cfg = hbd_config(depth).quality(q).speed(6);
+                let enc = zenavif::encode_rgb16(src.as_ref(), &cfg, stop())
+                    .unwrap_or_else(|e| panic!("bd{depth} {w}x{h} q{q}: {e}"));
+                let label = format!("bd{depth} {w}x{h} q{q}");
+                let p = container_rgb16_psnr(&enc.avif_file, src.as_ref(), &label);
+                assert!(p >= 38.0, "{label}: container PSNR {p:.2} dB < 38 dB");
+                worst = worst.min(p);
+            }
+        }
+    }
+    eprintln!("container round trip: worst {worst:.2} dB over 12 cells");
+    // 8 bits comes back as Rgb<u8>, not Rgb<u16> — the pixel type follows the
+    // coded depth, and a caller that assumed otherwise would get `None`.
+    let src8 = gradient_rgb8(64, 64);
+    let enc8 = encode(src8.as_ref(), &aom_config().quality(90.0).speed(6));
+    let dec8 = zenavif::decode(&enc8.avif_file).expect("bd8 decode");
+    assert!(
+        dec8.try_as_imgref::<Rgb<u8>>().is_some(),
+        "an 8-bit aom AVIF must decode to Rgb<u8>"
+    );
+    assert!(
+        dec8.try_as_imgref::<Rgb<u16>>().is_none(),
+        "an 8-bit aom AVIF must NOT present as Rgb<u16>"
+    );
+}
+
+/// `zenavif::decode` -> `Rgb<u16>` PSNR against the source, over the full u16
+/// scale. Panics if the decode does not present as `Rgb<u16>`, which is itself
+/// part of the assertion (see the caller).
+fn container_rgb16_psnr(avif: &[u8], src: ImgRef<'_, rgb::Rgb<u16>>, label: &str) -> f64 {
+    let dec = zenavif::decode(avif)
+        .unwrap_or_else(|e| panic!("{label}: a high-bit-depth aom AVIF must decode: {e}"));
+    assert_eq!(dec.width() as usize, src.width(), "{label}: width");
+    assert_eq!(dec.height() as usize, src.height(), "{label}: height");
+    let out = dec
+        .try_as_imgref::<rgb::Rgb<u16>>()
+        .unwrap_or_else(|| panic!("{label}: a 10/12-bit decode must yield Rgb<u16>"));
+    let mut se = 0f64;
+    for (p, q) in src.buf().iter().zip(out.buf().iter()) {
+        for (a, b) in [(p.r, q.r), (p.g, q.g), (p.b, q.b)] {
+            let d = f64::from(a) - f64::from(b);
+            se += d * d;
+        }
+    }
+    if se == 0.0 {
+        return f64::INFINITY;
+    }
+    let mse = se / (src.buf().len() * 3) as f64;
+    10.0 * (65535.0 * 65535.0 / mse).log10()
+}
+
 /// The Cs400 grayscale path is 8-bit only, and says so.
 ///
 /// `encode_gray8` takes u8 samples and this seam passes them through as the
@@ -982,10 +1048,7 @@ fn other_backends_refuse_12_bit_rather_than_coding_10() {
 fn aom_backend_refuses_hbd_grayscale() {
     let gray: Vec<u8> = (0..64 * 64).map(|i| ((i * 7) % 256) as u8).collect();
     let img = Img::new(gray, 64, 64);
-    for cfg in [
-        aom_config().bit_depth(zenavif::EncodeBitDepth::Ten),
-        aom_config().bit_depth(zenavif::EncodeBitDepth::Twelve),
-    ] {
+    for cfg in [hbd_config(10), hbd_config(12)] {
         let e = zenavif::encode_gray8(img.as_ref(), &cfg, stop())
             .expect_err("high-bit-depth grayscale must be refused");
         assert!(
@@ -1166,6 +1229,19 @@ fn hbd_gate_can_fail_on_wrong_content_and_wrong_depth() {
         || {
             assert_hbd_flat_luma_within(&fenc.avif_file, b.as_ref(), 10, 0, "mutant-flat");
         },
+    );
+    // The CONTAINER round trip must also compare against the source, not
+    // merely decode — it is a different code path from the coded-luma gate
+    // (it applies `colr`, undoes the studio swing, converts back to RGB).
+    let cenc = zenavif::encode_rgb16(a.as_ref(), &hbd_config(12).quality(90.0).speed(6), stop())
+        .expect("bd12 encode");
+    let cp = container_rgb16_psnr(&cenc.avif_file, a.as_ref(), "control-container");
+    assert!(cp >= 38.0, "control-container: {cp:.2} dB");
+    let cq = container_rgb16_psnr(&cenc.avif_file, b.as_ref(), "mutant-container");
+    assert!(
+        cq < 38.0,
+        "MUTATION PROOF FAILED: a bd12 encode of A scored {cq:.2} dB against source B \
+         through the container — that comparison is vacuous"
     );
     // ... and the bound must be load-bearing, not permissive: the same
     // comparison with a bound wide enough to swallow a range error would pass,
