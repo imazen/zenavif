@@ -18,7 +18,7 @@ never silent degradation. Sources: `src/encoder.rs`, `src/encoder_svt_rs.rs`,
 | Axis | Zenravif (default, `encode`) | Zenav1Svt (`zenav1-svt`, experimental) | Zenav1Aom (`zenav1-aom-encode`, experimental) |
 |---|---|---|---|
 | Input: RGB8 | yes | yes | yes |
-| Input: RGBA8 (alpha item) | yes | yes (alpha as Cs400 `auxl` item, `alpha_quality` fallback honored) | rejected — the Cs400 mono encode an `auxl` alpha item needs exists here, the item itself is not wired |
+| Input: RGBA8 (alpha item) | yes | yes (alpha as Cs400 `auxl` item, `alpha_quality` fallback honored) | rejected at **both** `validate_for_input` and encode (zenavif#44, fixed 2026-09-03 — the validate half was missing, so an alpha config validated and then failed at `encode_rgba8`) — the Cs400 mono encode an `auxl` alpha item needs exists here, the item itself is not wired. Unchanged by the bit-depth work: alpha is refused at 8, 10 and 12 |
 | Input: Gray8 → Cs400 mono | yes (`encode-mono` gate) | yes (`encode-mono` gate) | yes (`encode-mono` gate) |
 | Input: RGB16/RGBA16 → 10-bit AV1 | yes (`encode_rgb16`/`encode_rgba16`, identity-RGB 4:4:4) | yes (#33; YCbCr 4:2:0 at 10-bit precision via the port's native u16 `try_encode_frame_420_hbd`; RGBA16 needs speed ≥ 7 for its 10-bit Cs400 alpha item) | **RGB16 yes** (2026-09-03; YCbCr 4:2:0 at 8/10/12 bits via `rgbx_to_yuv420_u16`, NOT identity-GBR — same shape as Zenav1Svt, and `validate_for_input` allows `16-bit + Yuv420` for these two backends only). RGBA16 rejected — the `auxl` alpha item is not built |
 | Bit depth 8 | yes | yes | yes |

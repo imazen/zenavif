@@ -489,6 +489,23 @@ Gated in `validate_agrees_with_the_encode_path`: alpha input must fail
 `validate_for_input`, the same config without alpha must pass, and 16-bit RGB
 must pass. Mutation-verified — neutering the new arm turns that test red.
 
+### Verified — the 7-platform Test matrix COMPLETED, for the first time
+
+Run 33710032112 on `820947a`: **15/15 jobs green**, `Fuzz` and `link-u corpus`
+green on the same commit. Worth recording because the matrix had never finished
+before — consecutive pushes kept superseding it under
+`cancel-in-progress`, so every "green" before this was a partial.
+
+The gate is confirmed to have RUN, not merely to have not failed. All six
+native Test platforms — ubuntu-latest, ubuntu-24.04-arm, macos-latest,
+macos-26-intel, windows-latest, windows-11-arm — print
+`aom_encode_backend ran: 25 tests passed` from the assert-the-gate-ran step.
+(`Test (i686 cross)` is a separate `cross` job with its own reduced step list
+and has never carried that step; its absence there is by design, not a silent
+skip.) The downstream-consumer step printed its encodes on ubuntu-latest:
+`aom Eight: 364 bytes`, `aom Ten: 542 bytes`, `aom Twelve: 415 bytes`, and the
+zenravif 12-bit refusal text.
+
 ### Added — `dev/downstream-probe/`, the `cargo semver-checks` substitute
 
 `cargo semver-checks` cannot run on this crate. `dev/downstream-probe/` is an
