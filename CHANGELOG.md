@@ -456,6 +456,28 @@ still gates them. Also not cleared: removing
 `src/decoder.rs`, which is behind `unsafe-asm` and is compiled by nothing (not
 CI, not this box), so removing it would be an edit made blind. It stays queued.
 
+### Fixed — `validate_for_input` accepted alpha the aom seam refuses (zenavif#44)
+
+`8395e86` fixed one instance of a class — `validate_aom_scope` missing the
+encode path's lossless refusal. zenavif#44 found the second, in
+`validate_for_input` rather than `validate`: an **alpha** input validated and
+then failed at `encode_rgba8`, because the aom seam does not build the Cs400
+`auxl` alpha item. `input_has_alpha` is exactly the config x input property
+that method exists to check, and the zenav1-svt backend needs no such arm
+because it *implements* alpha. Now refused there with
+`BackendUnsupportedParam { param: "alpha input" }`.
+
+The issue's other observation is also addressed, in the opposite direction:
+16-bit input used to be rejected for this backend only **incidentally**, by the
+generic identity-RGB-has-no-4:2:0 rule, with no aom-specific check behind it.
+That would have become the wrong answer the moment the seam grew a 16-bit entry
+point — which it just did, so the aom backend is now excluded from that rule
+and 16-bit RGB validates, with a comment saying why.
+
+Gated in `validate_agrees_with_the_encode_path`: alpha input must fail
+`validate_for_input`, the same config without alpha must pass, and 16-bit RGB
+must pass. Mutation-verified — neutering the new arm turns that test red.
+
 ### Added — `dev/downstream-probe/`, the `cargo semver-checks` substitute
 
 `cargo semver-checks` cannot run on this crate. `dev/downstream-probe/` is an

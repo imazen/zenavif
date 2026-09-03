@@ -543,6 +543,32 @@ fn validate_agrees_with_the_encode_path() {
         cfg.validate()
             .expect_err(&format!("{what} must fail validate()"));
     }
+    // zenavif#44: alpha input must FAIL validate_for_input, because it fails
+    // encode. `input_has_alpha` is a config x input property, so `validate()`
+    // alone cannot see it — this is the case that used to return Ok and then
+    // error at `encode_rgba8`.
+    use zenavif::PlanInput;
+    aom_config()
+        .validate_for_input(PlanInput::rgba8(64, 64))
+        .expect_err("alpha input must fail validate_for_input, as it fails encode");
+    // The same config WITHOUT alpha validates, so the refusal is scoped to
+    // alpha and is not just "this backend never validates".
+    aom_config()
+        .validate_for_input(PlanInput::rgb8(64, 64))
+        .expect("RGB8 input must validate for the aom backend");
+    // And 16-bit RGB input validates too, since `encode_rgb16` reaches the
+    // seam. Before 2026-09-03 the generic identity-RGB 4:2:0 rule rejected it
+    // INCIDENTALLY (zenavif#44's control observed exactly that), which would
+    // have been the wrong answer the moment the seam grew the entry point.
+    aom_config()
+        .validate_for_input(PlanInput {
+            width: 64,
+            height: 64,
+            input_is_16bit: true,
+            input_has_alpha: false,
+        })
+        .expect("16-bit RGB input must validate for the aom backend");
+
     // Lossless: the encode path has refused it since the seam landed
     // (`reject_unsupported_config`), but `validate_aom_scope` was missing the
     // twin check, so `.with_lossless(true)` VALIDATED and then failed at

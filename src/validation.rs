@@ -270,6 +270,26 @@ impl crate::EncoderConfig {
                 });
             }
         }
+        // zenavif#44: the aom seam refuses alpha at `reject_aom_backend` (the
+        // Cs400 mono encode an `auxl` item needs exists, the item itself is
+        // not built), and `validate_for_input` had no twin — so an alpha input
+        // VALIDATED and then failed at encode. `input_has_alpha` is exactly
+        // the config x input property this method exists to check. The
+        // zenav1-svt backend needs no such arm because it IMPLEMENTS alpha.
+        #[cfg(feature = "zenav1-aom-encode")]
+        if self.backend == crate::Av1Backend::Zenav1Aom && input.input_has_alpha {
+            return Err(ValidationError::BackendUnsupportedParam {
+                backend: "Av1Backend::Zenav1Aom",
+                param: "alpha input",
+                detail: "does not build the Cs400 `auxl` alpha auxiliary item, at any \
+                         bit depth (the monochrome encode it would need does exist here); \
+                         use Av1Backend::Zenravif for alpha",
+            });
+        }
+        // The 16-bit-input rule above no longer fires for this backend
+        // (`encode_rgb16` reaches the aom seam since 2026-09-03), which is why
+        // the aom arm was added to its exclusion list rather than left to
+        // reject 16-bit input INCIDENTALLY, as zenavif#44 observed it doing.
         // NOT checked here: the zenav1-aom Cs400 grayscale path is 8-bit only
         // while its colour path codes 8/10/12. That predicate needs to know
         // the input is grayscale, and `PlanInput` has no such field — it is a
