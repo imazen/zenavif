@@ -186,3 +186,89 @@ fn zenav1_aom_feature_admits_the_decode_backend() {
     // error is expected, a missing variant would be a build failure.
     let _ = err;
 }
+
+/// With `zenav1-aom-encode` on, an in-scope 4:2:0 YCbCr config on the aom
+/// ENCODE backend must VALIDATE. (The decode test above is about
+/// `DecodeBackend::Zenav1Aom`; this is the encode-side twin, and the two
+/// live behind DIFFERENT features — see the `zenav1-aom` vs
+/// `zenav1-aom-encode` note in `Cargo.toml`.)
+#[cfg(feature = "zenav1-aom-encode")]
+#[test]
+fn zenav1_aom_encode_feature_admits_the_encode_backend() {
+    use zenavif::{Av1Backend, EncodeChromaSubsampling, EncodeColorModel, EncoderConfig};
+    EncoderConfig::new()
+        .backend(Av1Backend::Zenav1Aom)
+        .chroma_subsampling(EncodeChromaSubsampling::Yuv420)
+        .color_model(EncodeColorModel::YCbCr)
+        .validate()
+        .expect("zenav1-aom-encode is enabled, so an in-scope 4:2:0 YCbCr config must validate");
+}
+
+/// With `zenav1-aom-encode` OFF, the same config must be rejected as
+/// unavailable and the error must name that feature — NOT `zenav1-aom`,
+/// which is the decode backend and would send a caller to the wrong switch.
+///
+/// This is the contract a same-feature test cannot check: the aom encode
+/// gate (`tests/aom_encode_backend.rs`) is `#![cfg(feature =
+/// "zenav1-aom-encode")]`, so nothing there ever observes the feature-off
+/// path. Without this, a build with the feature off could silently serve an
+/// `Av1Backend::Zenav1Aom` request with zenravif and no test would notice.
+#[cfg(all(feature = "encode", not(feature = "zenav1-aom-encode")))]
+#[test]
+fn without_zenav1_aom_encode_the_backend_is_unavailable() {
+    use zenavif::{
+        Av1Backend, EncodeChromaSubsampling, EncodeColorModel, EncoderConfig, ValidationError,
+    };
+    let err = EncoderConfig::new()
+        .backend(Av1Backend::Zenav1Aom)
+        .chroma_subsampling(EncodeChromaSubsampling::Yuv420)
+        .color_model(EncodeColorModel::YCbCr)
+        .validate()
+        .expect_err("zenav1-aom-encode is off, so the backend must be rejected");
+    match err {
+        ValidationError::BackendUnavailable { feature, .. } => {
+            assert_eq!(
+                feature, "zenav1-aom-encode",
+                "the error must name the ENCODE feature, not the decode one"
+            );
+        }
+        other => panic!("expected BackendUnavailable, got {other:?}"),
+    }
+}
+
+/// And the encode ENTRY POINT must refuse too, not just `validate()` — a
+/// caller that skips validation must still never be silently served by
+/// zenravif. `encode_rgb8` is the entry the backend implements when the
+/// feature IS on, so it is the one that could plausibly fall through.
+#[cfg(all(feature = "encode", not(feature = "zenav1-aom-encode")))]
+#[test]
+fn without_zenav1_aom_encode_the_entry_point_refuses() {
+    use imgref::Img;
+    use rgb::Rgb;
+    use zenavif::{Av1Backend, EncodeChromaSubsampling, EncoderConfig};
+    let img = Img::new(
+        vec![
+            Rgb {
+                r: 10u8,
+                g: 20,
+                b: 30
+            };
+            64 * 64
+        ],
+        64,
+        64,
+    );
+    let cfg = EncoderConfig::new()
+        .backend(Av1Backend::Zenav1Aom)
+        .chroma_subsampling(EncodeChromaSubsampling::Yuv420);
+    let err = zenavif::encode_rgb8(
+        img.as_ref(),
+        &cfg,
+        almost_enough::StopToken::new(zenavif::Unstoppable),
+    )
+    .expect_err("without the feature, encode_rgb8 must refuse rather than serve with zenravif");
+    assert!(
+        format!("{err}").contains("zenav1-aom-encode"),
+        "the refusal must name the missing feature, got: {err}"
+    );
+}

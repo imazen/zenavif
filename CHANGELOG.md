@@ -515,6 +515,27 @@ write-path returns + gain-map interop additions, already on main).
   `SvtRs`, `AomRs`, `SvtRs420`) are untouched and
   `tests/deprecated_backend_aliases.rs` still compiles.
 
+### Added — the feature-OFF contract for the aom encode backend is now gated
+
+- Nothing asserted what happens when `zenav1-aom-encode` is **off**. The aom
+  gate is `#![cfg(feature = "zenav1-aom-encode")]`, so it never observes that
+  path — a build with the feature off could have silently served an
+  `Av1Backend::Zenav1Aom` request with zenravif and no test would have
+  noticed. Three tests in `tests/deprecated_backend_aliases.rs` close it:
+  the feature-on config validates; with the feature off `validate()` returns
+  `BackendUnavailable` naming **`zenav1-aom-encode`** (not `zenav1-aom`, which
+  is the decode backend and would send a caller to the wrong switch); and
+  `encode_rgb8` itself refuses rather than falling through.
+
+- They run in CI already, in the existing diffmap step
+  (`--features two-pass-butteraugli,two-pass-zensim,auto-tune`), which
+  transitively enables `encode` but not `zenav1-aom-encode` — verified by
+  running that exact command, not by reading the feature graph.
+
+- Proved able to fail, both directions: renaming the feature in the
+  `BackendUnavailable` error to `zenav1-aom` reddens the first, and making the
+  entry point fall through to zenravif reddens the second.
+
 ### Measured — encode wall time, replacing the "unmeasured" note
 
 - `src/encoder_aom.rs` shipped saying encode speed was unmeasured rather than
