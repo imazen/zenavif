@@ -107,8 +107,12 @@ jobs:
       # used to be: neither `two-pass-butteraugli` nor `two-pass-zensim`
       # appeared anywhere in this workflow, so tests/two_pass.rs and
       # tests/zensim_loop.rs never ran on any platform. This runs them.
+      # `encode-mono` WITHOUT `zenav1-aom-encode` is the build where the gray8
+      # feature-off refusal lives (tests/deprecated_backend_aliases.rs
+      # `without_zenav1_aom_encode_gray8_names_the_feature`); the seam step
+      # above has both features ON, so only this step can observe it.
       - name: Test (diffmap closed loops — butteraugli + zensim)
-        run: cargo test --features two-pass-butteraugli,two-pass-zensim,auto-tune
+        run: cargo test --features two-pass-butteraugli,two-pass-zensim,auto-tune,encode-mono
       # Lives HERE and not in `feature-check` because `--lib` includes
       # `decode_av1::tests::{decode_gain_map_from_avif_test_file,
       # raw_obu_422_matches_the_container_path}`, which read

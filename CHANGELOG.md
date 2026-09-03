@@ -422,6 +422,20 @@ write-path returns + gain-map interop additions, already on main).
 
 ## [Unreleased]
 
+### Fixed — the gray8 feature-off refusal contradicted itself and named no switch
+
+- With `encode-mono` on and `zenav1-aom-encode` off, `encode_gray8` on
+  `Av1Backend::Zenav1Aom` fell through to `reject_aom_backend`, whose message
+  says the backend "does not support encode_gray8" while listing "8-bit
+  grayscale stills" as in scope — and never names the missing feature (the
+  rgb8 entry point already did). Same wrong-switch class as the a4ba11c
+  refusal fix. Now the gray8 dispatch mirrors rgb8's feature-off arm and the
+  refusal names `zenav1-aom-encode`; gated by
+  `without_zenav1_aom_encode_gray8_names_the_feature` (proved able to fail),
+  which runs in the diffmap CI step — `encode-mono` joined that step's feature
+  list because the seam step has both features ON and so can never observe
+  this build.
+
 ### Fixed — the aom scope's `validate()` accepted a lossless config the encode path refuses
 
 - `validate_aom_scope` documents itself as carrying the same predicates as the

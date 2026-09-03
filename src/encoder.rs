@@ -1484,6 +1484,18 @@ pub fn encode_gray8(
     if config.backend == Av1Backend::Zenav1Aom {
         return crate::encoder_aom::encode_gray8_aom(img, config, stop);
     }
+    // Without the feature the fall-through below would reach
+    // `reject_aom_backend`, whose message says the backend "does not support
+    // encode_gray8" while listing "8-bit grayscale stills" as in scope — a
+    // self-contradiction, and it never names the switch. gray8 IS in the aom
+    // seam's scope; what is missing in this build is the feature, so name it
+    // (the exact message the rgb8 dispatch uses).
+    #[cfg(not(feature = "zenav1-aom-encode"))]
+    if config.backend == Av1Backend::Zenav1Aom {
+        return Err(at!(Error::Unsupported(
+            "Av1Backend::Zenav1Aom requires the `zenav1-aom-encode` cargo feature"
+        )));
+    }
     reject_svt_rs_backend(config, "encode_gray8")?;
 
     let enc = build_ravif_encoder(config, stop, false)?;

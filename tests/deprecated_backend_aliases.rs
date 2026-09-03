@@ -272,3 +272,40 @@ fn without_zenav1_aom_encode_the_entry_point_refuses() {
         "the refusal must name the missing feature, got: {err}"
     );
 }
+
+/// Same contract for `encode_gray8`. gray8 IS in the aom seam's scope (the
+/// `encode-mono` path), so with the feature off the refusal must say the
+/// FEATURE is missing — not fall through to `reject_aom_backend`, whose
+/// message claims the backend "does not support encode_gray8" while listing
+/// grayscale stills as in scope, and names no switch at all. Measured from a
+/// downstream consumer 2026-09-02 during adversarial review.
+#[cfg(all(
+    feature = "encode",
+    feature = "encode-mono",
+    not(feature = "zenav1-aom-encode")
+))]
+#[test]
+fn without_zenav1_aom_encode_gray8_names_the_feature() {
+    use imgref::Img;
+    use zenavif::{Av1Backend, EncodeChromaSubsampling, EncoderConfig};
+    let img = Img::new(vec![128u8; 64 * 64], 64, 64);
+    let cfg = EncoderConfig::new()
+        .backend(Av1Backend::Zenav1Aom)
+        .chroma_subsampling(EncodeChromaSubsampling::Yuv420);
+    let err = zenavif::encode_gray8(
+        img.as_ref(),
+        &cfg,
+        almost_enough::StopToken::new(zenavif::Unstoppable),
+    )
+    .expect_err("without the feature, encode_gray8 must refuse");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("zenav1-aom-encode"),
+        "the gray8 refusal must name the missing feature, got: {msg}"
+    );
+    assert!(
+        !msg.contains("does not support encode_gray8"),
+        "the gray8 refusal must not claim gray8 is out of scope (it is the \
+         feature that is missing), got: {msg}"
+    );
+}
