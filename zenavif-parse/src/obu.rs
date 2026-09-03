@@ -462,40 +462,48 @@ struct UncompressedHeaderState {
 
 /// Walk through the uncompressed_header() fields that precede tile_info.
 ///
-/// Bit-for-bit equivalent to the inline implementation: same conditional
-/// reads in the same order, same errors on `show_existing_frame` / unsupported
-/// frame types. For `reduced_still_picture_header` no bits are consumed
-/// (matches the spec's implied defaults).
+/// Follows AV1 spec 5.9.2 field-for-field. The subtlety that matters most
+/// here: the `reduced_still_picture_header` branch only INFERS the fields
+/// *inside* it (`show_existing_frame`, `frame_type`, `FrameIsIntra`,
+/// `show_frame`, `showable_frame`). Everything after that branch —
+/// `disable_cdf_update`, `allow_screen_content_tools`, `frame_size()`,
+/// `render_size()` — is still coded and must be consumed, or every later
+/// field (including `base_q_idx`) is read from the wrong bit offset.
+/// See imazen/zenavif#46.
 fn read_uncompressed_header_until_tiles(
     b: &mut BitReader,
     seq: &SequenceHeaderObu,
 ) -> Result<UncompressedHeaderState> {
-    if seq.reduced_still_picture_header {
-        return Ok(UncompressedHeaderState {
-            frame_type: 0, // KEY_FRAME
-            allow_screen_content_tools: false,
-            error_resilient_mode: true,
-        });
-    }
-
-    let show_existing_frame = b.read_bool().map_err(|e| at!(Error::from(e)))?;
-    if show_existing_frame {
-        return Err(at!(Error::InvalidData("show_existing_frame")));
-    }
-
-    let frame_type = b.read_u8(2).map_err(|e| at!(Error::from(e)))?;
-    let show_frame = b.read_bool().map_err(|e| at!(Error::from(e)))?;
-    if !show_frame {
-        let _showable_frame = b.read_bool().map_err(|e| at!(Error::from(e)))?;
-    }
-
-    let error_resilient_mode = if frame_type == 3 /* SWITCH_FRAME */ {
-        true
+    let (frame_type, show_frame, error_resilient_mode) = if seq.reduced_still_picture_header {
+        (KEY_FRAME, true, true)
     } else {
-        b.read_bool().map_err(|e| at!(Error::from(e)))?
+        let show_existing_frame = b.read_bool().map_err(|e| at!(Error::from(e)))?;
+        if show_existing_frame {
+            return Err(at!(Error::InvalidData("show_existing_frame")));
+        }
+
+        let frame_type = b.read_u8(2).map_err(|e| at!(Error::from(e)))?;
+        let show_frame = b.read_bool().map_err(|e| at!(Error::from(e)))?;
+        if !show_frame {
+            let _showable_frame = b.read_bool().map_err(|e| at!(Error::from(e)))?;
+        }
+
+        // Inferred (not coded) for SWITCH_FRAME and for a *shown* KEY_FRAME.
+        let error_resilient_mode = if frame_type == SWITCH_FRAME
+            || (frame_type == KEY_FRAME && show_frame)
+        {
+            true
+        } else {
+            b.read_bool().map_err(|e| at!(Error::from(e)))?
+        };
+
+        (frame_type, show_frame, error_resilient_mode)
     };
 
-    let _disable_cdf_update = b.read_bool().map_err(|e| at!(Error::from(e)))?;
+    let frame_is_intra = frame_type == KEY_FRAME || frame_type == INTRA_ONLY_FRAME;
+
+    // Coded unconditionally, for reduced-still streams too.
+    let disable_cdf_update = b.read_bool().map_err(|e| at!(Error::from(e)))?;
 
     let allow_screen_content_tools = if seq.seq_force_screen_content_tools == SELECT_SCREEN_CONTENT_TOOLS {
         b.read_bool().map_err(|e| at!(Error::from(e)))?
@@ -512,39 +520,59 @@ fn read_uncompressed_header_until_tiles(
         let _current_frame_id = b.read_u32(id_len).map_err(|e| at!(Error::from(e)))?;
     }
 
-    let frame_size_override_flag = if frame_type == 3 /* SWITCH_FRAME */ {
+    let frame_size_override_flag = if frame_type == SWITCH_FRAME {
         true
+    } else if seq.reduced_still_picture_header {
+        false
     } else {
         b.read_bool().map_err(|e| at!(Error::from(e)))?
     };
 
+    // order_hint f(OrderHintBits); OrderHintBits is 0 when !enable_order_hint.
     if seq.enable_order_hint {
         let _order_hint = b.read_u32(seq.order_hint_bits).map_err(|e| at!(Error::from(e)))?;
     }
 
     // primary_ref_frame — only for non-intra, non-error-resilient
-    if frame_type != 0 /* KEY_FRAME */
-        && frame_type != 2 /* INTRA_ONLY */
-        && !error_resilient_mode
-    {
+    if !frame_is_intra && !error_resilient_mode {
         let _primary_ref_frame = b.read_u8(3).map_err(|e| at!(Error::from(e)))?;
     }
 
     // decoder_model_info — already errored on in the sequence header read
 
-    match frame_type {
-        0 /* KEY_FRAME */ | 2 /* INTRA_ONLY */ => {
-            read_intra_frame_geometry(
-                b,
-                seq,
-                frame_size_override_flag,
-                allow_screen_content_tools,
-            )?;
+    // refresh_frame_flags is INFERRED as allFrames for SWITCH_FRAME and for a
+    // shown KEY_FRAME (spec 5.9.2); it is only coded otherwise.
+    let refresh_frame_flags = if frame_type == SWITCH_FRAME || (frame_type == KEY_FRAME && show_frame) {
+        ALL_FRAMES
+    } else {
+        b.read_u8(8).map_err(|e| at!(Error::from(e)))?
+    };
+
+    if (!frame_is_intra || refresh_frame_flags != ALL_FRAMES)
+        && error_resilient_mode
+        && seq.enable_order_hint
+    {
+        for _ in 0..NUM_REF_FRAMES {
+            let _ref_order_hint = b.read_u32(seq.order_hint_bits).map_err(|e| at!(Error::from(e)))?;
         }
-        _ => {
-            // INTER or SWITCH — not expected for still AVIF, bail
-            return Err(at!(Error::Unsupported("inter frame in probe")));
-        }
+    }
+
+    if frame_is_intra {
+        read_intra_frame_geometry(
+            b,
+            seq,
+            frame_size_override_flag,
+            allow_screen_content_tools,
+        )?;
+    } else {
+        // INTER or SWITCH — not expected for still AVIF, bail
+        return Err(at!(Error::Unsupported("inter frame in probe")));
+    }
+
+    // disable_frame_end_update_cdf is inferred 1 when the stream is a reduced
+    // still picture or CDF updates are already off; coded otherwise.
+    if !seq.reduced_still_picture_header && !disable_cdf_update {
+        let _disable_frame_end_update_cdf = b.read_bool().map_err(|e| at!(Error::from(e)))?;
     }
 
     Ok(UncompressedHeaderState {
@@ -554,39 +582,45 @@ fn read_uncompressed_header_until_tiles(
     })
 }
 
-/// Read the refresh_frame_flags / frame_size / superres / render_size /
-/// allow_intrabc block shared by KEY_FRAME and INTRA_ONLY.
+/// Read the frame_size / superres / render_size / allow_intrabc block that
+/// spec 5.9.2 runs for `FrameIsIntra` (KEY_FRAME and INTRA_ONLY alike).
 ///
-/// Each conditional read matches the spec ordering; the two branches were
-/// already byte-identical in the inline version (the spec defines them
-/// the same way for KEY_FRAME and INTRA_ONLY in this region).
+/// `refresh_frame_flags` is NOT read here — spec 5.9.2 reads it before the
+/// `FrameIsIntra` branch, and infers it for the shown-keyframe case that
+/// still AVIF always takes.
 fn read_intra_frame_geometry(
     b: &mut BitReader,
     seq: &SequenceHeaderObu,
     frame_size_override_flag: bool,
     allow_screen_content_tools: bool,
 ) -> Result<()> {
-    let _refresh_frame_flags = b.read_u8(8).map_err(|e| at!(Error::from(e)))?;
-
+    // frame_size()
     if frame_size_override_flag {
         let _frame_width = 1 + b.read_u32(seq.frame_width_bits).map_err(|e| at!(Error::from(e)))?;
         let _frame_height = 1 + b.read_u32(seq.frame_height_bits).map_err(|e| at!(Error::from(e)))?;
     }
 
-    if seq.enable_superres {
+    // superres_params()
+    let use_superres = if seq.enable_superres {
         let use_superres = b.read_bool().map_err(|e| at!(Error::from(e)))?;
         if use_superres {
             let _coded_denom = b.read_u8(3).map_err(|e| at!(Error::from(e)))?;
         }
-    }
+        use_superres
+    } else {
+        false
+    };
 
+    // render_size()
     let render_and_frame_size_different = b.read_bool().map_err(|e| at!(Error::from(e)))?;
     if render_and_frame_size_different {
         let _render_width = 1u32 + b.read_u16(16).map_err(|e| at!(Error::from(e)))? as u32;
         let _render_height = 1u32 + b.read_u16(16).map_err(|e| at!(Error::from(e)))? as u32;
     }
 
-    if allow_screen_content_tools {
+    // allow_intrabc is gated on `UpscaledWidth == FrameWidth`, i.e. superres
+    // did not scale this frame.
+    if allow_screen_content_tools && !use_superres {
         let _allow_intrabc = b.read_bool().map_err(|e| at!(Error::from(e)))?;
     }
     Ok(())
@@ -667,9 +701,12 @@ fn skip_non_uniform_tile_spacing(
 
 /// Read the quantization_params block: base_q_idx + delta-q values.
 ///
-/// `coded_lossless` requires all components to be zero. Mirror exactly the
-/// spec's UV-shared vs separate paths: when `separate_uv_delta_q` is false,
-/// V values mirror U (not zero).
+/// Follows AV1 spec 5.9.12. `coded_lossless` requires all components to be
+/// zero. Two details the bit walk depends on: `separate_uv_delta_q` (a
+/// SEQUENCE header flag) gates a `diff_uv_delta` BIT here, and it is that
+/// bit — not the sequence flag — which decides whether the V deltas are
+/// coded separately; and `using_qmatrix` is coded for every plane count,
+/// not only when there is chroma.
 fn read_quantization_params(
     b: &mut BitReader,
     seq: &SequenceHeaderObu,
@@ -684,18 +721,29 @@ fn read_quantization_params(
     let mut delta_q_v_ac = 0i8;
 
     if num_planes > 1 {
-        if seq.color.separate_uv_delta_q {
-            delta_q_u_dc = read_delta_q(b)?;
-            delta_q_u_ac = read_delta_q(b)?;
+        let diff_uv_delta = if seq.color.separate_uv_delta_q {
+            b.read_bool().map_err(|e| at!(Error::from(e)))?
+        } else {
+            false
+        };
+        delta_q_u_dc = read_delta_q(b)?;
+        delta_q_u_ac = read_delta_q(b)?;
+        if diff_uv_delta {
             delta_q_v_dc = read_delta_q(b)?;
             delta_q_v_ac = read_delta_q(b)?;
         } else {
-            delta_q_u_dc = read_delta_q(b)?;
-            delta_q_u_ac = read_delta_q(b)?;
             delta_q_v_dc = delta_q_u_dc;
             delta_q_v_ac = delta_q_u_ac;
         }
-        let _using_qmatrix = b.read_bool().map_err(|e| at!(Error::from(e)))?;
+    }
+
+    let using_qmatrix = b.read_bool().map_err(|e| at!(Error::from(e)))?;
+    if using_qmatrix {
+        let _qm_y = b.read_u8(4).map_err(|e| at!(Error::from(e)))?;
+        let _qm_u = b.read_u8(4).map_err(|e| at!(Error::from(e)))?;
+        if seq.color.separate_uv_delta_q {
+            let _qm_v = b.read_u8(4).map_err(|e| at!(Error::from(e)))?;
+        }
     }
 
     let coded_lossless = base_q_idx == 0
@@ -773,6 +821,15 @@ const MAX_TILE_COLS: usize = 64; //  Maximum number of tile columns
 const INTRABC_DELAY_PIXELS: usize = 256; //     Number of horizontal luma samples before intra block copy can be used
 const INTRABC_DELAY_SB64: usize = 4; //   Number of 64 by 64 blocks before intra block copy can be used
 const NUM_REF_FRAMES: usize = 8; //   Number of frames that can be stored for future reference
+
+// frame_type values (AV1 spec 6.8.2). Distinct from the reference-frame
+// indices above (INTRA_FRAME..ALTREF_FRAME), which name slots, not types.
+const KEY_FRAME: u8 = 0;
+const INTER_FRAME: u8 = 1;
+const INTRA_ONLY_FRAME: u8 = 2;
+const SWITCH_FRAME: u8 = 3;
+/// `allFrames` from spec 5.9.2: `(1 << NUM_REF_FRAMES) - 1`.
+const ALL_FRAMES: u8 = 0xFF;
 const REF_CONTEXTS: usize = 3; //   Number of contexts for single_ref, comp_ref, comp_bwdref, uni_comp_ref, uni_comp_ref_p1 and uni_comp_ref_p2
 const MAX_SEGMENTS: usize = 8; //   Number of segments allowed in segmentation map
 const SEGMENT_ID_CONTEXTS: usize = 3; //   Number of contexts for segment_id
@@ -947,3 +1004,457 @@ const INTRA_FILTER_MODES: usize = 5; //   Number of types of intra filtering
 const COEFF_CDF_Q_CTXS: usize = 4; //   Number of selectable context types for the coeff( ) syntax structure
 const PRIMARY_REF_NONE: usize = 7; //   Value of primary_ref_frame indicating that there is no primary reference frame
 const BUFFER_POOL_MAX_SIZE: usize = 10; //  Number of frames in buffer pool
+
+#[cfg(test)]
+mod frame_header_walk_tests {
+    //! Bit-exact round-trip gates for the frame-header re-parse that backs
+    //! `AvifMetadata::base_q_idx` / `AvifMetadata::lossless`.
+    //!
+    //! Every fixture is GENERATED here by a spec-shaped bit writer, so there
+    //! are no committed binaries: the writer follows AV1 spec 5.9.2
+    //! (`uncompressed_header`), 5.9.15 (`tile_info`) and 5.9.12
+    //! (`quantization_params`) directly, and the reader must land on the same
+    //! bit offsets. A misalignment anywhere in the walk shows up as a wrong
+    //! `base_q_idx`, which is exactly the failure imazen/zenavif#46 reports.
+
+    use super::*;
+
+    /// Minimal MSB-first bit writer (AV1 `f(n)` ordering).
+    #[derive(Default)]
+    struct BitWriter {
+        out: Vec<u8>,
+        cur: u8,
+        nbits: u8,
+    }
+
+    impl BitWriter {
+        fn new() -> Self {
+            Self::default()
+        }
+
+        fn bit(&mut self, b: bool) {
+            self.cur = (self.cur << 1) | u8::from(b);
+            self.nbits += 1;
+            if self.nbits == 8 {
+                self.out.push(self.cur);
+                self.cur = 0;
+                self.nbits = 0;
+            }
+        }
+
+        /// AV1 `f(n)`: the low `n` bits of `v`, most-significant first.
+        fn f(&mut self, n: u32, v: u32) {
+            for i in (0..n).rev() {
+                self.bit((v >> i) & 1 == 1);
+            }
+        }
+
+        /// `trailing_bits()`: a 1 bit then zero padding to the byte boundary.
+        fn finish(mut self) -> Vec<u8> {
+            self.bit(true);
+            if self.nbits > 0 {
+                self.cur <<= 8 - self.nbits;
+                self.out.push(self.cur);
+                self.cur = 0;
+                self.nbits = 0;
+            }
+            self.out
+        }
+    }
+
+    fn uleb(mut v: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        loop {
+            let mut byte = (v & 0x7f) as u8;
+            v >>= 7;
+            if v != 0 {
+                byte |= 0x80;
+            }
+            out.push(byte);
+            if v == 0 {
+                return out;
+            }
+        }
+    }
+
+    /// Wrap a payload in an OBU header with `obu_has_size_field = 1`.
+    fn obu(obu_type: u8, payload: &[u8]) -> Vec<u8> {
+        let mut out = vec![(obu_type << 3) | 0b010];
+        out.extend_from_slice(&uleb(payload.len() as u64));
+        out.extend_from_slice(payload);
+        out
+    }
+
+    #[derive(Clone, Copy)]
+    struct SeqSpec {
+        reduced_still_picture_header: bool,
+        width: u32,
+        height: u32,
+        use_128x128_superblock: bool,
+        enable_superres: bool,
+        monochrome: bool,
+        separate_uv_delta_q: bool,
+    }
+
+    impl SeqSpec {
+        /// The shape essentially every still-AVIF encoder emits.
+        fn still(width: u32, height: u32) -> Self {
+            Self {
+                reduced_still_picture_header: true,
+                width,
+                height,
+                use_128x128_superblock: false,
+                enable_superres: false,
+                monochrome: false,
+                separate_uv_delta_q: false,
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, Default)]
+    struct FrameSpec {
+        base_q_idx: u8,
+        disable_cdf_update: bool,
+        allow_screen_content_tools: bool,
+        force_integer_mv: bool,
+        use_superres: bool,
+        render_and_frame_size_different: bool,
+        allow_intrabc: bool,
+        diff_uv_delta: bool,
+        using_qmatrix: bool,
+    }
+
+    impl FrameSpec {
+        fn q(base_q_idx: u8) -> Self {
+            Self { base_q_idx, ..Self::default() }
+        }
+    }
+
+    /// AV1 spec 5.5.1 `sequence_header_obu()`, profile 0 / 8-bit.
+    fn build_seq(s: &SeqSpec) -> Vec<u8> {
+        let mut w = BitWriter::new();
+        w.f(3, 0); // seq_profile
+        w.bit(true); // still_picture
+        w.bit(s.reduced_still_picture_header);
+        if s.reduced_still_picture_header {
+            w.f(5, 0); // seq_level_idx[0]
+        } else {
+            w.bit(false); // timing_info_present_flag
+            w.bit(false); // initial_display_delay_present_flag
+            w.f(5, 0); // operating_points_cnt_minus_1
+            w.f(12, 0); // operating_point_idc[0]
+            w.f(5, 0); // seq_level_idx[0]  (<= 7, so no seq_tier)
+        }
+        w.f(4, 15); // frame_width_bits_minus_1  => 16
+        w.f(4, 15); // frame_height_bits_minus_1 => 16
+        w.f(16, s.width - 1);
+        w.f(16, s.height - 1);
+        if !s.reduced_still_picture_header {
+            w.bit(false); // frame_id_numbers_present_flag
+        }
+        w.bit(s.use_128x128_superblock);
+        w.bit(false); // enable_filter_intra
+        w.bit(false); // enable_intra_edge_filter
+        if !s.reduced_still_picture_header {
+            w.bit(false); // enable_interintra_compound
+            w.bit(false); // enable_masked_compound
+            w.bit(false); // enable_warped_motion
+            w.bit(false); // enable_dual_filter
+            w.bit(false); // enable_order_hint => OrderHintBits = 0
+            w.bit(true); // seq_choose_screen_content_tools => SELECT
+            w.bit(true); // seq_choose_integer_mv           => SELECT
+        }
+        w.bit(s.enable_superres);
+        w.bit(false); // enable_cdef
+        w.bit(false); // enable_restoration
+        // color_config()
+        w.bit(false); // high_bitdepth => 8-bit
+        w.bit(s.monochrome);
+        w.bit(false); // color_description_present_flag => CP/TC/MC all 2
+        w.f(1, 0); // color_range
+        if !s.monochrome {
+            // seq_profile 0 => 4:2:0, so chroma_sample_position is coded
+            w.f(2, 0);
+            w.bit(s.separate_uv_delta_q);
+        }
+        w.bit(false); // film_grain_params_present
+        w.finish()
+    }
+
+    /// AV1 spec 5.9.15 `tile_info()` for a single uniformly-spaced tile.
+    fn write_single_tile_info(w: &mut BitWriter, s: &SeqSpec) {
+        let sb_shift = if s.use_128x128_superblock { 5 } else { 4 };
+        // Spec 5.9.5: MiCols = 2 * ((FrameWidth + 7) >> 3).
+        let mi_cols = 2 * ((s.width + 7) >> 3);
+        let mi_rows = 2 * ((s.height + 7) >> 3);
+        let sb_cols = (mi_cols + (1 << sb_shift) - 1) >> sb_shift;
+        let sb_rows = (mi_rows + (1 << sb_shift) - 1) >> sb_shift;
+        w.bit(true); // uniform_tile_spacing_flag
+        if tile_log2(1, sb_cols) > 0 {
+            w.bit(false); // increment_tile_cols_log2 = 0 => one tile column
+        }
+        if tile_log2(1, sb_rows) > 0 {
+            w.bit(false); // increment_tile_rows_log2 = 0 => one tile row
+        }
+    }
+
+    /// AV1 spec 5.9.2 `uncompressed_header()` for a shown KEY_FRAME, followed
+    /// by `tile_info()` and `quantization_params()`.
+    fn build_frame_header(s: &SeqSpec, f: &FrameSpec) -> Vec<u8> {
+        let mut w = BitWriter::new();
+        if !s.reduced_still_picture_header {
+            w.bit(false); // show_existing_frame
+            w.f(2, 0); // frame_type = KEY_FRAME
+            w.bit(true); // show_frame
+            // showable_frame: inferred from show_frame == 1.
+            // error_resilient_mode: INFERRED 1 for KEY_FRAME && show_frame.
+        }
+        w.bit(f.disable_cdf_update);
+        // seq_force_screen_content_tools == SELECT in every fixture here.
+        w.bit(f.allow_screen_content_tools);
+        if f.allow_screen_content_tools {
+            // seq_force_integer_mv == SELECT.
+            w.bit(f.force_integer_mv);
+        }
+        // frame_id_numbers_present_flag == 0 => no current_frame_id.
+        if !s.reduced_still_picture_header {
+            w.bit(false); // frame_size_override_flag
+        }
+        // order_hint: OrderHintBits == 0 => no bits.
+        // primary_ref_frame: FrameIsIntra => PRIMARY_REF_NONE, not coded.
+        // refresh_frame_flags: KEY_FRAME && show_frame => allFrames, NOT coded.
+        // frame_size(): frame_size_override_flag == 0 => no dimensions.
+        if s.enable_superres {
+            w.bit(f.use_superres);
+            if f.use_superres {
+                w.f(3, 0); // coded_denom
+            }
+        }
+        // render_size()
+        w.bit(f.render_and_frame_size_different);
+        if f.render_and_frame_size_different {
+            w.f(16, s.width - 1);
+            w.f(16, s.height - 1);
+        }
+        // allow_intrabc needs UpscaledWidth == FrameWidth, i.e. no superres scaling.
+        if f.allow_screen_content_tools && !f.use_superres {
+            w.bit(f.allow_intrabc);
+        }
+        if !s.reduced_still_picture_header && !f.disable_cdf_update {
+            w.bit(true); // disable_frame_end_update_cdf
+        }
+        write_single_tile_info(&mut w, s);
+        // quantization_params()
+        w.f(8, u32::from(f.base_q_idx));
+        w.bit(false); // DeltaQYDc: delta_coded = 0
+        if !s.monochrome {
+            if s.separate_uv_delta_q {
+                w.bit(f.diff_uv_delta);
+            }
+            w.bit(false); // DeltaQUDc
+            w.bit(false); // DeltaQUAc
+            if s.separate_uv_delta_q && f.diff_uv_delta {
+                w.bit(false); // DeltaQVDc
+                w.bit(false); // DeltaQVAc
+            }
+        }
+        w.bit(f.using_qmatrix);
+        if f.using_qmatrix {
+            w.f(4, 0); // qm_y
+            w.f(4, 0); // qm_u
+            if s.separate_uv_delta_q {
+                w.f(4, 0); // qm_v
+            }
+        }
+        w.finish()
+    }
+
+    fn parse_q(s: &SeqSpec, f: &FrameSpec) -> FrameQuantization {
+        let mut stream = obu(1, &build_seq(s));
+        stream.extend_from_slice(&obu(3, &build_frame_header(s, f)));
+        let (seq, quant) = parse_obu_with_frame_info(&stream).expect("fixture stream parses");
+        assert_eq!(
+            seq.reduced_still_picture_header, s.reduced_still_picture_header,
+            "sequence header round-trips reduced_still_picture_header"
+        );
+        assert_eq!(seq.max_frame_width.get(), s.width, "sequence header width");
+        assert_eq!(seq.max_frame_height.get(), s.height, "sequence header height");
+        quant.expect("the frame header must yield quantization params")
+    }
+
+    /// THE reported bug (imazen/zenavif#46): a `reduced_still_picture_header`
+    /// frame header still codes `disable_cdf_update`, `allow_screen_content_tools`
+    /// and the `frame_size()`/`render_size()` bits — the spec's reduced branch
+    /// only infers the fields *inside* it. Skipping them misaligns everything
+    /// downstream, and `tile_info()`'s frame-size-dependent length makes the
+    /// resulting `base_q_idx` drift with image size.
+    #[test]
+    fn reduced_still_picture_base_q_idx_round_trips_at_every_size() {
+        for (w, h) in [(64, 64), (96, 96), (128, 128), (256, 256), (320, 240), (512, 512), (1024, 1024)] {
+            let s = SeqSpec::still(w, h);
+            for q in [0u8, 1, 32, 63, 128, 200, 255] {
+                let got = parse_q(&s, &FrameSpec::q(q));
+                assert_eq!(
+                    got.base_q_idx, q,
+                    "{w}x{h}: base_q_idx must round-trip (got {}, want {q})",
+                    got.base_q_idx
+                );
+            }
+        }
+    }
+
+    /// The same stream shape the zenav1-aom round-trip exercised: one config,
+    /// many sizes. Pre-fix this returned a *different* wrong value per size.
+    #[test]
+    fn reduced_still_picture_base_q_idx_is_size_invariant() {
+        let q = 128;
+        let mut seen = Vec::new();
+        for (w, h) in [(64, 64), (128, 128), (256, 256), (512, 512), (1024, 1024)] {
+            seen.push(parse_q(&SeqSpec::still(w, h), &FrameSpec::q(q)).base_q_idx);
+        }
+        assert!(
+            seen.iter().all(|&v| v == q),
+            "one config must read back one base_q_idx at every frame size; got {seen:?}"
+        );
+    }
+
+    /// `disable_cdf_update` is coded unconditionally (spec 5.9.2), so flipping
+    /// it must not move any later field.
+    #[test]
+    fn reduced_still_picture_disable_cdf_update_bit_is_consumed() {
+        let s = SeqSpec::still(256, 256);
+        for disable_cdf_update in [false, true] {
+            let f = FrameSpec { disable_cdf_update, ..FrameSpec::q(96) };
+            assert_eq!(parse_q(&s, &f).base_q_idx, 96, "disable_cdf_update={disable_cdf_update}");
+        }
+    }
+
+    /// `allow_screen_content_tools` (and the `force_integer_mv` / `allow_intrabc`
+    /// bits it gates) are coded for reduced-still streams too, because the
+    /// sequence header forces both SELECT values there (spec 5.5.1).
+    #[test]
+    fn reduced_still_picture_screen_content_tool_bits_are_consumed() {
+        let s = SeqSpec::still(256, 256);
+        for force_integer_mv in [false, true] {
+            for allow_intrabc in [false, true] {
+                let f = FrameSpec {
+                    allow_screen_content_tools: true,
+                    force_integer_mv,
+                    allow_intrabc,
+                    ..FrameSpec::q(77)
+                };
+                assert_eq!(
+                    parse_q(&s, &f).base_q_idx,
+                    77,
+                    "screen-content tools on (force_integer_mv={force_integer_mv}, allow_intrabc={allow_intrabc})"
+                );
+            }
+        }
+    }
+
+    /// `render_size()` always codes `render_and_frame_size_different`.
+    #[test]
+    fn reduced_still_picture_render_size_bits_are_consumed() {
+        let s = SeqSpec::still(320, 240);
+        for render_and_frame_size_different in [false, true] {
+            let f = FrameSpec { render_and_frame_size_different, ..FrameSpec::q(42) };
+            assert_eq!(parse_q(&s, &f).base_q_idx, 42, "render_diff={render_and_frame_size_different}");
+        }
+    }
+
+    /// `superres_params()` codes `use_superres` when the sequence enables it,
+    /// and a scaled frame suppresses `allow_intrabc` (UpscaledWidth != FrameWidth).
+    #[test]
+    fn superres_bits_are_consumed() {
+        let s = SeqSpec { enable_superres: true, ..SeqSpec::still(256, 256) };
+        for use_superres in [false, true] {
+            for allow_screen_content_tools in [false, true] {
+                let f = FrameSpec {
+                    use_superres,
+                    allow_screen_content_tools,
+                    allow_intrabc: true,
+                    ..FrameSpec::q(150)
+                };
+                assert_eq!(
+                    parse_q(&s, &f).base_q_idx,
+                    150,
+                    "use_superres={use_superres} ascm={allow_screen_content_tools}"
+                );
+            }
+        }
+    }
+
+    /// A non-reduced sequence header with a shown KEY_FRAME: the spec infers
+    /// `error_resilient_mode = 1` and `refresh_frame_flags = allFrames` for
+    /// `frame_type == KEY_FRAME && show_frame`, so neither is coded, and
+    /// `disable_frame_end_update_cdf` IS coded when `disable_cdf_update == 0`.
+    #[test]
+    fn non_reduced_shown_key_frame_base_q_idx_round_trips() {
+        for (w, h) in [(64, 64), (256, 256), (512, 512)] {
+            let s = SeqSpec { reduced_still_picture_header: false, ..SeqSpec::still(w, h) };
+            for disable_cdf_update in [false, true] {
+                for q in [0u8, 64, 128, 255] {
+                    let f = FrameSpec { disable_cdf_update, ..FrameSpec::q(q) };
+                    assert_eq!(
+                        parse_q(&s, &f).base_q_idx,
+                        q,
+                        "{w}x{h} disable_cdf_update={disable_cdf_update}: base_q_idx"
+                    );
+                }
+            }
+        }
+    }
+
+    /// 128x128 superblocks change `tile_info()`'s bit length; the walk must
+    /// still land on `quantization_params()`.
+    #[test]
+    fn superblock_128_tile_info_round_trips() {
+        for (w, h) in [(256, 256), (1024, 1024)] {
+            let s = SeqSpec { use_128x128_superblock: true, ..SeqSpec::still(w, h) };
+            assert_eq!(parse_q(&s, &FrameSpec::q(111)).base_q_idx, 111, "{w}x{h} sb128");
+        }
+    }
+
+    /// Monochrome: `quantization_params()` codes no chroma deltas, but
+    /// `using_qmatrix` is still coded (spec 5.9.12 puts it outside the
+    /// `NumPlanes > 1` branch).
+    #[test]
+    fn monochrome_quantization_params_round_trip() {
+        let s = SeqSpec { monochrome: true, ..SeqSpec::still(256, 256) };
+        for using_qmatrix in [false, true] {
+            let f = FrameSpec { using_qmatrix, ..FrameSpec::q(0) };
+            let got = parse_q(&s, &f);
+            assert_eq!(got.base_q_idx, 0, "mono using_qmatrix={using_qmatrix}");
+            assert!(got.coded_lossless, "base_q_idx 0 with zero deltas is coded-lossless");
+        }
+    }
+
+    /// `separate_uv_delta_q` in the SEQUENCE header gates a `diff_uv_delta`
+    /// BIT in the frame header; that bit — not the sequence flag — decides
+    /// whether the V deltas are coded separately (spec 5.9.12).
+    #[test]
+    fn separate_uv_delta_q_codes_a_diff_uv_delta_bit() {
+        let s = SeqSpec { separate_uv_delta_q: true, ..SeqSpec::still(256, 256) };
+        for diff_uv_delta in [false, true] {
+            for using_qmatrix in [false, true] {
+                let f = FrameSpec { diff_uv_delta, using_qmatrix, ..FrameSpec::q(0) };
+                let got = parse_q(&s, &f);
+                assert_eq!(got.base_q_idx, 0, "diff_uv_delta={diff_uv_delta} qm={using_qmatrix}");
+                assert!(
+                    got.coded_lossless,
+                    "all deltas zero => coded_lossless (diff_uv_delta={diff_uv_delta})"
+                );
+            }
+        }
+    }
+
+    /// A non-zero `base_q_idx` is never lossless, at every size.
+    #[test]
+    fn lossless_flag_tracks_base_q_idx() {
+        let s = SeqSpec::still(256, 256);
+        assert!(parse_q(&s, &FrameSpec::q(0)).coded_lossless, "q=0 is coded-lossless");
+        for q in [1u8, 32, 128, 255] {
+            assert!(!parse_q(&s, &FrameSpec::q(q)).coded_lossless, "q={q} is not lossless");
+        }
+    }
+}

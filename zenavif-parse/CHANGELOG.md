@@ -9,6 +9,39 @@ a 0.6.x patch. **0.6.3 (the size=0-box fix, imazen/zenavif#16) must be published
 from commit `c36b822`**, the pre-break release-prep point (CI green there).
 
 ### Fixed
+- **`base_q_idx` / `lossless` were read from the wrong bit offset on
+  `reduced_still_picture_header` streams — which is what still-AVIF encoders
+  emit** (imazen/zenavif#46). `parse_frame_header_quantization`'s
+  `uncompressed_header()` walk returned early for reduced-still streams,
+  consuming *zero* bits, on the premise that the spec's reduced branch implies
+  every field. AV1 spec 5.9.2 only infers the fields *inside* that branch;
+  `disable_cdf_update`, `allow_screen_content_tools` (and the `force_integer_mv`
+  / `allow_intrabc` bits it gates), `superres_params()`'s `use_superres` and
+  `render_size()`'s `render_and_frame_size_different` are all still coded. A
+  typical still AVIF therefore left 3 bits unconsumed, and because `tile_info()`
+  is frame-size dependent the misalignment landed on a different `base_q_idx`
+  byte for each image size — one `cq=32` encode read back 48/64/0/72 instead of
+  128. Found by imazen/zenav1-aom's AVIF container round-trip, against a frame
+  header writer proven bit-exact to `aomenc`.
+
+  Four more bit-walk transcription errors in the same fork-added frame-header
+  probe are fixed with it, each of which also moved `base_q_idx` / `lossless`:
+  `error_resilient_mode` and `refresh_frame_flags` are inferred (not coded) for
+  a shown `KEY_FRAME`, so the walk was over-reading 9 bits on the *non*-reduced
+  still path; `disable_frame_end_update_cdf` is coded when CDF updates are on
+  and was never read; `allow_intrabc` is gated on `UpscaledWidth == FrameWidth`,
+  so a superres-scaled frame over-read a bit; and in `quantization_params()`
+  the sequence-level `separate_uv_delta_q` gates a `diff_uv_delta` *bit* (it is
+  that bit, not the sequence flag, which decides whether the V deltas are coded
+  separately), while `using_qmatrix` is coded for every plane count, not only
+  when chroma is present.
+
+  Container extraction (`primary_data()`) and every sequence-header field of
+  `primary_metadata()` were never affected. Gated by 11 generated-fixture
+  round-trip tests in `obu.rs` (`frame_header_walk_tests`) that build
+  spec-shaped OBUs with a bit writer and assert the reader lands on the same
+  offsets; 9 of the 11 fail without this change. No public API change.
+
 - **The extended `pixi` form parses under strict validation, and a mislabelled
   `essential` flag on a *supported* property no longer rejects the file.** Two
   narrow changes, both made so the parent `zenavif` crate's decoders could stop
