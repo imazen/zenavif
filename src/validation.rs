@@ -294,7 +294,7 @@ impl crate::EncoderConfig {
         // while its colour path codes 8/10/12. That predicate needs to know
         // the input is grayscale, and `PlanInput` has no such field — it is a
         // plain public struct, so adding one is a breaking change. So
-        // `.bit_depth_bits(10)` + `encode_gray8` VALIDATES and then refuses at
+        // `EncodeBitDepth::Ten` + `encode_gray8` VALIDATES and then refuses at
         // encode (`encoder_aom::aom_depth_error`). Same validate/encode
         // divergence class as zenavif#44; named rather than hidden.
         // The zenav1-svt dimension envelope (issue #32): the 4:2:0 colour
@@ -418,7 +418,7 @@ impl crate::EncoderConfig {
         {
             return Err(ValidationError::BackendUnsupportedParam {
                 backend: BACKEND,
-                param: "bit_depth / bit_depth_bits",
+                param: "bit_depth",
                 detail,
             });
         }

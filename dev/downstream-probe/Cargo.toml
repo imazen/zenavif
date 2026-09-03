@@ -25,6 +25,10 @@ name = "zenavif-downstream-probe"
 version = "0.0.0"
 edition = "2024"
 publish = false
+# Two binaries: the probe (what CI runs) and `emit`, which writes AVIFs for an
+# EXTERNAL decoder to read. Without `default-run` a bare `cargo run` is
+# ambiguous and the CI step would fail on the second binary being added.
+default-run = "zenavif-downstream-probe"
 
 [workspace]
 

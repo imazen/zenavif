@@ -1,0 +1,43 @@
+aom 8-bit byte-identity across the 10/12-bit wiring
+===================================================
+
+Question: did wiring 10- and 12-bit into the zenav1-aom encode seam move any
+8-bit output byte?
+
+Method: a source snapshot of the PRE-change tree (`git archive ec6728b`) and
+the post-change tree each drive the SAME emitter
+(`dev/downstream-probe/src/bin/bd8_anchor.rs`), which encodes 60 cells and
+prints length + fnv1a-64 of the whole AVIF file per cell. The two TSVs are
+diffed.
+
+Grid (60 cells): 6 geometries {64x64, 33x47, 128x96, 192x64, 65x33, 256x256}
+x 5 (quality, speed) pairs {(90,6), (80,1), (80,10), (20,6), (99,4)}
+x 2 content classes {gradient, flat 235}.
+Quality 100 is excluded on purpose: `--cq-level 0` PANICS upstream on flat
+content (zenavif#45).
+
+Box: Apple M4 Pro, macOS 25.5.0. Base rev ec6728b (0.1.8); head = the 0.2.0
+high-bit-depth commits.
+
+RESULT
+------
+60/60 cells byte-identical (length AND hash) between pre- and post-change.
+
+ANTI-VACUITY, measured the same way
+-----------------------------------
+Mutating the post-change tree's 8-bit conversion from YuvRange::Limited to
+YuvRange::Full changes 60/60 cells. So the harness detects a change, and the
+identity above is a result rather than a broken comparison.
+
+SECOND RESULT, unexpected and worth keeping
+-------------------------------------------
+Disabling the u8-kernel special case in `color_planes_420` — routing 8-bit
+input at depth 8 through the depth-generic `rgbx_to_yuv420_u16` recipe like
+every other cell — changes 0/60 cells. The two kernels agree byte-for-byte at
+output depth 8 on this corpus.
+
+That means the special case is NOT what keeps 8-bit output stable, contrary to
+what the first draft of its comment claimed. It is kept as a conservatism and
+performance choice (the u8 kernel packs twice the lanes per vector), not as a
+correctness guard. Nobody has measured the speed difference, so that half is
+stated as a reason to keep, not as a claim about magnitude.

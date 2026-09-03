@@ -1072,14 +1072,18 @@ fn aom_backend_refuses_hbd_grayscale() {
 /// wiring landed, and the u8-kernel special case that keeps it that way is
 /// load-bearing.
 ///
-/// `color_planes_420` routes 8-bit input at depth 8 through the dedicated
-/// `rgb8_to_yuv420` u8 kernel and widens, exactly as the seam always did; the
-/// depth-generic `rgbx_to_yuv420_u16` recipe serves every other cell. This
-/// test pins the resulting file's length and its full byte hash as a FORWARD
-/// anchor: it is not by itself proof against the pre-change build (no
-/// pre-change binary exists here to diff against — the identity argument is
-/// the code path), but any later edit that folds the special case away moves
-/// this hash.
+/// The pre-vs-post comparison itself is NOT this test — it is
+/// `benchmarks/aom_bd8_identity_2026-09-03.*`, which drives the same emitter
+/// from a `git archive` of `ec6728b` and from this tree and diffs the two:
+/// **60/60 cells byte-identical**, with a full-range mutation moving 60/60 as
+/// the anti-vacuity control. This test is the cheap FORWARD anchor on one of
+/// those cells, so a later edit that moves 8-bit output turns it red in the
+/// normal test run rather than only in a benchmark nobody re-runs.
+///
+/// Note what this does NOT prove: the u8-kernel special case in
+/// `color_planes_420` is not what holds the bytes still. The same benchmark
+/// measured routing that cell through the depth-generic u16 recipe instead and
+/// got **0 of 60** cells changed.
 #[test]
 fn aom_bd8_output_is_unchanged_by_the_hbd_wiring() {
     let src = gradient_rgb8(64, 64);
@@ -1097,9 +1101,10 @@ fn aom_bd8_output_is_unchanged_by_the_hbd_wiring() {
     assert_eq!(
         digest,
         BD8_ANCHOR_FNV1A,
-        "8-bit aom output changed (len {}). The high-bit-depth wiring must leave \
-         depth-8 byte-identical: `color_planes_420` keeps the rgb8_to_yuv420 u8 \
-         kernel for that cell precisely so this hash cannot move.",
+        "8-bit aom output changed (len {}). Depth 8 was byte-identical across the \
+         high-bit-depth wiring (60/60 cells, benchmarks/aom_bd8_identity_2026-09-03.*) \
+         and is expected to stay that way; explain the change, do not re-pin the hash \
+         reflexively.",
         enc.avif_file.len()
     );
 }
@@ -1417,4 +1422,40 @@ fn two_independent_decoders_agree_on_aom_output() {
     assert_eq!(rav.u, aom.u, "decoders disagree on Cb");
     assert_eq!(rav.v, aom.v, "decoders disagree on Cr");
     eprintln!("rav1d-safe and zenav1-aom agree bit-exactly on the aom encoder's output");
+}
+
+/// The same two-decoder agreement at **10 and 12 bits**.
+///
+/// The high-bit-depth gates above all decode with rav1d-safe alone. Agreement
+/// with a second, independently-written decoder is a stronger statement about
+/// the bitstream than any single decoder's output, and it is exactly the
+/// property the 8-bit gate above already asserts — there is no reason for the
+/// high-bit-depth path to be held to a weaker bar.
+#[cfg(feature = "zenav1-aom")]
+#[test]
+fn two_independent_decoders_agree_at_10_and_12_bits() {
+    let src = gradient_rgb16(96, 64);
+    for depth in [10u8, 12] {
+        let enc = zenavif::encode_rgb16(
+            src.as_ref(),
+            &hbd_config(depth).quality(90.0).speed(6),
+            stop(),
+        )
+        .unwrap_or_else(|e| panic!("bd{depth}: {e}"));
+        let payload = primary_payload(&enc.avif_file);
+        let rav = decode_av1_obu_yuv(&payload, DecodeBackend::Rav1dSafe)
+            .unwrap_or_else(|e| panic!("bd{depth}: rav1d-safe: {e}"));
+        let aom = decode_av1_obu_yuv(&payload, DecodeBackend::Zenav1Aom)
+            .unwrap_or_else(|e| panic!("bd{depth}: zenav1-aom: {e}"));
+        assert_eq!(
+            (rav.width, rav.height, rav.bit_depth),
+            (aom.width, aom.height, aom.bit_depth),
+            "bd{depth}: decoders disagree on geometry or depth"
+        );
+        assert_eq!(rav.bit_depth, i32::from(depth), "bd{depth}: coded depth");
+        assert_eq!(rav.y, aom.y, "bd{depth}: decoders disagree on luma");
+        assert_eq!(rav.u, aom.u, "bd{depth}: decoders disagree on Cb");
+        assert_eq!(rav.v, aom.v, "bd{depth}: decoders disagree on Cr");
+        eprintln!("bd{depth}: rav1d-safe and zenav1-aom agree bit-exactly");
+    }
 }

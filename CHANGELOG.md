@@ -424,7 +424,7 @@ write-path returns + gain-map interop additions, already on main).
 
 ### BREAKING — version bumped `0.1.8` -> `0.2.0` (user-approved 2026-09-03)
 
-Four breaks ship together, as the QUEUED BREAKING CHANGES section required.
+The breaks ship together, as the QUEUED BREAKING CHANGES section required.
 Nothing is published: the crate is still not in a publishable state (see the
 Workspace section), so this is a version in tree, not a release.
 
@@ -433,16 +433,27 @@ Workspace section), so this is a version in tree, not a release.
   itself have been a break, so every future depth or policy variant is additive
   from here. Downstream exhaustive matches need a `_` arm.
 - **`EncodeColorModel`, `EncodeChromaSubsampling` and `EncodeAlphaMode` are now
-  `#[non_exhaustive]`.** Their variant sets are strict subsets of what the
-  format or the policy space allows (AV1 has 4:4:4 / 4:2:2 / 4:2:0 / 4:0:0 and
-  this enum names two), so they will grow, and this is the release to pay for
-  it in. **`EncodePixelRange` is deliberately NOT marked** — it mirrors H.273's
+  `#[non_exhaustive]`.** Each names a strict subset of what the format or the
+  policy space allows — `EncodeChromaSubsampling` names two of AV1's four
+  (4:4:4 / 4:2:2 / 4:2:0 / 4:0:0), and the other two are policy sets rather
+  than closed spec domains — so they will grow, and this is the release to pay
+  for it in. **`EncodePixelRange` is deliberately NOT marked** — it mirrors H.273's
   `video_full_range_flag`, a single bit, so the domain is genuinely closed and
   forcing a `_` arm on every consumer would buy nothing.
 - **`Av1Backend`, `DecodeBackend` and `TargetMetric` `#[non_exhaustive]` +
   `TargetMetric::ZensimC` + `ValidationError::BackendUnsupportedParam` ship
   here.** These were already in tree and queued for "the next 0.x minor bump";
   this is that bump.
+
+`docs/public-api/*` is **not** regenerated for this break. Those snapshots can
+only be produced on Linux (`just api-doc` builds rustdoc JSON over all manifest
+features, which includes `unsafe-asm`, whose rav1d `.S` sources Apple `cc`
+refuses to assemble) and were already stale on `main` before this change. No CI
+job runs `api-doc`, so nothing gates on them. The API delta is: one new
+`EncodeBitDepth` variant plus four `#[non_exhaustive]` attributes — verified by
+diffing every `pub fn` / `pub struct` / `pub enum` / `pub const` signature in
+`src/encoder.rs` against `ec6728b`, which comes back **empty**, and by
+`dev/downstream-probe` compiling against the result.
 
 **Deliberately NOT cleared from the queue:** the deprecated feature aliases
 (`encode-svt-rs`, `aom-backend`) and enum aliases (`Av1Backend::SvtRs`,
@@ -483,7 +494,9 @@ must pass. Mutation-verified — neutering the new arm turns that test red.
 `cargo semver-checks` cannot run on this crate. `dev/downstream-probe/` is an
 out-of-crate consumer with its own `[workspace]`, run with
 `CARGO_TARGET_DIR=../../target cargo run --release` (seconds — it shares the
-parent's target dir). It exercises the `zencodec` surface imageflow uses, the
+parent's target dir) and wired into CI on `ubuntu-latest` only, since the break
+it detects is platform-independent and it rebuilds the dependency graph in its
+own feature unification. It exercises the `zencodec` surface imageflow uses, the
 `EncoderConfig` builder at all three depths, and **exhaustive matches on every
 enum that became `#[non_exhaustive]`** — the only place that break's shape shows
 up, since in-crate matches are unaffected by the attribute. It also asserts that
@@ -506,6 +519,12 @@ Measured blast radius of the 0.2.0 bump, from running it:
   tables in a dependency's manifest are ignored, so this crate's root patch
   table does not reach downstream. Also pre-existing.
 
+It carries two more binaries, both measurement tools rather than gates:
+`emit` writes one AVIF per coded depth for an external decoder to read, and
+`bd8_anchor` prints the 60-cell length+hash table the 8-bit byte-identity
+benchmark diffs. `default-run` is set so the bare `cargo run` CI uses stays
+unambiguous.
+
 ### Added — 10- and 12-bit 4:2:0 through the zenav1-aom encode backend
 
 `Av1Backend::Zenav1Aom` codes **8, 10 and 12 bits** on its RGB -> 4:2:0 colour
@@ -517,11 +536,15 @@ at all.
 refusal text was stale:**
 
 - *"this seam has no u16 forward RGB->YUV path"* — `src/yuv_convert.rs` has
-  shipped `rgbx_to_yuv420_u16` (depth-generic, `magetypes` SIMD over
-  AVX-512/AVX2/SSE4.2/NEON/wasm128/scalar, `FwdConsts::for_depth` scaling the
-  studio swing by `<< (depth - 8)` per H.273) since the zenav1-svt seam needed
-  it; `src/encoder_svt_rs.rs:644` already called it. `ForwardPixel` is
-  implemented for `Rgb<u8>`, `Rgba<u8>`, `Rgb<u16>` and `Rgba<u16>`.
+  shipped `rgbx_to_yuv420_u16` since the zenav1-svt seam needed it, and
+  `encoder_svt_rs::Yuv420Planes::convert` already called it. It is depth-generic
+  (`FwdConsts::for_depth` scales the studio swing by `<< (depth - 8)` per
+  H.273, so 10- and 12-bit needed no new constants) and dispatched per ISA
+  tier through `#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]` + `incant!`
+  — the body is a scalar loop inside each tier's `target_feature` region, so
+  that is per-tier auto-vectorization rather than hand-written intrinsics.
+  `ForwardPixel` is implemented for `Rgb<u8>`, `Rgba<u8>`, `Rgb<u16>` and
+  `Rgba<u16>`, so the 16-bit entry point needed no new impl either.
 - *"profile-2 `av1C` signalling is not wired"* — `KeyFrameConfig::profile()`
   already returns 2 at `bit_depth == 12`, and `zenavif-serialize` already
   derives `high_bitdepth` / `twelve_bit` / `pixi` and raises `seq_profile` from
@@ -553,7 +576,7 @@ maps, animation, and **high-bit-depth grayscale** — `encode_gray8` takes `u8`
 samples and the seam passes them through as the coded luma, so promoting them
 to a 10/12-bit swing would need a value-scaling rule nothing here measures.
 
-**Gates** (`tests/aom_encode_backend.rs`, 23 tests):
+**Gates** (`tests/aom_encode_backend.rs`, 25 tests):
 
 | gate | measured | bound |
 |---|---|---|
@@ -571,6 +594,11 @@ compared against an H.273 expectation written longhand in the test, not against
 studio/full range mix-up moves these by hundreds to thousands of code values.
 `aom_backend_12_bit_signals_profile_2` reads `seq_profile` / `high_bitdepth` /
 `twelve_bit` back out of the `av1C` box.
+
+`two_independent_decoders_agree_at_10_and_12_bits` holds the high-bit-depth
+path to the bar the 8-bit path already had: rav1d-safe and the zenav1-aom
+DECODER (a different crate from the encoder) must agree **bit-exactly** on
+every plane at both depths, not merely each decode successfully. They do.
 
 `aom_hbd_decodes_correctly_through_the_container` closes the other half:
 `zenavif::decode` — the path a caller actually uses, which applies `colr`,
@@ -594,10 +622,22 @@ degenerate to 8-bit constants).
 validate()"` in `validate_agrees_with_the_encode_path`. 16-bit **RGBA** takes
 over the 16-bit refusal case, because alpha genuinely is still refused.
 
-8-bit output is unchanged: `color_planes_420` keeps the `rgb8_to_yuv420` u8
-kernel for the 8-bit-source-at-depth-8 cell and only routes every other cell
-through the depth-generic u16 recipe. `aom_bd8_output_is_unchanged_by_the_hbd_wiring`
-pins the resulting file hash forward.
+**8-bit output is unchanged, MEASURED** (`benchmarks/aom_bd8_identity_2026-09-03.*`):
+a `git archive` of `ec6728b` and this tree each drive the same emitter over 60
+cells (6 geometries x 5 quality/speed pairs x gradient/flat) and the results are
+**60/60 byte-identical** by length and hash. Anti-vacuity: a full-range mutation
+on the same harness moves 60/60. `aom_bd8_output_is_unchanged_by_the_hbd_wiring`
+is the cheap forward anchor on one of those cells so a later regression shows up
+in the normal test run.
+
+That benchmark also **corrected a premise this changelog first stated wrongly**.
+`color_planes_420` keeps the `rgb8_to_yuv420` u8 kernel for the
+8-bit-source-at-depth-8 cell, and the first draft said that split is what keeps
+8-bit output stable. It is not: routing that cell through the depth-generic
+`rgbx_to_yuv420_u16` recipe instead changes **0 of 60** cells — the two kernels
+agree byte-for-byte at output depth 8. The split is kept as conservatism plus a
+lane-width argument (u8 packs twice the lanes), with no speed number claimed
+because none was measured.
 
 `sweep.rs`: `EncodeBitDepth::Twelve` gets a new fingerprint discriminant (3) and
 a new cell-id token (`-bd12`), so **no id or fingerprint minted before 0.2.0
@@ -605,6 +645,27 @@ moves**. `aom_bit_depth_resolves_into_the_fingerprint` measures — rather than
 assumes — that 8/10/12/Auto aom cells hash apart, which they do because depth
 is hashed in the shared pixel-path block even though `aom_resolved_identity`
 carries only `(cpu_used, cq_level)`.
+
+### Measured — a decoder outside this workspace reads all three depths
+
+`sips`, Apple's own AVIF decoder, sharing no code with this workspace, was
+pointed at 192x128 gradients encoded through the aom backend at quality 88 /
+speed 5 (emitted by `dev/downstream-probe`'s `emit` binary; `file(1)` reports
+all three as "ISO Media, AVIF Image"):
+
+| file | `sips` `bitsPerSample` | mean per-channel delta vs source | max |
+|---|---|---|---|
+| 8-bit | 8 | 0.919 | 5 |
+| 10-bit | 10 | 0.690 | 3 |
+| 12-bit | 12 | 0.674 | 4 |
+
+`sips` reports the DEPTH, not just the dimensions, so this independently
+confirms the `av1C` `high_bitdepth` / `twelve_bit` signalling from outside —
+the in-tree gate reads those bits out of our own container, which cannot catch
+a shared misunderstanding. 73,728 8-bit channel values per file after `sips`
+transcodes to PNG. The high-bit-depth files score better, which is the expected
+direction (more coded precision on the same source), not evidence of anything
+else.
 
 ### Found — `--cq-level 0` (quality 100) PANICS in the aom port on flat content
 
@@ -631,6 +692,10 @@ the boundary — quality 99 encodes the same content at all three depths — so 
 day upstream fixes it, the canary says so instead of going quietly green. The
 `src/encoder_aom.rs` module docs claiming "no clamp away from the endpoint"
 were describing a mapping that panics, and now say so.
+
+Tracked as **zenavif#45**, which lays out the four options (clamp to cq >= 1
+like the svt seam; typed refusal; `catch_unwind` at the seam; fix upstream) and
+why none of them is the seam's to pick unilaterally.
 
 
 ### Fixed — the assert-the-gate-ran step died on Windows before cargo ran

@@ -1144,7 +1144,7 @@ fn cicp_to_transfer_characteristics(tc: u8) -> ravif::TransferCharacteristics {
 }
 
 /// The configured coded depth as a `ravif::BitDepth`, honouring
-/// [`EncoderConfig::bit_depth_bits`] over [`EncodeBitDepth`].
+/// [`EncodeBitDepth`], including [`EncodeBitDepth::Auto`]'s input-depth rule.
 ///
 /// `ravif::BitDepth` has no 12-bit representation, so a 12 arriving here would
 /// map to `Ten`. That is unreachable: every caller runs
@@ -1688,7 +1688,7 @@ pub fn encode_rgb16(
         return crate::encoder_svt_rs::encode_rgb16_svt_rs(img, config, stop);
     }
     // The zenav1-aom seam converts 16-bit RGB to YCbCr 4:2:0 at 8, 10 or 12
-    // bits (`bit_depth_bits(12)` is the only way to reach profile 2). Same
+    // bits (`EncodeBitDepth::Twelve` is what reaches profile 2). Same
     // shape as the zenav1-svt 16-bit path, NOT zenravif's identity-GBR 4:4:4.
     // The feature-off arm names the missing FEATURE; falling through to
     // `reject_aom_backend` would say "does not support encode_rgb16", which

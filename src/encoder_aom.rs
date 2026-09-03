@@ -60,10 +60,13 @@
 //! `219 << (d-8)`). The sequence header pins `color_range = 0` at **every**
 //! depth, so full range stays refused at every depth too.
 //!
-//! One cell deliberately does not use that recipe: **8-bit input at depth 8**
-//! keeps the dedicated `rgb8_to_yuv420` u8 kernel and widens, exactly as this
-//! seam always did, so no 8-bit output byte moved when the depth landed
-//! (`aom_bd8_output_is_unchanged_by_the_hbd_wiring`).
+//! One cell does not use that recipe: **8-bit input at depth 8** keeps the
+//! dedicated `rgb8_to_yuv420` u8 kernel and widens, exactly as this seam
+//! always did. That split is conservatism, **not** the reason 8-bit output is
+//! stable — MEASURED (`benchmarks/aom_bd8_identity_2026-09-03.*`): 60 of 60
+//! cells are byte-identical across the high-bit-depth wiring, and routing that
+//! cell through the u16 recipe instead changes **0 of 60**, so the two kernels
+//! agree at output depth 8. See [`color_planes_420`].
 //!
 //! 12-bit is AV1 **profile 2**: `KeyFrameConfig::profile()` returns 2 at that
 //! depth, and `mux_aom` passes the depth to `zenavif-serialize`, which derives
@@ -161,6 +164,22 @@
 //! top-left source pixel is (0, 0, 0), it codes to studio luma 16, and
 //! Apple's decoder returns (1, 1, 1) — not (16, 16, 16), which is what a
 //! decoder ignoring `color_range = 0` would give.
+//!
+//! **Re-measured 2026-09-03 across all three coded depths** (192x128
+//! gradient, quality 88, speed 5; emitted by `dev/downstream-probe`'s `emit`
+//! binary). `sips` reports the DEPTH as well as the dimensions, so this is
+//! independent confirmation of the `av1C` `high_bitdepth` / `twelve_bit`
+//! signalling by a decoder that shares no code with this workspace:
+//!
+//! | file | `sips` `bitsPerSample` | mean per-channel delta vs source | max |
+//! |---|---|---|---|
+//! | 8-bit | 8 | 0.919 | 5 |
+//! | 10-bit | 10 | 0.690 | 3 |
+//! | 12-bit | 12 | 0.674 | 4 |
+//!
+//! (73,728 8-bit channel values per file, after `sips` transcodes to PNG.
+//! The high-bit-depth files score BETTER, which is the expected direction —
+//! more coded precision on the same source — not evidence of anything else.)
 //!
 //! # Encode speed (MEASURED 2026-09-02 — `benchmarks/aom_backend_2026-09-02.*`)
 //!
@@ -303,8 +322,7 @@ pub(crate) fn aom_depth_error(bit_depth: u8, monochrome: bool) -> Option<&'stati
     if !matches!(bit_depth, 8 | 10 | 12) {
         return Some(
             "Av1Backend::Zenav1Aom codes 8, 10 or 12 bits (aom_encode::key_frame gates \
-             exactly those three); use EncodeBitDepth::Eight / ::Ten or \
-             EncoderConfig::bit_depth_bits(12)",
+             exactly those three); use EncodeBitDepth::Eight, ::Ten or ::Twelve",
         );
     }
     if monochrome && bit_depth != 8 {
@@ -323,7 +341,7 @@ pub(crate) fn aom_depth_error(bit_depth: u8, monochrome: bool) -> Option<&'stati
 ///
 /// The depth comes from the one shared resolver,
 /// [`EncoderConfig::coded_bit_depth_bits`], so [`crate::EncodeBitDepth::Auto`],
-/// [`crate::EncodeBitDepth::Ten`] and [`EncoderConfig::bit_depth_bits`] all land
+/// [`crate::EncodeBitDepth::Ten`] and [`crate::EncodeBitDepth::Twelve`] all land
 /// here.
 pub(crate) fn resolve_aom_depth(
     config: &EncoderConfig,
@@ -489,13 +507,23 @@ enum ColorSource<'a> {
 /// **Limited, not full range** — the port's sequence header pins
 /// `color_range = 0`. See the module docs.
 ///
-/// At `bit_depth == 8` from an 8-bit source this deliberately routes through
-/// the dedicated `rgb8_to_yuv420` u8 kernel and widens, which is what the seam
-/// has always done; the depth-generic `rgbx_to_yuv420_u16` recipe serves every
-/// other cell. The two are not asserted to agree, so keeping the 8-bit path on
-/// its original kernel keeps existing 8-bit output byte-for-byte unchanged.
-/// `aom_bd8_output_is_unchanged_by_the_hbd_wiring` in
-/// `tests/aom_encode_backend.rs` is the gate on that.
+/// At `bit_depth == 8` from an 8-bit source this routes through the dedicated
+/// `rgb8_to_yuv420` u8 kernel and widens, which is what the seam has always
+/// done; the depth-generic `rgbx_to_yuv420_u16` recipe serves every other cell.
+///
+/// **That split is a conservatism/perf choice, not a correctness guard, and
+/// the first draft of this comment had it wrong.** MEASURED
+/// (`benchmarks/aom_bd8_identity_2026-09-03.*`): routing the 8-bit cell through
+/// the u16 recipe instead changes **0 of 60** cells — the two kernels agree
+/// byte-for-byte at output depth 8 across 6 geometries x 5 (quality, speed)
+/// pairs x 2 content classes. The same harness detects a real change (a
+/// full-range mutation moves 60/60), so that is a result and not a broken
+/// comparison. The u8 kernel is kept because it packs twice the lanes per
+/// vector; nobody has measured by how much, so no speed number is claimed.
+///
+/// What actually establishes that 8-bit output did not move across the
+/// high-bit-depth wiring is the same benchmark: 60/60 cells byte-identical
+/// between `ec6728b` and this tree.
 fn color_planes_420(
     src: ColorSource<'_>,
     width: usize,
@@ -625,7 +653,7 @@ fn reject_empty(width: usize, height: usize) -> Result<()> {
 /// encode is not interruptible once entered.
 ///
 /// The coded depth follows [`EncoderConfig::bit_depth`] /
-/// [`EncoderConfig::bit_depth_bits`]: 8 (the default for 8-bit input), 10 and
+/// [`crate::EncodeBitDepth`]: 8 (the default for 8-bit input), 10 and
 /// 12 all encode. At 10 or 12 the conversion quantizes at the OUTPUT depth, so
 /// an 8-bit source gains chroma-average precision it would lose through an
 /// 8-bit quantize-then-widen — it does not gain luma detail it never had.
@@ -656,9 +684,9 @@ pub(crate) fn encode_rgb8_aom(
 /// Encode a 16-bit RGB image to AVIF via the zenav1-aom backend.
 ///
 /// **KEY-frame / still scope only.** The coded depth follows
-/// [`EncoderConfig::bit_depth`] / [`EncoderConfig::bit_depth_bits`], with
-/// [`crate::EncodeBitDepth::Auto`]'s documented rule (16-bit input -> 10-bit AV1)
-/// unchanged. `bit_depth_bits(12)` is what reaches profile 2.
+/// [`EncoderConfig::bit_depth`], with [`crate::EncodeBitDepth::Auto`]'s
+/// documented rule (16-bit input -> 10-bit AV1) unchanged.
+/// [`crate::EncodeBitDepth::Twelve`] is what reaches profile 2.
 ///
 /// Unlike the zenravif 16-bit path — which encodes identity-matrix GBR planes
 /// at 4:4:4 — this converts to YCbCr 4:2:0 BT.601 limited range, the only
