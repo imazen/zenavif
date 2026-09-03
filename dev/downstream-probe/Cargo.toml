@@ -1,0 +1,39 @@
+# The stand-in for `cargo semver-checks`, which cannot run on this crate.
+#
+# An OUT-OF-CRATE consumer of zenavif, in its OWN [workspace] so it never joins
+# the parent (a `path` dep back to the parent from a member would be circular).
+# Two things it catches that a same-crate test cannot:
+#
+#   1. `#[non_exhaustive]` — in-crate matches are unaffected by it, so only a
+#      separate crate proves the break shape. Every wildcard arm in `main.rs`
+#      is a change a downstream consumer must make.
+#   2. A refusal message that names the WRONG feature or backend. That defect
+#      (`Av1Backend::Zenav1Aom does not support encode_rgb16 (requires the
+#      zenav1-svt cargo feature)`) shipped on 2026-09-02 and was caught by
+#      compiling a real consumer, not by a same-crate test.
+#
+# Usage (share the parent's target dir so this costs seconds, not gigabytes):
+#   CARGO_TARGET_DIR=../../target cargo run --release
+#
+# The `[patch.crates-io]` table below is NOT optional and is NOT new in 0.2.0:
+# `[patch]` tables in a dependency's own manifest are ignored, so the parent's
+# root patch table does not reach a consumer. Any consumer of zenavif needs
+# these two entries until zenavif-serialize 0.2.0 and zenanalyze-api 0.1.1
+# publish.
+[package]
+name = "zenavif-downstream-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+zenavif = { path = "../..", features = ["encode", "zenav1-aom-encode"] }
+imgref = "1.11.0"
+rgb = "0.8.52"
+almost-enough = { version = "0.4.3", features = ["alloc"] }
+
+[patch.crates-io]
+zenanalyze-api = { git = "https://github.com/imazen/zenanalyze" }
+zenavif-serialize = { path = "../../zenavif-serialize" }

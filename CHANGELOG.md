@@ -456,6 +456,34 @@ still gates them. Also not cleared: removing
 `src/decoder.rs`, which is behind `unsafe-asm` and is compiled by nothing (not
 CI, not this box), so removing it would be an edit made blind. It stays queued.
 
+### Added — `dev/downstream-probe/`, the `cargo semver-checks` substitute
+
+`cargo semver-checks` cannot run on this crate. `dev/downstream-probe/` is an
+out-of-crate consumer with its own `[workspace]`, run with
+`CARGO_TARGET_DIR=../../target cargo run --release` (seconds — it shares the
+parent's target dir). It exercises the `zencodec` surface imageflow uses, the
+`EncoderConfig` builder at all three depths, and **exhaustive matches on every
+enum that became `#[non_exhaustive]`** — the only place that break's shape shows
+up, since in-crate matches are unaffected by the attribute. It also asserts that
+`EncodePixelRange` still matches WITHOUT a wildcard, which is the claim behind
+leaving it unmarked.
+
+Measured blast radius of the 0.2.0 bump, from running it:
+
+- Every downstream `zenavif = "0.1.x"` requirement must move to `"0.2.0"`.
+  zenpipe pins `0.1.7`, imageflow `0.1.4`.
+- Neither zenpipe nor imageflow matches on the newly `#[non_exhaustive]` enums —
+  both go through `AvifEncoderConfig` / `AvifDecoderConfig` — so beyond the
+  version requirement the enum break costs them nothing.
+- **Pre-existing, unrelated to this bump:** imageflow requests
+  `features = ["zencodec", "encode"]`; `zencodec` is a required dependency here,
+  not a feature, and has not been one on `main` for some time, so that request
+  already fails to resolve.
+- **Any consumer needs its own `[patch.crates-io]`** for `zenavif-serialize`
+  (0.2.0, unpublished) and `zenanalyze-api` (0.1.1, unpublished): `[patch]`
+  tables in a dependency's manifest are ignored, so this crate's root patch
+  table does not reach downstream. Also pre-existing.
+
 ### Added — 10- and 12-bit 4:2:0 through the zenav1-aom encode backend
 
 `Av1Backend::Zenav1Aom` codes **8, 10 and 12 bits** on its RGB -> 4:2:0 colour

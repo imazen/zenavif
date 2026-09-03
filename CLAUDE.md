@@ -104,6 +104,24 @@ same three CMPERR files. So this suite is useless as a local regression gate
 on macOS; run `linku_decode_all` instead (156/156, no `avifdec` involved) and
 let CI's `link-u corpus` workflow own the parity half.
 
+**`cargo semver-checks` cannot run on this crate** (pre-existing, same root
+cause as the unpublishable state — see the CHANGELOG Workspace section). The
+substitute is **`dev/downstream-probe/`**: an out-of-crate consumer with its own
+`[workspace]`, run with
+`cd dev/downstream-probe && CARGO_TARGET_DIR=../../target cargo run --release`
+(seconds, since it shares the parent's target dir). It is the only thing that
+shows a `#[non_exhaustive]` break's shape — in-crate matches are unaffected by
+that attribute — and it is what caught the 2026-09-02 refusal message that named
+the wrong cargo feature. **Any consumer of zenavif needs a `[patch.crates-io]`
+of its own** for `zenavif-serialize` and `zenanalyze-api`: `[patch]` tables in a
+dependency's manifest are IGNORED, so this crate's root patch table does not
+reach downstream. Measured blast radius of the 0.2.0 bump: every downstream
+`zenavif = "0.1.x"` requirement must move to `"0.2.0"` (zenpipe pins `0.1.7`,
+imageflow `0.1.4`), and imageflow additionally requests
+`features = ["zencodec", ...]` — `zencodec` is a required dependency here, not a
+feature, and has not been one on `main` for some time, so that request is
+already stale independent of this bump.
+
 **Executable gates (docs/ENGINEERING_BASELINE.md section A):** run
 `just gates` (= `gate-determinism` + `gate-conformance` + `gate-ladder`,
 all via `examples/gate_kit.rs` + `scripts/gates/gate_conformance.sh`)
