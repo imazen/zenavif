@@ -69,20 +69,49 @@ pub struct EncodedImage {
     pub alpha_byte_size: usize,
 }
 
-/// Bit depth for encoding
+/// Bit depth for the coded AV1 stream.
+///
+/// `#[non_exhaustive]`: AV1 codes 8, 10 and 12 bits and this enum also carries
+/// *policy* variants like [`EncodeBitDepth::Auto`], so its variant set is not
+/// closed. Marked in the same 0.2.0 break that added
+/// [`EncodeBitDepth::Twelve`], so every future depth or policy is additive
+/// from here — retrofitting `#[non_exhaustive]` later would itself be a break.
+/// Downstream exhaustive matches need a `_` arm.
+///
+/// Not every backend codes every depth. [`Av1Backend::Zenravif`] codes 8 and
+/// 10 (`ravif::BitDepth` has no 12-bit representation); [`Av1Backend::Zenav1Svt`]
+/// codes 8 and 10 (the port has no 12-bit encode, matching C SVT-AV1 v4.2.0's
+/// own check); [`Av1Backend::Zenav1Aom`] codes 8, 10 and 12 on its 4:2:0 colour
+/// path. A depth a backend cannot code is refused by name at
+/// [`EncoderConfig::validate`] and again at encode time — never silently
+/// served at a different depth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum EncodeBitDepth {
     /// 8 bits per channel
     Eight,
     /// 10 bits per channel
     Ten,
-    /// Match input depth: 8-bit input → 8-bit AV1, 16-bit input → 10-bit AV1
+    /// 12 bits per channel (AV1 profile 2).
+    ///
+    /// Only [`Av1Backend::Zenav1Aom`] codes it today, on RGB → 4:2:0 stills;
+    /// see the enum docs. Added in 0.2.0.
+    Twelve,
+    /// Match input depth: 8-bit input → 8-bit AV1, 16-bit input → 10-bit AV1.
+    ///
+    /// Never resolves to 12 — 12-bit is an explicit request, because the
+    /// 16-bit entry points carry no signal distinguishing "10-bit content
+    /// promoted to u16" from "12-bit content promoted to u16".
     #[default]
     Auto,
 }
 
 /// Internal color model for encoding
+/// `#[non_exhaustive]` (0.2.0): AV1 signals a whole H.273 matrix space and
+/// this enum names two of its meanings, so the set can grow. Downstream
+/// exhaustive matches need a `_` arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum EncodeColorModel {
     /// YCbCr color model (smaller files, standard)
     #[default]
@@ -92,7 +121,11 @@ pub enum EncodeColorModel {
 }
 
 /// Alpha channel handling mode
+/// `#[non_exhaustive]` (0.2.0): these are alpha *policies*, not a closed
+/// spec domain, so the set can grow. Downstream exhaustive matches need a
+/// `_` arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum EncodeAlphaMode {
     /// Unassociated alpha, clean color values under transparent pixels
     #[default]
@@ -109,6 +142,11 @@ pub enum EncodeAlphaMode {
 /// Limited/narrow range uses the broadcast range (16–235 luma, 16–240 chroma
 /// for 8-bit; 64–940 for 10-bit). Use limited range for broadcast/studio
 /// content that is already in narrow range.
+///
+/// Deliberately **not** `#[non_exhaustive]`, unlike its sibling config enums:
+/// this one mirrors H.273's `video_full_range_flag`, which is a single bit, so
+/// the domain is genuinely closed and forcing a `_` arm on every consumer
+/// would buy nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EncodePixelRange {
     /// Full range (0–255 / 0–1023). Default.
@@ -129,7 +167,11 @@ pub enum EncodePixelRange {
 /// identity matrix has no meaningful "chroma" to subsample);
 /// [`EncoderConfig::validate`] rejects the pair and the encoder errors
 /// at encode time.
+/// `#[non_exhaustive]` (0.2.0): AV1 has 4:4:4, 4:2:2, 4:2:0 and 4:0:0 and
+/// this enum names two of them, so the set will grow. Downstream exhaustive
+/// matches need a `_` arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum EncodeChromaSubsampling {
     /// Full-resolution chroma (4:4:4). Default, and recommended for AVIF.
     #[default]
@@ -604,6 +646,29 @@ impl EncoderConfig {
         self
     }
 
+    /// The coded depth in bits this config resolves to.
+    ///
+    /// The single resolver every path shares -- `validate`, all three encode
+    /// seams and [`EncoderConfig::resolve_plan`] -- so an introspected plan
+    /// cannot drift from what the encoder does. It does NOT check that the
+    /// chosen backend can code the depth; the per-backend gates
+    /// ([`reject_unspellable_coded_depth`], `encoder_aom::aom_depth_error`,
+    /// `encoder_svt_rs::svt_rs_depth_error`) are what refuse it.
+    pub(crate) fn coded_bit_depth_bits(&self, input_is_16bit: bool) -> u8 {
+        match self.bit_depth {
+            EncodeBitDepth::Eight => 8,
+            EncodeBitDepth::Ten => 10,
+            EncodeBitDepth::Twelve => 12,
+            EncodeBitDepth::Auto => {
+                if input_is_16bit {
+                    10
+                } else {
+                    8
+                }
+            }
+        }
+    }
+
     /// Set the internal color model
     ///
     /// YCbCr (default) produces smaller files. RGB may be better for lossless.
@@ -1076,24 +1141,21 @@ fn cicp_to_transfer_characteristics(tc: u8) -> ravif::TransferCharacteristics {
     }
 }
 
-/// Resolve `EncodeBitDepth::Auto` based on whether the input is 8-bit or 16-bit.
+/// The configured coded depth as a `ravif::BitDepth`, honouring
+/// [`EncoderConfig::bit_depth_bits`] over [`EncodeBitDepth`].
 ///
-/// Shared by `build_ravif_encoder` and `EncoderConfig::resolve_plan` so
-/// the introspected plan cannot drift from what the encoder does.
-pub(crate) fn resolve_bit_depth(
-    configured: EncodeBitDepth,
+/// `ravif::BitDepth` has no 12-bit representation, so a 12 arriving here would
+/// map to `Ten`. That is unreachable: every caller runs
+/// [`reject_unspellable_coded_depth`] first (`build_ravif_encoder` does it on
+/// its own first line, and the 16-bit entry points reach this only through
+/// that constructor). Keep it that way -- do not call this without the guard.
+pub(crate) fn resolve_coded_bit_depth(
+    config: &EncoderConfig,
     input_is_16bit: bool,
 ) -> ravif::BitDepth {
-    match configured {
-        EncodeBitDepth::Eight => ravif::BitDepth::Eight,
-        EncodeBitDepth::Ten => ravif::BitDepth::Ten,
-        EncodeBitDepth::Auto => {
-            if input_is_16bit {
-                ravif::BitDepth::Ten
-            } else {
-                ravif::BitDepth::Eight
-            }
-        }
+    match config.coded_bit_depth_bits(input_is_16bit) {
+        8 => ravif::BitDepth::Eight,
+        _ => ravif::BitDepth::Ten,
     }
 }
 
@@ -1157,19 +1219,47 @@ fn reject_svt_rs_backend(config: &EncoderConfig, entry: &'static str) -> Result<
 /// `aom_encode::key_frame::encode_key_frame` is a ONE-KEY-FRAME entry point:
 /// no inter prediction, no reference management, no multi-frame state. So
 /// animation is not "not wired yet at this seam", it is absent from the
-/// encoder — and alpha, 16-bit input and 10/12-bit output are the
-/// seam-level gaps. Each is named in the message rather than silently
-/// served by zenravif.
+/// encoder. **Alpha** is the remaining seam-level gap: the Cs400 mono encode
+/// an `auxl` alpha item needs exists here, the item itself is not built, so
+/// `encode_rgba8` / `encode_rgba16` land here. Named in the message rather
+/// than silently served by zenravif.
+///
+/// Depth is NOT on this list any more (2026-09-03): the colour 4:2:0 path
+/// codes 8, 10 and 12 bits from both 8- and 16-bit input. What refuses a
+/// depth now is `encoder_aom::aom_depth_error`, which names the one case that
+/// is still 8-bit-only — the Cs400 grayscale path.
 pub(crate) fn reject_aom_backend(config: &EncoderConfig, entry: &'static str) -> Result<()> {
     if config.backend == Av1Backend::Zenav1Aom {
         return Err(at!(Error::Encode(format!(
             "Av1Backend::Zenav1Aom does not support {entry}: it encodes ONE AV1 \
-             KEY frame (8-bit RGB → 4:2:0 and 8-bit grayscale stills only — no \
-             animation, no alpha auxiliary item, no 16-bit input, no 10/12-bit \
-             output); use Av1Backend::Zenravif"
+             KEY frame (RGB → 4:2:0 at 8/10/12 bits and 8-bit grayscale stills \
+             only — no animation, no alpha auxiliary item); \
+             use Av1Backend::Zenravif"
         ))));
     }
     Ok(())
+}
+
+/// Refuse an [`EncodeBitDepth`] the zenravif path cannot code, naming the one
+/// backend that can.
+///
+/// This exists so a 12-bit request can never be silently served as 10:
+/// [`resolve_coded_bit_depth`] returns `ravif::BitDepth`, which has no 12-bit
+/// representation, so without this guard `EncodeBitDepth::Twelve` on the
+/// zenravif backend would code 10 bits and report success -- exactly the
+/// silent-wrong-pixels class the crate forbids.
+pub(crate) fn reject_unspellable_coded_depth(
+    config: &EncoderConfig,
+    input_is_16bit: bool,
+) -> Result<()> {
+    if matches!(config.coded_bit_depth_bits(input_is_16bit), 8 | 10) {
+        return Ok(());
+    }
+    Err(at!(Error::Unsupported(
+        "Av1Backend::Zenravif codes 8 and 10 bits only (ravif::BitDepth has no 12-bit \
+         representation), so EncodeBitDepth::Twelve is refused rather than coded at 10. \
+         12-bit is implemented by Av1Backend::Zenav1Aom on RGB -> 4:2:0 stills"
+    )))
 }
 
 fn build_ravif_encoder(
@@ -1177,12 +1267,13 @@ fn build_ravif_encoder(
     stop: almost_enough::StopToken,
     input_is_16bit: bool,
 ) -> Result<ravif::Encoder<'_>> {
+    reject_unspellable_coded_depth(config, input_is_16bit)?;
     let mut enc = ravif::Encoder::new()
         .with_quality(config.quality)
         // `speed_effective`, not `speed`: lossless clamps into the
         // registry-era band (imazen/zenavif#8; see encode_plan.rs).
         .with_speed(config.speed_effective())
-        .with_bit_depth(resolve_bit_depth(config.bit_depth, input_is_16bit))
+        .with_bit_depth(resolve_coded_bit_depth(config, input_is_16bit))
         .with_internal_color_model(match config.color_model {
             EncodeColorModel::YCbCr => ravif::ColorModel::YCbCr,
             EncodeColorModel::Rgb => ravif::ColorModel::RGB,
@@ -1431,8 +1522,8 @@ pub(crate) fn encode_rgb8_once(
             )));
         }
     }
-    // Same contract for the zenav1-aom backend: 8-bit RGB → 4:2:0 still is
-    // exactly the slice it implements (`src/encoder_aom.rs`).
+    // Same contract for the zenav1-aom backend: RGB → 4:2:0 still (8, 10 or
+    // 12 bits) is exactly the slice it implements (`src/encoder_aom.rs`).
     if config.backend == Av1Backend::Zenav1Aom {
         #[cfg(feature = "zenav1-aom-encode")]
         {
@@ -1594,6 +1685,24 @@ pub fn encode_rgb16(
     if config.backend == Av1Backend::Zenav1Svt {
         return crate::encoder_svt_rs::encode_rgb16_svt_rs(img, config, stop);
     }
+    // The zenav1-aom seam converts 16-bit RGB to YCbCr 4:2:0 at 8, 10 or 12
+    // bits (`bit_depth_bits(12)` is the only way to reach profile 2). Same
+    // shape as the zenav1-svt 16-bit path, NOT zenravif's identity-GBR 4:4:4.
+    // The feature-off arm names the missing FEATURE; falling through to
+    // `reject_aom_backend` would say "does not support encode_rgb16", which
+    // stopped being true on 2026-09-03.
+    if config.backend == Av1Backend::Zenav1Aom {
+        #[cfg(feature = "zenav1-aom-encode")]
+        {
+            return crate::encoder_aom::encode_rgb16_aom(img, config, stop);
+        }
+        #[cfg(not(feature = "zenav1-aom-encode"))]
+        {
+            return Err(at!(Error::Unsupported(
+                "Av1Backend::Zenav1Aom requires the `zenav1-aom-encode` cargo feature"
+            )));
+        }
+    }
     reject_svt_rs_backend(config, "encode_rgb16")?;
     let enc = build_ravif_encoder(config, stop, true)?;
     let width = img.width();
@@ -1617,7 +1726,7 @@ pub fn encode_rgb16(
     //
     // `Auto` keeps its documented contract (16-bit input -> 10-bit AV1), so
     // the default path through here is byte-for-byte what it always was.
-    let result = match resolve_bit_depth(config.bit_depth, true) {
+    let result = match resolve_coded_bit_depth(config, true) {
         ravif::BitDepth::Eight => {
             let pixels: Vec<[u8; 3]> = img
                 .pixels()
@@ -1696,7 +1805,7 @@ pub fn encode_rgba16(
         _ => ravif::PixelRange::Full,
     };
     // Honours `config.bit_depth` for colour AND alpha — see encode_rgb16.
-    let result = match resolve_bit_depth(config.bit_depth, true) {
+    let result = match resolve_coded_bit_depth(config, true) {
         ravif::BitDepth::Eight => {
             let pixels: Vec<[u8; 3]> = img
                 .pixels()

@@ -169,7 +169,8 @@ pub struct EncodePlan {
     /// emitted (the encoder drops all-opaque alpha planes); `None` when
     /// the input declares no alpha at all.
     pub alpha_quantizer: Option<u8>,
-    /// Resolved output bit depth (8 or 10).
+    /// Resolved output bit depth in bits (8, 10, or 12 -- see
+    /// [`crate::EncoderConfig::bit_depth_bits`]).
     pub bit_depth: u8,
     /// Resolved internal color model. On the 16-bit entry points the
     /// current implementation always encodes identity-matrix RGB planes
@@ -479,11 +480,11 @@ impl EncoderConfig {
             s
         });
 
-        let bit_depth =
-            match crate::encoder::resolve_bit_depth(self.bit_depth, input.input_is_16bit) {
-                ravif::BitDepth::Eight => 8,
-                _ => 10,
-            };
+        // `coded_bit_depth_bits`, not the `EncodeBitDepth` enum: it is the one
+        // resolver the encode seams use, so an introspected plan reports the
+        // depth that is actually coded -- including a `bit_depth_bits(12)`
+        // request, which no `ravif::BitDepth` can represent.
+        let bit_depth = self.coded_bit_depth_bits(input.input_is_16bit);
 
         // The 16-bit entry points feed raw RGB planes with an identity
         // matrix regardless of the configured color model

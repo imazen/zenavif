@@ -237,9 +237,12 @@ impl crate::EncoderConfig {
         // zenravif's 16-bit path is the identity-RGB (GBR) encode, which
         // has no 4:2:0. The zenav1-svt backend converts 16-bit input to
         // 10-bit YCbCr 4:2:0 instead, so the pair is exactly its shape.
+        // The zenav1-aom backend converts 16-bit input the same way
+        // (YCbCr 4:2:0, 8/10/12-bit), so the pair is its shape too.
         if input.input_is_16bit
             && self.chroma_subsampling == crate::EncodeChromaSubsampling::Yuv420
             && self.backend != crate::Av1Backend::Zenav1Svt
+            && self.backend != crate::Av1Backend::Zenav1Aom
         {
             return Err(ValidationError::MutuallyExclusive {
                 a: "chroma_subsampling=Yuv420",
@@ -251,17 +254,10 @@ impl crate::EncoderConfig {
         // predicate as the encode path (`encoder_svt_rs::svt_rs_depth_error`).
         #[cfg(feature = "zenav1-svt")]
         if self.backend == crate::Av1Backend::Zenav1Svt {
-            let bit_depth = match self.bit_depth {
-                crate::EncodeBitDepth::Eight => 8,
-                crate::EncodeBitDepth::Ten => 10,
-                crate::EncodeBitDepth::Auto => {
-                    if input.input_is_16bit {
-                        10
-                    } else {
-                        8
-                    }
-                }
-            };
+            // The one shared resolver, not a local copy of the rule: a
+            // duplicated match is exactly what let `EncodeBitDepth::Twelve`
+            // reach a backend that cannot code it.
+            let bit_depth = self.coded_bit_depth_bits(input.input_is_16bit);
             if let Some(detail) = crate::encoder_svt_rs::svt_rs_depth_error(
                 bit_depth,
                 self.speed,
@@ -274,6 +270,13 @@ impl crate::EncoderConfig {
                 });
             }
         }
+        // NOT checked here: the zenav1-aom Cs400 grayscale path is 8-bit only
+        // while its colour path codes 8/10/12. That predicate needs to know
+        // the input is grayscale, and `PlanInput` has no such field — it is a
+        // plain public struct, so adding one is a breaking change. So
+        // `.bit_depth_bits(10)` + `encode_gray8` VALIDATES and then refuses at
+        // encode (`encoder_aom::aom_depth_error`). Same validate/encode
+        // divergence class as zenavif#44; named rather than hidden.
         // The zenav1-svt dimension envelope (issue #32): the 4:2:0 colour
         // path takes arbitrary dimensions at any speed; a Cs400 alpha or
         // grayscale stream needs SVT preset >= 6 (speed >= 5) AND multiples
@@ -385,13 +388,19 @@ impl crate::EncoderConfig {
                          header pins color_range=0, AOM_CR_STUDIO_RANGE)",
             });
         }
-        if self.bit_depth == crate::EncodeBitDepth::Ten {
+        // Depth: 8, 10 and 12 all encode on the colour 4:2:0 path since
+        // 2026-09-03. Only a value the encoder has no gate for is refused
+        // config-side; the grayscale-is-8-bit-only half needs the input shape
+        // and lives in `validate_for_input`. Same predicate as the encode path
+        // (`encoder_aom::aom_depth_error`).
+        if let Some(detail) = crate::encoder_aom::aom_depth_error(
+            self.coded_bit_depth_bits(false),
+            false,
+        ) {
             return Err(ValidationError::BackendUnsupportedParam {
                 backend: BACKEND,
-                param: "bit_depth",
-                detail: "encodes 8-bit only in this seam (the encoder byte-gates \
-                         8, 10 and 12; the u16 forward path and profile-2 av1C \
-                         signalling are not wired here)",
+                param: "bit_depth / bit_depth_bits",
+                detail,
             });
         }
         if self.gain_map.is_some() {

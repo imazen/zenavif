@@ -1578,6 +1578,8 @@ impl Stratum {
             EncodeBitDepth::Auto => {}
             EncodeBitDepth::Eight => s.push_str("-bd8"),
             EncodeBitDepth::Ten => s.push_str("-bd10"),
+            // New token, so no id minted before 0.2.0 changes.
+            EncodeBitDepth::Twelve => s.push_str("-bd12"),
         }
         if self.color_model == EncodeColorModel::Rgb {
             s.push_str("-rgb");
@@ -1966,6 +1968,12 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
         // config-only fingerprint cannot see. Auto never merges with an
         // explicit depth even where they coincide.
         EncodeBitDepth::Auto => 2,
+        // A NEW discriminant, so no fingerprint minted before 0.2.0 moves.
+        // This is also what makes 10- and 12-bit aom cells hash apart:
+        // `aom_resolved_identity` above carries only (cpu_used, cq_level),
+        // and depth is hashed here in the shared pixel-path block for every
+        // backend. `aom_bit_depth_resolves_into_the_fingerprint` gates it.
+        EncodeBitDepth::Twelve => 3,
     });
     h.u8(match config.color_model {
         EncodeColorModel::YCbCr => 0,
@@ -2713,6 +2721,37 @@ mod tests {
             .quality(90.0)
             .speed(6);
         assert_ne!(fingerprint(&at(90.0)), fingerprint(&zenravif));
+    }
+
+    /// 8-, 10- and 12-bit aom cells fingerprint APART.
+    ///
+    /// `aom_resolved_identity` carries only `(cpu_used, cq_level)` — no depth
+    /// — so this could only hold because bit depth is hashed in the shared
+    /// pixel-path block for every backend. MEASURED here rather than assumed;
+    /// if a future edit moved the aom backend onto a depth-free fingerprint,
+    /// three genuinely different encodes would merge into one cell.
+    #[cfg(feature = "zenav1-aom-encode")]
+    #[test]
+    fn aom_bit_depth_resolves_into_the_fingerprint() {
+        let at = |d: crate::EncodeBitDepth| {
+            crate::EncoderConfig::new()
+                .backend(crate::Av1Backend::Zenav1Aom)
+                .chroma_subsampling(EncodeChromaSubsampling::Yuv420)
+                .speed(6)
+                .quality(90.0)
+                .bit_depth(d)
+        };
+        let e = fingerprint(&at(crate::EncodeBitDepth::Eight));
+        let t = fingerprint(&at(crate::EncodeBitDepth::Ten));
+        let w = fingerprint(&at(crate::EncodeBitDepth::Twelve));
+        let a = fingerprint(&at(crate::EncodeBitDepth::Auto));
+        assert_ne!(e, t, "8- and 10-bit aom cells are different encodes");
+        assert_ne!(t, w, "10- and 12-bit aom cells are different encodes");
+        assert_ne!(e, w, "8- and 12-bit aom cells are different encodes");
+        // Auto never merges with an explicit depth, even where it resolves to
+        // the same one — a config-only fingerprint cannot see input bitness.
+        assert_ne!(a, e, "Auto and Eight stay distinct cells");
+        assert_ne!(a, w, "Auto and Twelve stay distinct cells");
     }
 
     /// The knobs are inert on every non-svt-rs backend, so setting them on

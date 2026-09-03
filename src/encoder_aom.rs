@@ -143,7 +143,7 @@
 //! byte/quality columns are NOT an RD comparison.
 
 use crate::Result;
-use crate::encoder::{EncodeBitDepth, EncodeChromaSubsampling, EncodeColorModel, EncodePixelRange};
+use crate::encoder::{EncodeChromaSubsampling, EncodeColorModel, EncodePixelRange};
 use crate::encoder::{EncodedImage, EncoderConfig};
 use crate::error::Error;
 use imgref::ImgRef;
@@ -247,36 +247,51 @@ fn reject_unsupported_config(config: &EncoderConfig) -> Result<()> {
     Ok(())
 }
 
-/// The bit depth this seam will encode at, or a typed refusal naming what is
-/// unimplemented.
+/// The bit-depth envelope this seam accepts, shared by the encode path and
+/// `EncoderConfig::validate` -- so a config that validates encodes and a
+/// config that encodes validates. Returns the reason a `bit_depth`-bit encode
+/// is refused, or `None` when it encodes.
 ///
-/// The encoder byte-gates 8, 10 and 12 bits; this seam wires 8 only (a u16
-/// forward RGB->YUV path and profile-2 `av1C` signalling are what 10/12 would
-/// additionally need).
-pub(crate) fn reject_out_of_envelope_depth(
+/// 8, 10 and 12 all encode on the **colour** 4:2:0 path (all three are
+/// byte-gated upstream). The grayscale (Cs400) path is 8-bit only -- see the
+/// message for why that is a missing value-scaling rule, not a missing
+/// encoder.
+pub(crate) fn aom_depth_error(bit_depth: u8, monochrome: bool) -> Option<&'static str> {
+    if !matches!(bit_depth, 8 | 10 | 12) {
+        return Some(
+            "Av1Backend::Zenav1Aom codes 8, 10 or 12 bits (aom_encode::key_frame gates \
+             exactly those three); use EncodeBitDepth::Eight / ::Ten or \
+             EncoderConfig::bit_depth_bits(12)",
+        );
+    }
+    if monochrome && bit_depth != 8 {
+        return Some(
+            "Av1Backend::Zenav1Aom codes 8-bit grayscale (Cs400) only: encode_gray8 takes \
+             u8 samples and this seam passes them through as the coded luma, so promoting \
+             them to a 10- or 12-bit swing would need a value-scaling rule nothing here \
+             measures. The 4:2:0 colour path codes 8, 10 and 12 -- use RGB input",
+        );
+    }
+    None
+}
+
+/// Encode-time twin of `validate_aom_scope`'s depth check, both driven by
+/// [`aom_depth_error`]. Returns the depth to code at.
+///
+/// The depth comes from the one shared resolver,
+/// [`EncoderConfig::coded_bit_depth_bits`], so [`crate::EncodeBitDepth::Auto`],
+/// [`crate::EncodeBitDepth::Ten`] and [`EncoderConfig::bit_depth_bits`] all land
+/// here.
+pub(crate) fn resolve_aom_depth(
     config: &EncoderConfig,
     input_is_16bit: bool,
-) -> Result<()> {
-    let requested = match config.bit_depth {
-        EncodeBitDepth::Eight => 8u8,
-        EncodeBitDepth::Ten => 10,
-        EncodeBitDepth::Auto => {
-            if input_is_16bit {
-                10
-            } else {
-                8
-            }
-        }
-    };
-    if requested != 8 {
-        return Err(at!(Error::Unsupported(
-            "Av1Backend::Zenav1Aom encodes 8-bit only in this seam \
-             (aom_encode::key_frame byte-gates 8, 10 and 12 bits; the 10/12-bit \
-             forward RGB->YUV path and the profile-2 av1C signalling are not \
-             wired here)"
-        )));
+    monochrome: bool,
+) -> Result<u8> {
+    let bit_depth = config.coded_bit_depth_bits(input_is_16bit);
+    match aom_depth_error(bit_depth, monochrome) {
+        None => Ok(bit_depth),
+        Some(reason) => Err(at!(Error::Unsupported(reason))),
     }
-    Ok(())
 }
 
 /// Map a raw CICP colour-primaries code point to the muxer's enum. Unmapped
@@ -313,12 +328,13 @@ fn key_frame_config(
     config: &EncoderConfig,
     width: usize,
     height: usize,
+    bit_depth: u8,
     monochrome: bool,
 ) -> aom_encode::key_frame::KeyFrameConfig {
     aom_encode::key_frame::KeyFrameConfig {
         width,
         height,
-        bit_depth: 8,
+        bit_depth,
         monochrome,
         // Monochrome carries (1, 1) — the AOM_IMG_FMT_I420 a mono image
         // allocates; `encode_key_frame` rejects any other ss for mono.
@@ -353,6 +369,7 @@ fn mux_aom(
     width: usize,
     height: usize,
     seq_profile: u8,
+    bit_depth: u8,
     color_primaries: u8,
     transfer_characteristics: u8,
     monochrome: bool,
@@ -401,8 +418,12 @@ fn mux_aom(
         );
     }
     let color_byte_size = payload.len();
+    // `bit_depth`, not a literal 8: `zenavif-serialize` derives the `av1C`
+    // `high_bitdepth` / `twelve_bit` flags and the `pixi` depth from this, and
+    // raises `seq_profile` to 2 at 12 bits. A 10-bit payload muxed as 8 would
+    // be a container that contradicts its own bitstream.
     let avif_file = aviffy
-        .try_to_vec(&payload, None, w, h, 8)
+        .try_to_vec(&payload, None, w, h, bit_depth)
         .map_err(|e| at!(Error::Encode(format!("AVIF serialization failed: {e}"))))?;
     Ok(EncodedImage {
         avif_file,
@@ -411,59 +432,113 @@ fn mux_aom(
     })
 }
 
-/// Encode an 8-bit RGB image to AVIF via the zenav1-aom backend.
+/// The colour input the 4:2:0 conversion reads, with its pixel stride.
+enum ColorSource<'a> {
+    /// 8-bit RGB, as `crate::encoder::encode_rgb8` hands it over.
+    Rgb8(&'a [Rgb<u8>], usize),
+    /// 16-bit RGB (full 0..=65535), as `crate::encoder::encode_rgb16` does.
+    Rgb16(&'a [rgb::Rgb<u16>], usize),
+}
+
+/// The 4:2:0 colour planes this seam feeds `encode_key_frame`, as tight `u16`
+/// samples in the `bit_depth`-bit range.
 ///
-/// **KEY-frame / still scope only** — see the module docs. Cancellation is
-/// checked at the seam's phase boundaries (pre-conversion, pre-encode,
-/// pre-mux); `encode_key_frame` takes no stop token, so a single frame's
-/// encode is not interruptible once entered.
-pub(crate) fn encode_rgb8_aom(
-    img: ImgRef<'_, Rgb<u8>>,
-    config: &EncoderConfig,
-    stop: almost_enough::StopToken,
-) -> Result<EncodedImage> {
-    use almost_enough::Stop;
-    stop.check().map_err(|e| at!(Error::from(e)))?;
-    reject_unsupported_config(config)?;
-    reject_out_of_envelope_depth(config, false)?;
-
-    let width = img.width();
-    let height = img.height();
-    if width == 0 || height == 0 {
-        return Err(at!(Error::Encode(
-            "Av1Backend::Zenav1Aom: width and height must be non-zero".into()
-        )));
-    }
-
-    // ---- RGB -> YUV 4:2:0, BT.601, LIMITED range ------------------------
-    // Limited, not full: the port's sequence header pins color_range = 0.
-    // See the module docs.
-    stop.check().map_err(|e| at!(Error::from(e)))?;
+/// **Limited, not full range** — the port's sequence header pins
+/// `color_range = 0`. See the module docs.
+///
+/// At `bit_depth == 8` from an 8-bit source this deliberately routes through
+/// the dedicated `rgb8_to_yuv420` u8 kernel and widens, which is what the seam
+/// has always done; the depth-generic `rgbx_to_yuv420_u16` recipe serves every
+/// other cell. The two are not asserted to agree, so keeping the 8-bit path on
+/// its original kernel keeps existing 8-bit output byte-for-byte unchanged.
+/// `aom_bd8_output_is_unchanged_by_the_hbd_wiring` in
+/// `tests/aom_encode_backend.rs` is the gate on that.
+fn color_planes_420(
+    src: ColorSource<'_>,
+    width: usize,
+    height: usize,
+    bit_depth: u8,
+) -> (Vec<u16>, Vec<u16>, Vec<u16>) {
+    use crate::yuv_convert::{YuvMatrix, YuvRange};
     let cw = width.div_ceil(2);
     let ch = height.div_ceil(2);
-    let mut y8 = vec![0u8; width * height];
-    let mut u8p = vec![0u8; cw * ch];
-    let mut v8p = vec![0u8; cw * ch];
-    crate::yuv_convert::rgb8_to_yuv420(
-        img.buf(),
-        img.stride(),
-        width,
-        height,
-        crate::yuv_convert::YuvRange::Limited,
-        crate::yuv_convert::YuvMatrix::Bt601,
-        &mut y8,
-        &mut u8p,
-        &mut v8p,
-    );
-    // `encode_key_frame` takes u16 samples in the bit_depth-bit range; an
-    // 8-bit source carries 8-bit values, so this is a widen, not a scale.
-    let y: Vec<u16> = y8.iter().map(|&s| u16::from(s)).collect();
-    let u: Vec<u16> = u8p.iter().map(|&s| u16::from(s)).collect();
-    let v: Vec<u16> = v8p.iter().map(|&s| u16::from(s)).collect();
+    let mut y = vec![0u16; width * height];
+    let mut u = vec![0u16; cw * ch];
+    let mut v = vec![0u16; cw * ch];
+    match src {
+        ColorSource::Rgb8(buf, stride) if bit_depth == 8 => {
+            let mut y8 = vec![0u8; width * height];
+            let mut u8p = vec![0u8; cw * ch];
+            let mut v8p = vec![0u8; cw * ch];
+            crate::yuv_convert::rgb8_to_yuv420(
+                buf,
+                stride,
+                width,
+                height,
+                YuvRange::Limited,
+                YuvMatrix::Bt601,
+                &mut y8,
+                &mut u8p,
+                &mut v8p,
+            );
+            // `encode_key_frame` takes u16 samples in the bit_depth-bit range;
+            // an 8-bit source carries 8-bit values, so this is a widen, not a
+            // scale.
+            for (d, s) in y.iter_mut().zip(&y8) {
+                *d = u16::from(*s);
+            }
+            for (d, s) in u.iter_mut().zip(&u8p) {
+                *d = u16::from(*s);
+            }
+            for (d, s) in v.iter_mut().zip(&v8p) {
+                *d = u16::from(*s);
+            }
+        }
+        ColorSource::Rgb8(buf, stride) => {
+            crate::yuv_convert::rgbx_to_yuv420_u16(
+                buf,
+                stride,
+                width,
+                height,
+                bit_depth,
+                YuvRange::Limited,
+                YuvMatrix::Bt601,
+                &mut y,
+                &mut u,
+                &mut v,
+            );
+        }
+        ColorSource::Rgb16(buf, stride) => {
+            crate::yuv_convert::rgbx_to_yuv420_u16(
+                buf,
+                stride,
+                width,
+                height,
+                bit_depth,
+                YuvRange::Limited,
+                YuvMatrix::Bt601,
+                &mut y,
+                &mut u,
+                &mut v,
+            );
+        }
+    }
+    (y, u, v)
+}
 
-    // ---- zenav1-aom key-frame encode ------------------------------------
+/// Shared tail of the colour entry points: encode the planes and mux.
+fn finish_color_420(
+    planes: (Vec<u16>, Vec<u16>, Vec<u16>),
+    config: &EncoderConfig,
+    width: usize,
+    height: usize,
+    bit_depth: u8,
+    stop: &almost_enough::StopToken,
+) -> Result<EncodedImage> {
+    use almost_enough::Stop;
+    let (y, u, v) = planes;
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let cfg = key_frame_config(config, width, height, false);
+    let cfg = key_frame_config(config, width, height, bit_depth, false);
     let payload = encode_key_frame_checked(
         aom_encode::key_frame::KeyFramePlanes {
             y: &y,
@@ -473,7 +548,6 @@ pub(crate) fn encode_rgb8_aom(
         &cfg,
     )?;
 
-    // ---- AVIF container --------------------------------------------------
     stop.check().map_err(|e| at!(Error::from(e)))?;
     mux_aom(
         config,
@@ -481,12 +555,95 @@ pub(crate) fn encode_rgb8_aom(
         width,
         height,
         u8::try_from(cfg.profile()).unwrap_or(0),
+        bit_depth,
         config.color_primaries.unwrap_or(DEFAULT_COLOR_PRIMARIES),
         config
             .transfer_characteristics
             .unwrap_or(DEFAULT_TRANSFER_CHARACTERISTICS),
         false,
     )
+}
+
+/// Reject a zero-sized input before anything allocates.
+fn reject_empty(width: usize, height: usize) -> Result<()> {
+    if width == 0 || height == 0 {
+        return Err(at!(Error::Encode(
+            "Av1Backend::Zenav1Aom: width and height must be non-zero".into()
+        )));
+    }
+    Ok(())
+}
+
+/// Encode an 8-bit RGB image to AVIF via the zenav1-aom backend.
+///
+/// **KEY-frame / still scope only** — see the module docs. Cancellation is
+/// checked at the seam's phase boundaries (pre-conversion, pre-encode,
+/// pre-mux); `encode_key_frame` takes no stop token, so a single frame's
+/// encode is not interruptible once entered.
+///
+/// The coded depth follows [`EncoderConfig::bit_depth`] /
+/// [`EncoderConfig::bit_depth_bits`]: 8 (the default for 8-bit input), 10 and
+/// 12 all encode. At 10 or 12 the conversion quantizes at the OUTPUT depth, so
+/// an 8-bit source gains chroma-average precision it would lose through an
+/// 8-bit quantize-then-widen — it does not gain luma detail it never had.
+pub(crate) fn encode_rgb8_aom(
+    img: ImgRef<'_, Rgb<u8>>,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedImage> {
+    use almost_enough::Stop;
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_unsupported_config(config)?;
+    let bit_depth = resolve_aom_depth(config, false, false)?;
+
+    let width = img.width();
+    let height = img.height();
+    reject_empty(width, height)?;
+
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    let planes = color_planes_420(
+        ColorSource::Rgb8(img.buf(), img.stride()),
+        width,
+        height,
+        bit_depth,
+    );
+    finish_color_420(planes, config, width, height, bit_depth, &stop)
+}
+
+/// Encode a 16-bit RGB image to AVIF via the zenav1-aom backend.
+///
+/// **KEY-frame / still scope only.** The coded depth follows
+/// [`EncoderConfig::bit_depth`] / [`EncoderConfig::bit_depth_bits`], with
+/// [`crate::EncodeBitDepth::Auto`]'s documented rule (16-bit input -> 10-bit AV1)
+/// unchanged. `bit_depth_bits(12)` is what reaches profile 2.
+///
+/// Unlike the zenravif 16-bit path — which encodes identity-matrix GBR planes
+/// at 4:4:4 — this converts to YCbCr 4:2:0 BT.601 limited range, the only
+/// shape this seam has. That is the same shape as the zenav1-svt 16-bit path,
+/// and it is why [`crate::EncoderConfig::validate_for_input`] allows
+/// `16-bit + Yuv420` for these two backends and no other.
+pub(crate) fn encode_rgb16_aom(
+    img: ImgRef<'_, rgb::Rgb<u16>>,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedImage> {
+    use almost_enough::Stop;
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_unsupported_config(config)?;
+    let bit_depth = resolve_aom_depth(config, true, false)?;
+
+    let width = img.width();
+    let height = img.height();
+    reject_empty(width, height)?;
+
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    let planes = color_planes_420(
+        ColorSource::Rgb16(img.buf(), img.stride()),
+        width,
+        height,
+        bit_depth,
+    );
+    finish_color_420(planes, config, width, height, bit_depth, &stop)
 }
 
 /// Encode an 8-bit grayscale image to AVIF as true monochrome (Cs400) via the
@@ -505,15 +662,12 @@ pub(crate) fn encode_gray8_aom(
     use almost_enough::Stop;
     stop.check().map_err(|e| at!(Error::from(e)))?;
     reject_unsupported_config(config)?;
-    reject_out_of_envelope_depth(config, false)?;
+    // `monochrome = true`: the Cs400 path is 8-bit only — see `aom_depth_error`.
+    let bit_depth = resolve_aom_depth(config, false, true)?;
 
     let width = img.width();
     let height = img.height();
-    if width == 0 || height == 0 {
-        return Err(at!(Error::Encode(
-            "Av1Backend::Zenav1Aom: width and height must be non-zero".into()
-        )));
-    }
+    reject_empty(width, height)?;
 
     let mut y = Vec::with_capacity(width * height);
     for row in img.rows() {
@@ -521,7 +675,7 @@ pub(crate) fn encode_gray8_aom(
     }
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let cfg = key_frame_config(config, width, height, true);
+    let cfg = key_frame_config(config, width, height, bit_depth, true);
     let payload = encode_key_frame_checked(
         aom_encode::key_frame::KeyFramePlanes {
             y: &y,
@@ -538,6 +692,7 @@ pub(crate) fn encode_gray8_aom(
         width,
         height,
         u8::try_from(cfg.profile()).unwrap_or(0),
+        bit_depth,
         config.color_primaries.unwrap_or(DEFAULT_COLOR_PRIMARIES),
         config
             .transfer_characteristics

@@ -871,6 +871,8 @@ fn main() {
     let ss_tag = match subsampling {
         EncodeChromaSubsampling::Yuv444 => "444",
         EncodeChromaSubsampling::Yuv420 => "420",
+        // `EncodeChromaSubsampling` became `#[non_exhaustive]` in 0.2.0.
+        _ => "other",
     };
     println!(
         "{w}\t{h}\t{pixels}\t{mode}\t{speed}\t{quality}\t{}\t{pre}\t{peak}\t{}\t{backend_tag}\t{threads}\t{ss_tag}",

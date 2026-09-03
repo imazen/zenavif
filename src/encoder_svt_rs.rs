@@ -107,7 +107,7 @@
 //! seam end-to-end.
 
 use crate::Result;
-use crate::encoder::{EncodeBitDepth, EncodeChromaSubsampling, EncodeColorModel, EncodePixelRange};
+use crate::encoder::{EncodeChromaSubsampling, EncodeColorModel, EncodePixelRange};
 use crate::encoder::{EncodedImage, EncoderConfig};
 use crate::error::Error;
 use almost_enough::Stop;
@@ -474,21 +474,12 @@ fn reject_out_of_envelope_dims(
     }
 }
 
-/// Bit depth this backend codes for a request — the same
-/// [`EncodeBitDepth`] resolution the zenravif path applies
-/// (`encoder::resolve_bit_depth`), minus its ravif type.
+/// Bit depth this backend codes for a request, from the one shared resolver
+/// ([`crate::EncoderConfig::coded_bit_depth_bits`]) -- so a
+/// `bit_depth_bits` request reaches this backend's own depth gate rather than
+/// being silently ignored.
 fn effective_bit_depth(config: &EncoderConfig, input_is_16bit: bool) -> u8 {
-    match config.bit_depth {
-        EncodeBitDepth::Eight => 8,
-        EncodeBitDepth::Ten => 10,
-        EncodeBitDepth::Auto => {
-            if input_is_16bit {
-                10
-            } else {
-                8
-            }
-        }
-    }
+    config.coded_bit_depth_bits(input_is_16bit)
 }
 
 /// Lowest SVT preset with a native-10-bit **monochrome** level producer.
@@ -509,6 +500,15 @@ pub(crate) fn svt_rs_depth_error(
     speed: u8,
     mono_plane: bool,
 ) -> Option<&'static str> {
+    // `bit_depth_bits` can spell depths this port has no encoder for. Refuse
+    // them here rather than let `pipeline.bit_depth = 12` produce a stream
+    // nothing gated: the port's 12-bit path does not exist.
+    if !matches!(bit_depth, 8 | 10) {
+        return Some(
+            "Av1Backend::Zenav1Svt codes 8- and 10-bit only; zenav1-svt has no 12-bit \
+             encode. Only Av1Backend::Zenav1Aom implements bit_depth_bits(12)",
+        );
+    }
     if bit_depth == 10 && mono_plane && speed_to_svt_preset(speed) < MONO_HBD_MIN_PRESET {
         return Some(
             "Av1Backend::Zenav1Svt codes 10-bit alpha and grayscale (Cs400) streams at SVT \
