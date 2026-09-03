@@ -105,8 +105,12 @@ jobs:
           cargo test --features zenav1-aom,zenav1-aom-encode,encode,encode-imazen,zenav1-svt,target-quality,encode-mono --test aom_encode_backend 2>&1 | tee aom_gate_rerun.log
           n=$(sed -n 's/^test result: ok\. \([0-9][0-9]*\) passed.*/\1/p' aom_gate_rerun.log | head -1)
           rm -f aom_gate_rerun.log
-          if [ -z "${n:-}" ] || [ "$n" -lt 12 ]; then
-            echo "::error::aom_encode_backend reported '${n:-<none>}' passing tests; expected at least 12"
+          # Floor raised 12 -> 23 on 2026-09-03 with the high-bit-depth
+          # gates. It is a FLOOR on a count, so it catches a test set that
+          # silently shrinks; raise it when tests are added, never lower it
+          # to make a run pass.
+          if [ -z "${n:-}" ] || [ "$n" -lt 23 ]; then
+            echo "::error::aom_encode_backend reported '${n:-<none>}' passing tests; expected at least 23"
             exit 1
           fi
           echo "aom_encode_backend ran: $n tests passed"
@@ -131,6 +135,22 @@ jobs:
       # compile, they do not run tests, and they need no vectors.
       - name: Test --features __expert (the sweep fingerprint gates)
         run: cargo test --features __expert,encode,encode-imazen,zenav1-svt,zenav1-aom,zenav1-aom-encode --lib
+      # The `cargo semver-checks` substitute. That tool cannot run on this
+      # crate at all, and an in-crate test structurally CANNOT observe a
+      # `#[non_exhaustive]` break — the attribute has no effect inside the
+      # defining crate — so only an out-of-crate consumer can. This also
+      # catches a refusal message that names the wrong cargo feature or the
+      # wrong backend, which is a defect that shipped on 2026-09-02 and was
+      # found by compiling a consumer, not by any test here.
+      #
+      # ONE platform on purpose: it is a separate workspace with its own
+      # feature unification, so it rebuilds the dependency graph rather than
+      # reusing this job's artifacts. Running it on all six would buy
+      # nothing — the break it detects is platform-independent.
+      - name: Downstream consumer compiles and runs (semver-checks substitute)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: dev/downstream-probe
+        run: cargo run
 
   resolve-standalone:
     # GATE: zenavif must resolve for someone who does NOT run clone-siblings.
