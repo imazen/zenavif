@@ -96,8 +96,15 @@ jobs:
           # `cargo test --test <name>` fails outright when the target is not
           # selected, and `--format json` would need nightly, so parse the
           # human summary: "test result: ok. N passed" with N > 0.
-          out=$(cargo test --features zenav1-aom,zenav1-aom-encode,encode,encode-imazen,zenav1-svt,target-quality,encode-mono --test aom_encode_backend 2>&1 | tee /dev/stderr)
-          n=$(printf '%s\n' "$out" | sed -n 's/^test result: ok\. \([0-9][0-9]*\) passed.*/\1/p' | head -1)
+          # tee to a REGULAR file, not /dev/stderr: the windows-11-arm
+          # runner's Git Bash has no /dev/stderr ("tee: /dev/stderr: No such
+          # file or directory"), and under pipefail that killed this step
+          # before cargo ran — observed on run 33700746090, the first run on
+          # which a Windows job ever REACHED this step (every earlier run's
+          # Windows Test job was superseded first).
+          cargo test --features zenav1-aom,zenav1-aom-encode,encode,encode-imazen,zenav1-svt,target-quality,encode-mono --test aom_encode_backend 2>&1 | tee aom_gate_rerun.log
+          n=$(sed -n 's/^test result: ok\. \([0-9][0-9]*\) passed.*/\1/p' aom_gate_rerun.log | head -1)
+          rm -f aom_gate_rerun.log
           if [ -z "${n:-}" ] || [ "$n" -lt 12 ]; then
             echo "::error::aom_encode_backend reported '${n:-<none>}' passing tests; expected at least 12"
             exit 1

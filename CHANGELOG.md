@@ -422,6 +422,17 @@ write-path returns + gain-map interop additions, already on main).
 
 ## [Unreleased]
 
+### Fixed — the assert-the-gate-ran step died on Windows before cargo ran
+
+- The `Assert the aom encode gate actually ran` step captured the rerun with
+  `tee /dev/stderr`, and the windows-11-arm runner's Git Bash has no
+  `/dev/stderr` — under `pipefail` the step failed with
+  `tee: /dev/stderr: No such file or directory` before cargo started. Run
+  33700746090 was the FIRST run on which a Windows Test job ever reached the
+  step (every earlier run's Windows job was superseded by the next push
+  first), so the breakage was invisible until then. The rerun output now tees
+  to a regular file and the count is parsed from it.
+
 ### Added — CI builds the deprecated alias features, which no job enabled
 
 - `aom-backend` and `encode-svt-rs` (the deprecated 0.1.8 alias spellings)
