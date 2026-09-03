@@ -198,7 +198,8 @@ impl EstimateArm {
     #[deprecated(
         since = "0.1.8",
         note = "renamed to `EstimateArm::Zenav1Svt420` to match the zenav1-svt crate; \
-                the alias is removed in 0.2"
+                the alias's removal is DEFERRED past 0.2.0 — a live consumer \
+                was still building against the old spelling"
     )]
     #[allow(non_upper_case_globals)]
     pub const SvtRs420: Self = Self::Zenav1Svt420;

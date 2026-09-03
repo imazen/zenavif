@@ -531,7 +531,10 @@ fn validate_agrees_with_the_encode_path() {
         .expect("12-bit must validate, as it encodes");
     for (cfg, what) in [
         (EncoderConfig::new().backend(Av1Backend::Zenav1Aom), "4:4:4"),
-        (aom_config().color_model(zenavif::EncodeColorModel::Rgb), "identity/RGB"),
+        (
+            aom_config().color_model(zenavif::EncodeColorModel::Rgb),
+            "identity/RGB",
+        ),
         (
             aom_config().pixel_range(zenavif::EncodePixelRange::Full),
             "full range",
@@ -737,7 +740,10 @@ fn hbd_luma_psnr(avif: &[u8], src: ImgRef<'_, Rgb<u16>>, depth: u8, label: &str)
 fn aom_backend_encodes_10_and_12_bit_that_decode() {
     for (depth, cfg) in [
         (10u8, aom_config().bit_depth(zenavif::EncodeBitDepth::Ten)),
-        (12u8, aom_config().bit_depth(zenavif::EncodeBitDepth::Twelve)),
+        (
+            12u8,
+            aom_config().bit_depth(zenavif::EncodeBitDepth::Twelve),
+        ),
     ] {
         for &(w, h) in &[(64usize, 64usize), (65, 33), (192, 128)] {
             let src = gradient_rgb16(w, h);
@@ -749,7 +755,10 @@ fn aom_backend_encodes_10_and_12_bit_that_decode() {
             let p = hbd_luma_psnr(&enc.avif_file, src.as_ref(), depth, &label);
             // MEASURED before being written; see the module table.
             assert!(p >= 40.0, "{label}: coded-luma PSNR {p:.2} dB < 40 dB");
-            eprintln!("{label}: coded-luma PSNR {p:.2} dB, {} bytes", enc.avif_file.len());
+            eprintln!(
+                "{label}: coded-luma PSNR {p:.2} dB, {} bytes",
+                enc.avif_file.len()
+            );
         }
     }
 }
@@ -827,7 +836,10 @@ fn aom_backend_12_bit_signals_profile_2() {
     let src = gradient_rgb16(64, 64);
     let enc = zenavif::encode_rgb16(
         src.as_ref(),
-        &aom_config().bit_depth(zenavif::EncodeBitDepth::Twelve).quality(90.0).speed(6),
+        &aom_config()
+            .bit_depth(zenavif::EncodeBitDepth::Twelve)
+            .quality(90.0)
+            .speed(6),
         stop(),
     )
     .expect("bd12 encode");
@@ -854,7 +866,11 @@ fn aom_backend_12_bit_signals_profile_2() {
     )
     .expect("bd10 encode");
     let av1c10 = find_av1c(&enc10.avif_file).expect("av1C");
-    assert_eq!(av1c10[1] >> 5, 0, "av1C seq_profile for a 10-bit 4:2:0 stream");
+    assert_eq!(
+        av1c10[1] >> 5,
+        0,
+        "av1C seq_profile for a 10-bit 4:2:0 stream"
+    );
     assert_eq!((av1c10[2] >> 6) & 1, 1, "av1C high_bitdepth for 10-bit");
     assert_eq!((av1c10[2] >> 5) & 1, 0, "av1C twelve_bit for 10-bit");
 }
@@ -894,8 +910,12 @@ fn aom_backend_refuses_depths_it_does_not_code() {
         64,
         64,
     );
-    let e = zenavif::encode_rgba8(rgba.as_ref(), &aom_config().bit_depth(zenavif::EncodeBitDepth::Twelve), stop())
-        .expect_err("alpha must still be refused at 12 bits");
+    let e = zenavif::encode_rgba8(
+        rgba.as_ref(),
+        &aom_config().bit_depth(zenavif::EncodeBitDepth::Twelve),
+        stop(),
+    )
+    .expect_err("alpha must still be refused at 12 bits");
     assert!(
         format!("{e}").contains("no alpha auxiliary item"),
         "the alpha refusal must name the missing item, got: {e}"
@@ -950,7 +970,13 @@ fn aom_backend_refuses_hbd_grayscale() {
     // The same config on the COLOUR path encodes — the refusal is scoped to
     // Cs400, not to the depth.
     let rgb = gradient_rgb8(64, 64);
-    encode(rgb.as_ref(), &aom_config().bit_depth(zenavif::EncodeBitDepth::Twelve).quality(90.0).speed(6));
+    encode(
+        rgb.as_ref(),
+        &aom_config()
+            .bit_depth(zenavif::EncodeBitDepth::Twelve)
+            .quality(90.0)
+            .speed(6),
+    );
 }
 
 /// The 8-bit path is byte-for-byte what it was before the high-bit-depth
@@ -980,7 +1006,8 @@ fn aom_bd8_output_is_unchanged_by_the_hbd_wiring() {
         enc.avif_file.len()
     );
     assert_eq!(
-        digest, BD8_ANCHOR_FNV1A,
+        digest,
+        BD8_ANCHOR_FNV1A,
         "8-bit aom output changed (len {}). The high-bit-depth wiring must leave \
          depth-8 byte-identical: `color_planes_420` keeps the rgb8_to_yuv420 u8 \
          kernel for that cell precisely so this hash cannot move.",
@@ -1108,9 +1135,12 @@ fn hbd_gate_can_fail_on_wrong_content_and_wrong_depth() {
     )
     .expect("bd10 flat encode");
     assert_hbd_flat_luma_within(&fenc.avif_file, flat.as_ref(), 10, 0, "control-flat");
-    must_panic("comparing a flat 60293 encode against a flat 20000 source", || {
-        assert_hbd_flat_luma_within(&fenc.avif_file, b.as_ref(), 10, 0, "mutant-flat");
-    });
+    must_panic(
+        "comparing a flat 60293 encode against a flat 20000 source",
+        || {
+            assert_hbd_flat_luma_within(&fenc.avif_file, b.as_ref(), 10, 0, "mutant-flat");
+        },
+    );
     // ... and the bound must be load-bearing, not permissive: the same
     // comparison with a bound wide enough to swallow a range error would pass,
     // so the bound the gate ships with (0 at 10 bits) is what makes it a gate.

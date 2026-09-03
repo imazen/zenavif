@@ -515,7 +515,8 @@ impl DecodeBackend {
     #[deprecated(
         since = "0.1.8",
         note = "renamed to `DecodeBackend::Zenav1Aom` to match the zenav1-aom crate; \
-                the alias is removed in 0.2"
+                the alias's removal is DEFERRED past 0.2.0 — a live consumer \
+                was still building against the old spelling"
     )]
     #[allow(non_upper_case_globals)]
     pub const AomRs: Self = Self::Zenav1Aom;

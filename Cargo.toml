@@ -1,6 +1,6 @@
 [package]
 name = "zenavif"
-version = "0.1.8"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.93"
 license = "AGPL-3.0-only OR LicenseRef-Imazen-Commercial"
@@ -538,7 +538,10 @@ avx512 = ["archmage/avx512"]
 zenav1-aom = ["dep:aom-decode"]
 # DEPRECATED alias for `zenav1-aom`, kept so existing consumers keep building.
 # Cargo has no `#[deprecated]` for features; this comment and the 0.1.8
-# CHANGELOG entry are the deprecation notice. Removed in 0.2.
+# CHANGELOG entry are the deprecation notice. NOT removed in 0.2.0 — a live
+# consumer was still building against the old spelling when 0.2.0 was cut, and
+# removing it would have broken that build for no benefit. Removal is deferred;
+# it is not tied to a version until something needs the name back.
 aom-backend = ["zenav1-aom"]
 # Additive SYNONYM for `zenav1-aom`, spelled with the crate name the feature
 # actually turns on (`zenav1-aom-decode`). `zenav1-aom` names the REPOSITORY,
@@ -603,7 +606,10 @@ two-pass-zensim = ["target-quality", "encode-imazen", "ravif/__expert"]
 zenav1-svt = ["encode", "dep:svtav1", "dep:zenavif-serialize"]
 # DEPRECATED alias for `zenav1-svt`, kept so existing consumers keep building.
 # Cargo has no `#[deprecated]` for features; this comment and the 0.1.8
-# CHANGELOG entry are the deprecation notice. Removed in 0.2.
+# CHANGELOG entry are the deprecation notice. NOT removed in 0.2.0 — a live
+# consumer was still building against the old spelling when 0.2.0 was cut, and
+# removing it would have broken that build for no benefit. Removal is deferred;
+# it is not tied to a version until something needs the name back.
 encode-svt-rs = ["zenav1-svt"]
 # Encoding with hand-written assembly (fastest, uses unsafe)
 encode-asm = ["encode", "ravif/asm"]

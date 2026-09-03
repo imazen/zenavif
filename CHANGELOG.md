@@ -422,6 +422,157 @@ write-path returns + gain-map interop additions, already on main).
 
 ## [Unreleased]
 
+### BREAKING — version bumped `0.1.8` -> `0.2.0` (user-approved 2026-09-03)
+
+Four breaks ship together, as the QUEUED BREAKING CHANGES section required.
+Nothing is published: the crate is still not in a publishable state (see the
+Workspace section), so this is a version in tree, not a release.
+
+- **`EncodeBitDepth` gained `Twelve` and is now `#[non_exhaustive]`.** Both in
+  one break, exactly as queued: retrofitting `#[non_exhaustive]` later would
+  itself have been a break, so every future depth or policy variant is additive
+  from here. Downstream exhaustive matches need a `_` arm.
+- **`EncodeColorModel`, `EncodeChromaSubsampling` and `EncodeAlphaMode` are now
+  `#[non_exhaustive]`.** Their variant sets are strict subsets of what the
+  format or the policy space allows (AV1 has 4:4:4 / 4:2:2 / 4:2:0 / 4:0:0 and
+  this enum names two), so they will grow, and this is the release to pay for
+  it in. **`EncodePixelRange` is deliberately NOT marked** — it mirrors H.273's
+  `video_full_range_flag`, a single bit, so the domain is genuinely closed and
+  forcing a `_` arm on every consumer would buy nothing.
+- **`Av1Backend`, `DecodeBackend` and `TargetMetric` `#[non_exhaustive]` +
+  `TargetMetric::ZensimC` + `ValidationError::BackendUnsupportedParam` ship
+  here.** These were already in tree and queued for "the next 0.x minor bump";
+  this is that bump.
+
+**Deliberately NOT cleared from the queue:** the deprecated feature aliases
+(`encode-svt-rs`, `aom-backend`) and enum aliases (`Av1Backend::SvtRs`,
+`DecodeBackend::AomRs`, `EstimateArm::SvtRs420`) were marked "removed in 0.2"
+and are **kept**. A live consumer was still building against the old spelling
+when 0.2.0 was cut, and removing the names would have broken that build for no
+benefit. Their `#[deprecated]` notes and Cargo comments now say the removal is
+deferred and is not tied to a version. `tests/deprecated_backend_aliases.rs`
+still gates them. Also not cleared: removing
+`Error::ColorConversion(yuv::YuvError)` — the only remaining constructor is in
+`src/decoder.rs`, which is behind `unsafe-asm` and is compiled by nothing (not
+CI, not this box), so removing it would be an edit made blind. It stays queued.
+
+### Added — 10- and 12-bit 4:2:0 through the zenav1-aom encode backend
+
+`Av1Backend::Zenav1Aom` codes **8, 10 and 12 bits** on its RGB -> 4:2:0 colour
+path, from both the 8-bit (`encode_rgb8`) and 16-bit (`encode_rgb16`) entry
+points. Before this it was 8-bit only and `encode_rgb16` never reached the seam
+at all.
+
+**The two blockers the refusals named were both already cleared, and the
+refusal text was stale:**
+
+- *"this seam has no u16 forward RGB->YUV path"* — `src/yuv_convert.rs` has
+  shipped `rgbx_to_yuv420_u16` (depth-generic, `magetypes` SIMD over
+  AVX-512/AVX2/SSE4.2/NEON/wasm128/scalar, `FwdConsts::for_depth` scaling the
+  studio swing by `<< (depth - 8)` per H.273) since the zenav1-svt seam needed
+  it; `src/encoder_svt_rs.rs:644` already called it. `ForwardPixel` is
+  implemented for `Rgb<u8>`, `Rgba<u8>`, `Rgb<u16>` and `Rgba<u16>`.
+- *"profile-2 `av1C` signalling is not wired"* — `KeyFrameConfig::profile()`
+  already returns 2 at `bit_depth == 12`, and `zenavif-serialize` already
+  derives `high_bitdepth` / `twelve_bit` / `pixi` and raises `seq_profile` from
+  the depth argument that `mux_aom` was passing a hardcoded `8`.
+
+So the change is wiring: the three hardcoded `8`s
+(`key_frame_config.bit_depth`, `mux_aom`'s `try_to_vec` depth, and the blanket
+depth refusal) are gone.
+
+**Depth resolution is now one function.** `EncoderConfig::coded_bit_depth_bits`
+serves `validate`, all three encode seams and `resolve_plan`; the duplicated
+`match config.bit_depth` copies in `encoder_svt_rs.rs`, `validation.rs` and
+`encode_plan.rs` are gone. A duplicated match is what would let
+`EncodeBitDepth::Twelve` reach a backend that cannot code it.
+`EncodePlan::bit_depth` is now the coded depth in bits (8/10/12), not a
+`ravif::BitDepth` narrowed to 8-or-10.
+
+**Depths a backend cannot code are refused by name, never coded at a different
+depth.** `Av1Backend::Zenravif` refuses `Twelve`
+(`encoder::reject_unspellable_coded_depth`) because `ravif::BitDepth` has no
+12-bit representation and would silently code 10 — the silent-wrong-pixels
+class. `Av1Backend::Zenav1Svt` refuses it in `svt_rs_depth_error`, matching
+C SVT-AV1 v4.2.0's own 8/10 check.
+
+**Still refused at the aom seam, each naming what is unimplemented:** alpha
+(`encode_rgba8` / `encode_rgba16` — the Cs400 mono encode an `auxl` item needs
+exists, the item itself is not built), 4:4:4, 4:2:2, full pixel range, gain
+maps, animation, and **high-bit-depth grayscale** — `encode_gray8` takes `u8`
+samples and the seam passes them through as the coded luma, so promoting them
+to a 10/12-bit swing would need a value-scaling rule nothing here measures.
+
+**Gates** (`tests/aom_encode_backend.rs`, 23 tests):
+
+| gate | measured | bound |
+|---|---|---|
+| bd10 coded luma, 3 sizes, q90 s6 | 49.58-49.69 dB | 40 dB |
+| bd12 coded luma, 3 sizes, q90 s6 | 50.24-50.57 dB | 40 dB |
+| bd10 flat luma vs longhand H.273, q99 | worst **0** code values | 0 |
+| bd12 flat luma vs longhand H.273, q99 | worst **1** code value | 1 |
+
+Every cell decodes with **rav1d-safe** — a different port from the one that
+encoded it — which reports the requested coded depth and whose luma plane is
+compared against an H.273 expectation written longhand in the test, not against
+`yuv_convert.rs`. bd12 is off by one because `--cq-level 1` is not
+`base_qindex 0`; the bound is the measured worst, not a padded number. A
+studio/full range mix-up moves these by hundreds to thousands of code values.
+`aom_backend_12_bit_signals_profile_2` reads `seq_profile` / `high_bitdepth` /
+`twelve_bit` back out of the `av1C` box.
+
+Mutation proofs are `#[test]`s using `catch_unwind`, matching the pattern the
+8-bit gate set: `hbd_gate_can_fail_on_wrong_content_and_wrong_depth` (wrong
+source, wrong claimed depth, wrong flat value, **and** that the flat bound
+itself is load-bearing — a bound of 1 must still reject a wrong source) and
+`the_studio_swing_expectation_scales_with_depth` (the longhand helper cannot
+degenerate to 8-bit constants).
+
+**Three existing assertions were deliberately INVERTED, not slipped in:**
+`"10-bit must be refused"` and `"16-bit must be refused"` in
+`aom_backend_refuses_what_it_does_not_implement`, and `"10-bit must fail
+validate()"` in `validate_agrees_with_the_encode_path`. 16-bit **RGBA** takes
+over the 16-bit refusal case, because alpha genuinely is still refused.
+
+8-bit output is unchanged: `color_planes_420` keeps the `rgb8_to_yuv420` u8
+kernel for the 8-bit-source-at-depth-8 cell and only routes every other cell
+through the depth-generic u16 recipe. `aom_bd8_output_is_unchanged_by_the_hbd_wiring`
+pins the resulting file hash forward.
+
+`sweep.rs`: `EncodeBitDepth::Twelve` gets a new fingerprint discriminant (3) and
+a new cell-id token (`-bd12`), so **no id or fingerprint minted before 0.2.0
+moves**. `aom_bit_depth_resolves_into_the_fingerprint` measures — rather than
+assumes — that 8/10/12/Auto aom cells hash apart, which they do because depth
+is hashed in the shared pixel-path block even though `aom_resolved_identity`
+carries only `(cpu_used, cq_level)`.
+
+### Found — `--cq-level 0` (quality 100) PANICS in the aom port on flat content
+
+Pre-existing, **not** caused by the high-bit-depth wiring: quality 100 maps to
+`--cq-level 0`, and `encode_key_frame` then panics with
+`assertion failed: depth <= MAX_VARTX_DEPTH`
+(`crates/aom-dsp/src/entropy/partition.rs:675` at the pinned rev `c3e1b4ab`).
+It is a plain `assert!`, so it fires in release builds too, and it crosses the
+seam as a process panic rather than an `Err` — the zenavif CLAUDE.md "Backend
+seam" obligation 2 case.
+
+MEASURED 2026-09-03, 64x64, speed 6:
+
+| quality | cq | bd8 flat | bd8 grad | bd10 flat | bd10 grad | bd12 flat | bd12 grad |
+|---|---|---|---|---|---|---|---|
+| 100 | 0 | PANIC | ok | PANIC | ok | PANIC | PANIC |
+| 99 | 1 | ok | ok | ok | ok | ok | ok |
+
+It is **content-dependent**, so this seam does not blanket-refuse `cq 0`: a
+refusal would reject the gradient cells that encode correctly today. Whether to
+clamp (as the zenav1-svt seam clamps QP 0) is a product call for the owner.
+Pinned meanwhile by `aom_cq0_still_panics_on_flat_content`, which also asserts
+the boundary — quality 99 encodes the same content at all three depths — so the
+day upstream fixes it, the canary says so instead of going quietly green. The
+`src/encoder_aom.rs` module docs claiming "no clamp away from the endpoint"
+were describing a mapping that panics, and now say so.
+
+
 ### Fixed — the assert-the-gate-ran step died on Windows before cargo ran
 
 - The `Assert the aom encode gate actually ran` step captured the rerun with
@@ -1098,30 +1249,29 @@ write-path returns + gain-map interop additions, already on main).
   not `#[non_exhaustive]`, so adding a variant breaks every downstream
   exhaustive match — a 0.1.7 → 0.2.0 bump that the workspace rules require to be
   real, unavoidable and user-approved. It is queued below instead.
+  **SUPERSEDED 2026-09-03: approved and landed — see the BREAKING section at the
+  top of [Unreleased].**
 
 ### QUEUED BREAKING CHANGES
-- Add `EncodeBitDepth::Twelve` **together with `#[non_exhaustive]` on the enum**
-  in one break. zenrav1e supports 12-bit end to end
-  (`ravif/src/av1encoder.rs:79`, `:1105-1111`, `:1445`); zenav1-svt refuses any
-  depth but 8/10 at encoder init, matching C v4.2.0's own check, so
-  `encoder_svt_rs::reject_out_of_envelope_depth` must refuse it early with the
-  C-envelope reason. The 16-bit-entry-point blocker for this is now cleared (see
-  Fixed above). Change set + upstream facts: zenmetrics
-  `benchmarks/bitdepth_capability_matrix_2026-09-02.md` §3.
+<!-- LANDED 2026-09-03 in the 0.1.8 -> 0.2.0 bump, and removed from this queue:
+     `EncodeBitDepth::Twelve` + `#[non_exhaustive]`; `#[non_exhaustive]` on
+     `Av1Backend` / `DecodeBackend` / `TargetMetric` (plus
+     `TargetMetric::ZensimC` and `ValidationError::BackendUnsupportedParam`).
+     See the BREAKING section at the top of [Unreleased]. -->
 - Remove `Error::ColorConversion(yuv::YuvError)` — the last public-API tie to
   the `yuv` crate. In-house kernels no longer construct it (they are
-  infallible); the legacy `unsafe-asm` decoder still does. Removing the
-  variant + the dep ships with the next 0.x minor bump.
-- `Av1Backend`, `DecodeBackend` and `TargetMetric` are now
-  `#[non_exhaustive]`. Downstream exhaustive matches need a `_` arm. Taken in
-  the SAME release as the variant additions that already broke them
-  (`Av1Backend::SvtRs`, `TargetMetric::ZensimC`) so consumers absorb one break
-  rather than two: every future backend or metric is additive from here.
-  `ValidationError` (already `#[non_exhaustive]`) gained
-  `BackendUnsupportedParam` — ship with the next 0.x minor bump.
-- `TargetMetric` gained the `ZensimC(f64)` variant. The enum is not
-  `#[non_exhaustive]`, so downstream exhaustive matches must add an arm —
-  ship with the next 0.x minor bump. No existing variant changed meaning.
+  infallible); the legacy `unsafe-asm` decoder still does. **Deliberately NOT
+  taken in 0.2.0**: the only remaining constructor lives in `src/decoder.rs`,
+  which is behind `unsafe-asm` and is compiled by nothing — not CI, not the dev
+  box (Apple `cc` refuses the rav1d `.S` sources) — so removing it would be an
+  edit made blind, with no build to catch a mistake. Ships when either that
+  file is compilable somewhere or the variant's last constructor goes.
+- Remove the deprecated aliases `encode-svt-rs`, `aom-backend`,
+  `Av1Backend::SvtRs`, `DecodeBackend::AomRs`, `EstimateArm::SvtRs420`. Their
+  notes said "removed in 0.2" and they were **deliberately kept** in 0.2.0: a
+  live consumer was still building against the old spelling when the bump was
+  cut. The notes now say the removal is deferred and is not tied to a version.
+  `tests/deprecated_backend_aliases.rs` fails to compile if they regress.
 
 ### Changed
 - **`src/yuv_bilinear_fix.rs` retired; `yuv` moved 0.8.12 → 0.8.17.** Upstream

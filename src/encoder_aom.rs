@@ -20,23 +20,56 @@
 //! Within stills, this seam is deliberately narrower than the encoder it
 //! drives. Wired:
 //!
-//! * 8-bit RGB -> YCbCr **4:2:0**, BT.601, **limited (studio) range** — see
-//!   "Colour signalling" below for why the range is not full.
+//! * RGB -> YCbCr **4:2:0**, BT.601, **limited (studio) range**, at **8, 10 or
+//!   12 bits** ([`crate::EncodeBitDepth`]), from both the 8-bit
+//!   ([`crate::encoder::encode_rgb8`]) and 16-bit
+//!   ([`crate::encoder::encode_rgb16`]) entry points. See "Colour signalling"
+//!   below for why the range is not full, and "Bit depth" for how the depth is
+//!   chosen.
 //! * 8-bit grayscale -> true monochrome (Cs400).
 //!
 //! Refused by name, each with the reason (`reject_unsupported_config`,
-//! [`reject_out_of_envelope_depth`]):
+//! [`aom_depth_error`]):
 //!
 //! * 4:4:4 and the identity/RGB colour model — the *encoder* gates 4:2:0,
 //!   4:2:2 and 4:4:4 (186/186 cells), but this seam has no forward RGB->YUV
-//!   4:4:4 kernel: `src/yuv_convert.rs` ships `rgb8_to_yuv420` and no 4:4:4
+//!   4:4:4 kernel: `src/yuv_convert.rs` ships 4:2:0 kernels and no 4:4:4
 //!   counterpart. Same refusal, and the same reason, as the zenav1-svt seam.
-//! * 10- and 12-bit, and the 16-bit entry points — again an encoder capability
-//!   (bd 8/10/12 are all byte-gated) this seam has not wired: it would need
-//!   the u16 forward path plus profile-2 `av1C` signalling.
+//!   Note this is a CHROMA-FORMAT gap and has nothing to do with bit depth —
+//!   conflating the two is what kept 10/12-bit refused until 2026-09-03.
 //! * Alpha (`encode_rgba8` / `encode_rgba16`) — the auxiliary Cs400 item is
 //!   not wired yet; the mono encode it needs already exists here.
+//! * High-bit-depth GRAYSCALE — `encode_gray8` takes `u8` samples and this
+//!   seam passes them through as the coded luma, so promoting them to a 10- or
+//!   12-bit swing would need a value-scaling rule nothing here measures.
 //! * Full pixel range, gain maps, animation.
+//!
+//! # Bit depth (wired 2026-09-03)
+//!
+//! The colour path codes 8, 10 and 12 bits; all three are byte-gated upstream.
+//! The depth comes from [`crate::EncoderConfig::coded_bit_depth_bits`] — the
+//! one resolver `validate`, every encode seam and `resolve_plan` share — so
+//! [`crate::EncodeBitDepth::Auto`] (8-bit input -> 8, 16-bit input -> 10),
+//! `::Ten` and `::Twelve` all land in [`resolve_aom_depth`].
+//!
+//! Conversion is [`crate::yuv_convert::rgbx_to_yuv420_u16`], the depth-generic
+//! recipe the zenav1-svt seam already used: it quantizes at the OUTPUT depth,
+//! so the 2x2 chroma average keeps fraction bits an 8-bit
+//! quantize-then-widen would drop, and `FwdConsts::for_depth` shifts the studio
+//! swing by `<< (depth - 8)` per H.273 (offset `16 << (d-8)`, span
+//! `219 << (d-8)`). The sequence header pins `color_range = 0` at **every**
+//! depth, so full range stays refused at every depth too.
+//!
+//! One cell deliberately does not use that recipe: **8-bit input at depth 8**
+//! keeps the dedicated `rgb8_to_yuv420` u8 kernel and widens, exactly as this
+//! seam always did, so no 8-bit output byte moved when the depth landed
+//! (`aom_bd8_output_is_unchanged_by_the_hbd_wiring`).
+//!
+//! 12-bit is AV1 **profile 2**: `KeyFrameConfig::profile()` returns 2 at that
+//! depth, and `mux_aom` passes the depth to `zenavif-serialize`, which derives
+//! the `av1C` `high_bitdepth` / `twelve_bit` flags and the `pixi` depth from it
+//! and raises `seq_profile` to match (`aom_backend_12_bit_signals_profile_2`
+//! reads all three back out of the box).
 //!
 //! # Colour signalling (read this before comparing against the zenav1-svt seam)
 //!
@@ -80,6 +113,16 @@
 //! * quality 1..=100 -> `--cq-level` 63..=0, linear ([`quality_to_cq_level`]).
 //!   Both ends are byte-gated upstream (`cq0` and `cq63` are sweep cells), so
 //!   unlike the zenav1-svt seam there is no clamp away from the endpoint.
+//!
+//!   **`--cq-level 0` (quality 100) PANICS on some content**, MEASURED
+//!   2026-09-03 at the pinned rev: `assertion failed: depth <= MAX_VARTX_DEPTH`
+//!   (`crates/aom-dsp/src/entropy/partition.rs:675`) on flat content at every
+//!   bit depth, and on a gradient at 12 bits. A plain `assert!`, so it fires in
+//!   release too, and it crosses this seam as a process panic rather than an
+//!   `Err`. It is content-dependent, so this seam does NOT blanket-refuse cq 0
+//!   — a refusal would reject the gradient cells that encode correctly.
+//!   Whether to clamp (as the zenav1-svt seam clamps QP 0) is an open product
+//!   call; pinned meanwhile by `aom_cq0_still_panics_on_flat_content`.
 //! * speed 1..=10 -> `--cpu-used` 0..=9, linear ([`speed_to_cpu_used`]).
 //!   The whole range is byte-gated.
 //! * `--enable-cdef=0`, `--enable-restoration=1`: real aomenc's ALLINTRA

@@ -277,12 +277,13 @@ pub enum Av1Backend {
     /// KEY frame and returns one temporal unit — there is no inter
     /// prediction and no multi-frame state in it — so
     /// [`encode_animation_rgb8`] and the other animation entry points
-    /// refuse this backend by name, as do the 16-bit and alpha entry
-    /// points. Within stills this seam wires **8-bit RGB → 4:2:0 BT.601
-    /// limited range** and **8-bit grayscale → monochrome (Cs400)**; 4:4:4,
-    /// 4:2:2, 10/12-bit, alpha, full pixel range and gain maps are each
-    /// refused with a message naming what is unimplemented (see
-    /// `src/encoder_aom.rs`).
+    /// refuse this backend by name, as do the alpha entry points. Within
+    /// stills this seam wires **RGB → 4:2:0 BT.601 limited range at 8, 10
+    /// or 12 bits** (from both [`encode_rgb8`] and [`encode_rgb16`];
+    /// [`EncodeBitDepth::Twelve`] is AV1 profile 2) and **8-bit grayscale →
+    /// monochrome (Cs400)**. 4:4:4, 4:2:2, alpha, high-bit-depth
+    /// grayscale, full pixel range and gain maps are each refused with a
+    /// message naming what is unimplemented (see `src/encoder_aom.rs`).
     ///
     /// Unlike [`Av1Backend::Zenravif`] (where zenravif muxes), this backend
     /// gets raw AV1 OBUs back and muxes the AVIF container in-crate with
@@ -320,7 +321,8 @@ impl Av1Backend {
     #[deprecated(
         since = "0.1.8",
         note = "renamed to `Av1Backend::Zenav1Svt` to match the zenav1-svt crate; \
-                the alias is removed in 0.2"
+                the alias's removal is DEFERRED past 0.2.0 — a live consumer \
+                was still building against the old spelling"
     )]
     #[allow(non_upper_case_globals)]
     pub const SvtRs: Self = Self::Zenav1Svt;

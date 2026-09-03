@@ -393,10 +393,9 @@ impl crate::EncoderConfig {
         // config-side; the grayscale-is-8-bit-only half needs the input shape
         // and lives in `validate_for_input`. Same predicate as the encode path
         // (`encoder_aom::aom_depth_error`).
-        if let Some(detail) = crate::encoder_aom::aom_depth_error(
-            self.coded_bit_depth_bits(false),
-            false,
-        ) {
+        if let Some(detail) =
+            crate::encoder_aom::aom_depth_error(self.coded_bit_depth_bits(false), false)
+        {
             return Err(ValidationError::BackendUnsupportedParam {
                 backend: BACKEND,
                 param: "bit_depth / bit_depth_bits",
