@@ -202,6 +202,17 @@ jobs:
           cargo check --features __expert,encode
           cargo check --features __expert,encode,zenav1-aom-encode
           cargo check --features __expert,encode,encode-imazen,zenav1-svt,zenav1-aom,zenav1-aom-encode
+      # The DEPRECATED alias features (`aom-backend` -> `zenav1-aom`,
+      # `encode-svt-rs` -> `zenav1-svt`) were in NO job either: cargo validates
+      # that an alias's target feature EXISTS on every resolution, but nothing
+      # ever built with the aliases enabled, so an alias rewired to the wrong
+      # target would keep CI green while breaking every consumer still on the
+      # old spelling. One build with both aliases (and only the aliases) keeps
+      # them honest until their 0.2 removal. Found 2026-09-02 by the
+      # adversarial review of the aom-encode series — the same
+      # feature-in-no-job class as `__expert` and `encode-mono` above.
+      - name: Check the deprecated alias features (in no job before 2026-09-02)
+        run: cargo check --features aom-backend,encode-svt-rs
 
   wasm:
     name: WASM (wasm32-wasip1, members)

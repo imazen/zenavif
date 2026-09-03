@@ -422,6 +422,17 @@ write-path returns + gain-map interop additions, already on main).
 
 ## [Unreleased]
 
+### Added — CI builds the deprecated alias features, which no job enabled
+
+- `aom-backend` and `encode-svt-rs` (the deprecated 0.1.8 alias spellings)
+  appeared in no CI job: cargo validates that an alias's target feature exists,
+  but nothing ever built with either alias enabled, so an alias rewired to the
+  wrong target would have kept CI green while breaking consumers on the old
+  spelling. The `feature-check` job now runs one
+  `cargo check --features aom-backend,encode-svt-rs` — the same
+  feature-in-no-job class the series itself fixed for `__expert` and
+  `encode-mono`.
+
 ### Fixed — the gray8 feature-off refusal contradicted itself and named no switch
 
 - With `encode-mono` on and `zenav1-aom-encode` off, `encode_gray8` on
