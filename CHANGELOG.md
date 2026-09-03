@@ -526,8 +526,16 @@ write-path returns + gain-map interop additions, already on main).
 
 - **`__expert` appeared in NO CI job**, so the break would have shipped green.
   `feature-check` now checks it in three combinations (alone, with the encode
-  backends, with the expert knobs) and runs the `--lib` tests that gate the
-  sweep fingerprint.
+  backends, with the expert knobs), and the `test` job runs the `--lib` tests
+  that gate the sweep fingerprint.
+
+  The `--lib` step went into `feature-check` first and reddened CI (run
+  33697870049): `--lib` includes two `decode_av1` tests that read
+  `tests/vectors/` **fail-loud**, and only the `test` job provisions those
+  vectors. Nothing was relaxed to fix it — the tests are right to fail loudly
+  on a missing corpus, so the step moved to the job that has the corpus. A
+  local run had passed because this box already had the vectors on disk, which
+  is exactly the difference CI exists to catch.
 
 - A second, quieter bug in the same place: `zenravif_mediated` decides whether
   the zenravif quantizer/speed mediators are hashed into the fingerprint, and

@@ -109,6 +109,17 @@ jobs:
       # tests/zensim_loop.rs never ran on any platform. This runs them.
       - name: Test (diffmap closed loops — butteraugli + zensim)
         run: cargo test --features two-pass-butteraugli,two-pass-zensim,auto-tune
+      # Lives HERE and not in `feature-check` because `--lib` includes
+      # `decode_av1::tests::{decode_gain_map_from_avif_test_file,
+      # raw_obu_422_matches_the_container_path}`, which read
+      # `tests/vectors/` fail-loud. Only this job provisions those vectors
+      # (the cache + download steps above), so the same command in
+      # `feature-check` failed with "No such file or directory ... (run: just
+      # download-vectors)" — measured on run 33697870049, not guessed. The
+      # `cargo check --features __expert` lines stay in `feature-check`: they
+      # compile, they do not run tests, and they need no vectors.
+      - name: Test --features __expert (the sweep fingerprint gates)
+        run: cargo test --features __expert,encode,encode-imazen,zenav1-svt,zenav1-aom,zenav1-aom-encode --lib
 
   resolve-standalone:
     # GATE: zenavif must resolve for someone who does NOT run clone-siblings.
@@ -187,8 +198,6 @@ jobs:
           cargo check --features __expert,encode
           cargo check --features __expert,encode,zenav1-aom-encode
           cargo check --features __expert,encode,encode-imazen,zenav1-svt,zenav1-aom,zenav1-aom-encode
-      - name: Test --features __expert (the sweep fingerprint gates)
-        run: cargo test --features __expert,encode,encode-imazen,zenav1-svt,zenav1-aom,zenav1-aom-encode --lib
 
   wasm:
     name: WASM (wasm32-wasip1, members)
