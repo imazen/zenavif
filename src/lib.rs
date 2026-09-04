@@ -60,6 +60,20 @@ mod auto_tune;
 #[cfg(feature = "auto-tune")]
 pub use auto_tune::{AutoTuneError, AutoTuneOptions, QualityTarget};
 
+/// Backend + knob tuning — pick an [`Av1Backend`] *and* its knobs for one
+/// image, from a bake the **caller** supplies (never bundled weights).
+///
+/// The [`auto_tune`] family's backend-choosing sibling; see the module
+/// docs for the contract and for [`backend_tuner::StubTuner`], the
+/// measured-default implementation a consumer can integrate against
+/// before a bake exists.
+#[cfg(all(feature = "auto-tune", feature = "encode"))]
+pub mod backend_tuner;
+#[cfg(all(feature = "auto-tune", feature = "encode"))]
+pub use backend_tuner::{
+    AllowedBackends, AvifTune, AvifTuner, AvifTuning, StubTuner, TuneRequest, TuneSource,
+};
+
 mod cicp_resolve;
 mod codec;
 mod config;
