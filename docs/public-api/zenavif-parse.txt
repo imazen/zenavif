@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenavif-parse.txt 227 lines (supported surface) | zenavif-parse.features.txt 61 added (features: c_api,eager,zencodec) | zenavif-parse.internal.txt 33 lines (33 hidden + 0 excluded-feature)
+# files: zenavif-parse.txt 228 lines (supported surface) | zenavif-parse.features.txt 61 added (features: c_api,eager,zencodec) | zenavif-parse.internal.txt 33 lines (33 hidden + 0 excluded-feature)
 
 ## summary
 #
@@ -14,7 +14,7 @@
 #   pub types (struct/enum/trait/alias)        29
 #   pub consts/statics                          3
 #   free functions                              1
-#   inherent methods                           51
+#   inherent methods                           52
 #   struct fields                              96
 #   enum variants                              10
 #   re-exports                                  3
@@ -23,9 +23,9 @@
 #   auto-trait exceptions                       1
 #
 # per-module pub lines:
-#   (root)                          194
+#   (root)                          195
 
-## items (194 lines)
+## items (195 lines)
 
 pub mod zenavif_parse
 pub use Stop
@@ -116,6 +116,7 @@ pub fn AvifParser<'data>::gain_map_data(&self) -> core::option::Option<Result<al
 pub fn AvifParser<'data>::gain_map_metadata(&self) -> core::option::Option<&GainMapMetadata>
 pub fn AvifParser<'data>::grid_config(&self) -> core::option::Option<&GridConfig>
 pub fn AvifParser<'data>::grid_tile_count(&self) -> usize
+pub fn AvifParser<'data>::has_alpha_aux_items(&self) -> bool
 pub fn AvifParser<'data>::has_depth_map(&self) -> bool
 pub fn AvifParser<'data>::layer_selector(&self) -> core::option::Option<&LayerSelector>
 pub fn AvifParser<'data>::layered_image_indexing(&self) -> core::option::Option<&AV1LayeredImageIndexing>

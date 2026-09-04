@@ -50,13 +50,12 @@
 //! - **No aom row.** `zenav1-aom` has **no** measured knob, RD or speed
 //!   number anywhere in the campaign (block A3 was never declared).
 
-
 use super::contract::TuneCell;
 use super::{
-    cell_is_viable, config_for_cell, AllowedBackends, AvifTune, AvifTuning, TuneRequest, TuneSource,
+    AllowedBackends, AvifTune, AvifTuning, TuneRequest, TuneSource, cell_is_viable, config_for_cell,
 };
-use crate::auto_tune::AutoTuneError;
 use crate::Av1Backend;
+use crate::auto_tune::AutoTuneError;
 
 /// A measured wall-time fit for one (backend, speed) arm.
 ///
@@ -261,7 +260,7 @@ fn default_cell(backend: Av1Backend) -> Result<TuneCell, AutoTuneError> {
         other => {
             return Err(AutoTuneError::LutMalformed(format!(
                 "no measured default cell for backend {other:?}"
-            )))
+            )));
         }
     };
     TuneCell::parse(label)
@@ -486,7 +485,11 @@ mod tests {
         let cell = default_cell(Av1Backend::Zenav1Svt).expect("svt default cell");
         assert_eq!(cell.svt_screen_content_mode(), None, "scm is inert at s6");
         assert_eq!(cell.svt_tune(), None, "svttune=3 regresses 8/30 images");
-        assert_eq!(cell.enable_qm(), None, "the QM window is a per-image choice");
+        assert_eq!(
+            cell.enable_qm(),
+            None,
+            "the QM window is a per-image choice"
+        );
         assert_eq!(cell.svt_sharpness(), None, "sharpness only pays with QM");
         assert!(
             !cell.declares_svt_knobs(),

@@ -10,33 +10,37 @@
 ## summary
 #
 #   pub modules                                 8
-#   pub types (struct/enum/trait/alias)        11
-#   free functions                             28
-#   inherent methods                           70
-#   struct fields                              30
+#   pub types (struct/enum/trait/alias)        12
+#   free functions                             29
+#   inherent methods                          101
+#   struct fields                              45
 #   enum variants                              28
-#   trait roster entries (type × trait)        66
-#   auto-trait-complete types                  11
+#   trait roster entries (type × trait)        80
+#   auto-trait-complete types                  12
 #
 # per-module pub lines:
-#   (root)                           24
+#   (root)                           26
+#   backend_tuner                     4
 #   detect                            4
-#   expert                            9
+#   expert                           31
 #   fast_heads                        3
+#   heuristics                        1
 #   palette_gate                      1
-#   simd                              3
-#   sweep                            84
+#   simd                              4
+#   sweep                           101
 #   two_pass                          1
+#   two_pass_zensim                   1
 #   yuv_convert                      40
 #   yuv_convert_fast                  1
 #   yuv_convert_libyuv                3
 #   yuv_convert_libyuv_autovec        1
 #   yuv_convert_libyuv_simd           1
 
-## items (175 lines)
+## items (223 lines)
 
 #[non_exhaustive] pub enum sweep::KnobProbe
 #[non_exhaustive] pub struct expert::InternalParams
+#[non_exhaustive] pub struct expert::SvtParams
 pub enum sweep::QualityGrid
 pub enum yuv_convert::ChromaSubsampling
 pub enum yuv_convert::YuvMatrix
@@ -51,12 +55,18 @@ pub fn EncodeBitDepth::assert_fields_are_eq(&self)
 pub fn EncodeChromaSubsampling::assert_fields_are_eq(&self)
 pub fn EncodeColorModel::assert_fields_are_eq(&self)
 pub fn EncodePixelRange::assert_fields_are_eq(&self)
+pub fn EncoderConfig::svt_params(&self) -> expert::SvtParams
 pub fn EncoderConfig::with_internal_params(self, expert::InternalParams) -> Self
+pub fn EncoderConfig::with_svt_params(self, expert::SvtParams) -> Self
 pub fn MatrixCoefficients::assert_fields_are_eq(&self)
 pub fn PlanInput::assert_fields_are_eq(&self)
 pub fn SpeedDerived::assert_fields_are_eq(&self)
 pub fn TilesResolution::assert_fields_are_eq(&self)
 pub fn TransferCharacteristics::assert_fields_are_eq(&self)
+pub fn backend_tuner::AllowedBackends::assert_fields_are_eq(&self)
+pub fn backend_tuner::TuneSource::assert_fields_are_eq(&self)
+pub fn backend_tuner::contract::TuneHead::assert_fields_are_eq(&self)
+pub fn backend_tuner::contract::TuneLayout::assert_fields_are_eq(&self)
 pub fn detect::ChromaSampling::assert_fields_are_eq(&self)
 pub fn detect::Confidence::assert_fields_are_eq(&self)
 pub fn detect::ProbeError::assert_fields_are_eq(&self)
@@ -65,13 +75,23 @@ pub fn expert::InternalParams::clone(&self) -> expert::InternalParams
 pub fn expert::InternalParams::default() -> expert::InternalParams
 pub fn expert::InternalParams::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn expert::InternalParams::validate(&self) -> core::result::Result<(), ValidationError>
+pub fn expert::SvtParams::clamped(self) -> Self
+pub fn expert::SvtParams::clone(&self) -> expert::SvtParams
+pub fn expert::SvtParams::default() -> Self
+pub fn expert::SvtParams::deviations(&self) -> u8
+pub fn expert::SvtParams::eq(&self, &expert::SvtParams) -> bool
+pub fn expert::SvtParams::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn expert::SvtParams::is_default(&self) -> bool
+pub fn expert::SvtParams::resolved(self, u8) -> Self
 pub fn fast_heads::FastTierBudgets::assert_fields_are_eq(&self)
 pub fn fast_heads::PartitionBudget::assert_fields_are_eq(&self)
 pub fn fast_heads::TxBudget::assert_fields_are_eq(&self)
+pub fn heuristics::EstimateArm::assert_fields_are_eq(&self)
 pub fn palette_gate::PalettePreference::assert_fields_are_eq(&self)
 pub fn simd::avg_8bpc(&mut [u8], usize, &[i16], &[i16], usize, usize)
 pub fn simd::avg_8bpc_avx2(archmage::tokens::generated::x86::Desktop64, &mut [u8], usize, &[i16], &[i16], usize, usize)
 pub fn simd::avg_8bpc_scalar(&mut [u8], usize, &[i16], &[i16], usize, usize)
+pub fn simd::unpremultiply8_dispatch(&mut [rgb::formats::rgba::Rgba<u8>])
 pub fn sweep::DroppedAxis::clone(&self) -> sweep::DroppedAxis
 pub fn sweep::DroppedAxis::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn sweep::KnobProbe::apply(self, EncoderConfig) -> EncoderConfig
@@ -87,8 +107,23 @@ pub fn sweep::SweepAxes::clone(&self) -> sweep::SweepAxes
 pub fn sweep::SweepAxes::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn sweep::SweepAxes::modes_full() -> Self
 pub fn sweep::SweepAxes::modes_full_alpha() -> Self
+pub fn sweep::SweepAxes::names() -> &'static [&'static str]
 pub fn sweep::SweepAxes::rd_core() -> Self
 pub fn sweep::SweepAxes::scalar_dense() -> Self
+pub fn sweep::SweepAxes::svt_doe_b6() -> Self
+pub fn sweep::SweepAxes::svt_doe_b6_knob_sets() -> alloc::vec::Vec<expert::SvtParams>
+pub fn sweep::SweepAxes::svt_doe_era_delta_r1() -> Self
+pub fn sweep::SweepAxes::svt_doe_era_delta_r1_knob_sets() -> alloc::vec::Vec<expert::SvtParams>
+pub fn sweep::SweepAxes::svt_doe_knob_sets() -> alloc::vec::Vec<expert::SvtParams>
+pub fn sweep::SweepAxes::svt_doe_main() -> Self
+pub fn sweep::SweepAxes::svt_doe_pairwise() -> Self
+pub fn sweep::SweepAxes::svt_doe_pairwise_sets() -> alloc::vec::Vec<expert::SvtParams>
+pub fn sweep::SweepAxes::svt_doe_t1_bd10_knobs() -> Self
+pub fn sweep::SweepAxes::svt_doe_t1_bd10_ladder() -> Self
+pub fn sweep::SweepAxes::svt_doe_t1_bd10_transfer() -> Self
+pub fn sweep::SweepAxes::svt_doe_t1_live_knob_sets() -> alloc::vec::Vec<expert::SvtParams>
+pub fn sweep::SweepAxes::svt_doe_transfer() -> Self
+pub fn sweep::SweepAxes::svt_speed_dense() -> Self
 pub fn sweep::SweepBuilder::clone(&self) -> sweep::SweepBuilder
 pub fn sweep::SweepBuilder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn sweep::SweepBuilder::new(sweep::SweepAxes, sweep::QualityGrid) -> Self
@@ -107,6 +142,7 @@ pub fn sweep::config_from_cell_id(&str, f32) -> core::result::Result<EncoderConf
 pub fn sweep::feature_columns() -> &'static [&'static str]
 pub fn sweep::fingerprint(&EncoderConfig) -> u64
 pub fn two_pass::TwoPassMetric::assert_fields_are_eq(&self)
+pub fn two_pass_zensim::LatticePolicy::assert_fields_are_eq(&self)
 pub fn yuv_convert::ChromaSubsampling::assert_fields_are_eq(&self)
 pub fn yuv_convert::ChromaSubsampling::clone(&self) -> yuv_convert::ChromaSubsampling
 pub fn yuv_convert::ChromaSubsampling::eq(&self, &yuv_convert::ChromaSubsampling) -> bool
@@ -156,6 +192,19 @@ pub expert::InternalParams::complex_prediction_modes: core::option::Option<bool>
 pub expert::InternalParams::fast_deblock: core::option::Option<bool>
 pub expert::InternalParams::lrf: core::option::Option<bool>
 pub expert::InternalParams::partition_range: core::option::Option<(u8, u8)>
+pub expert::SvtParams::ac_bias: f64
+pub expert::SvtParams::enable_qm: bool
+pub expert::SvtParams::enable_variance_boost: bool
+pub expert::SvtParams::force_screen_content_mode: core::option::Option<u8>
+pub expert::SvtParams::max_qm_level: u8
+pub expert::SvtParams::max_tx_size: u8
+pub expert::SvtParams::min_qm_level: u8
+pub expert::SvtParams::sharpness: i8
+pub expert::SvtParams::tile_cols_log2: u8
+pub expert::SvtParams::tile_rows_log2: u8
+pub expert::SvtParams::tune: u8
+pub expert::SvtParams::variance_boost_strength: u8
+pub expert::SvtParams::variance_octile: u8
 pub sweep::DroppedAxis::axis: &'static str
 pub sweep::DroppedAxis::dropped: alloc::vec::Vec<alloc::string::String>
 pub sweep::DroppedAxis::kept: alloc::string::String
@@ -178,12 +227,14 @@ pub sweep::KnobProbe::VaqStrength(f64)
 pub sweep::QualityGrid::Explicit(alloc::vec::Vec<f32>)
 pub sweep::QualityGrid::Step5
 pub sweep::QualityGrid::TrainingDense
+pub sweep::SweepAxes::backends: alloc::vec::Vec<Av1Backend>
 pub sweep::SweepAxes::bit_depths: alloc::vec::Vec<EncodeBitDepth>
 pub sweep::SweepAxes::color_models: alloc::vec::Vec<EncodeColorModel>
 pub sweep::SweepAxes::probes: alloc::vec::Vec<sweep::KnobProbe>
 pub sweep::SweepAxes::qm: alloc::vec::Vec<bool>
 pub sweep::SweepAxes::speeds: alloc::vec::Vec<u8>
 pub sweep::SweepAxes::subsampling: alloc::vec::Vec<EncodeChromaSubsampling>
+pub sweep::SweepAxes::svt_knobs: alloc::vec::Vec<expert::SvtParams>
 pub sweep::SweepAxes::trellis: alloc::vec::Vec<bool>
 pub sweep::SweepAxes::vaq: alloc::vec::Vec<core::option::Option<f64>>
 pub sweep::SweepCell::aliases: alloc::vec::Vec<alloc::string::String>
@@ -211,7 +262,7 @@ pub yuv_convert::YuvMatrix::Custom::kr: f32
 pub yuv_convert::YuvRange::Full
 pub yuv_convert::YuvRange::Limited
 
-## trait impls (40 types)
+## trait impls (49 types)
 
 Av1Backend: TrivialClone
 ChromaSampling: TrivialClone
@@ -232,14 +283,22 @@ TargetMetric: TrivialClone
 TargetOptions: TrivialClone
 TilesResolution: TrivialClone
 TransferCharacteristics: TrivialClone
+backend_tuner::AllowedBackends: TrivialClone
+backend_tuner::TuneSource: TrivialClone
+backend_tuner::contract::TuneHead: TrivialClone
+backend_tuner::contract::TuneLayout: TrivialClone
+backend_tuner::stub::StubTuner: TrivialClone
+backend_tuner::stub::WallTimeModel: TrivialClone
 detect::ChromaSampling: TrivialClone
 detect::Confidence: TrivialClone
 expert::InternalParams: Clone, Debug, Default
+expert::SvtParams: Clone, Copy, Debug, Default, PartialEq, TrivialClone
 fast_heads::FastTierBudgets: TrivialClone
 fast_heads::PartitionBudget: TrivialClone
 fast_heads::TxBudget: TrivialClone
 heuristics::DecodeEstimate: TrivialClone
 heuristics::EncodeEstimate: TrivialClone
+heuristics::EstimateArm: TrivialClone
 heuristics::ThreadingInfo: TrivialClone
 palette_gate::PalettePreference: TrivialClone
 sweep::DroppedAxis: Clone, Debug
@@ -250,10 +309,11 @@ sweep::SweepBuilder: Clone, Debug
 sweep::SweepCell: Clone, Debug
 sweep::SweepPlan: Clone, Debug
 two_pass::TwoPassMetric: TrivialClone
+two_pass_zensim::LatticePolicy: TrivialClone
 yuv_convert::ChromaSubsampling: Clone, Copy, Debug, Eq, PartialEq, TrivialClone
 yuv_convert::YuvMatrix: Clone, Copy, Debug, PartialEq, TrivialClone
 yuv_convert::YuvRange: Clone, Copy, Debug, Eq, PartialEq, TrivialClone
 
 ## auto traits
 
-11 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+12 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

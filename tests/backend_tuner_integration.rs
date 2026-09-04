@@ -50,7 +50,7 @@ use almost_enough::{StopToken, Unstoppable};
 use imgref::{Img, ImgVec};
 use rgb::Rgb;
 use zenavif::backend_tuner::{
-    stub, AllowedBackends, AvifTuning, StubTuner, TuneRequest, TuneSource,
+    AllowedBackends, AvifTuning, StubTuner, TuneRequest, TuneSource, stub,
 };
 use zenavif::{Av1Backend, EncodeChromaSubsampling, EncoderConfig, QualityTarget};
 
@@ -285,7 +285,8 @@ fn tuned_config_encodes_and_reads_back_what_it_asked_for() {
         let coded = readback_chroma(&avif);
         let requested = requested_chroma(&tuned);
         assert_eq!(
-            coded, requested,
+            coded,
+            requested,
             "{name}: cell {:?} asked for {requested:?} but the bitstream codes {coded:?} — \
              a config that does not land is exactly the confound the campaign found",
             tuned.cell_label()
@@ -350,8 +351,7 @@ fn tuned_pick_does_not_regress_bytes_against_the_plain_default() {
         let tuned = tuner.tune(&rgb, None, &req).expect("a pick");
 
         let tuned_bytes = encode(tuned.config(), &image).len();
-        let default_bytes =
-            encode(&EncoderConfig::new().quality(80.0).speed(6), &image).len();
+        let default_bytes = encode(&EncoderConfig::new().quality(80.0).speed(6), &image).len();
 
         let delta_pct =
             (tuned_bytes as f64 - default_bytes as f64) / (default_bytes as f64) * 100.0;

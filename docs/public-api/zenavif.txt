@@ -6,28 +6,28 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenavif.txt 335 lines (supported surface) | zenavif.features.txt 358 added (features: aom-backend,auto-tune,avx512,encode,encode-asm,encode-imazen,encode-mono,encode-svt-rs,encode-threading,target-quality,two-pass-butteraugli,unsafe-asm) | zenavif.internal.txt 216 lines (59 hidden + 271 excluded-feature)
+# files: zenavif.txt 343 lines (supported surface) | zenavif.features.txt 661 added (features: aom-backend,auto-tune,avx512,encode,encode-asm,encode-imazen,encode-mono,encode-svt-rs,encode-threading,target-quality,two-pass-butteraugli,two-pass-zensim,unsafe-asm,zenav1-aom,zenav1-aom-decode,zenav1-aom-encode,zenav1-svt) | zenavif.internal.txt 273 lines (74 hidden + 327 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 3
-#   pub types (struct/enum/trait/alias)        32
-#   pub consts/statics                         43
-#   free functions                             13
+#   pub types (struct/enum/trait/alias)        33
+#   pub consts/statics                         44
+#   free functions                             15
 #   inherent methods                           41
 #   struct fields                             104
-#   enum variants                              51
+#   enum variants                              54
 #   re-exports                                 12
-#   trait roster entries (type × trait)       104
-#   auto-trait-complete types                  25
+#   trait roster entries (type × trait)       110
+#   auto-trait-complete types                  26
 #   auto-trait exceptions                       6
 #
 # per-module pub lines:
 #   (root)                          235
 #   detect                           42
-#   heuristics                       22
+#   heuristics                       29
 
-## items (298 lines)
+## items (305 lines)
 
 pub mod zenavif
 pub use CleanAperture
@@ -85,6 +85,11 @@ pub detect::QualityEstimate::estimated_quality: f32
 pub detect::QualityEstimate::quantizer: u8
 pub fn detect::probe(&[u8]) -> core::result::Result<detect::AvifProbe, detect::ProbeError>
 pub mod heuristics
+pub enum heuristics::EstimateArm
+pub heuristics::EstimateArm::Zenav1Svt420
+pub heuristics::EstimateArm::Zenravif420
+pub heuristics::EstimateArm::Zenravif444
+pub const heuristics::EstimateArm::SvtRs420: Self
 #[non_exhaustive] pub struct heuristics::DecodeEstimate
 pub heuristics::DecodeEstimate::output_bytes: u64
 pub heuristics::DecodeEstimate::peak_memory_bytes: u64
@@ -106,7 +111,9 @@ pub fn heuristics::decode_threading_info(u64) -> heuristics::ThreadingInfo
 pub fn heuristics::encode_threading_info(u64) -> heuristics::ThreadingInfo
 pub fn heuristics::estimate_decode(u32, u32, u8) -> core::option::Option<heuristics::DecodeEstimate>
 pub fn heuristics::estimate_encode(u32, u32, u8, u8) -> core::option::Option<heuristics::EncodeEstimate>
+pub fn heuristics::estimate_encode_for(u32, u32, u8, u8, heuristics::EstimateArm) -> core::option::Option<heuristics::EncodeEstimate>
 pub fn heuristics::estimate_encode_threaded(u32, u32, u8, u8, usize) -> core::option::Option<heuristics::EncodeEstimate>
+pub fn heuristics::estimate_encode_threaded_for(u32, u32, u8, u8, usize, heuristics::EstimateArm) -> core::option::Option<heuristics::EncodeEstimate>
 pub enum ChromaSampling [also: detect]
 pub ChromaSampling::Cs420
 pub ChromaSampling::Cs422
@@ -115,7 +122,7 @@ pub ChromaSampling::Monochrome
 pub enum ColorRange
 pub ColorRange::Full
 pub ColorRange::Limited
-pub enum DecodeBackend
+#[non_exhaustive] pub enum DecodeBackend
 pub DecodeBackend::Rav1dSafe
 #[non_exhaustive] pub enum Error
 pub Error::Cancelled(enough::reason::StopReason)
@@ -281,10 +288,10 @@ pub ImageInfo::width: u32
 pub ImageInfo::xmp: core::option::Option<alloc::vec::Vec<u8>>
 pub struct ManagedAvifDecoder
 pub fn ManagedAvifDecoder::decode(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<zenpixels::buffer::PixelBuffer>
-pub fn ManagedAvifDecoder::decode_animation(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<DecodedAnimation>
 pub fn ManagedAvifDecoder::decode_full(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<(zenpixels::buffer::PixelBuffer, ImageInfo)>
-pub fn ManagedAvifDecoder::decode_to_sink(&mut self, &impl enough::Stop + ?core::marker::Sized, &mut dyn zencodec::sink::DecodeRowSink) -> Result<ImageInfo>
 pub fn ManagedAvifDecoder::new(&[u8], &DecoderConfig) -> Result<Self>
+pub fn ManagedAvifDecoder::decode_animation(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<DecodedAnimation>
+pub fn ManagedAvifDecoder::decode_to_sink(&mut self, &impl enough::Stop + ?core::marker::Sized, &mut dyn zencodec::sink::DecodeRowSink) -> Result<ImageInfo>
 pub fn ManagedAvifDecoder::probe_info(&self) -> Result<ImageInfo>
 pub struct MatrixCoefficients(pub u8)
 pub const MatrixCoefficients::BT2020_CL: Self
@@ -328,7 +335,7 @@ pub fn decode_av1_obu_yuv_with(&[u8], DecodeBackend, &DecoderConfig, &impl enoug
 pub fn decode_with(&[u8], &DecoderConfig, &impl enough::Stop + ?core::marker::Sized) -> Result<zenpixels::buffer::PixelBuffer>
 pub type Result<T, E> = core::result::Result<T, E>
 
-## trait impls (30 types)
+## trait impls (31 types)
 
 AvifAnimationFrameDecoder: zencodec::traits::decoder::AnimationFrameDecoder
 AvifDecodeJob: zencodec::traits::decoding::DecodeJob<'a>
@@ -358,12 +365,13 @@ detect::QualityEstimate: Clone, Debug
 detect::Recommendation: Clone, Debug, Eq, PartialEq
 heuristics::DecodeEstimate: Clone, Copy, Debug
 heuristics::EncodeEstimate: Clone, Copy, Debug
+heuristics::EstimateArm: Clone, Copy, Debug, Default, Eq, PartialEq
 heuristics::ThreadingInfo: Clone, Copy, Debug
 whereat::at::At<zencodec::error::CodecError>: From<Error>
 
 ## auto traits
 
-25 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+26 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 AnimationDecoder: !RefUnwindSafe !UnwindSafe
 AvifAnimationFrameDecoder: !RefUnwindSafe !UnwindSafe
 AvifDecodeJob: !RefUnwindSafe !UnwindSafe

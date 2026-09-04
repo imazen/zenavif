@@ -41,7 +41,6 @@
 //! upstream pass can therefore serve the tuner, the palette gate and
 //! the fast-tier heads together.
 
-
 use crate::auto_tune::{AutoTuneError, QualityTarget};
 use crate::{Av1Backend, EncoderConfig};
 
@@ -406,11 +405,7 @@ pub(crate) fn config_for_cell(
 /// Masks, in order: the caller's backend mask (already intersected with
 /// the build's), then alpha support. A cell that fails either is not a
 /// candidate — it is never merely penalized.
-pub(crate) fn cell_is_viable(
-    cell: &TuneCell,
-    allowed: AllowedBackends,
-    has_alpha: bool,
-) -> bool {
+pub(crate) fn cell_is_viable(cell: &TuneCell, allowed: AllowedBackends, has_alpha: bool) -> bool {
     if !allowed.contains(cell.backend()) {
         return false;
     }
@@ -490,9 +485,7 @@ impl AvifTuning for AvifTuner {
         offer: Option<&zenanalyze_api::Offer<'_>>,
         request: &TuneRequest,
     ) -> Result<AvifTune, AutoTuneError> {
-        let allowed = request
-            .allowed_backends
-            .intersect(AllowedBackends::built());
+        let allowed = request.allowed_backends.intersect(AllowedBackends::built());
         if allowed.is_empty() {
             return Err(AutoTuneError::NoCellAllowed);
         }
@@ -700,7 +693,10 @@ mod tests {
     #[test]
     fn allowed_backends_built_matches_cargo_features() {
         let built = AllowedBackends::built();
-        assert_eq!(built.contains(Av1Backend::Zenravif), cfg!(feature = "encode"));
+        assert_eq!(
+            built.contains(Av1Backend::Zenravif),
+            cfg!(feature = "encode")
+        );
         assert_eq!(
             built.contains(Av1Backend::Zenav1Svt),
             cfg!(feature = "zenav1-svt")

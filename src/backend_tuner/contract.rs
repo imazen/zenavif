@@ -43,7 +43,6 @@
 //! `head_major` is `head * n_cells + cell`. The bake declares which; a
 //! bake whose output count does not equal the product is refused.
 
-
 use crate::auto_tune::AutoTuneError;
 use crate::{Av1Backend, EncodeBitDepth, EncodeChromaSubsampling};
 
@@ -248,7 +247,9 @@ impl TuneCell {
                         _ => return Err(bad("expected 8, 10 or 12")),
                     });
                 }
-                "qm" => cell.enable_qm = Some(parse_bool(value).ok_or_else(|| bad("expected 0/1"))?),
+                "qm" => {
+                    cell.enable_qm = Some(parse_bool(value).ok_or_else(|| bad("expected 0/1"))?)
+                }
                 "tune" => {
                     if !is_rav1e {
                         return Err(wrong_backend("zenravif (SVT's is `svttune`)"));
@@ -563,9 +564,7 @@ impl TuneContract {
             image_features.push(name.clone());
         }
         let zq_index = zq_index.ok_or_else(|| {
-            AutoTuneError::LutMalformed(format!(
-                "{INPUT_ORDER_KEY}: no {ZQ_NORM_INPUT} input"
-            ))
+            AutoTuneError::LutMalformed(format!("{INPUT_ORDER_KEY}: no {ZQ_NORM_INPUT} input"))
         })?;
 
         Ok(Self {
@@ -695,8 +694,14 @@ mod tests {
         assert!(format!("{err}").contains("svttune"));
         let err = TuneCell::parse("svt,tune=still").expect_err("tune= is rav1e-only");
         let msg = format!("{err}");
-        assert!(msg.contains("svttune"), "the error must point at the right spelling: {msg}");
-        assert!(TuneCell::parse("rav1e,qmmin=2").is_err(), "no window on rav1e");
+        assert!(
+            msg.contains("svttune"),
+            "the error must point at the right spelling: {msg}"
+        );
+        assert!(
+            TuneCell::parse("rav1e,qmmin=2").is_err(),
+            "no window on rav1e"
+        );
         assert!(TuneCell::parse("aom,scm=3").is_err(), "scm is svt-only");
     }
 

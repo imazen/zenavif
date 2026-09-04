@@ -10,6 +10,39 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ## Workspace
 
+### [Unreleased]
+
+#### Added — backend + knob auto-tuning (`auto-tune`, off by default), 2026-09-04
+
+- **`zenavif::backend_tuner`** — choose an `Av1Backend` *and* its knobs for
+  one image at a quality target inside a time budget, and report the
+  expected cost. `AvifTuning` trait with two implementors: `AvifTuner`
+  (a ZNPR v3 bake the **caller** supplies — no `include_bytes!`, no
+  bundled weights) and `StubTuner` (measured defaults, no model), with
+  `AvifTune::source()` always reporting which answered. New public items:
+  `AllowedBackends`, `AvifTune`, `AvifTuner`, `AvifTuning`, `StubTuner`,
+  `TuneRequest`, `TuneSource`, and the `backend_tuner` module
+  (`TuneContract`, `TuneCell`, `TuneHead`, `stub::WallTimeModel`).
+  Purely additive; no existing signature changed. (`04fa3093`)
+- Wall-time table transcribed from the committed speed instrument
+  (`speed_alpha_beta.tsv`, sha256 `c7f63157…`), 20 `(backend, speed)`
+  `alpha + beta*MP` rows. A test reproduces the backend campaign's own
+  published iso-time row from them. `zenav1-aom` has **no** rows because
+  it was never measured — every aom lookup returns `None` (NOT MEASURED),
+  never an analogy.
+- Knobs are **backend-scoped**: `tune=still|psycho` (rav1e) vs
+  `svttune=<u8>` (SVT), and the QM window (`qmmin`/`qmmax`) exists only on
+  SVT. A knob on the wrong backend is a load error, and a cell declaring
+  SVT knobs on a build without `__expert` is refused rather than encoded
+  with the knobs dropped — the `zenav1-svt#17` defect class.
+- Bake contract documented at `docs/AUTOTUNE_CONTRACT.md`.
+- 21 unit tests + 7 integration gates with real encodes, `av1C` decode
+  read-back, and the model path driven end to end by a hand-baked
+  contract-carrying ZNPR. (`cdfe7b46`)
+- Adds `zenpredict-bake` as a dev-dependency (the canonical ZNPR
+  serializer, for the test bake).
+
+
 - **2026-08-29 — Known issue: this repository cannot be resolved by anything that
   clones only this repository. That breaks `Dependabot Updates`, and it blocks
   `cargo publish`.** Investigated as part of a workspace-wide sweep of six repos

@@ -1,5 +1,5 @@
 # zenavif public API — additions from non-default features
-# features: aom-backend,auto-tune,avx512,encode,encode-asm,encode-imazen,encode-mono,encode-svt-rs,encode-threading,target-quality,two-pass-butteraugli,unsafe-asm
+# features: aom-backend,auto-tune,avx512,encode,encode-asm,encode-imazen,encode-mono,encode-svt-rs,encode-threading,target-quality,two-pass-butteraugli,two-pass-zensim,unsafe-asm,zenav1-aom,zenav1-aom-decode,zenav1-aom-encode,zenav1-svt
 # (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
 # Encodings: crate-name prefix stripped; auto traits collapse to a
 # count + exceptions; trait impls collapse to one roster line per
@@ -9,28 +9,138 @@
 
 ## summary
 #
-#   pub modules                                 4
-#   pub types (struct/enum/trait/alias)        44
-#   pub consts/statics                         18
-#   free functions                             26
-#   inherent methods                           75
-#   struct fields                             110
-#   enum variants                              47
-#   re-exports                                  2
-#   trait roster entries (type × trait)       129
-#   auto-trait-complete types                  34
-#   auto-trait exceptions                       3
+#   pub modules                                 9
+#   pub types (struct/enum/trait/alias)        79
+#   pub consts/statics                         37
+#   free functions                             47
+#   inherent methods                          179
+#   struct fields                             214
+#   enum variants                              68
+#   re-exports                                  4
+#   trait roster entries (type × trait)       185
+#   auto-trait-complete types                  51
+#   auto-trait exceptions                       4
 #
 # per-module pub lines:
-#   (root)                          261
+#   (root)                          356
+#   backend_tuner                   132
 #   fast_heads                       29
+#   heuristics                        1
 #   palette_gate                     10
 #   q0_head                           3
 #   two_pass                         23
+#   two_pass_zensim                  60
+#   zensim_c                         23
 
-## items (318 lines)
+## items (603 lines)
 
 pub use FRAME_HINTS_LIVE
+pub use SPATIAL_HINTS_LIVE
+pub mod backend_tuner
+pub mod backend_tuner::contract
+pub backend_tuner::contract::TuneHead::BytesLog
+pub backend_tuner::contract::TuneHead::EncodeMsLog
+pub backend_tuner::contract::TuneHead::Quality
+pub const fn backend_tuner::contract::TuneHead::label(self) -> &'static str [also: (root)]
+#[non_exhaustive] pub enum backend_tuner::contract::TuneLayout
+pub backend_tuner::contract::TuneLayout::CellMajor
+pub backend_tuner::contract::TuneLayout::HeadMajor
+pub fn backend_tuner::contract::TuneCell::backend(&self) -> Av1Backend
+pub fn backend_tuner::contract::TuneCell::bit_depth(&self) -> core::option::Option<EncodeBitDepth>
+pub fn backend_tuner::contract::TuneCell::chroma(&self) -> EncodeChromaSubsampling
+pub fn backend_tuner::contract::TuneCell::declares_svt_knobs(&self) -> bool
+pub fn backend_tuner::contract::TuneCell::enable_qm(&self) -> core::option::Option<bool>
+pub fn backend_tuner::contract::TuneCell::label(&self) -> &str
+pub fn backend_tuner::contract::TuneCell::parse(&str) -> core::result::Result<Self, AutoTuneError>
+pub fn backend_tuner::contract::TuneCell::speed(&self) -> u8
+pub fn backend_tuner::contract::TuneCell::svt_qm_window(&self) -> core::option::Option<(u8, u8)>
+pub fn backend_tuner::contract::TuneCell::svt_screen_content_mode(&self) -> core::option::Option<u8>
+pub fn backend_tuner::contract::TuneCell::svt_sharpness(&self) -> core::option::Option<i8>
+pub fn backend_tuner::contract::TuneCell::svt_tune(&self) -> core::option::Option<u8>
+pub fn backend_tuner::contract::TuneCell::tune_still_image(&self) -> core::option::Option<bool>
+pub fn backend_tuner::contract::TuneContract::build_input(&self, f32, &[f32]) -> core::result::Result<alloc::vec::Vec<f32>, AutoTuneError>
+pub fn backend_tuner::contract::TuneContract::cells(&self) -> &[backend_tuner::contract::TuneCell]
+pub fn backend_tuner::contract::TuneContract::from_model(&zenpredict::model::Model) -> core::result::Result<Self, AutoTuneError>
+pub fn backend_tuner::contract::TuneContract::has_head(&self, backend_tuner::contract::TuneHead) -> bool
+pub fn backend_tuner::contract::TuneContract::head_value(&self, &[f32], usize, backend_tuner::contract::TuneHead) -> core::option::Option<f32>
+pub fn backend_tuner::contract::TuneContract::heads(&self) -> &[backend_tuner::contract::TuneHead]
+pub fn backend_tuner::contract::TuneContract::image_features(&self) -> &[alloc::string::String]
+pub fn backend_tuner::contract::TuneContract::input_order(&self) -> &[alloc::string::String]
+pub fn backend_tuner::contract::TuneContract::layout(&self) -> backend_tuner::contract::TuneLayout
+pub const backend_tuner::contract::CELLS_KEY: &str
+pub const backend_tuner::contract::HEADS_KEY: &str
+pub const backend_tuner::contract::INPUT_ORDER_KEY: &str
+pub const backend_tuner::contract::LAYOUT_KEY: &str
+pub const backend_tuner::contract::ZQ_NORM_INPUT: &str
+pub mod backend_tuner::stub
+pub const fn backend_tuner::stub::StubTuner::new() -> Self [also: (root)]
+pub struct backend_tuner::stub::WallTimeModel
+pub backend_tuner::stub::WallTimeModel::alpha_ms: f32
+pub backend_tuner::stub::WallTimeModel::beta_ms_per_mp: f32
+pub fn backend_tuner::stub::WallTimeModel::estimate_ms(&self, f32) -> f32
+pub const backend_tuner::stub::SVT_REACH_CEILING_TARGET: f32
+pub fn backend_tuner::stub::estimated_wall_ms(&backend_tuner::contract::TuneCell, f32) -> core::option::Option<f32>
+pub fn backend_tuner::stub::wall_time_model(Av1Backend, u8) -> core::option::Option<backend_tuner::stub::WallTimeModel>
+#[non_exhaustive] pub enum backend_tuner::TuneHead [also: backend_tuner::contract]
+pub backend_tuner::TuneHead::BytesLog
+pub backend_tuner::TuneHead::EncodeMsLog
+pub backend_tuner::TuneHead::Quality
+pub backend_tuner::TuneSource::Model
+pub backend_tuner::TuneSource::Stub
+pub const fn backend_tuner::AllowedBackends::built() -> Self [also: (root)]
+pub fn backend_tuner::AllowedBackends::contains(&self, Av1Backend) -> bool
+pub fn backend_tuner::AllowedBackends::intersect(self, Self) -> Self
+pub fn backend_tuner::AllowedBackends::is_empty(&self) -> bool
+pub const fn backend_tuner::AllowedBackends::none() -> Self [also: (root)]
+pub fn backend_tuner::AllowedBackends::with(self, Av1Backend) -> Self
+pub fn backend_tuner::AvifTune::backend(&self) -> Av1Backend
+pub fn backend_tuner::AvifTune::cell_label(&self) -> &str
+pub fn backend_tuner::AvifTune::config(&self) -> &EncoderConfig
+pub fn backend_tuner::AvifTune::expected_bytes(&self) -> core::option::Option<f32>
+pub fn backend_tuner::AvifTune::expected_wall_ms(&self) -> core::option::Option<f32>
+pub fn backend_tuner::AvifTune::into_config(self) -> EncoderConfig
+pub fn backend_tuner::AvifTune::margin(&self) -> core::option::Option<f32>
+pub fn backend_tuner::AvifTune::source(&self) -> backend_tuner::TuneSource
+pub fn backend_tuner::AvifTuner::caller_input_width(&self) -> usize
+pub fn backend_tuner::AvifTuner::contract(&self) -> &backend_tuner::contract::TuneContract
+pub fn backend_tuner::AvifTuner::from_bytes(&[u8]) -> core::result::Result<Self, AutoTuneError>
+pub fn backend_tuner::AvifTuner::from_bytes_with_schema(&[u8], u64) -> core::result::Result<Self, AutoTuneError>
+pub fn backend_tuner::AvifTuner::model(&self) -> &zenpredict::model::Model
+pub struct backend_tuner::TuneCell [also: backend_tuner::contract]
+pub fn backend_tuner::contract::TuneCell::backend(&self) -> Av1Backend
+pub fn backend_tuner::contract::TuneCell::bit_depth(&self) -> core::option::Option<EncodeBitDepth>
+pub fn backend_tuner::contract::TuneCell::chroma(&self) -> EncodeChromaSubsampling
+pub fn backend_tuner::contract::TuneCell::declares_svt_knobs(&self) -> bool
+pub fn backend_tuner::contract::TuneCell::enable_qm(&self) -> core::option::Option<bool>
+pub fn backend_tuner::contract::TuneCell::label(&self) -> &str
+pub fn backend_tuner::contract::TuneCell::parse(&str) -> core::result::Result<Self, AutoTuneError>
+pub fn backend_tuner::contract::TuneCell::speed(&self) -> u8
+pub fn backend_tuner::contract::TuneCell::svt_qm_window(&self) -> core::option::Option<(u8, u8)>
+pub fn backend_tuner::contract::TuneCell::svt_screen_content_mode(&self) -> core::option::Option<u8>
+pub fn backend_tuner::contract::TuneCell::svt_sharpness(&self) -> core::option::Option<i8>
+pub fn backend_tuner::contract::TuneCell::svt_tune(&self) -> core::option::Option<u8>
+pub fn backend_tuner::contract::TuneCell::tune_still_image(&self) -> core::option::Option<bool>
+pub struct backend_tuner::TuneContract [also: backend_tuner::contract]
+pub fn backend_tuner::contract::TuneContract::build_input(&self, f32, &[f32]) -> core::result::Result<alloc::vec::Vec<f32>, AutoTuneError>
+pub fn backend_tuner::contract::TuneContract::cells(&self) -> &[backend_tuner::contract::TuneCell]
+pub fn backend_tuner::contract::TuneContract::from_model(&zenpredict::model::Model) -> core::result::Result<Self, AutoTuneError>
+pub fn backend_tuner::contract::TuneContract::has_head(&self, backend_tuner::contract::TuneHead) -> bool
+pub fn backend_tuner::contract::TuneContract::head_value(&self, &[f32], usize, backend_tuner::contract::TuneHead) -> core::option::Option<f32>
+pub fn backend_tuner::contract::TuneContract::heads(&self) -> &[backend_tuner::contract::TuneHead]
+pub fn backend_tuner::contract::TuneContract::image_features(&self) -> &[alloc::string::String]
+pub fn backend_tuner::contract::TuneContract::input_order(&self) -> &[alloc::string::String]
+pub fn backend_tuner::contract::TuneContract::layout(&self) -> backend_tuner::contract::TuneLayout
+pub backend_tuner::TuneRequest::allowed_backends: backend_tuner::AllowedBackends
+pub backend_tuner::TuneRequest::has_alpha: bool
+pub backend_tuner::TuneRequest::height: u32
+pub backend_tuner::TuneRequest::target: QualityTarget
+pub backend_tuner::TuneRequest::time_budget_ms: core::option::Option<f32>
+pub backend_tuner::TuneRequest::width: u32
+pub fn backend_tuner::TuneRequest::new(QualityTarget, u32, u32) -> Self
+pub fn backend_tuner::TuneRequest::with_allowed_backends(self, backend_tuner::AllowedBackends) -> Self
+pub fn backend_tuner::TuneRequest::with_alpha(self, bool) -> Self
+pub fn backend_tuner::TuneRequest::with_time_budget_ms(self, f32) -> Self
+pub fn backend_tuner::AvifTuning::tune(&self, &[u8], core::option::Option<&zenanalyze_api::Offer<'_>>, &backend_tuner::TuneRequest) -> core::result::Result<backend_tuner::AvifTune, AutoTuneError>
 pub mod fast_heads
 pub fast_heads::PartitionBudget::Max32
 pub fast_heads::PartitionBudget::Ship
@@ -58,6 +168,7 @@ pub fn fast_heads::monotone_speed_gate(f32, u8) -> u8
 pub fn fast_heads::monotone_speed_gate_for_rgb8(&[u8], u32, u32, core::option::Option<&zenanalyze_api::Offer<'_>>, u8) -> u8
 pub fn fast_heads::partition_budget_gate(f32, u8) -> fast_heads::PartitionBudget
 pub fn fast_heads::tx_budget_gate(f32, f32, u8) -> fast_heads::TxBudget
+pub fn heuristics::EstimateArm::for_config(&EncoderConfig) -> Self
 pub mod palette_gate
 pub palette_gate::PalettePreference::Always
 pub palette_gate::PalettePreference::Auto
@@ -90,6 +201,81 @@ pub two_pass::TwoPassOptions::pool_exponent: f64
 pub two_pass::TwoPassOptions::probe_quality: core::option::Option<f32>
 pub two_pass::TwoPassOptions::strength: f64
 pub two_pass::TwoPassOptions::weight_clamp: (f64, f64)
+pub mod two_pass_zensim
+pub use two_pass_zensim::SPATIAL_HINTS_LIVE
+pub two_pass_zensim::LatticePolicy::AtLeast
+pub two_pass_zensim::LatticePolicy::AtMost
+pub two_pass_zensim::LatticePolicy::Nearest
+pub two_pass_zensim::TwoShotOptions::include_edge_mse: bool
+pub two_pass_zensim::TwoShotOptions::keep_closer: bool
+pub two_pass_zensim::TwoShotOptions::map_eps: f64
+pub two_pass_zensim::TwoShotOptions::masking_strength: core::option::Option<f32>
+pub two_pass_zensim::TwoShotOptions::max_quality: f32
+pub two_pass_zensim::TwoShotOptions::min_quality: f32
+pub two_pass_zensim::TwoShotOptions::policy: two_pass_zensim::LatticePolicy
+pub two_pass_zensim::TwoShotOptions::pool_exponent: f64
+pub two_pass_zensim::TwoShotOptions::seed_quality: core::option::Option<f32>
+pub two_pass_zensim::TwoShotOptions::spatial_strength: f64
+pub two_pass_zensim::TwoShotOptions::tolerance: f64
+pub two_pass_zensim::TwoShotOptions::weight_clamp: (f64, f64)
+pub two_pass_zensim::TwoShotResult::encoded: EncodedImage
+pub two_pass_zensim::TwoShotResult::encodes: u8
+pub two_pass_zensim::TwoShotResult::kept_pass1: bool
+pub two_pass_zensim::TwoShotResult::pass1_quality: f32
+pub two_pass_zensim::TwoShotResult::pass1_quantizer: u8
+pub two_pass_zensim::TwoShotResult::pass1_score: f64
+pub two_pass_zensim::TwoShotResult::predicted_score: f64
+pub two_pass_zensim::TwoShotResult::quality: f32
+pub two_pass_zensim::TwoShotResult::quantizer: u8
+pub two_pass_zensim::TwoShotResult::sb_q_scale: core::option::Option<alloc::boxed::Box<[f32]>>
+pub two_pass_zensim::TwoShotResult::score: f64
+pub two_pass_zensim::TwoShotResult::spatial_applied: bool
+pub two_pass_zensim::TwoShotResult::within_tolerance: bool
+pub two_pass_zensim::ZensimLoopOptions::include_edge_mse: bool
+pub two_pass_zensim::ZensimLoopOptions::map_eps: f64
+pub two_pass_zensim::ZensimLoopOptions::masking_strength: core::option::Option<f32>
+pub two_pass_zensim::ZensimLoopOptions::max_encodes: u8
+pub two_pass_zensim::ZensimLoopOptions::max_quality: f32
+pub two_pass_zensim::ZensimLoopOptions::min_quality: f32
+pub two_pass_zensim::ZensimLoopOptions::pool_exponent: f64
+pub two_pass_zensim::ZensimLoopOptions::seed_quality: core::option::Option<f32>
+pub two_pass_zensim::ZensimLoopOptions::spatial_strength: f64
+pub two_pass_zensim::ZensimLoopOptions::tolerance: f64
+pub two_pass_zensim::ZensimLoopOptions::weight_clamp: (f64, f64)
+pub two_pass_zensim::ZensimLoopResult::converged: bool
+pub two_pass_zensim::ZensimLoopResult::encoded: EncodedImage
+pub two_pass_zensim::ZensimLoopResult::encodes: u8
+pub two_pass_zensim::ZensimLoopResult::pass1_quality: f32
+pub two_pass_zensim::ZensimLoopResult::pass1_score: f64
+pub two_pass_zensim::ZensimLoopResult::quality: f32
+pub two_pass_zensim::ZensimLoopResult::sb_q_scale: core::option::Option<alloc::boxed::Box<[f32]>>
+pub two_pass_zensim::ZensimLoopResult::score: f64
+pub two_pass_zensim::ZensimLoopResult::spatial_applied: bool
+pub fn two_pass_zensim::sb_q_scale_from_diffmap(&[f32], usize, usize, &two_pass_zensim::TwoShotOptions) -> alloc::boxed::Box<[f32]>
+pub mod zensim_c
+pub struct zensim_c::AttributionSteer
+pub fn zensim_c::AttributionSteer::density(&self) -> &[f32]
+pub fn zensim_c::AttributionSteer::gradient_nonzero(&self) -> usize
+pub fn zensim_c::AttributionSteer::height(&self) -> usize
+pub fn zensim_c::AttributionSteer::sb_means(&self) -> alloc::vec::Vec<f64>
+pub fn zensim_c::AttributionSteer::score(&self) -> f64
+pub fn zensim_c::AttributionSteer::width(&self) -> usize
+pub struct zensim_c::ZensimC
+pub fn zensim_c::ZensimC::features(&mut self, &impl zensim::source::ImageSource, &impl zensim::source::ImageSource) -> Result<alloc::vec::Vec<f64>>
+pub fn zensim_c::ZensimC::new() -> Self
+pub fn zensim_c::ZensimC::score(&mut self, &impl zensim::source::ImageSource, &impl zensim::source::ImageSource) -> Result<f64>
+pub fn zensim_c::ZensimC::steer(&mut self, &impl zensim::source::ImageSource, &impl zensim::source::ImageSource) -> Result<zensim_c::AttributionSteer>
+pub fn zensim_c::ZensimC::with_parallel(self, bool) -> Self
+pub fn zensim_c::ZensimC::with_stop(self, almost_enough::stop_token::StopToken) -> Self
+pub const zensim_c::FOLDED_944: usize
+pub const zensim_c::HDR_TRANSFER_CHARACTERISTICS: [u8; 2]
+pub fn zensim_c::anchor_quantizer_for_zensim_c(f64) -> f64
+pub fn zensim_c::anchor_zensim_c_for_quantizer(f64) -> f64
+pub fn zensim_c::profile_for_transfer(core::option::Option<u8>) -> zensim::profile::ZensimProfile
+pub fn zensim_c::sb_q_scale_from_attribution(&[f64], (f64, f64), f64) -> alloc::boxed::Box<[f32]>
+pub fn zensim_c::score_features(&[f64], u32, u32) -> Result<f64>
+pub fn zensim_c::sdr_guard(core::option::Option<u8>) -> Result<()>
+pub fn zensim_c::transfer_is_hdr(u8) -> bool
 pub enum AutoTuneError
 pub AutoTuneError::FeatureExtraction(alloc::string::String)
 pub AutoTuneError::Inference(alloc::string::String)
@@ -98,29 +284,37 @@ pub AutoTuneError::LutMalformed(alloc::string::String)
 pub AutoTuneError::ModelNotBaked
 pub AutoTuneError::NoCellAllowed
 pub AutoTuneError::TargetOutOfRange(f32)
-pub enum Av1Backend
-pub Av1Backend::SvtRs
+#[non_exhaustive] pub enum Av1Backend
 pub Av1Backend::Svtav1
+pub Av1Backend::Zenav1Aom
+pub Av1Backend::Zenav1Svt
 pub Av1Backend::Zenravif
-pub DecodeBackend::AomRs
+pub const Av1Backend::SvtRs: Self
 pub DecodeBackend::Rav1dFfi
-pub enum EncodeAlphaMode
+pub DecodeBackend::Zenav1Aom
+pub const DecodeBackend::AomRs: Self
+#[non_exhaustive] pub enum EncodeAlphaMode
 pub EncodeAlphaMode::Premultiplied
 pub EncodeAlphaMode::UnassociatedClean
 pub EncodeAlphaMode::UnassociatedDirty
-pub enum EncodeBitDepth
+#[non_exhaustive] pub enum EncodeBitDepth
 pub EncodeBitDepth::Auto
 pub EncodeBitDepth::Eight
 pub EncodeBitDepth::Ten
-pub enum EncodeChromaSubsampling
+pub EncodeBitDepth::Twelve
+#[non_exhaustive] pub enum EncodeChromaSubsampling
 pub EncodeChromaSubsampling::Yuv420
 pub EncodeChromaSubsampling::Yuv444
-pub enum EncodeColorModel
+#[non_exhaustive] pub enum EncodeColorModel
 pub EncodeColorModel::Rgb
 pub EncodeColorModel::YCbCr
 pub enum EncodePixelRange
 pub EncodePixelRange::Full
 pub EncodePixelRange::Limited
+#[non_exhaustive] pub enum LatticePolicy [also: two_pass_zensim]
+pub LatticePolicy::AtLeast
+pub LatticePolicy::AtMost
+pub LatticePolicy::Nearest
 pub enum PalettePreference [also: palette_gate]
 pub PalettePreference::Always
 pub PalettePreference::Auto
@@ -130,13 +324,17 @@ pub PartitionBudget::Max32
 pub PartitionBudget::Ship
 pub enum QualityTarget
 pub QualityTarget::Zensim(f32)
-pub enum TargetMetric
+#[non_exhaustive] pub enum TargetMetric
 pub TargetMetric::Ssim2(f64)
 pub TargetMetric::Zensim(f64)
+pub TargetMetric::ZensimC(f64)
 pub enum TilesResolution
 pub TilesResolution::Fixed(usize)
 pub TilesResolution::MachineDependent
 pub TilesResolution::MachineDependent::cap: usize
+#[non_exhaustive] pub enum TuneSource [also: backend_tuner]
+pub TuneSource::Model
+pub TuneSource::Stub
 #[non_exhaustive] pub enum TwoPassMetric [also: two_pass]
 pub TwoPassMetric::Butteraugli
 pub fn two_pass::TwoPassMetric::from_name(&str) -> core::option::Option<Self>
@@ -145,6 +343,11 @@ pub enum TxBudget [also: fast_heads]
 pub TxBudget::Largest
 pub TxBudget::Min
 pub TxBudget::Size1
+pub struct AllowedBackends [also: backend_tuner]
+pub fn backend_tuner::AllowedBackends::contains(&self, Av1Backend) -> bool
+pub fn backend_tuner::AllowedBackends::intersect(self, Self) -> Self
+pub fn backend_tuner::AllowedBackends::is_empty(&self) -> bool
+pub fn backend_tuner::AllowedBackends::with(self, Av1Backend) -> Self
 pub struct AnimationFrame
 pub AnimationFrame::duration_ms: u32
 pub AnimationFrame::pixels: imgref::ImgVec<rgb::RGB8>
@@ -188,6 +391,21 @@ pub fn AvifEncoderConfig::with_effort_u32(self, u32) -> Self
 pub fn AvifEncoderConfig::with_gain_map(self, alloc::vec::Vec<u8>, u32, u32, u8, alloc::vec::Vec<u8>) -> Self
 pub fn AvifEncoderConfig::with_lossless_mode(self, bool) -> Self
 pub fn AvifEncoderConfig::with_quality(self, f32) -> Self
+pub struct AvifTune [also: backend_tuner]
+pub fn backend_tuner::AvifTune::backend(&self) -> Av1Backend
+pub fn backend_tuner::AvifTune::cell_label(&self) -> &str
+pub fn backend_tuner::AvifTune::config(&self) -> &EncoderConfig
+pub fn backend_tuner::AvifTune::expected_bytes(&self) -> core::option::Option<f32>
+pub fn backend_tuner::AvifTune::expected_wall_ms(&self) -> core::option::Option<f32>
+pub fn backend_tuner::AvifTune::into_config(self) -> EncoderConfig
+pub fn backend_tuner::AvifTune::margin(&self) -> core::option::Option<f32>
+pub fn backend_tuner::AvifTune::source(&self) -> backend_tuner::TuneSource
+pub struct AvifTuner [also: backend_tuner]
+pub fn backend_tuner::AvifTuner::caller_input_width(&self) -> usize
+pub fn backend_tuner::AvifTuner::contract(&self) -> &backend_tuner::contract::TuneContract
+pub fn backend_tuner::AvifTuner::from_bytes(&[u8]) -> core::result::Result<Self, AutoTuneError>
+pub fn backend_tuner::AvifTuner::from_bytes_with_schema(&[u8], u64) -> core::result::Result<Self, AutoTuneError>
+pub fn backend_tuner::AvifTuner::model(&self) -> &zenpredict::model::Model
 #[non_exhaustive] pub struct EncodePlan
 pub EncodePlan::alpha_color_mode: EncodeAlphaMode
 pub EncodePlan::alpha_quantizer: core::option::Option<u8>
@@ -242,6 +460,7 @@ pub fn EncoderConfig::pixel_range(self, EncodePixelRange) -> Self
 pub fn EncoderConfig::quality(self, f32) -> Self
 pub fn EncoderConfig::quality_value(&self) -> f32
 pub fn EncoderConfig::rotation(self, u8) -> Self
+pub fn EncoderConfig::sb_q_scale_value(&self) -> core::option::Option<&[f32]>
 pub fn EncoderConfig::speed(self, u8) -> Self
 pub fn EncoderConfig::speed_value(&self) -> u8
 pub fn EncoderConfig::still_image_preset(self) -> Self
@@ -258,6 +477,7 @@ pub fn EncoderConfig::with_lru_on_skip(self, core::option::Option<bool>) -> Self
 pub fn EncoderConfig::with_palette_preference(self, core::option::Option<palette_gate::PalettePreference>) -> Self
 pub fn EncoderConfig::with_qm(self, bool) -> Self
 pub fn EncoderConfig::with_rdo_tx_decision(self, core::option::Option<bool>) -> Self
+pub fn EncoderConfig::with_sb_q_scale(self, core::option::Option<alloc::boxed::Box<[f32]>>) -> Self
 pub fn EncoderConfig::with_seg_boost(self, core::option::Option<f64>) -> Self
 pub fn EncoderConfig::with_segmentation_complex(self, core::option::Option<bool>) -> Self
 pub fn EncoderConfig::with_sgr_full(self, core::option::Option<bool>) -> Self
@@ -307,6 +527,7 @@ pub SpeedDerived::reduced_tx_set: bool
 pub SpeedDerived::segmentation_complex: bool
 pub SpeedDerived::sgr_complexity_full: bool
 pub SpeedDerived::tx_domain_rate: bool
+pub struct StubTuner [also: backend_tuner, backend_tuner::stub]
 pub struct TargetOptions
 pub TargetOptions::max_encodes: u8
 pub TargetOptions::max_quality: f32
@@ -318,6 +539,17 @@ pub TargetedEncode::encoded: EncodedImage
 pub TargetedEncode::encodes: u8
 pub TargetedEncode::quality: f32
 pub TargetedEncode::score: f64
+pub struct TuneRequest [also: backend_tuner]
+pub TuneRequest::allowed_backends: backend_tuner::AllowedBackends
+pub TuneRequest::has_alpha: bool
+pub TuneRequest::height: u32
+pub TuneRequest::target: QualityTarget
+pub TuneRequest::time_budget_ms: core::option::Option<f32>
+pub TuneRequest::width: u32
+pub fn backend_tuner::TuneRequest::new(QualityTarget, u32, u32) -> Self
+pub fn backend_tuner::TuneRequest::with_allowed_backends(self, backend_tuner::AllowedBackends) -> Self
+pub fn backend_tuner::TuneRequest::with_alpha(self, bool) -> Self
+pub fn backend_tuner::TuneRequest::with_time_budget_ms(self, f32) -> Self
 pub struct TwoPassEncode [also: two_pass]
 pub TwoPassEncode::encode: EncodedImage
 pub TwoPassEncode::pass1_butteraugli_3n: f64
@@ -333,6 +565,60 @@ pub TwoPassOptions::pool_exponent: f64
 pub TwoPassOptions::probe_quality: core::option::Option<f32>
 pub TwoPassOptions::strength: f64
 pub TwoPassOptions::weight_clamp: (f64, f64)
+pub struct TwoShotOptions [also: two_pass_zensim]
+pub TwoShotOptions::include_edge_mse: bool
+pub TwoShotOptions::keep_closer: bool
+pub TwoShotOptions::map_eps: f64
+pub TwoShotOptions::masking_strength: core::option::Option<f32>
+pub TwoShotOptions::max_quality: f32
+pub TwoShotOptions::min_quality: f32
+pub TwoShotOptions::policy: two_pass_zensim::LatticePolicy
+pub TwoShotOptions::pool_exponent: f64
+pub TwoShotOptions::seed_quality: core::option::Option<f32>
+pub TwoShotOptions::spatial_strength: f64
+pub TwoShotOptions::tolerance: f64
+pub TwoShotOptions::weight_clamp: (f64, f64)
+#[non_exhaustive] pub struct TwoShotResult [also: two_pass_zensim]
+pub TwoShotResult::encoded: EncodedImage
+pub TwoShotResult::encodes: u8
+pub TwoShotResult::kept_pass1: bool
+pub TwoShotResult::pass1_quality: f32
+pub TwoShotResult::pass1_quantizer: u8
+pub TwoShotResult::pass1_score: f64
+pub TwoShotResult::predicted_score: f64
+pub TwoShotResult::quality: f32
+pub TwoShotResult::quantizer: u8
+pub TwoShotResult::sb_q_scale: core::option::Option<alloc::boxed::Box<[f32]>>
+pub TwoShotResult::score: f64
+pub TwoShotResult::spatial_applied: bool
+pub TwoShotResult::within_tolerance: bool
+pub struct ZensimLoopOptions [also: two_pass_zensim]
+pub ZensimLoopOptions::include_edge_mse: bool
+pub ZensimLoopOptions::map_eps: f64
+pub ZensimLoopOptions::masking_strength: core::option::Option<f32>
+pub ZensimLoopOptions::max_encodes: u8
+pub ZensimLoopOptions::max_quality: f32
+pub ZensimLoopOptions::min_quality: f32
+pub ZensimLoopOptions::pool_exponent: f64
+pub ZensimLoopOptions::seed_quality: core::option::Option<f32>
+pub ZensimLoopOptions::spatial_strength: f64
+pub ZensimLoopOptions::tolerance: f64
+pub ZensimLoopOptions::weight_clamp: (f64, f64)
+#[non_exhaustive] pub struct ZensimLoopResult [also: two_pass_zensim]
+pub ZensimLoopResult::converged: bool
+pub ZensimLoopResult::encoded: EncodedImage
+pub ZensimLoopResult::encodes: u8
+pub ZensimLoopResult::pass1_quality: f32
+pub ZensimLoopResult::pass1_score: f64
+pub ZensimLoopResult::quality: f32
+pub ZensimLoopResult::sb_q_scale: core::option::Option<alloc::boxed::Box<[f32]>>
+pub ZensimLoopResult::score: f64
+pub ZensimLoopResult::spatial_applied: bool
+pub trait AvifTuning [also: backend_tuner]
+pub fn AvifTuning::tune(&self, &[u8], core::option::Option<&zenanalyze_api::Offer<'_>>, &backend_tuner::TuneRequest) -> core::result::Result<backend_tuner::AvifTune, AutoTuneError>
+pub fn anchor_quality_for_zensim(f64) -> f32 [also: two_pass_zensim]
+pub fn anchor_quantizer_for_zensim(f64) -> f64 [also: two_pass_zensim]
+pub fn anchor_zensim_for_quantizer(f64) -> f64 [also: two_pass_zensim]
 pub fn encode(&zenpixels::buffer::PixelBuffer) -> Result<EncodedImage>
 pub fn encode_animation_rgb16(&[AnimationFrame16], &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
 pub fn encode_animation_rgb8(&[AnimationFrame], &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
@@ -344,12 +630,15 @@ pub fn encode_rgb16_with_target(imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u16>>,
 pub fn encode_rgb8(imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u8>>, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
 pub fn encode_rgb8_two_pass(imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u8>>, &EncoderConfig, &two_pass::TwoPassOptions, almost_enough::stop_token::StopToken) -> Result<two_pass::TwoPassEncode> [also: two_pass]
 pub fn encode_rgb8_with_target(imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u8>>, &EncoderConfig, TargetMetric, &TargetOptions, almost_enough::stop_token::StopToken) -> Result<TargetedEncode>
+pub fn encode_rgb8_zensim_loop(imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u8>>, &EncoderConfig, f64, &two_pass_zensim::ZensimLoopOptions, almost_enough::stop_token::StopToken) -> Result<two_pass_zensim::ZensimLoopResult> [also: two_pass_zensim]
+pub fn encode_rgb8_zensim_two_shot(imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u8>>, &EncoderConfig, f64, &two_pass_zensim::TwoShotOptions, almost_enough::stop_token::StopToken) -> Result<two_pass_zensim::TwoShotResult> [also: two_pass_zensim]
 pub fn encode_rgba16(imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u16>>, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
 pub fn encode_rgba8(imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u8>>, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
 pub fn encode_rgba8_with_target(imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u8>>, &EncoderConfig, TargetMetric, &TargetOptions, almost_enough::stop_token::StopToken) -> Result<TargetedEncode>
 pub fn encode_with(&zenpixels::buffer::PixelBuffer, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
+pub fn quality_for_quantizer(u8) -> f32
 
-## trait impls (36 types)
+## trait impls (53 types)
 
 AnimationFrame: Clone
 AnimationFrame16: Clone
@@ -380,6 +669,17 @@ TargetMetric: Clone, Copy, Debug, PartialEq
 TargetOptions: Clone, Copy, Debug, Default
 TargetedEncode: Debug
 TilesResolution: Clone, Copy, Debug, Eq, PartialEq
+backend_tuner::AllowedBackends: Clone, Copy, Debug, Default, Eq, PartialEq
+backend_tuner::AvifTune: Clone, Debug
+backend_tuner::AvifTuner: backend_tuner::AvifTuning
+backend_tuner::TuneRequest: Clone, Debug
+backend_tuner::TuneSource: Clone, Copy, Debug, Eq, PartialEq
+backend_tuner::contract::TuneCell: Clone, Debug, PartialEq
+backend_tuner::contract::TuneContract: Clone, Debug
+backend_tuner::contract::TuneHead: Clone, Copy, Debug, Eq, PartialEq
+backend_tuner::contract::TuneLayout: Clone, Copy, Debug, Default, Eq, PartialEq
+backend_tuner::stub::StubTuner: Clone, Copy, Debug, Default, backend_tuner::AvifTuning
+backend_tuner::stub::WallTimeModel: Clone, Copy, Debug, PartialEq
 fast_heads::FastTierBudgets: Clone, Copy, Debug, Default, Eq, PartialEq
 fast_heads::PartitionBudget: Clone, Copy, Debug, Default, Eq, PartialEq
 fast_heads::TxBudget: Clone, Copy, Debug, Default, Eq, PartialEq
@@ -387,10 +687,17 @@ palette_gate::PalettePreference: Clone, Copy, Debug, Default, Eq, PartialEq
 two_pass::TwoPassEncode: Debug
 two_pass::TwoPassMetric: Clone, Copy, Debug, Default, Eq, PartialEq
 two_pass::TwoPassOptions: Clone, Debug, Default
+two_pass_zensim::LatticePolicy: Clone, Copy, Debug, Default, Eq, PartialEq
+two_pass_zensim::TwoShotOptions: Clone, Debug, Default
+two_pass_zensim::TwoShotResult: Debug
+two_pass_zensim::ZensimLoopOptions: Clone, Debug, Default
+two_pass_zensim::ZensimLoopResult: Debug
+zensim_c::ZensimC: Default
 
 ## auto traits
 
-34 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+51 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 AvifAnimationFrameEncoder: !RefUnwindSafe !UnwindSafe
 AvifEncodeJob: !RefUnwindSafe !UnwindSafe
 AvifEncoder: !RefUnwindSafe !UnwindSafe
+zensim_c::ZensimC: !RefUnwindSafe !UnwindSafe

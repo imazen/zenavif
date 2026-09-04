@@ -317,6 +317,76 @@ just download-vectors
 just test-integration
 ```
 
+## Backend + knob auto-tuning (`auto-tune`, off by default)
+
+Given one image, a quality target and an optional time budget, choose the
+AV1 **backend** *and* its knobs — and say what that choice is expected to
+cost.
+
+```rust,ignore
+use zenavif::backend_tuner::{AvifTuning, StubTuner, TuneRequest};
+use zenavif::QualityTarget;
+
+// Measured defaults, no model file. Swap for
+// `AvifTuner::from_bytes(&bake)` when you have a trained bake; nothing
+// below this line changes.
+let tuner = StubTuner::new();
+
+let req = TuneRequest::new(QualityTarget::Zensim(82.0), width, height)
+    .with_time_budget_ms(250.0);
+let tuned = tuner.tune(&rgb8, None /* or Some(&offer) */, &req)?;
+
+// tuned.backend(), tuned.config(), tuned.expected_wall_ms(),
+// tuned.expected_bytes(), tuned.margin(), tuned.source()
+let avif = zenavif::encode_rgb8(img, tuned.config(), stop)?;
+```
+
+**No bundled weights.** Nothing in `backend_tuner` `include_bytes!`s a
+model — the bake is always the caller's. Bundling one would be a separate,
+user-gated proposal.
+
+**Two implementations, one trait, and the answer always says which.**
+`AvifTuner` reads a ZNPR v3 bake; `StubTuner` is a table of measured
+defaults so a consumer can integrate the whole path before a bake exists.
+`AvifTune::source()` reports `Model` or `Stub`, so a log line can never
+misattribute a table lookup to a prediction.
+
+**What the stub actually decides**, and on what evidence:
+
+- **Reach** — at a high target it prefers zenravif. svt-as-configured
+  cannot reach ssim2 90 on **16 of 32** campaign references at any q or
+  speed (6/6 plots, 5/5 screenshots); zenravif misses on 1 of 32.
+- **Time** — under a budget it takes the fastest cell that fits, from the
+  20-row `alpha + beta * MP` table transcribed from the committed speed
+  instrument. At 1 MP and speed 6 that is 66 ms (svt) against 2,971 ms
+  (zenravif).
+
+When the two conflict the **budget wins** — a caller who asked for 100 ms
+must not be handed a 2-second encode because the tuner preferred a
+different backend.
+
+**What it deliberately does *not* set**, because the campaign says a blind
+default would be wrong: `scm=3` (byte-identical to the control at every
+product-reachable speed below 7, and its famous −50% is the median over
+the 31% of cells where it fires), `svttune=3` (largest single main effect
+at −7.69%, but it regresses 8 of 30 images), and the QM window (a real
+win that **inverts on plots** and is categorical, not ordinal). Those are
+per-image decisions — which is what a trained bake is for. Each one has a
+test asserting the stub leaves it alone.
+
+**Knobs are backend-scoped and never conflated.** `tune=still|psycho` is
+rav1e's enum; `svttune=<u8>` is SVT's numeric tune; the QM *window* exists
+only on SVT. A knob on the wrong backend is a load error, and a cell
+declaring SVT knobs on a build without `__expert` is refused rather than
+encoded with the knobs dropped — the failure mode this guards against
+cost the DOE 8,972 cells before anyone noticed
+([zenav1-svt#17](https://github.com/imazen/zenav1-svt/issues/17)).
+
+Bake contract: [`docs/AUTOTUNE_CONTRACT.md`](docs/AUTOTUNE_CONTRACT.md).
+Gates: `tests/backend_tuner_integration.rs` (add `zenav1-svt` to make the
+routing gates bite — with one backend built there is nothing to route
+between).
+
 ## Credits
 
 This project builds on excellent work by others:
