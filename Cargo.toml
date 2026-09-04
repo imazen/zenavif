@@ -328,6 +328,12 @@ almost-enough = { version = "0.4.3", features = ["alloc"] }
 # publishes, delete the harness's `regress` module and restore the import — the
 # builder chain is already written in its shape.
 zenutils-fuzz = "0.1.0"
+# Bakes the tiny contract-carrying ZNPR the backend-tuner integration test
+# drives the MODEL path with (`tests/tiny_bake.rs`). zenpredict-bake is the
+# canonical ZNPR v3 serializer — hand-emitting the wire format is banned, so
+# the test uses the real one rather than a fixture blob checked into git.
+# Same sibling checkout the `auto-tune` deps already require.
+zenpredict-bake = { path = "../zenanalyze/zenpredict-bake" }
 # `testable_dispatch` is what lets a test disable a token that the target
 # baseline guarantees at COMPILE time (NEON on aarch64, SSE2 on x86-64):
 # without it `incant!` can never fall below the host's best tier and the
