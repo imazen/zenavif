@@ -145,7 +145,12 @@ aom-decode = { package = "zenav1-aom-decode", git = "https://github.com/imazen/z
 #   [patch."https://github.com/imazen/zenav1-aom"]
 #   zenav1-aom-encode = { path = "../zenav1-aom/crates/aom-encode" }
 # and revert it before landing.
-aom-encode = { package = "zenav1-aom-encode", git = "https://github.com/imazen/zenav1-aom", rev = "c3e1b4ab6dd7115ecee6c659f0e603aff2f9629e", optional = true }
+#
+# Pin history: `c3e1b4ab` -> `45c53ddb` on 2026-09-04 (zenavif#45): carries
+# `21544fde`, the root fix for the `--cq-level 0` (quality 100) panic, plus
+# the `KeyFrameConfig` tile / SB128 fields the seam now sets to their
+# `allintra_speed0` defaults. `tests/aom_encode_backend.rs` gates cq 0 exact.
+aom-encode = { package = "zenav1-aom-encode", git = "https://github.com/imazen/zenav1-aom", rev = "45c53ddbe33b59c2a34679243ed3a79e89a56993", optional = true }
 archmage = { version = "0.9.15", features = ["macros", "avx512"] }
 magetypes = { version = "0.9.15"}
 safe_unaligned_simd = "0.2.5"

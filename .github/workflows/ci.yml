@@ -106,11 +106,13 @@ jobs:
           n=$(sed -n 's/^test result: ok\. \([0-9][0-9]*\) passed.*/\1/p' aom_gate_rerun.log | head -1)
           rm -f aom_gate_rerun.log
           # Floor raised 12 -> 25 on 2026-09-03 with the high-bit-depth
-          # gates. It is a FLOOR on a count, so it catches a test set that
+          # gates, and 25 -> 26 on 2026-09-04 when the cq-0 panic canary
+          # became an exactness gate plus its mutation proof (+2, -1).
+          # It is a FLOOR on a count, so it catches a test set that
           # silently shrinks; raise it when tests are added, never lower it
           # to make a run pass.
-          if [ -z "${n:-}" ] || [ "$n" -lt 25 ]; then
-            echo "::error::aom_encode_backend reported '${n:-<none>}' passing tests; expected at least 25"
+          if [ -z "${n:-}" ] || [ "$n" -lt 26 ]; then
+            echo "::error::aom_encode_backend reported '${n:-<none>}' passing tests; expected at least 26"
             exit 1
           fi
           echo "aom_encode_backend ran: $n tests passed"

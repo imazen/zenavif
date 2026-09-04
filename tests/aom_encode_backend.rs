@@ -48,6 +48,7 @@
 //! | bd10 flat luma vs longhand H.273, q99 | worst 0 code values | 0 |
 //! | bd12 flat luma vs longhand H.273, q99 | worst 1 code value | 1 |
 //! | bd10/bd12 container RGB round trip, 3 sizes x q80/q90 | 43.56-48.12 dB | 38 dB |
+//! | q100 (cq 0, coded-lossless) Y/U/V planes, 6 cells, 2 decoders | 0 mismatched samples | 0 (equality) |
 //!
 //! A broken decode lands far below any of them: wrong content measures 6.4 dB
 //! and a two-byte payload corruption fails to decode at all. The
@@ -707,9 +708,10 @@ fn hbd_planes(avif: &[u8], expect_depth: u8, label: &str) -> zenavif::DecodedYuv
 ///
 /// 12 bits is not exact because `--cq-level 1` is not `base_qindex` 0: the DC
 /// quantizer step at 12 bits is coarser than one code value, so a flat DC
-/// lands one below. (`--cq-level 0` would be the lossless-ish end, and it
-/// PANICS upstream on flat content — see
-/// `aom_cq0_still_panics_on_flat_content`.)
+/// lands one below. (`--cq-level 0` IS `base_qindex` 0 — coded-lossless —
+/// and reconstructs every plane exactly at all three depths since the pin
+/// moved past zenav1-aom `21544fde`; see
+/// [`aom_cq0_encodes_and_reconstructs_the_coded_planes_exactly`].)
 fn assert_hbd_flat_luma_within(
     avif: &[u8],
     src: ImgRef<'_, Rgb<u16>>,
@@ -806,8 +808,10 @@ fn aom_backend_encodes_10_and_12_bit_that_decode() {
 fn aom_backend_hbd_flat_content_decodes_exactly() {
     for depth in [10u8, 12] {
         let src = flat_rgb16(64, 64, 60293);
-        // quality 99, not 100: `--cq-level 0` PANICS upstream on flat content
-        // at every depth (`aom_cq0_still_panics_on_flat_content` pins it).
+        // quality 99, not 100, on purpose: this gate measures the NEAR-lossless
+        // end (cq 1) against the longhand with a per-depth bound. cq 0 is the
+        // coded-lossless end and has its own zero-tolerance gate,
+        // `aom_cq0_encodes_and_reconstructs_the_coded_planes_exactly`.
         let cfg = hbd_config(depth).quality(99.0).speed(6);
         let enc = zenavif::encode_rgb16(src.as_ref(), &cfg, stop())
             .unwrap_or_else(|e| panic!("bd{depth} flat: encode must succeed: {e}"));
@@ -1121,59 +1125,473 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     h
 }
 
-/// **Known upstream defect, pinned:** `--cq-level 0` (zenavif quality 100)
-/// PANICS inside the zenav1-aom port on flat content, at every bit depth.
-///
-/// MEASURED 2026-09-03 at the pinned rev `c3e1b4ab`, 64x64, speed 6:
-///
-/// | quality | cq | bd8 flat | bd8 gradient | bd10 flat | bd10 grad | bd12 flat | bd12 grad |
-/// |---|---|---|---|---|---|---|---|
-/// | 100 | 0 | PANIC | ok | PANIC | ok | PANIC | PANIC |
-/// | 99 | 1 | ok | ok | ok | ok | ok | ok |
-///
-/// The panic is `assertion failed: depth <= MAX_VARTX_DEPTH` at
-/// `crates/aom-dsp/src/entropy/partition.rs:675` — a plain `assert!`, so it
-/// fires in release builds too, and it crosses the seam as a process panic
-/// rather than an `Err` (zenavif CLAUDE.md "Backend seam" obligation 2). It is
-/// **content-dependent**, which is why this seam does not blanket-refuse
-/// cq 0: a refusal would reject the gradient cells that encode correctly
-/// today. The product decision belongs to the owner — tracked as an issue —
-/// and this test pins the behaviour meanwhile so the day it is fixed, it says
-/// so instead of going quietly green.
-///
-/// **This defect is NOT new with the high-bit-depth wiring**: bd8 flat at
-/// quality 100 panics on `main` as it does here, and the module docs above
-/// claiming "quality 100 -> cq 0 ... no clamp away from the endpoint" were
-/// describing a mapping that panics.
-#[test]
-fn aom_cq0_still_panics_on_flat_content() {
-    let flat8 = flat_rgb8(64, 64, 235);
-    must_panic(
-        "quality 100 (cq 0) on flat 8-bit content — if this stopped panicking, \
-         zenav1-aom fixed MAX_VARTX_DEPTH and the seam can stop warning about it",
-        || {
-            let _ = encode(flat8.as_ref(), &aom_config().quality(100.0).speed(6));
-        },
-    );
-    let flat16 = flat_rgb16(64, 64, 60293);
-    for cfg in [
-        aom_config().bit_depth(zenavif::EncodeBitDepth::Ten),
-        aom_config().bit_depth(zenavif::EncodeBitDepth::Twelve),
-    ] {
-        let cfg = cfg.quality(100.0).speed(6);
-        must_panic("quality 100 (cq 0) on flat high-bit-depth content", || {
-            let _ = zenavif::encode_rgb16(flat16.as_ref(), &cfg, stop());
+/// The six cells the retired canary `aom_cq0_still_panics_on_flat_content`
+/// covered, unchanged: {flat, gradient} x bd {8, 10, 12}, 64x64, speed 6,
+/// 4:2:0. The bd8 cells come from 8-bit sources through `encode_rgb8`, the
+/// bd10/bd12 cells from 16-bit sources through `encode_rgb16`, exactly as the
+/// canary drove them.
+struct Cq0Cell {
+    label: String,
+    depth: u8,
+    src8: ImgVec<Rgb<u8>>,
+    src16: ImgVec<Rgb<u16>>,
+}
+
+fn cq0_cells() -> Vec<Cq0Cell> {
+    let mut cells = Vec::new();
+    for depth in [8u8, 10, 12] {
+        // 235 at 8 bits and 60293 at 16 — the canary's own values.
+        cells.push(Cq0Cell {
+            label: format!("bd{depth} flat 64x64 q100 s6"),
+            depth,
+            src8: flat_rgb8(64, 64, 235),
+            src16: flat_rgb16(64, 64, 60293),
+        });
+        cells.push(Cq0Cell {
+            label: format!("bd{depth} gradient 64x64 q100 s6"),
+            depth,
+            src8: gradient_rgb8(64, 64),
+            src16: gradient_rgb16(64, 64),
         });
     }
-    // The boundary is cq 0 alone: quality 99 (cq 1) encodes on the same
-    // content at all three depths.
-    encode(flat8.as_ref(), &aom_config().quality(99.0).speed(6));
-    for cfg in [
-        aom_config().bit_depth(zenavif::EncodeBitDepth::Ten),
-        aom_config().bit_depth(zenavif::EncodeBitDepth::Twelve),
-    ] {
-        zenavif::encode_rgb16(flat16.as_ref(), &cfg.quality(99.0).speed(6), stop())
-            .expect("quality 99 must encode where quality 100 panics");
+    cells
+}
+
+/// Encode one [`cq0_cells`] cell at `quality`; 8-bit sources feed the bd8
+/// cells, 16-bit sources the bd10/bd12 cells.
+fn encode_cq0_cell(
+    depth: u8,
+    src8: ImgRef<'_, Rgb<u8>>,
+    src16: ImgRef<'_, Rgb<u16>>,
+    quality: f32,
+    label: &str,
+) -> EncodedImage {
+    let cfg = hbd_config(depth).quality(quality).speed(6);
+    if depth == 8 {
+        zenavif::encode_rgb8(src8, &cfg, stop())
+    } else {
+        zenavif::encode_rgb16(src16, &cfg, stop())
+    }
+    .unwrap_or_else(|e| panic!("{label}: encode must succeed: {e}"))
+}
+
+/// The luma / chroma planes as **real numbers before quantisation**, plus
+/// their rounded code values — the BT.601 limited-range 4:2:0 conversion
+/// written longhand from H.273 in f64, independent of `src/yuv_convert.rs`.
+///
+/// `px(x, y)` yields the source pixel normalised to `0.0..=1.0`. Chroma is
+/// the mean of the four co-sited samples of a 2x2 block (right/bottom edges
+/// clamp), quantised once at the output depth: offset `16 << (d-8)`, spans
+/// `219 << (d-8)` (luma) and `224 << (d-8)` (chroma), centre `1 << (d-1)`.
+/// Rounding is H.273's `Round(x) = Sign(x) * Floor(Abs(x) + 0.5)`.
+struct LonghandPlanes {
+    /// Pre-round values, Y then U then V, in plane order.
+    real: [Vec<f64>; 3],
+    /// H.273-rounded code values in the same order.
+    code: [Vec<u16>; 3],
+}
+
+fn longhand_limited_yuv420(
+    w: usize,
+    h: usize,
+    depth: u8,
+    px: impl Fn(usize, usize) -> (f64, f64, f64),
+) -> LonghandPlanes {
+    let (kr, kb) = (0.299f64, 0.114f64);
+    let kg = 1.0 - kr - kb;
+    let scale = f64::from(1u32 << (depth - 8));
+    let max = f64::from((1u32 << depth) - 1);
+    let q = |v: f64| -> u16 { (v.abs() + 0.5).floor().copysign(v).clamp(0.0, max) as u16 };
+    let mut y_real = vec![0f64; w * h];
+    let mut pb = vec![0f64; w * h];
+    let mut pr = vec![0f64; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let (r, g, b) = px(x, y);
+            let ey = kr * r + kg * g + kb * b;
+            y_real[y * w + x] = 219.0 * scale * ey + 16.0 * scale;
+            pb[y * w + x] = (b - ey) / (2.0 * (1.0 - kb));
+            pr[y * w + x] = (r - ey) / (2.0 * (1.0 - kr));
+        }
+    }
+    let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+    let mut u_real = vec![0f64; cw * ch];
+    let mut v_real = vec![0f64; cw * ch];
+    let centre = f64::from(1u32 << (depth - 1));
+    for cy in 0..ch {
+        for cx in 0..cw {
+            let (x0, y0) = (2 * cx, 2 * cy);
+            let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(h - 1));
+            let idx = [y0 * w + x0, y0 * w + x1, y1 * w + x0, y1 * w + x1];
+            let mu = idx.iter().map(|&i| pb[i]).sum::<f64>() / 4.0;
+            let mv = idx.iter().map(|&i| pr[i]).sum::<f64>() / 4.0;
+            u_real[cy * cw + cx] = 224.0 * scale * mu + centre;
+            v_real[cy * cw + cx] = 224.0 * scale * mv + centre;
+        }
+    }
+    let code = [
+        y_real.iter().map(|&v| q(v)).collect(),
+        u_real.iter().map(|&v| q(v)).collect(),
+        v_real.iter().map(|&v| q(v)).collect(),
+    ];
+    LonghandPlanes {
+        real: [y_real, u_real, v_real],
+        code,
+    }
+}
+
+/// The planes the seam actually hands `encode_key_frame`: a bit-exact
+/// mirror of the `src/yuv_convert.rs` forward recipe (f32, `mul_add` in the
+/// kernel's association, `round_ties_even`; the u8 kernel the bd8 cell takes
+/// and the u16 kernel the others take are the same arithmetic at their
+/// depth, and `mul_add` is a single exactly-rounded FMA on every dispatch
+/// tier). A mirror rather than the longhand, on purpose: the coded-lossless
+/// claim is "reconstruction == the encoder's INPUT", and this is that input
+/// to the last code value, so the comparison can be a zero-tolerance
+/// equality. Where this and the H.273 longhand disagree is pinned separately
+/// — see [`assert_longhand_agrees_up_to_ties`].
+fn seam_mirror_limited_yuv420(
+    w: usize,
+    h: usize,
+    depth: u8,
+    max: f32,
+    px: impl Fn(usize, usize) -> (f32, f32, f32),
+) -> [Vec<u16>; 3] {
+    let (kr, kb) = (0.299f32, 0.114f32);
+    let kg = 1.0 - kr - kb;
+    let scale = (1u32 << (depth - 8)) as f32;
+    let (y_off, y_span, uv_span) = (16.0 * scale, 219.0 * scale, 224.0 * scale);
+    let inv_ub = 1.0 / (2.0 * (1.0 - kb));
+    let inv_vr = 1.0 / (2.0 * (1.0 - kr));
+    let inv_max = 1.0 / max;
+    let out_max = ((1u32 << depth) - 1) as f32;
+    let uv_center = (1u32 << (depth - 1)) as f32;
+    let mut y_plane = vec![0u16; w * h];
+    let mut u_rows = vec![0f32; w * h];
+    let mut v_rows = vec![0f32; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let (r, g, b) = px(x, y);
+            let (rn, gn, bn) = (r * inv_max, g * inv_max, b * inv_max);
+            let yl = kb.mul_add(bn, kr.mul_add(rn, kg * gn));
+            y_plane[y * w + x] = yl
+                .mul_add(y_span, y_off)
+                .clamp(0.0, out_max)
+                .round_ties_even() as u16;
+            u_rows[y * w + x] = (bn - yl) * inv_ub;
+            v_rows[y * w + x] = (rn - yl) * inv_vr;
+        }
+    }
+    let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+    let mut u_plane = vec![0u16; cw * ch];
+    let mut v_plane = vec![0u16; cw * ch];
+    for cy in 0..ch {
+        for cx in 0..cw {
+            let (x0, y0) = (2 * cx, 2 * cy);
+            let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(h - 1));
+            let ua = 0.25
+                * (u_rows[y0 * w + x0]
+                    + u_rows[y0 * w + x1]
+                    + u_rows[y1 * w + x0]
+                    + u_rows[y1 * w + x1]);
+            let va = 0.25
+                * (v_rows[y0 * w + x0]
+                    + v_rows[y0 * w + x1]
+                    + v_rows[y1 * w + x0]
+                    + v_rows[y1 * w + x1]);
+            u_plane[cy * cw + cx] = ua
+                .mul_add(uv_span, uv_center)
+                .clamp(0.0, out_max)
+                .round_ties_even() as u16;
+            v_plane[cy * cw + cx] = va
+                .mul_add(uv_span, uv_center)
+                .clamp(0.0, out_max)
+                .round_ties_even() as u16;
+        }
+    }
+    [y_plane, u_plane, v_plane]
+}
+
+/// Both expectations for one [`cq0_cells`] cell: the 8-bit source at depth
+/// 8, the 16-bit source otherwise (mirroring [`encode_cq0_cell`]).
+fn expected_cq0_planes(
+    depth: u8,
+    src8: ImgRef<'_, Rgb<u8>>,
+    src16: ImgRef<'_, Rgb<u16>>,
+) -> ([Vec<u16>; 3], LonghandPlanes) {
+    if depth == 8 {
+        let (w, h) = (src8.width(), src8.height());
+        (
+            seam_mirror_limited_yuv420(w, h, depth, 255.0, |x, y| {
+                let p = src8[(x, y)];
+                (f32::from(p.r), f32::from(p.g), f32::from(p.b))
+            }),
+            longhand_limited_yuv420(w, h, depth, |x, y| {
+                let p = src8[(x, y)];
+                (
+                    f64::from(p.r) / 255.0,
+                    f64::from(p.g) / 255.0,
+                    f64::from(p.b) / 255.0,
+                )
+            }),
+        )
+    } else {
+        let (w, h) = (src16.width(), src16.height());
+        (
+            seam_mirror_limited_yuv420(w, h, depth, 65535.0, |x, y| {
+                let p = src16[(x, y)];
+                (f32::from(p.r), f32::from(p.g), f32::from(p.b))
+            }),
+            longhand_limited_yuv420(w, h, depth, |x, y| {
+                let p = src16[(x, y)];
+                (
+                    f64::from(p.r) / 65535.0,
+                    f64::from(p.g) / 65535.0,
+                    f64::from(p.b) / 65535.0,
+                )
+            }),
+        )
+    }
+}
+
+/// Count the samples where a decoded plane differs from its expectation,
+/// keeping the first few `(got, expected)` pairs for the failure message.
+fn plane_mismatches(got: &[u16], expect: &[u16], name: &str, label: &str) -> (usize, String) {
+    assert_eq!(
+        got.len(),
+        expect.len(),
+        "{label}: {name} plane length ({} vs {})",
+        got.len(),
+        expect.len()
+    );
+    let n = got.iter().zip(expect).filter(|(a, b)| a != b).count();
+    let first = got
+        .iter()
+        .zip(expect)
+        .filter(|(a, b)| a != b)
+        .take(4)
+        .map(|(a, b)| format!("{a}!={b}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    (n, first)
+}
+
+/// Decode `avif` with `backend` and require every sample of every plane to
+/// equal the seam's input — an equality on the CODED planes, not a PSNR
+/// bound. `--cq-level 0` is coded-lossless (`base_qindex == 0` selects the
+/// Walsh-Hadamard path), so the reconstruction must be the encoder's input
+/// bit for bit; anything else is a codec defect, however small.
+fn assert_planes_exact(
+    avif: &[u8],
+    backend: DecodeBackend,
+    depth: u8,
+    expect: &[Vec<u16>; 3],
+    label: &str,
+) {
+    let payload = primary_payload(avif);
+    let yuv = decode_av1_obu_yuv(&payload, backend)
+        .unwrap_or_else(|e| panic!("{label}: {backend:?} must decode the aom stream: {e}"));
+    assert_eq!(
+        yuv.bit_depth,
+        i32::from(depth),
+        "{label}: {backend:?} reports a different coded depth than was requested"
+    );
+    assert_eq!(
+        (yuv.subsampling_x, yuv.subsampling_y),
+        (1, 1),
+        "{label}: 4:2:0"
+    );
+    let (ny, fy) = plane_mismatches(&yuv.y, &expect[0], "Y", label);
+    let (nu, fu) = plane_mismatches(&yuv.u, &expect[1], "U", label);
+    let (nv, fv) = plane_mismatches(&yuv.v, &expect[2], "V", label);
+    assert!(
+        ny + nu + nv == 0,
+        "{label}: {backend:?} reconstruction is NOT the encoder's input — cq 0 is \
+         coded-lossless, so this is a codec defect, not rounding. Mismatched samples: \
+         Y {ny} of {} ({fy}), U {nu} of {} ({fu}), V {nv} of {} ({fv})",
+        expect[0].len(),
+        expect[1].len(),
+        expect[2].len()
+    );
+    eprintln!(
+        "{label}: {backend:?} {depth}-bit Y/U/V exact ({} + {} + {} samples)",
+        expect[0].len(),
+        expect[1].len(),
+        expect[2].len()
+    );
+}
+
+/// A pre-round value this close to a half-integer is a rounding TIE: which
+/// side it lands on is decided by floating-point noise, not by the
+/// conversion. 0.002 code values is 1/500 of the smallest error a codec can
+/// make, and an order of magnitude above the f32 recipe's own error at 12
+/// bits (ulp ~2.4e-4 at 4095). The ties observed on these cells sit
+/// 1.7e-5 (bd12 gradient, luma 1695.499983) and ~1e-14 (bd8 gradient,
+/// luma 125.5 exactly) from a half.
+const TIE_EPS: f64 = 0.002;
+
+/// The seam mirror must agree with the INDEPENDENT H.273 longhand on every
+/// sample, except where the longhand's real value is a rounding tie — there
+/// the two may differ by exactly one code value. This is what keeps the
+/// zero-tolerance gate above honest: the "encoder's input" it compares
+/// against is pinned to the standard's conversion, not merely to whatever
+/// the kernel emits. Returns the number of tolerated ties.
+fn assert_longhand_agrees_up_to_ties(
+    mirror: &[Vec<u16>; 3],
+    longhand: &LonghandPlanes,
+    label: &str,
+) -> usize {
+    let mut ties = 0usize;
+    for (plane, name) in ["Y", "U", "V"].iter().enumerate() {
+        for (i, ((&m, &c), &real)) in mirror[plane]
+            .iter()
+            .zip(&longhand.code[plane])
+            .zip(&longhand.real[plane])
+            .enumerate()
+        {
+            if m == c {
+                continue;
+            }
+            let delta = (i32::from(m) - i32::from(c)).abs();
+            let from_half = ((real - real.floor()) - 0.5).abs();
+            assert!(
+                delta == 1 && from_half < TIE_EPS,
+                "{label}: {name}[{i}] — the seam converts to {m} but H.273 longhand says {c} \
+                 (real {real:.6}, {from_half:.2e} from a half). Not a tie: the seam's \
+                 conversion disagrees with the standard."
+            );
+            ties += 1;
+        }
+    }
+    eprintln!("{label}: seam mirror agrees with the H.273 longhand up to {ties} rounding tie(s)");
+    ties
+}
+
+/// **Quality 100 (`--cq-level 0`) encodes and reconstructs EXACTLY**, on the
+/// six cells where it used to panic: {flat, gradient} x bd {8, 10, 12},
+/// 64x64, speed 6, 4:2:0.
+///
+/// This replaces the canary `aom_cq0_still_panics_on_flat_content`, which
+/// pinned zenavif#45 — `assertion failed: depth <= MAX_VARTX_DEPTH` inside
+/// the port at the previous pin `c3e1b4ab`. Fixed at the root in
+/// imazen/zenav1-aom `21544fde` (`count_leaf` had paraphrased libaom's
+/// `txb_split_count` predicate as `tx_size_to_depth(..) != 0`; C writes the
+/// inequality and never walks the depth under `ONLY_4X4`, which is what a
+/// coded-lossless frame selects). The pin moved to `45c53ddb`, and the six
+/// cells now encode, so the canary's `must_panic` went red — as designed —
+/// and became this.
+///
+/// The assertion is an **equality on every sample of every coded plane**,
+/// not a PSNR bound: cq 0 is coded-lossless (`base_qindex == 0`, WHT), so a
+/// conforming decode returns the encoder's input bit for bit. "Lossless"
+/// here is the CODED planes — the RGB round trip is still through 4:2:0
+/// subsampling and studio range, which the longhand accounts for. Decoded by
+/// rav1d-safe — a different port from the one that encoded — and, with
+/// `zenav1-aom`, by aom-decode as well.
+///
+/// Proved able to fail by [`cq0_gate_can_fail_on_a_lossy_encode`], which
+/// runs the same helper on quality 99 (cq 1) output of the same cells and
+/// requires it to go red.
+#[test]
+fn aom_cq0_encodes_and_reconstructs_the_coded_planes_exactly() {
+    let mut ties_total = 0usize;
+    for Cq0Cell {
+        label,
+        depth,
+        src8,
+        src16,
+    } in cq0_cells()
+    {
+        let enc = encode_cq0_cell(depth, src8.as_ref(), src16.as_ref(), 100.0, &label);
+        assert_is_avif_container(&enc.avif_file, &label);
+        let (mirror, longhand) = expected_cq0_planes(depth, src8.as_ref(), src16.as_ref());
+        ties_total += assert_longhand_agrees_up_to_ties(&mirror, &longhand, &label);
+        assert_planes_exact(
+            &enc.avif_file,
+            DecodeBackend::Rav1dSafe,
+            depth,
+            &mirror,
+            &label,
+        );
+        #[cfg(feature = "zenav1-aom")]
+        assert_planes_exact(
+            &enc.avif_file,
+            DecodeBackend::Zenav1Aom,
+            depth,
+            &mirror,
+            &label,
+        );
+        eprintln!("{label}: {} bytes", enc.avif_file.len());
+    }
+    // MEASURED 2026-09-04: exactly two ties across the six cells (one luma
+    // sample each on the bd8 and bd12 gradients; every flat cell and the
+    // bd10 gradient are tie-free). The bound is a ceiling on how much of the
+    // comparison the tie exception may absorb, so the gate cannot drift into
+    // "everything is a tie" if the longhand is ever edited.
+    assert!(
+        ties_total <= 4,
+        "{ties_total} rounding ties across the six cells; measured 2 — if the content or \
+         the conversion changed, re-measure rather than raising this"
+    );
+}
+
+/// The exact-planes gate must go RED on a lossy encode of the same six cells.
+///
+/// `--cq-level 1` (quality 99) is the neighbouring quantiser and NOT
+/// coded-lossless; on the gradient cells its reconstruction differs from the
+/// encoder's input, so [`assert_planes_exact`] must panic there. This is the
+/// mutation "request quality 99 and keep the exactness assert" made
+/// permanent: a later edit that makes the equality vacuous turns this red.
+///
+/// MEASURED 2026-09-04 at the pinned rev: at quality 99 the three gradient
+/// cells are inexact, and so is bd12 flat (a flat frame's DC survives cq 1
+/// at 8 and 10 bits but lands one code value off at 12 —
+/// `assert_hbd_flat_luma_within` measures the same). The proof is pinned to
+/// the gradient cells, where it is unconditional, and merely reports the
+/// flat ones.
+#[test]
+fn cq0_gate_can_fail_on_a_lossy_encode() {
+    let mut inexact = Vec::new();
+    for Cq0Cell {
+        label,
+        depth,
+        src8,
+        src16,
+    } in cq0_cells()
+    {
+        let label = label.replace("q100", "q99");
+        let enc = encode_cq0_cell(depth, src8.as_ref(), src16.as_ref(), 99.0, &label);
+        let (mirror, _) = expected_cq0_planes(depth, src8.as_ref(), src16.as_ref());
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            assert_planes_exact(
+                &enc.avif_file,
+                DecodeBackend::Rav1dSafe,
+                depth,
+                &mirror,
+                &label,
+            );
+        }));
+        std::panic::set_hook(prev);
+        eprintln!(
+            "{label}: cq 1 reconstruction {}",
+            if r.is_err() {
+                "INEXACT (gate fires)"
+            } else {
+                "exact"
+            }
+        );
+        if r.is_err() {
+            inexact.push(label);
+        }
+    }
+    for cell in ["bd8 gradient", "bd10 gradient", "bd12 gradient"] {
+        assert!(
+            inexact.iter().any(|l| l.starts_with(cell)),
+            "MUTATION PROOF FAILED: the exact-planes gate did not fire on the {cell} cell at \
+             quality 99 (cq 1) — the equality is vacuous. Fired on: {inexact:?}"
+        );
     }
 }
 

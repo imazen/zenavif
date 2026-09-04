@@ -117,15 +117,18 @@
 //!   Both ends are byte-gated upstream (`cq0` and `cq63` are sweep cells), so
 //!   unlike the zenav1-svt seam there is no clamp away from the endpoint.
 //!
-//!   **`--cq-level 0` (quality 100) PANICS on some content**, MEASURED
-//!   2026-09-03 at the pinned rev: `assertion failed: depth <= MAX_VARTX_DEPTH`
-//!   (`crates/aom-dsp/src/entropy/partition.rs:675`) on flat content at every
-//!   bit depth, and on a gradient at 12 bits. A plain `assert!`, so it fires in
-//!   release too, and it crosses this seam as a process panic rather than an
-//!   `Err`. It is content-dependent, so this seam does NOT blanket-refuse cq 0
-//!   — a refusal would reject the gradient cells that encode correctly.
-//!   Whether to clamp (as the zenav1-svt seam clamps QP 0) is an open product
-//!   call; pinned meanwhile by `aom_cq0_still_panics_on_flat_content`.
+//!   **`--cq-level 0` (quality 100) is coded-lossless** (`base_qindex == 0`,
+//!   Walsh-Hadamard), and reconstructs the seam's 4:2:0 planes EXACTLY at 8,
+//!   10 and 12 bits — gated with zero tolerance on both decoders by
+//!   `aom_cq0_encodes_and_reconstructs_the_coded_planes_exactly`
+//!   (`tests/aom_encode_backend.rs`). It is not a lossless *image* round trip:
+//!   the RGB -> studio-range 4:2:0 conversion in front of it is lossy, and
+//!   `EncoderConfig::lossless` is still refused by name here. History: at the
+//!   pin before `45c53ddb` (zenavif#45) cq 0 hit a debug assertion in the
+//!   port's leaf counter on flat content (`count_leaf` paraphrased libaom's
+//!   `txb_split_count` predicate as a depth walk C never performs under
+//!   `ONLY_4X4`); fixed at the root in zenav1-aom `21544fde`, and the canary
+//!   that pinned the panic became the exactness gate above.
 //! * speed 1..=10 -> `--cpu-used` 0..=9, linear ([`speed_to_cpu_used`]).
 //!   The whole range is byte-gated.
 //! * `--enable-cdef=0`, `--enable-restoration=1`: real aomenc's ALLINTRA
@@ -409,6 +412,16 @@ fn key_frame_config(
         // are byte-gated upstream at every speed in this combination.
         enable_cdef: false,
         enable_restoration: true,
+        // Explicit tile / superblock requests landed upstream after the
+        // previous pin (`bda14f3d`, `abe20559`). `0` / `false` are the
+        // `allintra_speed0` defaults and what the previous rev hard-coded, so
+        // the seam's output is unchanged by the bump (the bd8 byte anchor
+        // `aom_bd8_output_is_unchanged_by_the_hbd_wiring` holds). The tile
+        // request is a FLOOR: `av1_get_tile_limits` still forces the minimum
+        // a large frame needs, exactly as C clamps it.
+        tile_columns_log2: 0,
+        tile_rows_log2: 0,
+        sb_size_128: false,
     }
 }
 

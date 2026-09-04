@@ -500,6 +500,50 @@ still gates them. Also not cleared: removing
 `src/decoder.rs`, which is behind `unsafe-asm` and is compiled by nothing (not
 CI, not this box), so removing it would be an edit made blind. It stays queued.
 
+### Fixed — quality 100 (`--cq-level 0`) on the aom backend is coded-lossless, and gated exact (zenavif#45)
+
+- **`zenav1-aom-encode` pin `c3e1b4ab` -> `45c53ddb`** (imazen/zenav1-aom `main`
+  tip on 2026-09-04). Carries the root fix `21544fde` — `count_leaf` had
+  paraphrased libaom's `txb_split_count` predicate as `tx_size_to_depth(..) != 0`,
+  a depth walk C never performs under `ONLY_4X4`, which is what a coded-lossless
+  frame selects; at cq 0 it tripped `debug_assert!(depth <= MAX_VARTX_DEPTH)`
+  on flat content at every depth and on a gradient at 12 bits — plus the docs
+  follow-ups `496d2496` and `45c53ddb`. Upstream at the new pin: 427/427 cells
+  byte-identical to real aomenc (189 of them cq 0),
+  `coded_lossless_reconstructs_the_source_exactly` 248/248 on both decoders.
+  The **decode** pin (`zenav1-aom-decode` at `14124356`) is unchanged; the two
+  still resolve as two sources, and `resolve-standalone` still holds (no
+  sibling path dep was introduced). `KeyFrameConfig` grew
+  `tile_columns_log2` / `tile_rows_log2` / `sb_size_128` between the pins; the
+  seam sets `0 / 0 / false`, the `allintra_speed0` defaults the previous rev
+  hard-coded, so 8-bit output is unchanged — the `BD8_ANCHOR_FNV1A` byte pin
+  holds.
+- **Retired the canary `aom_cq0_still_panics_on_flat_content`** — it went red
+  on the bump exactly as built — and replaced it, on the same six cells
+  ({flat, gradient} x bd {8, 10, 12}, 64x64, speed 6, 4:2:0), with
+  `aom_cq0_encodes_and_reconstructs_the_coded_planes_exactly`: quality 100
+  encodes, and rav1d-safe AND aom-decode reconstruct every sample of every
+  coded plane **equal** to the seam's input (zero tolerance, not a PSNR
+  bound; MEASURED 0 mismatches on all 6 cells x 2 decoders, 286-5648 bytes).
+  The expectation is a bit-exact mirror of the seam's f32 conversion, and a
+  second assertion pins that mirror to an independent f64 H.273 longhand up to
+  witnessed rounding ties (2 across the six cells, both luma samples sitting
+  within 2e-5 of a half). Still not a lossless *image* round trip — the RGB ->
+  studio 4:2:0 conversion in front of the codec is lossy, and
+  `EncoderConfig::lossless` stays refused by name on this backend.
+- **Proved able to fail**, twice: `cq0_gate_can_fail_on_a_lossy_encode` is a
+  permanent `#[test]` that runs the same helper on quality 99 (cq 1) output and
+  requires it to fire on all three gradient cells (measured: it also fires on
+  bd12 flat, one code value off, and not on bd8/bd10 flat); and a one-off
+  mutation of the gate itself to quality 99 went red on the first gradient
+  cell (Y 763/4096, U 192/1024 samples off) before a byte-identical restore.
+- `tests/aom_encode_backend.rs` is 25 -> **26** tests; the CI
+  `Assert the aom encode gate actually ran` floor is raised 25 -> 26 to match.
+  `src/encoder_aom.rs` module docs, `docs/BACKEND_SUPPORT_MATRIX.md` (quality
+  dial, lossless, panic-freedom and C-parity rows) and `CLAUDE.md` no longer
+  describe the panic. No `catch_unwind` was ever added at the seam, so none is
+  removed.
+
 ### Fixed — `validate_for_input` accepted alpha the aom seam refuses (zenavif#44)
 
 `8395e86` fixed one instance of a class — `validate_aom_scope` missing the
