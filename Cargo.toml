@@ -256,7 +256,24 @@ ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/ima
 # was still -10.61. Do NOT compose this with a [patch] on a consumer's master —
 # that silently redirects every other build to a local working copy, which is
 # the hazard this pin exists to prevent.
-svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "2ca060f421760cff4b278fb4baf47ba86afcb5f2", optional = true }
+# 2026-09-05 (bump #3): rev moved 2ca060f42 -> 2d75a105f (140 commits) to pick up
+# the encoder-speed work, for the zensim ladder-instrument grid rebuild. That
+# range is dominated by port-vs-C cost reductions, all landed byte-identical:
+#   * `2d9262178` Wiener `compute_stats` in C's six-step shape — 127x C per call
+#     -> 1.35x (746.5 M -> 7.9 M Ir per 512x512 frame); the LR search falls from
+#     a claimed 33-55 % of preset 6 to a measured 3.2-7.7 % (`2d75a105f`).
+#   * `8fed0aa15` the LAST reference was materialised three times per inter frame
+#     and the stored picture twice — 1.311x -> 1.189x at 2048.
+#   * `600c5177d` honour C's `enable_skipping_mds1`; `0ba430ee1` C's two-phase
+#     tx-type search; `d709b0d70`/`2f59c2e03`/`48ab246ad` allocator + call-count
+#     work in the leaf funnel (24.2 M -> 15.1 M allocator calls per photo frame).
+#   * `a588b1e4f` branch-free CFL predict; `d552c62c5` the last scalar
+#     directional intra kernel in NEON lanes.
+# MEASURED here rather than inherited — the still-image cost delta old-pin ->
+# new-pin on this crate's own encode path is recorded in
+# `benchmarks/svt_pin_speed_2026-09-05.md`. Nothing in the range touches the
+# seam's API surface; no `use` path or feature changed.
+svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "2d75a105fe0b310bf586110951315f014e274fff", optional = true }
 # AVIF container muxer for the zenav1-svt backend (the zenravif backend muxes
 # inside zenravif; this backend muxes in-crate). The 0.2.0 version is
 # supplied by the [patch.crates-io] git pin below until 0.2.0 publishes.

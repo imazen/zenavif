@@ -12,6 +12,21 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+#### Changed — `zenav1-svt` pin `2ca060f42` -> `2d75a105f`, 2026-09-05
+
+- Bumped the `svtav1` (package `zenav1-svt`) git rev by 140 commits to
+  `imazen/zenav1-svt` origin/main, picking up the encoder-speed range
+  (Wiener `compute_stats` in C's six-step shape, the triple-materialised
+  last reference, `enable_skipping_mds1`, the two-phase tx-type search,
+  leaf-funnel allocator work, branch-free CFL predict).
+- **MEASURED on this crate's own AVIF still-encode path, not inherited:
+  1.498x on summed `encode_ms` / 1.482x wall (min of 7 interleaved rounds,
+  3 images x q30/60/90, svt-rs backend), with 9 of 9 cells producing
+  BYTE-IDENTICAL bitstreams.** The gain rises with quality (1.30-1.46x at
+  q30 -> 1.58-1.61x at q90). Record + caveats:
+  `benchmarks/svt_pin_speed_2026-09-05.md`.
+- No API, feature, or `use`-path change; the seam is unchanged.
+
 #### Added — backend + knob auto-tuning (`auto-tune`, off by default), 2026-09-04
 
 - **`zenavif::backend_tuner`** — choose an `Av1Backend` *and* its knobs for
