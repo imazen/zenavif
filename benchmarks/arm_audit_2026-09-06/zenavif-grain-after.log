@@ -1,0 +1,10 @@
+cargo run -p zenavif --example heaptrack_decode -- /Users/lilith/Library/Caches/codec-corpus/v1/avif-conformance/valid/xiph_abandoned_filmgrain.avif 3 --verify-threads
+   Compiling rav1d-safe v0.6.0 (https://github.com/imazen/rav1d-safe?rev=e73811f5d4dad81b75195ca18554fd8a5df19515#e73811f5)
+   Compiling rav1d-disjoint-mut v0.3.1 (https://github.com/imazen/rav1d-safe?rev=e73811f5d4dad81b75195ca18554fd8a5df19515#e73811f5)
+   Compiling zenavif v0.2.0 (/Users/lilith/work/zen/zenavif)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.69s
+     Running `target/debug/examples/heaptrack_decode /Users/lilith/Library/Caches/codec-corpus/v1/avif-conformance/valid/xiph_abandoned_filmgrain.avif 3 --verify-threads`
+exact thread parity: threads=1, iterations=3
+exact thread parity: threads=2, iterations=3
+exact thread parity: threads=4, iterations=3
+exact thread parity: threads=8, iterations=3

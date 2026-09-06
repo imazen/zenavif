@@ -32,7 +32,7 @@ path = ".."
 # the #524 loop-filter H-window fix). Keep it in lockstep with the root
 # manifest's `rev` — the reasoning for the current one lives there. Drop at
 # the rav1d-safe 0.6.0 release.
-rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "66f58fa6a64c689998721cc5cdb16a4698e26eec" }
+rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "e73811f5d4dad81b75195ca18554fd8a5df19515" }
 
 [[bin]]
 name = "fuzz_decode"

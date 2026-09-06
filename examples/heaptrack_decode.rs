@@ -20,6 +20,8 @@
 //!   heaptrack ./target/release/examples/heaptrack_decode <file.avif> [iters]
 //!   ./target/release/examples/heaptrack_decode <file.avif> 1 --backend zenav1-aom
 //!
+//! `--verify-threads` compares exact pixels at 1, 2, 4 and 8 threads.
+//!
 //! `--backend rav1d-safe|zenav1-aom` picks the AV1 engine (zenav1-aom needs the
 //! `zenav1-aom` feature). On a host without heaptrack — macOS, say — wrap the
 //! binary in `/usr/bin/time -l` and read "maximum resident set size" (BYTES)
@@ -62,6 +64,12 @@ fn main() {
         };
         args.drain(i..i + 2);
     }
+    let verify_threads = if let Some(i) = args.iter().position(|a| a == "--verify-threads") {
+        args.remove(i);
+        true
+    } else {
+        false
+    };
     let config = zenavif::DecoderConfig::new().decode_backend(backend);
 
     let path: PathBuf = match args.get(1) {
@@ -76,6 +84,33 @@ fn main() {
         eprintln!("failed to read {}: {e}", path.display());
         std::process::exit(1);
     });
+
+    // Compare active row bytes, excluding allocation padding, at each thread count.
+    if verify_threads {
+        let reference = zenavif::decode_with(&data, &config.clone().threads(1), &Unstoppable)
+            .expect("single-thread reference decode");
+        for threads in [1, 2, 4, 8] {
+            for iteration in 0..iters {
+                let actual =
+                    zenavif::decode_with(&data, &config.clone().threads(threads), &Unstoppable)
+                        .expect("threaded decode");
+                assert_eq!(actual.width(), reference.width());
+                assert_eq!(actual.height(), reference.height());
+                assert_eq!(actual.descriptor(), reference.descriptor());
+                let row_bytes =
+                    reference.width() as usize * reference.descriptor().bytes_per_pixel();
+                for y in 0..reference.height() {
+                    assert_eq!(
+                        &actual.as_slice().row(y)[..row_bytes],
+                        &reference.as_slice().row(y)[..row_bytes],
+                        "threads={threads}, iteration={iteration}, row={y}"
+                    );
+                }
+            }
+            eprintln!("exact thread parity: threads={threads}, iterations={iters}");
+        }
+        return;
+    }
 
     // Decode once up front to report the dimensions the alloc count is relative to.
     {

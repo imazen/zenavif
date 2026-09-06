@@ -300,6 +300,15 @@ backend capability landing:**
 
 ## Known Bugs
 
+### ARM film-grain row reservations — fixed by decoder pin integration
+
+The `66f58fa6` decoder pin panicked on codec-corpus's
+`xiph_abandoned_filmgrain.avif` on Apple M4 Pro. Root and fuzz pins now
+select `e73811f5`, carrying ARM and x86 row reservation fixes. Exact pixels
+agree at 1, 2, 4 and 8 threads (three decodes each). Reproduce with
+`just arm-filmgrain-parity <fixture> 3`; evidence and fixture SHA-256 are in
+[the ARM audit](benchmarks/arm_audit_2026-09-06/README.md#film-grain-decoder-integration).
+
 ### `row_sink_decode_is_byte_identical_to_buffered_decode` CI flake — FIXED upstream (rav1d-safe#524 / `3426ebf7`), pin bumped 2026-08-29
 Seen once on `ubuntu-latest` (run 33238501769) at rav1d-safe rev `140f914`:
 `tests/cov_zencodec.rs::row_sink_decode_is_byte_identical_to_buffered_decode`

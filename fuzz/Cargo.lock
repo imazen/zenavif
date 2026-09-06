@@ -410,7 +410,7 @@ checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 [[package]]
 name = "rav1d-disjoint-mut"
 version = "0.3.1"
-source = "git+https://github.com/imazen/rav1d-safe?rev=66f58fa6a64c689998721cc5cdb16a4698e26eec#66f58fa6a64c689998721cc5cdb16a4698e26eec"
+source = "git+https://github.com/imazen/rav1d-safe?rev=e73811f5d4dad81b75195ca18554fd8a5df19515#e73811f5d4dad81b75195ca18554fd8a5df19515"
 dependencies = [
  "aligned",
  "aligned-vec",
@@ -420,7 +420,7 @@ dependencies = [
 [[package]]
 name = "rav1d-safe"
 version = "0.6.0"
-source = "git+https://github.com/imazen/rav1d-safe?rev=66f58fa6a64c689998721cc5cdb16a4698e26eec#66f58fa6a64c689998721cc5cdb16a4698e26eec"
+source = "git+https://github.com/imazen/rav1d-safe?rev=e73811f5d4dad81b75195ca18554fd8a5df19515#e73811f5d4dad81b75195ca18554fd8a5df19515"
 dependencies = [
  "aligned",
  "archmage",
@@ -639,16 +639,16 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "yuv"
-version = "0.8.15"
+version = "0.8.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dba772cc0fb636dfce23c6907e7ca49c35a4b2ac687ea5df86a1a8879e8ea219"
+checksum = "220655e1c245693beb13b377d3174b9efcb1645018d1d4ec53903fc211b135ae"
 dependencies = [
  "num-traits",
 ]
 
 [[package]]
 name = "zenavif"
-version = "0.1.7"
+version = "0.2.0"
 dependencies = [
  "almost-enough",
  "archmage",

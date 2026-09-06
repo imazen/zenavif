@@ -1,0 +1,6 @@
+   Compiling rav1d-safe v0.6.0 (https://github.com/imazen/rav1d-safe?rev=e73811f5d4dad81b75195ca18554fd8a5df19515#e73811f5)
+    Checking rav1d-disjoint-mut v0.3.1 (https://github.com/imazen/rav1d-safe?rev=e73811f5d4dad81b75195ca18554fd8a5df19515#e73811f5)
+    Checking zenavif-parse v0.7.0 (/Users/lilith/work/zen/zenavif/zenavif-parse)
+    Checking zenavif-serialize v0.2.0 (/Users/lilith/work/zen/zenavif/zenavif-serialize)
+    Checking zenavif v0.2.0 (/Users/lilith/work/zen/zenavif)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.92s

@@ -1,0 +1,454 @@
+   Compiling zenavif v0.2.0 (/Users/lilith/work/zen/zenavif)
+    Finished `test` profile [optimized + debuginfo] target(s) in 12.04s
+     Running unittests src/lib.rs (target/debug/deps/zenavif-334c4fb986ccd5fe)
+
+running 108 tests
+test alloc_util::tests::alloc_filled_all_modes_equal_bytes ... ok
+test alloc_util::tests::alloc_filled_nonzero_fill ... ok
+test alloc_util::tests::alloc_filled_fallible_oom_returns_err ... ok
+test alloc_util::tests::codec_default_keeps_site_default_false ... ok
+test alloc_util::tests::codec_default_keeps_site_default_true ... ok
+test alloc_util::tests::explicit_fallible_overrides_any_site_default ... ok
+test alloc_util::tests::explicit_infallible_overrides_any_site_default ... ok
+test alloc_util::tests::from_zencodec_alloc_preference_maps_all_modes ... ok
+test alloc_util::tests::vec_with_capacity_fallible_oom_returns_err ... ok
+test alloc_util::tests::vec_with_capacity_reserves_and_is_empty ... ok
+test cancel::tests::relay_observes_a_cancel_that_happens_during_the_work ... ok
+test cancel::tests::relay_reports_cancelled_as_the_reason ... ok
+test cancel::tests::unstoppable_callers_get_no_relay_and_no_thread ... ok
+test cancel::tests::stoppable_callers_get_a_relay_that_starts_unfired ... ok
+test cicp_resolve::tests::derivation_matches_h273_published_values ... ok
+test cicp_resolve::tests::mc12_derives_from_primaries ... ok
+test cicp_resolve::tests::mc13_constant_luminance_rejected_even_when_derivable ... ok
+test cicp_resolve::tests::self_contained_codes_pass_through ... ok
+test cicp_resolve::tests::unimplemented_math_errors_loudly ... ok
+test cicp_resolve::tests::unspecified_uses_hint_else_errors ... ok
+test codec::anim_decoder::tests::avif_animation_frame_decoder_implements_trait ... ok
+test cancel::tests::work_that_finishes_first_tears_the_watcher_down_promptly ... ok
+test codec::negotiate::tests::negotiate_gray::class_gate_accepts_gray_icc_and_rejects_short ... ok
+test codec::negotiate::tests::negotiate_gray::class_gate_strips_rgb_icc_from_gray ... ok
+test codec::negotiate::tests::negotiate_gray::collapses_without_context_and_matches_channel ... ok
+test codec::negotiate::tests::negotiate_gray::helper_contracts ... ok
+test codec::negotiate::tests::negotiate_gray::lying_metadata_never_fakes_gray ... ok
+test codec::negotiate::tests::negotiate_gray::srgb_icc_collapses_and_drops_profile ... ok
+test codec::negotiate::tests::negotiate_gray::unknown_icc_suppresses_and_falls_through ... ok
+test codec::orientation::tests::a_malformed_mirror_axis_degrades_to_identity ... ok
+test codec::orientation::tests::a_malformed_rotation_angle_degrades_to_identity ... ok
+test codec::orientation::tests::only_the_correcting_hints_bake_orientation ... ok
+test codec::orientation::tests::the_four_rotations_are_distinct ... ok
+test codec::orientation::tests::the_two_mirror_axes_never_decode_to_the_same_orientation ... ok
+test codec::threads::policy_tests::policy_lowering_is_exact ... ok
+test config::tests::default_frame_size_limit_is_120mp_not_unbounded ... ok
+test config::tests::frame_size_limit_zero_opts_out ... ok
+test convert::tests::downscale_to_8bit_keeps_every_channel_in_place ... ok
+test codec::decode_config::tests::config_limits::config_level_limits_bound_an_untrusted_decode ... ok
+test convert::tests::limited_to_full_16_endpoints ... ok
+test convert::tests::limited_to_full_8_all_values_in_range ... ok
+test convert::tests::limited_to_full_8_no_overflow ... ok
+test convert::tests::scale_to_u16_endpoints ... ok
+test decode_av1::tests::empty_data_returns_error ... ok
+test decode_av1::tests::invalid_data_returns_error ... ok
+test decode_av1::tests::random_bytes_return_error ... ok
+test decode_av1::tests::decode_gain_map_from_avif_test_file ... ok
+test decode_av1::tests::raw_obu_mono_matches_the_container_path ... ok
+test decode_av1::tests::rgb_byte_len_overflow_is_an_error_not_a_wrap ... ok
+test decode_av1::tests::truncated_obu_returns_error ... ok
+test decoder_managed::grid::stitch_tests::stitch_copies_within_bounds ... ok
+test decoder_managed::grid::stitch_tests::stitch_does_not_panic_when_tile_origin_exceeds_output ... ok
+test decoder_managed::grid::stitch_tests::stitch_does_not_panic_when_tile_x_exceeds_output ... ok
+test decoder_managed::grid::stitch_tests::stitch_zero_avail_at_exact_edge ... ok
+test decoder_managed::grid::stitch_tests::uniformity_accepts_uniform_tiles_with_edge_crop ... ok
+test decoder_managed::grid::stitch_tests::uniformity_rejects_mismatched_tile ... ok
+test decoder_managed::grid::stitch_tests::uniformity_rejects_undersized_coverage ... ok
+test detect::tests::test_probe_all_vectors ... ignored
+test detect::tests::test_probe_not_avif ... ok
+test detect::tests::test_probe_too_short ... ok
+test detect::tests::test_qp_to_quality_boundaries ... ok
+test detect::tests::test_qp_to_quality_monotonic ... ok
+test error::error_category_tests::error_category_mapping ... ok
+test error::error_category_tests::error_from_rav1d_classifies_real_cause ... ok
+test heuristics::tests::alpha_and_depth_add_cost ... ok
+test heuristics::tests::decode_cheaper_than_encode ... ok
+test heuristics::tests::encode_time_scales_with_speed ... ok
+test heuristics::tests::estimate_arms_ordered_as_measured ... ok
+test heuristics::tests::estimate_typical_covers_measured_peak_on_every_arm ... ok
+test heuristics::tests::fit_at_floor_still_over_budget_reports_floor ... ok
+test heuristics::tests::fit_floors_at_one_thread ... ok
+test heuristics::tests::fit_no_reduction_when_request_fits ... ok
+test heuristics::tests::fit_twenty_megapixel_two_gib_example ... ok
+test heuristics::tests::fit_walks_down_to_largest_fitting_count ... ok
+test heuristics::tests::fit_without_budget_is_inert ... ok
+test heuristics::tests::overflow_returns_none ... ok
+test heuristics::tests::requested_or_default_semantics ... ok
+test simd::avg::tests::test_avg_avx2_matches_scalar ... ok
+test simd::avg::tests::test_avg_neon_direct_matches_scalar ... ok
+test simd::avg::tests::test_avg_rounding ... ok
+test simd::avg::tests::test_avg_varying_data ... ok
+test simd::unpremul::tests::edge_alpha_semantics ... ok
+test simd::unpremul::tests::exact_over_complete_domain ... ok
+test simd::unpremul::tests::tail_lengths_exact ... ok
+test strip_convert::tests::rgba_strip_has_alpha_255 ... ok
+test strip_convert::tests::strip_matches_full_frame_420 ... ok
+test codec::decode_config::tests::alloc_pref_decode::fallible_alloc_decode_matches_default ... ok
+test yuv_convert::tests::fixed_formula_within_one_of_exact ... ok
+test yuv_convert::tests::floor_nonneg_idx_matches_libm_floor ... ok
+test yuv_convert::tests::forward_u16_kernel_matches_8bit_recipe_at_depth_10 ... ok
+test yuv_convert::tests::rgb_to_yuv420_reference_gray_and_roundtrip ... ok
+test yuv_convert::tests::strip_rgba_kernels_match_full_rgb_kernels_exactly ... ok
+test yuv_convert::tests::test_yuv_to_rgb_black ... ok
+test yuv_convert::tests::test_yuv_to_rgb_gray ... ok
+test yuv_convert::tests::test_yuv_to_rgb_white ... ok
+test yuv_convert::tests::u16_planes_of_8bit_samples_match_the_u8_kernels ... ok
+test yuv_convert::tests::yuv16_kernels_byte_identical_to_reference_all_depths ... ok
+test yuv_convert::tests::yuv400_matches_recipe_all_depths ... ok
+test yuv_convert::tests::yuv420_to_rgb8_byte_identical_to_reference ... ok
+test yuv_convert::tests::yuv422_to_rgb8_byte_identical_to_reference ... ok
+test yuv_convert::tests::yuv444_to_rgb8_byte_identical_to_reference ... ok
+test yuv_convert_libyuv::tests::test_bt601_supported ... ok
+test yuv_convert_libyuv::tests::test_bt709_full ... ok
+test yuv_convert_libyuv_autovec::tests::test_autovec ... ok
+test yuv_convert_libyuv_simd::tests::test_simd_matches_scalar ... ok
+test yuv_convert::tests::every_simd_tier_is_byte_identical ... ok
+test decode_av1::tests::raw_obu_422_matches_the_container_path ... ok
+test codec::anim_decoder::tests::animated_avif_animation_frame_decoder_roundtrip ... ok
+
+test result: ok. 107 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.68s
+
+     Running tests/animation_decode.rs (target/debug/deps/animation_decode-584a80a4181530a7)
+
+running 13 tests
+test animation_with_config_and_cancellation ... ok
+test decode_8bpc_audio_track_skipped ... ok
+test decode_12bpc_keyframes ... ok
+test decode_12bpc_produces_16bit_with_full_range ... ok
+test frame_by_frame_12bpc ... ok
+test decode_8bpc_no_alpha ... ok
+test frame_by_frame_cancellation ... ok
+test decode_8bpc_depth ... ok
+test frame_by_frame_still_image_returns_unsupported ... ok
+test still_image_returns_unsupported ... ok
+test frame_by_frame_matches_batch ... ok
+test decode_8bpc_with_alpha ... ok
+test frame_durations_sum_positive ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/aom_encode_backend.rs (target/debug/deps/aom_encode_backend-80f450ca0fcceb55)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/backend_tuner_integration.rs (target/debug/deps/backend_tuner_integration-5fb8fe63a52ec3de)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/bit_depth_request.rs (target/debug/deps/bit_depth_request-3b291e64baf14f18)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/color_context_decode.rs (target/debug/deps/color_context_decode-4475e90925cce78d)
+
+running 10 tests
+test gray_downscale_preserves_context ... ok
+test mono_with_derivable_rgb_icc_decodes_native_gray_with_cicp ... ok
+test mono_with_gray_class_icc_decodes_native_gray ... ok
+test icc_source_attaches_rgb_class_profile ... ok
+test native_gray_output_carries_context ... ok
+test mono_with_rgb_class_icc_stays_rgb ... ok
+test streaming_strips_carry_context ... ok
+test cicp_source_attaches_raw_code_points ... ok
+test negotiated_conversion_propagates_context ... ok
+test reconstructed_hdr_carries_linear_cicp ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/cov_zencodec.rs (target/debug/deps/cov_zencodec-b6e91c82aa2791b6)
+
+running 12 tests
+test dyn_dispatch_recovers_category_and_codec_name ... ok
+test orientation_correct_reports_display_dims_and_identity ... ok
+test orientation_mirror_preserve_reports_flip_tag_without_swapping_dims ... ok
+test orientation_output_info_matches_probe_for_both_hints ... ok
+test orientation_preserve_default_reports_stored_dims_and_tag ... ok
+test decode_is_byte_identical_under_every_threading_policy ... ok
+test orientation_decode_dims_match_probe_for_both_hints ... ok
+test orientation_correct_bakes_pixels_to_match_upright_reference ... ok
+test orientation_streaming_correct_matches_single_decode ... ok
+test row_sink_mono_matches_buffered_and_streaming_byte_for_byte ... ok
+test orientation_streaming_preserve_keeps_stored_dims ... ok
+test row_sink_decode_is_byte_identical_to_buffered_decode ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/cross_backend_decode.rs (target/debug/deps/cross_backend_decode-e2356399c9345110)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/decode_frame_size_limit.rs (target/debug/deps/decode_frame_size_limit-4af30d9b6678aadf)
+
+running 3 tests
+test zero_limit_opts_out_of_preflight ... ok
+test default_config_decodes_normal_image ... ok
+test over_limit_dimensions_rejected_preflight ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/deprecated_backend_aliases.rs (target/debug/deps/deprecated_backend_aliases-feaa2ede712128f0)
+
+running 2 tests
+test estimate_arm_alias_expression_position ... ok
+test estimate_arm_alias_pattern_position ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/encode_contracts.rs (target/debug/deps/encode_contracts-456283339c2455e6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/encode_roundtrip.rs (target/debug/deps/encode_roundtrip-da16925dd2a1b91d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/expert_internal_params.rs (target/debug/deps/expert_internal_params-d2ba76656af32b8a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/fuzz_regression.rs (target/debug/deps/fuzz_regression-392636b490b62e46)
+
+running 1 test
+test fuzz_regression ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/gainmap_decode.rs (target/debug/deps/gainmap_decode-0505db0d0077d258)
+
+running 19 tests
+test decode_full_no_gain_map ... ok
+test gain_map_channel_params_valid ... ok
+test gain_map_data_has_valid_obu_structure ... ok
+test decode_no_gain_map_extras_on_normal_image ... ok
+test decode_full_has_gain_map ... ok
+test gain_map_small_dimensions ... ok
+test nogrid_color_with_gainmap_grid ... ok
+test probe_gain_map_absent ... ok
+test probe_gain_map_present ... ok
+test gain_map_render_base_only_attaches_nothing ... ok
+test probe_hdr_gain_map_present ... ok
+test decode_gain_map_via_zencodec_extras ... ok
+test gain_map_render_reconstructs_linear_hdr ... ok
+test supported_writer_version_with_extra_bytes ... ok
+test unsupported_gainmap_minimum_version_rejected ... ok
+test unsupported_gainmap_version_still_decodes_base ... ok
+test reconstruct_at_sdr_headroom_matches_linearized_base ... ok
+test streaming_reconstruct_matches_buffered ... ok
+test reconstruct_headroom_is_monotonic ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/gainmap_encode.rs (target/debug/deps/gainmap_encode-33843da509c8d534)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/gainmap_roundtrip.rs (target/debug/deps/gainmap_roundtrip-29f7d3bc409a3f47)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/hdr_roundtrip.rs (target/debug/deps/hdr_roundtrip-0d5f5a3afcbbce7d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/identity_roundtrip.rs (target/debug/deps/identity_roundtrip-5051f383b48e5875)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/integration_corpus.rs (target/debug/deps/integration_corpus-d38dd7336389c898)
+
+running 3 tests
+test test_decode_all_vectors ... ignored
+test test_decode_specific_formats ... ignored
+test test_yuv_crate_sanity ... ok
+
+test result: ok. 1 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/linku_corpus.rs (target/debug/deps/linku_corpus-716cd9636445cc17)
+
+running 2 tests
+test linku_decode_all ... ignored
+test linku_pixel_parity ... ignored
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/metadata_roundtrip.rs (target/debug/deps/metadata_roundtrip-45c8c04ab63edb3e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/mono_decode.rs (target/debug/deps/mono_decode-fb5f73bd177d5f7d)
+
+running 10 tests
+test capabilities_and_descriptors_advertise_gray ... ok
+test legacy_decode_with_stays_rgb ... ok
+test mono_gray8_preference_on_10bit_downconverts ... ok
+test mono_10bit_decodes_native_gray16 ... ok
+test mono_limited_range_actually_expands ... ok
+test mono_odd_dimensions_crop ... ok
+test mono_decodes_native_gray8_by_default ... ok
+test streaming_mono_emits_gray_strips_matching_buffered ... ok
+test mono_rgb_preference_keeps_classic_expansion ... ok
+test color_image_never_synthesizes_gray ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/mono_encode_roundtrip.rs (target/debug/deps/mono_encode_roundtrip-053ac652bc636c08)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/negotiation_matrix.rs (target/debug/deps/negotiation_matrix-e5acdf6096e85adf)
+
+running 10 tests
+test all_paths_report_the_container_cicp ... ok
+test decode_into_refuses_hdr_with_an_unsupported_error ... ok
+test decode_into_convenience_methods_never_panic_on_any_fixture ... ok
+test hdr_pq_fixtures_are_tagged_pq_on_every_path ... ok
+test matrix_axes_are_actually_covered ... ok
+test reconstruct_hdr_is_refused_identically_on_all_three_paths ... ok
+test reconstruct_hdr_refusal_has_the_same_category_on_all_three_paths ... ok
+test all_paths_agree_on_the_negotiated_pixel_format ... ok
+test all_paths_agree_on_pixels_byte_for_byte ... ok
+test no_preferred_cicp_depth_alpha_combination_panics ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.44s
+
+     Running tests/parity_test.rs (target/debug/deps/parity_test-8c2cee9e08e17d55)
+
+running 1 test
+test test_decode_works ... ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/parser_leniency_scope.rs (target/debug/deps/parser_leniency_scope-354a182aa983fb31)
+
+running 5 tests
+test non_zero_reserved_flags_outside_pixi_are_refused ... ok
+test pixi_flags_other_than_the_extension_marker_are_refused ... ok
+test unknown_property_marked_essential_is_refused ... ok
+test extended_pixi_decodes_byte_identically_under_strict_parsing ... ok
+test mislabelled_non_essential_transform_decodes_byte_identically ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/pixel_verification.rs (target/debug/deps/pixel_verification-c1b820da7f50cc83)
+
+running 3 tests
+test generate_references ... ignored
+test verify_against_libavif ... ignored
+test verify_pixel_accuracy ... ignored
+
+test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/product_aom_backend.rs (target/debug/deps/product_aom_backend-6997cbc3b92641e0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/sb_q_scale_hint.rs (target/debug/deps/sb_q_scale_hint-36f6670f7204e059)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/svt_rs_backend.rs (target/debug/deps/svt_rs_backend-ad8e0606a4548331)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/sweep_40_geometry.rs (target/debug/deps/sweep_40_geometry-200b5a873b4fbd95)
+
+running 2 tests
+test grid_with_alpha_aux_items_is_refused_not_decoded_opaque ... ok
+test alpha_item_with_fewer_rows_than_primary_is_rejected ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/target_quality.rs (target/debug/deps/target_quality-8d5a50525e805e9d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/test_yuv_accuracy.rs (target/debug/deps/test_yuv_accuracy-c695649f379ad955)
+
+running 1 test
+test test_yuv_conversion_accuracy ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/tiny_bake.rs (target/debug/deps/tiny_bake-9ce07001bd876778)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/two_pass.rs (target/debug/deps/two_pass-cd0205b730604226)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/validation.rs (target/debug/deps/validation-034ea5e04b9b2baf)
+
+running 3 tests
+test decoder_default_validates ... ok
+test decoder_frame_size_limit_zero_ok ... ok
+test decoder_threads_zero_ok ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/whereat_trace_preservation.rs (target/debug/deps/whereat_trace_preservation-49a7a97b142ceb5a)
+
+running 2 tests
+test parse_error_preserves_trace ... ok
+test av1_decode_error_preserves_trace ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/yuv_upstream_bilinear.rs (target/debug/deps/yuv_upstream_bilinear-fccbbc3c18a1c3c5)
+
+running 2 tests
+test upstream_writes_every_row_on_odd_height_420_bilinear ... ok
+test upstream_writes_every_row_on_even_height_420_bilinear ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/zensim_loop.rs (target/debug/deps/zensim_loop-209b2c2450ee5138)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

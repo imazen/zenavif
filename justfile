@@ -288,3 +288,7 @@ arm-tiers-macos bench="tier_isolation":
 arm-encode-integration-macos:
     mkdir -p "$HOME/tmp"
     CARGO_BUILD_JOBS=4 RAYON_NUM_THREADS=4 OMP_NUM_THREADS=4 RUST_TEST_THREADS=4 TMPDIR="$HOME/tmp" nice -n 19 cargo test --locked -p zenavif --features zenav1-aom,zenav1-aom-encode,encode-imazen,encode-mono --test aom_encode_backend --test encode_contracts --test encode_roundtrip --test identity_roundtrip --test mono_encode_roundtrip > "$HOME/tmp/zenavif-encode-integration.log" 2>&1
+
+# Exact film-grain decode parity; caller supplies the corpus fixture explicitly.
+arm-filmgrain-parity fixture iters="3":
+    cargo run -p zenavif --example heaptrack_decode -- {{fixture}} {{iters}} --verify-threads

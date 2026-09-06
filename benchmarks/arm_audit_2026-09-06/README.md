@@ -70,3 +70,23 @@ The primary `zenravif` backend remains pinned to `f6c883b6`, with its git `zenra
 The SVT backend is not changed by this pin update. Its separate audit found a C scalar/NEON quantizer-oracle disagreement outside the narrow coefficient domain; that baseline gate remains unresolved rather than weakened. No codec release was made.
 
 Reproduce the integration checks with `just arm-encode-integration-macos`.
+
+## Film-grain decoder integration
+
+The wrapper's `66f58fa6` decoder pin reproduced ARM worker panics on
+`avif-conformance/valid/xiph_abandoned_filmgrain.avif` from codec-corpus.
+Root and fuzz manifests now select audited rav1d-safe `e73811f5`, including
+ARM row reservation fix `83fa5d3e` and x86 fix `c2a7dfd7`.
+The same fixture passes exact active-row pixel comparisons at 1, 2, 4 and
+8 threads, three decodes each. This verifies one film-grain fixture;
+it is not exhaustive bit-depth or layout coverage.
+
+Reproduce with `just arm-filmgrain-parity <fixture> 3` (debug build, runtime
+dispatch, no native CPU flags). [Before](zenavif-grain-before.log) and
+[after](zenavif-grain-after.log) retain the actual panic and parity results.
+Fixture archive: `/Users/lilith/work/codec-artifacts/zenavif-arm-audit/xiph_abandoned_filmgrain.avif`,
+141549 bytes, SHA-256 `d7c35d24ec249c2c8ed5361995b0dad11dbda9a0f565a574154fc7cbc5e5bcb2`.
+The image is outside git. No cloud or NAS mirror was created in this audit.
+
+Default-feature library/integration checks pass: 203 passed, zero failed, 9 existing ignored. [Test log](zenavif-pin-integration.log);
+[strict library/example clippy](zenavif-pin-clippy.log) also passes.

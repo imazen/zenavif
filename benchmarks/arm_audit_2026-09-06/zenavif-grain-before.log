@@ -1,0 +1,78 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.48s
+     Running `target/debug/examples/heaptrack_decode /Users/lilith/Library/Caches/codec-corpus/v1/avif-conformance/valid/xiph_abandoned_filmgrain.avif 1`
+
+thread 'rav1d-worker-6' (144308316) panicked at /Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41:
+/Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41 took a 45052 B picture-plane reservation while tile threading is active; the measured ceiling for that file is 1408 B.
+This is the bounds map's standing extent invariant (docs/BOUNDS_MAP.md, PIC_EXTENT_CEILINGS). A wider reservation collides with a concurrent foreign WRITE at the rate the map's widening-budget column predicts — the decoder's largest guard site has 60 bytes of measured headroom, and the three refuted attempts (#469 rectangle, #475 hull, #485 band) all failed exactly here.
+If the widening is deliberate: price it against the budget table FIRST (`--features __probe_bounds`), then raise the ceiling WITH the measurement in the same commit. (one picture row here is 1408 B; this reservation spans 32 rows)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'rav1d-worker-10' (144308320) panicked at /Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41:
+/Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41 took a 45052 B picture-plane reservation while tile threading is active; the measured ceiling for that file is 1408 B.
+This is the bounds map's standing extent invariant (docs/BOUNDS_MAP.md, PIC_EXTENT_CEILINGS). A wider reservation collides with a concurrent foreign WRITE at the rate the map's widening-budget column predicts — the decoder's largest guard site has 60 bytes of measured headroom, and the three refuted attempts (#469 rectangle, #475 hull, #485 band) all failed exactly here.
+If the widening is deliberate: price it against the budget table FIRST (`--features __probe_bounds`), then raise the ceiling WITH the measurement in the same commit. (one picture row here is 1408 B; this reservation spans 32 rows)
+
+thread 'rav1d-worker-4' (144308314) panicked at /Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41:
+/Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41 took a 45052 B picture-plane reservation while tile threading is active; the measured ceiling for that file is 1408 B.
+This is the bounds map's standing extent invariant (docs/BOUNDS_MAP.md, PIC_EXTENT_CEILINGS). A wider reservation collides with a concurrent foreign WRITE at the rate the map's widening-budget column predicts — the decoder's largest guard site has 60 bytes of measured headroom, and the three refuted attempts (#469 rectangle, #475 hull, #485 band) all failed exactly here.
+If the widening is deliberate: price it against the budget table FIRST (`--features __probe_bounds`), then raise the ceiling WITH the measurement in the same commit. (one picture row here is 1408 B; this reservation spans 32 rows)
+
+thread 'rav1d-worker-1' (144308311) panicked at /Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41:
+/Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41 took a 45052 B picture-plane reservation while tile threading is active; the measured ceiling for that file is 1408 B.
+This is the bounds map's standing extent invariant (docs/BOUNDS_MAP.md, PIC_EXTENT_CEILINGS). A wider reservation collides with a concurrent foreign WRITE at the rate the map's widening-budget column predicts — the decoder's largest guard site has 60 bytes of measured headroom, and the three refuted attempts (#469 rectangle, #475 hull, #485 band) all failed exactly here.
+If the widening is deliberate: price it against the budget table FIRST (`--features __probe_bounds`), then raise the ceiling WITH the measurement in the same commit. (one picture row here is 1408 B; this reservation spans 32 rows)
+
+thread 'rav1d-worker-3' (144308313) panicked at /Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41:
+/Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41 took a 45052 B picture-plane reservation while tile threading is active; the measured ceiling for that file is 1408 B.
+This is the bounds map's standing extent invariant (docs/BOUNDS_MAP.md, PIC_EXTENT_CEILINGS). A wider reservation collides with a concurrent foreign WRITE at the rate the map's widening-budget column predicts — the decoder's largest guard site has 60 bytes of measured headroom, and the three refuted attempts (#469 rectangle, #475 hull, #485 band) all failed exactly here.
+If the widening is deliberate: price it against the budget table FIRST (`--features __probe_bounds`), then raise the ceiling WITH the measurement in the same commit. (one picture row here is 1408 B; this reservation spans 32 rows)
+
+thread 'rav1d-worker-9' (144308319) panicked at /Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41:
+/Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41 took a 45052 B picture-plane reservation while tile threading is active; the measured ceiling for that file is 1408 B.
+This is the bounds map's standing extent invariant (docs/BOUNDS_MAP.md, PIC_EXTENT_CEILINGS). A wider reservation collides with a concurrent foreign WRITE at the rate the map's widening-budget column predicts — the decoder's largest guard site has 60 bytes of measured headroom, and the three refuted attempts (#469 rectangle, #475 hull, #485 band) all failed exactly here.
+If the widening is deliberate: price it against the budget table FIRST (`--features __probe_bounds`), then raise the ceiling WITH the measurement in the same commit. (one picture row here is 1408 B; this reservation spans 32 rows)
+
+thread 'rav1d-worker-7' (144308317) panicked at /Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41:
+/Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41 took a 45052 B picture-plane reservation while tile threading is active; the measured ceiling for that file is 1408 B.
+This is the bounds map's standing extent invariant (docs/BOUNDS_MAP.md, PIC_EXTENT_CEILINGS). A wider reservation collides with a concurrent foreign WRITE at the rate the map's widening-budget column predicts — the decoder's largest guard site has 60 bytes of measured headroom, and the three refuted attempts (#469 rectangle, #475 hull, #485 band) all failed exactly here.
+If the widening is deliberate: price it against the budget table FIRST (`--features __probe_bounds`), then raise the ceiling WITH the measurement in the same commit. (one picture row here is 1408 B; this reservation spans 32 rows)
+
+thread 'rav1d-worker-2' (144308312) panicked at /Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41:
+/Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41 took a 45052 B picture-plane reservation while tile threading is active; the measured ceiling for that file is 1408 B.
+This is the bounds map's standing extent invariant (docs/BOUNDS_MAP.md, PIC_EXTENT_CEILINGS). A wider reservation collides with a concurrent foreign WRITE at the rate the map's widening-budget column predicts — the decoder's largest guard site has 60 bytes of measured headroom, and the three refuted attempts (#469 rectangle, #475 hull, #485 band) all failed exactly here.
+If the widening is deliberate: price it against the budget table FIRST (`--features __probe_bounds`), then raise the ceiling WITH the measurement in the same commit. (one picture row here is 1408 B; this reservation spans 32 rows)
+
+thread 'rav1d-worker-8' (144308318) panicked at /Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41:
+/Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41 took a 45052 B picture-plane reservation while tile threading is active; the measured ceiling for that file is 1408 B.
+This is the bounds map's standing extent invariant (docs/BOUNDS_MAP.md, PIC_EXTENT_CEILINGS). A wider reservation collides with a concurrent foreign WRITE at the rate the map's widening-budget column predicts — the decoder's largest guard site has 60 bytes of measured headroom, and the three refuted attempts (#469 rectangle, #475 hull, #485 band) all failed exactly here.
+If the widening is deliberate: price it against the budget table FIRST (`--features __probe_bounds`), then raise the ceiling WITH the measurement in the same commit. (one picture row here is 1408 B; this reservation spans 32 rows)
+
+thread 'rav1d-worker-0' (144308310) panicked at /Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41:
+/Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41 took a 45052 B picture-plane reservation while tile threading is active; the measured ceiling for that file is 1408 B.
+This is the bounds map's standing extent invariant (docs/BOUNDS_MAP.md, PIC_EXTENT_CEILINGS). A wider reservation collides with a concurrent foreign WRITE at the rate the map's widening-budget column predicts — the decoder's largest guard site has 60 bytes of measured headroom, and the three refuted attempts (#469 rectangle, #475 hull, #485 band) all failed exactly here.
+If the widening is deliberate: price it against the budget table FIRST (`--features __probe_bounds`), then raise the ceiling WITH the measurement in the same commit. (one picture row here is 1408 B; this reservation spans 32 rows)
+
+thread 'rav1d-worker-11' (144308321) panicked at /Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41:
+/Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41 took a 45052 B picture-plane reservation while tile threading is active; the measured ceiling for that file is 1408 B.
+This is the bounds map's standing extent invariant (docs/BOUNDS_MAP.md, PIC_EXTENT_CEILINGS). A wider reservation collides with a concurrent foreign WRITE at the rate the map's widening-budget column predicts — the decoder's largest guard site has 60 bytes of measured headroom, and the three refuted attempts (#469 rectangle, #475 hull, #485 band) all failed exactly here.
+If the widening is deliberate: price it against the budget table FIRST (`--features __probe_bounds`), then raise the ceiling WITH the measurement in the same commit. (one picture row here is 1408 B; this reservation spans 32 rows)
+
+thread 'rav1d-worker-5' (144308315) panicked at /Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41:
+/Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/safe_simd/filmgrain_arm.rs:1608:41 took a 45052 B picture-plane reservation while tile threading is active; the measured ceiling for that file is 1408 B.
+This is the bounds map's standing extent invariant (docs/BOUNDS_MAP.md, PIC_EXTENT_CEILINGS). A wider reservation collides with a concurrent foreign WRITE at the rate the map's widening-budget column predicts — the decoder's largest guard site has 60 bytes of measured headroom, and the three refuted attempts (#469 rectangle, #475 hull, #485 band) all failed exactly here.
+If the widening is deliberate: price it against the budget table FIRST (`--features __probe_bounds`), then raise the ceiling WITH the measurement in the same commit. (one picture row here is 1408 B; this reservation spans 32 rows)
+
+thread 'main' (144308296) panicked at /Users/lilith/.cargo/git/checkouts/rav1d-safe-3878e0dd5e85740b/66f58fa/src/thread_task.rs:534:56:
+called `Option::unwrap()` on a `None` value
+rav1d worker thread panicked during shutdown: Any { .. }
+rav1d worker thread panicked during shutdown: Any { .. }
+rav1d worker thread panicked during shutdown: Any { .. }
+rav1d worker thread panicked during shutdown: Any { .. }
+rav1d worker thread panicked during shutdown: Any { .. }
+rav1d worker thread panicked during shutdown: Any { .. }
+rav1d worker thread panicked during shutdown: Any { .. }
+rav1d worker thread panicked during shutdown: Any { .. }
+rav1d worker thread panicked during shutdown: Any { .. }
+rav1d worker thread panicked during shutdown: Any { .. }
+rav1d worker thread panicked during shutdown: Any { .. }
+rav1d worker thread panicked during shutdown: Any { .. }
