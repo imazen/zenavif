@@ -12,12 +12,10 @@
 //!
 //! Run: `cargo bench --bench tier_isolation --features _dev`
 //! Do NOT build with `-C target-cpu=native`: that pins the tier at compile
-//! time, after which it cannot be disabled and this bench skips rather than
-//! silently reporting the SIMD path under both labels.
+//! time, after which it cannot be disabled and this benchmark fails explicitly.
 
 use zenavif::yuv_convert::{YuvMatrix, YuvRange, yuv420_to_rgb8};
-use zenbench::criterion_compat::*;
-use zenbench::{criterion_group, criterion_main};
+use zenbench::prelude::*;
 
 #[cfg(target_arch = "aarch64")]
 type TierToken = archmage::NeonToken;
@@ -69,46 +67,41 @@ fn planes(w: usize, h: usize) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     (y, u, v)
 }
 
-fn bench_tiers(c: &mut Criterion) {
-    if !set_simd(true) || !set_simd(false) {
-        eprintln!(
-            "[tier_isolation] no toggleable SIMD tier on this target, or the tier is \
-             compile-time guaranteed (drop -C target-cpu=native, build with --features _dev). \
-             Skipping."
-        );
-        return;
-    }
+fn bench_tiers(suite: &mut Suite) {
+    assert!(
+        set_simd(true) && set_simd(false),
+        "build with _dev and runtime SIMD dispatch"
+    );
     set_simd(true);
-    eprintln!("[tier_isolation] comparing {TIER_NAME} vs forced scalar");
-
-    for &(name, w, h) in &[("512x256", 512usize, 256usize), ("1920x1080", 1920, 1080)] {
+    for &(name, w, h) in &[
+        ("64x64", 64usize, 64usize),
+        ("512x256", 512, 256),
+        ("1920x1080", 1920, 1080),
+    ] {
         let (yp, up, vp) = planes(w, h);
-        let mut group = c.benchmark_group(format!("yuv420_to_rgb8/{name}"));
-        group.throughput(Throughput::Elements((w * h) as u64));
-        for (arm, simd) in [(TIER_NAME, true), ("scalar", false)] {
-            group.bench_function(arm, |b| {
-                set_simd(simd);
-                b.iter(|| {
-                    yuv420_to_rgb8(
-                        black_box(&yp),
-                        black_box(w),
-                        black_box(&up),
-                        black_box(w.div_ceil(2)),
-                        black_box(&vp),
-                        black_box(w.div_ceil(2)),
-                        black_box(w),
-                        black_box(h),
-                        YuvRange::Full,
-                        YuvMatrix::Bt709,
-                    )
-                })
-            });
-        }
-        set_simd(true);
-        group.finish();
+        suite.compare(format!("yuv420_to_rgb8/{name}"), |group| {
+            group.throughput(Throughput::Elements((w * h) as u64));
+            for (arm, simd) in [(TIER_NAME, true), ("scalar", false)] {
+                let (yp, up, vp) = (yp.clone(), up.clone(), vp.clone());
+                group.bench(arm, move |b| {
+                    b.with_input(move || assert!(set_simd(simd))).run(|_| {
+                        yuv420_to_rgb8(
+                            black_box(&yp),
+                            w,
+                            black_box(&up),
+                            w.div_ceil(2),
+                            black_box(&vp),
+                            w.div_ceil(2),
+                            w,
+                            h,
+                            YuvRange::Full,
+                            YuvMatrix::Bt709,
+                        )
+                    })
+                });
+            }
+        });
     }
-    set_simd(true);
 }
 
-criterion_group!(benches, bench_tiers);
-criterion_main!(benches);
+zenbench::main!(bench_tiers);
