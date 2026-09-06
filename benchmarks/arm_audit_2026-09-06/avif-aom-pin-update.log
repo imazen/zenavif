@@ -1,0 +1,8 @@
+    Updating git repository `https://github.com/imazen/zenav1-aom`
+    Updating crates.io index
+     Locking 2 packages to latest Rust 1.93 compatible versions
+    Removing zenav1-aom-dsp v0.0.1 (https://github.com/imazen/zenav1-aom?rev=45c53ddbe33b59c2a34679243ed3a79e89a56993#45c53ddb)
+      Adding zenav1-aom-dsp v0.0.1 (https://github.com/imazen/zenav1-aom?rev=a7b1ab13fc2ba1c0f4fb05282ab40e417bc32190#a7b1ab13)
+    Removing zenav1-aom-encode v0.0.1 (https://github.com/imazen/zenav1-aom?rev=45c53ddbe33b59c2a34679243ed3a79e89a56993#45c53ddb)
+      Adding zenav1-aom-encode v0.0.1 (https://github.com/imazen/zenav1-aom?rev=a7b1ab13fc2ba1c0f4fb05282ab40e417bc32190#a7b1ab13)
+note: pass `--verbose` to see 13 unchanged dependencies behind latest

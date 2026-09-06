@@ -1,0 +1,79 @@
+   Compiling zenav1-aom-dsp v0.0.1 (https://github.com/imazen/zenav1-aom?rev=a7b1ab13fc2ba1c0f4fb05282ab40e417bc32190#a7b1ab13)
+   Compiling zenav1-aom-encode v0.0.1 (https://github.com/imazen/zenav1-aom?rev=a7b1ab13fc2ba1c0f4fb05282ab40e417bc32190#a7b1ab13)
+   Compiling zenavif v0.2.0 (/Users/lilith/work/zen/zenavif)
+    Finished `test` profile [optimized + debuginfo] target(s) in 22.24s
+     Running tests/aom_encode_backend.rs (target/debug/deps/aom_encode_backend-6727c8a8bc7e5838)
+
+running 26 tests
+test aom_backend_encodes_monochrome_that_decodes ... ok
+test aom_backend_12_bit_signals_profile_2 ... ok
+test aom_backend_flat_content_decodes_exactly_on_an_independent_decoder ... ok
+test aom_backend_hbd_flat_content_decodes_exactly ... ok
+test aom_backend_codes_hbd_from_8_bit_input ... ok
+test aom_backend_quality_moves_bytes ... ok
+test aom_backend_refuses_depths_it_does_not_code ... ok
+test aom_backend_refuses_hbd_grayscale ... ok
+test aom_backend_refuses_what_it_does_not_implement ... ok
+test aom_backend_produces_an_avif_that_decodes ... ok
+test aom_backend_encodes_10_and_12_bit_that_decode ... ok
+test aom_bd8_output_is_unchanged_by_the_hbd_wiring ... ok
+test aom_cq0_encodes_and_reconstructs_the_coded_planes_exactly ... ok
+test cq0_gate_can_fail_on_a_lossy_encode ... ok
+test aom_backend_tracks_the_production_backend ... ok
+test gate_can_fail_on_a_corrupted_payload ... ok
+test gate_can_fail_on_wrong_content ... ok
+test limited_range_signalling_is_load_bearing ... ok
+test other_backends_refuse_12_bit_rather_than_coding_10 ... ok
+test the_studio_swing_expectation_scales_with_depth ... ok
+test hbd_gate_can_fail_on_wrong_content_and_wrong_depth ... ok
+test two_independent_decoders_agree_on_aom_output ... ok
+test validate_agrees_with_the_encode_path ... ok
+test two_independent_decoders_agree_at_10_and_12_bits ... ok
+test aom_hbd_decodes_correctly_through_the_container ... ok
+test aom_backend_every_speed_decodes ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.65s
+
+     Running tests/encode_contracts.rs (target/debug/deps/encode_contracts-a332220ee5adb5cf)
+
+running 4 tests
+test validate_rejects_dead_and_contradictory_combos ... ok
+test chroma_subsampling_is_live ... ok
+test quality_is_mediated_by_quantizer ... ok
+test alpha_quality_unset_follows_color_quality ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running tests/encode_roundtrip.rs (target/debug/deps/encode_roundtrip-0663dbd9fca8c85b)
+
+running 10 tests
+test encode_with_custom_config ... ok
+test convenience_encode_rgb16 ... ok
+test roundtrip_rgb16 ... ok
+test convenience_encode_rgb8 ... ok
+test roundtrip_rgb8 ... ok
+test roundtrip_rgba16 ... ok
+test unsupported_grayscale_input ... ok
+test roundtrip_rgba8 ... ok
+test convenience_encode_rgba8 ... ok
+test encoder_config_builder_chains ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/identity_roundtrip.rs (target/debug/deps/identity_roundtrip-c359049efd6f4d66)
+
+running 3 tests
+test identity_lossy_channels_stay_in_their_slots ... ok
+test identity_8bit_lossless_roundtrip_is_pixel_exact ... ok
+test identity_16bit_lossless_roundtrip_is_pixel_exact ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/mono_encode_roundtrip.rs (target/debug/deps/mono_encode_roundtrip-ab98896c8fa1aa5c)
+
+running 2 tests
+test gray8_mono_encode_roundtrip ... ok
+test gray8_mono_encode_roundtrip_odd_dims ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+

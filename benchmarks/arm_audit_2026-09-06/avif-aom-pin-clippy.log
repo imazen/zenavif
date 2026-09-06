@@ -1,0 +1,23 @@
+    Checking archmage v0.9.28
+    Checking memchr v2.8.3
+    Checking av1-grain v0.2.5
+    Checking v_frame v0.3.9
+    Checking maybe-rayon v0.1.1
+    Checking zenavif-serialize v0.2.0 (/Users/lilith/work/zen/zenavif/zenavif-serialize)
+    Checking magetypes v0.9.28
+    Checking no_std_io2 v0.9.4
+    Checking garb v0.2.8
+    Checking bitstream-io v4.10.0
+    Checking zenrav1e v0.2.0 (https://github.com/imazen/zenrav1e?rev=e4883037553434efb57ecbf4414c8b49922ba3e4#e4883037)
+    Checking linear-srgb v0.6.12
+    Checking zenav1-aom-dsp v0.0.1 (https://github.com/imazen/zenav1-aom?rev=a7b1ab13fc2ba1c0f4fb05282ab40e417bc32190#a7b1ab13)
+    Checking zenav1-aom-dsp v0.0.1 (https://github.com/imazen/zenav1-aom?rev=14124356c46f813ac7656b8e7b6631f466b666b0#14124356)
+    Checking zenavif-parse v0.7.0 (/Users/lilith/work/zen/zenavif/zenavif-parse)
+    Checking zenravif v0.2.0 (https://github.com/imazen/cavif-rs?rev=f6c883b6e7395fad67c87ddab676c4df59575a41#f6c883b6)
+    Checking zenpixels-convert v0.2.16
+    Checking rav1d-safe v0.6.0 (https://github.com/imazen/rav1d-safe?rev=66f58fa6a64c689998721cc5cdb16a4698e26eec#66f58fa6)
+    Checking ultrahdr-core v0.5.0
+    Checking zenav1-aom-encode v0.0.1 (https://github.com/imazen/zenav1-aom?rev=a7b1ab13fc2ba1c0f4fb05282ab40e417bc32190#a7b1ab13)
+    Checking zenav1-aom-decode v0.0.1 (https://github.com/imazen/zenav1-aom?rev=14124356c46f813ac7656b8e7b6631f466b666b0#14124356)
+    Checking zenavif v0.2.0 (/Users/lilith/work/zen/zenavif)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.85s
