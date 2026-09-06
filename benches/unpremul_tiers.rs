@@ -34,12 +34,12 @@ fn set_simd(_on: bool) -> bool {
 }
 
 fn bench(suite: &mut Suite) {
-    if !set_simd(true) || !set_simd(false) {
-        eprintln!("[unpremul_tiers] SIMD tier not toggleable here. Skipping.");
-        return;
-    }
+    assert!(
+        set_simd(true) && set_simd(false),
+        "benchmark requires toggleable SIMD"
+    );
     set_simd(true);
-    for width in [1920usize, 512] {
+    for width in [1usize, 17, 64, 512, 1920, 4096] {
         let row: &'static [Rgba<u8>] = Box::leak(
             (0..width)
                 .map(|i| Rgba {
@@ -52,13 +52,20 @@ fn bench(suite: &mut Suite) {
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
         );
+        let mut scalar = row.to_vec();
+        assert!(set_simd(false));
+        zenavif::simd::unpremultiply8_dispatch(&mut scalar);
+        let mut neon = row.to_vec();
+        assert!(set_simd(true));
+        zenavif::simd::unpremultiply8_dispatch(&mut neon);
+        assert_eq!(neon, scalar, "tier parity at width {width}");
         suite.compare(format!("unpremultiply8/{width}px"), move |g| {
             g.throughput(Throughput::Bytes((width * 4) as u64));
             for (arm, simd) in [(TIER_NAME, true), ("scalar", false)] {
                 g.bench(arm, move |b| {
                     // Buffer built in with_input so the clone is not timed.
                     b.with_input(move || {
-                        set_simd(simd);
+                        assert!(set_simd(simd));
                         row.to_vec()
                     })
                     .run(move |mut r| {
