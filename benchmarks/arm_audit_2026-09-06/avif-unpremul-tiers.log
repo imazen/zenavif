@@ -1,0 +1,80 @@
+   Compiling zenavif v0.2.0 (/Users/lilith/work/zen/zenavif)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.34s
+     Running benches/unpremul_tiers.rs (target/release/deps/unpremul_tiers-26b7d31bd6670941)
+[zenbench] calibration: int=0.39ns/iter mem_bw=86.5GiB/s mem_lat=8.0ns
+[zenbench] timer resolution: 41ns, loop overhead: 0.42ns/iter, TSC: 1.000 ticks/ns (invariant)
+[zenbench] results → /Users/lilith/tmp/zenbench/zenbench-1788674715-13839.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1788674715-13839
+  git: 2ebca1b4e4ecfebf1dd0888cb356b6982360abe4
+═══════════════════════════════════════════════════════════════
+
+  unpremultiply8/1px  200 rounds × 66K calls
+             mean ±mad ns  95% CI vs base   iB/s
+  ├─ neon     20.3 ±1.9ns  [19.9–20.7]ns    188M
+  ╰─ scalar   19.7 ±1.4ns  [-4.3%–-1.6%]    194M
+
+  scalar  ████████████████████████████████████████████████████████████ 194 MiB/s
+  neon    ██████████████████████████████████████████████████████████ 188 MiB/s
+
+  unpremultiply8/17px  100 rounds × 45K calls
+             mean ±mad ns  95% CI vs base      iB/s
+  ├─ neon     55.8 ±4.9ns  [54.6–56.9]ns      1.14G
+  ╰─ scalar   70.4 ±7.1ns  [+23.6%–+28.9%]     921M
+
+  neon    ███████████████████████████████████████████████████████████ 1.14 GiB/s
+  scalar  ███████████████████████████████████████████████ 921 MiB/s
+
+  unpremultiply8/64px  200 rounds × 10K calls
+             mean ±mad ns  95% CI vs base      iB/s
+  ├─ neon     134 ±26ns  [130–138]ns        1.78G [1]
+  ╰─ scalar   297 ±44ns  [+75.0%–+79.4%]     823M [2]
+
+  neon    ███████████████████████████████████████████████████████████ 1.78 GiB/s
+  scalar  ███████████████████████████ 823 MiB/s
+  [1] CV=21%
+  [2] CV=46%
+
+  unpremultiply8/512px  200 rounds × 1K calls
+             mean ±mad ns  95% CI vs base        iB/s
+  ├─ neon      845 ±113ns  [827–862]ns          2.26G
+  ╰─ scalar   2445 ±449ns  [+115.8%–+120.8%]     799M [1]
+
+  neon    ███████████████████████████████████████████████████████████ 2.26 GiB/s
+  scalar  ████████████████████ 799 MiB/s
+  [1] CV=50%
+
+  unpremultiply8/1920px  190 rounds × 369 calls
+              mean ±mad µs  95% CI vs base        iB/s
+  ├─ neon      3.2 ±0.2µs  [3.1–3.3]µs          2.24G
+  ╰─ scalar   10.5 ±1.8µs  [+205.8%–+249.8%]     699M [1]
+
+  neon    ███████████████████████████████████████████████████████████ 2.24 GiB/s
+  scalar  ██████████████████ 699 MiB/s
+  [1] CV=48%
+
+  unpremultiply8/4096px  200 rounds × 175 calls
+              mean ±mad µs  95% CI vs base        iB/s
+  ├─ neon      6.4 ±0.9µs  [6.2–6.5]µs          2.39G
+  ╰─ scalar   20.7 ±3.8µs  [+199.8%–+245.8%]     756M [1]
+
+  neon    ███████████████████████████████████████████████████████████ 2.39 GiB/s
+  scalar  ██████████████████ 756 MiB/s
+  [1] CV=54%
+
+  total: 126.4s  (30 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
+group=unpremultiply8/1px benchmark=neon  |  vs_base=baseline  |  min=8.6ns mean=20.3ns median=21.0ns mad=1.9ns  |  throughput=187.93 MiB/s  |  n=200 cv=12.7% rounds=200 calls=66666 mean_ci=[19.9ns 20.7ns] cold=84.0ns
+group=unpremultiply8/1px benchmark=scalar  |  vs_base_pct=-2.93 ci=[-4.26% -1.59%] significant=true effect=-0.25 p=0.0001  |  min=9.7ns mean=19.7ns median=20.5ns mad=1.4ns  |  throughput=193.60 MiB/s  |  n=200 cv=11.5% rounds=200 calls=66666 mean_ci=[19.4ns 20.0ns] cold=41.0ns
+group=unpremultiply8/17px benchmark=neon  |  vs_base=baseline  |  min=34.7ns mean=55.8ns median=54.8ns mad=4.9ns  |  throughput=1.14 GiB/s  |  n=100 cv=10.3% rounds=100 calls=45454 mean_ci=[54.6ns 56.9ns] cold=41.0ns
+group=unpremultiply8/17px benchmark=scalar  |  vs_base_pct=+26.24 ci=[+23.65% +28.89%] significant=true effect=2.21 p=0.0000  |  min=42.4ns mean=70.4ns median=72.1ns mad=7.1ns  |  throughput=921.30 MiB/s  |  n=100 cv=10.5% rounds=100 calls=45454 mean_ci=[68.9ns 71.9ns] cold=42.0ns
+group=unpremultiply8/64px benchmark=neon  |  vs_base=baseline  |  min=54.0ns mean=134.2ns median=135.8ns mad=26.3ns  |  throughput=1.78 GiB/s  |  n=200 cv=20.8% rounds=200 calls=10204 mean_ci=[130.3ns 138.0ns] cold=84.0ns
+group=unpremultiply8/64px benchmark=scalar  |  vs_base_pct=+77.25 ci=[+75.02% +79.38%] significant=true effect=3.77 p=0.0000  |  min=94.3ns mean=296.7ns median=266.9ns mad=43.5ns  |  throughput=822.77 MiB/s  |  n=200 cv=46.4% rounds=200 calls=10204 mean_ci=[277.6ns 316.0ns] cold=84.0ns
+group=unpremultiply8/512px benchmark=neon  |  vs_base=baseline  |  min=360.4ns mean=845.2ns median=868.7ns mad=112.9ns  |  throughput=2.26 GiB/s  |  n=200 cv=15.3% rounds=200 calls=1396 mean_ci=[826.6ns 862.4ns] cold=458.0ns
+group=unpremultiply8/512px benchmark=scalar  |  vs_base_pct=+118.31 ci=[+115.76% +120.77%] significant=true effect=5.69 p=0.0000  |  min=767.7ns mean=2.45µs median=2.06µs mad=449.0ns  |  throughput=798.72 MiB/s  |  n=200 cv=50.3% rounds=200 calls=1396 mean_ci=[2.28µs 2.62µs] cold=709.0ns
+group=unpremultiply8/1920px benchmark=neon  |  vs_base=baseline  |  min=1.25µs mean=3.20µs median=3.40µs mad=193.7ns  |  throughput=2.24 GiB/s  |  n=190 cv=13.3% rounds=190 calls=369 mean_ci=[3.14µs 3.26µs] cold=1.38µs
+group=unpremultiply8/1920px benchmark=scalar  |  vs_base_pct=+227.51 ci=[+205.83% +249.83%] significant=true effect=2.02 p=0.0000  |  min=2.65µs mean=10.48µs median=7.67µs mad=1.75µs  |  throughput=698.81 MiB/s  |  n=190 cv=48.4% rounds=190 calls=369 mean_ci=[9.78µs 11.20µs] cold=2.58µs
+group=unpremultiply8/4096px benchmark=neon  |  vs_base=baseline  |  min=2.69µs mean=6.38µs median=6.58µs mad=931.1ns  |  throughput=2.39 GiB/s  |  n=200 cv=19.8% rounds=200 calls=175 mean_ci=[6.20µs 6.55µs] cold=2.83µs
+group=unpremultiply8/4096px benchmark=scalar  |  vs_base_pct=+222.25 ci=[+199.78% +245.82%] significant=true effect=1.79 p=0.0000  |  min=5.73µs mean=20.68µs median=16.30µs mad=3.83µs  |  throughput=755.61 MiB/s  |  n=200 cv=54.5% rounds=200 calls=175 mean_ci=[19.15µs 22.30µs] cold=5.46µs

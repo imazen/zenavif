@@ -1,0 +1,15 @@
+    Checking lz4_flex v0.11.6
+    Checking serde_core v1.0.229
+    Checking zenavif-parse v0.7.0 (/Users/lilith/work/zen/zenavif/zenavif-parse)
+    Checking fast-ssim2 v0.8.2
+    Checking zenpredict v0.2.0 (https://github.com/imazen/zenanalyze?rev=05de3cbc44b19d8769077d99710b0146c761d6df#05de3cbc)
+    Checking zenpredict v0.2.0 (/Users/lilith/work/zen/zenanalyze/zenpredict)
+    Checking zenavif v0.2.0 (/Users/lilith/work/zen/zenavif)
+    Checking zensim v0.3.0 (https://github.com/imazen/zensim?branch=main#a390a182)
+    Checking zenavif-serialize v0.2.0 (/Users/lilith/work/zen/zenavif/zenavif-serialize)
+    Checking serde_json v1.0.151
+    Checking serde v1.0.229
+    Checking zenbench v0.1.8
+    Checking zenpredict-bake v0.1.0 (/Users/lilith/work/zen/zenanalyze/zenpredict-bake)
+    Checking zensim-regress v0.4.0 (https://github.com/imazen/zensim?branch=main#a390a182)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.28s

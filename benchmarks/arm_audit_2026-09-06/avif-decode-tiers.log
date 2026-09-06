@@ -1,0 +1,46 @@
+   Compiling zenavif v0.2.0 (/Users/lilith/work/zen/zenavif)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.41s
+     Running benches/decode_benchmark.rs (target/release/deps/decode_benchmark-74550cfb608b1ca4)
+[zenbench] calibration: int=0.30ns/iter mem_bw=106.5GiB/s mem_lat=7.4ns
+[zenbench] timer resolution: 41ns, loop overhead: 0.30ns/iter, TSC: 1.000 ticks/ns (invariant)
+[zenbench] results → /Users/lilith/tmp/zenbench/zenbench-1788674878-13948.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1788674878-13948
+  git: bd852fdb8d6b32f4c591521bc755393cde02e9d6
+═══════════════════════════════════════════════════════════════
+
+  decode_tiers/kodim03_yuv420_8bpc.avif  30 rounds × 1 calls
+                    mean ±mad ms  95% CI vs base       ops/s
+  ├─ native_simd      6.5 ±0.6ms  [6.3–6.7]ms          60.5M
+  ╰─ forced_scalar   13.5 ±0.8ms  [+101.3%–+113.4%]    29.2M
+
+  native_simd    ███████████████████████████████████████████████████ 60.5 Mops/s
+  forced_scalar  █████████████████████████ 29.2 Mops/s
+
+  decode_tiers/extended_pixi.avif  200 rounds × 25 calls
+                       mean ±mad µs  95% CI vs base      ops/s
+  ├─ native_simd     111.3 ±13.5µs  [108.9–113.9]µs     144K
+  ╰─ forced_scalar   112.0 ±16.1µs  [-0.9%–+1.7%]       143K [1]
+
+  native_simd    ████████████████████████████████████████████████████ 144 Kops/s
+  forced_scalar  ████████████████████████████████████████████████████ 143 Kops/s
+  [1] CI crosses zero
+
+  decode_tiers/clap_irot_imir_non_essential.avif  200 rounds × 72 calls
+                      mean ±mad µs  95% CI vs base     ops/s
+  ├─ native_simd     100.4 ±9.1µs  [98.9–101.7]µs     4.07M
+  ╰─ forced_scalar   116.3 ±9.8µs  [+14.0%–+17.8%]    3.51M
+
+  native_simd    ███████████████████████████████████████████████████ 4.07 Mops/s
+  forced_scalar  ████████████████████████████████████████████ 3.51 Mops/s
+
+  total: 51.0s  (4 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
+group=decode_tiers/kodim03_yuv420_8bpc.avif benchmark=native_simd  |  vs_base=baseline  |  min=5.76ms mean=6.50ms median=6.72ms mad=644.70µs  |  throughput=60.46 Mops/s  |  n=30 cv=8.5% rounds=30 calls=1 mean_ci=[6.31ms 6.70ms] cold=5.48ms
+group=decode_tiers/kodim03_yuv420_8bpc.avif benchmark=forced_scalar  |  vs_base_pct=+107.28 ci=[+101.27% +113.39%] significant=true effect=11.79 p=0.0000  |  min=12.13ms mean=13.48ms median=13.44ms mad=836.48µs  |  throughput=29.17 Mops/s  |  n=30 cv=4.7% rounds=30 calls=1 mean_ci=[13.25ms 13.70ms] cold=11.26ms
+group=decode_tiers/extended_pixi.avif benchmark=native_simd  |  vs_base=baseline  |  min=49.55µs mean=111.32µs median=110.17µs mad=13.50µs  |  throughput=143.72 Kops/s  |  n=200 cv=16.3% rounds=200 calls=25 mean_ci=[108.86µs 113.86µs] cold=37.12µs
+group=decode_tiers/extended_pixi.avif benchmark=forced_scalar  |  vs_base_pct=+0.40 ci=[-0.93% +1.74%] significant=false effect=0.03 p=0.2896  |  min=48.02µs mean=112.03µs median=112.03µs mad=16.15µs  |  throughput=142.82 Kops/s  |  n=200 cv=16.9% rounds=200 calls=25 mean_ci=[109.41µs 114.62µs] cold=37.42µs
+group=decode_tiers/clap_irot_imir_non_essential.avif benchmark=native_simd  |  vs_base=baseline  |  min=59.33µs mean=100.35µs median=99.32µs mad=9.12µs  |  throughput=4.07 Mops/s  |  n=200 cv=10.1% rounds=200 calls=72 mean_ci=[98.95µs 101.74µs] cold=59.92µs
+group=decode_tiers/clap_irot_imir_non_essential.avif benchmark=forced_scalar  |  vs_base_pct=+15.88 ci=[+14.01% +17.76%] significant=true effect=1.45 p=0.0000  |  min=70.63µs mean=116.29µs median=116.32µs mad=9.83µs  |  throughput=3.51 Mops/s  |  n=200 cv=10.2% rounds=200 calls=72 mean_ci=[114.65µs 117.93µs] cold=66.25µs

@@ -1,0 +1,244 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.47
+   Compiling libm v0.2.16
+   Compiling autocfg v1.5.1
+   Compiling num-traits v0.2.19
+   Compiling libc v0.2.189
+   Compiling safe_unaligned_simd v0.2.5
+   Compiling cfg-if v1.0.4
+   Compiling imgref v1.12.3
+   Compiling memchr v2.8.3
+   Compiling thiserror v2.0.20
+   Compiling crossbeam-utils v0.8.22
+   Compiling syn v2.0.119
+   Compiling syn v3.0.4
+   Compiling rustversion v1.0.23
+   Compiling paste v1.0.15
+   Compiling archmage-macros v0.9.28
+   Compiling bytemuck_derive v1.12.0
+   Compiling thiserror-impl v2.0.20
+   Compiling bytemuck v1.25.2
+   Compiling archmage v0.9.28
+   Compiling whereat v0.1.5
+   Compiling crossbeam-epoch v0.9.20
+   Compiling rgb v0.8.53
+   Compiling bitflags v2.13.1
+   Compiling crossbeam-deque v0.8.7
+   Compiling magetypes v0.9.28
+   Compiling equator-macro v0.4.2
+   Compiling arrayvec v0.7.8
+   Compiling rayon-core v1.13.0
+   Compiling log v0.4.34
+   Compiling equator v0.4.2
+   Compiling zenpixels v0.2.16
+   Compiling num-integer v0.1.47
+   Compiling zerocopy v0.8.56
+   Compiling version_check v0.9.5
+   Compiling simd-adler32 v0.3.10
+   Compiling enough v0.4.4
+   Compiling num-bigint v0.4.8
+   Compiling zerocopy-derive v0.8.56
+   Compiling stable_deref_trait v1.2.1
+   Compiling either v1.18.0
+   Compiling aligned-vec v0.6.4
+   Compiling as-slice v0.2.1
+   Compiling num-rational v0.4.2
+   Compiling linear-srgb v0.6.12
+   Compiling adler2 v2.0.1
+   Compiling aligned v0.4.3
+   Compiling rayon v1.12.0
+   Compiling heck v0.5.0
+   Compiling anyhow v1.0.104
+   Compiling almost-enough v0.4.4
+   Compiling num-derive v0.4.2
+   Compiling crc32fast v1.5.1
+   Compiling serde_core v1.0.229
+   Compiling smallvec v1.15.2
+   Compiling zencodec v0.1.26
+   Compiling half v2.7.1
+   Compiling jobserver v0.1.35
+   Compiling v_frame v0.3.9
+   Compiling garb v0.2.8
+   Compiling wide v1.7.0
+   Compiling once_cell v1.21.4
+   Compiling find-msvc-tools v0.1.11
+   Compiling parking_lot_core v0.9.12
+   Compiling lz4_flex v0.11.6
+   Compiling rustix v1.1.4
+   Compiling built v0.8.1
+   Compiling shlex v2.0.1
+   Compiling zmij v1.0.23
+   Compiling utf8parse v0.2.2
+   Compiling lz4_flex v0.13.1
+   Compiling av-scenechange v0.14.1
+   Compiling zenpixels-convert v0.2.16
+   Compiling anstyle-parse v1.0.0
+   Compiling nasm-rs v0.3.2
+   Compiling cc v1.4.4
+   Compiling rav1e v0.8.1
+   Compiling miniz_oxide v0.8.9
+   Compiling miniz_oxide v0.9.1
+   Compiling slotmap v1.1.1
+   Compiling pulp v0.22.3
+   Compiling errno v0.3.14
+   Compiling arg_enum_proc_macro v0.3.4
+   Compiling profiling-procmacros v1.0.18
+   Compiling no_std_io2 v0.9.4
+   Compiling nom v8.0.0
+   Compiling pastey v0.1.1
+   Compiling serde_json v1.0.151
+   Compiling quick-error v2.0.1
+   Compiling scopeguard v1.2.0
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling colorchoice v1.0.5
+   Compiling anstyle-query v1.1.5
+   Compiling y4m v0.8.0
+   Compiling anstyle v1.0.14
+   Compiling serde v1.0.229
+   Compiling anstream v1.0.0
+   Compiling lock_api v0.4.14
+   Compiling av1-grain v0.2.5
+   Compiling profiling v1.0.18
+   Compiling bitstream-io v4.10.0
+   Compiling flate2 v1.1.10
+   Compiling rav1d-safe v0.6.0 (https://github.com/imazen/rav1d-safe?rev=66f58fa6a64c689998721cc5cdb16a4698e26eec#66f58fa6)
+   Compiling maybe-rayon v0.1.1
+   Compiling strum_macros v0.28.0
+   Compiling itertools v0.14.0
+   Compiling objc2-core-foundation v0.3.2
+   Compiling num-complex v0.4.6
+   Compiling serde_derive v1.0.229
+   Compiling atomig-macro v0.4.0
+   Compiling simd_helpers v0.1.0
+   Compiling byte-slice-cast v1.2.3
+   Compiling zenresize v0.3.1
+   Compiling itoa v1.0.18
+   Compiling weezl v0.1.12
+   Compiling new_debug_unreachable v1.0.6
+   Compiling strsim v0.11.1
+   Compiling bytes v1.12.1
+   Compiling zune-core v0.5.3
+   Compiling object v0.37.3
+   Compiling clap_lex v1.1.0
+   Compiling pulp-wasm-simd-flag v0.1.1
+   Compiling yuvxyb-math v0.1.1
+   Compiling noop_proc_macro v0.3.0
+   Compiling reborrow v0.5.5
+   Compiling fast-ssim2 v0.8.2
+   Compiling clap_builder v4.6.6
+   Compiling av-data v0.4.4
+   Compiling zune-jpeg v0.5.15
+   Compiling strum v0.28.0
+   Compiling atomig v0.4.3
+   Compiling objc2-io-kit v0.3.2
+   Compiling parking_lot v0.12.5
+   Compiling zenpredict v0.2.0 (https://github.com/imazen/zenanalyze?rev=05de3cbc44b19d8769077d99710b0146c761d6df#05de3cbc)
+   Compiling rav1d-disjoint-mut v0.3.1 (https://github.com/imazen/rav1d-safe?rev=66f58fa6a64c689998721cc5cdb16a4698e26eec#66f58fa6)
+   Compiling clap_derive v4.6.4
+   Compiling zenflate v0.3.6
+   Compiling fdeflate v0.3.7
+   Compiling zune-inflate v0.2.54
+   Compiling v_frame v0.5.2
+   Compiling avif-serialize v0.8.9
+   Compiling zenblend v0.1.3
+   Compiling raw-cpuid v11.6.0
+   Compiling loop9 v0.1.5
+   Compiling bitreader v0.3.11
+   Compiling to_method v1.1.0
+   Compiling fax v0.2.7
+   Compiling bit_field v0.10.3
+   Compiling assert_matches v1.5.0
+   Compiling grid v1.0.1
+   Compiling byteorder-lite v0.1.0
+   Compiling lebe v0.5.3
+   Compiling color_quant v1.1.0
+   Compiling fallible_collections v0.5.2
+   Compiling byteorder v1.5.0
+   Compiling gimli v0.32.3
+   Compiling leb128 v0.2.7
+   Compiling pxfm v0.1.30
+   Compiling exr v1.74.2
+   Compiling zenavif-parse v0.7.0 (/Users/lilith/work/zen/zenavif/zenavif-parse)
+   Compiling addr2line v0.25.1
+   Compiling gif v0.14.2
+   Compiling moxcms v0.8.1
+   Compiling image-webp v0.2.4
+   Compiling taffy v0.12.2
+   Compiling tiff v0.11.3
+   Compiling clap v4.6.6
+   Compiling zensim v0.3.0 (https://github.com/imazen/zensim?branch=main#a390a182)
+   Compiling ravif v0.13.0
+   Compiling yuvxyb v0.5.0
+   Compiling png v0.18.1
+   Compiling zenpng v0.1.4
+   Compiling sysinfo v0.36.1
+   Compiling fs4 v1.1.0
+   Compiling terminal_size v0.4.4
+   Compiling ultrahdr-core v0.5.0
+   Compiling zenpredict v0.2.0 (/Users/lilith/work/zen/zenanalyze/zenpredict)
+   Compiling env_filter v2.0.0
+   Compiling qoi v0.4.1
+   Compiling fs2 v0.4.3
+   Compiling yuv v0.8.17
+   Compiling base64 v0.22.1
+   Compiling rustc-demangle v0.1.28
+   Compiling seahash v4.1.0
+   Compiling zenpredict-bake v0.1.0 (/Users/lilith/work/zen/zenanalyze/zenpredict-bake)
+   Compiling backtrace v0.3.76
+   Compiling image v0.25.10
+   Compiling env_logger v0.11.11
+   Compiling zenbench v0.1.8
+   Compiling zenavif v0.2.0 (/Users/lilith/work/zen/zenavif)
+   Compiling zenanalyze v0.2.0 (/Users/lilith/work/zen/zenanalyze)
+   Compiling zensim-regress v0.4.0 (https://github.com/imazen/zensim?branch=main#a390a182)
+   Compiling zenavif-serialize v0.2.0 (/Users/lilith/work/zen/zenavif/zenavif-serialize)
+   Compiling zenutils-fuzz v0.1.0
+    Finished `bench` profile [optimized + debuginfo] target(s) in 17.07s
+     Running benches/tier_isolation.rs (target/release/deps/tier_isolation-e9651b0f363321da)
+[zenbench] calibration: int=0.40ns/iter mem_bw=80.8GiB/s mem_lat=7.8ns
+[zenbench] timer resolution: 41ns, loop overhead: 0.42ns/iter, TSC: 1.000 ticks/ns (invariant)
+[zenbench] results → /Users/lilith/tmp/zenbench/zenbench-1788674592-13753.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1788674592-13753
+  git: 2ebca1b4e4ecfebf1dd0888cb356b6982360abe4
+═══════════════════════════════════════════════════════════════
+
+  yuv420_to_rgb8/64x64  200 rounds × 182 calls
+              mean ±mad µs  95% CI vs base    ops/s
+  ├─ neon     13.8 ±3.0µs  [13.4–14.3]µs     296M [1]
+  ╰─ scalar   12.8 ±2.5µs  [-7.9%–-6.9%]     320M [2]
+
+  scalar  ███████████████████████████████████████████████████████████ 320 Mops/s
+  neon    ███████████████████████████████████████████████████████ 296 Mops/s
+  [1] CV=24%
+  [2] CV=24%
+
+  yuv420_to_rgb8/512x256  200 rounds × 30 calls
+                mean ±mad µs  95% CI vs base      ops/s
+  ├─ neon     257.9 ±21.0µs  [254.3–261.6]µs     508M
+  ╰─ scalar   253.8 ±21.4µs  [-3.3%–+0.1%]       516M [1]
+
+  scalar  ███████████████████████████████████████████████████████████ 516 Mops/s
+  neon    ██████████████████████████████████████████████████████████ 508 Mops/s
+  [1] CI crosses zero
+
+  yuv420_to_rgb8/1920x1080  200 rounds × 2 calls
+             mean ±mad ms  95% CI vs base   ops/s
+  ├─ neon     3.7 ±0.3ms  [3.7–3.8]ms      558M
+  ╰─ scalar   3.7 ±0.4ms  [-2.0%–+1.2%]    560M [1]
+
+  scalar  ███████████████████████████████████████████████████████████ 560 Mops/s
+  neon    ███████████████████████████████████████████████████████████ 558 Mops/s
+  [1] CI crosses zero
+
+  total: 69.4s  (47 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
+group=yuv420_to_rgb8/64x64 benchmark=neon  |  vs_base=baseline  |  min=5.03µs mean=13.83µs median=14.48µs mad=2.96µs  |  throughput=296.10 Mops/s  |  n=200 cv=24.3% rounds=200 calls=182 mean_ci=[13.37µs 14.30µs] cold=6.58µs
+group=yuv420_to_rgb8/64x64 benchmark=scalar  |  vs_base_pct=-7.45 ci=[-7.95% -6.95%] significant=true effect=-0.32 p=0.0000  |  min=4.65µs mean=12.78µs median=13.38µs mad=2.46µs  |  throughput=320.40 Mops/s  |  n=200 cv=24.1% rounds=200 calls=182 mean_ci=[12.36µs 13.21µs] cold=5.04µs
+group=yuv420_to_rgb8/512x256 benchmark=neon  |  vs_base=baseline  |  min=157.20µs mean=257.92µs median=258.11µs mad=20.96µs  |  throughput=508.20 Mops/s  |  n=200 cv=10.2% rounds=200 calls=30 mean_ci=[254.30µs 261.55µs] cold=159.96µs
+group=yuv420_to_rgb8/512x256 benchmark=scalar  |  vs_base_pct=-1.60 ci=[-3.28% +0.06%] significant=false effect=-0.16 p=0.0217  |  min=156.15µs mean=253.79µs median=254.61µs mad=21.44µs  |  throughput=516.46 Mops/s  |  n=200 cv=10.3% rounds=200 calls=30 mean_ci=[250.15µs 257.36µs] cold=161.75µs
+group=yuv420_to_rgb8/1920x1080 benchmark=neon  |  vs_base=baseline  |  min=2.27ms mean=3.72ms median=3.68ms mad=287.26µs  |  throughput=557.91 Mops/s  |  n=200 cv=10.1% rounds=200 calls=2 mean_ci=[3.66ms 3.77ms] cold=2.33ms
+group=yuv420_to_rgb8/1920x1080 benchmark=scalar  |  vs_base_pct=-0.41 ci=[-1.98% +1.17%] significant=false effect=-0.04 p=0.3734  |  min=2.25ms mean=3.70ms median=3.74ms mad=385.76µs  |  throughput=560.20 Mops/s  |  n=200 cv=10.7% rounds=200 calls=2 mean_ci=[3.65ms 3.76ms] cold=2.33ms
