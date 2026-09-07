@@ -54,13 +54,14 @@ pub(super) fn convert_native_info(native: &crate::image::ImageInfo) -> ImageInfo
         ));
     }
     if let Some(ref mdcv) = native.mastering_display {
+        // Wire GBR order -> codec RGB order.
         // Convert from 0.00002 units (u16) to CIE 1931 xy (f32), and 0.0001 cd/m² (u32) to f32
         let xy = |v: u16| v as f32 * 0.00002;
         info = info.with_mastering_display(zencodec::MasteringDisplay::new(
             [
+                [xy(mdcv.primaries[2].0), xy(mdcv.primaries[2].1)],
                 [xy(mdcv.primaries[0].0), xy(mdcv.primaries[0].1)],
                 [xy(mdcv.primaries[1].0), xy(mdcv.primaries[1].1)],
-                [xy(mdcv.primaries[2].0), xy(mdcv.primaries[2].1)],
             ],
             [xy(mdcv.white_point.0), xy(mdcv.white_point.1)],
             mdcv.max_luminance as f32 * 0.0001,

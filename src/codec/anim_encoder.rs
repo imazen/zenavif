@@ -48,6 +48,7 @@ pub struct AvifAnimationFrameEncoder {
     pub(super) limits: ResourceLimits,
     /// Number of frames pushed so far, for max_frames enforcement.
     pub(super) frame_count: u32,
+    pub(super) loop_count: Option<u32>,
 }
 
 #[cfg(feature = "encode")]
@@ -234,7 +235,7 @@ impl AvifAnimationFrameEncoder {
 
         let stop_token = self.stop_token();
 
-        let avif_file = match self.frames[0] {
+        let mut avif_file = match self.frames[0] {
             BufferedFrame::Rgb8 { .. } => {
                 let anim_frames: Vec<crate::AnimationFrame> = self
                     .frames
@@ -312,6 +313,10 @@ impl AvifAnimationFrameEncoder {
                 result.avif_file
             }
         };
+
+        if let Some(count) = self.loop_count {
+            super::animation_repetition::set_loop_count(&mut avif_file, count)?;
+        }
 
         self.limits
             .check_output_size(avif_file.len() as u64)

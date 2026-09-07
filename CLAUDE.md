@@ -298,6 +298,26 @@ backend capability landing:**
    backend config and map it from `zencodec::AllocPreference` /
    `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
 
+## Codec playback and HDR correction — 2026-09-07 (local)
+
+The codec job stored loop-count requests but did not pass them to its animation
+encoder. It now carries the count through finish and updates only the generated
+container's fixed-width movie/track presentation durations and edit repeat flags.
+Both zenravif and SVT use the same serializer layout. All fields are validated
+before mutation; sample bytes, offsets, media timing and metadata remain intact.
+The helper deliberately accepts the generated version-1/single-edit layout,
+not arbitrary input AVIF editing. Count 0 stays infinite; 1 plays once; positive
+counts include the initial playback. Overflow produces an error with unchanged
+bytes. Tests cover both backends and the maximum u32 count.
+
+Codec metadata uses RGB primary order, while native/container MDCV uses GBR.
+Both encoder paths and decoded `ImageInfo` now reorder correctly. Animation
+also used incorrect 65535/256/16384 scaling: corrected to 50000 chromaticity and
+10000 luminance units. Independent wire-value and native-fixture probe tests
+failed before correction; a staged ordering-only fix then exposed the remaining
+animation scaling failure. This avoids an encode/decode round trip masking two
+inverse ordering bugs. See `benchmarks/codec_playback_hdr_2026-09-07.md`.
+
 ## Animation integration audit — 2026-09-07 (local work)
 
 The public SVT RGB/RGBA animation entry points were still blanket-refused after

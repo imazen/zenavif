@@ -120,11 +120,8 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
             // round-trip against our own decoder.)
             let xy_to_u16 = |v: f32| (v * 50000.0 + 0.5) as u16;
             config = config.mastering_display(crate::MasteringDisplayConfig {
+                // zencodec RGB order -> ST 2086 green, blue, red wire order.
                 primaries: [
-                    (
-                        xy_to_u16(mdcv.primaries_xy[0][0]),
-                        xy_to_u16(mdcv.primaries_xy[0][1]),
-                    ),
                     (
                         xy_to_u16(mdcv.primaries_xy[1][0]),
                         xy_to_u16(mdcv.primaries_xy[1][1]),
@@ -132,6 +129,10 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
                     (
                         xy_to_u16(mdcv.primaries_xy[2][0]),
                         xy_to_u16(mdcv.primaries_xy[2][1]),
+                    ),
+                    (
+                        xy_to_u16(mdcv.primaries_xy[0][0]),
+                        xy_to_u16(mdcv.primaries_xy[0][1]),
                     ),
                 ],
                 white_point: (
@@ -220,13 +221,10 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
             );
         }
         if let Some(mdcv) = self.mastering_display {
-            let xy_to_u16 = |v: f32| (v * 65535.0 + 0.5) as u16;
+            let xy_to_u16 = |v: f32| (v * 50000.0 + 0.5) as u16;
             config = config.mastering_display(crate::MasteringDisplayConfig {
+                // zencodec RGB order -> ST 2086 green, blue, red wire order.
                 primaries: [
-                    (
-                        xy_to_u16(mdcv.primaries_xy[0][0]),
-                        xy_to_u16(mdcv.primaries_xy[0][1]),
-                    ),
                     (
                         xy_to_u16(mdcv.primaries_xy[1][0]),
                         xy_to_u16(mdcv.primaries_xy[1][1]),
@@ -235,13 +233,17 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
                         xy_to_u16(mdcv.primaries_xy[2][0]),
                         xy_to_u16(mdcv.primaries_xy[2][1]),
                     ),
+                    (
+                        xy_to_u16(mdcv.primaries_xy[0][0]),
+                        xy_to_u16(mdcv.primaries_xy[0][1]),
+                    ),
                 ],
                 white_point: (
                     xy_to_u16(mdcv.white_point_xy[0]),
                     xy_to_u16(mdcv.white_point_xy[1]),
                 ),
-                max_luminance: (mdcv.max_luminance * 256.0 + 0.5) as u32,
-                min_luminance: (mdcv.min_luminance * 16384.0 + 0.5) as u32,
+                max_luminance: (mdcv.max_luminance * 10000.0 + 0.5) as u32,
+                min_luminance: (mdcv.min_luminance * 10000.0 + 0.5) as u32,
             });
         }
         if let Some(rot) = self.rotation {
@@ -291,6 +293,7 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
             canvas_height: canvas_h,
             limits: self.limits,
             frame_count: 0,
+            loop_count: self.loop_count.flatten(),
         })
     }
 }

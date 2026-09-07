@@ -12,6 +12,9 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Honor codec-job animation loop counts on zenravif and SVT, including play-once and maximum-u32 counts, without changing encoded samples or metadata. Reject repeated-duration overflow before modifying output.
+- Correct codec HDR metadata conversion: RGB primary order maps to AVIF's green/blue/red wire order and back; animation chromaticities and luminances now use the same ST 2086 units as still images.
+
 - Wire SVT RGB/RGBA animation for 8/16-bit inputs and 8/10-bit output through the native and codec-trait entry points. Share pixel coding with stills, preserve timing/alpha/metadata, emit full sequence headers and derive the level from the fastest frame interval.
 - Correct missing premultiplied-alpha signaling on the SVT still path and carry it into animation, verified against decoded channel values.
 
