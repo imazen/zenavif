@@ -1485,6 +1485,18 @@ impl AV1Metadata {
     }
 }
 
+/// Exact frame timing in the animation's media timescale. No conversion to
+/// milliseconds or floating-point seconds is performed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AnimationFrameTiming {
+    /// Media ticks per second.
+    pub timescale: u32,
+    /// Presentation timestamp, in media ticks.
+    pub pts_in_timescales: u64,
+    /// Sample duration, in media ticks.
+    pub duration_in_timescales: u32,
+}
+
 /// A single frame from an animated AVIF, with zero-copy when possible.
 ///
 /// The `data` field is `Cow::Borrowed` when the frame lives in a single
@@ -1493,6 +1505,8 @@ pub struct FrameRef<'a> {
     pub data: Cow<'a, [u8]>,
     /// Alpha channel data for this frame, if the animation has a separate alpha track.
     pub alpha_data: Option<Cow<'a, [u8]>>,
+    /// Legacy whole milliseconds, truncated and saturated to `u32::MAX`.
+    /// Use [`AvifParser::frame_timing`] for exact media ticks.
     pub duration_ms: u32,
 }
 
@@ -2320,6 +2334,39 @@ impl<'data> AvifParser<'data> {
             data.extend_from_slice(slice).map_err(|e| at!(Error::from(e)))?;
         }
         Ok(Cow::Owned(data.into_iter().collect()))
+    }
+
+    /// Get exact timing without decoding or copying frame data. This avoids
+    /// rounding sub-millisecond frames to zero or saturating very long frames.
+    /// Returns an error for a still image, invalid index, missing timing entry,
+    /// zero timescale, or timestamp overflow in a malformed sample table.
+    pub fn frame_timing(&self, index: usize) -> Result<AnimationFrameTiming> {
+        let anim = self.animation_data.as_ref()
+            .ok_or_else(|| at!(Error::InvalidData("not an animated AVIF")))?;
+        if index >= anim.sample_table.sample_sizes.len() {
+            return Err(at!(Error::InvalidData("frame index out of bounds")));
+        }
+        if anim.media_timescale == 0 {
+            return Err(at!(Error::InvalidData("animation has zero media timescale")));
+        }
+        let mut remaining = index as u64;
+        let mut pts = 0u64;
+        for entry in &anim.sample_table.time_to_sample {
+            let count = u64::from(entry.sample_count);
+            let consumed = remaining.min(count);
+            // A single run fits u64 (both factors originate from u32).
+            pts = pts.checked_add(consumed * u64::from(entry.sample_delta))
+                .ok_or_else(|| at!(Error::InvalidData("animation timestamp overflow")))?;
+            if remaining < count {
+                return Ok(AnimationFrameTiming {
+                    timescale: anim.media_timescale,
+                    pts_in_timescales: pts,
+                    duration_in_timescales: entry.sample_delta,
+                });
+            }
+            remaining -= count;
+        }
+        Err(at!(Error::InvalidData("frame timing not found")))
     }
 
     /// Resolve a single animation frame from the raw buffer.

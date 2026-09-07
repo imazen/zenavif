@@ -300,6 +300,24 @@ backend capability landing:**
 
 ## Known Bugs
 
+**Open 2026-09-07 — animation timing/count precision in downstream APIs.**
+The serializer correctly writes `RepetitionCount::Finite(u32::MAX)` as
+4,294,967,296 total playbacks, but the parser's `u32` `loop_count` rejects it:
+`animation play count is not representable`. Reproduced with the real sources
+by `~/tmp/animation-metadata/serializer-check/examples/repeat_boundary.rs`;
+log `timing-clippy.log` in the parent directory. Libavif separately maps counts
+above INT_MAX to infinite by policy, so the independent timing gate verifies
+exact finite duration in the boxes, not only its reported repeat count.
+Preserving the complete finite count through parser and codec APIs remains work.
+
+`AvifParser::frame_timing` now exposes exact media ticks and 64-bit timestamps,
+including durations below 1 ms and above u32 milliseconds. The older
+`FrameRef::duration_ms` remains truncated/saturated for compatibility; managed
+and codec decode adapters still consume that legacy field and require follow-up
+wiring. Local verification: 83 serializer tests, 19 parser tests and 5 parser
+doctests pass; both source harnesses pass clippy with warnings denied.
+
+
 **Fixed 2026-09-07 — mirror orientation conversion.** The adapter interpreted
 HEIF `imir=0` as a left/right flip at 0/180 degrees. ISO/IEC 23008-12:2022
 6.5.12 and libavif 1.3.0 define 0 as top/bottom and 1 as left/right; rotation

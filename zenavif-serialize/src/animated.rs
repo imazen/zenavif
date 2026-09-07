@@ -840,6 +840,32 @@ mod tests {
     }
 
     #[test]
+    fn exact_timing_roundtrip_preserves_submilliseconds_and_large_timestamps() {
+        for (timescale, durations) in [
+            (1001, vec![1, 1, 1000, 1000, 1]),
+            (1, vec![u32::MAX, u32::MAX, 1]),
+            (u32::MAX, vec![1, u32::MAX, u32::MAX - 1]),
+            (1000, (0..257).map(|i| 1 + i % 5).collect()),
+        ] {
+            let frames: Vec<_> = durations.iter().map(|&d| AnimFrame::new(b"frame", d).with_sync(true)).collect();
+            let mut image = AnimatedImage::new();
+            image.set_timescale(timescale).set_repetition_count(RepetitionCount::Finite(2));
+            let bytes = image.try_serialize(64, 80, &frames, b"header", None).unwrap();
+            let parsed = zenavif_parse_current::AvifParser::from_bytes(&bytes).unwrap();
+            let mut pts = 0u64;
+            for (i, duration) in durations.iter().enumerate() {
+                let timing = parsed.frame_timing(i).unwrap();
+                assert_eq!(timing.timescale, timescale);
+                assert_eq!(timing.pts_in_timescales, pts);
+                assert_eq!(timing.duration_in_timescales, *duration);
+                pts += u64::from(*duration);
+            }
+            assert!(parsed.frame_timing(durations.len()).is_err());
+            assert!(parsed.frame_timing(usize::MAX).is_err());
+        }
+    }
+
+    #[test]
     fn checked_animation_rejects_inconsistent_alpha_and_repeat_overflow() {
         let mut image = AnimatedImage::new();
         let frames = [AnimFrame::new(b"a", u32::MAX).with_sync(true), AnimFrame::new(b"b", u32::MAX)];

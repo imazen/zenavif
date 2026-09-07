@@ -12,6 +12,8 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Parser: `frame_timing(index)` exposes exact media ticks and 64-bit presentation timestamps, avoiding the precision limits of the legacy millisecond field.
+
 - Animated clean-aperture cropping with validated integer rectangles and an uncropped secondary poster; reuse encoded sample extents and preserve independent alpha and metadata references.
 
 - Animated serializer: square-pixel aspect, rotation and mirroring on color tracks and posters, with checked validation and essential poster transform associations.

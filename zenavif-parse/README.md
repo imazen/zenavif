@@ -130,10 +130,13 @@ if let Some(grid) = parser.grid_config() {
 
 ```rust
 if let Some(info) = parser.animation_info() {
-    for frame in parser.frames() {
+    for (index, frame) in parser.frames().enumerate() {
         let frame = frame?;
         decode_av1(&frame.data)?;
-        // display for frame.duration_ms milliseconds
+        let timing = parser.frame_timing(index)?;
+        // Exact duration: timing.duration_in_timescales / timing.timescale seconds.
+        // timing.pts_in_timescales preserves the 64-bit presentation timestamp.
+        // frame.duration_ms is a legacy truncated/saturated convenience value.
     }
 }
 ```
