@@ -18,6 +18,7 @@ version is pre-bumped to prevent an accidental semver-violating 0.1.5.
   allocation — the crate deliberately avoids that overhead).
 
 ### Fixed
+- Animation now writes repetition edit lists, poster alpha, premultiplied associations and ICC/Exif/XMP/CICP/CLLI/MDCV metadata on color items and tracks; adds checked serialization (`0abe957f`).
 - **The primary item's `av1C` now restates the payload's own `seq_profile` and
   chroma format instead of the caller's settings** (`ae9a354f`). `Aviffy::new()`
   defaults to `min_seq_profile = 1` and `chroma_subsampling = NONE` (4:4:4), so a

@@ -9,6 +9,7 @@ a 0.6.x patch. **0.6.3 (the size=0-box fix, imazen/zenavif#16) must be published
 from commit `c36b822`**, the pre-break release-prep point (CI green there).
 
 ### Fixed
+- Derive finite animation play counts from track and edit-list durations instead of treating every repeating edit list as infinite (`0abe957f`).
 - **`base_q_idx` / `lossless` were read from the wrong bit offset on
   `reduced_still_picture_header` streams — which is what still-AVIF encoders
   emit** (imazen/zenavif#46). `parse_frame_header_quantization`'s
