@@ -318,14 +318,34 @@ default features; unavailable optional/build/dev sibling dependencies excluded).
 Parser/serializer clippy passes with warnings denied. This is not a claim that
 the canonical root workspace or all feature combinations passed.
 
-**Open 2026-09-07 — exact timing in downstream decoder APIs.**
-`AvifParser::frame_timing` now exposes exact media ticks and 64-bit timestamps,
-including durations below 1 ms and above u32 milliseconds. The older
-`FrameRef::duration_ms` remains truncated/saturated for compatibility; managed
-and codec decode adapters still consume that legacy field and require follow-up
-wiring. Local verification: 83 serializer tests, 19 parser tests and 5 parser
-doctests pass; both source harnesses pass clippy with warnings denied.
+**Fixed 2026-09-07 — exact native decode timing and duration-limit undercounts.**
+`DecodedFrame::timing` now carries `AnimationFrameTiming` through eager and lazy
+native decode, including the alternate AOM construction path. The type is
+re-exported at the root; native and concrete codec decoders expose
+`frame_timing(index)` without copying payloads or advancing playback. The older
+`duration_ms` fields retain their explicitly documented truncated/saturated
+behavior. The erased shared zencodec frame trait still exposes only u32 whole
+milliseconds; full precision requires the native frame or concrete accessor.
 
+Two actual resource-limit bypasses were reproduced before fixing the adapter:
+two 1/1001-second frames were accepted under a 1 ms limit, and u32::MAX seconds
+were accepted under a u32::MAX millisecond limit. The adapter now compares the
+exact cumulative endpoint to the limit using u128 cross-multiplication, including
+skipped frames. No rounding, saturation or overflowing u64 conversion is involved.
+
+Local verification: `tests/animation_exact_timing.rs` passes 6/6 in the actual
+managed-source harness, covering 274 frames at six timelines (548 eager/lazy
+frame decodes with identical pixels), plus finite/infinite native pixel decode and
+codec probe/creation at both sides of the u32 playback-count boundary; u32-max
+sample durations/timescales,
+64-bit timestamps, exact limit equality and skipped frames. The 39-byte fixture
+is a real libavif 1.3.0 keyframe, embedded as text; no external corpus is needed.
+Before/after logs: `~/tmp/animation-metadata/timing-native-{before,after,final}.log`.
+Managed-source lib/tests clippy passes with warnings denied (`timing-native-clippy.log`).
+The optional AOM feature was wired but not compiled by this default-feature
+harness; the canonical full workspace remains unverified because of missing
+optional/build/dev sibling dependencies. Shared codec encode/decode interfaces
+still require a broader timing/count representation for complete precision.
 
 **Fixed 2026-09-07 — mirror orientation conversion.** The adapter interpreted
 HEIF `imir=0` as a left/right flip at 0/180 degrees. ISO/IEC 23008-12:2022

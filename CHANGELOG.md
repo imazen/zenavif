@@ -12,6 +12,9 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Native `DecodedFrame::timing` preserves exact duration and 64-bit timestamps in media ticks. `AnimationFrameTiming` is re-exported, and native/concrete codec decoders expose `frame_timing(index)` without advancing playback. The legacy millisecond fields remain truncated/saturated convenience values.
+- Fix animation duration-limit bypasses caused by truncating sub-millisecond frames or saturating long durations. Limits now compare exact cumulative media ticks, including skipped frames.
+
 - Animation playback counts now use `u64` in parser and native decoder metadata, preserving the entire finite range (including 4,294,967,296 total plays). This widens the public `loop_count` fields; consumers storing them in `u32` must use a checked conversion. The narrower zencodec adapter reports `Unsupported` for counts it cannot represent.
 
 - Parser: `frame_timing(index)` exposes exact media ticks and 64-bit presentation timestamps, avoiding the precision limits of the legacy millisecond field.

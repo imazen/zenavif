@@ -1,8 +1,8 @@
 //! AVIF image metadata types
 
 pub use zenavif_parse::{
-    CleanAperture, ColorInformation, ContentLightLevel, GainMapChannel, GainMapMetadata,
-    ImageMirror, ImageRotation, MasteringDisplayColourVolume, PixelAspectRatio,
+    AnimationFrameTiming, CleanAperture, ColorInformation, ContentLightLevel, GainMapChannel,
+    GainMapMetadata, ImageMirror, ImageRotation, MasteringDisplayColourVolume, PixelAspectRatio,
 };
 
 /// Gain map for SDR/HDR tone mapping (ISO 21496-1), bundled from AVIF container.
@@ -179,8 +179,11 @@ pub struct ImageInfo {
 pub struct DecodedFrame {
     /// Decoded pixel data for this frame.
     pub pixels: zenpixels::PixelBuffer,
-    /// Duration of this frame in milliseconds.
+    /// Legacy whole milliseconds, truncated and saturated to `u32::MAX`.
+    /// Use `timing` for exact duration and presentation timestamp.
     pub duration_ms: u32,
+    /// Exact media ticks, retaining sub-millisecond and very long durations.
+    pub timing: AnimationFrameTiming,
 }
 
 /// Metadata about a decoded animation.

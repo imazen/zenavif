@@ -660,7 +660,6 @@ impl AvifDecodeJob {
             preferred: preferred.to_vec(),
             current_frame: None,
             limits: self.limits,
-            accumulated_ms: 0,
             bake_to,
         })
     }

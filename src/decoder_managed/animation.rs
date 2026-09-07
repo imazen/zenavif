@@ -8,12 +8,19 @@
 use super::ManagedAvifDecoder;
 use crate::config::DecoderConfig;
 use crate::error::{Error, Result, error_from_rav1d};
-use crate::image::{DecodedAnimation, DecodedAnimationInfo, DecodedFrame};
+use crate::image::{AnimationFrameTiming, DecodedAnimation, DecodedAnimationInfo, DecodedFrame};
 use enough::Stop;
 use rav1d_safe::src::managed::{Decoder as Rav1dDecoder, Frame, Settings};
 use whereat::at;
 
 impl ManagedAvifDecoder {
+    /// Exact timing for a frame, without decoding pixels or advancing playback.
+    pub fn frame_timing(&self, index: usize) -> Result<AnimationFrameTiming> {
+        self.parser
+            .frame_timing(index)
+            .map_err(|e| e.map_error(Error::Parse))
+    }
+
     /// Decode an animated AVIF, returning all frames with timing info.
     ///
     /// Returns [`Error::Unsupported`] if the file is not animated.
@@ -79,6 +86,7 @@ impl ManagedAvifDecoder {
             frames.push(DecodedFrame {
                 pixels,
                 duration_ms: frame_ref.duration_ms,
+                timing: self.frame_timing(i)?,
             });
         }
 
@@ -294,6 +302,12 @@ impl AnimationDecoder {
         &self.info
     }
 
+    /// Exact timing for any frame, without decoding or advancing playback.
+    /// Returns an error if the index or container timing is invalid.
+    pub fn frame_timing(&self, index: usize) -> Result<AnimationFrameTiming> {
+        self.inner.frame_timing(index)
+    }
+
     /// Decode and return the next frame, or `None` if all frames have been decoded.
     pub fn next_frame(&mut self, stop: &(impl Stop + ?Sized)) -> Result<Option<DecodedFrame>> {
         if self.frame_index >= self.info.frame_count {
@@ -301,6 +315,8 @@ impl AnimationDecoder {
         }
 
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
+
+        let timing = self.frame_timing(self.frame_index)?;
 
         #[cfg(feature = "zenav1-aom")]
         if let Some(frames) = self.aom_frames.as_mut() {
@@ -318,6 +334,7 @@ impl AnimationDecoder {
             return Ok(Some(DecodedFrame {
                 pixels,
                 duration_ms,
+                timing,
             }));
         }
 
@@ -352,6 +369,7 @@ impl AnimationDecoder {
         Ok(Some(DecodedFrame {
             pixels,
             duration_ms,
+            timing,
         }))
     }
 

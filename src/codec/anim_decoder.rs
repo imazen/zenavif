@@ -62,8 +62,6 @@ pub struct AvifAnimationFrameDecoder {
     pub(super) current_frame: Option<PixelBuffer>,
     /// Resource limits for frame count and animation duration enforcement.
     pub(super) limits: ResourceLimits,
-    /// Accumulated animation duration in milliseconds across all decoded frames.
-    pub(super) accumulated_ms: u64,
     /// Orientation to bake into every frame: the intrinsic `irot`/`imir`
     /// transform on the bake path (`OrientationHint::bakes()`), or `Identity`
     /// (no-op) on the preserve path (the default). Applied after format
@@ -109,6 +107,19 @@ impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
 }
 
 impl AvifAnimationFrameDecoder {
+    /// Exact source timing without advancing playback. The shared zencodec
+    /// frame type exposes only legacy whole milliseconds; use this method
+    /// when retaining the concrete decoder and needing exact media ticks.
+    /// The index addresses source frames, including any skipped frames.
+    pub fn frame_timing(
+        &self,
+        index: usize,
+    ) -> Result<crate::AnimationFrameTiming, At<CodecError>> {
+        self.anim_decoder
+            .frame_timing(index)
+            .map_err(CodecError::of)
+    }
+
     fn render_next_frame_inner(
         &mut self,
         stop: Option<&dyn zencodec::enough::Stop>,
@@ -127,11 +138,19 @@ impl AvifAnimationFrameDecoder {
                 .check_frames(self.frames_decoded)
                 .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
 
-            // Accumulate and enforce max_animation_ms.
-            self.accumulated_ms += frame.duration_ms as u64;
-            self.limits
-                .check_animation_ms(self.accumulated_ms)
-                .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
+            // Use the exact cumulative endpoint, including skipped frames.
+            // Summing truncated milliseconds loses every sub-ms frame and
+            // undercounts very long frames. Cross-multiply in u128 so neither
+            // rounding nor a u64 tick-to-millisecond conversion can overflow.
+            if let Some(max_ms) = self.limits.max_animation_ms {
+                let end_ticks = u128::from(frame.timing.pts_in_timescales)
+                    + u128::from(frame.timing.duration_in_timescales);
+                if end_ticks * 1000 > u128::from(max_ms) * u128::from(frame.timing.timescale) {
+                    return Err(at!(Error::ResourceLimit(format!(
+                        "animation duration exceeds {max_ms} milliseconds",
+                    ))));
+                }
+            }
 
             // Skip frames before the requested start index. We must still
             // decode them to maintain correct compositing state, but we
