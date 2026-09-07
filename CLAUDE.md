@@ -298,9 +298,20 @@ backend capability landing:**
    backend config and map it from `zencodec::AllocPreference` /
    `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
 
+## Animation filter integration — 2026-09-07
+
+Owner pin `b829a9ee` applies explicit color CDEF/restoration overrides to
+animation contexts; alpha retains its independent preset policy. The canonical
+public-API regression fails against the previous pin and passes against the
+published fix at both coding depths, decoding eight complete two-frame files.
+Published-Git workspace validation passes 901/901 tests (nine existing skips)
+and all-feature library clippy.
+See `benchmarks/animation_filters_2026-09-07.md` for scope and validation.
+The thread/cancellation sections below retain their historical revisions.
+
 ## Animation thread integration — 2026-09-07
 
-The current owner pin is cavif-rs `939fa5a3`. The shared animation sequence
+The thread-forwarding owner revision was cavif-rs `939fa5a3`. The shared animation sequence
 encoder now applies the requested worker pool to color and alpha contexts.
 The canonical regression fails against the previous pin and passes against
 the published fix at coded depths 8 and 10, with identical complete files
