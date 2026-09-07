@@ -298,6 +298,18 @@ backend capability landing:**
    backend config and map it from `zencodec::AllocPreference` /
    `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
 
+## Animation coding controls — 2026-09-07
+
+Owner `ecbf41ec` forwards lossless on both tracks and VAQ/boost/tune/trellis
+on color. Backend `1d5a6e04` prevents trellis from changing lossless WHT
+coefficients. The public regression failed on the old owner (alpha 53 vs 0)
+and passes all 14 two-frame cases with the published pins. Workspace validation
+passes 903/903 tests (nine existing skips) and library Clippy. Owner libaom
+verification requires all eight lossless streams to match source planes
+exactly, including combined tuning. This is coded-plane losslessness, not
+an exact RGB round trip. See `benchmarks/animation_coding_2026-09-07.md`.
+The existing lossy quality investigation still prevents a wrapper main merge.
+
 ## Animation speed override integration — 2026-09-07
 
 Owner `a8eaf997` consumes eight previously dropped speed controls in the shared
