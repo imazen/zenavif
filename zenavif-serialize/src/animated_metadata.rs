@@ -8,7 +8,9 @@ pub(super) struct ImageItem<'a> {
     pub sample_len: u32,
 }
 
+#[derive(Clone)]
 pub(super) struct Sidecar {
+    target: u16,
     id: u16,
     kind: [u8; 4],
     content_type: &'static [u8],
@@ -19,12 +21,26 @@ pub(super) fn sidecars(image: &AnimatedImage) -> Vec<Sidecar> {
     let mut items = Vec::new();
     if let Some(exif) = image.exif.as_deref() {
         let payload = crate::exif_extents(exif).iter().flat_map(|e| e.data.iter().copied()).collect();
-        items.push(Sidecar { id: 3, kind: *b"Exif", content_type: b"", payload });
+        items.push(Sidecar { target: 1, id: 3, kind: *b"Exif", content_type: b"", payload });
     }
     if let Some(xmp) = image.xmp.as_ref() {
-        items.push(Sidecar { id: 4, kind: *b"mime", content_type: b"application/rdf+xml\0", payload: xmp.clone() });
+        items.push(Sidecar { target: 1, id: 4, kind: *b"mime", content_type: b"application/rdf+xml\0", payload: xmp.clone() });
     }
     items
+}
+
+// Separate reference sources interoperate with readers (including libavif)
+// that retain only the last target of a multi-target cdsc/auxl reference.
+// Color/alpha sample bytes remain shared; sidecar IDs 7/8 describe item 5.
+pub(super) fn uncropped_sidecars(sidecars: &[Sidecar]) -> Vec<Sidecar> {
+    let mut result = sidecars.to_vec();
+    for sidecar in sidecars {
+        let mut secondary = sidecar.clone();
+        secondary.id += 4;
+        secondary.target = 5;
+        result.push(secondary);
+    }
+    result
 }
 
 // Image data uses file offsets (construction_method=0); metadata is local
@@ -76,7 +92,7 @@ pub(super) fn write_meta(
     write_fullbox(out, 0, 0);
     write_u16(out, (images.len() + sidecars.len()) as u16);
     for image in images {
-        write_infe(out, image.id, b"av01", b"", image.id == 2);
+        write_infe(out, image.id, b"av01", b"", matches!(image.id, 2 | 6));
     }
     for item in sidecars {
         write_infe(out, item.id, &item.kind, item.content_type, false);
@@ -85,10 +101,11 @@ pub(super) fn write_meta(
     if !images.is_empty() {
         let iref = begin_box(out, b"iref");
         write_fullbox(out, 0, 0);
-        for item in sidecars { write_reference(out, b"cdsc", item.id, 1); }
-        if images.len() == 2 {
-            write_reference(out, b"auxl", 2, 1);
-            if options.premultiplied_alpha { write_reference(out, b"prem", 1, 2); }
+        for item in sidecars { write_reference(out, b"cdsc", item.id, item.target); }
+        for image in images.iter().filter(|image| matches!(image.id, 2 | 6)) {
+            let color_id = if image.id == 2 { 1 } else { 5 };
+            write_reference(out, b"auxl", image.id, color_id);
+            if options.premultiplied_alpha { write_reference(out, b"prem", color_id, image.id); }
         }
         end_box(out, iref);
         let iprp = begin_box(out, b"iprp");
@@ -111,7 +128,7 @@ pub(super) fn write_meta(
             for _ in 0..channels { out.push(bit_depth_from_av1c(image.config)); }
             end_box(out, pixi);
             props.push(next); next += 1;
-            if image.id == 2 {
+            if matches!(image.id, 2 | 6) {
                 let auxc = begin_box(out, b"auxC");
                 write_fullbox(out, 0, 0);
                 out.extend_from_slice(ALPHA_TYPE);
@@ -120,8 +137,10 @@ pub(super) fn write_meta(
             } else {
                 let count = write_color_properties(out, options);
                 for _ in 0..count { props.push(next); next += 1; }
-                let count = write_transform_properties(out, options);
-                for _ in 0..count { props.push(next | 0x80); next += 1; }
+                if image.id == 1 {
+                    let count = write_transform_properties(out, options, width, height);
+                    for _ in 0..count { props.push(next | 0x80); next += 1; }
+                }
             }
             associations.push((image.id, props));
         }
@@ -186,11 +205,20 @@ pub(super) fn write_color_properties(out: &mut Vec<u8>, options: &AnimatedImage)
     count
 }
 
-// HEIF/MIAF order: crop (when supported), counter-clockwise rotation, mirror.
+// HEIF/MIAF order: crop, counter-clockwise rotation, mirror.
 // Transformative poster properties are essential. Alpha is transformed with
 // its associated color image; it does not carry a second orientation.
-pub(super) fn write_transform_properties(out: &mut Vec<u8>, options: &AnimatedImage) -> u8 {
+pub(super) fn write_transform_properties(out: &mut Vec<u8>, options: &AnimatedImage, width: u32, height: u32) -> u8 {
     let mut count = 0;
+    if let Some(crop) = options.crop {
+        let clap = crop.to_clean_aperture(width, height).expect("invalid crop rectangle");
+        let pos = begin_box(out, b"clap");
+        for value in [clap.width_n, clap.width_d, clap.height_n, clap.height_d,
+            clap.horiz_off_n as u32, clap.horiz_off_d, clap.vert_off_n as u32, clap.vert_off_d] {
+            write_u32(out, value);
+        }
+        end_box(out, pos); count += 1;
+    }
     if let Some(angle) = options.rotation {
         let pos = begin_box(out, b"irot");
         out.push(angle & 3); end_box(out, pos); count += 1;

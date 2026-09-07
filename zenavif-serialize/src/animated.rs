@@ -3,7 +3,7 @@
 //! Takes pre-encoded AV1 frame data and produces a valid animated AVIF file
 //! with `ftyp(avis) + meta + moov + mdat` structure.
 
-use crate::boxes::{Av1CBox, ClliBox, ColrBox, MdcvBox, PaspBox};
+use crate::boxes::{Av1CBox, ClapBox, ClliBox, ColrBox, MdcvBox, PaspBox};
 #[path = "animated_metadata.rs"]
 mod metadata;
 
@@ -16,6 +16,37 @@ pub enum RepetitionCount {
     Finite(u32),
 }
 
+
+/// Integer clean-aperture rectangle in the unrotated, uncropped image.
+/// The crop is applied before rotation and mirroring, to color and associated alpha.
+/// MIAF requires integral crop dimensions and top-left coordinates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CropRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl CropRect {
+    pub fn new(x: u32, y: u32, width: u32, height: u32) -> Self {
+        Self { x, y, width, height }
+    }
+
+    /// Convert to exact rational center offsets. Returns `None` for an empty
+    /// or out-of-bounds rectangle, or offsets outside the box's signed range.
+    pub fn to_clean_aperture(self, image_width: u32, image_height: u32) -> Option<ClapBox> {
+        if self.width == 0 || self.height == 0 || self.x > image_width || self.y > image_height
+            || self.width > image_width - self.x || self.height > image_height - self.y {
+            return None;
+        }
+        let x = 2 * i64::from(self.x) + i64::from(self.width) - i64::from(image_width);
+        let y = 2 * i64::from(self.y) + i64::from(self.height) - i64::from(image_height);
+        Some(ClapBox::new(self.width, 1, self.height, 1,
+            i32::try_from(x).ok()?, 2, i32::try_from(y).ok()?, 2))
+    }
+}
 
 /// A single pre-encoded animation frame.
 #[derive(Clone)]
@@ -68,6 +99,7 @@ pub struct AnimatedImage {
     clli: Option<ClliBox>,
     mdcv: Option<MdcvBox>,
     pixel_aspect_ratio: Option<PaspBox>,
+    crop: Option<CropRect>,
     rotation: Option<u8>,
     mirror: Option<u8>,
 }
@@ -93,6 +125,7 @@ impl AnimatedImage {
             clli: None,
             mdcv: None,
             pixel_aspect_ratio: None,
+            crop: None,
             rotation: None,
             mirror: None,
         }
@@ -113,6 +146,10 @@ impl AnimatedImage {
         self.pixel_aspect_ratio = Some(PaspBox::new(h_spacing, v_spacing));
         self
     }
+    /// Crop color and associated alpha before orientation. Also includes a
+    /// non-hidden uncropped poster sharing the first color sample's bytes, as
+    /// required by AVIF 1.2 section 2.2.3 for crops away from the top-left.
+    pub fn set_crop(&mut self, crop: CropRect) -> &mut Self { self.crop = Some(crop); self }
     /// Counter-clockwise quarter-turn code (0..=3), applied before mirroring.
     pub fn set_rotation(&mut self, angle: u8) -> &mut Self { self.rotation = Some(angle); self }
     /// Mirror after rotation: 0 exchanges top/bottom, 1 exchanges left/right.
@@ -142,6 +179,9 @@ impl AnimatedImage {
         if width == 0 || height == 0 || width > 65535 || height > 65535 {
             return Err(invalid("animation dimensions must fit the visual sample entry"));
         }
+        if self.crop.is_some_and(|crop| crop.to_clean_aperture(width, height).is_none()) {
+            return Err(invalid("crop rectangle must be nonempty and within the image"));
+        }
         if self.timescale == 0 || frames.is_empty() || frames.len() > u32::MAX as usize || color_seq_header.is_empty() || !frames[0].is_sync {
             return Err(invalid("animation needs a timescale, sequence header and first sync sample"));
         }
@@ -163,11 +203,12 @@ impl AnimatedImage {
         if let RepetitionCount::Finite(count) = self.repetition {
             duration.checked_mul(u64::from(count) + 1).filter(|&n| n != u64::MAX).ok_or_else(|| invalid("repeated duration overflow"))?;
         }
+        let metadata_copies = if self.crop.is_some() { 3 } else { 2 };
         for bytes in [&self.icc, &self.exif, &self.xmp].into_iter().flatten() {
             if bytes.is_empty() { return Err(invalid("metadata payload must not be empty")); }
-            size = size.checked_add((bytes.len() as u64).checked_mul(2).ok_or_else(|| invalid("metadata size overflow"))?).ok_or_else(|| invalid("metadata size overflow"))?;
+            size = size.checked_add((bytes.len() as u64).checked_mul(metadata_copies).ok_or_else(|| invalid("metadata size overflow"))?).ok_or_else(|| invalid("metadata size overflow"))?;
         }
-        size = (color_seq_header.len() as u64).checked_add(alpha_seq_header.map_or(0, |s| s.len()) as u64).and_then(|n| n.checked_mul(2)).and_then(|n| size.checked_add(n)).ok_or_else(|| invalid("configuration size overflow"))?;
+        size = (color_seq_header.len() as u64).checked_add(alpha_seq_header.map_or(0, |s| s.len()) as u64).and_then(|n| n.checked_mul(metadata_copies)).and_then(|n| size.checked_add(n)).ok_or_else(|| invalid("configuration size overflow"))?;
         if size > u32::MAX as u64 { return Err(invalid("animation exceeds 32-bit container offsets")); }
         Ok(self.serialize(width, height, frames, color_seq_header, alpha_seq_header))
     }
@@ -200,6 +241,7 @@ impl AnimatedImage {
         RepetitionCount::Finite(count) => total_duration.checked_mul(u64::from(count) + 1).expect("repeated animation duration overflow"),
     };
     let sidecars = metadata::sidecars(self);
+    let poster_sidecars = self.crop.map(|_| metadata::uncropped_sidecars(&sidecars));
     let durations: Vec<u32> = frames.iter().map(|f| f.duration).collect();
     let color_frames: Vec<&[u8]> = frames.iter().map(|f| f.color).collect();
     let alpha_frames: Vec<&[u8]> = if has_alpha {
@@ -225,7 +267,15 @@ impl AnimatedImage {
     if has_alpha {
         images.push(metadata::ImageItem { id: 2, config: self.alpha_config.as_ref().unwrap(), sequence: alpha_seq_header.unwrap(), sample_len: alpha_frames.first().map_or(0, |f| f.len() as u32) });
     }
-    let iloc_offsets = metadata::write_meta(&mut out, width, height, &images, &sidecars, self);
+    if self.crop.is_some() {
+        // IDs 3 and 4 belong to Exif and XMP. Item 5 exposes the full image
+        // without another encode or another copy of its sample payload.
+        images.push(metadata::ImageItem { id: 5, config: &self.color_config, sequence: color_seq_header, sample_len: color_frames.first().map_or(0, |f| f.len() as u32) });
+        if has_alpha {
+            images.push(metadata::ImageItem { id: 6, config: self.alpha_config.as_ref().unwrap(), sequence: alpha_seq_header.unwrap(), sample_len: alpha_frames.first().map_or(0, |f| f.len() as u32) });
+        }
+    }
+    let iloc_offsets = metadata::write_meta(&mut out, width, height, &images, poster_sidecars.as_deref().unwrap_or(&sidecars), self);
 
     // moov — each write_track returns the byte position of its stco placeholder.
     let moov_pos = begin_box(&mut out, b"moov");
@@ -268,8 +318,10 @@ impl AnimatedImage {
     // for sentinel byte patterns: AV1 frame payloads can legitimately contain those
     // bytes (and an attacker could deliberately seed them), so a scan-and-replace
     // approach would silently corrupt user data.
-    write_u32_at(&mut out, iloc_offsets[0], mdat_data_start as u32);
-    if has_alpha { write_u32_at(&mut out, iloc_offsets[1], alpha_data_start as u32); }
+    for (image, offset) in images.iter().zip(iloc_offsets) {
+        let start = if matches!(image.id, 2 | 6) { alpha_data_start } else { mdat_data_start };
+        write_u32_at(&mut out, offset, start as u32);
+    }
     write_u32_at(&mut out, color_stco_pos, mdat_data_start as u32);
     if let Some(pos) = alpha_stco_pos {
         write_u32_at(&mut out, pos, alpha_data_start as u32);
@@ -507,7 +559,7 @@ fn write_track(
                         end_box(out, auxi);
                     } else {
                         metadata::write_color_properties(out, options);
-                        metadata::write_transform_properties(out, options);
+                        metadata::write_transform_properties(out, options, width, height);
                     }
 
 
@@ -696,6 +748,42 @@ fn fixed_16_16_saturating(value: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn animation_crop_roundtrip_and_validation() {
+        let frames = [AnimFrame::new(b"frame", 1).with_sync(true)];
+        for crop in [CropRect::new(0, 0, 64, 80), CropRect::new(0, 0, 48, 56),
+            CropRect::new(8, 12, 48, 56), CropRect::new(1, 3, 61, 75), CropRect::new(63, 79, 1, 1)] {
+            let mut image = AnimatedImage::new();
+            image.set_crop(crop).set_rotation(1).set_mirror(0);
+            let bytes = image.try_serialize(64, 80, &frames, b"header", None).unwrap();
+            let parsed = zenavif_parse_current::AvifParser::from_bytes(&bytes).unwrap();
+            let clap = parsed.clean_aperture().unwrap();
+            assert_eq!((clap.width_n, clap.width_d, clap.height_n, clap.height_d), (crop.width, 1, crop.height, 1));
+            assert_eq!((clap.horiz_off_n, clap.horiz_off_d), ((2 * crop.x + crop.width) as i32 - 64, 2));
+            assert_eq!((clap.vert_off_n, clap.vert_off_d), ((2 * crop.y + crop.height) as i32 - 80, 2));
+            assert_eq!(parsed.rotation().unwrap().angle, 90);
+            assert_eq!(parsed.mirror().unwrap().axis, 0);
+        }
+        for crop in [CropRect::new(0, 0, 0, 80), CropRect::new(0, 0, 64, 0),
+            CropRect::new(64, 0, 1, 1), CropRect::new(0, 80, 1, 1),
+            CropRect::new(1, 0, 64, 80), CropRect::new(0, 1, 64, 80),
+            CropRect::new(u32::MAX, 0, 2, 2), CropRect::new(0, 0, u32::MAX, 1)] {
+            let mut image = AnimatedImage::new();
+            image.set_crop(crop);
+            assert!(image.try_serialize(64, 80, &frames, b"header", None).is_err());
+        }
+    }
+
+    #[test]
+    fn crop_center_offsets_preserve_half_pixels_and_boundaries() {
+        let clap = CropRect::new(0, 0, 1, 1).to_clean_aperture(65535, 65534).unwrap();
+        assert_eq!((clap.horiz_off_n, clap.vert_off_n), (-65534, -65533));
+        let clap = CropRect::new(65534, 65533, 1, 1).to_clean_aperture(65535, 65534).unwrap();
+        assert_eq!((clap.horiz_off_n, clap.vert_off_n), (65534, 65533));
+        assert!(CropRect::new(u32::MAX, u32::MAX, 1, 1).to_clean_aperture(u32::MAX, u32::MAX).is_none());
+        assert!(CropRect::new(0, 0, 1, 1).to_clean_aperture(u32::MAX, u32::MAX).is_none());
+    }
 
     #[test]
     fn animation_orientation_roundtrip_and_validation() {

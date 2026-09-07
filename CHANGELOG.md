@@ -12,6 +12,8 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Animated clean-aperture cropping with validated integer rectangles and an uncropped secondary poster; reuse encoded sample extents and preserve independent alpha and metadata references.
+
 - Animated serializer: square-pixel aspect, rotation and mirroring on color tracks and posters, with checked validation and essential poster transform associations.
 - Correct HEIF mirror-axis conversion in the codec orientation adapter; verify all 12 combinations against the libavif C reference.
 
