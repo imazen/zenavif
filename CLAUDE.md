@@ -298,6 +298,17 @@ backend capability landing:**
    backend config and map it from `zencodec::AllocPreference` /
    `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
 
+## Animation color-format wiring — 2026-09-07
+
+Owner `7f55b540` honors animation chroma, RGB identity and full/limited
+range; backend `1447c200` corrects forced sub8 inter and partial chroma
+distortion. The public regression fails with the previous owner and passes
+40 files / 80 frames across four input formats, both coding depths and five
+color modes. Libavif validates their signaling; libaom matches all eight
+RGB and all 20 alpha streams to coded source planes. Default animation now
+honors 4:4:4. See `benchmarks/animation_color_2026-09-07.md`; the separate
+quality investigation still prevents wrapper main merges.
+
 ## Exact animation timing — 2026-09-07
 
 Owner `23522fff` supplies exact-tick RGB/RGBA animation encoding. Canonical

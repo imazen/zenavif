@@ -184,7 +184,7 @@ log = "0.4.29"
 # 2026-09-07: 176ad8ee corrects the fast-preset intra-mode budget after
 # matched-quality corpus verification, retaining the verified animation and
 # alpha corrections. See benchmarks/quality_drift_2026-09-07/README.md.
-ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/imazen/cavif-rs", rev = "23522fff0947ae05aa6c1f341f5ee55fb7b78d84", default-features = false, optional = true, features = ["stop"] }
+ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/imazen/cavif-rs", rev = "7f55b540fdf40ee9b37a7060c8d327747e842345", default-features = false, optional = true, features = ["stop"] }
 # zenav1-svt experimental AV1 encode backend (`zenav1-svt` feature).
 # The facade crate lives in the rust/svtav1 subdir of imazen/zenav1-svt and is
 # PACKAGED as `zenav1-svt`; the `svtav1` alias keeps the seam's `use` paths

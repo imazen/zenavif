@@ -2515,7 +2515,7 @@ dependencies = [
 [[package]]
 name = "zenrav1e"
 version = "0.2.0"
-source = "git+https://github.com/imazen/zenrav1e?rev=1d5a6e04e80216b1063faa3baa7cbb2189d132f3#1d5a6e04e80216b1063faa3baa7cbb2189d132f3"
+source = "git+https://github.com/imazen/zenrav1e?rev=1447c200fd083916c69ac72c1335079ba4624b2e#1447c200fd083916c69ac72c1335079ba4624b2e"
 dependencies = [
  "aligned-vec",
  "arbitrary",
@@ -2554,7 +2554,7 @@ dependencies = [
 [[package]]
 name = "zenravif"
 version = "0.2.0"
-source = "git+https://github.com/imazen/cavif-rs?rev=23522fff0947ae05aa6c1f341f5ee55fb7b78d84#23522fff0947ae05aa6c1f341f5ee55fb7b78d84"
+source = "git+https://github.com/imazen/cavif-rs?rev=7f55b540fdf40ee9b37a7060c8d327747e842345#7f55b540fdf40ee9b37a7060c8d327747e842345"
 dependencies = [
  "almost-enough",
  "imgref",

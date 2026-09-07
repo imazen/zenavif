@@ -16,6 +16,7 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 - Exact-tick animation APIs for all RGB/RGBA input formats and both encoding backends, with exact result timing and mixed-clock codec-adapter pushes, using zenravif `23522fff`.
 
 ### Fixed
+- Honor animation chroma, RGB identity and full/limited range through zenravif `7f55b540`, with public depth-conversion and exact RGB/alpha plane verification; backend `1447c200` fixes forced-sub8 inter partitions and partial chroma-edge distortion.
 - Forward configured animation color superblock quantizer maps through zenravif `5b7c50b9`, retaining neutral-map bytes and independent alpha; backend application remains intra-only.
 - Honor animation lossless, VAQ, segmentation boost, StillImage and trellis settings through zenravif `ecbf41ec`; backend `1d5a6e04` preserves exact lossless WHT coefficients with trellis enabled.
 - Honor explicit animation partition, prediction, transform-RDO and filter-search speed overrides via zenravif `a8eaf997`, including both values of each control and the separate alpha policy.
