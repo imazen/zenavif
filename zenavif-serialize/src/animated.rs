@@ -293,6 +293,7 @@ fn write_fullbox(out: &mut Vec<u8>, version: u8, flags: u32) {
 }
 
 const STCO_PLACEHOLDER: u32 = 0xDEAD_BEEF;
+#[cfg(test)]
 const ILOC_PLACEHOLDER: u32 = 0xDEAD_BEE0;
 
 // ─── Top-level boxes ─────────────────────────────────────────────────
