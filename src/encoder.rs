@@ -584,6 +584,10 @@ impl EncoderConfig {
     /// [`crate::two_pass_zensim::sb_q_scale_from_diffmap`] builds a
     /// correctly shaped map from a zensim diffmap.
     ///
+    /// Animation submits the configured map on each color frame. The backend
+    /// applies it to non-lossless intra frames; alpha remains independent.
+    /// A different map per animation frame is not exposed by this builder.
+    ///
     /// **RELEASE-GATED downstream**: forwarded through zenravif's expert
     /// `sb_q_scale` passthrough, which is inert while
     /// [`crate::FRAME_HINTS_LIVE`]` == false` (registry `zenrav1e` 0.1.4

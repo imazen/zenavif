@@ -298,6 +298,18 @@ backend capability landing:**
    backend config and map it from `zencodec::AllocPreference` /
    `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
 
+## Animation quantizer hints — 2026-09-07
+
+Owner `5b7c50b9` now submits the configured superblock quantizer map with every
+animation color frame, preserving alpha and neutral-map bytes. The public
+six-file regression fails on the old owner and passes at both coding depths
+with the new pin. Published-Git workspace tests pass 904/904 (nine existing
+skips), and library Clippy passes. Owner libaom verification covers 12 raw
+streams / 24 frames. Backend hints still apply only to non-lossless intra
+frames; a distinct map per frame is not exposed. See
+`benchmarks/animation_hints_2026-09-07.md`. The quality investigation remains
+open, so wrapper main branches are not advanced.
+
 ## Animation coding controls — 2026-09-07
 
 Owner `ecbf41ec` forwards lossless on both tracks and VAQ/boost/tune/trellis
