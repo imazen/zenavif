@@ -12,6 +12,9 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Use animation-track HDR metadata for codec probing and frame-decoder info, including authoritative absence when a poster has HDR. Expose all four static track HDR properties through `AvifAnimationFrameDecoder::hdr_metadata`.
+- Probe valid animations without a poster from their first sample. Preserve the color track's premultiplied-alpha reference and use it during managed/AOM animation conversion independently of poster alpha semantics.
+
 - Honor codec-job animation loop counts on zenravif and SVT, including play-once and maximum-u32 counts, without changing encoded samples or metadata. Reject repeated-duration overflow before modifying output.
 - Correct codec HDR metadata conversion: RGB primary order maps to AVIF's green/blue/red wire order and back; animation chromaticities and luminances now use the same ST 2086 units as still images.
 

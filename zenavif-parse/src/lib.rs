@@ -1198,6 +1198,7 @@ struct ParsedAnimationData {
     alpha_sample_table: Option<SampleTable>,
     loop_count: u64,
     color_codec_config: TrackCodecConfig,
+    premultiplied_alpha: bool,
 }
 
 #[cfg(feature = "eager")]
@@ -1606,6 +1607,7 @@ struct AnimationParserData {
     alpha_sample_table: Option<SampleTable>,
     loop_count: u64,
     codec_config: TrackCodecConfig,
+    premultiplied_alpha: bool,
 }
 
 /// Animation metadata from [`AvifParser`]
@@ -1795,6 +1797,7 @@ impl<'data> AvifParser<'data> {
                 alpha_sample_table: anim.alpha_sample_table,
                 loop_count: anim.loop_count,
                 codec_config: anim.color_codec_config,
+                premultiplied_alpha: anim.premultiplied_alpha,
             })
         } else {
             None
@@ -1806,6 +1809,7 @@ impl<'data> AvifParser<'data> {
             let track_config = animation_data.as_ref()
                 .map(|a| a.codec_config.clone())
                 .unwrap_or_default();
+            let premultiplied_alpha = animation_data.as_ref().is_some_and(|a| a.premultiplied_alpha);
             return Ok(Self {
                 raw,
                 mdat_bounds: parsed.mdat_bounds,
@@ -1816,7 +1820,7 @@ impl<'data> AvifParser<'data> {
                 grid_config: None,
                 tiles: TryVec::new(),
                 animation_data,
-                premultiplied_alpha: false,
+                premultiplied_alpha,
                 spatial_extents: None,
                 av1_config: track_config.av1_config,
                 color_info: track_config.color_info,
@@ -2580,6 +2584,12 @@ impl<'data> AvifParser<'data> {
     // ========================================
     // Metadata (no data access)
     // ========================================
+
+    /// Whether the animation color track is premultiplied by its associated
+    /// alpha track. Independent of the poster item's `prem` reference.
+    pub fn animation_premultiplied_alpha(&self) -> Option<bool> {
+        self.animation_data.as_ref().map(|a| a.premultiplied_alpha)
+    }
 
     /// Get animation metadata (if animated).
     pub fn animation_info(&self) -> Option<AnimationInfo> {
@@ -5770,6 +5780,11 @@ fn associate_tracks(tracks: TryVec<ParsedTrack>) -> Result<ParsedAnimationData> 
         (color, None)
     };
 
+    let premultiplied_alpha = alpha_track.as_ref().is_some_and(|alpha| {
+        color_track.references.iter().any(|reference| reference.reference_type == b"prem"
+            && reference.track_ids.iter().any(|&id| id == alpha.track_id))
+    });
+
     let (alpha_timescale, alpha_sample_table) = match alpha_track {
         Some(t) => (Some(t.media_timescale), Some(t.sample_table)),
         None => (None, None),
@@ -5782,6 +5797,7 @@ fn associate_tracks(tracks: TryVec<ParsedTrack>) -> Result<ParsedAnimationData> 
         alpha_timescale,
         alpha_sample_table,
         loop_count: color_track.loop_count,
+        premultiplied_alpha,
     })
 }
 

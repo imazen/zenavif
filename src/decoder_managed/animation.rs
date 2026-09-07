@@ -81,7 +81,12 @@ impl ManagedAvifDecoder {
                 _ => None,
             };
 
-            let (pixels, _info) = self.convert_to_image(primary_frame, alpha_frame, stop)?;
+            let (pixels, _info) = self.convert_to_image_with_premultiplied(
+                primary_frame,
+                alpha_frame,
+                self.parser.animation_premultiplied_alpha().unwrap_or(false),
+                stop,
+            )?;
 
             frames.push(DecodedFrame {
                 pixels,
@@ -331,7 +336,15 @@ impl AnimationDecoder {
                 .frame(self.frame_index)
                 .map_err(|e| e.map_error(Error::Parse))?
                 .duration_ms;
-            let (pixels, _info) = self.inner.convert_aom_to_image(fd, fd_alpha, stop)?;
+            let (pixels, _info) = self.inner.convert_aom_to_image_with_premultiplied(
+                fd,
+                fd_alpha,
+                self.inner
+                    .parser
+                    .animation_premultiplied_alpha()
+                    .unwrap_or(false),
+                stop,
+            )?;
             self.frame_index += 1;
             return Ok(Some(DecodedFrame {
                 pixels,
@@ -361,9 +374,15 @@ impl AnimationDecoder {
             _ => None,
         };
 
-        let (pixels, _info) = self
-            .inner
-            .convert_to_image(primary_frame, alpha_frame, stop)?;
+        let (pixels, _info) = self.inner.convert_to_image_with_premultiplied(
+            primary_frame,
+            alpha_frame,
+            self.inner
+                .parser
+                .animation_premultiplied_alpha()
+                .unwrap_or(false),
+            stop,
+        )?;
 
         let duration_ms = frame_ref.duration_ms;
         self.frame_index += 1;

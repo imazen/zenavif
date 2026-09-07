@@ -262,3 +262,120 @@ fn native_animation_hdr_metadata_reaches_decoded_info_without_changing_pixels() 
         );
     }
 }
+
+#[test]
+fn codec_animation_hdr_comes_from_track_not_poster() {
+    use zencodec::decode::AnimationFrameDecoder as _;
+    let mut mux = AnimatedImage::new();
+    let mut cfg = Av1CBox::default();
+    cfg.seq_level_idx_0 = 0;
+    mux.set_color_config(cfg)
+        .set_clli(zenavif_serialize::ClliBox::new(1000, 400))
+        .set_mdcv(zenavif_serialize::MdcvBox::new(
+            [(13250, 34500), (7500, 3000), (34000, 16000)],
+            (15635, 16450),
+            10_000_000,
+            50,
+        ));
+    let mut cclv = zenavif_serialize::CclvBox::new();
+    cclv.primaries = Some([(-1234, 45678), (7500, 3000), (34000, 16000)]);
+    cclv.max_luminance = Some(10_000_000);
+    mux.set_amve(zenavif_serialize::AmveBox::new(100_000, 15635, 16450))
+        .set_cclv(cclv);
+    let original = mux
+        .try_serialize(
+            150,
+            150,
+            &[AnimFrame::new(SAMPLE, 1).with_sync(true)],
+            &SAMPLE[2..18],
+            None,
+        )
+        .unwrap();
+    // The serializer writes poster properties before track properties. Check
+    // both known payloads before changing only the poster or track's box type.
+    let positions = |data: &[u8], kind: &[u8; 4]| -> Vec<usize> {
+        data.windows(4)
+            .enumerate()
+            .filter_map(|(i, b)| (b == kind).then_some(i))
+            .collect()
+    };
+    let clli = positions(&original, b"clli");
+    let mdcv = positions(&original, b"mdcv");
+    assert_eq!(clli.len(), 2);
+    assert_eq!(mdcv.len(), 2);
+    let expected_pixels = zenavif::decode_animation(&original).unwrap();
+    for (remove_track, remove_poster) in [(false, false), (true, false), (false, true)] {
+        let mut data = original.clone();
+        // Give the poster different HDR values.
+        data[clli[0] + 4..clli[0] + 8].copy_from_slice(&[0, 10, 0, 4]);
+        data[mdcv[0] + 20..mdcv[0] + 24].copy_from_slice(&1_000_000u32.to_be_bytes());
+        if remove_track {
+            data[clli[1]..clli[1] + 4].copy_from_slice(b"free");
+            data[mdcv[1]..mdcv[1] + 4].copy_from_slice(b"free");
+        }
+        if remove_poster {
+            let mut pos = 0;
+            while pos < data.len() {
+                let size = u32::from_be_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
+                assert!(size >= 8 && pos + size <= data.len());
+                if &data[pos + 4..pos + 8] == b"meta" {
+                    data[pos + 4..pos + 8].copy_from_slice(b"free");
+                }
+                pos += size;
+            }
+        }
+        let parser = zenavif_parse::AvifParser::from_bytes(&data).unwrap();
+        assert_eq!(
+            parser
+                .content_light_level()
+                .unwrap()
+                .max_content_light_level,
+            if remove_poster { 1000 } else { 10 }
+        );
+        let track = parser.animation_info().unwrap().hdr;
+        assert_eq!(track.content_light_level.is_some(), !remove_track);
+        let cfg = AvifDecoderConfig::new();
+        let probe = cfg.clone().job().probe(&data).unwrap();
+        let mut dec = cfg
+            .job()
+            .animation_frame_decoder(Cow::Borrowed(&data), &[])
+            .unwrap();
+        assert_eq!(dec.hdr_metadata(), track);
+        assert_eq!(
+            dec.hdr_metadata()
+                .ambient_viewing
+                .unwrap()
+                .ambient_illuminance,
+            100_000
+        );
+        assert_eq!(
+            dec.hdr_metadata().content_colour_volume.unwrap().primaries,
+            cclv.primaries
+        );
+        for info in [&probe, dec.info()] {
+            if remove_track {
+                assert!(info.source_color.content_light_level.is_none());
+                assert!(info.source_color.mastering_display.is_none());
+            } else {
+                assert_eq!(
+                    info.source_color
+                        .content_light_level
+                        .unwrap()
+                        .max_content_light_level,
+                    1000
+                );
+                assert_eq!(
+                    info.source_color.mastering_display.unwrap().max_luminance,
+                    1000.0
+                );
+            }
+        }
+        let frame = dec.render_next_frame(None).unwrap().unwrap();
+        for row in 0..150 {
+            assert_eq!(
+                frame.pixels().row(row),
+                expected_pixels.frames[0].pixels.as_slice().row(row)
+            );
+        }
+    }
+}

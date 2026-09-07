@@ -136,18 +136,34 @@ impl ManagedAvifDecoder {
     /// dimensions, color info, ICC profile, EXIF, XMP, orientation, and HDR metadata.
     /// Does NOT do full AV1 frame decoding.
     pub fn probe_info(&self) -> Result<ImageInfo> {
+        let primary_data = self
+            .parser
+            .primary_data()
+            .map_err(|e| e.map_error(Error::Parse))?;
         // Get dimensions from grid config or AV1 sequence header
         let (width, height) = if let Some(grid) = self.parser.grid_config() {
             (grid.output_width, grid.output_height)
         } else {
-            let meta = self
-                .parser
-                .primary_metadata()
-                .map_err(|e| e.map_error(Error::Parse))?;
+            let data = &primary_data;
+            // AVIF sequences may omit a poster item. In that layout the
+            // parser exposes empty primary data and track-level properties;
+            // derive dimensions from the first actual sequence sample.
+            let meta = if data.is_empty() && self.parser.animation_info().is_some() {
+                let frame = self
+                    .parser
+                    .frame(0)
+                    .map_err(|e| e.map_error(Error::Parse))?;
+                zenavif_parse::AV1Metadata::parse_av1_bitstream(&frame.data)
+            } else {
+                zenavif_parse::AV1Metadata::parse_av1_bitstream(data)
+            }
+            .map_err(|e| e.map_error(Error::Parse))?;
             (meta.max_frame_width.get(), meta.max_frame_height.get())
         };
 
-        let has_alpha = self.parser.alpha_metadata().is_some();
+        let has_alpha = self.parser.alpha_metadata().is_some()
+            || (primary_data.is_empty()
+                && self.parser.animation_info().is_some_and(|a| a.has_alpha));
 
         // AV1 config for bit depth
         let bit_depth = self.parser.av1_config().map(|c| c.bit_depth).unwrap_or(8);

@@ -298,6 +298,35 @@ backend capability landing:**
    backend config and map it from `zencodec::AllocPreference` /
    `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
 
+## Track metadata versus poster — 2026-09-07 (local)
+
+Final verification: 877 all-feature nextest tests and 473 default tests/doctests
+pass, with nine existing skips and ten existing ignores respectively. Library
+clippy passes. Determinism and 56 reference conformance cells pass (optional
+armed CLI leg not run). Ladder still has the same 33 byte/quality failure rows
+plus 15 timing misses; the same two speed inversions remain. CI is deferred.
+
+
+Codec animation probe/frame-decoder info previously used poster CLLI/MDCV:
+a track MaxCLL of 1000 appeared as the poster's 10. They now use track values,
+including None when a track property is absent. The concrete codec decoder's
+`hdr_metadata()` preserves all four native static HDR properties (AMVE/CCLV
+are not representable in shared codec ImageInfo yet).
+
+No-poster sequences also failed managed probing on empty primary-item bytes;
+probe now uses the first sample when no primary data exists, with track alpha
+presence. The parser retains the color track's `prem` reference to its associated
+alpha and exposes `animation_premultiplied_alpha()`. Animation conversion uses
+that track value in managed and AOM paths; still conversion retains item semantics.
+Tests compare rendered pixels at 8/10 bits both without a poster and with
+contradictory poster/track alpha declarations, in both directions.
+
+Other track properties still need their own audit: codec dimensions/color and
+orientation currently begin from primary-item probing when a poster exists;
+this HDR/premultiplication correction is not evidence for those fields.
+See `benchmarks/track_metadata_2026-09-07.md`. The full goal and existing quality
+baseline investigation remain active; push/CI remain deferred.
+
 ## Codec playback and HDR correction — 2026-09-07 (local)
 
 The codec job stored loop-count requests but did not pass them to its animation

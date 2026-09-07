@@ -297,3 +297,116 @@ fn svt_animation_is_wired_through_codec_traits() {
         [25, 50, 75]
     );
 }
+
+#[test]
+fn animation_alpha_uses_track_reference_with_or_without_poster() {
+    use std::borrow::Cow;
+    use zencodec::decode::{AnimationFrameDecoder as _, DecodeJob as _, DecoderConfig as _};
+    for depth in [EncodeBitDepth::Eight, EncodeBitDepth::Ten] {
+        let frame = AnimationFrameRgba {
+            pixels: Img::new(
+                vec![
+                    Rgba {
+                        r: 32,
+                        g: 64,
+                        b: 96,
+                        a: 128
+                    };
+                    65 * 67
+                ],
+                65,
+                67,
+            ),
+            duration_ms: 25,
+        };
+        let cfg = config(depth, 6).alpha_color_mode(EncodeAlphaMode::Premultiplied);
+        let encoded =
+            encode_animation_rgba8(&[frame.clone(), frame.clone()], &cfg, stop()).unwrap();
+        let straight = encode_animation_rgba8(
+            &[frame.clone(), frame],
+            &cfg.clone()
+                .alpha_color_mode(EncodeAlphaMode::UnassociatedDirty),
+            stop(),
+        )
+        .unwrap();
+        let straight_pixels = decode_animation(&straight.avif_file).unwrap();
+        let expected = decode_animation(&encoded.avif_file).unwrap();
+        for scenario in 0..3 {
+            let keep_poster = scenario != 0;
+            let track_premultiplied = scenario != 2;
+            let mut data = encoded.avif_file.clone();
+            if keep_poster {
+                let refs: Vec<_> = data
+                    .windows(4)
+                    .enumerate()
+                    .filter_map(|(i, b)| (b == b"prem").then_some(i))
+                    .collect();
+                assert_eq!(refs.len(), 2);
+                // The poster declares straight alpha while the track remains premultiplied.
+                let removed = if track_premultiplied {
+                    refs[0]
+                } else {
+                    refs[1]
+                };
+                data[removed..removed + 4].copy_from_slice(b"free");
+            } else {
+                let mut pos = 0;
+                while pos < data.len() {
+                    let size = u32::from_be_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
+                    assert!(size >= 8 && pos + size <= data.len());
+                    if &data[pos + 4..pos + 8] == b"meta" {
+                        data[pos + 4..pos + 8].copy_from_slice(b"free");
+                    }
+                    pos += size;
+                }
+            }
+            assert_eq!(
+                zenavif_parse::AvifParser::from_bytes(&data)
+                    .unwrap()
+                    .animation_premultiplied_alpha(),
+                Some(track_premultiplied)
+            );
+            assert_eq!(
+                zenavif_parse::AvifParser::from_owned(data.clone())
+                    .unwrap()
+                    .animation_premultiplied_alpha(),
+                Some(track_premultiplied)
+            );
+            let info = ManagedAvifDecoder::new(&data, &DecoderConfig::new())
+                .unwrap()
+                .probe_info()
+                .unwrap();
+            assert!(info.has_alpha);
+            assert_eq!(info.premultiplied_alpha, scenario != 1);
+            for backend in [
+                DecodeBackend::Rav1dSafe,
+                #[cfg(feature = "zenav1-aom")]
+                DecodeBackend::Zenav1Aom,
+            ] {
+                let mut cfg = AvifDecoderConfig::new();
+                *cfg.inner_mut() = DecoderConfig::new().decode_backend(backend);
+                let mut decoder = cfg
+                    .job()
+                    .animation_frame_decoder(Cow::Borrowed(&data), &[])
+                    .unwrap();
+                assert!(decoder.info().has_alpha);
+                let reference = if track_premultiplied {
+                    &expected
+                } else {
+                    &straight_pixels
+                };
+                for expected in &reference.frames {
+                    let actual = decoder.render_next_frame(None).unwrap().unwrap();
+                    for row in 0..67 {
+                        assert_eq!(
+                            actual.pixels().row(row),
+                            expected.pixels.as_slice().row(row),
+                            "{backend:?} {depth:?}"
+                        );
+                    }
+                }
+                assert!(decoder.render_next_frame(None).unwrap().is_none());
+            }
+        }
+    }
+}

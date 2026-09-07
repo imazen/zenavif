@@ -68,6 +68,21 @@ impl ManagedAvifDecoder {
         alpha: Option<Frame>,
         stop: &(impl Stop + ?Sized),
     ) -> Result<(PixelBuffer, ImageInfo)> {
+        self.convert_to_image_with_premultiplied(
+            primary,
+            alpha,
+            self.parser.premultiplied_alpha(),
+            stop,
+        )
+    }
+
+    pub(super) fn convert_to_image_with_premultiplied(
+        &self,
+        primary: Frame,
+        alpha: Option<Frame>,
+        premultiplied_alpha: bool,
+        stop: &(impl Stop + ?Sized),
+    ) -> Result<(PixelBuffer, ImageInfo)> {
         let width = primary.width() as usize;
         let height = primary.height() as usize;
         let bit_depth = primary.bit_depth();
@@ -116,7 +131,7 @@ impl ManagedAvifDecoder {
             height: height as u32,
             bit_depth,
             has_alpha,
-            premultiplied_alpha: self.parser.premultiplied_alpha(),
+            premultiplied_alpha,
             monochrome: matches!(layout, PixelLayout::I400),
             color_primaries,
             transfer_characteristics,
@@ -251,7 +266,7 @@ impl ManagedAvifDecoder {
                 display_width,
                 display_height,
                 alpha_range,
-                self.parser.premultiplied_alpha(),
+                info.premultiplied_alpha,
             )?;
         }
 
@@ -365,7 +380,7 @@ impl ManagedAvifDecoder {
                 display_height,
                 alpha_range,
                 info.bit_depth,
-                self.parser.premultiplied_alpha(),
+                info.premultiplied_alpha,
             )?;
         }
 

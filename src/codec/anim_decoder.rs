@@ -107,6 +107,13 @@ impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
 }
 
 impl AvifAnimationFrameDecoder {
+    /// Complete static HDR metadata from the animation color track, in native
+    /// AVIF units. Includes AMVE and CCLV, which the shared codec ImageInfo
+    /// currently cannot represent. Independent of the poster item's metadata.
+    pub fn hdr_metadata(&self) -> crate::AnimationHdrMetadata {
+        self.anim_decoder.info().hdr
+    }
+
     /// Exact source timing without advancing playback. The shared zencodec
     /// frame type exposes only legacy whole milliseconds; use this method
     /// when retaining the concrete decoder and needing exact media ticks.

@@ -137,6 +137,21 @@ impl ManagedAvifDecoder {
         fd_alpha: Option<aom_decode::frame::FrameDecode>,
         stop: &(impl Stop + ?Sized),
     ) -> Result<(PixelBuffer, ImageInfo)> {
+        self.convert_aom_to_image_with_premultiplied(
+            fd,
+            fd_alpha,
+            self.parser.premultiplied_alpha(),
+            stop,
+        )
+    }
+
+    pub(super) fn convert_aom_to_image_with_premultiplied(
+        &self,
+        fd: aom_decode::frame::FrameDecode,
+        fd_alpha: Option<aom_decode::frame::FrameDecode>,
+        premultiplied_alpha: bool,
+        stop: &(impl Stop + ?Sized),
+    ) -> Result<(PixelBuffer, ImageInfo)> {
         let (width, height) = (fd.width, fd.height);
         let bit_depth = fd.bit_depth as u8;
         if !matches!(bit_depth, 8 | 10 | 12) {
@@ -187,7 +202,7 @@ impl ManagedAvifDecoder {
             height: height as u32,
             bit_depth,
             has_alpha,
-            premultiplied_alpha: self.parser.premultiplied_alpha(),
+            premultiplied_alpha,
             monochrome: fd.monochrome,
             color_primaries,
             transfer_characteristics,
@@ -277,7 +292,7 @@ impl ManagedAvifDecoder {
             } else {
                 ColorRange::Limited
             };
-            let premul = self.parser.premultiplied_alpha();
+            let premul = premultiplied_alpha;
             if wide_out {
                 add_alpha16(
                     &mut image,
