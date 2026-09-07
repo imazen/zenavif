@@ -102,6 +102,7 @@ impl ManagedAvifDecoder {
                 frame_count,
                 loop_count: anim_info.loop_count,
                 hdr: anim_info.hdr,
+                spatial: anim_info.spatial,
                 has_alpha: anim_info.has_alpha,
                 timescale: anim_info.timescale,
             },
@@ -220,6 +221,7 @@ impl AnimationDecoder {
             frame_count: anim_info.frame_count,
             loop_count: anim_info.loop_count,
             hdr: anim_info.hdr,
+            spatial: anim_info.spatial,
             has_alpha: anim_info.has_alpha,
             timescale: anim_info.timescale,
         };

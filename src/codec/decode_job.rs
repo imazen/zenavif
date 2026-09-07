@@ -268,11 +268,14 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
 impl AvifDecodeJob {
     fn probe_inner(&self, data: &[u8]) -> Result<ImageInfo, At<Error>> {
         let decoder = crate::ManagedAvifDecoder::new_for_animation(data, &self.config.inner)?;
-        let native_info = if decoder.animation_info().is_some() {
+        let mut native_info = if decoder.animation_info().is_some() {
             decoder.probe_animation_info()?
         } else {
             decoder.probe_info()?
         };
+        if decoder.animation_info().is_some() {
+            super::animation_spatial::AnimationCrop::resolve(&mut native_info)?;
+        }
         // `convert_native_info` reports the Preserve view (stored dims +
         // intrinsic tag); rewrite to display dims + Identity on the bake path.
         let mut info = apply_reported_orientation(
@@ -617,8 +620,9 @@ impl AvifDecodeJob {
         // Probe metadata before creating animation decoder (both parse the container,
         // but ManagedAvifDecoder gives us the native ImageInfo for conversion).
         let probe_dec = crate::ManagedAvifDecoder::new_for_animation(&data, &cfg)?;
-        let native_info = probe_dec.probe_animation_info()?;
+        let mut native_info = probe_dec.probe_animation_info()?;
         self.check_decode_limits(&native_info)?;
+        let crop = super::animation_spatial::AnimationCrop::resolve(&mut native_info)?;
         drop(probe_dec);
 
         let anim_dec = crate::AnimationDecoder::new(&data, &cfg)?;
@@ -665,6 +669,8 @@ impl AvifDecodeJob {
             current_frame: None,
             limits: self.limits,
             bake_to,
+            crop,
+            alloc_pref: cfg.alloc_pref,
         })
     }
 

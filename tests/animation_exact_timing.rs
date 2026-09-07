@@ -1,6 +1,9 @@
 //! Timing regression fixture: the 39-byte first keyframe from libavif 1.3.0
 //! tests/data/colors-animated-8bpc.avif (150x150, 8-bit 4:2:0).
 //! Repeating the keyframe changes timing without changing decoded pixels.
+#[path = "support/animation.rs"]
+mod animation_support;
+
 use std::borrow::Cow;
 use zenavif::AvifDecoderConfig;
 use zenavif_serialize::Av1CBox;
@@ -314,15 +317,7 @@ fn codec_animation_hdr_comes_from_track_not_poster() {
             data[mdcv[1]..mdcv[1] + 4].copy_from_slice(b"free");
         }
         if remove_poster {
-            let mut pos = 0;
-            while pos < data.len() {
-                let size = u32::from_be_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
-                assert!(size >= 8 && pos + size <= data.len());
-                if &data[pos + 4..pos + 8] == b"meta" {
-                    data[pos + 4..pos + 8].copy_from_slice(b"free");
-                }
-                pos += size;
-            }
+            animation_support::remove_poster(&mut data);
         }
         let parser = zenavif_parse::AvifParser::from_bytes(&data).unwrap();
         assert_eq!(

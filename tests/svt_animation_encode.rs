@@ -1,4 +1,7 @@
 #![cfg(feature = "zenav1-svt")]
+#[path = "support/animation.rs"]
+mod animation_support;
+
 use imgref::Img;
 use rgb::{Rgb, Rgba};
 use zenavif::*;
@@ -350,15 +353,7 @@ fn animation_alpha_uses_track_reference_with_or_without_poster() {
                 };
                 data[removed..removed + 4].copy_from_slice(b"free");
             } else {
-                let mut pos = 0;
-                while pos < data.len() {
-                    let size = u32::from_be_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
-                    assert!(size >= 8 && pos + size <= data.len());
-                    if &data[pos + 4..pos + 8] == b"meta" {
-                        data[pos + 4..pos + 8].copy_from_slice(b"free");
-                    }
-                    pos += size;
-                }
+                animation_support::remove_poster(&mut data);
             }
             assert_eq!(
                 zenavif_parse::AvifParser::from_bytes(&data)

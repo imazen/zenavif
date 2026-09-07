@@ -298,6 +298,35 @@ backend capability landing:**
    backend config and map it from `zencodec::AllocPreference` /
    `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
 
+## Animation spatial metadata — 2026-09-07 (local)
+
+Sample-entry clap/irot/imir/pasp now survive parser and native animation
+metadata independently of poster properties. Native frames preserve the coded
+canvas. Codec animation output applies an exact integer crop before orientation
+correction; concrete spatial_metadata() retains the original declarations.
+Fractional apertures/origins still require resampling and return Unsupported
+from the codec adapter. Non-square pixel presentation and tkhd matrices remain
+open, as do track-local Exif/XMP and auxiliary metadata.
+
+A failing 65×67 versus 53×49 reproduction now passes all 576 codec frame checks
+and 144 native frame checks across 8/10-bit input, rotations, mirrors, both
+managed/AOM backends, conflicting posters, absent track properties and absent
+posters. Validation is exact, checked and transactional; cancellation is polled
+per cropped row. Libavif 1.3.0 independently reads the track crop/rotation/mirror
+and decodes both posterless frames. Its PNG CLI does not apply these transforms,
+so this is independent metadata evidence, not rendered-pixel comparison.
+The reference check exposed invalid still-image brands in our posterless test
+fixtures; a shared helper corrects those brands without moving sample offsets.
+Earlier timing, dual-color and SVT animation fixtures use the correction too.
+
+All-feature workspace nextest passes 884/884 (nine existing skips); default
+workspace tests/doctests pass 478 (ten existing ignores). Library clippy,
+scoped formatting, 25 determinism legs and 56 reference conformance cells pass.
+The optional armed CLI leg remains unrun. Ladder retains the same 33 byte/quality
+rows plus 16 timing misses, and the same two speed inversions persist. Nothing
+was repinned. See benchmarks/animation_spatial_2026-09-07.md. The full goal and
+quality investigation remain active; push/CI remain deferred.
+
 ## Coexisting ICC and nclx — 2026-09-07 (local)
 
 Fixed colr representation loss: primary parsing used the first property and
@@ -315,8 +344,8 @@ default features, including streaming and posterless cases. Clippy/formatting,
 determinism and 56 reference conformance cells pass; the optional armed CLI
 leg is explicitly unrun. The same 33 byte/quality mismatch rows plus 16 timing
 misses and two speed inversions remain. See `benchmarks/dual_colr_2026-09-07.md`.
-Auxiliary gain-map/depth color-property coexistence and track spatial/sidecar
-metadata still require work. The full goal remains active; CI is deferred.
+Auxiliary gain-map/depth color-property coexistence and track sidecar
+metadata still require work; subsequent spatial work is recorded above. The full goal remains active; CI is deferred.
 
 ## Animation color and geometry — 2026-09-07 (local)
 
@@ -335,8 +364,8 @@ CLI leg is explicitly unrun. See `benchmarks/track_color_geometry_2026-09-07.md`
 for evidence and validation, including final eager-convenience routing checks.
 The ladder retains the same 33 byte/quality rows plus 15 timing misses; the same
 two speed inversions persist. No envelope has been re-pinned.
-Track spatial properties and Exif/XMP association still require implementation
-and rendered proof; source-encoding details also need provenance auditing.
+The subsequent sample-entry spatial correction is recorded above. Track-local
+Exif/XMP association and source-encoding provenance still require auditing.
 The full goal and quality-envelope investigation remain active. CI is deferred.
 
 ## Track metadata versus poster — 2026-09-07 (local)

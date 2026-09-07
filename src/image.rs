@@ -1,9 +1,9 @@
 //! AVIF image metadata types
 
 pub use zenavif_parse::{
-    AnimationFrameTiming, AnimationHdrMetadata, CleanAperture, ColorInformation, ContentLightLevel,
-    GainMapChannel, GainMapMetadata, ImageMirror, ImageRotation, MasteringDisplayColourVolume,
-    PixelAspectRatio,
+    AnimationFrameTiming, AnimationHdrMetadata, AnimationSpatialMetadata, CleanAperture,
+    ColorInformation, ContentLightLevel, GainMapChannel, GainMapMetadata, ImageMirror,
+    ImageRotation, MasteringDisplayColourVolume, PixelAspectRatio,
 };
 
 /// Gain map for SDR/HDR tone mapping (ISO 21496-1), bundled from AVIF container.
@@ -192,6 +192,9 @@ pub struct DecodedFrame {
 pub struct DecodedAnimationInfo {
     /// Static HDR metadata from the color track's sample description.
     pub hdr: AnimationHdrMetadata,
+    /// Source spatial properties. Native frames preserve the coded pixel
+    /// canvas; apply crop, rotation and mirror for presentation.
+    pub spatial: AnimationSpatialMetadata,
     /// Number of frames in the animation.
     pub frame_count: usize,
     /// Total number of playbacks (0 = infinite), including the initial play.

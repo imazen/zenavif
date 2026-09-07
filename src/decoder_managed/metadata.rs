@@ -70,6 +70,22 @@ impl ManagedAvifDecoder {
         (primaries, transfer, icc)
     }
 
+    pub(super) fn spatial_for(&self, source: MetadataSource) -> crate::AnimationSpatialMetadata {
+        match source {
+            MetadataSource::Primary => crate::AnimationSpatialMetadata {
+                rotation: self.parser.rotation().copied(),
+                mirror: self.parser.mirror().copied(),
+                clean_aperture: self.parser.clean_aperture().copied(),
+                pixel_aspect_ratio: self.parser.pixel_aspect_ratio().copied(),
+            },
+            MetadataSource::Animation => self
+                .parser
+                .animation_info()
+                .map(|a| a.spatial)
+                .unwrap_or_default(),
+        }
+    }
+
     pub(super) fn premultiplied_for(&self, source: MetadataSource) -> bool {
         match source {
             MetadataSource::Primary => self.parser.premultiplied_alpha(),
@@ -332,10 +348,10 @@ impl ManagedAvifDecoder {
             color_range,
             chroma_sampling,
             icc_profile,
-            rotation: self.parser.rotation().cloned(),
-            mirror: self.parser.mirror().cloned(),
-            clean_aperture: self.parser.clean_aperture().cloned(),
-            pixel_aspect_ratio: self.parser.pixel_aspect_ratio().cloned(),
+            rotation: track.spatial.rotation,
+            mirror: track.spatial.mirror,
+            clean_aperture: track.spatial.clean_aperture,
+            pixel_aspect_ratio: track.spatial.pixel_aspect_ratio,
             content_light_level: track.hdr.content_light_level,
             mastering_display: track.hdr.mastering_display,
             exif: self

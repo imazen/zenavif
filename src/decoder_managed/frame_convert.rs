@@ -101,6 +101,7 @@ impl ManagedAvifDecoder {
             convert_transfer(av1_color.transfer_characteristics),
         );
 
+        let spatial = self.spatial_for(source);
         let info = ImageInfo {
             width: width as u32,
             height: height as u32,
@@ -114,10 +115,10 @@ impl ManagedAvifDecoder {
             color_range,
             chroma_sampling: convert_chroma_sampling(layout),
             icc_profile,
-            rotation: self.parser.rotation().cloned(),
-            mirror: self.parser.mirror().cloned(),
-            clean_aperture: self.parser.clean_aperture().cloned(),
-            pixel_aspect_ratio: self.parser.pixel_aspect_ratio().cloned(),
+            rotation: spatial.rotation,
+            mirror: spatial.mirror,
+            clean_aperture: spatial.clean_aperture,
+            pixel_aspect_ratio: spatial.pixel_aspect_ratio,
             content_light_level: self.parser.content_light_level().cloned(),
             mastering_display: self.parser.mastering_display().cloned(),
             exif: self

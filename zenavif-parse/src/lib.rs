@@ -1080,6 +1080,8 @@ pub struct AnimationConfig {
     pub loop_count: u64,
     /// Static HDR metadata from the color track.
     pub hdr: AnimationHdrMetadata,
+    /// Spatial properties of the color sample entry, not the poster.
+    pub spatial: AnimationSpatialMetadata,
     /// All frames in the animation
     pub frames: TryVec<AnimationFrame>,
 }
@@ -1170,6 +1172,17 @@ pub struct AnimationHdrMetadata {
     pub ambient_viewing: Option<AmbientViewingEnvironment>,
 }
 
+/// Spatial properties of an animation color sample entry, independent of
+/// the poster. Coordinates refer to the untransformed coded image; apply
+/// clean aperture, counter-clockwise rotation, then mirroring.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AnimationSpatialMetadata {
+    pub rotation: Option<ImageRotation>,
+    pub mirror: Option<ImageMirror>,
+    pub clean_aperture: Option<CleanAperture>,
+    pub pixel_aspect_ratio: Option<PixelAspectRatio>,
+}
+
 /// Codec properties extracted from a `stsd` VisualSampleEntry.
 #[derive(Debug, Clone, Default)]
 struct TrackCodecConfig {
@@ -1177,6 +1190,7 @@ struct TrackCodecConfig {
     color_info: Option<ColorInformation>,
     nclx_color_info: Option<ColorInformation>,
     hdr: AnimationHdrMetadata,
+    spatial: AnimationSpatialMetadata,
 }
 
 /// Parsed data from a single track box (`trak`).
@@ -1632,6 +1646,8 @@ pub struct AnimationInfo {
     pub frame_count: usize,
     /// Static HDR metadata from the color track, independently of the poster.
     pub hdr: AnimationHdrMetadata,
+    /// Spatial properties of the color sample entry, not the poster.
+    pub spatial: AnimationSpatialMetadata,
     /// Total number of playbacks (0 = infinite), including the initial play.
     /// Uses 64 bits to preserve finite durations from version-1 track headers.
     pub loop_count: u64,
@@ -1841,10 +1857,10 @@ impl<'data> AvifParser<'data> {
                 av1_config: track_config.av1_config,
                 color_info: track_config.color_info,
                 nclx_color_info: track_config.nclx_color_info,
-                rotation: None,
-                mirror: None,
-                clean_aperture: None,
-                pixel_aspect_ratio: None,
+                rotation: track_config.spatial.rotation,
+                mirror: track_config.spatial.mirror,
+                clean_aperture: track_config.spatial.clean_aperture,
+                pixel_aspect_ratio: track_config.spatial.pixel_aspect_ratio,
                 content_light_level: track_config.hdr.content_light_level,
                 mastering_display: track_config.hdr.mastering_display,
                 content_colour_volume: track_config.hdr.content_colour_volume,
@@ -2623,6 +2639,7 @@ impl<'data> AvifParser<'data> {
             frame_count: data.sample_table.sample_sizes.len(),
             loop_count: data.loop_count,
             hdr: data.codec_config.hdr,
+            spatial: data.codec_config.spatial,
             has_alpha: data.alpha_sample_table.is_some(),
             timescale: data.media_timescale,
         })
@@ -2905,6 +2922,7 @@ impl<'data> AvifParser<'data> {
             Some(AnimationConfig {
                 loop_count: info.loop_count,
                 hdr: info.hdr,
+                spatial: info.spatial,
                 frames,
             })
         } else {
@@ -4148,6 +4166,7 @@ fn extract_animation(
                 context.animation = Some(AnimationConfig {
                     loop_count: anim.loop_count,
                     hdr: anim.color_codec_config.hdr,
+                    spatial: anim.color_codec_config.spatial,
                     frames,
                 });
             }
@@ -5443,6 +5462,10 @@ fn read_stsd<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TrackCodecConfig> {
                 BoxType::AV1CodecConfigurationBox => {
                     config.av1_config = Some(read_av1c(&mut sub_box)?);
                 }
+                BoxType::ImageRotationBox => { config.spatial.rotation = Some(read_irot(&mut sub_box)?); }
+                BoxType::ImageMirrorBox => { config.spatial.mirror = Some(read_imir(&mut sub_box)?); }
+                BoxType::CleanApertureBox => { config.spatial.clean_aperture = Some(read_clap(&mut sub_box)?); }
+                BoxType::PixelAspectRatioBox => { config.spatial.pixel_aspect_ratio = Some(read_pasp(&mut sub_box)?); }
                 BoxType::ContentLightLevelBox => { config.hdr.content_light_level = Some(read_clli(&mut sub_box)?); }
                 BoxType::MasteringDisplayColourVolumeBox => { config.hdr.mastering_display = Some(read_mdcv(&mut sub_box)?); }
                 BoxType::ContentColourVolumeBox => { config.hdr.content_colour_volume = Some(read_cclv(&mut sub_box)?); }

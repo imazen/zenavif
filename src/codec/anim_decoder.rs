@@ -67,6 +67,8 @@ pub struct AvifAnimationFrameDecoder {
     /// (no-op) on the preserve path (the default). Applied after format
     /// negotiation, before the frame is yielded.
     pub(super) bake_to: zencodec::Orientation,
+    pub(super) crop: Option<super::animation_spatial::AnimationCrop>,
+    pub(super) alloc_pref: crate::alloc_util::AllocPref,
 }
 
 impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
@@ -112,6 +114,12 @@ impl AvifAnimationFrameDecoder {
     /// currently cannot represent. Independent of the poster item's metadata.
     pub fn hdr_metadata(&self) -> crate::AnimationHdrMetadata {
         self.anim_decoder.info().hdr
+    }
+
+    /// Original track spatial metadata. Codec output applies the clean
+    /// aperture; rotation/mirroring follow the selected orientation policy.
+    pub fn spatial_metadata(&self) -> crate::AnimationSpatialMetadata {
+        self.anim_decoder.info().spatial
     }
 
     /// Exact source timing without advancing playback. The shared zencodec
@@ -168,7 +176,11 @@ impl AvifAnimationFrameDecoder {
 
             // Animation frames stay on the RGB path (native-gray opt-in is
             // still-image only); no gray claims here.
-            let pixels = attach_color_context_class_gated(frame.pixels, &self.info.source_color);
+            let pixels = match self.crop {
+                Some(crop) => crop.apply(frame.pixels, self.alloc_pref, stop)?,
+                None => frame.pixels,
+            };
+            let pixels = attach_color_context_class_gated(pixels, &self.info.source_color);
             let pixels = negotiate_format(pixels, &self.preferred, false);
             // Bake orientation into the frame on the bake path; `Identity` is a
             // no-op (preserve path keeps stored-orientation pixels unchanged).

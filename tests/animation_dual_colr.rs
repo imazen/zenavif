@@ -1,3 +1,6 @@
+#[path = "support/animation.rs"]
+mod animation_support;
+
 use std::borrow::Cow;
 use zenavif::{AvifDecoderConfig, DecoderConfig, ManagedAvifDecoder, Unstoppable};
 use zenavif_serialize::animated::{AnimFrame, AnimatedImage};
@@ -209,18 +212,7 @@ fn posterless_animation_retains_both_color_properties() {
     let control = zenavif::decode_animation(&serialize(&mux)).unwrap();
     mux.set_icc_profile(icc.clone());
     let mut data = serialize(&mux);
-    let mut pos = 0;
-    let mut removed = false;
-    while pos < data.len() {
-        let size = u32::from_be_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
-        assert!(size >= 8 && pos + size <= data.len());
-        if &data[pos + 4..pos + 8] == b"meta" {
-            data[pos + 4..pos + 8].copy_from_slice(b"free");
-            removed = true;
-        }
-        pos += size;
-    }
-    assert!(removed);
+    animation_support::remove_poster(&mut data);
     let p = zenavif_parse::AvifParser::from_bytes(&data).unwrap();
     assert!(p.primary_data().unwrap().is_empty());
     assert_eq!(p.color_info(), p.animation_color_info());

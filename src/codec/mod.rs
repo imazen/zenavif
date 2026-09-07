@@ -34,6 +34,7 @@ mod anim_decoder;
 mod anim_encoder;
 #[cfg(feature = "encode")]
 mod animation_repetition;
+mod animation_spatial;
 mod color;
 mod decode_config;
 mod decode_job;

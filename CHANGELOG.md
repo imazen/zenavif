@@ -12,6 +12,8 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Retain animation-track crop, rotation, mirror and pixel aspect ratio independently of the poster. Native animation APIs expose the original spatial metadata; codec animation output applies exact integer crops before the requested orientation correction. Fractional crops remain unsupported by the pixel-buffer adapter.
+
 - Preserve coexisting ICC and nclx properties independently of box order for poster items and animation tracks. Retain ICC metadata while using nclx for matrix hints and CICP across managed/AOM/legacy decode paths and lightweight probing.
 
 - Derive animation geometry, depth, chroma and CICP/ICC metadata from its color track, and apply frame limits to that track. Correct managed/AOM fallback-matrix selection so a differently tagged poster cannot alter animation pixels.
