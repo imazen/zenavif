@@ -1,0 +1,5 @@
+   Compiling zenavif v0.2.0 (/home/lilith/work/zen/zenavif)
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.29s
+gate-cells: 56 avif cells + 2 y4m inputs -> /home/lilith/tmp/slower-preset-probe/animation-conformance-work/cells in 35.8s
+gate-conformance: 56 avif cells + 0 armed cells, 0 failures (armed leg: SKIPPED (ZENRAV1E unset — release-gated tools not covered))
+gate-conformance: PASS

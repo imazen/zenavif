@@ -298,6 +298,24 @@ backend capability landing:**
    backend config and map it from `zencodec::AllocPreference` /
    `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
 
+## Animation cancellation integration — 2026-09-07
+
+The owner pin is cavif-rs `2b9d4335` (code fix `294cd9ee`). Animation now
+honors the forwarded stop token, legacy token and a shared timeout across
+preparation, color/alpha tracks and serialization. Per-superblock cancellation
+is wired with the stop feature; row/wrapper checks also work without it.
+The canonical regression fails after its successful entry check on the old
+dependency and passes with the fix. An owner mutation removing only set_stop
+fails the backend test at both depths for color and alpha. Ten exported AVIFs
+remain byte-identical. Local and fetched-Git all-feature suites pass 899/899
+(nine existing skips), library clippy passes, determinism passes 25 legs and
+reference conformance 56 cells (optional armed CLI unrun). The same 32 non-timing
+ladder rows, 20 timing misses and six inversions remain; no baseline changed.
+See `benchmarks/animation_cancellation_2026-09-07.md` and its evidence files.
+Review pushes remain authorized; zenavif/cavif main merges remain pending the
+quality investigation. SVT main was independently merged at `11522ed0`, with
+its complete six-issue audit recorded in SVT `286dcb03`.
+
 ## Quality-gate investigation and fast-mode correction — 2026-09-07
 
 The encoder dependency advances to published cavif-rs 176ad8ee. Its forced

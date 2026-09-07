@@ -12,6 +12,10 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+### Fixed
+- Forwarded animation cancellation now reaches zenrav1e during encoding, across color and alpha tracks, through cavif-rs `294cd9ee` / `2b9d4335`; retain the canonical cancellation error.
+
+
 - Pin zenravif `176ad8ee` to restore full intra-mode search at speeds 9/10. The original photo budget now passes; all 35 audited photo/screen rate curves improve at both speeds, with measured encoding-time increases of approximately 23% and 49%. Preserve the audit and remaining gate failures in `benchmarks/quality_drift_2026-09-07/`.
 
 - Fix still premultiplied RGBA encoding at both input depths and AOM identity-color alpha decoding. Opaque pixels retain alpha and color; partial alpha is associated before coding. Pin the verified upstream correction at `9585c67a`.

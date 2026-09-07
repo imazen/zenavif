@@ -1,0 +1,6 @@
+   Compiling zenravif v0.2.0 (https://github.com/imazen/cavif-rs?rev=2b9d4335950a952b9faa0bcd624eebf7820e714a#2b9d4335)
+   Compiling zenavif v0.2.0 (/home/lilith/work/zen/zenavif)
+    Finished `release` profile [optimized + debuginfo] target(s) in 12.48s
+     Running `target/release/examples/gate_kit determinism`
+gate-determinism: 5 cells x 5 thread legs in 7.8s, 0 failures
+gate-determinism: PASS

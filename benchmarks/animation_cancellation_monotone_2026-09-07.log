@@ -1,0 +1,10 @@
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.07s
+     Running `target/release/examples/gate_kit monotone`
+gate-monotone: 6 cells, 6 inversion(s) (0 known, 6 NEW, 0 fixed) on linux-x86_64
+  [NEW ] photo/q40: s6 dominated by faster s10
+  [NEW ] photo/q40: s7 dominated by faster s10
+  [NEW ] photo/q40: s8 dominated by faster s10
+  [NEW ] photo/q80: s5 dominated by faster s10
+  [NEW ] screen/q80: s6 dominated by faster s7
+  [NEW ] screen/q80: s6 dominated by faster s8
+gate-monotone: FAIL — 6 NEW inversion(s) introduced (see above).
