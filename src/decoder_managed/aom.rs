@@ -215,7 +215,14 @@ impl ManagedAvifDecoder {
             let resolved = self.resolved_matrix_for_source(&info, source)?;
             match resolved {
                 ResolvedMatrix::Identity if chroma_sampling == ChromaSampling::Cs444 => {
-                    aom_identity_to_buffer(&fd, our_range, bit_depth, wide_out)?
+                    aom_identity_to_buffer(
+                        &fd,
+                        our_range,
+                        bit_depth,
+                        wide_out,
+                        has_alpha,
+                        self.alloc_pref,
+                    )?
                 }
                 ResolvedMatrix::Identity => {
                     return Err(at!(Error::Unsupported(
@@ -342,6 +349,8 @@ fn aom_identity_to_buffer(
     range: OurYuvRange,
     bit_depth: u8,
     wide_out: bool,
+    has_alpha: bool,
+    alloc_pref: crate::alloc_util::AllocPref,
 ) -> Result<PixelBuffer> {
     let (w, h) = (fd.width, fd.height);
     let px = w.checked_mul(h).ok_or_else(|| at!(Error::OutOfMemory))?;
@@ -357,32 +366,28 @@ fn aom_identity_to_buffer(
             v
         }
     };
-    if wide_out {
-        // Native-depth output (range-expanded within 0..2^bd-1) — the caller's
-        // scale_pixels_to_u16 widens, exactly like the rav1d identity path.
-        let mut out = vec![rgb::Rgb::<u16> { r: 0, g: 0, b: 0 }; px];
-        for (i, o) in out.iter_mut().enumerate() {
-            *o = rgb::Rgb {
-                r: expand(fd.v[i]),
-                g: expand(fd.y[i]),
-                b: expand(fd.u[i]),
-            };
-        }
-        PixelBuffer::from_pixels(out, w as u32, h as u32)
-            .map(Into::into)
-            .map_err(|_| at!(Error::OutOfMemory))
-    } else {
-        let mut out = vec![Rgb::<u8> { r: 0, g: 0, b: 0 }; px];
-        for (i, o) in out.iter_mut().enumerate() {
-            *o = Rgb {
-                r: expand(fd.v[i]) as u8,
-                g: expand(fd.y[i]) as u8,
-                b: expand(fd.u[i]) as u8,
-            };
-        }
-        PixelBuffer::from_pixels(out, w as u32, h as u32)
-            .map(Into::into)
-            .map_err(|_| at!(Error::OutOfMemory))
+    // Alpha attachment needs RGBA storage for identity just as for YUV.
+    macro_rules! reorder {
+        ($sample:ty, $pixel:ty, $make:expr) => {{
+            let mut out = crate::alloc_util::vec_with_capacity(alloc_pref, true, px)?;
+            for i in 0..px {
+                let make: fn($sample, $sample, $sample) -> $pixel = $make;
+                out.push(make(
+                    expand(fd.v[i]) as $sample,
+                    expand(fd.y[i]) as $sample,
+                    expand(fd.u[i]) as $sample,
+                ));
+            }
+            PixelBuffer::from_pixels(out, w as u32, h as u32)
+                .map(Into::into)
+                .map_err(|_| at!(Error::OutOfMemory))
+        }};
+    }
+    match (wide_out, has_alpha) {
+        (true, true) => reorder!(u16, rgb::Rgba<u16>, |r, g, b| rgb::Rgba::new(r, g, b, 0)),
+        (true, false) => reorder!(u16, Rgb<u16>, Rgb::new),
+        (false, true) => reorder!(u8, rgb::Rgba<u8>, |r, g, b| rgb::Rgba::new(r, g, b, 0)),
+        (false, false) => reorder!(u8, Rgb<u8>, Rgb::new),
     }
 }
 

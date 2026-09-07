@@ -181,10 +181,10 @@ log = "0.4.29"
 # `[patch."https://github.com/imazen/cavif-rs"] zenravif = { path = "../ravif/ravif" }`.
 # The [patch."…/zenavif-serialize"] below folds zenravif's copy onto this
 # workspace's member.
-# 2026-09-07: 6974b5a8 includes main's zenrav1e 60594682 block handling
-# fixes and verified animation metadata/premultiplication wiring. See
-# benchmarks/animation_encode_metadata_2026-09-07.md for before/after evidence.
-ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/imazen/cavif-rs", rev = "6974b5a8dd5ed38d416ee4455a2b990692c3d4d8", default-features = false, optional = true, features = ["stop"] }
+# 2026-09-07: 9585c67a also fixes still RGBA premultiplication, on top of
+# main's zenrav1e 60594682 and verified animation metadata wiring. See
+# benchmarks/still_premultiplication_2026-09-07.md for decoded-pixel evidence.
+ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/imazen/cavif-rs", rev = "9585c67a6be5f32418924610084ca7cc8e91c449", default-features = false, optional = true, features = ["stop"] }
 # zenav1-svt experimental AV1 encode backend (`zenav1-svt` feature).
 # The facade crate lives in the rust/svtav1 subdir of imazen/zenav1-svt and is
 # PACKAGED as `zenav1-svt`; the `svtav1` alias keeps the seam's `use` paths

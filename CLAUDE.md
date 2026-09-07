@@ -298,6 +298,30 @@ backend capability landing:**
    backend config and map it from `zencodec::AllocPreference` /
    `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
 
+## Still alpha conversion correction — 2026-09-07
+
+The owner dependency advances to published cavif-rs 9585c67a. RGBA8 now
+multiplies RGB by alpha and preserves opaque pixels; canonical RGBA16 performs
+the missing association before raw-plane coding. AOM's identity-color decoder
+now allocates RGBA storage when attaching alpha. The consumer regression failed
+before correction; a mutation disabling only the RGBA16 multiplication reproduces
+red 149 instead of 75 at half alpha. Libavif verifies all twelve exported files,
+with maximum visible color error 3/255 and exact alpha.
+
+Published-Git all-feature nextest passes 897/897 (nine existing skips); default
+local-source tests/doctests pass 484 (ten existing ignores); all-feature library
+clippy passes against both local and published sources. Determinism passes
+25 legs and conformance 56 cells; the optional armed CLI leg is unrun. The
+same 33 byte/quality ladder failures, 16 timing misses and two speed inversions
+remain. No thresholds or skips changed. See
+benchmarks/still_premultiplication_2026-09-07.md for executed failure and
+reference evidence. Earlier dependency/checkpoint entries below are historical.
+
+The user authorized merging main once ready, then reading all open GitHub issues
+to reconcile remaining gaps. Main merge and CI remain deferred until readiness;
+review-branch pushes remain authorized. Investigate the RGB-only ladder drift
+next rather than treating alpha correctness as an all-passing local result.
+
 ## Upstream animation metadata integration — 2026-09-07
 
 The cavif-rs owner fix is published as 6974b5a8 on animation-avif-complete and

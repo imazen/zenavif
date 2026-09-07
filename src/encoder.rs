@@ -1788,12 +1788,27 @@ pub fn encode_rgba16(
         Some(EncodePixelRange::Limited) => ravif::PixelRange::Limited,
         _ => ravif::PixelRange::Full,
     };
+    // Raw-plane APIs require associated color when the output signals premultiplication.
+    // Associate in the full input domain before narrowing, preserving opaque endpoints.
+    let color = |v: u16, a: u16| {
+        if config.alpha_color_mode == EncodeAlphaMode::Premultiplied {
+            ((u32::from(v) * u32::from(a) + 32767) / 65535) as u16
+        } else {
+            v
+        }
+    };
     // Honours `config.bit_depth` for colour AND alpha — see encode_rgb16.
     let result = match resolve_coded_bit_depth(config, true) {
         ravif::BitDepth::Eight => {
             let pixels: Vec<[u8; 3]> = img
                 .pixels()
-                .map(|p| [narrow_to_u8(p.g), narrow_to_u8(p.b), narrow_to_u8(p.r)])
+                .map(|p| {
+                    [
+                        narrow_to_u8(color(p.g, p.a)),
+                        narrow_to_u8(color(p.b, p.a)),
+                        narrow_to_u8(color(p.r, p.a)),
+                    ]
+                })
                 .collect();
             let alpha: Vec<u8> = img.pixels().map(|p| narrow_to_u8(p.a)).collect();
             enc.encode_raw_planes_8_bit(
@@ -1810,9 +1825,9 @@ pub fn encode_rgba16(
                 .pixels()
                 .map(|p| {
                     [
-                        scale_from_u16(p.g, 10),
-                        scale_from_u16(p.b, 10),
-                        scale_from_u16(p.r, 10),
+                        scale_from_u16(color(p.g, p.a), 10),
+                        scale_from_u16(color(p.b, p.a), 10),
+                        scale_from_u16(color(p.r, p.a), 10),
                     ]
                 })
                 .collect();

@@ -12,6 +12,8 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Fix still premultiplied RGBA encoding at both input depths and AOM identity-color alpha decoding. Opaque pixels retain alpha and color; partial alpha is associated before coding. Pin the verified upstream correction at `9585c67a`.
+
 - Update zenravif to `6974b5a8`, including current main's zenrav1e block-handling fixes and corrected animation metadata wiring. Preserve configured ICC/Exif/XMP, rotation/mirror, CICP, CLLI and MDCV on tracks and posters.
 - Correct zenravif animation premultiplication at 8/10 bits: convert color samples before coding and signal the matching alpha association. Invalid animation spatial metadata now returns a serialization error.
 
