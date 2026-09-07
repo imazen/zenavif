@@ -12,6 +12,9 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Animated serializer: add `AmveBox` and `CclvBox` with shared range/presence/luminance-order validation and setters for color track/poster metadata.
+- Parser: preserve CLLI, MDCV, CCLV and AMVE from color-track sample entries, including sequences without a poster. `AnimationInfo`, legacy `AnimationConfig` and native `DecodedAnimationInfo` now carry `hdr: AnimationHdrMetadata`, separately from poster metadata. Correct ambient illuminance documentation to 0.0001 lux.
+
 - Native `DecodedFrame::timing` preserves exact duration and 64-bit timestamps in media ticks. `AnimationFrameTiming` is re-exported, and native/concrete codec decoders expose `frame_timing(index)` without advancing playback. The legacy millisecond fields remain truncated/saturated convenience values.
 - Fix animation duration-limit bypasses caused by truncating sub-millisecond frames or saturating long durations. Limits now compare exact cumulative media ticks, including skipped frames.
 

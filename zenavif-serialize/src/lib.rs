@@ -25,7 +25,7 @@ use whereat::at;
 whereat::define_at_crate_info!();
 
 // Re-export box types needed by the public API
-pub use crate::boxes::{Av1CBox, ClapBox, ClliBox, ColrBox, ColrIccBox, IrotBox, ImirBox, MdcvBox, PaspBox};
+pub use crate::boxes::{AmveBox, CclvBox, Av1CBox, ClapBox, ClliBox, ColrBox, ColrIccBox, IrotBox, ImirBox, MdcvBox, PaspBox};
 pub use crate::error::{Result, SerializeError};
 
 /// IPMA association flag marking a property as essential (decoders must understand it

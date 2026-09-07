@@ -95,6 +95,7 @@ impl ManagedAvifDecoder {
             info: DecodedAnimationInfo {
                 frame_count,
                 loop_count: anim_info.loop_count,
+                hdr: anim_info.hdr,
                 has_alpha: anim_info.has_alpha,
                 timescale: anim_info.timescale,
             },
@@ -212,6 +213,7 @@ impl AnimationDecoder {
         let info = DecodedAnimationInfo {
             frame_count: anim_info.frame_count,
             loop_count: anim_info.loop_count,
+            hdr: anim_info.hdr,
             has_alpha: anim_info.has_alpha,
             timescale: anim_info.timescale,
         };

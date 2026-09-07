@@ -32,7 +32,7 @@ signaling, transforms, metadata, animation, and grids.
 - **Still images** with optional alpha channel (separate monochrome AV1 plane)
 - **Animated AVIF** with per-frame durations and keyframe control
 - **Grid/tiled images** (up to 256x256 tiles) for large images
-- **HDR metadata** — content light level (clli) and mastering display color volume (mdcv)
+- **HDR metadata** — content light level (clli) and mastering display color volume (mdcv); animated color tracks and posters also support ambient viewing (amve) and content colour volume (cclv)
 - **Transforms** — rotation, mirror, clean aperture crop, pixel aspect ratio
 - **Color spaces** — full CICP support (BT.709, BT.2020, Display P3, PQ, HLG, etc.)
 - **ICC profiles**, EXIF, and XMP metadata embedding
@@ -168,6 +168,13 @@ let frames = vec![
 // seq_header: &[u8] — the AV1 sequence header OBU, passed separately here.
 let avif_bytes = anim.serialize(width, height, &frames, &seq_header, None);
 ```
+
+Animation HDR metadata uses `set_amve(AmveBox)` and `set_cclv(CclvBox)`.
+They apply to the color track, poster and uncropped secondary, independently of
+alpha. `AmveBox::new(100_000, 15635, 16450)` describes 10 lux with D65
+chromaticity. Populate at least one `CclvBox` field; absent luminances differ
+from explicit zero. `try_serialize` validates chromaticity ranges and ordering
+of supplied minimum/average/maximum luminances before writing any bytes.
 
 ### Grid (tiled)
 

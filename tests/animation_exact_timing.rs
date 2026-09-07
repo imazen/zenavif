@@ -201,3 +201,64 @@ fn finite_count_survives_native_pixel_decode_and_codec_boundary() {
         }
     }
 }
+
+#[test]
+fn native_animation_hdr_metadata_reaches_decoded_info_without_changing_pixels() {
+    let mut image = AnimatedImage::new();
+    let mut config = Av1CBox::default();
+    config.seq_level_idx_0 = 0;
+    image.set_color_config(config);
+    let frames = [AnimFrame::new(SAMPLE, 1).with_sync(true)];
+    let untagged = image
+        .try_serialize(150, 150, &frames, &SAMPLE[2..18], None)
+        .unwrap();
+    let expected = zenavif::decode_animation(&untagged).unwrap();
+    assert_eq!(expected.info.hdr, zenavif::AnimationHdrMetadata::default());
+    let mut cclv = zenavif_serialize::CclvBox::new();
+    cclv.primaries = Some([(-1234, 45678), (7500, 3000), (34000, 16000)]);
+    cclv.min_luminance = Some(0);
+    cclv.max_luminance = Some(10_000_000);
+    cclv.avg_luminance = Some(1_000_000);
+    image
+        .set_amve(zenavif_serialize::AmveBox::new(100_000, 15635, 16450))
+        .set_cclv(cclv);
+    let tagged = image
+        .try_serialize(150, 150, &frames, &SAMPLE[2..18], None)
+        .unwrap();
+    let actual = zenavif::decode_animation(&tagged).unwrap();
+    let mut lazy = zenavif::AnimationDecoder::new(&tagged, &zenavif::DecoderConfig::new()).unwrap();
+    assert_eq!(lazy.info().hdr, actual.info.hdr);
+    assert_eq!(
+        actual.info.hdr.ambient_viewing.unwrap().ambient_illuminance,
+        100_000
+    );
+    assert_eq!(
+        actual.info.hdr.content_colour_volume.unwrap().primaries,
+        cclv.primaries
+    );
+    assert_eq!(
+        actual.info.hdr.content_colour_volume.unwrap().min_luminance,
+        Some(0)
+    );
+    assert_eq!(
+        actual.info.hdr.content_colour_volume.unwrap().max_luminance,
+        cclv.max_luminance
+    );
+    assert_eq!(
+        actual.info.hdr.content_colour_volume.unwrap().avg_luminance,
+        cclv.avg_luminance
+    );
+    assert!(actual.info.hdr.content_light_level.is_none());
+    assert!(actual.info.hdr.mastering_display.is_none());
+    let lazy_frame = lazy.next_frame(&zenavif::Unstoppable).unwrap().unwrap();
+    for row in 0..150 {
+        assert_eq!(
+            actual.frames[0].pixels.as_slice().row(row),
+            expected.frames[0].pixels.as_slice().row(row)
+        );
+        assert_eq!(
+            lazy_frame.pixels.as_slice().row(row),
+            expected.frames[0].pixels.as_slice().row(row)
+        );
+    }
+}

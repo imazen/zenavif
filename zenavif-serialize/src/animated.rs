@@ -3,7 +3,7 @@
 //! Takes pre-encoded AV1 frame data and produces a valid animated AVIF file
 //! with `ftyp(avis) + meta + moov + mdat` structure.
 
-use crate::boxes::{Av1CBox, ClapBox, ClliBox, ColrBox, MdcvBox, PaspBox};
+use crate::boxes::{AmveBox, CclvBox, Av1CBox, ClapBox, ClliBox, ColrBox, MdcvBox, PaspBox};
 #[path = "animated_metadata.rs"]
 mod metadata;
 
@@ -98,6 +98,8 @@ pub struct AnimatedImage {
     colr_raw: Option<(u16, u16, u16, bool)>,
     clli: Option<ClliBox>,
     mdcv: Option<MdcvBox>,
+    amve: Option<AmveBox>,
+    cclv: Option<CclvBox>,
     pixel_aspect_ratio: Option<PaspBox>,
     crop: Option<CropRect>,
     rotation: Option<u8>,
@@ -124,6 +126,8 @@ impl AnimatedImage {
             colr_raw: None,
             clli: None,
             mdcv: None,
+            amve: None,
+            cclv: None,
             pixel_aspect_ratio: None,
             crop: None,
             rotation: None,
@@ -185,6 +189,12 @@ impl AnimatedImage {
         if self.timescale == 0 || frames.is_empty() || frames.len() > u32::MAX as usize || color_seq_header.is_empty() || !frames[0].is_sync {
             return Err(invalid("animation needs a timescale, sequence header and first sync sample"));
         }
+        if self.amve.is_some_and(|v| !v.is_valid()) {
+            return Err(invalid("amve needs nonzero illuminance and chromaticities in 0..=50000"));
+        }
+        if self.cclv.is_some_and(|v| !v.is_valid()) {
+            return Err(invalid("cclv needs a field, primaries in -5000000..=5000000, and min <= avg <= max"));
+        }
         let alpha = frames[0].alpha.is_some();
         if alpha != self.alpha_config.is_some() || alpha != alpha_seq_header.is_some() || (self.premultiplied_alpha && !alpha) {
             return Err(invalid("alpha samples, configuration and sequence header must agree"));
@@ -227,6 +237,10 @@ impl AnimatedImage {
     pub fn set_clli(&mut self, clli: ClliBox) -> &mut Self { self.clli = Some(clli); self }
     /// Mastering Display Colour Volume (HDR).
     pub fn set_mdcv(&mut self, mdcv: MdcvBox) -> &mut Self { self.mdcv = Some(mdcv); self }
+    /// Set nominal ambient viewing conditions on the color track and poster.
+    pub fn set_amve(&mut self, amve: AmveBox) -> &mut Self { self.amve = Some(amve); self }
+    /// Set nominal content colour volume on the color track and poster.
+    pub fn set_cclv(&mut self, cclv: CclvBox) -> &mut Self { self.cclv = Some(cclv); self }
 
     /// Serialize an animated AVIF file from pre-encoded AV1 frame data.
     pub fn serialize(&self, width: u32, height: u32, frames: &[AnimFrame<'_>],
@@ -1074,3 +1088,7 @@ mod tests {
         assert_eq!(info.timescale, 1000);
     }
 }
+
+#[cfg(test)]
+#[path = "animated_hdr_tests.rs"]
+mod hdr_tests;

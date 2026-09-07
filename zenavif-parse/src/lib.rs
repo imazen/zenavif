@@ -608,7 +608,7 @@ pub struct ContentColourVolume {
 /// was authored. See ISOBMFF § 12.1.5 / H.265 D.2.39.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AmbientViewingEnvironment {
-    /// Ambient illuminance in units of 1/10000 cd/m²
+    /// Ambient illuminance in units of 1/10000 lux
     pub ambient_illuminance: u32,
     /// Ambient light x chromaticity (CIE 1931), units of 1/50000
     pub ambient_light_x: u16,
@@ -1078,6 +1078,8 @@ pub struct AnimationFrame {
 pub struct AnimationConfig {
     /// Total number of playbacks (0 = infinite)
     pub loop_count: u64,
+    /// Static HDR metadata from the color track.
+    pub hdr: AnimationHdrMetadata,
     /// All frames in the animation
     pub frames: TryVec<AnimationFrame>,
 }
@@ -1158,11 +1160,22 @@ struct TrackReference {
     track_ids: TryVec<u32>,
 }
 
+/// Static HDR metadata from an animation color track's sample description.
+/// Kept separately from the poster item, which may describe a different image.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AnimationHdrMetadata {
+    pub content_light_level: Option<ContentLightLevel>,
+    pub mastering_display: Option<MasteringDisplayColourVolume>,
+    pub content_colour_volume: Option<ContentColourVolume>,
+    pub ambient_viewing: Option<AmbientViewingEnvironment>,
+}
+
 /// Codec properties extracted from a `stsd` VisualSampleEntry.
 #[derive(Debug, Clone, Default)]
 struct TrackCodecConfig {
     av1_config: Option<AV1Config>,
     color_info: Option<ColorInformation>,
+    hdr: AnimationHdrMetadata,
 }
 
 /// Parsed data from a single track box (`trak`).
@@ -1599,6 +1612,8 @@ struct AnimationParserData {
 #[derive(Debug, Clone, Copy)]
 pub struct AnimationInfo {
     pub frame_count: usize,
+    /// Static HDR metadata from the color track, independently of the poster.
+    pub hdr: AnimationHdrMetadata,
     /// Total number of playbacks (0 = infinite), including the initial play.
     /// Uses 64 bits to preserve finite durations from version-1 track headers.
     pub loop_count: u64,
@@ -1809,10 +1824,10 @@ impl<'data> AvifParser<'data> {
                 mirror: None,
                 clean_aperture: None,
                 pixel_aspect_ratio: None,
-                content_light_level: None,
-                mastering_display: None,
-                content_colour_volume: None,
-                ambient_viewing: None,
+                content_light_level: track_config.hdr.content_light_level,
+                mastering_display: track_config.hdr.mastering_display,
+                content_colour_volume: track_config.hdr.content_colour_volume,
+                ambient_viewing: track_config.hdr.ambient_viewing,
                 operating_point: None,
                 layer_selector: None,
                 layered_image_indexing: None,
@@ -2571,6 +2586,7 @@ impl<'data> AvifParser<'data> {
         self.animation_data.as_ref().map(|data| AnimationInfo {
             frame_count: data.sample_table.sample_sizes.len(),
             loop_count: data.loop_count,
+            hdr: data.codec_config.hdr,
             has_alpha: data.alpha_sample_table.is_some(),
             timescale: data.media_timescale,
         })
@@ -2850,6 +2866,7 @@ impl<'data> AvifParser<'data> {
             }
             Some(AnimationConfig {
                 loop_count: info.loop_count,
+                hdr: info.hdr,
                 frames,
             })
         } else {
@@ -4064,6 +4081,7 @@ fn extract_animation(
                 log::debug!("Animation: extracted {} frames", frames.len());
                 context.animation = Some(AnimationConfig {
                     loop_count: anim.loop_count,
+                    hdr: anim.color_codec_config.hdr,
                     frames,
                 });
             }
@@ -5359,6 +5377,10 @@ fn read_stsd<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TrackCodecConfig> {
                 BoxType::AV1CodecConfigurationBox => {
                     config.av1_config = Some(read_av1c(&mut sub_box)?);
                 }
+                BoxType::ContentLightLevelBox => { config.hdr.content_light_level = Some(read_clli(&mut sub_box)?); }
+                BoxType::MasteringDisplayColourVolumeBox => { config.hdr.mastering_display = Some(read_mdcv(&mut sub_box)?); }
+                BoxType::ContentColourVolumeBox => { config.hdr.content_colour_volume = Some(read_cclv(&mut sub_box)?); }
+                BoxType::AmbientViewingEnvironmentBox => { config.hdr.ambient_viewing = Some(read_amve(&mut sub_box)?); }
                 BoxType::ColorInformationBox => {
                     if let Ok(colr) = read_colr(&mut sub_box) {
                         config.color_info = Some(colr);

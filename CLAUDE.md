@@ -300,6 +300,40 @@ backend capability landing:**
 
 ## Known Bugs
 
+**Fixed 2026-09-07 — color-track HDR metadata was discarded.**
+`read_stsd` previously retained only av1C/colr; the poster path could hide this
+because item getters still found HDR properties. The new no-poster regression
+failed at a missing CLLI value (`hdr-track-before.log`) and now preserves all
+four CLLI/MDCV/CCLV/AMVE values. `AnimationHdrMetadata` is carried separately by
+parser/eager/native animation info, so a different poster does not override
+track metadata. Native eager and lazy decode retain it without changing pixels.
+
+The animated serializer now emits AMVE/CCLV on the color sample entry and color
+poster/uncropped secondary, with no duplicate metadata on alpha. AMVE uses
+0.0001 lux (the old parser documentation incorrectly said cd/m²). CCLV retains
+signed primaries and distinguishes absent fields from explicit zero values.
+Shared encoder validation checks H.274 primary/ambient ranges, requires a CCLV
+field, and enforces min <= avg <= max where values exist. The absent-field and
+luminance-order witness failed before the additional validation
+(`hdr-validation-before.log`). Unit coverage includes all 15 nonempty CCLV
+presence combinations and rejects the empty combination.
+
+Specification references: AVIF 1.2 section 9 metadata table; ITU-T H.274
+sections 8.13/8.14; libavif 1.3.0 `read.c::avifSkipContentColourVolume` and
+`avifSkipAmbientViewingEnvironment` confirm the BMFF payload layout and reserved
+bits. Final local results: 89 serializer tests, 20 all-feature parser tests,
+6 parser doctests, 7 native integration tests, and 30,240 independent metadata
+checks across 8/10-bit output pass. Encoder nextest passes 2600/2600 and
+regression spotcheck 123/123; parser/serializer/managed-source clippy passes with
+warnings denied. Logs are `~/tmp/animation-metadata/hdr-*.log`. The full canonical
+workspace and optional feature combinations remain unverified; managed tests
+use the documented actual-source harness. No CI or push was run.
+
+Libavif ignores these two metadata values, so the independent gate also
+checks exact big-endian bytes, box paths, nonessential item associations and
+absence on alpha, rather than claiming libavif reports the values.
+
+
 **Fixed 2026-09-07 — finite playback count overflow in parser/native metadata.**
 `RepetitionCount::Finite(u32::MAX)` writes 4,294,967,296 total playbacks;
 `loop_count: u32` previously rejected that valid file. Parser internal, eager,

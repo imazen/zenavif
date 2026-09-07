@@ -202,6 +202,23 @@ pub(super) fn write_color_properties(out: &mut Vec<u8>, options: &AnimatedImage)
     }
     if let Some(clli) = options.clli.as_ref() { write_clli(out, clli); count += 1; }
     if let Some(mdcv) = options.mdcv.as_ref() { write_mdcv(out, mdcv); count += 1; }
+    if let Some(amve) = options.amve {
+        let pos = begin_box(out, b"amve");
+        write_u32(out, amve.ambient_illuminance);
+        write_u16(out, amve.ambient_light_x); write_u16(out, amve.ambient_light_y);
+        end_box(out, pos); count += 1;
+    }
+    if let Some(cclv) = options.cclv {
+        let pos = begin_box(out, b"cclv");
+        out.push(cclv.flags()); // Reserved cancel/persistence and low bits remain zero.
+        if let Some(primaries) = cclv.primaries {
+            for (x, y) in primaries { write_u32(out, x as u32); write_u32(out, y as u32); }
+        }
+        for value in [cclv.min_luminance, cclv.max_luminance, cclv.avg_luminance].into_iter().flatten() {
+            write_u32(out, value);
+        }
+        end_box(out, pos); count += 1;
+    }
     count
 }
 

@@ -131,6 +131,8 @@ if let Some(grid) = parser.grid_config() {
 ```rust
 if let Some(info) = parser.animation_info() {
     // info.loop_count: u64 total plays, including the initial play (0 = infinite).
+    // info.hdr preserves HDR metadata from the color track, independently
+    // of the poster's metadata (CLLI/MDCV/CCLV/AMVE).
     for (index, frame) in parser.frames().enumerate() {
         let frame = frame?;
         decode_av1(&frame.data)?;

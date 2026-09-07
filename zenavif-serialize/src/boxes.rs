@@ -680,6 +680,91 @@ impl MpegBox for ClliBox {
     }
 }
 
+/// Ambient viewing environment (`amve`), ISOBMFF / H.274 section 8.13.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct AmveBox {
+    /// Environmental illuminance in units of 0.0001 lux; must be nonzero.
+    pub ambient_illuminance: u32,
+    /// CIE 1931 x chromaticity times 50000, in 0..=50000.
+    pub ambient_light_x: u16,
+    /// CIE 1931 y chromaticity times 50000, in 0..=50000.
+    pub ambient_light_y: u16,
+}
+
+impl AmveBox {
+    pub fn new(ambient_illuminance: u32, ambient_light_x: u16, ambient_light_y: u16) -> Self {
+        Self { ambient_illuminance, ambient_light_x, ambient_light_y }
+    }
+    /// Check the H.274 illuminance and chromaticity ranges.
+    pub fn is_valid(&self) -> bool {
+        self.ambient_illuminance != 0 && self.ambient_light_x <= 50000 && self.ambient_light_y <= 50000
+    }
+}
+
+impl MpegBox for AmveBox {
+    fn len(&self) -> usize { BASIC_BOX_SIZE + 8 }
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"amve")?;
+        b.u32(self.ambient_illuminance)?;
+        b.u16(self.ambient_light_x)?;
+        b.u16(self.ambient_light_y)
+    }
+}
+
+/// Nominal content colour volume (`cclv`), ISOBMFF / H.274 section 8.14.
+/// Presence flags preserve absent fields separately from explicit zero values.
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CclvBox {
+    /// CIE 1931 xy values times 50000, each in -5_000_000..=5_000_000.
+    /// Conventional primary order is green, blue, red.
+    pub primaries: Option<[(i32, i32); 3]>,
+    /// Normalized minimum luminance in increments of 0.0000001.
+    pub min_luminance: Option<u32>,
+    /// Normalized maximum luminance in increments of 0.0000001.
+    pub max_luminance: Option<u32>,
+    /// Normalized average luminance in increments of 0.0000001.
+    pub avg_luminance: Option<u32>,
+}
+
+impl CclvBox {
+    pub fn new() -> Self { Self::default() }
+    /// Check H.274 presence, primary ranges and ordering of supplied luminances.
+    /// At least one field must be present; absent fields are not inferred here.
+    pub fn is_valid(&self) -> bool {
+        self.flags() != 0
+            && self.primaries.is_none_or(|p| p.iter().all(|&(x, y)|
+                (-5_000_000..=5_000_000).contains(&x) && (-5_000_000..=5_000_000).contains(&y)))
+            && [(self.min_luminance, self.avg_luminance), (self.avg_luminance, self.max_luminance),
+                (self.min_luminance, self.max_luminance)].into_iter()
+                .all(|(low, high)| low.zip(high).is_none_or(|(lo, hi)| lo <= hi))
+    }
+    pub(crate) fn flags(&self) -> u8 {
+        u8::from(self.primaries.is_some()) << 5 | u8::from(self.min_luminance.is_some()) << 4
+            | u8::from(self.max_luminance.is_some()) << 3 | u8::from(self.avg_luminance.is_some()) << 2
+    }
+}
+
+impl MpegBox for CclvBox {
+    fn len(&self) -> usize {
+        BASIC_BOX_SIZE + 1 + usize::from(self.primaries.is_some()) * 24
+            + 4 * (usize::from(self.min_luminance.is_some()) + usize::from(self.max_luminance.is_some())
+                + usize::from(self.avg_luminance.is_some()))
+    }
+    fn write<B: WriterBackend>(&self, w: &mut Writer<B>) -> Result<(), B::Error> {
+        let mut b = w.basic_box(self.len(), *b"cclv")?;
+        b.u8(self.flags())?;
+        if let Some(primaries) = self.primaries {
+            for (x, y) in primaries { b.u32(x as u32)?; b.u32(y as u32)?; }
+        }
+        for value in [self.min_luminance, self.max_luminance, self.avg_luminance].into_iter().flatten() {
+            b.u32(value)?;
+        }
+        Ok(())
+    }
+}
+
 /// Mastering Display Colour Volume box (`mdcv`), per ISOBMFF § 12.1.5 / SMPTE ST 2086.
 ///
 /// Describes the color volume of the mastering display used to author the content.
