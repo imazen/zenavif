@@ -6,6 +6,7 @@
 //! the reference frames inter prediction needs.
 
 use super::ManagedAvifDecoder;
+use super::metadata::MetadataSource;
 use crate::config::DecoderConfig;
 use crate::error::{Error, Result, error_from_rav1d};
 use crate::image::{AnimationFrameTiming, DecodedAnimation, DecodedAnimationInfo, DecodedFrame};
@@ -81,10 +82,10 @@ impl ManagedAvifDecoder {
                 _ => None,
             };
 
-            let (pixels, _info) = self.convert_to_image_with_premultiplied(
+            let (pixels, _info) = self.convert_to_image_from(
                 primary_frame,
                 alpha_frame,
-                self.parser.animation_premultiplied_alpha().unwrap_or(false),
+                MetadataSource::Animation,
                 stop,
             )?;
 
@@ -197,7 +198,7 @@ impl AnimationDecoder {
     ///
     /// Returns [`Error::Unsupported`] if the file is not animated.
     pub fn new(data: &[u8], config: &DecoderConfig) -> Result<Self> {
-        let inner = ManagedAvifDecoder::new(data, config)?;
+        let inner = ManagedAvifDecoder::new_for_animation(data, config)?;
 
         let anim_info = inner
             .parser
@@ -336,13 +337,10 @@ impl AnimationDecoder {
                 .frame(self.frame_index)
                 .map_err(|e| e.map_error(Error::Parse))?
                 .duration_ms;
-            let (pixels, _info) = self.inner.convert_aom_to_image_with_premultiplied(
+            let (pixels, _info) = self.inner.convert_aom_to_image_from(
                 fd,
                 fd_alpha,
-                self.inner
-                    .parser
-                    .animation_premultiplied_alpha()
-                    .unwrap_or(false),
+                MetadataSource::Animation,
                 stop,
             )?;
             self.frame_index += 1;
@@ -374,13 +372,10 @@ impl AnimationDecoder {
             _ => None,
         };
 
-        let (pixels, _info) = self.inner.convert_to_image_with_premultiplied(
+        let (pixels, _info) = self.inner.convert_to_image_from(
             primary_frame,
             alpha_frame,
-            self.inner
-                .parser
-                .animation_premultiplied_alpha()
-                .unwrap_or(false),
+            MetadataSource::Animation,
             stop,
         )?;
 
@@ -409,17 +404,23 @@ impl AnimationDecoder {
 fn native_animation_metadata_retains_maximum_finite_count() {
     use zenavif_serialize::animated::{AnimFrame, AnimatedImage, RepetitionCount};
 
-    // Metadata-only construction: AV1 decoding is deliberately not invoked.
-    // The serializer/parser round trip covers the version-1 duration and edit
-    // list; both native decoder entry points must retain that full count.
+    // Pixel decoding is deliberately not invoked, but construction checks the
+    // sequence header against frame limits. Use the real libavif 1.3.0
+    // colors-animated-8bpc first sample (150x150), not placeholder AV1 bytes.
+    // Both native decoder entry points must retain the full version-1 count.
+    let sample: &[u8] = &[
+        0x12, 0, 0x0a, 0x0e, 0, 0, 0, 3, 0xbc, 0xac, 0xa9, 0xb5, 0xf2, 0x20, 0x21, 0xa0, 0xd0,
+        0x80, 0x32, 0x13, 0x10, 0, 0x83, 0x80, 0, 0, 0x80, 0, 0, 0, 0xeb, 0xc5, 0xa6, 0x2e, 0x0c,
+        0x0d, 0xd1, 0x51, 0x40,
+    ];
     let mut image = AnimatedImage::new();
     image.set_repetition_count(RepetitionCount::Finite(u32::MAX));
     let data = image
         .try_serialize(
-            64,
-            64,
-            &[AnimFrame::new(b"sample", 1).with_sync(true)],
-            b"header",
+            150,
+            150,
+            &[AnimFrame::new(sample, 1).with_sync(true)],
+            &sample[2..18],
             None,
         )
         .unwrap();

@@ -298,6 +298,27 @@ backend capability landing:**
    backend config and map it from `zencodec::AllocPreference` /
    `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
 
+## Animation color and geometry — 2026-09-07 (local)
+
+Corrected track/poster source selection for codec geometry/depth/chroma and
+CICP/ICC probing, managed/AOM pixel conversion and fallback-matrix resolution,
+and animation constructor frame limits. The parser no longer fills absent
+poster codec/color properties from the track. Independent conflicting nclx,
+ICC absence, and different-size/depth poster tests pass (11 focused tests).
+A real colored sample makes matrix mistakes observable in rendered rows;
+restoring poster selection causes the regression test to fail. A large poster
+previously rejected an in-limit smaller animation; it now decodes successfully.
+Full all-feature nextest passes 880/880 (nine existing skips), default tests/
+doctests pass 475 (ten existing ignores), and library clippy/scoped formatting
+pass. Determinism and 56 reference conformance cells pass; the optional armed
+CLI leg is explicitly unrun. See `benchmarks/track_color_geometry_2026-09-07.md`
+for evidence and validation, including final eager-convenience routing checks.
+The ladder retains the same 33 byte/quality rows plus 15 timing misses; the same
+two speed inversions persist. No envelope has been re-pinned.
+Track spatial properties and Exif/XMP association still require implementation
+and rendered proof; source-encoding details also need provenance auditing.
+The full goal and quality-envelope investigation remain active. CI is deferred.
+
 ## Track metadata versus poster — 2026-09-07 (local)
 
 Final verification: 877 all-feature nextest tests and 473 default tests/doctests
@@ -321,9 +342,9 @@ that track value in managed and AOM paths; still conversion retains item semanti
 Tests compare rendered pixels at 8/10 bits both without a poster and with
 contradictory poster/track alpha declarations, in both directions.
 
-Other track properties still need their own audit: codec dimensions/color and
-orientation currently begin from primary-item probing when a poster exists;
-this HDR/premultiplication correction is not evidence for those fields.
+The subsequent color/geometry correction is recorded above. Track spatial
+properties and sidecar association still need their own audit; this earlier
+HDR/premultiplication correction is not evidence for those fields.
 See `benchmarks/track_metadata_2026-09-07.md`. The full goal and existing quality
 baseline investigation remain active; push/CI remain deferred.
 

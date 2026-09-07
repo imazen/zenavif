@@ -304,7 +304,7 @@ pub fn decode_animation_with(
     config: &DecoderConfig,
     stop: &(impl Stop + ?Sized),
 ) -> Result<DecodedAnimation> {
-    let mut decoder = ManagedAvifDecoder::new(data, config)?;
+    let mut decoder = ManagedAvifDecoder::new_for_animation(data, config)?;
     decoder.decode_animation(stop)
 }
 

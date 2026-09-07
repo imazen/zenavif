@@ -5,6 +5,7 @@
 //! feature gates.
 
 use super::ManagedAvifDecoder;
+use super::metadata::MetadataSource;
 use crate::cicp_resolve::ResolvedMatrix;
 use crate::convert::{add_alpha8, add_alpha16, downscale_to_8bit, scale_pixels_to_u16};
 use crate::error::{Error, Result};
@@ -137,19 +138,14 @@ impl ManagedAvifDecoder {
         fd_alpha: Option<aom_decode::frame::FrameDecode>,
         stop: &(impl Stop + ?Sized),
     ) -> Result<(PixelBuffer, ImageInfo)> {
-        self.convert_aom_to_image_with_premultiplied(
-            fd,
-            fd_alpha,
-            self.parser.premultiplied_alpha(),
-            stop,
-        )
+        self.convert_aom_to_image_from(fd, fd_alpha, MetadataSource::Primary, stop)
     }
 
-    pub(super) fn convert_aom_to_image_with_premultiplied(
+    pub(super) fn convert_aom_to_image_from(
         &self,
         fd: aom_decode::frame::FrameDecode,
         fd_alpha: Option<aom_decode::frame::FrameDecode>,
-        premultiplied_alpha: bool,
+        source: MetadataSource,
         stop: &(impl Stop + ?Sized),
     ) -> Result<(PixelBuffer, ImageInfo)> {
         let (width, height) = (fd.width, fd.height);
@@ -176,7 +172,7 @@ impl ManagedAvifDecoder {
             ColorRange::Limited
         };
         let (color_primaries, transfer_characteristics, icc_profile) =
-            match self.parser.color_info() {
+            match self.color_info_for(source) {
                 Some(zenavif_parse::ColorInformation::Nclx {
                     color_primaries: cp,
                     transfer_characteristics: tc,
@@ -202,7 +198,7 @@ impl ManagedAvifDecoder {
             height: height as u32,
             bit_depth,
             has_alpha,
-            premultiplied_alpha,
+            premultiplied_alpha: self.premultiplied_for(source),
             monochrome: fd.monochrome,
             color_primaries,
             transfer_characteristics,
@@ -239,7 +235,7 @@ impl ManagedAvifDecoder {
         let mut image = if fd.monochrome {
             self.aom_mono_to_buffer(&fd, our_range, bit_depth, wide_out, has_alpha)?
         } else {
-            let resolved = self.resolved_matrix_for(&info)?;
+            let resolved = self.resolved_matrix_for_source(&info, source)?;
             match resolved {
                 ResolvedMatrix::Identity if chroma_sampling == ChromaSampling::Cs444 => {
                     aom_identity_to_buffer(&fd, our_range, bit_depth, wide_out)?
@@ -292,7 +288,7 @@ impl ManagedAvifDecoder {
             } else {
                 ColorRange::Limited
             };
-            let premul = premultiplied_alpha;
+            let premul = self.premultiplied_for(source);
             if wide_out {
                 add_alpha16(
                     &mut image,

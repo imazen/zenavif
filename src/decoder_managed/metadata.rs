@@ -18,7 +18,33 @@ use crate::image::{
 };
 use rav1d_safe::src::managed::{Frame, PixelLayout};
 
+/// Which independently coded image owns the properties used for conversion.
+#[derive(Clone, Copy)]
+pub(super) enum MetadataSource {
+    Primary,
+    Animation,
+}
+
 impl ManagedAvifDecoder {
+    pub(super) fn color_info_for(
+        &self,
+        source: MetadataSource,
+    ) -> Option<&zenavif_parse::ColorInformation> {
+        match source {
+            MetadataSource::Primary => self.parser.color_info(),
+            MetadataSource::Animation => self.parser.animation_color_info(),
+        }
+    }
+
+    pub(super) fn premultiplied_for(&self, source: MetadataSource) -> bool {
+        match source {
+            MetadataSource::Primary => self.parser.premultiplied_alpha(),
+            MetadataSource::Animation => {
+                self.parser.animation_premultiplied_alpha().unwrap_or(false)
+            }
+        }
+    }
+
     /// Resolve the H.273 matrix for conversion, honestly.
     ///
     /// `info.matrix_coefficients` carries the *signaled* AV1-bitstream
@@ -28,6 +54,14 @@ impl ManagedAvifDecoder {
     /// authoritative precedence — is consulted only as the hint for
     /// MC=2/reserved, per the zenpixels#36 resolution contract.
     pub(super) fn resolved_matrix_for(&self, info: &ImageInfo) -> Result<ResolvedMatrix> {
+        self.resolved_matrix_for_source(info, MetadataSource::Primary)
+    }
+
+    pub(super) fn resolved_matrix_for_source(
+        &self,
+        info: &ImageInfo,
+        source: MetadataSource,
+    ) -> Result<ResolvedMatrix> {
         // Hint chain for an unspecified/reserved bitstream MC, per the
         // documented AVIF precedence ("container colr > AV1 bitstream >
         // AVIF defaults 1/13/6"): a *valid* container `nclx` matrix
@@ -39,7 +73,7 @@ impl ManagedAvifDecoder {
         // default is documented disambiguation, not a guess; the
         // honest-error class stays with genuinely unimplemented math
         // (YCgCo/CL/ICtCp/underivable MC=12).
-        let hint = match self.parser.color_info() {
+        let hint = match self.color_info_for(source) {
             Some(zenavif_parse::ColorInformation::Nclx {
                 matrix_coefficients,
                 ..
@@ -140,35 +174,24 @@ impl ManagedAvifDecoder {
             .parser
             .primary_data()
             .map_err(|e| e.map_error(Error::Parse))?;
+        if primary_data.is_empty() && self.parser.animation_info().is_some() {
+            return self.probe_animation_info();
+        }
         // Get dimensions from grid config or AV1 sequence header
         let (width, height) = if let Some(grid) = self.parser.grid_config() {
             (grid.output_width, grid.output_height)
         } else {
-            let data = &primary_data;
-            // AVIF sequences may omit a poster item. In that layout the
-            // parser exposes empty primary data and track-level properties;
-            // derive dimensions from the first actual sequence sample.
-            let meta = if data.is_empty() && self.parser.animation_info().is_some() {
-                let frame = self
-                    .parser
-                    .frame(0)
-                    .map_err(|e| e.map_error(Error::Parse))?;
-                zenavif_parse::AV1Metadata::parse_av1_bitstream(&frame.data)
-            } else {
-                zenavif_parse::AV1Metadata::parse_av1_bitstream(data)
-            }
-            .map_err(|e| e.map_error(Error::Parse))?;
+            let meta = zenavif_parse::AV1Metadata::parse_av1_bitstream(&primary_data)
+                .map_err(|e| e.map_error(Error::Parse))?;
             (meta.max_frame_width.get(), meta.max_frame_height.get())
         };
 
-        let has_alpha = self.parser.alpha_metadata().is_some()
-            || (primary_data.is_empty()
-                && self.parser.animation_info().is_some_and(|a| a.has_alpha));
+        let has_alpha = self.parser.alpha_metadata().is_some();
 
         // AV1 config for bit depth
         let bit_depth = self.parser.av1_config().map(|c| c.bit_depth).unwrap_or(8);
 
-        // CICP from container (colr box) or AV1 config fallback
+        // CICP from container (colr box), otherwise the existing still defaults.
         let (
             color_primaries,
             transfer_characteristics,
@@ -243,6 +266,115 @@ impl ManagedAvifDecoder {
             pixel_aspect_ratio: self.parser.pixel_aspect_ratio().cloned(),
             content_light_level: self.parser.content_light_level().cloned(),
             mastering_display: self.parser.mastering_display().cloned(),
+            exif: self
+                .parser
+                .exif()
+                .and_then(|r| r.ok())
+                .map(|c| c.into_owned()),
+            xmp: self
+                .parser
+                .xmp()
+                .and_then(|r| r.ok())
+                .map(|c| c.into_owned()),
+            gain_map: self.extract_gain_map(),
+            // Depth map extraction requires zenavif-parse > 0.4.0 (not yet published).
+            depth_map: None,
+        })
+    }
+
+    /// Probe the animation color track independently of its optional poster.
+    pub fn probe_animation_info(&self) -> Result<ImageInfo> {
+        let source = MetadataSource::Animation;
+        let track = self
+            .parser
+            .animation_info()
+            .ok_or_else(|| whereat::at!(Error::InvalidParameters("not an animated AVIF".into())))?;
+        let frame = self
+            .parser
+            .frame(0)
+            .map_err(|e| e.map_error(Error::Parse))?;
+        let meta = zenavif_parse::AV1Metadata::parse_av1_bitstream(&frame.data)
+            .map_err(|e| e.map_error(Error::Parse))?;
+        let (width, height) = (meta.max_frame_width.get(), meta.max_frame_height.get());
+        let has_alpha = track.has_alpha;
+        let bit_depth = meta.bit_depth;
+
+        // CICP from container (colr box) or AV1 sequence-header fallback
+        let (
+            color_primaries,
+            transfer_characteristics,
+            matrix_coefficients,
+            color_range,
+            icc_profile,
+        ) = match self.color_info_for(source) {
+            Some(zenavif_parse::ColorInformation::Nclx {
+                color_primaries: cp,
+                transfer_characteristics: tc,
+                ..
+            }) => (
+                ColorPrimaries(*cp as u8),
+                TransferCharacteristics(*tc as u8),
+                MatrixCoefficients(meta.matrix_coefficients),
+                if meta.full_range {
+                    ColorRange::Full
+                } else {
+                    ColorRange::Limited
+                },
+                None,
+            ),
+            Some(zenavif_parse::ColorInformation::IccProfile(icc)) => (
+                ColorPrimaries(meta.color_primaries),
+                TransferCharacteristics(meta.transfer_characteristics),
+                MatrixCoefficients(meta.matrix_coefficients),
+                if meta.full_range {
+                    ColorRange::Full
+                } else {
+                    ColorRange::Limited
+                },
+                Some(icc.clone()),
+            ),
+            None => (
+                ColorPrimaries(meta.color_primaries),
+                TransferCharacteristics(meta.transfer_characteristics),
+                MatrixCoefficients(meta.matrix_coefficients),
+                if meta.full_range {
+                    ColorRange::Full
+                } else {
+                    ColorRange::Limited
+                },
+                None,
+            ),
+        };
+
+        let chroma_sampling = if meta.monochrome {
+            ChromaSampling::Monochrome
+        } else if meta.chroma_subsampling.horizontal && meta.chroma_subsampling.vertical {
+            ChromaSampling::Cs420
+        } else if meta.chroma_subsampling.horizontal {
+            ChromaSampling::Cs422
+        } else {
+            ChromaSampling::Cs444
+        };
+
+        Ok(ImageInfo {
+            width,
+            height,
+            bit_depth,
+            has_alpha,
+            premultiplied_alpha: self.premultiplied_for(source),
+            monochrome: chroma_sampling == ChromaSampling::Monochrome,
+            color_primaries,
+            transfer_characteristics,
+            matrix_coefficients,
+            color_range,
+            chroma_sampling,
+            icc_profile,
+            rotation: self.parser.rotation().cloned(),
+            mirror: self.parser.mirror().cloned(),
+            clean_aperture: self.parser.clean_aperture().cloned(),
+            pixel_aspect_ratio: self.parser.pixel_aspect_ratio().cloned(),
+            content_light_level: track.hdr.content_light_level,
+            mastering_display: track.hdr.mastering_display,
             exif: self
                 .parser
                 .exif()

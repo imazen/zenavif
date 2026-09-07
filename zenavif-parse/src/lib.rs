@@ -1462,6 +1462,14 @@ pub struct AV1Metadata {
     /// constants like [`ChromaSubsampling::YUV420`].
     pub chroma_subsampling: ChromaSubsampling,
     pub monochrome: bool,
+    /// CICP color primaries signaled by the AV1 sequence header.
+    pub color_primaries: u8,
+    /// CICP transfer characteristics signaled by the AV1 sequence header.
+    pub transfer_characteristics: u8,
+    /// CICP matrix coefficients signaled by the AV1 sequence header.
+    pub matrix_coefficients: u8,
+    /// Full-range flag signaled by the AV1 sequence header.
+    pub full_range: bool,
     /// AV1 base quantizer index (0-255) from the first frame header.
     /// `None` if the frame header could not be parsed.
     /// 0 = lossless candidate, 255 = worst quality.
@@ -1493,6 +1501,10 @@ impl AV1Metadata {
             seq_profile: h.seq_profile,
             chroma_subsampling: h.color.chroma_subsampling,
             monochrome: h.color.monochrome,
+            color_primaries: h.color.color_primaries,
+            transfer_characteristics: h.color.transfer_characteristics,
+            matrix_coefficients: h.color.matrix_coefficients,
+            full_range: h.color.color_range != 0,
             base_q_idx: frame_quant.map(|fq| fq.base_q_idx),
             lossless: frame_quant.map(|fq| fq.coded_lossless && no_chroma_subsampling),
         })
@@ -2118,12 +2130,9 @@ impl<'data> AvifParser<'data> {
             };
         }
 
-        let track_config = animation_data.as_ref().map(|a| &a.codec_config);
         let spatial_extents = find_prop!(ImageSpatialExtents);
-        let av1_config = find_prop!(AV1Config)
-            .or_else(|| track_config.and_then(|c| c.av1_config.clone()));
-        let color_info = find_prop!(ColorInformation)
-            .or_else(|| track_config.and_then(|c| c.color_info.clone()));
+        let av1_config = find_prop!(AV1Config);
+        let color_info = find_prop!(ColorInformation);
         let rotation = find_prop!(Rotation);
         let mirror = find_prop!(Mirror);
         let clean_aperture = find_prop!(CleanAperture);
@@ -2584,6 +2593,12 @@ impl<'data> AvifParser<'data> {
     // ========================================
     // Metadata (no data access)
     // ========================================
+
+    /// Color property of the animation color sample entry. A missing track
+    /// property never inherits the primary poster item's color property.
+    pub fn animation_color_info(&self) -> Option<&ColorInformation> {
+        self.animation_data.as_ref()?.codec_config.color_info.as_ref()
+    }
 
     /// Whether the animation color track is premultiplied by its associated
     /// alpha track. Independent of the poster item's `prem` reference.

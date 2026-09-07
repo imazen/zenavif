@@ -267,14 +267,12 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
 
 impl AvifDecodeJob {
     fn probe_inner(&self, data: &[u8]) -> Result<ImageInfo, At<Error>> {
-        let decoder = crate::ManagedAvifDecoder::new(data, &self.config.inner)?;
-        let mut native_info = decoder.probe_info()?;
-        if let Some(anim) = decoder.animation_info() {
-            // Animation metadata belongs to the color track, independently
-            // of a possibly different poster. Absence is authoritative too.
-            native_info.content_light_level = anim.hdr.content_light_level;
-            native_info.mastering_display = anim.hdr.mastering_display;
-        }
+        let decoder = crate::ManagedAvifDecoder::new_for_animation(data, &self.config.inner)?;
+        let native_info = if decoder.animation_info().is_some() {
+            decoder.probe_animation_info()?
+        } else {
+            decoder.probe_info()?
+        };
         // `convert_native_info` reports the Preserve view (stored dims +
         // intrinsic tag); rewrite to display dims + Identity on the bake path.
         let mut info = apply_reported_orientation(
@@ -618,15 +616,13 @@ impl AvifDecodeJob {
 
         // Probe metadata before creating animation decoder (both parse the container,
         // but ManagedAvifDecoder gives us the native ImageInfo for conversion).
-        let probe_dec = crate::ManagedAvifDecoder::new(&data, &cfg)?;
-        let mut native_info = probe_dec.probe_info()?;
+        let probe_dec = crate::ManagedAvifDecoder::new_for_animation(&data, &cfg)?;
+        let native_info = probe_dec.probe_animation_info()?;
         self.check_decode_limits(&native_info)?;
         drop(probe_dec);
 
         let anim_dec = crate::AnimationDecoder::new(&data, &cfg)?;
         let anim_info = anim_dec.info().clone();
-        native_info.content_light_level = anim_info.hdr.content_light_level;
-        native_info.mastering_display = anim_info.hdr.mastering_display;
 
         // `convert_native_info` reports the Preserve view (stored dims +
         // intrinsic tag); the bake path rewrites the canvas to display dims +

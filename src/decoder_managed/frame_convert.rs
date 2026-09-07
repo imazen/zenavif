@@ -11,6 +11,7 @@ use super::cicp_map::{
     convert_chroma_sampling, convert_color_primaries, convert_color_range, convert_matrix,
     convert_transfer, to_yuv_range,
 };
+use super::metadata::MetadataSource;
 use super::plane_convert::{
     ConvertCtx, convert_8bit_identity, convert_8bit_monochrome, convert_8bit_monochrome_gray,
     convert_8bit_planar, convert_16bit_identity, convert_16bit_monochrome,
@@ -68,19 +69,14 @@ impl ManagedAvifDecoder {
         alpha: Option<Frame>,
         stop: &(impl Stop + ?Sized),
     ) -> Result<(PixelBuffer, ImageInfo)> {
-        self.convert_to_image_with_premultiplied(
-            primary,
-            alpha,
-            self.parser.premultiplied_alpha(),
-            stop,
-        )
+        self.convert_to_image_from(primary, alpha, MetadataSource::Primary, stop)
     }
 
-    pub(super) fn convert_to_image_with_premultiplied(
+    pub(super) fn convert_to_image_from(
         &self,
         primary: Frame,
         alpha: Option<Frame>,
-        premultiplied_alpha: bool,
+        source: MetadataSource,
         stop: &(impl Stop + ?Sized),
     ) -> Result<(PixelBuffer, ImageInfo)> {
         let width = primary.width() as usize;
@@ -100,7 +96,7 @@ impl ManagedAvifDecoder {
         let color_range = convert_color_range(av1_color.color_range);
 
         let (color_primaries, transfer_characteristics, icc_profile) =
-            match self.parser.color_info() {
+            match self.color_info_for(source) {
                 Some(zenavif_parse::ColorInformation::Nclx {
                     color_primaries: cp,
                     transfer_characteristics: tc,
@@ -131,7 +127,7 @@ impl ManagedAvifDecoder {
             height: height as u32,
             bit_depth,
             has_alpha,
-            premultiplied_alpha,
+            premultiplied_alpha: self.premultiplied_for(source),
             monochrome: matches!(layout, PixelLayout::I400),
             color_primaries,
             transfer_characteristics,
@@ -163,7 +159,7 @@ impl ManagedAvifDecoder {
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         let info_clone = info.clone();
-        let resolved = self.resolved_matrix_for(&info)?;
+        let resolved = self.resolved_matrix_for_source(&info, source)?;
         let mut pixels = match bit_depth {
             8 => self.convert_8bit(primary, alpha, info, resolved, stop),
             10 | 12 => self.convert_16bit(primary, alpha, info, resolved, stop),

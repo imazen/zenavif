@@ -52,6 +52,15 @@ pub struct ManagedAvifDecoder {
 impl ManagedAvifDecoder {
     /// Create new decoder with AVIF data and configuration
     pub fn new(data: &[u8], config: &DecoderConfig) -> Result<Self> {
+        Self::new_for_source(data, config, false)
+    }
+
+    /// Apply configured frame limits to the color track when a sequence exists.
+    pub(crate) fn new_for_animation(data: &[u8], config: &DecoderConfig) -> Result<Self> {
+        Self::new_for_source(data, config, true)
+    }
+
+    fn new_for_source(data: &[u8], config: &DecoderConfig, animation: bool) -> Result<Self> {
         // Zero-copy AvifParser — primary/alpha data returned as Cow::Borrowed.
         //
         // STRICT container validation, deliberately. `DecodeConfig::default()`
@@ -105,7 +114,12 @@ impl ManagedAvifDecoder {
 
         // Validate dimensions against frame_size_limit before any decode work
         if config.frame_size_limit > 0 {
-            let (width, height) = if let Some(grid) = parser.grid_config() {
+            let (width, height) = if animation && parser.animation_info().is_some() {
+                let frame = parser.frame(0).map_err(|e| e.map_error(Error::Parse))?;
+                let meta = zenavif_parse::AV1Metadata::parse_av1_bitstream(&frame.data)
+                    .map_err(|e| e.map_error(Error::Parse))?;
+                (meta.max_frame_width.get(), meta.max_frame_height.get())
+            } else if let Some(grid) = parser.grid_config() {
                 (grid.output_width, grid.output_height)
             } else if let Ok(meta) = parser.primary_metadata() {
                 (meta.max_frame_width.get(), meta.max_frame_height.get())

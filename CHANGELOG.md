@@ -12,6 +12,9 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Derive animation geometry, depth, chroma and CICP/ICC metadata from its color track, and apply frame limits to that track. Correct managed/AOM fallback-matrix selection so a differently tagged poster cannot alter animation pixels.
+- Keep absent poster codec/color properties independent of the animation track, including ICC profiles.
+
 - Use animation-track HDR metadata for codec probing and frame-decoder info, including authoritative absence when a poster has HDR. Expose all four static track HDR properties through `AvifAnimationFrameDecoder::hdr_metadata`.
 - Probe valid animations without a poster from their first sample. Preserve the color track's premultiplied-alpha reference and use it during managed/AOM animation conversion independently of poster alpha semantics.
 
