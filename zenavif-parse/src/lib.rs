@@ -5439,29 +5439,29 @@ fn precompute_sample_offsets(
 
 /// Parse Track Header box (tkhd)
 /// See ISO/IEC 14496-12:2015 § 8.3.2
-fn read_tkhd<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<u32> {
+fn read_tkhd<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<(u32, u64)> {
     let version = src.read_u8().map_err(|e| at!(Error::from(e)))?;
     let _flags = [src.read_u8().map_err(|e| at!(Error::from(e)))?, src.read_u8().map_err(|e| at!(Error::from(e)))?, src.read_u8().map_err(|e| at!(Error::from(e)))?];
 
-    let track_id = if version == 1 {
+    let header = if version == 1 {
         let _creation_time = be_u64(src)?;
         let _modification_time = be_u64(src)?;
         let track_id = be_u32(src)?;
         let _reserved = be_u32(src)?;
-        let _duration = be_u64(src)?;
-        track_id
+        let duration = be_u64(src)?;
+        (track_id, duration)
     } else {
         let _creation_time = be_u32(src)?;
         let _modification_time = be_u32(src)?;
         let track_id = be_u32(src)?;
         let _reserved = be_u32(src)?;
-        let _duration = be_u32(src)?;
-        track_id
+        let duration = be_u32(src)?;
+        (track_id, if duration == u32::MAX { u64::MAX } else { u64::from(duration) })
     };
 
     // Skip rest (reserved, layer, alternate_group, volume, matrix, width, height)
     skip_box_remain(src)?;
-    Ok(track_id)
+    Ok(header)
 }
 
 /// Parse Track Reference box (tref)
@@ -5488,26 +5488,35 @@ fn read_tref<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<TrackReference>
     Ok(refs)
 }
 
-/// Parse Edit List box (elst) to extract loop count from flags.
-/// See ISO/IEC 14496-12:2015 § 8.6.6
-///
-/// Returns the loop count: flags bit 0 set = infinite looping (0), otherwise 1.
-fn read_elst<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<u32> {
+/// Parse repetition and the duration of one edit-list cycle, in movie ticks.
+fn read_elst<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<(bool, u64)> {
     let (version, flags) = read_fullbox_extra(src)?;
-
-    let entry_count = be_u32(src)?;
-    // Skip all entries
-    let entry_size: u64 = if version == 1 { 20 } else { 12 };
-    skip(src, (entry_count as u64).checked_mul(entry_size)
-        .ok_or_else(|| at!(Error::InvalidData("edit list entry count overflow")))?)?;
-    skip_box_remain(src)?;
-
-    // Bit 0 of flags: repeat (1 = infinite loop → loop_count=0, 0 = play once → loop_count=1)
-    if flags & 1 != 0 {
-        Ok(0) // infinite
-    } else {
-        Ok(1) // play once
+    if version > 1 {
+        return Err(at!(Error::InvalidData("unsupported edit list version")));
     }
+    let entry_count = be_u32(src)?;
+    let mut duration = 0u64;
+    for _ in 0..entry_count {
+        let segment = if version == 1 { be_u64(src)? } else { u64::from(be_u32(src)?) };
+        duration = duration.checked_add(segment)
+            .ok_or_else(|| at!(Error::InvalidData("edit list duration overflow")))?;
+        // media_time (signed, same width as duration), then media_rate.
+        skip(src, if version == 1 { 12 } else { 8 })?;
+    }
+    skip_box_remain(src)?;
+    Ok((flags & 1 != 0, duration))
+}
+
+fn repetition_play_count(track_duration: u64, edit: Option<(bool, u64)>) -> Result<u32> {
+    let Some((true, cycle)) = edit else { return Ok(1); };
+    if cycle == 0 {
+        return Err(at!(Error::InvalidData("repeating edit list has zero duration")));
+    }
+    if track_duration == u64::MAX { return Ok(0); }
+    // The last playback can be truncated by the track presentation duration.
+    u32::try_from(track_duration.div_ceil(cycle))
+        .ok().filter(|&count| count != 0)
+        .ok_or_else(|| at!(Error::InvalidData("animation play count is not representable")))
 }
 
 /// Parse animation from moov box.
@@ -5540,14 +5549,15 @@ fn read_moov<T: Read>(src: &mut BMFFBox<'_, T>, stop: &dyn Stop) -> Result<TryVe
 fn read_trak<T: Read>(src: &mut BMFFBox<'_, T>, stop: &dyn Stop) -> Result<Option<ParsedTrack>> {
     let mut track_id = 0u32;
     let mut references = TryVec::new();
-    let mut loop_count = 1u32; // default: play once
+    let mut track_duration = 0u64;
+    let mut edit = None;
     let mut mdia_result: Option<(FourCC, u32, SampleTable, TrackCodecConfig)> = None;
 
     let mut iter = src.box_iter();
     while let Some(mut b) = iter.next_box()? {
         match b.head.name {
             BoxType::TrackHeaderBox => {
-                track_id = read_tkhd(&mut b)?;
+                (track_id, track_duration) = read_tkhd(&mut b)?;
             }
             BoxType::TrackReferenceBox => {
                 references = read_tref(&mut b)?;
@@ -5557,7 +5567,7 @@ fn read_trak<T: Read>(src: &mut BMFFBox<'_, T>, stop: &dyn Stop) -> Result<Optio
                 let mut edts_iter = b.box_iter();
                 while let Some(mut eb) = edts_iter.next_box()? {
                     if eb.head.name == BoxType::EditListBox {
-                        loop_count = read_elst(&mut eb)?;
+                        edit = Some(read_elst(&mut eb)?);
                     } else {
                         skip_box_remain(&mut eb)?;
                     }
@@ -5579,7 +5589,7 @@ fn read_trak<T: Read>(src: &mut BMFFBox<'_, T>, stop: &dyn Stop) -> Result<Optio
             media_timescale,
             sample_table,
             references,
-            loop_count,
+            loop_count: repetition_play_count(track_duration, edit)?,
             codec_config,
         }))
     } else {
@@ -6105,5 +6115,22 @@ mod sample_offset_overflow_tests {
         assert_eq!(sizes.get(0), Some(1));
         assert_eq!(sizes.get(64 * 1024 * 1024 - 1), Some(1));
         assert_eq!(sizes.get(64 * 1024 * 1024), None);
+    }
+}
+
+#[cfg(test)]
+mod repetition_tests {
+    use super::repetition_play_count;
+
+    #[test]
+    fn finite_repetition_uses_track_presentation_duration() {
+        assert_eq!(repetition_play_count(1800, Some((true, 600))).unwrap(), 3);
+        assert_eq!(repetition_play_count(1500, Some((true, 600))).unwrap(), 3);
+        assert_eq!(repetition_play_count(u64::MAX, Some((true, 600))).unwrap(), 0);
+        assert_eq!(repetition_play_count(600, Some((false, 600))).unwrap(), 1);
+        assert_eq!(repetition_play_count(600, None).unwrap(), 1);
+        assert!(repetition_play_count(600, Some((true, 0))).is_err());
+        assert!(repetition_play_count(0, Some((true, 600))).is_err());
+        assert!(repetition_play_count(u64::MAX - 1, Some((true, 1))).is_err());
     }
 }

@@ -4,6 +4,18 @@
 //! with `ftyp(avis) + meta + moov + mdat` structure.
 
 use crate::boxes::{Av1CBox, ClliBox, ColrBox, MdcvBox};
+#[path = "animated_metadata.rs"]
+mod metadata;
+
+/// Number of additional playbacks after the first presentation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepetitionCount {
+    /// Repeat without a finite end time.
+    Infinite,
+    /// Repeat this many times; zero plays the sequence once.
+    Finite(u32),
+}
+
 
 /// A single pre-encoded animation frame.
 #[derive(Clone)]
@@ -44,10 +56,15 @@ impl<'a> AnimFrame<'a> {
 /// with per-encode data (dimensions, frames, sequence headers) to produce the AVIF file.
 pub struct AnimatedImage {
     timescale: u32,
-    loop_count: u32,
+    repetition: RepetitionCount,
+    icc: Option<Vec<u8>>,
+    exif: Option<Vec<u8>>,
+    xmp: Option<Vec<u8>>,
+    premultiplied_alpha: bool,
     color_config: Av1CBox,
     alpha_config: Option<Av1CBox>,
     colr: Option<ColrBox>,
+    colr_raw: Option<(u16, u16, u16, bool)>,
     clli: Option<ClliBox>,
     mdcv: Option<MdcvBox>,
 }
@@ -61,10 +78,15 @@ impl AnimatedImage {
     pub fn new() -> Self {
         Self {
             timescale: 1000,
-            loop_count: 0,
+            repetition: RepetitionCount::Infinite,
+            icc: None,
+            exif: None,
+            xmp: None,
+            premultiplied_alpha: false,
             color_config: Av1CBox::default(),
             alpha_config: None,
             colr: None,
+            colr_raw: None,
             clli: None,
             mdcv: None,
         }
@@ -72,14 +94,72 @@ impl AnimatedImage {
 
     /// Timescale in ticks per second. Default: 1000 (milliseconds).
     pub fn set_timescale(&mut self, timescale: u32) -> &mut Self { self.timescale = timescale; self }
-    /// Loop count: 0 = infinite. Default: 0.
-    pub fn set_loop_count(&mut self, loop_count: u32) -> &mut Self { self.loop_count = loop_count; self }
+    /// Total playbacks: 0 = infinite, 1 = play once. Default: infinite.
+    pub fn set_loop_count(&mut self, loop_count: u32) -> &mut Self {
+        self.repetition = if loop_count == 0 { RepetitionCount::Infinite } else { RepetitionCount::Finite(loop_count - 1) };
+        self
+    }
+    /// Set additional playbacks explicitly (zero means play once).
+    pub fn set_repetition_count(&mut self, count: RepetitionCount) -> &mut Self { self.repetition = count; self }
+    /// Embed an ICC profile in both the color sample entry and poster.
+    pub fn set_icc_profile(&mut self, icc: Vec<u8>) -> &mut Self { self.icc = Some(icc); self }
+    /// Embed Exif in the color track and poster. Accepts TIFF bytes or an
+    /// already-framed HEIF Exif item, matching the still-image serializer.
+    pub fn set_exif(&mut self, exif: Vec<u8>) -> &mut Self { self.exif = Some(exif); self }
+    /// Embed XMP in the color track and poster.
+    pub fn set_xmp(&mut self, xmp: Vec<u8>) -> &mut Self { self.xmp = Some(xmp); self }
+    /// Signal that color samples are already premultiplied by alpha. Does not
+    /// alter sample pixels; the caller must supply the corresponding values.
+    pub fn set_premultiplied_alpha(&mut self, value: bool) -> &mut Self { self.premultiplied_alpha = value; self }
+
+    /// Validate dimensions, sample layout and durations before writing. The
+    /// supplied OBUs must already match the codec configuration and sync flags.
+    pub fn try_serialize(&self, width: u32, height: u32, frames: &[AnimFrame<'_>],
+                         color_seq_header: &[u8], alpha_seq_header: Option<&[u8]>) -> crate::Result<Vec<u8>> {
+        let invalid = |message| whereat::at!(crate::SerializeError::InvalidInput(message));
+        if width == 0 || height == 0 || width > 65535 || height > 65535 {
+            return Err(invalid("animation dimensions must fit the visual sample entry"));
+        }
+        if self.timescale == 0 || frames.is_empty() || frames.len() > u32::MAX as usize || color_seq_header.is_empty() || !frames[0].is_sync {
+            return Err(invalid("animation needs a timescale, sequence header and first sync sample"));
+        }
+        let alpha = frames[0].alpha.is_some();
+        if alpha != self.alpha_config.is_some() || alpha != alpha_seq_header.is_some() || (self.premultiplied_alpha && !alpha) {
+            return Err(invalid("alpha samples, configuration and sequence header must agree"));
+        }
+        if alpha_seq_header.is_some_and(|s| s.is_empty()) { return Err(invalid("empty alpha sequence header")); }
+        let mut duration = 0u64;
+        // Conservative upper bound for the current 32-bit boxes and offsets.
+        let mut size = 65536u64;
+        for frame in frames {
+            if frame.duration == 0 || frame.color.is_empty() || frame.alpha.is_some() != alpha || frame.alpha.is_some_and(|a| a.is_empty()) {
+                return Err(invalid("animation samples must be nonempty, timed and have consistent alpha"));
+            }
+            duration = duration.checked_add(u64::from(frame.duration)).ok_or_else(|| invalid("animation duration overflow"))?;
+            size = size.checked_add(frame.color.len() as u64).and_then(|n| n.checked_add(frame.alpha.map_or(0, |a| a.len()) as u64)).and_then(|n| n.checked_add(32)).ok_or_else(|| invalid("animation size overflow"))?;
+        }
+        if let RepetitionCount::Finite(count) = self.repetition {
+            duration.checked_mul(u64::from(count) + 1).filter(|&n| n != u64::MAX).ok_or_else(|| invalid("repeated duration overflow"))?;
+        }
+        for bytes in [&self.icc, &self.exif, &self.xmp].into_iter().flatten() {
+            if bytes.is_empty() { return Err(invalid("metadata payload must not be empty")); }
+            size = size.checked_add((bytes.len() as u64).checked_mul(2).ok_or_else(|| invalid("metadata size overflow"))?).ok_or_else(|| invalid("metadata size overflow"))?;
+        }
+        size = (color_seq_header.len() as u64).checked_add(alpha_seq_header.map_or(0, |s| s.len()) as u64).and_then(|n| n.checked_mul(2)).and_then(|n| size.checked_add(n)).ok_or_else(|| invalid("configuration size overflow"))?;
+        if size > u32::MAX as u64 { return Err(invalid("animation exceeds 32-bit container offsets")); }
+        Ok(self.serialize(width, height, frames, color_seq_header, alpha_seq_header))
+    }
     /// AV1 codec configuration for the color track.
     pub fn set_color_config(&mut self, config: Av1CBox) -> &mut Self { self.color_config = config; self }
     /// AV1 codec configuration for the alpha track.
     pub fn set_alpha_config(&mut self, config: Av1CBox) -> &mut Self { self.alpha_config = Some(config); self }
     /// CICP color info (nclx).
-    pub fn set_colr(&mut self, colr: ColrBox) -> &mut Self { self.colr = Some(colr); self }
+    pub fn set_colr(&mut self, colr: ColrBox) -> &mut Self { self.colr = Some(colr); self.colr_raw = None; self }
+    /// Write exact CICP code points, including values absent from the typed
+    /// convenience enums. The last color-description setter takes precedence.
+    pub fn set_color_description(&mut self, primaries: u16, transfer: u16, matrix: u16, full_range: bool) -> &mut Self {
+        self.colr_raw = Some((primaries, transfer, matrix, full_range)); self
+    }
     /// Content Light Level Information (HDR).
     pub fn set_clli(&mut self, clli: ClliBox) -> &mut Self { self.clli = Some(clli); self }
     /// Mastering Display Colour Volume (HDR).
@@ -93,6 +173,11 @@ impl AnimatedImage {
         && alpha_seq_header.is_some();
 
     let total_duration: u64 = frames.iter().map(|f| u64::from(f.duration)).sum();
+    let presentation_duration = match self.repetition {
+        RepetitionCount::Infinite => u64::MAX,
+        RepetitionCount::Finite(count) => total_duration.checked_mul(u64::from(count) + 1).expect("repeated animation duration overflow"),
+    };
+    let sidecars = metadata::sidecars(self);
     let durations: Vec<u32> = frames.iter().map(|f| f.duration).collect();
     let color_frames: Vec<&[u8]> = frames.iter().map(|f| f.color).collect();
     let alpha_frames: Vec<&[u8]> = if has_alpha {
@@ -112,29 +197,23 @@ impl AnimatedImage {
     // ftyp
     write_ftyp(&mut out);
 
-    // meta — declares primary item for still-frame interop. Returns the byte position
-    // of the iloc extent_offset placeholder so we can patch it without scanning.
-    let iloc_offset_pos = write_meta(
-        &mut out,
-        width,
-        height,
-        color_seq_header,
-        color_frames.first().map(|f| f.len() as u32).unwrap_or(0),
-        &self.color_config,
-        self.colr.as_ref(),
-        self.clli.as_ref(),
-        self.mdcv.as_ref(),
-    );
+    // Poster items use the first color/alpha samples. Metadata is also
+    // associated with the color track so sequence-oriented readers see it.
+    let mut images = vec![metadata::ImageItem { id: 1, config: &self.color_config, sequence: color_seq_header, sample_len: color_frames.first().map_or(0, |f| f.len() as u32) }];
+    if has_alpha {
+        images.push(metadata::ImageItem { id: 2, config: self.alpha_config.as_ref().unwrap(), sequence: alpha_seq_header.unwrap(), sample_len: alpha_frames.first().map_or(0, |f| f.len() as u32) });
+    }
+    let iloc_offsets = metadata::write_meta(&mut out, width, height, &images, &sidecars, self);
 
     // moov — each write_track returns the byte position of its stco placeholder.
     let moov_pos = begin_box(&mut out, b"moov");
-    write_mvhd(&mut out, self.timescale, total_duration, next_track_id);
+    write_mvhd(&mut out, self.timescale, presentation_duration, next_track_id);
     let color_stco_pos = write_track(
         &mut out, 1, width, height,
         self.timescale, total_duration,
         &color_frames, &durations, &sync_indices,
         color_seq_header, &self.color_config,
-        false,
+        false, self, presentation_duration, &sidecars,
     );
     let alpha_stco_pos = if has_alpha {
         let alpha_seq = alpha_seq_header.unwrap();
@@ -144,7 +223,7 @@ impl AnimatedImage {
             self.timescale, total_duration,
             &alpha_frames, &durations, &sync_indices,
             alpha_seq, alpha_cfg,
-            true,
+            true, self, presentation_duration, &sidecars,
         ))
     } else {
         None
@@ -167,7 +246,8 @@ impl AnimatedImage {
     // for sentinel byte patterns: AV1 frame payloads can legitimately contain those
     // bytes (and an attacker could deliberately seed them), so a scan-and-replace
     // approach would silently corrupt user data.
-    write_u32_at(&mut out, iloc_offset_pos, mdat_data_start as u32);
+    write_u32_at(&mut out, iloc_offsets[0], mdat_data_start as u32);
+    if has_alpha { write_u32_at(&mut out, iloc_offsets[1], alpha_data_start as u32); }
     write_u32_at(&mut out, color_stco_pos, mdat_data_start as u32);
     if let Some(pos) = alpha_stco_pos {
         write_u32_at(&mut out, pos, alpha_data_start as u32);
@@ -229,170 +309,6 @@ fn write_ftyp(out: &mut Vec<u8>) {
     end_box(out, pos);
 }
 
-#[allow(clippy::too_many_arguments)]
-fn write_meta(
-    out: &mut Vec<u8>,
-    width: u32,
-    height: u32,
-    seq_header: &[u8],
-    first_frame_len: u32,
-    av1c: &Av1CBox,
-    colr: Option<&ColrBox>,
-    clli: Option<&ClliBox>,
-    mdcv: Option<&MdcvBox>,
-) -> usize {
-    // Records the byte position of the iloc extent_offset placeholder.
-    let iloc_offset_pos: usize;
-    let meta_pos = begin_box(out, b"meta");
-    write_fullbox(out, 0, 0);
-
-    // hdlr
-    {
-        let pos = begin_box(out, b"hdlr");
-        write_fullbox(out, 0, 0);
-        write_u32(out, 0); // pre_defined
-        out.extend_from_slice(b"pict");
-        out.extend_from_slice(&[0u8; 12]); // reserved
-        out.push(0); // name (null-terminated empty)
-        end_box(out, pos);
-    }
-
-    // pitm
-    {
-        let pos = begin_box(out, b"pitm");
-        write_fullbox(out, 0, 0);
-        write_u16(out, 1); // item_id
-        end_box(out, pos);
-    }
-
-    // iloc
-    {
-        let pos = begin_box(out, b"iloc");
-        write_fullbox(out, 0, 0);
-        out.push(0x44); // offset_size=4, length_size=4
-        out.push(0x00); // base_offset_size=0, reserved=0
-        write_u16(out, 1); // item_count
-        write_u16(out, 1); // item_id
-        write_u16(out, 0); // data_reference_index
-        write_u16(out, 1); // extent_count
-        iloc_offset_pos = out.len();
-        write_u32(out, ILOC_PLACEHOLDER); // extent_offset (patched later)
-        write_u32(out, first_frame_len); // extent_length
-        end_box(out, pos);
-    }
-
-    // iinf
-    {
-        let iinf_pos = begin_box(out, b"iinf");
-        write_fullbox(out, 0, 0);
-        write_u16(out, 1); // entry_count
-
-        let infe_pos = begin_box(out, b"infe");
-        write_fullbox(out, 2, 0);
-        write_u16(out, 1); // item_id
-        write_u16(out, 0); // protection_index
-        out.extend_from_slice(b"av01");
-        out.push(0); // name
-        end_box(out, infe_pos);
-
-        end_box(out, iinf_pos);
-    }
-
-    // iprp (ipco + ipma)
-    {
-        let iprp_pos = begin_box(out, b"iprp");
-
-        // ipco
-        {
-            let ipco_pos = begin_box(out, b"ipco");
-
-            // Property 1: ispe
-            {
-                let pos = begin_box(out, b"ispe");
-                write_fullbox(out, 0, 0);
-                write_u32(out, width);
-                write_u32(out, height);
-                end_box(out, pos);
-            }
-
-            // Property 2: av1C
-            write_av1c_box(out, av1c, seq_header);
-
-            // Property 3: pixi
-            {
-                let pos = begin_box(out, b"pixi");
-                write_fullbox(out, 0, 0);
-                if av1c.monochrome {
-                    out.push(1); // 1 channel
-                    out.push(bit_depth_from_av1c(av1c));
-                } else {
-                    out.push(3); // 3 channels
-                    let depth = bit_depth_from_av1c(av1c);
-                    out.push(depth);
-                    out.push(depth);
-                    out.push(depth);
-                }
-                end_box(out, pos);
-            }
-
-            // Property 4: colr (optional)
-            if let Some(colr) = colr
-                && *colr != ColrBox::default() {
-                    write_colr_nclx(out, colr);
-                }
-
-            // Property 5: clli (optional)
-            if let Some(clli) = clli {
-                write_clli(out, clli);
-            }
-
-            // Property 6: mdcv (optional)
-            if let Some(mdcv) = mdcv {
-                write_mdcv(out, mdcv);
-            }
-
-            end_box(out, ipco_pos);
-        }
-
-        // ipma
-        {
-            let pos = begin_box(out, b"ipma");
-            write_fullbox(out, 0, 0);
-            write_u32(out, 1); // entry_count
-            write_u16(out, 1); // item_id
-            // Count associations: ispe + av1C(essential) + pixi + optional colr/clli/mdcv
-            let mut assoc_count: u8 = 3;
-            let has_colr = colr.is_some_and(|c| *c != ColrBox::default());
-            if has_colr { assoc_count += 1; }
-            if clli.is_some() { assoc_count += 1; }
-            if mdcv.is_some() { assoc_count += 1; }
-            out.push(assoc_count);
-            out.push(0x01); // property 1 (ispe), not essential
-            out.push(0x82); // property 2 (av1C), essential
-            out.push(0x03); // property 3 (pixi), not essential
-            let mut next_prop = 4u8;
-            if has_colr {
-                out.push(next_prop);
-                next_prop += 1;
-            }
-            if clli.is_some() {
-                out.push(next_prop);
-                next_prop += 1;
-            }
-            if mdcv.is_some() {
-                out.push(next_prop);
-                let _ = next_prop;
-            }
-            end_box(out, pos);
-        }
-
-        end_box(out, iprp_pos);
-    }
-
-    end_box(out, meta_pos);
-    iloc_offset_pos
-}
-
 fn write_mvhd(out: &mut Vec<u8>, timescale: u32, duration: u64, next_track_id: u32) {
     let pos = begin_box(out, b"mvhd");
     write_fullbox(out, 1, 0);
@@ -426,6 +342,9 @@ fn write_track(
     seq_header: &[u8],
     av1c: &Av1CBox,
     is_alpha: bool,
+    options: &AnimatedImage,
+    presentation_duration: u64,
+    sidecars: &[metadata::Sidecar],
 ) -> usize {
     // Records the byte position of the stco chunk_offset placeholder.
     let stco_offset_pos: usize;
@@ -440,7 +359,7 @@ fn write_track(
         write_u64(out, 0); // modification_time
         write_u32(out, track_id);
         write_u32(out, 0); // reserved
-        write_u64(out, duration);
+        write_u64(out, presentation_duration);
         out.extend_from_slice(&[0u8; 8]); // reserved
         write_u16(out, 0); // layer
         write_u16(out, 0); // alternate_group
@@ -456,6 +375,19 @@ fn write_track(
         write_u32(out, fixed_16_16_saturating(width));
         write_u32(out, fixed_16_16_saturating(height));
         end_box(out, pos);
+    }
+
+    // Repeat the single media edit until the track presentation duration.
+    let edts = begin_box(out, b"edts");
+    let elst = begin_box(out, b"elst");
+    write_fullbox(out, 1, u32::from(options.repetition != RepetitionCount::Finite(0)));
+    write_u32(out, 1);
+    write_u64(out, duration);
+    write_u64(out, 0);
+    write_u16(out, 1); write_u16(out, 0);
+    end_box(out, elst); end_box(out, edts);
+    if !is_alpha && !sidecars.is_empty() {
+        metadata::write_meta(out, width, height, &[], sidecars, options);
     }
 
     // mdia
@@ -545,6 +477,15 @@ fn write_track(
 
                     // av1C sub-box with seq header
                     write_av1c_box(out, av1c, seq_header);
+                    if is_alpha {
+                        let auxi = begin_box(out, b"auxi");
+                        write_fullbox(out, 0, 0);
+                        out.extend_from_slice(metadata::ALPHA_TYPE);
+                        end_box(out, auxi);
+                    } else {
+                        metadata::write_color_properties(out, options);
+                    }
+
 
                     end_box(out, av01_pos);
                     end_box(out, pos);
@@ -634,6 +575,12 @@ fn write_track(
         end_box(out, tref_pos);
     }
 
+    if !is_alpha && options.premultiplied_alpha {
+        let tref = begin_box(out, b"tref");
+        let prem = begin_box(out, b"prem");
+        write_u32(out, 2);
+        end_box(out, prem); end_box(out, tref);
+    }
     end_box(out, trak_pos);
     stco_offset_pos
 }
@@ -725,6 +672,34 @@ fn fixed_16_16_saturating(value: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repetition_round_trips_with_variable_frame_durations() {
+        let frames = [AnimFrame::new(b"a", 100).with_sync(true), AnimFrame::new(b"b", 500)];
+        for (repeat, expected) in [(RepetitionCount::Finite(0), 1), (RepetitionCount::Finite(2), 3), (RepetitionCount::Infinite, 0)] {
+            let mut image = AnimatedImage::new();
+            image.set_repetition_count(repeat);
+            let bytes = image.try_serialize(64, 64, &frames, b"header", None).unwrap();
+            let parser = zenavif_parse_current::AvifParser::from_bytes(&bytes).unwrap();
+            let info = parser.animation_info().unwrap();
+            assert_eq!(info.loop_count, expected);
+            assert_eq!(info.frame_count, 2);
+            assert_eq!(info.timescale, 1000);
+        }
+    }
+
+    #[test]
+    fn checked_animation_rejects_inconsistent_alpha_and_repeat_overflow() {
+        let mut image = AnimatedImage::new();
+        let frames = [AnimFrame::new(b"a", u32::MAX).with_sync(true), AnimFrame::new(b"b", u32::MAX)];
+        image.set_repetition_count(RepetitionCount::Finite(u32::MAX));
+        assert!(image.try_serialize(64, 64, &frames, b"header", None).is_err());
+        image.set_repetition_count(RepetitionCount::Finite(0));
+        image.set_premultiplied_alpha(true);
+        assert!(image.try_serialize(64, 64, &frames, b"header", None).is_err());
+        image.set_premultiplied_alpha(false).set_alpha_config(mono_av1c());
+        assert!(image.try_serialize(64, 64, &frames, b"header", Some(b"alpha")).is_err());
+    }
 
     fn basic_av1c() -> Av1CBox {
         Av1CBox {
