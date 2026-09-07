@@ -12,6 +12,8 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Pin zenravif `176ad8ee` to restore full intra-mode search at speeds 9/10. The original photo budget now passes; all 35 audited photo/screen rate curves improve at both speeds, with measured encoding-time increases of approximately 23% and 49%. Preserve the audit and remaining gate failures in `benchmarks/quality_drift_2026-09-07/`.
+
 - Fix still premultiplied RGBA encoding at both input depths and AOM identity-color alpha decoding. Opaque pixels retain alpha and color; partial alpha is associated before coding. Pin the verified upstream correction at `9585c67a`.
 
 - Update zenravif to `6974b5a8`, including current main's zenrav1e block-handling fixes and corrected animation metadata wiring. Preserve configured ICC/Exif/XMP, rotation/mirror, CICP, CLLI and MDCV on tracks and posters.

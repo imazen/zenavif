@@ -1,0 +1,7 @@
+run-heavy: mem-cap=16G (cgroup, hard) jobs=4/20 avail=28847MiB :: bash scripts/gates/gate_conformance.sh
+   Compiling zenavif v0.2.0 (/home/lilith/work/zen/zenavif)
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.29s
+gate-cells: 56 avif cells + 2 y4m inputs -> /tmp/zenavif_gate_conformance.1246031/cells in 30.4s
+gate-conformance: 56 avif cells + 0 armed cells, 0 failures (armed leg: SKIPPED (ZENRAV1E unset — release-gated tools not covered))
+gate-conformance: PASS
+run-heavy: done rc=0 32s | peak-RSS 0.16GiB | min-avail 28769MiB | peak-load 4.26

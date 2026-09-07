@@ -1,0 +1,8 @@
+run-heavy: mem-cap=16G (cgroup, hard) jobs=4/20 avail=28075MiB :: cargo --config patch."https://github.com/imazen/cavif-rs".zenravif.path="/home/lilith/work/zen/cavif-rs/ravif" run --release --features encode-imazen,encode-threading --example gate_kit -- determinism
+   Compiling zenravif v0.2.0 (/home/lilith/work/zen/cavif-rs/ravif)
+   Compiling zenavif v0.2.0 (/home/lilith/work/zen/zenavif)
+    Finished `release` profile [optimized + debuginfo] target(s) in 12.46s
+     Running `target/release/examples/gate_kit determinism`
+gate-determinism: 5 cells x 5 thread legs in 7.9s, 0 failures
+gate-determinism: PASS
+run-heavy: done rc=0 21s | peak-RSS 0.50GiB | min-avail 27973MiB | peak-load 4.93

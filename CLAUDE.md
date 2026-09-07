@@ -298,6 +298,38 @@ backend capability landing:**
    backend config and map it from `zencodec::AllocPreference` /
    `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
 
+## Quality-gate investigation and fast-mode correction — 2026-09-07
+
+The encoder dependency advances to published cavif-rs 176ad8ee. Its forced
+one-candidate intra-mode budget at speeds 9/10 caused a real photo regression.
+The correction restores full preset mode search while retaining CDEF/transform
+choices and the explicit backend budget knob. The original photo/q35 budget
+regression fails before (1165 B / SSIM2 53.312) and passes after (1016 / 59.913).
+All 35 GB82/GB82-SC image curves improve at both affected speeds: median rate
+-3.332% at speed 10, -5.202% at speed 9, with median single-pass time costs
+1.233x and 1.493x. See benchmarks/quality_drift_2026-09-07/README.md and its
+raw tables/probe/analysis source for precise scope, estimator and evidence.
+
+The audit reproduces all 27 original envelope file sizes with July 5 owner
+adb88ddc + registry zenrav1e 0.1.4. Current decoder score drift is <=0.077.
+A four-switch diagnostic and old-wrapper/new-backend comparison are byte-identical
+in all 27 AVIFs, separating preset changes from backend work. Parent/child
+probes establish added search cost without output movement on one speed-2
+witness; this does not justify reverting correctness/search work elsewhere.
+
+Local-source and published-Git all-feature integration each pass 898/898
+(nine existing skips), library clippy passes in both, determinism 25 legs and
+conformance 56 cells pass; optional armed
+CLI leg unrun. Independent libavif decodes 1381 experimental files. The final
+ladder still fails: 32 non-timing changes plus 20 timing misses. It flags
+improvements as well as regressions. Monotone now has six inversions: two
+existing screen cases and four photo cases where improved speed 10 dominates
+slower presets. No envelope or threshold changed. Main merge and CI remain
+deferred; the user authorized merging when ready, then auditing every open
+GitHub issue. The next quality task is those slower-preset gaps, not restoring
+the regressing cap simply to reduce the inversion count. Earlier checkpoints
+below retain their historical dependency revisions and counts.
+
 ## Still alpha conversion correction — 2026-09-07
 
 The owner dependency advances to published cavif-rs 9585c67a. RGBA8 now
