@@ -298,6 +298,17 @@ backend capability landing:**
    backend config and map it from `zencodec::AllocPreference` /
    `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
 
+## Animation speed override integration — 2026-09-07
+
+Owner `a8eaf997` consumes eight previously dropped speed controls in the shared
+animation context path. Explicit prediction modes also clear the speed-6–8
+top-seven preset arm. Alpha remains independently configured. The canonical
+partition-output assertion fails on the old owner, while the owner test passes
+at both input depths after correction. See `benchmarks/animation_speed_2026-09-07.md`
+for the complete controls, test matrix and remaining option gaps. Published-Git
+validation passes all 32 public-API cases (64 decoded frames), 902/902 workspace
+tests (nine existing skips) and all-feature library clippy.
+
 ## Animation filter integration — 2026-09-07
 
 Owner pin `b829a9ee` applies explicit color CDEF/restoration overrides to

@@ -13,6 +13,7 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 ### [Unreleased]
 
 ### Fixed
+- Honor explicit animation partition, prediction, transform-RDO and filter-search speed overrides via zenravif `a8eaf997`, including both values of each control and the separate alpha policy.
 - Apply explicit color CDEF and restoration settings to zenravif animation encoding via owner `b829a9ee`, preserving the separate alpha policy.
 - Honor requested animation worker counts for both color and alpha at 8/10 bits through zenravif `939fa5a3`; complete AVIF bytes remain identical across thread settings.
 - Forwarded animation cancellation now reaches zenrav1e during encoding, across color and alpha tracks, through cavif-rs `294cd9ee` / `2b9d4335`; retain the canonical cancellation error.
