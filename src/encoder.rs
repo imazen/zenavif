@@ -1866,10 +1866,48 @@ pub struct EncodedAnimation {
     pub total_duration_ms: u64,
 }
 
+// Keep animation input conversion independent of coding depth. Upstream's
+// four animation entry points choose a fixed depth from their input type.
+// Fallible staging uses logical pixels, so stride padding cannot become pixels.
+fn map_animation_pixels<S: Copy, D>(
+    image: ImgRef<'_, S>,
+    stop: &almost_enough::StopToken,
+    convert: impl Fn(S) -> D,
+) -> Result<ImgVec<D>> {
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    let count = image
+        .width()
+        .checked_mul(image.height())
+        .ok_or_else(|| at!(Error::OutOfMemory))?;
+    let mut pixels = Vec::new();
+    pixels
+        .try_reserve_exact(count)
+        .map_err(|_| at!(Error::OutOfMemory))?;
+    for (index, pixel) in image.pixels().enumerate() {
+        if index & 1023 == 0 {
+            stop.check().map_err(|e| at!(Error::from(e)))?;
+        }
+        pixels.push(convert(pixel));
+    }
+    Ok(ImgVec::new(pixels, image.width(), image.height()))
+}
+
+fn map_animation_frames<S, D>(frames: &[S], convert: impl Fn(&S) -> Result<D>) -> Result<Vec<D>> {
+    let mut result = Vec::new();
+    result
+        .try_reserve_exact(frames.len())
+        .map_err(|_| at!(Error::OutOfMemory))?;
+    for frame in frames {
+        result.push(convert(frame)?);
+    }
+    Ok(result)
+}
+
 /// Encode a sequence of RGB8 frames into an animated AVIF
 ///
 /// All frames must have the same dimensions. Each frame has its own
-/// duration in milliseconds.
+/// duration in milliseconds. Explicit 8/10-bit output depth is honored
+/// independently of input storage; Auto selects 8 bits for this entry point.
 ///
 /// # Arguments
 ///
@@ -1886,6 +1924,20 @@ pub fn encode_animation_rgb8(
         return crate::encoder_svt_rs::encode_animation_rgb8(frames, config, stop);
     }
     reject_svt_rs_backend(config, "animation encoding")?;
+    reject_unspellable_coded_depth(config, false)?;
+    if config.coded_bit_depth_bits(false) == 10 {
+        let converted = map_animation_frames(frames, |f| {
+            Ok(AnimationFrame16 {
+                pixels: map_animation_pixels(f.pixels.as_ref(), &stop, |p| RGB16 {
+                    r: u16::from(p.r) * 257,
+                    g: u16::from(p.g) * 257,
+                    b: u16::from(p.b) * 257,
+                })?,
+                duration_ms: f.duration_ms,
+            })
+        })?;
+        return encode_animation_rgb16(&converted, config, stop);
+    }
     let enc = build_ravif_encoder(config, stop, false)?;
 
     let ravif_frames: Vec<ravif::AnimFrame<'_>> = frames
@@ -1929,6 +1981,21 @@ pub fn encode_animation_rgba8(
         return crate::encoder_svt_rs::encode_animation_rgba8(frames, config, stop);
     }
     reject_svt_rs_backend(config, "animation encoding")?;
+    reject_unspellable_coded_depth(config, false)?;
+    if config.coded_bit_depth_bits(false) == 10 {
+        let converted = map_animation_frames(frames, |f| {
+            Ok(AnimationFrameRgba16 {
+                pixels: map_animation_pixels(f.pixels.as_ref(), &stop, |p| RGBA16 {
+                    r: u16::from(p.r) * 257,
+                    g: u16::from(p.g) * 257,
+                    b: u16::from(p.b) * 257,
+                    a: u16::from(p.a) * 257,
+                })?,
+                duration_ms: f.duration_ms,
+            })
+        })?;
+        return encode_animation_rgba16(&converted, config, stop);
+    }
     let enc = build_ravif_encoder(config, stop, false)?;
 
     let ravif_frames: Vec<ravif::AnimFrameRgba<'_>> = frames
@@ -1969,11 +2036,12 @@ pub struct AnimationFrameRgba16 {
     pub duration_ms: u32,
 }
 
-/// Encode a sequence of 16-bit RGB frames into an animated AVIF (10-bit AV1)
+/// Encode a sequence of 16-bit RGB frames into an animated AVIF
 ///
 /// Input values should be in full u16 range (0–65535), in the image's native
-/// transfer function (typically sRGB gamma). Values are scaled to 10-bit
-/// internally. All frames must have the same dimensions.
+/// transfer function (typically sRGB gamma). Values are scaled to the requested
+/// 8/10-bit output depth; Auto selects 10 bits. All frames must have the same
+/// dimensions.
 ///
 /// # Arguments
 ///
@@ -1992,25 +2060,30 @@ pub fn encode_animation_rgb16(
         return crate::encoder_svt_rs::encode_animation_rgb16(frames, config, stop);
     }
     reject_svt_rs_backend(config, "animation encoding")?;
-    let enc = build_ravif_encoder(config, stop, true)?;
+    reject_unspellable_coded_depth(config, true)?;
+    if config.coded_bit_depth_bits(true) == 8 {
+        let converted = map_animation_frames(frames, |f| {
+            Ok(AnimationFrame {
+                pixels: map_animation_pixels(f.pixels.as_ref(), &stop, |p| RGB8 {
+                    r: crate::convert::narrow_to_u8(p.r),
+                    g: crate::convert::narrow_to_u8(p.g),
+                    b: crate::convert::narrow_to_u8(p.b),
+                })?,
+                duration_ms: f.duration_ms,
+            })
+        })?;
+        return encode_animation_rgb8(&converted, config, stop);
+    }
+    let enc = build_ravif_encoder(config, stop.clone(), true)?;
 
-    // Scale each frame from 0–65535 to 10-bit (0–1023)
-    let scaled_frames: Vec<ImgVec<RGB16>> = frames
-        .iter()
-        .map(|f| {
-            let scaled: Vec<RGB16> = f
-                .pixels
-                .buf()
-                .iter()
-                .map(|p| RGB16 {
-                    r: scale_from_u16(p.r, 10),
-                    g: scale_from_u16(p.g, 10),
-                    b: scale_from_u16(p.b, 10),
-                })
-                .collect();
-            ImgVec::new(scaled, f.pixels.width(), f.pixels.height())
+    // Scale full-range logical pixels to the upstream 10-bit input domain.
+    let scaled_frames = map_animation_frames(frames, |f| {
+        map_animation_pixels(f.pixels.as_ref(), &stop, |p| RGB16 {
+            r: scale_from_u16(p.r, 10),
+            g: scale_from_u16(p.g, 10),
+            b: scale_from_u16(p.b, 10),
         })
-        .collect();
+    })?;
 
     let ravif_frames: Vec<ravif::AnimFrame16<'_>> = scaled_frames
         .iter()
@@ -2033,11 +2106,12 @@ pub fn encode_animation_rgb16(
     })
 }
 
-/// Encode a sequence of 16-bit RGBA frames into an animated AVIF (10-bit AV1)
+/// Encode a sequence of 16-bit RGBA frames into an animated AVIF
 ///
 /// Input values should be in full u16 range (0–65535), in the image's native
-/// transfer function (typically sRGB gamma). Values are scaled to 10-bit
-/// internally. All frames must have the same dimensions.
+/// transfer function (typically sRGB gamma). Values are scaled to the requested
+/// 8/10-bit output depth; Auto selects 10 bits. All frames must have the same
+/// dimensions.
 ///
 /// # Arguments
 ///
@@ -2056,26 +2130,32 @@ pub fn encode_animation_rgba16(
         return crate::encoder_svt_rs::encode_animation_rgba16(frames, config, stop);
     }
     reject_svt_rs_backend(config, "animation encoding")?;
-    let enc = build_ravif_encoder(config, stop, true)?;
+    reject_unspellable_coded_depth(config, true)?;
+    if config.coded_bit_depth_bits(true) == 8 {
+        let converted = map_animation_frames(frames, |f| {
+            Ok(AnimationFrameRgba {
+                pixels: map_animation_pixels(f.pixels.as_ref(), &stop, |p| RGBA8 {
+                    r: crate::convert::narrow_to_u8(p.r),
+                    g: crate::convert::narrow_to_u8(p.g),
+                    b: crate::convert::narrow_to_u8(p.b),
+                    a: crate::convert::narrow_to_u8(p.a),
+                })?,
+                duration_ms: f.duration_ms,
+            })
+        })?;
+        return encode_animation_rgba8(&converted, config, stop);
+    }
+    let enc = build_ravif_encoder(config, stop.clone(), true)?;
 
-    // Scale each frame from 0–65535 to 10-bit (0–1023)
-    let scaled_frames: Vec<ImgVec<RGBA16>> = frames
-        .iter()
-        .map(|f| {
-            let scaled: Vec<RGBA16> = f
-                .pixels
-                .buf()
-                .iter()
-                .map(|p| RGBA16 {
-                    r: scale_from_u16(p.r, 10),
-                    g: scale_from_u16(p.g, 10),
-                    b: scale_from_u16(p.b, 10),
-                    a: scale_from_u16(p.a, 10),
-                })
-                .collect();
-            ImgVec::new(scaled, f.pixels.width(), f.pixels.height())
+    // Scale full-range logical pixels to the upstream 10-bit input domain.
+    let scaled_frames = map_animation_frames(frames, |f| {
+        map_animation_pixels(f.pixels.as_ref(), &stop, |p| RGBA16 {
+            r: scale_from_u16(p.r, 10),
+            g: scale_from_u16(p.g, 10),
+            b: scale_from_u16(p.b, 10),
+            a: scale_from_u16(p.a, 10),
         })
-        .collect();
+    })?;
 
     let ravif_frames: Vec<ravif::AnimFrameRgba16<'_>> = scaled_frames
         .iter()

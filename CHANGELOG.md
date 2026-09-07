@@ -12,6 +12,8 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Honor explicit 8/10-bit animation output depth on zenravif independently of RGB/RGBA input storage depth. Preserve Auto's input-depth defaults, use shared sample scaling, and exclude row padding from 16-bit animation conversion. Conversion staging is fallible and checks cancellation.
+
 - Preserve color-track Exif/XMP independently of poster metadata through borrowed/owned parsing, native eager/lazy animation and codec probes/frames. Resolve track-local idat and file extents, honor Exif padding offsets, and distinguish RDF/XML XMP from other MIME items. Malformed animation sidecars now return errors instead of silently disappearing.
 - Retain posterless animation frames and metadata in the deprecated eager parser, which previously returned an empty result. AnimationConfig and DecodedAnimationInfo now expose track Exif/XMP.
 

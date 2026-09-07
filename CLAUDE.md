@@ -298,6 +298,37 @@ backend capability landing:**
    backend config and map it from `zencodec::AllocPreference` /
    `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
 
+## Animation output depth and stride — 2026-09-07 (local)
+
+The zenravif animation seam now selects the upstream entry point according to
+requested coded depth, rather than input storage. RGB/RGBA8 -> Ten promotes by
+257; RGB/RGBA16 -> Eight uses shared narrowing. Auto remains 8 bits for 8-bit
+input and 10 bits for 16-bit input. Existing 16-to-10 staging now iterates logical
+pixels, excluding row padding, with fallible reservation and cancellation checks.
+An executed regression first caught requested Eight producing Ten. Packed/padded
+and equivalent-storage files now match exactly across 24 two-frame native
+encodes. Restoring backing-buffer iteration fails the padding assertion.
+The codec test confirms requested color/alpha depth and variable timing through
+managed/AOM decoding. Libavif independently decodes 16 files / 32 frames at the
+requested depths.
+
+Workspace all-feature nextest passes 891/891 (nine existing skips); default
+workspace tests/doctests pass 484 (ten existing ignores). Final focused tests
+pass 2/2 all-feature and 2/2 encode-only, including the codec test added after
+the full run. Production code is unchanged after that suite except docs.
+Library clippy/scoped formatting, determinism and 56 reference conformance cells
+pass; optional armed CLI coverage is unrun. The same 33 byte/quality rows plus
+16 timing misses and two speed inversions remain. No thresholds were repinned;
+push/CI remain deferred. See benchmarks/animation_depth_2026-09-07.md.
+
+Exact non-ms encoding timing remains open: native frames expose milliseconds,
+SVT uses a 1000 Hz clock for coding-level selection/muxing, and pinned zenravif
+hard-codes time_base=1/1000 in encoding and its separate header context. Its
+assemble_animation also omits metadata setters used by still encoding; this
+read-only finding needs a runtime reproduction/correction next. Depth tests
+do not establish support for all other encoder options. Full AVIF/video scope
+remains active.
+
 ## Animation track Exif/XMP — 2026-09-07 (local)
 
 Track-local meta is now parsed without assuming a primary image. Color-track
