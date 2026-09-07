@@ -298,6 +298,18 @@ backend capability landing:**
    backend config and map it from `zencodec::AllocPreference` /
    `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
 
+## Animation thread integration — 2026-09-07
+
+The current owner pin is cavif-rs `939fa5a3`. The shared animation sequence
+encoder now applies the requested worker pool to color and alpha contexts.
+The canonical regression fails against the previous pin and passes against
+the published fix at coded depths 8 and 10, with identical complete files
+for one and two workers. Owner coverage additionally checks all four storage
+formats, zero and None. Published-Git workspace tests pass 900/900 (nine
+existing skips), and all-feature library clippy passes. See
+`benchmarks/animation_threads_2026-09-07.md`.
+The earlier cancellation evidence below records its historical pin.
+
 ## Animation cancellation integration — 2026-09-07
 
 The owner pin is cavif-rs `2b9d4335` (code fix `294cd9ee`). Animation now

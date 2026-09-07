@@ -2554,7 +2554,7 @@ dependencies = [
 [[package]]
 name = "zenravif"
 version = "0.2.0"
-source = "git+https://github.com/imazen/cavif-rs?rev=2b9d4335950a952b9faa0bcd624eebf7820e714a#2b9d4335950a952b9faa0bcd624eebf7820e714a"
+source = "git+https://github.com/imazen/cavif-rs?rev=939fa5a3e6f0717837ff7cd6d314a5644b9abff3#939fa5a3e6f0717837ff7cd6d314a5644b9abff3"
 dependencies = [
  "almost-enough",
  "imgref",
