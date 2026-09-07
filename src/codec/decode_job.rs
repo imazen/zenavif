@@ -11,7 +11,7 @@ use whereat::{At, at};
 use zencodec::{CodecError, ImageInfo, ImageSequence, ResourceLimits};
 use zenpixels::PixelDescriptor;
 
-use super::anim_decoder::AvifAnimationFrameDecoder;
+use super::anim_decoder::{AvifAnimationFrameDecoder, codec_loop_count};
 use super::color::{
     attach_source_color_context, color_context_for_layout, icc_allows_native_gray,
     native_source_color, set_cicp_on_pixels,
@@ -280,7 +280,7 @@ impl AvifDecodeJob {
         if let Some(anim) = decoder.animation_info() {
             info = info.with_sequence(ImageSequence::Animation {
                 frame_count: Some(anim.frame_count as u32),
-                loop_count: Some(anim.loop_count),
+                loop_count: Some(codec_loop_count(anim.loop_count)?),
                 random_access: true,
             });
         }
@@ -630,7 +630,7 @@ impl AvifDecodeJob {
         )
         .with_sequence(ImageSequence::Animation {
             frame_count: Some(anim_info.frame_count as u32),
-            loop_count: Some(anim_info.loop_count),
+            loop_count: Some(codec_loop_count(anim_info.loop_count)?),
             random_access: true,
         });
         // Attach source encoding details to the shared animation ImageInfo.
@@ -656,7 +656,7 @@ impl AvifDecodeJob {
             start_frame_index: self.start_frame_index,
             info: Arc::new(base_info),
             total_frames: anim_info.frame_count as u32,
-            loop_count: anim_info.loop_count,
+            loop_count: codec_loop_count(anim_info.loop_count)?,
             preferred: preferred.to_vec(),
             current_frame: None,
             limits: self.limits,

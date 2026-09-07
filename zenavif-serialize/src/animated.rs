@@ -840,6 +840,28 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Verify that the legacy eager parser preserves the count too.
+    fn maximum_finite_repetition_roundtrip() {
+        let frames = [AnimFrame::new(b"a", 1).with_sync(true), AnimFrame::new(b"b", 2)];
+        for repeats in [u32::MAX - 1, u32::MAX] {
+            let mut image = AnimatedImage::new();
+            image.set_repetition_count(RepetitionCount::Finite(repeats));
+            let bytes = image.try_serialize(64, 64, &frames, b"header", None).unwrap();
+            let parsers = [
+                zenavif_parse_current::AvifParser::from_bytes(&bytes).unwrap(),
+                zenavif_parse_current::AvifParser::from_owned(bytes.clone()).unwrap(),
+                zenavif_parse_current::AvifParser::from_reader(&mut &bytes[..]).unwrap(),
+            ];
+            for parser in parsers {
+                assert_eq!(parser.animation_info().unwrap().loop_count, u64::from(repeats) + 1);
+                assert_eq!(parser.frame_timing(1).unwrap().duration_in_timescales, 2);
+            }
+            let eager = zenavif_parse_current::read_avif(&mut &bytes[..]).unwrap();
+            assert_eq!(eager.animation.unwrap().loop_count, u64::from(repeats) + 1);
+        }
+    }
+
+    #[test]
     fn exact_timing_roundtrip_preserves_submilliseconds_and_large_timestamps() {
         for (timescale, durations) in [
             (1001, vec![1, 1, 1000, 1000, 1]),

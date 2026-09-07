@@ -365,3 +365,28 @@ impl AnimationDecoder {
         self.frame_index
     }
 }
+
+#[test]
+fn native_animation_metadata_retains_maximum_finite_count() {
+    use zenavif_serialize::animated::{AnimFrame, AnimatedImage, RepetitionCount};
+
+    // Metadata-only construction: AV1 decoding is deliberately not invoked.
+    // The serializer/parser round trip covers the version-1 duration and edit
+    // list; both native decoder entry points must retain that full count.
+    let mut image = AnimatedImage::new();
+    image.set_repetition_count(RepetitionCount::Finite(u32::MAX));
+    let data = image
+        .try_serialize(
+            64,
+            64,
+            &[AnimFrame::new(b"sample", 1).with_sync(true)],
+            b"header",
+            None,
+        )
+        .unwrap();
+    let config = DecoderConfig::new();
+    let decoder = AnimationDecoder::new(&data, &config).unwrap();
+    assert_eq!(decoder.info().loop_count, 4_294_967_296);
+    let managed = ManagedAvifDecoder::new(&data, &config).unwrap();
+    assert_eq!(managed.animation_info().unwrap().loop_count, 4_294_967_296);
+}

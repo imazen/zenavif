@@ -188,8 +188,8 @@ pub struct DecodedFrame {
 pub struct DecodedAnimationInfo {
     /// Number of frames in the animation.
     pub frame_count: usize,
-    /// Number of times to loop (0 = infinite).
-    pub loop_count: u32,
+    /// Total number of playbacks (0 = infinite), including the initial play.
+    pub loop_count: u64,
     /// Whether the animation has alpha.
     pub has_alpha: bool,
     /// Media timescale (ticks per second) of the color track.

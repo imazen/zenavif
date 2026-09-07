@@ -12,6 +12,8 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Animation playback counts now use `u64` in parser and native decoder metadata, preserving the entire finite range (including 4,294,967,296 total plays). This widens the public `loop_count` fields; consumers storing them in `u32` must use a checked conversion. The narrower zencodec adapter reports `Unsupported` for counts it cannot represent.
+
 - Parser: `frame_timing(index)` exposes exact media ticks and 64-bit presentation timestamps, avoiding the precision limits of the legacy millisecond field.
 
 - Animated clean-aperture cropping with validated integer rectangles and an uncropped secondary poster; reuse encoded sample extents and preserve independent alpha and metadata references.

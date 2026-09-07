@@ -300,16 +300,25 @@ backend capability landing:**
 
 ## Known Bugs
 
-**Open 2026-09-07 — animation timing/count precision in downstream APIs.**
-The serializer correctly writes `RepetitionCount::Finite(u32::MAX)` as
-4,294,967,296 total playbacks, but the parser's `u32` `loop_count` rejects it:
-`animation play count is not representable`. Reproduced with the real sources
-by `~/tmp/animation-metadata/serializer-check/examples/repeat_boundary.rs`;
-log `timing-clippy.log` in the parent directory. Libavif separately maps counts
-above INT_MAX to infinite by policy, so the independent timing gate verifies
-exact finite duration in the boxes, not only its reported repeat count.
-Preserving the complete finite count through parser and codec APIs remains work.
+**Fixed 2026-09-07 — finite playback count overflow in parser/native metadata.**
+`RepetitionCount::Finite(u32::MAX)` writes 4,294,967,296 total playbacks;
+`loop_count: u32` previously rejected that valid file. Parser internal, eager,
+and zero-copy metadata plus native `DecodedAnimationInfo` now retain `u64`.
+Borrowed, owned and reader round trips cover both sides of the u32 boundary;
+the arithmetic test also covers the largest finite track duration. The shared
+zencodec trait still exposes `u32`, so both adapter probe and decoder creation
+return `Unsupported` on overflow, explicitly pointing to the native API.
+No finite count is clamped, wrapped to zero/infinite, or reported as unknown.
+The maximum-count witness failed before the fix (`repetition-width-before.log`).
+Local evidence in `~/tmp/animation-metadata`: 84 serializer tests (including the
+legacy eager path), 20 all-feature parser tests and 6 doctests pass. Both native
+metadata and codec boundary tests pass. The actual full managed source compiles
+and passes clippy under `managed-check` (the normal required dependencies and
+default features; unavailable optional/build/dev sibling dependencies excluded).
+Parser/serializer clippy passes with warnings denied. This is not a claim that
+the canonical root workspace or all feature combinations passed.
 
+**Open 2026-09-07 — exact timing in downstream decoder APIs.**
 `AvifParser::frame_timing` now exposes exact media ticks and 64-bit timestamps,
 including durations below 1 ms and above u32 milliseconds. The older
 `FrameRef::duration_ms` remains truncated/saturated for compatibility; managed

@@ -12,6 +12,29 @@ use super::color::attach_color_context_class_gated;
 use super::negotiate::negotiate_format;
 use crate::error::Error;
 
+/// The shared codec trait has a narrower count than the native AVIF API.
+/// Reject unsupported metadata rather than turn a finite animation into an
+/// infinite one or report fewer playbacks. Native `AnimationDecoder` retains
+/// the full count.
+pub(super) fn codec_loop_count(count: u64) -> Result<u32, At<Error>> {
+    u32::try_from(count).map_err(|_| at!(Error::Unsupported(
+        "animation playback count exceeds the zencodec u32 API; use the native AnimationDecoder",
+    )))
+}
+
+#[test]
+fn codec_loop_count_preserves_finite_and_infinite() {
+    for count in [0, 1, 2, u32::MAX] {
+        assert_eq!(codec_loop_count(u64::from(count)).unwrap(), count);
+    }
+    for count in [u64::from(u32::MAX) + 1, u64::MAX - 1] {
+        assert!(matches!(
+            codec_loop_count(count).unwrap_err().error(),
+            Error::Unsupported(_)
+        ));
+    }
+}
+
 // `animated_avif_animation_frame_decoder_roundtrip` names this through `super`.
 #[cfg(test)]
 use super::decode_config::AvifDecoderConfig;

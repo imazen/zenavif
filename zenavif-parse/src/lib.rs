@@ -1076,8 +1076,8 @@ pub struct AnimationFrame {
 #[derive(Debug)]
 #[allow(deprecated)]
 pub struct AnimationConfig {
-    /// Number of times to loop (0 = infinite)
-    pub loop_count: u32,
+    /// Total number of playbacks (0 = infinite)
+    pub loop_count: u64,
     /// All frames in the animation
     pub frames: TryVec<AnimationFrame>,
 }
@@ -1173,7 +1173,7 @@ struct ParsedTrack {
     media_timescale: u32,
     sample_table: SampleTable,
     references: TryVec<TrackReference>,
-    loop_count: u32,
+    loop_count: u64,
     codec_config: TrackCodecConfig,
 }
 
@@ -1183,7 +1183,7 @@ struct ParsedAnimationData {
     color_sample_table: SampleTable,
     alpha_timescale: Option<u32>,
     alpha_sample_table: Option<SampleTable>,
-    loop_count: u32,
+    loop_count: u64,
     color_codec_config: TrackCodecConfig,
 }
 
@@ -1591,7 +1591,7 @@ struct AnimationParserData {
     sample_table: SampleTable,
     alpha_media_timescale: Option<u32>,
     alpha_sample_table: Option<SampleTable>,
-    loop_count: u32,
+    loop_count: u64,
     codec_config: TrackCodecConfig,
 }
 
@@ -1599,7 +1599,9 @@ struct AnimationParserData {
 #[derive(Debug, Clone, Copy)]
 pub struct AnimationInfo {
     pub frame_count: usize,
-    pub loop_count: u32,
+    /// Total number of playbacks (0 = infinite), including the initial play.
+    /// Uses 64 bits to preserve finite durations from version-1 track headers.
+    pub loop_count: u64,
     /// Whether animation has a separate alpha track.
     pub has_alpha: bool,
     /// Media timescale (ticks per second) for the color track.
@@ -5553,16 +5555,18 @@ fn read_elst<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<(bool, u64)> {
     Ok((flags & 1 != 0, duration))
 }
 
-fn repetition_play_count(track_duration: u64, edit: Option<(bool, u64)>) -> Result<u32> {
+fn repetition_play_count(track_duration: u64, edit: Option<(bool, u64)>) -> Result<u64> {
     let Some((true, cycle)) = edit else { return Ok(1); };
     if cycle == 0 {
         return Err(at!(Error::InvalidData("repeating edit list has zero duration")));
     }
     if track_duration == u64::MAX { return Ok(0); }
     // The last playback can be truncated by the track presentation duration.
-    u32::try_from(track_duration.div_ceil(cycle))
-        .ok().filter(|&count| count != 0)
-        .ok_or_else(|| at!(Error::InvalidData("animation play count is not representable")))
+    let count = track_duration.div_ceil(cycle);
+    if count == 0 {
+        return Err(at!(Error::InvalidData("repeating track has zero duration")));
+    }
+    Ok(count)
 }
 
 /// Parse animation from moov box.
@@ -6177,6 +6181,7 @@ mod repetition_tests {
         assert_eq!(repetition_play_count(600, None).unwrap(), 1);
         assert!(repetition_play_count(600, Some((true, 0))).is_err());
         assert!(repetition_play_count(0, Some((true, 600))).is_err());
-        assert!(repetition_play_count(u64::MAX - 1, Some((true, 1))).is_err());
+        assert_eq!(repetition_play_count(u64::MAX - 1, Some((true, 1))).unwrap(), u64::MAX - 1);
+        assert_eq!(repetition_play_count(u64::from(u32::MAX) + 1, Some((true, 1))).unwrap(), 4_294_967_296);
     }
 }
