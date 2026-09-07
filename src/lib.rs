@@ -211,7 +211,9 @@ pub use encoder::{
     AnimationFrame, AnimationFrame16, AnimationFrameRgba, AnimationFrameRgba16, Av1Backend,
     EncodeAlphaMode, EncodeBitDepth, EncodeChromaSubsampling, EncodeColorModel, EncodePixelRange,
     EncodedAnimation, EncodedImage, EncoderConfig, GainMapConfig, MasteringDisplayConfig,
-    encode_animation_rgb8, encode_animation_rgb16, encode_animation_rgba8, encode_animation_rgba16,
+    TimedAnimationFrame, encode_animation_rgb8, encode_animation_rgb8_timed,
+    encode_animation_rgb16, encode_animation_rgb16_timed, encode_animation_rgba8,
+    encode_animation_rgba8_timed, encode_animation_rgba16, encode_animation_rgba16_timed,
     encode_rgb8, encode_rgb16, encode_rgba8, encode_rgba16,
 };
 pub use enough::{Stop, StopReason, Unstoppable};

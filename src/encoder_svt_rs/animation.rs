@@ -1,68 +1,79 @@
 //! SVT sync-sample animation using the same pixel coding as still images.
 use super::*;
+use crate::encoder::AnimationInput;
+use rgb::{RGB8, RGB16, RGBA8, RGBA16};
 use zenavif_serialize::{
     Av1CBox,
     animated::{AnimFrame, AnimatedImage},
 };
 
-pub(crate) fn encode_animation_rgb8(
-    frames: &[crate::AnimationFrame],
+pub(crate) fn encode_animation_rgb8<F: AnimationInput<RGB8>>(
+    frames: &[F],
+    timescale: u32,
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<crate::EncodedAnimation> {
     encode_frames(
         frames,
+        timescale,
         config,
         stop,
-        |f| (f.pixels.width(), f.pixels.height(), f.duration_ms),
-        |f, mode, token| encode_rgb8_frame(f.pixels.as_ref(), config, token, mode),
+        |f| (f.pixels().width(), f.pixels().height(), f.duration_ticks()),
+        |f, mode, token| encode_rgb8_frame(f.pixels(), config, token, mode),
     )
 }
 
-pub(crate) fn encode_animation_rgba8(
-    frames: &[crate::AnimationFrameRgba],
+pub(crate) fn encode_animation_rgba8<F: AnimationInput<RGBA8>>(
+    frames: &[F],
+    timescale: u32,
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<crate::EncodedAnimation> {
     encode_frames(
         frames,
+        timescale,
         config,
         stop,
-        |f| (f.pixels.width(), f.pixels.height(), f.duration_ms),
-        |f, mode, token| encode_rgba8_frame(f.pixels.as_ref(), config, token, mode),
+        |f| (f.pixels().width(), f.pixels().height(), f.duration_ticks()),
+        |f, mode, token| encode_rgba8_frame(f.pixels(), config, token, mode),
     )
 }
 
-pub(crate) fn encode_animation_rgb16(
-    frames: &[crate::AnimationFrame16],
+pub(crate) fn encode_animation_rgb16<F: AnimationInput<RGB16>>(
+    frames: &[F],
+    timescale: u32,
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<crate::EncodedAnimation> {
     encode_frames(
         frames,
+        timescale,
         config,
         stop,
-        |f| (f.pixels.width(), f.pixels.height(), f.duration_ms),
-        |f, mode, token| encode_rgb16_frame(f.pixels.as_ref(), config, token, mode),
+        |f| (f.pixels().width(), f.pixels().height(), f.duration_ticks()),
+        |f, mode, token| encode_rgb16_frame(f.pixels(), config, token, mode),
     )
 }
 
-pub(crate) fn encode_animation_rgba16(
-    frames: &[crate::AnimationFrameRgba16],
+pub(crate) fn encode_animation_rgba16<F: AnimationInput<RGBA16>>(
+    frames: &[F],
+    timescale: u32,
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<crate::EncodedAnimation> {
     encode_frames(
         frames,
+        timescale,
         config,
         stop,
-        |f| (f.pixels.width(), f.pixels.height(), f.duration_ms),
-        |f, mode, token| encode_rgba16_frame(f.pixels.as_ref(), config, token, mode),
+        |f| (f.pixels().width(), f.pixels().height(), f.duration_ticks()),
+        |f, mode, token| encode_rgba16_frame(f.pixels(), config, token, mode),
     )
 }
 
 fn encode_frames<F>(
     frames: &[F],
+    timescale: u32,
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
     layout: impl Fn(&F) -> (usize, usize, u32),
@@ -85,7 +96,7 @@ fn encode_frames<F>(
         )));
     }
     let mut shortest = u32::MAX;
-    let mut total_duration_ms = 0u64;
+    let mut total_duration_ticks = 0u64;
     for frame in frames {
         stop.check().map_err(|e| at!(Error::from(e)))?;
         let (w, h, duration) = layout(frame);
@@ -95,11 +106,11 @@ fn encode_frames<F>(
             )));
         }
         shortest = shortest.min(duration);
-        total_duration_ms = total_duration_ms
+        total_duration_ticks = total_duration_ticks
             .checked_add(u64::from(duration))
             .ok_or_else(|| at!(Error::Encode("animation duration overflow".into())))?;
     }
-    let framerate = 1000.0 / f64::from(shortest);
+    let framerate = f64::from(timescale) / f64::from(shortest);
     let mode = FrameMode::Sequence { framerate };
     let mut coded = Vec::new();
     coded
@@ -118,7 +129,7 @@ fn encode_frames<F>(
     av1_config.seq_level_idx_0 =
         svtav1::entropy::obu::compute_seq_level_idx(first.width, first.height, framerate);
     let mut mux = AnimatedImage::new();
-    mux.set_timescale(1000)
+    mux.set_timescale(timescale)
         .set_color_config(av1_config)
         .set_color_description(
             u16::from(first.color_primaries),
@@ -185,7 +196,16 @@ fn encode_frames<F>(
     Ok(crate::EncodedAnimation {
         avif_file,
         frame_count: frames.len(),
-        total_duration_ms,
+        total_duration_ticks,
+        timescale,
+        total_duration_ms: u64::try_from(
+            u128::from(total_duration_ticks) * 1000 / u128::from(timescale),
+        )
+        .map_err(|_| {
+            at!(Error::Encode(
+                "animation millisecond duration overflow".into()
+            ))
+        })?,
     })
 }
 

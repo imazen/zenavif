@@ -17,20 +17,39 @@ use crate::error::Error;
 pub(super) enum BufferedFrame {
     Rgb8 {
         pixels: imgref::ImgVec<Rgb<u8>>,
-        duration_ms: u32,
+        duration_ticks: u32,
     },
     Rgba8 {
         pixels: imgref::ImgVec<Rgba<u8>>,
-        duration_ms: u32,
+        duration_ticks: u32,
     },
     Rgb16 {
         pixels: imgref::ImgVec<Rgb<u16>>,
-        duration_ms: u32,
+        duration_ticks: u32,
     },
     Rgba16 {
         pixels: imgref::ImgVec<Rgba<u16>>,
-        duration_ms: u32,
+        duration_ticks: u32,
     },
+}
+
+impl BufferedFrame {
+    fn duration(&self) -> u32 {
+        match self {
+            Self::Rgb8 { duration_ticks, .. }
+            | Self::Rgba8 { duration_ticks, .. }
+            | Self::Rgb16 { duration_ticks, .. }
+            | Self::Rgba16 { duration_ticks, .. } => *duration_ticks,
+        }
+    }
+    fn duration_mut(&mut self) -> &mut u32 {
+        match self {
+            Self::Rgb8 { duration_ticks, .. }
+            | Self::Rgba8 { duration_ticks, .. }
+            | Self::Rgb16 { duration_ticks, .. }
+            | Self::Rgba16 { duration_ticks, .. } => duration_ticks,
+        }
+    }
 }
 
 /// Full-frame animation encoder for AVIF.
@@ -49,10 +68,91 @@ pub struct AvifAnimationFrameEncoder {
     /// Number of frames pushed so far, for max_frames enforcement.
     pub(super) frame_count: u32,
     pub(super) loop_count: Option<u32>,
+    pub(super) timescale: u32,
 }
 
 #[cfg(feature = "encode")]
 impl AvifAnimationFrameEncoder {
+    /// Append a frame with an exact positive tick duration.
+    ///
+    /// `timescale` is ticks per second. Mixed clocks are rescaled exactly to
+    /// their least common multiple. An unrepresentable u32 clock or sample
+    /// duration returns an error before appending the frame. The trait's
+    /// `push_frame` method continues to accept milliseconds.
+    pub fn push_frame_ticks(
+        &mut self,
+        pixels: PixelSlice<'_>,
+        duration_ticks: u32,
+        timescale: u32,
+        stop: Option<&dyn Stop>,
+    ) -> Result<(), At<CodecError>> {
+        self.push_frame_ticks_inner(pixels, duration_ticks, timescale, stop)
+            .map_err(zencodec::CodecError::of)
+    }
+
+    fn push_frame_ticks_inner(
+        &mut self,
+        pixels: PixelSlice<'_>,
+        duration_ticks: u32,
+        timescale: u32,
+        stop: Option<&dyn Stop>,
+    ) -> Result<(), At<Error>> {
+        if let Some(s) = stop {
+            s.check().map_err(|e| at!(Error::from(e)))?;
+        }
+        if let Some(s) = &self.stop {
+            s.check().map_err(|e| at!(Error::from(e)))?;
+        }
+        if timescale == 0 || duration_ticks == 0 {
+            return Err(at!(Error::InvalidState(
+                "animation timing must be positive".into()
+            )));
+        }
+        let clock = if self.frames.is_empty() {
+            timescale
+        } else {
+            let (mut a, mut b) = (self.timescale, timescale);
+            while b != 0 {
+                (a, b) = (b, a % b);
+            }
+            self.timescale.checked_mul(timescale / a).ok_or_else(|| {
+                at!(Error::InvalidState(
+                    "animation timescale exceeds u32".into()
+                ))
+            })?
+        };
+        let incoming = duration_ticks
+            .checked_mul(clock / timescale)
+            .ok_or_else(|| {
+                at!(Error::InvalidState(
+                    "animation sample duration exceeds u32".into()
+                ))
+            })?;
+        let factor = if self.frames.is_empty() {
+            1
+        } else {
+            clock / self.timescale
+        };
+        if factor != 1 {
+            for frame in &self.frames {
+                frame.duration().checked_mul(factor).ok_or_else(|| {
+                    at!(Error::InvalidState(
+                        "animation sample duration exceeds u32".into()
+                    ))
+                })?;
+            }
+        }
+        let previous_len = self.frames.len();
+        self.push_frame_inner(pixels, incoming, stop)?;
+        if factor != 1 {
+            for frame in &mut self.frames[..previous_len] {
+                *frame.duration_mut() *= factor;
+            }
+        }
+        self.timescale = clock;
+        Ok(())
+    }
+
     fn stop_token(&self) -> almost_enough::StopToken {
         match &self.stop {
             Some(s) => s.clone(),
@@ -77,8 +177,7 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
         duration_ms: u32,
         stop: Option<&dyn Stop>,
     ) -> Result<(), At<CodecError>> {
-        self.push_frame_inner(pixels, duration_ms, stop)
-            .map_err(zencodec::CodecError::of)
+        self.push_frame_ticks(pixels, duration_ms, 1000, stop)
     }
 
     fn finish(self, stop: Option<&dyn Stop>) -> Result<EncodeOutput, At<CodecError>> {
@@ -91,7 +190,7 @@ impl AvifAnimationFrameEncoder {
     fn push_frame_inner(
         &mut self,
         pixels: PixelSlice<'_>,
-        duration_ms: u32,
+        duration_ticks: u32,
         stop: Option<&dyn Stop>,
     ) -> Result<(), At<Error>> {
         // Check cancellation (combine per-call + owned stop)
@@ -161,28 +260,28 @@ impl AvifAnimationFrameEncoder {
                 let rgb: Vec<Rgb<u8>> = bytemuck::cast_slice(&raw).to_vec();
                 BufferedFrame::Rgb8 {
                     pixels: imgref::ImgVec::new(rgb, wu, hu),
-                    duration_ms,
+                    duration_ticks,
                 }
             }
             zenpixels::PixelFormat::Rgba8 => {
                 let rgba: Vec<Rgba<u8>> = bytemuck::cast_slice(&raw).to_vec();
                 BufferedFrame::Rgba8 {
                     pixels: imgref::ImgVec::new(rgba, wu, hu),
-                    duration_ms,
+                    duration_ticks,
                 }
             }
             zenpixels::PixelFormat::Rgb16 => {
                 let rgb: Vec<Rgb<u16>> = bytemuck::cast_slice(&raw).to_vec();
                 BufferedFrame::Rgb16 {
                     pixels: imgref::ImgVec::new(rgb, wu, hu),
-                    duration_ms,
+                    duration_ticks,
                 }
             }
             zenpixels::PixelFormat::Rgba16 => {
                 let rgba: Vec<Rgba<u16>> = bytemuck::cast_slice(&raw).to_vec();
                 BufferedFrame::Rgba16 {
                     pixels: imgref::ImgVec::new(rgba, wu, hu),
-                    duration_ms,
+                    duration_ticks,
                 }
             }
             _ => {
@@ -237,79 +336,95 @@ impl AvifAnimationFrameEncoder {
 
         let mut avif_file = match self.frames[0] {
             BufferedFrame::Rgb8 { .. } => {
-                let anim_frames: Vec<crate::AnimationFrame> = self
+                let anim_frames: Vec<crate::TimedAnimationFrame<Rgb<u8>>> = self
                     .frames
                     .into_iter()
                     .map(|f| match f {
                         BufferedFrame::Rgb8 {
                             pixels,
-                            duration_ms,
-                        } => crate::AnimationFrame {
+                            duration_ticks,
+                        } => crate::TimedAnimationFrame {
                             pixels,
-                            duration_ms,
+                            duration_ticks,
                         },
                         _ => unreachable!(),
                     })
                     .collect();
-                let result =
-                    crate::encode_animation_rgb8(&anim_frames, &self.config, stop_token.clone())?;
+                let result = crate::encode_animation_rgb8_timed(
+                    &anim_frames,
+                    self.timescale,
+                    &self.config,
+                    stop_token.clone(),
+                )?;
                 result.avif_file
             }
             BufferedFrame::Rgba8 { .. } => {
-                let anim_frames: Vec<crate::AnimationFrameRgba> = self
+                let anim_frames: Vec<crate::TimedAnimationFrame<Rgba<u8>>> = self
                     .frames
                     .into_iter()
                     .map(|f| match f {
                         BufferedFrame::Rgba8 {
                             pixels,
-                            duration_ms,
-                        } => crate::AnimationFrameRgba {
+                            duration_ticks,
+                        } => crate::TimedAnimationFrame {
                             pixels,
-                            duration_ms,
+                            duration_ticks,
                         },
                         _ => unreachable!(),
                     })
                     .collect();
-                let result =
-                    crate::encode_animation_rgba8(&anim_frames, &self.config, stop_token.clone())?;
+                let result = crate::encode_animation_rgba8_timed(
+                    &anim_frames,
+                    self.timescale,
+                    &self.config,
+                    stop_token.clone(),
+                )?;
                 result.avif_file
             }
             BufferedFrame::Rgb16 { .. } => {
-                let anim_frames: Vec<crate::AnimationFrame16> = self
+                let anim_frames: Vec<crate::TimedAnimationFrame<Rgb<u16>>> = self
                     .frames
                     .into_iter()
                     .map(|f| match f {
                         BufferedFrame::Rgb16 {
                             pixels,
-                            duration_ms,
-                        } => crate::AnimationFrame16 {
+                            duration_ticks,
+                        } => crate::TimedAnimationFrame {
                             pixels,
-                            duration_ms,
+                            duration_ticks,
                         },
                         _ => unreachable!(),
                     })
                     .collect();
-                let result =
-                    crate::encode_animation_rgb16(&anim_frames, &self.config, stop_token.clone())?;
+                let result = crate::encode_animation_rgb16_timed(
+                    &anim_frames,
+                    self.timescale,
+                    &self.config,
+                    stop_token.clone(),
+                )?;
                 result.avif_file
             }
             BufferedFrame::Rgba16 { .. } => {
-                let anim_frames: Vec<crate::AnimationFrameRgba16> = self
+                let anim_frames: Vec<crate::TimedAnimationFrame<Rgba<u16>>> = self
                     .frames
                     .into_iter()
                     .map(|f| match f {
                         BufferedFrame::Rgba16 {
                             pixels,
-                            duration_ms,
-                        } => crate::AnimationFrameRgba16 {
+                            duration_ticks,
+                        } => crate::TimedAnimationFrame {
                             pixels,
-                            duration_ms,
+                            duration_ticks,
                         },
                         _ => unreachable!(),
                     })
                     .collect();
-                let result =
-                    crate::encode_animation_rgba16(&anim_frames, &self.config, stop_token.clone())?;
+                let result = crate::encode_animation_rgba16_timed(
+                    &anim_frames,
+                    self.timescale,
+                    &self.config,
+                    stop_token.clone(),
+                )?;
                 result.avif_file
             }
         };

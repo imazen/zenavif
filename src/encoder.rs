@@ -1873,6 +1873,29 @@ pub struct AnimationFrameRgba {
     pub duration_ms: u32,
 }
 
+/// An animation frame whose duration is expressed in caller-selected ticks.
+#[derive(Clone)]
+pub struct TimedAnimationFrame<P: Copy> {
+    /// Owned pixel rows, with optional stride padding.
+    pub pixels: ImgVec<P>,
+    /// Positive duration in the timescale passed to a timed encoding function.
+    pub duration_ticks: u32,
+}
+
+pub(crate) trait AnimationInput<P: Copy> {
+    fn pixels(&self) -> ImgRef<'_, P>;
+    fn duration_ticks(&self) -> u32;
+}
+
+impl<P: Copy> AnimationInput<P> for TimedAnimationFrame<P> {
+    fn pixels(&self) -> ImgRef<'_, P> {
+        self.pixels.as_ref()
+    }
+    fn duration_ticks(&self) -> u32 {
+        self.duration_ticks
+    }
+}
+
 /// Result of animated AVIF encoding
 #[non_exhaustive]
 #[derive(Clone)]
@@ -1881,8 +1904,12 @@ pub struct EncodedAnimation {
     pub avif_file: Vec<u8>,
     /// Number of frames encoded
     pub frame_count: usize,
-    /// Total duration in milliseconds
+    /// Total duration in milliseconds, rounded down for fractional milliseconds.
     pub total_duration_ms: u64,
+    /// Exact total duration in `timescale` ticks.
+    pub total_duration_ticks: u64,
+    /// Number of timing ticks per second.
+    pub timescale: u32,
 }
 
 // Keep animation input conversion independent of coding depth. Upstream's
@@ -1937,38 +1964,72 @@ pub fn encode_animation_rgb8(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
+    encode_animation_rgb8_inner(frames, 1000, config, stop)
+}
+
+/// Encode RGB8 animation with exact tick durations and ticks per second.
+/// Pixel depth conversion and alpha handling match the millisecond API.
+pub fn encode_animation_rgb8_timed(
+    frames: &[TimedAnimationFrame<RGB8>],
+    timescale: u32,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedAnimation> {
+    encode_animation_rgb8_inner(frames, timescale, config, stop)
+}
+
+impl AnimationInput<RGB8> for AnimationFrame {
+    fn pixels(&self) -> ImgRef<'_, RGB8> {
+        self.pixels.as_ref()
+    }
+    fn duration_ticks(&self) -> u32 {
+        self.duration_ms
+    }
+}
+
+fn encode_animation_rgb8_inner<F: AnimationInput<RGB8>>(
+    frames: &[F],
+    timescale: u32,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedAnimation> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    if timescale == 0 {
+        return Err(at!(Error::Encode(
+            "animation timescale must be positive".into()
+        )));
+    }
     #[cfg(feature = "zenav1-svt")]
     if config.backend == Av1Backend::Zenav1Svt {
-        return crate::encoder_svt_rs::encode_animation_rgb8(frames, config, stop);
+        return crate::encoder_svt_rs::encode_animation_rgb8(frames, timescale, config, stop);
     }
     reject_svt_rs_backend(config, "animation encoding")?;
     reject_unspellable_coded_depth(config, false)?;
     if config.coded_bit_depth_bits(false) == 10 {
         let converted = map_animation_frames(frames, |f| {
-            Ok(AnimationFrame16 {
-                pixels: map_animation_pixels(f.pixels.as_ref(), &stop, |p| RGB16 {
+            Ok(TimedAnimationFrame {
+                pixels: map_animation_pixels(f.pixels(), &stop, |p| RGB16 {
                     r: u16::from(p.r) * 257,
                     g: u16::from(p.g) * 257,
                     b: u16::from(p.b) * 257,
                 })?,
-                duration_ms: f.duration_ms,
+                duration_ticks: f.duration_ticks(),
             })
         })?;
-        return encode_animation_rgb16(&converted, config, stop);
+        return encode_animation_rgb16_inner(&converted, timescale, config, stop);
     }
     let enc = build_ravif_encoder(config, stop, false)?;
 
-    let ravif_frames: Vec<ravif::AnimFrame<'_>> = frames
+    let ravif_frames: Vec<ravif::TimedAnimFrame<'_, _>> = frames
         .iter()
-        .map(|f| ravif::AnimFrame {
-            rgb: f.pixels.as_ref(),
-            duration_ms: f.duration_ms,
+        .map(|f| ravif::TimedAnimFrame {
+            pixels: f.pixels(),
+            duration_ticks: f.duration_ticks(),
         })
         .collect();
 
     let result = enc
-        .encode_animation_rgb(&ravif_frames)
+        .encode_animation_rgb_timed(&ravif_frames, timescale)
         .map_err_at(error_from_ravif)
         .at_crate(crate::at_crate_info())?;
 
@@ -1976,6 +2037,8 @@ pub fn encode_animation_rgb8(
         avif_file: result.avif_file,
         frame_count: result.frame_count,
         total_duration_ms: result.total_duration_ms,
+        total_duration_ticks: result.total_duration_ticks,
+        timescale: result.timescale,
     })
 }
 
@@ -1994,39 +2057,73 @@ pub fn encode_animation_rgba8(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
+    encode_animation_rgba8_inner(frames, 1000, config, stop)
+}
+
+/// Encode RGBA8 animation with exact tick durations and ticks per second.
+/// Pixel depth conversion and alpha handling match the millisecond API.
+pub fn encode_animation_rgba8_timed(
+    frames: &[TimedAnimationFrame<RGBA8>],
+    timescale: u32,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedAnimation> {
+    encode_animation_rgba8_inner(frames, timescale, config, stop)
+}
+
+impl AnimationInput<RGBA8> for AnimationFrameRgba {
+    fn pixels(&self) -> ImgRef<'_, RGBA8> {
+        self.pixels.as_ref()
+    }
+    fn duration_ticks(&self) -> u32 {
+        self.duration_ms
+    }
+}
+
+fn encode_animation_rgba8_inner<F: AnimationInput<RGBA8>>(
+    frames: &[F],
+    timescale: u32,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedAnimation> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    if timescale == 0 {
+        return Err(at!(Error::Encode(
+            "animation timescale must be positive".into()
+        )));
+    }
     #[cfg(feature = "zenav1-svt")]
     if config.backend == Av1Backend::Zenav1Svt {
-        return crate::encoder_svt_rs::encode_animation_rgba8(frames, config, stop);
+        return crate::encoder_svt_rs::encode_animation_rgba8(frames, timescale, config, stop);
     }
     reject_svt_rs_backend(config, "animation encoding")?;
     reject_unspellable_coded_depth(config, false)?;
     if config.coded_bit_depth_bits(false) == 10 {
         let converted = map_animation_frames(frames, |f| {
-            Ok(AnimationFrameRgba16 {
-                pixels: map_animation_pixels(f.pixels.as_ref(), &stop, |p| RGBA16 {
+            Ok(TimedAnimationFrame {
+                pixels: map_animation_pixels(f.pixels(), &stop, |p| RGBA16 {
                     r: u16::from(p.r) * 257,
                     g: u16::from(p.g) * 257,
                     b: u16::from(p.b) * 257,
                     a: u16::from(p.a) * 257,
                 })?,
-                duration_ms: f.duration_ms,
+                duration_ticks: f.duration_ticks(),
             })
         })?;
-        return encode_animation_rgba16(&converted, config, stop);
+        return encode_animation_rgba16_inner(&converted, timescale, config, stop);
     }
     let enc = build_ravif_encoder(config, stop, false)?;
 
-    let ravif_frames: Vec<ravif::AnimFrameRgba<'_>> = frames
+    let ravif_frames: Vec<ravif::TimedAnimFrame<'_, _>> = frames
         .iter()
-        .map(|f| ravif::AnimFrameRgba {
-            rgba: f.pixels.as_ref(),
-            duration_ms: f.duration_ms,
+        .map(|f| ravif::TimedAnimFrame {
+            pixels: f.pixels(),
+            duration_ticks: f.duration_ticks(),
         })
         .collect();
 
     let result = enc
-        .encode_animation_rgba(&ravif_frames)
+        .encode_animation_rgba_timed(&ravif_frames, timescale)
         .map_err_at(error_from_ravif)
         .at_crate(crate::at_crate_info())?;
 
@@ -2034,6 +2131,8 @@ pub fn encode_animation_rgba8(
         avif_file: result.avif_file,
         frame_count: result.frame_count,
         total_duration_ms: result.total_duration_ms,
+        total_duration_ticks: result.total_duration_ticks,
+        timescale: result.timescale,
     })
 }
 
@@ -2072,49 +2171,83 @@ pub fn encode_animation_rgb16(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
+    encode_animation_rgb16_inner(frames, 1000, config, stop)
+}
+
+/// Encode RGB16 animation with exact tick durations and ticks per second.
+/// Pixel depth conversion and alpha handling match the millisecond API.
+pub fn encode_animation_rgb16_timed(
+    frames: &[TimedAnimationFrame<RGB16>],
+    timescale: u32,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedAnimation> {
+    encode_animation_rgb16_inner(frames, timescale, config, stop)
+}
+
+impl AnimationInput<RGB16> for AnimationFrame16 {
+    fn pixels(&self) -> ImgRef<'_, RGB16> {
+        self.pixels.as_ref()
+    }
+    fn duration_ticks(&self) -> u32 {
+        self.duration_ms
+    }
+}
+
+fn encode_animation_rgb16_inner<F: AnimationInput<RGB16>>(
+    frames: &[F],
+    timescale: u32,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedAnimation> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    if timescale == 0 {
+        return Err(at!(Error::Encode(
+            "animation timescale must be positive".into()
+        )));
+    }
     #[cfg(feature = "zenav1-svt")]
     if config.backend == Av1Backend::Zenav1Svt {
-        return crate::encoder_svt_rs::encode_animation_rgb16(frames, config, stop);
+        return crate::encoder_svt_rs::encode_animation_rgb16(frames, timescale, config, stop);
     }
     reject_svt_rs_backend(config, "animation encoding")?;
     reject_unspellable_coded_depth(config, true)?;
     if config.coded_bit_depth_bits(true) == 8 {
         let converted = map_animation_frames(frames, |f| {
-            Ok(AnimationFrame {
-                pixels: map_animation_pixels(f.pixels.as_ref(), &stop, |p| RGB8 {
+            Ok(TimedAnimationFrame {
+                pixels: map_animation_pixels(f.pixels(), &stop, |p| RGB8 {
                     r: crate::convert::narrow_to_u8(p.r),
                     g: crate::convert::narrow_to_u8(p.g),
                     b: crate::convert::narrow_to_u8(p.b),
                 })?,
-                duration_ms: f.duration_ms,
+                duration_ticks: f.duration_ticks(),
             })
         })?;
-        return encode_animation_rgb8(&converted, config, stop);
+        return encode_animation_rgb8_inner(&converted, timescale, config, stop);
     }
     let enc = build_ravif_encoder(config, stop.clone(), true)?;
 
     // Scale full-range logical pixels to the upstream 10-bit input domain.
     let scaled_frames = map_animation_frames(frames, |f| {
-        map_animation_pixels(f.pixels.as_ref(), &stop, |p| RGB16 {
+        map_animation_pixels(f.pixels(), &stop, |p| RGB16 {
             r: scale_from_u16(p.r, 10),
             g: scale_from_u16(p.g, 10),
             b: scale_from_u16(p.b, 10),
         })
     })?;
 
-    let ravif_frames: Vec<ravif::AnimFrame16<'_>> = scaled_frames
+    let ravif_frames: Vec<ravif::TimedAnimFrame<'_, _>> = scaled_frames
         .iter()
         .zip(frames.iter())
-        .map(|(scaled, orig)| ravif::AnimFrame16 {
-            rgb: scaled.as_ref(),
-            duration_ms: orig.duration_ms,
+        .map(|(scaled, orig)| ravif::TimedAnimFrame {
+            pixels: scaled.as_ref(),
+            duration_ticks: orig.duration_ticks(),
         })
         .collect();
 
     let result = enc
-        .encode_animation_rgb16(&ravif_frames)
+        .encode_animation_rgb16_timed(&ravif_frames, timescale)
         .map_err_at(error_from_ravif)
         .at_crate(crate::at_crate_info())?;
 
@@ -2122,6 +2255,8 @@ pub fn encode_animation_rgb16(
         avif_file: result.avif_file,
         frame_count: result.frame_count,
         total_duration_ms: result.total_duration_ms,
+        total_duration_ticks: result.total_duration_ticks,
+        timescale: result.timescale,
     })
 }
 
@@ -2142,33 +2277,67 @@ pub fn encode_animation_rgba16(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
+    encode_animation_rgba16_inner(frames, 1000, config, stop)
+}
+
+/// Encode RGBA16 animation with exact tick durations and ticks per second.
+/// Pixel depth conversion and alpha handling match the millisecond API.
+pub fn encode_animation_rgba16_timed(
+    frames: &[TimedAnimationFrame<RGBA16>],
+    timescale: u32,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedAnimation> {
+    encode_animation_rgba16_inner(frames, timescale, config, stop)
+}
+
+impl AnimationInput<RGBA16> for AnimationFrameRgba16 {
+    fn pixels(&self) -> ImgRef<'_, RGBA16> {
+        self.pixels.as_ref()
+    }
+    fn duration_ticks(&self) -> u32 {
+        self.duration_ms
+    }
+}
+
+fn encode_animation_rgba16_inner<F: AnimationInput<RGBA16>>(
+    frames: &[F],
+    timescale: u32,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedAnimation> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    if timescale == 0 {
+        return Err(at!(Error::Encode(
+            "animation timescale must be positive".into()
+        )));
+    }
     #[cfg(feature = "zenav1-svt")]
     if config.backend == Av1Backend::Zenav1Svt {
-        return crate::encoder_svt_rs::encode_animation_rgba16(frames, config, stop);
+        return crate::encoder_svt_rs::encode_animation_rgba16(frames, timescale, config, stop);
     }
     reject_svt_rs_backend(config, "animation encoding")?;
     reject_unspellable_coded_depth(config, true)?;
     if config.coded_bit_depth_bits(true) == 8 {
         let converted = map_animation_frames(frames, |f| {
-            Ok(AnimationFrameRgba {
-                pixels: map_animation_pixels(f.pixels.as_ref(), &stop, |p| RGBA8 {
+            Ok(TimedAnimationFrame {
+                pixels: map_animation_pixels(f.pixels(), &stop, |p| RGBA8 {
                     r: crate::convert::narrow_to_u8(p.r),
                     g: crate::convert::narrow_to_u8(p.g),
                     b: crate::convert::narrow_to_u8(p.b),
                     a: crate::convert::narrow_to_u8(p.a),
                 })?,
-                duration_ms: f.duration_ms,
+                duration_ticks: f.duration_ticks(),
             })
         })?;
-        return encode_animation_rgba8(&converted, config, stop);
+        return encode_animation_rgba8_inner(&converted, timescale, config, stop);
     }
     let enc = build_ravif_encoder(config, stop.clone(), true)?;
 
     // Scale full-range logical pixels to the upstream 10-bit input domain.
     let scaled_frames = map_animation_frames(frames, |f| {
-        map_animation_pixels(f.pixels.as_ref(), &stop, |p| RGBA16 {
+        map_animation_pixels(f.pixels(), &stop, |p| RGBA16 {
             r: scale_from_u16(p.r, 10),
             g: scale_from_u16(p.g, 10),
             b: scale_from_u16(p.b, 10),
@@ -2176,17 +2345,17 @@ pub fn encode_animation_rgba16(
         })
     })?;
 
-    let ravif_frames: Vec<ravif::AnimFrameRgba16<'_>> = scaled_frames
+    let ravif_frames: Vec<ravif::TimedAnimFrame<'_, _>> = scaled_frames
         .iter()
         .zip(frames.iter())
-        .map(|(scaled, orig)| ravif::AnimFrameRgba16 {
-            rgba: scaled.as_ref(),
-            duration_ms: orig.duration_ms,
+        .map(|(scaled, orig)| ravif::TimedAnimFrame {
+            pixels: scaled.as_ref(),
+            duration_ticks: orig.duration_ticks(),
         })
         .collect();
 
     let result = enc
-        .encode_animation_rgba16(&ravif_frames)
+        .encode_animation_rgba16_timed(&ravif_frames, timescale)
         .map_err_at(error_from_ravif)
         .at_crate(crate::at_crate_info())?;
 
@@ -2194,5 +2363,7 @@ pub fn encode_animation_rgba16(
         avif_file: result.avif_file,
         frame_count: result.frame_count,
         total_duration_ms: result.total_duration_ms,
+        total_duration_ticks: result.total_duration_ticks,
+        timescale: result.timescale,
     })
 }

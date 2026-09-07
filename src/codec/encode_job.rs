@@ -294,6 +294,7 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
             limits: self.limits,
             frame_count: 0,
             loop_count: self.loop_count.flatten(),
+            timescale: 1000,
         })
     }
 }

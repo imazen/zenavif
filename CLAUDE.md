@@ -298,6 +298,19 @@ backend capability landing:**
    backend config and map it from `zencodec::AllocPreference` /
    `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
 
+## Exact animation timing — 2026-09-07
+
+Owner `23522fff` supplies exact-tick RGB/RGBA animation encoding. Canonical
+`TimedAnimationFrame` and four timed entry points share the legacy conversion
+paths; SVT also receives the clock for muxing and level derivation. Exact
+result fields coexist with a rounded-down legacy millisecond total. The
+concrete codec adapter's `push_frame_ticks` rescales mixed clocks exactly
+with checked overflow; the generic zencodec trait retains milliseconds.
+All 80 native/adapter files (176 frames) pass libavif's exact timing checks.
+Workspace tests pass 906/906 (nine existing skips) and library/timing-test
+Clippy passes. See `benchmarks/animation_timing_2026-09-07.md`. The quality
+investigation still prevents wrapper main merges.
+
 ## Animation quantizer hints — 2026-09-07
 
 Owner `5b7c50b9` now submits the configured superblock quantizer map with every
