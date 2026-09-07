@@ -8,7 +8,8 @@ use zenpixels::PixelBuffer;
 /// Convert AVIF rotation + mirror properties to EXIF orientation.
 ///
 /// AVIF uses separate `irot` (rotation) and `imir` (mirror) boxes.
-/// The display pipeline applies: mirror first, then rotate (both CCW).
+/// The display pipeline applies counter-clockwise rotation, then mirroring.
+/// HEIF axis 0 exchanges top/bottom; axis 1 exchanges left/right.
 pub(super) fn avif_to_orientation(
     rotation: Option<&zenavif_parse::ImageRotation>,
     mirror: Option<&zenavif_parse::ImageMirror>,
@@ -20,13 +21,13 @@ pub(super) fn avif_to_orientation(
         (None, 90) => Orientation::Rotate270,
         (None, 180) => Orientation::Rotate180,
         (None, 270) => Orientation::Rotate90,
-        (Some(0), 0) => Orientation::FlipH,
+        (Some(0), 0) => Orientation::FlipV,
         (Some(0), 90) => Orientation::Transpose,
-        (Some(0), 180) => Orientation::FlipV,
+        (Some(0), 180) => Orientation::FlipH,
         (Some(0), 270) => Orientation::Transverse,
-        (Some(1), 0) => Orientation::FlipV,
+        (Some(1), 0) => Orientation::FlipH,
         (Some(1), 90) => Orientation::Transverse,
-        (Some(1), 180) => Orientation::FlipH,
+        (Some(1), 180) => Orientation::FlipV,
         (Some(1), 270) => Orientation::Transpose,
         _ => Orientation::Identity,
     }
@@ -132,9 +133,9 @@ pub(super) fn orientation_to_avif(orientation: zencodec::Orientation) -> (Option
     use zencodec::Orientation;
     match orientation {
         Orientation::Identity => (None, None),
-        Orientation::FlipH => (Some(0), Some(0)), // mirror=0, no rotation
+        Orientation::FlipH => (None, Some(1)), // exchange left and right
         Orientation::Rotate180 => (Some(2), None), // 180° CCW
-        Orientation::FlipV => (Some(2), Some(0)), // mirror=0, 180° CCW
+        Orientation::FlipV => (None, Some(0)), // exchange top and bottom
         Orientation::Transpose => (Some(1), Some(0)), // mirror=0, 90° CCW
         Orientation::Rotate90 => (Some(3), None), // 270° CCW = 90° CW
         Orientation::Transverse => (Some(3), Some(0)), // mirror=0, 270° CCW
@@ -196,8 +197,51 @@ mod tests {
         }
     }
 
-    /// The two mirror axes are NOT interchangeable: axis 0 flips left-right,
-    /// axis 1 flips top-bottom, so at every rotation they must disagree.
+    /// libavif 1.3.0 exif.c::avifImageIrotImirToExifOrientation, measured
+    /// for all 12 rotation/mirror combinations. A round trip between two
+    /// mutually inverted local tables cannot detect a shared axis mistake.
+    #[test]
+    fn orientation_matches_libavif_reference_table() {
+        let expected = [
+            [
+                Orientation::Identity,
+                Orientation::FlipV,
+                Orientation::FlipH,
+            ],
+            [
+                Orientation::Rotate270,
+                Orientation::Transpose,
+                Orientation::Transverse,
+            ],
+            [
+                Orientation::Rotate180,
+                Orientation::FlipH,
+                Orientation::FlipV,
+            ],
+            [
+                Orientation::Rotate90,
+                Orientation::Transverse,
+                Orientation::Transpose,
+            ],
+        ];
+        for (quarter_turn, row) in expected.into_iter().enumerate() {
+            for (axis, want) in [None, Some(0), Some(1)].into_iter().zip(row) {
+                assert_eq!(
+                    avif_to_orientation(
+                        Some(&ImageRotation {
+                            angle: quarter_turn as u16 * 90
+                        }),
+                        axis.map(|axis| ImageMirror { axis }).as_ref()
+                    ),
+                    want,
+                    "irot={quarter_turn}, imir={axis:?}"
+                );
+            }
+        }
+    }
+
+    /// The two mirror axes are NOT interchangeable: axis 0 flips top-bottom,
+    /// axis 1 flips left-right, so at every rotation they must disagree.
     /// A swapped axis is a silent vertical/horizontal flip.
     #[test]
     fn the_two_mirror_axes_never_decode_to_the_same_orientation() {

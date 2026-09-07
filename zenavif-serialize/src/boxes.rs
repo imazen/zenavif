@@ -900,12 +900,11 @@ impl MpegBox for IrotBox {
 /// Image Mirror box (`imir`). NOT a FullBox.
 ///
 /// Specifies a mirror axis to apply after rotation.
-/// `axis` = 0 means vertical axis (left-right flip),
-/// `axis` = 1 means horizontal axis (top-bottom flip).
+/// `axis` = 0 exchanges top and bottom; `axis` = 1 exchanges left and right.
 #[derive(Debug, Copy, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct ImirBox {
-    /// 0 = vertical axis (left-right flip), 1 = horizontal axis (top-bottom flip)
+    /// 0 exchanges top/bottom; 1 exchanges left/right
     pub axis: u8,
 }
 

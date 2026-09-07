@@ -506,8 +506,8 @@ impl Aviffy {
 
     /// Set image mirror axis.
     ///
-    /// `axis` = 0: vertical axis (left-right flip).
-    /// `axis` = 1: horizontal axis (top-bottom flip).
+    /// `axis` = 0: exchanges top and bottom.
+    /// `axis` = 1: exchanges left and right.
     /// Adds an `imir` property box.
     #[inline]
     pub fn set_mirror(&mut self, axis: u8) -> &mut Self {

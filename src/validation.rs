@@ -543,7 +543,7 @@ impl crate::EncoderConfig {
         {
             return Err(ValidationError::RotationInvalid { value: angle });
         }
-        // mirror axis: AVIF imir spec — 0 = vertical, 1 = horizontal.
+        // mirror axis: AVIF imir spec — 0 exchanges top/bottom, 1 exchanges left/right.
         if let Some(axis) = self.mirror
             && axis > 1
         {

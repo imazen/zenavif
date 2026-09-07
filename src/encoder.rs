@@ -346,7 +346,7 @@ pub struct EncoderConfig {
     pub(crate) icc_profile: Option<Vec<u8>>,
     /// Image rotation (counter-clockwise degrees: 0, 90, 180, 270)
     pub(crate) rotation: Option<u8>,
-    /// Image mirror axis (0 = vertical, 1 = horizontal)
+    /// Image mirror axis (0 exchanges top/bottom, 1 exchanges left/right)
     pub(crate) mirror: Option<u8>,
     /// Content light level (max_cll, max_fall)
     pub(crate) content_light_level: Option<(u16, u16)>,
@@ -728,7 +728,7 @@ impl EncoderConfig {
         self
     }
 
-    /// Set image mirror axis (0 = vertical/left-right, 1 = horizontal/top-bottom)
+    /// Set image mirror axis (0 exchanges top/bottom, 1 exchanges left/right)
     pub fn mirror(mut self, axis: u8) -> Self {
         self.mirror = Some(axis);
         self

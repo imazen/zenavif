@@ -300,6 +300,19 @@ backend capability landing:**
 
 ## Known Bugs
 
+**Fixed 2026-09-07 — mirror orientation conversion.** The adapter interpreted
+HEIF `imir=0` as a left/right flip at 0/180 degrees. ISO/IEC 23008-12:2022
+6.5.12 and libavif 1.3.0 define 0 as top/bottom and 1 as left/right; rotation
+precedes mirroring. Corrected both decode mapping and encode inverse. The new
+12-combination reference table test failed before the fix while the old local
+round-trip test passed (both tables shared the same mistake). A C probe compiled
+from libavif's `exif.c::avifImageIrotImirToExifOrientation` produced the expected
+table. Local source harness: `~/tmp/animation-metadata/orientation-check`, using
+the actual module and dependency types with a minimal enclosing ImageInfo shell
+because the root workspace's zenanalyze path dependencies are unavailable.
+Evidence: `orientation-{c.csv,before.log,after.log}` in the same directory.
+
+
 ### ARM film-grain row reservations — fixed by decoder pin integration
 
 The `66f58fa6` decoder pin panicked on codec-corpus's

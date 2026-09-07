@@ -514,8 +514,7 @@ pub struct ImageRotation {
 /// See ISOBMFF § 12.1.4.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImageMirror {
-    /// Mirror axis: 0 = top-to-bottom (vertical axis, left-right flip),
-    /// 1 = left-to-right (horizontal axis, top-bottom flip).
+    /// Mirror axis: 0 exchanges top and bottom; 1 exchanges left and right.
     pub axis: u8,
 }
 
