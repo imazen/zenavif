@@ -12,6 +12,8 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Update the SVT backend to `4e688a54` with matching SIMD dependencies. Enable odd and partial grayscale/alpha dimensions at every speed at 8/10 bits. Replace retired refusal tests with pixel-quality and exact decoded-source checks; keep the public lossy quality policy.
+
 - Legacy `unsafe-asm` decoder: share managed/raw-OBU color-conversion kernels and matrix resolution, correcting high-depth quality and pixel differences. Decode color-grid tiles with shared canvas assembly; retain the explicit alpha-grid limitation.
 
 - Legacy `unsafe-asm` decoder: stop polling exhausted AV1 input forever, keep owned packet references alive, and scale high-depth color before attaching alpha to avoid scaling alpha twice.

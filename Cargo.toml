@@ -274,7 +274,11 @@ ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/ima
 # new-pin on this crate's own encode path is recorded in
 # `benchmarks/svt_pin_speed_2026-09-05.md`. Nothing in the range touches the
 # seam's API surface; no `use` path or feature changed.
-svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "2d75a105fe0b310bf586110951315f014e274fff", optional = true }
+# 2026-09-07: 4e688a54 includes the animation branch and main's quality fixes.
+# Retires mono/alpha geometry and preset floors; direct QP-0 tests now require
+# exact mono/native-10 reconstruction. Root SIMD patches below are required
+# because Cargo does not inherit the dependency workspace's patch table.
+svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "4e688a545847b3e6a40a3b46fc158dfd46331c3d", optional = true }
 # AVIF container muxer for the zenav1-svt backend (the zenravif backend muxes
 # inside zenravif; this backend muxes in-crate). The 0.2.0 version is
 # supplied by the [patch.crates-io] git pin below until 0.2.0 publishes.
@@ -620,18 +624,10 @@ two-pass-zensim = ["target-quality", "encode-imazen", "ravif/__expert"]
 # `Av1Backend::Zenav1Svt` variant. Off by default; requires `encode` (the backend
 # enum and entry points live there).
 #
-# SCOPE — `svt_rs_dims_error` + `reject_unsupported_config` in
-# `src/encoder_svt_rs.rs` are the single source of truth; this comment was
-# three claims out of date until 2026-09-02, so check the code, not this text:
-#   * 4:2:0 stills at 8 AND 10 bits (10-bit alpha/gray needs speed >= 7).
-#   * COLOUR 4:2:0 takes ARBITRARY dimensions at ANY speed. The old
-#     multiple-of-64 rule is gone; the partial-superblock floor was removed
-#     2026-08-29 once upstream measured partial SBs at every preset.
-#   * Alpha / grayscale (Cs400) items still need speed >= 5 (SVT preset >= 6)
-#     AND multiples of 8; anything at multiples of 64 is accepted regardless.
-#   * Bitstream identity vs C SVT-AV1 v4.2.0 IS asserted upstream now (see the
-#     dep comment above and upstream `rust/STATUS.md`) — the "NOT yet
-#     asserted" note this replaces predated that work.
+# Still color 4:2:0 and Cs400 alpha/gray at 8/10 bits, all public speeds,
+# including odd dimensions and partial superblocks. The quality dial retains
+# QP >= 1; upstream lossless and animation APIs are not yet publicly wired.
+# See src/encoder_svt_rs.rs and tests/svt_rs_backend.rs for the checked scope.
 zenav1-svt = ["encode", "dep:svtav1", "dep:zenavif-serialize"]
 # DEPRECATED alias for `zenav1-svt`, kept so existing consumers keep building.
 # Cargo has no `#[deprecated]` for features; this comment and the 0.1.8
@@ -704,6 +700,12 @@ name = "decode_backend_bench"
 required-features = ["encode", "zenav1-aom"]
 
 [patch.crates-io]
+# SVT 4e688a54 uses integer SIMD primitives absent from magetypes 0.9.28.
+# Dependency workspace patches are not inherited; keep the same tested
+# archmage/macro/magetypes revision as SVT's root manifest until publication.
+archmage = { git = "https://github.com/imazen/archmage", rev = "cc24398c9a9fee0251722931e295da840730704d" }
+archmage-macros = { git = "https://github.com/imazen/archmage", rev = "cc24398c9a9fee0251722931e295da840730704d" }
+magetypes = { git = "https://github.com/imazen/archmage", rev = "cc24398c9a9fee0251722931e295da840730704d" }
 # The zenanalyze-api additions this crate's graph needs (FeatureProvider,
 # Select::Names) are on `main` but not yet on crates.io. ONE patch, here at the
 # workspace root, rewrites every registry edge — including the ones inside

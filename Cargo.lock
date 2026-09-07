@@ -129,9 +129,8 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
 name = "archmage"
-version = "0.9.28"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "802588500749f8792342d51afe283f42a7ab6baeb3c5334b62c3c48855a2ec20"
+version = "0.9.29"
+source = "git+https://github.com/imazen/archmage?rev=cc24398c9a9fee0251722931e295da840730704d#cc24398c9a9fee0251722931e295da840730704d"
 dependencies = [
  "archmage-macros",
  "safe_unaligned_simd",
@@ -140,13 +139,12 @@ dependencies = [
 
 [[package]]
 name = "archmage-macros"
-version = "0.9.28"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6e6c957fc425c4e22da4abc86b3341df09672079df466de138b6b0608a6cfd2"
+version = "0.9.29"
+source = "git+https://github.com/imazen/archmage?rev=cc24398c9a9fee0251722931e295da840730704d#cc24398c9a9fee0251722931e295da840730704d"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -926,9 +924,8 @@ checksum = "7ef0d4ed8669f8f8826eb00dc878084aa8f253506c4fd5e8f58f5bce72ddb97e"
 
 [[package]]
 name = "magetypes"
-version = "0.9.28"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b3e01b6a29880b694607d95eb01da6bf71a291c545a560c5255c26e02a35413"
+version = "0.9.29"
+source = "git+https://github.com/imazen/archmage?rev=cc24398c9a9fee0251722931e295da840730704d#cc24398c9a9fee0251722931e295da840730704d"
 dependencies = [
  "archmage",
  "rustversion",
@@ -2214,7 +2211,7 @@ dependencies = [
 [[package]]
 name = "zenav1-svt"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zenav1-svt?rev=2d75a105fe0b310bf586110951315f014e274fff#2d75a105fe0b310bf586110951315f014e274fff"
+source = "git+https://github.com/imazen/zenav1-svt?rev=4e688a545847b3e6a40a3b46fc158dfd46331c3d#4e688a545847b3e6a40a3b46fc158dfd46331c3d"
 dependencies = [
  "zenav1-svt-dsp",
  "zenav1-svt-encoder",
@@ -2224,7 +2221,7 @@ dependencies = [
 [[package]]
 name = "zenav1-svt-dsp"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zenav1-svt?rev=2d75a105fe0b310bf586110951315f014e274fff#2d75a105fe0b310bf586110951315f014e274fff"
+source = "git+https://github.com/imazen/zenav1-svt?rev=4e688a545847b3e6a40a3b46fc158dfd46331c3d#4e688a545847b3e6a40a3b46fc158dfd46331c3d"
 dependencies = [
  "archmage",
  "magetypes",
@@ -2234,7 +2231,7 @@ dependencies = [
 [[package]]
 name = "zenav1-svt-encoder"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zenav1-svt?rev=2d75a105fe0b310bf586110951315f014e274fff#2d75a105fe0b310bf586110951315f014e274fff"
+source = "git+https://github.com/imazen/zenav1-svt?rev=4e688a545847b3e6a40a3b46fc158dfd46331c3d#4e688a545847b3e6a40a3b46fc158dfd46331c3d"
 dependencies = [
  "almost-enough",
  "archmage",
@@ -2248,7 +2245,7 @@ dependencies = [
 [[package]]
 name = "zenav1-svt-types"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zenav1-svt?rev=2d75a105fe0b310bf586110951315f014e274fff#2d75a105fe0b310bf586110951315f014e274fff"
+source = "git+https://github.com/imazen/zenav1-svt?rev=4e688a545847b3e6a40a3b46fc158dfd46331c3d#4e688a545847b3e6a40a3b46fc158dfd46331c3d"
 dependencies = [
  "enough",
  "whereat",

@@ -1,110 +1,41 @@
 //! zenav1-svt AVIF encode backend (`zenav1-svt` feature, EXPERIMENTAL).
 //!
-//! Routes [`crate::encoder::encode_rgb8`] through the pure-Rust SVT-AV1 port
-//! ([imazen/zenav1-svt](https://github.com/imazen/zenav1-svt), the
-//! `rust/svtav1/` subdir) when
-//! [`crate::Av1Backend::Zenav1Svt`] is selected. Unlike the zenravif backend —
-//! where zenravif itself muxes the AVIF container — this backend drives the
-//! `svtav1_encoder::pipeline::EncodePipeline` directly and muxes in-crate via
-//! `zenavif-serialize`.
+//! Drives the pure Rust SVT-AV1 `EncodePipeline` and muxes the coded items
+//! through `zenavif-serialize`.
 //!
-//! # Scope (v1, deliberately narrow)
+//! # Wired scope
 //!
-//! * Still images only: RGB/RGBA → 4:2:0 YCbCr (BT.601, full range),
-//!   plus grayscale → monochrome (Cs400). RGBA's straight alpha plane is a
-//!   separate Cs400 encode muxed as an `auxl` auxiliary item, honoring the
-//!   [`crate::EncoderConfig::alpha_quality`] fallback contract.
-//! * 8-bit and 10-bit (issue #33). 16-bit input (`encode_rgb16` /
-//!   `encode_rgba16`) or [`crate::EncodeBitDepth::Ten`] codes a 10-bit
-//!   profile-0 stream: RGB → YCbCr runs at 10-bit precision (the in-house
-//!   f32 recipe quantized at the output depth, so an 8-bit source keeps
-//!   its chroma-average fraction bits) and the u16 planes go through the
-//!   port's native `try_encode_frame_420_hbd`. The low two bits reach the
-//!   mode decision, the coded levels **and** the post-filter searches: as
-//!   of upstream hbd chunk 2 (zenav1-svt `f319ec298`, on top of chunk 1
-//!   `35743ebd5`) the deblock level search's SSE, the CDEF strength
-//!   search's distortion and the Wiener tap search all read the caller's
-//!   native u16 planes instead of the old `u8 << 2` widening — nothing on
-//!   the bd10 path truncates the source any more, and a native source that
-//!   went unconsumed is a typed refusal rather than a silent truncation
-//!   (`pipeline.rs` "native 10-bit source went unconsumed"). Upstream gate:
-//!   `tools/bd10_hbd_src_gate.sh`, 100/100 cells byte-identical to real C.
-//!   10-bit **monochrome** (alpha, gray) has a native level
-//!   producer at SVT preset ≥ 9 (speed ≥ 7) only, and an AVIF alpha item
-//!   must match the colour item's depth, so 10-bit RGBA / gray encodes
-//!   need speed ≥ 7 ([`svt_rs_depth_error`]). HDR static metadata (`clli`,
-//!   `mdcv`) is written container-side by zenavif-serialize from
-//!   [`crate::EncoderConfig::content_light_level`] /
-//!   [`crate::EncoderConfig::mastering_display`]; BT.2020 / PQ / HLG CICP
-//!   is signalled in both the sequence header and `colr`.
-//! * Dimensions (issue #32): the 4:2:0 colour path takes **arbitrary**
-//!   dimensions at **every** speed — upstream pads TRUE→ALIGNED internally,
-//!   signals the TRUE dimensions in the sequence header, and codes partial
-//!   superblocks byte-identically to C on the PD0 path (upstream
-//!   `partial_sb_gate` 146/146 on aarch64 / 145/145 on x86-64 CI, incl. odd
-//!   dims and a 23-cell presets-0–5 block added 2026-08-04). The preset ≥ 6
-//!   floor this backend used to impose on the colour path is GONE; see
-//!   [`svt_rs_dims_error`] for the measurement that retired it and for the
-//!   one residual upstream still names (a `screen`-content RD class that is
-//!   NOT dimension-conditioned). The alpha/gray **monochrome** streams keep
-//!   a floor at SVT preset ≥ 6 (upstream `b6a1737a` + `1ed7db46` fixed the
-//!   mono edge-leaf coding that mis-coded them at preset 6 — see CLAUDE.md
-//!   Known Bugs; nothing measures mono partial SBs below it) and only at
-//!   multiples of 8 (the mono path does no TRUE→ALIGNED padding yet); the
-//!   alpha item must match the colour item's dimensions, so an RGBA encode
-//!   inherits that rule. [`svt_rs_dims_error`] is the single gate both the
-//!   encode path and [`crate::EncoderConfig::validate_for_input`] apply.
-//! * No 12-bit, no RGB (identity) model, no limited range, no gain map, no
-//!   animation. Each is rejected honestly at encode time (and by
-//!   [`crate::EncoderConfig::validate`]). Coded-lossless (QP 0) is
-//!   implemented upstream on the 8-bit 4:2:0 path, but this backend's
-//!   quality mapping deliberately does not reach it — see
-//!   [`quality_to_qp_gated`].
+//! Still RGB/RGBA images use 4:2:0 BT.601 full-range YCbCr; grayscale uses
+//! Cs400. Straight alpha is a separate Cs400 `auxl` item and honors the
+//! configured alpha quality fallback. Color, grayscale and alpha support
+//! odd dimensions and partial superblocks at every public speed, at both
+//! 8 and 10 bits. Sixteen-bit RGB/RGBA input is quantized to native 10-bit
+//! planes; monochrome uses native 10-bit coefficient coding, although its
+//! mode decisions currently use the upper eight source bits upstream.
+//! CICP is signaled in the sequence header and container, with `clli` and
+//! `mdcv` written container-side.
 //!
-//! # Payload shape
+//! This adapter still rejects 12-bit, 4:2:2/4:4:4, identity/RGB, limited
+//! range, gain maps and animation. Upstream has animation and coded-lossless
+//! 8/10-bit color/mono support; those capabilities are not yet exposed by
+//! this adapter's public encoding policy. The quality dial retains QP >= 1
+//! (see [`quality_to_qp_gated`]).
 //!
-//! `EncodePipeline::try_encode_frame_420` returns a temporal-delimiter +
-//! sequence-header + frame OBU sequence. It is muxed **verbatim**: the
-//! leading TD matches the zenravif payload convention (zenrav1e packet data
-//! also begins with a TD OBU) and is byte-identical to the streams the
-//! zenav1-svt decode-conformance suite validates under `aomdec` (525 mono +
-//! 1575 4:2:0 cells, `tools/decode_conformance.sh` at the pinned rev).
+//! # Quality and speed
 //!
-//! # Quality / speed mapping
+//! Quality uses SVT's linear 1..=100 to QP 63..=0 mapping with the QP >= 1
+//! clamp. Speed uses the upstream rounded 0..=13 mapping, clamped to M9 for
+//! all-intra coding, so speeds 7..=10 are aliases. Sweep fingerprints use
+//! these same resolved values.
 //!
-//! Deliberately zenav1-svt's own documented mappings, NOT zenravif's fitted
-//! quality→quantizer curve (`src/encode_plan.rs` mirrors describe zenravif
-//! only):
+//! # Verification
 //!
-//! * quality 1..=100 → QP 63..=0, linear
-//!   ([`svtav1::avif::AvifEncoder::quality_to_qp_static`]), except QP is
-//!   clamped to ≥ 1: QP 0 corrupts on the pinned rev (see
-//!   [`quality_to_qp_gated`]).
-//! * speed 1..=10 → SVT preset 0..=13, linear
-//!   (same formula as `svtav1::avif::AvifEncoder`'s internal
-//!   `speed_to_preset`; that helper is private upstream, so the formula is
-//!   mirrored here with provenance).
-//!
-//! # C parity
-//!
-//! At the pinned tree, zenav1-svt emits **byte-identical bitstreams to the C
-//! SVT-AV1 encoder (v4.2.0 baseline)** across its verified battery
-//! (upstream `rust/README.md` gate table + `rust/STATUS.md`): the full-SB
-//! identity matrix (`identity_full_8bit` 280/280, every preset 0–13, bd8
-//! synthetic), bd10 (matrix 36/36 + non-flat 309/309 + native-source
-//! 100/100), partial SBs and odd dims (`partial_sb_gate` 146/146 aarch64 /
-//! 145/145 x86-64 CI, now including a presets-0–5 block), 10-bit at
-//! non-64-aligned dims (159/159), SB128, and multi-tile (29/29).
-//! Coded-lossless is no longer a refusal: `lossless_gate.sh` is 112/144
-//! byte-identical (presets 4–13 all 96/96, incl. partial superblocks) with
-//! 32 self-promoting pinned cells, and **144/144 decode to the source**.
-//! Not byte-exact everywhere yet: screen-content low presets carry pinned
-//! RD near-ties (upstream issue #71, which also fires on 64-aligned
-//! frames), bd10 photo p4 is 13/15, and QP 0 stays typed-refused on
-//! monochrome, 10-bit, HDR-fork, screen-content-tools, superres and inter
-//! frames. The zenavif round-trip and cross-backend decode tests
-//! (`tests/svt_rs_backend.rs`, `tests/cross_backend_decode.rs`) verify the
-//! seam end-to-end.
+//! `tests/svt_rs_backend.rs` checks real AVIF round trips, unchanged pixel
+//! quality floors, supported geometry/depth combinations, and direct QP-0
+//! source reconstruction with independent raw decoders. The pinned upstream
+//! merge's C regression and native-lossless results are recorded in
+//! `rust/benchmarks/main_merge_2026-09-07.md` in zenav1-svt. These are scoped
+//! measurements, not a claim that every C feature or coding case is exact.
 
 use crate::Result;
 use crate::encoder::{EncodeChromaSubsampling, EncodeColorModel, EncodePixelRange};
@@ -151,41 +82,14 @@ fn map_svt_encode_error(e: whereat::At<svtav1::types::EncodeError>) -> whereat::
     }
 }
 
-/// Map zenavif quality 1..=100 to an zenav1-svt QP, clamped away from QP 0.
+/// Map the lossy quality ladder to SVT QP >= 1.
 ///
-/// QP 0 is `base_qindex` 0 = **coded-lossless**, and its history upstream
-/// runs corrupt → refused → implemented:
-///
-/// 1. rev 3e25f52b: syntactically-valid bitstreams decoding to garbage
-///    (ssim2 ~= −700; `benchmarks/backend_sweep_2026-07-22.tsv`).
-/// 2. `f0f0a70ca` (issue #5): a typed `EncodeError::UnsupportedConfig`.
-/// 3. `aeb619cd8` + `75cf7b0f7` (issue #5 chunk 2) + `129d45494` (issue #9
-///    items 6-7): coded-lossless ENCODES on the 8-bit 4:2:0 still path and
-///    the capability refusal is RETIRED (upstream's inventory went 15 → 14
-///    capability refusals). Still typed-refused there: monochrome, 10-bit,
-///    HDR-fork mode, screen-content tools, superres, inter frames.
-///
-/// The clamp is therefore no longer a corruption guard, and it is no longer
-/// working around a refusal — it is a **product** choice, kept deliberately:
-///
-/// * quality 100 must ENCODE, and mapping it to QP 0 would silently switch
-///   coding modes (WHT/TX_4X4, no in-loop filters) and multiply file size,
-///   which is not what a caller asking for "quality 100" of a lossy ladder
-///   is asking for;
-/// * this backend converts RGB → 4:2:0 YCbCr, so a coded-lossless AV1
-///   frame is still not a lossless *image* round-trip — advertising it as
-///   one through the quality dial would be a false claim;
-/// * `EncoderConfig` has no lossless request for this backend to honour, so
-///   there is no way for a caller to ask for it explicitly and no way to
-///   distinguish "I want q100" from "I want lossless".
-///
-/// Composition is covered by `svt_rs_quality_100_does_not_corrupt` (clamp
-/// side) and `svt_rs_direct_qp0_codes_lossless_420` +
-/// `svt_rs_direct_qp0_typed_refusal_outside_420_8bit` (upstream-behaviour
-/// side, driving the pipeline directly) in `tests/svt_rs_backend.rs`.
-/// Removing the clamp is a deliberate product decision that needs a
-/// lossless request on `EncoderConfig` to hang off, not a doc fix — tracked
-/// as zenavif#42.
+/// Upstream implements coded-lossless QP 0 for 8/10-bit color and mono.
+/// This adapter retains its existing quality policy: RGB conversion and
+/// 4:2:0 subsampling cannot promise image-lossless reconstruction. The
+/// explicit lossless request is still rejected here pending public wiring.
+/// `svt_rs_quality_100_does_not_corrupt` covers the ladder; the direct QP-0
+/// tests separately require exact reconstruction of every coded plane.
 pub(crate) fn quality_to_qp_gated(quality: f32) -> u8 {
     svtav1::avif::AvifEncoder::quality_to_qp_static(quality).max(1)
 }
@@ -214,9 +118,7 @@ pub(crate) fn quality_to_qp_gated(quality: f32) -> u8 {
 /// six decimals on 2 images × 4 quality points, while speed 6 (preset 7)
 /// differs on every cell — the discriminating control.
 ///
-/// Both preset floors this module gates on are unaffected: speeds 1..=6
-/// map to 0/1/3/4/6/7 either way, and speeds 7..=10 clear
-/// [`MONO_HBD_MIN_PRESET`] (9) both before and after the clamp.
+/// Speeds 1..=6 map to 0/1/3/4/6/7; speeds 7..=10 map to 9.
 pub(crate) fn speed_to_svt_preset(speed: u8) -> u8 {
     let clamped = speed.clamp(1, 10) as u32;
     ((((clamped - 1) * 13 + 4) / 9) as u8).min(9)
@@ -286,99 +188,20 @@ fn apply_svt_params(
     pipeline.tile_rows_log2 = p.tile_rows_log2;
 }
 
-/// Lowest SVT preset at which the **monochrome** (Cs400) path is verified
-/// to code a partial superblock correctly — the alpha auxiliary item and
-/// grayscale colour items.
-///
-/// This used to be `PARTIAL_SB_MIN_PRESET`, a floor the 4:2:0 colour path
-/// shared. The colour half of that floor is GONE (see
-/// [`svt_rs_dims_error`]); the mono half stays because nothing upstream
-/// measures mono partial superblocks below preset 6: `partial_sb_gate` is
-/// bd8 **4:2:0** by its own scope line, and the mono partial-SB evidence is
-/// the preset-6 edge-leaf fix (zenav1-svt `b6a1737a` + `1ed7db46`) plus this
-/// crate's `svt_rs_direct_mono_partial_sb_preset6_roundtrips`. A floor with
-/// no measurement under it stays where the measurement stops.
-pub(crate) const MONO_PARTIAL_SB_MIN_PRESET: u8 = 6;
-
-/// The dimension envelope this backend accepts, as one predicate shared by
-/// the encode path and [`crate::EncoderConfig::validate_for_input`] (issue
-/// #32). Returns the reason a `width`x`height` image is refused at zenavif
-/// `speed`, or `None` when it encodes.
-///
-/// * Any speed: multiples of 64 always encode.
-/// * The 4:2:0 **colour** path codes arbitrary dimensions at **every**
-///   speed (upstream pads TRUE→ALIGNED and signals the true size).
-/// * `mono_plane` streams — the Cs400 alpha auxiliary item and grayscale
-///   colour items — need SVT preset ≥ [`MONO_PARTIAL_SB_MIN_PRESET`]
-///   (speed ≥ 5) AND multiples of 8, because the port's monochrome path
-///   does no TRUE→ALIGNED padding (`try_encode_frame` rejects
-///   `aligned != true`) and its partial-SB edge coding is measured only at
-///   preset ≥ 6 (zenav1-svt `b6a1737a` + `1ed7db46`; the round-trip gate
-///   `svt_rs_direct_mono_partial_sb_preset6_roundtrips` in
-///   `tests/svt_rs_backend.rs` keeps that fixed). Below that preset a mono
-///   stream is 64-multiples only.
-///
-/// # Why the colour preset floor was removed (2026-08-29)
-///
-/// It rested on a premise that upstream measurement has since retired.
-/// Until 2026-08-04 upstream gated its C-faithful PD1 refinement walk on a
-/// COMPLETE superblock (`refined = matches!(preset, 0..=5) && use_funnel &&
-/// full_sb`), so a partial SB at presets 0–5 fell back to a plain PD0 fixed
-/// tree — a search C never runs. That `full_sb` gate is gone: the walk is
-/// edge-aware, and `tools/partial_sb_gate.sh` grew a 23-cell presets-0–5
-/// block, every cell byte-identical to real SvtAv1EncApp v4.2.0 (gate total
-/// 146/146 on aarch64, 145/145 on the x86-64 CI runner — the one-cell
-/// difference is an ISA-scoped C-side divergence, upstream
-/// `SUSPECTED-C-BUGS.md` #9, not a port variable). Anti-vacuity was
-/// re-measured adversarially: restoring `&& full_sb` drops the gate to
-/// 118/141 with all 23 failures inside that block.
-///
-/// The residual upstream names is **not** dimension-conditioned, which is
-/// what makes a *dimension* gate the wrong tool for it. Measured over 36
-/// cells per preset (9 non-64-aligned geometries × {gradient, screen} ×
-/// {q20, q48}): every `gradient` cell byte-matches at p0..p3 and p5; the
-/// misses are `screen` content at p0/p1/p2 (+4 cells at p4) — upstream
-/// issue #71, the palette/IntraBC over-picking RD class, which fires on
-/// **64-ALIGNED** 256/384/512 screen frames too. Those aligned frames this
-/// gate has always accepted at every speed, so the 64-multiple rule never
-/// protected anyone from that class; it only refused correct encodes.
-///
-/// And the residual is an RD divergence — different partition choices,
-/// different bytes — not corruption: upstream
-/// `tools/arbitrary_size_robustness.sh` is 128/128 panic-free-and-decodable
-/// with **0 refused** across every preset. What this crate owes its callers
-/// is correct pixels, not byte-identity to C, and the positive gate
-/// `svt_rs_partial_sb_roundtrip_at_low_presets` pins exactly that.
+/// All public speeds support partial and odd-size color, mono and alpha.
+/// Keep validation and encode-time checks together; the pinned port owns
+/// detailed geometry validation and returns its dimensions and reason.
 pub(crate) fn svt_rs_dims_error(
     width: usize,
     height: usize,
-    speed: u8,
-    mono_plane: bool,
+    _speed: u8,
+    _mono_plane: bool,
 ) -> Option<&'static str> {
     if width == 0 || height == 0 {
-        return Some("cannot encode an empty image");
+        Some("cannot encode an empty image")
+    } else {
+        None
     }
-    if width.is_multiple_of(64) && height.is_multiple_of(64) {
-        return None;
-    }
-    let preset = speed_to_svt_preset(speed);
-    if mono_plane && preset < MONO_PARTIAL_SB_MIN_PRESET {
-        return Some(
-            "Av1Backend::Zenav1Svt codes alpha and grayscale (Cs400) dimensions that are not \
-             multiples of 64 only at SVT preset >= 6 (speed >= 5): the zenav1-svt monochrome \
-             partial-superblock edge coding is measured only from that preset. Use speed >= 5, \
-             pad/crop to multiples of 64, use RGB input, or use the zenravif backend",
-        );
-    }
-    if mono_plane && (!width.is_multiple_of(8) || !height.is_multiple_of(8)) {
-        return Some(
-            "Av1Backend::Zenav1Svt alpha and grayscale (Cs400) streams need dimensions \
-             that are multiples of 8 (the zenav1-svt monochrome path pads no partial \
-             8x8 block yet), and the alpha item must match the colour item's size. \
-             Use RGB input, pad/crop to multiples of 8, or use the zenravif backend",
-        );
-    }
-    None
 }
 
 /// Reject configuration the zenav1-svt backend cannot honor.
@@ -416,8 +239,8 @@ fn reject_unsupported_config(config: &EncoderConfig) -> Result<()> {
     #[cfg(feature = "encode-imazen")]
     if config.lossless {
         return Err(at!(Error::Unsupported(
-            "Av1Backend::Zenav1Svt has no lossless mode (QP 0 is not mathematically \
-             lossless); use the zenravif backend for lossless"
+            "Av1Backend::Zenav1Svt does not expose image-lossless encoding; \
+             use the zenravif backend for lossless"
         )));
     }
     Ok(())
@@ -481,39 +304,17 @@ fn effective_bit_depth(config: &EncoderConfig, input_is_16bit: bool) -> u8 {
     config.coded_bit_depth_bits(input_is_16bit)
 }
 
-/// Lowest SVT preset with a native-10-bit **monochrome** level producer.
-/// The port's `bd10_levels_native` (pipeline.rs) approves mono only where
-/// the level re-encode post-pass runs — the eff-M9 band — because the
-/// full-RD bd10 funnel requires 4:2:0; `try_encode_frame_hbd` refuses
-/// anything else rather than emit 8-bit-quantized levels under a 10-bit
-/// sequence header. Colour (4:2:0) has a bd10 producer at every preset.
-pub(crate) const MONO_HBD_MIN_PRESET: u8 = 9;
-
-/// The bit-depth envelope this backend accepts, shared by the encode path
-/// and [`crate::EncoderConfig::validate_for_input`] (issue #33). Returns
-/// the reason a `bit_depth`-bit encode at zenavif `speed` is refused, or
-/// `None` when it encodes. `mono_plane` is true when a Cs400 stream is
-/// emitted (alpha auxiliary item, grayscale colour item).
+/// The pinned SVT port supports native 8/10-bit color, monochrome and
+/// alpha at every public speed. Twelve-bit remains an unimplemented depth.
 pub(crate) fn svt_rs_depth_error(
     bit_depth: u8,
-    speed: u8,
-    mono_plane: bool,
+    _speed: u8,
+    _mono_plane: bool,
 ) -> Option<&'static str> {
-    // `EncodeBitDepth` can spell depths this port has no encoder for. Refuse
-    // them here rather than let `pipeline.bit_depth = 12` produce a stream
-    // nothing gated: the port's 12-bit path does not exist.
     if !matches!(bit_depth, 8 | 10) {
         return Some(
             "Av1Backend::Zenav1Svt codes 8- and 10-bit only; zenav1-svt has no 12-bit \
              encode. Only Av1Backend::Zenav1Aom codes EncodeBitDepth::Twelve",
-        );
-    }
-    if bit_depth == 10 && mono_plane && speed_to_svt_preset(speed) < MONO_HBD_MIN_PRESET {
-        return Some(
-            "Av1Backend::Zenav1Svt codes 10-bit alpha and grayscale (Cs400) streams at SVT \
-             preset >= 9 (speed >= 7) only: the zenav1-svt bd10 monochrome level pass runs \
-             there and nowhere else, and an AVIF alpha item must match the colour item's \
-             depth. Use speed >= 7, RGB input, 8-bit, or the zenravif backend",
         );
     }
     None
@@ -1090,8 +891,7 @@ pub(crate) fn encode_rgb16_svt_rs(
 
 /// Encode a 16-bit RGBA image to a 10-bit AVIF via the zenav1-svt backend
 /// (issue #33): colour as [`encode_rgb16_svt_rs`], the alpha plane scaled
-/// to 10 bits (`scale_from_u16`) as a Cs400 `auxl` item — which needs
-/// speed ≥ 7 (see [`svt_rs_depth_error`]).
+/// to 10 bits (`scale_from_u16`) as a Cs400 `auxl` item at every speed.
 pub(crate) fn encode_rgba16_svt_rs(
     img: ImgRef<'_, rgb::Rgba<u16>>,
     config: &EncoderConfig,
@@ -1143,8 +943,7 @@ pub(crate) fn encode_rgba16_svt_rs(
 /// Encode an 8-bit grayscale image to a monochrome (Cs400) AVIF via the
 /// zenav1-svt backend — the same still-frame mono pipeline the alpha plane
 /// uses, muxed as a monochrome color item. [`crate::EncodeBitDepth::Ten`]
-/// widens to a 10-bit Cs400 stream (speed ≥ 7 only, see
-/// [`svt_rs_depth_error`]).
+/// widens to a 10-bit Cs400 stream at every speed.
 #[cfg(feature = "encode-mono")]
 pub(crate) fn encode_gray8_svt_rs(
     img: ImgRef<'_, u8>,

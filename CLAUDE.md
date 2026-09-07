@@ -192,7 +192,7 @@ TSV diff in the same commit. zenrav1e's halves (`gate-identity`,
 - `(default)` - Pure Rust decode only, safe SIMD via archmage
 - `encode` - AVIF encoding via zenravif
 - `encode-imazen` - Encoding with zenrav1e fork extras (QM, VAQ, still-image, lossless)
-- `zenav1-svt` - EXPERIMENTAL `Av1Backend::Zenav1Svt` via zenav1-svt (git-rev dep on imazen/zenav1-svt — NOT a sibling path dep since 2026-09-02, and `resolve-standalone` in ci.yml gates it that way; stills only — RGB/RGBA 4:2:0 + grayscale Cs400 at 8 or 10 bits (#33: 16-bit input / `EncodeBitDepth::Ten` → native u16 `try_encode_frame_420_hbd` — since upstream hbd chunk 2 (`f319ec298`) the deblock/CDEF/Wiener post-filter searches read those native u16 planes too, nothing truncates; 10-bit alpha/gray only at speed ≥ 7 = SVT preset ≥ 9 per `svt_rs_depth_error`; HDR clli/mdcv container-side), alpha as Cs400 `auxl` aux item; dims: the 4:2:0 colour path takes ARBITRARY dimensions at ANY speed (the preset ≥ 6 floor was removed 2026-08-29 — see Known Bugs), a Cs400 alpha/gray stream needs speed ≥ 5 (SVT preset ≥ 6) AND multiples of 8, else multiples of 64 — `svt_rs_dims_error` in `src/encoder_svt_rs.rs` is the single gate (#32); coded-lossless (QP 0) is implemented upstream on 8-bit 4:2:0 but the seam's quality→QP mapping deliberately clamps to QP ≥ 1; muxes in-crate via zenavif-serialize)
+- `zenav1-svt` - EXPERIMENTAL `Av1Backend::Zenav1Svt`, pinned to `4e688a54`: still RGB/RGBA 4:2:0 and grayscale Cs400 at 8/10 bits, including odd and partial dimensions at every public speed. Alpha is a Cs400 `auxl` item. Quality retains QP >= 1; the adapter still rejects explicit lossless and animation despite upstream support. Direct pipeline tests require exact QP-0 mono/native-10 reconstruction. Root archmage/archmage-macros/magetypes patches must match upstream because dependency workspace patches are not inherited. See `src/encoder_svt_rs.rs` and `tests/svt_rs_backend.rs` for current scope.
 - `zenav1-aom` - EXPERIMENTAL `DecodeBackend::Zenav1Aom` — zenav1-aom pure-Rust KEY-frame decoder behind the raw-OBU seam `decode_av1_obu_yuv` (git-rev dep on imazen/zenav1-aom; byte-identical to rav1d-safe on the 8-cell decode corpus; drives `examples/decode_4way_bench.rs`)
 - `zenav1-aom-decode` - additive SYNONYM for `zenav1-aom`, spelled with the crate name. Neither is deprecated; `zenav1-aom` stays canonical.
 - `zenav1-aom-encode` - EXPERIMENTAL `Av1Backend::Zenav1Aom` — zenav1-aom pure-Rust ENCODE backend via `aom_encode::key_frame::encode_key_frame` (git-rev dep on imazen/zenav1-aom at `45c53ddb` — bumped 2026-09-04 from `c3e1b4ab` for the zenavif#45 fix `21544fde`; a NEWER rev than the decode pin because `encode_key_frame` landed after it, and cargo resolves the two as two sources). **KEY-frame / still scope only** — that entry point encodes one frame and has no inter path, so animation is absent from the ENCODER, not merely unwired. Wired: RGB → 4:2:0 BT.601 **limited** range (the port pins `color_range=0`, the OPPOSITE of the svt seam) at **8, 10 or 12 bits** from BOTH `encode_rgb8` and `encode_rgb16` (2026-09-03; `EncodeBitDepth::Twelve` is AV1 profile 2 and was added in the 0.2.0 break), plus 8-bit grayscale → Cs400. Depth conversion is `yuv_convert::rgbx_to_yuv420_u16` — the depth-generic recipe the svt seam already used, quantizing at the OUTPUT depth with the studio swing scaled `<< (d-8)`; the 8-bit-source-at-depth-8 cell keeps the u8 `rgb8_to_yuv420` kernel as conservatism, NOT as the reason 8-bit output is stable — MEASURED (`benchmarks/aom_bd8_identity_2026-09-03.*`): 60/60 cells byte-identical pre-vs-post the wiring, and routing that cell through the u16 recipe instead changes 0/60. Refused by name: animation, alpha (`auxl` item not built, at any depth), **high-bit-depth grayscale** (the Cs400 path passes u8 through as coded luma and there is no measured promotion rule), 4:4:4, 4:2:2, identity/RGB, full range, gain maps, lossless. **Quality 100 = `--cq-level 0` is coded-lossless and gated EXACT** on every coded plane at 8/10/12 bits, both decoders (`aom_cq0_encodes_and_reconstructs_the_coded_planes_exactly`, with `cq0_gate_can_fail_on_a_lossy_encode` as its q99 mutation proof). It panicked in the port before the `45c53ddb` pin (zenavif#45, a `debug_assert` in `count_leaf`'s depth walk — fixed at the root in zenav1-aom `21544fde`); the canary `aom_cq0_still_panics_on_flat_content` that pinned it went red on the bump, as designed, and was retired into the gate. Muxes in-crate via zenavif-serialize. Gate: `tests/aom_encode_backend.rs` (26 tests, mutation proofs are `#[test]`s; the CI `Assert the aom encode gate actually ran` step floors the count at 26). See `src/encoder_aom.rs`.
@@ -496,6 +496,9 @@ placement as the colour grid, then hand the stitched alpha plane to
 its own alpha tile before stitching. Regression: `tests/sweep_40_geometry.rs`.
 
 ### zenav1-svt MONOCHROME partial superblocks were mis-coded at SVT preset 6 (found 2026-08-27 while landing zenavif#32) — FIXED upstream `b6a1737a` + `1ed7db46` the same day; seam gate lowered to preset 6
+
+**2026-09-07 update:** The `4e688a54` pin removes the remaining mono/alpha geometry and preset restrictions and implements QP-0 monochrome/native-10 coding. The former refusal tests now require successful round trips and exact decoded-source reconstruction; public quality still clamps to QP >= 1. The following records the earlier investigation.
+
 History: the port's `try_encode_frame` (mono) asserted partial-SB support
 from preset 6, but measured at `../zenav1-svt` @ 45aae91b5 (aarch64) every
 8-aligned non-64-multiple mono cell at preset 6 was wrong: 96x80 decoded
@@ -534,6 +537,9 @@ typed/garbage result AND a debug-build assert — or it reads as a new
 regression the day CI builds it unoptimised.
 
 ### zenav1-svt QP 0 (imazen/zenav1-svt#5, #9) — IMPLEMENTED upstream 2026-08-28 (was: corrupt, then refused); seam clamp RETAINED as a product choice
+
+**2026-09-07 update:** The `4e688a54` pin removes the remaining mono/alpha geometry and preset restrictions and implements QP-0 monochrome/native-10 coding. The former refusal tests now require successful round trips and exact decoded-source reconstruction; public quality still clamps to QP >= 1. The following records the earlier investigation.
+
 History runs corrupt -> refused -> implemented, and the seam gate followed it
 each time:
 1. rev 3e25f52b: every CQP QP-0 still encode emitted a valid-syntax bitstream
@@ -609,7 +615,7 @@ the residual is an RD divergence (different partition choices, different
 bytes), not corruption: `tools/arbitrary_size_robustness.sh` is 128/128
 panic-free-and-decodable with 0 refused across every preset.
 
-Seam: `PARTIAL_SB_MIN_PRESET` is renamed `MONO_PARTIAL_SB_MIN_PRESET` and now
+Historical seam (superseded by the 2026-09-07 pin, which removes the remaining mono floor): `PARTIAL_SB_MIN_PRESET` was renamed `MONO_PARTIAL_SB_MIN_PRESET` and now
 gates **only** the Cs400 mono path (alpha aux item, grayscale colour item),
 because nothing upstream measures mono partial superblocks below preset 6 —
 `partial_sb_gate` is bd8 4:2:0 by its own scope line, and the mono evidence is
@@ -622,7 +628,7 @@ measurement under it stays where the measurement stops. Tests: the refusal test
 `svt_rs_mono_partial_sb_still_refused_below_preset_6` (which also asserts the
 SAME geometry now validates without alpha).
 
-### Cross-backend status — CURRENT (2026-09-02)
+### Cross-backend status — historical snapshot (2026-09-02)
 Both backend deps are **git-rev pins** again, not sibling path deps:
 zenav1-aom `14124356`, zenav1-svt `ef0b122b` (`85af725`). The path deps had
 two costs — a plain clone of this repo could not run any cargo command (the

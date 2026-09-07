@@ -246,26 +246,12 @@ pub enum Av1Backend {
     /// zenav1-svt (pure Rust SVT-AV1 port) — EXPERIMENTAL, behind the
     /// `zenav1-svt` cargo feature (default off).
     ///
-    /// This is the working successor the [`Av1Backend::Svtav1`] doc
-    /// promised. At the pinned imazen/svtav1 rev the port emits
-    /// bitstreams **byte-identical to the C SVT-AV1 encoder (v4.2.0)**
-    /// across its verified battery — all-preset synthetic bd8, bd10,
-    /// real-photo low-preset gates at both depths, partial SBs, SB128
-    /// and multi-tile (upstream `rust/STATUS.md`); screen-content low
-    /// presets still carry pinned RD near-ties and QP 0 / lossless is
-    /// rejected upstream. Streams pass decode conformance under `aomdec`
-    /// (2100 conformance cells at the pin) and the payload is muxed into
-    /// a real AVIF container in-crate. The zenavif seam's scope stays
-    /// deliberately narrow — 8- and 10-bit 4:2:0 stills (10-bit alpha or
-    /// grayscale at speed >= 7 only).
-    ///
-    /// Dimensions, per `svt_rs_dims_error` in `src/encoder_svt_rs.rs`
-    /// (which is the gate, and which this paragraph contradicted until
-    /// 2026-09-02): multiples of 64 are always accepted; **any other size
-    /// is accepted on the colour 4:2:0 path at every speed** — the
-    /// partial-superblock floor was removed 2026-08-29; an alpha or
-    /// grayscale (Cs400) item at a non-multiple-of-64 size additionally
-    /// needs speed >= 5 (SVT preset >= 6) and multiples of 8.
+    /// Encodes 8/10-bit 4:2:0 stills, with Cs400 alpha or grayscale at
+    /// every public speed. Odd dimensions and partial superblocks are
+    /// supported on all three paths; the container retains the true size.
+    /// Upstream C parity and coded-lossless reconstruction are measured by
+    /// its scoped gates. This adapter's quality dial retains QP >= 1;
+    /// public lossless and animation wiring remain separate work.
     /// [`EncoderConfig::validate`] rejects the variant when the feature
     /// is off, and rejects configs outside the supported scope when on.
     Zenav1Svt,
