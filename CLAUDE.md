@@ -300,6 +300,17 @@ backend capability landing:**
 
 ## Known Bugs
 
+**2026-09-07 — canonical workspace verification resumed.** The missing
+`../zenanalyze` checkout and pinned parser corpora are now available. Default
+workspace all-target check passes. The default test run plus the repaired
+fixture target accounts for 472 passes and ten existing ignores; six initial
+failures were one missing 12-bit libavif fixture, not codec failures.
+All-feature/all-target check also passes after correcting non-exhaustive
+bit-depth matches in `examples/encode_sweep.rs`. Optional-feature runtime
+verification remains outstanding. See
+`benchmarks/animation_workspace_2026-09-07.md` for exact evidence and scope.
+No CI or push was run.
+
 **Fixed 2026-09-07 — color-track HDR metadata was discarded.**
 `read_stsd` previously retained only av1C/colr; the poster path could hide this
 because item getters still found HDR properties. The new no-poster regression
@@ -325,9 +336,9 @@ bits. Final local results: 89 serializer tests, 20 all-feature parser tests,
 6 parser doctests, 7 native integration tests, and 30,240 independent metadata
 checks across 8/10-bit output pass. Encoder nextest passes 2600/2600 and
 regression spotcheck 123/123; parser/serializer/managed-source clippy passes with
-warnings denied. Logs are `~/tmp/animation-metadata/hdr-*.log`. The full canonical
-workspace and optional feature combinations remain unverified; managed tests
-use the documented actual-source harness. No CI or push was run.
+warnings denied. Logs are `~/tmp/animation-metadata/hdr-*.log`. These initial
+results used the documented actual-source harness; the subsequent canonical
+workspace verification is recorded above. No CI or push was run.
 
 Libavif ignores these two metadata values, so the independent gate also
 checks exact big-endian bytes, box paths, nonessential item associations and

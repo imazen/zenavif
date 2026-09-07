@@ -276,12 +276,15 @@ fn load_rgb(path: &Path) -> Result<Img<Vec<Rgb<u8>>>, String> {
     Ok(Img::new(pixels, w, h))
 }
 
-fn ravif_bit_depth(b: zenavif::EncodeBitDepth) -> ravif::BitDepth {
+fn ravif_bit_depth(b: zenavif::EncodeBitDepth) -> Result<(ravif::BitDepth, &'static str), String> {
     match b {
-        zenavif::EncodeBitDepth::Eight => ravif::BitDepth::Eight,
-        zenavif::EncodeBitDepth::Ten => ravif::BitDepth::Ten,
+        zenavif::EncodeBitDepth::Eight => Ok((ravif::BitDepth::Eight, "8")),
+        zenavif::EncodeBitDepth::Ten => Ok((ravif::BitDepth::Ten, "10")),
         // Auto == "match input", which is 8-bit for PNG RGB input.
-        zenavif::EncodeBitDepth::Auto => ravif::BitDepth::Eight,
+        zenavif::EncodeBitDepth::Auto => Ok((ravif::BitDepth::Eight, "auto")),
+        _ => Err(format!(
+            "the zenravif sweep does not support bit depth {b:?}"
+        )),
     }
 }
 
@@ -315,7 +318,13 @@ fn main() -> ExitCode {
     let qm_vals = args.qm.values();
     let bu_vals = args.force_bottomup.values();
     let bit_depth = args.bit_depth;
-    let ravif_depth = ravif_bit_depth(bit_depth);
+    let (ravif_depth, bit_depth_label) = match ravif_bit_depth(bit_depth) {
+        Ok(depth) => depth,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::from(2);
+        }
+    };
 
     let mut tsv = String::from(
         "speed\tquality\tqm\tbottomup\tbit_depth\tencode_ms\tsize_bytes\tcompression_ratio\tzensim\n",
@@ -346,12 +355,6 @@ fn main() -> ExitCode {
     )
     .ok();
     writeln!(s, "{}", "-".repeat(55)).ok();
-
-    let bit_depth_label = match bit_depth {
-        zenavif::EncodeBitDepth::Eight => "8",
-        zenavif::EncodeBitDepth::Ten => "10",
-        zenavif::EncodeBitDepth::Auto => "auto",
-    };
 
     for &speed in &args.speeds {
         let speed = speed as u8;

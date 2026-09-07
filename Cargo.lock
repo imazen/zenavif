@@ -2344,6 +2344,7 @@ dependencies = [
  "mp4parse",
  "whereat",
  "zenavif-parse 0.6.2",
+ "zenavif-parse 0.7.0",
  "zenpixels-convert",
  "zenrav1e 0.1.4",
 ]

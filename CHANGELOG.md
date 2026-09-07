@@ -12,6 +12,9 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Fix the optional `encode_sweep` example's non-exhaustive bit-depth matches; unsupported depths produce an error instead of preventing the all-feature build.
+- Refresh downloaded test vectors when the newer 12-bit negotiation fixture is missing from an older libavif corpus.
+
 - Animated serializer: add `AmveBox` and `CclvBox` with shared range/presence/luminance-order validation and setters for color track/poster metadata.
 - Parser: preserve CLLI, MDCV, CCLV and AMVE from color-track sample entries, including sequences without a poster. `AnimationInfo`, legacy `AnimationConfig` and native `DecodedAnimationInfo` now carry `hdr: AnimationHdrMetadata`, separately from poster metadata. Correct ambient illuminance documentation to 0.0001 lux.
 
