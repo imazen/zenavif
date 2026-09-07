@@ -12,6 +12,8 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Legacy `unsafe-asm` decoder: stop polling exhausted AV1 input forever, keep owned packet references alive, and scale high-depth color before attaching alpha to avoid scaling alpha twice.
+
 - Fix the optional `encode_sweep` example's non-exhaustive bit-depth matches; unsupported depths produce an error instead of preventing the all-feature build.
 - Refresh downloaded test vectors when the newer 12-bit negotiation fixture is missing from an older libavif corpus.
 

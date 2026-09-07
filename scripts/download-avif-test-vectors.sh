@@ -7,11 +7,12 @@ mkdir -p "$VECTORS_DIR"
 echo "Downloading AVIF test vectors..."
 
 # 1. libavif (most comprehensive)
-# Guard on both the gain-map corpus and the newer 12-bit negotiation fixture:
-# an older download can contain the former while still missing the latter.
+# Check the newer ICC gain-map and 12-bit negotiation fixtures as well:
+# an older download can contain the basic gain map while missing these.
 # The directory itself always exists because some tiny vectors are committed.
 echo "1/3 Downloading libavif tests..."
 if [ ! -f "$VECTORS_DIR/libavif/seine_sdr_gainmap_srgb.avif" ] ||
+   [ ! -f "$VECTORS_DIR/libavif/seine_sdr_gainmap_srgb_icc.avif" ] ||
    [ ! -f "$VECTORS_DIR/libavif/weld_sato_12B_8B_q0.avif" ]; then
     mkdir -p "$VECTORS_DIR/libavif"
     git clone --depth=1 https://github.com/AOMediaCodec/libavif.git /tmp/libavif-tests

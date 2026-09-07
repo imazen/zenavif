@@ -300,6 +300,14 @@ backend capability landing:**
 
 ## Known Bugs
 
+**2026-09-07 — optional runtime failures are now measured.** See
+`benchmarks/legacy_decoder_2026-09-07.md`. The legacy `unsafe-asm` wrapper's
+no-frame EAGAIN spin and double-scaled high-depth alpha are corrected, and
+packet storage is now owned by rav1d. All-feature root library tests have
+308 passes and two remaining mono/4:2:2 pixel-conversion failures. Additional
+integration failures, including legacy grids, remain open. Do not infer a
+passing optional-feature runtime suite from the successful compilation below.
+
 **2026-09-07 — canonical workspace verification resumed.** The missing
 `../zenanalyze` checkout and pinned parser corpora are now available. Default
 workspace all-target check passes. The default test run plus the repaired

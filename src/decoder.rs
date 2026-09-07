@@ -2,6 +2,19 @@
 
 #![allow(unsafe_code)]
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packet_without_frame_returns_error() {
+        // A valid temporal delimiter OBU has no picture. End-of-input must
+        // return an error, not poll EAGAIN forever.
+        let mut decoder = Rav1dDecoder::new(&DecoderConfig::new().threads(1)).unwrap();
+        assert!(decoder.decode(&[0x12, 0]).is_err());
+    }
+}
+
 use crate::config::DecoderConfig;
 use crate::convert::{add_alpha8, add_alpha16, downscale_to_8bit, scale_pixels_to_u16};
 use crate::error::{Error, Result};
@@ -29,11 +42,9 @@ use rav1d::include::dav1d::headers::{
 use rav1d::include::dav1d::picture::Dav1dPicture;
 #[cfg(feature = "unsafe-asm")]
 use rav1d::src::lib::{
-    dav1d_close, dav1d_data_wrap, dav1d_default_settings, dav1d_get_picture, dav1d_open,
-    dav1d_picture_unref, dav1d_send_data,
+    dav1d_close, dav1d_data_create, dav1d_data_unref, dav1d_default_settings, dav1d_get_picture,
+    dav1d_open, dav1d_picture_unref, dav1d_send_data,
 };
-#[cfg(feature = "unsafe-asm")]
-use rav1d::src::send_sync_non_null::SendSyncNonNull;
 
 #[cfg(not(feature = "unsafe-asm"))]
 use rav1d_safe::include::dav1d::data::Dav1dData;
@@ -48,14 +59,22 @@ use rav1d_safe::include::dav1d::headers::{
 use rav1d_safe::include::dav1d::picture::Dav1dPicture;
 #[cfg(not(feature = "unsafe-asm"))]
 use rav1d_safe::src::lib::{
-    dav1d_close, dav1d_data_wrap, dav1d_default_settings, dav1d_get_picture, dav1d_open,
-    dav1d_picture_unref, dav1d_send_data,
+    dav1d_close, dav1d_data_create, dav1d_data_unref, dav1d_default_settings, dav1d_get_picture,
+    dav1d_open, dav1d_picture_unref, dav1d_send_data,
 };
-#[cfg(not(feature = "unsafe-asm"))]
-use rav1d_safe::src::send_sync_non_null::SendSyncNonNull;
 use std::ffi::c_int;
-use std::ffi::c_void;
 use std::ptr::NonNull;
+
+/// Own the input reference even when sending fails or leaves data pending.
+struct DecoderPacket(Dav1dData);
+
+impl Drop for DecoderPacket {
+    fn drop(&mut self) {
+        // SAFETY: the data was initialized by dav1d_data_create; unref also
+        // accepts the empty value left after dav1d_send_data consumes it.
+        unsafe { dav1d_data_unref(NonNull::new(&mut self.0)) };
+    }
+}
 
 /// Internal rav1d context wrapper with automatic cleanup
 struct Rav1dDecoder {
@@ -114,36 +133,24 @@ impl Rav1dDecoder {
             })
         })?;
 
-        // Wrap the input data
-        let mut dav1d_data = Dav1dData::default();
-
-        // We need to keep the data alive for the duration of decode.
-        // We pass a null free callback since we manage the lifetime ourselves.
-        unsafe extern "C" fn null_free(_data: *const u8, _cookie: Option<SendSyncNonNull<c_void>>) {
+        // rav1d may retain the packet after returning a picture. Give it an
+        // owned reference instead of wrapping the caller's borrowed slice with
+        // a no-op free callback. Release our reference on every return path.
+        let mut packet = DecoderPacket(Dav1dData::default());
+        // SAFETY: packet.0 is valid writable storage for the initialized data.
+        let dst = unsafe { dav1d_data_create(NonNull::new(&mut packet.0), data.len()) };
+        if dst.is_null() {
+            return Err(at!(Error::OutOfMemory));
         }
-
-        // SAFETY: dav1d_data_wrap wraps the data pointer
-        let result = unsafe {
-            dav1d_data_wrap(
-                NonNull::new(&mut dav1d_data),
-                NonNull::new(data.as_ptr() as *mut u8),
-                data.len(),
-                Some(null_free),
-                None,
-            )
-        };
-
-        if result.0 < 0 {
-            return Err(at!(Error::Decode {
-                code: result.0,
-                msg: "failed to wrap data",
-            }));
-        }
+        // SAFETY: dav1d_data_create allocated data.len() bytes, disjoint from
+        // the caller's slice. rav1d owns their lifetime through its references.
+        unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), dst, data.len()) };
+        let dav1d_data = &mut packet.0;
 
         // Send data to decoder in a loop until all data is consumed
         // SAFETY: ctx is valid and dav1d_data has been initialized
         loop {
-            let result = unsafe { dav1d_send_data(Some(ctx), NonNull::new(&mut dav1d_data)) };
+            let result = unsafe { dav1d_send_data(Some(ctx), NonNull::new(&mut *dav1d_data)) };
 
             if result.0 == 0 {
                 // All data consumed
@@ -158,7 +165,10 @@ impl Rav1dDecoder {
                     // Got a picture while draining
                     return Ok(DecodedPicture { picture });
                 }
-                // Otherwise continue trying to send
+                return Err(at!(Error::Decode {
+                    code: pic_result.0,
+                    msg: "decoder could not drain pending input",
+                }));
             } else if result.0 < 0 {
                 return Err(at!(Error::Decode {
                     code: result.0,
@@ -172,26 +182,25 @@ impl Rav1dDecoder {
             }
         }
 
-        // Get the decoded picture - keep trying if EAGAIN
+        // The first get_picture call enables draining; a second call waits
+        // for delayed frame-thread output (rav1d 1.1.0 rav1d_get_picture).
+        // EAGAIN after that means more input is required, not asynchronous
+        // work to busy-poll. This API has already supplied the whole packet.
         let mut picture = Dav1dPicture::default();
-        loop {
-            // SAFETY: ctx is valid and picture is initialized
+        for attempt in 0..2 {
+            // SAFETY: ctx is live and picture is valid writable storage.
             let result = unsafe { dav1d_get_picture(Some(ctx), NonNull::new(&mut picture)) };
-
             if result.0 == 0 {
                 return Ok(DecodedPicture { picture });
-            } else if result.0 == EAGAIN {
-                // No picture ready yet, this can happen if decoding is async
-                // For single-frame this shouldn't loop forever
-                std::thread::yield_now();
-                continue;
-            } else {
+            }
+            if result.0 != EAGAIN || attempt == 1 {
                 return Err(at!(Error::Decode {
                     code: result.0,
-                    msg: "failed to get picture",
+                    msg: "AV1 packet did not produce a picture",
                 }));
             }
         }
+        unreachable!("the second drain attempt always returns")
     }
 }
 
@@ -793,6 +802,12 @@ impl AvifDecoder {
         // Check for cancellation before alpha decode
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
+        // add_alpha16 scales the alpha samples itself and unpremultiplies
+        // against full-range RGB. Expand color before attaching alpha.
+        if bit_depth > 8 && bit_depth < 16 {
+            scale_pixels_to_u16(&mut image, bit_depth);
+        }
+
         // Decode alpha channel if present
         if let Some(alpha_result) = self.parser.alpha_data() {
             let alpha_data = alpha_result.map_err(|e| e.map_error(Error::Parse))?;
@@ -840,11 +855,6 @@ impl AvifDecoder {
                     premultiplied,
                 )?;
             }
-        }
-
-        // Scale 10/12-bit output to full u16 range
-        if bit_depth > 8 && bit_depth < 16 {
-            scale_pixels_to_u16(&mut image, bit_depth);
         }
 
         if self.config.prefer_8bit && bit_depth > 8 {
