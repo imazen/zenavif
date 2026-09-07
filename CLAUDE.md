@@ -298,6 +298,38 @@ backend capability landing:**
    backend config and map it from `zencodec::AllocPreference` /
    `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
 
+## Upstream animation metadata integration — 2026-09-07
+
+The cavif-rs owner fix is published as 6974b5a8 on animation-avif-complete and
+this consumer pins that Git revision. It includes main a7e9fcc5 / zenrav1e
+60594682 block-handling fixes, plus track/poster ICC/Exif/XMP, spatial/CICP/HDR
+wiring and actual 8/10-bit premultiplication before color coding. The serializer
+pin is canonical 98c8a501, unified to the byte-identical workspace member.
+Missing Exif and absent premultiplication both failed executed regressions.
+A signaling-only mutation fails decoded red at 149 versus expected 75; the
+restored implementation passes. Invalid spatial metadata returns a checked
+serialization error. Tests cover all four input types, exact sample/timing
+preservation for container-only metadata, and native managed/AOM results.
+Libavif independently decodes 22 frames, exports exact ICC/Exif/XMP bytes, and
+verifies 2048 half-alpha RGBA pixels with maximum errors [1,1,1,0].
+
+Published-Git all-feature nextest passes 895/895 (nine existing skips), default
+tests/doctests 484 (ten existing ignores), encode-only focused tests 3/3, and
+library clippy/scoped formatting pass. Owner tests pass 86 with and without
+assembly on this x86_64 host; both owner all-target clippy variants pass.
+Determinism and 56 reference conformance cells pass; optional armed CLI coverage
+is unrun. The same 33 byte/quality rows, 16 timing misses and two speed inversions
+remain. No thresholds changed. See benchmarks/animation_encode_metadata_2026-09-07.md,
+including the corrected nextest/clippy override invocation and source verification.
+
+Review branches are synchronized under the user's existing push request; their
+checked workflow filters exclude branch-push CI. CI remains deferred pending
+quality-gate correction; no PR or workflow dispatch is created. Earlier local/
+not-pushed statements below describe historical checkpoints, not this latest
+publication. Exact non-ms timing, further ignored animation options, additional
+metadata/auxiliary forms and video remain open. The owner's still alpha helper
+needs a separate executed regression/correction. The full goal remains active.
+
 ## Animation output depth and stride — 2026-09-07 (local)
 
 The zenravif animation seam now selects the upstream entry point according to

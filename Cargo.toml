@@ -181,7 +181,10 @@ log = "0.4.29"
 # `[patch."https://github.com/imazen/cavif-rs"] zenravif = { path = "../ravif/ravif" }`.
 # The [patch."…/zenavif-serialize"] below folds zenravif's copy onto this
 # workspace's member.
-ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/imazen/cavif-rs", rev = "f6c883b6e7395fad67c87ddab676c4df59575a41", default-features = false, optional = true, features = ["stop"] }
+# 2026-09-07: 6974b5a8 includes main's zenrav1e 60594682 block handling
+# fixes and verified animation metadata/premultiplication wiring. See
+# benchmarks/animation_encode_metadata_2026-09-07.md for before/after evidence.
+ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/imazen/cavif-rs", rev = "6974b5a8dd5ed38d416ee4455a2b990692c3d4d8", default-features = false, optional = true, features = ["stop"] }
 # zenav1-svt experimental AV1 encode backend (`zenav1-svt` feature).
 # The facade crate lives in the rust/svtav1 subdir of imazen/zenav1-svt and is
 # PACKAGED as `zenav1-svt`; the `svtav1` alias keeps the seam's `use` paths
@@ -721,13 +724,10 @@ zenanalyze-api = { git = "https://github.com/imazen/zenanalyze" }
 # publish.
 zenavif-serialize = { path = "zenavif-serialize" }
 
-# zenravif (git-rev dep above) takes zenavif-serialize 0.2.0 from the archived
-# standalone repo as a git dep of its own (since cavif-rs 2026-08-27, so that
-# its git consumers need no patch). Unify that source to the same workspace
-# member, or `encode` + tests/`zenav1-svt` builds would carry two
-# zenavif-serialize 0.2.0 packages. Cargo reports this entry unused (a
-# warning, not an error) in builds without `encode`. Drop at the publish.
-[patch."https://github.com/imazen/zenavif-serialize"]
+# zenravif now uses the canonical serializer Git revision with animation
+# metadata/HDR/premultiplication support. Unify it with the workspace member
+# used by native SVT and tests, avoiding duplicate serializer packages.
+[patch."https://github.com/imazen/zenavif"]
 zenavif-serialize = { path = "zenavif-serialize" }
 # (The former TEMP rav1d-safe [patch.crates-io] pin at f6aed27e is gone:
 # the dependency itself is now a git dep at 398b0bfa — a 0.6.0-staged rev
