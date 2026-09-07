@@ -120,6 +120,8 @@ pub(super) fn write_meta(
             } else {
                 let count = write_color_properties(out, options);
                 for _ in 0..count { props.push(next); next += 1; }
+                let count = write_transform_properties(out, options);
+                for _ in 0..count { props.push(next | 0x80); next += 1; }
             }
             associations.push((image.id, props));
         }
@@ -181,5 +183,21 @@ pub(super) fn write_color_properties(out: &mut Vec<u8>, options: &AnimatedImage)
     }
     if let Some(clli) = options.clli.as_ref() { write_clli(out, clli); count += 1; }
     if let Some(mdcv) = options.mdcv.as_ref() { write_mdcv(out, mdcv); count += 1; }
+    count
+}
+
+// HEIF/MIAF order: crop (when supported), counter-clockwise rotation, mirror.
+// Transformative poster properties are essential. Alpha is transformed with
+// its associated color image; it does not carry a second orientation.
+pub(super) fn write_transform_properties(out: &mut Vec<u8>, options: &AnimatedImage) -> u8 {
+    let mut count = 0;
+    if let Some(angle) = options.rotation {
+        let pos = begin_box(out, b"irot");
+        out.push(angle & 3); end_box(out, pos); count += 1;
+    }
+    if let Some(axis) = options.mirror {
+        let pos = begin_box(out, b"imir");
+        out.push(axis & 1); end_box(out, pos); count += 1;
+    }
     count
 }

@@ -12,6 +12,9 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Animated serializer: square-pixel aspect, rotation and mirroring on color tracks and posters, with checked validation and essential poster transform associations.
+- Correct HEIF mirror-axis conversion in the codec orientation adapter; verify all 12 combinations against the libavif C reference.
+
 #### Changed — `zenav1-svt` pin `2ca060f42` -> `2d75a105f`, 2026-09-05
 
 - Bumped the `svtav1` (package `zenav1-svt`) git rev by 140 commits to

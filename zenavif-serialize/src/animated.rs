@@ -68,6 +68,8 @@ pub struct AnimatedImage {
     clli: Option<ClliBox>,
     mdcv: Option<MdcvBox>,
     pixel_aspect_ratio: Option<PaspBox>,
+    rotation: Option<u8>,
+    mirror: Option<u8>,
 }
 
 impl Default for AnimatedImage {
@@ -91,6 +93,8 @@ impl AnimatedImage {
             clli: None,
             mdcv: None,
             pixel_aspect_ratio: None,
+            rotation: None,
+            mirror: None,
         }
     }
 
@@ -109,6 +113,10 @@ impl AnimatedImage {
         self.pixel_aspect_ratio = Some(PaspBox::new(h_spacing, v_spacing));
         self
     }
+    /// Counter-clockwise quarter-turn code (0..=3), applied before mirroring.
+    pub fn set_rotation(&mut self, angle: u8) -> &mut Self { self.rotation = Some(angle); self }
+    /// Mirror after rotation: 0 exchanges top/bottom, 1 exchanges left/right.
+    pub fn set_mirror(&mut self, axis: u8) -> &mut Self { self.mirror = Some(axis); self }
     /// Embed an ICC profile in both the color sample entry and poster.
     pub fn set_icc_profile(&mut self, icc: Vec<u8>) -> &mut Self { self.icc = Some(icc); self }
     /// Embed Exif in the color track and poster. Accepts TIFF bytes or an
@@ -125,6 +133,9 @@ impl AnimatedImage {
     pub fn try_serialize(&self, width: u32, height: u32, frames: &[AnimFrame<'_>],
                          color_seq_header: &[u8], alpha_seq_header: Option<&[u8]>) -> crate::Result<Vec<u8>> {
         let invalid = |message| whereat::at!(crate::SerializeError::InvalidInput(message));
+        if self.rotation.is_some_and(|r| r > 3) || self.mirror.is_some_and(|m| m > 1) {
+            return Err(invalid("rotation must be 0..=3 and mirror axis must be 0..=1"));
+        }
         if self.pixel_aspect_ratio.is_some_and(|p| p.h_spacing == 0 || p.h_spacing != p.v_spacing) {
             return Err(invalid("AVIF pixel aspect ratio must be positive and 1:1"));
         }
@@ -496,6 +507,7 @@ fn write_track(
                         end_box(out, auxi);
                     } else {
                         metadata::write_color_properties(out, options);
+                        metadata::write_transform_properties(out, options);
                     }
 
 
@@ -684,6 +696,27 @@ fn fixed_16_16_saturating(value: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn animation_orientation_roundtrip_and_validation() {
+        let frames = [AnimFrame::new(b"frame", 1).with_sync(true)];
+        for rotation in [None, Some(0), Some(1), Some(2), Some(3)] {
+            for mirror in [None, Some(0), Some(1)] {
+                let mut image = AnimatedImage::new();
+                if let Some(r) = rotation { image.set_rotation(r); }
+                if let Some(m) = mirror { image.set_mirror(m); }
+                let bytes = image.try_serialize(64, 80, &frames, b"header", None).unwrap();
+                let parsed = zenavif_parse_current::AvifParser::from_bytes(&bytes).unwrap();
+                assert_eq!(parsed.rotation().map(|r| r.angle), rotation.map(|r| u16::from(r) * 90));
+                assert_eq!(parsed.mirror().map(|m| m.axis), mirror);
+            }
+        }
+        for (r, m) in [(4, 0), (255, 0), (0, 2), (0, 255)] {
+            let mut image = AnimatedImage::new();
+            image.set_rotation(r).set_mirror(m);
+            assert!(image.try_serialize(64, 80, &frames, b"header", None).is_err());
+        }
+    }
 
     #[test]
     fn animation_pixel_aspect_ratio_roundtrip_and_validation() {
