@@ -16,9 +16,9 @@
 //! `mdcv` written container-side.
 //!
 //! This adapter still rejects 12-bit, 4:2:2/4:4:4, identity/RGB, limited
-//! range, gain maps and animation. Upstream has animation and coded-lossless
-//! 8/10-bit color/mono support; those capabilities are not yet exposed by
-//! this adapter's public encoding policy. The quality dial retains QP >= 1
+//! range and gain maps. RGB/RGBA animation at 8/10 bits uses full sequence
+//! headers and independent sync samples, sharing the still pixel-coding path.
+//! Explicit coded-lossless remains unwired; the quality dial retains QP >= 1
 //! (see [`quality_to_qp_gated`]).
 //!
 //! # Quality and speed
@@ -36,6 +36,11 @@
 //! merge's C regression and native-lossless results are recorded in
 //! `rust/benchmarks/main_merge_2026-09-07.md` in zenav1-svt. These are scoped
 //! measurements, not a claim that every C feature or coding case is exact.
+
+mod animation;
+pub(crate) use animation::{
+    encode_animation_rgb8, encode_animation_rgb16, encode_animation_rgba8, encode_animation_rgba16,
+};
 
 use crate::Result;
 use crate::encoder::{EncodeChromaSubsampling, EncodeColorModel, EncodePixelRange};
@@ -357,6 +362,7 @@ fn encode_mono_plane_svt(
     threads: usize,
     color_description: svtav1::entropy::obu::ColorDescription,
     stop: &almost_enough::StopToken,
+    mode: FrameMode,
 ) -> Result<Vec<u8>> {
     let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
     let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
@@ -374,6 +380,7 @@ fn encode_mono_plane_svt(
     // Cooperative cancellation inside the pipeline (SB-cadence polling) —
     // backend-seam obligation 3: a capability the backend accepts must be
     // threaded through in the same change.
+    pipeline = mode.configure(pipeline);
     pipeline.stop = stop.clone();
     // Bounded tile-parallel threading (byte-inert — tiles reassemble in
     // order; inert on today's single-tile frames but wired so a future
@@ -470,6 +477,10 @@ impl Yuv420Planes {
 /// Run one still-frame 4:2:0 colour encode through the zenav1-svt pipeline
 /// at the planes' depth. Returns the TD + sequence header + frame OBU
 /// payload.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "shared color pipeline configuration"
+)]
 fn encode_color_420_svt(
     planes: &Yuv420Planes,
     width: usize,
@@ -478,6 +489,7 @@ fn encode_color_420_svt(
     color_primaries: u8,
     transfer_characteristics: u8,
     stop: &almost_enough::StopToken,
+    mode: FrameMode,
 ) -> Result<Vec<u8>> {
     let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
     let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
@@ -502,6 +514,7 @@ fn encode_color_420_svt(
         // (full) regardless of this flag; kept coherent anyway.
         full_range: true,
     };
+    pipeline = mode.configure(pipeline);
     pipeline.stop = stop.clone();
     // Caller's thread budget (see encode_mono_plane_svt for semantics).
     pipeline.thread_count = config.threads.unwrap_or(0);
@@ -563,41 +576,93 @@ fn build_aviffy(
 
 /// Mux a colour payload (and optional alpha payload) into an AVIF file
 /// with the config's container-level metadata.
-#[expect(clippy::too_many_arguments, reason = "internal mux helper")]
-fn mux_svt(
-    config: &EncoderConfig,
-    color_payload: Vec<u8>,
-    alpha_payload: Option<Vec<u8>>,
+/// Coded pixels shared by still-item and animation-track serialization.
+struct CodedSvtFrame {
+    color: Vec<u8>,
+    alpha: Option<Vec<u8>>,
+    width: u32,
+    height: u32,
+    bit_depth: u8,
+    color_primaries: u8,
+    transfer_characteristics: u8,
+    monochrome: bool,
+}
+
+impl CodedSvtFrame {
+    fn mux_still(self, config: &EncoderConfig) -> Result<EncodedImage> {
+        let mut aviffy = build_aviffy(
+            config,
+            self.color_primaries,
+            self.transfer_characteristics,
+            if self.monochrome {
+                zenavif_serialize::constants::MatrixCoefficients::Unspecified
+            } else {
+                zenavif_serialize::constants::MatrixCoefficients::Bt601
+            },
+            self.monochrome,
+        );
+        aviffy.set_premultiplied_alpha(
+            self.alpha.is_some()
+                && config.alpha_color_mode == crate::EncodeAlphaMode::Premultiplied,
+        );
+        let avif_file = aviffy
+            .try_to_vec(
+                &self.color,
+                self.alpha.as_deref(),
+                self.width,
+                self.height,
+                self.bit_depth,
+            )
+            .map_err(|e| at!(Error::Encode(format!("AVIF serialization failed: {e}"))))?;
+        Ok(EncodedImage {
+            color_byte_size: self.color.len(),
+            alpha_byte_size: self.alpha.as_ref().map_or(0, Vec::len),
+            avif_file,
+        })
+    }
+}
+
+#[derive(Clone, Copy)]
+enum FrameMode {
+    Still,
+    Sequence { framerate: f64 },
+}
+impl FrameMode {
+    fn configure(
+        self,
+        mut pipeline: svtav1::encoder::pipeline::EncodePipeline,
+    ) -> svtav1::encoder::pipeline::EncodePipeline {
+        if let Self::Sequence { framerate } = self {
+            pipeline = pipeline.with_image_sequence();
+            pipeline.rc_config.framerate = framerate;
+        }
+        pipeline
+    }
+}
+
+#[expect(clippy::too_many_arguments, reason = "coded frame construction")]
+fn coded_frame(
+    color: Vec<u8>,
+    alpha: Option<Vec<u8>>,
     width: usize,
     height: usize,
     bit_depth: u8,
     color_primaries: u8,
     transfer_characteristics: u8,
     monochrome: bool,
-) -> Result<EncodedImage> {
-    let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
-    let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
-    // The av1C written here must match the payload's sequence header
-    // (Chrome cross-validates): profile 0, 8- or 10-bit, 4:2:0 (or mono),
-    // full range.
-    let aviffy = build_aviffy(
-        config,
+) -> Result<CodedSvtFrame> {
+    let width = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
+    let height =
+        u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
+    Ok(CodedSvtFrame {
+        color,
+        alpha,
+        width,
+        height,
+        bit_depth,
         color_primaries,
         transfer_characteristics,
-        if monochrome {
-            zenavif_serialize::constants::MatrixCoefficients::Unspecified
-        } else {
-            zenavif_serialize::constants::MatrixCoefficients::Bt601
-        },
         monochrome,
-    );
-    let avif_file = aviffy
-        .try_to_vec(&color_payload, alpha_payload.as_deref(), w, h, bit_depth)
-        .map_err(|e| at!(Error::Encode(format!("AVIF serialization failed: {e}"))))?;
-    Ok(EncodedImage {
-        color_byte_size: color_payload.len(),
-        alpha_byte_size: alpha_payload.map_or(0, |a| a.len()),
-        avif_file,
     })
 }
 
@@ -614,11 +679,12 @@ fn widen_8_to_10(v: u8) -> u16 {
 /// at the seam's phase boundaries (pre-conversion, pre-encode, pre-mux)
 /// AND inside the pipeline itself: the token handed to `pipeline.stop` is
 /// polled at superblock cadence by the encode loops at the pinned rev.
-pub(crate) fn encode_rgb8_svt_rs(
+fn encode_rgb8_frame(
     img: ImgRef<'_, Rgb<u8>>,
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
-) -> Result<EncodedImage> {
+    mode: FrameMode,
+) -> Result<CodedSvtFrame> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
     reject_unsupported_config(config)?;
 
@@ -671,12 +737,12 @@ pub(crate) fn encode_rgb8_svt_rs(
         color_primaries,
         transfer_characteristics,
         &stop,
+        mode,
     )?;
 
     // ---- AVIF container --------------------------------------------------
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    mux_svt(
-        config,
+    coded_frame(
         av1_payload,
         None,
         width,
@@ -702,7 +768,7 @@ fn alpha_color_description() -> svtav1::entropy::obu::ColorDescription {
     }
 }
 
-/// Encode a colour 4:2:0 item plus a Cs400 alpha item and mux both — the
+/// Encode a colour 4:2:0 payload plus a Cs400 alpha payload — the
 /// shared tail of the RGBA entry points. `alpha` is a tight plane at
 /// `bit_depth` (8 or 10).
 fn encode_rgba_planes_svt(
@@ -712,7 +778,8 @@ fn encode_rgba_planes_svt(
     height: usize,
     config: &EncoderConfig,
     stop: &almost_enough::StopToken,
-) -> Result<EncodedImage> {
+    mode: FrameMode,
+) -> Result<CodedSvtFrame> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
     let alpha_qp = quality_to_qp_gated(crate::encoder::effective_alpha_quality(config));
     let preset = speed_to_svt_preset(config.speed);
@@ -728,6 +795,7 @@ fn encode_rgba_planes_svt(
         color_primaries,
         transfer_characteristics,
         stop,
+        mode,
     )?;
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
@@ -741,12 +809,12 @@ fn encode_rgba_planes_svt(
         config.threads.unwrap_or(0),
         alpha_color_description(),
         stop,
+        mode,
     )?;
 
     // ---- AVIF container (color item + auxl alpha item) -------------------
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    mux_svt(
-        config,
+    coded_frame(
         color_payload,
         Some(alpha_payload),
         width,
@@ -765,17 +833,18 @@ fn encode_rgba_planes_svt(
 /// separate monochrome (Cs400) still and muxed as an `auxl` auxiliary item.
 /// Alpha quality follows the [`crate::EncoderConfig::alpha_quality`]
 /// contract (falls back to the color quality).
-pub(crate) fn encode_rgba8_svt_rs(
+fn encode_rgba8_frame(
     img: ImgRef<'_, rgb::Rgba<u8>>,
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
-) -> Result<EncodedImage> {
+    mode: FrameMode,
+) -> Result<CodedSvtFrame> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
     reject_unsupported_config(config)?;
 
     let width = img.width();
     let height = img.height();
-    // The alpha plane is a Cs400 stream: the stricter mono envelope applies.
+    // The alpha plane is a Cs400 stream with matching depth and dimensions.
     reject_out_of_envelope_dims(width, height, config, true)?;
     let bit_depth = effective_bit_depth(config, false);
     reject_out_of_envelope_depth(bit_depth, config, true)?;
@@ -818,6 +887,7 @@ pub(crate) fn encode_rgba8_svt_rs(
             height,
             config,
             &stop,
+            mode,
         )
     } else {
         let mut alpha = Vec::with_capacity(width * height);
@@ -831,6 +901,7 @@ pub(crate) fn encode_rgba8_svt_rs(
             height,
             config,
             &stop,
+            mode,
         )
     }
 }
@@ -843,11 +914,12 @@ pub(crate) fn encode_rgba8_svt_rs(
 /// 16-bit source and the u16 planes are handed to the port's native
 /// `try_encode_frame_420_hbd`. [`crate::EncodeBitDepth::Eight`] codes an
 /// 8-bit stream from the same conversion.
-pub(crate) fn encode_rgb16_svt_rs(
+fn encode_rgb16_frame(
     img: ImgRef<'_, Rgb<u16>>,
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
-) -> Result<EncodedImage> {
+    mode: FrameMode,
+) -> Result<CodedSvtFrame> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
     reject_unsupported_config(config)?;
 
@@ -873,11 +945,11 @@ pub(crate) fn encode_rgb16_svt_rs(
         color_primaries,
         transfer_characteristics,
         &stop,
+        mode,
     )?;
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    mux_svt(
-        config,
+    coded_frame(
         av1_payload,
         None,
         width,
@@ -892,11 +964,12 @@ pub(crate) fn encode_rgb16_svt_rs(
 /// Encode a 16-bit RGBA image to a 10-bit AVIF via the zenav1-svt backend
 /// (issue #33): colour as [`encode_rgb16_svt_rs`], the alpha plane scaled
 /// to 10 bits (`scale_from_u16`) as a Cs400 `auxl` item at every speed.
-pub(crate) fn encode_rgba16_svt_rs(
+fn encode_rgba16_frame(
     img: ImgRef<'_, rgb::Rgba<u16>>,
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
-) -> Result<EncodedImage> {
+    mode: FrameMode,
+) -> Result<CodedSvtFrame> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
     reject_unsupported_config(config)?;
 
@@ -920,6 +993,7 @@ pub(crate) fn encode_rgba16_svt_rs(
             height,
             config,
             &stop,
+            mode,
         )
     } else {
         let mut alpha = Vec::with_capacity(width * height);
@@ -936,6 +1010,7 @@ pub(crate) fn encode_rgba16_svt_rs(
             height,
             config,
             &stop,
+            mode,
         )
     }
 }
@@ -945,17 +1020,18 @@ pub(crate) fn encode_rgba16_svt_rs(
 /// uses, muxed as a monochrome color item. [`crate::EncodeBitDepth::Ten`]
 /// widens to a 10-bit Cs400 stream at every speed.
 #[cfg(feature = "encode-mono")]
-pub(crate) fn encode_gray8_svt_rs(
+fn encode_gray8_frame(
     img: ImgRef<'_, u8>,
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
-) -> Result<EncodedImage> {
+    mode: FrameMode,
+) -> Result<CodedSvtFrame> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
     reject_unsupported_config(config)?;
 
     let width = img.width();
     let height = img.height();
-    // Grayscale is a Cs400 stream: the stricter mono envelope applies.
+    // Grayscale uses the shared Cs400 depth and dimension checks.
     reject_out_of_envelope_dims(width, height, config, true)?;
     let bit_depth = effective_bit_depth(config, false);
     reject_out_of_envelope_depth(bit_depth, config, true)?;
@@ -986,6 +1062,7 @@ pub(crate) fn encode_gray8_svt_rs(
             config.threads.unwrap_or(0),
             color_description,
             &stop,
+            mode,
         )?
     } else {
         let mut wide = Vec::with_capacity(width * height);
@@ -1002,12 +1079,12 @@ pub(crate) fn encode_gray8_svt_rs(
             config.threads.unwrap_or(0),
             color_description,
             &stop,
+            mode,
         )?
     };
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    mux_svt(
-        config,
+    coded_frame(
         av1_payload,
         None,
         width,
@@ -1017,6 +1094,47 @@ pub(crate) fn encode_gray8_svt_rs(
         transfer_characteristics,
         true,
     )
+}
+
+pub(crate) fn encode_rgb8_svt_rs(
+    img: ImgRef<'_, Rgb<u8>>,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedImage> {
+    encode_rgb8_frame(img, config, stop, FrameMode::Still)?.mux_still(config)
+}
+
+pub(crate) fn encode_rgba8_svt_rs(
+    img: ImgRef<'_, rgb::Rgba<u8>>,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedImage> {
+    encode_rgba8_frame(img, config, stop, FrameMode::Still)?.mux_still(config)
+}
+
+pub(crate) fn encode_rgb16_svt_rs(
+    img: ImgRef<'_, Rgb<u16>>,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedImage> {
+    encode_rgb16_frame(img, config, stop, FrameMode::Still)?.mux_still(config)
+}
+
+pub(crate) fn encode_rgba16_svt_rs(
+    img: ImgRef<'_, rgb::Rgba<u16>>,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedImage> {
+    encode_rgba16_frame(img, config, stop, FrameMode::Still)?.mux_still(config)
+}
+
+#[cfg(feature = "encode-mono")]
+pub(crate) fn encode_gray8_svt_rs(
+    img: ImgRef<'_, u8>,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedImage> {
+    encode_gray8_frame(img, config, stop, FrameMode::Still)?.mux_still(config)
 }
 
 #[cfg(test)]

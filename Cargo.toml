@@ -626,7 +626,8 @@ two-pass-zensim = ["target-quality", "encode-imazen", "ravif/__expert"]
 #
 # Still color 4:2:0 and Cs400 alpha/gray at 8/10 bits, all public speeds,
 # including odd dimensions and partial superblocks. The quality dial retains
-# QP >= 1; upstream lossless and animation APIs are not yet publicly wired.
+# QP >= 1; explicit lossless remains unwired. RGB/RGBA animation shares the
+# coded-frame path and emits full headers with independent sync samples.
 # See src/encoder_svt_rs.rs and tests/svt_rs_backend.rs for the checked scope.
 zenav1-svt = ["encode", "dep:svtav1", "dep:zenavif-serialize"]
 # DEPRECATED alias for `zenav1-svt`, kept so existing consumers keep building.

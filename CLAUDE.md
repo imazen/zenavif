@@ -192,7 +192,7 @@ TSV diff in the same commit. zenrav1e's halves (`gate-identity`,
 - `(default)` - Pure Rust decode only, safe SIMD via archmage
 - `encode` - AVIF encoding via zenravif
 - `encode-imazen` - Encoding with zenrav1e fork extras (QM, VAQ, still-image, lossless)
-- `zenav1-svt` - EXPERIMENTAL `Av1Backend::Zenav1Svt`, pinned to `4e688a54`: still RGB/RGBA 4:2:0 and grayscale Cs400 at 8/10 bits, including odd and partial dimensions at every public speed. Alpha is a Cs400 `auxl` item. Quality retains QP >= 1; the adapter still rejects explicit lossless and animation despite upstream support. Direct pipeline tests require exact QP-0 mono/native-10 reconstruction. Root archmage/archmage-macros/magetypes patches must match upstream because dependency workspace patches are not inherited. See `src/encoder_svt_rs.rs` and `tests/svt_rs_backend.rs` for current scope.
+- `zenav1-svt` - EXPERIMENTAL `Av1Backend::Zenav1Svt`, pinned to `4e688a54`: still RGB/RGBA 4:2:0 and grayscale Cs400 at 8/10 bits, including odd and partial dimensions at every public speed. Alpha is a Cs400 `auxl` item. RGB/RGBA animation now shares the still pixel-coding path with full sequence headers, independent sync samples and exact millisecond timing at 8/10 bits. Premultiplied input is flagged in still and animated containers. Quality retains QP >= 1; explicit lossless remains unwired. Direct pipeline tests require exact QP-0 mono/native-10 reconstruction. Root archmage/archmage-macros/magetypes patches must match upstream because dependency workspace patches are not inherited. See `src/encoder_svt_rs.rs` and `tests/svt_rs_backend.rs` for current scope.
 - `zenav1-aom` - EXPERIMENTAL `DecodeBackend::Zenav1Aom` — zenav1-aom pure-Rust KEY-frame decoder behind the raw-OBU seam `decode_av1_obu_yuv` (git-rev dep on imazen/zenav1-aom; byte-identical to rav1d-safe on the 8-cell decode corpus; drives `examples/decode_4way_bench.rs`)
 - `zenav1-aom-decode` - additive SYNONYM for `zenav1-aom`, spelled with the crate name. Neither is deprecated; `zenav1-aom` stays canonical.
 - `zenav1-aom-encode` - EXPERIMENTAL `Av1Backend::Zenav1Aom` — zenav1-aom pure-Rust ENCODE backend via `aom_encode::key_frame::encode_key_frame` (git-rev dep on imazen/zenav1-aom at `45c53ddb` — bumped 2026-09-04 from `c3e1b4ab` for the zenavif#45 fix `21544fde`; a NEWER rev than the decode pin because `encode_key_frame` landed after it, and cargo resolves the two as two sources). **KEY-frame / still scope only** — that entry point encodes one frame and has no inter path, so animation is absent from the ENCODER, not merely unwired. Wired: RGB → 4:2:0 BT.601 **limited** range (the port pins `color_range=0`, the OPPOSITE of the svt seam) at **8, 10 or 12 bits** from BOTH `encode_rgb8` and `encode_rgb16` (2026-09-03; `EncodeBitDepth::Twelve` is AV1 profile 2 and was added in the 0.2.0 break), plus 8-bit grayscale → Cs400. Depth conversion is `yuv_convert::rgbx_to_yuv420_u16` — the depth-generic recipe the svt seam already used, quantizing at the OUTPUT depth with the studio swing scaled `<< (d-8)`; the 8-bit-source-at-depth-8 cell keeps the u8 `rgb8_to_yuv420` kernel as conservatism, NOT as the reason 8-bit output is stable — MEASURED (`benchmarks/aom_bd8_identity_2026-09-03.*`): 60/60 cells byte-identical pre-vs-post the wiring, and routing that cell through the u16 recipe instead changes 0/60. Refused by name: animation, alpha (`auxl` item not built, at any depth), **high-bit-depth grayscale** (the Cs400 path passes u8 through as coded luma and there is no measured promotion rule), 4:4:4, 4:2:2, identity/RGB, full range, gain maps, lossless. **Quality 100 = `--cq-level 0` is coded-lossless and gated EXACT** on every coded plane at 8/10/12 bits, both decoders (`aom_cq0_encodes_and_reconstructs_the_coded_planes_exactly`, with `cq0_gate_can_fail_on_a_lossy_encode` as its q99 mutation proof). It panicked in the port before the `45c53ddb` pin (zenavif#45, a `debug_assert` in `count_leaf`'s depth walk — fixed at the root in zenav1-aom `21544fde`); the canary `aom_cq0_still_panics_on_flat_content` that pinned it went red on the bump, as designed, and was retired into the gate. Muxes in-crate via zenavif-serialize. Gate: `tests/aom_encode_backend.rs` (26 tests, mutation proofs are `#[test]`s; the CI `Assert the aom encode gate actually ran` step floors the count at 26). See `src/encoder_aom.rs`.
@@ -297,6 +297,25 @@ backend capability landing:**
    Infallible (trusted → single-`calloc` fast). Expose the choice via the
    backend config and map it from `zencodec::AllocPreference` /
    `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
+
+## Animation integration audit — 2026-09-07 (local work)
+
+The public SVT RGB/RGBA animation entry points were still blanket-refused after
+upstream animation landed. Shared coded-frame production now serves both still
+items and animation tracks without temporary still containers. Sequence mode
+uses full headers and sets the level from the fastest frame interval.
+Premultiplied samples previously lacked the container flag on the SVT still
+path; the new decoded-pixel test reproduced and corrected the omission in
+both paths. Remaining public API work includes repetition/options/exact non-ms
+timing, plus streaming and inter-picture compression.
+
+Required pre-refactor gates found existing zenravif ladder drift before the
+animation implementation: 49 tolerance failures across 27 cells and two new
+monotonicity inversions. Determinism passed 5×5; reference conformance passed
+56/56. The optional armed sibling CLI was absent, so that leg was explicitly
+not run. Preserve `~/tmp/animation-metadata/animation-seam-before-*.log` and
+investigate rather than re-pin envelopes or relax thresholds. Push and CI
+remain deferred while this newly measured baseline failure is unresolved.
 
 ## Known Bugs
 

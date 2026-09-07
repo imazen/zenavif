@@ -251,7 +251,8 @@ pub enum Av1Backend {
     /// supported on all three paths; the container retains the true size.
     /// Upstream C parity and coded-lossless reconstruction are measured by
     /// its scoped gates. This adapter's quality dial retains QP >= 1;
-    /// public lossless and animation wiring remain separate work.
+    /// explicit lossless remains separate work. RGB/RGBA animation uses
+    /// independently coded sync samples at both supported depths.
     /// [`EncoderConfig::validate`] rejects the variant when the feature
     /// is off, and rejects configs outside the supported scope when on.
     Zenav1Svt,
@@ -1188,14 +1189,9 @@ fn reject_svt_rs_backend(config: &EncoderConfig, entry: &'static str) -> Result<
         // "does not support encode_rgb16 (requires the `zenav1-svt` cargo
         // feature)" named the wrong feature entirely. Caught by compiling a
         // real downstream consumer, not by a same-crate test.
-        let hint = if entry == "animation encoding" {
-            ""
-        } else {
-            " (requires the `zenav1-svt` cargo feature)"
-        };
+        let hint = " (requires the `zenav1-svt` cargo feature)";
         return Err(at!(Error::Encode(format!(
             "Av1Backend::Zenav1Svt does not support {entry}{hint} \
-             (RGB/RGBA/grayscale still encodes only); \
              use Av1Backend::Zenravif"
         ))));
     }
@@ -1885,6 +1881,10 @@ pub fn encode_animation_rgb8(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    #[cfg(feature = "zenav1-svt")]
+    if config.backend == Av1Backend::Zenav1Svt {
+        return crate::encoder_svt_rs::encode_animation_rgb8(frames, config, stop);
+    }
     reject_svt_rs_backend(config, "animation encoding")?;
     let enc = build_ravif_encoder(config, stop, false)?;
 
@@ -1924,6 +1924,10 @@ pub fn encode_animation_rgba8(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    #[cfg(feature = "zenav1-svt")]
+    if config.backend == Av1Backend::Zenav1Svt {
+        return crate::encoder_svt_rs::encode_animation_rgba8(frames, config, stop);
+    }
     reject_svt_rs_backend(config, "animation encoding")?;
     let enc = build_ravif_encoder(config, stop, false)?;
 
@@ -1983,6 +1987,10 @@ pub fn encode_animation_rgb16(
 ) -> Result<EncodedAnimation> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    #[cfg(feature = "zenav1-svt")]
+    if config.backend == Av1Backend::Zenav1Svt {
+        return crate::encoder_svt_rs::encode_animation_rgb16(frames, config, stop);
+    }
     reject_svt_rs_backend(config, "animation encoding")?;
     let enc = build_ravif_encoder(config, stop, true)?;
 
@@ -2043,6 +2051,10 @@ pub fn encode_animation_rgba16(
 ) -> Result<EncodedAnimation> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    #[cfg(feature = "zenav1-svt")]
+    if config.backend == Av1Backend::Zenav1Svt {
+        return crate::encoder_svt_rs::encode_animation_rgba16(frames, config, stop);
+    }
     reject_svt_rs_backend(config, "animation encoding")?;
     let enc = build_ravif_encoder(config, stop, true)?;
 

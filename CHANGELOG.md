@@ -12,6 +12,9 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Wire SVT RGB/RGBA animation for 8/16-bit inputs and 8/10-bit output through the native and codec-trait entry points. Share pixel coding with stills, preserve timing/alpha/metadata, emit full sequence headers and derive the level from the fastest frame interval.
+- Correct missing premultiplied-alpha signaling on the SVT still path and carry it into animation, verified against decoded channel values.
+
 - Update the SVT backend to `4e688a54` with matching SIMD dependencies. Enable odd and partial grayscale/alpha dimensions at every speed at 8/10 bits. Replace retired refusal tests with pixel-quality and exact decoded-source checks; keep the public lossy quality policy.
 
 - Legacy `unsafe-asm` decoder: share managed/raw-OBU color-conversion kernels and matrix resolution, correcting high-depth quality and pixel differences. Decode color-grid tiles with shared canvas assembly; retain the explicit alpha-grid limitation.
