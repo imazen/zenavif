@@ -190,6 +190,10 @@ pub struct DecodedFrame {
 /// Metadata about a decoded animation.
 #[derive(Debug, Clone)]
 pub struct DecodedAnimationInfo {
+    /// EXIF TIFF bytes belonging to the color track, independently of the poster.
+    pub exif: Option<Vec<u8>>,
+    /// XMP XML bytes belonging to the color track, independently of the poster.
+    pub xmp: Option<Vec<u8>>,
     /// Static HDR metadata from the color track's sample description.
     pub hdr: AnimationHdrMetadata,
     /// Source spatial properties. Native frames preserve the coded pixel

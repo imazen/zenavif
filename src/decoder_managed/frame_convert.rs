@@ -121,16 +121,8 @@ impl ManagedAvifDecoder {
             pixel_aspect_ratio: spatial.pixel_aspect_ratio,
             content_light_level: self.parser.content_light_level().cloned(),
             mastering_display: self.parser.mastering_display().cloned(),
-            exif: self
-                .parser
-                .exif()
-                .and_then(|r| r.ok())
-                .map(|c| c.into_owned()),
-            xmp: self
-                .parser
-                .xmp()
-                .and_then(|r| r.ok())
-                .map(|c| c.into_owned()),
+            exif: self.exif_for(source)?,
+            xmp: self.xmp_for(source)?,
             gain_map: self.extract_gain_map(),
             // Depth map extraction requires zenavif-parse > 0.4.0 (not yet published).
             depth_map: None,

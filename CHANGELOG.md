@@ -12,6 +12,9 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Preserve color-track Exif/XMP independently of poster metadata through borrowed/owned parsing, native eager/lazy animation and codec probes/frames. Resolve track-local idat and file extents, honor Exif padding offsets, and distinguish RDF/XML XMP from other MIME items. Malformed animation sidecars now return errors instead of silently disappearing.
+- Retain posterless animation frames and metadata in the deprecated eager parser, which previously returned an empty result. AnimationConfig and DecodedAnimationInfo now expose track Exif/XMP.
+
 - Retain animation-track crop, rotation, mirror and pixel aspect ratio independently of the poster. Native animation APIs expose the original spatial metadata; codec animation output applies exact integer crops before the requested orientation correction. Fractional crops remain unsupported by the pixel-buffer adapter.
 
 - Preserve coexisting ICC and nclx properties independently of box order for poster items and animation tracks. Retain ICC metadata while using nclx for matrix hints and CICP across managed/AOM/legacy decode paths and lightweight probing.

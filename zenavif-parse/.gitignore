@@ -70,3 +70,6 @@ Cargo.toml.original.txt
 *.profraw
 *.profdata
 fuzz-*.log
+
+# Small generated regression fixture; provenance is in the adjacent test.
+!tests/fixtures/track-sidecars.avif

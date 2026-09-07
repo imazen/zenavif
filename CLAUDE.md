@@ -298,6 +298,35 @@ backend capability landing:**
    backend config and map it from `zencodec::AllocPreference` /
    `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
 
+## Animation track Exif/XMP — 2026-09-07 (local)
+
+Track-local meta is now parsed without assuming a primary image. Color-track
+association preserves independent Exif/XMP extents and idat; file-backed metadata
+and Exif padding offsets are supported. Only RDF/XML MIME items count as XMP.
+Parser accessors, native eager/lazy animation info and managed/AOM codec probes/
+frames retain exact track sidecars, including authoritative absence. Malformed
+animation sidecars return errors rather than disappearing. Deprecated eager
+AnimationConfig and conversion retain metadata; read_avif's posterless early
+return is corrected to preserve frames and track properties too.
+
+Executed regressions first failed on missing posterless Exif, then on the eager
+parser discarding the animation. Six layouts test conflicting poster payloads,
+no poster, no track sidecars, non-XMP MIME, file extents and padded Exif. Borrowed/
+owned parsing, both native APIs and both codec backends check exact bytes and
+frame rows. Extent units verify ordering and invalid ranges. Libavif 1.3.0
+independently decodes both frames and exports the exact source Exif/XMP bytes
+into PNG metadata chunks, whose CRCs and bytes are checked independently.
+
+Final all-feature nextest passes 890/890 (nine existing skips), default tests/
+doctests pass 484 (ten existing ignores), and library clippy/scoped formatting
+pass. Determinism and 56 reference conformance cells pass; optional armed CLI
+coverage is unrun. The same 33 byte/quality rows, 16 timing misses and two speed
+inversions remain; these gates precede the final deprecated-eager-only fix.
+See benchmarks/animation_sidecars_2026-09-07.md. Additional metadata forms and
+associations, auxiliary features, track matrices, fractional crops, non-square
+pixel presentation, animation options/timing/mono APIs and video encoding remain
+open. No quality thresholds were changed; push and CI remain deferred.
+
 ## Animation spatial metadata — 2026-09-07 (local)
 
 Sample-entry clap/irot/imir/pasp now survive parser and native animation
@@ -306,7 +335,8 @@ canvas. Codec animation output applies an exact integer crop before orientation
 correction; concrete spatial_metadata() retains the original declarations.
 Fractional apertures/origins still require resampling and return Unsupported
 from the codec adapter. Non-square pixel presentation and tkhd matrices remain
-open, as do track-local Exif/XMP and auxiliary metadata.
+open. The later track-local Exif/XMP correction is recorded above; auxiliary
+metadata remains open.
 
 A failing 65×67 versus 53×49 reproduction now passes all 576 codec frame checks
 and 144 native frame checks across 8/10-bit input, rotations, mirrors, both
@@ -344,8 +374,8 @@ default features, including streaming and posterless cases. Clippy/formatting,
 determinism and 56 reference conformance cells pass; the optional armed CLI
 leg is explicitly unrun. The same 33 byte/quality mismatch rows plus 16 timing
 misses and two speed inversions remain. See `benchmarks/dual_colr_2026-09-07.md`.
-Auxiliary gain-map/depth color-property coexistence and track sidecar
-metadata still require work; subsequent spatial work is recorded above. The full goal remains active; CI is deferred.
+Auxiliary gain-map/depth color-property coexistence still requires work;
+subsequent spatial and track-sidecar corrections are recorded above. The full goal remains active; CI is deferred.
 
 ## Animation color and geometry — 2026-09-07 (local)
 
@@ -365,7 +395,8 @@ for evidence and validation, including final eager-convenience routing checks.
 The ladder retains the same 33 byte/quality rows plus 15 timing misses; the same
 two speed inversions persist. No envelope has been re-pinned.
 The subsequent sample-entry spatial correction is recorded above. Track-local
-Exif/XMP association and source-encoding provenance still require auditing.
+Exif/XMP is corrected above; additional associations and source-encoding
+provenance still require auditing.
 The full goal and quality-envelope investigation remain active. CI is deferred.
 
 ## Track metadata versus poster — 2026-09-07 (local)

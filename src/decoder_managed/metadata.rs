@@ -70,6 +70,28 @@ impl ManagedAvifDecoder {
         (primaries, transfer, icc)
     }
 
+    pub(super) fn exif_for(&self, source: MetadataSource) -> Result<Option<Vec<u8>>> {
+        let value = match source {
+            MetadataSource::Primary => self.parser.exif(),
+            MetadataSource::Animation => self.parser.animation_exif(),
+        };
+        value
+            .transpose()
+            .map(|v| v.map(|v| v.into_owned()))
+            .map_err(|e| e.map_error(Error::Parse))
+    }
+
+    pub(super) fn xmp_for(&self, source: MetadataSource) -> Result<Option<Vec<u8>>> {
+        let value = match source {
+            MetadataSource::Primary => self.parser.xmp(),
+            MetadataSource::Animation => self.parser.animation_xmp(),
+        };
+        value
+            .transpose()
+            .map(|v| v.map(|v| v.into_owned()))
+            .map_err(|e| e.map_error(Error::Parse))
+    }
+
     pub(super) fn spatial_for(&self, source: MetadataSource) -> crate::AnimationSpatialMetadata {
         match source {
             MetadataSource::Primary => crate::AnimationSpatialMetadata {
@@ -354,16 +376,8 @@ impl ManagedAvifDecoder {
             pixel_aspect_ratio: track.spatial.pixel_aspect_ratio,
             content_light_level: track.hdr.content_light_level,
             mastering_display: track.hdr.mastering_display,
-            exif: self
-                .parser
-                .exif()
-                .and_then(|r| r.ok())
-                .map(|c| c.into_owned()),
-            xmp: self
-                .parser
-                .xmp()
-                .and_then(|r| r.ok())
-                .map(|c| c.into_owned()),
+            exif: self.exif_for(source)?,
+            xmp: self.xmp_for(source)?,
             gain_map: self.extract_gain_map(),
             // Depth map extraction requires zenavif-parse > 0.4.0 (not yet published).
             depth_map: None,

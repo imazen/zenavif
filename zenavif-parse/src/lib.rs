@@ -1076,6 +1076,10 @@ pub struct AnimationFrame {
 #[derive(Debug)]
 #[allow(deprecated)]
 pub struct AnimationConfig {
+    /// EXIF TIFF bytes belonging to the color track.
+    pub exif: Option<std::vec::Vec<u8>>,
+    /// XMP XML bytes belonging to the color track.
+    pub xmp: Option<std::vec::Vec<u8>>,
     /// Total number of playbacks (0 = infinite)
     pub loop_count: u64,
     /// Static HDR metadata from the color track.
@@ -1193,6 +1197,13 @@ struct TrackCodecConfig {
     spatial: AnimationSpatialMetadata,
 }
 
+#[derive(Debug, Default)]
+struct TrackSidecars {
+    exif: Option<ItemExtents>,
+    xmp: Option<ItemExtents>,
+    idat: Option<TryVec<u8>>,
+}
+
 /// Parsed data from a single track box (`trak`).
 #[derive(Debug)]
 struct ParsedTrack {
@@ -1203,6 +1214,7 @@ struct ParsedTrack {
     references: TryVec<TrackReference>,
     loop_count: u64,
     codec_config: TrackCodecConfig,
+    sidecars: TrackSidecars,
 }
 
 /// Paired color + optional alpha animation data after track association.
@@ -1214,6 +1226,7 @@ struct ParsedAnimationData {
     loop_count: u64,
     color_codec_config: TrackCodecConfig,
     premultiplied_alpha: bool,
+    sidecars: TrackSidecars,
 }
 
 #[cfg(feature = "eager")]
@@ -1560,6 +1573,7 @@ struct MdatBounds {
 }
 
 /// Where an item's data lives: construction method + extent ranges.
+#[derive(Debug)]
 struct ItemExtents {
     construction_method: ConstructionMethod,
     extents: TryVec<ExtentRange>,
@@ -1638,6 +1652,7 @@ struct AnimationParserData {
     loop_count: u64,
     codec_config: TrackCodecConfig,
     premultiplied_alpha: bool,
+    sidecars: TrackSidecars,
 }
 
 /// Animation metadata from [`AvifParser`]
@@ -1786,7 +1801,7 @@ impl<'data> AvifParser<'data> {
                     meta = Some(read_avif_meta(&mut b, &parse_opts)?);
                 }
                 BoxType::MovieBox => {
-                    let tracks = read_moov(&mut b, stop)?;
+                    let tracks = read_moov(&mut b, stop, &parse_opts)?;
                     if !tracks.is_empty() {
                         animation_data = Some(associate_tracks(tracks)?);
                     }
@@ -1830,6 +1845,7 @@ impl<'data> AvifParser<'data> {
                 loop_count: anim.loop_count,
                 codec_config: anim.color_codec_config,
                 premultiplied_alpha: anim.premultiplied_alpha,
+                sidecars: anim.sidecars,
             })
         } else {
             None
@@ -2002,7 +2018,7 @@ impl<'data> AvifParser<'data> {
             };
             if info.item_type == b"Exif" && exif_item.is_none() {
                 exif_item = Some(Self::get_item_extents(&meta, desc_item_id)?);
-            } else if info.item_type == b"mime" && xmp_item.is_none() {
+            } else if info.is_xmp && xmp_item.is_none() {
                 xmp_item = Some(Self::get_item_extents(&meta, desc_item_id)?);
             }
         }
@@ -2290,8 +2306,12 @@ impl<'data> AvifParser<'data> {
     /// Resolve an item's data from the raw buffer, returning `Cow::Borrowed`
     /// for single-extent file items and `Cow::Owned` for multi-extent or idat.
     fn resolve_item(&self, item: &ItemExtents) -> Result<Cow<'_, [u8]>> {
+        self.resolve_item_with_idat(item, self.idat.as_deref())
+    }
+
+    fn resolve_item_with_idat<'a>(&'a self, item: &ItemExtents, idat: Option<&'a [u8]>) -> Result<Cow<'a, [u8]>> {
         match item.construction_method {
-            ConstructionMethod::Idat => self.resolve_idat_extents(&item.extents),
+            ConstructionMethod::Idat => Self::resolve_idat_extents(idat, &item.extents),
             ConstructionMethod::File => self.resolve_file_extents(&item.extents),
             ConstructionMethod::Item => Err(at!(Error::Unsupported("construction_method 'item' not supported"))),
         }
@@ -2347,8 +2367,8 @@ impl<'data> AvifParser<'data> {
     }
 
     /// Resolve idat-based extents.
-    fn resolve_idat_extents(&self, extents: &[ExtentRange]) -> Result<Cow<'_, [u8]>> {
-        let idat_data = self.idat.as_ref()
+    fn resolve_idat_extents<'a>(idat: Option<&'a [u8]>, extents: &[ExtentRange]) -> Result<Cow<'a, [u8]>> {
+        let idat_data = idat
             .ok_or_else(|| at!(Error::InvalidData("idat box missing but construction_method is Idat")))?;
 
         if extents.len() == 1 {
@@ -2356,8 +2376,8 @@ impl<'data> AvifParser<'data> {
             let start = usize::try_from(extent.start()).map_err(|e| at!(Error::from(e)))?;
             let slice = match extent {
                 ExtentRange::WithLength(range) => {
-                    let len = usize::try_from(range.end - range.start).map_err(|e| at!(Error::from(e)))?;
-                    idat_data.get(start..start + len)
+                    let end = usize::try_from(range.end).map_err(|e| at!(Error::from(e)))?;
+                    idat_data.get(start..end)
                         .ok_or_else(|| at!(Error::InvalidData("idat extent out of bounds")))?
                 }
                 ExtentRange::ToEnd(_) => {
@@ -2374,8 +2394,8 @@ impl<'data> AvifParser<'data> {
             let start = usize::try_from(extent.start()).map_err(|e| at!(Error::from(e)))?;
             let slice = match extent {
                 ExtentRange::WithLength(range) => {
-                    let len = usize::try_from(range.end - range.start).map_err(|e| at!(Error::from(e)))?;
-                    idat_data.get(start..start + len)
+                    let end = usize::try_from(range.end).map_err(|e| at!(Error::from(e)))?;
+                    idat_data.get(start..end)
                         .ok_or_else(|| at!(Error::InvalidData("idat extent out of bounds")))?
                 }
                 ExtentRange::ToEnd(_) => {
@@ -2746,22 +2766,39 @@ impl<'data> AvifParser<'data> {
     ///
     /// Returns raw EXIF data (TIFF header onwards), with the 4-byte AVIF offset prefix stripped.
     pub fn exif(&self) -> Option<Result<Cow<'_, [u8]>>> {
-        self.exif_item.as_ref().map(|item| {
-            let raw = self.resolve_item(item)?;
-            // AVIF EXIF items start with a 4-byte big-endian offset to the TIFF header
-            if raw.len() <= 4 {
-                return Err(at!(Error::InvalidData("EXIF item too short")));
+        self.exif_item.as_ref().map(|item| Self::strip_exif(self.resolve_item(item)?))
+    }
+
+    fn strip_exif(raw: Cow<'_, [u8]>) -> Result<Cow<'_, [u8]>> {
+        let prefix = raw.get(..4).ok_or_else(|| at!(Error::InvalidData("EXIF item too short")))?;
+        let offset = usize::try_from(u32::from_be_bytes(prefix.try_into().unwrap()))
+            .map_err(|e| at!(Error::from(e)))?;
+        let start = 4usize.checked_add(offset)
+            .filter(|&n| n < raw.len())
+            .ok_or_else(|| at!(Error::InvalidData("EXIF offset exceeds item size")))?;
+        match raw {
+            Cow::Borrowed(slice) => Ok(Cow::Borrowed(&slice[start..])),
+            Cow::Owned(mut data) => {
+                data.drain(..start);
+                Ok(Cow::Owned(data))
             }
-            let offset = u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]) as usize;
-            let start = 4 + offset;
-            if start >= raw.len() {
-                return Err(at!(Error::InvalidData("EXIF offset exceeds item size")));
-            }
-            match raw {
-                Cow::Borrowed(slice) => Ok(Cow::Borrowed(&slice[start..])),
-                Cow::Owned(vec) => Ok(Cow::Owned(vec[start..].to_vec())),
-            }
-        })
+        }
+    }
+
+    /// EXIF belonging to the color track, independently of the poster.
+    /// Returns TIFF bytes after the AVIF offset prefix and any padding.
+    pub fn animation_exif(&self) -> Option<Result<Cow<'_, [u8]>>> {
+        let sidecars = &self.animation_data.as_ref()?.sidecars;
+        sidecars.exif.as_ref().map(|item| Self::strip_exif(
+            self.resolve_item_with_idat(item, sidecars.idat.as_deref())?
+        ))
+    }
+
+    /// XMP belonging to the color track, independently of the poster.
+    pub fn animation_xmp(&self) -> Option<Result<Cow<'_, [u8]>>> {
+        let sidecars = &self.animation_data.as_ref()?.sidecars;
+        sidecars.xmp.as_ref().map(|item|
+            self.resolve_item_with_idat(item, sidecars.idat.as_deref()))
     }
 
     /// Get XMP metadata for the primary item, if present.
@@ -2920,6 +2957,8 @@ impl<'data> AvifParser<'data> {
                 frames.push(AnimationFrame { data, duration_ms: frame_ref.duration_ms }).map_err(|e| at!(Error::from(e)))?;
             }
             Some(AnimationConfig {
+                exif: self.animation_exif().transpose()?.map(Cow::into_owned),
+                xmp: self.animation_xmp().transpose()?.map(Cow::into_owned),
                 loop_count: info.loop_count,
                 hdr: info.hdr,
                 spatial: info.spatial,
@@ -3101,6 +3140,7 @@ impl MediaDataBox {
 struct ItemInfoEntry {
     item_id: u32,
     item_type: FourCC,
+    is_xmp: bool,
 }
 
 /// See ISO 14496-12:2015 § 8.11.12
@@ -3601,7 +3641,7 @@ pub fn read_avif_with_config<T: Read + ?Sized>(
                 meta = Some(read_avif_meta(&mut b, &parse_opts)?);
             },
             BoxType::MovieBox => {
-                let tracks = read_moov(&mut b, stop)?;
+                let tracks = read_moov(&mut b, stop, &parse_opts)?;
                 if !tracks.is_empty() {
                     animation_data = Some(associate_tracks(tracks)?);
                 }
@@ -3627,10 +3667,28 @@ pub fn read_avif_with_config<T: Read + ?Sized>(
         return Err(at!(Error::InvalidData("missing meta")));
     }
     let Some(meta) = meta else {
-        // Pure sequence: return minimal AvifData with no items
-        return Ok(AvifData {
+        // There is no primary item, but the track still owns frames and metadata.
+        let mut context = AvifData {
+            major_brand,
+            compatible_brands,
             ..Default::default()
-        });
+        };
+        if let Some(anim) = animation_data {
+            context.premultiplied_alpha = anim.premultiplied_alpha;
+            context.av1_config = anim.color_codec_config.av1_config.clone();
+            context.color_info = anim.color_codec_config.color_info.clone();
+            context.nclx_color_info = anim.color_codec_config.nclx_color_info.clone();
+            context.rotation = anim.color_codec_config.spatial.rotation;
+            context.mirror = anim.color_codec_config.spatial.mirror;
+            context.clean_aperture = anim.color_codec_config.spatial.clean_aperture;
+            context.pixel_aspect_ratio = anim.color_codec_config.spatial.pixel_aspect_ratio;
+            context.content_light_level = anim.color_codec_config.hdr.content_light_level;
+            context.mastering_display = anim.color_codec_config.hdr.mastering_display;
+            context.content_colour_volume = anim.color_codec_config.hdr.content_colour_volume;
+            context.ambient_viewing = anim.color_codec_config.hdr.ambient_viewing;
+            extract_animation(anim, &mut mdats, &mut tracker, &mut context)?;
+        }
+        return Ok(context);
     };
 
     // Check if primary item is a grid (tiled image)
@@ -3986,7 +4044,7 @@ fn extract_metadata_sidecars(
                     }
                 }
             }
-        } else if info.item_type == b"mime"
+        } else if info.is_xmp
             && let Some(loc) = meta.iloc_items.iter().find(|l| l.item_id == desc_item_id)
         {
             let mut xmp = TryVec::new();
@@ -4144,6 +4202,23 @@ fn property_for<T>(meta: &AvifInternalMeta, item_id: u32, pick: impl Fn(&ItemPro
         .find_map(|p| pick(&p.property))
 }
 
+#[cfg(feature = "eager")]
+fn resolve_track_sidecar_eager(item: &ItemExtents, sidecars: &TrackSidecars, mdats: &[MediaDataBox]) -> Result<std::vec::Vec<u8>> {
+    match item.construction_method {
+        ConstructionMethod::Idat => Ok(AvifParser::resolve_idat_extents(sidecars.idat.as_deref(), &item.extents)?.into_owned()),
+        ConstructionMethod::File => {
+            let mut bytes = TryVec::new();
+            for extent in &item.extents {
+                let mdat = mdats.iter().find(|mdat| mdat.contains_extent(extent))
+                    .ok_or_else(|| at!(Error::InvalidData("track metadata extent outside mdat")))?;
+                mdat.read_extent(extent, &mut bytes)?;
+            }
+            Ok(bytes.into_iter().collect())
+        }
+        ConstructionMethod::Item => Err(at!(Error::Unsupported("construction_method 'item' not supported"))),
+    }
+}
+
 /// Decode the animation sample table into per-frame buffers + duration. Sample-size count is
 /// validated against the resource budget before extracting; per-frame extraction errors are
 /// logged but do not fail the parse (the still-image branch may still be valid).
@@ -4164,6 +4239,13 @@ fn extract_animation(
             if !frames.is_empty() {
                 log::debug!("Animation: extracted {} frames", frames.len());
                 context.animation = Some(AnimationConfig {
+                    exif: anim.sidecars.exif.as_ref().map(|item|
+                        resolve_track_sidecar_eager(item, &anim.sidecars, mdats)
+                            .and_then(|raw| AvifParser::strip_exif(Cow::Owned(raw)).map(Cow::into_owned))
+                    ).transpose()?,
+                    xmp: anim.sidecars.xmp.as_ref().map(|item|
+                        resolve_track_sidecar_eager(item, &anim.sidecars, mdats)
+                    ).transpose()?,
                     loop_count: anim.loop_count,
                     hdr: anim.color_codec_config.hdr,
                     spatial: anim.color_codec_config.spatial,
@@ -4409,6 +4491,12 @@ fn parse_tone_map_image(data: &[u8]) -> Result<GainMapMetadata> {
 /// an error otherwise.
 /// See ISO 14496-12:2015 § 8.11.1
 fn read_avif_meta<T: Read + Offset>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<AvifInternalMeta> {
+    read_avif_meta_scoped(src, options, true)
+}
+
+// Track-local meta need not identify a primary image; its descriptive items
+// belong to the track. Keep primary-image validation for the top-level meta.
+fn read_avif_meta_scoped<T: Read + Offset>(src: &mut BMFFBox<'_, T>, options: &ParseOptions, require_primary: bool) -> Result<AvifInternalMeta> {
     let version = read_fullbox_version_no_flags(src, options)?;
 
     if version != 0 {
@@ -4472,18 +4560,20 @@ fn read_avif_meta<T: Read + Offset>(src: &mut BMFFBox<'_, T>, options: &ParseOpt
         check_parser_state(&b.head, &b.content)?;
     }
 
-    let primary_item_id = primary_item_id.ok_or_else(|| at!(Error::InvalidData("Required pitm box not present in meta box")))?;
+    let primary_item_id = if require_primary {
+        primary_item_id.ok_or_else(|| at!(Error::InvalidData("Required pitm box not present in meta box")))?
+    } else { primary_item_id.unwrap_or(0) };
 
     let item_infos = item_infos.ok_or_else(|| at!(Error::InvalidData("iinf missing")))?;
 
-    if let Some(item_info) = item_infos.iter().find(|x| x.item_id == primary_item_id) {
-        // Allow both "av01" (standard single-frame) and "grid" (tiled) types
+    if require_primary {
+        let item_info = item_infos.iter().find(|x| x.item_id == primary_item_id)
+            .ok_or_else(|| at!(Error::InvalidData("primary_item_id not present in iinf box")))?;
+        // A top-level primary item must be a coded image or a grid.
         if item_info.item_type != b"av01" && item_info.item_type != b"grid" {
             warn!("primary_item_id type: {}", item_info.item_type);
             return Err(at!(Error::InvalidData("primary_item_id type is not av01 or grid")));
         }
-    } else {
-        return Err(at!(Error::InvalidData("primary_item_id not present in iinf box")));
     }
 
     Ok(AvifInternalMeta {
@@ -4581,10 +4671,22 @@ fn read_infe<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<ItemInfoEntry> {
     let item_type = FourCC::from(be_u32(src)?);
     debug!("infe item_id {item_id} item_type: {item_type}");
 
-    // There are some additional fields here, but they're not of interest to us
-    skip_box_remain(src)?;
+    // MIME items carry a NUL-terminated name and content type. Only RDF/XML
+    // identifies XMP; arbitrary MIME payloads must not become XMP metadata.
+    let mut is_xmp = false;
+    if item_type == b"mime" {
+        let fields = src.read_into_try_vec().map_err(|e| at!(Error::from(e)))?;
+        let name_end = fields.iter().position(|&b| b == 0)
+            .ok_or_else(|| at!(Error::InvalidData("unterminated MIME item name")))?;
+        let content = &fields[name_end + 1..];
+        let end = content.iter().position(|&b| b == 0)
+            .ok_or_else(|| at!(Error::InvalidData("unterminated MIME content type")))?;
+        is_xmp = &content[..end] == b"application/rdf+xml";
+    } else {
+        skip_box_remain(src)?;
+    }
 
-    Ok(ItemInfoEntry { item_id, item_type })
+    Ok(ItemInfoEntry { item_id, item_type, is_xmp })
 }
 
 fn read_iref<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<TryVec<SingleItemTypeReferenceBox>> {
@@ -5682,7 +5784,7 @@ fn repetition_play_count(track_duration: u64, edit: Option<(bool, u64)>) -> Resu
 
 /// Parse animation from moov box.
 /// Returns all parsed tracks.
-fn read_moov<T: Read>(src: &mut BMFFBox<'_, T>, stop: &dyn Stop) -> Result<TryVec<ParsedTrack>> {
+fn read_moov<T: Read + Offset>(src: &mut BMFFBox<'_, T>, stop: &dyn Stop, options: &ParseOptions) -> Result<TryVec<ParsedTrack>> {
     let mut tracks = TryVec::new();
 
     let mut iter = src.box_iter();
@@ -5692,7 +5794,7 @@ fn read_moov<T: Read>(src: &mut BMFFBox<'_, T>, stop: &dyn Stop) -> Result<TryVe
                 let _mvhd = read_mvhd(&mut b)?;
             }
             BoxType::TrackBox => {
-                if let Some(track) = read_trak(&mut b, stop)? {
+                if let Some(track) = read_trak(&mut b, stop, options)? {
                     tracks.push(track).map_err(|e| at!(Error::from(e)))?;
                 }
             }
@@ -5707,7 +5809,8 @@ fn read_moov<T: Read>(src: &mut BMFFBox<'_, T>, stop: &dyn Stop) -> Result<TryVe
 
 /// Parse track box (trak).
 /// Returns a ParsedTrack if this track has a valid sample table.
-fn read_trak<T: Read>(src: &mut BMFFBox<'_, T>, stop: &dyn Stop) -> Result<Option<ParsedTrack>> {
+fn read_trak<T: Read + Offset>(src: &mut BMFFBox<'_, T>, stop: &dyn Stop, options: &ParseOptions) -> Result<Option<ParsedTrack>> {
+    let mut sidecars = None;
     let mut track_id = 0u32;
     let mut references = TryVec::new();
     let mut track_duration = 0u64;
@@ -5716,7 +5819,24 @@ fn read_trak<T: Read>(src: &mut BMFFBox<'_, T>, stop: &dyn Stop) -> Result<Optio
 
     let mut iter = src.box_iter();
     while let Some(mut b) = iter.next_box()? {
+        stop.check().map_err(|e| at!(Error::from(e)))?;
         match b.head.name {
+            BoxType::MetadataBox => {
+                if sidecars.is_some() {
+                    return Err(at!(Error::InvalidData("duplicate track meta box")));
+                }
+                let meta = read_avif_meta_scoped(&mut b, options, false)?;
+                let mut result = TrackSidecars::default();
+                for info in &meta.item_infos {
+                    if info.item_type == b"Exif" && result.exif.is_none() {
+                        result.exif = Some(AvifParser::get_item_extents(&meta, info.item_id)?);
+                    } else if info.is_xmp && result.xmp.is_none() {
+                        result.xmp = Some(AvifParser::get_item_extents(&meta, info.item_id)?);
+                    }
+                }
+                result.idat = meta.idat;
+                sidecars = Some(result);
+            }
             BoxType::TrackHeaderBox => {
                 (track_id, track_duration) = read_tkhd(&mut b)?;
             }
@@ -5752,6 +5872,7 @@ fn read_trak<T: Read>(src: &mut BMFFBox<'_, T>, stop: &dyn Stop) -> Result<Optio
             references,
             loop_count: repetition_play_count(track_duration, edit)?,
             codec_config,
+            sidecars: sidecars.unwrap_or_default(),
         }))
     } else {
         Ok(None)
@@ -5870,6 +5991,7 @@ fn associate_tracks(tracks: TryVec<ParsedTrack>) -> Result<ParsedAnimationData> 
     };
 
     Ok(ParsedAnimationData {
+        sidecars: color_track.sidecars,
         color_timescale: color_track.media_timescale,
         color_codec_config: color_track.codec_config,
         color_sample_table: color_track.sample_table,
@@ -6300,5 +6422,43 @@ mod repetition_tests {
         assert!(repetition_play_count(0, Some((true, 600))).is_err());
         assert_eq!(repetition_play_count(u64::MAX - 1, Some((true, 1))).unwrap(), u64::MAX - 1);
         assert_eq!(repetition_play_count(u64::from(u32::MAX) + 1, Some((true, 1))).unwrap(), 4_294_967_296);
+    }
+}
+
+#[cfg(test)]
+mod sidecar_extent_tests {
+    use super::*;
+
+    #[test]
+    fn idat_extents_check_bounds_and_preserve_order() {
+        let raw = b"abcdefgh";
+        let ordered = [ExtentRange::WithLength(4..6), ExtentRange::WithLength(1..3)];
+        assert_eq!(AvifParser::resolve_idat_extents(Some(raw), &ordered).unwrap().as_ref(), b"efbc");
+        for bad in [ExtentRange::WithLength(7..9), ExtentRange::WithLength(4..3), ExtentRange::ToEnd(u64::MAX..)] {
+            assert!(AvifParser::resolve_idat_extents(Some(raw), &[bad]).is_err());
+        }
+        assert!(AvifParser::resolve_idat_extents(None, &ordered).is_err());
+        assert_eq!(AvifParser::resolve_idat_extents(Some(raw), &[ExtentRange::ToEnd(6..)]).unwrap().as_ref(), b"gh");
+    }
+
+    #[cfg(feature = "eager")]
+    #[test]
+    fn eager_track_metadata_resolves_all_extents_without_poster_idat() {
+        let mut bytes = TryVec::new();
+        bytes.extend_from_slice(b"abcdefgh").unwrap();
+        let sidecars = TrackSidecars { idat: Some(bytes), ..TrackSidecars::default() };
+        let mut extents = TryVec::new();
+        extents.push(ExtentRange::WithLength(4..6)).unwrap();
+        extents.push(ExtentRange::WithLength(1..3)).unwrap();
+        let item = ItemExtents { construction_method: ConstructionMethod::Idat, extents };
+        assert_eq!(resolve_track_sidecar_eager(&item, &sidecars, &[]).unwrap(), b"efbc");
+        let mut bytes = TryVec::new(); bytes.extend_from_slice(b"abcdefgh").unwrap();
+        let mdat = MediaDataBox { offset: 100, data: bytes };
+        let mut extents = TryVec::new();
+        extents.push(ExtentRange::WithLength(104..106)).unwrap();
+        extents.push(ExtentRange::ToEnd(106..)).unwrap();
+        let item = ItemExtents { construction_method: ConstructionMethod::File, extents };
+        assert_eq!(resolve_track_sidecar_eager(&item, &sidecars, &[mdat]).unwrap(), b"efgh");
+        assert!(resolve_track_sidecar_eager(&item, &sidecars, &[]).is_err());
     }
 }
