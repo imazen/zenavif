@@ -3,7 +3,7 @@
 //! Takes pre-encoded AV1 frame data and produces a valid animated AVIF file
 //! with `ftyp(avis) + meta + moov + mdat` structure.
 
-use crate::boxes::{Av1CBox, ClliBox, ColrBox, MdcvBox};
+use crate::boxes::{Av1CBox, ClliBox, ColrBox, MdcvBox, PaspBox};
 #[path = "animated_metadata.rs"]
 mod metadata;
 
@@ -67,6 +67,7 @@ pub struct AnimatedImage {
     colr_raw: Option<(u16, u16, u16, bool)>,
     clli: Option<ClliBox>,
     mdcv: Option<MdcvBox>,
+    pixel_aspect_ratio: Option<PaspBox>,
 }
 
 impl Default for AnimatedImage {
@@ -89,6 +90,7 @@ impl AnimatedImage {
             colr_raw: None,
             clli: None,
             mdcv: None,
+            pixel_aspect_ratio: None,
         }
     }
 
@@ -101,6 +103,12 @@ impl AnimatedImage {
     }
     /// Set additional playbacks explicitly (zero means play once).
     pub fn set_repetition_count(&mut self, count: RepetitionCount) -> &mut Self { self.repetition = count; self }
+    /// Set the horizontal-to-vertical pixel spacing ratio on the color track
+    /// and poster. Both spacings must be positive and equal (AVIF 1.2 section 9.1.2).
+    pub fn set_pixel_aspect_ratio(&mut self, h_spacing: u32, v_spacing: u32) -> &mut Self {
+        self.pixel_aspect_ratio = Some(PaspBox::new(h_spacing, v_spacing));
+        self
+    }
     /// Embed an ICC profile in both the color sample entry and poster.
     pub fn set_icc_profile(&mut self, icc: Vec<u8>) -> &mut Self { self.icc = Some(icc); self }
     /// Embed Exif in the color track and poster. Accepts TIFF bytes or an
@@ -117,6 +125,9 @@ impl AnimatedImage {
     pub fn try_serialize(&self, width: u32, height: u32, frames: &[AnimFrame<'_>],
                          color_seq_header: &[u8], alpha_seq_header: Option<&[u8]>) -> crate::Result<Vec<u8>> {
         let invalid = |message| whereat::at!(crate::SerializeError::InvalidInput(message));
+        if self.pixel_aspect_ratio.is_some_and(|p| p.h_spacing == 0 || p.h_spacing != p.v_spacing) {
+            return Err(invalid("AVIF pixel aspect ratio must be positive and 1:1"));
+        }
         if width == 0 || height == 0 || width > 65535 || height > 65535 {
             return Err(invalid("animation dimensions must fit the visual sample entry"));
         }
@@ -673,6 +684,24 @@ fn fixed_16_16_saturating(value: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn animation_pixel_aspect_ratio_roundtrip_and_validation() {
+        let frames = [AnimFrame::new(b"frame", 1).with_sync(true)];
+        for spacing in [1, 2, u32::MAX] {
+            let mut image = AnimatedImage::new();
+            image.set_pixel_aspect_ratio(spacing, spacing);
+            let bytes = image.try_serialize(64, 64, &frames, b"header", None).unwrap();
+            let parsed = zenavif_parse_current::AvifParser::from_bytes(&bytes).unwrap();
+            let ratio = parsed.pixel_aspect_ratio().unwrap();
+            assert_eq!((ratio.h_spacing, ratio.v_spacing), (spacing, spacing));
+        }
+        for (h, v) in [(0, 0), (0, 1), (1, 0), (2, 1), (1, 2)] {
+            let mut image = AnimatedImage::new();
+            image.set_pixel_aspect_ratio(h, v);
+            assert!(image.try_serialize(64, 64, &frames, b"header", None).is_err());
+        }
+    }
 
     #[test]
     fn repetition_round_trips_with_variable_frame_durations() {

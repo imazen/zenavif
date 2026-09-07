@@ -174,6 +174,11 @@ pub(super) fn write_color_properties(out: &mut Vec<u8>, options: &AnimatedImage)
         out.extend_from_slice(b"prof"); out.extend_from_slice(icc);
         end_box(out, pos); count += 1;
     }
+    if let Some(pasp) = options.pixel_aspect_ratio {
+        let pos = begin_box(out, b"pasp");
+        write_u32(out, pasp.h_spacing); write_u32(out, pasp.v_spacing);
+        end_box(out, pos); count += 1;
+    }
     if let Some(clli) = options.clli.as_ref() { write_clli(out, clli); count += 1; }
     if let Some(mdcv) = options.mdcv.as_ref() { write_mdcv(out, mdcv); count += 1; }
     count
