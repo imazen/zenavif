@@ -1719,6 +1719,8 @@ fn gate_can_fail_on_wrong_content() {
 fn gate_can_fail_on_a_corrupted_payload() {
     let img = gradient_rgb8(64, 64);
     let enc = encode(img.as_ref(), &aom_config().quality(90.0).speed(6));
+    assert_rgb_round_trip(&enc.avif_file, img.as_ref(), 38.0, "control");
+    let control = zenavif::decode(&enc.avif_file).expect("control decode");
     let payload = primary_payload(&enc.avif_file);
     // Find the payload inside the container and flip bits deep in the tile
     // data (well past the headers), then re-search: the mux writes the
@@ -1732,8 +1734,24 @@ fn gate_can_fail_on_a_corrupted_payload() {
     let hit = start + payload.len() - 8;
     broken[hit] ^= 0xFF;
     broken[hit + 1] ^= 0xA5;
-    must_panic("flipping two bytes of coded tile data", || {
-        assert_rgb_round_trip(&broken, img.as_ref(), 38.0, "mutant");
+    // A two-byte mutation can stay above a lossy quality floor (measured
+    // 38.43 dB with the shared conversion kernels). Exact decoded-pixel
+    // comparison must still detect it; quality and integrity are different
+    // assertions, and neither threshold should be adjusted to hide this.
+    must_panic("two-byte mutation against exact decoded control", || {
+        let mutant = zenavif::decode(&broken).expect("mutant decode");
+        assert_eq!(
+            mutant.as_slice().contiguous_bytes(),
+            control.as_slice().contiguous_bytes(),
+            "coded-payload mutation must affect the reconstructed pixels"
+        );
+    });
+    // Damage a larger portion of the coded tail, preserving container and
+    // sequence headers, to prove the unchanged quality gate also goes red.
+    assert!(payload.len() > 32, "mutation must remain past the headers");
+    broken[start + payload.len() - 16..start + payload.len()].fill(0);
+    must_panic("zeroing sixteen bytes of coded tile data", || {
+        assert_rgb_round_trip(&broken, img.as_ref(), 38.0, "damaged tail");
     });
 }
 

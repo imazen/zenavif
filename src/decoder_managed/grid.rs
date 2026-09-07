@@ -123,43 +123,13 @@ impl ManagedAvifDecoder {
         output_width: usize,
         output_height: usize,
     ) -> Result<PixelBuffer> {
-        let descriptor = tile_images[0].descriptor();
-        let bpp = descriptor.bytes_per_pixel();
-        let (tile_w, tile_h) =
-            validate_tile_uniformity(&tile_images, cols, output_width, output_height)?;
-        let alloc_size = output_width
-            .checked_mul(output_height)
-            .and_then(|n| n.checked_mul(bpp))
-            .ok_or_else(|| at!(Error::OutOfMemory))?;
-        // Full grid-stitch canvas, sized from the (untrusted) grid output
-        // dimensions → fallible by default.
-        let data = crate::alloc_util::alloc_filled(self.alloc_pref, true, 0u8, alloc_size)?;
-        let mut output =
-            PixelBuffer::from_vec(data, output_width as u32, output_height as u32, descriptor)
-                .map_err(|_| {
-                    at!(Error::Decode {
-                        code: -1,
-                        msg: "failed to create output buffer for grid stitch",
-                    })
-                })?;
-
-        for (tile_idx, tile) in tile_images.iter().enumerate() {
-            let row = tile_idx / cols;
-            let col = tile_idx % cols;
-            let dst_x = col * tile_w;
-            let dst_y = row * tile_h;
-            stitch_tile_into_buffer(
-                tile,
-                &mut output,
-                dst_x,
-                dst_y,
-                output_width,
-                output_height,
-                bpp,
-            );
-        }
-
-        Ok(output)
+        stitch_tile_images(
+            tile_images,
+            cols,
+            output_width,
+            output_height,
+            self.alloc_pref,
+        )
     }
 
     /// Decode one tile-row of a grid image, returning converted pixel buffers.
@@ -202,6 +172,56 @@ impl ManagedAvifDecoder {
 /// misplaced over earlier tiles or leave zero-filled holes (sweep issue #40).
 /// Tiles must also cover the declared output canvas; larger coverage is the
 /// spec-legal right/bottom-edge crop, clipped per row by the caller.
+/// Shared canvas assembly for managed, AOM and legacy assembly decoding.
+pub(crate) fn stitch_tile_images(
+    tile_images: Vec<PixelBuffer>,
+    cols: usize,
+    output_width: usize,
+    output_height: usize,
+    alloc_pref: crate::alloc_util::AllocPref,
+) -> Result<PixelBuffer> {
+    if tile_images.is_empty() || cols == 0 || tile_images.len() % cols != 0 {
+        return Err(at!(Error::Malformed("invalid grid tile layout")));
+    }
+    let descriptor = tile_images[0].descriptor();
+    let bpp = descriptor.bytes_per_pixel();
+    let (tile_w, tile_h) =
+        validate_tile_uniformity(&tile_images, cols, output_width, output_height)?;
+    let alloc_size = output_width
+        .checked_mul(output_height)
+        .and_then(|n| n.checked_mul(bpp))
+        .ok_or_else(|| at!(Error::OutOfMemory))?;
+    // Full grid-stitch canvas, sized from the (untrusted) grid output
+    // dimensions → fallible by default.
+    let data = crate::alloc_util::alloc_filled(alloc_pref, true, 0u8, alloc_size)?;
+    let mut output =
+        PixelBuffer::from_vec(data, output_width as u32, output_height as u32, descriptor)
+            .map_err(|_| {
+                at!(Error::Decode {
+                    code: -1,
+                    msg: "failed to create output buffer for grid stitch",
+                })
+            })?;
+
+    for (tile_idx, tile) in tile_images.iter().enumerate() {
+        let row = tile_idx / cols;
+        let col = tile_idx % cols;
+        let dst_x = col * tile_w;
+        let dst_y = row * tile_h;
+        stitch_tile_into_buffer(
+            tile,
+            &mut output,
+            dst_x,
+            dst_y,
+            output_width,
+            output_height,
+            bpp,
+        );
+    }
+
+    Ok(output)
+}
+
 fn validate_tile_uniformity(
     tile_images: &[PixelBuffer],
     cols: usize,

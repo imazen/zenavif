@@ -29,7 +29,7 @@ mod aom;
 mod cicp_map;
 mod decoder;
 mod frame_convert;
-mod grid;
+pub(crate) mod grid;
 mod metadata;
 mod plane_convert;
 mod sink;

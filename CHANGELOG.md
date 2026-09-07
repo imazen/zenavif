@@ -12,6 +12,8 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Legacy `unsafe-asm` decoder: share managed/raw-OBU color-conversion kernels and matrix resolution, correcting high-depth quality and pixel differences. Decode color-grid tiles with shared canvas assembly; retain the explicit alpha-grid limitation.
+
 - Legacy `unsafe-asm` decoder: stop polling exhausted AV1 input forever, keep owned packet references alive, and scale high-depth color before attaching alpha to avoid scaling alpha twice.
 
 - Fix the optional `encode_sweep` example's non-exhaustive bit-depth matches; unsupported depths produce an error instead of preventing the all-feature build.

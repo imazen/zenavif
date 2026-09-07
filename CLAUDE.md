@@ -300,6 +300,17 @@ backend capability landing:**
 
 ## Known Bugs
 
+**2026-09-07 — measured optional runtime failures corrected.** Legacy YUV
+conversion now uses the shared kernels and matrix resolver. Color grids
+decode their AV1 tiles and share canvas assembly; alpha grids remain an
+explicit feature gap. The corruption witness now checks exact pixels for
+its original two-byte mutation and retains the original quality threshold
+for a stronger coded-tail mutation. Final workspace all-feature nextest is
+866/866 (nine existing skips); default workspace is 472 passes (ten existing
+ignores); explicit managed/AOM tests are 7/7; all-feature library clippy passes
+with warnings denied. See `benchmarks/legacy_decoder_2026-09-07.md`.
+The following initial-failure notes are historical. CI is still deferred.
+
 **2026-09-07 — optional runtime failures are now measured.** See
 `benchmarks/legacy_decoder_2026-09-07.md`. The legacy `unsafe-asm` wrapper's
 no-frame EAGAIN spin and double-scaled high-depth alpha are corrected, and

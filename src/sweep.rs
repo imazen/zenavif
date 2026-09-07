@@ -2202,7 +2202,8 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
 /// moment that plan landed — so the diagnostic that is supposed to tell
 /// you which plans exist would have told a future reader this one does
 /// not. Callers render their message FROM `names()` instead.
-static PLANS: &[(&str, fn() -> SweepAxes)] = &[
+type PlanFactory = fn() -> SweepAxes;
+static PLANS: &[(&str, PlanFactory)] = &[
     ("rd_core", SweepAxes::rd_core),
     ("modes_full", SweepAxes::modes_full),
     ("modes_full_alpha", SweepAxes::modes_full_alpha),

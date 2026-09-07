@@ -1,5 +1,51 @@
 # Legacy decoder runtime findings — 2026-09-07
 
+## Final conversion and color-grid correction
+
+The legacy decoder now uses the same strip kernels as managed and raw-OBU
+decoding for monochrome, 4:2:0, 4:2:2 and 4:4:4 at 8/10/12 bits, including
+RGBA output. It also uses the shared H.273 resolver, preserving container
+hints and chromaticity-derived coefficients instead of silently treating
+unknown/unsupported matrices as BT.601. Identity remains a separate reorder.
+Output allocation honors the decoder's allocation preference.
+
+Color grids now decode their individual AV1 tiles through the legacy decoder
+and use shared canvas assembly, with output-size limits, tile-count checks
+and cancellation polling. Grid descriptors are no longer sent as raw OBUs.
+Transparent grids remain explicitly unsupported, consistently with the
+managed/AOM paths; implementing alpha-grid stitching is still required.
+
+All 11 focused conversion/quality/parser comparisons passed unchanged.
+The full suite then exposed a fragile mutation witness: the existing two-byte
+corruption decoded at 38.43 dB, above its 38 dB quality floor. The revised
+test preserves those exact flipped bytes and requires exact decoded-pixel
+comparison to detect them. It additionally zeros sixteen coded-tail bytes
+and requires the original 38 dB quality gate to reject that damage. The
+uncorrupted control passes at 44.03 dB. No quality threshold was relaxed.
+
+Final local evidence:
+
+- Workspace all-feature nextest: **866/866**, nine existing skips.
+- Default workspace tests and doctests: **472 passes**, ten existing ignores.
+- Explicit `encode,zenav1-aom` product-path tests without `unsafe-asm`:
+  **7/7**, including animations, grids, alpha and 10-bit comparisons. The
+  earlier `zenav1-aom`-only invocation selected zero tests and is not evidence.
+- All-feature library clippy passes with warnings denied. Two pre-existing
+  lint issues were corrected using a config builder and a sweep factory alias.
+- Scoped formatting and whitespace checks pass.
+
+Logs: `ffi-kernels-focused.log`, `ffi-kernels-grid-nextest.log` (mutation
+witness failure), `ffi-mutation-after.log`, `ffi-kernels-final-nextest.log`,
+`ffi-kernels-default.log`, `ffi-kernels-managed-aom-final.log`, and
+`ffi-kernels-clippy-final.log`, under `~/tmp/animation-metadata/`.
+
+These runs use the canonical manifest's existing backend revisions, including
+SVT `2d75a105`; they do not yet verify integration with the newly merged SVT
+animation branch. CI remains deferred. The broader AVIF/video goal remains
+open, including transparent grids and the other recorded feature gaps.
+
+## Initial findings and drain/alpha correction
+
 The real workspace all-feature nextest run completed 853 tests successfully,
 reported nine assertion/fixture failures, and had three grid tests terminated
 by signals (865 executed tests total, nine existing skips). The outer wrapper
