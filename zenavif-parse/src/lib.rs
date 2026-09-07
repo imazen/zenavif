@@ -1175,6 +1175,7 @@ pub struct AnimationHdrMetadata {
 struct TrackCodecConfig {
     av1_config: Option<AV1Config>,
     color_info: Option<ColorInformation>,
+    nclx_color_info: Option<ColorInformation>,
     hdr: AnimationHdrMetadata,
 }
 
@@ -1261,8 +1262,10 @@ pub struct AvifData {
     /// AV1 codec configuration from the container's `av1C` property.
     pub av1_config: Option<AV1Config>,
 
-    /// Colour information from the container's `colr` property.
+    /// Preferred colour information (ICC when both ICC and nclx are present).
     pub color_info: Option<ColorInformation>,
+    /// Independent nclx parameters, retained even when color_info is ICC.
+    pub nclx_color_info: Option<ColorInformation>,
 
     /// Image rotation from the container's `irot` property.
     pub rotation: Option<ImageRotation>,
@@ -1587,6 +1590,7 @@ pub struct AvifParser<'data> {
     spatial_extents: Option<ImageSpatialExtents>,
     av1_config: Option<AV1Config>,
     color_info: Option<ColorInformation>,
+    nclx_color_info: Option<ColorInformation>,
     rotation: Option<ImageRotation>,
     mirror: Option<ImageMirror>,
     clean_aperture: Option<CleanAperture>,
@@ -1836,6 +1840,7 @@ impl<'data> AvifParser<'data> {
                 spatial_extents: None,
                 av1_config: track_config.av1_config,
                 color_info: track_config.color_info,
+                nclx_color_info: track_config.nclx_color_info,
                 rotation: None,
                 mirror: None,
                 clean_aperture: None,
@@ -2132,7 +2137,7 @@ impl<'data> AvifParser<'data> {
 
         let spatial_extents = find_prop!(ImageSpatialExtents);
         let av1_config = find_prop!(AV1Config);
-        let color_info = find_prop!(ColorInformation);
+        let (color_info, nclx_color_info) = item_color_properties(&meta, meta.primary_item_id);
         let rotation = find_prop!(Rotation);
         let mirror = find_prop!(Mirror);
         let clean_aperture = find_prop!(CleanAperture);
@@ -2177,6 +2182,7 @@ impl<'data> AvifParser<'data> {
             spatial_extents,
             av1_config,
             color_info,
+            nclx_color_info,
             rotation,
             mirror,
             clean_aperture,
@@ -2594,6 +2600,11 @@ impl<'data> AvifParser<'data> {
     // Metadata (no data access)
     // ========================================
 
+    /// nclx parameters of the animation color sample entry, independently of ICC.
+    pub fn animation_nclx_color_info(&self) -> Option<&ColorInformation> {
+        self.animation_data.as_ref()?.codec_config.nclx_color_info.as_ref()
+    }
+
     /// Color property of the animation color sample entry. A missing track
     /// property never inherits the primary poster item's color property.
     pub fn animation_color_info(&self) -> Option<&ColorInformation> {
@@ -2648,11 +2659,13 @@ impl<'data> AvifParser<'data> {
         self.av1_config.as_ref()
     }
 
-    /// Get colour information for the primary item, if present.
-    ///
-    /// This is parsed from the `colr` property box in the container.
-    /// For CICP/nclx values, this is the authoritative source and may
-    /// differ from values in the AV1 bitstream sequence header.
+    /// Get the primary item's nclx property, independently of its ICC profile.
+    /// Returns only the Nclx variant, or None if that property is absent.
+    pub fn nclx_color_info(&self) -> Option<&ColorInformation> {
+        self.nclx_color_info.as_ref()
+    }
+
+    /// Preferred color property: ICC when both ICC and nclx are present.
     pub fn color_info(&self) -> Option<&ColorInformation> {
         self.color_info.as_ref()
     }
@@ -2907,6 +2920,7 @@ impl<'data> AvifParser<'data> {
             animation,
             av1_config: self.av1_config.clone(),
             color_info: self.color_info.clone(),
+            nclx_color_info: self.nclx_color_info.clone(),
             rotation: self.rotation,
             mirror: self.mirror,
             clean_aperture: self.clean_aperture,
@@ -3764,7 +3778,7 @@ pub fn read_avif_with_config<T: Read + ?Sized>(
     }
 
     let av1_config = find_prop!(AV1Config);
-    let color_info = find_prop!(ColorInformation);
+    let (color_info, nclx_color_info) = item_color_properties(&meta, meta.primary_item_id);
     let rotation = find_prop!(Rotation);
     let mirror = find_prop!(Mirror);
     let clean_aperture = find_prop!(CleanAperture);
@@ -3787,6 +3801,7 @@ pub fn read_avif_with_config<T: Read + ?Sized>(
         }),
         av1_config,
         color_info,
+        nclx_color_info,
         rotation,
         mirror,
         clean_aperture,
@@ -4073,6 +4088,32 @@ fn find_depth_aux_item(meta: &AvifInternalMeta, alpha_item_id: Option<u32>) -> O
                     }
             })
         })
+}
+
+// ICC describes the RGB color space. nclx must remain available separately
+// for unspecified AV1 color fields and YUV matrix resolution. Different colr
+// representations must not displace each other when their box order changes.
+fn retain_color_property(preferred: &mut Option<ColorInformation>, nclx: &mut Option<ColorInformation>, value: ColorInformation) {
+    match &value {
+        ColorInformation::Nclx { .. } => {
+            if nclx.is_none() { *nclx = Some(value.clone()); }
+            if preferred.is_none() { *preferred = Some(value); }
+        }
+        ColorInformation::IccProfile(_) => {
+            if !matches!(preferred, Some(ColorInformation::IccProfile(_))) { *preferred = Some(value); }
+        }
+    }
+}
+
+fn item_color_properties(meta: &AvifInternalMeta, item_id: u32) -> (Option<ColorInformation>, Option<ColorInformation>) {
+    let mut preferred = None;
+    let mut nclx = None;
+    for property in meta.properties.iter().filter(|p| p.item_id == item_id) {
+        if let ItemProperty::ColorInformation(color) = &property.property {
+            retain_color_property(&mut preferred, &mut nclx, color.clone());
+        }
+    }
+    (preferred, nclx)
 }
 
 /// Return the first property of the given item that matches `pick`, ignoring properties for
@@ -5408,7 +5449,7 @@ fn read_stsd<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TrackCodecConfig> {
                 BoxType::AmbientViewingEnvironmentBox => { config.hdr.ambient_viewing = Some(read_amve(&mut sub_box)?); }
                 BoxType::ColorInformationBox => {
                     if let Ok(colr) = read_colr(&mut sub_box) {
-                        config.color_info = Some(colr);
+                        retain_color_property(&mut config.color_info, &mut config.nclx_color_info, colr);
                     } else {
                         skip_box_remain(&mut sub_box)?;
                     }

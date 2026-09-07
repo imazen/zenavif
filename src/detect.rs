@@ -164,23 +164,20 @@ pub fn probe(data: &[u8]) -> Result<AvifProbe, ProbeError> {
     let has_alpha = parser.alpha_data().is_some();
     let has_animation = parser.animation_info().is_some();
 
-    // Parse CICP / ICC from colr box
-    let (color_primaries, transfer_characteristics, matrix_coefficients, full_range, has_icc) =
-        match parser.color_info() {
+    // ICC and nclx are independent properties; report both when present.
+    let has_icc = matches!(
+        parser.color_info(),
+        Some(zenavif_parse::ColorInformation::IccProfile(_))
+    );
+    let (color_primaries, transfer_characteristics, matrix_coefficients, full_range) =
+        match parser.nclx_color_info() {
             Some(zenavif_parse::ColorInformation::Nclx {
                 color_primaries: cp,
                 transfer_characteristics: tc,
                 matrix_coefficients: mc,
                 full_range: fr,
-            }) => (
-                Some(*cp as u8),
-                Some(*tc as u8),
-                Some(*mc as u8),
-                Some(*fr),
-                false,
-            ),
-            Some(zenavif_parse::ColorInformation::IccProfile(_)) => (None, None, None, None, true),
-            None => (None, None, None, None, false),
+            }) => (Some(*cp as u8), Some(*tc as u8), Some(*mc as u8), Some(*fr)),
+            _ => (None, None, None, None),
         };
 
     // Parse AV1 bitstream for sequence header + frame header

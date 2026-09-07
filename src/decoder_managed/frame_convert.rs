@@ -20,7 +20,7 @@ use super::plane_convert::{
 use crate::cicp_resolve::ResolvedMatrix;
 use crate::convert::{add_alpha8, add_alpha16, downscale_to_8bit, scale_pixels_to_u16};
 use crate::error::{Error, Result};
-use crate::image::{ChromaSampling, ColorPrimaries, ImageInfo, TransferCharacteristics};
+use crate::image::{ChromaSampling, ImageInfo};
 use enough::Stop;
 use rav1d_safe::src::managed::{Frame, PixelLayout, Planes};
 use whereat::at;
@@ -95,32 +95,11 @@ impl ManagedAvifDecoder {
         let matrix_coefficients = convert_matrix(av1_color.matrix_coefficients);
         let color_range = convert_color_range(av1_color.color_range);
 
-        let (color_primaries, transfer_characteristics, icc_profile) =
-            match self.color_info_for(source) {
-                Some(zenavif_parse::ColorInformation::Nclx {
-                    color_primaries: cp,
-                    transfer_characteristics: tc,
-                    ..
-                }) => (
-                    ColorPrimaries(*cp as u8),
-                    TransferCharacteristics(*tc as u8),
-                    None,
-                ),
-                Some(zenavif_parse::ColorInformation::IccProfile(icc)) => {
-                    // ICC overrides CP and TC for color management, but we
-                    // still populate those fields from AV1 as a fallback
-                    (
-                        convert_color_primaries(av1_color.primaries),
-                        convert_transfer(av1_color.transfer_characteristics),
-                        Some(icc.clone()),
-                    )
-                }
-                None => (
-                    convert_color_primaries(av1_color.primaries),
-                    convert_transfer(av1_color.transfer_characteristics),
-                    None,
-                ),
-            };
+        let (color_primaries, transfer_characteristics, icc_profile) = self.color_fields_for(
+            source,
+            convert_color_primaries(av1_color.primaries),
+            convert_transfer(av1_color.transfer_characteristics),
+        );
 
         let info = ImageInfo {
             width: width as u32,

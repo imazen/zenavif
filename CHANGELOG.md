@@ -12,6 +12,8 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Preserve coexisting ICC and nclx properties independently of box order for poster items and animation tracks. Retain ICC metadata while using nclx for matrix hints and CICP across managed/AOM/legacy decode paths and lightweight probing.
+
 - Derive animation geometry, depth, chroma and CICP/ICC metadata from its color track, and apply frame limits to that track. Correct managed/AOM fallback-matrix selection so a differently tagged poster cannot alter animation pixels.
 - Keep absent poster codec/color properties independent of the animation track, including ICC profiles.
 

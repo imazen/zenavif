@@ -298,6 +298,26 @@ backend capability landing:**
    backend config and map it from `zencodec::AllocPreference` /
    `DecoderConfig.alloc_pref` at the seam — do not hardcode either side.
 
+## Coexisting ICC and nclx — 2026-09-07 (local)
+
+Fixed colr representation loss: primary parsing used the first property and
+track parsing used the last. Both now retain ICC and nclx separately, exposing
+ICC through the existing preferred-color accessor and nclx through dedicated
+accessors. Managed/AOM/legacy YUV conversion uses the retained nclx matrix hint;
+metadata retains the ICC. The lightweight probe reports both. The deprecated
+eager primary parser view also retains nclx independently.
+A dual-property file in both box orders preserves exact metadata and rendered
+rows against a nclx-only control. Discarding nclx in a targeted mutation makes
+the pixel comparison fail. Full all-feature workspace nextest passes 881/881
+(nine existing skips); default workspace passes 476 tests/doctests (ten existing
+ignores). Final expanded focused tests pass 18/18 with all features and 2/2 with
+default features, including streaming and posterless cases. Clippy/formatting,
+determinism and 56 reference conformance cells pass; the optional armed CLI
+leg is explicitly unrun. The same 33 byte/quality mismatch rows plus 16 timing
+misses and two speed inversions remain. See `benchmarks/dual_colr_2026-09-07.md`.
+Auxiliary gain-map/depth color-property coexistence and track spatial/sidecar
+metadata still require work. The full goal remains active; CI is deferred.
+
 ## Animation color and geometry — 2026-09-07 (local)
 
 Corrected track/poster source selection for codec geometry/depth/chroma and

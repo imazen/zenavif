@@ -36,6 +36,40 @@ impl ManagedAvifDecoder {
         }
     }
 
+    pub(super) fn nclx_info_for(
+        &self,
+        source: MetadataSource,
+    ) -> Option<&zenavif_parse::ColorInformation> {
+        match source {
+            MetadataSource::Primary => self.parser.nclx_color_info(),
+            MetadataSource::Animation => self.parser.animation_nclx_color_info(),
+        }
+    }
+
+    pub(super) fn color_fields_for(
+        &self,
+        source: MetadataSource,
+        fallback_primaries: ColorPrimaries,
+        fallback_transfer: TransferCharacteristics,
+    ) -> (ColorPrimaries, TransferCharacteristics, Option<Vec<u8>>) {
+        let (primaries, transfer) = match self.nclx_info_for(source) {
+            Some(zenavif_parse::ColorInformation::Nclx {
+                color_primaries,
+                transfer_characteristics,
+                ..
+            }) => (
+                ColorPrimaries(*color_primaries as u8),
+                TransferCharacteristics(*transfer_characteristics as u8),
+            ),
+            _ => (fallback_primaries, fallback_transfer),
+        };
+        let icc = match self.color_info_for(source) {
+            Some(zenavif_parse::ColorInformation::IccProfile(icc)) => Some(icc.clone()),
+            _ => None,
+        };
+        (primaries, transfer, icc)
+    }
+
     pub(super) fn premultiplied_for(&self, source: MetadataSource) -> bool {
         match source {
             MetadataSource::Primary => self.parser.premultiplied_alpha(),
@@ -73,7 +107,7 @@ impl ManagedAvifDecoder {
         // default is documented disambiguation, not a guess; the
         // honest-error class stays with genuinely unimplemented math
         // (YCgCo/CL/ICtCp/underivable MC=12).
-        let hint = match self.color_info_for(source) {
+        let hint = match self.nclx_info_for(source) {
             Some(zenavif_parse::ColorInformation::Nclx {
                 matrix_coefficients,
                 ..
@@ -100,28 +134,11 @@ impl ManagedAvifDecoder {
         let matrix_coefficients = convert_matrix(av1_color.matrix_coefficients);
         let color_range = convert_color_range(av1_color.color_range);
 
-        let (color_primaries, transfer_characteristics, icc_profile) =
-            match self.parser.color_info() {
-                Some(zenavif_parse::ColorInformation::Nclx {
-                    color_primaries: cp,
-                    transfer_characteristics: tc,
-                    ..
-                }) => (
-                    ColorPrimaries(*cp as u8),
-                    TransferCharacteristics(*tc as u8),
-                    None,
-                ),
-                Some(zenavif_parse::ColorInformation::IccProfile(icc)) => (
-                    convert_color_primaries(av1_color.primaries),
-                    convert_transfer(av1_color.transfer_characteristics),
-                    Some(icc.clone()),
-                ),
-                None => (
-                    convert_color_primaries(av1_color.primaries),
-                    convert_transfer(av1_color.transfer_characteristics),
-                    None,
-                ),
-            };
+        let (color_primaries, transfer_characteristics, icc_profile) = self.color_fields_for(
+            MetadataSource::Primary,
+            convert_color_primaries(av1_color.primaries),
+            convert_transfer(av1_color.transfer_characteristics),
+        );
 
         Ok(ImageInfo {
             width: width as u32,
@@ -191,44 +208,25 @@ impl ManagedAvifDecoder {
         // AV1 config for bit depth
         let bit_depth = self.parser.av1_config().map(|c| c.bit_depth).unwrap_or(8);
 
-        // CICP from container (colr box), otherwise the existing still defaults.
-        let (
-            color_primaries,
-            transfer_characteristics,
-            matrix_coefficients,
-            color_range,
-            icc_profile,
-        ) = match self.parser.color_info() {
+        let (color_primaries, transfer_characteristics, icc_profile) = self.color_fields_for(
+            MetadataSource::Primary,
+            ColorPrimaries::BT709,
+            TransferCharacteristics::SRGB,
+        );
+        let (matrix_coefficients, color_range) = match self.parser.nclx_color_info() {
             Some(zenavif_parse::ColorInformation::Nclx {
-                color_primaries: cp,
-                transfer_characteristics: tc,
-                matrix_coefficients: mc,
+                matrix_coefficients,
                 full_range,
+                ..
             }) => (
-                ColorPrimaries(*cp as u8),
-                TransferCharacteristics(*tc as u8),
-                MatrixCoefficients(*mc as u8),
+                MatrixCoefficients(*matrix_coefficients as u8),
                 if *full_range {
                     ColorRange::Full
                 } else {
                     ColorRange::Limited
                 },
-                None,
             ),
-            Some(zenavif_parse::ColorInformation::IccProfile(icc)) => (
-                ColorPrimaries::BT709,
-                TransferCharacteristics::SRGB,
-                MatrixCoefficients::BT601,
-                ColorRange::Full,
-                Some(icc.clone()),
-            ),
-            None => (
-                ColorPrimaries::BT709,
-                TransferCharacteristics::SRGB,
-                MatrixCoefficients::BT601,
-                ColorRange::Full,
-                None,
-            ),
+            _ => (MatrixCoefficients::BT601, ColorRange::Full),
         };
 
         let chroma_sampling = self
@@ -299,51 +297,16 @@ impl ManagedAvifDecoder {
         let has_alpha = track.has_alpha;
         let bit_depth = meta.bit_depth;
 
-        // CICP from container (colr box) or AV1 sequence-header fallback
-        let (
-            color_primaries,
-            transfer_characteristics,
-            matrix_coefficients,
-            color_range,
-            icc_profile,
-        ) = match self.color_info_for(source) {
-            Some(zenavif_parse::ColorInformation::Nclx {
-                color_primaries: cp,
-                transfer_characteristics: tc,
-                ..
-            }) => (
-                ColorPrimaries(*cp as u8),
-                TransferCharacteristics(*tc as u8),
-                MatrixCoefficients(meta.matrix_coefficients),
-                if meta.full_range {
-                    ColorRange::Full
-                } else {
-                    ColorRange::Limited
-                },
-                None,
-            ),
-            Some(zenavif_parse::ColorInformation::IccProfile(icc)) => (
-                ColorPrimaries(meta.color_primaries),
-                TransferCharacteristics(meta.transfer_characteristics),
-                MatrixCoefficients(meta.matrix_coefficients),
-                if meta.full_range {
-                    ColorRange::Full
-                } else {
-                    ColorRange::Limited
-                },
-                Some(icc.clone()),
-            ),
-            None => (
-                ColorPrimaries(meta.color_primaries),
-                TransferCharacteristics(meta.transfer_characteristics),
-                MatrixCoefficients(meta.matrix_coefficients),
-                if meta.full_range {
-                    ColorRange::Full
-                } else {
-                    ColorRange::Limited
-                },
-                None,
-            ),
+        let (color_primaries, transfer_characteristics, icc_profile) = self.color_fields_for(
+            source,
+            ColorPrimaries(meta.color_primaries),
+            TransferCharacteristics(meta.transfer_characteristics),
+        );
+        let matrix_coefficients = MatrixCoefficients(meta.matrix_coefficients);
+        let color_range = if meta.full_range {
+            ColorRange::Full
+        } else {
+            ColorRange::Limited
         };
 
         let chroma_sampling = if meta.monochrome {

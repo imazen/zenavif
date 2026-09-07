@@ -171,28 +171,12 @@ impl ManagedAvifDecoder {
         } else {
             ColorRange::Limited
         };
-        let (color_primaries, transfer_characteristics, icc_profile) =
-            match self.color_info_for(source) {
-                Some(zenavif_parse::ColorInformation::Nclx {
-                    color_primaries: cp,
-                    transfer_characteristics: tc,
-                    ..
-                }) => (
-                    ColorPrimaries(*cp as u8),
-                    TransferCharacteristics(*tc as u8),
-                    None,
-                ),
-                Some(zenavif_parse::ColorInformation::IccProfile(icc)) => (
-                    ColorPrimaries(fd.color_primaries as u8),
-                    TransferCharacteristics(fd.transfer_characteristics as u8),
-                    Some(icc.clone()),
-                ),
-                None => (
-                    ColorPrimaries(fd.color_primaries as u8),
-                    TransferCharacteristics(fd.transfer_characteristics as u8),
-                    None,
-                ),
-            };
+        let (color_primaries, transfer_characteristics, icc_profile) = self.color_fields_for(
+            source,
+            ColorPrimaries(fd.color_primaries as u8),
+            TransferCharacteristics(fd.transfer_characteristics as u8),
+        );
+
         let info = ImageInfo {
             width: width as u32,
             height: height as u32,

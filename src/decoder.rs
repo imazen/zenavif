@@ -651,6 +651,24 @@ impl AvifDecoder {
                     ChromaSampling::Cs444
                 };
 
+                let (color_primaries, transfer_characteristics) = match parser.nclx_color_info() {
+                    Some(zenavif_parse::ColorInformation::Nclx {
+                        color_primaries,
+                        transfer_characteristics,
+                        ..
+                    }) => (
+                        ColorPrimaries(*color_primaries as u8),
+                        TransferCharacteristics(*transfer_characteristics as u8),
+                    ),
+                    _ => (
+                        ColorPrimaries(metadata.color_primaries),
+                        TransferCharacteristics(metadata.transfer_characteristics),
+                    ),
+                };
+                let icc_profile = match parser.color_info() {
+                    Some(zenavif_parse::ColorInformation::IccProfile(icc)) => Some(icc.clone()),
+                    _ => None,
+                };
                 ImageInfo {
                     width: metadata.max_frame_width.get(),
                     height: metadata.max_frame_height.get(),
@@ -658,13 +676,16 @@ impl AvifDecoder {
                     has_alpha: parser.alpha_data().is_some(),
                     premultiplied_alpha: parser.premultiplied_alpha(),
                     monochrome: metadata.monochrome,
-                    // Color info will be determined from decoded sequence header
-                    color_primaries: ColorPrimaries::default(),
-                    transfer_characteristics: TransferCharacteristics::default(),
-                    matrix_coefficients: MatrixCoefficients::default(),
-                    color_range: ColorRange::default(),
+                    color_primaries,
+                    transfer_characteristics,
+                    matrix_coefficients: MatrixCoefficients(metadata.matrix_coefficients),
+                    color_range: if metadata.full_range {
+                        ColorRange::Full
+                    } else {
+                        ColorRange::Limited
+                    },
                     chroma_sampling,
-                    icc_profile: None,
+                    icc_profile,
                     rotation: None,
                     mirror: None,
                     clean_aperture: None,
@@ -770,7 +791,7 @@ impl AvifDecoder {
             color_primaries,
             matrix_coefficients,
             ..
-        }) = self.parser.color_info()
+        }) = self.parser.nclx_color_info()
         {
             primaries = *color_primaries as u8;
             if crate::cicp_resolve::is_resolvable_hint(*matrix_coefficients as u8) {
