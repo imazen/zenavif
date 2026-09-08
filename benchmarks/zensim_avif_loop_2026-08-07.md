@@ -457,3 +457,40 @@ emitted files are retained under
 Next gate: per-image attained bounds and train-family calibration with actual
 1/2/3 complete-encode accounting, then matched-quality comparisons against a
 strong scalar controller. The August 29 negative RD findings above still stand.
+
+### Shared actual-encode instrument (September 8, after the binding screen)
+
+The existing `zensim_cq_rd` command now has `--native-fit <manifest-root>` and
+`--native-eval <manifest-root> --native-calibration <json>` routes, both with
+`--bake <exact-file> --out-dir <fresh-directory>`. They call the shared Rust
+`zensim-target::native_probe` owner at zensim `8462c824042b`; this example owns
+only the AVIF adapter in `examples/zensim_cq_rd/targeting.rs`. The adapter and
+outer scalar evaluation use the same pinned zensim and predictor sources.
+
+The experiment's configuration is frozen in the adapter: Zenravif, CQ 1..255,
+17 integer knots, speed 6, 444, opaque 8-bit RGB, one encoder thread, bin 8,
+formula revision 1 and the existing zerosum rule (gain 0 neutral / 10 active,
+factor clamp 1.15). Set `ZENSIM_FORMULA_REV=1` and `RAYON_NUM_THREADS=8`. The
+scalar arm computes no maps; neutral computes maps but supplies no non-neutral
+field; active may consume the preceding complete decode's map. First encode
+therefore has zero consumed spatial maps. Every adapter call performs exactly
+one complete encode/decode; no nested encode is hidden inside a shot. All map
+comparisons and the independent terminal decode/score are accounted separately.
+
+Each bound CQ resets state, then uses one scalar encode or three neutral/active
+encodes. The final state is the attained witness; the FIRST state alone fits
+the train-only seed curve. The shared controller receives no per-image bound.
+The 12 train / 8 validation imazen-26 family manifests are the same canonical
+ones used by the September 8 JXL native study. Sparse witness gaps are reported
+as unresolved, not impossible. No universal perceptual tolerance is established.
+
+Pilot passed: origin:2010 training and separate origin:3311 development
+validation; 51 records / 119 complete encodes per bound stage, identical
+first-probe calibration curves across arms, and 54 target cases over three
+jointly witnessed requests. Scalar/neutral hit these three requests by two
+encodes; active needs three. This is instrument evidence, not a population
+performance or spatial RD claim. Six source/calibration rejection controls and
+four analyzer negative controls pass; altered decoded PNG pixels are refused
+before independent judge aggregation. Full artifacts and exact prototype binary
+identity: `/mnt/v/output/zensim/avif-native-target-2026-09-08/`. The full 12/8
+family calibration/evaluation and independent RD judges are the next gate.

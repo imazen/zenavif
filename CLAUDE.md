@@ -1793,3 +1793,10 @@ rule engages but has no demonstrated RD win. `--iters K` costs K+1 full encodes,
 plus a separate three-encode hint probe per process. Terminal verification adds
 one decode/score. This CLI accepts opaque 8-bit RGB/grayscale only; it does not
 qualify production HDR/alpha paths or a replacement model.
+
+The same example's `--native-fit` / `--native-eval` routes now use the pinned
+shared `zensim-target::native_probe` instrument. They count actual complete
+encodes and use the previous reconstruction's map, with 17-point attained
+bounds completed before steering. Seeds fit only first-encode scores from
+canonical train families. See the later shared-instrument addendum in the
+August 7 study document; the one-family pilot is not model qualification.

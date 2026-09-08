@@ -26,6 +26,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
+#[path = "zensim_cq_rd/targeting.rs"]
+mod targeting;
+
 use almost_enough::{StopToken, Unstoppable};
 use rgb::Rgb;
 use zenavif::{DecoderConfig, EncoderConfig, FRAME_HINTS_LIVE, decode_with, encode_rgb8};
@@ -334,6 +337,16 @@ fn emit_from(iterates: Vec<(f64, f64, Vec<u8>)>, emit_best: bool) -> (f64, Vec<u
     }
 }
 
+/// Existing August 29 research redistribution rule, shared by both probe routes.
+fn redistribute_zerosum(sb_scale: &mut [f32], q: &[f64], h3_gain: f32, factor_max: f32) {
+    let mtq = q.iter().sum::<f64>() / q.len() as f64;
+    for (scale, &tq) in sb_scale.iter_mut().zip(q.iter()) {
+        let step = (-(h3_gain as f64) * (tq - mtq)).exp() as f32;
+        let step = step.clamp(1.0 / factor_max, factor_max);
+        *scale = step.clamp(SB_SCALE_MIN, SB_SCALE_MAX);
+    }
+}
+
 /// Controller step shared by both inner arms (the adopted jxl template
 /// mirrored into the quantizer domain, qf ∝ 1/q): g > 1 ⇒ too lossy ⇒
 /// more bits ⇒ LOWER CQ, i.e.
@@ -477,12 +490,7 @@ fn run_inner_cell<'m>(
                 // ZERO-SUM redistribution, recomputed FRESH each iteration:
                 //   s_i = exp(−g·(tq_i − mean(tq))), then clamp. Mean-rate stays
                 // the controller's job; the map only redistributes.
-                let mtq = q.iter().sum::<f64>() / q.len() as f64;
-                for (scale, &tq) in sb_scale.iter_mut().zip(q.iter()) {
-                    let step = (-(h3_gain as f64) * (tq - mtq)).exp() as f32;
-                    let step = step.clamp(1.0 / factor_max, factor_max);
-                    *scale = step.clamp(SB_SCALE_MIN, SB_SCALE_MAX);
-                }
+                redistribute_zerosum(&mut sb_scale, q, h3_gain, factor_max);
             } else {
                 for (scale, &tq) in sb_scale.iter_mut().zip(q.iter()) {
                     let factor = (1.0 + h3_gain * tq as f32).clamp(1.0 / factor_max, factor_max);
@@ -589,6 +597,9 @@ fn main() {
         );
     }
 
+    let mut native_fit = None;
+    let mut native_eval = None;
+    let mut native_calibration = None;
     let mut label = "avif_cq".to_string();
     let mut out_dir = PathBuf::from("/mnt/v/output/zensim/avif-loop-2026-08-07");
     let mut iters: usize = 3;
@@ -599,6 +610,13 @@ fn main() {
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
+            "--native-fit" => native_fit = Some(PathBuf::from(args.next().expect("manifest root"))),
+            "--native-eval" => {
+                native_eval = Some(PathBuf::from(args.next().expect("manifest root")))
+            }
+            "--native-calibration" => {
+                native_calibration = Some(PathBuf::from(args.next().expect("calibration path")))
+            }
             "--label" => label = args.next().expect("--label value"),
             "--out-dir" => out_dir = PathBuf::from(args.next().expect("--out-dir value")),
             "--iters" => {
@@ -624,6 +642,29 @@ fn main() {
             "--bake" => bake = args.next().expect("--bake value"),
             other => panic!("unknown flag {other}"),
         }
+    }
+    if native_fit.is_some() || native_eval.is_some() {
+        assert!(
+            native_fit.is_none() || native_eval.is_none(),
+            "select fit or eval"
+        );
+        let codec = targeting::Avif;
+        let path = std::path::Path::new(&bake);
+        if let Some(root) = native_fit {
+            zensim_target::native_probe::fit(&codec, &root, path, &out_dir).expect("native fit");
+        } else {
+            zensim_target::native_probe::evaluate(
+                &codec,
+                &native_eval.unwrap(),
+                native_calibration
+                    .as_deref()
+                    .expect("--native-calibration required"),
+                path,
+                &out_dir,
+            )
+            .expect("native evaluate");
+        }
+        return;
     }
     assert!(
         !targets.is_empty() && targets.iter().all(|x| x.is_finite()),
