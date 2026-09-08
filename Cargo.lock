@@ -2294,6 +2294,7 @@ dependencies = [
  "zenpixels",
  "zenpixels-convert",
  "zenpredict 0.2.0",
+ "zenpredict 0.2.0 (git+https://github.com/imazen/zenanalyze?rev=05de3cbc44b19d8769077d99710b0146c761d6df)",
  "zenpredict-bake",
  "zenravif",
  "zensim",
@@ -2591,12 +2592,13 @@ dependencies = [
 [[package]]
 name = "zensim"
 version = "0.3.0"
-source = "git+https://github.com/imazen/zensim?branch=main#a390a1822301b628fd42e86153b0a5812be11af5"
+source = "git+https://github.com/imazen/zensim?rev=f99b91eb54f00d976417ba18837870530187befb#f99b91eb54f00d976417ba18837870530187befb"
 dependencies = [
  "archmage",
  "bytemuck",
  "enough",
  "imgref",
+ "libm",
  "linear-srgb",
  "magetypes",
  "rayon",
@@ -2609,7 +2611,7 @@ dependencies = [
 [[package]]
 name = "zensim-regress"
 version = "0.4.0"
-source = "git+https://github.com/imazen/zensim?branch=main#a390a1822301b628fd42e86153b0a5812be11af5"
+source = "git+https://github.com/imazen/zensim?rev=f99b91eb54f00d976417ba18837870530187befb#f99b91eb54f00d976417ba18837870530187befb"
 dependencies = [
  "base64",
  "bytemuck",

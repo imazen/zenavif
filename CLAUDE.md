@@ -1782,3 +1782,14 @@ zenavif is the **only zen codec with a production picker.** `EncoderConfig::auto
 Training intermediates from earlier 2026-05-04 sweep (`benchmarks/zenavif_picker_v0.{3,4,5}_2026-05-04.bin`) are kept for reproducibility; production wires `v0.1.1`.
 
 The training pipeline that produces a new `rav1e_picker_v*.bin` lives in `~/work/zen/zenanalyze/zentrain/` (Python). See `~/work/zen/_ml-inventory-2026-05-20/05-per-codec-pickers.md` for cross-codec picker design.
+
+## Candidate diffmap research binding (2026-09-08)
+
+`examples/zensim_cq_rd.rs` requires exact bake files and serves complete scalar
+and current-reconstruction spatial scores through `zensim::BakeScorer`. Read the
+September 8 addendum in `benchmarks/zensim_avif_loop_2026-08-07.md` before using it:
+legacy gain-10 maps were inert on the training control; the existing zerosum
+rule engages but has no demonstrated RD win. `--iters K` costs K+1 full encodes,
+plus a separate three-encode hint probe per process. Terminal verification adds
+one decode/score. This CLI accepts opaque 8-bit RGB/grayscale only; it does not
+qualify production HDR/alpha paths or a replacement model.

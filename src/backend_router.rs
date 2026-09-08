@@ -4,7 +4,9 @@
 //! wrapper can prepare or mux them. Both layers must accept a candidate.
 //! These queries allocate no image planes and perform no trial encodes.
 
-use crate::{Av1Backend, EncodeChromaSubsampling, EncoderConfig, PlanInput};
+#[cfg(feature = "zenav1-svt")]
+use crate::EncodeChromaSubsampling;
+use crate::{Av1Backend, EncoderConfig, PlanInput};
 #[cfg(feature = "zenav1-svt")]
 pub use svtav1::avif::ZenEnhancement as SvtEnhancement;
 

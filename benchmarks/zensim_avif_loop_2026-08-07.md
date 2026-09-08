@@ -373,3 +373,87 @@ UNREACHABLE on the screen crops on the current substrate** (sc_gui 32.5,
 sc_wiki 20.2, sc_imessage 12.7 err at k3 — achieved floors ~50; either a
 genuine nonphoto low-end reach limit or the substrate regression's other
 face; predates steering).
+
+## September 8 candidate-binding preregistration
+
+Replace the research harness's width probes, profile mounts and seed-only
+sensitivities with a per-command complete `BakeScorer` and current-reconstruction
+attribution. `--bake` accepts exact model files; the historical `profile:c` alias
+is refused with an explicit request for artifact bytes. Production named-profile
+APIs are unaffected. An explicit map bake remains a separate research arm and
+gets its own scorer and reference cache. Unsupported spatial terms and corruption
+gates fail explicitly. The first decoded comparison produces a map for encode 2.
+The existing controller, CQ mapping and SB update rules remain fixed; select
+`Av1Backend::Zenravif` explicitly. The emitted iterate is independently rescored.
+
+First check: one canonical training-family image, fixed CQ (controller exponent
+0), three full encodes, own-map active versus gain-zero, bin 8/speed 6/444/8-bit.
+Require reproducibility and different emitted bytes AND decoded pixels, with
+three recorded map evaluations. This is binding validation, not target/RD
+qualification. Follow with actual bounds and train-only seeds through the shared
+controller after the binding works. No CI wait or unrelated full-suite work.
+
+The first September 8 binding screen failed the active/neutral intervention:
+all 16 positive SB attributions saturate the legacy gain-10 factor at 1.15,
+then mean normalization returns every scale to 1. The native hint probe passes
+but that does not establish model-map engagement. Retain this negative control.
+Next bounded check, on the same origin:2010 training image only: the existing
+`AVIF_ZENSIM_H3_RULE=zerosum`, gain 10, otherwise identical configuration; compare
+neutral and active bytes, decoded pixels and three fresh map records, then repeat
+active for determinism. This selects no validation/test information.
+
+Before extending the target matrix, preserve fractional/negative target identity
+in filenames and TSV rows (the older integer rounding can alias requests), reject
+nonfinite/empty target lists and non-opaque/non-8-bit research input, and append
+terminal verification and full cell wall time to the existing manifest. Keep
+encode, comparison and map counts explicit. These changes affect the research
+CLI only; supported production SDR/HDR/alpha routes are unchanged.
+
+### September 8 result: complete candidate binding works; legacy gain is inert
+
+The repeated origin:2010 screen passes with the existing `zerosum` rule. Both
+scalar and map score use the exact D by-ID packed artifact through `BakeScorer`;
+map iteration 0 feeds the second complete encode. The driver uses the complete
+model's current finite secants, retained feature extraction and reference cache.
+An explicit separate map bake remains a named research control. Unsupported
+spatial IDs and corruption discontinuities are refused.
+
+| Configuration | Decoded D score | Bytes | Encodes | Maps | Scalar comparisons, including terminal |
+|---|---:|---:|---:|---:|---:|
+| Neutral, gain 0 | 79.368 | 18,355 | 3 | 3 | 4 |
+| Legacy mag, gain 10 | 79.368 | 18,355 | 3 | 3 | 4 |
+| Existing zerosum, gain 10 | 80.287 | 19,573 | 3 | 3 | 4 |
+
+Active zerosum repeat is byte-exact and decoded-pixel-exact, with all three maps
+identical. The first map matches neutral; later maps track the changed decoded
+pixels. The default legacy rule's failure is retained: all 16 positive SB map
+values (0.1087..0.8691) exceed its saturation threshold, then renormalize to 1.
+The standalone hint probe adds three small complete encodes per process and is
+reported separately from each three-encode cell. Terminal verification decodes
+and scores the selected bytes again, with no additional encode.
+
+This proves model-map engagement, **not an RD improvement or model qualification**.
+The higher score costs 6.64% more bytes. Cell wall times including terminal
+verification were 1.324 s neutral and 1.269/1.263 s active/repeat; this small fixed
+order screen supports no speed claim. No validation or terminal family was used.
+
+Validation: exact-feature `cargo clippy --locked -p zenavif --features
+encode-imazen,two-pass-butteraugli --example zensim_cq_rd -- -D warnings`; matching
+locked release build; byte/pixel/map repeat and post-reporting-change reproduction;
+six rejection controls (nonfinite, empty, duplicate target, mutable profile alias,
+alpha input, unsupported B spatial terms). No CI wait or unrelated test suite.
+
+Reproduce with the locked release example, the exact D artifact listed in
+`zensim_avif_candidate_binding_2026-09-08.json`, and a one-row `path\t2010\tphoto`
+corpus TSV. Set `ZENSIM_FORMULA_REV=1`, `RAYON_NUM_THREADS=8`,
+`AVIF_ZENSIM_CTRL_EXP=0`, `AVIF_ZENSIM_SEED_CQ=90`,
+`AVIF_ZENSIM_H3_RULE=zerosum`, `AVIF_ZENSIM_H3_GAIN=0` or `10`, and
+`AVIF_ZENSIM_SAVE_AVIF=1`; pass `--zensim-targets 80 --arms h3-mag --iters 2
+--label <unique-label> --out-dir <output>`. A label must be fresh because the
+historical trace owner appends rows. All commands, binaries, rejection logs and
+emitted files are retained under
+`/mnt/v/output/zensim/avif-candidate-binding-2026-09-08/`.
+
+Next gate: per-image attained bounds and train-family calibration with actual
+1/2/3 complete-encode accounting, then matched-quality comparisons against a
+strong scalar controller. The August 29 negative RD findings above still stand.

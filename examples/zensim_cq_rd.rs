@@ -3,8 +3,8 @@
 //! constants, gates, seeds, and the measured smoke:
 //! `benchmarks/zensim_avif_loop_2026-08-07.md`** (appendix AC.4).
 //!
-//! Per cell: seed encode at the registered seed CQ → decode → folded-944
-//! features on (ref, decoded) → mounted-bake forward → the adopted jxl
+//! Per cell: seed encode → independent decode → complete candidate surface
+//! score and current attribution → the adopted jxl
 //! controller (pure proportional, exp 1.0 / per-step clamp 2.0). Arms:
 //! `baseline` (controller only), `h3-mag` (per-64px-SB `query_rect`
 //! magnitude steering via `EncoderConfig::with_sb_q_scale`; PANICS if
@@ -16,7 +16,7 @@
 //!
 //! CLI (mirrors zensim_diffmap_rd): `--corpus-file` (path\tname\tclass
 //! TSV) `--zensim-targets 70,80,88` `--arms baseline,h3-mag|outer`
-//! `--bake <path>|profile:c` `--iters K` `--label L` `--out-dir D`.
+//! `--bake <exact-artifact-path>` `--iters K` `--label L` `--out-dir D`.
 //! `AVIF_ZENSIM_*` env knobs + defaults: the study doc. Outputs:
 //! `target_ab_<label>.tsv` (jxl series schema — readable by
 //! `analyze_23shot.cells_stats`; seed_d → seed_cq) + a per-iteration
@@ -29,11 +29,9 @@ use std::time::Instant;
 use almost_enough::{StopToken, Unstoppable};
 use rgb::Rgb;
 use zenavif::{DecoderConfig, EncoderConfig, FRAME_HINTS_LIVE, decode_with, encode_rgb8};
-// `ZensimProfile::C` and the folded-944 surface come from the plain `zensim`
-// dep, which on this branch is git `main` with `custom-profiles` +
-// `feature-regime-v2` enabled. The renamed `zensim03` alias this file used to
-// need existed only while the main dep was pinned to registry 0.2.4.
-use zensim::{PrecomputedReference, RgbSlice, Zensim, ZensimProfile};
+// Scalar scoring and current spatial maps share the complete candidate surface.
+use zenpredict_serving::Model;
+use zensim::{BakeScorer, PrecomputedReference, RgbSlice};
 
 const SB: usize = 64;
 const CQ_MIN: f64 = 1.0;
@@ -92,121 +90,23 @@ fn cq_to_quality(cq: f64) -> f32 {
     (q * 100.0).clamp(1.0, 100.0) as f32
 }
 
-/// One bake per process (matches the jxl harness' OnceLock contract).
-static BAKE_BYTES: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
-fn bake_bytes() -> &'static [u8] {
-    BAKE_BYTES.get().expect("bake bytes loaded").as_slice()
-}
-static SCORE_PROFILE: std::sync::OnceLock<(ZensimProfile, usize)> = std::sync::OnceLock::new();
-
-/// Smallest-first width probe (the jxl `rd_infer_n_inputs` rule: the
-/// forward accepts any width ≥ the bake's caller width, so the FIRST
-/// accepted width is tight; a PRUNED bake probes at its CALLER width —
-/// the shipped C bake is 944 caller / 667 internal).
-fn probe_caller_width(profile: ZensimProfile) -> usize {
-    let feats = vec![0.0f64; 944];
-    for n in [156usize, 228, 300, 372, 720, 924, 944] {
-        if zensim::score_features_with_profile(profile, &feats[..n], 64, 64).is_ok() {
-            return n;
-        }
-    }
-    0
+/// Exact artifact identity, with no global mount or width inference.
+fn load_model(path: &str) -> Model {
+    assert!(
+        !path.starts_with("profile:"),
+        "pass an exact bake file, not a mutable profile alias"
+    );
+    let bytes = fs::read(path).unwrap_or_else(|e| panic!("bake {path}: {e}"));
+    Model::from_bytes(&bytes).unwrap_or_else(|e| panic!("bake {path}: {e}"))
 }
 
-fn score_profile(bake_arg: &str) -> (ZensimProfile, usize) {
-    *SCORE_PROFILE.get_or_init(|| {
-        let profile = if let Some(name) = bake_arg.strip_prefix("profile:") {
-            match name {
-                "c" => ZensimProfile::C,
-                other => panic!("unsupported judge profile:{other} (only profile:c)"),
-            }
-        } else {
-            let bytes = std::fs::read(bake_arg).unwrap_or_else(|e| panic!("bake {bake_arg}: {e}"));
-            BAKE_BYTES.set(bytes).expect("bake set once");
-            let params = zensim::profile::ProfileParams::builder()
-                .mlp(bake_bytes)
-                .skip_score_mapping(true)
-                .extrapolate_score(true)
-                .extended_features(true)
-                .compute_iw_features(true)
-                .build();
-            let params: &'static zensim::profile::ProfileParams = Box::leak(Box::new(params));
-            ZensimProfile::Custom {
-                params,
-                name: "avif-cq-rd-bake",
-            }
-        };
-        let n_in = probe_caller_width(profile);
-        assert!(
-            n_in != 0,
-            "bake {bake_arg}: forward accepts no probed feature width — refusing \
-             (a silent mount would emit seed-quality bitstreams)"
-        );
-        // Folded-class only (the `--regime 944` known-bug class):
-        assert!(
-            n_in >= 720,
-            "bake {bake_arg}: caller width {n_in} < 720 — folded-944 features \
-             zero f156-371, silently mis-scoring a {n_in}-class bake (zensim \
-             CLAUDE.md known bug); use the jxl-series 372-class route instead"
-        );
-        (profile, n_in)
-    })
-}
-
-/// Split-role STEERING-MAP bake (jxl `JXL_ZENSIM_MAP_BAKE` mirror, 2026-08-29):
-/// `AVIF_ZENSIM_MAP_BAKE=<path>` mounts a SECOND bake whose FD gradient drives
-/// the h3-mag attribution walk while `--bake` keeps scoring. Unset = the
-/// scorer's own gradient (structurally identical path). Same width contract
-/// as the scorer (folded-944 class, loud refusal below 720).
-static MAP_BAKE_BYTES: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
-fn map_bake_bytes() -> &'static [u8] {
-    MAP_BAKE_BYTES
-        .get()
-        .expect("map bake bytes loaded")
-        .as_slice()
-}
-static MAP_BAKE_PROFILE: std::sync::OnceLock<Option<(ZensimProfile, usize)>> =
-    std::sync::OnceLock::new();
-fn map_bake_profile() -> Option<(ZensimProfile, usize)> {
-    *MAP_BAKE_PROFILE.get_or_init(|| {
-        let path = std::env::var("AVIF_ZENSIM_MAP_BAKE").ok()?;
-        let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("map bake {path}: {e}"));
-        MAP_BAKE_BYTES.set(bytes).expect("map bake set once");
-        let params = zensim::profile::ProfileParams::builder()
-            .mlp(map_bake_bytes)
-            .skip_score_mapping(true)
-            .extrapolate_score(true)
-            .extended_features(true)
-            .compute_iw_features(true)
-            .build();
-        let params: &'static zensim::profile::ProfileParams = Box::leak(Box::new(params));
-        let profile = ZensimProfile::Custom { params, name: "avif-cq-rd-map-bake" };
-        let n_in = probe_caller_width(profile);
-        assert!(
-            n_in >= 720,
-            "map bake {path}: caller width {n_in} < 720 — folded-944 class required              (same contract as the scorer)"
-        );
-        eprintln!("[zensim_cq_rd] SPLIT-ROLE: steering map from {path} (caller width {n_in})");
-        Some((profile, n_in))
-    })
-}
-
-/// Map-side profile for extraction + the fused attribution walk (the jxl
-/// `rd_attr_map_profile` shape: no MLP, all basic features, default walk).
-static MAP_PROFILE: std::sync::OnceLock<ZensimProfile> = std::sync::OnceLock::new();
-fn map_profile() -> ZensimProfile {
-    *MAP_PROFILE.get_or_init(|| {
-        let params = zensim::profile::ProfileParams::builder()
-            .skip_score_mapping(true)
-            .extrapolate_score(true)
-            .extended_features(true)
-            .build();
-        let params: &'static zensim::profile::ProfileParams = Box::leak(Box::new(params));
-        ZensimProfile::Custom {
-            params,
-            name: "avif-cq-rd-map",
-        }
-    })
+fn served_score(scorer: &mut BakeScorer<'_>, source: &RgbSlice<'_>, decoded: &RgbSlice<'_>) -> f64 {
+    let score = scorer
+        .compute(source, decoded, Some("avif"))
+        .expect("complete candidate scoring")
+        .score();
+    assert!(score.is_finite(), "nonfinite candidate score");
+    score
 }
 
 fn env_f64(name: &str, default: f64) -> f64 {
@@ -224,9 +124,12 @@ fn env_flag(name: &str) -> bool {
 }
 
 fn load_rgb8(path: &str) -> (Vec<[u8; 3]>, usize, usize) {
-    let img = image::open(path)
-        .unwrap_or_else(|e| panic!("open {path}: {e}"))
-        .to_rgb8();
+    let img = image::open(path).unwrap_or_else(|e| panic!("open {path}: {e}"));
+    assert!(
+        matches!(img.color(), image::ColorType::Rgb8 | image::ColorType::L8),
+        "this research driver requires opaque 8-bit RGB or grayscale input: {path}"
+    );
+    let img = img.to_rgb8();
     let (w, h) = (img.width() as usize, img.height() as usize);
     let px: Vec<[u8; 3]> = img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
     (px, w, h)
@@ -269,6 +172,7 @@ fn base_config(s: &EncodeSettings) -> EncoderConfig {
     // Registered constants (study doc): 4:4:4, 8-bit, single-threaded
     // (deterministic + box-load courtesy).
     EncoderConfig::new()
+        .backend(zenavif::Av1Backend::Zenravif)
         .speed(s.speed)
         .bit_depth(zenavif::EncodeBitDepth::Eight)
         .chroma_subsampling(zenavif::EncodeChromaSubsampling::Yuv444)
@@ -369,6 +273,21 @@ struct TraceCtx<'a> {
 }
 
 impl TraceCtx<'_> {
+    fn map(&self, iter: usize, score: f64, tiles: &[f64]) {
+        use std::io::Write;
+        let path = self.path.with_extension("maps.jsonl");
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .expect("map trace");
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({"trace_id":self.id,"iter":iter,"score":score,"tiles":tiles})
+        )
+        .expect("write map trace");
+    }
     #[allow(clippy::too_many_arguments)]
     fn line(
         &self,
@@ -415,32 +334,6 @@ fn emit_from(iterates: Vec<(f64, f64, Vec<u8>)>, emit_best: bool) -> (f64, Vec<u
     }
 }
 
-/// The mounted bake's forward over caller-width-sized features.
-fn forward(profile: ZensimProfile, n_in: usize, feats: &[f64], w: usize, h: usize) -> f64 {
-    let take = n_in.min(feats.len());
-    zensim::score_features_with_profile(profile, &feats[..take], w as u32, h as u32)
-        .expect("forward failed after a passing mount probe (wiring bug)")
-}
-
-/// Shared per-compare scoring: folded-944 extraction on (ref, decoded) +
-/// the mounted bake's forward, sized by the bake's CALLER width.
-fn folded_score(
-    z: &Zensim,
-    profile: ZensimProfile,
-    n_in: usize,
-    ref_slice: &RgbSlice<'_>,
-    dec_slice: &RgbSlice<'_>,
-    w: usize,
-    h: usize,
-) -> (f64, Vec<f64>) {
-    let v2 = z
-        .compute_folded720_append2_features(ref_slice, dec_slice)
-        .expect("folded-944 extraction failed (loud by design)");
-    let feats = v2.features();
-    let sc = forward(profile, n_in, feats, w, h);
-    (sc, feats[..n_in.min(feats.len())].to_vec())
-}
-
 /// Controller step shared by both inner arms (the adopted jxl template
 /// mirrored into the quantizer domain, qf ∝ 1/q): g > 1 ⇒ too lossy ⇒
 /// more bits ⇒ LOWER CQ, i.e.
@@ -454,10 +347,9 @@ fn controller_step(cq: f64, score: f64, target: f64, exp: f64, clamp: f64) -> f6
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_inner_cell(
-    z: &Zensim,
-    profile: ZensimProfile,
-    n_in: usize,
+fn run_inner_cell<'m>(
+    scorer: &mut BakeScorer<'m>,
+    map_scorer: Option<&mut BakeScorer<'m>>,
     px: &[[u8; 3]],
     w: usize,
     h: usize,
@@ -482,7 +374,7 @@ fn run_inner_cell(
     let sb_rows = h.div_ceil(SB);
     let n_sb = sb_cols * sb_rows;
     let mut sb_scale = vec![1.0f32; n_sb];
-    let mut grad: Option<Vec<f64>> = None;
+    let mut map_scorer = map_scorer;
     let mut session = zensim::Fused944Session::new();
 
     let seed_cq = seed_cq_for_target(target);
@@ -494,9 +386,7 @@ fn run_inner_cell(
 
     for iter in 0..encodes {
         let t_it = Instant::now();
-        // Hints first land on encode 2 (the jxl timeline: the seed
-        // compare derives the gradient, encode 1's compare the first
-        // map; redistribution at iteration i shapes i+1).
+        // Current comparison i supplies hints to complete encode i+1.
         let hints: Option<Box<[f32]>> = if steer && iter > 0 && sb_scale.iter().any(|&v| v != 1.0) {
             Some(sb_scale.clone().into_boxed_slice())
         } else {
@@ -510,63 +400,41 @@ fn run_inner_cell(
         let dec = decode_rgb8(&bytes, w, h);
         let dec_slice = RgbSlice::new(&dec, w, h);
 
-        // Score (+ attribution on steered iterations 1+); iter 0 is
-        // always the plain extraction (the fused entry needs the grad).
         let mut tile_q: Option<Vec<f64>> = None;
-        let score = if let (true, Some(s)) = (steer, grad.as_deref()) {
-            let (_res, v2, attr) = z
-                .compute_folded944_score_and_attribution_binned(
+        let score = if steer {
+            let map_owner = map_scorer.as_deref_mut().unwrap_or(&mut *scorer);
+            let spatial = map_owner
+                .compute_with_ref_and_attribution(
                     &ref_slice,
                     pre,
                     &dec_slice,
-                    s,
+                    Some("avif"),
                     &mut session,
                     attr_bin,
                 )
-                .expect("fused folded-944 compare failed (loud by design)");
-            let sc = forward(profile, n_in, v2.features(), w, h);
-            // Per-64px-SB magnitude signal: query_rect in pixel coords
-            // (bin-exact for 64px rects at bin 8; edges clamp exactly).
+                .expect("complete candidate attribution");
+            assert!(
+                spatial.unsupported_feature_ids().is_empty() && !spatial.has_corruption_gate(),
+                "candidate has unsupported spatial terms or a discontinuous corruption gate: {:?}",
+                spatial.unsupported_feature_ids()
+            );
             let mut q = Vec::with_capacity(n_sb);
             for sby in 0..sb_rows {
                 for sbx in 0..sb_cols {
-                    let x0 = sbx * SB;
-                    let y0 = sby * SB;
-                    q.push(attr.query_rect(x0, y0, x0 + SB, y0 + SB));
+                    let (x, y) = (sbx * SB, sby * SB);
+                    q.push(spatial.attribution().query_rect(x, y, x + SB, y + SB));
                 }
             }
+            assert!(q.iter().all(|v| v.is_finite()), "nonfinite SB attribution");
+            trace.map(iter, spatial.result().score(), &q);
             tile_q = Some(q);
-            sc
-        } else {
-            let (sc, feats) = folded_score(z, profile, n_in, &ref_slice, &dec_slice, w, h);
-            if steer && grad.is_none() {
-                // Split-role: the STEERING gradient comes from the map bake
-                // when mounted; the scorer keeps judging (jxl fd2f4351 mirror).
-                let (gprofile, _gn) = map_bake_profile().unwrap_or((profile, n_in));
-                let s = zensim::score_features_fd_gradient_with_profile(
-                    gprofile, &feats, w as u32, h as u32,
-                )
-                .expect("FD gradient failed");
-                let nonzero = s.iter().filter(|&&g| g != 0.0).count();
-                if nonzero == 0 {
-                    if map_bake_profile().is_some() {
-                        // Split-role amendment (2026-08-29): a mounted MAP bake can
-                        // plateau to a zero FD gradient on flat/screen content (f16
-                        // quantization). Product-realistic fallback: this cell runs
-                        // UNSTEERED (scalar controller only), logged loudly. The
-                        // own-map path keeps the panic — zero gradient there is a
-                        // mount bug, not a content property.
-                        eprintln!(
-                            "[zensim_cq_rd] MAP-BAKE gradient identically zero — cell falls back to UNSTEERED"
-                        );
-                    } else {
-                        panic!("h3-mag gradient identically zero — steering could never engage");
-                    }
-                } else {
-                    grad = Some(s);
-                }
+            if map_scorer.is_some() {
+                served_score(scorer, &ref_slice, &dec_slice)
+            } else {
+                spatial.result().score()
             }
-            sc
+        } else {
+            served_score(scorer, &ref_slice, &dec_slice)
         };
         loop_ms += t_loop.elapsed().as_secs_f64() * 1e3;
 
@@ -644,12 +512,10 @@ fn run_inner_cell(
 
 /// The comparator: zensim-judged CQ BISECTION, one full re-encode per
 /// step. Bracket [1, 255], first probe at the shared seed CQ, integer
-/// midpoints after; judge = the same folded-944 forward.
+/// midpoints after; judge = the same complete candidate surface.
 #[allow(clippy::too_many_arguments)]
 fn run_outer_cell(
-    z: &Zensim,
-    profile: ZensimProfile,
-    n_in: usize,
+    scorer: &mut BakeScorer<'_>,
     px: &[[u8; 3]],
     w: usize,
     h: usize,
@@ -675,7 +541,7 @@ fn run_outer_cell(
         let t_loop = Instant::now();
         let dec = decode_rgb8(&bytes, w, h);
         let dec_slice = RgbSlice::new(&dec, w, h);
-        let (judged, _) = folded_score(z, profile, n_in, &ref_slice, &dec_slice, w, h);
+        let judged = served_score(scorer, &ref_slice, &dec_slice);
         loop_ms += t_loop.elapsed().as_secs_f64() * 1e3;
         let err = (judged - target).abs();
         trace.line(
@@ -744,7 +610,7 @@ fn main() {
                     .next()
                     .expect("--zensim-targets list")
                     .split(',')
-                    .filter_map(|x| x.trim().parse().ok())
+                    .map(|x| x.trim().parse().expect("finite target score"))
                     .collect();
             }
             "--arms" => {
@@ -759,6 +625,16 @@ fn main() {
             other => panic!("unknown flag {other}"),
         }
     }
+    assert!(
+        !targets.is_empty() && targets.iter().all(|x| x.is_finite()),
+        "targets must be nonempty and finite"
+    );
+    assert!(!arms.is_empty(), "at least one arm is required");
+    let mut unique_targets = std::collections::HashSet::new();
+    assert!(
+        targets.iter().all(|t| unique_targets.insert(t.to_string())),
+        "duplicate target score"
+    );
     for arm in &arms {
         assert!(
             matches!(arm.as_str(), "baseline" | "h3-mag" | "outer"),
@@ -775,9 +651,15 @@ fn main() {
         speed: env_f64("AVIF_ZENSIM_SPEED", 6.0) as u8,
         threads: 1,
     };
-    let (profile, n_in) = score_profile(&bake);
-    let z = Zensim::new(map_profile()).with_parallel(false);
-    let encodes = iters + 1;
+    let model = load_model(&bake);
+    let mut scorer = BakeScorer::new(&model).expect("candidate admission");
+    let map_model = std::env::var("AVIF_ZENSIM_MAP_BAKE")
+        .ok()
+        .map(|path| load_model(&path));
+    let mut map_scorer = map_model
+        .as_ref()
+        .map(|m| BakeScorer::new(m).expect("map candidate admission"));
+    let encodes = iters.checked_add(1).expect("encode count overflow");
     let emit_best = env_flag("AVIF_ZENSIM_EMIT_BEST");
 
     let decoded_dir = out_dir.join("decoded");
@@ -787,10 +669,10 @@ fn main() {
     let manifest_path = out_dir.join(format!("target_ab_{label}.tsv"));
     let trace_path = out_dir.join(format!("trace_{label}.tsv"));
     let mut manifest = String::from(
-        "image\tclass\ttarget\tarm\tbake\tseed_cq\tachieved_inloop\titers_used\tachieved_decoded\tabs_err\tbytes\tencode_ms\tloop_ms\tms_per_compare\n",
+        "image\tclass\ttarget\tarm\tbake\tseed_cq\tachieved_inloop\titers_used\tachieved_decoded\tabs_err\tbytes\tencode_ms\tloop_ms\tms_per_compare\tterminal_verify_ms\tcell_total_ms\tscalar_comparisons\tmap_evaluations\n",
     );
     eprintln!(
-        "[zensim_cq_rd] label={label} bake={bake} (caller width {n_in}) corpus={} arms={arms:?} \
+        "[zensim_cq_rd] label={label} bake={bake} (complete candidate surface) corpus={} arms={arms:?} \
          targets={targets:?} encodes/cell={encodes} speed={} FRAME_HINTS_LIVE={FRAME_HINTS_LIVE}",
         corpus.len(),
         settings.speed,
@@ -807,7 +689,9 @@ fn main() {
                 .save(&ref_png)
                 .expect("save ref");
         }
-        let pre = z
+        let pre = map_scorer
+            .as_ref()
+            .unwrap_or(&scorer)
             .precompute_reference(&RgbSlice::new(&px, w, h))
             .expect("precompute reference");
         for &t in &targets {
@@ -819,17 +703,24 @@ fn main() {
                 }
                 let trace = TraceCtx {
                     path: &trace_path,
-                    id: format!("{label}|{name}|{class}|{t:.0}|{arm}"),
+                    id: format!("{label}|{name}|{class}|{t}|{arm}"),
                 };
                 let t_cell = Instant::now();
                 let res = match arm.as_str() {
                     "outer" => run_outer_cell(
-                        &z, profile, n_in, &px, w, h, t, encodes, &settings, &trace, emit_best,
+                        &mut scorer,
+                        &px,
+                        w,
+                        h,
+                        t,
+                        encodes,
+                        &settings,
+                        &trace,
+                        emit_best,
                     ),
                     inner => run_inner_cell(
-                        &z,
-                        profile,
-                        n_in,
+                        &mut scorer,
+                        map_scorer.as_mut(),
                         &px,
                         w,
                         h,
@@ -845,29 +736,45 @@ fn main() {
                 let cell_ms = t_cell.elapsed().as_secs_f64() * 1e3;
                 let err = (res.achieved - t).abs();
                 let ms_per_compare = res.loop_ms / res.iters_used.max(1) as f64;
-                let dist_png = decoded_dir.join(format!("{label}__{name}__t{t:.0}__{arm}.png"));
+                let dist_png = decoded_dir.join(format!("{label}__{name}__t{t}__{arm}.png"));
+                let t_verify = Instant::now();
                 let dec = decode_rgb8(&res.bytes, w, h);
+                let verified = served_score(
+                    &mut scorer,
+                    &RgbSlice::new(&px, w, h),
+                    &RgbSlice::new(&dec, w, h),
+                );
+                assert!(
+                    (verified - res.achieved).abs() <= 1e-8,
+                    "emitted bitstream score mismatch"
+                );
+                let terminal_verify_ms = t_verify.elapsed().as_secs_f64() * 1e3;
+                let cell_total_ms = t_cell.elapsed().as_secs_f64() * 1e3;
+                let scalar_comparisons = res.iters_used
+                    + 1
+                    + usize::from(arm == "h3-mag" && map_scorer.is_some()) * res.iters_used;
+                let map_evaluations = usize::from(arm == "h3-mag") * res.iters_used;
                 let flat: Vec<u8> = dec.iter().flat_map(|p| p.iter().copied()).collect();
                 image::RgbImage::from_raw(w as u32, h as u32, flat)
                     .expect("dec from_raw")
                     .save(&dist_png)
                     .expect("save decoded");
                 if env_flag("AVIF_ZENSIM_SAVE_AVIF") {
-                    let avif = decoded_dir.join(format!("{label}__{name}__t{t:.0}__{arm}.avif"));
+                    let avif = decoded_dir.join(format!("{label}__{name}__t{t}__{arm}.avif"));
                     fs::write(&avif, &res.bytes).expect("save avif");
                 }
                 manifest.push_str(&format!(
-                    "{name}\t{class}\t{t:.0}\t{arm}\t{bake}\t{:.0}\t{:.3}\t{}\t{:.3}\t{err:.3}\t{}\t{:.1}\t{:.1}\t{ms_per_compare:.1}\n",
+                    "{name}\t{class}\t{t}\t{arm}\t{bake}\t{:.0}\t{:.3}\t{}\t{:.3}\t{err:.3}\t{}\t{:.1}\t{:.1}\t{ms_per_compare:.1}\t{terminal_verify_ms:.3}\t{cell_total_ms:.3}\t{scalar_comparisons}\t{map_evaluations}\n",
                     res.seed_cq,
                     res.achieved,
                     res.iters_used,
-                    res.achieved,
+                    verified,
                     res.bytes.len(),
                     res.encode_ms,
                     res.loop_ms,
                 ));
                 eprintln!(
-                    "  [{label}] {name} t={t:.0} {arm}: achieved={:.2} err={err:.2} \
+                    "  [{label}] {name} t={t} {arm}: achieved={:.2} err={err:.2} \
                      encodes={} bytes={} cell={cell_ms:.0}ms",
                     res.achieved,
                     res.iters_used,

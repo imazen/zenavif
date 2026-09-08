@@ -1,0 +1,127 @@
+{
+  "status": "BINDING_VALIDATED_NOT_QUALIFIED",
+  "source": {
+    "path": "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_2010.png.scale205x256.png",
+    "sha256": "fd167d5beaffed69734990ec1e38296beffce21ffde3dd5698a0600ebbe66865",
+    "origin": "2010",
+    "family": "origin:2010",
+    "split": "train",
+    "content_class": "photo"
+  },
+  "model_sha256": "cd1098b450ef6941b6925b24bcbd129715b6f07c4fe84838a92e13ab364ddea6",
+  "zensim_revision": "f99b91eb54f00d976417ba18837870530187befb",
+  "zenpredict_revision": "05de3cbc44b19d8769077d99710b0146c761d6df",
+  "binary": {
+    "path": "/mnt/v/output/zensim/avif-candidate-binding-2026-09-08/bin/zensim_cq_rd-4b4a7e945653",
+    "sha256": "4b4a7e94565322661c41a10461833778fa46ff243ea0c1eec62547e9302afecc"
+  },
+  "config": {
+    "codec": "Zenravif",
+    "speed": 6,
+    "threads": 1,
+    "chroma": "444",
+    "depth": 8,
+    "base_cq": 90,
+    "controller_exponent": 0,
+    "target": 80,
+    "complete_encodes_per_cell": 3,
+    "map_evaluations_per_cell": 3,
+    "scalar_comparisons_per_cell_including_terminal": 4,
+    "standalone_hint_probe_encodes_per_process": 3,
+    "formula_revision": 1,
+    "attribution_bin": 8,
+    "h3_gain": 10,
+    "factor_max": 1.15
+  },
+  "results": {
+    "neutral-zerosum": {
+      "image": "2010",
+      "class": "photo",
+      "target": "80",
+      "arm": "h3-mag",
+      "bake": "/home/lilith/work/zen/zensim/zensim/weights/d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin",
+      "seed_cq": "90",
+      "achieved_inloop": "79.368",
+      "iters_used": "3",
+      "achieved_decoded": "79.368",
+      "abs_err": "0.632",
+      "bytes": "18355",
+      "encode_ms": "1289.2",
+      "loop_ms": "30.8",
+      "ms_per_compare": "10.3",
+      "terminal_verify_ms": "3.406",
+      "cell_total_ms": "1323.549",
+      "scalar_comparisons": "4",
+      "map_evaluations": "3"
+    },
+    "active-zerosum": {
+      "image": "2010",
+      "class": "photo",
+      "target": "80",
+      "arm": "h3-mag",
+      "bake": "/home/lilith/work/zen/zensim/zensim/weights/d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin",
+      "seed_cq": "90",
+      "achieved_inloop": "80.287",
+      "iters_used": "3",
+      "achieved_decoded": "80.287",
+      "abs_err": "0.287",
+      "bytes": "19573",
+      "encode_ms": "1246.9",
+      "loop_ms": "18.3",
+      "ms_per_compare": "6.1",
+      "terminal_verify_ms": "3.405",
+      "cell_total_ms": "1268.695",
+      "scalar_comparisons": "4",
+      "map_evaluations": "3"
+    },
+    "active-repeat-zerosum": {
+      "image": "2010",
+      "class": "photo",
+      "target": "80",
+      "arm": "h3-mag",
+      "bake": "/home/lilith/work/zen/zensim/zensim/weights/d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin",
+      "seed_cq": "90",
+      "achieved_inloop": "80.287",
+      "iters_used": "3",
+      "achieved_decoded": "80.287",
+      "abs_err": "0.287",
+      "bytes": "19573",
+      "encode_ms": "1241.3",
+      "loop_ms": "17.8",
+      "ms_per_compare": "5.9",
+      "terminal_verify_ms": "3.372",
+      "cell_total_ms": "1262.715",
+      "scalar_comparisons": "4",
+      "map_evaluations": "3"
+    }
+  },
+  "intervention": {
+    "neutral": {
+      "avif_sha256": "dab6c2579b35e69da0bbbda144b53f80c5ff985c03f341f564635123c084f491",
+      "pixel_sha256": "2194a71b324092cb6947a15a4c09e55924a84546dd02f6dce9f12f4ed248a9f1"
+    },
+    "active": {
+      "avif_sha256": "6ae472c4bafcac26dd839574c8e42693abce1ec18379f6dc881d69d18f881703",
+      "pixel_sha256": "512d3103f2b2ad278f5fc78d0f4dfff7bea9fce5167bb38e688a59faf76462c7"
+    },
+    "active-repeat": {
+      "avif_sha256": "6ae472c4bafcac26dd839574c8e42693abce1ec18379f6dc881d69d18f881703",
+      "pixel_sha256": "512d3103f2b2ad278f5fc78d0f4dfff7bea9fce5167bb38e688a59faf76462c7"
+    }
+  },
+  "legacy_gain_10": "FAIL: all factors clamp at 1.15; normalization yields all-neutral scale 1",
+  "negative_controls": [
+    "nonfinite",
+    "empty",
+    "duplicate",
+    "alias",
+    "alpha",
+    "unsupported"
+  ],
+  "limits": [
+    "One canonical training family; no validation or terminal holdout used",
+    "Engagement only; added bytes accompany the improved score",
+    "No matched-quality benefit, targeting calibration or competitive model claim",
+    "Driver input is opaque 8-bit RGB/grayscale; production HDR/alpha paths unchanged"
+  ]
+}
