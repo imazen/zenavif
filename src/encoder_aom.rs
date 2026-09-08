@@ -388,7 +388,7 @@ fn cicp_to_serialize_transfer(tc: u8) -> zenavif_serialize::constants::TransferC
 }
 
 /// Build the `aom_encode` config for one still.
-fn key_frame_config(
+pub(crate) fn key_frame_config(
     config: &EncoderConfig,
     width: usize,
     height: usize,

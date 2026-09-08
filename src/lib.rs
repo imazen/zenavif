@@ -67,6 +67,10 @@ pub use auto_tune::{AutoTuneError, AutoTuneOptions, QualityTarget};
 /// docs for the contract and for [`backend_tuner::StubTuner`], the
 /// measured-default implementation a consumer can integrate against
 /// before a bake exists.
+/// Backend-owned configuration support and still-image routing.
+#[cfg(feature = "encode")]
+pub mod backend_router;
+
 #[cfg(all(feature = "auto-tune", feature = "encode"))]
 pub mod backend_tuner;
 #[cfg(all(feature = "auto-tune", feature = "encode"))]

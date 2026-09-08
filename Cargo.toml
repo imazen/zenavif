@@ -749,3 +749,10 @@ required-features = ["encode"]
 # (examples/mem_probe_encode.rs, JXL_ALLOC_SITES=1).
 [profile.release]
 debug = "line-tables-only"
+
+# Temporary local composition while backend-owned support APIs are validated.
+# Replace with verified Git pins before publishing this routing change.
+[patch."https://github.com/imazen/zenav1-svt"]
+zenav1-svt = { path = "../zenav1-svt/rust/svtav1" }
+[patch."https://github.com/imazen/zenav1-aom"]
+zenav1-aom-encode = { path = "../zenav1-aom/crates/aom-encode" }
