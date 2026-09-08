@@ -26,7 +26,10 @@
 //!   ([`crate::encoder::encode_rgb16`]) entry points. See "Colour signalling"
 //!   below for why the range is not full, and "Bit depth" for how the depth is
 //!   chosen.
-//! * 8-bit grayscale -> true monochrome (Cs400).
+//! * grayscale -> true monochrome (Cs400), coded at 8, 10 or 12 bits. The
+//!   input is 8-bit (`encode_gray8`); the CODED depth is the caller's, and
+//!   the samples are scaled to it by the same rule the colour and alpha
+//!   paths use.
 //!
 //! Refused by name, each with the reason (`reject_unsupported_config`,
 //! [`aom_depth_error`]):
@@ -338,10 +341,10 @@ pub(crate) fn reject_unsupported_config(config: &EncoderConfig) -> Result<()> {
 /// config that encodes validates. Returns the reason a `bit_depth`-bit encode
 /// is refused, or `None` when it encodes.
 ///
-/// 8, 10 and 12 all encode on the **colour** 4:2:0 path (all three are
-/// byte-gated upstream). The grayscale (Cs400) path is 8-bit only -- see the
-/// message for why that is a missing value-scaling rule, not a missing
-/// encoder.
+/// 8, 10 and 12 all encode, on the colour path AND on the grayscale (Cs400)
+/// path -- all byte-gated upstream. The grayscale arm refused above 8 bits
+/// until the sample conversion learned to scale; `monochrome` survives as a
+/// parameter so that history stays legible at the call sites.
 pub(crate) fn aom_depth_error(bit_depth: u8, monochrome: bool) -> Option<&'static str> {
     if !matches!(bit_depth, 8 | 10 | 12) {
         return Some(
@@ -349,13 +352,15 @@ pub(crate) fn aom_depth_error(bit_depth: u8, monochrome: bool) -> Option<&'stati
              exactly those three); use EncodeBitDepth::Eight, ::Ten or ::Twelve",
         );
     }
-    if monochrome && bit_depth != 8 {
-        return Some(
-            "Av1Backend::Zenav1Aom codes 8-bit grayscale (Cs400) only: encode_gray8 takes \
-             u8 samples and this seam maps them to 8-bit studio-range luma. Promotion \
-             to 10- or 12-bit monochrome is not wired or measured. The 4:2:0 colour path codes 8, 10 and 12 -- use RGB input",
-        );
-    }
+    // Grayscale used to be refused above 8 bits here, on the grounds that
+    // promotion was "not wired or measured". It is now both: the sample
+    // conversion in `encode_gray8_aom` scales to the coded depth with the same
+    // rule the colour and alpha paths use, and the encoder's monochrome path
+    // codes 8, 10 and 12 (the AVIF alpha auxiliary item is a Cs400 stream and
+    // has been coded at 12 bits since alpha landed). `monochrome` is retained
+    // as a parameter because it is what makes that history legible and because
+    // a future depth limit would be depth-and-format shaped, not depth alone.
+    let _ = monochrome;
     None
 }
 
@@ -1195,18 +1200,45 @@ pub(crate) fn encode_gray8_aom(
     use almost_enough::Stop;
     stop.check().map_err(|e| at!(Error::from(e)))?;
     reject_unsupported_config(config)?;
-    // `monochrome = true`: the Cs400 path is 8-bit only — see `aom_depth_error`.
     let bit_depth = resolve_aom_depth(config, false, true)?;
 
     let width = img.width();
     let height = img.height();
     reject_empty(width, height)?;
 
+    // Gray8 samples have the same FULL-range pixel semantics as RGB8, so the
+    // conversion has to answer two questions the old one answered by hardcode:
+    // which range the stream signals, and at what depth.
+    //
+    // This was a live mis-signalling bug for exactly as long as full range was
+    // reachable at this seam. Before that landing `pixel_range(Full)` was
+    // refused, so mapping unconditionally to studio 16..235 was always right;
+    // afterwards a caller asking for full range got a header saying `full_range
+    // = true` over studio-mapped samples — measured as coded luma 16..232 for a
+    // 0..252 source, i.e. a washed-out image on any decoder that honours the
+    // header. `the_gray_path_codes_the_range_it_signals` is the gate.
+    let shift = bit_depth - 8;
+    let full_range = wants_full_range(config);
     let mut y = Vec::with_capacity(width * height);
     for row in img.rows() {
-        // Gray8 samples have the same full-range pixel semantics as RGB8.
-        // The AOM stream signals studio range, so code 16..235 luma.
-        y.extend(row.iter().map(|&s| 16 + (u16::from(s) * 219 + 127) / 255));
+        y.extend(row.iter().map(|&s| {
+            let c = u16::from(s);
+            if full_range {
+                // Scale, not widen: 255 must reach the coded maximum, the same
+                // rule `color_planes` and the alpha plane use.
+                if shift == 0 { c } else { (c << shift) | (c >> (8 - shift)) }
+            } else {
+                // Studio swing at the coded depth: 16..235 scaled by 1 << shift.
+                //
+                // In u32 deliberately: at 12 bits the numerator reaches
+                // 255 * (219 << 4) = 893,520, which WRAPS in u16 and produced a
+                // non-monotonic ramp (measured: a 10-bit luma max of 319 where
+                // the arithmetic calls for 930). The values fit u16 again only
+                // after the divide.
+                let scaled = (u32::from(c) * (219u32 << shift) + 127) / 255;
+                (16 << shift) + u16::try_from(scaled).unwrap_or(u16::MAX)
+            }
+        }));
     }
 
     stop.check().map_err(|e| at!(Error::from(e)))?;

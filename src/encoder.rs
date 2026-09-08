@@ -298,13 +298,20 @@ pub enum Av1Backend {
     /// KEY frame and returns one temporal unit — there is no inter
     /// prediction and no multi-frame state in it — so
     /// [`encode_animation_rgb8`] and the other animation entry points
-    /// refuse this backend by name, as do the alpha entry points. Within
-    /// stills this seam wires **RGB → 4:2:0 BT.601 limited range at 8, 10
-    /// or 12 bits** (from both [`encode_rgb8`] and [`encode_rgb16`];
-    /// [`EncodeBitDepth::Twelve`] is AV1 profile 2) and **8-bit grayscale →
-    /// monochrome (Cs400)**. 4:4:4, 4:2:2, alpha, high-bit-depth
-    /// grayscale, full pixel range and gain maps are each refused with a
-    /// message naming what is unimplemented (see `src/encoder_aom.rs`).
+    /// refuse this backend by name. Within stills this seam wires
+    /// **RGB/RGBA → 4:4:4 or 4:2:0 at 8, 10 or 12 bits, in either pixel
+    /// range** (from [`encode_rgb8`], [`encode_rgb16`], [`encode_rgba8`] and
+    /// [`encode_rgba16`]; [`EncodeBitDepth::Twelve`] is AV1 profile 2), the
+    /// **GBR identity model** at 4:4:4 — which is what makes a
+    /// mathematically lossless encode possible — **alpha** as the auxiliary
+    /// Cs400 item AVIF specifies, and **grayscale → monochrome (Cs400) at 8,
+    /// 10 or 12 bits**. 4:2:2 and gain maps are refused with a message naming
+    /// what is unimplemented (see `src/encoder_aom.rs`), and identity outside
+    /// 4:4:4 is refused because AV1 5.5.2 does not define it.
+    ///
+    /// That list is asserted rather than maintained by hand:
+    /// `tests/aom_roundtrip_loss.rs` requires the support query, the routing
+    /// query and the encode path to agree on it in both directions.
     ///
     /// Unlike [`Av1Backend::Zenravif`] (where zenravif muxes), this backend
     /// gets raw AV1 OBUs back and muxes the AVIF container in-crate with
@@ -1284,7 +1291,7 @@ pub(crate) fn reject_aom_backend(config: &EncoderConfig, entry: &'static str) ->
         return Err(at!(Error::Encode(format!(
             "Av1Backend::Zenav1Aom does not support {entry}: it encodes ONE AV1 \
              KEY frame (RGB/RGBA → 4:4:4 or 4:2:0 at 8/10/12 bits, GBR identity, \
-             and 8-bit grayscale stills — no animation); \
+             and grayscale stills at 8/10/12 — no animation); \
              use Av1Backend::Zenravif"
         ))));
     }

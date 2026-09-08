@@ -61,8 +61,9 @@
 //! `Av1Backend::Zenav1Aom` codes 4:2:0 at 8, 10 and 12 bits, from both 8-bit
 //! (`encode_rgb8`) and 16-bit (`encode_rgb16`) input. 12 bits is
 //! `EncodeBitDepth::Twelve`, added in the 0.2.0 break together with
-//! `#[non_exhaustive]` on the enum. The grayscale (Cs400) path stays 8-bit
-//! only and refuses by name.
+//! `#[non_exhaustive]` on the enum. The grayscale (Cs400) path codes 8, 10 and
+//! 12 as well — it used to refuse above 8 by name, and
+//! `the_gray_path_codes_the_range_it_signals` is what replaced that pin.
 #![cfg(all(feature = "zenav1-aom-encode", feature = "encode"))]
 
 use almost_enough::{StopToken, Unstoppable};
@@ -1083,34 +1084,85 @@ fn container_rgb16_psnr(avif: &[u8], src: ImgRef<'_, rgb::Rgb<u16>>, label: &str
     10.0 * (65535.0 * 65535.0 / mse).log10()
 }
 
-/// The Cs400 grayscale path is 8-bit only, and says so.
+/// **The grayscale path codes the range it signals, at every depth it codes.**
 ///
-/// `encode_gray8` takes u8 samples and this seam passes them through as the
-/// coded luma, so promoting them to a 10- or 12-bit swing would need a
-/// value-scaling rule nothing here measures. Refused rather than guessed.
+/// This test used to assert the OPPOSITE — that 10- and 12-bit grayscale were
+/// refused, because "promoting them to a 10- or 12-bit swing would need a
+/// value-scaling rule nothing here measures". Both halves of that have since
+/// stopped being true: the encoder's monochrome path codes 8, 10 and 12 (the
+/// AVIF alpha auxiliary item is a Cs400 stream and has been coded at 12 bits
+/// since alpha landed), and the scaling rule is the one the colour and alpha
+/// paths already use.
+///
+/// It also pins the bug that made this worth doing rather than merely
+/// possible. `pixel_range(Full)` became reachable at this seam before the
+/// grayscale conversion learned about it, so for that window a caller asking
+/// for full range got a header saying `full_range = true` over studio-mapped
+/// samples — measured as coded luma 16..232 for a 0..252 source, i.e. a
+/// washed-out image on any decoder that honours the header.
+///
+/// Every bound below is arithmetic, not a tolerance: full range maps 0 to 0
+/// and 255 to the coded maximum, studio maps them to `16 << shift` and
+/// `235 << shift`.
 #[cfg(feature = "encode-mono")]
 #[test]
-fn aom_backend_refuses_hbd_grayscale() {
-    let gray: Vec<u8> = (0..64 * 64).map(|i| ((i * 7) % 256) as u8).collect();
+fn the_gray_path_codes_the_range_it_signals() {
+    // A ramp over the whole u8 domain, so both extremes are present.
+    let gray: Vec<u8> = (0..64 * 64).map(|i| (i % 256) as u8).collect();
     let img = Img::new(gray, 64, 64);
-    for cfg in [hbd_config(10), hbd_config(12)] {
-        let e = zenavif::encode_gray8(img.as_ref(), &cfg, stop())
-            .expect_err("high-bit-depth grayscale must be refused");
-        assert!(
-            format!("{e}").contains("8-bit grayscale (Cs400) only"),
-            "the grayscale depth refusal must name the limitation, got: {e}"
-        );
+    let mut checked = 0;
+    for depth in [8u8, 10, 12] {
+        let shift = u32::from(depth - 8);
+        for full in [false, true] {
+            // quality 100 is cq 0 — coded lossless, so the decoded luma is the
+            // conversion's output exactly and the bounds below can be equalities
+            // rather than tolerances. At a lossy quantizer the extremes drift by
+            // a unit (measured: a studio floor of 15 where the conversion writes
+            // 16), which would test the quantizer rather than the range rule.
+            let cfg = hbd_config(depth).quality(100.0).pixel_range(if full {
+                zenavif::EncodePixelRange::Full
+            } else {
+                zenavif::EncodePixelRange::Limited
+            });
+            let label = format!("gray depth {depth} full_range {full}");
+            let enc = zenavif::encode_gray8(img.as_ref(), &cfg, stop())
+                .unwrap_or_else(|e| panic!("{label}: must encode, got {e}"));
+
+            // What the container and bitstream SAY.
+            let pcfg = zenavif_parse::DecodeConfig::default();
+            let parser = zenavif_parse::AvifParser::from_owned_with_config(
+                enc.avif_file.clone(),
+                &pcfg,
+                &Unstoppable,
+            )
+            .unwrap_or_else(|e| panic!("{label}: container must parse: {e}"));
+            let meta = parser.primary_metadata().expect("sequence header");
+            assert_eq!(meta.bit_depth, depth, "{label}: coded depth");
+            assert!(meta.monochrome, "{label}: must be a true Cs400 stream");
+            assert_eq!(meta.full_range, full, "{label}: signalled range");
+
+            // What the samples ARE.
+            let yuv = zenavif::decode_av1_obu_yuv(
+                &primary_payload(&enc.avif_file),
+                zenavif::DecodeBackend::Rav1dSafe,
+            )
+            .unwrap_or_else(|e| panic!("{label}: decode: {e}"));
+            let lo = *yuv.y.iter().min().expect("non-empty luma");
+            let hi = *yuv.y.iter().max().expect("non-empty luma");
+            let (want_lo, want_hi) = if full {
+                (0u16, ((1u32 << depth) - 1) as u16)
+            } else {
+                ((16u32 << shift) as u16, (235u32 << shift) as u16)
+            };
+            assert_eq!(
+                (lo, hi),
+                (want_lo, want_hi),
+                "{label}: coded luma must span the range the header signals"
+            );
+            checked += 1;
+        }
     }
-    // The same config on the COLOUR path encodes — the refusal is scoped to
-    // Cs400, not to the depth.
-    let rgb = gradient_rgb8(64, 64);
-    encode(
-        rgb.as_ref(),
-        &aom_config()
-            .bit_depth(zenavif::EncodeBitDepth::Twelve)
-            .quality(90.0)
-            .speed(6),
-    );
+    assert_eq!(checked, 6, "three depths x both ranges");
 }
 
 /// The 8-bit path is byte-for-byte what it was before the high-bit-depth
