@@ -152,8 +152,8 @@ aom-decode = { package = "zenav1-aom-decode", git = "https://github.com/imazen/z
 # the `KeyFrameConfig` tile / SB128 fields the seam now sets to their
 # `allintra_speed0` defaults. `tests/aom_encode_backend.rs` gates cq 0 exact.
 aom-encode = { package = "zenav1-aom-encode", git = "https://github.com/imazen/zenav1-aom", rev = "a7b1ab13fc2ba1c0f4fb05282ab40e417bc32190", optional = true }
-archmage = { version = "0.9.15", features = ["macros", "avx512"] }
-magetypes = { version = "0.9.15"}
+archmage = { version = "0.9.29", features = ["macros", "avx512"] }
+magetypes = { version = "0.9.29"}
 safe_unaligned_simd = "0.2.5"
 # 0.7.0 (breaking): parser entry points return `whereat::At<Error>`, and `Error`
 # impls `zencodec::CategorizedError` (delegated from this crate's `Error::Parse`).
@@ -371,7 +371,7 @@ zenpredict-bake = { path = "../zenanalyze/zenpredict-bake" }
 # cross-tier parity test in src/yuv_convert.rs asserts the disable actually
 # took effect (CompileTimePolicy::Fail), so removing this feature fails the
 # test loudly instead of silently testing one tier twice.
-archmage = { version = "0.9.15", features = ["std", "testable_dispatch"] }
+archmage = { version = "0.9.29", features = ["std", "testable_dispatch"] }
 env_logger = { version = "0.11.10", default-features = false }
 png = "0.18.0"
 image = "0.25.10"
@@ -704,12 +704,6 @@ name = "decode_backend_bench"
 required-features = ["encode", "zenav1-aom"]
 
 [patch.crates-io]
-# SVT 4e688a54 uses integer SIMD primitives absent from magetypes 0.9.28.
-# Dependency workspace patches are not inherited; keep the same tested
-# archmage/macro/magetypes revision as SVT's root manifest until publication.
-archmage = { git = "https://github.com/imazen/archmage", rev = "cc24398c9a9fee0251722931e295da840730704d" }
-archmage-macros = { git = "https://github.com/imazen/archmage", rev = "cc24398c9a9fee0251722931e295da840730704d" }
-magetypes = { git = "https://github.com/imazen/archmage", rev = "cc24398c9a9fee0251722931e295da840730704d" }
 # The zenanalyze-api additions this crate's graph needs (FeatureProvider,
 # Select::Names) are on `main` but not yet on crates.io. ONE patch, here at the
 # workspace root, rewrites every registry edge — including the ones inside
