@@ -50,6 +50,19 @@ exit and from deeper SPLIT estimation. They do not justify reverting those
 search/correctness changes: other cells select different winners. Other
 intervening changes also contribute; the timing drift is not fully corrected.
 
+The subsequent partial-chroma distortion correction (`zenrav1e 1447c200`,
+owner `7f55b540`) does not resolve the low-quality mixed witness. At
+`s2/mixed/q15`, 509x341, it produces 842 bytes / SSIM2 31.245, compared
+with the old reference's 874 / 48.023. Independent libavif/dav1d decoding
+scores 31.240 versus 48.025 with the same fast-ssim2 0.8.2 metric. The
+earlier current-backend witness was 848 / 31.006: this edge fix changes
+the output slightly, while the larger quality gap remains. Exact hashes
+and scores are in `sub8-witness.tsv`. Encodes and independent decoded
+PNGs remain under `~/tmp/slower-preset-probe/sub8-quality-witness-files/`
+and `sub8-decode-compare/`. The one-cell run used `PROBE_SPEED=2`,
+`PROBE_QUALITIES=15`, `PROBE_CELL=s2/mixed/q15` with the existing probe.
+No quality floor or coding tool was changed.
+
 ## Mode-budget correction
 
 For speed-10 photo/q35, current defaults produce **1165 B / SSIM2 53.312**.

@@ -1,0 +1,40 @@
+--- a/ravif/src/av1encoder.rs
++++ b/ravif/src/av1encoder.rs
+@@ -2738,6 +2738,26 @@
+         //     .map_err(|e| at!(Error::from(e)))?;
+         unreachable!("FRAME_HINTS_LIVE requires the zenrav1e dep bump (uncomment the hinted send)");
+     }
++    let dump_planes = |frame: &Frame<P>, suffix: &str| {
++        if let Some(dir) = std::env::var_os("PROBE_RECON") {
++            let dir = std::path::PathBuf::from(dir);
++            std::fs::create_dir_all(&dir).unwrap();
++            let mut data = Vec::new();
++            let count = if p.chroma_sampling == ChromaSampling::Cs400 { 1 } else { 3 };
++            for plane in &frame.planes[..count] {
++                let width = p.width.div_ceil(1 << plane.cfg.xdec);
++                let height = p.height.div_ceil(1 << plane.cfg.ydec);
++                for row in plane.slice(Default::default()).rows_iter().take(height) {
++                    for &value in &row[..width] {
++                        let value = u16::cast_from(value);
++                        if p.bit_depth == 8 { data.push(value as u8); } else { data.extend_from_slice(&value.to_le_bytes()); }
++                    }
++                }
++            }
++            std::fs::write(dir.join(suffix), data).unwrap();
++        }
++    };
++    dump_planes(&frame, "source.yuv");
+     ctx.send_frame(frame).map_err(|e| at!(Error::from(e)))?;
+     ctx.flush();
+ 
+@@ -2761,6 +2781,10 @@
+         match ctx.receive_packet() {
+             Ok(mut packet) => match packet.frame_type {
+                 FrameType::KEY => {
++                    if let Some(dir) = std::env::var_os("PROBE_RECON") {
++                        std::fs::write(std::path::PathBuf::from(dir).join("coded.obu"), &packet.data).unwrap();
++                        dump_planes(packet.rec.as_ref().unwrap(), "encoder.yuv");
++                    }
+                     out.append(&mut packet.data);
+                 },
+                 _ => continue,
