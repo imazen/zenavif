@@ -375,12 +375,13 @@ fn aom_backend_encodes_monochrome_that_decodes() {
         .expect("rav1d-safe must decode the mono aom stream");
     assert_eq!(yuv.width as usize, w);
     assert_eq!(yuv.height as usize, h);
-    // A Cs400 stream carries the caller's luma verbatim, so at q95 the
-    // reconstruction must be close; assert a tight bound rather than "it
-    // decoded".
+    // The AOM bitstream signals studio range: compare coded luma against
+    // the full-range Gray8 input converted to 16..235. Displayed gray samples
+    // have an independent exact flat-sample gate in resolved_routing.rs.
     let mut worst = 0i32;
     for (a, b) in yuv.y.iter().zip(&gray) {
-        worst = worst.max((i32::from(*a as u8) - i32::from(*b)).abs());
+        let expected_luma = 16 + (u16::from(*b) * 219 + 127) / 255;
+        worst = worst.max((i32::from(*a as u8) - i32::from(expected_luma)).abs());
     }
     assert!(worst <= 24, "mono q95 worst-channel error {worst} > 24");
     eprintln!("mono 64x64 q95 s6: worst luma error {worst}");

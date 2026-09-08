@@ -1,5 +1,14 @@
 # Changelog
 
+## API/support follow-up (unreleased, 2026-09-08)
+
+- Added explicit Gray8 routing and versioned complete route replay/cache keys (SVT companion: `25708931`; zenavif implementation commit recorded in history).
+- Wired SVT film-grain controls through support queries, primary-color encoding and replay; retained explicit enhancement/reference identity.
+- Fixed AOM Gray8 studio-range conversion, represented transfer-code preservation and independent ICC+nclx serialization.
+- Reject unsupported adapter controls; retain palette/fast-tier research helpers while automatic picking attaches only active settings.
+- Integrated main through `a26343da`; aligned research/replay SHA-256 dependencies and preserved the scoring width-refusal regression with an explicitly malformed fixture after the owner fixed automatic extraction.
+
+
 All notable changes to zenavif are documented here. zenavif is an AVIF encoder
 and decoder built on the excellent work of the [rav1d-safe](https://github.com/imazen/rav1d-safe)
 decoder (our fork of [dav1d](https://code.videolan.org/videolan/dav1d) via

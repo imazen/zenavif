@@ -144,7 +144,10 @@ pub(crate) fn speed_to_svt_preset(speed: u8) -> u8 {
 #[cfg_attr(not(feature = "__expert"), allow(dead_code))]
 pub(crate) fn svt_resolved_identity(config: &crate::EncoderConfig) -> (i8, u8, u8) {
     (
-        config.svt_route_preset.map(|p| p.value()).unwrap_or_else(|| speed_to_svt_preset(config.speed_effective()) as i8),
+        config
+            .svt_route_preset
+            .map(|p| p.value())
+            .unwrap_or_else(|| speed_to_svt_preset(config.speed_effective()) as i8),
         quality_to_qp_gated(config.quality),
         quality_to_qp_gated(crate::encoder::effective_alpha_quality(config)),
     )
@@ -176,21 +179,77 @@ fn apply_svt_params(
     config: &crate::EncoderConfig,
 ) {
     let p = config.svt_params_resolved();
-    pipeline.hdr.tune = p.tune;
-    pipeline.hdr.enable_variance_boost = p.enable_variance_boost;
-    pipeline.hdr.variance_boost_strength = p.variance_boost_strength;
-    pipeline.hdr.variance_octile = p.variance_octile;
-    pipeline.hdr.enable_qm = p.enable_qm;
-    pipeline.hdr.min_qm_level = p.min_qm_level;
-    pipeline.hdr.max_qm_level = p.max_qm_level;
-    pipeline.hdr.min_chroma_qm_level = p.min_qm_level;
-    pipeline.hdr.max_chroma_qm_level = p.max_qm_level;
-    pipeline.hdr.sharpness = p.sharpness;
-    pipeline.hdr.screen_content_mode = p.force_screen_content_mode;
-    pipeline.hdr.ac_bias = p.ac_bias;
-    pipeline.hdr.max_tx_size = p.max_tx_size;
+    pipeline.hdr = resolved_svt_hdr(config);
     pipeline.tile_cols_log2 = p.tile_cols_log2;
     pipeline.tile_rows_log2 = p.tile_rows_log2;
+}
+
+/// Shared query/encode validation for routing controls.
+fn resolved_svt_hdr(config: &EncoderConfig) -> svtav1::encoder::hdr_mode::HdrForkConfig {
+    let p = config.svt_params_resolved();
+    svtav1::encoder::hdr_mode::HdrForkConfig {
+        tune: p.tune,
+        enable_variance_boost: p.enable_variance_boost,
+        variance_boost_strength: p.variance_boost_strength,
+        variance_octile: p.variance_octile,
+        enable_qm: p.enable_qm,
+        min_qm_level: p.min_qm_level,
+        max_qm_level: p.max_qm_level,
+        min_chroma_qm_level: p.min_qm_level,
+        max_chroma_qm_level: p.max_qm_level,
+        sharpness: p.sharpness,
+        screen_content_mode: p.force_screen_content_mode,
+        ac_bias: p.ac_bias,
+        max_tx_size: p.max_tx_size,
+        ..Default::default()
+    }
+}
+
+pub(crate) fn validate_still_controls(
+    config: &EncoderConfig,
+    monochrome: bool,
+) -> core::result::Result<(), String> {
+    if config.svt.tune > 5 {
+        return Err(
+            "SVT adapter tune must be 0..=5; its legacy slot 5 means film grain, not C VMAF".into(),
+        );
+    }
+    if config.svt_route_policy.is_some() && config.svt.tune == 5 {
+        return Err("SvtParity cannot use the adapter's legacy film-grain tune slot 5: C tune 5 is VMAF and rejects all-intra".into());
+    }
+    if !config.svt.ac_bias.is_finite() || !(0.0..=8.0).contains(&config.svt.ac_bias) {
+        return Err("SVT AC bias must be finite and in 0..=8".into());
+    }
+    if config.svt.force_screen_content_mode.is_some_and(|m| m > 3) {
+        return Err("SVT screen-content mode must be 0..=3".into());
+    }
+    config.svt_film_grain.validate().map_err(str::to_owned)?;
+    if monochrome && config.svt_film_grain.enabled() {
+        return Err("C film grain requires 8/10-bit 4:2:0".into());
+    }
+    let hdr = resolved_svt_hdr(config);
+    if monochrome
+        && (config.svt_route_policy.is_some()
+            || !config.svt_route_enhancements.is_empty()
+            || config.svt != crate::svt_params::SvtParams::default())
+    {
+        return Err("SVT monochrome uses the Rust extension with default coding tools; parity, color-tool overrides and enhancements are unsupported".into());
+    }
+    if let Some(svtav1::avif::EncodingPolicy::SvtParity(reference)) = config.svt_route_policy {
+        reference.validate_hdr_config(&hdr).map_err(str::to_owned)?;
+    }
+    config
+        .svt_route_enhancements
+        .validate(
+            config
+                .svt_route_preset
+                .map(|p| p.value())
+                .unwrap_or_else(|| speed_to_svt_preset(config.speed) as i8),
+            true,
+            !monochrome,
+        )
+        .map_err(str::to_owned)?;
+    Ok(())
 }
 
 /// All public speeds support partial and odd-size color, mono and alpha.
@@ -216,6 +275,10 @@ pub(crate) fn svt_rs_dims_error(
 /// path too — a config asking for something this backend cannot produce
 /// must never be served silently different output.
 fn reject_unsupported_config(config: &EncoderConfig) -> Result<()> {
+    config
+        .validate()
+        .map_err(|e| at!(Error::InvalidParameters(e.to_string())))?;
+    validate_still_controls(config, false).map_err(|e| at!(Error::InvalidParameters(e)))?;
     if config.chroma_subsampling != EncodeChromaSubsampling::Yuv420 {
         return Err(at!(Error::Unsupported(
             "Av1Backend::Zenav1Svt encodes 4:2:0 only: set \
@@ -268,11 +331,21 @@ fn cicp_to_serialize_primaries(cp: u8) -> zenavif_serialize::constants::ColorPri
 }
 
 /// Map a raw CICP transfer-characteristics code point to the muxer's enum.
+#[allow(deprecated)]
 fn cicp_to_serialize_transfer(tc: u8) -> zenavif_serialize::constants::TransferCharacteristics {
     use zenavif_serialize::constants::TransferCharacteristics as TC;
     match tc {
         1 => TC::Bt709,
+        4 => TC::Bt470M,
+        5 => TC::Bt470BG,
         6 => TC::Bt601,
+        7 => TC::Smpte240,
+        9 => TC::Log,
+        10 => TC::LogSqrt,
+        11 => TC::Iec61966,
+        12 => TC::Bt1361,
+        15 => TC::Bt2020_12,
+        17 => TC::Smpte428,
         8 => TC::Linear,
         13 => TC::Srgb,
         14 => TC::Bt2020_10,
@@ -357,7 +430,7 @@ fn encode_mono_plane_svt(
     width: usize,
     height: usize,
     stride: usize,
-    preset: u8,
+    preset: i8,
     qp: u8,
     threads: usize,
     color_description: svtav1::entropy::obu::ColorDescription,
@@ -371,7 +444,15 @@ fn encode_mono_plane_svt(
         qp,
         ..svtav1::encoder::rate_control::RcConfig::default()
     };
-    let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new(w, h, preset, rc, 0, 1);
+    let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new_with_preset(
+        w,
+        h,
+        svtav1::avif::NativePreset::new(preset)
+            .ok_or_else(|| at!(Error::InvalidParameters("invalid native preset".into())))?,
+        rc,
+        0,
+        1,
+    );
     pipeline.bit_depth = match plane {
         MonoPlane::Eight(_) => 8,
         MonoPlane::Ten(_) => 10,
@@ -502,14 +583,19 @@ fn encode_color_420_svt(
     };
     // hierarchical_levels 0 + intra_period 1: single still key frame with a
     // reduced still-picture sequence header (the AvifEncoder pattern).
-    let native = config.svt_route_preset.unwrap_or_else(|| svtav1::avif::NativePreset::new(preset as i8).unwrap());
-    let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new_with_preset(w, h, native, rc, 0, 1)
-        .with_chroma_420(true);
+    let native = config
+        .svt_route_preset
+        .unwrap_or_else(|| svtav1::avif::NativePreset::new(preset as i8).unwrap());
+    let mut pipeline =
+        svtav1::encoder::pipeline::EncodePipeline::new_with_preset(w, h, native, rc, 0, 1)
+            .with_chroma_420(true);
     apply_svt_params(&mut pipeline, config);
     pipeline.enhancements = config.svt_route_enhancements;
+    pipeline.film_grain = config.svt_film_grain.clone();
     if let Some(svtav1::avif::EncodingPolicy::SvtParity(reference)) = config.svt_route_policy {
         pipeline.reference = reference;
-        reference.validate_hdr_config(&pipeline.hdr)
+        reference
+            .validate_hdr_config(&pipeline.hdr)
             .map_err(|e| at!(Error::InvalidParameters(e.into())))?;
     }
     pipeline.bit_depth = planes.bit_depth();
@@ -811,7 +897,7 @@ fn encode_rgba_planes_svt(
         width,
         height,
         width,
-        preset,
+        preset as i8,
         alpha_qp,
         config.threads.unwrap_or(0),
         alpha_color_description(),
@@ -1035,6 +1121,7 @@ fn encode_gray8_frame(
 ) -> Result<CodedSvtFrame> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
     reject_unsupported_config(config)?;
+    validate_still_controls(config, true).map_err(|e| at!(Error::InvalidParameters(e)))?;
 
     let width = img.width();
     let height = img.height();
@@ -1045,7 +1132,10 @@ fn encode_gray8_frame(
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
     let qp = quality_to_qp_gated(config.quality);
-    let preset = speed_to_svt_preset(config.speed);
+    let preset = config
+        .svt_route_preset
+        .map(|p| p.value())
+        .unwrap_or_else(|| speed_to_svt_preset(config.speed) as i8);
     let color_primaries = config.color_primaries.unwrap_or(DEFAULT_COLOR_PRIMARIES);
     let transfer_characteristics = config
         .transfer_characteristics

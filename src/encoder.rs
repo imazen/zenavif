@@ -45,6 +45,11 @@ fn error_from_ravif(e: ravif::Error) -> Error {
 /// encoding the per-pixel gain needed to reconstruct the HDR rendition from
 /// the SDR base image.
 #[derive(Debug, Clone)]
+#[cfg_attr(
+    feature = "routing-replay",
+    derive(serde::Serialize, serde::Deserialize)
+)]
+#[cfg_attr(feature = "routing-replay", serde(deny_unknown_fields))]
 pub struct GainMapConfig {
     /// Pre-encoded AV1 bitstream of the gain map image.
     pub av1_data: Vec<u8>,
@@ -87,6 +92,10 @@ pub struct EncodedImage {
 /// served at a different depth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
+#[cfg_attr(
+    feature = "routing-replay",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub enum EncodeBitDepth {
     /// 8 bits per channel
     Eight,
@@ -112,6 +121,10 @@ pub enum EncodeBitDepth {
 /// exhaustive matches need a `_` arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
+#[cfg_attr(
+    feature = "routing-replay",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub enum EncodeColorModel {
     /// YCbCr color model (smaller files, standard)
     #[default]
@@ -126,6 +139,10 @@ pub enum EncodeColorModel {
 /// `_` arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
+#[cfg_attr(
+    feature = "routing-replay",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub enum EncodeAlphaMode {
     /// Unassociated alpha, clean color values under transparent pixels
     #[default]
@@ -148,6 +165,10 @@ pub enum EncodeAlphaMode {
 /// the domain is genuinely closed and forcing a `_` arm on every consumer
 /// would buy nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(
+    feature = "routing-replay",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub enum EncodePixelRange {
     /// Full range (0–255 / 0–1023). Default.
     #[default]
@@ -172,6 +193,10 @@ pub enum EncodePixelRange {
 /// matches need a `_` arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
+#[cfg_attr(
+    feature = "routing-replay",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub enum EncodeChromaSubsampling {
     /// Full-resolution chroma (4:4:4). Default, and recommended for AVIF.
     #[default]
@@ -190,6 +215,11 @@ pub enum EncodeChromaSubsampling {
 /// - chromaticity x/y: CIE 1931 in **0.00002 units** (multiply CIE xy by 50000)
 /// - luminance: in **0.0001 cd/m² units** (multiply cd/m² by 10000)
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(
+    feature = "routing-replay",
+    derive(serde::Serialize, serde::Deserialize)
+)]
+#[cfg_attr(feature = "routing-replay", serde(deny_unknown_fields))]
 pub struct MasteringDisplayConfig {
     /// Display primary chromaticities `[(x, y); 3]`, in 0.00002 units
     /// (xy×50000), **in `mdcv` wire order: GREEN, BLUE, RED** (the
@@ -225,6 +255,10 @@ pub struct MasteringDisplayConfig {
 /// another break; the CHANGELOG already queued this break for the `Zenav1Svt`
 /// addition, so taking it in the same release costs nothing extra.
 #[non_exhaustive]
+#[cfg_attr(
+    feature = "routing-replay",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub enum Av1Backend {
     /// zenrav1e (rav1e fork) — default, production-proven.
     #[default]
@@ -324,6 +358,8 @@ pub struct EncoderConfig {
     pub(crate) svt_route_preset: Option<svtav1::avif::NativePreset>,
     #[cfg(feature = "zenav1-svt")]
     pub(crate) svt_route_enhancements: svtav1::avif::ZenEnhancements,
+    #[cfg(feature = "zenav1-svt")]
+    pub(crate) svt_film_grain: svtav1::encoder::film_grain_config::FilmGrainConfig,
     pub(crate) quality: f32,
     pub(crate) speed: u8,
     pub(crate) alpha_quality: Option<f32>,
@@ -457,6 +493,8 @@ impl Default for EncoderConfig {
             svt_route_preset: None,
             #[cfg(feature = "zenav1-svt")]
             svt_route_enhancements: Default::default(),
+            #[cfg(feature = "zenav1-svt")]
+            svt_film_grain: Default::default(),
             quality: 75.0,
             speed: 4,
             alpha_quality: None,
@@ -526,6 +564,15 @@ impl Default for EncoderConfig {
 }
 
 impl EncoderConfig {
+    /// Configure C film-grain modeling or a supplied table on the primary SVT
+    /// color stream. Auxiliary alpha stays ungrained. Automatic routes require
+    /// SVT when these controls are set; monochrome refuses enabled grain.
+    #[cfg(feature = "zenav1-svt")]
+    pub fn with_svt_film_grain(mut self, grain: crate::backend_router::SvtFilmGrainConfig) -> Self {
+        self.svt_film_grain = grain;
+        self
+    }
+
     /// Create a new encoder configuration with default settings
     ///
     /// Defaults: quality 75, speed 4, auto bit depth, YCbCr color model
@@ -1505,6 +1552,16 @@ pub(crate) fn encode_rgb8_once(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
+    crate::backend_router::validate_adapter_controls(
+        config,
+        crate::backend_router::StillInput::Rgb8 {
+            width: u32::try_from(img.width())
+                .map_err(|_| at!(Error::InvalidParameters("width exceeds u32".into())))?,
+            height: u32::try_from(img.height())
+                .map_err(|_| at!(Error::InvalidParameters("height exceeds u32".into())))?,
+        },
+    )
+    .map_err(|e| at!(Error::InvalidParameters(e)))?;
     stop.check().map_err(|e| at!(Error::from(e)))?;
 
     // Backend dispatch: the zenav1-svt backend covers exactly this entry
@@ -1567,6 +1624,14 @@ pub fn encode_gray8(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    config
+        .validate_still_input(crate::backend_router::StillInput::Gray8 {
+            width: u32::try_from(img.width())
+                .map_err(|_| at!(Error::InvalidParameters("width exceeds u32".into())))?,
+            height: u32::try_from(img.height())
+                .map_err(|_| at!(Error::InvalidParameters("height exceeds u32".into())))?,
+        })
+        .map_err(|e| at!(Error::InvalidParameters(e.to_string())))?;
     #[cfg(feature = "zenav1-svt")]
     if config.backend == Av1Backend::Zenav1Svt {
         return crate::encoder_svt_rs::encode_gray8_svt_rs(img, config, stop);
@@ -1640,6 +1705,16 @@ pub(crate) fn encode_rgba8_once(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
+    crate::backend_router::validate_adapter_controls(
+        config,
+        crate::backend_router::StillInput::Rgba8 {
+            width: u32::try_from(img.width())
+                .map_err(|_| at!(Error::InvalidParameters("width exceeds u32".into())))?,
+            height: u32::try_from(img.height())
+                .map_err(|_| at!(Error::InvalidParameters("height exceeds u32".into())))?,
+        },
+    )
+    .map_err(|e| at!(Error::InvalidParameters(e)))?;
     stop.check().map_err(|e| at!(Error::from(e)))?;
     #[cfg(feature = "zenav1-svt")]
     if config.backend == Av1Backend::Zenav1Svt {
@@ -1680,6 +1755,16 @@ pub fn encode_rgb16(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
     use crate::convert::{narrow_to_u8, scale_from_u16};
+    crate::backend_router::validate_adapter_controls(
+        config,
+        crate::backend_router::StillInput::Rgb16 {
+            width: u32::try_from(img.width())
+                .map_err(|_| at!(Error::InvalidParameters("width exceeds u32".into())))?,
+            height: u32::try_from(img.height())
+                .map_err(|_| at!(Error::InvalidParameters("height exceeds u32".into())))?,
+        },
+    )
+    .map_err(|e| at!(Error::InvalidParameters(e)))?;
     stop.check().map_err(|e| at!(Error::from(e)))?;
     #[cfg(feature = "zenav1-svt")]
     if config.backend == Av1Backend::Zenav1Svt {
@@ -1790,6 +1875,16 @@ pub fn encode_rgba16(
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
     use crate::convert::{narrow_to_u8, scale_from_u16};
+    crate::backend_router::validate_adapter_controls(
+        config,
+        crate::backend_router::StillInput::Rgba16 {
+            width: u32::try_from(img.width())
+                .map_err(|_| at!(Error::InvalidParameters("width exceeds u32".into())))?,
+            height: u32::try_from(img.height())
+                .map_err(|_| at!(Error::InvalidParameters("height exceeds u32".into())))?,
+        },
+    )
+    .map_err(|e| at!(Error::InvalidParameters(e)))?;
     stop.check().map_err(|e| at!(Error::from(e)))?;
     #[cfg(feature = "zenav1-svt")]
     if config.backend == Av1Backend::Zenav1Svt {

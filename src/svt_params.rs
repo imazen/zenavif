@@ -51,6 +51,11 @@
 /// being encoded repeatedly under different names.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    feature = "routing-replay",
+    derive(serde::Serialize, serde::Deserialize)
+)]
+#[cfg_attr(feature = "routing-replay", serde(deny_unknown_fields))]
 pub struct SvtParams {
     /// `--tune`: 0 = VQ, 1 = PSNR (default), 2 = SSIM, 3 = IQ (the only mode
     /// upstream marks still-image-only), 4 = MS-SSIM. Slot 5 is

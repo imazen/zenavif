@@ -637,31 +637,11 @@ impl EncoderConfig {
             .filter(|q| *q >= 0)
             .ok_or(AutoTuneError::TargetOutOfRange(target_zq))?;
 
-        // 7. Deterministic descriptor heads (no model file): the palette
-        // gate (FEATURE_HINTS §E rule 1, `patch_fraction >` the speed
-        // tier's threshold → PaletteMode::Always where the encoder's own
-        // AA-aware detection is downscale-blind; speed-conditional since
-        // the 2026-07-03 A/B — the just-picked speed selects the tier).
-        // Reuses the same Offer contract; degrades to Auto on any analysis
-        // failure. RELEASE-GATED downstream: the preference is stored on
-        // the config today and forwarded to the encoder at the zenrav1e
-        // dep bump (see src/palette_gate.rs).
-        let palette = crate::palette_gate::palette_gate_for_rgb8(rgb, width, height, offer, speed);
-
-        // 7b. Fast-tier budget heads (FAST_TIER_PARITY P2): per-image tx +
-        // partition search budgets for the s6-class fast tier. Same Offer
-        // contract; off-tier speeds and analysis failures degrade to the
-        // speed table's global defaults (Size1 + Ship). RELEASE-GATED
-        // downstream like the palette preference (src/fast_heads.rs).
-        let budgets =
-            crate::fast_heads::fast_tier_budgets_for_rgb8(rgb, width, height, offer, speed);
-
-        // 8. Apply.
-        Ok(self
-            .speed(speed)
-            .quality(q as f32)
-            .with_palette_preference(Some(palette))
-            .with_fast_tier_budgets(Some(budgets)))
+        // Apply only controls the pinned adapter executes. Palette and fast-tier
+        // recommendation helpers remain available for diagnostics, but the owner
+        // has no passthrough for them yet. Attaching those inert preferences here
+        // would turn an otherwise valid tuned config into an unsupported request.
+        Ok(self.speed(speed).quality(q as f32))
     }
 }
 

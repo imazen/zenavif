@@ -546,9 +546,8 @@ impl Aviffy {
 
     /// Set ICC color profile to embed in the AVIF file.
     ///
-    /// This adds a `colr` box with colour_type='prof'. When set, this
-    /// replaces the nclx `colr` box (they are mutually exclusive per spec,
-    /// though some files include both).
+    /// Adds a `colr` box with colour_type='prof', preserving any non-default
+    /// nclx color description as a separate property on the same image item.
     #[inline]
     pub fn set_icc_profile(&mut self, icc_data: Vec<u8>) -> &mut Self {
         self.icc_profile = Some(icc_data);
@@ -873,7 +872,8 @@ impl Aviffy {
         if let Some(ref icc_data) = self.icc_profile {
             let p = push_prop(ipco, IpcoProp::ColrIcc(ColrIccBox { icc_data: icc_data.clone() }))?;
             ipma.prop_ids.push(p);
-        } else if self.colr != ColrBox::default() {
+        }
+        if self.colr != ColrBox::default() {
             let p = push_prop(ipco, IpcoProp::Colr(self.colr))?;
             ipma.prop_ids.push(p);
         }

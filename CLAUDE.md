@@ -2,6 +2,17 @@
 
 Pure Rust AVIF encoder/decoder wrapping rav1d-safe (pure Rust AV1 decoder) and zenavif-parse.
 
+## Current still API/support audit — 2026-09-08
+
+See `docs/BACKEND_ROUTING_API.md` for input-kind-aware routing, complete
+versioned replay/cache identity and backend support. The audit fixed Gray8
+AOM range conversion (input 16 previously displayed as black), transfer-code
+loss and ICC+nclx dropping; film grain is wired through SVT query/encode/replay.
+Unsupported stored palette/fast-tier overrides are now refused. Automatic
+picking attaches only active quality/speed controls; its recommendation helpers
+remain available pending owner passthrough. Do not mistake these support checks
+for measured RD/time ranking or universal C byte parity.
+
 ## Workspace (since 2026-07-16)
 
 This repo is a cargo workspace with three published crates: **zenavif**
@@ -687,6 +698,14 @@ investigate rather than re-pin envelopes or relax thresholds. Push and CI
 remain deferred while this newly measured baseline failure is unresolved.
 
 ## Known Bugs
+
+**2026-09-08 — still adapter audit corrections.** AOM Gray8 input 16
+previously displayed as 0 because full-range samples were tagged limited;
+the adapter now converts to studio-range luma. Explicit transfer metadata
+and ICC+nclx are preserved. Inert palette/fast-tier preferences and incompatible
+backend controls now refuse explicitly. The SvtParity tune-5 numbering
+collision is rejected. Regression evidence and remaining support gaps:
+[`docs/BACKEND_ROUTING_API.md`](docs/BACKEND_ROUTING_API.md).
 
 **2026-09-07 — measured optional runtime failures corrected.** Legacy YUV
 conversion now uses the shared kernels and matrix resolver. Color grids
@@ -1725,12 +1744,13 @@ orchestrator.
 `src/zensim_c.rs`'s module docs before touching any zensim scoring here.
 The four facts that cost the most time to establish:
 
-1. **`Zensim::compute` is the wrong front end for C.** C consumes the
-   folded-944 regime (`compute_folded720_features_streaming` with the
-   append+append2 toggles, then `score_features_with_profile(C, …)`).
-   `compute` returns `ModelForwardFailed` on a real pair — but
-   byte-identical pairs short-circuit to 100 *before* the forward pass, so
-   a naive smoke test passes and proves nothing.
+1. **C requires the folded-944 regime.** Historically `Zensim::compute`
+   supplied only 372 values and failed on real pairs while identical pairs
+   short-circuited to 100. The current `8462c824` owner selects the complete
+   regime in `compute`. The refusal regression now explicitly supplies a
+   372-value B vector to C and still requires `ModelForwardFailed`; the
+   identical-score assertion is unchanged. The explicit folded extraction
+   used by `ZensimC` remains supported.
 2. **C HAS a per-pixel map, and it is not a diffmap.** `AttributionResult`
    is row-major `w × h` f32 + a SAT. It is **signed**, its unit is **score
    points**, and it is absolutely normalized — so the B pooling rule

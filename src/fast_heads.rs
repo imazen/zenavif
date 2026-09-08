@@ -69,6 +69,10 @@
 
 /// Per-image transform-search budget for the fast tier (head 1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(
+    feature = "routing-replay",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub enum TxBudget {
     /// Withhold tx-size RDO entirely (`TX_MODE_LARGEST`, the stock s6+
     /// table): razor-edge tiled content where size-RDO pays bytes.
@@ -84,6 +88,10 @@ pub enum TxBudget {
 
 /// Per-image partition-search budget for the fast tier (head 2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(
+    feature = "routing-replay",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub enum PartitionBudget {
     /// The landed P1 pruned-liveness point (rects live at 16×16, 4-ways
     /// SPLIT-dominant-gated, breakout + homogeneity vargate 2.0).
@@ -271,6 +279,11 @@ pub fn monotone_speed_gate(gradient_fraction_smooth: f32, speed: u8) -> u8 {
 
 /// The composed per-image fast-tier recommendation (both heads).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(
+    feature = "routing-replay",
+    derive(serde::Serialize, serde::Deserialize)
+)]
+#[cfg_attr(feature = "routing-replay", serde(deny_unknown_fields))]
 pub struct FastTierBudgets {
     /// Head-1 transform-search budget.
     pub tx: TxBudget,

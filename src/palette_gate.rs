@@ -64,6 +64,10 @@
 /// antialiasing-aware per-keyframe detection; `Always` arms the palette
 /// search unconditionally (RDO still decides per block); `Off` disables it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(
+    feature = "routing-replay",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub enum PalettePreference {
     /// Encoder's own screen-content detection decides (the AV1 default).
     #[default]

@@ -6,13 +6,12 @@
 //! Every other zensim call in this crate is one line —
 //! `Zensim::new(codec_target()).compute(src, dst)` — because profile `B`
 //! consumes the standard 372-feature v1 pipeline that `compute` produces.
-//! **`C` does not.** It is a 944-input MLP over the folded-720 + append +
-//! append2 regime, and the 372-wide vector `compute` hands it is the wrong
-//! shape. Feeding C through `compute` fails with
-//! `ZensimError::ModelForwardFailed` — *except* on a byte-identical pair,
-//! which short-circuits to 100 before the forward pass ever runs. So the
-//! naive smoke test passes and hides the breakage; [`c_via_compute_fails`]
-//! (in this module's tests) pins that trap open on purpose.
+//! **`C` does not consume that v1 vector.** It is a 944-input MLP over
+//! the folded-720 + append + append2 regime. The current pinned owner now
+//! makes `compute` select the complete regime itself; historically it passed
+//! only 372 values and failed except on identical pairs. The malformed-vector
+//! regression below explicitly supplies a 372-wide vector to the scorer so
+//! the refusal remains tested even when automatic extraction is corrected.
 //!
 //! The working sequence, mirrored from zensim's own
 //! `examples/avif_sb_hints.rs`:
@@ -647,24 +646,31 @@ mod tests {
         assert!(c < 99.0, "C scored a visibly crushed quadrant at {c}");
     }
 
-    /// THE TRAP, pinned open: `compute` (the 372-feature v1 pipeline) is
-    /// the wrong front end for C. A non-identical pair must FAIL rather
-    /// than return a plausible-looking number — and an identical pair
-    /// short-circuits to 100 *before* the forward pass, which is exactly
-    /// why a naive smoke test passes and proves nothing.
+    /// Preserve the original wrong-width refusal with an explicitly malformed
+    /// vector. The current owner now extracts the full C regime in `compute`,
+    /// so that entry point no longer constructs this invalid fixture for us.
     #[test]
-    fn c_via_compute_fails() {
+    fn c_rejects_a_v1_vector() {
         let (w, h) = (96usize, 96usize);
         let s = source(w, h);
         let d = damaged(&s, w, h);
         let z = zensim::Zensim::new(ZensimProfile::C).with_parallel(false);
 
-        let err = z
+        let v1 = zensim::Zensim::new(ZensimProfile::B)
+            .with_parallel(false)
             .compute(&RgbSlice::new(&s, w, h), &RgbSlice::new(&d, w, h))
-            .expect_err("compute() must refuse C's 944 bake a 372-wide vector");
+            .expect("the v1 extractor must work");
+        assert_eq!(v1.features().len(), 372);
+        let err = zensim::score_features_with_profile(
+            ZensimProfile::C,
+            v1.features(),
+            w as u32,
+            h as u32,
+        )
+        .expect_err("C's 944 bake must refuse a 372-wide vector");
         assert!(
             matches!(err, zensim::ZensimError::ModelForwardFailed { .. }),
-            "unexpected error from compute() under C: {err:?}"
+            "unexpected error from a v1 vector under C: {err:?}"
         );
 
         // The short-circuit that hides it.

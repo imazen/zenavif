@@ -4,11 +4,77 @@
 //! wrapper can prepare or mux them. Both layers must accept a candidate.
 //! These queries allocate no image planes and perform no trial encodes.
 
+#[cfg(feature = "routing-replay")]
+#[path = "route_replay.rs"]
+mod replay;
+
 #[cfg(feature = "zenav1-svt")]
 use crate::EncodeChromaSubsampling;
 use crate::{Av1Backend, EncoderConfig, PlanInput};
 #[cfg(feature = "zenav1-svt")]
 pub use svtav1::avif::ZenEnhancement as SvtEnhancement;
+
+#[cfg(feature = "zenav1-svt")]
+pub use svtav1::encoder::film_grain_config::FilmGrainConfig as SvtFilmGrainConfig;
+#[cfg(feature = "zenav1-svt")]
+pub use svtav1::entropy::obu::FilmGrainParams as SvtFilmGrainTable;
+
+/// Exact pixel entry point, kept separate from the legacy RGB-only `PlanInput`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "routing-replay",
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub enum StillInput {
+    Rgb8 { width: u32, height: u32 },
+    Rgba8 { width: u32, height: u32 },
+    Rgb16 { width: u32, height: u32 },
+    Rgba16 { width: u32, height: u32 },
+    Gray8 { width: u32, height: u32 },
+}
+impl StillInput {
+    pub fn plan_input(self) -> PlanInput {
+        let (width, height, input_is_16bit, input_has_alpha) = match self {
+            Self::Rgb8 { width, height } | Self::Gray8 { width, height } => {
+                (width, height, false, false)
+            }
+            Self::Rgba8 { width, height } => (width, height, false, true),
+            Self::Rgb16 { width, height } => (width, height, true, false),
+            Self::Rgba16 { width, height } => (width, height, true, true),
+        };
+        PlanInput {
+            width,
+            height,
+            input_is_16bit,
+            input_has_alpha,
+        }
+    }
+    pub fn is_monochrome(self) -> bool {
+        matches!(self, Self::Gray8 { .. })
+    }
+}
+impl From<PlanInput> for StillInput {
+    fn from(p: PlanInput) -> Self {
+        match (p.input_is_16bit, p.input_has_alpha) {
+            (false, false) => Self::Rgb8 {
+                width: p.width,
+                height: p.height,
+            },
+            (false, true) => Self::Rgba8 {
+                width: p.width,
+                height: p.height,
+            },
+            (true, false) => Self::Rgb16 {
+                width: p.width,
+                height: p.height,
+            },
+            (true, true) => Self::Rgba16 {
+                width: p.width,
+                height: p.height,
+            },
+        }
+    }
+}
 
 /// Configuration support for one built or unavailable backend.
 #[derive(Debug, Clone)]
@@ -30,7 +96,11 @@ impl BackendSupportReport {
 /// Query all three backends without changing the requested pixel format,
 /// precision, range, alpha or coding settings. An unavailable Cargo feature
 /// produces a refusal instead of disappearing from the report.
-pub fn query_still_backends(config: &EncoderConfig, input: PlanInput) -> Vec<BackendSupportReport> {
+pub fn query_still_backends(
+    config: &EncoderConfig,
+    input: impl Into<StillInput>,
+) -> Vec<BackendSupportReport> {
+    let input = input.into();
     [
         Av1Backend::Zenravif,
         Av1Backend::Zenav1Svt,
@@ -54,9 +124,13 @@ pub fn query_still_backends(config: &EncoderConfig, input: PlanInput) -> Vec<Bac
 
 fn query_one(
     config: &EncoderConfig,
-    input: PlanInput,
+    source: StillInput,
     backend: Av1Backend,
 ) -> Result<SuitabilityReport, String> {
+    let input = source.plan_input();
+    if source.is_monochrome() && !cfg!(feature = "encode-mono") {
+        return Err("grayscale requires the encode-mono cargo feature".into());
+    }
     if input.width == 0 || input.height == 0 {
         return Err("still-image width and height must be nonzero".into());
     }
@@ -74,6 +148,7 @@ fn query_one(
     candidate
         .validate_for_input(input)
         .map_err(|e| e.to_string())?;
+    validate_adapter_controls(&candidate, source)?;
     let depth = candidate.coded_bit_depth_bits(input.input_is_16bit);
     match backend {
         Av1Backend::Zenravif => {
@@ -86,12 +161,14 @@ fn query_one(
         }
         #[cfg(feature = "zenav1-svt")]
         Av1Backend::Zenav1Svt => {
+            crate::encoder_svt_rs::validate_still_controls(&candidate, source.is_monochrome())?;
             let chroma = match candidate.chroma_subsampling {
                 EncodeChromaSubsampling::Yuv420 => svtav1::avif::ChromaSubsampling::Yuv420,
                 EncodeChromaSubsampling::Yuv444 => svtav1::avif::ChromaSubsampling::Yuv444,
             };
             let mut encoder = svtav1::avif::AvifEncoder::new()
-                .with_quality(candidate.quality)
+                .with_quality(candidate.quality.clamp(1.0, 100.0))
+                .with_film_grain(candidate.svt_film_grain.clone())
                 .with_bit_depth(depth)
                 .with_chroma_subsampling(chroma)
                 .with_native_preset(candidate.svt_route_preset.unwrap_or_else(|| {
@@ -112,6 +189,17 @@ fn query_one(
                 }
             }
             encoder
+                .validate_configuration_for_input(
+                    input.width,
+                    input.height,
+                    if source.is_monochrome() {
+                        svtav1::avif::StillInputFormat::Monochrome
+                    } else {
+                        svtav1::avif::StillInputFormat::Yuv420
+                    },
+                )
+                .map_err(|e| e.to_string())?;
+            encoder
                 .resolve_still_policy()
                 .map(|plan| match plan.suitability {
                     svtav1::avif::StillSuitability::Uncalibrated => {
@@ -121,18 +209,120 @@ fn query_one(
                 .map_err(|e| e.to_string())
         }
         #[cfg(feature = "zenav1-aom-encode")]
-        Av1Backend::Zenav1Aom => crate::encoder_aom::key_frame_config(
-            &candidate,
-            input.width as usize,
-            input.height as usize,
-            depth,
-            false,
-        )
-        .validate_configuration()
-        .map(|_| SuitabilityReport::NotExposedByBackend)
-        .map_err(|e| e.to_string()),
+        Av1Backend::Zenav1Aom => {
+            if let Some(reason) = crate::encoder_aom::aom_depth_error(depth, source.is_monochrome())
+            {
+                return Err(reason.into());
+            }
+            crate::encoder_aom::key_frame_config(
+                &candidate,
+                input.width as usize,
+                input.height as usize,
+                depth,
+                source.is_monochrome(),
+            )
+            .validate_configuration()
+            .map(|_| SuitabilityReport::NotExposedByBackend)
+            .map_err(|e| e.to_string())
+        }
         _ => Err("backend is not available in this build".into()),
     }
+}
+
+/// Settings that an adapter cannot represent must not be accepted by a query
+/// or silently ignored by a public pixel entry point.
+pub(crate) fn validate_adapter_controls(
+    config: &EncoderConfig,
+    source: StillInput,
+) -> Result<(), String> {
+    if config.gain_map.is_none()
+        && (config.gain_map_alt_colr.is_some() || config.gain_map_alt_icc.is_some())
+    {
+        return Err("alternate gain-map color metadata requires a gain map".into());
+    }
+    #[cfg(any(feature = "zenav1-svt", feature = "__expert"))]
+    if config.backend != Av1Backend::Zenav1Svt
+        && config.svt != crate::svt_params::SvtParams::default()
+    {
+        return Err("explicit SVT coding controls require zenav1-svt".into());
+    }
+    #[cfg(feature = "zenav1-svt")]
+    if config.backend != Av1Backend::Zenav1Svt
+        && config.svt_film_grain != SvtFilmGrainConfig::default()
+    {
+        return Err("explicit SVT film-grain controls cannot migrate to another backend".into());
+    }
+    #[cfg(feature = "encode-imazen")]
+    {
+        // These preferences are stored but have no consumer in the pinned
+        // zenravif adapter. Do not present them as enabled encoding tools.
+        if config.palette_preference.is_some() || config.fast_tier_budgets.is_some() {
+            return Err(
+                "palette preferences and fast-tier budgets are not wired in the pinned adapter"
+                    .into(),
+            );
+        }
+        if config.backend != Av1Backend::Zenravif
+            && (!config.enable_qm
+                || config.enable_vaq
+                || config.vaq_strength != 1.0
+                || config.tune_still_image
+                || config.seg_boost.is_some()
+                || config.override_cdef.is_some()
+                || config.override_rdo_tx_decision.is_some()
+                || config.override_sgr_full.is_some()
+                || config.override_lru_on_skip.is_some()
+                || config.override_segmentation_complex.is_some()
+                || config.override_encode_bottomup.is_some()
+                || config.override_partition_range.is_some()
+                || config.override_complex_prediction_modes.is_some()
+                || config.override_lrf.is_some()
+                || config.override_fast_deblock.is_some()
+                || config.trellis.is_some())
+        {
+            return Err(
+                "explicit zenravif coding controls cannot migrate to another backend".into(),
+            );
+        }
+        #[cfg(not(feature = "__expert"))]
+        if config.override_partition_range.is_some()
+            || config.override_complex_prediction_modes.is_some()
+            || config.override_lrf.is_some()
+            || config.override_fast_deblock.is_some()
+        {
+            return Err(
+                "these expert controls require the __expert feature to reach the encoder".into(),
+            );
+        }
+    }
+    #[cfg(any(feature = "two-pass-butteraugli", feature = "two-pass-zensim"))]
+    if config.backend != Av1Backend::Zenravif && config.sb_q_scale.is_some() {
+        return Err("superblock scale maps require zenravif".into());
+    }
+    if matches!(
+        config.backend,
+        Av1Backend::Zenav1Svt | Av1Backend::Zenav1Aom
+    ) {
+        let matrix = if source.is_monochrome() { 2 } else { 6 };
+        if config.matrix_coefficients.is_some_and(|m| m != matrix) {
+            return Err("requested matrix is not implemented by this pixel conversion path".into());
+        }
+        if config
+            .color_primaries
+            .is_some_and(|v| !matches!(v, 1 | 2 | 6 | 9 | 11 | 12))
+        {
+            return Err("requested color primaries cannot be preserved by this AVIF muxer".into());
+        }
+        if config
+            .transfer_characteristics
+            .is_some_and(|v| !matches!(v, 1 | 2 | 4..=18))
+        {
+            return Err(
+                "requested transfer characteristics cannot be preserved by this AVIF muxer".into(),
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Checked ordinal effort, independent of a backend's preset numbering.
@@ -152,6 +342,10 @@ impl Effort {
 
 /// The exact source a strict parity request targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(
+    feature = "routing-replay",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub enum ParityReference {
     #[default]
     Mainline420,
@@ -169,12 +363,20 @@ impl ParityReference {
 
 /// Policy is independent of which backend an automatic request prefers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "routing-replay",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub enum StillPolicy {
     SvtParity(ParityReference),
     Zen,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "routing-replay",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub enum BackendSelection {
     /// Use exactly this backend; an unsupported request is an error.
     Explicit(Av1Backend),
@@ -229,6 +431,10 @@ impl Default for RoutingRequest {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
+#[cfg_attr(
+    feature = "routing-replay",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub enum RouteReason {
     ExplicitBackend,
     StrictParity,
@@ -253,13 +459,14 @@ impl core::fmt::Display for RouteError {
 }
 impl std::error::Error for RouteError {}
 
-/// An immutable resolved configuration, executable through all four RGB/RGBA
-/// still entry points. Cloning/reusing a plan does not rerun backend selection.
-/// This is not yet a portable serialized replay/cache record.
+/// An immutable resolved configuration for RGB/RGBA and feature-gated Gray8.
+/// Cloning/reusing it never reruns backend selection. The `routing-replay`
+/// feature adds versioned portable records and complete cache identities.
 #[derive(Debug, Clone)]
 pub struct ResolvedRoute {
     config: EncoderConfig,
     input: PlanInput,
+    source: StillInput,
     request: RoutingRequest,
     reports: Vec<BackendSupportReport>,
     reason: RouteReason,
@@ -276,6 +483,9 @@ impl ResolvedRoute {
     }
     pub fn input(&self) -> PlanInput {
         self.input
+    }
+    pub fn input_kind(&self) -> StillInput {
+        self.source
     }
     pub fn request(&self) -> RoutingRequest {
         self.request
@@ -301,7 +511,8 @@ impl ResolvedRoute {
         deep: bool,
         alpha: bool,
     ) -> crate::Result<()> {
-        if width != self.input.width as usize
+        if self.source.is_monochrome()
+            || width != self.input.width as usize
             || height != self.input.height as usize
             || deep != self.input.input_is_16bit
             || alpha != self.input.input_has_alpha
@@ -311,6 +522,22 @@ impl ResolvedRoute {
             )));
         }
         Ok(())
+    }
+    #[cfg(feature = "encode-mono")]
+    pub fn encode_gray8(
+        &self,
+        img: imgref::ImgRef<'_, u8>,
+        stop: almost_enough::StopToken,
+    ) -> crate::Result<crate::EncodedImage> {
+        if !self.source.is_monochrome()
+            || img.width() != self.input.width as usize
+            || img.height() != self.input.height as usize
+        {
+            return Err(whereat::at!(crate::Error::InvalidParameters(
+                "resolved route input kind or dimensions changed".into()
+            )));
+        }
+        crate::encode_gray8(img, &self.config, stop)
     }
     pub fn encode_rgb8(
         &self,
@@ -347,14 +574,22 @@ impl ResolvedRoute {
 }
 
 impl EncoderConfig {
+    /// Validate the actual pixel entry point against the same checks as routing.
+    pub fn validate_still_input(&self, input: impl Into<StillInput>) -> Result<(), RouteError> {
+        query_one(self, input.into(), self.backend)
+            .map(|_| ())
+            .map_err(RouteError)
+    }
     /// Resolve a real executable route without changing pixel requirements.
     /// Unknown calibration preserves a supported preferred backend; format
     /// fallback is explicitly labelled and never presented as an RD win.
     pub fn resolve_route(
         &self,
         request: RoutingRequest,
-        input: PlanInput,
+        source: impl Into<StillInput>,
     ) -> Result<ResolvedRoute, RouteError> {
+        let source = source.into();
+        let input = source.plan_input();
         let mut base = self.clone();
         if let Some(effort) = request.effort {
             // Legacy wrapper speed buckets. SVT additionally resolves the native
@@ -366,7 +601,7 @@ impl EncoderConfig {
             {
                 return Err(RouteError("SvtParity cannot select another backend".into()));
             }
-            if input.input_has_alpha {
+            if input.input_has_alpha || source.is_monochrome() {
                 return Err(RouteError(
                     "SvtParity cannot code the Rust-only monochrome alpha extension".into(),
                 ));
@@ -401,7 +636,7 @@ impl EncoderConfig {
                 );
             }
         }
-        let mut reports = query_still_backends(&base, input);
+        let mut reports = query_still_backends(&base, source);
         // Explicit legacy/unknown backend identities must also get a refusal.
         if !reports.iter().any(|r| r.backend == preferred) {
             reports.push(BackendSupportReport {
@@ -440,6 +675,7 @@ impl EncoderConfig {
         Ok(ResolvedRoute {
             config,
             input,
+            source,
             request,
             reports,
             reason,

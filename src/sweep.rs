@@ -1991,8 +1991,17 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
             h.bytes_opt(Some(b"svt-parity-v1"));
             h.bytes_opt(Some(reference.id().as_bytes()));
         }
-        for enhancement in [svtav1::avif::ZenEnhancement::AomIntraEdgeFilter, svtav1::avif::ZenEnhancement::AomRestorationUnitSearch] {
-            if config.svt_route_enhancements.contains(enhancement) { h.bytes_opt(Some(enhancement.id().as_bytes())); }
+        for enhancement in [
+            svtav1::avif::ZenEnhancement::AomIntraEdgeFilter,
+            svtav1::avif::ZenEnhancement::AomRestorationUnitSearch,
+        ] {
+            if config.svt_route_enhancements.contains(enhancement) {
+                h.bytes_opt(Some(enhancement.id().as_bytes()));
+            }
+        }
+        if config.svt_film_grain != Default::default() {
+            h.bytes_opt(Some(b"svt-film-grain-v1"));
+            hash_svt_grain(&mut h, &config.svt_film_grain);
         }
         h.u8(qp);
         h.u8(alpha_qp);
@@ -4043,5 +4052,91 @@ mod tests {
             main_bd10_s4, t1_bd10_s4,
             "T1's s4 leg must reproduce A1's cell id, not open a new identity space"
         );
+    }
+}
+
+#[cfg(feature = "zenav1-svt")]
+fn hash_svt_grain(h: &mut Fnv, grain: &crate::backend_router::SvtFilmGrainConfig) {
+    let crate::backend_router::SvtFilmGrainConfig {
+        denoise_strength,
+        denoise_apply,
+        adaptive,
+        table,
+        ignore_ref,
+    } = grain;
+    h.u8(*denoise_strength);
+    h.u8(u8::from(*denoise_apply));
+    h.u8(u8::from(*adaptive));
+    h.u8(u8::from(*ignore_ref));
+    h.u8(u8::from(table.is_some()));
+    if let Some(table) = table {
+        let crate::backend_router::SvtFilmGrainTable {
+            apply_grain,
+            random_seed,
+            num_y_points,
+            scaling_points_y,
+            chroma_scaling_from_luma,
+            num_cb_points,
+            scaling_points_cb,
+            num_cr_points,
+            scaling_points_cr,
+            scaling_shift,
+            ar_coeff_lag,
+            ar_coeffs_y,
+            ar_coeffs_cb,
+            ar_coeffs_cr,
+            ar_coeff_shift,
+            grain_scale_shift,
+            cb_mult,
+            cb_luma_mult,
+            cb_offset,
+            cr_mult,
+            cr_luma_mult,
+            cr_offset,
+            overlap_flag,
+            clip_to_restricted_range,
+        } = table;
+        h.u8(u8::from(*apply_grain));
+        h.u16(*random_seed);
+        h.u64(*num_y_points as u64);
+        for point in scaling_points_y {
+            for value in point {
+                h.u8(*value);
+            }
+        }
+        h.u8(u8::from(*chroma_scaling_from_luma));
+        h.u64(*num_cb_points as u64);
+        for point in scaling_points_cb {
+            for value in point {
+                h.u8(*value);
+            }
+        }
+        h.u64(*num_cr_points as u64);
+        for point in scaling_points_cr {
+            for value in point {
+                h.u8(*value);
+            }
+        }
+        h.u8(*scaling_shift);
+        h.u8(*ar_coeff_lag);
+        for value in ar_coeffs_y {
+            h.u16(*value as u16);
+        }
+        for value in ar_coeffs_cb {
+            h.u16(*value as u16);
+        }
+        for value in ar_coeffs_cr {
+            h.u16(*value as u16);
+        }
+        h.u8(*ar_coeff_shift);
+        h.u8(*grain_scale_shift);
+        h.u8(*cb_mult);
+        h.u8(*cb_luma_mult);
+        h.u16(*cb_offset);
+        h.u8(*cr_mult);
+        h.u8(*cr_luma_mult);
+        h.u16(*cr_offset);
+        h.u8(u8::from(*overlap_flag));
+        h.u8(u8::from(*clip_to_restricted_range));
     }
 }

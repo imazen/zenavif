@@ -331,9 +331,8 @@ pub(crate) fn aom_depth_error(bit_depth: u8, monochrome: bool) -> Option<&'stati
     if monochrome && bit_depth != 8 {
         return Some(
             "Av1Backend::Zenav1Aom codes 8-bit grayscale (Cs400) only: encode_gray8 takes \
-             u8 samples and this seam passes them through as the coded luma, so promoting \
-             them to a 10- or 12-bit swing would need a value-scaling rule nothing here \
-             measures. The 4:2:0 colour path codes 8, 10 and 12 -- use RGB input",
+             u8 samples and this seam maps them to 8-bit studio-range luma. Promotion \
+             to 10- or 12-bit monochrome is not wired or measured. The 4:2:0 colour path codes 8, 10 and 12 -- use RGB input",
         );
     }
     None
@@ -373,11 +372,21 @@ fn cicp_to_serialize_primaries(cp: u8) -> zenavif_serialize::constants::ColorPri
 }
 
 /// See [`cicp_to_serialize_primaries`].
+#[allow(deprecated)]
 fn cicp_to_serialize_transfer(tc: u8) -> zenavif_serialize::constants::TransferCharacteristics {
     use zenavif_serialize::constants::TransferCharacteristics as TC;
     match tc {
         1 => TC::Bt709,
+        4 => TC::Bt470M,
+        5 => TC::Bt470BG,
         6 => TC::Bt601,
+        7 => TC::Smpte240,
+        9 => TC::Log,
+        10 => TC::LogSqrt,
+        11 => TC::Iec61966,
+        12 => TC::Bt1361,
+        15 => TC::Bt2020_12,
+        17 => TC::Smpte428,
         8 => TC::Linear,
         13 => TC::Srgb,
         14 => TC::Bt2020_10,
@@ -755,7 +764,9 @@ pub(crate) fn encode_gray8_aom(
 
     let mut y = Vec::with_capacity(width * height);
     for row in img.rows() {
-        y.extend(row.iter().map(|&s| u16::from(s)));
+        // Gray8 samples have the same full-range pixel semantics as RGB8.
+        // The AOM stream signals studio range, so code 16..235 luma.
+        y.extend(row.iter().map(|&s| 16 + (u16::from(s) * 219 + 127) / 255));
     }
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
