@@ -1800,3 +1800,11 @@ encodes and use the previous reconstruction's map, with 17-point attained
 bounds completed before steering. Seeds fit only first-encode scores from
 canonical train families. See the later shared-instrument addendum in the
 August 7 study document; the one-family pilot is not model qualification.
+
+The full September 8 12/8-family study is now complete:
+`benchmarks/zensim_native_targeting_2026-09-08.md`. Calibrated scalar/neutral
+reach 28/28 jointly witnessed targets within ±1 by three encodes, active 24/28;
+coverage is only 28/80. Independent SSIMULACRA2/Butteraugli disagree on the
+fixed-CQ active arm, and active targeting worsens. Do not promote this spatial
+strategy or model from engagement alone. Exact bytes, costs and controls are
+in the report JSON; use `RESULT_COMPLETE.json` for final artifact status.

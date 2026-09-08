@@ -494,3 +494,15 @@ four analyzer negative controls pass; altered decoded PNG pixels are refused
 before independent judge aggregation. Full artifacts and exact prototype binary
 identity: `/mnt/v/output/zensim/avif-native-target-2026-09-08/`. The full 12/8
 family calibration/evaluation and independent RD judges are the next gate.
+
+### Full matrix completed (later September 8)
+
+The [pinned native targeting study](zensim_native_targeting_2026-09-08.md)
+supersedes the pending status above: 12 training families, eight validation
+families, 504 target cases and all 912 validation outputs judged independently.
+Only 28/80 requests are jointly witnessed. Calibrated scalar/neutral achieve
+28/28 within ±1 by three full encodes; active achieves 24/28. Fixed-CQ active
+steering modestly improves SSIMULACRA2 while worsening Butteraugli in every
+content class. Spatial utility and replacement-model qualification remain
+failed/incomplete. The full costs, controls and sparse-coverage limits are
+preserved in the dated report and JSON.
