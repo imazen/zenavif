@@ -296,6 +296,149 @@ fn the_support_query_agrees_with_the_encode_path() {
     assert!(all_ok && refused, "the matrix must span supported AND refused configurations");
 }
 
+/// **The THIRD query surface: `backend_router::query_still_backends`.**
+///
+/// `validate()` / `validate_for_input()` are one query and the router is
+/// another, and a caller choosing a backend calls the router — so the router
+/// is the one whose answer decides whether this backend is ever reached. It
+/// runs `validate_adapter_controls` on top of the config validation, which is
+/// an ADDITIONAL predicate the test above cannot see: a config the encode path
+/// accepts can still be refused there, and that refusal is invisible to
+/// `validate()`.
+///
+/// This sweeps `matrix_coefficients` alongside the format axes, because the
+/// muxer's matrix is exactly what the newly-supported identity/GBR mode
+/// changes: `mux_aom` writes `MatrixCoefficients::Rgb` (CICP 0) for an
+/// identity encode and `Bt601` (6) otherwise, so an adapter predicate that
+/// hardcodes 6 refuses the one value the adapter itself emits.
+#[test]
+fn the_router_query_agrees_with_the_encode_path() {
+    let src16 = ramp_rgba16(32, 32);
+    let rgb8 = to_rgb8(src16.as_ref());
+
+    let mut checked = 0usize;
+    let mut disagreements = Vec::new();
+    let mut refusals = 0usize;
+    for chroma in [EncodeChromaSubsampling::Yuv444, EncodeChromaSubsampling::Yuv420] {
+        for model in [EncodeColorModel::YCbCr, EncodeColorModel::Rgb] {
+            for range in [None, Some(EncodePixelRange::Full)] {
+                // `None` is the caller who does not care; 6 is what the muxer
+                // writes for a YCbCr encode; 0 is what it writes for identity.
+                for mc in [None, Some(6u8), Some(0u8)] {
+                    let mut cfg = base()
+                        .quality(90.0)
+                        .chroma_subsampling(chroma)
+                        .color_model(model);
+                    if let Some(r) = range {
+                        cfg = cfg.pixel_range(r);
+                    }
+                    if let Some(m) = mc {
+                        cfg = cfg.matrix_coefficients(m);
+                    }
+                    let label = format!("{chroma:?}/{model:?}/{range:?}/mc={mc:?}");
+
+                    let reports = zenavif::backend_router::query_still_backends(
+                        &cfg,
+                        zenavif::PlanInput::rgb8(32, 32),
+                    );
+                    let says = reports
+                        .iter()
+                        .find(|r| r.backend == Av1Backend::Zenav1Aom)
+                        .expect("the router must report on every backend, not omit one")
+                        .supported();
+                    let does = zenavif::encode_rgb8(rgb8.as_ref(), &cfg, stop()).is_ok();
+                    checked += 1;
+                    if !says {
+                        refusals += 1;
+                    }
+                    if says != does {
+                        disagreements.push(format!(
+                            "{label}: router says supported={says} but encode={does}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    eprintln!(
+        "router agreement: {checked} configurations checked, {refusals} refused by the router"
+    );
+    assert!(
+        disagreements.is_empty(),
+        "the routing query must never disagree with the encode path; {} of {checked} did:\n  {}",
+        disagreements.len(),
+        disagreements.join("\n  ")
+    );
+    // Non-vacuity, both directions: the sweep must contain configurations the
+    // router refuses AND configurations it accepts, or "they agree" is trivial.
+    assert!(
+        refusals > 0 && refusals < checked,
+        "the sweep must span refused AND accepted routing answers (got {refusals} of {checked})"
+    );
+
+    // **The specific cell this test was written for, asserted by name.**
+    // Agreement alone would be satisfied by BOTH surfaces refusing, which is
+    // exactly the state this found: the adapter predicate hardcoded
+    // `if mono { 2 } else { 6 }`, so asking for the identity matrix at
+    // `Rgb` + 4:4:4 -- the one configuration whose `colr` box the muxer fills
+    // with CICP 0 -- was refused as "not implemented by this pixel conversion
+    // path". So assert the ANSWER, not only that the two agree on it.
+    let identity444 = base()
+        .quality(90.0)
+        .color_model(EncodeColorModel::Rgb)
+        .chroma_subsampling(EncodeChromaSubsampling::Yuv444)
+        .matrix_coefficients(0);
+    let reports = zenavif::backend_router::query_still_backends(
+        &identity444,
+        zenavif::PlanInput::rgb8(32, 32),
+    );
+    let aom = reports
+        .iter()
+        .find(|r| r.backend == Av1Backend::Zenav1Aom)
+        .expect("the router must report on every backend");
+    assert!(
+        aom.supported(),
+        "requesting the identity matrix (CICP 0) at Rgb + 4:4:4 is requesting exactly what \
+         this backend writes into the colr box; the router refused it: {:?}",
+        aom.refusal
+    );
+    assert!(
+        zenavif::encode_rgb8(rgb8.as_ref(), &identity444, stop()).is_ok(),
+        "and it must encode"
+    );
+
+    // The other direction, so the fix is a correction and not a hole: a matrix
+    // this seam does NOT code is still refused, and identity outside 4:4:4 is
+    // still refused by name (AV1 5.5.2 -- G/B/R planes have no subsampling).
+    let wrong_matrix = base().quality(90.0).matrix_coefficients(9);
+    assert!(
+        !zenavif::backend_router::query_still_backends(
+            &wrong_matrix,
+            zenavif::PlanInput::rgb8(32, 32),
+        )
+        .iter()
+        .find(|r| r.backend == Av1Backend::Zenav1Aom)
+        .unwrap()
+        .supported(),
+        "a matrix this conversion path does not implement must still be refused"
+    );
+    let identity420 = base()
+        .quality(90.0)
+        .color_model(EncodeColorModel::Rgb)
+        .chroma_subsampling(EncodeChromaSubsampling::Yuv420);
+    assert!(
+        !zenavif::backend_router::query_still_backends(
+            &identity420,
+            zenavif::PlanInput::rgb8(32, 32),
+        )
+        .iter()
+        .find(|r| r.backend == Av1Backend::Zenav1Aom)
+        .unwrap()
+        .supported(),
+        "identity at 4:2:0 is not conformant and must stay refused"
+    );
+}
+
 fn base() -> EncoderConfig {
     EncoderConfig::new().backend(Av1Backend::Zenav1Aom)
 }

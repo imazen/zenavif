@@ -82,19 +82,31 @@ same bytes; the existing sweep fingerprint remains a separate alias reducer.
 
 This table describes wrapper support, not everything the raw codecs can do.
 
+**The zenav1-aom column is asserted, not maintained by hand.** Its rows are the
+capabilities `tests/aom_roundtrip_loss.rs` sweeps: `the_support_query_agrees
+_with_the_encode_path` (72 config x input pairs) and `the_router_query_agrees
+_with_the_encode_path` (24 configurations through `query_still_backends`) both
+require the answer here to equal what the encode path does, in both directions,
+and `every_format_orders_least_lossy_first` measures the loss each row costs.
+That coupling exists because these rows had gone stale in the refusing
+direction: four of them said "refused" for capabilities the encoder had, and
+the adapter's own matrix predicate refused the identity matrix on the exact
+configuration whose `colr` box it fills with it.
+
+
 | Requirement | zenravif | zenav1-svt | zenav1-aom |
 |---|---|---|---|
-| RGB8 / RGB16 | Yes; deep input uses identity RGB/4:4:4 | Yes, 4:2:0 | Yes, 4:2:0 |
-| RGBA8 / RGBA16 | Yes | Yes | Refused: no auxiliary alpha item |
+| RGB8 / RGB16 | Yes; deep input uses identity RGB/4:4:4 | Yes, 4:2:0 | Yes, 4:4:4 or 4:2:0 |
+| RGBA8 / RGBA16 | Yes | Yes | Yes; auxiliary Cs400 full-range alpha item referenced by `auxl` |
 | Gray8 | Yes | Yes, including selected native -1 | Yes; full-range input now converted to the coded studio range |
 | Coded depth | 8/10 through this adapter | 8/10 | 8/10/12 color; 8 mono |
-| Color subsampling | 4:4:4 / 4:2:0 where input/model permit | 4:2:0 | 4:2:0; raw codec also has 4:2:2/4:4:4 |
-| Pixel range | Existing zenravif model/range validation | Full | Limited |
-| Explicit conversion matrix | Existing zenravif path | BT.601 color; unspecified mono | BT.601 color; unspecified mono |
+| Color subsampling | 4:4:4 / 4:2:0 where input/model permit | 4:2:0 | 4:4:4 / 4:2:0; raw codec also has 4:2:2 |
+| Pixel range | Existing zenravif model/range validation | Full | Full or limited; identity and lossless force full |
+| Explicit conversion matrix | Existing zenravif path | BT.601 color; unspecified mono | BT.601 color; identity (CICP 0) under the RGB model at 4:4:4; unspecified mono |
 | ICC + explicit nclx | Owner muxer behavior | Both retained independently | Both retained independently |
 | Transfer codes represented by shared muxer | Owner mapping | Full represented set 1/2/4–18 | Full represented set 1/2/4–18 |
 | Exif/XMP, rotation/mirror, CLLI/mastering display | Existing paths | Existing paths, replayed | Existing paths, replayed |
-| Source-lossless / gain map | Existing supported formats | Refused by RGB adapter (raw coded-lossless planes exist) | Refused by wrapper |
+| Source-lossless / gain map | Existing supported formats | Refused by RGB adapter (raw coded-lossless planes exist) | Lossless: yes, at 4:4:4 + RGB/identity + full range (measured bit-exact round trip); gain map: refused |
 | C film-grain model or table | No exposed route requirement | Wired for primary color | No exposed wrapper control |
 | SvtParity / named C reference | Refused | Supported policy, subject to tracked parity divergences | Refused |
 | Explicit Zen SVT enhancements | Refused | Opt-in, research tip only | Refused |

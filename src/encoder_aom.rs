@@ -523,6 +523,48 @@ fn wants_identity(config: &EncoderConfig) -> bool {
     config.color_model == EncodeColorModel::Rgb
 }
 
+/// **The CICP matrix this backend actually signals for a given request** — the
+/// one value a caller may ask for and get.
+///
+/// Single source of truth for the two places that must agree, or the adapter
+/// refuses what the container is about to write: the AVIF `colr` box (see
+/// `mux_aom`'s `set_matrix_coefficients`) and the adapter's accept/refuse
+/// predicate in `backend_router::validate_adapter_controls`.
+///
+/// It is a function rather than two copies of one expression because the two
+/// copies HAD drifted, and the drift was measured: the muxer emits
+/// `MatrixCoefficients::Rgb` (CICP 0) for an identity encode, while the
+/// adapter predicate hardcoded `if mono { 2 } else { 6 }` and so refused CICP
+/// 0 with *"requested matrix is not implemented by this pixel conversion
+/// path"* — on the very configuration whose pixel conversion path is the
+/// identity one. A caller asking for exactly what the muxer was about to write
+/// got a refusal naming a capability that was not missing.
+///
+/// **Not the sequence header.** `key_frame_config` codes `MC_IDENTITY` (0) for
+/// the GBR path and "unspecified" (2) otherwise, deliberately: this seam lets
+/// the `colr` box carry the colorimetry (module docs above), and a decoder
+/// resolving "unspecified" falls back to BT.601 — which is what
+/// `rgbx_to_yuv*` converts with, so the two agree in effect without signalling
+/// the same fact twice. The identity case is the one where the sequence header
+/// MUST carry it, because it changes how the planes are interpreted rather
+/// than merely describing them, and there both values are 0.
+///
+/// * **0 (identity / GBR)** when the RGB colour model is requested. The three
+///   planes ARE G/B/R, so no matrix is applied; AV1 5.5.2 requires 4:4:4 for
+///   it, which [`reject_unsupported_config`] enforces separately.
+/// * **2 (unspecified)** for monochrome: there is no chroma to relate to luma,
+///   and naming a matrix would describe planes that do not exist.
+/// * **6 (BT.601)** otherwise, which is what `rgbx_to_yuv*` implements.
+pub(crate) fn coded_matrix_coefficients(config: &EncoderConfig, monochrome: bool) -> u8 {
+    if monochrome {
+        2
+    } else if wants_identity(config) {
+        0
+    } else {
+        6
+    }
+}
+
 /// The forward-conversion range that matches [`wants_full_range`].
 fn fwd_range(config: &EncoderConfig) -> crate::yuv_convert::YuvRange {
     if wants_full_range(config) {
@@ -556,7 +598,6 @@ fn mux_aom(
     monochrome: bool,
     chroma: (bool, bool),
     full_range: bool,
-    identity: bool,
     alpha: Option<Vec<u8>>,
 ) -> Result<EncodedImage> {
     let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
@@ -573,13 +614,14 @@ fn mux_aom(
         .set_full_color_range(full_range)
         .set_color_primaries(cicp_to_serialize_primaries(color_primaries))
         .set_transfer_characteristics(cicp_to_serialize_transfer(transfer_characteristics))
-        .set_matrix_coefficients(if monochrome {
-            zenavif_serialize::constants::MatrixCoefficients::Unspecified
-        } else if identity {
-            // `MatrixCoefficients::Rgb` IS CICP 0 (GBR/identity).
-            zenavif_serialize::constants::MatrixCoefficients::Rgb
-        } else {
-            zenavif_serialize::constants::MatrixCoefficients::Bt601
+        // Derived, not passed: an `identity: bool` argument here would be a
+        // second copy of a fact the config already carries, and the caller
+        // could pass the wrong one. `MatrixCoefficients::Rgb` IS CICP 0
+        // (GBR/identity); `Unspecified` is 2; `Bt601` is 6.
+        .set_matrix_coefficients(match coded_matrix_coefficients(config, monochrome) {
+            0 => zenavif_serialize::constants::MatrixCoefficients::Rgb,
+            2 => zenavif_serialize::constants::MatrixCoefficients::Unspecified,
+            _ => zenavif_serialize::constants::MatrixCoefficients::Bt601,
         });
     if let Some(ref exif) = config.exif {
         aviffy.set_exif(exif.clone());
@@ -869,7 +911,6 @@ fn finish_color(
         false,
         (cfg.ss_x == 1, cfg.ss_y == 1),
         cfg.color.full_range,
-        cfg.color.matrix_coefficients == 0,
         None,
     )
 }
@@ -970,7 +1011,6 @@ fn finish_color_with_alpha(
         false,
         (cfg.ss_x == 1, cfg.ss_y == 1),
         cfg.color.full_range,
-        cfg.color.matrix_coefficients == 0,
         Some(alpha_payload),
     )
 }
@@ -1197,7 +1237,6 @@ pub(crate) fn encode_gray8_aom(
         // and `set_monochrome(true)` is what actually suppresses chroma.
         (cfg.ss_x == 1, cfg.ss_y == 1),
         cfg.color.full_range,
-        cfg.color.matrix_coefficients == 0,
         None,
     )
 }

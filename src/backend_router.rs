@@ -303,7 +303,28 @@ pub(crate) fn validate_adapter_controls(
         config.backend,
         Av1Backend::Zenav1Svt | Av1Backend::Zenav1Aom
     ) {
-        let matrix = if source.is_monochrome() { 2 } else { 6 };
+        // The aom seam's matrix is DERIVED from the seam's own rule rather
+        // than restated here, because restating it is what made this refusal
+        // wrong: `if mono { 2 } else { 6 }` refused CICP 0 with the message
+        // below even at `color_model(Rgb)` + 4:4:4, which is precisely where
+        // `mux_aom` writes CICP 0 itself — so a caller who asked for exactly
+        // what the muxer was about to write was told the pixel conversion path
+        // does not implement it. It does; it is the identity path.
+        // `reject_unsupported_config` still refuses identity outside 4:4:4,
+        // by name, which is the refusal that IS true.
+        let matrix = match config.backend {
+            #[cfg(feature = "zenav1-aom-encode")]
+            Av1Backend::Zenav1Aom => {
+                crate::encoder_aom::coded_matrix_coefficients(config, source.is_monochrome())
+            }
+            _ => {
+                if source.is_monochrome() {
+                    2
+                } else {
+                    6
+                }
+            }
+        };
         if config.matrix_coefficients.is_some_and(|m| m != matrix) {
             return Err("requested matrix is not implemented by this pixel conversion path".into());
         }

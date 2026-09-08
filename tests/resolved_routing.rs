@@ -81,17 +81,35 @@ fn twelve_bit_requirement_routes_to_aom_and_replays_the_exact_configuration() {
         RoutingRequest::default().with_backend(BackendSelection::Explicit(Av1Backend::Zenav1Svt));
     assert!(cfg.resolve_route(exact, PlanInput::rgb8(32, 32)).is_err());
 }
+/// **Alpha no longer forces a fallback away from aom — it is served in place.**
+///
+/// This test used to assert `assert_ne!(route.backend(), Zenav1Aom)`, because
+/// the aom seam refused RGBA outright and the router had to route around it.
+/// The seam now emits the auxiliary Cs400 full-range item AVIF requires, so
+/// routing away would be routing away from a backend that supports the
+/// request. The assertion is inverted rather than deleted: the property worth
+/// gating was never "some other backend runs", it is that **the encode keeps
+/// the alpha**, and that half is unchanged and still asserted below.
 #[cfg(feature = "zenav1-aom-encode")]
 #[test]
-fn alpha_requirement_falls_back_and_actual_rgba_encode_keeps_alpha() {
+fn alpha_is_served_by_aom_in_place_and_the_rgba_encode_keeps_alpha() {
     let cfg = config(Av1Backend::Zenav1Aom);
     let route = cfg
         .resolve_route(RoutingRequest::default(), PlanInput::rgba8(32, 32))
         .unwrap();
-    assert_ne!(route.backend(), Av1Backend::Zenav1Aom);
+    assert_eq!(
+        route.backend(),
+        Av1Backend::Zenav1Aom,
+        "aom supports auxiliary alpha now; routing away from it would be a stale capability model"
+    );
+    assert_eq!(
+        route.reason(),
+        RouteReason::PreferredBackendSupported,
+        "and the reason must say the preferred backend was supported, not that it fell back"
+    );
     let img = Img::new(vec![Rgba::new(80, 100, 120, 128); 32 * 32], 32, 32);
     let out = route.encode_rgba8(img.as_ref(), stop()).unwrap();
-    assert!(out.alpha_byte_size > 0);
+    assert!(out.alpha_byte_size > 0, "the auxiliary alpha item must carry bytes");
     zenavif::decode(&out.avif_file).unwrap();
 }
 #[cfg(feature = "zenav1-svt")]
