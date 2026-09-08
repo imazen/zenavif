@@ -318,6 +318,12 @@ impl Av1Backend {
 #[derive(Debug, Clone)]
 pub struct EncoderConfig {
     pub(crate) backend: Av1Backend,
+    #[cfg(feature = "zenav1-svt")]
+    pub(crate) svt_route_policy: Option<svtav1::avif::EncodingPolicy>,
+    #[cfg(feature = "zenav1-svt")]
+    pub(crate) svt_route_preset: Option<svtav1::avif::NativePreset>,
+    #[cfg(feature = "zenav1-svt")]
+    pub(crate) svt_route_enhancements: svtav1::avif::ZenEnhancements,
     pub(crate) quality: f32,
     pub(crate) speed: u8,
     pub(crate) alpha_quality: Option<f32>,
@@ -445,6 +451,12 @@ impl Default for EncoderConfig {
     fn default() -> Self {
         Self {
             backend: Av1Backend::default(),
+            #[cfg(feature = "zenav1-svt")]
+            svt_route_policy: None,
+            #[cfg(feature = "zenav1-svt")]
+            svt_route_preset: None,
+            #[cfg(feature = "zenav1-svt")]
+            svt_route_enhancements: Default::default(),
             quality: 75.0,
             speed: 4,
             alpha_quality: None,

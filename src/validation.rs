@@ -321,6 +321,20 @@ impl crate::EncoderConfig {
     }
 
     fn validate_backend_and_color(&self) -> Result<(), ValidationError> {
+        #[cfg(feature = "zenav1-svt")]
+        if !self.svt_route_enhancements.is_empty() && (self.svt_route_policy.is_some() || self.backend != crate::Av1Backend::Zenav1Svt) {
+            return Err(ValidationError::BackendUnsupportedParam {
+                backend: "SVT Zen enhancements", param: "policy/backend", detail: "explicit enhancements require Zen policy on the SVT backend",
+            });
+        }
+
+
+        #[cfg(feature = "zenav1-svt")]
+        if self.svt_route_policy.is_some() && self.backend != crate::Av1Backend::Zenav1Svt {
+            return Err(ValidationError::BackendUnsupportedParam {
+                backend: "SvtParity", param: "backend", detail: "strict SVT policy cannot be transferred to another backend",
+            });
+        }
         // The deprecated svtav1 backend exists in no build (the
         // encode-svtav1 feature was never shipped); without this check
         // the encode entry points would silently serve the request with
@@ -491,8 +505,7 @@ impl crate::EncoderConfig {
             return Err(ValidationError::BackendUnsupportedParam {
                 backend: BACKEND,
                 param: "lossless",
-                detail: "zenav1-svt has no lossless mode (QP 0 is not \
-                         mathematically lossless)",
+                detail: "this RGB adapter does not expose source-lossless encoding; the raw SVT codec supports coded-lossless planes",
             });
         }
         Ok(())

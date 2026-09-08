@@ -1981,7 +1981,19 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
     #[cfg(feature = "zenav1-svt")]
     if config.backend == crate::Av1Backend::Zenav1Svt {
         let (preset, qp, alpha_qp) = crate::encoder_svt_rs::svt_resolved_identity(config);
-        h.u8(preset);
+        h.u8(preset as u8); // signed research -1 has the stable 0xff identity
+        if config.svt_route_preset.is_some() {
+            h.bytes_opt(Some(b"svt-route-native-v1"));
+            // Auxiliary monochrome streams still follow the wrapper speed.
+            h.u8(crate::encoder_svt_rs::speed_to_svt_preset(config.speed));
+        }
+        if let Some(svtav1::avif::EncodingPolicy::SvtParity(reference)) = config.svt_route_policy {
+            h.bytes_opt(Some(b"svt-parity-v1"));
+            h.bytes_opt(Some(reference.id().as_bytes()));
+        }
+        for enhancement in [svtav1::avif::ZenEnhancement::AomIntraEdgeFilter, svtav1::avif::ZenEnhancement::AomRestorationUnitSearch] {
+            if config.svt_route_enhancements.contains(enhancement) { h.bytes_opt(Some(enhancement.id().as_bytes())); }
+        }
         h.u8(qp);
         h.u8(alpha_qp);
         // Still-image knobs, hashed in their RESOLVED form — after the

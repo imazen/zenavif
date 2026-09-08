@@ -2188,6 +2188,7 @@ dependencies = [
 [[package]]
 name = "zenav1-aom-dsp"
 version = "0.0.1"
+source = "git+https://github.com/imazen/zenav1-aom?rev=14124356c46f813ac7656b8e7b6631f466b666b0#14124356c46f813ac7656b8e7b6631f466b666b0"
 dependencies = [
  "archmage",
  "magetypes",
@@ -2196,7 +2197,7 @@ dependencies = [
 [[package]]
 name = "zenav1-aom-dsp"
 version = "0.0.1"
-source = "git+https://github.com/imazen/zenav1-aom?rev=14124356c46f813ac7656b8e7b6631f466b666b0#14124356c46f813ac7656b8e7b6631f466b666b0"
+source = "git+https://github.com/imazen/zenav1-aom?rev=93d12c35819bae531a9e5111eb783b398cdd6772#93d12c35819bae531a9e5111eb783b398cdd6772"
 dependencies = [
  "archmage",
  "magetypes",
@@ -2205,13 +2206,15 @@ dependencies = [
 [[package]]
 name = "zenav1-aom-encode"
 version = "0.0.1"
+source = "git+https://github.com/imazen/zenav1-aom?rev=93d12c35819bae531a9e5111eb783b398cdd6772#93d12c35819bae531a9e5111eb783b398cdd6772"
 dependencies = [
- "zenav1-aom-dsp 0.0.1",
+ "zenav1-aom-dsp 0.0.1 (git+https://github.com/imazen/zenav1-aom?rev=93d12c35819bae531a9e5111eb783b398cdd6772)",
 ]
 
 [[package]]
 name = "zenav1-svt"
 version = "0.1.0"
+source = "git+https://github.com/imazen/zenav1-svt?rev=bb069a7c9d3dcef1232f0d9583a0081fa9fdf823#bb069a7c9d3dcef1232f0d9583a0081fa9fdf823"
 dependencies = [
  "zenav1-svt-dsp",
  "zenav1-svt-encoder",
@@ -2221,6 +2224,7 @@ dependencies = [
 [[package]]
 name = "zenav1-svt-dsp"
 version = "0.1.0"
+source = "git+https://github.com/imazen/zenav1-svt?rev=bb069a7c9d3dcef1232f0d9583a0081fa9fdf823#bb069a7c9d3dcef1232f0d9583a0081fa9fdf823"
 dependencies = [
  "archmage",
  "magetypes",
@@ -2230,6 +2234,7 @@ dependencies = [
 [[package]]
 name = "zenav1-svt-encoder"
 version = "0.1.0"
+source = "git+https://github.com/imazen/zenav1-svt?rev=bb069a7c9d3dcef1232f0d9583a0081fa9fdf823#bb069a7c9d3dcef1232f0d9583a0081fa9fdf823"
 dependencies = [
  "almost-enough",
  "archmage",
@@ -2243,6 +2248,7 @@ dependencies = [
 [[package]]
 name = "zenav1-svt-types"
 version = "0.1.0"
+source = "git+https://github.com/imazen/zenav1-svt?rev=bb069a7c9d3dcef1232f0d9583a0081fa9fdf823#bb069a7c9d3dcef1232f0d9583a0081fa9fdf823"
 dependencies = [
  "enough",
  "whereat",

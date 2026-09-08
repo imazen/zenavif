@@ -151,7 +151,7 @@ aom-decode = { package = "zenav1-aom-decode", git = "https://github.com/imazen/z
 # `21544fde`, the root fix for the `--cq-level 0` (quality 100) panic, plus
 # the `KeyFrameConfig` tile / SB128 fields the seam now sets to their
 # `allintra_speed0` defaults. `tests/aom_encode_backend.rs` gates cq 0 exact.
-aom-encode = { package = "zenav1-aom-encode", git = "https://github.com/imazen/zenav1-aom", rev = "a7b1ab13fc2ba1c0f4fb05282ab40e417bc32190", optional = true }
+aom-encode = { package = "zenav1-aom-encode", git = "https://github.com/imazen/zenav1-aom", rev = "93d12c35819bae531a9e5111eb783b398cdd6772", optional = true }
 archmage = { version = "0.9.29", features = ["macros", "avx512"] }
 magetypes = { version = "0.9.29"}
 safe_unaligned_simd = "0.2.5"
@@ -281,7 +281,7 @@ ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/ima
 # Retires mono/alpha geometry and preset floors; direct QP-0 tests now require
 # exact mono/native-10 reconstruction. Root SIMD patches below are required
 # because Cargo does not inherit the dependency workspace's patch table.
-svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "4e688a545847b3e6a40a3b46fc158dfd46331c3d", optional = true }
+svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "bb069a7c9d3dcef1232f0d9583a0081fa9fdf823", optional = true }
 # AVIF container muxer for the zenav1-svt backend (the zenravif backend muxes
 # inside zenravif; this backend muxes in-crate). The 0.2.0 version is
 # supplied by the [patch.crates-io] git pin below until 0.2.0 publishes.
@@ -744,9 +744,5 @@ required-features = ["encode"]
 [profile.release]
 debug = "line-tables-only"
 
-# Temporary local composition while backend-owned support APIs are validated.
-# Replace with verified Git pins before publishing this routing change.
-[patch."https://github.com/imazen/zenav1-svt"]
-zenav1-svt = { path = "../zenav1-svt/rust/svtav1" }
-[patch."https://github.com/imazen/zenav1-aom"]
-zenav1-aom-encode = { path = "../zenav1-aom/crates/aom-encode" }
+# Backend support/policy APIs are pinned to pushed commits. No sibling backend
+# checkout or local patch is required for configuration resolution.

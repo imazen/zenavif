@@ -142,9 +142,9 @@ pub(crate) fn speed_to_svt_preset(speed: u8) -> u8 {
 /// merging cells that differ, so the fingerprint routes here instead.
 // Only `src/sweep.rs` (behind `__expert`) calls this.
 #[cfg_attr(not(feature = "__expert"), allow(dead_code))]
-pub(crate) fn svt_resolved_identity(config: &crate::EncoderConfig) -> (u8, u8, u8) {
+pub(crate) fn svt_resolved_identity(config: &crate::EncoderConfig) -> (i8, u8, u8) {
     (
-        speed_to_svt_preset(config.speed_effective()),
+        config.svt_route_preset.map(|p| p.value()).unwrap_or_else(|| speed_to_svt_preset(config.speed_effective()) as i8),
         quality_to_qp_gated(config.quality),
         quality_to_qp_gated(crate::encoder::effective_alpha_quality(config)),
     )
@@ -502,9 +502,16 @@ fn encode_color_420_svt(
     };
     // hierarchical_levels 0 + intra_period 1: single still key frame with a
     // reduced still-picture sequence header (the AvifEncoder pattern).
-    let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new(w, h, preset, rc, 0, 1)
+    let native = config.svt_route_preset.unwrap_or_else(|| svtav1::avif::NativePreset::new(preset as i8).unwrap());
+    let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new_with_preset(w, h, native, rc, 0, 1)
         .with_chroma_420(true);
     apply_svt_params(&mut pipeline, config);
+    pipeline.enhancements = config.svt_route_enhancements;
+    if let Some(svtav1::avif::EncodingPolicy::SvtParity(reference)) = config.svt_route_policy {
+        pipeline.reference = reference;
+        reference.validate_hdr_config(&pipeline.hdr)
+            .map_err(|e| at!(Error::InvalidParameters(e.into())))?;
+    }
     pipeline.bit_depth = planes.bit_depth();
     pipeline.color_description = svtav1::entropy::obu::ColorDescription {
         color_primaries,
