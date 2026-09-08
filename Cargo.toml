@@ -149,11 +149,29 @@ aom-decode = { package = "zenav1-aom-decode", git = "https://github.com/imazen/z
 #   zenav1-aom-encode = { path = "../zenav1-aom/crates/aom-encode" }
 # and revert it before landing.
 #
+# Pin history: `a7b1ab13` -> `fbea6b4` on 2026-09-08: carries `ColorDescription`
+# (the sequence header's CICP triple + pixel range became configuration instead
+# of a hardcoded `(2,2,2)` + AOM_CR_STUDIO_RANGE). That is what unblocked THREE
+# refusals at this seam in one go — full pixel range, AVIF alpha (an auxiliary
+# item is monochrome FULL-range, so it could not be signalled before), and
+# mathematically lossless (which needs full range + identity/GBR). It adds a
+# public field, so the `KeyFrameConfig` struct literal in `src/encoder_aom.rs`
+# gains `color: ...` — the same shape of break the `45c53ddb` bump absorbed for
+# the tile / SB128 fields. Also carries three byte-identical loop-restoration
+# SIMD tiers (2.733x -> 2.557x vs libaom) which change no output.
+#
 # Pin history: `c3e1b4ab` -> `45c53ddb` on 2026-09-04 (zenavif#45): carries
 # `21544fde`, the root fix for the `--cq-level 0` (quality 100) panic, plus
 # the `KeyFrameConfig` tile / SB128 fields the seam now sets to their
 # `allintra_speed0` defaults. `tests/aom_encode_backend.rs` gates cq 0 exact.
-aom-encode = { package = "zenav1-aom-encode", git = "https://github.com/imazen/zenav1-aom", rev = "93d12c35819bae531a9e5111eb783b398cdd6772", optional = true }
+#
+# Pin history: `93d12c35` -> `fbea6b4` on 2026-09-08. `93d12c35` was a WIP commit
+# on `preserve/2026-09-08-handoff-pre-rebase`, NOT on the dependency's `main`;
+# its only source change (`KeyFrameConfig::validate_configuration`, the shared
+# support query) has since landed on `main` and is present in `fbea6b4`, so this
+# is strictly forward. Verified: `git grep "pub fn validate_configuration"
+# fbea6b4` and the `configuration_support.rs` gate both resolve.
+aom-encode = { package = "zenav1-aom-encode", git = "https://github.com/imazen/zenav1-aom", rev = "fbea6b4", optional = true }
 archmage = { version = "0.9.29", features = ["macros", "avx512"] }
 magetypes = { version = "0.9.29"}
 safe_unaligned_simd = "0.2.5"

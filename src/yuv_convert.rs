@@ -1779,6 +1779,156 @@ pub(crate) fn rgba8_to_yuv420(
     )
 }
 
+
+/// Convert RGB(A) rows to YUV **4:4:4** planes (8-bit).
+///
+/// # Why this exists
+///
+/// This seam previously refused 4:4:4 with *"the encoder itself gates 4:2:0,
+/// 4:2:2 and 4:4:4; this seam has no forward RGB->YUV 4:4:4 kernel"* — so every
+/// image, whatever the caller asked for, was subsampled to 4:2:0. That is a
+/// SILENT quality loss on the way in, on a path whose encoder is byte-exact at
+/// 4:4:4, and it is the loss a "least lossy unless overridden" selection is
+/// supposed to avoid.
+///
+/// Same recipe as [`rgbx_to_yuv420_kernel`] minus the 2x2 box average: chroma
+/// is projected per pixel and quantized where it is computed, so 4:4:4 carries
+/// no chroma resampling error at all. Layout matches the 4:2:0 kernel — `rgb`
+/// is `rgb_stride`-strided in pixels, all three planes are tight at `width`.
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+fn rgbx_to_yuv444_kernel<P: ForwardPixel>(
+    token: Token,
+    rgb: &[P],
+    rgb_stride: usize,
+    width: usize,
+    height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    y_plane: &mut [u8],
+    u_plane: &mut [u8],
+    v_plane: &mut [u8],
+) {
+    let _ = token;
+    let c = FwdConsts::new(matrix, range);
+    let inv255 = 1.0 / 255.0;
+    for y_pos in 0..height {
+        let src = &rgb[y_pos * rgb_stride..][..width];
+        let y_out = &mut y_plane[y_pos * width..][..width];
+        let u_out = &mut u_plane[y_pos * width..][..width];
+        let v_out = &mut v_plane[y_pos * width..][..width];
+        for x in 0..width {
+            let (r, g, b) = src[x].rgb_f32();
+            let rn = r * inv255;
+            let gn = g * inv255;
+            let bn = b * inv255;
+            let yl = c.kb.mul_add(bn, c.kr.mul_add(rn, c.kg * gn));
+            y_out[x] = yl
+                .mul_add(c.y_span, c.y_off)
+                .clamp(0.0, 255.0)
+                .round_ties_even() as u8;
+            u_out[x] = ((bn - yl) * c.inv_ub)
+                .mul_add(c.uv_span, 128.0)
+                .clamp(0.0, 255.0)
+                .round_ties_even() as u8;
+            v_out[x] = ((rn - yl) * c.inv_vr)
+                .mul_add(c.uv_span, 128.0)
+                .clamp(0.0, 255.0)
+                .round_ties_even() as u8;
+        }
+    }
+}
+
+/// High-bit-depth twin of [`rgbx_to_yuv444_kernel`] (`u16`, `out_depth` 10 or
+/// 12). Mirrors [`rgbx_to_yuv420_u16_kernel`]'s depth handling: the source is
+/// normalized by its own full scale and quantized at the OUTPUT depth.
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+fn rgbx_to_yuv444_u16_kernel<P: ForwardPixel>(
+    token: Token,
+    rgb: &[P],
+    rgb_stride: usize,
+    width: usize,
+    height: usize,
+    out_depth: u8,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    y_plane: &mut [u16],
+    u_plane: &mut [u16],
+    v_plane: &mut [u16],
+) {
+    let _ = token;
+    let c = FwdConsts::for_depth(matrix, range, out_depth);
+    let inv_max = 1.0 / P::MAX;
+    let out_max = ((1u32 << out_depth) - 1) as f32;
+    let uv_center = (1u32 << (out_depth - 1)) as f32;
+    for y_pos in 0..height {
+        let src = &rgb[y_pos * rgb_stride..][..width];
+        let y_out = &mut y_plane[y_pos * width..][..width];
+        let u_out = &mut u_plane[y_pos * width..][..width];
+        let v_out = &mut v_plane[y_pos * width..][..width];
+        for x in 0..width {
+            let (r, g, b) = src[x].rgb_f32();
+            let rn = r * inv_max;
+            let gn = g * inv_max;
+            let bn = b * inv_max;
+            let yl = c.kb.mul_add(bn, c.kr.mul_add(rn, c.kg * gn));
+            y_out[x] = yl
+                .mul_add(c.y_span, c.y_off)
+                .clamp(0.0, out_max)
+                .round_ties_even() as u16;
+            u_out[x] = ((bn - yl) * c.inv_ub)
+                .mul_add(c.uv_span, uv_center)
+                .clamp(0.0, out_max)
+                .round_ties_even() as u16;
+            v_out[x] = ((rn - yl) * c.inv_vr)
+                .mul_add(c.uv_span, uv_center)
+                .clamp(0.0, out_max)
+                .round_ties_even() as u16;
+        }
+    }
+}
+
+/// RGB(A) -> YUV 4:4:4, 8-bit (tight planes; see the kernel docs).
+pub(crate) fn rgbx_to_yuv444<P: ForwardPixel>(
+    rgb: &[P],
+    rgb_stride: usize,
+    width: usize,
+    height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    y_plane: &mut [u8],
+    u_plane: &mut [u8],
+    v_plane: &mut [u8],
+) {
+    incant!(
+        rgbx_to_yuv444_kernel::<P>(
+            rgb, rgb_stride, width, height, range, matrix, y_plane, u_plane, v_plane
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
+}
+
+/// RGB(A) -> YUV 4:4:4, high bit depth (tight planes; see the kernel docs).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn rgbx_to_yuv444_u16<P: ForwardPixel>(
+    rgb: &[P],
+    rgb_stride: usize,
+    width: usize,
+    height: usize,
+    out_depth: u8,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    y_plane: &mut [u16],
+    u_plane: &mut [u16],
+    v_plane: &mut [u16],
+) {
+    incant!(
+        rgbx_to_yuv444_u16_kernel::<P>(
+            rgb, rgb_stride, width, height, out_depth, range, matrix, y_plane, u_plane, v_plane
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

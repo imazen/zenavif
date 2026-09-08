@@ -272,29 +272,23 @@ pub(crate) fn aom_resolved_identity(config: &EncoderConfig) -> (u8, u8) {
 
 /// The configuration slice this seam implements. Everything else is refused by
 /// name rather than silently served by zenravif or silently mis-encoded.
-fn reject_unsupported_config(config: &EncoderConfig) -> Result<()> {
-    if config.chroma_subsampling != EncodeChromaSubsampling::Yuv420 {
-        return Err(at!(Error::Unsupported(
-            "Av1Backend::Zenav1Aom encodes 4:2:0 only: set \
-             .chroma_subsampling(EncodeChromaSubsampling::Yuv420). \
-             The encoder itself gates 4:2:0, 4:2:2 and 4:4:4; this seam has no \
-             forward RGB->YUV 4:4:4 kernel (src/yuv_convert.rs ships \
-             rgb8_to_yuv420 and no 4:4:4 counterpart)"
-        )));
-    }
+pub(crate) fn reject_unsupported_config(config: &EncoderConfig) -> Result<()> {
     if config.color_model != EncodeColorModel::YCbCr {
-        return Err(at!(Error::Unsupported(
-            "Av1Backend::Zenav1Aom supports the YCbCr color model only \
-             (identity/RGB has no defined 4:2:0 subsampling)"
-        )));
-    }
-    if config.pixel_range == Some(EncodePixelRange::Full) {
-        return Err(at!(Error::Unsupported(
-            "Av1Backend::Zenav1Aom signals LIMITED pixel range only \
-             (the zenav1-aom sequence header pins color_range=0, \
-             AOM_CR_STUDIO_RANGE); requesting full range would mis-signal the \
-             stream"
-        )));
+        // Identity (GBR) is now SUPPORTED — at 4:4:4, which is where AV1
+        // allows it. `matrix_coefficients = MC_IDENTITY` means the three
+        // planes ARE G/B/R, so there is nothing to subsample; AV1 5.5.2 makes
+        // `subsampling_x == subsampling_y == 0` a conformance requirement and
+        // upstream's `validate_configuration` refuses the pairing. The old
+        // blanket refusal ("identity/RGB has no defined 4:2:0 subsampling")
+        // was right about 4:2:0 and wrong to conclude the model was
+        // unsupported: it is the only way to encode MATHEMATICALLY lossless.
+        if config.chroma_subsampling != EncodeChromaSubsampling::Yuv444 {
+            return Err(at!(Error::Unsupported(
+                "Av1Backend::Zenav1Aom: the RGB (identity) colour model requires \
+                 4:4:4 — subsampling G/B/R planes is not defined in AV1. \
+                 Use .chroma_subsampling(EncodeChromaSubsampling::Yuv444)"
+            )));
+        }
     }
     if config.gain_map.is_some() {
         return Err(at!(Error::Unsupported(
@@ -304,10 +298,37 @@ fn reject_unsupported_config(config: &EncoderConfig) -> Result<()> {
     }
     #[cfg(feature = "encode-imazen")]
     if config.lossless {
-        return Err(at!(Error::Unsupported(
-            "Av1Backend::Zenav1Aom has no lossless mode wired \
-             (use the zenravif backend for lossless)"
-        )));
+        // Lossless IS wired now — `--cq-level 0` is coded-lossless upstream
+        // (base_qindex 0, Walsh-Hadamard), byte-identical to real aomenc
+        // across 427 cells and asserted to reconstruct the CODED PLANES
+        // exactly on 248/248 cells on both decoders.
+        //
+        // But "lossless" is a claim about the IMAGE, and everything in front
+        // of the coded planes has to be lossless too. Refuse the combinations
+        // that cannot be, rather than emit a smaller file and call it
+        // lossless:
+        if config.chroma_subsampling != EncodeChromaSubsampling::Yuv444 {
+            return Err(at!(Error::Unsupported(
+                "Av1Backend::Zenav1Aom: lossless requires 4:4:4 — 4:2:0 discards \
+                 three quarters of the chroma before the encoder sees it. \
+                 Use .chroma_subsampling(EncodeChromaSubsampling::Yuv444)"
+            )));
+        }
+        if config.color_model != EncodeColorModel::Rgb {
+            return Err(at!(Error::Unsupported(
+                "Av1Backend::Zenav1Aom: mathematically lossless requires the RGB \
+                 (identity/GBR) colour model — a YCbCr matrix round trip is not \
+                 exactly invertible in integer samples. \
+                 Use .color_model(EncodeColorModel::Rgb)"
+            )));
+        }
+        if config.pixel_range == Some(EncodePixelRange::Limited) {
+            return Err(at!(Error::Unsupported(
+                "Av1Backend::Zenav1Aom: lossless requires full pixel range — the \
+                 studio swing (16..235) cannot represent every input code point. \
+                 Use .pixel_range(EncodePixelRange::Full)"
+            )));
+        }
     }
     Ok(())
 }
@@ -338,7 +359,7 @@ pub(crate) fn aom_depth_error(bit_depth: u8, monochrome: bool) -> Option<&'stati
     None
 }
 
-/// Encode-time twin of `validate_aom_scope`'s depth check, both driven by
+/// Encode-time twin of `reject_unsupported_config`'s depth check, both driven by
 /// [`aom_depth_error`]. Returns the depth to code at.
 ///
 /// The depth comes from the one shared resolver,
@@ -404,16 +425,33 @@ pub(crate) fn key_frame_config(
     bit_depth: u8,
     monochrome: bool,
 ) -> aom_encode::key_frame::KeyFrameConfig {
+    // Monochrome carries (1, 1) — the AOM_IMG_FMT_I420 a mono image allocates;
+    // `encode_key_frame` rejects any other ss for mono. Colour honours the
+    // caller's request, whose DEFAULT is 4:4:4.
+    let (ss_x, ss_y) = if monochrome {
+        (1, 1)
+    } else {
+        match config.chroma_subsampling {
+            EncodeChromaSubsampling::Yuv444 => (0, 0),
+            EncodeChromaSubsampling::Yuv420 => (1, 1),
+        }
+    };
     aom_encode::key_frame::KeyFrameConfig {
         width,
         height,
         bit_depth,
         monochrome,
-        // Monochrome carries (1, 1) — the AOM_IMG_FMT_I420 a mono image
-        // allocates; `encode_key_frame` rejects any other ss for mono.
-        ss_x: 1,
-        ss_y: 1,
-        cq_level: quality_to_cq_level(config.quality),
+        ss_x,
+        ss_y,
+        // `lossless` pins cq 0 — coded-lossless upstream (base_qindex 0), which
+        // reconstructs the coded planes EXACTLY. `reject_unsupported_config` has
+        // already refused every combination in front of it that would make the
+        // IMAGE lossy anyway (subsampling, a YCbCr matrix, studio range).
+        cq_level: if wants_lossless(config) {
+            0
+        } else {
+            quality_to_cq_level(config.quality)
+        },
         cpu_used: speed_to_cpu_used(config.speed),
         usage: AOM_USAGE_ALL_INTRA,
         // Real aomenc's ALLINTRA defaults (`av1_cx_iface.c:3067`): CDEF off
@@ -431,6 +469,66 @@ pub(crate) fn key_frame_config(
         tile_columns_log2: 0,
         tile_rows_log2: 0,
         sb_size_128: false,
+        // The CICP description + range. `full_range` is now CONFIGURATION
+        // upstream (`ColorDescription`), so a full-range still is codable
+        // instead of refused; the CICP triple stays "unspecified" because the
+        // `colr` box carries the colorimetry for this seam (see the module
+        // docs) and signalling it twice invites the two to disagree.
+        color: aom_encode::key_frame::ColorDescription {
+            full_range: wants_full_range(config),
+            // MC_IDENTITY (0) for the GBR path, "unspecified" otherwise. The
+            // primaries/transfer stay unspecified either way: the `colr` box
+            // carries the colorimetry for this seam, and signalling it in two
+            // places invites the two to disagree.
+            matrix_coefficients: if wants_identity(config) { 0 } else { 2 },
+            ..Default::default()
+        },
+    }
+}
+
+/// Whether this encode signals FULL pixel range.
+///
+/// `EncodePixelRange::Full` used to be refused here, citing the upstream
+/// sequence header's pinned `color_range = 0`. That pin is gone
+/// (`ColorDescription`), so the request is honoured: the samples are converted
+/// with the full-range recipe AND the sequence header says so, which are the
+/// two halves that have to agree.
+fn wants_full_range(config: &EncoderConfig) -> bool {
+    // Identity (GBR) planes ARE the source samples; coding them against the
+    // studio swing would quantize them, so identity always carries full range.
+    // Lossless implies identity (see `reject_unsupported_config`), hence full range
+    // too.
+    wants_identity(config) || matches!(config.pixel_range, Some(EncodePixelRange::Full))
+}
+
+/// Whether the caller asked for mathematically lossless output.
+///
+/// `EncoderConfig::lossless` is behind `encode-imazen`, so this is the one
+/// place that knows it; everything else asks this.
+fn wants_lossless(config: &EncoderConfig) -> bool {
+    #[cfg(feature = "encode-imazen")]
+    {
+        config.lossless
+    }
+    #[cfg(not(feature = "encode-imazen"))]
+    {
+        let _ = config;
+        false
+    }
+}
+
+/// Whether this encode uses the identity (GBR) "matrix" — i.e. no colour
+/// conversion at all, the AV1 `MC_IDENTITY` path. Only legal at 4:4:4.
+fn wants_identity(config: &EncoderConfig) -> bool {
+    config.color_model == EncodeColorModel::Rgb
+}
+
+/// The forward-conversion range that matches [`wants_full_range`].
+fn fwd_range(config: &EncoderConfig) -> crate::yuv_convert::YuvRange {
+    if wants_full_range(config) {
+        crate::yuv_convert::YuvRange::Full
+    } else {
+        crate::yuv_convert::YuvRange::Limited
     }
 }
 
@@ -456,21 +554,30 @@ fn mux_aom(
     color_primaries: u8,
     transfer_characteristics: u8,
     monochrome: bool,
+    chroma: (bool, bool),
+    full_range: bool,
+    identity: bool,
+    alpha: Option<Vec<u8>>,
 ) -> Result<EncodedImage> {
     let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
     let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
     let mut aviffy = zenavif_serialize::Aviffy::new();
     aviffy
         .set_seq_profile(seq_profile)
-        .set_chroma_subsampling((true, true))
+        // Both of these MUST match what the sequence header actually codes —
+        // a container that disagrees with the bitstream is the mis-signalling
+        // this seam exists to avoid. They were hardcoded (4:2:0, studio) back
+        // when the encoder could produce nothing else.
+        .set_chroma_subsampling(chroma)
         .set_monochrome(monochrome)
-        // MUST match the sequence header's `color_range = 0`. See the module
-        // docs: the port pins AOM_CR_STUDIO_RANGE.
-        .set_full_color_range(false)
+        .set_full_color_range(full_range)
         .set_color_primaries(cicp_to_serialize_primaries(color_primaries))
         .set_transfer_characteristics(cicp_to_serialize_transfer(transfer_characteristics))
         .set_matrix_coefficients(if monochrome {
             zenavif_serialize::constants::MatrixCoefficients::Unspecified
+        } else if identity {
+            // `MatrixCoefficients::Rgb` IS CICP 0 (GBR/identity).
+            zenavif_serialize::constants::MatrixCoefficients::Rgb
         } else {
             zenavif_serialize::constants::MatrixCoefficients::Bt601
         });
@@ -506,12 +613,12 @@ fn mux_aom(
     // raises `seq_profile` to 2 at 12 bits. A 10-bit payload muxed as 8 would
     // be a container that contradicts its own bitstream.
     let avif_file = aviffy
-        .try_to_vec(&payload, None, w, h, bit_depth)
+        .try_to_vec(&payload, alpha.as_deref(), w, h, bit_depth)
         .map_err(|e| at!(Error::Encode(format!("AVIF serialization failed: {e}"))))?;
     Ok(EncodedImage {
         avif_file,
         color_byte_size,
-        alpha_byte_size: 0,
+        alpha_byte_size: alpha.as_ref().map_or(0, Vec::len),
     })
 }
 
@@ -521,13 +628,26 @@ enum ColorSource<'a> {
     Rgb8(&'a [Rgb<u8>], usize),
     /// 16-bit RGB (full 0..=65535), as `crate::encoder::encode_rgb16` does.
     Rgb16(&'a [rgb::Rgb<u16>], usize),
+    /// 8-bit RGBA. Alpha rides its OWN Cs400 auxiliary item, so the colour
+    /// conversion ignores it exactly as the RGB variants do.
+    Rgba8(&'a [rgb::Rgba<u8>], usize),
+    /// 16-bit RGBA.
+    Rgba16(&'a [rgb::Rgba<u16>], usize),
 }
 
-/// The 4:2:0 colour planes this seam feeds `encode_key_frame`, as tight `u16`
-/// samples in the `bit_depth`-bit range.
+/// The colour planes this seam feeds `encode_key_frame`, as tight `u16`
+/// samples in the `bit_depth`-bit range, at the requested subsampling and
+/// pixel range.
 ///
-/// **Limited, not full range** — the port's sequence header pins
-/// `color_range = 0`. See the module docs.
+/// **4:4:4 used to be REFUSED here** — and 4:4:4 is
+/// [`EncodeChromaSubsampling`]'s DEFAULT, so this backend could not serve an
+/// unconfigured caller at all. The refusal cited a missing forward kernel,
+/// which `yuv_convert::rgbx_to_yuv444*` now supplies; the ENCODER has been
+/// byte-exact at 4:4:4 and 4:2:2 throughout.
+///
+/// **Range is the caller's** — the upstream sequence header no longer pins
+/// `color_range = 0`, so a full-range request converts with the full-range
+/// recipe AND signals it. See [`wants_full_range`].
 ///
 /// At `bit_depth == 8` from an 8-bit source this routes through the dedicated
 /// `rgb8_to_yuv420` u8 kernel and widens, which is what the seam has always
@@ -546,33 +666,101 @@ enum ColorSource<'a> {
 /// What actually establishes that 8-bit output did not move across the
 /// high-bit-depth wiring is the same benchmark: 60/60 cells byte-identical
 /// between `ec6728b` and this tree.
-fn color_planes_420(
+fn color_planes(
     src: ColorSource<'_>,
     width: usize,
     height: usize,
     bit_depth: u8,
+    ss_x: usize,
+    ss_y: usize,
+    range: crate::yuv_convert::YuvRange,
+    identity: bool,
 ) -> (Vec<u16>, Vec<u16>, Vec<u16>) {
-    use crate::yuv_convert::{YuvMatrix, YuvRange};
-    let cw = width.div_ceil(2);
-    let ch = height.div_ceil(2);
+    use crate::yuv_convert::YuvMatrix;
+    let sub = (ss_x, ss_y) == (1, 1);
+    let (cw, ch) = if sub {
+        (width.div_ceil(2), height.div_ceil(2))
+    } else {
+        (width, height)
+    };
     let mut y = vec![0u16; width * height];
     let mut u = vec![0u16; cw * ch];
     let mut v = vec![0u16; cw * ch];
+    // Identity: the planes ARE the source channels, in AV1's G/B/R order, with
+    // no matrix and no range compression. This is the only path on which the
+    // image (not merely the coded planes) can be lossless.
+    if identity {
+        debug_assert!(!sub, "MC_IDENTITY is 4:4:4 only (AV1 5.5.2)");
+        match src {
+            ColorSource::Rgb8(buf, stride) => {
+                let shift = bit_depth - 8;
+                for row in 0..height {
+                    for x in 0..width {
+                        let px = buf[row * stride + x];
+                        let (r, g, b) = (u16::from(px.r), u16::from(px.g), u16::from(px.b));
+                        // An 8-bit source at a deeper coded depth is SCALED,
+                        // not widened: 255 must map to the new maximum or the
+                        // round trip is not lossless.
+                        let up = |c: u16| -> u16 {
+                            if shift == 0 { c } else { (c << shift) | (c >> (8 - shift)) }
+                        };
+                        y[row * width + x] = up(g);
+                        u[row * width + x] = up(b);
+                        v[row * width + x] = up(r);
+                    }
+                }
+            }
+            ColorSource::Rgb16(buf, stride) => {
+                let down = 16 - u32::from(bit_depth);
+                for row in 0..height {
+                    for x in 0..width {
+                        let px = buf[row * stride + x];
+                        y[row * width + x] = px.g >> down;
+                        u[row * width + x] = px.b >> down;
+                        v[row * width + x] = px.r >> down;
+                    }
+                }
+            }
+            ColorSource::Rgba8(buf, stride) => {
+                let shift = bit_depth - 8;
+                for row in 0..height {
+                    for x in 0..width {
+                        let px = buf[row * stride + x];
+                        let up = |c: u8| -> u16 {
+                            let c = u16::from(c);
+                            if shift == 0 { c } else { (c << shift) | (c >> (8 - shift)) }
+                        };
+                        y[row * width + x] = up(px.g);
+                        u[row * width + x] = up(px.b);
+                        v[row * width + x] = up(px.r);
+                    }
+                }
+            }
+            ColorSource::Rgba16(buf, stride) => {
+                let down = 16 - u32::from(bit_depth);
+                for row in 0..height {
+                    for x in 0..width {
+                        let px = buf[row * stride + x];
+                        y[row * width + x] = px.g >> down;
+                        u[row * width + x] = px.b >> down;
+                        v[row * width + x] = px.r >> down;
+                    }
+                }
+            }
+        }
+        return (y, u, v);
+    }
     match src {
-        ColorSource::Rgb8(buf, stride) if bit_depth == 8 => {
+        // The dedicated u8 kernel is kept for the 8-bit 4:2:0 cell only: it is
+        // the historical path and the one the bd8 byte anchor pins. Measured
+        // equal to the u16 recipe at output depth 8 (60/60 cells), so this is
+        // a lane-packing choice, not a correctness one.
+        ColorSource::Rgb8(buf, stride) if bit_depth == 8 && sub => {
             let mut y8 = vec![0u8; width * height];
             let mut u8p = vec![0u8; cw * ch];
             let mut v8p = vec![0u8; cw * ch];
             crate::yuv_convert::rgb8_to_yuv420(
-                buf,
-                stride,
-                width,
-                height,
-                YuvRange::Limited,
-                YuvMatrix::Bt601,
-                &mut y8,
-                &mut u8p,
-                &mut v8p,
+                buf, stride, width, height, range, YuvMatrix::Bt601, &mut y8, &mut u8p, &mut v8p,
             );
             // `encode_key_frame` takes u16 samples in the bit_depth-bit range;
             // an 8-bit source carries 8-bit values, so this is a widen, not a
@@ -588,39 +776,64 @@ fn color_planes_420(
             }
         }
         ColorSource::Rgb8(buf, stride) => {
-            crate::yuv_convert::rgbx_to_yuv420_u16(
-                buf,
-                stride,
-                width,
-                height,
-                bit_depth,
-                YuvRange::Limited,
-                YuvMatrix::Bt601,
-                &mut y,
-                &mut u,
-                &mut v,
-            );
+            if sub {
+                crate::yuv_convert::rgbx_to_yuv420_u16(
+                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    &mut v,
+                );
+            } else {
+                crate::yuv_convert::rgbx_to_yuv444_u16(
+                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    &mut v,
+                );
+            }
         }
         ColorSource::Rgb16(buf, stride) => {
-            crate::yuv_convert::rgbx_to_yuv420_u16(
-                buf,
-                stride,
-                width,
-                height,
-                bit_depth,
-                YuvRange::Limited,
-                YuvMatrix::Bt601,
-                &mut y,
-                &mut u,
-                &mut v,
-            );
+            if sub {
+                crate::yuv_convert::rgbx_to_yuv420_u16(
+                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    &mut v,
+                );
+            } else {
+                crate::yuv_convert::rgbx_to_yuv444_u16(
+                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    &mut v,
+                );
+            }
+        }
+        // Alpha rides its own Cs400 item; the colour conversion drops it.
+        ColorSource::Rgba8(buf, stride) => {
+            if sub {
+                crate::yuv_convert::rgbx_to_yuv420_u16(
+                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    &mut v,
+                );
+            } else {
+                crate::yuv_convert::rgbx_to_yuv444_u16(
+                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    &mut v,
+                );
+            }
+        }
+        ColorSource::Rgba16(buf, stride) => {
+            if sub {
+                crate::yuv_convert::rgbx_to_yuv420_u16(
+                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    &mut v,
+                );
+            } else {
+                crate::yuv_convert::rgbx_to_yuv444_u16(
+                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    &mut v,
+                );
+            }
         }
     }
     (y, u, v)
 }
 
 /// Shared tail of the colour entry points: encode the planes and mux.
-fn finish_color_420(
+fn finish_color(
     planes: (Vec<u16>, Vec<u16>, Vec<u16>),
     config: &EncoderConfig,
     width: usize,
@@ -654,6 +867,177 @@ fn finish_color_420(
             .transfer_characteristics
             .unwrap_or(DEFAULT_TRANSFER_CHARACTERISTICS),
         false,
+        (cfg.ss_x == 1, cfg.ss_y == 1),
+        cfg.color.full_range,
+        cfg.color.matrix_coefficients == 0,
+        None,
+    )
+}
+
+
+/// Encode a straight (non-premultiplied) alpha plane as the Cs400 monochrome
+/// auxiliary item an AVIF `auxl` alpha reference points at.
+///
+/// # Why this is a separate encode
+///
+/// AVIF codes alpha as its OWN AV1 image item — a monochrome stream with the
+/// same dimensions as the colour item — not as a fourth plane. The mono encode
+/// it needs has existed at this seam since the gray8 path landed; what was
+/// missing was the item, which is why `encode_rgba8` / `encode_rgba16` used to
+/// land in `reject_aom_backend`.
+///
+/// **Alpha is FULL RANGE.** An alpha sample is a coverage fraction: 0 means
+/// none and the maximum means complete, so the studio swing would both clip
+/// and quantize it. That is exactly what the upstream sequence header's pinned
+/// `color_range = 0` made impossible, and why this could not be wired before
+/// `ColorDescription` existed.
+fn encode_alpha_plane(
+    alpha: &[u16],
+    width: usize,
+    height: usize,
+    bit_depth: u8,
+    config: &EncoderConfig,
+) -> Result<Vec<u8>> {
+    let mut cfg = key_frame_config(config, width, height, bit_depth, true);
+    cfg.cq_level = if wants_lossless(config) {
+        0
+    } else {
+        quality_to_cq_level(crate::encoder::effective_alpha_quality(config))
+    };
+    cfg.color = aom_encode::key_frame::ColorDescription {
+        full_range: true,
+        ..Default::default()
+    };
+    // A mono encode reads only the luma plane; `encode_key_frame` still wants
+    // the chroma slices to exist and be empty for monochrome.
+    encode_key_frame_checked(
+        aom_encode::key_frame::KeyFramePlanes {
+            y: alpha,
+            u: &[],
+            v: &[],
+        },
+        &cfg,
+    )
+}
+
+/// Shared tail of the RGBA entry points: colour + alpha, then mux both.
+fn finish_color_with_alpha(
+    src: ColorSource<'_>,
+    alpha: Vec<u16>,
+    config: &EncoderConfig,
+    width: usize,
+    height: usize,
+    bit_depth: u8,
+    stop: &almost_enough::StopToken,
+) -> Result<EncodedImage> {
+    use almost_enough::Stop;
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    let cfg = key_frame_config(config, width, height, bit_depth, false);
+    let (y, u, v) = color_planes(
+        src,
+        width,
+        height,
+        bit_depth,
+        cfg.ss_x,
+        cfg.ss_y,
+        fwd_range(config),
+        wants_identity(config),
+    );
+    let payload = encode_key_frame_checked(
+        aom_encode::key_frame::KeyFramePlanes {
+            y: &y,
+            u: &u,
+            v: &v,
+        },
+        &cfg,
+    )?;
+
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    let alpha_payload = encode_alpha_plane(&alpha, width, height, bit_depth, config)?;
+
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    mux_aom(
+        config,
+        payload,
+        width,
+        height,
+        u8::try_from(cfg.profile()).unwrap_or(0),
+        bit_depth,
+        config.color_primaries.unwrap_or(DEFAULT_COLOR_PRIMARIES),
+        config
+            .transfer_characteristics
+            .unwrap_or(DEFAULT_TRANSFER_CHARACTERISTICS),
+        false,
+        (cfg.ss_x == 1, cfg.ss_y == 1),
+        cfg.color.full_range,
+        cfg.color.matrix_coefficients == 0,
+        Some(alpha_payload),
+    )
+}
+
+/// Encode an 8-bit RGBA image to AVIF via the zenav1-aom backend: a colour
+/// item plus a Cs400 alpha auxiliary item.
+pub(crate) fn encode_rgba8_aom(
+    img: ImgRef<'_, rgb::Rgba<u8>>,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedImage> {
+    use almost_enough::Stop;
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_unsupported_config(config)?;
+    let bit_depth = resolve_aom_depth(config, false, false)?;
+    let width = img.width();
+    let height = img.height();
+    reject_empty(width, height)?;
+
+    let shift = bit_depth - 8;
+    let mut alpha = Vec::with_capacity(width * height);
+    for row in img.rows() {
+        alpha.extend(row.iter().map(|px| {
+            let c = u16::from(px.a);
+            // Scale, not widen: full-range alpha must map 255 -> the coded
+            // maximum, or a fully opaque pixel stops being fully opaque.
+            if shift == 0 { c } else { (c << shift) | (c >> (8 - shift)) }
+        }));
+    }
+    finish_color_with_alpha(
+        ColorSource::Rgba8(img.buf(), img.stride()),
+        alpha,
+        config,
+        width,
+        height,
+        bit_depth,
+        &stop,
+    )
+}
+
+/// Encode a 16-bit RGBA image to AVIF via the zenav1-aom backend.
+pub(crate) fn encode_rgba16_aom(
+    img: ImgRef<'_, rgb::Rgba<u16>>,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+) -> Result<EncodedImage> {
+    use almost_enough::Stop;
+    stop.check().map_err(|e| at!(Error::from(e)))?;
+    reject_unsupported_config(config)?;
+    let bit_depth = resolve_aom_depth(config, true, false)?;
+    let width = img.width();
+    let height = img.height();
+    reject_empty(width, height)?;
+
+    let down = 16 - u32::from(bit_depth);
+    let mut alpha = Vec::with_capacity(width * height);
+    for row in img.rows() {
+        alpha.extend(row.iter().map(|px| px.a >> down));
+    }
+    finish_color_with_alpha(
+        ColorSource::Rgba16(img.buf(), img.stride()),
+        alpha,
+        config,
+        width,
+        height,
+        bit_depth,
+        &stop,
     )
 }
 
@@ -694,13 +1078,21 @@ pub(crate) fn encode_rgb8_aom(
     reject_empty(width, height)?;
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let planes = color_planes_420(
+    // The subsampling and range the config asks for -- derived from the SAME
+    // `key_frame_config` the encode uses, so the conversion cannot disagree
+    // with what the sequence header signals.
+    let probe = key_frame_config(config, width, height, bit_depth, false);
+    let planes = color_planes(
         ColorSource::Rgb8(img.buf(), img.stride()),
         width,
         height,
         bit_depth,
+        probe.ss_x,
+        probe.ss_y,
+        fwd_range(config),
+        wants_identity(config),
     );
-    finish_color_420(planes, config, width, height, bit_depth, &stop)
+    finish_color(planes, config, width, height, bit_depth, &stop)
 }
 
 /// Encode a 16-bit RGB image to AVIF via the zenav1-aom backend.
@@ -730,13 +1122,21 @@ pub(crate) fn encode_rgb16_aom(
     reject_empty(width, height)?;
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let planes = color_planes_420(
+    // The subsampling and range the config asks for -- derived from the SAME
+    // `key_frame_config` the encode uses, so the conversion cannot disagree
+    // with what the sequence header signals.
+    let probe = key_frame_config(config, width, height, bit_depth, false);
+    let planes = color_planes(
         ColorSource::Rgb16(img.buf(), img.stride()),
         width,
         height,
         bit_depth,
+        probe.ss_x,
+        probe.ss_y,
+        fwd_range(config),
+        wants_identity(config),
     );
-    finish_color_420(planes, config, width, height, bit_depth, &stop)
+    finish_color(planes, config, width, height, bit_depth, &stop)
 }
 
 /// Encode an 8-bit grayscale image to AVIF as true monochrome (Cs400) via the
@@ -793,5 +1193,11 @@ pub(crate) fn encode_gray8_aom(
             .transfer_characteristics
             .unwrap_or(DEFAULT_TRANSFER_CHARACTERISTICS),
         true,
+        // Mono codes ss (1, 1) — the AOM_IMG_FMT_I420 a mono image allocates —
+        // and `set_monochrome(true)` is what actually suppresses chroma.
+        (cfg.ss_x == 1, cfg.ss_y == 1),
+        cfg.color.full_range,
+        cfg.color.matrix_coefficients == 0,
+        None,
     )
 }

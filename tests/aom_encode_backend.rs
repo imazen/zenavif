@@ -439,44 +439,36 @@ fn aom_backend_refuses_what_it_does_not_implement() {
         64,
     );
 
-    // 4:4:4 (the crate default) — the encoder gates it, this seam does not.
-    let e = zenavif::encode_rgb8(
+    // ---- what this backend NOW implements -------------------------------
+    //
+    // Four things used to be refused here, and each refusal was a SILENT
+    // downgrade or a hard stop on a path the encoder already supported:
+    //
+    //  * 4:4:4 — and 4:4:4 is `EncodeChromaSubsampling`'s DEFAULT, so this
+    //    backend could not serve an unconfigured caller at all;
+    //  * full pixel range — the upstream sequence header pinned
+    //    `color_range = 0`, so a full-range source was crushed to the studio
+    //    swing (~13 % of the code range) with no way to say otherwise;
+    //  * alpha — the Cs400 item was never built;
+    //  * lossless and the identity/GBR colour model.
+
+    // 4:4:4 is the DEFAULT config, and it encodes.
+    zenavif::encode_rgb8(
         img.as_ref(),
         &EncoderConfig::new().backend(Av1Backend::Zenav1Aom),
         stop(),
     )
-    .expect_err("4:4:4 must be refused");
+    .expect("4:4:4 is the default and must encode");
+
+    // Alpha: a colour item AND an alpha auxiliary item.
+    let out = zenavif::encode_rgba8(rgba.as_ref(), &aom_config(), stop())
+        .expect("8-bit RGBA must encode");
     assert!(
-        format!("{e}").contains("4:2:0 only"),
-        "4:4:4 refusal must name the limitation, got: {e}"
+        out.alpha_byte_size > 0 && out.color_byte_size > 0,
+        "RGBA must produce both a colour and an alpha item, got {out:?}"
     );
 
-    // Alpha.
-    let e = zenavif::encode_rgba8(rgba.as_ref(), &aom_config(), stop())
-        .expect_err("alpha must be refused");
-    assert!(
-        format!("{e}").contains("Zenav1Aom"),
-        "alpha refusal must name the backend, got: {e}"
-    );
-
-    // A refusal must name the AOM backend's own limitation, never another
-    // backend's feature. `reject_svt_rs_backend` and `reject_aom_backend`
-    // share their `entry` string, and the svt-specific hint used to be baked
-    // into it — so the aom refusal for `encode_rgb16` read "requires the
-    // `zenav1-svt` cargo feature", naming a feature that has nothing to do
-    // with this backend. Caught 2026-09-02 by compiling a real downstream
-    // consumer, and gated here so it cannot come back.
-    let e = zenavif::encode_rgba8(rgba.as_ref(), &aom_config(), stop())
-        .expect_err("alpha must be refused");
-    assert!(
-        !format!("{e}").contains("zenav1-svt"),
-        "an Av1Backend::Zenav1Aom refusal must not name the zenav1-svt feature, got: {e}"
-    );
-
-    // 16-bit RGB input USED to be refused. `encode_rgb16` reaches the seam
-    // since 2026-09-03 (YCbCr 4:2:0 at 8/10/12 bits, not zenravif's
-    // identity-GBR 4:4:4); 16-bit RGBA is what is still refused, because the
-    // alpha auxiliary item is not built. That is the assertion below.
+    // 16-bit RGBA too.
     let rgba16: ImgVec<rgb::Rgba<u16>> = Img::new(
         img.buf()
             .iter()
@@ -490,35 +482,62 @@ fn aom_backend_refuses_what_it_does_not_implement() {
         64,
         64,
     );
-    let e = zenavif::encode_rgba16(rgba16.as_ref(), &aom_config(), stop())
-        .expect_err("16-bit RGBA must be refused");
+    let out16 = zenavif::encode_rgba16(rgba16.as_ref(), &aom_config(), stop())
+        .expect("16-bit RGBA must encode");
+    assert!(out16.alpha_byte_size > 0, "16-bit RGBA must carry alpha");
+
+    // Full pixel range.
+    zenavif::encode_rgb8(
+        img.as_ref(),
+        &aom_config().pixel_range(zenavif::EncodePixelRange::Full),
+        stop(),
+    )
+    .expect("full range must encode");
+
+    // ---- what is still refused, and it must say why ----------------------
+
+    // 4:2:0 stays available when it is what the caller wants — the point is
+    // that it is a CHOICE now, not the only thing on offer.
+    zenavif::encode_rgb8(
+        img.as_ref(),
+        &aom_config().chroma_subsampling(zenavif::EncodeChromaSubsampling::Yuv420),
+        stop(),
+    )
+    .expect("4:2:0 stays available when asked for");
+
+    // The identity (GBR) colour model requires 4:4:4 — AV1 5.5.2 makes that a
+    // conformance requirement, not a preference. The refusal must say so, and
+    // must name THIS backend rather than another one's cargo feature
+    // (`reject_svt_rs_backend` and `reject_aom_backend` share their `entry`
+    // string, and the svt hint used to be baked into it).
+    let e = zenavif::encode_rgb8(
+        img.as_ref(),
+        &aom_config()
+            .color_model(zenavif::EncodeColorModel::Rgb)
+            .chroma_subsampling(zenavif::EncodeChromaSubsampling::Yuv420),
+        stop(),
+    )
+    .expect_err("identity at 4:2:0 must be refused");
     let msg = format!("{e}");
     assert!(
-        msg.contains("Zenav1Aom") && msg.contains("no alpha auxiliary item"),
-        "the 16-bit RGBA refusal must name the backend and the limitation, got: {msg}"
+        msg.contains("Zenav1Aom") && msg.contains("4:4:4"),
+        "the identity refusal must name the backend and the requirement, got: {msg}"
     );
     assert!(
         !msg.contains("zenav1-svt"),
         "an Av1Backend::Zenav1Aom refusal must not name the zenav1-svt feature, got: {msg}"
     );
 
-    // 10-bit output USED to be refused here. It encodes since 2026-09-03 —
-    // `aom_backend_encodes_10_and_12_bit_that_decode` is the positive gate
-    // that replaced this refusal. What is still 8-bit-only is the Cs400
-    // grayscale path, and that keeps a refusal test of its own
-    // (`aom_backend_refuses_hbd_grayscale`).
-
-    // Full pixel range — the sequence header pins studio range.
-    let e = zenavif::encode_rgb8(
+    // ... and identity AT 4:4:4 is accepted, so the refusal is about the
+    // pairing rather than a blanket ban on the model.
+    zenavif::encode_rgb8(
         img.as_ref(),
-        &aom_config().pixel_range(zenavif::EncodePixelRange::Full),
+        &aom_config()
+            .color_model(zenavif::EncodeColorModel::Rgb)
+            .chroma_subsampling(zenavif::EncodeChromaSubsampling::Yuv444),
         stop(),
     )
-    .expect_err("full range must be refused");
-    assert!(
-        format!("{e}").contains("LIMITED"),
-        "full-range refusal must name the limitation, got: {e}"
-    );
+    .expect("identity (GBR) at 4:4:4 must encode");
 }
 
 /// `validate()` must agree with the encode path — a config that encodes
@@ -543,11 +562,24 @@ fn validate_agrees_with_the_encode_path() {
         .bit_depth(zenavif::EncodeBitDepth::Twelve)
         .validate()
         .expect("12-bit must validate, as it encodes");
+    // These four USED to be asserted as "must fail validate()". They now
+    // validate, because they now ENCODE — and that is the point of this test:
+    // `validate()` is a query about the encode path, so when the encode path
+    // grows, the query must grow with it or it lies.
+    //
+    // It DID lie: `validate_aom_scope` was a hand-written restatement of the
+    // encode rules, and it went on refusing 4:4:4, identity/GBR, full range
+    // and alpha after all four landed. It now delegates to the encode path's
+    // own `reject_unsupported_config`, so the two cannot drift again;
+    // `aom_roundtrip_loss::the_support_query_agrees_with_the_encode_path`
+    // checks that mechanically over the whole matrix.
     for (cfg, what) in [
-        (EncoderConfig::new().backend(Av1Backend::Zenav1Aom), "4:4:4"),
+        (EncoderConfig::new().backend(Av1Backend::Zenav1Aom), "4:4:4 (the default)"),
         (
-            aom_config().color_model(zenavif::EncodeColorModel::Rgb),
-            "identity/RGB",
+            aom_config()
+                .color_model(zenavif::EncodeColorModel::Rgb)
+                .chroma_subsampling(EncodeChromaSubsampling::Yuv444),
+            "identity/RGB at 4:4:4",
         ),
         (
             aom_config().pixel_range(zenavif::EncodePixelRange::Full),
@@ -555,18 +587,22 @@ fn validate_agrees_with_the_encode_path() {
         ),
     ] {
         cfg.validate()
-            .expect_err(&format!("{what} must fail validate()"));
+            .unwrap_or_else(|e| panic!("{what} must validate, as it encodes: {e}"));
     }
-    // zenavif#44: alpha input must FAIL validate_for_input, because it fails
-    // encode. `input_has_alpha` is a config x input property, so `validate()`
-    // alone cannot see it — this is the case that used to return Ok and then
-    // error at `encode_rgba8`.
+    // ... and a genuinely non-conformant pairing still fails, so `validate()`
+    // has not simply become "always Ok".
+    aom_config()
+        .color_model(zenavif::EncodeColorModel::Rgb)
+        .chroma_subsampling(EncodeChromaSubsampling::Yuv420)
+        .validate()
+        .expect_err("identity at 4:2:0 is not conformant and must fail validate()");
+
+    // Alpha input: `validate_for_input` used to refuse it because the Cs400
+    // `auxl` item was not built. It is now, so the query must say yes.
     use zenavif::PlanInput;
     aom_config()
         .validate_for_input(PlanInput::rgba8(64, 64))
-        .expect_err("alpha input must fail validate_for_input, as it fails encode");
-    // The same config WITHOUT alpha validates, so the refusal is scoped to
-    // alpha and is not just "this backend never validates".
+        .expect("alpha input must validate, as it encodes");
     aom_config()
         .validate_for_input(PlanInput::rgb8(64, 64))
         .expect("RGB8 input must validate for the aom backend");
@@ -936,16 +972,20 @@ fn aom_backend_refuses_depths_it_does_not_code() {
         64,
         64,
     );
-    let e = zenavif::encode_rgba8(
+    // Alpha USED to be refused here. It encodes since the Cs400 auxiliary-item
+    // landing, at 12 bits like every other depth the colour path codes, so the
+    // refusal became a positive assertion: a real alpha item with bytes in it.
+    let out = zenavif::encode_rgba8(
         rgba.as_ref(),
         &aom_config().bit_depth(zenavif::EncodeBitDepth::Twelve),
         stop(),
     )
-    .expect_err("alpha must still be refused at 12 bits");
+    .expect("12-bit alpha must encode");
     assert!(
-        format!("{e}").contains("no alpha auxiliary item"),
-        "the alpha refusal must name the missing item, got: {e}"
+        out.alpha_byte_size > 0,
+        "a 12-bit RGBA encode must carry an alpha auxiliary item, got {out:?}"
     );
+    assert!(out.color_byte_size > 0, "and a colour item");
 }
 
 /// The zenravif and zenav1-svt backends refuse 12 bits by name rather than

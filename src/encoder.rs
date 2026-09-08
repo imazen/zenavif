@@ -1266,10 +1266,14 @@ fn reject_svt_rs_backend(config: &EncoderConfig, entry: &'static str) -> Result<
 /// `aom_encode::key_frame::encode_key_frame` is a ONE-KEY-FRAME entry point:
 /// no inter prediction, no reference management, no multi-frame state. So
 /// animation is not "not wired yet at this seam", it is absent from the
-/// encoder. **Alpha** is the remaining seam-level gap: the Cs400 mono encode
-/// an `auxl` alpha item needs exists here, the item itself is not built, so
-/// `encode_rgba8` / `encode_rgba16` land here. Named in the message rather
-/// than silently served by zenravif.
+/// encoder.
+///
+/// **Alpha is no longer on this list.** `encode_rgba8` / `encode_rgba16` now
+/// dispatch to `encoder_aom`, which builds the Cs400 `auxl` alpha item beside
+/// the colour item. It was blocked less by the item than by the upstream
+/// sequence header pinning `color_range = 0` — an alpha plane is FULL range,
+/// so it could not have been signalled correctly before `ColorDescription`
+/// landed.
 ///
 /// Depth is NOT on this list any more (2026-09-03): the colour 4:2:0 path
 /// codes 8, 10 and 12 bits from both 8- and 16-bit input. What refuses a
@@ -1279,8 +1283,8 @@ pub(crate) fn reject_aom_backend(config: &EncoderConfig, entry: &'static str) ->
     if config.backend == Av1Backend::Zenav1Aom {
         return Err(at!(Error::Encode(format!(
             "Av1Backend::Zenav1Aom does not support {entry}: it encodes ONE AV1 \
-             KEY frame (RGB → 4:2:0 at 8/10/12 bits and 8-bit grayscale stills \
-             only — no animation, no alpha auxiliary item); \
+             KEY frame (RGB/RGBA → 4:4:4 or 4:2:0 at 8/10/12 bits, GBR identity, \
+             and 8-bit grayscale stills — no animation); \
              use Av1Backend::Zenravif"
         ))));
     }
@@ -1720,6 +1724,19 @@ pub(crate) fn encode_rgba8_once(
     if config.backend == Av1Backend::Zenav1Svt {
         return crate::encoder_svt_rs::encode_rgba8_svt_rs(img, config, stop);
     }
+    // Alpha is wired for the aom backend as of the Cs400 auxiliary-item
+    // landing: a colour item plus a full-range monochrome alpha item. It used
+    // to fall through to `reject_aom_backend`.
+    #[cfg(feature = "zenav1-aom-encode")]
+    if config.backend == Av1Backend::Zenav1Aom {
+        return crate::encoder_aom::encode_rgba8_aom(img, config, stop);
+    }
+    #[cfg(not(feature = "zenav1-aom-encode"))]
+    if config.backend == Av1Backend::Zenav1Aom {
+        return Err(at!(Error::Unsupported(
+            "Av1Backend::Zenav1Aom requires the `zenav1-aom-encode` cargo feature"
+        )));
+    }
     reject_svt_rs_backend(config, "encode_rgba8")?;
     let enc = build_ravif_encoder(config, stop, false)?;
     let result = enc
@@ -1889,6 +1906,19 @@ pub fn encode_rgba16(
     #[cfg(feature = "zenav1-svt")]
     if config.backend == Av1Backend::Zenav1Svt {
         return crate::encoder_svt_rs::encode_rgba16_svt_rs(img, config, stop);
+    }
+    // Alpha is wired for the aom backend as of the Cs400 auxiliary-item
+    // landing: a colour item plus a full-range monochrome alpha item. It used
+    // to fall through to `reject_aom_backend`.
+    #[cfg(feature = "zenav1-aom-encode")]
+    if config.backend == Av1Backend::Zenav1Aom {
+        return crate::encoder_aom::encode_rgba16_aom(img, config, stop);
+    }
+    #[cfg(not(feature = "zenav1-aom-encode"))]
+    if config.backend == Av1Backend::Zenav1Aom {
+        return Err(at!(Error::Unsupported(
+            "Av1Backend::Zenav1Aom requires the `zenav1-aom-encode` cargo feature"
+        )));
     }
     reject_svt_rs_backend(config, "encode_rgba16")?;
     let enc = build_ravif_encoder(config, stop, true)?;

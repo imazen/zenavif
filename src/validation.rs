@@ -276,16 +276,10 @@ impl crate::EncoderConfig {
         // VALIDATED and then failed at encode. `input_has_alpha` is exactly
         // the config x input property this method exists to check. The
         // zenav1-svt backend needs no such arm because it IMPLEMENTS alpha.
-        #[cfg(feature = "zenav1-aom-encode")]
-        if self.backend == crate::Av1Backend::Zenav1Aom && input.input_has_alpha {
-            return Err(ValidationError::BackendUnsupportedParam {
-                backend: "Av1Backend::Zenav1Aom",
-                param: "alpha input",
-                detail: "does not build the Cs400 `auxl` alpha auxiliary item, at any \
-                         bit depth (the monochrome encode it would need does exist here); \
-                         use Av1Backend::Zenravif for alpha",
-            });
-        }
+        // Alpha input USED to be refused here: the Cs400 `auxl` item was not
+        // built. It is now (a full-range monochrome item beside the colour
+        // item), so `encode_rgba8` / `encode_rgba16` succeed and this arm would
+        // make the query lie in the other direction.
         // The 16-bit-input rule above no longer fires for this backend
         // (`encode_rgb16` reaches the aom seam since 2026-09-03), which is why
         // the aom arm was added to its exclusion list rather than left to
@@ -397,65 +391,42 @@ impl crate::EncoderConfig {
     /// config that validates encodes and a config that encodes validates.
     #[cfg(feature = "zenav1-aom-encode")]
     fn validate_aom_scope(&self) -> Result<(), ValidationError> {
-        const BACKEND: &str = "Av1Backend::Zenav1Aom";
-        if self.chroma_subsampling != crate::EncodeChromaSubsampling::Yuv420 {
-            return Err(ValidationError::BackendUnsupportedParam {
-                backend: BACKEND,
-                param: "chroma_subsampling",
-                detail: "encodes 4:2:0 only; this seam has no forward RGB->YUV \
-                         4:4:4 kernel (the encoder itself gates 4:2:0, 4:2:2 and 4:4:4)",
-            });
-        }
-        if self.color_model != crate::EncodeColorModel::YCbCr {
-            return Err(ValidationError::BackendUnsupportedParam {
-                backend: BACKEND,
-                param: "color_model",
-                detail: "supports the YCbCr color model only \
-                         (identity/RGB has no defined 4:2:0 subsampling)",
-            });
-        }
-        if self.pixel_range == Some(crate::EncodePixelRange::Full) {
-            return Err(ValidationError::BackendUnsupportedParam {
-                backend: BACKEND,
-                param: "pixel_range",
-                detail: "signals LIMITED pixel range only (the zenav1-aom sequence \
-                         header pins color_range=0, AOM_CR_STUDIO_RANGE)",
-            });
-        }
-        // Depth: 8, 10 and 12 all encode on the colour 4:2:0 path since
-        // 2026-09-03. Only a value the encoder has no gate for is refused
-        // config-side; the grayscale-is-8-bit-only half needs the input shape
-        // and lives in `validate_for_input`. Same predicate as the encode path
+        // DELEGATE, do not restate. This used to be a hand-written copy of the
+        // encode path's predicates, under a doc comment promising "a config
+        // that validates encodes and a config that encodes validates" — and it
+        // drifted the moment the encode path grew: 4:4:4, identity/GBR, full
+        // range and lossless all became supported at the seam while this copy
+        // still refused them, so the SUPPORT QUERY LIED about four things the
+        // encoder does. (Its own last comment records an earlier instance of
+        // the same drift, in the other direction.)
+        //
+        // Two copies of a rule set is the defect; one predicate with two
+        // callers is the fix. `reject_unsupported_config` is the encode path's
+        // own gate, so the promise above is now true by construction rather
+        // than by review.
+        crate::encoder_aom::reject_unsupported_config(self).map_err(|e| {
+            ValidationError::BackendUnsupportedParam {
+                backend: "Av1Backend::Zenav1Aom",
+                param: "configuration",
+                // `&'static str` field, and the encode path's reason is a
+                // runtime String — leak it so the query reports the SAME
+                // sentence the encode path would. Bounded: the reason set is
+                // finite and this runs once per rejected validate().
+                detail: Box::leak(format!("{e}").into_boxed_str()),
+            }
+        })?;
+        // Depth: 8, 10 and 12 all encode on the colour path. Only a value the
+        // encoder has no gate for is refused config-side; the
+        // grayscale-is-8-bit-only half needs the input shape and lives in
+        // `validate_for_input`. Same predicate as the encode path
         // (`encoder_aom::aom_depth_error`).
         if let Some(detail) =
             crate::encoder_aom::aom_depth_error(self.coded_bit_depth_bits(false), false)
         {
             return Err(ValidationError::BackendUnsupportedParam {
-                backend: BACKEND,
+                backend: "Av1Backend::Zenav1Aom",
                 param: "bit_depth",
                 detail,
-            });
-        }
-        if self.gain_map.is_some() {
-            return Err(ValidationError::BackendUnsupportedParam {
-                backend: BACKEND,
-                param: "gain_map",
-                detail: "does not support gain maps (use Av1Backend::Zenravif)",
-            });
-        }
-        // Mirror of the encode path's `encode-imazen`-gated lossless refusal
-        // (`src/encoder_aom.rs` `reject_unsupported_config`): without this,
-        // `.with_lossless(true)` VALIDATED and then failed at encode — the
-        // exact validate/encode divergence this method documents itself as
-        // preventing. The zenav1-svt scope below has always had the twin
-        // check; this one was simply missing.
-        #[cfg(feature = "encode-imazen")]
-        if self.lossless {
-            return Err(ValidationError::BackendUnsupportedParam {
-                backend: BACKEND,
-                param: "lossless",
-                detail: "has no lossless mode wired (use Av1Backend::Zenravif \
-                         for lossless)",
             });
         }
         Ok(())

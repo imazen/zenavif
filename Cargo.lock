@@ -2326,18 +2326,20 @@ dependencies = [
 [[package]]
 name = "zenav1-aom-dsp"
 version = "0.0.1"
-source = "git+https://github.com/imazen/zenav1-aom?rev=93d12c35819bae531a9e5111eb783b398cdd6772#93d12c35819bae531a9e5111eb783b398cdd6772"
+source = "git+https://github.com/imazen/zenav1-aom?rev=fbea6b4#fbea6b47d9e0e8e635e24027e1e484bd8b4d4fea"
 dependencies = [
  "archmage",
+ "enough",
  "magetypes",
 ]
 
 [[package]]
 name = "zenav1-aom-encode"
 version = "0.0.1"
-source = "git+https://github.com/imazen/zenav1-aom?rev=93d12c35819bae531a9e5111eb783b398cdd6772#93d12c35819bae531a9e5111eb783b398cdd6772"
+source = "git+https://github.com/imazen/zenav1-aom?rev=fbea6b4#fbea6b47d9e0e8e635e24027e1e484bd8b4d4fea"
 dependencies = [
- "zenav1-aom-dsp 0.0.1 (git+https://github.com/imazen/zenav1-aom?rev=93d12c35819bae531a9e5111eb783b398cdd6772)",
+ "enough",
+ "zenav1-aom-dsp 0.0.1 (git+https://github.com/imazen/zenav1-aom?rev=fbea6b4)",
 ]
 
 [[package]]
@@ -2590,7 +2592,6 @@ dependencies = [
 name = "zenpredict"
 version = "0.2.0"
 dependencies = [
- "archmage",
  "bytemuck",
  "libm",
  "lz4_flex 0.11.6",
