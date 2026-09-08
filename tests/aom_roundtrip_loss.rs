@@ -439,6 +439,128 @@ fn the_router_query_agrees_with_the_encode_path() {
     );
 }
 
+/// **The container must not contradict the payload it wraps.**
+///
+/// An AVIF file states its profile, level, depth, monochrome flag, chroma
+/// format and colour range TWICE — once in the `av1C` / `colr` boxes and once
+/// in the AV1 sequence header inside the payload. Two statements of one fact
+/// drift, and this seam has been bitten by that class three times now: the
+/// muxer once wrote an `av1C` claiming 4:4:4 over a 4:2:0 payload; `mux_aom`
+/// hardcoded 4:2:0 + studio range "back when the encoder could produce nothing
+/// else"; and the routing query refused the one matrix the muxer itself
+/// writes.
+///
+/// So this asserts the two agree, on every format this backend supports, using
+/// **`zenavif-parse`'s own independent readers on both sides** — `av1_config()`
+/// reads the container boxes, `primary_metadata()` re-parses the payload's
+/// sequence header — rather than either side checking itself.
+#[test]
+fn the_container_agrees_with_the_payload_on_every_format() {
+    let src16 = ramp_rgba16(32, 32);
+    let rgb8 = to_rgb8(src16.as_ref());
+    let rgba8 = to_rgba8(src16.as_ref());
+
+    let mut checked = 0usize;
+    let mut alpha_cells = 0usize;
+    for chroma in [EncodeChromaSubsampling::Yuv444, EncodeChromaSubsampling::Yuv420] {
+        for model in [EncodeColorModel::YCbCr, EncodeColorModel::Rgb] {
+            for range in [None, Some(EncodePixelRange::Full), Some(EncodePixelRange::Limited)] {
+                for depth in [EncodeBitDepth::Eight, EncodeBitDepth::Ten, EncodeBitDepth::Twelve] {
+                    let mut cfg = base()
+                        .quality(90.0)
+                        .chroma_subsampling(chroma)
+                        .color_model(model)
+                        .bit_depth(depth);
+                    if let Some(r) = range {
+                        cfg = cfg.pixel_range(r);
+                    }
+                    let label = format!("{chroma:?}/{model:?}/{range:?}/{depth:?}");
+                    for (kind, file) in [
+                        ("rgb8", zenavif::encode_rgb8(rgb8.as_ref(), &cfg, stop()).ok()),
+                        ("rgba8", zenavif::encode_rgba8(rgba8.as_ref(), &cfg, stop()).ok()),
+                    ] {
+                        // A refused configuration is not this test's business —
+                        // `the_support_query_agrees_with_the_encode_path` owns that.
+                        let Some(enc) = file else { continue };
+                        if kind == "rgba8" {
+                            assert!(enc.alpha_byte_size > 0, "{label} {kind}: alpha item is empty");
+                            alpha_cells += 1;
+                        }
+                        let pcfg = zenavif_parse::DecodeConfig::default();
+                        let parser = zenavif_parse::AvifParser::from_owned_with_config(
+                            enc.avif_file.clone(),
+                            &pcfg,
+                            &almost_enough::Unstoppable,
+                        )
+                        .unwrap_or_else(|e| panic!("{label} {kind}: container must parse: {e}"));
+                        let av1c = parser
+                            .av1_config()
+                            .unwrap_or_else(|| panic!("{label} {kind}: av1C on the primary item"));
+                        let meta = parser
+                            .primary_metadata()
+                            .unwrap_or_else(|e| panic!("{label} {kind}: seq header: {e}"));
+
+                        assert_eq!(
+                            av1c.profile, meta.seq_profile,
+                            "{label} {kind}: av1C profile vs the payload's seq_profile"
+                        );
+                        assert_eq!(
+                            av1c.bit_depth, meta.bit_depth,
+                            "{label} {kind}: av1C depth vs the payload's"
+                        );
+                        assert_eq!(
+                            av1c.monochrome, meta.monochrome,
+                            "{label} {kind}: av1C monochrome vs the payload's"
+                        );
+                        let (mssx, mssy): (bool, bool) = meta.chroma_subsampling.into();
+                        assert_eq!(
+                            (av1c.chroma_subsampling_x == 1, av1c.chroma_subsampling_y == 1),
+                            (mssx, mssy),
+                            "{label} {kind}: av1C chroma vs the payload's"
+                        );
+                        // `colr` is optional; where it exists it must agree on
+                        // range, and on any CICP field the payload NAMES. A
+                        // payload that codes "unspecified" (2) is handing that
+                        // field to the container deliberately -- the aom seam's
+                        // identity path signals (2, 2, 0) -- so an unspecified
+                        // field is not a disagreement.
+                        if let Some(zenavif_parse::ColorInformation::Nclx {
+                            color_primaries,
+                            transfer_characteristics,
+                            matrix_coefficients,
+                            full_range,
+                        }) = parser.color_info()
+                        {
+                            assert_eq!(
+                                *full_range, meta.full_range,
+                                "{label} {kind}: colr range vs the payload's color_range"
+                            );
+                            for (name, boxed, coded) in [
+                                ("primaries", *color_primaries, u16::from(meta.color_primaries)),
+                                ("transfer", *transfer_characteristics, u16::from(meta.transfer_characteristics)),
+                                ("matrix", *matrix_coefficients, u16::from(meta.matrix_coefficients)),
+                            ] {
+                                if coded != 2 {
+                                    assert_eq!(
+                                        boxed, coded,
+                                        "{label} {kind}: colr {name} contradicts the payload"
+                                    );
+                                }
+                            }
+                        }
+                        checked += 1;
+                    }
+                }
+            }
+        }
+    }
+    eprintln!("container/payload agreement: {checked} files checked, {alpha_cells} with alpha");
+    // Non-vacuity: the sweep must actually have produced files, including
+    // alpha ones (the item whose av1C used to be built from the COLOUR depth).
+    assert!(checked >= 40, "the sweep must encode real files (got {checked})");
+    assert!(alpha_cells > 0, "and some must carry an alpha item");
+}
+
 fn base() -> EncoderConfig {
     EncoderConfig::new().backend(Av1Backend::Zenav1Aom)
 }

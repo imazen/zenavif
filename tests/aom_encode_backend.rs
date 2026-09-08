@@ -1138,10 +1138,24 @@ fn aom_bd8_output_is_unchanged_by_the_hbd_wiring() {
     assert_eq!(yuv.height, 64);
     // Anchor measured 2026-09-03 on this content/config. A change here is a
     // change to 8-bit output and must be explained, not re-pinned reflexively.
+    // TWO anchors, because the file is a container wrapping a payload and only
+    // one of them is "8-bit output". Hashing the file alone cannot tell a
+    // change in the encoder from a change in the muxer, and that ambiguity cost
+    // a measurement the first time this fired (see the note below).
+    let payload = primary_payload(&enc.avif_file);
+    let payload_digest = fnv1a(&payload);
     let digest = fnv1a(&enc.avif_file);
     eprintln!(
-        "bd8 anchor: {} bytes, fnv1a-64 {digest:#018x}",
-        enc.avif_file.len()
+        "bd8 anchor: file {} bytes fnv1a-64 {digest:#018x}; AV1 payload {} bytes \
+         fnv1a-64 {payload_digest:#018x}",
+        enc.avif_file.len(),
+        payload.len()
+    );
+    assert_eq!(
+        payload_digest, BD8_PAYLOAD_ANCHOR_FNV1A,
+        "the 8-bit AV1 PAYLOAD changed ({} bytes). This is the encoder, not the muxer — \
+         a container-only change leaves this hash alone.",
+        payload.len()
     );
     assert_eq!(
         digest,
@@ -1155,7 +1169,21 @@ fn aom_bd8_output_is_unchanged_by_the_hbd_wiring() {
 }
 
 /// Measured 2026-09-03; see [`aom_bd8_output_is_unchanged_by_the_hbd_wiring`].
-const BD8_ANCHOR_FNV1A: u64 = 0x622c_cd37_57b0_c862;
+/// The whole AVIF file. **Moved once, 2026-09-08, by a MUXER change with the
+/// payload byte-identical**: `zenavif-serialize` began deriving the `av1C` from
+/// the payload's own sequence header instead of hardcoding
+/// `seq_level_idx_0 = 31`, so exactly one container byte changed (`0x3f` ->
+/// `0x20`, the level `zenav1-aom`'s ported `set_bitstream_level_tier` had
+/// already computed and written into the bitstream). Measured on an A/B of the
+/// same tree: file hash moved, AV1 payload hash and length identical, total
+/// file length identical.
+const BD8_ANCHOR_FNV1A: u64 = 0xae5b_ea34_423f_cdc7;
+
+/// The AV1 payload alone — what "8-bit output" actually means. This has NOT
+/// moved since 2026-09-03; a change here is an encoder change and the 60/60
+/// identity result in `benchmarks/aom_bd8_identity_2026-09-03.*` no longer
+/// holds.
+const BD8_PAYLOAD_ANCHOR_FNV1A: u64 = 0x293d_629d_85cc_1cf5;
 
 fn fnv1a(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;

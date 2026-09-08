@@ -15,6 +15,7 @@ mod boxes;
 pub mod constants;
 mod error;
 pub mod grid;
+mod seq_header;
 mod writer;
 
 use crate::boxes::*;
@@ -206,64 +207,6 @@ impl From<ChromaSubsampling> for (bool, bool) {
     fn from(cs: ChromaSubsampling) -> Self {
         (cs.horizontal, cs.vertical)
     }
-}
-
-/// Read `seq_profile` out of the first `OBU_SEQUENCE_HEADER` in an AV1
-/// temporal unit, so `av1C` can restate what the bitstream actually says
-/// instead of what the caller remembered to configure.
-///
-/// Only the OBU framing and the header's first three bits are read — the
-/// profile is the first syntax element of `sequence_header_obu()` (AV1 spec
-/// 5.5.1), so nothing downstream of it has to be parsed. Returns `None` when
-/// the payload carries no sequence header or is truncated; the caller then
-/// keeps its own settings rather than failing a mux.
-fn stream_seq_profile(av1_data: &[u8]) -> Option<u8> {
-    const OBU_SEQUENCE_HEADER: u8 = 1;
-    let mut rest = av1_data;
-    while let Some((&header, after_header)) = rest.split_first() {
-        // obu_forbidden_bit(1) obu_type(4) obu_extension_flag(1)
-        // obu_has_size_field(1) obu_reserved_1bit(1)
-        if header & 0x80 != 0 {
-            return None; // forbidden bit set: not an OBU stream
-        }
-        let obu_type = (header >> 3) & 0x0f;
-        let has_size_field = header & 0x02 != 0;
-        let mut body = after_header;
-        if header & 0x04 != 0 {
-            // obu_extension_flag: one more header byte
-            body = body.get(1..)?;
-        }
-        let payload = if has_size_field {
-            let (size, size_len) = read_leb128(body)?;
-            let start = size_len;
-            let end = start.checked_add(usize::try_from(size).ok()?)?;
-            let p = body.get(start..end)?;
-            rest = &body[end..];
-            p
-        } else {
-            // No size field: this OBU runs to the end of the temporal unit.
-            rest = &[];
-            body
-        };
-        if obu_type == OBU_SEQUENCE_HEADER {
-            // seq_profile is f(3), the first element of the header payload.
-            return payload.first().map(|b| b >> 5);
-        }
-    }
-    None
-}
-
-/// Minimal leb128 reader for OBU sizes: returns `(value, bytes_consumed)`.
-/// AV1 caps `leb128()` at 8 bytes (spec 4.10.5).
-fn read_leb128(data: &[u8]) -> Option<(u64, usize)> {
-    let mut value: u64 = 0;
-    for (i, &byte) in data.iter().take(8).enumerate() {
-        value |= u64::from(byte & 0x7f) << (i * 7);
-        if byte & 0x80 == 0 {
-            return Some((value, i + 1));
-        }
-    }
-    None
 }
 
 /// Config for the serialization (allows setting advanced image properties).
@@ -831,36 +774,46 @@ impl Aviffy {
         //                                                     caller's subsampling stands
         // A payload with no readable sequence header (pre-split OBUs, fixtures)
         // falls back to the caller's settings — the pre-2026-09-02 behaviour.
-        let stated_profile = stream_seq_profile(color_av1_data);
+        // The derivation now covers the WHOLE `av1C`, not just the profile:
+        // level, tier, depth, monochrome, chroma and the sample position are
+        // all coded in the sequence header too, and two statements of one fact
+        // drift. See `seq_header`'s module doc.
+        let parsed = seq_header::parse(color_av1_data);
         let fallback_profile = if self.monochrome { 0 } else { self.min_seq_profile };
         // 12-bit is profile 2 only, so a depth/profile contradiction can never
         // emit `twelve_bit` under profile 0 or 1.
-        let seq_profile = stated_profile
-            .unwrap_or(fallback_profile)
-            .max(if color_depth_bits >= 12 { 2 } else { 0 });
-        let monochrome = self.monochrome && seq_profile != 1;
-        let (sub_x, sub_y) = match seq_profile {
-            0 => (true, true),
-            1 => (false, false),
-            _ if monochrome => (true, true),
-            _ => (self.chroma_subsampling.horizontal, self.chroma_subsampling.vertical),
-        };
-        let av1c_color_prop = push_prop(ipco, IpcoProp::Av1C(Av1CBox {
-            seq_profile,
-            seq_level_idx_0: 31,
-            seq_tier_0: false,
-            high_bitdepth: color_depth_bits >= 10,
-            twelve_bit: color_depth_bits >= 12,
-            monochrome,
-            chroma_subsampling_x: sub_x,
-            chroma_subsampling_y: sub_y,
-            chroma_sample_position: 0,
-        }))?;
+        let seq_profile = fallback_profile.max(if color_depth_bits >= 12 { 2 } else { 0 });
+        let fallback_mono = self.monochrome && seq_profile != 1;
+        let av1c_color = parsed.map_or_else(
+            || Av1CBox {
+                seq_profile,
+                seq_level_idx_0: 31,
+                seq_tier_0: false,
+                high_bitdepth: color_depth_bits >= 10,
+                twelve_bit: color_depth_bits >= 12,
+                monochrome: fallback_mono,
+                chroma_subsampling_x: match seq_profile {
+                    1 => false,
+                    _ => true,
+                } || fallback_mono,
+                chroma_subsampling_y: match seq_profile {
+                    0 => true,
+                    1 => false,
+                    _ => fallback_mono || self.chroma_subsampling.vertical,
+                },
+                chroma_sample_position: 0,
+            },
+            seq_header::SeqHeader::to_av1c,
+        );
+        let monochrome = av1c_color.monochrome;
+        // pixi restates the payload's depth for the same reason the av1C does.
+        let pixi_depth = parsed.map_or(color_depth_bits, |h| h.bit_depth);
+        let av1c_color_prop = push_prop(ipco, IpcoProp::Av1C(av1c_color))?;
         // MIAF: pixi channel count reflects the coded image — 1 for
         // monochrome, 3 for color.
         let pixi_color = push_prop(ipco, IpcoProp::Pixi(PixiBox {
             channels: if monochrome { 1 } else { 3 },
-            depth: color_depth_bits,
+            depth: pixi_depth,
         }))?;
 
         let mut ipma = IpmaEntry {
@@ -873,8 +826,24 @@ impl Aviffy {
             let p = push_prop(ipco, IpcoProp::ColrIcc(ColrIccBox { icc_data: icc_data.clone() }))?;
             ipma.prop_ids.push(p);
         }
+        // WHETHER a `colr` box is emitted stays the caller's decision (an
+        // all-default declaration means "no nclx box", unchanged); what goes
+        // IN it must agree with the payload. See `SeqHeader::agreeing_colr`
+        // for why the CICP triple is taken per field rather than per flag.
+        //
+        // NAMED RESIDUAL, deliberately not changed here: because the predicate
+        // reads the CALLER's declaration, a caller that sets no colour knobs
+        // gets no `colr` box even over a payload that names BT.2020 / PQ — the
+        // same drift in a weaker form (the container under-describes rather
+        // than contradicts). Keying the predicate on the DERIVED value would
+        // fix it, and would also add an nclx box to every studio-range file
+        // muxed through the bare `serialize()` entry point, since
+        // `ColrBox::default()` is full-range. That is a wider behaviour change
+        // than the contradiction fix needs, so it is recorded rather than
+        // taken.
         if self.colr != ColrBox::default() {
-            let p = push_prop(ipco, IpcoProp::Colr(self.colr))?;
+            let colr = parsed.map_or(self.colr, |h| h.agreeing_colr(self.colr));
+            let p = push_prop(ipco, IpcoProp::Colr(colr))?;
             ipma.prop_ids.push(p);
         }
         if let Some(clli) = self.clli {
@@ -931,18 +900,29 @@ impl Aviffy {
             });
         }
 
-        let av1c_alpha_prop = push_prop(ipco, IpcoProp::Av1C(Av1CBox {
-            seq_profile: if alpha_depth_bits >= 12 { 2 } else { 0 },
-            seq_level_idx_0: 31,
-            seq_tier_0: false,
-            high_bitdepth: alpha_depth_bits >= 10,
-            twelve_bit: alpha_depth_bits >= 12,
-            monochrome: true,
-            chroma_subsampling_x: true,
-            chroma_subsampling_y: true,
-            chroma_sample_position: 0,
-        }))?;
-        let pixi_1 = push_prop(ipco, IpcoProp::Pixi(PixiBox { channels: 1, depth: alpha_depth_bits }))?;
+        // The alpha item is a SEPARATE AV1 stream with its own sequence
+        // header, so its `av1C` is derived from ITS payload — not from the
+        // colour item's depth, which is all this had to go on before. Nothing
+        // required the two to be coded at the same depth; they simply always
+        // were, so a caller who split them would have muxed a lying `av1C`
+        // with no error.
+        let alpha_parsed = seq_header::parse(alpha_data);
+        let alpha_depth = alpha_parsed.map_or(alpha_depth_bits, |h| h.bit_depth);
+        let av1c_alpha_prop = push_prop(ipco, IpcoProp::Av1C(alpha_parsed.map_or(
+            Av1CBox {
+                seq_profile: if alpha_depth_bits >= 12 { 2 } else { 0 },
+                seq_level_idx_0: 31,
+                seq_tier_0: false,
+                high_bitdepth: alpha_depth_bits >= 10,
+                twelve_bit: alpha_depth_bits >= 12,
+                monochrome: true,
+                chroma_subsampling_x: true,
+                chroma_subsampling_y: true,
+                chroma_sample_position: 0,
+            },
+            seq_header::SeqHeader::to_av1c,
+        )))?;
+        let pixi_1 = push_prop(ipco, IpcoProp::Pixi(PixiBox { channels: 1, depth: alpha_depth }))?;
         let auxc_prop = push_prop(ipco, IpcoProp::AuxC(AuxCBox {
             urn: "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha",
         }))?;
@@ -2350,11 +2330,47 @@ impl TestBitWriter {
 /// explicit-chroma branch rather than the sRGB shortcut.
 #[cfg(test)]
 fn test_seq_header_obu(seq_profile: u8, high_bitdepth: bool, twelve_bit: bool, monochrome: bool) -> Vec<u8> {
+    test_seq_header_obu_at_level(seq_profile, high_bitdepth, twelve_bit, monochrome, 0)
+}
+
+/// [`test_seq_header_obu`] with an explicit `seq_level_idx[0]`.
+#[cfg(test)]
+fn test_seq_header_obu_at_level(
+    seq_profile: u8,
+    high_bitdepth: bool,
+    twelve_bit: bool,
+    monochrome: bool,
+    level: u8,
+) -> Vec<u8> {
+    test_seq_header_obu_full(seq_profile, high_bitdepth, twelve_bit, monochrome, level, 9, 16, 9)
+}
+
+/// [`test_seq_header_obu`] with an explicit CICP triple, so the "payload
+/// declines to name this field" hand-off can be exercised. `(2, 2, 2)` writes
+/// `color_description_present_flag = 0`; the sRGB triple `(1, 13, 0)` takes
+/// AV1 5.5.2's shortcut and codes no `color_range` bit.
+#[cfg(test)]
+fn test_seq_header_obu_cicp(seq_profile: u8, cp: u8, tc: u8, mc: u8) -> Vec<u8> {
+    test_seq_header_obu_full(seq_profile, false, false, false, 0, cp, tc, mc)
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
+fn test_seq_header_obu_full(
+    seq_profile: u8,
+    high_bitdepth: bool,
+    twelve_bit: bool,
+    monochrome: bool,
+    level: u8,
+    cp: u8,
+    tc: u8,
+    mc: u8,
+) -> Vec<u8> {
     let mut w = TestBitWriter::new();
     w.put(u32::from(seq_profile), 3);
     w.put(1, 1); // still_picture
     w.put(1, 1); // reduced_still_picture_header
-    w.put(0, 5); // seq_level_idx[0]
+    w.put(u32::from(level), 5); // seq_level_idx[0]
     w.put(15, 4); // frame_width_bits_minus_1  -> 16
     w.put(15, 4); // frame_height_bits_minus_1 -> 16
     w.put(63, 16); // max_frame_width_minus_1  -> 64
@@ -2376,12 +2392,20 @@ fn test_seq_header_obu(seq_profile: u8, high_bitdepth: bool, twelve_bit: bool, m
         w.put(u32::from(monochrome), 1);
         monochrome
     };
-    w.put(1, 1); // color_description_present_flag
-    w.put(9, 8); // color_primaries      = BT.2020
-    w.put(16, 8); // transfer_characteristics = SMPTE 2084 (PQ)
-    w.put(9, 8); // matrix_coefficients  = BT.2020 NCL
-    w.put(0, 1); // color_range (limited)
-    if !mono {
+    let describe = (cp, tc, mc) != (2, 2, 2);
+    w.put(u32::from(describe), 1); // color_description_present_flag
+    if describe {
+        w.put(u32::from(cp), 8);
+        w.put(u32::from(tc), 8);
+        w.put(u32::from(mc), 8);
+    }
+    // AV1 5.5.2: the sRGB triple fixes range full and the format 4:4:4, and
+    // codes NO range bit.
+    let srgb_shortcut = !mono && (cp, tc, mc) == (1, 13, 0);
+    if !srgb_shortcut {
+        w.put(0, 1); // color_range (limited)
+    }
+    if !mono && !srgb_shortcut {
         let (ssx, ssy) = match seq_profile {
             0 => (true, true),
             1 => (false, false),
@@ -2500,6 +2524,277 @@ fn av1c_monochrome_profile0_keeps_mono_flag() {
     assert_eq!(profile, 0);
     assert!(ssx && ssy);
     assert!(mono);
+}
+
+/// **The reader is the writer's inverse, field for field.**
+///
+/// `test_seq_header_obu` above is a spec-shaped sequence-header WRITER that
+/// predates the reader, so round-tripping through it checks the parser against
+/// an independently-written layout rather than against itself. Every profile /
+/// depth / monochrome combination the writer can express is swept.
+#[test]
+fn seq_header_parse_inverts_the_test_writer() {
+    let mut checked = 0;
+    for (seq_profile, high_bitdepth, twelve_bit) in
+        [(0u8, false, false), (0, true, false), (1, false, false), (1, true, false),
+         (2, true, false), (2, true, true), (2, false, false)]
+    {
+        for monochrome in [false, true] {
+            // Profile 1 does not code `mono_chrome` at all — the writer knows
+            // this and the reader must derive the same `false`.
+            let obu = test_seq_header_obu(seq_profile, high_bitdepth, twelve_bit, monochrome);
+            let h = seq_header::parse(&obu)
+                .unwrap_or_else(|| panic!("profile {seq_profile} hbd {high_bitdepth} \
+                                           twelve {twelve_bit} mono {monochrome}: no parse"));
+            let expect_depth = match (seq_profile, high_bitdepth, twelve_bit) {
+                (2, true, true) => 12,
+                (_, true, _) => 10,
+                _ => 8,
+            };
+            let expect_mono = monochrome && seq_profile != 1;
+            let (expect_ssx, expect_ssy) = if expect_mono {
+                (true, true)
+            } else {
+                match seq_profile {
+                    0 => (true, true),
+                    1 => (false, false),
+                    _ if expect_depth == 12 => (true, true),
+                    _ => (true, false), // profile 2 below 12-bit is 4:2:2
+                }
+            };
+            let label = format!("profile {seq_profile} depth {expect_depth} mono {expect_mono}");
+            assert_eq!(h.seq_profile, seq_profile, "{label}: seq_profile");
+            assert_eq!(h.bit_depth, expect_depth, "{label}: bit_depth");
+            assert_eq!(h.monochrome, expect_mono, "{label}: mono_chrome");
+            assert_eq!((h.subsampling_x, h.subsampling_y), (expect_ssx, expect_ssy), "{label}: chroma");
+            assert_eq!(h.max_frame_width, 64, "{label}: max_frame_width");
+            assert_eq!(h.max_frame_height, 64, "{label}: max_frame_height");
+            assert_eq!(h.seq_level_idx_0, 0, "{label}: seq_level_idx[0]");
+            // The writer signals BT.2020 / PQ / BT.2020-NCL explicitly, which
+            // is what keeps it off the sRGB shortcut branch.
+            assert!(h.color_description_present, "{label}: cdp");
+            assert_eq!(
+                (h.color_primaries, h.transfer_characteristics, h.matrix_coefficients),
+                (9, 16, 9),
+                "{label}: CICP triple"
+            );
+            assert!(!h.color_range, "{label}: writer codes studio range");
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 14, "the sweep must cover every writable combination");
+}
+
+/// **The sRGB triple codes NO range bit** (AV1 5.5.2 fixes range full and the
+/// format 4:4:4 for `cp = 1, tc = 13, mc = 0`). A reader that consumed one
+/// anyway would be misaligned for `separate_uv_delta_q` and
+/// `film_grain_params_present`, so this is a layout check, not a value check.
+#[test]
+fn seq_header_parse_takes_the_srgb_shortcut_without_a_range_bit() {
+    let mut w = TestBitWriter::new();
+    w.put(1, 3); // seq_profile = 1 (4:4:4)
+    w.put(1, 1); // still_picture
+    w.put(1, 1); // reduced_still_picture_header
+    w.put(0, 5); // seq_level_idx[0]
+    w.put(15, 4);
+    w.put(15, 4);
+    w.put(63, 16);
+    w.put(63, 16);
+    w.put(0, 1); // use_128x128_superblock
+    w.put(0, 1); // enable_filter_intra
+    w.put(0, 1); // enable_intra_edge_filter
+    w.put(0, 1); // enable_superres
+    w.put(0, 1); // enable_cdef
+    w.put(0, 1); // enable_restoration
+    w.put(0, 1); // high_bitdepth
+    // profile 1 codes no mono_chrome
+    w.put(1, 1); // color_description_present_flag
+    w.put(1, 8); // color_primaries = BT.709
+    w.put(13, 8); // transfer_characteristics = sRGB
+    w.put(0, 8); // matrix_coefficients = IDENTITY
+    // NO color_range bit here — that is the whole point.
+    w.put(0, 1); // separate_uv_delta_q
+    w.put(0, 1); // film_grain_params_present
+    let payload = w.finish();
+    let mut obu = vec![0b0000_1010u8];
+    obu.push(u8::try_from(payload.len()).unwrap());
+    obu.extend_from_slice(&payload);
+
+    let h = seq_header::parse(&obu).expect("sRGB sequence header must parse");
+    assert_eq!(h.seq_profile, 1);
+    assert!(h.color_range, "the sRGB triple is full range by definition");
+    assert!(!h.subsampling_x && !h.subsampling_y, "and 4:4:4 by definition");
+    assert_eq!((h.color_primaries, h.transfer_characteristics, h.matrix_coefficients), (1, 13, 0));
+}
+
+/// **Truncation must return `None`, never panic.** This parses bytes a caller
+/// can be handed from anywhere, inside a muxer that must not abort. Every
+/// prefix of a valid header is fed in, plus a byte-flip sweep.
+#[test]
+fn seq_header_parse_survives_truncation_and_corruption() {
+    let obu = test_seq_header_obu(2, true, true, false);
+    for cut in 0..obu.len() {
+        // No assertion on the RESULT — a short header may still parse if the
+        // fields it needs happen to fit. The property is that it returns.
+        let _ = seq_header::parse(&obu[..cut]);
+    }
+    for byte in 0..obu.len() {
+        for bit in 0..8 {
+            let mut mutated = obu.clone();
+            mutated[byte] ^= 1 << bit;
+            let _ = seq_header::parse(&mutated);
+        }
+    }
+    // Non-OBU bytes, the case `av1c_falls_back_to_caller_settings_without_a_
+    // sequence_header` mux-tests one layer up.
+    assert!(seq_header::parse(&[1, 2, 3, 4, 5, 6]).is_none());
+    assert!(seq_header::parse(&[]).is_none());
+    assert!(seq_header::parse(&[0xff]).is_none(), "forbidden bit set");
+}
+
+/// Every `av1C` box in a muxed file, in `ipco` order (colour first, then
+/// alpha), as `(seq_profile, seq_level_idx_0, high_bitdepth, twelve_bit,
+/// monochrome, ssx, ssy)`. Read raw rather than through `zenavif-parse`,
+/// which surfaces only the primary item's config.
+#[cfg(test)]
+fn all_muxed_av1c(avif: &[u8]) -> Vec<(u8, u8, bool, bool, bool, bool, bool)> {
+    let mut out = Vec::new();
+    for i in 0..avif.len().saturating_sub(8) {
+        if &avif[i..i + 4] == b"av1C" {
+            let b = &avif[i + 4..i + 8];
+            out.push((
+                b[1] >> 5,
+                b[1] & 0x1f,
+                b[2] & 0x40 != 0,
+                b[2] & 0x20 != 0,
+                b[2] & 0x10 != 0,
+                b[2] & 0x08 != 0,
+                b[2] & 0x04 != 0,
+            ));
+        }
+    }
+    out
+}
+
+/// The muxed `colr` nclx box as `(cp, tc, mc, full_range)`.
+#[cfg(test)]
+fn muxed_nclx(avif: &[u8]) -> (u16, u16, u16, bool) {
+    let parser = zenavif_parse::AvifParser::from_bytes(avif).expect("parse muxed AVIF");
+    match parser.color_info().expect("colr box present") {
+        zenavif_parse::ColorInformation::Nclx {
+            color_primaries,
+            transfer_characteristics,
+            matrix_coefficients,
+            full_range,
+        } => (*color_primaries, *transfer_characteristics, *matrix_coefficients, *full_range),
+        other => panic!("expected an nclx colr box, got {other:?}"),
+    }
+}
+
+/// **`seq_level_idx` was thrown away.** All three `av1C` sites hardcoded 31
+/// ("unspecified") over payloads that state a level — `zenav1-aom` ports
+/// libaom's `set_bitstream_level_tier` to compute exactly this field, and the
+/// container discarded it.
+#[test]
+fn av1c_level_follows_the_sequence_header_instead_of_a_hardcoded_31() {
+    for level in [0u8, 4, 8, 13, 31] {
+        let obu = test_seq_header_obu_at_level(0, false, false, false, level);
+        let avif = Aviffy::new().to_vec(&obu, None, 64, 64, 8);
+        let boxes = all_muxed_av1c(&avif);
+        assert_eq!(boxes.len(), 1, "one colour item, no alpha");
+        assert_eq!(
+            boxes[0].1, level,
+            "av1C must restate the payload's seq_level_idx[0], not a constant"
+        );
+    }
+}
+
+/// **The alpha item is a separate stream and its `av1C` must come from ITS
+/// payload.** Before this it was built from the COLOUR item's depth argument,
+/// so an 8-bit alpha under a 12-bit colour item muxed an `av1C` claiming
+/// `twelve_bit` over an 8-bit sequence header, with no error. Nothing in the
+/// AVIF spec ties the two depths together; they simply always matched in the
+/// callers that existed.
+#[test]
+fn alpha_av1c_follows_the_alpha_payload_not_the_colour_depth() {
+    let colour = test_seq_header_obu(2, true, true, false); // 12-bit 4:2:0-ish
+    let alpha = test_seq_header_obu(0, false, false, true); // 8-bit monochrome
+    let avif = Aviffy::new().to_vec(&colour, Some(&alpha), 64, 64, 12);
+
+    let boxes = all_muxed_av1c(&avif);
+    assert_eq!(boxes.len(), 2, "colour + alpha");
+    let (c_profile, _, c_high, c_twelve, ..) = boxes[0];
+    assert_eq!((c_profile, c_high, c_twelve), (2, true, true), "colour item is 12-bit profile 2");
+    let (a_profile, _, a_high, a_twelve, a_mono, ..) = boxes[1];
+    assert_eq!(
+        (a_profile, a_high, a_twelve),
+        (0, false, false),
+        "the alpha av1C must describe the 8-bit alpha payload, not the 12-bit colour item"
+    );
+    assert!(a_mono, "an AVIF alpha auxiliary item is monochrome");
+}
+
+/// **Range is always coded in the payload, so the container never has to
+/// guess it.** A caller declaring the opposite of what it encoded used to
+/// produce a file whose `colr` contradicted its own bitstream — invisible to
+/// a decoder that reads the sequence header (ours does) and wrong for one
+/// that trusts the container.
+#[test]
+fn colr_full_range_follows_the_sequence_header() {
+    // `test_seq_header_obu` codes studio range; declare full and watch the
+    // payload win.
+    let obu = test_seq_header_obu(0, false, false, false);
+    let avif = Aviffy::new()
+        .set_color_primaries(constants::ColorPrimaries::Bt2020)
+        .set_full_color_range(true)
+        .to_vec(&obu, None, 64, 64, 8);
+    let (.., full_range) = muxed_nclx(&avif);
+    assert!(
+        !full_range,
+        "the payload codes studio range; the container must not claim full"
+    );
+}
+
+/// **The hand-off point, and the reason the CICP triple is taken per field.**
+/// `zenav1-aom`'s identity/GBR path signals `(2, 2, 0)`: an explicit
+/// `MC_IDENTITY`, because it decides whether the planes are GBR or YCbCr, over
+/// UNSPECIFIED primaries and transfer that `colr` exists to carry. A rule
+/// keyed on `color_description_present_flag` would take all three and throw
+/// the caller's BT.709 / sRGB away.
+#[test]
+fn colr_keeps_caller_colorimetry_where_the_payload_says_unspecified() {
+    let obu = test_seq_header_obu_cicp(1, 2, 2, 0); // profile 1, (cp, tc, mc) = unspec/unspec/identity
+    let avif = Aviffy::new()
+        .set_color_primaries(constants::ColorPrimaries::Bt709)
+        .set_transfer_characteristics(constants::TransferCharacteristics::Srgb)
+        .set_matrix_coefficients(constants::MatrixCoefficients::Rgb)
+        .to_vec(&obu, None, 64, 64, 8);
+    let (cp, tc, mc, _) = muxed_nclx(&avif);
+    assert_eq!(cp, 1, "the payload said unspecified; the caller's BT.709 stands");
+    assert_eq!(tc, 13, "and its sRGB transfer");
+    assert_eq!(mc, 0, "while the payload's explicit MC_IDENTITY is restated");
+}
+
+/// The converse of the above, so the per-field rule is not just "always keep
+/// the caller's": where the payload NAMES a primary/transfer, it wins.
+#[test]
+fn colr_takes_colorimetry_the_payload_does_name() {
+    // `test_seq_header_obu` signals BT.2020 / PQ / BT.2020-NCL.
+    let obu = test_seq_header_obu(0, true, false, false);
+    // Declared DisplayP3 / BT.709-transfer / BT.709-matrix: wrong on all three
+    // counts, and non-default so a `colr` box is emitted at all (see the note
+    // on the emission predicate in `build_color_ipma`).
+    let avif = Aviffy::new()
+        .set_color_primaries(constants::ColorPrimaries::DisplayP3)
+        .set_transfer_characteristics(constants::TransferCharacteristics::Bt709)
+        .set_matrix_coefficients(constants::MatrixCoefficients::Bt709)
+        .to_vec(&obu, None, 64, 64, 10);
+    let (cp, tc, mc, _) = muxed_nclx(&avif);
+    assert_eq!(
+        (cp, tc, mc),
+        (9, 16, 9),
+        "the payload names all three; a container that kept the caller's sRGB would mis-describe an HDR stream"
+    );
 }
 
 /// A payload with no readable sequence header (a caller muxing pre-split OBUs,
