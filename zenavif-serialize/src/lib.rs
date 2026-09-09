@@ -214,6 +214,13 @@ impl From<ChromaSubsampling> for (bool, bool) {
 /// See [`Aviffy::new`].
 pub struct Aviffy {
     strict_payload_agreement: bool,
+    /// Whether any `colr` setter was called. A declaration that HAPPENS to
+    /// equal `ColrBox::default()` is still a declaration and can still
+    /// contradict the payload; a caller that set nothing has declared nothing
+    /// and cannot. Without this the two are indistinguishable, and strict mode
+    /// would refuse every studio-range payload muxed by a caller that never
+    /// touched the colour knobs.
+    colr_declared: bool,
     premultiplied_alpha: bool,
     colr: ColrBox,
     clli: Option<ClliBox>,
@@ -302,6 +309,7 @@ impl Aviffy {
     pub fn new() -> Self {
         Self {
             strict_payload_agreement: false,
+            colr_declared: false,
             premultiplied_alpha: false,
             min_seq_profile: 1,
             chroma_subsampling: ChromaSubsampling::NONE,
@@ -356,6 +364,7 @@ impl Aviffy {
     #[inline]
     pub fn set_matrix_coefficients(&mut self, matrix_coefficients: constants::MatrixCoefficients) -> &mut Self {
         self.colr.matrix_coefficients = matrix_coefficients;
+        self.colr_declared = true;
         self
     }
 
@@ -369,6 +378,7 @@ impl Aviffy {
     #[inline]
     pub fn set_transfer_characteristics(&mut self, transfer_characteristics: constants::TransferCharacteristics) -> &mut Self {
         self.colr.transfer_characteristics = transfer_characteristics;
+        self.colr_declared = true;
         self
     }
 
@@ -382,6 +392,7 @@ impl Aviffy {
     #[inline]
     pub fn set_color_primaries(&mut self, color_primaries: constants::ColorPrimaries) -> &mut Self {
         self.colr.color_primaries = color_primaries;
+        self.colr_declared = true;
         self
     }
 
@@ -422,6 +433,7 @@ impl Aviffy {
 
     pub fn set_full_color_range(&mut self, full_range: bool) -> &mut Self {
         self.colr.full_range_flag = full_range;
+        self.colr_declared = true;
         self
     }
 
@@ -641,7 +653,8 @@ impl Aviffy {
     /// produced. All serialization entry points route through this.
     /// See [`Aviffy::set_strict_payload_agreement`]. A no-op unless that is on.
     fn check_payload_agreement(&self, color_av1_data: &[u8]) -> Result<()> {
-        if !self.strict_payload_agreement || self.colr == ColrBox::default() {
+        if !self.strict_payload_agreement || !self.colr_declared {
+            // Nothing declared is nothing to contradict.
             return Ok(());
         }
         let Some(h) = seq_header::parse(color_av1_data) else {
@@ -895,17 +908,22 @@ impl Aviffy {
         // IN it must agree with the payload. See `SeqHeader::agreeing_colr`
         // for why the CICP triple is taken per field rather than per flag.
         //
-        // NAMED RESIDUAL, deliberately not changed here: because the predicate
-        // reads the CALLER's declaration, a caller that sets no colour knobs
-        // gets no `colr` box even over a payload that names BT.2020 / PQ — the
-        // same drift in a weaker form (the container under-describes rather
-        // than contradicts). Keying the predicate on the DERIVED value would
-        // fix it, and would also add an nclx box to every studio-range file
-        // muxed through the bare `serialize()` entry point, since
-        // `ColrBox::default()` is full-range. That is a wider behaviour change
-        // than the contradiction fix needs, so it is recorded rather than
-        // taken.
-        if self.colr != ColrBox::default() {
+        // The predicate reads the CALLER's declaration, so a caller whose
+        // colorimetry happens to EQUAL `ColrBox::default()` gets no nclx box at
+        // all — the same drift in a weaker form (the container under-describes
+        // rather than contradicts), and not hypothetical: `zenavif`'s aom seam
+        // declares `{Bt709, Srgb, Bt601, full_range}`, which IS the default
+        // whenever the encode is full-range, so every full-range file it muxed
+        // carried no `colr`. That seam deliberately codes
+        // `matrix_coefficients = 2` in the bitstream and relies on `colr` to
+        // carry BT.601 — so in exactly that case nothing carried it.
+        //
+        // Fixed under STRICT mode only. A caller who has asked for the
+        // container to describe the payload accurately wants it described even
+        // when the description matches this crate's defaults; a caller who has
+        // not is left byte-for-byte where it was, which is why the bare
+        // `serialize()` entry point sees no change.
+        if self.strict_payload_agreement || self.colr_declared || self.colr != ColrBox::default() {
             let colr = parsed.map_or(self.colr, |h| h.agreeing_colr(self.colr));
             let p = push_prop(ipco, IpcoProp::Colr(colr))?;
             ipma.prop_ids.push(p);
@@ -2906,6 +2924,51 @@ fn strict_mode_refuses_a_colr_that_contradicts_the_payload() {
     assert!(
         format!("{err}").contains("matrix_coefficients"),
         "the refusal must name the field, got: {err}"
+    );
+}
+
+/// **Strict mode emits a `colr` box even when the declaration equals this
+/// crate's defaults** — the under-description half of the same drift.
+///
+/// The emission predicate reads the CALLER's declaration, so a caller whose
+/// colorimetry happens to equal `ColrBox::default()` used to get no nclx box at
+/// all. That is not hypothetical: `zenavif`'s aom seam declares
+/// `{Bt709, Srgb, Bt601, full_range}`, which IS the default whenever the encode
+/// is full-range — so **every full-range file it muxed carried no `colr`**,
+/// while its bitstream deliberately codes `matrix_coefficients = 2` and relies
+/// on `colr` to carry BT.601. Nothing carried it.
+#[test]
+fn strict_mode_emits_colr_even_when_the_declaration_is_the_default() {
+    // A payload coding unspecified CICP and FULL range — the shape the aom
+    // seam's identity-free full-range path produces.
+    let obu = test_seq_header_obu_cicp(1, 1, 13, 0); // the sRGB triple: range full, 4:4:4
+
+    // Declared exactly the crate defaults for the three CICP fields.
+    let permissive = Aviffy::new()
+        .set_color_primaries(constants::ColorPrimaries::Bt709)
+        .set_transfer_characteristics(constants::TransferCharacteristics::Srgb)
+        .set_matrix_coefficients(constants::MatrixCoefficients::Bt601)
+        .set_full_color_range(true)
+        .to_vec(&obu, None, 64, 64, 8);
+    let strict = Aviffy::new()
+        .set_strict_payload_agreement(true)
+        .to_vec(&obu, None, 64, 64, 8);
+
+    // The permissive arm declared explicitly, so it emits too — the regression
+    // this guards is the NO-declaration case under strict.
+    assert!(
+        permissive.windows(4).any(|w| w == b"colr"),
+        "an explicit declaration is emitted whether or not it equals the default"
+    );
+    assert!(
+        strict.windows(4).any(|w| w == b"colr"),
+        "strict mode must describe the payload even with nothing declared"
+    );
+    let (cp, tc, mc, full) = muxed_nclx(&strict);
+    assert_eq!(
+        (cp, tc, mc, full),
+        (1, 13, 0, true),
+        "and the box it emits must restate the payload, not the crate defaults"
     );
 }
 
