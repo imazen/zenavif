@@ -609,6 +609,13 @@ fn mux_aom(
     let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
     let mut aviffy = zenavif_serialize::Aviffy::new();
     aviffy
+        // This seam owns both sides — it encodes the payload AND declares the
+        // container — so a disagreement between them is a bug HERE, not a
+        // caller's input to be repaired. Strict mode turns the muxer's silent
+        // correction into an error at the boundary. It has never fired: the
+        // 54-file sweep in `the_container_agrees_with_the_payload_on_every_
+        // format` is what keeps it that way.
+        .set_strict_payload_agreement(true)
         .set_seq_profile(seq_profile)
         // Both of these MUST match what the sequence header actually codes —
         // a container that disagrees with the bitstream is the mis-signalling

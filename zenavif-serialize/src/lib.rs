@@ -213,6 +213,7 @@ impl From<ChromaSubsampling> for (bool, bool) {
 ///
 /// See [`Aviffy::new`].
 pub struct Aviffy {
+    strict_payload_agreement: bool,
     premultiplied_alpha: bool,
     colr: ColrBox,
     clli: Option<ClliBox>,
@@ -300,6 +301,7 @@ impl Aviffy {
     #[must_use]
     pub fn new() -> Self {
         Self {
+            strict_payload_agreement: false,
             premultiplied_alpha: false,
             min_seq_profile: 1,
             chroma_subsampling: ChromaSubsampling::NONE,
@@ -391,6 +393,33 @@ impl Aviffy {
     /// If set, must match the AV1 color payload, and will result in `colr` box added to AVIF.
     /// Defaults to full.
     #[inline]
+    /// **Refuse a `colr` declaration that contradicts the payload, instead of
+    /// silently correcting it.**
+    ///
+    /// By default this crate DERIVES the container's colorimetry from the AV1
+    /// sequence header wherever the payload speaks (see [`crate::seq_header`]),
+    /// so a caller that declares the opposite of what it encoded gets a
+    /// correct file rather than a lying one. That repairs the symptom at the
+    /// muxer. It does not tell the caller they have a bug — and a caller whose
+    /// encoder and whose declaration disagree has one, whichever way the muxer
+    /// resolves it.
+    ///
+    /// With this set, such a declaration is an error at the API boundary. The
+    /// check is deliberately narrow: it fires only where the caller made an
+    /// explicit non-default `colr` declaration AND the payload's own sequence
+    /// header states a different value for that same field. A payload that
+    /// codes "unspecified" is handing the field over deliberately and is never
+    /// a contradiction; neither is a payload whose sequence header cannot be
+    /// read.
+    ///
+    /// Off by default, because turning a silently-corrected file into a hard
+    /// failure is a breaking change for existing callers. An integration that
+    /// owns both sides — as `zenavif` does — should turn it on.
+    pub fn set_strict_payload_agreement(&mut self, strict: bool) -> &mut Self {
+        self.strict_payload_agreement = strict;
+        self
+    }
+
     pub fn set_full_color_range(&mut self, full_range: bool) -> &mut Self {
         self.colr.full_range_flag = full_range;
         self
@@ -610,6 +639,40 @@ impl Aviffy {
     /// [`Self::make_boxes`] plus the opt-in output-size cap
     /// ([`Self::set_max_output_bytes`]), applied before any output is
     /// produced. All serialization entry points route through this.
+    /// See [`Aviffy::set_strict_payload_agreement`]. A no-op unless that is on.
+    fn check_payload_agreement(&self, color_av1_data: &[u8]) -> Result<()> {
+        if !self.strict_payload_agreement || self.colr == ColrBox::default() {
+            return Ok(());
+        }
+        let Some(h) = seq_header::parse(color_av1_data) else {
+            // No readable sequence header: the payload states nothing to
+            // contradict. Same fallback the derivation itself takes.
+            return Ok(());
+        };
+        let derived = h.agreeing_colr(self.colr);
+        if derived.full_range_flag != self.colr.full_range_flag {
+            return Err(at!(SerializeError::InvalidInput(
+                "declared colr full_range contradicts the payload's coded color_range"
+            )));
+        }
+        if derived.color_primaries != self.colr.color_primaries {
+            return Err(at!(SerializeError::InvalidInput(
+                "declared colr color_primaries contradicts the payload's coded value"
+            )));
+        }
+        if derived.transfer_characteristics != self.colr.transfer_characteristics {
+            return Err(at!(SerializeError::InvalidInput(
+                "declared colr transfer_characteristics contradicts the payload's coded value"
+            )));
+        }
+        if derived.matrix_coefficients != self.colr.matrix_coefficients {
+            return Err(at!(SerializeError::InvalidInput(
+                "declared colr matrix_coefficients contradicts the payload's coded value"
+            )));
+        }
+        Ok(())
+    }
+
     fn checked_boxes<'data>(
         &'data self,
         color_av1_data: &'data [u8],
@@ -618,6 +681,7 @@ impl Aviffy {
         height: u32,
         depth_bits: u8,
     ) -> Result<AvifFile<'data>> {
+        self.check_payload_agreement(color_av1_data)?;
         let file = self.make_boxes(color_av1_data, alpha_av1_data, width, height, depth_bits)?;
         if let Some(cap) = self.max_output_bytes
             && file.file_size() > cap
@@ -2795,6 +2859,91 @@ fn colr_takes_colorimetry_the_payload_does_name() {
         (9, 16, 9),
         "the payload names all three; a container that kept the caller's sRGB would mis-describe an HDR stream"
     );
+}
+
+/// **Strict mode turns a repaired lie into a reported one.**
+///
+/// The derivation means a caller that declares the opposite of what it encoded
+/// gets a CORRECT file — which fixes the file and tells the caller nothing.
+/// With `set_strict_payload_agreement`, the same declaration is an error at the
+/// API boundary.
+#[test]
+fn strict_mode_refuses_a_colr_that_contradicts_the_payload() {
+    // The writer codes studio range and BT.2020 / PQ / BT.2020-NCL.
+    let obu = test_seq_header_obu(0, true, false, false);
+
+    // Permissive (the default): the payload wins and the file is correct.
+    let lenient = Aviffy::new()
+        .set_color_primaries(constants::ColorPrimaries::Bt2020)
+        .set_full_color_range(true) // contradicts the payload's studio range
+        .to_vec(&obu, None, 64, 64, 10);
+    let (.., full_range) = muxed_nclx(&lenient);
+    assert!(!full_range, "permissive mode repairs the declaration");
+
+    // Strict: the same declaration is refused, by name.
+    let err = Aviffy::new()
+        .set_strict_payload_agreement(true)
+        .set_color_primaries(constants::ColorPrimaries::Bt2020)
+        .set_full_color_range(true)
+        .try_to_vec(&obu, None, 64, 64, 10)
+        .expect_err("strict mode must refuse a contradicting range declaration");
+    assert!(
+        format!("{err}").contains("full_range"),
+        "the refusal must name the field, got: {err}"
+    );
+
+    // And the matrix, which is the field that decides how planes are read.
+    // Everything else declared to MATCH the payload, so the matrix is the only
+    // contradiction and the field-ordered checks cannot fire on something else.
+    let err = Aviffy::new()
+        .set_strict_payload_agreement(true)
+        .set_color_primaries(constants::ColorPrimaries::Bt2020)
+        .set_transfer_characteristics(constants::TransferCharacteristics::Smpte2084)
+        .set_matrix_coefficients(constants::MatrixCoefficients::Rgb) // payload says BT.2020-NCL
+        .set_full_color_range(false)
+        .try_to_vec(&obu, None, 64, 64, 10)
+        .expect_err("strict mode must refuse a contradicting matrix declaration");
+    assert!(
+        format!("{err}").contains("matrix_coefficients"),
+        "the refusal must name the field, got: {err}"
+    );
+}
+
+/// **Strict mode must not fire on the cases that are not contradictions**, or
+/// it would be unusable: a payload that codes "unspecified" is handing the
+/// field to the container deliberately, and a payload with no readable
+/// sequence header states nothing at all.
+#[test]
+fn strict_mode_allows_unspecified_and_unreadable_payloads() {
+    // (2, 2, 0): explicit MC_IDENTITY over unspecified primaries/transfer —
+    // `zenav1-aom`'s identity path. The caller's BT.709 / sRGB is NOT a
+    // contradiction, and the matrix AGREES.
+    let identity = test_seq_header_obu_cicp(1, 2, 2, 0);
+    Aviffy::new()
+        .set_strict_payload_agreement(true)
+        .set_color_primaries(constants::ColorPrimaries::Bt709)
+        .set_transfer_characteristics(constants::TransferCharacteristics::Srgb)
+        .set_matrix_coefficients(constants::MatrixCoefficients::Rgb)
+        // `test_seq_header_obu_cicp` codes studio range (it is not the sRGB
+        // triple, so the range bit IS present and is 0) — declare to match, so
+        // this test isolates the unspecified hand-off rather than range.
+        .set_full_color_range(false)
+        .try_to_vec(&identity, None, 64, 64, 8)
+        .expect("unspecified fields are a hand-off, not a contradiction");
+
+    // No readable sequence header: nothing to contradict.
+    Aviffy::new()
+        .set_strict_payload_agreement(true)
+        .set_color_primaries(constants::ColorPrimaries::Bt2020)
+        .try_to_vec(&[1, 2, 3, 4, 5, 6], None, 10, 20, 8)
+        .expect("an unreadable payload states nothing to contradict");
+
+    // And an all-default declaration is never checked, whatever the payload.
+    let obu = test_seq_header_obu(0, true, false, false);
+    Aviffy::new()
+        .set_strict_payload_agreement(true)
+        .try_to_vec(&obu, None, 64, 64, 10)
+        .expect("a caller that declared no colorimetry cannot contradict");
 }
 
 /// A payload with no readable sequence header (a caller muxing pre-split OBUs,
