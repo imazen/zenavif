@@ -171,7 +171,21 @@ aom-decode = { package = "zenav1-aom-decode", git = "https://github.com/imazen/z
 # support query) has since landed on `main` and is present in `fbea6b4`, so this
 # is strictly forward. Verified: `git grep "pub fn validate_configuration"
 # fbea6b4` and the `configuration_support.rs` gate both resolve.
-aom-encode = { package = "zenav1-aom-encode", git = "https://github.com/imazen/zenav1-aom", rev = "fbea6b4", optional = true }
+#
+# Pin history: `fbea6b4` -> `41c9c065` on 2026-09-15 (branch
+# `perf/gate3-txfm-i16-batch`, pushed for this bump). Carries: the
+# `#[non_exhaustive]` surface freeze on every `key_frame` pub type (the
+# `KeyFrameConfig` literal in `src/encoder_aom.rs` is now
+# `allintra_speed0(..)` + field assignment, so future field additions stop
+# being two-repo breaks); the new `threads` knob (phase-1 tile walk
+# parallelised over row bands — left at its serial default here, so output
+# is byte-unchanged); `mode`/`screen_likelihood` (the `Zenaom` opt-in +
+# zenanalyze `patch_fraction` seam — inert under the `LibaomExact` default
+# this seam keeps); palette + IntraBC now ON by default upstream (the seam
+# inherits them — `aom_encode_backend` 22/22 incl. the bd8 byte anchor);
+# the bd8 encode loop filter now runs the u8 kernels C uses; and a perf
+# batch landing the encoder at ~1.36x libaom on the ship cell.
+aom-encode = { package = "zenav1-aom-encode", git = "https://github.com/imazen/zenav1-aom", rev = "41c9c065bb0e996a605adb0612fd0da28fb0d7b8", optional = true }
 archmage = { version = "0.9.29", features = ["macros", "avx512"] }
 magetypes = { version = "0.9.29"}
 safe_unaligned_simd = "0.2.5"
@@ -751,6 +765,7 @@ zenavif-serialize = { path = "zenavif-serialize" }
 # used by native SVT and tests, avoiding duplicate serializer packages.
 [patch."https://github.com/imazen/zenavif"]
 zenavif-serialize = { path = "zenavif-serialize" }
+
 # (The former TEMP rav1d-safe [patch.crates-io] pin at f6aed27e is gone:
 # the dependency itself is now a git dep at 398b0bfa — a 0.6.0-staged rev
 # that carries the zenavif#30 wedge fix and the #14 aarch64 SGR fix, and

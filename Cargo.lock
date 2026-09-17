@@ -2326,7 +2326,7 @@ dependencies = [
 [[package]]
 name = "zenav1-aom-dsp"
 version = "0.0.1"
-source = "git+https://github.com/imazen/zenav1-aom?rev=fbea6b4#fbea6b47d9e0e8e635e24027e1e484bd8b4d4fea"
+source = "git+https://github.com/imazen/zenav1-aom?rev=41c9c065bb0e996a605adb0612fd0da28fb0d7b8#41c9c065bb0e996a605adb0612fd0da28fb0d7b8"
 dependencies = [
  "archmage",
  "enough",
@@ -2336,10 +2336,11 @@ dependencies = [
 [[package]]
 name = "zenav1-aom-encode"
 version = "0.0.1"
-source = "git+https://github.com/imazen/zenav1-aom?rev=fbea6b4#fbea6b47d9e0e8e635e24027e1e484bd8b4d4fea"
+source = "git+https://github.com/imazen/zenav1-aom?rev=41c9c065bb0e996a605adb0612fd0da28fb0d7b8#41c9c065bb0e996a605adb0612fd0da28fb0d7b8"
 dependencies = [
  "enough",
- "zenav1-aom-dsp 0.0.1 (git+https://github.com/imazen/zenav1-aom?rev=fbea6b4)",
+ "smallvec",
+ "zenav1-aom-dsp 0.0.1 (git+https://github.com/imazen/zenav1-aom?rev=41c9c065bb0e996a605adb0612fd0da28fb0d7b8)",
 ]
 
 [[package]]

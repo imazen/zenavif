@@ -441,7 +441,13 @@ pub(crate) fn key_frame_config(
             EncodeChromaSubsampling::Yuv420 => (1, 1),
         }
     };
-    aom_encode::key_frame::KeyFrameConfig {
+    // `KeyFrameConfig` went `#[non_exhaustive]` upstream (the 2026-09-13
+    // surface freeze), so the struct literal is gone: `allintra_speed0`
+    // supplies aomenc's ALLINTRA defaults — including the tile / superblock
+    // floors (`av1_get_tile_limits` still forces the minimum a large frame
+    // needs, exactly as C clamps it) — and each override lands as a field
+    // assignment. New upstream fields stop being compile breaks here.
+    let mut cfg = aom_encode::key_frame::KeyFrameConfig::allintra_speed0(
         width,
         height,
         bit_depth,
@@ -452,43 +458,38 @@ pub(crate) fn key_frame_config(
         // reconstructs the coded planes EXACTLY. `reject_unsupported_config` has
         // already refused every combination in front of it that would make the
         // IMAGE lossy anyway (subsampling, a YCbCr matrix, studio range).
-        cq_level: if wants_lossless(config) {
+        if wants_lossless(config) {
             0
         } else {
             quality_to_cq_level(config.quality)
         },
-        cpu_used: speed_to_cpu_used(config.speed),
-        usage: AOM_USAGE_ALL_INTRA,
-        // Real aomenc's ALLINTRA defaults (`av1_cx_iface.c:3067`): CDEF off
-        // ("CDEF has been found to blur images"), loop restoration on. Both
-        // are byte-gated upstream at every speed in this combination.
-        enable_cdef: false,
-        enable_restoration: true,
-        // Explicit tile / superblock requests landed upstream after the
-        // previous pin (`bda14f3d`, `abe20559`). `0` / `false` are the
-        // `allintra_speed0` defaults and what the previous rev hard-coded, so
-        // the seam's output is unchanged by the bump (the bd8 byte anchor
-        // `aom_bd8_output_is_unchanged_by_the_hbd_wiring` holds). The tile
-        // request is a FLOOR: `av1_get_tile_limits` still forces the minimum
-        // a large frame needs, exactly as C clamps it.
-        tile_columns_log2: 0,
-        tile_rows_log2: 0,
-        sb_size_128: false,
-        // The CICP description + range. `full_range` is now CONFIGURATION
-        // upstream (`ColorDescription`), so a full-range still is codable
-        // instead of refused; the CICP triple stays "unspecified" because the
-        // `colr` box carries the colorimetry for this seam (see the module
-        // docs) and signalling it twice invites the two to disagree.
-        color: aom_encode::key_frame::ColorDescription {
-            full_range: wants_full_range(config),
-            // MC_IDENTITY (0) for the GBR path, "unspecified" otherwise. The
-            // primaries/transfer stay unspecified either way: the `colr` box
-            // carries the colorimetry for this seam, and signalling it in two
-            // places invites the two to disagree.
-            matrix_coefficients: if wants_identity(config) { 0 } else { 2 },
-            ..Default::default()
-        },
-    }
+    );
+    cfg.cpu_used = speed_to_cpu_used(config.speed);
+    cfg.usage = AOM_USAGE_ALL_INTRA;
+    // Real aomenc's ALLINTRA defaults (`av1_cx_iface.c:3067`): CDEF off
+    // ("CDEF has been found to blur images"), loop restoration on. Both
+    // are byte-gated upstream at every speed in this combination.
+    cfg.enable_cdef = false;
+    cfg.enable_restoration = true;
+    // The CICP description + range. `full_range` is now CONFIGURATION
+    // upstream (`ColorDescription`), so a full-range still is codable
+    // instead of refused; the CICP triple stays "unspecified" because the
+    // `colr` box carries the colorimetry for this seam (see the module
+    // docs) and signalling it twice invites the two to disagree.
+    cfg.color.full_range = wants_full_range(config);
+    // MC_IDENTITY (0) for the GBR path, "unspecified" otherwise — but never
+    // on a MONOCHROME encode: upstream `validate_configuration` refuses
+    // IDENTITY without 4:4:4 colour, and the alpha aux item is exactly that
+    // (a mono encode sharing the colour item's config). The
+    // primaries/transfer stay unspecified either way: the `colr` box
+    // carries the colorimetry for this seam, and signalling it in two
+    // places invites the two to disagree.
+    cfg.color.matrix_coefficients = if !monochrome && wants_identity(config) {
+        0
+    } else {
+        2
+    };
+    cfg
 }
 
 /// Whether this encode signals FULL pixel range.
@@ -900,11 +901,7 @@ fn finish_color(
     stop.check().map_err(|e| at!(Error::from(e)))?;
     let cfg = key_frame_config(config, width, height, bit_depth, false);
     let payload = encode_key_frame_checked(
-        aom_encode::key_frame::KeyFramePlanes {
-            y: &y,
-            u: &u,
-            v: &v,
-        },
+        aom_encode::key_frame::KeyFramePlanes::new(&y, &u, &v),
         &cfg,
     )?;
 
@@ -957,18 +954,11 @@ fn encode_alpha_plane(
     } else {
         quality_to_cq_level(crate::encoder::effective_alpha_quality(config))
     };
-    cfg.color = aom_encode::key_frame::ColorDescription {
-        full_range: true,
-        ..Default::default()
-    };
+    cfg.color.full_range = true;
     // A mono encode reads only the luma plane; `encode_key_frame` still wants
     // the chroma slices to exist and be empty for monochrome.
     encode_key_frame_checked(
-        aom_encode::key_frame::KeyFramePlanes {
-            y: alpha,
-            u: &[],
-            v: &[],
-        },
+        aom_encode::key_frame::KeyFramePlanes::new(alpha, &[], &[]),
         &cfg,
     )
 }
@@ -997,11 +987,7 @@ fn finish_color_with_alpha(
         wants_identity(config),
     );
     let payload = encode_key_frame_checked(
-        aom_encode::key_frame::KeyFramePlanes {
-            y: &y,
-            u: &u,
-            v: &v,
-        },
+        aom_encode::key_frame::KeyFramePlanes::new(&y, &u, &v),
         &cfg,
     )?;
 
@@ -1251,11 +1237,7 @@ pub(crate) fn encode_gray8_aom(
     stop.check().map_err(|e| at!(Error::from(e)))?;
     let cfg = key_frame_config(config, width, height, bit_depth, true);
     let payload = encode_key_frame_checked(
-        aom_encode::key_frame::KeyFramePlanes {
-            y: &y,
-            u: &[],
-            v: &[],
-        },
+        aom_encode::key_frame::KeyFramePlanes::new(&y, &[], &[]),
         &cfg,
     )?;
 
