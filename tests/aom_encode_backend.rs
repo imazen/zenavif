@@ -575,7 +575,10 @@ fn validate_agrees_with_the_encode_path() {
     // `aom_roundtrip_loss::the_support_query_agrees_with_the_encode_path`
     // checks that mechanically over the whole matrix.
     for (cfg, what) in [
-        (EncoderConfig::new().backend(Av1Backend::Zenav1Aom), "4:4:4 (the default)"),
+        (
+            EncoderConfig::new().backend(Av1Backend::Zenav1Aom),
+            "4:4:4 (the default)",
+        ),
         (
             aom_config()
                 .color_model(zenavif::EncodeColorModel::Rgb)
@@ -1204,7 +1207,8 @@ fn aom_bd8_output_is_unchanged_by_the_hbd_wiring() {
         payload.len()
     );
     assert_eq!(
-        payload_digest, BD8_PAYLOAD_ANCHOR_FNV1A,
+        payload_digest,
+        BD8_PAYLOAD_ANCHOR_FNV1A,
         "the 8-bit AV1 PAYLOAD changed ({} bytes). This is the encoder, not the muxer — \
          a container-only change leaves this hash alone.",
         payload.len()
