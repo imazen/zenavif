@@ -3,7 +3,7 @@
 ## SVT research knob + pin bump (unreleased, 2026-09-24)
 
 - Added `__expert` `SvtParams::chroma_q: Option<(i8, i8)>` (`02b62dff`): fixed per-plane U/V chroma delta-q on `Av1Backend::Zenav1Svt`, routed to zenav1-svt's `ChromaQOverride`, for decorrelated-plane research stimuli. Refused (never ignored) off the svt backend, outside -64..=63, under SvtParity, for monochrome input and without `__expert`. Measured on smooth two-plane chroma texture at q60: U+48 raises Cb MSE 2.48 -> 5.67 with Cr flat; V+48 raises Cr MSE 2.16 -> 4.84 with Cb flat; (0, 0) is byte-identical to no override.
-- Fixed the sweep fingerprint and cell-id grammar for `SvtParams::chroma_q` (`e8f30910`): cells differing only in the override hashed alike, so the planner and zenmetrics' dedup would have merged distinct encodes. It is now hashed when set, and `-cq<i8>.<i8>` round-trips.
+- Fixed the sweep fingerprint and cell-id grammar for `SvtParams::chroma_q` (`4d999037`): cells differing only in the override hashed alike, so the planner and zenmetrics' dedup would have merged distinct encodes. It is now hashed when set, and `-cq<i8>.<i8>` round-trips.
 - Bumped the zenav1-svt pin `25708931` -> `2255a342` (`c58fb0ac`): 280 upstream commits, including the `lpf_vertical_6` SIMD overread fix the bump surfaced (a panic at 100x37 speed 4 in `svt_rs_partial_sb_roundtrip_at_low_presets`). Still-control validation now judges the coded bit depth (the port's enhancement envelopes are depth-scoped). `backend_router::native_extensions_remain_eligible`, red on the last main CI run, passes; `codec_hdr_units` still fails exactly as on main.
 
 ## API/support follow-up (unreleased, 2026-09-08)
