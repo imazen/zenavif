@@ -19,6 +19,7 @@ pub(crate) fn encode_animation_rgb8<F: AnimationInput<RGB8>>(
         config,
         stop,
         |f| (f.pixels().width(), f.pixels().height(), f.duration_ticks()),
+        false,
         |f, mode, token| encode_rgb8_frame(f.pixels(), config, token, mode),
     )
 }
@@ -35,6 +36,7 @@ pub(crate) fn encode_animation_rgba8<F: AnimationInput<RGBA8>>(
         config,
         stop,
         |f| (f.pixels().width(), f.pixels().height(), f.duration_ticks()),
+        false,
         |f, mode, token| encode_rgba8_frame(f.pixels(), config, token, mode),
     )
 }
@@ -51,6 +53,7 @@ pub(crate) fn encode_animation_rgb16<F: AnimationInput<RGB16>>(
         config,
         stop,
         |f| (f.pixels().width(), f.pixels().height(), f.duration_ticks()),
+        true,
         |f, mode, token| encode_rgb16_frame(f.pixels(), config, token, mode),
     )
 }
@@ -67,6 +70,7 @@ pub(crate) fn encode_animation_rgba16<F: AnimationInput<RGBA16>>(
         config,
         stop,
         |f| (f.pixels().width(), f.pixels().height(), f.duration_ticks()),
+        true,
         |f, mode, token| encode_rgba16_frame(f.pixels(), config, token, mode),
     )
 }
@@ -77,10 +81,11 @@ fn encode_frames<F>(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
     layout: impl Fn(&F) -> (usize, usize, u32),
+    input_is_16bit: bool,
     encode: impl Fn(&F, FrameMode, almost_enough::StopToken) -> Result<CodedSvtFrame>,
 ) -> Result<crate::EncodedAnimation> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    reject_unsupported_config(config)?;
+    reject_unsupported_config(config, input_is_16bit)?;
     let first = frames
         .first()
         .ok_or_else(|| at!(Error::Encode("animation needs at least one frame".into())))?;

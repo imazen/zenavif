@@ -301,7 +301,7 @@ ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/ima
 # Retires mono/alpha geometry and preset floors; direct QP-0 tests now require
 # exact mono/native-10 reconstruction. Root SIMD patches below are required
 # because Cargo does not inherit the dependency workspace's patch table.
-svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "257089314ae8e7cd30e77366ca285221da33bfad", optional = true }
+svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "2255a34264de6052651ae9f448e461abbcd5df9e", optional = true }
 # AVIF container muxer for the zenav1-svt backend (the zenravif backend muxes
 # inside zenravif; this backend muxes in-crate). The 0.2.0 version is
 # supplied by the [patch.crates-io] git pin below until 0.2.0 publishes.

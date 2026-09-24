@@ -1770,9 +1770,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.15.2"
+version = "1.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
+checksum = "ba467056f1b547ed52077911161fc86985becbc60e8e1857c8a144dab0def891"
 
 [[package]]
 name = "stable_deref_trait"
@@ -2345,8 +2345,10 @@ dependencies = [
 [[package]]
 name = "zenav1-svt"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zenav1-svt?rev=257089314ae8e7cd30e77366ca285221da33bfad#257089314ae8e7cd30e77366ca285221da33bfad"
+source = "git+https://github.com/imazen/zenav1-svt?rev=2255a34264de6052651ae9f448e461abbcd5df9e#2255a34264de6052651ae9f448e461abbcd5df9e"
 dependencies = [
+ "almost-enough",
+ "enough",
  "zenav1-svt-dsp",
  "zenav1-svt-encoder",
  "zenav1-svt-types",
@@ -2355,7 +2357,7 @@ dependencies = [
 [[package]]
 name = "zenav1-svt-dsp"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zenav1-svt?rev=257089314ae8e7cd30e77366ca285221da33bfad#257089314ae8e7cd30e77366ca285221da33bfad"
+source = "git+https://github.com/imazen/zenav1-svt?rev=2255a34264de6052651ae9f448e461abbcd5df9e#2255a34264de6052651ae9f448e461abbcd5df9e"
 dependencies = [
  "archmage",
  "magetypes",
@@ -2365,12 +2367,13 @@ dependencies = [
 [[package]]
 name = "zenav1-svt-encoder"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zenav1-svt?rev=257089314ae8e7cd30e77366ca285221da33bfad#257089314ae8e7cd30e77366ca285221da33bfad"
+source = "git+https://github.com/imazen/zenav1-svt?rev=2255a34264de6052651ae9f448e461abbcd5df9e#2255a34264de6052651ae9f448e461abbcd5df9e"
 dependencies = [
  "almost-enough",
  "archmage",
  "enough",
  "magetypes",
+ "smallvec",
  "whereat",
  "zenav1-svt-dsp",
  "zenav1-svt-types",
@@ -2379,7 +2382,7 @@ dependencies = [
 [[package]]
 name = "zenav1-svt-types"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zenav1-svt?rev=257089314ae8e7cd30e77366ca285221da33bfad#257089314ae8e7cd30e77366ca285221da33bfad"
+source = "git+https://github.com/imazen/zenav1-svt?rev=2255a34264de6052651ae9f448e461abbcd5df9e#2255a34264de6052651ae9f448e461abbcd5df9e"
 dependencies = [
  "enough",
  "whereat",
@@ -2592,6 +2595,7 @@ dependencies = [
 name = "zenpredict"
 version = "0.2.0"
 dependencies = [
+ "archmage",
  "bytemuck",
  "libm",
  "lz4_flex 0.11.6",

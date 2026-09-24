@@ -161,7 +161,11 @@ fn query_one(
         }
         #[cfg(feature = "zenav1-svt")]
         Av1Backend::Zenav1Svt => {
-            crate::encoder_svt_rs::validate_still_controls(&candidate, source.is_monochrome())?;
+            crate::encoder_svt_rs::validate_still_controls(
+                &candidate,
+                source.is_monochrome(),
+                source.plan_input().input_is_16bit,
+            )?;
             let chroma = match candidate.chroma_subsampling {
                 EncodeChromaSubsampling::Yuv420 => svtav1::avif::ChromaSubsampling::Yuv420,
                 EncodeChromaSubsampling::Yuv444 => svtav1::avif::ChromaSubsampling::Yuv444,

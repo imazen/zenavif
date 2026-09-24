@@ -208,6 +208,7 @@ fn resolved_svt_hdr(config: &EncoderConfig) -> svtav1::encoder::hdr_mode::HdrFor
 pub(crate) fn validate_still_controls(
     config: &EncoderConfig,
     monochrome: bool,
+    input_is_16bit: bool,
 ) -> core::result::Result<(), String> {
     if config.svt.tune > 5 {
         return Err(
@@ -247,6 +248,10 @@ pub(crate) fn validate_still_controls(
                 .unwrap_or_else(|| speed_to_svt_preset(config.speed) as i8),
             true,
             !monochrome,
+            // The coded depth, as the pipeline will see it: the port's
+            // per-member envelopes are depth-scoped (deep search is 8-bit
+            // only), so the query and the encode must judge the same depth.
+            effective_bit_depth(config, input_is_16bit),
         )
         .map_err(str::to_owned)?;
     Ok(())
@@ -274,11 +279,12 @@ pub(crate) fn svt_rs_dims_error(
 /// [`crate::EncoderConfig::validate`], so these checks run on the encode
 /// path too — a config asking for something this backend cannot produce
 /// must never be served silently different output.
-fn reject_unsupported_config(config: &EncoderConfig) -> Result<()> {
+fn reject_unsupported_config(config: &EncoderConfig, input_is_16bit: bool) -> Result<()> {
     config
         .validate()
         .map_err(|e| at!(Error::InvalidParameters(e.to_string())))?;
-    validate_still_controls(config, false).map_err(|e| at!(Error::InvalidParameters(e)))?;
+    validate_still_controls(config, false, input_is_16bit)
+        .map_err(|e| at!(Error::InvalidParameters(e)))?;
     if config.chroma_subsampling != EncodeChromaSubsampling::Yuv420 {
         return Err(at!(Error::Unsupported(
             "Av1Backend::Zenav1Svt encodes 4:2:0 only: set \
@@ -779,7 +785,7 @@ fn encode_rgb8_frame(
     mode: FrameMode,
 ) -> Result<CodedSvtFrame> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    reject_unsupported_config(config)?;
+    reject_unsupported_config(config, false)?;
 
     let width = img.width();
     let height = img.height();
@@ -933,7 +939,7 @@ fn encode_rgba8_frame(
     mode: FrameMode,
 ) -> Result<CodedSvtFrame> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    reject_unsupported_config(config)?;
+    reject_unsupported_config(config, false)?;
 
     let width = img.width();
     let height = img.height();
@@ -1014,7 +1020,7 @@ fn encode_rgb16_frame(
     mode: FrameMode,
 ) -> Result<CodedSvtFrame> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    reject_unsupported_config(config)?;
+    reject_unsupported_config(config, true)?;
 
     let width = img.width();
     let height = img.height();
@@ -1064,7 +1070,7 @@ fn encode_rgba16_frame(
     mode: FrameMode,
 ) -> Result<CodedSvtFrame> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    reject_unsupported_config(config)?;
+    reject_unsupported_config(config, true)?;
 
     let width = img.width();
     let height = img.height();
@@ -1120,8 +1126,8 @@ fn encode_gray8_frame(
     mode: FrameMode,
 ) -> Result<CodedSvtFrame> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    reject_unsupported_config(config)?;
-    validate_still_controls(config, true).map_err(|e| at!(Error::InvalidParameters(e)))?;
+    reject_unsupported_config(config, false)?;
+    validate_still_controls(config, true, false).map_err(|e| at!(Error::InvalidParameters(e)))?;
 
     let width = img.width();
     let height = img.height();
