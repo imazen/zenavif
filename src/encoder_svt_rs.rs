@@ -182,6 +182,14 @@ fn apply_svt_params(
     pipeline.hdr = resolved_svt_hdr(config);
     pipeline.tile_cols_log2 = p.tile_cols_log2;
     pipeline.tile_rows_log2 = p.tile_rows_log2;
+    // Color path only (this fn is not called for mono/alpha planes);
+    // `validate_still_controls` refuses `chroma_q` wherever it cannot land.
+    #[cfg(feature = "__expert")]
+    {
+        pipeline.chroma_q_override = p
+            .chroma_q
+            .map(|(u, v)| svtav1::encoder::chroma_q::ChromaQOverride::new(u, v));
+    }
 }
 
 /// Shared query/encode validation for routing controls.
@@ -223,6 +231,16 @@ pub(crate) fn validate_still_controls(
     }
     if config.svt.force_screen_content_mode.is_some_and(|m| m > 3) {
         return Err("SVT screen-content mode must be 0..=3".into());
+    }
+    if config.svt.chroma_q.is_some() {
+        if config.svt_route_policy.is_some() {
+            return Err("SvtParity cannot carry SvtParams::chroma_q: the per-plane chroma override has no C counterpart".into());
+        }
+        // Without `__expert` the pipeline has no override field to set, so a
+        // chroma_q that reached here (e.g. from a routing replay) would be
+        // dropped silently. Refuse instead.
+        #[cfg(not(feature = "__expert"))]
+        return Err("SvtParams::chroma_q needs zenavif's __expert feature to be applied".into());
     }
     config.svt_film_grain.validate().map_err(str::to_owned)?;
     if monochrome && config.svt_film_grain.enabled() {

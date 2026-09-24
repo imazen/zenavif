@@ -686,7 +686,9 @@ encode-mono = ["encode"]
 # signals "private — do not depend on this in production code." Anything
 # in the `expert` module may change without semver bumps. Pulls zenravif's
 # `__expert` feature for the underlying speed-preset overrides.
-__expert = ["encode-imazen", "ravif/__expert"]
+# Also forwards zenav1-svt's `__expert` when the svt backend is built, so
+# `SvtParams::chroma_q` (per-plane chroma delta-q) can reach its pipeline.
+__expert = ["encode-imazen", "ravif/__expert", "svtav1?/__expert"]
 # Auto-tune via the rav1e knob predictor MLP. Includes a baked ZNPR
 # model + zenanalyze feature extractor; adds ~30 KB to the binary.
 # See docs/RAV1E_PICKER_PLAN.md for the training pipeline.

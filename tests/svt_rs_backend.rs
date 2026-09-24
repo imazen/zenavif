@@ -1563,3 +1563,132 @@ fn svt_rs_refuses_12_bit_by_name() {
     )
     .expect("10-bit must still encode on this backend");
 }
+
+/// `SvtParams::chroma_q` — the per-plane chroma delta-q research knob routed
+/// to zenav1-svt's `__expert` `ChromaQOverride`.
+#[cfg(feature = "__expert")]
+mod chroma_q {
+    use super::*;
+    use zenavif::expert::SvtParams;
+
+    /// Smooth mid-frequency chroma texture in both planes (red carries most
+    /// of Cr, blue most of Cb). No hard chroma edges: at those, 4:2:0
+    /// subsampling error dominates and no quantizer change can move it, which
+    /// would hide the plane the override targets.
+    fn chroma_rich_rgb8(w: usize, h: usize) -> Img<Vec<Rgb<u8>>> {
+        let mut pixels = Vec::with_capacity(w * h);
+        for y in 0..h {
+            for x in 0..w {
+                let (fx, fy) = (x as f64, y as f64);
+                let r = 128.0 + 90.0 * (fx / 7.0).sin() * (fy / 11.0).cos();
+                let b = 128.0 + 90.0 * (fy / 6.0).sin() * (fx / 13.0).cos();
+                pixels.push(Rgb {
+                    r: r.round().clamp(0.0, 255.0) as u8,
+                    g: 110,
+                    b: b.round().clamp(0.0, 255.0) as u8,
+                });
+            }
+        }
+        Img::new(pixels, w, h)
+    }
+
+    /// Mean squared Cb and Cr error (BT.601, full range) between two RGB8
+    /// images of the same geometry.
+    fn cbcr_mse(a: &[Rgb<u8>], b: &[Rgb<u8>]) -> (f64, f64) {
+        let cbcr = |p: &Rgb<u8>| {
+            let (r, g, b) = (f64::from(p.r), f64::from(p.g), f64::from(p.b));
+            (
+                -0.168_736 * r - 0.331_264 * g + 0.5 * b,
+                0.5 * r - 0.418_688 * g - 0.081_312 * b,
+            )
+        };
+        let (mut cb, mut cr) = (0f64, 0f64);
+        for (pa, pb) in a.iter().zip(b) {
+            let (ca, ra) = cbcr(pa);
+            let (cb2, rb) = cbcr(pb);
+            cb += (ca - cb2) * (ca - cb2);
+            cr += (ra - rb) * (ra - rb);
+        }
+        let n = a.len().max(1) as f64;
+        (cb / n, cr / n)
+    }
+
+    fn with_chroma_q(u: i8, v: i8) -> EncoderConfig {
+        let mut p = SvtParams::default();
+        p.chroma_q = Some((u, v));
+        svt_config().quality(60.0).speed(6).with_svt_params(p)
+    }
+
+    fn encode_decode(img: &Img<Vec<Rgb<u8>>>, cfg: &EncoderConfig) -> (Vec<u8>, Vec<Rgb<u8>>) {
+        let enc = zenavif::encode_rgb8(img.as_ref(), cfg, stop()).expect("encode");
+        let dec = zenavif::decode(&enc.avif_file).expect("decode");
+        let out = dec.try_as_imgref::<Rgb<u8>>().expect("RGB8 decode");
+        let px: Vec<Rgb<u8>> = out.rows().flat_map(|r| r.iter().copied()).collect();
+        (enc.avif_file, px)
+    }
+
+    #[test]
+    fn chroma_q_moves_the_plane_it_names() {
+        let img = chroma_rich_rgb8(128, 128);
+        let (base_bytes, base) = encode_decode(&img, &svt_config().quality(60.0).speed(6));
+        let (zero_bytes, _) = encode_decode(&img, &with_chroma_q(0, 0));
+        let (_, u_only) = encode_decode(&img, &with_chroma_q(48, 0));
+        let (_, v_only) = encode_decode(&img, &with_chroma_q(0, 48));
+
+        // Mainline at the default tune derives all-zero chroma deltas, so a
+        // (0, 0) override must be byte-identical to no override.
+        assert_eq!(
+            zero_bytes, base_bytes,
+            "(0, 0) override must not move bytes"
+        );
+
+        let e0 = cbcr_mse(img.buf(), &base);
+        let eu = cbcr_mse(img.buf(), &u_only);
+        let ev = cbcr_mse(img.buf(), &v_only);
+        eprintln!("chroma_q cb/cr mse: none {e0:?}  u+48 {eu:?}  v+48 {ev:?}");
+        assert!(
+            eu.0 > e0.0 * 1.2,
+            "u+48 must raise Cb error: {e0:?} -> {eu:?}"
+        );
+        assert!(
+            ev.1 > e0.1 * 1.2,
+            "v+48 must raise Cr error: {e0:?} -> {ev:?}"
+        );
+        assert!(
+            eu.0 - e0.0 > eu.1 - e0.1,
+            "u+48 must hurt Cb more than Cr: {e0:?} -> {eu:?}"
+        );
+        assert!(
+            ev.1 - e0.1 > ev.0 - e0.0,
+            "v+48 must hurt Cr more than Cb: {e0:?} -> {ev:?}"
+        );
+    }
+
+    #[test]
+    fn chroma_q_is_refused_where_it_cannot_land() {
+        let mut p = SvtParams::default();
+        p.chroma_q = Some((20, 20));
+        // Off the svt backend (the default backend is zenravif).
+        assert!(matches!(
+            EncoderConfig::new().with_svt_params(p).validate(),
+            Err(ValidationError::BackendUnsupportedParam { .. })
+        ));
+        // Outside the FH su(1+6) range.
+        let mut wide = SvtParams::default();
+        wide.chroma_q = Some((100, 0));
+        assert!(matches!(
+            svt_config().with_svt_params(wide).validate(),
+            Err(ValidationError::BackendUnsupportedParam { .. })
+        ));
+        // Monochrome input has no chroma planes to override.
+        #[cfg(feature = "encode-mono")]
+        {
+            let gray = Img::new(vec![128u8; 64 * 64], 64, 64);
+            assert!(
+                zenavif::encode_gray8(gray.as_ref(), &svt_config().with_svt_params(p), stop())
+                    .is_err(),
+                "mono + chroma_q must be refused, not ignored"
+            );
+        }
+    }
+}

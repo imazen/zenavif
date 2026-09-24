@@ -106,6 +106,19 @@ pub struct SvtParams {
     pub tile_cols_log2: u8,
     /// `--tile-rows` as log2.
     pub tile_rows_log2: u8,
+    /// **Research-only**: fixed per-plane chroma delta-q `(u, v)` in qindex
+    /// units, replacing the derived chroma deltas (zenav1-svt's `__expert`
+    /// `ChromaQOverride`). Each value must be in `-64..=63` and applies to
+    /// both the DC and AC quantizer of its plane; positive is coarser.
+    /// `u != v` signals `separate_uv_delta_q = 1`.
+    ///
+    /// For decorrelated-plane research stimuli (chroma much coarser or finer
+    /// than luma), not a quality knob, and with no C counterpart. Refused on
+    /// every backend other than [`crate::Av1Backend::Zenav1Svt`], under
+    /// `SvtParity`, for monochrome input, and in builds without `__expert`
+    /// (where it could not be applied) — never silently dropped.
+    #[cfg_attr(feature = "routing-replay", serde(default))]
+    pub chroma_q: Option<(i8, i8)>,
 }
 
 impl Default for SvtParams {
@@ -124,6 +137,7 @@ impl Default for SvtParams {
             max_tx_size: 64,
             tile_cols_log2: 0,
             tile_rows_log2: 0,
+            chroma_q: None,
         }
     }
 }
@@ -171,6 +185,7 @@ impl SvtParams {
             + u8::from(
                 self.tile_cols_log2 != d.tile_cols_log2 || self.tile_rows_log2 != d.tile_rows_log2,
             )
+            + u8::from(self.chroma_q != d.chroma_q)
     }
 
     /// Clamp the two fields the port guards with `debug_assert` only.

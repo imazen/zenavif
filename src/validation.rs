@@ -315,6 +315,27 @@ impl crate::EncoderConfig {
     }
 
     fn validate_backend_and_color(&self) -> Result<(), ValidationError> {
+        // `SvtParams::chroma_q` is a stimulus-defining research knob: a cell
+        // that asks for it and ships without it would be mislabelled, so it
+        // is refused (not ignored, as the other SvtParams are) off the svt
+        // backend, and out of the FH `su(1+6)` range.
+        #[cfg(any(feature = "zenav1-svt", feature = "__expert"))]
+        if let Some((u, v)) = self.svt.chroma_q {
+            if self.backend != crate::Av1Backend::Zenav1Svt {
+                return Err(ValidationError::BackendUnsupportedParam {
+                    backend: "non-svt backend",
+                    param: "SvtParams::chroma_q",
+                    detail: "per-plane chroma delta-q is implemented by Av1Backend::Zenav1Svt only",
+                });
+            }
+            if !(-64..=63).contains(&u) || !(-64..=63).contains(&v) {
+                return Err(ValidationError::BackendUnsupportedParam {
+                    backend: "Av1Backend::Zenav1Svt",
+                    param: "SvtParams::chroma_q",
+                    detail: "each chroma delta-q must be in -64..=63 (the FH su(1+6) range)",
+                });
+            }
+        }
         #[cfg(feature = "zenav1-svt")]
         if !self.svt_route_enhancements.is_empty() && (self.svt_route_policy.is_some() || self.backend != crate::Av1Backend::Zenav1Svt) {
             return Err(ValidationError::BackendUnsupportedParam {
