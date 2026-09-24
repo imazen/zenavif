@@ -1738,6 +1738,9 @@ fn svt_knob_label(p: crate::expert::SvtParams) -> String {
     if p.tile_cols_log2 != d.tile_cols_log2 || p.tile_rows_log2 != d.tile_rows_log2 {
         s.push_str(&format!("-tl{}.{}", p.tile_cols_log2, p.tile_rows_log2));
     }
+    if let Some((u, v)) = p.chroma_q {
+        s.push_str(&format!("-cq{u}.{v}"));
+    }
     s
 }
 
@@ -2039,6 +2042,15 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
             h.u8(r.max_tx_size);
             h.u8(r.tile_cols_log2);
             h.u8(r.tile_rows_log2);
+            // Research-only per-plane chroma delta-q: it changes the chroma
+            // quantizers, so two cells that differ only here are different
+            // encodes and must not dedup together. Hashed only when set, so
+            // every cell declared before the knob keeps its fingerprint.
+            if let Some((u, v)) = r.chroma_q {
+                h.bytes_opt(Some(b"svt-chroma-q-v1"));
+                h.u8(u as u8);
+                h.u8(v as u8);
+            }
         }
     }
     // Without the feature there is no svt-rs encode to be identical TO:
@@ -2294,6 +2306,7 @@ impl SweepAxes {
 ///        -acb<f>                       ac_bias
 ///        -mtx<u8>                      max_tx_size (32 | 64)
 ///        -tl<u8>.<u8>                  tiles: cols_log2 . rows_log2
+///        -cq<i8>.<i8>                  chroma_q: per-plane chroma delta-q u . v
 /// ```
 ///
 /// Numbers render with shortest-roundtrip `Display`, so parsing is
@@ -2317,7 +2330,7 @@ pub fn config_from_cell_id(base_id: &str, quality: f32) -> Result<EncoderConfig,
         .map_err(|e| format!("bad speed in '{base_id}': {e}"))?;
     let mut cur = &rest[digits.len()..];
     // One slot per svt-knob token, in `svt_knob_label`'s field order.
-    let mut svt_seen = [false; 8];
+    let mut svt_seen = [false; 9];
 
     let mut stratum = Stratum {
         backend: crate::Av1Backend::Zenravif,
@@ -2356,6 +2369,20 @@ pub fn config_from_cell_id(base_id: &str, quality: f32) -> Result<EncoderConfig,
             .parse()
             .map_err(|e| format!("bad {what} integer in '{id}': {e}"))?;
         Ok((v, &s[end..]))
+    }
+    // Signed integer where '.' is a separator (the cq<u>.<v> pair).
+    fn signed_i8<'a>(s: &'a str, id: &str, what: &str) -> Result<(i8, &'a str), String> {
+        let (neg, body) = match s.strip_prefix('-') {
+            Some(b) => (true, b),
+            None => (false, s),
+        };
+        let end = body.bytes().take_while(u8::is_ascii_digit).count();
+        let mag: i16 = body[..end]
+            .parse()
+            .map_err(|e| format!("bad {what} integer in '{id}': {e}"))?;
+        let v = i8::try_from(if neg { -mag } else { mag })
+            .map_err(|_| format!("{what} out of i8 range in '{id}'"))?;
+        Ok((v, &body[end..]))
     }
     fn bool01<'a>(s: &'a str, id: &str, what: &str) -> Result<(bool, &'a str), String> {
         match s.as_bytes().first() {
@@ -2542,6 +2569,13 @@ pub fn config_from_cell_id(base_id: &str, quality: f32) -> Result<EncoderConfig,
             svt_once(&mut svt_seen, 0, base_id)?;
             stratum.svt.tune = v;
             t
+        } else if let Some(t) = tok.strip_prefix("cq") {
+            let (u, t) = signed_i8(t, base_id, "cq-u")?;
+            let t = dot(t, base_id, "cq")?;
+            let (v, t) = signed_i8(t, base_id, "cq-v")?;
+            svt_once(&mut svt_seen, 8, base_id)?;
+            stratum.svt.chroma_q = Some((u, v));
+            t
         } else if let Some(t) = tok.strip_prefix("tl") {
             let (cols, t) = integer(t, base_id, "tl-cols")?;
             let t = dot(t, base_id, "tl")?;
@@ -2566,7 +2600,7 @@ fn dot<'a>(s: &'a str, id: &str, what: &str) -> Result<&'a str, String> {
 
 /// Reject a repeated svt-knob token — the grammar renders each at most
 /// once, so a duplicate is a malformed id, not a last-wins override.
-fn svt_once(seen: &mut [bool; 8], slot: usize, id: &str) -> Result<(), String> {
+fn svt_once(seen: &mut [bool; 9], slot: usize, id: &str) -> Result<(), String> {
     if seen[slot] {
         return Err(format!(
             "duplicate svt-knob token in '{id}': each knob renders at most once"
@@ -2749,6 +2783,42 @@ mod tests {
             .with_svt_params(crate::expert::SvtParams::default());
         assert_eq!(fingerprint(&plain), fingerprint(&explicit));
         assert_eq!(svt_knob_label(crate::expert::SvtParams::default()), "");
+    }
+
+    /// `chroma_q` changes the chroma quantizers, so cells that differ only
+    /// there must fingerprint apart (else the planner and zenmetrics' dedup
+    /// merge distinct encodes), and its `-cq<u>.<v>` token must round-trip,
+    /// negative values included.
+    #[cfg(feature = "zenav1-svt")]
+    #[test]
+    fn chroma_q_fingerprints_apart_and_roundtrips() {
+        let base = config_from_cell_id("s4-svt-420", 50.0).unwrap();
+        let with = |u: i8, v: i8| {
+            let mut p = crate::expert::SvtParams::default();
+            p.chroma_q = Some((u, v));
+            base.clone().with_svt_params(p)
+        };
+        let fps = [
+            fingerprint(&base),
+            fingerprint(&with(0, 0)),
+            fingerprint(&with(48, 0)),
+            fingerprint(&with(0, 48)),
+            fingerprint(&with(-32, -32)),
+        ];
+        for i in 0..fps.len() {
+            for j in i + 1..fps.len() {
+                assert_ne!(fps[i], fps[j], "cells {i} and {j} must not dedup together");
+            }
+        }
+        for (u, v) in [(48, 0), (-20, 5), (-64, 63)] {
+            let mut p = crate::expert::SvtParams::default();
+            p.chroma_q = Some((u, v));
+            let label = svt_knob_label(p);
+            assert_eq!(label, format!("-cq{u}.{v}"));
+            let back = config_from_cell_id(&format!("s4-svt-420{label}"), 50.0).unwrap();
+            assert_eq!(back.svt_params().chroma_q, Some((u, v)), "{label}");
+            assert_eq!(fingerprint(&back), fingerprint(&with(u, v)), "{label}");
+        }
     }
 
     /// The zenav1-aom backend reads NEITHER zenravif mediator, so
