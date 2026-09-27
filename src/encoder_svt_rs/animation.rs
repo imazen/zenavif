@@ -132,7 +132,7 @@ fn encode_frames<F>(
     av1_config.high_bitdepth = first.bit_depth > 8;
     av1_config.monochrome = first.monochrome;
     av1_config.seq_level_idx_0 =
-        svtav1::entropy::obu::compute_seq_level_idx(first.width, first.height, framerate);
+        svtav1::pipeline::compute_seq_level_idx(first.width, first.height, framerate);
     let mut mux = AnimatedImage::new();
     mux.set_timescale(timescale)
         .set_color_config(av1_config)

@@ -305,15 +305,14 @@ fn svt_rs_partial_sb_roundtrip_at_low_presets() {
                 let v: Vec<u8> = (0..ch)
                     .flat_map(|r| (0..cw).map(move |c| (128 - ((r * 3 + c) % 48) as u8) | 0x03))
                     .collect();
-                let rc = svtav1::encoder::rate_control::RcConfig {
-                    mode: svtav1::encoder::rate_control::RcMode::Cqp,
+                let rc = svtav1::pipeline::RcConfig {
+                    mode: svtav1::pipeline::RcMode::Cqp,
                     qp: 20,
-                    ..svtav1::encoder::rate_control::RcConfig::default()
+                    ..svtav1::pipeline::RcConfig::default()
                 };
-                let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new(
-                    w as u32, h as u32, preset, rc, 0, 1,
-                )
-                .with_chroma_420(true);
+                let mut pipeline =
+                    svtav1::pipeline::EncodePipeline::new(w as u32, h as u32, preset, rc, 0, 1)
+                        .with_chroma_420(true);
                 pipeline.bit_depth = 8;
                 let payload = pipeline
                     .try_encode_frame_420(&y, &u, &v, w)
@@ -537,13 +536,12 @@ fn svt_rs_direct_mono_partial_sb_preset6_roundtrips() {
         let plane: Vec<u8> = (0..h)
             .flat_map(|y| (0..w).map(move |x| (((x + y) * 255) / (w + h)) as u8))
             .collect();
-        let rc = svtav1::encoder::rate_control::RcConfig {
-            mode: svtav1::encoder::rate_control::RcMode::Cqp,
+        let rc = svtav1::pipeline::RcConfig {
+            mode: svtav1::pipeline::RcMode::Cqp,
             qp: 10,
-            ..svtav1::encoder::rate_control::RcConfig::default()
+            ..svtav1::pipeline::RcConfig::default()
         };
-        let mut pipeline =
-            svtav1::encoder::pipeline::EncodePipeline::new(w as u32, h as u32, 6, rc, 0, 1);
+        let mut pipeline = svtav1::pipeline::EncodePipeline::new(w as u32, h as u32, 6, rc, 0, 1);
         pipeline.bit_depth = 8;
         let payload = pipeline
             .try_encode_frame(&plane, w)
@@ -1363,15 +1361,14 @@ fn svt_rs_direct_qp0_codes_lossless_420() {
         // self-promotingly pinned there, so they are not asserted here.
         for preset in [6u8, 7, 9] {
             let (y, u, v) = yuv420_structured(w, h);
-            let rc = svtav1::encoder::rate_control::RcConfig {
-                mode: svtav1::encoder::rate_control::RcMode::Cqp,
+            let rc = svtav1::pipeline::RcConfig {
+                mode: svtav1::pipeline::RcMode::Cqp,
                 qp: 0,
-                ..svtav1::encoder::rate_control::RcConfig::default()
+                ..svtav1::pipeline::RcConfig::default()
             };
-            let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new(
-                w as u32, h as u32, preset, rc, 0, 1,
-            )
-            .with_chroma_420(true);
+            let mut pipeline =
+                svtav1::pipeline::EncodePipeline::new(w as u32, h as u32, preset, rc, 0, 1)
+                    .with_chroma_420(true);
             pipeline.bit_depth = 8;
             let payload = pipeline
                 .try_encode_frame_420(&y, &u, &v, w)
@@ -1457,15 +1454,14 @@ fn svt_rs_direct_qp0_mono_and_native_10bit_are_lossless() {
     for (w, h) in [(64usize, 64usize), (65, 67)] {
         for preset in [0, 7, 9] {
             for (depth, mono) in [(8, true), (10, true), (10, false)] {
-                let rc = svtav1::encoder::rate_control::RcConfig {
-                    mode: svtav1::encoder::rate_control::RcMode::Cqp,
+                let rc = svtav1::pipeline::RcConfig {
+                    mode: svtav1::pipeline::RcMode::Cqp,
                     qp: 0,
                     ..Default::default()
                 };
-                let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new(
-                    w as u32, h as u32, preset, rc, 0, 1,
-                )
-                .with_chroma_420(!mono);
+                let mut pipeline =
+                    svtav1::pipeline::EncodePipeline::new(w as u32, h as u32, preset, rc, 0, 1)
+                        .with_chroma_420(!mono);
                 pipeline.bit_depth = depth;
                 let mask = (1u16 << depth) - 1;
                 let y: Vec<u16> = (0..w * h)

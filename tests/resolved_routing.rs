@@ -228,10 +228,14 @@ fn fingerprints_distinguish_native_effort_and_pinned_reference() {
 fn explicit_zen_enhancement_is_encoded_and_cannot_be_dropped_by_routing() {
     use zenavif::backend_router::SvtEnhancement;
     let cfg = config(Av1Backend::Zenav1Svt);
-    let input = PlanInput::rgb8(32, 32);
-    let request = RoutingRequest::default().with_effort(Effort::new(1.0).unwrap());
+    let input = PlanInput::rgb8(128, 128);
+    // Effort 0.0 -> speed 10 -> SVT preset 9: `DeepSearch` re-evaluates the
+    // search-effort ladders at enc_mode -1, which changes winners at fast
+    // presets; at preset 0/-1 the ladders already sit at their deepest tier
+    // and the enhancement is byte-inert by design.
+    let request = RoutingRequest::default().with_effort(Effort::new(0.0).unwrap());
     let plain = cfg.resolve_route(request, input).unwrap();
-    let enhanced_request = request.with_svt_enhancement(SvtEnhancement::AomIntraEdgeFilter);
+    let enhanced_request = request.with_svt_enhancement(SvtEnhancement::DeepSearch);
     let enhanced = cfg.resolve_route(enhanced_request, input).unwrap();
     let replanned = enhanced
         .config()
@@ -245,9 +249,22 @@ fn explicit_zen_enhancement_is_encoded_and_cannot_be_dropped_by_routing() {
     assert!(
         enhanced
             .svt_enhancements()
-            .contains(SvtEnhancement::AomIntraEdgeFilter)
+            .contains(SvtEnhancement::DeepSearch)
     );
-    let image = Img::new(vec![Rgb::new(80, 100, 120); 1024], 32, 32);
+    // A deterministic textured image: on flat input the deepest-tier
+    // candidate set collapses to the same winners the preset search picks,
+    // which made `DeepSearch` byte-inert and failed `assert_ne` below.
+    let pixels: Vec<Rgb<u8>> = (0..128 * 128)
+        .map(|i| {
+            let (x, y) = (i % 128, i / 128);
+            Rgb::new(
+                ((x * 37 + y * 91 + x * y * 3) % 256) as u8,
+                ((x * 53 + y * 17 + x * y * 7 + 40) % 256) as u8,
+                ((x * 11 + y * 71 + x * x + 90) % 256) as u8,
+            )
+        })
+        .collect();
+    let image = Img::new(pixels, 128, 128);
     let a = plain.encode_rgb8(image.as_ref(), stop()).unwrap();
     let b = enhanced.encode_rgb8(image.as_ref(), stop()).unwrap();
     assert_ne!(a.avif_file, b.avif_file);
@@ -266,13 +283,10 @@ fn explicit_zen_enhancement_is_encoded_and_cannot_be_dropped_by_routing() {
         )
         .is_err()
     );
-    assert!(
-        cfg.resolve_route(
-            enhanced_request.with_effort(Effort::new(0.0).unwrap()),
-            input
-        )
-        .is_err()
-    );
+    // An effort-only change used to be refused because the removed
+    // `AomIntraEdgeFilter` variant was preset-scoped; the surviving
+    // `DeepSearch` validates at every effort (allintra 4:2:0 8-bit), so no
+    // request-knob change on this test's dimensions produces a refusal.
     #[cfg(feature = "__expert")]
     assert_ne!(
         zenavif::sweep::fingerprint(plain.config()),
@@ -457,7 +471,7 @@ fn portable_replay_preserves_signed_preset_reference_and_enhancements() {
     for request in [
         RoutingRequest::default().with_policy(StillPolicy::SvtParity(ParityReference::Mainline420)),
         RoutingRequest::default().with_policy(StillPolicy::SvtParity(ParityReference::Hybrid3115)),
-        RoutingRequest::default().with_svt_enhancement(SvtEnhancement::AomIntraEdgeFilter),
+        RoutingRequest::default().with_svt_enhancement(SvtEnhancement::DeepSearch),
     ] {
         let route = config(Av1Backend::Zenav1Svt)
             .resolve_route(

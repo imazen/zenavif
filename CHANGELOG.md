@@ -94,6 +94,23 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 - Animated serializer: square-pixel aspect, rotation and mirroring on color tracks and posters, with checked validation and essential poster transform associations.
 - Correct HEIF mirror-axis conversion in the codec orientation adapter; verify all 12 combinations against the libavif C reference.
 
+#### Changed — `zenav1-svt` pin `2255a342` -> `0f63ca13`, 2026-09-27
+
+- Picks up per-leaf stop-token checks inside the mode-decision walks
+  (upstream `c7c0b9715`): measured cancel-latency poll gap on this crate's
+  1024x1024 still-encode path drops 215ms -> 35ms worst-case, with
+  byte-identical output on the harness's deterministic input.
+- **Seam API break absorbed**: the facade moved pipeline internals to
+  `svtav1::pipeline::*`/`svtav1::avif::*` (the old `svtav1::encoder::*`/
+  `svtav1::entropy::*` paths are `__expert`-gated upstream), and the
+  uncalibrated `ZenEnhancement` variants `AomIntraEdgeFilter` and
+  `AomRestorationUnitSearch` were removed upstream — the surviving set is
+  `AomScreenTools`/`DeepSearch`, which the router now forwards.
+- `tests/resolved_routing.rs`: the enhancement test uses `DeepSearch` at
+  effort 0.0 (preset 9) on textured input — at preset 0/-1 or on flat
+  input the deepest-tier candidate set produces the same winners and the
+  enhancement is byte-inert by design.
+
 #### Changed — `zenav1-svt` pin `2ca060f42` -> `2d75a105f`, 2026-09-05
 
 - Bumped the `svtav1` (package `zenav1-svt`) git rev by 140 commits to
