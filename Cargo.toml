@@ -171,7 +171,20 @@ aom-decode = { package = "zenav1-aom-decode", git = "https://github.com/imazen/z
 # support query) has since landed on `main` and is present in `fbea6b4`, so this
 # is strictly forward. Verified: `git grep "pub fn validate_configuration"
 # fbea6b4` and the `configuration_support.rs` gate both resolve.
-aom-encode = { package = "zenav1-aom-encode", git = "https://github.com/imazen/zenav1-aom", rev = "fbea6b4", optional = true }
+#
+# Pin history: `fbea6b4` -> `6799fe95` on 2026-10-04: carries cooperative
+# cancellation (`56192f9d` et seq) — `EncodeConfig::with_stop` polling once per
+# superblock inside `encode_key_frame_with`, the `Deadline` token, and
+# `KeyFrameError::Cancelled`. The seam previously checked `stop` only before
+# and after the whole frame encode, so a cancellation could not take effect
+# inside what is seconds of work at low `cpu_used`. API breaks absorbed:
+# `KeyFrameConfig`/`KeyFramePlanes`/`ColorDescription` became
+# `#[non_exhaustive]` (struct literals -> `allintra_speed0` + field mutation /
+# `KeyFramePlanes::new`), and `enable_palette`/`enable_intrabc` now exist with
+# aomenc's ALLINTRA defaults ON — inert on photographic content (gated on the
+# screen-content decision). `tests/aom_encode_backend.rs` 22/22 pass incl. the
+# bd8 byte anchor against this rev.
+aom-encode = { package = "zenav1-aom-encode", git = "https://github.com/imazen/zenav1-aom", rev = "6799fe95", optional = true }
 archmage = { version = "0.9.29", features = ["macros", "avx512"] }
 magetypes = { version = "0.9.29"}
 safe_unaligned_simd = "0.2.5"
