@@ -301,7 +301,13 @@ ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/ima
 # Retires mono/alpha geometry and preset floors; direct QP-0 tests now require
 # exact mono/native-10 reconstruction. Root SIMD patches below are required
 # because Cargo does not inherit the dependency workspace's patch table.
-svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "2255a34264de6052651ae9f448e461abbcd5df9e", optional = true }
+# 2026-09-27: 0f63ca13 picks up per-leaf stop checks inside the MD walks
+# (cancel <50ms at p0) plus the facade rework: the pipeline internals moved to
+# `svtav1::pipeline::*`/`svtav1::avif::*` (the `svtav1::encoder::*` paths are
+# `__expert`-gated upstream), and the two uncalibrated `ZenEnhancement`
+# variants (`AomIntraEdgeFilter`, `AomRestorationUnitSearch`) were REMOVED
+# upstream — `AomScreenTools`/`DeepSearch` are the surviving set.
+svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "0f63ca13757eea3075f29656b7886143073d2022", optional = true }
 # AVIF container muxer for the zenav1-svt backend (the zenravif backend muxes
 # inside zenravif; this backend muxes in-crate). The 0.2.0 version is
 # supplied by the [patch.crates-io] git pin below until 0.2.0 publishes.

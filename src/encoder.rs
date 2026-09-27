@@ -366,7 +366,7 @@ pub struct EncoderConfig {
     #[cfg(feature = "zenav1-svt")]
     pub(crate) svt_route_enhancements: svtav1::avif::ZenEnhancements,
     #[cfg(feature = "zenav1-svt")]
-    pub(crate) svt_film_grain: svtav1::encoder::film_grain_config::FilmGrainConfig,
+    pub(crate) svt_film_grain: svtav1::pipeline::FilmGrainConfig,
     pub(crate) quality: f32,
     pub(crate) speed: u8,
     pub(crate) alpha_quality: Option<f32>,

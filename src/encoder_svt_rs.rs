@@ -67,8 +67,8 @@ const MATRIX_COEFFICIENTS_BT601: u8 = 6;
 /// the old `is_empty()` heuristic on the infallible `encode_frame*` calls
 /// (obligation 4: an out-of-envelope config now surfaces as a structured
 /// refusal instead of a possibly-corrupt bitstream or a panic).
-fn map_svt_encode_error(e: whereat::At<svtav1::types::EncodeError>) -> whereat::At<Error> {
-    use svtav1::types::EncodeError as SvtError;
+fn map_svt_encode_error(e: whereat::At<svtav1::pipeline::EncodeError>) -> whereat::At<Error> {
+    use svtav1::pipeline::EncodeError as SvtError;
     let (err, _trace) = e.decompose();
     match err {
         SvtError::Cancelled(reason) => at!(Error::Cancelled(reason)),
@@ -175,7 +175,7 @@ pub(crate) fn svt_resolved_identity(config: &crate::EncoderConfig) -> (i8, u8, u
 /// grayscale items stay at the mainline defaults, which is also what libavif
 /// does (it drives alpha with `tune=psnr`).
 fn apply_svt_params(
-    pipeline: &mut svtav1::encoder::pipeline::EncodePipeline,
+    pipeline: &mut svtav1::pipeline::EncodePipeline,
     config: &crate::EncoderConfig,
 ) {
     let p = config.svt_params_resolved();
@@ -188,14 +188,14 @@ fn apply_svt_params(
     {
         pipeline.chroma_q_override = p
             .chroma_q
-            .map(|(u, v)| svtav1::encoder::chroma_q::ChromaQOverride::new(u, v));
+            .map(|(u, v)| svtav1::avif::ChromaQOverride::new(u, v));
     }
 }
 
 /// Shared query/encode validation for routing controls.
-fn resolved_svt_hdr(config: &EncoderConfig) -> svtav1::encoder::hdr_mode::HdrForkConfig {
+fn resolved_svt_hdr(config: &EncoderConfig) -> svtav1::pipeline::HdrForkConfig {
     let p = config.svt_params_resolved();
-    svtav1::encoder::hdr_mode::HdrForkConfig {
+    svtav1::pipeline::HdrForkConfig {
         tune: p.tune,
         enable_variance_boost: p.enable_variance_boost,
         variance_boost_strength: p.variance_boost_strength,
@@ -457,18 +457,18 @@ fn encode_mono_plane_svt(
     preset: i8,
     qp: u8,
     threads: usize,
-    color_description: svtav1::entropy::obu::ColorDescription,
+    color_description: svtav1::pipeline::ColorDescription,
     stop: &almost_enough::StopToken,
     mode: FrameMode,
 ) -> Result<Vec<u8>> {
     let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
     let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
-    let rc = svtav1::encoder::rate_control::RcConfig {
-        mode: svtav1::encoder::rate_control::RcMode::Cqp,
+    let rc = svtav1::pipeline::RcConfig {
+        mode: svtav1::pipeline::RcMode::Cqp,
         qp,
-        ..svtav1::encoder::rate_control::RcConfig::default()
+        ..svtav1::pipeline::RcConfig::default()
     };
-    let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new_with_preset(
+    let mut pipeline = svtav1::pipeline::EncodePipeline::new_with_preset(
         w,
         h,
         svtav1::avif::NativePreset::new(preset)
@@ -600,19 +600,18 @@ fn encode_color_420_svt(
     let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
     let qp = quality_to_qp_gated(config.quality);
     let preset = speed_to_svt_preset(config.speed);
-    let rc = svtav1::encoder::rate_control::RcConfig {
-        mode: svtav1::encoder::rate_control::RcMode::Cqp,
+    let rc = svtav1::pipeline::RcConfig {
+        mode: svtav1::pipeline::RcMode::Cqp,
         qp,
-        ..svtav1::encoder::rate_control::RcConfig::default()
+        ..svtav1::pipeline::RcConfig::default()
     };
     // hierarchical_levels 0 + intra_period 1: single still key frame with a
     // reduced still-picture sequence header (the AvifEncoder pattern).
     let native = config
         .svt_route_preset
         .unwrap_or_else(|| svtav1::avif::NativePreset::new(preset as i8).unwrap());
-    let mut pipeline =
-        svtav1::encoder::pipeline::EncodePipeline::new_with_preset(w, h, native, rc, 0, 1)
-            .with_chroma_420(true);
+    let mut pipeline = svtav1::pipeline::EncodePipeline::new_with_preset(w, h, native, rc, 0, 1)
+        .with_chroma_420(true);
     apply_svt_params(&mut pipeline, config);
     pipeline.enhancements = config.svt_route_enhancements;
     pipeline.film_grain = config.svt_film_grain.clone();
@@ -623,7 +622,7 @@ fn encode_color_420_svt(
             .map_err(|e| at!(Error::InvalidParameters(e.into())))?;
     }
     pipeline.bit_depth = planes.bit_depth();
-    pipeline.color_description = svtav1::entropy::obu::ColorDescription {
+    pipeline.color_description = svtav1::pipeline::ColorDescription {
         color_primaries,
         transfer_characteristics,
         matrix_coefficients: MATRIX_COEFFICIENTS_BT601,
@@ -747,8 +746,8 @@ enum FrameMode {
 impl FrameMode {
     fn configure(
         self,
-        mut pipeline: svtav1::encoder::pipeline::EncodePipeline,
-    ) -> svtav1::encoder::pipeline::EncodePipeline {
+        mut pipeline: svtav1::pipeline::EncodePipeline,
+    ) -> svtav1::pipeline::EncodePipeline {
         if let Self::Sequence { framerate } = self {
             pipeline = pipeline.with_image_sequence();
             pipeline.rc_config.framerate = framerate;
@@ -876,8 +875,8 @@ fn encode_rgb8_frame(
 const CICP_UNSPECIFIED: u8 = 2;
 
 /// Colour description for a Cs400 alpha stream (no colorimetry).
-fn alpha_color_description() -> svtav1::entropy::obu::ColorDescription {
-    svtav1::entropy::obu::ColorDescription {
+fn alpha_color_description() -> svtav1::pipeline::ColorDescription {
+    svtav1::pipeline::ColorDescription {
         color_primaries: CICP_UNSPECIFIED,
         transfer_characteristics: CICP_UNSPECIFIED,
         matrix_coefficients: CICP_UNSPECIFIED,
@@ -1164,7 +1163,7 @@ fn encode_gray8_frame(
     let transfer_characteristics = config
         .transfer_characteristics
         .unwrap_or(DEFAULT_TRANSFER_CHARACTERISTICS);
-    let color_description = svtav1::entropy::obu::ColorDescription {
+    let color_description = svtav1::pipeline::ColorDescription {
         color_primaries,
         transfer_characteristics,
         // Monochrome streams carry no chroma; matrix is unspecified.
@@ -1304,7 +1303,7 @@ mod tests {
                 ours.tune = tune;
                 let ours = ours.resolved(qp);
 
-                let mut theirs = svtav1::encoder::hdr_mode::HdrForkConfig::mainline();
+                let mut theirs = svtav1::pipeline::HdrForkConfig::mainline();
                 theirs.tune = tune;
                 theirs.apply_tune_overrides(qp);
 
@@ -1351,20 +1350,17 @@ mod tests {
     /// knob axis existed.
     #[test]
     fn svt_params_default_leaves_the_pipeline_at_mainline() {
-        let rc = svtav1::encoder::rate_control::RcConfig {
-            mode: svtav1::encoder::rate_control::RcMode::Cqp,
+        let rc = svtav1::pipeline::RcConfig {
+            mode: svtav1::pipeline::RcMode::Cqp,
             qp: 35,
-            ..svtav1::encoder::rate_control::RcConfig::default()
+            ..svtav1::pipeline::RcConfig::default()
         };
-        let mut pipeline = svtav1::encoder::pipeline::EncodePipeline::new(64, 64, 6, rc, 0, 1)
-            .with_chroma_420(true);
+        let mut pipeline =
+            svtav1::pipeline::EncodePipeline::new(64, 64, 6, rc, 0, 1).with_chroma_420(true);
         let before = pipeline.hdr.clone();
         super::apply_svt_params(&mut pipeline, &crate::EncoderConfig::new());
         assert_eq!(pipeline.hdr, before, "default SvtParams must be inert");
-        assert_eq!(
-            pipeline.hdr,
-            svtav1::encoder::hdr_mode::HdrForkConfig::mainline()
-        );
+        assert_eq!(pipeline.hdr, svtav1::pipeline::HdrForkConfig::mainline());
         assert_eq!((pipeline.tile_cols_log2, pipeline.tile_rows_log2), (0, 0));
     }
 }

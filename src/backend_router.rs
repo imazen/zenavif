@@ -15,9 +15,9 @@ use crate::{Av1Backend, EncoderConfig, PlanInput};
 pub use svtav1::avif::ZenEnhancement as SvtEnhancement;
 
 #[cfg(feature = "zenav1-svt")]
-pub use svtav1::encoder::film_grain_config::FilmGrainConfig as SvtFilmGrainConfig;
+pub use svtav1::pipeline::FilmGrainConfig as SvtFilmGrainConfig;
 #[cfg(feature = "zenav1-svt")]
-pub use svtav1::entropy::obu::FilmGrainParams as SvtFilmGrainTable;
+pub use svtav1::pipeline::FilmGrainParams as SvtFilmGrainTable;
 
 /// Exact pixel entry point, kept separate from the legacy RGB-only `PlanInput`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -184,10 +184,7 @@ fn query_one(
             if let Some(policy) = candidate.svt_route_policy {
                 encoder = encoder.with_policy(policy);
             }
-            for enhancement in [
-                SvtEnhancement::AomIntraEdgeFilter,
-                SvtEnhancement::AomRestorationUnitSearch,
-            ] {
+            for enhancement in [SvtEnhancement::AomScreenTools, SvtEnhancement::DeepSearch] {
                 if candidate.svt_route_enhancements.contains(enhancement) {
                     encoder = encoder.with_enhancement(enhancement);
                 }
@@ -639,10 +636,7 @@ impl EncoderConfig {
         };
         #[cfg(feature = "zenav1-svt")]
         {
-            for enhancement in [
-                SvtEnhancement::AomIntraEdgeFilter,
-                SvtEnhancement::AomRestorationUnitSearch,
-            ] {
+            for enhancement in [SvtEnhancement::AomScreenTools, SvtEnhancement::DeepSearch] {
                 if request.svt_enhancements.contains(enhancement) {
                     base.svt_route_enhancements = base.svt_route_enhancements.with(enhancement);
                 }
