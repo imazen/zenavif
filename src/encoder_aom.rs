@@ -730,13 +730,12 @@ fn color_planes(
     width: usize,
     height: usize,
     bit_depth: u8,
-    ss_x: usize,
-    ss_y: usize,
+    subsampling: (usize, usize),
     range: crate::yuv_convert::YuvRange,
     identity: bool,
 ) -> (Vec<u16>, Vec<u16>, Vec<u16>) {
     use crate::yuv_convert::YuvMatrix;
-    let sub = (ss_x, ss_y) == (1, 1);
+    let sub = subsampling == (1, 1);
     let (cw, ch) = if sub {
         (width.div_ceil(2), height.div_ceil(2))
     } else {
@@ -1071,8 +1070,7 @@ fn finish_color_with_alpha(
         width,
         height,
         bit_depth,
-        cfg.ss_x,
-        cfg.ss_y,
+        (cfg.ss_x, cfg.ss_y),
         fwd_range(config),
         wants_identity(config),
     );
@@ -1220,8 +1218,7 @@ pub(crate) fn encode_rgb8_aom(
         width,
         height,
         bit_depth,
-        probe.ss_x,
-        probe.ss_y,
+        (probe.ss_x, probe.ss_y),
         fwd_range(config),
         wants_identity(config),
     );
@@ -1264,8 +1261,7 @@ pub(crate) fn encode_rgb16_aom(
         width,
         height,
         bit_depth,
-        probe.ss_x,
-        probe.ss_y,
+        (probe.ss_x, probe.ss_y),
         fwd_range(config),
         wants_identity(config),
     );
