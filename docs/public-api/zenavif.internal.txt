@@ -12,17 +12,18 @@
 #   pub modules                                 8
 #   pub types (struct/enum/trait/alias)        12
 #   free functions                             29
-#   inherent methods                          101
-#   struct fields                              45
+#   inherent methods                          112
+#   struct fields                              46
 #   enum variants                              28
-#   trait roster entries (type × trait)        80
+#   trait roster entries (type × trait)        92
 #   auto-trait-complete types                  12
 #
 # per-module pub lines:
 #   (root)                           26
+#   backend_router                    9
 #   backend_tuner                     4
 #   detect                            4
-#   expert                           31
+#   expert                           34
 #   fast_heads                        3
 #   heuristics                        1
 #   palette_gate                      1
@@ -36,7 +37,7 @@
 #   yuv_convert_libyuv_autovec        1
 #   yuv_convert_libyuv_simd           1
 
-## items (223 lines)
+## items (235 lines)
 
 #[non_exhaustive] pub enum sweep::KnobProbe
 #[non_exhaustive] pub struct expert::InternalParams
@@ -63,6 +64,15 @@ pub fn PlanInput::assert_fields_are_eq(&self)
 pub fn SpeedDerived::assert_fields_are_eq(&self)
 pub fn TilesResolution::assert_fields_are_eq(&self)
 pub fn TransferCharacteristics::assert_fields_are_eq(&self)
+pub fn backend_router::BackendSelection::assert_fields_are_eq(&self)
+pub fn backend_router::NativeSettings::assert_fields_are_eq(&self)
+pub fn backend_router::ParityReference::assert_fields_are_eq(&self)
+pub fn backend_router::RouteCalibration::assert_fields_are_eq(&self)
+pub fn backend_router::RouteError::assert_fields_are_eq(&self)
+pub fn backend_router::RouteReason::assert_fields_are_eq(&self)
+pub fn backend_router::StillInput::assert_fields_are_eq(&self)
+pub fn backend_router::StillPolicy::assert_fields_are_eq(&self)
+pub fn backend_router::SuitabilityReport::assert_fields_are_eq(&self)
 pub fn backend_tuner::AllowedBackends::assert_fields_are_eq(&self)
 pub fn backend_tuner::TuneSource::assert_fields_are_eq(&self)
 pub fn backend_tuner::contract::TuneHead::assert_fields_are_eq(&self)
@@ -78,11 +88,13 @@ pub fn expert::InternalParams::validate(&self) -> core::result::Result<(), Valid
 pub fn expert::SvtParams::clamped(self) -> Self
 pub fn expert::SvtParams::clone(&self) -> expert::SvtParams
 pub fn expert::SvtParams::default() -> Self
+pub fn expert::SvtParams::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub fn expert::SvtParams::deviations(&self) -> u8
 pub fn expert::SvtParams::eq(&self, &expert::SvtParams) -> bool
 pub fn expert::SvtParams::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn expert::SvtParams::is_default(&self) -> bool
 pub fn expert::SvtParams::resolved(self, u8) -> Self
+pub fn expert::SvtParams::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 pub fn fast_heads::FastTierBudgets::assert_fields_are_eq(&self)
 pub fn fast_heads::PartitionBudget::assert_fields_are_eq(&self)
 pub fn fast_heads::TxBudget::assert_fields_are_eq(&self)
@@ -193,6 +205,7 @@ pub expert::InternalParams::fast_deblock: core::option::Option<bool>
 pub expert::InternalParams::lrf: core::option::Option<bool>
 pub expert::InternalParams::partition_range: core::option::Option<(u8, u8)>
 pub expert::SvtParams::ac_bias: f64
+pub expert::SvtParams::chroma_q: core::option::Option<(i8, i8)>
 pub expert::SvtParams::enable_qm: bool
 pub expert::SvtParams::enable_variance_boost: bool
 pub expert::SvtParams::force_screen_content_mode: core::option::Option<u8>
@@ -262,7 +275,7 @@ pub yuv_convert::YuvMatrix::Custom::kr: f32
 pub yuv_convert::YuvRange::Full
 pub yuv_convert::YuvRange::Limited
 
-## trait impls (49 types)
+## trait impls (59 types)
 
 Av1Backend: TrivialClone
 ChromaSampling: TrivialClone
@@ -283,6 +296,16 @@ TargetMetric: TrivialClone
 TargetOptions: TrivialClone
 TilesResolution: TrivialClone
 TransferCharacteristics: TrivialClone
+backend_router::BackendSelection: TrivialClone
+backend_router::Effort: TrivialClone
+backend_router::NativeSettings: TrivialClone
+backend_router::ParityReference: TrivialClone
+backend_router::RouteCalibration: TrivialClone
+backend_router::RouteReason: TrivialClone
+backend_router::RoutingRequest: TrivialClone
+backend_router::StillInput: TrivialClone
+backend_router::StillPolicy: TrivialClone
+backend_router::SuitabilityReport: TrivialClone
 backend_tuner::AllowedBackends: TrivialClone
 backend_tuner::TuneSource: TrivialClone
 backend_tuner::contract::TuneHead: TrivialClone
@@ -292,7 +315,7 @@ backend_tuner::stub::WallTimeModel: TrivialClone
 detect::ChromaSampling: TrivialClone
 detect::Confidence: TrivialClone
 expert::InternalParams: Clone, Debug, Default
-expert::SvtParams: Clone, Copy, Debug, Default, PartialEq, TrivialClone
+expert::SvtParams: Clone, Copy, Debug, Default, PartialEq, TrivialClone, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 fast_heads::FastTierBudgets: TrivialClone
 fast_heads::PartitionBudget: TrivialClone
 fast_heads::TxBudget: TrivialClone

@@ -13,17 +13,17 @@
 #   pub types (struct/enum/trait/alias)         4
 #   free functions                              3
 #   inherent methods                            6
-#   struct fields                              40
+#   struct fields                              45
 #   enum variants                               2
 #   trait roster entries (type × trait)         4
 #   auto-trait-complete types                   3
 #   auto-trait exceptions                       1
 #
 # per-module pub lines:
-#   (root)                           50
+#   (root)                           55
 #   c_api                             6
 
-## items (56 lines)
+## items (61 lines)
 
 pub mod c_api
 #[repr(C)] pub struct c_api::avif_data_t
@@ -35,8 +35,12 @@ pub c_api::avif_data_t::primary_size: usize
 #[no_mangle] pub unsafe c fn c_api::avif_data_free(*const c_api::avif_data_t)
 #[no_mangle] pub unsafe c fn c_api::avif_parse(*const u8, usize) -> *const c_api::avif_data_t
 pub struct AnimationConfig
+pub AnimationConfig::exif: core::option::Option<alloc::vec::Vec<u8>>
 pub AnimationConfig::frames: fallible_collections::vec::TryVec<AnimationFrame>
-pub AnimationConfig::loop_count: u32
+pub AnimationConfig::hdr: AnimationHdrMetadata
+pub AnimationConfig::loop_count: u64
+pub AnimationConfig::spatial: AnimationSpatialMetadata
+pub AnimationConfig::xmp: core::option::Option<alloc::vec::Vec<u8>>
 pub struct AnimationFrame
 pub AnimationFrame::data: fallible_collections::vec::TryVec<u8>
 pub AnimationFrame::duration_ms: u32
@@ -66,6 +70,7 @@ pub AvifData::layered_image_indexing: core::option::Option<AV1LayeredImageIndexi
 pub AvifData::major_brand: [u8; 4]
 pub AvifData::mastering_display: core::option::Option<MasteringDisplayColourVolume>
 pub AvifData::mirror: core::option::Option<ImageMirror>
+pub AvifData::nclx_color_info: core::option::Option<ColorInformation>
 pub AvifData::operating_point: core::option::Option<OperatingPointSelector>
 pub AvifData::pixel_aspect_ratio: core::option::Option<PixelAspectRatio>
 pub AvifData::premultiplied_alpha: bool

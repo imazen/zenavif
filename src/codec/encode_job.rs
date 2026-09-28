@@ -295,6 +295,9 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
             frame_count: 0,
             loop_count: self.loop_count.flatten(),
             timescale: 1000,
+            retained_bytes: 0,
+            descriptor: None,
+            color_context: None,
         })
     }
 }

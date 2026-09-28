@@ -6,31 +6,34 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenavif-serialize.txt 177 lines (supported surface) | zenavif-serialize.features.txt 0 added (features: none) | zenavif-serialize.internal.txt 24 lines (24 hidden + 0 excluded-feature)
+# files: zenavif-serialize.txt 218 lines (supported surface) | zenavif-serialize.features.txt 0 added (features: none) | zenavif-serialize.internal.txt 32 lines (32 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 4
-#   pub types (struct/enum/trait/alias)        19
+#   pub types (struct/enum/trait/alias)        23
 #   pub consts/statics                          3
 #   free functions                              4
-#   inherent methods                           58
-#   struct fields                              38
-#   enum variants                              30
-#   trait roster entries (type × trait)        65
-#   auto-trait-complete types                  17
+#   inherent methods                           78
+#   struct fields                              49
+#   enum variants                              32
+#   trait roster entries (type × trait)        86
+#   auto-trait-complete types                  21
 #   auto-trait exceptions                       1
 #
 # per-module pub lines:
-#   (root)                          100
-#   animated                         18
+#   (root)                          114
+#   animated                         41
 #   constants                        30
 #   grid                              8
 
-## items (156 lines)
+## items (193 lines)
 
 pub mod zenavif_serialize
 pub mod animated
+pub enum animated::RepetitionCount
+pub animated::RepetitionCount::Finite(u32)
+pub animated::RepetitionCount::Infinite
 #[non_exhaustive] pub struct animated::AnimFrame<'a>
 pub animated::AnimFrame::alpha: core::option::Option<&'a [u8]>
 pub animated::AnimFrame::color: &'a [u8]
@@ -43,12 +46,32 @@ pub struct animated::AnimatedImage
 pub fn animated::AnimatedImage::new() -> Self
 pub fn animated::AnimatedImage::serialize(&self, u32, u32, &[animated::AnimFrame<'_>], &[u8], core::option::Option<&[u8]>) -> alloc::vec::Vec<u8>
 pub fn animated::AnimatedImage::set_alpha_config(&mut self, Av1CBox) -> &mut Self
+pub fn animated::AnimatedImage::set_amve(&mut self, AmveBox) -> &mut Self
+pub fn animated::AnimatedImage::set_cclv(&mut self, CclvBox) -> &mut Self
 pub fn animated::AnimatedImage::set_clli(&mut self, ClliBox) -> &mut Self
 pub fn animated::AnimatedImage::set_color_config(&mut self, Av1CBox) -> &mut Self
+pub fn animated::AnimatedImage::set_color_description(&mut self, u16, u16, u16, bool) -> &mut Self
 pub fn animated::AnimatedImage::set_colr(&mut self, ColrBox) -> &mut Self
+pub fn animated::AnimatedImage::set_crop(&mut self, animated::CropRect) -> &mut Self
+pub fn animated::AnimatedImage::set_exif(&mut self, alloc::vec::Vec<u8>) -> &mut Self
+pub fn animated::AnimatedImage::set_icc_profile(&mut self, alloc::vec::Vec<u8>) -> &mut Self
 pub fn animated::AnimatedImage::set_loop_count(&mut self, u32) -> &mut Self
 pub fn animated::AnimatedImage::set_mdcv(&mut self, MdcvBox) -> &mut Self
+pub fn animated::AnimatedImage::set_mirror(&mut self, u8) -> &mut Self
+pub fn animated::AnimatedImage::set_pixel_aspect_ratio(&mut self, u32, u32) -> &mut Self
+pub fn animated::AnimatedImage::set_premultiplied_alpha(&mut self, bool) -> &mut Self
+pub fn animated::AnimatedImage::set_repetition_count(&mut self, animated::RepetitionCount) -> &mut Self
+pub fn animated::AnimatedImage::set_rotation(&mut self, u8) -> &mut Self
 pub fn animated::AnimatedImage::set_timescale(&mut self, u32) -> &mut Self
+pub fn animated::AnimatedImage::set_xmp(&mut self, alloc::vec::Vec<u8>) -> &mut Self
+pub fn animated::AnimatedImage::try_serialize(&self, u32, u32, &[animated::AnimFrame<'_>], &[u8], core::option::Option<&[u8]>) -> Result<alloc::vec::Vec<u8>>
+#[non_exhaustive] pub struct animated::CropRect
+pub animated::CropRect::height: u32
+pub animated::CropRect::width: u32
+pub animated::CropRect::x: u32
+pub animated::CropRect::y: u32
+pub fn animated::CropRect::new(u32, u32, u32, u32) -> Self
+pub fn animated::CropRect::to_clean_aperture(self, u32, u32) -> core::option::Option<ClapBox>
 pub mod constants
 #[non_exhaustive] pub enum constants::ColorPrimaries
 pub constants::ColorPrimaries::Bt2020 = 9
@@ -93,6 +116,12 @@ pub fn grid::GridImage::set_premultiplied_alpha(&mut self, bool) -> &mut Self
 pub SerializeError::InvalidInput(&'static str)
 pub SerializeError::Io(std::io::error::Error)
 pub SerializeError::Oom
+#[non_exhaustive] pub struct AmveBox
+pub AmveBox::ambient_illuminance: u32
+pub AmveBox::ambient_light_x: u16
+pub AmveBox::ambient_light_y: u16
+pub fn AmveBox::is_valid(&self) -> bool
+pub fn AmveBox::new(u32, u16, u16) -> Self
 #[non_exhaustive] pub struct Av1CBox
 pub Av1CBox::chroma_sample_position: u8
 pub Av1CBox::chroma_subsampling_x: bool
@@ -128,6 +157,7 @@ pub fn Aviffy::set_pixel_aspect_ratio(&mut self, u32, u32) -> &mut Self
 pub fn Aviffy::set_premultiplied_alpha(&mut self, bool) -> &mut Self
 pub fn Aviffy::set_rotation(&mut self, u8) -> &mut Self
 pub fn Aviffy::set_seq_profile(&mut self, u8) -> &mut Self
+pub fn Aviffy::set_strict_payload_agreement(&mut self, bool) -> &mut Self
 pub fn Aviffy::set_transfer_characteristics(&mut self, constants::TransferCharacteristics) -> &mut Self
 pub fn Aviffy::set_width(&mut self, u32) -> &mut Self
 pub fn Aviffy::set_xmp(&mut self, alloc::vec::Vec<u8>) -> &mut Self
@@ -136,6 +166,13 @@ pub fn Aviffy::try_to_vec(&self, &[u8], core::option::Option<&[u8]>, u32, u32, u
 pub fn Aviffy::with_max_output_bytes(&mut self, usize) -> &mut Self
 pub fn Aviffy::write<W: std::io::Write>(&self, W, &[u8], core::option::Option<&[u8]>, u32, u32, u8) -> Result<()>
 pub fn Aviffy::write_slice<W: std::io::Write>(&self, W, &[u8], core::option::Option<&[u8]>) -> Result<()>
+#[non_exhaustive] pub struct CclvBox
+pub CclvBox::avg_luminance: core::option::Option<u32>
+pub CclvBox::max_luminance: core::option::Option<u32>
+pub CclvBox::min_luminance: core::option::Option<u32>
+pub CclvBox::primaries: core::option::Option<[(i32, i32); 3]>
+pub fn CclvBox::is_valid(&self) -> bool
+pub fn CclvBox::new() -> Self
 pub struct ChromaSubsampling
 pub ChromaSubsampling::horizontal: bool
 pub ChromaSubsampling::vertical: bool
@@ -186,11 +223,13 @@ pub fn serialize_to_vec(&[u8], core::option::Option<&[u8]>, u32, u32, u8) -> all
 pub fn try_serialize_to_vec(&[u8], core::option::Option<&[u8]>, u32, u32, u8) -> Result<alloc::vec::Vec<u8>>
 pub type Result<T> = core::result::Result<T, whereat::at::At<SerializeError>>
 
-## trait impls (19 types)
+## trait impls (23 types)
 
 (bool, bool): From<ChromaSubsampling>
+AmveBox: Clone, Copy, Debug, Eq, PartialEq
 Av1CBox: Clone, Copy, Debug, Default
 Aviffy: Default
+CclvBox: Clone, Copy, Debug, Default, Eq, PartialEq
 ChromaSubsampling: Clone, Copy, Debug, Eq, From<(bool, bool)>, PartialEq
 ClapBox: Clone, Copy, Debug, PartialEq
 ClliBox: Clone, Copy, Debug, PartialEq
@@ -203,6 +242,8 @@ PaspBox: Clone, Copy, Debug, PartialEq
 SerializeError: Debug, Display, Error, From<std::io::error::Error>
 animated::AnimFrame<'a>: Clone
 animated::AnimatedImage: Default
+animated::CropRect: Clone, Copy, Debug, Eq, PartialEq
+animated::RepetitionCount: Clone, Copy, Debug, Eq, PartialEq
 constants::ColorPrimaries: Clone, Copy, Debug, Eq, PartialEq
 constants::MatrixCoefficients: Clone, Copy, Debug, Eq, PartialEq
 constants::TransferCharacteristics: Clone, Copy, Debug, Eq, PartialEq
@@ -210,5 +251,5 @@ grid::GridImage: Default
 
 ## auto traits
 
-17 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+21 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 SerializeError: !RefUnwindSafe !UnwindSafe

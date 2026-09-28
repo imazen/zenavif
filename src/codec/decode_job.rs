@@ -614,6 +614,9 @@ impl AvifDecodeJob {
                 zencodec::UnsupportedOperation::AnimationDecode,
             )));
         }
+        if let Some(stop) = &self.stop {
+            stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
+        }
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
 
@@ -659,8 +662,9 @@ impl AvifDecodeJob {
 
         Ok(AvifAnimationFrameDecoder {
             anim_decoder: anim_dec,
-            index: 0,
             frames_decoded: 0,
+            stop: self.stop,
+            failed: false,
             start_frame_index: self.start_frame_index,
             info: Arc::new(base_info),
             total_frames: anim_info.frame_count as u32,

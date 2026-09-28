@@ -1,5 +1,5 @@
 # zenavif public API — additions from non-default features
-# features: aom-backend,auto-tune,avx512,encode,encode-asm,encode-imazen,encode-mono,encode-svt-rs,encode-threading,target-quality,two-pass-butteraugli,two-pass-zensim,unsafe-asm,zenav1-aom,zenav1-aom-decode,zenav1-aom-encode,zenav1-svt
+# features: aom-backend,auto-tune,avx512,encode,encode-asm,encode-imazen,encode-mono,encode-svt-rs,encode-threading,routing-replay,target-quality,two-pass-butteraugli,two-pass-zensim,unsafe-asm,zenav1-aom,zenav1-aom-decode,zenav1-aom-encode,zenav1-svt
 # (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
 # Encodings: crate-name prefix stripped; auto traits collapse to a
 # count + exceptions; trait impls collapse to one roster line per
@@ -9,20 +9,21 @@
 
 ## summary
 #
-#   pub modules                                 9
-#   pub types (struct/enum/trait/alias)        79
-#   pub consts/statics                         37
-#   free functions                             47
-#   inherent methods                          179
-#   struct fields                             214
-#   enum variants                              68
-#   re-exports                                  4
-#   trait roster entries (type × trait)       185
-#   auto-trait-complete types                  51
-#   auto-trait exceptions                       4
+#   pub modules                                10
+#   pub types (struct/enum/trait/alias)        93
+#   pub consts/statics                         39
+#   free functions                             52
+#   inherent methods                          209
+#   struct fields                             237
+#   enum variants                              86
+#   re-exports                                  7
+#   trait roster entries (type × trait)       280
+#   auto-trait-complete types                  64
+#   auto-trait exceptions                       5
 #
 # per-module pub lines:
-#   (root)                          356
+#   (root)                          372
+#   backend_router                   80
 #   backend_tuner                   132
 #   fast_heads                       29
 #   heuristics                        1
@@ -32,10 +33,93 @@
 #   two_pass_zensim                  60
 #   zensim_c                         23
 
-## items (603 lines)
+## items (699 lines)
 
 pub use FRAME_HINTS_LIVE
 pub use SPATIAL_HINTS_LIVE
+pub mod backend_router
+pub use backend_router::SvtEnhancement
+pub use backend_router::SvtFilmGrainConfig
+pub use backend_router::SvtFilmGrainTable
+pub enum backend_router::BackendSelection
+pub backend_router::BackendSelection::Automatic
+pub backend_router::BackendSelection::Explicit(Av1Backend)
+pub enum backend_router::ParityReference
+pub backend_router::ParityReference::Hybrid3115
+pub backend_router::ParityReference::Mainline420
+#[non_exhaustive] pub enum backend_router::RouteCalibration
+pub backend_router::RouteCalibration::Unavailable
+#[non_exhaustive] pub enum backend_router::RouteReason
+pub backend_router::RouteReason::CapabilityFallback
+pub backend_router::RouteReason::ExplicitBackend
+pub backend_router::RouteReason::PreferredBackendSupported
+pub backend_router::RouteReason::StrictParity
+pub enum backend_router::StillInput
+pub backend_router::StillInput::Gray8
+pub backend_router::StillInput::Gray8::height: u32
+pub backend_router::StillInput::Gray8::width: u32
+pub backend_router::StillInput::Rgb16
+pub backend_router::StillInput::Rgb16::height: u32
+pub backend_router::StillInput::Rgb16::width: u32
+pub backend_router::StillInput::Rgb8
+pub backend_router::StillInput::Rgb8::height: u32
+pub backend_router::StillInput::Rgb8::width: u32
+pub backend_router::StillInput::Rgba16
+pub backend_router::StillInput::Rgba16::height: u32
+pub backend_router::StillInput::Rgba16::width: u32
+pub backend_router::StillInput::Rgba8
+pub backend_router::StillInput::Rgba8::height: u32
+pub backend_router::StillInput::Rgba8::width: u32
+pub fn backend_router::StillInput::is_monochrome(self) -> bool
+pub fn backend_router::StillInput::plan_input(self) -> PlanInput
+pub enum backend_router::StillPolicy
+pub backend_router::StillPolicy::SvtParity(backend_router::ParityReference)
+pub backend_router::StillPolicy::Zen
+#[non_exhaustive] pub enum backend_router::SuitabilityReport
+pub backend_router::SuitabilityReport::BackendUncalibrated
+pub backend_router::SuitabilityReport::NotExposedByBackend
+pub struct backend_router::BackendSupportReport
+pub backend_router::BackendSupportReport::backend: Av1Backend
+pub backend_router::BackendSupportReport::refusal: core::option::Option<alloc::string::String>
+pub backend_router::BackendSupportReport::suitability: core::option::Option<backend_router::SuitabilityReport>
+pub fn backend_router::BackendSupportReport::supported(&self) -> bool
+pub struct backend_router::Effort(_)
+pub fn backend_router::Effort::new(f32) -> core::result::Result<Self, backend_router::RouteError>
+pub const fn backend_router::Effort::value(self) -> f32
+pub struct backend_router::NativeSettings
+pub backend_router::NativeSettings::control: &'static str
+pub backend_router::NativeSettings::reference: core::option::Option<&'static str>
+pub backend_router::NativeSettings::value: i16
+pub struct backend_router::ResolvedRoute
+pub fn backend_router::ResolvedRoute::backend(&self) -> Av1Backend
+pub fn backend_router::ResolvedRoute::calibration(&self) -> backend_router::RouteCalibration
+pub fn backend_router::ResolvedRoute::config(&self) -> &EncoderConfig
+pub fn backend_router::ResolvedRoute::encode_gray8(&self, imgref::ImgRef<'_, u8>, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
+pub fn backend_router::ResolvedRoute::encode_rgb16(&self, imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u16>>, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
+pub fn backend_router::ResolvedRoute::encode_rgb8(&self, imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u8>>, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
+pub fn backend_router::ResolvedRoute::encode_rgba16(&self, imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u16>>, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
+pub fn backend_router::ResolvedRoute::encode_rgba8(&self, imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u8>>, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
+pub fn backend_router::ResolvedRoute::input(&self) -> PlanInput
+pub fn backend_router::ResolvedRoute::input_kind(&self) -> backend_router::StillInput
+pub fn backend_router::ResolvedRoute::reason(&self) -> backend_router::RouteReason
+pub fn backend_router::ResolvedRoute::reports(&self) -> &[backend_router::BackendSupportReport]
+pub fn backend_router::ResolvedRoute::request(&self) -> backend_router::RoutingRequest
+pub fn backend_router::ResolvedRoute::svt_enhancements(&self) -> svtav1_encoder::enhancements::ZenEnhancements
+pub const fn backend_router::ResolvedRoute::version(&self) -> u32
+pub fn backend_router::ResolvedRoute::cache_key(&self, &str, [u8; 32]) -> core::result::Result<[u8; 32], backend_router::RouteError>
+pub fn backend_router::ResolvedRoute::from_replay_json(&str, &str) -> core::result::Result<Self, backend_router::RouteError>
+pub fn backend_router::ResolvedRoute::to_replay_json(&self, &str) -> core::result::Result<alloc::string::String, backend_router::RouteError>
+pub fn backend_router::ResolvedRoute::primary_native_settings(&self) -> backend_router::NativeSettings
+pub struct backend_router::RouteError(pub alloc::string::String)
+#[non_exhaustive] pub struct backend_router::RoutingRequest
+pub backend_router::RoutingRequest::backend: backend_router::BackendSelection
+pub backend_router::RoutingRequest::effort: core::option::Option<backend_router::Effort>
+pub backend_router::RoutingRequest::policy: backend_router::StillPolicy
+pub fn backend_router::RoutingRequest::with_backend(self, backend_router::BackendSelection) -> Self
+pub fn backend_router::RoutingRequest::with_effort(self, backend_router::Effort) -> Self
+pub fn backend_router::RoutingRequest::with_policy(self, backend_router::StillPolicy) -> Self
+pub fn backend_router::RoutingRequest::with_svt_enhancement(self, svtav1_encoder::enhancements::ZenEnhancement) -> Self
+pub fn backend_router::query_still_backends(&EncoderConfig, impl core::convert::Into<backend_router::StillInput>) -> alloc::vec::Vec<backend_router::BackendSupportReport>
 pub mod backend_tuner
 pub mod backend_tuner::contract
 pub backend_tuner::contract::TuneHead::BytesLog
@@ -369,6 +453,7 @@ pub fn AutoTuneOptions::with_pareto_weight(self, f32) -> Self
 pub fn AutoTuneOptions::with_speed_range(self, core::ops::range::RangeInclusive<u8>) -> Self
 pub fn AutoTuneOptions::with_time_budget(self, core::time::Duration) -> Self
 pub struct AvifAnimationFrameEncoder
+pub fn AvifAnimationFrameEncoder::push_frame_ticks(&mut self, zenpixels::buffer::PixelSlice<'_>, u32, u32, core::option::Option<&dyn enough::Stop>) -> core::result::Result<(), whereat::at::At<zencodec::error::CodecError>>
 pub struct AvifDecoder
 pub fn AvifDecoder::decode(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<zenpixels::buffer::PixelBuffer>
 pub fn AvifDecoder::info(&self) -> &ImageInfo
@@ -434,7 +519,9 @@ pub EncodePlan::vaq_strength: f64
 #[non_exhaustive] pub struct EncodedAnimation
 pub EncodedAnimation::avif_file: alloc::vec::Vec<u8>
 pub EncodedAnimation::frame_count: usize
+pub EncodedAnimation::timescale: u32
 pub EncodedAnimation::total_duration_ms: u64
+pub EncodedAnimation::total_duration_ticks: u64
 pub struct EncodedImage
 pub EncodedImage::alpha_byte_size: usize
 pub EncodedImage::avif_file: alloc::vec::Vec<u8>
@@ -482,11 +569,14 @@ pub fn EncoderConfig::with_seg_boost(self, core::option::Option<f64>) -> Self
 pub fn EncoderConfig::with_segmentation_complex(self, core::option::Option<bool>) -> Self
 pub fn EncoderConfig::with_sgr_full(self, core::option::Option<bool>) -> Self
 pub fn EncoderConfig::with_still_image_tuning(self, bool) -> Self
+pub fn EncoderConfig::with_svt_film_grain(self, svtav1_encoder::film_grain_config::FilmGrainConfig) -> Self
 pub fn EncoderConfig::with_trellis(self, core::option::Option<bool>) -> Self
 pub fn EncoderConfig::with_vaq(self, bool, f64) -> Self
 pub fn EncoderConfig::xmp(self, alloc::vec::Vec<u8>) -> Self
 pub fn EncoderConfig::auto_tune(self, &[u8], u32, u32, QualityTarget, AutoTuneOptions, core::option::Option<&zenanalyze_api::Offer<'_>>) -> core::result::Result<Self, AutoTuneError>
 pub fn EncoderConfig::resolve_plan(&self, PlanInput) -> EncodePlan
+pub fn EncoderConfig::resolve_route(&self, backend_router::RoutingRequest, impl core::convert::Into<backend_router::StillInput>) -> core::result::Result<backend_router::ResolvedRoute, backend_router::RouteError>
+pub fn EncoderConfig::validate_still_input(&self, impl core::convert::Into<backend_router::StillInput>) -> core::result::Result<(), backend_router::RouteError>
 pub fn EncoderConfig::validate(&self) -> core::result::Result<(), ValidationError>
 pub fn EncoderConfig::validate_for_input(&self, PlanInput) -> core::result::Result<(), ValidationError>
 pub struct FastTierBudgets [also: fast_heads]
@@ -539,6 +629,9 @@ pub TargetedEncode::encoded: EncodedImage
 pub TargetedEncode::encodes: u8
 pub TargetedEncode::quality: f32
 pub TargetedEncode::score: f64
+pub struct TimedAnimationFrame<P: core::marker::Copy>
+pub TimedAnimationFrame::duration_ticks: u32
+pub TimedAnimationFrame::pixels: imgref::ImgVec<P>
 pub struct TuneRequest [also: backend_tuner]
 pub TuneRequest::allowed_backends: backend_tuner::AllowedBackends
 pub TuneRequest::has_alpha: bool
@@ -621,9 +714,13 @@ pub fn anchor_quantizer_for_zensim(f64) -> f64 [also: two_pass_zensim]
 pub fn anchor_zensim_for_quantizer(f64) -> f64 [also: two_pass_zensim]
 pub fn encode(&zenpixels::buffer::PixelBuffer) -> Result<EncodedImage>
 pub fn encode_animation_rgb16(&[AnimationFrame16], &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
+pub fn encode_animation_rgb16_timed(&[TimedAnimationFrame<rgb::RGB16>], u32, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
 pub fn encode_animation_rgb8(&[AnimationFrame], &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
+pub fn encode_animation_rgb8_timed(&[TimedAnimationFrame<rgb::RGB8>], u32, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
 pub fn encode_animation_rgba16(&[AnimationFrameRgba16], &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
+pub fn encode_animation_rgba16_timed(&[TimedAnimationFrame<rgb::RGBA16>], u32, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
 pub fn encode_animation_rgba8(&[AnimationFrameRgba], &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
+pub fn encode_animation_rgba8_timed(&[TimedAnimationFrame<rgb::RGBA8>], u32, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
 pub fn encode_gray8(imgref::ImgRef<'_, u8>, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
 pub fn encode_rgb16(imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u16>>, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
 pub fn encode_rgb16_with_target(imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u16>>, &EncoderConfig, TargetMetric, &TargetOptions, almost_enough::stop_token::StopToken) -> Result<TargetedEncode>
@@ -638,7 +735,7 @@ pub fn encode_rgba8_with_target(imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u8>>
 pub fn encode_with(&zenpixels::buffer::PixelBuffer, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
 pub fn quality_for_quantizer(u8) -> f32
 
-## trait impls (53 types)
+## trait impls (67 types)
 
 AnimationFrame: Clone
 AnimationFrame16: Clone
@@ -646,22 +743,22 @@ AnimationFrameRgba: Clone
 AnimationFrameRgba16: Clone
 AutoTuneError: Debug, Display, Error
 AutoTuneOptions: Clone, Debug, Default
-Av1Backend: Clone, Copy, Debug, Default, Eq, PartialEq
+Av1Backend: Clone, Copy, Debug, Default, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 AvifAnimationFrameEncoder: zencodec::traits::encoder::AnimationFrameEncoder
 AvifEncodeJob: zencodec::traits::encoding::EncodeJob
 AvifEncoder: zencodec::traits::encoder::Encoder
 AvifEncoderConfig: Clone, Debug, Default, zencodec::traits::encoding::EncoderConfig
-EncodeAlphaMode: Clone, Copy, Debug, Default, Eq, PartialEq
-EncodeBitDepth: Clone, Copy, Debug, Default, Eq, PartialEq
-EncodeChromaSubsampling: Clone, Copy, Debug, Default, Eq, PartialEq
-EncodeColorModel: Clone, Copy, Debug, Default, Eq, PartialEq
-EncodePixelRange: Clone, Copy, Debug, Default, Eq, PartialEq
+EncodeAlphaMode: Clone, Copy, Debug, Default, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+EncodeBitDepth: Clone, Copy, Debug, Default, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+EncodeChromaSubsampling: Clone, Copy, Debug, Default, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+EncodeColorModel: Clone, Copy, Debug, Default, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+EncodePixelRange: Clone, Copy, Debug, Default, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 EncodePlan: Clone, Debug, PartialEq
 EncodedAnimation: Clone
 EncodedImage: Clone, Debug
 EncoderConfig: Clone, Debug, Default
-GainMapConfig: Clone, Debug
-MasteringDisplayConfig: Clone, Copy, Debug
+GainMapConfig: Clone, Debug, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+MasteringDisplayConfig: Clone, Copy, Debug, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 PlanInput: Clone, Copy, Debug, Eq, PartialEq
 QualityTarget: Clone, Copy, Debug, PartialEq
 SpeedDerived: Clone, Copy, Debug, Eq, PartialEq
@@ -669,6 +766,20 @@ TargetMetric: Clone, Copy, Debug, PartialEq
 TargetOptions: Clone, Copy, Debug, Default
 TargetedEncode: Debug
 TilesResolution: Clone, Copy, Debug, Eq, PartialEq
+TimedAnimationFrame<P>: Clone
+backend_router::BackendSelection: Clone, Copy, Debug, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+backend_router::BackendSupportReport: Clone, Debug
+backend_router::Effort: Clone, Copy, Debug, PartialEq
+backend_router::NativeSettings: Clone, Copy, Debug, Eq, PartialEq
+backend_router::ParityReference: Clone, Copy, Debug, Default, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+backend_router::ResolvedRoute: Clone, Debug
+backend_router::RouteCalibration: Clone, Copy, Debug, Eq, PartialEq
+backend_router::RouteError: Clone, Debug, Display, Eq, Error, PartialEq
+backend_router::RouteReason: Clone, Copy, Debug, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+backend_router::RoutingRequest: Clone, Copy, Debug, Default
+backend_router::StillInput: Clone, Copy, Debug, Eq, From<PlanInput>, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+backend_router::StillPolicy: Clone, Copy, Debug, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+backend_router::SuitabilityReport: Clone, Copy, Debug, Eq, PartialEq
 backend_tuner::AllowedBackends: Clone, Copy, Debug, Default, Eq, PartialEq
 backend_tuner::AvifTune: Clone, Debug
 backend_tuner::AvifTuner: backend_tuner::AvifTuning
@@ -680,10 +791,10 @@ backend_tuner::contract::TuneHead: Clone, Copy, Debug, Eq, PartialEq
 backend_tuner::contract::TuneLayout: Clone, Copy, Debug, Default, Eq, PartialEq
 backend_tuner::stub::StubTuner: Clone, Copy, Debug, Default, backend_tuner::AvifTuning
 backend_tuner::stub::WallTimeModel: Clone, Copy, Debug, PartialEq
-fast_heads::FastTierBudgets: Clone, Copy, Debug, Default, Eq, PartialEq
-fast_heads::PartitionBudget: Clone, Copy, Debug, Default, Eq, PartialEq
-fast_heads::TxBudget: Clone, Copy, Debug, Default, Eq, PartialEq
-palette_gate::PalettePreference: Clone, Copy, Debug, Default, Eq, PartialEq
+fast_heads::FastTierBudgets: Clone, Copy, Debug, Default, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+fast_heads::PartitionBudget: Clone, Copy, Debug, Default, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+fast_heads::TxBudget: Clone, Copy, Debug, Default, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+palette_gate::PalettePreference: Clone, Copy, Debug, Default, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 two_pass::TwoPassEncode: Debug
 two_pass::TwoPassMetric: Clone, Copy, Debug, Default, Eq, PartialEq
 two_pass::TwoPassOptions: Clone, Debug, Default
@@ -696,8 +807,9 @@ zensim_c::ZensimC: Default
 
 ## auto traits
 
-51 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+64 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 AvifAnimationFrameEncoder: !RefUnwindSafe !UnwindSafe
 AvifEncodeJob: !RefUnwindSafe !UnwindSafe
 AvifEncoder: !RefUnwindSafe !UnwindSafe
+TimedAnimationFrame<P>: !RefUnwindSafe !Send !Sync !Unpin !UnwindSafe
 zensim_c::ZensimC: !RefUnwindSafe !UnwindSafe

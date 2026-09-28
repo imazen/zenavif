@@ -575,7 +575,10 @@ fn validate_agrees_with_the_encode_path() {
     // `aom_roundtrip_loss::the_support_query_agrees_with_the_encode_path`
     // checks that mechanically over the whole matrix.
     for (cfg, what) in [
-        (EncoderConfig::new().backend(Av1Backend::Zenav1Aom), "4:4:4 (the default)"),
+        (
+            EncoderConfig::new().backend(Av1Backend::Zenav1Aom),
+            "4:4:4 (the default)",
+        ),
         (
             aom_config()
                 .color_model(zenavif::EncodeColorModel::Rgb)
@@ -989,28 +992,22 @@ fn aom_backend_refuses_depths_it_does_not_code() {
     assert!(out.color_byte_size > 0, "and a colour item");
 }
 
-/// The zenravif and zenav1-svt backends refuse 12 bits by name rather than
-/// silently coding 10.
-///
-/// `ravif::BitDepth` has no 12-bit representation, so without
-/// `reject_unspellable_coded_depth` the zenravif path would code 10 and report
-/// success — wrong pixels reported as an Ok.
+/// Both native backends now signal the requested 12-bit stream.
 #[test]
-fn other_backends_refuse_12_bit_rather_than_coding_10() {
+fn zenravif_also_codes_twelve_bits_without_narrowing() {
     let img = gradient_rgb8(64, 64);
-    let e = zenavif::encode_rgb8(
+    let output = zenavif::encode_rgb8(
         img.as_ref(),
         &EncoderConfig::new()
+            .speed(10)
             .chroma_subsampling(EncodeChromaSubsampling::Yuv420)
             .bit_depth(zenavif::EncodeBitDepth::Twelve),
         stop(),
     )
-    .expect_err("the zenravif backend must refuse 12-bit");
-    let msg = format!("{e}");
-    assert!(
-        msg.contains("Zenav1Aom") && msg.contains("8 and 10 bits only"),
-        "the zenravif 12-bit refusal must name the limit and the backend that has it, got: {msg}"
-    );
+    .unwrap();
+    let parser = zenavif_parse::AvifParser::from_bytes(&output.avif_file).unwrap();
+    assert_eq!(parser.av1_config().unwrap().bit_depth, 12);
+    assert_eq!(parser.av1_config().unwrap().profile, 2);
 }
 
 /// A high-bit-depth AVIF also decodes correctly **through the container** —
@@ -1204,7 +1201,8 @@ fn aom_bd8_output_is_unchanged_by_the_hbd_wiring() {
         payload.len()
     );
     assert_eq!(
-        payload_digest, BD8_PAYLOAD_ANCHOR_FNV1A,
+        payload_digest,
+        BD8_PAYLOAD_ANCHOR_FNV1A,
         "the 8-bit AV1 PAYLOAD changed ({} bytes). This is the encoder, not the muxer — \
          a container-only change leaves this hash alone.",
         payload.len()

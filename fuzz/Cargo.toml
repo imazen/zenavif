@@ -25,6 +25,10 @@ zenpixels = ">=0.2.16, <0.4.0"
 path = ".."
 
 [patch.crates-io]
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "633f71e9d0c8fc82cc29b58ffaa92d367d82f9f9" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "2031094449ad1177ff96461d7c4d586c7ed384e6" }
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "cabe3d06e8d31911bed3964d836aefc170bff1e8" }
+zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "cabe3d06e8d31911bed3964d836aefc170bff1e8" }
 # fuzz/ is its own workspace root, so the root [patch] does not reach it.
 # zenavif-parse needs no mirror: zenavif's dep on it is a path dep into the
 # workspace (zenavif-parse/), which resolves transitively from here.
@@ -32,7 +36,7 @@ path = ".."
 # the #524 loop-filter H-window fix). Keep it in lockstep with the root
 # manifest's `rev` — the reasoning for the current one lives there. Drop at
 # the rav1d-safe 0.6.0 release.
-rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "e73811f5d4dad81b75195ca18554fd8a5df19515" }
+rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "dfd01e3268f6e8da862d2d5f0a71d19f414f2b87" }
 
 [[bin]]
 name = "fuzz_decode"

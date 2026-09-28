@@ -96,7 +96,7 @@ fn animation_color_settings_survive_public_dispatch_and_depth_conversion() {
             EncodePixelRange::Full,
         ),
     ] {
-        for depth in [8, 10] {
+        for depth in [8, 10, 12] {
             let config = EncoderConfig::new()
                 .backend(Av1Backend::Zenravif)
                 .speed(10)
@@ -107,6 +107,8 @@ fn animation_color_settings_survive_public_dispatch_and_depth_conversion() {
                 .pixel_range(range)
                 .bit_depth(if depth == 8 {
                     EncodeBitDepth::Eight
+                } else if depth == 12 {
+                    EncodeBitDepth::Twelve
                 } else {
                     EncodeBitDepth::Ten
                 });
@@ -133,7 +135,12 @@ fn animation_color_settings_survive_public_dispatch_and_depth_conversion() {
                         cfg.chroma_subsampling_x,
                         cfg.chroma_subsampling_y
                     ),
-                    (1 - subsampled, depth, subsampled, subsampled)
+                    (
+                        if depth == 12 { 2 } else { 1 - subsampled },
+                        depth,
+                        subsampled,
+                        subsampled
+                    )
                 );
                 for color in [parser.nclx_color_info(), parser.animation_nclx_color_info()] {
                     let Some(zenavif_parse::ColorInformation::Nclx {
@@ -169,7 +176,9 @@ fn animation_color_settings_survive_public_dispatch_and_depth_conversion() {
                         if depth == 8 {
                             vec![v]
                         } else {
-                            ((u16::from(v) * 257) >> 6).to_le_bytes().to_vec()
+                            ((u16::from(v) * 257) >> (16 - depth))
+                                .to_le_bytes()
+                                .to_vec()
                         }
                     };
                     if name == "rgb" {

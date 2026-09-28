@@ -6,26 +6,26 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenavif-parse.txt 228 lines (supported surface) | zenavif-parse.features.txt 61 added (features: c_api,eager,zencodec) | zenavif-parse.internal.txt 33 lines (33 hidden + 0 excluded-feature)
+# files: zenavif-parse.txt 258 lines (supported surface) | zenavif-parse.features.txt 66 added (features: c_api,eager,zencodec) | zenavif-parse.internal.txt 39 lines (39 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 1
-#   pub types (struct/enum/trait/alias)        29
+#   pub types (struct/enum/trait/alias)        32
 #   pub consts/statics                          3
 #   free functions                              1
-#   inherent methods                           52
-#   struct fields                              96
+#   inherent methods                           59
+#   struct fields                             113
 #   enum variants                              10
 #   re-exports                                  3
-#   trait roster entries (type × trait)       120
-#   auto-trait-complete types                  27
+#   trait roster entries (type × trait)       137
+#   auto-trait-complete types                  30
 #   auto-trait exceptions                       1
 #
 # per-module pub lines:
-#   (root)                          195
+#   (root)                          222
 
-## items (195 lines)
+## items (222 lines)
 
 pub mod zenavif_parse
 pub use Stop
@@ -62,22 +62,42 @@ pub AV1LayeredImageIndexing::layer_sizes: [u32; 3]
 pub AV1Metadata::base_q_idx: core::option::Option<u8>
 pub AV1Metadata::bit_depth: u8
 pub AV1Metadata::chroma_subsampling: ChromaSubsampling
+pub AV1Metadata::color_primaries: u8
+pub AV1Metadata::full_range: bool
 pub AV1Metadata::lossless: core::option::Option<bool>
+pub AV1Metadata::matrix_coefficients: u8
 pub AV1Metadata::max_frame_height: core::num::nonzero::NonZeroU32
 pub AV1Metadata::max_frame_width: core::num::nonzero::NonZeroU32
 pub AV1Metadata::monochrome: bool
 pub AV1Metadata::seq_profile: u8
 pub AV1Metadata::still_picture: bool
+pub AV1Metadata::transfer_characteristics: u8
 pub fn AV1Metadata::parse_av1_bitstream(&[u8]) -> Result<Self>
 pub struct AmbientViewingEnvironment
 pub AmbientViewingEnvironment::ambient_illuminance: u32
 pub AmbientViewingEnvironment::ambient_light_x: u16
 pub AmbientViewingEnvironment::ambient_light_y: u16
+pub struct AnimationFrameTiming
+pub AnimationFrameTiming::duration_in_timescales: u32
+pub AnimationFrameTiming::pts_in_timescales: u64
+pub AnimationFrameTiming::timescale: u32
+pub struct AnimationHdrMetadata
+pub AnimationHdrMetadata::ambient_viewing: core::option::Option<AmbientViewingEnvironment>
+pub AnimationHdrMetadata::content_colour_volume: core::option::Option<ContentColourVolume>
+pub AnimationHdrMetadata::content_light_level: core::option::Option<ContentLightLevel>
+pub AnimationHdrMetadata::mastering_display: core::option::Option<MasteringDisplayColourVolume>
 pub struct AnimationInfo
 pub AnimationInfo::frame_count: usize
 pub AnimationInfo::has_alpha: bool
-pub AnimationInfo::loop_count: u32
+pub AnimationInfo::hdr: AnimationHdrMetadata
+pub AnimationInfo::loop_count: u64
+pub AnimationInfo::spatial: AnimationSpatialMetadata
 pub AnimationInfo::timescale: u32
+pub struct AnimationSpatialMetadata
+pub AnimationSpatialMetadata::clean_aperture: core::option::Option<CleanAperture>
+pub AnimationSpatialMetadata::mirror: core::option::Option<ImageMirror>
+pub AnimationSpatialMetadata::pixel_aspect_ratio: core::option::Option<PixelAspectRatio>
+pub AnimationSpatialMetadata::rotation: core::option::Option<ImageRotation>
 pub struct AvifDepthMap
 pub AvifDepthMap::av1_config: core::option::Option<AV1Config>
 pub AvifDepthMap::color_info: core::option::Option<ColorInformation>
@@ -92,7 +112,12 @@ pub struct AvifParser<'data>
 pub fn AvifParser<'data>::alpha_data(&self) -> core::option::Option<Result<alloc::borrow::Cow<'_, [u8]>>>
 pub fn AvifParser<'data>::alpha_metadata(&self) -> core::option::Option<Result<AV1Metadata>>
 pub fn AvifParser<'data>::ambient_viewing(&self) -> core::option::Option<&AmbientViewingEnvironment>
+pub fn AvifParser<'data>::animation_color_info(&self) -> core::option::Option<&ColorInformation>
+pub fn AvifParser<'data>::animation_exif(&self) -> core::option::Option<Result<alloc::borrow::Cow<'_, [u8]>>>
 pub fn AvifParser<'data>::animation_info(&self) -> core::option::Option<AnimationInfo>
+pub fn AvifParser<'data>::animation_nclx_color_info(&self) -> core::option::Option<&ColorInformation>
+pub fn AvifParser<'data>::animation_premultiplied_alpha(&self) -> core::option::Option<bool>
+pub fn AvifParser<'data>::animation_xmp(&self) -> core::option::Option<Result<alloc::borrow::Cow<'_, [u8]>>>
 pub fn AvifParser<'data>::av1_config(&self) -> core::option::Option<&AV1Config>
 pub fn AvifParser<'data>::clean_aperture(&self) -> core::option::Option<&CleanAperture>
 pub fn AvifParser<'data>::color_info(&self) -> core::option::Option<&ColorInformation>
@@ -103,6 +128,7 @@ pub fn AvifParser<'data>::depth_map(&self) -> core::option::Option<Result<AvifDe
 pub fn AvifParser<'data>::depth_map_data(&self) -> core::option::Option<Result<alloc::borrow::Cow<'_, [u8]>>>
 pub fn AvifParser<'data>::exif(&self) -> core::option::Option<Result<alloc::borrow::Cow<'_, [u8]>>>
 pub fn AvifParser<'data>::frame(&self, usize) -> Result<FrameRef<'_>>
+pub fn AvifParser<'data>::frame_timing(&self, usize) -> Result<AnimationFrameTiming>
 pub fn AvifParser<'data>::frames(&self) -> FrameIterator<'_>
 pub fn AvifParser<'data>::from_bytes(&'data [u8]) -> Result<Self>
 pub fn AvifParser<'data>::from_bytes_with_config(&'data [u8], &DecodeConfig, &dyn enough::Stop) -> Result<Self>
@@ -123,6 +149,7 @@ pub fn AvifParser<'data>::layered_image_indexing(&self) -> core::option::Option<
 pub fn AvifParser<'data>::major_brand(&self) -> &[u8; 4]
 pub fn AvifParser<'data>::mastering_display(&self) -> core::option::Option<&MasteringDisplayColourVolume>
 pub fn AvifParser<'data>::mirror(&self) -> core::option::Option<&ImageMirror>
+pub fn AvifParser<'data>::nclx_color_info(&self) -> core::option::Option<&ColorInformation>
 pub fn AvifParser<'data>::operating_point(&self) -> core::option::Option<&OperatingPointSelector>
 pub fn AvifParser<'data>::pixel_aspect_ratio(&self) -> core::option::Option<&PixelAspectRatio>
 pub fn AvifParser<'data>::premultiplied_alpha(&self) -> bool
@@ -223,14 +250,17 @@ pub PixelAspectRatio::h_spacing: u32
 pub PixelAspectRatio::v_spacing: u32
 pub type Result<T, E> = core::result::Result<T, E>
 
-## trait impls (31 types)
+## trait impls (34 types)
 
 (bool, bool): From<ChromaSubsampling>
 AV1Config: Clone, Debug, Eq, PartialEq
 AV1LayeredImageIndexing: Clone, Copy, Debug, Eq, PartialEq
 AV1Metadata: Clone, Debug
 AmbientViewingEnvironment: Clone, Copy, Debug, Eq, PartialEq
+AnimationFrameTiming: Clone, Copy, Debug, Eq, PartialEq
+AnimationHdrMetadata: Clone, Copy, Debug, Default, Eq, PartialEq
 AnimationInfo: Clone, Copy, Debug
+AnimationSpatialMetadata: Clone, Copy, Debug, Default, Eq, PartialEq
 AvifDepthMap: Clone, Debug
 AvifGainMap: Clone, Debug
 ChromaSubsampling: Clone, Copy, Debug, Eq, From<(bool, bool)>, PartialEq
@@ -259,5 +289,5 @@ zencodec::gainmap::GainMapParams: From<&GainMapMetadata>
 
 ## auto traits
 
-27 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+30 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 Error: !RefUnwindSafe !UnwindSafe

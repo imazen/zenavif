@@ -152,10 +152,9 @@ fn query_one(
     let depth = candidate.coded_bit_depth_bits(input.input_is_16bit);
     match backend {
         Av1Backend::Zenravif => {
-            // zenravif exposes 8/10, even though its zenrav1e backend also
-            // handles 12-bit raw planes. Query the actual consumer envelope.
-            if !matches!(depth, 8 | 10) {
-                return Err("zenravif's pixel API codes only 8 and 10 bits".into());
+            // The pinned zenravif exposes all three AV1 integer depths.
+            if !matches!(depth, 8 | 10 | 12) {
+                return Err("zenravif's pixel API requires 8, 10 or 12 bits".into());
             }
             Ok(SuitabilityReport::NotExposedByBackend)
         }

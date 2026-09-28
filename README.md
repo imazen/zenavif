@@ -266,9 +266,19 @@ The encoder matches output bit depth to input type by default:
 - `encode_rgb8` / `encode_rgba8` → 8-bit AV1
 - `encode_rgb16` / `encode_rgba16` → 10-bit AV1
 
-Override with `.bit_depth(EncodeBitDepth::Ten)` if you want 10-bit output
-from 8-bit input (slightly better quality at the cost of larger files and
-wider decoder compatibility requirements).
+Override with `.bit_depth(EncodeBitDepth::Ten)` or
+`.bit_depth(EncodeBitDepth::Twelve)` for explicit 10/12-bit native output,
+including RGB/RGBA animation. Twelve-bit output uses AV1 profile 2; SVT
+still rejects this depth. Packed RGB16 input/output spans 0..65535; the
+encoder scales it to the requested coded precision, including low code bits.
+
+The zencodec animation adapter preserves exact rational frame durations and
+source color interpretation. Admission rejects incompatible dimensions,
+precision/color changes, unknown color without a profile, and cumulative
+resource-limit violations before retaining the new frame. Input frames and
+compressed output remain buffered. Job cancellation remains attached to an
+animation decoder, and borrowed finish cancellation reaches native zenravif
+work. Skipped decode frames count toward limits and retain their source index.
 
 ### Decoder output depth
 

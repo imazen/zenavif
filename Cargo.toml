@@ -95,7 +95,7 @@ rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8",
 #    (rav1d-safe#423). zenavif calls `flush()` at end of input in
 #    `decode_av1.rs` and `decoder_managed/decoder.rs`.
 # Film-grain row reservations: ARM 83fa5d3e and x86 c2a7dfd7, audited at e73811f5.
-rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "e73811f5d4dad81b75195ca18554fd8a5df19515", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
+rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "dfd01e3268f6e8da862d2d5f0a71d19f414f2b87", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
 # zenav1-aom pure-Rust AV1 KEY-frame decoder — second decode backend (feature
 # `zenav1-aom`). Git-rev pinned to imazen/zenav1-aom main (crate unpublished;
 # intra decode is conformance-clean vs libaom v3.14.1 at this rev). This rev
@@ -204,7 +204,7 @@ log = "0.4.29"
 # 2026-09-07: 176ad8ee corrects the fast-preset intra-mode budget after
 # matched-quality corpus verification, retaining the verified animation and
 # alpha corrections. See benchmarks/quality_drift_2026-09-07/README.md.
-ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/imazen/cavif-rs", rev = "7f55b540fdf40ee9b37a7060c8d327747e842345", default-features = false, optional = true, features = ["stop"] }
+ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/imazen/cavif-rs", rev = "aac04acc5295b581eac7234ed96bac1553ce51e2", default-features = false, optional = true, features = ["stop"] }
 # zenav1-svt experimental AV1 encode backend (`zenav1-svt` feature).
 # The facade crate lives in the rust/svtav1 subdir of imazen/zenav1-svt and is
 # PACKAGED as `zenav1-svt`; the `svtav1` alias keeps the seam's `use` paths
@@ -323,16 +323,16 @@ fast-ssim2 = { version = "0.8.0", optional = true, features = ["imgref", "rayon"
 # gated on `custom-profiles` and whose fused entry needs BOTH. Neither
 # feature changes the v1 372-feature extraction that profile `B` scores
 # through, so `TargetMetric::Zensim` is byte-unaffected.
-zensim = { git = "https://github.com/imazen/zensim", rev = "8462c824042b843dc48877fce0f04dd0522ea827", optional = true, features = ["imgref", "zenpixels", "feature-regime-v2", "custom-profiles"] }
+zensim = { git = "https://github.com/imazen/zensim", rev = "8557758809156baba7364bd8cfe32889a61da4e8", optional = true, features = ["imgref", "zenpixels", "feature-regime-v2", "custom-profiles"] }
 # Optional two-pass diffmap dep — butteraugli per-pixel error map drives the
 # per-SB quantizer-scale second pass (`two-pass-butteraugli` feature).
 butteraugli = { version = "0.9.3", optional = true }
 # Optional auto-tune deps — gated on `auto-tune` feature, off by default.
-# Path-pinned to the sibling checkout (CI clones ../zenanalyze); reqs track the
+# Git-pinned to the audited zenanalyze revision; version requirements track the
 # sibling's 0.2.0 — crates.io still has 0.1.0/0.1.x, so a registry release of
 # zenavif needs zenanalyze/zenpredict published first.
-zenpredict = { version = "0.2.0", path = "../zenanalyze/zenpredict", optional = true }
-zenanalyze = { version = "0.2.0", path = "../zenanalyze", optional = true, features = ["experimental"] }
+zenpredict = { version = "0.2.0", git = "https://github.com/imazen/zenanalyze", rev = "6bbcacb11313923ded6e5eeebb725878c5736453", optional = true }
+zenanalyze = { version = "0.2.0", git = "https://github.com/imazen/zenanalyze", rev = "6bbcacb11313923ded6e5eeebb725878c5736453", optional = true, features = ["experimental"] }
 # zenanalyze-api: the zero-dep, version-unifying feature contract (Request /
 # Offer / FeatureProvider) the auto-tuner negotiates a shared feature pass with,
 # and this crate's INTERCHANGE BOUNDARY — so a host on any zenanalyze version can
@@ -360,7 +360,7 @@ zencodec = { version = ">=0.1.26, <0.3.0" }
 # Gain-map application math for GainMapRender::ReconstructHdr (decode-side
 # HDR reconstruction). Pure math, no codec engines. Used unconditionally by the
 # (now always-built) `codec` module, so it is a hard dep too.
-ultrahdr-core = { version = "0.5.0", default-features = false }
+ultrahdr-core = { version = "0.6.0", default-features = false }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 zenpixels = { version = ">=0.2.16, <0.4.0", default-features = false, features = ["imgref", "rgb"] }
 zenpixels-convert = { version = ">=0.2.16, <0.4.0", default-features = false, features = ["rgb", "hdr-experimental"] }
@@ -369,7 +369,7 @@ linear-srgb = { version = "0.6.7"}
 [dev-dependencies]
 anyhow = "1"
 sha2 = "0.11.0"
-zensim-target = { git = "https://github.com/imazen/zensim", rev = "8462c824042b843dc48877fce0f04dd0522ea827", default-features = false, features = ["native-probe"] }
+zensim-target = { git = "https://github.com/imazen/zensim", rev = "8557758809156baba7364bd8cfe32889a61da4e8", default-features = false, features = ["native-probe"] }
 # Exact predictor owner required by zensim::BakeScorer; the optional auto-tune
 # predictor has a separate existing source and is not used for candidate scoring.
 zenpredict-serving = { package = "zenpredict", version = "0.2.0", git = "https://github.com/imazen/zenanalyze", rev = "05de3cbc44b19d8769077d99710b0146c761d6df" }
@@ -389,7 +389,7 @@ zenutils-fuzz = "0.1.0"
 # canonical ZNPR v3 serializer — hand-emitting the wire format is banned, so
 # the test uses the real one rather than a fixture blob checked into git.
 # Same sibling checkout the `auto-tune` deps already require.
-zenpredict-bake = { path = "../zenanalyze/zenpredict-bake" }
+zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "6bbcacb11313923ded6e5eeebb725878c5736453" }
 # `testable_dispatch` is what lets a test disable a token that the target
 # baseline guarantees at COMPILE time (NEON on aarch64, SSE2 on x86-64):
 # without it `incant!` can never fall below the host's best tier and the
@@ -403,12 +403,12 @@ png = "0.18.0"
 image = "0.25.10"
 zenbench = { version = "0.1.2", features = ["criterion-compat"] }
 fast-ssim2 = { version = "0.8.0", features = ["imgref"] }
-zensim = { git = "https://github.com/imazen/zensim", rev = "8462c824042b843dc48877fce0f04dd0522ea827", features = ["imgref", "zenpixels", "feature-regime-v2", "custom-profiles"] }
+zensim = { git = "https://github.com/imazen/zensim", rev = "8557758809156baba7364bd8cfe32889a61da4e8", features = ["imgref", "zenpixels", "feature-regime-v2", "custom-profiles"] }
 # zensim-regress must track the SAME zensim as the dependency above, or the
 # `Zensim` / `ImageSource` types in tests/linku_corpus.rs come from two
 # different zensim crates and don't unify. Registry 0.3.1 depends on zensim
 # 0.2.x; git `main` (0.4.0) depends on 0.3.0. Unpin together at the publish.
-zensim-regress = { git = "https://github.com/imazen/zensim", rev = "8462c824042b843dc48877fce0f04dd0522ea827" }
+zensim-regress = { git = "https://github.com/imazen/zensim", rev = "8557758809156baba7364bd8cfe32889a61da4e8" }
 # NOTE (merge of origin/main, 2026-08-11): main carried a second, RENAMED
 # `zensim03` path dep so the `zensim_cq_rd` harness could reach 0.3.0's
 # `ZensimProfile::C` while the main dep stayed pinned to registry 0.2.4.
@@ -421,7 +421,7 @@ rayon = "1.11.0"
 # Feature extraction for the rav1e knob predictor MLP training.
 # Path-pinned to the sibling checkout (see the [dependencies] note above);
 # test-only dep for the rav1e picker training.
-zenanalyze = { version = "0.2.0", path = "../zenanalyze", features = ["experimental"] }
+zenanalyze = { version = "0.2.0", git = "https://github.com/imazen/zenanalyze", rev = "6bbcacb11313923ded6e5eeebb725878c5736453", features = ["experimental"] }
 # Parses `cargo metadata` in tests/public_api_doc.rs (feature-list discovery).
 serde_json = "1.0.150"
 # Crafted-container regressions (tests/sweep_40_geometry.rs) mux mismatched
@@ -734,6 +734,12 @@ name = "decode_backend_bench"
 required-features = ["encode", "zenav1-aom"]
 
 [patch.crates-io]
+zenpng = { git = "https://github.com/imazen/zenpng", rev = "70d320e31c5c0f9d71a052c6ccb19616dfb302bb" }
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "633f71e9d0c8fc82cc29b58ffaa92d367d82f9f9" }
+# Coordinated exact animation timing; unify shared types with the native media stack.
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "2031094449ad1177ff96461d7c4d586c7ed384e6" }
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "cabe3d06e8d31911bed3964d836aefc170bff1e8" }
+zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "cabe3d06e8d31911bed3964d836aefc170bff1e8" }
 # The zenanalyze-api additions this crate's graph needs (FeatureProvider,
 # Select::Names) are on `main` but not yet on crates.io. ONE patch, here at the
 # workspace root, rewrites every registry edge — including the ones inside
@@ -741,7 +747,7 @@ required-features = ["encode", "zenav1-aom"]
 # and `Offer` typechecks across the picker boundary. Never re-pin this as a
 # per-manifest git rev: that is what split the ecosystem before. Drop the entry
 # at the zenanalyze-api 0.1.1 publish.
-zenanalyze-api = { git = "https://github.com/imazen/zenanalyze" }
+zenanalyze-api = { git = "https://github.com/imazen/zenanalyze", rev = "6bbcacb11313923ded6e5eeebb725878c5736453" }
 # Workspace member supplies zenavif-serialize 0.2.0 (set_gain_map_alt_icc) to
 # this crate's own registry requirements (the optional `zenav1-svt` dep and
 # the dev-dep) — 0.2.0 is unpublished. Drop at the zenavif-serialize 0.2.0
