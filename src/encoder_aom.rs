@@ -441,13 +441,8 @@ pub(crate) fn key_frame_config(
             EncodeChromaSubsampling::Yuv420 => (1, 1),
         }
     };
-    // `#[non_exhaustive]` upstream — build from `allintra_speed0` and mutate.
-    // That constructor's defaults differ from this seam's on two fields:
-    // `enable_restoration` (aomenc's ALLINTRA default is ON; the constructor
-    // leaves it off) and `enable_palette`/`enable_intrabc` (ON upstream, the
-    // aomenc defaults — kept: they are gated on the screen-content decision,
-    // so they stay inert on photographic content, and real aomenc has them
-    // set for ALLINTRA too).
+    // The upstream constructor is non-exhaustive; preserve this seam's
+    // pre-cancellation tool settings explicitly below.
     let mut cfg = aom_encode::key_frame::KeyFrameConfig::allintra_speed0(
         width,
         height,
@@ -472,6 +467,10 @@ pub(crate) fn key_frame_config(
     // are byte-gated upstream at every speed in this combination.
     cfg.enable_cdef = false;
     cfg.enable_restoration = true;
+    // The previous dependency revision did not search either screen tool.
+    // Cancellation plumbing must not silently enable additional RD searches.
+    cfg.enable_palette = false;
+    cfg.enable_intrabc = false;
     // The CICP description + range. `full_range` is now CONFIGURATION
     // upstream (`ColorDescription`), so a full-range still is codable
     // instead of refused; the CICP triple stays "unspecified" because the
@@ -1339,7 +1338,7 @@ pub(crate) fn encode_gray8_aom(
     let payload = encode_key_frame_checked(
         aom_encode::key_frame::KeyFramePlanes::new(&y, &[], &[]),
         &cfg,
-        stop,
+        &stop,
     )?;
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
@@ -1361,4 +1360,18 @@ pub(crate) fn encode_gray8_aom(
         cfg.color.full_range,
         None,
     )
+}
+
+#[cfg(test)]
+mod cancellation_config_tests {
+    #[test]
+    fn cancellation_update_preserves_screen_search_defaults() {
+        let config = crate::EncoderConfig::new();
+        for speed in [0, 5, 10] {
+            let config = config.clone().speed(speed);
+            let cfg = super::key_frame_config(&config, 64, 64, 8, false);
+            assert!(!cfg.enable_palette);
+            assert!(!cfg.enable_intrabc);
+        }
+    }
 }
