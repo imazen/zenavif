@@ -102,7 +102,11 @@ fn to_rgba8(src: ImgRef<'_, Rgba<u16>>) -> ImgVec<Rgba<u8>> {
 fn to_rgb8(src: ImgRef<'_, Rgba<u16>>) -> ImgVec<Rgb<u8>> {
     Img::new(
         src.pixels()
-            .map(|p| Rgb { r: (p.r >> 8) as u8, g: (p.g >> 8) as u8, b: (p.b >> 8) as u8 })
+            .map(|p| Rgb {
+                r: (p.r >> 8) as u8,
+                g: (p.g >> 8) as u8,
+                b: (p.b >> 8) as u8,
+            })
             .collect::<Vec<_>>(),
         src.width(),
         src.height(),
@@ -111,7 +115,13 @@ fn to_rgb8(src: ImgRef<'_, Rgba<u16>>) -> ImgVec<Rgb<u8>> {
 
 fn to_rgb16(src: ImgRef<'_, Rgba<u16>>) -> ImgVec<Rgb<u16>> {
     Img::new(
-        src.pixels().map(|p| Rgb { r: p.r, g: p.g, b: p.b }).collect::<Vec<_>>(),
+        src.pixels()
+            .map(|p| Rgb {
+                r: p.r,
+                g: p.g,
+                b: p.b,
+            })
+            .collect::<Vec<_>>(),
         src.width(),
         src.height(),
     )
@@ -151,14 +161,17 @@ fn measure_rgb8(src: ImgRef<'_, Rgb<u8>>, avif: &[u8], label: &str) -> Loss {
     let score = check_regression(&zensim, &ss, &got, &tol)
         .map(|r| r.score())
         .unwrap_or(f64::NAN);
-    Loss { max, mean: sum as f64 / (src.width() * src.height() * 3) as f64, zensim: score }
+    Loss {
+        max,
+        mean: sum as f64 / (src.width() * src.height() * 3) as f64,
+        zensim: score,
+    }
 }
 
 /// Compare a decoded 16-bit RGB result against the 16-bit source, reported in
 /// the CODED depth's units so the number is comparable across depths.
 fn measure_rgb16(src: ImgRef<'_, Rgb<u16>>, avif: &[u8], depth: u32, label: &str) -> Loss {
-    let dec = zenavif::decode(avif)
-        .unwrap_or_else(|e| panic!("{label}: must decode: {e}"));
+    let dec = zenavif::decode(avif).unwrap_or_else(|e| panic!("{label}: must decode: {e}"));
     let got = dec
         .try_as_imgref::<Rgb<u16>>()
         .unwrap_or_else(|| panic!("{label}: expected 16-bit RGB back"));
@@ -177,7 +190,6 @@ fn measure_rgb16(src: ImgRef<'_, Rgb<u16>>, avif: &[u8], depth: u32, label: &str
         zensim: f64::NAN,
     }
 }
-
 
 /// Colour error for an image that carries alpha: the decode comes back as
 /// RGBA, so `measure_rgb8` cannot read it. Compares the three colour channels
@@ -214,7 +226,11 @@ fn measure_rgba(
     } else {
         panic!("{label}: expected RGBA back");
     }
-    Loss { max, mean: sum as f64 / n, zensim: f64::NAN }
+    Loss {
+        max,
+        mean: sum as f64 / n,
+        zensim: f64::NAN,
+    }
 }
 
 /// **Does the SUPPORT QUERY tell the truth?**
@@ -238,14 +254,26 @@ fn the_support_query_agrees_with_the_encode_path() {
 
     let mut checked = 0usize;
     let mut disagreements = Vec::new();
-    for chroma in [EncodeChromaSubsampling::Yuv444, EncodeChromaSubsampling::Yuv420] {
-        for range in [None, Some(EncodePixelRange::Full), Some(EncodePixelRange::Limited)] {
+    for chroma in [
+        EncodeChromaSubsampling::Yuv444,
+        EncodeChromaSubsampling::Yuv420,
+    ] {
+        for range in [
+            None,
+            Some(EncodePixelRange::Full),
+            Some(EncodePixelRange::Limited),
+        ] {
             for model in [EncodeColorModel::YCbCr, EncodeColorModel::Rgb] {
-                for depth in
-                    [EncodeBitDepth::Eight, EncodeBitDepth::Ten, EncodeBitDepth::Twelve]
-                {
-                    let mut cfg =
-                        base().quality(90.0).chroma_subsampling(chroma).color_model(model).bit_depth(depth);
+                for depth in [
+                    EncodeBitDepth::Eight,
+                    EncodeBitDepth::Ten,
+                    EncodeBitDepth::Twelve,
+                ] {
+                    let mut cfg = base()
+                        .quality(90.0)
+                        .chroma_subsampling(chroma)
+                        .color_model(model)
+                        .bit_depth(depth);
                     if let Some(r) = range {
                         cfg = cfg.pixel_range(r);
                     }
@@ -256,9 +284,8 @@ fn the_support_query_agrees_with_the_encode_path() {
                     let does = zenavif::encode_rgb8(rgb8.as_ref(), &cfg, stop()).is_ok();
                     checked += 1;
                     if says != does {
-                        disagreements.push(format!(
-                            "rgb8 {label}: validate()={says} but encode={does}"
-                        ));
+                        disagreements
+                            .push(format!("rgb8 {label}: validate()={says} but encode={does}"));
                     }
 
                     // (b) config x input query vs the RGBA encode -- the arm
@@ -293,7 +320,10 @@ fn the_support_query_agrees_with_the_encode_path() {
         .chroma_subsampling(EncodeChromaSubsampling::Yuv420)
         .validate()
         .is_err();
-    assert!(all_ok && refused, "the matrix must span supported AND refused configurations");
+    assert!(
+        all_ok && refused,
+        "the matrix must span supported AND refused configurations"
+    );
 }
 
 /// **The THIRD query surface: `backend_router::query_still_backends`.**
@@ -319,7 +349,10 @@ fn the_router_query_agrees_with_the_encode_path() {
     let mut checked = 0usize;
     let mut disagreements = Vec::new();
     let mut refusals = 0usize;
-    for chroma in [EncodeChromaSubsampling::Yuv444, EncodeChromaSubsampling::Yuv420] {
+    for chroma in [
+        EncodeChromaSubsampling::Yuv444,
+        EncodeChromaSubsampling::Yuv420,
+    ] {
         for model in [EncodeColorModel::YCbCr, EncodeColorModel::Rgb] {
             for range in [None, Some(EncodePixelRange::Full)] {
                 // `None` is the caller who does not care; 6 is what the muxer
@@ -462,10 +495,21 @@ fn the_container_agrees_with_the_payload_on_every_format() {
 
     let mut checked = 0usize;
     let mut alpha_cells = 0usize;
-    for chroma in [EncodeChromaSubsampling::Yuv444, EncodeChromaSubsampling::Yuv420] {
+    for chroma in [
+        EncodeChromaSubsampling::Yuv444,
+        EncodeChromaSubsampling::Yuv420,
+    ] {
         for model in [EncodeColorModel::YCbCr, EncodeColorModel::Rgb] {
-            for range in [None, Some(EncodePixelRange::Full), Some(EncodePixelRange::Limited)] {
-                for depth in [EncodeBitDepth::Eight, EncodeBitDepth::Ten, EncodeBitDepth::Twelve] {
+            for range in [
+                None,
+                Some(EncodePixelRange::Full),
+                Some(EncodePixelRange::Limited),
+            ] {
+                for depth in [
+                    EncodeBitDepth::Eight,
+                    EncodeBitDepth::Ten,
+                    EncodeBitDepth::Twelve,
+                ] {
                     let mut cfg = base()
                         .quality(90.0)
                         .chroma_subsampling(chroma)
@@ -476,14 +520,23 @@ fn the_container_agrees_with_the_payload_on_every_format() {
                     }
                     let label = format!("{chroma:?}/{model:?}/{range:?}/{depth:?}");
                     for (kind, file) in [
-                        ("rgb8", zenavif::encode_rgb8(rgb8.as_ref(), &cfg, stop()).ok()),
-                        ("rgba8", zenavif::encode_rgba8(rgba8.as_ref(), &cfg, stop()).ok()),
+                        (
+                            "rgb8",
+                            zenavif::encode_rgb8(rgb8.as_ref(), &cfg, stop()).ok(),
+                        ),
+                        (
+                            "rgba8",
+                            zenavif::encode_rgba8(rgba8.as_ref(), &cfg, stop()).ok(),
+                        ),
                     ] {
                         // A refused configuration is not this test's business —
                         // `the_support_query_agrees_with_the_encode_path` owns that.
                         let Some(enc) = file else { continue };
                         if kind == "rgba8" {
-                            assert!(enc.alpha_byte_size > 0, "{label} {kind}: alpha item is empty");
+                            assert!(
+                                enc.alpha_byte_size > 0,
+                                "{label} {kind}: alpha item is empty"
+                            );
                             alpha_cells += 1;
                         }
                         let pcfg = zenavif_parse::DecodeConfig::default();
@@ -514,7 +567,10 @@ fn the_container_agrees_with_the_payload_on_every_format() {
                         );
                         let (mssx, mssy): (bool, bool) = meta.chroma_subsampling.into();
                         assert_eq!(
-                            (av1c.chroma_subsampling_x == 1, av1c.chroma_subsampling_y == 1),
+                            (
+                                av1c.chroma_subsampling_x == 1,
+                                av1c.chroma_subsampling_y == 1
+                            ),
                             (mssx, mssy),
                             "{label} {kind}: av1C chroma vs the payload's"
                         );
@@ -536,9 +592,21 @@ fn the_container_agrees_with_the_payload_on_every_format() {
                                 "{label} {kind}: colr range vs the payload's color_range"
                             );
                             for (name, boxed, coded) in [
-                                ("primaries", *color_primaries, u16::from(meta.color_primaries)),
-                                ("transfer", *transfer_characteristics, u16::from(meta.transfer_characteristics)),
-                                ("matrix", *matrix_coefficients, u16::from(meta.matrix_coefficients)),
+                                (
+                                    "primaries",
+                                    *color_primaries,
+                                    u16::from(meta.color_primaries),
+                                ),
+                                (
+                                    "transfer",
+                                    *transfer_characteristics,
+                                    u16::from(meta.transfer_characteristics),
+                                ),
+                                (
+                                    "matrix",
+                                    *matrix_coefficients,
+                                    u16::from(meta.matrix_coefficients),
+                                ),
                             ] {
                                 if coded != 2 {
                                     assert_eq!(
@@ -557,7 +625,10 @@ fn the_container_agrees_with_the_payload_on_every_format() {
     eprintln!("container/payload agreement: {checked} files checked, {alpha_cells} with alpha");
     // Non-vacuity: the sweep must actually have produced files, including
     // alpha ones (the item whose av1C used to be built from the COLOUR depth).
-    assert!(checked >= 40, "the sweep must encode real files (got {checked})");
+    assert!(
+        checked >= 40,
+        "the sweep must encode real files (got {checked})"
+    );
     assert!(alpha_cells > 0, "and some must carry an alpha item");
 }
 
@@ -600,7 +671,11 @@ fn every_format_orders_least_lossy_first() {
     let rgb16 = to_rgb16(src16.as_ref());
     let rgba8 = to_rgba8(src16.as_ref());
 
-    for depth in [EncodeBitDepth::Eight, EncodeBitDepth::Ten, EncodeBitDepth::Twelve] {
+    for depth in [
+        EncodeBitDepth::Eight,
+        EncodeBitDepth::Ten,
+        EncodeBitDepth::Twelve,
+    ] {
         let dbits = match depth {
             EncodeBitDepth::Eight => 8,
             EncodeBitDepth::Ten => 10,
@@ -640,7 +715,10 @@ fn every_format_orders_least_lossy_first() {
                     }
                 };
                 if l.zensim.is_nan() {
-                    eprintln!("{label:32} max={:5} mean={:8.4} zensim=   n/a", l.max, l.mean);
+                    eprintln!(
+                        "{label:32} max={:5} mean={:8.4} zensim=   n/a",
+                        l.max, l.mean
+                    );
                 } else {
                     eprintln!(
                         "{label:32} max={:5} mean={:8.4} zensim={:6.2}",
@@ -700,8 +778,15 @@ fn lossless_round_trips_bit_exactly_on_every_rgb_format() {
     let e = zenavif::encode_rgb8(rgb8.as_ref(), &cfg(EncodeBitDepth::Eight), stop())
         .expect("8-bit lossless must encode");
     let l = measure_rgb8(rgb8.as_ref(), &e.avif_file, "Rgb<u8> lossless");
-    eprintln!("Rgb<u8>  lossless: max={} mean={:.4} zensim={:.2}", l.max, l.mean, l.zensim);
-    assert_eq!(l.max, 0, "8-bit lossless must be EXACT, max abs error {}", l.max);
+    eprintln!(
+        "Rgb<u8>  lossless: max={} mean={:.4} zensim={:.2}",
+        l.max, l.mean, l.zensim
+    );
+    assert_eq!(
+        l.max, 0,
+        "8-bit lossless must be EXACT, max abs error {}",
+        l.max
+    );
 
     // 16-bit source at 12-bit coded: exact in the CODED depth's units, which is
     // the most a 12-bit stream can promise about a 16-bit source.
@@ -722,10 +807,17 @@ fn lossless_round_trips_bit_exactly_on_every_rgb_format() {
 fn alpha_ramp_round_trips_through_the_auxiliary_item() {
     let src16 = ramp_rgba16(W, H);
     let rgba8 = to_rgba8(src16.as_ref());
-    for depth in [EncodeBitDepth::Eight, EncodeBitDepth::Ten, EncodeBitDepth::Twelve] {
+    for depth in [
+        EncodeBitDepth::Eight,
+        EncodeBitDepth::Ten,
+        EncodeBitDepth::Twelve,
+    ] {
         let cfg = base().quality(95.0).bit_depth(depth);
         let enc = zenavif::encode_rgba8(rgba8.as_ref(), &cfg, stop()).expect("RGBA must encode");
-        assert!(enc.alpha_byte_size > 0, "must carry an alpha auxiliary item");
+        assert!(
+            enc.alpha_byte_size > 0,
+            "must carry an alpha auxiliary item"
+        );
         let dec = zenavif::decode(&enc.avif_file).expect("must decode");
         // The alpha ramp must come back as a ramp: a dropped plane would
         // default to opaque and a constant probe could not tell.
