@@ -194,6 +194,11 @@ fn codec_animation_depth_request_reaches_color_and_alpha_streams() {
                 } else {
                     zenpixels::PixelSlice::from(rgba.as_ref()).erase()
                 };
+                // Typed U16 storage alone carries no transfer interpretation.
+                // These authored values are sRGB codes, replicated into U16.
+                let pixels = pixels
+                    .with_transfer(zenpixels::TransferFunction::Srgb)
+                    .with_primaries(zenpixels::ColorPrimaries::Bt709);
                 encoder.push_frame(pixels, duration, None).unwrap();
             }
             let encoded = encoder.finish(None).unwrap();

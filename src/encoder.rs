@@ -83,8 +83,8 @@ pub struct EncodedImage {
 /// from here — retrofitting `#[non_exhaustive]` later would itself be a break.
 /// Downstream exhaustive matches need a `_` arm.
 ///
-/// Not every backend codes every depth. [`Av1Backend::Zenravif`] codes 8 and
-/// 10 (`ravif::BitDepth` has no 12-bit representation); [`Av1Backend::Zenav1Svt`]
+/// Not every backend codes every depth. [`Av1Backend::Zenravif`] codes 8,
+/// 10 and 12; [`Av1Backend::Zenav1Svt`]
 /// codes 8 and 10 (the port has no 12-bit encode, matching C SVT-AV1 v4.2.0's
 /// own check); [`Av1Backend::Zenav1Aom`] codes 8, 10 and 12 on its 4:2:0 colour
 /// path. A depth a backend cannot code is refused by name at
@@ -711,7 +711,7 @@ impl EncoderConfig {
     /// seams and [`EncoderConfig::resolve_plan`] -- so an introspected plan
     /// cannot drift from what the encoder does. It does NOT check that the
     /// chosen backend can code the depth; the per-backend gates
-    /// ([`reject_unspellable_coded_depth`], `encoder_aom::aom_depth_error`,
+    /// (`encoder_aom::aom_depth_error`,
     /// `encoder_svt_rs::svt_rs_depth_error`) are what refuse it.
     pub(crate) fn coded_bit_depth_bits(&self, input_is_16bit: bool) -> u8 {
         match self.bit_depth {
@@ -1203,17 +1203,13 @@ fn cicp_to_transfer_characteristics(tc: u8) -> ravif::TransferCharacteristics {
 /// The configured coded depth as a `ravif::BitDepth`, honouring
 /// [`EncodeBitDepth`], including [`EncodeBitDepth::Auto`]'s input-depth rule.
 ///
-/// `ravif::BitDepth` has no 12-bit representation, so a 12 arriving here would
-/// map to `Ten`. That is unreachable: every caller runs
-/// [`reject_unspellable_coded_depth`] first (`build_ravif_encoder` does it on
-/// its own first line, and the 16-bit entry points reach this only through
-/// that constructor). Keep it that way -- do not call this without the guard.
 pub(crate) fn resolve_coded_bit_depth(
     config: &EncoderConfig,
     input_is_16bit: bool,
 ) -> ravif::BitDepth {
     match config.coded_bit_depth_bits(input_is_16bit) {
         8 => ravif::BitDepth::Eight,
+        12 => ravif::BitDepth::Twelve,
         _ => ravif::BitDepth::Ten,
     }
 }
@@ -1298,34 +1294,11 @@ pub(crate) fn reject_aom_backend(config: &EncoderConfig, entry: &'static str) ->
     Ok(())
 }
 
-/// Refuse an [`EncodeBitDepth`] the zenravif path cannot code, naming the one
-/// backend that can.
-///
-/// This exists so a 12-bit request can never be silently served as 10:
-/// [`resolve_coded_bit_depth`] returns `ravif::BitDepth`, which has no 12-bit
-/// representation, so without this guard `EncodeBitDepth::Twelve` on the
-/// zenravif backend would code 10 bits and report success -- exactly the
-/// silent-wrong-pixels class the crate forbids.
-pub(crate) fn reject_unspellable_coded_depth(
-    config: &EncoderConfig,
-    input_is_16bit: bool,
-) -> Result<()> {
-    if matches!(config.coded_bit_depth_bits(input_is_16bit), 8 | 10) {
-        return Ok(());
-    }
-    Err(at!(Error::Unsupported(
-        "Av1Backend::Zenravif codes 8 and 10 bits only (ravif::BitDepth has no 12-bit \
-         representation), so EncodeBitDepth::Twelve is refused rather than coded at 10. \
-         12-bit is implemented by Av1Backend::Zenav1Aom on RGB -> 4:2:0 stills"
-    )))
-}
-
 fn build_ravif_encoder(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
     input_is_16bit: bool,
 ) -> Result<ravif::Encoder<'_>> {
-    reject_unspellable_coded_depth(config, input_is_16bit)?;
     let mut enc = ravif::Encoder::new()
         .with_quality(config.quality)
         // `speed_effective`, not `speed`: lossless clamps into the
@@ -1835,6 +1808,7 @@ pub fn encode_rgb16(
     //
     // `Auto` keeps its documented contract (16-bit input -> 10-bit AV1), so
     // the default path through here is byte-for-byte what it always was.
+    let depth = config.coded_bit_depth_bits(true);
     let result = match resolve_coded_bit_depth(config, true) {
         ravif::BitDepth::Eight => {
             let pixels: Vec<[u8; 3]> = img
@@ -1855,20 +1829,31 @@ pub fn encode_rgb16(
                 .pixels()
                 .map(|p| {
                     [
-                        scale_from_u16(p.g, 10),
-                        scale_from_u16(p.b, 10),
-                        scale_from_u16(p.r, 10),
+                        scale_from_u16(p.g, depth),
+                        scale_from_u16(p.b, depth),
+                        scale_from_u16(p.r, depth),
                     ]
                 })
                 .collect();
-            enc.encode_raw_planes_10_bit(
-                width,
-                height,
-                pixels,
-                None::<std::iter::Empty<u16>>,
-                pixel_range,
-                ravif::MatrixCoefficients::Identity,
-            )
+            if depth == 12 {
+                enc.encode_raw_planes_12_bit(
+                    width,
+                    height,
+                    pixels,
+                    None::<std::iter::Empty<u16>>,
+                    pixel_range,
+                    ravif::MatrixCoefficients::Identity,
+                )
+            } else {
+                enc.encode_raw_planes_10_bit(
+                    width,
+                    height,
+                    pixels,
+                    None::<std::iter::Empty<u16>>,
+                    pixel_range,
+                    ravif::MatrixCoefficients::Identity,
+                )
+            }
         }
     }
     .map_err_at(error_from_ravif)
@@ -1946,6 +1931,7 @@ pub fn encode_rgba16(
         }
     };
     // Honours `config.bit_depth` for colour AND alpha — see encode_rgb16.
+    let depth = config.coded_bit_depth_bits(true);
     let result = match resolve_coded_bit_depth(config, true) {
         ravif::BitDepth::Eight => {
             let pixels: Vec<[u8; 3]> = img
@@ -1973,21 +1959,32 @@ pub fn encode_rgba16(
                 .pixels()
                 .map(|p| {
                     [
-                        scale_from_u16(color(p.g, p.a), 10),
-                        scale_from_u16(color(p.b, p.a), 10),
-                        scale_from_u16(color(p.r, p.a), 10),
+                        scale_from_u16(color(p.g, p.a), depth),
+                        scale_from_u16(color(p.b, p.a), depth),
+                        scale_from_u16(color(p.r, p.a), depth),
                     ]
                 })
                 .collect();
-            let alpha: Vec<u16> = img.pixels().map(|p| scale_from_u16(p.a, 10)).collect();
-            enc.encode_raw_planes_10_bit(
-                width,
-                height,
-                pixels,
-                Some(alpha),
-                pixel_range,
-                ravif::MatrixCoefficients::Identity,
-            )
+            let alpha: Vec<u16> = img.pixels().map(|p| scale_from_u16(p.a, depth)).collect();
+            if depth == 12 {
+                enc.encode_raw_planes_12_bit(
+                    width,
+                    height,
+                    pixels,
+                    Some(alpha),
+                    pixel_range,
+                    ravif::MatrixCoefficients::Identity,
+                )
+            } else {
+                enc.encode_raw_planes_10_bit(
+                    width,
+                    height,
+                    pixels,
+                    Some(alpha),
+                    pixel_range,
+                    ravif::MatrixCoefficients::Identity,
+                )
+            }
         }
     }
     .map_err_at(error_from_ravif)
@@ -2062,9 +2059,13 @@ pub struct EncodedAnimation {
 fn map_animation_pixels<S: Copy, D>(
     image: ImgRef<'_, S>,
     stop: &almost_enough::StopToken,
+    call_stop: Option<&dyn almost_enough::Stop>,
     convert: impl Fn(S) -> D,
 ) -> Result<ImgVec<D>> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    if let Some(stop) = call_stop {
+        stop.check().map_err(|e| at!(Error::from(e)))?;
+    }
     let count = image
         .width()
         .checked_mul(image.height())
@@ -2076,6 +2077,9 @@ fn map_animation_pixels<S: Copy, D>(
     for (index, pixel) in image.pixels().enumerate() {
         if index & 1023 == 0 {
             stop.check().map_err(|e| at!(Error::from(e)))?;
+            if let Some(stop) = call_stop {
+                stop.check().map_err(|e| at!(Error::from(e)))?;
+            }
         }
         pixels.push(convert(pixel));
     }
@@ -2108,7 +2112,7 @@ pub fn encode_animation_rgb8(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
-    encode_animation_rgb8_inner(frames, 1000, config, stop)
+    encode_animation_rgb8_inner(frames, 1000, config, stop, None)
 }
 
 /// Encode RGB8 animation with exact tick durations and ticks per second.
@@ -2119,7 +2123,18 @@ pub fn encode_animation_rgb8_timed(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
-    encode_animation_rgb8_inner(frames, timescale, config, stop)
+    encode_animation_rgb8_inner(frames, timescale, config, stop, None)
+}
+
+// The zencodec finish call owns this borrow only for the encode invocation.
+pub(crate) fn encode_animation_rgb8_timed_with_stop(
+    frames: &[TimedAnimationFrame<RGB8>],
+    timescale: u32,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+    call_stop: Option<&dyn almost_enough::Stop>,
+) -> Result<EncodedAnimation> {
+    encode_animation_rgb8_inner(frames, timescale, config, stop, call_stop)
 }
 
 impl AnimationInput<RGB8> for AnimationFrame {
@@ -2136,8 +2151,12 @@ fn encode_animation_rgb8_inner<F: AnimationInput<RGB8>>(
     timescale: u32,
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
+    call_stop: Option<&dyn almost_enough::Stop>,
 ) -> Result<EncodedAnimation> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    if let Some(stop) = call_stop {
+        stop.check().map_err(|e| at!(Error::from(e)))?;
+    }
     if timescale == 0 {
         return Err(at!(Error::Encode(
             "animation timescale must be positive".into()
@@ -2145,14 +2164,17 @@ fn encode_animation_rgb8_inner<F: AnimationInput<RGB8>>(
     }
     #[cfg(feature = "zenav1-svt")]
     if config.backend == Av1Backend::Zenav1Svt {
-        return crate::encoder_svt_rs::encode_animation_rgb8(frames, timescale, config, stop);
+        let result = crate::encoder_svt_rs::encode_animation_rgb8(frames, timescale, config, stop)?;
+        if let Some(stop) = call_stop {
+            stop.check().map_err(|e| at!(Error::from(e)))?;
+        }
+        return Ok(result);
     }
     reject_svt_rs_backend(config, "animation encoding")?;
-    reject_unspellable_coded_depth(config, false)?;
-    if config.coded_bit_depth_bits(false) == 10 {
+    if config.coded_bit_depth_bits(false) > 8 {
         let converted = map_animation_frames(frames, |f| {
             Ok(TimedAnimationFrame {
-                pixels: map_animation_pixels(f.pixels(), &stop, |p| RGB16 {
+                pixels: map_animation_pixels(f.pixels(), &stop, call_stop, |p| RGB16 {
                     r: u16::from(p.r) * 257,
                     g: u16::from(p.g) * 257,
                     b: u16::from(p.b) * 257,
@@ -2160,9 +2182,13 @@ fn encode_animation_rgb8_inner<F: AnimationInput<RGB8>>(
                 duration_ticks: f.duration_ticks(),
             })
         })?;
-        return encode_animation_rgb16_inner(&converted, timescale, config, stop);
+        return encode_animation_rgb16_inner(&converted, timescale, config, stop, call_stop);
     }
     let enc = build_ravif_encoder(config, stop, false)?;
+    let enc = match call_stop {
+        Some(stop) => enc.with_animation_stop_ref(stop),
+        None => enc,
+    };
 
     let ravif_frames: Vec<ravif::TimedAnimFrame<'_, _>> = frames
         .iter()
@@ -2201,7 +2227,7 @@ pub fn encode_animation_rgba8(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
-    encode_animation_rgba8_inner(frames, 1000, config, stop)
+    encode_animation_rgba8_inner(frames, 1000, config, stop, None)
 }
 
 /// Encode RGBA8 animation with exact tick durations and ticks per second.
@@ -2212,7 +2238,18 @@ pub fn encode_animation_rgba8_timed(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
-    encode_animation_rgba8_inner(frames, timescale, config, stop)
+    encode_animation_rgba8_inner(frames, timescale, config, stop, None)
+}
+
+// The zencodec finish call owns this borrow only for the encode invocation.
+pub(crate) fn encode_animation_rgba8_timed_with_stop(
+    frames: &[TimedAnimationFrame<RGBA8>],
+    timescale: u32,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+    call_stop: Option<&dyn almost_enough::Stop>,
+) -> Result<EncodedAnimation> {
+    encode_animation_rgba8_inner(frames, timescale, config, stop, call_stop)
 }
 
 impl AnimationInput<RGBA8> for AnimationFrameRgba {
@@ -2229,8 +2266,12 @@ fn encode_animation_rgba8_inner<F: AnimationInput<RGBA8>>(
     timescale: u32,
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
+    call_stop: Option<&dyn almost_enough::Stop>,
 ) -> Result<EncodedAnimation> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    if let Some(stop) = call_stop {
+        stop.check().map_err(|e| at!(Error::from(e)))?;
+    }
     if timescale == 0 {
         return Err(at!(Error::Encode(
             "animation timescale must be positive".into()
@@ -2238,14 +2279,18 @@ fn encode_animation_rgba8_inner<F: AnimationInput<RGBA8>>(
     }
     #[cfg(feature = "zenav1-svt")]
     if config.backend == Av1Backend::Zenav1Svt {
-        return crate::encoder_svt_rs::encode_animation_rgba8(frames, timescale, config, stop);
+        let result =
+            crate::encoder_svt_rs::encode_animation_rgba8(frames, timescale, config, stop)?;
+        if let Some(stop) = call_stop {
+            stop.check().map_err(|e| at!(Error::from(e)))?;
+        }
+        return Ok(result);
     }
     reject_svt_rs_backend(config, "animation encoding")?;
-    reject_unspellable_coded_depth(config, false)?;
-    if config.coded_bit_depth_bits(false) == 10 {
+    if config.coded_bit_depth_bits(false) > 8 {
         let converted = map_animation_frames(frames, |f| {
             Ok(TimedAnimationFrame {
-                pixels: map_animation_pixels(f.pixels(), &stop, |p| RGBA16 {
+                pixels: map_animation_pixels(f.pixels(), &stop, call_stop, |p| RGBA16 {
                     r: u16::from(p.r) * 257,
                     g: u16::from(p.g) * 257,
                     b: u16::from(p.b) * 257,
@@ -2254,9 +2299,13 @@ fn encode_animation_rgba8_inner<F: AnimationInput<RGBA8>>(
                 duration_ticks: f.duration_ticks(),
             })
         })?;
-        return encode_animation_rgba16_inner(&converted, timescale, config, stop);
+        return encode_animation_rgba16_inner(&converted, timescale, config, stop, call_stop);
     }
     let enc = build_ravif_encoder(config, stop, false)?;
+    let enc = match call_stop {
+        Some(stop) => enc.with_animation_stop_ref(stop),
+        None => enc,
+    };
 
     let ravif_frames: Vec<ravif::TimedAnimFrame<'_, _>> = frames
         .iter()
@@ -2302,7 +2351,7 @@ pub struct AnimationFrameRgba16 {
 ///
 /// Input values should be in full u16 range (0–65535), in the image's native
 /// transfer function (typically sRGB gamma). Values are scaled to the requested
-/// 8/10-bit output depth; Auto selects 10 bits. All frames must have the same
+/// 8/10/12-bit output depth; Auto selects 10 bits. All frames must have the same
 /// dimensions.
 ///
 /// # Arguments
@@ -2315,7 +2364,7 @@ pub fn encode_animation_rgb16(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
-    encode_animation_rgb16_inner(frames, 1000, config, stop)
+    encode_animation_rgb16_inner(frames, 1000, config, stop, None)
 }
 
 /// Encode RGB16 animation with exact tick durations and ticks per second.
@@ -2326,7 +2375,18 @@ pub fn encode_animation_rgb16_timed(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
-    encode_animation_rgb16_inner(frames, timescale, config, stop)
+    encode_animation_rgb16_inner(frames, timescale, config, stop, None)
+}
+
+// The zencodec finish call owns this borrow only for the encode invocation.
+pub(crate) fn encode_animation_rgb16_timed_with_stop(
+    frames: &[TimedAnimationFrame<RGB16>],
+    timescale: u32,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+    call_stop: Option<&dyn almost_enough::Stop>,
+) -> Result<EncodedAnimation> {
+    encode_animation_rgb16_inner(frames, timescale, config, stop, call_stop)
 }
 
 impl AnimationInput<RGB16> for AnimationFrame16 {
@@ -2343,9 +2403,13 @@ fn encode_animation_rgb16_inner<F: AnimationInput<RGB16>>(
     timescale: u32,
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
+    call_stop: Option<&dyn almost_enough::Stop>,
 ) -> Result<EncodedAnimation> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    if let Some(stop) = call_stop {
+        stop.check().map_err(|e| at!(Error::from(e)))?;
+    }
     if timescale == 0 {
         return Err(at!(Error::Encode(
             "animation timescale must be positive".into()
@@ -2353,14 +2417,18 @@ fn encode_animation_rgb16_inner<F: AnimationInput<RGB16>>(
     }
     #[cfg(feature = "zenav1-svt")]
     if config.backend == Av1Backend::Zenav1Svt {
-        return crate::encoder_svt_rs::encode_animation_rgb16(frames, timescale, config, stop);
+        let result =
+            crate::encoder_svt_rs::encode_animation_rgb16(frames, timescale, config, stop)?;
+        if let Some(stop) = call_stop {
+            stop.check().map_err(|e| at!(Error::from(e)))?;
+        }
+        return Ok(result);
     }
     reject_svt_rs_backend(config, "animation encoding")?;
-    reject_unspellable_coded_depth(config, true)?;
     if config.coded_bit_depth_bits(true) == 8 {
         let converted = map_animation_frames(frames, |f| {
             Ok(TimedAnimationFrame {
-                pixels: map_animation_pixels(f.pixels(), &stop, |p| RGB8 {
+                pixels: map_animation_pixels(f.pixels(), &stop, call_stop, |p| RGB8 {
                     r: crate::convert::narrow_to_u8(p.r),
                     g: crate::convert::narrow_to_u8(p.g),
                     b: crate::convert::narrow_to_u8(p.b),
@@ -2368,16 +2436,21 @@ fn encode_animation_rgb16_inner<F: AnimationInput<RGB16>>(
                 duration_ticks: f.duration_ticks(),
             })
         })?;
-        return encode_animation_rgb8_inner(&converted, timescale, config, stop);
+        return encode_animation_rgb8_inner(&converted, timescale, config, stop, call_stop);
     }
     let enc = build_ravif_encoder(config, stop.clone(), true)?;
+    let enc = match call_stop {
+        Some(stop) => enc.with_animation_stop_ref(stop),
+        None => enc,
+    };
 
-    // Scale full-range logical pixels to the upstream 10-bit input domain.
+    // Scale full-range logical pixels to the explicitly requested code domain.
+    let depth = config.coded_bit_depth_bits(true);
     let scaled_frames = map_animation_frames(frames, |f| {
-        map_animation_pixels(f.pixels(), &stop, |p| RGB16 {
-            r: scale_from_u16(p.r, 10),
-            g: scale_from_u16(p.g, 10),
-            b: scale_from_u16(p.b, 10),
+        map_animation_pixels(f.pixels(), &stop, call_stop, |p| RGB16 {
+            r: scale_from_u16(p.r, depth),
+            g: scale_from_u16(p.g, depth),
+            b: scale_from_u16(p.b, depth),
         })
     })?;
 
@@ -2408,7 +2481,7 @@ fn encode_animation_rgb16_inner<F: AnimationInput<RGB16>>(
 ///
 /// Input values should be in full u16 range (0–65535), in the image's native
 /// transfer function (typically sRGB gamma). Values are scaled to the requested
-/// 8/10-bit output depth; Auto selects 10 bits. All frames must have the same
+/// 8/10/12-bit output depth; Auto selects 10 bits. All frames must have the same
 /// dimensions.
 ///
 /// # Arguments
@@ -2421,7 +2494,7 @@ pub fn encode_animation_rgba16(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
-    encode_animation_rgba16_inner(frames, 1000, config, stop)
+    encode_animation_rgba16_inner(frames, 1000, config, stop, None)
 }
 
 /// Encode RGBA16 animation with exact tick durations and ticks per second.
@@ -2432,7 +2505,18 @@ pub fn encode_animation_rgba16_timed(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedAnimation> {
-    encode_animation_rgba16_inner(frames, timescale, config, stop)
+    encode_animation_rgba16_inner(frames, timescale, config, stop, None)
+}
+
+// The zencodec finish call owns this borrow only for the encode invocation.
+pub(crate) fn encode_animation_rgba16_timed_with_stop(
+    frames: &[TimedAnimationFrame<RGBA16>],
+    timescale: u32,
+    config: &EncoderConfig,
+    stop: almost_enough::StopToken,
+    call_stop: Option<&dyn almost_enough::Stop>,
+) -> Result<EncodedAnimation> {
+    encode_animation_rgba16_inner(frames, timescale, config, stop, call_stop)
 }
 
 impl AnimationInput<RGBA16> for AnimationFrameRgba16 {
@@ -2449,9 +2533,13 @@ fn encode_animation_rgba16_inner<F: AnimationInput<RGBA16>>(
     timescale: u32,
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
+    call_stop: Option<&dyn almost_enough::Stop>,
 ) -> Result<EncodedAnimation> {
     use crate::convert::scale_from_u16;
     stop.check().map_err(|e| at!(Error::from(e)))?;
+    if let Some(stop) = call_stop {
+        stop.check().map_err(|e| at!(Error::from(e)))?;
+    }
     if timescale == 0 {
         return Err(at!(Error::Encode(
             "animation timescale must be positive".into()
@@ -2459,14 +2547,18 @@ fn encode_animation_rgba16_inner<F: AnimationInput<RGBA16>>(
     }
     #[cfg(feature = "zenav1-svt")]
     if config.backend == Av1Backend::Zenav1Svt {
-        return crate::encoder_svt_rs::encode_animation_rgba16(frames, timescale, config, stop);
+        let result =
+            crate::encoder_svt_rs::encode_animation_rgba16(frames, timescale, config, stop)?;
+        if let Some(stop) = call_stop {
+            stop.check().map_err(|e| at!(Error::from(e)))?;
+        }
+        return Ok(result);
     }
     reject_svt_rs_backend(config, "animation encoding")?;
-    reject_unspellable_coded_depth(config, true)?;
     if config.coded_bit_depth_bits(true) == 8 {
         let converted = map_animation_frames(frames, |f| {
             Ok(TimedAnimationFrame {
-                pixels: map_animation_pixels(f.pixels(), &stop, |p| RGBA8 {
+                pixels: map_animation_pixels(f.pixels(), &stop, call_stop, |p| RGBA8 {
                     r: crate::convert::narrow_to_u8(p.r),
                     g: crate::convert::narrow_to_u8(p.g),
                     b: crate::convert::narrow_to_u8(p.b),
@@ -2475,17 +2567,22 @@ fn encode_animation_rgba16_inner<F: AnimationInput<RGBA16>>(
                 duration_ticks: f.duration_ticks(),
             })
         })?;
-        return encode_animation_rgba8_inner(&converted, timescale, config, stop);
+        return encode_animation_rgba8_inner(&converted, timescale, config, stop, call_stop);
     }
     let enc = build_ravif_encoder(config, stop.clone(), true)?;
+    let enc = match call_stop {
+        Some(stop) => enc.with_animation_stop_ref(stop),
+        None => enc,
+    };
 
-    // Scale full-range logical pixels to the upstream 10-bit input domain.
+    // Scale full-range logical pixels to the explicitly requested code domain.
+    let depth = config.coded_bit_depth_bits(true);
     let scaled_frames = map_animation_frames(frames, |f| {
-        map_animation_pixels(f.pixels(), &stop, |p| RGBA16 {
-            r: scale_from_u16(p.r, 10),
-            g: scale_from_u16(p.g, 10),
-            b: scale_from_u16(p.b, 10),
-            a: scale_from_u16(p.a, 10),
+        map_animation_pixels(f.pixels(), &stop, call_stop, |p| RGBA16 {
+            r: scale_from_u16(p.r, depth),
+            g: scale_from_u16(p.g, depth),
+            b: scale_from_u16(p.b, depth),
+            a: scale_from_u16(p.a, depth),
         })
     })?;
 

@@ -175,3 +175,57 @@ fn narrowed_eight_bit_encode_preserves_replicated_bytes() {
          narrowing is not the inverse of LSB replication"
     );
 }
+
+#[test]
+fn twelve_bit_still_requests_preserve_low_sample_bits_in_rgb_and_alpha() {
+    let (w, h) = (17, 13);
+    let rgba: Vec<_> = (0..w * h)
+        .map(|i| {
+            Rgba::new(
+                (i * 173 + 32769) as u16,
+                (i * 113 + 16387) as u16,
+                (i * 239 + 123) as u16,
+                (i * 37 + 49151) as u16,
+            )
+        })
+        .collect();
+    let rgb: Vec<_> = rgba.iter().map(|p| Rgb::new(p.r, p.g, p.b)).collect();
+    let config = cfg(EncodeBitDepth::Twelve)
+        .with_lossless(true)
+        .color_model(zenavif::EncodeColorModel::Rgb);
+    let rgb = ImgVec::new(rgb, w, h);
+    let rgba = ImgVec::new(rgba, w, h);
+    for encoded in [
+        zenavif::encode_rgb16(rgb.as_ref(), &config, stop()),
+        zenavif::encode_rgba16(rgba.as_ref(), &config, stop()),
+    ] {
+        let encoded = encoded.unwrap();
+        assert_eq!(coded_bit_depth(&encoded.avif_file), 12);
+        let parsed = zenavif_parse::AvifParser::from_bytes(&encoded.avif_file).unwrap();
+        assert_eq!(parsed.av1_config().unwrap().profile, 2);
+        // The authored source has distinct low bits, not replicated 8-bit data.
+        let decoded = zenavif::decode(&encoded.avif_file).unwrap();
+        if let Some(view) = decoded.try_as_imgref::<Rgba<u16>>() {
+            for (actual, expected) in view.pixels().zip(rgba.pixels()) {
+                for (a, e) in [actual.r, actual.g, actual.b, actual.a]
+                    .into_iter()
+                    .zip([expected.r, expected.g, expected.b, expected.a])
+                {
+                    let code = e >> 4;
+                    assert_eq!(a, (code << 4) | (code >> 8), "source {e}");
+                }
+            }
+        } else {
+            let view = decoded.try_as_imgref::<Rgb<u16>>().unwrap();
+            for (actual, expected) in view.pixels().zip(rgb.pixels()) {
+                for (a, e) in [actual.r, actual.g, actual.b]
+                    .into_iter()
+                    .zip([expected.r, expected.g, expected.b])
+                {
+                    let code = e >> 4;
+                    assert_eq!(a, (code << 4) | (code >> 8), "source {e}");
+                }
+            }
+        }
+    }
+}

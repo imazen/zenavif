@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenavif.txt 343 lines (supported surface) | zenavif.features.txt 661 added (features: aom-backend,auto-tune,avx512,encode,encode-asm,encode-imazen,encode-mono,encode-svt-rs,encode-threading,target-quality,two-pass-butteraugli,two-pass-zensim,unsafe-asm,zenav1-aom,zenav1-aom-decode,zenav1-aom-encode,zenav1-svt) | zenavif.internal.txt 273 lines (74 hidden + 327 excluded-feature)
+# files: zenavif.txt 357 lines (supported surface) | zenavif.features.txt 772 added (features: aom-backend,auto-tune,avx512,encode,encode-asm,encode-imazen,encode-mono,encode-svt-rs,encode-threading,routing-replay,target-quality,two-pass-butteraugli,two-pass-zensim,unsafe-asm,zenav1-aom,zenav1-aom-decode,zenav1-aom-encode,zenav1-svt) | zenavif.internal.txt 295 lines (93 hidden + 332 excluded-feature)
 
 ## summary
 #
@@ -14,22 +14,25 @@
 #   pub types (struct/enum/trait/alias)        33
 #   pub consts/statics                         44
 #   free functions                             15
-#   inherent methods                           41
-#   struct fields                             104
+#   inherent methods                           47
+#   struct fields                             109
 #   enum variants                              54
-#   re-exports                                 12
+#   re-exports                                 15
 #   trait roster entries (type × trait)       110
 #   auto-trait-complete types                  26
 #   auto-trait exceptions                       6
 #
 # per-module pub lines:
-#   (root)                          235
+#   (root)                          249
 #   detect                           42
 #   heuristics                       29
 
-## items (305 lines)
+## items (319 lines)
 
 pub mod zenavif
+pub use AnimationFrameTiming
+pub use AnimationHdrMetadata
+pub use AnimationSpatialMetadata
 pub use CleanAperture
 pub use ContentLightLevel
 pub use GainMapChannel
@@ -186,11 +189,15 @@ pub ValidationError::VaqStrengthOutOfRange::valid: core::ops::range::RangeInclus
 pub ValidationError::VaqStrengthOutOfRange::value: f64
 pub struct AnimationDecoder
 pub fn AnimationDecoder::frame_index(&self) -> usize
+pub fn AnimationDecoder::frame_timing(&self, usize) -> Result<zenavif_parse::AnimationFrameTiming>
 pub fn AnimationDecoder::info(&self) -> &DecodedAnimationInfo
 pub fn AnimationDecoder::new(&[u8], &DecoderConfig) -> Result<Self>
 pub fn AnimationDecoder::next_frame(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<core::option::Option<DecodedFrame>>
 pub fn AnimationDecoder::remaining_frames(&self) -> usize
 pub struct AvifAnimationFrameDecoder
+pub fn AvifAnimationFrameDecoder::frame_timing(&self, usize) -> core::result::Result<zenavif_parse::AnimationFrameTiming, whereat::at::At<zencodec::error::CodecError>>
+pub fn AvifAnimationFrameDecoder::hdr_metadata(&self) -> zenavif_parse::AnimationHdrMetadata
+pub fn AvifAnimationFrameDecoder::spatial_metadata(&self) -> zenavif_parse::AnimationSpatialMetadata
 pub struct AvifDecodeJob
 pub fn AvifDecodeJob::with_extract_gain_map(self, bool) -> Self
 pub struct AvifDecoderConfig
@@ -234,13 +241,18 @@ pub struct DecodedAnimation
 pub DecodedAnimation::frames: alloc::vec::Vec<DecodedFrame>
 pub DecodedAnimation::info: DecodedAnimationInfo
 pub struct DecodedAnimationInfo
+pub DecodedAnimationInfo::exif: core::option::Option<alloc::vec::Vec<u8>>
 pub DecodedAnimationInfo::frame_count: usize
 pub DecodedAnimationInfo::has_alpha: bool
-pub DecodedAnimationInfo::loop_count: u32
+pub DecodedAnimationInfo::hdr: zenavif_parse::AnimationHdrMetadata
+pub DecodedAnimationInfo::loop_count: u64
+pub DecodedAnimationInfo::spatial: zenavif_parse::AnimationSpatialMetadata
 pub DecodedAnimationInfo::timescale: u32
+pub DecodedAnimationInfo::xmp: core::option::Option<alloc::vec::Vec<u8>>
 pub struct DecodedFrame
 pub DecodedFrame::duration_ms: u32
 pub DecodedFrame::pixels: zenpixels::buffer::PixelBuffer
+pub DecodedFrame::timing: zenavif_parse::AnimationFrameTiming
 pub struct DecodedYuv
 pub DecodedYuv::bit_depth: i32
 pub DecodedYuv::height: usize
@@ -291,7 +303,9 @@ pub fn ManagedAvifDecoder::decode(&mut self, &impl enough::Stop + ?core::marker:
 pub fn ManagedAvifDecoder::decode_full(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<(zenpixels::buffer::PixelBuffer, ImageInfo)>
 pub fn ManagedAvifDecoder::new(&[u8], &DecoderConfig) -> Result<Self>
 pub fn ManagedAvifDecoder::decode_animation(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<DecodedAnimation>
+pub fn ManagedAvifDecoder::frame_timing(&self, usize) -> Result<zenavif_parse::AnimationFrameTiming>
 pub fn ManagedAvifDecoder::decode_to_sink(&mut self, &impl enough::Stop + ?core::marker::Sized, &mut dyn zencodec::sink::DecodeRowSink) -> Result<ImageInfo>
+pub fn ManagedAvifDecoder::probe_animation_info(&self) -> Result<ImageInfo>
 pub fn ManagedAvifDecoder::probe_info(&self) -> Result<ImageInfo>
 pub struct MatrixCoefficients(pub u8)
 pub const MatrixCoefficients::BT2020_CL: Self

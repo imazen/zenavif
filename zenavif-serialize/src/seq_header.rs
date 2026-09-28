@@ -181,10 +181,9 @@ fn parse_seq_header_payload(payload: &[u8]) -> Option<SeqHeader> {
     let _still_picture = r.flag()?;
     let reduced_still_picture_header = r.flag()?;
 
-    let seq_level_idx_0;
     let mut seq_tier_0 = false;
-    if reduced_still_picture_header {
-        seq_level_idx_0 = u8::try_from(r.f(5)?).ok()?;
+    let seq_level_idx_0 = if reduced_still_picture_header {
+        u8::try_from(r.f(5)?).ok()?
     } else {
         let mut decoder_model_info_present = false;
         let mut buffer_delay_length = 0u32;
@@ -224,8 +223,8 @@ fn parse_seq_header_payload(payload: &[u8]) -> Option<SeqHeader> {
                 let _initial_display_delay_minus_1 = r.f(4)?;
             }
         }
-        seq_level_idx_0 = level0;
-    }
+        level0
+    };
 
     let frame_width_bits = r.f(4)? + 1;
     let frame_height_bits = r.f(4)? + 1;
@@ -404,7 +403,7 @@ impl SeqHeader {
         use crate::constants::{ColorPrimaries as Cp, MatrixCoefficients as Mc, TransferCharacteristics as Tc};
         let mut out = declared;
         out.full_range_flag = self.color_range;
-        if let Some(cp) = (self.color_primaries != 2).then(|| match self.color_primaries {
+        if let Some(cp) = (self.color_primaries != 2).then_some(match self.color_primaries {
             1 => Some(Cp::Bt709),
             6 => Some(Cp::Bt601),
             9 => Some(Cp::Bt2020),
@@ -415,7 +414,7 @@ impl SeqHeader {
             out.color_primaries = cp;
         }
         #[allow(deprecated)]
-        if let Some(tc) = (self.transfer_characteristics != 2).then(|| match self.transfer_characteristics {
+        if let Some(tc) = (self.transfer_characteristics != 2).then_some(match self.transfer_characteristics {
             1 => Some(Tc::Bt709),
             4 => Some(Tc::Bt470M),
             5 => Some(Tc::Bt470BG),
@@ -436,7 +435,7 @@ impl SeqHeader {
         }).flatten() {
             out.transfer_characteristics = tc;
         }
-        if let Some(mc) = (self.matrix_coefficients != 2).then(|| match self.matrix_coefficients {
+        if let Some(mc) = (self.matrix_coefficients != 2).then_some(match self.matrix_coefficients {
             0 => Some(Mc::Rgb),
             1 => Some(Mc::Bt709),
             6 => Some(Mc::Bt601),
