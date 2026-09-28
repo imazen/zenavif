@@ -441,7 +441,9 @@ pub(crate) fn key_frame_config(
             EncodeChromaSubsampling::Yuv420 => (1, 1),
         }
     };
-    aom_encode::key_frame::KeyFrameConfig {
+    // The upstream constructor is non-exhaustive; preserve this seam's
+    // pre-cancellation tool settings explicitly below.
+    let mut cfg = aom_encode::key_frame::KeyFrameConfig::allintra_speed0(
         width,
         height,
         bit_depth,
@@ -452,43 +454,39 @@ pub(crate) fn key_frame_config(
         // reconstructs the coded planes EXACTLY. `reject_unsupported_config` has
         // already refused every combination in front of it that would make the
         // IMAGE lossy anyway (subsampling, a YCbCr matrix, studio range).
-        cq_level: if wants_lossless(config) {
+        if wants_lossless(config) {
             0
         } else {
             quality_to_cq_level(config.quality)
         },
-        cpu_used: speed_to_cpu_used(config.speed),
-        usage: AOM_USAGE_ALL_INTRA,
-        // Real aomenc's ALLINTRA defaults (`av1_cx_iface.c:3067`): CDEF off
-        // ("CDEF has been found to blur images"), loop restoration on. Both
-        // are byte-gated upstream at every speed in this combination.
-        enable_cdef: false,
-        enable_restoration: true,
-        // Explicit tile / superblock requests landed upstream after the
-        // previous pin (`bda14f3d`, `abe20559`). `0` / `false` are the
-        // `allintra_speed0` defaults and what the previous rev hard-coded, so
-        // the seam's output is unchanged by the bump (the bd8 byte anchor
-        // `aom_bd8_output_is_unchanged_by_the_hbd_wiring` holds). The tile
-        // request is a FLOOR: `av1_get_tile_limits` still forces the minimum
-        // a large frame needs, exactly as C clamps it.
-        tile_columns_log2: 0,
-        tile_rows_log2: 0,
-        sb_size_128: false,
-        // The CICP description + range. `full_range` is now CONFIGURATION
-        // upstream (`ColorDescription`), so a full-range still is codable
-        // instead of refused; the CICP triple stays "unspecified" because the
-        // `colr` box carries the colorimetry for this seam (see the module
-        // docs) and signalling it twice invites the two to disagree.
-        color: aom_encode::key_frame::ColorDescription {
-            full_range: wants_full_range(config),
-            // MC_IDENTITY (0) for the GBR path, "unspecified" otherwise. The
-            // primaries/transfer stay unspecified either way: the `colr` box
-            // carries the colorimetry for this seam, and signalling it in two
-            // places invites the two to disagree.
-            matrix_coefficients: if wants_identity(config) { 0 } else { 2 },
-            ..Default::default()
-        },
-    }
+    );
+    cfg.cpu_used = speed_to_cpu_used(config.speed);
+    cfg.usage = AOM_USAGE_ALL_INTRA;
+    // Real aomenc's ALLINTRA defaults (`av1_cx_iface.c:3067`): CDEF off
+    // ("CDEF has been found to blur images"), loop restoration on. Both
+    // are byte-gated upstream at every speed in this combination.
+    cfg.enable_cdef = false;
+    cfg.enable_restoration = true;
+    // The previous dependency revision did not search either screen tool.
+    // Cancellation plumbing must not silently enable additional RD searches.
+    cfg.enable_palette = false;
+    cfg.enable_intrabc = false;
+    // The CICP description + range. `full_range` is now CONFIGURATION
+    // upstream (`ColorDescription`), so a full-range still is codable
+    // instead of refused; the CICP triple stays "unspecified" because the
+    // `colr` box carries the colorimetry for this seam (see the module
+    // docs) and signalling it twice invites the two to disagree.
+    cfg.color = {
+        let mut c = aom_encode::key_frame::ColorDescription::default();
+        c.full_range = wants_full_range(config);
+        // MC_IDENTITY (0) for the GBR path, "unspecified" otherwise. The
+        // primaries/transfer stay unspecified either way: the `colr` box
+        // carries the colorimetry for this seam, and signalling it in two
+        // places invites the two to disagree.
+        c.matrix_coefficients = if wants_identity(config) { 0 } else { 2 };
+        c
+    };
+    cfg
 }
 
 /// Whether this encode signals FULL pixel range.
@@ -580,12 +578,19 @@ fn fwd_range(config: &EncoderConfig) -> crate::yuv_convert::YuvRange {
 }
 
 /// Run one `encode_key_frame` and translate its refusals into `Error`.
+/// `stop` is polled once per superblock inside the AOM encode (and per SB row
+/// of the phase-2 repack); a fired token surfaces as a cancelled `Error`
+/// rather than a truncated payload.
 fn encode_key_frame_checked(
     planes: aom_encode::key_frame::KeyFramePlanes<'_>,
     cfg: &aom_encode::key_frame::KeyFrameConfig,
+    stop: &almost_enough::StopToken,
 ) -> Result<Vec<u8>> {
-    aom_encode::key_frame::encode_key_frame(planes, cfg)
-        .map_err(|e| at!(Error::Encode(format!("zenav1-aom key-frame encode: {e}"))))
+    let opts = aom_encode::key_frame::EncodeConfig::new().with_stop(stop);
+    aom_encode::key_frame::encode_key_frame_with(planes, cfg, &opts).map_err(|e| match e {
+        aom_encode::key_frame::KeyFrameError::Cancelled(r) => at!(Error::from(r)),
+        e => at!(Error::Encode(format!("zenav1-aom key-frame encode: {e}"))),
+    })
 }
 
 /// Mux a colour (or monochrome) payload into an AVIF file with the config's
@@ -725,13 +730,12 @@ fn color_planes(
     width: usize,
     height: usize,
     bit_depth: u8,
-    ss_x: usize,
-    ss_y: usize,
+    subsampling: (usize, usize),
     range: crate::yuv_convert::YuvRange,
     identity: bool,
 ) -> (Vec<u16>, Vec<u16>, Vec<u16>) {
     use crate::yuv_convert::YuvMatrix;
-    let sub = (ss_x, ss_y) == (1, 1);
+    let sub = subsampling == (1, 1);
     let (cw, ch) = if sub {
         (width.div_ceil(2), height.div_ceil(2))
     } else {
@@ -756,7 +760,11 @@ fn color_planes(
                         // not widened: 255 must map to the new maximum or the
                         // round trip is not lossless.
                         let up = |c: u16| -> u16 {
-                            if shift == 0 { c } else { (c << shift) | (c >> (8 - shift)) }
+                            if shift == 0 {
+                                c
+                            } else {
+                                (c << shift) | (c >> (8 - shift))
+                            }
                         };
                         y[row * width + x] = up(g);
                         u[row * width + x] = up(b);
@@ -782,7 +790,11 @@ fn color_planes(
                         let px = buf[row * stride + x];
                         let up = |c: u8| -> u16 {
                             let c = u16::from(c);
-                            if shift == 0 { c } else { (c << shift) | (c >> (8 - shift)) }
+                            if shift == 0 {
+                                c
+                            } else {
+                                (c << shift) | (c >> (8 - shift))
+                            }
                         };
                         y[row * width + x] = up(px.g);
                         u[row * width + x] = up(px.b);
@@ -814,7 +826,15 @@ fn color_planes(
             let mut u8p = vec![0u8; cw * ch];
             let mut v8p = vec![0u8; cw * ch];
             crate::yuv_convert::rgb8_to_yuv420(
-                buf, stride, width, height, range, YuvMatrix::Bt601, &mut y8, &mut u8p, &mut v8p,
+                buf,
+                stride,
+                width,
+                height,
+                range,
+                YuvMatrix::Bt601,
+                &mut y8,
+                &mut u8p,
+                &mut v8p,
             );
             // `encode_key_frame` takes u16 samples in the bit_depth-bit range;
             // an 8-bit source carries 8-bit values, so this is a widen, not a
@@ -832,12 +852,28 @@ fn color_planes(
         ColorSource::Rgb8(buf, stride) => {
             if sub {
                 crate::yuv_convert::rgbx_to_yuv420_u16(
-                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    buf,
+                    stride,
+                    width,
+                    height,
+                    bit_depth,
+                    range,
+                    YuvMatrix::Bt601,
+                    &mut y,
+                    &mut u,
                     &mut v,
                 );
             } else {
                 crate::yuv_convert::rgbx_to_yuv444_u16(
-                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    buf,
+                    stride,
+                    width,
+                    height,
+                    bit_depth,
+                    range,
+                    YuvMatrix::Bt601,
+                    &mut y,
+                    &mut u,
                     &mut v,
                 );
             }
@@ -845,12 +881,28 @@ fn color_planes(
         ColorSource::Rgb16(buf, stride) => {
             if sub {
                 crate::yuv_convert::rgbx_to_yuv420_u16(
-                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    buf,
+                    stride,
+                    width,
+                    height,
+                    bit_depth,
+                    range,
+                    YuvMatrix::Bt601,
+                    &mut y,
+                    &mut u,
                     &mut v,
                 );
             } else {
                 crate::yuv_convert::rgbx_to_yuv444_u16(
-                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    buf,
+                    stride,
+                    width,
+                    height,
+                    bit_depth,
+                    range,
+                    YuvMatrix::Bt601,
+                    &mut y,
+                    &mut u,
                     &mut v,
                 );
             }
@@ -859,12 +911,28 @@ fn color_planes(
         ColorSource::Rgba8(buf, stride) => {
             if sub {
                 crate::yuv_convert::rgbx_to_yuv420_u16(
-                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    buf,
+                    stride,
+                    width,
+                    height,
+                    bit_depth,
+                    range,
+                    YuvMatrix::Bt601,
+                    &mut y,
+                    &mut u,
                     &mut v,
                 );
             } else {
                 crate::yuv_convert::rgbx_to_yuv444_u16(
-                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    buf,
+                    stride,
+                    width,
+                    height,
+                    bit_depth,
+                    range,
+                    YuvMatrix::Bt601,
+                    &mut y,
+                    &mut u,
                     &mut v,
                 );
             }
@@ -872,12 +940,28 @@ fn color_planes(
         ColorSource::Rgba16(buf, stride) => {
             if sub {
                 crate::yuv_convert::rgbx_to_yuv420_u16(
-                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    buf,
+                    stride,
+                    width,
+                    height,
+                    bit_depth,
+                    range,
+                    YuvMatrix::Bt601,
+                    &mut y,
+                    &mut u,
                     &mut v,
                 );
             } else {
                 crate::yuv_convert::rgbx_to_yuv444_u16(
-                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    buf,
+                    stride,
+                    width,
+                    height,
+                    bit_depth,
+                    range,
+                    YuvMatrix::Bt601,
+                    &mut y,
+                    &mut u,
                     &mut v,
                 );
             }
@@ -900,12 +984,9 @@ fn finish_color(
     stop.check().map_err(|e| at!(Error::from(e)))?;
     let cfg = key_frame_config(config, width, height, bit_depth, false);
     let payload = encode_key_frame_checked(
-        aom_encode::key_frame::KeyFramePlanes {
-            y: &y,
-            u: &u,
-            v: &v,
-        },
+        aom_encode::key_frame::KeyFramePlanes::new(&y, &u, &v),
         &cfg,
+        stop,
     )?;
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
@@ -926,7 +1007,6 @@ fn finish_color(
         None,
     )
 }
-
 
 /// Encode a straight (non-premultiplied) alpha plane as the Cs400 monochrome
 /// auxiliary item an AVIF `auxl` alpha reference points at.
@@ -950,6 +1030,7 @@ fn encode_alpha_plane(
     height: usize,
     bit_depth: u8,
     config: &EncoderConfig,
+    stop: &almost_enough::StopToken,
 ) -> Result<Vec<u8>> {
     let mut cfg = key_frame_config(config, width, height, bit_depth, true);
     cfg.cq_level = if wants_lossless(config) {
@@ -957,19 +1038,17 @@ fn encode_alpha_plane(
     } else {
         quality_to_cq_level(crate::encoder::effective_alpha_quality(config))
     };
-    cfg.color = aom_encode::key_frame::ColorDescription {
-        full_range: true,
-        ..Default::default()
+    cfg.color = {
+        let mut c = aom_encode::key_frame::ColorDescription::default();
+        c.full_range = true;
+        c
     };
     // A mono encode reads only the luma plane; `encode_key_frame` still wants
     // the chroma slices to exist and be empty for monochrome.
     encode_key_frame_checked(
-        aom_encode::key_frame::KeyFramePlanes {
-            y: alpha,
-            u: &[],
-            v: &[],
-        },
+        aom_encode::key_frame::KeyFramePlanes::new(alpha, &[], &[]),
         &cfg,
+        stop,
     )
 }
 
@@ -991,22 +1070,18 @@ fn finish_color_with_alpha(
         width,
         height,
         bit_depth,
-        cfg.ss_x,
-        cfg.ss_y,
+        (cfg.ss_x, cfg.ss_y),
         fwd_range(config),
         wants_identity(config),
     );
     let payload = encode_key_frame_checked(
-        aom_encode::key_frame::KeyFramePlanes {
-            y: &y,
-            u: &u,
-            v: &v,
-        },
+        aom_encode::key_frame::KeyFramePlanes::new(&y, &u, &v),
         &cfg,
+        stop,
     )?;
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let alpha_payload = encode_alpha_plane(&alpha, width, height, bit_depth, config)?;
+    let alpha_payload = encode_alpha_plane(&alpha, width, height, bit_depth, config, stop)?;
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
     mux_aom(
@@ -1049,7 +1124,11 @@ pub(crate) fn encode_rgba8_aom(
             let c = u16::from(px.a);
             // Scale, not widen: full-range alpha must map 255 -> the coded
             // maximum, or a fully opaque pixel stops being fully opaque.
-            if shift == 0 { c } else { (c << shift) | (c >> (8 - shift)) }
+            if shift == 0 {
+                c
+            } else {
+                (c << shift) | (c >> (8 - shift))
+            }
         }));
     }
     finish_color_with_alpha(
@@ -1139,8 +1218,7 @@ pub(crate) fn encode_rgb8_aom(
         width,
         height,
         bit_depth,
-        probe.ss_x,
-        probe.ss_y,
+        (probe.ss_x, probe.ss_y),
         fwd_range(config),
         wants_identity(config),
     );
@@ -1183,8 +1261,7 @@ pub(crate) fn encode_rgb16_aom(
         width,
         height,
         bit_depth,
-        probe.ss_x,
-        probe.ss_y,
+        (probe.ss_x, probe.ss_y),
         fwd_range(config),
         wants_identity(config),
     );
@@ -1233,7 +1310,11 @@ pub(crate) fn encode_gray8_aom(
             if full_range {
                 // Scale, not widen: 255 must reach the coded maximum, the same
                 // rule `color_planes` and the alpha plane use.
-                if shift == 0 { c } else { (c << shift) | (c >> (8 - shift)) }
+                if shift == 0 {
+                    c
+                } else {
+                    (c << shift) | (c >> (8 - shift))
+                }
             } else {
                 // Studio swing at the coded depth: 16..235 scaled by 1 << shift.
                 //
@@ -1251,12 +1332,9 @@ pub(crate) fn encode_gray8_aom(
     stop.check().map_err(|e| at!(Error::from(e)))?;
     let cfg = key_frame_config(config, width, height, bit_depth, true);
     let payload = encode_key_frame_checked(
-        aom_encode::key_frame::KeyFramePlanes {
-            y: &y,
-            u: &[],
-            v: &[],
-        },
+        aom_encode::key_frame::KeyFramePlanes::new(&y, &[], &[]),
         &cfg,
+        &stop,
     )?;
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
@@ -1278,4 +1356,18 @@ pub(crate) fn encode_gray8_aom(
         cfg.color.full_range,
         None,
     )
+}
+
+#[cfg(test)]
+mod cancellation_config_tests {
+    #[test]
+    fn cancellation_update_preserves_screen_search_defaults() {
+        let config = crate::EncoderConfig::new();
+        for speed in [0, 5, 10] {
+            let config = config.clone().speed(speed);
+            let cfg = super::key_frame_config(&config, 64, 64, 8, false);
+            assert!(!cfg.enable_palette);
+            assert!(!cfg.enable_intrabc);
+        }
+    }
 }

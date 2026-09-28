@@ -109,7 +109,10 @@ fn alpha_is_served_by_aom_in_place_and_the_rgba_encode_keeps_alpha() {
     );
     let img = Img::new(vec![Rgba::new(80, 100, 120, 128); 32 * 32], 32, 32);
     let out = route.encode_rgba8(img.as_ref(), stop()).unwrap();
-    assert!(out.alpha_byte_size > 0, "the auxiliary alpha item must carry bytes");
+    assert!(
+        out.alpha_byte_size > 0,
+        "the auxiliary alpha item must carry bytes"
+    );
     zenavif::decode(&out.avif_file).unwrap();
 }
 #[cfg(feature = "zenav1-svt")]

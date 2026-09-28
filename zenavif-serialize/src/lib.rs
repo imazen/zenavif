@@ -869,10 +869,7 @@ impl Aviffy {
                 high_bitdepth: color_depth_bits >= 10,
                 twelve_bit: color_depth_bits >= 12,
                 monochrome: fallback_mono,
-                chroma_subsampling_x: match seq_profile {
-                    1 => false,
-                    _ => true,
-                } || fallback_mono,
+                chroma_subsampling_x: seq_profile != 1 || fallback_mono,
                 chroma_subsampling_y: match seq_profile {
                     0 => true,
                     1 => false,

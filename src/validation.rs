@@ -337,17 +337,22 @@ impl crate::EncoderConfig {
             }
         }
         #[cfg(feature = "zenav1-svt")]
-        if !self.svt_route_enhancements.is_empty() && (self.svt_route_policy.is_some() || self.backend != crate::Av1Backend::Zenav1Svt) {
+        if !self.svt_route_enhancements.is_empty()
+            && (self.svt_route_policy.is_some() || self.backend != crate::Av1Backend::Zenav1Svt)
+        {
             return Err(ValidationError::BackendUnsupportedParam {
-                backend: "SVT Zen enhancements", param: "policy/backend", detail: "explicit enhancements require Zen policy on the SVT backend",
+                backend: "SVT Zen enhancements",
+                param: "policy/backend",
+                detail: "explicit enhancements require Zen policy on the SVT backend",
             });
         }
-
 
         #[cfg(feature = "zenav1-svt")]
         if self.svt_route_policy.is_some() && self.backend != crate::Av1Backend::Zenav1Svt {
             return Err(ValidationError::BackendUnsupportedParam {
-                backend: "SvtParity", param: "backend", detail: "strict SVT policy cannot be transferred to another backend",
+                backend: "SvtParity",
+                param: "backend",
+                detail: "strict SVT policy cannot be transferred to another backend",
             });
         }
         // The deprecated svtav1 backend exists in no build (the

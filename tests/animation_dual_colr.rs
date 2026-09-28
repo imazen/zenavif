@@ -71,13 +71,14 @@ fn icc_and_nclx_survive_together_in_both_box_orders() {
     let positions: Vec<_> = original
         .windows(4)
         .enumerate()
-        .filter_map(|(i, b)| (b == b"colr").then(|| i - 4))
+        .filter(|(_, b)| *b == b"colr")
+        .map(|(i, _)| i - 4)
         .collect();
     assert_eq!(positions.len(), 4);
     for reverse in [false, true] {
         let mut data = original.clone();
         if reverse {
-            for pair in positions.chunks_exact(2) {
+            for pair in positions.as_chunks::<2>().0 {
                 let a = pair[0];
                 let b = pair[1];
                 let len_a = u32::from_be_bytes(data[a..a + 4].try_into().unwrap()) as usize;
