@@ -2,6 +2,9 @@
 
 ## Coordinated animation and precision contracts (unreleased)
 
+- Stamp decoded animation descriptors after alpha/depth conversion and carry RGB/full-range CICP on reconstructed pixels. Raw coded matrix/range remain on source metadata.
+
+
 - Carry exact rational durations through the zencodec animation adapter. Reject invalid frame admission atomically and bound retained inputs, cumulative pixels, duration, and frame count.
 - Preserve source descriptor/ColorContext through animation encoding, retain decode job cancellation, poison failed decoder state, and keep original indices for skipped frames. Borrowed finish cancellation reaches native zenravif processing.
 - Implement explicit native 12-bit RGB/RGBA still and animation output, including alpha and low sample bits. Keep packed U16 values normalized to the full storage range.
