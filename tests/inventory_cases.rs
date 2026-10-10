@@ -1082,6 +1082,80 @@ fn anim_dup_moov(a: &Anim) -> Vec<u8> {
     bmff::insert_before(&d, &[b"moov"], &mv1, true)
 }
 
+// ── Round-2 cases (review-repro/cases-r2, tools/make_r2*.py) ──────────────
+
+/// The replaced iprp's own ipma carries a payload in its association bytes:
+/// indices past the first ipco's three properties, which read_iprp skips.
+fn r2_dup_iprp_ipma_payload(w: &White) -> Vec<u8> {
+    let pay = b"IPMA-HIDDEN-PAYLOAD-SENTINEL";
+    assert!(pay.iter().all(|&c| c < 0x80 && (c & 0x7f) > 3));
+    let ipma1 = full(
+        b"ipma",
+        0,
+        0,
+        &cat(&[
+            &1u32.to_be_bytes(),
+            &1u16.to_be_bytes(),
+            &[pay.len() as u8],
+            pay,
+        ]),
+    );
+    let iprp1 = bx(
+        b"iprp",
+        &cat(&[
+            &bx(
+                b"ipco",
+                &cat(&[&icc_colr(), &w.ispe, &bx(b"zPrv", b"IPRP1-PRIVATE")]),
+            ),
+            &ipma1,
+        ]),
+    );
+    let iprp2 = bx(b"iprp", &cat(&[&bx(b"ipco", &base_props(w)), &base_ipma()]));
+    Still {
+        iprp_override: Some(cat(&[&iprp1, &iprp2])),
+        ..Still::base(w)
+    }
+    .build(w)
+}
+
+/// Boxes of the moov family under a parent whose reader skips them: an stco
+/// directly under moov, an elst directly under mdia, a trak inside a trak.
+fn r2_moov_misplaced(mv: Vec<u8>) -> Vec<u8> {
+    let stco = full(
+        b"stco",
+        0,
+        0,
+        &cat(&[&6u32.to_be_bytes(), b"MOOV-LEVEL-STCO-SENTINEL"]),
+    );
+    let elst = full(b"elst", 0, 0, b"MDIA-LEVEL-ELST-SENTINEL");
+    let nested = bx(b"trak", &full(b"mdhd", 0, 0, b"NESTED-TRAK-MDHD-SENTINEL"));
+    let mv = bmff::append_child(&mv, &[b"moov", b"trak", b"mdia"], &elst, false);
+    let mv = bmff::append_child(&mv, &[b"moov", b"trak"], &nested, false);
+    bmff::append_child(&mv, &[b"moov"], &stco, false)
+}
+
+/// edts nested 40 deep under the track: read_trak reads only the elst
+/// children of its edts.
+fn r2_deep_edts(mv: Vec<u8>) -> Vec<u8> {
+    let mut inner = full(b"elst", 0, 0, b"DEEP-EDTS-ELST-SENTINEL");
+    for _ in 0..40 {
+        inner = bx(b"edts", &inner);
+    }
+    bmff::append_child(&mv, &[b"moov", b"trak"], &inner, false)
+}
+
+const EXIF_MOOV: &[u8] = b"\0\0\0\0MM\0*\0\0\0\x08\0\0MOOV-META-EXIF-SENTINEL";
+
+/// A track-style meta moved from the trak to directly under moov, where
+/// read_moov skips it (same moov size, so the offsets hold).
+fn r2_moov_meta(mv: Vec<u8>) -> Vec<u8> {
+    let m = bmff::get_box(&mv, &[b"moov", b"trak", b"meta"]);
+    let mv = bmff::rewrite_box(&mv, &[b"moov", b"trak", b"meta"], &[]);
+    // rewrite_box shifted the stco entries; shift them back.
+    let mv = shift_stco(&mv, m.len() as i64);
+    bmff::append_child(&mv, &[b"moov"], &m, false)
+}
+
 // ── Gain-map cases (supported_gainmap_writer_version_with_extra_bytes) ─────
 
 fn gain_map_base() -> Vec<u8> {
@@ -1614,6 +1688,66 @@ fn cases() -> Vec<Case> {
             vec![(b"TMAP-ALT-ICC-SENTINEL", D::Metadata(K::GainMap))],
         ),
         case("gm_frame_overwritten", gm_frame_overwritten(), vec![]),
+        case(
+            "r2_dup_iprp_ipma_payload",
+            r2_dup_iprp_ipma_payload(&w),
+            vec![
+                (b"IPMA-HIDDEN-PAYLOAD-SENTINEL", D::Dropped),
+                (ICC_FIRST, D::Dropped),
+                (b"IPRP1-PRIVATE", D::Dropped),
+            ],
+        ),
+        case(
+            "r2_moov_misplaced",
+            anim_build(&a, None, TrackExif::None, Some(&r2_moov_misplaced)),
+            vec![
+                (b"MOOV-LEVEL-STCO-SENTINEL", D::Skipped),
+                (b"MDIA-LEVEL-ELST-SENTINEL", D::Skipped),
+                (b"NESTED-TRAK-MDHD-SENTINEL", D::Skipped),
+            ],
+        ),
+        Case {
+            extra: Some(Box::new(|_, inv| {
+                let capped: Vec<&Part> = inv
+                    .parts()
+                    .iter()
+                    .filter(|p| {
+                        p.detail
+                            .as_deref()
+                            .is_some_and(|d| d.contains("deeper than"))
+                    })
+                    .collect();
+                assert_eq!(capped.len(), 1, "{inv}");
+                assert_eq!(capped[0].disposition, Disposition::Unknown, "{inv}");
+            })),
+            ..case(
+                "r2_deep_edts",
+                anim_build(&a, None, TrackExif::None, Some(&r2_deep_edts)),
+                vec![(b"DEEP-EDTS-ELST-SENTINEL", D::Unknown)],
+            )
+        },
+        Case {
+            extra: Some(Box::new(|_, inv| {
+                let metas: Vec<&Part> = inv
+                    .parts()
+                    .iter()
+                    .filter(|p| p.tag == PartTag::FourCc(*b"meta"))
+                    .collect();
+                // The top-level meta, and the one under moov.
+                assert_eq!(metas.len(), 2, "{inv}");
+                assert_eq!(metas[1].disposition, Disposition::Skipped, "{inv}");
+            })),
+            ..case(
+                "r2_moov_meta",
+                anim_build(
+                    &a,
+                    None,
+                    TrackExif::Mdat(EXIF_MOOV, Vec::new()),
+                    Some(&r2_moov_meta),
+                ),
+                vec![(b"MOOV-META-EXIF-SENTINEL", D::Skipped)],
+            )
+        },
     ];
     v.push(case(
         "anim_base",

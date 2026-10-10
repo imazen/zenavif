@@ -179,8 +179,18 @@ enum Ctx {
     Iprp,
     Ipco,
     Iref,
-    /// A `moov` subtree (`read_moov`), read for animation.
+    /// Children of `moov` (`read_moov`), read for animation.
     Moov,
+    /// Children of a `trak` (`read_trak`).
+    Trak,
+    /// Children of a track's `edts` (`read_trak` reads only `elst`).
+    Edts,
+    /// Children of `mdia` (`read_mdia`).
+    Mdia,
+    /// Children of `minf` (`read_minf`).
+    Minf,
+    /// Children of `stbl` (`read_stbl`).
+    Stbl,
     /// Sample entries in a track's `stsd` (`read_stsd`).
     Stsd,
     /// Children of an `av01` sample entry (`read_stsd`).
@@ -951,7 +961,7 @@ impl<'a> Walker<'a> {
         depth: usize,
     ) -> Result<usize, At<Error>> {
         let range = pos..h.end;
-        let (disp, mut layout, child_ctx, why) = classify(ctx, &h.typ);
+        let (mut disp, mut layout, child_ctx, why) = classify(ctx, &h.typ);
         let mut kind = match ctx {
             Ctx::Ipco => PartKind::Property,
             _ => PartKind::Box,
@@ -966,8 +976,13 @@ impl<'a> Walker<'a> {
             notes.push("uuid box too short for its 16-byte usertype".to_string());
         }
         if depth >= MAX_DEPTH && layout != Layout::Leaf {
+            // The work budget's fallback (zencodec docs/inventory.md):
+            // unverified bytes are never reported consumed.
             layout = Layout::Leaf;
-            notes.push(format!("nested deeper than {MAX_DEPTH} boxes; not walked"));
+            disp = Disposition::Unknown;
+            notes.push(format!(
+                "nested deeper than {MAX_DEPTH} boxes; not walked; the decoder may read it"
+            ));
         }
         let content = pos + h.base_header..h.end;
         let c = slice(self.data, content.clone());
@@ -1194,7 +1209,7 @@ impl<'a> Walker<'a> {
                     ..TrakRec::default()
                 });
             }
-            (Ctx::Moov, b"tkhd") => {
+            (Ctx::Trak, b"tkhd") => {
                 let tid = match c.first() {
                     Some(1) => be32_at(c, 20),
                     Some(_) => be32_at(c, 12),
@@ -1204,24 +1219,19 @@ impl<'a> Walker<'a> {
                     self.traks[t].track_id = tid as u32;
                 }
             }
-            (Ctx::Moov, b"hdlr") => {
-                let in_mdia =
-                    parent.is_some_and(|p| self.nodes[p].tag == PartTag::FourCc(*b"mdia"));
-                if in_mdia
-                    && let Some(t) = self.trak_of(parent)
+            (Ctx::Mdia, b"hdlr") => {
+                if let Some(t) = self.trak_of(parent)
                     && let Some(ht) = c.get(8..12).and_then(|b| <[u8; 4]>::try_from(b).ok())
                 {
                     self.traks[t].handler = Some(ht);
                 }
             }
-            (Ctx::Moov, b"stbl") => {
-                let in_minf =
-                    parent.is_some_and(|p| self.nodes[p].tag == PartTag::FourCc(*b"minf"));
-                if in_minf && let Some(t) = self.trak_of(parent) {
+            (Ctx::Minf, b"stbl") => {
+                if let Some(t) = self.trak_of(parent) {
                     self.traks[t].has_stbl = true;
                 }
             }
-            (Ctx::Moov, b"stsd") => {
+            (Ctx::Stbl, b"stsd") => {
                 if let Some(t) = self.trak_of(parent) {
                     self.traks[t].stsds.push(id);
                 }
@@ -1241,7 +1251,7 @@ impl<'a> Walker<'a> {
                     self.traks[t].auxl.extend(ids);
                 }
             }
-            (Ctx::Moov, b"meta") => {
+            (Ctx::Trak, b"meta") => {
                 let trak = self.trak_of(parent);
                 self.track_meta_index.insert(id, self.track_metas.len());
                 self.track_metas.push(TrackMetaRec {
@@ -1705,45 +1715,39 @@ fn classify(ctx: Ctx, typ: &[u8; 4]) -> (Disposition, Layout, Ctx, Option<&'stat
         // Properties and references: decided in the second pass.
         Ctx::Ipco => (D::Unknown, Layout::Leaf, ctx, None),
         Ctx::Iref => (D::Dropped, Layout::Leaf, ctx, None),
-        // `read_moov`/`read_trak`/`read_mdia`/`read_minf`/`read_stbl`.
-        Ctx::Moov => {
-            let layout = generic_layout(typ);
-            // `read_moov`, `read_trak`, `read_mdia`, `read_minf`, `read_stbl`;
-            // `stss` and other children are skipped.
-            let read = matches!(
-                typ,
-                b"mvhd"
-                    | b"trak"
-                    | b"tkhd"
-                    | b"tref"
-                    | b"edts"
-                    | b"elst"
-                    | b"mdia"
-                    | b"mdhd"
-                    | b"hdlr"
-                    | b"minf"
-                    | b"stbl"
-                    | b"stts"
-                    | b"stsc"
-                    | b"stsz"
-                    | b"stco"
-                    | b"co64"
-            );
-            match typ {
-                b"free" | b"skip" => (D::Padding, Layout::Leaf, ctx, None),
-                b"uuid" => (D::Unknown, Layout::Leaf, ctx, None),
-                b"stsd" => (D::Structure, Layout::FullCount, Ctx::Stsd, None),
-                b"tref" => (D::Structure, Layout::Plain, Ctx::Tref, None),
-                b"meta" => (
-                    D::Structure,
-                    Layout::Full,
-                    Ctx::TrackMeta,
-                    Some("track metadata (EXIF/XMP sidecars)"),
-                ),
-                _ if read => (D::Structure, layout, ctx, None),
-                _ => (D::Skipped, layout, Ctx::Unread, None),
+        // `read_moov`, `read_trak`, `read_mdia`, `read_minf`, `read_stbl`:
+        // each reads a fixed set of children and sends the rest to
+        // `skip_box_remain`.
+        Ctx::Moov | Ctx::Trak | Ctx::Edts | Ctx::Mdia | Ctx::Minf | Ctx::Stbl => match (ctx, typ) {
+            (_, b"free" | b"skip") => (D::Padding, Layout::Leaf, ctx, None),
+            (_, b"uuid") => (D::Unknown, Layout::Leaf, ctx, None),
+            (Ctx::Moov, b"mvhd") => (D::Structure, Layout::Leaf, ctx, None),
+            (Ctx::Moov, b"trak") => (D::Structure, Layout::Plain, Ctx::Trak, None),
+            (Ctx::Trak, b"meta") => (
+                D::Structure,
+                Layout::Full,
+                Ctx::TrackMeta,
+                Some("track metadata (EXIF/XMP sidecars)"),
+            ),
+            (Ctx::Trak, b"tkhd") => (D::Structure, Layout::Leaf, ctx, None),
+            (Ctx::Trak, b"tref") => (D::Structure, Layout::Plain, Ctx::Tref, None),
+            (Ctx::Trak, b"edts") => (D::Structure, Layout::Plain, Ctx::Edts, None),
+            (Ctx::Trak, b"mdia") => (D::Structure, Layout::Plain, Ctx::Mdia, None),
+            (Ctx::Edts, b"elst") => (D::Structure, Layout::Leaf, ctx, None),
+            (Ctx::Mdia, b"mdhd" | b"hdlr") => (D::Structure, Layout::Leaf, ctx, None),
+            (Ctx::Mdia, b"minf") => (D::Structure, Layout::Plain, Ctx::Minf, None),
+            (Ctx::Minf, b"stbl") => (D::Structure, Layout::Plain, Ctx::Stbl, None),
+            (Ctx::Stbl, b"stsd") => (D::Structure, Layout::FullCount, Ctx::Stsd, None),
+            (Ctx::Stbl, b"stts" | b"stsc" | b"stsz" | b"stco" | b"co64") => {
+                (D::Structure, Layout::Leaf, ctx, None)
             }
-        }
+            _ => (
+                D::Skipped,
+                generic_layout(typ),
+                Ctx::Unread,
+                Some("zenavif-parse skips this box"),
+            ),
+        },
         Ctx::Stsd => match typ {
             b"av01" => (
                 D::Structure,
@@ -1864,7 +1868,7 @@ fn inner_parts(
     let v1 = c.first() == Some(&1);
     let property = matches!(ctx, Ctx::Ipco | Ctx::Av01Entry);
     let read: Option<(usize, &str)> = match (ctx, typ) {
-        (Ctx::Meta | Ctx::Moov | Ctx::TrackMeta, b"hdlr") => Some((
+        (Ctx::Meta | Ctx::Mdia | Ctx::TrackMeta, b"hdlr") => Some((
             12,
             "reserved fields and handler name: zenavif-parse reads only the handler type",
         )),
@@ -1962,22 +1966,22 @@ fn inner_parts(
             }
             _ => None,
         },
-        (Ctx::Moov, b"mvhd" | b"mdhd") => Some((
+        (Ctx::Moov, b"mvhd") | (Ctx::Mdia, b"mdhd") => Some((
             if v1 { 32 } else { 20 },
             "after the time scale and duration read",
         )),
-        (Ctx::Moov, b"tkhd") => Some((
+        (Ctx::Trak, b"tkhd") => Some((
             if v1 { 36 } else { 24 },
             "after the track ID and duration read (width, height, matrix skipped)",
         )),
-        (Ctx::Moov, b"elst") => be32_at(c, 4).map(|n| {
+        (Ctx::Edts, b"elst") => be32_at(c, 4).map(|n| {
             let per = if v1 { 20 } else { 12 };
             (
                 usize::try_from(n.saturating_mul(per).saturating_add(8)).unwrap_or(usize::MAX),
                 "after the edit entries read",
             )
         }),
-        (Ctx::Moov, b"stts" | b"stsc" | b"stco" | b"co64") => be32_at(c, 4).map(|n| {
+        (Ctx::Stbl, b"stts" | b"stsc" | b"stco" | b"co64") => be32_at(c, 4).map(|n| {
             let per: u64 = match typ {
                 b"stts" | b"co64" => 8,
                 b"stsc" => 12,
@@ -1988,7 +1992,7 @@ fn inner_parts(
                 "after the entries read",
             )
         }),
-        (Ctx::Moov, b"stsz") => match (be32_at(c, 4), be32_at(c, 8)) {
+        (Ctx::Stbl, b"stsz") => match (be32_at(c, 4), be32_at(c, 8)) {
             (Some(0), Some(n)) => Some((
                 usize::try_from(n.saturating_mul(4).saturating_add(12)).unwrap_or(usize::MAX),
                 "after the sample sizes read",
@@ -2977,14 +2981,27 @@ impl Walker<'_> {
             .filter(|(_, _, i)| *i > 0)
             .filter_map(|&(_, _, i)| active.get(usize::from(i) - 1).copied())
             .collect();
+        // A replaced iprp takes its ipco and ipma with it.
+        const IPRP_REPLACED: &str =
+            "a later iprp replaces this one (read_avif_meta_scoped keeps the last)";
+        let replaced = |p: usize| Some(p) != active_iprp;
         for &n in &self.iprps.clone() {
-            if Some(n) != active_iprp {
+            if replaced(n) {
                 self.nodes[n].disp = Disposition::Dropped;
-                self.note(
-                    n,
-                    "a later iprp replaces this one (read_avif_meta_scoped keeps the last)",
-                );
+                self.note(n, IPRP_REPLACED);
             }
+        }
+        let in_replaced: Vec<usize> = self
+            .ipcos
+            .iter()
+            .copied()
+            .chain(self.ipmas.iter().map(|(n, p, _)| (*n, *p)))
+            .filter(|&(_, p)| replaced(p))
+            .map(|(n, _)| n)
+            .collect();
+        for n in in_replaced {
+            self.nodes[n].disp = Disposition::Dropped;
+            self.note(n, IPRP_REPLACED);
         }
         let active_ipco = self
             .ipcos
@@ -3016,10 +3033,20 @@ impl Walker<'_> {
                 );
             }
         }
+        let mut in_active_ipco = vec![false; props.len()];
+        for &i in &active {
+            in_active_ipco[i] = true;
+        }
+        // Running count of properties per ipco, for the `#n` label.
+        let mut per_ipco: BTreeMap<usize, usize> = BTreeMap::new();
         for (gi, rec) in props.iter().enumerate() {
-            let pos = props[..gi].iter().filter(|p| p.ipco == rec.ipco).count();
-            self.note(rec.node, format!("property #{}", pos + 1));
-            let in_active = active.contains(&gi);
+            if gi % 4096 == 0 {
+                self.check_stop()?;
+            }
+            let pos = per_ipco.entry(rec.ipco).or_insert(0);
+            *pos += 1;
+            self.note(rec.node, format!("property #{pos}"));
+            let in_active = in_active_ipco[gi];
             let (disp, why) = if model.is_none() {
                 (Disposition::Dropped, rejected().why)
             } else if !in_active {
@@ -3565,7 +3592,11 @@ impl Walker<'_> {
         } else {
             node.notes.push(cand.why);
         }
-        if cand.disp == Disposition::ImageData {
+        // AV1 data: the image items, samples, and the gain-map image.
+        let av1 = cand.disp == Disposition::ImageData
+            || (cand.disp == Disposition::Metadata(MetadataKind::GainMap)
+                && node.notes.iter().any(|n| n.contains("gain-map image")));
+        if av1 {
             node.notes.push(
                 "coded-unit framing inside is not walked yet: bytes after the last OBU are not distinguished"
                     .to_string(),
