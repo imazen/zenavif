@@ -6430,6 +6430,8 @@ mod sidecar_extent_tests {
     use super::*;
 
     #[test]
+    // `4..3` is deliberately reversed: the resolver must reject it.
+    #[allow(clippy::reversed_empty_ranges)]
     fn idat_extents_check_bounds_and_preserve_order() {
         let raw = b"abcdefgh";
         let ordered = [ExtentRange::WithLength(4..6), ExtentRange::WithLength(1..3)];
