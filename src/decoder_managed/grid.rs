@@ -8,7 +8,7 @@
 use super::ManagedAvifDecoder;
 use crate::error::{Error, Result};
 use enough::Stop;
-use rav1d_safe::src::managed::Frame;
+use rav1d_safe::Frame;
 use whereat::at;
 use zenpixels::PixelBuffer;
 

@@ -11,7 +11,7 @@ use crate::config::DecoderConfig;
 use crate::error::{Error, Result, error_from_rav1d};
 use crate::image::{AnimationFrameTiming, DecodedAnimation, DecodedAnimationInfo, DecodedFrame};
 use enough::Stop;
-use rav1d_safe::src::managed::{Decoder as Rav1dDecoder, Frame, Settings};
+use rav1d_safe::{Decoder as Rav1dDecoder, Frame, Settings};
 use whereat::at;
 
 impl ManagedAvifDecoder {

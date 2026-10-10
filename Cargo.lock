@@ -2595,7 +2595,6 @@ dependencies = [
 name = "zenpredict"
 version = "0.2.0"
 dependencies = [
- "archmage",
  "bytemuck",
  "libm",
  "lz4_flex 0.11.6",

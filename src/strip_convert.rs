@@ -20,7 +20,7 @@ use rgb::{Rgb, Rgba};
 use whereat::at;
 use zenpixels::{PixelBuffer, PixelDescriptor};
 
-use rav1d_safe::src::managed::{Frame, Planes};
+use rav1d_safe::{Frame, Planes};
 
 /// Holds decoded YUV frames and converts strips on demand.
 ///

@@ -126,7 +126,7 @@ impl From<StopReason> for Error {
 /// `context` supplies the message for the cases with no more specific
 /// signal (`InvalidSettings`/`InitFailed`/`Other`).
 ///
-/// `rav1d_safe::src::managed::Error::OutOfMemory` routes to zenavif's own
+/// `rav1d_safe::Error::OutOfMemory` routes to zenavif's own
 /// dedicated [`Error::OutOfMemory`] variant rather than staying
 /// `Decode`-shaped, since `Resource` is a better fit than "the decoder
 /// itself failed". `Cancelled` (rav1d-safe's own cooperative in-flight
@@ -134,8 +134,8 @@ impl From<StopReason> for Error {
 /// release) routes to [`Error::Cancelled`]; the enum variant carries no
 /// reason, and `Cancelled` is the accurate `StopReason` at this boundary
 /// (same mapping the encode path uses for `ravif::Error::Cancelled`).
-pub(crate) fn error_from_rav1d(e: rav1d_safe::src::managed::Error, context: &'static str) -> Error {
-    use rav1d_safe::src::managed::Error as R;
+pub(crate) fn error_from_rav1d(e: rav1d_safe::Error, context: &'static str) -> Error {
+    use rav1d_safe::Error as R;
     match e {
         R::InvalidData => Error::Malformed(context),
         R::NeedMoreData => Error::UnexpectedEof(context),
@@ -417,7 +417,7 @@ mod error_category_tests {
     #[test]
     fn error_from_rav1d_classifies_real_cause() {
         use super::error_from_rav1d;
-        use rav1d_safe::src::managed::Error as R;
+        use rav1d_safe::Error as R;
 
         assert_eq!(
             error_from_rav1d(R::InvalidData, "decode failed").category(),
