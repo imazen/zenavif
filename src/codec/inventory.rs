@@ -1344,6 +1344,8 @@ struct Model {
     samples: Vec<(Range<u64>, Use, &'static str)>,
     /// Track-level metadata items located through the parser.
     sidecars: Vec<(Range<u64>, Use, &'static str)>,
+    /// More samples than an inventory may hold.
+    too_many: bool,
 }
 
 /// The byte range `s` occupies inside `base`, when it borrows from it.
@@ -1698,6 +1700,12 @@ impl Model {
             return;
         };
         for i in 0..info.frame_count {
+            // Every sample becomes a part: stop at the part cap; `resolve`
+            // turns the overflow into the cap error.
+            if self.samples.len() > DEFAULT_MAX_PARTS as usize {
+                self.too_many = true;
+                return;
+            }
             let Ok(f) = parser.frame(i) else {
                 break;
             };
@@ -1932,6 +1940,11 @@ impl Walker<'_> {
             .iter()
             .filter_map(|&m| self.nodes[m].body.clone())
             .collect();
+        if model.is_some_and(|m| m.too_many) {
+            return Err(at!(Error::ResourceLimit(
+                "inventory exceeds the zencodec part cap".to_string()
+            )));
+        }
         let mut cands: Vec<Cand> = Vec::new();
         let mut located: BTreeSet<u32> = BTreeSet::new();
         for (note_to, entries, skipped) in std::mem::take(&mut self.ilocs) {
@@ -2038,6 +2051,11 @@ impl Walker<'_> {
                     let mut why = u.why.clone();
                     if len == 0 {
                         why.push_str("; length 0: runs to the end of its source");
+                    }
+                    if cands.len() >= self.max_nodes {
+                        return Err(at!(Error::ResourceLimit(
+                            "inventory exceeds the zencodec part cap".to_string()
+                        )));
                     }
                     cands.push(Cand {
                         item: id,
