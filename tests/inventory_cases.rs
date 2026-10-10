@@ -1329,28 +1329,28 @@ fn metadata_units(data: &[u8], inv: &Inventory, kind: MetadataKind) -> Vec<Vec<u
     let parts = inv.parts();
     let mut out = Vec::new();
     for (i, p) in parts.iter().enumerate() {
-        if p.disposition != Disposition::Metadata(kind) {
+        if p.disposition() != Disposition::Metadata(kind) {
             continue;
         }
         // Top-most: the parent is not the same metadata.
-        if p.parent
+        if p.parent()
             .and_then(|q| inv.get(q))
-            .is_some_and(|q| q.disposition == p.disposition)
+            .is_some_and(|q| q.disposition() == p.disposition())
         {
             continue;
         }
         let mut b: Vec<u8> = Vec::new();
         let kids: Vec<&Part> = parts
             .iter()
-            .filter(|c| c.parent.map(|q| q.index()) == Some(i))
+            .filter(|c| c.parent().map(|q| q.index()) == Some(i))
             .collect();
-        let mut at = p.range.start;
-        for c in kids.iter().filter(|c| c.disposition != p.disposition) {
-            b.extend_from_slice(&data[at as usize..c.range.start as usize]);
-            at = c.range.end;
+        let mut at = p.range().start;
+        for c in kids.iter().filter(|c| c.disposition() != p.disposition()) {
+            b.extend_from_slice(&data[at as usize..c.range().start as usize]);
+            at = c.range().end;
         }
-        b.extend_from_slice(&data[at as usize..p.range.end as usize]);
-        if p.tag == PartTag::FourCc(*b"colr") {
+        b.extend_from_slice(&data[at as usize..p.range().end as usize]);
+        if *p.tag() == PartTag::FourCc(*b"colr") {
             b.drain(..12.min(b.len()));
         }
         out.push(b);
@@ -1386,7 +1386,7 @@ fn check_oracle(name: &str, data: &[u8], inv: &Inventory, r: &Reports) {
         assert!(
             inv.parts()
                 .iter()
-                .any(|p| p.disposition == Disposition::ImageData),
+                .any(|p| p.disposition() == Disposition::ImageData),
             "{name}: decodes, but no part is image data\n{inv}"
         );
     }
@@ -1402,17 +1402,20 @@ fn check_reverse(name: &str, data: &[u8], inv: &Inventory, base: &Reports) -> Ve
     let parts = inv.parts();
     let mut has_child = vec![false; parts.len()];
     for p in parts {
-        if let Some(q) = p.parent {
+        if let Some(q) = p.parent() {
             has_child[q.index()] = true;
         }
     }
     let mut failures = Vec::new();
     for (i, p) in parts.iter().enumerate() {
-        if has_child[i] || !p.disposition.is_consumed() {
+        if has_child[i] || !p.disposition().is_consumed() {
             continue;
         }
-        let mut r = p.range.start as usize..p.range.end as usize;
-        if matches!(p.kind, PartKind::Box | PartKind::Property | PartKind::Item) {
+        let mut r = p.range().start as usize..p.range().end as usize;
+        if matches!(
+            p.kind(),
+            PartKind::Box | PartKind::Property | PartKind::Item
+        ) {
             let hdr = if bmff::be(data, r.start, 4) == 1 {
                 16
             } else {
@@ -1436,16 +1439,16 @@ fn check_reverse(name: &str, data: &[u8], inv: &Inventory, base: &Reports) -> Ve
                 }
                 reports(&m).sig != base.sig
             });
-        if !changes && !p.detail.as_deref().is_some_and(|d| d.contains(NO_CHANGE)) {
+        if !changes && !p.detail().is_some_and(|d| d.contains(NO_CHANGE)) {
             failures.push(format!(
                 "{name}: {} {} {}..{} {} — flipping its {} bytes changes nothing the caller receives ({:?})",
-                p.kind.name(),
-                p.tag,
-                p.range.start,
-                p.range.end,
-                p.disposition,
+                p.kind().name(),
+                p.tag(),
+                p.range().start,
+                p.range().end,
+                p.disposition(),
                 r.len(),
-                p.detail
+                p.detail()
             ));
         }
     }
@@ -1457,16 +1460,16 @@ fn leaf_at(inv: &Inventory, at: u64) -> &Part {
     let parts = inv.parts();
     let depth = |p: &Part| {
         let mut d = 0;
-        let mut q = p.parent;
+        let mut q = p.parent();
         while let Some(x) = q {
             d += 1;
-            q = parts[x.index()].parent;
+            q = parts[x.index()].parent();
         }
         d
     };
     parts
         .iter()
-        .filter(|p| p.range.start <= at && at < p.range.end)
+        .filter(|p| p.range().start <= at && at < p.range().end)
         .max_by_key(|p| depth(p))
         .expect("every byte is covered")
 }
@@ -1509,7 +1512,7 @@ fn last_byte_is(needle: Vec<u8>, d: Disposition) -> Check {
         let at =
             find(data, &needle).last().copied().expect("needle present") + needle.len() as u64 - 1;
         let leaf = leaf_at(inv, at);
-        assert_eq!(leaf.disposition, d, "leaf at {at}: {leaf:?}\n{inv}");
+        assert_eq!(leaf.disposition(), d, "leaf at {at}: {leaf:?}\n{inv}");
     })
 }
 
@@ -1520,9 +1523,9 @@ fn property_is(tag: &'static [u8; 4], label: Option<&'static str>, d: Dispositio
             .parts()
             .iter()
             .filter(|p| {
-                p.kind == PartKind::Property
-                    && p.tag == PartTag::FourCc(*tag)
-                    && (label.is_none() || p.label.as_deref() == label)
+                p.kind() == PartKind::Property
+                    && *p.tag() == PartTag::FourCc(*tag)
+                    && (label.is_none() || p.label() == label)
             })
             .collect();
         assert!(
@@ -1531,7 +1534,7 @@ fn property_is(tag: &'static [u8; 4], label: Option<&'static str>, d: Dispositio
             String::from_utf8_lossy(tag)
         );
         for p in hits {
-            assert_eq!(p.disposition, d, "{p:?}\n{inv}");
+            assert_eq!(p.disposition(), d, "{p:?}\n{inv}");
         }
     })
 }
@@ -1712,13 +1715,13 @@ fn cases() -> Vec<Case> {
                     .parts()
                     .iter()
                     .filter(|p| {
-                        p.detail
+                        p.detail()
                             .as_deref()
                             .is_some_and(|d| d.contains("deeper than"))
                     })
                     .collect();
                 assert_eq!(capped.len(), 1, "{inv}");
-                assert_eq!(capped[0].disposition, Disposition::Unknown, "{inv}");
+                assert_eq!(capped[0].disposition(), Disposition::Unknown, "{inv}");
             })),
             ..case(
                 "r2_deep_edts",
@@ -1731,11 +1734,11 @@ fn cases() -> Vec<Case> {
                 let metas: Vec<&Part> = inv
                     .parts()
                     .iter()
-                    .filter(|p| p.tag == PartTag::FourCc(*b"meta"))
+                    .filter(|p| *p.tag() == PartTag::FourCc(*b"meta"))
                     .collect();
                 // The top-level meta, and the one under moov.
                 assert_eq!(metas.len(), 2, "{inv}");
-                assert_eq!(metas[1].disposition, Disposition::Skipped, "{inv}");
+                assert_eq!(metas[1].disposition(), Disposition::Skipped, "{inv}");
             })),
             ..case(
                 "r2_moov_meta",
@@ -1784,17 +1787,17 @@ fn review_cases_conform_and_pin_their_sentinels() {
             );
             for at in hits {
                 let leaf = leaf_at(&inv, at);
-                if leaf.disposition != *want {
+                if leaf.disposition() != *want {
                     failures.push(format!(
                         "{}: {:?} at {at} is in {} {} {}..{} {} (want {want}): {:?}",
                         c.name,
                         String::from_utf8_lossy(s),
-                        leaf.kind.name(),
-                        leaf.tag,
-                        leaf.range.start,
-                        leaf.range.end,
-                        leaf.disposition,
-                        leaf.detail
+                        leaf.kind().name(),
+                        leaf.tag(),
+                        leaf.range().start,
+                        leaf.range().end,
+                        leaf.disposition(),
+                        leaf.detail()
                     ));
                 }
             }
@@ -1859,7 +1862,7 @@ fn iloc_budget_exhaustion_leaves_the_rest_unknown() {
     let inv = inventory_of(&d);
     let s = find(&d, b"TAIL-SENTINEL")[0];
     let leaf = leaf_at(&inv, s);
-    assert_eq!(leaf.disposition, Disposition::Unknown, "{leaf:?}");
+    assert_eq!(leaf.disposition(), Disposition::Unknown, "{leaf:?}");
 }
 
 /// An XMP item whose extent starts inside the EXIF item's padding (the bytes
@@ -1902,6 +1905,9 @@ fn shared_bytes_inside_exif_padding_stay_consumed() {
     let pad = find(&d, b"PADPADPA")[0];
     for at in pad + 2..pad + 8 {
         let leaf = leaf_at(&inv, at);
-        assert!(leaf.disposition.is_consumed(), "byte {at}: {leaf:?}\n{inv}");
+        assert!(
+            leaf.disposition().is_consumed(),
+            "byte {at}: {leaf:?}\n{inv}"
+        );
     }
 }

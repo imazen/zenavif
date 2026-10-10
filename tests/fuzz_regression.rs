@@ -449,23 +449,23 @@ fn metadata_oracle(data: &[u8]) {
         let parts = inv.parts();
         let mut out = Vec::new();
         for (i, p) in parts.iter().enumerate() {
-            if p.disposition != D::Metadata(kind)
-                || p.parent
+            if p.disposition() != D::Metadata(kind)
+                || p.parent()
                     .and_then(|q| inv.get(q))
-                    .is_some_and(|q| q.disposition == p.disposition)
+                    .is_some_and(|q| q.disposition() == p.disposition())
             {
                 continue;
             }
             let mut b = Vec::new();
-            let mut at = p.range.start as usize;
+            let mut at = p.range().start as usize;
             for c in parts.iter().filter(|c| {
-                c.parent.map(|q| q.index()) == Some(i) && c.disposition != p.disposition
+                c.parent().map(|q| q.index()) == Some(i) && c.disposition() != p.disposition()
             }) {
-                b.extend_from_slice(&data[at..c.range.start as usize]);
-                at = c.range.end as usize;
+                b.extend_from_slice(&data[at..c.range().start as usize]);
+                at = c.range().end as usize;
             }
-            b.extend_from_slice(&data[at..p.range.end as usize]);
-            if p.tag == PartTag::FourCc(*b"colr") {
+            b.extend_from_slice(&data[at..p.range().end as usize]);
+            if *p.tag() == PartTag::FourCc(*b"colr") {
                 b.drain(..12.min(b.len()));
             }
             out.push(b);
@@ -477,7 +477,7 @@ fn metadata_oracle(data: &[u8]) {
     let animated = inv
         .parts()
         .iter()
-        .any(|p| p.kind == PartKind::Box && p.tag == PartTag::FourCc(*b"moov"));
+        .any(|p| p.kind() == PartKind::Box && *p.tag() == PartTag::FourCc(*b"moov"));
     if let Ok(info) = job().probe_full(data) {
         for (kind, reported) in [
             (K::Exif, info.embedded_metadata.exif.as_deref()),
@@ -493,8 +493,8 @@ fn metadata_oracle(data: &[u8]) {
                     // over it (parents come before their children).
                     let mut consumed = vec![false; data.len()];
                     for p in inv.parts() {
-                        consumed[p.range.start as usize..p.range.end as usize]
-                            .fill(p.disposition.is_consumed());
+                        consumed[p.range().start as usize..p.range().end as usize]
+                            .fill(p.disposition().is_consumed());
                     }
                     (0..(data.len() + 1).saturating_sub(r.len()))
                         .filter(|&k| data[k..k + r.len()] == *r)
@@ -522,7 +522,7 @@ fn metadata_oracle(data: &[u8]) {
         .is_ok()
     {
         assert!(
-            inv.parts().iter().any(|p| p.disposition == D::ImageData),
+            inv.parts().iter().any(|p| p.disposition() == D::ImageData),
             "the decode succeeds, but no part is image data\n{inv}"
         );
     }

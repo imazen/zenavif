@@ -63,7 +63,7 @@ fn inventory_of(data: &[u8]) -> Inventory {
 }
 
 fn bytes<'a>(data: &'a [u8], p: &Part) -> &'a [u8] {
-    &data[p.range.start as usize..p.range.end as usize]
+    &data[p.range().start as usize..p.range().end as usize]
 }
 
 /// `check_inventory` for a file the inventory says the decoder turns into
@@ -74,7 +74,7 @@ fn check_file(data: &[u8], name: &str, undecodable: &mut usize) {
     if inv
         .parts()
         .iter()
-        .any(|p| p.disposition == Disposition::ImageData)
+        .any(|p| p.disposition() == Disposition::ImageData)
     {
         zencodec_testkit::check_inventory(AvifDecoderConfig::new(), data)
             .unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -94,16 +94,16 @@ fn check_file(data: &[u8], name: &str, undecodable: &mut usize) {
     let inv = inventory_of(&junked);
     let mut has_child = vec![false; inv.parts().len()];
     for p in inv.parts() {
-        if let Some(q) = p.parent {
+        if let Some(q) = p.parent() {
             has_child[q.index()] = true;
         }
     }
     for (i, p) in inv.parts().iter().enumerate() {
-        if !has_child[i] && p.range.end > data.len() as u64 {
+        if !has_child[i] && p.range().end > data.len() as u64 {
             assert!(
-                !p.disposition.is_consumed(),
+                !p.disposition().is_consumed(),
                 "{name}: appended junk reported as {}\n{inv}",
-                p.disposition
+                p.disposition()
             );
         }
     }
@@ -166,7 +166,7 @@ fn reported_metadata_matches_probe_full() {
         let inv = inventory_of(&data);
         let mut has_child = vec![false; inv.parts().len()];
         for p in inv.parts() {
-            if let Some(q) = p.parent {
+            if let Some(q) = p.parent() {
                 has_child[q.index()] = true;
             }
         }
@@ -179,10 +179,10 @@ fn reported_metadata_matches_probe_full() {
                 .iter()
                 .enumerate()
                 .filter(|(i, p)| {
-                    p.disposition == Disposition::Metadata(k)
+                    p.disposition() == Disposition::Metadata(k)
                         && (k != MetadataKind::Exif || !has_child[*i])
                         && matches!(
-                            p.kind,
+                            p.kind(),
                             PartKind::Extent | PartKind::Property | PartKind::Gap
                         )
                 })
@@ -222,7 +222,7 @@ fn reported_metadata_matches_probe_full() {
         }
         let icc: Vec<&Part> = of_kind(MetadataKind::Icc)
             .into_iter()
-            .filter(|p| p.kind == PartKind::Property)
+            .filter(|p| p.kind() == PartKind::Property)
             .collect();
         match &info.source_color.icc_profile {
             Some(want) => {
@@ -553,12 +553,12 @@ fn synthetic_fixture_part_list_is_pinned() {
             out.push(format!(
                 "{}{} {} {}..{} {}{}",
                 "  ".repeat(depth),
-                p.kind.name(),
-                p.tag,
-                p.range.start,
-                p.range.end,
-                p.disposition,
-                p.label
+                p.kind().name(),
+                p.tag(),
+                p.range().start,
+                p.range().end,
+                p.disposition(),
+                p.label()
                     .as_deref()
                     .map(|l| format!(" {l:?}"))
                     .unwrap_or_default()
@@ -785,7 +785,7 @@ fn exiftool_oracle_agrees() {
         let mut matched = 0;
         for u in &units {
             let hit = inv.parts().iter().any(|p| {
-                let tag_ok = match (&p.kind, &p.tag) {
+                let tag_ok = match (&p.kind(), &p.tag()) {
                     (PartKind::Item, _) => u.fourcc == "infe",
                     (_, PartTag::FourCc(cc)) => cc.as_slice() == u.fourcc.as_bytes(),
                     _ => false,
@@ -793,14 +793,14 @@ fn exiftool_oracle_agrees() {
                 if !tag_ok {
                     return false;
                 }
-                let start = p.range.start as usize;
+                let start = p.range().start as usize;
                 let size32 = u32::from_be_bytes(data[start..start + 4].try_into().unwrap());
                 let h = if size32 == 1 { 16 } else { 8 };
-                let mut ok = p.range.start + h == u.payload_at
-                    && p.range.end - u.payload_at == u.payload_len;
+                let mut ok = p.range().start + h == u.payload_at
+                    && p.range().end - u.payload_at == u.payload_len;
                 if !ok && u.fourcc == "uuid" {
-                    ok = p.range.start + h + 16 == u.payload_at
-                        && p.range.end - u.payload_at == u.payload_len;
+                    ok = p.range().start + h + 16 == u.payload_at
+                        && p.range().end - u.payload_at == u.payload_len;
                 }
                 ok
             });
