@@ -116,6 +116,25 @@ fn fuzz_regression() {
                 );
             }
         })
+        .target("inventory", |input| {
+            // Mirrors fuzz_inventory.rs: the structural inventory must not
+            // panic and must validate, with and without HDR reconstruction.
+            use zencodec::decode::{DecodeJob as _, DecoderConfig as _};
+            for reconstruct in [false, true] {
+                let mut job = zenavif::AvifDecoderConfig::new().job();
+                if reconstruct {
+                    job = job.with_gain_map_render(zencodec::GainMapRender::ReconstructHdr {
+                        target_headroom: None,
+                    });
+                }
+                if let Ok(Some(inv)) = job.inventory(input) {
+                    assert_eq!(inv.input_len(), input.len() as u64);
+                    if let Err(e) = inv.validate() {
+                        panic!("invalid inventory: {e}\n{inv}");
+                    }
+                }
+            }
+        })
         .run();
 
     println!("{report}");

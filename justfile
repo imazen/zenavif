@@ -292,3 +292,16 @@ arm-encode-integration-macos:
 # Exact film-grain decode parity; caller supplies the corpus fixture explicitly.
 arm-filmgrain-parity fixture iters="3":
     cargo run -p zenavif --example heaptrack_decode -- {{fixture}} {{iters}} --verify-threads
+
+# ── Structural inventory (DecodeJob::inventory) ──────────────────────────
+# Unit + fixture tests (tests/vectors, synthetic fixture, pinned part list)
+inventory-test:
+    cargo test --test inventory -- --nocapture
+
+# check_inventory over the codec-corpus AVIF conformance set
+inventory-corpus corpus=env_var_or_default("CODEC_CORPUS", "../../codec-corpus"):
+    AVIF_INVENTORY_CORPUS={{corpus}}/avif-conformance cargo test --test inventory -- --nocapture corpus_inventories_conform reported_metadata
+
+# Cross-check every box exiftool -v3 lists against the inventory
+inventory-oracle exiftool="exiftool" corpus=env_var_or_default("CODEC_CORPUS", "../../codec-corpus"):
+    INVENTORY_ORACLE_EXIFTOOL="$(command -v {{exiftool}})" AVIF_INVENTORY_CORPUS={{corpus}}/avif-conformance cargo test --test inventory exiftool_oracle_agrees -- --nocapture
