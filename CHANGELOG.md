@@ -597,6 +597,14 @@ still gates them. Also not cleared: removing
 `src/decoder.rs`, which is behind `unsafe-asm` and is compiled by nothing (not
 CI, not this box), so removing it would be an edit made blind. It stays queued.
 
+### Added — structural inventory (`DecodeJob::inventory`)
+
+- `AvifDecodeJob::inventory` maps every byte of an AVIF file without decoding pixels: every box (recursively, including `moov`/`trak` and track-level `meta`), every `infe` as an item, every `ipco` property, every `iloc` extent and animation sample inside its `mdat`/`idat`, slack, trailing bytes and malformed boxes, each with what the zencodec decode does with it. `DecodeCapabilities::with_inventory(true)`. Bytes zenavif-parse never reads inside a consumed part (property tails, item names, `av1C` configOBUs, handler names, sample-entry fixed fields, ICC past its declared size, EXIF offset padding, XMP trailers, `tmap` bytes past the ISO 21496-1 payload) are separate parts. `examples/inventory.rs` prints inventories; fuzz target `inventory` (`6a3ce708`).
+- Tests: `check_inventory` on `tests/vectors` and encoder output, a pinned synthetic fixture, metadata bytes cross-checked against `probe_full`, `just inventory-corpus` (codec-corpus `avif-conformance`) and `just inventory-oracle` (every box `exiftool -v3` lists matches a part); `fuzz_regression` replays seeds through the inventory (`1e166445`).
+- Depends on imazen/zencodec#133 through a temporary `[patch.crates-io]` git pin (root and `fuzz/`), to be swapped for the released zencodec before merge.
+- Housekeeping on the same branch: `cargo fmt` reflow of files main left unformatted (`e5d1becf`); Rust 1.99 clippy lints in zenavif-serialize and two test files, and an explicit allow on zenavif-parse's deliberately reversed test range (`482e6bd4`).
+- Found while building it: zenavif#55 (a cropped grid decodes to `Ok` 0x0), #56 (iprp/essential-property strictness), #57 (`dump_boxes` mis-walks `meta`), #58 (depth maps never reported).
+
 ### Fixed — quality 100 (`--cq-level 0`) on the aom backend is coded-lossless, and gated exact (zenavif#45)
 
 - **`zenav1-aom-encode` pin `c3e1b4ab` -> `45c53ddb`** (imazen/zenav1-aom `main`
