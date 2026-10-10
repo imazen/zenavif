@@ -77,9 +77,13 @@ pub(crate) struct Options {
     pub(crate) keep_icc: bool,
     pub(crate) keep_exif: bool,
     pub(crate) keep_xmp: bool,
-    /// The container parser configuration the decode uses
-    /// (`ManagedAvifDecoder::new_for_source`).
+    /// The container parser configuration `probe`/`probe_full` use
+    /// (`probe_inner`: the codec configuration, without the job's limits).
     pub(crate) parse_config: zenavif_parse::DecodeConfig,
+    /// The decoders' configuration when the job's `ResourceLimits` make it
+    /// stricter (`effective_config`): a file it rejects still has its
+    /// metadata probed, but nothing decodes.
+    pub(crate) decode_parse_config: Option<zenavif_parse::DecodeConfig>,
     /// `ResourceLimits::max_pixels`, which becomes the decoder's
     /// `frame_size_limit` (`ManagedAvifDecoder::new_for_source`).
     pub(crate) max_pixels: Option<u64>,
@@ -102,7 +106,21 @@ pub(crate) fn inventory(
     let parsed = zenavif_parse::AvifParser::from_bytes_with_config(data, &opts.parse_config, stop);
     match parsed {
         Ok(parser) => {
-            let model = Model::build(&w, &parser, opts)?;
+            let mut model = Model::build(&w, &parser, opts)?;
+            if let Some(dc) = &opts.decode_parse_config {
+                match zenavif_parse::AvifParser::from_bytes_with_config(data, dc, stop) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        if let zenavif_parse::Error::Stopped(reason) = e.error() {
+                            return Err(at!(Error::Cancelled(*reason)));
+                        }
+                        model.refuse_decode(&format!(
+                            "the decoders reject the file under the job's ResourceLimits ({}); probe and probe_full do not apply them",
+                            e.error()
+                        ));
+                    }
+                }
+            }
             w.resolve(Some((&parser, &model)))?;
         }
         Err(e) => {
@@ -2420,6 +2438,21 @@ impl Model {
         Ok(m)
     }
 
+    /// The decoders refuse the file: nothing becomes pixels, while what the
+    /// probe reports stays metadata.
+    fn refuse_decode(&mut self, why: &str) {
+        let uses = self
+            .items
+            .values_mut()
+            .chain(self.samples.iter_mut().map(|(_, u, _)| u));
+        for u in uses {
+            if u.disp == Disposition::ImageData {
+                u.disp = Disposition::Dropped;
+                u.why = format!("{}; {why}", u.why);
+            }
+        }
+    }
+
     /// `ManagedAvifDecoder::new_for_source`: with `ResourceLimits::max_pixels`
     /// set, the decode refuses an image whose size exceeds it (from the grid,
     /// the primary's sequence header, or the first frame for animation).
@@ -2691,7 +2724,7 @@ impl Model {
             let [(off, len)] = loc.extents[..] else {
                 continue;
             };
-            if len == 0 || loc.data_ref != 0 {
+            if loc.data_ref != 0 {
                 continue;
             }
             let (src, idat) = match (loc.method, &idat_body) {
@@ -2706,7 +2739,23 @@ impl Model {
             else {
                 continue;
             };
-            let Some(end) = start.checked_add(len).filter(|&e| e <= src.end) else {
+            // Length 0 reads to the end of its source: the idat, or the mdat
+            // that holds the start, else the file (`resolve_extents_from_raw`).
+            let end = if len == 0 {
+                match idat {
+                    Some(_) => Some(src.end),
+                    None => Some(
+                        w.mdats
+                            .iter()
+                            .filter_map(|&m| w.nodes[m].body.clone())
+                            .find(|b| b.start <= start && start < b.end)
+                            .map_or(src.end, |b| b.end),
+                    ),
+                }
+            } else {
+                start.checked_add(len)
+            };
+            let Some(end) = end.filter(|&e| e <= src.end && start < e) else {
                 continue;
             };
             // The bytes the parser hands over must be these (after the EXIF
@@ -3296,50 +3345,78 @@ impl Walker<'_> {
             ));
             self.add(node)?;
         }
-        for (holder, mut list) in placed {
-            list.sort_by(|a, b| {
+        for (holder, list) in placed {
+            // Consumed extents first, so an unconsumed one never covers bytes
+            // the decode reads. Parts cannot overlap: pass 1 lists the
+            // consumed extents that share no bytes, pass 2 the unshared bytes
+            // of the consumed ones that do, pass 3 the unconsumed extents
+            // that share no bytes (the rest are only noted).
+            let (mut first, mut second): (Vec<Cand>, Vec<Cand>) =
+                list.into_iter().partition(|c| c.disp.is_consumed());
+            let order = |a: &Cand, b: &Cand| {
                 a.range
                     .start
                     .cmp(&b.range.start)
                     .then(rank(b.disp).cmp(&rank(a.disp)))
-            });
-            let mut last: Option<(u64, String)> = None;
-            for cand in list {
-                if let Some((end, other)) = &last
-                    && cand.range.start < *end
-                {
+            };
+            first.sort_by(order);
+            second.sort_by(order);
+            // Listed ranges: start -> (end, who); disjoint.
+            let mut taken: BTreeMap<u64, (u64, String)> = BTreeMap::new();
+            let shared_with = |taken: &BTreeMap<u64, (u64, String)>, r: &Range<u64>| {
+                let mut v: Vec<(u64, u64, String)> = taken
+                    .range(..r.end)
+                    .rev()
+                    .take_while(|(_, (e, _))| *e > r.start)
+                    .map(|(&s, (e, w))| (s, *e, w.clone()))
+                    .collect();
+                v.reverse();
+                v
+            };
+            let mut deferred: Vec<Cand> = Vec::new();
+            for (pass, cand) in first
+                .into_iter()
+                .map(|c| (1u8, c))
+                .chain(second.into_iter().map(|c| (3u8, c)))
+            {
+                self.check_stop()?;
+                if pass == 3 && !deferred.is_empty() {
+                    self.place_pieces(
+                        holder,
+                        std::mem::take(&mut deferred),
+                        &mut taken,
+                        &shared_with,
+                    )?;
+                }
+                let shared = shared_with(&taken, &cand.range);
+                if shared.is_empty() {
+                    taken.insert(cand.range.start, (cand.range.end, cand.who.clone()));
+                    self.place_extent(holder, cand)?;
+                    continue;
+                }
+                let other = shared[0].2.clone();
+                let what = if pass == 1 {
+                    "only its unshared bytes are listed"
+                } else {
+                    "not listed as a part"
+                };
+                if self.nodes[cand.note_to].notes.len() < MAX_NOTES {
                     self.note(
                         cand.note_to,
                         format!(
-                            "{} at {}..{} shares bytes with {other}; not listed as a part",
+                            "{} at {}..{} shares bytes with {other}; {what}",
                             cand.who, cand.range.start, cand.range.end
                         ),
                     );
-                    continue;
-                }
-                last = Some((cand.range.end, cand.who.clone()));
-                let mut node = Self::leaf(
-                    Some(holder),
-                    PartKind::Extent,
-                    cand.tag,
-                    cand.range,
-                    cand.disp,
-                );
-                node.label = cand.label;
-                if cand.item != 0 && cand.who.ends_with("/1") {
-                    node.notes.push(cand.why);
-                } else if cand.item != 0 {
-                    node.notes.push(format!("{}; {}", cand.who, cand.why));
                 } else {
-                    node.notes.push(cand.why);
+                    self.note(cand.note_to, String::new());
                 }
-                if cand.disp == Disposition::ImageData {
-                    node.notes.push(
-                        "coded-unit framing inside is not walked yet: bytes after the last OBU are not distinguished"
-                            .to_string(),
-                    );
+                if pass == 1 {
+                    deferred.push(cand);
                 }
-                self.add(node)?;
+            }
+            if !deferred.is_empty() {
+                self.place_pieces(holder, deferred, &mut taken, &shared_with)?;
             }
         }
 
@@ -3376,6 +3453,79 @@ impl Walker<'_> {
                         ),
                     );
                 }
+            }
+        }
+        Ok(())
+    }
+
+    /// One extent as an `Extent` part in its holder.
+    fn place_extent(&mut self, holder: usize, cand: Cand) -> Result<(), At<Error>> {
+        let mut node = Self::leaf(
+            Some(holder),
+            PartKind::Extent,
+            cand.tag,
+            cand.range,
+            cand.disp,
+        );
+        node.label = cand.label;
+        if cand.item != 0 && cand.who.ends_with("/1") {
+            node.notes.push(cand.why);
+        } else if cand.item != 0 {
+            node.notes.push(format!("{}; {}", cand.who, cand.why));
+        } else {
+            node.notes.push(cand.why);
+        }
+        if cand.disp == Disposition::ImageData {
+            node.notes.push(
+                "coded-unit framing inside is not walked yet: bytes after the last OBU are not distinguished"
+                    .to_string(),
+            );
+        }
+        self.add(node)?;
+        Ok(())
+    }
+
+    /// The bytes of consumed extents that listed ones do not cover, as
+    /// parts of their own. `split_metadata_extents` skips these pieces
+    /// (their first note starts with "item").
+    #[allow(clippy::type_complexity)]
+    fn place_pieces(
+        &mut self,
+        holder: usize,
+        deferred: Vec<Cand>,
+        taken: &mut BTreeMap<u64, (u64, String)>,
+        shared_with: &dyn Fn(&BTreeMap<u64, (u64, String)>, &Range<u64>) -> Vec<(u64, u64, String)>,
+    ) -> Result<(), At<Error>> {
+        for cand in deferred {
+            self.check_stop()?;
+            let shared = shared_with(taken, &cand.range);
+            let other = shared.first().map(|x| x.2.clone()).unwrap_or_default();
+            let mut pieces = Vec::new();
+            let mut at = cand.range.start;
+            for (s, e, _) in &shared {
+                if *s > at {
+                    pieces.push(at..*s);
+                }
+                at = at.max(*e);
+            }
+            if at < cand.range.end {
+                pieces.push(at..cand.range.end);
+            }
+            for piece in pieces {
+                taken.insert(piece.start, (piece.end, cand.who.clone()));
+                let mut node = Self::leaf(
+                    Some(holder),
+                    PartKind::Extent,
+                    cand.tag.clone(),
+                    piece,
+                    cand.disp,
+                );
+                node.label = cand.label.clone();
+                node.notes.push(format!(
+                    "item data: bytes of {} that {other} and the other listed extents do not cover; {}",
+                    cand.who, cand.why
+                ));
+                self.add(node)?;
             }
         }
         Ok(())

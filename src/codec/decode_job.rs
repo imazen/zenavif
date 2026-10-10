@@ -314,18 +314,27 @@ impl AvifDecodeJob {
     fn inventory_inner(&self, data: &[u8]) -> Result<zencodec::inventory::Inventory, At<Error>> {
         use super::inventory::{GainMapUse, Options};
         self.check_input_size(data)?;
-        // The container parser configuration `ManagedAvifDecoder` uses.
-        let cfg = self.effective_config();
-        let mut parse_config = zenavif_parse::DecodeConfig::default();
-        if let Some(mem) = cfg.parser_peak_memory_limit {
-            parse_config = parse_config.with_peak_memory_limit(mem);
-        }
-        if let Some(mp) = cfg.parser_total_megapixels_limit {
-            parse_config = parse_config.with_total_megapixels_limit(mp);
-        }
-        if let Some(frames) = cfg.parser_max_animation_frames {
-            parse_config = parse_config.with_max_animation_frames(frames);
-        }
+        // The container parser configurations: probe/probe_full parse with
+        // the codec configuration alone (`probe_inner`); the decoders add
+        // the job's ResourceLimits (`effective_config`).
+        let parse_config_of = |cfg: &crate::DecoderConfig| {
+            let mut pc = zenavif_parse::DecodeConfig::default();
+            if let Some(mem) = cfg.parser_peak_memory_limit {
+                pc = pc.with_peak_memory_limit(mem);
+            }
+            if let Some(mp) = cfg.parser_total_megapixels_limit {
+                pc = pc.with_total_megapixels_limit(mp);
+            }
+            if let Some(frames) = cfg.parser_max_animation_frames {
+                pc = pc.with_max_animation_frames(frames);
+            }
+            pc
+        };
+        let parse_config = parse_config_of(&self.config.inner);
+        let limited = self.limits.max_pixels.is_some()
+            || self.limits.max_memory_bytes.is_some()
+            || self.limits.max_frames.is_some();
+        let decode_parse_config = limited.then(|| parse_config_of(&self.effective_config()));
         let policy = self.policy.as_ref();
         // codec/decoder.rs: ReconstructHdr applies the gain map; Components
         // and `extract_gain_map` hand it to the caller.
@@ -341,6 +350,7 @@ impl AvifDecodeJob {
             keep_exif: policy.is_none_or(|p| p.resolve_exif(true)),
             keep_xmp: policy.is_none_or(|p| p.resolve_xmp(true)),
             parse_config,
+            decode_parse_config,
             max_pixels: self.limits.max_pixels,
             allow_animation: policy.is_none_or(|p| p.resolve_animation(true)),
         };

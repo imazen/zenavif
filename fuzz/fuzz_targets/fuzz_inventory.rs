@@ -70,10 +70,12 @@ fn metadata_oracle(data: &[u8]) {
         }
         out
     };
+    // A file with a moov may report the track's metadata (probe) and the
+    // primary's (decode): only a still must match probe_full both ways.
     let animated = inv
         .parts()
         .iter()
-        .any(|p| p.kind == PartKind::Extent && p.label.as_deref() == Some("color sample"));
+        .any(|p| p.kind == PartKind::Box && p.tag == PartTag::FourCc(*b"moov"));
     if let Ok(info) = job().probe_full(data) {
         for (kind, reported) in [
             (K::Exif, info.embedded_metadata.exif.as_deref()),
@@ -82,8 +84,28 @@ fn metadata_oracle(data: &[u8]) {
         ] {
             let u = units(&inv, kind);
             if let Some(r) = reported {
+                // Exactly one part, or (when items share bytes, which parts
+                // cannot) somewhere every byte of it is in consumed parts.
+                let covered = || {
+                    let parts = inv.parts();
+                    let mut has_child = vec![false; parts.len()];
+                    for p in parts {
+                        if let Some(q) = p.parent {
+                            has_child[q.index()] = true;
+                        }
+                    }
+                    let mut consumed = vec![false; data.len()];
+                    for (i, p) in parts.iter().enumerate() {
+                        if !has_child[i] && p.disposition.is_consumed() {
+                            consumed[p.range.start as usize..p.range.end as usize].fill(true);
+                        }
+                    }
+                    (0..(data.len() + 1).saturating_sub(r.len()))
+                        .filter(|&k| data[k..k + r.len()] == *r)
+                        .any(|k| consumed[k..k + r.len()].iter().all(|&c| c))
+                };
                 assert!(
-                    u.iter().any(|x| x == r),
+                    u.iter().any(|x| x == r) || covered(),
                     "probe_full reports {kind:?} that no part holds\n{inv}"
                 );
             }
