@@ -604,6 +604,7 @@ CI, not this box), so removing it would be an edit made blind. It stays queued.
 - Depends on imazen/zencodec#133 through a temporary `[patch.crates-io]` git pin (root and `fuzz/`), to be swapped for the released zencodec before merge.
 - Housekeeping on the same branch: `cargo fmt` reflow of files main left unformatted (`e5d1becf`); Rust 1.99 clippy lints in zenavif-serialize and two test files, and an explicit allow on zenavif-parse's deliberately reversed test range (`482e6bd4`).
 - Found while building it: zenavif#55 (a cropped grid decodes to `Ok` 0x0), #56 (iprp/essential-property strictness), #57 (`dump_boxes` mis-walks `meta`), #58 (depth maps never reported).
+- The inventory refuses with `LimitExceeded` once a file declares more parts than zencodec's cap, before it collects samples or extents, so a file of millions of zero-length samples is refused early instead of building a list it will throw away (`f6b62f10`).
 
 ### Fixed — quality 100 (`--cq-level 0`) on the aom backend is coded-lossless, and gated exact (zenavif#45)
 

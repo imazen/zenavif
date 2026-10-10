@@ -9,6 +9,7 @@ a 0.6.x patch. **0.6.3 (the size=0-box fix, imazen/zenavif#16) must be published
 from commit `c36b822`**, the pre-break release-prep point (CI green there).
 
 ### Fixed
+- A track whose `tref`/`auxl` names its own ID was picked as its own alpha track, and `associate_tracks` then panicked removing it twice; the alpha search now skips the colour track (imazen/zenavif#60, `45928ff8`, seed `fuzz/regression/crash-associate-tracks-self-auxl`).
 - Derive finite animation play counts from track and edit-list durations instead of treating every repeating edit list as infinite (`0abe957f`).
 - **`base_q_idx` / `lossless` were read from the wrong bit offset on
   `reduced_still_picture_header` streams — which is what still-AVIF encoders
