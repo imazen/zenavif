@@ -36,7 +36,7 @@ use regress::RegressionSuite;
 /// unminimized fuzzer output, not the minimized fixed-bug seeds this gate
 /// replays. Promoting any of them is a separate decision — minimize with
 /// `cargo +nightly fuzz tmin` first, then move it here and bump this constant.)
-const TRACKED_SEEDS: usize = 1;
+const TRACKED_SEEDS: usize = 2;
 
 #[test]
 fn fuzz_regression() {

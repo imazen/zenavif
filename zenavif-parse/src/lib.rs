@@ -5936,9 +5936,13 @@ fn associate_tracks(tracks: TryVec<ParsedTrack>) -> Result<ParsedAnimationData> 
         .ok_or_else(|| at!(Error::InvalidData("color track index out of bounds")))?;
     let color_track_id = color_track.track_id;
 
-    // Find alpha track: handler_type == "auxv" or "pict" with tref/auxl referencing color track
-    let alpha_idx = tracks.iter().position(|t| {
-        matches!(&t.handler_type.value, b"auxv" | b"pict")
+    // Find alpha track: handler_type == "auxv" or "pict" with tref/auxl referencing color track.
+    // Never the color track itself: a track whose auxl names its own ID was
+    // picked as both and removed twice below (a panic on a 250-byte input,
+    // fuzz/regression/crash-associate-tracks-self-auxl).
+    let alpha_idx = tracks.iter().enumerate().position(|(i, t)| {
+        i != color_idx
+            && matches!(&t.handler_type.value, b"auxv" | b"pict")
             && t.references.iter().any(|r| {
                 r.reference_type == b"auxl"
                     && r.track_ids.iter().any(|&id| id == color_track_id)
