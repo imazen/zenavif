@@ -16,7 +16,7 @@ use crate::image::{
     ChromaSampling, ColorPrimaries, ColorRange, ImageInfo, MatrixCoefficients,
     TransferCharacteristics,
 };
-use rav1d_safe::src::managed::{Frame, PixelLayout};
+use rav1d_safe::{Frame, PixelLayout};
 
 /// Which independently coded image owns the properties used for conversion.
 #[derive(Clone, Copy)]

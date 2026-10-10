@@ -50,7 +50,7 @@
 //! class this harness has no reason to carry.
 
 use enough::Unstoppable;
-use rav1d_safe::src::managed::{Decoder, Frame, PixelLayout, Planes, Settings};
+use rav1d_safe::{Decoder, Frame, PixelLayout, Planes, Settings};
 use std::io::Write;
 use std::process::ExitCode;
 

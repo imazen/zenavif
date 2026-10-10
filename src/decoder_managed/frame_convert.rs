@@ -22,7 +22,7 @@ use crate::convert::{add_alpha8, add_alpha16, downscale_to_8bit, scale_pixels_to
 use crate::error::{Error, Result};
 use crate::image::{ChromaSampling, ImageInfo};
 use enough::Stop;
-use rav1d_safe::src::managed::{Frame, PixelLayout, Planes};
+use rav1d_safe::{Frame, PixelLayout, Planes};
 use whereat::at;
 use zenpixels::PixelBuffer;
 
