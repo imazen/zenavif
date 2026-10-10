@@ -36,7 +36,7 @@ use regress::RegressionSuite;
 /// unminimized fuzzer output, not the minimized fixed-bug seeds this gate
 /// replays. Promoting any of them is a separate decision — minimize with
 /// `cargo +nightly fuzz tmin` first, then move it here and bump this constant.)
-const TRACKED_SEEDS: usize = 5;
+const TRACKED_SEEDS: usize = 6;
 
 #[test]
 fn fuzz_regression() {
@@ -489,18 +489,12 @@ fn metadata_oracle(data: &[u8]) {
                 // Exactly one part, or (when items share bytes, which parts
                 // cannot) somewhere every byte of it is in consumed parts.
                 let covered = || {
-                    let parts = inv.parts();
-                    let mut has_child = vec![false; parts.len()];
-                    for p in parts {
-                        if let Some(q) = p.parent {
-                            has_child[q.index()] = true;
-                        }
-                    }
+                    // Each byte takes the disposition of the deepest part
+                    // over it (parents come before their children).
                     let mut consumed = vec![false; data.len()];
-                    for (i, p) in parts.iter().enumerate() {
-                        if !has_child[i] && p.disposition.is_consumed() {
-                            consumed[p.range.start as usize..p.range.end as usize].fill(true);
-                        }
+                    for p in inv.parts() {
+                        consumed[p.range.start as usize..p.range.end as usize]
+                            .fill(p.disposition.is_consumed());
                     }
                     (0..(data.len() + 1).saturating_sub(r.len()))
                         .filter(|&k| data[k..k + r.len()] == *r)

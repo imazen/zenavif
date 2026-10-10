@@ -651,10 +651,17 @@ struct Walker<'a> {
     track_metas: Vec<TrackMetaRec>,
     /// Track `meta` node → index into `track_metas`.
     track_meta_index: BTreeMap<usize, usize>,
+    /// Bytes a consumed extent shares with listed ones: `(range,
+    /// disposition, who)`. A part split out of the listed extent there
+    /// (EXIF padding, a tail) must not call them unconsumed.
+    shared_claims: Vec<(Range<u64>, Disposition, String)>,
     /// The tracks `associate_tracks` keeps (indices into `traks`).
     color_trak: Option<usize>,
     alpha_trak: Option<usize>,
 }
+
+/// A shared-bytes claim's disposition and who makes it.
+type Claim = (Disposition, String);
 
 /// `(ipma node, its iprp, entries)`.
 type IpmaRec = (usize, usize, Option<Vec<(u32, bool, u16)>>);
@@ -713,6 +720,7 @@ impl<'a> Walker<'a> {
             track_meta_index: BTreeMap::new(),
             color_trak: None,
             alpha_trak: None,
+            shared_claims: Vec::new(),
         }
     }
 
@@ -3422,6 +3430,7 @@ impl Walker<'_> {
 
         self.split_metadata_extents(model.is_some());
         self.add_inner_parts()?;
+        self.apply_shared_claims()?;
 
         if !self.moovs.is_empty() {
             for m in self.mdats.clone() {
@@ -3452,6 +3461,87 @@ impl Walker<'_> {
                             "the iloc extent budget ({MAX_ILOC_EXTENTS}) ran out: bytes outside the listed extents may be item data the decoder reads"
                         ),
                     );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// An unconsumed leaf (EXIF padding, a dropped tail) inside bytes another
+    /// consumed item also covers is split at the claim's edges, and the
+    /// claimed slice takes the claim's disposition.
+    fn apply_shared_claims(&mut self) -> Result<(), At<Error>> {
+        if self.shared_claims.is_empty() {
+            return Ok(());
+        }
+        let mut claims = std::mem::take(&mut self.shared_claims);
+        claims.sort_by_key(|c| c.0.start);
+        let mut has_child = vec![false; self.nodes.len()];
+        for n in &self.nodes {
+            if let Some(p) = n.parent {
+                has_child[p] = true;
+            }
+        }
+        let leaves: Vec<usize> = (0..self.nodes.len())
+            .filter(|&i| {
+                !has_child[i]
+                    && !self.nodes[i].disp.is_consumed()
+                    && self.nodes[i]
+                        .parent
+                        .is_some_and(|p| self.nodes[p].kind == PartKind::Extent)
+            })
+            .collect();
+        for i in leaves {
+            self.check_stop()?;
+            let r = self.nodes[i].range.clone();
+            // Claims that reach into this leaf (they may overlap each other).
+            let k = claims.partition_point(|c| c.0.start < r.end);
+            let mut cuts: Vec<(Range<u64>, Disposition, String)> = claims[..k]
+                .iter()
+                .filter(|c| c.0.end > r.start)
+                .map(|c| (c.0.start.max(r.start)..c.0.end.min(r.end), c.1, c.2.clone()))
+                .collect();
+            if cuts.is_empty() {
+                continue;
+            }
+            cuts.sort_by_key(|c| c.0.start);
+            // Disjoint slices, first claim wins where claims overlap.
+            let mut at = r.start;
+            let mut slices: Vec<(Range<u64>, Option<Claim>)> = Vec::new();
+            for (c, d, who) in cuts {
+                let c = c.start.max(at)..c.end;
+                if c.start >= c.end {
+                    continue;
+                }
+                if c.start > at {
+                    slices.push((at..c.start, None));
+                }
+                slices.push((c.clone(), Some((d, who))));
+                at = c.end;
+            }
+            if at < r.end {
+                slices.push((at..r.end, None));
+            }
+            let base = Self::leaf(
+                self.nodes[i].parent,
+                self.nodes[i].kind,
+                self.nodes[i].tag.clone(),
+                0..0,
+                self.nodes[i].disp,
+            );
+            let notes = self.nodes[i].notes.clone();
+            for (k, (sr, claim)) in slices.into_iter().enumerate() {
+                let mut n = Self::leaf(base.parent, base.kind, base.tag.clone(), sr, base.disp);
+                n.notes = notes.clone();
+                if let Some((d, who)) = claim {
+                    n.disp = d;
+                    n.notes
+                        .push(format!("also bytes of {who}, which the caller receives"));
+                }
+                if k == 0 {
+                    self.nodes[i] = n;
+                } else {
+                    self.add(n)?;
                 }
             }
         }
@@ -3507,6 +3597,10 @@ impl Walker<'_> {
                     pieces.push(at..*s);
                 }
                 at = at.max(*e);
+                let c = (*s).max(cand.range.start)..(*e).min(cand.range.end);
+                if c.start < c.end {
+                    self.shared_claims.push((c, cand.disp, cand.who.clone()));
+                }
             }
             if at < cand.range.end {
                 pieces.push(at..cand.range.end);

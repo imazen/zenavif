@@ -1727,3 +1727,47 @@ fn iloc_budget_exhaustion_leaves_the_rest_unknown() {
     let leaf = leaf_at(&inv, s);
     assert_eq!(leaf.disposition, Disposition::Unknown, "{leaf:?}");
 }
+
+/// An XMP item whose extent starts inside the EXIF item's padding (the bytes
+/// the TIFF-header offset skips): the shared bytes are handed over as XMP,
+/// so they must not stay Dropped padding.
+#[test]
+fn shared_bytes_inside_exif_padding_stay_consumed() {
+    let w = white();
+    let exif = b"\0\0\0\x08PADPADPAMM\0*\0\0\0\x08\0\0EXIF-SENTINEL".to_vec();
+    let xmp = b"<?xpacket begin?><x:xmpmeta/><?xpacket end=\"w\"?>".to_vec();
+    let mut s = Still::base(&w);
+    s.items.push((2, *b"Exif", Vec::new(), None));
+    s.items.push((
+        3,
+        *b"mime",
+        Vec::new(),
+        Some(b"application/rdf+xml".to_vec()),
+    ));
+    s.chunks.push((Some(2), exif.clone()));
+    s.chunks.push((Some(3), xmp.clone()));
+    s.irefs = vec![(*b"cdsc", 2, vec![1]), (*b"cdsc", 3, vec![1])];
+    let mut d = s.build(&w);
+    // Item 3's extent: start it 6 bytes into item 2, inside its padding.
+    let back = exif.len() as u32 - 6;
+    let b = bmff::locate(&d, &[b"meta", b"iloc"], 0);
+    let mut p = b.pos + b.hdr + 4 + 2 + 2;
+    loop {
+        let id = bmff::be(&d, p, 2);
+        let n = bmff::be(&d, p + 6, 2) as usize;
+        if id == 3 {
+            let o = bmff::be(&d, p + 8, 4) as u32 - back;
+            let l = bmff::be(&d, p + 12, 4) as u32 + back;
+            d[p + 8..p + 12].copy_from_slice(&o.to_be_bytes());
+            d[p + 12..p + 16].copy_from_slice(&l.to_be_bytes());
+            break;
+        }
+        p += 8 + 8 * n;
+    }
+    let inv = inventory_of(&d);
+    let pad = find(&d, b"PADPADPA")[0];
+    for at in pad + 2..pad + 8 {
+        let leaf = leaf_at(&inv, at);
+        assert!(leaf.disposition.is_consumed(), "byte {at}: {leaf:?}\n{inv}");
+    }
+}
