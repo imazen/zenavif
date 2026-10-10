@@ -193,6 +193,17 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
             .map_err(zencodec::CodecError::of)
     }
 
+    /// Every box, item, item extent, animation sample and property, with what
+    /// this job's decode does with it. See `codec/inventory.rs`.
+    fn inventory(
+        &self,
+        data: &[u8],
+    ) -> Result<Option<zencodec::inventory::Inventory>, At<CodecError>> {
+        self.inventory_inner(data)
+            .map(Some)
+            .map_err(zencodec::CodecError::of)
+    }
+
     fn push_decoder(
         self,
         data: Cow<'a, [u8]>,
@@ -298,6 +309,39 @@ impl AvifDecodeJob {
             apply_decode_policy(&mut info, policy);
         }
         Ok(info)
+    }
+
+    fn inventory_inner(&self, data: &[u8]) -> Result<zencodec::inventory::Inventory, At<Error>> {
+        use super::inventory::{GainMapUse, Options};
+        self.check_input_size(data)?;
+        // The container parser configuration `ManagedAvifDecoder` uses.
+        let cfg = self.effective_config();
+        let mut parse_config = zenavif_parse::DecodeConfig::default();
+        if let Some(mem) = cfg.parser_peak_memory_limit {
+            parse_config = parse_config.with_peak_memory_limit(mem);
+        }
+        if let Some(mp) = cfg.parser_total_megapixels_limit {
+            parse_config = parse_config.with_total_megapixels_limit(mp);
+        }
+        if let Some(frames) = cfg.parser_max_animation_frames {
+            parse_config = parse_config.with_max_animation_frames(frames);
+        }
+        let policy = self.policy.as_ref();
+        let opts = Options {
+            gain_map: match self.gain_map_render {
+                zencodec::GainMapRender::ReconstructHdr { .. } => GainMapUse::Reconstruct,
+                _ => GainMapUse::Describe,
+            },
+            keep_icc: policy.is_none_or(|p| p.resolve_icc(true)),
+            keep_exif: policy.is_none_or(|p| p.resolve_exif(true)),
+            keep_xmp: policy.is_none_or(|p| p.resolve_xmp(true)),
+            parse_config,
+        };
+        let stop: &dyn enough::Stop = match self.stop {
+            Some(ref s) => s,
+            None => &enough::Unstoppable,
+        };
+        super::inventory::inventory(data, &opts, stop)
     }
 
     fn output_info_inner(&self, data: &[u8]) -> Result<zencodec::decode::OutputInfo, At<Error>> {

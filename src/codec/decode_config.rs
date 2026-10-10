@@ -347,6 +347,7 @@ static AVIF_DECODE_CAPABILITIES: zencodec::decode::DecodeCapabilities =
         .with_hdr(true)
         .with_gain_map(true)
         .with_reconstructs_hdr(true)
+        .with_inventory(true)
         .with_native_gray(true)
         .with_native_16bit(true)
         .with_native_alpha(true)

@@ -33,6 +33,9 @@ path = ".."
 # manifest's `rev` — the reasoning for the current one lives there. Drop at
 # the rav1d-safe 0.6.0 release.
 rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "e73811f5d4dad81b75195ca18554fd8a5df19515" }
+# TEMPORARY: the structural-inventory API branch (imazen/zencodec#133);
+# swap for the released zencodec before merge.
+zencodec = { git = "https://github.com/imazen/zencodec", branch = "feat/inventory" }
 
 [[bin]]
 name = "fuzz_decode"
@@ -65,6 +68,13 @@ bench = false
 [[bin]]
 name = "fuzz_decode_negotiate"
 path = "fuzz_targets/fuzz_decode_negotiate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "inventory"
+path = "fuzz_targets/fuzz_inventory.rs"
 test = false
 doc = false
 bench = false
