@@ -327,6 +327,22 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      # `--tests` compiles tests that `include_bytes!` downloaded vectors
+      # (tests/animation_dual_colr.rs, animation_exact_timing.rs), so clippy
+      # needs them too. Same steps and cache key as the Test job, so a cache
+      # this job populates is complete for the others.
+      - name: Cache test vectors
+        id: vectors-cache
+        uses: actions/cache@v5
+        with:
+          path: tests/vectors
+          key: avif-test-vectors-${{ hashFiles('scripts/download-avif-test-vectors.sh', 'scripts/download-linku-samples.sh') }}
+      - name: Download test vectors
+        if: steps.vectors-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          bash scripts/download-avif-test-vectors.sh
+          bash scripts/download-linku-samples.sh
       - name: Clippy (default)
         run: cargo clippy --lib --tests --examples -- -D warnings
       - name: Clippy (members)
