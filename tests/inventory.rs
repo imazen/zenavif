@@ -616,7 +616,7 @@ box meta 28..1090 structure
         gap - 711..714 dropped
       property colr 714..733 metadata(cicp) \"nclx\"
       property colr 733..770 metadata(icc) \"prof\"
-        gap - 765..770 unreferenced
+        gap - 765..770 metadata(icc)
       property irot 770..779 metadata(orientation)
       property pixi 779..795 dropped
       property zPrv 795..819 unknown
@@ -643,7 +643,7 @@ box mdat 1154..1358 structure
     gap - 1191..1193 dropped
     gap - 1193..1203 metadata(exif)
   extent 0x3 1203..1255 metadata(xmp) \"XMP\"
-    gap - 1251..1255 unreferenced
+    gap - 1251..1255 metadata(xmp)
   extent 0x5 1255..1263 unknown \"private\"
   extent 0x6 1263..1272 image-data \"Alpha\"
   extent 0x7 1272..1281 skipped \"Thumb\"

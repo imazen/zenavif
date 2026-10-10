@@ -327,15 +327,22 @@ impl AvifDecodeJob {
             parse_config = parse_config.with_max_animation_frames(frames);
         }
         let policy = self.policy.as_ref();
+        // codec/decoder.rs: ReconstructHdr applies the gain map; Components
+        // and `extract_gain_map` hand it to the caller.
+        let gain_map = match self.gain_map_render {
+            zencodec::GainMapRender::ReconstructHdr { .. } => GainMapUse::Reconstruct,
+            zencodec::GainMapRender::Components => GainMapUse::Surface,
+            _ if self.extract_gain_map => GainMapUse::Surface,
+            _ => GainMapUse::Describe,
+        };
         let opts = Options {
-            gain_map: match self.gain_map_render {
-                zencodec::GainMapRender::ReconstructHdr { .. } => GainMapUse::Reconstruct,
-                _ => GainMapUse::Describe,
-            },
+            gain_map,
             keep_icc: policy.is_none_or(|p| p.resolve_icc(true)),
             keep_exif: policy.is_none_or(|p| p.resolve_exif(true)),
             keep_xmp: policy.is_none_or(|p| p.resolve_xmp(true)),
             parse_config,
+            max_pixels: self.limits.max_pixels,
+            allow_animation: policy.is_none_or(|p| p.resolve_animation(true)),
         };
         let stop: &dyn enough::Stop = match self.stop {
             Some(ref s) => s,

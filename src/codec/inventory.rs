@@ -59,10 +59,12 @@ const DEPTH_URNS: [&[u8]; 2] = [
 /// How the job uses the gain map (codec/decode_job.rs `decoder_inner`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum GainMapUse {
-    /// The gain-map item is read for its sequence header and reported in
-    /// `ImageInfo::gain_map`; its pixels are decoded only on request
-    /// (`extract_gain_map`, `GainMapRender::Components`).
+    /// The gain-map item is read for its sequence and first frame headers
+    /// (`convert_gain_map_info`), which size `ImageInfo::gain_map`.
     Describe,
+    /// `extract_gain_map` (the raw item in a `GainMapSource`) or
+    /// `GainMapRender::Components` (decoded into a `DecodedGainMap`).
+    Surface,
     /// `GainMapRender::ReconstructHdr`: the gain map shapes the output pixels.
     Reconstruct,
 }
@@ -78,6 +80,12 @@ pub(crate) struct Options {
     /// The container parser configuration the decode uses
     /// (`ManagedAvifDecoder::new_for_source`).
     pub(crate) parse_config: zenavif_parse::DecodeConfig,
+    /// `ResourceLimits::max_pixels`, which becomes the decoder's
+    /// `frame_size_limit` (`ManagedAvifDecoder::new_for_source`).
+    pub(crate) max_pixels: Option<u64>,
+    /// `DecodePolicy::allow_animation`: `animation_frame_decoder` refuses
+    /// when false.
+    pub(crate) allow_animation: bool,
 }
 
 /// Map every structural part of `data`. Errors only on cancellation or when
@@ -89,11 +97,12 @@ pub(crate) fn inventory(
 ) -> Result<Inventory, At<Error>> {
     let mut w = Walker::new(data, stop);
     w.walk(None, 0, data.len() as u64, Ctx::Top, 0)?;
+    w.decide_structure(opts);
 
     let parsed = zenavif_parse::AvifParser::from_bytes_with_config(data, &opts.parse_config, stop);
     match parsed {
         Ok(parser) => {
-            let model = Model::build(&w, &parser, opts);
+            let model = Model::build(&w, &parser, opts)?;
             w.resolve(Some((&parser, &model)))?;
         }
         Err(e) => {
@@ -128,6 +137,9 @@ struct Node {
     tag: PartTag,
     label: Option<String>,
     range: Range<u64>,
+    /// Box header length (8, 16, or 24/32 with a `uuid` usertype); 0 for
+    /// parts that are not boxes.
+    header: u64,
     body: Option<Range<u64>>,
     disp: Disposition,
     notes: Vec<String>,
@@ -155,9 +167,15 @@ enum Ctx {
     Stsd,
     /// Children of an `av01` sample entry (`read_stsd`).
     Av01Entry,
-    /// A track-level `meta` (`read_avif_meta_scoped`, no primary required),
-    /// and everything below it: read for the track's EXIF/XMP sidecars.
+    /// A track-level `meta` (`read_avif_meta_scoped`, no primary required):
+    /// read for the track's EXIF/XMP sidecars.
     TrackMeta,
+    /// `infe` entries of a track-level `meta`.
+    TrackIinf,
+    /// Children of a track's `tref` (`read_tref`).
+    Tref,
+    /// A subtree zenavif-parse reads and then discards.
+    Dropped,
     /// Entity groups in `grpl` (`read_grpl`): parsed, never used.
     Grpl,
     /// A subtree zenavif-parse does not read.
@@ -206,9 +224,10 @@ enum HdrOutcome {
         typ: [u8; 4],
         size: u64,
     },
-    /// The box runs past its container.
+    /// The box runs past its container: `clamped` ends at the container's
+    /// end, as zenavif-parse's `BoxIter::next_box` reads it.
     Overrun {
-        typ: [u8; 4],
+        clamped: Hdr,
         declared: u64,
     },
 }
@@ -258,12 +277,8 @@ fn read_header(data: &[u8], pos: u64, limit: u64) -> HdrOutcome {
     if size < base_header {
         return HdrOutcome::BadSize { typ, size };
     }
-    if size > avail {
-        return HdrOutcome::Overrun {
-            typ,
-            declared: size,
-        };
-    }
+    let declared = size;
+    let size = size.min(avail);
     let mut header = base_header;
     let mut usertype = None;
     if &typ == b"uuid" && size >= base_header + 16 {
@@ -273,13 +288,21 @@ fn read_header(data: &[u8], pos: u64, limit: u64) -> HdrOutcome {
             header += 16;
         }
     }
-    HdrOutcome::Ok(Hdr {
+    let h = Hdr {
         typ,
         base_header,
         header,
         end: pos + size,
         usertype,
-    })
+    };
+    if declared > avail {
+        HdrOutcome::Overrun {
+            clamped: h,
+            declared,
+        }
+    } else {
+        HdrOutcome::Ok(h)
+    }
 }
 
 fn fourcc_str(cc: &[u8; 4]) -> String {
@@ -414,62 +437,105 @@ impl Bits<'_> {
     }
 }
 
-/// `(entries, extents not read because of [`MAX_ILOC_EXTENTS`])`.
-fn read_iloc(c: &[u8]) -> Result<(Vec<Loc>, usize), String> {
-    let version = *c.first().ok_or("empty iloc")?;
-    if version > 2 {
-        return Err(format!("iloc version {version}"));
-    }
+/// `(entries, extents not listed)`. `budget` is the number of extents still
+/// to list across every `iloc` read; extents past it are counted, and
+/// skipped arithmetically rather than read one by one (zero-width fields
+/// make an extent cost no input bytes). The outer `Err` is cancellation.
+#[allow(clippy::type_complexity)]
+fn read_iloc(
+    c: &[u8],
+    budget: &mut usize,
+    stop: &dyn enough::Stop,
+) -> Result<Result<(Vec<Loc>, usize), String>, enough::StopReason> {
+    let version = match c.first() {
+        Some(&v) if v <= 2 => v,
+        Some(&v) => return Ok(Err(format!("iloc version {v}"))),
+        None => return Ok(Err("empty iloc".to_string())),
+    };
     let size = |n: u8| -> Result<u8, String> {
         match n {
             0 | 4 | 8 => Ok(n),
             _ => Err(format!("iloc field size {n}")),
         }
     };
-    let b4 = *c.get(4).ok_or("iloc too short")?;
-    let b5 = *c.get(5).ok_or("iloc too short")?;
-    let (off_sz, len_sz, base_sz) = (size(b4 >> 4)?, size(b4 & 15)?, size(b5 >> 4)?);
-    let idx_sz = if version >= 1 { size(b5 & 15)? } else { 0 };
+    let (Some(&b4), Some(&b5)) = (c.get(4), c.get(5)) else {
+        return Ok(Err("iloc too short".to_string()));
+    };
+    let sizes = (|| -> Result<(u8, u8, u8, u8), String> {
+        Ok((
+            size(b4 >> 4)?,
+            size(b4 & 15)?,
+            size(b5 >> 4)?,
+            if version >= 1 { size(b5 & 15)? } else { 0 },
+        ))
+    })();
+    let (off_sz, len_sz, base_sz, idx_sz) = match sizes {
+        Ok(v) => v,
+        Err(e) => return Ok(Err(e)),
+    };
+    let per_extent = usize::from(idx_sz) + usize::from(off_sz) + usize::from(len_sz);
     let mut r = Bits { c, p: 6 };
     let short = || "iloc truncated".to_string();
-    let count = r.n(if version == 2 { 4 } else { 2 }).ok_or_else(short)?;
+    let Some(count) = r.n(if version == 2 { 4 } else { 2 }) else {
+        return Ok(Err(short()));
+    };
     let mut out = Vec::new();
-    let mut total = 0usize;
     let mut skipped = 0usize;
-    for _ in 0..count {
-        let id = r.n(if version == 2 { 4 } else { 2 }).ok_or_else(short)? as u32;
-        let method = if version >= 1 {
-            (r.n(2).ok_or_else(short)? & 15) as u8
+    for k in 0..count {
+        if k % 4096 == 0 {
+            stop.check()?;
+        }
+        let entry = (|| -> Option<(u32, u8, u16, u64, usize)> {
+            let id = r.n(if version == 2 { 4 } else { 2 })? as u32;
+            let method = if version >= 1 {
+                (r.n(2)? & 15) as u8
+            } else {
+                0
+            };
+            let data_ref = r.n(2)? as u16;
+            let base = r.n(base_sz)?;
+            let n = r.n(2)? as usize;
+            Some((id, method, data_ref, base, n))
+        })();
+        let Some((id, method, data_ref, base, n)) = entry else {
+            return Ok(Err(short()));
+        };
+        // Entries past the item cap keep nothing: their extents are counted.
+        let take = if out.len() < MAX_ILOC_EXTENTS {
+            n.min(*budget)
         } else {
             0
         };
-        let data_ref = r.n(2).ok_or_else(short)? as u16;
-        let base = r.n(base_sz).ok_or_else(short)?;
-        let n = r.n(2).ok_or_else(short)? as usize;
-        let mut extents = Vec::new();
-        for _ in 0..n {
-            r.n(idx_sz).ok_or_else(short)?;
-            let o = r.n(off_sz).ok_or_else(short)?;
-            let l = r.n(len_sz).ok_or_else(short)?;
-            if total < MAX_ILOC_EXTENTS {
-                extents.push((o, l));
-                total += 1;
-            } else {
-                skipped += 1;
-            }
+        let mut extents = Vec::with_capacity(take.min(64));
+        for _ in 0..take {
+            let (Some(_), Some(o), Some(l)) = (r.n(idx_sz), r.n(off_sz), r.n(len_sz)) else {
+                return Ok(Err(short()));
+            };
+            extents.push((o, l));
         }
-        out.push(Loc {
-            id,
-            method,
-            data_ref,
-            base,
-            extents,
-        });
-        if out.len() >= MAX_ILOC_EXTENTS {
-            break;
+        *budget -= take;
+        // The rest of this entry's extents: counted, not read.
+        let rest = n - take;
+        let Some(end) = rest
+            .checked_mul(per_extent)
+            .and_then(|b| r.p.checked_add(b))
+            .filter(|&e| e <= c.len())
+        else {
+            return Ok(Err(short()));
+        };
+        r.p = end;
+        skipped += rest;
+        if out.len() < MAX_ILOC_EXTENTS {
+            out.push(Loc {
+                id,
+                method,
+                data_ref,
+                base,
+                extents,
+            });
         }
     }
-    Ok((out, skipped))
+    Ok(Ok((out, skipped)))
 }
 
 /// One `iref` child: `(type, from, [to])`.
@@ -520,6 +586,10 @@ struct InfeRec {
 
 struct PropRec {
     node: usize,
+    /// The `ipco` holding it.
+    ipco: usize,
+    /// Payload length (after the box header).
+    len: usize,
     typ: [u8; 4],
     /// The `colr` colour type.
     colour_type: Option<[u8; 4]>,
@@ -542,11 +612,58 @@ struct Walker<'a> {
     infes: Vec<InfeRec>,
     /// `(node, entries or the reason they could not be read, extents not read)`.
     ilocs: Vec<(usize, Result<Vec<Loc>, String>, usize)>,
+    /// Extents left to read across every `iloc` box.
+    iloc_budget: usize,
+    /// Some `iloc` extents were not read: the budget ran out.
+    iloc_budget_exhausted: bool,
     props: Vec<PropRec>,
     /// `(node, type, from, [to])`.
     irefs: Vec<(usize, [u8; 4], u32, Vec<u32>)>,
-    ipma: Vec<(u32, bool, u16)>,
-    ipmas: Vec<usize>,
+    /// `iprp` boxes of the top-level `meta`, in order.
+    iprps: Vec<usize>,
+    /// `(ipco node, its iprp)`.
+    ipcos: Vec<(usize, usize)>,
+    /// `(ipma node, its iprp, entries)`.
+    ipmas: Vec<IpmaRec>,
+    /// Every top-level `ftyp`.
+    ftyps: Vec<usize>,
+    traks: Vec<TrakRec>,
+    /// `trak` node → index into `traks`.
+    trak_index: BTreeMap<usize, usize>,
+    track_metas: Vec<TrackMetaRec>,
+    /// Track `meta` node → index into `track_metas`.
+    track_meta_index: BTreeMap<usize, usize>,
+    /// The tracks `associate_tracks` keeps (indices into `traks`).
+    color_trak: Option<usize>,
+    alpha_trak: Option<usize>,
+}
+
+/// `(ipma node, its iprp, entries)`.
+type IpmaRec = (usize, usize, Option<Vec<(u32, bool, u16)>>);
+
+/// A `trak`, with what `read_trak` and `associate_tracks` look at.
+#[derive(Default)]
+struct TrakRec {
+    node: usize,
+    moov: Option<usize>,
+    /// `mdia`/`hdlr` handler type (the last one read).
+    handler: Option<[u8; 4]>,
+    /// `tkhd` track ID (the last one read; 0 when absent).
+    track_id: u32,
+    /// Track IDs in `tref`/`auxl`.
+    auxl: Vec<u32>,
+    /// A `minf` holds an `stbl`: `read_trak` returns the track.
+    has_stbl: bool,
+    stsds: Vec<usize>,
+}
+
+/// A track-level `meta`, with what `read_trak` takes from it.
+struct TrackMetaRec {
+    trak: Option<usize>,
+    iloc: Option<Result<Vec<Loc>, String>>,
+    /// `(node, entry)` in order.
+    infes: Vec<(usize, Infe)>,
+    idat: Option<usize>,
 }
 
 impl<'a> Walker<'a> {
@@ -564,11 +681,103 @@ impl<'a> Walker<'a> {
             pitm: None,
             infes: Vec::new(),
             ilocs: Vec::new(),
+            iloc_budget: MAX_ILOC_EXTENTS,
+            iloc_budget_exhausted: false,
             props: Vec::new(),
             irefs: Vec::new(),
-            ipma: Vec::new(),
+            iprps: Vec::new(),
+            ipcos: Vec::new(),
             ipmas: Vec::new(),
+            ftyps: Vec::new(),
+            traks: Vec::new(),
+            trak_index: BTreeMap::new(),
+            track_metas: Vec::new(),
+            track_meta_index: BTreeMap::new(),
+            color_trak: None,
+            alpha_trak: None,
         }
+    }
+
+    /// The nearest ancestor of `from` (inclusive) that is a box of type `typ`.
+    fn ancestor(&self, from: Option<usize>, typ: &[u8; 4]) -> Option<usize> {
+        let mut at = from;
+        while let Some(i) = at {
+            if self.nodes[i].tag == PartTag::FourCc(*typ) && self.nodes[i].kind == PartKind::Box {
+                return Some(i);
+            }
+            at = self.nodes[i].parent;
+        }
+        None
+    }
+
+    /// zenavif-parse `read_avif_meta_scoped` / `read_iprp`: a later `iprp`
+    /// replaces an earlier one, and inside it a later `ipco` or `ipma`
+    /// replaces an earlier one. Returns the active `iprp`, the `props`
+    /// indices of the active `ipco` (its property order), and the active
+    /// `ipma` entries.
+    #[allow(clippy::type_complexity)]
+    fn active_properties(&self) -> (Option<usize>, Vec<usize>, &[(u32, bool, u16)]) {
+        self.active_properties_of(&self.props)
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn active_properties_of(
+        &self,
+        all: &[PropRec],
+    ) -> (Option<usize>, Vec<usize>, &[(u32, bool, u16)]) {
+        let Some(&iprp) = self.iprps.last() else {
+            return (None, Vec::new(), &[]);
+        };
+        let ipco = self
+            .ipcos
+            .iter()
+            .rev()
+            .find(|&&(_, p)| p == iprp)
+            .map(|&(n, _)| n);
+        let props = match ipco {
+            Some(c) => (0..all.len()).filter(|&i| all[i].ipco == c).collect(),
+            None => Vec::new(),
+        };
+        let ipma = self
+            .ipmas
+            .iter()
+            .rev()
+            .find(|(_, p, _)| *p == iprp)
+            .and_then(|(_, _, e)| e.as_deref())
+            .unwrap_or(&[]);
+        (Some(iprp), props, ipma)
+    }
+
+    fn trak_of(&self, from: Option<usize>) -> Option<usize> {
+        let t = self.ancestor(from, b"trak")?;
+        self.trak_index.get(&t).copied()
+    }
+
+    fn track_meta_mut(&mut self, node: Option<usize>) -> Option<&mut TrackMetaRec> {
+        let i = *self.track_meta_index.get(&node?)?;
+        self.track_metas.get_mut(i)
+    }
+
+    /// Children of every node, in order.
+    fn children_index(&self) -> Vec<Vec<usize>> {
+        let mut kids = vec![Vec::new(); self.nodes.len()];
+        for (i, n) in self.nodes.iter().enumerate() {
+            if let Some(p) = n.parent {
+                kids[p].push(i);
+            }
+        }
+        kids
+    }
+
+    /// `root` and every node below it.
+    fn subtree(kids: &[Vec<usize>], root: usize) -> Vec<usize> {
+        let mut out = vec![root];
+        let mut k = 0;
+        while k < out.len() {
+            out.extend_from_slice(&kids[out[k]]);
+            k += 1;
+        }
+        out
     }
 
     fn check_stop(&self) -> Result<(), At<Error>> {
@@ -608,6 +817,7 @@ impl<'a> Walker<'a> {
             tag,
             label: None,
             range,
+            header: 0,
             body: None,
             disp,
             notes: Vec::new(),
@@ -668,18 +878,33 @@ impl<'a> Walker<'a> {
                     )?;
                     return Ok(());
                 }
-                HdrOutcome::Overrun { typ, declared } => {
+                HdrOutcome::Overrun { clamped, declared } => {
                     let room = if ctx == Ctx::Top {
                         "the file"
                     } else {
                         "its container"
                     };
-                    self.malformed(
-                        parent,
-                        PartTag::FourCc(typ),
-                        pos..end,
-                        format!("declares {declared} bytes, {room} has {} left", end - pos),
-                    )?;
+                    let what = format!("declares {declared} bytes, {room} has {} left", end - pos);
+                    if overrun_is_read(ctx, &clamped.typ) {
+                        // `BoxIter::next_box` clamps the box to what is left
+                        // and the reader parses it truncated.
+                        let id = self.visit(parent, pos, &clamped, ctx, depth)?;
+                        self.note(
+                            id,
+                            format!(
+                                "{what}: zenavif-parse reads it clamped to that (BoxIter::next_box)"
+                            ),
+                        );
+                    } else {
+                        self.malformed(
+                            parent,
+                            PartTag::FourCc(clamped.typ),
+                            pos..end,
+                            format!(
+                                "{what}: zenavif-parse skips this box with skip_box_content, which rejects the file (box content size mismatch)"
+                            ),
+                        )?;
+                    }
                     return Ok(());
                 }
                 HdrOutcome::Ok(h) => {
@@ -698,7 +923,7 @@ impl<'a> Walker<'a> {
         h: &Hdr,
         ctx: Ctx,
         depth: usize,
-    ) -> Result<(), At<Error>> {
+    ) -> Result<usize, At<Error>> {
         let range = pos..h.end;
         let (disp, mut layout, child_ctx, why) = classify(ctx, &h.typ);
         let mut kind = match ctx {
@@ -739,7 +964,7 @@ impl<'a> Walker<'a> {
                 }
             }
             (_, b"hdlr") => label = label_from(c.get(8..12).unwrap_or(&[])),
-            (Ctx::Iinf, b"infe") => {
+            (Ctx::Iinf | Ctx::TrackIinf, b"infe") => {
                 let info = read_infe(c);
                 match &info {
                     Some(i) => {
@@ -815,6 +1040,7 @@ impl<'a> Walker<'a> {
         let mut node = Self::leaf(parent, kind, tag, range, disp);
         node.label = label;
         node.notes = notes;
+        node.header = h.header;
         node.body = body.clone();
         if layout == Layout::Leaf {
             node.inner = inner_parts(ctx, &h.typ, content.clone(), c);
@@ -829,6 +1055,7 @@ impl<'a> Walker<'a> {
                 if self.ftyp.is_none() {
                     self.ftyp = Some(id);
                 }
+                self.ftyps.push(id);
             }
             (Ctx::Top, b"meta") => self.metas.push(id),
             (Ctx::Top, b"moov") => self.moovs.push(id),
@@ -851,20 +1078,45 @@ impl<'a> Walker<'a> {
                 }
             }
             (Ctx::Meta, b"iloc") => {
-                let r = read_iloc(c);
-                let (entries, skipped) = match r {
-                    Ok((e, s)) => (Ok(e), s),
-                    Err(e) => (Err(e), 0),
+                // zenavif-parse rejects a second iloc (and a second meta), so
+                // only the first iloc of the first meta can be used. One
+                // extent budget covers every iloc this walk reads.
+                let first = self.metas.len() == 1 && self.ilocs.is_empty();
+                let (entries, skipped) = if first {
+                    match read_iloc(c, &mut self.iloc_budget, self.stop) {
+                        Ok(Ok((e, s))) => (Ok(e), s),
+                        Ok(Err(e)) => (Err(e), 0),
+                        Err(r) => return Err(at!(Error::Cancelled(r))),
+                    }
+                } else {
+                    (
+                        Err("not read: zenavif-parse rejects a second iloc or meta".to_string()),
+                        0,
+                    )
                 };
                 self.ilocs.push((id, entries, skipped));
             }
             (Ctx::Meta, b"idat") => self.idats.push((id, true)),
-            (_, b"idat") => self.idats.push((id, false)),
+            (_, b"idat") => {
+                self.idats.push((id, false));
+                if ctx == Ctx::TrackMeta
+                    && let Some(m) = self.track_meta_mut(parent)
+                    && m.idat.is_none()
+                {
+                    m.idat = Some(id);
+                }
+            }
             (Ctx::Meta, b"iref") => {}
             (Ctx::Iref, typ) => {
+                // The version byte follows the iref box header (8 or 16
+                // bytes).
                 let version = parent
                     .and_then(|p| self.nodes.get(p))
-                    .and_then(|p| slice(self.data, p.range.clone()).get(8).copied())
+                    .and_then(|p| {
+                        slice(self.data, p.range.clone())
+                            .get(p.header as usize)
+                            .copied()
+                    })
                     .unwrap_or(0);
                 if let Some((from, to)) = read_iref_entry(c, version) {
                     self.irefs.push((id, *typ, from, to));
@@ -872,11 +1124,16 @@ impl<'a> Walker<'a> {
                     self.note(id, "unreadable reference entry");
                 }
             }
-            (Ctx::Iprp, b"ipma") => {
-                if let Some(v) = read_ipma(c) {
-                    self.ipma.extend(v);
+            (Ctx::Meta, b"iprp") => self.iprps.push(id),
+            (Ctx::Iprp, b"ipco") => {
+                if let Some(p) = parent {
+                    self.ipcos.push((id, p));
                 }
-                self.ipmas.push(id);
+            }
+            (Ctx::Iprp, b"ipma") => {
+                if let Some(p) = parent {
+                    self.ipmas.push((id, p, read_ipma(c)));
+                }
             }
             (Ctx::Ipco, typ) => {
                 let colour_type = (typ == b"colr")
@@ -893,15 +1150,109 @@ impl<'a> Walker<'a> {
                 }
                 self.props.push(PropRec {
                     node: id,
+                    ipco: parent.unwrap_or(0),
+                    len: c.len(),
                     typ: *typ,
                     colour_type,
                     urn,
                 });
             }
+            // `read_moov` / `read_trak` / `read_mdia` / `read_minf`: what
+            // `associate_tracks` decides with.
+            (Ctx::Moov, b"trak") => {
+                let moov = self.ancestor(parent, b"moov");
+                self.trak_index.insert(id, self.traks.len());
+                self.traks.push(TrakRec {
+                    node: id,
+                    moov,
+                    ..TrakRec::default()
+                });
+            }
+            (Ctx::Moov, b"tkhd") => {
+                let tid = match c.first() {
+                    Some(1) => be32_at(c, 20),
+                    Some(_) => be32_at(c, 12),
+                    None => None,
+                };
+                if let (Some(t), Some(tid)) = (self.trak_of(parent), tid) {
+                    self.traks[t].track_id = tid as u32;
+                }
+            }
+            (Ctx::Moov, b"hdlr") => {
+                let in_mdia =
+                    parent.is_some_and(|p| self.nodes[p].tag == PartTag::FourCc(*b"mdia"));
+                if in_mdia
+                    && let Some(t) = self.trak_of(parent)
+                    && let Some(ht) = c.get(8..12).and_then(|b| <[u8; 4]>::try_from(b).ok())
+                {
+                    self.traks[t].handler = Some(ht);
+                }
+            }
+            (Ctx::Moov, b"stbl") => {
+                let in_minf =
+                    parent.is_some_and(|p| self.nodes[p].tag == PartTag::FourCc(*b"minf"));
+                if in_minf && let Some(t) = self.trak_of(parent) {
+                    self.traks[t].has_stbl = true;
+                }
+            }
+            (Ctx::Moov, b"stsd") => {
+                if let Some(t) = self.trak_of(parent) {
+                    self.traks[t].stsds.push(id);
+                }
+            }
+            (Ctx::Tref, b"auxl") => {
+                // `read_tref`: whole 4-byte track IDs only.
+                if c.len() >= 4
+                    && c.len().is_multiple_of(4)
+                    && let Some(t) = self.trak_of(parent)
+                {
+                    let ids: Vec<u32> = c
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|b| u32::from_be_bytes(*b))
+                        .collect();
+                    self.traks[t].auxl.extend(ids);
+                }
+            }
+            (Ctx::Moov, b"meta") => {
+                let trak = self.trak_of(parent);
+                self.track_meta_index.insert(id, self.track_metas.len());
+                self.track_metas.push(TrackMetaRec {
+                    trak,
+                    iloc: None,
+                    infes: Vec::new(),
+                    idat: None,
+                });
+            }
+            (Ctx::TrackMeta, b"iloc") => {
+                let r = match read_iloc(c, &mut self.iloc_budget, self.stop) {
+                    Ok(Ok((e, skipped))) => {
+                        self.iloc_budget_exhausted |= skipped > 0;
+                        Ok(e)
+                    }
+                    Ok(Err(e)) => Err(e),
+                    Err(r) => return Err(at!(Error::Cancelled(r))),
+                };
+                if let Some(m) = self.track_meta_mut(parent)
+                    && m.iloc.is_none()
+                {
+                    m.iloc = Some(r);
+                }
+            }
             _ => {}
         }
         if let Some(info) = infe {
-            self.infes.push(InfeRec { node: id, info });
+            if ctx == Ctx::TrackIinf {
+                let meta = parent.and_then(|p| self.nodes[p].parent);
+                if let Some(info) = info
+                    && let Some(m) = self.track_meta_mut(meta)
+                {
+                    m.infes.push((id, info));
+                }
+            } else {
+                self.infes.push(InfeRec { node: id, info });
+            }
         }
 
         if let Some(b) = body
@@ -931,7 +1282,328 @@ impl<'a> Walker<'a> {
             }
             self.walk(Some(id), start, b.end, child_ctx, depth + 1)?;
         }
-        Ok(())
+        Ok(id)
+    }
+}
+
+impl Walker<'_> {
+    /// Structural decisions the walk can make before parsing: which
+    /// `ftyp`, `moov`, tracks and sample entries zenavif-parse uses.
+    fn decide_structure(&mut self, opts: &Options) {
+        use Disposition as D;
+        // `parse_raw` reads only the first box as `ftyp`; later ones go to
+        // `skip_box_content`.
+        for &f in self.ftyps.iter().skip(1) {
+            self.nodes[f].disp = D::Skipped;
+            self.nodes[f].notes.push(
+                "not the first box: zenavif-parse reads only the first ftyp and skips this one"
+                    .to_string(),
+            );
+        }
+        // `read_moov` returns the tracks whose `minf` holds an `stbl`;
+        // `parse_raw` keeps the last moov that returns any.
+        let parsed = |w: &Self, m: usize| {
+            w.traks
+                .iter()
+                .filter(|t| t.moov == Some(m) && t.has_stbl)
+                .count()
+        };
+        let used = self
+            .moovs
+            .iter()
+            .copied()
+            .rev()
+            .find(|&m| parsed(self, m) > 0);
+        let mut roots: Vec<(usize, &'static str)> = Vec::new();
+        for &m in &self.moovs {
+            if Some(m) == used {
+                continue;
+            }
+            roots.push((
+                m,
+                if parsed(self, m) > 0 {
+                    "a later moov with tracks replaces this one (parse_raw keeps the last)"
+                } else {
+                    "no track with a sample table: read_moov parses it and keeps nothing"
+                },
+            ));
+        }
+        if let Some(m) = used {
+            // `associate_tracks`.
+            let tracks: Vec<usize> = (0..self.traks.len())
+                .filter(|&t| self.traks[t].moov == Some(m) && self.traks[t].has_stbl)
+                .collect();
+            let color = tracks
+                .iter()
+                .copied()
+                .find(|&t| self.traks[t].handler.as_ref() == Some(b"pict"))
+                .or_else(|| {
+                    tracks
+                        .iter()
+                        .copied()
+                        .find(|&t| self.traks[t].handler.as_ref() != Some(b"soun"))
+                });
+            let alpha = color.and_then(|c| {
+                let cid = self.traks[c].track_id;
+                tracks.iter().copied().find(|&t| {
+                    t != c
+                        && matches!(
+                            self.traks[t].handler.as_ref(),
+                            Some(b"auxv") | Some(b"pict")
+                        )
+                        && self.traks[t].auxl.contains(&cid)
+                })
+            });
+            self.color_trak = color;
+            self.alpha_trak = alpha;
+            for t in 0..self.traks.len() {
+                if self.traks[t].moov != Some(m) || Some(t) == color || Some(t) == alpha {
+                    continue;
+                }
+                roots.push((
+                    self.traks[t].node,
+                    if self.traks[t].has_stbl {
+                        "associate_tracks keeps only the colour and alpha tracks"
+                    } else {
+                        "no sample table: read_trak returns nothing for it"
+                    },
+                ));
+            }
+            let kids = self.children_index();
+            for (t, alpha) in [(color, false), (alpha, true)] {
+                if let Some(t) = t {
+                    for stsd in self.traks[t].stsds.clone() {
+                        self.decide_stsd(&kids, stsd, alpha, opts);
+                    }
+                }
+            }
+            // zenavif#62: read_minf returns at the first stbl.
+            for t in [color, alpha].into_iter().flatten() {
+                let tnode = self.traks[t].node;
+                let minfs: Vec<usize> = (0..self.nodes.len())
+                    .filter(|&i| {
+                        self.nodes[i].tag == PartTag::FourCc(*b"minf")
+                            && self.ancestor(Some(i), b"trak") == Some(tnode)
+                    })
+                    .collect();
+                for minf in minfs {
+                    let mk = &kids[minf];
+                    if let Some(k) = mk
+                        .iter()
+                        .position(|&i| self.nodes[i].tag == PartTag::FourCc(*b"stbl"))
+                    {
+                        for &i in &mk[k + 1..] {
+                            self.mark_desynced(&kids, i, "read_minf returns at the first stbl");
+                        }
+                    }
+                }
+            }
+            // The alpha track's `tref`/`auxl` names the colour track.
+            if let (Some(a), Some(c)) = (alpha, color) {
+                let anode = self.traks[a].node;
+                let cid = self.traks[c].track_id;
+                for i in 0..self.nodes.len() {
+                    if self.nodes[i].tag == PartTag::FourCc(*b"auxl")
+                        && self.ancestor(Some(i), b"trak") == Some(anode)
+                    {
+                        self.nodes[i].disp = D::Structure;
+                        self.nodes[i].notes.push(format!(
+                            "names colour track {cid}: associate_tracks pairs the alpha track with it"
+                        ));
+                    }
+                }
+            }
+        }
+        // Dropped subtrees: everything below a dropped root that the walk
+        // called consumed.
+        let mut dropped = vec![false; self.nodes.len()];
+        for (r, why) in roots {
+            dropped[r] = true;
+            self.nodes[r].disp = D::Dropped;
+            self.nodes[r].notes.push(why.to_string());
+        }
+        for i in 0..self.nodes.len() {
+            if let Some(p) = self.nodes[i].parent
+                && dropped[p]
+            {
+                dropped[i] = true;
+                if self.nodes[i].disp.is_consumed() {
+                    self.nodes[i].disp = D::Dropped;
+                }
+            }
+        }
+    }
+
+    /// `read_stsd`: entries in order, up to `entry_count`, until an `av01`
+    /// entry with an `av1C` has been read; most fields are last-wins across
+    /// the entries read, `colr` first-of-kind (`retain_color_property`).
+    fn decide_stsd(&mut self, kids: &[Vec<usize>], stsd: usize, alpha: bool, opts: &Options) {
+        use Disposition as D;
+        use MetadataKind as K;
+        let r = self.nodes[stsd].range.clone();
+        let content = r.start + self.nodes[stsd].header;
+        let count = be_u32(self.data, content + 4).unwrap_or(0) as usize;
+        let entries: Vec<usize> = kids[stsd]
+            .iter()
+            .copied()
+            .filter(|&i| self.nodes[i].kind == PartKind::Box)
+            .collect();
+        let mut done = false;
+        let mut read: Vec<usize> = Vec::new();
+        for (k, &e) in entries.iter().enumerate() {
+            let is_av01 = self.nodes[e].tag == PartTag::FourCc(*b"av01");
+            let why = if done {
+                Some("read_stsd stops after the first av01 entry with an av1C")
+            } else if k >= count {
+                Some("beyond the stsd entry_count")
+            } else {
+                None
+            };
+            if let Some(why) = why {
+                self.skip_subtree(kids, e, why);
+                continue;
+            }
+            if !is_av01 {
+                continue;
+            }
+            let ek = &kids[e];
+            if ek
+                .iter()
+                .any(|&c| self.nodes[c].tag == PartTag::FourCc(*b"av1C"))
+            {
+                done = true;
+            }
+            read.extend_from_slice(ek);
+        }
+        // zenavif#62: read_stsd breaks without consuming the rest of the
+        // stsd, so the stbl iterator reads its next box header from those
+        // bytes.
+        let stopped_at = read.last().and_then(|&c| self.nodes[c].parent);
+        let unread = match stopped_at {
+            Some(e) => self.nodes[e].range.end < self.nodes[stsd].range.end,
+            None => false,
+        };
+        if unread && let Some(stbl) = self.nodes[stsd].parent {
+            let end = self.nodes[stsd].range.end;
+            let later: Vec<usize> = kids[stbl]
+                .iter()
+                .copied()
+                .filter(|&i| self.nodes[i].range.start >= end)
+                .collect();
+            for i in later {
+                self.mark_desynced(kids, i, "read_stsd stops before the end of the stsd");
+            }
+        }
+        // Across the entries read: last-wins kinds, first-wins colours.
+        let kind_of = |w: &Self, c: usize| -> Option<[u8; 4]> {
+            match &w.nodes[c].tag {
+                PartTag::FourCc([b'c', b'o', b'l', b'r']) => {
+                    let cs = w.nodes[c].range.start + w.nodes[c].header;
+                    match fourcc_at(w.data, cs) {
+                        Some(ct) if &ct == b"nclx" && w.nodes[c].range.end - cs >= 11 => {
+                            Some(*b"nclx")
+                        }
+                        Some(ct) if &ct == b"prof" || &ct == b"rICC" => Some(*b"ICC "),
+                        _ => None,
+                    }
+                }
+                PartTag::FourCc(t) => Some(*t),
+                _ => None,
+            }
+        };
+        let mut chosen: BTreeMap<[u8; 4], usize> = BTreeMap::new();
+        for &c in &read {
+            let Some(k) = kind_of(self, c) else { continue };
+            match &k {
+                b"nclx" | b"ICC " => {
+                    chosen.entry(k).or_insert(c);
+                }
+                _ => {
+                    chosen.insert(k, c);
+                }
+            }
+        }
+        for &c in &read {
+            let PartTag::FourCc(t) = self.nodes[c].tag.clone() else {
+                continue;
+            };
+            let k = kind_of(self, c);
+            let is_chosen = k.is_some_and(|k| chosen.get(&k) == Some(&c));
+            let (d, why): (Disposition, &str) = match (&t, k.as_ref()) {
+                (b"colr", None) => (
+                    D::Unknown,
+                    "colour type zenavif-parse does not read, or an nclx shorter than 11 bytes",
+                ),
+                (
+                    b"av1C" | b"colr" | b"irot" | b"imir" | b"clap" | b"pasp" | b"clli" | b"mdcv"
+                    | b"cclv" | b"amve",
+                    _,
+                ) if !is_chosen => (
+                    D::Dropped,
+                    "replaced by a later one of the same kind (or, for colr, an earlier one wins)",
+                ),
+                (b"av1C", _) => (D::Structure, "decoder configuration of the track"),
+                _ if alpha => (
+                    D::Dropped,
+                    "alpha track: only its AV1 configuration is used",
+                ),
+                (b"colr", Some(b"nclx")) => (
+                    D::Metadata(K::Cicp),
+                    "track nclx colour: probe_animation_info reports it and the frames convert with it",
+                ),
+                (b"colr", _) if opts.keep_icc => (
+                    D::Metadata(K::Icc),
+                    "track ICC profile: probe_animation_info reports it",
+                ),
+                (b"colr", _) => (D::Dropped, "ICC profile removed by the DecodePolicy"),
+                (b"irot" | b"imir", _) => (
+                    D::Metadata(K::Orientation),
+                    "track orientation: probe_animation_info reports it",
+                ),
+                (b"clap", _) => (
+                    D::Structure,
+                    "clean aperture: animation frames are cropped to it (AnimationCrop)",
+                ),
+                (b"clli" | b"mdcv", _) => (
+                    D::Metadata(K::HdrStatic),
+                    "track HDR static metadata: probe_animation_info reports it",
+                ),
+                (b"pasp", _) => (
+                    D::Dropped,
+                    "parsed; zencodec neither reports nor applies pixel aspect",
+                ),
+                (b"cclv" | b"amve", _) => {
+                    (D::Dropped, "parsed; zencodec's ImageInfo cannot carry it")
+                }
+                _ => continue,
+            };
+            self.nodes[c].disp = d;
+            self.nodes[c].notes.push(why.to_string());
+        }
+    }
+
+    /// zenavif#62: a box zenavif-parse reads out of sync, after a reader
+    /// returned without consuming its box.
+    fn mark_desynced(&mut self, kids: &[Vec<usize>], root: usize, cause: &str) {
+        for i in Self::subtree(kids, root) {
+            if self.nodes[i].disp.is_consumed() {
+                self.nodes[i].disp = Disposition::Dropped;
+            }
+        }
+        self.nodes[root].notes.push(format!(
+            "{cause}, so zenavif-parse reads the following bytes out of sync (zenavif#62); what this box holds makes no change in what the caller receives"
+        ));
+    }
+
+    /// Mark a sample entry and its consumed descendants `Skipped`.
+    fn skip_subtree(&mut self, kids: &[Vec<usize>], root: usize, why: &str) {
+        for i in Self::subtree(kids, root) {
+            if self.nodes[i].disp.is_consumed() {
+                self.nodes[i].disp = Disposition::Skipped;
+            }
+        }
+        self.nodes[root].disp = Disposition::Skipped;
+        self.nodes[root].notes.push(why.to_string());
     }
 }
 
@@ -1035,6 +1707,7 @@ fn classify(ctx: Ctx, typ: &[u8; 4]) -> (Disposition, Layout, Ctx, Option<&'stat
                 b"free" | b"skip" => (D::Padding, Layout::Leaf, ctx, None),
                 b"uuid" => (D::Unknown, Layout::Leaf, ctx, None),
                 b"stsd" => (D::Structure, Layout::FullCount, Ctx::Stsd, None),
+                b"tref" => (D::Structure, Layout::Plain, Ctx::Tref, None),
                 b"meta" => (
                     D::Structure,
                     Layout::Full,
@@ -1066,11 +1739,50 @@ fn classify(ctx: Ctx, typ: &[u8; 4]) -> (Disposition, Layout, Ctx, Option<&'stat
             b"uuid" => (D::Unknown, Layout::Leaf, ctx, None),
             _ => (D::Skipped, generic_layout(typ), Ctx::Unread, None),
         },
+        // `read_avif_meta_scoped(.., require_primary = false)`; `read_trak`
+        // keeps only the first Exif and first XMP item, its iloc and idat.
         Ctx::TrackMeta => match typ {
+            b"hdlr" => (
+                D::Structure,
+                Layout::Leaf,
+                ctx,
+                Some("handler must be pict"),
+            ),
+            b"iloc" => (D::Structure, Layout::Leaf, ctx, None),
+            b"iinf" => (D::Structure, Layout::Iinf, Ctx::TrackIinf, None),
+            b"idat" => (D::Structure, Layout::Data, ctx, None),
+            b"pitm" | b"iref" | b"iprp" | b"grpl" => (
+                D::Dropped,
+                generic_layout(typ),
+                Ctx::Dropped,
+                Some(
+                    "track metadata: parsed, then discarded (read_trak keeps only the Exif/XMP items)",
+                ),
+            ),
+            b"dinf" => (
+                D::Skipped,
+                Layout::Plain,
+                Ctx::Unread,
+                Some("zenavif-parse skips this box"),
+            ),
             b"free" | b"skip" => (D::Padding, Layout::Leaf, ctx, None),
             b"uuid" => (D::Unknown, Layout::Leaf, ctx, None),
-            b"dinf" => (D::Skipped, Layout::Plain, Ctx::Unread, None),
-            _ => (D::Structure, generic_layout(typ), ctx, None),
+            b"ipro" | b"fiin" | b"ipmc" | b"xml " | b"bxml" => (
+                D::Skipped,
+                Layout::Leaf,
+                ctx,
+                Some("zenavif-parse skips this box"),
+            ),
+            _ => (D::Unknown, Layout::Leaf, ctx, None),
+        },
+        // `read_iinf`: decided in the second pass.
+        Ctx::TrackIinf => (D::Skipped, Layout::Leaf, ctx, None),
+        // `read_tref`: each child is a list of track IDs.
+        Ctx::Tref => (D::Dropped, Layout::Leaf, ctx, None),
+        Ctx::Dropped => match typ {
+            b"free" | b"skip" => (D::Padding, Layout::Leaf, ctx, None),
+            b"uuid" => (D::Unknown, Layout::Leaf, ctx, None),
+            _ => (D::Dropped, generic_layout(typ), ctx, None),
         },
         Ctx::Grpl => (D::Dropped, Layout::Leaf, ctx, None),
         Ctx::Unread => match typ {
@@ -1078,6 +1790,22 @@ fn classify(ctx: Ctx, typ: &[u8; 4]) -> (Disposition, Layout, Ctx, Option<&'stat
             b"uuid" => (D::Unknown, Layout::Leaf, ctx, None),
             _ => (D::Skipped, generic_layout(typ), ctx, None),
         },
+    }
+}
+
+/// Whether zenavif-parse reads a box of this type here with a parser that
+/// accepts it clamped to its container. At the top level and in `meta`,
+/// boxes it does not parse go to `skip_box_content`, which rejects a size
+/// that runs past the container; deeper down, unread boxes go to
+/// `skip_box_remain`, which skips whatever is left.
+fn overrun_is_read(ctx: Ctx, typ: &[u8; 4]) -> bool {
+    match ctx {
+        Ctx::Top => matches!(typ, b"ftyp" | b"meta" | b"moov"),
+        Ctx::Meta | Ctx::TrackMeta => matches!(
+            typ,
+            b"hdlr" | b"pitm" | b"iloc" | b"iinf" | b"iref" | b"iprp" | b"idat" | b"grpl"
+        ),
+        _ => true,
     }
 }
 
@@ -1114,7 +1842,7 @@ fn inner_parts(
             12,
             "reserved fields and handler name: zenavif-parse reads only the handler type",
         )),
-        (Ctx::Iinf | Ctx::TrackMeta, b"infe") => {
+        (Ctx::Iinf | Ctx::TrackIinf, b"infe") => {
             let fixed = if c.first() == Some(&3) { 14 } else { 12 };
             if c.get(8..12) == Some(b"mime") || c.get(10..14) == Some(b"mime") {
                 // `read_infe` reads the name and content type of a mime item,
@@ -1143,6 +1871,14 @@ fn inner_parts(
         }
         (Ctx::Iprp, b"ipma") => ipma_read_len(c).map(|r| (r, "after the last association read")),
         (_, b"ispe") if property => Some((12, "after the width and height read")),
+        // `read_grid`: version/flags, flags byte, rows, columns, then two
+        // 16- or 32-bit sizes.
+        (Ctx::Ipco, b"grid") => c.get(4).map(|&f| {
+            (
+                if f & 1 == 0 { 11 } else { 15 },
+                "after the grid fields read",
+            )
+        }),
         (_, b"irot" | b"imir") if property => Some((1, "after the one byte read")),
         (_, b"clap") if property => Some((32, "after the 8 clap fields read")),
         (_, b"pasp") if property => Some((8, "after the two spacings read")),
@@ -1185,11 +1921,13 @@ fn inner_parts(
                 if let Some(declared) = be32_at(c, 4) {
                     let end = 4u64.saturating_add(declared);
                     if end < len as u64 {
+                        // zenavif-parse copies the whole payload, so the
+                        // caller receives these bytes with the profile.
                         out.push((
                             content.start + end..content.end,
-                            Disposition::Unreferenced,
+                            Disposition::Metadata(MetadataKind::Icc),
                             format!(
-                                "after the ICC profile's declared {declared} bytes; reported with the profile"
+                                "after the ICC profile's declared {declared} bytes; the caller receives them with the profile"
                             ),
                         ));
                     }
@@ -1315,10 +2053,13 @@ fn supported_property(p: &PropRec) -> bool {
     match &p.typ {
         b"pixi" | b"auxC" | b"ispe" | b"grid" | b"av1C" | b"irot" | b"imir" | b"clap" | b"pasp"
         | b"clli" | b"mdcv" | b"cclv" | b"amve" | b"a1op" | b"lsel" | b"a1lx" => true,
-        b"colr" => matches!(
-            p.colour_type.as_ref(),
-            Some(b"nclx") | Some(b"rICC") | Some(b"prof")
-        ),
+        // `read_colr` fails on an nclx shorter than its 11 bytes, and
+        // `read_ipco` turns that into `Unsupported`.
+        b"colr" => match p.colour_type.as_ref() {
+            Some(b"nclx") => p.len >= 11,
+            Some(b"rICC") | Some(b"prof") => true,
+            _ => false,
+        },
         _ => false,
     }
 }
@@ -1342,10 +2083,25 @@ struct Model {
     refs: BTreeMap<usize, Use>,
     /// Animation samples: `(range, use, label)`.
     samples: Vec<(Range<u64>, Use, &'static str)>,
-    /// Track-level metadata items located through the parser.
-    sidecars: Vec<(Range<u64>, Use, &'static str)>,
+    /// The colour track's EXIF/XMP items.
+    sidecars: Vec<Sidecar>,
+    /// Track-level `infe` nodes `read_trak` uses.
+    track_items: Vec<(usize, Use)>,
     /// More samples than an inventory may hold.
     too_many: bool,
+    /// `parser.frame(0)` fails, so `probe_animation_info` fails: nothing
+    /// the colour track reports reaches the caller.
+    track_probe_fails: bool,
+}
+
+/// A track-level metadata item: its bytes, how they are used, and the
+/// track `idat` holding them (`None`: the file).
+struct Sidecar {
+    range: Range<u64>,
+    u: Use,
+    label: &'static str,
+    item: u32,
+    idat: Option<usize>,
 }
 
 /// The byte range `s` occupies inside `base`, when it borrows from it.
@@ -1361,14 +2117,17 @@ fn locate(base: &[u8], s: &[u8]) -> Option<Range<u64>> {
 }
 
 impl Model {
-    fn build(w: &Walker<'_>, parser: &zenavif_parse::AvifParser<'_>, opts: &Options) -> Self {
+    fn build(
+        w: &Walker<'_>,
+        parser: &zenavif_parse::AvifParser<'_>,
+        opts: &Options,
+    ) -> Result<Self, At<Error>> {
         let mut m = Self::default();
-        let infos: BTreeMap<u32, &Infe> = w
-            .infes
-            .iter()
-            .filter_map(|r| r.info.as_ref())
-            .map(|i| (i.id, i))
-            .collect();
+        // `item_infos.iter().find(..)`: the first infe of an ID counts.
+        let mut infos: BTreeMap<u32, &Infe> = BTreeMap::new();
+        for i in w.infes.iter().filter_map(|r| r.info.as_ref()) {
+            infos.entry(i.id).or_insert(i);
+        }
         // `read_iref`: one reference per (type, from, to), in file order.
         let refs: Vec<(usize, [u8; 4], u32, u32, u16)> = w
             .irefs
@@ -1380,39 +2139,52 @@ impl Model {
             })
             .collect();
         // `read_iprp`: supported properties associated with an item, in ipma
-        // order.
-        let assoc: Vec<(u32, usize)> = w
-            .ipma
-            .iter()
-            .filter(|(_, _, idx)| *idx > 0)
-            .map(|&(item, _, idx)| (item, usize::from(idx) - 1))
-            .filter(|&(_, i)| w.props.get(i).is_some_and(supported_property))
-            .collect();
-        // The first associated property of each kind, per item.
-        let first_of = |item: u32, kind: [u8; 4]| -> Option<usize> {
-            assoc
-                .iter()
-                .find(|&&(it, i)| it == item && prop_kind(&w.props[i]) == kind)
-                .map(|&(_, i)| i)
-        };
-        let props_of = |item: u32| -> Vec<usize> {
-            assoc
-                .iter()
-                .filter(|&&(it, _)| it == item)
-                .map(|&(_, i)| i)
-                .collect()
-        };
+        // order; indices into the active ipco.
+        let (_, active, ipma) = w.active_properties();
+        let mut assoc: Vec<(u32, usize)> = Vec::new();
+        for (k, &(item, _, idx)) in ipma.iter().enumerate() {
+            if k % 4096 == 0 {
+                w.check_stop()?;
+            }
+            if idx == 0 {
+                continue;
+            }
+            if let Some(&i) = active.get(usize::from(idx) - 1)
+                && supported_property(&w.props[i])
+            {
+                assoc.push((item, i));
+            }
+        }
+        // Per item: its properties in order, and the first of each kind.
+        let mut by_item: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
+        let mut first: BTreeMap<(u32, [u8; 4]), usize> = BTreeMap::new();
+        for &(item, i) in &assoc {
+            by_item.entry(item).or_default().push(i);
+            first.entry((item, prop_kind(&w.props[i]))).or_insert(i);
+        }
+        let first_of =
+            |item: u32, kind: [u8; 4]| -> Option<usize> { first.get(&(item, kind)).copied() };
+        let props_of =
+            |item: u32| -> Vec<usize> { by_item.get(&item).cloned().unwrap_or_default() };
         let urn_of = |item: u32| -> Vec<Vec<u8>> {
             props_of(item)
                 .into_iter()
                 .filter_map(|i| w.props[i].urn.clone())
                 .collect()
         };
+        // The first colr of either kind, in association order
+        // (`gain_map_color_info`: `find_map` over the tmap's properties).
+        let first_colr = |item: u32| -> Option<usize> {
+            props_of(item)
+                .into_iter()
+                .find(|&i| &w.props[i].typ == b"colr")
+        };
 
         let Some(&(_, primary)) = w.pitm.as_ref() else {
             // A pure image sequence: frames only.
-            m.frames(parser, w.data);
-            return m;
+            m.frames(w, parser, opts)?;
+            m.apply_frame_size_limit(parser, opts);
+            return Ok(m);
         };
         let ptype = infos.get(&primary).map(|i| i.typ);
 
@@ -1468,7 +2240,8 @@ impl Model {
                 "primary image",
             ),
         }
-        m.primary_props(&w.props, primary, &props_of, &first_of, opts);
+        let is_grid = ptype.as_ref() == Some(b"grid");
+        m.primary_props(&w.props, primary, is_grid, &props_of, &first_of, opts);
 
         // Alpha: the first auxl → primary item with the CICP alpha URN.
         let auxl: Vec<u32> = refs
@@ -1539,7 +2312,14 @@ impl Model {
             }
         }
         if let Some(e) = exif {
-            let (d, why) = if opts.keep_exif {
+            let (d, why) = if matches!(parser.exif(), Some(Err(_))) {
+                // `strip_exif` fails: probe_info swallows it (no EXIF is
+                // reported) and decode_full propagates it.
+                (
+                    Disposition::Malformed,
+                    "EXIF item whose offset field points past its end: probe reports no EXIF, and Decode::decode fails (strip_exif: EXIF offset exceeds item size; zenavif#63)",
+                )
+            } else if opts.keep_exif {
                 (
                     Disposition::Metadata(MetadataKind::Exif),
                     "EXIF of the primary image (first Exif item linked by cdsc)",
@@ -1583,17 +2363,22 @@ impl Model {
                     Disposition::Metadata(MetadataKind::GainMap),
                     "ISO 21496-1 gain-map parameters, reported in ImageInfo::gain_map",
                 );
-                let gm_disp = match opts.gain_map {
-                    GainMapUse::Describe => Disposition::Metadata(MetadataKind::GainMap),
-                    GainMapUse::Reconstruct => Disposition::ImageData,
+                let (gm_disp, gm_why) = match opts.gain_map {
+                    GainMapUse::Describe => (
+                        Disposition::Metadata(MetadataKind::GainMap),
+                        "gain-map image: only its sequence and first frame headers are read (convert_gain_map_info sizes ImageInfo::gain_map)",
+                    ),
+                    GainMapUse::Surface => (
+                        Disposition::Metadata(MetadataKind::GainMap),
+                        "gain-map image: handed to the caller (extract_gain_map: GainMapSource; GainMapRender::Components: decoded to DecodedGainMap)",
+                    ),
+                    GainMapUse::Reconstruct => (
+                        Disposition::ImageData,
+                        "gain-map image: decoded and applied to the base (GainMapRender::ReconstructHdr)",
+                    ),
                 };
-                set(
-                    &mut m.items,
-                    gm,
-                    gm_disp,
-                    "gain-map image: its sequence header sizes ImageInfo::gain_map; pixels decoded on request",
-                );
-                if let Some(i) = first_of(tmap, *b"nclx").or_else(|| first_of(tmap, *b"ICC ")) {
+                set(&mut m.items, gm, gm_disp, gm_why);
+                if let Some(i) = first_colr(tmap) {
                     set(
                         &mut m.props,
                         i,
@@ -1630,8 +2415,56 @@ impl Model {
                 "thumbnail of the primary image; zenavif does not read thumbnails",
             );
         }
-        m.frames(parser, w.data);
-        m
+        m.frames(w, parser, opts)?;
+        m.apply_frame_size_limit(parser, opts);
+        Ok(m)
+    }
+
+    /// `ManagedAvifDecoder::new_for_source`: with `ResourceLimits::max_pixels`
+    /// set, the decode refuses an image whose size exceeds it (from the grid,
+    /// the primary's sequence header, or the first frame for animation).
+    fn apply_frame_size_limit(&mut self, parser: &zenavif_parse::AvifParser<'_>, opts: &Options) {
+        let Some(limit) = opts.max_pixels else {
+            return;
+        };
+        let limit = limit.min(u64::from(u32::MAX));
+        let too_big = |w: u32, h: u32| u64::from(w.saturating_mul(h)) > limit;
+        let (w, h) = if let Some(g) = parser.grid_config() {
+            (g.output_width, g.output_height)
+        } else if let Ok(meta) = parser.primary_metadata() {
+            (meta.max_frame_width.get(), meta.max_frame_height.get())
+        } else {
+            (0, 0)
+        };
+        if too_big(w, h) {
+            for u in self.items.values_mut() {
+                if u.disp == Disposition::ImageData {
+                    u.disp = Disposition::Dropped;
+                    u.why = format!(
+                        "{}; Decode::decode refuses: {w}x{h} exceeds ResourceLimits::max_pixels ({limit})",
+                        u.why
+                    );
+                }
+            }
+        }
+        let anim = parser.frame(0).ok().and_then(|f| {
+            zenavif_parse::AV1Metadata::parse_av1_bitstream(&f.data)
+                .ok()
+                .map(|m| (m.max_frame_width.get(), m.max_frame_height.get()))
+        });
+        if let Some((aw, ah)) = anim
+            && too_big(aw, ah)
+        {
+            for (_, u, _) in &mut self.samples {
+                if u.disp == Disposition::ImageData {
+                    u.disp = Disposition::Dropped;
+                    u.why = format!(
+                        "{}; animation_frame_decoder refuses: {aw}x{ah} exceeds ResourceLimits::max_pixels ({limit})",
+                        u.why
+                    );
+                }
+            }
+        }
     }
 
     /// `AvifParser::build` `find_prop!` / `item_color_properties` for the
@@ -1640,6 +2473,7 @@ impl Model {
         &mut self,
         props: &[PropRec],
         primary: u32,
+        is_grid: bool,
         props_of: &dyn Fn(u32) -> Vec<usize>,
         first_of: &dyn Fn(u32, [u8; 4]) -> Option<usize>,
         opts: &Options,
@@ -1663,7 +2497,11 @@ impl Model {
             let (d, why) = match &kind {
                 b"ispe" => (D::Structure, "image extents (megapixel limit)"),
                 b"av1C" => (D::Structure, "decoder configuration (bit depth)"),
-                b"grid" => (D::Structure, "grid layout"),
+                b"grid" if is_grid => (D::Structure, "grid layout (calculate_grid_config)"),
+                b"grid" => (
+                    D::Dropped,
+                    "parsed; calculate_grid_config runs only for a grid primary",
+                ),
                 b"ICC " if opts.keep_icc => {
                     (D::Metadata(K::Icc), "ICC profile, reported in SourceColor")
                 }
@@ -1694,17 +2532,48 @@ impl Model {
     }
 
     /// Animation samples, located through the parser (`AvifParser::frame`
-    /// borrows the input), and the track-level EXIF/XMP sidecars.
-    fn frames(&mut self, parser: &zenavif_parse::AvifParser<'_>, data: &[u8]) {
+    /// borrows the input), and the colour track's EXIF/XMP sidecars.
+    fn frames(
+        &mut self,
+        w: &Walker<'_>,
+        parser: &zenavif_parse::AvifParser<'_>,
+        opts: &Options,
+    ) -> Result<(), At<Error>> {
         let Some(info) = parser.animation_info() else {
-            return;
+            return Ok(());
+        };
+        let data = w.data;
+        // `animation_frame_decoder_inner` refuses when the policy forbids
+        // animation; `Decode::decode` never reads samples.
+        let (disp, refused) = if opts.allow_animation {
+            (Disposition::ImageData, "")
+        } else {
+            (
+                Disposition::Dropped,
+                "; DecodePolicy forbids animation, so animation_frame_decoder refuses",
+            )
+        };
+        // A frame the parser cannot locate fails `animation_frame_decoder`
+        // (and, for frame 0, `probe_animation_info`).
+        let first_bad = (0..info.frame_count).find(|&i| parser.frame(i).is_err());
+        // probe_animation_info reads frame 0 whatever the frame count.
+        self.track_probe_fails = parser.frame(0).is_err();
+        let (disp, refused) = match first_bad {
+            Some(i) => (
+                Disposition::Dropped,
+                format!("; frame {i} cannot be located, so animation_frame_decoder fails"),
+            ),
+            None => (disp, refused.to_string()),
         };
         for i in 0..info.frame_count {
+            if i % 1024 == 0 {
+                w.check_stop()?;
+            }
             // Every sample becomes a part: stop at the part cap; `resolve`
             // turns the overflow into the cap error.
             if self.samples.len() > DEFAULT_MAX_PARTS as usize {
                 self.too_many = true;
-                return;
+                return Ok(());
             }
             let Ok(f) = parser.frame(i) else {
                 break;
@@ -1713,8 +2582,8 @@ impl Model {
                 self.samples.push((
                     r,
                     Use {
-                        disp: Disposition::ImageData,
-                        why: format!("animation frame {i} (animation_frame_decoder)"),
+                        disp,
+                        why: format!("animation frame {i} (animation_frame_decoder){refused}"),
                     },
                     "color sample",
                 ));
@@ -1725,38 +2594,142 @@ impl Model {
                 self.samples.push((
                     r,
                     Use {
-                        disp: Disposition::ImageData,
-                        why: format!("alpha of animation frame {i} (animation_frame_decoder)"),
+                        disp,
+                        why: format!(
+                            "alpha of animation frame {i} (animation_frame_decoder){refused}"
+                        ),
                     },
                     "alpha sample",
                 ));
             }
         }
-        // `probe_info` reports the track's metadata only for a pure sequence.
-        let pure = parser.primary_data().is_ok_and(|d| d.is_empty());
-        let mut sidecar = |r: Option<Range<u64>>, kind: MetadataKind, label: &'static str| {
-            if let Some(r) = r {
-                let u = if pure {
-                    Use {
-                        disp: Disposition::Metadata(kind),
-                        why: "track metadata, reported for the image sequence".to_string(),
-                    }
-                } else {
-                    Use {
-                        disp: Disposition::Skipped,
-                        why: "track metadata; the primary image's metadata is reported instead"
-                            .to_string(),
-                    }
-                };
-                self.sidecars.push((r, u, label));
-            }
+        self.track_sidecars(w, parser, opts);
+        Ok(())
+    }
+
+    /// `read_trak`: the first Exif and the first XMP item of the colour
+    /// track's `meta`, read through that meta's `iloc` and `idat`.
+    /// `probe_animation_info` reports them whenever a sequence exists
+    /// (probe, probe_full and animation_frame_decoder), while
+    /// `Decode::decode` reports the primary item's.
+    fn track_sidecars(
+        &mut self,
+        w: &Walker<'_>,
+        parser: &zenavif_parse::AvifParser<'_>,
+        opts: &Options,
+    ) {
+        let Some(tm) = w
+            .track_metas
+            .iter()
+            .find(|m| m.trak.is_some() && m.trak == w.color_trak)
+        else {
+            return;
         };
-        if let Some(Ok(e)) = parser.animation_exif() {
-            // `strip_exif` drops the offset prefix; the reported bytes start here.
-            sidecar(locate(data, &e), MetadataKind::Exif, "track Exif");
-        }
-        if let Some(Ok(x)) = parser.animation_xmp() {
-            sidecar(locate(data, &x), MetadataKind::Xmp, "track XMP");
+        let probe_fails = self.track_probe_fails;
+        let locs: &[Loc] = match &tm.iloc {
+            Some(Ok(l)) => l,
+            _ => &[],
+        };
+        let data = w.data;
+        let idat_body = tm.idat.and_then(|n| w.nodes[n].body.clone());
+        let entry_point = "probe, probe_full and animation_frame_decoder report it (probe_animation_info); Decode::decode reports the primary item's instead (zenavif#64)";
+        for kind in [MetadataKind::Exif, MetadataKind::Xmp] {
+            let pick = tm.infes.iter().find(|(_, i)| match kind {
+                MetadataKind::Exif => &i.typ == b"Exif",
+                _ => i.is_xmp(),
+            });
+            let Some((infe_node, info)) = pick else {
+                continue;
+            };
+            let (label, keep, parsed) = match kind {
+                MetadataKind::Exif => ("track Exif", opts.keep_exif, parser.animation_exif()),
+                _ => ("track XMP", opts.keep_xmp, parser.animation_xmp()),
+            };
+            let what = if kind == MetadataKind::Exif {
+                "EXIF"
+            } else {
+                "XMP"
+            };
+            let u = match &parsed {
+                _ if probe_fails => Use {
+                    disp: Disposition::Dropped,
+                    why: format!(
+                        "colour track {what}: probe_animation_info fails (frame 0 cannot be located), so no entry point reports it"
+                    ),
+                },
+                Some(Err(_)) => Use {
+                    disp: Disposition::Malformed,
+                    why: format!(
+                        "colour track {what} that zenavif-parse cannot read (EXIF offset past the item's end): probe_animation_info fails, so probe, probe_full and animation_frame_decoder error (zenavif#63)"
+                    ),
+                },
+                _ if keep => Use {
+                    disp: Disposition::Metadata(kind),
+                    why: format!("colour track {what}: {entry_point}"),
+                },
+                _ => Use {
+                    disp: Disposition::Dropped,
+                    why: format!("colour track {what} removed by the DecodePolicy"),
+                },
+            };
+            self.track_items.push((
+                *infe_node,
+                Use {
+                    disp: if u.disp.is_consumed() {
+                        Disposition::Structure
+                    } else {
+                        u.disp
+                    },
+                    why: format!("the colour track's {what} item (read_trak)"),
+                },
+            ));
+            // `AvifParser::get_item_extents` + `resolve_item_with_idat`: a
+            // single extent, in the file or in this meta's idat.
+            let Some(loc) = locs.iter().find(|l| l.id == info.id) else {
+                continue;
+            };
+            let [(off, len)] = loc.extents[..] else {
+                continue;
+            };
+            if len == 0 || loc.data_ref != 0 {
+                continue;
+            }
+            let (src, idat) = match (loc.method, &idat_body) {
+                (0, _) => (0..data.len() as u64, None),
+                (1, Some(b)) => (b.clone(), tm.idat),
+                _ => continue,
+            };
+            let Some(start) = src
+                .start
+                .checked_add(loc.base)
+                .and_then(|v| v.checked_add(off))
+            else {
+                continue;
+            };
+            let Some(end) = start.checked_add(len).filter(|&e| e <= src.end) else {
+                continue;
+            };
+            // The bytes the parser hands over must be these (after the EXIF
+            // offset prefix).
+            let raw = slice(data, start..end);
+            let same = match (&parsed, kind) {
+                (Some(Ok(b)), MetadataKind::Exif) => be32_at(raw, 0)
+                    .and_then(|o| usize::try_from(o).ok()?.checked_add(4))
+                    .and_then(|t| raw.get(t..))
+                    .is_some_and(|tiff| tiff == &b[..]),
+                (Some(Ok(b)), _) => raw == &b[..],
+                (Some(Err(_)), _) => true,
+                (None, _) => false,
+            };
+            if same {
+                self.sidecars.push(Sidecar {
+                    range: start..end,
+                    u,
+                    label,
+                    item: info.id,
+                    idat,
+                });
+            }
         }
     }
 }
@@ -1803,6 +2776,8 @@ struct Cand {
     label: Option<String>,
     tag: PartTag,
     note_to: usize,
+    /// The `idat` that must hold it (a track meta's sidecar).
+    holder: Option<usize>,
 }
 
 impl Walker<'_> {
@@ -1885,23 +2860,121 @@ impl Walker<'_> {
             self.note(node, why);
         }
 
-        // Properties.
+        // Metadata a box reports through a path that fails: everything when
+        // zenavif-parse rejects the file; the colour track's when
+        // `probe_animation_info` fails.
+        let track_fails = model.is_some_and(|m| m.track_probe_fails);
+        let color_node = self.color_trak.map(|t| self.traks[t].node);
+        for i in 0..self.nodes.len() {
+            if !matches!(
+                self.nodes[i].disp,
+                Disposition::Metadata(_) | Disposition::ImageData
+            ) {
+                continue;
+            }
+            if model.is_none() {
+                self.nodes[i].disp = Disposition::Dropped;
+            } else if track_fails
+                && color_node.is_some()
+                && self.ancestor(Some(i), b"trak") == color_node
+            {
+                self.nodes[i].disp = Disposition::Dropped;
+                self.nodes[i].notes.push(
+                    "probe_animation_info fails (frame 0 cannot be located), so nothing the colour track reports reaches the caller"
+                        .to_string(),
+                );
+            }
+        }
+
+        // Track-level items `read_trak` uses; the rest of a used track
+        // meta's items are not read.
+        for (node, u) in model.map(|m| m.track_items.clone()).unwrap_or_default() {
+            self.nodes[node].disp = u.disp;
+            self.note(node, u.why);
+        }
+        for i in 0..self.track_metas.len() {
+            for k in 0..self.track_metas[i].infes.len() {
+                let node = self.track_metas[i].infes[k].0;
+                if self.nodes[node]
+                    .notes
+                    .iter()
+                    .all(|n| !n.contains("read_trak"))
+                {
+                    self.note(
+                        node,
+                        "track metadata item read_trak does not use (it takes the first Exif and XMP items of the colour track)",
+                    );
+                }
+            }
+        }
+
+        // Properties: only the last ipco of the last iprp counts
+        // (`read_iprp`), and only the last ipma.
         let props = std::mem::take(&mut self.props);
-        let associated: BTreeSet<usize> = self
-            .ipma
+        let (active_iprp, active, ipma) = {
+            let (a, b, c) = self.active_properties_of(&props);
+            (a, b, c.to_vec())
+        };
+        let associated: BTreeSet<usize> = ipma
             .iter()
             .filter(|(_, _, i)| *i > 0)
-            .map(|&(_, _, i)| usize::from(i) - 1)
+            .filter_map(|&(_, _, i)| active.get(usize::from(i) - 1).copied())
             .collect();
-        for (index, rec) in props.iter().enumerate() {
-            self.note(rec.node, format!("property #{}", index + 1));
+        for &n in &self.iprps.clone() {
+            if Some(n) != active_iprp {
+                self.nodes[n].disp = Disposition::Dropped;
+                self.note(
+                    n,
+                    "a later iprp replaces this one (read_avif_meta_scoped keeps the last)",
+                );
+            }
+        }
+        let active_ipco = self
+            .ipcos
+            .iter()
+            .rev()
+            .find(|&&(_, p)| Some(p) == active_iprp)
+            .map(|&(n, _)| n);
+        for (n, p) in self.ipcos.clone() {
+            if Some(p) == active_iprp && Some(n) != active_ipco {
+                self.nodes[n].disp = Disposition::Dropped;
+                self.note(
+                    n,
+                    "a later ipco replaces this one (read_iprp keeps the last)",
+                );
+            }
+        }
+        let active_ipma = self
+            .ipmas
+            .iter()
+            .rev()
+            .find(|(_, p, _)| Some(*p) == active_iprp)
+            .map(|(n, _, _)| *n);
+        for (n, p, _) in self.ipmas.clone() {
+            if Some(p) == active_iprp && Some(n) != active_ipma {
+                self.nodes[n].disp = Disposition::Dropped;
+                self.note(
+                    n,
+                    "a later ipma replaces this one (read_iprp keeps the last)",
+                );
+            }
+        }
+        for (gi, rec) in props.iter().enumerate() {
+            let pos = props[..gi].iter().filter(|p| p.ipco == rec.ipco).count();
+            self.note(rec.node, format!("property #{}", pos + 1));
+            let in_active = active.contains(&gi);
             let (disp, why) = if model.is_none() {
                 (Disposition::Dropped, rejected().why)
+            } else if !in_active {
+                (
+                    Disposition::Dropped,
+                    "in an ipco (or iprp) that a later one replaces".to_string(),
+                )
             } else if !supported_property(rec) {
                 if &rec.typ == b"colr" {
                     (
                         Disposition::Unknown,
-                        "colour type zenavif-parse does not recognise".to_string(),
+                        "colour type zenavif-parse does not recognise, or an nclx shorter than 11 bytes (read_colr fails; the property is Unsupported)".to_string(),
                     )
                 } else {
                     (
@@ -1909,9 +2982,9 @@ impl Walker<'_> {
                         "zenavif-parse has no parser for this property".to_string(),
                     )
                 }
-            } else if let Some(u) = model.and_then(|m| m.props.get(&index)) {
+            } else if let Some(u) = model.and_then(|m| m.props.get(&gi)) {
                 (u.disp, u.why.clone())
-            } else if associated.contains(&index) {
+            } else if associated.contains(&gi) {
                 (
                     Disposition::Skipped,
                     "associated only with items the zencodec decode does not use".to_string(),
@@ -1961,6 +3034,7 @@ impl Walker<'_> {
                 format!("{} item locations, {n_ext} extents", locs.len()),
             );
             if skipped > 0 {
+                self.iloc_budget_exhausted = true;
                 self.note(note_to, format!("{skipped} further extents not listed"));
             }
             for loc in locs {
@@ -2067,14 +3141,16 @@ impl Walker<'_> {
                         label: label.clone(),
                         tag: PartTag::Code(id),
                         note_to,
+                        holder: None,
                     });
                 }
             }
         }
-        // Animation samples and track sidecars, located through the parser.
+        // Animation samples, located through the parser, and the colour
+        // track's metadata items.
         if let Some(m) = model {
             let note_to = self.moovs.first().copied().unwrap_or(0);
-            for (r, u, label) in m.samples.iter().chain(m.sidecars.iter()) {
+            for (r, u, label) in &m.samples {
                 cands.push(Cand {
                     item: 0,
                     who: u.why.clone(),
@@ -2085,6 +3161,21 @@ impl Walker<'_> {
                     label: Some((*label).to_string()),
                     tag: PartTag::None,
                     note_to,
+                    holder: None,
+                });
+            }
+            for sc in &m.sidecars {
+                cands.push(Cand {
+                    item: sc.item,
+                    who: format!("{} (item {})", sc.label, sc.item),
+                    range: sc.range.clone(),
+                    idat: sc.idat.is_some(),
+                    disp: sc.u.disp,
+                    why: sc.u.why.clone(),
+                    label: Some(sc.label.to_string()),
+                    tag: PartTag::Code(sc.item),
+                    note_to,
+                    holder: sc.idat,
                 });
             }
         }
@@ -2099,26 +3190,111 @@ impl Walker<'_> {
         );
         holders.retain(|&(h, _)| self.nodes[h].body.is_some());
         let mut placed: BTreeMap<usize, Vec<Cand>> = BTreeMap::new();
-        for cand in cands {
-            let holder = holders.iter().copied().find(|&(h, is_idat)| {
-                let b = self.nodes[h].body.clone().unwrap_or(0..0);
-                (is_idat == cand.idat || !cand.idat)
-                    && b.start <= cand.range.start
-                    && cand.range.end <= b.end
-            });
-            match holder {
-                Some((h, _)) => placed.entry(h).or_default().push(cand),
-                None => {
-                    let place = self.top_box_at(cand.range.start);
-                    self.note(
-                        cand.note_to,
-                        format!(
-                            "{} at {}..{} lies outside every mdat/idat ({place})",
-                            cand.who, cand.range.start, cand.range.end
-                        ),
-                    );
+        let mut top_level: Vec<Cand> = Vec::new();
+        // Leaf parts an extent may nest in (no body, no children to come),
+        // and the top-level parts, both sorted by start; leaves never
+        // overlap.
+        let mut leaves: Vec<(u64, u64, usize)> = {
+            let mut has_child = vec![false; self.nodes.len()];
+            for n in &self.nodes {
+                if let Some(p) = n.parent {
+                    has_child[p] = true;
                 }
             }
+            (0..self.nodes.len())
+                .filter(|&i| {
+                    let n = &self.nodes[i];
+                    !has_child[i]
+                        && n.body.is_none()
+                        && n.inner.is_empty()
+                        && n.kind != PartKind::Extent
+                })
+                .map(|i| (self.nodes[i].range.start, self.nodes[i].range.end, i))
+                .collect()
+        };
+        leaves.sort_unstable();
+        let mut tops: Vec<(u64, u64)> = self
+            .nodes
+            .iter()
+            .filter(|n| n.parent.is_none())
+            .map(|n| (n.range.start, n.range.end))
+            .collect();
+        tops.sort_unstable();
+        for cand in cands {
+            let within = |h: usize| {
+                let b = self.nodes[h].body.clone().unwrap_or(0..0);
+                b.start <= cand.range.start && cand.range.end <= b.end
+            };
+            let holder = match cand.holder {
+                Some(h) => within(h).then_some(h),
+                None => holders
+                    .iter()
+                    .copied()
+                    .find(|&(h, is_idat)| (is_idat == cand.idat || !cand.idat) && within(h))
+                    .map(|(h, _)| h),
+            };
+            if let Some(h) = holder {
+                placed.entry(h).or_default().push(cand);
+                continue;
+            }
+            // zenavif-parse slices the extent wherever it points
+            // (`resolve_file_extents`). Inside a leaf box, the extent
+            // becomes the leaf's child; past the last box, a top-level part.
+            if !cand.idat {
+                let at = leaves.partition_point(|&(s, _, _)| s <= cand.range.start);
+                let host = at
+                    .checked_sub(1)
+                    .map(|k| leaves[k])
+                    .filter(|&(_, e, _)| cand.range.end <= e)
+                    .map(|(_, _, i)| i);
+                let k = tops.partition_point(|&(s, _)| s < cand.range.end);
+                let outside_boxes = k == 0 || tops[k - 1].1 <= cand.range.start;
+                if let Some(h) = host {
+                    if self.nodes[h].notes.len() < MAX_NOTES {
+                        self.note(
+                            h,
+                            format!(
+                                "holds {} at {}..{}: the iloc points inside this box",
+                                cand.who, cand.range.start, cand.range.end
+                            ),
+                        );
+                    }
+                    placed.entry(h).or_default().push(cand);
+                    continue;
+                }
+                if outside_boxes {
+                    top_level.push(cand);
+                    continue;
+                }
+            }
+            if self.nodes[cand.note_to].notes.len() < MAX_NOTES {
+                let place = self.top_box_at(cand.range.start);
+                self.note(
+                    cand.note_to,
+                    format!(
+                        "{} at {}..{} lies outside every mdat/idat ({place}); not listed as a part",
+                        cand.who, cand.range.start, cand.range.end
+                    ),
+                );
+            } else {
+                self.note(cand.note_to, String::new());
+            }
+        }
+        // Past the last box: top-level extents, in order, without overlaps.
+        top_level.sort_by_key(|c| c.range.start);
+        let mut last_end = 0u64;
+        for cand in top_level {
+            if cand.range.start < last_end {
+                continue;
+            }
+            last_end = cand.range.end;
+            let mut node = Self::leaf(None, PartKind::Extent, cand.tag, cand.range, cand.disp);
+            node.label = cand.label;
+            node.notes.push(format!(
+                "{}; {}; after the last box: the iloc points past every box",
+                cand.who, cand.why
+            ));
+            self.add(node)?;
         }
         for (holder, mut list) in placed {
             list.sort_by(|a, b| {
@@ -2181,6 +3357,27 @@ impl Walker<'_> {
                 }
             }
         }
+        // The extent budget ran out: bytes no listed extent covers may still
+        // be item data the decoder reads, so they are Unknown, not slack.
+        if self.iloc_budget_exhausted {
+            let holders: Vec<usize> = self
+                .mdats
+                .iter()
+                .copied()
+                .chain(self.idats.iter().map(|&(n, _)| n))
+                .collect();
+            for h in holders {
+                if self.nodes[h].body.is_some() {
+                    self.nodes[h].gap_fill = Some(Disposition::Unknown);
+                    self.note(
+                        h,
+                        format!(
+                            "the iloc extent budget ({MAX_ILOC_EXTENTS}) ran out: bytes outside the listed extents may be item data the decoder reads"
+                        ),
+                    );
+                }
+            }
+        }
         Ok(())
     }
 
@@ -2198,7 +3395,15 @@ impl Walker<'_> {
                 continue;
             }
             let inner = std::mem::take(&mut self.nodes[i].inner);
+            let parent_disp = self.nodes[i].disp;
             for (r, d, why) in inner {
+                // A tail handed over with its blob carries the blob's
+                // disposition (an ICC profile reported as the gain map's
+                // alternate colour is gain-map metadata).
+                let d = match (d, parent_disp) {
+                    (Disposition::Metadata(_), Disposition::Metadata(_)) => parent_disp,
+                    _ => d,
+                };
                 let mut n = Self::leaf(Some(i), PartKind::Gap, PartTag::None, r, d);
                 n.notes.push(why);
                 self.add(n)?;
@@ -2255,8 +3460,9 @@ impl Walker<'_> {
                     {
                         parts.push((
                             r.start + end as u64..r.end,
-                            Disposition::Unreferenced,
-                            "after the XMP packet trailer; reported with the packet".to_string(),
+                            Disposition::Metadata(MetadataKind::Xmp),
+                            "after the XMP packet trailer; the caller receives it with the packet"
+                                .to_string(),
                         ));
                     }
                 }
