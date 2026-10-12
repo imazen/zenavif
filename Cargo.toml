@@ -305,7 +305,7 @@ svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt",
 # AVIF container muxer for the zenav1-svt backend (the zenravif backend muxes
 # inside zenravif; this backend muxes in-crate). The 0.2.0 version is
 # supplied by the [patch.crates-io] git pin below until 0.2.0 publishes.
-zenavif-serialize = { version = "0.2.0", optional = true }
+zenavif-serialize = { path = "zenavif-serialize", version = "0.2.0", optional = true }
 # Optional target-quality deps — encode->decode->score convergence loop
 # (`target-quality` feature). Same versions as the dev-dependency copies.
 fast-ssim2 = { version = "0.8.0", optional = true, features = ["imgref", "rayon"] }
@@ -429,7 +429,7 @@ serde_json = "1.0.150"
 # Crafted-container regressions (tests/sweep_40_geometry.rs) mux mismatched
 # AV1 payloads that no encoder would produce. Must match the optional normal
 # dep's source exactly (cargo requires one canonical path per dep name).
-zenavif-serialize = { version = "0.2.0" }
+zenavif-serialize = { path = "zenavif-serialize", version = "0.2.0" }
 
 [[bench]]
 name = "tier_isolation"

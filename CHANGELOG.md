@@ -70,6 +70,8 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 - Exact-tick animation APIs for all RGB/RGBA input formats and both encoding backends, with exact result timing and mixed-clock codec-adapter pushes, using zenravif `23522fff`.
 
 ### Fixed
+
+- Resolve the workspace serializer directly for SVT/AOM Git consumers, and remove a duplicated standalone-fuzz contract patch.
 - Make optional auto-tune dependencies resolvable by git consumers through versioned requirements and root patches. No public signature or feature change.
 
 - Bind the `zensim_cq_rd` research driver's scalar score and fresh spatial maps to complete exact candidate artifacts through Rust `BakeScorer`; independently verify emitted bytes, preserve fractional/negative targets and reject unsupported spatial terms. Retain the inert legacy-gain control and the successful one-image redistribution engagement result without claiming RD or model qualification.
