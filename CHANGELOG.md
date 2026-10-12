@@ -27,6 +27,18 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+### Metadata integration (published baseline 0.1.6)
+
+- Reuse PR 61 (`d2f17783`) inventory and regression fixtures behind default-off
+  `inventory`; keep baseline metadata available independently. Use shared typed
+  unsupported/input/part errors and preserve cancellation on malformed input.
+- Retain PR 61's auxiliary-track self-reference parser fix; validate metadata
+  across all three AV1 encoders and both decoders.
+- Registry audit confirms pre-existing breaks at `85dd0d2b`: animation struct
+  fields, non-exhaustive encoder enums, `EncodeBitDepth::Auto` discriminant and
+  nine codec-trait error types. See [the report](docs/METADATA_INTEGRATION.md).
+
+
 ### Added
 - Add calibrated native AVIF experiment routes through the shared Rust targeting owner, with train-family seeds, premeasured attained bounds and explicit 1/2/3 complete-encode accounting.
 - Exact-tick animation APIs for all RGB/RGBA input formats and both encoding backends, with exact result timing and mixed-clock codec-adapter pushes, using zenravif `23522fff`.

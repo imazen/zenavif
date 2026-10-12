@@ -368,6 +368,8 @@ linear-srgb = { version = "0.6.7"}
 
 [dev-dependencies]
 anyhow = "1"
+# check_inventory: the structural-inventory conformance check.
+zencodec-testkit = ">=0.1.0, <0.3.0"
 sha2 = "0.11.0"
 zensim-target = { git = "https://github.com/imazen/zensim", rev = "8462c824042b843dc48877fce0f04dd0522ea827", default-features = false, features = ["native-probe"] }
 # Exact predictor owner required by zensim::BakeScorer; the optional auto-tune
@@ -587,6 +589,8 @@ name = "hdr_fidelity_probe"
 required-features = ["encode"]
 
 [features]
+# Container inventory is optional for every backend.
+inventory = []
 default = ["avx512"]
 # AVX-512 kernel tiers (v4x/v4) for the in-house YUV converters — safe,
 # runtime-dispatched (used only when the CPU reports support). Default-on;
@@ -751,6 +755,12 @@ zenavif-serialize = { path = "zenavif-serialize" }
 # zenravif now uses the canonical serializer Git revision with animation
 # metadata/HDR/premultiplication support. Unify it with the workspace member
 # used by native SVT and tests, avoiding duplicate serializer packages.
+# Structural inventory API (imazen/zencodec#133, branch `feat/inventory`).
+# TEMPORARY: swap both entries for the released zencodec / zencodec-testkit
+# before this merges.
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "c1c3292ff10f386191780ad407526951165da47a" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "c1c3292ff10f386191780ad407526951165da47a" }
+
 [patch."https://github.com/imazen/zenavif"]
 zenavif-serialize = { path = "zenavif-serialize" }
 # (The former TEMP rav1d-safe [patch.crates-io] pin at f6aed27e is gone:
@@ -776,3 +786,7 @@ debug = "line-tables-only"
 
 # Backend support/policy APIs are pinned to pushed commits. No sibling backend
 # checkout or local patch is required for configuration resolution.
+
+[[example]]
+name = "inventory"
+required-features = ["inventory"]

@@ -23,6 +23,7 @@ zenpixels = ">=0.2.16, <0.4.0"
 
 [dependencies.zenavif]
 path = ".."
+features = ["inventory"]
 
 [patch.crates-io]
 # fuzz/ is its own workspace root, so the root [patch] does not reach it.
@@ -33,6 +34,9 @@ path = ".."
 # manifest's `rev` — the reasoning for the current one lives there. Drop at
 # the rav1d-safe 0.6.0 release.
 rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "e73811f5d4dad81b75195ca18554fd8a5df19515" }
+# TEMPORARY: the structural-inventory API branch (imazen/zencodec#133);
+# swap for the released zencodec before merge.
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "c1c3292ff10f386191780ad407526951165da47a" }
 
 [[bin]]
 name = "fuzz_decode"
@@ -65,6 +69,13 @@ bench = false
 [[bin]]
 name = "fuzz_decode_negotiate"
 path = "fuzz_targets/fuzz_decode_negotiate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "inventory"
+path = "fuzz_targets/fuzz_inventory.rs"
 test = false
 doc = false
 bench = false

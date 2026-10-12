@@ -32,6 +32,8 @@ once per checkout.
 - 100% safe Rust by default. Zero `unsafe` in the decode path.
 - Cooperative cancellation via the [`enough`](https://crates.io/crates/enough) crate
 
+Container inventory is opt-in with `inventory`; see the [metadata integration report](docs/METADATA_INTEGRATION.md) for the feature boundary and validation.
+
 ## Quick start
 
 ```toml

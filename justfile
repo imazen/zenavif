@@ -292,3 +292,34 @@ arm-encode-integration-macos:
 # Exact film-grain decode parity; caller supplies the corpus fixture explicitly.
 arm-filmgrain-parity fixture iters="3":
     cargo run -p zenavif --example heaptrack_decode -- {{fixture}} {{iters}} --verify-threads
+
+# Inventory's container contract is shared across AV1 backends.
+metadata-check:
+    cargo test -p zenavif --features inventory --test inventory --test inventory_cases --test inventory_feature --test fuzz_regression
+    cargo clippy -p zenavif --features inventory --lib --tests -- -D warnings
+    cargo check -p zenavif --no-default-features
+    cargo test -p zenavif --test inventory_feature
+
+metadata-backends:
+    cargo test -p zenavif --features inventory,zenav1-aom,zenav1-aom-encode,zenav1-svt,encode-imazen --test inventory --test inventory_cases --test product_aom_backend --test metadata_roundtrip -- --test-threads=4
+
+inventory-oracle:
+    AVIF_INVENTORY_CORPUS="${AVIF_INVENTORY_CORPUS:-$HOME/work/codec-corpus/avif-conformance}" INVENTORY_ORACLE_EXIFTOOL="$(command -v exiftool)" cargo test -p zenavif --features inventory --test inventory -- --nocapture
+
+metadata-portability:
+    CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_RUNNER=env cargo test -p zenavif --features inventory --target i686-unknown-linux-gnu --test inventory --test inventory_cases --test inventory_feature --test fuzz_regression
+    cargo check --manifest-path fuzz/Cargo.toml --bin inventory
+    just api-doc
+
+metadata-api-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    baseline=$(cargo read zenavif==0.1.6 --path-only)
+    RUSTC_BOOTSTRAP=1 cargo rustdoc -p zenavif --lib --features inventory,encode -- -Zunstable-options --output-format json
+    RUSTC_BOOTSTRAP=1 cargo rustdoc --manifest-path "$baseline/Cargo.toml" --target-dir "$PWD/target/published-api/0.1.6" --lib --features encode -- -Zunstable-options --output-format json
+    cargo semver-checks check-release -p zenavif --current-rustdoc target/doc/zenavif.json --baseline-rustdoc target/published-api/0.1.6/doc/zenavif.json --release-type patch
+
+metadata-api-validation:
+    cargo check --manifest-path fuzz/Cargo.toml --bin inventory
+    just api-doc
+    just metadata-api-check
