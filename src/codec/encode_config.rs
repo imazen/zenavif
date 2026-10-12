@@ -697,8 +697,9 @@ mod tests {
 
         let config = AvifEncoderConfig::new();
         let image = ImageCharacteristics::new(2048, 2048, PixelDescriptor::RGB8_SRGB);
-        let e1 = config.estimate_encode_resources(&image, &ComputeEnvironment::new());
-        let e8 = config.estimate_encode_resources(&image, &ComputeEnvironment::new().with_cores(8));
+        let e1 = config.estimate_encode_resources(&image, &ComputeEnvironment::conservative());
+        let e8 = config
+            .estimate_encode_resources(&image, &ComputeEnvironment::conservative().with_cores(8));
         assert!(
             e8.peak_memory_bytes_est().unwrap() > e1.peak_memory_bytes_est().unwrap(),
             "peaks must carry the per-thread term"

@@ -6,8 +6,8 @@ use zencodec::encode::{
     AnimationFrameEncoder as _, EncodeJob as _, Encoder as _, EncoderConfig as _,
 };
 
-fn metadata() -> zencodec::MasteringDisplay {
-    zencodec::MasteringDisplay::new(
+fn metadata() -> zenpixels::hdr::MasteringDisplay {
+    zenpixels::hdr::MasteringDisplay::new(
         [[0.68, 0.32], [0.265, 0.69], [0.15, 0.06]],
         [0.3127, 0.3290],
         1000.0,

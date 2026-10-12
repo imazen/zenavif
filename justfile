@@ -349,3 +349,17 @@ metadata-shared-icc-check:
 
 metadata-git-deps-check:
     cargo check --lib --no-default-features
+
+metadata-animation-integration-check:
+    cargo test -p zenavif --features inventory,zenav1-aom,zenav1-aom-encode,zenav1-svt,encode-imazen --test animation_decoded_color --test animation_encode_admission --test animation_exact_timing --test bit_depth_request --test animation_dual_colr -- --test-threads=1
+    just metadata-shared-icc-check
+
+# Preserve native-depth routing and exercise the optional SVT adapter.
+metadata-backend-routing-check:
+    cargo test -p zenavif --features inventory,zenav1-aom,zenav1-aom-encode,zenav1-svt,encode-imazen --test svt_rs_backend --test codec_hdr_units -- --test-threads=1
+    cargo test -p zenavif --features inventory,zenav1-aom,zenav1-aom-encode,zenav1-svt,encode-imazen --test backend_router -- --test-threads=1
+
+metadata-svt-final-check:
+    just metadata-backend-gainmap-check
+    just metadata-animation-integration-check
+    cargo test -p zenavif --features inventory,zenav1-aom,zenav1-aom-encode,zenav1-svt,encode-imazen --test svt_rs_backend --test codec_hdr_units -- --test-threads=1

@@ -1,5 +1,15 @@
 # Changelog
 
+## Coordinated animation and precision contracts (unreleased)
+
+- Stamp decoded animation descriptors after alpha/depth conversion and carry RGB/full-range CICP on reconstructed pixels. Raw coded matrix/range remain on source metadata.
+
+
+- Carry exact rational durations through the zencodec animation adapter. Reject invalid frame admission atomically and bound retained inputs, cumulative pixels, duration, and frame count.
+- Preserve source descriptor/ColorContext through animation encoding, retain decode job cancellation, poison failed decoder state, and keep original indices for skipped frames. Borrowed finish cancellation reaches native zenravif processing.
+- Implement explicit native 12-bit RGB/RGBA still and animation output, including alpha and low sample bits. Keep packed U16 values normalized to the full storage range.
+- Pin the coordinated native packet decoder, encoder, pixel 0.3, and HDR dependencies for portable checkouts.
+
 ## SVT research knob + pin bump (unreleased, 2026-09-24)
 
 - Added `__expert` `SvtParams::chroma_q: Option<(i8, i8)>` (`02b62dff`): fixed per-plane U/V chroma delta-q on `Av1Backend::Zenav1Svt`, routed to zenav1-svt's `ChromaQOverride`, for decorrelated-plane research stimuli. Refused (never ignored) off the svt backend, outside -64..=63, under SvtParity, for monochrome input and without `__expert`. Measured on smooth two-plane chroma texture at q60: U+48 raises Cb MSE 2.48 -> 5.67 with Cr flat; V+48 raises Cr MSE 2.16 -> 4.84 with Cb flat; (0, 0) is byte-identical to no override.
@@ -40,6 +50,10 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
   tests with base/alternate ICC and ISO parameters/payload preservation.
 
 ### Metadata integration (published baseline 0.1.6)
+
+- Shared encoding no longer turns an RGB input descriptor into an identity-matrix AV1 request; SVT/AOM retain their implemented conversion matrix and explicit native settings.
+
+- Reconcile existing image-animation and native 12-bit contracts (`60794df9`, `b777fa12`) with the metadata backend changes, retaining the coordinated decoder and pixel revisions.
 
 - Reuse PR 61 (`d2f17783`) inventory and regression fixtures behind default-off
   `inventory`; keep baseline metadata available independently. Use shared typed
@@ -3243,3 +3257,4 @@ why none of them is the seam's to pick unilaterally.
 - Temporarily pinned `rav1d-safe` to a git revision containing the
   aarch64 panic fixes while the fix was making its way through a release
   (01c02d0).
+

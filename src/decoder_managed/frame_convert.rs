@@ -144,7 +144,10 @@ impl ManagedAvifDecoder {
             pixels = downscale_to_8bit(pixels);
         }
 
-        Ok((pixels, info_clone))
+        // Alpha attachment and depth conversion can allocate a fresh typed
+        // buffer. Describe the resulting samples after all such conversions.
+        let descriptor = crate::convert::descriptor_with_cicp(pixels.descriptor(), &info_clone);
+        Ok((pixels.with_descriptor(descriptor), info_clone))
     }
 
     /// Convert 8-bit frame to RGB using yuv crate bulk conversion (zero-copy)

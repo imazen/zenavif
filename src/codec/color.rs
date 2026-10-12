@@ -75,6 +75,13 @@ pub(super) fn color_context_for_layout(
     if ctx.icc.is_none() && ctx.cicp.is_none() {
         return None;
     }
+    // These are reconstructed RGB/gray samples. Matrix and range conversion
+    // already happened in the decoder; retaining source YCbCr signaling here
+    // would request a second conversion. Raw source CICP remains on ImageInfo.
+    if let Some(cicp) = &mut ctx.cicp {
+        cicp.matrix_coefficients = 0;
+        cicp.full_range = true;
+    }
     Some(Arc::new(ctx))
 }
 
@@ -145,12 +152,6 @@ pub(super) fn set_cicp_on_pixels(
     pixels: PixelBuffer,
     info: &crate::image::ImageInfo,
 ) -> PixelBuffer {
-    let mut desc = pixels.descriptor();
-    if let Some(tf) = zenpixels::TransferFunction::from_cicp(info.transfer_characteristics.0) {
-        desc = desc.with_transfer(tf);
-    }
-    if let Some(p) = zenpixels::ColorPrimaries::from_cicp(info.color_primaries.0) {
-        desc = desc.with_primaries(p);
-    }
+    let desc = crate::convert::descriptor_with_cicp(pixels.descriptor(), info);
     pixels.with_descriptor(desc)
 }

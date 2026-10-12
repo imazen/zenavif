@@ -491,8 +491,9 @@ impl AvifDecodeJob {
             // Measured envelope of the reconstructed pixels (zencodec
             // contract: MaxCLL/MaxFALL are measured; mastering display
             // passes through unchanged).
-            info =
-                info.with_content_light_level(zencodec::ContentLightLevel::new(max_cll, max_fall));
+            info = info.with_content_light_level(zenpixels::hdr::ContentLightLevel::new(
+                max_cll, max_fall,
+            ));
             let strip_height = 64u32.min(h.max(1));
             return Ok(AvifStreamingDecoder {
                 info,
@@ -684,6 +685,9 @@ impl AvifDecodeJob {
                 zencodec::UnsupportedOperation::AnimationDecode,
             )));
         }
+        if let Some(stop) = &self.stop {
+            stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
+        }
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
 
@@ -729,8 +733,9 @@ impl AvifDecodeJob {
 
         Ok(AvifAnimationFrameDecoder {
             anim_decoder: anim_dec,
-            index: 0,
             frames_decoded: 0,
+            stop: self.stop,
+            failed: false,
             start_frame_index: self.start_frame_index,
             info: Arc::new(base_info),
             total_frames: anim_info.frame_count as u32,

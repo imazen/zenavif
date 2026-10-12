@@ -179,11 +179,15 @@ fn codec_adapter_rescales_mixed_clocks_without_rounding_or_partial_append() {
                     .speed(10)
                     .threads(Some(1));
                 let mut anim = cfg.job().animation_frame_encoder().unwrap();
-                let pixels = || match kind {
-                    0 => zenpixels::PixelSlice::from(rgb.as_ref()).erase(),
-                    1 => zenpixels::PixelSlice::from(rgba.as_ref()).erase(),
-                    2 => zenpixels::PixelSlice::from(high.as_ref()).erase(),
-                    _ => zenpixels::PixelSlice::from(high_alpha.as_ref()).erase(),
+                let pixels = || {
+                    match kind {
+                        0 => zenpixels::PixelSlice::from(rgb.as_ref()).erase(),
+                        1 => zenpixels::PixelSlice::from(rgba.as_ref()).erase(),
+                        2 => zenpixels::PixelSlice::from(high.as_ref()).erase(),
+                        _ => zenpixels::PixelSlice::from(high_alpha.as_ref()).erase(),
+                    }
+                    .with_transfer(zenpixels::TransferFunction::Srgb)
+                    .with_primaries(zenpixels::ColorPrimaries::Bt709)
                 };
                 assert!(anim.push_frame_ticks(pixels(), 1, 0, None).is_err());
                 anim.push_frame_ticks(pixels(), 1001, 30000, None).unwrap();

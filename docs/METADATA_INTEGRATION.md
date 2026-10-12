@@ -98,3 +98,14 @@ and removes the reader ambiguity. After this change, the existing serializer
 suite, backend metadata/gain-map/animation suites and clippy pass, libheif opens
 and decodes each backend output, and ExifTool reports `Validate: OK` on all
 three outputs. Reproduce with `just metadata-shared-icc-check`.
+
+## Existing animation branch reconciliation
+
+The integration includes the animation and native 12-bit work from
+`60794df9` and `b777fa12`, already consumed by zencodecs. It retains the
+`dfd01e32` decoder revision and the pixel dependency used by that consumer.
+`just metadata-animation-integration-check` passes the decoded-color, frame
+admission, exact-timing, dual-color and bit-depth suites, followed by the
+shared serializer and all-backend gain-map tests, strict clippy and independent
+libheif/ExifTool checks. Public API snapshots were regenerated with `just api-doc`.
+The merged routing regression retains Zenravif and AOM for 12-bit input. SVT is enabled in the backend metadata and gain-map checks; its adapter explicitly rejects 12-bit input. `just metadata-backend-routing-check` also runs the SVT adapter tests.

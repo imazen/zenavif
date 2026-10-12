@@ -146,6 +146,7 @@ fn zenravif_animation_preserves_requested_container_metadata() {
             assert_eq!(mastering.max_luminance, md.max_luminance);
             assert_eq!(mastering.min_luminance, md.min_luminance);
             assert_eq!(p.mastering_display(), Some(&mastering));
+            #[allow(clippy::single_element_loop)] // AOM adds a second backend when enabled.
             for backend in [
                 DecodeBackend::Rav1dSafe,
                 #[cfg(feature = "zenav1-aom")]

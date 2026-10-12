@@ -26,6 +26,10 @@ path = ".."
 features = ["inventory"]
 
 [patch.crates-io]
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "3c8e2cb20e9cebfb877b53300c188c2e98bf2e49" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "2031094449ad1177ff96461d7c4d586c7ed384e6" }
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "0d74f5eb91d985b877d92210020bb96f233fcc0b" }
+zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "0d74f5eb91d985b877d92210020bb96f233fcc0b" }
 # fuzz/ is its own workspace root, so the root [patch] does not reach it.
 # zenavif-parse needs no mirror: zenavif's dep on it is a path dep into the
 # workspace (zenavif-parse/), which resolves transitively from here.
@@ -33,10 +37,10 @@ features = ["inventory"]
 # the #524 loop-filter H-window fix). Keep it in lockstep with the root
 # manifest's `rev` — the reasoning for the current one lives there. Drop at
 # the rav1d-safe 0.6.0 release.
-rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "e73811f5d4dad81b75195ca18554fd8a5df19515" }
+rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "dfd01e3268f6e8da862d2d5f0a71d19f414f2b87" }
 # TEMPORARY: the structural-inventory API branch (imazen/zencodec#133);
 # swap for the released zencodec before merge.
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "c1c3292ff10f386191780ad407526951165da47a" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "a31a9b680e54d5fea555c44b0d70c65802087df3" }
 
 [[bin]]
 name = "fuzz_decode"

@@ -170,19 +170,9 @@ impl AvifEncoder {
             self.config = self.config.clone().color_primaries(cp_val);
         }
 
-        // Keep the matrix consistent with the primaries/transfer we just wrote.
-        // When the caller supplied no CICP at all, its matrix wasn't applied in
-        // encoder(), so derive one from the descriptor here (RGB content ⇒
-        // Identity/0, matching `Cicp::from_descriptor`) so the config carries a
-        // coherent triple (informational — no available backend reads the
-        // matrix field). When the caller DID supply a CICP, its matrix is
-        // already on the config; leave it alone.
-        if caller.is_none() && (cp.is_some() || tc.is_some()) {
-            let mc = zenpixels::Cicp::from_descriptor(&desc)
-                .map(|c| c.matrix_coefficients)
-                .unwrap_or(0);
-            self.config = self.config.clone().matrix_coefficients(mc);
-        }
+        // The descriptor describes RGB input pixels. Its identity matrix is
+        // not a request for identity-coded AV1: the backend chooses the matrix
+        // of its RGB-to-YUV conversion. Keep any explicit native config value.
 
         // For PQ/HLG, switch to 10-bit depth (the native HDR depth for AV1)
         if matches!(transfer, TransferFunction::Pq | TransferFunction::Hlg) {

@@ -699,6 +699,8 @@ remain deferred while this newly measured baseline failure is unresolved.
 
 ## Known Bugs
 
+- Metadata integration found the shared still encoder inferred an identity output matrix from RGB input descriptors, rejecting SVT/AOM YUV encoding. Descriptor/source CICP now carries primaries and transfer while the native backend retains its coding-matrix choice; `codec_hdr_units` exercises the SVT path.
+
 **2026-09-08 — still adapter audit corrections.** AOM Gray8 input 16
 previously displayed as 0 because full-range samples were tagged limited;
 the adapter now converts to studio-range luma. Explicit transfer metadata

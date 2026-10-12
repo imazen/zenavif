@@ -1,7 +1,7 @@
 #![cfg(feature = "encode")]
 
 use zenavif::backend_router::query_still_backends;
-use zenavif::{Av1Backend, EncodeBitDepth, EncodeChromaSubsampling, EncoderConfig, PlanInput};
+use zenavif::{Av1Backend, EncodeChromaSubsampling, EncoderConfig, PlanInput};
 
 #[test]
 fn unsupported_svt_format_is_filtered_without_rewriting_request() {
@@ -29,7 +29,7 @@ fn unsupported_svt_format_is_filtered_without_rewriting_request() {
 #[test]
 fn twelve_bit_routes_only_to_a_backend_and_wrapper_that_can_code_it() {
     let config = EncoderConfig::new()
-        .bit_depth(EncodeBitDepth::Twelve)
+        .bit_depth(zenavif::EncodeBitDepth::Twelve)
         .chroma_subsampling(EncodeChromaSubsampling::Yuv420);
     let reports = query_still_backends(&config, PlanInput::rgb8(65, 67));
     let supported: Vec<_> = reports
@@ -37,14 +37,14 @@ fn twelve_bit_routes_only_to_a_backend_and_wrapper_that_can_code_it() {
         .filter(|r| r.supported())
         .map(|r| r.backend)
         .collect();
-    assert_eq!(supported, vec![Av1Backend::Zenav1Aom]);
+    assert_eq!(supported, vec![Av1Backend::Zenravif, Av1Backend::Zenav1Aom]);
 }
 
 #[cfg(feature = "zenav1-svt")]
 #[test]
 fn native_extensions_remain_eligible() {
     let config = EncoderConfig::new()
-        .bit_depth(EncodeBitDepth::Ten)
+        .bit_depth(zenavif::EncodeBitDepth::Ten)
         .chroma_subsampling(EncodeChromaSubsampling::Yuv420);
     let reports = query_still_backends(&config, PlanInput::rgba8(65, 67));
     assert!(
@@ -54,11 +54,12 @@ fn native_extensions_remain_eligible() {
             .unwrap()
             .supported()
     );
-    assert!(
-        !reports
+    assert_eq!(
+        reports
             .iter()
             .find(|r| r.backend == Av1Backend::Zenav1Aom)
             .unwrap()
-            .supported()
+            .supported(),
+        cfg!(feature = "zenav1-aom-encode")
     );
 }
