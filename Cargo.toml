@@ -328,11 +328,11 @@ zensim = { git = "https://github.com/imazen/zensim", rev = "8462c824042b843dc488
 # per-SB quantizer-scale second pass (`two-pass-butteraugli` feature).
 butteraugli = { version = "0.9.3", optional = true }
 # Optional auto-tune deps — gated on `auto-tune` feature, off by default.
-# Path-pinned to the sibling checkout (CI clones ../zenanalyze); reqs track the
-# sibling's 0.2.0 — crates.io still has 0.1.0/0.1.x, so a registry release of
-# zenavif needs zenanalyze/zenpredict published first.
-zenpredict = { version = "0.2.0", path = "../zenanalyze/zenpredict", optional = true }
-zenanalyze = { version = "0.2.0", path = "../zenanalyze", optional = true, features = ["experimental"] }
+# Versioned dependencies use the root patch table until their releases.
+# Avoid paths outside this repository: Cargo must resolve optional dependencies
+# when a downstream crate consumes zenavif from git.
+zenpredict = { version = "0.2.0", optional = true }
+zenanalyze = { version = "0.2.0", optional = true, features = ["experimental"] }
 # zenanalyze-api: the zero-dep, version-unifying feature contract (Request /
 # Offer / FeatureProvider) the auto-tuner negotiates a shared feature pass with,
 # and this crate's INTERCHANGE BOUNDARY — so a host on any zenanalyze version can
@@ -423,7 +423,7 @@ rayon = "1.11.0"
 # Feature extraction for the rav1e knob predictor MLP training.
 # Path-pinned to the sibling checkout (see the [dependencies] note above);
 # test-only dep for the rav1e picker training.
-zenanalyze = { version = "0.2.0", path = "../zenanalyze", features = ["experimental"] }
+zenanalyze = { version = "0.2.0", features = ["experimental"] }
 # Parses `cargo metadata` in tests/public_api_doc.rs (feature-list discovery).
 serde_json = "1.0.150"
 # Crafted-container regressions (tests/sweep_40_geometry.rs) mux mismatched
@@ -738,6 +738,9 @@ name = "decode_backend_bench"
 required-features = ["encode", "zenav1-aom"]
 
 [patch.crates-io]
+# Optional research dependencies must also resolve when this crate is used from git.
+zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "6bbcacb11313923ded6e5eeebb725878c5736453" }
+zenanalyze = { git = "https://github.com/imazen/zenanalyze", rev = "6bbcacb11313923ded6e5eeebb725878c5736453" }
 # The zenanalyze-api additions this crate's graph needs (FeatureProvider,
 # Select::Names) are on `main` but not yet on crates.io. ONE patch, here at the
 # workspace root, rewrites every registry edge — including the ones inside

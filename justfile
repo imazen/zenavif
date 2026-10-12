@@ -346,3 +346,6 @@ metadata-shared-icc-check:
     cargo test -p zenavif-serialize
     just metadata-backend-gainmap-check
     just metadata-backend-gainmap-oracle
+
+metadata-git-deps-check:
+    cargo check --lib --no-default-features

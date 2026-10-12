@@ -2291,6 +2291,7 @@ dependencies = [
 [[package]]
 name = "zenanalyze"
 version = "0.2.0"
+source = "git+https://github.com/imazen/zenanalyze?rev=6bbcacb11313923ded6e5eeebb725878c5736453#6bbcacb11313923ded6e5eeebb725878c5736453"
 dependencies = [
  "archmage",
  "garb",
@@ -2431,8 +2432,8 @@ dependencies = [
  "zencodec-testkit",
  "zenpixels",
  "zenpixels-convert",
- "zenpredict 0.2.0",
  "zenpredict 0.2.0 (git+https://github.com/imazen/zenanalyze?rev=05de3cbc44b19d8769077d99710b0146c761d6df)",
+ "zenpredict 0.2.0 (git+https://github.com/imazen/zenanalyze?rev=6bbcacb11313923ded6e5eeebb725878c5736453)",
  "zenpredict-bake",
  "zenravif",
  "zensim",
@@ -2616,6 +2617,17 @@ dependencies = [
 name = "zenpredict"
 version = "0.2.0"
 source = "git+https://github.com/imazen/zenanalyze?rev=05de3cbc44b19d8769077d99710b0146c761d6df#05de3cbc44b19d8769077d99710b0146c761d6df"
+dependencies = [
+ "archmage",
+ "bytemuck",
+ "libm",
+ "lz4_flex 0.11.6",
+]
+
+[[package]]
+name = "zenpredict"
+version = "0.2.0"
+source = "git+https://github.com/imazen/zenanalyze?rev=6bbcacb11313923ded6e5eeebb725878c5736453#6bbcacb11313923ded6e5eeebb725878c5736453"
 dependencies = [
  "archmage",
  "bytemuck",
