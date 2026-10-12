@@ -26,7 +26,7 @@ path = ".."
 features = ["inventory"]
 
 [patch.crates-io]
-ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "3c8e2cb20e9cebfb877b53300c188c2e98bf2e49" }
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "02c49bc5bf60c76d702322c2e089ad204a02228b" }
 zencodec = { git = "https://github.com/imazen/zencodec", rev = "2031094449ad1177ff96461d7c4d586c7ed384e6" }
 zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "0d74f5eb91d985b877d92210020bb96f233fcc0b" }
 zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "0d74f5eb91d985b877d92210020bb96f233fcc0b" }
@@ -40,7 +40,7 @@ zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "0d74f5
 rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "dfd01e3268f6e8da862d2d5f0a71d19f414f2b87" }
 # TEMPORARY: the structural-inventory API branch (imazen/zencodec#133);
 # swap for the released zencodec before merge.
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "a31a9b680e54d5fea555c44b0d70c65802087df3" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "a81daf7605dc63074d4a39757e7b4399057d4a8f" }
 
 [[bin]]
 name = "fuzz_decode"
