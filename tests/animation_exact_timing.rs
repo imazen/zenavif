@@ -85,7 +85,7 @@ fn native_frames_preserve_exact_timing_and_pixels() {
         let eager = managed.decode_animation(&zenavif::Unstoppable).unwrap();
         assert_eq!(eager.frames.len(), durations.len());
         let codec_config = AvifDecoderConfig::new();
-        let codec = codec_config
+        let mut codec = codec_config
             .job()
             .animation_frame_decoder(Cow::Borrowed(&data), &[])
             .unwrap();
@@ -108,6 +108,17 @@ fn native_frames_preserve_exact_timing_and_pixels() {
             assert_eq!(codec.frame_timing(index).unwrap(), expected);
             let frame = lazy.next_frame(&zenavif::Unstoppable).unwrap().unwrap();
             assert_eq!(frame.timing, expected);
+            let codec_frame = codec.render_next_frame(None).unwrap().unwrap();
+            assert_eq!(
+                codec_frame.duration(),
+                zencodec::animation::FrameDuration::new(u64::from(duration), timescale).unwrap()
+            );
+            for row in 0..150 {
+                assert_eq!(
+                    codec_frame.pixels().row(row),
+                    frame.pixels.as_slice().row(row)
+                );
+            }
             assert_eq!(eager.frames[index].timing, expected);
             let legacy_ms = ((u64::from(duration) * 1000) / u64::from(timescale))
                 .min(u64::from(u32::MAX)) as u32;

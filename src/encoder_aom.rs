@@ -45,7 +45,7 @@
 //! * High-bit-depth GRAYSCALE — `encode_gray8` takes `u8` samples and this
 //!   seam passes them through as the coded luma, so promoting them to a 10- or
 //!   12-bit swing would need a value-scaling rule nothing here measures.
-//! * Full pixel range, gain maps, animation.
+//! * Full pixel range and animation. Gain-map items use the shared muxer.
 //!
 //! # Bit depth (wired 2026-09-03)
 //!
@@ -293,12 +293,7 @@ pub(crate) fn reject_unsupported_config(config: &EncoderConfig) -> Result<()> {
             )));
         }
     }
-    if config.gain_map.is_some() {
-        return Err(at!(Error::Unsupported(
-            "Av1Backend::Zenav1Aom does not support gain maps \
-             (use the zenravif backend)"
-        )));
-    }
+
     #[cfg(feature = "encode-imazen")]
     if config.lossless {
         // Lossless IS wired now — `--cq-level 0` is coded-lossless upstream
@@ -661,6 +656,7 @@ fn mux_aom(
             md.min_luminance,
         );
     }
+    crate::encoder::mux_gain_map(config, &mut aviffy)?;
     let color_byte_size = payload.len();
     // `bit_depth`, not a literal 8: `zenavif-serialize` derives the `av1C`
     // `high_bitdepth` / `twelve_bit` flags and the `pixi` depth from this, and
@@ -720,6 +716,10 @@ enum ColorSource<'a> {
 /// What actually establishes that 8-bit output did not move across the
 /// high-bit-depth wiring is the same benchmark: 60/60 cells byte-identical
 /// between `ec6728b` and this tree.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "internal pixel conversion controls"
+)]
 fn color_planes(
     src: ColorSource<'_>,
     width: usize,
@@ -756,7 +756,11 @@ fn color_planes(
                         // not widened: 255 must map to the new maximum or the
                         // round trip is not lossless.
                         let up = |c: u16| -> u16 {
-                            if shift == 0 { c } else { (c << shift) | (c >> (8 - shift)) }
+                            if shift == 0 {
+                                c
+                            } else {
+                                (c << shift) | (c >> (8 - shift))
+                            }
                         };
                         y[row * width + x] = up(g);
                         u[row * width + x] = up(b);
@@ -782,7 +786,11 @@ fn color_planes(
                         let px = buf[row * stride + x];
                         let up = |c: u8| -> u16 {
                             let c = u16::from(c);
-                            if shift == 0 { c } else { (c << shift) | (c >> (8 - shift)) }
+                            if shift == 0 {
+                                c
+                            } else {
+                                (c << shift) | (c >> (8 - shift))
+                            }
                         };
                         y[row * width + x] = up(px.g);
                         u[row * width + x] = up(px.b);
@@ -814,7 +822,15 @@ fn color_planes(
             let mut u8p = vec![0u8; cw * ch];
             let mut v8p = vec![0u8; cw * ch];
             crate::yuv_convert::rgb8_to_yuv420(
-                buf, stride, width, height, range, YuvMatrix::Bt601, &mut y8, &mut u8p, &mut v8p,
+                buf,
+                stride,
+                width,
+                height,
+                range,
+                YuvMatrix::Bt601,
+                &mut y8,
+                &mut u8p,
+                &mut v8p,
             );
             // `encode_key_frame` takes u16 samples in the bit_depth-bit range;
             // an 8-bit source carries 8-bit values, so this is a widen, not a
@@ -832,12 +848,28 @@ fn color_planes(
         ColorSource::Rgb8(buf, stride) => {
             if sub {
                 crate::yuv_convert::rgbx_to_yuv420_u16(
-                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    buf,
+                    stride,
+                    width,
+                    height,
+                    bit_depth,
+                    range,
+                    YuvMatrix::Bt601,
+                    &mut y,
+                    &mut u,
                     &mut v,
                 );
             } else {
                 crate::yuv_convert::rgbx_to_yuv444_u16(
-                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    buf,
+                    stride,
+                    width,
+                    height,
+                    bit_depth,
+                    range,
+                    YuvMatrix::Bt601,
+                    &mut y,
+                    &mut u,
                     &mut v,
                 );
             }
@@ -845,12 +877,28 @@ fn color_planes(
         ColorSource::Rgb16(buf, stride) => {
             if sub {
                 crate::yuv_convert::rgbx_to_yuv420_u16(
-                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    buf,
+                    stride,
+                    width,
+                    height,
+                    bit_depth,
+                    range,
+                    YuvMatrix::Bt601,
+                    &mut y,
+                    &mut u,
                     &mut v,
                 );
             } else {
                 crate::yuv_convert::rgbx_to_yuv444_u16(
-                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    buf,
+                    stride,
+                    width,
+                    height,
+                    bit_depth,
+                    range,
+                    YuvMatrix::Bt601,
+                    &mut y,
+                    &mut u,
                     &mut v,
                 );
             }
@@ -859,12 +907,28 @@ fn color_planes(
         ColorSource::Rgba8(buf, stride) => {
             if sub {
                 crate::yuv_convert::rgbx_to_yuv420_u16(
-                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    buf,
+                    stride,
+                    width,
+                    height,
+                    bit_depth,
+                    range,
+                    YuvMatrix::Bt601,
+                    &mut y,
+                    &mut u,
                     &mut v,
                 );
             } else {
                 crate::yuv_convert::rgbx_to_yuv444_u16(
-                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    buf,
+                    stride,
+                    width,
+                    height,
+                    bit_depth,
+                    range,
+                    YuvMatrix::Bt601,
+                    &mut y,
+                    &mut u,
                     &mut v,
                 );
             }
@@ -872,12 +936,28 @@ fn color_planes(
         ColorSource::Rgba16(buf, stride) => {
             if sub {
                 crate::yuv_convert::rgbx_to_yuv420_u16(
-                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    buf,
+                    stride,
+                    width,
+                    height,
+                    bit_depth,
+                    range,
+                    YuvMatrix::Bt601,
+                    &mut y,
+                    &mut u,
                     &mut v,
                 );
             } else {
                 crate::yuv_convert::rgbx_to_yuv444_u16(
-                    buf, stride, width, height, bit_depth, range, YuvMatrix::Bt601, &mut y, &mut u,
+                    buf,
+                    stride,
+                    width,
+                    height,
+                    bit_depth,
+                    range,
+                    YuvMatrix::Bt601,
+                    &mut y,
+                    &mut u,
                     &mut v,
                 );
             }
@@ -926,7 +1006,6 @@ fn finish_color(
         None,
     )
 }
-
 
 /// Encode a straight (non-premultiplied) alpha plane as the Cs400 monochrome
 /// auxiliary item an AVIF `auxl` alpha reference points at.
@@ -1049,7 +1128,11 @@ pub(crate) fn encode_rgba8_aom(
             let c = u16::from(px.a);
             // Scale, not widen: full-range alpha must map 255 -> the coded
             // maximum, or a fully opaque pixel stops being fully opaque.
-            if shift == 0 { c } else { (c << shift) | (c >> (8 - shift)) }
+            if shift == 0 {
+                c
+            } else {
+                (c << shift) | (c >> (8 - shift))
+            }
         }));
     }
     finish_color_with_alpha(
@@ -1233,7 +1316,11 @@ pub(crate) fn encode_gray8_aom(
             if full_range {
                 // Scale, not widen: 255 must reach the coded maximum, the same
                 // rule `color_planes` and the alpha plane use.
-                if shift == 0 { c } else { (c << shift) | (c >> (8 - shift)) }
+                if shift == 0 {
+                    c
+                } else {
+                    (c << shift) | (c >> (8 - shift))
+                }
             } else {
                 // Studio swing at the coded depth: 16..235 scaled by 1 << shift.
                 //

@@ -101,6 +101,11 @@ pub enum Error {
     #[error("Resource limit exceeded: {0}")]
     ResourceLimit(String),
 
+    /// Structural inventory could not be constructed.
+    #[cfg(feature = "inventory")]
+    #[error("{0}")]
+    Inventory(#[source] zencodec::inventory::InventoryError),
+
     /// Memory allocation failed
     #[error("Out of memory")]
     OutOfMemory,
@@ -250,6 +255,8 @@ impl zencodec::CategorizedError for Error {
             // `Memory`, the dominant allocation-guard axis. The precise
             // limit stays in `Display`.
             Self::ResourceLimit(_) => C::Resource(Res::Limits(L::Memory)),
+            #[cfg(feature = "inventory")]
+            Self::Inventory(e) => e.category(),
 
             // Allocation failed (distinct from a configured resource limit).
             Self::OutOfMemory => C::Resource(Res::OutOfMemory),

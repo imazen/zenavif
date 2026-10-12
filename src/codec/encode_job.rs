@@ -25,8 +25,8 @@ pub struct AvifEncodeJob {
     pub(super) xmp: Option<Arc<[u8]>>,
     pub(super) limits: ResourceLimits,
     pub(super) cicp: Option<zencodec::Cicp>,
-    pub(super) content_light_level: Option<zencodec::ContentLightLevel>,
-    pub(super) mastering_display: Option<zencodec::MasteringDisplay>,
+    pub(super) content_light_level: Option<zenpixels::hdr::ContentLightLevel>,
+    pub(super) mastering_display: Option<zenpixels::hdr::MasteringDisplay>,
     pub(super) rotation: Option<u8>,
     pub(super) mirror: Option<u8>,
     pub(super) policy: Option<zencodec::encode::EncodePolicy>,
@@ -295,18 +295,16 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
             frame_count: 0,
             loop_count: self.loop_count.flatten(),
             timescale: 1000,
+            retained_bytes: 0,
+            descriptor: None,
+            color_context: None,
         })
     }
 }
 
-/// Lower a [`zencodec::Cicp`] onto the native AVIF encoder config, writing all
-/// three nclx axes (primaries, transfer, matrix) so the config carries a
-/// coherent triple rather than a partial/stale one (the prior bug set only some
-/// axes). Note: the *emitted* nclx matrix is determined by ravif's own YCbCr
-/// conversion (BT.601), so `config.matrix_coefficients` is informational —
-/// no available backend consults it (its only reader was the deprecated
-/// svtav1 path); the coherent triple is kept for introspection and any
-/// future backend.
+/// Carry source primaries and transfer onto the encoder. The source matrix
+/// describes how source samples were interpreted; the output matrix belongs
+/// to the backend's pixel conversion and any explicit native encoder setting.
 #[cfg(feature = "encode")]
 fn apply_cicp_to_config(
     config: crate::EncoderConfig,
@@ -315,7 +313,6 @@ fn apply_cicp_to_config(
     config
         .color_primaries(cicp.color_primaries)
         .transfer_characteristics(cicp.transfer_characteristics)
-        .matrix_coefficients(cicp.matrix_coefficients)
 }
 
 /// Resolve which color description to emit for an AVIF encode, the single source

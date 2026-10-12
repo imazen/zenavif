@@ -301,7 +301,8 @@ impl ManagedAvifDecoder {
         if self.prefer_8bit && bit_depth > 8 {
             image = downscale_to_8bit(image);
         }
-        Ok((image, info))
+        let descriptor = crate::convert::descriptor_with_cicp(image.descriptor(), &info);
+        Ok((image.with_descriptor(descriptor), info))
     }
 
     fn aom_mono_to_buffer(

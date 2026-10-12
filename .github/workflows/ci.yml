@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, review/zenmeta-integration]
   pull_request:
     branches: [main]
   # Manual trigger — used when GitHub's pull_request event delivery stalls
@@ -86,8 +86,10 @@ jobs:
       # for BOTH the zenravif and zenav1-svt backends, not just the new one —
       # had never been built by any CI job. Adding it here runs 455 tests
       # (up from 448) with no new failures.
+      - name: Inventory disabled without the feature
+        run: cargo test --test inventory_feature
       - name: Test (AV1 backend seams — aom decode + svt-rs encode + aom encode)
-        run: cargo test --features zenav1-aom,zenav1-aom-encode,encode,encode-imazen,zenav1-svt,target-quality,encode-mono
+        run: cargo test --features inventory,zenav1-aom,zenav1-aom-encode,encode,encode-imazen,zenav1-svt,target-quality,encode-mono
       - name: Assert the aom encode gate actually ran
         shell: bash
         run: |
@@ -102,7 +104,7 @@ jobs:
           # before cargo ran — observed on run 33700746090, the first run on
           # which a Windows job ever REACHED this step (every earlier run's
           # Windows Test job was superseded first).
-          cargo test --features zenav1-aom,zenav1-aom-encode,encode,encode-imazen,zenav1-svt,target-quality,encode-mono --test aom_encode_backend 2>&1 | tee aom_gate_rerun.log
+          cargo test --features inventory,zenav1-aom,zenav1-aom-encode,encode,encode-imazen,zenav1-svt,target-quality,encode-mono --test aom_encode_backend 2>&1 | tee aom_gate_rerun.log
           n=$(sed -n 's/^test result: ok\. \([0-9][0-9]*\) passed.*/\1/p' aom_gate_rerun.log | head -1)
           rm -f aom_gate_rerun.log
           # Floor raised 12 -> 25 on 2026-09-03 with the high-bit-depth
@@ -304,7 +306,7 @@ jobs:
         # this, cargo errors at manifest-load on the missing sources.
         env:
           CROSS_CONTAINER_OPTS: "-v ${{ github.workspace }}/..:${{ github.workspace }}/.."
-        run: cross test --target i686-unknown-linux-gnu
+        run: cross test --target i686-unknown-linux-gnu --features inventory
       # Scoped via --manifest-path: under cross, a bare `-p zenavif-parse`
       # resolves ambiguously (registry 0.6.x from zenavif-serialize's
       # dev-deps vs the 0.7.0 member).

@@ -69,6 +69,9 @@ pub struct AvifAnimationFrameEncoder {
     pub(super) frame_count: u32,
     pub(super) loop_count: Option<u32>,
     pub(super) timescale: u32,
+    pub(super) retained_bytes: u64,
+    pub(super) descriptor: Option<zenpixels::PixelDescriptor>,
+    pub(super) color_context: Option<std::sync::Arc<zenpixels::ColorContext>>,
 }
 
 #[cfg(feature = "encode")]
@@ -142,6 +145,19 @@ impl AvifAnimationFrameEncoder {
                 })?;
             }
         }
+        if let Some(max_ms) = self.limits.max_animation_ms {
+            let total = self
+                .frames
+                .iter()
+                .map(|f| u128::from(f.duration()) * u128::from(factor))
+                .sum::<u128>()
+                + u128::from(incoming);
+            if total * 1000 > u128::from(max_ms) * u128::from(clock) {
+                return Err(at!(Error::ResourceLimit(
+                    "animation duration limit exceeded".into()
+                )));
+            }
+        }
         let previous_len = self.frames.len();
         self.push_frame_inner(pixels, incoming, stop)?;
         if factor != 1 {
@@ -180,6 +196,17 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
         self.push_frame_ticks(pixels, duration_ms, 1000, stop)
     }
 
+    fn push_frame_timed(
+        &mut self,
+        pixels: PixelSlice<'_>,
+        duration: zencodec::animation::FrameDuration,
+        stop: Option<&dyn Stop>,
+    ) -> Result<(), At<CodecError>> {
+        let ticks = u32::try_from(duration.numerator())
+            .map_err(|_| Self::reject(zencodec::UnsupportedOperation::AnimationTiming))?;
+        self.push_frame_ticks(pixels, ticks, duration.denominator(), stop)
+    }
+
     fn finish(self, stop: Option<&dyn Stop>) -> Result<EncodeOutput, At<CodecError>> {
         self.finish_inner(stop).map_err(zencodec::CodecError::of)
     }
@@ -193,105 +220,159 @@ impl AvifAnimationFrameEncoder {
         duration_ticks: u32,
         stop: Option<&dyn Stop>,
     ) -> Result<(), At<Error>> {
-        // Check cancellation (combine per-call + owned stop)
         if let Some(s) = stop {
             s.check().map_err(|e| at!(Error::from(e)))?;
         }
-        if let Some(ref s) = self.stop {
+        if let Some(s) = &self.stop {
             s.check().map_err(|e| at!(Error::from(e)))?;
         }
-
-        let w = pixels.width();
-        let h = pixels.rows();
-
-        // Validate canvas dimensions match
-        match (self.canvas_width, self.canvas_height) {
-            (Some(cw), Some(ch)) if cw != w || ch != h => {
-                return Err(at!(Error::InvalidState(format!(
-                    "frame dimensions {}x{} don't match canvas {}x{}",
-                    w, h, cw, ch
-                ))));
-            }
-            (None, None) => {
-                self.canvas_width = Some(w);
-                self.canvas_height = Some(h);
-            }
-            _ => {}
-        }
-
-        // Check resource limits
+        let (w, h) = (pixels.width(), pixels.rows());
         let desc = pixels.descriptor();
-        let bpp = desc.bytes_per_pixel() as u64;
-        self.limits.check_dimensions(w, h).map_err(|_| {
-            at!(Error::ImageTooLarge {
-                width: w,
-                height: h,
-            })
-        })?;
-        self.limits
-            .check_memory(w as u64 * h as u64 * bpp)
-            .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
-
-        // Enforce max_frames limit.
-        self.frame_count += 1;
-        self.limits
-            .check_frames(self.frame_count)
-            .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
-
         let fmt = desc.pixel_format();
-
-        // Validate consistent pixel format across frames
-        if let Some(expected) = self.pixel_format {
-            if fmt != expected {
-                return Err(at!(Error::InvalidState(format!(
-                    "pixel format mismatch: first frame was {expected:?}, this frame is {fmt:?}"
-                ))));
-            }
-        } else {
-            self.pixel_format = Some(fmt);
+        if w == 0
+            || h == 0
+            || desc.signal_range != zenpixels::SignalRange::Full
+            || matches!(desc.alpha(), Some(zenpixels::AlphaMode::Premultiplied))
+            || !matches!(
+                fmt,
+                zenpixels::PixelFormat::Rgb8
+                    | zenpixels::PixelFormat::Rgba8
+                    | zenpixels::PixelFormat::Rgb16
+                    | zenpixels::PixelFormat::Rgba16
+            )
+        {
+            return Err(at!(Error::UnsupportedOperation(
+                zencodec::UnsupportedOperation::PixelFormat
+            )));
         }
-
-        let raw = pixels.contiguous_bytes();
-        let wu = w as usize;
-        let hu = h as usize;
-
-        let frame = match fmt {
-            zenpixels::PixelFormat::Rgb8 => {
-                let rgb: Vec<Rgb<u8>> = bytemuck::cast_slice(&raw).to_vec();
-                BufferedFrame::Rgb8 {
-                    pixels: imgref::ImgVec::new(rgb, wu, hu),
-                    duration_ticks,
+        if self.canvas_width.is_some_and(|v| v != w) || self.canvas_height.is_some_and(|v| v != h) {
+            return Err(at!(Error::InvalidState(
+                "frame dimensions do not match the canvas".into()
+            )));
+        }
+        if self.descriptor.is_some_and(|d| d != desc)
+            || (self.descriptor.is_some() && self.color_context.as_ref() != pixels.color_context())
+        {
+            return Err(at!(Error::InvalidState(
+                "animation frames must share precision and color interpretation".into()
+            )));
+        }
+        let count = self
+            .frame_count
+            .checked_add(1)
+            .ok_or_else(|| at!(Error::ResourceLimit("frame count overflow".into())))?;
+        let bytes = u64::from(w) * u64::from(h) * desc.bytes_per_pixel() as u64;
+        let retained = self
+            .retained_bytes
+            .checked_add(bytes)
+            .ok_or_else(|| at!(Error::ResourceLimit("animation size overflow".into())))?;
+        self.limits
+            .check_dimensions(w, h)
+            .map_err(|e| at!(Error::ResourceLimit(e.to_string())))?;
+        self.limits
+            .check_frames(count)
+            .map_err(|e| at!(Error::ResourceLimit(e.to_string())))?;
+        self.limits
+            .check_memory(retained)
+            .map_err(|e| at!(Error::ResourceLimit(e.to_string())))?;
+        self.limits
+            .check_total_pixels(u64::from(w) * u64::from(h) * u64::from(count))
+            .map_err(|e| at!(Error::ResourceLimit(e.to_string())))?;
+        let mut config = self.config.clone();
+        if self.frames.is_empty() {
+            if let Some(context) = pixels.color_context() {
+                if config.icc_profile.is_none() {
+                    config.icc_profile = context.icc.as_ref().map(|v| v.to_vec());
+                }
+                if let Some(cicp) = context.cicp {
+                    config.color_primaries = config.color_primaries.or(Some(cicp.color_primaries));
+                    config.transfer_characteristics = config
+                        .transfer_characteristics
+                        .or(Some(cicp.transfer_characteristics));
                 }
             }
-            zenpixels::PixelFormat::Rgba8 => {
-                let rgba: Vec<Rgba<u8>> = bytemuck::cast_slice(&raw).to_vec();
-                BufferedFrame::Rgba8 {
-                    pixels: imgref::ImgVec::new(rgba, wu, hu),
-                    duration_ticks,
-                }
-            }
-            zenpixels::PixelFormat::Rgb16 => {
-                let rgb: Vec<Rgb<u16>> = bytemuck::cast_slice(&raw).to_vec();
-                BufferedFrame::Rgb16 {
-                    pixels: imgref::ImgVec::new(rgb, wu, hu),
-                    duration_ticks,
-                }
-            }
-            zenpixels::PixelFormat::Rgba16 => {
-                let rgba: Vec<Rgba<u16>> = bytemuck::cast_slice(&raw).to_vec();
-                BufferedFrame::Rgba16 {
-                    pixels: imgref::ImgVec::new(rgba, wu, hu),
-                    duration_ticks,
-                }
-            }
-            _ => {
-                return Err(at!(Error::UnsupportedOperation(
-                    zencodec::UnsupportedOperation::PixelFormat,
+            config.color_primaries = config.color_primaries.or(desc.primaries.to_cicp());
+            config.transfer_characteristics = config
+                .transfer_characteristics
+                .or(desc.transfer().to_cicp());
+            if config.icc_profile.is_none()
+                && (config.color_primaries.is_none() || config.transfer_characteristics.is_none())
+            {
+                return Err(at!(Error::InvalidState(
+                    "animation color interpretation must be explicit".into()
                 )));
             }
+        }
+        let job = self.stop.as_ref();
+        let u16_at = |p: &[u8], i| u16::from_ne_bytes([p[i], p[i + 1]]);
+        let (wu, hu) = (w as usize, h as usize);
+        let frame = match fmt {
+            zenpixels::PixelFormat::Rgb8 => BufferedFrame::Rgb8 {
+                pixels: imgref::ImgVec::new(
+                    copy_animation_pixels(&pixels, 3, job, stop, |p| Rgb {
+                        r: p[0],
+                        g: p[1],
+                        b: p[2],
+                    })?,
+                    wu,
+                    hu,
+                ),
+                duration_ticks,
+            },
+            zenpixels::PixelFormat::Rgba8 => BufferedFrame::Rgba8 {
+                pixels: imgref::ImgVec::new(
+                    copy_animation_pixels(&pixels, 4, job, stop, |p| Rgba {
+                        r: p[0],
+                        g: p[1],
+                        b: p[2],
+                        a: p[3],
+                    })?,
+                    wu,
+                    hu,
+                ),
+                duration_ticks,
+            },
+            zenpixels::PixelFormat::Rgb16 => BufferedFrame::Rgb16 {
+                pixels: imgref::ImgVec::new(
+                    copy_animation_pixels(&pixels, 6, job, stop, |p| Rgb {
+                        r: u16_at(p, 0),
+                        g: u16_at(p, 2),
+                        b: u16_at(p, 4),
+                    })?,
+                    wu,
+                    hu,
+                ),
+                duration_ticks,
+            },
+            zenpixels::PixelFormat::Rgba16 => BufferedFrame::Rgba16 {
+                pixels: imgref::ImgVec::new(
+                    copy_animation_pixels(&pixels, 8, job, stop, |p| Rgba {
+                        r: u16_at(p, 0),
+                        g: u16_at(p, 2),
+                        b: u16_at(p, 4),
+                        a: u16_at(p, 6),
+                    })?,
+                    wu,
+                    hu,
+                ),
+                duration_ticks,
+            },
+            _ => unreachable!(),
         };
-
+        self.frames.try_reserve(1).map_err(|_| {
+            at!(Error::ResourceLimit(
+                "animation frame allocation failed".into()
+            ))
+        })?;
         self.frames.push(frame);
+        self.canvas_width = Some(w);
+        self.canvas_height = Some(h);
+        self.frame_count = count;
+        self.pixel_format = Some(fmt);
+        self.descriptor = Some(desc);
+        self.color_context = pixels.color_context().cloned();
+        self.retained_bytes = retained;
+        self.config = config;
         Ok(())
     }
 
@@ -325,7 +406,12 @@ impl AvifAnimationFrameEncoder {
                 // Rgba16 (push_frame_inner rejects everything else).
                 _ => 8,
             };
-            let (pin, note) = fit_encode_threads_to_memory(&self.limits, &self.config, w, h, bpp)?;
+            let mut working_limits = self.limits;
+            if let Some(max) = working_limits.max_memory_bytes {
+                working_limits.max_memory_bytes = Some(max.saturating_sub(self.retained_bytes));
+            }
+            let (pin, note) =
+                fit_encode_threads_to_memory(&working_limits, &self.config, w, h, bpp)?;
             if let Some(n) = pin {
                 self.config = self.config.clone().threads(Some(n));
             }
@@ -350,11 +436,12 @@ impl AvifAnimationFrameEncoder {
                         _ => unreachable!(),
                     })
                     .collect();
-                let result = crate::encode_animation_rgb8_timed(
+                let result = crate::encoder::encode_animation_rgb8_timed_with_stop(
                     &anim_frames,
                     self.timescale,
                     &self.config,
                     stop_token.clone(),
+                    stop,
                 )?;
                 result.avif_file
             }
@@ -373,11 +460,12 @@ impl AvifAnimationFrameEncoder {
                         _ => unreachable!(),
                     })
                     .collect();
-                let result = crate::encode_animation_rgba8_timed(
+                let result = crate::encoder::encode_animation_rgba8_timed_with_stop(
                     &anim_frames,
                     self.timescale,
                     &self.config,
                     stop_token.clone(),
+                    stop,
                 )?;
                 result.avif_file
             }
@@ -396,11 +484,12 @@ impl AvifAnimationFrameEncoder {
                         _ => unreachable!(),
                     })
                     .collect();
-                let result = crate::encode_animation_rgb16_timed(
+                let result = crate::encoder::encode_animation_rgb16_timed_with_stop(
                     &anim_frames,
                     self.timescale,
                     &self.config,
                     stop_token.clone(),
+                    stop,
                 )?;
                 result.avif_file
             }
@@ -419,11 +508,12 @@ impl AvifAnimationFrameEncoder {
                         _ => unreachable!(),
                     })
                     .collect();
-                let result = crate::encode_animation_rgba16_timed(
+                let result = crate::encoder::encode_animation_rgba16_timed_with_stop(
                     &anim_frames,
                     self.timescale,
                     &self.config,
                     stop_token.clone(),
+                    stop,
                 )?;
                 result.avif_file
             }
@@ -444,6 +534,34 @@ impl AvifAnimationFrameEncoder {
         }
         Ok(out)
     }
+}
+
+fn copy_animation_pixels<T>(
+    pixels: &PixelSlice<'_>,
+    bpp: usize,
+    job: Option<&zencodec::StopToken>,
+    call: Option<&dyn Stop>,
+    convert: impl Fn(&[u8]) -> T,
+) -> Result<Vec<T>, At<Error>> {
+    let count = (pixels.width() as usize)
+        .checked_mul(pixels.rows() as usize)
+        .ok_or_else(|| at!(Error::ResourceLimit("frame size overflow".into())))?;
+    let mut output = Vec::new();
+    output.try_reserve_exact(count).map_err(|_| {
+        at!(Error::ResourceLimit(
+            "animation pixel allocation failed".into()
+        ))
+    })?;
+    for y in 0..pixels.rows() {
+        if let Some(stop) = job {
+            stop.check().map_err(|e| at!(Error::from(e)))?;
+        }
+        if let Some(stop) = call {
+            stop.check().map_err(|e| at!(Error::from(e)))?;
+        }
+        output.extend(pixels.row(y).chunks_exact(bpp).map(&convert));
+    }
+    Ok(output)
 }
 
 #[cfg(test)]

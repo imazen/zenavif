@@ -41,12 +41,10 @@ use super::decode_config::AvifDecoderConfig;
 
 /// Animation AVIF full-frame decoder.
 ///
-/// Lazily decodes frames on demand. The `AnimationFrameDecoder` trait doesn't pass
-/// a stop token per-call, so per-frame cancellation is not available
-/// through this interface (use the native `AnimationDecoder` API for that).
+/// Lazily decodes frames on demand and forwards per-call cancellation to the
+/// native animation decoder.
 pub struct AvifAnimationFrameDecoder {
     pub(super) anim_decoder: crate::AnimationDecoder,
-    pub(super) index: usize,
     /// Number of frames decoded so far (including skipped ones).
     pub(super) frames_decoded: u32,
     /// Skip frames before this index. Frames are still decoded to maintain
@@ -69,6 +67,8 @@ pub struct AvifAnimationFrameDecoder {
     pub(super) bake_to: zencodec::Orientation,
     pub(super) crop: Option<super::animation_spatial::AnimationCrop>,
     pub(super) alloc_pref: crate::alloc_util::AllocPref,
+    pub(super) stop: Option<zencodec::StopToken>,
+    pub(super) failed: bool,
 }
 
 impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
@@ -95,6 +95,14 @@ impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
         &mut self,
         stop: Option<&dyn zencodec::enough::Stop>,
     ) -> Result<Option<AnimationFrame<'_>>, At<CodecError>> {
+        if self.failed {
+            return Err(CodecError::of(at!(Error::InvalidState(
+                "animation decoder failed".into()
+            ))));
+        }
+        // Borrowing output prevents setting state after the successful call.
+        // Start poisoned and clear it only immediately before yielding/EOF.
+        self.failed = true;
         self.render_next_frame_inner(stop)
             .map_err(zencodec::CodecError::of)
     }
@@ -122,9 +130,9 @@ impl AvifAnimationFrameDecoder {
         self.anim_decoder.info().spatial
     }
 
-    /// Exact source timing without advancing playback. The shared zencodec
-    /// frame type exposes only legacy whole milliseconds; use this method
-    /// when retaining the concrete decoder and needing exact media ticks.
+    /// Exact source timing without advancing playback. Shared zencodec frames
+    /// retain the same rational duration; this method additionally exposes
+    /// the native media ticks and presentation timestamp.
     /// The index addresses source frames, including any skipped frames.
     pub fn frame_timing(
         &self,
@@ -139,14 +147,53 @@ impl AvifAnimationFrameDecoder {
         &mut self,
         stop: Option<&dyn zencodec::enough::Stop>,
     ) -> Result<Option<AnimationFrame<'_>>, At<Error>> {
-        let stop: &dyn zencodec::enough::Stop = stop.unwrap_or(&enough::Unstoppable);
+        struct Stops<'a>(
+            Option<&'a zencodec::StopToken>,
+            Option<&'a dyn enough::Stop>,
+        );
+        impl enough::Stop for Stops<'_> {
+            fn check(&self) -> Result<(), enough::StopReason> {
+                if let Some(stop) = self.0 {
+                    stop.check()?;
+                }
+                if let Some(stop) = self.1 {
+                    stop.check()?;
+                }
+                Ok(())
+            }
+        }
+        let job = self.stop.clone();
+        let stops = Stops(job.as_ref(), stop);
+        let stop: &dyn enough::Stop = &stops;
+        self.current_frame = None;
         loop {
+            stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
+            if self.frames_decoded == self.total_frames {
+                self.failed = false;
+                return Ok(None);
+            }
+            let count = self
+                .frames_decoded
+                .checked_add(1)
+                .ok_or_else(|| at!(Error::InvalidState("animation frame count overflow".into())))?;
+            self.limits
+                .check_frames(count)
+                .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
+            self.limits
+                .check_total_pixels(
+                    u64::from(self.info.width)
+                        .saturating_mul(u64::from(self.info.height))
+                        .saturating_mul(u64::from(count)),
+                )
+                .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
             let frame = self.anim_decoder.next_frame(stop).at()?;
             let Some(frame) = frame else {
-                return Ok(None);
+                return Err(at!(Error::InvalidState(
+                    "animation ended before its declared frame count".into()
+                )));
             };
             let frame_index = self.frames_decoded;
-            self.frames_decoded += 1;
+            self.frames_decoded = count;
 
             // Enforce max_frames limit (counts all decoded frames, including skipped).
             self.limits
@@ -189,12 +236,16 @@ impl AvifAnimationFrameDecoder {
             } else {
                 zenpixels_convert::orient::apply_orientation(pixels.as_slice(), self.bake_to)
             };
-            let idx = self.index as u32;
-            self.index += 1;
-            let duration_ms = frame.duration_ms;
+            let idx = frame_index;
+            let duration = zencodec::animation::FrameDuration::new(
+                u64::from(frame.timing.duration_in_timescales),
+                frame.timing.timescale,
+            )
+            .map_err(|_| at!(Error::InvalidState("animation clock is zero".into())))?;
             self.current_frame = Some(pixels);
+            self.failed = false;
             let slice = self.current_frame.as_ref().unwrap().as_slice().erase();
-            return Ok(Some(AnimationFrame::new(slice, duration_ms, idx)));
+            return Ok(Some(AnimationFrame::with_duration(slice, duration, idx)));
         }
     }
 }

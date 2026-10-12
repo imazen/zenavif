@@ -1,5 +1,15 @@
 # Changelog
 
+## Coordinated animation and precision contracts (unreleased)
+
+- Stamp decoded animation descriptors after alpha/depth conversion and carry RGB/full-range CICP on reconstructed pixels. Raw coded matrix/range remain on source metadata.
+
+
+- Carry exact rational durations through the zencodec animation adapter. Reject invalid frame admission atomically and bound retained inputs, cumulative pixels, duration, and frame count.
+- Preserve source descriptor/ColorContext through animation encoding, retain decode job cancellation, poison failed decoder state, and keep original indices for skipped frames. Borrowed finish cancellation reaches native zenravif processing.
+- Implement explicit native 12-bit RGB/RGBA still and animation output, including alpha and low sample bits. Keep packed U16 values normalized to the full storage range.
+- Pin the coordinated native packet decoder, encoder, pixel 0.3, and HDR dependencies for portable checkouts.
+
 ## SVT research knob + pin bump (unreleased, 2026-09-24)
 
 - Added `__expert` `SvtParams::chroma_q: Option<(i8, i8)>` (`02b62dff`): fixed per-plane U/V chroma delta-q on `Av1Backend::Zenav1Svt`, routed to zenav1-svt's `ChromaQOverride`, for decorrelated-plane research stimuli. Refused (never ignored) off the svt backend, outside -64..=63, under SvtParity, for monochrome input and without `__expert`. Measured on smooth two-plane chroma texture at q60: U+48 raises Cb MSE 2.48 -> 5.67 with Cr flat; V+48 raises Cr MSE 2.16 -> 4.84 with Cb flat; (0, 0) is byte-identical to no override.
@@ -27,11 +37,43 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+### Shared gain-map transport
+
+- Reuse identical ICC properties between AVIF items, preserving associations
+  while avoiding duplicate-profile directory warnings in independent readers.
+
+- SVT and AOM still-image encoders now carry pre-encoded ISO gain-map items,
+  alternate ICC/CICP, and payload-derived dimensions/depth/chroma through the
+  existing AVIF serializer, matching zenravif. No public signatures change.
+- Share gain-map payload validation across all three backends; retain explicit
+  refusal for SVT animation gain maps. Extend the six-backend-pair metadata
+  tests with base/alternate ICC and ISO parameters/payload preservation.
+
+### Metadata integration (published baseline 0.1.6)
+
+- Shared encoding no longer turns an RGB input descriptor into an identity-matrix AV1 request; SVT/AOM retain their implemented conversion matrix and explicit native settings.
+
+- Reconcile existing image-animation and native 12-bit contracts (`60794df9`, `b777fa12`) with the metadata backend changes, retaining the coordinated decoder and pixel revisions.
+
+- Reuse PR 61 (`d2f17783`) inventory and regression fixtures behind default-off
+  `inventory`; keep baseline metadata available independently. Use shared typed
+  unsupported/input/part errors and preserve cancellation on malformed input.
+- Retain PR 61's auxiliary-track self-reference parser fix; validate metadata
+  across all three AV1 encoders and both decoders.
+- Registry audit confirms pre-existing breaks at `85dd0d2b`: animation struct
+  fields, non-exhaustive encoder enums, `EncodeBitDepth::Auto` discriminant and
+  nine codec-trait error types. See [the report](docs/METADATA_INTEGRATION.md).
+
+
 ### Added
 - Add calibrated native AVIF experiment routes through the shared Rust targeting owner, with train-family seeds, premeasured attained bounds and explicit 1/2/3 complete-encode accounting.
 - Exact-tick animation APIs for all RGB/RGBA input formats and both encoding backends, with exact result timing and mixed-clock codec-adapter pushes, using zenravif `23522fff`.
 
 ### Fixed
+
+- Resolve the workspace serializer directly for SVT/AOM Git consumers, and remove a duplicated standalone-fuzz contract patch.
+- Make optional auto-tune dependencies resolvable by git consumers through versioned requirements and root patches. No public signature or feature change.
+
 - Bind the `zensim_cq_rd` research driver's scalar score and fresh spatial maps to complete exact candidate artifacts through Rust `BakeScorer`; independently verify emitted bytes, preserve fractional/negative targets and reject unsupported spatial terms. Retain the inert legacy-gain control and the successful one-image redistribution engagement result without claiming RD or model qualification.
 - Honor animation chroma, RGB identity and full/limited range through zenravif `7f55b540`, with public depth-conversion and exact RGB/alpha plane verification; backend `1447c200` fixes forced-sub8 inter partitions and partial chroma-edge distortion.
 - Forward configured animation color superblock quantizer maps through zenravif `5b7c50b9`, retaining neutral-map bytes and independent alpha; backend application remains intra-only.
@@ -3217,3 +3259,4 @@ why none of them is the seam's to pick unilaterally.
 - Temporarily pinned `rav1d-safe` to a git revision containing the
   aarch64 panic fixes while the fix was making its way through a release
   (01c02d0).
+

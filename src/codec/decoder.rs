@@ -148,8 +148,9 @@ impl AvifDecoder<'_> {
             // describes what we actually produced (zencodec contract:
             // MaxCLL/MaxFALL are measured; mastering display passes
             // through unchanged).
-            info =
-                info.with_content_light_level(zencodec::ContentLightLevel::new(max_cll, max_fall));
+            info = info.with_content_light_level(zenpixels::hdr::ContentLightLevel::new(
+                max_cll, max_fall,
+            ));
         }
         let mut output = DecodeOutput::new(pixels, info);
         if let Ok(probe) = crate::detect::probe(&self.data) {

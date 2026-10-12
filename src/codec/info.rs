@@ -48,7 +48,7 @@ pub(super) fn convert_native_info(native: &crate::image::ImageInfo) -> ImageInfo
         info = info.with_xmp(xmp.clone());
     }
     if let Some(ref cll) = native.content_light_level {
-        info = info.with_content_light_level(zencodec::ContentLightLevel::new(
+        info = info.with_content_light_level(zenpixels::hdr::ContentLightLevel::new(
             cll.max_content_light_level,
             cll.max_pic_average_light_level,
         ));
@@ -57,7 +57,7 @@ pub(super) fn convert_native_info(native: &crate::image::ImageInfo) -> ImageInfo
         // Wire GBR order -> codec RGB order.
         // Convert from 0.00002 units (u16) to CIE 1931 xy (f32), and 0.0001 cd/m² (u32) to f32
         let xy = |v: u16| v as f32 * 0.00002;
-        info = info.with_mastering_display(zencodec::MasteringDisplay::new(
+        info = info.with_mastering_display(zenpixels::hdr::MasteringDisplay::new(
             [
                 [xy(mdcv.primaries[2].0), xy(mdcv.primaries[2].1)],
                 [xy(mdcv.primaries[0].0), xy(mdcv.primaries[0].1)],

@@ -10,9 +10,11 @@ pub fn remove_poster(data: &mut [u8]) {
         if &data[pos + 4..pos + 8] == b"ftyp" {
             assert_eq!(&data[pos + 8..pos + 12], b"avis");
             let mut brands: Vec<[u8; 4]> = data[pos + 16..pos + size]
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .filter(|b| *b != b"avif" && *b != b"mif1" && *b != b"avis")
-                .map(|b| b.try_into().unwrap())
+                .copied()
                 .collect();
             if !brands.contains(b"msf1") {
                 brands.push(*b"msf1");
