@@ -27,6 +27,15 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+### Shared gain-map transport
+
+- SVT and AOM still-image encoders now carry pre-encoded ISO gain-map items,
+  alternate ICC/CICP, and payload-derived dimensions/depth/chroma through the
+  existing AVIF serializer, matching zenravif. No public signatures change.
+- Share gain-map payload validation across all three backends; retain explicit
+  refusal for SVT animation gain maps. Extend the six-backend-pair metadata
+  tests with base/alternate ICC and ISO parameters/payload preservation.
+
 ### Metadata integration (published baseline 0.1.6)
 
 - Reuse PR 61 (`d2f17783`) inventory and regression fixtures behind default-off

@@ -305,7 +305,7 @@ pub enum Av1Backend {
     /// **GBR identity model** at 4:4:4 — which is what makes a
     /// mathematically lossless encode possible — **alpha** as the auxiliary
     /// Cs400 item AVIF specifies, and **grayscale → monochrome (Cs400) at 8,
-    /// 10 or 12 bits**. 4:2:2 and gain maps are refused with a message naming
+    /// 10 or 12 bits**. 4:2:2 is refused with a message naming
     /// what is unimplemented (see `src/encoder_aom.rs`), and identity outside
     /// 4:4:4 is refused because AV1 5.5.2 does not define it.
     ///
@@ -1408,28 +1408,7 @@ fn build_ravif_encoder(
         });
     }
     if let Some(ref gm) = config.gain_map {
-        // The muxed `av1C` (and `ispe`) of the gain-map item must describe
-        // the actual byte-carried bitstream — derive subsampling/monochrome
-        // from its sequence header and validate the caller-declared
-        // dimensions/depth against it, instead of writing defaults that can
-        // lie about the payload (e.g. a 4:4:4 map muxed as 4:2:0).
-        let md = zenavif_parse::AV1Metadata::parse_av1_bitstream(&gm.av1_data).map_err(|e| {
-            at!(Error::InvalidParameters(format!(
-                "gain map AV1 payload failed to parse: {e}"
-            )))
-        })?;
-        if (md.max_frame_width.get(), md.max_frame_height.get()) != (gm.width, gm.height) {
-            return Err(at!(Error::InvalidParameters(format!(
-                "gain map dimensions {}x{} do not match its AV1 payload ({}x{})",
-                gm.width, gm.height, md.max_frame_width, md.max_frame_height
-            ))));
-        }
-        if md.bit_depth != gm.bit_depth {
-            return Err(at!(Error::InvalidParameters(format!(
-                "gain map bit depth {} does not match its AV1 payload ({})",
-                gm.bit_depth, md.bit_depth
-            ))));
-        }
+        let md = validated_gain_map(gm)?;
         enc = enc.with_gain_map(ravif::GainMapData {
             av1_data: gm.av1_data.clone(),
             width: gm.width,
@@ -2510,4 +2489,110 @@ fn encode_animation_rgba16_inner<F: AnimationInput<RGBA16>>(
         total_duration_ticks: result.total_duration_ticks,
         timescale: result.timescale,
     })
+}
+
+// Shared payload agreement check for all three encoder backends.
+fn validated_gain_map(gm: &GainMapConfig) -> Result<zenavif_parse::AV1Metadata> {
+    let md = zenavif_parse::AV1Metadata::parse_av1_bitstream(&gm.av1_data).map_err(|e| {
+        at!(Error::InvalidParameters(format!(
+            "gain map AV1 payload failed to parse: {e}"
+        )))
+    })?;
+    if (md.max_frame_width.get(), md.max_frame_height.get()) != (gm.width, gm.height) {
+        return Err(at!(Error::InvalidParameters(format!(
+            "gain map dimensions {}x{} do not match its AV1 payload ({}x{})",
+            gm.width, gm.height, md.max_frame_width, md.max_frame_height
+        ))));
+    }
+    if md.bit_depth != gm.bit_depth {
+        return Err(at!(Error::InvalidParameters(format!(
+            "gain map bit depth {} does not match its AV1 payload ({})",
+            gm.bit_depth, md.bit_depth
+        ))));
+    }
+    Ok(md)
+}
+
+/// Apply the same byte-carried gain-map container metadata to SVT and AOM.
+#[cfg(any(feature = "zenav1-svt", feature = "zenav1-aom-encode"))]
+pub(crate) fn mux_gain_map(
+    config: &EncoderConfig,
+    mux: &mut zenavif_serialize::Aviffy,
+) -> Result<()> {
+    let Some(gm) = &config.gain_map else {
+        return Ok(());
+    };
+    let md = validated_gain_map(gm)?;
+    mux.set_gain_map(
+        gm.av1_data.clone(),
+        gm.width,
+        gm.height,
+        gm.bit_depth,
+        gm.metadata.clone(),
+    )
+    .set_gain_map_chroma_subsampling((
+        md.chroma_subsampling.horizontal,
+        md.chroma_subsampling.vertical,
+    ))
+    .set_gain_map_monochrome(md.monochrome);
+    if let Some((cp, tc, mc, full_range_flag)) = config.gain_map_alt_colr {
+        use zenavif_serialize::constants::{
+            ColorPrimaries as P, MatrixCoefficients as M, TransferCharacteristics as T,
+        };
+        let unsupported = || {
+            at!(Error::InvalidParameters(
+                "unsupported gain-map alternate CICP code point".into()
+            ))
+        };
+        let color_primaries = match cp {
+            1 => P::Bt709,
+            2 => P::Unspecified,
+            6 => P::Bt601,
+            9 => P::Bt2020,
+            11 => P::DciP3,
+            12 => P::DisplayP3,
+            _ => return Err(unsupported()),
+        };
+        #[allow(deprecated)]
+        let transfer_characteristics = match tc {
+            1 => T::Bt709,
+            2 => T::Unspecified,
+            4 => T::Bt470M,
+            5 => T::Bt470BG,
+            6 => T::Bt601,
+            7 => T::Smpte240,
+            8 => T::Linear,
+            9 => T::Log,
+            10 => T::LogSqrt,
+            11 => T::Iec61966,
+            12 => T::Bt1361,
+            13 => T::Srgb,
+            14 => T::Bt2020_10,
+            15 => T::Bt2020_12,
+            16 => T::Smpte2084,
+            17 => T::Smpte428,
+            18 => T::Hlg,
+            _ => return Err(unsupported()),
+        };
+        let matrix_coefficients = match mc {
+            0 => M::Rgb,
+            1 => M::Bt709,
+            2 => M::Unspecified,
+            6 => M::Bt601,
+            8 => M::Ycgco,
+            9 => M::Bt2020Ncl,
+            10 => M::Bt2020Cl,
+            _ => return Err(unsupported()),
+        };
+        let mut colr = zenavif_serialize::ColrBox::default();
+        colr.color_primaries = color_primaries;
+        colr.transfer_characteristics = transfer_characteristics;
+        colr.matrix_coefficients = matrix_coefficients;
+        colr.full_range_flag = full_range_flag;
+        mux.set_gain_map_alt_colr(colr);
+    }
+    if let Some(icc) = &config.gain_map_alt_icc {
+        mux.set_gain_map_alt_icc(icc.clone());
+    }
+    Ok(())
 }

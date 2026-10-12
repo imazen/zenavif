@@ -459,7 +459,7 @@ impl crate::EncoderConfig {
     }
 
     /// The configuration slice the experimental zenav1-svt backend
-    /// implements: 8/10-bit 4:2:0 YCbCr full-range stills, no gain map, no
+    /// implements: 8/10-bit 4:2:0 YCbCr full-range stills, byte-carried gain maps, no
     /// lossless. The dimension envelope (multiples of 64; arbitrary at
     /// speed >= 5; multiples of 8 at speed >= 5 with alpha) is a
     /// config×input concern checked by [`Self::validate_for_input`] and at
@@ -490,13 +490,7 @@ impl crate::EncoderConfig {
                 detail: "the zenav1-svt sequence header signals full range only",
             });
         }
-        if self.gain_map.is_some() {
-            return Err(ValidationError::BackendUnsupportedParam {
-                backend: BACKEND,
-                param: "gain_map",
-                detail: "gain-map muxing is zenravif-only for now",
-            });
-        }
+
         #[cfg(feature = "encode-imazen")]
         if self.lossless {
             return Err(ValidationError::BackendUnsupportedParam {

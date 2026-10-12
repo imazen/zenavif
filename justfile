@@ -323,3 +323,21 @@ metadata-api-validation:
     cargo check --manifest-path fuzz/Cargo.toml --bin inventory
     just api-doc
     just metadata-api-check
+
+metadata-backend-color:
+    cargo test -p zenavif --features inventory,zenav1-aom,zenav1-aom-encode,zenav1-svt,encode-imazen --test metadata_roundtrip --test gainmap_encode across_all_av1_backends -- --test-threads=1
+
+metadata-backend-gainmap-check:
+    cargo test -p zenavif --features inventory,zenav1-aom,zenav1-aom-encode,zenav1-svt,encode-imazen --test gainmap_encode --test metadata_roundtrip --test validation --test animation_encode_metadata -- --test-threads=1
+    cargo clippy -p zenavif --features inventory,zenav1-aom,zenav1-aom-encode,zenav1-svt,encode-imazen --lib --test gainmap_encode --test metadata_roundtrip -- -D warnings
+
+metadata-backend-gainmap-oracle:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    output="$HOME/tmp/zenmeta-avif-gainmap-oracle"
+    AVIF_METADATA_OUTPUT="$output" cargo test -p zenavif --features inventory,zenav1-aom,zenav1-aom-encode,zenav1-svt,encode-imazen --test gainmap_encode gain_map_metadata_across_all_av1_backends -- --test-threads=1
+    for backend in Zenravif Zenav1Svt Zenav1Aom; do
+        heif-info "$output/$backend.avif"
+        heif-convert "$output/$backend.avif" "$output/$backend.png"
+        exiftool -validate -warning -error "$output/$backend.avif"
+    done

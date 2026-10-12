@@ -335,6 +335,14 @@ fn metadata_is_shared_across_all_av1_backends() {
     use zencodec::decode::{DecodeJob as _, DecoderConfig as _};
     use zencodec::inventory::{Disposition, MetadataKind};
     let image = make_test_image();
+    let icc_vector = std::fs::read("tests/vectors/libavif/seine_sdr_gainmap_srgb_icc.avif")
+        .expect("provision libavif vectors");
+    let icc = ManagedAvifDecoder::new(&icc_vector, &DecoderConfig::new())
+        .unwrap()
+        .probe_info()
+        .unwrap()
+        .icc_profile
+        .unwrap();
     let exif = make_avif_exif();
     let xmp = b"<x:xmpmeta xmlns:x='adobe:ns:meta/'/>".to_vec();
     for backend in [
@@ -347,6 +355,7 @@ fn metadata_is_shared_across_all_av1_backends() {
             .quality(80.0)
             .speed(10)
             .chroma_subsampling(EncodeChromaSubsampling::Yuv420)
+            .icc_profile(icc.clone())
             .exif(exif.clone())
             .xmp(xmp.clone())
             .rotation(1);
@@ -367,7 +376,12 @@ fn metadata_is_shared_across_all_av1_backends() {
                 Some(xmp.as_slice()),
                 "{backend:?}/{decoder:?}: XMP"
             );
-            for kind in [MetadataKind::Exif, MetadataKind::Xmp] {
+            assert_eq!(
+                info.source_color.icc_profile.as_deref(),
+                Some(icc.as_slice()),
+                "{backend:?}/{decoder:?}: ICC"
+            );
+            for kind in [MetadataKind::Exif, MetadataKind::Xmp, MetadataKind::Icc] {
                 assert!(
                     inventory
                         .parts()

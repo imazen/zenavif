@@ -59,3 +59,33 @@ parse AV1 OBU internals. Traversal and extent limits are deliberate bounds, not
 claims of exhaustive interpretation. It retains PR 61's decoder/configuration
 semantics and is not a container rewrite implementation. Broad cross-backend
 ICC/gain-map tests and remote CI completion remain separate validation work.
+
+## Subsequent backend gain-map integration
+
+The expanded backend test exposed explicit SVT/AOM gain-map refusals. Both now
+use the existing serializer's still-image gain-map support and share zenravif's
+payload dimension/depth validation. No additional public API is introduced.
+SVT animation remains explicitly unsupported for gain maps.
+
+`just metadata-backend-gainmap-check` exercises base ICC, alternate ICC, ISO
+parameters, byte-carried map payload and geometry mismatch refusal for all
+three encoder choices, with metadata checked before and after base decoding by
+both decoders. Existing metadata, gain-map, validation and animation tests and
+clippy are included. The test uses the existing libavif ICC gain-map vector;
+the tiny monochrome ICC test vector has an intentionally empty profile table
+and is unsuitable for this positive ICC validation.
+
+`just metadata-backend-gainmap-oracle` additionally opens and decodes each
+backend output with libheif and inspects it with ExifTool. This checks base
+image interoperability; it does not independently reconstruct HDR from the
+alternate ICC profile. Arbitrary HDR/bit-depth/map-encoding combinations still
+need their existing specialized tests, and remote CI remains a release gate.
+
+The independent-reader run opens and decodes all three outputs, but ExifTool
+reports two warnings on each: `ViewingConditions pointer references previous
+ViewingConditions directory` and `Measurement pointer references previous
+Measurement directory`. The pre-existing zenravif path produces the same
+warnings as SVT/AOM. All base/alternate profile bytes match the source vector
+in the tests; the source itself reports `Validate: OK` and exposes one profile
+to ExifTool, while these outputs expose two. This is recorded as an unresolved
+oracle difference, not a clean ExifTool validation result.
