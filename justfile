@@ -341,3 +341,8 @@ metadata-backend-gainmap-oracle:
         heif-convert "$output/$backend.avif" "$output/$backend.png"
         exiftool -validate -warning -error "$output/$backend.avif"
     done
+
+metadata-shared-icc-check:
+    cargo test -p zenavif-serialize
+    just metadata-backend-gainmap-check
+    just metadata-backend-gainmap-oracle

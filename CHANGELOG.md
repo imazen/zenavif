@@ -29,6 +29,9 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### Shared gain-map transport
 
+- Reuse identical ICC properties between AVIF items, preserving associations
+  while avoiding duplicate-profile directory warnings in independent readers.
+
 - SVT and AOM still-image encoders now carry pre-encoded ISO gain-map items,
   alternate ICC/CICP, and payload-derived dimensions/depth/chroma through the
   existing AVIF serializer, matching zenravif. No public signatures change.

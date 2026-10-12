@@ -89,3 +89,12 @@ warnings as SVT/AOM. All base/alternate profile bytes match the source vector
 in the tests; the source itself reports `Validate: OK` and exposes one profile
 to ExifTool, while these outputs expose two. This is recorded as an unresolved
 oracle difference, not a clean ExifTool validation result.
+
+### ICC oracle difference resolved
+
+The serializer emitted duplicate identical ICC properties for base and alternate
+items. Reusing one property with both item associations preserves both profiles
+and removes the reader ambiguity. After this change, the existing serializer
+suite, backend metadata/gain-map/animation suites and clippy pass, libheif opens
+and decodes each backend output, and ExifTool reports `Validate: OK` on all
+three outputs. Reproduce with `just metadata-shared-icc-check`.
