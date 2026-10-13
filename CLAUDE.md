@@ -699,6 +699,11 @@ remain deferred while this newly measured baseline failure is unresolved.
 
 ## Known Bugs
 
+- Fixed during the shared timing audit: transparent native unsupported-error
+  wrapping hid the precise cause from erased callers. The wrapper retains the
+  cause; `reported_timing_fallback_is_atomic_and_exact_refusal_is_typed` checks
+  exact refusal, ordinary quantization and rejected-frame atomicity.
+
 - Shared metadata integration exposed an unpublished serializer registry requirement for SVT/AOM Git consumers and duplicate zencodec keys in the standalone fuzz manifest. Direct workspace paths and a single coordinated patch fix resolution.
 
 - Metadata integration found the shared still encoder inferred an identity output matrix from RGB input descriptors, rejecting SVT/AOM YUV encoding. Descriptor/source CICP now carries primaries and transfer while the native backend retains its coding-matrix choice; `codec_hdr_units` exercises the SVT path.

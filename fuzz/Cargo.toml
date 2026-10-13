@@ -26,7 +26,7 @@ path = ".."
 features = ["inventory"]
 
 [patch.crates-io]
-ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "02c49bc5bf60c76d702322c2e089ad204a02228b" }
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "e2148a30755ab690317939cca193574e1bcfbbc0" }
 zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "0d74f5eb91d985b877d92210020bb96f233fcc0b" }
 zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "0d74f5eb91d985b877d92210020bb96f233fcc0b" }
 # fuzz/ is its own workspace root, so the root [patch] does not reach it.

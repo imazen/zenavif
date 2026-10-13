@@ -38,7 +38,7 @@ fn rejected_frame_does_not_commit_canvas_format_or_clock() {
     let wide = pixels(18, 13);
     assert!(
         encoder
-            .push_frame_timed(
+            .push_frame_exact(
                 wide.as_slice(),
                 FrameDuration::new(1, u32::MAX).unwrap(),
                 None
@@ -48,12 +48,12 @@ fn rejected_frame_does_not_commit_canvas_format_or_clock() {
     let good = pixels(17, 13);
     let first = FrameDuration::new(1001, 30000).unwrap();
     encoder
-        .push_frame_timed(good.as_slice(), first, None)
+        .push_frame_exact(good.as_slice(), first, None)
         .unwrap();
     let wrong_height = pixels(17, 12);
     assert!(
         encoder
-            .push_frame_timed(
+            .push_frame_exact(
                 wrong_height.as_slice(),
                 FrameDuration::new(1, 30001).unwrap(),
                 None
@@ -61,7 +61,7 @@ fn rejected_frame_does_not_commit_canvas_format_or_clock() {
             .is_err()
     );
     encoder
-        .push_frame_timed(good.as_slice(), first, None)
+        .push_frame_exact(good.as_slice(), first, None)
         .unwrap();
     let bytes = encoder.finish(None).unwrap();
     let decoder_config = zenavif::AvifDecoderConfig::new();
@@ -102,12 +102,12 @@ fn buffered_memory_and_duration_limits_count_all_accepted_frames() {
     let part = FrameDuration::new(1, 3000).unwrap();
     for _ in 0..3 {
         timing
-            .push_frame_timed(input.as_slice(), part, None)
+            .push_frame_exact(input.as_slice(), part, None)
             .unwrap();
     }
     assert!(
         timing
-            .push_frame_timed(input.as_slice(), part, None)
+            .push_frame_exact(input.as_slice(), part, None)
             .is_err()
     );
 }
@@ -197,4 +197,49 @@ fn animation_decode_keeps_job_stop_and_counts_skipped_pixels() {
         2
     );
     assert!(skipped.render_next_frame(None).unwrap().is_none());
+}
+
+#[test]
+fn reported_timing_fallback_is_atomic_and_exact_refusal_is_typed() {
+    use zencodec_testkit::ExpectedError;
+    let input = pixels(17, 13);
+    let wrong_size = pixels(18, 13);
+    let config = config();
+    let mut encoder = config.job().animation_frame_encoder().unwrap();
+    let first = FrameDuration::new(1, 1000).unwrap();
+    assert_eq!(
+        encoder
+            .push_frame_timed(input.as_slice(), first, None)
+            .unwrap(),
+        first
+    );
+    // LCM(1000, u32::MAX) cannot fit the container clock. Exact mode refuses;
+    // ordinary mode rounds to the existing clock and reports the chosen time.
+    let fractional = FrameDuration::new(100_000_000, u32::MAX).unwrap();
+    let error = encoder
+        .push_frame_exact(input.as_slice(), fractional, None)
+        .unwrap_err();
+    assert!(
+        ExpectedError::Unsupported(zencodec::UnsupportedOperation::AnimationTiming).matches(&error)
+    );
+    assert!(
+        encoder
+            .push_frame_timed(wrong_size.as_slice(), fractional, None)
+            .is_err()
+    );
+    let second = encoder
+        .push_frame_timed(input.as_slice(), fractional, None)
+        .unwrap();
+    assert_eq!(second, FrameDuration::from_millis(23));
+    let third = encoder
+        .push_frame_timed(input.as_slice(), fractional, None)
+        .unwrap();
+    assert_eq!(third, FrameDuration::from_millis(24));
+    let output = encoder.finish(None).unwrap();
+    zencodec_testkit::check_animation_durations(
+        zenavif::AvifDecoderConfig::new(),
+        output.data(),
+        &[first, second, third],
+    )
+    .unwrap();
 }

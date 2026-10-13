@@ -115,7 +115,7 @@ pub enum Error {
     Cancelled(StopReason),
 
     /// Unsupported codec operation
-    #[error(transparent)]
+    #[error("{0}")]
     UnsupportedOperation(#[from] zencodec::UnsupportedOperation),
 }
 

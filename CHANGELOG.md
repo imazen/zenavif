@@ -2,6 +2,13 @@
 
 ## Coordinated animation and precision contracts (unreleased)
 
+- Adopt ordinary timing quantization with returned rational durations and
+  explicit exact timing through zencodec `4fda4391`. Rejected frames do not
+  consume rounding state. Exact container-clock overflow preserves the typed
+  AnimationTiming cause through erased errors. No published inherent method
+  signature changes; the coordinated trait changes remain unreleased.
+
+
 - Stamp decoded animation descriptors after alpha/depth conversion and carry RGB/full-range CICP on reconstructed pixels. Raw coded matrix/range remain on source metadata.
 
 

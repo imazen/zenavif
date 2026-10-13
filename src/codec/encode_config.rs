@@ -282,6 +282,7 @@ pub(super) static AVIF_ENCODE_CAPABILITIES: zencodec::encode::EncodeCapabilities
         .with_hdr(true)
         .with_gain_map(true)
         .with_animation(true)
+        .with_animation_timing(true)
         .with_native_gray(false)
         .with_native_16bit(true)
         .with_native_f32(false)

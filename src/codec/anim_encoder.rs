@@ -69,6 +69,7 @@ pub struct AvifAnimationFrameEncoder {
     pub(super) frame_count: u32,
     pub(super) loop_count: Option<u32>,
     pub(super) timescale: u32,
+    pub(super) timing: Option<zencodec::animation::TimingQuantizer>,
     pub(super) retained_bytes: u64,
     pub(super) descriptor: Option<zenpixels::PixelDescriptor>,
     pub(super) color_context: Option<std::sync::Arc<zenpixels::ColorContext>>,
@@ -106,6 +107,36 @@ impl AvifAnimationFrameEncoder {
         if let Some(s) = &self.stop {
             s.check().map_err(|e| at!(Error::from(e)))?;
         }
+        let (clock, incoming, factor) = self.timing_parameters(duration_ticks, timescale)?;
+        if let Some(max_ms) = self.limits.max_animation_ms {
+            let total = self
+                .frames
+                .iter()
+                .map(|f| u128::from(f.duration()) * u128::from(factor))
+                .sum::<u128>()
+                + u128::from(incoming);
+            if total * 1000 > u128::from(max_ms) * u128::from(clock) {
+                return Err(at!(Error::ResourceLimit(
+                    "animation duration limit exceeded".into()
+                )));
+            }
+        }
+        let previous_len = self.frames.len();
+        self.push_frame_inner(pixels, incoming, stop)?;
+        if factor != 1 {
+            for frame in &mut self.frames[..previous_len] {
+                *frame.duration_mut() *= factor;
+            }
+        }
+        self.timescale = clock;
+        Ok(())
+    }
+
+    fn timing_parameters(
+        &self,
+        duration_ticks: u32,
+        timescale: u32,
+    ) -> Result<(u32, u32, u32), At<Error>> {
         if timescale == 0 || duration_ticks == 0 {
             return Err(at!(Error::InvalidState(
                 "animation timing must be positive".into()
@@ -145,28 +176,7 @@ impl AvifAnimationFrameEncoder {
                 })?;
             }
         }
-        if let Some(max_ms) = self.limits.max_animation_ms {
-            let total = self
-                .frames
-                .iter()
-                .map(|f| u128::from(f.duration()) * u128::from(factor))
-                .sum::<u128>()
-                + u128::from(incoming);
-            if total * 1000 > u128::from(max_ms) * u128::from(clock) {
-                return Err(at!(Error::ResourceLimit(
-                    "animation duration limit exceeded".into()
-                )));
-            }
-        }
-        let previous_len = self.frames.len();
-        self.push_frame_inner(pixels, incoming, stop)?;
-        if factor != 1 {
-            for frame in &mut self.frames[..previous_len] {
-                *frame.duration_mut() *= factor;
-            }
-        }
-        self.timescale = clock;
-        Ok(())
+        Ok((clock, incoming, factor))
     }
 
     fn stop_token(&self) -> almost_enough::StopToken {
@@ -201,8 +211,47 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
         pixels: PixelSlice<'_>,
         duration: zencodec::animation::FrameDuration,
         stop: Option<&dyn Stop>,
+    ) -> Result<zencodec::animation::FrameDuration, At<CodecError>> {
+        if self.timing.is_none()
+            && u32::try_from(duration.numerator())
+                .ok()
+                .is_some_and(|ticks| {
+                    self.timing_parameters(ticks, duration.denominator())
+                        .is_ok()
+                })
+        {
+            self.push_frame_exact(pixels, duration, stop)?;
+            return Ok(duration);
+        }
+        let mut timing = match self.timing {
+            Some(timing) => timing,
+            None => zencodec::animation::TimingQuantizer::new(
+                if self.frames.is_empty() {
+                    1000
+                } else {
+                    self.timescale
+                },
+                u64::from(u32::MAX),
+            )
+            .map_err(|_| Self::reject(zencodec::UnsupportedOperation::AnimationTiming))?,
+        };
+        let encoded = timing
+            .quantize(duration)
+            .map_err(|_| Self::reject(zencodec::UnsupportedOperation::AnimationTiming))?;
+        self.push_frame_exact(pixels, encoded, stop)?;
+        self.timing = Some(timing);
+        Ok(encoded)
+    }
+
+    fn push_frame_exact(
+        &mut self,
+        pixels: PixelSlice<'_>,
+        duration: zencodec::animation::FrameDuration,
+        stop: Option<&dyn Stop>,
     ) -> Result<(), At<CodecError>> {
         let ticks = u32::try_from(duration.numerator())
+            .map_err(|_| Self::reject(zencodec::UnsupportedOperation::AnimationTiming))?;
+        self.timing_parameters(ticks, duration.denominator())
             .map_err(|_| Self::reject(zencodec::UnsupportedOperation::AnimationTiming))?;
         self.push_frame_ticks(pixels, ticks, duration.denominator(), stop)
     }

@@ -363,3 +363,8 @@ metadata-svt-final-check:
     just metadata-backend-gainmap-check
     just metadata-animation-integration-check
     cargo test -p zenavif --features inventory,zenav1-aom,zenav1-aom-encode,zenav1-svt,encode-imazen --test svt_rs_backend --test codec_hdr_units -- --test-threads=1
+
+# Shared exact/reported animation timing and rejected-frame atomicity.
+animation-contract-check:
+    cargo test -p zenavif --features encode-imazen,zenav1-svt --test animation_encode_admission --test animation_encode_timing -- --test-threads=1
+    cargo clippy -p zenavif --features encode-imazen,zenav1-svt --lib -- -D warnings
