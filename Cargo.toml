@@ -741,8 +741,8 @@ required-features = ["encode", "zenav1-aom"]
 # Optional research dependencies must also resolve when this crate is used from git.
 zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "6bbcacb11313923ded6e5eeebb725878c5736453" }
 zenanalyze = { git = "https://github.com/imazen/zenanalyze", rev = "6bbcacb11313923ded6e5eeebb725878c5736453" }
-zenpng = { git = "https://github.com/imazen/zenpng", rev = "a3e322d8826e4e04a74b9fd0f9f831772a057b2f" }
-ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "e2148a30755ab690317939cca193574e1bcfbbc0" }
+zenpng = { git = "https://github.com/imazen/zenpng", rev = "8c9b9a87460116d45d1e58afd8058002b083c4a6" }
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "e6abe1cd7103c57beb04e09e73f571a26a0cf1e0" }
 # Coordinated exact animation timing; unify shared types with the native media stack.
 zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "0d74f5eb91d985b877d92210020bb96f233fcc0b" }
 zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "0d74f5eb91d985b877d92210020bb96f233fcc0b" }
@@ -766,8 +766,8 @@ zenavif-serialize = { path = "zenavif-serialize" }
 # Structural inventory API (imazen/zencodec#133, branch `feat/inventory`).
 # TEMPORARY: swap both entries for the released zencodec / zencodec-testkit
 # before this merges.
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "4fda439133d465246174b55f62426dc54ef204dd" }
-zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "4fda439133d465246174b55f62426dc54ef204dd" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "fa49f7ce0fc75e65b88da1a0eb90b17378297ceb" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "fa49f7ce0fc75e65b88da1a0eb90b17378297ceb" }
 
 [patch."https://github.com/imazen/zenavif"]
 zenavif-serialize = { path = "zenavif-serialize" }

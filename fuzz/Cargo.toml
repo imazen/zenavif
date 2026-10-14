@@ -26,7 +26,7 @@ path = ".."
 features = ["inventory"]
 
 [patch.crates-io]
-ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "e2148a30755ab690317939cca193574e1bcfbbc0" }
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "e6abe1cd7103c57beb04e09e73f571a26a0cf1e0" }
 zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "0d74f5eb91d985b877d92210020bb96f233fcc0b" }
 zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "0d74f5eb91d985b877d92210020bb96f233fcc0b" }
 # fuzz/ is its own workspace root, so the root [patch] does not reach it.
@@ -39,7 +39,7 @@ zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "0d74f5
 rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "dfd01e3268f6e8da862d2d5f0a71d19f414f2b87" }
 # TEMPORARY: the structural-inventory API branch (imazen/zencodec#133);
 # swap for the released zencodec before merge.
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "a81daf7605dc63074d4a39757e7b4399057d4a8f" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "fa49f7ce0fc75e65b88da1a0eb90b17378297ceb" }
 
 [[bin]]
 name = "fuzz_decode"
