@@ -2,7 +2,7 @@
 
 AVIF container parser (ISOBMFF/MIAF demuxer) that extracts AV1 payloads, alpha channels, grid tiles, and animation frames from AVIF files. Written entirely in safe Rust with fallible allocations throughout.
 
-This is a fork of [kornelski/avif-parse](https://github.com/kornelski/avif-parse), which itself descends from Mozilla's MP4 parser used in Firefox. The upstream crate is battle-tested against untrusted data; this fork adds animation, grid images, and a zero-copy API for our specific use case.
+This is a fork of [kornelski/avif-parse](https://github.com/kornelski/avif-parse), which itself descends from the mp4parse project (Ralph Giles, Matthew Gregan, Alfredo Yang, Jon Bauman), used in Firefox. The upstream crate is battle-tested against untrusted data; this fork adds animation, grid images, and a zero-copy API for our specific use case.
 
 Since 2026-07-16 the crate is developed in the [imazen/zenavif](https://github.com/imazen/zenavif) workspace (directory `zenavif-parse/`), with its full history and release tags imported under the `zenavif-parse-v*` prefix (upstream lineages as `avif-parse-v*` and `mp4parse-v*`).
 
