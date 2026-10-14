@@ -82,10 +82,10 @@ impl AvifEncoderConfig {
         self.lossless = lossless;
         if lossless {
             self.inner = self.inner.quality(100.0);
-            #[cfg(feature = "encode-imazen")]
-            {
-                self.inner = self.inner.with_lossless(true);
-            }
+        }
+        #[cfg(feature = "encode-imazen")]
+        {
+            self.inner = self.inner.with_lossless(lossless);
         }
         self
     }
@@ -393,16 +393,8 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
         self.trait_quality
     }
 
-    fn with_lossless(mut self, lossless: bool) -> Self {
-        self.lossless = lossless;
-        if lossless {
-            self.inner = self.inner.quality(100.0);
-            #[cfg(feature = "encode-imazen")]
-            {
-                self.inner = self.inner.with_lossless(true);
-            }
-        }
-        self
+    fn with_lossless(self, lossless: bool) -> Self {
+        self.with_lossless_mode(lossless)
     }
 
     fn is_lossless(&self) -> Option<bool> {
@@ -548,6 +540,23 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
 mod tests {
     use super::*;
     use imgref::Img;
+
+    #[cfg(feature = "encode-imazen")]
+    #[test]
+    fn lossless_to_lossy_clears_native_state() {
+        use zencodec::encode::{EncoderConfig as _, Fidelity};
+        let lossless = AvifEncoderConfig::new().with_fidelity(Fidelity::Lossless);
+        assert!(lossless.inner.lossless);
+        for lossy in [
+            lossless.clone().with_lossless_mode(false),
+            lossless.clone().with_lossless(false),
+            lossless.with_fidelity(Fidelity::codec_quality(70.0)),
+        ] {
+            assert_eq!(lossy.is_lossless(), Some(false));
+            assert!(!lossy.inner.lossless);
+            assert_ne!(lossy.resolved_target_fidelity(), Some(Fidelity::Lossless));
+        }
+    }
 
     #[cfg(feature = "encode")]
     #[test]

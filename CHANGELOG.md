@@ -44,6 +44,10 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+### Fixed
+
+- Switching lossless off now clears the native encoder flag as well as the codec adapter flag; both setters share one implementation.
+
 ### Shared gain-map transport
 
 - Reuse identical ICC properties between AVIF items, preserving associations

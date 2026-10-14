@@ -1837,3 +1837,8 @@ coverage is only 28/80. Independent SSIMULACRA2/Butteraugli disagree on the
 fixed-CQ active arm, and active targeting worsens. Do not promote this spatial
 strategy or model from engagement alone. Exact bytes, costs and controls are
 in the report JSON; use `RESULT_COMPLETE.json` for final artifact status.
+
+### Codec fidelity regression
+
+Switching the adapter from lossless to lossy left the native encoder flag set.
+`lossless_to_lossy_clears_native_state` covers both setters and fidelity switching.
