@@ -56,7 +56,7 @@ pub enum Av1SessionError {
     /// A frame whose size, layout, depth or siting differs from the
     /// encoder's settings: no conversion is implicit.
     InputMismatch,
-    /// A presentation timestamp earlier than the previous frame's.
+    /// A presentation timestamp not later than the previous frame's.
     NonMonotonicTimestamp,
 }
 
@@ -69,7 +69,7 @@ impl core::fmt::Display for Av1SessionError {
             Self::Encode(m) => write!(f, "AV1 encode: {m}"),
             Self::InputMismatch => f.write_str("frame does not match the AV1 encoder's settings"),
             Self::NonMonotonicTimestamp => {
-                f.write_str("frame timestamp is earlier than the previous one")
+                f.write_str("frame timestamp is not later than the previous one")
             }
         }
     }
@@ -90,6 +90,44 @@ fn decode_err(e: whereat::At<rav1d_safe::Error>) -> SessionError<Av1SessionError
 /// The `configOBUs` of an `av1C` record (ISO/IEC 14496-12 AV1 binding):
 /// everything after its 4-byte header. A bare sequence header (no `av1C`
 /// marker bit) is taken whole.
+/// What each AV1 plane holds: G, B, R under the identity matrix (AV1 spec
+/// 6.4.2), Y, Cb, Cr otherwise.
+fn plane_roles(subsampling: Subsampling, matrix_coefficients: u8) -> Vec<PlaneRole> {
+    match (subsampling, matrix_coefficients) {
+        (Subsampling::Mono, _) => vec![PlaneRole::Luma],
+        (_, 0) => vec![PlaneRole::Green, PlaneRole::Blue, PlaneRole::Red],
+        _ => vec![PlaneRole::Luma, PlaneRole::Cb, PlaneRole::Cr],
+    }
+}
+
+/// Length of a temporal delimiter OBU at the start of `b`, or 0. Container
+/// configuration OBUs go after it: a temporal unit starts with its
+/// delimiter.
+fn leading_temporal_delimiter(b: &[u8]) -> usize {
+    const OBU_TEMPORAL_DELIMITER: u8 = 2;
+    let Some(&header) = b.first() else { return 0 };
+    if (header >> 3) & 0xF != OBU_TEMPORAL_DELIMITER || header & 0x2 == 0 {
+        return 0;
+    }
+    let mut i = 1 + usize::from(header & 0x4 != 0);
+    let (mut size, mut shift) = (0usize, 0u32);
+    loop {
+        let Some(&byte) = b.get(i) else { return 0 };
+        i += 1;
+        size |= usize::from(byte & 0x7F) << shift;
+        if byte & 0x80 == 0 {
+            break;
+        }
+        shift += 7;
+        if shift > 56 {
+            return 0;
+        }
+    }
+    i.checked_add(size)
+        .filter(|&end| end <= b.len())
+        .unwrap_or(0)
+}
+
 fn config_obus(private: &[u8]) -> Option<&[u8]> {
     match private.first() {
         // marker (1) + version (7 bits) = 1: an av1C record.
@@ -202,12 +240,7 @@ impl Av1VideoDecoder {
             rav1d_safe::PixelLayout::I422 => Subsampling::Yuv422,
             _ => Subsampling::Yuv444,
         };
-        let roles = match (subsampling, raw.matrix_coefficients) {
-            (Subsampling::Mono, _) => vec![PlaneRole::Luma],
-            // Identity matrix: the planes are G, B, R (AV1 spec 6.4.2).
-            (_, 0) => vec![PlaneRole::Green, PlaneRole::Blue, PlaneRole::Red],
-            _ => vec![PlaneRole::Luma, PlaneRole::Cb, PlaneRole::Cr],
-        };
+        let roles = plane_roles(subsampling, raw.matrix_coefficients);
         let siting = match raw.chroma_sample_position {
             1 => ChromaSiting::Left,
             2 => ChromaSiting::TopLeft,
@@ -327,9 +360,12 @@ impl VideoDecoder for Av1VideoDecoder {
             .ok_or(SessionError::Protocol(ProtocolViolation::EmptyPacket))?;
         let bytes = match self.prefix.take() {
             Some(prefix) => {
+                let payload = payload.as_bytes();
+                let td = leading_temporal_delimiter(payload);
                 let mut v = Vec::with_capacity(prefix.len() + payload.len());
+                v.extend_from_slice(&payload[..td]);
                 v.extend_from_slice(&prefix);
-                v.extend_from_slice(payload.as_bytes());
+                v.extend_from_slice(&payload[td..]);
                 v
             }
             None => payload.into_vec(),
@@ -463,6 +499,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn configuration_goes_after_the_temporal_delimiter() {
+        // TD with a size field, then a frame OBU.
+        assert_eq!(
+            leading_temporal_delimiter(&[0x12, 0x00, 0x32, 0x01, 0xAA]),
+            2
+        );
+        // TD with an extension byte.
+        assert_eq!(leading_temporal_delimiter(&[0x16, 0x00, 0x00, 0x32]), 3);
+        // Not a TD (sequence header first), no size field, truncated sizes.
+        assert_eq!(leading_temporal_delimiter(&[0x0A, 0x01, 0x00]), 0);
+        assert_eq!(leading_temporal_delimiter(&[0x10, 0x32]), 0);
+        assert_eq!(leading_temporal_delimiter(&[0x12, 0x80]), 0);
+        assert_eq!(leading_temporal_delimiter(&[0x12, 0x05, 0x00]), 0);
+        assert_eq!(leading_temporal_delimiter(&[]), 0);
+    }
+
+    #[test]
     fn config_obus_skip_the_av1c_header() {
         assert_eq!(config_obus(&[0x81, 0, 0, 0, 0x0A, 1]), Some(&[0x0A, 1][..]));
         assert_eq!(config_obus(&[0x81, 0, 0, 0]), None);
@@ -490,7 +543,7 @@ mod encode {
     use enough::Stop;
     use num_traits::FromPrimitive;
     use zencodec::time::{TimeBase, Timestamp};
-    use zencodec_media::frame::{ChromaSiting, Frame, PlaneSamples, Subsampling};
+    use zencodec_media::frame::{ChromaSiting, Frame, PlaneSamples, SampleEncoding, Subsampling};
     use zencodec_media::packet::{Packet, RandomAccess};
     use zencodec_media::session::{
         CodecConfig, ProtocolViolation, Receive, SendStatus, SessionError, VideoEncoder,
@@ -500,7 +553,7 @@ mod encode {
     use zenrav1e::prelude::{ChromaSampling, EncoderStatus, FrameType, Pixel};
     use zenrav1e::{Context, EncoderConfig};
 
-    use super::{Av1SessionError, Res};
+    use super::{Av1SessionError, Res, plane_roles};
 
     /// What [`Av1VideoEncoder`] encodes: frames of exactly this shape.
     #[derive(Clone, Debug)]
@@ -530,12 +583,17 @@ mod encode {
         /// does only once a packet is ready: the encoder's lookahead may hold
         /// more.
         pub max_queued_frames: usize,
+        /// Nominal frames per second, numerator and denominator. zenrav1e
+        /// sizes its tiling (the AV1 level's tile-rate minimum) and scene
+        /// detection from it. It is not written to the bitstream and has no
+        /// bearing on timestamps, which come from the frames.
+        pub frame_rate: (u32, u32),
     }
 
     impl Av1EncodeSettings {
         /// 8-bit 4:2:0 of `width` x `height`, unspecified colour (limited
         /// range), speed 6, quantizer 100, a key frame at least every 240
-        /// frames.
+        /// frames, a nominal 30 frames per second.
         pub fn new(width: u32, height: u32) -> Self {
             Self {
                 width,
@@ -549,6 +607,7 @@ mod encode {
                 key_frame_interval: 240,
                 threads: 0,
                 max_queued_frames: 64,
+                frame_rate: (30, 1),
             }
         }
 
@@ -605,6 +664,13 @@ mod encode {
             self.max_queued_frames = frames;
             self
         }
+
+        /// The nominal frame rate, `numerator / denominator` frames per
+        /// second.
+        pub fn with_frame_rate(mut self, numerator: u32, denominator: u32) -> Self {
+            self.frame_rate = (numerator, denominator);
+            self
+        }
     }
 
     fn cfg_err(m: &str) -> Av1SessionError {
@@ -616,10 +682,19 @@ mod encode {
         U16(Box<Context<u16>>),
     }
 
-    /// zenrav1e's AV1 encoder as a [`VideoEncoder`] session. Frames must
-    /// match [`Av1EncodeSettings`] exactly; packets carry the presentation
-    /// timestamp and duration of the frame they show and are random-access
-    /// points exactly when they are key frames.
+    /// zenrav1e's AV1 encoder as a [`VideoEncoder`] session.
+    ///
+    /// Frames must match [`Av1EncodeSettings`] exactly, or `send` refuses
+    /// them with [`Av1SessionError::InputMismatch`]: size (uncropped), depth
+    /// (LSB-aligned), subsampling, 4:2:0 siting, plane roles (Y, Cb, Cr; G,
+    /// B, R under the identity matrix; no alpha), a known colour claim equal
+    /// to the signalled one, and pictures holding exactly those planes at
+    /// those sizes. Nothing is converted. Timestamps must increase strictly.
+    ///
+    /// Packets are temporal units in the low-overhead format, each starting
+    /// with a temporal delimiter (ISOBMFF and Matroska muxers drop it). They
+    /// carry the presentation timestamp and duration of the frame they show
+    /// and are random-access points exactly when they are key frames.
     ///
     /// `output_config` carries the 4-byte `av1C` record with no
     /// `configOBUs`: every key frame repeats the sequence header in band,
@@ -669,6 +744,9 @@ mod encode {
             }
             if s.width == 0 || s.height == 0 || s.max_queued_frames == 0 {
                 return Err(cfg_err("width, height and queue length must be positive"));
+            }
+            if s.frame_rate.0 == 0 || s.frame_rate.1 == 0 {
+                return Err(cfg_err("the frame rate must be positive"));
             }
             let chroma_sampling = match s.subsampling {
                 Subsampling::Mono => ChromaSampling::Cs400,
@@ -723,12 +801,14 @@ mod encode {
             enc.max_key_frame_interval = s.key_frame_interval.max(1);
             enc.min_key_frame_interval = enc.min_key_frame_interval.min(enc.max_key_frame_interval);
             // Timestamps come from the frames; nothing in the bitstream
-            // claims an equal-picture rate.
+            // claims an equal-picture rate. zenrav1e's time base is seconds
+            // per frame: the nominal rate, never the tick clock (a 1/90000
+            // clock read as 90000 fps forces a tile per superblock row).
             enc.enable_timing_info = false;
             enc.still_picture = false;
             enc.time_base = zenrav1e::prelude::Rational::new(
-                u64::from(clock.numerator()),
-                u64::from(clock.denominator()),
+                u64::from(s.frame_rate.1),
+                u64::from(s.frame_rate.0),
             );
             let config = zenrav1e::Config::new()
                 .with_encoder_config(enc)
@@ -799,6 +879,21 @@ mod encode {
                 && i.encoding.code_bits() == s.bit_depth
                 && i.encoding.bit_shift() == 0
                 && (!matches!(s.subsampling, Subsampling::Yuv420) || i.siting == s.siting)
+                && i.roles == plane_roles(s.subsampling, s.color.matrix_coefficients)
+                // A known colour claim must be the signalled one: coding a
+                // full-range frame as limited (or YUV as GBR) is a silent
+                // conversion. An unknown claim takes the settings' word.
+                && i.color.resolved.is_none_or(|c| c == s.color)
+        }
+
+        /// Width and height of each plane, in plane order.
+        fn plane_dims(&self) -> Vec<(usize, usize)> {
+            let s = &self.settings;
+            let luma = (s.width as usize, s.height as usize);
+            match s.subsampling.chroma_size(s.width, s.height) {
+                None => vec![luma],
+                Some((w, h)) => vec![luma, (w as usize, h as usize), (w as usize, h as usize)],
+            }
         }
 
         /// The next packet from zenrav1e, with the timing of the frame it
@@ -847,15 +942,32 @@ mod encode {
         }
     }
 
-    fn copy_and_send<P: Pixel>(ctx: &mut Context<P>, frame: &Frame) -> Result<(), SendError> {
+    /// Copy the frame's planes into a zenrav1e frame and send it. The
+    /// picture must hold exactly the planes `dims` names, each in the
+    /// interpretation's sample encoding: a short, oversized or differently
+    /// coded plane is refused, never cropped or padded.
+    fn copy_and_send<P: Pixel>(
+        ctx: &mut Context<P>,
+        frame: &Frame,
+        dims: &[(usize, usize)],
+        encoding: SampleEncoding,
+    ) -> Result<(), SendError> {
         let mapped = frame.map().map_err(|_| SendError::Input)?;
+        if mapped.plane_count() != dims.len() {
+            return Err(SendError::Input);
+        }
+        for (index, &(w, h)) in dims.iter().enumerate() {
+            let plane = mapped.plane(index).ok_or(SendError::Input)?;
+            if (plane.width(), plane.height()) != (w, h) || plane.encoding() != encoding {
+                return Err(SendError::Input);
+            }
+        }
         let mut out = ctx.new_frame();
-        let planes = mapped.plane_count().min(3);
-        for index in 0..planes {
+        for (index, &(w, h)) in dims.iter().enumerate() {
             let plane = mapped.plane(index).ok_or(SendError::Input)?;
             let mut slice = out.planes[index].mut_slice(Default::default());
-            for (y, row) in slice.rows_iter_mut().take(plane.height()).enumerate() {
-                let dst = &mut row[..plane.width()];
+            for (y, row) in slice.rows_iter_mut().take(h).enumerate() {
+                let dst = row.get_mut(..w).ok_or(SendError::Input)?;
                 match plane.row(y).ok_or(SendError::Input)? {
                     PlaneSamples::U8(src) => {
                         for (d, &v) in dst.iter_mut().zip(src) {
@@ -870,16 +982,14 @@ mod encode {
                 }
             }
         }
-        match ctx.send_frame(out) {
-            Ok(()) => Ok(()),
-            Err(EncoderStatus::EnoughData) => Err(SendError::Full),
-            Err(e) => Err(SendError::Encoder(format!("{e:?}"))),
-        }
+        // EnoughData comes only after flush or for still pictures, both
+        // excluded before this call; it is an encoder error here.
+        ctx.send_frame(out)
+            .map_err(|e| SendError::Encoder(format!("{e:?}")))
     }
 
     enum SendError {
         Input,
-        Full,
         Encoder(String),
     }
 
@@ -898,7 +1008,7 @@ mod encode {
             if pts.base() != self.clock {
                 return Err(SessionError::Protocol(ProtocolViolation::ClockMismatch));
             }
-            if self.last_pts.is_some_and(|last| pts.ticks() < last) {
+            if self.last_pts.is_some_and(|last| pts.ticks() <= last) {
                 return Err(SessionError::Codec(Av1SessionError::NonMonotonicTimestamp));
             }
             if !self.matches(frame) {
@@ -915,23 +1025,14 @@ mod encode {
                     return Ok(SendStatus::ReceivePending);
                 }
             }
+            let dims = self.plane_dims();
+            let encoding = frame.interpretation().encoding;
             let sent = match &mut self.backend {
-                Backend::U8(c) => copy_and_send(c, frame),
-                Backend::U16(c) => copy_and_send(c, frame),
+                Backend::U8(c) => copy_and_send(c, frame, &dims, encoding),
+                Backend::U16(c) => copy_and_send(c, frame, &dims, encoding),
             };
             match sent {
                 Ok(()) => {}
-                Err(SendError::Full) => {
-                    return match self.pull()? {
-                        Pulled::Packet(p) => {
-                            self.ready = Some(p);
-                            Ok(SendStatus::ReceivePending)
-                        }
-                        _ => Err(SessionError::Codec(Av1SessionError::Encode(
-                            "encoder full with no packet ready".into(),
-                        ))),
-                    };
-                }
                 Err(SendError::Input) => {
                     return Err(SessionError::Codec(Av1SessionError::InputMismatch));
                 }

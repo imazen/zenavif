@@ -8,8 +8,8 @@ use enough::Unstoppable;
 use zenavif::media::{Av1EncodeSettings, Av1SessionError, Av1VideoDecoder, Av1VideoEncoder};
 use zencodec::time::{TimeBase, Timestamp};
 use zencodec_media::frame::{
-    ChromaSiting, Frame, FrameGeometry, FrameInterpretation, FrameTiming, OwnedPlane, OwnedPlanes,
-    PlaneData, PlaneRole, Presentation, SampleEncoding, Subsampling,
+    ChromaSiting, ColorClaim, Frame, FrameGeometry, FrameInterpretation, FrameTiming, OwnedPlane,
+    OwnedPlanes, PlaneData, PlaneRole, Presentation, SampleEncoding, Subsampling,
 };
 use zencodec_media::packet::{Packet, RandomAccess};
 use zencodec_media::session::CodecConfig;
@@ -54,6 +54,43 @@ fn frame_sited(
     h: u32,
     pts: i64,
 ) -> Frame {
+    frame_with(i, bits, sub, siting, 1, w, h, pts)
+}
+
+/// A frame shaped exactly as `s` encodes.
+fn frame_for(s: &Av1EncodeSettings, i: usize, pts: i64) -> Frame {
+    frame_with(
+        i,
+        s.bit_depth,
+        s.subsampling,
+        s.siting,
+        s.color.matrix_coefficients,
+        s.width,
+        s.height,
+        pts,
+    )
+}
+
+/// The planes AV1 carries: G, B, R under the identity matrix.
+fn roles(sub: Subsampling, matrix: u8) -> Vec<PlaneRole> {
+    match (sub, matrix) {
+        (Subsampling::Mono, _) => vec![PlaneRole::Luma],
+        (_, 0) => vec![PlaneRole::Green, PlaneRole::Blue, PlaneRole::Red],
+        _ => vec![PlaneRole::Luma, PlaneRole::Cb, PlaneRole::Cr],
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn frame_with(
+    i: usize,
+    bits: u8,
+    sub: Subsampling,
+    siting: ChromaSiting,
+    matrix: u8,
+    w: u32,
+    h: u32,
+    pts: i64,
+) -> Frame {
     let planes: Vec<OwnedPlane> = dims(sub, w, h)
         .into_iter()
         .enumerate()
@@ -81,12 +118,13 @@ fn frame_sited(
     } else {
         SampleEncoding::new(ChannelType::U16, bits, 0).unwrap()
     };
-    let roles = if matches!(sub, Subsampling::Mono) {
-        vec![PlaneRole::Luma]
-    } else {
-        vec![PlaneRole::Luma, PlaneRole::Cb, PlaneRole::Cr]
-    };
-    let interp = FrameInterpretation::new(FrameGeometry::full(w, h), sub, siting, enc, roles);
+    let interp = FrameInterpretation::new(
+        FrameGeometry::full(w, h),
+        sub,
+        siting,
+        enc,
+        roles(sub, matrix),
+    );
     Frame::new(
         Arc::new(OwnedPlanes::new(planes, enc).unwrap()),
         Arc::new(interp),
@@ -182,12 +220,13 @@ fn lossless_frames_decode_sample_exact() {
     for (bits, sub, w, h) in cases {
         let name = format!("{bits}-bit {sub:?} {w}x{h}");
         let pts: Vec<i64> = vec![0, 40, 80, 125, 160, 200, 240];
+        let s = settings(bits, sub, w, h);
         let frames: Vec<Frame> = pts
             .iter()
             .enumerate()
-            .map(|(i, &t)| frame(i, bits, sub, w, h, t))
+            .map(|(i, &t)| frame_for(&s, i, t))
             .collect();
-        let mut enc = Av1VideoEncoder::new(settings(bits, sub, w, h), TB).unwrap();
+        let mut enc = Av1VideoEncoder::new(s.clone(), TB).unwrap();
         let cfg = enc.output_config().unwrap().clone();
         assert_eq!(
             cfg.private.as_deref().map(|p| p[0]),
@@ -212,11 +251,10 @@ fn lossless_frames_decode_sample_exact() {
             let it = f.interpretation();
             assert_eq!(it.subsampling, sub, "{name}");
             assert_eq!(it.encoding.code_bits(), bits, "{name}");
-            assert_eq!(
-                it.color.bitstream,
-                Some(settings(bits, sub, w, h).color),
-                "{name}"
-            );
+            assert_eq!(it.color.bitstream, Some(s.color), "{name}");
+            // The planes come back as what they were: G, B, R under the
+            // identity matrix.
+            assert_eq!(it.roles, frames[i].interpretation().roles, "{name}");
             assert_eq!(f.timing().pts.unwrap().ticks(), pts[i], "{name}");
             let m = f.map().unwrap();
             for (c, (pw, ph)) in dims(sub, w, h).into_iter().enumerate() {
@@ -314,6 +352,160 @@ fn mismatched_input_is_refused() {
         enc.send(&untimed, &Unstoppable),
         Err(SessionError::Protocol(ProtocolViolation::MissingTimestamp))
     ));
+    let same_time = frame(1, 8, Subsampling::Yuv420, 32, 32, 80);
+    assert!(matches!(
+        enc.send(&same_time, &Unstoppable),
+        Err(SessionError::Codec(Av1SessionError::NonMonotonicTimestamp))
+    ));
+}
+
+/// `ok` with its interpretation edited and new timing.
+fn reinterpreted(ok: &Frame, pts: i64, edit: impl FnOnce(&mut FrameInterpretation)) -> Frame {
+    let mut it = (**ok.interpretation()).clone();
+    edit(&mut it);
+    Frame::new(
+        Arc::clone(ok.picture()),
+        Arc::new(it),
+        FrameTiming::at(Timestamp::new(pts, TB)),
+        Presentation::default(),
+    )
+}
+
+fn refused(enc: &mut Av1VideoEncoder, f: &Frame) -> bool {
+    matches!(
+        enc.send(f, &Unstoppable),
+        Err(SessionError::Codec(Av1SessionError::InputMismatch))
+    )
+}
+
+/// Colour claims, plane roles and the picture itself must agree with the
+/// settings: none of these is converted, so each is refused.
+#[test]
+fn frames_that_would_need_conversion_are_refused() {
+    let s = Av1EncodeSettings::new(32, 32);
+    let mut enc = Av1VideoEncoder::new(s.clone(), TB).unwrap();
+    let ok = frame_for(&s, 0, 0);
+    // A full-range claim against limited-range settings.
+    let full = reinterpreted(&ok, 40, |it| {
+        it.color = ColorClaim::new(None, None, Some(Cicp::new(2, 2, 2, true)));
+    });
+    assert!(refused(&mut enc, &full), "range");
+    // A BT.709 claim against unspecified settings.
+    let bt709 = reinterpreted(&ok, 40, |it| {
+        it.color = ColorClaim::new(None, None, Some(Cicp::new(1, 1, 1, false)));
+    });
+    assert!(refused(&mut enc, &bt709), "primaries and matrix");
+    // Cb and Cr swapped; G, B, R under a YUV matrix; an alpha plane.
+    for roles in [
+        vec![PlaneRole::Luma, PlaneRole::Cr, PlaneRole::Cb],
+        vec![PlaneRole::Green, PlaneRole::Blue, PlaneRole::Red],
+        vec![
+            PlaneRole::Luma,
+            PlaneRole::Cb,
+            PlaneRole::Cr,
+            PlaneRole::Alpha,
+        ],
+    ] {
+        let f = reinterpreted(&ok, 40, |it| it.roles = roles.clone());
+        assert!(refused(&mut enc, &f), "{roles:?}");
+    }
+    // The settings' own claim is accepted, as is an unknown one.
+    let same = reinterpreted(&ok, 40, |it| {
+        it.color = ColorClaim::new(None, None, Some(Cicp::new(2, 2, 2, false)));
+    });
+    assert!(matches!(
+        enc.send(&same, &Unstoppable),
+        Ok(SendStatus::Accepted)
+    ));
+    assert!(matches!(
+        enc.send(&frame_for(&s, 1, 80), &Unstoppable),
+        Ok(SendStatus::Accepted)
+    ));
+    // Pictures that do not hold what the interpretation says: one plane,
+    // short chroma, a different sample encoding.
+    let interp = ok.interpretation();
+    let luma = OwnedPlane {
+        data: PlaneData::U8(vec![128; 32 * 32]),
+        width: 32,
+        height: 32,
+        stride_bytes: 32,
+    };
+    let chroma = |w: usize, h: usize| OwnedPlane {
+        data: PlaneData::U8(vec![128; w * h]),
+        width: w,
+        height: h,
+        stride_bytes: w,
+    };
+    let pictures = [
+        OwnedPlanes::new(vec![luma.clone()], SampleEncoding::U8).unwrap(),
+        OwnedPlanes::new(
+            vec![luma.clone(), chroma(16, 15), chroma(16, 15)],
+            SampleEncoding::U8,
+        )
+        .unwrap(),
+        OwnedPlanes::new(
+            vec![luma.clone(), chroma(17, 16), chroma(17, 16)],
+            SampleEncoding::U8,
+        )
+        .unwrap(),
+    ];
+    for (n, picture) in pictures.into_iter().enumerate() {
+        let f = Frame::new(
+            Arc::new(picture),
+            Arc::clone(interp),
+            FrameTiming::at(Timestamp::new(120 + n as i64, TB)),
+            Presentation::default(),
+        );
+        assert!(refused(&mut enc, &f), "picture {n}");
+    }
+    // A 10-bit interpretation over MSB-aligned words.
+    let s10 = Av1EncodeSettings::new(32, 32).with_bit_depth(10);
+    let mut enc10 = Av1VideoEncoder::new(s10.clone(), TB).unwrap();
+    let ok10 = frame_for(&s10, 0, 0);
+    let msb = SampleEncoding::new(ChannelType::U16, 10, 6).unwrap();
+    let word = |w: usize, h: usize| OwnedPlane {
+        data: PlaneData::U16(vec![512 << 6; w * h]),
+        width: w,
+        height: h,
+        stride_bytes: w * 2,
+    };
+    let shifted = Frame::new(
+        Arc::new(OwnedPlanes::new(vec![word(32, 32), word(16, 16), word(16, 16)], msb).unwrap()),
+        Arc::clone(ok10.interpretation()),
+        FrameTiming::at(Timestamp::new(0, TB)),
+        Presentation::default(),
+    );
+    assert!(refused(&mut enc10, &shifted), "bit shift");
+    assert!(matches!(
+        enc10.send(&ok10, &Unstoppable),
+        Ok(SendStatus::Accepted)
+    ));
+}
+
+/// The tick clock is not a frame rate: the same frames on a millisecond and
+/// a 90 kHz clock give the same bitstream.
+#[test]
+fn the_clock_does_not_change_the_bitstream() {
+    let s = Av1EncodeSettings::new(96, 64)
+        .with_speed(10)
+        .with_threads(1);
+    let khz90 = TimeBase::new(1, 90_000).unwrap();
+    let run = |clock: TimeBase, step: i64| -> Vec<Vec<u8>> {
+        let mut enc = Av1VideoEncoder::new(s.clone(), clock).unwrap();
+        let frames: Vec<Frame> = (0..6)
+            .map(|i| {
+                let f = frame_for(&s, i, 0);
+                let mut t = f.timing();
+                t.pts = Some(Timestamp::new(i as i64 * step, clock));
+                f.represent(t, Presentation::default())
+            })
+            .collect();
+        encode(&mut enc, &frames)
+            .iter()
+            .map(|p| p.bytes().to_vec())
+            .collect()
+    };
+    assert_eq!(run(TB, 40), run(khz90, 3600));
 }
 
 #[test]
@@ -380,11 +572,9 @@ fn the_decoder_meets_its_contract_on_encoded_streams() {
         (10, Subsampling::Yuv444),
         (12, Subsampling::Mono),
     ] {
-        let frames: Vec<Frame> = (0..8)
-            .map(|i| frame(i, bits, sub, 24, 16, i as i64 * 40))
-            .collect();
-        let mut enc =
-            Av1VideoEncoder::new(settings(bits, sub, 24, 16).with_quantizer(80), TB).unwrap();
+        let s = settings(bits, sub, 24, 16).with_quantizer(80);
+        let frames: Vec<Frame> = (0..8).map(|i| frame_for(&s, i, i as i64 * 40)).collect();
+        let mut enc = Av1VideoEncoder::new(s, TB).unwrap();
         let config: CodecConfig = enc.output_config().unwrap().clone();
         let packets = encode(&mut enc, &frames);
         check_video_decoder_contract(|| Av1VideoDecoder::new().unwrap(), &config, &packets)
@@ -536,49 +726,192 @@ fn av1c_config_obus_restore_stripped_sequence_headers() {
     assert!(!got, "a stream without its sequence header must not decode");
 }
 
-/// The `av1C` record agrees with the sequence header on depth, subsampling
-/// and chroma position (ISOBMFF requires it); the decoder reports the same
-/// siting.
-#[test]
-fn av1c_matches_the_signalled_format() {
-    for (bits, sub, siting, csp) in [
-        (8, Subsampling::Yuv420, ChromaSiting::Unknown, 0u8),
-        (8, Subsampling::Yuv420, ChromaSiting::Left, 1),
-        (10, Subsampling::Yuv420, ChromaSiting::TopLeft, 2),
-        (12, Subsampling::Yuv422, ChromaSiting::Unknown, 0),
-        (8, Subsampling::Mono, ChromaSiting::Unknown, 0),
-        (10, Subsampling::Yuv444, ChromaSiting::Unknown, 0),
-    ] {
-        let name = format!("{bits}-bit {sub:?} {siting:?}");
-        let mut s = settings(bits, sub, 16, 16).with_siting(siting);
-        if !matches!(sub, Subsampling::Yuv444) {
-            s = s.with_color(Cicp::new(1, 13, 1, true));
+/// MSB-first bit reader over an OBU payload.
+struct Bits<'a> {
+    b: &'a [u8],
+    pos: usize,
+}
+
+impl Bits<'_> {
+    fn bit(&mut self) -> u8 {
+        let v = (self.b[self.pos / 8] >> (7 - self.pos % 8)) & 1;
+        self.pos += 1;
+        v
+    }
+    fn f(&mut self, n: usize) -> u32 {
+        (0..n).fold(0, |acc, _| acc << 1 | u32::from(self.bit()))
+    }
+}
+
+/// The `av1C`-relevant fields of an AV1 sequence header OBU (spec 5.5),
+/// read independently of the encoder: (profile, level, tier, high_bitdepth,
+/// twelve_bit, monochrome, subsampling_x, subsampling_y,
+/// chroma_sample_position).
+fn sequence_header_fields(obu: &[u8]) -> [u32; 9] {
+    // OBU header and leb128 size.
+    let mut i = 1 + usize::from(obu[0] & 0x4 != 0);
+    while obu[i] & 0x80 != 0 {
+        i += 1;
+    }
+    let mut r = Bits {
+        b: &obu[i + 1..],
+        pos: 0,
+    };
+    let profile = r.f(3);
+    let _still = r.f(1);
+    let reduced = r.f(1);
+    let mut tier = 0;
+    let level = if reduced == 1 {
+        r.f(5)
+    } else {
+        assert_eq!(r.f(1), 0, "timing_info_present is off");
+        let initial_display_delay = r.f(1);
+        let ops = r.f(5) + 1;
+        let mut first_level = 0;
+        for op in 0..ops {
+            let _idc = r.f(12);
+            let lvl = r.f(5);
+            let t = if lvl > 7 { r.f(1) } else { 0 };
+            if initial_display_delay == 1 && r.f(1) == 1 {
+                r.f(4);
+            }
+            if op == 0 {
+                first_level = lvl;
+                tier = t;
+            }
         }
-        let mut enc = Av1VideoEncoder::new(s, TB).unwrap();
+        first_level
+    };
+    let wb = r.f(4) as usize + 1;
+    let hb = r.f(4) as usize + 1;
+    r.f(wb);
+    r.f(hb);
+    if reduced == 0 && r.f(1) == 1 {
+        r.f(7); // frame id lengths
+    }
+    r.f(3); // 128x128, filter intra, intra edge
+    if reduced == 0 {
+        r.f(4); // interintra, masked, warped, dual filter
+        let order_hint = r.f(1);
+        if order_hint == 1 {
+            r.f(2); // jnt comp, ref frame mvs
+        }
+        let force_sct = if r.f(1) == 1 { 2 } else { r.f(1) };
+        if force_sct > 0 && r.f(1) == 0 {
+            r.f(1);
+        }
+        if order_hint == 1 {
+            r.f(3);
+        }
+    }
+    r.f(3); // superres, cdef, restoration
+    let high = r.f(1);
+    let twelve = if profile == 2 && high == 1 { r.f(1) } else { 0 };
+    let mono = if profile == 1 { 0 } else { r.f(1) };
+    let (mut cp, mut tc, mut mc) = (2, 2, 2);
+    if r.f(1) == 1 {
+        cp = r.f(8);
+        tc = r.f(8);
+        mc = r.f(8);
+    }
+    let (sx, sy, mut csp) = if mono == 1 {
+        r.f(1);
+        (1, 1, 0)
+    } else if (cp, tc, mc) == (1, 13, 0) {
+        (0, 0, 0)
+    } else {
+        r.f(1); // colour range
+        match profile {
+            0 => (1, 1, 0),
+            1 => (0, 0, 0),
+            _ if twelve == 1 => {
+                let sx = r.f(1);
+                let sy = if sx == 1 { r.f(1) } else { 0 };
+                (sx, sy, 0)
+            }
+            _ => (1, 0, 0),
+        }
+    };
+    if mono == 0 && sx == 1 && sy == 1 {
+        csp = r.f(2);
+    }
+    [profile, level, tier, high, twelve, mono, sx, sy, csp]
+}
+
+/// The `av1C` record agrees with the in-band sequence header on every field
+/// ISOBMFF requires (profile, level, tier, depth, monochrome, subsampling,
+/// chroma position), the header signals what the settings ask for, and the
+/// decoder reports the same siting.
+#[test]
+fn av1c_matches_the_sequence_header() {
+    const SEQUENCE_HEADER: u8 = 1;
+    for (bits, sub, siting, matrix) in [
+        (8, Subsampling::Yuv420, ChromaSiting::Unknown, 1),
+        (8, Subsampling::Yuv420, ChromaSiting::Left, 1),
+        (10, Subsampling::Yuv420, ChromaSiting::TopLeft, 1),
+        (12, Subsampling::Yuv422, ChromaSiting::Unknown, 1),
+        (12, Subsampling::Yuv420, ChromaSiting::Left, 1),
+        (8, Subsampling::Mono, ChromaSiting::Unknown, 1),
+        (10, Subsampling::Yuv444, ChromaSiting::Unknown, 0),
+        (8, Subsampling::Yuv444, ChromaSiting::Unknown, 1),
+    ] {
+        let name = format!("{bits}-bit {sub:?} {siting:?} mc={matrix}");
+        let s = settings(bits, sub, 16, 16)
+            .with_siting(siting)
+            .with_color(Cicp::new(1, 13, matrix, true));
+        let mut enc = Av1VideoEncoder::new(s.clone(), TB).unwrap();
         let record = enc.output_config().unwrap().clone();
         let b = record.private.as_deref().unwrap().to_vec();
-        assert_eq!(b[0], 0x81, "{name}");
-        let flags = b[2];
-        assert_eq!(flags >> 6 & 1 == 1, bits > 8, "{name}: high_bitdepth");
-        assert_eq!(flags >> 5 & 1 == 1, bits == 12, "{name}: twelve_bit");
-        assert_eq!(
-            flags >> 4 & 1 == 1,
-            matches!(sub, Subsampling::Mono),
-            "{name}: monochrome"
-        );
+        assert_eq!(b.len(), 4, "{name}: no configOBUs");
+        assert_eq!(b[0], 0x81, "{name}: marker and version");
+        let av1c = [
+            u32::from(b[1] >> 5),
+            u32::from(b[1] & 0x1F),
+            u32::from(b[2] >> 7),
+            u32::from(b[2] >> 6 & 1),
+            u32::from(b[2] >> 5 & 1),
+            u32::from(b[2] >> 4 & 1),
+            u32::from(b[2] >> 3 & 1),
+            u32::from(b[2] >> 2 & 1),
+            u32::from(b[2] & 3),
+        ];
+        let packets = encode(&mut enc, &[frame_for(&s, 0, 0)]);
+        let seq = obus(packets[0].bytes())
+            .into_iter()
+            .find(|(kind, _)| *kind == SEQUENCE_HEADER)
+            .map(|(_, bytes)| bytes)
+            .expect("a key frame carries the sequence header");
+        let header = sequence_header_fields(&seq);
+        assert_eq!(av1c, header, "{name}: av1C vs sequence header");
         let (sx, sy) = match sub {
-            Subsampling::Yuv444 => (false, false),
-            Subsampling::Yuv422 => (true, false),
-            _ => (true, true),
+            Subsampling::Yuv444 => (0, 0),
+            Subsampling::Yuv422 => (1, 0),
+            _ => (1, 1),
         };
+        let csp = match (sub, siting) {
+            (Subsampling::Yuv420, ChromaSiting::Left) => 1,
+            (Subsampling::Yuv420, ChromaSiting::TopLeft) => 2,
+            _ => 0,
+        };
+        let want_profile = match (sub, bits) {
+            (_, 12) => 2,
+            (Subsampling::Yuv422, _) => 2,
+            (Subsampling::Yuv444, _) => 1,
+            _ => 0,
+        };
+        assert_eq!(header[0], want_profile, "{name}: profile");
         assert_eq!(
-            (flags >> 3 & 1 == 1, flags >> 2 & 1 == 1),
-            (sx, sy),
-            "{name}: subsampling"
+            header[3..],
+            [
+                u32::from(bits > 8),
+                u32::from(bits == 12),
+                u32::from(matches!(sub, Subsampling::Mono)),
+                sx,
+                sy,
+                csp
+            ],
+            "{name}: signalled format"
         );
-        assert_eq!(flags & 0b11, csp, "{name}: chroma_sample_position");
-        let input = frame_sited(0, bits, sub, siting, 16, 16, 0);
-        let packets = encode(&mut enc, &[input]);
         let mut dec = Av1VideoDecoder::new().unwrap();
         let out = decode_with(&mut dec, &record, &packets);
         assert_eq!(

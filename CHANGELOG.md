@@ -9,14 +9,24 @@
   fields.
 - New `media-encode` feature: `media::Av1VideoEncoder` and
   `Av1EncodeSettings`, zenrav1e behind `VideoEncoder` (8/10/12-bit; mono,
-  4:2:0, 4:2:2, 4:4:4). Packets carry the frame's pts and duration and are
-  random-access points at key frames. `send` answers `ReceivePending` only
-  when a packet is ready. The `av1C` record has no configOBUs, and its
+  4:2:0, 4:2:2, 4:4:4). Frames that would need a conversion are refused
+  (`InputMismatch`): a known colour claim other than the signalled one,
+  plane roles other than Y/Cb/Cr (G/B/R under the identity matrix), and
+  pictures whose planes, sizes or sample encoding differ from the
+  interpretation. Timestamps must increase strictly. Packets carry the
+  frame's pts and duration and are random-access points at key frames.
+  `send` answers `ReceivePending` only when a packet is ready. zenrav1e's
+  frame rate is a nominal `frame_rate` setting (default 30), never the tick
+  clock, which it would read as frames per second. The `av1C` record has no configOBUs, and its
   format byte is rebuilt from the settings: zenrav1e's record writes
   chroma_sample_position 0 and subsampling_y 0 for monochrome.
-- Tests: `tests/media_session.rs` covers lossless round trips (six
-  depth/subsampling/odd-size cases), the testkit encoder and decoder
-  contracts, reset, av1C injection and the av1C fields. `tests/media_corpus.rs`
+- The decoder inserts `av1C` configOBUs after a packet's leading temporal
+  delimiter, so a temporal unit still starts with it.
+- Tests: `tests/media_session.rs` (12) covers lossless round trips (six
+  depth/subsampling/odd-size cases, roles included), the testkit encoder and
+  decoder contracts, reset, av1C injection, the av1C record against an
+  independently parsed sequence header, refusal of frames that would need
+  conversion, and a clock-independent bitstream. `tests/media_corpus.rs`
   runs the 48-file lossless corpus (`just media-corpus`, not committed; see
   `docs/av1-media-corpus.pointer.md`). `scripts/media-ffmpeg-oracle.sh` runs
   36 checks: libdav1d decodes the encoder's lossless output to the source,
