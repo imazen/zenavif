@@ -93,6 +93,20 @@ impl BackendSupportReport {
     }
 }
 
+/// The backend a capability fallback picks when the preferred one refuses:
+/// the first of these that supports the request. Measured on 2026-10-15
+/// (`benchmarks/backend_probe_2026-10-15.md`): zenav1-svt and zenav1-aom
+/// are within about 1% of each other on bytes at equal PSNR, svt faster at
+/// 8-bit; zenravif needs 14-18% more bytes at 8/10/12-bit and about ten
+/// times the time at the probed speeds. zenav1-svt codes no 12-bit, so a
+/// 12-bit request falls to zenav1-aom. The report order of
+/// [`query_still_backends`] is unchanged.
+const FALLBACK_ORDER: [Av1Backend; 3] = [
+    Av1Backend::Zenav1Svt,
+    Av1Backend::Zenav1Aom,
+    Av1Backend::Zenravif,
+];
+
 /// Query all three backends without changing the requested pixel format,
 /// precision, range, alpha or coding settings. An unavailable Cargo feature
 /// produces a refusal instead of disappearing from the report.
@@ -679,7 +693,10 @@ impl EncoderConfig {
         } else if strict {
             None
         } else {
-            reports.iter().find(|r| r.supported()).map(|r| r.backend)
+            FALLBACK_ORDER
+                .iter()
+                .copied()
+                .find(|b| reports.iter().any(|r| r.backend == *b && r.supported()))
         };
         let Some(chosen) = chosen else {
             return Err(RouteError(format!(
