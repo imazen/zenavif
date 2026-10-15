@@ -62,7 +62,21 @@ pub(super) fn wants_gray_output(preferred: &[PixelDescriptor]) -> bool {
 /// Do not "simplify" this back to a native-preserving target without
 /// re-measuring both; the tie-rounding difference is invisible in a spot check
 /// (a flat row compares equal) and only shows up over a whole image.
-fn target_descriptor(pref: PixelDescriptor) -> PixelDescriptor {
+///
+/// **Layout-only changes keep the source's colour description.** Adding or
+/// dropping alpha at the same depth converts no sample values, so neither
+/// point above applies; labelling the result with the preference's transfer
+/// instead would relabel the pixels. A source whose transfer is unknown (an
+/// ICC profile that cannot be parsed) then reached zenpixels-convert as an
+/// `Unknown -> sRGB` request, which it rightly refuses (`NeedsCms`), and the
+/// add-alpha preference was declined.
+fn target_descriptor(native: PixelDescriptor, pref: PixelDescriptor) -> PixelDescriptor {
+    if pref.channel_type() == native.channel_type() {
+        return pref
+            .with_transfer(native.transfer())
+            .with_primaries(native.primaries)
+            .with_signal_range(native.signal_range);
+    }
     pref
 }
 
@@ -153,7 +167,7 @@ pub(super) fn negotiate_strip_descriptor(
     preferred
         .iter()
         .filter(|pref| reduction_is_offered(native, **pref))
-        .map(|pref| target_descriptor(*pref))
+        .map(|pref| target_descriptor(native, *pref))
         .find(|target| {
             // Probe the plan on one pixel. Cheap, and it means the descriptor
             // we announce is always one we can actually deliver.
@@ -249,7 +263,7 @@ pub(super) fn negotiate_format(
         if !reduction_is_offered(native, *pref) {
             continue;
         }
-        match try_reduce(&pixels, target_descriptor(*pref)) {
+        match try_reduce(&pixels, target_descriptor(native, *pref)) {
             Some(converted) => return converted,
             // No conversion plan for this pair: decline and let the next
             // preference have its shot (zenavif#39 — never unwind).

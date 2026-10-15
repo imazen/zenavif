@@ -397,15 +397,9 @@ impl AvifDecodeJob {
         } else {
             PixelDescriptor::RGB8_SRGB
         };
-        // Override TF and primaries from CICP if available.
-        if let Some(tf) =
-            zenpixels::TransferFunction::from_cicp(native_info.transfer_characteristics.0)
-        {
-            desc = desc.with_transfer(tf);
-        }
-        if let Some(p) = zenpixels::ColorPrimaries::from_cicp(native_info.color_primaries.0) {
-            desc = desc.with_primaries(p);
-        }
+        // Transfer and primaries from CICP, by the rule the decode itself
+        // applies, so the prediction matches the buffers.
+        desc = crate::convert::descriptor_with_cicp(desc, &native_info);
         // Report the post-orientation output dims + what the decoder bakes:
         // `Correct` bakes the intrinsic orientation (output = display dims,
         // `orientation_applied` = intrinsic); `Preserve` bakes nothing
@@ -610,15 +604,7 @@ impl AvifDecodeJob {
 
             // Apply CICP metadata to descriptor. No format negotiation for
             // the grid path — tiles produce native format and we stitch raw bytes.
-            let mut strip_descriptor = base_desc;
-            if let Some(tf) =
-                zenpixels::TransferFunction::from_cicp(native_info.transfer_characteristics.0)
-            {
-                strip_descriptor = strip_descriptor.with_transfer(tf);
-            }
-            if let Some(p) = zenpixels::ColorPrimaries::from_cicp(native_info.color_primaries.0) {
-                strip_descriptor = strip_descriptor.with_primaries(p);
-            }
+            let strip_descriptor = crate::convert::descriptor_with_cicp(base_desc, &native_info);
 
             return Ok(AvifStreamingDecoder {
                 info,
