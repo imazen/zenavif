@@ -172,7 +172,10 @@ fn codec_duration_limit_accepts_exact_boundary() {
         .animation_frame_decoder(Cow::Borrowed(&data), &[])
         .unwrap();
     let frame = decoder.render_next_frame(None).unwrap().unwrap();
-    assert_eq!(frame.duration_ms(), 1000);
+    assert_eq!(
+        frame.duration(),
+        zencodec::animation::FrameDuration::from_millis(1000)
+    );
     assert!(decoder.render_next_frame(None).unwrap().is_none());
 }
 

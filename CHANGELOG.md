@@ -1,5 +1,23 @@
 # Changelog
 
+## Main CI repair (unreleased)
+
+- Unspecified CICP primaries (H.273 code 2) label the descriptor `Unknown`
+  instead of a `Bt709` default, on the buffered, strip and `output_info`
+  paths alike (`output_info` also predicted sRGB transfer where the decode
+  reports `Unknown`). The colour context keeps the raw code; zenpixels-convert
+  refuses a descriptor that disagrees with it, so every RGBA or alpha
+  expansion of such a stream failed (`mono_rgb_preference_keeps_classic_expansion`).
+  zenpixels moves to `9fa4fcb4` (zenpixels PR 85 on `0d74f5eb`), where an
+  unspecified context agrees with an `Unknown` descriptor.
+- Negotiation keeps the source's colour description for same-depth layout
+  changes (adding or dropping alpha); only depth changes take the preference's
+  transfer, the measured rule for 16-to-8 narrows. A source with an
+  unparseable ICC profile can be expanded to RGBA again.
+- CI: Clippy downloads the test vectors its `--tests` build includes; the fuzz
+  crate mirrors the root zencodec (`4fda4391`), rav1d-safe and zenpixels pins
+  (it had split into two zencodec copies); `duration_ms` replaced by `duration`.
+
 ## Coordinated animation and precision contracts (unreleased)
 
 - Adopt ordinary timing quantization with returned rational durations and

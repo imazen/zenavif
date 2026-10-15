@@ -27,8 +27,8 @@ features = ["inventory"]
 
 [patch.crates-io]
 ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "e2148a30755ab690317939cca193574e1bcfbbc0" }
-zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "0d74f5eb91d985b877d92210020bb96f233fcc0b" }
-zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "0d74f5eb91d985b877d92210020bb96f233fcc0b" }
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "9fa4fcb489a0d8986c28e50f9bfa2413a0492e16" }
+zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "9fa4fcb489a0d8986c28e50f9bfa2413a0492e16" }
 # fuzz/ is its own workspace root, so the root [patch] does not reach it.
 # zenavif-parse needs no mirror: zenavif's dep on it is a path dep into the
 # workspace (zenavif-parse/), which resolves transitively from here.
@@ -37,9 +37,10 @@ zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "0d74f5
 # manifest's `rev` — the reasoning for the current one lives there. Drop at
 # the rav1d-safe 0.6.0 release.
 rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "dfd01e3268f6e8da862d2d5f0a71d19f414f2b87" }
-# TEMPORARY: the structural-inventory API branch (imazen/zencodec#133);
-# swap for the released zencodec before merge.
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "a81daf7605dc63074d4a39757e7b4399057d4a8f" }
+# Mirror of the root zencodec pin: ultrahdr-core reaches zencodec through
+# zenmeta at this exact rev, so any other rev splits the graph into two
+# zencodec copies (gain_map.rs then fails to typecheck).
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "4fda439133d465246174b55f62426dc54ef204dd" }
 
 [[bin]]
 name = "fuzz_decode"

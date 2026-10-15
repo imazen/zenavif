@@ -329,6 +329,20 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      # Some tests include_bytes! download-only vectors, so `--tests` needs
+      # them to compile (same cache as the test jobs).
+      - name: Cache test vectors
+        id: vectors-cache
+        uses: actions/cache@v5
+        with:
+          path: tests/vectors
+          key: avif-test-vectors-${{ hashFiles('scripts/download-avif-test-vectors.sh', 'scripts/download-linku-samples.sh') }}
+      - name: Download test vectors
+        if: steps.vectors-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          bash scripts/download-avif-test-vectors.sh
+          bash scripts/download-linku-samples.sh
       - name: Clippy (default)
         run: cargo clippy --lib --tests --examples -- -D warnings
       - name: Clippy (members)
