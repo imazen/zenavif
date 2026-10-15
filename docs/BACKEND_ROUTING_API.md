@@ -2,7 +2,11 @@
 
 The execution router selects and runs a supported backend. It currently has
 **no calibrated RD/time ranking**: automatic selection keeps an eligible
-preferred backend, otherwise uses a deterministic capability fallback. Explicit
+preferred backend, otherwise uses a deterministic capability fallback: the
+first of zenav1-svt, zenav1-aom, zenravif that supports the request. That
+order comes from an exploratory probe, `benchmarks/backend_probe_2026-10-15.md`.
+zenav1-svt and zenav1-aom tie on bytes, and zenravif needs 14–18% more. A
+12-bit request therefore falls from zenav1-svt to zenav1-aom. Explicit
 selection and `SvtParity` never fall back after a refusal or encoder error.
 
 ## Inputs and settings
