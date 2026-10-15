@@ -761,8 +761,8 @@ zenanalyze = { git = "https://github.com/imazen/zenanalyze", rev = "6bbcacb11313
 zenpng = { git = "https://github.com/imazen/zenpng", rev = "8c9b9a87460116d45d1e58afd8058002b083c4a6" }
 ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "10a79c3a888dd589884fd032846eec70bc31eb13" }
 # Coordinated exact animation timing; unify shared types with the native media stack.
-zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "9fa4fcb489a0d8986c28e50f9bfa2413a0492e16" }
-zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "9fa4fcb489a0d8986c28e50f9bfa2413a0492e16" }
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "1d3ddd2131b22e9e3754c765d4ce45ce3901de59" }
+zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "1d3ddd2131b22e9e3754c765d4ce45ce3901de59" }
 # The zenanalyze-api additions this crate's graph needs (FeatureProvider,
 # Select::Names) are on `main` but not yet on crates.io. ONE patch, here at the
 # workspace root, rewrites every registry edge — including the ones inside

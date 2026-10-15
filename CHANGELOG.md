@@ -126,6 +126,10 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+### Changed
+
+- zenpixels/zenpixels-convert pinned to main 1d3ddd21 (from the 0.2 bridge's 9fa4fcb): zenpixels main is the converged 0.2.17 line again and carries 9fa4fcb's unresolved-CICP fix plus the ICC-database fixes (#86-#88).
+
 ### Fixed
 
 - **Stills are written upright with orientation 1.** A metadata orientation used to become `irot`/`imir`; several readers ignore `irot`, and `imir`'s axis reads opposite ways in the 2017 and 2022 HEIF editions (imazen/zencodec#132). The still encoder now applies the orientation to the pixels, writes no `irot`/`imir`, and rewrites the EXIF Orientation tag and XMP `tiff:Orientation` to 1. The animation encoder still maps orientation to `irot`/`imir`. Test: `tests/orientation_bake.rs` (all 8 orientations).
