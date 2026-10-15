@@ -1,0 +1,27 @@
+[package]
+name = "zenmp4"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "AGPL-3.0-only OR LicenseRef-Imazen-Commercial"
+description = "Sans-I/O MP4 (ISOBMFF) demuxer and muxer implementing the zencodec-media container contracts"
+categories = ["multimedia::video", "parser-implementations"]
+keywords = ["mp4", "isobmff", "av1", "container", "sans-io"]
+repository = "https://github.com/imazen/zenavif"
+include = ["/src/**", "/README.md", "/LICENSE*"]
+# zencodec-media is unpublished.
+publish = false
+
+[dependencies]
+zencodec = { version = ">=0.1.26, <0.3.0", default-features = false }
+zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
+zenpixels = { version = ">=0.2.16, <0.4.0", default-features = false }
+enough = { version = "0.4.4", default-features = false }
+
+[dev-dependencies]
+zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
+zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"

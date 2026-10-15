@@ -18,7 +18,7 @@ include = ["/src/**", "/README.crates.md", "/CHANGELOG.md", "/LICENSE*", "/tests
 # root `exclude` does not reach a package nested inside a member directory);
 # the exclude entries below are documentation + glob-safety only.
 [workspace]
-members = ["zenavif-parse", "zenavif-serialize"]
+members = ["zenavif-parse", "zenavif-serialize", "zenmp4"]
 exclude = ["fuzz", "zenavif-parse/fuzz"]
 resolver = "3"
 

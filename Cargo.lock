@@ -2751,6 +2751,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "zenmp4"
+version = "0.1.0"
+dependencies = [
+ "enough",
+ "zencodec",
+ "zencodec-io",
+ "zencodec-media",
+ "zencodec-media-testkit",
+ "zenpixels",
+]
+
+[[package]]
 name = "zenpixels"
 version = "0.2.17"
 source = "git+https://github.com/imazen/zenpixels?rev=9fa4fcb489a0d8986c28e50f9bfa2413a0492e16#9fa4fcb489a0d8986c28e50f9bfa2413a0492e16"

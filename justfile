@@ -64,6 +64,10 @@ test-media:
 media-corpus dir="/mnt/v/input/zenavif/av1-media-corpus-2026-10-15":
     ZENAVIF_AV1_MEDIA_CORPUS={{dir}} cargo test --features _media-corpus --test media_corpus
 
+# zenmp4's demuxer against ffprobe on FFmpeg-written MP4s.
+mp4-ffmpeg-oracle:
+    zenmp4/scripts/ffmpeg-oracle.sh
+
 # Differential check of the media sessions against FFmpeg (libdav1d, libaom).
 media-ffmpeg-oracle:
     scripts/media-ffmpeg-oracle.sh

@@ -360,6 +360,7 @@ jobs:
         run: |
           cargo clippy -p zenavif-parse --all-features --all-targets -- -D warnings
           cargo clippy -p zenavif-serialize --all-targets -- -D warnings
+          cargo clippy -p zenmp4 --all-targets -- -D warnings
 
   fmt:
     name: Format
