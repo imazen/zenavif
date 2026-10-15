@@ -6,6 +6,8 @@
 #     format; libdav1d must decode the IVF to the source samples exactly
 #     (lossless, quantizer 0) and to exactly what Av1VideoDecoder decodes
 #     (lossy, quantizer 120, default speed: reordered hidden frames).
+#     zenav1-svt (all-intra) output must decode identically in libdav1d,
+#     libaom and Av1VideoDecoder.
 #  2. libaom encodes the same sources with alt-ref reordering; Av1VideoDecoder
 #     must decode every frame bit-exactly as libdav1d does, with the same
 #     frame count and presentation timestamps as ffprobe reports.
@@ -17,7 +19,7 @@ work=${1:-$here/target/media-ffmpeg-oracle}
 mkdir -p "$work"
 cd "$work"
 ff() { ffmpeg -v error -y "$@"; }
-(cd "$here" && cargo build -q --release --features media-encode --example media_ivf)
+(cd "$here" && cargo build -q --release --features media-encode,zenav1-svt --example media_ivf)
 tool=$(cd "$here" && cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')/release/examples/media_ivf
 fail=0
 check() { # name, a, b
@@ -40,6 +42,16 @@ for spec in gray:64x48 yuv420p:33x17 yuv422p:40x30 yuv444p:24x18 \
   dav1d "$fmt.q120.ivf" "$fmt" "$fmt.q120.dav1d.yuv"
   "$tool" decode "$fmt.q120.ivf" "$fmt.q120.zen.yuv" > "$fmt.q120.zen.pts"
   check "$fmt zenrav1e lossy: rav1d-safe = dav1d" "$fmt.q120.dav1d.yuv" "$fmt.q120.zen.yuv"
+  case $fmt in
+    gray|yuv420p|yuv444p|yuv420p10le|gray10le)
+      "$tool" encode "$src" "$fmt" "$w" "$h" "$fmt.svt.ivf" 100 10 svt
+      dav1d "$fmt.svt.ivf" "$fmt" "$fmt.svt.dav1d.yuv"
+      ff -c:v libaom-av1 -i "$fmt.svt.ivf" -f rawvideo -pix_fmt "$fmt" "$fmt.svt.aom.yuv"
+      "$tool" decode "$fmt.svt.ivf" "$fmt.svt.zen.yuv" > /dev/null
+      check "$fmt zenav1-svt: libaom = dav1d" "$fmt.svt.dav1d.yuv" "$fmt.svt.aom.yuv"
+      check "$fmt zenav1-svt: rav1d-safe = dav1d" "$fmt.svt.dav1d.yuv" "$fmt.svt.zen.yuv"
+      ;;
+  esac
   # 2. libaom -> our decoder.
   case $fmt in
     gray*) ;; # libaom takes no gray input

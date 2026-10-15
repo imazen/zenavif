@@ -2,9 +2,12 @@
 //! checks against FFmpeg (`scripts/media-ffmpeg-oracle.sh`).
 //!
 //! ```text
-//! media_ivf encode <in.yuv> <pix_fmt> <width> <height> <out.ivf> [quantizer] [speed]
+//! media_ivf encode <in.yuv> <pix_fmt> <width> <height> <out.ivf> [quantizer] [speed] [svt]
 //! media_ivf decode <in.ivf> <out.yuv>
 //! ```
+//!
+//! A trailing `svt` encodes with zenav1-svt (all-intra; needs the
+//! `zenav1-svt` feature) instead of zenrav1e.
 //!
 //! `pix_fmt` uses FFmpeg's names: `gray`, `yuv420p`, `yuv422p`, `yuv444p`,
 //! each optionally with a `10le` or `12le` suffix. Frames are timestamped
@@ -76,13 +79,14 @@ fn ivf_header(out: &mut Vec<u8>, w: u16, h: u16, tb: TimeBase, frames: u32) {
 fn encode(args: &[String]) -> Res<()> {
     let [input, fmt, w, h, output, rest @ ..] = args else {
         return Err(
-            "encode <in.yuv> <pix_fmt> <width> <height> <out.ivf> [quantizer] [speed]".into(),
+            "encode <in.yuv> <pix_fmt> <width> <height> <out.ivf> [quantizer] [speed] [svt]".into(),
         );
     };
     let (sub, bits) = pix_fmt(fmt)?;
     let (w, h): (u32, u32) = (w.parse()?, h.parse()?);
     let quantizer: u8 = rest.first().map_or(Ok(100), |q| q.parse())?;
     let speed: u8 = rest.get(1).map_or(Ok(6), |s| s.parse())?;
+    let svt = rest.get(2).is_some_and(|b| b == "svt");
     let raw = std::fs::read(input)?;
     let dims = plane_dims(sub, w as usize, h as usize);
     let bps = if bits == 8 { 1 } else { 2 };
@@ -108,14 +112,17 @@ fn encode(args: &[String]) -> Res<()> {
         encoding,
         roles,
     ));
-    let mut enc = Av1VideoEncoder::new(
-        Av1EncodeSettings::new(w, h)
-            .with_bit_depth(bits)
-            .with_subsampling(sub)
-            .with_quantizer(quantizer)
-            .with_speed(speed),
-        tb,
-    )?;
+    let mut settings = Av1EncodeSettings::new(w, h)
+        .with_bit_depth(bits)
+        .with_subsampling(sub)
+        .with_quantizer(quantizer)
+        .with_speed(speed);
+    if svt {
+        settings = settings
+            .with_backend(zenavif::media::Av1VideoBackend::Zenav1Svt)
+            .with_key_frame_interval(1);
+    }
+    let mut enc = Av1VideoEncoder::new(settings, tb)?;
     let mut packets: Vec<Packet> = Vec::new();
     for (i, chunk) in raw.chunks_exact(frame_bytes).enumerate() {
         let mut at = 0;

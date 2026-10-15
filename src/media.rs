@@ -536,7 +536,7 @@ mod tests {
 }
 
 #[cfg(feature = "media-encode")]
-pub use encode::{Av1EncodeSettings, Av1VideoEncoder};
+pub use encode::{Av1EncodeSettings, Av1VideoBackend, Av1VideoEncoder};
 
 #[cfg(feature = "media-encode")]
 mod encode {
@@ -574,9 +574,13 @@ mod encode {
         pub siting: ChromaSiting,
         /// Colour signalled in the sequence header (range flag included).
         pub color: Cicp,
-        /// zenrav1e speed preset, 0 (slowest) to 10.
+        /// The encoder behind the session.
+        pub backend: Av1VideoBackend,
+        /// The backend's own speed preset, slowest first: zenrav1e 0 to 10,
+        /// zenav1-svt 0 to 13 (clamped).
         pub speed: u8,
-        /// Base quantizer, 0 (lossless) to 255.
+        /// Base quantizer index, 0 (lossless) to 255. zenav1-svt takes
+        /// `quantizer / 4` on its 0 to 63 QP scale.
         pub quantizer: u8,
         /// Longest distance between key frames.
         pub key_frame_interval: u64,
@@ -605,6 +609,7 @@ mod encode {
                 subsampling: Subsampling::Yuv420,
                 siting: ChromaSiting::Unknown,
                 color: Cicp::new(2, 2, 2, false),
+                backend: Av1VideoBackend::Zenrav1e,
                 speed: 6,
                 quantizer: 100,
                 key_frame_interval: 240,
@@ -635,6 +640,12 @@ mod encode {
         /// The signalled colour.
         pub fn with_color(mut self, color: Cicp) -> Self {
             self.color = color;
+            self
+        }
+
+        /// The encoder behind the session.
+        pub fn with_backend(mut self, backend: Av1VideoBackend) -> Self {
+            self.backend = backend;
             self
         }
 
@@ -676,6 +687,24 @@ mod encode {
         }
     }
 
+    /// Which AV1 encoder an [`Av1VideoEncoder`] runs.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+    #[non_exhaustive]
+    pub enum Av1VideoBackend {
+        /// zenrav1e: every depth and subsampling, lookahead with hidden
+        /// frames.
+        #[default]
+        Zenrav1e,
+        /// zenav1-svt (needs the `zenav1-svt` feature): one packet per
+        /// frame, no lookahead, every frame a key frame
+        /// (`key_frame_interval` must be 1). Its low-delay inter frames can
+        /// be corrupt (libaom and rav1d reject them; imazen/zenav1-svt
+        /// issue 26), so the session does not offer them yet. 8-bit mono,
+        /// 4:2:0 and 4:4:4, 10-bit mono and 4:2:0; 4:2:2 is not ported and
+        /// 12-bit is refused, as by SVT-AV1.
+        Zenav1Svt,
+    }
+
     fn cfg_err(m: &str) -> Av1SessionError {
         Av1SessionError::Configuration(m.into())
     }
@@ -683,6 +712,8 @@ mod encode {
     enum Backend {
         U8(Box<Context<u8>>),
         U16(Box<Context<u16>>),
+        #[cfg(feature = "zenav1-svt")]
+        Svt(Box<svt::SvtSession>),
     }
 
     /// zenrav1e's AV1 encoder as a [`VideoEncoder`] session.
@@ -772,62 +803,76 @@ mod encode {
             if c.matrix_coefficients == 0 && !matches!(s.subsampling, Subsampling::Yuv444) {
                 return Err(cfg_err("the identity matrix requires 4:4:4"));
             }
-            let color_description = match (
-                c.color_primaries,
-                c.transfer_characteristics,
-                c.matrix_coefficients,
-            ) {
-                (2, 2, 2) => None,
-                (p, t, m) => Some(zenrav1e::color::ColorDescription {
-                    color_primaries: zenrav1e::color::ColorPrimaries::from_u8(p)
-                        .ok_or_else(|| cfg_err("colour primaries code unknown to zenrav1e"))?,
-                    transfer_characteristics: zenrav1e::color::TransferCharacteristics::from_u8(t)
-                        .ok_or_else(|| cfg_err("transfer code unknown to zenrav1e"))?,
-                    matrix_coefficients: zenrav1e::color::MatrixCoefficients::from_u8(m)
-                        .ok_or_else(|| cfg_err("matrix code unknown to zenrav1e"))?,
-                }),
-            };
-            let mut enc = EncoderConfig::with_speed_preset(s.speed.min(10));
-            enc.width = s.width as usize;
-            enc.height = s.height as usize;
-            enc.bit_depth = usize::from(s.bit_depth);
-            enc.chroma_sampling = chroma_sampling;
-            enc.chroma_sample_position = chroma_sample_position;
-            enc.pixel_range = if c.full_range {
-                zenrav1e::color::PixelRange::Full
-            } else {
-                zenrav1e::color::PixelRange::Limited
-            };
-            enc.color_description = color_description;
-            enc.quantizer = usize::from(s.quantizer);
-            enc.min_quantizer = 0;
-            enc.max_key_frame_interval = s.key_frame_interval.max(1);
-            enc.min_key_frame_interval = enc.min_key_frame_interval.min(enc.max_key_frame_interval);
-            // Timestamps come from the frames; nothing in the bitstream
-            // claims an equal-picture rate. zenrav1e's time base is seconds
-            // per frame: the nominal rate, never the tick clock (a 1/90000
-            // clock read as 90000 fps forces a tile per superblock row).
-            enc.enable_timing_info = false;
-            enc.still_picture = false;
-            enc.time_base = zenrav1e::prelude::Rational::new(
-                u64::from(s.frame_rate.1),
-                u64::from(s.frame_rate.0),
-            );
-            let config = zenrav1e::Config::new()
-                .with_encoder_config(enc)
-                .with_threads(s.threads);
-            let backend = if s.bit_depth == 8 {
-                Backend::U8(Box::new(
-                    config.new_context().map_err(|e| cfg_err(&e.to_string()))?,
-                ))
-            } else {
-                Backend::U16(Box::new(
-                    config.new_context().map_err(|e| cfg_err(&e.to_string()))?,
-                ))
-            };
-            let mut av1c = match &backend {
-                Backend::U8(c) => c.container_sequence_header(),
-                Backend::U16(c) => c.container_sequence_header(),
+            let (backend, mut av1c) = match s.backend {
+                Av1VideoBackend::Zenrav1e => {
+                    let color_description = match (
+                        c.color_primaries,
+                        c.transfer_characteristics,
+                        c.matrix_coefficients,
+                    ) {
+                        (2, 2, 2) => None,
+                        (p, t, m) => Some(zenrav1e::color::ColorDescription {
+                            color_primaries: zenrav1e::color::ColorPrimaries::from_u8(p)
+                                .ok_or_else(|| {
+                                    cfg_err("colour primaries code unknown to zenrav1e")
+                                })?,
+                            transfer_characteristics:
+                                zenrav1e::color::TransferCharacteristics::from_u8(t)
+                                    .ok_or_else(|| cfg_err("transfer code unknown to zenrav1e"))?,
+                            matrix_coefficients: zenrav1e::color::MatrixCoefficients::from_u8(m)
+                                .ok_or_else(|| cfg_err("matrix code unknown to zenrav1e"))?,
+                        }),
+                    };
+                    let mut enc = EncoderConfig::with_speed_preset(s.speed.min(10));
+                    enc.width = s.width as usize;
+                    enc.height = s.height as usize;
+                    enc.bit_depth = usize::from(s.bit_depth);
+                    enc.chroma_sampling = chroma_sampling;
+                    enc.chroma_sample_position = chroma_sample_position;
+                    enc.pixel_range = if c.full_range {
+                        zenrav1e::color::PixelRange::Full
+                    } else {
+                        zenrav1e::color::PixelRange::Limited
+                    };
+                    enc.color_description = color_description;
+                    enc.quantizer = usize::from(s.quantizer);
+                    enc.min_quantizer = 0;
+                    enc.max_key_frame_interval = s.key_frame_interval.max(1);
+                    enc.min_key_frame_interval =
+                        enc.min_key_frame_interval.min(enc.max_key_frame_interval);
+                    // Timestamps come from the frames; nothing in the bitstream
+                    // claims an equal-picture rate. zenrav1e's time base is seconds
+                    // per frame: the nominal rate, never the tick clock (a 1/90000
+                    // clock read as 90000 fps forces a tile per superblock row).
+                    enc.enable_timing_info = false;
+                    enc.still_picture = false;
+                    enc.time_base = zenrav1e::prelude::Rational::new(
+                        u64::from(s.frame_rate.1),
+                        u64::from(s.frame_rate.0),
+                    );
+                    let config = zenrav1e::Config::new()
+                        .with_encoder_config(enc)
+                        .with_threads(s.threads);
+                    let context_err = |e: zenrav1e::InvalidConfig| cfg_err(&e.to_string());
+                    if s.bit_depth == 8 {
+                        let context: Context<u8> = config.new_context().map_err(context_err)?;
+                        let av1c = context.container_sequence_header();
+                        (Backend::U8(Box::new(context)), av1c)
+                    } else {
+                        let context: Context<u16> = config.new_context().map_err(context_err)?;
+                        let av1c = context.container_sequence_header();
+                        (Backend::U16(Box::new(context)), av1c)
+                    }
+                }
+                #[cfg(feature = "zenav1-svt")]
+                Av1VideoBackend::Zenav1Svt => {
+                    let (session, av1c) = svt::SvtSession::new(s)?;
+                    (Backend::Svt(Box::new(session)), av1c)
+                }
+                #[cfg(not(feature = "zenav1-svt"))]
+                Av1VideoBackend::Zenav1Svt => {
+                    return Err(cfg_err("zenav1-svt needs the zenav1-svt feature"));
+                }
             };
             // zenrav1e's record writes chroma_sample_position 0 whatever the
             // sequence header says, and subsampling_y 0 for monochrome
@@ -910,6 +955,14 @@ mod encode {
                     Backend::U16(c) => c
                         .receive_packet()
                         .map(|p| (p.data, p.input_frameno, p.frame_type)),
+                    #[cfg(feature = "zenav1-svt")]
+                    Backend::Svt(svt) => {
+                        return Ok(match svt.out.pop_front() {
+                            Some(p) => Pulled::Packet(p),
+                            None if self.ended => Pulled::End,
+                            None => Pulled::NeedInput,
+                        });
+                    }
                 };
                 let encode_err = |m: String| SessionError::Codec(Av1SessionError::Encode(m));
                 match got {
@@ -996,6 +1049,200 @@ mod encode {
         Encoder(String),
     }
 
+    /// A frame's planes copied tightly packed, after the same checks as
+    /// [`copy_and_send`].
+    #[cfg(feature = "zenav1-svt")]
+    enum Packed {
+        Eight(Vec<Vec<u8>>),
+        Wide(Vec<Vec<u16>>),
+    }
+
+    #[cfg(feature = "zenav1-svt")]
+    fn packed_planes(
+        frame: &Frame,
+        dims: &[(usize, usize)],
+        encoding: SampleEncoding,
+    ) -> Result<Packed, SendError> {
+        let mapped = frame.map().map_err(|_| SendError::Input)?;
+        if mapped.plane_count() != dims.len() {
+            return Err(SendError::Input);
+        }
+        let mut eight = Vec::new();
+        let mut wide = Vec::new();
+        for (index, &(w, h)) in dims.iter().enumerate() {
+            let plane = mapped.plane(index).ok_or(SendError::Input)?;
+            if (plane.width(), plane.height()) != (w, h) || plane.encoding() != encoding {
+                return Err(SendError::Input);
+            }
+            let (mut p8, mut p16) = (Vec::new(), Vec::new());
+            for y in 0..h {
+                match plane.row(y).ok_or(SendError::Input)? {
+                    PlaneSamples::U8(r) => {
+                        p8.extend_from_slice(r.get(..w).ok_or(SendError::Input)?)
+                    }
+                    PlaneSamples::U16(r) => {
+                        p16.extend_from_slice(r.get(..w).ok_or(SendError::Input)?)
+                    }
+                }
+            }
+            eight.push(p8);
+            wide.push(p16);
+        }
+        Ok(if encoding.code_bits() == 8 {
+            Packed::Eight(eight)
+        } else {
+            Packed::Wide(wide)
+        })
+    }
+
+    #[cfg(feature = "zenav1-svt")]
+    mod svt {
+        use std::collections::VecDeque;
+
+        use svtav1::ChromaFormat;
+        use svtav1::encoder::pipeline::EncodePipeline;
+        use svtav1::encoder::rate_control::{RcConfig, RcMode};
+        use zencodec_media::frame::{ChromaSiting, Subsampling};
+        use zencodec_media::packet::Packet;
+
+        use super::{Av1EncodeSettings, Packed, SendError, cfg_err};
+        use crate::media::Av1SessionError;
+
+        /// zenav1-svt, all-intra: each frame is one temporal unit, out at
+        /// once.
+        pub(super) struct SvtSession {
+            pipeline: EncodePipeline,
+            subsampling: Subsampling,
+            width: usize,
+            intra_period: u64,
+            sent: u64,
+            /// Packets out and not yet received.
+            pub(super) out: VecDeque<Packet>,
+        }
+
+        impl SvtSession {
+            /// The session and its `av1C` record (format byte left to the
+            /// caller).
+            pub(super) fn new(s: &Av1EncodeSettings) -> Result<(Self, Vec<u8>), Av1SessionError> {
+                if s.key_frame_interval != 1 {
+                    return Err(cfg_err(
+                        "zenav1-svt runs all-intra here (its inter frames can be corrupt, \
+                         imazen/zenav1-svt issue 26): key_frame_interval must be 1",
+                    ));
+                }
+                match (s.bit_depth, s.subsampling) {
+                    (_, Subsampling::Yuv422) => {
+                        return Err(cfg_err("zenav1-svt has not ported 4:2:2"));
+                    }
+                    (8, _) | (10, Subsampling::Mono | Subsampling::Yuv420) => {}
+                    (10, _) => {
+                        return Err(cfg_err("zenav1-svt codes 10-bit mono and 4:2:0 only"));
+                    }
+                    _ => {
+                        return Err(cfg_err(
+                            "zenav1-svt codes 8- and 10-bit only, as SVT-AV1 does",
+                        ));
+                    }
+                }
+                let fps = f64::from(s.frame_rate.0) / f64::from(s.frame_rate.1);
+                let rc = RcConfig {
+                    mode: RcMode::Cqp,
+                    qp: (s.quantizer / 4).min(63),
+                    framerate: fps,
+                    ..RcConfig::default()
+                };
+                let preset = svtav1::avif::NativePreset::new(s.speed.min(13) as i8)
+                    .ok_or_else(|| cfg_err("zenav1-svt preset out of range"))?;
+                let intra_period = u32::try_from(s.key_frame_interval.max(1)).unwrap_or(u32::MAX);
+                let mut pipeline =
+                    EncodePipeline::new_with_preset(s.width, s.height, preset, rc, 0, intra_period)
+                        .with_image_sequence();
+                pipeline = match s.subsampling {
+                    Subsampling::Mono => pipeline,
+                    Subsampling::Yuv420 => pipeline.with_chroma_format(Some(ChromaFormat::Yuv420)),
+                    Subsampling::Yuv422 => pipeline.with_chroma_format(Some(ChromaFormat::Yuv422)),
+                    _ => pipeline.with_chroma_format(Some(ChromaFormat::Yuv444)),
+                };
+                let csp = match (s.subsampling, s.siting) {
+                    (Subsampling::Yuv420, ChromaSiting::Left) => 1,
+                    (Subsampling::Yuv420, ChromaSiting::TopLeft) => 2,
+                    _ => 0,
+                };
+                let c = s.color;
+                pipeline = pipeline
+                    .with_bit_depth(s.bit_depth)
+                    .with_color_description(svtav1::entropy::obu::ColorDescription {
+                        color_primaries: c.color_primaries,
+                        transfer_characteristics: c.transfer_characteristics,
+                        matrix_coefficients: c.matrix_coefficients,
+                        full_range: c.full_range,
+                    })
+                    .with_chroma_sample_position(csp)
+                    .with_thread_count(s.threads);
+                let profile: u8 = match s.subsampling {
+                    Subsampling::Yuv444 => 1,
+                    Subsampling::Yuv422 => 2,
+                    _ => 0,
+                };
+                let level = svtav1::entropy::obu::compute_seq_level_idx(s.width, s.height, fps);
+                let av1c = vec![0x81, profile << 5 | (level & 0x1F), 0, 0];
+                Ok((
+                    Self {
+                        pipeline,
+                        subsampling: s.subsampling,
+                        width: s.width as usize,
+                        intra_period: u64::from(intra_period),
+                        sent: 0,
+                        out: VecDeque::new(),
+                    },
+                    av1c,
+                ))
+            }
+
+            /// Encode one frame; its temporal unit and whether it is a key
+            /// frame.
+            pub(super) fn encode(&mut self, planes: Packed) -> Result<(Vec<u8>, bool), SendError> {
+                let w = self.width;
+                let p = &mut self.pipeline;
+                let err = |e: whereat::At<svtav1::types::EncodeError>| {
+                    SendError::Encoder(format!("{e:?}"))
+                };
+                let bytes = match (planes, self.subsampling) {
+                    (Packed::Eight(v), Subsampling::Mono) => p.try_encode_frame(&v[0], w),
+                    (Packed::Eight(v), Subsampling::Yuv420) => {
+                        p.try_encode_frame_420(&v[0], &v[1], &v[2], w)
+                    }
+                    (Packed::Eight(v), Subsampling::Yuv422) => {
+                        p.try_encode_frame_422(&v[0], &v[1], &v[2], w)
+                    }
+                    (Packed::Eight(v), _) => p.try_encode_frame_444(&v[0], &v[1], &v[2], w),
+                    (Packed::Wide(v), Subsampling::Mono) => p.try_encode_frame_hbd(&v[0], w),
+                    (Packed::Wide(v), _) => p.try_encode_frame_420_hbd(&v[0], &v[1], &v[2], w),
+                }
+                .map_err(err)?;
+                let key = self.sent.is_multiple_of(self.intra_period);
+                self.sent += 1;
+                Ok((bytes, key))
+            }
+
+            /// Low delay holds nothing back; anything here has no frame to
+            /// time it by.
+            pub(super) fn flush(&mut self) -> Result<(), Av1SessionError> {
+                let rest = self
+                    .pipeline
+                    .try_flush()
+                    .map_err(|e| Av1SessionError::Encode(format!("{e:?}")))?;
+                if rest.is_empty() {
+                    Ok(())
+                } else {
+                    Err(Av1SessionError::Encode(
+                        "zenav1-svt flushed untimed output".into(),
+                    ))
+                }
+            }
+        }
+    }
+
     impl VideoEncoder for Av1VideoEncoder {
         type Error = Av1SessionError;
 
@@ -1020,6 +1267,42 @@ mod encode {
             if self.ready.is_some() {
                 return Ok(SendStatus::ReceivePending);
             }
+            #[cfg(feature = "zenav1-svt")]
+            {
+                let dims = self.plane_dims();
+                let max = self.settings.max_queued_frames;
+                if let Backend::Svt(svt) = &mut self.backend {
+                    if svt.out.len() >= max {
+                        return Ok(SendStatus::ReceivePending);
+                    }
+                    let input_err = |e| {
+                        SessionError::Codec(match e {
+                            SendError::Input => Av1SessionError::InputMismatch,
+                            SendError::Encoder(m) => Av1SessionError::Encode(m),
+                        })
+                    };
+                    let planes = packed_planes(frame, &dims, frame.interpretation().encoding)
+                        .map_err(input_err)?;
+                    let (bytes, key) = svt.encode(planes).map_err(input_err)?;
+                    let mut p = Packet::from_vec(bytes)
+                        .map_err(|e| SessionError::Codec(Av1SessionError::Encode(e.to_string())))?
+                        .with_pts(pts)
+                        .with_random_access(if key {
+                            RandomAccess::Yes
+                        } else {
+                            RandomAccess::No
+                        })
+                        .with_ordinal(self.emitted);
+                    if let Some(d) = frame.timing().duration_ticks {
+                        p = p.with_duration_ticks(d);
+                    }
+                    svt.out.push_back(p);
+                    self.emitted += 1;
+                    self.submitted += 1;
+                    self.last_pts = Some(pts.ticks());
+                    return Ok(SendStatus::Accepted);
+                }
+            }
             if self.queued.len() >= self.settings.max_queued_frames {
                 // Push back only with a packet to hand out, so the
                 // `receive` that follows is `Ready`.
@@ -1033,6 +1316,9 @@ mod encode {
             let sent = match &mut self.backend {
                 Backend::U8(c) => copy_and_send(c, frame, &dims, encoding),
                 Backend::U16(c) => copy_and_send(c, frame, &dims, encoding),
+                // Sent above.
+                #[cfg(feature = "zenav1-svt")]
+                Backend::Svt(_) => Ok(()),
             };
             match sent {
                 Ok(()) => {}
@@ -1073,6 +1359,8 @@ mod encode {
                 match &mut self.backend {
                     Backend::U8(c) => c.flush(),
                     Backend::U16(c) => c.flush(),
+                    #[cfg(feature = "zenav1-svt")]
+                    Backend::Svt(svt) => svt.flush().map_err(SessionError::Codec)?,
                 }
                 self.ended = true;
             }

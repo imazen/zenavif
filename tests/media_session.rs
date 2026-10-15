@@ -921,3 +921,196 @@ fn av1c_matches_the_sequence_header() {
         );
     }
 }
+
+/// zenav1-svt behind the same session.
+#[cfg(feature = "zenav1-svt")]
+mod svt {
+    use super::*;
+    use zenavif::media::Av1VideoBackend;
+
+    /// A smooth moving gradient: content a lossy encode keeps close.
+    fn smooth(s: &Av1EncodeSettings, i: usize, pts: i64) -> Frame {
+        let max = (1u32 << s.bit_depth) - 1;
+        let planes: Vec<OwnedPlane> = dims(s.subsampling, s.width, s.height)
+            .into_iter()
+            .enumerate()
+            .map(|(c, (pw, ph))| {
+                let v = move |x: usize, y: usize| {
+                    let t = (x * 3 + y * 2 + i * 4 + c * 40) as u32 % 200 + 20;
+                    (t * max / 255) as u16
+                };
+                let codes = (0..ph).flat_map(move |y| (0..pw).map(move |x| v(x, y)));
+                if s.bit_depth == 8 {
+                    OwnedPlane {
+                        data: PlaneData::U8(codes.map(|v| v as u8).collect()),
+                        width: pw,
+                        height: ph,
+                        stride_bytes: pw,
+                    }
+                } else {
+                    OwnedPlane {
+                        data: PlaneData::U16(codes.collect()),
+                        width: pw,
+                        height: ph,
+                        stride_bytes: pw * 2,
+                    }
+                }
+            })
+            .collect();
+        let template = frame_for(s, 0, pts);
+        Frame::new(
+            Arc::new(OwnedPlanes::new(planes, template.interpretation().encoding).unwrap()),
+            Arc::clone(template.interpretation()),
+            FrameTiming::at(Timestamp::new(pts, TB)).with_duration_ticks(40),
+            Presentation::default(),
+        )
+    }
+
+    fn psnr(a: &Frame, b: &Frame, bits: u8) -> f64 {
+        let (ma, mb) = (a.map().unwrap(), b.map().unwrap());
+        let mut worst = f64::INFINITY;
+        for c in 0..ma.plane_count() {
+            let (pa, pb) = (ma.plane(c).unwrap(), mb.plane(c).unwrap());
+            let mut se = 0f64;
+            for y in 0..pa.height() {
+                for x in 0..pa.width() {
+                    let d = f64::from(pa.code(x, y).unwrap()) - f64::from(pb.code(x, y).unwrap());
+                    se += d * d;
+                }
+            }
+            let mse = se / (pa.width() * pa.height()) as f64;
+            let peak = f64::from((1u32 << bits) - 1);
+            worst = worst.min(10.0 * (peak * peak / mse.max(1e-9)).log10());
+        }
+        worst
+    }
+
+    fn svt(bits: u8, sub: Subsampling, kfi: u64) -> Av1EncodeSettings {
+        Av1EncodeSettings::new(48, 32)
+            .with_backend(Av1VideoBackend::Zenav1Svt)
+            .with_bit_depth(bits)
+            .with_subsampling(sub)
+            .with_color(Cicp::new(1, 1, 1, false))
+            .with_quantizer(80)
+            .with_speed(10)
+            .with_key_frame_interval(kfi)
+            .with_threads(1)
+    }
+
+    #[test]
+    fn svt_streams_decode_with_their_timing_and_key_frames() {
+        for (bits, sub, kfi) in [
+            (8, Subsampling::Yuv420, 1),
+            (8, Subsampling::Yuv444, 1),
+            (8, Subsampling::Mono, 1),
+            (10, Subsampling::Yuv420, 1),
+            (10, Subsampling::Mono, 1),
+        ] {
+            let name = format!("{bits}-bit {sub:?} kfi {kfi}");
+            let s = svt(bits, sub, kfi);
+            let pts = [0i64, 40, 80, 125, 160, 200, 240];
+            let frames: Vec<Frame> = pts
+                .iter()
+                .enumerate()
+                .map(|(i, &t)| smooth(&s, i, t))
+                .collect();
+            let mut enc = Av1VideoEncoder::new(s, TB).unwrap();
+            let packets = encode(&mut enc, &frames);
+            assert_eq!(packets.len(), frames.len(), "{name}");
+            let got: Vec<i64> = packets.iter().map(|p| p.pts().unwrap().ticks()).collect();
+            assert_eq!(got, pts, "{name}");
+            let keys: Vec<bool> = packets
+                .iter()
+                .map(|p| p.random_access() == RandomAccess::Yes)
+                .collect();
+            let want: Vec<bool> = (0..frames.len())
+                .map(|i| (i as u64).is_multiple_of(kfi))
+                .collect();
+            assert_eq!(keys, want, "{name}: random-access flags");
+            let decoded = decode(&enc, &packets);
+            assert_eq!(decoded.len(), frames.len(), "{name}");
+            for (i, f) in decoded.iter().enumerate() {
+                assert_eq!(f.timing().pts.unwrap().ticks(), pts[i], "{name}");
+                assert_eq!(
+                    f.presentation().keyframe,
+                    want[i],
+                    "{name} frame {i}: key frame"
+                );
+                assert_eq!(f.interpretation().subsampling, sub, "{name}");
+                assert_eq!(f.interpretation().encoding.code_bits(), bits, "{name}");
+                assert_eq!(
+                    f.interpretation().color.bitstream,
+                    Some(Cicp::new(1, 1, 1, false)),
+                    "{name}: colour"
+                );
+                let q = psnr(f, &frames[i], bits);
+                assert!(q > 30.0, "{name} frame {i}: PSNR {q:.1} dB");
+            }
+        }
+    }
+
+    #[test]
+    fn svt_sessions_meet_the_encoder_contract() {
+        for queue in [1, 64] {
+            let s = svt(8, Subsampling::Yuv420, 1).with_max_queued_frames(queue);
+            let frames: Vec<Frame> = (0..9).map(|i| smooth(&s, i, i as i64 * 40)).collect();
+            check_video_encoder_contract(|| Av1VideoEncoder::new(s.clone(), TB).unwrap(), &frames)
+                .unwrap_or_else(|e| panic!("queue {queue}: {e:?}"));
+        }
+    }
+
+    #[test]
+    fn svt_av1c_matches_the_sequence_header() {
+        const SEQUENCE_HEADER: u8 = 1;
+        for (bits, sub, siting, kfi) in [
+            (8, Subsampling::Yuv420, ChromaSiting::Left, 1),
+            (8, Subsampling::Yuv420, ChromaSiting::Unknown, 1),
+            (8, Subsampling::Yuv444, ChromaSiting::Unknown, 1),
+            (8, Subsampling::Mono, ChromaSiting::Unknown, 1),
+            (10, Subsampling::Yuv420, ChromaSiting::TopLeft, 1),
+        ] {
+            let name = format!("{bits}-bit {sub:?} {siting:?}");
+            let s = svt(bits, sub, kfi).with_siting(siting);
+            let mut enc = Av1VideoEncoder::new(s.clone(), TB).unwrap();
+            let record = enc.output_config().unwrap().clone();
+            let b = record.private.as_deref().unwrap().to_vec();
+            let av1c = [
+                u32::from(b[1] >> 5),
+                u32::from(b[1] & 0x1F),
+                u32::from(b[2] >> 7),
+                u32::from(b[2] >> 6 & 1),
+                u32::from(b[2] >> 5 & 1),
+                u32::from(b[2] >> 4 & 1),
+                u32::from(b[2] >> 3 & 1),
+                u32::from(b[2] >> 2 & 1),
+                u32::from(b[2] & 3),
+            ];
+            let packets = encode(&mut enc, &[smooth(&s, 0, 0)]);
+            let seq = obus(packets[0].bytes())
+                .into_iter()
+                .find(|(kind, _)| *kind == SEQUENCE_HEADER)
+                .map(|(_, bytes)| bytes)
+                .expect("a key frame carries the sequence header");
+            assert_eq!(av1c, sequence_header_fields(&seq), "{name}");
+        }
+    }
+
+    #[test]
+    fn svt_refuses_what_it_cannot_code() {
+        let bad = |s: Av1EncodeSettings| Av1VideoEncoder::new(s, TB).unwrap_err();
+        for s in [
+            // Inter frames: imazen/zenav1-svt issue 26.
+            svt(8, Subsampling::Yuv420, 3),
+            svt(10, Subsampling::Yuv420, 4),
+            svt(8, Subsampling::Yuv422, 1),
+            svt(12, Subsampling::Yuv420, 1),
+            svt(10, Subsampling::Yuv444, 1),
+        ] {
+            let what = format!("{s:?}");
+            assert!(
+                matches!(bad(s), Av1SessionError::Configuration(_)),
+                "{what}"
+            );
+        }
+    }
+}

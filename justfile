@@ -56,6 +56,7 @@ test-fast-encode:
 # AV1 video sessions (zencodec-media): decoder + zenrav1e encoder tests.
 test-media:
     cargo test --features media-encode --test media_session
+    cargo test --features media-encode,zenav1-svt --test media_session
     cargo test --features media-encode --lib media::
 
 # The 48-file lossless AV1 corpus (not committed; see

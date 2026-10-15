@@ -20,6 +20,15 @@
   clock, which it would read as frames per second. The `av1C` record has no configOBUs, and its
   format byte is rebuilt from the settings: zenrav1e's record writes
   chroma_sample_position 0 and subsampling_y 0 for monochrome.
+- `Av1VideoBackend::Zenav1Svt` (with the `zenav1-svt` feature): zenav1-svt
+  behind the same session, all-intra (`key_frame_interval` 1), one packet per
+  frame. Its low-delay inter frames can be corrupt: libaom and rav1d reject
+  them, libdav1d does not (imazen/zenav1-svt issue 26, standalone repro on
+  the pinned rev and on main), so inter frames wait for that fix. 8-bit mono,
+  4:2:0, 4:4:4 and 10-bit mono, 4:2:0; 4:2:2 (not ported) and 12-bit are
+  refused. The `av1C` level comes from zenav1-svt's own
+  `compute_seq_level_idx`. The oracle gains 10 checks: libaom and rav1d-safe
+  equal libdav1d on its output in five formats.
 - The decoder inserts `av1C` configOBUs after a packet's leading temporal
   delimiter, so a temporal unit still starts with it.
 - Tests: `tests/media_session.rs` (12) covers lossless round trips (six
@@ -29,7 +38,7 @@
   conversion, and a clock-independent bitstream. `tests/media_corpus.rs`
   runs the 48-file lossless corpus (`just media-corpus`, not committed; see
   `docs/av1-media-corpus.pointer.md`). `scripts/media-ffmpeg-oracle.sh` runs
-  36 checks: libdav1d decodes the encoder's lossless output to the source,
+  46 checks: libdav1d decodes the encoder's lossless output to the source,
   and rav1d-safe matches libdav1d on zenrav1e and libaom streams.
 - Pins zencodec, zencodec-testkit and zencodec-media to `7cc3d3ec`, and
   ultrahdr-core to `10a79c3a` (its zenmeta on the same zencodec), in the root
