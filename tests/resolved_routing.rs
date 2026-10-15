@@ -193,7 +193,10 @@ fn both_deep_input_entry_points_execute_and_preserve_requested_depth_and_alpha()
             },
         )
         .unwrap();
-    assert_eq!(route.backend(), Av1Backend::Zenav1Svt);
+    // zenav1-aom serves alpha in place (see
+    // alpha_is_served_by_aom_in_place_and_the_rgba_encode_keeps_alpha), so a
+    // 16-bit RGBA request stays on the preferred backend.
+    assert_eq!(route.backend(), Av1Backend::Zenav1Aom);
     let out = route.encode_rgba16(rgba.as_ref(), stop()).unwrap();
     assert!(out.alpha_byte_size > 0);
     zenavif::decode(&out.avif_file).unwrap();
@@ -780,13 +783,24 @@ fn support_matrix_matches_all_five_pixel_entry_points() {
         }
     }
     assert_eq!(cells, 90);
-    assert!(
-        config(Av1Backend::Zenravif)
-            .bit_depth(EncodeBitDepth::Twelve)
-            .chroma_subsampling(EncodeChromaSubsampling::Yuv444)
-            .resolve_route(RoutingRequest::default(), PlanInput::rgb8(17, 19))
-            .is_err()
-    );
+    // zenravif codes 12-bit since PR 66: a 12-bit 4:4:4 request at an odd
+    // size stays on it and decodes as 12-bit.
+    let route = config(Av1Backend::Zenravif)
+        .bit_depth(EncodeBitDepth::Twelve)
+        .chroma_subsampling(EncodeChromaSubsampling::Yuv444)
+        .resolve_route(RoutingRequest::default(), PlanInput::rgb8(17, 19))
+        .unwrap();
+    assert_eq!(route.backend(), Av1Backend::Zenravif);
+    let img = Img::new(vec![Rgb::new(30u8, 140, 220); 17 * 19], 17, 19);
+    let out = route.encode_rgb8(img.as_ref(), stop()).unwrap();
+    let parser = zenavif_parse::AvifParser::from_owned_with_config(
+        out.avif_file.clone(),
+        &Default::default(),
+        &Unstoppable,
+    )
+    .unwrap();
+    assert_eq!(parser.primary_metadata().unwrap().bit_depth, 12);
+    zenavif::decode(&out.avif_file).unwrap();
 }
 
 #[cfg(all(feature = "zenav1-svt", feature = "__expert"))]

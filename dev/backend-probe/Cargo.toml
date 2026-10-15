@@ -1,0 +1,12 @@
+[package]
+name = "av1probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+[workspace]
+[dependencies]
+zenrav1e = { git = "https://github.com/imazen/zenrav1e", branch = "master" }
+svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", branch = "main" }
+aom_encode = { package = "zenav1-aom-encode", git = "https://github.com/imazen/zenav1-aom", branch = "main" }
+[profile.release]
+debug = false

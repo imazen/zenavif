@@ -1,0 +1,145 @@
+img,bits,backend,qindex,bytes,ms,status,psnr
+1,8,zenrav1e,60,107500,2488.5,ok,43.419
+1,8,zenav1-svt,60,92168,98.9,ok,42.584
+1,8,zenav1-aom,60,95409,182.9,ok,43.062
+1,8,zenrav1e,100,75865,2244.4,ok,39.827
+1,8,zenav1-svt,100,62729,94.7,ok,38.884
+1,8,zenav1-aom,100,67353,199.3,ok,39.569
+1,8,zenrav1e,140,45256,1986.6,ok,35.223
+1,8,zenav1-svt,140,37202,80.4,ok,34.658
+1,8,zenav1-aom,140,41621,170.8,ok,35.301
+1,8,zenrav1e,180,22540,1677.5,ok,30.603
+1,8,zenav1-svt,180,18372,57.0,ok,30.273
+1,8,zenav1-aom,180,22472,160.2,ok,31.163
+1,10,zenrav1e,60,111484,2513.8,ok,44.142
+1,10,zenav1-svt,60,96685,268.2,ok,43.395
+1,10,zenav1-aom,60,99060,238.0,ok,43.854
+1,10,zenrav1e,100,76551,2297.6,ok,40.096
+1,10,zenav1-svt,100,63464,268.9,ok,39.179
+1,10,zenav1-aom,100,67394,268.5,ok,39.862
+1,10,zenrav1e,140,45821,2006.8,ok,35.423
+1,10,zenav1-svt,140,36929,248.3,ok,34.691
+1,10,zenav1-aom,140,40886,226.3,ok,35.413
+1,10,zenrav1e,180,22536,1686.6,ok,30.650
+1,10,zenav1-svt,180,17518,197.6,ok,30.062
+1,10,zenav1-aom,180,21120,203.1,ok,31.032
+1,12,zenrav1e,60,113340,2561.5,ok,44.379
+1,12,zenav1-svt,60,,,refused: unsupported config: try_encode_frame_420_hbd requires with_bit_depth(10) (8-bit sources use encode_frame_420; 12-bit is outside C's shipping envelope),
+1,12,zenav1-aom,60,97768,265.1,ok,43.812
+1,12,zenrav1e,100,76740,2430.1,ok,40.111
+1,12,zenav1-svt,100,,,refused: unsupported config: try_encode_frame_420_hbd requires with_bit_depth(10) (8-bit sources use encode_frame_420; 12-bit is outside C's shipping envelope),
+1,12,zenav1-aom,100,64340,301.7,ok,39.501
+1,12,zenrav1e,140,45727,2134.7,ok,35.381
+1,12,zenav1-svt,140,,,refused: unsupported config: try_encode_frame_420_hbd requires with_bit_depth(10) (8-bit sources use encode_frame_420; 12-bit is outside C's shipping envelope),
+1,12,zenav1-aom,140,36556,243.2,ok,34.641
+1,12,zenrav1e,180,22562,1776.7,ok,30.646
+1,12,zenav1-svt,180,,,refused: unsupported config: try_encode_frame_420_hbd requires with_bit_depth(10) (8-bit sources use encode_frame_420; 12-bit is outside C's shipping envelope),
+1,12,zenav1-aom,180,16610,210.3,ok,29.806
+2,8,zenrav1e,60,105287,2493.8,ok,43.569
+2,8,zenav1-svt,60,85021,89.1,ok,42.230
+2,8,zenav1-aom,60,87177,168.5,ok,42.716
+2,8,zenrav1e,100,72649,2228.8,ok,39.977
+2,8,zenav1-svt,100,54360,84.6,ok,38.538
+2,8,zenav1-aom,100,58740,172.8,ok,39.274
+2,8,zenrav1e,140,41077,1904.4,ok,35.429
+2,8,zenav1-svt,140,30056,70.8,ok,34.613
+2,8,zenav1-aom,140,33895,141.2,ok,35.304
+2,8,zenrav1e,180,19002,1534.9,ok,30.964
+2,8,zenav1-svt,180,14892,53.0,ok,30.825
+2,8,zenav1-aom,180,17473,111.3,ok,31.439
+2,10,zenrav1e,60,110387,2567.9,ok,44.413
+2,10,zenav1-svt,60,89962,257.3,ok,43.034
+2,10,zenav1-aom,60,91268,232.6,ok,43.477
+2,10,zenrav1e,100,73356,2287.7,ok,40.265
+2,10,zenav1-svt,100,55204,251.5,ok,38.804
+2,10,zenav1-aom,100,59055,246.1,ok,39.573
+2,10,zenrav1e,140,41238,1959.8,ok,35.542
+2,10,zenav1-svt,140,29716,240.9,ok,34.616
+2,10,zenav1-aom,140,33210,202.0,ok,35.379
+2,10,zenrav1e,180,18984,1567.2,ok,30.996
+2,10,zenav1-svt,180,14255,195.8,ok,30.645
+2,10,zenav1-aom,180,16697,157.1,ok,31.424
+2,12,zenrav1e,60,111090,2566.6,ok,44.505
+2,12,zenav1-svt,60,,,refused: unsupported config: try_encode_frame_420_hbd requires with_bit_depth(10) (8-bit sources use encode_frame_420; 12-bit is outside C's shipping envelope),
+2,12,zenav1-aom,60,89773,234.5,ok,43.415
+2,12,zenrav1e,100,73262,2280.8,ok,40.270
+2,12,zenav1-svt,100,,,refused: unsupported config: try_encode_frame_420_hbd requires with_bit_depth(10) (8-bit sources use encode_frame_420; 12-bit is outside C's shipping envelope),
+2,12,zenav1-aom,100,55411,245.2,ok,39.162
+2,12,zenrav1e,140,41352,1899.1,ok,35.553
+2,12,zenav1-svt,140,,,refused: unsupported config: try_encode_frame_420_hbd requires with_bit_depth(10) (8-bit sources use encode_frame_420; 12-bit is outside C's shipping envelope),
+2,12,zenav1-aom,140,29228,208.0,ok,34.664
+2,12,zenrav1e,180,18917,1557.5,ok,30.980
+2,12,zenav1-svt,180,,,refused: unsupported config: try_encode_frame_420_hbd requires with_bit_depth(10) (8-bit sources use encode_frame_420; 12-bit is outside C's shipping envelope),
+2,12,zenav1-aom,180,13523,150.9,ok,30.433
+3,8,zenrav1e,60,102841,2489.3,ok,43.311
+3,8,zenav1-svt,60,88709,93.4,ok,42.588
+3,8,zenav1-aom,60,90646,184.2,ok,43.157
+3,8,zenrav1e,100,72657,2259.8,ok,39.791
+3,8,zenav1-svt,100,60228,90.9,ok,38.963
+3,8,zenav1-aom,100,63577,195.7,ok,39.719
+3,8,zenrav1e,140,43795,1975.3,ok,35.294
+3,8,zenav1-svt,140,35214,86.0,ok,34.715
+3,8,zenav1-aom,140,38505,169.7,ok,35.503
+3,8,zenrav1e,180,22280,1679.0,ok,30.891
+3,8,zenav1-svt,180,18007,63.9,ok,30.535
+3,8,zenav1-aom,180,20589,146.2,ok,31.359
+3,10,zenrav1e,60,105910,2551.1,ok,43.971
+3,10,zenav1-svt,60,93436,271.4,ok,43.397
+3,10,zenav1-aom,60,94433,237.2,ok,43.944
+3,10,zenrav1e,100,73160,2297.5,ok,40.009
+3,10,zenav1-svt,100,60999,253.7,ok,39.214
+3,10,zenav1-aom,100,63756,266.0,ok,40.042
+3,10,zenrav1e,140,43699,2000.7,ok,35.385
+3,10,zenav1-svt,140,34841,251.2,ok,34.721
+3,10,zenav1-aom,140,38167,228.9,ok,35.667
+3,10,zenrav1e,180,22227,1766.6,ok,30.920
+3,10,zenav1-svt,180,17163,227.7,ok,30.350
+3,10,zenav1-aom,180,19830,195.8,ok,31.332
+3,12,zenrav1e,60,107402,2531.9,ok,44.153
+3,12,zenav1-svt,60,,,refused: unsupported config: try_encode_frame_420_hbd requires with_bit_depth(10) (8-bit sources use encode_frame_420; 12-bit is outside C's shipping envelope),
+3,12,zenav1-aom,60,93096,252.6,ok,43.886
+3,12,zenrav1e,100,73909,2278.2,ok,40.136
+3,12,zenav1-svt,100,,,refused: unsupported config: try_encode_frame_420_hbd requires with_bit_depth(10) (8-bit sources use encode_frame_420; 12-bit is outside C's shipping envelope),
+3,12,zenav1-aom,100,60535,272.7,ok,39.697
+3,12,zenrav1e,140,44282,1986.3,ok,35.497
+3,12,zenav1-svt,140,,,refused: unsupported config: try_encode_frame_420_hbd requires with_bit_depth(10) (8-bit sources use encode_frame_420; 12-bit is outside C's shipping envelope),
+3,12,zenav1-aom,140,34048,231.0,ok,34.956
+3,12,zenrav1e,180,22299,1711.6,ok,30.928
+3,12,zenav1-svt,180,,,refused: unsupported config: try_encode_frame_420_hbd requires with_bit_depth(10) (8-bit sources use encode_frame_420; 12-bit is outside C's shipping envelope),
+3,12,zenav1-aom,180,15663,184.5,ok,30.165
+4,8,zenrav1e,60,43604,1395.8,ok,48.054
+4,8,zenav1-svt,60,32840,51.0,ok,46.620
+4,8,zenav1-aom,60,35166,81.5,ok,46.904
+4,8,zenrav1e,100,30547,1254.9,ok,44.405
+4,8,zenav1-svt,100,22008,45.8,ok,42.896
+4,8,zenav1-aom,100,24446,94.1,ok,43.550
+4,8,zenrav1e,140,17898,1105.3,ok,39.743
+4,8,zenav1-svt,140,12636,39.8,ok,38.666
+4,8,zenav1-aom,140,14610,82.6,ok,39.419
+4,8,zenrav1e,180,8395,951.2,ok,34.955
+4,8,zenav1-svt,180,6092,28.0,ok,34.395
+4,8,zenav1-aom,180,7802,80.8,ok,35.413
+4,10,zenrav1e,60,45450,1444.0,ok,48.842
+4,10,zenav1-svt,60,34603,186.8,ok,47.449
+4,10,zenav1-aom,60,36459,106.9,ok,47.721
+4,10,zenrav1e,100,30759,1304.0,ok,44.686
+4,10,zenav1-svt,100,22280,174.4,ok,43.178
+4,10,zenav1-aom,100,24273,124.9,ok,43.854
+4,10,zenrav1e,140,17913,1110.2,ok,39.811
+4,10,zenav1-svt,140,12471,157.0,ok,38.660
+4,10,zenav1-aom,140,14344,110.9,ok,39.501
+4,10,zenrav1e,180,8377,948.6,ok,35.003
+4,10,zenav1-svt,180,5833,140.3,ok,34.225
+4,10,zenav1-aom,180,7336,97.5,ok,35.288
+4,12,zenrav1e,60,45844,1420.1,ok,48.973
+4,12,zenav1-svt,60,,,refused: unsupported config: try_encode_frame_420_hbd requires with_bit_depth(10) (8-bit sources use encode_frame_420; 12-bit is outside C's shipping envelope),
+4,12,zenav1-aom,60,35836,114.6,ok,47.621
+4,12,zenrav1e,100,31028,1253.9,ok,44.744
+4,12,zenav1-svt,100,,,refused: unsupported config: try_encode_frame_420_hbd requires with_bit_depth(10) (8-bit sources use encode_frame_420; 12-bit is outside C's shipping envelope),
+4,12,zenav1-aom,100,23025,127.9,ok,43.479
+4,12,zenrav1e,140,18011,1096.5,ok,39.855
+4,12,zenav1-svt,140,,,refused: unsupported config: try_encode_frame_420_hbd requires with_bit_depth(10) (8-bit sources use encode_frame_420; 12-bit is outside C's shipping envelope),
+4,12,zenav1-aom,140,12755,113.8,ok,38.708
+4,12,zenrav1e,180,8387,910.0,ok,34.981
+4,12,zenav1-svt,180,,,refused: unsupported config: try_encode_frame_420_hbd requires with_bit_depth(10) (8-bit sources use encode_frame_420; 12-bit is outside C's shipping envelope),
+4,12,zenav1-aom,180,5672,93.0,ok,33.998
