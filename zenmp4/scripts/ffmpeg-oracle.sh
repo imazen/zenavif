@@ -25,7 +25,9 @@ ff -f lavfi -i testsrc2=size=64x48:rate=24 -f lavfi -i sine=sample_rate=44100 -t
 ff -f lavfi -i testsrc2=size=64x48:rate=24 -f lavfi -i sine=sample_rate=44100 -t 1.2 \
   -c:v mpeg4 -bf 2 -g 12 -c:a aac -movflags frag_keyframe+empty_moov+default_base_moof mpeg4_aac_frag.mp4
 ff -f lavfi -i sine=sample_rate=48000 -t 0.5 -c:a flac flac.mp4
-if ffmpeg -hide_banner -encoders 2>/dev/null | grep -q libx264; then
+# Not `| grep -q`: under pipefail its early exit fails the pipeline.
+encoders=$(ffmpeg -hide_banner -encoders 2>/dev/null)
+if grep -q libx264 <<< "$encoders"; then
   ff -f lavfi -i testsrc2=size=64x48:rate=24 -f lavfi -i sine=sample_rate=44100 -t 1.2 \
     -c:v libx264 -bf 2 -g 12 -c:a aac h264_aac.mp4
   ff -f lavfi -i testsrc2=size=64x48:rate=24 -t 1 -c:v libx264 -bf 2 -g 12 \
