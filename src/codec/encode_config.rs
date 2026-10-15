@@ -268,14 +268,13 @@ pub(super) static AVIF_ENCODE_CAPABILITIES: zencodec::encode::EncodeCapabilities
         .with_exif(true)
         .with_xmp(true)
         .with_cicp(true)
-        // AVIF's nclx (CICP) has been spec-mandated since the first MIAF/HEIF
-        // editions: the colour-information property is reader-authoritative — it
-        // overrides any in-bitstream colour and a default is always assumed — so a
-        // conforming reader honors nclx. CICP is therefore safe as the *sole* color
-        // carrier here; drop a redundant ICC, like JXL. (Contrast PNG's cICP, a far
-        // newer optional chunk that is not yet sole-safe.)
+        // AVIF's nclx is a valid carrier, but not a safe *sole* one: vips and
+        // ImageMagick act only on a `prof` and show an nclx-only Display P3 AVIF
+        // as sRGB (reader-compatibility matrix, imazen/zencodec#132). So a
+        // wide-gamut ICC is kept next to the nclx, and a CICP-only source gets a
+        // synthesized one. Only JXL is sole-safe.
         .with_cicp_is_valid_carrier(true)
-        .with_cicp_safe_sole_carrier(true)
+        .with_cicp_safe_sole_carrier(false)
         .with_stop(true)
         .with_lossy(true)
         .with_lossless(cfg!(feature = "encode-imazen"))

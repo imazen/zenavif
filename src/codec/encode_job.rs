@@ -363,7 +363,7 @@ fn resolve_avif_color(
             // Transfer-aware lowering: `synthesize_icc_for_cicp` matches the TRC, so a
             // BT.2020-PQ source never gets the SDR-TRC Rec.2020 profile. `Profile`
             // → own a copy; `NotNeeded`/`NeedsCms`/`CmsUnsupported` → no ICC (nclx
-            // still carries the color, and AVIF nclx is a sole-safe carrier).
+            // still carries the color for the readers that honour it).
             use zenpixels_convert::icc_profiles::SynthesizedIcc;
             match zenpixels_convert::icc_profiles::synthesize_icc_for_cicp(c) {
                 SynthesizedIcc::Profile(bytes) => Some(Arc::<[u8]>::from(bytes.as_ref())),
@@ -382,6 +382,29 @@ fn resolve_avif_color(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Measured defaults (imazen/zencodec#132): vips and ImageMagick act only
+    /// on an AVIF `prof`, so a wide-gamut source keeps an ICC next to the nclx.
+    #[cfg(feature = "encode")]
+    #[test]
+    fn wide_gamut_keeps_an_icc_next_to_nclx() {
+        let p3 = zencodec::Cicp::DISPLAY_P3;
+        // CICP only: an ICC is synthesized to go with the nclx.
+        let (cicp, icc) = resolve_avif_color(Some(p3), None, None);
+        assert_eq!(cicp, Some(p3));
+        assert!(icc.is_some(), "a P3 nclx needs a companion ICC");
+        // A source ICC is kept, not dropped as redundant.
+        let source: Arc<[u8]> = Arc::from(
+            zenpixels_convert::icc_profiles::DISPLAY_P3_V4
+                .to_vec()
+                .into_boxed_slice(),
+        );
+        let (_, icc) = resolve_avif_color(Some(p3), Some(source.clone()), None);
+        assert_eq!(icc.as_deref(), Some(&*source));
+        // sRGB needs no profile.
+        let (_, icc) = resolve_avif_color(Some(zencodec::Cicp::SRGB), None, None);
+        assert_eq!(icc, None);
+    }
     use imgref::Img;
     use rgb::Rgb;
     use zencodec::ImageFormat;
