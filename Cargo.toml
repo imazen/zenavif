@@ -365,11 +365,20 @@ ultrahdr-core = { version = "0.6.0", default-features = false }
 zenpixels = { version = ">=0.2.16, <0.4.0", default-features = false, features = ["imgref", "rgb"] }
 zenpixels-convert = { version = ">=0.2.16, <0.4.0", default-features = false, features = ["rgb", "hdr-experimental"] }
 linear-srgb = { version = "0.6.7"}
+# AV1 video sessions (`media` feature): the zencodec-media VideoDecoder over
+# rav1d-safe and, with `media-encode`, the VideoEncoder over zenrav1e.
+# zencodec-media is unpublished, so it is a git rev on zencodec main; the
+# zenrav1e rev is the one zenravif pins, so the graph holds one zenrav1e.
+zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914", optional = true }
+zenrav1e = { version = "0.2.0", git = "https://github.com/imazen/zenrav1e", rev = "9057c4bacf1d8a23974e32de09fd4446a1cc525a", default-features = false, optional = true }
+num-traits = { version = "0.2.19", default-features = false, optional = true }
 
 [dev-dependencies]
 anyhow = "1"
 # check_inventory: the structural-inventory conformance check.
 zencodec-testkit = ">=0.1.0, <0.3.0"
+# check_video_{decoder,encoder}_contract for the `media` sessions.
+zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
 sha2 = "0.11.0"
 zensim-target = { git = "https://github.com/imazen/zensim", rev = "8557758809156baba7364bd8cfe32889a61da4e8", default-features = false, features = ["native-probe"] }
 # Exact predictor owner required by zensim::BakeScorer; the optional auto-tune
@@ -591,6 +600,14 @@ required-features = ["encode"]
 [features]
 # Container inventory is optional for every backend.
 inventory = []
+# AV1 video sessions for zencodec-media: `media::Av1VideoDecoder` (rav1d-safe).
+# Experimental: zencodec-media is an unpublished git dependency.
+media = ["dep:zencodec-media"]
+# `media::Av1VideoEncoder` over zenrav1e.
+media-encode = ["media", "dep:zenrav1e", "dep:num-traits"]
+# Runs tests/media_corpus.rs against the 48-file lossless AV1 corpus, which is
+# not committed: `just media-corpus` points ZENAVIF_AV1_MEDIA_CORPUS at it.
+_media-corpus = ["media"]
 default = ["avx512"]
 # AVX-512 kernel tiers (v4x/v4) for the in-house YUV converters — safe,
 # runtime-dispatched (used only when the CPU reports support). Default-on;
@@ -742,7 +759,7 @@ required-features = ["encode", "zenav1-aom"]
 zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "6bbcacb11313923ded6e5eeebb725878c5736453" }
 zenanalyze = { git = "https://github.com/imazen/zenanalyze", rev = "6bbcacb11313923ded6e5eeebb725878c5736453" }
 zenpng = { git = "https://github.com/imazen/zenpng", rev = "8c9b9a87460116d45d1e58afd8058002b083c4a6" }
-ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "e6abe1cd7103c57beb04e09e73f571a26a0cf1e0" }
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "10a79c3a888dd589884fd032846eec70bc31eb13" }
 # Coordinated exact animation timing; unify shared types with the native media stack.
 zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "9fa4fcb489a0d8986c28e50f9bfa2413a0492e16" }
 zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "9fa4fcb489a0d8986c28e50f9bfa2413a0492e16" }
@@ -763,11 +780,12 @@ zenavif-serialize = { path = "zenavif-serialize" }
 # zenravif now uses the canonical serializer Git revision with animation
 # metadata/HDR/premultiplication support. Unify it with the workspace member
 # used by native SVT and tests, avoiding duplicate serializer packages.
-# Structural inventory API (imazen/zencodec#133, branch `feat/inventory`).
-# TEMPORARY: swap both entries for the released zencodec / zencodec-testkit
-# before this merges.
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "fa49f7ce0fc75e65b88da1a0eb90b17378297ceb" }
-zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "fa49f7ce0fc75e65b88da1a0eb90b17378297ceb" }
+# Structural inventory API and the zencodec-media sessions, both on zencodec
+# main (unpublished; 0.1.27 is staged). TEMPORARY: swap both entries for the
+# released zencodec / zencodec-testkit at that publish. zencodec-media must
+# come from the same rev, or the graph holds two zencodec copies.
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
 
 [patch."https://github.com/imazen/zenavif"]
 zenavif-serialize = { path = "zenavif-serialize" }
@@ -798,3 +816,15 @@ debug = "line-tables-only"
 [[example]]
 name = "inventory"
 required-features = ["inventory"]
+
+[[test]]
+name = "media_session"
+required-features = ["media-encode"]
+
+[[test]]
+name = "media_corpus"
+required-features = ["_media-corpus"]
+
+[[example]]
+name = "media_ivf"
+required-features = ["media-encode"]

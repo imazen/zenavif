@@ -45,6 +45,6 @@ zenavif-serialize = { path = "../../zenavif-serialize" }
 # root `[patch.crates-io]`): zenavif main uses zencodec APIs the registry
 # 0.1.26 lacks (`animation`, timed frames, inventory), and one rev of each
 # keeps the graph to a single copy.
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "fa49f7ce0fc75e65b88da1a0eb90b17378297ceb" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
 zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "9fa4fcb489a0d8986c28e50f9bfa2413a0492e16" }
 zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "9fa4fcb489a0d8986c28e50f9bfa2413a0492e16" }

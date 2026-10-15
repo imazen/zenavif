@@ -88,6 +88,11 @@ jobs:
       # (up from 448) with no new failures.
       - name: Inventory disabled without the feature
         run: cargo test --test inventory_feature
+      - name: Test media sessions (zencodec-media AV1 decoder; zenrav1e and zenav1-svt encoders)
+        run: |
+          cargo test --features media-encode --test media_session
+          cargo test --features media-encode,zenav1-svt --test media_session
+          cargo test --features media-encode --lib media::
       - name: Test (AV1 backend seams — aom decode + svt-rs encode + aom encode)
         run: cargo test --features inventory,zenav1-aom,zenav1-aom-encode,encode,encode-imazen,zenav1-svt,target-quality,encode-mono
       - name: Assert the aom encode gate actually ran
@@ -219,6 +224,8 @@ jobs:
         run: cargo check
       - name: Check --no-default-features
         run: cargo check --no-default-features
+      - name: Check media without the encoder
+        run: cargo check --no-default-features --features media
       - name: Check zenavif-parse --features c_api
         run: cargo check -p zenavif-parse --features c_api
       # `__expert` appeared in NO job before 2026-09-02, and it gates
@@ -345,6 +352,10 @@ jobs:
           bash scripts/download-linku-samples.sh
       - name: Clippy (default)
         run: cargo clippy --lib --tests --examples -- -D warnings
+      - name: Clippy (media sessions)
+        run: |
+          cargo clippy --features media-encode --lib --tests --examples -- -D warnings
+          cargo clippy --features media-encode,zenav1-svt --lib --tests --examples -- -D warnings
       - name: Clippy (members)
         run: |
           cargo clippy -p zenavif-parse --all-features --all-targets -- -D warnings
