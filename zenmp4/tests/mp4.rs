@@ -583,3 +583,250 @@ fn limits_are_enforced_before_allocation() {
     assert!(limit(MediaLimits::default().with_max_header_bytes(64)).contains("Limit"));
     assert!(limit(MediaLimits::default().with_max_packet_bytes(8)).contains("Limit"));
 }
+
+mod muxer {
+    use super::*;
+    use std::sync::Arc;
+    use zencodec_media::container::{MuxHint, Muxer, apply_finish};
+    use zencodec_media::session::SessionError;
+    use zencodec_media::track::{AudioTrackInfo, ChannelLayout, VideoTrackInfo};
+    use zencodec_media_testkit::check_muxer_output_honesty;
+    use zenmp4::{Mp4Error, Mp4Muxer};
+
+    fn opus_head() -> Vec<u8> {
+        [
+            &b"OpusHead"[..],
+            &[1, 2],
+            &312u16.to_le_bytes(),
+            &48_000u32.to_le_bytes(),
+            &[0, 0, 0],
+        ]
+        .concat()
+    }
+
+    fn tracks(av1c: Option<&[u8]>) -> Vec<TrackInfo> {
+        let mut v = TrackInfo::video(
+            0,
+            CodecId::Av1,
+            TimeBase::new(1, 1000).unwrap(),
+            VideoTrackInfo::new(64, 48).with_color(Cicp::new(1, 1, 1, false)),
+        )
+        .with_edit_delay_ticks(80);
+        if let Some(c) = av1c {
+            v = v.with_codec_private(Arc::from(c));
+        }
+        vec![
+            v.build().unwrap(),
+            TrackInfo::audio(
+                1,
+                CodecId::Opus,
+                TimeBase::new(1, 48_000).unwrap(),
+                AudioTrackInfo::new(48_000, ChannelLayout::new(2)),
+            )
+            .with_codec_private(Arc::from(opus_head()))
+            .build()
+            .unwrap(),
+        ]
+    }
+
+    /// A sequence header OBU from FFmpeg/libaom (8-bit 4:2:0), as a key
+    /// frame's prefix.
+    const SEQ: [u8; 12] = [
+        0x0a, 0x0a, 0x00, 0x00, 0x00, 0x03, 0x2d, 0xff, 0xcd, 0xaf, 0x90, 0x04,
+    ];
+
+    /// Video every 40 ms with B-frame composition offsets and a key frame
+    /// every 4; Opus every 20 ms. Interleaved by decode time.
+    fn packets(n_video: usize) -> Vec<Packet> {
+        let ms = TimeBase::new(1, 1000).unwrap();
+        let khz48 = TimeBase::new(1, 48_000).unwrap();
+        let cts = [80i64, 0, 0, 40];
+        let mut out = Vec::new();
+        for i in 0..n_video {
+            let dts = 40 * i as i64;
+            let mut body = vec![0x12, 0x00];
+            if i % 4 == 0 {
+                body.extend_from_slice(&SEQ);
+            }
+            body.extend((0..10 + i % 7).map(|j| (i * 3 + j) as u8));
+            out.push(
+                Packet::from_vec(body)
+                    .unwrap()
+                    .with_track(0)
+                    .with_dts(Timestamp::new(dts, ms))
+                    .with_pts(Timestamp::new(dts + cts[i % 4], ms))
+                    .with_random_access(if i % 4 == 0 {
+                        RandomAccess::Yes
+                    } else {
+                        RandomAccess::No
+                    }),
+            );
+            for k in 0..2 {
+                let n = 2 * i + k;
+                out.push(
+                    Packet::from_vec((0..3 + n % 5).map(|j| (100 + n + j) as u8).collect())
+                        .unwrap()
+                        .with_track(1)
+                        .with_pts(Timestamp::new(960 * n as i64, khz48))
+                        .with_random_access(RandomAccess::Yes),
+                );
+            }
+        }
+        out
+    }
+
+    fn mux(
+        m: Mp4Muxer,
+        tracks: &[TrackInfo],
+        packets: &[Packet],
+        hint: MuxHint,
+    ) -> Result<Vec<u8>, String> {
+        let mut m = m;
+        m.begin(tracks, hint).map_err(|e| format!("{e:?}"))?;
+        let mut out = Vec::new();
+        for p in packets {
+            m.write_packet(p.clone(), &Unstoppable)
+                .map_err(|e| format!("{e:?}"))?;
+            m.take_output(&mut out);
+        }
+        apply_finish(
+            &mut out,
+            m.finish(&Unstoppable).map_err(|e| format!("{e:?}"))?,
+        )
+        .map_err(|e| format!("{e:?}"))?;
+        Ok(out)
+    }
+
+    fn key(p: &Packet) -> (u32, i64, i64, Vec<u8>, bool) {
+        (
+            p.track(),
+            p.pts().unwrap().ticks(),
+            p.dts().map_or(p.pts().unwrap().ticks(), |d| d.ticks()),
+            p.bytes().to_vec(),
+            p.random_access() == RandomAccess::Yes,
+        )
+    }
+
+    #[test]
+    fn written_files_read_back_packet_for_packet() {
+        let av1c = [&[0x81u8, 0x00, 0x0c, 0x00][..], &SEQ].concat();
+        let input = packets(9);
+        let mut want: Vec<_> = input.iter().map(key).collect();
+        want.sort_by_key(|k| (k.0, k.2));
+        for (name, m, hint) in [
+            ("progressive", Mp4Muxer::new(), MuxHint::default()),
+            ("forward-only", Mp4Muxer::new(), MuxHint::forward_only()),
+            ("fragmented", Mp4Muxer::fragmented(), MuxHint::default()),
+        ] {
+            let file = mux(m, &tracks(Some(&av1c)), &input, hint).unwrap();
+            let (t, p) = demux(&file).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let mut got: Vec<_> = p.iter().map(key).collect();
+            got.sort_by_key(|k| (k.0, k.2));
+            assert_eq!(got, want, "{name}");
+            assert_eq!(
+                t[0].codec_private().map(|c| c.to_vec()),
+                Some(av1c.clone()),
+                "{name}"
+            );
+            assert_eq!(
+                t[1].codec_private().map(|c| c.to_vec()),
+                Some(opus_head()),
+                "{name}"
+            );
+            assert_eq!(t[0].edit_delay_ticks(), Some(80), "{name}");
+            assert_eq!(
+                t[0].video_info().unwrap().color,
+                Some(Cicp::new(1, 1, 1, false)),
+                "{name}"
+            );
+            // Durations are the steps between decode times; the last repeats.
+            let video: Vec<_> = p.iter().filter(|p| p.track() == 0).collect();
+            let durations: Vec<_> = video.iter().map(|p| p.duration_ticks()).collect();
+            assert!(
+                durations.iter().all(|d| *d == Some(40)),
+                "{name}: {durations:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_av1_track_without_a_record_gets_one_from_its_sequence_header() {
+        let av1c = [&[0x81u8, 0x00, 0x0c, 0x00][..], &SEQ].concat();
+        for m in [Mp4Muxer::new(), Mp4Muxer::fragmented()] {
+            let file = mux(m, &tracks(None), &packets(5), MuxHint::default()).unwrap();
+            let (t, _) = demux(&file).unwrap();
+            assert_eq!(t[0].codec_private().map(|c| c.to_vec()), Some(av1c.clone()));
+        }
+        // No sequence header anywhere: refused, not guessed.
+        let mut bare = packets(1);
+        bare[0] = Packet::from_vec(vec![0x12, 0x00, 0x32, 0x01, 0x00])
+            .unwrap()
+            .with_track(0)
+            .with_pts(Timestamp::new(0, TimeBase::new(1, 1000).unwrap()));
+        let e = mux(Mp4Muxer::new(), &tracks(None), &bare, MuxHint::default()).unwrap_err();
+        assert!(e.contains("Missing(\"av1C\")"), "{e}");
+    }
+
+    #[test]
+    fn the_muxer_output_is_honest() {
+        let av1c = [&[0x81u8, 0x00, 0x0c, 0x00][..], &SEQ].concat();
+        for make in [Mp4Muxer::new as fn() -> Mp4Muxer, Mp4Muxer::fragmented] {
+            check_muxer_output_honesty(make, &tracks(Some(&av1c)), &packets(9)).unwrap();
+        }
+    }
+
+    #[test]
+    fn what_mp4_cannot_carry_is_refused() {
+        let av1c = [&[0x81u8, 0x00, 0x0c, 0x00][..], &SEQ].concat();
+        let ok = tracks(Some(&av1c));
+        // A clock that is not 1/timescale.
+        let ntsc = vec![
+            TrackInfo::video(
+                0,
+                CodecId::Av1,
+                TimeBase::new(1001, 30_000).unwrap(),
+                VideoTrackInfo::new(64, 48),
+            )
+            .with_codec_private(Arc::from(av1c.as_slice()))
+            .build()
+            .unwrap(),
+        ];
+        let mut m = Mp4Muxer::new();
+        assert!(matches!(
+            m.begin(&ntsc, MuxHint::default()),
+            Err(SessionError::Codec(Mp4Error::UnsupportedTimeBase))
+        ));
+        // Decode times must increase.
+        let mut p = packets(2);
+        p.swap(0, 3);
+        let e = mux(Mp4Muxer::new(), &ok, &p, MuxHint::default()).unwrap_err();
+        assert!(e.contains("DecodeOrder"), "{e}");
+        // Opus needs its OpusHead; a codec with no sample entry is refused.
+        let mut bad = ok.clone();
+        bad[1] = TrackInfo::audio(
+            1,
+            CodecId::Opus,
+            TimeBase::new(1, 48_000).unwrap(),
+            AudioTrackInfo::new(48_000, ChannelLayout::new(2)),
+        )
+        .with_codec_private(Arc::from(&b"not opus"[..]))
+        .build()
+        .unwrap();
+        assert!(matches!(
+            Mp4Muxer::new().begin(&bad, MuxHint::default()),
+            Err(SessionError::Codec(Mp4Error::BadCodecPrivate))
+        ));
+        bad[1] = TrackInfo::audio(
+            1,
+            CodecId::Pcm,
+            TimeBase::new(1, 48_000).unwrap(),
+            AudioTrackInfo::new(48_000, ChannelLayout::new(2)),
+        )
+        .build()
+        .unwrap();
+        assert!(matches!(
+            Mp4Muxer::new().begin(&bad, MuxHint::default()),
+            Err(SessionError::Codec(Mp4Error::UnsupportedCodec))
+        ));
+    }
+}

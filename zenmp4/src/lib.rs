@@ -13,7 +13,14 @@
 //!   `avcC` and `hvcC` payloads as they are, Opus `dOps` as an `OpusHead`,
 //!   AAC `esds` as its AudioSpecificConfig, FLAC `dfLa` as `fLaC` plus its
 //!   metadata blocks.
-//! - The muxer is not written yet.
+//! - [`Mp4Muxer`] writes progressive files (`mdat` streamed, `moov` at the
+//!   end, one patch for the `mdat` size) or, for destinations that cannot
+//!   seek back, fragmented ones (`moov` first, a fragment per video
+//!   random-access point, no patches). Sample durations come from the next
+//!   sample's decode time, so they are exact; the last uses its packet's
+//!   duration or the step before. An AV1 track without an `av1C` gets one
+//!   built from its first sequence header (the fragmented `moov` waits
+//!   for it).
 #![no_std]
 #![forbid(unsafe_code)]
 
@@ -24,10 +31,13 @@ use core::fmt;
 
 use zencodec_media::track::{CodecId, CodecTag};
 
+mod av1;
 mod boxes;
 mod demux;
+mod mux;
 
 pub use demux::Mp4Demuxer;
+pub use mux::Mp4Muxer;
 
 /// Malformed or unsupported MP4.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -62,6 +72,16 @@ pub enum Mp4Error {
     HeadersFirst,
     /// No sample satisfies the seek.
     NoSuchSample,
+    /// The muxer has no MP4 sample entry for this codec.
+    UnsupportedCodec,
+    /// Width or height over 65535.
+    DimensionsTooLarge,
+    /// `codec_private` is not in the form this codec's sample entry needs.
+    BadCodecPrivate,
+    /// A track clock other than `1/timescale`.
+    UnsupportedTimeBase,
+    /// Decode times that do not increase within a track.
+    DecodeOrder,
 }
 
 impl fmt::Display for Mp4Error {
@@ -85,6 +105,13 @@ impl fmt::Display for Mp4Error {
             Self::Overflow => f.write_str("MP4 timestamp or offset overflows"),
             Self::HeadersFirst => f.write_str("seek before the MP4 headers were read"),
             Self::NoSuchSample => f.write_str("no MP4 sample satisfies the seek"),
+            Self::UnsupportedCodec => f.write_str("no MP4 sample entry for this codec"),
+            Self::DimensionsTooLarge => f.write_str("MP4 sample entries hold 16-bit dimensions"),
+            Self::BadCodecPrivate => {
+                f.write_str("codec_private is not in the form the MP4 sample entry needs")
+            }
+            Self::UnsupportedTimeBase => f.write_str("MP4 track clocks must be 1/timescale"),
+            Self::DecodeOrder => f.write_str("MP4 decode times must increase within a track"),
         }
     }
 }
