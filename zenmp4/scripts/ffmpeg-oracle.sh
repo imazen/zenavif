@@ -100,4 +100,43 @@ for f in *.zen-*.mp4; do
     echo "FAIL $f: decoded frames differ from $orig ($(head -c 300 "$f.decode.err"))"; fail=1
   fi
 done
+# 3. Seeking, FFmpeg's files and zenmp4's copies (fragmented ones seek by
+#    indexing every moof): on each file's first stream, seek at or before
+#    25%, 50% and 90% of its packets' times. A random-access seek must land
+#    on the last ffprobe key packet at or before the target, an `any` seek
+#    on the last packet at or before it, and the next packet must be that
+#    one. Targets go to zenmp4 with the track's edit delay added back.
+(cd "$here" && cargo build -q --release --example mp4_seek)
+seek=$bin/mp4_seek
+for f in *.mp4; do
+  [ -s "$f.zen.txt" ] || continue
+  edit=$(python3 -c "
+import sys
+for line in open('$f.zen.txt'):
+    if line.startswith('track 0 '):
+        e = [p for p in line.split() if p.startswith('edit=')][0][5:]
+        print(int(e[5:-1]) if e.startswith('Some(') else 0)")
+  ffprobe -v error -select_streams 0 -show_entries packet=pts,flags -of csv=p=0 "$f" > "$f.seek.csv"
+  for q in 25 50 90; do
+    for scope in key any; do
+      got=$("$seek" "$f" 0 "$(python3 -c "
+import csv; p=[int(r[0]) for r in csv.reader(open('$f.seek.csv'))]; p.sort(); print(p[len(p)*$q//100] + $edit)")" \
+        $([ $scope = any ] && echo any) 2>&1) || { echo "FAIL $f seek $q% $scope: $got"; fail=1; continue; }
+      if python3 - "$f" "$q" "$scope" "$edit" "$got" <<'PY'
+import csv, sys
+f, q, scope, edit, got = sys.argv[1], int(sys.argv[2]), sys.argv[3], int(sys.argv[4]), sys.argv[5]
+rows = [(int(r[0]), "K" in r[1]) for r in csv.reader(open(f + ".seek.csv"))]
+times = sorted(t for t, _ in rows)
+target = times[len(times) * q // 100]
+want = max(t for t, k in rows if t <= target and (k or scope == "any"))
+(landed, _, lk), (nxt, _, nk) = [tuple(int(x) for x in line.split()) for line in got.splitlines()]
+landed -= edit; nxt -= edit
+ok = landed == want and nxt == landed and (lk == 1 or scope == "any") and lk == nk
+print(("ok   " if ok else "FAIL ") + f"{f}: seek {q}% {scope}: target {target}, landed {landed}, ffprobe says {want}")
+sys.exit(0 if ok else 1)
+PY
+      then :; else fail=1; fi
+    done
+  done
+done
 exit $fail

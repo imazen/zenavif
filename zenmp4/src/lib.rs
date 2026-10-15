@@ -12,7 +12,8 @@
 //!   Codec configuration records become `codec_private`: `av1C`, `vpcC`,
 //!   `avcC` and `hvcC` payloads as they are, Opus `dOps` as an `OpusHead`,
 //!   AAC `esds` as its AudioSpecificConfig, FLAC `dfLa` as `fLaC` plus its
-//!   metadata blocks.
+//!   metadata blocks. Seeking works in both layouts: a fragmented file's
+//!   first seek indexes every `moof`, skipping each `mdat`.
 //! - [`Mp4Muxer`] writes progressive files (`mdat` streamed, `moov` at the
 //!   end, one patch for the `mdat` size) or, for destinations that cannot
 //!   seek back, fragmented ones (`moov` first, a fragment per video

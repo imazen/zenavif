@@ -533,6 +533,71 @@ fn seeking_lands_on_real_samples() {
     check_demuxer_seek(|| Mp4Demuxer::new(MediaLimits::default()), &file, &targets).unwrap();
 }
 
+#[test]
+fn seeking_a_fragmented_file_indexes_its_fragments() {
+    let (file, want) = fragmented();
+    let tb = TimeBase::new(1, 90_000).unwrap();
+    let at = |t: i64, mode, scope| SeekTarget::new(0, Timestamp::new(t, tb), mode, scope);
+    let targets = [
+        // Into the second fragment, then back into the first, then forward.
+        at(
+            1_011_000,
+            SeekMode::AtOrBefore,
+            SeekScope::RandomAccessPoints,
+        ),
+        at(0, SeekMode::AtOrAfter, SeekScope::Any),
+        at(
+            1_007_000,
+            SeekMode::AtOrBefore,
+            SeekScope::RandomAccessPoints,
+        ),
+        at(1_012_500, SeekMode::Nearest, SeekScope::Any),
+    ];
+    check_demuxer_seek(|| Mp4Demuxer::new(MediaLimits::default()), &file, &targets).unwrap();
+
+    // After a seek the rest of the file comes out exactly as a straight
+    // read gives it, with the fragment index's decode times and ordinals,
+    // and the demuxer finishes instead of scanning past the end again.
+    for (target, from) in [(targets[0], 3), (targets[1], 1), (targets[2], 0)] {
+        let mut dem = Mp4Demuxer::new(MediaLimits::default());
+        let mut cursor = SliceCursor::new(16);
+        let mut next = || {
+            let y = cursor
+                .next(&file, &mut DemuxStage(&mut dem), &Unstoppable)
+                .unwrap();
+            (y.is_finished(), y.into_inner())
+        };
+        // Read one packet so the seek interrupts a fragment in progress.
+        while !matches!(next().1, DemuxEvent::Packet(_)) {}
+        drop(next);
+        use zencodec_media::container::{Demuxer, SeekStatus};
+        let status = dem.seek(&target).unwrap();
+        assert!(matches!(status, SeekStatus::Scanning), "{status:?}");
+        let mut out = Vec::new();
+        let mut seeked = None;
+        loop {
+            let y = cursor
+                .next(&file, &mut DemuxStage(&mut dem), &Unstoppable)
+                .unwrap();
+            let done = y.is_finished();
+            match y.into_inner() {
+                DemuxEvent::Seeked(r) => seeked = Some(r),
+                DemuxEvent::Packet(p) => out.push(got(&p)),
+                _ => {}
+            }
+            if done {
+                break;
+            }
+        }
+        let r = seeked.expect("the scan reports its position");
+        assert_eq!(r.ordinal, want[from].ordinal);
+        assert_eq!(out, want[from..], "seek to {target:?}");
+        // A second seek reuses the index: no scan.
+        let again = dem.seek(&target).unwrap();
+        assert!(matches!(again, SeekStatus::Positioned(_)), "{again:?}");
+    }
+}
+
 fn refused(file: &[u8]) -> String {
     demux(file).err().unwrap_or_else(|| panic!("accepted"))
 }

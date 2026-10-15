@@ -44,6 +44,15 @@
   ultrahdr-core to `10a79c3a` (its zenmeta on the same zencodec), in the root
   and fuzz manifests.
 
+## zenmp4 (unreleased, new workspace member)
+
+- `Mp4Demuxer`: progressive and fragmented MP4, sans-I/O, with seeking in
+  both layouts (a fragmented file's first seek indexes every `moof`).
+  `Mp4Muxer`: progressive, or fragmented for destinations that cannot seek
+  back; builds `av1C` from the first sequence header when a track has none.
+  `zenmp4/scripts/ffmpeg-oracle.sh` checks both directions and 162 seeks
+  against FFmpeg 8.0.1 / ffprobe.
+
 ## Main CI repair (unreleased)
 
 - Unspecified CICP primaries (H.273 code 2) label the descriptor `Unknown`

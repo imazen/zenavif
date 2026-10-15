@@ -63,6 +63,8 @@ struct TrackState {
 enum Phase {
     Scan,
     Emit,
+    /// A seek in a fragmented file is indexing every `moof`.
+    Index,
     Done,
 }
 
@@ -79,9 +81,18 @@ pub struct Mp4Demuxer {
     fragmented: bool,
     /// Samples still to emit, in file order.
     pending: VecDeque<Sample>,
-    /// Every sample of a progressive file, in file order (for seeking).
+    /// Every sample in file order, for seeking: from `moov` in a
+    /// progressive file, from the fragment index in a fragmented one.
     all: Vec<Sample>,
     phase: Phase,
+    /// Offset after `moov`, where a fragment index scan starts.
+    moov_end: u64,
+    /// Track states as `moov` left them, for a fragment index scan.
+    initial_states: Vec<TrackState>,
+    /// Every fragment is in `all`.
+    indexed: bool,
+    index_pos: u64,
+    pending_seek: Option<SeekTarget>,
 }
 
 impl Mp4Demuxer {
@@ -99,6 +110,11 @@ impl Mp4Demuxer {
             pending: VecDeque::new(),
             all: Vec::new(),
             phase: Phase::Scan,
+            moov_end: 0,
+            initial_states: Vec::new(),
+            indexed: false,
+            index_pos: 0,
+            pending_seek: None,
         }
     }
 
@@ -164,6 +180,7 @@ impl Mp4Demuxer {
                 self.pos = next;
                 if &h.kind == b"moov" {
                     self.movie(body)?;
+                    self.moov_end = next;
                     self.phase = if self.pending.is_empty() && self.fragmented {
                         Phase::Scan
                     } else {
@@ -171,7 +188,8 @@ impl Mp4Demuxer {
                     };
                     Ok(DemuxProgress::new(len, DemuxEvent::Headers))
                 } else {
-                    self.fragment(body, start)?;
+                    let samples = self.fragment(body, start)?;
+                    self.pending.extend(samples);
                     self.phase = Phase::Emit;
                     self.emit_or_request(len, input.total_len)
                 }
@@ -203,7 +221,7 @@ impl Mp4Demuxer {
                 Ok(DemuxProgress::need(consumed))
             }
             None => {
-                self.phase = if self.fragmented {
+                self.phase = if self.fragmented && !self.indexed {
                     Phase::Scan
                 } else {
                     Phase::Done
@@ -219,7 +237,7 @@ impl Mp4Demuxer {
             past_end(s, input.total_len)?;
         }
         let Some(&s) = self.pending.front() else {
-            if self.fragmented {
+            if self.fragmented && !self.indexed {
                 self.phase = Phase::Scan;
                 return self.need(Request::at_least(self.pos, 16));
             }
@@ -311,16 +329,117 @@ impl Mp4Demuxer {
             self.tracks.push(parsed.info);
         }
         self.movie = true;
+        self.initial_states = self.states.clone();
         samples.sort_by_key(|s: &Sample| s.offset);
-        if !self.fragmented {
-            self.all = samples.clone();
-        }
+        // A fragmented file's index extends these with every `moof`.
+        self.all = samples.clone();
         self.pending = samples.into();
         Ok(())
     }
 
-    /// Parse `moof` (at file offset `moof_start`) into pending samples.
-    fn fragment(&mut self, body: &[u8], moof_start: u64) -> Res<()> {
+    /// One step of a fragment index scan: parse each `moof` from the end of
+    /// `moov` to the end of the file into `all`, skipping everything else.
+    fn index_step(&mut self, input: Input<'_>) -> Res<DemuxProgress> {
+        let pos = self.index_pos;
+        if input.offset != pos {
+            return self.need(Request::at_least(pos, 16));
+        }
+        let b = input.bytes;
+        if b.is_empty() && input.reaches_end() {
+            self.all.sort_by_key(|s| s.offset);
+            self.indexed = true;
+            let target = self
+                .pending_seek
+                .take()
+                .expect("an index scan serves a seek");
+            let r = self.position(&target)?;
+            return Ok(DemuxProgress::new(0, DemuxEvent::Seeked(r)));
+        }
+        let h = match boxes::header(b).map_err(SessionError::Codec)? {
+            Some(h) => h,
+            None if input.reaches_end() => return err(Mp4Error::Truncated),
+            None => return self.need(Request::at_least(pos, 16)),
+        };
+        let size = match (h.size, input.total_len) {
+            (Some(s), _) => s,
+            (None, Some(total)) => total - pos,
+            (None, None) => return self.need(Request::Len),
+        };
+        let next = pos
+            .checked_add(size)
+            .ok_or(SessionError::Codec(Mp4Error::Overflow))?;
+        if input.total_len.is_some_and(|t| next > t) {
+            return err(Mp4Error::Truncated);
+        }
+        if &h.kind == b"moof" {
+            self.limits
+                .check_header_bytes(size)
+                .map_err(SessionError::Limit)?;
+            let len = usize::try_from(size).map_err(|_| SessionError::Codec(Mp4Error::Overflow))?;
+            if b.len() < len {
+                return self.need(Request::at_least(pos, len));
+            }
+            let samples = self.fragment(&b[h.header_len..len], pos)?;
+            self.limits
+                .check_table_entries((self.all.len() + samples.len()) as u64)
+                .map_err(SessionError::Limit)?;
+            self.all.extend(samples);
+        }
+        self.index_pos = next;
+        self.need(Request::at_least(next, 16))
+    }
+
+    /// Choose the sample `target` names in `all` and resume emitting there.
+    fn position(&mut self, target: &SeekTarget) -> Res<SeekResult> {
+        let track = target.track as usize;
+        let tb = self
+            .tracks
+            .get(track)
+            .ok_or(SessionError::Codec(Mp4Error::NoSuchSample))?
+            .time_base();
+        let t = target.time;
+        let value = |pts: i64| {
+            i128::from(pts) * i128::from(tb.numerator()) * i128::from(t.base().denominator())
+        };
+        let want =
+            i128::from(t.ticks()) * i128::from(t.base().numerator()) * i128::from(tb.denominator());
+        let candidates = self.all.iter().enumerate().filter(|(_, s)| {
+            s.track == track && (s.sync || matches!(target.scope, SeekScope::Any))
+        });
+        let chosen = match target.mode {
+            SeekMode::Nearest => candidates.min_by(|(_, a), (_, b)| {
+                (value(a.pts) - want)
+                    .abs()
+                    .cmp(&(value(b.pts) - want).abs())
+                    .then(a.pts.cmp(&b.pts))
+            }),
+            SeekMode::AtOrBefore => candidates
+                .filter(|(_, s)| value(s.pts) <= want)
+                .max_by_key(|(_, s)| s.pts),
+            SeekMode::AtOrAfter => candidates
+                .filter(|(_, s)| value(s.pts) >= want)
+                .min_by_key(|(_, s)| s.pts),
+            _ => return Err(SessionError::Unsupported(UnsupportedMedia::Seek)),
+        };
+        let (at, s) = chosen.ok_or(SessionError::Codec(Mp4Error::NoSuchSample))?;
+        let s = *s;
+        self.pending = self.all[at..].iter().copied().collect();
+        self.phase = Phase::Emit;
+        Ok(SeekResult::new(
+            Timestamp::new(s.pts, tb),
+            s.ordinal,
+            if s.sync {
+                RandomAccess::Yes
+            } else {
+                RandomAccess::No
+            },
+            0,
+        ))
+    }
+
+    /// Parse `moof` (at file offset `moof_start`) into samples, in file
+    /// order, advancing the tracks' decode times and ordinals.
+    fn fragment(&mut self, body: &[u8], moof_start: u64) -> Res<Vec<Sample>> {
         let c = SessionError::Codec;
         let mut out = Vec::new();
         for child in children(body) {
@@ -446,8 +565,7 @@ impl Mp4Demuxer {
             }
         }
         out.sort_by_key(|s| s.offset);
-        self.pending.extend(out);
-        Ok(())
+        Ok(out)
     }
 }
 
@@ -1043,6 +1161,7 @@ impl Demuxer for Mp4Demuxer {
         match self.phase {
             Phase::Scan => self.scan(input),
             Phase::Emit => self.emit(input),
+            Phase::Index => self.index_step(input),
             Phase::Done => Ok(DemuxProgress::new(0, DemuxEvent::Done)),
         }
     }
@@ -1060,56 +1179,23 @@ impl Demuxer for Mp4Demuxer {
         AccessPattern::RandomAccess
     }
 
+    /// Seek by time. A progressive file seeks in its `moov` tables at once.
+    /// A fragmented file's first seek indexes every `moof` from the end of
+    /// `moov` to the end of the file (range requests; `mdat` is skipped),
+    /// with exact decode times and per-track ordinals; later seeks reuse
+    /// the index.
     fn seek(&mut self, target: &SeekTarget) -> Res<SeekStatus> {
         if !self.movie {
             return err(Mp4Error::HeadersFirst);
         }
-        if self.fragmented {
-            return Err(SessionError::Unsupported(UnsupportedMedia::Seek));
+        if self.fragmented && !self.indexed {
+            self.pending_seek = Some(*target);
+            self.pending.clear();
+            self.states = self.initial_states.clone();
+            self.index_pos = self.moov_end;
+            self.phase = Phase::Index;
+            return Ok(SeekStatus::Scanning);
         }
-        let track = target.track as usize;
-        let tb = self
-            .tracks
-            .get(track)
-            .ok_or(SessionError::Codec(Mp4Error::NoSuchSample))?
-            .time_base();
-        let t = target.time;
-        let value = |pts: i64| {
-            i128::from(pts) * i128::from(tb.numerator()) * i128::from(t.base().denominator())
-        };
-        let want =
-            i128::from(t.ticks()) * i128::from(t.base().numerator()) * i128::from(tb.denominator());
-        let candidates = self.all.iter().enumerate().filter(|(_, s)| {
-            s.track == track && (s.sync || matches!(target.scope, SeekScope::Any))
-        });
-        let chosen = match target.mode {
-            SeekMode::Nearest => candidates.min_by(|(_, a), (_, b)| {
-                (value(a.pts) - want)
-                    .abs()
-                    .cmp(&(value(b.pts) - want).abs())
-                    .then(a.pts.cmp(&b.pts))
-            }),
-            SeekMode::AtOrBefore => candidates
-                .filter(|(_, s)| value(s.pts) <= want)
-                .max_by_key(|(_, s)| s.pts),
-            SeekMode::AtOrAfter => candidates
-                .filter(|(_, s)| value(s.pts) >= want)
-                .min_by_key(|(_, s)| s.pts),
-            _ => return Err(SessionError::Unsupported(UnsupportedMedia::Seek)),
-        };
-        let (at, s) = chosen.ok_or(SessionError::Codec(Mp4Error::NoSuchSample))?;
-        let s = *s;
-        self.pending = self.all[at..].iter().copied().collect();
-        self.phase = Phase::Emit;
-        Ok(SeekStatus::Positioned(SeekResult::new(
-            Timestamp::new(s.pts, tb),
-            s.ordinal,
-            if s.sync {
-                RandomAccess::Yes
-            } else {
-                RandomAccess::No
-            },
-            0,
-        )))
+        Ok(SeekStatus::Positioned(self.position(target)?))
     }
 }

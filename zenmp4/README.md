@@ -8,6 +8,9 @@ demuxer asks for byte ranges, and any `zencodec-io` driver (slice,
 - Fragmented files (`moov` with `mvex`, then `moof` + `mdat`).
 - Packets in file order, with pts, dts, duration and random-access
   evidence.
+- Seeking by time in both layouts. A fragmented file's first seek indexes
+  every `moof` (range requests that skip each `mdat`), and later seeks
+  reuse that index.
 - Edit lists carried as the track's edit delay, not applied.
 - Configuration records as `codec_private`: `av1C`, `vpcC`, `avcC` and
   `hvcC` as they are; Opus `dOps` as an `OpusHead`; AAC `esds` as its
@@ -16,7 +19,8 @@ demuxer asks for byte ranges, and any `zencodec-io` driver (slice,
 `scripts/ffmpeg-oracle.sh` checks both directions (`just mp4-ffmpeg-oracle`
 from the zenavif root). ffprobe must read FFmpeg-written files the same way
 zenmp4 does. zenmp4's stream copies, in both layouts, must read the same in
-ffprobe and decode to the original's frames in FFmpeg.
+ffprobe and decode to the original's frames in FFmpeg. Seeks into every
+file must land where ffprobe's packet list says they should.
 
 The muxer writes either layout:
 - Progressive: `mdat` streamed, `moov` at the end, one patch for the
