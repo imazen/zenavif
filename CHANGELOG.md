@@ -1,5 +1,30 @@
 # Changelog
 
+## AV1 media sessions (unreleased)
+
+- New `media` feature: `media::Av1VideoDecoder`, rav1d-safe behind
+  zencodec-media's `VideoDecoder`. Frames map rav1d's picture buffers without
+  copying and outlive the decoder; `av1C` configOBUs are prepended after
+  `configure` and `reset`; the container's colour fills only unspecified
+  fields.
+- New `media-encode` feature: `media::Av1VideoEncoder` and
+  `Av1EncodeSettings`, zenrav1e behind `VideoEncoder` (8/10/12-bit; mono,
+  4:2:0, 4:2:2, 4:4:4). Packets carry the frame's pts and duration and are
+  random-access points at key frames. `send` answers `ReceivePending` only
+  when a packet is ready. The `av1C` record has no configOBUs, and its
+  format byte is rebuilt from the settings: zenrav1e's record writes
+  chroma_sample_position 0 and subsampling_y 0 for monochrome.
+- Tests: `tests/media_session.rs` covers lossless round trips (six
+  depth/subsampling/odd-size cases), the testkit encoder and decoder
+  contracts, reset, av1C injection and the av1C fields. `tests/media_corpus.rs`
+  runs the 48-file lossless corpus (`just media-corpus`, not committed; see
+  `docs/av1-media-corpus.pointer.md`). `scripts/media-ffmpeg-oracle.sh` runs
+  36 checks: libdav1d decodes the encoder's lossless output to the source,
+  and rav1d-safe matches libdav1d on zenrav1e and libaom streams.
+- Pins zencodec, zencodec-testkit and zencodec-media to `7cc3d3ec`, and
+  ultrahdr-core to `10a79c3a` (its zenmeta on the same zencodec), in the root
+  and fuzz manifests.
+
 ## Main CI repair (unreleased)
 
 - Unspecified CICP primaries (H.273 code 2) label the descriptor `Unknown`

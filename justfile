@@ -53,6 +53,20 @@ test-fast:
 test-fast-encode:
     cargo test --features encode -- --test-threads=4
 
+# AV1 video sessions (zencodec-media): decoder + zenrav1e encoder tests.
+test-media:
+    cargo test --features media-encode --test media_session
+    cargo test --features media-encode --lib media::
+
+# The 48-file lossless AV1 corpus (not committed; see
+# docs/av1-media-corpus.pointer.md) through Av1VideoDecoder.
+media-corpus dir="/mnt/v/input/zenavif/av1-media-corpus-2026-10-15":
+    ZENAVIF_AV1_MEDIA_CORPUS={{dir}} cargo test --features _media-corpus --test media_corpus
+
+# Differential check of the media sessions against FFmpeg (libdav1d, libaom).
+media-ffmpeg-oracle:
+    scripts/media-ffmpeg-oracle.sh
+
 # Run clippy with warnings as errors
 clippy:
     cargo clippy --all-targets --all-features -- -D warnings

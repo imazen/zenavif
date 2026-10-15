@@ -97,6 +97,8 @@ mod encoder_aom;
 #[cfg(feature = "zenav1-svt")]
 mod encoder_svt_rs;
 mod error;
+#[cfg(feature = "media")]
+pub mod media;
 /// Deterministic zenanalyze palette gate (FEATURE_HINTS §E rule 1).
 #[cfg(feature = "encode")]
 pub mod palette_gate;
