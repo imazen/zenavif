@@ -106,7 +106,9 @@ fn plane_roles(subsampling: Subsampling, matrix_coefficients: u8) -> Vec<PlaneRo
 fn leading_temporal_delimiter(b: &[u8]) -> usize {
     const OBU_TEMPORAL_DELIMITER: u8 = 2;
     let Some(&header) = b.first() else { return 0 };
-    if (header >> 3) & 0xF != OBU_TEMPORAL_DELIMITER || header & 0x2 == 0 {
+    // A delimiter has no payload: forbidden bit clear, type 2, a size
+    // field, size 0.
+    if header & 0x80 != 0 || (header >> 3) & 0xF != OBU_TEMPORAL_DELIMITER || header & 0x2 == 0 {
         return 0;
     }
     let mut i = 1 + usize::from(header & 0x4 != 0);
@@ -123,9 +125,7 @@ fn leading_temporal_delimiter(b: &[u8]) -> usize {
             return 0;
         }
     }
-    i.checked_add(size)
-        .filter(|&end| end <= b.len())
-        .unwrap_or(0)
+    if size == 0 { i } else { 0 }
 }
 
 fn config_obus(private: &[u8]) -> Option<&[u8]> {
@@ -512,6 +512,9 @@ mod tests {
         assert_eq!(leading_temporal_delimiter(&[0x10, 0x32]), 0);
         assert_eq!(leading_temporal_delimiter(&[0x12, 0x80]), 0);
         assert_eq!(leading_temporal_delimiter(&[0x12, 0x05, 0x00]), 0);
+        // A payload is not a delimiter's; nor is the forbidden bit.
+        assert_eq!(leading_temporal_delimiter(&[0x12, 0x01, 0x00, 0x32]), 0);
+        assert_eq!(leading_temporal_delimiter(&[0x92, 0x00, 0x32]), 0);
         assert_eq!(leading_temporal_delimiter(&[]), 0);
     }
 
