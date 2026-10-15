@@ -528,6 +528,7 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
             mastering_display: None,
             rotation: None,
             mirror: None,
+            orientation: zencodec::Orientation::Identity,
             policy: None,
             canvas_size: None,
             loop_count: None,

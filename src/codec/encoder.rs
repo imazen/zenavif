@@ -35,6 +35,8 @@ pub struct AvifEncoder {
     /// (reductions are never silent). Attached to the [`EncodeOutput`] as a
     /// `String` extra in `make_output`.
     pub(super) threads_note: Option<String>,
+    /// Applied to the pixels before encoding; the file says orientation 1.
+    pub(super) orientation: zencodec::Orientation,
 }
 
 #[cfg(feature = "encode")]
@@ -463,6 +465,22 @@ impl AvifEncoder {
         height: u32,
         stride_pixels: u32,
     ) -> Result<EncodeOutput, At<Error>> {
+        if self.orientation != zencodec::Orientation::Identity {
+            let o = self.orientation;
+            self.orientation = zencodec::Orientation::Identity;
+            let src = PixelSlice::new(
+                data,
+                width,
+                height,
+                stride_pixels as usize * 4,
+                PixelDescriptor::RGBA8_SRGB,
+            )
+            .map_err(|e| at!(Error::InvalidParameters(format!("pixel buffer: {e}"))))?;
+            let upright = zenpixels_convert::orient::apply_orientation(src, o);
+            let (ow, oh) = (upright.width(), upright.height());
+            let mut bytes = upright.as_slice().contiguous_bytes().into_owned();
+            return self.encode_srgba8_inner(&mut bytes, make_opaque, ow, oh, ow);
+        }
         let w = width as usize;
         let h = height as usize;
         let stride = stride_pixels as usize;
@@ -508,6 +526,12 @@ impl AvifEncoder {
 
     fn encode_inner(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
         use zenpixels::PixelFormat;
+
+        if self.orientation != zencodec::Orientation::Identity {
+            let upright = zenpixels_convert::orient::apply_orientation(pixels, self.orientation);
+            self.orientation = zencodec::Orientation::Identity;
+            return self.encode_inner(upright.as_slice());
+        }
 
         // Propagate HDR color metadata from pixel descriptor to encoder config
         let desc = pixels.descriptor();

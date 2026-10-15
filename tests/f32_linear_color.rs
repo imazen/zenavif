@@ -14,8 +14,14 @@ fn encode(meta: Option<Metadata>) -> Vec<u8> {
     let (w, h) = (8u32, 8u32);
     let floats: Vec<f32> = (0..w * h * 3).map(|i| (i % 7) as f32 / 7.0).collect();
     let bytes: Vec<u8> = floats.iter().flat_map(|f| f.to_ne_bytes()).collect();
-    let slice = PixelSlice::new(&bytes, w, h, w as usize * 12, PixelDescriptor::RGBF32_LINEAR)
-        .unwrap();
+    let slice = PixelSlice::new(
+        &bytes,
+        w,
+        h,
+        w as usize * 12,
+        PixelDescriptor::RGBF32_LINEAR,
+    )
+    .unwrap();
     let mut job = zenavif::AvifEncoderConfig::new()
         .with_generic_quality(90.0)
         .with_generic_effort(10)
@@ -59,7 +65,10 @@ fn f32_linear_input_is_declared_srgb() {
         let cicp = cicp.expect("nclx");
         assert_eq!(cicp.transfer_characteristics, 13, "{how}: nclx transfer");
         let want_primaries = meta.and_then(|m| m.cicp).map_or(1, |c| c.color_primaries);
-        assert_eq!(cicp.color_primaries, want_primaries, "{how}: primaries kept");
+        assert_eq!(
+            cicp.color_primaries, want_primaries,
+            "{how}: primaries kept"
+        );
         if let Some(id) = icc {
             assert_eq!(
                 id.to_cicp().map(|c| c.transfer_characteristics),

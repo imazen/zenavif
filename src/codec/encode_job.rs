@@ -27,8 +27,11 @@ pub struct AvifEncodeJob {
     pub(super) cicp: Option<zencodec::Cicp>,
     pub(super) content_light_level: Option<zenpixels::hdr::ContentLightLevel>,
     pub(super) mastering_display: Option<zenpixels::hdr::MasteringDisplay>,
+    /// `irot`/`imir` for the animation encoder.
     pub(super) rotation: Option<u8>,
     pub(super) mirror: Option<u8>,
+    /// Applied to a still's pixels at encode (see [`AvifEncoder`]).
+    pub(super) orientation: zencodec::Orientation,
     pub(super) policy: Option<zencodec::encode::EncodePolicy>,
     pub(super) canvas_size: Option<(u32, u32)>,
     pub(super) loop_count: Option<Option<u32>>,
@@ -75,7 +78,9 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         if let Some(mdcv) = meta.mastering_display {
             self.mastering_display = Some(mdcv);
         }
-        // Map EXIF-style orientation to AVIF rotation/mirror boxes
+        // A still bakes the orientation into its pixels (`AvifEncoder`); the
+        // animation encoder still maps it to `irot`/`imir`.
+        self.orientation = meta.orientation;
         let (rotation, mirror) = orientation_to_avif(meta.orientation);
         self.rotation = rotation;
         self.mirror = mirror;
@@ -145,12 +150,28 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
                 min_luminance: (mdcv.min_luminance * 10000.0 + 0.5) as u32,
             });
         }
-        // Apply rotation/mirror from orientation metadata
-        if let Some(rot) = self.rotation {
-            config = config.rotation(rot);
-        }
-        if let Some(mir) = self.mirror {
-            config = config.mirror(mir);
+        // A still writes upright pixels and orientation 1 rather than
+        // `irot`/`imir`: several readers ignore `irot`, and `imir`'s axis
+        // reads opposite ways in the 2017 and 2022 HEIF editions
+        // (imazen/zencodec#132). The EXIF and XMP tags are rewritten to 1 so
+        // no reader rotates the upright pixels again.
+        let orientation = self.orientation;
+        let mut exif = self.exif;
+        let mut xmp = self.xmp;
+        if orientation != zencodec::Orientation::Identity {
+            if let Some(e) = &exif
+                && zencodec::helpers::parse_exif_orientation(e)
+                    .is_some_and(|o| o != zencodec::Orientation::Identity)
+                && let Some(fixed) =
+                    zencodec::helpers::set_exif_orientation(e, zencodec::Orientation::Identity)
+            {
+                exif = Some(fixed.into());
+            }
+            if let Some(x) = &xmp
+                && let Some(fixed) = super::orientation::xmp_orientation_to_1(x)
+            {
+                xmp = Some(fixed.into());
+            }
         }
         // Apply threading policy from ResourceLimits.
         // Skip Parallel — it means "use the ambient pool", so keep the codec's
@@ -169,7 +190,7 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         // Apply encode policy: suppress metadata the policy disallows.
         let exif = match self.policy {
             Some(ref p) if !p.resolve_exif(true) => None,
-            _ => self.exif,
+            _ => exif,
         };
         // `plan_icc` already encodes the keep/synthesize/drop decision from
         // resolve_color_emit. The coarse `embed_icc: Some(false)` gate is an
@@ -180,9 +201,10 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         };
         let xmp = match self.policy {
             Some(ref p) if !p.resolve_xmp(true) => None,
-            _ => self.xmp,
+            _ => xmp,
         };
         Ok(AvifEncoder {
+            orientation,
             config,
             stop: self.stop,
             exif,

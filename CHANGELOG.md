@@ -128,6 +128,8 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### Fixed
 
+- **Stills are written upright with orientation 1.** A metadata orientation used to become `irot`/`imir`; several readers ignore `irot`, and `imir`'s axis reads opposite ways in the 2017 and 2022 HEIF editions (imazen/zencodec#132). The still encoder now applies the orientation to the pixels, writes no `irot`/`imir`, and rewrites the EXIF Orientation tag and XMP `tiff:Orientation` to 1. The animation encoder still maps orientation to `irot`/`imir`. Test: `tests/orientation_bake.rs` (all 8 orientations).
+- **The Exif item is one `iloc` extent** (zenavif#52). zenavif-serialize wrote the 4-byte `exif_tiff_header_offset` and the TIFF data as two extents, which ffmpeg's demuxer refuses. The framed item is now one buffer; ffmpeg 8.0.1 probes and decodes the result. Test: `raw_tiff_exif_is_one_iloc_extent`.
 - f32 input that isn't PQ/HLG is stored as 8-bit sRGB, but the nclx said linear (transfer 8) whenever the descriptor or the caller's CICP did, and a profile synthesized from that CICP said linear too. Readers decoded the sRGB samples as linear. The nclx now says sRGB (13) with the primaries kept, and a synthesized profile is re-derived from it; a caller's own ICC is kept. Test: `tests/f32_linear_color.rs`.
 - Switching lossless off now clears the native encoder flag as well as the codec adapter flag; both setters share one implementation.
 
