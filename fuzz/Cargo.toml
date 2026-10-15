@@ -26,7 +26,7 @@ path = ".."
 features = ["inventory"]
 
 [patch.crates-io]
-ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "e2148a30755ab690317939cca193574e1bcfbbc0" }
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "e6abe1cd7103c57beb04e09e73f571a26a0cf1e0" }
 zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "9fa4fcb489a0d8986c28e50f9bfa2413a0492e16" }
 zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "9fa4fcb489a0d8986c28e50f9bfa2413a0492e16" }
 # fuzz/ is its own workspace root, so the root [patch] does not reach it.
@@ -40,7 +40,7 @@ rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "dfd01e3268f6
 # Mirror of the root zencodec pin: ultrahdr-core reaches zencodec through
 # zenmeta at this exact rev, so any other rev splits the graph into two
 # zencodec copies (gain_map.rs then fails to typecheck).
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "4fda439133d465246174b55f62426dc54ef204dd" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "fa49f7ce0fc75e65b88da1a0eb90b17378297ceb" }
 
 [[bin]]
 name = "fuzz_decode"

@@ -336,6 +336,7 @@ static DECODE_DESCRIPTORS: &[PixelDescriptor] = &[
 
 static AVIF_DECODE_CAPABILITIES: zencodec::decode::DecodeCapabilities =
     zencodec::decode::DecodeCapabilities::new()
+        .with_incremental(true)
         .with_icc(true)
         .with_exif(true)
         .with_xmp(true)

@@ -270,6 +270,19 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         self.animation_frame_decoder_inner(data, preferred)
             .map_err(zencodec::CodecError::of)
     }
+
+    /// Incremental (sans-I/O) decode: the header is reported as soon as it
+    /// probes, and the image decodes through `push_decoder` once the whole
+    /// file is offered. The AV1 items need their bytes complete; a source
+    /// binding that fetches only the items a decode needs is a follow-up.
+    fn dyn_incremental_decoder(
+        self,
+        preferred: &[PixelDescriptor],
+    ) -> Result<Box<zencodec::decode::DynIncrementalDecoder>, zencodec::decode::BoxedError> {
+        Ok(zencodec::decode::erase_incremental(
+            zencodec::helpers::WholeFileIncremental::new(self, preferred),
+        ))
+    }
 }
 
 impl AvifDecodeJob {

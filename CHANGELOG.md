@@ -18,6 +18,17 @@
   crate mirrors the root zencodec (`4fda4391`), rav1d-safe and zenpixels pins
   (it had split into two zencodec copies); `duration_ms` replaced by `duration`.
 
+## Incremental decode (unreleased)
+
+- `dyn_incremental_decoder` returns zencodec's `WholeFileIncremental`, and the
+  decode capabilities declare `incremental`, so the zencodec-io drivers (files,
+  streams, async sources) serve AVIF. `HeaderReady` comes as soon as a prefix
+  probes; rows come from `push_decoder` once the whole file is offered.
+  `tests/sansio.rs` runs the testkit's incremental contract on six vectors
+  (8-bit 4:2:0, orientation, 10-bit mono, ICC, gain map, animation). Pins
+  zencodec `fa49f7ce`, ultrahdr-core `e6abe1cd` (same zencodec) and the zenpng
+  patch `8c9b9a87`.
+
 ## Coordinated animation and precision contracts (unreleased)
 
 - Adopt ordinary timing quantization with returned rational durations and
