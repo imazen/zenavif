@@ -128,6 +128,7 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### Fixed
 
+- f32 input that isn't PQ/HLG is stored as 8-bit sRGB, but the nclx said linear (transfer 8) whenever the descriptor or the caller's CICP did, and a profile synthesized from that CICP said linear too. Readers decoded the sRGB samples as linear. The nclx now says sRGB (13) with the primaries kept, and a synthesized profile is re-derived from it; a caller's own ICC is kept. Test: `tests/f32_linear_color.rs`.
 - Switching lossless off now clears the native encoder flag as well as the codec adapter flag; both setters share one implementation.
 
 ### Shared gain-map transport

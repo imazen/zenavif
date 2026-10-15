@@ -336,7 +336,7 @@ fn apply_cicp_to_config(
 /// Channel count is left unset here: pixels aren't known yet at job-build time,
 /// and the resolver's grayscale path still fires off an ICC that declares gray.
 #[cfg(feature = "encode")]
-fn resolve_avif_color(
+pub(super) fn resolve_avif_color(
     cicp: Option<zencodec::Cicp>,
     icc: Option<Arc<[u8]>>,
     policy: Option<&zencodec::encode::EncodePolicy>,

@@ -131,8 +131,15 @@ impl AvifEncoder {
         let transfer = desc.transfer;
         let primaries = desc.primaries;
 
+        // f32 input that isn't PQ/HLG is stored as 8-bit sRGB
+        // (`linear_to_srgb_u8`), so the file's transfer is sRGB whatever the
+        // input's was.
+        let stored_srgb = desc.channel_type() == zenpixels::ChannelType::F32
+            && !matches!(transfer, TransferFunction::Pq | TransferFunction::Hlg);
+
         // Map transfer function to CICP transfer_characteristics
         let tc = match transfer {
+            _ if stored_srgb => Some(13),
             TransferFunction::Pq => Some(16u8),
             TransferFunction::Hlg => Some(18),
             TransferFunction::Bt709 => Some(1),
@@ -153,6 +160,22 @@ impl AvifEncoder {
         // only if caller_cicp is present AND the code point is not the H.273
         // unspecified/reserved sentinel (primaries/transfer: 0 reserved, 2
         // unspecified). Matrix 0 is Identity — a real value, not unspecified.
+        // A caller's "linear" described the f32 input, not the stored sRGB:
+        // move it to sRGB, and re-derive a profile that was synthesized from
+        // it (a caller's own ICC can't be re-derived and is kept).
+        if stored_srgb
+            && let Some(c) = self.caller_cicp
+            && c.transfer_characteristics == 8
+        {
+            let fixed =
+                zencodec::Cicp::new(c.color_primaries, 13, c.matrix_coefficients, c.full_range);
+            let (_, synthesized) = super::encode_job::resolve_avif_color(Some(c), None, None);
+            if self.icc_profile.is_some() && self.icc_profile == synthesized {
+                self.icc_profile = super::encode_job::resolve_avif_color(Some(fixed), None, None).1;
+            }
+            self.caller_cicp = Some(fixed);
+            self.config = self.config.clone().transfer_characteristics(13);
+        }
         let caller = self.caller_cicp;
         let cp_specified = caller.is_some_and(|c| !matches!(c.color_primaries, 0 | 2));
         let tc_specified = caller.is_some_and(|c| !matches!(c.transfer_characteristics, 0 | 2));
