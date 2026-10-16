@@ -302,7 +302,7 @@ verify-linku: generate-linku-references test-linku
 # Native runtime-SIMD comparisons; full output retained under ~/tmp.
 arm-tiers-macos bench="tier_isolation":
     mkdir -p "$HOME/tmp"
-    CARGO_BUILD_JOBS=4 RAYON_NUM_THREADS=4 OMP_NUM_THREADS=4 TMPDIR="$HOME/tmp" nice -n 19 cargo bench --locked -p zenavif --features _dev --bench '{{bench}}' -- --format=llm > "$HOME/tmp/zenavif-{{bench}}.log" 2>&1
+    CARGO_BUILD_JOBS=4 RAYON_NUM_THREADS=4 OMP_NUM_THREADS=4 TMPDIR="$HOME/tmp" nice -n 19 cargo bench -p zenavif --features _dev --bench '{{bench}}' -- --cpu-policy=unrestricted --format=llm > "$HOME/tmp/zenavif-{{bench}}.log" 2>&1
 
 arm-encode-integration-macos:
     mkdir -p "$HOME/tmp"
