@@ -1099,9 +1099,7 @@ mod encode {
     mod svt {
         use std::collections::VecDeque;
 
-        use svtav1::ChromaFormat;
-        use svtav1::encoder::pipeline::EncodePipeline;
-        use svtav1::encoder::rate_control::{RcConfig, RcMode};
+        use svtav1::pipeline::{ChromaFormat, EncodePipeline, RcConfig, RcMode};
         use zencodec_media::frame::{ChromaSiting, Subsampling};
         use zencodec_media::packet::Packet;
 
@@ -1171,7 +1169,7 @@ mod encode {
                 let c = s.color;
                 pipeline = pipeline
                     .with_bit_depth(s.bit_depth)
-                    .with_color_description(svtav1::entropy::obu::ColorDescription {
+                    .with_color_description(svtav1::pipeline::ColorDescription {
                         color_primaries: c.color_primaries,
                         transfer_characteristics: c.transfer_characteristics,
                         matrix_coefficients: c.matrix_coefficients,
@@ -1184,7 +1182,7 @@ mod encode {
                     Subsampling::Yuv422 => 2,
                     _ => 0,
                 };
-                let level = svtav1::entropy::obu::compute_seq_level_idx(s.width, s.height, fps);
+                let level = svtav1::pipeline::compute_seq_level_idx(s.width, s.height, fps);
                 let av1c = vec![0x81, profile << 5 | (level & 0x1F), 0, 0];
                 Ok((
                     Self {
@@ -1204,7 +1202,7 @@ mod encode {
             pub(super) fn encode(&mut self, planes: Packed) -> Result<(Vec<u8>, bool), SendError> {
                 let w = self.width;
                 let p = &mut self.pipeline;
-                let err = |e: whereat::At<svtav1::types::EncodeError>| {
+                let err = |e: whereat::At<svtav1::pipeline::EncodeError>| {
                     SendError::Encoder(format!("{e:?}"))
                 };
                 let bytes = match (planes, self.subsampling) {

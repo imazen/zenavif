@@ -184,7 +184,7 @@ impl ResolvedRoute {
         #[cfg(feature = "zenav1-svt")]
         let requested_enhancements = enhancement_bits(self.request.svt_enhancements);
         serde_json::to_string(&Replay {
-            schema: 1,
+            schema: 2,
             implementation_id: implementation_id.into(),
             features: features(),
             config: self.config.clone().into(),
@@ -200,7 +200,7 @@ impl ResolvedRoute {
     /// Restore and revalidate the stored backend; never resolve a new selection.
     pub fn from_replay_json(json: &str, implementation_id: &str) -> Result<Self, RouteError> {
         let record: Replay = serde_json::from_str(json).map_err(error)?;
-        if record.schema != 1 {
+        if record.schema != 2 {
             return Err(error("unsupported route replay schema"));
         }
         if record.implementation_id != implementation_id || record.features != features() {
@@ -319,8 +319,8 @@ impl ResolvedRoute {
 }
 #[cfg(feature = "zenav1-svt")]
 fn enhancement_bits(set: svtav1::avif::ZenEnhancements) -> u8 {
-    u8::from(set.contains(SvtEnhancement::AomIntraEdgeFilter))
-        | (u8::from(set.contains(SvtEnhancement::AomRestorationUnitSearch)) << 1)
+    u8::from(set.contains(SvtEnhancement::AomScreenTools))
+        | (u8::from(set.contains(SvtEnhancement::DeepSearch)) << 1)
 }
 #[cfg(feature = "zenav1-svt")]
 fn enhancements_from_bits(bits: u8) -> Result<svtav1::avif::ZenEnhancements, RouteError> {
@@ -329,10 +329,10 @@ fn enhancements_from_bits(bits: u8) -> Result<svtav1::avif::ZenEnhancements, Rou
     }
     let mut set = svtav1::avif::ZenEnhancements::default();
     if bits & 1 != 0 {
-        set = set.with(SvtEnhancement::AomIntraEdgeFilter);
+        set = set.with(SvtEnhancement::AomScreenTools);
     }
     if bits & 2 != 0 {
-        set = set.with(SvtEnhancement::AomRestorationUnitSearch);
+        set = set.with(SvtEnhancement::DeepSearch);
     }
     Ok(set)
 }
