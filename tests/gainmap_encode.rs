@@ -231,3 +231,99 @@ fn encode_gain_map_with_exif_and_icc() {
     // EXIF also present
     assert!(parser.exif().is_some());
 }
+
+/// The AV1 encoder choice must not change ISO gain-map or alternate ICC transport.
+#[cfg(all(
+    feature = "zenav1-svt",
+    feature = "zenav1-aom-encode",
+    feature = "zenav1-aom"
+))]
+#[test]
+fn gain_map_metadata_across_all_av1_backends() {
+    use zenavif::{
+        Av1Backend, DecodeBackend, DecoderConfig, EncodeChromaSubsampling, ManagedAvifDecoder,
+    };
+    let image = make_rgb8_image();
+    let metadata = make_test_tmap_metadata();
+    let (payload, width, height, depth) = make_real_gain_map();
+    let icc_vector = std::fs::read("tests/vectors/libavif/seine_sdr_gainmap_srgb_icc.avif")
+        .expect("provision libavif vectors");
+    let source_info = ManagedAvifDecoder::new(&icc_vector, &DecoderConfig::new())
+        .unwrap()
+        .probe_info()
+        .unwrap();
+    let icc = source_info.icc_profile.unwrap();
+    let alt_icc = match source_info.gain_map.unwrap().alt_color_info.unwrap() {
+        zenavif_parse::ColorInformation::IccProfile(profile) => profile,
+        other => panic!("expected source alternate ICC, got {other:?}"),
+    };
+    for backend in [
+        Av1Backend::Zenravif,
+        Av1Backend::Zenav1Svt,
+        Av1Backend::Zenav1Aom,
+    ] {
+        let config = EncoderConfig::new()
+            .backend(backend)
+            .quality(80.0)
+            .speed(10)
+            .chroma_subsampling(EncodeChromaSubsampling::Yuv420)
+            .icc_profile(icc.clone())
+            .with_gain_map(payload.clone(), width, height, depth, metadata.clone())
+            .with_gain_map_alt_icc(alt_icc.clone());
+        let encoded = encode_rgb8(image.as_ref(), &config, stop()).unwrap();
+        if let Some(directory) = std::env::var_os("AVIF_METADATA_OUTPUT") {
+            let directory = std::path::PathBuf::from(directory);
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(
+                directory.join(format!("{backend:?}.avif")),
+                &encoded.avif_file,
+            )
+            .unwrap();
+        }
+        let invalid = config.clone().with_gain_map(
+            payload.clone(),
+            width + 1,
+            height,
+            depth,
+            metadata.clone(),
+        );
+        assert!(
+            encode_rgb8(image.as_ref(), &invalid, stop())
+                .unwrap_err()
+                .to_string()
+                .contains("gain map dimensions"),
+            "{backend:?}: payload geometry must be checked"
+        );
+        for decoder in [DecodeBackend::Rav1dSafe, DecodeBackend::Zenav1Aom] {
+            let config = DecoderConfig::new().decode_backend(decoder);
+            let mut reader = ManagedAvifDecoder::new(&encoded.avif_file, &config).unwrap();
+            let probed = reader.probe_info().unwrap();
+            let (_, decoded) = reader.decode_full(&Unstoppable).unwrap();
+            for info in [probed, decoded] {
+                assert_eq!(
+                    info.icc_profile.as_deref(),
+                    Some(icc.as_slice()),
+                    "{backend:?}/{decoder:?}: base ICC"
+                );
+                let gain_map = info.gain_map.expect("gain map survives probe and decode");
+                assert_eq!(
+                    gain_map.gain_map_data, payload,
+                    "{backend:?}/{decoder:?}: AV1 payload"
+                );
+                assert_eq!(
+                    gain_map.metadata.to_bytes(),
+                    metadata,
+                    "{backend:?}/{decoder:?}: ISO metadata"
+                );
+                match gain_map.alt_color_info.expect("alternate color") {
+                    zenavif_parse::ColorInformation::IccProfile(profile) => {
+                        assert_eq!(profile, alt_icc)
+                    }
+                    other => {
+                        panic!("{backend:?}/{decoder:?}: expected alternate ICC, got {other:?}")
+                    }
+                }
+            }
+        }
+    }
+}

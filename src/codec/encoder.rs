@@ -35,6 +35,8 @@ pub struct AvifEncoder {
     /// (reductions are never silent). Attached to the [`EncodeOutput`] as a
     /// `String` extra in `make_output`.
     pub(super) threads_note: Option<String>,
+    /// Applied to the pixels before encoding; the file says orientation 1.
+    pub(super) orientation: zencodec::Orientation,
 }
 
 #[cfg(feature = "encode")]
@@ -131,8 +133,15 @@ impl AvifEncoder {
         let transfer = desc.transfer;
         let primaries = desc.primaries;
 
+        // f32 input that isn't PQ/HLG is stored as 8-bit sRGB
+        // (`linear_to_srgb_u8`), so the file's transfer is sRGB whatever the
+        // input's was.
+        let stored_srgb = desc.channel_type() == zenpixels::ChannelType::F32
+            && !matches!(transfer, TransferFunction::Pq | TransferFunction::Hlg);
+
         // Map transfer function to CICP transfer_characteristics
         let tc = match transfer {
+            _ if stored_srgb => Some(13),
             TransferFunction::Pq => Some(16u8),
             TransferFunction::Hlg => Some(18),
             TransferFunction::Bt709 => Some(1),
@@ -153,6 +162,22 @@ impl AvifEncoder {
         // only if caller_cicp is present AND the code point is not the H.273
         // unspecified/reserved sentinel (primaries/transfer: 0 reserved, 2
         // unspecified). Matrix 0 is Identity — a real value, not unspecified.
+        // A caller's "linear" described the f32 input, not the stored sRGB:
+        // move it to sRGB, and re-derive a profile that was synthesized from
+        // it (a caller's own ICC can't be re-derived and is kept).
+        if stored_srgb
+            && let Some(c) = self.caller_cicp
+            && c.transfer_characteristics == 8
+        {
+            let fixed =
+                zencodec::Cicp::new(c.color_primaries, 13, c.matrix_coefficients, c.full_range);
+            let (_, synthesized) = super::encode_job::resolve_avif_color(Some(c), None, None);
+            if self.icc_profile.is_some() && self.icc_profile == synthesized {
+                self.icc_profile = super::encode_job::resolve_avif_color(Some(fixed), None, None).1;
+            }
+            self.caller_cicp = Some(fixed);
+            self.config = self.config.clone().transfer_characteristics(13);
+        }
         let caller = self.caller_cicp;
         let cp_specified = caller.is_some_and(|c| !matches!(c.color_primaries, 0 | 2));
         let tc_specified = caller.is_some_and(|c| !matches!(c.transfer_characteristics, 0 | 2));
@@ -170,19 +195,9 @@ impl AvifEncoder {
             self.config = self.config.clone().color_primaries(cp_val);
         }
 
-        // Keep the matrix consistent with the primaries/transfer we just wrote.
-        // When the caller supplied no CICP at all, its matrix wasn't applied in
-        // encoder(), so derive one from the descriptor here (RGB content ⇒
-        // Identity/0, matching `Cicp::from_descriptor`) so the config carries a
-        // coherent triple (informational — no available backend reads the
-        // matrix field). When the caller DID supply a CICP, its matrix is
-        // already on the config; leave it alone.
-        if caller.is_none() && (cp.is_some() || tc.is_some()) {
-            let mc = zenpixels::Cicp::from_descriptor(&desc)
-                .map(|c| c.matrix_coefficients)
-                .unwrap_or(0);
-            self.config = self.config.clone().matrix_coefficients(mc);
-        }
+        // The descriptor describes RGB input pixels. Its identity matrix is
+        // not a request for identity-coded AV1: the backend chooses the matrix
+        // of its RGB-to-YUV conversion. Keep any explicit native config value.
 
         // For PQ/HLG, switch to 10-bit depth (the native HDR depth for AV1)
         if matches!(transfer, TransferFunction::Pq | TransferFunction::Hlg) {
@@ -450,6 +465,22 @@ impl AvifEncoder {
         height: u32,
         stride_pixels: u32,
     ) -> Result<EncodeOutput, At<Error>> {
+        if self.orientation != zencodec::Orientation::Identity {
+            let o = self.orientation;
+            self.orientation = zencodec::Orientation::Identity;
+            let src = PixelSlice::new(
+                data,
+                width,
+                height,
+                stride_pixels as usize * 4,
+                PixelDescriptor::RGBA8_SRGB,
+            )
+            .map_err(|e| at!(Error::InvalidParameters(format!("pixel buffer: {e}"))))?;
+            let upright = zenpixels_convert::orient::apply_orientation(src, o);
+            let (ow, oh) = (upright.width(), upright.height());
+            let mut bytes = upright.as_slice().contiguous_bytes().into_owned();
+            return self.encode_srgba8_inner(&mut bytes, make_opaque, ow, oh, ow);
+        }
         let w = width as usize;
         let h = height as usize;
         let stride = stride_pixels as usize;
@@ -495,6 +526,12 @@ impl AvifEncoder {
 
     fn encode_inner(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
         use zenpixels::PixelFormat;
+
+        if self.orientation != zencodec::Orientation::Identity {
+            let upright = zenpixels_convert::orient::apply_orientation(pixels, self.orientation);
+            self.orientation = zencodec::Orientation::Identity;
+            return self.encode_inner(upright.as_slice());
+        }
 
         // Propagate HDR color metadata from pixel descriptor to encoder config
         let desc = pixels.descriptor();

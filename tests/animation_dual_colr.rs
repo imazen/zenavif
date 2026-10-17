@@ -78,9 +78,7 @@ fn icc_and_nclx_survive_together_in_both_box_orders() {
     for reverse in [false, true] {
         let mut data = original.clone();
         if reverse {
-            for pair in positions.as_chunks::<2>().0 {
-                let a = pair[0];
-                let b = pair[1];
+            for &[a, b] in positions.as_chunks::<2>().0 {
                 let len_a = u32::from_be_bytes(data[a..a + 4].try_into().unwrap()) as usize;
                 let len_b = u32::from_be_bytes(data[b..b + 4].try_into().unwrap()) as usize;
                 assert_eq!(a + len_a, b);

@@ -53,6 +53,25 @@ test-fast:
 test-fast-encode:
     cargo test --features encode -- --test-threads=4
 
+# AV1 video sessions (zencodec-media): decoder + zenrav1e encoder tests.
+test-media:
+    cargo test --features media-encode --test media_session
+    cargo test --features media-encode,zenav1-svt --test media_session
+    cargo test --features media-encode --lib media::
+
+# The 48-file lossless AV1 corpus (not committed; see
+# docs/av1-media-corpus.pointer.md) through Av1VideoDecoder.
+media-corpus dir="/mnt/v/input/zenavif/av1-media-corpus-2026-10-15":
+    ZENAVIF_AV1_MEDIA_CORPUS={{dir}} cargo test --features _media-corpus --test media_corpus
+
+# zenmp4's demuxer against ffprobe on FFmpeg-written MP4s.
+mp4-ffmpeg-oracle:
+    zenmp4/scripts/ffmpeg-oracle.sh
+
+# Differential check of the media sessions against FFmpeg (libdav1d, libaom).
+media-ffmpeg-oracle:
+    scripts/media-ffmpeg-oracle.sh
+
 # Run clippy with warnings as errors
 clippy:
     cargo clippy --all-targets --all-features -- -D warnings
@@ -283,7 +302,7 @@ verify-linku: generate-linku-references test-linku
 # Native runtime-SIMD comparisons; full output retained under ~/tmp.
 arm-tiers-macos bench="tier_isolation":
     mkdir -p "$HOME/tmp"
-    CARGO_BUILD_JOBS=4 RAYON_NUM_THREADS=4 OMP_NUM_THREADS=4 TMPDIR="$HOME/tmp" nice -n 19 cargo bench --locked -p zenavif --features _dev --bench '{{bench}}' -- --format=llm > "$HOME/tmp/zenavif-{{bench}}.log" 2>&1
+    CARGO_BUILD_JOBS=4 RAYON_NUM_THREADS=4 OMP_NUM_THREADS=4 TMPDIR="$HOME/tmp" nice -n 19 cargo bench -p zenavif --features _dev --bench '{{bench}}' -- --cpu-policy=unrestricted --format=llm > "$HOME/tmp/zenavif-{{bench}}.log" 2>&1
 
 arm-encode-integration-macos:
     mkdir -p "$HOME/tmp"
@@ -292,3 +311,79 @@ arm-encode-integration-macos:
 # Exact film-grain decode parity; caller supplies the corpus fixture explicitly.
 arm-filmgrain-parity fixture iters="3":
     cargo run -p zenavif --example heaptrack_decode -- {{fixture}} {{iters}} --verify-threads
+
+# Inventory's container contract is shared across AV1 backends.
+metadata-check:
+    cargo test -p zenavif --features inventory --test inventory --test inventory_cases --test inventory_feature --test fuzz_regression
+    cargo clippy -p zenavif --features inventory --lib --tests -- -D warnings
+    cargo check -p zenavif --no-default-features
+    cargo test -p zenavif --test inventory_feature
+
+metadata-backends:
+    cargo test -p zenavif --features inventory,zenav1-aom,zenav1-aom-encode,zenav1-svt,encode-imazen --test inventory --test inventory_cases --test product_aom_backend --test metadata_roundtrip -- --test-threads=4
+
+inventory-oracle:
+    AVIF_INVENTORY_CORPUS="${AVIF_INVENTORY_CORPUS:-$HOME/work/codec-corpus/avif-conformance}" INVENTORY_ORACLE_EXIFTOOL="$(command -v exiftool)" cargo test -p zenavif --features inventory --test inventory -- --nocapture
+
+metadata-portability:
+    CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_RUNNER=env cargo test -p zenavif --features inventory --target i686-unknown-linux-gnu --test inventory --test inventory_cases --test inventory_feature --test fuzz_regression
+    cargo check --manifest-path fuzz/Cargo.toml --bin inventory
+    just api-doc
+
+metadata-api-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    baseline=$(cargo read zenavif==0.1.6 --path-only)
+    RUSTC_BOOTSTRAP=1 cargo rustdoc -p zenavif --lib --features inventory,encode -- -Zunstable-options --output-format json
+    RUSTC_BOOTSTRAP=1 cargo rustdoc --manifest-path "$baseline/Cargo.toml" --target-dir "$PWD/target/published-api/0.1.6" --lib --features encode -- -Zunstable-options --output-format json
+    cargo semver-checks check-release -p zenavif --current-rustdoc target/doc/zenavif.json --baseline-rustdoc target/published-api/0.1.6/doc/zenavif.json --release-type patch
+
+metadata-api-validation:
+    cargo check --manifest-path fuzz/Cargo.toml --bin inventory
+    just api-doc
+    just metadata-api-check
+
+metadata-backend-color:
+    cargo test -p zenavif --features inventory,zenav1-aom,zenav1-aom-encode,zenav1-svt,encode-imazen --test metadata_roundtrip --test gainmap_encode across_all_av1_backends -- --test-threads=1
+
+metadata-backend-gainmap-check:
+    cargo test -p zenavif --features inventory,zenav1-aom,zenav1-aom-encode,zenav1-svt,encode-imazen --test gainmap_encode --test metadata_roundtrip --test validation --test animation_encode_metadata -- --test-threads=1
+    cargo clippy -p zenavif --features inventory,zenav1-aom,zenav1-aom-encode,zenav1-svt,encode-imazen --lib --test gainmap_encode --test metadata_roundtrip -- -D warnings
+
+metadata-backend-gainmap-oracle:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    output="$HOME/tmp/zenmeta-avif-gainmap-oracle"
+    AVIF_METADATA_OUTPUT="$output" cargo test -p zenavif --features inventory,zenav1-aom,zenav1-aom-encode,zenav1-svt,encode-imazen --test gainmap_encode gain_map_metadata_across_all_av1_backends -- --test-threads=1
+    for backend in Zenravif Zenav1Svt Zenav1Aom; do
+        heif-info "$output/$backend.avif"
+        heif-convert "$output/$backend.avif" "$output/$backend.png"
+        exiftool -validate -warning -error "$output/$backend.avif"
+    done
+
+metadata-shared-icc-check:
+    cargo test -p zenavif-serialize
+    just metadata-backend-gainmap-check
+    just metadata-backend-gainmap-oracle
+
+metadata-git-deps-check:
+    cargo check --lib --no-default-features
+
+metadata-animation-integration-check:
+    cargo test -p zenavif --features inventory,zenav1-aom,zenav1-aom-encode,zenav1-svt,encode-imazen --test animation_decoded_color --test animation_encode_admission --test animation_exact_timing --test bit_depth_request --test animation_dual_colr -- --test-threads=1
+    just metadata-shared-icc-check
+
+# Preserve native-depth routing and exercise the optional SVT adapter.
+metadata-backend-routing-check:
+    cargo test -p zenavif --features inventory,zenav1-aom,zenav1-aom-encode,zenav1-svt,encode-imazen --test svt_rs_backend --test codec_hdr_units -- --test-threads=1
+    cargo test -p zenavif --features inventory,zenav1-aom,zenav1-aom-encode,zenav1-svt,encode-imazen --test backend_router -- --test-threads=1
+
+metadata-svt-final-check:
+    just metadata-backend-gainmap-check
+    just metadata-animation-integration-check
+    cargo test -p zenavif --features inventory,zenav1-aom,zenav1-aom-encode,zenav1-svt,encode-imazen --test svt_rs_backend --test codec_hdr_units -- --test-threads=1
+
+# Shared exact/reported animation timing and rejected-frame atomicity.
+animation-contract-check:
+    cargo test -p zenavif --features encode-imazen,zenav1-svt --test animation_encode_admission --test animation_encode_timing -- --test-threads=1
+    cargo clippy -p zenavif --features encode-imazen,zenav1-svt --lib -- -D warnings

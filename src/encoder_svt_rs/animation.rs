@@ -86,6 +86,11 @@ fn encode_frames<F>(
 ) -> Result<crate::EncodedAnimation> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
     reject_unsupported_config(config, input_is_16bit)?;
+    if config.gain_map.is_some() {
+        return Err(at!(Error::Unsupported(
+            "gain maps are supported for still images only"
+        )));
+    }
     let first = frames
         .first()
         .ok_or_else(|| at!(Error::Encode("animation needs at least one frame".into())))?;

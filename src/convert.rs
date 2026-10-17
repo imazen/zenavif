@@ -45,9 +45,12 @@ const TIGHTLY_PACKED_INVARIANT: &str = "decode-path buffers are allocated tightl
 ///   file that never claimed it. `Unknown` is the honest answer and it is
 ///   what the buffered path reports, since its buffers come from
 ///   `PixelBuffer::from_pixels`, whose default transfer is `Unknown`.
-/// * **primaries** are only overwritten when the container names a set
-///   zenpixels knows, leaving the `Bt709` default in place otherwise —
-///   again matching the buffered path.
+/// * **primaries** follow the same rule: a set zenpixels does not name
+///   (CICP 2, unspecified, or a reserved code) is `Unknown`, never a `Bt709`
+///   default. The buffer's colour context carries the same CICP, and
+///   zenpixels-convert refuses a buffer whose descriptor and context
+///   disagree (`NoPath`), so a defaulted `Bt709` made every conversion of
+///   such a stream fail (adding alpha to a mono decode, for one).
 pub(crate) fn descriptor_with_cicp(
     mut desc: PixelDescriptor,
     info: &crate::image::ImageInfo,
@@ -56,10 +59,10 @@ pub(crate) fn descriptor_with_cicp(
         zenpixels::TransferFunction::from_cicp(info.transfer_characteristics.0)
             .unwrap_or(zenpixels::TransferFunction::Unknown),
     );
-    if let Some(p) = zenpixels::ColorPrimaries::from_cicp(info.color_primaries.0) {
-        desc = desc.with_primaries(p);
-    }
-    desc
+    desc.with_primaries(
+        zenpixels::ColorPrimaries::from_cicp(info.color_primaries.0)
+            .unwrap_or(zenpixels::ColorPrimaries::Unknown),
+    )
 }
 
 /// Scale a limited-range Y value to full range (8-bit)

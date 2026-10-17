@@ -7,7 +7,7 @@ use crate::image::{
     ChromaSampling, ColorPrimaries, ColorRange, MatrixCoefficients, TransferCharacteristics,
 };
 use crate::yuv_convert::YuvRange as OurYuvRange;
-use rav1d_safe::src::managed::{
+use rav1d_safe::{
     ColorPrimaries as Rav1dColorPrimaries, ColorRange as Rav1dColorRange,
     MatrixCoefficients as Rav1dMatrixCoefficients, PixelLayout,
     TransferCharacteristics as Rav1dTransferCharacteristics,

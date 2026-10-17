@@ -22,9 +22,9 @@ fn main() {
     eprintln!("Primary data: {} bytes", primary_data.len());
 
     // Decode with rav1d
-    let mut settings = rav1d_safe::src::managed::Settings::default();
+    let mut settings = rav1d_safe::Settings::default();
     settings.threads = 1;
-    let mut decoder = rav1d_safe::src::managed::Decoder::with_settings(settings).unwrap();
+    let mut decoder = rav1d_safe::Decoder::with_settings(settings).unwrap();
     let frame = match decoder.decode(&primary_data) {
         Ok(Some(f)) => f,
         Ok(None) => {
@@ -51,7 +51,7 @@ fn main() {
     );
 
     match frame.planes() {
-        rav1d_safe::src::managed::Planes::Depth8(planes) => {
+        rav1d_safe::Planes::Depth8(planes) => {
             let y = planes.y();
             println!(
                 "Y plane: {}x{} stride={}",
@@ -110,7 +110,7 @@ fn main() {
                 println!("V plane: MISSING");
             }
         }
-        rav1d_safe::src::managed::Planes::Depth16(planes) => {
+        rav1d_safe::Planes::Depth16(planes) => {
             let y = planes.y();
             println!(
                 "Y plane (16bit): {}x{} stride={}",

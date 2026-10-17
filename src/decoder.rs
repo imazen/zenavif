@@ -29,7 +29,7 @@ use whereat::at;
 use yuv::YuvRange;
 use zenpixels::PixelBuffer;
 
-// Conditionally import from rav1d or rav1d-safe based on feature
+// This module exists only with the `unsafe-asm` feature, which uses the `rav1d` crate.
 #[cfg(feature = "unsafe-asm")]
 use rav1d::include::dav1d::data::Dav1dData;
 #[cfg(feature = "unsafe-asm")]
@@ -47,22 +47,6 @@ use rav1d::src::lib::{
     dav1d_open, dav1d_picture_unref, dav1d_send_data,
 };
 
-#[cfg(not(feature = "unsafe-asm"))]
-use rav1d_safe::include::dav1d::data::Dav1dData;
-#[cfg(not(feature = "unsafe-asm"))]
-use rav1d_safe::include::dav1d::dav1d::{Dav1dContext, Dav1dSettings};
-#[cfg(not(feature = "unsafe-asm"))]
-use rav1d_safe::include::dav1d::headers::{
-    DAV1D_PIXEL_LAYOUT_I400, DAV1D_PIXEL_LAYOUT_I420, DAV1D_PIXEL_LAYOUT_I422,
-    DAV1D_PIXEL_LAYOUT_I444, Dav1dPixelLayout, Rav1dSequenceHeader,
-};
-#[cfg(not(feature = "unsafe-asm"))]
-use rav1d_safe::include::dav1d::picture::Dav1dPicture;
-#[cfg(not(feature = "unsafe-asm"))]
-use rav1d_safe::src::lib::{
-    dav1d_close, dav1d_data_create, dav1d_data_unref, dav1d_default_settings, dav1d_get_picture,
-    dav1d_open, dav1d_picture_unref, dav1d_send_data,
-};
 use std::ffi::c_int;
 use std::ptr::NonNull;
 

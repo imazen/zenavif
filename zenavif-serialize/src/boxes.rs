@@ -384,6 +384,15 @@ impl IpcoBox {
 
     #[must_use]
     pub fn push(&mut self, prop: IpcoProp) -> Option<u8> {
+        // Multiple items can share one identical profile property. Keep its
+        // one-based association index rather than emitting duplicate profiles.
+        if let IpcoProp::ColrIcc(profile) = &prop
+            && let Some(index) = self.props.iter().position(|existing| {
+                matches!(existing, IpcoProp::ColrIcc(other) if other.icc_data == profile.icc_data)
+            })
+        {
+            return u8::try_from(index + 1).ok();
+        }
         self.props.try_push(prop).ok()?;
         Some(self.props.len() as u8) // the spec wants them off by one
     }

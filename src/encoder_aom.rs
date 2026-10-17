@@ -45,7 +45,7 @@
 //! * High-bit-depth GRAYSCALE — `encode_gray8` takes `u8` samples and this
 //!   seam passes them through as the coded luma, so promoting them to a 10- or
 //!   12-bit swing would need a value-scaling rule nothing here measures.
-//! * Full pixel range, gain maps, animation.
+//! * Full pixel range and animation. Gain-map items use the shared muxer.
 //!
 //! # Bit depth (wired 2026-09-03)
 //!
@@ -293,12 +293,7 @@ pub(crate) fn reject_unsupported_config(config: &EncoderConfig) -> Result<()> {
             )));
         }
     }
-    if config.gain_map.is_some() {
-        return Err(at!(Error::Unsupported(
-            "Av1Backend::Zenav1Aom does not support gain maps \
-             (use the zenravif backend)"
-        )));
-    }
+
     #[cfg(feature = "encode-imazen")]
     if config.lossless {
         // Lossless IS wired now — `--cq-level 0` is coded-lossless upstream
@@ -666,6 +661,7 @@ fn mux_aom(
             md.min_luminance,
         );
     }
+    crate::encoder::mux_gain_map(config, &mut aviffy)?;
     let color_byte_size = payload.len();
     // `bit_depth`, not a literal 8: `zenavif-serialize` derives the `av1C`
     // `high_bitdepth` / `twelve_bit` flags and the `pixi` depth from this, and
@@ -725,6 +721,10 @@ enum ColorSource<'a> {
 /// What actually establishes that 8-bit output did not move across the
 /// high-bit-depth wiring is the same benchmark: 60/60 cells byte-identical
 /// between `ec6728b` and this tree.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "internal pixel conversion controls"
+)]
 fn color_planes(
     src: ColorSource<'_>,
     width: usize,

@@ -9,17 +9,20 @@
 
 ## summary
 #
-#   inherent methods                           17
-#   trait roster entries (type × trait)        16
+#   inherent methods                           20
+#   trait roster entries (type × trait)        19
 #
 # per-module pub lines:
-#   (root)                           17
+#   (root)                           20
 
-## items (17 lines)
+## items (20 lines)
 
 pub fn AV1Config::assert_fields_are_eq(&self)
 pub fn AV1LayeredImageIndexing::assert_fields_are_eq(&self)
 pub fn AmbientViewingEnvironment::assert_fields_are_eq(&self)
+pub fn AnimationFrameTiming::assert_fields_are_eq(&self)
+pub fn AnimationHdrMetadata::assert_fields_are_eq(&self)
+pub fn AnimationSpatialMetadata::assert_fields_are_eq(&self)
 pub fn ChromaSubsampling::assert_fields_are_eq(&self)
 pub fn CleanAperture::assert_fields_are_eq(&self)
 pub fn ColorInformation::assert_fields_are_eq(&self)
@@ -35,11 +38,14 @@ pub fn MasteringDisplayColourVolume::assert_fields_are_eq(&self)
 pub fn OperatingPointSelector::assert_fields_are_eq(&self)
 pub fn PixelAspectRatio::assert_fields_are_eq(&self)
 
-## trait impls (16 types)
+## trait impls (19 types)
 
 AV1LayeredImageIndexing: TrivialClone
 AmbientViewingEnvironment: TrivialClone
+AnimationFrameTiming: TrivialClone
+AnimationHdrMetadata: TrivialClone
 AnimationInfo: TrivialClone
+AnimationSpatialMetadata: TrivialClone
 ChromaSubsampling: TrivialClone
 CleanAperture: TrivialClone
 ContentColourVolume: TrivialClone
