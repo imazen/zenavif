@@ -1995,8 +1995,8 @@ pub fn fingerprint(config: &EncoderConfig) -> u64 {
             h.bytes_opt(Some(reference.id().as_bytes()));
         }
         for enhancement in [
-            svtav1::avif::ZenEnhancement::AomIntraEdgeFilter,
-            svtav1::avif::ZenEnhancement::AomRestorationUnitSearch,
+            svtav1::avif::ZenEnhancement::AomScreenTools,
+            svtav1::avif::ZenEnhancement::DeepSearch,
         ] {
             if config.svt_route_enhancements.contains(enhancement) {
                 h.bytes_opt(Some(enhancement.id().as_bytes()));
