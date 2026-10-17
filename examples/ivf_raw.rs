@@ -13,7 +13,7 @@
 //! 8-bit: 1 byte/sample; 10/12-bit: 2 bytes/sample little-endian
 //! (matches aomdec's high-bitdepth `--rawvideo` output on LE hosts).
 
-use rav1d_safe::src::managed::{Decoder, Frame, PixelLayout, Planes, Settings};
+use rav1d_safe::{Decoder, Frame, PixelLayout, Planes, Settings};
 use std::io::Write;
 use std::process::ExitCode;
 

@@ -144,6 +144,56 @@ pub(super) fn orientation_to_avif(orientation: zencodec::Orientation) -> (Option
     }
 }
 
+/// Rewrite every single-digit `tiff:Orientation` value in an XMP packet to
+/// `1`, in either serialization (`tiff:Orientation="6"` or
+/// `<tiff:Orientation>6</tiff:Orientation>`). Same length, so a padded
+/// packet keeps its size. `None` when there is nothing to change. (The same
+/// rewrite zencodecs applies when it bakes an orientation.)
+#[cfg(feature = "encode")]
+pub(super) fn xmp_orientation_to_1(xmp: &[u8]) -> Option<Vec<u8>> {
+    const NAME: &[u8] = b"tiff:Orientation";
+    let skip_ws = |j: &mut usize, b: &[u8]| {
+        while *j < b.len() && b[*j].is_ascii_whitespace() {
+            *j += 1;
+        }
+    };
+    let mut out = xmp.to_vec();
+    let mut changed = false;
+    let mut i = 0;
+    while let Some(at) = out[i..].windows(NAME.len()).position(|w| w == NAME) {
+        let mut j = i + at + NAME.len();
+        i = j;
+        skip_ws(&mut j, &out);
+        let digit = match out.get(j) {
+            Some(b'=') => {
+                j += 1;
+                skip_ws(&mut j, &out);
+                match out.get(j) {
+                    Some(&q @ (b'"' | b'\'')) if out.get(j + 2) == Some(&q) => j + 1,
+                    _ => continue,
+                }
+            }
+            Some(b'>') => {
+                j += 1;
+                skip_ws(&mut j, &out);
+                let d = j;
+                j += 1;
+                skip_ws(&mut j, &out);
+                if out.get(j) != Some(&b'<') {
+                    continue;
+                }
+                d
+            }
+            _ => continue,
+        };
+        if matches!(out.get(digit), Some(b'2'..=b'8')) {
+            out[digit] = b'1';
+            changed = true;
+        }
+    }
+    changed.then_some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

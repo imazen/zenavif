@@ -1,5 +1,104 @@
 # Changelog
 
+## AV1 media sessions (unreleased)
+
+- New `media` feature: `media::Av1VideoDecoder`, rav1d-safe behind
+  zencodec-media's `VideoDecoder`. Frames map rav1d's picture buffers without
+  copying and outlive the decoder; `av1C` configOBUs are prepended after
+  `configure` and `reset`; the container's colour fills only unspecified
+  fields.
+- New `media-encode` feature: `media::Av1VideoEncoder` and
+  `Av1EncodeSettings`, zenrav1e behind `VideoEncoder` (8/10/12-bit; mono,
+  4:2:0, 4:2:2, 4:4:4). Frames that would need a conversion are refused
+  (`InputMismatch`): a known colour claim other than the signalled one,
+  plane roles other than Y/Cb/Cr (G/B/R under the identity matrix), and
+  pictures whose planes, sizes or sample encoding differ from the
+  interpretation. Timestamps must increase strictly. Packets carry the
+  frame's pts and duration and are random-access points at key frames.
+  `send` answers `ReceivePending` only when a packet is ready. zenrav1e's
+  frame rate is a nominal `frame_rate` setting (default 30), never the tick
+  clock, which it would read as frames per second. The `av1C` record has no configOBUs, and its
+  format byte is rebuilt from the settings: zenrav1e's record writes
+  chroma_sample_position 0 and subsampling_y 0 for monochrome.
+- `Av1VideoBackend::Zenav1Svt` (with the `zenav1-svt` feature): zenav1-svt
+  behind the same session, all-intra (`key_frame_interval` 1), one packet per
+  frame. Its low-delay inter frames can be corrupt: libaom and rav1d reject
+  them, libdav1d does not (imazen/zenav1-svt issue 26, standalone repro on
+  the pinned rev and on main), so inter frames wait for that fix. 8-bit mono,
+  4:2:0, 4:4:4 and 10-bit mono, 4:2:0; 4:2:2 (not ported) and 12-bit are
+  refused. The `av1C` level comes from zenav1-svt's own
+  `compute_seq_level_idx`. The oracle gains 10 checks: libaom and rav1d-safe
+  equal libdav1d on its output in five formats.
+- The decoder inserts `av1C` configOBUs after a packet's leading temporal
+  delimiter, so a temporal unit still starts with it.
+- Tests: `tests/media_session.rs` (12) covers lossless round trips (six
+  depth/subsampling/odd-size cases, roles included), the testkit encoder and
+  decoder contracts, reset, av1C injection, the av1C record against an
+  independently parsed sequence header, refusal of frames that would need
+  conversion, and a clock-independent bitstream. `tests/media_corpus.rs`
+  runs the 48-file lossless corpus (`just media-corpus`, not committed; see
+  `docs/av1-media-corpus.pointer.md`). `scripts/media-ffmpeg-oracle.sh` runs
+  46 checks: libdav1d decodes the encoder's lossless output to the source,
+  and rav1d-safe matches libdav1d on zenrav1e and libaom streams.
+- Pins zencodec, zencodec-testkit and zencodec-media to `7cc3d3ec`, and
+  ultrahdr-core to `10a79c3a` (its zenmeta on the same zencodec), in the root
+  and fuzz manifests.
+
+## zenmp4 (unreleased, new workspace member)
+
+- `Mp4Demuxer`: progressive and fragmented MP4, sans-I/O, with seeking in
+  both layouts (a fragmented file's first seek indexes every `moof`).
+  `Mp4Muxer`: progressive, or fragmented for destinations that cannot seek
+  back; builds `av1C` from the first sequence header when a track has none.
+  `zenmp4/scripts/ffmpeg-oracle.sh` checks both directions and 162 seeks
+  against FFmpeg 8.0.1 / ffprobe.
+
+## Main CI repair (unreleased)
+
+- Unspecified CICP primaries (H.273 code 2) label the descriptor `Unknown`
+  instead of a `Bt709` default, on the buffered, strip and `output_info`
+  paths alike (`output_info` also predicted sRGB transfer where the decode
+  reports `Unknown`). The colour context keeps the raw code; zenpixels-convert
+  refuses a descriptor that disagrees with it, so every RGBA or alpha
+  expansion of such a stream failed (`mono_rgb_preference_keeps_classic_expansion`).
+  zenpixels moves to `9fa4fcb4` (zenpixels PR 85 on `0d74f5eb`), where an
+  unspecified context agrees with an `Unknown` descriptor.
+- Negotiation keeps the source's colour description for same-depth layout
+  changes (adding or dropping alpha); only depth changes take the preference's
+  transfer, the measured rule for 16-to-8 narrows. A source with an
+  unparseable ICC profile can be expanded to RGBA again.
+- CI: Clippy downloads the test vectors its `--tests` build includes; the fuzz
+  crate mirrors the root zencodec (`4fda4391`), rav1d-safe and zenpixels pins
+  (it had split into two zencodec copies); `duration_ms` replaced by `duration`.
+
+## Incremental decode (unreleased)
+
+- `dyn_incremental_decoder` returns zencodec's `WholeFileIncremental`, and the
+  decode capabilities declare `incremental`, so the zencodec-io drivers (files,
+  streams, async sources) serve AVIF. `HeaderReady` comes as soon as a prefix
+  probes; rows come from `push_decoder` once the whole file is offered.
+  `tests/sansio.rs` runs the testkit's incremental contract on six vectors
+  (8-bit 4:2:0, orientation, 10-bit mono, ICC, gain map, animation). Pins
+  zencodec `fa49f7ce`, ultrahdr-core `e6abe1cd` (same zencodec) and the zenpng
+  patch `8c9b9a87`.
+
+## Coordinated animation and precision contracts (unreleased)
+
+- Adopt ordinary timing quantization with returned rational durations and
+  explicit exact timing through zencodec `4fda4391`. Rejected frames do not
+  consume rounding state. Exact container-clock overflow preserves the typed
+  AnimationTiming cause through erased errors. No published inherent method
+  signature changes; the coordinated trait changes remain unreleased.
+
+
+- Stamp decoded animation descriptors after alpha/depth conversion and carry RGB/full-range CICP on reconstructed pixels. Raw coded matrix/range remain on source metadata.
+
+
+- Carry exact rational durations through the zencodec animation adapter. Reject invalid frame admission atomically and bound retained inputs, cumulative pixels, duration, and frame count.
+- Preserve source descriptor/ColorContext through animation encoding, retain decode job cancellation, poison failed decoder state, and keep original indices for skipped frames. Borrowed finish cancellation reaches native zenravif processing.
+- Implement explicit native 12-bit RGB/RGBA still and animation output, including alpha and low sample bits. Keep packed U16 values normalized to the full storage range.
+- Pin the coordinated native packet decoder, encoder, pixel 0.3, and HDR dependencies for portable checkouts.
+
 ## SVT research knob + pin bump (unreleased, 2026-09-24)
 
 - Added `__expert` `SvtParams::chroma_q: Option<(i8, i8)>` (`02b62dff`): fixed per-plane U/V chroma delta-q on `Av1Backend::Zenav1Svt`, routed to zenav1-svt's `ChromaQOverride`, for decorrelated-plane research stimuli. Refused (never ignored) off the svt backend, outside -64..=63, under SvtParity, for monochrome input and without `__expert`. Measured on smooth two-plane chroma texture at q60: U+48 raises Cb MSE 2.48 -> 5.67 with Cr flat; V+48 raises Cr MSE 2.16 -> 4.84 with Cb flat; (0, 0) is byte-identical to no override.
@@ -27,11 +126,54 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+### Changed
+
+- zenpixels/zenpixels-convert pinned to main 1d3ddd21 (from the 0.2 bridge's 9fa4fcb): zenpixels main is the converged 0.2.17 line again and carries 9fa4fcb's unresolved-CICP fix plus the ICC-database fixes (#86-#88).
+
+### Fixed
+
+- **Stills are written upright with orientation 1.** A metadata orientation used to become `irot`/`imir`; several readers ignore `irot`, and `imir`'s axis reads opposite ways in the 2017 and 2022 HEIF editions (imazen/zencodec#132). The still encoder now applies the orientation to the pixels, writes no `irot`/`imir`, and rewrites the EXIF Orientation tag and XMP `tiff:Orientation` to 1. The animation encoder still maps orientation to `irot`/`imir`. Test: `tests/orientation_bake.rs` (all 8 orientations).
+- **The Exif item is one `iloc` extent** (zenavif#52). zenavif-serialize wrote the 4-byte `exif_tiff_header_offset` and the TIFF data as two extents, which ffmpeg's demuxer refuses. The framed item is now one buffer; ffmpeg 8.0.1 probes and decodes the result. Test: `raw_tiff_exif_is_one_iloc_extent`.
+- f32 input that isn't PQ/HLG is stored as 8-bit sRGB, but the nclx said linear (transfer 8) whenever the descriptor or the caller's CICP did, and a profile synthesized from that CICP said linear too. Readers decoded the sRGB samples as linear. The nclx now says sRGB (13) with the primaries kept, and a synthesized profile is re-derived from it; a caller's own ICC is kept. Test: `tests/f32_linear_color.rs`.
+- Switching lossless off now clears the native encoder flag as well as the codec adapter flag; both setters share one implementation.
+
+### Shared gain-map transport
+
+- Reuse identical ICC properties between AVIF items, preserving associations
+  while avoiding duplicate-profile directory warnings in independent readers.
+
+- SVT and AOM still-image encoders now carry pre-encoded ISO gain-map items,
+  alternate ICC/CICP, and payload-derived dimensions/depth/chroma through the
+  existing AVIF serializer, matching zenravif. No public signatures change.
+- Share gain-map payload validation across all three backends; retain explicit
+  refusal for SVT animation gain maps. Extend the six-backend-pair metadata
+  tests with base/alternate ICC and ISO parameters/payload preservation.
+
+### Metadata integration (published baseline 0.1.6)
+
+- Shared encoding no longer turns an RGB input descriptor into an identity-matrix AV1 request; SVT/AOM retain their implemented conversion matrix and explicit native settings.
+
+- Reconcile existing image-animation and native 12-bit contracts (`60794df9`, `b777fa12`) with the metadata backend changes, retaining the coordinated decoder and pixel revisions.
+
+- Reuse PR 61 (`d2f17783`) inventory and regression fixtures behind default-off
+  `inventory`; keep baseline metadata available independently. Use shared typed
+  unsupported/input/part errors and preserve cancellation on malformed input.
+- Retain PR 61's auxiliary-track self-reference parser fix; validate metadata
+  across all three AV1 encoders and both decoders.
+- Registry audit confirms pre-existing breaks at `85dd0d2b`: animation struct
+  fields, non-exhaustive encoder enums, `EncodeBitDepth::Auto` discriminant and
+  nine codec-trait error types. See [the report](docs/METADATA_INTEGRATION.md).
+
+
 ### Added
 - Add calibrated native AVIF experiment routes through the shared Rust targeting owner, with train-family seeds, premeasured attained bounds and explicit 1/2/3 complete-encode accounting.
 - Exact-tick animation APIs for all RGB/RGBA input formats and both encoding backends, with exact result timing and mixed-clock codec-adapter pushes, using zenravif `23522fff`.
 
 ### Fixed
+
+- Resolve the workspace serializer directly for SVT/AOM Git consumers, and remove a duplicated standalone-fuzz contract patch.
+- Make optional auto-tune dependencies resolvable by git consumers through versioned requirements and root patches. No public signature or feature change.
+
 - Bind the `zensim_cq_rd` research driver's scalar score and fresh spatial maps to complete exact candidate artifacts through Rust `BakeScorer`; independently verify emitted bytes, preserve fractional/negative targets and reject unsupported spatial terms. Retain the inert legacy-gain control and the successful one-image redistribution engagement result without claiming RD or model qualification.
 - Honor animation chroma, RGB identity and full/limited range through zenravif `7f55b540`, with public depth-conversion and exact RGB/alpha plane verification; backend `1447c200` fixes forced-sub8 inter partitions and partial chroma-edge distortion.
 - Forward configured animation color superblock quantizer maps through zenravif `5b7c50b9`, retaining neutral-map bytes and independent alpha; backend application remains intra-only.
@@ -3234,3 +3376,4 @@ why none of them is the seam's to pick unilaterally.
 - Temporarily pinned `rav1d-safe` to a git revision containing the
   aarch64 panic fixes while the fix was making its way through a release
   (01c02d0).
+

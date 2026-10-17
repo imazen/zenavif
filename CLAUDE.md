@@ -699,6 +699,15 @@ remain deferred while this newly measured baseline failure is unresolved.
 
 ## Known Bugs
 
+- Fixed during the shared timing audit: transparent native unsupported-error
+  wrapping hid the precise cause from erased callers. The wrapper retains the
+  cause; `reported_timing_fallback_is_atomic_and_exact_refusal_is_typed` checks
+  exact refusal, ordinary quantization and rejected-frame atomicity.
+
+- Shared metadata integration exposed an unpublished serializer registry requirement for SVT/AOM Git consumers and duplicate zencodec keys in the standalone fuzz manifest. Direct workspace paths and a single coordinated patch fix resolution.
+
+- Metadata integration found the shared still encoder inferred an identity output matrix from RGB input descriptors, rejecting SVT/AOM YUV encoding. Descriptor/source CICP now carries primaries and transfer while the native backend retains its coding-matrix choice; `codec_hdr_units` exercises the SVT path.
+
 **2026-09-08 — still adapter audit corrections.** AOM Gray8 input 16
 previously displayed as 0 because full-range samples were tagged limited;
 the adapter now converts to studio-range luma. Explicit transfer metadata
@@ -1828,3 +1837,8 @@ coverage is only 28/80. Independent SSIMULACRA2/Butteraugli disagree on the
 fixed-CQ active arm, and active targeting worsens. Do not promote this spatial
 strategy or model from engagement alone. Exact bytes, costs and controls are
 in the report JSON; use `RESULT_COMPLETE.json` for final artifact status.
+
+### Codec fidelity regression
+
+Switching the adapter from lossless to lossy left the native encoder flag set.
+`lossless_to_lossy_clears_native_state` covers both setters and fidelity switching.

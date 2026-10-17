@@ -322,12 +322,7 @@ fn reject_unsupported_config(config: &EncoderConfig, input_is_16bit: bool) -> Re
              (the zenav1-svt sequence header pins color_range=1)"
         )));
     }
-    if config.gain_map.is_some() {
-        return Err(at!(Error::Unsupported(
-            "Av1Backend::Zenav1Svt does not support gain maps yet \
-             (use the zenravif backend)"
-        )));
-    }
+
     #[cfg(feature = "encode-imazen")]
     if config.lossless {
         return Err(at!(Error::Unsupported(
@@ -717,6 +712,7 @@ impl CodedSvtFrame {
             },
             self.monochrome,
         );
+        crate::encoder::mux_gain_map(config, &mut aviffy)?;
         aviffy.set_premultiplied_alpha(
             self.alpha.is_some()
                 && config.alpha_color_mode == crate::EncodeAlphaMode::Premultiplied,

@@ -10,7 +10,7 @@ use crate::cicp_resolve::ResolvedMatrix;
 use crate::error::{Error, Result};
 use crate::image::{ChromaSampling, ImageInfo};
 use crate::yuv_convert::{self, YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRange};
-use rav1d_safe::src::managed::{Planes8, Planes16};
+use rav1d_safe::{Planes8, Planes16};
 use rgb::{Rgb, Rgba};
 use whereat::at;
 use yuv::{YuvPlanarImage, YuvRange};
@@ -348,9 +348,9 @@ pub(super) fn convert_8bit_planar(
 /// both paths guarantees identical color payloads decode identically with
 /// and without an alpha item — byte-for-byte, by construction.
 fn convert_8bit_planar_rgba_inhouse(
-    y_view: &rav1d_safe::src::managed::PlaneView8<'_>,
-    u_view: &rav1d_safe::src::managed::PlaneView8<'_>,
-    v_view: &rav1d_safe::src::managed::PlaneView8<'_>,
+    y_view: &rav1d_safe::PlaneView8<'_>,
+    u_view: &rav1d_safe::PlaneView8<'_>,
+    v_view: &rav1d_safe::PlaneView8<'_>,
     sampling: ChromaSampling,
     ctx: ConvertCtx,
     our_range: OurYuvRange,
@@ -428,9 +428,9 @@ fn convert_8bit_planar_rgba_inhouse(
 
 /// Decode 8-bit YUV planar to RGB via our `yuv_convert` SIMD path.
 fn convert_8bit_planar_rgb(
-    y_view: &rav1d_safe::src::managed::PlaneView8<'_>,
-    u_view: &rav1d_safe::src::managed::PlaneView8<'_>,
-    v_view: &rav1d_safe::src::managed::PlaneView8<'_>,
+    y_view: &rav1d_safe::PlaneView8<'_>,
+    u_view: &rav1d_safe::PlaneView8<'_>,
+    v_view: &rav1d_safe::PlaneView8<'_>,
     sampling: ChromaSampling,
     ctx: ConvertCtx,
     our_range: OurYuvRange,

@@ -23,8 +23,12 @@ zenpixels = ">=0.2.16, <0.4.0"
 
 [dependencies.zenavif]
 path = ".."
+features = ["inventory"]
 
 [patch.crates-io]
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "10a79c3a888dd589884fd032846eec70bc31eb13" }
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "1d3ddd2131b22e9e3754c765d4ce45ce3901de59" }
+zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "1d3ddd2131b22e9e3754c765d4ce45ce3901de59" }
 # fuzz/ is its own workspace root, so the root [patch] does not reach it.
 # zenavif-parse needs no mirror: zenavif's dep on it is a path dep into the
 # workspace (zenavif-parse/), which resolves transitively from here.
@@ -32,7 +36,11 @@ path = ".."
 # the #524 loop-filter H-window fix). Keep it in lockstep with the root
 # manifest's `rev` — the reasoning for the current one lives there. Drop at
 # the rav1d-safe 0.6.0 release.
-rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "e73811f5d4dad81b75195ca18554fd8a5df19515" }
+rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "dfd01e3268f6e8da862d2d5f0a71d19f414f2b87" }
+# Mirror of the root zencodec pin: ultrahdr-core reaches zencodec through
+# zenmeta at this exact rev, so any other rev splits the graph into two
+# zencodec copies (gain_map.rs then fails to typecheck).
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
 
 [[bin]]
 name = "fuzz_decode"
@@ -65,6 +73,13 @@ bench = false
 [[bin]]
 name = "fuzz_decode_negotiate"
 path = "fuzz_targets/fuzz_decode_negotiate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "inventory"
+path = "fuzz_targets/fuzz_inventory.rs"
 test = false
 doc = false
 bench = false

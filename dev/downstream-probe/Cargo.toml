@@ -18,8 +18,8 @@
 # The `[patch.crates-io]` table below is NOT optional and is NOT new in 0.2.0:
 # `[patch]` tables in a dependency's own manifest are ignored, so the parent's
 # root patch table does not reach a consumer. Any consumer of zenavif needs
-# these two entries until zenavif-serialize 0.2.0 and zenanalyze-api 0.1.1
-# publish.
+# these entries until zenavif-serialize 0.2.0, zenanalyze-api 0.1.1 and the
+# zencodec / zenpixels releases carrying the pinned APIs publish.
 [package]
 name = "zenavif-downstream-probe"
 version = "0.0.0"
@@ -41,3 +41,10 @@ almost-enough = { version = "0.4.3", features = ["alloc"] }
 [patch.crates-io]
 zenanalyze-api = { git = "https://github.com/imazen/zenanalyze" }
 zenavif-serialize = { path = "../../zenavif-serialize" }
+# zencodec and zenpixels at the root's pinned revs (keep in sync with the
+# root `[patch.crates-io]`): zenavif main uses zencodec APIs the registry
+# 0.1.26 lacks (`animation`, timed frames, inventory), and one rev of each
+# keeps the graph to a single copy.
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "1d3ddd2131b22e9e3754c765d4ce45ce3901de59" }
+zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "1d3ddd2131b22e9e3754c765d4ce45ce3901de59" }

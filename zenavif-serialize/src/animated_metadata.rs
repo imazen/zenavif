@@ -20,7 +20,7 @@ pub(super) struct Sidecar {
 pub(super) fn sidecars(image: &AnimatedImage) -> Vec<Sidecar> {
     let mut items = Vec::new();
     if let Some(exif) = image.exif.as_deref() {
-        let payload = crate::exif_extents(exif).iter().flat_map(|e| e.data.iter().copied()).collect();
+        let payload = crate::exif_item(exif).into_owned();
         items.push(Sidecar { target: 1, id: 3, kind: *b"Exif", content_type: b"", payload });
     }
     if let Some(xmp) = image.xmp.as_ref() {

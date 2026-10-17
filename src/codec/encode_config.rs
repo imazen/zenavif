@@ -82,10 +82,10 @@ impl AvifEncoderConfig {
         self.lossless = lossless;
         if lossless {
             self.inner = self.inner.quality(100.0);
-            #[cfg(feature = "encode-imazen")]
-            {
-                self.inner = self.inner.with_lossless(true);
-            }
+        }
+        #[cfg(feature = "encode-imazen")]
+        {
+            self.inner = self.inner.with_lossless(lossless);
         }
         self
     }
@@ -268,20 +268,20 @@ pub(super) static AVIF_ENCODE_CAPABILITIES: zencodec::encode::EncodeCapabilities
         .with_exif(true)
         .with_xmp(true)
         .with_cicp(true)
-        // AVIF's nclx (CICP) has been spec-mandated since the first MIAF/HEIF
-        // editions: the colour-information property is reader-authoritative — it
-        // overrides any in-bitstream colour and a default is always assumed — so a
-        // conforming reader honors nclx. CICP is therefore safe as the *sole* color
-        // carrier here; drop a redundant ICC, like JXL. (Contrast PNG's cICP, a far
-        // newer optional chunk that is not yet sole-safe.)
+        // AVIF's nclx is a valid carrier, but not a safe *sole* one: vips and
+        // ImageMagick act only on a `prof` and show an nclx-only Display P3 AVIF
+        // as sRGB (reader-compatibility matrix, imazen/zencodec#132). So a
+        // wide-gamut ICC is kept next to the nclx, and a CICP-only source gets a
+        // synthesized one. Only JXL is sole-safe.
         .with_cicp_is_valid_carrier(true)
-        .with_cicp_safe_sole_carrier(true)
+        .with_cicp_safe_sole_carrier(false)
         .with_stop(true)
         .with_lossy(true)
         .with_lossless(cfg!(feature = "encode-imazen"))
         .with_hdr(true)
         .with_gain_map(true)
         .with_animation(true)
+        .with_animation_timing(true)
         .with_native_gray(false)
         .with_native_16bit(true)
         .with_native_f32(false)
@@ -392,16 +392,8 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
         self.trait_quality
     }
 
-    fn with_lossless(mut self, lossless: bool) -> Self {
-        self.lossless = lossless;
-        if lossless {
-            self.inner = self.inner.quality(100.0);
-            #[cfg(feature = "encode-imazen")]
-            {
-                self.inner = self.inner.with_lossless(true);
-            }
-        }
-        self
+    fn with_lossless(self, lossless: bool) -> Self {
+        self.with_lossless_mode(lossless)
     }
 
     fn is_lossless(&self) -> Option<bool> {
@@ -536,6 +528,7 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
             mastering_display: None,
             rotation: None,
             mirror: None,
+            orientation: zencodec::Orientation::Identity,
             policy: None,
             canvas_size: None,
             loop_count: None,
@@ -547,6 +540,23 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
 mod tests {
     use super::*;
     use imgref::Img;
+
+    #[cfg(feature = "encode-imazen")]
+    #[test]
+    fn lossless_to_lossy_clears_native_state() {
+        use zencodec::encode::{EncoderConfig as _, Fidelity};
+        let lossless = AvifEncoderConfig::new().with_fidelity(Fidelity::Lossless);
+        assert!(lossless.inner.lossless);
+        for lossy in [
+            lossless.clone().with_lossless_mode(false),
+            lossless.clone().with_lossless(false),
+            lossless.with_fidelity(Fidelity::codec_quality(70.0)),
+        ] {
+            assert_eq!(lossy.is_lossless(), Some(false));
+            assert!(!lossy.inner.lossless);
+            assert_ne!(lossy.resolved_target_fidelity(), Some(Fidelity::Lossless));
+        }
+    }
 
     #[cfg(feature = "encode")]
     #[test]
@@ -697,8 +707,9 @@ mod tests {
 
         let config = AvifEncoderConfig::new();
         let image = ImageCharacteristics::new(2048, 2048, PixelDescriptor::RGB8_SRGB);
-        let e1 = config.estimate_encode_resources(&image, &ComputeEnvironment::new());
-        let e8 = config.estimate_encode_resources(&image, &ComputeEnvironment::new().with_cores(8));
+        let e1 = config.estimate_encode_resources(&image, &ComputeEnvironment::conservative());
+        let e8 = config
+            .estimate_encode_resources(&image, &ComputeEnvironment::conservative().with_cores(8));
         assert!(
             e8.peak_memory_bytes_est().unwrap() > e1.peak_memory_bytes_est().unwrap(),
             "peaks must carry the per-thread term"

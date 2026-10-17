@@ -1779,7 +1779,6 @@ pub(crate) fn rgba8_to_yuv420(
     )
 }
 
-
 /// Convert RGB(A) rows to YUV **4:4:4** planes (8-bit).
 ///
 /// # Why this exists

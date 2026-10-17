@@ -193,6 +193,13 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
             .map_err(zencodec::CodecError::of)
     }
 
+    /// Every box, item, item extent, animation sample and property, with what
+    /// this job's decode does with it. See `codec/inventory.rs`.
+    #[cfg(feature = "inventory")]
+    fn inventory(&self, data: &[u8]) -> Result<zencodec::inventory::Inventory, At<CodecError>> {
+        self.inventory_inner(data)
+    }
+
     fn push_decoder(
         self,
         data: Cow<'a, [u8]>,
@@ -263,6 +270,19 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         self.animation_frame_decoder_inner(data, preferred)
             .map_err(zencodec::CodecError::of)
     }
+
+    /// Incremental (sans-I/O) decode: the header is reported as soon as it
+    /// probes, and the image decodes through `push_decoder` once the whole
+    /// file is offered. The AV1 items need their bytes complete; a source
+    /// binding that fetches only the items a decode needs is a follow-up.
+    fn dyn_incremental_decoder(
+        self,
+        preferred: &[PixelDescriptor],
+    ) -> Result<Box<zencodec::decode::DynIncrementalDecoder>, zencodec::decode::BoxedError> {
+        Ok(zencodec::decode::erase_incremental(
+            zencodec::helpers::WholeFileIncremental::new(self, preferred),
+        ))
+    }
 }
 
 impl AvifDecodeJob {
@@ -300,6 +320,69 @@ impl AvifDecodeJob {
         Ok(info)
     }
 
+    #[cfg(feature = "inventory")]
+    fn inventory_inner(
+        &self,
+        data: &[u8],
+    ) -> Result<zencodec::inventory::Inventory, At<CodecError>> {
+        use super::inventory::{GainMapUse, Options};
+        self.limits
+            .check_input_size(data.len() as u64)
+            .map_err(|e| {
+                use zencodec::CategorizedError;
+                at!(CodecError::from_parts(
+                    Some("zenavif"),
+                    e.category(),
+                    Box::new(e)
+                ))
+            })?;
+        // The container parser configurations: probe/probe_full parse with
+        // the codec configuration alone (`probe_inner`); the decoders add
+        // the job's ResourceLimits (`effective_config`).
+        let parse_config_of = |cfg: &crate::DecoderConfig| {
+            let mut pc = zenavif_parse::DecodeConfig::default();
+            if let Some(mem) = cfg.parser_peak_memory_limit {
+                pc = pc.with_peak_memory_limit(mem);
+            }
+            if let Some(mp) = cfg.parser_total_megapixels_limit {
+                pc = pc.with_total_megapixels_limit(mp);
+            }
+            if let Some(frames) = cfg.parser_max_animation_frames {
+                pc = pc.with_max_animation_frames(frames);
+            }
+            pc
+        };
+        let parse_config = parse_config_of(&self.config.inner);
+        let limited = self.limits.max_pixels.is_some()
+            || self.limits.max_memory_bytes.is_some()
+            || self.limits.max_frames.is_some();
+        let decode_parse_config = limited.then(|| parse_config_of(&self.effective_config()));
+        let policy = self.policy.as_ref();
+        // codec/decoder.rs: ReconstructHdr applies the gain map; Components
+        // and `extract_gain_map` hand it to the caller.
+        let gain_map = match self.gain_map_render {
+            zencodec::GainMapRender::ReconstructHdr { .. } => GainMapUse::Reconstruct,
+            zencodec::GainMapRender::Components => GainMapUse::Surface,
+            _ if self.extract_gain_map => GainMapUse::Surface,
+            _ => GainMapUse::Describe,
+        };
+        let opts = Options {
+            gain_map,
+            keep_icc: policy.is_none_or(|p| p.resolve_icc(true)),
+            keep_exif: policy.is_none_or(|p| p.resolve_exif(true)),
+            keep_xmp: policy.is_none_or(|p| p.resolve_xmp(true)),
+            parse_config,
+            decode_parse_config,
+            max_pixels: self.limits.max_pixels,
+            allow_animation: policy.is_none_or(|p| p.resolve_animation(true)),
+        };
+        let stop: &dyn enough::Stop = match self.stop {
+            Some(ref s) => s,
+            None => &enough::Unstoppable,
+        };
+        super::inventory::inventory(data, &opts, stop).map_err(CodecError::of)
+    }
+
     fn output_info_inner(&self, data: &[u8]) -> Result<zencodec::decode::OutputInfo, At<Error>> {
         let decoder = crate::ManagedAvifDecoder::new(data, &self.config.inner)?;
         let native_info = decoder.probe_info()?;
@@ -314,15 +397,9 @@ impl AvifDecodeJob {
         } else {
             PixelDescriptor::RGB8_SRGB
         };
-        // Override TF and primaries from CICP if available.
-        if let Some(tf) =
-            zenpixels::TransferFunction::from_cicp(native_info.transfer_characteristics.0)
-        {
-            desc = desc.with_transfer(tf);
-        }
-        if let Some(p) = zenpixels::ColorPrimaries::from_cicp(native_info.color_primaries.0) {
-            desc = desc.with_primaries(p);
-        }
+        // Transfer and primaries from CICP, by the rule the decode itself
+        // applies, so the prediction matches the buffers.
+        desc = crate::convert::descriptor_with_cicp(desc, &native_info);
         // Report the post-orientation output dims + what the decoder bakes:
         // `Correct` bakes the intrinsic orientation (output = display dims,
         // `orientation_applied` = intrinsic); `Preserve` bakes nothing
@@ -421,8 +498,9 @@ impl AvifDecodeJob {
             // Measured envelope of the reconstructed pixels (zencodec
             // contract: MaxCLL/MaxFALL are measured; mastering display
             // passes through unchanged).
-            info =
-                info.with_content_light_level(zencodec::ContentLightLevel::new(max_cll, max_fall));
+            info = info.with_content_light_level(zenpixels::hdr::ContentLightLevel::new(
+                max_cll, max_fall,
+            ));
             let strip_height = 64u32.min(h.max(1));
             return Ok(AvifStreamingDecoder {
                 info,
@@ -526,15 +604,7 @@ impl AvifDecodeJob {
 
             // Apply CICP metadata to descriptor. No format negotiation for
             // the grid path — tiles produce native format and we stitch raw bytes.
-            let mut strip_descriptor = base_desc;
-            if let Some(tf) =
-                zenpixels::TransferFunction::from_cicp(native_info.transfer_characteristics.0)
-            {
-                strip_descriptor = strip_descriptor.with_transfer(tf);
-            }
-            if let Some(p) = zenpixels::ColorPrimaries::from_cicp(native_info.color_primaries.0) {
-                strip_descriptor = strip_descriptor.with_primaries(p);
-            }
+            let strip_descriptor = crate::convert::descriptor_with_cicp(base_desc, &native_info);
 
             return Ok(AvifStreamingDecoder {
                 info,
@@ -614,6 +684,9 @@ impl AvifDecodeJob {
                 zencodec::UnsupportedOperation::AnimationDecode,
             )));
         }
+        if let Some(stop) = &self.stop {
+            stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
+        }
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
 
@@ -659,8 +732,9 @@ impl AvifDecodeJob {
 
         Ok(AvifAnimationFrameDecoder {
             anim_decoder: anim_dec,
-            index: 0,
             frames_decoded: 0,
+            stop: self.stop,
+            failed: false,
             start_frame_index: self.start_frame_index,
             info: Arc::new(base_info),
             total_frames: anim_info.frame_count as u32,

@@ -2,7 +2,11 @@
 
 The execution router selects and runs a supported backend. It currently has
 **no calibrated RD/time ranking**: automatic selection keeps an eligible
-preferred backend, otherwise uses a deterministic capability fallback. Explicit
+preferred backend, otherwise uses a deterministic capability fallback: the
+first of zenav1-svt, zenav1-aom, zenravif that supports the request. That
+order comes from an exploratory probe, `benchmarks/backend_probe_2026-10-15.md`.
+zenav1-svt and zenav1-aom tie on bytes, and zenravif needs 14–18% more. A
+12-bit request therefore falls from zenav1-svt to zenav1-aom. Explicit
 selection and `SvtParity` never fall back after a refusal or encoder error.
 
 ## Inputs and settings
@@ -106,7 +110,7 @@ configuration whose `colr` box it fills with it.
 | ICC + explicit nclx | Owner muxer behavior | Both retained independently | Both retained independently |
 | Transfer codes represented by shared muxer | Owner mapping | Full represented set 1/2/4–18 | Full represented set 1/2/4–18 |
 | Exif/XMP, rotation/mirror, CLLI/mastering display | Existing paths | Existing paths, replayed | Existing paths, replayed |
-| Source-lossless / gain map | Existing supported formats | Refused by RGB adapter (raw coded-lossless planes exist) | Lossless: yes, at 4:4:4 + RGB/identity + full range (measured bit-exact round trip); gain map: refused |
+| Source-lossless / gain map | Existing supported formats | Source-lossless refused by RGB adapter; gain-map still-image byte carry supported | Lossless: yes, at 4:4:4 + RGB/identity + full range (measured bit-exact round trip); gain map: still-image byte carry |
 | C film-grain model or table | No exposed route requirement | Wired for primary color | No exposed wrapper control |
 | SvtParity / named C reference | Refused | Supported policy, subject to tracked parity divergences | Refused |
 | Explicit Zen SVT enhancements | Refused | Opt-in, research tip only | Refused |

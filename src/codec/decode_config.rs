@@ -336,6 +336,7 @@ static DECODE_DESCRIPTORS: &[PixelDescriptor] = &[
 
 static AVIF_DECODE_CAPABILITIES: zencodec::decode::DecodeCapabilities =
     zencodec::decode::DecodeCapabilities::new()
+        .with_incremental(true)
         .with_icc(true)
         .with_exif(true)
         .with_xmp(true)
@@ -347,6 +348,7 @@ static AVIF_DECODE_CAPABILITIES: zencodec::decode::DecodeCapabilities =
         .with_hdr(true)
         .with_gain_map(true)
         .with_reconstructs_hdr(true)
+        .with_inventory(cfg!(feature = "inventory"))
         .with_native_gray(true)
         .with_native_16bit(true)
         .with_native_alpha(true)

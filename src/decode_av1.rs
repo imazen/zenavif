@@ -8,7 +8,7 @@
 #![deny(unsafe_code)]
 
 use crate::error::{Error, Result, error_from_rav1d};
-use rav1d_safe::src::managed::{Decoder as Rav1dDecoder, Frame, PixelLayout, Planes, Settings};
+use rav1d_safe::{Decoder as Rav1dDecoder, Frame, PixelLayout, Planes, Settings};
 use rgb::Rgb;
 use whereat::at;
 
@@ -76,10 +76,7 @@ pub(crate) fn decode_av1_obu_with_config(
     let layout = frame.pixel_layout();
 
     let color_info = frame.color_info();
-    let yuv_range = if matches!(
-        color_info.color_range,
-        rav1d_safe::src::managed::ColorRange::Full
-    ) {
+    let yuv_range = if matches!(color_info.color_range, rav1d_safe::ColorRange::Full) {
         crate::yuv_convert::YuvRange::Full
     } else {
         crate::yuv_convert::YuvRange::Limited

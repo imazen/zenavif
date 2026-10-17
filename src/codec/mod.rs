@@ -47,6 +47,8 @@ mod encode_job;
 mod encoder;
 mod gain_map;
 mod info;
+#[cfg(feature = "inventory")]
+mod inventory;
 mod negotiate;
 mod orientation;
 mod streaming;

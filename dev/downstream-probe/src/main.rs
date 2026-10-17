@@ -96,22 +96,36 @@ fn main() {
         );
     }
 
-    // Twelve on the zenravif backend must be an honest refusal naming the one
-    // backend that codes it, not a silent 10-bit encode.
-    let e = zenavif::encode_rgb8(
+    // Twelve with no backend named: zenravif codes 12-bit since PR 66 (the
+    // in-crate routing tests pin the same), so this encodes and decodes at
+    // more than 8 bits per channel instead of being refused.
+    let out = zenavif::encode_rgb8(
         img.as_ref(),
         &EncoderConfig::new()
             .chroma_subsampling(EncodeChromaSubsampling::Yuv420)
             .bit_depth(EncodeBitDepth::Twelve),
         stop(),
     )
-    .expect_err("zenravif must refuse 12-bit");
+    .unwrap_or_else(|e| panic!("12-bit on the default backend: {e}"));
+    let back = zenavif::decode(&out.avif_file).expect("decode 12-bit");
+    let bpp = back.descriptor().bytes_per_pixel();
+    assert!(bpp > 4, "12-bit must not decode to 8 bits per channel: {bpp} bytes/pixel");
+    println!("default 12-bit: {} bytes -> {bpp} bytes/pixel", out.avif_file.len());
+
+    // A backend this consumer did not compile in must be refused, naming the
+    // cargo feature that provides it (not another backend's).
+    let e = zenavif::encode_rgb8(
+        img.as_ref(),
+        &EncoderConfig::new().backend(Av1Backend::Zenav1Svt),
+        stop(),
+    )
+    .expect_err("zenav1-svt is not compiled into this consumer");
     let msg = format!("{e}");
-    assert!(msg.contains("Zenav1Aom"), "refusal must name the backend: {msg}");
+    assert!(msg.contains("zenav1-svt"), "refusal must name the feature: {msg}");
     assert!(
-        !msg.contains("zenav1-svt"),
-        "an aom/zenravif refusal must not name the zenav1-svt feature: {msg}"
+        !msg.contains("zenav1-aom"),
+        "a zenav1-svt refusal must not name the aom feature: {msg}"
     );
-    println!("zenravif 12-bit refusal: {msg}");
+    println!("zenav1-svt refusal: {msg}");
     println!("OK");
 }

@@ -4,7 +4,7 @@
 
 AVIF container parser (ISOBMFF/MIAF demuxer) that extracts AV1 payloads, alpha channels, grid tiles, and animation frames from AVIF files. Written entirely in safe Rust with fallible allocations throughout.
 
-This is a fork of [kornelski/avif-parse](https://github.com/kornelski/avif-parse), which itself descends from Mozilla's MP4 parser used in Firefox. The upstream crate is battle-tested against untrusted data; this fork adds animation, grid images, and a zero-copy API for our specific use case.
+This is a fork of [kornelski/avif-parse](https://github.com/kornelski/avif-parse), which itself descends from the mp4parse project (Ralph Giles, Matthew Gregan, Alfredo Yang, Jon Bauman), used in Firefox. The upstream crate is battle-tested against untrusted data; this fork adds animation, grid images, and a zero-copy API for our specific use case.
 
 Since 2026-07-16 the crate is developed in the [imazen/zenavif](https://github.com/imazen/zenavif) workspace (directory `zenavif-parse/`), with its full history and release tags imported under the `zenavif-parse-v*` prefix (upstream lineages as `avif-parse-v*` and `mp4parse-v*`).
 
@@ -132,10 +132,16 @@ if let Some(grid) = parser.grid_config() {
 
 ```rust
 if let Some(info) = parser.animation_info() {
-    for frame in parser.frames() {
+    // info.loop_count: u64 total plays, including the initial play (0 = infinite).
+    // info.hdr preserves HDR metadata from the color track, independently
+    // of the poster's metadata (CLLI/MDCV/CCLV/AMVE).
+    for (index, frame) in parser.frames().enumerate() {
         let frame = frame?;
         decode_av1(&frame.data)?;
-        // display for frame.duration_ms milliseconds
+        let timing = parser.frame_timing(index)?;
+        // Exact duration: timing.duration_in_timescales / timing.timescale seconds.
+        // timing.pts_in_timescales preserves the 64-bit presentation timestamp.
+        // frame.duration_ms is a legacy truncated/saturated convenience value.
     }
 }
 ```

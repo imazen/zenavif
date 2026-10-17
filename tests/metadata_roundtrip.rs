@@ -321,3 +321,81 @@ fn cancellation_during_encode() {
     let result = encode_rgb8(img.as_ref(), &config, StopToken::new(AlreadyStopped));
     assert!(result.is_err(), "encoding with cancelled token should fail");
 }
+
+/// Container metadata must survive every supported encoder and both decoders.
+#[cfg(all(
+    feature = "inventory",
+    feature = "zenav1-svt",
+    feature = "zenav1-aom-encode",
+    feature = "zenav1-aom"
+))]
+#[test]
+fn metadata_is_shared_across_all_av1_backends() {
+    use zenavif::{Av1Backend, DecodeBackend, EncodeChromaSubsampling};
+    use zencodec::decode::{DecodeJob as _, DecoderConfig as _};
+    use zencodec::inventory::{Disposition, MetadataKind};
+    let image = make_test_image();
+    let icc_vector = std::fs::read("tests/vectors/libavif/seine_sdr_gainmap_srgb_icc.avif")
+        .expect("provision libavif vectors");
+    let icc = ManagedAvifDecoder::new(&icc_vector, &DecoderConfig::new())
+        .unwrap()
+        .probe_info()
+        .unwrap()
+        .icc_profile
+        .unwrap();
+    let exif = make_avif_exif();
+    let xmp = b"<x:xmpmeta xmlns:x='adobe:ns:meta/'/>".to_vec();
+    for backend in [
+        Av1Backend::Zenravif,
+        Av1Backend::Zenav1Svt,
+        Av1Backend::Zenav1Aom,
+    ] {
+        let config = EncoderConfig::new()
+            .backend(backend)
+            .quality(80.0)
+            .speed(10)
+            .chroma_subsampling(EncodeChromaSubsampling::Yuv420)
+            .icc_profile(icc.clone())
+            .exif(exif.clone())
+            .xmp(xmp.clone())
+            .rotation(1);
+        let encoded = encode_rgb8(image.as_ref(), &config, stop()).unwrap();
+        for decoder in [DecodeBackend::Rav1dSafe, DecodeBackend::Zenav1Aom] {
+            let mut config = zenavif::AvifDecoderConfig::new();
+            *config.inner_mut() = DecoderConfig::new().decode_backend(decoder);
+            let inventory = config.clone().job().inventory(&encoded.avif_file).unwrap();
+            inventory.validate().unwrap();
+            let info = config.clone().job().probe(&encoded.avif_file).unwrap();
+            assert_eq!(
+                info.embedded_metadata.exif.as_deref(),
+                Some(&exif[4..]),
+                "{backend:?}/{decoder:?}: EXIF"
+            );
+            assert_eq!(
+                info.embedded_metadata.xmp.as_deref(),
+                Some(xmp.as_slice()),
+                "{backend:?}/{decoder:?}: XMP"
+            );
+            assert_eq!(
+                info.source_color.icc_profile.as_deref(),
+                Some(icc.as_slice()),
+                "{backend:?}/{decoder:?}: ICC"
+            );
+            for kind in [MetadataKind::Exif, MetadataKind::Xmp, MetadataKind::Icc] {
+                assert!(
+                    inventory
+                        .parts()
+                        .iter()
+                        .any(|p| p.disposition() == Disposition::Metadata(kind)),
+                    "{backend:?}/{decoder:?}: {kind:?}"
+                );
+            }
+            let decoded = config.decode(&encoded.avif_file).unwrap();
+            assert_eq!(
+                decoded.info().orientation,
+                info.orientation,
+                "{backend:?}/{decoder:?}: orientation"
+            );
+        }
+    }
+}

@@ -58,7 +58,7 @@ fn animation_crop_and_orientation_use_track_and_transform_every_pixel() {
         color.seq_tier_0 = config.tier != 0;
         color.high_bitdepth = config.bit_depth > 8;
         color.chroma_sample_position = config.chroma_sample_position;
-        let mut alpha = color.clone();
+        let mut alpha = color;
         alpha.monochrome = true;
         let refs: Vec<_> = (0..2).map(|i| parser.frame(i).unwrap()).collect();
         let frames: Vec<_> = refs
@@ -72,8 +72,8 @@ fn animation_crop_and_orientation_use_track_and_transform_every_pixel() {
         for rotation in [1u8, 0, 2, 3] {
             for mirror in [Some(1u8), None, Some(0)] {
                 let mut mux = AnimatedImage::new();
-                mux.set_color_config(color.clone())
-                    .set_alpha_config(alpha.clone())
+                mux.set_color_config(color)
+                    .set_alpha_config(alpha)
                     .set_color_description(1, 13, 6, true)
                     .set_crop(CropRect::new(3, 5, 49, 53))
                     .set_rotation(rotation)
@@ -214,13 +214,10 @@ fn animation_crop_and_orientation_use_track_and_transform_every_pixel() {
                         && rotation == 1
                         && mirror == Some(1)
                         && scenario < 2
+                        && let Ok(dir) = std::env::var("ZENAVIF_SPATIAL_ARTIFACTS")
                     {
-                        if let Ok(dir) = std::env::var("ZENAVIF_SPATIAL_ARTIFACTS") {
-                            std::fs::write(format!("{dir}/spatial-{scenario}.avif"), &data)
-                                .unwrap();
-                            std::fs::write(format!("{dir}/control.avif"), &encoded.avif_file)
-                                .unwrap();
-                        }
+                        std::fs::write(format!("{dir}/spatial-{scenario}.avif"), &data).unwrap();
+                        std::fs::write(format!("{dir}/control.avif"), &encoded.avif_file).unwrap();
                     }
                 }
             }

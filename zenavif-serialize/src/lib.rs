@@ -237,6 +237,8 @@ pub struct Aviffy {
     height: u32,
     bit_depth: u8,
     exif: Option<Vec<u8>>,
+    /// `exif` framed as a HEIF Exif item, written as one extent.
+    exif_item: Option<Vec<u8>>,
     xmp: Option<Vec<u8>>,
     gain_map: Option<GainMapConfig>,
     max_output_bytes: Option<usize>,
@@ -326,6 +328,7 @@ impl Aviffy {
             pasp: None,
             icc_profile: None,
             exif: None,
+            exif_item: None,
             xmp: None,
             gain_map: None,
             max_output_bytes: None,
@@ -742,11 +745,11 @@ impl Aviffy {
                 .map_err(|e| at!(SerializeError::from(e)))?,
         );
 
-        if let Some(exif_data) = self.exif.as_deref() {
+        if let Some(exif_data) = self.exif_item.as_deref() {
             add_cdsc_sidecar(
                 &mut image_items, &mut iloc_items, &mut irefs,
                 &mut next_item_id, color_image_id,
-                FourCC(*b"Exif"), "", exif_extents(exif_data),
+                FourCC(*b"Exif"), "", from_array([IlocExtent { data: exif_data }]),
             );
         }
         if let Some(xmp_data) = self.xmp.as_deref() {
@@ -869,10 +872,7 @@ impl Aviffy {
                 high_bitdepth: color_depth_bits >= 10,
                 twelve_bit: color_depth_bits >= 12,
                 monochrome: fallback_mono,
-                chroma_subsampling_x: match seq_profile {
-                    1 => false,
-                    _ => true,
-                } || fallback_mono,
+                chroma_subsampling_x: seq_profile != 1 || fallback_mono,
                 chroma_subsampling_y: match seq_profile {
                     0 => true,
                     1 => false,
@@ -1069,6 +1069,7 @@ impl Aviffy {
     /// Set exif metadata to be included in the AVIF file as a separate item.
     #[inline]
     pub fn set_exif(&mut self, exif: Vec<u8>) -> &mut Self {
+        self.exif_item = Some(exif_item(&exif).into_owned());
         self.exif = Some(exif);
         self
     }
@@ -1149,16 +1150,13 @@ const EXIF_TIFF_OFFSET_ZERO: [u8; 4] = 0_u32.to_be_bytes();
 /// `exif_tiff_header_offset`. If the caller already supplied a framed item (the
 /// offset prefix plus a TIFF header where it points), it's emitted unchanged.
 /// Otherwise the input is treated as a raw TIFF block and the zero-offset header
-/// is prepended as a separate extent, so the original bytes aren't copied.
-fn exif_extents(exif: &[u8]) -> ArrayVec<IlocExtent<'_>, 2> {
+/// is prepended. Either way the item is one contiguous extent: ffmpeg's AVIF
+/// demuxer refuses an Exif item split across extents (zenavif#52).
+fn exif_item(exif: &[u8]) -> std::borrow::Cow<'_, [u8]> {
     if looks_like_heif_exif_item(exif) {
-        return from_array([IlocExtent { data: exif }]);
+        return std::borrow::Cow::Borrowed(exif);
     }
-
-    from_array([
-        IlocExtent { data: &EXIF_TIFF_OFFSET_ZERO },
-        IlocExtent { data: exif },
-    ])
+    std::borrow::Cow::Owned([&EXIF_TIFF_OFFSET_ZERO[..], exif].concat())
 }
 
 /// Whether `exif` already starts with a 4-byte `exif_tiff_header_offset` that
@@ -1301,25 +1299,24 @@ fn set_exif_stores_input_bytes_unchanged() {
 }
 
 #[test]
-fn raw_tiff_exif_uses_header_extent() {
-    // Raw TIFF input gets a 4-byte zero `exif_tiff_header_offset` prepended as a
-    // separate extent (the payload bytes are not copied).
+fn raw_tiff_exif_is_framed_into_one_item() {
+    // Raw TIFF input gets a 4-byte zero `exif_tiff_header_offset` prepended,
+    // in the same buffer: one iloc extent (zenavif#52).
     let tiff_exif = test_tiff_exif();
-    let extents = exif_extents(&tiff_exif);
+    let item = exif_item(&tiff_exif);
 
-    assert_eq!(2, extents.len());
-    assert_eq!(&EXIF_TIFF_OFFSET_ZERO[..], extents[0].data);
-    assert_eq!(tiff_exif.as_slice(), extents[1].data);
+    assert_eq!(&EXIF_TIFF_OFFSET_ZERO[..], &item[..4]);
+    assert_eq!(tiff_exif.as_slice(), &item[4..]);
 }
 
 #[test]
 fn heif_exif_item_uses_single_extent() {
     // Already-framed HEIF/MIAF Exif item is emitted unchanged.
     let expected = test_heif_exif(&test_tiff_exif());
-    let extents = exif_extents(&expected);
+    let item = exif_item(&expected);
 
-    assert_eq!(1, extents.len());
-    assert_eq!(expected.as_slice(), extents[0].data);
+    assert!(matches!(item, std::borrow::Cow::Borrowed(_)), "unchanged, not copied");
+    assert_eq!(expected.as_slice(), &item[..]);
 }
 
 #[test]
@@ -1328,10 +1325,10 @@ fn heif_exif_item_with_nonzero_offset_uses_single_extent() {
     let mut expected = 2_u32.to_be_bytes().to_vec();
     expected.extend_from_slice(&[0, 0]);
     expected.extend_from_slice(&test_tiff_exif());
-    let extents = exif_extents(&expected);
+    let item = exif_item(&expected);
 
-    assert_eq!(1, extents.len());
-    assert_eq!(expected.as_slice(), extents[0].data);
+    assert!(matches!(item, std::borrow::Cow::Borrowed(_)), "unchanged, not copied");
+    assert_eq!(expected.as_slice(), &item[..]);
 }
 
 #[test]
@@ -3020,4 +3017,44 @@ fn av1c_falls_back_to_caller_settings_without_a_sequence_header() {
     let (profile, ssx, ssy, ..) = muxed_av1c(&avif);
     assert_eq!(profile, 0);
     assert!(ssx && ssy);
+}
+
+/// Every `iloc` item's extent count, read from a serialized file.
+#[cfg(test)]
+fn iloc_extent_counts(file: &[u8]) -> Vec<u16> {
+    let at = file.windows(4).position(|w| w == b"iloc").expect("iloc box") + 4;
+    let version = file[at];
+    let sizes = file[at + 4];
+    let (offset_size, length_size) = (usize::from(sizes >> 4), usize::from(sizes & 15));
+    let sizes2 = file[at + 5];
+    let (base_offset_size, index_size) = (usize::from(sizes2 >> 4), usize::from(sizes2 & 15));
+    let mut p = at + 6;
+    let rd16 = |p: &mut usize| {
+        let v = u16::from_be_bytes([file[*p], file[*p + 1]]);
+        *p += 2;
+        v
+    };
+    let item_count = if version < 2 { u32::from(rd16(&mut p)) } else { unreachable!("v2") };
+    let mut counts = Vec::new();
+    for _ in 0..item_count {
+        p += 2; // item_ID
+        if version >= 1 {
+            p += 2; // construction_method
+        }
+        p += 2 + base_offset_size; // data_reference_index, base_offset
+        let extents = rd16(&mut p);
+        counts.push(extents);
+        let index = if version >= 1 { index_size } else { 0 };
+        p += usize::from(extents) * (index + offset_size + length_size);
+    }
+    counts
+}
+
+#[test]
+fn raw_tiff_exif_is_one_iloc_extent() {
+    // ffmpeg refuses an Exif item split across extents (zenavif#52).
+    let avif = Aviffy::new().set_exif(test_tiff_exif()).to_vec(b"av12356abc", None, 10, 20, 8);
+    let counts = iloc_extent_counts(&avif);
+    assert!(counts.len() >= 2, "image and Exif items: {counts:?}");
+    assert!(counts.iter().all(|&n| n == 1), "every item is one extent: {counts:?}");
 }
