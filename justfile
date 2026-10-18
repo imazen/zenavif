@@ -347,13 +347,16 @@ metadata-portability:
     cargo check --manifest-path fuzz/Cargo.toml --bin inventory
     just api-doc
 
-metadata-api-check:
+metadata-api-check current_features="inventory,encode" baseline_features="encode":
     #!/usr/bin/env bash
     set -euo pipefail
-    baseline=$(cargo read zenavif==0.1.6 --path-only)
-    RUSTC_BOOTSTRAP=1 cargo rustdoc -p zenavif --lib --features inventory,encode -- -Zunstable-options --output-format json
-    RUSTC_BOOTSTRAP=1 cargo rustdoc --manifest-path "$baseline/Cargo.toml" --target-dir "$PWD/target/published-api/0.1.6" --lib --features encode -- -Zunstable-options --output-format json
-    cargo semver-checks check-release -p zenavif --current-rustdoc target/doc/zenavif.json --baseline-rustdoc target/published-api/0.1.6/doc/zenavif.json --release-type patch
+    api_current_features={{quote(current_features)}}
+    api_baseline_features={{quote(baseline_features)}}
+    api_baseline=$(cargo read zenavif==0.1.6 --path-only)
+    api_target="${CARGO_TARGET_DIR:-$PWD/target}"
+    RUSTC_BOOTSTRAP=1 cargo rustdoc --locked -p zenavif --lib --features "$api_current_features" -- -Zunstable-options --output-format json
+    RUSTC_BOOTSTRAP=1 cargo rustdoc --manifest-path "$api_baseline/Cargo.toml" --target-dir "$api_target/published-api/0.1.6" --lib --features "$api_baseline_features" -- -Zunstable-options --output-format json
+    cargo semver-checks check-release -p zenavif --current-rustdoc "$api_target/doc/zenavif.json" --baseline-rustdoc "$api_target/published-api/0.1.6/doc/zenavif.json" --release-type patch
 
 metadata-api-validation:
     cargo check --manifest-path fuzz/Cargo.toml --bin inventory
