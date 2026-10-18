@@ -50,6 +50,9 @@
 
 ## zenmp4 (unreleased, new workspace member)
 
+- Refuse sample durations/composition offsets outside the MP4 fields and
+  negative decode times; check timestamp arithmetic before writing.
+
 - Reject truncated UUID box headers instead of panicking while slicing
   their bodies; minimized from the MP4 fuzz job.
 

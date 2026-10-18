@@ -959,6 +959,73 @@ mod muxer {
         ));
     }
 
+    fn timing_packet(pts: i64, dts: i64, duration: Option<u64>) -> Packet {
+        let mut packet = Packet::from_vec(vec![0x32, 1, 0])
+            .unwrap()
+            .with_pts(Timestamp::new(pts, TimeBase::MILLIS))
+            .with_dts(Timestamp::new(dts, TimeBase::MILLIS));
+        if let Some(duration) = duration {
+            packet = packet.with_duration_ticks(duration);
+        }
+        packet
+    }
+
+    #[test]
+    fn mux_timing_ranges_are_checked_before_writing() {
+        for make in [Mp4Muxer::new as fn() -> Mp4Muxer, Mp4Muxer::fragmented] {
+            for packet in [
+                timing_packet(0, 0, Some(u64::MAX)),
+                timing_packet(0, 0, Some(u64::from(u32::MAX) + 1)),
+                timing_packet(i64::MIN, 1, Some(1)),
+                timing_packet(i64::from(i32::MAX) + 1, 0, Some(1)),
+                timing_packet(i64::from(i32::MIN) - 1, 0, Some(1)),
+                timing_packet(i64::MAX, i64::MAX, Some(1)),
+            ] {
+                let mut muxer = make();
+                muxer
+                    .begin(&tracks(Some(&AV1C)), MuxHint::default())
+                    .unwrap();
+                assert!(matches!(
+                    muxer.write_packet(packet, &Unstoppable),
+                    Err(SessionError::Codec(Mp4Error::Overflow))
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn mux_inferred_duration_must_fit_the_sample_table() {
+        for make in [Mp4Muxer::new as fn() -> Mp4Muxer, Mp4Muxer::fragmented] {
+            let mut muxer = make();
+            muxer
+                .begin(&tracks(Some(&AV1C)), MuxHint::default())
+                .unwrap();
+            muxer
+                .write_packet(timing_packet(0, 0, None), &Unstoppable)
+                .unwrap();
+            let next = i64::from(u32::MAX) + 1;
+            assert!(matches!(
+                muxer.write_packet(timing_packet(next, next, None), &Unstoppable),
+                Err(SessionError::Codec(Mp4Error::Overflow))
+            ));
+        }
+    }
+
+    #[test]
+    fn mux_negative_decode_times_are_refused_instead_of_clamped() {
+        use zencodec_media::session::UnsupportedMedia;
+        for make in [Mp4Muxer::new as fn() -> Mp4Muxer, Mp4Muxer::fragmented] {
+            let mut muxer = make();
+            muxer
+                .begin(&tracks(Some(&AV1C)), MuxHint::default())
+                .unwrap();
+            assert!(matches!(
+                muxer.write_packet(timing_packet(0, -1, Some(1)), &Unstoppable),
+                Err(SessionError::Unsupported(UnsupportedMedia::Container))
+            ));
+        }
+    }
+
     #[test]
     fn unsupported_trims_and_mismatched_dts_clocks_are_refused() {
         use zencodec::time::FrameDuration;

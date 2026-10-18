@@ -152,14 +152,18 @@ impl Mp4Muxer {
     }
 
     /// Give the last held sample of `track` its duration from `dts`.
-    fn close_previous(track: &mut MuxTrack, dts: i64) {
+    fn close_previous(track: &mut MuxTrack, dts: i64) -> Res<()> {
         if let Some(prev) = track.samples.last_mut()
             && prev.duration.is_none()
         {
-            let d = u64::try_from(dts - prev.dts).unwrap_or(0);
-            prev.duration = Some(d);
-            track.last_step = Some(d);
+            let d = dts
+                .checked_sub(prev.dts)
+                .and_then(|d| u32::try_from(d).ok())
+                .ok_or(SessionError::Codec(Mp4Error::Overflow))?;
+            prev.duration = Some(u64::from(d));
+            track.last_step = Some(u64::from(d));
         }
+        Ok(())
     }
 
     fn ftyp(&self) -> Vec<u8> {
@@ -414,7 +418,10 @@ impl Mp4Muxer {
         }
         for &(i, n) in &taken {
             let t = &mut self.tracks[i];
-            let end = t.samples[n - 1].dts + t.samples[n - 1].duration.unwrap_or(0) as i64;
+            let end = t.samples[n - 1]
+                .dts
+                .checked_add(t.samples[n - 1].duration.unwrap_or(0) as i64)
+                .ok_or(SessionError::Codec(Mp4Error::Overflow))?;
             t.written_dts = Some(end);
             t.samples.drain(..n);
             t.data.drain(..n);
@@ -827,6 +834,34 @@ impl Muxer for Mp4Muxer {
         if track.last_dts.is_some_and(|last| dts <= last) {
             return err(Mp4Error::DecodeOrder);
         }
+        if dts < 0 {
+            return Err(SessionError::Unsupported(
+                zencodec_media::session::UnsupportedMedia::Container,
+            ));
+        }
+        // stts/trun durations are u32; signed ctts/trun offsets are i32.
+        // Validate before taking the payload or emitting a fragment.
+        let cts = pts
+            .ticks()
+            .checked_sub(dts)
+            .and_then(|offset| i32::try_from(offset).ok())
+            .ok_or(SessionError::Codec(Mp4Error::Overflow))?;
+        let duration = packet.duration_ticks();
+        if duration.is_some_and(|d| u32::try_from(d).is_err()) {
+            return err(Mp4Error::Overflow);
+        }
+        let end_dts = dts
+            .checked_add(duration.unwrap_or(0) as i64)
+            .ok_or(SessionError::Codec(Mp4Error::Overflow))?;
+        if let Some(previous) = track.samples.last()
+            && previous.duration.is_none()
+            && dts
+                .checked_sub(previous.dts)
+                .and_then(|d| u32::try_from(d).ok())
+                .is_none()
+        {
+            return err(Mp4Error::Overflow);
+        }
         if track.entry.is_none()
             && let Some(record) = crate::av1::av1c_from_temporal_unit(packet.bytes())
         {
@@ -836,7 +871,6 @@ impl Muxer for Mp4Muxer {
         let track = &self.tracks[index];
         let video = track.info.kind() == TrackKind::Video;
         let sync = packet.random_access() == RandomAccess::Yes;
-        let duration = packet.duration_ticks();
         let payload = packet
             .take()
             .ok_or(SessionError::Protocol(ProtocolViolation::EmptyPacket))?;
@@ -847,11 +881,11 @@ impl Muxer for Mp4Muxer {
         {
             // Close the open fragment before a video random-access point.
             let t = &mut self.tracks[index];
-            Self::close_previous(t, dts);
+            Self::close_previous(t, dts)?;
             self.flush_fragment(false)?;
         }
         let t = &mut self.tracks[index];
-        Self::close_previous(t, dts);
+        Self::close_previous(t, dts)?;
         let offset = match self.layout {
             Layout::Progressive => self.out.total(),
             Layout::Fragmented => 0,
@@ -860,12 +894,12 @@ impl Muxer for Mp4Muxer {
             offset,
             size,
             dts,
-            cts: pts.ticks() - dts,
+            cts: i64::from(cts),
             duration,
             sync,
         });
         t.last_dts = Some(dts);
-        t.end_dts = t.end_dts.max(dts + duration.unwrap_or(0) as i64).max(dts);
+        t.end_dts = t.end_dts.max(end_dts);
         match self.layout {
             Layout::Progressive => self.out.push(payload.as_bytes()),
             Layout::Fragmented => {
@@ -905,7 +939,11 @@ impl Muxer for Mp4Muxer {
                         s.duration = Some(step.unwrap_or(0));
                     }
                     if let Some(s) = t.samples.last() {
-                        t.end_dts = t.end_dts.max(s.dts + s.duration.unwrap_or(0) as i64);
+                        let end = s
+                            .dts
+                            .checked_add(s.duration.unwrap_or(0) as i64)
+                            .ok_or(SessionError::Codec(Mp4Error::Overflow))?;
+                        t.end_dts = t.end_dts.max(end);
                     }
                 }
                 let mdat_end = self.out.total();
