@@ -421,3 +421,17 @@ clippy-review-expert:
 
 check-downstream:
     cargo run --locked --manifest-path dev/downstream-probe/Cargo.toml
+
+# Lint the optional queue admission probe with the same warning policy.
+clippy-media-queue:
+    cargo clippy --locked --manifest-path dev/downstream-probe/Cargo.toml --features queue-audit --bin queue_audit -- -D warnings
+
+# Watch CI for a chosen branch without changing its head.
+ci-status branch="main":
+    @gh run list --repo imazen/zenavif --branch {{quote(branch)}} --limit 6
+
+ci-run id:
+    @gh run view {{quote(id)}} --repo imazen/zenavif --json status,conclusion,headSha,url,jobs --jq '{status,conclusion,headSha,url,remaining:[.jobs[]|select(.conclusion!="success")|{name,status,conclusion,databaseId,current:[.steps[]|select(.status=="in_progress")|.name]}]}'
+
+fmt-media-queue:
+    rustfmt --edition 2024 --check dev/downstream-probe/src/bin/queue_audit.rs
