@@ -144,7 +144,7 @@ impl DecoderConfig {
     /// (primary + alpha + gain-map items). Default
     /// [`crate::DecodeBackend::Rav1dSafe`].
     ///
-    /// [`crate::DecodeBackend::Zenav1Aom`] (feature `zenav1-aom`, EXPERIMENTAL)
+    /// [`crate::DecodeBackend::Zenav1Aom`](crate::DecodeBackend) (feature `zenav1-aom`, EXPERIMENTAL)
     /// routes item decodes through the zenav1-aom pure-Rust decoder —
     /// byte-identical to rav1d-safe on every still tested (8/10/12-bit,
     /// mono, 4:2:0/4:2:2/4:4:4, film grain, all conformance + sweep cells).
@@ -154,7 +154,7 @@ impl DecoderConfig {
     /// rav1d-safe at 8-bit. Not yet recommended for untrusted input in
     /// production (fuzz hardening in progress upstream).
     ///
-    /// [`crate::DecodeBackend::Rav1dFfi`] (feature `unsafe-asm`) is NOT
+    /// [`crate::DecodeBackend::Rav1dFfi`](crate::DecodeBackend) (feature `unsafe-asm`) is NOT
     /// accepted here — it remains a raw-OBU benchmark arm only.
     pub fn decode_backend(mut self, backend: crate::DecodeBackend) -> Self {
         self.decode_backend = backend;

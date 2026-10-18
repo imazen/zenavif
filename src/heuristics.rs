@@ -4,8 +4,8 @@
 //! AVIF encode/decode resource estimation (peak memory + time).
 //!
 //! Mirrors the zen per-codec estimation pattern (cf. `zenwebp::heuristics`)
-//! with separate [`EncodeEstimate`] (min / typical / max peak memory, time,
-//! output size) and [`DecodeEstimate`] (peak memory, output size, time).
+//! with separate [`crate::heuristics::EncodeEstimate`] (min / typical / max peak memory, time,
+//! output size) and [`crate::heuristics::DecodeEstimate`] (peak memory, output size, time).
 //!
 //! Unlike a CPU-bound transform codec, AVIF's dominant cost is **encode
 //! time, which is governed by the AV1 `speed` preset** — far more than by
