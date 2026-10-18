@@ -1478,7 +1478,7 @@ fn build_ravif_encoder(
 /// needs perceptual scoring (`target-quality`) + content analysis (`auto-tune`);
 /// without those features, on photo-like content or non-bundle speeds (where an
 /// inversion is impossible), or while the release gate is off, this is exactly a
-/// single [`encode_rgb8_once`] — no decode, no score, no extra encode. See
+/// single [encode_rgb8_once](https://github.com/imazen/zenavif/blob/3be52e05d7bba4ca615bee0a065985d609766be3/src/encoder.rs) — no decode, no score, no extra encode. See
 /// `docs/MONOTONICITY_PROGRAM.md` "SELECTIVE probe".
 ///
 /// # Arguments
@@ -1633,7 +1633,7 @@ pub fn encode_gray8(
 ///
 /// Like [`encode_rgb8`], this default path carries the automatic RD-vs-time
 /// monotonicity guarantee (selective probe on structured content; `patch_fraction`
-/// is taken over the color channels). Inert (a single [`encode_rgba8_once`])
+/// is taken over the color channels). Inert (a single [encode_rgba8_once](https://github.com/imazen/zenavif/blob/3be52e05d7bba4ca615bee0a065985d609766be3/src/encoder.rs))
 /// without `target-quality` + `auto-tune`, on photo-like content, on non-bundle
 /// speeds, or while the release gate is off.
 ///
@@ -1662,7 +1662,7 @@ pub fn encode_rgba8(
     }
 }
 
-/// Single-encode RGBA8 primitive (no monotonicity probe) — see [`encode_rgb8_once`].
+/// Single-encode RGBA8 primitive (no monotonicity probe) — see [encode_rgb8_once](https://github.com/imazen/zenavif/blob/3be52e05d7bba4ca615bee0a065985d609766be3/src/encoder.rs).
 pub(crate) fn encode_rgba8_once(
     img: ImgRef<'_, Rgba<u8>>,
     config: &EncoderConfig,

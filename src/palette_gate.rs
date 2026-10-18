@@ -52,7 +52,7 @@
 //!
 //! Registry `zenrav1e` 0.1.4 has NO palette tool (it landed on master
 //! 2026-07-03, `zenrav1e@68a8d81f..df27117c`), so today this module only
-//! *recommends*. The [`EncoderConfig::palette_preference`] plumbing applies
+//! *recommends*. The [EncoderConfig::palette_preference](https://github.com/imazen/zenavif/blob/3be52e05d7bba4ca615bee0a065985d609766be3/src/encoder.rs) plumbing applies
 //! the recommendation to the actual encoder once the zenravif → zenrav1e dep
 //! chain bumps past 0.1.4 (see the dep-bump checklist in CLAUDE.md "Known
 //! Bugs" → palette mode).
@@ -83,7 +83,7 @@ pub enum PalettePreference {
 /// Fit 2026-07-03 on the §E label store (LOOCV −10.91 vs −11.05 ceiling),
 /// re-validated by the mechanism A/B's val-origin refit, and re-confirmed by
 /// the speed-conditional A/B (s2 refit plateau keeps 0.197; lower arms add
-/// nothing consistent at s2 — see module docs). `patch_fraction` ∈ [0,1]:
+/// nothing consistent at s2 — see module docs). `patch_fraction` ∈ `[0,1]`:
 /// fraction of sampled blocks exactly matching another block — photos p90 ≈
 /// 0.037, screens p50 ≈ 0.726.
 pub const PALETTE_GATE_PATCH_FRACTION: f32 = 0.197;

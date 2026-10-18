@@ -29,7 +29,7 @@ pub enum Error {
     /// `rav1d-safe` setup/init failure) not attributable to the input
     /// bitstream. Genuinely input-caused decode failures are
     /// [`Malformed`](Self::Malformed) / [`UnexpectedEof`](Self::UnexpectedEof)
-    /// instead — see [`error_from_rav1d`].
+    /// instead — see [error_from_rav1d](https://github.com/imazen/zenavif/blob/3be52e05d7bba4ca615bee0a065985d609766be3/src/error.rs).
     #[error("AV1 decode error {code}: {msg}")]
     Decode {
         /// rav1d error code

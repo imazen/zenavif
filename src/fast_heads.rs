@@ -243,7 +243,7 @@ pub const MONOTONE_VALLEY_SPEED: u8 = 5;
 /// (benchmarks/mono_val_labels_doccharts_2026-07-06.tsv).
 pub const MONOTONE_REMAP_SPEED: u8 = 9;
 
-/// Release gate for [`monotone_speed_gate_for_rgb8`]'s APPLICATION. The s5
+/// Release gate for [monotone_speed_gate_for_rgb8](https://github.com/imazen/zenavif/blob/3be52e05d7bba4ca615bee0a065985d609766be3/src/fast_heads.rs)'s APPLICATION. The s5
 /// valley exists ONLY on the armed build (the s6+ bundle arms create it); on a
 /// registry build s5 is *not* dominated — measured, it often BEATS s9 (6096:
 /// registry-s5 170337/90.16 vs s9 198950/89.29), so remapping there would
@@ -262,7 +262,7 @@ pub const MONOTONE_GATE_LIVE: bool = false;
 /// never buy a worse RD point than the faster s9. Returns `speed` unchanged off
 /// the gate, on a non-finite feature, or off [`MONOTONE_VALLEY_SPEED`] — a
 /// clean no-op. This is the PURE remap logic (always active for unit-testing);
-/// its APPLICATION via [`monotone_speed_gate_for_rgb8`] is release-gated by
+/// its APPLICATION via [monotone_speed_gate_for_rgb8](https://github.com/imazen/zenavif/blob/3be52e05d7bba4ca615bee0a065985d609766be3/src/fast_heads.rs) is release-gated by
 /// [`MONOTONE_GATE_LIVE`] because the valley is armed-only — on registry s5 is
 /// not dominated, so applying the remap there would regress synthetic content.
 #[must_use]
