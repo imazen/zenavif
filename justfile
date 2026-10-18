@@ -53,6 +53,10 @@ test-fast:
 test-fast-encode:
     cargo test --features encode -- --test-threads=4
 
+# AV1 decoder unit regressions, including word-width-independent OBU handling.
+test-media-decoder:
+    cargo test --locked --features media --lib media::
+
 # AV1 packet validation and decoder metadata regressions.
 test-media-packets:
     cargo test --locked --features media --lib media::tests::packet_
@@ -400,3 +404,20 @@ metadata-svt-final-check:
 animation-contract-check:
     cargo test -p zenavif --features encode-imazen,zenav1-svt --test animation_encode_admission --test animation_encode_timing -- --test-threads=1
     cargo clippy -p zenavif --features encode-imazen,zenav1-svt --lib -- -D warnings
+
+# Quantify the AV1 lookahead/queue contract without changing admission policy.
+audit-media-queue:
+    cargo run --locked --manifest-path dev/downstream-probe/Cargo.toml --features queue-audit --bin queue_audit
+
+# Feature combinations exercised by the landing review.
+clippy-review-backends:
+    cargo clippy --locked --features inventory,zenav1-aom,zenav1-aom-encode,encode,encode-imazen,zenav1-svt,target-quality,encode-mono --all-targets -- -D warnings
+
+clippy-review-diffmap:
+    cargo clippy --locked --features two-pass-butteraugli,two-pass-zensim,auto-tune,encode-mono --all-targets -- -D warnings
+
+clippy-review-expert:
+    cargo clippy --locked --features __expert,encode,encode-imazen,zenav1-svt,zenav1-aom,zenav1-aom-encode --all-targets -- -D warnings
+
+check-downstream:
+    cargo run --locked --manifest-path dev/downstream-probe/Cargo.toml

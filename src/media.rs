@@ -112,11 +112,13 @@ fn leading_temporal_delimiter(b: &[u8]) -> usize {
         return 0;
     }
     let mut i = 1 + usize::from(header & 0x4 != 0);
-    let (mut size, mut shift) = (0usize, 0u32);
+    let (mut nonzero, mut shift) = (false, 0u32);
     loop {
         let Some(&byte) = b.get(i) else { return 0 };
         i += 1;
-        size |= usize::from(byte & 0x7F) << shift;
+        // Only zero is meaningful for a temporal delimiter. Testing the
+        // payload bits avoids overflow and shifts past usize on 32-bit.
+        nonzero |= byte & 0x7F != 0;
         if byte & 0x80 == 0 {
             break;
         }
@@ -125,7 +127,7 @@ fn leading_temporal_delimiter(b: &[u8]) -> usize {
             return 0;
         }
     }
-    if size == 0 { i } else { 0 }
+    if nonzero { 0 } else { i }
 }
 
 fn config_obus(private: &[u8]) -> Option<&[u8]> {
@@ -570,6 +572,24 @@ mod tests {
         assert_eq!(leading_temporal_delimiter(&[0x12, 0x01, 0x00, 0x32]), 0);
         assert_eq!(leading_temporal_delimiter(&[0x92, 0x00, 0x32]), 0);
         assert_eq!(leading_temporal_delimiter(&[]), 0);
+    }
+
+    #[test]
+    fn temporal_delimiter_sizes_do_not_depend_on_word_width() {
+        // Six-byte zero LEB: the old usize accumulator shifted by 35.
+        assert_eq!(
+            leading_temporal_delimiter(&[0x12, 0x80, 0x80, 0x80, 0x80, 0x80, 0]),
+            7
+        );
+        // Nonzero bits above bit 31 must not truncate to a zero size.
+        assert_eq!(
+            leading_temporal_delimiter(&[0x12, 0x80, 0x80, 0x80, 0x80, 0x10]),
+            0
+        );
+        assert_eq!(
+            leading_temporal_delimiter(&[0x12, 0x80, 0x80, 0x80, 0x80, 0x80]),
+            0
+        );
     }
 
     fn refuses_packet(mut packet: Packet, clock_mismatch: bool) {

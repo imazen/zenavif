@@ -721,10 +721,6 @@ enum ColorSource<'a> {
 /// What actually establishes that 8-bit output did not move across the
 /// high-bit-depth wiring is the same benchmark: 60/60 cells byte-identical
 /// between `ec6728b` and this tree.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "internal pixel conversion controls"
-)]
 fn color_planes(
     src: ColorSource<'_>,
     width: usize,
