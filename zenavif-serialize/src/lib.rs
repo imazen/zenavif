@@ -411,7 +411,8 @@ impl Aviffy {
     /// silently correcting it.**
     ///
     /// By default this crate DERIVES the container's colorimetry from the AV1
-    /// sequence header wherever the payload speaks (see [`crate::seq_header`]),
+    /// sequence header wherever the payload speaks (see the
+    /// [sequence-header parser](https://github.com/imazen/zenavif/blob/3be52e05d7bba4ca615bee0a065985d609766be3/zenavif-serialize/src/seq_header.rs)),
     /// so a caller that declares the opposite of what it encoded gets a
     /// correct file rather than a lying one. That repairs the symptom at the
     /// muxer. It does not tell the caller they have a bug — and a caller whose
