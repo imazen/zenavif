@@ -53,6 +53,16 @@
 
 ## zenmp4 (unreleased, new workspace member)
 
+- Refuse inconsistent explicit durations and nonzero progressive decode
+  origins instead of changing packet timestamps in the written file.
+  Fragmented output preserves nonzero origins through `tfdt`.
+
+- Refuse unrepresented seek pre-roll, codec delay and packet additions.
+  Opus codec delay is accepted when it matches the OpusHead pre-skip.
+
+- Refuse sample durations/composition offsets outside the MP4 fields and
+  negative decode times; check timestamp arithmetic before writing.
+
 - Reject truncated UUID box headers instead of panicking while slicing
   their bodies; minimized from the MP4 fuzz job.
 

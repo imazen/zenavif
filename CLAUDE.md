@@ -1857,3 +1857,17 @@ timing values, oversized ordinals, discard padding and packet additions without
 preserving their meaning. It now refuses these before taking packet payloads.
 `just test-media-packets` covers the boundary and payload ownership. Track-level
 trim configuration still requires plumbing through the shared media contract.
+
+### MP4 sample timing ranges (fixed 2026-10-18)
+
+The muxer formerly truncated wide sample durations and composition offsets and
+clamped negative decode times. It now refuses those values and checks timestamp
+arithmetic, including inferred durations and final sample ends. `just test-mp4`
+includes boundary regressions for both layouts.
+
+### MP4 decode timeline preservation (fixed 2026-10-18)
+
+Progressive sample tables start DTS at zero; a nonzero starting DTS is refused
+at finish, while fragmented output records it through tfdt. Explicit sample
+durations inconsistent with the next DTS are refused by this writer. Normal
+regressions cover these cases without changing existing decode-order assertions.
