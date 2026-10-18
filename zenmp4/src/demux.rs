@@ -7,7 +7,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use enough::Stop;
-use zencodec::time::{FrameDuration, TimeBase, Timestamp};
+use zencodec::time::{FrameDuration, Rounding, TimeBase, Timestamp};
 use zencodec_media::container::{
     AccessPattern, DemuxEvent, DemuxProgress, Demuxer, Input, Request, SeekMode, SeekResult,
     SeekScope, SeekStatus, SeekTarget,
@@ -723,16 +723,21 @@ fn edit_delay(trak: &[u8], movie_ts: u32, media_ts: u32) -> Res<Option<i64>> {
         };
         r.u32().map_err(c)?; // rate
         if media_time == -1 {
-            empty = empty.saturating_add(dur);
+            empty = empty.checked_add(dur).ok_or(c(Mp4Error::Overflow))?;
             continue;
         }
-        let empty_media = if movie_ts == 0 {
-            0
-        } else {
-            i64::try_from(u128::from(empty) * u128::from(media_ts) / u128::from(movie_ts))
-                .map_err(|_| c(Mp4Error::Overflow))?
-        };
-        return Ok(Some(media_time - empty_media));
+        let movie_clock = TimeBase::new(1, movie_ts).map_err(|_| c(Mp4Error::ZeroTimescale))?;
+        let media_clock = TimeBase::new(1, media_ts).map_err(|_| c(Mp4Error::ZeroTimescale))?;
+        // Rescale the signed timeline shift. Rounding a positive empty
+        // duration and then subtracting it would reverse the half-tick rule.
+        let shift = i64::try_from(-i128::from(empty)).map_err(|_| c(Mp4Error::Overflow))?;
+        let shift = Timestamp::new(shift, movie_clock)
+            .rescale(media_clock, Rounding::Nearest)
+            .map_err(|_| c(Mp4Error::Overflow))?;
+        return media_time
+            .checked_add(shift.ticks())
+            .map(Some)
+            .ok_or(c(Mp4Error::Overflow));
     }
     Ok(None)
 }

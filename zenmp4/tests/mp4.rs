@@ -460,6 +460,22 @@ fn progressive_files_read_the_same_with_moov_first_or_last() {
 }
 
 #[test]
+fn edit_offsets_rescale_signed_shifts_with_nearest_ties_up() {
+    for (movie_scale, empty_ticks, expected) in [(3000u32, 2u32, 79), (2000, 1, 80), (2000, 3, 79)]
+    {
+        let (mut file, _) = progressive(true);
+        let mvhd = file.windows(4).position(|w| w == b"mvhd").unwrap();
+        file[mvhd + 16..mvhd + 20].copy_from_slice(&movie_scale.to_be_bytes());
+        let elst = file.windows(4).position(|w| w == b"elst").unwrap();
+        file[elst + 12..elst + 16].copy_from_slice(&empty_ticks.to_be_bytes());
+        assert_eq!(
+            demux(&file).unwrap().0[0].edit_delay_ticks(),
+            Some(expected)
+        );
+    }
+}
+
+#[test]
 fn fragmented_files_follow_fragment_defaults_and_times() {
     let (file, want) = fragmented();
     let (tracks, packets) = demux(&file).unwrap();

@@ -46,6 +46,9 @@
 
 ## zenmp4 (unreleased, new workspace member)
 
+- Rescale signed edit-list offsets with the shared nearest/ties-up rule;
+  reject overflow instead of saturating the accumulated empty edits.
+
 - Check combined progressive/fragmented seek-index counts and fragment
   default-table counts before allocation, including samples retained from
   earlier tracks or fragments.
