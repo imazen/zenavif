@@ -1886,3 +1886,11 @@ even after `max_queued_frames` is reached. The fixture, measured overruns,
 reproduction command and pending contract decision are in
 [docs/media-queue-contract.md](docs/media-queue-contract.md). Existing session
 expectations remain unchanged while construction-time capacity refusal is reviewed.
+
+## Known Bugs: AV1 session contract gaps
+
+Shared session/resource limits, track trim configuration, presentation picture
+identity and packet-offset retirement remain incomplete. Epoch advancement and
+MP4 unsupported-error categories need contract decisions. The source findings
+and their limits are recorded in
+[docs/media-contract-status.md](docs/media-contract-status.md).
