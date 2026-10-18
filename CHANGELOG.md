@@ -2,6 +2,10 @@
 
 ## AV1 media sessions (unreleased)
 
+- Refuse packet timestamps on another clock, backend-unrepresentable timing
+  and ordinals, discard padding and additions before taking the payload.
+  Reset also resets the automatically assigned packet ordinal.
+
 - New `media` feature: `media::Av1VideoDecoder`, rav1d-safe behind
   zencodec-media's `VideoDecoder`. Frames map rav1d's picture buffers without
   copying and outlive the decoder; `av1C` configOBUs are prepended after
