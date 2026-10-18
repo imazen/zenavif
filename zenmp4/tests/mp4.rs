@@ -1105,6 +1105,53 @@ mod muxer {
     }
 
     #[test]
+    fn mux_nonzero_decode_origin_is_preserved_or_refused() {
+        use zencodec_media::session::UnsupportedMedia;
+        let input = [timing_packet(40, 40, Some(40))];
+        let mut progressive = Mp4Muxer::new();
+        progressive
+            .begin(&tracks(Some(&AV1C)), MuxHint::default())
+            .unwrap();
+        progressive
+            .write_packet(input[0].clone(), &Unstoppable)
+            .unwrap();
+        assert!(matches!(
+            progressive.finish(&Unstoppable),
+            Err(SessionError::Unsupported(UnsupportedMedia::Container))
+        ));
+        let bytes = mux(
+            Mp4Muxer::fragmented(),
+            &tracks(Some(&AV1C)),
+            &input,
+            MuxHint::default(),
+        )
+        .unwrap();
+        let (_, output) = demux(&bytes).unwrap();
+        assert_eq!(output[0].pts(), input[0].pts());
+        assert_eq!(output[0].dts(), input[0].dts());
+    }
+
+    #[test]
+    fn mux_inconsistent_explicit_durations_are_refused() {
+        use zencodec_media::session::UnsupportedMedia;
+        for make in [Mp4Muxer::new as fn() -> Mp4Muxer, Mp4Muxer::fragmented] {
+            for dts in [20, 60] {
+                let mut muxer = make();
+                muxer
+                    .begin(&tracks(Some(&AV1C)), MuxHint::default())
+                    .unwrap();
+                muxer
+                    .write_packet(timing_packet(0, 0, Some(40)), &Unstoppable)
+                    .unwrap();
+                assert!(matches!(
+                    muxer.write_packet(timing_packet(dts, dts, Some(40)), &Unstoppable),
+                    Err(SessionError::Unsupported(UnsupportedMedia::Container))
+                ));
+            }
+        }
+    }
+
+    #[test]
     fn unsupported_trims_and_mismatched_dts_clocks_are_refused() {
         use zencodec::time::FrameDuration;
         use zencodec_media::packet::Discard;

@@ -50,6 +50,10 @@
 
 ## zenmp4 (unreleased, new workspace member)
 
+- Refuse inconsistent explicit durations and nonzero progressive decode
+  origins instead of changing packet timestamps in the written file.
+  Fragmented output preserves nonzero origins through `tfdt`.
+
 - Refuse unrepresented seek pre-roll, codec delay and packet additions.
   Opus codec delay is accepted when it matches the OpusHead pre-skip.
 

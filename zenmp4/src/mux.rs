@@ -858,6 +858,25 @@ impl Muxer for Mp4Muxer {
                 zencodec_media::session::UnsupportedMedia::Container,
             ));
         }
+        // A sample table advances by duration, so an explicit duration
+        // must end at the next decode timestamp. This writer does not emit
+        // separate fragments to represent gaps or overlapping durations.
+        let previous_end = track
+            .samples
+            .last()
+            .and_then(|s| s.duration.and_then(|d| s.dts.checked_add(d as i64)))
+            .or_else(|| {
+                track
+                    .samples
+                    .is_empty()
+                    .then_some(track.written_dts)
+                    .flatten()
+            });
+        if previous_end.is_some_and(|end| end != dts) {
+            return Err(SessionError::Unsupported(
+                zencodec_media::session::UnsupportedMedia::Container,
+            ));
+        }
         // stts/trun durations are u32; signed ctts/trun offsets are i32.
         // Validate before taking the payload or emitting a fragment.
         let cts = pts
@@ -950,6 +969,14 @@ impl Muxer for Mp4Muxer {
         match self.layout {
             Layout::Progressive => {
                 for t in &mut self.tracks {
+                    // stts starts at decode time zero; this layout has no
+                    // tfdt to record another origin. Refuse at finish so
+                    // earlier decode-order errors retain their own diagnosis.
+                    if t.samples.first().is_some_and(|s| s.dts != 0) {
+                        return Err(SessionError::Unsupported(
+                            zencodec_media::session::UnsupportedMedia::Container,
+                        ));
+                    }
                     // The last sample: its own duration, else the step before.
                     let step = t.last_step;
                     if let Some(s) = t.samples.last_mut()
