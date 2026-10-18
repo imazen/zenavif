@@ -1894,3 +1894,10 @@ identity and packet-offset retirement remain incomplete. Epoch advancement and
 MP4 unsupported-error categories need contract decisions. The source findings
 and their limits are recorded in
 [docs/media-contract-status.md](docs/media-contract-status.md).
+
+## Known Bugs: MP4 display-header truncation (fixed)
+
+The muxer accepted display dimensions above 65535 even though tkhd uses
+unsigned 16.16 fields. They could wrap to zero. Admission now refuses them
+with DimensionsTooLarge before output; both layouts retain the largest valid
+integer dimensions. `just test-mp4-display-bounds` exercises those cases.

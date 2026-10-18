@@ -53,6 +53,9 @@
 
 ## zenmp4 (unreleased, new workspace member)
 
+- Refuse display dimensions beyond the track header's 16-bit integer range
+  before writing output, rather than wrapping them during fixed-point encoding.
+
 - Refuse inconsistent explicit durations and nonzero progressive decode
   origins instead of changing packet timestamps in the written file.
   Fragmented output preserves nonzero origins through `tfdt`.

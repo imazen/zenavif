@@ -580,6 +580,12 @@ fn sample_entry(t: &TrackInfo, av1c: Option<&[u8]>) -> Result<([u8; 4], Vec<u8>)
     match t.kind() {
         TrackKind::Video => {
             let v = t.video_info().ok_or(Mp4Error::Missing("video info"))?;
+            // tkhd stores each display dimension as unsigned 16.16 fixed point.
+            if v.display
+                .is_some_and(|(w, h)| w > u32::from(u16::MAX) || h > u32::from(u16::MAX))
+            {
+                return Err(Mp4Error::DimensionsTooLarge);
+            }
             let (fourcc, config): ([u8; 4], Option<ConfigBox<'_>>) = match t.codec() {
                 CodecId::Av1 => (
                     *b"av01",

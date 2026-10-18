@@ -438,3 +438,13 @@ ci-run id:
 
 fmt-media-queue:
     rustfmt --edition 2024 --check dev/downstream-probe/src/bin/queue_audit.rs
+
+# Refuse dimensions the MP4 fixed-point track header cannot represent.
+test-mp4-display-bounds:
+    cargo test --locked -p zenmp4 mux_display_dimensions
+
+# Focused MP4 member gate, including its integration tests.
+verify-mp4:
+    cargo test --locked -p zenmp4
+    cargo clippy --locked -p zenmp4 --all-targets -- -D warnings
+    cargo fmt -p zenmp4 --check

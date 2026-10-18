@@ -1207,4 +1207,49 @@ mod muxer {
             ));
         }
     }
+
+    #[test]
+    fn mux_display_dimensions_must_fit_the_track_header() {
+        for fragmented in [false, true] {
+            for (width, height) in [(65_536, 48), (64, 65_536), (u32::MAX, 48), (64, u32::MAX)] {
+                let track = TrackInfo::video(
+                    0,
+                    CodecId::Av1,
+                    TimeBase::MILLIS,
+                    VideoTrackInfo::new(64, 48).with_display(width, height),
+                )
+                .with_codec_private(Arc::from(AV1C))
+                .build()
+                .unwrap();
+                let mut m = if fragmented {
+                    Mp4Muxer::fragmented()
+                } else {
+                    Mp4Muxer::new()
+                };
+                assert!(
+                    matches!(
+                        m.begin(&[track], MuxHint::default()),
+                        Err(SessionError::Codec(Mp4Error::DimensionsTooLarge))
+                    ),
+                    "unrepresentable display {width}x{height} was accepted"
+                );
+                assert!(m.pending_output().is_empty());
+            }
+            let track = TrackInfo::video(
+                0,
+                CodecId::Av1,
+                TimeBase::MILLIS,
+                VideoTrackInfo::new(64, 48).with_display(u16::MAX.into(), u16::MAX.into()),
+            )
+            .with_codec_private(Arc::from(AV1C))
+            .build()
+            .unwrap();
+            let mut m = if fragmented {
+                Mp4Muxer::fragmented()
+            } else {
+                Mp4Muxer::new()
+            };
+            m.begin(&[track], MuxHint::default()).unwrap();
+        }
+    }
 }
