@@ -123,7 +123,9 @@ fn fixture_scan() -> Vec<u8> {
     px
 }
 
-fn fixtures() -> Vec<(&'static str, Vec<u8>, ImgVec<Rgb<u8>>)> {
+type Fixture = (&'static str, Vec<u8>, ImgVec<Rgb<u8>>);
+
+fn fixtures() -> Vec<Fixture> {
     [
         ("photo", fixture_photo()),
         ("screen", fixture_screen()),
@@ -148,7 +150,9 @@ fn encode(cfg: &EncoderConfig, rgb: &ImgVec<Rgb<u8>>) -> Vec<u8> {
 /// Pack a flat RGB8 buffer into the `imgref` view the encoder takes.
 fn img(rgb: &[u8]) -> ImgVec<Rgb<u8>> {
     let px: Vec<Rgb<u8>> = rgb
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|c| Rgb::new(c[0], c[1], c[2]))
         .collect();
     Img::new(px, W as usize, H as usize)

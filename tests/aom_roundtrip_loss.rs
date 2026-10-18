@@ -834,7 +834,7 @@ fn alpha_ramp_round_trips_through_the_auxiliary_item() {
                 .as_ref()
                 .pixels()
                 .zip(g.pixels())
-                .map(|(a, b)| u32::from((a.a >> 8).abs_diff((b.a >> 8) as u16)))
+                .map(|(a, b)| u32::from((a.a >> 8).abs_diff(b.a >> 8)))
                 .max()
                 .unwrap_or(0)
         } else {
