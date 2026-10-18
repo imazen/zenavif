@@ -748,6 +748,13 @@ impl Muxer for Mp4Muxer {
             if tb.numerator() != 1 {
                 return err(Mp4Error::UnsupportedTimeBase);
             }
+            // The current elst writer emits one media edit. A negative
+            // offset needs a leading empty edit, which it cannot represent.
+            if t.edit_delay_ticks().is_some_and(|delay| delay < 0) {
+                return Err(SessionError::Unsupported(
+                    zencodec_media::session::UnsupportedMedia::Container,
+                ));
+            }
             // An AV1 track without its record gets one from its first
             // sequence header (IVF carries none).
             let (handler, entry) = match sample_entry(t, None) {
@@ -802,8 +809,19 @@ impl Muxer for Mp4Muxer {
         let pts = packet
             .pts()
             .ok_or(SessionError::Protocol(ProtocolViolation::MissingTimestamp))?;
-        if pts.base() != track.info.time_base() {
+        if pts.base() != track.info.time_base()
+            || packet
+                .dts()
+                .is_some_and(|dts| dts.base() != track.info.time_base())
+        {
             return Err(SessionError::Protocol(ProtocolViolation::ClockMismatch));
+        }
+        // No sample-group or edit-list representation for per-packet
+        // discard is emitted here. Refuse it before taking the payload.
+        if packet.discard().is_some() {
+            return Err(SessionError::Unsupported(
+                zencodec_media::session::UnsupportedMedia::Container,
+            ));
         }
         let dts = packet.dts().map_or(pts.ticks(), |d| d.ticks());
         if track.last_dts.is_some_and(|last| dts <= last) {

@@ -46,6 +46,11 @@
 
 ## zenmp4 (unreleased, new workspace member)
 
+- Refuse negative edit delays and packet discard padding that the current
+  muxer layout cannot preserve, and reject DTS values on another clock.
+  These inputs previously lost timing metadata or used ticks from the wrong
+  time base. The regression covers progressive and fragmented layouts.
+
 - `Mp4Demuxer`: progressive and fragmented MP4, sans-I/O, with seeking in
   both layouts (a fragmented file's first seek indexes every `moof`).
   `Mp4Muxer`: progressive, or fragmented for destinations that cannot seek

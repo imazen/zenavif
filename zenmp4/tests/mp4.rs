@@ -894,4 +894,61 @@ mod muxer {
             Err(SessionError::Codec(Mp4Error::UnsupportedCodec))
         ));
     }
+
+    #[test]
+    fn unsupported_trims_and_mismatched_dts_clocks_are_refused() {
+        use zencodec::time::FrameDuration;
+        use zencodec_media::packet::Discard;
+        use zencodec_media::session::{ProtocolViolation, UnsupportedMedia};
+
+        let ms = TimeBase::MILLIS;
+        let negative = TrackInfo::video(0, CodecId::Av1, ms, VideoTrackInfo::new(64, 48))
+            .with_codec_private(Arc::from(AV1C.as_slice()))
+            .with_edit_delay_ticks(-420)
+            .build()
+            .unwrap();
+        let valid = TrackInfo::video(0, CodecId::Av1, ms, VideoTrackInfo::new(64, 48))
+            .with_codec_private(Arc::from(AV1C.as_slice()))
+            .build()
+            .unwrap();
+        let padding = FrameDuration::new(1, 1000).unwrap();
+        for make in [Mp4Muxer::new as fn() -> Mp4Muxer, Mp4Muxer::fragmented] {
+            assert!(matches!(
+                make().begin(core::slice::from_ref(&negative), MuxHint::default()),
+                Err(SessionError::Unsupported(UnsupportedMedia::Container))
+            ));
+            for discard in [
+                Discard::start(padding),
+                Discard::end(padding),
+                Discard::start(padding).with_end(padding),
+            ] {
+                let mut muxer = make();
+                muxer
+                    .begin(core::slice::from_ref(&valid), MuxHint::default())
+                    .unwrap();
+                let packet = Packet::from_vec(vec![0x32, 1, 0])
+                    .unwrap()
+                    .with_pts(Timestamp::new(1000, ms))
+                    .with_duration_ticks(40)
+                    .with_discard(discard);
+                assert!(matches!(
+                    muxer.write_packet(packet, &Unstoppable),
+                    Err(SessionError::Unsupported(UnsupportedMedia::Container))
+                ));
+            }
+            let mut muxer = make();
+            muxer
+                .begin(core::slice::from_ref(&valid), MuxHint::default())
+                .unwrap();
+            let packet = Packet::from_vec(vec![0x32, 1, 0])
+                .unwrap()
+                .with_pts(Timestamp::new(1000, ms))
+                .with_dts(Timestamp::new(1, TimeBase::new(1, 1).unwrap()))
+                .with_duration_ticks(40);
+            assert!(matches!(
+                muxer.write_packet(packet, &Unstoppable),
+                Err(SessionError::Protocol(ProtocolViolation::ClockMismatch))
+            ));
+        }
+    }
 }
