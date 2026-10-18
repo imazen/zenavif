@@ -46,6 +46,7 @@ mod encode_job;
 #[cfg(feature = "encode")]
 mod encoder;
 mod gain_map;
+mod incremental;
 mod info;
 #[cfg(feature = "inventory")]
 mod inventory;

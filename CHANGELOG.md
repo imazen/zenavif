@@ -91,6 +91,10 @@
 
 ## Incremental decode (unreleased)
 
+- Bound whole-file growing-prefix requests by max_input_bytes (plus one
+  byte to detect overflow when the source length is unknown), and refuse
+  oversized known-length inputs before requesting their payload.
+
 - `dyn_incremental_decoder` returns zencodec's `WholeFileIncremental`, and the
   decode capabilities declare `incremental`, so the zencodec-io drivers (files,
   streams, async sources) serve AVIF. `HeaderReady` comes as soon as a prefix

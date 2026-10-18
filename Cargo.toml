@@ -391,6 +391,7 @@ zenrav1e = { version = "0.2.0", git = "https://github.com/imazen/zenrav1e", rev 
 num-traits = { version = "0.2.19", default-features = false, optional = true }
 
 [dev-dependencies]
+zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
 anyhow = "1"
 # check_inventory: the structural-inventory conformance check.
 zencodec-testkit = ">=0.1.0, <0.3.0"

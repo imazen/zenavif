@@ -279,8 +279,9 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         self,
         preferred: &[PixelDescriptor],
     ) -> Result<Box<zencodec::decode::DynIncrementalDecoder>, zencodec::decode::BoxedError> {
+        let max_input_bytes = self.limits.max_input_bytes;
         Ok(zencodec::decode::erase_incremental(
-            zencodec::helpers::WholeFileIncremental::new(self, preferred),
+            super::incremental::AvifIncremental::new(self, preferred, max_input_bytes),
         ))
     }
 }

@@ -21,3 +21,36 @@ fn incremental_contract_holds() {
             .unwrap_or_else(|e| panic!("{name}: {e:?}"));
     }
 }
+
+#[test]
+fn incremental_input_limits_bound_growing_prefix_requests() {
+    use enough::Unstoppable;
+    use zencodec::ResourceLimits;
+    use zencodec::decode::{DecodeJob, Input, Request, StepError};
+    use zencodec_io::CollectSink;
+
+    let data = include_bytes!("vectors/libavif/kodim03_yuv420_8bpc.avif");
+    for known_length in [false, true] {
+        let limit = 32;
+        let mut decoder = AvifDecoderConfig::new()
+            .job()
+            .with_limits(ResourceLimits::none().with_max_input_bytes(limit))
+            .dyn_incremental_decoder(&[])
+            .unwrap();
+        let mut sink = CollectSink::new();
+        for request in decoder.requested() {
+            assert!(
+                matches!(request, Request::AtLeast { min_len, .. } if *min_len <= limit as usize + 1)
+            );
+        }
+        let input = if known_length {
+            Input::empty().with_total_len(data.len() as u64)
+        } else {
+            Input::new(0, &data[..limit as usize + 1])
+        };
+        assert!(matches!(
+            decoder.step(input, &mut sink, &Unstoppable),
+            Err(StepError::Codec(_))
+        ));
+    }
+}

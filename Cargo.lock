@@ -2584,6 +2584,7 @@ dependencies = [
  "zenavif-serialize",
  "zenbench",
  "zencodec",
+ "zencodec-io",
  "zencodec-media",
  "zencodec-media-testkit",
  "zencodec-testkit",
