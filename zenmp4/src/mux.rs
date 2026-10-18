@@ -762,6 +762,24 @@ impl Muxer for Mp4Muxer {
                     zencodec_media::session::UnsupportedMedia::Container,
                 ));
             }
+            // This writer records Opus delay only through OpusHead's pre-skip.
+            // No generic priming or seek-preroll boxes are emitted.
+            let delay_supported = t.codec_delay().is_none_or(|delay| {
+                if *t.codec() != CodecId::Opus {
+                    return false;
+                }
+                let Some(bytes) = t.codec_private().and_then(|p| p.get(10..12)) else {
+                    return false;
+                };
+                let pre_skip = u16::from_le_bytes([bytes[0], bytes[1]]);
+                u128::from(delay.numerator()) * 48_000
+                    == u128::from(pre_skip) * u128::from(delay.denominator())
+            });
+            if !delay_supported || t.seek_preroll().is_some() {
+                return Err(SessionError::Unsupported(
+                    zencodec_media::session::UnsupportedMedia::Container,
+                ));
+            }
             // An AV1 track without its record gets one from its first
             // sequence header (IVF carries none).
             let (handler, entry) = match sample_entry(t, None) {
@@ -824,8 +842,9 @@ impl Muxer for Mp4Muxer {
             return Err(SessionError::Protocol(ProtocolViolation::ClockMismatch));
         }
         // No sample-group or edit-list representation for per-packet
-        // discard is emitted here. Refuse it before taking the payload.
-        if packet.discard().is_some() {
+        // discard or packet additions is emitted here. Refuse them before
+        // taking the payload.
+        if packet.discard().is_some() || !packet.additions().is_empty() {
             return Err(SessionError::Unsupported(
                 zencodec_media::session::UnsupportedMedia::Container,
             ));

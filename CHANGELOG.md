@@ -50,6 +50,9 @@
 
 ## zenmp4 (unreleased, new workspace member)
 
+- Refuse unrepresented seek pre-roll, codec delay and packet additions.
+  Opus codec delay is accepted when it matches the OpusHead pre-skip.
+
 - Refuse sample durations/composition offsets outside the MP4 fields and
   negative decode times; check timestamp arithmetic before writing.
 
