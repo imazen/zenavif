@@ -53,6 +53,10 @@ test-fast:
 test-fast-encode:
     cargo test --features encode -- --test-threads=4
 
+# AV1 decoder unit regressions, including word-width-independent OBU handling.
+test-media-decoder:
+    cargo test --locked --features media --lib media::
+
 # AV1 packet validation and decoder metadata regressions.
 test-media-packets:
     cargo test --locked --features media --lib media::tests::packet_

@@ -1871,3 +1871,10 @@ Progressive sample tables start DTS at zero; a nonzero starting DTS is refused
 at finish, while fragmented output records it through tfdt. Explicit sample
 durations inconsistent with the next DTS are refused by this writer. Normal
 regressions cover these cases without changing existing decode-order assertions.
+
+### AV1 delimiter size scan on 32-bit (fixed 2026-10-18)
+
+The temporal-delimiter helper used a usize LEB accumulator: long size fields
+could shift beyond 31 bits or truncate nonzero upper bits on 32-bit. It now
+checks for zero payload bits directly. The media unit regressions also run
+under the i686 cross CI job.

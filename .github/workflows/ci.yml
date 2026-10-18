@@ -314,6 +314,10 @@ jobs:
         env:
           CROSS_CONTAINER_OPTS: "-v ${{ github.workspace }}/..:${{ github.workspace }}/.."
         run: cross test --target i686-unknown-linux-gnu --features inventory
+      - name: Test media packet validation (i686)
+        env:
+          CROSS_CONTAINER_OPTS: "-v ${{ github.workspace }}/..:${{ github.workspace }}/.."
+        run: cross test --target i686-unknown-linux-gnu --features media --lib media::
       # Scoped via --manifest-path: under cross, a bare `-p zenavif-parse`
       # resolves ambiguously (registry 0.6.x from zenavif-serialize's
       # dev-deps vs the 0.7.0 member).

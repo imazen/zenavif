@@ -33,6 +33,9 @@
   refused. The `av1C` level comes from zenav1-svt's own
   `compute_seq_level_idx`. The oracle gains 10 checks: libaom and rav1d-safe
   equal libdav1d on its output in five formats.
+- Recognize temporal-delimiter zero sizes without machine-word shifts;
+  long LEB sizes no longer overflow on 32-bit. The i686 CI job now runs
+  the media unit regressions.
 - The decoder inserts `av1C` configOBUs after a packet's leading temporal
   delimiter, so a temporal unit still starts with it.
 - Tests: `tests/media_session.rs` (12) covers lossless round trips (six
