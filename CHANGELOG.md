@@ -2,6 +2,10 @@
 
 ## AV1 media sessions (unreleased)
 
+- Add `Av1VideoDecoder::with_stop` and `Av1VideoEncoder::with_stop`
+  builders for owned cancellation tokens polled by the underlying backends.
+  The borrowed per-call stop remains independent.
+
 - New `media` feature: `media::Av1VideoDecoder`, rav1d-safe behind
   zencodec-media's `VideoDecoder`. Frames map rav1d's picture buffers without
   copying and outlive the decoder; `av1C` configOBUs are prepended after

@@ -140,6 +140,7 @@ fn config_obus(private: &[u8]) -> Option<&[u8]> {
 /// rav1d's AV1 decoder as a [`VideoDecoder`] session.
 pub struct Av1VideoDecoder {
     dec: rav1d_safe::Decoder,
+    owned_stop: Option<Arc<dyn Stop>>,
     config: Option<CodecConfig>,
     /// Sequence-header OBUs still to prepend to the next packet.
     prefix: Option<Arc<[u8]>>,
@@ -184,6 +185,7 @@ impl Av1VideoDecoder {
             .map_err(|e| Av1SessionError::Decode(e.error().clone()))?;
         Ok(Self {
             dec,
+            owned_stop: None,
             config: None,
             prefix: None,
             stash: None,
@@ -193,6 +195,16 @@ impl Av1VideoDecoder {
             next_ordinal: 0,
             info: None,
         })
+    }
+
+    /// Install an owned stop that rav1d can poll while decoding.
+    ///
+    /// This supplements the borrowed stop on each session call and is kept
+    /// across reset. Replace it with `Arc::new(enough::Unstoppable)` to clear.
+    pub fn with_stop(mut self, stop: Arc<dyn Stop>) -> Self {
+        self.dec.set_stop(Some(Arc::clone(&stop)));
+        self.owned_stop = Some(stop);
+        self
     }
 
     fn arm_prefix(&mut self) {
@@ -208,7 +220,11 @@ impl Av1VideoDecoder {
         let Some(p) = self.stash.as_mut() else {
             return Ok(true);
         };
-        match self.dec.send_packet(p).map_err(decode_err)? {
+        let result = self.dec.send_packet(p);
+        if let Some(owned) = &self.owned_stop {
+            owned.check()?;
+        }
+        match result.map_err(decode_err)? {
             rav1d_safe::SendStatus::Accepted => {
                 self.stash = None;
                 Ok(true)
@@ -323,6 +339,9 @@ impl VideoDecoder for Av1VideoDecoder {
 
     fn configure(&mut self, config: &CodecConfig, stop: &dyn Stop) -> Res<()> {
         stop.check()?;
+        if let Some(owned) = &self.owned_stop {
+            owned.check()?;
+        }
         if config.codec != CodecId::Av1 {
             return Err(SessionError::Unsupported(UnsupportedMedia::Codec));
         }
@@ -333,6 +352,9 @@ impl VideoDecoder for Av1VideoDecoder {
 
     fn send(&mut self, packet: &mut Packet, stop: &dyn Stop) -> Res<SendStatus> {
         stop.check()?;
+        if let Some(owned) = &self.owned_stop {
+            owned.check()?;
+        }
         let Some(config) = &self.config else {
             return Err(SessionError::Protocol(ProtocolViolation::NotConfigured));
         };
@@ -375,7 +397,11 @@ impl VideoDecoder for Av1VideoDecoder {
             .with_timestamp(pts)
             .with_duration(duration)
             .with_offset(i64::try_from(ordinal).unwrap_or(-1));
-        match self.dec.send_packet(&mut p).map_err(decode_err)? {
+        let result = self.dec.send_packet(&mut p);
+        if let Some(owned) = &self.owned_stop {
+            owned.check()?;
+        }
+        match result.map_err(decode_err)? {
             rav1d_safe::SendStatus::Accepted => {}
             // Accepted by the session; rav1d takes it once output drains.
             _ => self.stash = Some(p),
@@ -385,12 +411,19 @@ impl VideoDecoder for Av1VideoDecoder {
 
     fn receive(&mut self, stop: &dyn Stop) -> Res<Receive<Frame>> {
         stop.check()?;
+        if let Some(owned) = &self.owned_stop {
+            owned.check()?;
+        }
         if self.config.is_none() {
             return Err(SessionError::Protocol(ProtocolViolation::NotConfigured));
         }
         loop {
             self.tell_end_if_ready()?;
-            match self.dec.receive().map_err(decode_err)? {
+            let result = self.dec.receive();
+            if let Some(owned) = &self.owned_stop {
+                owned.check()?;
+            }
+            match result.map_err(decode_err)? {
                 rav1d_safe::ReceiveStatus::Frame(f) => return Ok(Receive::Ready(self.frame(f)?)),
                 rav1d_safe::ReceiveStatus::EndOfStream => return Ok(Receive::EndOfStream),
                 _ => {
@@ -410,6 +443,9 @@ impl VideoDecoder for Av1VideoDecoder {
     }
 
     fn end_input(&mut self) -> Res<()> {
+        if let Some(owned) = &self.owned_stop {
+            owned.check()?;
+        }
         self.ended = true;
         self.tell_end_if_ready()
     }
@@ -738,6 +774,7 @@ mod encode {
         settings: Av1EncodeSettings,
         clock: TimeBase,
         output: CodecConfig,
+        owned_stop: Option<Arc<dyn Stop>>,
         /// Timing of frames sent and not yet out, by input frame number.
         queued: BTreeMap<u64, (Timestamp, Option<u64>)>,
         submitted: u64,
@@ -907,6 +944,7 @@ mod encode {
                 settings,
                 clock,
                 output,
+                owned_stop: None,
                 queued: BTreeMap::new(),
                 submitted: 0,
                 emitted: 0,
@@ -915,6 +953,23 @@ mod encode {
                 ended: false,
                 drained: false,
             })
+        }
+
+        /// Install an owned stop that the encoder backend can poll.
+        ///
+        /// It supplements the borrowed per-call stop. Replace it with
+        /// `Arc::new(enough::Unstoppable)` to clear it.
+        pub fn with_stop(mut self, stop: Arc<dyn Stop>) -> Self {
+            match &mut self.backend {
+                Backend::U8(c) => c.set_stop(Arc::clone(&stop)),
+                Backend::U16(c) => c.set_stop(Arc::clone(&stop)),
+                #[cfg(feature = "zenav1-svt")]
+                Backend::Svt(svt) => {
+                    svt.pipeline.stop = almost_enough::StopToken::new(Arc::clone(&stop));
+                }
+            }
+            self.owned_stop = Some(stop);
+            self
         }
 
         fn matches(&self, frame: &Frame) -> bool {
@@ -964,6 +1019,9 @@ mod encode {
                         });
                     }
                 };
+                if let Some(owned) = &self.owned_stop {
+                    owned.check()?;
+                }
                 let encode_err = |m: String| SessionError::Codec(Av1SessionError::Encode(m));
                 match got {
                     Ok((data, input, frame_type)) => {
@@ -1109,7 +1167,7 @@ mod encode {
         /// zenav1-svt, all-intra: each frame is one temporal unit, out at
         /// once.
         pub(super) struct SvtSession {
-            pipeline: EncodePipeline,
+            pub(super) pipeline: EncodePipeline,
             subsampling: Subsampling,
             width: usize,
             intra_period: u64,
@@ -1246,6 +1304,9 @@ mod encode {
 
         fn send(&mut self, frame: &Frame, stop: &dyn Stop) -> Res<SendStatus> {
             stop.check()?;
+            if let Some(owned) = &self.owned_stop {
+                owned.check()?;
+            }
             if self.ended {
                 return Err(SessionError::Protocol(ProtocolViolation::SendAfterEnd));
             }
@@ -1281,7 +1342,11 @@ mod encode {
                     };
                     let planes = packed_planes(frame, &dims, frame.interpretation().encoding)
                         .map_err(input_err)?;
-                    let (bytes, key) = svt.encode(planes).map_err(input_err)?;
+                    let encoded = svt.encode(planes);
+                    if let Some(owned) = &self.owned_stop {
+                        owned.check()?;
+                    }
+                    let (bytes, key) = encoded.map_err(input_err)?;
                     let mut p = Packet::from_vec(bytes)
                         .map_err(|e| SessionError::Codec(Av1SessionError::Encode(e.to_string())))?
                         .with_pts(pts)
@@ -1336,6 +1401,9 @@ mod encode {
 
         fn receive(&mut self, stop: &dyn Stop) -> Res<Receive<Packet>> {
             stop.check()?;
+            if let Some(owned) = &self.owned_stop {
+                owned.check()?;
+            }
             if let Some(p) = self.ready.take() {
                 return Ok(Receive::Ready(p));
             }
@@ -1353,6 +1421,9 @@ mod encode {
         }
 
         fn end_input(&mut self) -> Res<()> {
+            if let Some(owned) = &self.owned_stop {
+                owned.check()?;
+            }
             if !self.ended {
                 match &mut self.backend {
                     Backend::U8(c) => c.flush(),

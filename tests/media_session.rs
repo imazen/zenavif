@@ -1114,3 +1114,68 @@ mod svt {
         }
     }
 }
+
+#[test]
+fn owned_stops_are_polled_inside_the_encoder_backend() {
+    use core::sync::atomic::{AtomicUsize, Ordering};
+    use enough::{Stop, StopReason};
+    #[derive(Default)]
+    struct Probe(AtomicUsize);
+    impl Stop for Probe {
+        fn check(&self) -> Result<(), StopReason> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+    let owned = Arc::new(Probe::default());
+    let s = settings(8, Subsampling::Yuv420, 32, 32);
+    let f = frame_for(&s, 0, 0);
+    let mut enc = Av1VideoEncoder::new(s, TB)
+        .unwrap()
+        .with_stop(owned.clone());
+    assert!(matches!(
+        enc.send(&f, &Unstoppable),
+        Ok(SendStatus::Accepted)
+    ));
+    enc.end_input().unwrap();
+    let before = owned.0.load(Ordering::Relaxed);
+    assert!(matches!(enc.receive(&Unstoppable), Ok(Receive::Ready(_))));
+    // The adapter checks before/after pull. More polls prove the owned
+    // token reached zenrav1e rather than just the session boundary.
+    assert!(owned.0.load(Ordering::Relaxed) - before > 2);
+
+    #[cfg(feature = "zenav1-svt")]
+    {
+        let owned = Arc::new(Probe::default());
+        let s = settings(8, Subsampling::Yuv420, 32, 32)
+            .with_backend(zenavif::media::Av1VideoBackend::Zenav1Svt)
+            .with_key_frame_interval(1);
+        let f = frame_for(&s, 0, 0);
+        let mut enc = Av1VideoEncoder::new(s, TB)
+            .unwrap()
+            .with_stop(owned.clone());
+        assert!(matches!(
+            enc.send(&f, &Unstoppable),
+            Ok(SendStatus::Accepted)
+        ));
+        // Two checks surround encoding in the adapter; the pipeline must
+        // also have polled the supplied owned token.
+        assert!(owned.0.load(Ordering::Relaxed) > 2);
+    }
+}
+
+#[test]
+fn an_owned_decoder_stop_cancels_with_an_unstoppable_call_token() {
+    use enough::{Stop, StopReason};
+    struct Tripped;
+    impl Stop for Tripped {
+        fn check(&self) -> Result<(), StopReason> {
+            Err(StopReason::Cancelled)
+        }
+    }
+    let mut decoder = Av1VideoDecoder::new().unwrap().with_stop(Arc::new(Tripped));
+    assert!(matches!(
+        decoder.configure(&CodecConfig::new(CodecId::Av1, TB), &Unstoppable),
+        Err(SessionError::Cancelled(StopReason::Cancelled))
+    ));
+}
