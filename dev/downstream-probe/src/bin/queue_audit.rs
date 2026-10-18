@@ -1,4 +1,6 @@
 //! Measure accepted frames before the AV1 session first promises output.
+#![forbid(unsafe_code)]
+
 use std::sync::Arc;
 
 use enough::Unstoppable;
