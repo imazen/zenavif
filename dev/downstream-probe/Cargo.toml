@@ -32,19 +32,36 @@ default-run = "zenavif-downstream-probe"
 
 [workspace]
 
+[features]
+queue-audit = ["zenavif/media-encode", "dep:zencodec", "dep:zencodec-media", "dep:zenpixels", "dep:enough", "dep:zenrav1e"]
+
+[[bin]]
+name = "queue_audit"
+path = "src/bin/queue_audit.rs"
+required-features = ["queue-audit"]
+
 [dependencies]
+zencodec = { version = "0.1.27", optional = true }
+zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914", optional = true }
+zenpixels = { version = "0.2.17", optional = true }
+enough = { version = "0.4.5", optional = true }
+zenrav1e = { version = "0.2.0", git = "https://github.com/imazen/zenrav1e", rev = "9057c4bacf1d8a23974e32de09fd4446a1cc525a", default-features = false, optional = true }
 zenavif = { path = "../..", features = ["encode", "zenav1-aom-encode"] }
 imgref = "1.11.0"
 rgb = "0.8.52"
 almost-enough = { version = "0.4.3", features = ["alloc"] }
 
 [patch.crates-io]
-zenanalyze-api = { git = "https://github.com/imazen/zenanalyze" }
-zenavif-serialize = { path = "../../zenavif-serialize" }
-# zencodec and zenpixels at the root's pinned revs (keep in sync with the
-# root `[patch.crates-io]`): zenavif main uses zencodec APIs the registry
-# 0.1.26 lacks (`animation`, timed frames, inventory), and one rev of each
-# keeps the graph to a single copy.
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
+zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "6bbcacb11313923ded6e5eeebb725878c5736453" }
+zenanalyze = { git = "https://github.com/imazen/zenanalyze", rev = "6bbcacb11313923ded6e5eeebb725878c5736453" }
+zenpng = { git = "https://github.com/imazen/zenpng", rev = "8c9b9a87460116d45d1e58afd8058002b083c4a6" }
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "10a79c3a888dd589884fd032846eec70bc31eb13" }
 zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "1d3ddd2131b22e9e3754c765d4ce45ce3901de59" }
 zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "1d3ddd2131b22e9e3754c765d4ce45ce3901de59" }
+zenanalyze-api = { git = "https://github.com/imazen/zenanalyze", rev = "6bbcacb11313923ded6e5eeebb725878c5736453" }
+zenavif-serialize = { path = "../../zenavif-serialize" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
+
+[patch."https://github.com/imazen/zenavif"]
+zenavif-serialize = { path = "../../zenavif-serialize" }

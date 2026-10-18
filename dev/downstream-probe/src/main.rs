@@ -109,8 +109,14 @@ fn main() {
     .unwrap_or_else(|e| panic!("12-bit on the default backend: {e}"));
     let back = zenavif::decode(&out.avif_file).expect("decode 12-bit");
     let bpp = back.descriptor().bytes_per_pixel();
-    assert!(bpp > 4, "12-bit must not decode to 8 bits per channel: {bpp} bytes/pixel");
-    println!("default 12-bit: {} bytes -> {bpp} bytes/pixel", out.avif_file.len());
+    assert!(
+        bpp > 4,
+        "12-bit must not decode to 8 bits per channel: {bpp} bytes/pixel"
+    );
+    println!(
+        "default 12-bit: {} bytes -> {bpp} bytes/pixel",
+        out.avif_file.len()
+    );
 
     // A backend this consumer did not compile in must be refused, naming the
     // cargo feature that provides it (not another backend's).
@@ -121,7 +127,10 @@ fn main() {
     )
     .expect_err("zenav1-svt is not compiled into this consumer");
     let msg = format!("{e}");
-    assert!(msg.contains("zenav1-svt"), "refusal must name the feature: {msg}");
+    assert!(
+        msg.contains("zenav1-svt"),
+        "refusal must name the feature: {msg}"
+    );
     assert!(
         !msg.contains("zenav1-aom"),
         "a zenav1-svt refusal must not name the aom feature: {msg}"
