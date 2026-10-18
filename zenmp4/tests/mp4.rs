@@ -649,6 +649,51 @@ fn limits_are_enforced_before_allocation() {
     assert!(limit(MediaLimits::default().with_max_packet_bytes(8)).contains("Limit"));
 }
 
+#[test]
+fn combined_seek_index_and_crafted_counts_obey_limits() {
+    use zencodec_media::container::{Demuxer, Input};
+    use zencodec_media::session::SessionError;
+
+    let (file, _) = progressive(true);
+    // The individual video/audio tables have six/four samples, but the
+    // combined seek index must fit the same six-entry limit.
+    let result = demux_with(&file, MediaLimits::default().with_max_table_entries(6), 64);
+    assert!(
+        matches!(result, Err(ref e) if e.contains("Limit")),
+        "{result:?}"
+    );
+
+    for (tag, delta) in [
+        (b"stsz", 12),
+        (b"stco", 8),
+        (b"stss", 8),
+        (b"stts", 8),
+        (b"stsc", 8),
+    ] {
+        let (mut file, _) = progressive(true);
+        let at = file.windows(4).position(|w| w == tag).unwrap() + delta;
+        file[at..at + 4].copy_from_slice(&u32::MAX.to_be_bytes());
+        let moov = file.windows(4).position(|w| w == b"moov").unwrap() - 4;
+        let mut demuxer = Mp4Demuxer::new(MediaLimits::default());
+        demuxer
+            .step(
+                Input::new(0, &file).with_total_len(file.len() as u64),
+                &Unstoppable,
+            )
+            .unwrap();
+        let error = demuxer
+            .step(
+                Input::new(moov as u64, &file[moov..]).with_total_len(file.len() as u64),
+                &Unstoppable,
+            )
+            .unwrap_err();
+        assert!(
+            matches!(error, SessionError::Limit(_)),
+            "{tag:?}: {error:?}"
+        );
+    }
+}
+
 mod muxer {
     use super::*;
     use std::sync::Arc;

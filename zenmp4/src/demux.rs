@@ -301,6 +301,9 @@ impl Mp4Demuxer {
                         size: r.u32().map_err(SessionError::Codec)?,
                         flags: r.u32().map_err(SessionError::Codec)?,
                     };
+                    self.limits
+                        .check_table_entries(trex.len() as u64 + 1)
+                        .map_err(SessionError::Limit)?;
                     trex.push((id, d));
                 }
             }
@@ -496,8 +499,15 @@ impl Mp4Demuxer {
                 let mut r = Reader::new(trun);
                 let (v, flags) = r.full().map_err(c)?;
                 let count = r.u32().map_err(c)?;
+                // Indexing retains the samples from all earlier moofs.
+                // Check their combined size before expanding this trun.
+                let retained = if self.phase == Phase::Index {
+                    self.all.len() as u64
+                } else {
+                    0
+                };
                 self.limits
-                    .check_table_entries(out.len() as u64 + u64::from(count))
+                    .check_table_entries(retained + out.len() as u64 + u64::from(count))
                     .map_err(SessionError::Limit)?;
                 if flags & 0x1 != 0 {
                     let off = i64::from(r.i32().map_err(c)?);
@@ -957,6 +967,11 @@ fn sample_table(
             let fixed = r.u32().map_err(c)?;
             let n = r.u32().map_err(c)?;
             table(n)?;
+            // Every track contributes to the same retained seek index.
+            // Bound that total before even allocating the sizes table.
+            limits
+                .check_table_entries(out.len() as u64 + u64::from(n))
+                .map_err(SessionError::Limit)?;
             if fixed != 0 {
                 vec![fixed; n as usize]
             } else {

@@ -46,6 +46,10 @@
 
 ## zenmp4 (unreleased, new workspace member)
 
+- Check combined progressive/fragmented seek-index counts and fragment
+  default-table counts before allocation, including samples retained from
+  earlier tracks or fragments.
+
 - Refuse negative edit delays and packet discard padding that the current
   muxer layout cannot preserve, and reject DTS values on another clock.
   These inputs previously lost timing metadata or used ticks from the wrong
