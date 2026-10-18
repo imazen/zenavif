@@ -620,6 +620,9 @@ fn refused(file: &[u8]) -> String {
 
 #[test]
 fn malformed_files_are_refused() {
+    // Minimized from the first fuzz_mp4 CI crash: an open moov with a
+    // UUID child lacking its mandatory 16-byte user type.
+    assert!(refused(b"\0\0\0\0moov\0\0\0\0uuid").contains("Truncated"));
     let (good, _) = progressive(true);
     let moov_at = good.windows(4).position(|w| w == b"moov").unwrap() - 4;
     // Truncated inside moov.

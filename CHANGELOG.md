@@ -46,6 +46,9 @@
 
 ## zenmp4 (unreleased, new workspace member)
 
+- Reject truncated UUID box headers instead of panicking while slicing
+  their bodies; minimized from the MP4 fuzz job.
+
 - Exercise the MP4 byte-window demuxer with a bounded standalone fuzz target,
   included in the Fuzz CI matrix.
 

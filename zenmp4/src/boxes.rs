@@ -114,6 +114,12 @@ pub(crate) fn header(b: &[u8]) -> Result<Option<Header>, Mp4Error> {
     {
         return Err(Mp4Error::BadBoxSize);
     }
+    // UUID boxes include a 16-byte user type even when their size is zero
+    // (extends to the parent's end). Do not hand an incomplete header to
+    // children(), which slices the body at header_len.
+    if b.len() < header_len {
+        return Ok(None);
+    }
     Ok(Some(Header {
         kind,
         header_len,
@@ -197,6 +203,20 @@ mod tests {
             header(&[0, 0, 0, 7, b'f', b'r', b'e', b'e']),
             Err(Mp4Error::BadBoxSize)
         );
+    }
+
+    #[test]
+    fn truncated_open_uuid_headers_are_refused() {
+        let mut uuid = [0u8; 24];
+        uuid[4..8].copy_from_slice(b"uuid");
+        for cut in 8..24 {
+            assert_eq!(header(&uuid[..cut]), Ok(None));
+            assert_eq!(
+                children(&uuid[..cut]).next(),
+                Some(Err(Mp4Error::Truncated))
+            );
+        }
+        assert_eq!(children(&uuid).next(), Some(Ok((*b"uuid", &[][..]))));
     }
 
     #[test]

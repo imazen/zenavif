@@ -1842,3 +1842,10 @@ in the report JSON; use `RESULT_COMPLETE.json` for final artifact status.
 
 Switching the adapter from lossless to lossy left the native encoder flag set.
 `lossless_to_lossy_clears_native_state` covers both setters and fidelity switching.
+
+## Known Bugs: truncated MP4 UUID headers (fixed)
+
+The first `fuzz_mp4` CI run found a panic when an open-ended UUID box lacked
+its mandatory 16-byte user type. `zenmp4/src/boxes.rs` now waits for the
+complete header; nested truncated headers return `Mp4Error::Truncated`.
+The minimized input and partial-header cases run in the normal MP4 tests.
