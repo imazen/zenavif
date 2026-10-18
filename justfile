@@ -90,7 +90,7 @@ clippy:
 # Package-scoped fmt: `--all` would also reformat the ../ravif and
 # ../zenanalyze path-deps (sibling repos).
 fmt:
-    cargo fmt -p zenavif -p zenavif-parse -p zenavif-serialize
+    cargo fmt -p zenavif -p zenavif-parse -p zenavif-serialize -p zenmp4
     cargo test --manifest-path apidoc/Cargo.toml
     cargo test --manifest-path zenavif-parse/apidoc/Cargo.toml
     cargo test --manifest-path zenavif-serialize/apidoc/Cargo.toml
@@ -109,7 +109,8 @@ api-doc-check:
 
 # Format check (same package scoping as fmt)
 fmt-check:
-    cargo fmt -p zenavif -p zenavif-parse -p zenavif-serialize --check
+    cargo fmt --manifest-path zenmp4/fuzz/Cargo.toml -- --check
+    cargo fmt -p zenavif -p zenavif-parse -p zenavif-serialize -p zenmp4 --check
 
 # Build with encode feature
 build-encode:

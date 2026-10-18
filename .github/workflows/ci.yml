@@ -372,7 +372,9 @@ jobs:
         with:
           components: rustfmt
       - name: Format check
-        run: cargo fmt -p zenavif -p zenavif-parse -p zenavif-serialize -- --check
+        run: |
+          cargo fmt -p zenavif -p zenavif-parse -p zenavif-serialize -p zenmp4 -- --check
+          cargo fmt --manifest-path zenmp4/fuzz/Cargo.toml -- --check
         # `--all` would recurse into the cloned ../zenanalyze path-dep,
         # which has its own fmt-check pipeline. Stay scoped to the workspace.
 
