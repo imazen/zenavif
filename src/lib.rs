@@ -20,7 +20,7 @@
 //!
 //! - **`unsafe-asm`**: Hand-written assembly decoder via C FFI (fastest) — overrides the default safe decoder
 //! - **`encode`**: AVIF encoding via zenravif
-//! - **`target-quality`**: [`encode_rgb8_with_target`] — converge on a requested SSIMULACRA2/zensim score
+//! - **`target-quality`**: [encode_rgb8_with_target](https://github.com/imazen/zenavif/blob/3be52e05d7bba4ca615bee0a065985d609766be3/src/target_quality.rs) — converge on a requested SSIMULACRA2/zensim score
 //! - **`zencodec`**: Integration with [`zencodec`](https://crates.io/crates/zencodec) traits
 //!
 //! The default decoder uses rav1d-safe's managed API — completely safe Rust
@@ -63,8 +63,8 @@ pub use auto_tune::{AutoTuneError, AutoTuneOptions, QualityTarget};
 /// Backend + knob tuning — pick an [`Av1Backend`] *and* its knobs for one
 /// image, from a bake the **caller** supplies (never bundled weights).
 ///
-/// The [`auto_tune`] family's backend-choosing sibling; see the module
-/// docs for the contract and for [`backend_tuner::StubTuner`], the
+/// The [auto_tune](https://github.com/imazen/zenavif/blob/3be52e05d7bba4ca615bee0a065985d609766be3/src/auto_tune.rs) family's backend-choosing sibling; see the module
+/// docs for the contract and for [backend_tuner::StubTuner](https://github.com/imazen/zenavif/blob/3be52e05d7bba4ca615bee0a065985d609766be3/src/backend_tuner.rs), the
 /// measured-default implementation a consumer can integrate against
 /// before a bake exists.
 /// Backend-owned configuration support and still-image routing.

@@ -5,6 +5,9 @@
 - Add `Av1VideoDecoder::with_stop` and `Av1VideoEncoder::with_stop`
   builders for owned cancellation tokens polled by the underlying backends.
   The borrowed per-call stop remains independent.
+- Refuse packet timestamps on another clock, backend-unrepresentable timing
+  and ordinals, discard padding and additions before taking the payload.
+  Reset also resets the automatically assigned packet ordinal.
 
 - New `media` feature: `media::Av1VideoDecoder`, rav1d-safe behind
   zencodec-media's `VideoDecoder`. Frames map rav1d's picture buffers without

@@ -1849,3 +1849,11 @@ The first `fuzz_mp4` CI run found a panic when an open-ended UUID box lacked
 its mandatory 16-byte user type. `zenmp4/src/boxes.rs` now waits for the
 complete header; nested truncated headers return `Mp4Error::Truncated`.
 The minimized input and partial-header cases run in the normal MP4 tests.
+
+### AV1 packet metadata validation (fixed 2026-10-18)
+
+The media decoder previously accepted timestamps on another clock, backend-reserved
+timing values, oversized ordinals, discard padding and packet additions without
+preserving their meaning. It now refuses these before taking packet payloads.
+`just test-media-packets` covers the boundary and payload ownership. Track-level
+trim configuration still requires plumbing through the shared media contract.

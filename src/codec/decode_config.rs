@@ -47,7 +47,7 @@ impl AvifDecoderConfig {
     }
 
     /// Set how the decoder handles the image's stored orientation
-    /// (`irot`/`imir`). See [`orientation`](Self::orientation) for semantics.
+    /// (`irot`/`imir`). See [`zencodec::OrientationHint`] for semantics.
     /// Default [`OrientationHint::Preserve`](zencodec::OrientationHint::Preserve).
     #[must_use]
     pub fn with_orientation(mut self, hint: zencodec::OrientationHint) -> Self {
@@ -375,7 +375,7 @@ impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
 
     /// Core-adjusted resource estimate via zencodec's unified `estimate` API.
     ///
-    /// Mirrors [`estimate_encode_resources`](AvifEncoderConfig::estimate_encode_resources):
+    /// Mirrors [`estimate_encode_resources`](zencodec::encode::EncoderConfig::estimate_encode_resources):
     /// delegates to the crate's calibrated [`crate::heuristics::estimate_decode`]
     /// (peak memory / time, keyed on the decoded output bytes-per-pixel) and maps
     /// the local [`crate::heuristics::ThreadingInfo`] onto the shared
@@ -386,7 +386,7 @@ impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
     /// The estimate covers the *whole* decode: the AV1 frame/tile working set
     /// (owned by `rav1d-safe`) plus zenavif's own RGB(A) output buffer. AVIF
     /// decode is only partly parallel (tile decode parallelises; the YUV→RGB
-    /// conversion does not), so the [`ThreadingInformation`] knee is
+    /// conversion does not), so the [`zencodec::estimate::ThreadingInformation`] knee is
     /// conservative — see [`crate::heuristics::decode_threading_info`].
     fn estimate_decode_resources(
         &self,

@@ -172,7 +172,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
     /// reconstructed pixels, and the gain-map components still surfaced
     /// for transcode use. Files without a gain map decode as honest SDR.
     /// Alpha-carrying or >8-bit bases are refused loudly — use
-    /// [`GainMapRender::Components`] and apply downstream for those.
+    /// [`zencodec::gainmap::GainMapRender::Components`] and apply downstream for those.
     fn with_gain_map_render(mut self, render: zencodec::GainMapRender) -> Self {
         self.gain_map_render = render;
         self

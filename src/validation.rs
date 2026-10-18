@@ -21,7 +21,7 @@
 use core::ops::RangeInclusive;
 
 /// Reasons a [`crate::EncoderConfig`], [`crate::DecoderConfig`], or
-/// [`crate::expert::InternalParams`] fails validation.
+/// [crate::expert::InternalParams](https://github.com/imazen/zenavif/blob/3be52e05d7bba4ca615bee0a065985d609766be3/src/expert.rs) fails validation.
 ///
 /// `#[non_exhaustive]` — variants may be added in any patch release as
 /// new configuration knobs are introduced.

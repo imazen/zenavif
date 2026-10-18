@@ -364,15 +364,32 @@ impl VideoDecoder for Av1VideoDecoder {
         if packet.config_epoch() != config.epoch {
             return Err(SessionError::Protocol(ProtocolViolation::EpochMismatch));
         }
+        if [packet.pts(), packet.dts()]
+            .into_iter()
+            .flatten()
+            .any(|t| t.base() != config.time_base)
+        {
+            return Err(SessionError::Protocol(ProtocolViolation::ClockMismatch));
+        }
+        let ordinal = packet.ordinal().unwrap_or(self.next_ordinal);
+        // rav1d reserves MIN for an absent timestamp, zero for an absent
+        // duration, and negative offsets for absent ordinals. Refuse metadata
+        // it cannot carry instead of silently changing the presentation.
+        if packet.pts().is_some_and(|t| t.ticks() == i64::MIN)
+            || packet
+                .duration_ticks()
+                .is_some_and(|d| d == 0 || d > i64::MAX as u64)
+            || ordinal > i64::MAX as u64
+            || packet.discard().is_some()
+            || !packet.additions().is_empty()
+        {
+            return Err(SessionError::Unsupported(UnsupportedMedia::Container));
+        }
         if !self.flush_stash()? {
             return Ok(SendStatus::ReceivePending);
         }
         let pts = packet.pts().map_or(i64::MIN, |t| t.ticks());
-        let duration = packet
-            .duration_ticks()
-            .and_then(|d| i64::try_from(d).ok())
-            .unwrap_or(0);
-        let ordinal = packet.ordinal().unwrap_or(self.next_ordinal);
+        let duration = packet.duration_ticks().unwrap_or(0) as i64;
         self.next_ordinal = ordinal + 1;
         if let Some(offset) = packet.input_offset() {
             self.offsets.insert(ordinal, offset);
@@ -396,7 +413,7 @@ impl VideoDecoder for Av1VideoDecoder {
             .map_err(decode_err)?
             .with_timestamp(pts)
             .with_duration(duration)
-            .with_offset(i64::try_from(ordinal).unwrap_or(-1));
+            .with_offset(ordinal as i64);
         let result = self.dec.send_packet(&mut p);
         if let Some(owned) = &self.owned_stop {
             owned.check()?;
@@ -456,6 +473,7 @@ impl VideoDecoder for Av1VideoDecoder {
         self.ended = false;
         self.told_end = false;
         self.offsets.clear();
+        self.next_ordinal = 0;
         self.arm_prefix();
         Ok(())
     }
@@ -552,6 +570,91 @@ mod tests {
         assert_eq!(leading_temporal_delimiter(&[0x12, 0x01, 0x00, 0x32]), 0);
         assert_eq!(leading_temporal_delimiter(&[0x92, 0x00, 0x32]), 0);
         assert_eq!(leading_temporal_delimiter(&[]), 0);
+    }
+
+    fn refuses_packet(mut packet: Packet, clock_mismatch: bool) {
+        let mut decoder = Av1VideoDecoder::new().unwrap();
+        decoder
+            .configure(
+                &CodecConfig::new(CodecId::Av1, zencodec::time::TimeBase::MILLIS),
+                &enough::Unstoppable,
+            )
+            .unwrap();
+        let original = packet.bytes().to_vec();
+        let result = decoder.send(&mut packet, &enough::Unstoppable);
+        if clock_mismatch {
+            assert!(
+                matches!(
+                    result,
+                    Err(SessionError::Protocol(ProtocolViolation::ClockMismatch))
+                ),
+                "{result:?}"
+            );
+        } else {
+            assert!(
+                matches!(
+                    result,
+                    Err(SessionError::Unsupported(UnsupportedMedia::Container))
+                ),
+                "{result:?}"
+            );
+        }
+        assert_eq!(
+            packet.bytes(),
+            original,
+            "refusal must preserve the payload"
+        );
+    }
+
+    #[test]
+    fn packet_timestamps_must_use_the_configured_clock() {
+        let other = Timestamp::new(12, zencodec::time::TimeBase::hz(90_000).unwrap());
+        for packet in [
+            Packet::from_vec(vec![0x12, 0]).unwrap().with_pts(other),
+            Packet::from_vec(vec![0x12, 0]).unwrap().with_dts(other),
+        ] {
+            refuses_packet(packet, true);
+        }
+    }
+
+    #[test]
+    fn packet_metadata_must_fit_the_backend() {
+        let packet = || Packet::from_vec(vec![0x12, 0]).unwrap();
+        refuses_packet(
+            packet().with_pts(Timestamp::new(i64::MIN, zencodec::time::TimeBase::MILLIS)),
+            false,
+        );
+        refuses_packet(packet().with_duration_ticks(i64::MAX as u64 + 1), false);
+        refuses_packet(packet().with_duration_ticks(0), false);
+        refuses_packet(packet().with_ordinal(u64::MAX), false);
+    }
+
+    #[test]
+    fn packet_additions_are_refused_instead_of_lost() {
+        use zencodec_media::packet::{PacketAddition, PacketPayload};
+        let packet = Packet::from_vec(vec![0x12, 0])
+            .unwrap()
+            .with_addition(PacketAddition::new(1, PacketPayload::Owned(vec![1, 2])));
+        refuses_packet(packet, false);
+    }
+
+    #[test]
+    fn packet_discard_is_refused_instead_of_lost() {
+        use zencodec_media::packet::Discard;
+        let duration =
+            zencodec::time::ticks_to_duration(1, zencodec::time::TimeBase::MILLIS).unwrap();
+        for discard in [
+            Discard::start(duration),
+            Discard::end(duration),
+            Discard::start(duration).with_end(duration),
+        ] {
+            refuses_packet(
+                Packet::from_vec(vec![0x12, 0])
+                    .unwrap()
+                    .with_discard(discard),
+                false,
+            );
+        }
     }
 
     #[test]
