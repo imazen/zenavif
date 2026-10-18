@@ -59,6 +59,21 @@ zencodec revision and can split `GainMapParams` into incompatible types. Align
 the intermediary graph before moving the pin; verify one zencodec and one
 enough in each root, fuzz, downstream and MP4-fuzz lockfile.
 
+With root pins moved to zencodec `d327434b0826a3e39633665c76f5081c0ceb34cc`
+and ultrahdr `cf20843d792222be23e4ccef417a0d59aeccd064`, the locked
+`cargo check --features media-encode,zenav1-svt --locked` on 2026-10-18 fails
+with E0308 at `src/codec/gain_map.rs:99`: ultrahdr expects the `GainMapParams`
+from zencodec `7cc3d3ec`, while the caller supplies the newer crate's type.
+That trial resolves two zencodec copies and one enough. Those pins were not
+landed; the root/consumer locks retain their single-copy graph.
+
+A root Git-source patch of `zenmeta` to that same repository URL at the newer
+revision is also rejected by Cargo because the patch points to the same source.
+Aligning the intermediary pin, or deliberately choosing a different-source
+override, is required; registry patches alone do not replace this Git edge.
+See [Cargo's dependency override reference](https://doc.rust-lang.org/cargo/reference/overriding-dependencies.html)
+for the workspace-root patch mechanism.
+
 The owned cancellation builders are proposed separately in
 [PR 71](https://github.com/imazen/zenavif/pull/71). That proposal does not resolve
 the queue, trim, picture-identity or shared-limit decisions above.
