@@ -53,6 +53,10 @@
 
 ## zenmp4 (unreleased, new workspace member)
 
+- Round movie-header lengths upward on their millisecond clock; refuse
+  overflow and finite lengths that would encode the unknown-duration sentinel.
+  Native sample timing remains on the supplied track clock.
+
 - Refuse display dimensions beyond the track header's 16-bit integer range
   before writing output, rather than wrapping them during fixed-point encoding.
 

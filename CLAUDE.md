@@ -1901,3 +1901,14 @@ The muxer accepted display dimensions above 65535 even though tkhd uses
 unsigned 16.16 fields. They could wrap to zero. Admission now refuses them
 with DimensionsTooLarge before output; both layouts retain the largest valid
 integer dimensions. `just test-mp4-display-bounds` exercises those cases.
+
+## Known Bugs: MP4 movie-clock duration loss (fixed)
+
+Movie-header durations previously rounded down and saturated to the all-ones
+unknown-duration sentinel. They now use explicit ceiling, retain the full
+finite u64 range and fail on overflow/reserved output. Fragment initialization
+keeps unknown duration zero without trying to rescale an unwritten length.
+`just test-mp4-movie-clock` covers fractional media, the largest finite value,
+overflow and the reserved sentinel. The upward header policy matches FFmpeg's
+[MOV writer](https://github.com/FFmpeg/FFmpeg/blob/master/libavformat/movenc.c);
+unknown duration semantics are in ISO/IEC 14496-12:2012, 8.2.2.3 and 8.3.2.3.

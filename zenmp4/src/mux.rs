@@ -7,6 +7,7 @@ use alloc::vec::Vec;
 
 use enough::Stop;
 use zencodec::encode::OutputBuffer;
+use zencodec::time::{Rounding, TimeBase, Timestamp};
 use zencodec_media::container::{MuxFinish, MuxHint, MuxTiming, Muxer, Patch};
 use zencodec_media::packet::{Packet, RandomAccess};
 use zencodec_media::session::{ProtocolViolation, SessionError};
@@ -98,6 +99,10 @@ enum Layout {
 /// Track clocks must be `1/timescale` (MP4 counts integer ticks of a
 /// per-track timescale). Configuration records come from `codec_private`
 /// in the forms [`Mp4Demuxer`](crate::Mp4Demuxer) returns them.
+///
+/// Movie/track-header lengths use a 1000-Hz clock and round upward to cover
+/// fractional media lengths. Sample timestamps and durations retain their
+/// native track clock. Unrepresentable finite header lengths are refused.
 #[derive(Debug)]
 pub struct Mp4Muxer {
     out: OutputBuffer,
@@ -145,10 +150,29 @@ impl Mp4Muxer {
         }
     }
 
-    fn movie_ticks(&self, t: &MuxTrack, ticks: i64) -> u64 {
-        let ticks = u128::try_from(ticks.max(0)).unwrap_or(0);
-        u64::try_from(ticks * u128::from(MOVIE_TIMESCALE) / u128::from(t.timescale))
-            .unwrap_or(u64::MAX)
+    /// Movie header extents use `Rounding::Ceil`, covering the full media.
+    fn movie_ticks(&self, t: &MuxTrack, ticks: i64) -> Res<u64> {
+        let unsigned =
+            u128::try_from(ticks).map_err(|_| SessionError::Codec(Mp4Error::Overflow))?;
+        match Timestamp::new(ticks, t.info.time_base()).rescale(TimeBase::MILLIS, Rounding::Ceil) {
+            Ok(value) => {
+                return u64::try_from(value.ticks())
+                    .map_err(|_| SessionError::Codec(Mp4Error::Overflow));
+            }
+            Err(zencodec::animation::TimingError::Overflow) => {}
+            Err(_) => return err(Mp4Error::Overflow),
+        }
+        // Version-1 duration fields have a wider unsigned range than Timestamp.
+        // Preserve that range with the same ceiling rule, never saturation.
+        let value = u64::try_from(
+            (unsigned * u128::from(MOVIE_TIMESCALE)).div_ceil(u128::from(t.timescale)),
+        )
+        .map_err(|_| SessionError::Codec(Mp4Error::Overflow))?;
+        // ISO BMFF reserves the all-ones duration for an unknown extent.
+        if value == u64::MAX {
+            return err(Mp4Error::Overflow);
+        }
+        Ok(value)
     }
 
     /// Give the last held sample of `track` its duration from `dts`.
@@ -186,16 +210,17 @@ impl Mp4Muxer {
     /// `moov`; with `tables` false (fragmented) the sample tables are empty
     /// and `mvex` declares the fragments.
     fn moov(&self, tables: bool) -> Res<Vec<u8>> {
-        let duration = self
-            .tracks
-            .iter()
-            .map(|t| self.movie_ticks(t, t.end_dts))
-            .max()
-            .unwrap_or(0);
-        let mut body = mvhd(
-            if tables { duration } else { 0 },
-            self.tracks.len() as u32 + 1,
-        );
+        let duration = if tables {
+            self.tracks
+                .iter()
+                .try_fold(0u64, |duration, t| -> Res<u64> {
+                    Ok(duration.max(self.movie_ticks(t, t.end_dts)?))
+                })?
+        } else {
+            // An initialization segment declares no duration for its fragments.
+            0
+        };
+        let mut body = mvhd(duration, self.tracks.len() as u32 + 1);
         for (i, t) in self.tracks.iter().enumerate() {
             body.extend_from_slice(&self.trak(i, t, tables)?);
         }
@@ -219,7 +244,7 @@ impl Mp4Muxer {
             0
         };
         let movie_duration = if tables {
-            self.movie_ticks(t, t.end_dts)
+            self.movie_ticks(t, t.end_dts)?
         } else {
             0
         };
@@ -1027,5 +1052,54 @@ impl Muxer for Mp4Muxer {
         done.tail = self.out.into_remaining();
         done.patches = patches;
         Ok(done)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::sync::Arc;
+    use zencodec::time::TimeBase;
+    use zencodec_media::track::VideoTrackInfo;
+
+    fn moov_at_end(timescale: u32, end: i64, tables: bool) -> Res<Vec<u8>> {
+        let track = TrackInfo::video(
+            0,
+            CodecId::Av1,
+            TimeBase::new(1, timescale).unwrap(),
+            VideoTrackInfo::new(64, 48),
+        )
+        .with_codec_private(Arc::from([0x81, 0, 0x0c, 0]))
+        .build()
+        .unwrap();
+        let mut muxer = Mp4Muxer::new();
+        muxer.begin(&[track], MuxHint::default()).unwrap();
+        muxer.tracks[0].end_dts = end;
+        muxer.moov(tables)
+    }
+
+    #[test]
+    fn movie_clock_refuses_overflow_instead_of_clamping() {
+        let bytes = moov_at_end(500, i64::MAX, true).unwrap();
+        let at = bytes.windows(4).position(|w| w == b"mvhd").unwrap();
+        assert_eq!(bytes[at + 4], 1);
+        assert_eq!(
+            u64::from_be_bytes(bytes[at + 28..at + 36].try_into().unwrap()),
+            u64::MAX - 1
+        );
+        assert!(matches!(
+            moov_at_end(499, i64::MAX, true),
+            Err(SessionError::Codec(Mp4Error::Overflow))
+        ));
+        assert!(moov_at_end(499, i64::MAX, false).is_ok());
+    }
+
+    #[test]
+    fn movie_clock_does_not_write_the_unknown_duration_sentinel_for_a_finite_end() {
+        let end = i64::try_from(u64::MAX / 5).unwrap();
+        assert!(matches!(
+            moov_at_end(200, end, true),
+            Err(SessionError::Codec(Mp4Error::Overflow))
+        ));
     }
 }

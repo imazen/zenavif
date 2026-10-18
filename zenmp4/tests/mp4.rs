@@ -1252,4 +1252,52 @@ mod muxer {
             m.begin(&[track], MuxHint::default()).unwrap();
         }
     }
+
+    fn movie_clock_box_duration(bytes: &[u8], tag: &[u8; 4]) -> u64 {
+        let at = bytes.windows(4).position(|w| w == tag).unwrap();
+        let body = &bytes[at + 8..];
+        let track_header = tag == b"tkhd";
+        match bytes[at + 4] {
+            0 => {
+                let offset = if track_header { 16 } else { 12 };
+                u64::from(u32::from_be_bytes(
+                    body[offset..offset + 4].try_into().unwrap(),
+                ))
+            }
+            1 => {
+                let offset = if track_header { 24 } else { 20 };
+                u64::from_be_bytes(body[offset..offset + 8].try_into().unwrap())
+            }
+            version => panic!("unsupported duration box version {version}"),
+        }
+    }
+
+    #[test]
+    fn movie_clock_lengths_cover_fractional_media() {
+        for (timescale, ticks) in [(48_000, 1), (24_000, 1001), (1000, 40)] {
+            let clock = TimeBase::new(1, timescale).unwrap();
+            let track = TrackInfo::video(0, CodecId::Av1, clock, VideoTrackInfo::new(64, 48))
+                .with_codec_private(Arc::from(AV1C))
+                .build()
+                .unwrap();
+            let packet = Packet::from_vec(vec![0x12, 0])
+                .unwrap()
+                .with_track(0)
+                .with_pts(Timestamp::new(0, clock))
+                .with_duration_ticks(ticks);
+            let bytes = mux(Mp4Muxer::new(), &[track], &[packet], MuxHint::default()).unwrap();
+            assert_eq!(movie_clock_box_duration(&bytes, b"mdhd"), ticks);
+            for tag in [b"mvhd", b"tkhd"] {
+                let duration = movie_clock_box_duration(&bytes, tag);
+                let media_end = u128::from(ticks) * 1000;
+                assert!(
+                    u128::from(duration) * u128::from(timescale) >= media_end,
+                    "movie header ended before the media: {duration} ms for {ticks}/{timescale} s"
+                );
+                assert!(
+                    duration == 0 || u128::from(duration - 1) * u128::from(timescale) < media_end
+                );
+            }
+        }
+    }
 }

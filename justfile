@@ -448,3 +448,7 @@ verify-mp4:
     cargo test --locked -p zenmp4
     cargo clippy --locked -p zenmp4 --all-targets -- -D warnings
     cargo fmt -p zenmp4 --check
+
+# Movie-header duration rounding and numeric boundaries.
+test-mp4-movie-clock:
+    cargo test --locked -p zenmp4 --no-fail-fast movie_clock
