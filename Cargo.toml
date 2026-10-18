@@ -387,7 +387,7 @@ linear-srgb = { version = "0.6.7"}
 # zencodec-media is unpublished, so it is a git rev on zencodec main; the
 # zenrav1e rev is the one zenravif pins, so the graph holds one zenrav1e.
 zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914", optional = true }
-zenrav1e = { version = "0.2.0", git = "https://github.com/imazen/zenrav1e", rev = "9057c4bacf1d8a23974e32de09fd4446a1cc525a", default-features = false, optional = true }
+zenrav1e = { version = "0.2.0", git = "https://github.com/imazen/zenrav1e", rev = "9057c4bacf1d8a23974e32de09fd4446a1cc525a", default-features = false, features = ["stop"], optional = true }
 num-traits = { version = "0.2.19", default-features = false, optional = true }
 
 [dev-dependencies]
