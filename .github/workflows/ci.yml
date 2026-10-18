@@ -159,7 +159,7 @@ jobs:
       - name: Downstream consumer compiles and runs (semver-checks substitute)
         if: matrix.os == 'ubuntu-latest'
         working-directory: dev/downstream-probe
-        run: cargo run
+        run: cargo run --locked
 
   resolve-standalone:
     # GATE: zenavif must resolve for someone who does NOT run clone-siblings.
