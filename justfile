@@ -64,6 +64,10 @@ test-media:
 media-corpus dir="/mnt/v/input/zenavif/av1-media-corpus-2026-10-15":
     ZENAVIF_AV1_MEDIA_CORPUS={{dir}} cargo test --features _media-corpus --test media_corpus
 
+# Compile the MP4 byte-window fuzzer without running a fuzz campaign.
+check-mp4-fuzz:
+    cargo check --locked --manifest-path zenmp4/fuzz/Cargo.toml --bins
+
 # MP4 container contracts and timing regressions.
 test-mp4:
     cargo test --locked -p zenmp4

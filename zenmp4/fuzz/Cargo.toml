@@ -1,0 +1,28 @@
+[package]
+name = "zenmp4-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+enough = "0.4.5"
+zenmp4 = { path = ".." }
+zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
+zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
+
+[patch.crates-io]
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "1d3ddd2131b22e9e3754c765d4ce45ce3901de59" }
+
+[[bin]]
+name = "fuzz_mp4"
+path = "fuzz_targets/fuzz_mp4.rs"
+test = false
+doc = false
+bench = false

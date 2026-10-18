@@ -46,6 +46,9 @@
 
 ## zenmp4 (unreleased, new workspace member)
 
+- Exercise the MP4 byte-window demuxer with a bounded standalone fuzz target,
+  included in the Fuzz CI matrix.
+
 - Rescale signed edit-list offsets with the shared nearest/ties-up rule;
   reject overflow instead of saturating the accumulated empty edits.
 
