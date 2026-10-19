@@ -452,3 +452,9 @@ verify-mp4:
 # Movie-header duration rounding and numeric boundaries.
 test-mp4-movie-clock:
     cargo test --locked -p zenmp4 --no-fail-fast movie_clock
+
+# Validate stable compatibility while tool builds select the current SIMD beta.
+beta-cohort-check:
+    cargo fmt --check
+    cargo clippy --locked --lib -- -D warnings
+    cargo test --locked --lib
