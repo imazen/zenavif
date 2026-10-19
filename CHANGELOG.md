@@ -175,6 +175,10 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+### Dependency compatibility
+
+- Admit archmage/magetypes 0.9.31-beta.1 in the current-main tool graph while retaining compatible stable requirements (`fdebc9b1`). Strict default library lint and 111 library tests pass; one existing ignored test remains unchanged.
+
 ### Changed
 
 - zenpixels/zenpixels-convert pinned to main 1d3ddd21 (from the 0.2 bridge's 9fa4fcb): zenpixels main is the converged 0.2.17 line again and carries 9fa4fcb's unresolved-CICP fix plus the ICC-database fixes (#86-#88).
