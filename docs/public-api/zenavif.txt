@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenavif.txt 357 lines (supported surface) | zenavif.features.txt 774 added (features: aom-backend,auto-tune,avx512,encode,encode-asm,encode-imazen,encode-mono,encode-svt-rs,encode-threading,inventory,routing-replay,target-quality,two-pass-butteraugli,two-pass-zensim,unsafe-asm,zenav1-aom,zenav1-aom-decode,zenav1-aom-encode,zenav1-svt) | zenavif.internal.txt 295 lines (93 hidden + 332 excluded-feature)
+# files: zenavif.txt 357 lines (supported surface) | zenavif.features.txt 828 added (features: aom-backend,auto-tune,avx512,encode,encode-asm,encode-imazen,encode-mono,encode-svt-rs,encode-threading,inventory,media,media-encode,routing-replay,target-quality,two-pass-butteraugli,two-pass-zensim,unsafe-asm,zenav1-aom,zenav1-aom-decode,zenav1-aom-encode,zenav1-svt) | zenavif.internal.txt 269 lines (67 hidden + 332 excluded-feature)
 
 ## summary
 #

@@ -1,5 +1,5 @@
 # zenavif public API — additions from non-default features
-# features: aom-backend,auto-tune,avx512,encode,encode-asm,encode-imazen,encode-mono,encode-svt-rs,encode-threading,inventory,routing-replay,target-quality,two-pass-butteraugli,two-pass-zensim,unsafe-asm,zenav1-aom,zenav1-aom-decode,zenav1-aom-encode,zenav1-svt
+# features: aom-backend,auto-tune,avx512,encode,encode-asm,encode-imazen,encode-mono,encode-svt-rs,encode-threading,inventory,media,media-encode,routing-replay,target-quality,two-pass-butteraugli,two-pass-zensim,unsafe-asm,zenav1-aom,zenav1-aom-decode,zenav1-aom-encode,zenav1-svt
 # (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
 # Encodings: crate-name prefix stripped; auto traits collapse to a
 # count + exceptions; trait impls collapse to one roster line per
@@ -9,31 +9,32 @@
 
 ## summary
 #
-#   pub modules                                10
-#   pub types (struct/enum/trait/alias)        93
+#   pub modules                                11
+#   pub types (struct/enum/trait/alias)        98
 #   pub consts/statics                         39
 #   free functions                             52
-#   inherent methods                          210
-#   struct fields                             237
-#   enum variants                              87
+#   inherent methods                          227
+#   struct fields                             250
+#   enum variants                              97
 #   re-exports                                  7
-#   trait roster entries (type × trait)       280
-#   auto-trait-complete types                  64
-#   auto-trait exceptions                       5
+#   trait roster entries (type × trait)       299
+#   auto-trait-complete types                  66
+#   auto-trait exceptions                       8
 #
 # per-module pub lines:
-#   (root)                          374
+#   (root)                          375
 #   backend_router                   80
 #   backend_tuner                   132
 #   fast_heads                       29
 #   heuristics                        1
+#   media                            45
 #   palette_gate                     10
 #   q0_head                           3
 #   two_pass                         23
 #   two_pass_zensim                  60
 #   zensim_c                         23
 
-## items (701 lines)
+## items (747 lines)
 
 pub use FRAME_HINTS_LIVE
 pub use SPATIAL_HINTS_LIVE
@@ -253,6 +254,52 @@ pub fn fast_heads::monotone_speed_gate_for_rgb8(&[u8], u32, u32, core::option::O
 pub fn fast_heads::partition_budget_gate(f32, u8) -> fast_heads::PartitionBudget
 pub fn fast_heads::tx_budget_gate(f32, f32, u8) -> fast_heads::TxBudget
 pub fn heuristics::EstimateArm::for_config(&EncoderConfig) -> Self
+pub mod media
+#[non_exhaustive] pub enum media::Av1SessionError
+pub media::Av1SessionError::Configuration(alloc::string::String)
+pub media::Av1SessionError::Decode(rav1d_safe::src::managed::Error)
+pub media::Av1SessionError::DecodeTraced(alloc::rcs::arc::Arc<whereat::at::At<rav1d_safe::src::managed::Error>>)
+pub media::Av1SessionError::Encode(alloc::string::String)
+pub media::Av1SessionError::InputMismatch
+pub media::Av1SessionError::MissingPacketContext
+pub media::Av1SessionError::NonMonotonicTimestamp
+pub media::Av1SessionError::UnsupportedBitDepth(u8)
+#[non_exhaustive] pub enum media::Av1VideoBackend
+pub media::Av1VideoBackend::Zenav1Svt
+pub media::Av1VideoBackend::Zenrav1e
+#[non_exhaustive] pub struct media::Av1EncodeSettings
+pub media::Av1EncodeSettings::backend: media::Av1VideoBackend
+pub media::Av1EncodeSettings::bit_depth: u8
+pub media::Av1EncodeSettings::color: zenpixels::cicp::Cicp
+pub media::Av1EncodeSettings::frame_rate: (u32, u32)
+pub media::Av1EncodeSettings::height: u32
+pub media::Av1EncodeSettings::key_frame_interval: u64
+pub media::Av1EncodeSettings::max_queued_frames: usize
+pub media::Av1EncodeSettings::quantizer: u8
+pub media::Av1EncodeSettings::siting: zencodec_media::frame::ChromaSiting
+pub media::Av1EncodeSettings::speed: u8
+pub media::Av1EncodeSettings::subsampling: zencodec_media::frame::Subsampling
+pub media::Av1EncodeSettings::threads: usize
+pub media::Av1EncodeSettings::width: u32
+pub fn media::Av1EncodeSettings::new(u32, u32) -> Self
+pub fn media::Av1EncodeSettings::with_backend(self, media::Av1VideoBackend) -> Self
+pub fn media::Av1EncodeSettings::with_bit_depth(self, u8) -> Self
+pub fn media::Av1EncodeSettings::with_color(self, zenpixels::cicp::Cicp) -> Self
+pub fn media::Av1EncodeSettings::with_frame_rate(self, u32, u32) -> Self
+pub fn media::Av1EncodeSettings::with_key_frame_interval(self, u64) -> Self
+pub fn media::Av1EncodeSettings::with_max_queued_frames(self, usize) -> Self
+pub fn media::Av1EncodeSettings::with_quantizer(self, u8) -> Self
+pub fn media::Av1EncodeSettings::with_siting(self, zencodec_media::frame::ChromaSiting) -> Self
+pub fn media::Av1EncodeSettings::with_speed(self, u8) -> Self
+pub fn media::Av1EncodeSettings::with_subsampling(self, zencodec_media::frame::Subsampling) -> Self
+pub fn media::Av1EncodeSettings::with_threads(self, usize) -> Self
+pub struct media::Av1VideoDecoder
+pub fn media::Av1VideoDecoder::new() -> core::result::Result<Self, media::Av1SessionError>
+pub fn media::Av1VideoDecoder::with_settings(rav1d_safe::src::managed::Settings) -> core::result::Result<Self, media::Av1SessionError>
+pub fn media::Av1VideoDecoder::with_stop(self, alloc::rcs::arc::Arc<dyn enough::Stop>) -> Self
+pub struct media::Av1VideoEncoder
+pub fn media::Av1VideoEncoder::new(media::Av1EncodeSettings, zencodec::time::TimeBase) -> core::result::Result<Self, media::Av1SessionError>
+pub fn media::Av1VideoEncoder::with_stop(self, alloc::rcs::arc::Arc<dyn enough::Stop>) -> Self
 pub mod palette_gate
 pub palette_gate::PalettePreference::Always
 pub palette_gate::PalettePreference::Auto
@@ -461,7 +508,7 @@ pub fn AvifDecoder::decode(&mut self, &impl enough::Stop + ?core::marker::Sized)
 pub fn AvifDecoder::info(&self) -> &ImageInfo
 pub fn AvifDecoder::new(&[u8], &DecoderConfig) -> Result<Self>
 pub struct AvifEncodeJob
-pub fn AvifEncodeJob::with_exif(self, impl core::convert::Into<alloc::sync::Arc<[u8]>>) -> Self
+pub fn AvifEncodeJob::with_exif(self, impl core::convert::Into<alloc::rcs::arc::Arc<[u8]>>) -> Self
 pub struct AvifEncoder
 pub struct AvifEncoderConfig
 pub fn AvifEncoderConfig::encode_gray8(&self, imgref::ImgRef<'_, rgb::formats::gray::Gray_v08<u8>>) -> core::result::Result<zencodec::output::EncodeOutput, whereat::at::At<zencodec::error::CodecError>>
@@ -737,7 +784,7 @@ pub fn encode_rgba8_with_target(imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u8>>
 pub fn encode_with(&zenpixels::buffer::PixelBuffer, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
 pub fn quality_for_quantizer(u8) -> f32
 
-## trait impls (67 types)
+## trait impls (72 types)
 
 AnimationFrame: Clone
 AnimationFrame16: Clone
@@ -796,6 +843,11 @@ backend_tuner::stub::WallTimeModel: Clone, Copy, Debug, PartialEq
 fast_heads::FastTierBudgets: Clone, Copy, Debug, Default, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 fast_heads::PartitionBudget: Clone, Copy, Debug, Default, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 fast_heads::TxBudget: Clone, Copy, Debug, Default, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
+media::Av1EncodeSettings: Clone, Debug
+media::Av1SessionError: Clone, Debug, Display, Eq, Error, PartialEq
+media::Av1VideoBackend: Clone, Copy, Debug, Default, Eq, Hash, PartialEq
+media::Av1VideoDecoder: Debug, zencodec_media::session::VideoDecoder
+media::Av1VideoEncoder: Debug, zencodec_media::session::VideoEncoder
 palette_gate::PalettePreference: Clone, Copy, Debug, Default, Eq, PartialEq, serde_core::de::Deserialize<'de>, serde_core::ser::Serialize
 two_pass::TwoPassEncode: Debug
 two_pass::TwoPassMetric: Clone, Copy, Debug, Default, Eq, PartialEq
@@ -809,9 +861,12 @@ zensim_c::ZensimC: Default
 
 ## auto traits
 
-64 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+66 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 AvifAnimationFrameEncoder: !RefUnwindSafe !UnwindSafe
 AvifEncodeJob: !RefUnwindSafe !UnwindSafe
 AvifEncoder: !RefUnwindSafe !UnwindSafe
-TimedAnimationFrame<P>: !RefUnwindSafe !Send !Sync !Unpin !UnwindSafe
+TimedAnimationFrame<P>: !Freeze !RefUnwindSafe !Send !Sync !Unpin !UnwindSafe
+media::Av1SessionError: !RefUnwindSafe !UnwindSafe
+media::Av1VideoDecoder: !RefUnwindSafe !UnwindSafe
+media::Av1VideoEncoder: !RefUnwindSafe !UnwindSafe
 zensim_c::ZensimC: !RefUnwindSafe !UnwindSafe
