@@ -61,6 +61,10 @@ test-media-decoder:
 test-media-packets:
     cargo test --locked --features media --lib media::tests::packet_
 
+# Native delayed-frame configuration and multi-presentation packet ownership.
+test-media-context:
+    cargo test --locked --features media-encode --test media_session packet_context -- --test-threads=1
+
 # AV1 video sessions (zencodec-media): decoder + zenrav1e encoder tests.
 test-media:
     cargo test --features media-encode --test media_session

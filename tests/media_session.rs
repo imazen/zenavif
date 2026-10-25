@@ -617,6 +617,72 @@ fn reset_decodes_the_same_frames_again_and_old_frames_stay_valid() {
     assert_eq!(before, first.iter().map(planes).collect::<Vec<_>>());
 }
 
+#[test]
+fn packet_context_keeps_the_configuration_at_acceptance() {
+    use zencodec_media::track::VideoTrackInfo;
+
+    let s = settings(8, Subsampling::Yuv420, 17, 13);
+    let input = frame_for(&s, 0, 40);
+    let mut enc = Av1VideoEncoder::new(s.clone(), TB).unwrap();
+    let old_color = s.color;
+    let config = enc
+        .output_config()
+        .unwrap()
+        .clone()
+        .with_video(VideoTrackInfo::new(s.width, s.height).with_color(old_color));
+    let packets = encode(&mut enc, &[input.clone()]);
+    assert_eq!(packets.len(), 1);
+    for threads in [1, 2] {
+        let mut native = rav1d_safe::Settings::default();
+        native.threads = threads;
+        let mut dec = Av1VideoDecoder::with_settings(native).unwrap();
+        dec.configure(&config, &Unstoppable).unwrap();
+        let mut packet = packets[0].clone().with_ordinal(7).with_input_offset(1234);
+        assert_eq!(dec.send(&mut packet, &Unstoppable).unwrap(), SendStatus::Accepted);
+        assert!(packet.is_taken());
+
+        // Change the clock and container evidence while the old picture is
+        // still owned by the decoder. This must not reset reference pictures.
+        let mut next = config.clone().with_epoch(1);
+        next.time_base = TimeBase::hz(90_000).unwrap();
+        next.video = Some(VideoTrackInfo::new(s.width, s.height)
+            .with_color(Cicp::new(9, 16, 9, true)));
+        dec.configure(&next, &Unstoppable).unwrap();
+        dec.end_input().unwrap();
+        let Receive::Ready(output) = dec.receive(&Unstoppable).unwrap() else {
+            panic!("queued frame was discarded during reconfiguration");
+        };
+        assert_eq!(output.timing().pts, Some(Timestamp::new(40, TB)));
+        assert_eq!(output.interpretation().config_epoch, 0);
+        assert_eq!(output.interpretation().color.container, Some(old_color));
+        assert_eq!(output.timing().packet_ordinal, Some(7));
+        assert_eq!(output.timing().input_offset, Some(1234));
+        assert_eq!(planes(&output), planes(&input));
+        assert!(matches!(dec.receive(&Unstoppable).unwrap(), Receive::EndOfStream));
+        dec.reset().unwrap();
+        drop(dec);
+        assert_eq!(planes(&output), planes(&input));
+        assert_eq!(output.timing().pts, Some(Timestamp::new(40, TB)));
+    }
+}
+
+#[test]
+fn packet_context_keeps_offsets_for_every_presentation_in_one_packet() {
+    let s = settings(8, Subsampling::Yuv420, 17, 13);
+    let inputs: Vec<_> = (0..3).map(|i| frame_for(&s, i, i as i64 * 40)).collect();
+    let mut enc = Av1VideoEncoder::new(s, TB).unwrap();
+    let packets = encode(&mut enc, &inputs);
+    let bytes = packets.iter().flat_map(|p| p.bytes()).copied().collect();
+    let packet = Packet::from_vec(bytes).unwrap().with_ordinal(7).with_input_offset(1234);
+    let outputs = decode(&enc, &[packet]);
+    assert_eq!(outputs.len(), inputs.len());
+    for (output, input) in outputs.iter().zip(&inputs) {
+        assert_eq!(planes(output), planes(input));
+        assert_eq!(output.timing().packet_ordinal, Some(7));
+        assert_eq!(output.timing().input_offset, Some(1234));
+    }
+}
+
 fn decode_with(dec: &mut Av1VideoDecoder, config: &CodecConfig, packets: &[Packet]) -> Vec<Frame> {
     dec.configure(config, &Unstoppable).unwrap();
     let mut frames = Vec::new();
