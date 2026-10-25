@@ -77,3 +77,60 @@ for the workspace-root patch mechanism.
 The owned cancellation builders are proposed separately in
 [PR 71](https://github.com/imazen/zenavif/pull/71). That proposal does not resolve
 the queue, trim, picture-identity or shared-limit decisions above.
+
+## Accepted-packet context (2026-10-25)
+
+The historical offset finding above now has native reproductions and an
+implementation. Against main `a7638f6e` with rav1d-safe `dfd01e32`, a queued
+frame accepted at 40 ticks on the 1/1000 clock was returned on a subsequently
+configured 1/90000 clock. Combining three temporal units in one packet also
+lost the packet's input offset after the first presentation. See
+[issue 73](https://github.com/imazen/zenavif/issues/73).
+
+The adapter now snapshots the accepted `CodecConfig`, ordinal and input offset
+in an immutable native packet context. [rav1d-safe PR 537](https://github.com/imazen/rav1d-safe/pull/537)
+retains that owner through reference pictures, delayed output and presentations.
+The adapter no longer guesses metadata retirement from output ordinals. A
+configuration change cannot mutate an accepted frame's interpretation, and
+identical ordinals from different epochs cannot replace one another's metadata.
+The context has the native reference lifetime; end-of-input alone does not
+release reference pictures. Reset/drop and the last retained frame determine
+release. This does not establish shared presentation-picture identity.
+
+`just test-media-context` exercises native 8/10-bit samples, one and multiple
+decoder threads, alternating clocks and container colors, repeated ordinals,
+multiple presentations in one packet and frames retained after reset/drop.
+The expected samples are the original lossless encoder input. The native
+context's delayed/reordered/show-existing and film-grain ownership checks live
+with rav1d-safe; they also run in checked and untracked storage modes.
+
+Native decode errors previously cloned only the underlying enum and discarded
+its `whereat` trace. `DecodeTraced` retains the original traced error in an Arc;
+`Error::source` exposes it through both typed and erased media sessions. The
+old `Decode` constructor remains source-compatible. `just test-media-errors`
+feeds malformed native input, checks the original error type and locations,
+and verifies that cloning the adapter error retains the trace.
+
+The shared zencodec pin remains `7cc3d3ec`; this change does not require the
+checked-operation proposal. The native decoder pin is `5707a2e9`. These fixes
+do not implement policy suspension, in-band epoch numbering, container-specific
+color conflict checks, track trims, hard queue admission or shared native
+workspace bounds.
+
+At `ae51b7e1`, the normal root and fuzz graphs each resolve one zencodec, one
+enough and one rav1d-safe. The full native session regressions, decoder unit
+checks, strict lib/test Clippy, fuzz-target compilation and API snapshots pass.
+The FFmpeg oracle also passes all of its comparisons: lossless encoder output
+against the source samples, lossy zenrav1e and zenav1-svt output against
+libdav1d/libaom, and libaom input against libdav1d samples and ffprobe timestamps.
+The tested layouts cover 8/10/12-bit, gray, 4:2:0, 4:2:2 and 4:4:4 where the
+respective encoder supports them. [Recorded evidence](../benchmarks/media_packet_context_2026-10-25.txt)
+includes commands, revision, output inventory hash and the resource-wrapper
+receipt: rc=0, 135 s, peak RSS 0.99 GiB, minimum available 13935 MiB, peak load
+3.75. This is build/test-process usage, not a native workspace or speed claim.
+
+API review note: the new traced error variant retains the original `At`;
+`Av1SessionError` therefore no longer automatically implements `UnwindSafe` or
+`RefUnwindSafe`. Its existing Clone/Eq traits remain. The media API is still
+unpublished. API snapshots also move the existing media feature surface out of
+the internal-feature snapshot and record current rustdoc auto-trait spelling.

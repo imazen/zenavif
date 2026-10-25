@@ -1889,9 +1889,15 @@ expectations remain unchanged while construction-time capacity refusal is review
 
 ## Known Bugs: AV1 session contract gaps
 
-Shared session/resource limits, track trim configuration, presentation picture
-identity and packet-offset retirement remain incomplete. Epoch advancement and
-MP4 unsupported-error categories need contract decisions. The source findings
+The delayed-configuration and packet-offset defects below are fixed by owned
+native packet context (2026-10-25). `just test-media-context` reproduces delayed
+clock/epoch/color changes, multiple presentations per packet and repeated
+ordinals across queued epochs. `just test-media-errors` verifies native traces
+through typed and erased sessions. Other gaps in the historical review remain.
+
+Shared session/resource limits, track trim configuration and presentation picture
+identity remain incomplete. In-band epoch advancement and MP4 unsupported-error
+categories need contract decisions. The historical source findings
 and their limits are recorded in
 [docs/media-contract-status.md](docs/media-contract-status.md).
 

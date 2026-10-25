@@ -1,0 +1,63 @@
+Native AV1 context qualification, 2026-10-25
+Source: ae51b7e1ddd844f180502d5f3d48f5e11f209284
+Native decoder: 5707a2e94ac88500892c9c7ad2ec77d5ab84fd59
+Shared API: 7cc3d3ec6b41103ee8398c30b1582ebdbb6df914
+Host CPU: Ryzen 9 7900X (r7900x), Rust 1.99.1
+Oracle: FFmpeg 8.0.1-3ubuntu2, libdav1d/libaom-av1/ffprobe
+Command: run-heavy --mem 12G --jobs 4 -- timeout --kill-after=15s 10m just qualify-media-context media-ffmpeg-oracle <artifact-directory>
+Executed in an export outside workspace patches, using the committed root/fuzz locks.
+Artifact directory on r7900x: /mnt/v/output/zenavif/packet-context-2026-10-25
+SHA256SUMS: cd7a8a62a6bd1a3345b54d16d9a42ee7ebc656a0f73b5c6c6ab7a0d824ac4cad
+
+Native media_session and media unit regressions passed, including queued clocks, epochs, color, repeated ordinals, multi-presentation offsets, retained frames and typed/erased trace sources. Strict lib/test Clippy, fuzz-target compilation and public API generation passed. Existing unused fuzz macro doc-comment warnings remain. The existing unused PNG patch remains unchanged.
+
+Independent checks:
+ok   gray zenrav1e lossless -> dav1d = source
+ok   gray zenrav1e lossy: rav1d-safe = dav1d
+ok   gray zenav1-svt: libaom = dav1d
+ok   gray zenav1-svt: rav1d-safe = dav1d
+ok   yuv420p zenrav1e lossless -> dav1d = source
+ok   yuv420p zenrav1e lossy: rav1d-safe = dav1d
+ok   yuv420p zenav1-svt: libaom = dav1d
+ok   yuv420p zenav1-svt: rav1d-safe = dav1d
+ok   yuv420p libaom: rav1d-safe = dav1d
+ok   yuv420p libaom: frame pts = ffprobe
+ok   yuv422p zenrav1e lossless -> dav1d = source
+ok   yuv422p zenrav1e lossy: rav1d-safe = dav1d
+ok   yuv422p libaom: rav1d-safe = dav1d
+ok   yuv422p libaom: frame pts = ffprobe
+ok   yuv444p zenrav1e lossless -> dav1d = source
+ok   yuv444p zenrav1e lossy: rav1d-safe = dav1d
+ok   yuv444p zenav1-svt: libaom = dav1d
+ok   yuv444p zenav1-svt: rav1d-safe = dav1d
+ok   yuv444p libaom: rav1d-safe = dav1d
+ok   yuv444p libaom: frame pts = ffprobe
+ok   yuv420p10le zenrav1e lossless -> dav1d = source
+ok   yuv420p10le zenrav1e lossy: rav1d-safe = dav1d
+ok   yuv420p10le zenav1-svt: libaom = dav1d
+ok   yuv420p10le zenav1-svt: rav1d-safe = dav1d
+ok   yuv420p10le libaom: rav1d-safe = dav1d
+ok   yuv420p10le libaom: frame pts = ffprobe
+ok   yuv444p10le zenrav1e lossless -> dav1d = source
+ok   yuv444p10le zenrav1e lossy: rav1d-safe = dav1d
+ok   yuv444p10le libaom: rav1d-safe = dav1d
+ok   yuv444p10le libaom: frame pts = ffprobe
+ok   gray10le zenrav1e lossless -> dav1d = source
+ok   gray10le zenrav1e lossy: rav1d-safe = dav1d
+ok   gray10le zenav1-svt: libaom = dav1d
+ok   gray10le zenav1-svt: rav1d-safe = dav1d
+ok   yuv420p12le zenrav1e lossless -> dav1d = source
+ok   yuv420p12le zenrav1e lossy: rav1d-safe = dav1d
+ok   yuv420p12le libaom: rav1d-safe = dav1d
+ok   yuv420p12le libaom: frame pts = ffprobe
+ok   yuv422p12le zenrav1e lossless -> dav1d = source
+ok   yuv422p12le zenrav1e lossy: rav1d-safe = dav1d
+ok   yuv422p12le libaom: rav1d-safe = dav1d
+ok   yuv422p12le libaom: frame pts = ffprobe
+ok   yuv444p12le zenrav1e lossless -> dav1d = source
+ok   yuv444p12le zenrav1e lossy: rav1d-safe = dav1d
+ok   yuv444p12le libaom: rav1d-safe = dav1d
+ok   yuv444p12le libaom: frame pts = ffprobe
+
+run-heavy: done rc=0 135s | peak-RSS 0.99GiB | min-avail 13935MiB | peak-load 3.75
+This receipt covers compilation and all checks. It is not native codec workspace accounting or a throughput benchmark.
