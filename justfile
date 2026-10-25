@@ -65,6 +65,20 @@ test-media-packets:
 test-media-context:
     cargo test --locked --features media-encode --test media_session packet_context -- --test-threads=1
 
+test-media-errors:
+    cargo test --locked --features media-encode --test media_session native_decode_error -- --test-threads=1
+
+# Validate the normal dependency graph in an export outside workspace patches.
+media-context-sync destination:
+    rsync -a --exclude .git --exclude .jj --exclude .workongoing --exclude target --exclude Cargo.lock ./ "{{destination}}/"
+
+qualify-media-context:
+    cargo test --locked --features media-encode --test media_session -- --test-threads=1
+    cargo test --locked --features media --lib media:: -- --test-threads=1
+    cargo clippy --locked --features media-encode --lib --test media_session -- -D warnings
+    cargo check --locked --manifest-path fuzz/Cargo.toml --bins
+    just api-doc
+
 # AV1 video sessions (zencodec-media): decoder + zenrav1e encoder tests.
 test-media:
     cargo test --features media-encode --test media_session
@@ -89,8 +103,8 @@ mp4-ffmpeg-oracle:
     zenmp4/scripts/ffmpeg-oracle.sh
 
 # Differential check of the media sessions against FFmpeg (libdav1d, libaom).
-media-ffmpeg-oracle:
-    scripts/media-ffmpeg-oracle.sh
+media-ffmpeg-oracle work_dir="target/media-ffmpeg-oracle":
+    scripts/media-ffmpeg-oracle.sh "{{work_dir}}"
 
 # Run clippy with warnings as errors
 clippy:

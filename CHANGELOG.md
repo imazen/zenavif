@@ -2,6 +2,15 @@
 
 ## AV1 media sessions (unreleased)
 
+- Preserve each accepted packet's clock, epoch, container color and input
+  offset through delayed and multiple native presentations. Native packet
+  ownership replaces the decoder's ordinal-indexed retirement map; repeated
+  ordinals in different epochs no longer collide. Pins rav1d-safe to
+  `5707a2e9` for its owned packet context.
+- Keep native `whereat::At<rav1d_safe::Error>` in the error source chain,
+  including erased sessions and cloned errors. New native failures use
+  `Av1SessionError::DecodeTraced`; the earlier `Decode` variant remains.
+
 - Add `Av1VideoDecoder::with_stop` and `Av1VideoEncoder::with_stop`
   builders for owned cancellation tokens polled by the underlying backends.
   The borrowed per-call stop remains independent.

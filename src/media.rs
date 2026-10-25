@@ -11,8 +11,10 @@
 //!   to the first packet of the epoch, and again after a `reset`, so decoding
 //!   can start at a random-access point that does not repeat them.
 //! - **Timing.** Packets carry their presentation timestamp, duration and
-//!   ordinal through rav1d unchanged; frames report them on the configured
-//!   clock. Missing timestamps stay missing.
+//!   ordinal through rav1d unchanged. Frames retain the clock, epoch,
+//!   container color and input offset captured when their packet was accepted,
+//!   even when a later configuration is installed before output is received.
+//!   Missing timestamps stay missing.
 //! - **Interpretation.** Coded and render size, subsampling, chroma siting
 //!   (`chroma_sample_position`, unknown kept), sample depth (10- and 12-bit
 //!   codes LSB-aligned in 16-bit words), plane roles (identity matrix planes
@@ -23,7 +25,6 @@
 //!   rav1d holds output; `send` then answers `ReceivePending` until a
 //!   `receive` makes room.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use enough::Stop;
@@ -58,12 +59,21 @@ pub enum Av1SessionError {
     InputMismatch,
     /// A presentation timestamp not later than the previous frame's.
     NonMonotonicTimestamp,
+    /// A native decoded presentation lost its accepted packet's context.
+    MissingPacketContext,
+    /// rav1d refused the stream, retaining its native error and location trace.
+    ///
+    /// Shared ownership preserves the trace when the session error is cloned.
+    /// New native failures use this variant; `Decode` remains available for
+    /// callers that constructed untraced errors with the earlier API.
+    DecodeTraced(Arc<whereat::At<rav1d_safe::Error>>),
 }
 
 impl core::fmt::Display for Av1SessionError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Decode(e) => write!(f, "AV1 decode: {e}"),
+            Self::DecodeTraced(e) => write!(f, "AV1 decode: {e}"),
             Self::UnsupportedBitDepth(b) => write!(f, "unsupported AV1 bit depth {b}"),
             Self::Configuration(m) => write!(f, "AV1 encoder settings: {m}"),
             Self::Encode(m) => write!(f, "AV1 encode: {m}"),
@@ -71,11 +81,22 @@ impl core::fmt::Display for Av1SessionError {
             Self::NonMonotonicTimestamp => {
                 f.write_str("frame timestamp is not later than the previous one")
             }
+            Self::MissingPacketContext => {
+                f.write_str("decoded AV1 presentation has no accepted packet context")
+            }
         }
     }
 }
 
-impl std::error::Error for Av1SessionError {}
+impl std::error::Error for Av1SessionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Decode(error) => Some(error),
+            Self::DecodeTraced(error) => Some(error.as_ref()),
+            _ => None,
+        }
+    }
+}
 
 type Res<T> = Result<T, SessionError<Av1SessionError>>;
 
@@ -83,7 +104,7 @@ fn decode_err(e: whereat::At<rav1d_safe::Error>) -> SessionError<Av1SessionError
     // A cancelled decode is the caller's stop, not a stream error.
     match e.error() {
         rav1d_safe::Error::Cancelled => SessionError::Cancelled(enough::StopReason::Cancelled),
-        other => SessionError::Codec(Av1SessionError::Decode(other.clone())),
+        _ => SessionError::Codec(Av1SessionError::DecodeTraced(Arc::new(e.at()))),
     }
 }
 
@@ -143,7 +164,7 @@ fn config_obus(private: &[u8]) -> Option<&[u8]> {
 pub struct Av1VideoDecoder {
     dec: rav1d_safe::Decoder,
     owned_stop: Option<Arc<dyn Stop>>,
-    config: Option<CodecConfig>,
+    config: Option<Arc<CodecConfig>>,
     /// Sequence-header OBUs still to prepend to the next packet.
     prefix: Option<Arc<[u8]>>,
     /// An accepted packet rav1d did not take yet.
@@ -151,10 +172,16 @@ pub struct Av1VideoDecoder {
     /// `end_input` was called; rav1d is told once the stash is empty.
     ended: bool,
     told_end: bool,
-    /// Input offsets by packet ordinal (rav1d carries one i64 per packet).
-    offsets: BTreeMap<u64, u64>,
     next_ordinal: u64,
     info: Option<VideoStreamInfo>,
+}
+
+/// Travels through native input, reference and presentation ownership. Packet
+/// ordinals are caller provenance, not a map key or a retirement watermark.
+struct PacketContext {
+    config: Arc<CodecConfig>,
+    ordinal: u64,
+    input_offset: Option<u64>,
 }
 
 impl core::fmt::Debug for Av1VideoDecoder {
@@ -184,7 +211,7 @@ impl Av1VideoDecoder {
     /// When rav1d cannot start.
     pub fn with_settings(settings: rav1d_safe::Settings) -> Result<Self, Av1SessionError> {
         let dec = rav1d_safe::Decoder::with_settings(settings)
-            .map_err(|e| Av1SessionError::Decode(e.error().clone()))?;
+            .map_err(|e| Av1SessionError::DecodeTraced(Arc::new(e.at())))?;
         Ok(Self {
             dec,
             owned_stop: None,
@@ -193,7 +220,6 @@ impl Av1VideoDecoder {
             stash: None,
             ended: false,
             told_end: false,
-            offsets: BTreeMap::new(),
             next_ordinal: 0,
             info: None,
         })
@@ -244,7 +270,11 @@ impl Av1VideoDecoder {
     }
 
     fn frame(&mut self, f: rav1d_safe::Frame) -> Res<Frame> {
-        let config = self.config.as_ref().expect("frames follow configure");
+        let context = f
+            .context()
+            .and_then(|value| value.downcast_ref::<PacketContext>())
+            .ok_or(SessionError::Codec(Av1SessionError::MissingPacketContext))?;
+        let config = &context.config;
         let bits = f.bit_depth();
         let encoding = match bits {
             8 => SampleEncoding::U8,
@@ -292,19 +322,12 @@ impl Av1VideoDecoder {
         let pts = Some(f.timestamp())
             .filter(|&t| t != i64::MIN)
             .map(|t| Timestamp::new(t, config.time_base));
-        let ordinal = u64::try_from(f.input_offset()).ok();
         let mut timing = FrameTiming::default();
         timing.pts = pts;
         if let Some(d) = u64::try_from(f.duration()).ok().filter(|&d| d > 0) {
             timing = timing.with_duration_ticks(d);
         }
-        let input_offset = ordinal.and_then(|o| self.offsets.get(&o).copied());
-        // Offsets of packets at or before this one are no longer needed,
-        // except for show-existing repeats, which carry their own ordinal.
-        if let Some(o) = ordinal {
-            self.offsets.retain(|&k, _| k > o);
-        }
-        timing = timing.with_packet(ordinal, input_offset);
+        timing = timing.with_packet(Some(context.ordinal), context.input_offset);
         let mut presentation = Presentation::default();
         presentation.keyframe = f.is_keyframe();
         presentation.show_existing = f.is_show_existing();
@@ -347,7 +370,7 @@ impl VideoDecoder for Av1VideoDecoder {
         if config.codec != CodecId::Av1 {
             return Err(SessionError::Unsupported(UnsupportedMedia::Codec));
         }
-        self.config = Some(config.clone());
+        self.config = Some(Arc::new(config.clone()));
         self.arm_prefix();
         Ok(())
     }
@@ -392,13 +415,15 @@ impl VideoDecoder for Av1VideoDecoder {
         }
         let pts = packet.pts().map_or(i64::MIN, |t| t.ticks());
         let duration = packet.duration_ticks().unwrap_or(0) as i64;
-        self.next_ordinal = ordinal + 1;
-        if let Some(offset) = packet.input_offset() {
-            self.offsets.insert(ordinal, offset);
-        }
+        let context = PacketContext {
+            config: Arc::clone(self.config.as_ref().expect("validated configuration")),
+            ordinal,
+            input_offset: packet.input_offset(),
+        };
         let payload = packet
             .take()
             .ok_or(SessionError::Protocol(ProtocolViolation::EmptyPacket))?;
+        self.next_ordinal = ordinal + 1;
         let bytes = match self.prefix.take() {
             Some(prefix) => {
                 let payload = payload.as_bytes();
@@ -415,7 +440,8 @@ impl VideoDecoder for Av1VideoDecoder {
             .map_err(decode_err)?
             .with_timestamp(pts)
             .with_duration(duration)
-            .with_offset(ordinal as i64);
+            .with_offset(ordinal as i64)
+            .with_context(Arc::new(context));
         let result = self.dec.send_packet(&mut p);
         if let Some(owned) = &self.owned_stop {
             owned.check()?;
@@ -474,7 +500,6 @@ impl VideoDecoder for Av1VideoDecoder {
         self.stash = None;
         self.ended = false;
         self.told_end = false;
-        self.offsets.clear();
         self.next_ordinal = 0;
         self.arm_prefix();
         Ok(())

@@ -36,7 +36,7 @@ zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "1d3ddd
 # the #524 loop-filter H-window fix). Keep it in lockstep with the root
 # manifest's `rev` — the reasoning for the current one lives there. Drop at
 # the rav1d-safe 0.6.0 release.
-rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "dfd01e3268f6e8da862d2d5f0a71d19f414f2b87" }
+rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "5707a2e94ac88500892c9c7ad2ec77d5ab84fd59" }
 # Mirror of the root zencodec pin: ultrahdr-core reaches zencodec through
 # zenmeta at this exact rev, so any other rev splits the graph into two
 # zencodec copies (gain_map.rs then fails to typecheck).
