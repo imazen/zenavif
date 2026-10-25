@@ -443,6 +443,10 @@ clippy-review-expert:
 check-downstream:
     cargo run --locked --manifest-path dev/downstream-probe/Cargo.toml
 
+# Refresh only the standalone probe's graph after a native dependency pin moves.
+resolve-downstream:
+    cargo metadata --manifest-path dev/downstream-probe/Cargo.toml --format-version 1 > /dev/null
+
 # Lint the optional queue admission probe with the same warning policy.
 clippy-media-queue:
     cargo clippy --locked --manifest-path dev/downstream-probe/Cargo.toml --features queue-audit --bin queue_audit -- -D warnings
