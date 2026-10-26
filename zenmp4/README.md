@@ -32,3 +32,17 @@ Durations come from the next sample's decode time, so they are exact. An
 AV1 track without an `av1C` gets one built from its first sequence header.
 
 Unpublished: `zencodec-media` is not on crates.io yet.
+
+For exact supplied packet timing, use `Mp4Muxer::begin_exact_timing(tracks,
+hint)`. It prepares the actual fragmented writer before exposing its header,
+including for a seekable destination, so nonzero decode origins survive.
+Every packet must supply an explicit duration; unrepresentable clocks, ranges,
+decode gaps/overlaps and missing durations refuse before that packet changes
+output. Missing DTS uses PTS as decode time. Preparation does not promise that
+unknown future packets will fit; drivers retain and report prior publication
+on failure. Metadata and workspace guarantees are separate.
+
+The legacy `Muxer::begin` still allows inferred durations and progressive output.
+The shared exact-timing trait hook is being qualified on the zencodec API review;
+this inherent method lets the native implementation be tested without changing
+the existing workspace's shared dependency revision.

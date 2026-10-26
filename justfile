@@ -104,6 +104,11 @@ check-mp4-fuzz:
 test-mp4:
     cargo test --locked -p zenmp4
 
+qualify-mp4-timing:
+    just test-mp4
+    cargo clippy --locked -p zenmp4 --all-targets -- -D warnings
+    RUSTDOCFLAGS="-D warnings" cargo doc --locked -p zenmp4 --no-deps
+
 # zenmp4's demuxer against ffprobe on FFmpeg-written MP4s.
 mp4-ffmpeg-oracle:
     zenmp4/scripts/ffmpeg-oracle.sh

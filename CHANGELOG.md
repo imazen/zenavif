@@ -70,6 +70,11 @@
 
 ## zenmp4 (unreleased, new workspace member)
 
+- Add `Mp4Muxer::begin_exact_timing`: retain the successfully prepared
+  fragmented writer, support nonzero decode origins, and refuse missing
+  explicit durations before packet output. Failed preparation exposes no
+  partially collected tracks/header. Existing `begin` behavior is unchanged.
+
 - Round movie-header lengths upward on their millisecond clock; refuse
   overflow and finite lengths that would encode the unknown-duration sentinel.
   Native sample timing remains on the supplied track clock.
