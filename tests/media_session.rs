@@ -796,6 +796,57 @@ fn native_decode_error_keeps_its_type_and_whereat_trace() {
     native(&erased_error);
 }
 
+#[test]
+fn native_picture_limit_refuses_before_a_media_frame_and_keeps_trace() {
+    use std::error::Error;
+    let settings = settings(10, Subsampling::Yuv420, 17, 13);
+    let input = frame_for(&settings, 0, 0);
+    let mut encoder = Av1VideoEncoder::new(settings, TB).unwrap();
+    let packets = encode(&mut encoder, &[input]);
+    for threads in [1, 4] {
+        let mut native = rav1d_safe::Settings::default();
+        native.threads = threads;
+        native.max_picture_bytes = Some(0);
+        let mut decoder = Av1VideoDecoder::with_settings(native).unwrap();
+        decoder
+            .configure(encoder.output_config().unwrap(), &Unstoppable)
+            .unwrap();
+        let mut failure = None;
+        for mut packet in packets.iter().cloned() {
+            if let Err(error) = decoder.send(&mut packet, &Unstoppable) {
+                failure = Some(error);
+                break;
+            }
+            match decoder.receive(&Unstoppable) {
+                Err(error) => {
+                    failure = Some(error);
+                    break;
+                }
+                Ok(Receive::Ready(_)) => panic!("frame published before native admission"),
+                Ok(_) => {}
+            }
+        }
+        let error = failure.unwrap_or_else(|| {
+            decoder.end_input().unwrap();
+            match decoder.receive(&Unstoppable) {
+                Err(error) => error,
+                Ok(_) => panic!("native picture admission did not refuse"),
+            }
+        });
+        let mut cause: &(dyn Error + 'static) = &error;
+        loop {
+            if let Some(native) = cause.downcast_ref::<whereat::At<rav1d_safe::Error>>() {
+                assert!(
+                    matches!(native.error(), rav1d_safe::Error::Other(message) if message == "native picture storage limit exceeded")
+                );
+                assert!(native.frame_count() > 0);
+                break;
+            }
+            cause = cause.source().expect("native budget trace was erased");
+        }
+    }
+}
+
 fn decode_with(dec: &mut Av1VideoDecoder, config: &CodecConfig, packets: &[Packet]) -> Vec<Frame> {
     dec.configure(config, &Unstoppable).unwrap();
     let mut frames = Vec::new();

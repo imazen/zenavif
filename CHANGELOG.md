@@ -2,6 +2,11 @@
 
 ## AV1 media sessions (unreleased)
 
+- Admit native picture-plane storage through
+  `Av1VideoDecoder::with_settings` and rav1d's `max_picture_bytes`.
+  Refusal precedes frame publication and preserves the native error trace.
+  Pins rav1d-safe to `b19aec65`; this limit does not bound codec workspace,
+  input, metadata or allocator overhead.
 - Preserve each accepted packet's clock, epoch, container color and input
   offset through delayed and multiple native presentations. Native packet
   ownership replaces the decoder's ordinal-indexed retirement map; repeated

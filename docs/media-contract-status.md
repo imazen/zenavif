@@ -134,3 +134,35 @@ API review note: the new traced error variant retains the original `At`;
 `RefUnwindSafe`. Its existing Clone/Eq traits remain. The media API is still
 unpublished. API snapshots also move the existing media feature surface out of
 the internal-feature snapshot and record current rustdoc auto-trait spelling.
+
+## Native picture-plane admission (2026-10-25)
+
+The native pin `b19aec65` adds `rav1d_safe::Settings::max_picture_bytes`,
+available through the existing `Av1VideoDecoder::with_settings` constructor.
+It reserves the full requested native plane allocation before the first plane
+is allocated, including row padding and alignment. References, reconstruction,
+film-grain copies and frames held by the caller share that allowance. A charge
+survives reset or decoder destruction until the last native owner releases it.
+Bounded mode frees plane buffers instead of returning them to the uncharged
+cache. The default `None` retains the existing pooled path.
+
+This setting does not establish shared `MediaLimits`, a bound on codec
+workspace, input concatenation, metadata, encoder lookahead or process RSS.
+The pixel-count setting remains independently available. A publication policy
+callback still runs after reconstruction; a caller needing this native storage
+requirement sets it before opening the session.
+
+The adapter's native regression exercises refusal on one and four workers,
+requires that no `Frame` is returned, and inspects the original
+`whereat::At<rav1d_safe::Error>` in the source chain. Refusal currently uses the
+native decoder's existing `Error::Other` category; it does not introduce a
+structured shared resource-limit error. Native boundary, retained-owner,
+film-grain and independent pixel-oracle gates live in
+[rav1d-safe's admission contract](https://github.com/imazen/rav1d-safe/blob/b19aec6561204ff310250bf2bc1b2c6faa42c3b5/docs/PICTURE_STORAGE_LIMIT.md).
+
+The normal dependency export passes the native session tests, decoder unit
+checks, strict lib/test Clippy, fuzz-target compilation and all three generated
+API snapshots. Root and fuzz locks each contain one rav1d-safe, one zencodec
+and one enough. [Validation receipt](../benchmarks/media_picture_budget_2026-10-25.txt):
+run-heavy rc=0, 220 s, peak RSS 1.17 GiB, minimum available 14093 MiB,
+peak load 3.58. This is build/test-process usage, not a decoder RAM bound.

@@ -1,0 +1,15 @@
+Native AV1 picture-plane admission — 2026-10-25
+Base: 2a4eb78767b68ac8f282a0353ea171d38f58c081
+Native dependency: rav1d-safe b19aec6561204ff310250bf2bc1b2c6faa42c3b5
+Changes under test: this commit's manifest pins and native storage-refusal test
+
+Normal dependency export outside workspace path overrides.
+Command: run-heavy --mem 12G --jobs 4 -- timeout --kill-after=15s 10m just media-context-resolve qualify-media-context
+Result: native media-session suite 19/19; decoder units 8/8; strict lib/test
+Clippy; fuzz-target compilation; root/parse/serialize public API snapshots pass.
+Existing unused documentation comments on fuzz macro invocations still warn.
+Root and fuzz locks each contain one rav1d-safe, one zencodec and one enough.
+
+run-heavy: done rc=0 220s | peak-RSS 1.17GiB | min-avail 14093MiB | peak-load 3.58
+This receipt measures the qualification process. It is not a native storage,
+whole-decoder memory or throughput measurement.

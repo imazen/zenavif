@@ -72,6 +72,10 @@ test-media-errors:
 media-context-sync destination:
     rsync -a --exclude .git --exclude .jj --exclude .workongoing --exclude target --exclude Cargo.lock ./ "{{destination}}/"
 
+media-context-resolve:
+    cargo update -p rav1d-safe
+    cargo update --manifest-path fuzz/Cargo.toml -p rav1d-safe
+
 qualify-media-context:
     cargo test --locked --features media-encode --test media_session -- --test-threads=1
     cargo test --locked --features media --lib media:: -- --test-threads=1

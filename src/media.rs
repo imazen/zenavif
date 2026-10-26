@@ -204,7 +204,12 @@ impl Av1VideoDecoder {
     }
 
     /// A session with explicit rav1d settings (threads, strictness, film
-    /// grain, operating point).
+    /// grain, operating point and native picture-plane admission).
+    ///
+    /// `max_picture_bytes` admits native plane allocations across reference
+    /// and caller-retained pictures before allocating their buffers. It does
+    /// not bound input, codec workspace, metadata or allocator overhead.
+    /// Native refusal retains its location trace through this adapter.
     ///
     /// # Errors
     ///
