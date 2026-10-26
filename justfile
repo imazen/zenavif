@@ -75,12 +75,14 @@ media-context-sync destination:
 media-context-resolve:
     cargo update -p rav1d-safe
     cargo update --manifest-path fuzz/Cargo.toml -p rav1d-safe
+    just resolve-downstream
 
 qualify-media-context:
     cargo test --locked --features media-encode --test media_session -- --test-threads=1
     cargo test --locked --features media --lib media:: -- --test-threads=1
     cargo clippy --locked --features media-encode --lib --test media_session -- -D warnings
     cargo check --locked --manifest-path fuzz/Cargo.toml --bins
+    just check-downstream
     just api-doc
 
 # AV1 video sessions (zencodec-media): decoder + zenrav1e encoder tests.

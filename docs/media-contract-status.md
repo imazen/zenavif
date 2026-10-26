@@ -166,3 +166,13 @@ API snapshots. Root and fuzz locks each contain one rav1d-safe, one zencodec
 and one enough. [Validation receipt](../benchmarks/media_picture_budget_2026-10-25.txt):
 run-heavy rc=0, 220 s, peak RSS 1.17 GiB, minimum available 14093 MiB,
 peak load 3.58. This is build/test-process usage, not a decoder RAM bound.
+
+### Downstream dependency resolution, 2026-10-25
+
+The native picture-budget pin also requires refreshing the independent
+`dev/downstream-probe/Cargo.lock`. CI caught the omitted update under `--locked`.
+`media-context-resolve` and `qualify-media-context` now include that consumer,
+so the standalone graph and its runtime probe remain part of native pin changes.
+The repaired graph passed `just resolve-downstream && just check-downstream`
+outside workspace patches: run-heavy rc=0, 12 s, peak RSS 1.12 GiB, minimum
+available 15067 MiB, peak load 1.64. No test expectation changed.

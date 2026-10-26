@@ -1918,3 +1918,10 @@ keeps unknown duration zero without trying to rescale an unwritten length.
 overflow and the reserved sentinel. The upward header policy matches FFmpeg's
 [MOV writer](https://github.com/FFmpeg/FFmpeg/blob/master/libavformat/movenc.c);
 unknown duration semantics are in ISO/IEC 14496-12:2012, 8.2.2.3 and 8.3.2.3.
+
+## Known Bugs: native pin downstream lock (2026-10-25, fixed)
+
+A native decoder pin update refreshed the workspace and fuzz locks but omitted
+the independent downstream probe lock. Its CI `--locked` check correctly refused
+resolution. The native context resolve/qualification recipes now include that
+consumer. See `docs/media-contract-status.md`.

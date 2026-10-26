@@ -690,7 +690,7 @@ dependencies = [
 [[package]]
 name = "rav1d-disjoint-mut"
 version = "0.4.0"
-source = "git+https://github.com/imazen/rav1d-safe?rev=5707a2e94ac88500892c9c7ad2ec77d5ab84fd59#5707a2e94ac88500892c9c7ad2ec77d5ab84fd59"
+source = "git+https://github.com/imazen/rav1d-safe?rev=b19aec6561204ff310250bf2bc1b2c6faa42c3b5#b19aec6561204ff310250bf2bc1b2c6faa42c3b5"
 dependencies = [
  "aligned",
  "loom",
@@ -701,7 +701,7 @@ dependencies = [
 [[package]]
 name = "rav1d-safe"
 version = "0.7.0"
-source = "git+https://github.com/imazen/rav1d-safe?rev=5707a2e94ac88500892c9c7ad2ec77d5ab84fd59#5707a2e94ac88500892c9c7ad2ec77d5ab84fd59"
+source = "git+https://github.com/imazen/rav1d-safe?rev=b19aec6561204ff310250bf2bc1b2c6faa42c3b5#b19aec6561204ff310250bf2bc1b2c6faa42c3b5"
 dependencies = [
  "aligned",
  "archmage",
