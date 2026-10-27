@@ -4,9 +4,9 @@
 //! mp4_remux <in.mp4> <out.mp4> [fragmented]
 //! ```
 
-use enough::Unstoppable;
+use zencodec::NoPulse;
 use zencodec_io::SliceCursor;
-use zencodec_media::container::{DemuxEvent, DemuxStage, Demuxer, MuxHint, Muxer, apply_finish};
+use zencodec_media::container::{DemuxEvent, DemuxStage, Demuxer, MuxHint, Muxer};
 use zencodec_media::limits::MediaLimits;
 use zenmp4::{Mp4Demuxer, Mp4Muxer};
 
@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut out = Vec::new();
     loop {
         let y = cursor
-            .next(&bytes, &mut DemuxStage(&mut dem), &Unstoppable)
+            .next(&bytes, &mut DemuxStage(&mut dem), &NoPulse)
             .map_err(|e| format!("demux: {e:?}"))?;
         let done = y.is_finished();
         match y.into_inner() {
@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .map_err(|e| format!("begin: {e:?}"))?;
             }
             DemuxEvent::Packet(p) => {
-                mux.write_packet(p, &Unstoppable)
+                mux.write_packet(p, &NoPulse)
                     .map_err(|e| format!("write: {e:?}"))?;
                 mux.take_output(&mut out);
             }
@@ -45,10 +45,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             break;
         }
     }
-    let finish = mux
-        .finish(&Unstoppable)
-        .map_err(|e| format!("finish: {e:?}"))?;
-    apply_finish(&mut out, finish).map_err(|e| format!("patch: {e:?}"))?;
+    let finish = mux.finish(&NoPulse).map_err(|e| format!("finish: {e:?}"))?;
+    finish
+        .apply_to(&mut out)
+        .map_err(|e| format!("patch: {e:?}"))?;
     std::fs::write(output, out)?;
     Ok(())
 }

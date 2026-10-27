@@ -414,7 +414,7 @@ impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
         let orientation = self.orientation;
         AvifDecodeJob {
             config: self,
-            stop: None,
+            pulse: None,
             limits: ResourceLimits::none(),
             start_frame_index: 0,
             policy: None,

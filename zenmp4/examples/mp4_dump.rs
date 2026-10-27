@@ -8,7 +8,7 @@
 //! One line per track (`track index codec timebase extras`), then one per
 //! packet: `track,pts,dts,size,key` with `key` 1 for a random-access point.
 
-use enough::Unstoppable;
+use zencodec::NoPulse;
 use zencodec_io::SliceCursor;
 use zencodec_media::container::{DemuxEvent, DemuxStage};
 use zencodec_media::limits::MediaLimits;
@@ -24,7 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut packets = Vec::new();
     loop {
         let y = cursor
-            .next(&bytes, &mut DemuxStage(&mut dem), &Unstoppable)
+            .next(&bytes, &mut DemuxStage(&mut dem), &NoPulse)
             .map_err(|e| format!("{e:?}"))?;
         let done = y.is_finished();
         match y.into_inner() {

@@ -33,7 +33,7 @@ default-run = "zenavif-downstream-probe"
 [workspace]
 
 [features]
-queue-audit = ["zenavif/media-encode", "dep:zencodec", "dep:zencodec-media", "dep:zenpixels", "dep:enough", "dep:zenrav1e"]
+queue-audit = ["zenavif/media-encode", "dep:zencodec", "dep:zencodec-media", "dep:zenpixels", "dep:zenrav1e"]
 
 [[bin]]
 name = "queue_audit"
@@ -42,9 +42,8 @@ required-features = ["queue-audit"]
 
 [dependencies]
 zencodec = { version = "0.1.27", optional = true }
-zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914", optional = true }
+zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54", optional = true }
 zenpixels = { version = "0.2.17", optional = true }
-enough = { version = "0.4.5", optional = true }
 zenrav1e = { version = "0.2.0", git = "https://github.com/imazen/zenrav1e", rev = "9057c4bacf1d8a23974e32de09fd4446a1cc525a", default-features = false, optional = true }
 zenavif = { path = "../..", features = ["encode", "zenav1-aom-encode"] }
 imgref = "1.11.0"
@@ -60,8 +59,8 @@ zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "1d3ddd2131b22e
 zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "1d3ddd2131b22e9e3754c765d4ce45ce3901de59" }
 zenanalyze-api = { git = "https://github.com/imazen/zenanalyze", rev = "6bbcacb11313923ded6e5eeebb725878c5736453" }
 zenavif-serialize = { path = "../../zenavif-serialize" }
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
-zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54" }
 
 [patch."https://github.com/imazen/zenavif"]
 zenavif-serialize = { path = "../../zenavif-serialize" }

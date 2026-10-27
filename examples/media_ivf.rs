@@ -18,8 +18,8 @@
 use std::io::Write;
 use std::sync::Arc;
 
-use enough::Unstoppable;
 use zenavif::media::{Av1EncodeSettings, Av1VideoDecoder, Av1VideoEncoder};
+use zencodec::NoPulse;
 use zencodec::time::{TimeBase, Timestamp};
 use zencodec_media::frame::{
     ChromaSiting, Frame, FrameGeometry, FrameInterpretation, FrameTiming, OwnedPlane, OwnedPlanes,
@@ -159,21 +159,21 @@ fn encode(args: &[String]) -> Res<()> {
             Presentation::default(),
         );
         loop {
-            match enc.send(&frame, &Unstoppable)? {
+            match enc.send(&frame, &NoPulse)? {
                 SendStatus::Accepted => break,
                 _ => {
-                    if let Receive::Ready(p) = enc.receive(&Unstoppable)? {
+                    if let Receive::Ready(p) = enc.receive(&NoPulse)? {
                         packets.push(p);
                     }
                 }
             }
         }
-        while let Receive::Ready(p) = enc.receive(&Unstoppable)? {
+        while let Receive::Ready(p) = enc.receive(&NoPulse)? {
             packets.push(p);
         }
     }
     enc.end_input()?;
-    while let Receive::Ready(p) = enc.receive(&Unstoppable)? {
+    while let Receive::Ready(p) = enc.receive(&NoPulse)? {
         packets.push(p);
     }
     let mut out = Vec::new();
@@ -199,7 +199,7 @@ fn decode(args: &[String]) -> Res<()> {
     let tb = TimeBase::new(u32_at(20), u32_at(16))?;
     let mut pos = usize::from(u16::from_le_bytes([bytes[6], bytes[7]]));
     let mut dec = Av1VideoDecoder::new()?;
-    dec.configure(&CodecConfig::new(CodecId::Av1, tb), &Unstoppable)?;
+    dec.configure(&CodecConfig::new(CodecId::Av1, tb), &NoPulse)?;
     let mut frames = Vec::new();
     let mut ordinal = 0;
     while pos + 12 <= bytes.len() {
@@ -211,21 +211,21 @@ fn decode(args: &[String]) -> Res<()> {
         ordinal += 1;
         pos += 12 + len;
         loop {
-            match dec.send(&mut p, &Unstoppable)? {
+            match dec.send(&mut p, &NoPulse)? {
                 SendStatus::Accepted => break,
                 _ => {
-                    if let Receive::Ready(f) = dec.receive(&Unstoppable)? {
+                    if let Receive::Ready(f) = dec.receive(&NoPulse)? {
                         frames.push(f);
                     }
                 }
             }
         }
-        while let Receive::Ready(f) = dec.receive(&Unstoppable)? {
+        while let Receive::Ready(f) = dec.receive(&NoPulse)? {
             frames.push(f);
         }
     }
     dec.end_input()?;
-    while let Receive::Ready(f) = dec.receive(&Unstoppable)? {
+    while let Receive::Ready(f) = dec.receive(&NoPulse)? {
         frames.push(f);
     }
     let mut out = std::io::BufWriter::new(std::fs::File::create(output)?);

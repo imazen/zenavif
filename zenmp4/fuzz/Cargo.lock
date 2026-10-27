@@ -144,6 +144,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
+name = "spin"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0134f9043ed38b087ac4f7d4af44c79e2c9e5094421fe3164f435ce585953b10"
+
+[[package]]
 name = "syn"
 version = "3.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -169,11 +175,12 @@ checksum = "ab90f361db038ba3135da12c938c328fb43a012992101879e3d6ebccb4d7eba8"
 [[package]]
 name = "zencodec"
 version = "0.1.27"
-source = "git+https://github.com/imazen/zencodec?rev=7cc3d3ec6b41103ee8398c30b1582ebdbb6df914#7cc3d3ec6b41103ee8398c30b1582ebdbb6df914"
+source = "git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54#f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54"
 dependencies = [
  "almost-enough",
  "enough",
  "how-far",
+ "spin",
  "whereat",
  "zenpixels",
 ]
@@ -181,7 +188,7 @@ dependencies = [
 [[package]]
 name = "zencodec-io"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zencodec?rev=7cc3d3ec6b41103ee8398c30b1582ebdbb6df914#7cc3d3ec6b41103ee8398c30b1582ebdbb6df914"
+source = "git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54#f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54"
 dependencies = [
  "enough",
  "how-far",
@@ -192,7 +199,7 @@ dependencies = [
 [[package]]
 name = "zencodec-media"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zencodec?rev=7cc3d3ec6b41103ee8398c30b1582ebdbb6df914#7cc3d3ec6b41103ee8398c30b1582ebdbb6df914"
+source = "git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54#f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54"
 dependencies = [
  "enough",
  "zencodec",
@@ -204,7 +211,6 @@ dependencies = [
 name = "zenmp4"
 version = "0.1.0"
 dependencies = [
- "enough",
  "zencodec",
  "zencodec-media",
  "zenpixels",
@@ -214,8 +220,8 @@ dependencies = [
 name = "zenmp4-fuzz"
 version = "0.0.0"
 dependencies = [
- "enough",
  "libfuzzer-sys",
+ "zencodec",
  "zencodec-io",
  "zencodec-media",
  "zenmp4",

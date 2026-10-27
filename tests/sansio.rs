@@ -24,9 +24,9 @@ fn incremental_contract_holds() {
 
 #[test]
 fn incremental_input_limits_bound_growing_prefix_requests() {
-    use enough::Unstoppable;
+    use zencodec::NoPulse;
     use zencodec::ResourceLimits;
-    use zencodec::decode::{DecodeJob, Input, Request, StepError};
+    use zencodec::decode::{DecodeJob, Input, InputRequest, StepError};
     use zencodec_io::CollectSink;
 
     let data = include_bytes!("vectors/libavif/kodim03_yuv420_8bpc.avif");
@@ -40,7 +40,7 @@ fn incremental_input_limits_bound_growing_prefix_requests() {
         let mut sink = CollectSink::new();
         for request in decoder.requested() {
             assert!(
-                matches!(request, Request::AtLeast { min_len, .. } if *min_len <= limit as usize + 1)
+                matches!(request, InputRequest::AtLeast { min_len, .. } if *min_len <= limit as usize + 1)
             );
         }
         let input = if known_length {
@@ -49,7 +49,7 @@ fn incremental_input_limits_bound_growing_prefix_requests() {
             Input::new(0, &data[..limit as usize + 1])
         };
         assert!(matches!(
-            decoder.step(input, &mut sink, &Unstoppable),
+            decoder.step(input, &mut sink, &NoPulse),
             Err(StepError::Codec(_))
         ));
     }

@@ -232,7 +232,7 @@ impl Av1VideoDecoder {
 
     /// Install an owned stop that rav1d can poll while decoding.
     ///
-    /// This supplements the borrowed stop on each session call and is kept
+    /// This supplements the borrowed pulse on each session call and is kept
     /// across reset. Replace it with `Arc::new(enough::Unstoppable)` to clear.
     pub fn with_stop(mut self, stop: Arc<dyn Stop>) -> Self {
         self.dec.set_stop(Some(Arc::clone(&stop)));
@@ -367,8 +367,8 @@ fn resolve_color(bitstream: Cicp, container: Option<Cicp>) -> Cicp {
 impl VideoDecoder for Av1VideoDecoder {
     type Error = Av1SessionError;
 
-    fn configure(&mut self, config: &CodecConfig, stop: &dyn Stop) -> Res<()> {
-        stop.check()?;
+    fn configure(&mut self, config: &CodecConfig, pulse: &dyn zencodec::Pulse) -> Res<()> {
+        pulse.check()?;
         if let Some(owned) = &self.owned_stop {
             owned.check()?;
         }
@@ -380,8 +380,8 @@ impl VideoDecoder for Av1VideoDecoder {
         Ok(())
     }
 
-    fn send(&mut self, packet: &mut Packet, stop: &dyn Stop) -> Res<SendStatus> {
-        stop.check()?;
+    fn send(&mut self, packet: &mut Packet, pulse: &dyn zencodec::Pulse) -> Res<SendStatus> {
+        pulse.check()?;
         if let Some(owned) = &self.owned_stop {
             owned.check()?;
         }
@@ -459,8 +459,8 @@ impl VideoDecoder for Av1VideoDecoder {
         Ok(SendStatus::Accepted)
     }
 
-    fn receive(&mut self, stop: &dyn Stop) -> Res<Receive<Frame>> {
-        stop.check()?;
+    fn receive(&mut self, pulse: &dyn zencodec::Pulse) -> Res<Receive<Frame>> {
+        pulse.check()?;
         if let Some(owned) = &self.owned_stop {
             owned.check()?;
         }
@@ -627,11 +627,11 @@ mod tests {
         decoder
             .configure(
                 &CodecConfig::new(CodecId::Av1, zencodec::time::TimeBase::MILLIS),
-                &enough::Unstoppable,
+                &zencodec::NoPulse,
             )
             .unwrap();
         let original = packet.bytes().to_vec();
-        let result = decoder.send(&mut packet, &enough::Unstoppable);
+        let result = decoder.send(&mut packet, &zencodec::NoPulse);
         if clock_mismatch {
             assert!(
                 matches!(
@@ -1110,7 +1110,7 @@ mod encode {
 
         /// Install an owned stop that the encoder backend can poll.
         ///
-        /// It supplements the borrowed per-call stop. Replace it with
+        /// It supplements the borrowed per-call pulse. Replace it with
         /// `Arc::new(enough::Unstoppable)` to clear it.
         pub fn with_stop(mut self, stop: Arc<dyn Stop>) -> Self {
             match &mut self.backend {
@@ -1455,8 +1455,8 @@ mod encode {
     impl VideoEncoder for Av1VideoEncoder {
         type Error = Av1SessionError;
 
-        fn send(&mut self, frame: &Frame, stop: &dyn Stop) -> Res<SendStatus> {
-            stop.check()?;
+        fn send(&mut self, frame: &Frame, pulse: &dyn zencodec::Pulse) -> Res<SendStatus> {
+            pulse.check()?;
             if let Some(owned) = &self.owned_stop {
                 owned.check()?;
             }
@@ -1552,8 +1552,8 @@ mod encode {
             Ok(SendStatus::Accepted)
         }
 
-        fn receive(&mut self, stop: &dyn Stop) -> Res<Receive<Packet>> {
-            stop.check()?;
+        fn receive(&mut self, pulse: &dyn zencodec::Pulse) -> Res<Receive<Packet>> {
+            pulse.check()?;
             if let Some(owned) = &self.owned_stop {
                 owned.check()?;
             }

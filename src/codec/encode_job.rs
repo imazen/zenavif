@@ -19,7 +19,8 @@ use super::threads::policy_to_threads;
 #[cfg(feature = "encode")]
 pub struct AvifEncodeJob {
     pub(super) config: AvifEncoderConfig,
-    pub(super) stop: Option<zencodec::StopToken>,
+    /// Cancellation and progress control, retained for the encoders.
+    pub(super) pulse: Option<zencodec::SharedPulse>,
     pub(super) exif: Option<Arc<[u8]>>,
     pub(super) icc_profile: Option<Arc<[u8]>>,
     pub(super) xmp: Option<Arc<[u8]>>,
@@ -53,8 +54,8 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
     type Enc = AvifEncoder;
     type AnimationFrameEnc = AvifAnimationFrameEncoder;
 
-    fn with_stop(mut self, stop: zencodec::StopToken) -> Self {
-        self.stop = Some(stop);
+    fn with_pulse(mut self, pulse: zencodec::SharedPulse) -> Self {
+        self.pulse = Some(pulse);
         self
     }
 
@@ -206,7 +207,7 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         Ok(AvifEncoder {
             orientation,
             config,
-            stop: self.stop,
+            pulse: self.pulse,
             exif,
             icc_profile,
             xmp,
@@ -308,7 +309,7 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
 
         Ok(AvifAnimationFrameEncoder {
             config,
-            stop: self.stop,
+            pulse: self.pulse,
             frames: Vec::new(),
             pixel_format: None,
             canvas_width: canvas_w,

@@ -67,7 +67,8 @@ pub struct AvifAnimationFrameDecoder {
     pub(super) bake_to: zencodec::Orientation,
     pub(super) crop: Option<super::animation_spatial::AnimationCrop>,
     pub(super) alloc_pref: crate::alloc_util::AllocPref,
-    pub(super) stop: Option<zencodec::StopToken>,
+    /// The job's control, polled for cancellation with each call's pulse.
+    pub(super) pulse: Option<zencodec::SharedPulse>,
     pub(super) failed: bool,
 }
 
@@ -93,7 +94,7 @@ impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
 
     fn render_next_frame(
         &mut self,
-        stop: Option<&dyn zencodec::enough::Stop>,
+        pulse: Option<&dyn zencodec::Pulse>,
     ) -> Result<Option<AnimationFrame<'_>>, At<CodecError>> {
         if self.failed {
             return Err(CodecError::of(at!(Error::InvalidState(
@@ -103,16 +104,16 @@ impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
         // Borrowing output prevents setting state after the successful call.
         // Start poisoned and clear it only immediately before yielding/EOF.
         self.failed = true;
-        self.render_next_frame_inner(stop)
+        self.render_next_frame_inner(pulse)
             .map_err(zencodec::CodecError::of)
     }
 
     fn render_next_frame_to_sink(
         &mut self,
-        stop: Option<&dyn zencodec::enough::Stop>,
+        pulse: Option<&dyn zencodec::Pulse>,
         sink: &mut dyn zencodec::decode::DecodeRowSink,
     ) -> Result<Option<zencodec::decode::OutputInfo>, Self::Error> {
-        zencodec::helpers::copy_frame_to_sink(self, stop, sink)
+        zencodec::helpers::copy_frame_to_sink(self, pulse, sink)
     }
 }
 
@@ -145,11 +146,11 @@ impl AvifAnimationFrameDecoder {
 
     fn render_next_frame_inner(
         &mut self,
-        stop: Option<&dyn zencodec::enough::Stop>,
+        pulse: Option<&dyn zencodec::Pulse>,
     ) -> Result<Option<AnimationFrame<'_>>, At<Error>> {
         struct Stops<'a>(
-            Option<&'a zencodec::StopToken>,
-            Option<&'a dyn enough::Stop>,
+            Option<&'a zencodec::SharedPulse>,
+            Option<&'a dyn zencodec::Pulse>,
         );
         impl enough::Stop for Stops<'_> {
             fn check(&self) -> Result<(), enough::StopReason> {
@@ -162,8 +163,8 @@ impl AvifAnimationFrameDecoder {
                 Ok(())
             }
         }
-        let job = self.stop.clone();
-        let stops = Stops(job.as_ref(), stop);
+        let job = self.pulse.clone();
+        let stops = Stops(job.as_ref(), pulse);
         let stop: &dyn enough::Stop = &stops;
         self.current_frame = None;
         loop {

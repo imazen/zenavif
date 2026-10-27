@@ -384,19 +384,20 @@ zenpixels-convert = { version = ">=0.2.16, <0.4.0", default-features = false, fe
 linear-srgb = { version = "0.6.7"}
 # AV1 video sessions (`media` feature): the zencodec-media VideoDecoder over
 # rav1d-safe and, with `media-encode`, the VideoEncoder over zenrav1e.
-# zencodec-media is unpublished, so it is a git rev on zencodec main; the
+# zencodec-media is unpublished, so it is a git rev on zencodec's ideal-api
+# review branch (PR 168, the Pulse controls); the
 # zenrav1e rev is the one zenravif pins, so the graph holds one zenrav1e.
-zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914", optional = true }
+zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54", optional = true }
 zenrav1e = { version = "0.2.0", git = "https://github.com/imazen/zenrav1e", rev = "9057c4bacf1d8a23974e32de09fd4446a1cc525a", default-features = false, features = ["stop"], optional = true }
 num-traits = { version = "0.2.19", default-features = false, optional = true }
 
 [dev-dependencies]
-zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
+zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54" }
 anyhow = "1"
 # check_inventory: the structural-inventory conformance check.
 zencodec-testkit = ">=0.1.0, <0.3.0"
 # check_video_{decoder,encoder}_contract for the `media` sessions.
-zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
+zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54" }
 sha2 = "0.11.0"
 zensim-target = { git = "https://github.com/imazen/zensim", rev = "8557758809156baba7364bd8cfe32889a61da4e8", default-features = false, features = ["native-probe"] }
 # Exact predictor owner required by zensim::BakeScorer; the optional auto-tune
@@ -798,12 +799,12 @@ zenavif-serialize = { path = "zenavif-serialize" }
 # zenravif now uses the canonical serializer Git revision with animation
 # metadata/HDR/premultiplication support. Unify it with the workspace member
 # used by native SVT and tests, avoiding duplicate serializer packages.
-# Structural inventory API and the zencodec-media sessions, both on zencodec
-# main (unpublished; 0.1.27 is staged). TEMPORARY: swap both entries for the
+# Structural inventory API, the zencodec-media sessions and the Pulse controls,
+# on zencodec's ideal-api review branch (PR 168). TEMPORARY: swap both entries for the
 # released zencodec / zencodec-testkit at that publish. zencodec-media must
 # come from the same rev, or the graph holds two zencodec copies.
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
-zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54" }
 
 [patch."https://github.com/imazen/zenavif"]
 zenavif-serialize = { path = "zenavif-serialize" }

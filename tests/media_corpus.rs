@@ -2,8 +2,8 @@
 //! full/narrow, odd and even sizes, 4 frames each) through the session:
 //! every sample equals the generator's formula.
 
-use enough::Unstoppable;
 use zenavif::media::Av1VideoDecoder;
+use zencodec::NoPulse;
 use zencodec::time::{TimeBase, Timestamp};
 use zencodec_media::frame::{Frame, PlaneRole, Subsampling};
 use zencodec_media::packet::Packet;
@@ -96,27 +96,27 @@ fn cases() -> Vec<Case> {
 }
 
 fn decode(dec: &mut Av1VideoDecoder, config: &CodecConfig, packets: &[Packet]) -> Vec<Frame> {
-    dec.configure(config, &Unstoppable).unwrap();
+    dec.configure(config, &NoPulse).unwrap();
     let mut frames = Vec::new();
     let mut pending: Vec<Packet> = packets.to_vec();
     pending.reverse();
     while let Some(mut p) = pending.pop() {
         loop {
-            match dec.send(&mut p, &Unstoppable).unwrap() {
+            match dec.send(&mut p, &NoPulse).unwrap() {
                 SendStatus::Accepted => break,
-                _ => match dec.receive(&Unstoppable).unwrap() {
+                _ => match dec.receive(&NoPulse).unwrap() {
                     Receive::Ready(f) => frames.push(f),
                     other => panic!("ReceivePending without output: {other:?}"),
                 },
             }
         }
-        while let Receive::Ready(f) = dec.receive(&Unstoppable).unwrap() {
+        while let Receive::Ready(f) = dec.receive(&NoPulse).unwrap() {
             frames.push(f);
         }
     }
     dec.end_input().unwrap();
     loop {
-        match dec.receive(&Unstoppable).unwrap() {
+        match dec.receive(&NoPulse).unwrap() {
             Receive::Ready(f) => frames.push(f),
             Receive::EndOfStream => break,
             Receive::NeedInput => panic!("NeedInput after end_input"),

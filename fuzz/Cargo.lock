@@ -743,7 +743,7 @@ dependencies = [
  "linear-srgb",
  "thiserror",
  "whereat",
- "zencodec",
+ "zencodec 0.1.27 (git+https://github.com/imazen/zencodec?rev=7cc3d3ec6b41103ee8398c30b1582ebdbb6df914)",
  "zenmeta",
  "zenpixels",
 ]
@@ -840,7 +840,7 @@ dependencies = [
  "whereat",
  "yuv",
  "zenavif-parse",
- "zencodec",
+ "zencodec 0.1.27 (git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54)",
  "zenpixels",
  "zenpixels-convert",
 ]
@@ -852,7 +852,7 @@ dependencies = [
  "enough",
  "libfuzzer-sys",
  "zenavif",
- "zencodec",
+ "zencodec 0.1.27 (git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54)",
  "zenpixels",
 ]
 
@@ -868,7 +868,7 @@ dependencies = [
  "leb128",
  "log",
  "whereat",
- "zencodec",
+ "zencodec 0.1.27 (git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54)",
 ]
 
 [[package]]
@@ -884,11 +884,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "zencodec"
+version = "0.1.27"
+source = "git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54#f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54"
+dependencies = [
+ "almost-enough",
+ "enough",
+ "how-far",
+ "spin",
+ "whereat",
+ "zenpixels",
+]
+
+[[package]]
 name = "zenmeta"
 version = "0.1.0"
 source = "git+https://github.com/imazen/zencodec?rev=7cc3d3ec6b41103ee8398c30b1582ebdbb6df914#7cc3d3ec6b41103ee8398c30b1582ebdbb6df914"
 dependencies = [
- "zencodec",
+ "zencodec 0.1.27 (git+https://github.com/imazen/zencodec?rev=7cc3d3ec6b41103ee8398c30b1582ebdbb6df914)",
  "zenpixels",
 ]
 

@@ -21,7 +21,8 @@ mod tests;
 #[cfg(feature = "encode")]
 pub struct AvifEncoder {
     pub(super) config: crate::EncoderConfig,
-    pub(super) stop: Option<zencodec::StopToken>,
+    /// The job's control. The native encoders poll it for cancellation only.
+    pub(super) pulse: Option<zencodec::SharedPulse>,
     pub(super) exif: Option<Arc<[u8]>>,
     pub(super) icc_profile: Option<Arc<[u8]>>,
     pub(super) xmp: Option<Arc<[u8]>>,
@@ -113,9 +114,11 @@ impl AvifEncoder {
         Ok(out)
     }
 
+    /// An owned cancellation view for the native encoder threads; the shared
+    /// pulse itself stays with this encoder.
     fn stop_token(&self) -> almost_enough::StopToken {
-        match &self.stop {
-            Some(s) => s.clone(),
+        match &self.pulse {
+            Some(p) => almost_enough::StopToken::new(p.clone()),
             None => almost_enough::StopToken::new(enough::Unstoppable),
         }
     }

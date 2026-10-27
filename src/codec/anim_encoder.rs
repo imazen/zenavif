@@ -59,7 +59,8 @@ impl BufferedFrame {
 #[cfg(feature = "encode")]
 pub struct AvifAnimationFrameEncoder {
     pub(super) config: crate::EncoderConfig,
-    pub(super) stop: Option<zencodec::StopToken>,
+    /// The job's control, polled for cancellation with each call's pulse.
+    pub(super) pulse: Option<zencodec::SharedPulse>,
     pub(super) frames: Vec<BufferedFrame>,
     pub(super) pixel_format: Option<zenpixels::PixelFormat>,
     pub(super) canvas_width: Option<u32>,
@@ -88,10 +89,15 @@ impl AvifAnimationFrameEncoder {
         pixels: PixelSlice<'_>,
         duration_ticks: u32,
         timescale: u32,
-        stop: Option<&dyn Stop>,
+        pulse: Option<&dyn zencodec::Pulse>,
     ) -> Result<(), At<CodecError>> {
-        self.push_frame_ticks_inner(pixels, duration_ticks, timescale, stop)
-            .map_err(zencodec::CodecError::of)
+        self.push_frame_ticks_inner(
+            pixels,
+            duration_ticks,
+            timescale,
+            pulse.map(|p| p as &dyn Stop),
+        )
+        .map_err(zencodec::CodecError::of)
     }
 
     fn push_frame_ticks_inner(
@@ -104,7 +110,7 @@ impl AvifAnimationFrameEncoder {
         if let Some(s) = stop {
             s.check().map_err(|e| at!(Error::from(e)))?;
         }
-        if let Some(s) = &self.stop {
+        if let Some(s) = &self.pulse {
             s.check().map_err(|e| at!(Error::from(e)))?;
         }
         let (clock, incoming, factor) = self.timing_parameters(duration_ticks, timescale)?;
@@ -179,9 +185,11 @@ impl AvifAnimationFrameEncoder {
         Ok((clock, incoming, factor))
     }
 
+    /// An owned cancellation view for the native encoder threads; the shared
+    /// pulse itself stays with this encoder.
     fn stop_token(&self) -> almost_enough::StopToken {
-        match &self.stop {
-            Some(s) => s.clone(),
+        match &self.pulse {
+            Some(p) => almost_enough::StopToken::new(p.clone()),
             None => almost_enough::StopToken::new(enough::Unstoppable),
         }
     }
@@ -201,16 +209,16 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
         &mut self,
         pixels: PixelSlice<'_>,
         duration_ms: u32,
-        stop: Option<&dyn Stop>,
+        pulse: Option<&dyn zencodec::Pulse>,
     ) -> Result<(), At<CodecError>> {
-        self.push_frame_ticks(pixels, duration_ms, 1000, stop)
+        self.push_frame_ticks(pixels, duration_ms, 1000, pulse)
     }
 
     fn push_frame_timed(
         &mut self,
         pixels: PixelSlice<'_>,
         duration: zencodec::animation::FrameDuration,
-        stop: Option<&dyn Stop>,
+        pulse: Option<&dyn zencodec::Pulse>,
     ) -> Result<zencodec::animation::FrameDuration, At<CodecError>> {
         if self.timing.is_none()
             && u32::try_from(duration.numerator())
@@ -220,7 +228,7 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
                         .is_ok()
                 })
         {
-            self.push_frame_exact(pixels, duration, stop)?;
+            self.push_frame_exact(pixels, duration, pulse)?;
             return Ok(duration);
         }
         let mut timing = match self.timing {
@@ -238,7 +246,7 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
         let encoded = timing
             .quantize(duration)
             .map_err(|_| Self::reject(zencodec::UnsupportedOperation::AnimationTiming))?;
-        self.push_frame_exact(pixels, encoded, stop)?;
+        self.push_frame_exact(pixels, encoded, pulse)?;
         self.timing = Some(timing);
         Ok(encoded)
     }
@@ -247,17 +255,18 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
         &mut self,
         pixels: PixelSlice<'_>,
         duration: zencodec::animation::FrameDuration,
-        stop: Option<&dyn Stop>,
+        pulse: Option<&dyn zencodec::Pulse>,
     ) -> Result<(), At<CodecError>> {
         let ticks = u32::try_from(duration.numerator())
             .map_err(|_| Self::reject(zencodec::UnsupportedOperation::AnimationTiming))?;
         self.timing_parameters(ticks, duration.denominator())
             .map_err(|_| Self::reject(zencodec::UnsupportedOperation::AnimationTiming))?;
-        self.push_frame_ticks(pixels, ticks, duration.denominator(), stop)
+        self.push_frame_ticks(pixels, ticks, duration.denominator(), pulse)
     }
 
-    fn finish(self, stop: Option<&dyn Stop>) -> Result<EncodeOutput, At<CodecError>> {
-        self.finish_inner(stop).map_err(zencodec::CodecError::of)
+    fn finish(self, pulse: Option<&dyn zencodec::Pulse>) -> Result<EncodeOutput, At<CodecError>> {
+        self.finish_inner(pulse.map(|p| p as &dyn Stop))
+            .map_err(zencodec::CodecError::of)
     }
 }
 
@@ -272,7 +281,7 @@ impl AvifAnimationFrameEncoder {
         if let Some(s) = stop {
             s.check().map_err(|e| at!(Error::from(e)))?;
         }
-        if let Some(s) = &self.stop {
+        if let Some(s) = &self.pulse {
             s.check().map_err(|e| at!(Error::from(e)))?;
         }
         let (w, h) = (pixels.width(), pixels.rows());
@@ -352,7 +361,7 @@ impl AvifAnimationFrameEncoder {
                 )));
             }
         }
-        let job = self.stop.as_ref();
+        let job = self.pulse.as_ref();
         let u16_at = |p: &[u8], i| u16::from_ne_bytes([p[i], p[i + 1]]);
         let (wu, hu) = (w as usize, h as usize);
         let frame = match fmt {
@@ -429,7 +438,7 @@ impl AvifAnimationFrameEncoder {
         if let Some(s) = stop {
             s.check().map_err(|e| at!(Error::from(e)))?;
         }
-        if let Some(ref s) = self.stop {
+        if let Some(ref s) = self.pulse {
             s.check().map_err(|e| at!(Error::from(e)))?;
         }
 
@@ -588,7 +597,7 @@ impl AvifAnimationFrameEncoder {
 fn copy_animation_pixels<T>(
     pixels: &PixelSlice<'_>,
     bpp: usize,
-    job: Option<&zencodec::StopToken>,
+    job: Option<&zencodec::SharedPulse>,
     call: Option<&dyn Stop>,
     convert: impl Fn(&[u8]) -> T,
 ) -> Result<Vec<T>, At<Error>> {

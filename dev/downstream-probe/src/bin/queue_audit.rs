@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
-use enough::Unstoppable;
 use zenavif::media::{Av1EncodeSettings, Av1VideoEncoder};
+use zencodec::NoPulse;
 use zencodec::time::{TimeBase, Timestamp};
 use zencodec_media::frame::{
     ChromaSiting, Frame, FrameGeometry, FrameInterpretation, FrameTiming, OwnedPlane, OwnedPlanes,
@@ -49,10 +49,10 @@ fn main() {
         let mut accepted = 0usize;
         let mut pending = false;
         for index in 0..128 {
-            match encoder.send(&frame(index), &Unstoppable).unwrap() {
+            match encoder.send(&frame(index), &NoPulse).unwrap() {
                 SendStatus::Accepted => accepted += 1,
                 SendStatus::ReceivePending => {
-                    let Receive::Ready(packet) = encoder.receive(&Unstoppable).unwrap() else {
+                    let Receive::Ready(packet) = encoder.receive(&NoPulse).unwrap() else {
                         panic!("backpressure did not provide output");
                     };
                     assert_eq!(packet.pts(), Some(Timestamp::new(0, TimeBase::MILLIS)));

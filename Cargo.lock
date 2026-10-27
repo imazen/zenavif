@@ -2122,7 +2122,7 @@ dependencies = [
  "linear-srgb",
  "thiserror",
  "whereat",
- "zencodec",
+ "zencodec 0.1.27 (git+https://github.com/imazen/zencodec?rev=7cc3d3ec6b41103ee8398c30b1582ebdbb6df914)",
  "zenmeta",
  "zenpixels",
 ]
@@ -2608,7 +2608,7 @@ dependencies = [
  "zenavif-parse 0.7.0",
  "zenavif-serialize",
  "zenbench",
- "zencodec",
+ "zencodec 0.1.27 (git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54)",
  "zencodec-io",
  "zencodec-media",
  "zencodec-media-testkit",
@@ -2639,7 +2639,7 @@ dependencies = [
  "fallible_collections 0.5.2",
  "leb128",
  "log",
- "zencodec",
+ "zencodec 0.1.27 (git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54)",
 ]
 
 [[package]]
@@ -2656,7 +2656,7 @@ dependencies = [
  "log",
  "walkdir",
  "whereat",
- "zencodec",
+ "zencodec 0.1.27 (git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54)",
  "zenutils-fuzz",
 ]
 
@@ -2712,23 +2712,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "zencodec"
+version = "0.1.27"
+source = "git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54#f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54"
+dependencies = [
+ "almost-enough",
+ "enough",
+ "how-far",
+ "spin",
+ "whereat",
+ "zenpixels",
+]
+
+[[package]]
 name = "zencodec-io"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zencodec?rev=7cc3d3ec6b41103ee8398c30b1582ebdbb6df914#7cc3d3ec6b41103ee8398c30b1582ebdbb6df914"
+source = "git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54#f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54"
 dependencies = [
  "enough",
  "how-far",
- "zencodec",
+ "zencodec 0.1.27 (git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54)",
  "zenpixels",
 ]
 
 [[package]]
 name = "zencodec-media"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zencodec?rev=7cc3d3ec6b41103ee8398c30b1582ebdbb6df914#7cc3d3ec6b41103ee8398c30b1582ebdbb6df914"
+source = "git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54#f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54"
 dependencies = [
  "enough",
- "zencodec",
+ "zencodec 0.1.27 (git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54)",
  "zencodec-io",
  "zenpixels",
 ]
@@ -2736,10 +2749,10 @@ dependencies = [
 [[package]]
 name = "zencodec-media-testkit"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zencodec?rev=7cc3d3ec6b41103ee8398c30b1582ebdbb6df914#7cc3d3ec6b41103ee8398c30b1582ebdbb6df914"
+source = "git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54#f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54"
 dependencies = [
  "enough",
- "zencodec",
+ "zencodec 0.1.27 (git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54)",
  "zencodec-io",
  "zencodec-media",
  "zenpixels",
@@ -2748,11 +2761,11 @@ dependencies = [
 [[package]]
 name = "zencodec-testkit"
 version = "0.2.0"
-source = "git+https://github.com/imazen/zencodec?rev=7cc3d3ec6b41103ee8398c30b1582ebdbb6df914#7cc3d3ec6b41103ee8398c30b1582ebdbb6df914"
+source = "git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54#f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54"
 dependencies = [
  "enough",
  "whereat",
- "zencodec",
+ "zencodec 0.1.27 (git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54)",
  "zencodec-io",
  "zenpixels",
 ]
@@ -2773,7 +2786,7 @@ name = "zenmeta"
 version = "0.1.0"
 source = "git+https://github.com/imazen/zencodec?rev=7cc3d3ec6b41103ee8398c30b1582ebdbb6df914#7cc3d3ec6b41103ee8398c30b1582ebdbb6df914"
 dependencies = [
- "zencodec",
+ "zencodec 0.1.27 (git+https://github.com/imazen/zencodec?rev=7cc3d3ec6b41103ee8398c30b1582ebdbb6df914)",
  "zenpixels",
 ]
 
@@ -2781,8 +2794,7 @@ dependencies = [
 name = "zenmp4"
 version = "0.1.0"
 dependencies = [
- "enough",
- "zencodec",
+ "zencodec 0.1.27 (git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54)",
  "zencodec-io",
  "zencodec-media",
  "zencodec-media-testkit",
@@ -2836,7 +2848,7 @@ dependencies = [
  "safe_unaligned_simd",
  "thiserror",
  "whereat",
- "zencodec",
+ "zencodec 0.1.27 (git+https://github.com/imazen/zencodec?rev=f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54)",
  "zenflate",
  "zenpixels",
  "zenpixels-convert",

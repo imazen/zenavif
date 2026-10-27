@@ -34,7 +34,8 @@ use crate::error::Error;
 /// Per-operation AVIF decode job.
 pub struct AvifDecodeJob {
     pub(super) config: AvifDecoderConfig,
-    pub(super) stop: Option<zencodec::StopToken>,
+    /// Cancellation and progress control, retained for the decoders.
+    pub(super) pulse: Option<zencodec::SharedPulse>,
     pub(super) limits: ResourceLimits,
     pub(super) start_frame_index: u32,
     pub(super) policy: Option<zencodec::decode::DecodePolicy>,
@@ -145,8 +146,8 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
     type StreamDec = AvifStreamingDecoder;
     type AnimationFrameDec = AvifAnimationFrameDecoder;
 
-    fn with_stop(mut self, stop: zencodec::StopToken) -> Self {
-        self.stop = Some(stop);
+    fn with_pulse(mut self, pulse: zencodec::SharedPulse) -> Self {
+        self.pulse = Some(pulse);
         self
     }
 
@@ -377,8 +378,8 @@ impl AvifDecodeJob {
             max_pixels: self.limits.max_pixels,
             allow_animation: policy.is_none_or(|p| p.resolve_animation(true)),
         };
-        let stop: &dyn enough::Stop = match self.stop {
-            Some(ref s) => s,
+        let stop: &dyn enough::Stop = match self.pulse {
+            Some(ref p) => p,
             None => &enough::Unstoppable,
         };
         super::inventory::inventory(data, &opts, stop).map_err(CodecError::of)
@@ -424,7 +425,7 @@ impl AvifDecodeJob {
         let cfg = self.effective_config();
         Ok(AvifDecoder {
             config: cfg,
-            stop: self.stop,
+            pulse: self.pulse,
             data,
             preferred: preferred.to_vec(),
             limits: self.limits,
@@ -442,10 +443,7 @@ impl AvifDecodeJob {
     ) -> Result<AvifStreamingDecoder, At<Error>> {
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
-        let stop_token = self
-            .stop
-            .take()
-            .unwrap_or_else(|| zencodec::StopToken::new(enough::Unstoppable));
+        let pulse = self.pulse.take().unwrap_or_default();
 
         let mut decoder = crate::ManagedAvifDecoder::new(&data, &cfg)?;
         let native_info = decoder.probe_info()?;
@@ -479,7 +477,7 @@ impl AvifDecodeJob {
         if let zencodec::GainMapRender::ReconstructHdr { target_headroom } = self.gain_map_render
             && native_info.gain_map.is_some()
         {
-            let (pixels, native_info) = decoder.decode_full(&stop_token)?;
+            let (pixels, native_info) = decoder.decode_full(&pulse)?;
             let pixels = set_cicp_on_pixels(pixels, &native_info);
             let pixels = attach_source_color_context(pixels, &native_info);
             let (hdr, (max_cll, max_fall)) = reconstruct_hdr_pixels(
@@ -487,7 +485,7 @@ impl AvifDecodeJob {
                 &native_info,
                 target_headroom,
                 self.config.inner(),
-                &stop_token,
+                &pulse,
             )?;
             let (baked, _orientation, w, h) = bake_orientation(hdr, &native_info, self.orientation);
             let strip_descriptor = baked.descriptor();
@@ -509,7 +507,7 @@ impl AvifDecodeJob {
                 output_width: w,
                 output_height: h,
                 decoder: None,
-                stop: stop_token,
+                pulse,
                 grid_rows: 0,
                 grid_cols: 0,
                 current_grid_row: 0,
@@ -534,7 +532,7 @@ impl AvifDecodeJob {
         // preserve path (default) falls through to the low-memory grid / strip-
         // converter streaming below, unchanged.
         if will_auto_orient(self.orientation) {
-            let (pixels, native_info) = decoder.decode_full(&stop_token)?;
+            let (pixels, native_info) = decoder.decode_full(&pulse)?;
             let pixels = set_cicp_on_pixels(pixels, &native_info);
             let pixels = attach_source_color_context(pixels, &native_info);
             let pixels = negotiate_format(
@@ -560,7 +558,7 @@ impl AvifDecodeJob {
                 output_width: w,
                 output_height: h,
                 decoder: None,
-                stop: stop_token,
+                pulse,
                 grid_rows: 0,
                 grid_cols: 0,
                 current_grid_row: 0,
@@ -613,7 +611,7 @@ impl AvifDecodeJob {
                 output_width,
                 output_height,
                 decoder: Some(decoder),
-                stop: stop_token,
+                pulse,
                 grid_rows: grid.rows as u32,
                 grid_cols: grid.columns as u32,
                 current_grid_row: 0,
@@ -638,7 +636,7 @@ impl AvifDecodeJob {
         // Use the frame-era info the converter returns (not the probe-era
         // one): the buffered path attaches its context from decode_full's
         // info, and strips must describe pixels identically.
-        let (converter, frame_native) = decoder.decode_to_strip_converter(&stop_token)?;
+        let (converter, frame_native) = decoder.decode_to_strip_converter(&pulse)?;
         // Already carries the container's CICP: `decode_to_strip_converter`
         // stamps the descriptor it mints (zenavif#37). Re-deriving it here
         // from probe-era info would be wrong — the comment below on
@@ -654,7 +652,7 @@ impl AvifDecodeJob {
             output_width: w,
             output_height: h,
             decoder: None,
-            stop: stop_token,
+            pulse,
             grid_rows: 0,
             grid_cols: 0,
             current_grid_row: 0,
@@ -685,8 +683,8 @@ impl AvifDecodeJob {
                 zencodec::UnsupportedOperation::AnimationDecode,
             )));
         }
-        if let Some(stop) = &self.stop {
-            stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
+        if let Some(pulse) = &self.pulse {
+            pulse.check().map_err(|e| at!(Error::Cancelled(e)))?;
         }
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
@@ -734,7 +732,7 @@ impl AvifDecodeJob {
         Ok(AvifAnimationFrameDecoder {
             anim_decoder: anim_dec,
             frames_decoded: 0,
-            stop: self.stop,
+            pulse: self.pulse,
             failed: false,
             start_frame_index: self.start_frame_index,
             info: Arc::new(base_info),
@@ -757,8 +755,8 @@ impl AvifDecodeJob {
     ) -> Result<zencodec::decode::OutputInfo, At<Error>> {
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
-        let stop: &dyn Stop = match &self.stop {
-            Some(s) => s,
+        let stop: &dyn Stop = match &self.pulse {
+            Some(p) => p,
             None => &enough::Unstoppable,
         };
         let mut decoder = crate::ManagedAvifDecoder::new(&data, &cfg)?;
