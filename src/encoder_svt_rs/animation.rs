@@ -86,6 +86,12 @@ fn encode_frames<F>(
 ) -> Result<crate::EncodedAnimation> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
     reject_unsupported_config(config, input_is_16bit)?;
+    if config.chroma_subsampling == EncodeChromaSubsampling::Yuv444 {
+        return Err(at!(Error::Unsupported(
+            "SVT 4:4:4 is wired for still images only; animation remains 4:2:0"
+        )));
+    }
+
     if config.gain_map.is_some() {
         return Err(at!(Error::Unsupported(
             "gain maps are supported for still images only"

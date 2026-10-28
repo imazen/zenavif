@@ -956,7 +956,9 @@ impl EncoderConfig {
     /// lossless encodes therefore clamp their speed preset into the
     /// [6, 8] band until the fixed zenrav1e releases (imazen/zenavif#8;
     /// see [`EncoderConfig::speed`]).
-    #[cfg(feature = "encode-imazen")]
+    /// With zenav1-svt this requires 8-bit identity RGB 4:4:4; unsupported
+    /// conversion or subsampling requests are refused rather than quantized.
+    #[cfg(any(feature = "encode-imazen", feature = "zenav1-svt"))]
     pub fn with_lossless(mut self, lossless: bool) -> Self {
         self.lossless = lossless;
         self

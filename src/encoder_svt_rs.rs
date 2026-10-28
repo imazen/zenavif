@@ -15,11 +15,12 @@
 //! CICP is signaled in the sequence header and container, with `clli` and
 //! `mdcv` written container-side.
 //!
-//! This adapter still rejects 12-bit, 4:2:2/4:4:4, identity/RGB, limited
-//! range and gain maps. RGB/RGBA animation at 8/10 bits uses full sequence
-//! headers and independent sync samples, sharing the still pixel-coding path.
-//! Explicit lossless is refused: the quality dial retains QP >= 1
-//! (see [`quality_to_qp_gated`]).
+//! Eight-bit stills also support 4:4:4: full-range BT.601 YCbCr or identity
+//! RGB (G/B/R planes). Source-lossless encoding requires identity RGB plus
+//! 4:4:4 and QP 0; alpha uses a separate source-exact monochrome plane.
+//! Sixteen-bit input, 10-bit 4:4:4, limited range, film grain on 4:4:4 and
+//! non-default lossless coding tools are refused. RGB/RGBA animation remains
+//! 4:2:0 at 8/10 bits; 4:4:4 animation is explicitly refused.
 //!
 //! # Quality and speed
 //!
@@ -61,6 +62,14 @@ const DEFAULT_TRANSFER_CHARACTERISTICS: u8 = 13; // sRGB
 /// available backend — see that method's docs).
 const MATRIX_COEFFICIENTS_BT601: u8 = 6;
 
+pub(crate) fn coded_matrix_coefficients(config: &EncoderConfig) -> u8 {
+    if config.color_model == EncodeColorModel::Rgb {
+        0
+    } else {
+        MATRIX_COEFFICIENTS_BT601
+    }
+}
+
 /// Map a fallible zenav1-svt pipeline failure onto the matching zenavif
 /// [`Error`] variant so the failure category survives to
 /// `CategorizedError::category()` (backend-seam obligation 1). This replaces
@@ -89,12 +98,9 @@ fn map_svt_encode_error(e: whereat::At<svtav1::pipeline::EncodeError>) -> wherea
 
 /// Map the lossy quality ladder to SVT QP >= 1.
 ///
-/// Upstream implements coded-lossless QP 0 for 8/10-bit color and mono, but
-/// this RGB adapter cannot promise source-lossless reconstruction: 4:2:0
-/// subsampling is lossy upstream of the coder, so `EncoderConfig::lossless`
-/// is refused by validate rather than served a QP-0 stream that is not
-/// mathematically identical. The quality dial retains QP >= 1;
-/// `svt_rs_quality_100_does_not_corrupt` covers the ladder.
+/// The quality dial remains lossy even at quality 100. Explicit lossless
+/// bypasses this mapping and selects QP 0 only with identity RGB 4:4:4;
+/// converted/subsampled YCbCr cannot preserve source RGB mathematically.
 pub(crate) fn quality_to_qp_gated(quality: f32) -> u8 {
     svtav1::avif::AvifEncoder::quality_to_qp_static(quality).max(1)
 }
@@ -148,8 +154,16 @@ pub(crate) fn svt_resolved_identity(config: &crate::EncoderConfig) -> (i8, u8, u
             .svt_route_preset
             .map(|p| p.value())
             .unwrap_or_else(|| speed_to_svt_preset(config.speed_effective()) as i8),
-        quality_to_qp_gated(config.quality),
-        quality_to_qp_gated(crate::encoder::effective_alpha_quality(config)),
+        if config.lossless {
+            0
+        } else {
+            quality_to_qp_gated(config.quality)
+        },
+        if config.lossless {
+            0
+        } else {
+            quality_to_qp_gated(crate::encoder::effective_alpha_quality(config))
+        },
     )
 }
 
@@ -218,6 +232,23 @@ pub(crate) fn validate_still_controls(
     monochrome: bool,
     input_is_16bit: bool,
 ) -> core::result::Result<(), String> {
+    if config.lossless
+        && (config.svt != crate::svt_params::SvtParams::default()
+            || !config.svt_route_enhancements.is_empty())
+    {
+        return Err("source-lossless SVT currently requires default coding tools".into());
+    }
+    if config.chroma_subsampling == EncodeChromaSubsampling::Yuv444 {
+        if config.alpha_color_mode == crate::EncodeAlphaMode::Premultiplied {
+            return Err("SVT 4:4:4 currently supports unassociated alpha only".into());
+        }
+        if input_is_16bit || effective_bit_depth(config, input_is_16bit) != 8 {
+            return Err("SVT 4:4:4 stills require 8-bit input and output".into());
+        }
+        if config.svt_film_grain.enabled() || config.svt_route_policy.is_some() {
+            return Err("SVT 4:4:4 is a Zen extension without film grain or SvtParity".into());
+        }
+    }
     if config.svt.tune > 5 {
         return Err(
             "SVT adapter tune must be 0..=5; its legacy slot 5 means film grain, not C VMAF".into(),
@@ -265,7 +296,7 @@ pub(crate) fn validate_still_controls(
                 .map(|p| p.value())
                 .unwrap_or_else(|| speed_to_svt_preset(config.speed) as i8),
             true,
-            !monochrome,
+            !monochrome && config.chroma_subsampling == EncodeChromaSubsampling::Yuv420,
             // The coded depth, as the pipeline will see it: the port's
             // per-member envelopes are depth-scoped (deep search is 8-bit
             // only), so the query and the encode must judge the same depth.
@@ -303,19 +334,6 @@ fn reject_unsupported_config(config: &EncoderConfig, input_is_16bit: bool) -> Re
         .map_err(|e| at!(Error::InvalidParameters(e.to_string())))?;
     validate_still_controls(config, false, input_is_16bit)
         .map_err(|e| at!(Error::InvalidParameters(e)))?;
-    if config.chroma_subsampling != EncodeChromaSubsampling::Yuv420 {
-        return Err(at!(Error::Unsupported(
-            "Av1Backend::Zenav1Svt encodes 4:2:0 only: set \
-             .chroma_subsampling(EncodeChromaSubsampling::Yuv420) \
-             (the 4:4:4 default is zenravif-only for now)"
-        )));
-    }
-    if config.color_model != EncodeColorModel::YCbCr {
-        return Err(at!(Error::Unsupported(
-            "Av1Backend::Zenav1Svt supports the YCbCr color model only \
-             (identity/RGB has no defined 4:2:0 subsampling)"
-        )));
-    }
     if config.pixel_range == Some(EncodePixelRange::Limited) {
         return Err(at!(Error::Unsupported(
             "Av1Backend::Zenav1Svt signals full pixel range only \
@@ -323,13 +341,6 @@ fn reject_unsupported_config(config: &EncoderConfig, input_is_16bit: bool) -> Re
         )));
     }
 
-    #[cfg(feature = "encode-imazen")]
-    if config.lossless {
-        return Err(at!(Error::Unsupported(
-            "Av1Backend::Zenav1Svt does not expose image-lossless encoding; \
-             use the zenravif backend for lossless"
-        )));
-    }
     Ok(())
 }
 
@@ -508,8 +519,8 @@ fn encode_mono_plane_svt(
     Ok(payload)
 }
 
-/// Tight 4:2:0 planes at the depth the colour stream is coded at.
-enum Yuv420Planes {
+/// Tight color planes; their subsampling is selected by the validated config.
+enum ColorPlanes {
     Eight {
         y: Vec<u8>,
         u: Vec<u8>,
@@ -522,12 +533,50 @@ enum Yuv420Planes {
     },
 }
 
-impl Yuv420Planes {
+impl ColorPlanes {
     fn bit_depth(&self) -> u8 {
         match self {
-            Yuv420Planes::Eight { .. } => 8,
-            Yuv420Planes::Ten { .. } => 10,
+            ColorPlanes::Eight { .. } => 8,
+            ColorPlanes::Ten { .. } => 10,
         }
+    }
+
+    /// Full-resolution 8-bit planes. Identity maps RGB to G/B/R exactly;
+    /// YCbCr uses the existing full-range BT.601 conversion kernel.
+    fn convert_444<P: crate::yuv_convert::ForwardPixel>(
+        rgb: &[P],
+        stride: usize,
+        width: usize,
+        height: usize,
+        config: &EncoderConfig,
+    ) -> Self {
+        let mut y = vec![0; width * height];
+        let mut u = vec![0; width * height];
+        let mut v = vec![0; width * height];
+        if config.color_model == EncodeColorModel::Rgb {
+            for row in 0..height {
+                for col in 0..width {
+                    let (r, g, b) = rgb[row * stride + col].rgb_f32();
+                    let i = row * width + col;
+                    y[i] = g as u8;
+                    u[i] = b as u8;
+                    v[i] = r as u8;
+                }
+            }
+        } else {
+            crate::yuv_convert::rgbx_to_yuv444(
+                rgb,
+                stride,
+                width,
+                height,
+                crate::yuv_convert::YuvRange::Full,
+                crate::yuv_convert::YuvMatrix::Bt601,
+                &mut y,
+                &mut u,
+                &mut v,
+            );
+        }
+        Self::Eight { y, u, v }
     }
 
     /// RGB(A) of any source depth -> 4:2:0 at `bit_depth` (8 or 10)
@@ -563,26 +612,26 @@ impl Yuv420Planes {
         if bit_depth == 8 {
             // Quantized at 8 bits by the kernel; narrow the container.
             let narrow = |p: Vec<u16>| p.into_iter().map(|s| s as u8).collect();
-            Yuv420Planes::Eight {
+            ColorPlanes::Eight {
                 y: narrow(y),
                 u: narrow(u),
                 v: narrow(v),
             }
         } else {
-            Yuv420Planes::Ten { y, u, v }
+            ColorPlanes::Ten { y, u, v }
         }
     }
 }
 
-/// Run one still-frame 4:2:0 colour encode through the zenav1-svt pipeline
+/// Run one still-frame colour encode through the zenav1-svt pipeline
 /// at the planes' depth. Returns the TD + sequence header + frame OBU
 /// payload.
 #[expect(
     clippy::too_many_arguments,
     reason = "shared color pipeline configuration"
 )]
-fn encode_color_420_svt(
-    planes: &Yuv420Planes,
+fn encode_color_svt(
+    planes: &ColorPlanes,
     width: usize,
     height: usize,
     config: &EncoderConfig,
@@ -593,7 +642,11 @@ fn encode_color_420_svt(
 ) -> Result<Vec<u8>> {
     let w = u32::try_from(width).map_err(|_| at!(Error::Encode("width exceeds u32".into())))?;
     let h = u32::try_from(height).map_err(|_| at!(Error::Encode("height exceeds u32".into())))?;
-    let qp = quality_to_qp_gated(config.quality);
+    let qp = if config.lossless {
+        0
+    } else {
+        quality_to_qp_gated(config.quality)
+    };
     let preset = speed_to_svt_preset(config.speed);
     let rc = svtav1::pipeline::RcConfig {
         mode: svtav1::pipeline::RcMode::Cqp,
@@ -606,7 +659,13 @@ fn encode_color_420_svt(
         .svt_route_preset
         .unwrap_or_else(|| svtav1::avif::NativePreset::new(preset as i8).unwrap());
     let mut pipeline = svtav1::pipeline::EncodePipeline::new_with_preset(w, h, native, rc, 0, 1)
-        .with_chroma_420(true);
+        .with_chroma_format(Some(
+            if config.chroma_subsampling == EncodeChromaSubsampling::Yuv444 {
+                svtav1::pipeline::ChromaFormat::Yuv444
+            } else {
+                svtav1::pipeline::ChromaFormat::Yuv420
+            },
+        ));
     apply_svt_params(&mut pipeline, config);
     pipeline.enhancements = config.svt_route_enhancements;
     pipeline.film_grain = config.svt_film_grain.clone();
@@ -620,7 +679,7 @@ fn encode_color_420_svt(
     pipeline.color_description = svtav1::pipeline::ColorDescription {
         color_primaries,
         transfer_characteristics,
-        matrix_coefficients: MATRIX_COEFFICIENTS_BT601,
+        matrix_coefficients: coded_matrix_coefficients(config),
         // Note: the zenav1-svt sequence-header writer pins color_range=1
         // (full) regardless of this flag; kept coherent anyway.
         full_range: true,
@@ -632,8 +691,14 @@ fn encode_color_420_svt(
 
     // TD + sequence header + frame OBUs, muxed verbatim (module docs).
     match planes {
-        Yuv420Planes::Eight { y, u, v } => pipeline.try_encode_frame_420(y, u, v, width),
-        Yuv420Planes::Ten { y, u, v } => pipeline.try_encode_frame_420_hbd(y, u, v, width),
+        ColorPlanes::Eight { y, u, v } => {
+            if config.chroma_subsampling == EncodeChromaSubsampling::Yuv444 {
+                pipeline.try_encode_frame_444(y, u, v, width)
+            } else {
+                pipeline.try_encode_frame_420(y, u, v, width)
+            }
+        }
+        ColorPlanes::Ten { y, u, v } => pipeline.try_encode_frame_420_hbd(y, u, v, width),
     }
     .map_err(map_svt_encode_error)
 }
@@ -648,9 +713,10 @@ fn build_aviffy(
     monochrome: bool,
 ) -> zenavif_serialize::Aviffy {
     let mut aviffy = zenavif_serialize::Aviffy::new();
+    let full_chroma = !monochrome && config.chroma_subsampling == EncodeChromaSubsampling::Yuv444;
     aviffy
-        .set_seq_profile(0)
-        .set_chroma_subsampling((true, true))
+        .set_seq_profile(u8::from(full_chroma))
+        .set_chroma_subsampling((!full_chroma, !full_chroma))
         .set_monochrome(monochrome)
         .set_full_color_range(true)
         .set_color_primaries(cicp_to_serialize_primaries(color_primaries))
@@ -708,7 +774,11 @@ impl CodedSvtFrame {
             if self.monochrome {
                 zenavif_serialize::constants::MatrixCoefficients::Unspecified
             } else {
-                zenavif_serialize::constants::MatrixCoefficients::Bt601
+                if config.color_model == EncodeColorModel::Rgb {
+                    zenavif_serialize::constants::MatrixCoefficients::Rgb
+                } else {
+                    zenavif_serialize::constants::MatrixCoefficients::Bt601
+                }
             },
             self.monochrome,
         );
@@ -813,7 +883,9 @@ fn encode_rgb8_frame(
     // kernel is the exact inverse of the decode recipe (per-pixel f32
     // chroma, box-averaged before quantization).
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let planes = if bit_depth == 8 {
+    let planes = if config.chroma_subsampling == EncodeChromaSubsampling::Yuv444 {
+        ColorPlanes::convert_444(img.buf(), img.stride(), width, height, config)
+    } else if bit_depth == 8 {
         let cw = width.div_ceil(2);
         let ch = height.div_ceil(2);
         let mut y = vec![0u8; width * height];
@@ -830,9 +902,9 @@ fn encode_rgb8_frame(
             &mut u,
             &mut v,
         );
-        Yuv420Planes::Eight { y, u, v }
+        ColorPlanes::Eight { y, u, v }
     } else {
-        Yuv420Planes::convert(img.buf(), img.stride(), width, height, bit_depth)
+        ColorPlanes::convert(img.buf(), img.stride(), width, height, bit_depth)
     };
 
     // ---- zenav1-svt still-frame encode -----------------------------------
@@ -841,7 +913,7 @@ fn encode_rgb8_frame(
     let transfer_characteristics = config
         .transfer_characteristics
         .unwrap_or(DEFAULT_TRANSFER_CHARACTERISTICS);
-    let av1_payload = encode_color_420_svt(
+    let av1_payload = encode_color_svt(
         &planes,
         width,
         height,
@@ -884,7 +956,7 @@ fn alpha_color_description() -> svtav1::pipeline::ColorDescription {
 /// shared tail of the RGBA entry points. `alpha` is a tight plane at
 /// `bit_depth` (8 or 10).
 fn encode_rgba_planes_svt(
-    planes: &Yuv420Planes,
+    planes: &ColorPlanes,
     alpha: MonoPlane<'_>,
     width: usize,
     height: usize,
@@ -893,13 +965,17 @@ fn encode_rgba_planes_svt(
     mode: FrameMode,
 ) -> Result<CodedSvtFrame> {
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let alpha_qp = quality_to_qp_gated(crate::encoder::effective_alpha_quality(config));
+    let alpha_qp = if config.lossless {
+        0
+    } else {
+        quality_to_qp_gated(crate::encoder::effective_alpha_quality(config))
+    };
     let preset = speed_to_svt_preset(config.speed);
     let color_primaries = config.color_primaries.unwrap_or(DEFAULT_COLOR_PRIMARIES);
     let transfer_characteristics = config
         .transfer_characteristics
         .unwrap_or(DEFAULT_TRANSFER_CHARACTERISTICS);
-    let color_payload = encode_color_420_svt(
+    let color_payload = encode_color_svt(
         planes,
         width,
         height,
@@ -966,7 +1042,9 @@ fn encode_rgba8_frame(
     // as its own Cs400 stream below), so RGB and RGBA encodes of the same
     // pixels produce byte-identical color payloads by construction.
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let planes = if bit_depth == 8 {
+    let planes = if config.chroma_subsampling == EncodeChromaSubsampling::Yuv444 {
+        ColorPlanes::convert_444(img.buf(), img.stride(), width, height, config)
+    } else if bit_depth == 8 {
         let cw = width.div_ceil(2);
         let ch = height.div_ceil(2);
         let mut y = vec![0u8; width * height];
@@ -983,9 +1061,9 @@ fn encode_rgba8_frame(
             &mut u,
             &mut v,
         );
-        Yuv420Planes::Eight { y, u, v }
+        ColorPlanes::Eight { y, u, v }
     } else {
-        Yuv420Planes::convert(img.buf(), img.stride(), width, height, bit_depth)
+        ColorPlanes::convert(img.buf(), img.stride(), width, height, bit_depth)
     };
     if bit_depth == 8 {
         let mut alpha = Vec::with_capacity(width * height);
@@ -1042,14 +1120,14 @@ fn encode_rgb16_frame(
     reject_out_of_envelope_depth(bit_depth, config, false)?;
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let planes = Yuv420Planes::convert(img.buf(), img.stride(), width, height, bit_depth);
+    let planes = ColorPlanes::convert(img.buf(), img.stride(), width, height, bit_depth);
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
     let color_primaries = config.color_primaries.unwrap_or(DEFAULT_COLOR_PRIMARIES);
     let transfer_characteristics = config
         .transfer_characteristics
         .unwrap_or(DEFAULT_TRANSFER_CHARACTERISTICS);
-    let av1_payload = encode_color_420_svt(
+    let av1_payload = encode_color_svt(
         &planes,
         width,
         height,
@@ -1092,7 +1170,7 @@ fn encode_rgba16_frame(
     reject_out_of_envelope_depth(bit_depth, config, true)?;
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let planes = Yuv420Planes::convert(img.buf(), img.stride(), width, height, bit_depth);
+    let planes = ColorPlanes::convert(img.buf(), img.stride(), width, height, bit_depth);
     if bit_depth == 8 {
         let mut alpha = Vec::with_capacity(width * height);
         for row in img.rows() {
@@ -1150,7 +1228,11 @@ fn encode_gray8_frame(
     reject_out_of_envelope_depth(bit_depth, config, true)?;
 
     stop.check().map_err(|e| at!(Error::from(e)))?;
-    let qp = quality_to_qp_gated(config.quality);
+    let qp = if config.lossless {
+        0
+    } else {
+        quality_to_qp_gated(config.quality)
+    };
     let preset = config
         .svt_route_preset
         .map(|p| p.value())

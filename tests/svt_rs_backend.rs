@@ -66,8 +66,7 @@ fn stop() -> StopToken {
     StopToken::new(Unstoppable)
 }
 
-/// A zenav1-svt-shaped config: 4:2:0 is the only subsampling the backend
-/// implements (zenavif's default is 4:4:4, which it rejects honestly).
+/// Keep the existing 4:2:0 baseline independent of the 4:4:4 default.
 fn svt_config() -> EncoderConfig {
     EncoderConfig::new()
         .backend(Av1Backend::Zenav1Svt)
@@ -588,12 +587,18 @@ fn svt_rs_direct_mono_partial_sb_preset6_roundtrips() {
 }
 
 #[test]
-fn svt_rs_rejects_default_yuv444_at_encode_time() {
+fn svt_rs_default_yuv444_encodes_without_downsampling() {
     let img = gradient_rgb8(64, 64);
-    let config = EncoderConfig::new().backend(Av1Backend::Zenav1Svt); // 4:4:4 default
-    let err = zenavif::encode_rgb8(img.as_ref(), &config, stop())
-        .expect_err("4:4:4 must be rejected, not silently downsampled");
-    assert!(err.to_string().contains("4:2:0"), "got: {err}");
+    let config = EncoderConfig::new().backend(Av1Backend::Zenav1Svt);
+    let encoded = zenavif::encode_rgb8(img.as_ref(), &config, stop()).unwrap();
+    let decoder =
+        zenavif::ManagedAvifDecoder::new(&encoded.avif_file, &Default::default()).unwrap();
+    assert_eq!(
+        decoder.probe_info().unwrap().chroma_sampling,
+        zenavif::ChromaSampling::Cs444
+    );
+    let decoded = zenavif::decode(&encoded.avif_file).unwrap();
+    assert_eq!((decoded.width(), decoded.height()), (64, 64));
 }
 
 // --------------------------------------------------------------------
@@ -1161,12 +1166,9 @@ fn svt_rs_validate_scope() {
     // In-scope config validates.
     svt_config().validate().expect("Yuv420 svt-rs validates");
 
-    // Default 4:4:4 rejected.
+    // Default 8-bit 4:4:4 is now wired through the still pipeline.
     let cfg = EncoderConfig::new().backend(Av1Backend::Zenav1Svt);
-    assert!(matches!(
-        cfg.validate(),
-        Err(ValidationError::BackendUnsupportedParam { .. })
-    ));
+    cfg.validate_for_input(PlanInput::rgb8(65, 67)).unwrap();
 
     // 10-bit validates (issue #33); validate_for_input additionally checks
     // the resolved depth and geometry for the actual input.
@@ -1175,13 +1177,16 @@ fn svt_rs_validate_scope() {
         .validate()
         .expect("Ten validates over Zenav1Svt");
 
-    // RGB color model rejected (Rgb+420 is globally invalid; the
-    // backend check must fire before/alongside it, so use its own path:
-    // Rgb+444 → still rejected for this backend).
+    // Identity RGB is supported at 8-bit 4:4:4; RGB+420 remains invalid.
     let cfg = EncoderConfig::new()
         .backend(Av1Backend::Zenav1Svt)
         .color_model(EncodeColorModel::Rgb);
-    assert!(cfg.validate().is_err());
+    cfg.validate_for_input(PlanInput::rgb8(65, 67)).unwrap();
+    assert!(
+        cfg.chroma_subsampling(EncodeChromaSubsampling::Yuv420)
+            .validate()
+            .is_err()
+    );
 
     // Limited range rejected.
     let cfg = svt_config().pixel_range(EncodePixelRange::Limited);

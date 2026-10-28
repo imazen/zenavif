@@ -278,7 +278,7 @@ pub(super) static AVIF_ENCODE_CAPABILITIES: zencodec::encode::EncodeCapabilities
         .with_cicp_safe_sole_carrier(false)
         .with_stop(true)
         .with_lossy(true)
-        .with_lossless(cfg!(feature = "encode-imazen"))
+        .with_lossless(cfg!(any(feature = "encode-imazen", feature = "zenav1-svt")))
         .with_hdr(true)
         .with_gain_map(true)
         .with_animation(true)
@@ -404,8 +404,8 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
     /// Honor a [`Fidelity`](zencodec::encode::Fidelity) target as natively as
     /// AVIF allows.
     ///
-    /// - `Lossless` → true qindex-0 lossless **only** under `encode-imazen`
-    ///   (the only build where it is real, matching `capabilities().lossless()`).
+    /// - `Lossless` selects qindex 0 with `encode-imazen`, or for the SVT
+    ///   backend with identity RGB 4:4:4 (checked at encode time).
     ///   Otherwise it would be q100 lossy, so it degrades to top quality and is
     ///   reported as `codec_quality`, never falsely as `Lossless`.
     /// - `Lossy(CodecSpecificQuality(q))` → the AVIF quality dial.
@@ -416,11 +416,12 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
         use zencodec::encode::{Fidelity, LossyTarget};
         match fidelity {
             Fidelity::Lossless => {
-                // `with_lossless(true)` is only truly lossless under
-                // `encode-imazen`; elsewhere it sets `self.lossless = true` over
-                // a q100 lossy encode, which would make the report lie. Keep the
-                // report honest by not claiming lossless on those builds.
-                if cfg!(feature = "encode-imazen") {
+                // SVT validates identity RGB 4:4:4 at encode time. The
+                // zenravif configuration still requires encode-imazen.
+                if cfg!(feature = "encode-imazen")
+                    || (cfg!(feature = "zenav1-svt")
+                        && self.inner.backend == crate::Av1Backend::Zenav1Svt)
+                {
                     self.with_lossless(true)
                 } else {
                     self.with_lossless(false).with_generic_quality(100.0)

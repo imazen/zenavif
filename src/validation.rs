@@ -258,6 +258,26 @@ impl crate::EncoderConfig {
             // duplicated match is exactly what let `EncodeBitDepth::Twelve`
             // reach a backend that cannot code it.
             let bit_depth = self.coded_bit_depth_bits(input.input_is_16bit);
+            if self.chroma_subsampling == crate::EncodeChromaSubsampling::Yuv444
+                && (input.input_is_16bit || bit_depth != 8)
+            {
+                return Err(ValidationError::BackendUnsupportedParam {
+                    backend: "Av1Backend::Zenav1Svt",
+                    param: "bit_depth",
+                    detail: "SVT 4:4:4 stills require 8-bit input and output",
+                });
+            }
+            if self.lossless
+                && input.input_has_alpha
+                && self.alpha_color_mode == crate::EncodeAlphaMode::Premultiplied
+            {
+                return Err(ValidationError::BackendUnsupportedParam {
+                    backend: "Av1Backend::Zenav1Svt",
+                    param: "alpha_color_mode",
+                    detail: "source-lossless RGBA requires unassociated alpha",
+                });
+            }
+
             if let Some(detail) = crate::encoder_svt_rs::svt_rs_depth_error(
                 bit_depth,
                 self.speed,
@@ -459,28 +479,20 @@ impl crate::EncoderConfig {
     }
 
     /// The configuration slice the experimental zenav1-svt backend
-    /// implements: 8/10-bit 4:2:0 YCbCr full-range stills, byte-carried gain maps, no
-    /// lossless. The dimension envelope (multiples of 64; arbitrary at
-    /// speed >= 5; multiples of 8 at speed >= 5 with alpha) is a
-    /// config×input concern checked by [`Self::validate_for_input`] and at
-    /// encode time.
+    /// implements: 8/10-bit 4:2:0 and 8-bit 4:4:4 full-range stills.
+    /// Source-lossless requires identity RGB 4:4:4; input precision and coding
+    /// controls are additionally checked by support queries and encoding.
     #[cfg(feature = "zenav1-svt")]
     fn validate_svt_rs_scope(&self) -> Result<(), ValidationError> {
         const BACKEND: &str = "Av1Backend::Zenav1Svt";
-        if self.chroma_subsampling != crate::EncodeChromaSubsampling::Yuv420 {
+        if self.chroma_subsampling == crate::EncodeChromaSubsampling::Yuv444
+            && (self.bit_depth == crate::EncodeBitDepth::Ten
+                || self.bit_depth == crate::EncodeBitDepth::Twelve)
+        {
             return Err(ValidationError::BackendUnsupportedParam {
                 backend: BACKEND,
-                param: "chroma_subsampling=Yuv444",
-                detail: "only Yuv420 is implemented (zenav1-svt 4:2:0 still pipeline); \
-                         set .chroma_subsampling(EncodeChromaSubsampling::Yuv420)",
-            });
-        }
-        if self.color_model != crate::EncodeColorModel::YCbCr {
-            return Err(ValidationError::BackendUnsupportedParam {
-                backend: BACKEND,
-                param: "color_model=Rgb",
-                detail: "only the YCbCr model is implemented (identity/RGB has no \
-                         defined 4:2:0 subsampling)",
+                param: "bit_depth",
+                detail: "SVT 4:4:4 stills support 8-bit only",
             });
         }
         if self.pixel_range == Some(crate::EncodePixelRange::Limited) {
@@ -491,11 +503,14 @@ impl crate::EncoderConfig {
             });
         }
 
-        if self.lossless {
+        if self.lossless
+            && (self.color_model != crate::EncodeColorModel::Rgb
+                || self.chroma_subsampling != crate::EncodeChromaSubsampling::Yuv444)
+        {
             return Err(ValidationError::BackendUnsupportedParam {
                 backend: BACKEND,
                 param: "lossless",
-                detail: "this RGB adapter does not expose source-lossless encoding; the raw SVT codec supports coded-lossless planes",
+                detail: "source-lossless SVT requires RGB identity planes and 4:4:4; QP 0 over converted 4:2:0 planes does not preserve RGB",
             });
         }
         Ok(())
