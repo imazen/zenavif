@@ -1695,9 +1695,19 @@ mod chroma_q {
 #[cfg(feature = "encode-imazen")]
 #[test]
 fn svt_rs_lossless_flag_is_refused_honestly() {
-    let px: Vec<rgb::RGB<u8>> = vec![rgb::RGB { r: 64, g: 64, b: 64 }; 32 * 24];
+    let px: Vec<rgb::RGB<u8>> = vec![
+        rgb::RGB {
+            r: 64,
+            g: 64,
+            b: 64
+        };
+        32 * 24
+    ];
     let img = imgref::ImgRef::new(&px, 32, 24);
     let err = zenavif::encode_rgb8(img, &svt_config().with_lossless(true), stop())
         .expect_err("lossless over Zenav1Svt must be refused");
-    assert!(err.to_string().contains("lossless"), "unexpected error: {err}");
+    assert!(
+        err.to_string().contains("lossless"),
+        "unexpected error: {err}"
+    );
 }
