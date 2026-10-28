@@ -18,7 +18,7 @@
 //! This adapter still rejects 12-bit, 4:2:2/4:4:4, identity/RGB, limited
 //! range and gain maps. RGB/RGBA animation at 8/10 bits uses full sequence
 //! headers and independent sync samples, sharing the still pixel-coding path.
-//! Explicit coded-lossless remains unwired; the quality dial retains QP >= 1
+//! Explicit lossless is refused: the quality dial retains QP >= 1
 //! (see [`quality_to_qp_gated`]).
 //!
 //! # Quality and speed
@@ -89,12 +89,12 @@ fn map_svt_encode_error(e: whereat::At<svtav1::pipeline::EncodeError>) -> wherea
 
 /// Map the lossy quality ladder to SVT QP >= 1.
 ///
-/// Upstream implements coded-lossless QP 0 for 8/10-bit color and mono.
-/// This adapter retains its existing quality policy: RGB conversion and
-/// 4:2:0 subsampling cannot promise image-lossless reconstruction. The
-/// explicit lossless request is still rejected here pending public wiring.
-/// `svt_rs_quality_100_does_not_corrupt` covers the ladder; the direct QP-0
-/// tests separately require exact reconstruction of every coded plane.
+/// Upstream implements coded-lossless QP 0 for 8/10-bit color and mono, but
+/// this RGB adapter cannot promise source-lossless reconstruction: 4:2:0
+/// subsampling is lossy upstream of the coder, so `EncoderConfig::lossless`
+/// is refused by validate rather than served a QP-0 stream that is not
+/// mathematically identical. The quality dial retains QP >= 1;
+/// `svt_rs_quality_100_does_not_corrupt` covers the ladder.
 pub(crate) fn quality_to_qp_gated(quality: f32) -> u8 {
     svtav1::avif::AvifEncoder::quality_to_qp_static(quality).max(1)
 }

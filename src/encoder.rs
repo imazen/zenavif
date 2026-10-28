@@ -416,8 +416,8 @@ pub struct EncoderConfig {
     /// Use Tune::StillImage instead of Tune::Psychovisual (imazen/rav1e fork)
     #[cfg(feature = "encode-imazen")]
     pub(crate) tune_still_image: bool,
-    /// Mathematically lossless encoding (quantizer=0) (imazen/rav1e fork)
-    #[cfg(feature = "encode-imazen")]
+    /// Mathematically lossless encoding (quantizer=0). Zenravif consumes it
+    /// under `encode-imazen`; Zenav1Svt maps it to QP 0 coded-lossless.
     pub(crate) lossless: bool,
     /// Segmentation boost (1.0 = off, >1.0 widens per-segment QP deltas)
     #[cfg(feature = "encode-imazen")]
@@ -532,7 +532,6 @@ impl Default for EncoderConfig {
             vaq_strength: 1.0,
             #[cfg(feature = "encode-imazen")]
             tune_still_image: false,
-            #[cfg(feature = "encode-imazen")]
             lossless: false,
             #[cfg(feature = "encode-imazen")]
             seg_boost: None,

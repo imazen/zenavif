@@ -80,6 +80,7 @@ impl AvifEncoderConfig {
     #[must_use]
     pub fn with_lossless_mode(mut self, lossless: bool) -> Self {
         self.lossless = lossless;
+        self.inner.lossless = lossless;
         if lossless {
             self.inner = self.inner.quality(100.0);
         }
