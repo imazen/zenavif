@@ -87,4 +87,4 @@ runs:
       run: |
         cd ..
         . "${RUNNER_TEMP}/clone_retry.sh"
-        clone_retry https://github.com/imazen/zensim.git zensim
+        clone_retry https://github.com/imazen/zensimx.git zensim
