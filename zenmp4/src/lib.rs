@@ -83,6 +83,8 @@ pub enum Mp4Error {
     UnsupportedTimeBase,
     /// Decode times that do not increase within a track.
     DecodeOrder,
+    /// Exact timing was requested but a packet omitted its sample duration.
+    MissingSampleDuration,
 }
 
 impl fmt::Display for Mp4Error {
@@ -113,6 +115,9 @@ impl fmt::Display for Mp4Error {
             }
             Self::UnsupportedTimeBase => f.write_str("MP4 track clocks must be 1/timescale"),
             Self::DecodeOrder => f.write_str("MP4 decode times must increase within a track"),
+            Self::MissingSampleDuration => {
+                f.write_str("exact MP4 timing requires an explicit packet duration")
+            }
         }
     }
 }

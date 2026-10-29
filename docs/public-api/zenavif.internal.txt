@@ -1,5 +1,5 @@
 # zenavif public API — doc(hidden) items and excluded-feature surface
-# excluded features: __expert,_dev
+# excluded features: __expert,_dev,_media-corpus
 # (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
 # Encodings: crate-name prefix stripped; auto traits collapse to a
 # count + exceptions; trait impls collapse to one roster line per
@@ -12,32 +12,28 @@
 #   pub modules                                 8
 #   pub types (struct/enum/trait/alias)        12
 #   free functions                             29
-#   inherent methods                          112
+#   inherent methods                           85
 #   struct fields                              46
 #   enum variants                              28
-#   trait roster entries (type × trait)        92
+#   trait roster entries (type × trait)        93
 #   auto-trait-complete types                  12
 #
 # per-module pub lines:
-#   (root)                           26
-#   backend_router                    9
-#   backend_tuner                     4
-#   detect                            4
+#   (root)                           17
+#   backend_router                    5
+#   backend_tuner                     1
 #   expert                           34
-#   fast_heads                        3
-#   heuristics                        1
-#   palette_gate                      1
+#   fast_heads                        1
+#   media                             1
 #   simd                              4
 #   sweep                           101
-#   two_pass                          1
-#   two_pass_zensim                   1
-#   yuv_convert                      40
+#   yuv_convert                      38
 #   yuv_convert_fast                  1
 #   yuv_convert_libyuv                3
 #   yuv_convert_libyuv_autovec        1
 #   yuv_convert_libyuv_simd           1
 
-## items (235 lines)
+## items (208 lines)
 
 #[non_exhaustive] pub enum sweep::KnobProbe
 #[non_exhaustive] pub struct expert::InternalParams
@@ -46,16 +42,7 @@ pub enum sweep::QualityGrid
 pub enum yuv_convert::ChromaSubsampling
 pub enum yuv_convert::YuvMatrix
 pub enum yuv_convert::YuvRange
-pub fn Av1Backend::assert_fields_are_eq(&self)
-pub fn ChromaSampling::assert_fields_are_eq(&self)
 pub fn ColorPrimaries::assert_fields_are_eq(&self)
-pub fn ColorRange::assert_fields_are_eq(&self)
-pub fn DecodeBackend::assert_fields_are_eq(&self)
-pub fn EncodeAlphaMode::assert_fields_are_eq(&self)
-pub fn EncodeBitDepth::assert_fields_are_eq(&self)
-pub fn EncodeChromaSubsampling::assert_fields_are_eq(&self)
-pub fn EncodeColorModel::assert_fields_are_eq(&self)
-pub fn EncodePixelRange::assert_fields_are_eq(&self)
 pub fn EncoderConfig::svt_params(&self) -> expert::SvtParams
 pub fn EncoderConfig::with_internal_params(self, expert::InternalParams) -> Self
 pub fn EncoderConfig::with_svt_params(self, expert::SvtParams) -> Self
@@ -66,56 +53,42 @@ pub fn TilesResolution::assert_fields_are_eq(&self)
 pub fn TransferCharacteristics::assert_fields_are_eq(&self)
 pub fn backend_router::BackendSelection::assert_fields_are_eq(&self)
 pub fn backend_router::NativeSettings::assert_fields_are_eq(&self)
-pub fn backend_router::ParityReference::assert_fields_are_eq(&self)
-pub fn backend_router::RouteCalibration::assert_fields_are_eq(&self)
 pub fn backend_router::RouteError::assert_fields_are_eq(&self)
-pub fn backend_router::RouteReason::assert_fields_are_eq(&self)
 pub fn backend_router::StillInput::assert_fields_are_eq(&self)
 pub fn backend_router::StillPolicy::assert_fields_are_eq(&self)
-pub fn backend_router::SuitabilityReport::assert_fields_are_eq(&self)
 pub fn backend_tuner::AllowedBackends::assert_fields_are_eq(&self)
-pub fn backend_tuner::TuneSource::assert_fields_are_eq(&self)
-pub fn backend_tuner::contract::TuneHead::assert_fields_are_eq(&self)
-pub fn backend_tuner::contract::TuneLayout::assert_fields_are_eq(&self)
-pub fn detect::ChromaSampling::assert_fields_are_eq(&self)
-pub fn detect::Confidence::assert_fields_are_eq(&self)
-pub fn detect::ProbeError::assert_fields_are_eq(&self)
-pub fn detect::Recommendation::assert_fields_are_eq(&self)
-pub fn expert::InternalParams::clone(&self) -> expert::InternalParams
-pub fn expert::InternalParams::default() -> expert::InternalParams
+pub fn expert::InternalParams::clone(&self) -> Self
+pub fn expert::InternalParams::default() -> Self
 pub fn expert::InternalParams::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn expert::InternalParams::validate(&self) -> core::result::Result<(), ValidationError>
 pub fn expert::SvtParams::clamped(self) -> Self
-pub fn expert::SvtParams::clone(&self) -> expert::SvtParams
+pub fn expert::SvtParams::clone(&self) -> Self
 pub fn expert::SvtParams::default() -> Self
 pub fn expert::SvtParams::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub fn expert::SvtParams::deviations(&self) -> u8
-pub fn expert::SvtParams::eq(&self, &expert::SvtParams) -> bool
+pub fn expert::SvtParams::eq(&self, &Self) -> bool
 pub fn expert::SvtParams::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn expert::SvtParams::is_default(&self) -> bool
 pub fn expert::SvtParams::resolved(self, u8) -> Self
 pub fn expert::SvtParams::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 pub fn fast_heads::FastTierBudgets::assert_fields_are_eq(&self)
-pub fn fast_heads::PartitionBudget::assert_fields_are_eq(&self)
-pub fn fast_heads::TxBudget::assert_fields_are_eq(&self)
-pub fn heuristics::EstimateArm::assert_fields_are_eq(&self)
-pub fn palette_gate::PalettePreference::assert_fields_are_eq(&self)
+pub fn media::Av1SessionError::assert_fields_are_eq(&self)
 pub fn simd::avg_8bpc(&mut [u8], usize, &[i16], &[i16], usize, usize)
 pub fn simd::avg_8bpc_avx2(archmage::tokens::generated::x86::Desktop64, &mut [u8], usize, &[i16], &[i16], usize, usize)
 pub fn simd::avg_8bpc_scalar(&mut [u8], usize, &[i16], &[i16], usize, usize)
 pub fn simd::unpremultiply8_dispatch(&mut [rgb::formats::rgba::Rgba<u8>])
-pub fn sweep::DroppedAxis::clone(&self) -> sweep::DroppedAxis
+pub fn sweep::DroppedAxis::clone(&self) -> Self
 pub fn sweep::DroppedAxis::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn sweep::KnobProbe::apply(self, EncoderConfig) -> EncoderConfig
-pub fn sweep::KnobProbe::clone(&self) -> sweep::KnobProbe
-pub fn sweep::KnobProbe::eq(&self, &sweep::KnobProbe) -> bool
+pub fn sweep::KnobProbe::clone(&self) -> Self
+pub fn sweep::KnobProbe::eq(&self, &Self) -> bool
 pub fn sweep::KnobProbe::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub fn sweep::QualityGrid::clone(&self) -> sweep::QualityGrid
+pub fn sweep::QualityGrid::clone(&self) -> Self
 pub fn sweep::QualityGrid::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn sweep::QualityGrid::points(&self) -> alloc::vec::Vec<f32>
 pub fn sweep::SweepAxes::alpha_probes() -> alloc::vec::Vec<sweep::KnobProbe>
 pub fn sweep::SweepAxes::by_name(&str) -> core::option::Option<Self>
-pub fn sweep::SweepAxes::clone(&self) -> sweep::SweepAxes
+pub fn sweep::SweepAxes::clone(&self) -> Self
 pub fn sweep::SweepAxes::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn sweep::SweepAxes::modes_full() -> Self
 pub fn sweep::SweepAxes::modes_full_alpha() -> Self
@@ -136,35 +109,31 @@ pub fn sweep::SweepAxes::svt_doe_t1_bd10_transfer() -> Self
 pub fn sweep::SweepAxes::svt_doe_t1_live_knob_sets() -> alloc::vec::Vec<expert::SvtParams>
 pub fn sweep::SweepAxes::svt_doe_transfer() -> Self
 pub fn sweep::SweepAxes::svt_speed_dense() -> Self
-pub fn sweep::SweepBuilder::clone(&self) -> sweep::SweepBuilder
+pub fn sweep::SweepBuilder::clone(&self) -> Self
 pub fn sweep::SweepBuilder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn sweep::SweepBuilder::new(sweep::SweepAxes, sweep::QualityGrid) -> Self
 pub fn sweep::SweepBuilder::plan(&self) -> sweep::SweepPlan
 pub fn sweep::SweepBuilder::with_budget(self, usize) -> Self
 pub fn sweep::SweepBuilder::with_compute_limit(self, u8) -> Self
 pub fn sweep::SweepBuilder::with_max_deviations(self, u8) -> Self
-pub fn sweep::SweepCell::clone(&self) -> sweep::SweepCell
+pub fn sweep::SweepCell::clone(&self) -> Self
 pub fn sweep::SweepCell::feature_row(&self, PlanInput) -> alloc::vec::Vec<f64>
 pub fn sweep::SweepCell::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub fn sweep::SweepPlan::clone(&self) -> sweep::SweepPlan
+pub fn sweep::SweepPlan::clone(&self) -> Self
 pub fn sweep::SweepPlan::encodes(&self, usize, usize) -> usize
 pub fn sweep::SweepPlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn sweep::compute_tier(&EncoderConfig) -> u8
 pub fn sweep::config_from_cell_id(&str, f32) -> core::result::Result<EncoderConfig, alloc::string::String>
 pub fn sweep::feature_columns() -> &'static [&'static str]
 pub fn sweep::fingerprint(&EncoderConfig) -> u64
-pub fn two_pass::TwoPassMetric::assert_fields_are_eq(&self)
-pub fn two_pass_zensim::LatticePolicy::assert_fields_are_eq(&self)
-pub fn yuv_convert::ChromaSubsampling::assert_fields_are_eq(&self)
-pub fn yuv_convert::ChromaSubsampling::clone(&self) -> yuv_convert::ChromaSubsampling
-pub fn yuv_convert::ChromaSubsampling::eq(&self, &yuv_convert::ChromaSubsampling) -> bool
+pub fn yuv_convert::ChromaSubsampling::clone(&self) -> Self
+pub fn yuv_convert::ChromaSubsampling::eq(&self, &Self) -> bool
 pub fn yuv_convert::ChromaSubsampling::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub fn yuv_convert::YuvMatrix::clone(&self) -> yuv_convert::YuvMatrix
-pub fn yuv_convert::YuvMatrix::eq(&self, &yuv_convert::YuvMatrix) -> bool
+pub fn yuv_convert::YuvMatrix::clone(&self) -> Self
+pub fn yuv_convert::YuvMatrix::eq(&self, &Self) -> bool
 pub fn yuv_convert::YuvMatrix::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub fn yuv_convert::YuvRange::assert_fields_are_eq(&self)
-pub fn yuv_convert::YuvRange::clone(&self) -> yuv_convert::YuvRange
-pub fn yuv_convert::YuvRange::eq(&self, &yuv_convert::YuvRange) -> bool
+pub fn yuv_convert::YuvRange::clone(&self) -> Self
+pub fn yuv_convert::YuvRange::eq(&self, &Self) -> bool
 pub fn yuv_convert::YuvRange::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn yuv_convert::yuv420_to_rgb16_strip(&[u16], usize, &[u16], usize, &[u16], usize, usize, usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix, u8, &mut [rgb::formats::rgb::Rgb<u16>])
 pub fn yuv_convert::yuv420_to_rgb8(&[u8], usize, &[u8], usize, &[u8], usize, usize, usize, yuv_convert::YuvRange, yuv_convert::YuvMatrix) -> imgref::ImgVec<rgb::RGB8>
@@ -275,7 +244,7 @@ pub yuv_convert::YuvMatrix::Custom::kr: f32
 pub yuv_convert::YuvRange::Full
 pub yuv_convert::YuvRange::Limited
 
-## trait impls (59 types)
+## trait impls (60 types)
 
 Av1Backend: TrivialClone
 ChromaSampling: TrivialClone
@@ -323,6 +292,7 @@ heuristics::DecodeEstimate: TrivialClone
 heuristics::EncodeEstimate: TrivialClone
 heuristics::EstimateArm: TrivialClone
 heuristics::ThreadingInfo: TrivialClone
+media::Av1VideoBackend: TrivialClone
 palette_gate::PalettePreference: TrivialClone
 sweep::DroppedAxis: Clone, Debug
 sweep::KnobProbe: Clone, Copy, Debug, PartialEq, TrivialClone

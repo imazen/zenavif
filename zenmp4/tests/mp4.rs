@@ -971,6 +971,73 @@ mod muxer {
     }
 
     #[test]
+    fn exact_timing_prepares_nonzero_origins_and_never_guesses_duration() {
+        for hint in [MuxHint::default(), MuxHint::forward_only()] {
+            let info = tracks(Some(&AV1C));
+            let mut mux = Mp4Muxer::new();
+            let timing = mux.begin_exact_timing(&info, hint).unwrap();
+            assert!(!timing.patches_at_finish());
+            let packets = [
+                timing_packet(42, 40, Some(17)),
+                timing_packet(60, 57, Some(23)),
+            ];
+            let mut bytes = Vec::new();
+            mux.take_output(&mut bytes);
+            for packet in &packets {
+                mux.write_packet(packet.clone(), &Unstoppable).unwrap();
+                mux.take_output(&mut bytes);
+            }
+            let finish = mux.finish(&Unstoppable).unwrap();
+            assert!(finish.patches.is_empty());
+            bytes.extend_from_slice(&finish.tail);
+            let (_, got) = demux(&bytes).unwrap();
+            for (got, expected) in got.iter().zip(&packets) {
+                assert_eq!(got.pts(), expected.pts());
+                assert_eq!(got.dts(), expected.dts());
+                assert_eq!(got.duration_ticks(), expected.duration_ticks());
+            }
+            assert_eq!(got.len(), packets.len());
+
+            for invalid in [
+                timing_packet(0, 0, None),
+                timing_packet(0, -1, Some(1)),
+                timing_packet(0, 0, Some(u64::MAX)),
+            ] {
+                let mut mux = Mp4Muxer::new();
+                mux.begin_exact_timing(&info, hint).unwrap();
+                let header = mux.pending_output().to_vec();
+                assert!(mux.write_packet(invalid, &Unstoppable).is_err());
+                assert_eq!(mux.pending_output(), header);
+            }
+        }
+    }
+
+    #[test]
+    fn exact_timing_preparation_failure_leaves_no_partial_header_or_tracks() {
+        let mut info = tracks(Some(&AV1C));
+        info[1] = TrackInfo::video(
+            1,
+            CodecId::Pcm,
+            TimeBase::MILLIS,
+            VideoTrackInfo::new(64, 48),
+        )
+        .build()
+        .unwrap();
+        let mut mux = Mp4Muxer::new();
+        assert!(mux.begin_exact_timing(&info, MuxHint::default()).is_err());
+        assert!(mux.pending_output().is_empty());
+        // A failed preparation has not begun; no earlier track leaks into retry.
+        mux.begin_exact_timing(&tracks(Some(&AV1C)), MuxHint::default())
+            .unwrap();
+        assert!(matches!(
+            mux.begin_exact_timing(&info, MuxHint::default()),
+            Err(SessionError::Protocol(
+                zencodec_media::session::ProtocolViolation::BeginTwice
+            ))
+        ));
+    }
+
+    #[test]
     fn mux_timing_ranges_are_checked_before_writing() {
         for make in [Mp4Muxer::new as fn() -> Mp4Muxer, Mp4Muxer::fragmented] {
             for packet in [

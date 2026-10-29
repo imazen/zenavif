@@ -118,6 +118,8 @@ pub struct Mp4Muxer {
     header_written: bool,
     /// Payload bytes waiting in the open fragment.
     fragment_bytes: usize,
+    /// Checked admission never infers an explicit sample duration.
+    exact_timing: bool,
 }
 
 impl Default for Mp4Muxer {
@@ -139,6 +141,7 @@ impl Mp4Muxer {
             sequence: 0,
             header_written: false,
             fragment_bytes: 0,
+            exact_timing: false,
         }
     }
 
@@ -148,6 +151,28 @@ impl Mp4Muxer {
             want: Some(Layout::Fragmented),
             ..Self::new()
         }
+    }
+
+    /// Begin with exact packet timing, refusing any packet without an explicit
+    /// duration before it changes output. Supplied PTS/DTS are never rebased;
+    /// absent DTS uses PTS as decode time. Native timestamp/range and contiguous
+    /// decode-duration checks still apply to each subsequent packet.
+    ///
+    /// Uses fragmented output on both seekable and forward-only destinations,
+    /// because progressive sample tables cannot represent an unknown nonzero
+    /// decode origin. No header promises that every future packet is admissible.
+    /// This does not certify metadata retention or bound native workspace.
+    pub fn begin_exact_timing(&mut self, tracks: &[TrackInfo], hint: MuxHint) -> Res<MuxTiming> {
+        if self.begun {
+            return Err(SessionError::Protocol(ProtocolViolation::BeginTwice));
+        }
+        // Construct off to the side: a preparation error exposes no partial
+        // tracks or header. Keep the successfully prepared object itself.
+        let mut prepared = Self::fragmented();
+        prepared.exact_timing = true;
+        let timing = prepared.begin(tracks, hint)?;
+        *self = prepared;
+        Ok(timing)
     }
 
     /// Movie header extents use `Rounding::Ceil`, covering the full media.
@@ -916,6 +941,9 @@ impl Muxer for Mp4Muxer {
             .and_then(|offset| i32::try_from(offset).ok())
             .ok_or(SessionError::Codec(Mp4Error::Overflow))?;
         let duration = packet.duration_ticks();
+        if self.exact_timing && duration.is_none() {
+            return err(Mp4Error::MissingSampleDuration);
+        }
         if duration.is_some_and(|d| u32::try_from(d).is_err()) {
             return err(Mp4Error::Overflow);
         }

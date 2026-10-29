@@ -61,6 +61,30 @@ test-media-decoder:
 test-media-packets:
     cargo test --locked --features media --lib media::tests::packet_
 
+# Native delayed-frame configuration and multi-presentation packet ownership.
+test-media-context:
+    cargo test --locked --features media-encode --test media_session packet_context -- --test-threads=1
+
+test-media-errors:
+    cargo test --locked --features media-encode --test media_session native_decode_error -- --test-threads=1
+
+# Validate the normal dependency graph in an export outside workspace patches.
+media-context-sync destination:
+    rsync -a --exclude .git --exclude .jj --exclude .workongoing --exclude target --exclude Cargo.lock ./ "{{destination}}/"
+
+media-context-resolve:
+    cargo update -p rav1d-safe
+    cargo update --manifest-path fuzz/Cargo.toml -p rav1d-safe
+    just resolve-downstream
+
+qualify-media-context:
+    cargo test --locked --features media-encode --test media_session -- --test-threads=1
+    cargo test --locked --features media --lib media:: -- --test-threads=1
+    cargo clippy --locked --features media-encode --lib --test media_session -- -D warnings
+    cargo check --locked --manifest-path fuzz/Cargo.toml --bins
+    just check-downstream
+    just api-doc
+
 # AV1 video sessions (zencodec-media): decoder + zenrav1e encoder tests.
 test-media:
     cargo test --features media-encode --test media_session
@@ -80,13 +104,18 @@ check-mp4-fuzz:
 test-mp4:
     cargo test --locked -p zenmp4
 
+qualify-mp4-timing:
+    just test-mp4
+    cargo clippy --locked -p zenmp4 --all-targets -- -D warnings
+    RUSTDOCFLAGS="-D warnings" cargo doc --locked -p zenmp4 --no-deps
+
 # zenmp4's demuxer against ffprobe on FFmpeg-written MP4s.
 mp4-ffmpeg-oracle:
     zenmp4/scripts/ffmpeg-oracle.sh
 
 # Differential check of the media sessions against FFmpeg (libdav1d, libaom).
-media-ffmpeg-oracle:
-    scripts/media-ffmpeg-oracle.sh
+media-ffmpeg-oracle work_dir="target/media-ffmpeg-oracle":
+    scripts/media-ffmpeg-oracle.sh "{{work_dir}}"
 
 # Run clippy with warnings as errors
 clippy:
@@ -424,6 +453,10 @@ clippy-review-expert:
 
 check-downstream:
     cargo run --locked --manifest-path dev/downstream-probe/Cargo.toml
+
+# Refresh only the standalone probe's graph after a native dependency pin moves.
+resolve-downstream:
+    cargo metadata --manifest-path dev/downstream-probe/Cargo.toml --format-version 1 > /dev/null
 
 # Lint the optional queue admission probe with the same warning policy.
 clippy-media-queue:

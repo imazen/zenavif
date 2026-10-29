@@ -40,7 +40,7 @@ pub ColorInformation::Nclx::matrix_coefficients: u16
 pub ColorInformation::Nclx::transfer_characteristics: u16
 pub enum Error
 pub Error::InvalidData(&'static str)
-pub Error::Io(std::io::error::Error)
+pub Error::Io(core::io::error::Error)
 pub Error::NoMoov
 pub Error::OutOfMemory
 pub Error::ResourceLimitExceeded(&'static str)
@@ -134,8 +134,8 @@ pub fn AvifParser<'data>::from_bytes(&'data [u8]) -> Result<Self>
 pub fn AvifParser<'data>::from_bytes_with_config(&'data [u8], &DecodeConfig, &dyn enough::Stop) -> Result<Self>
 pub fn AvifParser<'data>::from_owned(alloc::vec::Vec<u8>) -> Result<AvifParser<'static>>
 pub fn AvifParser<'data>::from_owned_with_config(alloc::vec::Vec<u8>, &DecodeConfig, &dyn enough::Stop) -> Result<AvifParser<'static>>
-pub fn AvifParser<'data>::from_reader<R: std::io::Read + ?core::marker::Sized>(&mut R) -> Result<AvifParser<'static>>
-pub fn AvifParser<'data>::from_reader_with_config<R: std::io::Read + ?core::marker::Sized>(&mut R, &DecodeConfig, &dyn enough::Stop) -> Result<AvifParser<'static>>
+pub fn AvifParser<'data>::from_reader<R: alloc::io::read::Read + ?core::marker::Sized>(&mut R) -> Result<AvifParser<'static>>
+pub fn AvifParser<'data>::from_reader_with_config<R: alloc::io::read::Read + ?core::marker::Sized>(&mut R, &DecodeConfig, &dyn enough::Stop) -> Result<AvifParser<'static>>
 pub fn AvifParser<'data>::gain_map(&self) -> core::option::Option<Result<AvifGainMap>>
 pub fn AvifParser<'data>::gain_map_color_info(&self) -> core::option::Option<&ColorInformation>
 pub fn AvifParser<'data>::gain_map_data(&self) -> core::option::Option<Result<alloc::borrow::Cow<'_, [u8]>>>
@@ -269,7 +269,7 @@ ColorInformation: Clone, Debug, Eq, PartialEq
 ContentColourVolume: Clone, Copy, Debug, Eq, PartialEq
 ContentLightLevel: Clone, Copy, Debug, Eq, PartialEq
 DecodeConfig: Clone, Debug, Default
-Error: Debug, Display, Error, From<alloc::collections::TryReserveError>, From<alloc::string::FromUtf8Error>, From<bitreader::BitReaderError>, From<core::num::error::TryFromIntError>, From<enough::reason::StopReason>, From<std::io::error::Error>, zencodec::error::CategorizedError
+Error: Debug, Display, Error, From<alloc::collections::TryReserveError>, From<alloc::string::FromUtf8Error>, From<bitreader::BitReaderError>, From<core::io::error::Error>, From<core::num::error::TryFromIntError>, From<enough::reason::StopReason>, zencodec::error::CategorizedError
 FrameIterator<'_>: ExactSizeIterator
 FrameIterator<'a>: Iterator
 GainMapChannel: Clone, Copy, Debug, Eq, From<&zencodec::gainmap::GainMapChannel>, PartialEq
@@ -283,7 +283,7 @@ MasteringDisplayColourVolume: Clone, Copy, Debug, Eq, PartialEq
 OperatingPointSelector: Clone, Copy, Debug, Eq, PartialEq
 ParseOptions: Clone, Copy, Debug, Default
 PixelAspectRatio: Clone, Copy, Debug, Eq, PartialEq
-std::io::error::Error: From<Error>
+core::io::error::Error: From<Error>
 zencodec::gainmap::GainMapChannel: From<&GainMapChannel>
 zencodec::gainmap::GainMapParams: From<&GainMapMetadata>
 

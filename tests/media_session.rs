@@ -617,6 +617,236 @@ fn reset_decodes_the_same_frames_again_and_old_frames_stay_valid() {
     assert_eq!(before, first.iter().map(planes).collect::<Vec<_>>());
 }
 
+#[test]
+fn packet_context_keeps_the_configuration_at_acceptance() {
+    use zencodec_media::track::VideoTrackInfo;
+
+    let s = settings(8, Subsampling::Yuv420, 17, 13);
+    let input = frame_for(&s, 0, 40);
+    let mut enc = Av1VideoEncoder::new(s.clone(), TB).unwrap();
+    let old_color = s.color;
+    let config = enc
+        .output_config()
+        .unwrap()
+        .clone()
+        .with_video(VideoTrackInfo::new(s.width, s.height).with_color(old_color));
+    let packets = encode(&mut enc, std::slice::from_ref(&input));
+    assert_eq!(packets.len(), 1);
+    for threads in [1, 2] {
+        let mut native = rav1d_safe::Settings::default();
+        native.threads = threads;
+        let mut dec = Av1VideoDecoder::with_settings(native).unwrap();
+        dec.configure(&config, &Unstoppable).unwrap();
+        let mut packet = packets[0].clone().with_ordinal(7).with_input_offset(1234);
+        assert_eq!(
+            dec.send(&mut packet, &Unstoppable).unwrap(),
+            SendStatus::Accepted
+        );
+        assert!(packet.is_taken());
+
+        // Change the clock and container evidence while the old picture is
+        // still owned by the decoder. This must not reset reference pictures.
+        let mut next = config.clone().with_epoch(1);
+        next.time_base = TimeBase::hz(90_000).unwrap();
+        next.video =
+            Some(VideoTrackInfo::new(s.width, s.height).with_color(Cicp::new(9, 16, 9, true)));
+        dec.configure(&next, &Unstoppable).unwrap();
+        dec.end_input().unwrap();
+        let Receive::Ready(output) = dec.receive(&Unstoppable).unwrap() else {
+            panic!("queued frame was discarded during reconfiguration");
+        };
+        assert_eq!(output.timing().pts, Some(Timestamp::new(40, TB)));
+        assert_eq!(output.interpretation().config_epoch, 0);
+        assert_eq!(output.interpretation().color.container, Some(old_color));
+        assert_eq!(output.timing().packet_ordinal, Some(7));
+        assert_eq!(output.timing().input_offset, Some(1234));
+        assert_eq!(planes(&output), planes(&input));
+        assert!(matches!(
+            dec.receive(&Unstoppable).unwrap(),
+            Receive::EndOfStream
+        ));
+        dec.reset().unwrap();
+        drop(dec);
+        assert_eq!(planes(&output), planes(&input));
+        assert_eq!(output.timing().pts, Some(Timestamp::new(40, TB)));
+    }
+}
+
+#[test]
+fn packet_context_keeps_offsets_for_every_presentation_in_one_packet() {
+    let s = settings(8, Subsampling::Yuv420, 17, 13);
+    let inputs: Vec<_> = (0..3).map(|i| frame_for(&s, i, i as i64 * 40)).collect();
+    let mut enc = Av1VideoEncoder::new(s, TB).unwrap();
+    let packets = encode(&mut enc, &inputs);
+    let bytes = packets.iter().flat_map(|p| p.bytes()).copied().collect();
+    let packet = Packet::from_vec(bytes)
+        .unwrap()
+        .with_ordinal(7)
+        .with_input_offset(1234);
+    let outputs = decode(&enc, &[packet]);
+    assert_eq!(outputs.len(), inputs.len());
+    for (output, input) in outputs.iter().zip(&inputs) {
+        assert_eq!(planes(output), planes(input));
+        assert_eq!(output.timing().packet_ordinal, Some(7));
+        assert_eq!(output.timing().input_offset, Some(1234));
+    }
+}
+
+#[test]
+fn packet_context_distinguishes_queued_epochs_with_repeated_ordinals() {
+    use zencodec_media::track::VideoTrackInfo;
+
+    let s = settings(10, Subsampling::Yuv420, 17, 13).with_color(Cicp::new(2, 2, 2, true));
+    let inputs: Vec<_> = (0..7).map(|i| frame_for(&s, i, i as i64 * 40)).collect();
+    let mut enc = Av1VideoEncoder::new(s.clone(), TB).unwrap();
+    let packets = encode(&mut enc, &inputs);
+    assert_eq!(packets.len(), inputs.len());
+    let clocks = [TB, TimeBase::hz(90_000).unwrap()];
+    let colors = [Cicp::new(1, 13, 1, true), Cicp::new(9, 16, 9, true)];
+    for threads in [1, 4] {
+        let mut native = rav1d_safe::Settings::default();
+        native.threads = threads;
+        native.max_frame_delay = 4;
+        let mut dec = Av1VideoDecoder::with_settings(native).unwrap();
+        let mut outputs = Vec::new();
+        for (i, packet) in packets.iter().enumerate() {
+            let mut config = enc.output_config().unwrap().clone().with_epoch(i as u32);
+            config.time_base = clocks[i % 2];
+            config.video = Some(VideoTrackInfo::new(s.width, s.height).with_color(colors[i % 2]));
+            dec.configure(&config, &Unstoppable).unwrap();
+            let mut packet = packet
+                .clone()
+                .with_pts(Timestamp::new(i as i64 * 40, config.time_base))
+                .with_config_epoch(config.epoch)
+                .with_ordinal(7)
+                .with_input_offset(1000 + i as u64);
+            while dec.send(&mut packet, &Unstoppable).unwrap() != SendStatus::Accepted {
+                let Receive::Ready(frame) = dec.receive(&Unstoppable).unwrap() else {
+                    panic!("backpressure without output");
+                };
+                outputs.push(frame);
+            }
+        }
+        let mut unused = enc.output_config().unwrap().clone().with_epoch(99);
+        unused.time_base = TimeBase::SECONDS;
+        dec.configure(&unused, &Unstoppable).unwrap();
+        dec.end_input().unwrap();
+        loop {
+            match dec.receive(&Unstoppable).unwrap() {
+                Receive::Ready(frame) => outputs.push(frame),
+                Receive::EndOfStream => break,
+                other => panic!("ended session failed to drain: {other:?}"),
+            }
+        }
+        assert_eq!(outputs.len(), inputs.len());
+        dec.reset().unwrap();
+        drop(dec);
+        for (i, (output, input)) in outputs.iter().zip(&inputs).enumerate() {
+            assert_eq!(planes(output), planes(input));
+            assert_eq!(output.interpretation().config_epoch, i as u32);
+            assert_eq!(output.interpretation().color.bitstream, Some(s.color));
+            assert_eq!(output.interpretation().color.container, Some(colors[i % 2]));
+            assert_eq!(output.interpretation().color.resolved, Some(colors[i % 2]));
+            assert_eq!(
+                output.timing().pts,
+                Some(Timestamp::new(i as i64 * 40, clocks[i % 2]))
+            );
+            assert_eq!(output.timing().packet_ordinal, Some(7));
+            assert_eq!(output.timing().input_offset, Some(1000 + i as u64));
+        }
+    }
+}
+
+#[test]
+fn native_decode_error_keeps_its_type_and_whereat_trace() {
+    use std::error::Error;
+
+    fn native<'a>(mut current: &'a (dyn Error + 'static)) -> &'a whereat::At<rav1d_safe::Error> {
+        loop {
+            if let Some(native) = current.downcast_ref::<whereat::At<rav1d_safe::Error>>() {
+                assert_eq!(native.error(), &rav1d_safe::Error::InvalidData);
+                assert!(native.frame_count() > 0);
+                return native;
+            }
+            current = current
+                .source()
+                .expect("native cause was erased by the media adapter");
+        }
+    }
+
+    let mut dec = Av1VideoDecoder::new().unwrap();
+    dec.configure(&CodecConfig::new(CodecId::Av1, TB), &Unstoppable)
+        .unwrap();
+    let mut malformed = Packet::from_vec(vec![0xff]).unwrap();
+    let error = dec.send(&mut malformed, &Unstoppable).unwrap_err();
+    let locations = native(&error).frame_count();
+    // Cloning the public error must not discard the trace either.
+    let SessionError::Codec(codec) = error else {
+        panic!("expected native codec failure")
+    };
+    let cloned = codec.clone();
+    assert_eq!(native(&cloned).frame_count(), locations);
+
+    let mut erased = zencodec_media::session::erase_video_decoder(Av1VideoDecoder::new().unwrap());
+    erased
+        .configure(&CodecConfig::new(CodecId::Av1, TB), &Unstoppable)
+        .unwrap();
+    let mut malformed = Packet::from_vec(vec![0xff]).unwrap();
+    let erased_error = erased.send(&mut malformed, &Unstoppable).unwrap_err();
+    native(&erased_error);
+}
+
+#[test]
+fn native_picture_limit_refuses_before_a_media_frame_and_keeps_trace() {
+    use std::error::Error;
+    let settings = settings(10, Subsampling::Yuv420, 17, 13);
+    let input = frame_for(&settings, 0, 0);
+    let mut encoder = Av1VideoEncoder::new(settings, TB).unwrap();
+    let packets = encode(&mut encoder, &[input]);
+    for threads in [1, 4] {
+        let mut native = rav1d_safe::Settings::default();
+        native.threads = threads;
+        native.max_picture_bytes = Some(0);
+        let mut decoder = Av1VideoDecoder::with_settings(native).unwrap();
+        decoder
+            .configure(encoder.output_config().unwrap(), &Unstoppable)
+            .unwrap();
+        let mut failure = None;
+        for mut packet in packets.iter().cloned() {
+            if let Err(error) = decoder.send(&mut packet, &Unstoppable) {
+                failure = Some(error);
+                break;
+            }
+            match decoder.receive(&Unstoppable) {
+                Err(error) => {
+                    failure = Some(error);
+                    break;
+                }
+                Ok(Receive::Ready(_)) => panic!("frame published before native admission"),
+                Ok(_) => {}
+            }
+        }
+        let error = failure.unwrap_or_else(|| {
+            decoder.end_input().unwrap();
+            match decoder.receive(&Unstoppable) {
+                Err(error) => error,
+                Ok(_) => panic!("native picture admission did not refuse"),
+            }
+        });
+        let mut cause: &(dyn Error + 'static) = &error;
+        loop {
+            if let Some(native) = cause.downcast_ref::<whereat::At<rav1d_safe::Error>>() {
+                assert!(
+                    matches!(native.error(), rav1d_safe::Error::Other(message) if message == "native picture storage limit exceeded")
+                );
+                assert!(native.frame_count() > 0);
+                break;
+            }
+            cause = cause.source().expect("native budget trace was erased");
+        }
+    }
+}
+
 fn decode_with(dec: &mut Av1VideoDecoder, config: &CodecConfig, packets: &[Packet]) -> Vec<Frame> {
     dec.configure(config, &Unstoppable).unwrap();
     let mut frames = Vec::new();

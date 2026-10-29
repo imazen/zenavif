@@ -1889,9 +1889,15 @@ expectations remain unchanged while construction-time capacity refusal is review
 
 ## Known Bugs: AV1 session contract gaps
 
-Shared session/resource limits, track trim configuration, presentation picture
-identity and packet-offset retirement remain incomplete. Epoch advancement and
-MP4 unsupported-error categories need contract decisions. The source findings
+The delayed-configuration and packet-offset defects below are fixed by owned
+native packet context (2026-10-25). `just test-media-context` reproduces delayed
+clock/epoch/color changes, multiple presentations per packet and repeated
+ordinals across queued epochs. `just test-media-errors` verifies native traces
+through typed and erased sessions. Other gaps in the historical review remain.
+
+Shared session/resource limits, track trim configuration and presentation picture
+identity remain incomplete. In-band epoch advancement and MP4 unsupported-error
+categories need contract decisions. The historical source findings
 and their limits are recorded in
 [docs/media-contract-status.md](docs/media-contract-status.md).
 
@@ -1912,3 +1918,10 @@ keeps unknown duration zero without trying to rescale an unwritten length.
 overflow and the reserved sentinel. The upward header policy matches FFmpeg's
 [MOV writer](https://github.com/FFmpeg/FFmpeg/blob/master/libavformat/movenc.c);
 unknown duration semantics are in ISO/IEC 14496-12:2012, 8.2.2.3 and 8.3.2.3.
+
+## Known Bugs: native pin downstream lock (2026-10-25, fixed)
+
+A native decoder pin update refreshed the workspace and fuzz locks but omitted
+the independent downstream probe lock. Its CI `--locked` check correctly refused
+resolution. The native context resolve/qualification recipes now include that
+consumer. See `docs/media-contract-status.md`.
