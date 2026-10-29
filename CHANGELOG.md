@@ -194,6 +194,25 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+#### QUEUED BREAKING CHANGES
+
+None from the SVT still-format extension.
+
+### SVT 4:4:4 and source-lossless stills
+
+- Support 8-bit 4:4:4 stills as full-resolution BT.601 YCbCr or identity RGB
+  planes. Source-lossless RGB/RGBA requires identity RGB, 4:4:4 and QP 0;
+  alpha is coded exactly as its own monochrome item. Color and alpha profiles
+  remain independent in the AVIF container.
+- Expose `EncoderConfig::with_lossless` with `zenav1-svt` independently of
+  `encode-imazen`, and retain this mode through the zencodec fidelity adapter.
+- Refuse high-precision input, 10-bit 4:4:4, limited range, premultiplied alpha,
+  film grain/parity on 4:4:4, non-default lossless tools and 4:4:4 animation.
+  Existing 8/10-bit 4:2:0 paths and the lossy quality ladder stay unchanged.
+- Pin SVT d0f6edc0 from the AVIF still review, including its identity-header fix.
+  Source-exact RGB/RGBA and raw-plane checks pass with libavif, aomdec and dav1d.
+  See [the scoped verification record](docs/SVT-STILL-444.md).
+
 ### Dependency compatibility
 
 - Admit archmage/magetypes 0.9.31-beta.1 in the current-main tool graph while retaining compatible stable requirements (`fdebc9b1`). Strict default library lint and 111 library tests pass; one existing ignored test remains unchanged.

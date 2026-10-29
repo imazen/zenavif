@@ -4,17 +4,18 @@ use zenavif::backend_router::query_still_backends;
 use zenavif::{Av1Backend, EncodeChromaSubsampling, EncoderConfig, PlanInput};
 
 #[test]
-fn unsupported_svt_format_is_filtered_without_rewriting_request() {
+fn supported_svt_444_is_retained_without_rewriting_request() {
     let config = EncoderConfig::new()
         .backend(Av1Backend::Zenav1Svt)
         .chroma_subsampling(EncodeChromaSubsampling::Yuv444);
     let reports = query_still_backends(&config, PlanInput::rgb8(65, 67));
-    assert!(
-        !reports
+    assert_eq!(
+        reports
             .iter()
             .find(|r| r.backend == Av1Backend::Zenav1Svt)
             .unwrap()
-            .supported()
+            .supported(),
+        cfg!(feature = "zenav1-svt")
     );
     assert!(
         reports

@@ -491,3 +491,11 @@ beta-cohort-check:
     cargo fmt --check
     cargo clippy --locked --lib -- -D warnings
     cargo test --locked --lib
+
+# SVT full-resolution still conversion, signaling, and source-exact pixels
+test-svt-444:
+    cargo test --locked -p zenavif --features zenav1-svt,encode-imazen --test svt_444
+
+# Explicitly invoked independent aomdec, dav1d and libavif checks (tools required)
+test-svt-444-oracle output:
+    cargo run --locked -p zenavif --features zenav1-svt,encode-imazen --example svt_444_oracle -- {{output}}

@@ -318,7 +318,7 @@ ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/ima
 # `__expert`-gated upstream), and the two uncalibrated `ZenEnhancement`
 # variants (`AomIntraEdgeFilter`, `AomRestorationUnitSearch`) were REMOVED
 # upstream — `AomScreenTools`/`DeepSearch` are the surviving set.
-svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "339bfb4ae1262cf9752e5d5d530eee1c01a9bc85", optional = true }
+svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "d0f6edc058c99659a73c53cf891090e80fb39ee0", optional = true }
 # AVIF container muxer for the zenav1-svt backend (the zenravif backend muxes
 # inside zenravif; this backend muxes in-crate). The 0.2.0 version is
 # supplied by the [patch.crates-io] git pin below until 0.2.0 publishes.
@@ -846,3 +846,7 @@ required-features = ["_media-corpus"]
 [[example]]
 name = "media_ivf"
 required-features = ["media-encode"]
+
+[[example]]
+name = "svt_444_oracle"
+required-features = ["zenav1-svt", "encode-imazen"]

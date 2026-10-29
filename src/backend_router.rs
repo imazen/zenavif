@@ -208,6 +208,8 @@ fn query_one(
                     input.height,
                     if source.is_monochrome() {
                         svtav1::avif::StillInputFormat::Monochrome
+                    } else if candidate.chroma_subsampling == EncodeChromaSubsampling::Yuv444 {
+                        svtav1::avif::StillInputFormat::Yuv444
                     } else {
                         svtav1::avif::StillInputFormat::Yuv420
                     },
@@ -334,6 +336,8 @@ pub(crate) fn validate_adapter_controls(
             _ => {
                 if source.is_monochrome() {
                     2
+                } else if config.color_model == crate::EncodeColorModel::Rgb {
+                    0
                 } else {
                     6
                 }
