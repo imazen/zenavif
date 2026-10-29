@@ -67,6 +67,9 @@ version is pre-bumped to prevent an accidental semver-violating 0.1.5.
   Justfile recipes `api-doc` / `api-doc-check`.
 
 ### Changed
+- Use the paired workspace parser in serializer roundtrip tests. The old 0.6
+  test dependency pulled an incompatible zencodec 0.1 into the shared graph.
+  Existing assertions and the independent avif-parse/mp4parse oracles remain.
 - README overhaul: canonical badge row (added MSRV, dropped `branch=`, fixed the
   lib.rs badge), a `## Quick start`, and a refreshed crosslink footer. Corrected
   stale claims against source — the `io::Write` entry points return
