@@ -207,6 +207,12 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Align optional-control manifests on core `feb09f9f`, pixels `283655c5`,
+  version-edge Ultra HDR `7e9d296c` and paired native PNG `7b6d1436`.
+  Root, downstream and fuzz consumers carry matching family patches. This is
+  source-only alignment; their old locks and native qualification remain pending.
+
+
 ### Dependency compatibility
 
 - Admit archmage/magetypes 0.9.31-beta.1 in the current-main tool graph while retaining compatible stable requirements (`fdebc9b1`). Strict default library lint and 111 library tests pass; one existing ignored test remains unchanged.

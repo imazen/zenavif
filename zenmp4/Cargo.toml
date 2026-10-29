@@ -13,13 +13,13 @@ include = ["/src/**", "/README.md", "/LICENSE*"]
 publish = false
 
 [dependencies]
-zencodec = { version = ">=0.1.26, <0.3.0", default-features = false }
-zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54" }
+zencodec = { version = ">=0.2.0, <0.4.0", default-features = false }
+zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "feb09f9fd25e90e49a30d7161db8f3b558dfb2a6" }
 zenpixels = { version = ">=0.2.16, <0.4.0", default-features = false }
 
 [dev-dependencies]
-zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54" }
-zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54" }
+zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "feb09f9fd25e90e49a30d7161db8f3b558dfb2a6" }
+zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "feb09f9fd25e90e49a30d7161db8f3b558dfb2a6" }
 
 [lints.rust]
 unsafe_code = "forbid"

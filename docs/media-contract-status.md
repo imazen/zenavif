@@ -7,13 +7,17 @@ AV1 session calls, codec incremental steps and MP4 container work, matching
 incremental wrapper forwards absence to its job-owning helper. Native progress
 reporting is unchanged. These source changes have not been built or run.
 
-The committed root, fuzz and downstream locks still contain zencodec at both
-`f73a7e0e` and `7cc3d3ec`: ultrahdr-core `10a79c3a` and its zenmeta retain the
-latter git edges. The MP4-fuzz lock has only the former. Manifests, locks and
-pixel pins remain unchanged by this source migration; matching core/media/IO/
-testkit pins and a unified intermediary graph are prerequisites for
-qualification. The current pixel pin is `1d3ddd21`; the target core pairs with
-`283655c5`. The dated findings below describe their original revisions.
+The optional-control manifests now select core/media/IO/testkit `feb09f9f`
+and pixels `283655c5`, with ultrahdr-core `7e9d296c` using version edges instead
+of the older fixed core revision. Native PNG tests use the qualified `7b6d1436`
+source and its zenflate dependency. Each standalone root carries the shared
+family patches; the downstream consumer requires core 0.2 rather than 0.1.27.
+
+These manifest changes are source-only. Committed locks still describe the old
+graph (including two older core revisions in the AVIF roots). Lock resolution,
+portable graph audit and native/media/fuzz execution remain required. No new
+AVIF or video support is inferred from the PNG/JPEG checks. The dated findings
+below describe their original revisions.
 
 This records unresolved findings from the post-landing review on 2026-10-18.
 The reviewed implementation is main commit `d235ae23`. It is not an assertion
