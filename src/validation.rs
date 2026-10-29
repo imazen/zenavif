@@ -491,7 +491,6 @@ impl crate::EncoderConfig {
             });
         }
 
-        #[cfg(feature = "encode-imazen")]
         if self.lossless {
             return Err(ValidationError::BackendUnsupportedParam {
                 backend: BACKEND,

@@ -318,7 +318,7 @@ ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/ima
 # `__expert`-gated upstream), and the two uncalibrated `ZenEnhancement`
 # variants (`AomIntraEdgeFilter`, `AomRestorationUnitSearch`) were REMOVED
 # upstream — `AomScreenTools`/`DeepSearch` are the surviving set.
-svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "0f63ca13757eea3075f29656b7886143073d2022", optional = true }
+svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "339bfb4ae1262cf9752e5d5d530eee1c01a9bc85", optional = true }
 # AVIF container muxer for the zenav1-svt backend (the zenravif backend muxes
 # inside zenravif; this backend muxes in-crate). The 0.2.0 version is
 # supplied by the [patch.crates-io] git pin below until 0.2.0 publishes.
@@ -340,7 +340,7 @@ fast-ssim2 = { version = "0.8.0", optional = true, features = ["imgref", "rayon"
 # gated on `custom-profiles` and whose fused entry needs BOTH. Neither
 # feature changes the v1 372-feature extraction that profile `B` scores
 # through, so `TargetMetric::Zensim` is byte-unaffected.
-zensim = { git = "https://github.com/imazen/zensim", rev = "8557758809156baba7364bd8cfe32889a61da4e8", optional = true, features = ["imgref", "zenpixels", "feature-regime-v2", "custom-profiles"] }
+zensim = { git = "https://github.com/imazen/zensimx", rev = "8557758809156baba7364bd8cfe32889a61da4e8", optional = true, features = ["imgref", "zenpixels", "feature-regime-v2", "custom-profiles"] }
 # Optional two-pass diffmap dep — butteraugli per-pixel error map drives the
 # per-SB quantizer-scale second pass (`two-pass-butteraugli` feature).
 butteraugli = { version = "0.9.3", optional = true }
@@ -399,7 +399,7 @@ zencodec-testkit = ">=0.1.0, <0.3.0"
 # check_video_{decoder,encoder}_contract for the `media` sessions.
 zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "f73a7e0e01c6d6eefb9f08c61f2bb71100e25f54" }
 sha2 = "0.11.0"
-zensim-target = { git = "https://github.com/imazen/zensim", rev = "8557758809156baba7364bd8cfe32889a61da4e8", default-features = false, features = ["native-probe"] }
+zensim-target = { git = "https://github.com/imazen/zensimx", rev = "8557758809156baba7364bd8cfe32889a61da4e8", default-features = false, features = ["native-probe"] }
 # Exact predictor owner required by zensim::BakeScorer; the optional auto-tune
 # predictor has a separate existing source and is not used for candidate scoring.
 zenpredict-serving = { package = "zenpredict", version = "0.2.0", git = "https://github.com/imazen/zenanalyze", rev = "05de3cbc44b19d8769077d99710b0146c761d6df" }
@@ -433,12 +433,12 @@ png = "0.18.0"
 image = "0.25.10"
 zenbench = { version = "0.1.2", features = ["criterion-compat"] }
 fast-ssim2 = { version = "0.8.0", features = ["imgref"] }
-zensim = { git = "https://github.com/imazen/zensim", rev = "8557758809156baba7364bd8cfe32889a61da4e8", features = ["imgref", "zenpixels", "feature-regime-v2", "custom-profiles"] }
+zensim = { git = "https://github.com/imazen/zensimx", rev = "8557758809156baba7364bd8cfe32889a61da4e8", features = ["imgref", "zenpixels", "feature-regime-v2", "custom-profiles"] }
 # zensim-regress must track the SAME zensim as the dependency above, or the
 # `Zensim` / `ImageSource` types in tests/linku_corpus.rs come from two
 # different zensim crates and don't unify. Registry 0.3.1 depends on zensim
 # 0.2.x; git `main` (0.4.0) depends on 0.3.0. Unpin together at the publish.
-zensim-regress = { git = "https://github.com/imazen/zensim", rev = "8557758809156baba7364bd8cfe32889a61da4e8" }
+zensim-regress = { git = "https://github.com/imazen/zensimx", rev = "8557758809156baba7364bd8cfe32889a61da4e8" }
 # NOTE (merge of origin/main, 2026-08-11): main carried a second, RENAMED
 # `zensim03` path dep so the `zensim_cq_rd` harness could reach 0.3.0's
 # `ZensimProfile::C` while the main dep stayed pinned to registry 0.2.4.

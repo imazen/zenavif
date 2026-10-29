@@ -1688,3 +1688,26 @@ mod chroma_q {
         }
     }
 }
+
+/// `lossless` on the Zenav1Svt backend is refused, not silently dropped to a
+/// lossy stream: the RGB->4:2:0 adapter cannot promise source-lossless output.
+/// The refusal names the semantics (coded-lossless planes exist upstream).
+#[cfg(feature = "encode-imazen")]
+#[test]
+fn svt_rs_lossless_flag_is_refused_honestly() {
+    let px: Vec<rgb::RGB<u8>> = vec![
+        rgb::RGB {
+            r: 64,
+            g: 64,
+            b: 64
+        };
+        32 * 24
+    ];
+    let img = imgref::ImgRef::new(&px, 32, 24);
+    let err = zenavif::encode_rgb8(img, &svt_config().with_lossless(true), stop())
+        .expect_err("lossless over Zenav1Svt must be refused");
+    assert!(
+        err.to_string().contains("lossless"),
+        "unexpected error: {err}"
+    );
+}
