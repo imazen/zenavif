@@ -9,11 +9,11 @@
   forwarding preserves absence, and encode/decode jobs keep their
   `SharedPulse` and native owned cancellation views. Native progress
   reporting is unchanged. zenmp4 no longer depends on `enough` directly.
-  Source and format audits pass; these changes have not been built or run.
-  Core/media/IO/testkit pins remain at `f73a7e0e`, while ultrahdr-core
-  `10a79c3a` and its zenmeta retain zencodec `7cc3d3ec`. The committed root,
-  fuzz and downstream graphs still hold both copies and need unified pins
-  before qualification.
+  Native media/incremental controls and strict Clippy pass on `dee1a361`;
+  paired-parser serializer controls pass on fixture correction `e5760d1c`.
+  Root pins/lock use core `feb09f9f`, pixels `283655c5` and Ultra HDR `7e9d296c`.
+  Downstream/fuzz locks and wider feature/platform coverage remain unqualified.
+  See `benchmarks/optional_pulse_2026-10-29.md`.
 
 - Admit native picture-plane storage through
   `Av1VideoDecoder::with_settings` and rav1d's `max_picture_bytes`.
@@ -209,8 +209,9 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 - Align optional-control manifests on core `feb09f9f`, pixels `283655c5`,
   version-edge Ultra HDR `7e9d296c` and paired native PNG `7b6d1436`.
-  Root, downstream and fuzz consumers carry matching family patches. This is
-  source-only alignment; their old locks and native qualification remain pending.
+  Root, downstream and fuzz consumers carry matching family patches. The root
+  lock and focused native controls are qualified; downstream/fuzz lock and
+  wider feature/platform qualification remain pending.
 
 
 ### Dependency compatibility
