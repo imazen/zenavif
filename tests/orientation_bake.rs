@@ -102,3 +102,160 @@ fn stills_are_written_upright_with_orientation_1() {
         );
     }
 }
+
+// Explicit representation is independent of the compatibility default above.
+#[test]
+fn explicit_stored_orientation_keeps_samples_and_geometry_typed_and_erased() {
+    use zencodec::encode::EncodeOrientation;
+    let px = source();
+    let stride = W as usize * 3 + 6;
+    let mut padded = vec![231; stride * H as usize];
+    for y in 0..H as usize {
+        padded[y * stride..y * stride + W as usize * 3]
+            .copy_from_slice(&px[y * W as usize * 3..(y + 1) * W as usize * 3]);
+    }
+    let slice = PixelSlice::new(&padded, W, H, stride, PixelDescriptor::RGB8_SRGB).unwrap();
+    let mut baseline = None;
+    for o in [
+        Orientation::Identity,
+        Orientation::FlipH,
+        Orientation::Rotate180,
+        Orientation::FlipV,
+        Orientation::Transpose,
+        Orientation::Rotate90,
+        Orientation::Transverse,
+        Orientation::Rotate270,
+    ] {
+        let meta = Metadata::none().with_orientation(o).with_exif(exif_with(o));
+        let mut config = zenavif::AvifEncoderConfig::new().with_lossless(true);
+        // An explicit common request must replace conflicting native overrides,
+        // including when metadata requests identity and therefore has no boxes.
+        *config.inner_mut() = config.inner().clone().rotation(2).mirror(1);
+        // Set the mode before metadata: subsequent metadata must retain it.
+        let typed = config
+            .clone()
+            .job()
+            .try_with_orientation_mode(EncodeOrientation::PreserveStored)
+            .unwrap()
+            .with_metadata_policy(meta.clone(), MetadataPolicy::PreserveExact)
+            .encoder()
+            .unwrap()
+            .encode(slice.clone())
+            .unwrap()
+            .into_vec();
+        let mut erased = config.job().into_dyn_job();
+        erased.set_metadata_policy(meta, MetadataPolicy::PreserveExact);
+        erased
+            .try_set_orientation_mode(EncodeOrientation::PreserveStored)
+            .unwrap();
+        let dynamic = erased
+            .into_encoder()
+            .unwrap()
+            .encode(slice.clone())
+            .unwrap()
+            .into_vec();
+        assert_eq!(
+            typed, dynamic,
+            "{o:?}: erasure preserves exact configured operation"
+        );
+        let codecs = zencodec::CodecSet::new()
+            .with_send_encoder(zenavif::AvifEncoderConfig::new().with_lossless(true));
+        let request = zencodec::operation::EncodeRequest::new(zencodec::ImageFormat::Avif)
+            .with_orientation_mode(EncodeOrientation::PreserveStored);
+        let mut regular = request.prepare(&codecs).unwrap().pop().unwrap().into_job();
+        regular.set_metadata_policy(
+            Metadata::none().with_orientation(o).with_exif(exif_with(o)),
+            MetadataPolicy::PreserveExact,
+        );
+        assert_eq!(
+            regular
+                .into_encoder()
+                .unwrap()
+                .encode(slice.clone())
+                .unwrap()
+                .into_vec(),
+            typed
+        );
+        let mut send = request
+            .prepare_send(&codecs)
+            .unwrap()
+            .pop()
+            .unwrap()
+            .into_job();
+        send.set_metadata_policy(
+            Metadata::none().with_orientation(o).with_exif(exif_with(o)),
+            MetadataPolicy::PreserveExact,
+        );
+        assert_eq!(
+            send.into_encoder()
+                .unwrap()
+                .encode(slice.clone())
+                .unwrap()
+                .into_vec(),
+            typed
+        );
+        let out = zenavif::AvifDecoderConfig::new()
+            .job()
+            .decoder(Cow::Borrowed(&typed), &[PixelDescriptor::RGB8_SRGB])
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert_eq!(out.info().orientation, o);
+        assert_eq!((out.pixels().width(), out.pixels().rows()), (W, H));
+        let bytes: Vec<u8> = (0..H).flat_map(|y| out.pixels().row(y).to_vec()).collect();
+        if let Some(expected) = &baseline {
+            assert_eq!(&bytes, expected, "{o:?}: stored samples changed");
+        } else {
+            baseline = Some(bytes);
+        }
+        let parsed = zenavif_parse::AvifParser::from_bytes(&typed).unwrap();
+        let coded = parsed.primary_metadata().unwrap();
+        assert_eq!(
+            (coded.max_frame_width.get(), coded.max_frame_height.get()),
+            (W, H)
+        );
+    }
+}
+
+#[test]
+fn explicit_bake_retains_default_still_bytes_and_refuses_animation() {
+    use zencodec::encode::EncodeOrientation;
+    let px = source();
+    let slice = PixelSlice::new(&px, W, H, W as usize * 3, PixelDescriptor::RGB8_SRGB).unwrap();
+    let config = zenavif::AvifEncoderConfig::new().with_lossless(true);
+    let meta = Metadata::none().with_orientation(Orientation::Rotate90);
+    let expected = config
+        .clone()
+        .job()
+        .with_metadata_policy(meta.clone(), MetadataPolicy::PreserveExact)
+        .encoder()
+        .unwrap()
+        .encode(slice.clone())
+        .unwrap()
+        .into_vec();
+    let actual = config
+        .clone()
+        .job()
+        .with_metadata_policy(meta, MetadataPolicy::PreserveExact)
+        .try_with_orientation_mode(EncodeOrientation::Bake)
+        .unwrap()
+        .encoder()
+        .unwrap()
+        .encode(slice.clone())
+        .unwrap()
+        .into_vec();
+    assert_eq!(actual, expected);
+    let result = config
+        .job()
+        .try_with_orientation_mode(EncodeOrientation::Bake)
+        .unwrap()
+        .animation_frame_encoder();
+    let error = match result {
+        Ok(_) => panic!("animation baking is unsupported"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        zencodec::find_cause::<zencodec::UnsupportedOperation>(&error),
+        Some(&zencodec::UnsupportedOperation::EncodeOrientation)
+    );
+}

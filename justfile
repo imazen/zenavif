@@ -496,3 +496,8 @@ beta-cohort-check:
 serializer-consumer-check:
     cargo test --locked -p zenavif --features encode-imazen --test encode_contracts --test animation_encode_admission --test animation_encode_timing -- --test-threads=1
     cargo clippy --locked -p zenavif --features encode-imazen --lib -- -D warnings
+
+# Stored representation is independent of the compatibility baking default.
+checked-orientation:
+    cargo test --locked -p zenavif --features encode-imazen --test orientation_bake
+    cargo clippy --locked -p zenavif --features encode-imazen --lib --test orientation_bake -- -D warnings

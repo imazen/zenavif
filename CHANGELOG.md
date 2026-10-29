@@ -3477,3 +3477,10 @@ why none of them is the seam's to pick unilaterally.
   aarch64 panic fixes while the fix was making its way through a release
   (01c02d0).
 
+
+## Checked orientation representation (unreleased review)
+
+- Implement the shared stored-orientation requirement without changing default
+  baking. Keep native container geometry and sample ordering when requested;
+  refuse unsupported animation baking before encoder construction.
+- Coordinate shared core and pixels pins for the new checked job method.
