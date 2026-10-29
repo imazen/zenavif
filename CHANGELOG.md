@@ -2,6 +2,10 @@
 
 ## AV1 media sessions (unreleased)
 
+- Align native zenravif to `fab98d6f` for the coordinated serializer source
+  (`c9892824`, `521d4823`). Eleven native encode/animation controls and strict
+  library Clippy pass; see `benchmarks/serializer_consumer_2026-10-29.md`.
+
 - Match zencodec `a7c2a6ca`'s optional borrowed Pulse contracts for AV1
   media sessions, incremental decoding and zenmp4 demux/mux work
   (`421de7b9`, `0af13c06`). These calls and the existing animation methods
