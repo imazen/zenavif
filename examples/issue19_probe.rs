@@ -20,6 +20,7 @@
 //!   <source.png> <out_dir> [q_start q_end]
 //! ```
 
+use std::io::BufWriter;
 use std::path::Path;
 
 use almost_enough::{StopToken, Unstoppable};
@@ -27,6 +28,21 @@ use imgref::{Img, ImgRef, ImgVec};
 use rgb::Rgb;
 use sha2::{Digest, Sha256};
 use zenavif::{Av1Backend, EncodeChromaSubsampling, EncoderConfig};
+
+fn write_png(path: &str, img: ImgRef<'_, Rgb<u8>>) -> Result<(), String> {
+    let f = std::fs::File::create(path).map_err(|e| format!("{path}: {e}"))?;
+    let mut enc = png::Encoder::new(BufWriter::new(f), img.width() as u32, img.height() as u32);
+    enc.set_color(png::ColorType::Rgb);
+    enc.set_depth(png::BitDepth::Eight);
+    let mut w = enc.write_header().map_err(|e| e.to_string())?;
+    let mut buf = Vec::with_capacity(img.width() * img.height() * 3);
+    for row in img.rows() {
+        for p in row {
+            buf.extend_from_slice(&[p.r, p.g, p.b]);
+        }
+    }
+    w.write_image_data(&buf).map_err(|e| e.to_string())
+}
 
 fn load_rgb8(path: &Path) -> Result<ImgVec<Rgb<u8>>, String> {
     let img = image::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
@@ -96,6 +112,7 @@ fn main() -> Result<(), String> {
         let dec_img: ImgRef<'_, Rgb<u8>> = decoded
             .try_as_imgref::<Rgb<u8>>()
             .ok_or("decoded image not RGB8-viewable")?;
+        write_png(&format!("{out_dir}/q{q:02.0}.dec.png"), dec_img)?;
         let ssim2 = fast_ssim2::compute_ssimulacra2(src_tri.as_ref(), tri(dec_img).as_ref())
             .map_err(|e| format!("q{q}: ssim2: {e}"))?;
         let ba = butteraugli::butteraugli(reference.as_ref(), dec_img, &ba_params)
