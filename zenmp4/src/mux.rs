@@ -872,7 +872,8 @@ impl Muxer for Mp4Muxer {
         })
     }
 
-    fn write_packet(&mut self, mut packet: Packet, pulse: &dyn zencodec::Pulse) -> Res<()> {
+    fn write_packet(&mut self, mut packet: Packet, pulse: Option<&dyn zencodec::Pulse>) -> Res<()> {
+        let pulse = pulse.unwrap_or(&zencodec::NoPulse);
         pulse.check()?;
         if !self.begun {
             return Err(SessionError::Protocol(ProtocolViolation::NoBegin));
@@ -1018,7 +1019,8 @@ impl Muxer for Mp4Muxer {
         self.out.take_into(into);
     }
 
-    fn finish(mut self, pulse: &dyn zencodec::Pulse) -> Res<MuxFinish> {
+    fn finish(mut self, pulse: Option<&dyn zencodec::Pulse>) -> Res<MuxFinish> {
+        let pulse = pulse.unwrap_or(&zencodec::NoPulse);
         pulse.check()?;
         if !self.begun {
             return Err(SessionError::Protocol(ProtocolViolation::NoBegin));

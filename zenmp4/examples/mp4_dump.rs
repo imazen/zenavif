@@ -24,7 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut packets = Vec::new();
     loop {
         let y = cursor
-            .next(&bytes, &mut DemuxStage(&mut dem), &NoPulse)
+            .next(&bytes, &mut DemuxStage(&mut dem), Some(&NoPulse))
             .map_err(|e| format!("{e:?}"))?;
         let done = y.is_finished();
         match y.into_inner() {

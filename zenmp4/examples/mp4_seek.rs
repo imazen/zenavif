@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cursor = SliceCursor::new(1 << 12);
     while !matches!(
         cursor
-            .next(&bytes, &mut DemuxStage(&mut dem), &NoPulse)
+            .next(&bytes, &mut DemuxStage(&mut dem), Some(&NoPulse))
             .map_err(|e| format!("{e:?}"))?
             .into_inner(),
         DemuxEvent::Headers
@@ -55,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         SeekStatus::Positioned(r) => r,
         _ => loop {
             if let DemuxEvent::Seeked(r) = cursor
-                .next(&bytes, &mut DemuxStage(&mut dem), &NoPulse)
+                .next(&bytes, &mut DemuxStage(&mut dem), Some(&NoPulse))
                 .map_err(|e| format!("{e:?}"))?
                 .into_inner()
             {
@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let next = loop {
         match cursor
-            .next(&bytes, &mut DemuxStage(&mut dem), &NoPulse)
+            .next(&bytes, &mut DemuxStage(&mut dem), Some(&NoPulse))
             .map_err(|e| format!("{e:?}"))?
             .into_inner()
         {

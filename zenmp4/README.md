@@ -4,6 +4,11 @@ MP4 (ISO base media file format) for `zencodec-media`, sans-I/O: the
 demuxer asks for byte ranges, and any `zencodec-io` driver (slice,
 `ReadAt`, `Read`, async) answers them.
 
+`Demuxer::step`, `Muxer::write_packet` and `Muxer::finish` accept an optional
+borrowed Pulse. `None` adds no per-call control; parsing, limits and timing
+validation still apply. This source migration targets zencodec `a7c2a6ca` and
+has not been compiled or tested with the still-pinned dependency graph.
+
 - Progressive files, `moov` before or after `mdat`.
 - Fragmented files (`moov` with `mvex`, then `moof` + `mdat`).
 - Packets in file order, with pts, dts, duration and random-access

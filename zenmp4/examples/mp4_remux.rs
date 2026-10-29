@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut out = Vec::new();
     loop {
         let y = cursor
-            .next(&bytes, &mut DemuxStage(&mut dem), &NoPulse)
+            .next(&bytes, &mut DemuxStage(&mut dem), Some(&NoPulse))
             .map_err(|e| format!("demux: {e:?}"))?;
         let done = y.is_finished();
         match y.into_inner() {
@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .map_err(|e| format!("begin: {e:?}"))?;
             }
             DemuxEvent::Packet(p) => {
-                mux.write_packet(p, &NoPulse)
+                mux.write_packet(p, Some(&NoPulse))
                     .map_err(|e| format!("write: {e:?}"))?;
                 mux.take_output(&mut out);
             }
@@ -45,7 +45,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             break;
         }
     }
-    let finish = mux.finish(&NoPulse).map_err(|e| format!("finish: {e:?}"))?;
+    let finish = mux
+        .finish(Some(&NoPulse))
+        .map_err(|e| format!("finish: {e:?}"))?;
     finish
         .apply_to(&mut out)
         .map_err(|e| format!("patch: {e:?}"))?;

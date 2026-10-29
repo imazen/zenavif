@@ -1174,7 +1174,12 @@ fn sample_table(
 impl Demuxer for Mp4Demuxer {
     type Error = Mp4Error;
 
-    fn step(&mut self, input: Input<'_>, pulse: &dyn zencodec::Pulse) -> Res<DemuxProgress> {
+    fn step(
+        &mut self,
+        input: Input<'_>,
+        pulse: Option<&dyn zencodec::Pulse>,
+    ) -> Res<DemuxProgress> {
+        let pulse = pulse.unwrap_or(&zencodec::NoPulse);
         pulse.check()?;
         self.requests.clear();
         match self.phase {
