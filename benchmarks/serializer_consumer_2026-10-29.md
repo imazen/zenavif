@@ -25,3 +25,10 @@ The root patch selects this workspace's serializer. Downstream roots must align
 their own serializer/parse sources and regenerate their locks; this test is not
 proof of the complete portable zenpipe graph. Fuzz, full API and platform gates
 remain separate. No crate was published.
+
+## Root-selected serializer follow-up
+
+`ca4bfaf4` consumes zenravif `52bb0243`, whose serializer is a registry edge
+selected by the application root. This removes the cyclic Git revision constraint.
+The resolved package delta is only zenravif's source revision; all 11 controls
+and strict Clippy pass again. Receipt: `run-heavy: done rc=0 24s | peak-RSS 0.45GiB | min-avail 14564MiB | peak-load 1.05`.

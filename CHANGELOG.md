@@ -2,7 +2,7 @@
 
 ## AV1 media sessions (unreleased)
 
-- Align native zenravif to `fab98d6f` for the coordinated serializer source
+- Align native zenravif to `52bb0243` (root-selected serializer, `ca4bfaf4`) for the coordinated serializer source
   (`c9892824`, `521d4823`). Eleven native encode/animation controls and strict
   library Clippy pass; see `benchmarks/serializer_consumer_2026-10-29.md`.
 
