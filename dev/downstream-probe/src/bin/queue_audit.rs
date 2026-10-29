@@ -49,10 +49,10 @@ fn main() {
         let mut accepted = 0usize;
         let mut pending = false;
         for index in 0..128 {
-            match encoder.send(&frame(index), &NoPulse).unwrap() {
+            match encoder.send(&frame(index), Some(&NoPulse)).unwrap() {
                 SendStatus::Accepted => accepted += 1,
                 SendStatus::ReceivePending => {
-                    let Receive::Ready(packet) = encoder.receive(&NoPulse).unwrap() else {
+                    let Receive::Ready(packet) = encoder.receive(Some(&NoPulse)).unwrap() else {
                         panic!("backpressure did not provide output");
                     };
                     assert_eq!(packet.pts(), Some(Timestamp::new(0, TimeBase::MILLIS)));

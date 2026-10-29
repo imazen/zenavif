@@ -56,9 +56,10 @@ impl IncrementalDecode for AvifIncremental {
         &mut self,
         input: Input<'_>,
         sink: &mut dyn DecodeRowSink,
-        pulse: &dyn zencodec::Pulse,
+        pulse: Option<&dyn zencodec::Pulse>,
     ) -> Result<Progress, StepError<Self::Error>> {
-        pulse.check()?;
+        let local_pulse = pulse.unwrap_or(&zencodec::NoPulse);
+        local_pulse.check()?;
         if let Some(limit) = self.max_input_bytes {
             let size = input
                 .total_len

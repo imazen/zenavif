@@ -96,27 +96,27 @@ fn cases() -> Vec<Case> {
 }
 
 fn decode(dec: &mut Av1VideoDecoder, config: &CodecConfig, packets: &[Packet]) -> Vec<Frame> {
-    dec.configure(config, &NoPulse).unwrap();
+    dec.configure(config, Some(&NoPulse)).unwrap();
     let mut frames = Vec::new();
     let mut pending: Vec<Packet> = packets.to_vec();
     pending.reverse();
     while let Some(mut p) = pending.pop() {
         loop {
-            match dec.send(&mut p, &NoPulse).unwrap() {
+            match dec.send(&mut p, Some(&NoPulse)).unwrap() {
                 SendStatus::Accepted => break,
-                _ => match dec.receive(&NoPulse).unwrap() {
+                _ => match dec.receive(Some(&NoPulse)).unwrap() {
                     Receive::Ready(f) => frames.push(f),
                     other => panic!("ReceivePending without output: {other:?}"),
                 },
             }
         }
-        while let Receive::Ready(f) = dec.receive(&NoPulse).unwrap() {
+        while let Receive::Ready(f) = dec.receive(Some(&NoPulse)).unwrap() {
             frames.push(f);
         }
     }
     dec.end_input().unwrap();
     loop {
-        match dec.receive(&NoPulse).unwrap() {
+        match dec.receive(Some(&NoPulse)).unwrap() {
             Receive::Ready(f) => frames.push(f),
             Receive::EndOfStream => break,
             Receive::NeedInput => panic!("NeedInput after end_input"),

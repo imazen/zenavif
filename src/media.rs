@@ -367,7 +367,8 @@ fn resolve_color(bitstream: Cicp, container: Option<Cicp>) -> Cicp {
 impl VideoDecoder for Av1VideoDecoder {
     type Error = Av1SessionError;
 
-    fn configure(&mut self, config: &CodecConfig, pulse: &dyn zencodec::Pulse) -> Res<()> {
+    fn configure(&mut self, config: &CodecConfig, pulse: Option<&dyn zencodec::Pulse>) -> Res<()> {
+        let pulse = pulse.unwrap_or(&zencodec::NoPulse);
         pulse.check()?;
         if let Some(owned) = &self.owned_stop {
             owned.check()?;
@@ -380,7 +381,12 @@ impl VideoDecoder for Av1VideoDecoder {
         Ok(())
     }
 
-    fn send(&mut self, packet: &mut Packet, pulse: &dyn zencodec::Pulse) -> Res<SendStatus> {
+    fn send(
+        &mut self,
+        packet: &mut Packet,
+        pulse: Option<&dyn zencodec::Pulse>,
+    ) -> Res<SendStatus> {
+        let pulse = pulse.unwrap_or(&zencodec::NoPulse);
         pulse.check()?;
         if let Some(owned) = &self.owned_stop {
             owned.check()?;
@@ -459,7 +465,8 @@ impl VideoDecoder for Av1VideoDecoder {
         Ok(SendStatus::Accepted)
     }
 
-    fn receive(&mut self, pulse: &dyn zencodec::Pulse) -> Res<Receive<Frame>> {
+    fn receive(&mut self, pulse: Option<&dyn zencodec::Pulse>) -> Res<Receive<Frame>> {
+        let pulse = pulse.unwrap_or(&zencodec::NoPulse);
         pulse.check()?;
         if let Some(owned) = &self.owned_stop {
             owned.check()?;
@@ -627,11 +634,11 @@ mod tests {
         decoder
             .configure(
                 &CodecConfig::new(CodecId::Av1, zencodec::time::TimeBase::MILLIS),
-                &zencodec::NoPulse,
+                Some(&zencodec::NoPulse),
             )
             .unwrap();
         let original = packet.bytes().to_vec();
-        let result = decoder.send(&mut packet, &zencodec::NoPulse);
+        let result = decoder.send(&mut packet, Some(&zencodec::NoPulse));
         if clock_mismatch {
             assert!(
                 matches!(
@@ -1455,7 +1462,8 @@ mod encode {
     impl VideoEncoder for Av1VideoEncoder {
         type Error = Av1SessionError;
 
-        fn send(&mut self, frame: &Frame, pulse: &dyn zencodec::Pulse) -> Res<SendStatus> {
+        fn send(&mut self, frame: &Frame, pulse: Option<&dyn zencodec::Pulse>) -> Res<SendStatus> {
+            let pulse = pulse.unwrap_or(&zencodec::NoPulse);
             pulse.check()?;
             if let Some(owned) = &self.owned_stop {
                 owned.check()?;
@@ -1552,7 +1560,8 @@ mod encode {
             Ok(SendStatus::Accepted)
         }
 
-        fn receive(&mut self, pulse: &dyn zencodec::Pulse) -> Res<Receive<Packet>> {
+        fn receive(&mut self, pulse: Option<&dyn zencodec::Pulse>) -> Res<Receive<Packet>> {
+            let pulse = pulse.unwrap_or(&zencodec::NoPulse);
             pulse.check()?;
             if let Some(owned) = &self.owned_stop {
                 owned.check()?;

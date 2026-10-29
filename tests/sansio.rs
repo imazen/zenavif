@@ -49,8 +49,51 @@ fn incremental_input_limits_bound_growing_prefix_requests() {
             Input::new(0, &data[..limit as usize + 1])
         };
         assert!(matches!(
-            decoder.step(input, &mut sink, &NoPulse),
+            decoder.step(input, &mut sink, Some(&NoPulse)),
             Err(StepError::Codec(_))
         ));
     }
+}
+
+#[test]
+fn absent_call_control_keeps_the_retained_incremental_job_stop() {
+    use enough::{Stop, StopReason};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    use zencodec::decode::DecodeJob;
+    use zencodec::{CodecErrorExt, ErrorCategory, SharedPulse};
+    use zencodec_io::{CollectSink, drive_from_slice};
+    struct Switch(Arc<AtomicBool>);
+    impl Stop for Switch {
+        fn check(&self) -> Result<(), StopReason> {
+            if self.0.load(Ordering::SeqCst) {
+                Err(StopReason::TimedOut)
+            } else {
+                Ok(())
+            }
+        }
+    }
+    let stopped = Arc::new(AtomicBool::new(false));
+    let pulse = SharedPulse::new(zencodec::how_far::StopOnly::new(Switch(stopped.clone())));
+    let mut decoder = AvifDecoderConfig::new()
+        .job()
+        .with_pulse(pulse)
+        .dyn_incremental_decoder(&[])
+        .unwrap();
+    stopped.store(true, Ordering::SeqCst);
+    let data = include_bytes!("vectors/libavif/kodim03_yuv420_8bpc.avif");
+    let mut sink = CollectSink::new();
+    let error = drive_from_slice(&mut decoder, data, &mut sink, None, data.len()).unwrap_err();
+    assert_eq!(
+        error.error_category(),
+        Some(ErrorCategory::Stopped(StopReason::TimedOut))
+    );
+    assert!(matches!(
+        zencodec::find_cause::<zenavif::Error>(&error),
+        Some(zenavif::Error::Cancelled(StopReason::TimedOut))
+    ));
+    assert_eq!(sink.rows_written(), 0);
+    assert!(!sink.finished());
 }
