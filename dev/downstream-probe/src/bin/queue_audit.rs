@@ -44,7 +44,7 @@ fn main() {
         let settings = Av1EncodeSettings::new(32, 32)
             .with_speed(speed)
             .with_threads(1)
-            .with_max_queued_frames(cap);
+            .with_output_pull_threshold(cap);
         let mut encoder = Av1VideoEncoder::new(settings, TimeBase::MILLIS).unwrap();
         let mut accepted = 0usize;
         let mut pending = false;

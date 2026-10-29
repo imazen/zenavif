@@ -869,10 +869,22 @@ mod encode {
             self
         }
 
-        /// The session's queue length.
-        pub fn with_max_queued_frames(mut self, frames: usize) -> Self {
+        /// Attempt to pull output after this many frames are in flight.
+        ///
+        /// This is not a hard input-capacity or memory limit. A backend needing
+        /// lookahead may accept more frames until output becomes available.
+        /// Zero is rejected when constructing the session.
+        pub fn with_output_pull_threshold(mut self, frames: usize) -> Self {
             self.max_queued_frames = frames;
             self
+        }
+
+        /// Compatibility spelling for the output pull threshold, not a hard cap.
+        #[deprecated(
+            note = "use with_output_pull_threshold; this setting is not a hard queue or memory bound"
+        )]
+        pub fn with_max_queued_frames(self, frames: usize) -> Self {
+            self.with_output_pull_threshold(frames)
         }
 
         /// The nominal frame rate, `numerator / denominator` frames per

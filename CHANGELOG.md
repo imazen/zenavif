@@ -2,6 +2,10 @@
 
 ## AV1 media sessions (unreleased)
 
+- Add `Av1EncodeSettings::with_output_pull_threshold`; deprecate the misleading
+  `with_max_queued_frames` builder without changing its soft-trigger behavior.
+  Native lookahead may exceed this threshold. Hard admission bounds remain open.
+
 - Align native zenravif to `52bb0243` (root-selected serializer, `ca4bfaf4`) for the coordinated serializer source
   (`c9892824`, `521d4823`). Eleven native encode/animation controls and strict
   library Clippy pass; see `benchmarks/serializer_consumer_2026-10-29.md`.

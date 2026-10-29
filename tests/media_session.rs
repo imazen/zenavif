@@ -286,7 +286,7 @@ fn the_session_meets_the_encoder_contract() {
                     Av1EncodeSettings::new(32, 32)
                         .with_speed(10)
                         .with_threads(1)
-                        .with_max_queued_frames(queue),
+                        .with_output_pull_threshold(queue),
                     TB,
                 )
                 .unwrap()
@@ -298,6 +298,7 @@ fn the_session_meets_the_encoder_contract() {
 }
 
 #[test]
+#[allow(deprecated)] // Preserve the legacy soft-threshold compatibility contract.
 fn the_default_speed_meets_the_contract_with_a_short_queue() {
     let frames: Vec<Frame> = (0..30)
         .map(|i| frame(i, 8, Subsampling::Yuv420, 32, 32, i as i64 * 40))
@@ -1282,7 +1283,7 @@ mod svt {
     #[test]
     fn svt_sessions_meet_the_encoder_contract() {
         for queue in [1, 64] {
-            let s = svt(8, Subsampling::Yuv420, 1).with_max_queued_frames(queue);
+            let s = svt(8, Subsampling::Yuv420, 1).with_output_pull_threshold(queue);
             let frames: Vec<Frame> = (0..9).map(|i| smooth(&s, i, i as i64 * 40)).collect();
             check_video_encoder_contract(|| Av1VideoEncoder::new(s.clone(), TB).unwrap(), &frames)
                 .unwrap_or_else(|e| panic!("queue {queue}: {e:?}"));
