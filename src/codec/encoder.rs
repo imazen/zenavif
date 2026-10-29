@@ -20,6 +20,8 @@ mod tests;
 /// Single-image AVIF encoder.
 #[cfg(feature = "encode")]
 pub struct AvifEncoder {
+    pub(super) planned_orientation: Option<zencodec::encode::OrientationPlan>,
+    pub(super) declaration: Option<zencodec::encode::EncodeDeclaration<'static>>,
     pub(super) config: crate::EncoderConfig,
     /// The job's control. The native encoders poll it for cancellation only.
     pub(super) pulse: Option<zencodec::SharedPulse>,
@@ -42,6 +44,26 @@ pub struct AvifEncoder {
 
 #[cfg(feature = "encode")]
 impl AvifEncoder {
+    fn validate_declared(
+        &self,
+        width: u32,
+        height: u32,
+        descriptor: PixelDescriptor,
+        has_color: bool,
+    ) -> Result<(), At<CodecError>> {
+        if let Some(declaration) = self.declaration
+            && (width != declaration.width
+                || height != declaration.height
+                || descriptor != declaration.descriptor
+                || has_color)
+        {
+            return Err(super::declared::refusal(
+                zencodec::encode::EncodePlanError::Changed,
+            ));
+        }
+        Ok(())
+    }
+
     fn build_config(&self) -> crate::EncoderConfig {
         let mut cfg = self.config.clone();
         if let Some(ref exif) = self.exif {
@@ -433,6 +455,40 @@ impl AvifEncoder {
 
 #[cfg(feature = "encode")]
 impl zencodec::encode::Encoder for AvifEncoder {
+    fn begin_declared(
+        &mut self,
+        declaration: &zencodec::encode::EncodeDeclaration<'_>,
+    ) -> Result<zencodec::encode::EncodePlan, Self::Error> {
+        if self.declaration.is_some() {
+            return Err(super::declared::refusal(
+                zencodec::encode::EncodePlanError::Changed,
+            ));
+        }
+        if !super::declared::color_supported(&self.config)
+            || self.icc_profile.is_some()
+            || self.caller_cicp.is_some_and(|c| c != zencodec::Cicp::SRGB)
+        {
+            return Err(super::declared::refusal(
+                zencodec::UnsupportedOperation::EncodePlanning,
+            ));
+        }
+        let plan = super::declared::plan(
+            declaration,
+            self.planned_orientation,
+            self.orientation,
+            &self.limits,
+        )?;
+        self.declaration = Some(
+            zencodec::encode::EncodeDeclaration::new(
+                declaration.width,
+                declaration.height,
+                declaration.descriptor,
+            )
+            .with_access(declaration.access),
+        );
+        Ok(plan)
+    }
+
     type Error = At<CodecError>;
 
     fn reject(op: zencodec::UnsupportedOperation) -> At<CodecError> {
@@ -449,11 +505,18 @@ impl zencodec::encode::Encoder for AvifEncoder {
         height: u32,
         stride_pixels: u32,
     ) -> Result<EncodeOutput, At<CodecError>> {
+        self.validate_declared(width, height, PixelDescriptor::RGBA8_SRGB, false)?;
         self.encode_srgba8_inner(data, make_opaque, width, height, stride_pixels)
             .map_err(zencodec::CodecError::of)
     }
 
     fn encode(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<CodecError>> {
+        self.validate_declared(
+            pixels.width(),
+            pixels.rows(),
+            pixels.descriptor(),
+            pixels.color_context().is_some(),
+        )?;
         self.encode_inner(pixels).map_err(zencodec::CodecError::of)
     }
 }

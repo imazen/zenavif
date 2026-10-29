@@ -2685,7 +2685,7 @@ dependencies = [
 [[package]]
 name = "zencodec"
 version = "0.2.0"
-source = "git+https://github.com/imazen/zencodec?rev=c6df5d5eb589b20585ad13cd57ce5a4158aa656e#c6df5d5eb589b20585ad13cd57ce5a4158aa656e"
+source = "git+https://github.com/imazen/zencodec?rev=ab133d2ccecacb9c3da427c14ddd13ffd0b235b9#ab133d2ccecacb9c3da427c14ddd13ffd0b235b9"
 dependencies = [
  "almost-enough",
  "enough",
@@ -2698,7 +2698,7 @@ dependencies = [
 [[package]]
 name = "zencodec-io"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zencodec?rev=c6df5d5eb589b20585ad13cd57ce5a4158aa656e#c6df5d5eb589b20585ad13cd57ce5a4158aa656e"
+source = "git+https://github.com/imazen/zencodec?rev=ab133d2ccecacb9c3da427c14ddd13ffd0b235b9#ab133d2ccecacb9c3da427c14ddd13ffd0b235b9"
 dependencies = [
  "enough",
  "how-far",
@@ -2709,7 +2709,7 @@ dependencies = [
 [[package]]
 name = "zencodec-media"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zencodec?rev=c6df5d5eb589b20585ad13cd57ce5a4158aa656e#c6df5d5eb589b20585ad13cd57ce5a4158aa656e"
+source = "git+https://github.com/imazen/zencodec?rev=ab133d2ccecacb9c3da427c14ddd13ffd0b235b9#ab133d2ccecacb9c3da427c14ddd13ffd0b235b9"
 dependencies = [
  "enough",
  "zencodec",
@@ -2720,7 +2720,7 @@ dependencies = [
 [[package]]
 name = "zencodec-media-testkit"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zencodec?rev=c6df5d5eb589b20585ad13cd57ce5a4158aa656e#c6df5d5eb589b20585ad13cd57ce5a4158aa656e"
+source = "git+https://github.com/imazen/zencodec?rev=ab133d2ccecacb9c3da427c14ddd13ffd0b235b9#ab133d2ccecacb9c3da427c14ddd13ffd0b235b9"
 dependencies = [
  "enough",
  "zencodec",
@@ -2732,7 +2732,7 @@ dependencies = [
 [[package]]
 name = "zencodec-testkit"
 version = "0.2.0"
-source = "git+https://github.com/imazen/zencodec?rev=c6df5d5eb589b20585ad13cd57ce5a4158aa656e#c6df5d5eb589b20585ad13cd57ce5a4158aa656e"
+source = "git+https://github.com/imazen/zencodec?rev=ab133d2ccecacb9c3da427c14ddd13ffd0b235b9#ab133d2ccecacb9c3da427c14ddd13ffd0b235b9"
 dependencies = [
  "enough",
  "whereat",
@@ -2753,7 +2753,7 @@ dependencies = [
 [[package]]
 name = "zenmeta"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zencodec?rev=c6df5d5eb589b20585ad13cd57ce5a4158aa656e#c6df5d5eb589b20585ad13cd57ce5a4158aa656e"
+source = "git+https://github.com/imazen/zencodec?rev=ab133d2ccecacb9c3da427c14ddd13ffd0b235b9#ab133d2ccecacb9c3da427c14ddd13ffd0b235b9"
 dependencies = [
  "zencodec",
  "zenpixels 0.3.1",
@@ -3130,4 +3130,4 @@ dependencies = [
 [[patch.unused]]
 name = "zencodec-coroutine"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zencodec?rev=c6df5d5eb589b20585ad13cd57ce5a4158aa656e#c6df5d5eb589b20585ad13cd57ce5a4158aa656e"
+source = "git+https://github.com/imazen/zencodec?rev=ab133d2ccecacb9c3da427c14ddd13ffd0b235b9#ab133d2ccecacb9c3da427c14ddd13ffd0b235b9"

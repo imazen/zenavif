@@ -24,6 +24,28 @@ cross the production native/core pixel boundary, but complete development graph
 unification remains open. No unrelated package version/source moved.
 
 Same-codec parity is not independent reader conformance. Required animation
-baking refuses; it is not implemented. Shared retained-plan orientation facts,
-row/replay acquisition and memory bounds remain unqualified. The default still
+baking refuses; it is not implemented. The follow-up below qualifies shared retained-plan orientation facts.
+Row/replay acquisition and memory bounds remain unqualified. The default still
 behavior stays baked; default animation behavior stays carried.
+
+## Retained planning follow-up
+
+`plan_encode` and `begin_declared` share validation and report whole-raster input
+plus applied/carried orientation. Startup preserves retained dimensions and
+pixel descriptor; encoding rejects later geometry, descriptor or color changes.
+Unknown native transform overrides remain unknown facts. Canonical RGB8/RGBA8
+sRGB is supported; explicit color contexts, exact-depth assertions and other
+layouts refuse during preflight. These refusals do not poison startup.
+
+Eight native tests cover plan/start agreement and ordinary-byte parity for every
+orientation and both representations, the existing stored/baked regressions,
+changed declarations, unsupported declarations, typed resource-limit errors,
+repeated startup, exact-depth and late color-context refusal. The original pixel
+and EXIF/XMP assertions remain unchanged. No native allocation bound is claimed.
+
+Portable git graph: core ab133d2c, pixels f23ac753; four roots resolved,
+eight tests and strict library/test Clippy pass. Wrapper rc0/41s,
+peak RSS 0.45GiB, minimum available 11327MiB. Lock identity deltas are
+12/4/8/6 records respectively (old plus new core-family identities); no unrelated
+package version/source changed. The initial media pixel split failure is retained;
+matching shared pixel floors repairs it without excluding media or tests.

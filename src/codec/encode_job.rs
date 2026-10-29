@@ -41,6 +41,20 @@ pub struct AvifEncodeJob {
 
 #[cfg(feature = "encode")]
 impl AvifEncodeJob {
+    fn orientation_plan(&self) -> Option<zencodec::encode::OrientationPlan> {
+        use zencodec::encode::{EncodeOrientation, OrientationPlan};
+        match self.orientation_mode {
+            Some(EncodeOrientation::PreserveStored) => {
+                Some(OrientationPlan::preserved(self.orientation))
+            }
+            Some(EncodeOrientation::Bake) => Some(OrientationPlan::baked(self.orientation)),
+            None if self.config.inner.rotation.is_none() && self.config.inner.mirror.is_none() => {
+                Some(OrientationPlan::baked(self.orientation))
+            }
+            _ => None,
+        }
+    }
+
     /// Set EXIF metadata to embed in the encoded AVIF.
     #[must_use]
     pub fn with_exif(mut self, exif: impl Into<Arc<[u8]>>) -> Self {
@@ -113,7 +127,33 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         }
     }
 
+    fn plan_encode(
+        &self,
+        declaration: &zencodec::encode::EncodeDeclaration<'_>,
+    ) -> Result<zencodec::encode::EncodePlan, zencodec::encode::BoxedError> {
+        if !super::declared::color_supported(&self.config.inner)
+            || self.icc_profile.is_some()
+            || self.cicp.is_some_and(|c| c != zencodec::Cicp::SRGB)
+        {
+            return Err(Box::new(super::declared::refusal(
+                zencodec::UnsupportedOperation::EncodePlanning,
+            )));
+        }
+        let orientation = self.orientation_plan();
+        let applied = if matches!(
+            self.orientation_mode,
+            Some(zencodec::encode::EncodeOrientation::PreserveStored)
+        ) {
+            zencodec::Orientation::Identity
+        } else {
+            self.orientation
+        };
+        super::declared::plan(declaration, orientation, applied, &self.limits)
+            .map_err(|e| Box::new(e) as zencodec::encode::BoxedError)
+    }
+
     fn encoder(self) -> Result<AvifEncoder, At<CodecError>> {
+        let planned_orientation = self.orientation_plan();
         let mut config = self.config.inner.clone();
         // Resolve the color *description* (ICC vs CICP code points) through
         // zencodec's `resolve_color_emit` — the single source of truth for which
@@ -234,6 +274,8 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
             _ => xmp,
         };
         Ok(AvifEncoder {
+            planned_orientation,
+            declaration: None,
             orientation,
             config,
             pulse: self.pulse,
