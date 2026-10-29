@@ -1,5 +1,20 @@
 # AV1 session contract gaps
 
+The current PR75 source migration accepts `Option<&dyn zencodec::Pulse>` for
+AV1 session calls, codec incremental steps and MP4 container work, matching
+[zencodec `a7c2a6ca`](https://github.com/imazen/zencodec/commit/a7c2a6ca).
+`None` adds no per-call control. Existing owned stops remain active, and the
+incremental wrapper forwards absence to its job-owning helper. Native progress
+reporting is unchanged. These source changes have not been built or run.
+
+The committed root, fuzz and downstream locks still contain zencodec at both
+`f73a7e0e` and `7cc3d3ec`: ultrahdr-core `10a79c3a` and its zenmeta retain the
+latter git edges. The MP4-fuzz lock has only the former. Manifests, locks and
+pixel pins remain unchanged by this source migration; matching core/media/IO/
+testkit pins and a unified intermediary graph are prerequisites for
+qualification. The current pixel pin is `1d3ddd21`; the target core pairs with
+`283655c5`. The dated findings below describe their original revisions.
+
 This records unresolved findings from the post-landing review on 2026-10-18.
 The reviewed implementation is main commit `d235ae23`. It is not an assertion
 that the whole media contract is implemented.

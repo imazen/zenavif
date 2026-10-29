@@ -2,18 +2,18 @@
 
 ## AV1 media sessions (unreleased)
 
-- Adopt zencodec's Pulse controls at review revision `f73a7e0e` (zencodec,
-  zencodec-media, zencodec-io and both testkits). Media sessions, zenmp4's
-  demuxer and muxer, incremental decoding and the animation traits take a
-  borrowed `&dyn zencodec::Pulse`; encode and decode jobs keep the
-  `SharedPulse` from `with_pulse` and give native backends an owned
-  cancellation view of it. No stage reports progress yet.
-  `AvifAnimationFrameEncoder::push_frame_ticks` takes
-  `Option<&dyn zencodec::Pulse>` like the trait methods. zenmp4 no longer
-  depends on `enough` directly. ultrahdr-core `10a79c3a` still reaches
-  zencodec `7cc3d3ec`, so this crate's own graph holds two zencodec copies
-  until that pin moves; a consumer that patches the zencodec Git source to one
-  checkout builds one copy.
+- Match zencodec `a7c2a6ca`'s optional borrowed Pulse contracts for AV1
+  media sessions, incremental decoding and zenmp4 demux/mux work
+  (`421de7b9`, `0af13c06`). These calls and the existing animation methods
+  accept `Option<&dyn zencodec::Pulse>`. `None` adds no per-call control;
+  forwarding preserves absence, and encode/decode jobs keep their
+  `SharedPulse` and native owned cancellation views. Native progress
+  reporting is unchanged. zenmp4 no longer depends on `enough` directly.
+  Source and format audits pass; these changes have not been built or run.
+  Core/media/IO/testkit pins remain at `f73a7e0e`, while ultrahdr-core
+  `10a79c3a` and its zenmeta retain zencodec `7cc3d3ec`. The committed root,
+  fuzz and downstream graphs still hold both copies and need unified pins
+  before qualification.
 
 - Admit native picture-plane storage through
   `Av1VideoDecoder::with_settings` and rav1d's `max_picture_bytes`.
