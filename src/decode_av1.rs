@@ -979,8 +979,11 @@ mod tests {
     /// question from the chroma math.
     ///
     /// Fixtures are the link-u corpus (`just download-linku`; CI provisions
-    /// them). Fail-loud, no graceful skip.
+    /// them). `#[ignore]` so a bare `cargo test` stays green on an
+    /// unprovisioned checkout (imazen/zenavif#47); run explicitly with
+    /// `cargo test --lib -- --ignored` after the download recipe.
     #[test]
+    #[ignore = "needs tests/vectors/link-u (just download-linku)"]
     fn raw_obu_422_matches_the_container_path() {
         for name in [
             "fox.profile2.8bpc.yuv422.avif",
@@ -1124,7 +1127,11 @@ mod tests {
     /// Extract the gain map AV1 data from a test AVIF file and decode it
     /// using `decode_av1_obu`. This exercises the real use case: AVIF gain
     /// maps are stored as raw AV1 bitstreams.
+    /// `#[ignore]` so a bare `cargo test` stays green on an unprovisioned
+    /// checkout (imazen/zenavif#47); run explicitly with
+    /// `cargo test --lib -- --ignored` after `just download-vectors`.
     #[test]
+    #[ignore = "needs tests/vectors/libavif (just download-vectors)"]
     fn decode_gain_map_from_avif_test_file() {
         let avif_path = "tests/vectors/libavif/seine_sdr_gainmap_srgb.avif";
         // Fail-loud: CI provisions the vectors (see ci.yml "Download test

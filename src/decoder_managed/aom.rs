@@ -197,10 +197,10 @@ impl ManagedAvifDecoder {
             pixel_aspect_ratio: spatial.pixel_aspect_ratio,
             content_light_level: self.parser.content_light_level().cloned(),
             mastering_display: self.parser.mastering_display().cloned(),
-            exif: self.exif_for(source)?,
+            exif: self.exif_for(source),
             xmp: self.xmp_for(source)?,
             gain_map: self.extract_gain_map(),
-            depth_map: None,
+            depth_map: self.extract_depth_map(),
         };
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 

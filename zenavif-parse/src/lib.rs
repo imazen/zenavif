@@ -2052,7 +2052,25 @@ impl<'data> AvifParser<'data> {
                 tile_ids.push(*tile_id).map_err(|e| at!(Error::from(e)))?;
             }
 
-            let grid_config = Self::calculate_grid_config(&meta, &tile_ids)?;
+            // The grid item's own data is the ImageGrid descriptor — the
+            // authoritative rows/columns/output size (imazen/zenavif#55).
+            let descriptor = match primary.construction_method {
+                ConstructionMethod::File => Some(Self::resolve_extents_from_raw(
+                    raw.as_ref(),
+                    &parsed.mdat_bounds,
+                    &primary,
+                )?),
+                ConstructionMethod::Idat => Some(
+                    Self::resolve_idat_extents(meta.idat.as_deref(), &primary.extents)?
+                        .into_owned(),
+                ),
+                ConstructionMethod::Item => None,
+            };
+            let descriptor = descriptor
+                .map(|d| parse_grid_descriptor(&d))
+                .transpose()?;
+
+            let grid_config = Self::calculate_grid_config(&meta, &tile_ids, descriptor)?;
 
             // Enforce total_megapixels_limit on grid output dimensions on the
             // default zero-copy path (the eager path also calls this at
@@ -2489,13 +2507,27 @@ impl<'data> AvifParser<'data> {
     }
 
     /// Calculate grid configuration from metadata.
-    fn calculate_grid_config(meta: &AvifInternalMeta, tile_ids: &[u32]) -> Result<GridConfig> {
+    ///
+    /// Precedence: explicit `ImageGrid` property, then the grid item's own
+    /// descriptor (the authoritative layout — ispe division only works when
+    /// the output is an exact tile multiple, which the spec does not
+    /// require; imazen/zenavif#55), then ispe exact-division. When nothing
+    /// determines the layout, error rather than return a 0×0 image.
+    fn calculate_grid_config(
+        meta: &AvifInternalMeta,
+        tile_ids: &[u32],
+        descriptor: Option<GridConfig>,
+    ) -> Result<GridConfig> {
         // Try explicit grid property first
         for prop in &meta.properties {
             if prop.item_id == meta.primary_item_id
                 && let ItemProperty::ImageGrid(grid) = &prop.property {
                     return Ok(grid.clone());
                 }
+        }
+
+        if let Some(grid) = descriptor {
+            return Ok(grid);
         }
 
         // Fall back to ispe calculation
@@ -2537,13 +2569,11 @@ impl<'data> AvifParser<'data> {
                 }
             }
 
-        let tile_count = tile_ids.len();
-        Ok(GridConfig {
-            rows: tile_count.min(255) as u8,
-            columns: 1,
-            output_width: 0,
-            output_height: 0,
-        })
+        let _ = tile_ids;
+        Err(at!(Error::InvalidData(
+            "grid layout cannot be determined: no ImageGrid property, no \
+             readable grid descriptor, and ispe division is not exact",
+        )))
     }
 
     /// Calculate frame duration from sample table.
@@ -3722,6 +3752,9 @@ pub fn read_avif_with_config<T: Read + ?Sized>(
     } else {
         None
     };
+    // An explicit ImageGrid property outranks the item descriptor; the
+    // ispe computation below is only a last-ditch fallback (#55).
+    let grid_from_property = grid_config.is_some();
 
     // Find tile item IDs if this is a grid
     let tile_item_ids: TryVec<u32> = if is_grid {
@@ -3797,16 +3830,10 @@ pub fn read_avif_with_config<T: Read + ?Sized>(
                 }
             }
 
-            // Fallback: if calculation failed or ispe not available, use N×1 inference
-            if grid_config.is_none() {
-                log::debug!("Grid: using fallback {}×1 layout inference", ids.len());
-                grid_config = Some(GridConfig {
-                    rows: ids.len() as u8,  // Changed: vertical stack
-                    columns: 1,              // Changed: single column
-                    output_width: 0,  // Will be calculated from tiles
-                    output_height: 0, // Will be calculated from tiles
-                });
-            }
+            // No N×1 fallback here: the grid descriptor (resolved at tile
+            // extraction below) is the authoritative layout; when nothing
+            // determines it the parse fails rather than reporting 0×0
+            // (imazen/zenavif#55).
         }
 
         ids
@@ -3899,6 +3926,22 @@ pub fn read_avif_with_config<T: Read + ?Sized>(
     // load data of relevant items
     // For grid images, we need to load tiles in the order specified by iref
     if is_grid {
+        // The grid item's own data is the ImageGrid descriptor — the
+        // authoritative layout (imazen/zenavif#55); it outranks the
+        // ispe-derived fallback above.
+        if !grid_from_property {
+            let loc = meta
+                .iloc_items
+                .iter()
+                .find(|loc| loc.item_id == meta.primary_item_id)
+                .ok_or_else(|| at!(Error::InvalidData("grid item not found in iloc")))?;
+            let mut descriptor = TryVec::new();
+            extractor.extract(loc, &mut descriptor)?;
+            let desc = parse_grid_descriptor(&descriptor)?;
+            tracker.validate_total_megapixels(desc.output_width, desc.output_height)?;
+            grid_config = Some(desc);
+        }
+
         for (idx, &tile_id) in tile_item_ids.iter().enumerate() {
             if idx % 16 == 0 {
                 stop.check().map_err(|e| at!(Error::from(e)))?;
@@ -4574,6 +4617,8 @@ fn read_avif_meta_scoped<T: Read + Offset>(src: &mut BMFFBox<'_, T>, options: &P
             warn!("primary_item_id type: {}", item_info.item_type);
             return Err(at!(Error::InvalidData("primary_item_id type is not av01 or grid")));
         }
+
+        check_essential_property_scope(primary_item_id, &properties, &item_references)?;
     }
 
     Ok(AvifInternalMeta {
@@ -4585,6 +4630,54 @@ fn read_avif_meta_scoped<T: Read + Offset>(src: &mut BMFFBox<'_, T>, options: &P
         idat,
         entity_groups,
     })
+}
+
+/// Reject when an *unsupported essential* property hangs off an item the
+/// decode actually consumes (imazen/zenavif#56): the primary item, its
+/// `dimg` inputs (grid tiles; a second level covers derived items like a
+/// `tmap`'s gain-map input), and `auxl` items linked to it (alpha, depth).
+/// An unsupported essential property on any other item — a thumbnail, a
+/// sidecar — means that item must not be processed, not that the file must
+/// be rejected.
+fn check_essential_property_scope(
+    primary_item_id: u32,
+    properties: &[AssociatedProperty],
+    item_references: &[SingleItemTypeReferenceBox],
+) -> Result<()> {
+    if !properties
+        .iter()
+        .any(|p| p.essential && p.property == ItemProperty::Unsupported)
+    {
+        return Ok(());
+    }
+    let is_used = |id: u32| {
+        id == primary_item_id
+            || item_references.iter().any(|iref| {
+                // tile / aux item of the primary
+                (iref.item_type == b"dimg" && iref.from_item_id == primary_item_id
+                    || iref.item_type == b"auxl" && iref.to_item_id == primary_item_id)
+                    && (iref.from_item_id == id || iref.to_item_id == id)
+            })
+            || item_references.iter().any(|iref| {
+                // inputs of a primary-derived item (e.g. tmap's gmap input)
+                iref.item_type == b"dimg"
+                    && iref.to_item_id == id
+                    && iref.from_item_id != primary_item_id
+                    && item_references.iter().any(|parent| {
+                        parent.item_type == b"dimg"
+                            && parent.from_item_id == primary_item_id
+                            && parent.to_item_id == iref.from_item_id
+                    })
+            })
+    };
+    for p in properties {
+        if p.essential && p.property == ItemProperty::Unsupported && is_used(p.item_id) {
+            return Err(at!(Error::Unsupported(
+                "unsupported property marked as essential",
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Parse a Handler Reference Box
@@ -4753,7 +4846,9 @@ fn read_iprp<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
             BoxType::ItemPropertyAssociationBox => {
                 associations = read_ipma(&mut b)?;
             },
-            _ => return Err(at!(Error::InvalidData("unexpected ipco child"))),
+            // ISOBMFF readers skip unknown boxes; an unfamiliar iprp child
+            // must not reject the whole file (imazen/zenavif#56).
+            _ => skip_box_remain(&mut b)?,
         }
     }
 
@@ -4818,17 +4913,24 @@ fn read_iprp<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
             associated.push(AssociatedProperty {
                 item_id: a.item_id,
                 property: entry.property.try_clone().map_err(|e| at!(Error::from(e)))?,
+                essential: a.essential,
             }).map_err(|e| at!(Error::from(e)))?;
         } else if a.essential {
-            // Unknown property marked essential — this item cannot be correctly processed
+            // Unknown property marked essential — this item cannot be
+            // correctly processed, but per ISO/IEC 23008-12 only *that item*
+            // is unprocessable. Record it and let
+            // `check_essential_property_scope` reject only when the item is
+            // one the decode actually consumes (imazen/zenavif#56).
             warn!(
                 "item {} has unsupported property {} marked essential; item will be unusable",
                 a.item_id, entry.fourcc
             );
             if !options.lenient {
-                return Err(at!(Error::Unsupported(
-                    "unsupported property marked as essential",
-                )));
+                associated.push(AssociatedProperty {
+                    item_id: a.item_id,
+                    property: ItemProperty::Unsupported,
+                    essential: true,
+                }).map_err(|e| at!(Error::from(e)))?;
             }
         }
         // Unknown non-essential properties are silently skipped (they're optional)
@@ -4892,6 +4994,8 @@ struct Association {
 pub(crate) struct AssociatedProperty {
     pub item_id: u32,
     pub property: ItemProperty,
+    /// The ipma `essential` flag on this association.
+    pub essential: bool,
 }
 
 fn read_ipma<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TryVec<Association>> {
@@ -5591,6 +5695,12 @@ fn read_stsd<T: Read>(src: &mut BMFFBox<'_, T>) -> Result<TrackCodecConfig> {
         }
     }
 
+    // Drain the rest of the box (remaining sample entries, padding): the
+    // parent `stbl` iterator has already charged the whole `stsd` against
+    // its budget, so unconsumed tail bytes would otherwise be parsed as
+    // the next `stbl` sibling (imazen/zenavif#62).
+    skip_box_remain(src)?;
+
     Ok(config)
 }
 
@@ -6011,15 +6121,23 @@ fn read_minf<T: Read>(
     src: &mut BMFFBox<'_, T>,
     stop: &dyn Stop,
 ) -> Result<Option<(SampleTable, TrackCodecConfig)>> {
+    let mut stbl = None;
     let mut iter = src.box_iter();
     while let Some(mut b) = iter.next_box()? {
         if b.head.name == BoxType::SampleTableBox {
-            return Ok(Some(read_stbl(&mut b, stop)?));
+            // Keep the first stbl, but keep walking: an early return leaves
+            // the rest of `minf` unconsumed and the parent `mdia` iterator
+            // parses the tail as its next sibling (imazen/zenavif#62).
+            if stbl.is_none() {
+                stbl = Some(read_stbl(&mut b, stop)?);
+            } else {
+                skip_box_remain(&mut b)?;
+            }
         } else {
             skip_box_remain(&mut b)?;
         }
     }
-    Ok(None)
+    Ok(stbl)
 }
 
 /// Extract animation frames using sample table
@@ -6086,6 +6204,45 @@ fn extract_animation_frames(
     Ok(frames)
 }
 
+/// Parse the `ImageGrid` derived-item descriptor (the payload of a `grid`
+/// item): `version(8) flags(8) rows_minus_one(8) columns_minus_one(8)` then
+/// 16- or 32-bit output dimensions (`flags & 1` selects the field width).
+fn parse_grid_descriptor(data: &[u8]) -> Result<GridConfig> {
+    if data.len() < 4 {
+        return Err(at!(Error::InvalidData("grid descriptor too short")));
+    }
+    let (version, flags) = (data[0], data[1]);
+    if version != 0 {
+        return Err(at!(Error::Unsupported("grid version > 0")));
+    }
+    let rows = u32::from(data[2]) + 1;
+    let columns = u32::from(data[3]) + 1;
+    let need = if flags & 1 == 0 { 8 } else { 12 };
+    if data.len() < need {
+        return Err(at!(Error::InvalidData("grid descriptor truncated")));
+    }
+    let (output_width, output_height) = if flags & 1 == 0 {
+        (
+            u32::from(u16::from_be_bytes([data[4], data[5]])),
+            u32::from(u16::from_be_bytes([data[6], data[7]])),
+        )
+    } else {
+        (
+            u32::from_be_bytes([data[4], data[5], data[6], data[7]]),
+            u32::from_be_bytes([data[8], data[9], data[10], data[11]]),
+        )
+    };
+    if rows > 255 || columns > 255 {
+        return Err(at!(Error::InvalidData("grid dimensions exceed 255")));
+    }
+    Ok(GridConfig {
+        rows: rows as u8,
+        columns: columns as u8,
+        output_width,
+        output_height,
+    })
+}
+
 /// Parse an ImageGrid property box
 /// See ISO/IEC 23008-12:2017 § 6.6.2.3
 fn read_grid<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Result<GridConfig> {
@@ -6140,6 +6297,22 @@ fn read_iloc<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
         IlocVersion::Two => iloc.read_u32(32).map_err(|e| at!(Error::from(e)))?,
     };
 
+    // Each extent costs index+offset+length bits of input. When all three
+    // field sizes are zero an extent consumes no input at all, so the box
+    // cannot bound extent_count: 65,535 extents per item × thousands of
+    // items peaked at ~3 GiB RSS on a 16 KB file (imazen/zenavif#59).
+    // Budget stored extents against the box's own bytes in that case;
+    // nonzero-width extents stay bounded by the bitstream.
+    let extent_bits = index_size.as_ref().map_or(0u64, |s| u64::from(s.to_bits()))
+        + u64::from(offset_size.to_bits())
+        + u64::from(length_size.to_bits());
+    let extent_budget = if extent_bits == 0 {
+        iloc.remaining() / 8
+    } else {
+        u64::MAX
+    };
+    let mut total_extents = 0u64;
+
     // Cap pre-allocation: item_count is untrusted, actual data is bounded by bitstream
     let mut items = TryVec::with_capacity(item_count.to_usize().min(4096)).map_err(|e| at!(Error::from(e)))?;
 
@@ -6180,7 +6353,18 @@ fn read_iloc<T: Read>(src: &mut BMFFBox<'_, T>, options: &ParseOptions) -> Resul
             return Err(at!(Error::InvalidData("extent_count must have a value 1 or greater per ISO 14496-12:2015 § 8.11.3.3")));
         }
 
-        let mut extents = TryVec::with_capacity(extent_count.to_usize()).map_err(|e| at!(Error::from(e)))?;
+        total_extents = total_extents
+            .checked_add(u64::from(extent_count))
+            .ok_or_else(|| at!(Error::InvalidData("iloc extent count overflow")))?;
+        if total_extents > extent_budget {
+            return Err(at!(Error::InvalidData(
+                "iloc extent_count is not credible for the box size",
+            )));
+        }
+
+        // Cap pre-allocation: the capacity hint alone costs memory even when
+        // the bitstream would bound the extents below it (#59).
+        let mut extents = TryVec::with_capacity(extent_count.to_usize().min(1024)).map_err(|e| at!(Error::from(e)))?;
 
         for _ in 0..extent_count {
             // Parsed but currently ignored, see `ItemLocationBoxExtent`

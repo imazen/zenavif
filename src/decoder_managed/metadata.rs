@@ -70,15 +70,16 @@ impl ManagedAvifDecoder {
         (primaries, transfer, icc)
     }
 
-    pub(super) fn exif_for(&self, source: MetadataSource) -> Result<Option<Vec<u8>>> {
+    /// EXIF for `source`, or `None` when the EXIF item is absent or
+    /// malformed. A malformed EXIF item (e.g. its 4-byte offset runs past
+    /// the item's end) is dropped rather than failing the decode — the same
+    /// rule `probe_info` has always applied (imazen/zenavif#63).
+    pub(super) fn exif_for(&self, source: MetadataSource) -> Option<Vec<u8>> {
         let value = match source {
             MetadataSource::Primary => self.parser.exif(),
             MetadataSource::Animation => self.parser.animation_exif(),
         };
-        value
-            .transpose()
-            .map(|v| v.map(|v| v.into_owned()))
-            .map_err(|e| e.map_error(Error::Parse))
+        value.and_then(|r| r.ok()).map(|v| v.into_owned())
     }
 
     pub(super) fn xmp_for(&self, source: MetadataSource) -> Result<Option<Vec<u8>>> {
@@ -208,8 +209,7 @@ impl ManagedAvifDecoder {
                 .and_then(|r| r.ok())
                 .map(|c| c.into_owned()),
             gain_map: self.extract_gain_map(),
-            // Depth map extraction requires zenavif-parse > 0.4.0 (not yet published).
-            depth_map: None,
+            depth_map: self.extract_depth_map(),
         })
     }
 
@@ -313,8 +313,7 @@ impl ManagedAvifDecoder {
                 .and_then(|r| r.ok())
                 .map(|c| c.into_owned()),
             gain_map: self.extract_gain_map(),
-            // Depth map extraction requires zenavif-parse > 0.4.0 (not yet published).
-            depth_map: None,
+            depth_map: self.extract_depth_map(),
         })
     }
 
@@ -376,11 +375,10 @@ impl ManagedAvifDecoder {
             pixel_aspect_ratio: track.spatial.pixel_aspect_ratio,
             content_light_level: track.hdr.content_light_level,
             mastering_display: track.hdr.mastering_display,
-            exif: self.exif_for(source)?,
+            exif: self.exif_for(source),
             xmp: self.xmp_for(source)?,
             gain_map: self.extract_gain_map(),
-            // Depth map extraction requires zenavif-parse > 0.4.0 (not yet published).
-            depth_map: None,
+            depth_map: self.extract_depth_map(),
         })
     }
 
@@ -403,6 +401,14 @@ impl ManagedAvifDecoder {
             gain_map_data: data,
             alt_color_info,
         })
+    }
+
+    /// Extract the depth auxiliary image bundle, if the container has one
+    /// (`auxl`-linked item with the MPEG-B depth `auxC` URN). Mirrors
+    /// [`extract_gain_map`](Self::extract_gain_map) (imazen/zenavif#58).
+    pub(super) fn extract_depth_map(&self) -> Option<crate::image::AvifDepthMap> {
+        let dm = self.parser.depth_map()?.ok()?;
+        Some(crate::image::AvifDepthMap { data: dm.data })
     }
 
     /// Whether this image is a grid (tiled) image.

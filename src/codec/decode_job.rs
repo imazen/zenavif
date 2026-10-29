@@ -288,8 +288,21 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
 }
 
 impl AvifDecodeJob {
+    /// `probe`/`probe_full` report metadata for the same entity the probe
+    /// describes: an animated file (poster + sequence) reports the colour
+    /// **track's** EXIF/XMP/colour/HDR, matching `animation_frame_decoder`,
+    /// while `Decode::decode` reports the poster (primary item's) metadata.
+    /// That split is deliberate: the probe describes the sequence, the
+    /// still decode describes the poster (imazen/zenavif#64).
+    ///
+    /// The job's [`ResourceLimits`] apply here exactly as they do to the
+    /// decoders (frame-size, peak-memory and frame-count limits reach the
+    /// container parser), so a file that fails its limits fails at probe
+    /// too rather than surfacing metadata a decode would refuse
+    /// (imazen/zenavif#65).
     fn probe_inner(&self, data: &[u8]) -> Result<ImageInfo, At<Error>> {
-        let decoder = crate::ManagedAvifDecoder::new_for_animation(data, &self.config.inner)?;
+        self.check_input_size(data)?;
+        let decoder = crate::ManagedAvifDecoder::new_for_animation(data, &self.effective_config())?;
         let mut native_info = if decoder.animation_info().is_some() {
             decoder.probe_animation_info()?
         } else {
@@ -339,8 +352,10 @@ impl AvifDecodeJob {
                 ))
             })?;
         // The container parser configurations: probe/probe_full parse with
-        // the codec configuration alone (`probe_inner`); the decoders add
-        // the job's ResourceLimits (`effective_config`).
+        // the same limits-adjusted configuration the decoders use
+        // (`effective_config`; imazen/zenavif#65). `decode_parse_config`
+        // stays spelled separately so the inventory can keep modelling the
+        // two passes independently.
         let parse_config_of = |cfg: &crate::DecoderConfig| {
             let mut pc = zenavif_parse::DecodeConfig::default();
             if let Some(mem) = cfg.parser_peak_memory_limit {
@@ -354,7 +369,7 @@ impl AvifDecodeJob {
             }
             pc
         };
-        let parse_config = parse_config_of(&self.config.inner);
+        let parse_config = parse_config_of(&self.effective_config());
         let limited = self.limits.max_pixels.is_some()
             || self.limits.max_memory_bytes.is_some()
             || self.limits.max_frames.is_some();
@@ -386,7 +401,8 @@ impl AvifDecodeJob {
     }
 
     fn output_info_inner(&self, data: &[u8]) -> Result<zencodec::decode::OutputInfo, At<Error>> {
-        let decoder = crate::ManagedAvifDecoder::new(data, &self.config.inner)?;
+        self.check_input_size(data)?;
+        let decoder = crate::ManagedAvifDecoder::new(data, &self.effective_config())?;
         let native_info = decoder.probe_info()?;
         let mut desc = if native_info.bit_depth > 8 {
             if native_info.has_alpha {

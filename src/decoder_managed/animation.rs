@@ -99,7 +99,7 @@ impl ManagedAvifDecoder {
         Ok(DecodedAnimation {
             frames,
             info: DecodedAnimationInfo {
-                exif: self.exif_for(super::metadata::MetadataSource::Animation)?,
+                exif: self.exif_for(super::metadata::MetadataSource::Animation),
                 xmp: self.xmp_for(super::metadata::MetadataSource::Animation)?,
                 frame_count,
                 loop_count: anim_info.loop_count,
@@ -220,7 +220,7 @@ impl AnimationDecoder {
         };
 
         let info = DecodedAnimationInfo {
-            exif: inner.exif_for(super::metadata::MetadataSource::Animation)?,
+            exif: inner.exif_for(super::metadata::MetadataSource::Animation),
             xmp: inner.xmp_for(super::metadata::MetadataSource::Animation)?,
             frame_count: anim_info.frame_count,
             loop_count: anim_info.loop_count,

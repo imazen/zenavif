@@ -1,58 +1,91 @@
-//! Dump all boxes in an AVIF file
+//! Dump all boxes in an AVIF file, with correct container nesting.
+//!
+//! Fixes imazen/zenavif#57: `meta` is a FullBox (4-byte version/flags
+//! before its children), recursions are bounded by the container's end,
+//! 64-bit sizes print untruncated, and a size-0 box extends to the
+//! container's end rather than ending the walk.
 use std::env;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
-fn read_box_header<R: Read>(r: &mut R) -> std::io::Result<Option<(u32, [u8; 4], u64)>> {
-    let mut buf = [0u8; 8];
-    if r.read(&mut buf)? < 8 {
-        return Ok(None);
-    }
-    
-    let mut size = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as u64;
-    let box_type = [buf[4], buf[5], buf[6], buf[7]];
-    
-    if size == 1 {
-        // 64-bit size
-        let mut size_buf = [0u8; 8];
-        r.read_exact(&mut size_buf)?;
-        size = u64::from_be_bytes(size_buf);
-    }
-    
-    Ok(Some((size as u32, box_type, size)))
+struct Header {
+    size: u64,
+    box_type: [u8; 4],
+    /// Bytes of header consumed (8, or 16 for a 64-bit size).
+    header_len: u64,
 }
 
-fn dump_boxes<R: Read + Seek>(r: &mut R, depth: usize) -> std::io::Result<()> {
+fn read_box_header<R: Read>(r: &mut R, remaining: u64) -> std::io::Result<Option<Header>> {
+    if remaining < 8 {
+        return Ok(None);
+    }
+    let mut buf = [0u8; 8];
+    match r.read(&mut buf)? {
+        n if n < 8 => return Ok(None),
+        _ => {}
+    }
+
+    let size32 = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
+    let box_type = [buf[4], buf[5], buf[6], buf[7]];
+
+    let (size, header_len) = match size32 {
+        0 => (u64::MAX, 8), // extends to the container's end
+        1 => {
+            if remaining < 16 {
+                return Ok(None);
+            }
+            let mut size_buf = [0u8; 8];
+            r.read_exact(&mut size_buf)?;
+            (u64::from_be_bytes(size_buf), 16)
+        }
+        _ => (u64::from(size32), 8),
+    };
+
+    Ok(Some(Header { size, box_type, header_len }))
+}
+
+fn dump_boxes<R: Read + Seek>(r: &mut R, end: u64, depth: usize) -> std::io::Result<()> {
     loop {
         let pos = r.stream_position()?;
-        match read_box_header(r)? {
-            None => break,
-            Some((size32, box_type, size64)) => {
-                let indent = "  ".repeat(depth);
-                let type_str = String::from_utf8_lossy(&box_type);
-                println!("{}[{}] {} size={}", indent, pos, type_str, size32);
-                
-                let content_size = if size32 == 0 {
-                    // size=0 means "to end of file"
-                    return Ok(());
-                } else if size32 == 1 {
-                    size64.saturating_sub(16)
-                } else {
-                    size64.saturating_sub(8)
-                };
-
-                // Recursively dump container boxes
-                let is_container = matches!(&box_type, b"moov" | b"trak" | b"mdia" | b"minf" | b"stbl" | b"meta" | b"iprp" | b"ipco");
-                if is_container && content_size > 0 && content_size < 1_000_000 {
-                    dump_boxes(r, depth + 1)?;
-                } else if content_size > 0 {
-                    // Skip to next box
-                    r.seek(SeekFrom::Current(content_size as i64))?;
-                }
-            }
+        if pos >= end {
+            break;
         }
+        let Some(h) = read_box_header(r, end - pos)? else {
+            break;
+        };
+        let content_start = pos + h.header_len;
+        let box_end = if h.size == u64::MAX {
+            end
+        } else {
+            content_start + h.size.saturating_sub(h.header_len)
+        };
+        let box_end = box_end.min(end);
+
+        let indent = "  ".repeat(depth);
+        let type_str = String::from_utf8_lossy(&h.box_type);
+        let shown_size = if h.size == u64::MAX { 0 } else { h.size };
+        println!("{}[{}] {} size={}", indent, pos, type_str, shown_size);
+
+        // `meta` is a FullBox: 4 bytes of version/flags precede children.
+        let child_start = if &h.box_type == b"meta" {
+            content_start + 4
+        } else {
+            content_start
+        };
+
+        let is_container = matches!(
+            &h.box_type,
+            b"moov" | b"trak" | b"mdia" | b"minf" | b"stbl" | b"meta" | b"iprp"
+                | b"ipco" | b"moof" | b"traf" | b"edts" | b"mdra" | b"grpl"
+        );
+        if is_container && child_start < box_end {
+            r.seek(SeekFrom::Start(child_start))?;
+            dump_boxes(r, box_end, depth + 1)?;
+        }
+        // Always land on the next sibling, whatever the recursion did.
+        r.seek(SeekFrom::Start(box_end))?;
     }
-    
+
     Ok(())
 }
 
@@ -62,10 +95,11 @@ fn main() {
         eprintln!("Usage: {} <avif-file>", args[0]);
         std::process::exit(1);
     }
-    
+
     let path = &args[1];
     let mut f = File::open(path).expect("Failed to open file");
-    
+    let file_len = f.metadata().expect("Failed to stat file").len();
+
     println!("Boxes in {}:", path);
-    dump_boxes(&mut f, 0).expect("Failed to dump boxes");
+    dump_boxes(&mut f, file_len, 0).expect("Failed to dump boxes");
 }

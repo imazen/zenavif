@@ -143,7 +143,10 @@ jobs:
       # `cargo check --features __expert` lines stay in `feature-check`: they
       # compile, they do not run tests, and they need no vectors.
       - name: Test --features __expert (the sweep fingerprint gates)
-        run: cargo test --features __expert,encode,encode-imazen,zenav1-svt,zenav1-aom,zenav1-aom-encode --lib
+        # `--include-ignored`: the two vector-backed decode_av1 tests are
+        # `#[ignore]`d so bare `cargo test` stays green on unprovisioned
+        # checkouts (#47); this job downloads the vectors, so it runs them.
+        run: cargo test --features __expert,encode,encode-imazen,zenav1-svt,zenav1-aom,zenav1-aom-encode --lib -- --include-ignored
       # The `cargo semver-checks` substitute. That tool cannot run on this
       # crate at all, and an in-crate test structurally CANNOT observe a
       # `#[non_exhaustive]` break — the attribute has no effect inside the
