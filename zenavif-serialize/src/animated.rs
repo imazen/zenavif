@@ -1065,9 +1065,18 @@ mod tests {
         image.set_color_config(basic_av1c());
         // 70000 used to panic at write_u32(out, width << 16).
         let avif = image.serialize(70_000, 70_000, &frames, b"seq", None);
-        // File is structurally valid.
+        // File is structurally valid. The paired parser's default image budget
+        // rejects these dimensions; this header-only fixture explicitly admits
+        // its 4,900 megapixels without allocating or decoding those pixels.
         assert_eq!(&avif[4..8], b"ftyp");
-        let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+        assert!(matches!(
+            zenavif_parse::AvifParser::from_bytes(&avif),
+            Err(error) if matches!(error.error(), zenavif_parse::Error::ResourceLimitExceeded(_))
+        ));
+        let config = zenavif_parse::DecodeConfig::default().with_total_megapixels_limit(4_900);
+        let parser = zenavif_parse::AvifParser::from_bytes_with_config(
+            &avif, &config, &zenavif_parse::Unstoppable,
+        ).unwrap();
         let info = parser.animation_info().expect("animation info");
         assert_eq!(info.frame_count, 1);
     }
