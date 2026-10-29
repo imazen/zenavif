@@ -266,6 +266,9 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 
 ### Added
+
+- Retained whole-raster preflight reports applied and carried orientation;
+  startup verifies the same declaration and rejects later interpretation changes.
 - Add calibrated native AVIF experiment routes through the shared Rust targeting owner, with train-family seeds, premeasured attained bounds and explicit 1/2/3 complete-encode accounting.
 - Exact-tick animation APIs for all RGB/RGBA input formats and both encoding backends, with exact result timing and mixed-clock codec-adapter pushes, using zenravif `23522fff`.
 
@@ -3477,3 +3480,10 @@ why none of them is the seam's to pick unilaterally.
   aarch64 panic fixes while the fix was making its way through a release
   (01c02d0).
 
+
+## Checked orientation representation (unreleased review)
+
+- Implement the shared stored-orientation requirement without changing default
+  baking. Keep native container geometry and sample ordering when requested;
+  refuse unsupported animation baking before encoder construction.
+- Coordinate shared core and pixels pins for the new checked job method.

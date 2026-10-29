@@ -33,6 +33,7 @@ pub struct AvifEncodeJob {
     pub(super) mirror: Option<u8>,
     /// Applied to a still's pixels at encode (see [`AvifEncoder`]).
     pub(super) orientation: zencodec::Orientation,
+    pub(super) orientation_mode: Option<zencodec::encode::EncodeOrientation>,
     pub(super) policy: Option<zencodec::encode::EncodePolicy>,
     pub(super) canvas_size: Option<(u32, u32)>,
     pub(super) loop_count: Option<Option<u32>>,
@@ -40,6 +41,20 @@ pub struct AvifEncodeJob {
 
 #[cfg(feature = "encode")]
 impl AvifEncodeJob {
+    fn orientation_plan(&self) -> Option<zencodec::encode::OrientationPlan> {
+        use zencodec::encode::{EncodeOrientation, OrientationPlan};
+        match self.orientation_mode {
+            Some(EncodeOrientation::PreserveStored) => {
+                Some(OrientationPlan::preserved(self.orientation))
+            }
+            Some(EncodeOrientation::Bake) => Some(OrientationPlan::baked(self.orientation)),
+            None if self.config.inner.rotation.is_none() && self.config.inner.mirror.is_none() => {
+                Some(OrientationPlan::baked(self.orientation))
+            }
+            _ => None,
+        }
+    }
+
     /// Set EXIF metadata to embed in the encoded AVIF.
     #[must_use]
     pub fn with_exif(mut self, exif: impl Into<Arc<[u8]>>) -> Self {
@@ -98,7 +113,47 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         self
     }
 
+    fn try_set_orientation_mode(
+        &mut self,
+        mode: zencodec::encode::EncodeOrientation,
+    ) -> Result<(), zencodec::UnsupportedOperation> {
+        use zencodec::encode::EncodeOrientation;
+        match mode {
+            EncodeOrientation::PreserveStored | EncodeOrientation::Bake => {
+                self.orientation_mode = Some(mode);
+                Ok(())
+            }
+            _ => Err(zencodec::UnsupportedOperation::EncodeOrientation),
+        }
+    }
+
+    fn plan_encode(
+        &self,
+        declaration: &zencodec::encode::EncodeDeclaration<'_>,
+    ) -> Result<zencodec::encode::EncodePlan, zencodec::encode::BoxedError> {
+        if !super::declared::color_supported(&self.config.inner)
+            || self.icc_profile.is_some()
+            || self.cicp.is_some_and(|c| c != zencodec::Cicp::SRGB)
+        {
+            return Err(Box::new(super::declared::refusal(
+                zencodec::UnsupportedOperation::EncodePlanning,
+            )));
+        }
+        let orientation = self.orientation_plan();
+        let applied = if matches!(
+            self.orientation_mode,
+            Some(zencodec::encode::EncodeOrientation::PreserveStored)
+        ) {
+            zencodec::Orientation::Identity
+        } else {
+            self.orientation
+        };
+        super::declared::plan(declaration, orientation, applied, &self.limits)
+            .map_err(|e| Box::new(e) as zencodec::encode::BoxedError)
+    }
+
     fn encoder(self) -> Result<AvifEncoder, At<CodecError>> {
+        let planned_orientation = self.orientation_plan();
         let mut config = self.config.inner.clone();
         // Resolve the color *description* (ICC vs CICP code points) through
         // zencodec's `resolve_color_emit` — the single source of truth for which
@@ -156,7 +211,21 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         // reads opposite ways in the 2017 and 2022 HEIF editions
         // (imazen/zencodec#132). The EXIF and XMP tags are rewritten to 1 so
         // no reader rotates the upright pixels again.
-        let orientation = self.orientation;
+        let orientation = match self.orientation_mode {
+            Some(zencodec::encode::EncodeOrientation::PreserveStored) => {
+                // Metadata is authoritative for an explicit common request,
+                // including identity: clear conflicting native overrides.
+                config.rotation = self.rotation;
+                config.mirror = self.mirror;
+                zencodec::Orientation::Identity
+            }
+            Some(zencodec::encode::EncodeOrientation::Bake) => {
+                config.rotation = None;
+                config.mirror = None;
+                self.orientation
+            }
+            _ => self.orientation,
+        };
         let mut exif = self.exif;
         let mut xmp = self.xmp;
         if orientation != zencodec::Orientation::Identity {
@@ -205,6 +274,8 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
             _ => xmp,
         };
         Ok(AvifEncoder {
+            planned_orientation,
+            declaration: None,
             orientation,
             config,
             pulse: self.pulse,
@@ -228,6 +299,18 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
     }
 
     fn animation_frame_encoder(self) -> Result<AvifAnimationFrameEncoder, At<CodecError>> {
+        if matches!(
+            self.orientation_mode,
+            Some(zencodec::encode::EncodeOrientation::Bake)
+        ) {
+            // The animation encoder currently carries transforms; it cannot
+            // promise per-frame baking. Refuse before any native encoder exists.
+            return Err(CodecError::of(whereat::at!(
+                crate::Error::UnsupportedOperation(
+                    zencodec::UnsupportedOperation::EncodeOrientation
+                )
+            )));
+        }
         let mut config = self.config.inner.clone();
         // Resolve color description the same way as the still path (single source
         // of truth): lower the resolved CICP to nclx and carry the resolved ICC.
@@ -268,6 +351,13 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
                 max_luminance: (mdcv.max_luminance * 10000.0 + 0.5) as u32,
                 min_luminance: (mdcv.min_luminance * 10000.0 + 0.5) as u32,
             });
+        }
+        if matches!(
+            self.orientation_mode,
+            Some(zencodec::encode::EncodeOrientation::PreserveStored)
+        ) {
+            config.rotation = None;
+            config.mirror = None;
         }
         if let Some(rot) = self.rotation {
             config = config.rotation(rot);

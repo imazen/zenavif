@@ -1932,3 +1932,16 @@ CI's locked downstream probe retained obsolete core revisions despite updated
 manifests. The refreshed lock and unchanged consumer command pass; graph delta
 and limits are in `benchmarks/downstream_pulse_2026-10-29.md`. Keep standalone
 consumer locks synchronized as well as the root lock.
+
+## Explicit orientation representation (review candidate)
+
+The shared EncodeJob checked orientation setter distinguishes PreserveStored
+from Bake without changing the default still baking behavior. Metadata supplies
+the intrinsic orientation. Explicit modes override conflicting native rotation
+and mirror settings, including identity; typed and erased configured jobs retain
+the choice. Required animation baking refuses before native construction.
+Qualification against the paired core candidate covers all eight stored
+orientations and strided input, ordinary and Send registry preparation, default
+bake parity and the typed refusal. This does not qualify low-memory streaming:
+the native shared plan hook is still unsupported. Existing default EXIF/XMP
+and pixel assertions remain in tests/orientation_bake.rs.
