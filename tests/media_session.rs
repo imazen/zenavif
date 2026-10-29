@@ -4,8 +4,8 @@
 
 use std::sync::Arc;
 
-use enough::Unstoppable;
 use zenavif::media::{Av1EncodeSettings, Av1SessionError, Av1VideoDecoder, Av1VideoEncoder};
+use zencodec::NoPulse;
 use zencodec::time::{TimeBase, Timestamp};
 use zencodec_media::frame::{
     ChromaSiting, ColorClaim, Frame, FrameGeometry, FrameInterpretation, FrameTiming, OwnedPlane,
@@ -137,21 +137,21 @@ fn encode(enc: &mut Av1VideoEncoder, frames: &[Frame]) -> Vec<Packet> {
     let mut out = Vec::new();
     for f in frames {
         loop {
-            match enc.send(f, &Unstoppable).unwrap() {
+            match enc.send(f, Some(&NoPulse)).unwrap() {
                 SendStatus::Accepted => break,
-                _ => match enc.receive(&Unstoppable).unwrap() {
+                _ => match enc.receive(Some(&NoPulse)).unwrap() {
                     Receive::Ready(p) => out.push(p),
                     other => panic!("ReceivePending, then {other:?}"),
                 },
             }
         }
-        while let Receive::Ready(p) = enc.receive(&Unstoppable).unwrap() {
+        while let Receive::Ready(p) = enc.receive(Some(&NoPulse)).unwrap() {
             out.push(p);
         }
     }
     enc.end_input().unwrap();
     loop {
-        match enc.receive(&Unstoppable).unwrap() {
+        match enc.receive(Some(&NoPulse)).unwrap() {
             Receive::Ready(p) => out.push(p),
             Receive::EndOfStream => break,
             other => panic!("drain: {other:?}"),
@@ -162,26 +162,26 @@ fn encode(enc: &mut Av1VideoEncoder, frames: &[Frame]) -> Vec<Packet> {
 
 fn decode(enc: &Av1VideoEncoder, packets: &[Packet]) -> Vec<Frame> {
     let mut dec = Av1VideoDecoder::new().unwrap();
-    dec.configure(enc.output_config().unwrap(), &Unstoppable)
+    dec.configure(enc.output_config().unwrap(), Some(&NoPulse))
         .unwrap();
     let mut frames = Vec::new();
     for p in packets {
         let mut p = p.clone();
         loop {
-            match dec.send(&mut p, &Unstoppable).unwrap() {
+            match dec.send(&mut p, Some(&NoPulse)).unwrap() {
                 SendStatus::Accepted => break,
-                _ => match dec.receive(&Unstoppable).unwrap() {
+                _ => match dec.receive(Some(&NoPulse)).unwrap() {
                     Receive::Ready(f) => frames.push(f),
                     other => panic!("{other:?}"),
                 },
             }
         }
-        while let Receive::Ready(f) = dec.receive(&Unstoppable).unwrap() {
+        while let Receive::Ready(f) = dec.receive(Some(&NoPulse)).unwrap() {
             frames.push(f);
         }
     }
     dec.end_input().unwrap();
-    while let Receive::Ready(f) = dec.receive(&Unstoppable).unwrap() {
+    while let Receive::Ready(f) = dec.receive(Some(&NoPulse)).unwrap() {
         frames.push(f);
     }
     frames
@@ -286,7 +286,7 @@ fn the_session_meets_the_encoder_contract() {
                     Av1EncodeSettings::new(32, 32)
                         .with_speed(10)
                         .with_threads(1)
-                        .with_max_queued_frames(queue),
+                        .with_output_pull_threshold(queue),
                     TB,
                 )
                 .unwrap()
@@ -298,6 +298,7 @@ fn the_session_meets_the_encoder_contract() {
 }
 
 #[test]
+#[allow(deprecated)] // Preserve the legacy soft-threshold compatibility contract.
 fn the_default_speed_meets_the_contract_with_a_short_queue() {
     let frames: Vec<Frame> = (0..30)
         .map(|i| frame(i, 8, Subsampling::Yuv420, 32, 32, i as i64 * 40))
@@ -322,39 +323,39 @@ fn mismatched_input_is_refused() {
     let mut enc = Av1VideoEncoder::new(Av1EncodeSettings::new(32, 32), TB).unwrap();
     let wrong_size = frame(0, 8, Subsampling::Yuv420, 30, 32, 0);
     assert!(matches!(
-        enc.send(&wrong_size, &Unstoppable),
+        enc.send(&wrong_size, Some(&NoPulse)),
         Err(SessionError::Codec(Av1SessionError::InputMismatch))
     ));
     let wrong_depth = frame(0, 10, Subsampling::Yuv420, 32, 32, 0);
     assert!(matches!(
-        enc.send(&wrong_depth, &Unstoppable),
+        enc.send(&wrong_depth, Some(&NoPulse)),
         Err(SessionError::Codec(Av1SessionError::InputMismatch))
     ));
     let wrong_sub = frame(0, 8, Subsampling::Yuv444, 32, 32, 0);
     assert!(matches!(
-        enc.send(&wrong_sub, &Unstoppable),
+        enc.send(&wrong_sub, Some(&NoPulse)),
         Err(SessionError::Codec(Av1SessionError::InputMismatch))
     ));
     let ok = frame(0, 8, Subsampling::Yuv420, 32, 32, 80);
     assert!(matches!(
-        enc.send(&ok, &Unstoppable),
+        enc.send(&ok, Some(&NoPulse)),
         Ok(SendStatus::Accepted)
     ));
     let earlier = frame(1, 8, Subsampling::Yuv420, 32, 32, 40);
     assert!(matches!(
-        enc.send(&earlier, &Unstoppable),
+        enc.send(&earlier, Some(&NoPulse)),
         Err(SessionError::Codec(Av1SessionError::NonMonotonicTimestamp))
     ));
     let mut untimed = ok.timing();
     untimed.pts = None;
     let untimed = ok.represent(untimed, Presentation::default());
     assert!(matches!(
-        enc.send(&untimed, &Unstoppable),
+        enc.send(&untimed, Some(&NoPulse)),
         Err(SessionError::Protocol(ProtocolViolation::MissingTimestamp))
     ));
     let same_time = frame(1, 8, Subsampling::Yuv420, 32, 32, 80);
     assert!(matches!(
-        enc.send(&same_time, &Unstoppable),
+        enc.send(&same_time, Some(&NoPulse)),
         Err(SessionError::Codec(Av1SessionError::NonMonotonicTimestamp))
     ));
 }
@@ -373,7 +374,7 @@ fn reinterpreted(ok: &Frame, pts: i64, edit: impl FnOnce(&mut FrameInterpretatio
 
 fn refused(enc: &mut Av1VideoEncoder, f: &Frame) -> bool {
     matches!(
-        enc.send(f, &Unstoppable),
+        enc.send(f, Some(&NoPulse)),
         Err(SessionError::Codec(Av1SessionError::InputMismatch))
     )
 }
@@ -414,11 +415,11 @@ fn frames_that_would_need_conversion_are_refused() {
         it.color = ColorClaim::new(None, None, Some(Cicp::new(2, 2, 2, false)));
     });
     assert!(matches!(
-        enc.send(&same, &Unstoppable),
+        enc.send(&same, Some(&NoPulse)),
         Ok(SendStatus::Accepted)
     ));
     assert!(matches!(
-        enc.send(&frame_for(&s, 1, 80), &Unstoppable),
+        enc.send(&frame_for(&s, 1, 80), Some(&NoPulse)),
         Ok(SendStatus::Accepted)
     ));
     // Pictures that do not hold what the interpretation says: one plane,
@@ -477,7 +478,7 @@ fn frames_that_would_need_conversion_are_refused() {
     );
     assert!(refused(&mut enc10, &shifted), "bit shift");
     assert!(matches!(
-        enc10.send(&ok10, &Unstoppable),
+        enc10.send(&ok10, Some(&NoPulse)),
         Ok(SendStatus::Accepted)
     ));
 }
@@ -636,10 +637,10 @@ fn packet_context_keeps_the_configuration_at_acceptance() {
         let mut native = rav1d_safe::Settings::default();
         native.threads = threads;
         let mut dec = Av1VideoDecoder::with_settings(native).unwrap();
-        dec.configure(&config, &Unstoppable).unwrap();
+        dec.configure(&config, Some(&NoPulse)).unwrap();
         let mut packet = packets[0].clone().with_ordinal(7).with_input_offset(1234);
         assert_eq!(
-            dec.send(&mut packet, &Unstoppable).unwrap(),
+            dec.send(&mut packet, Some(&NoPulse)).unwrap(),
             SendStatus::Accepted
         );
         assert!(packet.is_taken());
@@ -650,9 +651,9 @@ fn packet_context_keeps_the_configuration_at_acceptance() {
         next.time_base = TimeBase::hz(90_000).unwrap();
         next.video =
             Some(VideoTrackInfo::new(s.width, s.height).with_color(Cicp::new(9, 16, 9, true)));
-        dec.configure(&next, &Unstoppable).unwrap();
+        dec.configure(&next, Some(&NoPulse)).unwrap();
         dec.end_input().unwrap();
-        let Receive::Ready(output) = dec.receive(&Unstoppable).unwrap() else {
+        let Receive::Ready(output) = dec.receive(Some(&NoPulse)).unwrap() else {
             panic!("queued frame was discarded during reconfiguration");
         };
         assert_eq!(output.timing().pts, Some(Timestamp::new(40, TB)));
@@ -662,7 +663,7 @@ fn packet_context_keeps_the_configuration_at_acceptance() {
         assert_eq!(output.timing().input_offset, Some(1234));
         assert_eq!(planes(&output), planes(&input));
         assert!(matches!(
-            dec.receive(&Unstoppable).unwrap(),
+            dec.receive(Some(&NoPulse)).unwrap(),
             Receive::EndOfStream
         ));
         dec.reset().unwrap();
@@ -713,15 +714,15 @@ fn packet_context_distinguishes_queued_epochs_with_repeated_ordinals() {
             let mut config = enc.output_config().unwrap().clone().with_epoch(i as u32);
             config.time_base = clocks[i % 2];
             config.video = Some(VideoTrackInfo::new(s.width, s.height).with_color(colors[i % 2]));
-            dec.configure(&config, &Unstoppable).unwrap();
+            dec.configure(&config, Some(&NoPulse)).unwrap();
             let mut packet = packet
                 .clone()
                 .with_pts(Timestamp::new(i as i64 * 40, config.time_base))
                 .with_config_epoch(config.epoch)
                 .with_ordinal(7)
                 .with_input_offset(1000 + i as u64);
-            while dec.send(&mut packet, &Unstoppable).unwrap() != SendStatus::Accepted {
-                let Receive::Ready(frame) = dec.receive(&Unstoppable).unwrap() else {
+            while dec.send(&mut packet, Some(&NoPulse)).unwrap() != SendStatus::Accepted {
+                let Receive::Ready(frame) = dec.receive(Some(&NoPulse)).unwrap() else {
                     panic!("backpressure without output");
                 };
                 outputs.push(frame);
@@ -729,10 +730,10 @@ fn packet_context_distinguishes_queued_epochs_with_repeated_ordinals() {
         }
         let mut unused = enc.output_config().unwrap().clone().with_epoch(99);
         unused.time_base = TimeBase::SECONDS;
-        dec.configure(&unused, &Unstoppable).unwrap();
+        dec.configure(&unused, Some(&NoPulse)).unwrap();
         dec.end_input().unwrap();
         loop {
-            match dec.receive(&Unstoppable).unwrap() {
+            match dec.receive(Some(&NoPulse)).unwrap() {
                 Receive::Ready(frame) => outputs.push(frame),
                 Receive::EndOfStream => break,
                 other => panic!("ended session failed to drain: {other:?}"),
@@ -775,10 +776,10 @@ fn native_decode_error_keeps_its_type_and_whereat_trace() {
     }
 
     let mut dec = Av1VideoDecoder::new().unwrap();
-    dec.configure(&CodecConfig::new(CodecId::Av1, TB), &Unstoppable)
+    dec.configure(&CodecConfig::new(CodecId::Av1, TB), Some(&NoPulse))
         .unwrap();
     let mut malformed = Packet::from_vec(vec![0xff]).unwrap();
-    let error = dec.send(&mut malformed, &Unstoppable).unwrap_err();
+    let error = dec.send(&mut malformed, Some(&NoPulse)).unwrap_err();
     let locations = native(&error).frame_count();
     // Cloning the public error must not discard the trace either.
     let SessionError::Codec(codec) = error else {
@@ -789,10 +790,10 @@ fn native_decode_error_keeps_its_type_and_whereat_trace() {
 
     let mut erased = zencodec_media::session::erase_video_decoder(Av1VideoDecoder::new().unwrap());
     erased
-        .configure(&CodecConfig::new(CodecId::Av1, TB), &Unstoppable)
+        .configure(&CodecConfig::new(CodecId::Av1, TB), Some(&NoPulse))
         .unwrap();
     let mut malformed = Packet::from_vec(vec![0xff]).unwrap();
-    let erased_error = erased.send(&mut malformed, &Unstoppable).unwrap_err();
+    let erased_error = erased.send(&mut malformed, Some(&NoPulse)).unwrap_err();
     native(&erased_error);
 }
 
@@ -809,15 +810,15 @@ fn native_picture_limit_refuses_before_a_media_frame_and_keeps_trace() {
         native.max_picture_bytes = Some(0);
         let mut decoder = Av1VideoDecoder::with_settings(native).unwrap();
         decoder
-            .configure(encoder.output_config().unwrap(), &Unstoppable)
+            .configure(encoder.output_config().unwrap(), Some(&NoPulse))
             .unwrap();
         let mut failure = None;
         for mut packet in packets.iter().cloned() {
-            if let Err(error) = decoder.send(&mut packet, &Unstoppable) {
+            if let Err(error) = decoder.send(&mut packet, Some(&NoPulse)) {
                 failure = Some(error);
                 break;
             }
-            match decoder.receive(&Unstoppable) {
+            match decoder.receive(Some(&NoPulse)) {
                 Err(error) => {
                     failure = Some(error);
                     break;
@@ -828,7 +829,7 @@ fn native_picture_limit_refuses_before_a_media_frame_and_keeps_trace() {
         }
         let error = failure.unwrap_or_else(|| {
             decoder.end_input().unwrap();
-            match decoder.receive(&Unstoppable) {
+            match decoder.receive(Some(&NoPulse)) {
                 Err(error) => error,
                 Ok(_) => panic!("native picture admission did not refuse"),
             }
@@ -848,22 +849,22 @@ fn native_picture_limit_refuses_before_a_media_frame_and_keeps_trace() {
 }
 
 fn decode_with(dec: &mut Av1VideoDecoder, config: &CodecConfig, packets: &[Packet]) -> Vec<Frame> {
-    dec.configure(config, &Unstoppable).unwrap();
+    dec.configure(config, Some(&NoPulse)).unwrap();
     let mut frames = Vec::new();
     for p in packets {
         let mut p = p.clone();
-        while dec.send(&mut p, &Unstoppable).unwrap() != SendStatus::Accepted {
-            match dec.receive(&Unstoppable).unwrap() {
+        while dec.send(&mut p, Some(&NoPulse)).unwrap() != SendStatus::Accepted {
+            match dec.receive(Some(&NoPulse)).unwrap() {
                 Receive::Ready(f) => frames.push(f),
                 other => panic!("{other:?}"),
             }
         }
-        while let Receive::Ready(f) = dec.receive(&Unstoppable).unwrap() {
+        while let Receive::Ready(f) = dec.receive(Some(&NoPulse)).unwrap() {
             frames.push(f);
         }
     }
     dec.end_input().unwrap();
-    while let Receive::Ready(f) = dec.receive(&Unstoppable).unwrap() {
+    while let Receive::Ready(f) = dec.receive(Some(&NoPulse)).unwrap() {
         frames.push(f);
     }
     frames
@@ -949,10 +950,10 @@ fn av1c_config_obus_restore_stripped_sequence_headers() {
     );
     // Without the record the stripped stream does not decode.
     let mut dec = Av1VideoDecoder::new().unwrap();
-    dec.configure(&record, &Unstoppable).unwrap();
+    dec.configure(&record, Some(&NoPulse)).unwrap();
     let mut first = stripped[0].clone();
-    let sent = dec.send(&mut first, &Unstoppable);
-    let got = sent.is_ok() && matches!(dec.receive(&Unstoppable), Ok(Receive::Ready(_)));
+    let sent = dec.send(&mut first, Some(&NoPulse));
+    let got = sent.is_ok() && matches!(dec.receive(Some(&NoPulse)), Ok(Receive::Ready(_)));
     assert!(!got, "a stream without its sequence header must not decode");
 }
 
@@ -1282,7 +1283,7 @@ mod svt {
     #[test]
     fn svt_sessions_meet_the_encoder_contract() {
         for queue in [1, 64] {
-            let s = svt(8, Subsampling::Yuv420, 1).with_max_queued_frames(queue);
+            let s = svt(8, Subsampling::Yuv420, 1).with_output_pull_threshold(queue);
             let frames: Vec<Frame> = (0..9).map(|i| smooth(&s, i, i as i64 * 40)).collect();
             check_video_encoder_contract(|| Av1VideoEncoder::new(s.clone(), TB).unwrap(), &frames)
                 .unwrap_or_else(|e| panic!("queue {queue}: {e:?}"));
@@ -1364,12 +1365,12 @@ fn owned_stops_are_polled_inside_the_encoder_backend() {
         .unwrap()
         .with_stop(owned.clone());
     assert!(matches!(
-        enc.send(&f, &Unstoppable),
+        enc.send(&f, Some(&NoPulse)),
         Ok(SendStatus::Accepted)
     ));
     enc.end_input().unwrap();
     let before = owned.0.load(Ordering::Relaxed);
-    assert!(matches!(enc.receive(&Unstoppable), Ok(Receive::Ready(_))));
+    assert!(matches!(enc.receive(Some(&NoPulse)), Ok(Receive::Ready(_))));
     // The adapter checks before/after pull. More polls prove the owned
     // token reached zenrav1e rather than just the session boundary.
     assert!(owned.0.load(Ordering::Relaxed) - before > 2);
@@ -1385,7 +1386,7 @@ fn owned_stops_are_polled_inside_the_encoder_backend() {
             .unwrap()
             .with_stop(owned.clone());
         assert!(matches!(
-            enc.send(&f, &Unstoppable),
+            enc.send(&f, Some(&NoPulse)),
             Ok(SendStatus::Accepted)
         ));
         // Two checks surround encoding in the adapter; the pipeline must
@@ -1405,7 +1406,87 @@ fn an_owned_decoder_stop_cancels_with_an_unstoppable_call_token() {
     }
     let mut decoder = Av1VideoDecoder::new().unwrap().with_stop(Arc::new(Tripped));
     assert!(matches!(
-        decoder.configure(&CodecConfig::new(CodecId::Av1, TB), &Unstoppable),
+        decoder.configure(&CodecConfig::new(CodecId::Av1, TB), Some(&NoPulse)),
         Err(SessionError::Cancelled(StopReason::Cancelled))
     ));
+}
+
+#[test]
+fn absent_call_pulses_keep_owned_stops_active_for_every_session_call() {
+    use enough::{Stop, StopReason};
+    struct Tripped(StopReason);
+    impl Stop for Tripped {
+        fn check(&self) -> Result<(), StopReason> {
+            Err(self.0)
+        }
+    }
+    for reason in [StopReason::Cancelled, StopReason::TimedOut] {
+        let owned = Arc::new(Tripped(reason));
+        let mut decoder = Av1VideoDecoder::new().unwrap().with_stop(owned.clone());
+        let config = CodecConfig::new(CodecId::Av1, TB);
+        assert!(matches!(decoder.configure(&config, None),
+            Err(SessionError::Cancelled(actual)) if actual == reason));
+        let mut packet = Packet::from_vec(vec![0x12, 0]).unwrap();
+        let original = packet.bytes().to_vec();
+        assert!(matches!(decoder.send(&mut packet, None),
+            Err(SessionError::Cancelled(actual)) if actual == reason));
+        assert_eq!(packet.bytes(), original);
+        assert!(matches!(decoder.receive(None),
+            Err(SessionError::Cancelled(actual)) if actual == reason));
+
+        let s = settings(8, Subsampling::Yuv420, 32, 32);
+        let input = frame_for(&s, 0, 0);
+        let mut encoder = Av1VideoEncoder::new(s, TB).unwrap().with_stop(owned);
+        assert!(matches!(encoder.send(&input, None),
+            Err(SessionError::Cancelled(actual)) if actual == reason));
+        assert!(matches!(encoder.receive(None),
+            Err(SessionError::Cancelled(actual)) if actual == reason));
+    }
+}
+
+#[test]
+fn a_stopped_call_pulse_cancels_each_session_call_before_effects() {
+    use enough::{Stop, StopReason};
+    use zencodec::how_far::StopOnly;
+    struct Tripped(StopReason);
+    impl Stop for Tripped {
+        fn check(&self) -> Result<(), StopReason> {
+            Err(self.0)
+        }
+    }
+    let s = settings(8, Subsampling::Yuv420, 32, 32);
+    let frames: Vec<_> = (0..2).map(|i| frame_for(&s, i, i as i64 * 40)).collect();
+    let mut source = Av1VideoEncoder::new(s.clone(), TB).unwrap();
+    let packets = encode(&mut source, &frames);
+    let config = source.output_config().unwrap().clone();
+    for reason in [StopReason::Cancelled, StopReason::TimedOut] {
+        let tripped = Tripped(reason);
+        let pulse = StopOnly::borrowed(&tripped);
+
+        let mut enc = Av1VideoEncoder::new(s.clone(), TB).unwrap();
+        assert!(
+            matches!(enc.send(&frames[0], Some(&pulse)), Err(SessionError::Cancelled(r)) if r == reason)
+        );
+        assert!(
+            matches!(enc.receive(Some(&pulse)), Err(SessionError::Cancelled(r)) if r == reason)
+        );
+        // Nothing was accepted: the same encoder still encodes both frames.
+        assert_eq!(encode(&mut enc, &frames).len(), packets.len());
+
+        let mut dec = Av1VideoDecoder::new().unwrap();
+        assert!(
+            matches!(dec.configure(&config, Some(&pulse)), Err(SessionError::Cancelled(r)) if r == reason)
+        );
+        dec.configure(&config, Some(&NoPulse)).unwrap();
+        let mut first = packets[0].clone();
+        assert!(
+            matches!(dec.send(&mut first, Some(&pulse)), Err(SessionError::Cancelled(r)) if r == reason)
+        );
+        // The refused packet keeps its payload; the decoder took nothing.
+        assert_eq!(first.bytes(), packets[0].bytes());
+        assert!(
+            matches!(dec.receive(Some(&pulse)), Err(SessionError::Cancelled(r)) if r == reason)
+        );
+        assert_eq!(decode_with(&mut dec, &config, &packets).len(), frames.len());
+    }
 }

@@ -5,7 +5,6 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use enough::Stop;
 use zencodec::encode::OutputBuffer;
 use zencodec::time::{Rounding, TimeBase, Timestamp};
 use zencodec_media::container::{MuxFinish, MuxHint, MuxTiming, Muxer, Patch};
@@ -873,8 +872,9 @@ impl Muxer for Mp4Muxer {
         })
     }
 
-    fn write_packet(&mut self, mut packet: Packet, stop: &dyn Stop) -> Res<()> {
-        stop.check()?;
+    fn write_packet(&mut self, mut packet: Packet, pulse: Option<&dyn zencodec::Pulse>) -> Res<()> {
+        let pulse = pulse.unwrap_or(&zencodec::NoPulse);
+        pulse.check()?;
         if !self.begun {
             return Err(SessionError::Protocol(ProtocolViolation::NoBegin));
         }
@@ -1019,8 +1019,9 @@ impl Muxer for Mp4Muxer {
         self.out.take_into(into);
     }
 
-    fn finish(mut self, stop: &dyn Stop) -> Res<MuxFinish> {
-        stop.check()?;
+    fn finish(mut self, pulse: Option<&dyn zencodec::Pulse>) -> Res<MuxFinish> {
+        let pulse = pulse.unwrap_or(&zencodec::NoPulse);
+        pulse.check()?;
         if !self.begun {
             return Err(SessionError::Protocol(ProtocolViolation::NoBegin));
         }

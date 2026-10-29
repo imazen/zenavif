@@ -46,8 +46,8 @@ pub struct AvifStreamingDecoder {
     pub(super) output_height: u32,
     /// Grid path: managed decoder for tile-row streaming.
     pub(super) decoder: Option<crate::ManagedAvifDecoder>,
-    /// Stop token for cancellable grid decoding.
-    pub(super) stop: zencodec::StopToken,
+    /// The job's control, polled to cancel grid decoding.
+    pub(super) pulse: zencodec::SharedPulse,
     pub(super) grid_rows: u32,
     pub(super) grid_cols: u32,
     pub(super) current_grid_row: u32,
@@ -231,7 +231,7 @@ impl AvifStreamingDecoder {
                 .decode_tile_row(
                     self.current_grid_row as usize,
                     self.grid_cols as usize,
-                    &self.stop,
+                    &self.pulse,
                 )?;
 
             if tiles.is_empty() {

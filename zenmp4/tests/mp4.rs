@@ -2,7 +2,7 @@
 //! fragmented, the media testkit's contract and seek checks, and malformed
 //! input. FFmpeg-written files are covered by `scripts/ffmpeg-oracle.sh`.
 
-use enough::Unstoppable;
+use zencodec::NoPulse;
 use zencodec::time::{TimeBase, Timestamp};
 use zencodec_io::SliceCursor;
 use zencodec_media::container::{DemuxEvent, DemuxStage, SeekMode, SeekScope, SeekTarget};
@@ -400,7 +400,7 @@ fn demux_with(
     let mut out = Vec::new();
     loop {
         let y = cursor
-            .next(bytes, &mut DemuxStage(&mut dem), &Unstoppable)
+            .next(bytes, &mut DemuxStage(&mut dem), Some(&NoPulse))
             .map_err(|e| format!("{e:?}"))?;
         let done = y.is_finished();
         if let DemuxEvent::Packet(p) = y.into_inner() {
@@ -579,7 +579,7 @@ fn seeking_a_fragmented_file_indexes_its_fragments() {
         let mut cursor = SliceCursor::new(16);
         let mut next = || {
             let y = cursor
-                .next(&file, &mut DemuxStage(&mut dem), &Unstoppable)
+                .next(&file, &mut DemuxStage(&mut dem), Some(&NoPulse))
                 .unwrap();
             (y.is_finished(), y.into_inner())
         };
@@ -593,7 +593,7 @@ fn seeking_a_fragmented_file_indexes_its_fragments() {
         let mut seeked = None;
         loop {
             let y = cursor
-                .next(&file, &mut DemuxStage(&mut dem), &Unstoppable)
+                .next(&file, &mut DemuxStage(&mut dem), Some(&NoPulse))
                 .unwrap();
             let done = y.is_finished();
             match y.into_inner() {
@@ -697,13 +697,13 @@ fn combined_seek_index_and_crafted_counts_obey_limits() {
         demuxer
             .step(
                 Input::new(0, &file).with_total_len(file.len() as u64),
-                &Unstoppable,
+                Some(&NoPulse),
             )
             .unwrap();
         let error = demuxer
             .step(
                 Input::new(moov as u64, &file[moov..]).with_total_len(file.len() as u64),
-                &Unstoppable,
+                Some(&NoPulse),
             )
             .unwrap_err();
         assert!(
@@ -716,7 +716,7 @@ fn combined_seek_index_and_crafted_counts_obey_limits() {
 mod muxer {
     use super::*;
     use std::sync::Arc;
-    use zencodec_media::container::{MuxHint, Muxer, apply_finish};
+    use zencodec_media::container::{MuxHint, Muxer};
     use zencodec_media::session::SessionError;
     use zencodec_media::track::{AudioTrackInfo, ChannelLayout, VideoTrackInfo};
     use zencodec_media_testkit::check_muxer_output_honesty;
@@ -814,15 +814,14 @@ mod muxer {
         m.begin(tracks, hint).map_err(|e| format!("{e:?}"))?;
         let mut out = Vec::new();
         for p in packets {
-            m.write_packet(p.clone(), &Unstoppable)
+            m.write_packet(p.clone(), Some(&NoPulse))
                 .map_err(|e| format!("{e:?}"))?;
             m.take_output(&mut out);
         }
-        apply_finish(
-            &mut out,
-            m.finish(&Unstoppable).map_err(|e| format!("{e:?}"))?,
-        )
-        .map_err(|e| format!("{e:?}"))?;
+        m.finish(Some(&NoPulse))
+            .map_err(|e| format!("{e:?}"))?
+            .apply_to(&mut out)
+            .map_err(|e| format!("{e:?}"))?;
         Ok(out)
     }
 
@@ -834,6 +833,84 @@ mod muxer {
             p.bytes().to_vec(),
             p.random_access() == RandomAccess::Yes,
         )
+    }
+
+    #[test]
+    fn absent_call_controls_keep_exact_mux_bytes_and_demux_packets() {
+        let input = packets(5);
+        let tracks = tracks(Some(&AV1C));
+        for fragmented in [false, true] {
+            let make = || {
+                if fragmented {
+                    Mp4Muxer::fragmented()
+                } else {
+                    Mp4Muxer::new()
+                }
+            };
+            let expected = mux(make(), &tracks, &input, MuxHint::default()).unwrap();
+            let mut writer = make();
+            writer.begin(&tracks, MuxHint::default()).unwrap();
+            let mut bytes = Vec::new();
+            for packet in &input {
+                writer.write_packet(packet.clone(), None).unwrap();
+                writer.take_output(&mut bytes);
+            }
+            writer.finish(None).unwrap().apply_to(&mut bytes).unwrap();
+            assert_eq!(bytes, expected);
+            let (_, expected_packets) = demux(&expected).unwrap();
+            let mut reader = Mp4Demuxer::new(MediaLimits::default());
+            let mut cursor = SliceCursor::new(7);
+            let mut actual_packets = Vec::new();
+            loop {
+                let event = cursor
+                    .next(&bytes, &mut DemuxStage(&mut reader), None)
+                    .unwrap();
+                let done = event.is_finished();
+                if let DemuxEvent::Packet(packet) = event.into_inner() {
+                    actual_packets.push(key(&packet));
+                }
+                if done {
+                    break;
+                }
+            }
+            assert_eq!(
+                actual_packets,
+                expected_packets.iter().map(key).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn stopped_optional_controls_refuse_before_mp4_state_changes() {
+        use zencodec::decode::Input;
+        use zencodec::enough::{Stop, StopReason};
+        use zencodec_media::container::Demuxer;
+        struct Tripped(StopReason);
+        impl Stop for Tripped {
+            fn check(&self) -> Result<(), StopReason> {
+                Err(self.0)
+            }
+        }
+        for reason in [StopReason::Cancelled, StopReason::TimedOut] {
+            let pulse = zencodec::how_far::StopOnly::new(Tripped(reason));
+            let mut demuxer = Mp4Demuxer::new(MediaLimits::default());
+            let requests = demuxer.requested().to_vec();
+            assert!(matches!(demuxer.step(Input::empty(), Some(&pulse)),
+                Err(SessionError::Cancelled(actual)) if actual == reason));
+            assert_eq!(demuxer.requested(), requests);
+            let mut muxer = Mp4Muxer::new();
+            muxer
+                .begin(&tracks(Some(&AV1C)), MuxHint::default())
+                .unwrap();
+            let pending = muxer.pending_output().to_vec();
+            assert!(
+                matches!(muxer.write_packet(packets(1).remove(0), Some(&pulse)),
+                Err(SessionError::Cancelled(actual)) if actual == reason)
+            );
+            assert_eq!(muxer.pending_output(), pending);
+            assert!(matches!(muxer.finish(Some(&pulse)),
+                Err(SessionError::Cancelled(actual)) if actual == reason));
+        }
     }
 
     #[test]
@@ -984,10 +1061,10 @@ mod muxer {
             let mut bytes = Vec::new();
             mux.take_output(&mut bytes);
             for packet in &packets {
-                mux.write_packet(packet.clone(), &Unstoppable).unwrap();
+                mux.write_packet(packet.clone(), Some(&NoPulse)).unwrap();
                 mux.take_output(&mut bytes);
             }
-            let finish = mux.finish(&Unstoppable).unwrap();
+            let finish = mux.finish(Some(&NoPulse)).unwrap();
             assert!(finish.patches.is_empty());
             bytes.extend_from_slice(&finish.tail);
             let (_, got) = demux(&bytes).unwrap();
@@ -1006,7 +1083,7 @@ mod muxer {
                 let mut mux = Mp4Muxer::new();
                 mux.begin_exact_timing(&info, hint).unwrap();
                 let header = mux.pending_output().to_vec();
-                assert!(mux.write_packet(invalid, &Unstoppable).is_err());
+                assert!(mux.write_packet(invalid, Some(&NoPulse)).is_err());
                 assert_eq!(mux.pending_output(), header);
             }
         }
@@ -1053,7 +1130,7 @@ mod muxer {
                     .begin(&tracks(Some(&AV1C)), MuxHint::default())
                     .unwrap();
                 assert!(matches!(
-                    muxer.write_packet(packet, &Unstoppable),
+                    muxer.write_packet(packet, Some(&NoPulse)),
                     Err(SessionError::Codec(Mp4Error::Overflow))
                 ));
             }
@@ -1068,11 +1145,11 @@ mod muxer {
                 .begin(&tracks(Some(&AV1C)), MuxHint::default())
                 .unwrap();
             muxer
-                .write_packet(timing_packet(0, 0, None), &Unstoppable)
+                .write_packet(timing_packet(0, 0, None), Some(&NoPulse))
                 .unwrap();
             let next = i64::from(u32::MAX) + 1;
             assert!(matches!(
-                muxer.write_packet(timing_packet(next, next, None), &Unstoppable),
+                muxer.write_packet(timing_packet(next, next, None), Some(&NoPulse)),
                 Err(SessionError::Codec(Mp4Error::Overflow))
             ));
         }
@@ -1087,7 +1164,7 @@ mod muxer {
                 .begin(&tracks(Some(&AV1C)), MuxHint::default())
                 .unwrap();
             assert!(matches!(
-                muxer.write_packet(timing_packet(0, -1, Some(1)), &Unstoppable),
+                muxer.write_packet(timing_packet(0, -1, Some(1)), Some(&NoPulse)),
                 Err(SessionError::Unsupported(UnsupportedMedia::Container))
             ));
         }
@@ -1134,7 +1211,7 @@ mod muxer {
             let packet = timing_packet(0, 0, Some(40))
                 .with_addition(PacketAddition::new(1, PacketPayload::Owned(vec![9])));
             assert!(matches!(
-                muxer.write_packet(packet, &Unstoppable),
+                muxer.write_packet(packet, Some(&NoPulse)),
                 Err(SessionError::Unsupported(UnsupportedMedia::Container))
             ));
         }
@@ -1180,10 +1257,10 @@ mod muxer {
             .begin(&tracks(Some(&AV1C)), MuxHint::default())
             .unwrap();
         progressive
-            .write_packet(input[0].clone(), &Unstoppable)
+            .write_packet(input[0].clone(), Some(&NoPulse))
             .unwrap();
         assert!(matches!(
-            progressive.finish(&Unstoppable),
+            progressive.finish(Some(&NoPulse)),
             Err(SessionError::Unsupported(UnsupportedMedia::Container))
         ));
         let bytes = mux(
@@ -1208,10 +1285,10 @@ mod muxer {
                     .begin(&tracks(Some(&AV1C)), MuxHint::default())
                     .unwrap();
                 muxer
-                    .write_packet(timing_packet(0, 0, Some(40)), &Unstoppable)
+                    .write_packet(timing_packet(0, 0, Some(40)), Some(&NoPulse))
                     .unwrap();
                 assert!(matches!(
-                    muxer.write_packet(timing_packet(dts, dts, Some(40)), &Unstoppable),
+                    muxer.write_packet(timing_packet(dts, dts, Some(40)), Some(&NoPulse)),
                     Err(SessionError::Unsupported(UnsupportedMedia::Container))
                 ));
             }
@@ -1255,7 +1332,7 @@ mod muxer {
                     .with_duration_ticks(40)
                     .with_discard(discard);
                 assert!(matches!(
-                    muxer.write_packet(packet, &Unstoppable),
+                    muxer.write_packet(packet, Some(&NoPulse)),
                     Err(SessionError::Unsupported(UnsupportedMedia::Container))
                 ));
             }
@@ -1269,7 +1346,7 @@ mod muxer {
                 .with_dts(Timestamp::new(1, TimeBase::new(1, 1).unwrap()))
                 .with_duration_ticks(40);
             assert!(matches!(
-                muxer.write_packet(packet, &Unstoppable),
+                muxer.write_packet(packet, Some(&NoPulse)),
                 Err(SessionError::Protocol(ProtocolViolation::ClockMismatch))
             ));
         }

@@ -519,7 +519,7 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
     fn job(self) -> AvifEncodeJob {
         AvifEncodeJob {
             config: self,
-            stop: None,
+            pulse: None,
             exif: None,
             icc_profile: None,
             xmp: None,

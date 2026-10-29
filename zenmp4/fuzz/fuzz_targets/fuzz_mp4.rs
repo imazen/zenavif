@@ -1,8 +1,8 @@
 #![no_main]
 #![forbid(unsafe_code)]
 
-use enough::Unstoppable;
 use libfuzzer_sys::fuzz_target;
+use zencodec::NoPulse;
 use zencodec_io::SliceCursor;
 use zencodec_media::container::DemuxStage;
 use zencodec_media::limits::MediaLimits;
@@ -16,7 +16,7 @@ fuzz_target!(|data: &[u8]| {
         .with_max_packet_bytes(64 << 10);
     let mut demuxer = Mp4Demuxer::new(limits);
     let mut cursor = SliceCursor::new(17);
-    while let Ok(event) = cursor.next(data, &mut DemuxStage(&mut demuxer), &Unstoppable) {
+    while let Ok(event) = cursor.next(data, &mut DemuxStage(&mut demuxer), Some(&NoPulse)) {
         if event.is_finished() {
             break;
         }

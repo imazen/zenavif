@@ -29,7 +29,7 @@ fn track_hdr_metadata_survives_without_poster() {
         .set_mdcv(MdcvBox::new([(1, 2), (3, 4), (5, 6)], (7, 8), 10_000_000, 50));
     let data = image.try_serialize(64, 64, &[AnimFrame::new(b"sample", 1).with_sync(true)], b"header", None).unwrap();
     for bytes in [data.clone(), without_poster(data)] {
-        let parser = zenavif_parse_current::AvifParser::from_bytes(&bytes).unwrap();
+        let parser = zenavif_parse::AvifParser::from_bytes(&bytes).unwrap();
         assert_eq!(parser.content_light_level().unwrap().max_content_light_level, 1000);
         assert_eq!(parser.mastering_display().unwrap().min_luminance, 50);
         assert_eq!(parser.ambient_viewing().unwrap().ambient_illuminance, 100_000);
@@ -82,15 +82,15 @@ fn cclv_optional_fields_preserve_absence_signed_values_and_track_metadata() {
         assert_eq!(payload[0], mask << 2);
         assert_eq!(payload.len(), 1 + usize::from(mask & 8 != 0) * 24 + (mask & 7).count_ones() as usize * 4);
         if mask & 8 != 0 { assert_eq!(&payload[1..5], &(-5_000_000i32).to_be_bytes()); }
-        let parser = zenavif_parse_current::AvifParser::from_bytes(&data).unwrap();
+        let parser = zenavif_parse::AvifParser::from_bytes(&data).unwrap();
         let hdr = parser.animation_info().unwrap().hdr;
         assert_eq!(hdr.content_colour_volume, parser.content_colour_volume().copied());
         let parsed = hdr.content_colour_volume.unwrap();
         assert_eq!((parsed.primaries, parsed.min_luminance, parsed.max_luminance, parsed.avg_luminance),
                    (cclv.primaries, cclv.min_luminance, cclv.max_luminance, cclv.avg_luminance));
-        let eager = zenavif_parse_current::read_avif(&mut &data[..]).unwrap();
+        let eager = zenavif_parse::read_avif(&mut &data[..]).unwrap();
         assert_eq!(eager.animation.unwrap().hdr, hdr);
-        let owned = zenavif_parse_current::AvifParser::from_reader(&mut &without_poster(data)[..]).unwrap();
+        let owned = zenavif_parse::AvifParser::from_reader(&mut &without_poster(data)[..]).unwrap();
         assert_eq!(owned.animation_info().unwrap().hdr, hdr);
         assert_eq!(owned.content_colour_volume(), Some(&parsed));
     }
@@ -103,7 +103,7 @@ fn poster_and_track_hdr_are_independent() {
     let mut data = image.try_serialize(64, 64, &[AnimFrame::new(b"sample", 1).with_sync(true)], b"header", None).unwrap();
     let poster = payload_range(&data, &[*b"meta", *b"iprp", *b"ipco", *b"amve"]);
     data[poster.start..poster.start + 4].copy_from_slice(&200_000u32.to_be_bytes());
-    let parser = zenavif_parse_current::AvifParser::from_bytes(&data).unwrap();
+    let parser = zenavif_parse::AvifParser::from_bytes(&data).unwrap();
     assert_eq!(parser.ambient_viewing().unwrap().ambient_illuminance, 200_000);
     assert_eq!(parser.animation_info().unwrap().hdr.ambient_viewing.unwrap().ambient_illuminance, 100_000);
 }

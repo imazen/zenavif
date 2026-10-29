@@ -771,7 +771,7 @@ mod tests {
             let mut image = AnimatedImage::new();
             image.set_crop(crop).set_rotation(1).set_mirror(0);
             let bytes = image.try_serialize(64, 80, &frames, b"header", None).unwrap();
-            let parsed = zenavif_parse_current::AvifParser::from_bytes(&bytes).unwrap();
+            let parsed = zenavif_parse::AvifParser::from_bytes(&bytes).unwrap();
             let clap = parsed.clean_aperture().unwrap();
             assert_eq!((clap.width_n, clap.width_d, clap.height_n, clap.height_d), (crop.width, 1, crop.height, 1));
             assert_eq!((clap.horiz_off_n, clap.horiz_off_d), ((2 * crop.x + crop.width) as i32 - 64, 2));
@@ -808,7 +808,7 @@ mod tests {
                 if let Some(r) = rotation { image.set_rotation(r); }
                 if let Some(m) = mirror { image.set_mirror(m); }
                 let bytes = image.try_serialize(64, 80, &frames, b"header", None).unwrap();
-                let parsed = zenavif_parse_current::AvifParser::from_bytes(&bytes).unwrap();
+                let parsed = zenavif_parse::AvifParser::from_bytes(&bytes).unwrap();
                 assert_eq!(parsed.rotation().map(|r| r.angle), rotation.map(|r| u16::from(r) * 90));
                 assert_eq!(parsed.mirror().map(|m| m.axis), mirror);
             }
@@ -827,7 +827,7 @@ mod tests {
             let mut image = AnimatedImage::new();
             image.set_pixel_aspect_ratio(spacing, spacing);
             let bytes = image.try_serialize(64, 64, &frames, b"header", None).unwrap();
-            let parsed = zenavif_parse_current::AvifParser::from_bytes(&bytes).unwrap();
+            let parsed = zenavif_parse::AvifParser::from_bytes(&bytes).unwrap();
             let ratio = parsed.pixel_aspect_ratio().unwrap();
             assert_eq!((ratio.h_spacing, ratio.v_spacing), (spacing, spacing));
         }
@@ -845,7 +845,7 @@ mod tests {
             let mut image = AnimatedImage::new();
             image.set_repetition_count(repeat);
             let bytes = image.try_serialize(64, 64, &frames, b"header", None).unwrap();
-            let parser = zenavif_parse_current::AvifParser::from_bytes(&bytes).unwrap();
+            let parser = zenavif_parse::AvifParser::from_bytes(&bytes).unwrap();
             let info = parser.animation_info().unwrap();
             assert_eq!(info.loop_count, expected);
             assert_eq!(info.frame_count, 2);
@@ -862,15 +862,15 @@ mod tests {
             image.set_repetition_count(RepetitionCount::Finite(repeats));
             let bytes = image.try_serialize(64, 64, &frames, b"header", None).unwrap();
             let parsers = [
-                zenavif_parse_current::AvifParser::from_bytes(&bytes).unwrap(),
-                zenavif_parse_current::AvifParser::from_owned(bytes.clone()).unwrap(),
-                zenavif_parse_current::AvifParser::from_reader(&mut &bytes[..]).unwrap(),
+                zenavif_parse::AvifParser::from_bytes(&bytes).unwrap(),
+                zenavif_parse::AvifParser::from_owned(bytes.clone()).unwrap(),
+                zenavif_parse::AvifParser::from_reader(&mut &bytes[..]).unwrap(),
             ];
             for parser in parsers {
                 assert_eq!(parser.animation_info().unwrap().loop_count, u64::from(repeats) + 1);
                 assert_eq!(parser.frame_timing(1).unwrap().duration_in_timescales, 2);
             }
-            let eager = zenavif_parse_current::read_avif(&mut &bytes[..]).unwrap();
+            let eager = zenavif_parse::read_avif(&mut &bytes[..]).unwrap();
             assert_eq!(eager.animation.unwrap().loop_count, u64::from(repeats) + 1);
         }
     }
@@ -887,7 +887,7 @@ mod tests {
             let mut image = AnimatedImage::new();
             image.set_timescale(timescale).set_repetition_count(RepetitionCount::Finite(2));
             let bytes = image.try_serialize(64, 80, &frames, b"header", None).unwrap();
-            let parsed = zenavif_parse_current::AvifParser::from_bytes(&bytes).unwrap();
+            let parsed = zenavif_parse::AvifParser::from_bytes(&bytes).unwrap();
             let mut pts = 0u64;
             for (i, duration) in durations.iter().enumerate() {
                 let timing = parsed.frame_timing(i).unwrap();
@@ -1065,9 +1065,18 @@ mod tests {
         image.set_color_config(basic_av1c());
         // 70000 used to panic at write_u32(out, width << 16).
         let avif = image.serialize(70_000, 70_000, &frames, b"seq", None);
-        // File is structurally valid.
+        // File is structurally valid. The paired parser's default image budget
+        // rejects these dimensions; this header-only fixture explicitly admits
+        // its 4,900 megapixels without allocating or decoding those pixels.
         assert_eq!(&avif[4..8], b"ftyp");
-        let parser = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+        assert!(matches!(
+            zenavif_parse::AvifParser::from_bytes(&avif),
+            Err(error) if matches!(error.error(), zenavif_parse::Error::ResourceLimitExceeded(_))
+        ));
+        let config = zenavif_parse::DecodeConfig::default().with_total_megapixels_limit(4_900);
+        let parser = zenavif_parse::AvifParser::from_bytes_with_config(
+            &avif, &config, &zenavif_parse::Unstoppable,
+        ).unwrap();
         let info = parser.animation_info().expect("animation info");
         assert_eq!(info.frame_count, 1);
     }

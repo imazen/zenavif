@@ -21,7 +21,8 @@ use crate::error::Error;
 /// Single-image AVIF decoder.
 pub struct AvifDecoder<'a> {
     pub(super) config: crate::DecoderConfig,
-    pub(super) stop: Option<zencodec::StopToken>,
+    /// The job's control, polled for cancellation.
+    pub(super) pulse: Option<zencodec::SharedPulse>,
     pub(super) data: Cow<'a, [u8]>,
     pub(super) preferred: Vec<PixelDescriptor>,
     pub(super) limits: ResourceLimits,
@@ -43,8 +44,8 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
 
 impl AvifDecoder<'_> {
     fn decode_inner(self) -> Result<DecodeOutput, At<Error>> {
-        let stop: &dyn Stop = match &self.stop {
-            Some(s) => s,
+        let stop: &dyn Stop = match &self.pulse {
+            Some(p) => p,
             None => &enough::Unstoppable,
         };
         let mut decoder = crate::ManagedAvifDecoder::new(&self.data, &self.config)?;

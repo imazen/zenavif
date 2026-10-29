@@ -1925,3 +1925,10 @@ A native decoder pin update refreshed the workspace and fuzz locks but omitted
 the independent downstream probe lock. Its CI `--locked` check correctly refused
 resolution. The native context resolve/qualification recipes now include that
 consumer. See `docs/media-contract-status.md`.
+
+## Fixed: standalone downstream lock after Pulse migration
+
+CI's locked downstream probe retained obsolete core revisions despite updated
+manifests. The refreshed lock and unchanged consumer command pass; graph delta
+and limits are in `benchmarks/downstream_pulse_2026-10-29.md`. Keep standalone
+consumer locks synchronized as well as the root lock.

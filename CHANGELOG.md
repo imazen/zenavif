@@ -2,6 +2,27 @@
 
 ## AV1 media sessions (unreleased)
 
+- Add `Av1EncodeSettings::with_output_pull_threshold`; deprecate the misleading
+  `with_max_queued_frames` builder without changing its soft-trigger behavior.
+  Native lookahead may exceed this threshold. Hard admission bounds remain open.
+
+- Align native zenravif to `52bb0243` (root-selected serializer, `ca4bfaf4`) for the coordinated serializer source
+  (`c9892824`, `521d4823`). Eleven native encode/animation controls and strict
+  library Clippy pass; see `benchmarks/serializer_consumer_2026-10-29.md`.
+
+- Match zencodec `a7c2a6ca`'s optional borrowed Pulse contracts for AV1
+  media sessions, incremental decoding and zenmp4 demux/mux work
+  (`421de7b9`, `0af13c06`). These calls and the existing animation methods
+  accept `Option<&dyn zencodec::Pulse>`. `None` adds no per-call control;
+  forwarding preserves absence, and encode/decode jobs keep their
+  `SharedPulse` and native owned cancellation views. Native progress
+  reporting is unchanged. zenmp4 no longer depends on `enough` directly.
+  Native media/incremental controls and strict Clippy pass on `dee1a361`;
+  paired-parser serializer controls pass on fixture correction `e5760d1c`.
+  Root pins/lock use core `feb09f9f`, pixels `283655c5` and Ultra HDR `7e9d296c`.
+  Downstream/fuzz locks and wider feature/platform coverage remain unqualified.
+  See `benchmarks/optional_pulse_2026-10-29.md`.
+
 - Admit native picture-plane storage through
   `Av1VideoDecoder::with_settings` and rav1d's `max_picture_bytes`.
   Refusal precedes frame publication and preserves the native error trace.
@@ -193,6 +214,13 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 ## Workspace
 
 ### [Unreleased]
+
+- Align optional-control manifests on core `feb09f9f`, pixels `283655c5`,
+  version-edge Ultra HDR `7e9d296c` and paired native PNG `7b6d1436`.
+  Root, downstream and fuzz consumers carry matching family patches. The root
+  lock and focused native controls are qualified; downstream/fuzz lock and
+  wider feature/platform qualification remain pending.
+
 
 ### Dependency compatibility
 

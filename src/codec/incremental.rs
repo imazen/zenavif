@@ -1,8 +1,9 @@
 //! Input-budget enforcement around the shared whole-file state machine.
 
-use enough::Stop;
 use whereat::{At, at};
-use zencodec::decode::{DecodeRowSink, IncrementalDecode, Input, Progress, Request, StepError};
+use zencodec::decode::{
+    DecodeRowSink, IncrementalDecode, Input, InputRequest, Progress, StepError,
+};
 use zencodec::{CodecError, ImageInfo, ResourceLimits};
 use zenpixels::PixelDescriptor;
 
@@ -12,7 +13,7 @@ use crate::Error;
 pub(super) struct AvifIncremental {
     inner: zencodec::helpers::WholeFileIncremental<AvifDecodeJob>,
     max_input_bytes: Option<u64>,
-    requests: Vec<Request>,
+    requests: Vec<InputRequest>,
 }
 
 impl AvifIncremental {
@@ -39,8 +40,8 @@ impl AvifIncremental {
             .map(|n| usize::try_from(n.saturating_add(1)).unwrap_or(usize::MAX));
         for &request in self.inner.requested() {
             self.requests.push(match (request, cap) {
-                (Request::AtLeast { offset, min_len }, Some(cap)) => {
-                    Request::at_least(offset, min_len.min(cap))
+                (InputRequest::AtLeast { offset, min_len }, Some(cap)) => {
+                    InputRequest::at_least(offset, min_len.min(cap))
                 }
                 (other, _) => other,
             });
@@ -55,9 +56,10 @@ impl IncrementalDecode for AvifIncremental {
         &mut self,
         input: Input<'_>,
         sink: &mut dyn DecodeRowSink,
-        stop: &dyn Stop,
+        pulse: Option<&dyn zencodec::Pulse>,
     ) -> Result<Progress, StepError<Self::Error>> {
-        stop.check()?;
+        let local_pulse = pulse.unwrap_or(&zencodec::NoPulse);
+        local_pulse.check()?;
         if let Some(limit) = self.max_input_bytes {
             let size = input
                 .total_len
@@ -70,12 +72,12 @@ impl IncrementalDecode for AvifIncremental {
                     StepError::Codec(CodecError::of(at!(Error::ResourceLimit(e.to_string()))))
                 })?;
         }
-        let progress = self.inner.step(input, sink, stop)?;
+        let progress = self.inner.step(input, sink, pulse)?;
         self.update_requests();
         Ok(progress)
     }
 
-    fn requested(&self) -> &[Request] {
+    fn requested(&self) -> &[InputRequest] {
         &self.requests
     }
 

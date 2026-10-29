@@ -130,7 +130,7 @@ fn borrowed_finish_stop_is_checked_during_native_preparation() {
     let input = pixels(128, 256);
     encoder.push_frame(input.as_slice(), 10, None).unwrap();
     let stop = PollLimit(AtomicUsize::new(0));
-    let result = encoder.finish(Some(&stop));
+    let result = encoder.finish(Some(&zencodec::how_far::StopOnly::borrowed(&stop)));
     assert!(
         result.is_err(),
         "finish ignored cancellation after admission"
@@ -160,7 +160,9 @@ fn animation_decode_keeps_job_stop_and_counts_skipped_pixels() {
     let cancelled = Arc::new(AtomicBool::new(false));
     let mut decoder = zenavif::AvifDecoderConfig::new()
         .job()
-        .with_stop(zencodec::StopToken::new(Toggle(cancelled.clone())))
+        .with_pulse(zencodec::SharedPulse::new(
+            zencodec::how_far::StopOnly::new(Toggle(cancelled.clone())),
+        ))
         .animation_frame_decoder(Cow::Borrowed(bytes.data()), &[])
         .unwrap();
     cancelled.store(true, Ordering::Relaxed);

@@ -6,10 +6,9 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use enough::Stop;
 use zencodec::time::{FrameDuration, Rounding, TimeBase, Timestamp};
 use zencodec_media::container::{
-    AccessPattern, DemuxEvent, DemuxProgress, Demuxer, Input, Request, SeekMode, SeekResult,
+    AccessPattern, DemuxEvent, DemuxProgress, Demuxer, Input, InputRequest, SeekMode, SeekResult,
     SeekScope, SeekStatus, SeekTarget,
 };
 use zencodec_media::limits::MediaLimits;
@@ -72,7 +71,7 @@ enum Phase {
 #[derive(Debug)]
 pub struct Mp4Demuxer {
     limits: MediaLimits,
-    requests: Vec<Request>,
+    requests: Vec<InputRequest>,
     tracks: Vec<TrackInfo>,
     states: Vec<TrackState>,
     /// Next top-level box.
@@ -123,14 +122,14 @@ impl Mp4Demuxer {
         self.fragmented
     }
 
-    fn need(&mut self, r: Request) -> Res<DemuxProgress> {
+    fn need(&mut self, r: InputRequest) -> Res<DemuxProgress> {
         self.requests.push(r);
         Ok(DemuxProgress::need(0))
     }
 
     fn scan(&mut self, input: Input<'_>) -> Res<DemuxProgress> {
         if input.offset != self.pos {
-            return self.need(Request::at_least(self.pos, 16));
+            return self.need(InputRequest::at_least(self.pos, 16));
         }
         let b = input.bytes;
         if b.is_empty() && input.reaches_end() {
@@ -143,13 +142,13 @@ impl Mp4Demuxer {
         let h = match boxes::header(b).map_err(SessionError::Codec)? {
             Some(h) => h,
             None if input.reaches_end() => return err(Mp4Error::Truncated),
-            None => return self.need(Request::at_least(self.pos, 16)),
+            None => return self.need(InputRequest::at_least(self.pos, 16)),
         };
         let size = match h.size {
             Some(s) => s,
             None => match input.total_len {
                 Some(total) => total - self.pos,
-                None => return self.need(Request::Len),
+                None => return self.need(InputRequest::Len),
             },
         };
         let next = self
@@ -173,7 +172,7 @@ impl Mp4Demuxer {
                     if input.reaches_end() {
                         return err(Mp4Error::Truncated);
                     }
-                    return self.need(Request::at_least(self.pos, len));
+                    return self.need(InputRequest::at_least(self.pos, len));
                 }
                 let body = &b[h.header_len..len];
                 let start = self.pos;
@@ -206,7 +205,7 @@ impl Mp4Demuxer {
                     self.phase = Phase::Done;
                     return Ok(DemuxProgress::new(0, DemuxEvent::Done));
                 }
-                self.need(Request::at_least(self.pos, 16))
+                self.need(InputRequest::at_least(self.pos, 16))
             }
         }
     }
@@ -217,7 +216,7 @@ impl Mp4Demuxer {
             Some(s) => {
                 past_end(s, total)?;
                 self.requests
-                    .push(Request::range(s.offset, u64::from(s.size)));
+                    .push(InputRequest::range(s.offset, u64::from(s.size)));
                 Ok(DemuxProgress::need(consumed))
             }
             None => {
@@ -226,7 +225,7 @@ impl Mp4Demuxer {
                 } else {
                     Phase::Done
                 };
-                self.requests.push(Request::at_least(self.pos, 16));
+                self.requests.push(InputRequest::at_least(self.pos, 16));
                 Ok(DemuxProgress::need(consumed))
             }
         }
@@ -239,7 +238,7 @@ impl Mp4Demuxer {
         let Some(&s) = self.pending.front() else {
             if self.fragmented && !self.indexed {
                 self.phase = Phase::Scan;
-                return self.need(Request::at_least(self.pos, 16));
+                return self.need(InputRequest::at_least(self.pos, 16));
             }
             self.phase = Phase::Done;
             return Ok(DemuxProgress::new(0, DemuxEvent::Done));
@@ -249,7 +248,7 @@ impl Mp4Demuxer {
             if input.offset == s.offset && input.reaches_end() {
                 return err(Mp4Error::Truncated);
             }
-            return self.need(Request::range(s.offset, u64::from(s.size)));
+            return self.need(InputRequest::range(s.offset, u64::from(s.size)));
         }
         self.pending.pop_front();
         let mut data = Vec::new();
@@ -345,7 +344,7 @@ impl Mp4Demuxer {
     fn index_step(&mut self, input: Input<'_>) -> Res<DemuxProgress> {
         let pos = self.index_pos;
         if input.offset != pos {
-            return self.need(Request::at_least(pos, 16));
+            return self.need(InputRequest::at_least(pos, 16));
         }
         let b = input.bytes;
         if b.is_empty() && input.reaches_end() {
@@ -361,12 +360,12 @@ impl Mp4Demuxer {
         let h = match boxes::header(b).map_err(SessionError::Codec)? {
             Some(h) => h,
             None if input.reaches_end() => return err(Mp4Error::Truncated),
-            None => return self.need(Request::at_least(pos, 16)),
+            None => return self.need(InputRequest::at_least(pos, 16)),
         };
         let size = match (h.size, input.total_len) {
             (Some(s), _) => s,
             (None, Some(total)) => total - pos,
-            (None, None) => return self.need(Request::Len),
+            (None, None) => return self.need(InputRequest::Len),
         };
         let next = pos
             .checked_add(size)
@@ -380,7 +379,7 @@ impl Mp4Demuxer {
                 .map_err(SessionError::Limit)?;
             let len = usize::try_from(size).map_err(|_| SessionError::Codec(Mp4Error::Overflow))?;
             if b.len() < len {
-                return self.need(Request::at_least(pos, len));
+                return self.need(InputRequest::at_least(pos, len));
             }
             let samples = self.fragment(&b[h.header_len..len], pos)?;
             self.limits
@@ -389,7 +388,7 @@ impl Mp4Demuxer {
             self.all.extend(samples);
         }
         self.index_pos = next;
-        self.need(Request::at_least(next, 16))
+        self.need(InputRequest::at_least(next, 16))
     }
 
     /// Choose the sample `target` names in `all` and resume emitting there.
@@ -1175,8 +1174,13 @@ fn sample_table(
 impl Demuxer for Mp4Demuxer {
     type Error = Mp4Error;
 
-    fn step(&mut self, input: Input<'_>, stop: &dyn Stop) -> Res<DemuxProgress> {
-        stop.check()?;
+    fn step(
+        &mut self,
+        input: Input<'_>,
+        pulse: Option<&dyn zencodec::Pulse>,
+    ) -> Res<DemuxProgress> {
+        let pulse = pulse.unwrap_or(&zencodec::NoPulse);
+        pulse.check()?;
         self.requests.clear();
         match self.phase {
             Phase::Scan => self.scan(input),
@@ -1186,7 +1190,7 @@ impl Demuxer for Mp4Demuxer {
         }
     }
 
-    fn requested(&self) -> &[Request] {
+    fn requested(&self) -> &[InputRequest] {
         &self.requests
     }
 

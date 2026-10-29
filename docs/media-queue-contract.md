@@ -30,3 +30,37 @@ undersized queues at construction, and enforce admission against both that
 capacity and shared media/resource limits. Allowing small values as soft triggers
 instead requires an explicit distinction from a hard queue bound. This review
 changes neither policy nor existing session-test expectations.
+
+## Current paired graph and caller spelling (2026-10-29)
+
+The unchanged audit on source122b1474 with corefeb09f9f/pixels283655c5
+reproduces all four counts above. Receipt: rc0,4s,peak RSS0.37GiB,minimum
+available10664MiB,peak load0.96. This is an admission count, not a memory bound.
+
+Use `Av1EncodeSettings::with_output_pull_threshold` for this soft output trigger.
+The misleading `with_max_queued_frames` builder is deprecated immediately and
+delegates unchanged; the public `max_queued_frames` field remains its compatibility
+storage. Native session tests retain small-threshold progress, and one explicitly
+retains the old builder. A separate hard admission bound still requires native
+capacity evidence and pre-effect refusal; this rename does not provide it.
+
+The replacement builder is qualified on source0c6a7507: the four-case queue
+audit preserves the counts above; all21 native media-session tests pass with
+zero ignored/filtered tests, and strict downstream queue Clippy passes.
+Receipt: rc0,29s,peak RSS0.87GiB,minimum available10371MiB,peak load1.11.
+The existing default-speed test still exercises the deprecated builder; other
+queue matrix cases and the downstream probe use the new spelling.
+
+### Why the observed counts are not preflight evidence
+
+Source review at zenrav1e9057c4b confirms two separate readiness predicates:
+[`needs_more_frame_q_lookahead`](https://github.com/imazen/zenrav1e/blob/9057c4bacf1d8a23974e32de09fd4446a1cc525a/src/api/internal.rs#L439)
+uses keyframe lookahead and input ordinals; `needs_more_fi_lookahead` counts
+ready coded-frame invariants, excluding show-existing presentations. Native
+[`send_frame`](https://github.com/imazen/zenrav1e/blob/9057c4bacf1d8a23974e32de09fd4446a1cc525a/src/api/context.rs#L105)
+does not expose a finite queue-cap admission result: its EnoughData refusal
+concerns flush/still-picture/frame-count exhaustion. Existing native lookahead
+tests inspect both frame_q and frame_data; neither the measured first-output
+count nor the number of submitted-but-unemitted frames bounds all retained
+reference storage. A hard workspace claim must include those lifetimes and
+preparation allocations, not merely stop send after a counter reaches a cap.

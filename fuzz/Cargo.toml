@@ -18,7 +18,7 @@ libfuzzer-sys = "0.4"
 enough = "0.4"
 # The negotiation fuzzer drives the zencodec adapter (the other targets use
 # the native `decode_with` entry point, which never reaches negotiation).
-zencodec = ">=0.1.26, <0.3.0"
+zencodec = ">=0.2.0, <0.4.0"
 zenpixels = ">=0.2.16, <0.4.0"
 
 [dependencies.zenavif]
@@ -26,9 +26,16 @@ path = ".."
 features = ["inventory"]
 
 [patch.crates-io]
-ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "10a79c3a888dd589884fd032846eec70bc31eb13" }
-zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "1d3ddd2131b22e9e3754c765d4ce45ce3901de59" }
-zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "1d3ddd2131b22e9e3754c765d4ce45ce3901de59" }
+# Keep standalone consumers on the same optional-control family.
+zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "feb09f9fd25e90e49a30d7161db8f3b558dfb2a6" }
+zencodec-coroutine = { git = "https://github.com/imazen/zencodec", rev = "feb09f9fd25e90e49a30d7161db8f3b558dfb2a6" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "feb09f9fd25e90e49a30d7161db8f3b558dfb2a6" }
+zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "feb09f9fd25e90e49a30d7161db8f3b558dfb2a6" }
+zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "feb09f9fd25e90e49a30d7161db8f3b558dfb2a6" }
+zenmeta = { git = "https://github.com/imazen/zencodec", rev = "feb09f9fd25e90e49a30d7161db8f3b558dfb2a6" }
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "7e9d296c9e037e626234c9f0e8673d48278f83f0" }
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "283655c5424e0ad7ebc6d2acd94670fac1e29158" }
+zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "283655c5424e0ad7ebc6d2acd94670fac1e29158" }
 # fuzz/ is its own workspace root, so the root [patch] does not reach it.
 # zenavif-parse needs no mirror: zenavif's dep on it is a path dep into the
 # workspace (zenavif-parse/), which resolves transitively from here.
@@ -40,7 +47,7 @@ rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "b19aec656120
 # Mirror of the root zencodec pin: ultrahdr-core reaches zencodec through
 # zenmeta at this exact rev, so any other rev splits the graph into two
 # zencodec copies (gain_map.rs then fails to typecheck).
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "7cc3d3ec6b41103ee8398c30b1582ebdbb6df914" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "feb09f9fd25e90e49a30d7161db8f3b558dfb2a6" }
 
 [[bin]]
 name = "fuzz_decode"

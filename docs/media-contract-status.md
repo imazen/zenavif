@@ -1,5 +1,34 @@
 # AV1 session contract gaps
 
+The current PR75 source migration accepts `Option<&dyn zencodec::Pulse>` for
+AV1 session calls, codec incremental steps and MP4 container work, matching
+[zencodec `a7c2a6ca`](https://github.com/imazen/zencodec/commit/a7c2a6ca).
+`None` adds no per-call control. Existing owned stops remain active, and the
+incremental wrapper forwards absence to its job-owning helper. Native progress
+reporting is unchanged. The focused optional-control qualification below passes.
+
+The optional-control manifests now select core/media/IO/testkit `feb09f9f`
+and pixels `283655c5`, with ultrahdr-core `7e9d296c` using version edges instead
+of the older fixed core revision. Native PNG tests use the qualified `7b6d1436`
+source and its zenflate dependency. Each standalone root carries the shared
+family patches; the downstream consumer requires core 0.2 rather than 0.1.27.
+
+The standalone root graph now has one shared core/pixel family. The serializer's
+old parser0.6 dev dependency brought a legacy core copy into the graph; all
+roundtrip tests now use the paired workspace parser0.7 while retaining the
+independent avif-parse/mp4parse oracles. The 70,000-square structural fixture
+explicitly declares its parser budget and also verifies default-budget refusal.
+
+On `dee1a361`, 21 media-session tests, 3 incremental tests and strict native
+Clippy pass. On the fixture-only correction `e5760d1c`, all 101 serializer tests
+and strict serializer Clippy pass; library source and reviewed lock are unchanged.
+The original disk-floor interruption and parser-budget failure remain recorded
+in [the receipt](../benchmarks/optional_pulse_2026-10-29.md).
+The downstream lock and default/queue consumers are now qualified (see
+[queue admission](media-queue-contract.md)); both standalone fuzz locks and all fuzz binaries also compile on that graph.
+Wider feature coverage and cross-platform qualification
+remain separate gates. The dated findings below retain their original scope.
+
 This records unresolved findings from the post-landing review on 2026-10-18.
 The reviewed implementation is main commit `d235ae23`. It is not an assertion
 that the whole media contract is implemented.
