@@ -491,3 +491,8 @@ beta-cohort-check:
     cargo fmt --check
     cargo clippy --locked --lib -- -D warnings
     cargo test --locked --lib
+
+# Native controls for coordinated serializer dependency changes.
+serializer-consumer-check:
+    cargo test --locked -p zenavif --features encode-imazen --test encode_contracts --test animation_encode_admission --test animation_encode_timing -- --test-threads=1
+    cargo clippy --locked -p zenavif --features encode-imazen --lib -- -D warnings
