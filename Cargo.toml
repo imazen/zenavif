@@ -215,7 +215,7 @@ log = "0.4.29"
 # 2026-09-07: 176ad8ee corrects the fast-preset intra-mode budget after
 # matched-quality corpus verification, retaining the verified animation and
 # alpha corrections. See benchmarks/quality_drift_2026-09-07/README.md.
-ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/imazen/cavif-rs", rev = "fab98d6fcf0bc2c5dc3d6d18b53924b365036d15", default-features = false, optional = true, features = ["stop"] }
+ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/imazen/cavif-rs", rev = "52bb0243a418989393c884ab0d1226c356cb2272", default-features = false, optional = true, features = ["stop"] }
 # zenav1-svt experimental AV1 encode backend (`zenav1-svt` feature).
 # The facade crate lives in the rust/svtav1 subdir of imazen/zenav1-svt and is
 # PACKAGED as `zenav1-svt`; the `svtav1` alias keeps the seam's `use` paths
@@ -803,9 +803,7 @@ zenanalyze-api = { git = "https://github.com/imazen/zenanalyze", rev = "6bbcacb1
 # publish.
 zenavif-serialize = { path = "zenavif-serialize" }
 
-# zenravif now uses the canonical serializer Git revision with animation
-# metadata/HDR/premultiplication support. Unify it with the workspace member
-# used by native SVT and tests, avoiding duplicate serializer packages.
+# The registry serializer edge in zenravif is unified by the workspace patch above.
 # Structural inventory API, the zencodec-media sessions and the Pulse controls,
 # on zencodec's ideal-api review branch (PR 168). TEMPORARY: swap both entries for the
 # released zencodec / zencodec-testkit at that publish. zencodec-media must
