@@ -318,7 +318,7 @@ ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/ima
 # `__expert`-gated upstream), and the two uncalibrated `ZenEnhancement`
 # variants (`AomIntraEdgeFilter`, `AomRestorationUnitSearch`) were REMOVED
 # upstream — `AomScreenTools`/`DeepSearch` are the surviving set.
-svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "339bfb4ae1262cf9752e5d5d530eee1c01a9bc85", optional = true }
+svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "0ebcb871151327b051fc9d6b1a170b159f25b596", optional = true }
 # AVIF container muxer for the zenav1-svt backend (the zenravif backend muxes
 # inside zenravif; this backend muxes in-crate). The 0.2.0 version is
 # supplied by the [patch.crates-io] git pin below until 0.2.0 publishes.
@@ -432,6 +432,9 @@ png = "0.18.0"
 image = "0.25.10"
 zenbench = { version = "0.1.2", features = ["criterion-compat"] }
 fast-ssim2 = { version = "0.8.0", features = ["imgref"] }
+# Butteraugli scoring for the svt-rs quality-step probe (issue #19
+# revalidation); same version as the optional two-pass dep.
+butteraugli = "0.9.3"
 zensim = { git = "https://github.com/imazen/zensimx", rev = "8557758809156baba7364bd8cfe32889a61da4e8", features = ["imgref", "zenpixels", "feature-regime-v2", "custom-profiles"] }
 # zensim-regress must track the SAME zensim as the dependency above, or the
 # `Zensim` / `ImageSource` types in tests/linku_corpus.rs come from two
@@ -822,6 +825,11 @@ required-features = ["_dev"]
 [[example]]
 name = "cancel_latency"
 required-features = ["encode"]
+
+# svt-rs quality-step revalidation probe (zenav1-svt issue #19).
+[[example]]
+name = "issue19_probe"
+required-features = ["encode-svt-rs"]
 
 # line-tables-only: file:line resolution for the per-site allocation profiler
 # (examples/mem_probe_encode.rs, JXL_ALLOC_SITES=1).
