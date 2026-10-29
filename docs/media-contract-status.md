@@ -25,7 +25,8 @@ and strict serializer Clippy pass; library source and reviewed lock are unchange
 The original disk-floor interruption and parser-budget failure remain recorded
 in [the receipt](../benchmarks/optional_pulse_2026-10-29.md).
 The downstream lock and default/queue consumers are now qualified (see
-[queue admission](media-queue-contract.md)); fuzz locks, wider feature coverage and cross-platform qualification
+[queue admission](media-queue-contract.md)); both standalone fuzz locks and all fuzz binaries also compile on that graph.
+Wider feature coverage and cross-platform qualification
 remain separate gates. The dated findings below retain their original scope.
 
 This records unresolved findings from the post-landing review on 2026-10-18.
