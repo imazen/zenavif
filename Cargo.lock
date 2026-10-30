@@ -522,6 +522,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "critical-section"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
+
+[[package]]
 name = "crossbeam-deque"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -868,6 +874,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "090dfeab9752b8574ff7b6fcfc96af46f4e4fc5b2cd0a3462e6d419b076eb7d1"
 dependencies = [
  "enough",
+]
+
+[[package]]
+name = "how-far-along"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "341fd592ab88e539e66604194e7bdeabd057bb13ab7227ef1f6c929617d70da9"
+dependencies = [
+ "critical-section",
+ "enough",
+ "how-far",
+]
+
+[[package]]
+name = "how-far-really"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b9972a73c90b26b7682b067a5b4a34f679ea79f5845a20c1f11df03432a6aa1"
+dependencies = [
+ "how-far",
+ "how-far-along",
 ]
 
 [[package]]
@@ -2685,11 +2712,12 @@ dependencies = [
 [[package]]
 name = "zencodec"
 version = "0.2.0"
-source = "git+https://github.com/imazen/zencodec?rev=ab133d2ccecacb9c3da427c14ddd13ffd0b235b9#ab133d2ccecacb9c3da427c14ddd13ffd0b235b9"
+source = "git+https://github.com/imazen/zencodec?rev=41b1357e9bec50fb1c9508a310ba4b601605207b#41b1357e9bec50fb1c9508a310ba4b601605207b"
 dependencies = [
  "almost-enough",
  "enough",
  "how-far",
+ "libm",
  "spin",
  "whereat",
  "zenpixels 0.3.1",
@@ -2698,7 +2726,7 @@ dependencies = [
 [[package]]
 name = "zencodec-io"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zencodec?rev=ab133d2ccecacb9c3da427c14ddd13ffd0b235b9#ab133d2ccecacb9c3da427c14ddd13ffd0b235b9"
+source = "git+https://github.com/imazen/zencodec?rev=41b1357e9bec50fb1c9508a310ba4b601605207b#41b1357e9bec50fb1c9508a310ba4b601605207b"
 dependencies = [
  "enough",
  "how-far",
@@ -2709,7 +2737,7 @@ dependencies = [
 [[package]]
 name = "zencodec-media"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zencodec?rev=ab133d2ccecacb9c3da427c14ddd13ffd0b235b9#ab133d2ccecacb9c3da427c14ddd13ffd0b235b9"
+source = "git+https://github.com/imazen/zencodec?rev=41b1357e9bec50fb1c9508a310ba4b601605207b#41b1357e9bec50fb1c9508a310ba4b601605207b"
 dependencies = [
  "enough",
  "zencodec",
@@ -2720,7 +2748,7 @@ dependencies = [
 [[package]]
 name = "zencodec-media-testkit"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zencodec?rev=ab133d2ccecacb9c3da427c14ddd13ffd0b235b9#ab133d2ccecacb9c3da427c14ddd13ffd0b235b9"
+source = "git+https://github.com/imazen/zencodec?rev=41b1357e9bec50fb1c9508a310ba4b601605207b#41b1357e9bec50fb1c9508a310ba4b601605207b"
 dependencies = [
  "enough",
  "zencodec",
@@ -2732,9 +2760,11 @@ dependencies = [
 [[package]]
 name = "zencodec-testkit"
 version = "0.2.0"
-source = "git+https://github.com/imazen/zencodec?rev=ab133d2ccecacb9c3da427c14ddd13ffd0b235b9#ab133d2ccecacb9c3da427c14ddd13ffd0b235b9"
+source = "git+https://github.com/imazen/zencodec?rev=41b1357e9bec50fb1c9508a310ba4b601605207b#41b1357e9bec50fb1c9508a310ba4b601605207b"
 dependencies = [
  "enough",
+ "how-far-along",
+ "how-far-really",
  "whereat",
  "zencodec",
  "zencodec-io",
@@ -2753,7 +2783,7 @@ dependencies = [
 [[package]]
 name = "zenmeta"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zencodec?rev=ab133d2ccecacb9c3da427c14ddd13ffd0b235b9#ab133d2ccecacb9c3da427c14ddd13ffd0b235b9"
+source = "git+https://github.com/imazen/zencodec?rev=41b1357e9bec50fb1c9508a310ba4b601605207b#41b1357e9bec50fb1c9508a310ba4b601605207b"
 dependencies = [
  "zencodec",
  "zenpixels 0.3.1",
@@ -3130,4 +3160,4 @@ dependencies = [
 [[patch.unused]]
 name = "zencodec-coroutine"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zencodec?rev=ab133d2ccecacb9c3da427c14ddd13ffd0b235b9#ab133d2ccecacb9c3da427c14ddd13ffd0b235b9"
+source = "git+https://github.com/imazen/zencodec?rev=41b1357e9bec50fb1c9508a310ba4b601605207b#41b1357e9bec50fb1c9508a310ba4b601605207b"

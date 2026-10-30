@@ -54,6 +54,6 @@ The shared exact-timing trait hook forwards to the same implementation.
 and binds representable edit programs before publishing a header. MP4 requires
 exact fixed-point rates and representable clocks; unsupported programs refuse.
 
-Timeline adoption currently targets the shared API review through an isolated
-source bridge. The portable dependency graph and independent edited-playback
-validation remain open. See [qualification](../benchmarks/mp4_timeline_2026-10-30.md).
+Timeline adoption targets the shared API review. The portable native MP4
+graph passes tests, strict Clippy and a no-default WASM check. Independent
+edited-playback validation and broader consumer qualification remain open. See [qualification](../benchmarks/mp4_timeline_2026-10-30.md).

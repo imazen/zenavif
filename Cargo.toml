@@ -387,17 +387,17 @@ linear-srgb = { version = "0.6.7"}
 # zencodec-media is unpublished, so it is a git rev on zencodec's ideal-api
 # review branch (PR 168, the Pulse controls); the
 # zenrav1e rev is the one zenravif pins, so the graph holds one zenrav1e.
-zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "ab133d2ccecacb9c3da427c14ddd13ffd0b235b9", optional = true }
+zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "41b1357e9bec50fb1c9508a310ba4b601605207b", optional = true }
 zenrav1e = { version = "0.2.0", git = "https://github.com/imazen/zenrav1e", rev = "9057c4bacf1d8a23974e32de09fd4446a1cc525a", default-features = false, features = ["stop"], optional = true }
 num-traits = { version = "0.2.19", default-features = false, optional = true }
 
 [dev-dependencies]
-zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "ab133d2ccecacb9c3da427c14ddd13ffd0b235b9" }
+zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "41b1357e9bec50fb1c9508a310ba4b601605207b" }
 anyhow = "1"
 # check_inventory: the structural-inventory conformance check.
 zencodec-testkit = ">=0.2.0, <0.4.0"
 # check_video_{decoder,encoder}_contract for the `media` sessions.
-zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "ab133d2ccecacb9c3da427c14ddd13ffd0b235b9" }
+zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "41b1357e9bec50fb1c9508a310ba4b601605207b" }
 sha2 = "0.11.0"
 zensim-target = { git = "https://github.com/imazen/zensimx", rev = "8557758809156baba7364bd8cfe32889a61da4e8", default-features = false, features = ["native-probe"] }
 # Exact predictor owner required by zensim::BakeScorer; the optional auto-tune
@@ -778,11 +778,11 @@ required-features = ["encode", "zenav1-aom"]
 
 [patch.crates-io]
 # Keep standalone consumers on the same optional-control family.
-zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "ab133d2ccecacb9c3da427c14ddd13ffd0b235b9" }
-zencodec-coroutine = { git = "https://github.com/imazen/zencodec", rev = "ab133d2ccecacb9c3da427c14ddd13ffd0b235b9" }
-zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "ab133d2ccecacb9c3da427c14ddd13ffd0b235b9" }
-zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "ab133d2ccecacb9c3da427c14ddd13ffd0b235b9" }
-zenmeta = { git = "https://github.com/imazen/zencodec", rev = "ab133d2ccecacb9c3da427c14ddd13ffd0b235b9" }
+zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "41b1357e9bec50fb1c9508a310ba4b601605207b" }
+zencodec-coroutine = { git = "https://github.com/imazen/zencodec", rev = "41b1357e9bec50fb1c9508a310ba4b601605207b" }
+zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "41b1357e9bec50fb1c9508a310ba4b601605207b" }
+zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "41b1357e9bec50fb1c9508a310ba4b601605207b" }
+zenmeta = { git = "https://github.com/imazen/zencodec", rev = "41b1357e9bec50fb1c9508a310ba4b601605207b" }
 zenflate = { git = "https://github.com/imazen/zenflate", rev = "a0ea03637a2cc9a193e343018ae2cfb1a6c31edd" }
 # Optional research dependencies must also resolve when this crate is used from git.
 zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "6bbcacb11313923ded6e5eeebb725878c5736453" }
@@ -811,8 +811,8 @@ zenavif-serialize = { path = "zenavif-serialize" }
 # on zencodec's ideal-api review branch (PR 168). TEMPORARY: swap both entries for the
 # released zencodec / zencodec-testkit at that publish. zencodec-media must
 # come from the same rev, or the graph holds two zencodec copies.
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "ab133d2ccecacb9c3da427c14ddd13ffd0b235b9" }
-zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "ab133d2ccecacb9c3da427c14ddd13ffd0b235b9" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "41b1357e9bec50fb1c9508a310ba4b601605207b" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "41b1357e9bec50fb1c9508a310ba4b601605207b" }
 
 [patch."https://github.com/imazen/zenavif"]
 zenavif-serialize = { path = "zenavif-serialize" }

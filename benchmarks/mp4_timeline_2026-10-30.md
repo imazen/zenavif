@@ -35,3 +35,24 @@ Resource receipts (3G hard cap, jobs2, timeout900; not performance benchmarks):
 
 Full logs are retained under `~/tmp/native-timeline-20261030/` as `repair.log`
 and `lint.log`, along with immutable source archives and earlier failure logs.
+
+## Portable native graph
+
+Source `8ca4b0a86d03f4f81cc02e572447671c398202c0`, with its resolved lock,
+passes `just qualify-mp4-timeline`: all 38 tests (zero ignored/filtered),
+strict all-target Clippy and no-default WASM. All five manifest roots now pin
+core `41b1357e9bec50fb1c9508a310ba4b601605207b`. The root graph has one
+copy of each shared interface; only zenresize's existing private edge retains
+zenpixels 0.2.16. The lock adds the testkit's how-far-along/how-far-really and
+critical-section dependencies, updates the shared family revisions and adds
+core's libm edge. No unrelated existing package versions changed.
+
+The updated dump example preserves the oracle's scalar `edit=` field and adds
+a separate full `timeline=` field. The scalar is not a general edit executor.
+Full portable run: rc0, 32s, peak RSS 0.32GiB, minimum available 14414MiB,
+peak load 0.84; 3G/jobs2/timeout900. Log: `portable-check.log` alongside the
+prior receipts. The supervisor and Rust processes were verified exited.
+
+Standalone fuzz/downstream lock qualification, the broader AVIF package,
+independent edited playback and the other shared container adapters remain
+open. The API dependency is a review revision; this is a draft adoption.

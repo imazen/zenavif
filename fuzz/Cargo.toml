@@ -27,12 +27,12 @@ features = ["inventory"]
 
 [patch.crates-io]
 # Keep standalone consumers on the same optional-control family.
-zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "ab133d2ccecacb9c3da427c14ddd13ffd0b235b9" }
-zencodec-coroutine = { git = "https://github.com/imazen/zencodec", rev = "ab133d2ccecacb9c3da427c14ddd13ffd0b235b9" }
-zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "ab133d2ccecacb9c3da427c14ddd13ffd0b235b9" }
-zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "ab133d2ccecacb9c3da427c14ddd13ffd0b235b9" }
-zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "ab133d2ccecacb9c3da427c14ddd13ffd0b235b9" }
-zenmeta = { git = "https://github.com/imazen/zencodec", rev = "ab133d2ccecacb9c3da427c14ddd13ffd0b235b9" }
+zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "41b1357e9bec50fb1c9508a310ba4b601605207b" }
+zencodec-coroutine = { git = "https://github.com/imazen/zencodec", rev = "41b1357e9bec50fb1c9508a310ba4b601605207b" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "41b1357e9bec50fb1c9508a310ba4b601605207b" }
+zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "41b1357e9bec50fb1c9508a310ba4b601605207b" }
+zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "41b1357e9bec50fb1c9508a310ba4b601605207b" }
+zenmeta = { git = "https://github.com/imazen/zencodec", rev = "41b1357e9bec50fb1c9508a310ba4b601605207b" }
 ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "7e9d296c9e037e626234c9f0e8673d48278f83f0" }
 zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "f23ac7535be1144a22d0dc6b71f866a08b151f34" }
 zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "f23ac7535be1144a22d0dc6b71f866a08b151f34" }
@@ -47,7 +47,7 @@ rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "b19aec656120
 # Mirror of the root zencodec pin: ultrahdr-core reaches zencodec through
 # zenmeta at this exact rev, so any other rev splits the graph into two
 # zencodec copies (gain_map.rs then fails to typecheck).
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "ab133d2ccecacb9c3da427c14ddd13ffd0b235b9" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "41b1357e9bec50fb1c9508a310ba4b601605207b" }
 
 [[bin]]
 name = "fuzz_decode"
