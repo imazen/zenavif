@@ -6,7 +6,7 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use zencodec::time::{FrameDuration, Rounding, TimeBase, Timestamp};
+use zencodec::time::{FrameDuration, TimeBase, Timestamp};
 use zencodec_media::container::{
     AccessPattern, DemuxEvent, DemuxProgress, Demuxer, Input, InputRequest, SeekMode, SeekResult,
     SeekScope, SeekStatus, SeekTarget,
@@ -14,6 +14,9 @@ use zencodec_media::container::{
 use zencodec_media::limits::MediaLimits;
 use zencodec_media::packet::{Packet, RandomAccess};
 use zencodec_media::session::{SessionError, UnsupportedMedia};
+use zencodec_media::timeline::{
+    EditContent, EditExtent, EditList, EditSegment, PlaybackRate, TrackTimeline,
+};
 use zencodec_media::track::{
     AudioTrackInfo, ChannelLayout, CodecId, TrackInfo, TrackKind, VideoTrackInfo,
 };
@@ -316,7 +319,14 @@ impl Mp4Demuxer {
             self.limits
                 .check_tracks(index as u64 + 1)
                 .map_err(SessionError::Limit)?;
-            let parsed = parse_track(trak, index, movie_timescale, &self.limits, &mut samples)?;
+            let parsed = parse_track(
+                trak,
+                index,
+                movie_timescale,
+                self.fragmented,
+                &self.limits,
+                &mut samples,
+            )?;
             let defaults = trex
                 .iter()
                 .find(|(id, _)| *id == parsed.id)
@@ -609,6 +619,7 @@ fn parse_track(
     trak: &[u8],
     index: usize,
     movie_timescale: u32,
+    fragmented: bool,
     limits: &MediaLimits,
     samples: &mut Vec<Sample>,
 ) -> Res<ParsedTrack> {
@@ -676,9 +687,13 @@ fn parse_track(
     if let Some(d) = entry.codec_delay {
         builder = builder.with_codec_delay(d);
     }
-    if let Some(delay) = edit_delay(trak, movie_timescale, timescale)? {
-        builder = builder.with_edit_delay_ticks(delay);
-    }
+    builder = builder.with_timeline(track_timeline(
+        trak,
+        movie_timescale,
+        timescale,
+        fragmented,
+        limits,
+    )?);
     if duration != 0 && duration != u64::from(u32::MAX) && duration != u64::MAX {
         builder = builder.with_declared_duration_ticks(duration);
     }
@@ -697,22 +712,45 @@ fn parse_track(
     })
 }
 
-/// The delay a single edit implies: its media time, less any leading empty
-/// edit (converted from the movie timescale).
-fn edit_delay(trak: &[u8], movie_ts: u32, media_ts: u32) -> Res<Option<i64>> {
+/// Retain every edit, including independent movie/media clocks and exact rate.
+fn track_timeline(
+    trak: &[u8],
+    movie_ts: u32,
+    media_ts: u32,
+    fragmented: bool,
+    limits: &MediaLimits,
+) -> Res<TrackTimeline> {
     let c = SessionError::Codec;
     let Some(edts) = find(trak, b"edts").map_err(c)? else {
-        return Ok(None);
+        return Ok(TrackTimeline::Unedited);
     };
-    let Some(elst) = find(edts, b"elst").map_err(c)? else {
-        return Ok(None);
-    };
+    let elst = find(edts, b"elst")
+        .map_err(c)?
+        .ok_or(c(Mp4Error::Missing("elst")))?;
     let mut r = Reader::new(elst);
-    let (v, _) = r.full().map_err(c)?;
-    let n = r.u32().map_err(c)?;
-    let mut empty: u64 = 0;
-    for _ in 0..n {
-        let (dur, media_time) = if v == 1 {
+    let (version, flags) = r.full().map_err(c)?;
+    if version > 1 || flags != 0 {
+        return Err(SessionError::Unsupported(
+            UnsupportedMedia::PresentationTimeline,
+        ));
+    }
+    let count = r.u32().map_err(c)?;
+    limits
+        .check_table_entries(u64::from(count))
+        .map_err(SessionError::Limit)?;
+    let entry_size = if version == 1 { 20 } else { 12 };
+    let count = usize::try_from(count).map_err(|_| c(Mp4Error::Overflow))?;
+    if count > r.remaining() / entry_size {
+        return err(Mp4Error::Truncated);
+    }
+    let movie_clock = TimeBase::hz(movie_ts).map_err(|_| c(Mp4Error::ZeroTimescale))?;
+    let media_clock = TimeBase::hz(media_ts).map_err(|_| c(Mp4Error::ZeroTimescale))?;
+    let mut segments = Vec::new();
+    segments
+        .try_reserve_exact(count)
+        .map_err(|_| c(Mp4Error::Overflow))?;
+    for _ in 0..count {
+        let (duration, start) = if version == 1 {
             (r.u64().map_err(c)?, r.u64().map_err(c)? as i64)
         } else {
             (
@@ -720,25 +758,47 @@ fn edit_delay(trak: &[u8], movie_ts: u32, media_ts: u32) -> Res<Option<i64>> {
                 i64::from(r.i32().map_err(c)?),
             )
         };
-        r.u32().map_err(c)?; // rate
-        if media_time == -1 {
-            empty = empty.checked_add(dur).ok_or(c(Mp4Error::Overflow))?;
-            continue;
-        }
-        let movie_clock = TimeBase::new(1, movie_ts).map_err(|_| c(Mp4Error::ZeroTimescale))?;
-        let media_clock = TimeBase::new(1, media_ts).map_err(|_| c(Mp4Error::ZeroTimescale))?;
-        // Rescale the signed timeline shift. Rounding a positive empty
-        // duration and then subtracting it would reverse the half-tick rule.
-        let shift = i64::try_from(-i128::from(empty)).map_err(|_| c(Mp4Error::Overflow))?;
-        let shift = Timestamp::new(shift, movie_clock)
-            .rescale(media_clock, Rounding::Nearest)
-            .map_err(|_| c(Mp4Error::Overflow))?;
-        return media_time
-            .checked_add(shift.ticks())
-            .map(Some)
-            .ok_or(c(Mp4Error::Overflow));
+        let rate =
+            PlaybackRate::new(r.i32().map_err(c)?, 65536).map_err(|_| c(Mp4Error::Overflow))?;
+        let content = if start == -1 {
+            if rate != PlaybackRate::NORMAL {
+                return Err(SessionError::Unsupported(
+                    UnsupportedMedia::PresentationTimeline,
+                ));
+            }
+            EditContent::Gap
+        } else if start < 0 {
+            return Err(SessionError::Unsupported(
+                UnsupportedMedia::PresentationTimeline,
+            ));
+        } else {
+            EditContent::Media {
+                start: Timestamp::new(start, media_clock),
+                rate,
+            }
+        };
+        // W3C fragmented initialization: the single rate-one edit with zero
+        // duration covers future media. Other finite zero declarations stay zero.
+        let extent = if fragmented
+            && count == 1
+            && duration == 0
+            && start >= 0
+            && rate == PlaybackRate::NORMAL
+        {
+            EditExtent::ToEnd
+        } else {
+            EditExtent::Finite(
+                FrameDuration::new(duration, movie_ts).map_err(|_| c(Mp4Error::ZeroTimescale))?,
+            )
+        };
+        segments.push(EditSegment::new(extent, content));
     }
-    Ok(None)
+    if r.remaining() != 0 {
+        return err(Mp4Error::InconsistentTable("elst trailing bytes"));
+    }
+    let program = EditList::new(Timestamp::new(0, movie_clock), segments)
+        .map_err(|_| c(Mp4Error::InconsistentTable("elst ordering")))?;
+    Ok(TrackTimeline::Edited(Arc::new(program)))
 }
 
 /// The first (and only) sample description.

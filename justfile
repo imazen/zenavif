@@ -501,3 +501,9 @@ serializer-consumer-check:
 checked-orientation:
     cargo test --locked -p zenavif --features encode-imazen --test orientation_bake
     cargo clippy --locked -p zenavif --features encode-imazen --lib --test orientation_bake -- -D warnings
+
+# Complete native timeline gates; run through the caller's serialized resource wrapper.
+qualify-mp4-timeline:
+    cargo test --locked -p zenmp4 --all-targets
+    cargo clippy --locked -p zenmp4 --all-targets -- -D warnings
+    cargo check --locked -p zenmp4 --no-default-features --target wasm32-unknown-unknown

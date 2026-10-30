@@ -10,6 +10,7 @@ use zencodec::time::{Rounding, TimeBase, Timestamp};
 use zencodec_media::container::{MuxFinish, MuxHint, MuxTiming, Muxer, Patch};
 use zencodec_media::packet::{Packet, RandomAccess};
 use zencodec_media::session::{ProtocolViolation, SessionError};
+use zencodec_media::timeline::{EditContent, EditExtent, EditList, TrackTimeline};
 use zencodec_media::track::{CodecId, TrackInfo, TrackKind};
 
 use crate::Mp4Error;
@@ -24,6 +25,142 @@ fn err<T>(e: Mp4Error) -> Res<T> {
 const MOVIE_TIMESCALE: u32 = 1000;
 /// A fragment closes at this many bytes even without a random-access point.
 const FRAGMENT_BYTES: usize = 8 << 20;
+
+#[derive(Debug)]
+struct EditPlan {
+    records: Vec<(u64, i64, i32)>,
+    duration: Option<u64>,
+}
+fn presentation_refusal<T>() -> Res<T> {
+    Err(SessionError::Unsupported(
+        zencodec_media::session::UnsupportedMedia::PresentationTimeline,
+    ))
+}
+#[allow(deprecated)] // Preserve the old unknown-timeline route, never project a full program.
+fn legacy_offset(track: &TrackInfo) -> Option<i64> {
+    if matches!(track.timeline(), TrackTimeline::Unknown) {
+        track.edit_delay_ticks()
+    } else {
+        None
+    }
+}
+fn movie_clock(tracks: &[TrackInfo]) -> Res<u32> {
+    fn lcm(a: u32, b: u32) -> Option<u32> {
+        let (mut x, mut y) = (a, b);
+        while y != 0 {
+            (x, y) = (y, x % y);
+        }
+        (a / x).checked_mul(b)
+    }
+    let mut clock = None;
+    for track in tracks {
+        if let TrackTimeline::Edited(program) = track.timeline() {
+            if program.origin().ticks() != 0 {
+                return presentation_refusal();
+            }
+            let mut required = program.origin().base().denominator();
+            for edit in program.segments() {
+                if let EditExtent::Finite(duration) = edit.extent() {
+                    required =
+                        lcm(required, duration.denominator()).ok_or(SessionError::Unsupported(
+                            zencodec_media::session::UnsupportedMedia::PresentationTimeline,
+                        ))?;
+                }
+            }
+            clock = Some(
+                lcm(clock.unwrap_or(1), required).ok_or(SessionError::Unsupported(
+                    zencodec_media::session::UnsupportedMedia::PresentationTimeline,
+                ))?,
+            );
+        }
+    }
+    Ok(clock.unwrap_or(MOVIE_TIMESCALE))
+}
+fn plan_edits(
+    program: &EditList,
+    movie_clock: u32,
+    media_clock: TimeBase,
+    layout: Layout,
+) -> Res<EditPlan> {
+    if program.origin().ticks() != 0
+        || media_clock.numerator() != 1
+        || u32::try_from(program.segments().len()).is_err()
+    {
+        return presentation_refusal();
+    }
+    let mut records = Vec::new();
+    records
+        .try_reserve_exact(program.segments().len())
+        .map_err(|_| SessionError::Codec(Mp4Error::Overflow))?;
+    let mut total = Some(0u64);
+    for edit in program.segments() {
+        let (start, rate) = match edit.content() {
+            EditContent::Gap => (-1, 65536),
+            EditContent::Media { start, rate } => {
+                let n = i128::from(start.ticks())
+                    * i128::from(start.base().numerator())
+                    * i128::from(media_clock.denominator());
+                let d = i128::from(start.base().denominator());
+                let r = i64::from(rate.numerator()) * 65536;
+                if n < 0 || n % d != 0 || r % i64::from(rate.denominator()) != 0 {
+                    return presentation_refusal();
+                }
+                (
+                    i64::try_from(n / d).map_err(|_| SessionError::Codec(Mp4Error::Overflow))?,
+                    i32::try_from(r / i64::from(rate.denominator())).map_err(|_| {
+                        SessionError::Unsupported(
+                            zencodec_media::session::UnsupportedMedia::PresentationTimeline,
+                        )
+                    })?,
+                )
+            }
+            _ => return presentation_refusal(),
+        };
+        let duration = match edit.extent() {
+            EditExtent::Finite(duration) => {
+                let ticks = duration.ticks_at(movie_clock).map_err(|_| {
+                    SessionError::Unsupported(
+                        zencodec_media::session::UnsupportedMedia::PresentationTimeline,
+                    )
+                })?;
+                // This wire spelling means open-ended in the fragmented profile.
+                if ticks == 0
+                    && layout == Layout::Fragmented
+                    && program.segments().len() == 1
+                    && start >= 0
+                    && rate == 65536
+                {
+                    return presentation_refusal();
+                }
+                total = Some(
+                    total
+                        .ok_or(SessionError::Codec(Mp4Error::Overflow))?
+                        .checked_add(ticks)
+                        .filter(|v| *v != u64::MAX)
+                        .ok_or(SessionError::Codec(Mp4Error::Overflow))?,
+                );
+                ticks
+            }
+            EditExtent::ToEnd => {
+                if layout != Layout::Fragmented
+                    || program.segments().len() != 1
+                    || start < 0
+                    || rate != 65536
+                {
+                    return presentation_refusal();
+                }
+                total = None;
+                0
+            }
+            _ => return presentation_refusal(),
+        };
+        records.push((duration, start, rate));
+    }
+    Ok(EditPlan {
+        records,
+        duration: total,
+    })
+}
 
 pub(crate) fn bx(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
     let len = body.len() + 8;
@@ -66,6 +203,7 @@ struct MuxSample {
 #[derive(Debug)]
 struct MuxTrack {
     info: TrackInfo,
+    edits: Option<EditPlan>,
     timescale: u32,
     handler: [u8; 4],
     /// `None` for an AV1 track still waiting for a sequence header.
@@ -99,9 +237,10 @@ enum Layout {
 /// per-track timescale). Configuration records come from `codec_private`
 /// in the forms [`Mp4Demuxer`](crate::Mp4Demuxer) returns them.
 ///
-/// Movie/track-header lengths use a 1000-Hz clock and round upward to cover
-/// fractional media lengths. Sample timestamps and durations retain their
-/// native track clock. Unrepresentable finite header lengths are refused.
+/// Ordinary movie/track-header lengths use a 1000-Hz clock and round upward
+/// to cover fractional media lengths. Complete edit programs select an exact
+/// common movie clock before output. Sample timing keeps its native track
+/// clock. Unrepresentable clocks, edits and finite header lengths refuse.
 #[derive(Debug)]
 pub struct Mp4Muxer {
     out: OutputBuffer,
@@ -119,6 +258,7 @@ pub struct Mp4Muxer {
     fragment_bytes: usize,
     /// Checked admission never infers an explicit sample duration.
     exact_timing: bool,
+    movie_timescale: u32,
 }
 
 impl Default for Mp4Muxer {
@@ -141,6 +281,7 @@ impl Mp4Muxer {
             header_written: false,
             fragment_bytes: 0,
             exact_timing: false,
+            movie_timescale: MOVIE_TIMESCALE,
         }
     }
 
@@ -178,7 +319,11 @@ impl Mp4Muxer {
     fn movie_ticks(&self, t: &MuxTrack, ticks: i64) -> Res<u64> {
         let unsigned =
             u128::try_from(ticks).map_err(|_| SessionError::Codec(Mp4Error::Overflow))?;
-        match Timestamp::new(ticks, t.info.time_base()).rescale(TimeBase::MILLIS, Rounding::Ceil) {
+        match Timestamp::new(ticks, t.info.time_base()).rescale(
+            TimeBase::hz(self.movie_timescale)
+                .map_err(|_| SessionError::Codec(Mp4Error::ZeroTimescale))?,
+            Rounding::Ceil,
+        ) {
             Ok(value) => {
                 return u64::try_from(value.ticks())
                     .map_err(|_| SessionError::Codec(Mp4Error::Overflow));
@@ -189,7 +334,7 @@ impl Mp4Muxer {
         // Version-1 duration fields have a wider unsigned range than Timestamp.
         // Preserve that range with the same ceiling rule, never saturation.
         let value = u64::try_from(
-            (unsigned * u128::from(MOVIE_TIMESCALE)).div_ceil(u128::from(t.timescale)),
+            (unsigned * u128::from(self.movie_timescale)).div_ceil(u128::from(t.timescale)),
         )
         .map_err(|_| SessionError::Codec(Mp4Error::Overflow))?;
         // ISO BMFF reserves the all-ones duration for an unknown extent.
@@ -238,13 +383,13 @@ impl Mp4Muxer {
             self.tracks
                 .iter()
                 .try_fold(0u64, |duration, t| -> Res<u64> {
-                    Ok(duration.max(self.movie_ticks(t, t.end_dts)?))
+                    Ok(duration.max(self.track_movie_duration(t, true)?))
                 })?
         } else {
             // An initialization segment declares no duration for its fragments.
             0
         };
-        let mut body = mvhd(duration, self.tracks.len() as u32 + 1);
+        let mut body = mvhd(duration, self.tracks.len() as u32 + 1, self.movie_timescale);
         for (i, t) in self.tracks.iter().enumerate() {
             body.extend_from_slice(&self.trak(i, t, tables)?);
         }
@@ -260,6 +405,17 @@ impl Mp4Muxer {
         Ok(bx(b"moov", &body))
     }
 
+    fn track_movie_duration(&self, track: &MuxTrack, tables: bool) -> Res<u64> {
+        if let Some(edits) = &track.edits {
+            return Ok(edits.duration.unwrap_or(0));
+        }
+        if tables {
+            self.movie_ticks(track, track.end_dts)
+        } else {
+            Ok(0)
+        }
+    }
+
     fn trak(&self, i: usize, t: &MuxTrack, tables: bool) -> Res<Vec<u8>> {
         let id = i as u32 + 1;
         let media_duration = if tables {
@@ -267,11 +423,7 @@ impl Mp4Muxer {
         } else {
             0
         };
-        let movie_duration = if tables {
-            self.movie_ticks(t, t.end_dts)?
-        } else {
-            0
-        };
+        let movie_duration = self.track_movie_duration(t, tables)?;
         let video = t.info.kind() == TrackKind::Video;
         let (w, h) = t
             .info
@@ -297,7 +449,18 @@ impl Mp4Muxer {
         let mut trak = full(b"tkhd", 1, 3, &tkhd);
         // A fragmented moov is written before the duration is known: its
         // edit has segment_duration 0, which runs to the end of the media.
-        if let Some(delay) = t.info.edit_delay_ticks()
+        if let Some(edits) = &t.edits {
+            let mut elst = u32::try_from(edits.records.len())
+                .map_err(|_| SessionError::Codec(Mp4Error::Overflow))?
+                .to_be_bytes()
+                .to_vec();
+            for &(duration, start, rate) in &edits.records {
+                elst.extend_from_slice(&duration.to_be_bytes());
+                elst.extend_from_slice(&start.to_be_bytes());
+                elst.extend_from_slice(&rate.to_be_bytes());
+            }
+            trak.extend_from_slice(&bx(b"edts", &full(b"elst", 1, 0, &elst)));
+        } else if let Some(delay) = legacy_offset(&t.info)
             && delay >= 0
         {
             let mut elst = 1u32.to_be_bytes().to_vec();
@@ -491,9 +654,9 @@ const IDENTITY: [u8; 36] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0x40, 0, 0, 0,
 ];
 
-fn mvhd(duration: u64, next_track: u32) -> Vec<u8> {
+fn mvhd(duration: u64, next_track: u32, timescale: u32) -> Vec<u8> {
     let mut b = vec![0u8; 16];
-    b.extend_from_slice(&MOVIE_TIMESCALE.to_be_bytes());
+    b.extend_from_slice(&timescale.to_be_bytes());
     b.extend_from_slice(&duration.to_be_bytes());
     b.extend_from_slice(&0x0001_0000u32.to_be_bytes());
     b.extend_from_slice(&[1, 0]);
@@ -805,14 +968,29 @@ impl Muxer for Mp4Muxer {
         } else {
             Layout::Progressive
         });
+        self.movie_timescale = movie_clock(tracks)?;
+        let mut prepared_tracks = Vec::new();
+        prepared_tracks
+            .try_reserve_exact(tracks.len())
+            .map_err(|_| SessionError::Codec(Mp4Error::Overflow))?;
         for t in tracks {
+            let edits = match t.timeline() {
+                TrackTimeline::Unknown | TrackTimeline::Unedited => None,
+                TrackTimeline::Edited(program) => Some(plan_edits(
+                    program,
+                    self.movie_timescale,
+                    t.time_base(),
+                    self.layout,
+                )?),
+                _ => return presentation_refusal(),
+            };
             let tb = t.time_base();
             if tb.numerator() != 1 {
                 return err(Mp4Error::UnsupportedTimeBase);
             }
             // The current elst writer emits one media edit. A negative
             // offset needs a leading empty edit, which it cannot represent.
-            if t.edit_delay_ticks().is_some_and(|delay| delay < 0) {
+            if legacy_offset(t).is_some_and(|delay| delay < 0) {
                 return Err(SessionError::Unsupported(
                     zencodec_media::session::UnsupportedMedia::Container,
                 ));
@@ -842,8 +1020,9 @@ impl Muxer for Mp4Muxer {
                 Err(Mp4Error::Missing("av1C")) => (*b"vide", None),
                 Err(e) => return err(e),
             };
-            self.tracks.push(MuxTrack {
+            prepared_tracks.push(MuxTrack {
                 info: t.clone(),
+                edits,
                 timescale: tb.denominator(),
                 handler,
                 entry,
@@ -855,6 +1034,7 @@ impl Muxer for Mp4Muxer {
                 last_step: None,
             });
         }
+        self.tracks = prepared_tracks;
         self.begun = true;
         self.out.push(&self.ftyp());
         Ok(match self.layout {
@@ -870,6 +1050,23 @@ impl Muxer for Mp4Muxer {
                 MuxTiming::streaming()
             }
         })
+    }
+
+    fn begin_exact_timing(&mut self, tracks: &[TrackInfo], hint: MuxHint) -> Res<MuxTiming> {
+        Mp4Muxer::begin_exact_timing(self, tracks, hint)
+    }
+
+    fn begin_exact_presentation(&mut self, tracks: &[TrackInfo], hint: MuxHint) -> Res<MuxTiming> {
+        if self.begun {
+            return Err(SessionError::Protocol(ProtocolViolation::BeginTwice));
+        }
+        if tracks
+            .iter()
+            .any(|track| matches!(track.timeline(), TrackTimeline::Unknown))
+        {
+            return presentation_refusal();
+        }
+        Mp4Muxer::begin_exact_timing(self, tracks, hint)
     }
 
     fn write_packet(&mut self, mut packet: Packet, pulse: Option<&dyn zencodec::Pulse>) -> Res<()> {

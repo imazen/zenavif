@@ -30,16 +30,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         match y.into_inner() {
             DemuxEvent::Headers => {
                 for t in zencodec_media::container::Demuxer::tracks(&dem) {
+                    // The existing FFmpeg packet/seek oracle consumes this scalar.
+                    // It is only a compatibility projection, not an edit executor.
+                    #[allow(deprecated)]
+                    let edit = t.edit_delay_ticks();
                     println!(
-                        "track {} {:?} {}/{} private={} delay={:?} edit={:?} packets={:?}",
+                        "track {} {:?} {}/{} private={} delay={:?} edit={:?} packets={:?} timeline={:?}",
                         t.index(),
                         t.codec(),
                         t.time_base().numerator(),
                         t.time_base().denominator(),
                         t.codec_private().map_or(0, |p| p.len()),
                         t.codec_delay(),
-                        t.edit_delay_ticks(),
-                        t.declared_packets()
+                        edit,
+                        t.declared_packets(),
+                        t.timeline()
                     );
                 }
             }
