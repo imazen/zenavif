@@ -507,3 +507,9 @@ qualify-mp4-timeline:
     cargo test --locked -p zenmp4 --all-targets
     cargo clippy --locked -p zenmp4 --all-targets -- -D warnings
     cargo check --locked -p zenmp4 --no-default-features --target wasm32-unknown-unknown
+
+# Keep the existing legacy CICP assertion while checked metadata APIs migrate.
+test-legacy-cicp:
+    test -f tests/vectors/libavif/paris_icc_exif_xmp.avif
+    cargo test --locked --features encode --lib caller_cicp_wins_over_descriptor_color -- --nocapture
+    cargo clippy --locked --features media-encode --lib --tests --examples -- -D warnings
