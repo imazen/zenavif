@@ -418,6 +418,7 @@ fn demux(bytes: &[u8]) -> Result<(Vec<TrackInfo>, Vec<Packet>), String> {
 }
 
 #[test]
+#[allow(deprecated)] // Retain the established scalar compatibility assertion.
 fn progressive_files_read_the_same_with_moov_first_or_last() {
     for moov_first in [true, false] {
         let (file, want) = progressive(moov_first);
@@ -460,6 +461,7 @@ fn progressive_files_read_the_same_with_moov_first_or_last() {
 }
 
 #[test]
+#[allow(deprecated)] // Retain the established scalar compatibility assertion.
 fn edit_offsets_rescale_signed_shifts_with_nearest_ties_up() {
     for (movie_scale, empty_ticks, expected) in [(3000u32, 2u32, 79), (2000, 1, 80), (2000, 3, 79)]
     {
@@ -577,15 +579,16 @@ fn seeking_a_fragmented_file_indexes_its_fragments() {
     for (target, from) in [(targets[0], 3), (targets[1], 1), (targets[2], 0)] {
         let mut dem = Mp4Demuxer::new(MediaLimits::default());
         let mut cursor = SliceCursor::new(16);
-        let mut next = || {
-            let y = cursor
-                .next(&file, &mut DemuxStage(&mut dem), Some(&NoPulse))
-                .unwrap();
-            (y.is_finished(), y.into_inner())
-        };
-        // Read one packet so the seek interrupts a fragment in progress.
-        while !matches!(next().1, DemuxEvent::Packet(_)) {}
-        drop(next);
+        {
+            let mut next = || {
+                let y = cursor
+                    .next(&file, &mut DemuxStage(&mut dem), Some(&NoPulse))
+                    .unwrap();
+                (y.is_finished(), y.into_inner())
+            };
+            // Read one packet so the seek interrupts a fragment in progress.
+            while !matches!(next().1, DemuxEvent::Packet(_)) {}
+        }
         use zencodec_media::container::{Demuxer, SeekStatus};
         let status = dem.seek(&target).unwrap();
         assert!(matches!(status, SeekStatus::Scanning), "{status:?}");
@@ -732,7 +735,7 @@ mod muxer {
         ]
         .concat()
     }
-
+    #[allow(deprecated)] // Retain the established scalar compatibility assertion.
     fn tracks(av1c: Option<&[u8]>) -> Vec<TrackInfo> {
         let mut v = TrackInfo::video(
             0,
@@ -914,6 +917,7 @@ mod muxer {
     }
 
     #[test]
+    #[allow(deprecated)] // Retain the established scalar compatibility assertion.
     fn written_files_read_back_packet_for_packet() {
         let av1c = [&[0x81u8, 0x00, 0x0c, 0x00][..], &SEQ].concat();
         let input = packets(9);
@@ -1296,6 +1300,7 @@ mod muxer {
     }
 
     #[test]
+    #[allow(deprecated)] // Retain the established scalar compatibility assertion.
     fn unsupported_trims_and_mismatched_dts_clocks_are_refused() {
         use zencodec::time::FrameDuration;
         use zencodec_media::packet::Discard;
@@ -1443,5 +1448,207 @@ mod muxer {
                 );
             }
         }
+    }
+}
+
+mod full_timelines {
+    use super::*;
+    use std::sync::Arc;
+    use zencodec::time::FrameDuration;
+    use zencodec_media::{
+        container::{MuxHint, Muxer},
+        session::{SessionError, UnsupportedMedia},
+        timeline::{EditContent, EditExtent, EditList, EditSegment, PlaybackRate, TrackTimeline},
+        track::VideoTrackInfo,
+    };
+    use zenmp4::Mp4Muxer;
+
+    fn track(program: TrackTimeline) -> TrackInfo {
+        TrackInfo::video(
+            0,
+            CodecId::Av1,
+            TimeBase::MILLIS,
+            VideoTrackInfo::new(64, 48),
+        )
+        .with_codec_private(Arc::from(AV1C))
+        .with_timeline(program)
+        .build()
+        .unwrap()
+    }
+    fn list(segments: Vec<EditSegment>) -> TrackTimeline {
+        TrackTimeline::Edited(Arc::new(
+            EditList::new(Timestamp::new(0, TimeBase::hz(1001).unwrap()), segments).unwrap(),
+        ))
+    }
+    fn media(extent: EditExtent, start: i64, rate: PlaybackRate) -> EditSegment {
+        EditSegment::new(
+            extent,
+            EditContent::Media {
+                start: Timestamp::new(start, TimeBase::MILLIS),
+                rate,
+            },
+        )
+    }
+    fn write(track: &TrackInfo, mode: u8) -> Vec<u8> {
+        let mut mux = Mp4Muxer::new();
+        let hint = if mode == 0 {
+            MuxHint::default()
+        } else {
+            MuxHint::forward_only()
+        };
+        if mode == 2 {
+            mux.begin_exact_presentation(std::slice::from_ref(track), hint)
+                .unwrap();
+        } else {
+            mux.begin(std::slice::from_ref(track), hint).unwrap();
+        }
+        let mut bytes = Vec::new();
+        mux.take_output(&mut bytes);
+        for index in 0..4 {
+            let packet = Packet::from_vec(vec![0x12, 0])
+                .unwrap()
+                .with_track(0)
+                .with_pts(Timestamp::new(index * 40, TimeBase::MILLIS))
+                .with_duration_ticks(40);
+            mux.write_packet(packet, None).unwrap();
+            mux.take_output(&mut bytes);
+        }
+        mux.finish(None).unwrap().apply_to(&mut bytes).unwrap();
+        bytes
+    }
+    #[test]
+    fn all_ordered_edits_survive_progressive_fragmented_and_checked_muxing() {
+        let program = list(vec![
+            EditSegment::new(
+                EditExtent::Finite(FrameDuration::new(1, 3).unwrap()),
+                EditContent::Gap,
+            ),
+            media(
+                EditExtent::Finite(FrameDuration::new(2, 1001).unwrap()),
+                17,
+                PlaybackRate::new(1, 2).unwrap(),
+            ),
+            media(
+                EditExtent::Finite(FrameDuration::new(2, 1001).unwrap()),
+                51,
+                PlaybackRate::new(-1, 1).unwrap(),
+            ),
+            media(
+                EditExtent::Finite(FrameDuration::new(0, 1).unwrap()),
+                3,
+                PlaybackRate::new(0, 1).unwrap(),
+            ),
+        ]);
+        let original = track(program.clone());
+        for mode in [0, 1, 2] {
+            let bytes = write(&original, mode);
+            let (tracks, packets) = demux(&bytes).unwrap();
+            assert_eq!(packets.len(), 4);
+            let (TrackTimeline::Edited(expected), TrackTimeline::Edited(actual)) =
+                (&program, tracks[0].timeline())
+            else {
+                panic!("lost edits")
+            };
+            assert!(expected.origin().same_instant(actual.origin()));
+            assert_eq!(expected.segments(), actual.segments());
+            check_demuxer_contract(|| Mp4Demuxer::new(MediaLimits::default()), &bytes).unwrap();
+            // Independent inspection of the actual fixed-point fields and exact
+            // movie-clock durations; these values are not read through our parser.
+            let movie = bytes.windows(4).position(|w| w == b"mvhd").unwrap();
+            assert_eq!(
+                u32::from_be_bytes(bytes[movie + 24..movie + 28].try_into().unwrap()),
+                3003
+            );
+            let at = bytes.windows(4).position(|w| w == b"elst").unwrap();
+            assert_eq!(bytes[at + 4], 1);
+            assert_eq!(
+                u32::from_be_bytes(bytes[at + 8..at + 12].try_into().unwrap()),
+                4
+            );
+            for (i, (duration, start, rate)) in [
+                (1001u64, -1i64, 65536i32),
+                (6, 17, 32768),
+                (6, 51, -65536),
+                (0, 3, 0),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let pos = at + 12 + i * 20;
+                assert_eq!(
+                    u64::from_be_bytes(bytes[pos..pos + 8].try_into().unwrap()),
+                    duration
+                );
+                assert_eq!(
+                    i64::from_be_bytes(bytes[pos + 8..pos + 16].try_into().unwrap()),
+                    start
+                );
+                assert_eq!(
+                    i32::from_be_bytes(bytes[pos + 16..pos + 20].try_into().unwrap()),
+                    rate
+                );
+            }
+        }
+    }
+    #[test]
+    fn empty_unedited_and_open_programs_remain_distinct() {
+        for program in [
+            TrackTimeline::Unedited,
+            list(vec![]),
+            list(vec![media(EditExtent::ToEnd, 17, PlaybackRate::NORMAL)]),
+        ] {
+            let input = track(program.clone());
+            let bytes = write(&input, 2);
+            let actual = demux(&bytes).unwrap().0.remove(0);
+            assert_eq!(actual.timeline(), &program);
+        }
+    }
+    #[test]
+    fn unsupported_programs_refuse_before_any_header_and_allow_clean_retry() {
+        let cases = [
+            TrackTimeline::Unknown,
+            list(vec![media(
+                EditExtent::Finite(FrameDuration::new(1, 1).unwrap()),
+                0,
+                PlaybackRate::new(1, 3).unwrap(),
+            )]),
+            list(vec![media(
+                EditExtent::Finite(FrameDuration::new(0, 1).unwrap()),
+                0,
+                PlaybackRate::NORMAL,
+            )]),
+            list(vec![EditSegment::new(EditExtent::ToEnd, EditContent::Gap)]),
+        ];
+        for program in cases {
+            let mut mux = Mp4Muxer::new();
+            assert!(matches!(
+                mux.begin_exact_presentation(&[track(program)], MuxHint::forward_only()),
+                Err(SessionError::Unsupported(
+                    UnsupportedMedia::PresentationTimeline
+                ))
+            ));
+            assert!(mux.pending_output().is_empty());
+            mux.begin_exact_presentation(
+                &[track(TrackTimeline::Unedited)],
+                MuxHint::forward_only(),
+            )
+            .unwrap();
+            assert!(!mux.pending_output().is_empty());
+        }
+    }
+    #[test]
+    fn edit_versions_and_unparsed_later_entries_cannot_be_ignored() {
+        let (original, _) = progressive(true);
+        let at = original.windows(4).position(|w| w == b"elst").unwrap();
+        let mut version = original.clone();
+        version[at + 4] = 2;
+        assert!(
+            demux(&version)
+                .unwrap_err()
+                .contains("PresentationTimeline")
+        );
+        let mut count = original;
+        count[at + 8..at + 12].copy_from_slice(&3u32.to_be_bytes());
+        assert!(demux(&count).unwrap_err().contains("Truncated"));
     }
 }

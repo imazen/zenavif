@@ -7,8 +7,10 @@
 //!   `mvex`, then `moof` + `mdat` pairs). Samples come out in file order
 //!   with decode and presentation timestamps (`stts`, `ctts` or `trun`),
 //!   durations and random-access evidence (`stss`, sample flags). Edit lists
-//!   are carried, not applied: a single edit becomes
-//!   [`TrackInfo::edit_delay_ticks`](zencodec_media::track::TrackInfo::edit_delay_ticks).
+//!   are carried, not applied, through the complete
+//!   [`TrackInfo::timeline`](zencodec_media::track::TrackInfo::timeline).
+//!   Ordered gaps, media segments, exact rates and independent clocks survive;
+//!   unsupported edit versions refuse rather than becoming identity.
 //!   Codec configuration records become `codec_private`: `av1C`, `vpcC`,
 //!   `avcC` and `hvcC` payloads as they are, Opus `dOps` as an `OpusHead`,
 //!   AAC `esds` as its AudioSpecificConfig, FLAC `dfLa` as `fLaC` plus its

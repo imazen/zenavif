@@ -637,6 +637,7 @@ fn encoder_trait_pq_bt2020_roundtrip() {
 /// Display-P3, not the descriptor's BT.709.
 #[cfg(feature = "encode")]
 #[test]
+#[allow(deprecated)] // Keep the established best-effort setter's CICP regression.
 fn caller_cicp_wins_over_descriptor_color() {
     use zencodec::Cicp;
     use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
@@ -655,7 +656,8 @@ fn caller_cicp_wins_over_descriptor_color() {
     // PixelDescriptor::RGB8_SRGB ⇒ BT.709 primaries, sRGB transfer.
     let slice = PixelSlice::from(img.as_ref()).with_descriptor(PixelDescriptor::RGB8_SRGB);
 
-    // Caller pins Display-P3 via Metadata. Use the blessed metadata path.
+    // Caller pins Display-P3 through the legacy best-effort metadata setter.
+    // This checks that compatibility path, not checked retention admission.
     let meta = Metadata::none().with_cicp(Cicp::DISPLAY_P3);
     let encoder = AvifEncoderConfig::new()
         .with_quality(90.0)

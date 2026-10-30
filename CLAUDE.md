@@ -1945,3 +1945,12 @@ orientations and strided input, ordinary and Send registry preparation, default
 bake parity and the typed refusal. This does not qualify low-memory streaming:
 the native shared plan hook is still unsupported. Existing default EXIF/XMP
 and pixel assertions remain in tests/orientation_bake.rs.
+
+## Native timeline CI: legacy metadata setter (2026-10-30)
+
+The CICP compatibility test intentionally exercises the deprecated best-effort
+metadata setter. Its allowance is function-scoped; assertions remain unchanged.
+The unit control and media-encode lib/tests/examples strict Clippy pass with the
+required compile-time fixture staged. See benchmarks/legacy_cicp_2026-10-30.md.
+The malformed animation EXIF code/test conflict remains unresolved; do not
+weaken that assertion as part of this lint repair.

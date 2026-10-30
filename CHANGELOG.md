@@ -1,5 +1,15 @@
 # Changelog
 
+## zenmp4 (unreleased)
+
+### QUEUED BREAKING CHANGES
+
+- Adopt the reviewed complete track-timeline contract (`72b004a5`); retain
+  ordered MP4 edits instead of projecting them to a single offset.
+- Bind representable edit programs before mux header publication; refuse
+  unsupported clocks/rates/open programs explicitly. Native tests, Clippy
+  and no-default WASM pass; independent playback remains unqualified.
+
 ## AV1 media sessions (unreleased)
 
 - Add `Av1EncodeSettings::with_output_pull_threshold`; deprecate the misleading

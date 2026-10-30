@@ -6,8 +6,7 @@ demuxer asks for byte ranges, and any `zencodec-io` driver (slice,
 
 `Demuxer::step`, `Muxer::write_packet` and `Muxer::finish` accept an optional
 borrowed Pulse. `None` adds no per-call control; parsing, limits and timing
-validation still apply. This source migration targets zencodec `a7c2a6ca` and
-has not been compiled or tested with the still-pinned dependency graph.
+validation still apply.
 
 - Progressive files, `moov` before or after `mdat`.
 - Fragmented files (`moov` with `mvex`, then `moof` + `mdat`).
@@ -16,7 +15,9 @@ has not been compiled or tested with the still-pinned dependency graph.
 - Seeking by time in both layouts. A fragmented file's first seek indexes
   every `moof` (range requests that skip each `mdat`), and later seeks
   reuse that index.
-- Edit lists carried as the track's edit delay, not applied.
+- Complete ordered edit lists retained in `TrackInfo::timeline()`, not applied
+  to decoded samples. Gaps, dwell, reverse and rational-rate segments remain
+  explicit; unknown and unedited timelines are distinct.
 - Configuration records as `codec_private`: `av1C`, `vpcC`, `avcC` and
   `hvcC` as they are; Opus `dOps` as an `OpusHead`; AAC `esds` as its
   AudioSpecificConfig; FLAC `dfLa` as `fLaC` plus its blocks.
@@ -48,6 +49,11 @@ unknown future packets will fit; drivers retain and report prior publication
 on failure. Metadata and workspace guarantees are separate.
 
 The legacy `Muxer::begin` still allows inferred durations and progressive output.
-The shared exact-timing trait hook is being qualified on the zencodec API review;
-this inherent method lets the native implementation be tested without changing
-the existing workspace's shared dependency revision.
+The shared exact-timing trait hook forwards to the same implementation.
+`Muxer::begin_exact_presentation` additionally refuses unknown track timelines
+and binds representable edit programs before publishing a header. MP4 requires
+exact fixed-point rates and representable clocks; unsupported programs refuse.
+
+Timeline adoption targets the shared API review. The portable native MP4
+graph passes tests, strict Clippy and a no-default WASM check. Independent
+edited-playback validation and broader consumer qualification remain open. See [qualification](../benchmarks/mp4_timeline_2026-10-30.md).

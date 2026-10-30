@@ -14,12 +14,12 @@ publish = false
 
 [dependencies]
 zencodec = { version = ">=0.2.0, <0.4.0", default-features = false }
-zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "ab133d2ccecacb9c3da427c14ddd13ffd0b235b9" }
+zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "41b1357e9bec50fb1c9508a310ba4b601605207b" }
 zenpixels = { version = ">=0.2.16, <0.4.0", default-features = false }
 
 [dev-dependencies]
-zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "ab133d2ccecacb9c3da427c14ddd13ffd0b235b9" }
-zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "ab133d2ccecacb9c3da427c14ddd13ffd0b235b9" }
+zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "41b1357e9bec50fb1c9508a310ba4b601605207b" }
+zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "41b1357e9bec50fb1c9508a310ba4b601605207b" }
 
 [lints.rust]
 unsafe_code = "forbid"
