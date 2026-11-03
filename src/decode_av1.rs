@@ -476,6 +476,68 @@ impl DecodedYuv {
     pub fn luma_pixels(&self) -> usize {
         self.width * self.height
     }
+
+    /// Borrow the decoded planes as zenpixels planes plus their layout,
+    /// without copying.
+    ///
+    /// Samples are AV1 codes in the low `bit_depth` bits of each `u16`
+    /// (`SampleEncoding::new(U16, bit_depth, 0)`). Subsampling shifts map
+    /// (1,1) to 4:2:0, (1,0) to 4:2:2 and (0,0) to 4:4:4; a monochrome frame
+    /// yields one `Luma` plane with `Mono` subsampling. Chroma siting is
+    /// `Unknown`: this struct does not carry it.
+    ///
+    /// Returns `None` when the fields are inconsistent: an unsupported bit
+    /// depth or shift pair, or a plane `Vec` shorter than its dimensions.
+    pub fn zenpixels_planes(
+        &self,
+    ) -> Option<(
+        zenpixels::plane::PlanarLayout,
+        Vec<zenpixels::plane::AnyPlane<'_>>,
+    )> {
+        use zenpixels::ChannelType;
+        use zenpixels::plane::{
+            AnyPlane, PlanarLayout, PlaneEncoding, PlaneRef, PlaneRole, PlaneSpec,
+        };
+        use zenpixels::sample::{ChromaSiting, ChromaSubsampling, SampleEncoding};
+
+        let bits = u8::try_from(self.bit_depth).ok()?;
+        let encoding = PlaneEncoding::Code(SampleEncoding::new(ChannelType::U16, bits, 0).ok()?);
+        fn plane(buf: &[u16], w: usize, h: usize) -> Option<AnyPlane<'_>> {
+            let len = w.checked_mul(h)?;
+            Some(AnyPlane::U16(
+                PlaneRef::new(buf.get(..len)?, w, h, w).ok()?,
+            ))
+        }
+        let luma = plane(&self.y, self.width, self.height)?;
+        if self.monochrome {
+            let layout = PlanarLayout::new(
+                vec![PlaneSpec::new(PlaneRole::Luma, encoding)],
+                ChromaSubsampling::Mono,
+                ChromaSiting::Unknown,
+            )
+            .ok()?;
+            return Some((layout, vec![luma]));
+        }
+        let subsampling = match (self.subsampling_x, self.subsampling_y) {
+            (1, 1) => ChromaSubsampling::Yuv420,
+            (1, 0) => ChromaSubsampling::Yuv422,
+            (0, 0) => ChromaSubsampling::Yuv444,
+            _ => return None,
+        };
+        let layout = PlanarLayout::new(
+            vec![
+                PlaneSpec::new(PlaneRole::Luma, encoding),
+                PlaneSpec::new(PlaneRole::Cb, encoding),
+                PlaneSpec::new(PlaneRole::Cr, encoding),
+            ],
+            subsampling,
+            ChromaSiting::Unknown,
+        )
+        .ok()?;
+        let cb = plane(&self.u, self.width_uv, self.height_uv)?;
+        let cr = plane(&self.v, self.width_uv, self.height_uv)?;
+        Some((layout, vec![luma, cb, cr]))
+    }
 }
 
 /// Which AV1 decode kernel to run behind zenavif's raw-OBU decode seam.
@@ -1177,5 +1239,75 @@ mod tests {
             nonzero_count > 0,
             "decoded gain map should have non-zero pixel values"
         );
+    }
+}
+
+#[cfg(test)]
+mod zenpixels_planes_tests {
+    use super::DecodedYuv;
+    use zenpixels::plane::{AnyPlane, PlaneRole};
+    use zenpixels::sample::{ChromaSiting, ChromaSubsampling};
+
+    fn rows_alias(plane: &AnyPlane<'_>, buf: &[u16], w: usize, h: usize) {
+        let AnyPlane::U16(p) = plane else {
+            panic!("expected a U16 plane");
+        };
+        assert_eq!((p.width(), p.height()), (w, h));
+        for y in 0..h {
+            let row = p.row(y).unwrap();
+            assert_eq!(row.len(), w);
+            assert!(core::ptr::eq(row.as_ptr(), buf[y * w..].as_ptr()));
+        }
+    }
+
+    #[test]
+    fn decoded_yuv_borrows_planes_without_copying() {
+        // 4:2:0, odd dimensions: chroma rounds up.
+        let (w, h, wc, hc) = (5usize, 3usize, 3usize, 2usize);
+        let yuv = DecodedYuv {
+            y: (0..(w * h) as u16).collect(),
+            u: (0..(wc * hc) as u16).collect(),
+            v: (100..100 + (wc * hc) as u16).collect(),
+            width: w,
+            height: h,
+            width_uv: wc,
+            height_uv: hc,
+            bit_depth: 10,
+            monochrome: false,
+            subsampling_x: 1,
+            subsampling_y: 1,
+        };
+        let (layout, planes) = yuv.zenpixels_planes().unwrap();
+        assert_eq!(layout.subsampling(), ChromaSubsampling::Yuv420);
+        assert_eq!(layout.siting(), ChromaSiting::Unknown);
+        let roles: Vec<_> = layout.planes().iter().map(|s| s.role()).collect();
+        assert_eq!(roles, [PlaneRole::Luma, PlaneRole::Cb, PlaneRole::Cr]);
+        assert_eq!(planes.len(), 3);
+        assert_eq!(layout.plane_size(0, w as u32, h as u32), Some((5, 3)));
+        assert_eq!(layout.plane_size(1, w as u32, h as u32), Some((3, 2)));
+        rows_alias(&planes[0], &yuv.y, w, h);
+        rows_alias(&planes[1], &yuv.u, wc, hc);
+        rows_alias(&planes[2], &yuv.v, wc, hc);
+
+        // Monochrome: one Luma plane, Mono subsampling.
+        let mono = DecodedYuv {
+            y: vec![7; w * h],
+            u: Vec::new(),
+            v: Vec::new(),
+            width: w,
+            height: h,
+            width_uv: 0,
+            height_uv: 0,
+            bit_depth: 8,
+            monochrome: true,
+            subsampling_x: 1,
+            subsampling_y: 1,
+        };
+        let (layout, planes) = mono.zenpixels_planes().unwrap();
+        assert_eq!(layout.subsampling(), ChromaSubsampling::Mono);
+        assert_eq!(layout.planes().len(), 1);
+        assert_eq!(layout.planes()[0].role(), PlaneRole::Luma);
+        assert_eq!(planes.len(), 1);
+        rows_alias(&planes[0], &mono.y, w, h);
     }
 }
