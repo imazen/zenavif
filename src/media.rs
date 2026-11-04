@@ -1436,19 +1436,19 @@ mod encode {
                         p.try_encode_frame(y, ys)
                     }
                     (Borrowed::Eight([(y, ys), (u, us), (v, vs)]), Subsampling::Yuv420) => {
-                        p.try_encode_frame_420_strided(y, ys, u, us, v, vs)
+                        p.try_encode_frame_420(y, ys, u, us, v, vs)
                     }
                     (Borrowed::Eight([(y, ys), (u, us), (v, vs)]), Subsampling::Yuv422) => {
-                        p.try_encode_frame_422_strided(y, ys, u, us, v, vs)
+                        p.try_encode_frame_422(y, ys, u, us, v, vs)
                     }
                     (Borrowed::Eight([(y, ys), (u, us), (v, vs)]), _) => {
-                        p.try_encode_frame_444_strided(y, ys, u, us, v, vs)
+                        p.try_encode_frame_444(y, ys, u, us, v, vs)
                     }
                     (Borrowed::Wide([(y, ys), ..]), Subsampling::Mono) => {
                         p.try_encode_frame_hbd(y, ys)
                     }
                     (Borrowed::Wide([(y, ys), (u, us), (v, vs)]), _) => {
-                        p.try_encode_frame_420_hbd_strided(y, ys, u, us, v, vs)
+                        p.try_encode_frame_420_hbd(y, ys, u, us, v, vs)
                     }
                 }
                 .map_err(err)?;

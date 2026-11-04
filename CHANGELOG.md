@@ -6,7 +6,7 @@
   strides instead of copying every plane into a tight buffer (a7764f0b). Output is
   byte-identical (`padded_planes_code_to_the_bytes_of_tight_ones`). The zenrav1e
   session still copies, into the frame that encoder owns. Pins imazen/zenav1-svt
-  to `4881fd72` (its PR 30) until that lands.
+  to `3289d101` (its PR 30) until that lands.
 
 - Add `Av1EncodeSettings::with_output_pull_threshold`; deprecate the misleading
   `with_max_queued_frames` builder without changing its soft-trigger behavior.
