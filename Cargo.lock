@@ -1525,7 +1525,7 @@ dependencies = [
 [[package]]
 name = "rav1d-disjoint-mut"
 version = "0.4.0"
-source = "git+https://github.com/imazen/rav1d-safe?rev=b19aec6561204ff310250bf2bc1b2c6faa42c3b5#b19aec6561204ff310250bf2bc1b2c6faa42c3b5"
+source = "git+https://github.com/imazen/rav1d-safe?rev=87e872f0#87e872f0982b1891b26c63577727bc5410746926"
 dependencies = [
  "aligned",
  "loom",
@@ -1536,7 +1536,7 @@ dependencies = [
 [[package]]
 name = "rav1d-safe"
 version = "0.7.0"
-source = "git+https://github.com/imazen/rav1d-safe?rev=b19aec6561204ff310250bf2bc1b2c6faa42c3b5#b19aec6561204ff310250bf2bc1b2c6faa42c3b5"
+source = "git+https://github.com/imazen/rav1d-safe?rev=87e872f0#87e872f0982b1891b26c63577727bc5410746926"
 dependencies = [
  "aligned",
  "archmage",
@@ -2496,6 +2496,16 @@ dependencies = [
 [[package]]
 name = "zenav1-aom-dsp"
 version = "0.0.1"
+source = "git+https://github.com/imazen/zenav1-aom?rev=10be4beb#10be4beb77b6af7d499c0926ec5344827ec39de2"
+dependencies = [
+ "archmage",
+ "enough",
+ "magetypes",
+]
+
+[[package]]
+name = "zenav1-aom-dsp"
+version = "0.0.1"
 source = "git+https://github.com/imazen/zenav1-aom?rev=14124356c46f813ac7656b8e7b6631f466b666b0#14124356c46f813ac7656b8e7b6631f466b666b0"
 dependencies = [
  "archmage",
@@ -2503,23 +2513,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "zenav1-aom-dsp"
-version = "0.0.1"
-source = "git+https://github.com/imazen/zenav1-aom?rev=6799fe95#6799fe958c87a7f6696113630e5094bdfe115a4f"
-dependencies = [
- "archmage",
- "enough",
- "magetypes",
-]
-
-[[package]]
 name = "zenav1-aom-encode"
 version = "0.0.1"
-source = "git+https://github.com/imazen/zenav1-aom?rev=6799fe95#6799fe958c87a7f6696113630e5094bdfe115a4f"
+source = "git+https://github.com/imazen/zenav1-aom?rev=10be4beb#10be4beb77b6af7d499c0926ec5344827ec39de2"
 dependencies = [
  "enough",
  "smallvec",
- "zenav1-aom-dsp 0.0.1 (git+https://github.com/imazen/zenav1-aom?rev=6799fe95)",
+ "zenav1-aom-dsp 0.0.1 (git+https://github.com/imazen/zenav1-aom?rev=10be4beb)",
 ]
 
 [[package]]
