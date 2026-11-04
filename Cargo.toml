@@ -95,7 +95,7 @@ rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8",
 #    (rav1d-safe#423). zenavif calls `flush()` at end of input in
 #    `decode_av1.rs` and `decoder_managed/decoder.rs`.
 # Film-grain row reservations: ARM 83fa5d3e and x86 c2a7dfd7, audited at e73811f5.
-rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "87e872f0", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
+rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "4161bae4", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
 # zenav1-aom pure-Rust AV1 KEY-frame decoder — second decode backend (feature
 # `zenav1-aom`). Git-rev pinned to imazen/zenav1-aom main (crate unpublished;
 # intra decode is conformance-clean vs libaom v3.14.1 at this rev). This rev
