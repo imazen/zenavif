@@ -318,7 +318,10 @@ ravif = { package = "zenravif", version = "0.2.0", git = "https://github.com/ima
 # `__expert`-gated upstream), and the two uncalibrated `ZenEnhancement`
 # variants (`AomIntraEdgeFilter`, `AomRestorationUnitSearch`) were REMOVED
 # upstream — `AomScreenTools`/`DeepSearch` are the surviving set.
-svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "0ebcb871151327b051fc9d6b1a170b159f25b596", optional = true }
+# 2026-11-03: 3289d101 is the head of imazen/zenav1-svt PR 30 (a stride per input
+# plane), which `src/media.rs` uses to stop copying every frame. TO BE SWAPPED
+# for the merge commit when that PR lands.
+svtav1 = { package = "zenav1-svt", git = "https://github.com/imazen/zenav1-svt", rev = "3289d101a7ebcd866c5e5b3b42ada9a5c4a8377c", optional = true }
 # AVIF container muxer for the zenav1-svt backend (the zenravif backend muxes
 # inside zenravif; this backend muxes in-crate). The 0.2.0 version is
 # supplied by the [patch.crates-io] git pin below until 0.2.0 publishes.

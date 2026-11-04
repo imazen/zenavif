@@ -315,7 +315,7 @@ fn svt_rs_partial_sb_roundtrip_at_low_presets() {
                         .with_chroma_420(true);
                 pipeline.bit_depth = 8;
                 let payload = pipeline
-                    .try_encode_frame_420(&y, &u, &v, w)
+                    .try_encode_frame_420(&y, w, &u, w.div_ceil(2), &v, w.div_ceil(2))
                     .unwrap_or_else(|e| {
                         panic!("upstream must accept 4:2:0 {w}x{h} at preset {preset}: {e}")
                     });
@@ -1371,7 +1371,7 @@ fn svt_rs_direct_qp0_codes_lossless_420() {
                     .with_chroma_420(true);
             pipeline.bit_depth = 8;
             let payload = pipeline
-                .try_encode_frame_420(&y, &u, &v, w)
+                .try_encode_frame_420(&y, w, &u, w.div_ceil(2), &v, w.div_ceil(2))
                 .unwrap_or_else(|e| {
                     panic!(
                         "qp0 coded-lossless {w}x{h} preset {preset} must ENCODE (upstream #9 \
@@ -1478,7 +1478,7 @@ fn svt_rs_direct_qp0_mono_and_native_10bit_are_lossless() {
                 } else if mono {
                     pipeline.try_encode_frame_hbd(&y, w)
                 } else {
-                    pipeline.try_encode_frame_420_hbd(&y, &u, &v, w)
+                    pipeline.try_encode_frame_420_hbd(&y, w, &u, w.div_ceil(2), &v, w.div_ceil(2))
                 }
                 .unwrap();
                 let backends = [
