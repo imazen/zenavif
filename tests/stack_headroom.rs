@@ -49,9 +49,7 @@ use almost_enough::StopToken;
 use imgref::{Img, ImgVec};
 #[cfg(feature = "encode")]
 use rgb::{Rgb, Rgba};
-use zenavif::{
-    DecoderConfig, Unstoppable, decode_animation_with, decode_av1_obu_yuv, decode_with,
-};
+use zenavif::{DecoderConfig, Unstoppable, decode_animation_with, decode_av1_obu_yuv, decode_with};
 
 fn stack_size() -> usize {
     std::env::var("ZENAVIF_STACK_KB")
