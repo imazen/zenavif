@@ -65,10 +65,9 @@ pub(super) fn convert_8bit_monochrome_gray(
     let y_view = planes.y();
     let (w, h) = ctx.dims();
     let hu = h as usize;
-    let mut out = crate::alloc_util::alloc_filled(
+    let mut out = crate::alloc_util::alloc_zeroed::<rgb::Gray<u8>>(
         ctx.alloc_pref,
         true,
-        rgb::Gray::<u8>::new(0),
         ctx.buffer_pixel_count,
     )?;
     crate::yuv_convert::yuv400_to_rgbx_strip::<u8, rgb::Gray<u8>>(
@@ -95,10 +94,9 @@ pub(super) fn convert_16bit_monochrome_gray(
 ) -> Result<PixelBuffer> {
     let y_view = planes.y();
     let (w, h) = ctx.dims();
-    let mut out = crate::alloc_util::alloc_filled(
+    let mut out = crate::alloc_util::alloc_zeroed::<rgb::Gray<u16>>(
         ctx.alloc_pref,
         true,
-        rgb::Gray::<u16>::new(0),
         ctx.buffer_pixel_count,
     )?;
     crate::yuv_convert::yuv400_to_rgbx_strip::<u16, rgb::Gray<u16>>(
@@ -150,10 +148,9 @@ pub(super) fn convert_8bit_monochrome(
             .map(Into::into)
             .map_err(|_| at!(Error::OutOfMemory))
     } else {
-        let mut out = crate::alloc_util::alloc_filled(
+        let mut out = crate::alloc_util::alloc_zeroed::<Rgb<u8>>(
             ctx.alloc_pref,
             true,
-            Rgb { r: 0u8, g: 0, b: 0 },
             ctx.buffer_pixel_count,
         )?;
         crate::yuv_convert::yuv400_to_rgbx_strip::<u8, Rgb<u8>>(
@@ -497,15 +494,9 @@ pub(super) fn convert_16bit_monochrome(
     let (w, h) = ctx.dims();
     let our_range = ctx_our_range(&ctx);
     if ctx.has_alpha {
-        let mut out = crate::alloc_util::alloc_filled(
+        let mut out = crate::alloc_util::alloc_zeroed::<Rgba<u16>>(
             ctx.alloc_pref,
             true,
-            Rgba {
-                r: 0u16,
-                g: 0,
-                b: 0,
-                a: 0,
-            },
             ctx.buffer_pixel_count,
         )?;
         crate::yuv_convert::yuv400_to_rgbx_strip::<u16, Rgba<u16>>(
@@ -522,14 +513,9 @@ pub(super) fn convert_16bit_monochrome(
             .map(Into::into)
             .map_err(|_| at!(Error::OutOfMemory))
     } else {
-        let mut out = crate::alloc_util::alloc_filled(
+        let mut out = crate::alloc_util::alloc_zeroed::<Rgb<u16>>(
             ctx.alloc_pref,
             true,
-            Rgb {
-                r: 0u16,
-                g: 0,
-                b: 0,
-            },
             ctx.buffer_pixel_count,
         )?;
         crate::yuv_convert::yuv400_to_rgbx_strip::<u16, Rgb<u16>>(
@@ -618,15 +604,9 @@ fn convert_16bit_planar_inhouse(
     let bw = ctx.buffer_width;
     let bh = ctx.buffer_height;
     if ctx.has_alpha {
-        let mut out = crate::alloc_util::alloc_filled(
+        let mut out = crate::alloc_util::alloc_zeroed::<Rgba<u16>>(
             ctx.alloc_pref,
             true,
-            Rgba {
-                r: 0u16,
-                g: 0,
-                b: 0,
-                a: 0,
-            },
             ctx.buffer_pixel_count,
         )?;
         crate::yuv_convert::yuv16_to_rgbx_strip::<Rgba<u16>>(
@@ -650,14 +630,9 @@ fn convert_16bit_planar_inhouse(
             .map(Into::into)
             .map_err(|_| at!(Error::OutOfMemory))
     } else {
-        let mut out = crate::alloc_util::alloc_filled(
+        let mut out = crate::alloc_util::alloc_zeroed::<Rgb<u16>>(
             ctx.alloc_pref,
             true,
-            Rgb {
-                r: 0u16,
-                g: 0,
-                b: 0,
-            },
             ctx.buffer_pixel_count,
         )?;
         crate::yuv_convert::yuv16_to_rgbx_strip::<Rgb<u16>>(

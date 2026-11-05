@@ -924,10 +924,9 @@ impl AvifDecoder {
             .ok_or_else(|| at!(Error::OutOfMemory))?;
         let range = kernel_range(yuv_range);
         if has_alpha {
-            let mut out = crate::alloc_util::alloc_filled(
+            let mut out = crate::alloc_util::alloc_zeroed::<Rgba<u8>>(
                 self.config.alloc_pref,
                 true,
-                Rgba::<u8>::default(),
                 pixel_count,
             )?;
             crate::yuv_convert::yuv400_to_rgbx_strip::<u8, Rgba<u8>>(
@@ -937,10 +936,9 @@ impl AvifDecoder {
                 .map(Into::into)
                 .map_err(|_| at!(Error::OutOfMemory))
         } else {
-            let mut out = crate::alloc_util::alloc_filled(
+            let mut out = crate::alloc_util::alloc_zeroed::<Rgb<u8>>(
                 self.config.alloc_pref,
                 true,
-                Rgb::<u8>::default(),
                 pixel_count,
             )?;
             crate::yuv_convert::yuv400_to_rgbx_strip::<u8, Rgb<u8>>(
@@ -966,10 +964,9 @@ impl AvifDecoder {
             .ok_or_else(|| at!(Error::OutOfMemory))?;
         let range = kernel_range(yuv_range);
         if has_alpha {
-            let mut out = crate::alloc_util::alloc_filled(
+            let mut out = crate::alloc_util::alloc_zeroed::<Rgba<u16>>(
                 self.config.alloc_pref,
                 true,
-                Rgba::<u16>::default(),
                 pixel_count,
             )?;
             crate::yuv_convert::yuv400_to_rgbx_strip::<u16, Rgba<u16>>(
@@ -979,10 +976,9 @@ impl AvifDecoder {
                 .map(Into::into)
                 .map_err(|_| at!(Error::OutOfMemory))
         } else {
-            let mut out = crate::alloc_util::alloc_filled(
+            let mut out = crate::alloc_util::alloc_zeroed::<Rgb<u16>>(
                 self.config.alloc_pref,
                 true,
-                Rgb::<u16>::default(),
                 pixel_count,
             )?;
             crate::yuv_convert::yuv400_to_rgbx_strip::<u16, Rgb<u16>>(
@@ -1007,10 +1003,9 @@ impl AvifDecoder {
             .ok_or_else(|| at!(Error::OutOfMemory))?;
         let range = kernel_range(yuv_range);
         if has_alpha {
-            let mut out = crate::alloc_util::alloc_filled(
+            let mut out = crate::alloc_util::alloc_zeroed::<Rgba<u8>>(
                 self.config.alloc_pref,
                 true,
-                Rgba::<u8>::default(),
                 pixel_count,
             )?;
             match planes.chroma_sampling() {
@@ -1067,10 +1062,9 @@ impl AvifDecoder {
                 .map(Into::into)
                 .map_err(|_| at!(Error::OutOfMemory))
         } else {
-            let mut out = crate::alloc_util::alloc_filled(
+            let mut out = crate::alloc_util::alloc_zeroed::<Rgb<u8>>(
                 self.config.alloc_pref,
                 true,
-                Rgb::<u8>::default(),
                 pixel_count,
             )?;
             match planes.chroma_sampling() {
@@ -1246,10 +1240,9 @@ impl AvifDecoder {
             .ok_or_else(|| at!(Error::OutOfMemory))?;
         let range = kernel_range(yuv_range);
         if has_alpha {
-            let mut out = crate::alloc_util::alloc_filled(
+            let mut out = crate::alloc_util::alloc_zeroed::<Rgba<u16>>(
                 self.config.alloc_pref,
                 true,
-                Rgba::<u16>::default(),
                 pixel_count,
             )?;
             match planes.chroma_sampling() {
@@ -1309,10 +1302,9 @@ impl AvifDecoder {
                 .map(Into::into)
                 .map_err(|_| at!(Error::OutOfMemory))
         } else {
-            let mut out = crate::alloc_util::alloc_filled(
+            let mut out = crate::alloc_util::alloc_zeroed::<Rgb<u16>>(
                 self.config.alloc_pref,
                 true,
-                Rgb::<u16>::default(),
                 pixel_count,
             )?;
             match planes.chroma_sampling() {

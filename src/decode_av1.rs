@@ -148,10 +148,9 @@ fn convert_identity_to_rgb(
     let limited = matches!(yuv_range, crate::yuv_convert::YuvRange::Limited);
     // Full-image output buffer sized from the (untrusted) decoded frame
     // dimensions → fallible by default (zenavif#21).
-    let mut out = crate::alloc_util::alloc_filled(
+    let mut out = crate::alloc_util::alloc_zeroed::<u8>(
         crate::alloc_util::AllocPref::CodecDefault,
         true,
-        0u8,
         rgb_byte_len(pixel_count)?,
     )?;
 
@@ -248,10 +247,9 @@ fn convert_monochrome(
             }));
         };
         let y_view = planes.y();
-        let mut gray = crate::alloc_util::alloc_filled(
+        let mut gray = crate::alloc_util::alloc_zeroed::<rgb::Gray<u8>>(
             crate::alloc_util::AllocPref::CodecDefault,
             true,
-            rgb::Gray::<u8>::new(0),
             pixel_count,
         )?;
         crate::yuv_convert::yuv400_to_rgbx_strip::<u8, rgb::Gray<u8>>(
@@ -273,10 +271,9 @@ fn convert_monochrome(
             }));
         };
         let y_view = planes.y();
-        let mut gray = crate::alloc_util::alloc_filled(
+        let mut gray = crate::alloc_util::alloc_zeroed::<rgb::Gray<u16>>(
             crate::alloc_util::AllocPref::CodecDefault,
             true,
-            rgb::Gray::<u16>::new(0),
             pixel_count,
         )?;
         crate::yuv_convert::yuv400_to_rgbx_strip::<u16, rgb::Gray<u16>>(
@@ -341,10 +338,9 @@ fn convert_to_rgb(
         let v_view = planes
             .v()
             .ok_or_else(|| at!(Error::Malformed("missing V chroma plane")))?;
-        let mut out = crate::alloc_util::alloc_filled(
+        let mut out = crate::alloc_util::alloc_zeroed::<Rgb<u8>>(
             crate::alloc_util::AllocPref::CodecDefault,
             true,
-            Rgb { r: 0u8, g: 0, b: 0 },
             pixel_count,
         )?;
         match sampling {
@@ -408,10 +404,9 @@ fn convert_to_rgb(
         let v_view = planes
             .v()
             .ok_or_else(|| at!(Error::Malformed("missing V chroma plane")))?;
-        let mut out = crate::alloc_util::alloc_filled(
+        let mut out = crate::alloc_util::alloc_zeroed::<Rgb<u16>>(
             crate::alloc_util::AllocPref::CodecDefault,
             true,
-            Rgb::<u16> { r: 0, g: 0, b: 0 },
             pixel_count,
         )?;
         crate::yuv_convert::yuv16_to_rgbx_strip::<Rgb<u16>>(
@@ -731,10 +726,9 @@ fn decode_av1_obu_aom_8bit(
                 narrow_code(u32::from(v), bd)
             }
         };
-        let mut out = crate::alloc_util::alloc_filled(
+        let mut out = crate::alloc_util::alloc_zeroed::<u8>(
             config.alloc_pref,
             true,
-            0u8,
             px.checked_mul(3).ok_or_else(|| at!(Error::OutOfMemory))?,
         )?;
         for i in 0..px {
@@ -770,10 +764,9 @@ fn decode_av1_obu_aom_8bit(
         bd,
         &mut wide,
     );
-    let mut out = crate::alloc_util::alloc_filled(
+    let mut out = crate::alloc_util::alloc_zeroed::<u8>(
         config.alloc_pref,
         true,
-        0u8,
         px.checked_mul(3).ok_or_else(|| at!(Error::OutOfMemory))?,
     )?;
     for (i, p) in wide.iter().enumerate() {

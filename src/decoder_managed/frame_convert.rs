@@ -47,7 +47,7 @@ impl ManagedAvifDecoder {
             .ok_or_else(|| at!(Error::OutOfMemory))?;
         // Full crop destination, sized from the display dimensions → fallible
         // by default.
-        let mut data = crate::alloc_util::alloc_filled(alloc_pref, true, 0u8, alloc_size)?;
+        let mut data = crate::alloc_util::alloc_zeroed::<u8>(alloc_pref, true, alloc_size)?;
         let src = image.as_slice();
         for y in 0..height.min(src_h) {
             let src_row = src.row(y as u32);

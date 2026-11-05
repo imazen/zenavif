@@ -195,7 +195,7 @@ yuv = "0.8.17"
 imgref = "1.12.0"
 rgb = { version = "0.8.52", default-features = false, features = ["bytemuck"] }
 enough = "0.4.3"
-bytemuck = { version = "1.25.0", default-features = false, features = ["derive"] }
+bytemuck = { version = "1.25.0", default-features = false, features = ["derive", "extern_crate_alloc"] }
 thiserror = { version = "2.0.18", default-features = false }
 whereat = { version = "0.1.5"}
 log = "0.4.29"

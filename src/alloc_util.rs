@@ -81,6 +81,24 @@ pub(crate) fn resolve_fallible(pref: AllocPref, site_default_fallible: bool) -> 
     }
 }
 
+/// Allocate explicitly zero-valued elements; arbitrary fills use `alloc_filled`.
+pub(crate) fn alloc_zeroed<T: bytemuck::Zeroable>(
+    pref: AllocPref,
+    site_default_fallible: bool,
+    n: usize,
+) -> Result<Vec<T>, At<Error>> {
+    bytemuck::allocation::try_zeroed_vec(n).map_err(|()| {
+        if !resolve_fallible(pref, site_default_fallible) {
+            let layout = core::alloc::Layout::array::<T>(n).expect("capacity overflow");
+            std::alloc::handle_alloc_error(layout);
+        }
+        at!(Error::ResourceLimit(format!(
+            "out of memory allocating {} bytes",
+            n.saturating_mul(core::mem::size_of::<T>())
+        )))
+    })
+}
+
 /// Allocate `n` elements of `T` (each zero-initialized via `fill`), honoring
 /// the per-site fallibility.
 ///
@@ -171,6 +189,27 @@ mod tests {
     fn explicit_infallible_overrides_any_site_default() {
         assert!(!resolve_fallible(AllocPref::Infallible, true));
         assert!(!resolve_fallible(AllocPref::Infallible, false));
+    }
+
+    #[test]
+    fn typed_zero_buffers_preserve_alpha_and_zst_contracts() {
+        for pref in [
+            AllocPref::CodecDefault,
+            AllocPref::Fallible,
+            AllocPref::Infallible,
+        ] {
+            for site in [false, true] {
+                let v = alloc_zeroed::<rgb::Rgba<u16>>(pref, site, 17).unwrap();
+                assert_eq!(v.len(), 17);
+                assert!(v.iter().all(|p| *p == rgb::Rgba::new(0, 0, 0, 0)));
+                let v = alloc_filled(pref, site, rgb::Rgba::new(0u8, 0, 0, 255), 17).unwrap();
+                assert!(v.iter().all(|p| p.a == 255));
+                let v = alloc_zeroed::<()>(pref, site, usize::MAX).unwrap();
+                assert_eq!(v.len(), usize::MAX);
+                assert_eq!(v.capacity(), usize::MAX);
+            }
+        }
+        assert!(alloc_zeroed::<u16>(AllocPref::Fallible, true, usize::MAX).is_err());
     }
 
     #[test]

@@ -317,12 +317,7 @@ impl ManagedAvifDecoder {
         let px = w.checked_mul(h).ok_or_else(|| at!(Error::OutOfMemory))?;
         macro_rules! mono {
             ($pix:ty) => {{
-                let mut out = crate::alloc_util::alloc_filled(
-                    self.alloc_pref,
-                    true,
-                    <$pix as Default>::default(),
-                    px,
-                )?;
+                let mut out = crate::alloc_util::alloc_zeroed::<$pix>(self.alloc_pref, true, px)?;
                 crate::yuv_convert::yuv400_to_rgbx_strip::<u16, $pix>(
                     &fd.y, w, w, 0, h, range, bit_depth, &mut out,
                 );
@@ -409,12 +404,7 @@ fn aom_planar_to_buffer(
     let px = w.checked_mul(h).ok_or_else(|| at!(Error::OutOfMemory))?;
     macro_rules! planar {
         ($pix:ty) => {{
-            let mut out = crate::alloc_util::alloc_filled(
-                alloc_pref,
-                true,
-                <$pix as Default>::default(),
-                px,
-            )?;
+            let mut out = crate::alloc_util::alloc_zeroed::<$pix>(alloc_pref, true, px)?;
             crate::yuv_convert::yuv16_to_rgbx_strip::<$pix>(
                 sampling,
                 &fd.y,

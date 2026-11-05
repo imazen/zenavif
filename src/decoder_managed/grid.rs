@@ -193,7 +193,7 @@ pub(crate) fn stitch_tile_images(
         .ok_or_else(|| at!(Error::OutOfMemory))?;
     // Full grid-stitch canvas, sized from the (untrusted) grid output
     // dimensions → fallible by default.
-    let data = crate::alloc_util::alloc_filled(alloc_pref, true, 0u8, alloc_size)?;
+    let data = crate::alloc_util::alloc_zeroed::<u8>(alloc_pref, true, alloc_size)?;
     let mut output =
         PixelBuffer::from_vec(data, output_width as u32, output_height as u32, descriptor)
             .map_err(|_| {
