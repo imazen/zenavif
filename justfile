@@ -532,3 +532,9 @@ sibling-standalone-check:
 # The named B profile now emits 720 slots; the legacy refusal fixture remains 372.
 sibling-legacy-fixture-check:
     cargo test --features two-pass-zensim --lib zensim_c::tests::c_rejects_a_v1_vector -- --exact
+
+# Decoder drops malformed EXIF while parser errors and other sidecars remain visible.
+animation-sidecars-check:
+    cargo test --locked --test animation_sidecars
+    cargo test --locked --features zenav1-aom --test animation_sidecars
+    cargo clippy --locked --test animation_sidecars -- -D warnings

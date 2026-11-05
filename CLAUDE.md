@@ -707,14 +707,12 @@ remain deferred while this newly measured baseline failure is unresolved.
   replay lacked fixtures; the completed-fixture replay confirms the same
   sentinel failure and passes the other three inventory tests.
 
-- Untouched main `252baa40` fails
-  `malformed_track_exif_is_an_error_not_missing_metadata`: `46f0ff93` changed
-  malformed animation EXIF to be dropped, while the unchanged test still
-  requires probe/construction errors. The isolated baseline is 0/1 passes;
-  the same assertion fails in all six platform test jobs plus coverage in
-  [CI 42022900813](https://github.com/imazen/zenavif/actions/runs/42022900813).
-  The converged graph reproduces it (2/3 passes in that binary). Coordinator
-  retains the policy and every assertion; convergence must add no failures.
+- Fixed with owner approval (2026-11-05): the animation EXIF regression now
+  checks the tolerant decoder contract introduced in `46f0ff93`. Malformed
+  track EXIF remains a parser error, while decoder APIs drop only that EXIF,
+  preserve poster EXIF/XMP and emit unchanged pixels. The three sidecar tests
+  pass with both default and AOM backends; `just animation-sidecars-check`
+  also checks strict clippy.
 
 - The still/animation `AvifEncodeJob` does not implement checked metadata
   retention. The shared core rejects `try_set_metadata_policy` by default;

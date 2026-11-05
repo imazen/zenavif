@@ -184,7 +184,10 @@ fn track_and_poster_sidecars_stay_independent_across_decoders() {
 }
 
 #[test]
-fn malformed_track_exif_is_an_error_not_missing_metadata() {
+fn malformed_track_exif_is_dropped_without_changing_pixels_or_poster() {
+    use std::borrow::Cow;
+    use zenavif::{AnimationDecoder, AvifDecoderConfig, DecodeBackend, Unstoppable};
+    use zencodec::decode::{AnimationFrameDecoder as _, DecodeJob as _, DecoderConfig as _};
     for offset in [EXIF.len() as u32, u32::MAX] {
         let mut data = original();
         let idat = positions(&data, b"idat")[1];
@@ -192,8 +195,50 @@ fn malformed_track_exif_is_an_error_not_missing_metadata() {
         let p = zenavif_parse::AvifParser::from_bytes(&data).unwrap();
         assert!(p.animation_exif().unwrap().is_err());
         assert_eq!(p.exif().unwrap().unwrap().as_ref(), EXIF);
-        let decoder = ManagedAvifDecoder::new(&data, &DecoderConfig::new()).unwrap();
-        assert!(decoder.probe_animation_info().is_err());
-        assert!(zenavif::AnimationDecoder::new(&data, &DecoderConfig::new()).is_err());
+        for backend in [
+            DecodeBackend::Rav1dSafe,
+            #[cfg(feature = "zenav1-aom")]
+            DecodeBackend::Zenav1Aom,
+        ] {
+            let config = DecoderConfig::new().decode_backend(backend);
+            let pristine = original();
+            let reference = ManagedAvifDecoder::new(&pristine, &config)
+                .unwrap()
+                .decode_animation(&Unstoppable)
+                .unwrap();
+            let mut decoder = ManagedAvifDecoder::new(&data, &config).unwrap();
+            assert_eq!(decoder.probe_info().unwrap().exif.as_deref(), Some(EXIF));
+            let probe = decoder.probe_animation_info().unwrap();
+            assert!(probe.exif.is_none());
+            assert_eq!(probe.xmp.as_deref(), Some(XMP));
+            let decoded = decoder.decode_animation(&Unstoppable).unwrap();
+            assert!(decoded.info.exif.is_none());
+            assert_eq!(decoded.info.xmp.as_deref(), Some(XMP));
+            assert_eq!(decoded.frames.len(), reference.frames.len());
+            let mut native = AnimationDecoder::new(&data, &config).unwrap();
+            assert!(native.info().exif.is_none());
+            assert_eq!(native.info().xmp.as_deref(), Some(XMP));
+            let mut cfg = AvifDecoderConfig::new();
+            *cfg.inner_mut() = config;
+            let mut codec = cfg
+                .job()
+                .animation_frame_decoder(Cow::Borrowed(&data), &[])
+                .unwrap();
+            assert!(codec.info().embedded_metadata.exif.is_none());
+            assert_eq!(codec.info().embedded_metadata.xmp.as_deref(), Some(XMP));
+            for (actual, expected) in decoded.frames.iter().zip(&reference.frames) {
+                let native_frame = native.next_frame(&Unstoppable).unwrap().unwrap();
+                let codec_frame = codec.render_next_frame(None).unwrap().unwrap();
+                let expected_view = expected.pixels.as_slice();
+                for y in 0..150 {
+                    let expected = expected_view.row(y);
+                    assert_eq!(actual.pixels.as_slice().row(y), expected);
+                    assert_eq!(native_frame.pixels.as_slice().row(y), expected);
+                    assert_eq!(codec_frame.pixels().row(y), expected);
+                }
+            }
+            assert!(native.next_frame(&Unstoppable).unwrap().is_none());
+            assert!(codec.render_next_frame(None).unwrap().is_none());
+        }
     }
 }

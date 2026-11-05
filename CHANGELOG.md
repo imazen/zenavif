@@ -215,12 +215,18 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Test malformed animation EXIF as a parser error and missing decoder metadata,
+  preserving poster EXIF, XMP and every decoded pixel across all three APIs.
+  This aligns the established test with the owner-approved tolerant contract.
+
+
 - Converge root, fuzz and downstream core/pixel sources (`1816b4d0`,
   `fa836abf`), plus PNG, Ultra HDR and paired metric development tools.
   Preserve metadata policy and all assertions. The legacy refusal fixture
   explicitly selects 372 slots; named profile B now serves 720. Existing
-  malformed-EXIF, 13-pixel animation and inventory-sentinel failures are
-  baseline findings recorded in CLAUDE.md, not relaxed checks.
+  13-pixel animation and inventory-sentinel failures remain baseline findings
+  recorded in CLAUDE.md. The malformed-EXIF expectation was subsequently updated
+  with owner approval to the existing tolerant decoder contract.
 
 - Explicitly zeroed decode surfaces request allocator-zeroed storage; nonzero opaque alpha fills and allocation failure policy remain intact.
 
