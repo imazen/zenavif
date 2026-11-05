@@ -32,3 +32,8 @@ path = "fuzz_targets/fuzz_parse_limited.rs"
 test = false
 doc = false
 bench = false
+
+# This standalone workspace inherits no parent patches.
+[patch.crates-io]
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "1816b4d082234c04c3805411b437b8396040f522" }
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }
