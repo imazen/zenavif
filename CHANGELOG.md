@@ -215,6 +215,10 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+### Changed
+
+- 10 and 12-bit samples use the canonical mapping, not bit replication: widening is nearest `q * 65535 / max`, and narrowing, including to 8 bits, is the nearest value rather than a shift. Decoded 10-bit output moves by 1 on 234 of 1,024 codes, and 12-bit on 952 of 4,096. Narrowed 8-bit output also changes, since the high byte truncated. Every code still round-trips. `tests/identity_roundtrip.rs` and `tests/bit_depth_request.rs` follow.
+
 - Align optional-control manifests on core `feb09f9f`, pixels `283655c5`,
   version-edge Ultra HDR `7e9d296c` and paired native PNG `7b6d1436`.
   Root, downstream and fuzz consumers carry matching family patches. The root

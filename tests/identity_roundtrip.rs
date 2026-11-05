@@ -29,11 +29,10 @@ fn mix(x: u32, y: u32, salt: u32) -> u8 {
     (h >> 16) as u8
 }
 
-/// Expand a 10-bit value to 16 bits the way the decoder does
-/// (LSB replication) — these values roundtrip the encoder's
-/// truncating 16→10 scale exactly.
+/// Expand a 10-bit value to 16 bits the way the decoder does, the canonical
+/// mapping: these values round-trip the encoder's nearest 16→10 narrowing exactly.
 fn expand10(v10: u16) -> u16 {
-    (v10 << 6) | (v10 >> 4)
+    ((u32::from(v10) * 65535 + 511) / 1023) as u16
 }
 
 #[test]

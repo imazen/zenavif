@@ -135,9 +135,9 @@ fn rgba16_ten_and_auto_still_code_ten() {
 /// Fidelity of the narrowing route: 8-bit content promoted to 16 bits by
 /// LSB replication and encoded losslessly at `bit_depth: Eight` must come
 /// back as the original bytes. This is what proves the 16 -> 8 step uses
-/// the inverse-of-replication rule (`scale_from_u16`, the crate's owner)
-/// and not a rule that shifts samples — half-up rounding moves 128 of the
-/// 256 bytes and overflows at 0xFFFF (pinned in `convert::narrow_16_to_8`).
+/// the canonical nearest rule (`scale_from_u16`, the crate's owner) and not a rule that
+/// shifts samples: `(v + 128) >> 8` moves 128 of the 256 bytes and overflows at 0xFFFF
+/// (pinned in `convert::narrow_16_to_8`).
 ///
 /// Tolerance is the same +/-2 the sibling identity tests carry for
 /// zenrav1e#9 (`with_lossless` is not yet bit-exact); a wrong narrowing
@@ -172,7 +172,7 @@ fn narrowed_eight_bit_encode_preserves_replicated_bytes() {
     assert!(
         worst <= 2,
         "narrowed 8-bit roundtrip worst channel delta {worst} (> 2): the 16 -> 8 \
-         narrowing is not the inverse of LSB replication"
+         narrowing is not the inverse of the canonical widening"
     );
 }
 
@@ -211,8 +211,8 @@ fn twelve_bit_still_requests_preserve_low_sample_bits_in_rgb_and_alpha() {
                     .into_iter()
                     .zip([expected.r, expected.g, expected.b, expected.a])
                 {
-                    let code = e >> 4;
-                    assert_eq!(a, (code << 4) | (code >> 8), "source {e}");
+                    let code = (u32::from(e) * 4095 + 32767) / 65535;
+                    assert_eq!(u32::from(a), (code * 65535 + 2047) / 4095, "source {e}");
                 }
             }
         } else {
@@ -222,8 +222,8 @@ fn twelve_bit_still_requests_preserve_low_sample_bits_in_rgb_and_alpha() {
                     .into_iter()
                     .zip([expected.r, expected.g, expected.b])
                 {
-                    let code = e >> 4;
-                    assert_eq!(a, (code << 4) | (code >> 8), "source {e}");
+                    let code = (u32::from(e) * 4095 + 32767) / 65535;
+                    assert_eq!(u32::from(a), (code * 65535 + 2047) / 4095, "source {e}");
                 }
             }
         }

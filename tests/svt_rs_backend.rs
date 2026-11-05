@@ -616,9 +616,13 @@ fn gradient_rgb16(w: usize, h: usize) -> Img<Vec<Rgb<u16>>> {
     Img::new(pixels, w, h)
 }
 
+/// A canonical `u16` sample at the nearest 10-bit code.
+fn to10(v: u16) -> u16 {
+    ((u32::from(v) * 1023 + 32767) / 65535) as u16
+}
+
 /// PSNR in the native 10-bit domain between a 16-bit source and a 16-bit
-/// decode (both `>> 6`; the decoder expands 10-bit by LSB replication, so
-/// the shift inverts it exactly).
+/// decode (both narrowed to the nearest code, which inverts the decoder's canonical widening exactly).
 fn psnr_10bit<P: Copy>(
     src: &Img<Vec<P>>,
     out: imgref::ImgRef<'_, P>,
@@ -629,7 +633,7 @@ fn psnr_10bit<P: Copy>(
     for (row_a, row_b) in src.rows().zip(out.rows()) {
         for (pa, pb) in row_a.iter().zip(row_b.iter()) {
             for (a, b) in channels(*pa).into_iter().zip(channels(*pb)) {
-                let d = i64::from(a >> 6) - i64::from(b >> 6);
+                let d = i64::from(to10(a)) - i64::from(to10(b));
                 se += (d * d) as u64;
                 n += 1;
             }
@@ -732,12 +736,12 @@ fn svt_rs_10bit_path_keeps_low_bits_vs_8bit_at_qp_floor() {
         let encoded = zenavif::encode_rgb16(img.as_ref(), &config, stop()).expect("encode");
         let pixels = decode_16bit(&encoded.avif_file);
         // Decoded samples on the 10-bit grid: a 10-bit stream decodes to
-        // Rgb16 by LSB replication (>> 6 inverts it exactly); an 8-bit
+        // canonical Rgb16 (`to10` inverts it exactly); an 8-bit
         // stream decodes to Rgb8, mapped by the exact inverse of the
         // widening (round(v * 1023 / 255)).
         let decoded10: Vec<[u16; 3]> = if let Some(out) = pixels.try_as_imgref::<Rgb<u16>>() {
             out.rows()
-                .flat_map(|r| r.iter().map(|p| [p.r >> 6, p.g >> 6, p.b >> 6]))
+                .flat_map(|r| r.iter().map(|p| [to10(p.r), to10(p.g), to10(p.b)]))
                 .collect()
         } else {
             let out = pixels.try_as_imgref::<Rgb<u8>>().expect("Rgb8 view");
@@ -750,7 +754,7 @@ fn svt_rs_10bit_path_keeps_low_bits_vs_8bit_at_qp_floor() {
         let mut n = 0f64;
         for (pa, pb) in img.buf().iter().zip(decoded10.iter()) {
             for (a, b) in [pa.r, pa.g, pa.b].into_iter().zip(*pb) {
-                let d = f64::from(a >> 6) - f64::from(b);
+                let d = f64::from(to10(a)) - f64::from(b);
                 se += d * d;
                 n += 1.0;
             }

@@ -85,23 +85,26 @@ fn limited_to_full_16(y: u16, bit_depth: u8) -> u16 {
     ((y32.saturating_sub(y_min)) * max_val / y_range).min(max_val) as u16
 }
 
-/// Scale a value from native bit depth to full u16 range using LSB replication.
+/// Widen a full-range code to the canonical `u16` domain: nearest `q * 65535 / max`.
 ///
-/// For 10-bit: `(v << 6) | (v >> 4)` maps 0→0, 1023→65535
-/// For 12-bit: `(v << 4) | (v >> 8)` maps 0→0, 4095→65535
-/// For 16-bit: no-op
+/// This is `zenpixels_convert::codes` for intensity and alpha. Every code survives
+/// [`scale_from_u16`], and white is 65535.
 #[inline]
 fn scale_to_u16(v: u16, bit_depth: u8) -> u16 {
-    let shift = 16 - bit_depth;
-    if shift == 0 {
+    if bit_depth >= 16 {
         return v;
     }
-    // LSB replication: fill lower bits with copies of upper bits
-    // This gives exact mapping: 0→0, max→65535
-    (v << shift) | (v >> (bit_depth - shift))
+    let max = (1u32 << bit_depth) - 1;
+    ((u32::from(v).min(max) * 65535 + max / 2) / max) as u16
 }
 
-/// Downscale a 16-bit PixelBuffer to 8-bit by taking the high byte of each channel.
+/// A canonical `u16` sample at 8 bits, the nearest value: `(v + 128) / 257`.
+#[inline]
+fn nearest_u8(v: u16) -> u8 {
+    ((u32::from(v) + 128) / 257) as u8
+}
+
+/// Downscale a 16-bit PixelBuffer to 8-bit, to the nearest value of each channel.
 ///
 /// Converts Rgb16 → Rgb8 and Rgba16 → Rgba8 in-place (reallocates to a new buffer).
 /// Values are assumed to be in full u16 range (0–65535) after `scale_pixels_to_u16`.
@@ -123,9 +126,9 @@ pub fn downscale_to_8bit(image: PixelBuffer) -> PixelBuffer {
         let out: Vec<Rgb<u8>> = src
             .pixels()
             .map(|px| Rgb {
-                r: (px.r >> 8) as u8,
-                g: (px.g >> 8) as u8,
-                b: (px.b >> 8) as u8,
+                r: nearest_u8(px.r),
+                g: nearest_u8(px.g),
+                b: nearest_u8(px.b),
             })
             .collect();
         reattach(
@@ -140,10 +143,10 @@ pub fn downscale_to_8bit(image: PixelBuffer) -> PixelBuffer {
         let out: Vec<Rgba<u8>> = src
             .pixels()
             .map(|px| Rgba {
-                r: (px.r >> 8) as u8,
-                g: (px.g >> 8) as u8,
-                b: (px.b >> 8) as u8,
-                a: (px.a >> 8) as u8,
+                r: nearest_u8(px.r),
+                g: nearest_u8(px.g),
+                b: nearest_u8(px.b),
+                a: nearest_u8(px.a),
             })
             .collect();
         reattach(
@@ -157,7 +160,7 @@ pub fn downscale_to_8bit(image: PixelBuffer) -> PixelBuffer {
             .expect(TIGHTLY_PACKED_INVARIANT);
         let out: Vec<rgb::Gray<u8>> = src
             .pixels()
-            .map(|px| rgb::Gray::new((px.value() >> 8) as u8))
+            .map(|px| rgb::Gray::new(nearest_u8(px.value())))
             .collect();
         reattach(
             PixelBuffer::from_pixels(out, w, h)
@@ -172,7 +175,7 @@ pub fn downscale_to_8bit(image: PixelBuffer) -> PixelBuffer {
 /// Scale all channels in a 16-bit PixelBuffer from native bit depth to full u16 range.
 ///
 /// This converts e.g. 10-bit values (0–1023) to full 16-bit (0–65535) using
-/// LSB replication for exact endpoint mapping.
+/// the canonical mapping, nearest `q * 65535 / max`.
 pub fn scale_pixels_to_u16(image: &mut PixelBuffer, bit_depth: u8) {
     if bit_depth >= 16 {
         return;
@@ -211,40 +214,29 @@ pub fn scale_pixels_to_u16(image: &mut PixelBuffer, bit_depth: u8) {
     }
 }
 
-/// Scale a full u16 value (0–65535) down to native bit depth range.
+/// Narrow a canonical `u16` sample to native bit depth: nearest `v * max / 65535`.
 ///
-/// For 10-bit: `v >> 6` maps 0→0, 65535→1023
-/// For 12-bit: `v >> 4` maps 0→0, 65535→4095
-///
-/// Uses truncation (top-bit extraction), which is the exact inverse of
-/// LSB replication in `scale_to_u16`. This gives lossless roundtrip for
-/// values produced by LSB replication, symmetric bias for arbitrary
-/// inputs, and lower max error than half-up rounding (63 vs 95 for 10-bit).
+/// Every code widened by `scale_to_u16` returns to itself, and the error is at most half a code.
 #[cfg(feature = "encode")]
 #[inline]
 pub fn scale_from_u16(v: u16, bit_depth: u8) -> u16 {
-    let shift = 16 - bit_depth;
-    if shift == 0 {
+    if bit_depth >= 16 {
         return v;
     }
-    v >> shift
+    let max = (1u32 << bit_depth) - 1;
+    ((u32::from(v) * max + 32767) / 65535) as u16
 }
 
 /// Narrow a full-range u16 sample to the u8 domain, for the 8-bit
 /// raw-plane encode APIs.
 ///
-/// This is [`scale_from_u16`] at depth 8 — the crate's narrowing owner —
-/// with the type change the `[u8; 3]` plane APIs need. It is deliberately
-/// NOT half-up rounding: truncation is the exact inverse of the widening
-/// rule (`scale_to_u16`, LSB replication), so 8-bit content promoted to
-/// 16 bits narrows back to the original byte, and it matches the decode
-/// side's `downscale_to_8bit` ("the high byte of each channel"). Pinned
-/// by the `narrow_16_to_8` tests.
+/// This is [`scale_from_u16`] at depth 8, the nearest value, with the type change the `[u8; 3]`
+/// plane APIs need. 8-bit content promoted to 16 bits narrows back to the original byte, and it
+/// matches `downscale_to_8bit`. Pinned by the `narrow_16_to_8` tests.
 #[cfg(feature = "encode")]
 #[inline]
 pub fn narrow_to_u8(v: u16) -> u8 {
-    // `scale_from_u16(v, 8)` is `v >> 8`, so the value is always <= 255
-    // and the mask is a no-op that keeps the cast provably lossless.
+    // At depth 8 the value is always <= 255, and the mask keeps the cast provably lossless.
     (scale_from_u16(v, 8) & 0xFF) as u8
 }
 
@@ -426,10 +418,10 @@ mod tests {
             assert_eq!(
                 (dst.r, dst.g, dst.b, dst.a),
                 (
-                    (src.r >> 8) as u8,
-                    (src.g >> 8) as u8,
-                    (src.b >> 8) as u8,
-                    (src.a >> 8) as u8
+                    nearest_u8(src.r),
+                    nearest_u8(src.g),
+                    nearest_u8(src.b),
+                    nearest_u8(src.a)
                 ),
                 "RGBA16 -> RGBA8 channel mismatch at pixel {i} ({src:?})"
             );
@@ -455,7 +447,7 @@ mod tests {
         for (src, dst) in rgb.iter().zip(got.pixels()) {
             assert_eq!(
                 (dst.r, dst.g, dst.b),
-                ((src.r >> 8) as u8, (src.g >> 8) as u8, (src.b >> 8) as u8),
+                (nearest_u8(src.r), nearest_u8(src.g), nearest_u8(src.b)),
                 "RGB16 -> RGB8 channel mismatch"
             );
         }
@@ -474,7 +466,7 @@ mod tests {
         for (src, dst) in gray.iter().zip(got.pixels()) {
             assert_eq!(
                 dst.value(),
-                (src.value() >> 8) as u8,
+                nearest_u8(src.value()),
                 "GRAY16 -> GRAY8 mismatch"
             );
         }
@@ -499,8 +491,8 @@ mod tests {
 ///
 /// The narrowing owner is `scale_from_u16(v, 8)` — the same function the
 /// 10-bit branch of those encoders already uses, and the same rule the
-/// decode side applies in `downscale_to_8bit` ("high byte of each
-/// channel"). It is NOT half-up rounding; these tests record why.
+/// decode side applies in `downscale_to_8bit`: the nearest value, `(v + 128) / 257`. That
+/// is not `(v + 128) >> 8`, which leaves the u8 domain, as the last test records.
 #[cfg(all(test, feature = "encode"))]
 mod narrow_16_to_8 {
     use super::*;
@@ -529,15 +521,38 @@ mod narrow_16_to_8 {
         }
     }
 
-    /// It agrees with the decode-side narrowing (`downscale_to_8bit`,
-    /// documented as "the high byte of each channel") on the whole u16
-    /// domain, so an encode-at-8 / decode-with-prefer_8bit pair cannot
-    /// disagree about which byte a sample is.
+    /// It agrees with the decode-side narrowing (`downscale_to_8bit`) on the whole u16 domain, so
+    /// an encode-at-8 / decode-with-prefer_8bit pair can't disagree about which byte a sample is,
+    /// and that byte is the nearest one.
     #[test]
-    fn narrowing_matches_the_decode_side_high_byte_rule() {
+    fn narrowing_is_the_nearest_value_and_matches_the_decode_side() {
         for v in 0u32..=u32::from(u16::MAX) {
-            let v = v as u16;
-            assert_eq!(scale_from_u16(v, 8), v >> 8, "diverged at v={v}");
+            let nearest = (f64::from(v) * 255.0 / 65535.0).round() as u16;
+            assert_eq!(scale_from_u16(v as u16, 8), nearest, "diverged at v={v}");
+            assert_eq!(
+                u16::from(nearest_u8(v as u16)),
+                nearest,
+                "diverged at v={v}"
+            );
+        }
+    }
+
+    /// Every native depth round-trips and agrees with the canonical mapping.
+    #[test]
+    fn native_depths_round_trip_on_the_canonical_grid() {
+        for depth in [8u8, 10, 12, 14] {
+            let max = (1u32 << depth) - 1;
+            for q in 0..=max {
+                let widened = scale_to_u16(q as u16, depth);
+                let nearest = (f64::from(q) * 65535.0 / f64::from(max)).round() as u16;
+                assert_eq!(widened, nearest, "depth {depth} code {q}");
+                assert_eq!(
+                    u32::from(scale_from_u16(widened, depth)),
+                    q,
+                    "depth {depth} code {q}"
+                );
+            }
+            assert_eq!(scale_to_u16(max as u16, depth), 65535);
         }
     }
 

@@ -120,7 +120,8 @@ fn mislabelled_non_essential_transform_decodes_byte_identically() {
     let got = decode_fingerprint(CLAP_NON_ESSENTIAL);
     assert_eq!(
         got,
-        (12, 34, 0x6899_8027_5c22_4c26),
+        // Canonical rounding. Replicating the same 10-bit codes gives the earlier 0x6899_8027_5c22_4c26.
+        (12, 34, 0x83a1_5686_b320_2709),
         "clap_irot_imir_non_essential.avif pixels changed (w, h, fnv1a64) — this \
          file's transforms must still be applied exactly as before"
     );

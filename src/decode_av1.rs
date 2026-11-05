@@ -12,6 +12,13 @@ use rav1d_safe::{Decoder as Rav1dDecoder, Frame, PixelLayout, Planes, Settings};
 use rgb::Rgb;
 use whereat::at;
 
+/// A native code at the nearest 8-bit value, as `zenavif::convert` does after widening.
+#[inline]
+fn narrow_code<D: Into<u32>>(v: u32, bit_depth: D) -> u8 {
+    let max = (1u32 << bit_depth.into()) - 1;
+    ((v.min(max) * 255 + max / 2) / max) as u8
+}
+
 // The former blind `to_yuv_matrix` (`_ => Bt601`) is replaced by
 // `crate::cicp_resolve::resolve` — raw OBU streams carry no container,
 // so there is no nclx hint here; unspecified/unimplemented matrices
@@ -156,7 +163,7 @@ fn convert_identity_to_rgb(
             let c = v.saturating_sub(smin).min(span);
             ((c * 255 + span / 2) / span) as u8
         } else {
-            (v >> (bit_depth - 8)) as u8
+            narrow_code(v, bit_depth)
         }
     };
 
@@ -283,13 +290,15 @@ fn convert_monochrome(
             &mut gray,
         );
         // Scale 10/12/16-bit down to 8-bit.
-        let shift = bit_depth.saturating_sub(8);
         let mut gray_pixels: Vec<u8> = crate::alloc_util::vec_with_capacity(
             crate::alloc_util::AllocPref::CodecDefault,
             true,
             pixel_count,
         )?;
-        gray_pixels.extend(gray.iter().map(|px| (px.value() >> shift).min(255) as u8));
+        gray_pixels.extend(
+            gray.iter()
+                .map(|px| narrow_code(u32::from(px.value()), bit_depth)),
+        );
         Ok((gray_pixels, width, height, 1))
     }
 }
@@ -424,16 +433,15 @@ fn convert_to_rgb(
         );
 
         // Scale 10/12/16-bit RGB down to 8-bit
-        let shift = bit_depth.saturating_sub(8);
         let mut bytes: Vec<u8> = crate::alloc_util::vec_with_capacity(
             crate::alloc_util::AllocPref::CodecDefault,
             true,
             rgb_byte_len(pixel_count)?,
         )?;
         for px in &out {
-            bytes.push((px.r >> shift).min(255) as u8);
-            bytes.push((px.g >> shift).min(255) as u8);
-            bytes.push((px.b >> shift).min(255) as u8);
+            bytes.push(narrow_code(u32::from(px.r), bit_depth));
+            bytes.push(narrow_code(u32::from(px.g), bit_depth));
+            bytes.push(narrow_code(u32::from(px.b), bit_depth));
         }
         Ok((bytes, width, height, 3))
     }
@@ -695,7 +703,10 @@ fn decode_av1_obu_aom_8bit(
     if fd.monochrome {
         let mut gray = vec![rgb::Gray::<u16>::new(0); px];
         yc::yuv400_to_rgbx_strip::<u16, rgb::Gray<u16>>(&fd.y, w, w, 0, h, range, bd, &mut gray);
-        let out: Vec<u8> = gray.iter().map(|g| (g.value() >> shift) as u8).collect();
+        let out: Vec<u8> = gray
+            .iter()
+            .map(|g| narrow_code(u32::from(g.value()), bd))
+            .collect();
         return Ok((out, w as u32, h as u32, 1));
     }
     let hint = Some(crate::cicp_resolve::AVIF_DEFAULT_MC);
@@ -710,7 +721,6 @@ fn decode_av1_obu_aom_8bit(
         }
         // Planes are (G,B,R); expand limited range then scale to 8-bit.
         let limited = !fd.full_range;
-        let max = (1u32 << bd) - 1;
         let smin = 16u32 << shift;
         let span = 219u32 << shift;
         let to8 = |v: u16| -> u8 {
@@ -718,7 +728,7 @@ fn decode_av1_obu_aom_8bit(
                 let c = (v as u32).saturating_sub(smin).min(span);
                 ((c * 255 + span / 2) / span) as u8
             } else {
-                (((v as u32) * 255 + max / 2) / max) as u8
+                narrow_code(u32::from(v), bd)
             }
         };
         let mut out = crate::alloc_util::alloc_filled(
@@ -767,9 +777,9 @@ fn decode_av1_obu_aom_8bit(
         px.checked_mul(3).ok_or_else(|| at!(Error::OutOfMemory))?,
     )?;
     for (i, p) in wide.iter().enumerate() {
-        out[i * 3] = (p.r >> shift) as u8;
-        out[i * 3 + 1] = (p.g >> shift) as u8;
-        out[i * 3 + 2] = (p.b >> shift) as u8;
+        out[i * 3] = narrow_code(u32::from(p.r), bd);
+        out[i * 3 + 1] = narrow_code(u32::from(p.g), bd);
+        out[i * 3 + 2] = narrow_code(u32::from(p.b), bd);
     }
     Ok((out, w as u32, h as u32, 3))
 }
