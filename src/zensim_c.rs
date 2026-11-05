@@ -3,9 +3,9 @@
 //!
 //! # Why C needs its own module and `B` did not
 //!
-//! Every other zensim call in this crate is one line —
-//! `Zensim::new(codec_target()).compute(src, dst)` — because profile `B`
-//! consumes the standard 372-feature v1 pipeline that `compute` produces.
+//! Ordinary named-profile calls select their complete feature regime through
+//! `Zensim::new(codec_target()).compute(src, dst)`. The current owner serves
+//! `B` in a 720-slot layout; the historical v1 layout had 372 slots.
 //! **`C` does not consume that v1 vector.** It is a 944-input MLP over
 //! the folded-720 + append + append2 regime. The current pinned owner now
 //! makes `compute` select the complete regime itself; historically it passed
@@ -656,10 +656,22 @@ mod tests {
         let d = damaged(&s, w, h);
         let z = zensim::Zensim::new(ZensimProfile::C).with_parallel(false);
 
-        let v1 = zensim::Zensim::new(ZensimProfile::B)
-            .with_parallel(false)
-            .compute(&RgbSlice::new(&s, w, h), &RgbSlice::new(&d, w, h))
-            .expect("the v1 extractor must work");
+        // B now serves a 720-slot layout. Build the same legacy 372-slot
+        // refusal input explicitly, without changing the C width assertion.
+        static V1: std::sync::LazyLock<zensim::profile::ProfileParams> =
+            std::sync::LazyLock::new(|| {
+                zensim::profile::ProfileParams::builder()
+                    .extended_features(true)
+                    .compute_iw_features(true)
+                    .build()
+            });
+        let v1 = zensim::Zensim::new(ZensimProfile::Custom {
+            name: "legacy-v1-refusal-fixture",
+            params: &V1,
+        })
+        .with_parallel(false)
+        .compute(&RgbSlice::new(&s, w, h), &RgbSlice::new(&d, w, h))
+        .expect("the v1 extractor must work");
         assert_eq!(v1.features().len(), 372);
         let err = zensim::score_features_with_profile(
             ZensimProfile::C,

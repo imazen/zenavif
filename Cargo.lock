@@ -2282,7 +2282,7 @@ dependencies = [
  "whereat",
  "zencodec",
  "zenmeta",
- "zenpixels 0.3.1",
+ "zenpixels",
 ]
 
 [[package]]
@@ -2651,7 +2651,7 @@ dependencies = [
  "garb",
  "linear-srgb",
  "magetypes",
- "zenpixels 0.3.1",
+ "zenpixels",
  "zenpixels-convert",
 ]
 
@@ -2789,7 +2789,7 @@ dependencies = [
  "zencodec-media",
  "zencodec-media-testkit",
  "zencodec-testkit",
- "zenpixels 0.3.1",
+ "zenpixels",
  "zenpixels-convert",
  "zenpredict 0.2.0 (git+https://github.com/imazen/zenanalyze?rev=38dc80f73887dafae6bf5ebfe9a03be5ef78ebe0)",
  "zenpredict 0.2.0 (git+https://github.com/imazen/zenanalyze?rev=f0903489300aea240ffae2e3f1359f8f2b9a0ba4)",
@@ -2878,7 +2878,7 @@ dependencies = [
  "libm",
  "spin",
  "whereat",
- "zenpixels 0.3.1",
+ "zenpixels",
 ]
 
 [[package]]
@@ -2889,7 +2889,7 @@ dependencies = [
  "enough",
  "how-far",
  "zencodec",
- "zenpixels 0.3.1",
+ "zenpixels",
 ]
 
 [[package]]
@@ -2900,7 +2900,7 @@ dependencies = [
  "enough",
  "zencodec",
  "zencodec-io",
- "zenpixels 0.3.1",
+ "zenpixels",
 ]
 
 [[package]]
@@ -2912,7 +2912,7 @@ dependencies = [
  "zencodec",
  "zencodec-io",
  "zencodec-media",
- "zenpixels 0.3.1",
+ "zenpixels",
 ]
 
 [[package]]
@@ -2926,7 +2926,7 @@ dependencies = [
  "whereat",
  "zencodec",
  "zencodec-io",
- "zenpixels 0.3.1",
+ "zenpixels",
 ]
 
 [[package]]
@@ -2944,7 +2944,7 @@ version = "0.1.0"
 source = "git+https://github.com/imazen/zencodec?rev=1816b4d082234c04c3805411b437b8396040f522#1816b4d082234c04c3805411b437b8396040f522"
 dependencies = [
  "zencodec",
- "zenpixels 0.3.1",
+ "zenpixels",
 ]
 
 [[package]]
@@ -2955,17 +2955,7 @@ dependencies = [
  "zencodec-io",
  "zencodec-media",
  "zencodec-media-testkit",
- "zenpixels 0.3.1",
-]
-
-[[package]]
-name = "zenpixels"
-version = "0.2.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5851fd39b312749a3c367a0cd3522bd95d43276cfa613e9c18df748447cef3a8"
-dependencies = [
- "bytemuck",
- "whereat",
+ "zenpixels",
 ]
 
 [[package]]
@@ -2995,7 +2985,7 @@ dependencies = [
  "paste",
  "rgb",
  "whereat",
- "zenpixels 0.3.1",
+ "zenpixels",
 ]
 
 [[package]]
@@ -3019,7 +3009,7 @@ dependencies = [
  "whereat",
  "zencodec",
  "zenflate",
- "zenpixels 0.3.1",
+ "zenpixels",
  "zenpixels-convert",
 ]
 
@@ -3189,7 +3179,7 @@ dependencies = [
  "safe_unaligned_simd",
  "whereat",
  "zenblend",
- "zenpixels 0.2.16",
+ "zenpixels",
 ]
 
 [[package]]
@@ -3207,7 +3197,7 @@ dependencies = [
  "rayon",
  "rgb",
  "thiserror 2.0.21",
- "zenpixels 0.2.16",
+ "zenpixels",
  "zenpredict 0.2.0 (git+https://github.com/imazen/zenanalyze?rev=f0903489300aea240ffae2e3f1359f8f2b9a0ba4)",
  "zenresize",
 ]
@@ -3236,7 +3226,7 @@ dependencies = [
  "taffy",
  "thiserror 2.0.21",
  "zenblend",
- "zenpixels 0.3.1",
+ "zenpixels",
  "zenpng",
  "zenresize",
  "zensim",
@@ -3258,7 +3248,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "zenpixels 0.2.16",
+ "zenpixels",
  "zenpredict 0.2.0 (git+https://github.com/imazen/zenanalyze?rev=f0903489300aea240ffae2e3f1359f8f2b9a0ba4)",
  "zensim",
  "zensim-experimental",
