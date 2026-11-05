@@ -215,6 +215,10 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+#### Changed
+
+- Accept the archmage and magetypes 0.9.31 stable release.
+
 - Test malformed animation EXIF as a parser error and missing decoder metadata,
   preserving poster EXIF, XMP and every decoded pixel across all three APIs.
   This aligns the established test with the owner-approved tolerant contract.
