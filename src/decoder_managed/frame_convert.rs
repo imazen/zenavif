@@ -18,7 +18,9 @@ use super::plane_convert::{
     convert_16bit_monochrome_gray, convert_16bit_planar,
 };
 use crate::cicp_resolve::ResolvedMatrix;
-use crate::convert::{add_alpha8, add_alpha16, downscale_to_8bit, scale_pixels_to_u16};
+use crate::convert::{
+    add_alpha8, add_alpha16, downscale_to_8bit, scale_pixels_to_u16, state_widened_depth,
+};
 use crate::error::{Error, Result};
 use crate::image::{ChromaSampling, ImageInfo};
 use enough::Stop;
@@ -352,6 +354,14 @@ impl ManagedAvifDecoder {
                 info.bit_depth,
                 info.premultiplied_alpha,
             )?;
+            if info.premultiplied_alpha {
+                return Ok(image);
+            }
+        }
+
+        // Color and alpha both widened from `bit_depth` codes.
+        if info.bit_depth < 16 {
+            state_widened_depth(&mut image, info.bit_depth, info.bit_depth);
         }
 
         Ok(image)

@@ -16,7 +16,9 @@ mod tests {
 }
 
 use crate::config::DecoderConfig;
-use crate::convert::{add_alpha8, add_alpha16, downscale_to_8bit, scale_pixels_to_u16};
+use crate::convert::{
+    add_alpha8, add_alpha16, downscale_to_8bit, scale_pixels_to_u16, state_widened_depth,
+};
 use crate::error::{Error, Result};
 use crate::image::{
     ChromaSampling, ColorPrimaries, ColorRange, ImageInfo, MatrixCoefficients,
@@ -855,6 +857,9 @@ impl AvifDecoder {
             scale_pixels_to_u16(&mut image, bit_depth);
         }
 
+        // Widened color stays on its code grid unless it gets unpremultiplied.
+        let mut widened_alpha_bits = Some(bit_depth);
+
         // Decode alpha channel if present
         if let Some(alpha_result) = self.parser.alpha_data() {
             let alpha_data = alpha_result.map_err(|e| e.map_error(Error::Parse))?;
@@ -867,6 +872,7 @@ impl AvifDecoder {
 
             let alpha_bit_depth = alpha_picture.bit_depth();
             let premultiplied = self.parser.premultiplied_alpha();
+            widened_alpha_bits = (!premultiplied).then_some(alpha_bit_depth);
 
             if alpha_bit_depth == 8 {
                 let (y_data, width, height, _) = alpha_picture.y_plane_u8().ok_or_else(|| {
@@ -906,6 +912,11 @@ impl AvifDecoder {
 
         if self.config.prefer_8bit && bit_depth > 8 {
             image = downscale_to_8bit(image);
+        } else if bit_depth > 8
+            && bit_depth < 16
+            && let Some(alpha_bits) = widened_alpha_bits
+        {
+            state_widened_depth(&mut image, bit_depth, alpha_bits);
         }
 
         Ok(image)

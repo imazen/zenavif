@@ -1,5 +1,9 @@
 # Changelog
 
+## Decode depth evidence (unreleased)
+
+- AV1 decodes widened from 10 or 12 bits now state `ExactDepth` on their buffers, on the rav1d and zenav1-aom paths, so a later step can tell a 10-bit source from full 16-bit samples. Premultiplied sources state nothing, since unpremultiplying takes color off that grid.
+
 ## AV1 media sessions (unreleased)
 
 - Add `Av1EncodeSettings::with_output_pull_threshold`; deprecate the misleading

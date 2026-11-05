@@ -7,7 +7,9 @@
 use super::ManagedAvifDecoder;
 use super::metadata::MetadataSource;
 use crate::cicp_resolve::ResolvedMatrix;
-use crate::convert::{add_alpha8, add_alpha16, downscale_to_8bit, scale_pixels_to_u16};
+use crate::convert::{
+    add_alpha8, add_alpha16, downscale_to_8bit, scale_pixels_to_u16, state_widened_depth,
+};
 use crate::error::{Error, Result};
 use crate::image::{
     ChromaSampling, ColorPrimaries, ColorRange, ImageInfo, MatrixCoefficients,
@@ -261,6 +263,9 @@ impl ManagedAvifDecoder {
             scale_pixels_to_u16(&mut image, bit_depth);
         }
 
+        // Widened color stays on its code grid unless it gets unpremultiplied.
+        let mut widened_alpha_bits = Some(bit_depth);
+
         if let Some(af) = fd_alpha {
             if af.width != width || af.height != height {
                 return Err(at!(Error::Unsupported(
@@ -273,6 +278,7 @@ impl ManagedAvifDecoder {
                 ColorRange::Limited
             };
             let premul = self.premultiplied_for(source);
+            widened_alpha_bits = (!premul).then_some(af.bit_depth as u8);
             if wide_out {
                 add_alpha16(
                     &mut image,
@@ -300,6 +306,11 @@ impl ManagedAvifDecoder {
 
         if self.prefer_8bit && bit_depth > 8 {
             image = downscale_to_8bit(image);
+        } else if wide_out
+            && bit_depth < 16
+            && let Some(alpha_bits) = widened_alpha_bits
+        {
+            state_widened_depth(&mut image, bit_depth, alpha_bits);
         }
         let descriptor = crate::convert::descriptor_with_cicp(image.descriptor(), &info);
         Ok((image.with_descriptor(descriptor), info))

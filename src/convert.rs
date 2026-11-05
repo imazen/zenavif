@@ -172,6 +172,25 @@ pub fn downscale_to_8bit(image: PixelBuffer) -> PixelBuffer {
     }
 }
 
+/// States the depths whose codes this buffer's canonical `u16` samples came from.
+///
+/// Call after [`scale_pixels_to_u16`] and alpha attachment, and not after
+/// unpremultiplying, which takes color off that grid. Without alpha, pass the
+/// color depth for `alpha_bits`; the statement ignores it on alpha-less layouts.
+pub(crate) fn state_widened_depth(image: &mut PixelBuffer, color_bits: u8, alpha_bits: u8) {
+    let range = image.descriptor().signal_range;
+    let exact = zenpixels::sample::ExactDepth::new(
+        zenpixels::ChannelType::U16,
+        range,
+        color_bits,
+        alpha_bits,
+    );
+    // A refusal means no depth was stated, which only loses the evidence.
+    if let Ok(exact) = exact {
+        let _ = image.set_exact_depth(Some(exact));
+    }
+}
+
 /// Scale all channels in a 16-bit PixelBuffer from native bit depth to full u16 range.
 ///
 /// This converts e.g. 10-bit values (0–1023) to full 16-bit (0–65535) using
