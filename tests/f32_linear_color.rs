@@ -10,6 +10,7 @@ use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
 use zencodec::{Cicp, Metadata, MetadataPolicy};
 use zenpixels::{PixelDescriptor, PixelSlice};
 
+#[allow(deprecated)] // Preserve legacy metadata coverage; checked retention is unsupported.
 fn encode(meta: Option<Metadata>) -> Vec<u8> {
     let (w, h) = (8u32, 8u32);
     let floats: Vec<f32> = (0..w * h * 3).map(|i| (i % 7) as f32 / 7.0).collect();

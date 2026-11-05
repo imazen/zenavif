@@ -637,6 +637,7 @@ fn encoder_trait_pq_bt2020_roundtrip() {
 /// Display-P3, not the descriptor's BT.709.
 #[cfg(feature = "encode")]
 #[test]
+#[allow(deprecated)] // Preserve legacy metadata coverage; checked retention is unsupported.
 fn caller_cicp_wins_over_descriptor_color() {
     use zencodec::Cicp;
     use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};

@@ -29,6 +29,7 @@ fn exif_with(o: Orientation) -> Vec<u8> {
 }
 
 #[test]
+#[allow(deprecated)] // Preserve legacy metadata assertions; checked retention is unsupported.
 fn stills_are_written_upright_with_orientation_1() {
     let px = source();
     for o in [
@@ -105,6 +106,7 @@ fn stills_are_written_upright_with_orientation_1() {
 
 // Explicit representation is independent of the compatibility default above.
 #[test]
+#[allow(deprecated)] // Preserve legacy metadata assertions; checked retention is unsupported.
 fn explicit_stored_orientation_keeps_samples_and_geometry_typed_and_erased() {
     use zencodec::encode::EncodeOrientation;
     let px = source();
@@ -218,6 +220,7 @@ fn explicit_stored_orientation_keeps_samples_and_geometry_typed_and_erased() {
 }
 
 #[test]
+#[allow(deprecated)] // Preserve legacy metadata assertions; checked retention is unsupported.
 fn explicit_bake_retains_default_still_bytes_and_refuses_animation() {
     use zencodec::encode::EncodeOrientation;
     let px = source();
@@ -261,6 +264,7 @@ fn explicit_bake_retains_default_still_bytes_and_refuses_animation() {
 }
 
 #[test]
+#[allow(deprecated)] // Preserve legacy metadata assertions; checked retention is unsupported.
 fn retained_orientation_plan_matches_native_start_and_bytes() {
     use zencodec::encode::{EncodeDeclaration, EncodeOrientation, OrientationPlan};
     let pixels = source();
