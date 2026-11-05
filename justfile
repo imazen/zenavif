@@ -501,3 +501,34 @@ serializer-consumer-check:
 checked-orientation:
     cargo test --locked -p zenavif --features encode-imazen --test orientation_bake
     cargo clippy --locked -p zenavif --features encode-imazen --lib --test orientation_bake -- -D warnings
+
+# Sibling convergence. Runtime commands keep all failures and their exit code:
+# compare observed failures with untouched main; see CLAUDE.md's Known Bugs.
+# Fixture submodules/tests/vectors must be provisioned. External media-corpus
+# and unsafe-asm remain selected by their existing dedicated CI jobs.
+sibling-runtime-default:
+    cargo test --workspace --lib --tests --no-fail-fast -- --test-threads=4
+
+sibling-runtime-production:
+    cargo test --workspace --lib --tests --no-fail-fast --features encode,inventory,media-encode,two-pass-butteraugli,two-pass-zensim,auto-tune,encode-mono -- --test-threads=4
+
+sibling-runtime-backends:
+    cargo test --lib --tests --no-fail-fast --features inventory,zenav1-aom,zenav1-aom-encode,encode,encode-imazen,zenav1-svt,target-quality,encode-mono -- --test-threads=4
+
+sibling-cohort-lint:
+    cargo clippy --workspace --all-targets --features encode,inventory,media-encode,two-pass-butteraugli,two-pass-zensim,auto-tune,encode-mono -- -D warnings
+
+sibling-doc-check:
+    cargo test --workspace --doc
+    cargo test --workspace --doc --features encode,inventory,media-encode,two-pass-butteraugli,two-pass-zensim,auto-tune,encode-mono
+
+sibling-standalone-check:
+    cargo fmt -p zenavif -p zenavif-parse -p zenavif-serialize -p zenmp4 --check
+    cargo check --manifest-path fuzz/Cargo.toml --bins
+    cargo check --manifest-path zenavif-parse/fuzz/Cargo.toml --bins
+    cargo check --manifest-path zenmp4/fuzz/Cargo.toml --bins
+    cargo check --manifest-path dev/downstream-probe/Cargo.toml --all-targets --features queue-audit
+
+# The named B profile now emits 720 slots; the legacy refusal fixture remains 372.
+sibling-legacy-fixture-check:
+    cargo test --features two-pass-zensim --lib zensim_c::tests::c_rejects_a_v1_vector -- --exact

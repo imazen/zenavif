@@ -699,6 +699,28 @@ remain deferred while this newly measured baseline failure is unresolved.
 
 ## Known Bugs
 
+- Untouched main `252baa40` also fails five production-feature animation
+  tests because zenravif `214e484` refuses their 13-pixel canvas height
+  (minimum 16), plus `inventory_cases::review_cases_conform_and_pin_their_sentinels`
+  on `anim_mdhd_after_stbl`. Focused baseline replays reproduce all six;
+  convergence retains the source, fixtures and assertions. Initial inventory
+  replay lacked fixtures; the completed-fixture replay confirms the same
+  sentinel failure and passes the other three inventory tests.
+
+- Untouched main `252baa40` fails
+  `malformed_track_exif_is_an_error_not_missing_metadata`: `46f0ff93` changed
+  malformed animation EXIF to be dropped, while the unchanged test still
+  requires probe/construction errors. The isolated baseline is 0/1 passes;
+  the same assertion fails in all six platform test jobs plus coverage in
+  [CI 42022900813](https://github.com/imazen/zenavif/actions/runs/42022900813).
+  The converged graph reproduces it (2/3 passes in that binary). Coordinator
+  retains the policy and every assertion; convergence must add no failures.
+
+- The still/animation `AvifEncodeJob` does not implement checked metadata
+  retention. The shared core rejects `try_set_metadata_policy` by default;
+  six existing regression callers retain narrowly allowed legacy setters and
+  every assertion. Adding retention behavior is outside dependency convergence.
+
 - Fixed during the shared timing audit: transparent native unsupported-error
   wrapping hid the precise cause from erased callers. The wrapper retains the
   cause; `reported_timing_fallback_is_atomic_and_exact_refusal_is_typed` checks
@@ -1945,3 +1967,29 @@ orientations and strided input, ordinary and Send registry preparation, default
 bake parity and the typed refusal. This does not qualify low-memory streaming:
 the native shared plan hook is still unsupported. Existing default EXIF/XMP
 and pixel assertions remain in tests/orientation_bake.rs.
+
+## Dependency convergence qualification (2026-11-05)
+
+Root, standalone fuzz, MP4 fuzz and downstream locks contain exactly one
+zencodec family (`1816b4d0`) and zenpixels/convert (`fa836abf`) source. PNG is
+`02a7f0df`, Ultra HDR `8a30cadf`, analyzer/API `38dc80f7`; metric/regression/
+native-probe development tools are paired at `02243a4b`.
+
+The single-pixel graph reports 525 passes / one baseline failure by default,
+872 passes / seven baseline failures with production features, and 572 passes /
+seven baseline failures with the CI backend feature set. Each retains 11
+existing ignores. All observed failures reproduce on untouched `252baa40`;
+commands retain exit 101 and no assertions/ignores/thresholds were changed.
+The decoder policy and all four failing integration-test files are byte-identical
+to that baseline. The development metric now returns 720 slots for B, so the
+refusal fixture uses the existing custom-profile builder for actual legacy
+372-slot extraction; all 38 assertion macros remain byte-identical.
+
+Strict production/backend all-target lint, 13 default and 17 production
+doctests, parser all-feature tests (160 runtime + six doctests), all three
+standalone fuzz workspaces and the downstream consumer check pass. Default
+doctests retain one old ignore; production doctests retain three. Validation
+wrapper receipts: final lint/docs/parser/fuzz/downstream rc=0, 89 s, peak RSS
+1.21 GiB, minimum available 6696 MiB, peak load 4.62; production rc=101 solely
+for the seven baseline failures, 120 s, peak RSS 1.83 GiB, minimum available
+6717 MiB, peak load 10.27. These describe validation, not codec performance.

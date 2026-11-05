@@ -215,6 +215,13 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 ### [Unreleased]
 
+- Converge root, fuzz and downstream core/pixel sources (`1816b4d0`,
+  `fa836abf`), plus PNG, Ultra HDR and paired metric development tools.
+  Preserve metadata policy and all assertions. The legacy refusal fixture
+  explicitly selects 372 slots; named profile B now serves 720. Existing
+  malformed-EXIF, 13-pixel animation and inventory-sentinel failures are
+  baseline findings recorded in CLAUDE.md, not relaxed checks.
+
 - Explicitly zeroed decode surfaces request allocator-zeroed storage; nonzero opaque alpha fills and allocation failure policy remain intact.
 
 ### Changed
