@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenavif-serialize.txt 218 lines (supported surface) | zenavif-serialize.features.txt 0 added (features: none) | zenavif-serialize.internal.txt 29 lines (29 hidden + 0 excluded-feature)
+# files: zenavif-serialize.txt 218 lines (supported surface) | zenavif-serialize.features.txt 0 added (features: none) | zenavif-serialize.internal.txt 32 lines (32 hidden + 0 excluded-feature)
 
 ## summary
 #

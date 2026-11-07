@@ -841,6 +841,14 @@ write-path returns + gain-map interop additions, already on main).
 
 ## [Unreleased]
 
+### Removed
+
+- **Breaking (`df77ce00`):** remove the unused `Error::ColorConversion(yuv::YuvError)` variant
+  and `From<yuv::YuvError>` implementation. Both decoders already use in-house
+  conversion kernels. The upstream `yuv` crate is now a dev-dependency only;
+  range translation and high-bit-depth plane forwarding use native decoder
+  views and preserve conversion math.
+
 ### BREAKING — version bumped `0.1.8` -> `0.2.0` (user-approved 2026-09-03)
 
 The breaks ship together, as the QUEUED BREAKING CHANGES section required.
@@ -881,10 +889,9 @@ and are **kept**. A live consumer was still building against the old spelling
 when 0.2.0 was cut, and removing the names would have broken that build for no
 benefit. Their `#[deprecated]` notes and Cargo comments now say the removal is
 deferred and is not tied to a version. `tests/deprecated_backend_aliases.rs`
-still gates them. Also not cleared: removing
-`Error::ColorConversion(yuv::YuvError)` — the only remaining constructor is in
-`src/decoder.rs`, which is behind `unsafe-asm` and is compiled by nothing (not
-CI, not this box), so removing it would be an edit made blind. It stays queued.
+still gates them. The `Error::ColorConversion(yuv::YuvError)` removal stayed
+queued at that point; the later dependency-removal entry above completes it
+after both decoders switched to the in-house kernels.
 
 ### Fixed — quality 100 (`--cq-level 0`) on the aom backend is coded-lossless, and gated exact (zenavif#45)
 
@@ -1858,19 +1865,13 @@ why none of them is the seam's to pick unilaterally.
   top of [Unreleased].**
 
 ### QUEUED BREAKING CHANGES
+
+- `df77ce00`: removed unused `Error::ColorConversion(yuv::YuvError)` and its `From` implementation; upstream `yuv` is test-only.
 <!-- LANDED 2026-09-03 in the 0.1.8 -> 0.2.0 bump, and removed from this queue:
      `EncodeBitDepth::Twelve` + `#[non_exhaustive]`; `#[non_exhaustive]` on
      `Av1Backend` / `DecodeBackend` / `TargetMetric` (plus
      `TargetMetric::ZensimC` and `ValidationError::BackendUnsupportedParam`).
      See the BREAKING section at the top of [Unreleased]. -->
-- Remove `Error::ColorConversion(yuv::YuvError)` — the last public-API tie to
-  the `yuv` crate. In-house kernels no longer construct it (they are
-  infallible); the legacy `unsafe-asm` decoder still does. **Deliberately NOT
-  taken in 0.2.0**: the only remaining constructor lives in `src/decoder.rs`,
-  which is behind `unsafe-asm` and is compiled by nothing — not CI, not the dev
-  box (Apple `cc` refuses the rav1d `.S` sources) — so removing it would be an
-  edit made blind, with no build to catch a mistake. Ships when either that
-  file is compilable somewhere or the variant's last constructor goes.
 - Remove the deprecated aliases `encode-svt-rs`, `aom-backend`,
   `Av1Backend::SvtRs`, `DecodeBackend::AomRs`, `EstimateArm::SvtRs420`. Their
   notes said "removed in 0.2" and they were **deliberately kept** in 0.2.0: a
