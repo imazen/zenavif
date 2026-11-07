@@ -24,11 +24,10 @@ use crate::image::{
     ChromaSampling, ColorPrimaries, ColorRange, ImageInfo, MatrixCoefficients,
     TransferCharacteristics,
 };
-use crate::yuv_convert::{YuvMatrix, YuvRange as KernelRange};
+use crate::yuv_convert::{YuvMatrix, YuvRange};
 use enough::Stop;
 use rgb::{Rgb, Rgba};
 use whereat::at;
-use yuv::YuvRange;
 use zenpixels::PixelBuffer;
 
 // This module exists only with the `unsafe-asm` feature, which uses the `rav1d` crate.
@@ -459,15 +458,7 @@ impl YuvPlanes16 {
     }
 }
 
-/// The same range convention used by the managed and raw-OBU kernels.
-fn kernel_range(range: YuvRange) -> KernelRange {
-    match range {
-        YuvRange::Full => KernelRange::Full,
-        YuvRange::Limited => KernelRange::Limited,
-    }
-}
-
-/// Convert rav1d color range to yuv crate's YuvRange
+/// Convert rav1d color range to the conversion kernels' range.
 fn to_yuv_range(color_range: u8) -> YuvRange {
     if color_range != 0 {
         YuvRange::Full
@@ -933,7 +924,7 @@ impl AvifDecoder {
         let pixel_count = width
             .checked_mul(height)
             .ok_or_else(|| at!(Error::OutOfMemory))?;
-        let range = kernel_range(yuv_range);
+        let range = yuv_range;
         if has_alpha {
             let mut out = crate::alloc_util::alloc_zeroed::<Rgba<u8>>(
                 self.config.alloc_pref,
@@ -973,7 +964,7 @@ impl AvifDecoder {
         let pixel_count = width
             .checked_mul(height)
             .ok_or_else(|| at!(Error::OutOfMemory))?;
-        let range = kernel_range(yuv_range);
+        let range = yuv_range;
         if has_alpha {
             let mut out = crate::alloc_util::alloc_zeroed::<Rgba<u16>>(
                 self.config.alloc_pref,
@@ -1012,7 +1003,7 @@ impl AvifDecoder {
         let pixel_count = width
             .checked_mul(height)
             .ok_or_else(|| at!(Error::OutOfMemory))?;
-        let range = kernel_range(yuv_range);
+        let range = yuv_range;
         if has_alpha {
             let mut out = crate::alloc_util::alloc_zeroed::<Rgba<u8>>(
                 self.config.alloc_pref,
@@ -1249,7 +1240,7 @@ impl AvifDecoder {
         let pixel_count = width
             .checked_mul(height)
             .ok_or_else(|| at!(Error::OutOfMemory))?;
-        let range = kernel_range(yuv_range);
+        let range = yuv_range;
         if has_alpha {
             let mut out = crate::alloc_util::alloc_zeroed::<Rgba<u16>>(
                 self.config.alloc_pref,

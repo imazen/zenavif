@@ -38,10 +38,6 @@ pub enum Error {
         msg: &'static str,
     },
 
-    /// YUV to RGB color conversion error
-    #[error("Color conversion error: {0}")]
-    ColorConversion(#[from] yuv::YuvError),
-
     /// AV1 encode error — an opaque failure in the encode pipeline (a
     /// foreign encoder/metric dependency such as `ravif`/`butteraugli`/
     /// `fast_ssim2`/`zensim`, or zenavif's own encode-side assumption) not
@@ -207,17 +203,6 @@ impl zencodec::CategorizedError for Error {
             // every site here is definitely zenavif's own bug.
             Self::Decode { .. } => C::Internal(Internal::Bug),
 
-            // `yuv` is a foreign crate whose error we cannot `impl
-            // CategorizedError` on. Every `ColorConversion` call site in
-            // this crate converts AV1-decoded YUV planes into an RGB
-            // buffer zenavif itself allocated (from the same dimensions)
-            // — never a raw caller-supplied buffer — so a mismatch here
-            // reflects an internal inconsistency between our own
-            // dimension bookkeeping and the yuv crate's expectations, not
-            // something a caller could fix by changing their request.
-            // Unclassified further.
-            Self::ColorConversion(_) => C::Internal(Internal::Dependency),
-
             // An opaque encode-pipeline failure: a foreign encoder/metric
             // dependency (`ravif`/`butteraugli`/`fast_ssim2`/`zensim`) or
             // zenavif's own encode-side assumption, neither of which this
@@ -332,10 +317,10 @@ mod error_category_tests {
             C::Image(Img::UnexpectedEof)
         );
 
-        // Opaque decoder/encoder/color-conversion pipeline faults not
+        // Opaque decoder/encoder pipeline faults not
         // attributable to the input -> Internal, split Bug (our own
         // invariant, the `Decode` bucket) vs Dependency (a foreign
-        // library we can't classify further: `Encode`/`ColorConversion`).
+        // library we can't classify further: `Encode`).
         assert_eq!(
             Error::Decode {
                 code: -1,
@@ -346,10 +331,6 @@ mod error_category_tests {
         );
         assert_eq!(
             Error::Encode("ravif failed".into()).category(),
-            C::Internal(Internal::Dependency)
-        );
-        assert_eq!(
-            Error::ColorConversion(yuv::YuvError::ZeroBaseSize).category(),
             C::Internal(Internal::Dependency)
         );
 

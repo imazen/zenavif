@@ -51,14 +51,14 @@ pub(crate) enum ResolvedMatrix {
     Bt709,
     /// BT.601 family (MC=5/6).
     Bt601,
-    /// US FCC (MC=4) — exact KR=0.30/KB=0.11 via the yuv crate.
+    /// US FCC (MC=4) — exact KR=0.30/KB=0.11 via the in-house custom-coefficient kernel.
     Fcc,
     /// BT.2020 non-constant luminance (MC=9, or derived from CP=9).
     Bt2020Ncl,
     /// SMPTE 240M (MC=7).
     Smpte240,
     /// Chromaticity-derived NCL (MC=12) whose coefficients match no
-    /// named table — decoded exactly via the yuv crate's custom-KR/KB
+    /// named table — decoded exactly via the in-house custom-KR/KB
     /// path (e.g. P3 primaries: KR≈0.229, KB≈0.079).
     Derived {
         /// Derived KR (red luminance weight).
@@ -266,7 +266,7 @@ mod tests {
         // CP=9 (BT.2020) → 2020-NCL coefficients (the canonical pair).
         assert_eq!(resolve(12, 9, None).unwrap(), ResolvedMatrix::Bt2020Ncl);
         // CP=12 (P3-D65) derives KR≈0.229/KB≈0.079 — decoded exactly
-        // via the yuv crate's custom-coefficient path.
+        // via the in-house custom-coefficient path.
         match resolve(12, 12, None).unwrap() {
             ResolvedMatrix::Derived { kr, kb } => {
                 assert!((kr - 0.2290).abs() < 2e-3, "P3 KR derived {kr}");

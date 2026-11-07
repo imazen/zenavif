@@ -9,7 +9,7 @@
 use super::ManagedAvifDecoder;
 use super::cicp_map::{
     convert_chroma_sampling, convert_color_primaries, convert_color_range, convert_matrix,
-    convert_transfer, to_yuv_range,
+    convert_transfer, to_our_yuv_range,
 };
 use super::metadata::MetadataSource;
 use super::plane_convert::{
@@ -176,7 +176,7 @@ impl ManagedAvifDecoder {
         let display_height = info.height as usize;
         let needs_crop = buffer_width != display_width || buffer_height != display_height;
         let has_alpha = alpha.is_some();
-        let yuv_range = to_yuv_range(info.color_range);
+        let yuv_range = to_our_yuv_range(info.color_range);
         // Placeholder on the identity path: the identity converter never
         // reads `ctx.matrix` (the branch below routes around it).
         let buffer_pixel_count = buffer_width
@@ -287,7 +287,7 @@ impl ManagedAvifDecoder {
         let display_height = info.height as usize;
         let needs_crop = buffer_width != display_width || buffer_height != display_height;
         let has_alpha = alpha.is_some();
-        let yuv_range = to_yuv_range(info.color_range);
+        let yuv_range = to_our_yuv_range(info.color_range);
         let buffer_pixel_count = buffer_width
             .checked_mul(buffer_height)
             .ok_or_else(|| at!(Error::OutOfMemory))?;

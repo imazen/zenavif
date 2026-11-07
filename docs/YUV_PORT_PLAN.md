@@ -1,8 +1,31 @@
-# YUV conversion: port the remaining `yuv`-crate surface in-house, unify the kernels
+# YUV conversion and dependency status
 
-Status: EXECUTED through P8 (2026-07-20). P1-P6 + P8 shipped; P7 (dep
-removal) is blocked only on the queued `Error::ColorConversion` breaking
-change and the legacy `unsafe-asm` decoder swap. P8 outcome: the canonical
+## Current dependency status (2026-11-07)
+
+All shipped conversion paths use the in-house `src/yuv_convert.rs` kernels,
+including the legacy `unsafe-asm` decoder. The normal/build dependency graph
+no longer includes `yuv`; it remains a dev-dependency for independent conversion
+oracles and comparison tools. `just check-no-runtime-yuv` checks all root-package
+features and target platforms without including test-only dependency edges.
+
+The managed high-bit-depth route passes rav1d-safe's validated plane views
+directly, retaining each plane's stride. Both decoders use the in-house range
+enum. Removing the unused public `Error::ColorConversion(yuv::YuvError)` variant
+also removes its `From<yuv::YuvError>` implementation; callers that named them
+must update. Conversion coefficients, sampling positions and rounding stay in
+the existing kernels.
+
+Zenpixels main supplies shared plane carriers and a separately qualified
+`YcbcrToRgbF32` route (BT.709 primaries/matrix, sRGB transfer, 8/10/12-bit).
+The carrier migrations are independent of this dependency removal. A carrier
+adapter must preserve sample encoding and strides; it does not require replacing
+a codec's established reconstruction math with another conversion route.
+
+## Historical port plan and measurements (2026-07-20)
+
+The remaining sections preserve the original plan and its intermediate state;
+the external-crate call lists below are historical, not current dependencies.
+P1–P8 conversion work is complete. P8 outcome: the canonical
 recipe is now the documented FIXED-POINT formula (single rounding,
 platform-exact integer arithmetic) for d<=12; the f32 recipe survives only
 for the 16-bit API entries (AV1 codes 8/10/12). Measured vs the f32

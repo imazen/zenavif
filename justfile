@@ -538,3 +538,14 @@ animation-sidecars-check:
     cargo test --locked --test animation_sidecars
     cargo test --locked --features zenav1-aom --test animation_sidecars
     cargo clippy --locked --test animation_sidecars -- -D warnings
+
+# Upstream YUV remains available to independent test oracles, never shipped code.
+check-no-runtime-yuv:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dependencies=$(cargo tree --locked -p zenavif --all-features --target all --edges normal,build --prefix none)
+    if printf '%s\n' "$dependencies" | rg '^yuv v'; then
+        echo 'upstream yuv must not appear in the normal/build dependency graph' >&2
+        exit 1
+    fi
+    echo 'normal/build dependency graph excludes upstream yuv (all features and targets)'

@@ -1,18 +1,17 @@
 //! Enum-to-enum CICP mapping between rav1d-safe's managed types, zenavif's
-//! own [`crate::image`] types, and the `yuv` crate's range type.
+//! own [`crate::image`] types, and the conversion kernels' range type.
 //!
 //! Pure translation: no decoder state, no I/O, no math.
 
 use crate::image::{
     ChromaSampling, ColorPrimaries, ColorRange, MatrixCoefficients, TransferCharacteristics,
 };
-use crate::yuv_convert::YuvRange as OurYuvRange;
+use crate::yuv_convert::YuvRange;
 use rav1d_safe::{
     ColorPrimaries as Rav1dColorPrimaries, ColorRange as Rav1dColorRange,
     MatrixCoefficients as Rav1dMatrixCoefficients, PixelLayout,
     TransferCharacteristics as Rav1dTransferCharacteristics,
 };
-use yuv::YuvRange;
 
 /// Convert rav1d-safe ColorPrimaries to zenavif ColorPrimaries
 pub(super) fn convert_color_primaries(pri: Rav1dColorPrimaries) -> ColorPrimaries {
@@ -63,18 +62,10 @@ pub(super) fn convert_color_range(range: Rav1dColorRange) -> ColorRange {
 // MC=12/13, loud errors for unimplemented math).
 
 /// Convert zenavif ColorRange to our YuvRange
-pub(super) fn to_our_yuv_range(cr: ColorRange) -> OurYuvRange {
+pub(super) fn to_our_yuv_range(cr: ColorRange) -> YuvRange {
     match cr {
-        ColorRange::Limited => OurYuvRange::Limited,
-        ColorRange::Full => OurYuvRange::Full,
-    }
-}
-
-/// Convert zenavif ColorRange to yuv crate's YuvRange
-pub(super) fn to_yuv_range(range: ColorRange) -> YuvRange {
-    match range {
-        ColorRange::Full => YuvRange::Full,
         ColorRange::Limited => YuvRange::Limited,
+        ColorRange::Full => YuvRange::Full,
     }
 }
 

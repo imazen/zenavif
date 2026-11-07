@@ -10,10 +10,9 @@ use crate::cicp_resolve::ResolvedMatrix;
 use crate::error::{Error, Result};
 use crate::image::{ChromaSampling, ImageInfo};
 use crate::yuv_convert::{self, YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRange};
-use rav1d_safe::{Planes8, Planes16};
+use rav1d_safe::{PlaneView16, Planes8, Planes16};
 use rgb::{Rgb, Rgba};
 use whereat::at;
-use yuv::{YuvPlanarImage, YuvRange};
 use zenpixels::PixelBuffer;
 
 /// Common context shared across every YUV→RGB(A) helper in this module.
@@ -31,21 +30,13 @@ pub(super) struct ConvertCtx {
     pub(super) buffer_pixel_count: usize,
     /// Whether the primary frame carries a sibling alpha plane.
     pub(super) has_alpha: bool,
-    /// `yuv` crate's color range (Tv/Pc).
-    pub(super) yuv_range: YuvRange,
+    /// Signal range used by the conversion kernels.
+    pub(super) yuv_range: OurYuvRange,
     /// Allocation-fallibility preference for the output buffers allocated by
     /// the YUV→RGB(A) helpers. The full-image `out` buffers are sized from the
     /// (untrusted) AV1 frame dimensions, so they default to fallible; the
     /// per-row `rgb_row` scratch is width-bounded and defaults to infallible.
     pub(super) alloc_pref: crate::alloc_util::AllocPref,
-}
-
-/// Map the ctx's yuv-crate range to the in-house kernel range.
-fn ctx_our_range(ctx: &ConvertCtx) -> OurYuvRange {
-    match ctx.yuv_range {
-        YuvRange::Full => OurYuvRange::Full,
-        YuvRange::Limited => OurYuvRange::Limited,
-    }
 }
 
 impl ConvertCtx {
@@ -56,7 +47,7 @@ impl ConvertCtx {
 
 /// Native Gray8 output for alpha-free monochrome (imazen/zenavif#5):
 /// 1 byte/pixel instead of the 3-4x RGB expansion. Range expansion goes
-/// through the same `yuv` crate kernel as the RGB path (per-row scratch),
+/// through the same in-house kernel as the RGB path,
 /// so gray output is bit-identical to the R channel of an RGB decode.
 pub(super) fn convert_8bit_monochrome_gray(
     planes: &Planes8<'_>,
@@ -76,7 +67,7 @@ pub(super) fn convert_8bit_monochrome_gray(
         w as usize,
         0,
         hu,
-        ctx_our_range(&ctx),
+        ctx.yuv_range,
         8,
         &mut out,
     );
@@ -105,7 +96,7 @@ pub(super) fn convert_16bit_monochrome_gray(
         w as usize,
         0,
         h as usize,
-        ctx_our_range(&ctx),
+        ctx.yuv_range,
         bit_depth,
         &mut out,
     );
@@ -121,7 +112,7 @@ pub(super) fn convert_8bit_monochrome(
 ) -> Result<PixelBuffer> {
     let y_view = planes.y();
     let (w, h) = ctx.dims();
-    let our_range = ctx_our_range(&ctx);
+    let our_range = ctx.yuv_range;
     if ctx.has_alpha {
         let mut out = crate::alloc_util::alloc_filled(
             ctx.alloc_pref,
@@ -185,7 +176,7 @@ pub(super) fn convert_8bit_identity(planes: &Planes8<'_>, ctx: ConvertCtx) -> Re
         .ok_or_else(|| at!(Error::Malformed("Identity content missing plane 2 (R)")))?;
 
     let (w, h) = (ctx.buffer_width, ctx.buffer_height);
-    let limited = matches!(ctx.yuv_range, YuvRange::Limited);
+    let limited = matches!(ctx.yuv_range, OurYuvRange::Limited);
     // Limited range on identity content uses the luma range (16–235)
     // on all three planes (H.273 full-range flag semantics).
     #[inline]
@@ -247,7 +238,7 @@ pub(super) fn convert_16bit_identity(
         .ok_or_else(|| at!(Error::Malformed("Identity content missing plane 2 (R)")))?;
 
     let (w, h) = (ctx.buffer_width, ctx.buffer_height);
-    let limited = matches!(ctx.yuv_range, YuvRange::Limited);
+    let limited = matches!(ctx.yuv_range, OurYuvRange::Limited);
     let max = (1u32 << bit_depth) - 1;
     // Studio range scaled by bit depth: min = 16<<(d-8), span = 219<<(d-8).
     let smin = 16u32 << (bit_depth - 8);
@@ -298,8 +289,8 @@ pub(super) fn convert_16bit_identity(
 
 /// 8-bit planar (Cs420/Cs422/Cs444) YUV→RGB(A) dispatch.
 ///
-/// `has_alpha` selects RGBA (yuv crate bilinear/standard paths) vs RGB
-/// (our `yuv_convert` SIMD paths). `info` supplies `color_range` and
+/// `has_alpha` selects RGBA vs RGB stores in the shared SIMD kernels.
+/// `info` supplies `color_range` and
 /// `matrix_coefficients` for the RGB path.
 pub(super) fn convert_8bit_planar(
     planes: &Planes8<'_>,
@@ -492,7 +483,7 @@ pub(super) fn convert_16bit_monochrome(
 ) -> Result<PixelBuffer> {
     let y_view = planes.y();
     let (w, h) = ctx.dims();
-    let our_range = ctx_our_range(&ctx);
+    let our_range = ctx.yuv_range;
     if ctx.has_alpha {
         let mut out = crate::alloc_util::alloc_zeroed::<Rgba<u16>>(
             ctx.alloc_pref,
@@ -556,33 +547,28 @@ pub(super) fn convert_16bit_planar(
         ))
     })?;
 
-    let (w, h) = ctx.dims();
-    let planar = YuvPlanarImage {
-        y_plane: y_view.as_slice(),
-        y_stride: y_view.stride() as u32,
-        u_plane: u_view.as_slice(),
-        u_stride: u_view.stride() as u32,
-        v_plane: v_view.as_slice(),
-        v_stride: v_view.stride() as u32,
-        width: w,
-        height: h,
-    };
-
     // Every real matrix maps in-house (FCC/SMPTE-240M/derived via
     // explicit Kr,Kb); identity never reaches here (guarded upstream).
     let our_matrix = resolved
         .to_our()
         .expect("identity guarded before planar conversion");
-    let our_range = ctx_our_range(&ctx);
-    convert_16bit_planar_inhouse(&planar, sampling, bit_depth, ctx, our_range, our_matrix)
+    let our_range = ctx.yuv_range;
+    convert_16bit_planar_inhouse(
+        [&y_view, &u_view, &v_view],
+        sampling,
+        bit_depth,
+        ctx,
+        our_range,
+        our_matrix,
+    )
 }
 
 /// 16-bit planar → RGB(A)16 via the in-house unified kernels (native-depth
-/// output; RGBA alpha = the native ceiling, exactly like the yuv-crate
-/// path). Same kernels as every other depth/output — byte-identity across
+/// output; RGBA alpha = the native ceiling). Same kernels as every other
+/// depth/output — byte-identity across
 /// RGB-vs-RGBA and full-vs-strip is structural.
 fn convert_16bit_planar_inhouse(
-    planar: &YuvPlanarImage<'_, u16>,
+    [y_view, u_view, v_view]: [&PlaneView16<'_>; 3],
     sampling: ChromaSampling,
     bit_depth: u8,
     ctx: ConvertCtx,
@@ -611,12 +597,12 @@ fn convert_16bit_planar_inhouse(
         )?;
         crate::yuv_convert::yuv16_to_rgbx_strip::<Rgba<u16>>(
             our_sampling,
-            planar.y_plane,
-            planar.y_stride as usize,
-            planar.u_plane,
-            planar.u_stride as usize,
-            planar.v_plane,
-            planar.v_stride as usize,
+            y_view.as_slice(),
+            y_view.stride(),
+            u_view.as_slice(),
+            u_view.stride(),
+            v_view.as_slice(),
+            v_view.stride(),
             bw,
             bh,
             0,
@@ -637,12 +623,12 @@ fn convert_16bit_planar_inhouse(
         )?;
         crate::yuv_convert::yuv16_to_rgbx_strip::<Rgb<u16>>(
             our_sampling,
-            planar.y_plane,
-            planar.y_stride as usize,
-            planar.u_plane,
-            planar.u_stride as usize,
-            planar.v_plane,
-            planar.v_stride as usize,
+            y_view.as_slice(),
+            y_view.stride(),
+            u_view.as_slice(),
+            u_view.stride(),
+            v_view.as_slice(),
+            v_view.stride(),
             bw,
             bh,
             0,
