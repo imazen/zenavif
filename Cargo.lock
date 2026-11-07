@@ -150,9 +150,9 @@ checksum = "3bc62ac97cc33321f50863d514c3bc38a453947a8f9e781137e47c7401020aed"
 
 [[package]]
 name = "archmage"
-version = "0.9.30"
+version = "0.9.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15785ee3576fbd41276a25f063b1e6b5bf323af9b4924632e25a8de6a3065f06"
+checksum = "67dcf4e0bcce8da7704d177f604cf43299777de9d0f052ffe8822ab188de2820"
 dependencies = [
  "archmage-macros",
  "safe_unaligned_simd",
@@ -161,9 +161,9 @@ dependencies = [
 
 [[package]]
 name = "archmage-macros"
-version = "0.9.30"
+version = "0.9.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce7707714970d5cf476caccbae2d282000c6c14ca5aada878e722a10d8e1c153"
+checksum = "8ec18ef9ee506a934ab4f46f204f1d1d83528283d5400df800688748268b82bc"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1161,12 +1161,11 @@ checksum = "ecbdfe44b1bd960b68170b417450a628c43f7cf56bb3c5317e61cb230ee7f226"
 
 [[package]]
 name = "magetypes"
-version = "0.9.30"
+version = "0.9.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5726fd3335b1d2814036c420a5c8d105abcc0e0b43eebb477e48f8c725fc8fb2"
+checksum = "f509b5e651143f19077f1d3874e87d1f8ed617f7c257f60e38d58f27563e0f98"
 dependencies = [
  "archmage",
- "libm",
  "rustversion",
 ]
 
@@ -1641,7 +1640,7 @@ dependencies = [
 [[package]]
 name = "rav1d-disjoint-mut"
 version = "0.4.0"
-source = "git+https://github.com/imazen/rav1d-safe?rev=4161bae4#4161bae4d04dd9ac0de410f4035d8c8d01559393"
+source = "git+https://github.com/imazen/rav1d-safe?rev=d33f3261319e40322d26a4f9b0b35ff4c7d24107#d33f3261319e40322d26a4f9b0b35ff4c7d24107"
 dependencies = [
  "aligned",
  "loom",
@@ -1652,7 +1651,7 @@ dependencies = [
 [[package]]
 name = "rav1d-safe"
 version = "0.7.0"
-source = "git+https://github.com/imazen/rav1d-safe?rev=4161bae4#4161bae4d04dd9ac0de410f4035d8c8d01559393"
+source = "git+https://github.com/imazen/rav1d-safe?rev=d33f3261319e40322d26a4f9b0b35ff4c7d24107#d33f3261319e40322d26a4f9b0b35ff4c7d24107"
 dependencies = [
  "aligned",
  "archmage",
@@ -2273,7 +2272,7 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 [[package]]
 name = "ultrahdr-core"
 version = "0.6.0"
-source = "git+https://github.com/imazen/ultrahdr?rev=8a30cadfd08721749050215b924ca0a58a42e277#8a30cadfd08721749050215b924ca0a58a42e277"
+source = "git+https://github.com/imazen/ultrahdr?rev=1742595b5efd3c51720189e00f6a17fa8cf39bb0#1742595b5efd3c51720189e00f6a17fa8cf39bb0"
 dependencies = [
  "bytemuck",
  "enough",
@@ -2645,7 +2644,7 @@ dependencies = [
 [[package]]
 name = "zenanalyze"
 version = "0.2.0"
-source = "git+https://github.com/imazen/zenanalyze?rev=38dc80f73887dafae6bf5ebfe9a03be5ef78ebe0#38dc80f73887dafae6bf5ebfe9a03be5ef78ebe0"
+source = "git+https://github.com/imazen/zenanalyze?rev=9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2#9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2"
 dependencies = [
  "archmage",
  "garb",
@@ -2658,7 +2657,7 @@ dependencies = [
 [[package]]
 name = "zenanalyze-api"
 version = "0.1.1"
-source = "git+https://github.com/imazen/zenanalyze?rev=38dc80f73887dafae6bf5ebfe9a03be5ef78ebe0#38dc80f73887dafae6bf5ebfe9a03be5ef78ebe0"
+source = "git+https://github.com/imazen/zenanalyze?rev=9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2#9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2"
 
 [[package]]
 name = "zenav1-aom-decode"
@@ -2791,7 +2790,7 @@ dependencies = [
  "zencodec-testkit",
  "zenpixels",
  "zenpixels-convert",
- "zenpredict 0.2.0 (git+https://github.com/imazen/zenanalyze?rev=38dc80f73887dafae6bf5ebfe9a03be5ef78ebe0)",
+ "zenpredict 0.2.0 (git+https://github.com/imazen/zenanalyze?rev=9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2)",
  "zenpredict 0.2.0 (git+https://github.com/imazen/zenanalyze?rev=f0903489300aea240ffae2e3f1359f8f2b9a0ba4)",
  "zenpredict-bake",
  "zenrav1e 0.2.0 (git+https://github.com/imazen/zenrav1e?rev=9057c4bacf1d8a23974e32de09fd4446a1cc525a)",
@@ -2991,7 +2990,7 @@ dependencies = [
 [[package]]
 name = "zenpng"
 version = "0.2.0"
-source = "git+https://github.com/imazen/zenpng?rev=02a7f0df5f72dd79b0afa58d66ced7cdd8395e31#02a7f0df5f72dd79b0afa58d66ced7cdd8395e31"
+source = "git+https://github.com/imazen/zenpng?rev=381abd7fc9c753f14d0bd28b4cdd6d36bb1687cf#381abd7fc9c753f14d0bd28b4cdd6d36bb1687cf"
 dependencies = [
  "almost-enough",
  "archmage",
@@ -3016,7 +3015,7 @@ dependencies = [
 [[package]]
 name = "zenpredict"
 version = "0.2.0"
-source = "git+https://github.com/imazen/zenanalyze?rev=38dc80f73887dafae6bf5ebfe9a03be5ef78ebe0#38dc80f73887dafae6bf5ebfe9a03be5ef78ebe0"
+source = "git+https://github.com/imazen/zenanalyze?rev=9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2#9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2"
 dependencies = [
  "archmage",
  "bytemuck",
@@ -3038,13 +3037,13 @@ dependencies = [
 [[package]]
 name = "zenpredict-bake"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zenanalyze?rev=38dc80f73887dafae6bf5ebfe9a03be5ef78ebe0#38dc80f73887dafae6bf5ebfe9a03be5ef78ebe0"
+source = "git+https://github.com/imazen/zenanalyze?rev=9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2#9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2"
 dependencies = [
  "bytemuck",
  "lz4_flex 0.11.6",
  "serde",
  "serde_json",
- "zenpredict 0.2.0 (git+https://github.com/imazen/zenanalyze?rev=38dc80f73887dafae6bf5ebfe9a03be5ef78ebe0)",
+ "zenpredict 0.2.0 (git+https://github.com/imazen/zenanalyze?rev=9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2)",
 ]
 
 [[package]]
@@ -3185,7 +3184,7 @@ dependencies = [
 [[package]]
 name = "zensim"
 version = "0.3.0"
-source = "git+https://github.com/imazen/zensimx?rev=02243a4ba84ed71611f2cf445553eb4d41c2fbac#02243a4ba84ed71611f2cf445553eb4d41c2fbac"
+source = "git+https://github.com/imazen/zensimx?rev=273eff30f32db2ab47ac0f72ba82bbda3516afe9#273eff30f32db2ab47ac0f72ba82bbda3516afe9"
 dependencies = [
  "archmage",
  "bytemuck",
@@ -3205,7 +3204,7 @@ dependencies = [
 [[package]]
 name = "zensim-experimental"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zensimx?rev=02243a4ba84ed71611f2cf445553eb4d41c2fbac#02243a4ba84ed71611f2cf445553eb4d41c2fbac"
+source = "git+https://github.com/imazen/zensimx?rev=273eff30f32db2ab47ac0f72ba82bbda3516afe9#273eff30f32db2ab47ac0f72ba82bbda3516afe9"
 dependencies = [
  "zensim",
 ]
@@ -3213,7 +3212,7 @@ dependencies = [
 [[package]]
 name = "zensim-regress"
 version = "0.4.0"
-source = "git+https://github.com/imazen/zensimx?rev=02243a4ba84ed71611f2cf445553eb4d41c2fbac#02243a4ba84ed71611f2cf445553eb4d41c2fbac"
+source = "git+https://github.com/imazen/zensimx?rev=273eff30f32db2ab47ac0f72ba82bbda3516afe9#273eff30f32db2ab47ac0f72ba82bbda3516afe9"
 dependencies = [
  "base64",
  "bytemuck",
@@ -3235,7 +3234,7 @@ dependencies = [
 [[package]]
 name = "zensim-target"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zensimx?rev=02243a4ba84ed71611f2cf445553eb4d41c2fbac#02243a4ba84ed71611f2cf445553eb4d41c2fbac"
+source = "git+https://github.com/imazen/zensimx?rev=273eff30f32db2ab47ac0f72ba82bbda3516afe9#273eff30f32db2ab47ac0f72ba82bbda3516afe9"
 dependencies = [
  "almost-enough",
  "anyhow",
