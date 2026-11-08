@@ -174,6 +174,33 @@ impl Mp4Muxer {
         Ok(timing)
     }
 
+    /// Publish a fragment containing each track's queued samples whose
+    /// durations are known, without waiting for the next random-access point.
+    /// Drain the resulting bytes through [`Muxer::take_output`].
+    ///
+    /// Call after [`Self::begin_exact_timing`] and a complete frame's packets
+    /// to publish that frame immediately. In the legacy inferred-timing mode,
+    /// a trailing sample without a known duration stays queued: this operation
+    /// neither guesses its duration nor finishes the stream. If no samples
+    /// are ready, no fragment is emitted. The caller chooses cross-track
+    /// publication boundaries; this method does not wait for audio or video.
+    ///
+    /// Refuses before begin and for progressive output. Optional cancellation
+    /// is checked before changing state. This is an output boundary, not a
+    /// bound on pending storage or a guarantee of network delivery latency.
+    pub fn flush_ready_fragment(&mut self, pulse: Option<&dyn zencodec::Pulse>) -> Res<()> {
+        pulse.unwrap_or(&zencodec::NoPulse).check()?;
+        if !self.begun {
+            return Err(SessionError::Protocol(ProtocolViolation::NoBegin));
+        }
+        if self.layout != Layout::Fragmented {
+            return Err(SessionError::Unsupported(
+                zencodec_media::session::UnsupportedMedia::Container,
+            ));
+        }
+        self.flush_fragment(false)
+    }
+
     /// Movie header extents use `Rounding::Ceil`, covering the full media.
     fn movie_ticks(&self, t: &MuxTrack, ticks: i64) -> Res<u64> {
         let unsigned =
