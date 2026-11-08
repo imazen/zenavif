@@ -6,8 +6,9 @@ demuxer asks for byte ranges, and any `zencodec-io` driver (slice,
 
 `Demuxer::step`, `Muxer::write_packet` and `Muxer::finish` accept an optional
 borrowed Pulse. `None` adds no per-call control; parsing, limits and timing
-validation still apply. This source migration targets zencodec `a7c2a6ca` and
-has not been compiled or tested with the still-pinned dependency graph.
+validation still apply. Native tests, strict clippy and the independent FFmpeg
+oracle pass with the pinned zencodec `1816b4d0` graph; see
+[the qualification receipt](../benchmarks/mp4_ready_fragments_2026-11-08.md).
 
 - Progressive files, `moov` before or after `mdat`.
 - Fragmented files (`moov` with `mvex`, then `moof` + `mdat`).
@@ -48,6 +49,15 @@ unknown future packets will fit; drivers retain and report prior publication
 on failure. Metadata and workspace guarantees are separate.
 
 The legacy `Muxer::begin` still allows inferred durations and progressive output.
+
+For explicit publication, call `Mp4Muxer::flush_ready_fragment(pulse)` after
+writing the packets for the desired boundary, then drain `take_output`. This
+publishes queued samples with known durations without waiting for the next
+video random-access packet. A trailing sample with an unknown duration stays
+queued; empty flushes add no fragment. The caller chooses which audio/video
+packets belong in each boundary. The method requires begun fragmented output,
+checks optional cancellation before mutation and does not bound pending
+storage or network latency. The existing automatic fragment policy is unchanged.
 The shared exact-timing trait hook is being qualified on the zencodec API review;
 this inherent method lets the native implementation be tested without changing
 the existing workspace's shared dependency revision.
