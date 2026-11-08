@@ -1048,6 +1048,125 @@ mod muxer {
     }
 
     #[test]
+    fn ready_fragment_is_decodable_before_next_packet_or_finish() {
+        let info = vec![tracks(Some(&AV1C)).remove(0)];
+        for hint in [MuxHint::default(), MuxHint::forward_only()] {
+            let mut mux = Mp4Muxer::new();
+            mux.begin_exact_timing(&info, hint).unwrap();
+            let first = timing_packet(42, 40, Some(17));
+            mux.write_packet(first.clone(), None).unwrap();
+            assert!(!mux.pending_output().windows(4).any(|s| s == b"moof"));
+            mux.flush_ready_fragment(None).unwrap();
+            let mut bytes = Vec::new();
+            mux.take_output(&mut bytes);
+            let (_, got) = demux(&bytes).unwrap();
+            assert_eq!(got.len(), 1, "frame must be published before another input");
+            assert_eq!(key(&got[0]), key(&first));
+            assert_eq!(got[0].duration_ticks(), Some(17));
+            mux.flush_ready_fragment(Some(&NoPulse)).unwrap();
+            assert!(
+                mux.pending_output().is_empty(),
+                "empty flush adds no fragment"
+            );
+
+            let second = timing_packet(60, 57, Some(23));
+            mux.write_packet(second.clone(), None).unwrap();
+            mux.flush_ready_fragment(None).unwrap();
+            mux.take_output(&mut bytes);
+            let (_, got) = demux(&bytes).unwrap();
+            assert_eq!(got.len(), 2);
+            assert_eq!(key(&got[1]), key(&second));
+            assert_eq!(got[1].duration_ticks(), Some(23));
+            let finish = mux.finish(None).unwrap();
+            assert!(finish.tail.is_empty() && finish.patches.is_empty());
+        }
+    }
+
+    #[test]
+    fn ready_fragment_retains_samples_until_their_duration_is_known() {
+        let info = vec![tracks(Some(&AV1C)).remove(0)];
+        let mut mux = Mp4Muxer::fragmented();
+        mux.begin(&info, MuxHint::default()).unwrap();
+        mux.write_packet(timing_packet(0, 0, None), None).unwrap();
+        let header = mux.pending_output().to_vec();
+        mux.flush_ready_fragment(None).unwrap();
+        assert_eq!(mux.pending_output(), header);
+        mux.write_packet(timing_packet(40, 40, None), None).unwrap();
+        mux.flush_ready_fragment(None).unwrap();
+        let mut bytes = Vec::new();
+        mux.take_output(&mut bytes);
+        let (_, got) = demux(&bytes).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].duration_ticks(), Some(40));
+        mux.finish(None).unwrap().apply_to(&mut bytes).unwrap();
+        let (_, got) = demux(&bytes).unwrap();
+        assert_eq!(got.len(), 2, "unknown-duration packet must not be dropped");
+        assert_eq!(got[1].dts().unwrap().ticks(), 40);
+        assert_eq!(got[1].duration_ticks(), Some(40));
+    }
+
+    #[test]
+    fn ready_fragment_covers_audio_and_video_and_respects_stop_before_output() {
+        use zencodec::enough::{Stop, StopReason};
+        struct Tripped(StopReason);
+        impl Stop for Tripped {
+            fn check(&self) -> Result<(), StopReason> {
+                Err(self.0)
+            }
+        }
+        for reason in [StopReason::Cancelled, StopReason::TimedOut] {
+            let info = tracks(Some(&AV1C));
+            let mut mux = Mp4Muxer::new();
+            mux.begin_exact_timing(&info, MuxHint::forward_only())
+                .unwrap();
+            let input = [
+                timing_packet(0, 0, Some(40)),
+                Packet::from_vec(vec![0xf8, 0xff, 0xfe])
+                    .unwrap()
+                    .with_track(1)
+                    .with_pts(Timestamp::new(0, info[1].time_base()))
+                    .with_duration_ticks(960)
+                    .with_random_access(RandomAccess::Yes),
+            ];
+            for packet in &input {
+                mux.write_packet(packet.clone(), None).unwrap();
+            }
+            let before = mux.pending_output().to_vec();
+            let pulse = zencodec::how_far::StopOnly::new(Tripped(reason));
+            assert!(matches!(mux.flush_ready_fragment(Some(&pulse)),
+                Err(SessionError::Cancelled(actual)) if actual == reason));
+            assert_eq!(mux.pending_output(), before);
+            mux.flush_ready_fragment(None).unwrap();
+            let mut bytes = Vec::new();
+            mux.take_output(&mut bytes);
+            let (_, got) = demux(&bytes).unwrap();
+            assert_eq!(got.len(), input.len());
+            for (actual, expected) in got.iter().zip(&input) {
+                assert_eq!(key(actual), key(expected));
+                assert_eq!(actual.duration_ticks(), expected.duration_ticks());
+            }
+        }
+    }
+
+    #[test]
+    fn ready_fragment_refuses_unbegun_and_progressive_output_without_mutation() {
+        use zencodec_media::session::{ProtocolViolation, UnsupportedMedia};
+        let mut mux = Mp4Muxer::new();
+        assert!(matches!(
+            mux.flush_ready_fragment(None),
+            Err(SessionError::Protocol(ProtocolViolation::NoBegin))
+        ));
+        assert!(mux.pending_output().is_empty());
+        mux.begin(&tracks(Some(&AV1C)), MuxHint::default()).unwrap();
+        let before = mux.pending_output().to_vec();
+        assert!(matches!(
+            mux.flush_ready_fragment(None),
+            Err(SessionError::Unsupported(UnsupportedMedia::Container))
+        ));
+        assert_eq!(mux.pending_output(), before);
+    }
+
+    #[test]
     fn exact_timing_prepares_nonzero_origins_and_never_guesses_duration() {
         for hint in [MuxHint::default(), MuxHint::forward_only()] {
             let info = tracks(Some(&AV1C));

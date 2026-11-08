@@ -1,5 +1,12 @@
 # Changelog
 
+## zenmp4 (unreleased)
+
+- Add explicit ready-fragment publication without waiting for another input
+  packet. Unknown-duration tails remain queued, and legacy automatic fragment
+  boundaries are unchanged. Native and independent prefix qualification is in
+  [the receipt](benchmarks/mp4_ready_fragments_2026-11-08.md).
+
 ## Decode depth evidence (unreleased)
 
 - AV1 decodes widened from 10 or 12 bits now state `ExactDepth` on their buffers, on the rav1d and zenav1-aom paths, so a later step can tell a 10-bit source from full 16-bit samples. Premultiplied sources state nothing, since unpremultiplying takes color off that grid.

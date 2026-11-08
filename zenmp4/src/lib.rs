@@ -22,6 +22,9 @@
 //!   duration or the step before. An AV1 track without an `av1C` gets one
 //!   built from its first sequence header (the fragmented `moov` waits
 //!   for it).
+//!   [`Mp4Muxer::flush_ready_fragment`] explicitly publishes samples with known
+//!   durations without waiting for another input packet. Unknown-duration tails
+//!   remain queued; the caller chooses cross-track publication boundaries.
 #![no_std]
 #![forbid(unsafe_code)]
 

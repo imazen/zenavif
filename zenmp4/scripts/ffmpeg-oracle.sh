@@ -11,7 +11,7 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 work=${1:-$here/../target/mp4-ffmpeg-oracle}
 mkdir -p "$work"
 cd "$work"
-ff() { ffmpeg -v error -y "$@"; }
+ff() { ffmpeg -nostdin -v error -y "$@"; }
 src_av=( -f lavfi -i testsrc2=size=96x64:rate=25 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 1.6 )
 ff "${src_av[@]}" -c:v libaom-av1 -cpu-used 8 -g 10 -c:a libopus av1_opus.mp4
 ff "${src_av[@]}" -c:v libaom-av1 -cpu-used 8 -g 10 -c:a libopus -movflags +faststart av1_opus_faststart.mp4
@@ -41,9 +41,9 @@ fail=0
 # 2. zenmp4 stream-copies each file, progressive and fragmented: ffprobe
 #    must read the same packets and FFmpeg decode the same frames.
 for f in $(ls *.mp4 | grep -v '\.zen'); do
-  for layout in progressive fragmented; do
+  for layout in progressive fragmented ready; do
     out=${f%.mp4}.zen-$layout.mp4
-    "$remux" "$f" "$out" $([ $layout = fragmented ] && echo fragmented) 2> "$out.err" \
+    "$remux" "$f" "$out" "$layout" 2> "$out.err" \
       || { echo "FAIL $out: zenmp4 refused: $(cat "$out.err")"; fail=1; continue; }
   done
 done
@@ -91,7 +91,7 @@ for f in *.zen-*.mp4; do
   # copies compare each stream's decoded frames in order (size, hash);
   # timing is compared packet by packet above.
   cols='{print}'; order=cat
-  case $f in *fragmented*) cols='BEGIN{FS=", *"}{print $1","$5","$6}'; order='sort -s -t, -k1,1' ;; esac
+  case $f in *fragmented*|*ready*) cols='BEGIN{FS=", *"}{print $1","$5","$6}'; order='sort -s -t, -k1,1' ;; esac
   ffmpeg -v error -i "$orig" -map 0 -f framemd5 - 2>/dev/null | grep -v '^#' | awk "$cols" | $order > "$f.orig.md5" || true
   ffmpeg -v error -i "$f" -map 0 -f framemd5 - 2> "$f.decode.err" | grep -v '^#' | awk "$cols" | $order > "$f.md5" || true
   if [ -s "$f.orig.md5" ] && cmp -s "$f.orig.md5" "$f.md5"; then
@@ -139,4 +139,50 @@ PY
     done
   done
 done
+# 4. A real coded keyframe must be inspectable and decodable after explicit
+# publication, without reading a second packet or finalizing the muxer. Write
+# outside *.mp4 above so earlier complete-file loops do not mistake this prefix
+# for an entire source clip.
+"$remux" vp9.mp4 ready-first-frame.prefix ready 1
+ffprobe -v error -show_packets -show_data_hash sha256 -show_entries packet=pts,dts,duration,size,flags,data_hash \
+  -of json vp9.mp4 > ready-original-packets.json
+ffprobe -v error -show_packets -show_data_hash sha256 -show_entries packet=pts,dts,duration,size,flags,data_hash \
+  -of json ready-first-frame.prefix > ready-first-packet.json
+python3 - <<'PY'
+import json,struct
+original=json.load(open('ready-original-packets.json'))['packets']
+prefix=json.load(open('ready-first-packet.json'))['packets']
+required={'pts','dts','size','flags','data_hash'}
+assert len(prefix)==1 and required<=prefix[0].keys(), prefix
+assert all(v==original[0][k] for k,v in prefix[0].items()), (prefix,original[:1])
+# This FFmpeg build omits the final VP9 packet duration on a one-fragment
+# prefix. Require the actual trun duration independently instead of inferring
+# it from another frame or silently accepting a missing duration field.
+def boxes(data):
+    at=0
+    while at<len(data):
+        assert len(data)-at>=8
+        size,kind=struct.unpack_from('>I4s',data,at)
+        assert 8<=size<=len(data)-at
+        yield kind,data[at+8:at+size]
+        at+=size
+def one(data,kind):
+    found=[value for key,value in boxes(data) if key==kind]
+    assert len(found)==1,(kind,len(found))
+    return found[0]
+data=open('ready-first-frame.prefix','rb').read()
+traf=one(one(data,b'moof'),b'traf')
+trun=one(traf,b'trun')
+flags=int.from_bytes(trun[1:4],'big')
+assert struct.unpack_from('>I',trun,4)[0]==1 and flags&0x100
+offset=8+4*bool(flags&1)+4*bool(flags&4)
+duration=struct.unpack_from('>I',trun,offset)[0]
+assert duration==original[0]['duration'],(duration,original[0])
+print('ok   ready prefix: first packet timing, bytes and flags match before finish')
+print('ok   ready prefix: explicit trun duration matches source before finish')
+PY
+ffmpeg -nostdin -v error -i vp9.mp4 -frames:v 1 -f framemd5 - | grep -v '^#' > ready-original-frame.md5
+ffmpeg -nostdin -v error -i ready-first-frame.prefix -frames:v 1 -f framemd5 - | grep -v '^#' > ready-prefix-frame.md5
+cmp ready-original-frame.md5 ready-prefix-frame.md5
+echo 'ok   ready prefix: first decoded frame matches before finish'
 exit $fail
