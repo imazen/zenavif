@@ -105,7 +105,7 @@ impl zencodec::decode::AnimationFrameDecoder for AvifAnimationFrameDecoder {
         // Start poisoned and clear it only immediately before yielding/EOF.
         self.failed = true;
         self.render_next_frame_inner(pulse)
-            .map_err(zencodec::CodecError::of)
+            .map_err(super::orientation::AdapterError::into_codec)
     }
 
     fn render_next_frame_to_sink(
@@ -147,7 +147,7 @@ impl AvifAnimationFrameDecoder {
     fn render_next_frame_inner(
         &mut self,
         pulse: Option<&dyn zencodec::Pulse>,
-    ) -> Result<Option<AnimationFrame<'_>>, At<Error>> {
+    ) -> Result<Option<AnimationFrame<'_>>, super::orientation::AdapterError> {
         struct Stops<'a>(
             Option<&'a zencodec::SharedPulse>,
             Option<&'a dyn zencodec::Pulse>,
@@ -191,7 +191,8 @@ impl AvifAnimationFrameDecoder {
             let Some(frame) = frame else {
                 return Err(at!(Error::InvalidState(
                     "animation ended before its declared frame count".into()
-                )));
+                ))
+                .into());
             };
             let frame_index = self.frames_decoded;
             self.frames_decoded = count;
@@ -211,7 +212,8 @@ impl AvifAnimationFrameDecoder {
                 if end_ticks * 1000 > u128::from(max_ms) * u128::from(frame.timing.timescale) {
                     return Err(at!(Error::ResourceLimit(format!(
                         "animation duration exceeds {max_ms} milliseconds",
-                    ))));
+                    )))
+                    .into());
                 }
             }
 
@@ -235,7 +237,10 @@ impl AvifAnimationFrameDecoder {
             let pixels = if self.bake_to.is_identity() {
                 pixels
             } else {
-                zenpixels_convert::orient::apply_orientation(pixels.as_slice(), self.bake_to)
+                {
+                    use zenpixels_convert::PixelSliceConvertExt;
+                    pixels.as_slice().oriented(self.bake_to)?
+                }
             };
             let idx = frame_index;
             let duration = zencodec::animation::FrameDuration::new(

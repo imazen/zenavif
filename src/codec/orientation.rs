@@ -76,19 +76,22 @@ pub(super) fn bake_orientation(
     pixels: PixelBuffer,
     native: &crate::image::ImageInfo,
     hint: zencodec::OrientationHint,
-) -> (PixelBuffer, zencodec::Orientation, u32, u32) {
+) -> Result<(PixelBuffer, zencodec::Orientation, u32, u32), AdapterError> {
     let intrinsic = intrinsic_orientation(native);
     if !will_auto_orient(hint) {
         let (w, h) = (pixels.width(), pixels.height());
-        return (pixels, intrinsic, w, h);
+        return Ok((pixels, intrinsic, w, h));
     }
     let baked = if intrinsic.is_identity() {
         pixels
     } else {
-        zenpixels_convert::orient::apply_orientation(pixels.as_slice(), intrinsic)
+        {
+            use zenpixels_convert::PixelSliceConvertExt;
+            pixels.as_slice().oriented(intrinsic)?
+        }
     };
     let (w, h) = (baked.width(), baked.height());
-    (baked, zencodec::Orientation::Identity, w, h)
+    Ok((baked, zencodec::Orientation::Identity, w, h))
 }
 
 /// Resolve the dims + orientation tag to report on `ImageInfo`/`OutputInfo`
@@ -361,5 +364,38 @@ mod tests {
         assert!(!will_auto_orient(OrientationHint::ExactTransform(
             Orientation::Rotate90,
         )));
+    }
+}
+
+// Private bridge: native failures and fallible orientation retain their own
+// causes and location traces without extending the public native error enum.
+pub(super) enum AdapterError {
+    Native(whereat::At<crate::Error>),
+    Orientation(whereat::At<zenpixels_convert::ConvertError>),
+}
+impl From<whereat::At<crate::Error>> for AdapterError {
+    fn from(error: whereat::At<crate::Error>) -> Self {
+        Self::Native(error)
+    }
+}
+impl From<whereat::At<zenpixels_convert::ConvertError>> for AdapterError {
+    fn from(error: whereat::At<zenpixels_convert::ConvertError>) -> Self {
+        Self::Orientation(error)
+    }
+}
+impl AdapterError {
+    pub(super) fn into_codec(self) -> whereat::At<zencodec::CodecError> {
+        match self {
+            Self::Native(error) => zencodec::CodecError::of(error),
+            Self::Orientation(error) => error.map_error(|cause| {
+                let category = match cause {
+                    zenpixels_convert::ConvertError::AllocationFailed => {
+                        zencodec::ErrorCategory::Resource(zencodec::ResourceError::OutOfMemory)
+                    }
+                    _ => zencodec::ErrorCategory::Internal(zencodec::InternalKind::Dependency),
+                };
+                zencodec::CodecError::from_parts(Some("zenavif"), category, Box::new(cause))
+            }),
+        }
     }
 }

@@ -38,12 +38,13 @@ impl zencodec::decode::Decode for AvifDecoder<'_> {
     type Error = At<CodecError>;
 
     fn decode(self) -> Result<DecodeOutput, At<CodecError>> {
-        self.decode_inner().map_err(zencodec::CodecError::of)
+        self.decode_inner()
+            .map_err(super::orientation::AdapterError::into_codec)
     }
 }
 
 impl AvifDecoder<'_> {
-    fn decode_inner(self) -> Result<DecodeOutput, At<Error>> {
+    fn decode_inner(self) -> Result<DecodeOutput, super::orientation::AdapterError> {
         let stop: &dyn Stop = match &self.pulse {
             Some(p) => p,
             None => &enough::Unstoppable,
@@ -134,7 +135,7 @@ impl AvifDecoder<'_> {
         // intrinsic tag + stored dims. `convert_native_info` already reports the
         // preserve view, so only the bake path rewrites it.
         let (pixels, _orientation, _w, _h) =
-            bake_orientation(pixels, &native_info, self.orientation);
+            bake_orientation(pixels, &native_info, self.orientation)?;
         let mut info = apply_reported_orientation(
             convert_native_info(&native_info),
             &native_info,
@@ -170,7 +171,8 @@ impl AvifDecoder<'_> {
             _ => {
                 return Err(at!(Error::InvalidParameters(
                     "unrecognized GainMapRender mode".into()
-                )));
+                ))
+                .into());
             }
         };
 

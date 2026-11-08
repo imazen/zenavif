@@ -30,9 +30,8 @@ use std::sync::Arc;
 use enough::Stop;
 use zencodec::time::Timestamp;
 use zencodec_media::frame::{
-    ChromaSiting, ColorClaim, Frame, FrameGeometry, FrameInterpretation, FrameTiming, MapError,
-    MappedPlanes, Picture, PlaneRole, PlaneSamples, PlaneView, Presentation, SampleEncoding,
-    Subsampling,
+    ColorClaim, Frame, FrameGeometry, FrameInterpretation, FrameTiming, MapError, MappedPlanes,
+    Picture, PlaneRole, Presentation,
 };
 use zencodec_media::packet::Packet;
 use zencodec_media::session::{
@@ -40,6 +39,8 @@ use zencodec_media::session::{
     VideoDecoder, VideoStreamInfo,
 };
 use zencodec_media::track::CodecId;
+use zenpixels::plane::{AnyPlane, PlanarLayout, PlaneEncoding, PlaneRef, PlaneSpec};
+use zenpixels::sample::{ChromaSiting, ChromaSubsampling as Subsampling, SampleEncoding};
 use zenpixels::{ChannelType, Cicp};
 
 /// Errors from the AV1 sessions.
@@ -282,7 +283,7 @@ impl Av1VideoDecoder {
         let config = &context.config;
         let bits = f.bit_depth();
         let encoding = match bits {
-            8 => SampleEncoding::U8,
+            8 => SampleEncoding::new(ChannelType::U8, 8, 0).expect("valid depth"),
             10 | 12 => SampleEncoding::new(ChannelType::U16, bits, 0).expect("valid depth"),
             b => return Err(SessionError::Codec(Av1SessionError::UnsupportedBitDepth(b))),
         };
@@ -311,10 +312,22 @@ impl Av1VideoDecoder {
         );
         let container = config.video.and_then(|v| v.color);
         let resolved = resolve_color(bitstream, container);
-        let interpretation =
-            FrameInterpretation::new(geometry, subsampling, siting, encoding, roles)
-                .with_color(ColorClaim::new(Some(bitstream), container, Some(resolved)))
-                .with_config_epoch(config.epoch);
+        let interpretation = FrameInterpretation::new(
+            geometry,
+            PlanarLayout::new(
+                roles
+                    .into_iter()
+                    .map(|role| PlaneSpec::new(role, PlaneEncoding::Code(encoding)))
+                    .collect(),
+                subsampling,
+                siting,
+            )
+            .map_err(|_| {
+                SessionError::Unsupported(zencodec_media::session::UnsupportedMedia::PixelFormat)
+            })?,
+        )
+        .with_color(ColorClaim::new(Some(bitstream), container, Some(resolved)))
+        .with_config_epoch(config.epoch);
         // Frames under one interpretation share one Arc.
         let interpretation = match &self.info {
             Some(i) if *i.interpretation == interpretation => Arc::clone(&i.interpretation),
@@ -547,20 +560,21 @@ struct Planes8<'a> {
 }
 
 impl MappedPlanes for Planes8<'_> {
+    fn encoding(&self, index: usize) -> Option<PlaneEncoding> {
+        self.views.get(index)?.as_ref()?;
+        Some(PlaneEncoding::Code(
+            SampleEncoding::new(ChannelType::U8, 8, 0).expect("valid depth"),
+        ))
+    }
     fn plane_count(&self) -> usize {
         self.views.iter().flatten().count()
     }
 
-    fn plane(&self, index: usize) -> Option<PlaneView<'_>> {
+    fn plane(&self, index: usize) -> Option<AnyPlane<'_>> {
         let v = self.views.get(index)?.as_ref()?;
-        PlaneView::new(
-            PlaneSamples::U8(v.as_slice()),
-            v.width(),
-            v.height(),
-            v.stride(),
-            SampleEncoding::U8,
-        )
-        .ok()
+        PlaneRef::new(v.as_slice(), v.width(), v.height(), v.stride())
+            .ok()
+            .map(AnyPlane::U8)
     }
 }
 
@@ -570,20 +584,19 @@ struct Planes16<'a> {
 }
 
 impl MappedPlanes for Planes16<'_> {
+    fn encoding(&self, index: usize) -> Option<PlaneEncoding> {
+        self.views.get(index)?.as_ref()?;
+        Some(PlaneEncoding::Code(self.encoding))
+    }
     fn plane_count(&self) -> usize {
         self.views.iter().flatten().count()
     }
 
-    fn plane(&self, index: usize) -> Option<PlaneView<'_>> {
+    fn plane(&self, index: usize) -> Option<AnyPlane<'_>> {
         let v = self.views.get(index)?.as_ref()?;
-        PlaneView::new(
-            PlaneSamples::U16(v.as_slice()),
-            v.width(),
-            v.height(),
-            v.stride() * 2,
-            self.encoding,
-        )
-        .ok()
+        PlaneRef::new(v.as_slice(), v.width(), v.height(), v.stride())
+            .ok()
+            .map(AnyPlane::U16)
     }
 }
 
@@ -740,9 +753,11 @@ mod encode {
     use std::sync::Arc;
 
     use enough::Stop;
+
+    use super::{AnyPlane, ChromaSiting, PlaneEncoding, SampleEncoding, Subsampling};
     use num_traits::FromPrimitive;
     use zencodec::time::{TimeBase, Timestamp};
-    use zencodec_media::frame::{ChromaSiting, Frame, PlaneSamples, SampleEncoding, Subsampling};
+    use zencodec_media::frame::Frame;
     use zencodec_media::packet::{Packet, RandomAccess};
     use zencodec_media::session::{
         CodecConfig, ProtocolViolation, Receive, SendStatus, SessionError, VideoEncoder,
@@ -1138,11 +1153,10 @@ mod encode {
             let g = &i.geometry;
             (g.coded_width, g.coded_height) == (s.width, s.height)
                 && (g.crop.x, g.crop.y, g.crop.width, g.crop.height) == (0, 0, s.width, s.height)
-                && i.subsampling == s.subsampling
-                && i.encoding.code_bits() == s.bit_depth
-                && i.encoding.bit_shift() == 0
-                && (!matches!(s.subsampling, Subsampling::Yuv420) || i.siting == s.siting)
-                && i.roles == plane_roles(s.subsampling, s.color.matrix_coefficients)
+                && i.layout.subsampling() == s.subsampling
+                && i.uniform_code_encoding().is_some_and(|e| e.code_bits() == s.bit_depth && e.bit_shift() == 0)
+                && (!matches!(s.subsampling, Subsampling::Yuv420) || i.layout.siting() == s.siting)
+                && i.layout.planes().iter().map(|p| p.role()).eq(plane_roles(s.subsampling, s.color.matrix_coefficients))
                 // A known colour claim must be the signalled one: coding a
                 // full-range frame as limited (or YUV as GBR) is a silent
                 // conversion. An unknown claim takes the settings' word.
@@ -1232,7 +1246,12 @@ mod encode {
         }
         for (index, &(w, h)) in dims.iter().enumerate() {
             let plane = mapped.plane(index).ok_or(SendError::Input)?;
-            if (plane.width(), plane.height()) != (w, h) || plane.encoding() != encoding {
+            if (plane.width(), plane.height()) != (w, h)
+                || plane.channel_type() != encoding.storage()
+                || mapped
+                    .encoding(index)
+                    .is_some_and(|e| e != PlaneEncoding::Code(encoding))
+            {
                 return Err(SendError::Input);
             }
         }
@@ -1242,17 +1261,20 @@ mod encode {
             let mut slice = out.planes[index].mut_slice(Default::default());
             for (y, row) in slice.rows_iter_mut().take(h).enumerate() {
                 let dst = row.get_mut(..w).ok_or(SendError::Input)?;
-                match plane.row(y).ok_or(SendError::Input)? {
-                    PlaneSamples::U8(src) => {
+                match plane {
+                    AnyPlane::U8(p) => {
+                        let src = p.row(y).ok_or(SendError::Input)?;
                         for (d, &v) in dst.iter_mut().zip(src) {
                             *d = P::cast_from(v);
                         }
                     }
-                    PlaneSamples::U16(src) => {
+                    AnyPlane::U16(p) => {
+                        let src = p.row(y).ok_or(SendError::Input)?;
                         for (d, &v) in dst.iter_mut().zip(src) {
                             *d = P::cast_from(v);
                         }
                     }
+                    _ => return Err(SendError::Input),
                 }
             }
         }
@@ -1289,18 +1311,26 @@ mod encode {
         let mut wide = Vec::new();
         for (index, &(w, h)) in dims.iter().enumerate() {
             let plane = mapped.plane(index).ok_or(SendError::Input)?;
-            if (plane.width(), plane.height()) != (w, h) || plane.encoding() != encoding {
+            if (plane.width(), plane.height()) != (w, h)
+                || plane.channel_type() != encoding.storage()
+                || mapped
+                    .encoding(index)
+                    .is_some_and(|e| e != PlaneEncoding::Code(encoding))
+            {
                 return Err(SendError::Input);
             }
             let (mut p8, mut p16) = (Vec::new(), Vec::new());
             for y in 0..h {
-                match plane.row(y).ok_or(SendError::Input)? {
-                    PlaneSamples::U8(r) => {
+                match plane {
+                    AnyPlane::U8(p) => {
+                        let r = p.row(y).ok_or(SendError::Input)?;
                         p8.extend_from_slice(r.get(..w).ok_or(SendError::Input)?)
                     }
-                    PlaneSamples::U16(r) => {
+                    AnyPlane::U16(p) => {
+                        let r = p.row(y).ok_or(SendError::Input)?;
                         p16.extend_from_slice(r.get(..w).ok_or(SendError::Input)?)
                     }
+                    _ => return Err(SendError::Input),
                 }
             }
             eight.push(p8);
@@ -1536,7 +1566,13 @@ mod encode {
                 }
             }
             let dims = self.plane_dims();
-            let encoding = frame.interpretation().encoding;
+            let encoding =
+                frame
+                    .interpretation()
+                    .uniform_code_encoding()
+                    .ok_or(SessionError::Unsupported(
+                        zencodec_media::session::UnsupportedMedia::PixelFormat,
+                    ))?;
             let sent = match &mut self.backend {
                 Backend::U8(c) => copy_and_send(c, frame, &dims, encoding),
                 Backend::U16(c) => copy_and_send(c, frame, &dims, encoding),

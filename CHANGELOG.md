@@ -3468,3 +3468,7 @@ why none of them is the seam's to pick unilaterally.
   aarch64 panic fixes while the fix was making its way through a release
   (01c02d0).
 
+
+## Frozen consumer compatibility (2026-11-08)
+
+Frozen native adapter compatibility: stable SIMD bounds, shared zenpixels planes/layouts, and public fallible orientation/ICC facades. Kernel source is unchanged. The zencodec PR201 consumer harness passes 70 tests and independent float/gamma controls; optional native feature configurations remain separate.

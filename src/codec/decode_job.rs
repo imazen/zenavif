@@ -260,7 +260,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         preferred: &[PixelDescriptor],
     ) -> Result<AvifStreamingDecoder, At<CodecError>> {
         self.streaming_decoder_inner(data, preferred)
-            .map_err(zencodec::CodecError::of)
+            .map_err(super::orientation::AdapterError::into_codec)
     }
 
     fn animation_frame_decoder(
@@ -440,7 +440,7 @@ impl AvifDecodeJob {
         mut self,
         data: Cow<'a, [u8]>,
         preferred: &[PixelDescriptor],
-    ) -> Result<AvifStreamingDecoder, At<Error>> {
+    ) -> Result<AvifStreamingDecoder, super::orientation::AdapterError> {
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
         let pulse = self.pulse.take().unwrap_or_default();
@@ -487,7 +487,8 @@ impl AvifDecodeJob {
                 self.config.inner(),
                 &pulse,
             )?;
-            let (baked, _orientation, w, h) = bake_orientation(hdr, &native_info, self.orientation);
+            let (baked, _orientation, w, h) =
+                bake_orientation(hdr, &native_info, self.orientation)?;
             let strip_descriptor = baked.descriptor();
             let mut info = apply_reported_orientation(
                 convert_native_info(&native_info),
@@ -541,7 +542,7 @@ impl AvifDecodeJob {
                 native_info.monochrome && !native_info.has_alpha,
             );
             let (baked, _orientation, w, h) =
-                bake_orientation(pixels, &native_info, self.orientation);
+                bake_orientation(pixels, &native_info, self.orientation)?;
             let strip_descriptor = baked.descriptor();
             let info = apply_reported_orientation(
                 convert_native_info(&native_info),

@@ -113,8 +113,8 @@ pub(super) fn native_source_color(
 /// reduction uses to decide whether a gray collapse keeps accurate
 /// color signaling.
 fn derived_cicp_from_icc(icc: &[u8]) -> Option<zencodec::Cicp> {
-    zenpixels::icc::extract_cicp(icc)
-        .or_else(|| zenpixels::icc::identify_common(icc).and_then(|id| id.to_cicp()))
+    zenpixels::Cicp::from_icc(icc)
+        .or_else(|| zenpixels::icc::IccIdentification::from_icc(icc).and_then(|id| id.to_cicp()))
 }
 
 /// Whether native-gray output keeps accurate color for this file.
