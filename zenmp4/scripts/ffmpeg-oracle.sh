@@ -149,11 +149,37 @@ ffprobe -v error -show_packets -show_data_hash sha256 -show_entries packet=pts,d
 ffprobe -v error -show_packets -show_data_hash sha256 -show_entries packet=pts,dts,duration,size,flags,data_hash \
   -of json ready-first-frame.prefix > ready-first-packet.json
 python3 - <<'PY'
-import json
+import json,struct
 original=json.load(open('ready-original-packets.json'))['packets']
 prefix=json.load(open('ready-first-packet.json'))['packets']
-assert len(prefix)==1 and prefix[0]==original[0], (prefix,original[:1])
+required={'pts','dts','size','flags','data_hash'}
+assert len(prefix)==1 and required<=prefix[0].keys(), prefix
+assert all(v==original[0][k] for k,v in prefix[0].items()), (prefix,original[:1])
+# This FFmpeg build omits the final VP9 packet duration on a one-fragment
+# prefix. Require the actual trun duration independently instead of inferring
+# it from another frame or silently accepting a missing duration field.
+def boxes(data):
+    at=0
+    while at<len(data):
+        assert len(data)-at>=8
+        size,kind=struct.unpack_from('>I4s',data,at)
+        assert 8<=size<=len(data)-at
+        yield kind,data[at+8:at+size]
+        at+=size
+def one(data,kind):
+    found=[value for key,value in boxes(data) if key==kind]
+    assert len(found)==1,(kind,len(found))
+    return found[0]
+data=open('ready-first-frame.prefix','rb').read()
+traf=one(one(data,b'moof'),b'traf')
+trun=one(traf,b'trun')
+flags=int.from_bytes(trun[1:4],'big')
+assert struct.unpack_from('>I',trun,4)[0]==1 and flags&0x100
+offset=8+4*bool(flags&1)+4*bool(flags&4)
+duration=struct.unpack_from('>I',trun,offset)[0]
+assert duration==original[0]['duration'],(duration,original[0])
 print('ok   ready prefix: first packet timing, bytes and flags match before finish')
+print('ok   ready prefix: explicit trun duration matches source before finish')
 PY
 ffmpeg -nostdin -v error -i vp9.mp4 -frames:v 1 -f framemd5 - | grep -v '^#' > ready-original-frame.md5
 ffmpeg -nostdin -v error -i ready-first-frame.prefix -frames:v 1 -f framemd5 - | grep -v '^#' > ready-prefix-frame.md5
