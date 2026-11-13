@@ -2,6 +2,8 @@
 
 ## Target-quality (unreleased)
 
+- Preserve all 16 source and decoded sample bits in adopted-A target scoring; add opaque alpha for the metric instead of shifting RGB samples to 8 bits.
+
 - Measure ordinary Zensim targets with frozen adopted revision-7 A instead of the historical research codec profile. Preserve the explicit C research metric and existing convergence bounds.
 
 ## Decode depth evidence (unreleased)

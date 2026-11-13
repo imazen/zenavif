@@ -464,9 +464,9 @@ pub fn encode_rgba8_with_target(
 ///
 /// Same search and selection policy as [`encode_rgb8_with_target`]. Scoring
 /// runs on the 16-bit decode (`prefer_8bit(false)`): SSIMULACRA2 natively at
-/// 16-bit precision; zensim on an 8-bit view (`>> 8` of both sides — the
-/// current zensim profile is calibrated for 8-bit input), applied
-/// identically to source and decode.
+/// 16-bit precision; adopted zensim A through opaque native-16 RGBA views.
+/// The explicit historical ZensimC research profile retains its 8-bit view
+/// (`>> 8` of both sides).
 ///
 /// # Errors
 ///
@@ -722,9 +722,32 @@ fn score_rgb16(
                 .map_err(|e| at!(Error::Encode(format!("target-quality ssim2: {e}"))))
         }
         TargetMetric::Zensim(_) => {
-            let a = downconvert8(source);
-            let b = downconvert8(dec_img);
-            zensim_score(&a.as_ref(), &b.as_ref())
+            // The serving metric accepts native sRGB16 RGBA. Add opaque
+            // alpha without truncating any source or reconstruction bits.
+            let rgba = |src: ImgRef<'_, Rgb<u16>>| -> Vec<[u16; 4]> {
+                src.rows()
+                    .flat_map(|row| row.iter().map(|p| [p.r, p.g, p.b, u16::MAX]))
+                    .collect()
+            };
+            let a = rgba(source);
+            let b = rgba(dec_img);
+            let reference = zensim_a::StridedBytes::with_alpha_mode(
+                bytemuck::cast_slice(&a),
+                source.width(),
+                source.height(),
+                source.width() * 8,
+                zensim_a::PixelFormat::Srgb16Rgba,
+                zensim_a::AlphaMode::Opaque,
+            );
+            let reconstruction = zensim_a::StridedBytes::with_alpha_mode(
+                bytemuck::cast_slice(&b),
+                dec_img.width(),
+                dec_img.height(),
+                dec_img.width() * 8,
+                zensim_a::PixelFormat::Srgb16Rgba,
+                zensim_a::AlphaMode::Opaque,
+            );
+            zensim_score(&reference, &reconstruction)
         }
         TargetMetric::ZensimC(_) => {
             let a = downconvert8(source);
@@ -743,7 +766,7 @@ fn to_triplet16_img(src: ImgRef<'_, Rgb<u16>>) -> ImgVec<[u16; 3]> {
     ImgVec::new(out, w, h)
 }
 
-/// 16→8-bit view for zensim (calibrated on 8-bit input); identical
+/// 16→8-bit view for the historical ZensimC research profile; identical
 /// treatment of source and decode keeps the comparison unbiased.
 fn downconvert8(src: ImgRef<'_, Rgb<u16>>) -> ImgVec<Rgb<u8>> {
     let (w, h) = (src.width(), src.height());

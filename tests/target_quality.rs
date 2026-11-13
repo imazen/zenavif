@@ -339,3 +339,67 @@ fn returned_zensim_score_is_adopted_revision7_a() {
         out.score
     );
 }
+
+#[test]
+fn rgb16_target_scores_native_precision_with_revision7_a() {
+    let (w, h) = (48, 40);
+    let pixels: Vec<Rgb<u16>> = (0..w * h)
+        .map(|i| {
+            Rgb::new(
+                (i * 353 % 65536) as u16,
+                (i * 181 + 37) as u16,
+                (i * 797 + 89) as u16,
+            )
+        })
+        .collect();
+    let image = ImgVec::new(pixels, w, h);
+    let opts = TargetOptions {
+        max_encodes: 2,
+        ..Default::default()
+    };
+    let out = zenavif::encode_rgb16_with_target(
+        image.as_ref(),
+        &base_config(),
+        TargetMetric::Zensim(60.0),
+        &opts,
+        stop(),
+    )
+    .unwrap();
+    let decoded = zenavif::decode_with(
+        &out.encoded.avif_file,
+        &zenavif::DecoderConfig::new().prefer_8bit(false),
+        &stop(),
+    )
+    .unwrap();
+    let view = decoded.try_as_imgref::<Rgb<u16>>().unwrap();
+    let rgba = |src: imgref::ImgRef<'_, Rgb<u16>>| -> Vec<[u16; 4]> {
+        src.pixels().map(|p| [p.r, p.g, p.b, u16::MAX]).collect()
+    };
+    let reference = rgba(image.as_ref());
+    let reconstruction = rgba(view);
+    let reference = zensim_a::StridedBytes::with_alpha_mode(
+        bytemuck::cast_slice(&reference),
+        w,
+        h,
+        w * 8,
+        zensim_a::PixelFormat::Srgb16Rgba,
+        zensim_a::AlphaMode::Opaque,
+    );
+    let reconstruction = zensim_a::StridedBytes::with_alpha_mode(
+        bytemuck::cast_slice(&reconstruction),
+        w,
+        h,
+        w * 8,
+        zensim_a::PixelFormat::Srgb16Rgba,
+        zensim_a::AlphaMode::Opaque,
+    );
+    let a = zensim_a::Zensim::new(zensim_a::ZensimProfile::A)
+        .compute(&reference, &reconstruction)
+        .unwrap()
+        .score();
+    assert!(
+        (out.score - a).abs() < 1e-8,
+        "reported {}, native16 revision-7 A {a}",
+        out.score
+    );
+}

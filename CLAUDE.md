@@ -2002,6 +2002,9 @@ adopted A scores 60.247339197561715. The new independently decoded regression
 fails before this binding change; all seven target-quality contracts pass after
 it with their existing thresholds and iteration caps. This is a metric migration,
 not evidence of a dense A calibration. The historical starting-quality heuristic
-remains a guess. RGB16 still uses its documented 8-bit scoring view, and explicit
+remains a guess. RGB16 adopted-A scoring now preserves native 16-bit samples through opaque
+RGBA16 metric views. The previous truncation reports 59.5913483622545 versus
+59.712631707261715 for the independent native-precision control. All eight
+target-quality tests pass with unchanged pre-existing bounds. Explicit
 ZensimC plus two-pass-zensim remain historical research contracts; they are not
 adopted-A targeting. No maps are requested by the ordinary target search.
