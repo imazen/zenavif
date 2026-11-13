@@ -126,11 +126,11 @@ fn encode_gray_as_color(
     // Gray expanded to YCbCr: Y = g (BT.601 luma of R=G=B equals g),
     // chroma planes neutral (128).
     frame.planes[0].copy_from_raw_u8(gray8, w, 1);
-    for p in 1..3 {
-        let cfgp = frame.planes[p].cfg.clone();
+    for plane in &mut frame.planes[1..3] {
+        let cfgp = plane.cfg.clone();
         let (cw, ch) = ((w + cfgp.xdec) >> cfgp.xdec, (h + cfgp.ydec) >> cfgp.ydec);
         let neutral = vec![128u8; cw * ch];
-        frame.planes[p].copy_from_raw_u8(&neutral, cw, 1);
+        plane.copy_from_raw_u8(&neutral, cw, 1);
     }
     ctx.send_frame(frame).expect("send_frame");
     ctx.flush();
