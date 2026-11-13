@@ -742,6 +742,8 @@ mod encode {
     use enough::Stop;
     use num_traits::FromPrimitive;
     use zencodec::time::{TimeBase, Timestamp};
+    #[cfg(feature = "zenav1-svt")]
+    use zencodec_media::frame::MappedPlanes;
     use zencodec_media::frame::{ChromaSiting, Frame, PlaneSamples, SampleEncoding, Subsampling};
     use zencodec_media::packet::{Packet, RandomAccess};
     use zencodec_media::session::{
@@ -1279,49 +1281,43 @@ mod encode {
         Encoder(String),
     }
 
-    /// A frame's planes copied tightly packed, after the same checks as
-    /// [`copy_and_send`].
+    /// A frame's planes borrowed from its mapping at their own strides, in
+    /// samples, after the same checks as [`copy_and_send`]. A monochrome frame
+    /// fills only the first entry. zenav1-svt makes its own tight copy once, at
+    /// frame entry, so nothing here copies and padding is never read.
     #[cfg(feature = "zenav1-svt")]
-    enum Packed {
-        Eight(Vec<Vec<u8>>),
-        Wide(Vec<Vec<u16>>),
+    enum Borrowed<'a> {
+        Eight([(&'a [u8], usize); 3]),
+        Wide([(&'a [u16], usize); 3]),
     }
 
     #[cfg(feature = "zenav1-svt")]
-    fn packed_planes(
-        frame: &Frame,
+    fn borrowed_planes<'a>(
+        mapped: &'a dyn MappedPlanes,
         dims: &[(usize, usize)],
         encoding: SampleEncoding,
-    ) -> Result<Packed, SendError> {
-        let mapped = frame.map().map_err(|_| SendError::Input)?;
+    ) -> Result<Borrowed<'a>, SendError> {
         if mapped.plane_count() != dims.len() {
             return Err(SendError::Input);
         }
-        let mut eight = Vec::new();
-        let mut wide = Vec::new();
+        let mut eight: [(&[u8], usize); 3] = [(&[], 0); 3];
+        let mut wide: [(&[u16], usize); 3] = [(&[], 0); 3];
         for (index, &(w, h)) in dims.iter().enumerate() {
             let plane = mapped.plane(index).ok_or(SendError::Input)?;
             if (plane.width(), plane.height()) != (w, h) || plane.encoding() != encoding {
                 return Err(SendError::Input);
             }
-            let (mut p8, mut p16) = (Vec::new(), Vec::new());
-            for y in 0..h {
-                match plane.row(y).ok_or(SendError::Input)? {
-                    PlaneSamples::U8(r) => {
-                        p8.extend_from_slice(r.get(..w).ok_or(SendError::Input)?)
-                    }
-                    PlaneSamples::U16(r) => {
-                        p16.extend_from_slice(r.get(..w).ok_or(SendError::Input)?)
-                    }
-                }
+            // The view checked that the stride holds whole samples.
+            let stride = plane.stride_bytes() / encoding.bytes_per_sample();
+            match plane.as_strided_samples() {
+                PlaneSamples::U8(samples) => eight[index] = (samples, stride),
+                PlaneSamples::U16(samples) => wide[index] = (samples, stride),
             }
-            eight.push(p8);
-            wide.push(p16);
         }
         Ok(if encoding.code_bits() == 8 {
-            Packed::Eight(eight)
+            Borrowed::Eight(eight)
         } else {
-            Packed::Wide(wide)
+            Borrowed::Wide(wide)
         })
     }
 
@@ -1333,7 +1329,7 @@ mod encode {
         use zencodec_media::frame::{ChromaSiting, Subsampling};
         use zencodec_media::packet::Packet;
 
-        use super::{Av1EncodeSettings, Packed, SendError, cfg_err};
+        use super::{Av1EncodeSettings, Borrowed, SendError, cfg_err};
         use crate::media::Av1SessionError;
 
         /// zenav1-svt, all-intra: each frame is one temporal unit, out at
@@ -1341,7 +1337,6 @@ mod encode {
         pub(super) struct SvtSession {
             pub(super) pipeline: EncodePipeline,
             subsampling: Subsampling,
-            width: usize,
             intra_period: u64,
             sent: u64,
             /// Packets out and not yet received.
@@ -1418,7 +1413,6 @@ mod encode {
                     Self {
                         pipeline,
                         subsampling: s.subsampling,
-                        width: s.width as usize,
                         intra_period: u64::from(intra_period),
                         sent: 0,
                         out: VecDeque::new(),
@@ -1429,23 +1423,33 @@ mod encode {
 
             /// Encode one frame; its temporal unit and whether it is a key
             /// frame.
-            pub(super) fn encode(&mut self, planes: Packed) -> Result<(Vec<u8>, bool), SendError> {
-                let w = self.width;
+            pub(super) fn encode(
+                &mut self,
+                planes: Borrowed<'_>,
+            ) -> Result<(Vec<u8>, bool), SendError> {
                 let p = &mut self.pipeline;
                 let err = |e: whereat::At<svtav1::pipeline::EncodeError>| {
                     SendError::Encoder(format!("{e:?}"))
                 };
                 let bytes = match (planes, self.subsampling) {
-                    (Packed::Eight(v), Subsampling::Mono) => p.try_encode_frame(&v[0], w),
-                    (Packed::Eight(v), Subsampling::Yuv420) => {
-                        p.try_encode_frame_420(&v[0], &v[1], &v[2], w)
+                    (Borrowed::Eight([(y, ys), ..]), Subsampling::Mono) => {
+                        p.try_encode_frame(y, ys)
                     }
-                    (Packed::Eight(v), Subsampling::Yuv422) => {
-                        p.try_encode_frame_422(&v[0], &v[1], &v[2], w)
+                    (Borrowed::Eight([(y, ys), (u, us), (v, vs)]), Subsampling::Yuv420) => {
+                        p.try_encode_frame_420(y, ys, u, us, v, vs)
                     }
-                    (Packed::Eight(v), _) => p.try_encode_frame_444(&v[0], &v[1], &v[2], w),
-                    (Packed::Wide(v), Subsampling::Mono) => p.try_encode_frame_hbd(&v[0], w),
-                    (Packed::Wide(v), _) => p.try_encode_frame_420_hbd(&v[0], &v[1], &v[2], w),
+                    (Borrowed::Eight([(y, ys), (u, us), (v, vs)]), Subsampling::Yuv422) => {
+                        p.try_encode_frame_422(y, ys, u, us, v, vs)
+                    }
+                    (Borrowed::Eight([(y, ys), (u, us), (v, vs)]), _) => {
+                        p.try_encode_frame_444(y, ys, u, us, v, vs)
+                    }
+                    (Borrowed::Wide([(y, ys), ..]), Subsampling::Mono) => {
+                        p.try_encode_frame_hbd(y, ys)
+                    }
+                    (Borrowed::Wide([(y, ys), (u, us), (v, vs)]), _) => {
+                        p.try_encode_frame_420_hbd(y, ys, u, us, v, vs)
+                    }
                 }
                 .map_err(err)?;
                 let key = self.sent.is_multiple_of(self.intra_period);
@@ -1513,7 +1517,10 @@ mod encode {
                             SendError::Encoder(m) => Av1SessionError::Encode(m),
                         })
                     };
-                    let planes = packed_planes(frame, &dims, frame.interpretation().encoding)
+                    // The mapping outlives the encode, which returns before
+                    // this call does: no frame data crosses a thread or a call.
+                    let mapped = frame.map().map_err(|_| input_err(SendError::Input))?;
+                    let planes = borrowed_planes(&*mapped, &dims, frame.interpretation().encoding)
                         .map_err(input_err)?;
                     let encoded = svt.encode(planes);
                     if let Some(owned) = &self.owned_stop {
